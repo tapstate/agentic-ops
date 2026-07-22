@@ -208,7 +208,15 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 	workspaceName := readFlag(args, "--workspace", "default")
 	runID := readFlag(args, "--run-id", "")
 	if runID == "" {
-		return writeJSON(stdout, output.Failure("write_evidence", "missing_run_id", "缺少 run_id", "请提供 --run-id"))
+		_ = appendWorkspaceEventWithCode(workspaceName, "", "", "evidence_write", "write_evidence", "input_validation", "ask_owner", "missing_run_id", "input_validation", false, true)
+		return writeJSON(stdout, output.FailureWithContext("write_evidence", output.FailureContext{
+			Code:                "missing_run_id",
+			Message:             "缺少 run_id",
+			RequiredHumanAction: "请提供 --run-id",
+			TaskType:            "evidence_write",
+			CurrentStage:        "input_validation",
+			NextAction:          "ask_owner",
+		}))
 	}
 	root, err := workspaceRoot()
 	if err != nil {
@@ -297,6 +305,10 @@ func fixedNow() time.Time {
 }
 
 func appendWorkspaceEvent(workspaceName string, runID string, issueKey string, taskType string, operation string, currentStage string, nextAction string, ok bool, requiresHumanAction bool) error {
+	return appendWorkspaceEventWithCode(workspaceName, runID, issueKey, taskType, operation, currentStage, nextAction, "", operation, ok, requiresHumanAction)
+}
+
+func appendWorkspaceEventWithCode(workspaceName string, runID string, issueKey string, taskType string, operation string, currentStage string, nextAction string, code string, gate string, ok bool, requiresHumanAction bool) error {
 	root, err := workspaceRoot()
 	if err != nil {
 		return err
@@ -306,14 +318,37 @@ func appendWorkspaceEvent(workspaceName string, runID string, issueKey string, t
 		Workspace:           workspaceName,
 		RunID:               runID,
 		IssueKey:            issueKey,
+		AgentTaskOpsVersion: Version,
+		VersionState:        VersionState,
+		AssetVersion:        readAssetVersion(),
 		TaskType:            taskType,
 		Operation:           operation,
 		CurrentStage:        currentStage,
 		NextAction:          nextAction,
 		OK:                  ok,
-		HumanGate:           false,
+		Code:                code,
+		Gate:                gate,
+		GateStatus:          gateStatus(ok, requiresHumanAction),
+		HumanGate:           requiresHumanAction,
 		RequiresHumanAction: requiresHumanAction,
 	})
+}
+
+func readAssetVersion() string {
+	if version := os.Getenv("AGENTIC_OPS_ASSET_VERSION"); version != "" {
+		return version
+	}
+	return "unknown"
+}
+
+func gateStatus(ok bool, requiresHumanAction bool) string {
+	if ok {
+		return "passed"
+	}
+	if requiresHumanAction {
+		return "blocked"
+	}
+	return "failed"
 }
 
 func workspaceRoot() (string, error) {

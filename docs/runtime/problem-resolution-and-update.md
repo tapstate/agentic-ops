@@ -106,6 +106,24 @@ agent-task-ops feedback bundle --workspace tapstate --run-id <run_id> --redact
 `doctor` 用于判断安装、版本、profile、policy、Jira / GitHub 凭证和 workspace 是否一致。  
 `feedback bundle --redact` 用于给维护者提供脱敏诊断包。
 
+### 当前错误与事件基线
+
+当前本地 fake flow 已实现以下基线能力：
+
+- 失败输出固定包含 `ok`、`operation`、`code`、`message`、`required_human_action`、`task_type`、`current_stage` 和 `next_action`。
+- 事件日志固定支持 `agent_task_ops_version`、`version_state`、`asset_version`、`operation`、`task_type`、`current_stage`、`next_action`、`code`、`gate` 和 `gate_status`。
+- `gate_status` 当前取值为 `passed`、`blocked` 或 `failed`。
+- 已实现命令中的校验失败会优先给出明确 `required_human_action`，例如缺少 `run_id` 时要求补充 `--run-id`。
+
+四类正式问题的稳定错误码规划如下：
+
+| 问题类型 | 稳定错误码 | 当前状态 |
+| --- | --- | --- |
+| `agent-task-ops` 逻辑错误 | `agent_task_ops_logic_error` | 规划中，后续由 `doctor` / `feedback bundle` 辅助定位。 |
+| Jira 流程状态没适配 | `unknown_jira_status` | 规划中，后续随 `profile validate / update / rollback` 落地。 |
+| Jira 卡片属性丢失 | `missing_jira_field` | 规划中，后续随任务接管 gate 落地。 |
+| 关键步骤门禁调整 | `policy_gate_required` | 规划中，后续随 `policy validate / update / rollback` 落地。 |
+
 ## 7. 修复路径一：CLI 逻辑错误
 
 适用场景：

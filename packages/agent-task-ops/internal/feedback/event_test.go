@@ -18,12 +18,19 @@ func TestRunIDUsesIssueTaskAndTime(t *testing.T) {
 func TestAppendEventWritesNDJSON(t *testing.T) {
 	path := t.TempDir() + "/events.ndjson"
 	err := AppendEvent(path, Event{
-		Workspace:    "tapstate",
-		RunID:        "run-1",
-		TaskType:     "task_takeover",
-		Operation:    "takeover_task",
-		CurrentStage: "takeover_gate",
-		NextAction:   "ask_owner",
+		Workspace:           "tapstate",
+		RunID:               "run-1",
+		TaskType:            "task_takeover",
+		Operation:           "takeover_task",
+		CurrentStage:        "takeover_gate",
+		NextAction:          "ask_owner",
+		OK:                  false,
+		Code:                "missing_jira_field",
+		AgentTaskOpsVersion: "DEV-v0.1.1-abc1234",
+		VersionState:        "DEV",
+		AssetVersion:        "RES-v0.1.1-abc1234",
+		Gate:                "jira_required_fields",
+		GateStatus:          "blocked",
 	})
 	if err != nil {
 		t.Fatalf("AppendEvent error = %v", err)
@@ -33,6 +40,15 @@ func TestAppendEventWritesNDJSON(t *testing.T) {
 		t.Fatalf("ReadFile error = %v", err)
 	}
 	if !strings.Contains(string(data), `"current_stage":"takeover_gate"`) {
+		t.Fatalf("event = %s", string(data))
+	}
+	if !strings.Contains(string(data), `"agent_task_ops_version":"DEV-v0.1.1-abc1234"`) {
+		t.Fatalf("event = %s", string(data))
+	}
+	if !strings.Contains(string(data), `"asset_version":"RES-v0.1.1-abc1234"`) {
+		t.Fatalf("event = %s", string(data))
+	}
+	if !strings.Contains(string(data), `"gate_status":"blocked"`) {
 		t.Fatalf("event = %s", string(data))
 	}
 }

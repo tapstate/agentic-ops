@@ -11,15 +11,48 @@ func Success(operation string, payload map[string]any) map[string]any {
 	return result
 }
 
+type FailureContext struct {
+	Code                string
+	Message             string
+	RequiredHumanAction string
+	TaskType            string
+	CurrentStage        string
+	NextAction          string
+}
+
 func Failure(operation string, code string, message string, requiredHumanAction string) map[string]any {
-	result := map[string]any{
-		"ok":        false,
-		"operation": operation,
-		"code":      code,
-		"message":   message,
+	return FailureWithContext(operation, FailureContext{
+		Code:                code,
+		Message:             message,
+		RequiredHumanAction: requiredHumanAction,
+		TaskType:            "unknown",
+		CurrentStage:        "failed",
+		NextAction:          "ask_owner",
+	})
+}
+
+func FailureWithContext(operation string, context FailureContext) map[string]any {
+	if context.TaskType == "" {
+		context.TaskType = "unknown"
 	}
-	if requiredHumanAction != "" {
-		result["required_human_action"] = requiredHumanAction
+	if context.CurrentStage == "" {
+		context.CurrentStage = "failed"
+	}
+	if context.NextAction == "" {
+		context.NextAction = "ask_owner"
+	}
+	if context.RequiredHumanAction == "" {
+		context.RequiredHumanAction = "请联系 AgenticOps 维护者处理"
+	}
+	result := map[string]any{
+		"ok":                    false,
+		"operation":             operation,
+		"code":                  context.Code,
+		"message":               context.Message,
+		"task_type":             context.TaskType,
+		"current_stage":         context.CurrentStage,
+		"next_action":           context.NextAction,
+		"required_human_action": context.RequiredHumanAction,
 	}
 	return result
 }

@@ -136,6 +136,18 @@ func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 	if !strings.Contains(string(events), `"operation":"takeover_task"`) {
 		t.Fatalf("events = %s", string(events))
 	}
+	if !strings.Contains(string(events), `"agent_task_ops_version":"SRC-source"`) {
+		t.Fatalf("events = %s", string(events))
+	}
+	if !strings.Contains(string(events), `"version_state":"SRC"`) {
+		t.Fatalf("events = %s", string(events))
+	}
+	if !strings.Contains(string(events), `"asset_version":"unknown"`) {
+		t.Fatalf("events = %s", string(events))
+	}
+	if !strings.Contains(string(events), `"gate_status":"passed"`) {
+		t.Fatalf("events = %s", string(events))
+	}
 }
 
 func TestResumeTakeoverReturnsRunIDAndNextAction(t *testing.T) {
@@ -152,6 +164,8 @@ func TestResumeTakeoverReturnsRunIDAndNextAction(t *testing.T) {
 }
 
 func TestWriteEvidenceRequiresRunID(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"write-evidence", "--workspace", "tapstate"}, &stdout, &stderr)
@@ -159,6 +173,20 @@ func TestWriteEvidenceRequiresRunID(t *testing.T) {
 		t.Fatalf("code = %d", code)
 	}
 	assertJSONField(t, stdout.String(), "code", "missing_run_id")
+	assertJSONField(t, stdout.String(), "task_type", "evidence_write")
+	assertJSONField(t, stdout.String(), "current_stage", "input_validation")
+	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertJSONField(t, stdout.String(), "required_human_action", "请提供 --run-id")
+	events, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
+	if err != nil {
+		t.Fatalf("ReadFile events error = %v", err)
+	}
+	if !strings.Contains(string(events), `"code":"missing_run_id"`) {
+		t.Fatalf("events = %s", string(events))
+	}
+	if !strings.Contains(string(events), `"gate_status":"blocked"`) {
+		t.Fatalf("events = %s", string(events))
+	}
 }
 
 func TestWriteEvidenceOutputsNextAction(t *testing.T) {

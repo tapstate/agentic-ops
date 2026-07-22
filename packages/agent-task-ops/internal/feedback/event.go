@@ -16,12 +16,17 @@ type Event struct {
 	Workspace           string `json:"workspace"`
 	RunID               string `json:"run_id"`
 	IssueKey            string `json:"issue_key,omitempty"`
+	AgentTaskOpsVersion string `json:"agent_task_ops_version"`
+	VersionState        string `json:"version_state"`
+	AssetVersion        string `json:"asset_version"`
 	TaskType            string `json:"task_type"`
 	Operation           string `json:"operation"`
 	CurrentStage        string `json:"current_stage"`
 	NextAction          string `json:"next_action"`
 	OK                  bool   `json:"ok"`
 	Code                string `json:"code,omitempty"`
+	Gate                string `json:"gate"`
+	GateStatus          string `json:"gate_status"`
 	HumanGate           bool   `json:"human_gate"`
 	RequiresHumanAction bool   `json:"requires_human_action"`
 }

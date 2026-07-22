@@ -126,6 +126,17 @@ human_gate:
 
 错误码命名使用 lowercase snake_case。
 
+失败输出必须包含：
+
+- `ok=false`
+- `operation`
+- `code`
+- `message`
+- `required_human_action`
+- `task_type`
+- `current_stage`
+- `next_action`
+
 ## 6. 副作用规则
 
 Operation 必须明确副作用：
@@ -133,6 +144,7 @@ Operation 必须明确副作用：
 - 是否写 Jira。
 - 是否写 PR。
 - 是否写本地事件日志。
+- 事件日志必须能记录 `agent_task_ops_version`、`version_state`、`asset_version`、`code`、`gate` 和 `gate_status`。
 - 是否修改代码。
 - 是否创建 commit。
 - 是否 push。

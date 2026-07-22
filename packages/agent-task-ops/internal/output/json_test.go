@@ -26,4 +26,36 @@ func TestFailureIncludesStableCode(t *testing.T) {
 	if got["required_human_action"] != "请补充 target_repo" {
 		t.Fatalf("required_human_action = %v", got["required_human_action"])
 	}
+	if got["task_type"] != "unknown" {
+		t.Fatalf("task_type = %v", got["task_type"])
+	}
+	if got["current_stage"] != "failed" {
+		t.Fatalf("current_stage = %v", got["current_stage"])
+	}
+	if got["next_action"] != "ask_owner" {
+		t.Fatalf("next_action = %v", got["next_action"])
+	}
+}
+
+func TestFailureWithContextIncludesTaskProgress(t *testing.T) {
+	got := FailureWithContext("takeover_task", FailureContext{
+		Code:                "missing_jira_field",
+		Message:             "Jira issue 缺少目标仓库信息",
+		RequiredHumanAction: "请补充目标仓库",
+		TaskType:            "task_takeover",
+		CurrentStage:        "takeover_gate",
+		NextAction:          "ask_owner",
+	})
+	if got["code"] != "missing_jira_field" {
+		t.Fatalf("code = %v", got["code"])
+	}
+	if got["task_type"] != "task_takeover" {
+		t.Fatalf("task_type = %v", got["task_type"])
+	}
+	if got["current_stage"] != "takeover_gate" {
+		t.Fatalf("current_stage = %v", got["current_stage"])
+	}
+	if got["next_action"] != "ask_owner" {
+		t.Fatalf("next_action = %v", got["next_action"])
+	}
 }

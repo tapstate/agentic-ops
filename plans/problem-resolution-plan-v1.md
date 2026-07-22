@@ -44,10 +44,11 @@ agent-task-ops policy rollback --workspace <name>
   - 确认正式使用前不依赖历史 `rd-agentic` / `td-agentic` 项目作为事实源。
   - 确认所有设计、计划、目标都以当前 `agentic-ops` 仓库文档为准。
 
-- [ ] **Task 1: 稳定错误码与事件模型**
+- [x] **Task 1: 稳定错误码与事件模型**
   - 为四类问题定义稳定 `code`。
   - 失败输出必须包含 `required_human_action`。
   - 事件日志记录 CLI version、asset version、operation、task_type、current_stage、next_action、code 和 gate 状态。
+  - Implementation note: 当前已完成结构化失败输出基线，失败输出包含 `required_human_action`、`task_type`、`current_stage` 和 `next_action`；事件模型已包含 `agent_task_ops_version`、`version_state`、`asset_version`、`code`、`gate` 和 `gate_status`。当前只覆盖已实现本地 fake flow 的命令，四类问题的完整业务 gate 分别在后续 Task 4、Task 5 和 Task 6 中继续落地。
 
 - [ ] **Task 2: 脱敏诊断包**
   - 实现 `doctor`。
