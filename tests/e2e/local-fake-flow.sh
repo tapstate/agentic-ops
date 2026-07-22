@@ -35,6 +35,15 @@ $cmd profile update --workspace tapstate --source "$profile_source" | grep '"ope
 $cmd profile validate --workspace tapstate | grep '"operation":"profile_validate"'
 $cmd profile rollback --workspace tapstate | grep '"operation":"profile_rollback"'
 rm -f "$profile_backup"
+$cmd policy validate --workspace tapstate | grep '"operation":"policy_validate"'
+policy_source="$workspace_root/default-policy-hotfix.yaml"
+policy_backup="assets/policies/default.yaml.bak"
+test ! -e "$policy_backup"
+cp assets/policies/default.yaml "$policy_source"
+$cmd policy update --workspace tapstate --source "$policy_source" | grep '"operation":"policy_update"'
+$cmd policy validate --workspace tapstate | grep '"operation":"policy_validate"'
+$cmd policy rollback --workspace tapstate | grep '"operation":"policy_rollback"'
+rm -f "$policy_backup"
 $cmd doctor --workspace tapstate | grep '"operation":"doctor"'
 $cmd preflight --workspace tapstate | grep '"operation":"preflight"'
 $cmd workspace init --workspace tapstate | grep '"operation":"workspace_init"'

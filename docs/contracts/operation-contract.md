@@ -37,6 +37,9 @@ Operation Contract 必须引用 Standard Process Registry 中的任务分类和�
 | `profile_validate` | 校验 Workflow Profile 是否能映射标准字段、任务分类、标准流程、状态和 transition。 |
 | `profile_update` | 使用经过校验的本地 source profile 更新当前 workspace profile，并保存可回滚备份。 |
 | `profile_rollback` | 从最近一次 profile update 备份恢复当前 workspace profile。 |
+| `policy_validate` | 校验当前 policy 是否包含关键步骤 gate 配置。 |
+| `policy_update` | 使用经过校验的本地 source policy 更新默认 policy，并保存可回滚备份。 |
+| `policy_rollback` | 从最近一次 policy update 备份恢复默认 policy。 |
 | `workspace_init` | 初始化项目 AI 工作空间。 |
 | `agent_init` | 初始化 AIAgent 能力。 |
 | `list_tasks` | 列出当前 owner 可处理任务。 |

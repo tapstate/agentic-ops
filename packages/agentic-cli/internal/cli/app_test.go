@@ -389,6 +389,67 @@ func TestProfileUpdateAndRollbackUseLocalProfileBackup(t *testing.T) {
 	}
 }
 
+func TestPolicyValidateOutputsIssueCount(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"policy", "validate", "--workspace", "tapstate"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "policy_validate")
+	assertJSONField(t, stdout.String(), "workspace", "tapstate")
+	assertJSONField(t, stdout.String(), "policy", "default")
+	assertJSONNumber(t, stdout.String(), "issues", 0)
+	assertJSONField(t, stdout.String(), "next_action", "continue")
+}
+
+func TestPolicyUpdateAndRollbackUseLocalPolicyBackup(t *testing.T) {
+	repo := t.TempDir()
+	t.Chdir(repo)
+	writeCLITestFile(t, filepath.Join(repo, "go.mod"), "module example.local/test\n")
+	writeCLITestFile(t, filepath.Join(repo, "contracts", "operations", ".keep"), "")
+	target := filepath.Join(repo, "assets", "policies", "default.yaml")
+	source := filepath.Join(repo, "incoming", "default-policy.yaml")
+	writeCLITestFile(t, target, validCLIPolicyYAML("default", false))
+	writeCLITestFile(t, source, validCLIPolicyYAML("default", true))
+
+	var updateStdout bytes.Buffer
+	var updateStderr bytes.Buffer
+	updateCode := Run([]string{"policy", "update", "--workspace", "tapstate", "--source", source}, &updateStdout, &updateStderr)
+	if updateCode != 0 {
+		t.Fatalf("updateCode = %d stdout = %s stderr = %s", updateCode, updateStdout.String(), updateStderr.String())
+	}
+	assertJSONField(t, updateStdout.String(), "operation", "policy_update")
+	assertJSONField(t, updateStdout.String(), "workspace", "tapstate")
+	assertJSONField(t, updateStdout.String(), "policy", "default")
+	assertJSONField(t, updateStdout.String(), "next_action", "policy_validate")
+	updated, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile updated error = %v", err)
+	}
+	if !strings.Contains(string(updated), "write_jira_comment:\n    required: true") {
+		t.Fatalf("updated policy = %s", string(updated))
+	}
+
+	var rollbackStdout bytes.Buffer
+	var rollbackStderr bytes.Buffer
+	rollbackCode := Run([]string{"policy", "rollback", "--workspace", "tapstate"}, &rollbackStdout, &rollbackStderr)
+	if rollbackCode != 0 {
+		t.Fatalf("rollbackCode = %d stdout = %s stderr = %s", rollbackCode, rollbackStdout.String(), rollbackStderr.String())
+	}
+	assertJSONField(t, rollbackStdout.String(), "operation", "policy_rollback")
+	assertJSONField(t, rollbackStdout.String(), "workspace", "tapstate")
+	assertJSONField(t, rollbackStdout.String(), "policy", "default")
+	assertJSONField(t, rollbackStdout.String(), "next_action", "policy_validate")
+	restored, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile restored error = %v", err)
+	}
+	if !strings.Contains(string(restored), "write_jira_comment:\n    required: false") {
+		t.Fatalf("restored policy = %s", string(restored))
+	}
+}
+
 func TestReleaseAgentRecordsCurrentAgentCleanup(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
@@ -556,4 +617,26 @@ func validCLIProfileYAML(workspace string, jiraProject string) string {
 		"  start_progress: Start Progress\n" +
 		"local:\n" +
 		"  source_root: /tmp/source\n"
+}
+
+func validCLIPolicyYAML(policyName string, requireJiraComment bool) string {
+	jiraCommentRequired := "false"
+	if requireJiraComment {
+		jiraCommentRequired = "true"
+	}
+	return "policy: " + policyName + "\n" +
+		"version: 1\n" +
+		"gates:\n" +
+		"  write_jira_comment:\n" +
+		"    required: " + jiraCommentRequired + "\n" +
+		"  transition_jira_status:\n" +
+		"    required: true\n" +
+		"  git_commit:\n" +
+		"    required: true\n" +
+		"  git_push:\n" +
+		"    required: true\n" +
+		"  create_pr:\n" +
+		"    required: true\n" +
+		"  scope_change:\n" +
+		"    required: true\n"
 }

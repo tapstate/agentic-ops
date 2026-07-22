@@ -16,6 +16,7 @@ import (
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/feedback"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/output"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/policy"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/update"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/workspace"
@@ -79,6 +80,16 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		}
 		if len(args) >= 2 && args[1] == "rollback" {
 			return runProfileRollback(args, stdout)
+		}
+	case "policy":
+		if len(args) >= 2 && args[1] == "validate" {
+			return runPolicyValidate(args, stdout)
+		}
+		if len(args) >= 2 && args[1] == "update" {
+			return runPolicyUpdate(args, stdout)
+		}
+		if len(args) >= 2 && args[1] == "rollback" {
+			return runPolicyRollback(args, stdout)
 		}
 	case "list-tasks":
 		return runListTasks(args, stdout)
@@ -192,6 +203,9 @@ func runAgentInit(args []string, stdout io.Writer) int {
 			"profile_validate",
 			"profile_update",
 			"profile_rollback",
+			"policy_validate",
+			"policy_update",
+			"policy_rollback",
 			"workspace_init",
 			"list_tasks",
 			"takeover_task",
@@ -479,6 +493,136 @@ func runProfileRollback(args []string, stdout io.Writer) int {
 		"profile":       result.TargetPath,
 		"restored_from": result.RestoredFrom,
 		"next_action":   "profile_validate",
+	}))
+}
+
+func runPolicyValidate(args []string, stdout io.Writer) int {
+	workspaceName := readFlag(args, "--workspace", "")
+	if workspaceName == "" {
+		return writeJSON(stdout, output.FailureWithContext("policy_validate", output.FailureContext{
+			Code:                "missing_workspace",
+			Message:             "缺少 workspace",
+			RequiredHumanAction: "请提供 --workspace",
+			TaskType:            "policy_validation",
+			CurrentStage:        "policy_validation",
+			NextAction:          "ask_owner",
+		}))
+	}
+	policyPath, err := repoPolicyPath()
+	if err != nil {
+		return writeJSON(stdout, output.Failure("policy_validate", "repo_root_not_found", "未找到仓库根目录", "请在 AgenticOps 仓库内运行"))
+	}
+	loadedPolicy, err := policy.LoadFile(policyPath)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("policy_validate", output.FailureContext{
+			Code:                "policy_not_found",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 assets/policies/default.yaml",
+			TaskType:            "policy_validation",
+			CurrentStage:        "policy_validation",
+			NextAction:          "fix_policy",
+		}))
+	}
+	issues := policy.Validate(loadedPolicy)
+	if len(issues) > 0 {
+		return writeJSON(stdout, output.FailureWithContext("policy_validate", output.FailureContext{
+			Code:                "policy_validation_failed",
+			Message:             "policy validation failed",
+			RequiredHumanAction: "请修复 policy 中的名称、版本和关键 gate 配置",
+			TaskType:            "policy_validation",
+			CurrentStage:        "policy_validation",
+			NextAction:          "fix_policy",
+		}))
+	}
+	return writeJSON(stdout, output.Success("policy_validate", map[string]any{
+		"workspace":   workspaceName,
+		"policy":      loadedPolicy.Policy,
+		"issues":      0,
+		"next_action": "continue",
+	}))
+}
+
+func runPolicyUpdate(args []string, stdout io.Writer) int {
+	workspaceName := readFlag(args, "--workspace", "")
+	if workspaceName == "" {
+		return writeJSON(stdout, output.FailureWithContext("policy_update", output.FailureContext{
+			Code:                "missing_workspace",
+			Message:             "缺少 workspace",
+			RequiredHumanAction: "请提供 --workspace",
+			TaskType:            "policy_update",
+			CurrentStage:        "input_validation",
+			NextAction:          "ask_owner",
+		}))
+	}
+	sourcePath := readFlag(args, "--source", "")
+	if sourcePath == "" {
+		return writeJSON(stdout, output.FailureWithContext("policy_update", output.FailureContext{
+			Code:                "missing_source",
+			Message:             "缺少 policy source",
+			RequiredHumanAction: "请提供 --source",
+			TaskType:            "policy_update",
+			CurrentStage:        "input_validation",
+			NextAction:          "ask_owner",
+		}))
+	}
+	targetPath, err := repoPolicyPath()
+	if err != nil {
+		return writeJSON(stdout, output.Failure("policy_update", "repo_root_not_found", "未找到仓库根目录", "请在 AgenticOps 仓库内运行"))
+	}
+	result, err := policy.UpdateFile(targetPath, sourcePath, "default")
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("policy_update", output.FailureContext{
+			Code:                "policy_update_failed",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 source policy 是否存在、名称是否匹配且能通过校验",
+			TaskType:            "policy_update",
+			CurrentStage:        "policy_update",
+			NextAction:          "fix_policy",
+		}))
+	}
+	return writeJSON(stdout, output.Success("policy_update", map[string]any{
+		"workspace":   workspaceName,
+		"policy":      result.Policy,
+		"path":        result.TargetPath,
+		"backup":      result.BackupPath,
+		"source":      result.SourcePath,
+		"next_action": "policy_validate",
+	}))
+}
+
+func runPolicyRollback(args []string, stdout io.Writer) int {
+	workspaceName := readFlag(args, "--workspace", "")
+	if workspaceName == "" {
+		return writeJSON(stdout, output.FailureWithContext("policy_rollback", output.FailureContext{
+			Code:                "missing_workspace",
+			Message:             "缺少 workspace",
+			RequiredHumanAction: "请提供 --workspace",
+			TaskType:            "policy_rollback",
+			CurrentStage:        "input_validation",
+			NextAction:          "ask_owner",
+		}))
+	}
+	targetPath, err := repoPolicyPath()
+	if err != nil {
+		return writeJSON(stdout, output.Failure("policy_rollback", "repo_root_not_found", "未找到仓库根目录", "请在 AgenticOps 仓库内运行"))
+	}
+	result, err := policy.RollbackFile(targetPath, "default")
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("policy_rollback", output.FailureContext{
+			Code:                "policy_rollback_failed",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 policy 备份是否存在且能通过校验",
+			TaskType:            "policy_rollback",
+			CurrentStage:        "policy_rollback",
+			NextAction:          "fix_policy",
+		}))
+	}
+	return writeJSON(stdout, output.Success("policy_rollback", map[string]any{
+		"workspace":     workspaceName,
+		"policy":        result.Policy,
+		"path":          result.TargetPath,
+		"restored_from": result.RestoredFrom,
+		"next_action":   "policy_validate",
 	}))
 }
 
@@ -871,6 +1015,14 @@ func repoProfilePath(workspaceName string) (string, error) {
 	return filepath.Join(root, "profiles", workspaceName+".yaml"), nil
 }
 
+func repoPolicyPath() (string, error) {
+	root, err := repoRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "assets", "policies", "default.yaml"), nil
+}
+
 func checkInstallDir(installDir string) map[string]string {
 	if installDir == "" {
 		return map[string]string{"status": "failed", "message": "install dir is empty"}
@@ -908,13 +1060,16 @@ func checkProfile(workspaceName string) map[string]string {
 }
 
 func checkPolicy() map[string]string {
-	root, err := repoRoot()
+	path, err := repoPolicyPath()
 	if err != nil {
 		return map[string]string{"status": "failed", "message": "repo root not found"}
 	}
-	path := filepath.Join(root, "assets", "policies", "default.yaml")
-	if _, err := os.Stat(path); err != nil {
+	loadedPolicy, err := policy.LoadFile(path)
+	if err != nil {
 		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	if issues := policy.Validate(loadedPolicy); len(issues) > 0 {
+		return map[string]string{"status": "failed", "message": issues[0].Code}
 	}
 	return map[string]string{"status": "ok", "message": path}
 }

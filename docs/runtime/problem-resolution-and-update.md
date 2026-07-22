@@ -122,7 +122,7 @@ agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
 | `agentic-cli` 逻辑错误 | `agentic_cli_logic_error` | `doctor` 和 `feedback bundle --redact` 本地诊断基线已落地；真实外部检查后续实现。 |
 | Jira 流程状态没适配 | `unknown_jira_status` | `profile validate / update / rollback` 基线已落地；真实接管 gate 后续实现。 |
 | Jira 卡片属性丢失 | `missing_jira_field` | fake Jira 接管 gate 已覆盖必填字段阻断；真实 Jira 字段读取和补全模板后续实现。 |
-| 关键步骤门禁调整 | `policy_gate_required` | 规划中，后续随 `policy validate / update / rollback` 落地。 |
+| 关键步骤门禁调整 | `policy_gate_required` | `policy validate / update / rollback` 本地基线已落地；真实写操作的 gate 审计和事件记录后续实现。 |
 
 ## 7. 修复路径一：CLI 逻辑错误
 
@@ -293,13 +293,15 @@ gates:
     required: true
 ```
 
-目标命令：
+当前本地基线命令：
 
 ```sh
 agentic-cli policy validate --workspace tapstate
-agentic-cli policy update --workspace tapstate
+agentic-cli policy update --workspace tapstate --source /path/to/default-policy.yaml
 agentic-cli policy rollback --workspace tapstate
 ```
+
+当前实现会读取 `assets/policies/default.yaml`，校验 policy 名称、版本和 `write_jira_comment`、`transition_jira_status`、`git_commit`、`git_push`、`create_pr`、`scope_change` 六个关键 gate。`policy update` 会先校验 source，再写入 `.bak` 备份；`policy rollback` 会先校验备份，再恢复默认 policy。
 
 门禁调整规则：
 
@@ -383,4 +385,4 @@ asset release
 - `scripts/build.sh`
 - `scripts/release.sh`
 
-当前 `update check/apply` 已完成本地 manifest 基线，尚未实现远程 manifest 拉取、artifact 下载、checksum 校验或真实二进制切换。本文中的 `policy update`、真实外部诊断检查和真实 release manifest 仍属于正式使用前必须补齐的目标能力。
+当前 `update check/apply` 已完成本地 manifest 基线，尚未实现远程 manifest 拉取、artifact 下载、checksum 校验或真实二进制切换。当前 `policy validate/update/rollback` 已完成本地文件基线，尚未实现真实写操作 gate 审计事件。真实外部诊断检查和真实 release manifest 仍属于正式使用前必须补齐的目标能力。

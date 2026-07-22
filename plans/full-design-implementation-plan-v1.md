@@ -831,10 +831,45 @@ bash tests/e2e/local-fake-flow.sh
 
 Expected: all commands exit 0.
 
+## 6.5 Policy Validate / Update / Rollback Local Baseline
+
+Goal: implement local policy validation and hot update rollback support for critical gate settings.
+
+- [x] **Step 1: Write failing policy package tests**
+
+Covered default policy validation, missing required fields/gates, update backup, rejected name mismatch and rollback restore.
+
+- [x] **Step 2: Implement policy model, loader, validator and updater**
+
+Added YAML-backed policy loading, required gate validation and local `.bak` update/rollback behavior.
+
+- [x] **Step 3: Write failing CLI route test**
+
+Covered `policy validate --workspace`, `policy update --workspace --source` and `policy rollback --workspace`.
+
+- [x] **Step 4: Implement CLI routes and capabilities**
+
+Added `policy_validate`, `policy_update` and `policy_rollback` to AgenticCLI capabilities and structured JSON outputs.
+
+- [x] **Step 5: Add operation contracts and e2e coverage**
+
+Added policy operation contracts and local fake flow coverage with temporary source policy and cleanup of generated backup.
+
+- [x] **Step 6: Verification**
+
+Run:
+
+```sh
+go test ./...
+bash tests/e2e/local-fake-flow.sh
+```
+
+Expected: all commands exit 0.
+
 ## 7. Later Phases
 
 - Later Phase 3: real Jira adapter and Jira-side `current_agent_id` writeback / cleanup.
-- Later Phase 4: remote update manifest/artifact handling, policy validate/update/rollback and real external doctor checks.
+- Later Phase 4: remote update manifest/artifact handling, real policy gate audit events and real external doctor checks.
 - Phase 5: completion cleanup and problem-resolution e2e.
 
 Do not start later phases until Phase 1 contract/schema baseline is passing and committed.
