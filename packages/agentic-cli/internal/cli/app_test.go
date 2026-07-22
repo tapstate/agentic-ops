@@ -2,11 +2,15 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
 )
 
 func TestVersionOutputsJSON(t *testing.T) {
@@ -450,6 +454,87 @@ func TestPolicyUpdateAndRollbackUseLocalPolicyBackup(t *testing.T) {
 	}
 }
 
+func TestTakeoverTaskRequiresConfirmationForRealJiraWrite(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	withJiraClientForTest(t, jiraClientSelection{Client: recordingJiraClient{issue: realModeIssue()}, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"takeover-task", "TAP-123", "--workspace", "tapstate"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "takeover_task")
+	assertJSONField(t, stdout.String(), "code", "real_jira_confirmation_required")
+	assertJSONField(t, stdout.String(), "current_stage", "takeover_gate")
+	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+}
+
+func TestReleaseAgentRequiresConfirmationForRealJiraWrite(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	withJiraClientForTest(t, jiraClientSelection{Client: recordingJiraClient{issue: realModeBoundIssue()}, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"release-agent", "--workspace", "tapstate", "--run-id", "run-1", "--issue-key", "TAP-123", "--completion-evidence", "evidence.md"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "release_agent")
+	assertJSONField(t, stdout.String(), "code", "real_jira_confirmation_required")
+	assertJSONField(t, stdout.String(), "current_stage", "completion_cleanup")
+	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+}
+
+func TestJiraWriteFieldsUseProfileMapping(t *testing.T) {
+	p := profile.Profile{
+		JiraFormMapping: profile.FormMapping{
+			Fields: map[string]profile.FormField{
+				"current_agent_id": {JiraField: "customfield_current_agent_id"},
+				"takeover_at":      {JiraField: "customfield_takeover_at"},
+			},
+		},
+	}
+
+	takeoverFields := jiraTakeoverFields(p, "agent-1", "2026-07-21T10:30:12Z")
+	if takeoverFields["customfield_current_agent_id"] != "agent-1" {
+		t.Fatalf("takeoverFields = %#v", takeoverFields)
+	}
+	if takeoverFields["customfield_takeover_at"] != "2026-07-21T10:30:12Z" {
+		t.Fatalf("takeoverFields = %#v", takeoverFields)
+	}
+	releaseFields := jiraReleaseFields(p)
+	if _, ok := releaseFields["customfield_current_agent_id"]; !ok {
+		t.Fatalf("releaseFields missing current agent field: %#v", releaseFields)
+	}
+	if releaseFields["customfield_current_agent_id"] != nil {
+		t.Fatalf("release current agent field = %#v", releaseFields["customfield_current_agent_id"])
+	}
+}
+
+func TestDefaultJiraClientRequiresRealAdapterConfig(t *testing.T) {
+	t.Setenv("AGENTIC_OPS_JIRA_ADAPTER", "real")
+	if _, err := defaultJiraClient("tapstate", profile.Profile{}); err == nil {
+		t.Fatalf("defaultJiraClient error = nil, want missing config error")
+	}
+
+	t.Setenv("AGENTIC_OPS_JIRA_BASE_URL", "https://jira.example.test")
+	t.Setenv("AGENTIC_OPS_JIRA_EMAIL", "bot@example.com")
+	t.Setenv("AGENTIC_OPS_JIRA_API_TOKEN", "token-123")
+	selection, err := defaultJiraClient("tapstate", profile.Profile{})
+	if err != nil {
+		t.Fatalf("defaultJiraClient error = %v", err)
+	}
+	if selection.Mode != "real" {
+		t.Fatalf("Mode = %s", selection.Mode)
+	}
+	if _, ok := selection.Client.(*jira.RealClient); !ok {
+		t.Fatalf("Client type = %T", selection.Client)
+	}
+}
+
 func TestReleaseAgentRecordsCurrentAgentCleanup(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
@@ -639,4 +724,63 @@ func validCLIPolicyYAML(policyName string, requireJiraComment bool) string {
 		"    required: true\n" +
 		"  scope_change:\n" +
 		"    required: true\n"
+}
+
+func withJiraClientForTest(t *testing.T, selection jiraClientSelection) {
+	t.Helper()
+	original := selectJiraClient
+	selectJiraClient = func(workspaceName string, workspaceProfile profile.Profile) (jiraClientSelection, error) {
+		return selection, nil
+	}
+	t.Cleanup(func() {
+		selectJiraClient = original
+	})
+}
+
+type recordingJiraClient struct {
+	issue jira.Issue
+}
+
+func (client recordingJiraClient) CurrentUser(ctx context.Context) (string, error) {
+	return "current-user", nil
+}
+
+func (client recordingJiraClient) SearchIssues(ctx context.Context, workspace string, jql string) ([]jira.Issue, error) {
+	return []jira.Issue{client.issue}, nil
+}
+
+func (client recordingJiraClient) GetIssueByKey(ctx context.Context, workspace string, key string) (jira.Issue, bool, error) {
+	if client.issue.Key == key {
+		return client.issue, true, nil
+	}
+	return jira.Issue{}, false, nil
+}
+
+func (client recordingJiraClient) AddComment(ctx context.Context, key string, body string) error {
+	return nil
+}
+
+func (client recordingJiraClient) UpdateFields(ctx context.Context, key string, fields map[string]any) error {
+	return nil
+}
+
+func realModeIssue() jira.Issue {
+	return jira.Issue{
+		Key:                "TAP-123",
+		Summary:            "修复示例任务",
+		Owner:              "current-user",
+		Assignee:           "current-user",
+		IssueType:          "Task",
+		Status:             "To Do",
+		TargetRepo:         "tapstate/example-repo",
+		AcceptanceCriteria: "单元测试通过",
+		VerificationMethod: "go test ./...",
+		RiskLevel:          "low",
+	}
+}
+
+func realModeBoundIssue() jira.Issue {
+	issue := realModeIssue()
+	issue.CurrentAgentID = "agentic-cli-local-agent"
+	return issue
 }

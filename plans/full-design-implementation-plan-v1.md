@@ -626,6 +626,50 @@ go test ./packages/agentic-cli/internal/jira ./packages/agentic-cli/internal/cli
 
 Expected: all commands exit 0.
 
+### Task 8.6: Guarded Real Jira Adapter Activation
+
+Scope:
+
+- Update: `packages/agentic-cli/internal/cli/app.go`
+- Update: `packages/agentic-cli/internal/cli/app_test.go`
+- Update: `contracts/operations/takeover-task.yaml`
+- Update: `contracts/operations/release-agent.yaml`
+
+Definition:
+
+- Default runtime still uses fake Jira adapter.
+- `AGENTIC_OPS_JIRA_ADAPTER=real` selects the real Jira client only when `AGENTIC_OPS_JIRA_BASE_URL`, `AGENTIC_OPS_JIRA_EMAIL` and `AGENTIC_OPS_JIRA_API_TOKEN` are all present.
+- Real Jira field writes in `takeover-task` and `release-agent` require `--confirm-real-jira-write`.
+- `takeover-task` writes profile-mapped `current_agent_id` and `takeover_at` fields only after ownership gate and explicit confirmation.
+- `release-agent` checks real Jira assignee and `current_agent_id` before clearing the profile-mapped `current_agent_id` field after explicit confirmation.
+- Missing real Jira confirmation returns `real_jira_confirmation_required` with `next_action: ask_owner`.
+
+- [x] **Step 1: Write CLI confirmation gate tests**
+
+Covered unconfirmed real-mode `takeover-task` and `release-agent` failures plus profile field mapping helpers.
+
+- [x] **Step 2: Implement real adapter selection**
+
+Added environment-based adapter selection with explicit required Jira connection configuration.
+
+- [x] **Step 3: Guard real Jira writes**
+
+Added `--confirm-real-jira-write` checks before real takeover binding and release cleanup field updates.
+
+- [x] **Step 4: Update operation contracts**
+
+Added adapter config, issue read, current user, confirmation and write mapping failure codes.
+
+- [x] **Step 5: Verification**
+
+Run:
+
+```sh
+go test ./packages/agentic-cli/internal/cli
+```
+
+Expected: all commands exit 0.
+
 ### Task 9: Takeover Form Event Baseline
 
 Scope:
@@ -913,7 +957,7 @@ Expected: all commands exit 0.
 
 ## 7. Later Phases
 
-- Later Phase 3: guarded real Jira adapter activation and Jira-side `current_agent_id` writeback / cleanup.
+- Later Phase 3: complete real Jira write audit events and transition/comment write gates.
 - Later Phase 4: remote update manifest/artifact handling, real policy gate audit events and real external doctor checks.
 - Phase 5: completion cleanup and problem-resolution e2e.
 

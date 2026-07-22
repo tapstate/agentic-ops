@@ -82,6 +82,12 @@ failure:
     - missing_target_repo
     - missing_verification_method
     - missing_risk_level
+    - jira_adapter_config_failed
+    - jira_issue_read_failed
+    - jira_current_user_failed
+    - real_jira_confirmation_required
+    - missing_jira_write_mapping
+    - jira_takeover_write_failed
     - missing_permission
     - workflow_transition_not_allowed
 side_effects:

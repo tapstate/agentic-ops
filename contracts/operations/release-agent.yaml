@@ -57,6 +57,11 @@ failure:
     - assignee_changed
     - agent_ownership_conflict
     - completion_evidence_missing
+    - jira_adapter_config_failed
+    - jira_issue_read_failed
+    - jira_current_user_failed
+    - real_jira_confirmation_required
+    - missing_jira_write_mapping
     - agent_release_failed
     - event_write_failed
 side_effects:

@@ -313,8 +313,11 @@ func runUpdateApply(args []string, stdout io.Writer) int {
 func runListTasks(args []string, stdout io.Writer) int {
 	workspaceName := readFlag(args, "--workspace", "default")
 	workspaceProfile := takeoverProfile(workspaceName)
-	client := jiraClient(workspaceName, workspaceProfile)
-	issues, err := client.SearchIssues(context.Background(), workspaceName, workspaceProfile.Jira.TaskQuery)
+	selection, err := selectJiraClient(workspaceName, workspaceProfile)
+	if err != nil {
+		return writeJSON(stdout, output.Failure("list_tasks", "jira_adapter_config_failed", err.Error(), "请检查 Jira adapter 配置"))
+	}
+	issues, err := selection.Client.SearchIssues(context.Background(), workspaceName, workspaceProfile.Jira.TaskQuery)
 	if err != nil {
 		return writeJSON(stdout, output.Failure("list_tasks", "jira_search_failed", err.Error(), "请检查 Jira adapter 配置"))
 	}
@@ -639,15 +642,18 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 	workspaceName := readFlag(args, "--workspace", "default")
 	issueKey := args[1]
 	workspaceProfile := takeoverProfile(workspaceName)
-	client := jiraClient(workspaceName, workspaceProfile)
-	issue, ok, err := client.GetIssueByKey(context.Background(), workspaceName, issueKey)
+	selection, err := selectJiraClient(workspaceName, workspaceProfile)
+	if err != nil {
+		return writeJSON(stdout, output.Failure("takeover_task", "jira_adapter_config_failed", err.Error(), "请检查 Jira adapter 配置"))
+	}
+	issue, ok, err := selection.Client.GetIssueByKey(context.Background(), workspaceName, issueKey)
 	if err != nil {
 		return writeJSON(stdout, output.Failure("takeover_task", "jira_issue_read_failed", err.Error(), "请检查 Jira adapter 配置和 issue 权限"))
 	}
 	if !ok {
 		return writeJSON(stdout, output.Failure("takeover_task", "issue_not_found", "未找到 Jira issue", "请检查 issue key"))
 	}
-	currentJiraUser, err := client.CurrentUser(context.Background())
+	currentJiraUser, err := selection.Client.CurrentUser(context.Background())
 	if err != nil {
 		return writeJSON(stdout, output.Failure("takeover_task", "jira_current_user_failed", err.Error(), "请检查 Jira adapter 登录状态"))
 	}
@@ -666,6 +672,26 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 	runID := feedback.RunID(issue.Key, "task_takeover", fixedNow(), "a8f3")
 	takeoverAt := fixedNow().Format(time.RFC3339)
 	currentAgentID := agentID()
+	if selection.Mode == "real" {
+		if !hasFlag(args, "--confirm-real-jira-write") {
+			_ = appendWorkspaceEventWithCode(workspaceName, "", issue.Key, "task_takeover", "takeover_task", "takeover_gate", "ask_owner", "real_jira_confirmation_required", "real_jira_write", false, true)
+			return writeJSON(stdout, output.FailureWithContext("takeover_task", output.FailureContext{
+				Code:                "real_jira_confirmation_required",
+				Message:             "真实 Jira 写入需要显式确认",
+				RequiredHumanAction: "请确认 policy/gate 允许写入后添加 --confirm-real-jira-write",
+				TaskType:            "task_takeover",
+				CurrentStage:        "takeover_gate",
+				NextAction:          "ask_owner",
+			}))
+		}
+		fields := jiraTakeoverFields(workspaceProfile, currentAgentID, takeoverAt)
+		if len(fields) == 0 {
+			return writeJSON(stdout, output.Failure("takeover_task", "missing_jira_write_mapping", "缺少 current_agent_id 或 takeover_at 字段映射", "请维护 workflow profile 的所有权字段映射"))
+		}
+		if err := selection.Client.UpdateFields(context.Background(), issue.Key, fields); err != nil {
+			return writeJSON(stdout, output.Failure("takeover_task", "jira_takeover_write_failed", err.Error(), "请检查 Jira 字段权限和 policy gate"))
+		}
+	}
 	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
 		RunID:          runID,
 		IssueKey:       issue.Key,
@@ -790,6 +816,61 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 	}
 	currentAgentID := agentID()
 	completedAt := fixedNow().Format(time.RFC3339)
+	workspaceProfile := takeoverProfile(workspaceName)
+	selection, err := selectJiraClient(workspaceName, workspaceProfile)
+	if err != nil {
+		return writeJSON(stdout, output.Failure("release_agent", "jira_adapter_config_failed", err.Error(), "请检查 Jira adapter 配置"))
+	}
+	if selection.Mode == "real" {
+		if !hasFlag(args, "--confirm-real-jira-write") {
+			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
+				Code:                "real_jira_confirmation_required",
+				Message:             "真实 Jira 写入需要显式确认",
+				RequiredHumanAction: "请确认完成证据和 policy/gate 后添加 --confirm-real-jira-write",
+				TaskType:            "task_takeover",
+				CurrentStage:        "completion_cleanup",
+				NextAction:          "ask_owner",
+			}))
+		}
+		issue, ok, err := selection.Client.GetIssueByKey(context.Background(), workspaceName, issueKey)
+		if err != nil {
+			return writeJSON(stdout, output.Failure("release_agent", "jira_issue_read_failed", err.Error(), "请检查 Jira adapter 配置和 issue 权限"))
+		}
+		if !ok {
+			return writeJSON(stdout, output.Failure("release_agent", "issue_not_found", "未找到 Jira issue", "请检查 issue key"))
+		}
+		currentJiraUser, err := selection.Client.CurrentUser(context.Background())
+		if err != nil {
+			return writeJSON(stdout, output.Failure("release_agent", "jira_current_user_failed", err.Error(), "请检查 Jira adapter 登录状态"))
+		}
+		if issue.Assignee != currentJiraUser {
+			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
+				Code:                "assignee_changed",
+				Message:             "当前 Jira assignee 已不是当前用户",
+				RequiredHumanAction: "请研发 owner 确认是否继续释放代理绑定",
+				TaskType:            "task_takeover",
+				CurrentStage:        "completion_cleanup",
+				NextAction:          "ask_owner",
+			}))
+		}
+		if issue.CurrentAgentID != currentAgentID {
+			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
+				Code:                "agent_ownership_conflict",
+				Message:             "当前 Jira issue 未绑定当前 AIAgent",
+				RequiredHumanAction: "请研发 owner 确认是否释放当前代理绑定",
+				TaskType:            "task_takeover",
+				CurrentStage:        "completion_cleanup",
+				NextAction:          "ask_owner",
+			}))
+		}
+		fields := jiraReleaseFields(workspaceProfile)
+		if len(fields) == 0 {
+			return writeJSON(stdout, output.Failure("release_agent", "missing_jira_write_mapping", "缺少 current_agent_id 字段映射", "请维护 workflow profile 的所有权字段映射"))
+		}
+		if err := selection.Client.UpdateFields(context.Background(), issueKey, fields); err != nil {
+			return writeJSON(stdout, output.Failure("release_agent", "agent_release_failed", err.Error(), "请检查 Jira 字段权限并由研发 owner 决策是否人工释放"))
+		}
+	}
 	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
 		RunID:                 runID,
 		IssueKey:              issueKey,
@@ -1142,8 +1223,46 @@ func takeoverProfile(workspaceName string) profile.Profile {
 	}
 }
 
-func jiraClient(workspaceName string, workspaceProfile profile.Profile) jira.Client {
-	return jira.FakeClient{}
+type jiraClientSelection struct {
+	Client jira.Client
+	Mode   string
+}
+
+var selectJiraClient = defaultJiraClient
+
+func defaultJiraClient(workspaceName string, workspaceProfile profile.Profile) (jiraClientSelection, error) {
+	if os.Getenv("AGENTIC_OPS_JIRA_ADAPTER") == "real" {
+		client, err := jira.NewRealClient(jira.RealClientConfig{
+			BaseURL:  os.Getenv("AGENTIC_OPS_JIRA_BASE_URL"),
+			Email:    os.Getenv("AGENTIC_OPS_JIRA_EMAIL"),
+			APIToken: os.Getenv("AGENTIC_OPS_JIRA_API_TOKEN"),
+			Profile:  workspaceProfile,
+		})
+		if err != nil {
+			return jiraClientSelection{}, err
+		}
+		return jiraClientSelection{Client: client, Mode: "real"}, nil
+	}
+	return jiraClientSelection{Client: jira.FakeClient{}, Mode: "fake"}, nil
+}
+
+func jiraTakeoverFields(workspaceProfile profile.Profile, currentAgentID string, takeoverAt string) map[string]any {
+	fields := map[string]any{}
+	if field := workspaceProfile.JiraFormMapping.Fields["current_agent_id"].JiraField; field != "" {
+		fields[field] = currentAgentID
+	}
+	if field := workspaceProfile.JiraFormMapping.Fields["takeover_at"].JiraField; field != "" {
+		fields[field] = takeoverAt
+	}
+	return fields
+}
+
+func jiraReleaseFields(workspaceProfile profile.Profile) map[string]any {
+	fields := map[string]any{}
+	if field := workspaceProfile.JiraFormMapping.Fields["current_agent_id"].JiraField; field != "" {
+		fields[field] = nil
+	}
+	return fields
 }
 
 func currentUser() string {
