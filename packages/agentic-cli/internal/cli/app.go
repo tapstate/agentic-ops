@@ -769,8 +769,45 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 	}
 	path := filepath.Join(root, ".agentic-ops", "runs", runID, "evidence.md")
 	content := fmt.Sprintf("# Evidence\n\n- workspace: %s\n- run_id: %s\n- status: evidence_written\n", workspaceName, runID)
+	workspaceProfile := takeoverProfile(workspaceName)
+	selection, err := selectJiraClient(workspaceName, workspaceProfile)
+	if err != nil {
+		return writeJSON(stdout, output.Failure("write_evidence", "jira_adapter_config_failed", err.Error(), "请检查 Jira adapter 配置"))
+	}
+	issueKey := readFlag(args, "--issue-key", "")
+	if selection.Mode == "real" {
+		if issueKey == "" {
+			issueKey, err = issueKeyForRun(root, runID)
+			if err != nil {
+				return writeJSON(stdout, output.Failure("write_evidence", "run_not_found", err.Error(), "请检查 run_id 是否存在有效接管事件"))
+			}
+		}
+		if issueKey == "" {
+			return writeJSON(stdout, output.Failure("write_evidence", "run_not_found", "未找到 run_id 对应的 Jira issue", "请检查 run_id 是否存在有效接管事件"))
+		}
+		if !hasFlag(args, "--confirm-real-jira-write") {
+			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "write_evidence", "evidence_write_gate", "ask_owner", "real_jira_confirmation_required", false, true)
+			return writeJSON(stdout, output.FailureWithContext("write_evidence", output.FailureContext{
+				Code:                "real_jira_confirmation_required",
+				Message:             "真实 Jira comment 写入需要显式确认",
+				RequiredHumanAction: "请确认 evidence 内容和 policy/gate 后添加 --confirm-real-jira-write",
+				TaskType:            "evidence_write",
+				CurrentStage:        "evidence_write_gate",
+				NextAction:          "ask_owner",
+			}))
+		}
+	}
 	if err := evidence.Write(path, content); err != nil {
 		return writeJSON(stdout, output.Failure("write_evidence", "write_failed", err.Error(), "请检查工作空间目录权限"))
+	}
+	if selection.Mode == "real" {
+		if err := selection.Client.AddComment(context.Background(), issueKey, content); err != nil {
+			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "write_evidence", "evidence_write_gate", "ask_owner", "jira_comment_write_failed", false, false)
+			return writeJSON(stdout, output.Failure("write_evidence", "jira_comment_write_failed", err.Error(), "请检查 Jira comment 权限和 policy gate"))
+		}
+		if err := appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "write_evidence", "evidence_written", "request_owner_confirmation", "", true, false); err != nil {
+			return writeJSON(stdout, output.Failure("write_evidence", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
+		}
 	}
 	if err := appendWorkspaceEvent(workspaceName, runID, "", "evidence_write", "write_evidence", "evidence_written", "request_owner_confirmation", true, true); err != nil {
 		return writeJSON(stdout, output.Failure("write_evidence", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
@@ -1071,10 +1108,14 @@ func appendWorkspaceEventWithDetails(workspaceName string, event feedback.Event)
 }
 
 func appendRealJiraWriteGateEvent(workspaceName string, runID string, issueKey string, operation string, currentStage string, nextAction string, code string, ok bool, requiresHumanAction bool) error {
+	taskType := "task_takeover"
+	if operation == "write_evidence" {
+		taskType = "evidence_write"
+	}
 	return appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
 		RunID:               runID,
 		IssueKey:            issueKey,
-		TaskType:            "task_takeover",
+		TaskType:            taskType,
 		Operation:           operation,
 		CurrentStage:        currentStage,
 		NextAction:          nextAction,
@@ -1087,6 +1128,19 @@ func appendRealJiraWriteGateEvent(workspaceName string, runID string, issueKey s
 		HumanGate:           true,
 		RequiresHumanAction: requiresHumanAction,
 	})
+}
+
+func issueKeyForRun(root string, runID string) (string, error) {
+	events, err := feedback.ReadEvents(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
+	if err != nil {
+		return "", err
+	}
+	for _, event := range events {
+		if event.RunID == runID && event.IssueKey != "" {
+			return event.IssueKey, nil
+		}
+	}
+	return "", nil
 }
 
 func readAssetVersion() string {

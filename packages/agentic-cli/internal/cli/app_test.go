@@ -324,6 +324,53 @@ func TestWriteEvidenceOutputsNextAction(t *testing.T) {
 	}
 }
 
+func TestWriteEvidenceRequiresConfirmationForRealJiraComment(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","ok":true,"gate":"takeover_task","gate_status":"passed"}
+`)
+	withJiraClientForTest(t, jiraClientSelection{Client: &recordingJiraClient{issue: realModeBoundIssue()}, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "write_evidence")
+	assertJSONField(t, stdout.String(), "code", "real_jira_confirmation_required")
+	assertEventLogContains(t, root, `"operation":"write_evidence"`)
+	assertEventLogContains(t, root, `"gate":"real_jira_write"`)
+	assertEventLogContains(t, root, `"gate_status":"blocked"`)
+}
+
+func TestWriteEvidenceRecordsPassedRealJiraCommentGate(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","ok":true,"gate":"takeover_task","gate_status":"passed"}
+`)
+	client := &recordingJiraClient{issue: realModeBoundIssue()}
+	withJiraClientForTest(t, jiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	if client.commentKey != "TAP-123" {
+		t.Fatalf("commentKey = %s", client.commentKey)
+	}
+	if !strings.Contains(client.commentBody, "status: evidence_written") {
+		t.Fatalf("commentBody = %s", client.commentBody)
+	}
+	assertEventLogContains(t, root, `"operation":"write_evidence"`)
+	assertEventLogContains(t, root, `"gate":"real_jira_write"`)
+	assertEventLogContains(t, root, `"gate_status":"passed"`)
+}
+
 func TestContractValidateOutputsIssueCount(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -789,6 +836,9 @@ type recordingJiraClient struct {
 	updatedKey    string
 	updatedFields map[string]any
 	updateErr     error
+	commentKey    string
+	commentBody   string
+	commentErr    error
 }
 
 func (client *recordingJiraClient) CurrentUser(ctx context.Context) (string, error) {
@@ -807,6 +857,11 @@ func (client *recordingJiraClient) GetIssueByKey(ctx context.Context, workspace 
 }
 
 func (client *recordingJiraClient) AddComment(ctx context.Context, key string, body string) error {
+	client.commentKey = key
+	client.commentBody = body
+	if client.commentErr != nil {
+		return client.commentErr
+	}
 	return nil
 }
 

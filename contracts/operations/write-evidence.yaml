@@ -40,6 +40,9 @@ failure:
     - assignee_changed
     - agent_ownership_conflict
     - evidence_template_missing
+    - jira_adapter_config_failed
+    - real_jira_confirmation_required
+    - jira_comment_write_failed
     - policy_gate_required
     - write_failed
     - event_write_failed

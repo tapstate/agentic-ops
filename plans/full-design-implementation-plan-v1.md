@@ -707,6 +707,46 @@ go test ./packages/agentic-cli/internal/cli
 
 Expected: all commands exit 0.
 
+### Task 8.8: Real Jira Comment Gate for Evidence
+
+Scope:
+
+- Update: `packages/agentic-cli/internal/cli/app.go`
+- Update: `packages/agentic-cli/internal/cli/app_test.go`
+- Update: `contracts/operations/write-evidence.yaml`
+- Update: `docs/runtime/problem-resolution-and-update.md`
+
+Definition:
+
+- In real Jira mode, `write-evidence` resolves the Jira issue key from `--issue-key` or the existing run event.
+- Real Jira comment writes require `--confirm-real-jira-write`.
+- Missing confirmation returns `real_jira_confirmation_required` and records a blocked `real_jira_write` gate event.
+- Confirmed comment writes call the Jira adapter `AddComment` path and record a passed `real_jira_write` gate event.
+- Jira comment write failures return `jira_comment_write_failed` and record a failed gate event.
+- Fake mode remains local-only and keeps existing e2e behavior.
+
+- [x] **Step 1: Write failing comment gate tests**
+
+Covered missing confirmation and confirmed real Jira comment write for `write-evidence`.
+
+- [x] **Step 2: Implement issue lookup and comment gate**
+
+Added run event lookup for issue key, confirmation guard, Jira comment write and `real_jira_write` gate events.
+
+- [x] **Step 3: Update operation contract**
+
+Added real Jira adapter config, confirmation and comment write failure codes to `write-evidence.yaml`.
+
+- [x] **Step 4: Verification**
+
+Run:
+
+```sh
+go test ./packages/agentic-cli/internal/cli
+```
+
+Expected: all commands exit 0.
+
 ### Task 9: Takeover Form Event Baseline
 
 Scope:
@@ -994,7 +1034,7 @@ Expected: all commands exit 0.
 
 ## 7. Later Phases
 
-- Later Phase 3: real Jira transition/comment write gates.
+- Later Phase 3: real Jira transition gate.
 - Later Phase 4: remote update manifest/artifact handling and real external doctor checks.
 - Phase 5: completion cleanup and problem-resolution e2e.
 
