@@ -65,7 +65,7 @@ tests/e2e/
 - Produces: `contract.FailureSpec`
 - Produces: `contract.RetryPolicy`
 
-- [ ] **Step 1: Write failing loader test**
+- [x] **Step 1: Write failing loader test**
 
 Add a test that loads `contracts/operations/takeover-task.yaml` and asserts:
 
@@ -88,7 +88,7 @@ Run: `go test ./packages/agentic-cli/internal/contract`
 
 Expected: FAIL because the current model does not expose these fields.
 
-- [ ] **Step 2: Implement model structs**
+- [x] **Step 2: Implement model structs**
 
 Update `model.go` so `Operation` includes:
 
@@ -128,7 +128,7 @@ type RetryPolicy struct {
 }
 ```
 
-- [ ] **Step 3: Run contract tests**
+- [x] **Step 3: Run contract tests**
 
 Run: `go test ./packages/agentic-cli/internal/contract`
 
@@ -150,7 +150,7 @@ Expected: PASS after YAML is expanded in Task 2.
 - Consumes: `contract.Operation`
 - Produces: YAML fields consumed by `contract.LoadFile`
 
-- [ ] **Step 1: Expand `takeover-task.yaml`**
+- [x] **Step 1: Expand `takeover-task.yaml`**
 
 Add `input`, `preconditions`, `output`, `failure`, `retry_policy`, and `redo_from_stage` matching `docs/contracts/operation-contract.md`.
 
@@ -171,13 +171,13 @@ failure:
     - workflow_transition_not_allowed
 ```
 
-- [ ] **Step 2: Expand resume and evidence contracts**
+- [x] **Step 2: Expand resume and evidence contracts**
 
 `resume-takeover.yaml` must include preconditions for existing run, workspace match, issue match, ownership check, and local state check.
 
 `write-evidence.yaml` must include preconditions for run existence, ownership check, evidence template availability, and policy check.
 
-- [ ] **Step 3: Expand remaining current-operation contracts**
+- [x] **Step 3: Expand remaining current-operation contracts**
 
 Every current operation YAML must include at least:
 
@@ -191,7 +191,7 @@ human_gate:
 retry_policy:
 ```
 
-- [ ] **Step 4: Run contract tests**
+- [x] **Step 4: Run contract tests**
 
 Run: `go test ./packages/agentic-cli/internal/contract`
 
@@ -207,7 +207,7 @@ Expected: PASS.
 - Consumes: `contract.Operation`
 - Produces: `contract.Validate(op Operation) []ValidationIssue`
 
-- [ ] **Step 1: Write failing validation tests**
+- [x] **Step 1: Write failing validation tests**
 
 Test that validation returns issues when:
 
@@ -222,7 +222,7 @@ Run: `go test ./packages/agentic-cli/internal/contract`
 
 Expected: FAIL because `Validate` does not exist.
 
-- [ ] **Step 2: Implement validator**
+- [x] **Step 2: Implement validator**
 
 Implement:
 
@@ -244,7 +244,7 @@ Validation codes must use lowercase snake_case:
 - `missing_side_effects`
 - `missing_human_gate`
 
-- [ ] **Step 3: Add repository contract test**
+- [x] **Step 3: Add repository contract test**
 
 Add a test that loads all files in `contracts/operations/*.yaml` and requires `Validate(op)` to return no issues.
 
@@ -263,7 +263,7 @@ Expected: PASS.
 **Interfaces:**
 - Produces CLI command: `agentic-cli contract validate`
 
-- [ ] **Step 1: Write failing CLI test**
+- [x] **Step 1: Write failing CLI test**
 
 Add test:
 
@@ -280,7 +280,7 @@ Run: `go test ./packages/agentic-cli/internal/cli`
 
 Expected: FAIL because command is unknown.
 
-- [ ] **Step 2: Implement command route**
+- [x] **Step 2: Implement command route**
 
 Add route:
 
@@ -303,7 +303,7 @@ case "contract":
 }
 ```
 
-- [ ] **Step 3: Run CLI tests**
+- [x] **Step 3: Run CLI tests**
 
 Run: `go test ./packages/agentic-cli/internal/cli`
 
@@ -319,7 +319,7 @@ Expected: PASS.
 **Interfaces:**
 - Consumes: `agentic-cli contract validate`
 
-- [ ] **Step 1: Add e2e assertion**
+- [x] **Step 1: Add e2e assertion**
 
 Add:
 
@@ -331,11 +331,11 @@ Run: `bash tests/e2e/local-fake-flow.sh`
 
 Expected: PASS.
 
-- [ ] **Step 2: Mark planning progress**
+- [x] **Step 2: Mark planning progress**
 
 Update `plans/problem-resolution-plan-v1.md` Task 0 to checked after architecture fit is recorded, and add an implementation note that full design implementation now proceeds from contract validation first.
 
-- [ ] **Step 3: Verification**
+- [x] **Step 3: Verification**
 
 Run:
 

@@ -30,6 +30,7 @@ Operation Contract 必须引用 Standard Process Registry 中的任务分类和�
 | --- | --- |
 | `install` | 安装 AgenticOps 到 `~/.agentic-ops`。 |
 | `assets_install` | 安装或更新 AI 员工手册、契约、profile、policy、runbook 和 template 等运行资产。 |
+| `contract_validate` | 校验机器可读 Operation Contract 是否满足完整设计基线。 |
 | `workspace_init` | 初始化项目 AI 工作空间。 |
 | `agent_init` | 初始化 AIAgent 能力。 |
 | `list_tasks` | 列出当前 owner 可处理任务。 |
@@ -46,7 +47,7 @@ Operation Contract 必须引用 Standard Process Registry 中的任务分类和�
 | `feedback_report` | 生成每日反馈报告。 |
 | `feedback_propose` | 生成改进建议。 |
 
-当前 `contracts/operations/` 只维护第一阶段本地 fake flow 已落地或直接需要的机器可读 YAML。未进入当前可运行闭环的 operation 先保留在本文档中作为后续契约范围，不视为已实现 CLI 命令。
+当前 `contracts/operations/` 维护已落地或直接需要的机器可读 YAML，并通过 `agentic-cli contract validate` 校验。未进入当前可运行闭环的 operation 先保留在本文档中作为后续契约范围，不视为已实现 CLI 命令。
 
 ## 4. 契约结构
 

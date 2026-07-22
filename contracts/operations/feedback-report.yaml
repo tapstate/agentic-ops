@@ -9,8 +9,45 @@ allowed_stages:
 required_inputs:
   - workspace
   - date
+input:
+  workspace:
+    type: string
+    required: true
+  date:
+    type: string
+    required: true
+preconditions:
+  - workspace_must_be_initialized
+  - feedback_events_must_be_readable
+output:
+  workspace:
+    type: string
+  date:
+    type: string
+  runs:
+    type: integer
+  succeeded:
+    type: integer
+  blocked:
+    type: integer
+  failed:
+    type: integer
+  report:
+    type: string
+  next_action:
+    type: string
+failure:
+  codes:
+    - workspace_root_failed
+    - event_read_failed
+    - report_write_failed
 side_effects:
   - may_write_workspace_feedback
   - must_not_write_jira
 human_gate:
   required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: evidence_written
+redo_from_stage: evidence_written

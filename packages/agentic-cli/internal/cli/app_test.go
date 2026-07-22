@@ -83,6 +83,9 @@ func TestAgentInitOutputsTaskModel(t *testing.T) {
 	assertJSONField(t, stdout.String(), "task_type", "capability_initialization")
 	assertJSONField(t, stdout.String(), "current_stage", "agent_capability_initialized")
 	assertJSONField(t, stdout.String(), "next_action", "list_tasks")
+	if !strings.Contains(stdout.String(), `"contract_validate"`) {
+		t.Fatalf("stdout missing contract_validate capability: %s", stdout.String())
+	}
 }
 
 func TestAssetsInstallCopiesAssetsToInstallDir(t *testing.T) {
@@ -210,6 +213,18 @@ func TestWriteEvidenceOutputsNextAction(t *testing.T) {
 	if !strings.Contains(string(events), `"operation":"write_evidence"`) {
 		t.Fatalf("events = %s", string(events))
 	}
+}
+
+func TestContractValidateOutputsIssueCount(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"contract", "validate"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "contract_validate")
+	assertJSONNumber(t, stdout.String(), "issues", 0)
+	assertJSONField(t, stdout.String(), "next_action", "continue")
 }
 
 func TestFeedbackReportOutputsReportPath(t *testing.T) {

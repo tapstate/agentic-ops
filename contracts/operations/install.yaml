@@ -6,8 +6,36 @@ allowed_stages:
   - not_installed
 required_inputs:
   - install_dir
+input:
+  install_dir:
+    type: string
+    required: true
+preconditions:
+  - platform_must_be_supported
+  - install_dir_must_be_writable
+output:
+  install_dir:
+    type: string
+  bin:
+    type: string
+  target:
+    type: string
+  version:
+    type: string
+  next_action:
+    type: string
+failure:
+  codes:
+    - unsupported_platform
+    - install_dir_not_writable
+    - install_failed
 side_effects:
   - may_write_global_install_dir
   - must_not_modify_project_workspace
 human_gate:
   required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: not_installed
+redo_from_stage: not_installed

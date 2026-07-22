@@ -10,9 +10,42 @@ required_inputs:
   - version
 optional_inputs:
   - install_dir
+input:
+  source:
+    type: string
+    required: true
+  version:
+    type: string
+    required: true
+  install_dir:
+    type: string
+    required: false
+preconditions:
+  - source_must_exist
+  - version_must_be_explicit
+  - install_dir_must_be_writable
+output:
+  asset_version:
+    type: string
+  assets_dir:
+    type: string
+  current:
+    type: string
+  next_action:
+    type: string
+failure:
+  codes:
+    - missing_source
+    - missing_asset_version
+    - assets_install_failed
 side_effects:
   - may_write_global_install_dir
   - must_not_modify_project_workspace
   - must_not_modify_business_repo
 human_gate:
   required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: installed
+redo_from_stage: installed

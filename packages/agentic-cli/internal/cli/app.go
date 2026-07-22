@@ -10,6 +10,7 @@ import (
 
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/assets"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/config"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/contract"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/evidence"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/feedback"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
@@ -52,6 +53,10 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	case "assets":
 		if len(args) >= 2 && args[1] == "install" {
 			return runAssetsInstall(args, stdout)
+		}
+	case "contract":
+		if len(args) >= 2 && args[1] == "validate" {
+			return runContractValidate(args, stdout)
 		}
 	case "list-tasks":
 		return runListTasks(args, stdout)
@@ -118,6 +123,7 @@ func runAgentInit(args []string, stdout io.Writer) int {
 		"capabilities": []string{
 			"preflight",
 			"assets_install",
+			"contract_validate",
 			"workspace_init",
 			"list_tasks",
 			"takeover_task",
@@ -157,6 +163,55 @@ func runListTasks(args []string, stdout io.Writer) int {
 		"workspace":   workspaceName,
 		"tasks":       issues,
 		"next_action": "takeover_task",
+	}))
+}
+
+func runContractValidate(args []string, stdout io.Writer) int {
+	root, err := repoRoot()
+	if err != nil {
+		return writeJSON(stdout, output.Failure("contract_validate", "repo_root_not_found", "未找到仓库根目录", "请在 AgenticOps 仓库内运行"))
+	}
+	paths, err := filepath.Glob(filepath.Join(root, "contracts", "operations", "*.yaml"))
+	if err != nil {
+		return writeJSON(stdout, output.Failure("contract_validate", "contract_glob_failed", err.Error(), "请检查 contracts/operations 目录"))
+	}
+	if len(paths) == 0 {
+		return writeJSON(stdout, output.Failure("contract_validate", "contract_not_found", "未找到 operation contract", "请检查 contracts/operations 目录"))
+	}
+	var allIssues []map[string]any
+	for _, path := range paths {
+		op, err := contract.LoadFile(path)
+		if err != nil {
+			allIssues = append(allIssues, map[string]any{
+				"path":    path,
+				"code":    "contract_load_failed",
+				"message": err.Error(),
+			})
+			continue
+		}
+		for _, issue := range contract.Validate(op) {
+			allIssues = append(allIssues, map[string]any{
+				"path":      path,
+				"operation": op.Operation,
+				"code":      issue.Code,
+				"message":   issue.Message,
+			})
+		}
+	}
+	if len(allIssues) > 0 {
+		return writeJSON(stdout, output.FailureWithContext("contract_validate", output.FailureContext{
+			Code:                "contract_validation_failed",
+			Message:             "operation contract validation failed",
+			RequiredHumanAction: "请修复 contracts/operations 中的契约字段",
+			TaskType:            "contract_validation",
+			CurrentStage:        "contract_validation",
+			NextAction:          "fix_contracts",
+		}))
+	}
+	return writeJSON(stdout, output.Success("contract_validate", map[string]any{
+		"contracts":   len(paths),
+		"issues":      0,
+		"next_action": "continue",
 	}))
 }
 
@@ -355,4 +410,23 @@ func workspaceRoot() (string, error) {
 		return root, nil
 	}
 	return os.Getwd()
+}
+
+func repoRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			if _, err := os.Stat(filepath.Join(dir, "contracts", "operations")); err == nil {
+				return dir, nil
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", os.ErrNotExist
+		}
+		dir = parent
+	}
 }

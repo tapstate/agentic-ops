@@ -39,10 +39,11 @@ agentic-cli policy rollback --workspace <name>
 
 ## 3. 实施任务
 
-- [ ] **Task 0: 架构适配性复核**
+- [x] **Task 0: 架构适配性复核**
   - 复核 `docs/runtime/problem-resolution-and-update.md` 中的架构适配性评估。
   - 确认正式使用前不依赖历史 `rd-agentic` / `td-agentic` 项目作为事实源。
   - 确认所有设计、计划、目标都以当前 `agentic-ops` 仓库文档为准。
+  - Implementation note: 用户已决策采用完整设计作为当前必须实现边界；实现顺序从 `docs/architecture/full-design-implementation-design.md` 和 `plans/full-design-implementation-plan-v1.md` 开始，先完成机器可读 Operation Contract 验证基线，再继续 profile、Jira ownership gate、problem resolution commands 和完成清理。
 
 - [x] **Task 1: 稳定错误码与事件模型**
   - 为四类问题定义稳定 `code`。

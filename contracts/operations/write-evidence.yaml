@@ -9,8 +9,47 @@ allowed_stages:
 required_inputs:
   - workspace
   - run_id
+input:
+  workspace:
+    type: string
+    required: true
+  run_id:
+    type: string
+    required: true
+preconditions:
+  - run_must_exist
+  - current_user_must_match_owner
+  - current_agent_id_must_match_agent_id
+  - evidence_template_must_exist
+  - policy_must_allow_evidence_write
+output:
+  workspace:
+    type: string
+  run_id:
+    type: string
+  evidence:
+    type: string
+  current_stage:
+    type: string
+  next_action:
+    type: string
+failure:
+  codes:
+    - missing_run_id
+    - run_not_found
+    - assignee_changed
+    - agent_ownership_conflict
+    - evidence_template_missing
+    - policy_gate_required
+    - write_failed
+    - event_write_failed
 side_effects:
   - may_write_jira_comment
   - may_write_local_event
 human_gate:
   required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: takeover_started
+redo_from_stage: takeover_started

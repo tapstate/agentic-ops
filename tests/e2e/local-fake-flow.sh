@@ -13,6 +13,7 @@ install_root="$workspace_root/install"
 
 $cmd --version | grep '"operation":"version"'
 $cmd assets install --source assets --install-dir "$install_root" --version RES-v0.1.1-a68372d | grep '"operation":"assets_install"'
+$cmd contract validate | grep '"operation":"contract_validate"'
 $cmd preflight --workspace tapstate | grep '"operation":"preflight"'
 $cmd workspace init --workspace tapstate | grep '"operation":"workspace_init"'
 $cmd agent init --workspace tapstate | grep '"operation":"agent_init"'
