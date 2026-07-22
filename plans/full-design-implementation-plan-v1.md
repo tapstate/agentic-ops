@@ -1082,10 +1082,23 @@ Default `doctor` keeps local checks and does not access external Jira or GitHub 
 
 `doctor --check-github` runs the GitHub CLI auth check and reports failed status when authentication is unavailable.
 
-## 10. Later Phases
+## 10. GitHub Release Publish Baseline
+
+- [x] **Step 1: Add publish script**
+
+Added `scripts/publish-release.sh <release_dir>` to publish a generated release directory through GitHub CLI.
+
+- [x] **Step 2: Create or update GitHub Release**
+
+The script checks whether the release already exists, creates it when absent, or uploads assets with `--clobber` when present.
+
+- [x] **Step 3: Verify publish flow without network**
+
+`scripts/test-build-release.sh` uses a fake `gh` binary to verify the publish command shape and release asset set without contacting GitHub.
+
+## 11. Later Phases
 
 - Later Phase 3: profile-driven Jira transition id/name mapping.
-- Later Phase 4: real release publishing.
 - Phase 5: completion cleanup and problem-resolution e2e.
 
 Do not start later phases until Phase 1 contract/schema baseline is passing and committed.

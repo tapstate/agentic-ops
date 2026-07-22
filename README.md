@@ -167,7 +167,7 @@ STATE-vMAJOR.ITERATION.COMMIT_INDEX-COMMIT
 
 迭代开始时维护者只需要打一次 `vMAJOR.ITERATION` tag，例如 `v0.1`。`scripts/build.sh` 和 `scripts/release.sh` 都不接受手工指定完整版本号；脚本会从最近的迭代 tag 自动计算提交序号，并使用当前 Git short commit 生成版本。资产版本号固定跟随 release version，也不能手工指定，避免发版人为输入错误。
 
-`scripts/release.sh` 当前只在 `dist/release/<version>/` 生成二进制包、资产包、checksum 和 manifest，不会创建 GitHub Release，也不会推送任何内容。项目采用 latest-only 支持策略：BUG 只在最新版本修复，有新版本时推荐自动更新应用，不维护旧版本补丁线。
+`scripts/release.sh` 在 `dist/release/<version>/` 生成二进制包、资产包、checksum 和 manifest；`scripts/publish-release.sh <release_dir>` 使用 GitHub CLI 创建或更新 GitHub Release 并上传这些产物。项目采用 latest-only 支持策略：BUG 只在最新版本修复，有新版本时推荐自动更新应用，不维护旧版本补丁线。
 
 ## 工作目录约定
 
