@@ -769,10 +769,72 @@ bash tests/e2e/local-fake-flow.sh
 
 Expected: all commands exit 0.
 
+### Task 13: Update Check / Apply Local Manifest Baseline
+
+Scope:
+
+- Create: `packages/agentic-cli/internal/update/manifest.go`
+- Create: `packages/agentic-cli/internal/update/manifest_test.go`
+- Update: `packages/agentic-cli/internal/cli/app.go`
+- Update: `packages/agentic-cli/internal/cli/app_test.go`
+- Create: `contracts/operations/update-check.yaml`
+- Create: `contracts/operations/update-apply.yaml`
+- Update: `docs/contracts/operation-contract.md`
+- Update: `docs/runtime/problem-resolution-and-update.md`
+- Update: `tests/e2e/local-fake-flow.sh`
+
+Definition:
+
+- Add `update check --manifest <path>`.
+- Add `update apply --manifest <path> --install-dir <dir>`.
+- Local manifest mode reads a local release manifest and does not download remote artifacts.
+- `check` returns `update_available`, `severity`, `reason`, `blocked_operations` and `next_action`.
+- `apply` writes `current.json` in the install dir and preserves previous `agentic_cli_version` / `asset_version`.
+- This is the local manifest baseline; it does not claim remote self-update, checksum validation, artifact download or real binary replacement.
+
+- [x] **Step 1: Write failing update package tests**
+
+Cover:
+
+- required update reports `blocked_operations`.
+- same version reports no update.
+- apply writes `current.json` and preserves previous versions.
+
+Expected: FAIL because the update package does not exist.
+
+- [x] **Step 2: Implement update manifest check/apply**
+
+Add manifest loading, version comparison by exact string, severity defaulting and current.json writing.
+
+- [x] **Step 3: Write failing CLI route test**
+
+Assert `update check` and `update apply` use a local manifest and return structured JSON.
+
+Expected: FAIL because the CLI routes do not exist.
+
+- [x] **Step 4: Implement CLI routes and capabilities**
+
+Add `update_check` and `update_apply` to `agent init` capabilities.
+
+- [x] **Step 5: Add operation contracts and e2e coverage**
+
+`contract validate` must include update contracts. Local fake flow must run check/apply against a temporary manifest.
+
+- [x] **Step 6: Verification**
+
+Run:
+
+```sh
+go test ./...
+bash tests/e2e/local-fake-flow.sh
+```
+
+Expected: all commands exit 0.
+
 ## 7. Later Phases
 
 - Later Phase 3: real Jira adapter and Jira-side `current_agent_id` writeback / cleanup.
-- Later Phase 4: update check/apply, policy validate/update/rollback and real external doctor checks.
+- Later Phase 4: remote update manifest/artifact handling, policy validate/update/rollback and real external doctor checks.
 - Phase 5: completion cleanup and problem-resolution e2e.
 
 Do not start later phases until Phase 1 contract/schema baseline is passing and committed.

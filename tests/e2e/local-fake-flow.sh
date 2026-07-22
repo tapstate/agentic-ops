@@ -13,6 +13,18 @@ install_root="$workspace_root/install"
 
 $cmd --version | grep '"operation":"version"'
 $cmd assets install --source assets --install-dir "$install_root" --version RES-v0.1.1-a68372d | grep '"operation":"assets_install"'
+update_manifest="$workspace_root/update-manifest.json"
+cat > "$update_manifest" <<'JSON'
+{
+  "version": "RES-v0.1.20-deadbee",
+  "asset_version": "RES-v0.1.20-deadbee",
+  "severity": "required",
+  "reason": "takeover_task may write invalid evidence",
+  "blocked_operations": ["takeover_task"]
+}
+JSON
+$cmd update check --manifest "$update_manifest" | grep '"severity":"required"'
+$cmd update apply --manifest "$update_manifest" --install-dir "$install_root" | grep '"operation":"update_apply"'
 $cmd contract validate | grep '"operation":"contract_validate"'
 $cmd profile validate --workspace tapstate | grep '"operation":"profile_validate"'
 profile_source="$workspace_root/tapstate-profile-hotfix.yaml"

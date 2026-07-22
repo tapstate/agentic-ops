@@ -17,6 +17,7 @@ import (
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/output"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/update"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/workspace"
 )
 
@@ -57,6 +58,13 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	case "assets":
 		if len(args) >= 2 && args[1] == "install" {
 			return runAssetsInstall(args, stdout)
+		}
+	case "update":
+		if len(args) >= 2 && args[1] == "check" {
+			return runUpdateCheck(args, stdout)
+		}
+		if len(args) >= 2 && args[1] == "apply" {
+			return runUpdateApply(args, stdout)
 		}
 	case "contract":
 		if len(args) >= 2 && args[1] == "validate" {
@@ -178,6 +186,8 @@ func runAgentInit(args []string, stdout io.Writer) int {
 			"preflight",
 			"doctor",
 			"assets_install",
+			"update_check",
+			"update_apply",
 			"contract_validate",
 			"profile_validate",
 			"profile_update",
@@ -213,6 +223,75 @@ func runAssetsInstall(args []string, stdout io.Writer) int {
 		"assets_dir":    result.AssetsDir,
 		"current":       result.CurrentPath,
 		"next_action":   "agent_init",
+	}))
+}
+
+func runUpdateCheck(args []string, stdout io.Writer) int {
+	manifestPath := readFlag(args, "--manifest", "")
+	if manifestPath == "" {
+		return writeJSON(stdout, output.FailureWithContext("update_check", output.FailureContext{
+			Code:                "missing_manifest",
+			Message:             "缺少 release manifest",
+			RequiredHumanAction: "请提供 --manifest",
+			TaskType:            "update",
+			CurrentStage:        "update_check",
+			NextAction:          "ask_owner",
+		}))
+	}
+	result, err := update.Check(manifestPath, Version)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("update_check", output.FailureContext{
+			Code:                "update_manifest_invalid",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 release manifest 路径和格式",
+			TaskType:            "update",
+			CurrentStage:        "update_check",
+			NextAction:          "fix_manifest",
+		}))
+	}
+	return writeJSON(stdout, output.Success("update_check", map[string]any{
+		"current_version":    result.CurrentVersion,
+		"latest_version":     result.LatestVersion,
+		"asset_version":      result.AssetVersion,
+		"update_available":   result.UpdateAvailable,
+		"severity":           result.Severity,
+		"reason":             result.Reason,
+		"blocked_operations": result.BlockedOperations,
+		"next_action":        result.NextAction,
+	}))
+}
+
+func runUpdateApply(args []string, stdout io.Writer) int {
+	manifestPath := readFlag(args, "--manifest", "")
+	if manifestPath == "" {
+		return writeJSON(stdout, output.FailureWithContext("update_apply", output.FailureContext{
+			Code:                "missing_manifest",
+			Message:             "缺少 release manifest",
+			RequiredHumanAction: "请提供 --manifest",
+			TaskType:            "update",
+			CurrentStage:        "update_apply",
+			NextAction:          "ask_owner",
+		}))
+	}
+	installDir := readInstallDir(args)
+	result, err := update.Apply(manifestPath, installDir)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("update_apply", output.FailureContext{
+			Code:                "update_apply_failed",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 release manifest 和安装目录权限",
+			TaskType:            "update",
+			CurrentStage:        "update_apply",
+			NextAction:          "fix_update_source",
+		}))
+	}
+	return writeJSON(stdout, output.Success("update_apply", map[string]any{
+		"version":                result.AgenticCLIVersion,
+		"asset_version":          result.AssetVersion,
+		"previous_version":       result.PreviousAgenticCLIVersion,
+		"previous_asset_version": result.PreviousAssetVersion,
+		"current":                result.CurrentPath,
+		"next_action":            "doctor",
 	}))
 }
 

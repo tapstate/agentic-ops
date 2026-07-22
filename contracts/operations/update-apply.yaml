@@ -1,0 +1,50 @@
+operation: update_apply
+version: 1
+purpose: 基于本地 release manifest 应用更新，切换本地 current.json 并保留 previous 版本。
+task_type: update
+allowed_stages:
+  - update_required
+  - update_available
+  - update_apply
+required_inputs:
+  - manifest
+optional_inputs:
+  - install_dir
+input:
+  manifest:
+    type: string
+    required: true
+  install_dir:
+    type: string
+    required: false
+preconditions:
+  - release_manifest_must_exist
+  - install_dir_must_be_writable
+output:
+  version:
+    type: string
+  asset_version:
+    type: string
+  previous_version:
+    type: string
+  previous_asset_version:
+    type: string
+  current:
+    type: string
+  next_action:
+    type: string
+failure:
+  codes:
+    - missing_manifest
+    - update_apply_failed
+side_effects:
+  - may_write_global_install_dir
+  - must_not_write_jira
+  - must_not_modify_code
+human_gate:
+  required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: update_check
+redo_from_stage: update_check

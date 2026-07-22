@@ -127,6 +127,48 @@ func TestAssetsInstallCopiesAssetsToInstallDir(t *testing.T) {
 	}
 }
 
+func TestUpdateCheckAndApplyUseLocalManifest(t *testing.T) {
+	dir := t.TempDir()
+	manifestPath := filepath.Join(dir, "manifest.json")
+	installDir := filepath.Join(dir, "install")
+	writeCLITestFile(t, manifestPath, `{
+  "version": "RES-v0.1.20-deadbee",
+  "asset_version": "RES-v0.1.20-deadbee",
+  "severity": "required",
+  "reason": "takeover_task may write invalid evidence",
+  "blocked_operations": ["takeover_task"]
+}
+`)
+
+	var checkStdout bytes.Buffer
+	var checkStderr bytes.Buffer
+	checkCode := Run([]string{"update", "check", "--manifest", manifestPath}, &checkStdout, &checkStderr)
+	if checkCode != 0 {
+		t.Fatalf("checkCode = %d stdout = %s stderr = %s", checkCode, checkStdout.String(), checkStderr.String())
+	}
+	assertJSONField(t, checkStdout.String(), "operation", "update_check")
+	assertJSONField(t, checkStdout.String(), "update_available", true)
+	assertJSONField(t, checkStdout.String(), "severity", "required")
+	assertJSONField(t, checkStdout.String(), "next_action", "update_apply")
+	if !strings.Contains(checkStdout.String(), `"takeover_task"`) {
+		t.Fatalf("check stdout missing blocked operation: %s", checkStdout.String())
+	}
+
+	var applyStdout bytes.Buffer
+	var applyStderr bytes.Buffer
+	applyCode := Run([]string{"update", "apply", "--manifest", manifestPath, "--install-dir", installDir}, &applyStdout, &applyStderr)
+	if applyCode != 0 {
+		t.Fatalf("applyCode = %d stdout = %s stderr = %s", applyCode, applyStdout.String(), applyStderr.String())
+	}
+	assertJSONField(t, applyStdout.String(), "operation", "update_apply")
+	assertJSONField(t, applyStdout.String(), "version", "RES-v0.1.20-deadbee")
+	assertJSONField(t, applyStdout.String(), "asset_version", "RES-v0.1.20-deadbee")
+	assertJSONField(t, applyStdout.String(), "next_action", "doctor")
+	if _, err := os.Stat(filepath.Join(installDir, "current.json")); err != nil {
+		t.Fatalf("current.json missing: %v", err)
+	}
+}
+
 func TestListTasksUsesFakeJira(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

@@ -31,6 +31,8 @@ Operation Contract 必须引用 Standard Process Registry 中的任务分类和�
 | `install` | 安装 AgenticOps 到 `~/.agentic-ops`。 |
 | `doctor` | 输出安装、版本、profile、policy、contract、adapter 和 workspace 的本地诊断结果。 |
 | `assets_install` | 安装或更新 AI 员工手册、契约、profile、policy、runbook 和 template 等运行资产。 |
+| `update_check` | 基于本地 release manifest 检查是否存在可用更新，并返回更新级别和受影响 operation。 |
+| `update_apply` | 基于本地 release manifest 应用更新，切换本地 `current.json` 并保留 previous 版本。 |
 | `contract_validate` | 校验机器可读 Operation Contract 是否满足完整设计基线。 |
 | `profile_validate` | 校验 Workflow Profile 是否能映射标准字段、任务分类、标准流程、状态和 transition。 |
 | `profile_update` | 使用经过校验的本地 source profile 更新当前 workspace profile，并保存可回滚备份。 |

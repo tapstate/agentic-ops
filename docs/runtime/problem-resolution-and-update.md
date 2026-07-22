@@ -383,4 +383,4 @@ asset release
 - `scripts/build.sh`
 - `scripts/release.sh`
 
-本文中的 `update`、`policy update`、真实外部诊断检查和真实 release manifest 仍属于正式使用前必须补齐的目标能力。
+当前 `update check/apply` 已完成本地 manifest 基线，尚未实现远程 manifest 拉取、artifact 下载、checksum 校验或真实二进制切换。本文中的 `policy update`、真实外部诊断检查和真实 release manifest 仍属于正式使用前必须补齐的目标能力。
