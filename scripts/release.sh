@@ -73,11 +73,11 @@ artifact_types=()
 
 for target in $targets; do
   target_name="${target/\//-}"
-  binary="$build_dir/$target_name/agent-task-ops"
-  package="agent-task-ops_${version}_${target_name}.tar.gz"
+  binary="$build_dir/$target_name/agentic-cli"
+  package="agentic-cli_${version}_${target_name}.tar.gz"
   package_path="$release_dir/$package"
 
-  tar -C "$build_dir/$target_name" -czf "$package_path" agent-task-ops
+  tar -C "$build_dir/$target_name" -czf "$package_path" agentic-cli
   printf '%s  %s\n' "$(checksum_file "$package_path")" "$package" >> "$checksums"
 
   artifact_names+=("$package")

@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/cli"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/cli"
 )
 
 func main() {

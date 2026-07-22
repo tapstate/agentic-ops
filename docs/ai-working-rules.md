@@ -29,7 +29,7 @@ AIAgent 做任何结论前必须先找证据。
 
 AIAgent 不得声称以下内容已经存在，除非当前仓库中有文件或命令输出证明：
 
-- `agent-task-ops` 已实现。
+- `agentic-cli` 已实现。
 - `init.sh` 已存在。
 - Operation YAML 已存在。
 - Workflow Profile 可运行。
@@ -78,9 +78,11 @@ AIAgent 必须严格区分：
 允许的工作：
 
 - 维护文档、目录结构、Operation Contract、Workflow Profile、AI 员工手册和 Feedback Loop。
-- 实现 `agent-task-ops` Go CLI 的本地 fake flow。
+- 实现 `agentic-cli` Go CLI 的本地 fake flow。
 - 实现 `scripts/init.sh` 安装 bootstrap。
 - 实现本地单元测试、脚本 smoke test 和 fake flow e2e。
+
+后续在人工确认和 policy 允许后写入 Jira 时，标题、描述、评论、工作日志、evidence 正文、阻塞说明和补卡说明必须使用中文；Jira 字段名、状态名、transition 名称和 issue key 可以保留原始值。
 
 ## 7. 输出纪律
 

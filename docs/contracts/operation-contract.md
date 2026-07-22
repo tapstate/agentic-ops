@@ -6,6 +6,10 @@ Operation Contract 是 AgenticOps 的操作契约层，用于屏蔽 Jira / GitHu
 
 AIAgent 面向 operation 工作，不直接面对 Jira 字段、Jira 状态、Jira transition 或 Jira comment 模板。
 
+Operation Contract 还必须说明每次 operation 如何读取或更新 Task Form Standard 中的标准字段。AIAgent 后续判断 `current_stage`、`next_action`、重试、重做和人工审查时，应以 operation 输出、表单数据和事件记录为准，而不是以聊天上下文为准。
+
+Operation Contract 必须引用 Standard Process Registry 中的任务分类和流程阶段。AIAgent 执行任务前必须先得到 `task_class` 和 `process_id`，再进入对应流程阶段。
+
 ## 2. 契约原则
 
 - 每个 operation 必须有稳定输入、输出、失败码和副作用说明。
@@ -14,6 +18,11 @@ AIAgent 面向 operation 工作，不直接面对 Jira 字段、Jira 状态、Ji
 - CLI stdout 必须输出结构化 JSON。
 - stderr 只输出人类诊断日志。
 - secrets 不得出现在 stdout、stderr 或事件日志中。
+- 写入 Jira 的人可见内容必须使用中文，包括标题、描述、评论、工作日志、evidence 正文、阻塞说明和补卡说明。
+- 每个 operation 必须声明读取或写入哪些标准表单字段。
+- 每个任务执行 operation 必须声明适用的 `task_class`、`process_id` 或阶段范围。
+- 每个 operation 必须声明失败后是否允许重试，或是否要求从某个阶段重做。
+- 每个 operation 都应是成熟固化交互逻辑的原子化入口，不承载尚未稳定的临场流程判断。
 
 ## 3. 第一阶段操作
 
@@ -64,6 +73,8 @@ input:
 
 preconditions:
   - current_user_must_match_owner
+  - current_agent_id_must_be_empty_or_match_agent_id
+  - task_class_must_be_mapped_to_standard_process
   - issue_must_be_in_allowed_project
   - issue_must_have_acceptance_criteria
   - issue_must_have_target_repo
@@ -84,11 +95,32 @@ output:
       - proceed
       - ask_owner
       - blocked
+  form_updates:
+    type: object
+    fields:
+      - run_id
+      - agent_id
+      - current_agent_id
+      - takeover_at
+      - task_type
+      - task_class
+      - process_id
+      - current_stage
+      - next_action
+  retry_policy:
+    type: object
+    required: false
+  redo_from_stage:
+    type: string
+    required: false
 
 failure:
   code:
     enum:
       - owner_mismatch
+      - assignee_mismatch
+      - agent_ownership_conflict
+      - task_class_mapping_gap
       - missing_acceptance_criteria
       - missing_target_repo
       - missing_permission
@@ -136,6 +168,8 @@ human_gate:
 - `task_type`
 - `current_stage`
 - `next_action`
+- `retryable`
+- `redo_from_stage`
 
 ## 6. 副作用规则
 
@@ -144,7 +178,9 @@ Operation 必须明确副作用：
 - 是否写 Jira。
 - 是否写 PR。
 - 是否写本地事件日志。
-- 事件日志必须能记录 `agent_task_ops_version`、`version_state`、`asset_version`、`code`、`gate` 和 `gate_status`。
+- 事件日志必须能记录 `agentic_cli_version`、`version_state`、`asset_version`、`code`、`gate` 和 `gate_status`。
+- 事件日志必须能记录 `agent_id`、`current_agent_id`、`task_class`、`process_id` 和 `current_agent_id_cleared`。
+- 写入 Jira 的标题、描述、评论、工作日志、evidence 正文、阻塞说明和补卡说明必须使用中文。
 - 是否修改代码。
 - 是否创建 commit。
 - 是否 push。

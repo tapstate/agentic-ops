@@ -29,7 +29,7 @@ AGENTIC_OPS_COMMIT_INDEX="$commit_index" \
 AGENTIC_OPS_COMMIT="$auto_commit" \
   bash scripts/build.sh
 
-auto_binary="$tmp_dir/auto-build/$auto_dev_version/${target/\//-}/agent-task-ops"
+auto_binary="$tmp_dir/auto-build/$auto_dev_version/${target/\//-}/agentic-cli"
 test -x "$auto_binary"
 "$auto_binary" --version | grep "\"version\":\"$auto_dev_version\""
 "$auto_binary" --version | grep '"version_state":"DEV"'
@@ -78,7 +78,7 @@ AGENTIC_OPS_COMMIT="$current_commit" \
   bash scripts/build.sh
 
 target_name="${target/\//-}"
-binary="$tmp_dir/build/$dev_version/$target_name/agent-task-ops"
+binary="$tmp_dir/build/$dev_version/$target_name/agentic-cli"
 
 test -x "$binary"
 "$binary" --version | grep "\"version\":\"$dev_version\""
@@ -110,7 +110,7 @@ AGENTIC_OPS_COMMIT="$current_commit" \
 
 release_dir="$tmp_dir/release/$release_version"
 
-test -f "$release_dir/agent-task-ops_${release_version}_${target_name}.tar.gz"
+test -f "$release_dir/agentic-cli_${release_version}_${target_name}.tar.gz"
 test -f "$release_dir/agentic-ops-assets_${release_version}.tar.gz"
 test -f "$release_dir/checksums.txt"
 test -f "$release_dir/manifest.json"
@@ -118,11 +118,11 @@ test -f "$release_dir/manifest.json"
 tar -tzf "$release_dir/agentic-ops-assets_${release_version}.tar.gz" | grep '^assets/manifest.json$'
 release_binary_dir="$tmp_dir/release-binary"
 mkdir -p "$release_binary_dir"
-tar -xzf "$release_dir/agent-task-ops_${release_version}_${target_name}.tar.gz" -C "$release_binary_dir"
-"$release_binary_dir/agent-task-ops" --version | grep "\"version\":\"$release_version\""
-"$release_binary_dir/agent-task-ops" --version | grep '"version_state":"RES"'
-"$release_binary_dir/agent-task-ops" --version | grep "\"iteration_version\":\"$iteration_version\""
-"$release_binary_dir/agent-task-ops" --version | grep '"commit_index":8'
+tar -xzf "$release_dir/agentic-cli_${release_version}_${target_name}.tar.gz" -C "$release_binary_dir"
+"$release_binary_dir/agentic-cli" --version | grep "\"version\":\"$release_version\""
+"$release_binary_dir/agentic-cli" --version | grep '"version_state":"RES"'
+"$release_binary_dir/agentic-cli" --version | grep "\"iteration_version\":\"$iteration_version\""
+"$release_binary_dir/agentic-cli" --version | grep '"commit_index":8'
 grep "\"version\":\"$release_version\"" "$release_dir/manifest.json"
 grep "\"asset_version\":\"$release_version\"" "$release_dir/manifest.json"
 grep '"version_state":"RES"' "$release_dir/manifest.json"
@@ -143,7 +143,7 @@ AGENTIC_OPS_COMMIT="$current_commit" \
 
 env_release_dir="$tmp_dir/env-release/$env_release_version"
 
-test -f "$env_release_dir/agent-task-ops_${env_release_version}_${target_name}.tar.gz"
+test -f "$env_release_dir/agentic-cli_${env_release_version}_${target_name}.tar.gz"
 test -f "$env_release_dir/agentic-ops-assets_${env_release_version}.tar.gz"
 grep "\"version\":\"$env_release_version\"" "$env_release_dir/manifest.json"
 grep "\"asset_version\":\"$env_release_version\"" "$env_release_dir/manifest.json"
@@ -194,7 +194,7 @@ AGENTIC_OPS_COMMIT="$current_commit" \
 
 prompt_release_dir="$tmp_dir/prompt-release/$prompt_version"
 
-test -f "$prompt_release_dir/agent-task-ops_${prompt_version}_${target_name}.tar.gz"
+test -f "$prompt_release_dir/agentic-cli_${prompt_version}_${target_name}.tar.gz"
 test -f "$prompt_release_dir/agentic-ops-assets_${prompt_version}.tar.gz"
 grep "\"version\":\"$prompt_version\"" "$prompt_release_dir/manifest.json"
 grep "\"asset_version\":\"$prompt_version\"" "$prompt_release_dir/manifest.json"

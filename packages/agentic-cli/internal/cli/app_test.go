@@ -139,7 +139,7 @@ func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 	if !strings.Contains(string(events), `"operation":"takeover_task"`) {
 		t.Fatalf("events = %s", string(events))
 	}
-	if !strings.Contains(string(events), `"agent_task_ops_version":"SRC-source"`) {
+	if !strings.Contains(string(events), `"agentic_cli_version":"SRC-source"`) {
 		t.Fatalf("events = %s", string(events))
 	}
 	if !strings.Contains(string(events), `"version_state":"SRC"`) {

@@ -9,9 +9,9 @@ import (
 )
 
 type Current struct {
-	AgentTaskOpsVersion         string `json:"agent_task_ops_version,omitempty"`
+	AgentTaskOpsVersion         string `json:"agentic_cli_version,omitempty"`
 	AssetVersion                string `json:"asset_version"`
-	PreviousAgentTaskOpsVersion string `json:"previous_agent_task_ops_version,omitempty"`
+	PreviousAgentTaskOpsVersion string `json:"previous_agentic_cli_version,omitempty"`
 	PreviousAssetVersion        string `json:"previous_asset_version,omitempty"`
 }
 

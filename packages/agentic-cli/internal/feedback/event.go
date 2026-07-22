@@ -16,7 +16,7 @@ type Event struct {
 	Workspace           string `json:"workspace"`
 	RunID               string `json:"run_id"`
 	IssueKey            string `json:"issue_key,omitempty"`
-	AgentTaskOpsVersion string `json:"agent_task_ops_version"`
+	AgentTaskOpsVersion string `json:"agentic_cli_version"`
 	VersionState        string `json:"version_state"`
 	AssetVersion        string `json:"asset_version"`
 	TaskType            string `json:"task_type"`

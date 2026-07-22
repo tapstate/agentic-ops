@@ -42,7 +42,7 @@ func TestAppendEventWritesNDJSON(t *testing.T) {
 	if !strings.Contains(string(data), `"current_stage":"takeover_gate"`) {
 		t.Fatalf("event = %s", string(data))
 	}
-	if !strings.Contains(string(data), `"agent_task_ops_version":"DEV-v0.1.1-abc1234"`) {
+	if !strings.Contains(string(data), `"agentic_cli_version":"DEV-v0.1.1-abc1234"`) {
 		t.Fatalf("event = %s", string(data))
 	}
 	if !strings.Contains(string(data), `"asset_version":"RES-v0.1.1-abc1234"`) {

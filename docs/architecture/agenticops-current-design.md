@@ -2,16 +2,16 @@
 
 ## 1. 定位
 
-AgenticOps 是把公司事务处理方式沉淀成 AI 可执行标准流程的 AI 执行控制体系。
+AgenticOps 是把公司员工执行标准沉淀成 AI 可执行标准流程的 AI 执行控制体系。
 
 第一阶段先落地研发 Jira 任务：帮助研发操作 AIAgent 从 Jira 接管任务到完成任务。AgenticOps 不替代 Jira、不替代研发 owner、不替代 PR Review，也不以全自动开发为第一阶段目标。它的核心价值是把 AI 员工从临时聊天助手变成流程内可管理、可追踪、可复盘的执行主体。
 
-不同任务会涉及不同流程，例如新任务接管、恢复接管、PR comments 修复、阻塞上报和工作日志上报。AgenticOps 通过 Operation Contract 和 Workflow Profile 选择流程，通过事件日志、`run_id`、evidence 和 feedback report 记录执行过程，并把关键状态、关键信息和证据回写到 Jira、PR 或项目 AI 工作空间，用于后续分析和优化。
+不同任务会涉及不同流程，例如新任务接管、恢复接管、PR comments 修复、阻塞上报和工作日志上报。AgenticOps 通过 Operation Contract 和 Workflow Profile 选择流程，通过 Task Form Standard、事件日志、`run_id`、evidence 和 feedback report 记录执行过程，并把关键状态、关键信息、表单数据和证据回写到 Jira、PR 或项目 AI 工作空间，用于后续分析和优化。
 
 一句话定义：
 
 ```text
-AgenticOps = AI 员工手册 + 项目规则 + AIAgent 工作规则 + Operation Contract + Workflow Profile + Policy / Gate + Runbook + Templates + Go CLI Runtime + Evidence / Feedback Loop
+AgenticOps = AI 员工手册 + 项目规则 + AIAgent 工作规则 + Operation Contract + Task Form Standard + Workflow Profile + Policy / Gate + Runbook + Templates + Go CLI Runtime + Evidence / Feedback Loop
 ```
 
 ## 2. 设计目标
@@ -44,7 +44,12 @@ Jira issue 已进入迭代
 - AIAgent 可以推进研发阶段，但不能绕过 workflow profile、gate 和人工确认点。
 - 控制规范不能只靠提示词；提示词负责指导，Go CLI Runtime 负责强制检查和结构化输出。
 - 每次执行都必须产生可聚合记录，关键状态和信息必须回写到对应事实源或项目 AI 工作空间。
-- 除非问题来自 `agent-task-ops` 二进制逻辑错误，否则 AIAgent 应优先通过标准资产自助处理、阻断或转人工。
+- 每个流程节点必须有可解释的标准动作、表单输出、审查结论和下一步规则。
+- 不同专业角色在对应节点审查任务结果，以专业知识判断产出是否合格，以及流程标准是否需要优化。
+- AIAgent 必须基于表单数据、事件记录、失败码和 gate 判断重试、重做、继续或停止，不能只依赖聊天上下文。
+- 框架只稳定定义大的流程环节、门禁和演进边界；成熟固化的交互逻辑才下沉为原子化 operation，脚本入口只做受控编排或调用。
+- AIAgent 在具体环节内执行任务并沉淀经验；周期性复盘把高频经验和失败模式转化为标准资产改进建议。
+- 除非问题来自 `agentic-cli` 二进制逻辑错误，否则 AIAgent 应优先通过标准资产自助处理、阻断或转人工。
 
 ## 4. 仓库与运行边界
 
@@ -62,7 +67,7 @@ contracts/     Operation Contract 和 schema
 skills/        AgenticOps skills 和 AI 员工工作规则
 handbooks/     AI 员工手册
 profiles/      workflow profile 示例和默认配置
-packages/      agent-task-ops Go CLI runtime
+packages/      agentic-cli Go CLI runtime
 templates/     Jira / PR / evidence 模板
 examples/      端到端演示样例
 tests/         自动化测试
@@ -242,16 +247,21 @@ side_effects:
 
 AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira workflow。
 
+Task Form Standard 定义 AI 操作任务从创建到完成所需的标准字段和生命周期要求。AIAgent 面向这些标准字段工作，不直接以 Jira custom field、描述段落或 workflow 状态为判断依据。
+
 Workflow Profile 负责把 Operation Contract 映射到具体团队流程：
 
 - Jira base URL、project、issue type、JQL。
-- Jira 字段映射，例如 owner、sprint、acceptance criteria、target repo、risk。
+- Jira Form Mapping，例如把 owner、sprint、acceptance criteria、target repo、risk 等 AgenticOps 标准字段映射到具体 Jira 字段、描述模板或 workspace 配置。
 - Jira 状态和 transition 映射。
+- 专业审查节点映射，例如研发 owner 确认、PR reviewer 退回、QA 验证、运维或安全审批。
 - GitHub organization、repo 映射。
 - 本地项目 AI 工作空间路径。
 - 允许的写操作。
 - 人工确认点。
 - evidence 模板。
+
+不同 Jira 工作流对接时应先通过 Jira Form Mapping 适配 AgenticOps 标准。不符合标准的地方记录 gap 并请求人工决策，不能让 AIAgent 直接猜测。Profile 还必须说明哪些节点允许重试、哪些节点必须重做前序表单，以及哪些审查结论会把 `next_action` 置为 `ask_owner`、`fix_and_verify`、`redo_previous_stage` 或 `blocked`。
 
 TapData / TapState 的方案 C 是第一套默认 profile，但不能硬编码进核心模型。
 
@@ -264,9 +274,9 @@ shell 只用于 `curl | bash` 安装引导。业务逻辑、operation、policy�
 推荐形态：
 
 ```text
-packages/agent-task-ops/
+packages/agentic-cli/
   cmd/
-    agent-task-ops/
+    agentic-cli/
   internal/
     cli/
     config/
@@ -285,10 +295,10 @@ Operation Contract 的机器可读源头在仓库顶层 `contracts/operations/`�
 AIAgent 始终调用统一入口：
 
 ```sh
-agent-task-ops list-tasks --workspace tapstate
-agent-task-ops takeover-task TAP-123 --workspace tapstate
-agent-task-ops write-evidence --run-id ...
-agent-task-ops prepare-pr --run-id ...
+agentic-cli list-tasks --workspace tapstate
+agentic-cli takeover-task TAP-123 --workspace tapstate
+agentic-cli write-evidence --run-id ...
+agentic-cli prepare-pr --run-id ...
 ```
 
 Go CLI Runtime 的要求：
@@ -311,9 +321,9 @@ linux-amd64
 linux-arm64
 ```
 
-安装 bootstrap 允许依赖 `bash`、`curl` 和系统解压工具。`agent-task-ops` 运行时不得依赖 `jq` 或本地 Python 环境。
+安装 bootstrap 允许依赖 `bash`、`curl` 和系统解压工具。`agentic-cli` 运行时不得依赖 `jq` 或本地 Python 环境。
 
-`agent-task-ops preflight` 应检查 OS、CPU 架构、GitHub CLI、GitHub 登录状态、Jira 凭证、workspace profile 和当前业务仓库匹配关系。
+`agentic-cli preflight` 应检查 OS、CPU 架构、GitHub CLI、GitHub 登录状态、Jira 凭证、workspace profile 和当前业务仓库匹配关系。
 
 ## 10. Git 和 GitHub 边界
 
@@ -418,10 +428,10 @@ Go CLI 执行 operation
 建议提供反馈命令：
 
 ```sh
-agent-task-ops feedback collect --workspace tapstate --date 2026-07-21
-agent-task-ops feedback analyze --workspace tapstate --date 2026-07-21
-agent-task-ops feedback report --workspace tapstate --date 2026-07-21
-agent-task-ops feedback propose --workspace tapstate --date 2026-07-21
+agentic-cli feedback collect --workspace tapstate --date 2026-07-21
+agentic-cli feedback analyze --workspace tapstate --date 2026-07-21
+agentic-cli feedback report --workspace tapstate --date 2026-07-21
+agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 ```
 
 反馈进入 AgenticOps 源头规则前必须经过：
@@ -460,16 +470,16 @@ curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
 项目 AI 工作空间初始化：
 
 ```sh
-agent-task-ops workspace init --workspace tapstate
+agentic-cli workspace init --workspace tapstate
 ```
 
 典型使用：
 
 ```sh
-agent-task-ops preflight --workspace tapstate
-agent-task-ops list-tasks --workspace tapstate
-agent-task-ops takeover-task TAP-123 --workspace tapstate
-agent-task-ops write-evidence --run-id ...
+agentic-cli preflight --workspace tapstate
+agentic-cli list-tasks --workspace tapstate
+agentic-cli takeover-task TAP-123 --workspace tapstate
+agentic-cli write-evidence --run-id ...
 ```
 
 以上命令是第一阶段本地 fake flow 的当前 CLI 接口；真实 Jira / GitHub 写操作仍未接入。
@@ -488,7 +498,7 @@ agent-task-ops write-evidence --run-id ...
 - AI 员工手册：`handbooks/ai-employee-handbook.md`。
 - Operation Contract 文档：`docs/contracts/operation-contract.md`。
 - TapData / TapState workflow profile 草案：`docs/profiles/workflow-profile.md`。
-- Go `agent-task-ops` CLI Runtime 设计：`docs/runtime/cli-runtime.md`。
+- Go `agentic-cli` CLI Runtime 设计：`docs/runtime/cli-runtime.md`。
 - Jira / GitHub / Git 关键操作 guard 设计：`docs/runtime/cli-runtime.md`。
 - Evidence templates 设计：`docs/templates/evidence-templates.md`。
 - Feedback Loop 事件日志规范和日报命令：`docs/workflows/feedback-loop.md`。

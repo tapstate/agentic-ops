@@ -4,7 +4,7 @@
 
 本文定义 AgenticOps 正式使用前必须具备的问题修复路径。
 
-研发日常使用的是安装后的 `agent-task-ops`、AI 员工手册、operation contracts、workflow profiles、policies、runbooks 和 templates。项目出现问题时，AgenticOps 必须能快速判断问题类型，选择正确修复载体，完成验证、发布、同步和回滚。
+研发日常使用的是安装后的 `agentic-cli`、AI 员工手册、operation contracts、workflow profiles、policies、runbooks 和 templates。项目出现问题时，AgenticOps 必须能快速判断问题类型，选择正确修复载体，完成验证、发布、同步和回滚。
 
 当前仓库已实现本地资产安装和本地 release 打包的最小能力，尚未实现完整发布、自更新、诊断包和 profile / policy 热更新能力。本文是正式使用前的目标设计和验收基线。
 
@@ -14,7 +14,7 @@
 
 | 架构部分 | 当前状态 | 适配性判断 | 必须补齐的能力 |
 | --- | --- | --- | --- |
-| Go CLI Runtime | 已有 `agent-task-ops` 本地 fake flow | 适合承载强制检查、结构化输出、诊断、更新和回滚 | version manifest、update、doctor、诊断包、真实 adapter 合同测试 |
+| Go CLI Runtime | 已有 `agentic-cli` 本地 fake flow | 适合承载强制检查、结构化输出、诊断、更新和回滚 | version manifest、update、doctor、诊断包、真实 adapter 合同测试 |
 | Operation Contract | 已有文档和第一阶段 YAML 子集 | 适合沉淀标准操作输入输出和失败码 | contract schema、contract validate、operation 兼容性版本 |
 | Workflow Profile | 已有设计文档 | 适合处理不同团队和 Jira workflow 差异 | profile 文件源头、validate / update / rollback、status / transition / field mapping |
 | Policy / Gate | 已有代码雏形和规则文档 | 适合控制关键步骤门禁 | policy package、validate / update / rollback、gate 变更审计 |
@@ -26,7 +26,7 @@
 
 - 当前架构方向适配“渐进形成公司标准流程”和“快速修复上线”两个目标。
 - 最大缺口不在目录结构，而在正式使用前缺少版本化资产、自更新、回滚、诊断包、profile / policy 热更新和合同验证。
-- 修复能力应优先作为 `agent-task-ops` 的一组受控 operation 实现，而不是分散在 shell 脚本、人工说明或提示词中。
+- 修复能力应优先作为 `agentic-cli` 的一组受控 operation 实现，而不是分散在 shell 脚本、人工说明或提示词中。
 
 ## 3. 设计目标
 
@@ -61,7 +61,7 @@
 - 不把 secrets、tokens、private keys、原始 Jira 描述、敏感代码片段写入诊断包。
 - 不让 AIAgent 猜 Jira 字段、状态或 workflow。
 - 不让 AIAgent 未经人工确认自动修改全局规范、profile 或 policy。
-- 不把标准资产不完善的问题误判为 `agent-task-ops` 二进制问题。
+- 不把标准资产不完善的问题误判为 `agentic-cli` 二进制问题。
 - 不把所有问题都升级成二进制发布；能通过 profile / policy / template 修复的问题优先走资产包。
 - 不维护旧版本补丁线；BUG 只在最新版本修复，有新版本时推荐自动更新应用。
 - 任何放宽门禁、真实 Jira 写操作、Git push、PR、merge 和发布都必须可审计、可回滚。
@@ -70,7 +70,7 @@
 
 | 问题类型 | 典型表现 | 修复载体 | 同步方式 |
 | --- | --- | --- | --- |
-| `agent-task-ops` 逻辑错误 | 命令输出错误、run_id 生成错误、事件写入错误、adapter 行为错误 | Go CLI 二进制 | 发布最新版本 + `update apply` |
+| `agentic-cli` 逻辑错误 | 命令输出错误、run_id 生成错误、事件写入错误、adapter 行为错误 | Go CLI 二进制 | 发布最新版本 + `update apply` |
 | Jira 流程状态没适配 | 未知 Jira status / transition、状态映射失败、项目 workflow 差异 | workflow profile / adapter mapping | asset update + `profile update` |
 | Jira 卡片属性丢失 | 缺少 owner、验收标准、目标仓库、验证方式、风险等级 | gate failure + 补全模板 / field mapping | 阻断接管 + 人工补卡或 profile 修复 |
 | 关键步骤门禁调整 | push / PR / Jira comment / scope change 的确认要求变化 | policy package | policy update + review + rollback |
@@ -83,7 +83,7 @@
 ```json
 {
   "workspace": "tapstate",
-  "agent_task_ops_version": "RES-v0.1.3-a68372d",
+  "agentic_cli_version": "RES-v0.1.3-a68372d",
   "version_state": "RES",
   "asset_version": "RES-v0.1.3-a68372d",
   "operation": "takeover_task",
@@ -99,8 +99,8 @@
 正式使用前应实现目标命令：
 
 ```sh
-agent-task-ops doctor --workspace tapstate
-agent-task-ops feedback bundle --workspace tapstate --run-id <run_id> --redact
+agentic-cli doctor --workspace tapstate
+agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
 ```
 
 `doctor` 用于判断安装、版本、profile、policy、Jira / GitHub 凭证和 workspace 是否一致。  
@@ -111,7 +111,7 @@ agent-task-ops feedback bundle --workspace tapstate --run-id <run_id> --redact
 当前本地 fake flow 已实现以下基线能力：
 
 - 失败输出固定包含 `ok`、`operation`、`code`、`message`、`required_human_action`、`task_type`、`current_stage` 和 `next_action`。
-- 事件日志固定支持 `agent_task_ops_version`、`version_state`、`asset_version`、`operation`、`task_type`、`current_stage`、`next_action`、`code`、`gate` 和 `gate_status`。
+- 事件日志固定支持 `agentic_cli_version`、`version_state`、`asset_version`、`operation`、`task_type`、`current_stage`、`next_action`、`code`、`gate` 和 `gate_status`。
 - `gate_status` 当前取值为 `passed`、`blocked` 或 `failed`。
 - 已实现命令中的校验失败会优先给出明确 `required_human_action`，例如缺少 `run_id` 时要求补充 `--run-id`。
 
@@ -119,7 +119,7 @@ agent-task-ops feedback bundle --workspace tapstate --run-id <run_id> --redact
 
 | 问题类型 | 稳定错误码 | 当前状态 |
 | --- | --- | --- |
-| `agent-task-ops` 逻辑错误 | `agent_task_ops_logic_error` | 规划中，后续由 `doctor` / `feedback bundle` 辅助定位。 |
+| `agentic-cli` 逻辑错误 | `agentic_cli_logic_error` | 规划中，后续由 `doctor` / `feedback bundle` 辅助定位。 |
 | Jira 流程状态没适配 | `unknown_jira_status` | 规划中，后续随 `profile validate / update / rollback` 落地。 |
 | Jira 卡片属性丢失 | `missing_jira_field` | 规划中，后续随任务接管 gate 落地。 |
 | 关键步骤门禁调整 | `policy_gate_required` | 规划中，后续随 `policy validate / update / rollback` 落地。 |
@@ -128,7 +128,7 @@ agent-task-ops feedback bundle --workspace tapstate --run-id <run_id> --redact
 
 适用场景：
 
-- `agent-task-ops` 命令逻辑错误。
+- `agentic-cli` 命令逻辑错误。
 - JSON 输出字段错误。
 - 事件日志写入错误。
 - evidence / feedback 生成错误。
@@ -153,8 +153,8 @@ agent-task-ops feedback bundle --workspace tapstate --run-id <run_id> --redact
 目标命令：
 
 ```sh
-agent-task-ops update check
-agent-task-ops update apply
+agentic-cli update check
+agentic-cli update apply
 ```
 
 AgenticOps 不支持为旧版本单独做 BUG 修复。修复完成后只发布新的 latest 版本，研发侧应优先自动更新到最新版本。后续如果实现 rollback，它只用于安装失败或新版本不可用时的本地恢复，不作为旧版本修复策略。
@@ -197,9 +197,9 @@ status_mapping:
 目标命令：
 
 ```sh
-agent-task-ops profile validate --workspace tapstate
-agent-task-ops profile update --workspace tapstate
-agent-task-ops profile rollback --workspace tapstate
+agentic-cli profile validate --workspace tapstate
+agentic-cli profile update --workspace tapstate
+agentic-cli profile rollback --workspace tapstate
 ```
 
 未知状态必须阻断，不允许 AIAgent 猜：
@@ -296,9 +296,9 @@ gates:
 目标命令：
 
 ```sh
-agent-task-ops policy validate --workspace tapstate
-agent-task-ops policy update --workspace tapstate
-agent-task-ops policy rollback --workspace tapstate
+agentic-cli policy validate --workspace tapstate
+agentic-cli policy update --workspace tapstate
+agentic-cli policy rollback --workspace tapstate
 ```
 
 门禁调整规则：
@@ -314,7 +314,7 @@ AgenticOps 需要两类发布物：
 
 ```text
 binary release
-  agent-task-ops 多平台二进制
+  agentic-cli 多平台二进制
 
 asset release
   operation contracts
@@ -329,9 +329,9 @@ asset release
 ```text
 ~/.agentic-ops/
   bin/
-    agent-task-ops
+    agentic-cli
   versions/
-    agent-task-ops/
+    agentic-cli/
       RES-v0.1.2-7f31a2b/
       RES-v0.1.3-a68372d/
   assets/
@@ -345,9 +345,9 @@ asset release
 
 ```json
 {
-  "agent_task_ops_version": "RES-v0.1.3-a68372d",
+  "agentic_cli_version": "RES-v0.1.3-a68372d",
   "asset_version": "RES-v0.1.3-a68372d",
-  "previous_agent_task_ops_version": "RES-v0.1.2-7f31a2b",
+  "previous_agentic_cli_version": "RES-v0.1.2-7f31a2b",
   "previous_asset_version": "RES-v0.1.2-7f31a2b"
 }
 ```

@@ -70,9 +70,9 @@ agentic-ops/
     jira-comments/
     pr-comments/
   packages/
-    agent-task-ops/
+    agentic-cli/
       cmd/
-        agent-task-ops/
+        agentic-cli/
       internal/
         cli/
         config/
@@ -102,7 +102,7 @@ agentic-ops/
 | `profiles/` | Workflow Profile 示例和默认配置。 |
 | `skills/` | AgenticOps skills，让 AIAgent 知道如何工作。 |
 | `templates/` | Jira / PR / evidence 回写模板。 |
-| `packages/agent-task-ops/` | Go CLI Runtime 当前实现位置。 |
+| `packages/agentic-cli/` | Go CLI Runtime 当前实现位置。 |
 | `examples/` | 端到端演示样例。 |
 | `tests/` | 合同、脚本和文档一致性测试。 |
 | `scripts/` | 安装、检查和辅助脚本。 |
@@ -116,7 +116,7 @@ agentic-ops/
 当前仓库使用目录区分源码、设计、计划和运行资产，不使用不同分支分管资料。发布时再按交付对象拆分：
 
 - 维护者面对完整仓库。
-- 研发 owner 和 AIAgent 面对安装后的 `agent-task-ops`、`~/.agentic-ops/current.json` 和 `~/.agentic-ops/assets/<version>/`。
+- 研发 owner 和 AIAgent 面对安装后的 `agentic-cli`、`~/.agentic-ops/current.json` 和 `~/.agentic-ops/assets/<version>/`。
 - 设计文档和实施计划不进入普通使用者的日常入口。
 
 ## 6. 工作空间边界

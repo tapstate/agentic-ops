@@ -10,13 +10,13 @@ AgenticOps 的用户故事需要同时约束三类对象：
 
 - 研发 owner：用自然语言或 CLI 快速操作 AI 员工。
 - AIAgent：按 AI 员工手册和 Operation Contract 工作。
-- `agent-task-ops`：作为 Go CLI Runtime 执行 gate、policy、流程选择、证据回写和事件记录。
+- `agentic-cli`：作为 Go CLI Runtime 执行 gate、policy、流程选择、证据回写和事件记录。
 
 ## 2. US-001 安装 AgenticOps
 
 作为研发 owner，  
 我希望能通过一条安装命令安装 AgenticOps，  
-以便在本机获得 `agent-task-ops`、AI 员工手册、全局配置模板、operation contracts 和通用 skills。
+以便在本机获得 `agentic-cli`、AI 员工手册、全局配置模板、operation contracts 和通用 skills。
 
 ### 触发方式
 
@@ -35,8 +35,8 @@ curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
 1. 安装脚本识别 OS 和 CPU 架构。
 2. 安装脚本检查 bootstrap 依赖：`bash`、`curl` 和系统解压工具。
 3. 安装脚本创建或更新 `~/.agentic-ops`。
-4. 安装脚本下载或更新当前平台对应的 `agent-task-ops` Go release 二进制。
-5. 安装脚本安装统一入口 `agent-task-ops`。
+4. 安装脚本下载或更新当前平台对应的 `agentic-cli` Go release 二进制。
+5. 安装脚本安装统一入口 `agentic-cli`。
 6. 安装脚本初始化全局配置模板。
 7. 安装脚本输出下一步命令。
 
@@ -47,7 +47,7 @@ curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
   "ok": true,
   "operation": "install",
   "install_dir": "~/.agentic-ops",
-  "bin": "~/.agentic-ops/bin/agent-task-ops",
+  "bin": "~/.agentic-ops/bin/agentic-cli",
   "next_action": "workspace_init"
 }
 ```
@@ -62,8 +62,8 @@ curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
 ### 验收标准
 
 - Linux、macOS Intel 和 macOS Apple Silicon 都能执行安装命令。
-- 安装后 `agent-task-ops --version` 可用。
-- 安装后 `agent-task-ops preflight` 可用。
+- 安装后 `agentic-cli --version` 可用。
+- 安装后 `agentic-cli preflight` 可用。
 - 安装目录是 `~/.agentic-ops`。
 - `~/.agentic-ops` 只保存全局安装和配置资料，不作为具体项目运行目录。
 
@@ -76,7 +76,7 @@ curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
 ### 触发方式
 
 ```sh
-agent-task-ops workspace init --workspace tapstate
+agentic-cli workspace init --workspace tapstate
 ```
 
 ### 前置条件
@@ -119,7 +119,7 @@ agent-task-ops workspace init --workspace tapstate
 - 一个工作空间能绑定一个具体 Jira 空间和一组 GitHub 仓库。
 - 不同工作空间可以使用不同 Jira / GitHub / repo 配置。
 - 工作空间产物写入项目 AI 工作空间，不写入 `~/.agentic-ops`。
-- `agent-task-ops preflight --workspace <name>` 能验证 workspace 可用性。
+- `agentic-cli preflight --workspace <name>` 能验证 workspace 可用性。
 
 ## 4. US-003 初始化 AIAgent 能力
 
@@ -130,7 +130,7 @@ agent-task-ops workspace init --workspace tapstate
 ### 触发方式
 
 ```sh
-agent-task-ops agent init --workspace tapstate
+agentic-cli agent init --workspace tapstate
 ```
 
 或由研发 owner 在 AIAgent 会话中输入：
@@ -143,7 +143,7 @@ agent-task-ops agent init --workspace tapstate
 
 - AgenticOps 已安装。
 - 项目 AI 工作空间已初始化。
-- AIAgent 当前会话可以读取本地文件并调用 `agent-task-ops`。
+- AIAgent 当前会话可以读取本地文件并调用 `agentic-cli`。
 
 ### 主流程
 
@@ -151,7 +151,7 @@ agent-task-ops agent init --workspace tapstate
 2. AIAgent 读取任务类型、阶段和下一步动作规则。
 3. AIAgent 读取 workspace profile 摘要。
 4. AIAgent 读取 Operation Contract 列表。
-5. AIAgent 执行 `agent-task-ops preflight --workspace tapstate`。
+5. AIAgent 执行 `agentic-cli preflight --workspace tapstate`。
 6. AIAgent 向研发 owner 输出当前可用能力、阶段判断方式和限制。
 
 ### 输出
@@ -186,7 +186,7 @@ agent-task-ops agent init --workspace tapstate
 ### 失败处理
 
 - 如果 AIAgent 无法读取手册，停止并提示安装或路径问题。
-- 如果 `agent-task-ops` 不可用，提示重新安装或修复 PATH。
+- 如果 `agentic-cli` 不可用，提示重新安装或修复 PATH。
 - 如果 workspace preflight 失败，AIAgent 不能开始接管任务。
 
 ### 验收标准
@@ -205,7 +205,7 @@ agent-task-ops agent init --workspace tapstate
 ### 触发方式
 
 ```sh
-agent-task-ops takeover-task TAP-123 --workspace tapstate
+agentic-cli takeover-task TAP-123 --workspace tapstate
 ```
 
 或自然语言：
@@ -265,6 +265,7 @@ agent-task-ops takeover-task TAP-123 --workspace tapstate
 - 每次接管都有唯一 `run_id`。
 - AIAgent 未经确认不得 push / PR。
 - 所有 operation 都写入结构化事件日志。
+- 写入 Jira 的接管成功、失败、阻塞和补卡说明必须使用中文。
 
 ## 6. US-005 恢复接管任务
 
@@ -275,7 +276,7 @@ agent-task-ops takeover-task TAP-123 --workspace tapstate
 ### 触发方式
 
 ```sh
-agent-task-ops resume-takeover --run-id TAP-123-takeover-20260721103012-a8f3 --workspace tapstate
+agentic-cli resume-takeover --run-id TAP-123-takeover-20260721103012-a8f3 --workspace tapstate
 ```
 
 或自然语言：
@@ -337,10 +338,10 @@ agent-task-ops resume-takeover --run-id TAP-123-takeover-20260721103012-a8f3 --w
 ### 触发方式
 
 ```sh
-agent-task-ops feedback collect --workspace tapstate --date 2026-07-21
-agent-task-ops feedback analyze --workspace tapstate --date 2026-07-21
-agent-task-ops feedback report --workspace tapstate --date 2026-07-21
-agent-task-ops feedback propose --workspace tapstate --date 2026-07-21
+agentic-cli feedback collect --workspace tapstate --date 2026-07-21
+agentic-cli feedback analyze --workspace tapstate --date 2026-07-21
+agentic-cli feedback report --workspace tapstate --date 2026-07-21
+agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 ```
 
 或自然语言：
@@ -393,4 +394,5 @@ agent-task-ops feedback propose --workspace tapstate --date 2026-07-21
 - 每天能按 workspace 生成反馈报告。
 - 报告包含成功、失败、阻塞、人工确认点和重复问题。
 - 报告不包含 secrets 或敏感原始内容。
+- 写入 Jira 的工作日志必须使用中文。
 - 改进建议必须经过人工确认后才能进入 AgenticOps 源头仓库。

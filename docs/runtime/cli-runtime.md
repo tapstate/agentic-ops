@@ -1,29 +1,29 @@
-# Go CLI 运行时
+# AgenticCLI 运行时
 
 ## 1. 目的
 
-本文定义 AgenticOps 第一阶段 Go CLI Runtime 的设计和当前实现边界。当前仓库已实现本地 fake flow；真实 Jira / GitHub 写操作、push、PR、merge 和发布仍未接入。
+本文定义 AgenticOps 第一阶段 AgenticCLI Runtime 的设计和当前实现边界。当前仓库已实现本地 fake flow；真实 Jira / GitHub 写操作、push、PR、merge 和发布仍未接入。
 
-CLI Runtime 的目标是给 AIAgent 提供稳定、结构化、可审计的操作入口，避免 AIAgent 直接面对 Jira / GitHub / Git 的底层事实和高风险动作。
+AgenticCLI 的目标是给 AIAgent 提供稳定、结构化、可审计的操作入口，承载 AgenticOps 成熟经验沉淀后的原子 operation，避免 AIAgent 直接面对 Jira / GitHub / Git 的底层事实和高风险动作。
 
 ## 2. 运行时形态
 
 统一入口：
 
 ```sh
-agent-task-ops
+agentic-cli
 ```
 
 建议安装位置：
 
 ```text
-~/.agentic-ops/bin/agent-task-ops
+~/.agentic-ops/bin/agentic-cli
 ```
 
 建议源码位置：
 
 ```text
-packages/agent-task-ops/
+packages/agentic-cli/
 ```
 
 第一阶段采用：
@@ -31,12 +31,14 @@ packages/agent-task-ops/
 - shell bootstrap：只负责 `curl | bash` 安装引导。
 - Go CLI：承载 operation、policy、adapter、事件日志、反馈分析和结构化输出。
 
+AgenticCLI operation 是成熟固化交互逻辑的原子化入口。只有输入输出稳定、失败码明确、边界可审计、可以安全重试或恢复的交互逻辑，才应沉淀为 operation。脚本入口只做受控编排或调用，不承载业务判断。仍在探索的流程判断先保留在 framework、runbook、profile、policy 和 feedback proposal 中，经过复盘和人工确认后再固化。
+
 ## 3. 目标目录
 
 ```text
-packages/agent-task-ops/
+packages/agentic-cli/
   cmd/
-    agent-task-ops/
+    agentic-cli/
   internal/
     cli/
     config/
@@ -80,7 +82,7 @@ curl
 tar 或 unzip
 ```
 
-`agent-task-ops` 运行时不得依赖本地 Python、`jq` 或 shell 业务脚本。
+`agentic-cli` 运行时不得依赖本地 Python、`jq` 或 shell 业务脚本。
 
 ## 5. 输入输出规则
 
@@ -122,7 +124,7 @@ CLI 必须遵守：
 
 ## 7. 预检
 
-`agent-task-ops preflight` 应检查：
+`agentic-cli preflight` 应检查：
 
 - OS 和 CPU 架构。
 - 当前二进制版本。
@@ -144,10 +146,10 @@ AgenticOps 面向公司研发分发，运行时必须支持快速修复和快速
 - 每次 release 生成多平台二进制。
 - 安装脚本按 OS 和 CPU 架构下载对应二进制。
 - 版本号使用 `STATE-vMAJOR.ITERATION.COMMIT_INDEX-COMMIT` 格式，例如 `RES-v0.1.3-a68372d`。
-- `agent-task-ops version` 能输出当前版本、`version_state`、`iteration_version`、`commit_index`、commit 和构建时间。
+- `agentic-cli version` 能输出当前版本、`version_state`、`iteration_version`、`commit_index`、commit 和构建时间。
 - `version_state` 必须区分 `SRC`、`DEV` 和 `RES`，分别表示源码运行、开发版和正式版。
 - build version、release version 和 asset version 均由脚本自动生成，不允许手工指定。
-- `agent-task-ops self-update` 能升级到最新稳定版本；有新版本时推荐自动更新应用。
+- `agentic-cli self-update` 能升级到最新稳定版本；有新版本时推荐自动更新应用。
 - 安装和升级不得覆盖用户本地配置。
 - 项目采用 latest-only 支持策略，BUG 只在最新版本修复，不维护旧版本补丁线。
 - 如后续实现 rollback，它只用于安装失败或新版本不可用时的本地恢复，不作为旧版本修复策略。
@@ -170,3 +172,18 @@ shell 不允许承载：
 - Policy 和 human gate 判断。
 - Evidence 生成。
 - Feedback 分析。
+
+## 10. 原子操作成熟度
+
+新增或调整 CLI operation 前，必须判断它是否已经足够成熟。
+
+成熟 operation 应满足：
+
+- 只完成一个清晰动作。
+- 输入、输出、失败码和副作用稳定。
+- 能通过 policy / gate 拒绝高风险动作。
+- 能写入结构化事件日志和 evidence。
+- 失败后能说明是否重试、重做或转人工。
+- 能被单元测试、contract 检查或 e2e fake flow 验证。
+
+不成熟逻辑不得直接写成脚本或 CLI 命令。它应先进入 runbook、workflow profile、policy 草案或 feedback proposal，由 AIAgent 在具体任务中执行并沉淀经验；当重复出现且边界清晰后，再升级为原子 operation。脚本只能用于安装引导、构建发布、轻量检测或调用受控 operation。

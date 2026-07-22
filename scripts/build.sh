@@ -23,7 +23,7 @@ if [ -n "${AGENTIC_OPS_VERSION:-}" ]; then
   exit 1
 fi
 targets="${AGENTIC_OPS_TARGETS:-darwin/arm64 darwin/amd64 linux/arm64 linux/amd64}"
-package_path="github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/cli"
+package_path="github.com/tapstate/agentic-ops/packages/agentic-cli/internal/cli"
 commit="${AGENTIC_OPS_COMMIT:-$(git rev-parse --short HEAD)}"
 build_time="${AGENTIC_OPS_BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 if [ -n "${AGENTIC_OPS_GENERATED_VERSION:-}" ]; then
@@ -55,7 +55,7 @@ for target in $targets; do
   goarch="${target#*/}"
   target_name="${goos}-${goarch}"
   out_dir="$build_dir/$target_name"
-  binary="$out_dir/agent-task-ops"
+  binary="$out_dir/agentic-cli"
 
   mkdir -p "$out_dir"
   CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
@@ -63,7 +63,7 @@ for target in $targets; do
       -trimpath \
       -ldflags "-s -w -X ${package_path}.Version=${version} -X ${package_path}.VersionState=${version_state} -X ${package_path}.IterationVersion=${iteration_version} -X ${package_path}.CommitIndex=${commit_index} -X ${package_path}.Commit=${commit} -X ${package_path}.BuildTime=${build_time}" \
       -o "$binary" \
-      ./packages/agent-task-ops/cmd/agent-task-ops
+      ./packages/agentic-cli/cmd/agentic-cli
 
   checksum_file "$binary" > "$binary.sha256"
 done

@@ -10,7 +10,7 @@
 
 本计划覆盖四类问题：
 
-- `agent-task-ops` 逻辑错误。
+- `agentic-cli` 逻辑错误。
 - Jira 流程状态没适配。
 - Jira 卡片属性丢失。
 - 关键步骤门禁调整。
@@ -25,16 +25,16 @@
 ## 2. 必须实现的目标命令
 
 ```text
-agent-task-ops doctor --workspace <name>
-agent-task-ops feedback bundle --workspace <name> --run-id <run_id> --redact
-agent-task-ops update check
-agent-task-ops update apply
-agent-task-ops profile validate --workspace <name>
-agent-task-ops profile update --workspace <name>
-agent-task-ops profile rollback --workspace <name>
-agent-task-ops policy validate --workspace <name>
-agent-task-ops policy update --workspace <name>
-agent-task-ops policy rollback --workspace <name>
+agentic-cli doctor --workspace <name>
+agentic-cli feedback bundle --workspace <name> --run-id <run_id> --redact
+agentic-cli update check
+agentic-cli update apply
+agentic-cli profile validate --workspace <name>
+agentic-cli profile update --workspace <name>
+agentic-cli profile rollback --workspace <name>
+agentic-cli policy validate --workspace <name>
+agentic-cli policy update --workspace <name>
+agentic-cli policy rollback --workspace <name>
 ```
 
 ## 3. 实施任务
@@ -48,7 +48,7 @@ agent-task-ops policy rollback --workspace <name>
   - 为四类问题定义稳定 `code`。
   - 失败输出必须包含 `required_human_action`。
   - 事件日志记录 CLI version、asset version、operation、task_type、current_stage、next_action、code 和 gate 状态。
-  - Implementation note: 当前已完成结构化失败输出基线，失败输出包含 `required_human_action`、`task_type`、`current_stage` 和 `next_action`；事件模型已包含 `agent_task_ops_version`、`version_state`、`asset_version`、`code`、`gate` 和 `gate_status`。当前只覆盖已实现本地 fake flow 的命令，四类问题的完整业务 gate 分别在后续 Task 4、Task 5 和 Task 6 中继续落地。
+  - Implementation note: 当前已完成结构化失败输出基线，失败输出包含 `required_human_action`、`task_type`、`current_stage` 和 `next_action`；事件模型已包含 `agentic_cli_version`、`version_state`、`asset_version`、`code`、`gate` 和 `gate_status`。当前只覆盖已实现本地 fake flow 的命令，四类问题的完整业务 gate 分别在后续 Task 4、Task 5 和 Task 6 中继续落地。
 
 - [ ] **Task 2: 脱敏诊断包**
   - 实现 `doctor`。

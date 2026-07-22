@@ -7,7 +7,7 @@ trap 'rm -rf "$tmp_home"' EXIT
 HOME="$tmp_home" bash scripts/init.sh > "$tmp_home/out.json"
 
 grep '"ok":true' "$tmp_home/out.json"
-test -x "$tmp_home/.agentic-ops/bin/agent-task-ops"
+test -x "$tmp_home/.agentic-ops/bin/agentic-cli"
 
 target="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
 case "$target" in
@@ -22,9 +22,9 @@ make_release() {
   local release_dir="$release_root/$version"
 
   mkdir -p "$release_dir/bin" "$release_dir/assets"
-  printf '#!/usr/bin/env sh\nif [ "$1" = "assets" ] && [ "$2" = "install" ]; then printf '"'"'{"ok":true,"operation":"assets_install"}\\n'"'"'; exit 0; fi\nprintf '"'"'{"ok":true,"operation":"version","version":"%s"}\\n'"'"'\n' "$version" > "$release_dir/bin/agent-task-ops"
-  chmod +x "$release_dir/bin/agent-task-ops"
-  tar -C "$release_dir/bin" -czf "$release_dir/agent-task-ops_${version}_${target}.tar.gz" agent-task-ops
+  printf '#!/usr/bin/env sh\nif [ "$1" = "assets" ] && [ "$2" = "install" ]; then printf '"'"'{"ok":true,"operation":"assets_install"}\\n'"'"'; exit 0; fi\nprintf '"'"'{"ok":true,"operation":"version","version":"%s"}\\n'"'"'\n' "$version" > "$release_dir/bin/agentic-cli"
+  chmod +x "$release_dir/bin/agentic-cli"
+  tar -C "$release_dir/bin" -czf "$release_dir/agentic-cli_${version}_${target}.tar.gz" agentic-cli
   printf '{"version":"%s"}\n' "$version" > "$release_dir/assets/manifest.json"
   tar -C "$release_dir" -czf "$release_dir/agentic-ops-assets_${version}.tar.gz" assets
   rm -rf "$release_dir/bin" "$release_dir/assets"
@@ -39,5 +39,5 @@ deploy_home="$tmp_home/deploy-home"
 AGENTIC_OPS_RELEASE_DIR="$release_root" HOME="$deploy_home" bash scripts/init.sh > "$tmp_home/deploy.json"
 
 grep "\"version\":\"$version\"" "$tmp_home/deploy.json"
-test -x "$deploy_home/.agentic-ops/bin/agent-task-ops"
-"$deploy_home/.agentic-ops/bin/agent-task-ops" --version | grep "\"version\":\"$version\""
+test -x "$deploy_home/.agentic-ops/bin/agentic-cli"
+"$deploy_home/.agentic-ops/bin/agentic-cli" --version | grep "\"version\":\"$version\""

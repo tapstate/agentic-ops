@@ -11,9 +11,9 @@
 ## Global Constraints
 
 - 当前阶段先执行本计划，不直接扩展到 Web 控制台、daemon、自动 PR 或完整 self-update。
-- CLI 统一入口为 `agent-task-ops`。
+- CLI 统一入口为 `agentic-cli`。
 - Go 是主实现语言；shell 只用于安装引导、轻量环境检测、下载或切换 Go release 二进制。
-- `agent-task-ops` 运行时不得依赖本地 Python、`jq` 或 shell 业务脚本。
+- `agentic-cli` 运行时不得依赖本地 Python、`jq` 或 shell 业务脚本。
 - stdout 只输出结构化 JSON；stderr 输出人类诊断日志。
 - 所有失败必须返回稳定 `code`。
 - secrets 不允许出现在 stdout、stderr 或事件日志中。
@@ -21,6 +21,8 @@
 - `~/.agentic-ops` 是全局安装和配置目录，不是具体项目或具体任务运行目录。
 - 项目运行目录是项目 AI 工作空间，例如 `tapstate` 或 `tapdata`。
 - AIAgent 不按固定角色工作，必须按 `task_type`、`current_stage`、`next_action` 推进。
+- AIAgent 执行 Jira 任务前必须先识别 `task_class`，再选择 Standard Process Registry 中的 `process_id`。
+- `agent_id` 是 AIAgent 唯一编号；`current_agent_id` 是任务运行中绑定字段，任务完成或交接结束后必须清理。
 - 第一阶段 operation 名称集合以 `docs/contracts/operation-contract.md` 为文档权威。
 
 ---
@@ -41,9 +43,9 @@ agentic-ops/
       write-evidence.yaml
       feedback-report.yaml
   packages/
-    agent-task-ops/
+    agentic-cli/
       cmd/
-        agent-task-ops/
+        agentic-cli/
           main.go
       internal/
         cli/
@@ -95,25 +97,25 @@ agentic-ops/
 先实现这些命令：
 
 ```text
-agent-task-ops --version
-agent-task-ops preflight --workspace <name>
-agent-task-ops workspace init --workspace <name>
-agent-task-ops agent init --workspace <name>
-agent-task-ops list-tasks --workspace <name>
-agent-task-ops takeover-task <issue-key> --workspace <name>
-agent-task-ops write-evidence --run-id <run_id> --workspace <name>
-agent-task-ops feedback report --workspace <name> --date <yyyy-mm-dd>
+agentic-cli --version
+agentic-cli preflight --workspace <name>
+agentic-cli workspace init --workspace <name>
+agentic-cli agent init --workspace <name>
+agentic-cli list-tasks --workspace <name>
+agentic-cli takeover-task <issue-key> --workspace <name>
+agentic-cli write-evidence --run-id <run_id> --workspace <name>
+agentic-cli feedback report --workspace <name> --date <yyyy-mm-dd>
 ```
 
 暂不实现这些命令：
 
 ```text
-agent-task-ops prepare-pr
-agent-task-ops fix-pr-comments
-agent-task-ops feedback collect
-agent-task-ops feedback analyze
-agent-task-ops feedback propose
-agent-task-ops self-update
+agentic-cli prepare-pr
+agentic-cli fix-pr-comments
+agentic-cli feedback collect
+agentic-cli feedback analyze
+agentic-cli feedback propose
+agentic-cli self-update
 ```
 
 这些命令保留在契约文档中，但不进入第一批可运行闭环。
@@ -124,11 +126,11 @@ agent-task-ops self-update
 
 **Files:**
 - Create: `go.mod`
-- Create: `packages/agent-task-ops/cmd/agent-task-ops/main.go`
-- Create: `packages/agent-task-ops/internal/cli/app.go`
-- Create: `packages/agent-task-ops/internal/cli/app_test.go`
-- Create: `packages/agent-task-ops/internal/output/json.go`
-- Create: `packages/agent-task-ops/internal/output/json_test.go`
+- Create: `packages/agentic-cli/cmd/agentic-cli/main.go`
+- Create: `packages/agentic-cli/internal/cli/app.go`
+- Create: `packages/agentic-cli/internal/cli/app_test.go`
+- Create: `packages/agentic-cli/internal/output/json.go`
+- Create: `packages/agentic-cli/internal/output/json_test.go`
 
 **Interfaces:**
 - Produces: `cli.Run(args []string, stdout io.Writer, stderr io.Writer) int`
@@ -143,12 +145,12 @@ module github.com/tapstate/agentic-ops
 go 1.22
 ```
 
-Run: `go test ./...`  
+Run: `go test ./...`
 Expected: command succeeds with `go: warning: "./..." matched no packages` or no package output before code files are added.
 
 - [x] **Step 2: Add JSON output helpers**
 
-Create `packages/agent-task-ops/internal/output/json.go`:
+Create `packages/agentic-cli/internal/output/json.go`:
 
 ```go
 package output
@@ -178,7 +180,7 @@ func Failure(operation string, code string, message string, requiredHumanAction 
 }
 ```
 
-Create `packages/agent-task-ops/internal/output/json_test.go`:
+Create `packages/agentic-cli/internal/output/json_test.go`:
 
 ```go
 package output
@@ -212,12 +214,12 @@ func TestFailureIncludesStableCode(t *testing.T) {
 }
 ```
 
-Run: `go test ./packages/agent-task-ops/internal/output`  
+Run: `go test ./packages/agentic-cli/internal/output`
 Expected: PASS.
 
 - [x] **Step 3: Add CLI app entry**
 
-Create `packages/agent-task-ops/internal/cli/app.go`:
+Create `packages/agentic-cli/internal/cli/app.go`:
 
 ```go
 package cli
@@ -227,7 +229,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/output"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/output"
 )
 
 var Version = "source"
@@ -263,7 +265,7 @@ func writeJSON(stdout io.Writer, payload map[string]any) int {
 }
 ```
 
-Create `packages/agent-task-ops/internal/cli/app_test.go`:
+Create `packages/agentic-cli/internal/cli/app_test.go`:
 
 ```go
 package cli
@@ -305,7 +307,7 @@ func TestUnknownCommandFailsWithStableCode(t *testing.T) {
 }
 ```
 
-Create `packages/agent-task-ops/cmd/agent-task-ops/main.go`:
+Create `packages/agentic-cli/cmd/agentic-cli/main.go`:
 
 ```go
 package main
@@ -313,7 +315,7 @@ package main
 import (
 	"os"
 
-	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/cli"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/cli"
 )
 
 func main() {
@@ -321,25 +323,25 @@ func main() {
 }
 ```
 
-Run: `go test ./packages/agent-task-ops/internal/...`  
+Run: `go test ./packages/agentic-cli/internal/...`
 Expected: PASS.
 
 - [x] **Step 4: Commit**
 
 ```bash
-git add go.mod packages/agent-task-ops
+git add go.mod packages/agentic-cli
 git commit -m "Feat(cli): add Go CLI skeleton"
 ```
 
 ### Task 2: 全局路径和工作空间目录
 
 **Files:**
-- Create: `packages/agent-task-ops/internal/config/paths.go`
-- Create: `packages/agent-task-ops/internal/config/paths_test.go`
-- Create: `packages/agent-task-ops/internal/workspace/workspace.go`
-- Create: `packages/agent-task-ops/internal/workspace/workspace_test.go`
-- Modify: `packages/agent-task-ops/internal/cli/app.go`
-- Modify: `packages/agent-task-ops/internal/cli/app_test.go`
+- Create: `packages/agentic-cli/internal/config/paths.go`
+- Create: `packages/agentic-cli/internal/config/paths_test.go`
+- Create: `packages/agentic-cli/internal/workspace/workspace.go`
+- Create: `packages/agentic-cli/internal/workspace/workspace_test.go`
+- Modify: `packages/agentic-cli/internal/cli/app.go`
+- Modify: `packages/agentic-cli/internal/cli/app_test.go`
 
 **Interfaces:**
 - Consumes: `cli.Run(args []string, stdout io.Writer, stderr io.Writer) int`
@@ -349,7 +351,7 @@ git commit -m "Feat(cli): add Go CLI skeleton"
 
 - [x] **Step 1: Add path helpers**
 
-Create `packages/agent-task-ops/internal/config/paths.go`:
+Create `packages/agentic-cli/internal/config/paths.go`:
 
 ```go
 package config
@@ -361,7 +363,7 @@ func DefaultInstallDir(home string) string {
 }
 ```
 
-Create `packages/agent-task-ops/internal/config/paths_test.go`:
+Create `packages/agentic-cli/internal/config/paths_test.go`:
 
 ```go
 package config
@@ -376,12 +378,12 @@ func TestDefaultInstallDir(t *testing.T) {
 }
 ```
 
-Run: `go test ./packages/agent-task-ops/internal/config`  
+Run: `go test ./packages/agentic-cli/internal/config`
 Expected: PASS.
 
 - [x] **Step 2: Add workspace creation**
 
-Create `packages/agent-task-ops/internal/workspace/workspace.go`:
+Create `packages/agentic-cli/internal/workspace/workspace.go`:
 
 ```go
 package workspace
@@ -424,7 +426,7 @@ func Ensure(root string, name string) (Info, error) {
 }
 ```
 
-Create `packages/agent-task-ops/internal/workspace/workspace_test.go`:
+Create `packages/agentic-cli/internal/workspace/workspace_test.go`:
 
 ```go
 package workspace
@@ -459,12 +461,12 @@ func TestEnsureCreatesWorkspaceDirs(t *testing.T) {
 }
 ```
 
-Run: `go test ./packages/agent-task-ops/internal/workspace`  
+Run: `go test ./packages/agentic-cli/internal/workspace`
 Expected: PASS.
 
 - [x] **Step 3: Add `workspace init` command route**
 
-Modify `packages/agent-task-ops/internal/cli/app.go` to route:
+Modify `packages/agentic-cli/internal/cli/app.go` to route:
 
 ```go
 case "workspace":
@@ -510,13 +512,13 @@ func TestWorkspaceInitOutputsNextAction(t *testing.T) {
 }
 ```
 
-Run: `go test ./packages/agent-task-ops/internal/...`  
+Run: `go test ./packages/agentic-cli/internal/...`
 Expected: PASS.
 
 - [x] **Step 4: Commit**
 
 ```bash
-git add packages/agent-task-ops/internal/config packages/agent-task-ops/internal/workspace packages/agent-task-ops/internal/cli
+git add packages/agentic-cli/internal/config packages/agentic-cli/internal/workspace packages/agentic-cli/internal/cli
 git commit -m "Feat(workspace): add workspace initialization model"
 ```
 
@@ -526,9 +528,9 @@ git commit -m "Feat(workspace): add workspace initialization model"
 - Create: `contracts/operations/takeover-task.yaml`
 - Create: `contracts/operations/list-tasks.yaml`
 - Create: `contracts/operations/write-evidence.yaml`
-- Create: `packages/agent-task-ops/internal/contract/model.go`
-- Create: `packages/agent-task-ops/internal/contract/loader.go`
-- Create: `packages/agent-task-ops/internal/contract/loader_test.go`
+- Create: `packages/agentic-cli/internal/contract/model.go`
+- Create: `packages/agentic-cli/internal/contract/loader.go`
+- Create: `packages/agentic-cli/internal/contract/loader_test.go`
 - Modify: `go.mod`
 
 **Interfaces:**
@@ -537,7 +539,7 @@ git commit -m "Feat(workspace): add workspace initialization model"
 
 - [x] **Step 1: Add YAML dependency**
 
-Run: `go get gopkg.in/yaml.v3`  
+Run: `go get gopkg.in/yaml.v3`
 Expected: `go.mod` and `go.sum` update with `gopkg.in/yaml.v3`.
 
 - [x] **Step 2: Add operation YAML files**
@@ -605,7 +607,7 @@ human_gate:
 
 - [x] **Step 3: Add contract model and loader**
 
-Create `packages/agent-task-ops/internal/contract/model.go`:
+Create `packages/agentic-cli/internal/contract/model.go`:
 
 ```go
 package contract
@@ -626,7 +628,7 @@ type HumanGate struct {
 }
 ```
 
-Create `packages/agent-task-ops/internal/contract/loader.go`:
+Create `packages/agentic-cli/internal/contract/loader.go`:
 
 ```go
 package contract
@@ -650,7 +652,7 @@ func LoadFile(path string) (Operation, error) {
 }
 ```
 
-Create `packages/agent-task-ops/internal/contract/loader_test.go`:
+Create `packages/agentic-cli/internal/contract/loader_test.go`:
 
 ```go
 package contract
@@ -678,23 +680,23 @@ func TestLoadFileReadsOperationContract(t *testing.T) {
 }
 ```
 
-Run: `go test ./packages/agent-task-ops/internal/contract`  
+Run: `go test ./packages/agentic-cli/internal/contract`
 Expected: PASS.
 
 - [x] **Step 4: Commit**
 
 ```bash
-git add go.mod go.sum contracts/operations packages/agent-task-ops/internal/contract
+git add go.mod go.sum contracts/operations packages/agentic-cli/internal/contract
 git commit -m "Feat(contract): add operation contract loader"
 ```
 
 ### Task 4: Fake Jira adapter 和任务列表
 
 **Files:**
-- Create: `packages/agent-task-ops/internal/jira/model.go`
-- Create: `packages/agent-task-ops/internal/jira/fake.go`
-- Modify: `packages/agent-task-ops/internal/cli/app.go`
-- Modify: `packages/agent-task-ops/internal/cli/app_test.go`
+- Create: `packages/agentic-cli/internal/jira/model.go`
+- Create: `packages/agentic-cli/internal/jira/fake.go`
+- Modify: `packages/agentic-cli/internal/cli/app.go`
+- Modify: `packages/agentic-cli/internal/cli/app_test.go`
 
 **Interfaces:**
 - Produces: `jira.Issue`
@@ -703,7 +705,7 @@ git commit -m "Feat(contract): add operation contract loader"
 
 - [x] **Step 1: Add fake Jira model**
 
-Create `packages/agent-task-ops/internal/jira/model.go`:
+Create `packages/agentic-cli/internal/jira/model.go`:
 
 ```go
 package jira
@@ -718,7 +720,7 @@ type Issue struct {
 }
 ```
 
-Create `packages/agent-task-ops/internal/jira/fake.go`:
+Create `packages/agentic-cli/internal/jira/fake.go`:
 
 ```go
 package jira
@@ -750,10 +752,10 @@ func (FakeClient) GetIssue(key string) (Issue, bool) {
 
 - [x] **Step 2: Add `list-tasks` command**
 
-Modify `packages/agent-task-ops/internal/cli/app.go` imports to include fake jira package:
+Modify `packages/agentic-cli/internal/cli/app.go` imports to include fake jira package:
 
 ```go
-	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/jira"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
 ```
 
 Add route:
@@ -787,23 +789,23 @@ func TestListTasksUsesFakeJira(t *testing.T) {
 }
 ```
 
-Run: `go test ./packages/agent-task-ops/internal/...`  
+Run: `go test ./packages/agentic-cli/internal/...`
 Expected: PASS.
 
 - [x] **Step 3: Commit**
 
 ```bash
-git add packages/agent-task-ops/internal/jira packages/agent-task-ops/internal/cli
+git add packages/agentic-cli/internal/jira packages/agentic-cli/internal/cli
 git commit -m "Feat(jira): add fake task listing"
 ```
 
 ### Task 5: 任务接管和事件日志
 
 **Files:**
-- Create: `packages/agent-task-ops/internal/feedback/event.go`
-- Create: `packages/agent-task-ops/internal/feedback/event_test.go`
-- Modify: `packages/agent-task-ops/internal/cli/app.go`
-- Modify: `packages/agent-task-ops/internal/cli/app_test.go`
+- Create: `packages/agentic-cli/internal/feedback/event.go`
+- Create: `packages/agentic-cli/internal/feedback/event_test.go`
+- Modify: `packages/agentic-cli/internal/cli/app.go`
+- Modify: `packages/agentic-cli/internal/cli/app_test.go`
 
 **Interfaces:**
 - Produces: `feedback.Event`
@@ -812,7 +814,7 @@ git commit -m "Feat(jira): add fake task listing"
 
 - [x] **Step 1: Add event model**
 
-Create `packages/agent-task-ops/internal/feedback/event.go`:
+Create `packages/agentic-cli/internal/feedback/event.go`:
 
 ```go
 package feedback
@@ -860,7 +862,7 @@ func AppendEvent(path string, event Event) error {
 }
 ```
 
-Create `packages/agent-task-ops/internal/feedback/event_test.go`:
+Create `packages/agentic-cli/internal/feedback/event_test.go`:
 
 ```go
 package feedback
@@ -896,12 +898,12 @@ func TestAppendEventWritesNDJSON(t *testing.T) {
 }
 ```
 
-Run: `go test ./packages/agent-task-ops/internal/feedback`  
+Run: `go test ./packages/agentic-cli/internal/feedback`
 Expected: PASS.
 
 - [x] **Step 2: Add `takeover-task` command**
 
-Modify `packages/agent-task-ops/internal/cli/app.go` to route:
+Modify `packages/agentic-cli/internal/cli/app.go` to route:
 
 ```go
 case "takeover-task":
@@ -943,30 +945,30 @@ func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 }
 ```
 
-Run: `go test ./packages/agent-task-ops/internal/...`  
+Run: `go test ./packages/agentic-cli/internal/...`
 Expected: PASS.
 
 - [x] **Step 3: Commit**
 
 ```bash
-git add packages/agent-task-ops/internal/feedback packages/agent-task-ops/internal/cli
+git add packages/agentic-cli/internal/feedback packages/agentic-cli/internal/cli
 git commit -m "Feat(takeover): add fake task takeover"
 ```
 
 ### Task 6: Evidence 写入
 
 **Files:**
-- Create: `packages/agent-task-ops/internal/evidence/writer.go`
-- Create: `packages/agent-task-ops/internal/evidence/writer_test.go`
-- Modify: `packages/agent-task-ops/internal/cli/app.go`
-- Modify: `packages/agent-task-ops/internal/cli/app_test.go`
+- Create: `packages/agentic-cli/internal/evidence/writer.go`
+- Create: `packages/agentic-cli/internal/evidence/writer_test.go`
+- Modify: `packages/agentic-cli/internal/cli/app.go`
+- Modify: `packages/agentic-cli/internal/cli/app_test.go`
 
 **Interfaces:**
 - Produces: `evidence.Write(path string, content string) error`
 
 - [x] **Step 1: Add evidence writer**
 
-Create `packages/agent-task-ops/internal/evidence/writer.go`:
+Create `packages/agentic-cli/internal/evidence/writer.go`:
 
 ```go
 package evidence
@@ -984,7 +986,7 @@ func Write(path string, content string) error {
 }
 ```
 
-Create `packages/agent-task-ops/internal/evidence/writer_test.go`:
+Create `packages/agentic-cli/internal/evidence/writer_test.go`:
 
 ```go
 package evidence
@@ -1011,7 +1013,7 @@ func TestWriteCreatesEvidenceFile(t *testing.T) {
 }
 ```
 
-Run: `go test ./packages/agent-task-ops/internal/evidence`  
+Run: `go test ./packages/agentic-cli/internal/evidence`
 Expected: PASS.
 
 - [x] **Step 2: Add `write-evidence` command**
@@ -1049,23 +1051,23 @@ func TestWriteEvidenceRequiresRunID(t *testing.T) {
 }
 ```
 
-Run: `go test ./packages/agent-task-ops/internal/...`  
+Run: `go test ./packages/agentic-cli/internal/...`
 Expected: PASS.
 
 - [x] **Step 3: Commit**
 
 ```bash
-git add packages/agent-task-ops/internal/evidence packages/agent-task-ops/internal/cli
+git add packages/agentic-cli/internal/evidence packages/agentic-cli/internal/cli
 git commit -m "Feat(evidence): add evidence writer"
 ```
 
 ### Task 7: Feedback report
 
 **Files:**
-- Create: `packages/agent-task-ops/internal/feedback/report.go`
-- Create: `packages/agent-task-ops/internal/feedback/report_test.go`
-- Modify: `packages/agent-task-ops/internal/cli/app.go`
-- Modify: `packages/agent-task-ops/internal/cli/app_test.go`
+- Create: `packages/agentic-cli/internal/feedback/report.go`
+- Create: `packages/agentic-cli/internal/feedback/report_test.go`
+- Modify: `packages/agentic-cli/internal/cli/app.go`
+- Modify: `packages/agentic-cli/internal/cli/app_test.go`
 
 **Interfaces:**
 - Produces: `feedback.Report{Runs, Succeeded, Blocked, Failed int}`
@@ -1073,7 +1075,7 @@ git commit -m "Feat(evidence): add evidence writer"
 
 - [x] **Step 1: Add report summarizer**
 
-Create `packages/agent-task-ops/internal/feedback/report.go`:
+Create `packages/agentic-cli/internal/feedback/report.go`:
 
 ```go
 package feedback
@@ -1103,7 +1105,7 @@ func Summarize(events []Event) Report {
 }
 ```
 
-Create `packages/agent-task-ops/internal/feedback/report_test.go`:
+Create `packages/agentic-cli/internal/feedback/report_test.go`:
 
 ```go
 package feedback
@@ -1125,7 +1127,7 @@ func TestSummarizeCountsRuns(t *testing.T) {
 }
 ```
 
-Run: `go test ./packages/agent-task-ops/internal/feedback`  
+Run: `go test ./packages/agentic-cli/internal/feedback`
 Expected: PASS.
 
 - [x] **Step 2: Add `feedback report` command**
@@ -1169,13 +1171,13 @@ func TestFeedbackReportOutputsReportPath(t *testing.T) {
 }
 ```
 
-Run: `go test ./packages/agent-task-ops/internal/...`  
+Run: `go test ./packages/agentic-cli/internal/...`
 Expected: PASS.
 
 - [x] **Step 3: Commit**
 
 ```bash
-git add packages/agent-task-ops/internal/feedback packages/agent-task-ops/internal/cli
+git add packages/agentic-cli/internal/feedback packages/agentic-cli/internal/cli
 git commit -m "Feat(feedback): add feedback report"
 ```
 
@@ -1186,8 +1188,8 @@ git commit -m "Feat(feedback): add feedback report"
 - Create: `scripts/test-init.sh`
 
 **Interfaces:**
-- Consumes: release artifact naming convention `agent-task-ops_<os>_<arch>.tar.gz`
-- Produces: `~/.agentic-ops/bin/agent-task-ops`
+- Consumes: release artifact naming convention `agentic-cli_<os>_<arch>.tar.gz`
+- Produces: `~/.agentic-ops/bin/agentic-cli`
 
 - [x] **Step 1: Add bootstrap script**
 
@@ -1218,15 +1220,15 @@ esac
 
 mkdir -p "$BIN_DIR"
 
-cat > "$BIN_DIR/agent-task-ops" <<'SH'
+cat > "$BIN_DIR/agentic-cli" <<'SH'
 #!/usr/bin/env sh
-echo '{"ok":false,"operation":"install","code":"binary_not_installed","message":"agent-task-ops release binary has not been downloaded in this first-stage bootstrap"}'
+echo '{"ok":false,"operation":"install","code":"binary_not_installed","message":"agentic-cli release binary has not been downloaded in this first-stage bootstrap"}'
 exit 1
 SH
 
-chmod +x "$BIN_DIR/agent-task-ops"
+chmod +x "$BIN_DIR/agentic-cli"
 
-printf '{"ok":true,"operation":"install","install_dir":"%s","bin":"%s","target":"%s-%s","version":"%s","next_action":"workspace_init"}\n' "$INSTALL_DIR" "$BIN_DIR/agent-task-ops" "$target_os" "$target_arch" "$VERSION"
+printf '{"ok":true,"operation":"install","install_dir":"%s","bin":"%s","target":"%s-%s","version":"%s","next_action":"workspace_init"}\n' "$INSTALL_DIR" "$BIN_DIR/agentic-cli" "$target_os" "$target_arch" "$VERSION"
 ```
 
 This script is a first-stage bootstrap stub that does not download a real binary. Replace the embedded stub with real release download logic when release artifacts exist.
@@ -1245,10 +1247,10 @@ trap 'rm -rf "$tmp_home"' EXIT
 HOME="$tmp_home" bash scripts/init.sh > "$tmp_home/out.json"
 
 grep '"ok":true' "$tmp_home/out.json"
-test -x "$tmp_home/.agentic-ops/bin/agent-task-ops"
+test -x "$tmp_home/.agentic-ops/bin/agentic-cli"
 ```
 
-Run: `bash scripts/test-init.sh`  
+Run: `bash scripts/test-init.sh`
 Expected: command exits 0 and prints the matched JSON line containing `"ok":true`.
 
 - [x] **Step 3: Commit**
@@ -1265,7 +1267,7 @@ git commit -m "Feat(install): add bootstrap installer"
 - Modify: `docs/examples/end-to-end-demo.md`
 
 **Interfaces:**
-- Consumes: `agent-task-ops` command from `go run ./packages/agent-task-ops/cmd/agent-task-ops`
+- Consumes: `agentic-cli` command from `go run ./packages/agentic-cli/cmd/agentic-cli`
 - Produces: local fake flow evidence that install, workspace init, agent init, list tasks, takeover, write evidence, feedback report produce JSON.
 
 - [x] **Step 1: Add local fake flow script**
@@ -1276,7 +1278,7 @@ Create `tests/e2e/local-fake-flow.sh`:
 #!/usr/bin/env bash
 set -euo pipefail
 
-cmd="go run ./packages/agent-task-ops/cmd/agent-task-ops"
+cmd="go run ./packages/agentic-cli/cmd/agentic-cli"
 
 $cmd --version | grep '"operation":"version"'
 $cmd workspace init --workspace tapstate | grep '"operation":"workspace_init"'
@@ -1287,7 +1289,7 @@ $cmd write-evidence --workspace tapstate --run-id TAP-123-takeover-2026072110301
 $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"operation":"feedback_report"'
 ```
 
-Run: `bash tests/e2e/local-fake-flow.sh`  
+Run: `bash tests/e2e/local-fake-flow.sh`
 Expected: all commands exit 0.
 
 - [x] **Step 2: Update demo doc with fake flow command**
@@ -1317,6 +1319,7 @@ git commit -m "Test(e2e): add local fake flow"
 - 所有 CLI 成功输出包含 `ok: true` 和 `operation`。
 - 所有 CLI 失败输出包含 `ok: false`、`operation`、`code`、`message`。
 - fake takeover 输出包含 `run_id`、`task_type`、`current_stage`、`next_action`。
+- 后续真实 Jira 接管 gate 必须校验 assignee、`current_agent_id`、`task_class` 和 `process_id`；当前 fake flow 只验证本地最小闭环。
 - 没有真实 Jira / GitHub 写操作。
 - 没有 secrets、tokens、private keys 或原始敏感日志。
 
@@ -1329,7 +1332,13 @@ git commit -m "Test(e2e): add local fake flow"
 - Jira issue get。
 - Jira comment write。
 - workspace profile 中 Jira 字段映射。
-- owner 匹配 gate。
+- Standard Process Registry 的机器可读契约。
+- task class 到 process id 的映射。
+- owner / assignee 匹配 gate。
+- `agent_id` 初始化和持久化。
+- `current_agent_id` 接管写入、执行过程校验和完成清理。
+- `takeover_at`、`completed_at` 和 `current_agent_id_cleared` 回写。
+- AIAgent 结构化事件上报字段扩展，包括 `agent_id`、`current_agent_id`、`task_class`、`process_id` 和 `current_agent_id_cleared`。
 
 不要在第一阶段本地 fake flow 中混入真实 Jira 接入。
 

@@ -89,7 +89,7 @@ if [ -n "$RELEASE_ROOT" ]; then
   fi
 
   release_version="$(basename "$release_dir")"
-  binary_package="$release_dir/agent-task-ops_${release_version}_${target_os}-${target_arch}.tar.gz"
+  binary_package="$release_dir/agentic-cli_${release_version}_${target_os}-${target_arch}.tar.gz"
   asset_package="$release_dir/agentic-ops-assets_${release_version}.tar.gz"
   if [ ! -f "$binary_package" ]; then
     echo "binary package not found: $binary_package" >&2
@@ -103,21 +103,21 @@ if [ -n "$RELEASE_ROOT" ]; then
   tmp_dir="$(mktemp -d)"
   trap 'rm -rf "$tmp_dir"' EXIT
   tar -xzf "$binary_package" -C "$tmp_dir"
-  install -m 0755 "$tmp_dir/agent-task-ops" "$BIN_DIR/agent-task-ops"
+  install -m 0755 "$tmp_dir/agentic-cli" "$BIN_DIR/agentic-cli"
 
   tar -xzf "$asset_package" -C "$tmp_dir"
-  "$BIN_DIR/agent-task-ops" assets install --source "$tmp_dir/assets" --install-dir "$INSTALL_DIR" --version "$release_version" >/dev/null
+  "$BIN_DIR/agentic-cli" assets install --source "$tmp_dir/assets" --install-dir "$INSTALL_DIR" --version "$release_version" >/dev/null
 
-  printf '{"ok":true,"operation":"install","install_dir":"%s","bin":"%s","target":"%s-%s","version":"%s","source":"local_release","next_action":"workspace_init"}\n' "$INSTALL_DIR" "$BIN_DIR/agent-task-ops" "$target_os" "$target_arch" "$release_version"
+  printf '{"ok":true,"operation":"install","install_dir":"%s","bin":"%s","target":"%s-%s","version":"%s","source":"local_release","next_action":"workspace_init"}\n' "$INSTALL_DIR" "$BIN_DIR/agentic-cli" "$target_os" "$target_arch" "$release_version"
   exit 0
 fi
 
-cat > "$BIN_DIR/agent-task-ops" <<'SH'
+cat > "$BIN_DIR/agentic-cli" <<'SH'
 #!/usr/bin/env sh
-echo '{"ok":false,"operation":"install","code":"binary_not_installed","message":"agent-task-ops release binary has not been downloaded in this first-stage bootstrap"}'
+echo '{"ok":false,"operation":"install","code":"binary_not_installed","message":"agentic-cli release binary has not been downloaded in this first-stage bootstrap"}'
 exit 1
 SH
 
-chmod +x "$BIN_DIR/agent-task-ops"
+chmod +x "$BIN_DIR/agentic-cli"
 
-printf '{"ok":true,"operation":"install","install_dir":"%s","bin":"%s","target":"%s-%s","version":"%s","next_action":"workspace_init"}\n' "$INSTALL_DIR" "$BIN_DIR/agent-task-ops" "$target_os" "$target_arch" "$VERSION"
+printf '{"ok":true,"operation":"install","install_dir":"%s","bin":"%s","target":"%s-%s","version":"%s","next_action":"workspace_init"}\n' "$INSTALL_DIR" "$BIN_DIR/agentic-cli" "$target_os" "$target_arch" "$VERSION"

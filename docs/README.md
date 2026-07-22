@@ -25,12 +25,14 @@
 ## 产品流程
 
 - [用户故事](user-stories/agenticops-user-stories.md)
+- [标准流程注册处](processes/standard-process-registry.md)
 - [反馈闭环](workflows/feedback-loop.md)
 - [端到端演示](examples/end-to-end-demo.md)
 
 ## 契约与配置
 
 - [操作契约](contracts/operation-contract.md)
+- [AI 操作任务表单标准](forms/task-form-standard.md)
 - [工作流配置](profiles/workflow-profile.md)
 - [CLI 运行时](runtime/cli-runtime.md)
 - [版本号设计](runtime/versioning.md)
@@ -43,4 +45,4 @@
 
 ## 当前阶段
 
-当前仓库已进入第一阶段本地实现。`agent-task-ops` Go CLI 已支持本地 fake flow、本地资产安装和本地 release 打包；真实 Jira / GitHub 写操作、push、PR、merge 和发布仍未接入。本文档集合中的能力以当前源码、测试和命令输出为准。
+当前仓库已进入第一阶段本地实现。`agentic-cli` Go CLI 已支持本地 fake flow、本地资产安装和本地 release 打包；真实 Jira / GitHub 写操作、push、PR、merge 和发布仍未接入。本文档集合中的能力以当前源码、测试和命令输出为准。

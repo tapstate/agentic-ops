@@ -39,7 +39,7 @@ RES-v0.1.3-a68372d
 
 ## 3. 运行状态
 
-版本号第一段包含运行状态，同时 `agent-task-ops --version` 仍必须输出独立的 `version_state` 字段，方便机器稳定解析。
+版本号第一段包含运行状态，同时 `agentic-cli --version` 仍必须输出独立的 `version_state` 字段，方便机器稳定解析。
 
 | `version_state` | 含义 | 生成方式 |
 | --- | --- | --- |
@@ -47,7 +47,7 @@ RES-v0.1.3-a68372d
 | `DEV` | 开发编译版 | `scripts/build.sh` |
 | `RES` | 正式 release 包 | `scripts/release.sh` |
 
-`agent-task-ops --version` 必须输出：
+`agentic-cli --version` 必须输出：
 
 ```json
 {
@@ -162,6 +162,6 @@ bash scripts/test-build-release.sh
 - `scripts/release.sh` 生成 `RES` 产物。
 - 临时 Git 仓库中从 `v0.1` tag 自动计算提交计数。
 - 没有迭代 tag 时版本生成失败并提示创建 tag。
-- `agent-task-ops --version` 输出 `version_state`、`iteration_version`、`commit_index`、`commit` 和 `build_time`。
+- `agentic-cli --version` 输出 `version_state`、`iteration_version`、`commit_index`、`commit` 和 `build_time`。
 - `scripts/build.sh` 和 `scripts/release.sh` 拒绝手工指定完整版本。
 - release manifest 写入 `version_state=RES`、`iteration_version` 和 `commit_index`。

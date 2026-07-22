@@ -14,6 +14,7 @@ AgenticOps 开发必须遵守：
 - 小步交付：每次变更只解决一个明确设计问题。
 - 证据优先：做结论前先读取当前文件、命令输出或权威文档。
 - 不猜测外部事实：Jira 字段、GitHub 仓库、工作空间路径、权限和状态映射必须来自 profile、配置或用户确认。
+- Jira 交互语言一致：写入 Jira 的标题、描述、评论、工作日志、evidence 正文、阻塞说明和补卡说明必须使用中文；字段名、状态名、transition 名称和 issue key 可以保留原始值。
 - 不绕过门禁：任何 push、PR、merge、发布和规则自动修改都必须人工确认。
 - 不混淆资料边界：全局资料、安装目录、项目 AI 工作空间和任务产物必须分开。
 
@@ -35,7 +36,7 @@ AgenticOps 开发必须遵守：
 
 - CLI Runtime 第一阶段使用 Go 作为主实现语言。
 - shell 只用于 `curl | bash` 安装引导，不承载业务逻辑。
-- CLI 入口统一为 `agent-task-ops`。
+- CLI 入口统一为 `agentic-cli`。
 - Go 代码应拆分为清晰的 command、contract、policy、adapter、workspace 和 feedback 模块，不写巨大单文件。
 - stdout 只输出结构化 JSON。
 - stderr 输出人类诊断日志。

@@ -10,6 +10,7 @@
 - `docs/user-stories/agenticops-user-stories.md`
 - `docs/development-style.md`
 - `docs/ai-working-rules.md`
+- `docs/processes/standard-process-registry.md`
 - `docs/strategy/positioning.md`
 - `docs/runtime/cli-runtime.md`
 - `docs/runtime/problem-resolution-and-update.md`
@@ -18,9 +19,9 @@
 
 ## 2. 产品边界
 
-AgenticOps 是把公司事务处理方式沉淀成 AI 可执行标准流程的 AI 执行控制体系。
+AgenticOps 是把公司员工执行标准沉淀成 AI 可执行标准流程的 AI 执行控制体系。
 
-第一阶段先落地研发 Jira 任务：帮助研发操作 AIAgent 从 Jira 接管任务到完成任务。不同任务可以对应不同流程。AgenticOps 必须通过 AI 员工手册、Operation Contract、Workflow Profile、Policy / Gate、Runbook、Templates、事件日志、evidence 和 feedback report 管理这些流程差异，让执行过程可恢复、可复盘、可分析，并把关键状态和关键信息回写到正确位置。
+第一阶段先落地研发 Jira 任务：帮助研发操作 AIAgent 从 Jira 接管任务到完成任务。不同任务必须先分类，再进入对应标准流程。AgenticOps 必须通过 Standard Process Registry、AI 员工手册、Operation Contract、Task Form Standard、Workflow Profile、Policy / Gate、Runbook、Templates、事件日志、evidence 和 feedback report 管理这些流程差异，让执行过程可恢复、可复盘、可分析，并把关键状态、关键信息、表单数据和审查结论回写到正确位置。
 
 AgenticOps 必须遵守：
 
@@ -31,7 +32,10 @@ AgenticOps 必须遵守：
 - 不以全自动开发作为第一阶段目标。
 - 不把某个具体 Jira workflow 硬编码为核心模型。
 - 不把所有任务强行压成同一条固定执行流程。
+- 不跳过任务分类直接执行开发。
 - 不依赖员工记住所有标准流程细节。
+- 不绕过研发 owner、reviewer、QA、运维、安全等专业角色在对应节点的审查责任。
+- 不把尚未成熟的流程判断直接固化为脚本或 CLI 命令。
 
 AgenticOps 第一阶段只追求跑通真实、可控、可复用的主链路：
 
@@ -40,6 +44,7 @@ Jira issue 已进入迭代
 -> 研发 owner 手动触发 AI
 -> AI 拉取 owner 名下待办
 -> 研发 owner 选择一个 issue
+-> AI 识别任务分类并选择标准流程
 -> AI 执行任务接管 gate
 -> AI 生成 run_id 和接管记录
 -> AI 本地开发与验证
@@ -68,9 +73,13 @@ AgenticOps 必须保持事实源边界清晰：
 执行记录必须覆盖：
 
 - 当前任务类型。
+- 当前任务分类和标准流程编号。
 - 当前阶段。
 - 下一步动作。
 - 人工门禁状态。
+- 当前节点表单状态。
+- 专业审查结论。
+- 重试和重做依据。
 - 关键输入、关键输出和关键失败原因。
 - 已回写的位置，例如 Jira evidence、PR comment、项目 AI 工作空间日志或 feedback report。
 
@@ -80,7 +89,7 @@ AgenticOps 必须保持事实源边界清晰：
 - 缺少 Jira 关键字段或上下文时，阻断接管并输出补全动作和模板。
 - 标准资产不适配时，生成 profile、policy、template 或 runbook 的改进建议。
 - 存在风险、权限不足、标准冲突或连续失败时，转人工确认。
-- 只有确认问题来自 `agent-task-ops` CLI 二进制逻辑错误时，才进入二进制修复发布路径。
+- 只有确认问题来自 `agentic-cli` CLI 二进制逻辑错误时，才进入二进制修复发布路径。
 
 ## 4. 仓库边界
 
@@ -99,7 +108,7 @@ contracts/     Operation Contract 和 schema
 skills/        AgenticOps skills 和 AI 员工工作规则
 handbooks/     AI 员工手册
 profiles/      workflow profile 示例和默认配置
-packages/      agent-task-ops Go CLI runtime
+packages/      agentic-cli Go CLI runtime
 templates/     Jira / PR / evidence 模板
 examples/      端到端演示样例
 tests/         自动化测试
@@ -188,6 +197,7 @@ AI 员工手册必须同时服务：
 AI 员工手册必须覆盖：
 
 - 任务类型：安装、工作空间初始化、AIAgent 初始化、新任务接管、恢复接管、PR comments 修复、工作日志上报、AgenticOps 改进建议。
+- 任务分类：需求变更、缺陷修复、技术任务、排查分析和流程改进等标准分类。
 - 阶段模型：已接收、预检中、等待接管、分析中、开发中、验证中、证据回写中、等待人工确认、阻塞、已交接。
 - 下一步动作：由 operation contract、workspace profile、当前 evidence 和人工门禁共同决定。
 - 工作入口：拉待办、任务接管、继续失败任务、修复 PR comments、回写证据。
@@ -251,8 +261,10 @@ Workflow Profile 负责把 Operation Contract 映射到具体项目流程。
 Workflow Profile 必须能表达：
 
 - Jira base URL、project、JQL。
-- Jira owner、sprint、acceptance criteria、target repo、risk 等字段映射。
+- Jira Form Mapping，把 owner、sprint、acceptance criteria、target repo、risk 等 AgenticOps 标准字段映射到具体 Jira 字段、描述模板、评论模板或 workspace 配置。
 - Jira 状态和 transition 映射。
+- 专业审查节点和对应角色，例如研发 owner、reviewer、QA、运维或安全。
+- 每个关键阶段允许重试还是必须重做前序表单。
 - GitHub organization 和 repo 映射。
 - 本地源码路径。
 - 允许的写操作。
@@ -270,13 +282,13 @@ shell 只用于安装引导，例如 `curl | bash` 的 `init.sh`。业务逻辑�
 统一入口为：
 
 ```sh
-agent-task-ops
+agentic-cli
 ```
 
 推荐安装位置：
 
 ```text
-~/.agentic-ops/bin/agent-task-ops
+~/.agentic-ops/bin/agentic-cli
 ```
 
 CLI 必须遵守：
@@ -298,9 +310,19 @@ linux-amd64
 linux-arm64
 ```
 
-安装 bootstrap 允许依赖 `bash`、`curl` 和系统解压工具。`agent-task-ops` 运行时不得依赖 `jq` 或本地 Python 环境。
+安装 bootstrap 允许依赖 `bash`、`curl` 和系统解压工具。`agentic-cli` 运行时不得依赖 `jq` 或本地 Python 环境。
 
-`agent-task-ops preflight` 必须检查 OS、CPU 架构、GitHub CLI、GitHub 登录状态、Jira 凭证、workspace profile 和当前业务仓库匹配关系。
+`agentic-cli preflight` 必须检查 OS、CPU 架构、GitHub CLI、GitHub 登录状态、Jira 凭证、workspace profile 和当前业务仓库匹配关系。
+
+CLI operation 和脚本入口必须遵守成熟度边界：
+
+- 成熟固化的交互逻辑可以沉淀为原子化 operation。
+- 脚本入口只做受控编排或调用，不承载 Jira、GitHub、Git、policy、gate、evidence 或 feedback 的业务判断。
+- 原子 operation 必须输入输出稳定、失败码明确、副作用可审计。
+- 原子 operation 必须能说明失败后应重试、重做、阻断还是转人工。
+- 尚未稳定的流程判断必须先进入 runbook、workflow profile、policy 草案或 feedback proposal。
+- 框架负责大的流程环节、门禁、状态和演进机制，不把每个任务的临场细节写死。
+- AIAgent 在具体环节内执行任务并沉淀经验，周期性复盘再决定是否固化为标准资产。
 
 ## 11. Git 和 GitHub 规则
 
@@ -354,7 +376,7 @@ AgenticOps 必须包含 AIAgent 反馈通道，用于按天分析执行日志并
 Go CLI 执行 operation
 -> 产生结构化事件日志
 -> 每天按 workspace 汇总
--> AIAgent 分析失败、卡点、重复人工确认、规则缺口
+-> AIAgent 分析失败、卡点、重复人工确认、专业审查退回、重试、重做、有效经验和规则缺口
 -> 生成改进建议
 -> 人确认后更新 AgenticOps 规则 / 手册 / contracts / Go CLI
 ```
@@ -421,6 +443,8 @@ Jira / GitHub 写操作必须可审计。任何写操作都必须关联 operatio
 - 产品名、角色名和工具名，例如 `AgenticOps`、`AIAgent`、`Jira`、`GitHub`、`CLI`。
 - 命令、配置字段、协议字段、文件名和目录名。
 - 用户故事、任务或契约的稳定编号，例如 `US-001`、`run_id`。
+
+Jira 交互中的人可见内容必须使用中文，包括标题、描述、评论、工作日志、evidence 正文、阻塞说明和补卡说明。Jira 字段名、状态名、transition 名称、issue key、命令、配置字段和协议字段可以保留原始英文或缩写。
 
 当规则变化影响 AIAgent 行为时，必须同步更新：
 

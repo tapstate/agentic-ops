@@ -1,6 +1,6 @@
 # 设计与实现审阅清单
 
-本文用于审阅 AgenticOps 第一阶段设计和当前本地实现是否一致。当前仓库已进入 `agent-task-ops` Go CLI 本地 fake flow 实现阶段；真实 Jira / GitHub 写操作、push、PR、merge 和发布仍未接入。
+本文用于审阅 AgenticOps 第一阶段设计和当前本地实现是否一致。当前仓库已进入 `agentic-cli` Go CLI 本地 fake flow 实现阶段；真实 Jira / GitHub 写操作、push、PR、merge 和发布仍未接入。
 
 ## 1. 建议阅读顺序
 

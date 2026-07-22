@@ -16,6 +16,9 @@ Evidence 必须：
 - 关联任务类型、当前阶段和下一步动作。
 - 说明当前阶段。
 - 说明下一步。
+- 说明当前节点已输出或更新的标准表单字段。
+- 说明专业审查结论、重试依据或重做起点。
+- 写入 Jira 的标题、描述、评论、工作日志、evidence 正文、阻塞说明和补卡说明必须使用中文。
 - 不包含 secrets、tokens、private keys、原始敏感日志、完整 Jira 描述或敏感代码片段。
 
 ## 3. 任务接管成功
@@ -58,6 +61,8 @@ AI 员工将读取目标仓库上下文并开始本地开发。未经研发 owne
 - 当前阶段: `takeover_gate`
 - 失败码: `<code>`
 - 下一步: `<next_action>`
+- 可重试: `<retryable>`
+- 重做起点: `<redo_from_stage>`
 
 ### 失败原因
 
@@ -84,6 +89,8 @@ AI 员工将读取目标仓库上下文并开始本地开发。未经研发 owne
 - 当前阶段: `<current_stage>`
 - 阻塞码: `<code>`
 - 下一步: `<next_action>`
+- 可重试: `<retryable>`
+- 重做起点: `<redo_from_stage>`
 
 ### 阻塞原因
 
@@ -109,6 +116,7 @@ AI 员工将读取目标仓库上下文并开始本地开发。未经研发 owne
 - 运行 ID: `<run_id>`
 - 当前阶段: `development_completed`
 - 下一步: `request_owner_confirmation`
+- 已更新表单: `implementation_summary`、`verification_result`、`residual_risk`
 
 ### 变更摘要
 
@@ -127,7 +135,35 @@ AI 员工将读取目标仓库上下文并开始本地开发。未经研发 owne
 等待研发 owner 确认是否允许 push / PR。
 ```
 
-## 7. 反馈建议
+## 7. 专业审查退回
+
+```markdown
+## 专业审查退回
+
+- 事项: `<issue-key>`
+- 工作空间: `<workspace>`
+- 任务类型: `<task_type>`
+- 运行 ID: `<run_id>`
+- 审查节点: `<review-gate>`
+- 审查角色: `<review-role>`
+- 当前阶段: `<current_stage>`
+- 下一步: `<next_action>`
+- 重做起点: `<redo_from_stage>`
+
+### 审查结论
+
+`<reviewer-decision>`
+
+### 需要处理
+
+- `<reviewer-required-action>`
+
+### 下一步
+
+AI 员工将按审查结论修复、重新验证，并在必要时重做受影响阶段表单。
+```
+
+## 8. 反馈建议
 
 ```markdown
 ## AgenticOps 改进建议

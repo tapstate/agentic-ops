@@ -8,13 +8,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/assets"
-	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/config"
-	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/evidence"
-	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/feedback"
-	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/jira"
-	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/output"
-	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/workspace"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/assets"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/config"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/evidence"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/feedback"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/output"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/workspace"
 )
 
 var Version = "SRC-source"

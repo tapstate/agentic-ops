@@ -8,7 +8,7 @@ workspace_root="$(mktemp -d)"
 trap 'rm -rf "$workspace_root"' EXIT
 export AGENTIC_OPS_WORKSPACE_ROOT="$workspace_root"
 
-cmd="go run ./packages/agent-task-ops/cmd/agent-task-ops"
+cmd="go run ./packages/agentic-cli/cmd/agentic-cli"
 install_root="$workspace_root/install"
 
 $cmd --version | grep '"operation":"version"'

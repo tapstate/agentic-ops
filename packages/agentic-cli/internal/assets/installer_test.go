@@ -45,7 +45,7 @@ func TestInstallPreservesPreviousCurrentVersion(t *testing.T) {
 
 	installDir := t.TempDir()
 	writeTestFile(t, filepath.Join(installDir, "current.json"), `{
-  "agent_task_ops_version": "RES-v0.1.1-a68372d",
+  "agentic_cli_version": "RES-v0.1.1-a68372d",
   "asset_version": "RES-v0.1.1-a68372d"
 }
 `)

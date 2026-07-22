@@ -26,13 +26,13 @@ AGENTIC_OPS_COMMIT="$commit" \
   bash scripts/release.sh
 
 release_dir="$tmp_dir/release/$version"
-test -f "$release_dir/agent-task-ops_${version}_${target_name}.tar.gz"
+test -f "$release_dir/agentic-cli_${version}_${target_name}.tar.gz"
 test -f "$release_dir/agentic-ops-assets_${version}.tar.gz"
 
 deploy_home="$tmp_dir/home"
 AGENTIC_OPS_RELEASE_DIR="$tmp_dir/release" HOME="$deploy_home" bash scripts/init.sh | grep "\"version\":\"$version\""
 
-bin="$deploy_home/.agentic-ops/bin/agent-task-ops"
+bin="$deploy_home/.agentic-ops/bin/agentic-cli"
 test -x "$bin"
 "$bin" --version | grep "\"version\":\"$version\""
 "$bin" --version | grep '"version_state":"RES"'
