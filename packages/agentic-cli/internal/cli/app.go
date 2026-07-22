@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -311,7 +312,12 @@ func runUpdateApply(args []string, stdout io.Writer) int {
 
 func runListTasks(args []string, stdout io.Writer) int {
 	workspaceName := readFlag(args, "--workspace", "default")
-	issues := jira.FakeClient{}.ListTasks(workspaceName)
+	workspaceProfile := takeoverProfile(workspaceName)
+	client := jiraClient(workspaceName, workspaceProfile)
+	issues, err := client.SearchIssues(context.Background(), workspaceName, workspaceProfile.Jira.TaskQuery)
+	if err != nil {
+		return writeJSON(stdout, output.Failure("list_tasks", "jira_search_failed", err.Error(), "请检查 Jira adapter 配置"))
+	}
 	return writeJSON(stdout, output.Success("list_tasks", map[string]any{
 		"workspace":   workspaceName,
 		"tasks":       issues,
@@ -632,12 +638,20 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 	}
 	workspaceName := readFlag(args, "--workspace", "default")
 	issueKey := args[1]
-	issue, ok := jira.FakeClient{}.GetIssue(workspaceName, issueKey)
+	workspaceProfile := takeoverProfile(workspaceName)
+	client := jiraClient(workspaceName, workspaceProfile)
+	issue, ok, err := client.GetIssueByKey(context.Background(), workspaceName, issueKey)
+	if err != nil {
+		return writeJSON(stdout, output.Failure("takeover_task", "jira_issue_read_failed", err.Error(), "请检查 Jira adapter 配置和 issue 权限"))
+	}
 	if !ok {
 		return writeJSON(stdout, output.Failure("takeover_task", "issue_not_found", "未找到 Jira issue", "请检查 issue key"))
 	}
-	workspaceProfile := takeoverProfile(workspaceName)
-	decision := jira.ValidateTakeover(issue, workspaceProfile, currentUser(), agentID())
+	currentJiraUser, err := client.CurrentUser(context.Background())
+	if err != nil {
+		return writeJSON(stdout, output.Failure("takeover_task", "jira_current_user_failed", err.Error(), "请检查 Jira adapter 登录状态"))
+	}
+	decision := jira.ValidateTakeover(issue, workspaceProfile, currentJiraUser, agentID())
 	if !decision.OK {
 		_ = appendWorkspaceEventWithCode(workspaceName, "", issue.Key, "task_takeover", "takeover_task", decision.CurrentStage, decision.NextAction, decision.Code, "takeover_gate", false, true)
 		return writeJSON(stdout, output.FailureWithContext("takeover_task", output.FailureContext{
@@ -1126,6 +1140,10 @@ func takeoverProfile(workspaceName string) profile.Profile {
 			"Done":        "completed",
 		},
 	}
+}
+
+func jiraClient(workspaceName string, workspaceProfile profile.Profile) jira.Client {
+	return jira.FakeClient{}
 }
 
 func currentUser() string {

@@ -1,6 +1,16 @@
 package jira
 
+import "context"
+
 type FakeClient struct{}
+
+func (FakeClient) CurrentUser(ctx context.Context) (string, error) {
+	return "current-user", nil
+}
+
+func (client FakeClient) SearchIssues(ctx context.Context, workspace string, jql string) ([]Issue, error) {
+	return client.ListTasks(workspace), nil
+}
 
 func (FakeClient) ListTasks(workspace string) []Issue {
 	return []Issue{
@@ -26,6 +36,19 @@ func (FakeClient) GetIssue(workspace string, key string) (Issue, bool) {
 		}
 	}
 	return Issue{}, false
+}
+
+func (client FakeClient) GetIssueByKey(ctx context.Context, workspace string, key string) (Issue, bool, error) {
+	issue, ok := client.GetIssue(workspace, key)
+	return issue, ok, nil
+}
+
+func (FakeClient) AddComment(ctx context.Context, key string, body string) error {
+	return nil
+}
+
+func (FakeClient) UpdateFields(ctx context.Context, key string, fields map[string]any) error {
+	return nil
 }
 
 func fakeIssues(workspace string) []Issue {

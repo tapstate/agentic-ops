@@ -581,6 +581,51 @@ bash tests/e2e/local-fake-flow.sh
 
 Expected: all commands exit 0.
 
+### Task 8.5: Real Jira REST Client Contract Baseline
+
+Scope:
+
+- Create: `packages/agentic-cli/internal/jira/adapter.go`
+- Create: `packages/agentic-cli/internal/jira/real.go`
+- Create: `packages/agentic-cli/internal/jira/real_test.go`
+- Update: `packages/agentic-cli/internal/jira/fake.go`
+- Update: `packages/agentic-cli/internal/cli/app.go`
+
+Definition:
+
+- Jira package defines an adapter interface for current user, JQL search, issue get, comment write and controlled field update.
+- Fake client implements the same adapter boundary and remains the default CLI adapter.
+- Real client builds Jira Cloud REST API requests for `/rest/api/3/myself`, `/rest/api/3/search/jql`, `/rest/api/3/issue/{issueIdOrKey}`, `/rest/api/3/issue/{issueIdOrKey}/comment` and issue field updates.
+- Real client tests use an in-process `RoundTripper`, not a real Jira server.
+- CLI `list-tasks` and `takeover-task` use the adapter interface instead of directly coupling to `FakeClient`.
+- This baseline does not enable real Jira writes in CLI runtime; that still requires policy / gate / confirmation wiring.
+
+- [x] **Step 1: Write adapter and real client tests**
+
+Covered current user lookup, JQL search field mapping, issue field update and ADF comment payloads.
+
+- [x] **Step 2: Implement adapter interface and fake compatibility**
+
+Added `jira.Client` and made fake client implement the adapter boundary while preserving existing fake helper methods.
+
+- [x] **Step 3: Implement real Jira REST client**
+
+Added Basic Auth request construction, profile-based field selection, Jira issue field mapping, ADF comment body generation and controlled `fields` update payloads.
+
+- [x] **Step 4: Wire CLI to adapter boundary**
+
+Updated `list-tasks` and `takeover-task` to use `jira.Client`; default factory still returns fake adapter.
+
+- [x] **Step 5: Verification**
+
+Run:
+
+```sh
+go test ./packages/agentic-cli/internal/jira ./packages/agentic-cli/internal/cli
+```
+
+Expected: all commands exit 0.
+
 ### Task 9: Takeover Form Event Baseline
 
 Scope:
@@ -868,7 +913,7 @@ Expected: all commands exit 0.
 
 ## 7. Later Phases
 
-- Later Phase 3: real Jira adapter and Jira-side `current_agent_id` writeback / cleanup.
+- Later Phase 3: guarded real Jira adapter activation and Jira-side `current_agent_id` writeback / cleanup.
 - Later Phase 4: remote update manifest/artifact handling, real policy gate audit events and real external doctor checks.
 - Phase 5: completion cleanup and problem-resolution e2e.
 
