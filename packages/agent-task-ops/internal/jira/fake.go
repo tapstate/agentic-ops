@@ -15,8 +15,8 @@ func (FakeClient) ListTasks(workspace string) []Issue {
 	}
 }
 
-func (FakeClient) GetIssue(key string) (Issue, bool) {
-	for _, issue := range (FakeClient{}).ListTasks("tapstate") {
+func (FakeClient) GetIssue(workspace string, key string) (Issue, bool) {
+	for _, issue := range (FakeClient{}).ListTasks(workspace) {
 		if issue.Key == key {
 			return issue, true
 		}

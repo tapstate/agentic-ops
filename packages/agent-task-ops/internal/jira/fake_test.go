@@ -17,11 +17,14 @@ func TestFakeClientListsTaskWithRequiredFields(t *testing.T) {
 }
 
 func TestFakeClientGetsIssue(t *testing.T) {
-	issue, ok := FakeClient{}.GetIssue("TAP-123")
+	issue, ok := FakeClient{}.GetIssue("CYNTEX", "TAP-123")
 	if !ok {
 		t.Fatal("expected TAP-123")
 	}
 	if issue.Key != "TAP-123" {
 		t.Fatalf("Key = %s", issue.Key)
+	}
+	if issue.TargetRepo != "CYNTEX/example-repo" {
+		t.Fatalf("TargetRepo = %s", issue.TargetRepo)
 	}
 }

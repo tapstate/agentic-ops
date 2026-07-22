@@ -80,10 +80,9 @@ func parseCommitIndex(value string) int {
 }
 
 func runPreflight(args []string, stdout io.Writer) int {
-	home, _ := os.UserHomeDir()
 	return writeJSON(stdout, output.Success("preflight", map[string]any{
 		"workspace":   readFlag(args, "--workspace", "default"),
-		"install_dir": config.DefaultInstallDir(home),
+		"install_dir": readInstallDir(args),
 		"go_runtime":  "not_required_for_installed_cli",
 		"jira":        "fake",
 		"github":      "not_used_in_phase_one",
@@ -167,7 +166,7 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 	}
 	workspaceName := readFlag(args, "--workspace", "default")
 	issueKey := args[1]
-	issue, ok := jira.FakeClient{}.GetIssue(issueKey)
+	issue, ok := jira.FakeClient{}.GetIssue(workspaceName, issueKey)
 	if !ok {
 		return writeJSON(stdout, output.Failure("takeover_task", "issue_not_found", "未找到 Jira issue", "请检查 issue key"))
 	}

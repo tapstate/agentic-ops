@@ -41,6 +41,8 @@ func TestUnknownCommandFailsWithStableCode(t *testing.T) {
 }
 
 func TestPreflightOutputsInstallDirAndNextAction(t *testing.T) {
+	installDir := t.TempDir()
+	t.Setenv("AGENTIC_OPS_HOME", installDir)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"preflight", "--workspace", "tapstate"}, &stdout, &stderr)
@@ -49,6 +51,7 @@ func TestPreflightOutputsInstallDirAndNextAction(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "operation", "preflight")
 	assertJSONField(t, stdout.String(), "workspace", "tapstate")
+	assertJSONField(t, stdout.String(), "install_dir", installDir)
 	assertJSONField(t, stdout.String(), "go_runtime", "not_required_for_installed_cli")
 	assertJSONField(t, stdout.String(), "next_action", "workspace_init")
 }

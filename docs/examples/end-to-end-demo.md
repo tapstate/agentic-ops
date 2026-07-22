@@ -152,3 +152,11 @@ bash tests/e2e/local-fake-flow.sh
 ```
 
 该命令使用 fake Jira 数据跑通本地 CLI 闭环，不执行真实 Jira 或 GitHub 写操作。
+
+第一阶段本地 release 安装闭环验证命令：
+
+```sh
+bash tests/e2e/local-release-install-flow.sh
+```
+
+该命令会编译当前平台二进制、生成本地 release 包、通过 `scripts/init.sh` 安装到临时 `~/.agentic-ops`，再使用安装后的 `agent-task-ops` 完成工作空间初始化、AIAgent 初始化、任务接管、恢复、evidence 写入和反馈报告。
