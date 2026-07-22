@@ -2,7 +2,7 @@
 set -euo pipefail
 
 tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT
+trap 'chmod -R u+w "$tmp_dir" 2>/dev/null || true; rm -rf "$tmp_dir"' EXIT
 
 repo_root="$(pwd)"
 target="$(go env GOOS)/$(go env GOARCH)"

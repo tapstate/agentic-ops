@@ -32,6 +32,9 @@ output:
     type: integer
   failed:
     type: integer
+  missing_fields:
+    type: object
+    optional: true
   report:
     type: string
   next_action:

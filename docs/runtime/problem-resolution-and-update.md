@@ -121,7 +121,7 @@ agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
 | --- | --- | --- |
 | `agentic-cli` 逻辑错误 | `agentic_cli_logic_error` | `doctor`、doctor 显式真实外部检查和 `feedback bundle --redact` 诊断基线已落地。 |
 | Jira 流程状态没适配 | `unknown_jira_status` | `profile validate / update / rollback`、真实 Jira REST 读取映射基线、显式 `--jira-transition-id` transition gate 和 profile 驱动 transition id/name 映射已落地。 |
-| Jira 卡片属性丢失 | `missing_jira_field` | fake Jira 接管 gate 已覆盖必填字段阻断；真实 Jira 字段读取映射基线已落地，补全模板后续实现。 |
+| Jira 卡片属性丢失 | `missing_jira_field` | fake Jira 接管 gate 已覆盖必填字段阻断；真实 Jira 字段读取映射基线、补全模板输出和 feedback report 缺失字段聚合已落地。 |
 | 关键步骤门禁调整 | `policy_gate_required` | `policy validate / update / rollback` 本地基线已落地；真实 Jira 字段写入、Jira comment 写入和显式 transition 写入已要求 `--confirm-real-jira-write`，并记录 `real_jira_write` gate 审计事件。 |
 
 ## 7. 修复路径一：CLI 逻辑错误
@@ -234,7 +234,9 @@ agentic-cli profile rollback --workspace tapstate
   "operation": "takeover_task",
   "code": "missing_target_repo",
   "message": "Jira issue 缺少目标仓库信息",
-  "required_human_action": "请在 Jira 卡片补充目标仓库，或维护 workspace repo 映射"
+  "required_human_action": "请在 Jira 卡片补充目标仓库，或维护 workspace repo 映射",
+  "missing_field": "target_repo",
+  "completion_template": "# Jira 卡片信息缺失\n\nAgenticOps 无法继续接管该任务，因为 Jira 卡片缺少必要信息。\n\n- 缺失字段：`target_repo`\n- 当前 operation：`takeover_task`\n- 建议动作：请补充该字段，或维护 workspace profile 中的字段映射。\n"
 }
 ```
 
@@ -244,7 +246,7 @@ agentic-cli profile rollback --workspace tapstate
 gate 发现必填属性缺失
 -> 停止接管
 -> 生成 required_human_action
--> 可生成 Jira comment 补全模板
+-> 输出 Jira comment 补全模板
 -> 记录 missing_field 事件
 -> feedback report 聚合缺失字段
 -> 提出 Jira 创建模板或字段校验改进建议

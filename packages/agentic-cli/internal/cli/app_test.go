@@ -336,11 +336,20 @@ func TestTakeoverTaskBlocksMissingTargetRepo(t *testing.T) {
 	assertJSONField(t, stdout.String(), "current_stage", "takeover_gate")
 	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
 	assertJSONField(t, stdout.String(), "required_human_action", "请在 Jira 卡片补充目标仓库，或维护 workspace repo 映射")
+	if !strings.Contains(stdout.String(), `"completion_template"`) {
+		t.Fatalf("stdout missing completion_template: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "缺失字段：`target_repo`") {
+		t.Fatalf("stdout missing rendered missing field template: %s", stdout.String())
+	}
 	events, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
 	if err != nil {
 		t.Fatalf("ReadFile events error = %v", err)
 	}
 	if !strings.Contains(string(events), `"code":"missing_target_repo"`) {
+		t.Fatalf("events = %s", string(events))
+	}
+	if !strings.Contains(string(events), `"missing_field":"target_repo"`) {
 		t.Fatalf("events = %s", string(events))
 	}
 	if !strings.Contains(string(events), `"gate_status":"blocked"`) {
@@ -814,6 +823,7 @@ func TestFeedbackReportOutputsReportPath(t *testing.T) {
 	t.Chdir(root)
 	Run([]string{"takeover-task", "TAP-123", "--workspace", "tapstate"}, &bytes.Buffer{}, &bytes.Buffer{})
 	Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", "run-1"}, &bytes.Buffer{}, &bytes.Buffer{})
+	Run([]string{"takeover-task", "TAP-MISSING-REPO", "--workspace", "tapstate"}, &bytes.Buffer{}, &bytes.Buffer{})
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -823,12 +833,15 @@ func TestFeedbackReportOutputsReportPath(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "operation", "feedback_report")
 	assertJSONField(t, stdout.String(), "next_action", "review_proposals")
-	assertJSONNumber(t, stdout.String(), "runs", 2)
+	assertJSONNumber(t, stdout.String(), "runs", 3)
+	if !strings.Contains(stdout.String(), `"missing_fields":{"target_repo":1}`) {
+		t.Fatalf("stdout missing missing_fields: %s", stdout.String())
+	}
 	data, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "daily", "2026-07-21.md"))
 	if err != nil {
 		t.Fatalf("ReadFile report error = %v", err)
 	}
-	if !strings.Contains(string(data), "runs: 2") {
+	if !strings.Contains(string(data), "runs: 3") || !strings.Contains(string(data), "target_repo: 1") {
 		t.Fatalf("report = %s", string(data))
 	}
 }

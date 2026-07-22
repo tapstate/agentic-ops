@@ -69,11 +69,12 @@ agentic-cli policy rollback --workspace <name>
   - 支持 `status_mapping`、`transition_mapping`、`field_mapping` 校验。
   - 未知 Jira 状态必须返回 `unknown_jira_status`，不允许 AIAgent 猜。
 
-- [ ] **Task 5: Jira 卡片属性缺失处理**
+- [x] **Task 5: Jira 卡片属性缺失处理**
   - 对 owner、验收标准、目标仓库、验证方式、风险等级等必填项做 gate。
   - 缺失时停止接管。
   - 输出补全模板和 `required_human_action`。
   - 把 missing field 写入 feedback report 聚合。
+  - Implementation note: `takeover-task` 在 fake / mapped Jira issue 缺少必填项时停止接管，输出 `missing_field`、渲染后的 `completion_template` 和 `required_human_action`；事件日志写入 `missing_field`，`feedback report` 输出并写入缺失字段聚合。
 
 - [ ] **Task 6: Policy / Gate 更新**
   - 实现 `policy validate / update / rollback`。

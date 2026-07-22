@@ -57,6 +57,15 @@ output:
       - proceed
       - ask_owner
       - blocked
+  missing_field:
+    type: string
+    optional: true
+  completion_template:
+    type: string
+    optional: true
+  completion_template_path:
+    type: string
+    optional: true
   form_updates:
     type: object
     fields:

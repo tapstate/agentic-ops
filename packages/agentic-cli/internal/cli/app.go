@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/assets"
@@ -723,15 +724,31 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 	}
 	decision := jira.ValidateTakeover(issue, workspaceProfile, currentJiraUser, agentID())
 	if !decision.OK {
-		_ = appendWorkspaceEventWithCode(workspaceName, "", issue.Key, "task_takeover", "takeover_task", decision.CurrentStage, decision.NextAction, decision.Code, "takeover_gate", false, true)
-		return writeJSON(stdout, output.FailureWithContext("takeover_task", output.FailureContext{
+		missingField := missingJiraFieldName(decision.Code)
+		_ = appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
+			IssueKey:            issue.Key,
+			TaskType:            "task_takeover",
+			Operation:           "takeover_task",
+			CurrentStage:        decision.CurrentStage,
+			NextAction:          decision.NextAction,
+			OK:                  false,
+			Code:                decision.Code,
+			MissingField:        missingField,
+			Gate:                "takeover_gate",
+			GateStatus:          "blocked",
+			HumanGate:           true,
+			RequiresHumanAction: true,
+		})
+		result := output.FailureWithContext("takeover_task", output.FailureContext{
 			Code:                decision.Code,
 			Message:             decision.Message,
 			RequiredHumanAction: decision.RequiredHumanAction,
 			TaskType:            "task_takeover",
 			CurrentStage:        decision.CurrentStage,
 			NextAction:          decision.NextAction,
-		}))
+		})
+		addMissingJiraFieldTemplate(result, decision.Code, "takeover_task")
+		return writeJSON(stdout, result)
 	}
 	runID := feedback.RunID(issue.Key, "task_takeover", fixedNow(), "a8f3")
 	takeoverAt := fixedNow().Format(time.RFC3339)
@@ -793,6 +810,50 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 		"target_repo":      issue.TargetRepo,
 		"next_action":      "proceed",
 	}))
+}
+
+func addMissingJiraFieldTemplate(result map[string]any, code string, operation string) {
+	missingField := missingJiraFieldName(code)
+	if missingField == "" {
+		return
+	}
+	templatePath, template := jiraMissingFieldTemplate()
+	template = strings.ReplaceAll(template, "<missing_field>", missingField)
+	template = strings.ReplaceAll(template, "<operation>", operation)
+	result["missing_field"] = missingField
+	result["completion_template"] = template
+	if templatePath != "" {
+		result["completion_template_path"] = templatePath
+	}
+}
+
+func missingJiraFieldName(code string) string {
+	switch code {
+	case "missing_acceptance_criteria":
+		return "acceptance_criteria"
+	case "missing_target_repo":
+		return "target_repo"
+	case "missing_verification_method":
+		return "verification_method"
+	case "missing_risk_level":
+		return "risk_level"
+	default:
+		return ""
+	}
+}
+
+func jiraMissingFieldTemplate() (string, string) {
+	const fallback = "# Jira 卡片信息缺失\n\nAgenticOps 无法继续接管该任务，因为 Jira 卡片缺少必要信息。\n\n- 缺失字段：`<missing_field>`\n- 当前 operation：`<operation>`\n- 建议动作：请补充该字段，或维护 workspace profile 中的字段映射。\n"
+	root, err := repoRoot()
+	if err != nil {
+		return "", fallback
+	}
+	path := filepath.Join(root, "assets", "templates", "jira-missing-field.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fallback
+	}
+	return path, string(data)
 }
 
 func runResumeTakeover(args []string, stdout io.Writer) int {
@@ -1086,7 +1147,7 @@ func runFeedbackReport(args []string, stdout io.Writer) int {
 	if err := feedback.WriteMarkdown(reportPath, workspaceName, date, report); err != nil {
 		return writeJSON(stdout, output.Failure("feedback_report", "report_write_failed", err.Error(), "请检查工作空间目录权限"))
 	}
-	return writeJSON(stdout, output.Success("feedback_report", map[string]any{
+	payload := map[string]any{
 		"workspace":   workspaceName,
 		"date":        date,
 		"runs":        report.Runs,
@@ -1095,7 +1156,11 @@ func runFeedbackReport(args []string, stdout io.Writer) int {
 		"failed":      report.Failed,
 		"report":      reportPath,
 		"next_action": "review_proposals",
-	}))
+	}
+	if len(report.MissingFields) > 0 {
+		payload["missing_fields"] = report.MissingFields
+	}
+	return writeJSON(stdout, output.Success("feedback_report", payload))
 }
 
 func runFeedbackBundle(args []string, stdout io.Writer) int {

@@ -33,6 +33,7 @@ type Event struct {
 	CurrentAgentIDCleared bool   `json:"current_agent_id_cleared,omitempty"`
 	OK                    bool   `json:"ok"`
 	Code                  string `json:"code,omitempty"`
+	MissingField          string `json:"missing_field,omitempty"`
 	Gate                  string `json:"gate"`
 	GateStatus            string `json:"gate_status"`
 	HumanGate             bool   `json:"human_gate"`
