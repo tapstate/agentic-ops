@@ -135,6 +135,11 @@ func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 			t.Fatalf("stdout missing %s: %s", want, stdout.String())
 		}
 	}
+	assertJSONField(t, stdout.String(), "agent_id", "agentic-cli-local-agent")
+	assertJSONField(t, stdout.String(), "current_agent_id", "agentic-cli-local-agent")
+	assertJSONField(t, stdout.String(), "takeover_at", "2026-07-21T10:30:12Z")
+	assertJSONField(t, stdout.String(), "task_class", "technical_task")
+	assertJSONField(t, stdout.String(), "process_id", "development_change_v1")
 	events, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
 	if err != nil {
 		t.Fatalf("ReadFile events error = %v", err)
@@ -153,6 +158,17 @@ func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 	}
 	if !strings.Contains(string(events), `"gate_status":"passed"`) {
 		t.Fatalf("events = %s", string(events))
+	}
+	for _, want := range []string{
+		`"agent_id":"agentic-cli-local-agent"`,
+		`"current_agent_id":"agentic-cli-local-agent"`,
+		`"takeover_at":"2026-07-21T10:30:12Z"`,
+		`"task_class":"technical_task"`,
+		`"process_id":"development_change_v1"`,
+	} {
+		if !strings.Contains(string(events), want) {
+			t.Fatalf("events missing %s: %s", want, string(events))
+		}
 	}
 }
 

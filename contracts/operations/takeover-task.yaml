@@ -31,6 +31,12 @@ output:
     type: string
   run_id:
     type: string
+  agent_id:
+    type: string
+  current_agent_id:
+    type: string
+  takeover_at:
+    type: string
   task_type:
     type: string
   task_class:
@@ -81,6 +87,7 @@ failure:
 side_effects:
   - may_write_jira_comment
   - may_create_takeover_record
+  - may_write_local_event
   - must_not_modify_code
   - must_not_create_pr
 human_gate:

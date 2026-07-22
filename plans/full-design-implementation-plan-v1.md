@@ -581,9 +581,56 @@ bash tests/e2e/local-fake-flow.sh
 
 Expected: all commands exit 0.
 
+### Task 9: Takeover Form Event Baseline
+
+Scope:
+
+- Update: `packages/agentic-cli/internal/feedback/event.go`
+- Update: `packages/agentic-cli/internal/cli/app.go`
+- Update: `packages/agentic-cli/internal/cli/app_test.go`
+- Update: `contracts/operations/takeover-task.yaml`
+- Update: `tests/e2e/local-fake-flow.sh`
+
+Definition:
+
+- Successful fake takeover returns `agent_id`, `current_agent_id`, `takeover_at`, `task_class` and `process_id`.
+- Successful fake takeover writes the same fields into the local feedback event.
+- This is the local event/form baseline for later real Jira adapter writeback; it does not claim real Jira mutation is implemented.
+
+- [x] **Step 1: Write failing CLI test for takeover form fields**
+
+Assert successful `takeover-task TAP-123 --workspace tapstate` output and event contain:
+
+- `agent_id`
+- `current_agent_id`
+- `takeover_at`
+- `task_class`
+- `process_id`
+
+Expected: FAIL because takeover success does not expose these fields.
+
+- [x] **Step 2: Extend event model and takeover success output**
+
+Add optional fields to feedback events and populate them in successful takeover.
+
+- [x] **Step 3: Update contract and e2e coverage**
+
+`takeover-task.yaml` must declare the new output fields. Local fake flow must assert the current agent binding appears in takeover output.
+
+- [x] **Step 4: Verification**
+
+Run:
+
+```sh
+go test ./...
+bash tests/e2e/local-fake-flow.sh
+```
+
+Expected: all commands exit 0.
+
 ## 6. Later Phases
 
-- Later Phase 3: real Jira adapter, `current_agent_id` writeback and takeover cleanup.
+- Later Phase 3: real Jira adapter, Jira-side `current_agent_id` writeback and takeover cleanup.
 - Phase 4: doctor, feedback bundle, update check/apply, policy validate/update/rollback.
 - Phase 5: completion cleanup and problem-resolution e2e.
 

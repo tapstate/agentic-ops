@@ -381,19 +381,39 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 		}))
 	}
 	runID := feedback.RunID(issue.Key, "task_takeover", fixedNow(), "a8f3")
-	if err := appendWorkspaceEvent(workspaceName, runID, issue.Key, "task_takeover", "takeover_task", "takeover_started", "proceed", true, false); err != nil {
+	takeoverAt := fixedNow().Format(time.RFC3339)
+	currentAgentID := agentID()
+	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
+		RunID:          runID,
+		IssueKey:       issue.Key,
+		TaskType:       "task_takeover",
+		Operation:      "takeover_task",
+		CurrentStage:   "takeover_started",
+		NextAction:     "proceed",
+		AgentID:        currentAgentID,
+		CurrentAgentID: currentAgentID,
+		TakeoverAt:     takeoverAt,
+		TaskClass:      decision.TaskClass,
+		ProcessID:      decision.ProcessID,
+		OK:             true,
+		Gate:           "takeover_task",
+		GateStatus:     "passed",
+	}); err != nil {
 		return writeJSON(stdout, output.Failure("takeover_task", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 	}
 	return writeJSON(stdout, output.Success("takeover_task", map[string]any{
-		"workspace":     workspaceName,
-		"issue_key":     issue.Key,
-		"run_id":        runID,
-		"task_type":     "task_takeover",
-		"task_class":    decision.TaskClass,
-		"process_id":    decision.ProcessID,
-		"current_stage": "takeover_started",
-		"target_repo":   issue.TargetRepo,
-		"next_action":   "proceed",
+		"workspace":        workspaceName,
+		"issue_key":        issue.Key,
+		"run_id":           runID,
+		"agent_id":         currentAgentID,
+		"current_agent_id": currentAgentID,
+		"takeover_at":      takeoverAt,
+		"task_type":        "task_takeover",
+		"task_class":       decision.TaskClass,
+		"process_id":       decision.ProcessID,
+		"current_stage":    "takeover_started",
+		"target_repo":      issue.TargetRepo,
+		"next_action":      "proceed",
 	}))
 }
 
@@ -520,18 +540,9 @@ func appendWorkspaceEvent(workspaceName string, runID string, issueKey string, t
 }
 
 func appendWorkspaceEventWithCode(workspaceName string, runID string, issueKey string, taskType string, operation string, currentStage string, nextAction string, code string, gate string, ok bool, requiresHumanAction bool) error {
-	root, err := workspaceRoot()
-	if err != nil {
-		return err
-	}
-	return feedback.AppendEvent(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), feedback.Event{
-		Timestamp:           fixedNow().Format(time.RFC3339),
-		Workspace:           workspaceName,
+	return appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
 		RunID:               runID,
 		IssueKey:            issueKey,
-		AgentTaskOpsVersion: Version,
-		VersionState:        VersionState,
-		AssetVersion:        readAssetVersion(),
 		TaskType:            taskType,
 		Operation:           operation,
 		CurrentStage:        currentStage,
@@ -543,6 +554,19 @@ func appendWorkspaceEventWithCode(workspaceName string, runID string, issueKey s
 		HumanGate:           requiresHumanAction,
 		RequiresHumanAction: requiresHumanAction,
 	})
+}
+
+func appendWorkspaceEventWithDetails(workspaceName string, event feedback.Event) error {
+	root, err := workspaceRoot()
+	if err != nil {
+		return err
+	}
+	event.Timestamp = fixedNow().Format(time.RFC3339)
+	event.Workspace = workspaceName
+	event.AgentTaskOpsVersion = Version
+	event.VersionState = VersionState
+	event.AssetVersion = readAssetVersion()
+	return feedback.AppendEvent(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), event)
 }
 
 func readAssetVersion() string {
