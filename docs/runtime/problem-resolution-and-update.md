@@ -119,7 +119,7 @@ agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
 
 | 问题类型 | 稳定错误码 | 当前状态 |
 | --- | --- | --- |
-| `agentic-cli` 逻辑错误 | `agentic_cli_logic_error` | 规划中，后续由 `doctor` / `feedback bundle` 辅助定位。 |
+| `agentic-cli` 逻辑错误 | `agentic_cli_logic_error` | `doctor` 本地诊断基线已落地；`feedback bundle` 和真实外部检查后续实现。 |
 | Jira 流程状态没适配 | `unknown_jira_status` | `profile validate / update / rollback` 基线已落地；真实接管 gate 后续实现。 |
 | Jira 卡片属性丢失 | `missing_jira_field` | fake Jira 接管 gate 已覆盖必填字段阻断；真实 Jira 字段读取和补全模板后续实现。 |
 | 关键步骤门禁调整 | `policy_gate_required` | 规划中，后续随 `policy validate / update / rollback` 落地。 |
@@ -383,4 +383,4 @@ asset release
 - `scripts/build.sh`
 - `scripts/release.sh`
 
-本文中的 `doctor`、`feedback bundle`、`update`、`profile update`、`policy update` 和真实 release manifest 仍属于正式使用前必须补齐的目标能力。
+本文中的 `feedback bundle`、`update`、`policy update`、真实外部诊断检查和真实 release manifest 仍属于正式使用前必须补齐的目标能力。

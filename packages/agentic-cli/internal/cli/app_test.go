@@ -56,6 +56,26 @@ func TestPreflightOutputsInstallDirAndNextAction(t *testing.T) {
 	assertJSONField(t, stdout.String(), "next_action", "workspace_init")
 }
 
+func TestDoctorOutputsLocalDiagnosticChecks(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"doctor", "--workspace", "tapstate"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "doctor")
+	assertJSONField(t, stdout.String(), "workspace", "tapstate")
+	assertJSONField(t, stdout.String(), "version", "SRC-source")
+	assertJSONField(t, stdout.String(), "next_action", "continue")
+	assertJSONField(t, stdout.String(), "status", "ok")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "profile", "status"}, "ok")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "policy", "status"}, "ok")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "jira_adapter", "status"}, "ok")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "github", "status"}, "skipped")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "workspace", "status"}, "ok")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "contracts", "status"}, "ok")
+}
+
 func TestWorkspaceInitOutputsNextAction(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
@@ -405,6 +425,25 @@ func assertJSONNumber(t *testing.T, raw string, key string, want float64) {
 	}
 	if got[key] != want {
 		t.Fatalf("%s = %v, want %v; raw = %s", key, got[key], want, raw)
+	}
+}
+
+func assertNestedJSONField(t *testing.T, raw string, path []string, want any) {
+	t.Helper()
+	var got any
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("invalid JSON %q: %v", raw, err)
+	}
+	current := got
+	for _, key := range path {
+		object, ok := current.(map[string]any)
+		if !ok {
+			t.Fatalf("path %v reached non-object %T in raw = %s", path, current, raw)
+		}
+		current = object[key]
+	}
+	if current != want {
+		t.Fatalf("%v = %v, want %v; raw = %s", path, current, want, raw)
 	}
 }
 

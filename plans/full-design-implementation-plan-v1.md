@@ -675,10 +675,61 @@ bash tests/e2e/local-fake-flow.sh
 
 Expected: all commands exit 0.
 
-## 6. Later Phases
+## 6. 阶段 4: Problem Resolution Commands
+
+### Task 11: Doctor Local Diagnostic Baseline
+
+Scope:
+
+- Update: `packages/agentic-cli/internal/cli/app.go`
+- Update: `packages/agentic-cli/internal/cli/app_test.go`
+- Create: `contracts/operations/doctor.yaml`
+- Update: `docs/contracts/operation-contract.md`
+- Update: `docs/runtime/problem-resolution-and-update.md`
+- Update: `tests/e2e/local-fake-flow.sh`
+
+Definition:
+
+- Add `doctor --workspace <name>`.
+- The command outputs structured JSON containing local checks for install dir, version, workspace root, profile, policy, operation contracts, fake Jira adapter and GitHub baseline status.
+- GitHub is `skipped` in the local baseline because real external checks are not implemented yet.
+- This is the local diagnostic baseline for later real Jira / GitHub / update checks.
+
+- [x] **Step 1: Write failing CLI test**
+
+Assert `doctor --workspace tapstate` returns:
+
+- `operation: doctor`
+- `workspace`
+- `version`
+- `status`
+- checks for `profile`, `policy`, `jira_adapter`, `github`, `workspace` and `contracts`.
+
+Expected: FAIL because the command does not exist.
+
+- [x] **Step 2: Implement local checks**
+
+Use current repo and workspace state to check profile validation, policy file presence and operation contract validation. Do not call network services.
+
+- [x] **Step 3: Add operation contract and e2e coverage**
+
+`contract validate` must include `doctor`. Local fake flow must run doctor.
+
+- [x] **Step 4: Verification**
+
+Run:
+
+```sh
+go test ./...
+bash tests/e2e/local-fake-flow.sh
+```
+
+Expected: all commands exit 0.
+
+## 7. Later Phases
 
 - Later Phase 3: real Jira adapter and Jira-side `current_agent_id` writeback / cleanup.
-- Phase 4: doctor, feedback bundle, update check/apply, policy validate/update/rollback.
+- Later Phase 4: feedback bundle, update check/apply, policy validate/update/rollback and real external doctor checks.
 - Phase 5: completion cleanup and problem-resolution e2e.
 
 Do not start later phases until Phase 1 contract/schema baseline is passing and committed.

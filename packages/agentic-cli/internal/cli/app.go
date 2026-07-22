@@ -41,6 +41,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 			"commit":            Commit,
 			"build_time":        BuildTime,
 		}))
+	case "doctor":
+		return runDoctor(args, stdout)
 	case "preflight":
 		return runPreflight(args, stdout)
 	case "workspace":
@@ -97,6 +99,41 @@ func parseCommitIndex(value string) int {
 	return index
 }
 
+func runDoctor(args []string, stdout io.Writer) int {
+	workspaceName := readFlag(args, "--workspace", "default")
+	checks := map[string]map[string]string{
+		"install":      checkInstallDir(readInstallDir(args)),
+		"version":      {"status": "ok", "message": Version},
+		"workspace":    checkWorkspaceRoot(),
+		"profile":      checkProfile(workspaceName),
+		"policy":       checkPolicy(),
+		"contracts":    checkContracts(),
+		"jira_adapter": {"status": "ok", "message": "fake adapter available"},
+		"github":       {"status": "skipped", "message": "GitHub CLI check is not implemented in local baseline"},
+	}
+	status := "ok"
+	for _, check := range checks {
+		if check["status"] == "failed" {
+			status = "failed"
+			break
+		}
+	}
+	nextAction := "continue"
+	if status != "ok" {
+		nextAction = "fix_environment"
+	}
+	return writeJSON(stdout, output.Success("doctor", map[string]any{
+		"workspace":         workspaceName,
+		"version":           Version,
+		"version_state":     VersionState,
+		"iteration_version": IterationVersion,
+		"commit":            Commit,
+		"status":            status,
+		"checks":            checks,
+		"next_action":       nextAction,
+	}))
+}
+
 func runPreflight(args []string, stdout io.Writer) int {
 	return writeJSON(stdout, output.Success("preflight", map[string]any{
 		"workspace":   readFlag(args, "--workspace", "default"),
@@ -135,6 +172,7 @@ func runAgentInit(args []string, stdout io.Writer) int {
 		"next_action":   "list_tasks",
 		"capabilities": []string{
 			"preflight",
+			"doctor",
 			"assets_install",
 			"contract_validate",
 			"profile_validate",
@@ -689,6 +727,78 @@ func repoProfilePath(workspaceName string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(root, "profiles", workspaceName+".yaml"), nil
+}
+
+func checkInstallDir(installDir string) map[string]string {
+	if installDir == "" {
+		return map[string]string{"status": "failed", "message": "install dir is empty"}
+	}
+	if _, err := os.Stat(installDir); err != nil {
+		return map[string]string{"status": "ok", "message": "install dir will be created when needed"}
+	}
+	return map[string]string{"status": "ok", "message": installDir}
+}
+
+func checkWorkspaceRoot() map[string]string {
+	root, err := workspaceRoot()
+	if err != nil {
+		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	if _, err := os.Stat(root); err != nil {
+		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	return map[string]string{"status": "ok", "message": root}
+}
+
+func checkProfile(workspaceName string) map[string]string {
+	path, err := repoProfilePath(workspaceName)
+	if err != nil {
+		return map[string]string{"status": "failed", "message": "repo root not found"}
+	}
+	loadedProfile, err := profile.LoadFile(path)
+	if err != nil {
+		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	if issues := profile.Validate(loadedProfile); len(issues) > 0 {
+		return map[string]string{"status": "failed", "message": issues[0].Code}
+	}
+	return map[string]string{"status": "ok", "message": path}
+}
+
+func checkPolicy() map[string]string {
+	root, err := repoRoot()
+	if err != nil {
+		return map[string]string{"status": "failed", "message": "repo root not found"}
+	}
+	path := filepath.Join(root, "assets", "policies", "default.yaml")
+	if _, err := os.Stat(path); err != nil {
+		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	return map[string]string{"status": "ok", "message": path}
+}
+
+func checkContracts() map[string]string {
+	root, err := repoRoot()
+	if err != nil {
+		return map[string]string{"status": "failed", "message": "repo root not found"}
+	}
+	paths, err := filepath.Glob(filepath.Join(root, "contracts", "operations", "*.yaml"))
+	if err != nil {
+		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	if len(paths) == 0 {
+		return map[string]string{"status": "failed", "message": "operation contracts not found"}
+	}
+	for _, path := range paths {
+		op, err := contract.LoadFile(path)
+		if err != nil {
+			return map[string]string{"status": "failed", "message": err.Error()}
+		}
+		if issues := contract.Validate(op); len(issues) > 0 {
+			return map[string]string{"status": "failed", "message": issues[0].Code}
+		}
+	}
+	return map[string]string{"status": "ok", "message": fmt.Sprintf("%d operation contracts", len(paths))}
 }
 
 func takeoverProfile(workspaceName string) profile.Profile {

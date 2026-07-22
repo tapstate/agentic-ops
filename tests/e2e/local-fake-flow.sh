@@ -23,6 +23,7 @@ $cmd profile update --workspace tapstate --source "$profile_source" | grep '"ope
 $cmd profile validate --workspace tapstate | grep '"operation":"profile_validate"'
 $cmd profile rollback --workspace tapstate | grep '"operation":"profile_rollback"'
 rm -f "$profile_backup"
+$cmd doctor --workspace tapstate | grep '"operation":"doctor"'
 $cmd preflight --workspace tapstate | grep '"operation":"preflight"'
 $cmd workspace init --workspace tapstate | grep '"operation":"workspace_init"'
 $cmd agent init --workspace tapstate | grep '"operation":"agent_init"'
