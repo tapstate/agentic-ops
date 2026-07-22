@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"time"
 
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/assets"
@@ -243,28 +244,38 @@ func runAssetsInstall(args []string, stdout io.Writer) int {
 
 func runUpdateCheck(args []string, stdout io.Writer) int {
 	manifestPath := readFlag(args, "--manifest", "")
-	if manifestPath == "" {
+	manifestURL := readFlag(args, "--manifest-url", "")
+	if manifestPath == "" && manifestURL == "" {
 		return writeJSON(stdout, output.FailureWithContext("update_check", output.FailureContext{
 			Code:                "missing_manifest",
 			Message:             "缺少 release manifest",
-			RequiredHumanAction: "请提供 --manifest",
+			RequiredHumanAction: "请提供 --manifest 或 --manifest-url",
 			TaskType:            "update",
 			CurrentStage:        "update_check",
 			NextAction:          "ask_owner",
 		}))
 	}
-	result, err := update.Check(manifestPath, Version)
+	source := "local"
+	var result update.CheckResult
+	var err error
+	if manifestURL != "" {
+		source = "remote"
+		result, err = update.CheckRemote(manifestURL, Version)
+	} else {
+		result, err = update.Check(manifestPath, Version)
+	}
 	if err != nil {
 		return writeJSON(stdout, output.FailureWithContext("update_check", output.FailureContext{
 			Code:                "update_manifest_invalid",
 			Message:             err.Error(),
-			RequiredHumanAction: "请检查 release manifest 路径和格式",
+			RequiredHumanAction: "请检查 release manifest 路径、URL 和格式",
 			TaskType:            "update",
 			CurrentStage:        "update_check",
 			NextAction:          "fix_manifest",
 		}))
 	}
 	return writeJSON(stdout, output.Success("update_check", map[string]any{
+		"source":             source,
 		"current_version":    result.CurrentVersion,
 		"latest_version":     result.LatestVersion,
 		"asset_version":      result.AssetVersion,
@@ -278,34 +289,50 @@ func runUpdateCheck(args []string, stdout io.Writer) int {
 
 func runUpdateApply(args []string, stdout io.Writer) int {
 	manifestPath := readFlag(args, "--manifest", "")
-	if manifestPath == "" {
+	manifestURL := readFlag(args, "--manifest-url", "")
+	if manifestPath == "" && manifestURL == "" {
 		return writeJSON(stdout, output.FailureWithContext("update_apply", output.FailureContext{
 			Code:                "missing_manifest",
 			Message:             "缺少 release manifest",
-			RequiredHumanAction: "请提供 --manifest",
+			RequiredHumanAction: "请提供 --manifest 或 --manifest-url",
 			TaskType:            "update",
 			CurrentStage:        "update_apply",
 			NextAction:          "ask_owner",
 		}))
 	}
 	installDir := readInstallDir(args)
-	result, err := update.Apply(manifestPath, installDir)
+	target := readFlag(args, "--target", runtime.GOOS+"-"+runtime.GOARCH)
+	source := "local"
+	var result update.ApplyResult
+	var err error
+	if manifestURL != "" {
+		source = "remote"
+		result, err = update.ApplyRemote(manifestURL, installDir, target)
+	} else {
+		result, err = update.Apply(manifestPath, installDir)
+	}
 	if err != nil {
 		return writeJSON(stdout, output.FailureWithContext("update_apply", output.FailureContext{
 			Code:                "update_apply_failed",
 			Message:             err.Error(),
-			RequiredHumanAction: "请检查 release manifest 和安装目录权限",
+			RequiredHumanAction: "请检查 release manifest、artifact checksum 和安装目录权限",
 			TaskType:            "update",
 			CurrentStage:        "update_apply",
 			NextAction:          "fix_update_source",
 		}))
 	}
+	downloadedArtifacts := result.DownloadedArtifacts
+	if downloadedArtifacts == nil {
+		downloadedArtifacts = []string{}
+	}
 	return writeJSON(stdout, output.Success("update_apply", map[string]any{
+		"source":                 source,
 		"version":                result.AgenticCLIVersion,
 		"asset_version":          result.AssetVersion,
 		"previous_version":       result.PreviousAgenticCLIVersion,
 		"previous_asset_version": result.PreviousAssetVersion,
 		"current":                result.CurrentPath,
+		"downloaded_artifacts":   downloadedArtifacts,
 		"next_action":            "doctor",
 	}))
 }

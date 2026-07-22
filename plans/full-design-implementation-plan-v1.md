@@ -1050,10 +1050,28 @@ Successful and failed transition writes append `real_jira_write` gate events. Fa
 
 Current `transition_mapping` maps standard workflow actions to standard stages. It does not yet identify concrete Jira transition ids or names, so automatic profile-driven transition selection remains a design decision.
 
-## 8. Later Phases
+## 8. Remote Update Manifest And Artifact Baseline
+
+- [x] **Step 1: Support remote manifest checks**
+
+`update check` now accepts `--manifest-url` and downloads the remote release manifest before comparing it with the current AgenticCLI version.
+
+- [x] **Step 2: Download release artifacts**
+
+`update apply` now accepts `--manifest-url`, selects the binary artifact for the current or explicit `--target`, downloads the matching assets artifact, and stores both under the install directory.
+
+- [x] **Step 3: Verify checksums before switching current metadata**
+
+Remote apply downloads `checksums.txt`, verifies each selected artifact with SHA-256, rejects checksum mismatches, and only then updates `current.json`.
+
+- [ ] **Step 4: Switch the installed binary**
+
+The current baseline verifies and stores remote artifacts but does not yet unpack and replace the running `agentic-cli` binary.
+
+## 9. Later Phases
 
 - Later Phase 3: profile-driven Jira transition id/name mapping.
-- Later Phase 4: remote update manifest/artifact handling and real external doctor checks.
+- Later Phase 4: real binary switching and real external doctor checks.
 - Phase 5: completion cleanup and problem-resolution e2e.
 
 Do not start later phases until Phase 1 contract/schema baseline is passing and committed.

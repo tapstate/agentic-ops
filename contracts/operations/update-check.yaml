@@ -1,21 +1,26 @@
 operation: update_check
 version: 1
-purpose: 基于本地 release manifest 检查是否存在可用更新，并返回更新级别和受影响 operation。
+purpose: 基于本地或远程 release manifest 检查是否存在可用更新，并返回更新级别和受影响 operation。
 task_type: update
 allowed_stages:
   - installed
   - update_check
   - failed
 required_inputs:
-  - manifest
+  - manifest_or_manifest_url
 input:
   manifest:
     type: string
-    required: true
+    required: false
+  manifest_url:
+    type: string
+    required: false
 preconditions:
   - release_manifest_must_exist
   - current_version_must_be_known
 output:
+  source:
+    type: string
   current_version:
     type: string
   latest_version:

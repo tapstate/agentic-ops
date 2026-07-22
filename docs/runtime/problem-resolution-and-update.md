@@ -6,7 +6,7 @@
 
 研发日常使用的是安装后的 `agentic-cli`、AI 员工手册、operation contracts、workflow profiles、policies、runbooks 和 templates。项目出现问题时，AgenticOps 必须能快速判断问题类型，选择正确修复载体，完成验证、发布、同步和回滚。
 
-当前仓库已实现本地资产安装、本地 release 打包、operation contract 校验、profile validate / update / rollback、policy validate / update / rollback、真实 Jira REST client 合同测试基线，以及真实 Jira 字段、comment 和显式 transition 写入 gate/confirmation。尚未实现完整发布、远程自更新、真实外部诊断检查和 profile 驱动 transition id/name 映射。本文是正式使用前的目标设计和验收基线。
+当前仓库已实现本地资产安装、本地 release 打包、operation contract 校验、profile validate / update / rollback、policy validate / update / rollback、远程 release manifest / artifact 下载校验、真实 Jira REST client 合同测试基线，以及真实 Jira 字段、comment 和显式 transition 写入 gate/confirmation。尚未实现完整发布、真实二进制切换、真实外部诊断检查和 profile 驱动 transition id/name 映射。本文是正式使用前的目标设计和验收基线。
 
 ## 2. 架构适配性评估
 
@@ -19,7 +19,7 @@
 | Workflow Profile | 已有默认 profile、`profile validate / update / rollback` 基线 | 适合处理不同团队和 Jira workflow 差异 | 真实 Jira status / transition gate、资产包来源、profile 版本审计 |
 | Policy / Gate | 已有 policy validate / update / rollback 本地基线 | 适合控制关键步骤门禁 | 真实写操作 gate 变更审计和 confirmation |
 | Evidence / Feedback | 已有本地 evidence 和 feedback report | 适合发现重复问题并推动规范优化 | feedback bundle、问题分类统计、修复效果追踪 |
-| Release / Install | 已有 bootstrap stub、本地资产安装、本地 build / release 脚本 | 适合快速分发，但当前不完整 | GitHub release、自更新、回滚、远程 manifest |
+| Release / Install | 已有 bootstrap stub、本地资产安装、本地 build / release 脚本和远程 manifest / artifact 下载校验 | 适合快速分发，但当前不完整 | GitHub release、自更新、回滚、真实二进制切换 |
 | 项目资料边界 | 已明确 `~/.agentic-ops` 和项目 AI 工作空间边界 | 适合隔离全局工具资产和任务运行产物 | assets 版本目录、workspace 覆盖配置、敏感信息检查 |
 
 结论：
@@ -385,4 +385,4 @@ asset release
 - `scripts/build.sh`
 - `scripts/release.sh`
 
-当前 `update check/apply` 已完成本地 manifest 基线，尚未实现远程 manifest 拉取、artifact 下载、checksum 校验或真实二进制切换。当前 `policy validate/update/rollback` 已完成本地文件基线，真实 Jira 字段写入、comment 写入和显式 transition 写入已记录 `real_jira_write` gate 审计事件；profile 驱动 transition id/name 映射、真实外部诊断检查和真实 release manifest 仍属于正式使用前必须补齐的目标能力。
+当前 `update check/apply` 已完成本地 manifest 基线、远程 manifest 拉取、artifact 下载和 checksum 校验，尚未实现真实二进制切换。当前 `policy validate/update/rollback` 已完成本地文件基线，真实 Jira 字段写入、comment 写入和显式 transition 写入已记录 `real_jira_write` gate 审计事件；profile 驱动 transition id/name 映射、真实外部诊断检查和真实 release 发布仍属于正式使用前必须补齐的目标能力。

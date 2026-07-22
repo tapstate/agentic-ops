@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/update"
 )
 
 func TestVersionOutputsJSON(t *testing.T) {
@@ -172,6 +175,32 @@ func TestUpdateCheckAndApplyUseLocalManifest(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(installDir, "current.json")); err != nil {
 		t.Fatalf("current.json missing: %v", err)
 	}
+}
+
+func TestUpdateCheckUsesRemoteManifestURL(t *testing.T) {
+	restore := update.SetHTTPClientForTest(&http.Client{Transport: cliRoundTripFunc(func(r *http.Request) *http.Response {
+		if r.URL.String() != "https://updates.example.test/manifest.json" {
+			t.Fatalf("url = %s", r.URL.String())
+		}
+		return cliHTTPResponse(http.StatusOK, `{
+  "version": "RES-v0.1.20-deadbee",
+  "asset_version": "RES-v0.1.20-deadbee",
+  "severity": "required"
+}
+`)
+	})})
+	defer restore()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"update", "check", "--manifest-url", "https://updates.example.test/manifest.json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "update_check")
+	assertJSONField(t, stdout.String(), "latest_version", "RES-v0.1.20-deadbee")
+	assertJSONField(t, stdout.String(), "source", "remote")
+	assertJSONField(t, stdout.String(), "next_action", "update_apply")
 }
 
 func TestListTasksUsesFakeJira(t *testing.T) {
@@ -936,6 +965,20 @@ func assertEventLogContains(t *testing.T, root string, want string) {
 	}
 	if !strings.Contains(string(events), want) {
 		t.Fatalf("events missing %s: %s", want, string(events))
+	}
+}
+
+type cliRoundTripFunc func(*http.Request) *http.Response
+
+func (fn cliRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request), nil
+}
+
+func cliHTTPResponse(statusCode int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: statusCode,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
 	}
 }
 
