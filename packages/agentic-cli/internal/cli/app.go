@@ -686,10 +686,15 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 		}
 		fields := jiraTakeoverFields(workspaceProfile, currentAgentID, takeoverAt)
 		if len(fields) == 0 {
+			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issue.Key, "takeover_task", "takeover_gate", "ask_owner", "missing_jira_write_mapping", false, true)
 			return writeJSON(stdout, output.Failure("takeover_task", "missing_jira_write_mapping", "缺少 current_agent_id 或 takeover_at 字段映射", "请维护 workflow profile 的所有权字段映射"))
 		}
 		if err := selection.Client.UpdateFields(context.Background(), issue.Key, fields); err != nil {
+			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issue.Key, "takeover_task", "takeover_gate", "ask_owner", "jira_takeover_write_failed", false, false)
 			return writeJSON(stdout, output.Failure("takeover_task", "jira_takeover_write_failed", err.Error(), "请检查 Jira 字段权限和 policy gate"))
+		}
+		if err := appendRealJiraWriteGateEvent(workspaceName, runID, issue.Key, "takeover_task", "takeover_started", "proceed", "", true, false); err != nil {
+			return writeJSON(stdout, output.Failure("takeover_task", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 		}
 	}
 	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
@@ -823,6 +828,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 	}
 	if selection.Mode == "real" {
 		if !hasFlag(args, "--confirm-real-jira-write") {
+			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completion_cleanup", "ask_owner", "real_jira_confirmation_required", false, true)
 			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
 				Code:                "real_jira_confirmation_required",
 				Message:             "真实 Jira 写入需要显式确认",
@@ -865,10 +871,15 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		}
 		fields := jiraReleaseFields(workspaceProfile)
 		if len(fields) == 0 {
+			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completion_cleanup", "ask_owner", "missing_jira_write_mapping", false, true)
 			return writeJSON(stdout, output.Failure("release_agent", "missing_jira_write_mapping", "缺少 current_agent_id 字段映射", "请维护 workflow profile 的所有权字段映射"))
 		}
 		if err := selection.Client.UpdateFields(context.Background(), issueKey, fields); err != nil {
+			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completion_cleanup", "ask_owner", "agent_release_failed", false, false)
 			return writeJSON(stdout, output.Failure("release_agent", "agent_release_failed", err.Error(), "请检查 Jira 字段权限并由研发 owner 决策是否人工释放"))
+		}
+		if err := appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completed", "feedback_report", "", true, false); err != nil {
+			return writeJSON(stdout, output.Failure("release_agent", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 		}
 	}
 	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
@@ -1057,6 +1068,25 @@ func appendWorkspaceEventWithDetails(workspaceName string, event feedback.Event)
 	event.VersionState = VersionState
 	event.AssetVersion = readAssetVersion()
 	return feedback.AppendEvent(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), event)
+}
+
+func appendRealJiraWriteGateEvent(workspaceName string, runID string, issueKey string, operation string, currentStage string, nextAction string, code string, ok bool, requiresHumanAction bool) error {
+	return appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
+		RunID:               runID,
+		IssueKey:            issueKey,
+		TaskType:            "task_takeover",
+		Operation:           operation,
+		CurrentStage:        currentStage,
+		NextAction:          nextAction,
+		AgentID:             agentID(),
+		CurrentAgentID:      agentID(),
+		OK:                  ok,
+		Code:                code,
+		Gate:                "real_jira_write",
+		GateStatus:          gateStatus(ok, requiresHumanAction),
+		HumanGate:           true,
+		RequiresHumanAction: requiresHumanAction,
+	})
 }
 
 func readAssetVersion() string {

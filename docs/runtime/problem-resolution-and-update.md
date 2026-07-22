@@ -122,7 +122,7 @@ agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
 | `agentic-cli` 逻辑错误 | `agentic_cli_logic_error` | `doctor` 和 `feedback bundle --redact` 本地诊断基线已落地；真实外部检查后续实现。 |
 | Jira 流程状态没适配 | `unknown_jira_status` | `profile validate / update / rollback` 和真实 Jira REST 读取映射基线已落地；真实 transition gate 后续实现。 |
 | Jira 卡片属性丢失 | `missing_jira_field` | fake Jira 接管 gate 已覆盖必填字段阻断；真实 Jira 字段读取映射基线已落地，补全模板后续实现。 |
-| 关键步骤门禁调整 | `policy_gate_required` | `policy validate / update / rollback` 本地基线已落地；真实 Jira 字段写入已要求 `--confirm-real-jira-write`，完整 gate 审计事件后续实现。 |
+| 关键步骤门禁调整 | `policy_gate_required` | `policy validate / update / rollback` 本地基线已落地；真实 Jira 字段写入已要求 `--confirm-real-jira-write`，并记录 `real_jira_write` gate 审计事件；transition/comment gate 后续实现。 |
 
 ## 7. 修复路径一：CLI 逻辑错误
 
@@ -385,4 +385,4 @@ asset release
 - `scripts/build.sh`
 - `scripts/release.sh`
 
-当前 `update check/apply` 已完成本地 manifest 基线，尚未实现远程 manifest 拉取、artifact 下载、checksum 校验或真实二进制切换。当前 `policy validate/update/rollback` 已完成本地文件基线，尚未实现真实写操作 gate 审计事件。真实外部诊断检查和真实 release manifest 仍属于正式使用前必须补齐的目标能力。
+当前 `update check/apply` 已完成本地 manifest 基线，尚未实现远程 manifest 拉取、artifact 下载、checksum 校验或真实二进制切换。当前 `policy validate/update/rollback` 已完成本地文件基线，真实 Jira 字段写入已记录 `real_jira_write` gate 审计事件；真实 Jira transition/comment gate、真实外部诊断检查和真实 release manifest 仍属于正式使用前必须补齐的目标能力。

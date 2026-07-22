@@ -670,6 +670,43 @@ go test ./packages/agentic-cli/internal/cli
 
 Expected: all commands exit 0.
 
+### Task 8.7: Real Jira Write Gate Audit Events
+
+Scope:
+
+- Update: `packages/agentic-cli/internal/cli/app.go`
+- Update: `packages/agentic-cli/internal/cli/app_test.go`
+- Update: `docs/runtime/problem-resolution-and-update.md`
+
+Definition:
+
+- Real Jira write confirmation failures record a local feedback event with `gate: real_jira_write`, `gate_status: blocked` and `code: real_jira_confirmation_required`.
+- Confirmed successful real Jira field writes record `gate_status: passed`.
+- Real Jira field write failures record `gate_status: failed` with the operation failure code.
+- Audit events apply to takeover binding and release cleanup field writes.
+
+- [x] **Step 1: Write failing gate audit tests**
+
+Covered blocked release confirmation, passed takeover field write and failed release cleanup write.
+
+- [x] **Step 2: Implement gate audit event helper**
+
+Added a dedicated `appendRealJiraWriteGateEvent` path that records `real_jira_write` gate status separately from the normal operation completion event.
+
+- [x] **Step 3: Wire takeover and release write paths**
+
+Recorded blocked, passed and failed gate events around real Jira field writes.
+
+- [x] **Step 4: Verification**
+
+Run:
+
+```sh
+go test ./packages/agentic-cli/internal/cli
+```
+
+Expected: all commands exit 0.
+
 ### Task 9: Takeover Form Event Baseline
 
 Scope:
@@ -957,8 +994,8 @@ Expected: all commands exit 0.
 
 ## 7. Later Phases
 
-- Later Phase 3: complete real Jira write audit events and transition/comment write gates.
-- Later Phase 4: remote update manifest/artifact handling, real policy gate audit events and real external doctor checks.
+- Later Phase 3: real Jira transition/comment write gates.
+- Later Phase 4: remote update manifest/artifact handling and real external doctor checks.
 - Phase 5: completion cleanup and problem-resolution e2e.
 
 Do not start later phases until Phase 1 contract/schema baseline is passing and committed.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -457,7 +458,7 @@ func TestPolicyUpdateAndRollbackUseLocalPolicyBackup(t *testing.T) {
 func TestTakeoverTaskRequiresConfirmationForRealJiraWrite(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	withJiraClientForTest(t, jiraClientSelection{Client: recordingJiraClient{issue: realModeIssue()}, Mode: "real"})
+	withJiraClientForTest(t, jiraClientSelection{Client: &recordingJiraClient{issue: realModeIssue()}, Mode: "real"})
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -469,12 +470,15 @@ func TestTakeoverTaskRequiresConfirmationForRealJiraWrite(t *testing.T) {
 	assertJSONField(t, stdout.String(), "code", "real_jira_confirmation_required")
 	assertJSONField(t, stdout.String(), "current_stage", "takeover_gate")
 	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertEventLogContains(t, root, `"gate":"real_jira_write"`)
+	assertEventLogContains(t, root, `"gate_status":"blocked"`)
+	assertEventLogContains(t, root, `"code":"real_jira_confirmation_required"`)
 }
 
 func TestReleaseAgentRequiresConfirmationForRealJiraWrite(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	withJiraClientForTest(t, jiraClientSelection{Client: recordingJiraClient{issue: realModeBoundIssue()}, Mode: "real"})
+	withJiraClientForTest(t, jiraClientSelection{Client: &recordingJiraClient{issue: realModeBoundIssue()}, Mode: "real"})
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -486,6 +490,49 @@ func TestReleaseAgentRequiresConfirmationForRealJiraWrite(t *testing.T) {
 	assertJSONField(t, stdout.String(), "code", "real_jira_confirmation_required")
 	assertJSONField(t, stdout.String(), "current_stage", "completion_cleanup")
 	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertEventLogContains(t, root, `"operation":"release_agent"`)
+	assertEventLogContains(t, root, `"gate":"real_jira_write"`)
+	assertEventLogContains(t, root, `"gate_status":"blocked"`)
+	assertEventLogContains(t, root, `"code":"real_jira_confirmation_required"`)
+}
+
+func TestTakeoverTaskRecordsPassedRealJiraWriteGate(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	client := &recordingJiraClient{issue: realModeIssue()}
+	withJiraClientForTest(t, jiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"takeover-task", "TAP-123", "--workspace", "tapstate", "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	if client.updatedKey != "TAP-123" {
+		t.Fatalf("updatedKey = %s", client.updatedKey)
+	}
+	assertEventLogContains(t, root, `"operation":"takeover_task"`)
+	assertEventLogContains(t, root, `"gate":"real_jira_write"`)
+	assertEventLogContains(t, root, `"gate_status":"passed"`)
+}
+
+func TestReleaseAgentRecordsFailedRealJiraWriteGate(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	client := &recordingJiraClient{issue: realModeBoundIssue(), updateErr: errors.New("jira write denied")}
+	withJiraClientForTest(t, jiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"release-agent", "--workspace", "tapstate", "--run-id", "run-1", "--issue-key", "TAP-123", "--completion-evidence", "evidence.md", "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "agent_release_failed")
+	assertEventLogContains(t, root, `"operation":"release_agent"`)
+	assertEventLogContains(t, root, `"gate":"real_jira_write"`)
+	assertEventLogContains(t, root, `"gate_status":"failed"`)
+	assertEventLogContains(t, root, `"code":"agent_release_failed"`)
 }
 
 func TestJiraWriteFieldsUseProfileMapping(t *testing.T) {
@@ -738,30 +785,49 @@ func withJiraClientForTest(t *testing.T, selection jiraClientSelection) {
 }
 
 type recordingJiraClient struct {
-	issue jira.Issue
+	issue         jira.Issue
+	updatedKey    string
+	updatedFields map[string]any
+	updateErr     error
 }
 
-func (client recordingJiraClient) CurrentUser(ctx context.Context) (string, error) {
+func (client *recordingJiraClient) CurrentUser(ctx context.Context) (string, error) {
 	return "current-user", nil
 }
 
-func (client recordingJiraClient) SearchIssues(ctx context.Context, workspace string, jql string) ([]jira.Issue, error) {
+func (client *recordingJiraClient) SearchIssues(ctx context.Context, workspace string, jql string) ([]jira.Issue, error) {
 	return []jira.Issue{client.issue}, nil
 }
 
-func (client recordingJiraClient) GetIssueByKey(ctx context.Context, workspace string, key string) (jira.Issue, bool, error) {
+func (client *recordingJiraClient) GetIssueByKey(ctx context.Context, workspace string, key string) (jira.Issue, bool, error) {
 	if client.issue.Key == key {
 		return client.issue, true, nil
 	}
 	return jira.Issue{}, false, nil
 }
 
-func (client recordingJiraClient) AddComment(ctx context.Context, key string, body string) error {
+func (client *recordingJiraClient) AddComment(ctx context.Context, key string, body string) error {
 	return nil
 }
 
-func (client recordingJiraClient) UpdateFields(ctx context.Context, key string, fields map[string]any) error {
+func (client *recordingJiraClient) UpdateFields(ctx context.Context, key string, fields map[string]any) error {
+	client.updatedKey = key
+	client.updatedFields = fields
+	if client.updateErr != nil {
+		return client.updateErr
+	}
 	return nil
+}
+
+func assertEventLogContains(t *testing.T, root string, want string) {
+	t.Helper()
+	events, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
+	if err != nil {
+		t.Fatalf("ReadFile events error = %v", err)
+	}
+	if !strings.Contains(string(events), want) {
+		t.Fatalf("events missing %s: %s", want, string(events))
+	}
 }
 
 func realModeIssue() jira.Issue {
