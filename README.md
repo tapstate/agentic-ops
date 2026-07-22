@@ -104,6 +104,7 @@ AI 代理必须按 `task_type`、`current_stage`、`next_action` 推进，不按
 - 运行资产源头：`assets/`。
 - 本地资产安装：`assets install --source assets --install-dir <dir> --version <asset_version>`。
 - 安装 bootstrap：`scripts/init.sh`。
+- 版本生成脚本：`scripts/version.sh`。
 - 编译脚本：`scripts/build.sh`。
 - 本地发版打包脚本：`scripts/release.sh`。
 - 本地 e2e：`tests/e2e/local-fake-flow.sh`。
@@ -144,11 +145,29 @@ bash scripts/init.sh
 生成本地 release 产物：
 
 ```sh
-bash scripts/build.sh 0.1.0-dev
-AGENTIC_OPS_ASSET_VERSION=2026.07.22.1 bash scripts/release.sh 0.1.0-dev
+git tag v0.1
+bash scripts/version.sh DEV
+bash scripts/build.sh
+bash scripts/release.sh
 ```
 
-`scripts/release.sh` 当前只在 `dist/release/<version>/` 生成二进制包、资产包、checksum 和 manifest，不会创建 GitHub Release，也不会推送任何内容。
+版本号格式：
+
+```text
+STATE-vMAJOR.ITERATION.COMMIT_INDEX-COMMIT
+```
+
+示例：`RES-v0.1.3-a68372d`。
+
+运行时 `agent-task-ops --version` 会输出 `version_state`，用于区分：
+
+- `SRC`：源码运行，例如 `go run`。
+- `DEV`：开发版，由 `scripts/build.sh` 自动生成。
+- `RES`：正式版，由 `scripts/release.sh` 生成。
+
+迭代开始时维护者只需要打一次 `vMAJOR.ITERATION` tag，例如 `v0.1`。`scripts/build.sh` 和 `scripts/release.sh` 都不接受手工指定完整版本号；脚本会从最近的迭代 tag 自动计算提交序号，并使用当前 Git short commit 生成版本。资产版本号固定跟随 release version，也不能手工指定，避免发版人为输入错误。
+
+`scripts/release.sh` 当前只在 `dist/release/<version>/` 生成二进制包、资产包、checksum 和 manifest，不会创建 GitHub Release，也不会推送任何内容。项目采用 latest-only 支持策略：BUG 只在最新版本修复，有新版本时推荐自动更新应用，不维护旧版本补丁线。
 
 ## 工作目录约定
 

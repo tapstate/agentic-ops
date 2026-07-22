@@ -17,6 +17,11 @@ func TestVersionOutputsJSON(t *testing.T) {
 		t.Fatalf("code = %d, want 0", code)
 	}
 	assertJSONField(t, stdout.String(), "operation", "version")
+	assertJSONField(t, stdout.String(), "version", "SRC-source")
+	assertJSONField(t, stdout.String(), "version_state", "SRC")
+	assertJSONField(t, stdout.String(), "iteration_version", "source")
+	assertJSONNumber(t, stdout.String(), "commit_index", 0)
+	assertJSONField(t, stdout.String(), "commit", "unknown")
 	if stderr.String() != "" {
 		t.Fatalf("stderr = %s", stderr.String())
 	}
@@ -84,14 +89,14 @@ func TestAssetsInstallCopiesAssetsToInstallDir(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"assets", "install", "--source", source, "--install-dir", installDir, "--version", "2026.07.22.1"}, &stdout, &stderr)
+	code := Run([]string{"assets", "install", "--source", source, "--install-dir", installDir, "--version", "RES-v0.1.1-a68372d"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
 
 	assertJSONField(t, stdout.String(), "operation", "assets_install")
-	assertJSONField(t, stdout.String(), "asset_version", "2026.07.22.1")
-	if _, err := os.Stat(filepath.Join(installDir, "assets", "2026.07.22.1", "handbooks", "ai-employee-handbook.md")); err != nil {
+	assertJSONField(t, stdout.String(), "asset_version", "RES-v0.1.1-a68372d")
+	if _, err := os.Stat(filepath.Join(installDir, "assets", "RES-v0.1.1-a68372d", "handbooks", "ai-employee-handbook.md")); err != nil {
 		t.Fatalf("installed asset missing: %v", err)
 	}
 }

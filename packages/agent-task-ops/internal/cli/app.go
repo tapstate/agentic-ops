@@ -17,7 +17,12 @@ import (
 	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/workspace"
 )
 
-var Version = "0.1.0-dev"
+var Version = "SRC-source"
+var VersionState = "SRC"
+var IterationVersion = "source"
+var CommitIndex = "0"
+var Commit = "unknown"
+var BuildTime = ""
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -26,7 +31,14 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 
 	switch args[0] {
 	case "--version", "version":
-		return writeJSON(stdout, output.Success("version", map[string]any{"version": Version}))
+		return writeJSON(stdout, output.Success("version", map[string]any{
+			"version":           Version,
+			"version_state":     VersionState,
+			"iteration_version": IterationVersion,
+			"commit_index":      parseCommitIndex(CommitIndex),
+			"commit":            Commit,
+			"build_time":        BuildTime,
+		}))
 	case "preflight":
 		return runPreflight(args, stdout)
 	case "workspace":
@@ -57,6 +69,14 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 
 	fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 	return writeJSON(stdout, output.Failure(args[0], "unknown_command", "未知命令", "请检查命令名称"))
+}
+
+func parseCommitIndex(value string) int {
+	var index int
+	if _, err := fmt.Sscanf(value, "%d", &index); err != nil {
+		return 0
+	}
+	return index
 }
 
 func runPreflight(args []string, stdout io.Writer) int {

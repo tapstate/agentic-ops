@@ -14,15 +14,15 @@ func TestInstallCopiesAssetsAndWritesCurrent(t *testing.T) {
 	writeTestFile(t, filepath.Join(source, "policies", "default.yaml"), "gates: {}\n")
 
 	installDir := t.TempDir()
-	result, err := Install(source, installDir, "2026.07.22.1")
+	result, err := Install(source, installDir, "RES-v0.1.1-a68372d")
 	if err != nil {
 		t.Fatalf("Install error = %v", err)
 	}
 
-	if result.AssetVersion != "2026.07.22.1" {
+	if result.AssetVersion != "RES-v0.1.1-a68372d" {
 		t.Fatalf("AssetVersion = %s", result.AssetVersion)
 	}
-	if _, err := os.Stat(filepath.Join(installDir, "assets", "2026.07.22.1", "handbooks", "ai-employee-handbook.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(installDir, "assets", "RES-v0.1.1-a68372d", "handbooks", "ai-employee-handbook.md")); err != nil {
 		t.Fatalf("installed handbook missing: %v", err)
 	}
 
@@ -34,7 +34,7 @@ func TestInstallCopiesAssetsAndWritesCurrent(t *testing.T) {
 	if err := json.Unmarshal(currentBytes, &current); err != nil {
 		t.Fatalf("Unmarshal current.json error = %v", err)
 	}
-	if current.AssetVersion != "2026.07.22.1" {
+	if current.AssetVersion != "RES-v0.1.1-a68372d" {
 		t.Fatalf("current AssetVersion = %s", current.AssetVersion)
 	}
 }
@@ -45,12 +45,12 @@ func TestInstallPreservesPreviousCurrentVersion(t *testing.T) {
 
 	installDir := t.TempDir()
 	writeTestFile(t, filepath.Join(installDir, "current.json"), `{
-  "agent_task_ops_version": "0.1.4",
-  "asset_version": "2026.07.22.1"
+  "agent_task_ops_version": "RES-v0.1.1-a68372d",
+  "asset_version": "RES-v0.1.1-a68372d"
 }
 `)
 
-	if _, err := Install(source, installDir, "2026.07.22.2"); err != nil {
+	if _, err := Install(source, installDir, "RES-v0.1.2-b794810"); err != nil {
 		t.Fatalf("Install error = %v", err)
 	}
 
@@ -62,13 +62,13 @@ func TestInstallPreservesPreviousCurrentVersion(t *testing.T) {
 	if err := json.Unmarshal(currentBytes, &current); err != nil {
 		t.Fatalf("Unmarshal current.json error = %v", err)
 	}
-	if current.AssetVersion != "2026.07.22.2" {
+	if current.AssetVersion != "RES-v0.1.2-b794810" {
 		t.Fatalf("current AssetVersion = %s", current.AssetVersion)
 	}
-	if current.PreviousAssetVersion != "2026.07.22.1" {
+	if current.PreviousAssetVersion != "RES-v0.1.1-a68372d" {
 		t.Fatalf("PreviousAssetVersion = %s", current.PreviousAssetVersion)
 	}
-	if current.PreviousAgentTaskOpsVersion != "0.1.4" {
+	if current.PreviousAgentTaskOpsVersion != "RES-v0.1.1-a68372d" {
 		t.Fatalf("PreviousAgentTaskOpsVersion = %s", current.PreviousAgentTaskOpsVersion)
 	}
 }

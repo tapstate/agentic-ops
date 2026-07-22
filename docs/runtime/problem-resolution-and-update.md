@@ -63,13 +63,14 @@
 - 不让 AIAgent 未经人工确认自动修改全局规范、profile 或 policy。
 - 不把标准资产不完善的问题误判为 `agent-task-ops` 二进制问题。
 - 不把所有问题都升级成二进制发布；能通过 profile / policy / template 修复的问题优先走资产包。
+- 不维护旧版本补丁线；BUG 只在最新版本修复，有新版本时推荐自动更新应用。
 - 任何放宽门禁、真实 Jira 写操作、Git push、PR、merge 和发布都必须可审计、可回滚。
 
 ## 5. 问题分类
 
 | 问题类型 | 典型表现 | 修复载体 | 同步方式 |
 | --- | --- | --- | --- |
-| `agent-task-ops` 逻辑错误 | 命令输出错误、run_id 生成错误、事件写入错误、adapter 行为错误 | Go CLI 二进制 | release patch + `update apply` |
+| `agent-task-ops` 逻辑错误 | 命令输出错误、run_id 生成错误、事件写入错误、adapter 行为错误 | Go CLI 二进制 | 发布最新版本 + `update apply` |
 | Jira 流程状态没适配 | 未知 Jira status / transition、状态映射失败、项目 workflow 差异 | workflow profile / adapter mapping | asset update + `profile update` |
 | Jira 卡片属性丢失 | 缺少 owner、验收标准、目标仓库、验证方式、风险等级 | gate failure + 补全模板 / field mapping | 阻断接管 + 人工补卡或 profile 修复 |
 | 关键步骤门禁调整 | push / PR / Jira comment / scope change 的确认要求变化 | policy package | policy update + review + rollback |
@@ -82,8 +83,9 @@
 ```json
 {
   "workspace": "tapstate",
-  "agent_task_ops_version": "0.1.4",
-  "asset_version": "2026.07.22.1",
+  "agent_task_ops_version": "RES-v0.1.3-a68372d",
+  "version_state": "RES",
+  "asset_version": "RES-v0.1.3-a68372d",
   "operation": "takeover_task",
   "task_type": "task_takeover",
   "current_stage": "takeover_gate",
@@ -125,9 +127,9 @@ agent-task-ops feedback bundle --workspace tapstate --run-id <run_id> --redact
 -> contract test
 -> local fake flow e2e
 -> 构建多平台二进制
--> 发布 patch release
+-> 发布新的 latest release
 -> 更新 release manifest
--> 研发 update apply
+-> 研发 update apply 或自动更新到最新版本
 ```
 
 目标命令：
@@ -135,8 +137,9 @@ agent-task-ops feedback bundle --workspace tapstate --run-id <run_id> --redact
 ```sh
 agent-task-ops update check
 agent-task-ops update apply
-agent-task-ops update rollback
 ```
+
+AgenticOps 不支持为旧版本单独做 BUG 修复。修复完成后只发布新的 latest 版本，研发侧应优先自动更新到最新版本。后续如果实现 rollback，它只用于安装失败或新版本不可用时的本地恢复，不作为旧版本修复策略。
 
 严重逻辑错误可以在 manifest 中标记：
 
@@ -311,11 +314,11 @@ asset release
     agent-task-ops
   versions/
     agent-task-ops/
-      0.1.4/
-      0.1.5/
+      RES-v0.1.2-7f31a2b/
+      RES-v0.1.3-a68372d/
   assets/
-    2026.07.22.1/
-    2026.07.22.2/
+    RES-v0.1.2-7f31a2b/
+    RES-v0.1.3-a68372d/
   current.json
   config.yaml
 ```
@@ -324,10 +327,10 @@ asset release
 
 ```json
 {
-  "agent_task_ops_version": "0.1.5",
-  "asset_version": "2026.07.22.2",
-  "previous_agent_task_ops_version": "0.1.4",
-  "previous_asset_version": "2026.07.22.1"
+  "agent_task_ops_version": "RES-v0.1.3-a68372d",
+  "asset_version": "RES-v0.1.3-a68372d",
+  "previous_agent_task_ops_version": "RES-v0.1.2-7f31a2b",
+  "previous_asset_version": "RES-v0.1.2-7f31a2b"
 }
 ```
 
@@ -337,11 +340,11 @@ asset release
 
 - 每类问题都有稳定错误码、人工动作和事件日志。
 - 研发可以一条命令生成脱敏诊断包。
-- CLI 逻辑错误可以通过 patch release 修复并回滚。
+- CLI 逻辑错误可以通过发布新的 latest 版本修复，并推荐研发侧自动更新。
 - Jira status / transition 差异可以通过 profile 更新修复并回滚。
 - Jira 卡片属性缺失会阻断接管，并给出补全模板。
 - 关键 gate 可以通过 policy 更新调整，并保留审计记录。
-- update check / apply / rollback 的输出全部是结构化 JSON。
+- update check / apply 的输出全部是结构化 JSON；如实现 rollback，它只用于本地恢复，不用于旧版本修复线。
 - required update 只阻断受影响 operation，不应无差别阻断所有命令。
 - 所有修复进入 feedback report，用于后续观察问题是否减少。
 
@@ -358,6 +361,7 @@ asset release
 - `resume-takeover`
 - `write-evidence`
 - `feedback report`
+- `scripts/version.sh`
 - `scripts/build.sh`
 - `scripts/release.sh`
 

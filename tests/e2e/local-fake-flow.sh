@@ -12,7 +12,7 @@ cmd="go run ./packages/agent-task-ops/cmd/agent-task-ops"
 install_root="$workspace_root/install"
 
 $cmd --version | grep '"operation":"version"'
-$cmd assets install --source assets --install-dir "$install_root" --version 2026.07.22.1 | grep '"operation":"assets_install"'
+$cmd assets install --source assets --install-dir "$install_root" --version RES-v0.1.1-a68372d | grep '"operation":"assets_install"'
 $cmd preflight --workspace tapstate | grep '"operation":"preflight"'
 $cmd workspace init --workspace tapstate | grep '"operation":"workspace_init"'
 $cmd agent init --workspace tapstate | grep '"operation":"agent_init"'
@@ -23,5 +23,5 @@ $cmd write-evidence --workspace tapstate --run-id TAP-123-takeover-2026072110301
 $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"runs":3'
 test -f "$workspace_root/.agentic-ops/feedback/events.ndjson"
 test -f "$workspace_root/.agentic-ops/feedback/daily/2026-07-21.md"
-test -f "$install_root/assets/2026.07.22.1/manifest.json"
+test -f "$install_root/assets/RES-v0.1.1-a68372d/manifest.json"
 test -f "$install_root/current.json"

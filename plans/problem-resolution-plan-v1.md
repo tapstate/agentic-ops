@@ -2,7 +2,7 @@
 
 > **For agentic workers:** 本计划用于实现正式使用前的成熟修复路径。执行时必须保持文档、契约、CLI、测试和发布资产同步，不得把未实现能力描述为当前能力。
 
-**Goal:** 让 AgenticOps 在正式给研发日常使用前，具备问题诊断、分类修复、快速同步和回滚能力。
+**Goal:** 让 AgenticOps 在正式给研发日常使用前，具备问题诊断、分类修复和快速同步能力；项目采用 latest-only 支持策略，BUG 只在最新版本修复，有新版本时推荐自动更新应用。
 
 **Reference:** `docs/runtime/problem-resolution-and-update.md`
 
@@ -29,7 +29,6 @@ agent-task-ops doctor --workspace <name>
 agent-task-ops feedback bundle --workspace <name> --run-id <run_id> --redact
 agent-task-ops update check
 agent-task-ops update apply
-agent-task-ops update rollback
 agent-task-ops profile validate --workspace <name>
 agent-task-ops profile update --workspace <name>
 agent-task-ops profile rollback --workspace <name>
@@ -55,11 +54,13 @@ agent-task-ops policy rollback --workspace <name>
   - 实现 `feedback bundle --redact`。
   - 测试诊断包不包含 secrets、tokens、原始 Jira 描述、敏感代码片段。
 
-- [ ] **Task 3: 二进制更新与回滚**
+- [ ] **Task 3: 二进制更新**
   - 定义 release manifest。
-  - 实现 `update check / apply / rollback`。
+  - 实现 `update check / apply`。
   - 支持 `optional`、`recommended`、`required` 三种更新级别。
   - required update 只阻断受影响 operation。
+  - 不维护旧版本补丁线；BUG 修复只进入新的 latest 版本。
+  - 如实现 rollback，只用于安装失败或新版本不可用时的本地恢复。
 
 - [ ] **Task 4: Workflow Profile 更新**
   - 实现 `profile validate / update / rollback`。
@@ -103,6 +104,6 @@ bash tests/e2e/problem-resolution-flow.sh
 - 每条修复路径都支持结构化输出。
 - 当前架构适配性评估已完成，且不依赖历史项目作为当前事实源。
 - 资产包更新不需要重新发布二进制。
-- 二进制更新和资产包更新都可以回滚。
+- 二进制更新和资产包更新失败时可以本地恢复；BUG 修复不维护旧版本补丁线，只进入新的 latest 版本。
 - 诊断包可交给维护者复现问题，且不包含敏感信息。
 - feedback report 能统计问题是否减少。

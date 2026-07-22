@@ -27,6 +27,8 @@
 | D-019 | 当前项目权威源头是 `agentic-ops` | AgenticOps 相关设计、计划和目标都在当前项目中维护；历史 `rd-agentic` / `td-agentic` 后缀项目只作为参考来源，不作为当前事实源或设计依赖。 |
 | D-020 | AgenticOps 的目标重心是形成 AI 可执行标准 | AgenticOps 不只是提供 CLI，而是通过 AI 员工手册、operation contracts、workflow profiles、policies、runbooks、templates 和 feedback loop 形成标准；除非问题来自 `agent-task-ops` 二进制逻辑错误，否则 AIAgent 应优先按标准资产自助处理、阻断或转人工。 |
 | D-021 | 同仓库按目录分管资料，发布时拆分交付物 | 当前项目不使用不同分支分管源码、设计、计划或运行资产；分支只用于开发协作和发布准备。维护者面对完整仓库，研发 owner 和 AIAgent 默认只接触安装后的命令、资产、模板和规范。 |
+| D-022 | 发布支持策略采用 latest-only | AgenticOps 不维护旧版本补丁线；BUG 只在最新版本修复，有新版本时推荐自动更新应用。rollback 只用于安装失败或新版本不可用时的本地恢复，不作为旧版本修复策略。 |
+| D-023 | 版本号采用运行状态、迭代版本、提交序号和提交编号 | AgenticOps 版本号格式为 `STATE-vMAJOR.ITERATION.COMMIT_INDEX-COMMIT`，例如 `RES-v0.1.3-a68372d`。迭代开始时维护者打 `vMAJOR.ITERATION` tag；build 和 release 自动按最近迭代 tag 到 HEAD 的提交计数生成 `COMMIT_INDEX`，并注入当前 Git short commit。运行时仍通过 `version_state` 区分 `SRC`、`DEV` 和 `RES`；build version、release version 和 asset version 都不允许手工指定。 |
 
 ## 2. 当前无需决策事项
 

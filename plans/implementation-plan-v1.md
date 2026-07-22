@@ -230,7 +230,10 @@ import (
 	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/output"
 )
 
-const Version = "0.1.0-dev"
+var Version = "source"
+var VersionState = "SRC"
+var Commit = "unknown"
+var BuildTime = ""
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -1217,7 +1220,7 @@ mkdir -p "$BIN_DIR"
 
 cat > "$BIN_DIR/agent-task-ops" <<'SH'
 #!/usr/bin/env sh
-echo '{"ok":false,"operation":"install","code":"binary_not_installed","message":"agent-task-ops release binary has not been downloaded in this design-phase script"}'
+echo '{"ok":false,"operation":"install","code":"binary_not_installed","message":"agent-task-ops release binary has not been downloaded in this first-stage bootstrap"}'
 exit 1
 SH
 
@@ -1226,7 +1229,7 @@ chmod +x "$BIN_DIR/agent-task-ops"
 printf '{"ok":true,"operation":"install","install_dir":"%s","bin":"%s","target":"%s-%s","version":"%s","next_action":"workspace_init"}\n' "$INSTALL_DIR" "$BIN_DIR/agent-task-ops" "$target_os" "$target_arch" "$VERSION"
 ```
 
-This script is a design-phase placeholder executable that does not download a real binary. Replace the embedded stub with real release download logic when release artifacts exist.
+This script is a first-stage bootstrap stub that does not download a real binary. Replace the embedded stub with real release download logic when release artifacts exist.
 
 - [x] **Step 2: Add bootstrap smoke test**
 

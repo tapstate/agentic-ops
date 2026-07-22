@@ -60,5 +60,5 @@
 - 真实 Jira 只读接入和写入接入的边界。
 - workspace profile 的真实字段映射和校验方式。
 - Git / GitHub guard 的人工门禁和审计记录。
-- release 二进制下载、安装、升级和回滚方式。
+- release 二进制下载、安装、自动更新、本地恢复和 latest-only 支持策略。
 - fake flow 到真实项目试点的验收标准。

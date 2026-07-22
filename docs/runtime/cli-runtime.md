@@ -143,10 +143,14 @@ AgenticOps 面向公司研发分发，运行时必须支持快速修复和快速
 
 - 每次 release 生成多平台二进制。
 - 安装脚本按 OS 和 CPU 架构下载对应二进制。
-- `agent-task-ops version` 能输出当前版本、commit 和构建时间。
-- `agent-task-ops self-update` 能升级到最新稳定版本。
+- 版本号使用 `STATE-vMAJOR.ITERATION.COMMIT_INDEX-COMMIT` 格式，例如 `RES-v0.1.3-a68372d`。
+- `agent-task-ops version` 能输出当前版本、`version_state`、`iteration_version`、`commit_index`、commit 和构建时间。
+- `version_state` 必须区分 `SRC`、`DEV` 和 `RES`，分别表示源码运行、开发版和正式版。
+- build version、release version 和 asset version 均由脚本自动生成，不允许手工指定。
+- `agent-task-ops self-update` 能升级到最新稳定版本；有新版本时推荐自动更新应用。
 - 安装和升级不得覆盖用户本地配置。
-- 回滚时可以指定安装旧版本。
+- 项目采用 latest-only 支持策略，BUG 只在最新版本修复，不维护旧版本补丁线。
+- 如后续实现 rollback，它只用于安装失败或新版本不可用时的本地恢复，不作为旧版本修复策略。
 
 ## 9. 语言边界
 

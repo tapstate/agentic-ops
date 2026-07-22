@@ -33,6 +33,7 @@
 - [操作契约](contracts/operation-contract.md)
 - [工作流配置](profiles/workflow-profile.md)
 - [CLI 运行时](runtime/cli-runtime.md)
+- [版本号设计](runtime/versioning.md)
 - [问题修复与同步路径](runtime/problem-resolution-and-update.md)
 - [证据模板](templates/evidence-templates.md)
 
