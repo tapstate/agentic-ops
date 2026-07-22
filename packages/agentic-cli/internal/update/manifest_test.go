@@ -1,6 +1,9 @@
 package update
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -136,7 +139,7 @@ func TestApplyRemoteDownloadsArtifactsAndVerifiesChecksums(t *testing.T) {
 	version := "RES-v0.1.20-deadbee"
 	binaryName := "agentic-cli_darwin-arm64.tar.gz"
 	assetsName := "agentic-ops-assets_" + version + ".tar.gz"
-	binaryContent := []byte("binary artifact")
+	binaryContent := agenticCLITarGZ(t, "new binary")
 	assetsContent := []byte("assets artifact")
 	checksums := fmt.Sprintf("%x  %s\n%x  %s\n", sha256.Sum256(binaryContent), binaryName, sha256.Sum256(assetsContent), assetsName)
 	restore := SetHTTPClientForTest(&http.Client{Transport: updateRoundTripFunc(func(r *http.Request) *http.Response {
@@ -176,6 +179,13 @@ func TestApplyRemoteDownloadsArtifactsAndVerifiesChecksums(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(installDir, "downloads", version, assetsName)); err != nil {
 		t.Fatalf("assets artifact missing: %v", err)
+	}
+	activated, err := os.ReadFile(filepath.Join(installDir, "bin", "agentic-cli"))
+	if err != nil {
+		t.Fatalf("activated binary missing: %v", err)
+	}
+	if string(activated) != "new binary" {
+		t.Fatalf("activated binary = %q", string(activated))
 	}
 }
 
@@ -235,4 +245,29 @@ func updateHTTPBytes(statusCode int, body []byte) *http.Response {
 		Header:     make(http.Header),
 		Body:       io.NopCloser(strings.NewReader(string(body))),
 	}
+}
+
+func agenticCLITarGZ(t *testing.T, content string) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	gzipWriter := gzip.NewWriter(&buffer)
+	tarWriter := tar.NewWriter(gzipWriter)
+	data := []byte(content)
+	if err := tarWriter.WriteHeader(&tar.Header{
+		Name: "agentic-cli",
+		Mode: 0o755,
+		Size: int64(len(data)),
+	}); err != nil {
+		t.Fatalf("WriteHeader error = %v", err)
+	}
+	if _, err := tarWriter.Write(data); err != nil {
+		t.Fatalf("tar Write error = %v", err)
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatalf("tar Close error = %v", err)
+	}
+	if err := gzipWriter.Close(); err != nil {
+		t.Fatalf("gzip Close error = %v", err)
+	}
+	return buffer.Bytes()
 }

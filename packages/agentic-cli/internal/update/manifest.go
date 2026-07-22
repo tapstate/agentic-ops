@@ -1,6 +1,8 @@
 package update
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -49,6 +51,7 @@ type ApplyResult struct {
 	PreviousAssetVersion      string
 	CurrentPath               string
 	DownloadedArtifacts       []string
+	ActivatedBinary           string
 }
 
 type currentState struct {
@@ -111,7 +114,7 @@ func Apply(manifestPath string, installDir string) (ApplyResult, error) {
 	if err != nil {
 		return ApplyResult{}, err
 	}
-	return applyManifest(manifest, installDir, nil)
+	return applyManifest(manifest, installDir, nil, "")
 }
 
 func ApplyRemote(manifestURL string, installDir string, target string) (ApplyResult, error) {
@@ -119,14 +122,14 @@ func ApplyRemote(manifestURL string, installDir string, target string) (ApplyRes
 	if err != nil {
 		return ApplyResult{}, err
 	}
-	downloads, err := downloadArtifacts(manifest, baseURL, installDir, target)
+	downloads, activatedBinary, err := downloadArtifacts(manifest, baseURL, installDir, target)
 	if err != nil {
 		return ApplyResult{}, err
 	}
-	return applyManifest(manifest, installDir, downloads)
+	return applyManifest(manifest, installDir, downloads, activatedBinary)
 }
 
-func applyManifest(manifest Manifest, installDir string, downloads []string) (ApplyResult, error) {
+func applyManifest(manifest Manifest, installDir string, downloads []string, activatedBinary string) (ApplyResult, error) {
 	if manifest.Version == "" {
 		return ApplyResult{}, fmt.Errorf("manifest version is required")
 	}
@@ -152,6 +155,7 @@ func applyManifest(manifest Manifest, installDir string, downloads []string) (Ap
 		PreviousAssetVersion:      next.PreviousAssetVersion,
 		CurrentPath:               currentPath,
 		DownloadedArtifacts:       downloads,
+		ActivatedBinary:           activatedBinary,
 	}, nil
 }
 
@@ -183,17 +187,17 @@ func LoadRemoteManifest(manifestURL string) (Manifest, *url.URL, error) {
 	return manifest, baseURL, nil
 }
 
-func downloadArtifacts(manifest Manifest, baseURL *url.URL, installDir string, target string) ([]string, error) {
+func downloadArtifacts(manifest Manifest, baseURL *url.URL, installDir string, target string) ([]string, string, error) {
 	if len(manifest.Artifacts) == 0 {
-		return nil, fmt.Errorf("manifest artifacts are required")
+		return nil, "", fmt.Errorf("manifest artifacts are required")
 	}
 	checksums, err := loadChecksums(manifest, baseURL)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	selected := selectedArtifacts(manifest.Artifacts, target)
 	if len(selected) == 0 {
-		return nil, fmt.Errorf("no artifact for target %s", target)
+		return nil, "", fmt.Errorf("no artifact for target %s", target)
 	}
 	assetVersion := manifest.AssetVersion
 	if assetVersion == "" {
@@ -201,9 +205,10 @@ func downloadArtifacts(manifest Manifest, baseURL *url.URL, installDir string, t
 	}
 	downloadDir := filepath.Join(installDir, "downloads", assetVersion)
 	var downloads []string
+	var binaryArchive string
 	for _, artifact := range selected {
 		if err := validateArtifactName(artifact.Name); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		artifactURL := artifact.URL
 		if artifactURL == "" {
@@ -211,29 +216,81 @@ func downloadArtifacts(manifest Manifest, baseURL *url.URL, installDir string, t
 		}
 		data, err := fetchURL(artifactURL)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		expected := artifact.SHA256
 		if expected == "" {
 			expected = checksums[artifact.Name]
 		}
 		if expected == "" {
-			return nil, fmt.Errorf("checksum missing for %s", artifact.Name)
+			return nil, "", fmt.Errorf("checksum missing for %s", artifact.Name)
 		}
 		actual := fmt.Sprintf("%x", sha256.Sum256(data))
 		if !strings.EqualFold(actual, expected) {
-			return nil, fmt.Errorf("checksum mismatch for %s", artifact.Name)
+			return nil, "", fmt.Errorf("checksum mismatch for %s", artifact.Name)
 		}
 		path := filepath.Join(downloadDir, artifact.Name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if err := os.WriteFile(path, data, 0o644); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		downloads = append(downloads, path)
+		if artifact.Type == "binary" {
+			binaryArchive = path
+		}
 	}
-	return downloads, nil
+	if binaryArchive == "" {
+		return nil, "", fmt.Errorf("binary artifact missing for target %s", target)
+	}
+	activatedBinary, err := activateBinaryArtifact(binaryArchive, installDir)
+	if err != nil {
+		return nil, "", err
+	}
+	return downloads, activatedBinary, nil
+}
+
+func activateBinaryArtifact(archivePath string, installDir string) (string, error) {
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	gzipReader, err := gzip.NewReader(file)
+	if err != nil {
+		return "", err
+	}
+	defer gzipReader.Close()
+	tarReader := tar.NewReader(gzipReader)
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		if header.Typeflag != tar.TypeReg {
+			continue
+		}
+		if filepath.Base(header.Name) != "agentic-cli" || strings.Contains(header.Name, "..") {
+			continue
+		}
+		data, err := io.ReadAll(tarReader)
+		if err != nil {
+			return "", err
+		}
+		binPath := filepath.Join(installDir, "bin", "agentic-cli")
+		if err := os.MkdirAll(filepath.Dir(binPath), 0o755); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(binPath, data, 0o755); err != nil {
+			return "", err
+		}
+		return binPath, nil
+	}
+	return "", fmt.Errorf("agentic-cli binary not found in %s", archivePath)
 }
 
 func loadChecksums(manifest Manifest, baseURL *url.URL) (map[string]string, error) {

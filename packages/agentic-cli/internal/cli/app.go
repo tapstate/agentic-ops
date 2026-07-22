@@ -369,6 +369,7 @@ func runUpdateApply(args []string, stdout io.Writer) int {
 		"previous_asset_version": result.PreviousAssetVersion,
 		"current":                result.CurrentPath,
 		"downloaded_artifacts":   downloadedArtifacts,
+		"activated_binary":       result.ActivatedBinary,
 		"next_action":            "doctor",
 	}))
 }

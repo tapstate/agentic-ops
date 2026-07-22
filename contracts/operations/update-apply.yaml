@@ -42,6 +42,8 @@ output:
     type: string
   downloaded_artifacts:
     type: array
+  activated_binary:
+    type: string
   next_action:
     type: string
 failure:

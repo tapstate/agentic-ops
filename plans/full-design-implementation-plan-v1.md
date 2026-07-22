@@ -1064,9 +1064,9 @@ Current `transition_mapping` maps standard workflow actions to standard stages. 
 
 Remote apply downloads `checksums.txt`, verifies each selected artifact with SHA-256, rejects checksum mismatches, and only then updates `current.json`.
 
-- [ ] **Step 4: Switch the installed binary**
+- [x] **Step 4: Switch the installed binary**
 
-The current baseline verifies and stores remote artifacts but does not yet unpack and replace the running `agentic-cli` binary.
+Remote apply now extracts the verified binary artifact and writes `bin/agentic-cli` under the install directory before updating `current.json`.
 
 ## 9. Doctor External Checks Baseline
 
@@ -1085,7 +1085,7 @@ Default `doctor` keeps local checks and does not access external Jira or GitHub 
 ## 10. Later Phases
 
 - Later Phase 3: profile-driven Jira transition id/name mapping.
-- Later Phase 4: real binary switching.
+- Later Phase 4: real release publishing.
 - Phase 5: completion cleanup and problem-resolution e2e.
 
 Do not start later phases until Phase 1 contract/schema baseline is passing and committed.
