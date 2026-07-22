@@ -1,0 +1,15 @@
+operation: resume_takeover
+version: 1
+purpose: 恢复一个已经存在的任务接管记录。
+task_type: task_takeover
+allowed_stages:
+  - takeover_started
+  - blocked
+required_inputs:
+  - workspace
+  - run_id
+side_effects:
+  - may_write_local_event
+  - must_not_create_pr
+human_gate:
+  required: false

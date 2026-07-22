@@ -468,7 +468,7 @@ agent-task-ops takeover-task TAP-123 --workspace tapstate
 agent-task-ops write-evidence --run-id ...
 ```
 
-以上命令是第一阶段目标接口，不表示当前仓库已经实现对应脚本、CLI 或配置。
+以上命令是第一阶段本地 fake flow 的当前 CLI 接口；真实 Jira / GitHub 写操作仍未接入。
 
 ## 14. 第一阶段交付物
 

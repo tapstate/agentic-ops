@@ -1,0 +1,17 @@
+operation: takeover_task
+version: 1
+purpose: 研发 owner 授权 AIAgent 接管一个已进入迭代的任务。
+task_type: task_takeover
+allowed_stages:
+  - waiting_takeover
+  - takeover_gate
+required_inputs:
+  - issue_key
+  - workspace
+side_effects:
+  - may_write_jira_comment
+  - may_create_takeover_record
+  - must_not_modify_code
+  - must_not_create_pr
+human_gate:
+  required: false

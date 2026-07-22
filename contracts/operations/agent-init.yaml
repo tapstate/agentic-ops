@@ -1,0 +1,13 @@
+operation: agent_init
+version: 1
+purpose: 初始化 AIAgent 在当前工作空间内可使用的能力说明。
+task_type: capability_initialization
+allowed_stages:
+  - workspace_initialized
+required_inputs:
+  - workspace
+side_effects:
+  - may_write_workspace_state
+  - must_not_modify_code
+human_gate:
+  required: false

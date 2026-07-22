@@ -2,7 +2,7 @@
 
 AgenticOps 是面向研发流程的 AI 执行控制体系，用于让 AIAgent 在现有 Jira-centered 研发体系中可控地接管任务、完成开发、运行验证并回写证据。
 
-当前阶段只做文档和设计落地，不实现运行代码。本文档中的命令是第一阶段目标接口，除非仓库中出现对应文件或命令输出证明，否则不得视为已经实现。
+当前仓库已进入第一阶段本地实现。`agent-task-ops` Go CLI 已支持本地 fake flow，用于验证安装引导、工作空间初始化、AIAgent 能力初始化、任务接管、evidence 写入和反馈日报；真实 Jira / GitHub 写操作尚未接入。
 
 ## 当前定位
 
@@ -60,7 +60,7 @@ AgenticOps
 
 ## 安装方向
 
-第一阶段设计中的安装入口：
+第一阶段安装入口：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
@@ -76,7 +76,7 @@ curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
 
 ## 当前状态
 
-当前仓库优先沉淀：
+当前仓库已经包含：
 
 - 项目定位和规则。
 - 项目规范、约束和开发风格。
@@ -87,5 +87,7 @@ curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
 - Workflow Profile。
 - 项目 AI 工作空间边界。
 - Feedback Loop。
+- Go CLI Runtime 第一阶段本地 fake flow。
+- 安装 bootstrap 和本地端到端验证脚本。
 
-在设计审阅确认前，不开始实现代码。
+当前实现只用于本地闭环验证。真实 Jira / GitHub 接入、push、PR、merge 和发布仍必须在后续阶段设计和人工确认后推进。

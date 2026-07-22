@@ -62,26 +62,25 @@ AIAgent 必须严格区分：
 
 不得把具体项目任务日志、代码变更、Jira 原文或敏感上下文写入 AgenticOps 全局资料。
 
-## 6. 仅文档阶段门禁
+## 6. 第一阶段实现门禁
 
-在用户审阅确认所有设计前，AIAgent 不得：
+当前已允许实现本地 fake flow。AIAgent 不得：
 
-- 实现 `init.sh`。
-- 实现 `agent-task-ops`。
-- 创建可执行 CLI 脚本。
 - 创建真实 adapter。
 - 调用真实 Jira 写操作。
 - 调用真实 GitHub 写操作。
+- 自动 push。
+- 自动创建 PR。
+- 自动 merge。
+- 自动发布。
+- 自动改写 AgenticOps 源头规则。
 
 允许的工作：
 
-- 整理文档。
-- 设计目录结构。
-- 设计 Operation Contract。
-- 设计 Workflow Profile。
-- 设计 AI 员工手册。
-- 设计 Feedback Loop。
-- 设计后续实现计划。
+- 维护文档、目录结构、Operation Contract、Workflow Profile、AI 员工手册和 Feedback Loop。
+- 实现 `agent-task-ops` Go CLI 的本地 fake flow。
+- 实现 `scripts/init.sh` 安装 bootstrap。
+- 实现本地单元测试、脚本 smoke test 和 fake flow e2e。
 
 ## 7. 输出纪律
 

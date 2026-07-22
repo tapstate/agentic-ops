@@ -1,0 +1,16 @@
+operation: feedback_report
+version: 1
+purpose: 生成当前工作空间的每日 AIAgent 执行反馈报告。
+task_type: feedback_reporting
+allowed_stages:
+  - evidence_written
+  - blocked
+  - completed
+required_inputs:
+  - workspace
+  - date
+side_effects:
+  - may_write_workspace_feedback
+  - must_not_write_jira
+human_gate:
+  required: false

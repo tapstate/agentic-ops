@@ -1,0 +1,13 @@
+operation: workspace_init
+version: 1
+purpose: 初始化具体项目的 AI 工作空间运行目录。
+task_type: workspace_initialization
+allowed_stages:
+  - installed
+required_inputs:
+  - workspace
+side_effects:
+  - may_write_workspace_state
+  - must_not_write_jira
+human_gate:
+  required: false

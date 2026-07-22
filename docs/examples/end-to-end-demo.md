@@ -144,3 +144,11 @@ agent-task-ops workspace init --workspace tapstate
 - 能展示 `run_id` 和 evidence。
 - 能展示人工确认点。
 - 能展示 feedback report 的输入和输出。
+
+第一阶段本地 fake flow 验证命令：
+
+```sh
+bash tests/e2e/local-fake-flow.sh
+```
+
+该命令使用 fake Jira 数据跑通本地 CLI 闭环，不执行真实 Jira 或 GitHub 写操作。

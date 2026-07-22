@@ -1,0 +1,13 @@
+operation: install
+version: 1
+purpose: 安装 AgenticOps 全局 CLI 到用户本机。
+task_type: installation
+allowed_stages:
+  - not_installed
+required_inputs:
+  - install_dir
+side_effects:
+  - may_write_global_install_dir
+  - must_not_modify_project_workspace
+human_gate:
+  required: false

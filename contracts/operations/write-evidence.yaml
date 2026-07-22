@@ -1,0 +1,16 @@
+operation: write_evidence
+version: 1
+purpose: 写入 Jira / PR evidence。
+task_type: evidence_write
+allowed_stages:
+  - takeover_started
+  - development_completed
+  - blocked
+required_inputs:
+  - workspace
+  - run_id
+side_effects:
+  - may_write_jira_comment
+  - may_write_local_event
+human_gate:
+  required: false

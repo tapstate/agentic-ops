@@ -135,7 +135,7 @@ agent-task-ops self-update
 - Produces: `output.Success(operation string, payload map[string]any) map[string]any`
 - Produces: `output.Failure(operation string, code string, message string, requiredHumanAction string) map[string]any`
 
-- [ ] **Step 1: Create Go module**
+- [x] **Step 1: Create Go module**
 
 ```go
 module github.com/tapstate/agentic-ops
@@ -146,7 +146,7 @@ go 1.22
 Run: `go test ./...`  
 Expected: command succeeds with `go: warning: "./..." matched no packages` or no package output before code files are added.
 
-- [ ] **Step 2: Add JSON output helpers**
+- [x] **Step 2: Add JSON output helpers**
 
 Create `packages/agent-task-ops/internal/output/json.go`:
 
@@ -215,7 +215,7 @@ func TestFailureIncludesStableCode(t *testing.T) {
 Run: `go test ./packages/agent-task-ops/internal/output`  
 Expected: PASS.
 
-- [ ] **Step 3: Add CLI app entry**
+- [x] **Step 3: Add CLI app entry**
 
 Create `packages/agent-task-ops/internal/cli/app.go`:
 
@@ -321,7 +321,7 @@ func main() {
 Run: `go test ./packages/agent-task-ops/internal/...`  
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add go.mod packages/agent-task-ops
@@ -344,7 +344,7 @@ git commit -m "Feat(cli): add Go CLI skeleton"
 - Produces: `workspace.Ensure(root string, name string) (Info, error)`
 - Produces: `workspace.Info{Name, Root, RunsDir, FeedbackDir string}`
 
-- [ ] **Step 1: Add path helpers**
+- [x] **Step 1: Add path helpers**
 
 Create `packages/agent-task-ops/internal/config/paths.go`:
 
@@ -376,7 +376,7 @@ func TestDefaultInstallDir(t *testing.T) {
 Run: `go test ./packages/agent-task-ops/internal/config`  
 Expected: PASS.
 
-- [ ] **Step 2: Add workspace creation**
+- [x] **Step 2: Add workspace creation**
 
 Create `packages/agent-task-ops/internal/workspace/workspace.go`:
 
@@ -459,7 +459,7 @@ func TestEnsureCreatesWorkspaceDirs(t *testing.T) {
 Run: `go test ./packages/agent-task-ops/internal/workspace`  
 Expected: PASS.
 
-- [ ] **Step 3: Add `workspace init` command route**
+- [x] **Step 3: Add `workspace init` command route**
 
 Modify `packages/agent-task-ops/internal/cli/app.go` to route:
 
@@ -510,7 +510,7 @@ func TestWorkspaceInitOutputsNextAction(t *testing.T) {
 Run: `go test ./packages/agent-task-ops/internal/...`  
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/agent-task-ops/internal/config packages/agent-task-ops/internal/workspace packages/agent-task-ops/internal/cli
@@ -532,12 +532,12 @@ git commit -m "Feat(workspace): add workspace initialization model"
 - Produces: `contract.Operation`
 - Produces: `contract.LoadFile(path string) (Operation, error)`
 
-- [ ] **Step 1: Add YAML dependency**
+- [x] **Step 1: Add YAML dependency**
 
 Run: `go get gopkg.in/yaml.v3`  
 Expected: `go.mod` and `go.sum` update with `gopkg.in/yaml.v3`.
 
-- [ ] **Step 2: Add operation YAML files**
+- [x] **Step 2: Add operation YAML files**
 
 Create `contracts/operations/takeover-task.yaml`:
 
@@ -600,7 +600,7 @@ human_gate:
   required: false
 ```
 
-- [ ] **Step 3: Add contract model and loader**
+- [x] **Step 3: Add contract model and loader**
 
 Create `packages/agent-task-ops/internal/contract/model.go`:
 
@@ -678,7 +678,7 @@ func TestLoadFileReadsOperationContract(t *testing.T) {
 Run: `go test ./packages/agent-task-ops/internal/contract`  
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add go.mod go.sum contracts/operations packages/agent-task-ops/internal/contract
@@ -698,7 +698,7 @@ git commit -m "Feat(contract): add operation contract loader"
 - Produces: `jira.FakeClient.ListTasks(workspace string) []Issue`
 - Consumes: `output.Success`
 
-- [ ] **Step 1: Add fake Jira model**
+- [x] **Step 1: Add fake Jira model**
 
 Create `packages/agent-task-ops/internal/jira/model.go`:
 
@@ -745,7 +745,7 @@ func (FakeClient) GetIssue(key string) (Issue, bool) {
 }
 ```
 
-- [ ] **Step 2: Add `list-tasks` command**
+- [x] **Step 2: Add `list-tasks` command**
 
 Modify `packages/agent-task-ops/internal/cli/app.go` imports to include fake jira package:
 
@@ -787,7 +787,7 @@ func TestListTasksUsesFakeJira(t *testing.T) {
 Run: `go test ./packages/agent-task-ops/internal/...`  
 Expected: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/agent-task-ops/internal/jira packages/agent-task-ops/internal/cli
@@ -807,7 +807,7 @@ git commit -m "Feat(jira): add fake task listing"
 - Produces: `feedback.RunID(issueKey string, taskType string, now time.Time, suffix string) string`
 - Produces: `feedback.AppendEvent(path string, event Event) error`
 
-- [ ] **Step 1: Add event model**
+- [x] **Step 1: Add event model**
 
 Create `packages/agent-task-ops/internal/feedback/event.go`:
 
@@ -896,7 +896,7 @@ func TestAppendEventWritesNDJSON(t *testing.T) {
 Run: `go test ./packages/agent-task-ops/internal/feedback`  
 Expected: PASS.
 
-- [ ] **Step 2: Add `takeover-task` command**
+- [x] **Step 2: Add `takeover-task` command**
 
 Modify `packages/agent-task-ops/internal/cli/app.go` to route:
 
@@ -943,7 +943,7 @@ func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 Run: `go test ./packages/agent-task-ops/internal/...`  
 Expected: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/agent-task-ops/internal/feedback packages/agent-task-ops/internal/cli
@@ -961,7 +961,7 @@ git commit -m "Feat(takeover): add fake task takeover"
 **Interfaces:**
 - Produces: `evidence.Write(path string, content string) error`
 
-- [ ] **Step 1: Add evidence writer**
+- [x] **Step 1: Add evidence writer**
 
 Create `packages/agent-task-ops/internal/evidence/writer.go`:
 
@@ -1011,7 +1011,7 @@ func TestWriteCreatesEvidenceFile(t *testing.T) {
 Run: `go test ./packages/agent-task-ops/internal/evidence`  
 Expected: PASS.
 
-- [ ] **Step 2: Add `write-evidence` command**
+- [x] **Step 2: Add `write-evidence` command**
 
 Route command:
 
@@ -1049,7 +1049,7 @@ func TestWriteEvidenceRequiresRunID(t *testing.T) {
 Run: `go test ./packages/agent-task-ops/internal/...`  
 Expected: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/agent-task-ops/internal/evidence packages/agent-task-ops/internal/cli
@@ -1068,7 +1068,7 @@ git commit -m "Feat(evidence): add evidence writer"
 - Produces: `feedback.Report{Runs, Succeeded, Blocked, Failed int}`
 - Produces: `feedback.Summarize(events []Event) Report`
 
-- [ ] **Step 1: Add report summarizer**
+- [x] **Step 1: Add report summarizer**
 
 Create `packages/agent-task-ops/internal/feedback/report.go`:
 
@@ -1125,7 +1125,7 @@ func TestSummarizeCountsRuns(t *testing.T) {
 Run: `go test ./packages/agent-task-ops/internal/feedback`  
 Expected: PASS.
 
-- [ ] **Step 2: Add `feedback report` command**
+- [x] **Step 2: Add `feedback report` command**
 
 Route command:
 
@@ -1169,7 +1169,7 @@ func TestFeedbackReportOutputsReportPath(t *testing.T) {
 Run: `go test ./packages/agent-task-ops/internal/...`  
 Expected: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add packages/agent-task-ops/internal/feedback packages/agent-task-ops/internal/cli
@@ -1186,7 +1186,7 @@ git commit -m "Feat(feedback): add feedback report"
 - Consumes: release artifact naming convention `agent-task-ops_<os>_<arch>.tar.gz`
 - Produces: `~/.agentic-ops/bin/agent-task-ops`
 
-- [ ] **Step 1: Add bootstrap script**
+- [x] **Step 1: Add bootstrap script**
 
 Create `scripts/init.sh`:
 
@@ -1228,7 +1228,7 @@ printf '{"ok":true,"operation":"install","install_dir":"%s","bin":"%s","target":
 
 This script is a design-phase placeholder executable that does not download a real binary. Replace the embedded stub with real release download logic when release artifacts exist.
 
-- [ ] **Step 2: Add bootstrap smoke test**
+- [x] **Step 2: Add bootstrap smoke test**
 
 Create `scripts/test-init.sh`:
 
@@ -1248,7 +1248,7 @@ test -x "$tmp_home/.agentic-ops/bin/agent-task-ops"
 Run: `bash scripts/test-init.sh`  
 Expected: command exits 0 and prints the matched JSON line containing `"ok":true`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/init.sh scripts/test-init.sh
@@ -1265,7 +1265,7 @@ git commit -m "Feat(install): add bootstrap installer"
 - Consumes: `agent-task-ops` command from `go run ./packages/agent-task-ops/cmd/agent-task-ops`
 - Produces: local fake flow evidence that install, workspace init, agent init, list tasks, takeover, write evidence, feedback report produce JSON.
 
-- [ ] **Step 1: Add local fake flow script**
+- [x] **Step 1: Add local fake flow script**
 
 Create `tests/e2e/local-fake-flow.sh`:
 
@@ -1287,7 +1287,7 @@ $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"operation":
 Run: `bash tests/e2e/local-fake-flow.sh`  
 Expected: all commands exit 0.
 
-- [ ] **Step 2: Update demo doc with fake flow command**
+- [x] **Step 2: Update demo doc with fake flow command**
 
 Modify `docs/examples/end-to-end-demo.md` to add this verification command under demo acceptance:
 
@@ -1297,7 +1297,7 @@ bash tests/e2e/local-fake-flow.sh
 
 Expected description: this command runs the first-stage local fake flow and does not perform real Jira or GitHub writes.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/e2e/local-fake-flow.sh docs/examples/end-to-end-demo.md
@@ -1337,3 +1337,4 @@ git commit -m "Test(e2e): add local fake flow"
 - Contract source: 顶层 `contracts/operations/` 是唯一机器可读契约源头。
 - Runtime boundary: Go CLI 承载业务逻辑，shell 只做安装引导。
 - Human gate: push、PR、merge、发布不在第一批自动执行范围内。
+- Implementation note: 第一阶段实现补齐了计划命令范围中的 `preflight`、`agent init`、`resume-takeover`，并创建完整目标 operation YAML；真实 Jira / GitHub 写操作仍未接入。
