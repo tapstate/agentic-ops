@@ -12,12 +12,15 @@
 - `docs/ai-working-rules.md`
 - `docs/strategy/positioning.md`
 - `docs/runtime/cli-runtime.md`
+- `docs/runtime/problem-resolution-and-update.md`
 - `docs/templates/evidence-templates.md`
 - `docs/examples/end-to-end-demo.md`
 
 ## 2. 产品边界
 
-AgenticOps 是面向研发流程的 AI 执行控制体系，用于让 AIAgent 在现有 Jira-centered 研发体系中可控地接管任务、完成开发、运行验证并回写证据。
+AgenticOps 是把公司事务处理方式沉淀成 AI 可执行标准流程的 AI 执行控制体系。
+
+第一阶段先落地研发 Jira 任务：帮助研发操作 AIAgent 从 Jira 接管任务到完成任务。不同任务可以对应不同流程。AgenticOps 必须通过 AI 员工手册、Operation Contract、Workflow Profile、Policy / Gate、Runbook、Templates、事件日志、evidence 和 feedback report 管理这些流程差异，让执行过程可恢复、可复盘、可分析，并把关键状态和关键信息回写到正确位置。
 
 AgenticOps 必须遵守：
 
@@ -27,6 +30,8 @@ AgenticOps 必须遵守：
 - 不创建新的任务管理事实源。
 - 不以全自动开发作为第一阶段目标。
 - 不把某个具体 Jira workflow 硬编码为核心模型。
+- 不把所有任务强行压成同一条固定执行流程。
+- 不依赖员工记住所有标准流程细节。
 
 AgenticOps 第一阶段只追求跑通真实、可控、可复用的主链路：
 
@@ -60,6 +65,23 @@ AgenticOps 必须保持事实源边界清晰：
 - 不要求研发 owner 手工填写。
 - 必须能串联 Jira evidence、事件日志、测试结果、PR 和反馈分析。
 
+执行记录必须覆盖：
+
+- 当前任务类型。
+- 当前阶段。
+- 下一步动作。
+- 人工门禁状态。
+- 关键输入、关键输出和关键失败原因。
+- 已回写的位置，例如 Jira evidence、PR comment、项目 AI 工作空间日志或 feedback report。
+
+标准流程出问题时，处理优先级必须是：
+
+- 能按 AI 员工手册、operation contract、workflow profile、policy、runbook 或 template 自助处理的，优先自助处理。
+- 缺少 Jira 关键字段或上下文时，阻断接管并输出补全动作和模板。
+- 标准资产不适配时，生成 profile、policy、template 或 runbook 的改进建议。
+- 存在风险、权限不足、标准冲突或连续失败时，转人工确认。
+- 只有确认问题来自 `agent-task-ops` CLI 二进制逻辑错误时，才进入二进制修复发布路径。
+
 ## 4. 仓库边界
 
 当前只有一个公司仓库作为 AgenticOps 的权威源头：
@@ -72,6 +94,7 @@ git@github.com:tapstate/agentic-ops.git
 
 ```text
 docs/          架构、目标定位、用户故事、流程、计划
+assets/        安装后交付给研发 owner 和 AIAgent 使用的运行资产源头
 contracts/     Operation Contract 和 schema
 skills/        AgenticOps skills 和 AI 员工工作规则
 handbooks/     AI 员工手册
@@ -84,6 +107,8 @@ scripts/       本地和 CI 辅助脚本
 ```
 
 仓库内文档、目录和脚本文件名默认使用英文 ASCII lowercase-kebab-case。面向用户的正文优先使用中文。
+
+同一个仓库内使用目录区分资料职责，不使用不同分支分管源码、设计、计划或运行资产。分支只用于开发协作、审阅和发布准备。正式交付时通过 release 包控制使用者可见内容，研发 owner 和 AIAgent 默认只接触安装后的命令、资产、模板和规范。
 
 ## 5. 安装边界
 

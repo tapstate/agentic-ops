@@ -44,6 +44,7 @@ func TestPreflightOutputsInstallDirAndNextAction(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "operation", "preflight")
 	assertJSONField(t, stdout.String(), "workspace", "tapstate")
+	assertJSONField(t, stdout.String(), "go_runtime", "not_required_for_installed_cli")
 	assertJSONField(t, stdout.String(), "next_action", "workspace_init")
 }
 
@@ -74,6 +75,25 @@ func TestAgentInitOutputsTaskModel(t *testing.T) {
 	assertJSONField(t, stdout.String(), "task_type", "capability_initialization")
 	assertJSONField(t, stdout.String(), "current_stage", "agent_capability_initialized")
 	assertJSONField(t, stdout.String(), "next_action", "list_tasks")
+}
+
+func TestAssetsInstallCopiesAssetsToInstallDir(t *testing.T) {
+	source := t.TempDir()
+	writeCLITestFile(t, filepath.Join(source, "handbooks", "ai-employee-handbook.md"), "# handbook\n")
+	installDir := t.TempDir()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"assets", "install", "--source", source, "--install-dir", installDir, "--version", "2026.07.22.1"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+
+	assertJSONField(t, stdout.String(), "operation", "assets_install")
+	assertJSONField(t, stdout.String(), "asset_version", "2026.07.22.1")
+	if _, err := os.Stat(filepath.Join(installDir, "assets", "2026.07.22.1", "handbooks", "ai-employee-handbook.md")); err != nil {
+		t.Fatalf("installed asset missing: %v", err)
+	}
 }
 
 func TestListTasksUsesFakeJira(t *testing.T) {
@@ -199,5 +219,15 @@ func assertJSONNumber(t *testing.T, raw string, key string, want float64) {
 	}
 	if got[key] != want {
 		t.Fatalf("%s = %v, want %v; raw = %s", key, got[key], want, raw)
+	}
+}
+
+func writeCLITestFile(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
 	}
 }

@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-本文定义 AgenticOps 第一阶段 Go CLI Runtime 的设计方向。当前阶段只记录设计，不实现代码。
+本文定义 AgenticOps 第一阶段 Go CLI Runtime 的设计和当前实现边界。当前仓库已实现本地 fake flow；真实 Jira / GitHub 写操作、push、PR、merge 和发布仍未接入。
 
 CLI Runtime 的目标是给 AIAgent 提供稳定、结构化、可审计的操作入口，避免 AIAgent 直接面对 Jira / GitHub / Git 的底层事实和高风险动作。
 
@@ -51,7 +51,7 @@ packages/agent-task-ops/
   testdata/
 ```
 
-以上是目标结构，不表示当前已经实现。
+以上是目标结构。当前已实现 `cli`、`config`、`contract`、`evidence`、`feedback`、`jira`、`output`、`policy` 和 `workspace` 的本地 fake flow；`git`、`github` 等真实集成目录仍属于后续阶段。
 
 Operation Contract 的机器可读源头在仓库顶层 `contracts/operations/`。Go CLI 可以在构建或运行时读取这些契约，但不在 package 内维护第二份契约源头。
 
@@ -136,6 +136,8 @@ CLI 必须遵守：
 ## 8. 发布与修复
 
 AgenticOps 面向公司研发分发，运行时必须支持快速修复和快速升级。
+
+正式使用前的问题分类、诊断、发布、同步和回滚路径见 `docs/runtime/problem-resolution-and-update.md`。
 
 第一阶段发布流程应满足：
 

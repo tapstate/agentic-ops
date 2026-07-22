@@ -1332,9 +1332,9 @@ git commit -m "Test(e2e): add local fake flow"
 
 ## 5. 自检记录
 
-- Spec coverage: 覆盖安装、工作空间初始化、AIAgent 初始化、新任务接管、证据写入、反馈报告。
+- Spec coverage: 覆盖安装、运行资产安装、本地 build / release 打包、工作空间初始化、AIAgent 初始化、新任务接管、证据写入、反馈报告。
 - Operation scope: 第一批可运行命令只取最小闭环，其他 operation 保留为后续计划。
 - Contract source: 顶层 `contracts/operations/` 是唯一机器可读契约源头。
 - Runtime boundary: Go CLI 承载业务逻辑，shell 只做安装引导。
 - Human gate: push、PR、merge、发布不在第一批自动执行范围内。
-- Implementation note: 第一阶段实现补齐了计划命令范围中的 `preflight`、`agent init`、`resume-takeover`，并创建完整目标 operation YAML；真实 Jira / GitHub 写操作仍未接入。
+- Implementation note: 第一阶段实现补齐了计划命令范围中的 `preflight`、`agent init`、`resume-takeover`、本地 `assets install`、`scripts/build.sh` 和 `scripts/release.sh`，并创建本地 fake flow 所需 operation YAML；真实 Jira / GitHub 写操作仍未接入。

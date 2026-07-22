@@ -1,0 +1,18 @@
+operation: assets_install
+version: 1
+purpose: 安装或更新 AgenticOps 运行资产到全局安装目录。
+task_type: asset_installation
+allowed_stages:
+  - installed
+  - asset_update_required
+required_inputs:
+  - source
+  - version
+optional_inputs:
+  - install_dir
+side_effects:
+  - may_write_global_install_dir
+  - must_not_modify_project_workspace
+  - must_not_modify_business_repo
+human_gate:
+  required: false

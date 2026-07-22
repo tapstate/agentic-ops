@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/assets"
 	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/config"
 	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/evidence"
 	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/feedback"
@@ -16,7 +17,7 @@ import (
 	"github.com/tapstate/agentic-ops/packages/agent-task-ops/internal/workspace"
 )
 
-const Version = "0.1.0-dev"
+var Version = "0.1.0-dev"
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -35,6 +36,10 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	case "agent":
 		if len(args) >= 2 && args[1] == "init" {
 			return runAgentInit(args, stdout)
+		}
+	case "assets":
+		if len(args) >= 2 && args[1] == "install" {
+			return runAssetsInstall(args, stdout)
 		}
 	case "list-tasks":
 		return runListTasks(args, stdout)
@@ -59,7 +64,7 @@ func runPreflight(args []string, stdout io.Writer) int {
 	return writeJSON(stdout, output.Success("preflight", map[string]any{
 		"workspace":   readFlag(args, "--workspace", "default"),
 		"install_dir": config.DefaultInstallDir(home),
-		"go_runtime":  "required",
+		"go_runtime":  "not_required_for_installed_cli",
 		"jira":        "fake",
 		"github":      "not_used_in_phase_one",
 		"next_action": "workspace_init",
@@ -93,6 +98,7 @@ func runAgentInit(args []string, stdout io.Writer) int {
 		"next_action":   "list_tasks",
 		"capabilities": []string{
 			"preflight",
+			"assets_install",
 			"workspace_init",
 			"list_tasks",
 			"takeover_task",
@@ -100,6 +106,28 @@ func runAgentInit(args []string, stdout io.Writer) int {
 			"write_evidence",
 			"feedback_report",
 		},
+	}))
+}
+
+func runAssetsInstall(args []string, stdout io.Writer) int {
+	source := readFlag(args, "--source", "")
+	if source == "" {
+		return writeJSON(stdout, output.Failure("assets_install", "missing_source", "缺少资产源目录", "请提供 --source"))
+	}
+	version := readFlag(args, "--version", "")
+	if version == "" {
+		return writeJSON(stdout, output.Failure("assets_install", "missing_asset_version", "缺少资产版本", "请提供 --version"))
+	}
+	installDir := readInstallDir(args)
+	result, err := assets.Install(source, installDir, version)
+	if err != nil {
+		return writeJSON(stdout, output.Failure("assets_install", "assets_install_failed", err.Error(), "请检查资产源目录和安装目录权限"))
+	}
+	return writeJSON(stdout, output.Success("assets_install", map[string]any{
+		"asset_version": result.AssetVersion,
+		"assets_dir":    result.AssetsDir,
+		"current":       result.CurrentPath,
+		"next_action":   "agent_init",
 	}))
 }
 
@@ -231,6 +259,17 @@ func readFlag(args []string, name string, fallback string) string {
 		}
 	}
 	return fallback
+}
+
+func readInstallDir(args []string) string {
+	if installDir := readFlag(args, "--install-dir", ""); installDir != "" {
+		return installDir
+	}
+	if installDir := os.Getenv("AGENTIC_OPS_HOME"); installDir != "" {
+		return installDir
+	}
+	home, _ := os.UserHomeDir()
+	return config.DefaultInstallDir(home)
 }
 
 func fixedNow() time.Time {

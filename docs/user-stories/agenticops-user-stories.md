@@ -2,13 +2,15 @@
 
 ## 1. 范围
 
-本文记录 AgenticOps 第一阶段用户故事。故事围绕研发 owner 使用 AI 员工完成 Jira 任务的主链路展开，覆盖安装、工作空间初始化、AIAgent 能力初始化、新任务接管、恢复接管任务和工作日志上报。
+本文记录 AgenticOps 第一阶段用户故事。故事围绕研发 owner 操作 AI 员工从 Jira 接管任务到完成任务的主链路展开，覆盖安装、工作空间初始化、AIAgent 能力初始化、新任务接管、恢复接管任务和工作日志上报。
+
+不同任务可以进入不同流程，但每个流程都必须记录执行过程，并在关键阶段回写状态、信息和证据，便于后续分析和优化。
 
 AgenticOps 的用户故事需要同时约束三类对象：
 
 - 研发 owner：用自然语言或 CLI 快速操作 AI 员工。
 - AIAgent：按 AI 员工手册和 Operation Contract 工作。
-- `agent-task-ops`：作为 Go CLI Runtime 执行 gate、policy、证据回写和事件记录。
+- `agent-task-ops`：作为 Go CLI Runtime 执行 gate、policy、流程选择、证据回写和事件记录。
 
 ## 2. US-001 安装 AgenticOps
 

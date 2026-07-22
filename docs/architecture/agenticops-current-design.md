@@ -2,14 +2,16 @@
 
 ## 1. 定位
 
-AgenticOps 是面向研发流程的 AI 执行控制体系，用于让 AIAgent 在现有 Jira-centered 研发体系中可控地接管任务、完成开发、运行验证并回写证据。
+AgenticOps 是把公司事务处理方式沉淀成 AI 可执行标准流程的 AI 执行控制体系。
 
-AgenticOps 不替代 Jira、不替代研发 owner、不替代 PR Review，也不以全自动开发为第一阶段目标。它的核心价值是把 AI 员工从临时聊天助手变成流程内可管理、可追踪、可复盘的执行主体。
+第一阶段先落地研发 Jira 任务：帮助研发操作 AIAgent 从 Jira 接管任务到完成任务。AgenticOps 不替代 Jira、不替代研发 owner、不替代 PR Review，也不以全自动开发为第一阶段目标。它的核心价值是把 AI 员工从临时聊天助手变成流程内可管理、可追踪、可复盘的执行主体。
+
+不同任务会涉及不同流程，例如新任务接管、恢复接管、PR comments 修复、阻塞上报和工作日志上报。AgenticOps 通过 Operation Contract 和 Workflow Profile 选择流程，通过事件日志、`run_id`、evidence 和 feedback report 记录执行过程，并把关键状态、关键信息和证据回写到 Jira、PR 或项目 AI 工作空间，用于后续分析和优化。
 
 一句话定义：
 
 ```text
-AgenticOps = AI 员工手册 + 项目规则 + 开发风格 + AIAgent 工作规则 + Operation Contract + Workflow Profile + Go CLI Runtime + Evidence Templates + Feedback Loop
+AgenticOps = AI 员工手册 + 项目规则 + AIAgent 工作规则 + Operation Contract + Workflow Profile + Policy / Gate + Runbook + Templates + Go CLI Runtime + Evidence / Feedback Loop
 ```
 
 ## 2. 设计目标
@@ -41,6 +43,8 @@ Jira issue 已进入迭代
 - `run_id` 只追踪一次 AI 执行，不替代 Jira issue key，也不替代 Jira 状态。
 - AIAgent 可以推进研发阶段，但不能绕过 workflow profile、gate 和人工确认点。
 - 控制规范不能只靠提示词；提示词负责指导，Go CLI Runtime 负责强制检查和结构化输出。
+- 每次执行都必须产生可聚合记录，关键状态和信息必须回写到对应事实源或项目 AI 工作空间。
+- 除非问题来自 `agent-task-ops` 二进制逻辑错误，否则 AIAgent 应优先通过标准资产自助处理、阻断或转人工。
 
 ## 4. 仓库与运行边界
 

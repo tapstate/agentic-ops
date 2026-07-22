@@ -15,6 +15,7 @@
 - Workflow Profile。
 - Skills。
 - Templates。
+- 运行资产源头。
 - CLI Runtime 设计。
 - 文档、示例和测试规划。
 
@@ -50,6 +51,14 @@ agentic-ops/
     project-rules.md
   handbooks/
     ai-employee-handbook.md
+  assets/
+    manifest.json
+    handbooks/
+    contracts/
+    profiles/
+    policies/
+    runbooks/
+    templates/
   plans/
     implementation-plan-v1.md
   contracts/
@@ -87,12 +96,13 @@ agentic-ops/
 | --- | --- |
 | `docs/` | 架构、规则、用户故事、流程和设计说明。 |
 | `handbooks/` | AI 员工手册，面向 AIAgent 和研发 owner。 |
+| `assets/` | 安装后交付给研发 owner 和 AIAgent 使用的运行资产源头。 |
 | `plans/` | 面向 AIAgent 和研发 owner 的可执行推进计划，使用 checkbox 跟踪实施进度。 |
 | `contracts/` | 可机器读取的 Operation Contract，后续以 YAML / JSON 管理。 |
 | `profiles/` | Workflow Profile 示例和默认配置。 |
 | `skills/` | AgenticOps skills，让 AIAgent 知道如何工作。 |
 | `templates/` | Jira / PR / evidence 回写模板。 |
-| `packages/agent-task-ops/` | Go CLI Runtime 的未来实现位置。 |
+| `packages/agent-task-ops/` | Go CLI Runtime 当前实现位置。 |
 | `examples/` | 端到端演示样例。 |
 | `tests/` | 合同、脚本和文档一致性测试。 |
 | `scripts/` | 安装、检查和辅助脚本。 |
@@ -102,6 +112,12 @@ agentic-ops/
 `~/.agentic-ops` 是用户本机全局安装和配置目录，可保存从 release 安装得到的 Go 二进制、安装元数据、全局配置、通用手册、通用 skills 和可安全重建的缓存。
 
 `~/.agentic-ops` 不是具体项目或具体任务运行目录。
+
+当前仓库使用目录区分源码、设计、计划和运行资产，不使用不同分支分管资料。发布时再按交付对象拆分：
+
+- 维护者面对完整仓库。
+- 研发 owner 和 AIAgent 面对安装后的 `agent-task-ops`、`~/.agentic-ops/current.json` 和 `~/.agentic-ops/assets/<version>/`。
+- 设计文档和实施计划不进入普通使用者的日常入口。
 
 ## 6. 工作空间边界
 

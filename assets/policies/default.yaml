@@ -1,0 +1,15 @@
+policy: default
+version: 1
+gates:
+  write_jira_comment:
+    required: false
+  transition_jira_status:
+    required: true
+  git_commit:
+    required: true
+  git_push:
+    required: true
+  create_pr:
+    required: true
+  scope_change:
+    required: true

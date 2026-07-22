@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-本文定义 AgenticOps 第一阶段端到端演示脚本。当前阶段只设计演示流程，不执行真实 Jira / GitHub 写操作。
+本文定义 AgenticOps 第一阶段端到端演示脚本。当前已提供本地 fake flow 验证脚本，用于演示 CLI 最小闭环；真实 Jira / GitHub 写操作仍不执行。
 
 ## 2. 演示目标
 
