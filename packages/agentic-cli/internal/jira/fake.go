@@ -51,6 +51,10 @@ func (FakeClient) UpdateFields(ctx context.Context, key string, fields map[strin
 	return nil
 }
 
+func (FakeClient) Transitions(ctx context.Context, key string) ([]Transition, error) {
+	return []Transition{{ID: "31", Name: "Done"}}, nil
+}
+
 func (FakeClient) TransitionIssue(ctx context.Context, key string, transitionID string) error {
 	return nil
 }

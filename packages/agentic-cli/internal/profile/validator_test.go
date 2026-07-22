@@ -26,11 +26,37 @@ func TestValidateReportsMissingRequiredMappings(t *testing.T) {
 		"standard_process_mapping_gap",
 		"lifecycle_mapping_gap",
 		"transition_mapping_gap",
+		"jira_transition_mapping_gap",
 		"missing_local_source_root",
 	} {
 		if !hasIssue(issues, code) {
 			t.Fatalf("missing validation issue %s in %#v", code, issues)
 		}
+	}
+}
+
+func TestValidateReportsMissingJiraTransitionMappingForStandardTransition(t *testing.T) {
+	p := Profile{
+		Workspace: "tapstate",
+		Jira: JiraConfig{
+			Project:   "TAP",
+			TaskQuery: "project = TAP",
+		},
+		JiraFormMapping: FormMapping{
+			Fields: map[string]FormField{"owner": {JiraField: "assignee"}},
+		},
+		TaskClassMapping: TaskClassMapping{
+			IssueTypes: map[string]string{"Task": "technical_task"},
+		},
+		StandardProcessMapping: map[string]string{"technical_task": "development_change_v1"},
+		StatusMapping:          map[string]string{"Done": "completed"},
+		TransitionMapping:      map[string]string{"complete": "completed"},
+		Local:                  LocalConfig{SourceRoot: "/tmp/src"},
+	}
+
+	issues := Validate(p)
+	if !hasIssue(issues, "jira_transition_mapping_gap") {
+		t.Fatalf("issues missing jira transition mapping gap: %#v", issues)
 	}
 }
 

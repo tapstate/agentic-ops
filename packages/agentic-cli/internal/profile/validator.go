@@ -31,6 +31,16 @@ func Validate(p Profile) []ValidationIssue {
 	if len(p.TransitionMapping) == 0 {
 		issues = append(issues, ValidationIssue{Code: "transition_mapping_gap", Message: "transition mapping is required"})
 	}
+	if len(p.JiraTransitionMapping) == 0 {
+		issues = append(issues, ValidationIssue{Code: "jira_transition_mapping_gap", Message: "jira transition mapping is required"})
+	}
+	for action := range p.TransitionMapping {
+		transition, ok := p.JiraTransitionMapping[action]
+		if !ok || (transition.ID == "" && transition.Name == "") {
+			issues = append(issues, ValidationIssue{Code: "jira_transition_mapping_gap", Message: "jira transition mapping is required for " + action})
+			break
+		}
+	}
 	if p.Local.SourceRoot == "" {
 		issues = append(issues, ValidationIssue{Code: "missing_local_source_root", Message: "local.source_root is required"})
 	}

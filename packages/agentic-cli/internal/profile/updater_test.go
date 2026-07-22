@@ -112,6 +112,9 @@ func validProfileYAML(workspace string, jiraProject string) string {
 		"  in_progress: In Progress\n" +
 		"transition_mapping:\n" +
 		"  start_progress: Start Progress\n" +
+		"jira_transition_mapping:\n" +
+		"  start_progress:\n" +
+		"    name: Start Progress\n" +
 		"local:\n" +
 		"  source_root: /tmp/source\n"
 }

@@ -1,6 +1,6 @@
 operation: profile_validate
 version: 1
-purpose: 校验当前 workspace 的 Workflow Profile 是否能映射标准字段、任务分类、标准流程、状态和 transition。
+purpose: 校验当前 workspace 的 Workflow Profile 是否能映射标准字段、任务分类、标准流程、状态、标准 transition 和 Jira transition。
 task_type: profile_validation
 allowed_stages:
   - design_review
@@ -34,6 +34,7 @@ failure:
     - standard_process_mapping_gap
     - lifecycle_mapping_gap
     - transition_mapping_gap
+    - jira_transition_mapping_gap
     - missing_local_source_root
 side_effects:
   - must_not_write_jira

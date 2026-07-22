@@ -68,6 +68,7 @@ failure:
     - real_jira_confirmation_required
     - missing_jira_write_mapping
     - agent_release_failed
+    - jira_transition_mapping_gap
     - jira_transition_failed
     - event_write_failed
 side_effects:

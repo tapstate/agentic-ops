@@ -971,6 +971,21 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 				NextAction:          "ask_owner",
 			}))
 		}
+		if jiraTransitionID == "" {
+			resolvedTransitionID, err := resolveJiraTransitionID(context.Background(), selection.Client, issueKey, workspaceProfile, "complete")
+			if err != nil {
+				_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "jira_transition", "ask_owner", "jira_transition_mapping_gap", false, true)
+				return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
+					Code:                "jira_transition_mapping_gap",
+					Message:             err.Error(),
+					RequiredHumanAction: "请维护 workflow profile 的 jira_transition_mapping，或显式提供 --jira-transition-id",
+					TaskType:            "task_takeover",
+					CurrentStage:        "jira_transition",
+					NextAction:          "ask_owner",
+				}))
+			}
+			jiraTransitionID = resolvedTransitionID
+		}
 		fields := jiraReleaseFields(workspaceProfile)
 		if len(fields) == 0 {
 			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completion_cleanup", "ask_owner", "missing_jira_write_mapping", false, true)
@@ -1030,6 +1045,29 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		"current_stage":            "completed",
 		"next_action":              "feedback_report",
 	}))
+}
+
+func resolveJiraTransitionID(ctx context.Context, client jira.Client, issueKey string, workspaceProfile profile.Profile, action string) (string, error) {
+	transition, ok := workspaceProfile.JiraTransitionMapping[action]
+	if !ok {
+		return "", fmt.Errorf("jira transition mapping missing for %s", action)
+	}
+	if transition.ID != "" {
+		return transition.ID, nil
+	}
+	if transition.Name == "" {
+		return "", fmt.Errorf("jira transition id or name is required for %s", action)
+	}
+	transitions, err := client.Transitions(ctx, issueKey)
+	if err != nil {
+		return "", err
+	}
+	for _, candidate := range transitions {
+		if candidate.Name == transition.Name {
+			return candidate.ID, nil
+		}
+	}
+	return "", fmt.Errorf("jira transition %q not found for %s", transition.Name, action)
 }
 
 func runFeedbackReport(args []string, stdout io.Writer) int {
@@ -1385,6 +1423,12 @@ func takeoverProfile(workspaceName string) profile.Profile {
 			"To Do":       "waiting_takeover",
 			"In Progress": "implementation",
 			"Done":        "completed",
+		},
+		TransitionMapping: map[string]string{
+			"complete": "completed",
+		},
+		JiraTransitionMapping: map[string]profile.JiraTransition{
+			"complete": {Name: "Done"},
 		},
 	}
 }

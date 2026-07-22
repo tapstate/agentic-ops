@@ -123,6 +123,19 @@ func (client *RealClient) UpdateFields(ctx context.Context, key string, fields m
 	return client.doJSON(ctx, http.MethodPut, requestPath, payload, nil)
 }
 
+func (client *RealClient) Transitions(ctx context.Context, key string) ([]Transition, error) {
+	requestPath := "/rest/api/3/issue/" + url.PathEscape(key) + "/transitions"
+	var payload jiraTransitionsResponse
+	if err := client.doJSON(ctx, http.MethodGet, requestPath, nil, &payload); err != nil {
+		return nil, err
+	}
+	transitions := make([]Transition, 0, len(payload.Transitions))
+	for _, transition := range payload.Transitions {
+		transitions = append(transitions, Transition{ID: transition.ID, Name: transition.Name})
+	}
+	return transitions, nil
+}
+
 func (client *RealClient) TransitionIssue(ctx context.Context, key string, transitionID string) error {
 	requestPath := "/rest/api/3/issue/" + url.PathEscape(key) + "/transitions"
 	payload := map[string]any{
@@ -135,6 +148,13 @@ func (client *RealClient) TransitionIssue(ctx context.Context, key string, trans
 
 type jiraSearchResponse struct {
 	Issues []jiraIssueResponse `json:"issues"`
+}
+
+type jiraTransitionsResponse struct {
+	Transitions []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"transitions"`
 }
 
 type jiraIssueResponse struct {

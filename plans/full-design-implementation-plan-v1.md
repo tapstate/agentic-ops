@@ -391,7 +391,7 @@ Expected: FAIL because the profile package does not exist.
 
 - [x] **Step 2: Create profile model and loader**
 
-`Profile` must include `workspace`, `jira.project`, `jira.task_query`, `jira_form_mapping.fields`, `task_class_mapping.issue_types`, `standard_process_mapping`, `status_mapping`, `transition_mapping`, `github.organization`, `github.repositories`, `local.source_root`, `local.runs_dir`, `local.feedback_dir`, `human_gates`, `review_gates`, `retry_redo`, and `templates`.
+`Profile` must include `workspace`, `jira.project`, `jira.task_query`, `jira_form_mapping.fields`, `task_class_mapping.issue_types`, `standard_process_mapping`, `status_mapping`, `transition_mapping`, `jira_transition_mapping`, `github.organization`, `github.repositories`, `local.source_root`, `local.runs_dir`, `local.feedback_dir`, `human_gates`, `review_gates`, `retry_redo`, and `templates`.
 
 - [x] **Step 3: Create default tapstate profile**
 
@@ -419,6 +419,7 @@ Validation must return stable codes:
 - `standard_process_mapping_gap`
 - `lifecycle_mapping_gap`
 - `transition_mapping_gap`
+- `jira_transition_mapping_gap`
 - `missing_local_source_root`
 
 - [x] **Step 5: Add CLI failing test**
@@ -1046,9 +1047,9 @@ Added `TransitionIssue` to the Jira client interface and implemented the Jira Cl
 
 Successful and failed transition writes append `real_jira_write` gate events. Failed transitions return `jira_transition_failed` and require owner review.
 
-- [ ] **Step 4: Decide profile-driven transition mapping**
+- [x] **Step 4: Add profile-driven transition mapping**
 
-Current `transition_mapping` maps standard workflow actions to standard stages. It does not yet identify concrete Jira transition ids or names, so automatic profile-driven transition selection remains a design decision.
+Added separate `jira_transition_mapping` entries for Jira transition ids or names while keeping `transition_mapping` focused on standard workflow actions and stages.
 
 ## 8. Remote Update Manifest And Artifact Baseline
 
@@ -1098,7 +1099,6 @@ The script checks whether the release already exists, creates it when absent, or
 
 ## 11. Later Phases
 
-- Later Phase 3: profile-driven Jira transition id/name mapping.
 - Phase 5: completion cleanup and problem-resolution e2e.
 
 Do not start later phases until Phase 1 contract/schema baseline is passing and committed.

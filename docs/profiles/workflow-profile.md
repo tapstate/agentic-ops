@@ -125,6 +125,7 @@ templates:
 - Profile 中的 repo 映射必须能解释任务如何定位目标源码。
 - Profile 缺字段时，AIAgent 不能自行猜测，应请求研发 owner 补充。
 - Profile 缺任务分类、流程映射、Jira 状态或 transition 时，AIAgent 必须输出 gap 并请求流程 owner 决策。
+- `transition_mapping` 只表达标准推进动作到标准流程阶段的关系；真实 Jira workflow 的 transition id/name 必须放在 `jira_transition_mapping`，避免把标准流程语义和项目私有 Jira 配置混在一起。
 
 ## 5. Jira Form Mapping
 
@@ -150,9 +151,27 @@ jira_form_mapping:
       required_from_stage: takeover_gate
 ```
 
-如果 Jira workflow、字段或描述模板无法适配标准字段，profile validation 必须返回稳定 gap，例如 `missing_form_field`、`unmapped_jira_field`、`lifecycle_mapping_gap`、`transition_mapping_gap` 或 `task_class_mapping_gap`。
+## 6. Jira Transition Mapping
 
-## 6. 审查、重试和重做映射
+Jira Transition Mapping 负责把标准推进动作映射到具体 Jira workflow 的 transition id 或 transition name。`id` 优先；只有没有 `id` 时，AgenticCLI 才会读取 Jira transitions 并按 `name` 查找 id。
+
+概念结构：
+
+```yaml
+transition_mapping:
+  start_progress: implementation
+  complete: completed
+
+jira_transition_mapping:
+  start_progress:
+    name: Start Progress
+  complete:
+    id: "31"
+```
+
+如果 Jira workflow、字段或描述模板无法适配标准字段，profile validation 必须返回稳定 gap，例如 `missing_form_field`、`unmapped_jira_field`、`lifecycle_mapping_gap`、`transition_mapping_gap`、`jira_transition_mapping_gap` 或 `task_class_mapping_gap`。
+
+## 7. 审查、重试和重做映射
 
 Workflow Profile 必须把专业审查节点映射为 AgenticOps 可理解的结果。
 

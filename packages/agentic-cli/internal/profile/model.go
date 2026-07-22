@@ -8,6 +8,7 @@ type Profile struct {
 	StandardProcessMapping map[string]string          `yaml:"standard_process_mapping"`
 	StatusMapping          map[string]string          `yaml:"status_mapping"`
 	TransitionMapping      map[string]string          `yaml:"transition_mapping"`
+	JiraTransitionMapping  map[string]JiraTransition  `yaml:"jira_transition_mapping"`
 	GitHub                 GitHubConfig               `yaml:"github"`
 	Local                  LocalConfig                `yaml:"local"`
 	HumanGates             []string                   `yaml:"human_gates"`
@@ -19,6 +20,11 @@ type Profile struct {
 type JiraConfig struct {
 	Project   string `yaml:"project"`
 	TaskQuery string `yaml:"task_query"`
+}
+
+type JiraTransition struct {
+	ID   string `yaml:"id"`
+	Name string `yaml:"name"`
 }
 
 type FormMapping struct {
@@ -59,5 +65,5 @@ type RetryRedoPolicy struct {
 	Retry         bool   `yaml:"retry"`
 	MaxAttempts   int    `yaml:"max_attempts"`
 	RedoFromStage string `yaml:"redo_from_stage"`
-	NextAction     string `yaml:"next_action"`
+	NextAction    string `yaml:"next_action"`
 }

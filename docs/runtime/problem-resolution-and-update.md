@@ -6,7 +6,7 @@
 
 研发日常使用的是安装后的 `agentic-cli`、AI 员工手册、operation contracts、workflow profiles、policies、runbooks 和 templates。项目出现问题时，AgenticOps 必须能快速判断问题类型，选择正确修复载体，完成验证、发布、同步和回滚。
 
-当前仓库已实现本地资产安装、本地 release 打包、GitHub Release 发布脚本、operation contract 校验、profile validate / update / rollback、policy validate / update / rollback、远程 release manifest / artifact 下载校验、真实二进制切换、doctor 显式真实外部检查、真实 Jira REST client 合同测试基线，以及真实 Jira 字段、comment 和显式 transition 写入 gate/confirmation。尚未实现 profile 驱动 transition id/name 映射。本文是正式使用前的目标设计和验收基线。
+当前仓库已实现本地资产安装、本地 release 打包、GitHub Release 发布脚本、operation contract 校验、profile validate / update / rollback、policy validate / update / rollback、profile 驱动 Jira transition id/name 映射、远程 release manifest / artifact 下载校验、真实二进制切换、doctor 显式真实外部检查、真实 Jira REST client 合同测试基线，以及真实 Jira 字段、comment 和 transition 写入 gate/confirmation。本文是正式使用前的目标设计和验收基线。
 
 ## 2. 架构适配性评估
 
@@ -14,7 +14,7 @@
 
 | 架构部分 | 当前状态 | 适配性判断 | 必须补齐的能力 |
 | --- | --- | --- | --- |
-| Go CLI Runtime | 已有 `agentic-cli` 本地 fake flow、真实 Jira REST client 合同测试基线、真实二进制切换和 doctor 显式外部检查 | 适合承载强制检查、结构化输出、诊断、更新和回滚 | profile 驱动 transition 映射 |
+| Go CLI Runtime | 已有 `agentic-cli` 本地 fake flow、真实 Jira REST client 合同测试基线、profile 驱动 transition 映射、真实二进制切换和 doctor 显式外部检查 | 适合承载强制检查、结构化输出、诊断、更新和回滚 | operation 兼容性版本治理 |
 | Operation Contract | 已有机器可读 YAML 和 `contract validate` 基线 | 适合沉淀标准操作输入输出和失败码 | operation 兼容性版本、跨版本迁移规则 |
 | Workflow Profile | 已有默认 profile、`profile validate / update / rollback` 基线 | 适合处理不同团队和 Jira workflow 差异 | 真实 Jira status / transition gate、资产包来源、profile 版本审计 |
 | Policy / Gate | 已有 policy validate / update / rollback 本地基线 | 适合控制关键步骤门禁 | 真实写操作 gate 变更审计和 confirmation |
@@ -120,7 +120,7 @@ agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
 | 问题类型 | 稳定错误码 | 当前状态 |
 | --- | --- | --- |
 | `agentic-cli` 逻辑错误 | `agentic_cli_logic_error` | `doctor`、doctor 显式真实外部检查和 `feedback bundle --redact` 诊断基线已落地。 |
-| Jira 流程状态没适配 | `unknown_jira_status` | `profile validate / update / rollback`、真实 Jira REST 读取映射基线和显式 `--jira-transition-id` transition gate 已落地；profile 驱动 transition id/name 映射仍需流程 owner 决策。 |
+| Jira 流程状态没适配 | `unknown_jira_status` | `profile validate / update / rollback`、真实 Jira REST 读取映射基线、显式 `--jira-transition-id` transition gate 和 profile 驱动 transition id/name 映射已落地。 |
 | Jira 卡片属性丢失 | `missing_jira_field` | fake Jira 接管 gate 已覆盖必填字段阻断；真实 Jira 字段读取映射基线已落地，补全模板后续实现。 |
 | 关键步骤门禁调整 | `policy_gate_required` | `policy validate / update / rollback` 本地基线已落地；真实 Jira 字段写入、Jira comment 写入和显式 transition 写入已要求 `--confirm-real-jira-write`，并记录 `real_jira_write` gate 审计事件。 |
 
@@ -386,4 +386,4 @@ asset release
 - `scripts/release.sh`
 - `scripts/publish-release.sh`
 
-当前 `update check/apply` 已完成本地 manifest 基线、远程 manifest 拉取、artifact 下载、checksum 校验和真实二进制切换。当前 `policy validate/update/rollback` 已完成本地文件基线，真实 Jira 字段写入、comment 写入和显式 transition 写入已记录 `real_jira_write` gate 审计事件；doctor 已支持显式 `--check-real-jira` 和 `--check-github` 外部检查。`scripts/publish-release.sh` 已支持使用 GitHub CLI 创建或更新 GitHub Release 并上传 release 产物。profile 驱动 transition id/name 映射仍属于正式使用前必须补齐的目标能力。
+当前 `update check/apply` 已完成本地 manifest 基线、远程 manifest 拉取、artifact 下载、checksum 校验和真实二进制切换。当前 `policy validate/update/rollback` 已完成本地文件基线，真实 Jira 字段写入、comment 写入和 profile 驱动 transition 写入已记录 `real_jira_write` gate 审计事件；doctor 已支持显式 `--check-real-jira` 和 `--check-github` 外部检查。`scripts/publish-release.sh` 已支持使用 GitHub CLI 创建或更新 GitHub Release 并上传 release 产物。剩余正式化重点是 operation / profile / assets 的跨版本兼容治理和发布权限治理。

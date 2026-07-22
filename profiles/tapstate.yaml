@@ -66,6 +66,12 @@ transition_mapping:
   start_progress: implementation
   complete: completed
 
+jira_transition_mapping:
+  start_progress:
+    name: "Start Progress"
+  complete:
+    name: "Done"
+
 github:
   organization: tapstate
   repositories:

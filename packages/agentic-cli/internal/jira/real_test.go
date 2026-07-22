@@ -118,6 +118,21 @@ func TestRealClientTransitionIssueUsesTransitionEndpoint(t *testing.T) {
 	}
 }
 
+func TestRealClientTransitionsUsesTransitionsEndpoint(t *testing.T) {
+	client := newTestRealClient(t, func(r *http.Request) *http.Response {
+		assertRealJiraRequest(t, r, http.MethodGet, "/rest/api/3/issue/TAP-123/transitions")
+		return jsonResponse(http.StatusOK, `{"transitions":[{"id":"31","name":"Done"},{"id":"11","name":"Start Progress"}]}`)
+	})
+
+	transitions, err := client.Transitions(context.Background(), "TAP-123")
+	if err != nil {
+		t.Fatalf("Transitions error = %v", err)
+	}
+	if len(transitions) != 2 || transitions[0].ID != "31" || transitions[0].Name != "Done" {
+		t.Fatalf("transitions = %#v", transitions)
+	}
+}
+
 func newTestRealClient(t *testing.T, handler func(*http.Request) *http.Response) *RealClient {
 	t.Helper()
 	client, err := NewRealClient(RealClientConfig{

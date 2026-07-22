@@ -686,6 +686,26 @@ func TestReleaseAgentTransitionsRealJiraIssueWhenTransitionIDProvided(t *testing
 	assertEventLogContains(t, root, `"gate_status":"passed"`)
 }
 
+func TestReleaseAgentUsesProfileJiraTransitionMapping(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	client := &recordingJiraClient{issue: realModeBoundIssue()}
+	withJiraClientForTest(t, jiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"release-agent", "--workspace", "tapstate", "--run-id", "run-1", "--issue-key", "TAP-123", "--completion-evidence", "evidence.md", "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	if client.transitionKey != "TAP-123" || client.transitionID != "31" {
+		t.Fatalf("transition = %s %s", client.transitionKey, client.transitionID)
+	}
+	assertJSONField(t, stdout.String(), "jira_transition_id", "31")
+	assertEventLogContains(t, root, `"current_stage":"jira_transition"`)
+	assertEventLogContains(t, root, `"gate_status":"passed"`)
+}
+
 func TestReleaseAgentRecordsFailedRealJiraTransitionGate(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
@@ -919,6 +939,9 @@ func validCLIProfileYAML(workspace string, jiraProject string) string {
 		"  in_progress: In Progress\n" +
 		"transition_mapping:\n" +
 		"  start_progress: Start Progress\n" +
+		"jira_transition_mapping:\n" +
+		"  start_progress:\n" +
+		"    name: Start Progress\n" +
 		"local:\n" +
 		"  source_root: /tmp/source\n"
 }
@@ -1000,6 +1023,10 @@ func (client *recordingJiraClient) UpdateFields(ctx context.Context, key string,
 		return client.updateErr
 	}
 	return nil
+}
+
+func (client *recordingJiraClient) Transitions(ctx context.Context, key string) ([]jira.Transition, error) {
+	return []jira.Transition{{ID: "31", Name: "Done"}}, nil
 }
 
 func (client *recordingJiraClient) TransitionIssue(ctx context.Context, key string, transitionID string) error {
