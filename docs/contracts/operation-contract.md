@@ -32,6 +32,8 @@ Operation Contract 必须引用 Standard Process Registry 中的任务分类和�
 | `assets_install` | 安装或更新 AI 员工手册、契约、profile、policy、runbook 和 template 等运行资产。 |
 | `contract_validate` | 校验机器可读 Operation Contract 是否满足完整设计基线。 |
 | `profile_validate` | 校验 Workflow Profile 是否能映射标准字段、任务分类、标准流程、状态和 transition。 |
+| `profile_update` | 使用经过校验的本地 source profile 更新当前 workspace profile，并保存可回滚备份。 |
+| `profile_rollback` | 从最近一次 profile update 备份恢复当前 workspace profile。 |
 | `workspace_init` | 初始化项目 AI 工作空间。 |
 | `agent_init` | 初始化 AIAgent 能力。 |
 | `list_tasks` | 列出当前 owner 可处理任务。 |

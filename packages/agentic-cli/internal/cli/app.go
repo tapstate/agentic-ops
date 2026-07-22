@@ -63,6 +63,12 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		if len(args) >= 2 && args[1] == "validate" {
 			return runProfileValidate(args, stdout)
 		}
+		if len(args) >= 2 && args[1] == "update" {
+			return runProfileUpdate(args, stdout)
+		}
+		if len(args) >= 2 && args[1] == "rollback" {
+			return runProfileRollback(args, stdout)
+		}
 	case "list-tasks":
 		return runListTasks(args, stdout)
 	case "takeover-task":
@@ -130,6 +136,8 @@ func runAgentInit(args []string, stdout io.Writer) int {
 			"assets_install",
 			"contract_validate",
 			"profile_validate",
+			"profile_update",
+			"profile_rollback",
 			"workspace_init",
 			"list_tasks",
 			"takeover_task",
@@ -264,6 +272,88 @@ func runProfileValidate(args []string, stdout io.Writer) int {
 		"workspace":   loadedProfile.Workspace,
 		"issues":      0,
 		"next_action": "continue",
+	}))
+}
+
+func runProfileUpdate(args []string, stdout io.Writer) int {
+	workspaceName := readFlag(args, "--workspace", "")
+	if workspaceName == "" {
+		return writeJSON(stdout, output.FailureWithContext("profile_update", output.FailureContext{
+			Code:                "missing_workspace",
+			Message:             "缺少 workspace",
+			RequiredHumanAction: "请提供 --workspace",
+			TaskType:            "profile_update",
+			CurrentStage:        "input_validation",
+			NextAction:          "ask_owner",
+		}))
+	}
+	sourcePath := readFlag(args, "--source", "")
+	if sourcePath == "" {
+		return writeJSON(stdout, output.FailureWithContext("profile_update", output.FailureContext{
+			Code:                "missing_source",
+			Message:             "缺少 profile source",
+			RequiredHumanAction: "请提供 --source",
+			TaskType:            "profile_update",
+			CurrentStage:        "input_validation",
+			NextAction:          "ask_owner",
+		}))
+	}
+	targetPath, err := repoProfilePath(workspaceName)
+	if err != nil {
+		return writeJSON(stdout, output.Failure("profile_update", "repo_root_not_found", "未找到仓库根目录", "请在 AgenticOps 仓库内运行"))
+	}
+	result, err := profile.UpdateFile(targetPath, sourcePath, workspaceName)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("profile_update", output.FailureContext{
+			Code:                "profile_update_failed",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 source profile 是否存在、workspace 是否匹配且能通过校验",
+			TaskType:            "profile_update",
+			CurrentStage:        "profile_update",
+			NextAction:          "fix_profile",
+		}))
+	}
+	return writeJSON(stdout, output.Success("profile_update", map[string]any{
+		"workspace":   result.Workspace,
+		"profile":     result.TargetPath,
+		"backup":      result.BackupPath,
+		"source":      result.SourcePath,
+		"next_action": "profile_validate",
+	}))
+}
+
+func runProfileRollback(args []string, stdout io.Writer) int {
+	workspaceName := readFlag(args, "--workspace", "")
+	if workspaceName == "" {
+		return writeJSON(stdout, output.FailureWithContext("profile_rollback", output.FailureContext{
+			Code:                "missing_workspace",
+			Message:             "缺少 workspace",
+			RequiredHumanAction: "请提供 --workspace",
+			TaskType:            "profile_rollback",
+			CurrentStage:        "input_validation",
+			NextAction:          "ask_owner",
+		}))
+	}
+	targetPath, err := repoProfilePath(workspaceName)
+	if err != nil {
+		return writeJSON(stdout, output.Failure("profile_rollback", "repo_root_not_found", "未找到仓库根目录", "请在 AgenticOps 仓库内运行"))
+	}
+	result, err := profile.RollbackFile(targetPath, workspaceName)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("profile_rollback", output.FailureContext{
+			Code:                "profile_rollback_failed",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 profile 备份是否存在且能通过校验",
+			TaskType:            "profile_rollback",
+			CurrentStage:        "profile_rollback",
+			NextAction:          "fix_profile",
+		}))
+	}
+	return writeJSON(stdout, output.Success("profile_rollback", map[string]any{
+		"workspace":     result.Workspace,
+		"profile":       result.TargetPath,
+		"restored_from": result.RestoredFrom,
+		"next_action":   "profile_validate",
 	}))
 }
 
@@ -481,4 +571,12 @@ func repoRoot() (string, error) {
 		}
 		dir = parent
 	}
+}
+
+func repoProfilePath(workspaceName string) (string, error) {
+	root, err := repoRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "profiles", workspaceName+".yaml"), nil
 }

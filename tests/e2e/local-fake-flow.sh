@@ -15,6 +15,14 @@ $cmd --version | grep '"operation":"version"'
 $cmd assets install --source assets --install-dir "$install_root" --version RES-v0.1.1-a68372d | grep '"operation":"assets_install"'
 $cmd contract validate | grep '"operation":"contract_validate"'
 $cmd profile validate --workspace tapstate | grep '"operation":"profile_validate"'
+profile_source="$workspace_root/tapstate-profile-hotfix.yaml"
+profile_backup="profiles/tapstate.yaml.bak"
+test ! -e "$profile_backup"
+cp profiles/tapstate.yaml "$profile_source"
+$cmd profile update --workspace tapstate --source "$profile_source" | grep '"operation":"profile_update"'
+$cmd profile validate --workspace tapstate | grep '"operation":"profile_validate"'
+$cmd profile rollback --workspace tapstate | grep '"operation":"profile_rollback"'
+rm -f "$profile_backup"
 $cmd preflight --workspace tapstate | grep '"operation":"preflight"'
 $cmd workspace init --workspace tapstate | grep '"operation":"workspace_init"'
 $cmd agent init --workspace tapstate | grep '"operation":"agent_init"'

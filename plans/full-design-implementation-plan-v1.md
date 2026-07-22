@@ -454,11 +454,70 @@ bash tests/e2e/local-fake-flow.sh
 
 Expected: all commands exit 0.
 
-### Later Phase 2 Tasks
+### Task 7: Profile Update / Rollback Baseline
 
-- `profile update --workspace <name>`
-- `profile rollback --workspace <name>`
-- profile hotfix e2e
+Scope:
+
+- Update: `packages/agentic-cli/internal/profile/updater.go`
+- Update: `packages/agentic-cli/internal/profile/updater_test.go`
+- Update: `packages/agentic-cli/internal/cli/app.go`
+- Update: `packages/agentic-cli/internal/cli/app_test.go`
+- Create: `contracts/operations/profile-update.yaml`
+- Create: `contracts/operations/profile-rollback.yaml`
+- Update: `tests/e2e/local-fake-flow.sh`
+
+Definition:
+
+- `profile update --workspace <name> --source <path>` loads and validates the source profile before replacing `profiles/<workspace>.yaml`.
+- The source profile workspace must match the requested workspace.
+- The previous profile must be saved as `profiles/<workspace>.yaml.bak`.
+- `profile rollback --workspace <name>` restores that backup after validating it.
+- Both commands return stable JSON and human-readable Chinese failure actions.
+
+- [x] **Step 1: Write failing profile updater tests**
+
+Add tests for `profile.UpdateFile` and `profile.RollbackFile` covering:
+
+- source validation and installation.
+- backup creation.
+- workspace mismatch rejection.
+- rollback restoration.
+
+Expected: FAIL because updater functions do not exist.
+
+- [x] **Step 2: Write failing CLI route test**
+
+Add a CLI test that creates a temporary repo root, runs:
+
+```sh
+agentic-cli profile update --workspace tapstate --source <tmp-profile>
+agentic-cli profile rollback --workspace tapstate
+```
+
+Expected: FAIL because the CLI routes do not exist.
+
+- [x] **Step 3: Implement profile updater**
+
+`profile.UpdateFile` must validate source before writing and must leave current profile unchanged on workspace mismatch.
+
+- [x] **Step 4: Implement CLI routes**
+
+Add `profile_update` and `profile_rollback` to `agent init` capabilities.
+
+- [x] **Step 5: Add operation contracts and e2e coverage**
+
+`contract validate` must include `profile_update` and `profile_rollback`. Local fake flow must exercise update, validate and rollback.
+
+- [x] **Step 6: Verification**
+
+Run:
+
+```sh
+go test ./...
+bash tests/e2e/local-fake-flow.sh
+```
+
+Expected: all commands exit 0.
 
 ## 5. Later Phases
 

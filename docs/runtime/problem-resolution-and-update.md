@@ -6,7 +6,7 @@
 
 研发日常使用的是安装后的 `agentic-cli`、AI 员工手册、operation contracts、workflow profiles、policies、runbooks 和 templates。项目出现问题时，AgenticOps 必须能快速判断问题类型，选择正确修复载体，完成验证、发布、同步和回滚。
 
-当前仓库已实现本地资产安装和本地 release 打包的最小能力，尚未实现完整发布、自更新、诊断包和 profile / policy 热更新能力。本文是正式使用前的目标设计和验收基线。
+当前仓库已实现本地资产安装、本地 release 打包、operation contract 校验和 profile validate / update / rollback 基线，尚未实现完整发布、自更新、诊断包、policy 热更新和真实 Jira gate。本文是正式使用前的目标设计和验收基线。
 
 ## 2. 架构适配性评估
 
@@ -15,8 +15,8 @@
 | 架构部分 | 当前状态 | 适配性判断 | 必须补齐的能力 |
 | --- | --- | --- | --- |
 | Go CLI Runtime | 已有 `agentic-cli` 本地 fake flow | 适合承载强制检查、结构化输出、诊断、更新和回滚 | version manifest、update、doctor、诊断包、真实 adapter 合同测试 |
-| Operation Contract | 已有文档和第一阶段 YAML 子集 | 适合沉淀标准操作输入输出和失败码 | contract schema、contract validate、operation 兼容性版本 |
-| Workflow Profile | 已有设计文档 | 适合处理不同团队和 Jira workflow 差异 | profile 文件源头、validate / update / rollback、status / transition / field mapping |
+| Operation Contract | 已有机器可读 YAML 和 `contract validate` 基线 | 适合沉淀标准操作输入输出和失败码 | operation 兼容性版本、跨版本迁移规则 |
+| Workflow Profile | 已有默认 profile、`profile validate / update / rollback` 基线 | 适合处理不同团队和 Jira workflow 差异 | 真实 Jira status / transition gate、资产包来源、profile 版本审计 |
 | Policy / Gate | 已有代码雏形和规则文档 | 适合控制关键步骤门禁 | policy package、validate / update / rollback、gate 变更审计 |
 | Evidence / Feedback | 已有本地 evidence 和 feedback report | 适合发现重复问题并推动规范优化 | feedback bundle、问题分类统计、修复效果追踪 |
 | Release / Install | 已有 bootstrap stub、本地资产安装、本地 build / release 脚本 | 适合快速分发，但当前不完整 | GitHub release、自更新、回滚、远程 manifest |
@@ -25,7 +25,7 @@
 结论：
 
 - 当前架构方向适配“渐进形成公司标准流程”和“快速修复上线”两个目标。
-- 最大缺口不在目录结构，而在正式使用前缺少版本化资产、自更新、回滚、诊断包、profile / policy 热更新和合同验证。
+- 最大缺口不在目录结构，而在正式使用前缺少版本化资产、自更新、诊断包、policy 热更新、真实 Jira gate 和更完整的 profile 版本审计。
 - 修复能力应优先作为 `agentic-cli` 的一组受控 operation 实现，而不是分散在 shell 脚本、人工说明或提示词中。
 
 ## 3. 设计目标
@@ -120,7 +120,7 @@ agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
 | 问题类型 | 稳定错误码 | 当前状态 |
 | --- | --- | --- |
 | `agentic-cli` 逻辑错误 | `agentic_cli_logic_error` | 规划中，后续由 `doctor` / `feedback bundle` 辅助定位。 |
-| Jira 流程状态没适配 | `unknown_jira_status` | 规划中，后续随 `profile validate / update / rollback` 落地。 |
+| Jira 流程状态没适配 | `unknown_jira_status` | `profile validate / update / rollback` 基线已落地；真实接管 gate 后续实现。 |
 | Jira 卡片属性丢失 | `missing_jira_field` | 规划中，后续随任务接管 gate 落地。 |
 | 关键步骤门禁调整 | `policy_gate_required` | 规划中，后续随 `policy validate / update / rollback` 落地。 |
 

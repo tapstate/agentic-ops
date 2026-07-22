@@ -240,6 +240,51 @@ func TestProfileValidateOutputsIssueCount(t *testing.T) {
 	assertJSONField(t, stdout.String(), "next_action", "continue")
 }
 
+func TestProfileUpdateAndRollbackUseLocalProfileBackup(t *testing.T) {
+	repo := t.TempDir()
+	t.Chdir(repo)
+	writeCLITestFile(t, filepath.Join(repo, "go.mod"), "module example.local/test\n")
+	writeCLITestFile(t, filepath.Join(repo, "contracts", "operations", ".keep"), "")
+	target := filepath.Join(repo, "profiles", "tapstate.yaml")
+	source := filepath.Join(repo, "incoming", "tapstate.yaml")
+	writeCLITestFile(t, target, validCLIProfileYAML("tapstate", "TAP"))
+	writeCLITestFile(t, source, validCLIProfileYAML("tapstate", "OPS"))
+
+	var updateStdout bytes.Buffer
+	var updateStderr bytes.Buffer
+	updateCode := Run([]string{"profile", "update", "--workspace", "tapstate", "--source", source}, &updateStdout, &updateStderr)
+	if updateCode != 0 {
+		t.Fatalf("updateCode = %d stdout = %s stderr = %s", updateCode, updateStdout.String(), updateStderr.String())
+	}
+	assertJSONField(t, updateStdout.String(), "operation", "profile_update")
+	assertJSONField(t, updateStdout.String(), "workspace", "tapstate")
+	assertJSONField(t, updateStdout.String(), "next_action", "profile_validate")
+	updated, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile updated error = %v", err)
+	}
+	if !strings.Contains(string(updated), "project: OPS") {
+		t.Fatalf("updated profile = %s", string(updated))
+	}
+
+	var rollbackStdout bytes.Buffer
+	var rollbackStderr bytes.Buffer
+	rollbackCode := Run([]string{"profile", "rollback", "--workspace", "tapstate"}, &rollbackStdout, &rollbackStderr)
+	if rollbackCode != 0 {
+		t.Fatalf("rollbackCode = %d stdout = %s stderr = %s", rollbackCode, rollbackStdout.String(), rollbackStderr.String())
+	}
+	assertJSONField(t, rollbackStdout.String(), "operation", "profile_rollback")
+	assertJSONField(t, rollbackStdout.String(), "workspace", "tapstate")
+	assertJSONField(t, rollbackStdout.String(), "next_action", "profile_validate")
+	restored, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile restored error = %v", err)
+	}
+	if !strings.Contains(string(restored), "project: TAP") {
+		t.Fatalf("restored profile = %s", string(restored))
+	}
+}
+
 func TestFeedbackReportOutputsReportPath(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
@@ -294,4 +339,26 @@ func writeCLITestFile(t *testing.T, path string, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile error = %v", err)
 	}
+}
+
+func validCLIProfileYAML(workspace string, jiraProject string) string {
+	return "workspace: " + workspace + "\n" +
+		"jira:\n" +
+		"  project: " + jiraProject + "\n" +
+		"  task_query: project = " + jiraProject + "\n" +
+		"jira_form_mapping:\n" +
+		"  fields:\n" +
+		"    owner:\n" +
+		"      source: jira_assignee\n" +
+		"task_class_mapping:\n" +
+		"  issue_types:\n" +
+		"    Task: technical_task\n" +
+		"standard_process_mapping:\n" +
+		"  technical_task: development-change-v1\n" +
+		"status_mapping:\n" +
+		"  in_progress: In Progress\n" +
+		"transition_mapping:\n" +
+		"  start_progress: Start Progress\n" +
+		"local:\n" +
+		"  source_root: /tmp/source\n"
 }
