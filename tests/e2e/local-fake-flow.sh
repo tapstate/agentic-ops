@@ -27,10 +27,17 @@ $cmd preflight --workspace tapstate | grep '"operation":"preflight"'
 $cmd workspace init --workspace tapstate | grep '"operation":"workspace_init"'
 $cmd agent init --workspace tapstate | grep '"operation":"agent_init"'
 $cmd list-tasks --workspace tapstate | grep '"key":"TAP-123"'
+set +e
+missing_repo_output="$($cmd takeover-task TAP-MISSING-REPO --workspace tapstate 2>/dev/null)"
+missing_repo_code="$?"
+set -e
+test "$missing_repo_code" -eq 1
+printf '%s\n' "$missing_repo_output" | grep '"code":"missing_target_repo"'
 $cmd takeover-task TAP-123 --workspace tapstate | grep '"current_stage":"takeover_started"'
 $cmd resume-takeover --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"operation":"resume_takeover"'
 $cmd write-evidence --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"operation":"write_evidence"'
-$cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"runs":3'
+$cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"runs":4'
+$cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"blocked":1'
 test -f "$workspace_root/.agentic-ops/feedback/events.ndjson"
 test -f "$workspace_root/.agentic-ops/feedback/daily/2026-07-21.md"
 test -f "$install_root/assets/RES-v0.1.1-a68372d/manifest.json"

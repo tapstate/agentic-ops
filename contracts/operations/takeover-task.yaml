@@ -70,9 +70,12 @@ failure:
     - assignee_changed
     - agent_ownership_conflict
     - task_class_mapping_gap
+    - standard_process_mapping_gap
+    - unknown_jira_status
     - missing_acceptance_criteria
     - missing_target_repo
     - missing_verification_method
+    - missing_risk_level
     - missing_permission
     - workflow_transition_not_allowed
 side_effects:

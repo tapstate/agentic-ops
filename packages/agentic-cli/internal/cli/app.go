@@ -367,6 +367,19 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 	if !ok {
 		return writeJSON(stdout, output.Failure("takeover_task", "issue_not_found", "未找到 Jira issue", "请检查 issue key"))
 	}
+	workspaceProfile := takeoverProfile(workspaceName)
+	decision := jira.ValidateTakeover(issue, workspaceProfile, currentUser(), agentID())
+	if !decision.OK {
+		_ = appendWorkspaceEventWithCode(workspaceName, "", issue.Key, "task_takeover", "takeover_task", decision.CurrentStage, decision.NextAction, decision.Code, "takeover_gate", false, true)
+		return writeJSON(stdout, output.FailureWithContext("takeover_task", output.FailureContext{
+			Code:                decision.Code,
+			Message:             decision.Message,
+			RequiredHumanAction: decision.RequiredHumanAction,
+			TaskType:            "task_takeover",
+			CurrentStage:        decision.CurrentStage,
+			NextAction:          decision.NextAction,
+		}))
+	}
 	runID := feedback.RunID(issue.Key, "task_takeover", fixedNow(), "a8f3")
 	if err := appendWorkspaceEvent(workspaceName, runID, issue.Key, "task_takeover", "takeover_task", "takeover_started", "proceed", true, false); err != nil {
 		return writeJSON(stdout, output.Failure("takeover_task", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
@@ -376,6 +389,8 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 		"issue_key":     issue.Key,
 		"run_id":        runID,
 		"task_type":     "task_takeover",
+		"task_class":    decision.TaskClass,
+		"process_id":    decision.ProcessID,
 		"current_stage": "takeover_started",
 		"target_repo":   issue.TargetRepo,
 		"next_action":   "proceed",
@@ -579,4 +594,48 @@ func repoProfilePath(workspaceName string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(root, "profiles", workspaceName+".yaml"), nil
+}
+
+func takeoverProfile(workspaceName string) profile.Profile {
+	if path, err := repoProfilePath(workspaceName); err == nil {
+		if loadedProfile, err := profile.LoadFile(path); err == nil {
+			return loadedProfile
+		}
+	}
+	return profile.Profile{
+		Workspace: workspaceName,
+		TaskClassMapping: profile.TaskClassMapping{
+			IssueTypes: map[string]string{
+				"Story": "feature_change",
+				"Bug":   "bug_fix",
+				"Task":  "technical_task",
+			},
+		},
+		StandardProcessMapping: map[string]string{
+			"feature_change":      "development_change_v1",
+			"bug_fix":             "development_change_v1",
+			"technical_task":      "development_change_v1",
+			"investigation":       "investigation_v1",
+			"process_improvement": "agenticops_improvement_v1",
+		},
+		StatusMapping: map[string]string{
+			"To Do":       "waiting_takeover",
+			"In Progress": "implementation",
+			"Done":        "completed",
+		},
+	}
+}
+
+func currentUser() string {
+	if value := os.Getenv("AGENTIC_OPS_CURRENT_USER"); value != "" {
+		return value
+	}
+	return "current-user"
+}
+
+func agentID() string {
+	if value := os.Getenv("AGENTIC_OPS_AGENT_ID"); value != "" {
+		return value
+	}
+	return "agentic-cli-local-agent"
 }

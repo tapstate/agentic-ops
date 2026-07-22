@@ -156,6 +156,32 @@ func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 	}
 }
 
+func TestTakeoverTaskBlocksMissingTargetRepo(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"takeover-task", "TAP-MISSING-REPO", "--workspace", "tapstate"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s", code, stdout.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "takeover_task")
+	assertJSONField(t, stdout.String(), "code", "missing_target_repo")
+	assertJSONField(t, stdout.String(), "current_stage", "takeover_gate")
+	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertJSONField(t, stdout.String(), "required_human_action", "请在 Jira 卡片补充目标仓库，或维护 workspace repo 映射")
+	events, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
+	if err != nil {
+		t.Fatalf("ReadFile events error = %v", err)
+	}
+	if !strings.Contains(string(events), `"code":"missing_target_repo"`) {
+		t.Fatalf("events = %s", string(events))
+	}
+	if !strings.Contains(string(events), `"gate_status":"blocked"`) {
+		t.Fatalf("events = %s", string(events))
+	}
+}
+
 func TestResumeTakeoverReturnsRunIDAndNextAction(t *testing.T) {
 	t.Chdir(t.TempDir())
 	var stdout bytes.Buffer

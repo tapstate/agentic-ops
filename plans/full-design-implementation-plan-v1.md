@@ -519,9 +519,71 @@ bash tests/e2e/local-fake-flow.sh
 
 Expected: all commands exit 0.
 
-## 5. Later Phases
+## 5. 阶段 3: Jira Adapter and Ownership Gate
 
-- Phase 3: Jira adapter and ownership gate.
+### Task 8: Fake Jira Takeover Gate Baseline
+
+Scope:
+
+- Update: `packages/agentic-cli/internal/jira/model.go`
+- Update: `packages/agentic-cli/internal/jira/fake.go`
+- Create: `packages/agentic-cli/internal/jira/gate.go`
+- Create: `packages/agentic-cli/internal/jira/gate_test.go`
+- Update: `packages/agentic-cli/internal/cli/app.go`
+- Update: `packages/agentic-cli/internal/cli/app_test.go`
+- Update: `contracts/operations/takeover-task.yaml`
+- Update: `tests/e2e/local-fake-flow.sh`
+
+Definition:
+
+- Fake Jira issues expose owner, assignee, issue type, status, risk level and `current_agent_id`.
+- `takeover-task` validates owner, assignee, agent binding, task class mapping, process mapping, status mapping and required Jira fields before creating a run.
+- Gate failures return stable JSON with `current_stage: takeover_gate`, `next_action: ask_owner` and Chinese `required_human_action`.
+- Gate failures write blocked feedback events.
+
+- [x] **Step 1: Write failing Jira gate tests**
+
+Cover accepted issue, missing target repo, owner mismatch, agent conflict and unknown Jira status.
+
+Expected: FAIL because the gate model and fields do not exist.
+
+- [x] **Step 2: Write failing CLI blocked takeover test**
+
+Run `takeover-task TAP-MISSING-REPO --workspace tapstate` and assert:
+
+- `code: missing_target_repo`
+- `current_stage: takeover_gate`
+- `next_action: ask_owner`
+- blocked feedback event exists.
+
+Expected: FAIL because fake Jira does not return this issue and takeover does not run the gate.
+
+- [x] **Step 3: Implement fake Jira issue fields and gate**
+
+Add `jira.ValidateTakeover` and fake issues for blocked scenarios.
+
+- [x] **Step 4: Wire takeover gate into CLI**
+
+Successful takeover returns `task_class` and `process_id`; blocked takeover writes a feedback event and does not create a run.
+
+- [x] **Step 5: Update contract and e2e coverage**
+
+Add newly exercised failure codes to `takeover-task.yaml`. Local fake flow must include a blocked takeover and count it in feedback report.
+
+- [x] **Step 6: Verification**
+
+Run:
+
+```sh
+go test ./...
+bash tests/e2e/local-fake-flow.sh
+```
+
+Expected: all commands exit 0.
+
+## 6. Later Phases
+
+- Later Phase 3: real Jira adapter, `current_agent_id` writeback and takeover cleanup.
 - Phase 4: doctor, feedback bundle, update check/apply, policy validate/update/rollback.
 - Phase 5: completion cleanup and problem-resolution e2e.
 
