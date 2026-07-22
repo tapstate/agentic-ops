@@ -227,6 +227,19 @@ func TestContractValidateOutputsIssueCount(t *testing.T) {
 	assertJSONField(t, stdout.String(), "next_action", "continue")
 }
 
+func TestProfileValidateOutputsIssueCount(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"profile", "validate", "--workspace", "tapstate"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "profile_validate")
+	assertJSONField(t, stdout.String(), "workspace", "tapstate")
+	assertJSONNumber(t, stdout.String(), "issues", 0)
+	assertJSONField(t, stdout.String(), "next_action", "continue")
+}
+
 func TestFeedbackReportOutputsReportPath(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)

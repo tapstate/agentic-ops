@@ -31,6 +31,7 @@ Operation Contract 必须引用 Standard Process Registry 中的任务分类和�
 | `install` | 安装 AgenticOps 到 `~/.agentic-ops`。 |
 | `assets_install` | 安装或更新 AI 员工手册、契约、profile、policy、runbook 和 template 等运行资产。 |
 | `contract_validate` | 校验机器可读 Operation Contract 是否满足完整设计基线。 |
+| `profile_validate` | 校验 Workflow Profile 是否能映射标准字段、任务分类、标准流程、状态和 transition。 |
 | `workspace_init` | 初始化项目 AI 工作空间。 |
 | `agent_init` | 初始化 AIAgent 能力。 |
 | `list_tasks` | 列出当前 owner 可处理任务。 |

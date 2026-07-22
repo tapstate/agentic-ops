@@ -350,9 +350,118 @@ Expected: all commands exit 0.
 
 ## 3. Later Phases
 
-After Phase 1 passes, create or extend task sections for:
+Phase 1 contract/schema baseline has passed and can be used by later phases.
 
-- Phase 2: profile model, profile validate/update/rollback.
+## 4. 阶段 2: Profile / Process 映射
+
+### Task 6: Profile Model and Validation Baseline
+
+**Files:**
+- Create: `profiles/tapstate.yaml`
+- Create: `contracts/processes/development-change-v1.yaml`
+- Create: `packages/agentic-cli/internal/profile/model.go`
+- Create: `packages/agentic-cli/internal/profile/loader.go`
+- Create: `packages/agentic-cli/internal/profile/validator.go`
+- Create: `packages/agentic-cli/internal/profile/validator_test.go`
+- Modify: `packages/agentic-cli/internal/cli/app.go`
+- Modify: `packages/agentic-cli/internal/cli/app_test.go`
+
+**Interfaces:**
+- Produces: `profile.LoadFile(path string) (Profile, error)`
+- Produces: `profile.Validate(p Profile) []ValidationIssue`
+- Produces CLI command: `agentic-cli profile validate --workspace <name>`
+
+- [x] **Step 1: Write failing profile validation test**
+
+Test that `profiles/tapstate.yaml` loads and validates with zero issues:
+
+```go
+p, err := LoadFile(filepath.Join("..", "..", "..", "..", "profiles", "tapstate.yaml"))
+if err != nil {
+	t.Fatalf("LoadFile error = %v", err)
+}
+if issues := Validate(p); len(issues) != 0 {
+	t.Fatalf("Validate issues = %#v", issues)
+}
+```
+
+Run: `go test ./packages/agentic-cli/internal/profile`
+
+Expected: FAIL because the profile package does not exist.
+
+- [x] **Step 2: Create profile model and loader**
+
+`Profile` must include `workspace`, `jira.project`, `jira.task_query`, `jira_form_mapping.fields`, `task_class_mapping.issue_types`, `standard_process_mapping`, `status_mapping`, `transition_mapping`, `github.organization`, `github.repositories`, `local.source_root`, `local.runs_dir`, `local.feedback_dir`, `human_gates`, `review_gates`, `retry_redo`, and `templates`.
+
+- [x] **Step 3: Create default tapstate profile**
+
+Create `profiles/tapstate.yaml` with mappings for:
+
+- `Story -> feature_change`
+- `Bug -> bug_fix`
+- `Task -> technical_task`
+- `feature_change`, `bug_fix`, and `technical_task -> development_change_v1`
+- `To Do -> waiting_takeover`
+- `In Progress -> implementation`
+- `Done -> completed`
+- `start_progress -> implementation`
+- `complete -> completed`
+
+- [x] **Step 4: Implement profile validator**
+
+Validation must return stable codes:
+
+- `missing_workspace`
+- `missing_jira_project`
+- `missing_task_query`
+- `missing_form_mapping`
+- `task_class_mapping_gap`
+- `standard_process_mapping_gap`
+- `lifecycle_mapping_gap`
+- `transition_mapping_gap`
+- `missing_local_source_root`
+
+- [x] **Step 5: Add CLI failing test**
+
+Test `Run([]string{"profile", "validate", "--workspace", "tapstate"}, ...)` returns:
+
+```json
+{
+  "ok": true,
+  "operation": "profile_validate",
+  "workspace": "tapstate",
+  "issues": 0,
+  "next_action": "continue"
+}
+```
+
+Run: `go test ./packages/agentic-cli/internal/cli`
+
+Expected: FAIL because the CLI route does not exist.
+
+- [x] **Step 6: Implement CLI route**
+
+`profile validate` must load `profiles/<workspace>.yaml`, run `profile.Validate`, and return stable JSON. Validation failures must return `profile_validation_failed` with `required_human_action` in Chinese.
+
+- [x] **Step 7: Verification**
+
+Run:
+
+```sh
+go test ./...
+bash tests/e2e/local-fake-flow.sh
+```
+
+Expected: all commands exit 0.
+
+### Later Phase 2 Tasks
+
+- `profile update --workspace <name>`
+- `profile rollback --workspace <name>`
+- profile hotfix e2e
+
+## 5. Later Phases
+
 - Phase 3: Jira adapter and ownership gate.
 - Phase 4: doctor, feedback bundle, update check/apply, policy validate/update/rollback.
 - Phase 5: completion cleanup and problem-resolution e2e.

@@ -15,6 +15,7 @@ import (
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/feedback"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/output"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/workspace"
 )
 
@@ -57,6 +58,10 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	case "contract":
 		if len(args) >= 2 && args[1] == "validate" {
 			return runContractValidate(args, stdout)
+		}
+	case "profile":
+		if len(args) >= 2 && args[1] == "validate" {
+			return runProfileValidate(args, stdout)
 		}
 	case "list-tasks":
 		return runListTasks(args, stdout)
@@ -124,6 +129,7 @@ func runAgentInit(args []string, stdout io.Writer) int {
 			"preflight",
 			"assets_install",
 			"contract_validate",
+			"profile_validate",
 			"workspace_init",
 			"list_tasks",
 			"takeover_task",
@@ -210,6 +216,52 @@ func runContractValidate(args []string, stdout io.Writer) int {
 	}
 	return writeJSON(stdout, output.Success("contract_validate", map[string]any{
 		"contracts":   len(paths),
+		"issues":      0,
+		"next_action": "continue",
+	}))
+}
+
+func runProfileValidate(args []string, stdout io.Writer) int {
+	workspaceName := readFlag(args, "--workspace", "")
+	if workspaceName == "" {
+		return writeJSON(stdout, output.FailureWithContext("profile_validate", output.FailureContext{
+			Code:                "missing_workspace",
+			Message:             "缺少 workspace",
+			RequiredHumanAction: "请提供 --workspace",
+			TaskType:            "profile_validation",
+			CurrentStage:        "profile_validation",
+			NextAction:          "ask_owner",
+		}))
+	}
+	root, err := repoRoot()
+	if err != nil {
+		return writeJSON(stdout, output.Failure("profile_validate", "repo_root_not_found", "未找到仓库根目录", "请在 AgenticOps 仓库内运行"))
+	}
+	profilePath := filepath.Join(root, "profiles", workspaceName+".yaml")
+	loadedProfile, err := profile.LoadFile(profilePath)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("profile_validate", output.FailureContext{
+			Code:                "profile_not_found",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 profiles 目录中的 workspace 配置",
+			TaskType:            "profile_validation",
+			CurrentStage:        "profile_validation",
+			NextAction:          "fix_profile",
+		}))
+	}
+	issues := profile.Validate(loadedProfile)
+	if len(issues) > 0 {
+		return writeJSON(stdout, output.FailureWithContext("profile_validate", output.FailureContext{
+			Code:                "profile_validation_failed",
+			Message:             "workflow profile validation failed",
+			RequiredHumanAction: "请修复 workflow profile 中的字段、分类、流程、状态或 transition 映射",
+			TaskType:            "profile_validation",
+			CurrentStage:        "profile_validation",
+			NextAction:          "fix_profile",
+		}))
+	}
+	return writeJSON(stdout, output.Success("profile_validate", map[string]any{
+		"workspace":   loadedProfile.Workspace,
 		"issues":      0,
 		"next_action": "continue",
 	}))
