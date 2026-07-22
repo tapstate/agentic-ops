@@ -726,10 +726,53 @@ bash tests/e2e/local-fake-flow.sh
 
 Expected: all commands exit 0.
 
+### Task 12: Feedback Bundle Redaction Baseline
+
+Scope:
+
+- Update: `packages/agentic-cli/internal/cli/app.go`
+- Update: `packages/agentic-cli/internal/cli/app_test.go`
+- Create: `contracts/operations/feedback-bundle.yaml`
+- Update: `docs/contracts/operation-contract.md`
+- Update: `docs/runtime/problem-resolution-and-update.md`
+- Update: `tests/e2e/local-fake-flow.sh`
+
+Definition:
+
+- Add `feedback bundle --workspace <name> --run-id <run_id> --redact`.
+- The command reads local feedback events and writes `.agentic-ops/feedback/bundles/<run_id>.md`.
+- When `--redact` is present, obvious `token=...`, `password=...`, `secret=...` and `authorization=...` values must be replaced with `[REDACTED]`.
+- This is the local diagnostic bundle baseline; it does not call external services or include raw Jira descriptions.
+
+- [x] **Step 1: Write failing CLI test**
+
+Create an event log containing sensitive-looking text, run `feedback bundle --redact`, and assert the generated bundle exists and excludes the original sensitive values.
+
+Expected: FAIL because the command does not exist.
+
+- [x] **Step 2: Implement bundle generation and redaction**
+
+Generate a Markdown bundle from local feedback events. Keep redaction deliberately narrow and auditable.
+
+- [x] **Step 3: Add operation contract and e2e coverage**
+
+`contract validate` must include `feedback_bundle`. Local fake flow must generate a bundle and verify the file exists.
+
+- [x] **Step 4: Verification**
+
+Run:
+
+```sh
+go test ./...
+bash tests/e2e/local-fake-flow.sh
+```
+
+Expected: all commands exit 0.
+
 ## 7. Later Phases
 
 - Later Phase 3: real Jira adapter and Jira-side `current_agent_id` writeback / cleanup.
-- Later Phase 4: feedback bundle, update check/apply, policy validate/update/rollback and real external doctor checks.
+- Later Phase 4: update check/apply, policy validate/update/rollback and real external doctor checks.
 - Phase 5: completion cleanup and problem-resolution e2e.
 
 Do not start later phases until Phase 1 contract/schema baseline is passing and committed.

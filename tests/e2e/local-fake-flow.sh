@@ -38,9 +38,11 @@ $cmd takeover-task TAP-123 --workspace tapstate | grep '"current_agent_id":"agen
 $cmd resume-takeover --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"operation":"resume_takeover"'
 $cmd write-evidence --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"operation":"write_evidence"'
 $cmd release-agent --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 --issue-key TAP-123 --completion-evidence evidence.md | grep '"current_agent_id_cleared":true'
+$cmd feedback bundle --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 --redact | grep '"operation":"feedback_bundle"'
 $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"runs":5'
 $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"blocked":1'
 test -f "$workspace_root/.agentic-ops/feedback/events.ndjson"
+test -f "$workspace_root/.agentic-ops/feedback/bundles/TAP-123-takeover-20260721103012-a8f3.md"
 test -f "$workspace_root/.agentic-ops/feedback/daily/2026-07-21.md"
 test -f "$install_root/assets/RES-v0.1.1-a68372d/manifest.json"
 test -f "$install_root/current.json"

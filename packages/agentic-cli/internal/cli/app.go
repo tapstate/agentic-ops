@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/assets"
@@ -84,6 +85,9 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	case "feedback":
 		if len(args) >= 2 && args[1] == "report" {
 			return runFeedbackReport(args, stdout)
+		}
+		if len(args) >= 2 && args[1] == "bundle" {
+			return runFeedbackBundle(args, stdout)
 		}
 	}
 
@@ -185,6 +189,7 @@ func runAgentInit(args []string, stdout io.Writer) int {
 			"write_evidence",
 			"release_agent",
 			"feedback_report",
+			"feedback_bundle",
 		},
 	}))
 }
@@ -607,6 +612,47 @@ func runFeedbackReport(args []string, stdout io.Writer) int {
 	}))
 }
 
+func runFeedbackBundle(args []string, stdout io.Writer) int {
+	workspaceName := readFlag(args, "--workspace", "default")
+	runID := readFlag(args, "--run-id", "")
+	if runID == "" {
+		return writeJSON(stdout, output.FailureWithContext("feedback_bundle", output.FailureContext{
+			Code:                "missing_run_id",
+			Message:             "缺少 run_id",
+			RequiredHumanAction: "请提供 --run-id",
+			TaskType:            "diagnosis",
+			CurrentStage:        "feedback_bundle",
+			NextAction:          "ask_owner",
+		}))
+	}
+	redact := hasFlag(args, "--redact")
+	root, err := workspaceRoot()
+	if err != nil {
+		return writeJSON(stdout, output.Failure("feedback_bundle", "workspace_root_failed", "无法读取当前工作目录", "请在项目 AI 工作空间中重试"))
+	}
+	eventsPath := filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson")
+	rawEvents, err := os.ReadFile(eventsPath)
+	if err != nil {
+		return writeJSON(stdout, output.Failure("feedback_bundle", "event_read_failed", err.Error(), "请检查工作空间反馈日志"))
+	}
+	content := string(rawEvents)
+	if redact {
+		content = redactSensitive(content)
+	}
+	bundlePath := filepath.Join(root, ".agentic-ops", "feedback", "bundles", runID+".md")
+	bundle := fmt.Sprintf("# Feedback Bundle\n\n- workspace: %s\n- run_id: %s\n- redacted: %t\n\n## Events\n\n```json\n%s\n```\n", workspaceName, runID, redact, content)
+	if err := evidence.Write(bundlePath, bundle); err != nil {
+		return writeJSON(stdout, output.Failure("feedback_bundle", "bundle_write_failed", err.Error(), "请检查工作空间目录权限"))
+	}
+	return writeJSON(stdout, output.Success("feedback_bundle", map[string]any{
+		"workspace":   workspaceName,
+		"run_id":      runID,
+		"bundle":      bundlePath,
+		"redacted":    redact,
+		"next_action": "share_bundle_with_maintainer",
+	}))
+}
+
 func writeJSON(stdout io.Writer, payload map[string]any) int {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -627,6 +673,23 @@ func readFlag(args []string, name string, fallback string) string {
 		}
 	}
 	return fallback
+}
+
+func hasFlag(args []string, name string) bool {
+	for _, arg := range args {
+		if arg == name {
+			return true
+		}
+	}
+	return false
+}
+
+func redactSensitive(value string) string {
+	keyValuePattern := regexp.MustCompile(`(?i)(token|password|secret|authorization)=([^\s,"}]+)`)
+	jsonPattern := regexp.MustCompile(`(?i)("(?:token|password|secret|authorization)"\s*:\s*")([^"]+)(")`)
+	redacted := keyValuePattern.ReplaceAllString(value, `${1}=[REDACTED]`)
+	redacted = jsonPattern.ReplaceAllString(redacted, `${1}[REDACTED]${3}`)
+	return redacted
 }
 
 func readInstallDir(args []string) string {

@@ -48,6 +48,7 @@ Operation Contract 必须引用 Standard Process Registry 中的任务分类和�
 | `prepare_pr` | 准备 PR，不绕过人工确认。 |
 | `fix_pr_comments` | 按 PR comments 修复。 |
 | `feedback_collect` | 收集工作空间事件日志。 |
+| `feedback_bundle` | 为指定 `run_id` 生成脱敏诊断包。 |
 | `feedback_analyze` | 分析执行失败、阻塞和重复问题。 |
 | `feedback_report` | 生成每日反馈报告。 |
 | `feedback_propose` | 生成改进建议。 |
