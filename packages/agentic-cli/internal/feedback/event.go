@@ -26,6 +26,8 @@ type Event struct {
 	AgentID               string `json:"agent_id,omitempty"`
 	CurrentAgentID        string `json:"current_agent_id,omitempty"`
 	TakeoverAt            string `json:"takeover_at,omitempty"`
+	CompletedAt           string `json:"completed_at,omitempty"`
+	CompletionEvidence    string `json:"completion_evidence,omitempty"`
 	TaskClass             string `json:"task_class,omitempty"`
 	ProcessID             string `json:"process_id,omitempty"`
 	CurrentAgentIDCleared bool   `json:"current_agent_id_cleared,omitempty"`

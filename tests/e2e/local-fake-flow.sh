@@ -36,7 +36,8 @@ printf '%s\n' "$missing_repo_output" | grep '"code":"missing_target_repo"'
 $cmd takeover-task TAP-123 --workspace tapstate | grep '"current_agent_id":"agentic-cli-local-agent"'
 $cmd resume-takeover --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"operation":"resume_takeover"'
 $cmd write-evidence --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"operation":"write_evidence"'
-$cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"runs":4'
+$cmd release-agent --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 --issue-key TAP-123 --completion-evidence evidence.md | grep '"current_agent_id_cleared":true'
+$cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"runs":5'
 $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"blocked":1'
 test -f "$workspace_root/.agentic-ops/feedback/events.ndjson"
 test -f "$workspace_root/.agentic-ops/feedback/daily/2026-07-21.md"

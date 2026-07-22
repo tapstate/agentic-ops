@@ -77,6 +77,8 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runResumeTakeover(args, stdout)
 	case "write-evidence":
 		return runWriteEvidence(args, stdout)
+	case "release-agent":
+		return runReleaseAgent(args, stdout)
 	case "feedback":
 		if len(args) >= 2 && args[1] == "report" {
 			return runFeedbackReport(args, stdout)
@@ -143,6 +145,7 @@ func runAgentInit(args []string, stdout io.Writer) int {
 			"takeover_task",
 			"resume_takeover",
 			"write_evidence",
+			"release_agent",
 			"feedback_report",
 		},
 	}))
@@ -467,6 +470,74 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 		"evidence":      path,
 		"current_stage": "evidence_written",
 		"next_action":   "request_owner_confirmation",
+	}))
+}
+
+func runReleaseAgent(args []string, stdout io.Writer) int {
+	workspaceName := readFlag(args, "--workspace", "default")
+	runID := readFlag(args, "--run-id", "")
+	if runID == "" {
+		return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
+			Code:                "missing_run_id",
+			Message:             "缺少 run_id",
+			RequiredHumanAction: "请提供 --run-id",
+			TaskType:            "task_takeover",
+			CurrentStage:        "completion_cleanup",
+			NextAction:          "ask_owner",
+		}))
+	}
+	issueKey := readFlag(args, "--issue-key", "")
+	if issueKey == "" {
+		return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
+			Code:                "missing_issue_key",
+			Message:             "缺少 issue key",
+			RequiredHumanAction: "请提供 --issue-key",
+			TaskType:            "task_takeover",
+			CurrentStage:        "completion_cleanup",
+			NextAction:          "ask_owner",
+		}))
+	}
+	completionEvidence := readFlag(args, "--completion-evidence", "")
+	if completionEvidence == "" {
+		return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
+			Code:                "missing_completion_evidence",
+			Message:             "缺少完成证据",
+			RequiredHumanAction: "请提供 --completion-evidence",
+			TaskType:            "task_takeover",
+			CurrentStage:        "completion_cleanup",
+			NextAction:          "ask_owner",
+		}))
+	}
+	currentAgentID := agentID()
+	completedAt := fixedNow().Format(time.RFC3339)
+	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
+		RunID:                 runID,
+		IssueKey:              issueKey,
+		TaskType:              "task_takeover",
+		Operation:             "release_agent",
+		CurrentStage:          "completed",
+		NextAction:            "feedback_report",
+		AgentID:               currentAgentID,
+		CurrentAgentID:        currentAgentID,
+		CompletedAt:           completedAt,
+		CompletionEvidence:    completionEvidence,
+		CurrentAgentIDCleared: true,
+		OK:                    true,
+		Gate:                  "release_agent",
+		GateStatus:            "passed",
+	}); err != nil {
+		return writeJSON(stdout, output.Failure("release_agent", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
+	}
+	return writeJSON(stdout, output.Success("release_agent", map[string]any{
+		"workspace":                workspaceName,
+		"issue_key":                issueKey,
+		"run_id":                   runID,
+		"agent_id":                 currentAgentID,
+		"current_agent_id_cleared": true,
+		"completed_at":             completedAt,
+		"completion_evidence":      completionEvidence,
+		"current_stage":            "completed",
+		"next_action":              "feedback_report",
 	}))
 }
 

@@ -41,6 +41,7 @@ Operation Contract 必须引用 Standard Process Registry 中的任务分类和�
 | `resume_takeover` | 恢复已有 `run_id` 的接管任务。 |
 | `read_task_context` | 读取任务上下文摘要。 |
 | `write_evidence` | 写入 Jira / PR evidence。 |
+| `release_agent` | 完成或明确交接后释放当前 AIAgent 绑定，并记录 `current_agent_id_cleared=true`。 |
 | `mark_blocked` | 记录阻塞原因和人工动作。 |
 | `request_owner_confirmation` | 请求研发 owner 确认。 |
 | `prepare_pr` | 准备 PR，不绕过人工确认。 |

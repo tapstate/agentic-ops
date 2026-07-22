@@ -1,0 +1,74 @@
+operation: release_agent
+version: 1
+purpose: 完成或明确交接后释放当前 AIAgent 绑定，并记录 current_agent_id 清理事件。
+task_type: task_takeover
+allowed_stages:
+  - completed
+  - handed_off
+  - completion_cleanup
+required_inputs:
+  - workspace
+  - run_id
+  - issue_key
+  - completion_evidence
+input:
+  workspace:
+    type: string
+    required: true
+  run_id:
+    type: string
+    required: true
+  issue_key:
+    type: string
+    required: true
+  completion_evidence:
+    type: string
+    required: true
+preconditions:
+  - run_must_exist
+  - current_user_must_match_owner
+  - current_agent_id_must_match_agent_id
+  - completion_evidence_must_exist
+output:
+  workspace:
+    type: string
+  issue_key:
+    type: string
+  run_id:
+    type: string
+  agent_id:
+    type: string
+  current_agent_id_cleared:
+    type: boolean
+  completed_at:
+    type: string
+  completion_evidence:
+    type: string
+  current_stage:
+    type: string
+  next_action:
+    type: string
+failure:
+  codes:
+    - missing_run_id
+    - missing_issue_key
+    - missing_completion_evidence
+    - run_not_found
+    - assignee_changed
+    - agent_ownership_conflict
+    - completion_evidence_missing
+    - agent_release_failed
+    - event_write_failed
+side_effects:
+  - may_write_jira_field
+  - may_write_local_event
+  - must_not_modify_code
+  - must_not_create_pr
+human_gate:
+  required: true
+  reason: 清理 current_agent_id 代表完成或交接结束，必须由研发 owner 确认完成证据。
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: completion_cleanup
+redo_from_stage: completion_cleanup

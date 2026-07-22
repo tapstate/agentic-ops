@@ -628,9 +628,56 @@ bash tests/e2e/local-fake-flow.sh
 
 Expected: all commands exit 0.
 
+### Task 10: Local Agent Release Event Baseline
+
+Scope:
+
+- Update: `packages/agentic-cli/internal/feedback/event.go`
+- Update: `packages/agentic-cli/internal/cli/app.go`
+- Update: `packages/agentic-cli/internal/cli/app_test.go`
+- Create: `contracts/operations/release-agent.yaml`
+- Update: `docs/contracts/operation-contract.md`
+- Update: `tests/e2e/local-fake-flow.sh`
+
+Definition:
+
+- Add `release-agent --workspace <name> --run-id <run_id> --issue-key <key> --completion-evidence <ref>`.
+- The command records a local completion cleanup event with `current_agent_id_cleared=true`, `completed_at` and `completion_evidence`.
+- The command is the local event/form baseline for later real Jira `current_agent_id` clearing; it does not claim real Jira mutation is implemented.
+
+- [x] **Step 1: Write failing CLI test for cleanup event**
+
+Assert `release-agent` returns `current_agent_id_cleared=true` and writes a `release_agent` event containing:
+
+- `current_agent_id`
+- `current_agent_id_cleared`
+- `completed_at`
+- `completion_evidence`
+
+Expected: FAIL because the command does not exist.
+
+- [x] **Step 2: Implement command and event fields**
+
+Add optional `completed_at` and `completion_evidence` to feedback events. Add the `release-agent` CLI route and `release_agent` capability.
+
+- [x] **Step 3: Add operation contract and e2e coverage**
+
+`contract validate` must include `release_agent`. Local fake flow must exercise the cleanup event and count it in feedback report.
+
+- [x] **Step 4: Verification**
+
+Run:
+
+```sh
+go test ./...
+bash tests/e2e/local-fake-flow.sh
+```
+
+Expected: all commands exit 0.
+
 ## 6. Later Phases
 
-- Later Phase 3: real Jira adapter, Jira-side `current_agent_id` writeback and takeover cleanup.
+- Later Phase 3: real Jira adapter and Jira-side `current_agent_id` writeback / cleanup.
 - Phase 4: doctor, feedback bundle, update check/apply, policy validate/update/rollback.
 - Phase 5: completion cleanup and problem-resolution e2e.
 

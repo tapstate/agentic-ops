@@ -327,6 +327,41 @@ func TestProfileUpdateAndRollbackUseLocalProfileBackup(t *testing.T) {
 	}
 }
 
+func TestReleaseAgentRecordsCurrentAgentCleanup(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	Run([]string{"takeover-task", "TAP-123", "--workspace", "tapstate"}, &bytes.Buffer{}, &bytes.Buffer{})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"release-agent", "--workspace", "tapstate", "--run-id", runID, "--issue-key", "TAP-123", "--completion-evidence", "evidence.md"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "release_agent")
+	assertJSONField(t, stdout.String(), "run_id", runID)
+	assertJSONField(t, stdout.String(), "current_stage", "completed")
+	assertJSONField(t, stdout.String(), "current_agent_id_cleared", true)
+	assertJSONField(t, stdout.String(), "next_action", "feedback_report")
+
+	events, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
+	if err != nil {
+		t.Fatalf("ReadFile events error = %v", err)
+	}
+	for _, want := range []string{
+		`"operation":"release_agent"`,
+		`"current_agent_id":"agentic-cli-local-agent"`,
+		`"current_agent_id_cleared":true`,
+		`"completed_at":"2026-07-21T10:30:12Z"`,
+		`"completion_evidence":"evidence.md"`,
+	} {
+		if !strings.Contains(string(events), want) {
+			t.Fatalf("events missing %s: %s", want, string(events))
+		}
+	}
+}
+
 func TestFeedbackReportOutputsReportPath(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
