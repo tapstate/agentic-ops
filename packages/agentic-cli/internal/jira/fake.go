@@ -51,6 +51,10 @@ func (FakeClient) UpdateFields(ctx context.Context, key string, fields map[strin
 	return nil
 }
 
+func (FakeClient) TransitionIssue(ctx context.Context, key string, transitionID string) error {
+	return nil
+}
+
 func fakeIssues(workspace string) []Issue {
 	valid := (FakeClient{}).ListTasks(workspace)[0]
 	missingRepo := valid

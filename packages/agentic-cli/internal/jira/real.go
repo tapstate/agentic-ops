@@ -123,6 +123,16 @@ func (client *RealClient) UpdateFields(ctx context.Context, key string, fields m
 	return client.doJSON(ctx, http.MethodPut, requestPath, payload, nil)
 }
 
+func (client *RealClient) TransitionIssue(ctx context.Context, key string, transitionID string) error {
+	requestPath := "/rest/api/3/issue/" + url.PathEscape(key) + "/transitions"
+	payload := map[string]any{
+		"transition": map[string]string{
+			"id": transitionID,
+		},
+	}
+	return client.doJSON(ctx, http.MethodPost, requestPath, payload, nil)
+}
+
 type jiraSearchResponse struct {
 	Issues []jiraIssueResponse `json:"issues"`
 }

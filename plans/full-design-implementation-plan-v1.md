@@ -1032,9 +1032,27 @@ bash tests/e2e/local-fake-flow.sh
 
 Expected: all commands exit 0.
 
-## 7. Later Phases
+## 7. Real Jira Transition Gate Baseline
 
-- Later Phase 3: real Jira transition gate.
+- [x] **Step 1: Add transition REST client contract**
+
+Added `TransitionIssue` to the Jira client interface and implemented the Jira Cloud v3 transition endpoint for the real adapter.
+
+- [x] **Step 2: Guard release-agent transition writes**
+
+`release-agent` now supports an explicit `--jira-transition-id` in real Jira mode. The transition runs only after `--confirm-real-jira-write`, ownership checks, and current_agent_id cleanup succeed.
+
+- [x] **Step 3: Record transition gate events**
+
+Successful and failed transition writes append `real_jira_write` gate events. Failed transitions return `jira_transition_failed` and require owner review.
+
+- [ ] **Step 4: Decide profile-driven transition mapping**
+
+Current `transition_mapping` maps standard workflow actions to standard stages. It does not yet identify concrete Jira transition ids or names, so automatic profile-driven transition selection remains a design decision.
+
+## 8. Later Phases
+
+- Later Phase 3: profile-driven Jira transition id/name mapping.
 - Later Phase 4: remote update manifest/artifact handling and real external doctor checks.
 - Phase 5: completion cleanup and problem-resolution e2e.
 

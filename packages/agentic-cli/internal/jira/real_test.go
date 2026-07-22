@@ -100,6 +100,24 @@ func TestRealClientAddCommentUsesADFBody(t *testing.T) {
 	}
 }
 
+func TestRealClientTransitionIssueUsesTransitionEndpoint(t *testing.T) {
+	client := newTestRealClient(t, func(r *http.Request) *http.Response {
+		assertRealJiraRequest(t, r, http.MethodPost, "/rest/api/3/issue/TAP-123/transitions")
+		var body map[string]map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Decode body error = %v", err)
+		}
+		if body["transition"]["id"] != "31" {
+			t.Fatalf("transition body = %#v", body)
+		}
+		return jsonResponse(http.StatusNoContent, "")
+	})
+
+	if err := client.TransitionIssue(context.Background(), "TAP-123", "31"); err != nil {
+		t.Fatalf("TransitionIssue error = %v", err)
+	}
+}
+
 func newTestRealClient(t *testing.T, handler func(*http.Request) *http.Response) *RealClient {
 	t.Helper()
 	client, err := NewRealClient(RealClientConfig{

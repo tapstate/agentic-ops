@@ -24,6 +24,9 @@ input:
   completion_evidence:
     type: string
     required: true
+  jira_transition_id:
+    type: string
+    required: false
 preconditions:
   - run_must_exist
   - current_user_must_match_owner
@@ -44,6 +47,8 @@ output:
     type: string
   completion_evidence:
     type: string
+  jira_transition_id:
+    type: string
   current_stage:
     type: string
   next_action:
@@ -63,9 +68,11 @@ failure:
     - real_jira_confirmation_required
     - missing_jira_write_mapping
     - agent_release_failed
+    - jira_transition_failed
     - event_write_failed
 side_effects:
   - may_write_jira_field
+  - may_transition_jira_issue
   - may_write_local_event
   - must_not_modify_code
   - must_not_create_pr

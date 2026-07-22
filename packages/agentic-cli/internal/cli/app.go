@@ -835,6 +835,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		}))
 	}
 	issueKey := readFlag(args, "--issue-key", "")
+	jiraTransitionID := readFlag(args, "--jira-transition-id", "")
 	if issueKey == "" {
 		return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
 			Code:                "missing_issue_key",
@@ -915,6 +916,22 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completion_cleanup", "ask_owner", "agent_release_failed", false, false)
 			return writeJSON(stdout, output.Failure("release_agent", "agent_release_failed", err.Error(), "请检查 Jira 字段权限并由研发 owner 决策是否人工释放"))
 		}
+		if jiraTransitionID != "" {
+			if err := selection.Client.TransitionIssue(context.Background(), issueKey, jiraTransitionID); err != nil {
+				_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "jira_transition", "ask_owner", "jira_transition_failed", false, false)
+				return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
+					Code:                "jira_transition_failed",
+					Message:             err.Error(),
+					RequiredHumanAction: "请检查 Jira transition 权限、transition id 和 workflow profile 映射",
+					TaskType:            "task_takeover",
+					CurrentStage:        "jira_transition",
+					NextAction:          "ask_owner",
+				}))
+			}
+			if err := appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "jira_transition", "completion_cleanup", "", true, false); err != nil {
+				return writeJSON(stdout, output.Failure("release_agent", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
+			}
+		}
 		if err := appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completed", "feedback_report", "", true, false); err != nil {
 			return writeJSON(stdout, output.Failure("release_agent", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 		}
@@ -943,6 +960,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		"run_id":                   runID,
 		"agent_id":                 currentAgentID,
 		"current_agent_id_cleared": true,
+		"jira_transition_id":       jiraTransitionID,
 		"completed_at":             completedAt,
 		"completion_evidence":      completionEvidence,
 		"current_stage":            "completed",

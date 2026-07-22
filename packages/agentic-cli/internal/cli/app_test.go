@@ -582,6 +582,48 @@ func TestReleaseAgentRecordsFailedRealJiraWriteGate(t *testing.T) {
 	assertEventLogContains(t, root, `"code":"agent_release_failed"`)
 }
 
+func TestReleaseAgentTransitionsRealJiraIssueWhenTransitionIDProvided(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	client := &recordingJiraClient{issue: realModeBoundIssue()}
+	withJiraClientForTest(t, jiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"release-agent", "--workspace", "tapstate", "--run-id", "run-1", "--issue-key", "TAP-123", "--completion-evidence", "evidence.md", "--confirm-real-jira-write", "--jira-transition-id", "31"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	if client.transitionKey != "TAP-123" || client.transitionID != "31" {
+		t.Fatalf("transition = %s %s", client.transitionKey, client.transitionID)
+	}
+	assertEventLogContains(t, root, `"operation":"release_agent"`)
+	assertEventLogContains(t, root, `"current_stage":"jira_transition"`)
+	assertEventLogContains(t, root, `"gate":"real_jira_write"`)
+	assertEventLogContains(t, root, `"gate_status":"passed"`)
+}
+
+func TestReleaseAgentRecordsFailedRealJiraTransitionGate(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	client := &recordingJiraClient{issue: realModeBoundIssue(), transitionErr: errors.New("transition denied")}
+	withJiraClientForTest(t, jiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"release-agent", "--workspace", "tapstate", "--run-id", "run-1", "--issue-key", "TAP-123", "--completion-evidence", "evidence.md", "--confirm-real-jira-write", "--jira-transition-id", "31"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "jira_transition_failed")
+	assertJSONField(t, stdout.String(), "current_stage", "jira_transition")
+	assertEventLogContains(t, root, `"operation":"release_agent"`)
+	assertEventLogContains(t, root, `"current_stage":"jira_transition"`)
+	assertEventLogContains(t, root, `"gate":"real_jira_write"`)
+	assertEventLogContains(t, root, `"gate_status":"failed"`)
+	assertEventLogContains(t, root, `"code":"jira_transition_failed"`)
+}
+
 func TestJiraWriteFieldsUseProfileMapping(t *testing.T) {
 	p := profile.Profile{
 		JiraFormMapping: profile.FormMapping{
@@ -839,6 +881,9 @@ type recordingJiraClient struct {
 	commentKey    string
 	commentBody   string
 	commentErr    error
+	transitionKey string
+	transitionID  string
+	transitionErr error
 }
 
 func (client *recordingJiraClient) CurrentUser(ctx context.Context) (string, error) {
@@ -870,6 +915,15 @@ func (client *recordingJiraClient) UpdateFields(ctx context.Context, key string,
 	client.updatedFields = fields
 	if client.updateErr != nil {
 		return client.updateErr
+	}
+	return nil
+}
+
+func (client *recordingJiraClient) TransitionIssue(ctx context.Context, key string, transitionID string) error {
+	client.transitionKey = key
+	client.transitionID = transitionID
+	if client.transitionErr != nil {
+		return client.transitionErr
 	}
 	return nil
 }
