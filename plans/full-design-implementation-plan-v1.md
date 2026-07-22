@@ -1068,10 +1068,24 @@ Remote apply downloads `checksums.txt`, verifies each selected artifact with SHA
 
 The current baseline verifies and stores remote artifacts but does not yet unpack and replace the running `agentic-cli` binary.
 
-## 9. Later Phases
+## 9. Doctor External Checks Baseline
+
+- [x] **Step 1: Keep default doctor local and non-invasive**
+
+Default `doctor` keeps local checks and does not access external Jira or GitHub services.
+
+- [x] **Step 2: Add explicit real Jira adapter check**
+
+`doctor --check-real-jira` verifies that the real Jira adapter is active and can read the current Jira user.
+
+- [x] **Step 3: Add explicit GitHub auth check**
+
+`doctor --check-github` runs the GitHub CLI auth check and reports failed status when authentication is unavailable.
+
+## 10. Later Phases
 
 - Later Phase 3: profile-driven Jira transition id/name mapping.
-- Later Phase 4: real binary switching and real external doctor checks.
+- Later Phase 4: real binary switching.
 - Phase 5: completion cleanup and problem-resolution e2e.
 
 Do not start later phases until Phase 1 contract/schema baseline is passing and committed.

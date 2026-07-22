@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -30,6 +31,10 @@ var IterationVersion = "source"
 var CommitIndex = "0"
 var Commit = "unknown"
 var BuildTime = ""
+
+var runGitHubAuthStatus = func(ctx context.Context) error {
+	return exec.CommandContext(ctx, "gh", "auth", "status").Run()
+}
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -133,8 +138,8 @@ func runDoctor(args []string, stdout io.Writer) int {
 		"profile":      checkProfile(workspaceName),
 		"policy":       checkPolicy(),
 		"contracts":    checkContracts(),
-		"jira_adapter": {"status": "ok", "message": "fake adapter available"},
-		"github":       {"status": "skipped", "message": "GitHub CLI check is not implemented in local baseline"},
+		"jira_adapter": checkJiraAdapter(workspaceName, hasFlag(args, "--check-real-jira")),
+		"github":       checkGitHubAuth(hasFlag(args, "--check-github")),
 	}
 	status := "ok"
 	for _, check := range checks {
@@ -157,6 +162,37 @@ func runDoctor(args []string, stdout io.Writer) int {
 		"checks":            checks,
 		"next_action":       nextAction,
 	}))
+}
+
+func checkJiraAdapter(workspaceName string, realCheck bool) map[string]string {
+	if !realCheck {
+		return map[string]string{"status": "ok", "message": "fake adapter available"}
+	}
+	workspaceProfile := takeoverProfile(workspaceName)
+	selection, err := selectJiraClient(workspaceName, workspaceProfile)
+	if err != nil {
+		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	if selection.Mode != "real" {
+		return map[string]string{"status": "failed", "message": "real Jira adapter is not active"}
+	}
+	currentUser, err := selection.Client.CurrentUser(context.Background())
+	if err != nil {
+		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	return map[string]string{"status": "ok", "message": "real adapter authenticated as " + currentUser}
+}
+
+func checkGitHubAuth(realCheck bool) map[string]string {
+	if !realCheck {
+		return map[string]string{"status": "skipped", "message": "GitHub CLI check requires --check-github"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := runGitHubAuthStatus(ctx); err != nil {
+		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	return map[string]string{"status": "ok", "message": "GitHub CLI authenticated"}
 }
 
 func runPreflight(args []string, stdout io.Writer) int {

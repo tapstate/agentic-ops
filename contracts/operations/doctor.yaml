@@ -1,6 +1,6 @@
 operation: doctor
 version: 1
-purpose: 输出安装、版本、profile、policy、contract、adapter 和 workspace 的本地诊断结果。
+purpose: 输出安装、版本、profile、policy、contract、adapter、GitHub 和 workspace 的诊断结果；真实外部检查必须显式启用。
 task_type: diagnosis
 allowed_stages:
   - installed
@@ -10,12 +10,20 @@ required_inputs:
   - workspace
 optional_inputs:
   - install_dir
+  - check_real_jira
+  - check_github
 input:
   workspace:
     type: string
     required: true
   install_dir:
     type: string
+    required: false
+  check_real_jira:
+    type: boolean
+    required: false
+  check_github:
+    type: boolean
     required: false
 preconditions:
   - workspace_name_must_be_known

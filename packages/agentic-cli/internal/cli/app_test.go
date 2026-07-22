@@ -84,6 +84,60 @@ func TestDoctorOutputsLocalDiagnosticChecks(t *testing.T) {
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "contracts", "status"}, "ok")
 }
 
+func TestDoctorChecksRealJiraAdapterWhenRequested(t *testing.T) {
+	withJiraClientForTest(t, jiraClientSelection{Client: &recordingJiraClient{issue: realModeIssue()}, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"doctor", "--workspace", "tapstate", "--check-real-jira"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "doctor")
+	assertJSONField(t, stdout.String(), "status", "ok")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "jira_adapter", "status"}, "ok")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "jira_adapter", "message"}, "real adapter authenticated as current-user")
+}
+
+func TestDoctorFailsRealJiraCheckWhenAdapterIsNotReal(t *testing.T) {
+	withJiraClientForTest(t, jiraClientSelection{Client: &recordingJiraClient{issue: realModeIssue()}, Mode: "fake"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"doctor", "--workspace", "tapstate", "--check-real-jira"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "doctor")
+	assertJSONField(t, stdout.String(), "status", "failed")
+	assertJSONField(t, stdout.String(), "next_action", "fix_environment")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "jira_adapter", "status"}, "failed")
+}
+
+func TestDoctorChecksGitHubAuthWhenRequested(t *testing.T) {
+	original := runGitHubAuthStatus
+	called := false
+	runGitHubAuthStatus = func(ctx context.Context) error {
+		called = true
+		return nil
+	}
+	t.Cleanup(func() {
+		runGitHubAuthStatus = original
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"doctor", "--workspace", "tapstate", "--check-github"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	if !called {
+		t.Fatalf("runGitHubAuthStatus was not called")
+	}
+	assertJSONField(t, stdout.String(), "operation", "doctor")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "github", "status"}, "ok")
+}
+
 func TestWorkspaceInitOutputsNextAction(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
