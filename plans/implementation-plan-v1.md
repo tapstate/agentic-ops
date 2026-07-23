@@ -1351,4 +1351,4 @@ git commit -m "Test(e2e): add local fake flow"
 - Contract source: 顶层 `contracts/operations/` 是唯一机器可读契约源头。
 - Runtime boundary: Go CLI 承载业务逻辑，shell 只做安装引导。
 - Human gate: 推送、创建拉取请求、合并、发布不在第一批自动执行范围内。
-- Implementation note: 第一阶段实现补齐了计划命令范围中的 `preflight`、`agent init`、`resume-takeover`、本地 `assets install`、`scripts/build.sh` 和 `scripts/release.sh`，并创建本地模拟流程所需操作 YAML；真实 Jira / GitHub 写操作仍未接入。
+- 实现说明：第一阶段实现补齐了计划命令范围中的 `preflight`、`agent init`、`resume-takeover`、本地 `assets install`、`scripts/build.sh` 和 `scripts/release.sh`，并创建本地模拟流程所需操作 YAML；真实 Jira / GitHub 写操作仍未接入。

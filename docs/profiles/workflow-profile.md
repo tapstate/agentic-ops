@@ -125,7 +125,7 @@ templates:
 - 工作流配置可以绑定具体 Jira 工作流，但核心操作不能依赖某个固定 Jira 状态名。
 - 工作流配置必须适配 Task Form Standard；AIAgent 只消费标准字段，不直接消费 Jira 自定义字段。
 - `Profile` 必须适配 Standard Process Registry；AIAgent 先识别 `task_class`，再选择 `process_id`。
-- `Profile` 必须说明关键专业审查节点如何映射到标准字段、Jira 状态、PR 审查、CI 或人工确认。
+- `Profile` 必须说明关键专业审查节点如何映射到标准字段、Jira 状态、拉取请求审查、CI 或人工确认。
 - `Profile` 必须说明失败后允许重试还是必须重做前序阶段。
 - `Profile` 必须能被 `agentic-cli preflight` 校验。
 - `Profile` 不得包含 secrets、tokens 或 private keys。

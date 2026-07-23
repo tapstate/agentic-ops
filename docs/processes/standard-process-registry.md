@@ -115,7 +115,7 @@ stages:
 | Jira 状态无法映射到标准阶段 | `lifecycle_mapping_gap` | 请求流程负责人决策状态映射或调整 Jira 工作流。 |
 | Jira `transition` 无法映射到标准推进动作 | `transition_mapping_gap` / `jira_transition_mapping_gap` | 请求流程负责人决策标准 `transition` 映射、Jira `transition` 标识映射或新增人工门禁。 |
 | Jira 卡片类型或标签无法映射任务分类 | `task_class_mapping_gap` | 请求研发负责人或流程负责人补充任务分类规则。 |
-| 审查节点无法映射到人、PR 审查、CI 或 Jira 状态 | `review_gate_mapping_gap` | 请求流程负责人决策审查节点和责任角色。 |
+| 审查节点无法映射到人、拉取请求审查、CI 或 Jira 状态 | `review_gate_mapping_gap` | 请求流程负责人决策审查节点和责任角色。 |
 
 缺口输出必须包含：
 

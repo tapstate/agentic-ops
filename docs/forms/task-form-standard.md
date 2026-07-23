@@ -64,9 +64,9 @@ AgenticOps 表单体系分为三层。
 | `implementation_summary` | 本地实现摘要。 | AIAgent | 开发完成 |
 | `verification_result` | 实际验证结果。 | AIAgent | 开发完成 |
 | `residual_risk` | 剩余风险和未验证部分。 | AIAgent | 开发完成 |
-| `pr_link` | PR 链接。 | 研发负责人、AIAgent（门禁后） | PR 阶段 |
-| `ci_status` | CI 状态摘要。 | GitHub / CI | PR 阶段 |
-| `review_status` | 审查意见处理状态。 | AIAgent、研发负责人 | PR 阶段 |
+| `pr_link` | 拉取请求链接。 | 研发负责人、AIAgent（门禁后） | 拉取请求阶段 |
+| `ci_status` | CI 状态摘要。 | GitHub / CI | 拉取请求阶段 |
+| `review_status` | 审查意见处理状态。 | AIAgent、研发负责人 | 拉取请求阶段 |
 | `reviewer_decision` | 专业审查结论，例如通过、退回、要求补充、阻断。 | 代码审查人、QA、运维、安全、研发负责人 | 审查节点 |
 | `reviewer_required_action` | 审查后要求 AIAgent 或负责人执行的动作。 | 代码审查人、QA、运维、安全、研发负责人 | 审查节点 |
 | `retry_policy` | 当前失败是否允许重试、最大次数或重试前置条件。 | AgenticOps、工作流配置 | 失败后 |

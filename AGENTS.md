@@ -9,13 +9,13 @@ AgenticOps 第一个版本发布正式上线前，必须遵守 `docs/development
 核心目录约定：
 
 - `docs/`：架构、规则、用户故事、流程和设计说明。
-- `handbooks/`：AI 员工手册，面向 AIAgent 和研发 owner。
-- `plans/`：可执行推进计划，使用 checkbox 跟踪实施进度。
-- `contracts/`：后续机器可读 Operation Contract 源头。
-- `profiles/`：Workflow Profile 示例和默认配置。
+- `handbooks/`：AI 员工手册，面向 AIAgent 和研发负责人。
+- `plans/`：可执行推进计划，使用勾选项跟踪实施进度。
+- `contracts/`：后续机器可读操作契约源头。
+- `profiles/`：工作流配置示例和默认配置。
 - `skills/`：AgenticOps skills。
-- `templates/`：Jira、PR 和 evidence 回写模板。
-- `packages/agentic-cli/`：Go CLI Runtime 的未来实现位置。
+- `templates/`：Jira、拉取请求和证据回写模板。
+- `packages/agentic-cli/`：Go CLI 运行时的未来实现位置。
 - `examples/`：端到端演示样例。
 - `tests/`：合同、脚本和文档一致性测试。
 - `scripts/`：安装、检查和辅助脚本。
@@ -36,15 +36,15 @@ AgenticOps 第一个版本发布正式上线前，必须遵守 `docs/development
 
 ## 语言与命名
 
-面向用户、研发 owner 和审阅者的可见文档标题默认使用中文。产品名、角色名、工具名、命令、配置字段、协议字段、文件名、目录名和稳定编号可以保留英文或缩写。
+面向用户、研发负责人和审阅者的可见文档标题默认使用中文。产品名、角色名、工具名、命令、配置字段、协议字段、文件名、目录名和稳定编号可以保留英文或缩写。
 
-Jira 交互中的人可见内容必须使用中文，包括标题、描述、评论、工作日志、evidence 正文、阻塞说明和补卡说明。Jira 字段名、状态名、transition 名称、issue key、命令、配置字段和协议字段可以保留原始英文或缩写。
+Jira 交互中的人可见内容必须使用中文，包括标题、描述、评论、工作日志、证据正文、阻塞说明和补卡说明。Jira 字段名、状态名、transition 名称、issue key、命令、配置字段和协议字段可以保留原始英文或缩写。
 
 目录名和文件名默认使用英文 ASCII lowercase-kebab-case。Markdown 正文以中文为主，首次出现关键术语时可中英并列。
 
 ## 运行时方向
 
-AgenticCLI 使用 Go 实现，统一入口为 `agentic-cli`。shell 只用于 `curl | bash` 安装引导、轻量环境检测、下载或切换 Go release 二进制，不承载 Jira、GitHub、Git、Operation Contract、policy gate、evidence 或 feedback 的业务逻辑。
+AgenticCLI 使用 Go 实现，统一入口为 `agentic-cli`。shell 只用于 `curl | bash` 安装引导、轻量环境检测、下载或切换 Go release 二进制，不承载 Jira、GitHub、Git、操作契约、策略门禁、证据或反馈的业务逻辑。
 
 `~/.agentic-ops` 是全局安装和配置目录，不是具体项目运行目录。具体项目运行目录是项目 AI 工作空间，例如 `tapstate` 或 `tapdata`。
 

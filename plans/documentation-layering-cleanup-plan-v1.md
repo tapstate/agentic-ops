@@ -1,17 +1,17 @@
 # AgenticOps 文档分层清理计划
 
-> **For agentic workers:** 本计划用于清理设计文档与实施计划的边界。执行时必须保持设计文档只表达稳定设计事实，计划文件承担阶段、任务、checkbox、Implementation note 和剩余工作记录。
+> **For agentic workers:** 本计划用于清理设计文档与实施计划的边界。执行时必须保持设计文档只表达稳定设计事实，计划文件承担阶段、任务、勾选项、实现说明和剩余工作记录。
 
 **Goal:** 将 AgenticOps 设计文档和计划文档职责分开，避免设计事实源混入实施进度、阶段状态和计划任务。
 
-**Architecture:** `docs/project-rules.md` 定义文档治理规则；`docs/architecture/` 保留稳定架构、能力边界和用户已确认的设计决策；`plans/` 保留实施阶段、任务拆解、checkbox、验收命令和历史推进记录。
+**Architecture:** `docs/project-rules.md` 定义文档治理规则；`docs/architecture/` 保留稳定架构、能力边界和用户已确认的设计决策；`plans/` 保留实施阶段、任务拆解、勾选项、验收命令和历史推进记录。
 
 **Tech Stack:** Markdown 文档；使用 `rg` 验证设计文档中不再出现计划跟踪内容。
 
 ## Global Constraints
 
 - 不修改 CLI 代码、契约 YAML 或运行资产。
-- 不把阶段性状态、剩余工作或 Implementation note 写入设计主叙事。
+- 不把阶段性状态、剩余工作或实现说明写入设计主叙事。
 - 架构缺口如果依赖产品或流程取舍，必须标记为需要用户决策，不得伪装成默认计划。
 - 保持中文正文，文件名使用英文 ASCII lowercase-kebab-case。
 
@@ -32,7 +32,7 @@
 
   - 设计文档只写稳定架构事实和能力边界。
   - 运行时文档记录实现边界、命令能力和正式化缺口。
-  - 计划文件记录阶段、任务、checkbox、验收命令和 Implementation note。
+  - 计划文件记录阶段、任务、勾选项、验收命令和实现说明。
   - 架构缺口涉及取舍时必须提示用户决策。
 
 ## Task 2: 清理架构设计文档
@@ -56,7 +56,7 @@
 
 - [x] **Step 3: 清理项目结构设计**
 
-  从 `docs/architecture/project-structure.md` 移除当前实现状态和 checkbox 跟踪语气，只保留目标结构、目录职责和需要用户决策的目录边界取舍。
+  从 `docs/architecture/project-structure.md` 移除当前实现状态和勾选项跟踪语气，只保留目标结构、目录职责和需要用户决策的目录边界取舍。
 
 ## Task 3: 验证
 
@@ -74,7 +74,7 @@
   Run:
 
   ```sh
-  rg -n "Implementation note|\\[x\\]|\\[ \\]|第一阶段交付物|第一阶段验收标准|执行顺序|分阶段设计|第一阶段操作" docs/architecture docs/project-rules.md
+  rg -n "实现说明|\\[x\\]|\\[ \\]|第一阶段交付物|第一阶段验收标准|执行顺序|分阶段设计|第一阶段操作" docs/architecture docs/project-rules.md
   ```
 
   Expected: 不再在 `docs/architecture/` 中出现计划跟踪内容；`docs/project-rules.md` 只允许出现规则说明语境。
