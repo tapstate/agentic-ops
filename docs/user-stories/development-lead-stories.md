@@ -69,6 +69,34 @@ curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
 - 安装目录是 `~/.agentic-ops`。
 - `~/.agentic-ops` 只保存全局安装和配置资料，不作为具体项目运行目录。
 
+### 保护行为
+
+- 安装是全局动作，不绑定具体 Jira 空间、代码仓库或项目 AI 工作空间。
+- 安装目录固定为 `~/.agentic-ops`。
+- 安装不得覆盖用户已有本地配置。
+- 安装日志和安装目录不得保存 secrets、tokens、private keys 或原始敏感日志。
+
+### 审核问题
+
+- 安装完成后研发负责人能否明确下一步是初始化项目 AI 工作空间。
+- `~/.agentic-ops` 是否只包含全局安装、配置模板和通用运行资产。
+- 安装失败时是否能说明缺失依赖、网络问题或权限问题。
+- 安装产物是否能证明来自可验证版本。
+
+### 验收证据
+
+- `agentic-cli --version` 输出。
+- `agentic-cli preflight` 输出。
+- 安装输出中的 `operation=install`、`install_dir` 和 `next_action`。
+- `bash tests/e2e/local-release-install-flow.sh`
+
+### 关联设计
+
+- `docs/architecture/project-structure.md`
+- `docs/runtime/cli-runtime.md`
+- `docs/runtime/versioning.md`
+- `scripts/init.sh`
+
 ## 3. DL-002 初始化项目 AI 工作空间
 
 作为研发负责人，
@@ -130,6 +158,34 @@ agentic-cli workspace init --workspace tapstate --jira-user dev@example.com --ji
 - 工作空间产物写入项目 AI 工作空间，不写入 `~/.agentic-ops`。
 - Jira 空间到代码仓库的映射由工作流配置维护，AIAgent 不得在接管真实卡片时猜测目标仓库。
 - `agentic-cli preflight --workspace <name>` 能验证工作空间可用性。
+
+### 保护行为
+
+- `workspace init` 必须在项目 AI 工作空间目录内执行。
+- 工作空间配置必须显式绑定 Jira 用户、Jira 空间、仓库映射和本地源码根目录。
+- 具体项目运行产物必须写入项目 AI 工作空间，不能写入 `~/.agentic-ops`。
+- 目标仓库选择必须来自 workflow profile 或 Jira 字段映射，不能由 AIAgent 临场猜测。
+
+### 审核问题
+
+- 当前目录是否是项目 AI 工作空间，而不是 AgenticOps 源头仓库或 `~/.agentic-ops`。
+- Jira 空间到代码仓库的映射是否完整。
+- 本地源码目录是否可访问。
+- 工作空间预检失败时是否能输出缺失配置。
+
+### 验收证据
+
+- `agentic-cli workspace init --workspace <name> --jira-user <user> --jira-project <project>` 输出。
+- `agentic-cli preflight --workspace <name>` 输出。
+- 项目 AI 工作空间中的 `.agentic-ops/runs/` 和 `.agentic-ops/feedback/`。
+- workflow profile 中的 Jira / GitHub / 本地路径映射。
+
+### 关联设计
+
+- `docs/architecture/project-structure.md`
+- `docs/profiles/workflow-profile.md`
+- `docs/project-rules.md`
+- `docs/runtime/cli-runtime.md`
 
 ## 4. DL-003 初始化 AIAgent 能力
 
@@ -206,6 +262,34 @@ agentic-cli agent init --workspace tapstate
 - AIAgent 知道不能直接面对 Jira 字段和状态，必须通过操作契约和 CLI 工作。
 - 初始化完成后，研发负责人可以直接说“列出我的任务”或“接管 TAP-123”。
 
+### 保护行为
+
+- AIAgent 必须读取 AI 员工手册、操作契约和工作流配置摘要后才能接管任务。
+- AIAgent 必须说明人工确认点，包括推送、创建拉取请求、合并、范围变更等。
+- AIAgent 不能直接面对 Jira 字段、状态或 `transition` 做临场猜测。
+- `workspace preflight` 失败时，AIAgent 不能开始接管任务。
+
+### 审核问题
+
+- AIAgent 是否能说明当前任务类型、阶段来源和下一步动作来源。
+- AIAgent 是否知道哪些操作有副作用。
+- AIAgent 是否知道何时必须停止并请求研发负责人判断。
+- 初始化输出是否足以让研发负责人继续说“列出我的任务”或“接管 TAP-123”。
+
+### 验收证据
+
+- `agentic-cli agent init --workspace <name>` 输出。
+- `agentic-cli preflight --workspace <name>` 输出。
+- AIAgent 对能力、阶段判断和人工确认点的说明。
+- AI 员工手册和操作契约读取记录。
+
+### 关联设计
+
+- `handbooks/ai-employee-handbook.md`
+- `docs/ai-working-rules.md`
+- `docs/contracts/operation-contract.md`
+- `docs/profiles/workflow-profile.md`
+
 ## 5. DL-004 新任务接管
 
 作为研发负责人，
@@ -277,6 +361,38 @@ agentic-cli takeover-task TAP-123 --workspace tapstate
 - 所有操作都写入结构化事件日志。
 - 写入 Jira 的接管成功、失败、阻塞和补卡说明必须使用中文。
 
+### 保护行为
+
+- 单次接管只能处理一个 Jira 卡片。
+- 接管必须检查负责人、迭代、需求范围、验收标准、目标仓库、验证方式、风险和权限门禁。
+- 接管成功必须生成唯一 `run_id` 并写入结构化事件日志。
+- 接管失败必须写结构化失败记录，不能继续开发。
+- 未经研发负责人确认，AIAgent 不得推送或创建拉取请求。
+
+### 审核问题
+
+- 当前 Jira 卡片是否已进入迭代并由当前研发负责人负责。
+- 卡片是否具备需求范围、验收标准、目标仓库和验证方式。
+- `target_repo` 是来自字段映射还是 workflow profile。
+- 接管失败时是否清楚提示 required human action。
+- 接管后是否停在正确的下一步，而不是绕过人工门禁。
+
+### 验收证据
+
+- `agentic-cli takeover-task <issue> --workspace <name>` 输出。
+- `run_id` 对应的事件日志。
+- Jira 中文接管成功、失败、阻塞或补卡说明。
+- `bash tests/e2e/local-fake-flow.sh`
+- 真实 Jira 卡片端到端演示记录。
+
+### 关联设计
+
+- `docs/contracts/operation-contract.md`
+- `docs/processes/standard-process-registry.md`
+- `docs/templates/evidence-templates.md`
+- `docs/examples/end-to-end-demo.md`
+- `docs/forms/task-form-standard.md`
+
 ## 6. DL-005 恢复接管任务
 
 作为研发负责人，
@@ -338,6 +454,34 @@ agentic-cli resume-takeover --run-id TAP-123-takeover-20260721103012-a8f3 --work
 - 恢复前必须校验 `workspace`、`issue`、负责人和目标仓库一致。
 - AIAgent 能说明从哪个阶段恢复。
 - 恢复过程继续写入同一个 run 的事件日志。
+
+### 保护行为
+
+- 恢复接管必须复用已有 `run_id`，不能创建新 `run_id`。
+- 恢复前必须校验 `workspace`、`issue`、负责人、目标仓库和本地代码状态。
+- 上次停在人工确认点时，AIAgent 不能自动继续。
+- 恢复过程必须继续写入同一个 run 的事件日志。
+
+### 审核问题
+
+- `run_id` 是否存在且与当前工作空间匹配。
+- 当前 Jira 卡片负责人和目标仓库是否仍一致。
+- 本地代码状态是否允许继续，是否需要研发负责人确认。
+- AIAgent 是否清楚说明 previous stage、current stage 和 next action。
+
+### 验收证据
+
+- `agentic-cli resume-takeover --run-id <run_id> --workspace <name>` 输出。
+- 同一 `run_id` 的 run summary 和 events。
+- 输出中的 `previous_stage`、`current_stage` 和 `next_action`。
+- 恢复失败时的结构化失败记录。
+
+### 关联设计
+
+- `docs/contracts/operation-contract.md`
+- `docs/processes/standard-process-registry.md`
+- `docs/workflows/feedback-loop.md`
+- `docs/architecture/full-design-implementation-design.md`
 
 ## 7. DL-006 任务完成审计与反馈分析
 
@@ -411,3 +555,34 @@ agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 - 报告不包含 secrets 或敏感原始内容。
 - 写入 Jira 的工作日志必须使用中文。
 - 改进建议必须经过人工确认后才能进入 AgenticOps 源头仓库。
+
+### 保护行为
+
+- AIAgent 完成、阻塞或交接任务时必须提交任务级审计记录。
+- `release-agent` 完成清理后必须记录 `current_agent_id` 清理状态。
+- 本地反馈报告不能替代 Jira 卡片、审计服务或目标仓库证据链中的任务审计记录。
+- 反馈分析只能形成改进建议，不能自动修改 AgenticOps 源头规则。
+- 审计记录和反馈报告不得包含 secrets 或敏感原始内容。
+
+### 审核问题
+
+- 任务最终状态是完成、阻塞还是交接。
+- 审计记录最终写入 Jira 卡片、审计服务还是目标仓库证据链。
+- `current_agent_id` 是否已清理或保留了未清理原因。
+- 反馈报告是否只是按需分析，而不是任务完成主路径。
+- 改进建议是否已经过人工确认。
+
+### 验收证据
+
+- `agentic-cli write-evidence --workspace <name> --run-id <run_id>` 输出。
+- `agentic-cli release-agent --workspace <name> --run-id <run_id> --issue-key <issue>` 输出。
+- 任务级审计记录或 Jira 中文工作日志。
+- `agentic-cli feedback report --workspace <name> --date <date>` 输出。
+- 脱敏反馈包和人工确认记录。
+
+### 关联设计
+
+- `docs/workflows/feedback-loop.md`
+- `docs/templates/evidence-templates.md`
+- `docs/runtime/problem-resolution-and-update.md`
+- `docs/project-rules.md`

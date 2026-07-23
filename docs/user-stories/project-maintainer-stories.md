@@ -58,6 +58,34 @@
 - 审阅者能从故事线追溯到设计，再追溯到计划和验收命令。
 - 需要用户决策的缺口被明确标出，不被写成默认实现。
 
+### 保护行为
+
+- 故事线不能记录阶段任务、checkbox、当前完成度或 Implementation note。
+- 设计文档不能把未决产品、流程、权限或事实源取舍写成默认实现。
+- 计划必须基于已确认故事线和相对稳定设计拆解。
+- 公开行为变化必须同步检查故事线、设计、契约、运行资产、测试和文档入口。
+
+### 审核问题
+
+- 这次变更属于故事线、设计、计划、运行资产还是实现代码。
+- 是否有计划内容进入故事线或设计文档。
+- 是否有设计缺口需要用户决策。
+- 审阅者能否从故事线追溯到对应设计和验收证据。
+
+### 验收证据
+
+- `docs/user-stories/agenticops-user-stories.md` 能说明故事线分类和推进门禁。
+- `docs/README.md` 和 `docs/review-checklist.md` 能指向故事线、设计和计划入口。
+- `git diff --check` 无 Markdown 空白错误。
+- 文档检查未发现故事线中的 checkbox 或 Implementation note。
+
+### 关联设计
+
+- `docs/project-rules.md`
+- `docs/architecture/agenticops-current-design.md`
+- `docs/review-checklist.md`
+- `docs/README.md`
+
 ## 3. PM-002 维护操作契约、标准流程和工作流配置
 
 作为项目维护者，
@@ -114,6 +142,35 @@
 - CLI 能校验操作契约、标准流程和 workflow profile。
 - 缺失映射能输出稳定错误码、缺口说明和所需人工动作。
 
+### 保护行为
+
+- AIAgent 不能直接猜测 Jira 字段、状态、`transition`、目标仓库或标准流程。
+- 未知 Jira 状态、缺失字段映射、缺失任务分类或缺失标准流程必须输出稳定缺口。
+- 操作契约必须声明输入、输出、前置门禁、失败码、副作用和人工确认要求。
+- workflow profile 必须承载具体项目 Jira / GitHub / 本地路径映射。
+
+### 审核问题
+
+- 新增或调整的能力是否已有明确操作契约。
+- 标准流程注册处是否能解释任务分类、阶段、责任角色和完成清理。
+- workflow profile 是否避免把具体项目事实写死到通用规则。
+- 缺失映射时是否有稳定错误码和人工动作。
+
+### 验收证据
+
+- 操作契约校验输出。
+- 标准流程注册处校验输出。
+- workflow profile 校验输出。
+- 缺失字段、未知状态或缺失映射的结构化失败输出。
+
+### 关联设计
+
+- `docs/contracts/operation-contract.md`
+- `docs/processes/standard-process-registry.md`
+- `docs/profiles/workflow-profile.md`
+- `docs/forms/task-form-standard.md`
+- `docs/architecture/full-design-implementation-design.md`
+
 ## 4. PM-003 发布 AgenticOps 版本和安装资产
 
 作为项目维护者，
@@ -165,6 +222,36 @@ bash scripts/publish-release.sh <release_dir>
 - release 产物、版本清单和校验和一致。
 - 安装脚本能安装发布后的 `agentic-cli` 和运行资产。
 - 发布动作受人工确认和审计约束。
+
+### 保护行为
+
+- 发布必须产出可验证的 `agentic-cli` 二进制、标准资产、版本清单和校验和。
+- 安装入口必须安装到 `~/.agentic-ops`，不能把具体项目运行资料写入全局安装目录。
+- 发布动作必须受权限、策略、人工确认和审计记录约束。
+- 失败或不可用版本必须能进入受控回滚或重新发布流程。
+
+### 审核问题
+
+- release 产物、版本号、清单和校验和是否一致。
+- 安装脚本是否只处理全局安装和通用运行资产。
+- 发布过程是否需要人工确认，以及确认记录写在哪里。
+- 发布后如何证明安装后的 `agentic-cli` 可运行。
+
+### 验收证据
+
+- `bash scripts/test-build-release.sh`
+- `bash tests/e2e/local-release-install-flow.sh`
+- release directory 中的版本清单和校验和。
+- 发布或安装审计记录。
+
+### 关联设计
+
+- `docs/runtime/versioning.md`
+- `docs/runtime/cli-runtime.md`
+- `docs/runtime/problem-resolution-and-update.md`
+- `scripts/release.sh`
+- `scripts/init.sh`
+- `scripts/publish-release.sh`
 
 ## 5. PM-004 诊断问题并选择修复载体
 
@@ -222,6 +309,34 @@ agentic-cli policy validate --workspace <name>
 - 诊断输出不包含敏感原始内容。
 - 修复路径能说明是否需要版本发布、资产热更新、补卡或人工决策。
 
+### 保护行为
+
+- 不把所有问题默认升级为二进制修复。
+- 诊断包不得包含 secrets、tokens、private keys、原始 Jira 描述、原始敏感日志或敏感代码片段。
+- 问题分类不明确时必须先补事实，不能直接修改设计、契约或代码。
+- 涉及权限、事实源或自动化程度变化时必须提示用户决策。
+
+### 审核问题
+
+- 当前问题属于 CLI 逻辑、workflow profile、Jira 卡片属性、policy、release/update 中哪一类。
+- 诊断数据是否已脱敏。
+- 修复载体是否能解释为什么不是其它路径。
+- 修复后是否有对应回归入口。
+
+### 验收证据
+
+- `agentic-cli doctor --workspace <name>` 的结构化输出。
+- `agentic-cli feedback bundle --workspace <name> --run-id <run_id> --redact` 生成的脱敏包。
+- `bash tests/e2e/problem-resolution-flow.sh`
+- 失败码、问题分类和建议修复载体的输出记录。
+
+### 关联设计
+
+- `docs/runtime/problem-resolution-and-update.md`
+- `assets/runbooks/problem-resolution.md`
+- `docs/workflows/feedback-loop.md`
+- `docs/templates/evidence-templates.md`
+
 ## 6. PM-005 处理反馈并形成改进建议
 
 作为项目维护者，
@@ -272,6 +387,34 @@ agentic-cli feedback propose --workspace <name> --date 2026-07-23
 - 能按工作空间、时间范围、失败码或任务类型生成反馈报告。
 - 报告包含成功、失败、阻塞、人工确认点和重复问题。
 - 改进建议经过人工确认后才进入 AgenticOps 源头仓库。
+
+### 保护行为
+
+- 反馈报告是按需分析工具，不替代任务级审计记录。
+- 重复失败只能形成 proposal，不能自动修改 AgenticOps 源头规则。
+- 报告和建议不得包含 secrets 或敏感原始内容。
+- proposal 进入设计、计划或实现前必须经过人工确认。
+
+### 审核问题
+
+- 报告输入来自哪些事件日志、证据或任务审计记录。
+- 输出是否区分 observation、proposal 和 accepted change。
+- 是否把“按需分析”误写成每个任务完成后的强制日报。
+- 改进建议是否明确影响故事线、设计、契约、配置、策略或代码。
+
+### 验收证据
+
+- `agentic-cli feedback report --workspace <name> --date <date>` 输出。
+- `agentic-cli feedback analyze --workspace <name> --date <date>` 输出。
+- `agentic-cli feedback propose --workspace <name> --date <date>` 输出。
+- 人工确认 proposal 的记录。
+
+### 关联设计
+
+- `docs/workflows/feedback-loop.md`
+- `docs/runtime/problem-resolution-and-update.md`
+- `docs/templates/evidence-templates.md`
+- `docs/project-rules.md`
 
 ## 7. PM-006 治理发布权限、回滚和兼容性
 
@@ -326,3 +469,31 @@ agentic-cli update rollback
 - 更新、发布和回滚都有结构化审计记录。
 - 不兼容版本不会继续执行受影响的高风险操作。
 - latest-only 支持策略不会被误读为维护旧版本补丁线。
+
+### 保护行为
+
+- AgenticOps 使用 latest-only 支持策略，不维护旧版本补丁线。
+- 更新前必须校验版本清单和产物校验和。
+- 必要更新只能阻断受影响操作，不能无差别阻断所有工作。
+- 更新失败或新版本不可用时必须能回滚到上一个可用版本。
+
+### 审核问题
+
+- 当前版本和目标版本如何识别。
+- 哪些操作会被必要更新阻断，阻断理由是什么。
+- 回滚需要哪些本地记录和审计信息。
+- 跨版本兼容最低承诺是否已经由用户决策。
+
+### 验收证据
+
+- `agentic-cli update check` 输出。
+- `agentic-cli update apply` 输出。
+- `agentic-cli update rollback` 输出。
+- 发布、更新或回滚的结构化审计记录。
+
+### 关联设计
+
+- `docs/runtime/versioning.md`
+- `docs/runtime/problem-resolution-and-update.md`
+- `docs/architecture/full-design-implementation-design.md`
+- `docs/development-phase-rules.md`
