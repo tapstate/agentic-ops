@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-本文定义 AgenticOps 第一阶段 AgenticCLI 运行时的设计和当前实现边界。当前仓库已实现本地模拟流程；真实 Jira / GitHub 写操作、推送、创建拉取请求、合并和发布仍未接入。
+本文定义 AgenticOps AgenticCLI 运行时的终态设计和稳定运行边界。阶段性实现状态、当前实现边界和剩余工作维护在 `plans/` 中。
 
 AgenticCLI 的目标是给 AIAgent 提供稳定、结构化、可审计的操作入口，承载 AgenticOps 成熟经验沉淀后的原子操作，避免 AIAgent 直接面对 Jira / GitHub / Git 的底层事实和高风险动作。
 

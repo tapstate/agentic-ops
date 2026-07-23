@@ -1,5 +1,7 @@
 # AgenticOps 第一阶段实施计划
 
+> **状态：** 历史计划 / 已完成本地基线。本计划记录第一阶段本地模拟流程的约束和验收口径，不再限制当前设计或后续实现范围；当前推进状态、剩余工作和阶段性限制应维护在仍处于活跃状态的计划文件中。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 构建 AgenticOps 第一阶段最小可运行闭环，让研发负责人可以安装 Go CLI、初始化工作空间、初始化 AIAgent 能力、用 fake Jira 数据接管任务、写入 evidence，并生成每日反馈报告。

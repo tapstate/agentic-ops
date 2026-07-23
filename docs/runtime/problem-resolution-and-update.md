@@ -295,7 +295,7 @@ gates:
     required: true
 ```
 
-当前本地基线命令：
+策略操作命令：
 
 ```sh
 agentic-cli policy validate --workspace tapstate
@@ -303,7 +303,7 @@ agentic-cli policy update --workspace tapstate --source /path/to/default-policy.
 agentic-cli policy rollback --workspace tapstate
 ```
 
-当前实现会读取 `assets/policies/default.yaml`，校验策略名称、版本和 `write_jira_comment`、`transition_jira_status`、`git_commit`、`git_push`、`create_pr`、`scope_change` 六个关键门禁。`policy update` 会先校验来源文件，再写入 `.bak` 备份；`policy rollback` 会先校验备份，再恢复默认策略。
+策略校验必须覆盖策略名称、版本和 `write_jira_comment`、`transition_jira_status`、`git_commit`、`git_push`、`create_pr`、`scope_change` 六个关键门禁。`policy update` 必须先校验来源文件，再写入可回滚备份；`policy rollback` 必须先校验备份，再恢复默认策略。
 
 门禁调整规则：
 
@@ -370,22 +370,6 @@ asset release
 - 必要更新只阻断受影响操作，不应无差别阻断所有命令。
 - 所有修复进入任务级审计记录，并可通过按需反馈报告观察问题是否减少。
 
-## 13. 当前实现边界
+## 13. 阶段计划入口
 
-当前第一阶段本地模拟流程已支持：
-
-- `assets install`
-- `preflight`
-- `workspace init`
-- `agent init`
-- `list-tasks`
-- `takeover-task`
-- `resume-takeover`
-- `write-evidence`
-- `feedback report`
-- `scripts/version.sh`
-- `scripts/build.sh`
-- `scripts/release.sh`
-- `scripts/publish-release.sh`
-
-当前 `update check` / `update apply` 已完成本地清单基线、远程清单拉取、产物下载、校验和真实二进制切换。当前 `policy validate` / `policy update` / `policy rollback` 已完成本地文件基线，真实 Jira 字段写入、评论写入和工作流配置驱动 `transition` 写入已记录 `real_jira_write` 门禁审计事件；`doctor` 已支持显式 `--check-real-jira` 和 `--check-github` 外部检查。`scripts/publish-release.sh` 已支持使用 GitHub CLI 创建或更新 GitHub Release 并上传发布产物。剩余正式化重点是操作、工作流配置和资产的跨版本兼容治理和发布权限治理。
+阶段性实现状态、当前实现边界、剩余工作和验收命令只维护在 `plans/` 中。本文只保留问题修复与同步路径的稳定设计、门禁和运行边界。

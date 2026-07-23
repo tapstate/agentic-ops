@@ -1,6 +1,6 @@
 # AgenticOps 文档
 
-本文是 `docs/` 目录索引，用于帮助审阅当前设计、阶段状态和实施计划。README 只保留 AgenticOps 的终态定位和入口导航；阶段性成果、当前实现边界和剩余工作在本文档、运行时文档和 `plans/` 中维护。
+本文是 `docs/` 目录索引，用于帮助审阅 AgenticOps 的终态设计、规则、故事线和实施计划入口。README 只保留终态定位和入口导航；阶段性成果、当前实现边界和剩余工作只在 `plans/` 中维护。
 
 ## 核心文档
 
@@ -49,14 +49,8 @@
 
 - [AI 员工手册](../handbooks/ai-employee-handbook.md)
 
-## 当前状态
+## 阶段计划
 
-当前仓库已进入第一阶段本地实现，阶段性事实以源码、测试、命令输出和实施计划 checkbox 为准。不要把尚未有源码、测试或命令输出支撑的能力描述为已实现。
-
-阶段性实现边界见：
-
-- [项目研发期规则](development-phase-rules.md)
-- [问题修复与同步路径：当前实现边界](runtime/problem-resolution-and-update.md#13-当前实现边界)
 - [完整设计实现计划](../plans/full-design-implementation-plan-v1.md)
 - [第一阶段实施计划](../plans/implementation-plan-v1.md)
 - [正式使用前问题修复计划](../plans/problem-resolution-plan-v1.md)
@@ -74,4 +68,4 @@
 -> 验证命令
 ```
 
-计划文件可以记录阶段目标、checkbox、Implementation note 和当前剩余工作；README 不承担阶段性成果记录职责。
+计划文件可以记录阶段目标、checkbox、Implementation note、当前实现边界和当前剩余工作；README 不承担阶段性成果记录职责。

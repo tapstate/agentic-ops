@@ -126,4 +126,4 @@ tapdata/
 | `scripts/` | 安装、构建、发布和本地检查脚本。 |
 | `tests/` | 合同、脚本和端到端验证。 |
 
-阶段状态、验收记录和剩余工作由 [文档索引](docs/README.md)、[运行时问题修复路径](docs/runtime/problem-resolution-and-update.md) 和 [实施计划](plans/) 维护。
+阶段状态、验收记录和剩余工作只由 [实施计划](plans/) 维护。
