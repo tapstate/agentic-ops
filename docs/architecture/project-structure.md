@@ -42,6 +42,8 @@ agentic-ops/
       evidence-templates.md
     user-stories/
       agenticops-user-stories.md
+      project-maintainer-stories.md
+      development-lead-stories.md
     workflows/
       feedback-loop.md
     review-checklist.md
@@ -94,7 +96,7 @@ agentic-ops/
 
 | Directory | Responsibility |
 | --- | --- |
-| `docs/` | 架构、规则、用户故事、流程和设计说明。 |
+| `docs/` | 架构、规则、故事线、流程和设计说明。 |
 | `handbooks/` | AI 员工手册，面向 AIAgent 和研发负责人。 |
 | `assets/` | 安装后交付给研发负责人和 AIAgent 使用的运行资产源头。 |
 | `plans/` | 面向维护者和项目维护代理的可执行推进计划。 |

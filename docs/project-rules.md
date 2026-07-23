@@ -8,6 +8,8 @@
 
 - `docs/architecture/agenticops-current-design.md`
 - `docs/user-stories/agenticops-user-stories.md`
+- `docs/user-stories/project-maintainer-stories.md`
+- `docs/user-stories/development-lead-stories.md`
 - `docs/development-style.md`
 - `docs/ai-working-rules.md`
 - `docs/processes/standard-process-registry.md`
@@ -60,12 +62,13 @@ AgenticOps 文档必须按职责分层：
 
 - `README.md` 只承担终态定位、核心模型、角色入口和稳定目录导航，不记录阶段性成果清单。
 - `docs/architecture/` 定义稳定架构边界，包括流程环节、门禁、状态、容错、事实源、角色责任、安全边界、能力边界和标准资产演进机制。
+- `docs/user-stories/` 定义故事线，包括主角、目标、触发方式、关键输出、失败路径和验收口径；故事线不记录实施计划或当前完成度。
 - `docs/runtime/` 记录运行时设计、命令能力、当前实现边界、正式化缺口和操作说明。
 - `plans/` 基于稳定架构从大阶段拆到中任务和小步骤，用 checkbox 跟踪实施进度。
 - 阶段、任务、checkbox、验收命令、当前实现状态、剩余工作和 Implementation note 只能写入 `docs/README.md`、`docs/runtime/` 或 `plans/`，不得混入 README 主叙事或架构设计主叙事。
 - 设计文档发现缺口时，只能说明能力边界、风险和约束；如果缺口背后涉及产品、流程、权限或事实源取舍，必须明确标记为需要用户决策，不得伪装成默认计划或默认实现。
 
-做任何计划前，必须先确认其所依赖的架构文档已经存在且相对稳定。架构不清时，应先更新或补齐架构，再拆实施计划；不得直接用零散功能点堆砌计划。
+做任何计划前，必须先确认其所依赖的故事线和架构文档已经存在且相对稳定。故事线不清时，应先确定故事线；架构不清时，应先更新或补齐架构；不得直接用零散功能点堆砌计划。
 
 ## 4. 事实源
 
@@ -122,7 +125,7 @@ git@github.com:tapstate/agentic-ops.git
 该仓库管理全局通用资料：
 
 ```text
-docs/          架构、目标定位、用户故事、流程、计划
+docs/          架构、目标定位、故事线、流程、计划
 assets/        安装后交付给研发负责人和 AIAgent 使用的运行资产源头
 contracts/     操作契约和结构定义
 skills/        AgenticOps 技能和 AI 员工工作规则
@@ -458,7 +461,7 @@ Jira / GitHub 写操作必须可审计。任何写操作都必须关联 `operati
 - 设计审阅清单。
 - 设计决策记录。
 - 项目规则文档。
-- 用户故事文档。
+- 故事线文档。
 - 当前设计文档。
 - 项目开发风格文档。
 - AIAgent 防幻觉工作规则。
@@ -477,7 +480,7 @@ Jira / GitHub 写操作必须可审计。任何写操作都必须关联 `operati
 - 属性名、状态名、配置键、协议字段和错误码，例如 `run_id`、`current_agent_id`、`side_effects`、`missing_form_field`。
 - 命令、参数、文件路径、目录名和代码符号，例如 `agentic-cli workspace init`、`--jira-project`、`contracts/operations/`。
 - 产品名、平台名、组件名和行业通用稳定名词，例如 `AgenticOps`、`AIAgent`、`Jira`、`GitHub`、`CI`、`CLI`。
-- 用户故事、任务或契约的稳定编号，例如 `US-001`。
+- 故事线、任务或契约的稳定编号，例如 `PM-001`、`DL-001`。
 
 中文正文使用“研发负责人”“流程负责人”“代码审查人”等中文角色名。只有在字段名、配置项、协议字段、代码示例或模板占位符中，才保留 `owner`、`reviewer` 等英文标识。自然描述中的动作、职责、流程、证据、门禁、策略、模板、运行手册和反馈报告必须使用中文；例如描述动作时写“推送”“合并”“创建拉取请求”，只有引用命令时才写 `git push`、`git merge` 或 `gh pr create`。
 
@@ -490,6 +493,6 @@ AgenticOps 提交信息推荐格式为 `<type>(<scope>): <subject>`。`type` 和
 - AI 员工手册。
 - 操作契约。
 - CLI 命令说明。
-- 用户故事或验收标准。
+- 故事线或验收标准。
 - AIAgent 工作规则。
 - 项目开发风格。

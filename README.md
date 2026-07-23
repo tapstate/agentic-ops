@@ -69,7 +69,7 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 
 - [AI 员工手册](handbooks/ai-employee-handbook.md)
 - [端到端演示](docs/examples/end-to-end-demo.md)
-- [用户故事](docs/user-stories/agenticops-user-stories.md)
+- [故事线总览](docs/user-stories/agenticops-user-stories.md)
 - [问题修复与同步路径](docs/runtime/problem-resolution-and-update.md)
 
 ### AIAgent
@@ -116,7 +116,7 @@ tapdata/
 
 | 目录 | 用途 |
 | --- | --- |
-| `docs/` | 架构、规则、用户故事、流程和设计说明。 |
+| `docs/` | 架构、规则、故事线、流程和设计说明。 |
 | `handbooks/` | AI 员工手册，面向 AIAgent 和研发负责人。 |
 | `assets/` | 安装后交付给研发负责人和 AIAgent 使用的运行资产源头。 |
 | `contracts/` | 机器可读操作契约和标准流程定义。 |

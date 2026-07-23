@@ -28,7 +28,9 @@
 
 ## 产品流程
 
-- [用户故事](user-stories/agenticops-user-stories.md)
+- [故事线总览](user-stories/agenticops-user-stories.md)
+- [项目维护者故事](user-stories/project-maintainer-stories.md)
+- [研发负责人故事](user-stories/development-lead-stories.md)
 - [标准流程注册处](processes/standard-process-registry.md)
 - [反馈闭环](workflows/feedback-loop.md)
 - [端到端演示](examples/end-to-end-demo.md)
@@ -61,10 +63,11 @@
 
 ## 规划规则
 
-所有计划必须基于已确认并相对稳定的架构拆解。推荐顺序是：
+所有计划必须基于已确认的故事线和相对稳定的架构拆解。推荐顺序是：
 
 ```text
-架构边界
+故事线
+-> 架构边界
 -> 大阶段
 -> 中任务
 -> 小步骤

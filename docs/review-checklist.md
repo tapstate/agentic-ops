@@ -8,12 +8,14 @@
 2. [项目规则](project-rules.md)：确认项目资料、运行资料、人工门禁和安全约束。
 3. [当前设计](architecture/agenticops-current-design.md)：确认整体架构、运行边界和主流程。
 4. [项目结构](architecture/project-structure.md)：确认仓库目录、全局安装目录和项目 AI 工作空间边界。
-5. [用户故事](user-stories/agenticops-user-stories.md)：确认安装、初始化、任务接管、恢复接管、任务完成审计和按需反馈分析。
-6. [AI 员工手册](../handbooks/ai-employee-handbook.md)：确认 AIAgent 如何工作、何时停止、如何回写证据。
-7. [操作契约](contracts/operation-contract.md)：确认 AIAgent 能调用哪些受控操作，以及每个操作的输入、输出和副作用。
-8. [工作流配置](profiles/workflow-profile.md)：确认如何屏蔽 Jira 事实，并把具体项目流程映射成稳定配置。
-9. [CLI 运行时](runtime/cli-runtime.md)：确认第一阶段控制层采用 Go CLI 运行时，shell 只做安装引导，不做常驻服务或 Web 平台。
-10. [反馈闭环](workflows/feedback-loop.md)：确认工作日志如何沉淀为 AgenticOps 改进建议。
+5. [故事线总览](user-stories/agenticops-user-stories.md)：确认后续推进遵循“故事线 -> 设计 -> 计划 / 开发 -> 验收”。
+6. [项目维护者故事](user-stories/project-maintainer-stories.md)：确认源头仓库维护、标准资产治理、发布、诊断、反馈、回滚和兼容性故事。
+7. [研发负责人故事](user-stories/development-lead-stories.md)：确认安装、初始化、任务接管、恢复接管、任务完成审计和按需反馈分析。
+8. [AI 员工手册](../handbooks/ai-employee-handbook.md)：确认 AIAgent 如何工作、何时停止、如何回写证据。
+9. [操作契约](contracts/operation-contract.md)：确认 AIAgent 能调用哪些受控操作，以及每个操作的输入、输出和副作用。
+10. [工作流配置](profiles/workflow-profile.md)：确认如何屏蔽 Jira 事实，并把具体项目流程映射成稳定配置。
+11. [CLI 运行时](runtime/cli-runtime.md)：确认第一阶段控制层采用 Go CLI 运行时，shell 只做安装引导，不做常驻服务或 Web 平台。
+12. [反馈闭环](workflows/feedback-loop.md)：确认工作日志如何沉淀为 AgenticOps 改进建议。
 
 ## 2. 必须确认的设计项
 
@@ -36,7 +38,7 @@
 - 是否有 AIAgent 可以绕过研发负责人的人工确认点。
 - 是否有 Jira、GitHub、Git 或本地路径的事实被写死在通用规则中。
 - 是否有标题、术语或文件说明不利于试点研发理解。
-- 是否有用户故事缺少失败路径、输出证据或验收标准。
+- 是否有故事线缺少失败路径、输出证据或验收标准。
 - 是否有反馈闭环会导致规则自动自我修改。
 
 ## 4. 当前结构判断
@@ -53,7 +55,7 @@
 
 ## 5. 当前审阅后的下一步
 
-当前第一阶段本地模拟流程已有实现计划和代码。后续推进必须继续保持计划、文档、契约、测试和代码同步。
+当前第一阶段本地模拟流程已有实现计划和代码。后续推进必须先对齐故事线，再保持设计、计划、文档、契约、测试和代码同步。
 
 下一步计划必须先明确：
 

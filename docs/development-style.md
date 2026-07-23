@@ -11,7 +11,7 @@
 AgenticOps 开发必须遵守：
 
 - 架构先行：先确认并稳定架构边界，再基于架构拆解计划和实施任务。
-- 文档先行：先确认目标定位、项目规则、用户故事、操作契约、工作流配置和 AI 员工手册。
+- 文档先行：先确认目标定位、项目规则、故事线、操作契约、工作流配置和 AI 员工手册。
 - 计划分层：计划必须从大阶段拆到中任务和小步骤，每个步骤都有明确验证方式。
 - 小步交付：每次变更只解决一个明确设计问题。
 - 证据优先：做结论前先读取当前文件、命令输出或权威文档。
@@ -30,7 +30,7 @@ AgenticOps 开发必须遵守：
 - 阶段性状态、已完成事项和剩余工作写入 `docs/README.md`、`docs/runtime/` 或 `plans/`。
 - 规则文档使用明确的“必须 / 不得 / 应”。
 - 设计文档说明背景、边界和取舍。
-- 用户故事写清 trigger、preconditions、main flow、output、failure handling 和 acceptance criteria。
+- 故事线写清 trigger、preconditions、main flow、output、failure handling 和 acceptance criteria。
 - 示例使用脱敏、虚拟或安全内容。
 - 不写 secrets、tokens、private keys、原始敏感日志。
 
@@ -72,6 +72,8 @@ Go CLI 运行时的实现方向如下：
 - `docs/project-rules.md`
 - `docs/architecture/agenticops-current-design.md`
 - `docs/user-stories/agenticops-user-stories.md`
+- `docs/user-stories/project-maintainer-stories.md`
+- `docs/user-stories/development-lead-stories.md`
 - `handbooks/ai-employee-handbook.md`
 - `docs/contracts/operation-contract.md`
 - `docs/profiles/workflow-profile.md`
