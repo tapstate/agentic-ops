@@ -87,6 +87,7 @@ local:
   workspace_root: "<project-ai-workspace>"
   source_root: "<project-ai-workspace>/src"
   runs_dir: "<project-ai-workspace>/.agentic-ops/runs"
+  run_logs_dir: "<project-ai-workspace>/.agentic-ops/run-logs"
   feedback_dir: "<project-ai-workspace>/.agentic-ops/feedback"
 
 human_gates:

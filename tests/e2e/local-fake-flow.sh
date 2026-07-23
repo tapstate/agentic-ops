@@ -63,6 +63,7 @@ $cmd feedback bundle --workspace tapstate --run-id TAP-123-takeover-202607211030
 $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"runs":5'
 $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"blocked":1'
 test -f "$workspace_root/.agentic-ops/feedback/events.ndjson"
+test -d "$workspace_root/.agentic-ops/run-logs"
 test -f "$workspace_root/.agentic-ops/feedback/bundles/TAP-123-takeover-20260721103012-a8f3.md"
 test -f "$workspace_root/.agentic-ops/feedback/reports/2026-07-21.md"
 test -f "$install_root/assets/RES-v0.1.1-a68372d/manifest.json"

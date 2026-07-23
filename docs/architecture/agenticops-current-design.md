@@ -408,10 +408,13 @@ Go CLI 执行操作
 反馈通道只做分析和建议，不允许 AIAgent 根据日志自动修改 AgenticOps 源头规则。
 
 运行日志应放在具体项目 AI 工作空间，任务级审计记录应回写到 Jira 卡片、审计服务或目标仓库证据链：
+执行日志文件名使用 `JIRA_ID.AGENT.TIMESTAMP.log`，其中 `TIMESTAMP` 使用 `YYYYMMDDHHmmss`。
 
 ```text
 <project-ai-workspace>/
   .agentic-ops/
+    run-logs/
+      TAP-123.codex.20260721103012.log
     runs/
       2026-07-21/
         TAP-123-takeover-20260721103012-a8f3/

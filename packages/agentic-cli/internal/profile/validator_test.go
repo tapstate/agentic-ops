@@ -29,6 +29,7 @@ func TestValidateReportsMissingRequiredMappings(t *testing.T) {
 		"transition_mapping_gap",
 		"jira_transition_mapping_gap",
 		"missing_local_source_root",
+		"missing_local_run_logs_dir",
 		"workspace_repo_mapping_gap",
 	} {
 		if !hasIssue(issues, code) {

@@ -151,8 +151,13 @@ func TestWorkspaceInitOutputsNextAction(t *testing.T) {
 	assertJSONField(t, stdout.String(), "jira_user", "dev@example.com")
 	assertJSONField(t, stdout.String(), "jira_project", "TAP")
 	assertJSONField(t, stdout.String(), "next_action", "init_agent_capability")
-	if _, err := os.Stat(filepath.Join(root, ".agentic-ops", "runs")); err != nil {
-		t.Fatalf("workspace root was not used: %v", err)
+	for _, dir := range []string{"runs", "run-logs", "feedback"} {
+		if _, err := os.Stat(filepath.Join(root, ".agentic-ops", dir)); err != nil {
+			t.Fatalf("workspace dir %s was not created: %v", dir, err)
+		}
+	}
+	if !strings.Contains(stdout.String(), `"run_logs_dir":"`) {
+		t.Fatalf("stdout missing run_logs_dir: %s", stdout.String())
 	}
 }
 
@@ -962,7 +967,8 @@ func validCLIProfileYAML(workspace string, jiraProject string) string {
 		"  repositories:\n" +
 		"    default: tapstate/example-repo\n" +
 		"local:\n" +
-		"  source_root: /tmp/source\n"
+		"  source_root: /tmp/source\n" +
+		"  run_logs_dir: /tmp/.agentic-ops/run-logs\n"
 }
 
 func validCLIPolicyYAML(policyName string, requireJiraComment bool) string {

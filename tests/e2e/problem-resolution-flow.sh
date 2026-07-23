@@ -47,6 +47,7 @@ cp assets/policies/default.yaml "$policy_source"
 rm -f "$policy_backup"
 
 "${cmd[@]}" workspace init --workspace tapstate --jira-user dev@example.com --jira-project TAP | grep '"operation":"workspace_init"'
+test -d "$workspace_root/.agentic-ops/run-logs"
 set +e
 missing_repo_output="$("${cmd[@]}" takeover-task TAP-MISSING-REPO --workspace tapstate 2>/dev/null)"
 missing_repo_code="$?"

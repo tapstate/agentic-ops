@@ -54,5 +54,6 @@ export AGENTIC_OPS_WORKSPACE_ROOT="$workspace_root"
 
 test -f "$deploy_home/.agentic-ops/assets/$version/manifest.json"
 test -f "$deploy_home/.agentic-ops/current.json"
+test -d "$workspace_root/.agentic-ops/run-logs"
 test -f "$workspace_root/.agentic-ops/feedback/events.ndjson"
 test -f "$workspace_root/.agentic-ops/feedback/reports/2026-07-22.md"

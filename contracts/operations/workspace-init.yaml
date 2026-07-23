@@ -34,6 +34,8 @@ output:
     type: string
   runs_dir:
     type: string
+  run_logs_dir:
+    type: string
   feedback_dir:
     type: string
   next_action:

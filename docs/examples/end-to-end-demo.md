@@ -70,7 +70,7 @@ agentic-cli workspace init --workspace tapstate --jira-user dev@example.com --ji
 - `workspace init` 在项目 AI 工作空间目录内执行。
 - 工作空间绑定 Jira 用户和 Jira 空间。
 - 工作空间维护该 Jira 空间对应的一组 GitHub 仓库和本地源码目录。
-- 工作空间创建 `.agentic-ops/runs` 和 `.agentic-ops/feedback`。
+- 工作空间创建 `.agentic-ops/runs`、`.agentic-ops/run-logs` 和 `.agentic-ops/feedback`。
 
 ### 步骤 3：初始化 AIAgent
 

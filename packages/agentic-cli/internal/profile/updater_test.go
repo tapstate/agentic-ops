@@ -120,5 +120,6 @@ func validProfileYAML(workspace string, jiraProject string) string {
 		"  repositories:\n" +
 		"    default: tapstate/example-repo\n" +
 		"local:\n" +
-		"  source_root: /tmp/source\n"
+		"  source_root: /tmp/source\n" +
+		"  run_logs_dir: /tmp/.agentic-ops/run-logs\n"
 }

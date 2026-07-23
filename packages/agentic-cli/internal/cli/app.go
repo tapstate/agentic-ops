@@ -232,6 +232,7 @@ func runWorkspaceInit(args []string, stdout io.Writer) int {
 		"jira_project":   jiraProject,
 		"profile":        info.Name,
 		"runs_dir":       info.RunsDir,
+		"run_logs_dir":   info.RunLogsDir,
 		"feedback_dir":   info.FeedbackDir,
 		"next_action":    "init_agent_capability",
 	}))

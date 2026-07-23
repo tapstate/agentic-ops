@@ -15,7 +15,7 @@ func TestEnsureCreatesWorkspaceDirs(t *testing.T) {
 	if info.Name != "tapstate" {
 		t.Fatalf("Name = %s", info.Name)
 	}
-	for _, dir := range []string{info.RunsDir, info.FeedbackDir} {
+	for _, dir := range []string{info.RunsDir, info.RunLogsDir, info.FeedbackDir} {
 		stat, err := os.Stat(dir)
 		if err != nil {
 			t.Fatalf("missing dir %s: %v", dir, err)
@@ -26,6 +26,9 @@ func TestEnsureCreatesWorkspaceDirs(t *testing.T) {
 	}
 	if filepath.Base(filepath.Dir(info.RunsDir)) != ".agentic-ops" {
 		t.Fatalf("RunsDir = %s", info.RunsDir)
+	}
+	if filepath.Base(info.RunLogsDir) != "run-logs" {
+		t.Fatalf("RunLogsDir = %s", info.RunLogsDir)
 	}
 }
 

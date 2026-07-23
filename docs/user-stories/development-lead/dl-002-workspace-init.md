@@ -26,7 +26,7 @@ agentic-cli workspace init --workspace tapstate --jira-user dev@example.com --ji
 3. CLI 创建项目 AI 工作空间配置。
 4. CLI 引导研发负责人配置 Jira 用户、Jira 空间、JQL、`owner` 字段、状态映射和目标仓库映射。
 5. CLI 引导研发负责人配置 GitHub 组织、默认代码仓库、按 `component` / `label` / `issue_type` 的仓库映射和本地源码根目录。
-6. CLI 创建工作空间事件目录，例如 `<project-ai-workspace>/.agentic-ops/runs/`。
+6. CLI 创建工作空间事件和执行日志目录，例如 `<project-ai-workspace>/.agentic-ops/runs/`、`<project-ai-workspace>/.agentic-ops/run-logs/`。
 7. CLI 运行工作空间预检。
 
 ### 输出
@@ -41,6 +41,7 @@ agentic-cli workspace init --workspace tapstate --jira-user dev@example.com --ji
   "jira_project": "TAP",
   "profile": "tapstate",
   "runs_dir": "<project-ai-workspace>/.agentic-ops/runs",
+  "run_logs_dir": "<project-ai-workspace>/.agentic-ops/run-logs",
   "next_action": "init_agent_capability"
 }
 ```
@@ -78,7 +79,7 @@ agentic-cli workspace init --workspace tapstate --jira-user dev@example.com --ji
 
 - `agentic-cli workspace init --workspace <name> --jira-user <user> --jira-project <project>` 输出。
 - `agentic-cli preflight --workspace <name>` 输出。
-- 项目 AI 工作空间中的 `.agentic-ops/runs/` 和 `.agentic-ops/feedback/`。
+- 项目 AI 工作空间中的 `.agentic-ops/runs/`、`.agentic-ops/run-logs/` 和 `.agentic-ops/feedback/`。
 - workflow profile 中的 Jira / GitHub / 本地路径映射。
 
 ### 关联设计

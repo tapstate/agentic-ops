@@ -61,6 +61,7 @@ type LocalConfig struct {
 	WorkspaceRoot string `yaml:"workspace_root"`
 	SourceRoot    string `yaml:"source_root"`
 	RunsDir       string `yaml:"runs_dir"`
+	RunLogsDir    string `yaml:"run_logs_dir"`
 	FeedbackDir   string `yaml:"feedback_dir"`
 }
 
