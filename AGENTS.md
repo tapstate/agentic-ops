@@ -56,12 +56,14 @@ AgenticCLI 使用 Go 实现，统一入口为 `agentic-cli`。shell 只用于 `c
 
 ## 提交规则
 
-提交信息使用英文，推荐格式：
+提交信息推荐格式：
 
 ```text
 <type>(<scope>): <subject>
 ```
 
-常用类型：`Feat`、`Fix`、`Docs`、`Style`、`Refactor`、`Test`、`Chore`。
+`type` 和 `scope` 使用英文；`subject` 使用中文，简洁说明本次提交做了什么。常用类型：`Feat`、`Fix`、`Docs`、`Style`、`Refactor`、`Test`、`Chore`。
 
-每个提交只包含一个逻辑变更。非平凡提交需要在 commit body 中说明做了什么、解决什么问题以及为什么这样做。
+commit body / description 使用中文，说明做了什么、解决什么问题以及为什么这样做。
+
+每个提交只包含一个逻辑变更。非平凡提交必须包含中文 commit body / description。

@@ -481,6 +481,8 @@ Jira / GitHub 写操作必须可审计。任何写操作都必须关联 `operati
 
 Jira 交互中的人可见内容必须使用中文，包括标题、描述、评论、工作日志、证据正文、阻塞说明和补卡说明。Jira 字段名、状态名、`transition` 名称、卡片编号、命令、配置字段和协议字段可以保留原始英文或缩写。
 
+AgenticOps 提交信息推荐格式为 `<type>(<scope>): <subject>`。`type` 和 `scope` 使用英文；`subject` 使用中文，简洁说明本次提交做了什么。commit body / description 使用中文，说明做了什么、解决什么问题以及为什么这样做。非平凡提交必须包含中文 commit body / description。
+
 当规则变化影响 AIAgent 行为时，必须同步更新：
 
 - AI 员工手册。
