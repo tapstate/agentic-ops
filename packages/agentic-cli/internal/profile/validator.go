@@ -10,6 +10,9 @@ func Validate(p Profile) []ValidationIssue {
 	if p.Workspace == "" {
 		issues = append(issues, ValidationIssue{Code: "missing_workspace", Message: "workspace is required"})
 	}
+	if p.Jira.User == "" {
+		issues = append(issues, ValidationIssue{Code: "missing_jira_user", Message: "jira.user is required"})
+	}
 	if p.Jira.Project == "" {
 		issues = append(issues, ValidationIssue{Code: "missing_jira_project", Message: "jira.project is required"})
 	}
@@ -43,6 +46,9 @@ func Validate(p Profile) []ValidationIssue {
 	}
 	if p.Local.SourceRoot == "" {
 		issues = append(issues, ValidationIssue{Code: "missing_local_source_root", Message: "local.source_root is required"})
+	}
+	if p.GitHub.Repositories.Default == "" && len(p.GitHub.Repositories.ByComponent) == 0 && len(p.GitHub.Repositories.ByLabel) == 0 && len(p.GitHub.Repositories.ByIssueType) == 0 {
+		issues = append(issues, ValidationIssue{Code: "workspace_repo_mapping_gap", Message: "github.repositories mapping is required"})
 	}
 	return issues
 }

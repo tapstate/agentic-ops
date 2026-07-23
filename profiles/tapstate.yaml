@@ -1,6 +1,7 @@
 workspace: tapstate
 
 jira:
+  user: dev@example.com
   project: TAP
   task_query: "assignee = currentUser() AND status in (\"To Do\", \"In Progress\")"
 
@@ -76,8 +77,14 @@ github:
   organization: tapstate
   repositories:
     default: tapstate/example-repo
+    by_component:
+      api: tapstate/tap-api
+      web: tapstate/tap-web
+    by_label:
+      cli: tapstate/agentic-ops
 
 local:
+  workspace_root: "<project-ai-workspace>"
   source_root: "<project-ai-workspace>/src"
   runs_dir: "<project-ai-workspace>/.agentic-ops/runs"
   feedback_dir: "<project-ai-workspace>/.agentic-ops/feedback"

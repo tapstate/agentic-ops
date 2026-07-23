@@ -1,6 +1,6 @@
 operation: takeover_task
 version: 1
-purpose: 研发 owner 授权 AIAgent 接管一个已进入迭代的任务。
+purpose: 研发负责人授权 AIAgent 接管一个已进入迭代的任务。
 task_type: task_takeover
 allowed_stages:
   - waiting_takeover

@@ -19,6 +19,7 @@ func TestValidateReportsMissingRequiredMappings(t *testing.T) {
 	issues := Validate(Profile{})
 	for _, code := range []string{
 		"missing_workspace",
+		"missing_jira_user",
 		"missing_jira_project",
 		"missing_task_query",
 		"missing_form_mapping",
@@ -28,6 +29,7 @@ func TestValidateReportsMissingRequiredMappings(t *testing.T) {
 		"transition_mapping_gap",
 		"jira_transition_mapping_gap",
 		"missing_local_source_root",
+		"workspace_repo_mapping_gap",
 	} {
 		if !hasIssue(issues, code) {
 			t.Fatalf("missing validation issue %s in %#v", code, issues)
@@ -39,6 +41,7 @@ func TestValidateReportsMissingJiraTransitionMappingForStandardTransition(t *tes
 	p := Profile{
 		Workspace: "tapstate",
 		Jira: JiraConfig{
+			User:      "dev@example.com",
 			Project:   "TAP",
 			TaskQuery: "project = TAP",
 		},
@@ -51,6 +54,7 @@ func TestValidateReportsMissingJiraTransitionMappingForStandardTransition(t *tes
 		StandardProcessMapping: map[string]string{"technical_task": "development_change_v1"},
 		StatusMapping:          map[string]string{"Done": "completed"},
 		TransitionMapping:      map[string]string{"complete": "completed"},
+		GitHub:                 GitHubConfig{Repositories: RepositoryMapping{Default: "tapstate/example-repo"}},
 		Local:                  LocalConfig{SourceRoot: "/tmp/src"},
 	}
 

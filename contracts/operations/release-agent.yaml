@@ -1,6 +1,6 @@
 operation: release_agent
 version: 1
-purpose: 完成或明确交接后释放当前 AIAgent 绑定，并记录 current_agent_id 清理事件。
+purpose: 完成或明确交接后释放当前 AIAgent 绑定，记录 `current_agent_id` 清理事件，并确认任务级审计记录已经提交或可追溯。
 task_type: task_takeover
 allowed_stages:
   - completed
@@ -32,6 +32,7 @@ preconditions:
   - current_user_must_match_owner
   - current_agent_id_must_match_agent_id
   - completion_evidence_must_exist
+  - task_audit_evidence_must_be_submitted_or_referenced
 output:
   workspace:
     type: string
@@ -75,11 +76,12 @@ side_effects:
   - may_write_jira_field
   - may_transition_jira_issue
   - may_write_local_event
+  - may_confirm_task_audit_submission
   - must_not_modify_code
   - must_not_create_pr
 human_gate:
   required: true
-  reason: 清理 current_agent_id 代表完成或交接结束，必须由研发 owner 确认完成证据。
+  reason: 清理 `current_agent_id` 代表完成或交接结束，必须由研发负责人确认完成证据。
 retry_policy:
   retryable: true
   max_attempts: 1

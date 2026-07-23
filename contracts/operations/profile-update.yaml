@@ -1,6 +1,6 @@
 operation: profile_update
 version: 1
-purpose: 使用经过校验的本地 source profile 更新当前 workspace 的 Workflow Profile，并在更新前保存可回滚备份。
+purpose: 使用经过校验的本地源工作流配置更新当前工作空间的工作流配置，并在更新前保存可回滚备份。
 task_type: profile_update
 allowed_stages:
   - profile_update_required
@@ -45,7 +45,7 @@ side_effects:
   - must_not_modify_business_repo
 human_gate:
   required: true
-  reason: Profile 更新会改变 workspace 流程映射，执行前需要维护者确认 source profile。
+  reason: 工作流配置更新会改变工作空间流程映射，执行前需要维护者确认源工作流配置。
 retry_policy:
   retryable: true
   max_attempts: 1

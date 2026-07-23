@@ -23,8 +23,8 @@ func TestSummarizeCountsRuns(t *testing.T) {
 	}
 }
 
-func TestWriteMarkdownCreatesDailyReport(t *testing.T) {
-	path := t.TempDir() + "/daily/2026-07-21.md"
+func TestWriteMarkdownCreatesFeedbackReport(t *testing.T) {
+	path := t.TempDir() + "/reports/2026-07-21.md"
 	report := Report{Runs: 2, Succeeded: 1, Blocked: 1, MissingFields: map[string]int{"target_repo": 1}}
 	if err := WriteMarkdown(path, "tapstate", "2026-07-21", report); err != nil {
 		t.Fatalf("WriteMarkdown error = %v", err)

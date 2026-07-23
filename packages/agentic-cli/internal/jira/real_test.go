@@ -89,13 +89,13 @@ func TestRealClientAddCommentUsesADFBody(t *testing.T) {
 			t.Fatalf("Decode body error = %v", err)
 		}
 		raw, _ := json.Marshal(body["body"])
-		if !strings.Contains(string(raw), "请研发 owner 确认") {
+		if !strings.Contains(string(raw), "请研发负责人确认") {
 			t.Fatalf("comment body = %s", string(raw))
 		}
 		return jsonResponse(http.StatusCreated, `{"id":"10000"}`)
 	})
 
-	if err := client.AddComment(context.Background(), "TAP-123", "请研发 owner 确认"); err != nil {
+	if err := client.AddComment(context.Background(), "TAP-123", "请研发负责人确认"); err != nil {
 		t.Fatalf("AddComment error = %v", err)
 	}
 }

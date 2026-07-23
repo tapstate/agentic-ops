@@ -2,9 +2,9 @@
 
 ## 1. 目的
 
-本文定义 AgenticOps 第一阶段 AgenticCLI 运行时 的设计和当前实现边界。当前仓库已实现本地 fake flow；真实 Jira / GitHub 写操作、push、PR、merge 和发布仍未接入。
+本文定义 AgenticOps 第一阶段 AgenticCLI 运行时的设计和当前实现边界。当前仓库已实现本地模拟流程；真实 Jira / GitHub 写操作、推送、创建拉取请求、合并和发布仍未接入。
 
-AgenticCLI 的目标是给 AIAgent 提供稳定、结构化、可审计的操作入口，承载 AgenticOps 成熟经验沉淀后的原子 operation，避免 AIAgent 直接面对 Jira / GitHub / Git 的底层事实和高风险动作。
+AgenticCLI 的目标是给 AIAgent 提供稳定、结构化、可审计的操作入口，承载 AgenticOps 成熟经验沉淀后的原子操作，避免 AIAgent 直接面对 Jira / GitHub / Git 的底层事实和高风险动作。
 
 ## 2. 运行时形态
 
@@ -28,10 +28,10 @@ packages/agentic-cli/
 
 第一阶段采用：
 
-- shell bootstrap：只负责 `curl | bash` 安装引导。
-- Go CLI：承载 operation、policy、adapter、事件日志、反馈分析和结构化输出。
+- shell 安装引导：只负责 `curl | bash` 安装引导。
+- Go CLI：承载操作、策略、适配器、事件日志、反馈分析和结构化输出。
 
-AgenticCLI operation 是成熟固化交互逻辑的原子化入口。只有输入输出稳定、失败码明确、边界可审计、可以安全重试或恢复的交互逻辑，才应沉淀为 operation。脚本入口只做受控编排或调用，不承载业务判断。仍在探索的流程判断先保留在 framework、runbook、profile、policy 和 feedback proposal 中，经过复盘和人工确认后再固化。
+AgenticCLI 操作是成熟固化交互逻辑的原子化入口。只有输入输出稳定、失败码明确、边界可审计、可以安全重试或恢复的交互逻辑，才应沉淀为操作。脚本入口只做受控编排或调用，不承载业务判断。仍在探索的流程判断先保留在框架、运行手册、工作流配置、策略和反馈建议中，经过复盘和人工确认后再固化。
 
 ## 3. 目标目录
 
@@ -53,7 +53,7 @@ packages/agentic-cli/
   testdata/
 ```
 
-以上是目标结构。当前已实现 `cli`、`config`、`contract`、`evidence`、`feedback`、`jira`、`output`、`policy` 和 `workspace` 的本地 fake flow；`git`、`github` 等真实集成目录仍属于后续阶段。
+以上是目标结构。当前已实现 `cli`、`config`、`contract`、`evidence`、`feedback`、`jira`、`output`、`policy` 和 `workspace` 的本地模拟流程；`git`、`github` 等真实集成目录仍属于后续阶段。
 
 操作契约的机器可读源头在仓库顶层 `contracts/operations/`。Go CLI 可以在构建或运行时读取这些契约，但不在 package 内维护第二份契约源头。
 
@@ -92,7 +92,7 @@ CLI 必须遵守：
 - stderr 输出人类诊断日志。
 - 所有失败返回稳定 `code`。
 - 退出码有固定语义。
-- 写操作必须检查 policy、gate 和 confirmation。
+- 写操作必须检查策略、门禁和人工确认。
 - secrets 不允许出现在 stdout、stderr 或事件日志中。
 
 示例输出：
@@ -102,25 +102,25 @@ CLI 必须遵守：
   "ok": false,
   "operation": "takeover_task",
   "code": "missing_target_repo",
-  "message": "Jira issue 缺少目标仓库信息",
-  "required_human_action": "请补充 target_repo 或 workspace repo 映射"
+  "message": "Jira 卡片缺少目标仓库信息",
+  "required_human_action": "请补充 target_repo 或 工作空间代码仓库 映射"
 }
 ```
 
 ## 6. 受控操作
 
-以下动作必须由 CLI guard 管控：
+以下动作必须由 CLI 防护管控：
 
 - Jira 写评论。
 - Jira 状态推进。
-- Git commit。
-- Git push。
-- Git merge。
-- Git rebase。
-- Git clean。
-- GitHub PR 创建。
-- GitHub PR 更新。
-- PR comments 修复后的重新提交。
+- Git 提交。
+- Git 推送。
+- Git 合并。
+- Git 变基。
+- Git 清理。
+- GitHub 拉取请求创建。
+- GitHub 拉取请求更新。
+- 拉取请求审查意见修复后的重新提交。
 
 ## 7. 预检
 
@@ -133,7 +133,7 @@ CLI 必须遵守：
 - GitHub 登录状态。
 - Jira 凭证配置。
 - 工作流配置完整性。
-- 当前业务仓库与 workspace 是否匹配。
+- 当前业务仓库与工作空间是否匹配。
 
 ## 8. 发布与修复
 
@@ -169,21 +169,21 @@ shell 不允许承载：
 - Jira / GitHub / Git 业务操作。
 - 操作契约解析。
 - 工作流配置校验。
-- Policy 和 human gate 判断。
-- Evidence 生成。
-- Feedback 分析。
+- 策略和人工门禁判断。
+- 证据生成。
+- 反馈分析。
 
 ## 10. 原子操作成熟度
 
-新增或调整 CLI operation 前，必须判断它是否已经足够成熟。
+新增或调整 CLI 操作前，必须判断它是否已经足够成熟。
 
-成熟 operation 应满足：
+成熟操作应满足：
 
 - 只完成一个清晰动作。
 - 输入、输出、失败码和副作用稳定。
-- 能通过 policy / gate 拒绝高风险动作。
-- 能写入结构化事件日志和 evidence。
+- 能通过策略和门禁拒绝高风险动作。
+- 能写入结构化事件日志和证据。
 - 失败后能说明是否重试、重做或转人工。
-- 能被单元测试、contract 检查或 e2e fake flow 验证。
+- 能被单元测试、契约检查或端到端模拟流程验证。
 
-不成熟逻辑不得直接写成脚本或 CLI 命令。它应先进入 runbook、工作流配置、policy 草案或 feedback proposal，由 AIAgent 在具体任务中执行并沉淀经验；当重复出现且边界清晰后，再升级为原子 operation。脚本只能用于安装引导、构建发布、轻量检测或调用受控 operation。
+不成熟逻辑不得直接写成脚本或 CLI 命令。它应先进入运行手册、工作流配置、策略草案或反馈建议，由 AIAgent 在具体任务中执行并沉淀经验；当重复出现且边界清晰后，再升级为原子操作。脚本只能用于安装引导、构建发布、轻量检测或调用受控操作。

@@ -40,7 +40,7 @@ func TestFailureIncludesStableCode(t *testing.T) {
 func TestFailureWithContextIncludesTaskProgress(t *testing.T) {
 	got := FailureWithContext("takeover_task", FailureContext{
 		Code:                "missing_jira_field",
-		Message:             "Jira issue 缺少目标仓库信息",
+		Message:             "Jira 卡片缺少目标仓库信息",
 		RequiredHumanAction: "请补充目标仓库",
 		TaskType:            "task_takeover",
 		CurrentStage:        "takeover_gate",

@@ -6,7 +6,7 @@
 
 研发日常使用的是安装后的 `agentic-cli`、AI 员工手册、操作契约、工作流配置、策略、运行手册和模板。项目出现问题时，AgenticOps 必须能快速判断问题类型，选择正确修复载体，完成验证、发布、同步和回滚。
 
-当前仓库已实现本地资产安装、本地 release 打包、GitHub Release 发布脚本、操作契约校验、profile validate / update / rollback、policy validate / update / rollback、profile 驱动 Jira transition id/name 映射、远程 release manifest / artifact 下载校验、真实二进制切换、doctor 显式真实外部检查、真实 Jira REST client 合同测试基线，以及真实 Jira 字段、comment 和 transition 写入 gate/confirmation。本文是正式使用前的目标设计和验收基线。
+当前仓库已实现本地资产安装、本地发布打包、GitHub Release 发布脚本、操作契约校验、`profile validate / update / rollback`、`policy validate / update / rollback`、工作流配置驱动 Jira `transition` 标识映射、远程发布清单和产物下载校验、真实二进制切换、`doctor` 显式真实外部检查、真实 Jira REST 客户端合同测试基线，以及真实 Jira 字段、评论和 `transition` 写入门禁与人工确认。本文是正式使用前的目标设计和验收基线。
 
 ## 2. 架构适配性评估
 
@@ -14,29 +14,29 @@
 
 | 架构部分 | 当前状态 | 适配性判断 | 必须补齐的能力 |
 | --- | --- | --- | --- |
-| Go CLI 运行时 | 已有 `agentic-cli` 本地 fake flow、真实 Jira REST client 合同测试基线、profile 驱动 transition 映射、真实二进制切换和 doctor 显式外部检查 | 适合承载强制检查、结构化输出、诊断、更新和回滚 | operation 兼容性版本治理 |
-| 操作契约 | 已有机器可读 YAML 和 `contract validate` 基线 | 适合沉淀标准操作输入输出和失败码 | operation 兼容性版本、跨版本迁移规则 |
-| 工作流配置 | 已有默认 profile、`profile validate / update / rollback` 基线 | 适合处理不同团队和 Jira workflow 差异 | 真实 Jira status / transition gate、资产包来源、profile 版本审计 |
-| Policy / Gate | 已有 policy validate / update / rollback 本地基线 | 适合控制关键步骤门禁 | 真实写操作 gate 变更审计和 confirmation |
-| Evidence / Feedback | 已有本地 evidence 和 feedback report | 适合发现重复问题并推动规范优化 | feedback bundle、问题分类统计、修复效果追踪 |
-| Release / Install | 已有 bootstrap stub、本地资产安装、本地 build / release / publish 脚本、远程 manifest / artifact 下载校验和真实二进制切换 | 适合快速分发 | profile 驱动 assets 来源治理、发布权限治理 |
-| 项目资料边界 | 已明确 `~/.agentic-ops` 和项目 AI 工作空间边界 | 适合隔离全局工具资产和任务运行产物 | assets 版本目录、workspace 覆盖配置、敏感信息检查 |
+| Go CLI 运行时 | 已有 `agentic-cli` 本地模拟流程、真实 Jira REST 客户端合同测试基线、工作流配置驱动 `transition` 映射、真实二进制切换和 `doctor` 显式外部检查 | 适合承载强制检查、结构化输出、诊断、更新和回滚 | 操作兼容性版本治理 |
+| 操作契约 | 已有机器可读 YAML 和 `contract validate` 基线 | 适合沉淀标准操作输入输出和失败码 | 操作兼容性版本、跨版本迁移规则 |
+| 工作流配置 | 已有默认工作流配置、`profile validate / update / rollback` 基线 | 适合处理不同团队和 Jira 工作流差异 | 真实 Jira `status` / `transition` 门禁、资产包来源、工作流配置版本审计 |
+| 策略 / 门禁 | 已有 `policy validate / update / rollback` 本地基线 | 适合控制关键步骤门禁 | 真实写操作门禁变更审计和人工确认 |
+| 证据 / 反馈 | 已有本地证据、反馈诊断包和按需反馈报告 | 适合提交任务审计、发现重复问题并推动规范优化 | 任务级审计提交、问题分类统计、修复效果追踪 |
+| 发布 / 安装 | 已有安装引导桩、本地资产安装、本地构建 / 发布 / 发布脚本、远程清单 / 产物下载校验和真实二进制切换 | 适合快速分发 | 工作流配置驱动资产来源治理、发布权限治理 |
+| 项目资料边界 | 已明确 `~/.agentic-ops` 和项目 AI 工作空间边界 | 适合隔离全局工具资产和任务运行产物 | 资产版本目录、工作空间覆盖配置、敏感信息检查 |
 
 结论：
 
 - 当前架构方向适配“渐进形成公司标准流程”和“快速修复上线”两个目标。
-- 最大缺口不在目录结构，而在正式使用前缺少远程版本化资产、自更新、真实外部诊断检查、真实 Jira 写入 gate/confirmation 和更完整的 profile 版本审计。
-- 修复能力应优先作为 `agentic-cli` 的一组受控 operation 实现，而不是分散在 shell 脚本、人工说明或提示词中。
+- 最大缺口不在目录结构，而在正式使用前缺少远程版本化资产、自更新、真实外部诊断检查、真实 Jira 写入门禁与人工确认，以及更完整的工作流配置版本审计。
+- 修复能力应优先作为 `agentic-cli` 的一组受控操作实现，而不是分散在 shell 脚本、人工说明或提示词中。
 
 ## 3. 设计目标
 
 持续快速优化能力必须做到：
 
 - 发现问题时，研发能用一条命令生成脱敏诊断信息。
-- 维护者能按问题类型判断应该修 Go 代码、profile、policy、template 还是 Jira 卡片数据。
+- 维护者能按问题类型判断应该修 Go 代码、工作流配置、策略、模板还是 Jira 卡片数据。
 - 修复后能快速发布二进制或资产包。
 - 研发侧能快速同步更新，并在异常时回滚。
-- 所有修复动作能进入 feedback report，用于判断问题是否减少。
+- 所有修复动作能进入任务级审计记录，并可被按需反馈报告分析，用于判断问题是否减少。
 - 所有能力以 `agentic-ops` 当前项目为权威维护；历史 `rd-agentic` / `td-agentic` 后缀项目只作为参考来源，不作为当前设计、计划或目标的事实源。
 
 ## 4. 总体流程
@@ -45,7 +45,7 @@
 
 ```text
 发现问题
--> 记录 operation / workspace / version / error_code
+-> 记录操作 / 工作空间 / 版本 / 错误码
 -> 生成脱敏诊断信息
 -> 判断问题类型
 -> 选择修复载体
@@ -53,28 +53,28 @@
 -> 发布二进制或资产包
 -> 研发侧同步更新
 -> 必要时回滚
--> feedback report 观察问题是否减少
+-> 按需反馈报告观察问题是否减少
 ```
 
 修复路径必须遵守：
 
 - 不把 secrets、tokens、private keys、原始 Jira 描述、敏感代码片段写入诊断包。
-- 不让 AIAgent 猜 Jira 字段、状态或 workflow。
-- 不让 AIAgent 未经人工确认自动修改全局规范、profile 或 policy。
+- 不让 AIAgent 猜 Jira 字段、状态或工作流。
+- 不让 AIAgent 未经人工确认自动修改全局规范、工作流配置或策略。
 - 不把标准资产不完善的问题误判为 `agentic-cli` 二进制问题。
-- 不把所有问题都升级成二进制发布；能通过 profile / policy / template 修复的问题优先走资产包。
+- 不把所有问题都升级成二进制发布；能通过工作流配置、策略或模板修复的问题优先走资产包。
 - 不维护旧版本补丁线；BUG 只在最新版本修复，有新版本时推荐自动更新应用。
-- 任何放宽门禁、真实 Jira 写操作、Git push、PR、merge 和发布都必须可审计、可回滚。
+- 任何放宽门禁、真实 Jira 写操作、Git 推送、创建拉取请求、合并和发布都必须可审计、可回滚。
 
 ## 5. 问题分类
 
 | 问题类型 | 典型表现 | 修复载体 | 同步方式 |
 | --- | --- | --- | --- |
-| `agentic-cli` 逻辑错误 | 命令输出错误、run_id 生成错误、事件写入错误、adapter 行为错误 | Go CLI 二进制 | 发布最新版本 + `update apply` |
-| Jira 流程状态没适配 | 未知 Jira status / transition、状态映射失败、项目 workflow 差异 | 工作流配置 / adapter mapping | asset update + `profile update` |
-| Jira 卡片属性丢失 | 缺少负责人、验收标准、目标仓库、验证方式、风险等级 | gate failure + 补全模板 / field mapping | 阻断接管 + 人工补卡或 profile 修复 |
-| 关键步骤门禁调整 | push / PR / Jira comment / scope change 的确认要求变化 | policy package | policy update + review + rollback |
-| 标准提示或处理步骤不完整 | AIAgent 不知道如何处理某类已知问题、说明不清、转人工条件不明确 | handbook / runbook / template | asset update + 人工 review |
+| `agentic-cli` 逻辑错误 | 命令输出错误、`run_id` 生成错误、事件写入错误、`adapter` 行为错误 | Go CLI 二进制 | 发布最新版本 + `update apply` |
+| Jira 流程状态没适配 | 未知 Jira `status` / `transition`、状态映射失败、项目工作流差异 | 工作流配置 / 适配器映射 | `asset update` + `profile update` |
+| Jira 卡片属性丢失 | 缺少负责人、验收标准、目标仓库、验证方式、风险等级 | 门禁失败 + 补全模板 / 字段映射 | 阻断接管 + 人工补卡或工作流配置修复 |
+| 关键步骤门禁调整 | 推送 / 创建拉取请求 / Jira 评论 / 范围变更的确认要求变化 | 策略包 | `policy update` + 审查 + 回滚 |
+| 标准提示或处理步骤不完整 | AIAgent 不知道如何处理某类已知问题、说明不清、转人工条件不明确 | 手册 / 运行手册 / 模板 | `asset update` + 人工审查 |
 
 ## 6. 通用诊断数据
 
@@ -92,7 +92,7 @@
   "next_action": "ask_owner",
   "ok": false,
   "code": "missing_target_repo",
-  "required_human_action": "请补充 target_repo 或维护 workspace repo 映射"
+  "required_human_action": "请补充 target_repo 或维护工作空间代码仓库映射"
 }
 ```
 
@@ -103,12 +103,12 @@ agentic-cli doctor --workspace tapstate
 agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
 ```
 
-`doctor` 用于判断安装、版本、profile、policy、Jira / GitHub 凭证和 workspace 是否一致。  
+`doctor` 用于判断安装、版本、工作流配置、策略、Jira / GitHub 凭证和工作空间是否一致。
 `feedback bundle --redact` 用于给维护者提供脱敏诊断包。
 
 ### 当前错误与事件基线
 
-当前本地 fake flow 已实现以下基线能力：
+当前本地模拟流程已实现以下基线能力：
 
 - 失败输出固定包含 `ok`、`operation`、`code`、`message`、`required_human_action`、`task_type`、`current_stage` 和 `next_action`。
 - 事件日志固定支持 `agentic_cli_version`、`version_state`、`asset_version`、`operation`、`task_type`、`current_stage`、`next_action`、`code`、`gate` 和 `gate_status`。
@@ -120,9 +120,9 @@ agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
 | 问题类型 | 稳定错误码 | 当前状态 |
 | --- | --- | --- |
 | `agentic-cli` 逻辑错误 | `agentic_cli_logic_error` | `doctor`、doctor 显式真实外部检查和 `feedback bundle --redact` 诊断基线已落地。 |
-| Jira 流程状态没适配 | `unknown_jira_status` | `profile validate / update / rollback`、真实 Jira REST 读取映射基线、显式 `--jira-transition-id` transition gate 和 profile 驱动 transition id/name 映射已落地。 |
-| Jira 卡片属性丢失 | `missing_jira_field` | fake Jira 接管 gate 已覆盖必填字段阻断；真实 Jira 字段读取映射基线、补全模板输出和 feedback report 缺失字段聚合已落地。 |
-| 关键步骤门禁调整 | `policy_gate_required` | `policy validate / update / rollback` 本地基线已落地；真实 Jira 字段写入、Jira comment 写入和显式 transition 写入已要求 `--confirm-real-jira-write`，并记录 `real_jira_write` gate 审计事件。 |
+| Jira 流程状态没适配 | `unknown_jira_status` | `profile validate / update / rollback`、真实 Jira REST 读取映射基线、显式 `--jira-transition-id` 门禁和工作流配置驱动 `transition` 标识映射已落地。 |
+| Jira 卡片属性丢失 | `missing_jira_field` | 模拟 Jira 接管门禁已覆盖必填字段阻断；真实 Jira 字段读取映射基线、补全模板输出和反馈报告缺失字段聚合已落地。 |
+| 关键步骤门禁调整 | `policy_gate_required` | `policy validate / update / rollback` 本地基线已落地；真实 Jira 字段写入、Jira 评论写入和显式 `transition` 写入已要求 `--confirm-real-jira-write`，并记录 `real_jira_write` 门禁审计事件。 |
 
 ## 7. 修复路径一：CLI 逻辑错误
 
@@ -131,8 +131,8 @@ agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
 - `agentic-cli` 命令逻辑错误。
 - JSON 输出字段错误。
 - 事件日志写入错误。
-- evidence / feedback 生成错误。
-- fake / real adapter 行为与 contract 不一致。
+- 证据或反馈生成错误。
+- 模拟或真实适配器行为与契约不一致。
 
 处理流程：
 
@@ -143,7 +143,7 @@ agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
 -> 修复 Go 代码
 -> go test ./...
 -> contract test
--> local fake flow e2e
+-> 本地模拟流程端到端测试
 -> 构建多平台二进制
 -> 发布新的 latest release
 -> 更新 release manifest
@@ -163,7 +163,7 @@ AgenticOps 不支持为旧版本单独做 BUG 修复。修复完成后只发布�
 
 ```yaml
 severity: required
-reason: takeover_task may write invalid evidence
+reason: takeover_task 可能写入无效证据
 blocked_operations:
   - takeover_task
   - write_evidence
@@ -177,7 +177,7 @@ blocked_operations:
 
 - Jira status 名称变更。
 - 项目新增或调整 transition。
-- 不同 workspace 的 Jira workflow 不一致。
+- 不同工作空间的 Jira 工作流不一致。
 - AIAgent 看到未知状态，无法判断下一步。
 
 这类问题优先修复 工作流配置，不优先发布二进制。
@@ -233,22 +233,22 @@ agentic-cli profile rollback --workspace tapstate
   "ok": false,
   "operation": "takeover_task",
   "code": "missing_target_repo",
-  "message": "Jira issue 缺少目标仓库信息",
-  "required_human_action": "请在 Jira 卡片补充目标仓库，或维护 workspace repo 映射",
+  "message": "Jira 卡片缺少目标仓库信息",
+  "required_human_action": "请在 Jira 卡片补充目标仓库，或维护工作空间代码仓库映射",
   "missing_field": "target_repo",
-  "completion_template": "# Jira 卡片信息缺失\n\nAgenticOps 无法继续接管该任务，因为 Jira 卡片缺少必要信息。\n\n- 缺失字段：`target_repo`\n- 当前 operation：`takeover_task`\n- 建议动作：请补充该字段，或维护 工作流配置中的字段映射。\n"
+  "completion_template": "# Jira 卡片信息缺失\n\nAgenticOps 无法继续接管该任务，因为 Jira 卡片缺少必要信息。\n\n- 缺失字段：`target_repo`\n- 当前操作：`takeover_task`\n- 建议动作：请补充该字段，或维护工作流配置中的字段映射。\n"
 }
 ```
 
 处理流程：
 
 ```text
-gate 发现必填属性缺失
+门禁发现必填属性缺失
 -> 停止接管
 -> 生成 required_human_action
 -> 输出 Jira comment 补全模板
 -> 记录 missing_field 事件
--> feedback report 聚合缺失字段
+-> 按需反馈报告聚合缺失字段
 -> 提出 Jira 创建模板或字段校验改进建议
 ```
 
@@ -268,12 +268,12 @@ field_mapping:
 
 适用场景：
 
-- 是否允许写 Jira comment。
+- 是否允许写 Jira `comment`。
 - 是否允许推进 Jira 状态。
-- 是否允许创建 commit。
-- 是否允许 push。
+- 是否允许创建 `commit`。
+- 是否允许推送。
 - 是否允许创建或更新 PR。
-- scope change、风险扩大、发布动作是否必须人工确认。
+- `scope change`、风险扩大、发布动作是否必须人工确认。
 
 门禁必须配置化、版本化，不应写死在提示词里。
 
@@ -303,14 +303,14 @@ agentic-cli policy update --workspace tapstate --source /path/to/default-policy.
 agentic-cli policy rollback --workspace tapstate
 ```
 
-当前实现会读取 `assets/policies/default.yaml`，校验 policy 名称、版本和 `write_jira_comment`、`transition_jira_status`、`git_commit`、`git_push`、`create_pr`、`scope_change` 六个关键 gate。`policy update` 会先校验 source，再写入 `.bak` 备份；`policy rollback` 会先校验备份，再恢复默认 policy。
+当前实现会读取 `assets/policies/default.yaml`，校验策略名称、版本和 `write_jira_comment`、`transition_jira_status`、`git_commit`、`git_push`、`create_pr`、`scope_change` 六个关键门禁。`policy update` 会先校验来源文件，再写入 `.bak` 备份；`policy rollback` 会先校验备份，再恢复默认策略。
 
 门禁调整规则：
 
 - 不确定是否需要门禁时，按需要门禁处理。
 - 放宽门禁必须有人工确认和决策记录。
 - 收紧门禁可以快速发布，但仍必须可回滚。
-- 所有 gate 变更必须写入事件日志和版本记录。
+- 所有门禁变更必须写入事件日志和版本记录。
 
 ## 11. 发布与同步模型
 
@@ -363,16 +363,16 @@ asset release
 - 每类问题都有稳定错误码、人工动作和事件日志。
 - 研发可以一条命令生成脱敏诊断包。
 - CLI 逻辑错误可以通过发布新的 latest 版本修复，并推荐研发侧自动更新。
-- Jira status / transition 差异可以通过 profile 更新修复并回滚。
+- Jira `status` / `transition` 差异可以通过工作流配置更新修复并回滚。
 - Jira 卡片属性缺失会阻断接管，并给出补全模板。
-- 关键 gate 可以通过 policy 更新调整，并保留审计记录。
-- update check / apply 的输出全部是结构化 JSON；如实现 rollback，它只用于本地恢复，不用于旧版本修复线。
-- required update 只阻断受影响 operation，不应无差别阻断所有命令。
-- 所有修复进入 feedback report，用于后续观察问题是否减少。
+- 关键门禁可以通过策略更新调整，并保留审计记录。
+- `update check` / `update apply` 的输出全部是结构化 JSON；如实现 `rollback`，它只用于本地恢复，不用于旧版本修复线。
+- 必要更新只阻断受影响操作，不应无差别阻断所有命令。
+- 所有修复进入任务级审计记录，并可通过按需反馈报告观察问题是否减少。
 
 ## 13. 当前实现边界
 
-当前第一阶段本地 fake flow 已支持：
+当前第一阶段本地模拟流程已支持：
 
 - `assets install`
 - `preflight`
@@ -388,4 +388,4 @@ asset release
 - `scripts/release.sh`
 - `scripts/publish-release.sh`
 
-当前 `update check/apply` 已完成本地 manifest 基线、远程 manifest 拉取、artifact 下载、checksum 校验和真实二进制切换。当前 `policy validate/update/rollback` 已完成本地文件基线，真实 Jira 字段写入、comment 写入和 profile 驱动 transition 写入已记录 `real_jira_write` gate 审计事件；doctor 已支持显式 `--check-real-jira` 和 `--check-github` 外部检查。`scripts/publish-release.sh` 已支持使用 GitHub CLI 创建或更新 GitHub Release 并上传 release 产物。剩余正式化重点是 operation / profile / assets 的跨版本兼容治理和发布权限治理。
+当前 `update check` / `update apply` 已完成本地清单基线、远程清单拉取、产物下载、校验和真实二进制切换。当前 `policy validate` / `policy update` / `policy rollback` 已完成本地文件基线，真实 Jira 字段写入、评论写入和工作流配置驱动 `transition` 写入已记录 `real_jira_write` 门禁审计事件；`doctor` 已支持显式 `--check-real-jira` 和 `--check-github` 外部检查。`scripts/publish-release.sh` 已支持使用 GitHub CLI 创建或更新 GitHub Release 并上传发布产物。剩余正式化重点是操作、工作流配置和资产的跨版本兼容治理和发布权限治理。

@@ -20,7 +20,7 @@ cat > "$update_manifest" <<'JSON'
   "version": "RES-v0.1.20-deadbee",
   "asset_version": "RES-v0.1.20-deadbee",
   "severity": "required",
-  "reason": "takeover_task may write invalid evidence",
+  "reason": "takeover_task 可能写入无效证据",
   "blocked_operations": ["takeover_task"]
 }
 JSON
@@ -46,7 +46,7 @@ cp assets/policies/default.yaml "$policy_source"
 "${cmd[@]}" policy rollback --workspace tapstate | grep '"operation":"policy_rollback"'
 rm -f "$policy_backup"
 
-"${cmd[@]}" workspace init --workspace tapstate | grep '"operation":"workspace_init"'
+"${cmd[@]}" workspace init --workspace tapstate --jira-user dev@example.com --jira-project TAP | grep '"operation":"workspace_init"'
 set +e
 missing_repo_output="$("${cmd[@]}" takeover-task TAP-MISSING-REPO --workspace tapstate 2>/dev/null)"
 missing_repo_code="$?"
@@ -74,4 +74,4 @@ if grep -E 'abc123|password=hidden' "$bundle_path"; then
 fi
 
 "${cmd[@]}" feedback report --workspace tapstate --date 2026-07-21 | grep '"missing_fields":{"target_repo":1}'
-grep 'target_repo: 1' "$workspace_root/.agentic-ops/feedback/daily/2026-07-21.md"
+grep 'target_repo: 1' "$workspace_root/.agentic-ops/feedback/reports/2026-07-21.md"

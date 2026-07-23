@@ -1,6 +1,6 @@
 operation: doctor
 version: 1
-purpose: 输出安装、版本、profile、policy、contract、adapter、GitHub 和 workspace 的诊断结果；真实外部检查必须显式启用。
+purpose: 输出安装、版本、工作流配置、策略、契约、适配器、GitHub 和工作空间的诊断结果；真实外部检查必须显式启用。
 task_type: diagnosis
 allowed_stages:
   - installed

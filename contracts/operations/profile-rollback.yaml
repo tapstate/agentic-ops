@@ -1,6 +1,6 @@
 operation: profile_rollback
 version: 1
-purpose: 从最近一次 profile update 生成的本地备份恢复当前 workspace 的 Workflow Profile。
+purpose: 从最近一次工作流配置更新生成的本地备份恢复当前工作空间的工作流配置。
 task_type: profile_update
 allowed_stages:
   - profile_update_required

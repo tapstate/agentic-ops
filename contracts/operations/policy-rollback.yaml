@@ -1,6 +1,6 @@
 operation: policy_rollback
 version: 1
-purpose: 从最近一次 policy update 生成的本地备份恢复当前默认 policy。
+purpose: 从最近一次策略更新生成的本地备份恢复当前默认策略。
 task_type: policy_update
 allowed_stages:
   - policy_update_required

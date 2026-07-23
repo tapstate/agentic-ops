@@ -1,6 +1,6 @@
 operation: policy_update
 version: 1
-purpose: 使用经过校验的本地 source policy 更新当前默认 policy，并在更新前保存可回滚备份。
+purpose: 使用经过校验的本地源策略更新当前默认策略，并在更新前保存可回滚备份。
 task_type: policy_update
 allowed_stages:
   - policy_update_required
@@ -47,7 +47,7 @@ side_effects:
   - must_not_modify_business_repo
 human_gate:
   required: true
-  reason: Policy 更新会改变关键步骤门禁，执行前需要维护者确认 source policy。
+  reason: 策略更新会改变关键步骤门禁，执行前需要维护者确认源策略。
 retry_policy:
   retryable: true
   max_attempts: 1

@@ -4,13 +4,13 @@
 
 **Goal:** 构建 AgenticOps 第一阶段最小可运行闭环，让研发负责人可以安装 Go CLI、初始化工作空间、初始化 AIAgent 能力、用 fake Jira 数据接管任务、写入 evidence，并生成每日反馈报告。
 
-**Architecture:** 第一阶段采用本地优先的 Go CLI Runtime，shell 只做 `curl | bash` 安装引导。Go CLI 以 Operation Contract为操作边界，先接 fake Jira adapter 跑通本地闭环，再接真实 Jira / GitHub。机器可读 Operation Contract的源头是仓库顶层 `contracts/operations/`，Go package 不维护第二份契约源头。
+**Architecture:** 第一阶段采用本地优先的 Go CLI 运行时，shell 只做 `curl | bash` 安装引导。Go CLI 以操作契约为操作边界，先接模拟 Jira 适配器跑通本地闭环，再接真实 Jira / GitHub。机器可读操作契约的源头是仓库顶层 `contracts/operations/`，Go package 不维护第二份契约源头。
 
 **Tech Stack:** Go 1.22+、标准库优先、`gopkg.in/yaml.v3` 用于 YAML、`gh` 作为 GitHub 登录状态检查、Jira 第一阶段先 fake adapter。
 
 ## Global Constraints
 
-- 当前阶段先执行本计划，不直接扩展到 Web 控制台、daemon、自动 PR 或完整 self-update。
+- 当前阶段先执行本计划，不直接扩展到 Web 控制台、后台常驻进程、自动创建拉取请求或完整自更新。
 - CLI 统一入口为 `agentic-cli`。
 - Go 是主实现语言；shell 只用于安装引导、轻量环境检测、下载或切换 Go release 二进制。
 - `agentic-cli` 运行时不得依赖本地 Python、`jq` 或 shell 业务脚本。
@@ -23,7 +23,7 @@
 - AIAgent 不按固定角色工作，必须按 `task_type`、`current_stage`、`next_action` 推进。
 - AIAgent 执行 Jira 任务前必须先识别 `task_class`，再选择 Standard Process Registry 中的 `process_id`。
 - `agent_id` 是 AIAgent 唯一编号；`current_agent_id` 是任务运行中绑定字段，任务完成或交接结束后必须清理。
-- 第一阶段 operation 名称集合以 `docs/contracts/operation-contract.md` 为文档权威。
+- 第一阶段操作名称集合以 `docs/contracts/operation-contract.md` 为文档权威。
 
 ---
 
@@ -589,7 +589,7 @@ Create `contracts/operations/write-evidence.yaml`:
 ```yaml
 operation: write_evidence
 version: 1
-purpose: 写入 Jira / PR evidence。
+purpose: 写入 Jira / 拉取请求证据。
 task_type: evidence_write
 allowed_stages:
   - takeover_started
@@ -908,13 +908,13 @@ Modify `packages/agentic-cli/internal/cli/app.go` to route:
 ```go
 case "takeover-task":
 	if len(args) < 2 {
-		return writeJSON(stdout, output.Failure("takeover_task", "missing_issue_key", "缺少 issue key", "请提供 Jira issue key"))
+		return writeJSON(stdout, output.Failure("takeover_task", "missing_issue_key", "缺少 Jira 卡片编号", "请提供 Jira 卡片编号"))
 	}
 	workspaceName := readFlag(args, "--workspace", "default")
 	issueKey := args[1]
 	issue, ok := jira.FakeClient{}.GetIssue(issueKey)
 	if !ok {
-		return writeJSON(stdout, output.Failure("takeover_task", "issue_not_found", "未找到 Jira issue", "请检查 issue key"))
+		return writeJSON(stdout, output.Failure("takeover_task", "issue_not_found", "未找到 Jira 卡片", "请检查 Jira 卡片编号"))
 	}
 	return writeJSON(stdout, output.Success("takeover_task", map[string]any{
 		"workspace":     workspaceName,
@@ -1268,9 +1268,9 @@ git commit -m "Feat(install): add bootstrap installer"
 
 **Interfaces:**
 - Consumes: `agentic-cli` command from `go run ./packages/agentic-cli/cmd/agentic-cli`
-- Produces: local fake flow evidence that install, workspace init, agent init, list tasks, takeover, write evidence, feedback report produce JSON.
+- Produces: 本地模拟流程证据，证明安装、工作空间初始化、AIAgent 初始化、拉取任务、接管、写证据和反馈报告都能产生 JSON。
 
-- [x] **Step 1: Add local fake flow script**
+- [x] **Step 1: Add local simulation script**
 
 Create `tests/e2e/local-fake-flow.sh`:
 
@@ -1292,7 +1292,7 @@ $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"operation":
 Run: `bash tests/e2e/local-fake-flow.sh`
 Expected: all commands exit 0.
 
-- [x] **Step 2: Update demo doc with fake flow command**
+- [x] **Step 2: Update demo doc with local simulation command**
 
 Modify `docs/examples/end-to-end-demo.md` to add this verification command under demo acceptance:
 
@@ -1300,7 +1300,7 @@ Modify `docs/examples/end-to-end-demo.md` to add this verification command under
 bash tests/e2e/local-fake-flow.sh
 ```
 
-Expected description: this command runs the first-stage local fake flow and does not perform real Jira or GitHub writes.
+Expected description: 该命令运行第一阶段本地模拟流程，不执行真实 Jira 或 GitHub 写操作。
 
 - [x] **Step 3: Commit**
 
@@ -1319,7 +1319,7 @@ git commit -m "Test(e2e): add local fake flow"
 - 所有 CLI 成功输出包含 `ok: true` 和 `operation`。
 - 所有 CLI 失败输出包含 `ok: false`、`operation`、`code`、`message`。
 - fake takeover 输出包含 `run_id`、`task_type`、`current_stage`、`next_action`。
-- 后续真实 Jira 接管 gate 必须校验 assignee、`current_agent_id`、`task_class` 和 `process_id`；当前 fake flow 只验证本地最小闭环。
+- 后续真实 Jira 接管门禁必须校验 `assignee`、`current_agent_id`、`task_class` 和 `process_id`；当前本地模拟流程只验证本地最小闭环。
 - 没有真实 Jira / GitHub 写操作。
 - 没有 secrets、tokens、private keys 或原始敏感日志。
 
@@ -1328,25 +1328,25 @@ git commit -m "Test(e2e): add local fake flow"
 本计划完成后，再新增第二份计划，范围只包含：
 
 - Jira current user。
-- Jira issue search。
-- Jira issue get。
+- Jira 卡片搜索。
+- Jira 卡片读取。
 - Jira comment write。
 - Workflow Profile中 Jira 字段映射。
 - Standard Process Registry 的机器可读契约。
 - task class 到 process id 的映射。
-- 负责人和 assignee 匹配 gate。
+- 负责人和 `assignee` 匹配门禁。
 - `agent_id` 初始化和持久化。
 - `current_agent_id` 接管写入、执行过程校验和完成清理。
 - `takeover_at`、`completed_at` 和 `current_agent_id_cleared` 回写。
 - AIAgent 结构化事件上报字段扩展，包括 `agent_id`、`current_agent_id`、`task_class`、`process_id` 和 `current_agent_id_cleared`。
 
-不要在第一阶段本地 fake flow 中混入真实 Jira 接入。
+不要在第一阶段本地模拟流程中混入真实 Jira 接入。
 
 ## 5. 自检记录
 
 - Spec coverage: 覆盖安装、运行资产安装、本地 build / release 打包、工作空间初始化、AIAgent 初始化、新任务接管、evidence 写入、反馈报告。
-- Operation scope: 第一批可运行命令只取最小闭环，其他 operation 保留为后续计划。
+- Operation scope: 第一批可运行命令只取最小闭环，其他操作保留为后续计划。
 - Contract source: 顶层 `contracts/operations/` 是唯一机器可读契约源头。
 - Runtime boundary: Go CLI 承载业务逻辑，shell 只做安装引导。
-- Human gate: push、PR、merge、发布不在第一批自动执行范围内。
-- Implementation note: 第一阶段实现补齐了计划命令范围中的 `preflight`、`agent init`、`resume-takeover`、本地 `assets install`、`scripts/build.sh` 和 `scripts/release.sh`，并创建本地 fake flow 所需 operation YAML；真实 Jira / GitHub 写操作仍未接入。
+- Human gate: 推送、创建拉取请求、合并、发布不在第一批自动执行范围内。
+- Implementation note: 第一阶段实现补齐了计划命令范围中的 `preflight`、`agent init`、`resume-takeover`、本地 `assets install`、`scripts/build.sh` 和 `scripts/release.sh`，并创建本地模拟流程所需操作 YAML；真实 Jira / GitHub 写操作仍未接入。

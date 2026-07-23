@@ -143,11 +143,13 @@ func TestWorkspaceInitOutputsNextAction(t *testing.T) {
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"workspace", "init", "--workspace", "tapstate"}, &stdout, &stderr)
+	code := Run([]string{"workspace", "init", "--workspace", "tapstate", "--jira-user", "dev@example.com", "--jira-project", "TAP"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d", code)
 	}
 	assertJSONField(t, stdout.String(), "operation", "workspace_init")
+	assertJSONField(t, stdout.String(), "jira_user", "dev@example.com")
+	assertJSONField(t, stdout.String(), "jira_project", "TAP")
 	assertJSONField(t, stdout.String(), "next_action", "init_agent_capability")
 	if _, err := os.Stat(filepath.Join(root, ".agentic-ops", "runs")); err != nil {
 		t.Fatalf("workspace root was not used: %v", err)
@@ -197,7 +199,7 @@ func TestUpdateCheckAndApplyUseLocalManifest(t *testing.T) {
   "version": "RES-v0.1.20-deadbee",
   "asset_version": "RES-v0.1.20-deadbee",
   "severity": "required",
-  "reason": "takeover_task may write invalid evidence",
+  "reason": "takeover_task 可能写入无效证据",
   "blocked_operations": ["takeover_task"]
 }
 `)
@@ -335,7 +337,7 @@ func TestTakeoverTaskBlocksMissingTargetRepo(t *testing.T) {
 	assertJSONField(t, stdout.String(), "code", "missing_target_repo")
 	assertJSONField(t, stdout.String(), "current_stage", "takeover_gate")
 	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
-	assertJSONField(t, stdout.String(), "required_human_action", "请在 Jira 卡片补充目标仓库，或维护 workspace repo 映射")
+	assertJSONField(t, stdout.String(), "required_human_action", "请在 Jira 卡片补充目标仓库，或维护工作空间代码仓库映射")
 	if !strings.Contains(stdout.String(), `"completion_template"`) {
 		t.Fatalf("stdout missing completion_template: %s", stdout.String())
 	}
@@ -799,7 +801,7 @@ func TestReleaseAgentRecordsCurrentAgentCleanup(t *testing.T) {
 	assertJSONField(t, stdout.String(), "run_id", runID)
 	assertJSONField(t, stdout.String(), "current_stage", "completed")
 	assertJSONField(t, stdout.String(), "current_agent_id_cleared", true)
-	assertJSONField(t, stdout.String(), "next_action", "feedback_report")
+	assertJSONField(t, stdout.String(), "next_action", "task_audit_submitted")
 
 	events, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
 	if err != nil {
@@ -837,7 +839,7 @@ func TestFeedbackReportOutputsReportPath(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"missing_fields":{"target_repo":1}`) {
 		t.Fatalf("stdout missing missing_fields: %s", stdout.String())
 	}
-	data, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "daily", "2026-07-21.md"))
+	data, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "reports", "2026-07-21.md"))
 	if err != nil {
 		t.Fatalf("ReadFile report error = %v", err)
 	}
@@ -937,6 +939,7 @@ func writeCLITestFile(t *testing.T, path string, content string) {
 func validCLIProfileYAML(workspace string, jiraProject string) string {
 	return "workspace: " + workspace + "\n" +
 		"jira:\n" +
+		"  user: dev@example.com\n" +
 		"  project: " + jiraProject + "\n" +
 		"  task_query: project = " + jiraProject + "\n" +
 		"jira_form_mapping:\n" +
@@ -955,6 +958,9 @@ func validCLIProfileYAML(workspace string, jiraProject string) string {
 		"jira_transition_mapping:\n" +
 		"  start_progress:\n" +
 		"    name: Start Progress\n" +
+		"github:\n" +
+		"  repositories:\n" +
+		"    default: tapstate/example-repo\n" +
 		"local:\n" +
 		"  source_root: /tmp/source\n"
 }

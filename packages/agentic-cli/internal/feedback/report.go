@@ -41,7 +41,7 @@ func WriteMarkdown(path string, workspace string, date string, report Report) er
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	content := fmt.Sprintf(`# AgenticOps Daily Feedback
+	content := fmt.Sprintf(`# AgenticOps Feedback Report
 
 - workspace: %s
 - date: %s

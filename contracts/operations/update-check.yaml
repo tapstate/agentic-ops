@@ -1,6 +1,6 @@
 operation: update_check
 version: 1
-purpose: 基于本地或远程 release manifest 检查是否存在可用更新，并返回更新级别和受影响 operation。
+purpose: 基于本地或远程发布清单检查是否存在可用更新，并返回更新级别和受影响操作。
 task_type: update
 allowed_stages:
   - installed

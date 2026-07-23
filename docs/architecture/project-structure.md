@@ -101,7 +101,7 @@ agentic-ops/
 | `contracts/` | 可机器读取的 操作契约，后续以 YAML / JSON 管理。 |
 | `profiles/` | 工作流配置示例和默认配置。 |
 | `skills/` | AgenticOps skills，让 AIAgent 知道如何工作。 |
-| `templates/` | Jira / PR / evidence 回写模板。 |
+| `templates/` | Jira / 拉取请求 / 证据回写模板。 |
 | `packages/agentic-cli/` | Go CLI 运行时 当前实现位置。 |
 | `examples/` | 端到端演示样例。 |
 | `tests/` | 合同、脚本和文档一致性测试。 |
@@ -128,7 +128,7 @@ tapstate/
 tapdata/
 ```
 
-项目 AI 工作空间保存该项目的 Jira 空间、GitHub 仓库、本地源码、工作流配置、任务执行上下文和反馈日志。
+项目 AI 工作空间保存该项目的 Jira 用户、Jira 空间、Jira 空间到代码仓库的映射、本地源码、工作流配置、任务执行上下文和反馈日志。`~/.agentic-ops` 只保存全局安装和通用资产，不保存具体项目的运行事实。
 
 建议工作空间内运行资料位置：
 

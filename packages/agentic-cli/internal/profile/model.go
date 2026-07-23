@@ -18,6 +18,7 @@ type Profile struct {
 }
 
 type JiraConfig struct {
+	User      string `yaml:"user"`
 	Project   string `yaml:"project"`
 	TaskQuery string `yaml:"task_query"`
 }
@@ -46,13 +47,21 @@ type TaskClassMapping struct {
 
 type GitHubConfig struct {
 	Organization string            `yaml:"organization"`
-	Repositories map[string]string `yaml:"repositories"`
+	Repositories RepositoryMapping `yaml:"repositories"`
+}
+
+type RepositoryMapping struct {
+	Default     string            `yaml:"default"`
+	ByComponent map[string]string `yaml:"by_component"`
+	ByLabel     map[string]string `yaml:"by_label"`
+	ByIssueType map[string]string `yaml:"by_issue_type"`
 }
 
 type LocalConfig struct {
-	SourceRoot  string `yaml:"source_root"`
-	RunsDir     string `yaml:"runs_dir"`
-	FeedbackDir string `yaml:"feedback_dir"`
+	WorkspaceRoot string `yaml:"workspace_root"`
+	SourceRoot    string `yaml:"source_root"`
+	RunsDir       string `yaml:"runs_dir"`
+	FeedbackDir   string `yaml:"feedback_dir"`
 }
 
 type ReviewGate struct {

@@ -19,7 +19,7 @@ cat > "$update_manifest" <<'JSON'
   "version": "RES-v0.1.20-deadbee",
   "asset_version": "RES-v0.1.20-deadbee",
   "severity": "required",
-  "reason": "takeover_task may write invalid evidence",
+  "reason": "takeover_task 可能写入无效证据",
   "blocked_operations": ["takeover_task"]
 }
 JSON
@@ -46,7 +46,7 @@ $cmd policy rollback --workspace tapstate | grep '"operation":"policy_rollback"'
 rm -f "$policy_backup"
 $cmd doctor --workspace tapstate | grep '"operation":"doctor"'
 $cmd preflight --workspace tapstate | grep '"operation":"preflight"'
-$cmd workspace init --workspace tapstate | grep '"operation":"workspace_init"'
+$cmd workspace init --workspace tapstate --jira-user dev@example.com --jira-project TAP | grep '"operation":"workspace_init"'
 $cmd agent init --workspace tapstate | grep '"operation":"agent_init"'
 $cmd list-tasks --workspace tapstate | grep '"key":"TAP-123"'
 set +e
@@ -64,6 +64,6 @@ $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"runs":5'
 $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"blocked":1'
 test -f "$workspace_root/.agentic-ops/feedback/events.ndjson"
 test -f "$workspace_root/.agentic-ops/feedback/bundles/TAP-123-takeover-20260721103012-a8f3.md"
-test -f "$workspace_root/.agentic-ops/feedback/daily/2026-07-21.md"
+test -f "$workspace_root/.agentic-ops/feedback/reports/2026-07-21.md"
 test -f "$install_root/assets/RES-v0.1.1-a68372d/manifest.json"
 test -f "$install_root/current.json"

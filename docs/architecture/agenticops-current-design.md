@@ -6,7 +6,7 @@ AgenticOps 是把公司员工执行标准沉淀成 AI 可执行标准流程的 A
 
 第一阶段先落地研发 Jira 任务：帮助研发操作 AIAgent 从 Jira 接管任务到完成任务。AgenticOps 不替代 Jira、不替代研发负责人、不替代 PR 审查，也不以全自动开发为第一阶段目标。它的核心价值是把 AI 员工从临时聊天助手变成流程内可管理、可追踪、可复盘的执行主体。
 
-不同任务会涉及不同流程，例如新任务接管、恢复接管、PR comments 修复、阻塞上报和工作日志上报。AgenticOps 通过操作契约和工作流配置选择流程，通过 Task Form Standard、事件日志、`run_id`、evidence 和 feedback report 记录执行过程，并把关键状态、关键信息、表单数据和证据回写到 Jira、PR 或项目 AI 工作空间，用于后续分析和优化。
+不同任务会涉及不同流程，例如新任务接管、恢复接管、拉取请求审查意见修复、阻塞上报和任务完成审计。AgenticOps 通过操作契约和工作流配置选择流程，通过 Task Form Standard、事件日志、`run_id`、证据、任务级审计记录和按需反馈分析记录执行过程，并把关键状态、关键信息、表单数据和证据回写到 Jira、拉取请求、审计服务或项目 AI 工作空间，用于后续分析和优化。
 
 一句话定义：
 
@@ -19,17 +19,17 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 第一阶段目标是跑通一条真实、可控、可复用的主链路：
 
 ```text
-Jira issue 已进入迭代
+Jira 卡片已进入迭代
 -> 研发负责人手动触发 AI
 -> AI 拉取 负责人名下待办
--> 研发负责人选择一个 issue
--> AI 执行任务接管 gate
--> AI 生成 run_id 和接管记录
+-> 研发负责人选择一个卡片
+-> AI 执行任务接管门禁
+-> AI 生成 `run_id` 和接管记录
 -> AI 本地开发与验证
 -> AI 回写 Jira 证据
 -> 研发负责人确认
--> 授权 push / PR
--> 进入既有 CI / Review / 合入流程
+-> 授权推送 / 创建拉取请求
+-> 进入既有 CI / 审查 / 合入流程
 ```
 
 第一阶段不阻塞在集成测试完整设计、低风险自动化门槛和 AI Review ROI 上。这些属于后续演进方向。
@@ -38,16 +38,17 @@ Jira issue 已进入迭代
 
 - Jira 是任务、需求、负责人、迭代、状态、评论和执行证据的事实源。
 - Git 仓库是代码、测试、提交和分支的事实源。
-- GitHub PR 与 CI 是 PR 审查、CI、审查评论和合入记录的事实源。
+- GitHub 拉取请求与 CI 是拉取请求审查、CI、审查评论和合入记录的事实源。
 - AgenticOps 不创建新的任务管理事实源。
-- `run_id` 只追踪一次 AI 执行，不替代 Jira issue key，也不替代 Jira 状态。
-- AIAgent 可以推进研发阶段，但不能绕过 工作流配置、gate 和人工确认点。
-- 控制规范不能只靠提示词；提示词负责指导，Go CLI 运行时 负责强制检查和结构化输出。
+- `run_id` 只追踪一次 AI 执行，不替代 Jira 卡片编号，也不替代 Jira 状态。
+- `agent_id` 是 AIAgent 的稳定身份；`current_agent_id` 是任务上的当前绑定字段，用于表达当前由哪个 `agent_id` 持有任务所有权。
+- AIAgent 可以推进研发阶段，但不能绕过工作流配置、门禁和人工确认点。
+- 控制规范不能只靠提示词；提示词负责指导，Go CLI 运行时负责强制检查和结构化输出。
 - 每次执行都必须产生可聚合记录，关键状态和信息必须回写到对应事实源或项目 AI 工作空间。
 - 每个流程节点必须有可解释的标准动作、表单输出、审查结论和下一步规则。
 - 不同专业角色在对应节点审查任务结果，以专业知识判断产出是否合格，以及流程标准是否需要优化。
-- AIAgent 必须基于表单数据、事件记录、失败码和 gate 判断重试、重做、继续或停止，不能只依赖聊天上下文。
-- 框架只稳定定义大的流程环节、门禁和演进边界；成熟固化的交互逻辑才下沉为原子化 operation，脚本入口只做受控编排或调用。
+- AIAgent 必须基于表单数据、事件记录、失败码和门禁判断重试、重做、继续或停止，不能只依赖聊天上下文。
+- 框架只稳定定义大的流程环节、门禁和演进边界；成熟固化的交互逻辑才下沉为原子化操作，脚本入口只做受控编排或调用。
 - AIAgent 在具体环节内执行任务并沉淀经验；周期性复盘把高频经验和失败模式转化为标准资产改进建议。
 - 除非问题来自 `agentic-cli` 二进制逻辑错误，否则 AIAgent 应优先通过标准资产自助处理、阻断或转人工。
 
@@ -63,12 +64,12 @@ git@github.com:tapstate/agentic-ops.git
 
 ```text
 docs/          架构、目标定位、用户故事、流程、计划
-contracts/     操作契约和 schema
-skills/        AgenticOps skills 和 AI 员工工作规则
+contracts/     操作契约和结构定义
+skills/        AgenticOps 技能和 AI 员工工作规则
 handbooks/     AI 员工手册
 profiles/      工作流配置示例和默认配置
-packages/      agentic-cli Go CLI runtime
-templates/     Jira / PR / evidence 模板
+packages/      agentic-cli Go CLI 运行时
+templates/     Jira / 拉取请求 / 证据模板
 examples/      端到端演示样例
 tests/         自动化测试
 scripts/       本地和 CI 辅助脚本
@@ -89,7 +90,7 @@ tapstate/
 tapdata/
 ```
 
-不同项目 AI 工作空间对应不同 Jira 空间、GitHub 组织/仓库、本地源码目录、工作流配置和任务执行上下文。
+不同项目 AI 工作空间对应不同 Jira 用户、Jira 空间、代码仓库集合、本地源码目录、工作流配置和任务执行上下文。一个 Jira 空间可以对应若干代码仓库，仓库选择规则必须在工作流配置中维护，不能由 AIAgent 在接管时猜测。
 
 ## 5. 资料边界
 
@@ -100,11 +101,11 @@ AgenticOps 必须严格区分两类资料。
 - AgenticOps 源代码
 - 项目规则
 - AI 员工手册
-- skills
+- 技能
 - 操作契约
 - 工作流配置
-- templates
-- adapters / CLI / SDK
+- 模板
+- 适配器 / CLI / SDK
 - 通用文档和示例
 
 具体工作空间产物：
@@ -114,10 +115,10 @@ AgenticOps 必须严格区分两类资料。
 - 测试结果
 - 本地执行日志
 - Jira 评论和证据
-- GitHub PR、CI、review comments
-- `run_id` 对应的 evidence
+- GitHub 拉取请求、CI、审查意见
+- `run_id` 对应的证据
 
-具体工作空间产物不应混入 `~/.agentic-ops` 的全局安装和配置资料；需要保留时应写入对应 AI 工作空间、目标业务仓库、Jira / PR 证据链，或受控的任务执行记录位置。
+具体工作空间产物不应混入 `~/.agentic-ops` 的全局安装和配置资料；需要保留时应写入对应 AI 工作空间、目标业务仓库、Jira / 拉取请求证据链，或受控的任务执行记录位置。
 
 ## 6. AI 员工手册
 
@@ -125,26 +126,26 @@ AgenticOps 必须包含 AI 员工手册，作为 AIAgent 在研发流程中工�
 
 AI 员工手册同时服务两个对象：
 
-- AIAgent：明确任务类型、当前阶段、下一步动作、工具、流程、gate、证据和停止条件。
+- AIAgent：明确任务类型、当前阶段、下一步动作、工具、流程、门禁、证据和停止条件。
 - 研发负责人：提供快捷操作方式，让研发能用自然语言或 CLI 指挥 AI 完成任务。
 
 AI 员工手册应覆盖：
 
-- 任务类型：安装、工作空间初始化、AIAgent 初始化、新任务接管、恢复接管、PR comments 修复、工作日志上报、AgenticOps 改进建议。
-- 阶段模型：已接收、预检中、等待接管、分析中、开发中、验证中、证据回写中、等待人工确认、阻塞、已交接。
+- 任务类型：安装、工作空间初始化、AIAgent 初始化、新任务接管、恢复接管、拉取请求审查意见修复、任务完成审计、AgenticOps 改进建议。
+- 阶段模型：`已接收`、`预检中`、`等待接管`、`分析中`、`开发中`、`验证中`、`证据回写中`、`等待人工确认`、`阻塞`、`已交接`。
 - 下一步动作：由操作契约、工作流配置、当前证据和人工门禁共同决定。
-- 工作入口：拉待办、任务接管、继续失败任务、修复 PR comments、回写证据。
-- 行为边界：不自动 push、不自动创建 PR、不自动 merge、不扩大需求范围、不泄露敏感信息。
+- 工作入口：拉待办、任务接管、继续失败任务、修复拉取请求审查意见、回写证据。
+- 行为边界：不自动推送、不自动创建拉取请求、不自动合并、不扩大需求范围、不泄露敏感信息。
 - 停止条件：需求不清、风险扩大、权限不足、测试无法运行、连续修复失败、需要人工判断。
-- 交付要求：代码 diff、测试结果、风险说明、Jira / PR evidence、下一步建议。
+- 交付要求：代码差异、测试结果、风险说明、Jira / 拉取请求证据、下一步建议。
 
-AI 员工手册不是普通说明文档，而是 skills、操作契约、工作流配置、CLI 命令和 evidence templates 的行为依据。
+AI 员工手册不是普通说明文档，而是 skills、操作契约、工作流配置、CLI 命令和证据模板的行为依据。
 
 ## 7. 操作契约
 
 操作契约是 AgenticOps 的操作契约层，用于屏蔽 Jira / GitHub / Git 的底层事实差异，向 AIAgent 暴露稳定、统一、可验证的任务操作输入输出规范。
 
-AIAgent 不应直接理解 Jira 字段、状态、transition 或 comment 格式。AIAgent 应理解 AgenticOps 暴露的 operation：
+AIAgent 不应直接理解 Jira 字段、状态、`transition` 或 `comment` 格式。AIAgent 应理解 AgenticOps 暴露的操作：
 
 ```text
 list_tasks
@@ -162,18 +163,18 @@ feedback_report
 feedback_propose
 ```
 
-每个 operation 至少定义：
+每个操作至少定义：
 
 - `operation`：操作名。
 - `version`：契约版本。
 - `purpose`：操作意图。
 - `task_type`：适用的任务类型。
-- `allowed_stages`：允许执行该 operation 的阶段。
+- `allowed_stages`：允许执行该操作的阶段。
 - `input`：结构化输入。
-- `preconditions`：前置 gate。
+- `preconditions`：前置门禁。
 - `output`：结构化输出。
 - `failure`：稳定错误码和人工动作。
-- `side_effects`：是否可能写 Jira、创建记录、push、创建 PR。
+- `side_effects`：是否可能写 Jira、创建记录、推送代码、创建拉取请求。
 - `human_gate`：是否需要人工确认。
 
 示例：
@@ -245,31 +246,32 @@ side_effects:
 
 ## 8. 工作流配置
 
-AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira workflow。
+AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira 工作流。
 
-Task Form Standard 定义 AI 操作任务从创建到完成所需的标准字段和生命周期要求。AIAgent 面向这些标准字段工作，不直接以 Jira custom field、描述段落或 workflow 状态为判断依据。
+Task Form Standard 定义 AI 操作任务从创建到完成所需的标准字段和生命周期要求。AIAgent 面向这些标准字段工作，不直接以 Jira 自定义字段、描述段落或工作流状态为判断依据。
 
-工作流配置负责把 操作契约映射到具体团队流程：
+工作流配置负责把操作契约映射到具体团队流程：
 
-- Jira base URL、project、issue type、JQL。
-- Jira Form Mapping，例如把 `owner`、`sprint`、`acceptance_criteria`、`target_repo`、`risk` 等 AgenticOps 标准字段映射到具体 Jira 字段、描述模板或工作空间配置。
-- Jira 状态和 transition 映射。
+- Jira `base_url`、Jira 用户、Jira 空间、`issue_type`、JQL。
+- Jira 表单映射，例如把 `owner`、`sprint`、`acceptance_criteria`、`target_repo`、`risk` 等 AgenticOps 标准字段映射到具体 Jira 字段、描述模板或工作空间配置。
+- Jira 空间到代码仓库的映射，包括默认仓库、按 `component` / `label` / `issue_type` 匹配的仓库，以及本地源码目录。
+- Jira 状态和 `transition` 映射。
 - 专业审查节点映射，例如研发负责人确认、PR 代码审查人退回、QA 验证、运维或安全审批。
-- GitHub organization、repo 映射。
+- GitHub 组织和代码仓库映射。
 - 本地项目 AI 工作空间路径。
 - 允许的写操作。
 - 人工确认点。
-- evidence 模板。
+- 证据模板。
 
-不同 Jira 工作流对接时应先通过 Jira Form Mapping 适配 AgenticOps 标准。不符合标准的地方记录 gap 并请求人工决策，不能让 AIAgent 直接猜测。Profile 还必须说明哪些节点允许重试、哪些节点必须重做前序表单，以及哪些审查结论会把 `next_action` 置为 `ask_owner`、`fix_and_verify`、`redo_previous_stage` 或 `blocked`。
+不同 Jira 工作流对接时应先通过 Jira 表单映射适配 AgenticOps 标准。不符合标准的地方记录缺口并请求人工决策，不能让 AIAgent 直接猜测。工作流配置还必须说明哪些节点允许重试、哪些节点必须重做前序表单，以及哪些审查结论会把 `next_action` 置为 `ask_owner`、`fix_and_verify`、`redo_previous_stage` 或 `blocked`。
 
-TapData / TapState 的方案 C 是第一套默认 profile，但不能硬编码进核心模型。
+TapData / TapState 的方案 C 是第一套默认工作流配置，但不能硬编码进核心模型。
 
 ## 9. 控制层运行时
 
 第一阶段控制层采用本地优先的 Go CLI 运行时，不做常驻 daemon，也不先做 Web 平台。
 
-shell 只用于 `curl | bash` 安装引导。业务逻辑、operation、policy、adapter、事件日志和反馈分析由 Go CLI 承载。
+shell 只用于 `curl | bash` 安装引导。业务逻辑、操作、策略、适配器、事件日志和反馈分析由 Go CLI 承载。
 
 推荐形态：
 
@@ -307,7 +309,7 @@ Go CLI 运行时 的要求：
 - stderr 输出人类诊断日志。
 - 所有失败返回稳定 `code`。
 - 退出码有固定语义。
-- 写操作必须检查 policy、gate 和 confirmation。
+- 写操作必须检查策略、门禁和人工确认。
 - secrets 不允许出现在 stdout、stderr 或事件日志中。
 - Linux (linux-amd64 / linux-arm64)、macOS Intel (darwin-amd64) 和 macOS Apple Silicon (darwin-arm64) 都应通过对应平台二进制运行。
 - 发布流程必须支持快速构建、发布和自更新。
@@ -327,7 +329,7 @@ linux-arm64
 
 ## 10. Git 和 GitHub 边界
 
-Jira 需要强封装，因为 Jira workflow、字段、状态和空间差异较大。
+Jira 需要强封装，因为 Jira 工作流、字段、状态和空间差异较大。
 
 GitHub / Git 不需要做可替换平台级封装，因为当前不会替换。但需要做安全操作级封装，用于控制 AI 员工能怎么使用它们。
 
@@ -340,7 +342,7 @@ git log
 git show
 ```
 
-高风险动作应通过 AgenticOps operation 或 CLI guard 管控：
+高风险动作应通过 AgenticOps 操作或 CLI 防护管控：
 
 ```text
 git commit
@@ -352,7 +354,7 @@ gh pr create
 gh pr edit
 ```
 
-建议由 Go CLI guard 管控的内部能力。这些能力不直接作为第一阶段 operation 暴露给 AIAgent，AIAgent 仍应调用 操作契约中定义的 operation：
+建议由 Go CLI 防护管控的内部能力。这些能力不直接作为第一阶段操作暴露给 AIAgent，AIAgent 仍应调用操作契约中定义的操作：
 
 ```text
 inspect_workspace
@@ -370,22 +372,24 @@ write_pr_evidence
 
 ## 11. 反馈闭环
 
-AgenticOps 应包含 AIAgent 反馈通道，用于每天分析执行日志并优化 AgenticOps。
+AgenticOps 应包含 AIAgent 反馈通道。反馈通道的主路径是任务完成、阻塞或交接时提交任务级审计记录；按 `workspace`、时间范围或失败码聚合只是后续分析方式，不作为每日必交付。
 
 反馈闭环：
 
 ```text
-Go CLI 执行 operation
+Go CLI 执行操作
 -> 产生结构化事件日志
--> 每天按 workspace 汇总
+-> 到达完成、阻塞或交接节点
+-> AIAgent 提交任务级审计记录到 Jira 卡片、审计服务或目标仓库证据链
+-> 维护者按需按 `run_id`、任务类型、失败码、时间范围或 `workspace` 聚合分析
 -> AIAgent 分析失败、卡点、重复人工确认、规则缺口
 -> 生成改进建议
--> 人确认后更新 AgenticOps 规则 / 手册 / contracts / Go CLI
+-> 人确认后更新 AgenticOps 规则、手册、契约和 Go CLI
 ```
 
 第一阶段反馈通道只做分析和建议，不允许 AIAgent 根据日志自动修改 AgenticOps 源头规则。
 
-运行日志应放在具体项目 AI 工作空间：
+运行日志应放在具体项目 AI 工作空间，任务级审计记录应回写到 Jira 卡片、审计服务或目标仓库证据链：
 
 ```text
 <project-ai-workspace>/
@@ -397,7 +401,9 @@ Go CLI 执行 operation
           summary.json
           evidence.md
     feedback/
-      daily/
+      bundles/
+        TAP-123-takeover-20260721103012-a8f3.md
+      reports/
         2026-07-21.md
         2026-07-21.json
 ```
@@ -421,18 +427,25 @@ Go CLI 执行 operation
   "duration_ms": 842,
   "human_gate": false,
   "requires_human_action": true,
-  "safe_message": "Jira issue 缺少目标仓库信息"
+  "audit_target": "jira_issue",
+  "audit_submitted": false,
+  "audit_reference": null,
+  "safe_message": "Jira 卡片缺少目标仓库信息"
 }
 ```
 
 建议提供反馈命令：
 
 ```sh
-agentic-cli feedback collect --workspace tapstate --date 2026-07-21
-agentic-cli feedback analyze --workspace tapstate --date 2026-07-21
+agentic-cli write-evidence --workspace tapstate --run-id <run_id>
+agentic-cli release-agent --workspace tapstate --run-id <run_id> --issue-key TAP-123 --completion-evidence evidence.md
+agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
 agentic-cli feedback report --workspace tapstate --date 2026-07-21
+agentic-cli feedback analyze --workspace tapstate --date 2026-07-21
 agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 ```
+
+`feedback report` 是按需分析报告，不是日报。第一阶段保留 `--date` 作为兼容参数和报告命名参数，后续可扩展按 `run_id`、`issue_key`、`task_type`、失败码或时间范围查询。
 
 反馈进入 AgenticOps 源头规则前必须经过：
 
@@ -449,13 +462,13 @@ Observation -> Proposal -> Accepted Change
 - 实际影响范围超出 Jira 已确认边界。
 - 需要改变复杂度、风险等级或需求范围。
 - AI 连续修复失败或无法解释失败原因。
-- push、创建 PR、重新提交修复。
-- PR 审查 comments 存在需要取舍的修改。
+- 推送、创建拉取请求、重新提交修复。
+- 拉取请求审查意见存在需要取舍的修改。
 - 合入、发布、线上风险相关动作。
 
 ## 13. 安装与工作空间流程
 
-初始化安装目标入口：
+全局安装目标入口：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
@@ -467,10 +480,11 @@ curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
 ~/.agentic-ops
 ```
 
-项目 AI 工作空间初始化：
+项目 AI 工作空间初始化必须在项目 AI 工作空间目录内执行，并显式绑定 Jira 用户和 Jira 空间：
 
 ```sh
-agentic-cli workspace init --workspace tapstate
+cd <project-ai-workspace>
+agentic-cli workspace init --workspace tapstate --jira-user dev@example.com --jira-project TAP
 ```
 
 典型使用：
@@ -482,7 +496,7 @@ agentic-cli takeover-task TAP-123 --workspace tapstate
 agentic-cli write-evidence --run-id ...
 ```
 
-以上命令是第一阶段本地 fake flow 的当前 CLI 接口；真实 Jira / GitHub 写操作仍未接入。
+以上命令是第一阶段 CLI 入口。对外演示必须使用真实 Jira 卡片；本地模拟流程只作为自动化回归验证。真实 Jira / GitHub 写操作仍必须经过门禁、策略和人工确认。
 
 ## 14. 第一阶段交付物
 
@@ -499,20 +513,20 @@ agentic-cli write-evidence --run-id ...
 - 操作契约文档：`docs/contracts/operation-contract.md`。
 - TapData / TapState 工作流配置草案：`docs/profiles/workflow-profile.md`。
 - Go `agentic-cli` CLI 运行时设计：`docs/runtime/cli-runtime.md`。
-- Jira / GitHub / Git 关键操作 guard 设计：`docs/runtime/cli-runtime.md`。
-- Evidence templates 设计：`docs/templates/evidence-templates.md`。
-- 反馈闭环事件日志规范和日报命令：`docs/workflows/feedback-loop.md`。
-- 一个端到端 demo issue 脚本：`docs/examples/end-to-end-demo.md`。
+- Jira / GitHub / Git 关键操作防护设计：`docs/runtime/cli-runtime.md`。
+- 证据模板设计：`docs/templates/evidence-templates.md`。
+- 反馈闭环事件日志、任务审计和按需分析规范：`docs/workflows/feedback-loop.md`。
+- 一个端到端演示卡片脚本：`docs/examples/end-to-end-demo.md`。
 
 第一阶段验收标准：
 
 - 研发负责人能完成初始化。
 - AI 能列出 负责人名下 Jira 待办。
-- AI 能接管一个 issue，并执行 gate。
+- AI 能接管一个 Jira 卡片，并执行门禁。
 - 接管成功或失败都能写入结构化 Jira 评论。
 - AI 能完成一次真实或接近真实的代码修改。
 - AI 能运行最小验证并回写结果。
 - AI 完成后停在人工确认点。
-- 研发负责人确认后再 push / PR。
-- 每次 operation 都有结构化事件日志。
-- 每天能生成 feedback report 和改进建议。
+- 研发负责人确认后再推送或创建拉取请求。
+- 每次操作都有结构化事件日志。
+- 完成、阻塞或交接时能提交任务级审计记录，并能按需生成反馈报告和改进建议。

@@ -6,8 +6,16 @@ allowed_stages:
   - installed
 required_inputs:
   - workspace
+  - jira_user
+  - jira_project
 input:
   workspace:
+    type: string
+    required: true
+  jira_user:
+    type: string
+    required: true
+  jira_project:
     type: string
     required: true
 preconditions:
@@ -15,6 +23,12 @@ preconditions:
   - workspace_root_must_be_writable
 output:
   workspace:
+    type: string
+  workspace_root:
+    type: string
+  jira_user:
+    type: string
+  jira_project:
     type: string
   profile:
     type: string
@@ -27,6 +41,8 @@ output:
 failure:
   codes:
     - missing_workspace
+    - missing_jira_user
+    - missing_jira_project
     - workspace_root_failed
     - workspace_init_failed
 side_effects:

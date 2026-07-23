@@ -209,6 +209,14 @@ func runPreflight(args []string, stdout io.Writer) int {
 
 func runWorkspaceInit(args []string, stdout io.Writer) int {
 	workspaceName := readFlag(args, "--workspace", "default")
+	jiraUser := readFlag(args, "--jira-user", "")
+	jiraProject := readFlag(args, "--jira-project", "")
+	if jiraUser == "" {
+		return writeJSON(stdout, output.Failure("workspace_init", "missing_jira_user", "缺少 Jira 用户", "请提供 --jira-user"))
+	}
+	if jiraProject == "" {
+		return writeJSON(stdout, output.Failure("workspace_init", "missing_jira_project", "缺少 Jira 空间", "请提供 --jira-project"))
+	}
 	root, err := workspaceRoot()
 	if err != nil {
 		return writeJSON(stdout, output.Failure("workspace_init", "workspace_root_failed", "无法读取当前工作目录", "请在项目 AI 工作空间中重试"))
@@ -218,11 +226,14 @@ func runWorkspaceInit(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.Failure("workspace_init", "workspace_init_failed", err.Error(), "请检查工作空间目录权限"))
 	}
 	return writeJSON(stdout, output.Success("workspace_init", map[string]any{
-		"workspace":    info.Name,
-		"profile":      info.Name,
-		"runs_dir":     info.RunsDir,
-		"feedback_dir": info.FeedbackDir,
-		"next_action":  "init_agent_capability",
+		"workspace":      info.Name,
+		"workspace_root": info.Root,
+		"jira_user":      jiraUser,
+		"jira_project":   jiraProject,
+		"profile":        info.Name,
+		"runs_dir":       info.RunsDir,
+		"feedback_dir":   info.FeedbackDir,
+		"next_action":    "init_agent_capability",
 	}))
 }
 
@@ -702,25 +713,25 @@ func runPolicyRollback(args []string, stdout io.Writer) int {
 
 func runTakeoverTask(args []string, stdout io.Writer) int {
 	if len(args) < 2 {
-		return writeJSON(stdout, output.Failure("takeover_task", "missing_issue_key", "缺少 issue key", "请提供 Jira issue key"))
+		return writeJSON(stdout, output.Failure("takeover_task", "missing_issue_key", "缺少 Jira 卡片编号", "请提供 Jira 卡片编号"))
 	}
 	workspaceName := readFlag(args, "--workspace", "default")
 	issueKey := args[1]
 	workspaceProfile := takeoverProfile(workspaceName)
 	selection, err := selectJiraClient(workspaceName, workspaceProfile)
 	if err != nil {
-		return writeJSON(stdout, output.Failure("takeover_task", "jira_adapter_config_failed", err.Error(), "请检查 Jira adapter 配置"))
+		return writeJSON(stdout, output.Failure("takeover_task", "jira_adapter_config_failed", err.Error(), "请检查 Jira 适配器配置"))
 	}
 	issue, ok, err := selection.Client.GetIssueByKey(context.Background(), workspaceName, issueKey)
 	if err != nil {
-		return writeJSON(stdout, output.Failure("takeover_task", "jira_issue_read_failed", err.Error(), "请检查 Jira adapter 配置和 issue 权限"))
+		return writeJSON(stdout, output.Failure("takeover_task", "jira_issue_read_failed", err.Error(), "请检查 Jira 适配器配置和卡片权限"))
 	}
 	if !ok {
-		return writeJSON(stdout, output.Failure("takeover_task", "issue_not_found", "未找到 Jira issue", "请检查 issue key"))
+		return writeJSON(stdout, output.Failure("takeover_task", "issue_not_found", "未找到 Jira 卡片", "请检查 Jira 卡片编号"))
 	}
 	currentJiraUser, err := selection.Client.CurrentUser(context.Background())
 	if err != nil {
-		return writeJSON(stdout, output.Failure("takeover_task", "jira_current_user_failed", err.Error(), "请检查 Jira adapter 登录状态"))
+		return writeJSON(stdout, output.Failure("takeover_task", "jira_current_user_failed", err.Error(), "请检查 Jira 适配器登录状态"))
 	}
 	decision := jira.ValidateTakeover(issue, workspaceProfile, currentJiraUser, agentID())
 	if !decision.OK {
@@ -843,7 +854,7 @@ func missingJiraFieldName(code string) string {
 }
 
 func jiraMissingFieldTemplate() (string, string) {
-	const fallback = "# Jira 卡片信息缺失\n\nAgenticOps 无法继续接管该任务，因为 Jira 卡片缺少必要信息。\n\n- 缺失字段：`<missing_field>`\n- 当前 operation：`<operation>`\n- 建议动作：请补充该字段，或维护 workspace profile 中的字段映射。\n"
+	const fallback = "# Jira 卡片信息缺失\n\nAgenticOps 无法继续接管该任务，因为 Jira 卡片缺少必要信息。\n\n- 缺失字段：`<missing_field>`\n- 当前操作：`<operation>`\n- 建议动作：请补充该字段，或维护工作流配置中的字段映射。\n"
 	root, err := repoRoot()
 	if err != nil {
 		return "", fallback
@@ -908,14 +919,14 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 			}
 		}
 		if issueKey == "" {
-			return writeJSON(stdout, output.Failure("write_evidence", "run_not_found", "未找到 run_id 对应的 Jira issue", "请检查 run_id 是否存在有效接管事件"))
+			return writeJSON(stdout, output.Failure("write_evidence", "run_not_found", "未找到 run_id 对应的 Jira 卡片", "请检查 run_id 是否存在有效接管事件"))
 		}
 		if !hasFlag(args, "--confirm-real-jira-write") {
 			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "write_evidence", "evidence_write_gate", "ask_owner", "real_jira_confirmation_required", false, true)
 			return writeJSON(stdout, output.FailureWithContext("write_evidence", output.FailureContext{
 				Code:                "real_jira_confirmation_required",
-				Message:             "真实 Jira comment 写入需要显式确认",
-				RequiredHumanAction: "请确认 evidence 内容和 policy/gate 后添加 --confirm-real-jira-write",
+				Message:             "真实 Jira 评论写入需要显式确认",
+				RequiredHumanAction: "请确认证据内容、策略和门禁后添加 --confirm-real-jira-write",
 				TaskType:            "evidence_write",
 				CurrentStage:        "evidence_write_gate",
 				NextAction:          "ask_owner",
@@ -928,7 +939,7 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 	if selection.Mode == "real" {
 		if err := selection.Client.AddComment(context.Background(), issueKey, content); err != nil {
 			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "write_evidence", "evidence_write_gate", "ask_owner", "jira_comment_write_failed", false, false)
-			return writeJSON(stdout, output.Failure("write_evidence", "jira_comment_write_failed", err.Error(), "请检查 Jira comment 权限和 policy gate"))
+			return writeJSON(stdout, output.Failure("write_evidence", "jira_comment_write_failed", err.Error(), "请检查 Jira 评论权限、策略和门禁"))
 		}
 		if err := appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "write_evidence", "evidence_written", "request_owner_confirmation", "", true, false); err != nil {
 			return writeJSON(stdout, output.Failure("write_evidence", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
@@ -964,7 +975,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 	if issueKey == "" {
 		return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
 			Code:                "missing_issue_key",
-			Message:             "缺少 issue key",
+			Message:             "缺少 Jira 卡片编号",
 			RequiredHumanAction: "请提供 --issue-key",
 			TaskType:            "task_takeover",
 			CurrentStage:        "completion_cleanup",
@@ -987,7 +998,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 	workspaceProfile := takeoverProfile(workspaceName)
 	selection, err := selectJiraClient(workspaceName, workspaceProfile)
 	if err != nil {
-		return writeJSON(stdout, output.Failure("release_agent", "jira_adapter_config_failed", err.Error(), "请检查 Jira adapter 配置"))
+		return writeJSON(stdout, output.Failure("release_agent", "jira_adapter_config_failed", err.Error(), "请检查 Jira 适配器配置"))
 	}
 	if selection.Mode == "real" {
 		if !hasFlag(args, "--confirm-real-jira-write") {
@@ -995,7 +1006,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
 				Code:                "real_jira_confirmation_required",
 				Message:             "真实 Jira 写入需要显式确认",
-				RequiredHumanAction: "请确认完成证据和 policy/gate 后添加 --confirm-real-jira-write",
+				RequiredHumanAction: "请确认完成证据、策略和门禁后添加 --confirm-real-jira-write",
 				TaskType:            "task_takeover",
 				CurrentStage:        "completion_cleanup",
 				NextAction:          "ask_owner",
@@ -1003,20 +1014,20 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		}
 		issue, ok, err := selection.Client.GetIssueByKey(context.Background(), workspaceName, issueKey)
 		if err != nil {
-			return writeJSON(stdout, output.Failure("release_agent", "jira_issue_read_failed", err.Error(), "请检查 Jira adapter 配置和 issue 权限"))
+			return writeJSON(stdout, output.Failure("release_agent", "jira_issue_read_failed", err.Error(), "请检查 Jira 适配器配置和卡片权限"))
 		}
 		if !ok {
-			return writeJSON(stdout, output.Failure("release_agent", "issue_not_found", "未找到 Jira issue", "请检查 issue key"))
+			return writeJSON(stdout, output.Failure("release_agent", "issue_not_found", "未找到 Jira 卡片", "请检查 Jira 卡片编号"))
 		}
 		currentJiraUser, err := selection.Client.CurrentUser(context.Background())
 		if err != nil {
-			return writeJSON(stdout, output.Failure("release_agent", "jira_current_user_failed", err.Error(), "请检查 Jira adapter 登录状态"))
+			return writeJSON(stdout, output.Failure("release_agent", "jira_current_user_failed", err.Error(), "请检查 Jira 适配器登录状态"))
 		}
 		if issue.Assignee != currentJiraUser {
 			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
 				Code:                "assignee_changed",
 				Message:             "当前 Jira assignee 已不是当前用户",
-				RequiredHumanAction: "请研发 owner 确认是否继续释放代理绑定",
+				RequiredHumanAction: "请研发负责人确认是否继续释放代理绑定",
 				TaskType:            "task_takeover",
 				CurrentStage:        "completion_cleanup",
 				NextAction:          "ask_owner",
@@ -1025,8 +1036,8 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		if issue.CurrentAgentID != currentAgentID {
 			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
 				Code:                "agent_ownership_conflict",
-				Message:             "当前 Jira issue 未绑定当前 AIAgent",
-				RequiredHumanAction: "请研发 owner 确认是否释放当前代理绑定",
+				Message:             "当前 Jira 卡片未绑定当前 AIAgent",
+				RequiredHumanAction: "请研发负责人确认是否释放当前代理绑定",
 				TaskType:            "task_takeover",
 				CurrentStage:        "completion_cleanup",
 				NextAction:          "ask_owner",
@@ -1054,7 +1065,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		}
 		if err := selection.Client.UpdateFields(context.Background(), issueKey, fields); err != nil {
 			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completion_cleanup", "ask_owner", "agent_release_failed", false, false)
-			return writeJSON(stdout, output.Failure("release_agent", "agent_release_failed", err.Error(), "请检查 Jira 字段权限并由研发 owner 决策是否人工释放"))
+			return writeJSON(stdout, output.Failure("release_agent", "agent_release_failed", err.Error(), "请检查 Jira 字段权限并由研发负责人决策是否人工释放"))
 		}
 		if jiraTransitionID != "" {
 			if err := selection.Client.TransitionIssue(context.Background(), issueKey, jiraTransitionID); err != nil {
@@ -1072,7 +1083,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 				return writeJSON(stdout, output.Failure("release_agent", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 			}
 		}
-		if err := appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completed", "feedback_report", "", true, false); err != nil {
+		if err := appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completed", "task_audit_submitted", "", true, false); err != nil {
 			return writeJSON(stdout, output.Failure("release_agent", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 		}
 	}
@@ -1082,7 +1093,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		TaskType:              "task_takeover",
 		Operation:             "release_agent",
 		CurrentStage:          "completed",
-		NextAction:            "feedback_report",
+		NextAction:            "task_audit_submitted",
 		AgentID:               currentAgentID,
 		CurrentAgentID:        currentAgentID,
 		CompletedAt:           completedAt,
@@ -1104,7 +1115,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		"completed_at":             completedAt,
 		"completion_evidence":      completionEvidence,
 		"current_stage":            "completed",
-		"next_action":              "feedback_report",
+		"next_action":              "task_audit_submitted",
 	}))
 }
 
@@ -1143,7 +1154,7 @@ func runFeedbackReport(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.Failure("feedback_report", "event_read_failed", err.Error(), "请检查工作空间反馈日志"))
 	}
 	report := feedback.Summarize(events)
-	reportPath := filepath.Join(root, ".agentic-ops", "feedback", "daily", date+".md")
+	reportPath := filepath.Join(root, ".agentic-ops", "feedback", "reports", date+".md")
 	if err := feedback.WriteMarkdown(reportPath, workspaceName, date, report); err != nil {
 		return writeJSON(stdout, output.Failure("feedback_report", "report_write_failed", err.Error(), "请检查工作空间目录权限"))
 	}

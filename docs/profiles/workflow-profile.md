@@ -2,27 +2,26 @@
 
 ## 1. 目的
 
-工作流配置把 AgenticOps 的通用 operation 映射到具体项目流程。
+工作流配置把 AgenticOps 的通用操作映射到具体项目流程。
 
-AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira workflow。
+AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira 工作流。
 
 ## 2. 配置范围
 
-一个 工作流配置至少应描述：
+一个工作流配置至少应描述：
 
 - 项目 AI 工作空间名称。
-- Jira 空间和查询规则。
+- Jira 用户、Jira 空间和查询规则。
 - Jira Form Mapping，把 AgenticOps 标准字段映射到具体 Jira 字段、描述模板、评论模板或工作空间配置。
-- 任务分类映射，把 Jira issue type、label、component、custom field 或描述模板映射到 AgenticOps `task_class`。
+- 任务分类映射，把 Jira 卡片类型、标签、组件、自定义字段或描述模板映射到 AgenticOps `task_class`。
 - 标准流程映射，把 `task_class` 映射到 Standard Process Registry 中的 `process_id`。
-- Jira 状态和 transition 映射。
+- Jira 状态和 `transition` 映射。
 - 专业审查节点和对应角色映射。
-- GitHub organization 和 repo 映射。
-- 本地源码目录。
+- Jira 空间到代码仓库的映射：一个 Jira 空间可以对应若干 GitHub 仓库，必须说明默认仓库、匹配规则和本地源码目录。
 - 允许的写操作。
 - 人工确认点。
 - 重试和重做规则。
-- evidence 模板。
+- 证据模板。
 - 事件日志位置。
 
 ## 3. 概念结构
@@ -31,6 +30,7 @@ AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira workfl
 workspace: tapstate
 
 jira:
+  user: dev@example.com
   project: TAP
   task_query: "assignee = currentUser() AND status in (...)"
 
@@ -75,8 +75,14 @@ github:
   organization: tapstate
   repositories:
     default: tapstate/example-repo
+    by_component:
+      api: tapstate/tap-api
+      web: tapstate/tap-web
+    by_label:
+      cli: tapstate/agentic-ops
 
 local:
+  workspace_root: "<project-ai-workspace>"
   source_root: "<project-ai-workspace>/src"
   runs_dir: "<project-ai-workspace>/.agentic-ops/runs"
   feedback_dir: "<project-ai-workspace>/.agentic-ops/feedback"
@@ -115,17 +121,17 @@ templates:
 
 ## 4. 配置规则
 
-- Profile 可以绑定具体 Jira workflow，但核心 operation 不能依赖某个固定 Jira 状态名。
-- Profile 必须适配 Task Form Standard；AIAgent 只消费标准字段，不直接消费 Jira custom field。
-- Profile 必须适配 Standard Process Registry；AIAgent 先识别 `task_class`，再选择 `process_id`。
-- Profile 必须说明关键专业审查节点如何映射到标准字段、Jira 状态、PR 审查、CI 或人工确认。
-- Profile 必须说明失败后允许重试还是必须重做前序阶段。
-- Profile 必须能被 `agentic-cli preflight` 校验。
-- Profile 不得包含 secrets、tokens 或 private keys。
-- Profile 中的 repo 映射必须能解释任务如何定位目标源码。
-- Profile 缺字段时，AIAgent 不能自行猜测，应请求研发负责人补充。
-- Profile 缺任务分类、流程映射、Jira 状态或 transition 时，AIAgent 必须输出 gap 并请求流程负责人决策。
-- `transition_mapping` 只表达标准推进动作到标准流程阶段的关系；真实 Jira workflow 的 transition id/name 必须放在 `jira_transition_mapping`，避免把标准流程语义和项目私有 Jira 配置混在一起。
+- 工作流配置可以绑定具体 Jira 工作流，但核心操作不能依赖某个固定 Jira 状态名。
+- 工作流配置必须适配 Task Form Standard；AIAgent 只消费标准字段，不直接消费 Jira 自定义字段。
+- `Profile` 必须适配 Standard Process Registry；AIAgent 先识别 `task_class`，再选择 `process_id`。
+- `Profile` 必须说明关键专业审查节点如何映射到标准字段、Jira 状态、PR 审查、CI 或人工确认。
+- `Profile` 必须说明失败后允许重试还是必须重做前序阶段。
+- `Profile` 必须能被 `agentic-cli preflight` 校验。
+- `Profile` 不得包含 secrets、tokens 或 private keys。
+- `Profile` 中的 `repo` 映射必须能解释任务如何定位目标源码。
+- `Profile` 缺字段时，AIAgent 不能自行猜测，应请求研发负责人补充。
+- `Profile` 缺任务分类、流程映射、Jira 状态或 `transition` 时，AIAgent 必须输出 `gap` 并请求流程负责人决策。
+- `transition_mapping` 只表达标准推进动作到标准流程阶段的关系；真实 Jira 工作流的 `transition id` / `transition name` 必须放在 `jira_transition_mapping`，避免把标准流程语义和项目私有 Jira 配置混在一起。
 
 ## 5. Jira Form Mapping
 
@@ -153,7 +159,7 @@ jira_form_mapping:
 
 ## 6. Jira Transition Mapping
 
-Jira Transition Mapping 负责把标准推进动作映射到具体 Jira workflow 的 transition id 或 transition name。`id` 优先；只有没有 `id` 时，AgenticCLI 才会读取 Jira transitions 并按 `name` 查找 id。
+Jira `transition` 映射负责把标准推进动作映射到具体 Jira 工作流的 `transition id` 或 `transition name`。`id` 优先；只有没有 `id` 时，AgenticCLI 才会读取 Jira `transition` 并按 `name` 查找 `id`。
 
 概念结构：
 
@@ -169,7 +175,7 @@ jira_transition_mapping:
     id: "31"
 ```
 
-如果 Jira workflow、字段或描述模板无法适配标准字段，profile validation 必须返回稳定 gap，例如 `missing_form_field`、`unmapped_jira_field`、`lifecycle_mapping_gap`、`transition_mapping_gap`、`jira_transition_mapping_gap` 或 `task_class_mapping_gap`。
+如果 Jira 工作流、字段或描述模板无法适配标准字段，工作流配置校验必须返回稳定缺口，例如 `missing_form_field`、`unmapped_jira_field`、`lifecycle_mapping_gap`、`transition_mapping_gap`、`jira_transition_mapping_gap` 或 `task_class_mapping_gap`。
 
 ## 7. 审查、重试和重做映射
 
@@ -188,7 +194,7 @@ review_gates:
       - blocked
     output_fields:
       reviewer_decision: changes_requested
-      reviewer_required_action: "按 review comments 修复并重新验证"
+      reviewer_required_action: "按审查意见修复并重新验证"
 
 retry_redo:
   verification_failed:
@@ -201,11 +207,11 @@ retry_redo:
     next_action: ask_owner
 ```
 
-当审查节点、重试规则或重做边界无法映射时，profile validation 必须返回 `review_gate_mapping_gap` 或 `retry_redo_policy_gap`，并要求流程负责人决策。
+当审查节点、重试规则或重做边界无法映射时，工作流配置校验必须返回 `review_gate_mapping_gap` 或 `retry_redo_policy_gap`，并要求流程负责人决策。
 
 ## 7. 所有权字段映射
 
-工作流配置必须声明 `current_agent_id` 和 `takeover_at` 如何落到 Jira 或稳定描述模板。接管 gate 依赖这些字段防止多个 AIAgent 同时处理同一任务。
+工作流配置必须声明 `current_agent_id` 和 `takeover_at` 如何落到 Jira 或稳定描述模板。`current_agent_id` 是任务当前绑定的 `agent_id`，不是新的身份字段；接管门禁依赖这些字段防止多个 AIAgent 同时处理同一任务。
 
 规则：
 
@@ -213,7 +219,7 @@ retry_redo:
 - `current_agent_id` 等于当前 AIAgent 的 `agent_id` 时，允许恢复同一代理的执行。
 - `current_agent_id` 不为空且不等于当前 AIAgent 的 `agent_id` 时，必须返回 `agent_ownership_conflict`。
 - 任务完成或交接结束后，必须清理 Jira 上的 `current_agent_id`，并记录 `current_agent_id_cleared=true`。
-- assignee 不是当前登录用户时，必须返回 `assignee_mismatch` 或 `assignee_changed`，不得自动接管或自动释放代理绑定。
+- `assignee` 不是当前登录用户时，必须返回 `assignee_mismatch` 或 `assignee_changed`，不得自动接管或自动释放代理绑定。
 
 ## 8. 第一批默认配置
 
@@ -222,4 +228,4 @@ retry_redo:
 - `tapstate`
 - `tapdata`
 
-这两个 profile 可以共享 操作契约，但拥有不同 Jira 空间、GitHub 仓库、本地源码和任务执行上下文。
+这两个工作流配置可以共享操作契约，但拥有不同 Jira 空间、GitHub 仓库、本地源码和任务执行上下文。

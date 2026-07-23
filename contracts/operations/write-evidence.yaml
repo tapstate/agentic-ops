@@ -1,6 +1,6 @@
 operation: write_evidence
 version: 1
-purpose: 写入 Jira / PR evidence。
+purpose: 写入 Jira / 拉取请求证据，并形成任务级审计记录的证据主体。
 task_type: evidence_write
 allowed_stages:
   - takeover_started
@@ -49,6 +49,7 @@ failure:
 side_effects:
   - may_write_jira_comment
   - may_write_local_event
+  - may_submit_task_audit_evidence
 human_gate:
   required: false
 retry_policy:

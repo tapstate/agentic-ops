@@ -21,7 +21,7 @@ func TestCheckReportsRequiredUpdateWithBlockedOperations(t *testing.T) {
   "version": "RES-v0.1.20-deadbee",
   "asset_version": "RES-v0.1.20-deadbee",
   "severity": "required",
-  "reason": "takeover_task may write invalid evidence",
+  "reason": "takeover_task 可能写入无效证据",
   "blocked_operations": ["takeover_task", "write_evidence"]
 }
 `)

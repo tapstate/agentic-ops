@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将 AgenticOps 从本地 fake flow 升级为符合完整设计的受控 CLI 运行时。
+**Goal:** 将 AgenticOps 从本地模拟流程升级为符合完整设计的受控 CLI 运行时。
 
-**Architecture:** 先把 Operation Contract变成可验证的机器可读源头，再接入 Workflow Profile、Standard Process Registry、Jira adapter、ownership gate、problem resolution commands 和完成清理。每个阶段都保留 fake adapter 作为本地测试入口，真实写操作必须受 policy / gate / confirmation 控制。
+**Architecture:** 先把操作契约变成可验证的机器可读源头，再接入工作流配置、Standard Process Registry、Jira 适配器、所有权门禁、问题修复命令和完成清理。每个阶段都保留模拟适配器作为本地测试入口，真实写操作必须受策略、门禁和人工确认控制。
 
 **Tech Stack:** Go 1.22+、标准库优先、`gopkg.in/yaml.v3`、shell 仅用于安装和 e2e 编排。
 
@@ -16,10 +16,10 @@
 - stdout 只输出结构化 JSON；stderr 输出人类诊断日志。
 - 所有失败必须返回稳定 `code`、`message`、`required_human_action`、`task_type`、`current_stage` 和 `next_action`。
 - secrets 不允许出现在 stdout、stderr、事件日志或诊断包中。
-- `contracts/operations/` 是唯一机器可读 Operation Contract源头。
+- `contracts/operations/` 是唯一机器可读操作契约源头。
 - AIAgent 执行 Jira 任务前必须先识别 `task_class`，再选择 Standard Process Registry 中的 `process_id`。
 - `agent_id` 是 AIAgent 唯一编号；`current_agent_id` 是任务运行中绑定字段，任务完成或交接结束后必须清理。
-- 真实 Jira 写操作、Git push、GitHub PR 创建、merge 和发布必须经过 policy / gate / confirmation。
+- 真实 Jira 写操作、Git 推送、GitHub 拉取请求创建、合并和发布必须经过策略、门禁和人工确认。
 - 历史 `rd-agentic` / `td-agentic` 只作为参考来源，不作为当前事实源。
 
 ---
@@ -507,7 +507,7 @@ Add `profile_update` and `profile_rollback` to `agent init` capabilities.
 
 - [x] **Step 5: Add Operation Contract and e2e coverage**
 
-`contract validate` must include `profile_update` and `profile_rollback`. Local fake flow must exercise update, validate and rollback.
+`contract validate` 必须包含 `profile_update` 和 `profile_rollback`。本地模拟流程必须覆盖更新、校验和回滚。
 
 - [x] **Step 6: Verification**
 
@@ -537,7 +537,7 @@ Scope:
 
 Definition:
 
-- Fake Jira issues expose owner, assignee, issue type, status, risk level and `current_agent_id`.
+- 模拟 Jira 卡片暴露 `owner`、`assignee`、卡片类型、状态、风险等级和 `current_agent_id`。
 - `takeover-task` validates owner, assignee, agent binding, task class mapping, process mapping, status mapping and required Jira fields before creating a run.
 - Gate failures return stable JSON with `current_stage: takeover_gate`, `next_action: ask_owner` and Chinese `required_human_action`.
 - Gate failures write blocked feedback events.
@@ -559,7 +559,7 @@ Run `takeover-task TAP-MISSING-REPO --workspace tapstate` and assert:
 
 Expected: FAIL because fake Jira does not return this issue and takeover does not run the gate.
 
-- [x] **Step 3: Implement fake Jira issue fields and gate**
+- [x] **Step 3: 补充模拟 Jira 卡片字段和所有权门禁**
 
 Add `jira.ValidateTakeover` and fake issues for blocked scenarios.
 
@@ -569,7 +569,7 @@ Successful takeover returns `task_class` and `process_id`; blocked takeover writ
 
 - [x] **Step 5: Update contract and e2e coverage**
 
-Add newly exercised failure codes to `takeover-task.yaml`. Local fake flow must include a blocked takeover and count it in feedback report.
+把新增覆盖到的失败码加入 `takeover-task.yaml`。本地模拟流程必须包含一次阻断接管，并把它计入反馈报告。
 
 - [x] **Step 6: Verification**
 
@@ -611,7 +611,7 @@ Added `jira.Client` and made fake client implement the adapter boundary while pr
 
 - [x] **Step 3: Implement real Jira REST client**
 
-Added Basic Auth request construction, profile-based field selection, Jira issue field mapping, ADF comment body generation and controlled `fields` update payloads.
+已加入 Basic Auth 请求构造、基于工作流配置的字段选择、Jira 卡片字段映射、ADF 评论正文生成和受控 `fields` 更新载荷。
 
 - [x] **Step 4: Wire CLI to adapter boundary**
 
@@ -719,7 +719,7 @@ Scope:
 
 Definition:
 
-- In real Jira mode, `write-evidence` resolves the Jira issue key from `--issue-key` or the existing run event.
+- 在真实 Jira 模式下，`write-evidence` 从 `--issue-key` 或既有运行事件解析 Jira 卡片编号。
 - Real Jira comment writes require `--confirm-real-jira-write`.
 - Missing confirmation returns `real_jira_confirmation_required` and records a blocked `real_jira_write` gate event.
 - Confirmed comment writes call the Jira adapter `AddComment` path and record a passed `real_jira_write` gate event.
@@ -732,7 +732,7 @@ Covered missing confirmation and confirmed real Jira comment write for `write-ev
 
 - [x] **Step 2: Implement issue lookup and comment gate**
 
-Added run event lookup for issue key, confirmation guard, Jira comment write and `real_jira_write` gate events.
+已加入按 Jira 卡片编号查找运行事件、确认防护、Jira 评论写入和 `real_jira_write` 门禁事件。
 
 - [x] **Step 3: Update Operation Contract**
 
@@ -782,7 +782,7 @@ Add optional fields to feedback events and populate them in successful takeover.
 
 - [x] **Step 3: Update contract and e2e coverage**
 
-`takeover-task.yaml` must declare the new output fields. Local fake flow must assert the current agent binding appears in takeover output.
+`takeover-task.yaml` 必须声明新增输出字段。本地模拟流程必须断言当前代理绑定出现在接管输出中。
 
 - [x] **Step 4: Verification**
 
@@ -829,7 +829,7 @@ Add optional `completed_at` and `completion_evidence` to feedback events. Add th
 
 - [x] **Step 3: Add Operation Contract and e2e coverage**
 
-`contract validate` must include `release_agent`. Local fake flow must exercise the cleanup event and count it in feedback report.
+`contract validate` 必须包含 `release_agent`。本地模拟流程必须覆盖清理事件，并把它计入反馈报告。
 
 - [x] **Step 4: Verification**
 
@@ -880,7 +880,7 @@ Use current repo and workspace state to check profile validation, policy file pr
 
 - [x] **Step 3: Add Operation Contract and e2e coverage**
 
-`contract validate` must include `doctor`. Local fake flow must run doctor.
+`contract validate` 必须包含 `doctor`。本地模拟流程必须运行 `doctor`。
 
 - [x] **Step 4: Verification**
 
@@ -923,7 +923,7 @@ Generate a Markdown bundle from local feedback events. Keep redaction deliberate
 
 - [x] **Step 3: Add Operation Contract and e2e coverage**
 
-`contract validate` must include `feedback_bundle`. Local fake flow must generate a bundle and verify the file exists.
+`contract validate` 必须包含 `feedback_bundle`。本地模拟流程必须生成诊断包并验证文件存在。
 
 - [x] **Step 4: Verification**
 
@@ -985,7 +985,7 @@ Add `update_check` and `update_apply` to `agent init` capabilities.
 
 - [x] **Step 5: Add Operation Contract and e2e coverage**
 
-`contract validate` must include update contracts. Local fake flow must run check/apply against a temporary manifest.
+`contract validate` 必须包含更新契约。本地模拟流程必须针对临时清单运行检查和应用。
 
 - [x] **Step 6: Verification**
 
@@ -1020,7 +1020,7 @@ Added `policy_validate`, `policy_update` and `policy_rollback` to AgenticCLI cap
 
 - [x] **Step 5: Add Operation Contract and e2e coverage**
 
-Added policy Operation Contract and local fake flow coverage with temporary source policy and cleanup of generated backup.
+已加入策略操作契约，并用临时源策略和备份清理覆盖本地模拟流程。
 
 - [x] **Step 6: Verification**
 

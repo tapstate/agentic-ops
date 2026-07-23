@@ -1,6 +1,6 @@
 operation: feedback_bundle
 version: 1
-purpose: 为指定 run 生成脱敏诊断包，供维护者定位失败、阻塞和环境问题。
+purpose: 为指定 `run_id` 生成脱敏诊断包，供维护者定位失败、阻塞和环境问题；它可以补充任务审计，但不能替代 Jira、审计服务或目标仓库上的任务级审计提交。
 task_type: diagnosis
 allowed_stages:
   - failed
@@ -45,6 +45,7 @@ failure:
 side_effects:
   - may_write_local_diagnostic_bundle
   - must_not_write_jira
+  - must_not_replace_task_audit_submission
   - must_not_modify_code
 human_gate:
   required: false

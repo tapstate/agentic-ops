@@ -20,7 +20,7 @@
 - Web 控制台。
 - 后台 daemon。
 - 自动修改公司规范。
-- 自动 push、自动 PR、自动 merge。
+- 自动推送、自动创建拉取请求、自动合并。
 
 ## 2. 必须实现的目标命令
 
@@ -43,53 +43,53 @@ agentic-cli policy rollback --workspace <name>
   - 复核 `docs/runtime/problem-resolution-and-update.md` 中的架构适配性评估。
   - 确认正式使用前不依赖历史 `rd-agentic` / `td-agentic` 项目作为事实源。
   - 确认所有设计、计划、目标都以当前 `agentic-ops` 仓库文档为准。
-  - Implementation note: 用户已决策采用完整设计作为当前必须实现边界；实现顺序从 `docs/architecture/full-design-implementation-design.md` 和 `plans/full-design-implementation-plan-v1.md` 开始，先完成机器可读 Operation Contract 验证基线，再继续 profile、Jira ownership gate、problem resolution commands 和完成清理。
+  - Implementation note: 用户已决策采用完整设计作为当前必须实现边界；实现顺序从 `docs/architecture/full-design-implementation-design.md` 和 `plans/full-design-implementation-plan-v1.md` 开始，先完成机器可读操作契约验证基线，再继续工作流配置、Jira 所有权门禁、问题修复命令和完成清理。
 
 - [x] **Task 1: 稳定错误码与事件模型**
   - 为四类问题定义稳定 `code`。
   - 失败输出必须包含 `required_human_action`。
-  - 事件日志记录 CLI version、asset version、operation、task_type、current_stage、next_action、code 和 gate 状态。
-  - Implementation note: 当前已完成结构化失败输出基线，失败输出包含 `required_human_action`、`task_type`、`current_stage` 和 `next_action`；事件模型已包含 `agentic_cli_version`、`version_state`、`asset_version`、`code`、`gate` 和 `gate_status`。当前只覆盖已实现本地 fake flow 的命令，四类问题的完整业务 gate 分别在后续 Task 4、Task 5 和 Task 6 中继续落地。
+  - 事件日志记录 CLI 版本、资产版本、操作、`task_type`、`current_stage`、`next_action`、`code` 和门禁状态。
+  - Implementation note: 当前已完成结构化失败输出基线，失败输出包含 `required_human_action`、`task_type`、`current_stage` 和 `next_action`；事件模型已包含 `agentic_cli_version`、`version_state`、`asset_version`、`code`、`gate` 和 `gate_status`。当前只覆盖已实现本地模拟流程的命令，四类问题的完整业务门禁分别在后续 Task 4、Task 5 和 Task 6 中继续落地。
 
 - [x] **Task 2: 脱敏诊断包**
   - 实现 `doctor`。
   - 实现 `feedback bundle --redact`。
   - 测试诊断包不包含 secrets、tokens、原始 Jira 描述、敏感代码片段。
-  - Implementation note: `doctor` 已覆盖本地安装、版本、profile、policy、Jira adapter、GitHub 检查入口和 workspace；`feedback bundle --redact` 会生成脱敏诊断包，`tests/e2e/problem-resolution-flow.sh` 验证 token/password 被替换为 `[REDACTED]`。
+  - Implementation note: `doctor` 已覆盖本地安装、版本、工作流配置、策略、Jira 适配器、GitHub 检查入口和工作空间；`feedback bundle --redact` 会生成脱敏诊断包，`tests/e2e/problem-resolution-flow.sh` 验证 `token` / `password` 被替换为 `[REDACTED]`。
 
 - [x] **Task 3: 二进制更新**
   - 定义 release manifest。
   - 实现 `update check / apply`。
   - 支持 `optional`、`recommended`、`required` 三种更新级别。
-  - required update 只阻断受影响 operation。
+  - 必要更新只阻断受影响操作。
   - 不维护旧版本补丁线；BUG 修复只进入新的 latest 版本。
   - 如实现 rollback，只用于安装失败或新版本不可用时的本地恢复。
-  - Implementation note: `update check / apply` 已支持本地和远程 manifest、三种 severity、`blocked_operations`、artifact checksum 校验和远程二进制激活；`tests/e2e/problem-resolution-flow.sh` 验证 required update 与阻断 operation 输出。
+  - Implementation note: `update check / apply` 已支持本地和远程清单、三种严重程度、`blocked_operations`、产物校验和远程二进制激活；`tests/e2e/problem-resolution-flow.sh` 验证必要更新与阻断操作输出。
 
 - [x] **Task 4: Workflow Profile更新**
   - 实现 `profile validate / update / rollback`。
   - 支持 `status_mapping`、`transition_mapping`、`field_mapping` 校验。
   - 未知 Jira 状态必须返回 `unknown_jira_status`，不允许 AIAgent 猜。
-  - Implementation note: `profile validate / update / rollback` 已落地，profile 校验覆盖 status、standard transition、Jira transition 和字段映射；未知 Jira 状态会返回 `unknown_jira_status`，`tests/e2e/problem-resolution-flow.sh` 验证 profile hotfix 和 rollback。
+  - Implementation note: `profile validate / update / rollback` 已落地，工作流配置校验覆盖状态、标准 `transition`、Jira `transition` 和字段映射；未知 Jira 状态会返回 `unknown_jira_status`，`tests/e2e/problem-resolution-flow.sh` 验证工作流配置热修复和回滚。
 
 - [x] **Task 5: Jira 卡片属性缺失处理**
-  - 对负责人、验收标准、目标仓库、验证方式、风险等级等必填项做 gate。
+  - 对负责人、验收标准、目标仓库、验证方式、风险等级等必填项做门禁。
   - 缺失时停止接管。
   - 输出补全模板和 `required_human_action`。
-  - 把 missing field 写入 feedback report 聚合。
-  - Implementation note: `takeover-task` 在 fake / mapped Jira issue 缺少必填项时停止接管，输出 `missing_field`、渲染后的 `completion_template` 和 `required_human_action`；事件日志写入 `missing_field`，`feedback report` 输出并写入缺失字段聚合。
+  - 把缺失字段写入反馈报告聚合。
+  - Implementation note: `takeover-task` 在模拟或已映射 Jira 卡片缺少必填项时停止接管，输出 `missing_field`、渲染后的 `completion_template` 和 `required_human_action`；事件日志写入 `missing_field`，`feedback report` 输出并写入缺失字段聚合。
 
 - [x] **Task 6: Policy / Gate 更新**
   - 实现 `policy validate / update / rollback`。
-  - 支持 push、PR、Jira comment、scope change 等 gate 配置。
-  - 放宽 gate 必须要求人工确认和决策记录。
-  - Implementation note: `policy validate / update / rollback` 已落地，默认 policy 覆盖 Jira comment、transition、git commit、push、PR 和 scope change gate；真实 Jira 写入仍要求显式确认并记录 gate 审计事件，`tests/e2e/problem-resolution-flow.sh` 验证 policy hotfix 和 rollback。
+  - 支持推送、创建拉取请求、Jira 评论、范围变更等门禁配置。
+  - 放宽门禁必须要求人工确认和决策记录。
+  - Implementation note: `policy validate / update / rollback` 已落地，默认策略覆盖 Jira 评论、`transition`、`git commit`、推送、创建拉取请求和范围变更门禁；真实 Jira 写入仍要求显式确认并记录门禁审计事件，`tests/e2e/problem-resolution-flow.sh` 验证策略热修复和回滚。
 
 - [x] **Task 7: 端到端验收**
   - 增加 fake release manifest 测试。
-  - 增加 profile hotfix e2e。
-  - 增加 policy rollback e2e。
-  - 增加 missing Jira field gate e2e。
+  - 增加工作流配置热修复端到端测试。
+  - 增加策略回滚端到端测试。
+  - 增加缺失 Jira 字段门禁端到端测试。
   - Implementation note: 已新增 `tests/e2e/problem-resolution-flow.sh`，并与 `tests/e2e/local-fake-flow.sh`、`tests/e2e/local-release-install-flow.sh` 共同覆盖问题修复路径和 release install flow。
 
 ## 4. 验收命令
@@ -114,4 +114,4 @@ bash tests/e2e/problem-resolution-flow.sh
 - 资产包更新不需要重新发布二进制。
 - 二进制更新和资产包更新失败时可以本地恢复；BUG 修复不维护旧版本补丁线，只进入新的 latest 版本。
 - 诊断包可交给维护者复现问题，且不包含敏感信息。
-- feedback report 能统计问题是否减少。
+- 反馈报告能统计问题是否减少。

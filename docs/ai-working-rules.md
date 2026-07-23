@@ -37,7 +37,7 @@ AIAgent 不得声称以下内容已经存在，除非当前仓库中有文件或
 - GitHub guard 已可用。
 - Feedback command 已可用。
 
-当前阶段已允许实现本地 fake flow。AIAgent 描述能力时必须以当前源码、测试和命令输出为准，不得把未实现内容表述为已完成能力。
+当前阶段已允许实现本地模拟流程。AIAgent 描述能力时必须以当前源码、测试和命令输出为准，不得把未实现内容表述为已完成能力。
 
 ## 4. 请求决策规则
 
@@ -64,25 +64,25 @@ AIAgent 必须严格区分：
 
 ## 6. 第一阶段实现门禁
 
-当前已允许实现本地 fake flow。AIAgent 不得：
+当前已允许实现本地模拟流程。AIAgent 不得：
 
 - 创建真实 adapter。
 - 调用真实 Jira 写操作。
 - 调用真实 GitHub 写操作。
-- 自动 push。
+- 自动推送。
 - 自动创建 PR。
-- 自动 merge。
+- 自动合并。
 - 自动发布。
 - 自动改写 AgenticOps 源头规则。
 
 允许的工作：
 
 - 维护文档、目录结构、操作契约、工作流配置、AI 员工手册和 反馈闭环。
-- 实现 `agentic-cli` Go CLI 的本地 fake flow。
+- 实现 `agentic-cli` Go CLI 的本地模拟流程。
 - 实现 `scripts/init.sh` 安装 bootstrap。
-- 实现本地单元测试、脚本 smoke test 和 fake flow e2e。
+- 实现本地单元测试、脚本冒烟测试和模拟流程端到端测试。
 
-后续在人工确认和 policy 允许后写入 Jira 时，标题、描述、评论、工作日志、evidence 正文、阻塞说明和补卡说明必须使用中文；Jira 字段名、状态名、transition 名称和 issue key 可以保留原始值。
+后续在人工确认和策略允许后写入 Jira 时，标题、描述、评论、工作日志、证据正文、阻塞说明和补卡说明必须使用中文；Jira 字段名、状态名、`transition` 名称和卡片编号可以保留原始值。
 
 ## 7. 输出纪律
 

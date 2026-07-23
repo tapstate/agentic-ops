@@ -44,7 +44,7 @@ export AGENTIC_OPS_WORKSPACE_ROOT="$workspace_root"
 
 "$bin" preflight --workspace CYNTEX | grep '"operation":"preflight"'
 "$bin" preflight --workspace CYNTEX | grep "\"install_dir\":\"$AGENTIC_OPS_HOME\""
-"$bin" workspace init --workspace CYNTEX | grep '"operation":"workspace_init"'
+"$bin" workspace init --workspace CYNTEX --jira-user dev@example.com --jira-project CYNTEX | grep '"operation":"workspace_init"'
 "$bin" agent init --workspace CYNTEX | grep '"operation":"agent_init"'
 "$bin" list-tasks --workspace CYNTEX | grep '"key":"TAP-123"'
 "$bin" takeover-task TAP-123 --workspace CYNTEX | grep '"target_repo":"CYNTEX/example-repo"'
@@ -55,4 +55,4 @@ export AGENTIC_OPS_WORKSPACE_ROOT="$workspace_root"
 test -f "$deploy_home/.agentic-ops/assets/$version/manifest.json"
 test -f "$deploy_home/.agentic-ops/current.json"
 test -f "$workspace_root/.agentic-ops/feedback/events.ndjson"
-test -f "$workspace_root/.agentic-ops/feedback/daily/2026-07-22.md"
+test -f "$workspace_root/.agentic-ops/feedback/reports/2026-07-22.md"

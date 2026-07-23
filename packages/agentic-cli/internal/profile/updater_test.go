@@ -97,6 +97,7 @@ func writeProfileTestFile(t *testing.T, path string, content string) {
 func validProfileYAML(workspace string, jiraProject string) string {
 	return "workspace: " + workspace + "\n" +
 		"jira:\n" +
+		"  user: dev@example.com\n" +
 		"  project: " + jiraProject + "\n" +
 		"  task_query: project = " + jiraProject + "\n" +
 		"jira_form_mapping:\n" +
@@ -115,6 +116,9 @@ func validProfileYAML(workspace string, jiraProject string) string {
 		"jira_transition_mapping:\n" +
 		"  start_progress:\n" +
 		"    name: Start Progress\n" +
+		"github:\n" +
+		"  repositories:\n" +
+		"    default: tapstate/example-repo\n" +
 		"local:\n" +
 		"  source_root: /tmp/source\n"
 }

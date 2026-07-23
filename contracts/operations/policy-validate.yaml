@@ -1,6 +1,6 @@
 operation: policy_validate
 version: 1
-purpose: 校验当前 workspace 使用的 policy 是否包含关键步骤 gate 配置。
+purpose: 校验当前工作空间使用的策略是否包含关键步骤门禁配置。
 task_type: policy_validation
 allowed_stages:
   - design_review
