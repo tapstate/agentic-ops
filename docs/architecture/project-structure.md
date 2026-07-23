@@ -44,6 +44,12 @@ agentic-ops/
       agenticops-user-stories.md
       project-maintainer-stories.md
       development-lead-stories.md
+      project-maintainer/
+        pm-001-document-boundary.md
+        ...
+      development-lead/
+        dl-001-install.md
+        ...
     workflows/
       feedback-loop.md
     review-checklist.md

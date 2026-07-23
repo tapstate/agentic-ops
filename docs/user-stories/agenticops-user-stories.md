@@ -77,18 +77,18 @@ AIAgent 和 `agentic-cli` 不作为第三类故事主角。AIAgent 是流程执�
 
 ### 项目维护者故事
 
-- PM-001：维护故事线、设计和计划边界。
-- PM-002：维护操作契约、标准流程和工作流配置。
-- PM-003：发布 AgenticOps 版本和安装资产。
-- PM-004：诊断问题并选择修复载体。
-- PM-005：处理反馈并形成改进建议。
-- PM-006：治理发布权限、回滚和兼容性。
+- [PM-001：维护故事线、设计和计划边界](project-maintainer/pm-001-document-boundary.md)。
+- [PM-002：维护操作契约、标准流程和工作流配置](project-maintainer/pm-002-standard-assets.md)。
+- [PM-003：发布 AgenticOps 版本和安装资产](project-maintainer/pm-003-release-assets.md)。
+- [PM-004：诊断问题并选择修复载体](project-maintainer/pm-004-problem-diagnosis.md)。
+- [PM-005：处理反馈并形成改进建议](project-maintainer/pm-005-feedback-proposal.md)。
+- [PM-006：治理发布权限、回滚和兼容性](project-maintainer/pm-006-release-governance.md)。
 
 ### 研发负责人故事
 
-- DL-001：安装 AgenticOps。
-- DL-002：初始化项目 AI 工作空间。
-- DL-003：初始化 AIAgent 能力。
-- DL-004：新任务接管。
-- DL-005：恢复接管任务。
-- DL-006：任务完成审计与反馈分析。
+- [DL-001：安装 AgenticOps](development-lead/dl-001-install.md)。
+- [DL-002：初始化项目 AI 工作空间](development-lead/dl-002-workspace-init.md)。
+- [DL-003：初始化 AIAgent 能力](development-lead/dl-003-agent-init.md)。
+- [DL-004：新任务接管](development-lead/dl-004-takeover-task.md)。
+- [DL-005：恢复接管任务](development-lead/dl-005-resume-takeover.md)。
+- [DL-006：任务完成审计与反馈分析](development-lead/dl-006-task-audit-feedback.md)。

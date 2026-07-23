@@ -1,0 +1,79 @@
+# PM-001 维护故事线、设计和计划边界
+
+作为项目维护者，
+我希望 AgenticOps 的故事线、设计和计划分层清晰，
+以便后续先确认故事线，再确认设计，再开发，最后按故事线验收。
+
+### 触发方式
+
+```text
+整理 AgenticOps 故事线。
+调整 AgenticOps 设计边界。
+根据设计形成后续计划。
+```
+
+### 前置条件
+
+- 当前工作位于 `tapstate/agentic-ops` 源头仓库。
+- 已读取项目规则和现有故事线、设计、计划。
+- 变更不涉及 secrets、tokens、private keys 或原始敏感日志。
+
+### 主流程
+
+1. 项目维护者先判断变更属于故事线、设计、计划、运行资产还是实现代码。
+2. 故事线文档只记录主角、目标、触发、输出、失败路径和验收口径。
+3. 设计文档只记录稳定设计事实、角色责任、事实源、能力边界和门禁。
+4. 计划文档记录任务拆解、checkbox、验证命令、当前状态和剩余工作。
+5. 如果发现设计缺口涉及产品、流程、权限或事实源取舍，先提示用户决策。
+6. 文档、契约、运行资产、测试和代码发生公开行为变化时保持同步。
+
+### 输出
+
+```json
+{
+  "ok": true,
+  "operation": "maintain_document_boundary",
+  "changed_layer": "storyline",
+  "next_action": "review_design_impact"
+}
+```
+
+### 失败处理
+
+- 如果设计文档混入计划 checkbox，移回 `plans/`。
+- 如果计划文档改变稳定能力边界，同步更新设计或明确需要用户决策。
+- 如果故事线缺少验收口径，不能进入设计调整。
+
+### 验收标准
+
+- 故事线、设计、计划和实现状态没有混写。
+- 审阅者能从故事线追溯到设计，再追溯到计划和验收命令。
+- 需要用户决策的缺口被明确标出，不被写成默认实现。
+
+### 保护行为
+
+- 故事线不能记录阶段任务、checkbox、当前完成度或 Implementation note。
+- 设计文档不能把未决产品、流程、权限或事实源取舍写成默认实现。
+- 计划必须基于已确认故事线和相对稳定设计拆解。
+- 公开行为变化必须同步检查故事线、设计、契约、运行资产、测试和文档入口。
+
+### 审核问题
+
+- 这次变更属于故事线、设计、计划、运行资产还是实现代码。
+- 是否有计划内容进入故事线或设计文档。
+- 是否有设计缺口需要用户决策。
+- 审阅者能否从故事线追溯到对应设计和验收证据。
+
+### 验收证据
+
+- `docs/user-stories/agenticops-user-stories.md` 能说明故事线分类和推进门禁。
+- `docs/README.md` 和 `docs/review-checklist.md` 能指向故事线、设计和计划入口。
+- `git diff --check` 无 Markdown 空白错误。
+- 文档检查未发现故事线中的 checkbox 或 Implementation note。
+
+### 关联设计
+
+- `docs/project-rules.md`
+- `docs/architecture/agenticops-current-design.md`
+- `docs/review-checklist.md`
+- `docs/README.md`
