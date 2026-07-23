@@ -21,6 +21,7 @@
 
 ## 推进计划
 
+- [设计实现差距代办](../plans/design-implementation-gap-todo-v1.md)
 - [完整设计实现计划](../plans/full-design-implementation-plan-v1.md)
 - [第一阶段实施计划](../plans/implementation-plan-v1.md)
 - [正式使用前问题修复计划](../plans/problem-resolution-plan-v1.md)
