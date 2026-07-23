@@ -1,0 +1,58 @@
+operation: update_check
+version: 1
+purpose: 基于本地或远程 release manifest 检查是否存在可用更新，并返回更新级别和受影响 operation。
+task_type: update
+allowed_stages:
+  - installed
+  - update_check
+  - failed
+required_inputs:
+  - manifest_or_manifest_url
+input:
+  manifest:
+    type: string
+    required: false
+  manifest_url:
+    type: string
+    required: false
+preconditions:
+  - release_manifest_must_exist
+  - current_version_must_be_known
+output:
+  source:
+    type: string
+  current_version:
+    type: string
+  latest_version:
+    type: string
+  asset_version:
+    type: string
+  update_available:
+    type: boolean
+  severity:
+    type: string
+    enum:
+      - optional
+      - recommended
+      - required
+  reason:
+    type: string
+  blocked_operations:
+    type: array
+  next_action:
+    type: string
+failure:
+  codes:
+    - missing_manifest
+    - update_manifest_invalid
+side_effects:
+  - must_not_modify_install_dir
+  - must_not_write_jira
+  - must_not_modify_code
+human_gate:
+  required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: update_check
+redo_from_stage: update_check

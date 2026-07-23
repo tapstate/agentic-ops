@@ -6,8 +6,35 @@ allowed_stages:
   - workspace_initialized
 required_inputs:
   - workspace
+input:
+  workspace:
+    type: string
+    required: true
+preconditions:
+  - workspace_must_be_initialized
+output:
+  workspace:
+    type: string
+  task_type:
+    type: string
+  current_stage:
+    type: string
+  next_action:
+    type: string
+  capabilities:
+    type: array
+failure:
+  codes:
+    - missing_workspace
+    - workspace_not_initialized
+    - capability_init_failed
 side_effects:
   - may_write_workspace_state
   - must_not_modify_code
 human_gate:
   required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: workspace_initialized
+redo_from_stage: workspace_initialized

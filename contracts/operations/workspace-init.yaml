@@ -6,8 +6,36 @@ allowed_stages:
   - installed
 required_inputs:
   - workspace
+input:
+  workspace:
+    type: string
+    required: true
+preconditions:
+  - workspace_root_must_be_available
+  - workspace_root_must_be_writable
+output:
+  workspace:
+    type: string
+  profile:
+    type: string
+  runs_dir:
+    type: string
+  feedback_dir:
+    type: string
+  next_action:
+    type: string
+failure:
+  codes:
+    - missing_workspace
+    - workspace_root_failed
+    - workspace_init_failed
 side_effects:
   - may_write_workspace_state
   - must_not_write_jira
 human_gate:
   required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: installed
+redo_from_stage: installed

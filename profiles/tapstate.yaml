@@ -1,0 +1,115 @@
+workspace: tapstate
+
+jira:
+  project: TAP
+  task_query: "assignee = currentUser() AND status in (\"To Do\", \"In Progress\")"
+
+jira_form_mapping:
+  fields:
+    owner:
+      source: jira_field
+      jira_field: assignee
+      required_from_stage: waiting_takeover
+    acceptance_criteria:
+      source: jira_field
+      jira_field: customfield_acceptance
+      required_from_stage: iteration_ready
+    target_repo:
+      source: jira_field
+      jira_field: customfield_target_repo
+      fallback: workspace_repo_mapping
+      required_from_stage: takeover_gate
+    target_branch:
+      source: jira_field
+      jira_field: customfield_target_branch
+      fallback: workspace_repo_mapping
+      required_from_stage: takeover_gate
+    verification_method:
+      source: jira_description_section
+      section: 验证方式
+      required_from_stage: takeover_gate
+    risk_level:
+      source: jira_field
+      jira_field: customfield_risk
+      required_from_stage: iteration_ready
+    current_agent_id:
+      source: jira_field
+      jira_field: customfield_current_agent_id
+      required_from_stage: takeover_gate
+    takeover_at:
+      source: jira_field
+      jira_field: customfield_takeover_at
+      required_from_stage: takeover_gate
+
+task_class_mapping:
+  issue_types:
+    Story: feature_change
+    Bug: bug_fix
+    Task: technical_task
+  labels:
+    investigation: investigation
+    agenticops-improvement: process_improvement
+
+standard_process_mapping:
+  feature_change: development_change_v1
+  bug_fix: development_change_v1
+  technical_task: development_change_v1
+  investigation: investigation_v1
+  process_improvement: agenticops_improvement_v1
+
+status_mapping:
+  To Do: waiting_takeover
+  In Progress: implementation
+  Done: completed
+
+transition_mapping:
+  start_progress: implementation
+  complete: completed
+
+jira_transition_mapping:
+  start_progress:
+    name: "Start Progress"
+  complete:
+    name: "Done"
+
+github:
+  organization: tapstate
+  repositories:
+    default: tapstate/example-repo
+
+local:
+  source_root: "<project-ai-workspace>/src"
+  runs_dir: "<project-ai-workspace>/.agentic-ops/runs"
+  feedback_dir: "<project-ai-workspace>/.agentic-ops/feedback"
+
+human_gates:
+  - push
+  - create_pr
+  - merge
+  - scope_change
+
+review_gates:
+  pr_review:
+    role: reviewer
+    decision_field: reviewer_decision
+    returned_next_action: fix_and_verify
+  qa_verification:
+    role: qa
+    decision_field: qa_decision
+    returned_next_action: redo_previous_stage
+
+retry_redo:
+  verification_failed:
+    retry: true
+    max_attempts: 3
+    next_action: fix_and_verify
+  scope_changed:
+    retry: false
+    redo_from_stage: takeover_gate
+    next_action: redo_previous_stage
+
+templates:
+  takeover_success: templates/evidence/takeover-success.md
+  takeover_failed: templates/evidence/takeover-failed.md
+  blocked: templates/evidence/blocked.md
+  development_completed: templates/evidence/development-completed.md

@@ -8,8 +8,49 @@ allowed_stages:
 required_inputs:
   - workspace
   - run_id
+input:
+  workspace:
+    type: string
+    required: true
+  run_id:
+    type: string
+    required: true
+preconditions:
+  - run_must_exist
+  - run_workspace_must_match
+  - run_issue_must_match
+  - current_user_must_match_owner
+  - current_agent_id_must_match_agent_id
+  - local_state_must_be_verifiable
+output:
+  workspace:
+    type: string
+  issue_key:
+    type: string
+  run_id:
+    type: string
+  previous_stage:
+    type: string
+  current_stage:
+    type: string
+  next_action:
+    type: string
+failure:
+  codes:
+    - missing_run_id
+    - run_not_found
+    - workspace_mismatch
+    - issue_mismatch
+    - assignee_changed
+    - agent_ownership_conflict
+    - local_state_mismatch
 side_effects:
   - may_write_local_event
   - must_not_create_pr
 human_gate:
   required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: takeover_gate
+redo_from_stage: takeover_gate

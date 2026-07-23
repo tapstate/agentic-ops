@@ -1,0 +1,64 @@
+operation: update_apply
+version: 1
+purpose: 基于本地或远程 release manifest 应用更新，下载并校验 artifact，切换本地 current.json 并保留 previous 版本。
+task_type: update
+allowed_stages:
+  - update_required
+  - update_available
+  - update_apply
+required_inputs:
+  - manifest_or_manifest_url
+optional_inputs:
+  - install_dir
+  - target
+input:
+  manifest:
+    type: string
+    required: false
+  manifest_url:
+    type: string
+    required: false
+  install_dir:
+    type: string
+    required: false
+  target:
+    type: string
+    required: false
+preconditions:
+  - release_manifest_must_exist
+  - install_dir_must_be_writable
+output:
+  source:
+    type: string
+  version:
+    type: string
+  asset_version:
+    type: string
+  previous_version:
+    type: string
+  previous_asset_version:
+    type: string
+  current:
+    type: string
+  downloaded_artifacts:
+    type: array
+  activated_binary:
+    type: string
+  next_action:
+    type: string
+failure:
+  codes:
+    - missing_manifest
+    - update_apply_failed
+side_effects:
+  - may_write_global_install_dir
+  - may_download_release_artifacts
+  - must_not_write_jira
+  - must_not_modify_code
+human_gate:
+  required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: update_check
+redo_from_stage: update_check

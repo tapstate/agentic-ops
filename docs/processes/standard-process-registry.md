@@ -113,7 +113,7 @@ stages:
 | Jira 无标准字段对应字段或模板 | `missing_form_field` | 停止当前 operation，提示新增 Jira 字段、使用描述模板映射，或调整 Task Form Standard。 |
 | Jira 字段存在但没有配置 mapping | `unmapped_jira_field` | 请求维护 Workflow Profile 的 Jira Form Mapping。 |
 | Jira 状态无法映射到标准阶段 | `lifecycle_mapping_gap` | 请求流程 owner 决策状态映射或调整 Jira workflow。 |
-| Jira transition 无法映射到标准推进动作 | `transition_mapping_gap` | 请求流程 owner 决策 transition mapping 或新增人工 gate。 |
+| Jira transition 无法映射到标准推进动作 | `transition_mapping_gap` / `jira_transition_mapping_gap` | 请求流程 owner 决策标准 transition mapping、Jira transition id/name mapping 或新增人工 gate。 |
 | Jira issue type / label 无法映射任务分类 | `task_class_mapping_gap` | 请求研发 owner 或流程 owner 补充任务分类规则。 |
 | 审查节点无法映射到人、PR review、CI 或 Jira 状态 | `review_gate_mapping_gap` | 请求流程 owner 决策审查节点和责任角色。 |
 

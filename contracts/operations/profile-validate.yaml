@@ -1,0 +1,49 @@
+operation: profile_validate
+version: 1
+purpose: 校验当前 workspace 的 Workflow Profile 是否能映射标准字段、任务分类、标准流程、状态、标准 transition 和 Jira transition。
+task_type: profile_validation
+allowed_stages:
+  - design_review
+  - implementation
+  - profile_update_required
+required_inputs:
+  - workspace
+input:
+  workspace:
+    type: string
+    required: true
+preconditions:
+  - profiles_dir_must_exist
+  - workspace_profile_must_exist
+output:
+  workspace:
+    type: string
+  issues:
+    type: integer
+  next_action:
+    type: string
+failure:
+  codes:
+    - missing_workspace
+    - profile_not_found
+    - profile_validation_failed
+    - missing_jira_project
+    - missing_task_query
+    - missing_form_mapping
+    - task_class_mapping_gap
+    - standard_process_mapping_gap
+    - lifecycle_mapping_gap
+    - transition_mapping_gap
+    - jira_transition_mapping_gap
+    - missing_local_source_root
+side_effects:
+  - must_not_write_jira
+  - must_not_modify_profile
+  - must_not_modify_code
+human_gate:
+  required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: design_review
+redo_from_stage: design_review

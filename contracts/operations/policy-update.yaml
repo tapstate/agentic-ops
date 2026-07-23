@@ -1,0 +1,55 @@
+operation: policy_update
+version: 1
+purpose: 使用经过校验的本地 source policy 更新当前默认 policy，并在更新前保存可回滚备份。
+task_type: policy_update
+allowed_stages:
+  - policy_update_required
+  - process_improvement
+required_inputs:
+  - workspace
+  - source
+input:
+  workspace:
+    type: string
+    required: true
+  source:
+    type: string
+    required: true
+preconditions:
+  - repo_root_must_exist
+  - source_policy_must_exist
+  - source_policy_must_match_default_policy
+  - source_policy_must_validate
+  - current_policy_must_exist
+output:
+  workspace:
+    type: string
+  policy:
+    type: string
+  path:
+    type: string
+  backup:
+    type: string
+  source:
+    type: string
+  next_action:
+    type: string
+failure:
+  codes:
+    - missing_workspace
+    - missing_source
+    - repo_root_not_found
+    - policy_update_failed
+side_effects:
+  - may_modify_policy
+  - may_write_policy_backup
+  - must_not_write_jira
+  - must_not_modify_business_repo
+human_gate:
+  required: true
+  reason: Policy 更新会改变关键步骤门禁，执行前需要维护者确认 source policy。
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: policy_update_required
+redo_from_stage: policy_update_required

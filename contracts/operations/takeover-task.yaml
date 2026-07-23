@@ -8,10 +8,107 @@ allowed_stages:
 required_inputs:
   - issue_key
   - workspace
+input:
+  issue_key:
+    type: string
+    required: true
+  workspace:
+    type: string
+    required: true
+preconditions:
+  - current_user_must_match_owner
+  - current_agent_id_must_be_empty_or_match_agent_id
+  - task_class_must_be_mapped_to_standard_process
+  - issue_must_be_in_allowed_project
+  - issue_must_have_acceptance_criteria
+  - issue_must_have_target_repo
+  - issue_must_have_verification_method
+  - jira_status_must_map_to_entry_stage
+output:
+  workspace:
+    type: string
+  issue_key:
+    type: string
+  run_id:
+    type: string
+  agent_id:
+    type: string
+  current_agent_id:
+    type: string
+  takeover_at:
+    type: string
+  task_type:
+    type: string
+  task_class:
+    type: string
+  process_id:
+    type: string
+  current_stage:
+    type: string
+    enum:
+      - takeover_started
+      - blocked
+      - waiting_owner_confirmation
+  target_repo:
+    type: string
+  next_action:
+    type: string
+    enum:
+      - proceed
+      - ask_owner
+      - blocked
+  missing_field:
+    type: string
+    optional: true
+  completion_template:
+    type: string
+    optional: true
+  completion_template_path:
+    type: string
+    optional: true
+  form_updates:
+    type: object
+    fields:
+      - run_id
+      - agent_id
+      - current_agent_id
+      - takeover_at
+      - task_type
+      - task_class
+      - process_id
+      - current_stage
+      - next_action
+failure:
+  codes:
+    - owner_mismatch
+    - assignee_mismatch
+    - assignee_changed
+    - agent_ownership_conflict
+    - task_class_mapping_gap
+    - standard_process_mapping_gap
+    - unknown_jira_status
+    - missing_acceptance_criteria
+    - missing_target_repo
+    - missing_verification_method
+    - missing_risk_level
+    - jira_adapter_config_failed
+    - jira_issue_read_failed
+    - jira_current_user_failed
+    - real_jira_confirmation_required
+    - missing_jira_write_mapping
+    - jira_takeover_write_failed
+    - missing_permission
+    - workflow_transition_not_allowed
 side_effects:
   - may_write_jira_comment
   - may_create_takeover_record
+  - may_write_local_event
   - must_not_modify_code
   - must_not_create_pr
 human_gate:
   required: false
+retry_policy:
+  retryable: false
+  max_attempts: 0
+  redo_from_stage: takeover_gate
+redo_from_stage: takeover_gate

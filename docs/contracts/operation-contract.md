@@ -29,7 +29,17 @@ Operation Contract 必须引用 Standard Process Registry 中的任务分类和�
 | Operation | Purpose |
 | --- | --- |
 | `install` | 安装 AgenticOps 到 `~/.agentic-ops`。 |
+| `doctor` | 输出安装、版本、profile、policy、contract、adapter 和 workspace 的本地诊断结果。 |
 | `assets_install` | 安装或更新 AI 员工手册、契约、profile、policy、runbook 和 template 等运行资产。 |
+| `update_check` | 基于本地 release manifest 检查是否存在可用更新，并返回更新级别和受影响 operation。 |
+| `update_apply` | 基于本地 release manifest 应用更新，切换本地 `current.json` 并保留 previous 版本。 |
+| `contract_validate` | 校验机器可读 Operation Contract 是否满足完整设计基线。 |
+| `profile_validate` | 校验 Workflow Profile 是否能映射标准字段、任务分类、标准流程、状态和 transition。 |
+| `profile_update` | 使用经过校验的本地 source profile 更新当前 workspace profile，并保存可回滚备份。 |
+| `profile_rollback` | 从最近一次 profile update 备份恢复当前 workspace profile。 |
+| `policy_validate` | 校验当前 policy 是否包含关键步骤 gate 配置。 |
+| `policy_update` | 使用经过校验的本地 source policy 更新默认 policy，并保存可回滚备份。 |
+| `policy_rollback` | 从最近一次 policy update 备份恢复默认 policy。 |
 | `workspace_init` | 初始化项目 AI 工作空间。 |
 | `agent_init` | 初始化 AIAgent 能力。 |
 | `list_tasks` | 列出当前 owner 可处理任务。 |
@@ -37,16 +47,18 @@ Operation Contract 必须引用 Standard Process Registry 中的任务分类和�
 | `resume_takeover` | 恢复已有 `run_id` 的接管任务。 |
 | `read_task_context` | 读取任务上下文摘要。 |
 | `write_evidence` | 写入 Jira / PR evidence。 |
+| `release_agent` | 完成或明确交接后释放当前 AIAgent 绑定，并记录 `current_agent_id_cleared=true`。 |
 | `mark_blocked` | 记录阻塞原因和人工动作。 |
 | `request_owner_confirmation` | 请求研发 owner 确认。 |
 | `prepare_pr` | 准备 PR，不绕过人工确认。 |
 | `fix_pr_comments` | 按 PR comments 修复。 |
 | `feedback_collect` | 收集工作空间事件日志。 |
+| `feedback_bundle` | 为指定 `run_id` 生成脱敏诊断包。 |
 | `feedback_analyze` | 分析执行失败、阻塞和重复问题。 |
 | `feedback_report` | 生成每日反馈报告。 |
 | `feedback_propose` | 生成改进建议。 |
 
-当前 `contracts/operations/` 只维护第一阶段本地 fake flow 已落地或直接需要的机器可读 YAML。未进入当前可运行闭环的 operation 先保留在本文档中作为后续契约范围，不视为已实现 CLI 命令。
+当前 `contracts/operations/` 维护已落地或直接需要的机器可读 YAML，并通过 `agentic-cli contract validate` 校验。未进入当前可运行闭环的 operation 先保留在本文档中作为后续契约范围，不视为已实现 CLI 命令。
 
 ## 4. 契约结构
 

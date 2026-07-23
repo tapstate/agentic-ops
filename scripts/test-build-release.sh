@@ -2,7 +2,7 @@
 set -euo pipefail
 
 tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT
+trap 'chmod -R u+w "$tmp_dir" 2>/dev/null || true; rm -rf "$tmp_dir"' EXIT
 repo_root="$(pwd)"
 
 target="$(go env GOOS)/$(go env GOARCH)"
@@ -130,6 +130,25 @@ grep "\"iteration_version\":\"$iteration_version\"" "$release_dir/manifest.json"
 grep '"commit_index":8' "$release_dir/manifest.json"
 grep '"support_policy":"latest_only"' "$release_dir/manifest.json"
 grep '"update_policy":"auto_update_to_latest_recommended"' "$release_dir/manifest.json"
+
+fake_gh="$tmp_dir/fake-gh"
+fake_gh_log="$tmp_dir/fake-gh.log"
+cat > "$fake_gh" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$AGENTIC_OPS_FAKE_GH_LOG"
+if [ "$1" = "release" ] && [ "$2" = "view" ]; then
+  exit 1
+fi
+exit 0
+SH
+chmod +x "$fake_gh"
+
+AGENTIC_OPS_GH_BIN="$fake_gh" \
+AGENTIC_OPS_FAKE_GH_LOG="$fake_gh_log" \
+  bash scripts/publish-release.sh "$release_dir" | grep '"operation":"release_publish"'
+grep "release create $release_version" "$fake_gh_log"
+grep "manifest.json" "$fake_gh_log"
+grep "checksums.txt" "$fake_gh_log"
 
 printf '\n\n' | \
 AGENTIC_OPS_TARGETS="$target" \

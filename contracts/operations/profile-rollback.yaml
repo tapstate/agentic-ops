@@ -1,0 +1,44 @@
+operation: profile_rollback
+version: 1
+purpose: 从最近一次 profile update 生成的本地备份恢复当前 workspace 的 Workflow Profile。
+task_type: profile_update
+allowed_stages:
+  - profile_update_required
+  - rollback_required
+required_inputs:
+  - workspace
+input:
+  workspace:
+    type: string
+    required: true
+preconditions:
+  - repo_root_must_exist
+  - profile_backup_must_exist
+  - backup_profile_must_match_workspace
+  - backup_profile_must_validate
+output:
+  workspace:
+    type: string
+  profile:
+    type: string
+  restored_from:
+    type: string
+  next_action:
+    type: string
+failure:
+  codes:
+    - missing_workspace
+    - repo_root_not_found
+    - profile_rollback_failed
+side_effects:
+  - may_modify_workspace_profile
+  - must_not_write_jira
+  - must_not_modify_business_repo
+human_gate:
+  required: true
+  reason: Profile rollback 会恢复流程映射旧版本，执行前需要维护者确认。
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: profile_update_required
+redo_from_stage: profile_update_required

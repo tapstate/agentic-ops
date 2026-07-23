@@ -12,23 +12,32 @@ import (
 )
 
 type Event struct {
-	Timestamp           string `json:"timestamp"`
-	Workspace           string `json:"workspace"`
-	RunID               string `json:"run_id"`
-	IssueKey            string `json:"issue_key,omitempty"`
-	AgentTaskOpsVersion string `json:"agentic_cli_version"`
-	VersionState        string `json:"version_state"`
-	AssetVersion        string `json:"asset_version"`
-	TaskType            string `json:"task_type"`
-	Operation           string `json:"operation"`
-	CurrentStage        string `json:"current_stage"`
-	NextAction          string `json:"next_action"`
-	OK                  bool   `json:"ok"`
-	Code                string `json:"code,omitempty"`
-	Gate                string `json:"gate"`
-	GateStatus          string `json:"gate_status"`
-	HumanGate           bool   `json:"human_gate"`
-	RequiresHumanAction bool   `json:"requires_human_action"`
+	Timestamp             string `json:"timestamp"`
+	Workspace             string `json:"workspace"`
+	RunID                 string `json:"run_id"`
+	IssueKey              string `json:"issue_key,omitempty"`
+	AgentTaskOpsVersion   string `json:"agentic_cli_version"`
+	VersionState          string `json:"version_state"`
+	AssetVersion          string `json:"asset_version"`
+	TaskType              string `json:"task_type"`
+	Operation             string `json:"operation"`
+	CurrentStage          string `json:"current_stage"`
+	NextAction            string `json:"next_action"`
+	AgentID               string `json:"agent_id,omitempty"`
+	CurrentAgentID        string `json:"current_agent_id,omitempty"`
+	TakeoverAt            string `json:"takeover_at,omitempty"`
+	CompletedAt           string `json:"completed_at,omitempty"`
+	CompletionEvidence    string `json:"completion_evidence,omitempty"`
+	TaskClass             string `json:"task_class,omitempty"`
+	ProcessID             string `json:"process_id,omitempty"`
+	CurrentAgentIDCleared bool   `json:"current_agent_id_cleared,omitempty"`
+	OK                    bool   `json:"ok"`
+	Code                  string `json:"code,omitempty"`
+	MissingField          string `json:"missing_field,omitempty"`
+	Gate                  string `json:"gate"`
+	GateStatus            string `json:"gate_status"`
+	HumanGate             bool   `json:"human_gate"`
+	RequiresHumanAction   bool   `json:"requires_human_action"`
 }
 
 func RunID(issueKey string, taskType string, now time.Time, suffix string) string {

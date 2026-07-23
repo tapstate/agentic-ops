@@ -6,7 +6,7 @@
 
 研发日常使用的是安装后的 `agentic-cli`、AI 员工手册、operation contracts、workflow profiles、policies、runbooks 和 templates。项目出现问题时，AgenticOps 必须能快速判断问题类型，选择正确修复载体，完成验证、发布、同步和回滚。
 
-当前仓库已实现本地资产安装和本地 release 打包的最小能力，尚未实现完整发布、自更新、诊断包和 profile / policy 热更新能力。本文是正式使用前的目标设计和验收基线。
+当前仓库已实现本地资产安装、本地 release 打包、GitHub Release 发布脚本、operation contract 校验、profile validate / update / rollback、policy validate / update / rollback、profile 驱动 Jira transition id/name 映射、远程 release manifest / artifact 下载校验、真实二进制切换、doctor 显式真实外部检查、真实 Jira REST client 合同测试基线，以及真实 Jira 字段、comment 和 transition 写入 gate/confirmation。本文是正式使用前的目标设计和验收基线。
 
 ## 2. 架构适配性评估
 
@@ -14,18 +14,18 @@
 
 | 架构部分 | 当前状态 | 适配性判断 | 必须补齐的能力 |
 | --- | --- | --- | --- |
-| Go CLI Runtime | 已有 `agentic-cli` 本地 fake flow | 适合承载强制检查、结构化输出、诊断、更新和回滚 | version manifest、update、doctor、诊断包、真实 adapter 合同测试 |
-| Operation Contract | 已有文档和第一阶段 YAML 子集 | 适合沉淀标准操作输入输出和失败码 | contract schema、contract validate、operation 兼容性版本 |
-| Workflow Profile | 已有设计文档 | 适合处理不同团队和 Jira workflow 差异 | profile 文件源头、validate / update / rollback、status / transition / field mapping |
-| Policy / Gate | 已有代码雏形和规则文档 | 适合控制关键步骤门禁 | policy package、validate / update / rollback、gate 变更审计 |
+| Go CLI Runtime | 已有 `agentic-cli` 本地 fake flow、真实 Jira REST client 合同测试基线、profile 驱动 transition 映射、真实二进制切换和 doctor 显式外部检查 | 适合承载强制检查、结构化输出、诊断、更新和回滚 | operation 兼容性版本治理 |
+| Operation Contract | 已有机器可读 YAML 和 `contract validate` 基线 | 适合沉淀标准操作输入输出和失败码 | operation 兼容性版本、跨版本迁移规则 |
+| Workflow Profile | 已有默认 profile、`profile validate / update / rollback` 基线 | 适合处理不同团队和 Jira workflow 差异 | 真实 Jira status / transition gate、资产包来源、profile 版本审计 |
+| Policy / Gate | 已有 policy validate / update / rollback 本地基线 | 适合控制关键步骤门禁 | 真实写操作 gate 变更审计和 confirmation |
 | Evidence / Feedback | 已有本地 evidence 和 feedback report | 适合发现重复问题并推动规范优化 | feedback bundle、问题分类统计、修复效果追踪 |
-| Release / Install | 已有 bootstrap stub、本地资产安装、本地 build / release 脚本 | 适合快速分发，但当前不完整 | GitHub release、自更新、回滚、远程 manifest |
+| Release / Install | 已有 bootstrap stub、本地资产安装、本地 build / release / publish 脚本、远程 manifest / artifact 下载校验和真实二进制切换 | 适合快速分发 | profile 驱动 assets 来源治理、发布权限治理 |
 | 项目资料边界 | 已明确 `~/.agentic-ops` 和项目 AI 工作空间边界 | 适合隔离全局工具资产和任务运行产物 | assets 版本目录、workspace 覆盖配置、敏感信息检查 |
 
 结论：
 
 - 当前架构方向适配“渐进形成公司标准流程”和“快速修复上线”两个目标。
-- 最大缺口不在目录结构，而在正式使用前缺少版本化资产、自更新、回滚、诊断包、profile / policy 热更新和合同验证。
+- 最大缺口不在目录结构，而在正式使用前缺少远程版本化资产、自更新、真实外部诊断检查、真实 Jira 写入 gate/confirmation 和更完整的 profile 版本审计。
 - 修复能力应优先作为 `agentic-cli` 的一组受控 operation 实现，而不是分散在 shell 脚本、人工说明或提示词中。
 
 ## 3. 设计目标
@@ -119,10 +119,10 @@ agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
 
 | 问题类型 | 稳定错误码 | 当前状态 |
 | --- | --- | --- |
-| `agentic-cli` 逻辑错误 | `agentic_cli_logic_error` | 规划中，后续由 `doctor` / `feedback bundle` 辅助定位。 |
-| Jira 流程状态没适配 | `unknown_jira_status` | 规划中，后续随 `profile validate / update / rollback` 落地。 |
-| Jira 卡片属性丢失 | `missing_jira_field` | 规划中，后续随任务接管 gate 落地。 |
-| 关键步骤门禁调整 | `policy_gate_required` | 规划中，后续随 `policy validate / update / rollback` 落地。 |
+| `agentic-cli` 逻辑错误 | `agentic_cli_logic_error` | `doctor`、doctor 显式真实外部检查和 `feedback bundle --redact` 诊断基线已落地。 |
+| Jira 流程状态没适配 | `unknown_jira_status` | `profile validate / update / rollback`、真实 Jira REST 读取映射基线、显式 `--jira-transition-id` transition gate 和 profile 驱动 transition id/name 映射已落地。 |
+| Jira 卡片属性丢失 | `missing_jira_field` | fake Jira 接管 gate 已覆盖必填字段阻断；真实 Jira 字段读取映射基线、补全模板输出和 feedback report 缺失字段聚合已落地。 |
+| 关键步骤门禁调整 | `policy_gate_required` | `policy validate / update / rollback` 本地基线已落地；真实 Jira 字段写入、Jira comment 写入和显式 transition 写入已要求 `--confirm-real-jira-write`，并记录 `real_jira_write` gate 审计事件。 |
 
 ## 7. 修复路径一：CLI 逻辑错误
 
@@ -234,7 +234,9 @@ agentic-cli profile rollback --workspace tapstate
   "operation": "takeover_task",
   "code": "missing_target_repo",
   "message": "Jira issue 缺少目标仓库信息",
-  "required_human_action": "请在 Jira 卡片补充目标仓库，或维护 workspace repo 映射"
+  "required_human_action": "请在 Jira 卡片补充目标仓库，或维护 workspace repo 映射",
+  "missing_field": "target_repo",
+  "completion_template": "# Jira 卡片信息缺失\n\nAgenticOps 无法继续接管该任务，因为 Jira 卡片缺少必要信息。\n\n- 缺失字段：`target_repo`\n- 当前 operation：`takeover_task`\n- 建议动作：请补充该字段，或维护 workspace profile 中的字段映射。\n"
 }
 ```
 
@@ -244,7 +246,7 @@ agentic-cli profile rollback --workspace tapstate
 gate 发现必填属性缺失
 -> 停止接管
 -> 生成 required_human_action
--> 可生成 Jira comment 补全模板
+-> 输出 Jira comment 补全模板
 -> 记录 missing_field 事件
 -> feedback report 聚合缺失字段
 -> 提出 Jira 创建模板或字段校验改进建议
@@ -293,13 +295,15 @@ gates:
     required: true
 ```
 
-目标命令：
+当前本地基线命令：
 
 ```sh
 agentic-cli policy validate --workspace tapstate
-agentic-cli policy update --workspace tapstate
+agentic-cli policy update --workspace tapstate --source /path/to/default-policy.yaml
 agentic-cli policy rollback --workspace tapstate
 ```
+
+当前实现会读取 `assets/policies/default.yaml`，校验 policy 名称、版本和 `write_jira_comment`、`transition_jira_status`、`git_commit`、`git_push`、`create_pr`、`scope_change` 六个关键 gate。`policy update` 会先校验 source，再写入 `.bak` 备份；`policy rollback` 会先校验备份，再恢复默认 policy。
 
 门禁调整规则：
 
@@ -382,5 +386,6 @@ asset release
 - `scripts/version.sh`
 - `scripts/build.sh`
 - `scripts/release.sh`
+- `scripts/publish-release.sh`
 
-本文中的 `doctor`、`feedback bundle`、`update`、`profile update`、`policy update` 和真实 release manifest 仍属于正式使用前必须补齐的目标能力。
+当前 `update check/apply` 已完成本地 manifest 基线、远程 manifest 拉取、artifact 下载、checksum 校验和真实二进制切换。当前 `policy validate/update/rollback` 已完成本地文件基线，真实 Jira 字段写入、comment 写入和 profile 驱动 transition 写入已记录 `real_jira_write` gate 审计事件；doctor 已支持显式 `--check-real-jira` 和 `--check-github` 外部检查。`scripts/publish-release.sh` 已支持使用 GitHub CLI 创建或更新 GitHub Release 并上传 release 产物。剩余正式化重点是 operation / profile / assets 的跨版本兼容治理和发布权限治理。
