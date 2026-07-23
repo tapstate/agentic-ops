@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-Feedback Loop 是 AgenticOps 的持续改进机制，用于分析 AIAgent 每天的执行日志，识别失败、阻塞、重复人工确认、有效经验和规则缺口，并生成改进建议。
+反馈闭环是 AgenticOps 的持续改进机制，用于分析 AIAgent 每天的执行日志，识别失败、阻塞、重复人工确认、有效经验和规则缺口，并生成改进建议。
 
 第一阶段反馈通道只做分析和建议，不允许 AIAgent 自动修改 AgenticOps 源头规则。
 
@@ -17,7 +17,7 @@ Go CLI 执行 operation
 -> 人确认后更新 AgenticOps 规则 / 手册 / contracts / Go CLI
 ```
 
-反馈闭环不只记录失败，也负责发现可固化经验。AIAgent 在具体环节中形成的有效处理方式，必须先以安全摘要进入事件、evidence 或 feedback proposal；只有重复出现、边界清晰、输入输出稳定后，才能建议升级为原子 operation、runbook、workflow profile、policy 或 template。
+反馈闭环不只记录失败，也负责发现可固化经验。AIAgent 在具体环节中形成的有效处理方式，必须先以安全摘要进入事件、证据或 feedback proposal；只有重复出现、边界清晰、输入输出稳定后，才能建议升级为原子 operation、runbook、工作流配置、policy 或 template。
 
 ## 3. 事件位置
 
@@ -121,4 +121,4 @@ agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 Observation -> Proposal -> Accepted Change
 ```
 
-AIAgent 可以生成 proposal，但不得未经人工确认直接修改项目规则、AI 员工手册、Operation Contract、Workflow Profile 或 CLI Runtime。
+AIAgent 可以生成 proposal，但不得未经人工确认直接修改项目规则、AI 员工手册、操作契约、工作流配置或 CLI 运行时。

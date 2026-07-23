@@ -2,17 +2,17 @@
 
 ## 1. 目的
 
-Workflow Profile 把 AgenticOps 的通用 operation 映射到具体项目流程。
+工作流配置把 AgenticOps 的通用 operation 映射到具体项目流程。
 
 AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira workflow。
 
 ## 2. 配置范围
 
-一个 workflow profile 至少应描述：
+一个 工作流配置至少应描述：
 
 - 项目 AI 工作空间名称。
 - Jira 空间和查询规则。
-- Jira Form Mapping，把 AgenticOps 标准字段映射到具体 Jira 字段、描述模板、评论模板或 workspace 配置。
+- Jira Form Mapping，把 AgenticOps 标准字段映射到具体 Jira 字段、描述模板、评论模板或工作空间配置。
 - 任务分类映射，把 Jira issue type、label、component、custom field 或描述模板映射到 AgenticOps `task_class`。
 - 标准流程映射，把 `task_class` 映射到 Standard Process Registry 中的 `process_id`。
 - Jira 状态和 transition 映射。
@@ -118,13 +118,13 @@ templates:
 - Profile 可以绑定具体 Jira workflow，但核心 operation 不能依赖某个固定 Jira 状态名。
 - Profile 必须适配 Task Form Standard；AIAgent 只消费标准字段，不直接消费 Jira custom field。
 - Profile 必须适配 Standard Process Registry；AIAgent 先识别 `task_class`，再选择 `process_id`。
-- Profile 必须说明关键专业审查节点如何映射到标准字段、Jira 状态、PR review、CI 或人工确认。
+- Profile 必须说明关键专业审查节点如何映射到标准字段、Jira 状态、PR 审查、CI 或人工确认。
 - Profile 必须说明失败后允许重试还是必须重做前序阶段。
 - Profile 必须能被 `agentic-cli preflight` 校验。
 - Profile 不得包含 secrets、tokens 或 private keys。
 - Profile 中的 repo 映射必须能解释任务如何定位目标源码。
-- Profile 缺字段时，AIAgent 不能自行猜测，应请求研发 owner 补充。
-- Profile 缺任务分类、流程映射、Jira 状态或 transition 时，AIAgent 必须输出 gap 并请求流程 owner 决策。
+- Profile 缺字段时，AIAgent 不能自行猜测，应请求研发负责人补充。
+- Profile 缺任务分类、流程映射、Jira 状态或 transition 时，AIAgent 必须输出 gap 并请求流程负责人决策。
 - `transition_mapping` 只表达标准推进动作到标准流程阶段的关系；真实 Jira workflow 的 transition id/name 必须放在 `jira_transition_mapping`，避免把标准流程语义和项目私有 Jira 配置混在一起。
 
 ## 5. Jira Form Mapping
@@ -173,7 +173,7 @@ jira_transition_mapping:
 
 ## 7. 审查、重试和重做映射
 
-Workflow Profile 必须把专业审查节点映射为 AgenticOps 可理解的结果。
+工作流配置必须把专业审查节点映射为 AgenticOps 可理解的结果。
 
 概念结构：
 
@@ -201,11 +201,11 @@ retry_redo:
     next_action: ask_owner
 ```
 
-当审查节点、重试规则或重做边界无法映射时，profile validation 必须返回 `review_gate_mapping_gap` 或 `retry_redo_policy_gap`，并要求流程 owner 决策。
+当审查节点、重试规则或重做边界无法映射时，profile validation 必须返回 `review_gate_mapping_gap` 或 `retry_redo_policy_gap`，并要求流程负责人决策。
 
 ## 7. 所有权字段映射
 
-Workflow Profile 必须声明 `current_agent_id` 和 `takeover_at` 如何落到 Jira 或稳定描述模板。接管 gate 依赖这些字段防止多个 AIAgent 同时处理同一任务。
+工作流配置必须声明 `current_agent_id` 和 `takeover_at` 如何落到 Jira 或稳定描述模板。接管 gate 依赖这些字段防止多个 AIAgent 同时处理同一任务。
 
 规则：
 
@@ -222,4 +222,4 @@ Workflow Profile 必须声明 `current_agent_id` 和 `takeover_at` 如何落到 
 - `tapstate`
 - `tapdata`
 
-这两个 profile 可以共享 Operation Contract，但拥有不同 Jira 空间、GitHub 仓库、本地源码和任务执行上下文。
+这两个 profile 可以共享 操作契约，但拥有不同 Jira 空间、GitHub 仓库、本地源码和任务执行上下文。

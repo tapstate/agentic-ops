@@ -4,9 +4,9 @@
 
 AgenticOps 是把公司员工执行标准沉淀成 AI 可执行标准流程的 AI 执行控制体系。
 
-第一阶段先落地研发 Jira 任务：帮助研发操作 AIAgent 从 Jira 接管任务到完成任务。AgenticOps 不替代 Jira、不替代研发 owner、不替代 PR Review，也不以全自动开发为第一阶段目标。它的核心价值是把 AI 员工从临时聊天助手变成流程内可管理、可追踪、可复盘的执行主体。
+第一阶段先落地研发 Jira 任务：帮助研发操作 AIAgent 从 Jira 接管任务到完成任务。AgenticOps 不替代 Jira、不替代研发负责人、不替代 PR 审查，也不以全自动开发为第一阶段目标。它的核心价值是把 AI 员工从临时聊天助手变成流程内可管理、可追踪、可复盘的执行主体。
 
-不同任务会涉及不同流程，例如新任务接管、恢复接管、PR comments 修复、阻塞上报和工作日志上报。AgenticOps 通过 Operation Contract 和 Workflow Profile 选择流程，通过 Task Form Standard、事件日志、`run_id`、evidence 和 feedback report 记录执行过程，并把关键状态、关键信息、表单数据和证据回写到 Jira、PR 或项目 AI 工作空间，用于后续分析和优化。
+不同任务会涉及不同流程，例如新任务接管、恢复接管、PR comments 修复、阻塞上报和工作日志上报。AgenticOps 通过操作契约和工作流配置选择流程，通过 Task Form Standard、事件日志、`run_id`、evidence 和 feedback report 记录执行过程，并把关键状态、关键信息、表单数据和证据回写到 Jira、PR 或项目 AI 工作空间，用于后续分析和优化。
 
 一句话定义：
 
@@ -20,14 +20,14 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 
 ```text
 Jira issue 已进入迭代
--> 研发 owner 手动触发 AI
--> AI 拉取 owner 名下待办
--> 研发 owner 选择一个 issue
+-> 研发负责人手动触发 AI
+-> AI 拉取 负责人名下待办
+-> 研发负责人选择一个 issue
 -> AI 执行任务接管 gate
 -> AI 生成 run_id 和接管记录
 -> AI 本地开发与验证
 -> AI 回写 Jira 证据
--> 研发 owner 确认
+-> 研发负责人确认
 -> 授权 push / PR
 -> 进入既有 CI / Review / 合入流程
 ```
@@ -36,13 +36,13 @@ Jira issue 已进入迭代
 
 ## 3. 核心原则
 
-- Jira 是任务、需求、owner、迭代、状态、评论和执行证据的事实源。
+- Jira 是任务、需求、负责人、迭代、状态、评论和执行证据的事实源。
 - Git 仓库是代码、测试、提交和分支的事实源。
-- GitHub PR / CI 是 Review、CI、comments 和合入记录的事实源。
+- GitHub PR 与 CI 是 PR 审查、CI、审查评论和合入记录的事实源。
 - AgenticOps 不创建新的任务管理事实源。
 - `run_id` 只追踪一次 AI 执行，不替代 Jira issue key，也不替代 Jira 状态。
-- AIAgent 可以推进研发阶段，但不能绕过 workflow profile、gate 和人工确认点。
-- 控制规范不能只靠提示词；提示词负责指导，Go CLI Runtime 负责强制检查和结构化输出。
+- AIAgent 可以推进研发阶段，但不能绕过 工作流配置、gate 和人工确认点。
+- 控制规范不能只靠提示词；提示词负责指导，Go CLI 运行时 负责强制检查和结构化输出。
 - 每次执行都必须产生可聚合记录，关键状态和信息必须回写到对应事实源或项目 AI 工作空间。
 - 每个流程节点必须有可解释的标准动作、表单输出、审查结论和下一步规则。
 - 不同专业角色在对应节点审查任务结果，以专业知识判断产出是否合格，以及流程标准是否需要优化。
@@ -63,10 +63,10 @@ git@github.com:tapstate/agentic-ops.git
 
 ```text
 docs/          架构、目标定位、用户故事、流程、计划
-contracts/     Operation Contract 和 schema
+contracts/     操作契约和 schema
 skills/        AgenticOps skills 和 AI 员工工作规则
 handbooks/     AI 员工手册
-profiles/      workflow profile 示例和默认配置
+profiles/      工作流配置示例和默认配置
 packages/      agentic-cli Go CLI runtime
 templates/     Jira / PR / evidence 模板
 examples/      端到端演示样例
@@ -89,7 +89,7 @@ tapstate/
 tapdata/
 ```
 
-不同项目 AI 工作空间对应不同 Jira 空间、GitHub 组织/仓库、本地源码目录、workflow profile 和任务执行上下文。
+不同项目 AI 工作空间对应不同 Jira 空间、GitHub 组织/仓库、本地源码目录、工作流配置和任务执行上下文。
 
 ## 5. 资料边界
 
@@ -101,8 +101,8 @@ AgenticOps 必须严格区分两类资料。
 - 项目规则
 - AI 员工手册
 - skills
-- operation contracts
-- workflow profiles
+- 操作契约
+- 工作流配置
 - templates
 - adapters / CLI / SDK
 - 通用文档和示例
@@ -126,23 +126,23 @@ AgenticOps 必须包含 AI 员工手册，作为 AIAgent 在研发流程中工�
 AI 员工手册同时服务两个对象：
 
 - AIAgent：明确任务类型、当前阶段、下一步动作、工具、流程、gate、证据和停止条件。
-- 研发 owner：提供快捷操作方式，让研发能用自然语言或 CLI 指挥 AI 完成任务。
+- 研发负责人：提供快捷操作方式，让研发能用自然语言或 CLI 指挥 AI 完成任务。
 
 AI 员工手册应覆盖：
 
 - 任务类型：安装、工作空间初始化、AIAgent 初始化、新任务接管、恢复接管、PR comments 修复、工作日志上报、AgenticOps 改进建议。
 - 阶段模型：已接收、预检中、等待接管、分析中、开发中、验证中、证据回写中、等待人工确认、阻塞、已交接。
-- 下一步动作：由 operation contract、workspace profile、当前 evidence 和人工门禁共同决定。
+- 下一步动作：由操作契约、工作流配置、当前证据和人工门禁共同决定。
 - 工作入口：拉待办、任务接管、继续失败任务、修复 PR comments、回写证据。
 - 行为边界：不自动 push、不自动创建 PR、不自动 merge、不扩大需求范围、不泄露敏感信息。
 - 停止条件：需求不清、风险扩大、权限不足、测试无法运行、连续修复失败、需要人工判断。
 - 交付要求：代码 diff、测试结果、风险说明、Jira / PR evidence、下一步建议。
 
-AI 员工手册不是普通说明文档，而是 skills、operation contracts、workflow profiles、CLI 命令和 evidence templates 的行为依据。
+AI 员工手册不是普通说明文档，而是 skills、操作契约、工作流配置、CLI 命令和 evidence templates 的行为依据。
 
 ## 7. 操作契约
 
-Operation Contract 是 AgenticOps 的操作契约层，用于屏蔽 Jira / GitHub / Git 的底层事实差异，向 AIAgent 暴露稳定、统一、可验证的任务操作输入输出规范。
+操作契约是 AgenticOps 的操作契约层，用于屏蔽 Jira / GitHub / Git 的底层事实差异，向 AIAgent 暴露稳定、统一、可验证的任务操作输入输出规范。
 
 AIAgent 不应直接理解 Jira 字段、状态、transition 或 comment 格式。AIAgent 应理解 AgenticOps 暴露的 operation：
 
@@ -181,7 +181,7 @@ feedback_propose
 ```yaml
 operation: takeover_task
 version: 1
-purpose: 研发 owner 授权 AIAgent 接管一个已进入迭代的任务。
+purpose: 研发负责人授权 AIAgent 接管一个已进入迭代的任务。
 
 task_type: task_takeover
 
@@ -249,12 +249,12 @@ AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira workfl
 
 Task Form Standard 定义 AI 操作任务从创建到完成所需的标准字段和生命周期要求。AIAgent 面向这些标准字段工作，不直接以 Jira custom field、描述段落或 workflow 状态为判断依据。
 
-Workflow Profile 负责把 Operation Contract 映射到具体团队流程：
+工作流配置负责把 操作契约映射到具体团队流程：
 
 - Jira base URL、project、issue type、JQL。
-- Jira Form Mapping，例如把 owner、sprint、acceptance criteria、target repo、risk 等 AgenticOps 标准字段映射到具体 Jira 字段、描述模板或 workspace 配置。
+- Jira Form Mapping，例如把 `owner`、`sprint`、`acceptance_criteria`、`target_repo`、`risk` 等 AgenticOps 标准字段映射到具体 Jira 字段、描述模板或工作空间配置。
 - Jira 状态和 transition 映射。
-- 专业审查节点映射，例如研发 owner 确认、PR reviewer 退回、QA 验证、运维或安全审批。
+- 专业审查节点映射，例如研发负责人确认、PR 代码审查人退回、QA 验证、运维或安全审批。
 - GitHub organization、repo 映射。
 - 本地项目 AI 工作空间路径。
 - 允许的写操作。
@@ -267,7 +267,7 @@ TapData / TapState 的方案 C 是第一套默认 profile，但不能硬编码�
 
 ## 9. 控制层运行时
 
-第一阶段控制层采用本地优先的 Go CLI Runtime，不做常驻 daemon，也不先做 Web 平台。
+第一阶段控制层采用本地优先的 Go CLI 运行时，不做常驻 daemon，也不先做 Web 平台。
 
 shell 只用于 `curl | bash` 安装引导。业务逻辑、operation、policy、adapter、事件日志和反馈分析由 Go CLI 承载。
 
@@ -290,7 +290,7 @@ packages/agentic-cli/
   testdata/
 ```
 
-Operation Contract 的机器可读源头在仓库顶层 `contracts/operations/`。Go CLI 可以在构建或运行时读取这些契约，但不在 package 内维护第二份契约源头。
+操作契约的机器可读源头在仓库顶层 `contracts/operations/`。Go CLI 可以在构建或运行时读取这些契约，但不在 package 内维护第二份契约源头。
 
 AIAgent 始终调用统一入口：
 
@@ -301,7 +301,7 @@ agentic-cli write-evidence --run-id ...
 agentic-cli prepare-pr --run-id ...
 ```
 
-Go CLI Runtime 的要求：
+Go CLI 运行时 的要求：
 
 - stdout 输出结构化 JSON。
 - stderr 输出人类诊断日志。
@@ -323,7 +323,7 @@ linux-arm64
 
 安装 bootstrap 允许依赖 `bash`、`curl` 和系统解压工具。`agentic-cli` 运行时不得依赖 `jq` 或本地 Python 环境。
 
-`agentic-cli preflight` 应检查 OS、CPU 架构、GitHub CLI、GitHub 登录状态、Jira 凭证、workspace profile 和当前业务仓库匹配关系。
+`agentic-cli preflight` 应检查 OS、CPU 架构、GitHub CLI、GitHub 登录状态、Jira 凭证、工作流配置和当前业务仓库匹配关系。
 
 ## 10. Git 和 GitHub 边界
 
@@ -352,7 +352,7 @@ gh pr create
 gh pr edit
 ```
 
-建议由 Go CLI guard 管控的内部能力。这些能力不直接作为第一阶段 operation 暴露给 AIAgent，AIAgent 仍应调用 Operation Contract 中定义的 operation：
+建议由 Go CLI guard 管控的内部能力。这些能力不直接作为第一阶段 operation 暴露给 AIAgent，AIAgent 仍应调用 操作契约中定义的 operation：
 
 ```text
 inspect_workspace
@@ -444,13 +444,13 @@ Observation -> Proposal -> Accepted Change
 
 以下动作必须暂停并等待人工确认：
 
-- 任务接管前 owner 不匹配。
+- 任务接管前 负责人不匹配。
 - 需求范围、验收标准、目标仓库或验证方式缺失。
 - 实际影响范围超出 Jira 已确认边界。
 - 需要改变复杂度、风险等级或需求范围。
 - AI 连续修复失败或无法解释失败原因。
 - push、创建 PR、重新提交修复。
-- PR Review comments 存在需要取舍的修改。
+- PR 审查 comments 存在需要取舍的修改。
 - 合入、发布、线上风险相关动作。
 
 ## 13. 安装与工作空间流程
@@ -496,23 +496,23 @@ agentic-cli write-evidence --run-id ...
 - AIAgent 工作规则文档：`docs/ai-working-rules.md`。
 - 用户故事文档：`docs/user-stories/agenticops-user-stories.md`。
 - AI 员工手册：`handbooks/ai-employee-handbook.md`。
-- Operation Contract 文档：`docs/contracts/operation-contract.md`。
-- TapData / TapState workflow profile 草案：`docs/profiles/workflow-profile.md`。
-- Go `agentic-cli` CLI Runtime 设计：`docs/runtime/cli-runtime.md`。
+- 操作契约文档：`docs/contracts/operation-contract.md`。
+- TapData / TapState 工作流配置草案：`docs/profiles/workflow-profile.md`。
+- Go `agentic-cli` CLI 运行时设计：`docs/runtime/cli-runtime.md`。
 - Jira / GitHub / Git 关键操作 guard 设计：`docs/runtime/cli-runtime.md`。
 - Evidence templates 设计：`docs/templates/evidence-templates.md`。
-- Feedback Loop 事件日志规范和日报命令：`docs/workflows/feedback-loop.md`。
+- 反馈闭环事件日志规范和日报命令：`docs/workflows/feedback-loop.md`。
 - 一个端到端 demo issue 脚本：`docs/examples/end-to-end-demo.md`。
 
 第一阶段验收标准：
 
-- 研发 owner 能完成初始化。
-- AI 能列出 owner 名下 Jira 待办。
+- 研发负责人能完成初始化。
+- AI 能列出 负责人名下 Jira 待办。
 - AI 能接管一个 issue，并执行 gate。
 - 接管成功或失败都能写入结构化 Jira 评论。
 - AI 能完成一次真实或接近真实的代码修改。
 - AI 能运行最小验证并回写结果。
 - AI 完成后停在人工确认点。
-- 研发 owner 确认后再 push / PR。
+- 研发负责人确认后再 push / PR。
 - 每次 operation 都有结构化事件日志。
 - 每天能生成 feedback report 和改进建议。

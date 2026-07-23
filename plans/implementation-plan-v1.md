@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 构建 AgenticOps 第一阶段最小可运行闭环，让研发 owner 可以安装 Go CLI、初始化工作空间、初始化 AIAgent 能力、用 fake Jira 数据接管任务、写入 evidence，并生成每日反馈报告。
+**Goal:** 构建 AgenticOps 第一阶段最小可运行闭环，让研发负责人可以安装 Go CLI、初始化工作空间、初始化 AIAgent 能力、用 fake Jira 数据接管任务、写入 evidence，并生成每日反馈报告。
 
-**Architecture:** 第一阶段采用本地优先的 Go CLI Runtime，shell 只做 `curl | bash` 安装引导。Go CLI 以 Operation Contract 为操作边界，先接 fake Jira adapter 跑通本地闭环，再接真实 Jira / GitHub。机器可读 Operation Contract 的源头是仓库顶层 `contracts/operations/`，Go package 不维护第二份契约源头。
+**Architecture:** 第一阶段采用本地优先的 Go CLI Runtime，shell 只做 `curl | bash` 安装引导。Go CLI 以 Operation Contract为操作边界，先接 fake Jira adapter 跑通本地闭环，再接真实 Jira / GitHub。机器可读 Operation Contract的源头是仓库顶层 `contracts/operations/`，Go package 不维护第二份契约源头。
 
 **Tech Stack:** Go 1.22+、标准库优先、`gopkg.in/yaml.v3` 用于 YAML、`gh` 作为 GitHub 登录状态检查、Jira 第一阶段先 fake adapter。
 
@@ -522,7 +522,7 @@ git add packages/agentic-cli/internal/config packages/agentic-cli/internal/works
 git commit -m "Feat(workspace): add workspace initialization model"
 ```
 
-### Task 3: Operation Contract 文件和读取器
+### Task 3: Operation Contract文件和读取器
 
 **Files:**
 - Create: `contracts/operations/takeover-task.yaml`
@@ -549,7 +549,7 @@ Create `contracts/operations/takeover-task.yaml`:
 ```yaml
 operation: takeover_task
 version: 1
-purpose: 研发 owner 授权 AIAgent 接管一个已进入迭代的任务。
+purpose: 研发负责人授权 AIAgent 接管一个已进入迭代的任务。
 task_type: task_takeover
 allowed_stages:
   - waiting_takeover
@@ -571,7 +571,7 @@ Create `contracts/operations/list-tasks.yaml`:
 ```yaml
 operation: list_tasks
 version: 1
-purpose: 列出当前 owner 可处理任务。
+purpose: 列出当前负责人可处理任务。
 task_type: task_listing
 allowed_stages:
   - initialized
@@ -687,7 +687,7 @@ Expected: PASS.
 
 ```bash
 git add go.mod go.sum contracts/operations packages/agentic-cli/internal/contract
-git commit -m "Feat(contract): add operation contract loader"
+git commit -m "Feat(contract): add Operation Contract loader"
 ```
 
 ### Task 4: Fake Jira adapter 和任务列表
@@ -1331,10 +1331,10 @@ git commit -m "Test(e2e): add local fake flow"
 - Jira issue search。
 - Jira issue get。
 - Jira comment write。
-- workspace profile 中 Jira 字段映射。
+- Workflow Profile中 Jira 字段映射。
 - Standard Process Registry 的机器可读契约。
 - task class 到 process id 的映射。
-- owner / assignee 匹配 gate。
+- 负责人和 assignee 匹配 gate。
 - `agent_id` 初始化和持久化。
 - `current_agent_id` 接管写入、执行过程校验和完成清理。
 - `takeover_at`、`completed_at` 和 `current_agent_id_cleared` 回写。
@@ -1344,7 +1344,7 @@ git commit -m "Test(e2e): add local fake flow"
 
 ## 5. 自检记录
 
-- Spec coverage: 覆盖安装、运行资产安装、本地 build / release 打包、工作空间初始化、AIAgent 初始化、新任务接管、证据写入、反馈报告。
+- Spec coverage: 覆盖安装、运行资产安装、本地 build / release 打包、工作空间初始化、AIAgent 初始化、新任务接管、evidence 写入、反馈报告。
 - Operation scope: 第一批可运行命令只取最小闭环，其他 operation 保留为后续计划。
 - Contract source: 顶层 `contracts/operations/` 是唯一机器可读契约源头。
 - Runtime boundary: Go CLI 承载业务逻辑，shell 只做安装引导。

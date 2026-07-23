@@ -6,7 +6,7 @@
 
 ## 2. 演示目标
 
-演示研发 owner 如何使用 AIAgent 完成一个受控任务接管：
+演示研发负责人如何使用 AIAgent 完成一个受控任务接管：
 
 ```text
 安装
@@ -34,7 +34,7 @@ CLI 命令 new 改为 create
 演示前应准备：
 
 - 一个脱敏 Jira issue。
-- 明确 owner。
+- 明确负责人。
 - 明确目标仓库。
 - 明确验收标准。
 - 明确验证方式。
@@ -74,7 +74,7 @@ agentic-cli workspace init --workspace tapstate
 期望说明：
 
 - AIAgent 加载 AI 员工手册。
-- AIAgent 加载 Operation Contract。
+- AIAgent 加载 操作契约。
 - AIAgent 说明人工确认点。
 
 ### 步骤 4：接管任务
@@ -104,7 +104,7 @@ agentic-cli workspace init --workspace tapstate
 ### 步骤 6：写入证据
 
 ```text
-回写本次开发 evidence。
+回写本次开发证据。
 ```
 
 期望说明：

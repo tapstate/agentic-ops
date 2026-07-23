@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将 AgenticOps 从本地 fake flow 升级为符合完整设计的受控 CLI Runtime。
+**Goal:** 将 AgenticOps 从本地 fake flow 升级为符合完整设计的受控 CLI 运行时。
 
-**Architecture:** 先把 Operation Contract 变成可验证的机器可读源头，再接入 Workflow Profile、Standard Process Registry、Jira adapter、ownership gate、problem resolution commands 和完成清理。每个阶段都保留 fake adapter 作为本地测试入口，真实写操作必须受 policy / gate / confirmation 控制。
+**Architecture:** 先把 Operation Contract变成可验证的机器可读源头，再接入 Workflow Profile、Standard Process Registry、Jira adapter、ownership gate、problem resolution commands 和完成清理。每个阶段都保留 fake adapter 作为本地测试入口，真实写操作必须受 policy / gate / confirmation 控制。
 
 **Tech Stack:** Go 1.22+、标准库优先、`gopkg.in/yaml.v3`、shell 仅用于安装和 e2e 编排。
 
@@ -16,7 +16,7 @@
 - stdout 只输出结构化 JSON；stderr 输出人类诊断日志。
 - 所有失败必须返回稳定 `code`、`message`、`required_human_action`、`task_type`、`current_stage` 和 `next_action`。
 - secrets 不允许出现在 stdout、stderr、事件日志或诊断包中。
-- `contracts/operations/` 是唯一机器可读 Operation Contract 源头。
+- `contracts/operations/` 是唯一机器可读 Operation Contract源头。
 - AIAgent 执行 Jira 任务前必须先识别 `task_class`，再选择 Standard Process Registry 中的 `process_id`。
 - `agent_id` 是 AIAgent 唯一编号；`current_agent_id` 是任务运行中绑定字段，任务完成或交接结束后必须清理。
 - 真实 Jira 写操作、Git push、GitHub PR 创建、merge 和发布必须经过 policy / gate / confirmation。
@@ -177,7 +177,7 @@ failure:
 
 `write-evidence.yaml` must include preconditions for run existence, ownership check, evidence template availability, and policy check.
 
-- [x] **Step 3: Expand remaining current-operation contracts**
+- [x] **Step 3: Expand remaining current-Operation Contract**
 
 Every current operation YAML must include at least:
 
@@ -505,7 +505,7 @@ Expected: FAIL because the CLI routes do not exist.
 
 Add `profile_update` and `profile_rollback` to `agent init` capabilities.
 
-- [x] **Step 5: Add operation contracts and e2e coverage**
+- [x] **Step 5: Add Operation Contract and e2e coverage**
 
 `contract validate` must include `profile_update` and `profile_rollback`. Local fake flow must exercise update, validate and rollback.
 
@@ -657,7 +657,7 @@ Added environment-based adapter selection with explicit required Jira connection
 
 Added `--confirm-real-jira-write` checks before real takeover binding and release cleanup field updates.
 
-- [x] **Step 4: Update operation contracts**
+- [x] **Step 4: Update Operation Contract**
 
 Added adapter config, issue read, current user, confirmation and write mapping failure codes.
 
@@ -734,7 +734,7 @@ Covered missing confirmation and confirmed real Jira comment write for `write-ev
 
 Added run event lookup for issue key, confirmation guard, Jira comment write and `real_jira_write` gate events.
 
-- [x] **Step 3: Update operation contract**
+- [x] **Step 3: Update Operation Contract**
 
 Added real Jira adapter config, confirmation and comment write failure codes to `write-evidence.yaml`.
 
@@ -827,7 +827,7 @@ Expected: FAIL because the command does not exist.
 
 Add optional `completed_at` and `completion_evidence` to feedback events. Add the `release-agent` CLI route and `release_agent` capability.
 
-- [x] **Step 3: Add operation contract and e2e coverage**
+- [x] **Step 3: Add Operation Contract and e2e coverage**
 
 `contract validate` must include `release_agent`. Local fake flow must exercise the cleanup event and count it in feedback report.
 
@@ -858,7 +858,7 @@ Scope:
 Definition:
 
 - Add `doctor --workspace <name>`.
-- The command outputs structured JSON containing local checks for install dir, version, workspace root, profile, policy, operation contracts, fake Jira adapter and GitHub baseline status.
+- The command outputs structured JSON containing local checks for install dir, version, workspace root, profile, policy, Operation Contract, fake Jira adapter and GitHub baseline status.
 - GitHub is `skipped` in the local baseline because real external checks are not implemented yet.
 - This is the local diagnostic baseline for later real Jira / GitHub / update checks.
 
@@ -876,9 +876,9 @@ Expected: FAIL because the command does not exist.
 
 - [x] **Step 2: Implement local checks**
 
-Use current repo and workspace state to check profile validation, policy file presence and operation contract validation. Do not call network services.
+Use current repo and workspace state to check profile validation, policy file presence and Operation Contract validation. Do not call network services.
 
-- [x] **Step 3: Add operation contract and e2e coverage**
+- [x] **Step 3: Add Operation Contract and e2e coverage**
 
 `contract validate` must include `doctor`. Local fake flow must run doctor.
 
@@ -921,7 +921,7 @@ Expected: FAIL because the command does not exist.
 
 Generate a Markdown bundle from local feedback events. Keep redaction deliberately narrow and auditable.
 
-- [x] **Step 3: Add operation contract and e2e coverage**
+- [x] **Step 3: Add Operation Contract and e2e coverage**
 
 `contract validate` must include `feedback_bundle`. Local fake flow must generate a bundle and verify the file exists.
 
@@ -983,7 +983,7 @@ Expected: FAIL because the CLI routes do not exist.
 
 Add `update_check` and `update_apply` to `agent init` capabilities.
 
-- [x] **Step 5: Add operation contracts and e2e coverage**
+- [x] **Step 5: Add Operation Contract and e2e coverage**
 
 `contract validate` must include update contracts. Local fake flow must run check/apply against a temporary manifest.
 
@@ -1018,9 +1018,9 @@ Covered `policy validate --workspace`, `policy update --workspace --source` and 
 
 Added `policy_validate`, `policy_update` and `policy_rollback` to AgenticCLI capabilities and structured JSON outputs.
 
-- [x] **Step 5: Add operation contracts and e2e coverage**
+- [x] **Step 5: Add Operation Contract and e2e coverage**
 
-Added policy operation contracts and local fake flow coverage with temporary source policy and cleanup of generated backup.
+Added policy Operation Contract and local fake flow coverage with temporary source policy and cleanup of generated backup.
 
 - [x] **Step 6: Verification**
 

@@ -2,18 +2,18 @@
 
 ## 1. 决策背景
 
-当前仓库已经跑通第一阶段本地 fake flow，但项目设计文档、AI 员工手册、用户故事、Workflow Profile 和 Standard Process Registry 已经把 AgenticOps 定义为完整的研发任务接管控制体系。
+当前仓库已经跑通第一阶段本地 fake flow，但项目设计文档、AI 员工手册、用户故事、工作流配置和 Standard Process Registry 已经把 AgenticOps 定义为完整的研发任务接管控制体系。
 
 2026-07-23 用户决策采用方案 B：完整设计作为当前必须实现边界，不再把真实 Jira gate、所有权绑定、profile / policy、诊断和更新能力仅视为远期文档目标。
 
 ## 2. 实现目标
 
-AgenticOps 必须从本地 fake flow 升级为可接真实研发流程的受控 CLI Runtime。完成后，`agentic-cli` 至少应具备：
+AgenticOps 必须从本地 fake flow 升级为可接真实研发流程的受控 CLI 运行时。完成后，`agentic-cli` 至少应具备：
 
-- 机器可读 Operation Contract 能表达输入、输出、前置 gate、失败码、副作用、重试和重做规则。
-- Workflow Profile 能校验 Jira 字段、状态、transition、任务分类、标准流程和本地源码映射。
+- 机器可读 操作契约能表达输入、输出、前置 gate、失败码、副作用、重试和重做规则。
+- 工作流配置能校验 Jira 字段、状态、transition、任务分类、标准流程和本地源码映射。
 - `takeover-task` 能执行所有权 gate、字段 gate、任务分类和标准流程选择。
-- `resume-takeover` 能读取已有 run 和事件，校验 workspace、issue、owner、目标仓库和恢复阶段。
+- `resume-takeover` 能读取已有 run 和事件，校验 `workspace`、`issue`、`owner`、目标仓库和恢复阶段。
 - `doctor`、`feedback bundle --redact`、`update check/apply`、`profile validate/update/rollback`、`policy validate/update/rollback` 具备结构化输出。
 - Jira 写入、Git push、PR、merge、发布和门禁放宽必须受 policy / gate / confirmation 控制。
 
@@ -36,7 +36,7 @@ AgenticOps 必须从本地 fake flow 升级为可接真实研发流程的受控 
 
 ### 阶段 2: Profile / Process 映射
 
-目标是让 Workflow Profile 和 Standard Process Registry 进入 CLI 校验路径。
+目标是让 工作流配置和 Standard Process Registry 进入 CLI 校验路径。
 
 实现内容：
 
@@ -97,4 +97,4 @@ AgenticOps 必须从本地 fake flow 升级为可接真实研发流程的受控 
 
 - 采用完整设计作为当前必须实现边界。
 - `implementation-plan-v1.md` 的 fake flow 仍作为已完成的本地基线，但不再限制后续实现范围。
-- `problem-resolution-plan-v1.md`、Standard Process Registry、Workflow Profile、Operation Contract 和 AI 员工手册共同定义后续实现目标。
+- `problem-resolution-plan-v1.md`、Standard Process Registry、工作流配置、操作契约和 AI 员工手册共同定义后续实现目标。

@@ -11,7 +11,7 @@
 AgenticOps 开发必须遵守：
 
 - 架构先行：先确认并稳定架构边界，再基于架构拆解计划和实施任务。
-- 文档先行：先确认目标定位、项目规则、用户故事、Operation Contract、Workflow Profile 和 AI 员工手册。
+- 文档先行：先确认目标定位、项目规则、用户故事、操作契约、工作流配置和 AI 员工手册。
 - 计划分层：计划必须从大阶段拆到中任务和小步骤，每个步骤都有明确验证方式。
 - 小步交付：每次变更只解决一个明确设计问题。
 - 证据优先：做结论前先读取当前文件、命令输出或权威文档。
@@ -36,9 +36,9 @@ AgenticOps 开发必须遵守：
 
 ## 4. 代码风格
 
-第一阶段 Go CLI Runtime 的实现方向如下：
+第一阶段 Go CLI 运行时 的实现方向如下：
 
-- CLI Runtime 第一阶段使用 Go 作为主实现语言。
+- CLI 运行时 第一阶段使用 Go 作为主实现语言。
 - shell 只用于 `curl | bash` 安装引导，不承载业务逻辑。
 - CLI 入口统一为 `agentic-cli`。
 - Go 代码应拆分为清晰的 command、contract、policy、adapter、workspace 和 feedback 模块，不写巨大单文件。
@@ -53,8 +53,8 @@ AgenticOps 开发必须遵守：
 
 实现代码时，测试应覆盖：
 
-- Operation Contract schema 校验。
-- Workflow Profile 必填字段校验。
+- 操作契约 schema 校验。
+- 工作流配置必填字段校验。
 - CLI JSON 输出格式。
 - 错误码稳定性。
 - secrets 脱敏。

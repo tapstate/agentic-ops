@@ -4,9 +4,9 @@
 
 本文定义 AgenticOps 正式使用前必须具备的问题修复路径。
 
-研发日常使用的是安装后的 `agentic-cli`、AI 员工手册、operation contracts、workflow profiles、policies、runbooks 和 templates。项目出现问题时，AgenticOps 必须能快速判断问题类型，选择正确修复载体，完成验证、发布、同步和回滚。
+研发日常使用的是安装后的 `agentic-cli`、AI 员工手册、操作契约、工作流配置、策略、运行手册和模板。项目出现问题时，AgenticOps 必须能快速判断问题类型，选择正确修复载体，完成验证、发布、同步和回滚。
 
-当前仓库已实现本地资产安装、本地 release 打包、GitHub Release 发布脚本、operation contract 校验、profile validate / update / rollback、policy validate / update / rollback、profile 驱动 Jira transition id/name 映射、远程 release manifest / artifact 下载校验、真实二进制切换、doctor 显式真实外部检查、真实 Jira REST client 合同测试基线，以及真实 Jira 字段、comment 和 transition 写入 gate/confirmation。本文是正式使用前的目标设计和验收基线。
+当前仓库已实现本地资产安装、本地 release 打包、GitHub Release 发布脚本、操作契约校验、profile validate / update / rollback、policy validate / update / rollback、profile 驱动 Jira transition id/name 映射、远程 release manifest / artifact 下载校验、真实二进制切换、doctor 显式真实外部检查、真实 Jira REST client 合同测试基线，以及真实 Jira 字段、comment 和 transition 写入 gate/confirmation。本文是正式使用前的目标设计和验收基线。
 
 ## 2. 架构适配性评估
 
@@ -14,9 +14,9 @@
 
 | 架构部分 | 当前状态 | 适配性判断 | 必须补齐的能力 |
 | --- | --- | --- | --- |
-| Go CLI Runtime | 已有 `agentic-cli` 本地 fake flow、真实 Jira REST client 合同测试基线、profile 驱动 transition 映射、真实二进制切换和 doctor 显式外部检查 | 适合承载强制检查、结构化输出、诊断、更新和回滚 | operation 兼容性版本治理 |
-| Operation Contract | 已有机器可读 YAML 和 `contract validate` 基线 | 适合沉淀标准操作输入输出和失败码 | operation 兼容性版本、跨版本迁移规则 |
-| Workflow Profile | 已有默认 profile、`profile validate / update / rollback` 基线 | 适合处理不同团队和 Jira workflow 差异 | 真实 Jira status / transition gate、资产包来源、profile 版本审计 |
+| Go CLI 运行时 | 已有 `agentic-cli` 本地 fake flow、真实 Jira REST client 合同测试基线、profile 驱动 transition 映射、真实二进制切换和 doctor 显式外部检查 | 适合承载强制检查、结构化输出、诊断、更新和回滚 | operation 兼容性版本治理 |
+| 操作契约 | 已有机器可读 YAML 和 `contract validate` 基线 | 适合沉淀标准操作输入输出和失败码 | operation 兼容性版本、跨版本迁移规则 |
+| 工作流配置 | 已有默认 profile、`profile validate / update / rollback` 基线 | 适合处理不同团队和 Jira workflow 差异 | 真实 Jira status / transition gate、资产包来源、profile 版本审计 |
 | Policy / Gate | 已有 policy validate / update / rollback 本地基线 | 适合控制关键步骤门禁 | 真实写操作 gate 变更审计和 confirmation |
 | Evidence / Feedback | 已有本地 evidence 和 feedback report | 适合发现重复问题并推动规范优化 | feedback bundle、问题分类统计、修复效果追踪 |
 | Release / Install | 已有 bootstrap stub、本地资产安装、本地 build / release / publish 脚本、远程 manifest / artifact 下载校验和真实二进制切换 | 适合快速分发 | profile 驱动 assets 来源治理、发布权限治理 |
@@ -71,8 +71,8 @@
 | 问题类型 | 典型表现 | 修复载体 | 同步方式 |
 | --- | --- | --- | --- |
 | `agentic-cli` 逻辑错误 | 命令输出错误、run_id 生成错误、事件写入错误、adapter 行为错误 | Go CLI 二进制 | 发布最新版本 + `update apply` |
-| Jira 流程状态没适配 | 未知 Jira status / transition、状态映射失败、项目 workflow 差异 | workflow profile / adapter mapping | asset update + `profile update` |
-| Jira 卡片属性丢失 | 缺少 owner、验收标准、目标仓库、验证方式、风险等级 | gate failure + 补全模板 / field mapping | 阻断接管 + 人工补卡或 profile 修复 |
+| Jira 流程状态没适配 | 未知 Jira status / transition、状态映射失败、项目 workflow 差异 | 工作流配置 / adapter mapping | asset update + `profile update` |
+| Jira 卡片属性丢失 | 缺少负责人、验收标准、目标仓库、验证方式、风险等级 | gate failure + 补全模板 / field mapping | 阻断接管 + 人工补卡或 profile 修复 |
 | 关键步骤门禁调整 | push / PR / Jira comment / scope change 的确认要求变化 | policy package | policy update + review + rollback |
 | 标准提示或处理步骤不完整 | AIAgent 不知道如何处理某类已知问题、说明不清、转人工条件不明确 | handbook / runbook / template | asset update + 人工 review |
 
@@ -180,7 +180,7 @@ blocked_operations:
 - 不同 workspace 的 Jira workflow 不一致。
 - AIAgent 看到未知状态，无法判断下一步。
 
-这类问题优先修复 workflow profile，不优先发布二进制。
+这类问题优先修复 工作流配置，不优先发布二进制。
 
 示例：
 
@@ -210,7 +210,7 @@ agentic-cli profile rollback --workspace tapstate
   "operation": "takeover_task",
   "code": "unknown_jira_status",
   "message": "当前 Jira 状态未配置映射",
-  "required_human_action": "请维护 workflow profile 的 status_mapping"
+  "required_human_action": "请维护 工作流配置的 status_mapping"
 }
 ```
 
@@ -221,7 +221,7 @@ agentic-cli profile rollback --workspace tapstate
 - 缺少验收标准。
 - 缺少目标仓库。
 - 缺少验证方式。
-- 缺少 owner。
+- 缺少负责人字段。
 - 缺少风险等级或范围边界。
 
 这类问题默认不是工具自动修复，而是任务数据质量问题。AgenticOps 必须停止接管，并输出明确补全动作。
@@ -236,7 +236,7 @@ agentic-cli profile rollback --workspace tapstate
   "message": "Jira issue 缺少目标仓库信息",
   "required_human_action": "请在 Jira 卡片补充目标仓库，或维护 workspace repo 映射",
   "missing_field": "target_repo",
-  "completion_template": "# Jira 卡片信息缺失\n\nAgenticOps 无法继续接管该任务，因为 Jira 卡片缺少必要信息。\n\n- 缺失字段：`target_repo`\n- 当前 operation：`takeover_task`\n- 建议动作：请补充该字段，或维护 workspace profile 中的字段映射。\n"
+  "completion_template": "# Jira 卡片信息缺失\n\nAgenticOps 无法继续接管该任务，因为 Jira 卡片缺少必要信息。\n\n- 缺失字段：`target_repo`\n- 当前 operation：`takeover_task`\n- 建议动作：请补充该字段，或维护 工作流配置中的字段映射。\n"
 }
 ```
 
@@ -262,7 +262,7 @@ field_mapping:
     jira_field: customfield_23456
 ```
 
-如果字段确实缺失，必须由研发 owner 或流程 owner 补卡，不允许 AIAgent 编造。
+如果字段确实缺失，必须由研发负责人或流程负责人补卡，不允许 AIAgent 编造。
 
 ## 10. 修复路径四：关键步骤门禁调整
 
@@ -321,8 +321,8 @@ binary release
   agentic-cli 多平台二进制
 
 asset release
-  operation contracts
-  workflow profiles
+  操作契约
+  工作流配置
   policies
   templates
   handbooks

@@ -2,9 +2,9 @@
 
 ## 1. 目的
 
-Task Form Standard 是 AgenticOps 维护 AI 操作任务属性和节点结果的标准层。它定义一张任务从创建、进入迭代、AI 接管、本地开发、PR / Review 到完成过程中需要维护的标准字段、生命周期要求、校验规则和缺口处理方式。
+任务表单标准（Task Form Standard）是 AgenticOps 维护 AI 操作任务属性和节点结果的标准层。它定义一张任务从创建、进入迭代、AI 接管、本地开发、PR / Review 到完成过程中需要维护的标准字段、生命周期要求、校验规则和缺口处理方式。
 
-Jira 是任务事实源，但不是 AgenticOps 表单标准的源头。AIAgent 必须面向 AgenticOps 标准字段工作；不同 Jira project、workflow、screen 或 custom field 的差异通过 workspace profile 中的 Jira Form Mapping 适配。
+Jira 是任务事实源，但不是 AgenticOps 表单标准的源头。AIAgent 必须面向 AgenticOps 标准字段工作；不同 Jira project、workflow、screen 或 custom field 的差异通过工作流配置中的 Jira Form Mapping 适配。
 
 表单数据不是普通附件。一个节点输出对应表单，代表该节点的标准动作已经执行过；后续 operation 必须基于这些表单数据、事件记录、审查结论和失败码判断下一步、重试、重做或停止。
 
@@ -26,11 +26,11 @@ AgenticOps 表单体系分为三层。
 
 | Layer | Responsibility | Source |
 | --- | --- | --- |
-| Task Form Standard | 定义 AgenticOps 标准字段、字段语义、值类型、owner 和敏感性。 | `docs/forms/`，后续 `contracts/forms/` |
+| Task Form Standard | 定义 AgenticOps 标准字段、字段语义、值类型、负责人和敏感性。 | `docs/forms/`，后续 `contracts/forms/` |
 | Lifecycle Form Requirements | 定义每个生命周期阶段需要哪些字段、何时必填、缺失时如何处理。 | `docs/forms/`，后续 `contracts/forms/` |
 | Jira Form Mapping | 把标准字段映射到具体 Jira project 的字段、描述模板、评论模板、状态或 transition。 | `profiles/<workspace>/`，后续 `assets/profiles/` |
 
-Operation Contract 只引用标准字段，不直接引用 Jira 字段。Workflow Profile 负责把标准字段映射到具体系统事实。
+操作契约只引用标准字段，不直接引用 Jira 字段。工作流配置负责把标准字段映射到具体系统事实。
 
 ## 4. 初始标准字段
 
@@ -39,41 +39,41 @@ Operation Contract 只引用标准字段，不直接引用 Jira 字段。Workflo
 | Field | Purpose | Owner | Required Stage |
 | --- | --- | --- | --- |
 | `issue_key` | Jira issue key。 | Jira | 创建后 |
-| `issue_type` | 任务类型，例如需求、缺陷、技术任务。 | 需求 owner / Jira | 创建后 |
-| `business_goal` | 任务要解决的业务或研发目标。 | 需求 owner | 卡片创建 |
-| `scope_boundary` | 明确包含和不包含的范围。 | 需求 owner / 研发 owner | 进入迭代 |
-| `acceptance_criteria` | 验收标准。 | 需求 owner / 研发 owner | 进入迭代 |
-| `owner` | 当前研发 owner。 | Jira / 迭代管理员 | 进入迭代 |
+| `issue_type` | 任务类型，例如需求、缺陷、技术任务。 | 需求负责人、Jira | 创建后 |
+| `business_goal` | 任务要解决的业务或研发目标。 | 需求负责人 | 卡片创建 |
+| `scope_boundary` | 明确包含和不包含的范围。 | 需求负责人、研发负责人 | 进入迭代 |
+| `acceptance_criteria` | 验收标准。 | 需求负责人、研发负责人 | 进入迭代 |
+| `owner` | 当前研发负责人。 | Jira / 迭代管理员 | 进入迭代 |
 | `iteration` | 所属迭代或计划窗口。 | 迭代管理员 | 进入迭代 |
-| `priority` | 任务优先级。 | 需求 owner / 迭代管理员 | 进入迭代 |
-| `risk_level` | 风险等级。 | 研发 owner | 进入迭代 |
-| `target_repo` | AI 需要读取和修改的目标仓库。 | 研发 owner / workspace profile | AI 接管 |
-| `target_branch` | 目标基线分支。 | 研发 owner / workspace profile | AI 接管 |
-| `verification_method` | 最小验证方式，例如命令、手动验收或 CI。 | 研发 owner | AI 接管 |
-| `environment_context` | 需要的环境、账号、测试数据或约束摘要。 | 研发 owner | AI 接管 |
-| `dependencies` | 外部依赖、前置任务或阻塞条件。 | 需求 owner / 研发 owner | AI 接管 |
+| `priority` | 任务优先级。 | 需求负责人、迭代管理员 | 进入迭代 |
+| `risk_level` | 风险等级。 | 研发负责人 | 进入迭代 |
+| `target_repo` | AI 需要读取和修改的目标仓库。 | 研发负责人、工作流配置 | AI 接管 |
+| `target_branch` | 目标基线分支。 | 研发负责人、工作流配置 | AI 接管 |
+| `verification_method` | 最小验证方式，例如命令、手动验收或 CI。 | 研发负责人 | AI 接管 |
+| `environment_context` | 需要的环境、账号、测试数据或约束摘要。 | 研发负责人 | AI 接管 |
+| `dependencies` | 外部依赖、前置任务或阻塞条件。 | 需求负责人、研发负责人 | AI 接管 |
 | `run_id` | 一次 AI 执行的追踪 ID。 | AgenticOps | 接管后 |
 | `agent_id` | 当前 AIAgent 的唯一编号。 | AgenticOps | AIAgent 初始化 |
-| `current_agent_id` | 当前任务绑定的 AIAgent 编号，用于防止多个代理同时处理同一任务。 | AgenticOps / Jira mapping | AI 接管 |
+| `current_agent_id` | 当前任务绑定的 AIAgent 编号，用于防止多个代理同时处理同一任务。 | AgenticOps、Jira 映射 | AI 接管 |
 | `takeover_at` | AIAgent 成功接管任务的时间。 | AgenticOps | AI 接管 |
 | `task_type` | AgenticOps 任务类型。 | AgenticOps | 接管后 |
-| `task_class` | 标准任务分类，用于选择对应标准流程。 | AgenticOps / workflow profile | 接管前 |
+| `task_class` | 标准任务分类，用于选择对应标准流程。 | AgenticOps、工作流配置 | 接管前 |
 | `process_id` | 标准流程编号。 | AgenticOps | 接管后 |
 | `current_stage` | 当前执行阶段。 | AgenticOps | 接管后 |
 | `next_action` | 下一步动作。 | AgenticOps | 接管后 |
 | `implementation_summary` | 本地实现摘要。 | AIAgent | 开发完成 |
 | `verification_result` | 实际验证结果。 | AIAgent | 开发完成 |
 | `residual_risk` | 剩余风险和未验证部分。 | AIAgent | 开发完成 |
-| `pr_link` | PR 链接。 | 研发 owner / AIAgent after gate | PR 阶段 |
+| `pr_link` | PR 链接。 | 研发负责人、AIAgent（门禁后） | PR 阶段 |
 | `ci_status` | CI 状态摘要。 | GitHub / CI | PR 阶段 |
-| `review_status` | Review comments 处理状态。 | AIAgent / 研发 owner | PR 阶段 |
-| `reviewer_decision` | 专业审查结论，例如通过、退回、要求补充、阻断。 | reviewer / QA / 运维 / 安全 / 研发 owner | 审查节点 |
-| `reviewer_required_action` | 审查后要求 AIAgent 或 owner 执行的动作。 | reviewer / QA / 运维 / 安全 / 研发 owner | 审查节点 |
-| `retry_policy` | 当前失败是否允许重试、最大次数或重试前置条件。 | AgenticOps / workflow profile | 失败后 |
-| `redo_from_stage` | 信息变更或审查退回时需要重做的起始阶段。 | AgenticOps / reviewer / 研发 owner | 重做时 |
-| `completion_evidence` | 最终完成证据。 | AIAgent / 研发 owner | 完成 |
-| `follow_up_items` | 后续问题或新任务建议。 | AIAgent / 研发 owner | 完成 |
-| `completed_at` | 标准流程完成或交接结束时间。 | AgenticOps / 研发 owner | 完成 |
+| `review_status` | 审查意见处理状态。 | AIAgent、研发负责人 | PR 阶段 |
+| `reviewer_decision` | 专业审查结论，例如通过、退回、要求补充、阻断。 | 代码审查人、QA、运维、安全、研发负责人 | 审查节点 |
+| `reviewer_required_action` | 审查后要求 AIAgent 或负责人执行的动作。 | 代码审查人、QA、运维、安全、研发负责人 | 审查节点 |
+| `retry_policy` | 当前失败是否允许重试、最大次数或重试前置条件。 | AgenticOps、工作流配置 | 失败后 |
+| `redo_from_stage` | 信息变更或审查退回时需要重做的起始阶段。 | AgenticOps、代码审查人、研发负责人 | 重做时 |
+| `completion_evidence` | 最终完成证据。 | AIAgent、研发负责人 | 完成 |
+| `follow_up_items` | 后续问题或新任务建议。 | AIAgent、研发负责人 | 完成 |
+| `completed_at` | 标准流程完成或交接结束时间。 | AgenticOps、研发负责人 | 完成 |
 | `current_agent_id_cleared` | 完成或交接后是否已清理任务上的 `current_agent_id`。 | AgenticOps | 完成 |
 
 字段值不得包含 secrets、tokens、private keys、原始敏感日志或完整敏感代码片段。写入 Jira 的人可见内容必须使用中文。
@@ -124,7 +124,7 @@ AIAgent 恢复任务时，应先读取最近一次表单状态和事件记录，
 
 ## 7. Jira Form Mapping
 
-每个 workspace profile 需要维护 Jira Form Mapping。Mapping 必须说明标准字段如何从 Jira 或 workspace 配置获得。
+每个工作流配置需要维护 Jira Form Mapping。Mapping 必须说明标准字段如何从 Jira 或工作空间配置获得。
 
 概念结构：
 
@@ -196,13 +196,13 @@ Jira 对接不满足 AgenticOps 标准时，先适配，再决策。
 | Jira 有字段但名称不同 | 更新 Jira Form Mapping。 |
 | Jira 字段存在但值为空 | 阻断当前阶段，输出补卡模板。 |
 | Jira 没有字段但描述模板稳定包含 | 在 mapping 中声明 `jira_description_section`。 |
-| Jira 没有字段也没有稳定模板 | 记录 `missing_form_field`，请求流程 owner 决策。 |
+| Jira 没有字段也没有稳定模板 | 记录 `missing_form_field`，请求流程负责人决策。 |
 | Jira 状态无法对应生命周期阶段 | 记录 `lifecycle_mapping_gap`，请求 workflow 决策。 |
 | 标准字段不适合某类任务 | 记录 `task_form_standard_gap`，请求是否调整标准。 |
 | 专业审查节点无法映射 | 记录 `review_gate_mapping_gap`，请求 workflow 决策。 |
 | 重试或重做规则缺失 | 记录 `retry_redo_policy_gap`，请求 profile / policy 决策。 |
-| 任务分类无法映射 | 记录 `task_class_mapping_gap`，请求研发 owner 或流程 owner 决策。 |
-| 完成后无法清理 `current_agent_id` | 记录 `agent_release_failed`，请求研发 owner 决策是否人工释放。 |
+| 任务分类无法映射 | 记录 `task_class_mapping_gap`，请求研发负责人或流程负责人决策。 |
+| 完成后无法清理 `current_agent_id` | 记录 `agent_release_failed`，请求研发负责人决策是否人工释放。 |
 
 稳定错误码建议：
 
@@ -232,31 +232,31 @@ Jira 对接不满足 AgenticOps 标准时，先适配，再决策。
 
 ## 9. 与现有契约的关系
 
-Operation Contract：
+操作契约：
 
 - 声明 operation 需要哪些标准字段。
 - 声明缺少标准字段时的稳定错误码。
 - 声明 operation 输出如何更新 `current_stage`、`next_action`、`retry_policy` 或 `redo_from_stage`。
 - 不声明具体 Jira custom field。
 
-Workflow Profile：
+工作流配置：
 
 - 声明 workspace、Jira project、状态映射、transition 映射和 Jira Form Mapping。
 - 声明任务分类到标准流程的映射。
 - 声明专业审查节点、允许重试的失败类型和必须重做的阶段边界。
 - 负责解释标准字段如何落到具体 Jira 事实。
 
-Evidence Templates：
+证据模板：
 
 - 使用标准字段渲染中文 Jira comment、工作日志和 evidence。
 - 不直接读取 Jira custom field。
 
-AI Employee Handbook：
+AI 员工手册：
 
 - 要求 AIAgent 面向标准字段工作。
 - 要求缺少标准字段时阻断或请求人工补充。
 
-Feedback Loop：
+反馈闭环：
 
 - 聚合缺失字段、映射缺口和生命周期不匹配。
 - 聚合审查退回、重试次数、重做来源阶段和重复阻塞原因。
@@ -272,7 +272,7 @@ Feedback Loop：
 - `docs/profiles/workflow-profile.md`
 - `docs/templates/evidence-templates.md`
 - `handbooks/ai-employee-handbook.md`
-- workspace profile 中的 Jira Form Mapping。
+- 工作流配置中的 Jira Form Mapping。
 
 字段变更分为三类：
 
@@ -287,10 +287,10 @@ Feedback Loop：
 第一阶段先做文档和契约基线，不接真实 Jira 写操作：
 
 1. 固定 Task Form Standard 和生命周期要求。
-2. 在 Workflow Profile 文档中引用 Jira Form Mapping。
-3. 在 Operation Contract 中把接管 gate 的前置条件改为标准字段要求。
+2. 在工作流配置文档中引用 Jira Form Mapping。
+3. 在操作契约中把接管 gate 的前置条件改为标准字段要求。
 4. 后续新增 `contracts/forms/task-form-standard.yaml` 和 `contracts/forms/lifecycle-requirements.yaml`。
-5. 后续新增 workspace profile 样例，只作为示例，不作为真实 Jira 默认配置。
+5. 后续新增工作流配置样例，只作为示例，不作为真实 Jira 默认配置。
 6. 在 feedback report 中聚合 `missing_form_field`、`lifecycle_mapping_gap`、审查退回、重试和重做事件。
 
 这让 AgenticOps 先形成可审阅、可演进的标准，再逐步接入不同 Jira 工作流。

@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-本文定义 AgenticOps 第一阶段 AgenticCLI Runtime 的设计和当前实现边界。当前仓库已实现本地 fake flow；真实 Jira / GitHub 写操作、push、PR、merge 和发布仍未接入。
+本文定义 AgenticOps 第一阶段 AgenticCLI 运行时 的设计和当前实现边界。当前仓库已实现本地 fake flow；真实 Jira / GitHub 写操作、push、PR、merge 和发布仍未接入。
 
 AgenticCLI 的目标是给 AIAgent 提供稳定、结构化、可审计的操作入口，承载 AgenticOps 成熟经验沉淀后的原子 operation，避免 AIAgent 直接面对 Jira / GitHub / Git 的底层事实和高风险动作。
 
@@ -55,7 +55,7 @@ packages/agentic-cli/
 
 以上是目标结构。当前已实现 `cli`、`config`、`contract`、`evidence`、`feedback`、`jira`、`output`、`policy` 和 `workspace` 的本地 fake flow；`git`、`github` 等真实集成目录仍属于后续阶段。
 
-Operation Contract 的机器可读源头在仓库顶层 `contracts/operations/`。Go CLI 可以在构建或运行时读取这些契约，但不在 package 内维护第二份契约源头。
+操作契约的机器可读源头在仓库顶层 `contracts/operations/`。Go CLI 可以在构建或运行时读取这些契约，但不在 package 内维护第二份契约源头。
 
 ## 4. 平台要求
 
@@ -132,7 +132,7 @@ CLI 必须遵守：
 - GitHub CLI 是否可用。
 - GitHub 登录状态。
 - Jira 凭证配置。
-- workspace profile 完整性。
+- 工作流配置完整性。
 - 当前业务仓库与 workspace 是否匹配。
 
 ## 8. 发布与修复
@@ -167,8 +167,8 @@ shell 只允许用于：
 shell 不允许承载：
 
 - Jira / GitHub / Git 业务操作。
-- Operation Contract 解析。
-- Workflow Profile 校验。
+- 操作契约解析。
+- 工作流配置校验。
 - Policy 和 human gate 判断。
 - Evidence 生成。
 - Feedback 分析。
@@ -186,4 +186,4 @@ shell 不允许承载：
 - 失败后能说明是否重试、重做或转人工。
 - 能被单元测试、contract 检查或 e2e fake flow 验证。
 
-不成熟逻辑不得直接写成脚本或 CLI 命令。它应先进入 runbook、workflow profile、policy 草案或 feedback proposal，由 AIAgent 在具体任务中执行并沉淀经验；当重复出现且边界清晰后，再升级为原子 operation。脚本只能用于安装引导、构建发布、轻量检测或调用受控 operation。
+不成熟逻辑不得直接写成脚本或 CLI 命令。它应先进入 runbook、工作流配置、policy 草案或 feedback proposal，由 AIAgent 在具体任务中执行并沉淀经验；当重复出现且边界清晰后，再升级为原子 operation。脚本只能用于安装引导、构建发布、轻量检测或调用受控 operation。

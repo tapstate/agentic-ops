@@ -7,16 +7,16 @@
 | 编号 | 决策 | 说明 |
 | --- | --- | --- |
 | D-001 | 第一阶段进入本地实现 | 已允许实现 `agentic-cli` Go CLI 的本地 fake flow；真实 Jira / GitHub 写操作、push、PR、merge 和发布仍不接入。 |
-| D-002 | AgenticOps 是 AI 执行控制体系 | 它不替代 Jira、研发 owner、PR Review、CI 或发布流程。 |
-| D-003 | 第一阶段由研发 owner 手动触发 | 不做全自动任务接管，低风险任务也先保留人工确认。 |
+| D-002 | AgenticOps 是 AI 执行控制体系 | 它不替代 Jira、研发负责人、PR 审查、CI 或发布流程。 |
+| D-003 | 第一阶段由研发负责人手动触发 | 不做全自动任务接管，低风险任务也先保留人工确认。 |
 | D-004 | 主流程从已进入迭代的 Jira issue 开始 | 需求复杂度、风险、优先级和范围边界应在进入迭代前完成确认。 |
-| D-005 | 源头仓库是 `tapstate/agentic-ops` | 源码、规则、AI 员工手册、skills、workflow profile、templates、adapters、CLI / SDK 和通用文档都在这里管理。 |
+| D-005 | 源头仓库是 `tapstate/agentic-ops` | 源码、规则、AI 员工手册、skills、工作流配置、templates、adapters、CLI / SDK 和通用文档都在这里管理。 |
 | D-006 | `~/.agentic-ops` 是全局安装和配置目录 | 该目录不是具体项目或具体任务的运行目录。 |
 | D-007 | 具体项目 AI 工作空间是运行目录 | 不同工作空间对应不同 Jira 空间、GitHub 仓库、本地源码和任务上下文。 |
-| D-008 | AI 员工手册是一等交付物 | 它同时服务 AIAgent 和研发 owner，定义工作方式、停止条件、工具使用和证据回写。 |
+| D-008 | AI 员工手册是一等交付物 | 它同时服务 AIAgent 和研发负责人，定义工作方式、停止条件、工具使用和证据回写。 |
 | D-009 | 操作契约屏蔽 Jira 事实 | AIAgent 面向 operation 工作，不直接依赖 Jira 字段、状态名和 workflow 细节。 |
-| D-010 | workflow profile 管理项目差异 | 不同项目通过 profile 映射 Jira 状态、字段、权限、仓库和人工门禁。 |
-| D-011 | 第一阶段控制层采用 Go CLI Runtime | shell 只用于安装引导；主 CLI 使用 Go 编译为 Linux、macOS Intel 和 macOS Apple Silicon 对应二进制，不优先做常驻服务或 Web 平台。 |
+| D-010 | 工作流配置管理项目差异 | 不同项目通过 profile 映射 Jira 状态、字段、权限、仓库和人工门禁。 |
+| D-011 | 第一阶段控制层采用 Go CLI 运行时 | shell 只用于安装引导；主 CLI 使用 Go 编译为 Linux、macOS Intel 和 macOS Apple Silicon 对应二进制，不优先做常驻服务或 Web 平台。 |
 | D-012 | Git / GitHub 轻 guard，不完全封装 | Git 和 GitHub 不会换，重点控制危险动作、记录证据和阻止越权。 |
 | D-013 | 反馈闭环只生成改进建议 | AIAgent 可以分析工作日志并提出 proposal，但不能未经人工确认自动改写源头规则。 |
 | D-014 | 文档可见标题默认中文 | 产品名、工具名、命令、字段、目录名和稳定编号可保留英文或缩写。 |
@@ -25,16 +25,16 @@
 | D-017 | AgenticOps 长期目标是公司事务处理标准化 | AgenticOps 首先落地研发 Jira 任务，长期目标是把公司事务处理方式沉淀为可执行、可审计、可回滚的规范资产，让 AI 按公司当前规范处理问题，并通过执行记录持续提出规范优化建议。 |
 | D-018 | 正式使用前必须具备成熟修复路径 | AgenticOps 正式给研发日常使用前，必须能按问题类型选择修复载体，支持脱敏诊断、快速发布、资产热更新、同步和回滚；四类首要问题是 CLI 逻辑错误、Jira 流程状态没适配、Jira 卡片属性丢失和关键步骤门禁调整。 |
 | D-019 | 当前项目权威源头是 `agentic-ops` | AgenticOps 相关设计、计划和目标都在当前项目中维护；历史 `rd-agentic` / `td-agentic` 后缀项目只作为参考来源，不作为当前事实源或设计依赖。 |
-| D-020 | AgenticOps 的目标重心是形成 AI 可执行标准 | AgenticOps 不只是提供 CLI，而是通过 AI 员工手册、operation contracts、workflow profiles、policies、runbooks、templates 和 feedback loop 形成标准；除非问题来自 `agentic-cli` 二进制逻辑错误，否则 AIAgent 应优先按标准资产自助处理、阻断或转人工。 |
-| D-021 | 同仓库按目录分管资料，发布时拆分交付物 | 当前项目不使用不同分支分管源码、设计、计划或运行资产；分支只用于开发协作和发布准备。维护者面对完整仓库，研发 owner 和 AIAgent 默认只接触安装后的命令、资产、模板和规范。 |
+| D-020 | AgenticOps 的目标重心是形成 AI 可执行标准 | AgenticOps 不只是提供 CLI，而是通过 AI 员工手册、操作契约、工作流配置、策略、运行手册、模板 和 反馈闭环 形成标准；除非问题来自 `agentic-cli` 二进制逻辑错误，否则 AIAgent 应优先按标准资产自助处理、阻断或转人工。 |
+| D-021 | 同仓库按目录分管资料，发布时拆分交付物 | 当前项目不使用不同分支分管源码、设计、计划或运行资产；分支只用于开发协作和发布准备。维护者面对完整仓库，研发负责人和 AIAgent 默认只接触安装后的命令、资产、模板和规范。 |
 | D-022 | 发布支持策略采用 latest-only | AgenticOps 不维护旧版本补丁线；BUG 只在最新版本修复，有新版本时推荐自动更新应用。rollback 只用于安装失败或新版本不可用时的本地恢复，不作为旧版本修复策略。 |
 | D-023 | 版本号采用运行状态、迭代版本、提交序号和提交编号 | AgenticOps 版本号格式为 `STATE-vMAJOR.ITERATION.COMMIT_INDEX-COMMIT`，例如 `RES-v0.1.3-a68372d`。迭代开始时维护者打 `vMAJOR.ITERATION` tag；build 和 release 自动按最近迭代 tag 到 HEAD 的提交计数生成 `COMMIT_INDEX`，并注入当前 Git short commit。运行时仍通过 `version_state` 区分 `SRC`、`DEV` 和 `RES`；build version、release version 和 asset version 都不允许手工指定。 |
 | D-024 | Jira 交互人可见内容使用中文 | 写入 Jira 的标题、描述、评论、工作日志、evidence 正文、阻塞说明和补卡说明必须使用中文；Jira 字段名、状态名、transition 名称、issue key、命令、配置字段和协议字段可以保留原始英文或缩写。 |
 | D-025 | AI 操作任务表单标准是 AgenticOps 源头标准 | AgenticOps 维护标准任务字段和生命周期要求；不同 Jira project、workflow、screen 或 custom field 先通过 Jira Form Mapping 适配。不符合标准的地方记录 gap 并请求人工决策，不能让 AIAgent 直接按 Jira 字段猜测。 |
 | D-026 | AgenticOps 承载公司员工执行标准 | AgenticOps 的定位从“公司事务处理方式”进一步收敛为“公司员工执行标准”：AIAgent 按标准动作执行任务，每个节点输出标准表单数据，不同专业角色在对应节点审查产出，后续 operation 根据表单数据、审查结论、失败码和 gate 决定继续、重试、重做或停止。 |
-| D-027 | 框架稳定，成熟逻辑原子化 | AgenticOps 框架先稳定定义大的流程环节、门禁、状态、容错和演进机制；成熟固化的交互逻辑再沉淀为原子化 operation。脚本入口只做受控编排或调用，不承载业务判断。AIAgent 在具体环节内执行任务并沉淀经验，周期性复盘把高频经验、失败模式和人工退回转化为 profile、policy、runbook、template 或 operation 的改进建议。 |
+| D-027 | 框架稳定，成熟逻辑原子化 | AgenticOps 框架先稳定定义大的流程环节、门禁、状态、容错和演进机制；成熟固化的交互逻辑再沉淀为原子化 operation。脚本入口只做受控编排或调用，不承载业务判断。AIAgent 在具体环节内执行任务并沉淀经验，周期性复盘把高频经验、失败模式和人工退回转化为 profile、策略、运行手册、模板 或 operation 的改进建议。 |
 | D-028 | CLI 组件命名为 AgenticCLI | 旧名 `agent-task-ops` 过度强调任务操作，不能表达二进制是 AgenticOps 成熟经验沉淀结晶。项目尚未上线，不保留兼容别名；组件名使用 `AgenticCLI`，二进制命令、release artifact 和 Go package 目录统一使用 `agentic-cli`。 |
-| D-029 | 标准流程由 Standard Process Registry 维护 | 任务必须先分类，再进入对应标准流程；Workflow Profile 只负责把标准流程映射到具体 Jira 字段、状态和 transition。接管任务必须校验 assignee 和 `current_agent_id`，执行过程中持续检查所有权；任务完成或交接结束后必须清理 `current_agent_id`，异常停止或所有权冲突时不得自动清理。 |
+| D-029 | 标准流程由 Standard Process Registry 维护 | 任务必须先分类，再进入对应标准流程；工作流配置只负责把标准流程映射到具体 Jira 字段、状态和 transition。接管任务必须校验 assignee 和 `current_agent_id`，执行过程中持续检查所有权；任务完成或交接结束后必须清理 `current_agent_id`，异常停止或所有权冲突时不得自动清理。 |
 
 ## 2. 当前无需决策事项
 
@@ -46,7 +46,7 @@
 - 是否强制 AI Review。
 - 是否完整设计集成测试体系。
 - 是否允许低风险任务自动 push 或自动创建 PR。
-- 是否把 Go CLI Runtime 改成常驻服务或 Web 控制台。
+- 是否把 Go CLI 运行时 改成常驻服务或 Web 控制台。
 
 这些事项可以作为后续演进主题，但不阻塞第一阶段文档审阅。
 

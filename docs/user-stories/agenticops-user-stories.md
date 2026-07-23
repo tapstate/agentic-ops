@@ -2,21 +2,21 @@
 
 ## 1. 范围
 
-本文记录 AgenticOps 第一阶段用户故事。故事围绕研发 owner 操作 AI 员工从 Jira 接管任务到完成任务的主链路展开，覆盖安装、工作空间初始化、AIAgent 能力初始化、新任务接管、恢复接管任务和工作日志上报。
+本文记录 AgenticOps 第一阶段用户故事。故事围绕研发负责人操作 AI 员工从 Jira 接管任务到完成任务的主链路展开，覆盖安装、工作空间初始化、AIAgent 能力初始化、新任务接管、恢复接管任务和工作日志上报。
 
 不同任务可以进入不同流程，但每个流程都必须记录执行过程，并在关键阶段回写状态、信息和证据，便于后续分析和优化。
 
 AgenticOps 的用户故事需要同时约束三类对象：
 
-- 研发 owner：用自然语言或 CLI 快速操作 AI 员工。
-- AIAgent：按 AI 员工手册和 Operation Contract 工作。
-- `agentic-cli`：作为 Go CLI Runtime 执行 gate、policy、流程选择、证据回写和事件记录。
+- 研发负责人：用自然语言或 CLI 快速操作 AI 员工。
+- AIAgent：按 AI 员工手册和 操作契约工作。
+- `agentic-cli`：作为 Go CLI 运行时 执行 gate、policy、流程选择、证据回写和事件记录。
 
 ## 2. US-001 安装 AgenticOps
 
-作为研发 owner，  
-我希望能通过一条安装命令安装 AgenticOps，  
-以便在本机获得 `agentic-cli`、AI 员工手册、全局配置模板、operation contracts 和通用 skills。
+作为研发负责人，
+我希望能通过一条安装命令安装 AgenticOps，
+以便在本机获得 `agentic-cli`、AI 员工手册、全局配置模板、操作契约和通用 skills。
 
 ### 触发方式
 
@@ -69,9 +69,9 @@ curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
 
 ## 3. US-002 初始化项目 AI 工作空间
 
-作为研发 owner，  
-我希望能为具体项目初始化 AI 工作空间，  
-以便 AgenticOps 知道该项目对应的 Jira 空间、GitHub 组织/仓库、本地源码目录、workflow profile 和任务执行记录位置。
+作为研发负责人，
+我希望能为具体项目初始化 AI 工作空间，
+以便 AgenticOps 知道该项目对应的 Jira 空间、GitHub 组织/仓库、本地源码目录、工作流配置和任务执行记录位置。
 
 ### 触发方式
 
@@ -82,15 +82,15 @@ agentic-cli workspace init --workspace tapstate
 ### 前置条件
 
 - AgenticOps 已安装。
-- 研发 owner 已确定当前项目 AI 工作空间名称，例如 `tapstate` 或 `tapdata`。
+- 研发负责人已确定当前项目 AI 工作空间名称，例如 `tapstate` 或 `tapdata`。
 - 本机可以访问对应项目的 GitHub 仓库和 Jira 空间。
 
 ### 主流程
 
 1. CLI 读取 `~/.agentic-ops` 中的全局配置和默认模板。
 2. CLI 创建项目 AI 工作空间配置。
-3. CLI 引导研发 owner 配置 Jira project、JQL、owner 字段、状态映射和目标仓库映射。
-4. CLI 引导研发 owner 配置 GitHub organization、默认 repo 和本地源码根目录。
+3. CLI 引导研发负责人配置 Jira project、JQL、owner 字段、状态映射和目标仓库映射。
+4. CLI 引导研发负责人配置 GitHub organization、默认 repo 和本地源码根目录。
 5. CLI 创建工作空间事件目录，例如 `<project-ai-workspace>/.agentic-ops/runs/`。
 6. CLI 运行 workspace preflight。
 
@@ -123,8 +123,8 @@ agentic-cli workspace init --workspace tapstate
 
 ## 4. US-003 初始化 AIAgent 能力
 
-作为研发 owner，  
-我希望能初始化当前 AIAgent 的 AgenticOps 能力，  
+作为研发负责人，
+我希望能初始化当前 AIAgent 的 AgenticOps 能力，
 以便 AIAgent 知道 AI 员工手册、可用 operation、停止条件、人工确认点和工具调用方式。
 
 ### 触发方式
@@ -133,7 +133,7 @@ agentic-cli workspace init --workspace tapstate
 agentic-cli agent init --workspace tapstate
 ```
 
-或由研发 owner 在 AIAgent 会话中输入：
+或由研发负责人在 AIAgent 会话中输入：
 
 ```text
 初始化 AgenticOps 能力，工作空间是 tapstate。
@@ -149,10 +149,10 @@ agentic-cli agent init --workspace tapstate
 
 1. AIAgent 读取 AI 员工手册。
 2. AIAgent 读取任务类型、阶段和下一步动作规则。
-3. AIAgent 读取 workspace profile 摘要。
-4. AIAgent 读取 Operation Contract 列表。
+3. AIAgent 读取 工作流配置摘要。
+4. AIAgent 读取 操作契约列表。
 5. AIAgent 执行 `agentic-cli preflight --workspace tapstate`。
-6. AIAgent 向研发 owner 输出当前可用能力、阶段判断方式和限制。
+6. AIAgent 向研发负责人输出当前可用能力、阶段判断方式和限制。
 
 ### 输出
 
@@ -193,13 +193,13 @@ agentic-cli agent init --workspace tapstate
 
 - AIAgent 能明确说明任务类型、阶段判断方式和可执行操作。
 - AIAgent 能明确说明哪些动作必须人工确认。
-- AIAgent 知道不能直接面对 Jira 字段和状态，必须通过 Operation Contract / CLI 工作。
-- 初始化完成后，研发 owner 可以直接说“列出我的任务”或“接管 TAP-123”。
+- AIAgent 知道不能直接面对 Jira 字段和状态，必须通过操作契约和 CLI 工作。
+- 初始化完成后，研发负责人可以直接说“列出我的任务”或“接管 TAP-123”。
 
 ## 5. US-004 新任务接管
 
-作为研发 owner，  
-我希望能让 AIAgent 接管一个新的 Jira issue，  
+作为研发负责人，
+我希望能让 AIAgent 接管一个新的 Jira issue，
 以便 AI 员工在完成 gate 后开始读取上下文、制定计划、开发、验证并回写证据。
 
 ### 触发方式
@@ -218,13 +218,13 @@ agentic-cli takeover-task TAP-123 --workspace tapstate
 
 - AIAgent 能力已初始化。
 - Jira issue 已进入迭代。
-- 当前 Jira 用户和 issue owner 匹配。
+- 当前 Jira 用户和 issue 负责人匹配。
 - Jira issue 具备需求范围、验收标准、目标仓库和验证方式。
 
 ### 主流程
 
 1. AIAgent 调用 `takeover_task` operation。
-2. CLI 执行 owner、迭代、需求、风险、目标仓库、验证方式和权限 gate。
+2. CLI 执行负责人、迭代、需求、风险、目标仓库、验证方式和权限 gate。
 3. gate 通过后，CLI 生成 `run_id`。
 4. CLI 写入接管成功 evidence。
 5. CLI 返回目标仓库、验证命令、任务摘要和下一步。
@@ -232,8 +232,8 @@ agentic-cli takeover-task TAP-123 --workspace tapstate
 7. AIAgent 输出开发计划和风险点。
 8. AIAgent 在允许范围内修改代码。
 9. AIAgent 运行最小验证。
-10. AIAgent 回写开发 evidence。
-11. AIAgent 停在人工确认点，等待研发 owner 确认 push / PR。
+10. AIAgent 回写开发证据。
+11. AIAgent 停在人工确认点，等待研发负责人确认 push / PR。
 
 ### 输出
 
@@ -253,7 +253,7 @@ agentic-cli takeover-task TAP-123 --workspace tapstate
 
 ### 失败处理
 
-- owner 不匹配时，停止，不写开发 evidence。
+- 负责人不匹配时，停止，不写开发证据。
 - 缺少验收标准、目标仓库或验证方式时，写接管失败 evidence。
 - 权限不足时，返回 `missing_permission`。
 - 风险边界不清时，要求人工确认。
@@ -269,8 +269,8 @@ agentic-cli takeover-task TAP-123 --workspace tapstate
 
 ## 6. US-005 恢复接管任务
 
-作为研发 owner，  
-我希望能恢复一个已接管但未完成的任务，  
+作为研发负责人，
+我希望能恢复一个已接管但未完成的任务，
 以便 AIAgent 继续同一个 `run_id` 的上下文，而不是重新开始或混淆多次执行记录。
 
 ### 触发方式
@@ -295,9 +295,9 @@ agentic-cli resume-takeover --run-id TAP-123-takeover-20260721103012-a8f3 --work
 
 1. AIAgent 调用 `resume_takeover` operation。
 2. CLI 读取 `run_id` 对应的 run summary 和 events。
-3. CLI 校验当前 workspace、issue、owner、目标仓库和本地分支状态。
+3. CLI 校验当前 workspace、issue、负责人、目标仓库和本地分支状态。
 4. CLI 返回上次阶段、已完成动作、失败原因、下一步建议。
-5. AIAgent 向研发 owner 简短说明恢复点。
+5. AIAgent 向研发负责人简短说明恢复点。
 6. AIAgent 从恢复点继续执行，而不是重新生成新的接管记录。
 
 ### 输出
@@ -319,20 +319,20 @@ agentic-cli resume-takeover --run-id TAP-123-takeover-20260721103012-a8f3 --work
 
 - `run_id` 不存在时，提示可恢复的最近 run。
 - 当前 workspace 与 `run_id` 不匹配时，拒绝恢复。
-- 本地代码状态不一致时，要求研发 owner 确认。
+- 本地代码状态不一致时，要求研发负责人确认。
 - 如果上次失败原因属于人工确认点，AIAgent 不能自动继续。
 
 ### 验收标准
 
 - 恢复任务不会创建新的 `run_id`。
-- 恢复前必须校验 workspace、issue、owner 和目标仓库一致。
+- 恢复前必须校验 workspace、issue、负责人和目标仓库一致。
 - AIAgent 能说明从哪个阶段恢复。
 - 恢复过程继续写入同一个 run 的事件日志。
 
 ## 7. US-006 工作日志上报
 
-作为研发 owner，  
-我希望 AIAgent 能上报每天的工作日志，  
+作为研发负责人，
+我希望 AIAgent 能上报每天的工作日志，
 以便团队分析 AI 员工执行情况、识别阻塞点，并持续优化 AgenticOps 手册、contracts、profiles 和 Go CLI。
 
 ### 触发方式

@@ -66,14 +66,14 @@ agentic-cli policy rollback --workspace <name>
   - 如实现 rollback，只用于安装失败或新版本不可用时的本地恢复。
   - Implementation note: `update check / apply` 已支持本地和远程 manifest、三种 severity、`blocked_operations`、artifact checksum 校验和远程二进制激活；`tests/e2e/problem-resolution-flow.sh` 验证 required update 与阻断 operation 输出。
 
-- [x] **Task 4: Workflow Profile 更新**
+- [x] **Task 4: Workflow Profile更新**
   - 实现 `profile validate / update / rollback`。
   - 支持 `status_mapping`、`transition_mapping`、`field_mapping` 校验。
   - 未知 Jira 状态必须返回 `unknown_jira_status`，不允许 AIAgent 猜。
   - Implementation note: `profile validate / update / rollback` 已落地，profile 校验覆盖 status、standard transition、Jira transition 和字段映射；未知 Jira 状态会返回 `unknown_jira_status`，`tests/e2e/problem-resolution-flow.sh` 验证 profile hotfix 和 rollback。
 
 - [x] **Task 5: Jira 卡片属性缺失处理**
-  - 对 owner、验收标准、目标仓库、验证方式、风险等级等必填项做 gate。
+  - 对负责人、验收标准、目标仓库、验证方式、风险等级等必填项做 gate。
   - 缺失时停止接管。
   - 输出补全模板和 `required_human_action`。
   - 把 missing field 写入 feedback report 聚合。

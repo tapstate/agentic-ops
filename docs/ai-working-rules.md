@@ -16,7 +16,7 @@ AIAgent 做任何结论前必须先找证据。
 - `git status`、`find`、`rg`、`sed` 等命令输出。
 - 已确认的项目规则和设计文档。
 - 用户当前明确指令。
-- Operation Contract、Workflow Profile、AI 员工手册。
+- 操作契约、工作流配置、AI 员工手册。
 
 无效证据包括：
 
@@ -32,7 +32,7 @@ AIAgent 不得声称以下内容已经存在，除非当前仓库中有文件或
 - `agentic-cli` 已实现。
 - `init.sh` 已存在。
 - Operation YAML 已存在。
-- Workflow Profile 可运行。
+- 工作流配置可运行。
 - Jira adapter 已可用。
 - GitHub guard 已可用。
 - Feedback command 已可用。
@@ -77,7 +77,7 @@ AIAgent 必须严格区分：
 
 允许的工作：
 
-- 维护文档、目录结构、Operation Contract、Workflow Profile、AI 员工手册和 Feedback Loop。
+- 维护文档、目录结构、操作契约、工作流配置、AI 员工手册和 反馈闭环。
 - 实现 `agentic-cli` Go CLI 的本地 fake flow。
 - 实现 `scripts/init.sh` 安装 bootstrap。
 - 实现本地单元测试、脚本 smoke test 和 fake flow e2e。

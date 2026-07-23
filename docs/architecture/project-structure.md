@@ -11,12 +11,12 @@
 - 源码设计。
 - 项目规则。
 - AI 员工手册。
-- Operation Contract。
-- Workflow Profile。
+- 操作契约。
+- 工作流配置。
 - Skills。
 - Templates。
 - 运行资产源头。
-- CLI Runtime 设计。
+- CLI 运行时设计。
 - 文档、示例和测试规划。
 
 ## 3. 目标结构
@@ -95,14 +95,14 @@ agentic-ops/
 | Directory | Responsibility |
 | --- | --- |
 | `docs/` | 架构、规则、用户故事、流程和设计说明。 |
-| `handbooks/` | AI 员工手册，面向 AIAgent 和研发 owner。 |
-| `assets/` | 安装后交付给研发 owner 和 AIAgent 使用的运行资产源头。 |
-| `plans/` | 面向 AIAgent 和研发 owner 的可执行推进计划，使用 checkbox 跟踪实施进度。 |
-| `contracts/` | 可机器读取的 Operation Contract，后续以 YAML / JSON 管理。 |
-| `profiles/` | Workflow Profile 示例和默认配置。 |
+| `handbooks/` | AI 员工手册，面向 AIAgent 和研发负责人。 |
+| `assets/` | 安装后交付给研发负责人和 AIAgent 使用的运行资产源头。 |
+| `plans/` | 面向 AIAgent 和研发负责人的可执行推进计划，使用 checkbox 跟踪实施进度。 |
+| `contracts/` | 可机器读取的 操作契约，后续以 YAML / JSON 管理。 |
+| `profiles/` | 工作流配置示例和默认配置。 |
 | `skills/` | AgenticOps skills，让 AIAgent 知道如何工作。 |
 | `templates/` | Jira / PR / evidence 回写模板。 |
-| `packages/agentic-cli/` | Go CLI Runtime 当前实现位置。 |
+| `packages/agentic-cli/` | Go CLI 运行时 当前实现位置。 |
 | `examples/` | 端到端演示样例。 |
 | `tests/` | 合同、脚本和文档一致性测试。 |
 | `scripts/` | 安装、检查和辅助脚本。 |
@@ -116,7 +116,7 @@ agentic-ops/
 当前仓库使用目录区分源码、设计、计划和运行资产，不使用不同分支分管资料。发布时再按交付对象拆分：
 
 - 维护者面对完整仓库。
-- 研发 owner 和 AIAgent 面对安装后的 `agentic-cli`、`~/.agentic-ops/current.json` 和 `~/.agentic-ops/assets/<version>/`。
+- 研发负责人和 AIAgent 面对安装后的 `agentic-cli`、`~/.agentic-ops/current.json` 和 `~/.agentic-ops/assets/<version>/`。
 - 设计文档和实施计划不进入普通使用者的日常入口。
 
 ## 6. 工作空间边界
@@ -128,7 +128,7 @@ tapstate/
 tapdata/
 ```
 
-项目 AI 工作空间保存该项目的 Jira 空间、GitHub 仓库、本地源码、workflow profile、任务执行上下文和反馈日志。
+项目 AI 工作空间保存该项目的 Jira 空间、GitHub 仓库、本地源码、工作流配置、任务执行上下文和反馈日志。
 
 建议工作空间内运行资料位置：
 
@@ -143,6 +143,6 @@ tapdata/
 
 当前结构可以支持第一阶段文档和设计落地，不需要额外目录决策。
 
-`plans/` 保留在仓库顶层。原因是实施计划不是普通说明文档，而是给 AIAgent 按步骤执行、给研发 owner 跟踪推进状态的工作入口；它需要比 `docs/` 中的设计说明更容易被定位和更新。
+`plans/` 保留在仓库顶层。原因是实施计划不是普通说明文档，而是给 AIAgent 按步骤执行、给研发负责人跟踪推进状态的工作入口；它需要比 `docs/` 中的设计说明更容易被定位和更新。
 
 如果后续要把 `contracts/`、`profiles/`、`skills/`、`templates/` 提前填入可执行配置，需要先确认这些内容属于“设计样例”还是“运行时默认配置”。

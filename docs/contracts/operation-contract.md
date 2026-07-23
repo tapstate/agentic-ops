@@ -2,13 +2,13 @@
 
 ## 1. 目的
 
-Operation Contract 是 AgenticOps 的操作契约层，用于屏蔽 Jira / GitHub / Git 的底层事实差异，向 AIAgent 暴露稳定、统一、可验证的任务操作输入输出规范。
+操作契约是 AgenticOps 的操作契约层，用于屏蔽 Jira / GitHub / Git 的底层事实差异，向 AIAgent 暴露稳定、统一、可验证的任务操作输入输出规范。
 
 AIAgent 面向 operation 工作，不直接面对 Jira 字段、Jira 状态、Jira transition 或 Jira comment 模板。
 
-Operation Contract 还必须说明每次 operation 如何读取或更新 Task Form Standard 中的标准字段。AIAgent 后续判断 `current_stage`、`next_action`、重试、重做和人工审查时，应以 operation 输出、表单数据和事件记录为准，而不是以聊天上下文为准。
+操作契约还必须说明每次 operation 如何读取或更新 Task Form Standard 中的标准字段。AIAgent 后续判断 `current_stage`、`next_action`、重试、重做和人工审查时，应以 operation 输出、表单数据和事件记录为准，而不是以聊天上下文为准。
 
-Operation Contract 必须引用 Standard Process Registry 中的任务分类和流程阶段。AIAgent 执行任务前必须先得到 `task_class` 和 `process_id`，再进入对应流程阶段。
+操作契约必须引用 Standard Process Registry 中的任务分类和流程阶段。AIAgent 执行任务前必须先得到 `task_class` 和 `process_id`，再进入对应流程阶段。
 
 ## 2. 契约原则
 
@@ -33,23 +33,23 @@ Operation Contract 必须引用 Standard Process Registry 中的任务分类和�
 | `assets_install` | 安装或更新 AI 员工手册、契约、profile、policy、runbook 和 template 等运行资产。 |
 | `update_check` | 基于本地 release manifest 检查是否存在可用更新，并返回更新级别和受影响 operation。 |
 | `update_apply` | 基于本地 release manifest 应用更新，切换本地 `current.json` 并保留 previous 版本。 |
-| `contract_validate` | 校验机器可读 Operation Contract 是否满足完整设计基线。 |
-| `profile_validate` | 校验 Workflow Profile 是否能映射标准字段、任务分类、标准流程、状态和 transition。 |
-| `profile_update` | 使用经过校验的本地 source profile 更新当前 workspace profile，并保存可回滚备份。 |
-| `profile_rollback` | 从最近一次 profile update 备份恢复当前 workspace profile。 |
+| `contract_validate` | 校验机器可读 操作契约是否满足完整设计基线。 |
+| `profile_validate` | 校验 工作流配置是否能映射标准字段、任务分类、标准流程、状态和 transition。 |
+| `profile_update` | 使用经过校验的本地 source profile 更新当前 工作流配置，并保存可回滚备份。 |
+| `profile_rollback` | 从最近一次 profile update 备份恢复当前 工作流配置。 |
 | `policy_validate` | 校验当前 policy 是否包含关键步骤 gate 配置。 |
 | `policy_update` | 使用经过校验的本地 source policy 更新默认 policy，并保存可回滚备份。 |
 | `policy_rollback` | 从最近一次 policy update 备份恢复默认 policy。 |
 | `workspace_init` | 初始化项目 AI 工作空间。 |
 | `agent_init` | 初始化 AIAgent 能力。 |
-| `list_tasks` | 列出当前 owner 可处理任务。 |
+| `list_tasks` | 列出当前负责人可处理任务。 |
 | `takeover_task` | 接管一个新的 Jira issue。 |
 | `resume_takeover` | 恢复已有 `run_id` 的接管任务。 |
 | `read_task_context` | 读取任务上下文摘要。 |
 | `write_evidence` | 写入 Jira / PR evidence。 |
 | `release_agent` | 完成或明确交接后释放当前 AIAgent 绑定，并记录 `current_agent_id_cleared=true`。 |
 | `mark_blocked` | 记录阻塞原因和人工动作。 |
-| `request_owner_confirmation` | 请求研发 owner 确认。 |
+| `request_owner_confirmation` | 请求研发负责人确认。 |
 | `prepare_pr` | 准备 PR，不绕过人工确认。 |
 | `fix_pr_comments` | 按 PR comments 修复。 |
 | `feedback_collect` | 收集工作空间事件日志。 |
@@ -62,12 +62,12 @@ Operation Contract 必须引用 Standard Process Registry 中的任务分类和�
 
 ## 4. 契约结构
 
-每个 operation contract 至少包含：
+每个 操作契约至少包含：
 
 ```yaml
 operation: takeover_task
 version: 1
-purpose: 研发 owner 授权 AIAgent 接管一个已进入迭代的任务。
+purpose: 研发负责人授权 AIAgent 接管一个已进入迭代的任务。
 
 task_type: task_takeover
 

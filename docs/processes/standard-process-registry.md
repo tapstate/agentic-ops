@@ -4,7 +4,7 @@
 
 Standard Process Registry 是 AgenticOps 维护标准流程的源头。它定义任务分类、标准流程、流程阶段、阶段处理标准、责任角色、表单输入输出、所有权 gate、日志上报、重试重做和完成清理规则。
 
-它不替代 Jira workflow。Jira 仍是任务事实源；Workflow Profile 负责把这里定义的标准流程映射到具体 Jira project 的字段、状态和 transition。AIAgent 必须先按任务分类选择标准流程，再按对应阶段的处理标准执行，不允许直接根据 Jira 状态或聊天上下文自由发挥。
+它不替代 Jira workflow。Jira 仍是任务事实源；工作流配置负责把这里定义的标准流程映射到具体 Jira project 的字段、状态和 transition。AIAgent 必须先按任务分类选择标准流程，再按对应阶段的处理标准执行，不允许直接根据 Jira 状态或聊天上下文自由发挥。
 
 ## 2. 文档边界
 
@@ -12,9 +12,9 @@ Standard Process Registry 是 AgenticOps 维护标准流程的源头。它定义
 | --- | --- |
 | Standard Process Registry | 定义任务分类、标准流程、阶段标准、责任角色、日志和完成清理规则。 |
 | Task Form Standard | 定义标准字段、字段语义、生命周期要求和字段缺口处理。 |
-| Workflow Profile | 把标准流程、标准字段和阶段映射到具体 Jira 字段、状态、transition 和审查节点。 |
-| Operation Contract | 定义 `agentic-cli` operation 如何校验、执行、输出和记录事件。 |
-| Feedback Loop | 聚合执行日志、失败码、审查退回、重试重做和流程改进建议。 |
+| 工作流配置 | 把标准流程、标准字段和阶段映射到具体 Jira 字段、状态、transition 和审查节点。 |
+| 操作契约 | 定义 `agentic-cli` operation 如何校验、执行、输出和记录事件。 |
+| 反馈闭环 | 聚合执行日志、失败码、审查退回、重试重做和流程改进建议。 |
 
 后续机器可读源头建议放入 `contracts/processes/`，发布资产同步到 `assets/processes/`。当前文档是第一阶段设计源头，不表示机器可读流程契约已经实现。
 
@@ -35,7 +35,7 @@ Jira issue
 -> 根据表单、审查结论、失败码和 gate 决定继续、重试、重做或停止
 ```
 
-如果无法判断任务分类，AIAgent 必须停止接管并输出 `task_classification_required`，请求研发 owner 或流程 owner 补充分类依据。
+如果无法判断任务分类，AIAgent 必须停止接管并输出 `task_classification_required`，请求研发负责人或流程负责人补充分类依据。
 
 ## 4. 初始任务分类
 
@@ -49,7 +49,7 @@ Jira issue
 | `investigation` | 排查、分析、复现、技术调研。 | `investigation_v1` |
 | `process_improvement` | AgenticOps profile、policy、template、runbook 或 operation 改进。 | `agenticops_improvement_v1` |
 
-Workflow Profile 可以把 Jira issue type、label、component、custom field 或描述模板映射为 `task_class`。映射缺失时必须返回 `task_class_mapping_gap`。
+工作流配置可以把 Jira issue type、label、component、custom field 或描述模板映射为 `task_class`。映射缺失时必须返回 `task_class_mapping_gap`。
 
 ## 5. 标准流程结构
 
@@ -111,11 +111,11 @@ stages:
 | Gap | 稳定错误码 | 处理方式 |
 | --- | --- | --- |
 | Jira 无标准字段对应字段或模板 | `missing_form_field` | 停止当前 operation，提示新增 Jira 字段、使用描述模板映射，或调整 Task Form Standard。 |
-| Jira 字段存在但没有配置 mapping | `unmapped_jira_field` | 请求维护 Workflow Profile 的 Jira Form Mapping。 |
-| Jira 状态无法映射到标准阶段 | `lifecycle_mapping_gap` | 请求流程 owner 决策状态映射或调整 Jira workflow。 |
-| Jira transition 无法映射到标准推进动作 | `transition_mapping_gap` / `jira_transition_mapping_gap` | 请求流程 owner 决策标准 transition mapping、Jira transition id/name mapping 或新增人工 gate。 |
-| Jira issue type / label 无法映射任务分类 | `task_class_mapping_gap` | 请求研发 owner 或流程 owner 补充任务分类规则。 |
-| 审查节点无法映射到人、PR review、CI 或 Jira 状态 | `review_gate_mapping_gap` | 请求流程 owner 决策审查节点和责任角色。 |
+| Jira 字段存在但没有配置 mapping | `unmapped_jira_field` | 请求维护 工作流配置的 Jira Form Mapping。 |
+| Jira 状态无法映射到标准阶段 | `lifecycle_mapping_gap` | 请求流程负责人决策状态映射或调整 Jira workflow。 |
+| Jira transition 无法映射到标准推进动作 | `transition_mapping_gap` / `jira_transition_mapping_gap` | 请求流程负责人决策标准 transition mapping、Jira transition id/name mapping 或新增人工 gate。 |
+| Jira issue type / label 无法映射任务分类 | `task_class_mapping_gap` | 请求研发负责人或流程负责人补充任务分类规则。 |
+| 审查节点无法映射到人、PR 审查、CI 或 Jira 状态 | `review_gate_mapping_gap` | 请求流程负责人决策审查节点和责任角色。 |
 
 缺口输出必须包含：
 
@@ -126,7 +126,7 @@ stages:
 - `current_stage`
 - 缺失的标准字段、状态或 transition。
 - 当前 profile 中已配置的 mapping 摘要。
-- 给开发者或流程 owner 的中文决策选项。
+- 给开发者或流程负责人的中文决策选项。
 
 ## 7. 接管所有权 gate
 
@@ -164,7 +164,7 @@ stages:
 | `current_agent_id` 已不是当前 AIAgent | `agent_ownership_conflict` | 记录当前字段值、当前 `agent_id`、operation 和停止阶段。 |
 | `current_agent_id` 为空但已有未完成 run | `agent_binding_lost` | 记录 run_id、issue_key 和需要人工判断的恢复动作。 |
 
-这些情况不允许自动抢回任务，也不允许清理 `current_agent_id`。AIAgent 必须记录事件，输出中文阻塞说明，并等待研发 owner 决策。
+这些情况不允许自动抢回任务，也不允许清理 `current_agent_id`。AIAgent 必须记录事件，输出中文阻塞说明，并等待研发负责人决策。
 
 ## 9. 完成清理规则
 
@@ -185,7 +185,7 @@ stages:
 - 完成阶段和完成证据引用。
 - `current_agent_id_cleared=true`。
 
-异常停止、阻塞、权限冲突、assignee 变更或代理冲突时不得自动清理 `current_agent_id`。这些场景保留字段值用于审计和恢复，由研发 owner 决策是否释放。
+异常停止、阻塞、权限冲突、assignee 变更或代理冲突时不得自动清理 `current_agent_id`。这些场景保留字段值用于审计和恢复，由研发负责人决策是否释放。
 
 ## 10. 阶段处理标准和责任
 
@@ -193,13 +193,13 @@ stages:
 
 | Stage | AIAgent 工作 | 责任角色 | 合格判断 |
 | --- | --- | --- | --- |
-| 分类 | 读取标准字段，识别 `task_class`。 | 研发 owner / 流程 owner | 分类能选择正确流程，缺口已阻断并请求决策。 |
-| 接管 | 校验所有权、字段、状态和流程入口。 | 研发 owner | 任务确实属于当前登录用户，且未被其他 AIAgent 占用。 |
-| 分析 | 理解范围、风险、依赖和验证方式。 | 研发 owner | 范围未扩大，风险和阻塞被说明。 |
-| 实现 | 修改代码或配置，遵守项目规范。 | AIAgent 执行，研发 owner 负责最终判断 | diff 解决目标问题，未引入无关变更。 |
-| 验证 | 运行约定验证并记录结果。 | AIAgent 执行，研发 owner / QA 判断 | 验证覆盖验收标准，未验证部分明确。 |
-| 审查 | 整理 evidence、PR 信息和待审内容。 | reviewer / QA / 运维 / 安全 / 研发 owner | 专业角色能判断通过、退回、阻断或要求补充。 |
-| 完成 | 写入完成证据，清理 `current_agent_id`。 | 研发 owner | 完成条件满足，代理绑定已释放或有明确不释放原因。 |
+| 分类 | 读取标准字段，识别 `task_class`。 | 研发负责人、流程负责人 | 分类能选择正确流程，缺口已阻断并请求决策。 |
+| 接管 | 校验所有权、字段、状态和流程入口。 | 研发负责人 | 任务确实属于当前登录用户，且未被其他 AIAgent 占用。 |
+| 分析 | 理解范围、风险、依赖和验证方式。 | 研发负责人 | 范围未扩大，风险和阻塞被说明。 |
+| 实现 | 修改代码或配置，遵守项目规范。 | AIAgent 执行，研发负责人负责最终判断 | diff 解决目标问题，未引入无关变更。 |
+| 验证 | 运行约定验证并记录结果。 | AIAgent 执行，研发负责人或 QA 判断 | 验证覆盖验收标准，未验证部分明确。 |
+| 审查 | 整理 evidence、PR 信息和待审内容。 | 代码审查人、QA、运维、安全、研发负责人 | 专业角色能判断通过、退回、阻断或要求补充。 |
+| 完成 | 写入完成证据，清理 `current_agent_id`。 | 研发负责人 | 完成条件满足，代理绑定已释放或有明确不释放原因。 |
 
 ## 11. 日志上报要求
 
@@ -228,7 +228,7 @@ stages:
 
 日志写入项目 AI 工作空间，不写入 `~/.agentic-ops`。日志只能保存安全摘要，不得记录 secrets、tokens、private keys、原始敏感日志、完整 Jira 描述或敏感代码片段。
 
-每个阶段完成后，AIAgent 还必须写入面向人的中文 evidence 或工作日志摘要，说明已完成事项、更新表单、验证结果、审查状态和下一步动作。
+每个阶段完成后，AIAgent 还必须写入面向人的中文 证据或工作日志摘要，说明已完成事项、更新表单、验证结果、审查状态和下一步动作。
 
 ## 12. 复盘演进
 
@@ -242,4 +242,4 @@ stages:
 - 完成后未清理 `current_agent_id` 的任务。
 - 可沉淀为 runbook、profile、policy、template 或 operation 的成熟经验。
 
-AIAgent 可以提出改进建议，但不能未经人工确认自动修改标准流程、Workflow Profile、Task Form Standard、Operation Contract 或 Jira workflow。
+AIAgent 可以提出改进建议，但不能未经人工确认自动修改标准流程、工作流配置、Task Form Standard、操作契约或 Jira workflow。

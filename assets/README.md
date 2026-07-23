@@ -1,6 +1,6 @@
 # AgenticOps 运行资产
 
-`assets/` 是安装后交付给研发 owner 和 AIAgent 使用的运行资产源头。
+`assets/` 是安装后交付给研发负责人和 AIAgent 使用的运行资产源头。
 
 维护者在当前仓库中维护源码、设计、计划和资产；发布时只把运行所需资产打包到 `~/.agentic-ops/assets/<version>/`，使用者不需要接触源码、设计文档或实施计划。
 
