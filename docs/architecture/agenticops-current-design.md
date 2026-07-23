@@ -11,7 +11,7 @@ AgenticOps 是把公司员工执行标准沉淀成 AI 可执行标准流程的 A
 一句话定义：
 
 ```text
-AgenticOps = AI 员工手册 + 项目规则 + AIAgent 工作规则 + Operation Contract + Task Form Standard + Workflow Profile + Policy / Gate + Runbook + Templates + Go CLI Runtime + Evidence / Feedback Loop
+AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操作契约 + 任务表单标准 + 工作流配置 + 策略门禁 + 运行手册 + 模板 + Go CLI 运行时 + 证据与反馈闭环
 ```
 
 ## 2. 设计目标
