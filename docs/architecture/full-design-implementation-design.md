@@ -1,100 +1,116 @@
-# 完整设计实现方案
+# AgenticOps 完整设计能力边界
 
-## 1. 决策背景
+## 1. 目的
 
-当前仓库已经跑通第一阶段本地模拟流程，但项目设计文档、AI 员工手册、用户故事、工作流配置和 Standard Process Registry 已经把 AgenticOps 定义为完整的研发任务接管控制体系。
+本文定义 AgenticOps 完整设计的能力边界和设计决策，不展开落地推进记录。
 
-2026-07-23 用户决策采用方案 B：完整设计作为当前必须实现边界，不再把真实 Jira 门禁、所有权绑定、工作流配置 / 策略、诊断和更新能力仅视为远期文档目标。
+## 2. 设计决策
 
-## 2. 实现目标
+2026-07-23 用户已确认：完整设计是 AgenticOps 当前必须遵守的能力边界，不再把真实 Jira 门禁、所有权绑定、工作流配置、策略、诊断和更新能力仅视为远期目标。
 
-AgenticOps 必须从本地模拟流程升级为可接真实研发流程的受控 CLI 运行时。完成后，`agentic-cli` 至少应具备：
+这条决策的含义是：
 
-- 机器可读操作契约能表达输入、输出、前置门禁、失败码、副作用、重试和重做规则。
-- 工作流配置能校验 Jira 字段、状态、transition、任务分类、标准流程和本地源码映射。
-- `takeover-task` 能执行所有权门禁、字段门禁、任务分类和标准流程选择。
-- `resume-takeover` 能读取已有 run 和事件，校验 `workspace`、`issue`、`owner`、目标仓库和恢复阶段。
-- `doctor`、`feedback bundle --redact`、`update check/apply`、`profile validate/update/rollback`、`policy validate/update/rollback` 具备结构化输出。
-- Jira 写入、Git 推送、创建拉取请求、合并、发布和门禁放宽必须受策略、门禁和人工确认控制。
+- 本地模拟流程只作为自动化回归验证入口，不定义 AgenticOps 的最终能力边界。
+- 真实 Jira 写操作、Git 推送、创建拉取请求、合并和发布可以被 AgenticOps 支持，但必须默认受策略、门禁、人工确认和审计记录约束。
+- AIAgent 不直接猜测 Jira 字段、Jira 状态、目标仓库、验证方式、任务分类或流程阶段；缺失映射时必须返回稳定缺口并引导人工补充。
+- 标准资产必须能通过工作流配置、策略、运行手册、模板或发布资产更新持续演进；只有确认问题来自 `agentic-cli` 二进制逻辑错误时，才进入二进制修复发布路径。
 
-## 3. 非目标
+## 3. 能力边界
 
-本方案不引入 Web 控制台、后台常驻进程、自动分配任务、自动推送、自动创建拉取请求、自动合并或自动修改公司规范。真实写操作可以被 CLI 操作支持，但必须默认受人工确认和审计控制。
+### 操作契约
 
-## 4. 分阶段设计
+`contracts/operations/` 是机器可读操作契约的唯一源头。操作契约必须能表达：
 
-### 阶段 1: Contract / Schema 基线
+- 结构化输入和输出。
+- 前置门禁。
+- 稳定失败码。
+- 人工动作。
+- 副作用。
+- 人工确认要求。
+- 重试和重做规则。
+- 允许执行的任务类型和阶段。
 
-目标是让 `contracts/operations/*.yaml` 成为真正可验证的机器可读契约源头，而不是只包含操作名称的轻量清单。
+AIAgent 执行任务时面向操作契约工作，而不是直接面向 Jira / GitHub / Git 的底层事实和临场聊天上下文。
 
-实现内容：
+### 工作流配置与标准流程
 
-- 扩展 Go contract model，支持 `input`、`preconditions`、`output`、`failure`、`side_effects`、`human_gate`、`retry_policy` 和 `redo_from_stage`。
-- 增加契约校验，校验每个操作至少包含稳定输入、输出、失败码、副作用和人工门禁声明。
-- 扩展现有操作 YAML，至少覆盖已实现命令和接管 / 恢复 / 写证据的完整字段。
-- 保持 `contracts/operations/` 是唯一机器可读契约源头。
+工作流配置负责把 AgenticOps 标准字段、标准阶段、标准动作和具体项目流程连接起来。它必须覆盖：
 
-### 阶段 2: Profile / Process 映射
+- Jira 字段映射。
+- Jira 状态和 `transition` 映射。
+- 任务分类到标准流程的映射。
+- Jira 空间到目标代码仓库的映射。
+- 本地源码路径映射。
+- 专业审查节点映射。
+- 允许写操作和人工确认点。
 
-目标是让 工作流配置和 Standard Process Registry 进入 CLI 校验路径。
+Standard Process Registry 维护任务分类、标准流程、阶段标准、责任角色、所有权门禁、日志上报、重试重做和完成清理规则。
 
-实现内容：
+未知 Jira 状态、缺失字段映射、缺失任务分类或缺失标准流程时，AgenticOps 必须输出稳定缺口，不允许 AIAgent 猜测映射。
 
-- 定义工作流配置文件结构和默认工作流配置示例。
-- 实现 `profile validate --workspace <name>`，校验字段映射、任务分类映射、标准流程映射、状态映射和 `transition` 映射。
-- 实现 `profile update` 与 `profile rollback` 的本地资产更新和恢复。
-- 未知 Jira 状态、缺失字段映射或任务分类缺口必须返回稳定 gap code，不能让 AIAgent 猜测。
+### Jira 适配器与所有权门禁
 
-### 阶段 3: Jira Adapter 与 Ownership Gate
+Jira 适配器必须隔离 Jira Cloud REST API、模拟 Jira 数据和具体团队 Jira 工作流差异。真实 Jira 适配器至少需要受控支持：
 
-目标是让任务接管从 fake lookup 升级为设计中的受控接管。
+- 读取当前 Jira 用户。
+- 搜索负责人名下任务。
+- 读取 Jira 卡片。
+- 写入受控 Jira 评论。
+- 执行受控字段写入。
+- 读取并执行受控 `transition`。
 
-实现内容：
+任务接管必须检查负责人、`assignee`、`current_agent_id`、任务分类、标准流程、入口状态、目标仓库、验收标准和验证方式。接管成功后，运行记录必须包含 `run_id`、`agent_id`、`current_agent_id`、`task_class`、`process_id`、`current_stage` 和 `next_action`。
 
-- 定义 Jira adapter 接口，支持 current user、issue search、issue get、comment write 和受控字段更新。
-- 保留 fake adapter 作为测试和本地 e2e 的默认实现。
-- `takeover-task` 执行 `assignee`、`current_agent_id`、`task_class`、`process_id`、状态入口、目标仓库、验收标准和验证方式门禁。
-- 接管成功写入 `run_id`、`agent_id`、`current_agent_id`、`takeover_at`、`task_class`、`process_id`、`current_stage` 和 `next_action`。
-- `resume-takeover` 读取 run summary 和 events，校验恢复条件后返回 previous stage、current stage 和 next action。
+执行过程中如 `assignee` 变更或 `current_agent_id` 不等于当前 `agent_id`，AIAgent 必须停止并记录原因。任务完成或明确交接后，必须通过受控操作清理 `current_agent_id`，并记录 `current_agent_id_cleared=true`。
 
-### 阶段 4: Problem Resolution Commands
+### 问题修复与同步
 
-目标是补齐正式使用前的问题诊断、分类修复和同步能力。
+AgenticOps 正式给研发日常使用前，必须具备成熟问题修复路径。修复路径按问题类型选择载体：
 
-实现内容：
+- `agentic-cli` 逻辑错误：通过新的 latest 版本修复。
+- Jira 流程状态不适配：通过工作流配置更新修复。
+- Jira 卡片属性缺失：阻断接管并输出补全模板。
+- 关键步骤门禁调整：通过策略更新修复，并保留人工确认和审计记录。
 
-- `doctor --workspace <name>` 输出安装、版本、工作流配置、策略、Jira 适配器、GitHub CLI、工作空间和业务仓库匹配检查结果。
-- `feedback bundle --workspace <name> --run-id <run_id> --redact` 生成脱敏诊断包。
-- `update check` 和 `update apply` 支持 `optional`、`recommended` 和 `required` 三种级别；必要更新只阻断受影响操作。
-- `policy validate/update/rollback` 支持推送、创建拉取请求、Jira 评论、范围变更等门禁配置。
+诊断与修复能力必须使用结构化输出，且诊断包不得包含 secrets、tokens、private keys、原始 Jira 描述、原始敏感日志或敏感代码片段。
 
-### 阶段 5: Completion / Cleanup / E2E
+### 更新、发布与版本治理
 
-目标是补齐执行过程所有权检查、完成清理和端到端验收。
+AgenticOps 采用 latest-only 支持策略：BUG 只在最新版本修复，不维护旧版本补丁线。资产更新和二进制更新都必须有版本、清单、校验和可审计记录。
 
-实现内容：
+更新机制必须确保：
 
-- 每个读取任务、修改代码、写证据、推进状态或请求人工门禁的操作前重新检查所有权。
-- 完成或明确交接后，通过受控操作清理 `current_agent_id`，并记录 `current_agent_id_cleared=true`。
-- 增加 `tests/e2e/problem-resolution-flow.sh`。
-- 增加工作流配置热修复、策略回滚、缺失 Jira 字段门禁和发布清单端到端测试。
+- 必要更新只阻断受影响操作。
+- 产物切换前完成校验。
+- 安装失败或新版本不可用时允许本地恢复。
+- 发布动作受权限、策略、人工确认和审计约束。
 
-## 5. 执行顺序
+跨版本兼容治理和发布权限治理属于正式化能力边界；具体落地不在本文展开。
 
-必须按阶段推进。阶段 1 是后续所有工作的前置条件；阶段 2 是真实接管门禁的前置条件；阶段 3 是任务接管一致性的核心；阶段 4 和阶段 5 完成正式使用前的问题修复和验收闭环。
+## 4. 非目标
 
-每个阶段必须：
+完整设计不默认引入：
 
-- 先写失败测试。
-- 再写最小实现。
-- 同步更新文档、契约、测试和运行资产。
-- 运行 `go test ./...`。
-- 运行相关 e2e。
-- 保持 stdout 结构化 JSON、stderr 人类诊断日志。
-- 不提交 secrets、tokens、private keys 或原始敏感日志。
+- Web 控制台。
+- 后台常驻进程。
+- 自动分配任务。
+- 自动推送。
+- 自动创建拉取请求。
+- 自动合并。
+- 自动发布。
+- 自动修改公司规范。
 
-## 6. 决策记录
+如果需要引入这些能力，必须先形成独立用户决策，明确事实源、权限边界、审计要求、失败回滚路径和人工确认规则。
 
-- 采用完整设计作为当前必须实现边界。
-- `implementation-plan-v1.md` 的本地模拟流程仍作为已完成的本地基线，但不再限制后续实现范围。
-- `problem-resolution-plan-v1.md`、Standard Process Registry、工作流配置、操作契约和 AI 员工手册共同定义后续实现目标。
+## 5. 需要用户决策的设计缺口
+
+以下缺口不能直接写成默认计划；进入实施前必须由用户确认取舍：
+
+- 是否引入 Web 控制台或后台常驻进程。
+- 是否允许某些低风险场景自动创建拉取请求或自动推送。
+- 发布权限由谁持有、如何授权、如何审计、如何回滚。
+- 跨版本兼容治理的最低承诺范围。
+- 任务级审计记录最终写入 Jira 卡片、审计服务还是目标仓库证据链。
+- 真实 Jira 工作流中名称相同或含义冲突的 `transition` 如何裁决。
+
+在用户未决策前，AgenticOps 必须保持保守默认：阻断高风险动作，输出稳定缺口、建议动作和所需人工角色。

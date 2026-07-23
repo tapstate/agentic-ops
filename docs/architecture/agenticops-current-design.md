@@ -4,7 +4,7 @@
 
 AgenticOps 是把公司员工执行标准沉淀成 AI 可执行标准流程的 AI 执行控制体系。
 
-第一阶段先落地研发 Jira 任务：帮助研发操作 AIAgent 从 Jira 接管任务到完成任务。AgenticOps 不替代 Jira、不替代研发负责人、不替代 PR 审查，也不以全自动开发为第一阶段目标。它的核心价值是把 AI 员工从临时聊天助手变成流程内可管理、可追踪、可复盘的执行主体。
+AgenticOps 主要落地研发 Jira 任务：帮助研发负责人操作 AIAgent 从 Jira 接管任务到完成任务。AgenticOps 不替代 Jira、不替代研发负责人、不替代拉取请求审查，也不以绕过人工授权、专业审查和策略门禁的全自动开发作为目标。它的核心价值是把 AI 员工从临时聊天助手变成流程内可管理、可追踪、可复盘的执行主体。
 
 不同任务会涉及不同流程，例如新任务接管、恢复接管、拉取请求审查意见修复、阻塞上报和任务完成审计。AgenticOps 通过操作契约和工作流配置选择流程，通过 Task Form Standard、事件日志、`run_id`、证据、任务级审计记录和按需反馈分析记录执行过程，并把关键状态、关键信息、表单数据和证据回写到 Jira、拉取请求、审计服务或项目 AI 工作空间，用于后续分析和优化。
 
@@ -16,7 +16,7 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 
 ## 2. 设计目标
 
-第一阶段目标是跑通一条真实、可控、可复用的主链路：
+目标主链路是一条真实、可控、可复用的研发任务执行链路：
 
 ```text
 Jira 卡片已进入迭代
@@ -32,7 +32,7 @@ Jira 卡片已进入迭代
 -> 进入既有 CI / 审查 / 合入流程
 ```
 
-第一阶段不阻塞在集成测试完整设计、低风险自动化门槛和 AI Review ROI 上。这些属于后续演进方向。
+集成测试完整设计、低风险自动化门槛和 AI Review ROI 不作为核心主链路的前置条件。这类能力进入 AgenticOps 前，需要先明确适用场景、风险门禁和收益判断。
 
 ## 3. 核心原则
 
@@ -269,7 +269,7 @@ TapData / TapState 的方案 C 是第一套默认工作流配置，但不能硬�
 
 ## 9. 控制层运行时
 
-第一阶段控制层采用本地优先的 Go CLI 运行时，不做常驻 daemon，也不先做 Web 平台。
+控制层采用本地优先的 Go CLI 运行时，不默认引入常驻 daemon 或 Web 平台。
 
 shell 只用于 `curl | bash` 安装引导。业务逻辑、操作、策略、适配器、事件日志和反馈分析由 Go CLI 承载。
 
@@ -314,7 +314,7 @@ Go CLI 运行时 的要求：
 - Linux (linux-amd64 / linux-arm64)、macOS Intel (darwin-amd64) 和 macOS Apple Silicon (darwin-arm64) 都应通过对应平台二进制运行。
 - 发布流程必须支持快速构建、发布和自更新。
 
-第一阶段主 CLI 发布目标：
+主 CLI 发布目标：
 
 ```text
 darwin-arm64
@@ -354,7 +354,7 @@ gh pr create
 gh pr edit
 ```
 
-建议由 Go CLI 防护管控的内部能力。这些能力不直接作为第一阶段操作暴露给 AIAgent，AIAgent 仍应调用操作契约中定义的操作：
+建议由 Go CLI 防护管控的内部能力。这些能力不直接暴露为 AIAgent 可自由调用的底层动作，AIAgent 仍应调用操作契约中定义的操作：
 
 ```text
 inspect_workspace
@@ -387,7 +387,7 @@ Go CLI 执行操作
 -> 人确认后更新 AgenticOps 规则、手册、契约和 Go CLI
 ```
 
-第一阶段反馈通道只做分析和建议，不允许 AIAgent 根据日志自动修改 AgenticOps 源头规则。
+反馈通道只做分析和建议，不允许 AIAgent 根据日志自动修改 AgenticOps 源头规则。
 
 运行日志应放在具体项目 AI 工作空间，任务级审计记录应回写到 Jira 卡片、审计服务或目标仓库证据链：
 
@@ -445,7 +445,7 @@ agentic-cli feedback analyze --workspace tapstate --date 2026-07-21
 agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 ```
 
-`feedback report` 是按需分析报告，不是日报。第一阶段保留 `--date` 作为兼容参数和报告命名参数，后续可扩展按 `run_id`、`issue_key`、`task_type`、失败码或时间范围查询。
+`feedback report` 是按需分析报告，不是日报。反馈分析可以按 `run_id`、`issue_key`、`task_type`、失败码、时间范围或 `workspace` 查询。
 
 反馈进入 AgenticOps 源头规则前必须经过：
 
@@ -496,37 +496,4 @@ agentic-cli takeover-task TAP-123 --workspace tapstate
 agentic-cli write-evidence --run-id ...
 ```
 
-以上命令是第一阶段 CLI 入口。对外演示必须使用真实 Jira 卡片；本地模拟流程只作为自动化回归验证。真实 Jira / GitHub 写操作仍必须经过门禁、策略和人工确认。
-
-## 14. 第一阶段交付物
-
-第一阶段建议交付：
-
-- 目标定位文档：`docs/strategy/positioning.md`。
-- 设计审阅清单：`docs/review-checklist.md`。
-- 设计决策记录：`docs/decision-log.md`。
-- 项目规则文档：`docs/project-rules.md`。
-- 项目开发风格文档：`docs/development-style.md`。
-- AIAgent 工作规则文档：`docs/ai-working-rules.md`。
-- 用户故事文档：`docs/user-stories/agenticops-user-stories.md`。
-- AI 员工手册：`handbooks/ai-employee-handbook.md`。
-- 操作契约文档：`docs/contracts/operation-contract.md`。
-- TapData / TapState 工作流配置草案：`docs/profiles/workflow-profile.md`。
-- Go `agentic-cli` CLI 运行时设计：`docs/runtime/cli-runtime.md`。
-- Jira / GitHub / Git 关键操作防护设计：`docs/runtime/cli-runtime.md`。
-- 证据模板设计：`docs/templates/evidence-templates.md`。
-- 反馈闭环事件日志、任务审计和按需分析规范：`docs/workflows/feedback-loop.md`。
-- 一个端到端演示卡片脚本：`docs/examples/end-to-end-demo.md`。
-
-第一阶段验收标准：
-
-- 研发负责人能完成初始化。
-- AI 能列出 负责人名下 Jira 待办。
-- AI 能接管一个 Jira 卡片，并执行门禁。
-- 接管成功或失败都能写入结构化 Jira 评论。
-- AI 能完成一次真实或接近真实的代码修改。
-- AI 能运行最小验证并回写结果。
-- AI 完成后停在人工确认点。
-- 研发负责人确认后再推送或创建拉取请求。
-- 每次操作都有结构化事件日志。
-- 完成、阻塞或交接时能提交任务级审计记录，并能按需生成反馈报告和改进建议。
+以上命令代表核心 CLI 入口。对外演示必须使用真实 Jira 卡片；本地模拟流程只作为自动化回归验证。真实 Jira / GitHub 写操作仍必须经过门禁、策略和人工确认。
