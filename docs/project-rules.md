@@ -54,7 +54,18 @@ Jira issue 已进入迭代
 -> 进入既有 CI / Review / 合入流程
 ```
 
-## 3. 事实源
+## 3. 文档与计划边界
+
+AgenticOps 文档必须按职责分层：
+
+- `README.md` 只承担终态定位、核心模型、角色入口和稳定目录导航，不记录阶段性成果清单。
+- `docs/architecture/` 先定义并稳定架构边界，包括流程环节、门禁、状态、容错、事实源和标准资产演进机制。
+- `plans/` 基于稳定架构从大阶段拆到中任务和小步骤，用 checkbox 跟踪实施进度。
+- 阶段性成果、当前实现边界、剩余工作和 Implementation note 应写入 `docs/README.md`、`docs/runtime/` 或 `plans/`，不得混入 README 主叙事。
+
+做任何计划前，必须先确认其所依赖的架构文档已经存在且相对稳定。架构不清时，应先更新或补齐架构，再拆实施计划；不得直接用零散功能点堆砌计划。
+
+## 4. 事实源
 
 AgenticOps 必须保持事实源边界清晰：
 
@@ -91,7 +102,7 @@ AgenticOps 必须保持事实源边界清晰：
 - 存在风险、权限不足、标准冲突或连续失败时，转人工确认。
 - 只有确认问题来自 `agentic-cli` CLI 二进制逻辑错误时，才进入二进制修复发布路径。
 
-## 4. 仓库边界
+## 5. 仓库边界
 
 当前只有一个公司仓库作为 AgenticOps 的权威源头：
 
@@ -119,7 +130,7 @@ scripts/       本地和 CI 辅助脚本
 
 同一个仓库内使用目录区分资料职责，不使用不同分支分管源码、设计、计划或运行资产。分支只用于开发协作、审阅和发布准备。正式交付时通过 release 包控制使用者可见内容，研发 owner 和 AIAgent 默认只接触安装后的命令、资产、模板和规范。
 
-## 5. 安装边界
+## 6. 安装边界
 
 AgenticOps 默认安装到：
 
@@ -155,7 +166,7 @@ curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
 
 安装脚本必须支持 Linux (linux-amd64 / linux-arm64)、macOS Intel (darwin-amd64) 和 macOS Apple Silicon (darwin-arm64)，并且不得覆盖用户已有本地配置。
 
-## 6. 项目 AI 工作空间边界
+## 7. 项目 AI 工作空间边界
 
 具体项目的运行目录必须是对应项目 AI 工作空间，例如：
 
@@ -185,7 +196,7 @@ tapdata/
     feedback/
 ```
 
-## 7. AI 员工手册规则
+## 8. AI 员工手册规则
 
 AgenticOps 必须包含 AI 员工手册，并将其作为一等交付物。
 
@@ -207,7 +218,7 @@ AI 员工手册必须覆盖：
 
 所有 skills、operation contracts、workflow profiles、CLI 命令和 evidence templates 必须与 AI 员工手册保持一致。
 
-## 8. 操作契约规则
+## 9. 操作契约规则
 
 AgenticOps 必须通过 Operation Contract 管理 AIAgent 可执行操作的输入、输出、失败模型和副作用。
 
@@ -252,7 +263,7 @@ feedback_propose
 
 写操作必须声明副作用。任何涉及 Jira 写入、Git commit、Git push、GitHub PR 创建或 PR 更新的 operation 必须经过 policy / gate / confirmation 检查。
 
-## 9. 工作流配置规则
+## 10. 工作流配置规则
 
 AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira workflow。
 
@@ -273,7 +284,7 @@ Workflow Profile 必须能表达：
 
 TapData / TapState 方案 C 可以作为第一套默认 profile，但不得硬编码进核心模型。
 
-## 10. CLI 运行时规则
+## 11. CLI 运行时规则
 
 第一阶段控制层必须采用本地优先的 Go CLI Runtime。
 
@@ -324,7 +335,7 @@ CLI operation 和脚本入口必须遵守成熟度边界：
 - 框架负责大的流程环节、门禁、状态和演进机制，不把每个任务的临场细节写死。
 - AIAgent 在具体环节内执行任务并沉淀经验，周期性复盘再决定是否固化为标准资产。
 
-## 11. Git 和 GitHub 规则
+## 12. Git 和 GitHub 规则
 
 GitHub / Git 当前不会替换，因此不需要做可替换平台级抽象，但必须做安全操作级封装。
 
@@ -351,7 +362,7 @@ gh pr edit
 
 未经研发 owner 确认，AIAgent 不得执行 push、创建 PR、重新提交修复或 merge。
 
-## 12. 人工门禁规则
+## 13. 人工门禁规则
 
 以下动作必须暂停并等待人工确认：
 
@@ -366,7 +377,7 @@ gh pr edit
 
 AIAgent 必须能向研发 owner 说明暂停原因、当前 evidence、建议下一步和需要谁确认。
 
-## 13. 反馈闭环规则
+## 14. 反馈闭环规则
 
 AgenticOps 必须包含 AIAgent 反馈通道，用于按天分析执行日志并优化 AgenticOps。
 
@@ -400,7 +411,7 @@ Go CLI 执行 operation
 Observation -> Proposal -> Accepted Change
 ```
 
-## 14. 安全规则
+## 15. 安全规则
 
 严禁提交或持久化：
 
@@ -416,7 +427,7 @@ Observation -> Proposal -> Accepted Change
 
 Jira / GitHub 写操作必须可审计。任何写操作都必须关联 operation、workspace、issue key、run_id、task_type、current_stage、next_action 和事件日志。
 
-## 15. 文档规则
+## 16. 文档规则
 
 第一阶段至少维护：
 
@@ -455,7 +466,7 @@ Jira 交互中的人可见内容必须使用中文，包括标题、描述、评
 - AIAgent 工作规则。
 - 项目开发风格。
 
-## 16. 第一阶段验收
+## 17. 第一阶段验收
 
 第一阶段最低验收标准：
 

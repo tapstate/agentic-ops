@@ -10,7 +10,9 @@
 
 AgenticOps 开发必须遵守：
 
+- 架构先行：先确认并稳定架构边界，再基于架构拆解计划和实施任务。
 - 文档先行：先确认目标定位、项目规则、用户故事、Operation Contract、Workflow Profile 和 AI 员工手册。
+- 计划分层：计划必须从大阶段拆到中任务和小步骤，每个步骤都有明确验证方式。
 - 小步交付：每次变更只解决一个明确设计问题。
 - 证据优先：做结论前先读取当前文件、命令输出或权威文档。
 - 不猜测外部事实：Jira 字段、GitHub 仓库、工作空间路径、权限和状态映射必须来自 profile、配置或用户确认。
@@ -24,6 +26,8 @@ AgenticOps 开发必须遵守：
 
 - 标题清晰，便于快速定位。
 - 每个文档只承担一个主要职责。
+- README 只写终态定位、核心模型、角色入口和稳定导航，不写阶段性成果清单。
+- 阶段性状态、已完成事项和剩余工作写入 `docs/README.md`、`docs/runtime/` 或 `plans/`。
 - 规则文档使用明确的“必须 / 不得 / 应”。
 - 设计文档说明背景、边界和取舍。
 - 用户故事写清 trigger、preconditions、main flow、output、failure handling 和 acceptance criteria。
