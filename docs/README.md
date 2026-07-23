@@ -9,6 +9,7 @@
 - [目标定位](strategy/positioning.md)
 - [长期定位](strategy/long-term-positioning.md)
 - [项目规则](project-rules.md)
+- [项目研发期规则](development-phase-rules.md)
 - [开发风格](development-style.md)
 - [AIAgent 工作规则](ai-working-rules.md)
 
@@ -51,6 +52,7 @@
 
 阶段性实现边界见：
 
+- [项目研发期规则](development-phase-rules.md)
 - [问题修复与同步路径：当前实现边界](runtime/problem-resolution-and-update.md#13-当前实现边界)
 - [完整设计实现计划](../plans/full-design-implementation-plan-v1.md)
 - [第一阶段实施计划](../plans/implementation-plan-v1.md)
