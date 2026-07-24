@@ -52,6 +52,7 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 
 从这里开始：
 
+- [项目维护者上手](docs/maintainers/getting-started.md)
 - [文档索引](docs/README.md)
 - [当前设计](docs/architecture/agenticops-current-design.md)
 - [项目规则](docs/project-rules.md)
@@ -67,22 +68,27 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 
 从这里开始：
 
+- [研发负责人上手](docs/development-leads/getting-started.md)
 - [AI 员工手册](handbooks/ai-employee-handbook.md)
 - [端到端演示](docs/examples/end-to-end-demo.md)
 - [故事线总览](docs/user-stories/agenticops-user-stories.md)
 - [问题修复与同步路径](docs/runtime/problem-resolution-and-update.md)
 
+研发负责人读人用指引，AIAgent 读 AI 资产入口。初始化工作空间后，应要求 AIAgent 先读取 [AI 资产入口](ai-assets/README.md)，再接管具体 Jira 任务。
+
 ### AIAgent
 
-AIAgent 不应主要依赖 README 执行任务，也不需要读取 AgenticOps 源码或关心 Go 编译环境。AIAgent 面对的是安装后的命令行工具、AI 员工手册、操作契约、模板和工作规则。
+AIAgent 不应主要依赖 README 或人用 `docs/` 执行任务，也不需要读取 AgenticOps 源码或关心 Go 编译环境。AIAgent 面对的是安装后的命令行工具和 AI 资产。
 
 执行前读取：
 
+- [AI 资产入口](ai-assets/README.md)
 - [AI 员工手册](handbooks/ai-employee-handbook.md)
-- [AIAgent 工作规则](docs/ai-working-rules.md)
 - [操作契约说明](docs/contracts/operation-contract.md)
 - [机器可读操作契约](contracts/operations/)
 - [工作流配置](docs/profiles/workflow-profile.md)
+
+如果 AIAgent 是在维护 AgenticOps 源头仓库，还必须额外读取 [AIAgent 工作规则](docs/ai-working-rules.md) 和 [项目研发期规则](docs/development-phase-rules.md)。
 
 ## 标准资产
 
@@ -116,7 +122,8 @@ tapdata/
 
 | 目录 | 用途 |
 | --- | --- |
-| `docs/` | 架构、规则、故事线、流程和设计说明。 |
+| `docs/` | 人读文档，包括项目维护者、研发负责人、架构、规则、故事线、流程和设计说明。 |
+| `ai-assets/` | AIAgent 执行前读取的 AI 资产入口；当前先做索引，运行资产源文件暂不迁移。 |
 | `handbooks/` | AI 员工手册，面向 AIAgent 和研发负责人。 |
 | `assets/` | 安装后交付给研发负责人和 AIAgent 使用的运行资产源头。 |
 | `contracts/` | 机器可读操作契约和标准流程定义。 |

@@ -1,6 +1,14 @@
 # AgenticOps 文档
 
-本文是 `docs/` 目录索引，用于帮助审阅 AgenticOps 的终态设计、规则、故事线和实施计划入口。README 只保留终态定位和入口导航；阶段性成果、当前实现边界和剩余工作只在 `plans/` 中维护。
+本文是 `docs/` 目录索引，用于帮助人审阅 AgenticOps 的终态设计、规则、故事线和实施计划入口。README 只保留终态定位和入口导航；阶段性成果、当前实现边界和剩余工作只在 `plans/` 中维护。
+
+`docs/` 面向项目维护者和研发负责人阅读。AIAgent 执行任务前的资产入口见 [AI 资产入口](../ai-assets/README.md)。
+
+## 角色入口
+
+- [项目维护者上手](maintainers/getting-started.md)
+- [研发负责人上手](development-leads/getting-started.md)
+- [AI 资产入口](../ai-assets/README.md)
 
 ## 核心文档
 

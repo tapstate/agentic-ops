@@ -25,6 +25,10 @@
 agentic-ops/
   README.md
   docs/
+    maintainers/
+      getting-started.md
+    development-leads/
+      getting-started.md
     strategy/
       positioning.md
     architecture/
@@ -57,6 +61,8 @@ agentic-ops/
     ai-working-rules.md
     development-style.md
     project-rules.md
+  ai-assets/
+    README.md
   handbooks/
     ai-employee-handbook.md
   assets/
@@ -102,7 +108,8 @@ agentic-ops/
 
 | Directory | Responsibility |
 | --- | --- |
-| `docs/` | 架构、规则、故事线、流程和设计说明。 |
+| `docs/` | 人读文档，包括项目维护者、研发负责人、架构、规则、故事线、流程和设计说明。 |
+| `ai-assets/` | AIAgent 执行前读取的 AI 资产入口；当前作为索引层，运行资产源文件暂不迁移。 |
 | `handbooks/` | AI 员工手册，面向 AIAgent 和研发负责人。 |
 | `assets/` | 安装后交付给研发负责人和 AIAgent 使用的运行资产源头。 |
 | `plans/` | 面向维护者和项目维护代理的可执行推进计划。 |

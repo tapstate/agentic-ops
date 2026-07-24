@@ -133,7 +133,8 @@ git@github.com:tapstate/agentic-ops.git
 该仓库管理全局通用资料：
 
 ```text
-docs/          架构、目标定位、故事线、流程、计划
+docs/          人读文档，包括架构、目标定位、故事线、流程和计划
+ai-assets/     AIAgent 执行前读取的 AI 资产入口，当前作为索引层
 assets/        安装后交付给研发负责人和 AIAgent 使用的运行资产源头
 contracts/     操作契约和结构定义
 skills/        AgenticOps 技能和 AI 员工工作规则
