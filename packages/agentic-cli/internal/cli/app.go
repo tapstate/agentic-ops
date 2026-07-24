@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,9 +19,12 @@ import (
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/contract"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/evidence"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/feedback"
+	gitops "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/git"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/github"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/output"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/policy"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/process"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/update"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/workspace"
@@ -36,6 +40,14 @@ var BuildTime = ""
 var runGitHubAuthStatus = func(ctx context.Context) error {
 	return exec.CommandContext(ctx, "gh", "auth", "status").Run()
 }
+
+var commandAvailable = func(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
+}
+
+var inspectGitWorkspace = gitops.InspectWorkspace
+var gitHubClient = github.Client{Runner: github.ExecRunner{}}
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -109,6 +121,16 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		return runWriteEvidence(args, stdout)
 	case "release-agent":
 		return runReleaseAgent(args, stdout)
+	case "inspect-workspace":
+		return runInspectWorkspace(args, stdout)
+	case "prepare-pr":
+		return runPreparePR(args, stdout)
+	case "read-pr-comments":
+		return runReadPRComments(args, stdout)
+	case "check-ci-status":
+		return runCheckCIStatus(args, stdout)
+	case "fix-pr-comments":
+		return runFixPRComments(args, stdout)
 	case "feedback":
 		if len(args) >= 2 && args[1] == "report" {
 			return runFeedbackReport(args, stdout)
@@ -132,11 +154,14 @@ func parseCommitIndex(value string) int {
 
 func runDoctor(args []string, stdout io.Writer) int {
 	workspaceName := readFlag(args, "--workspace", "default")
+	installDir := readInstallDir(args)
 	checks := map[string]map[string]string{
-		"install":      checkInstallDir(readInstallDir(args)),
+		"install":      checkInstallDir(installDir),
 		"version":      {"status": "ok", "message": Version},
+		"current":      checkCurrentInstall(installDir),
 		"workspace":    checkWorkspaceRoot(),
 		"profile":      checkProfile(workspaceName),
+		"local_paths":  checkLocalPaths(workspaceName),
 		"policy":       checkPolicy(),
 		"contracts":    checkContracts(),
 		"jira_adapter": checkJiraAdapter(workspaceName, hasFlag(args, "--check-real-jira")),
@@ -161,6 +186,8 @@ func runDoctor(args []string, stdout io.Writer) int {
 		"commit":            Commit,
 		"status":            status,
 		"checks":            checks,
+		"current":           checks["current"],
+		"local_paths":       checks["local_paths"],
 		"next_action":       nextAction,
 	}))
 }
@@ -196,14 +223,40 @@ func checkGitHubAuth(realCheck bool) map[string]string {
 	return map[string]string{"status": "ok", "message": "GitHub CLI authenticated"}
 }
 
+func checkCommandAvailable(name string) map[string]string {
+	if commandAvailable(name) {
+		return map[string]string{"status": "ok", "message": name + " available"}
+	}
+	return map[string]string{"status": "failed", "message": name + " not found in PATH"}
+}
+
 func runPreflight(args []string, stdout io.Writer) int {
+	workspaceName := readFlag(args, "--workspace", "default")
+	installDir := readInstallDir(args)
+	workspaceProfile := takeoverProfile(workspaceName)
+	checks := map[string]map[string]string{
+		"runtime":           {"status": "ok", "message": runtime.GOOS + "/" + runtime.GOARCH},
+		"version":           {"status": "ok", "message": Version},
+		"git":               checkCommandAvailable("git"),
+		"github_cli":        checkCommandAvailable("gh"),
+		"github_auth":       checkGitHubAuth(hasFlag(args, "--check-github")),
+		"profile":           checkProfile(workspaceName),
+		"current_directory": checkCurrentDirectoryAllowed(workspaceProfile),
+	}
+	status := statusFromChecks(checks)
+	nextAction := "workspace_init"
+	if status != "ok" {
+		nextAction = "fix_environment"
+	}
 	return writeJSON(stdout, output.Success("preflight", map[string]any{
-		"workspace":   readFlag(args, "--workspace", "default"),
-		"install_dir": readInstallDir(args),
-		"go_runtime":  "not_required_for_installed_cli",
-		"jira":        "fake",
-		"github":      "not_used_in_phase_one",
-		"next_action": "workspace_init",
+		"workspace":   workspaceName,
+		"install_dir": installDir,
+		"os":          runtime.GOOS,
+		"arch":        runtime.GOARCH,
+		"version":     Version,
+		"status":      status,
+		"checks":      checks,
+		"next_action": nextAction,
 	}))
 }
 
@@ -225,17 +278,67 @@ func runWorkspaceInit(args []string, stdout io.Writer) int {
 	if err != nil {
 		return writeJSON(stdout, output.Failure("workspace_init", "workspace_init_failed", err.Error(), "请检查工作空间目录权限"))
 	}
+	profilePath, err := materializeWorkspaceProfile(info, jiraUser, jiraProject)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("workspace_init", output.FailureContext{
+			Code:                "workspace_profile_failed",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 profiles 目录中的工作流配置，并确认 workspace、jira.user 和 jira.project 与初始化参数一致",
+			TaskType:            "workspace_initialization",
+			CurrentStage:        "workspace_profile",
+			NextAction:          "fix_profile",
+		}))
+	}
 	return writeJSON(stdout, output.Success("workspace_init", map[string]any{
 		"workspace":      info.Name,
 		"workspace_root": info.Root,
 		"jira_user":      jiraUser,
 		"jira_project":   jiraProject,
-		"profile":        info.Name,
+		"profile":        profilePath,
 		"runs_dir":       info.RunsDir,
 		"run_logs_dir":   info.RunLogsDir,
 		"feedback_dir":   info.FeedbackDir,
 		"next_action":    "init_agent_capability",
 	}))
+}
+
+func materializeWorkspaceProfile(info workspace.Info, jiraUser string, jiraProject string) (string, error) {
+	sourcePath, err := repoProfilePath(info.Name)
+	if err != nil {
+		return "", err
+	}
+	loadedProfile, err := profile.LoadFile(sourcePath)
+	if err != nil {
+		return "", err
+	}
+	if loadedProfile.Workspace != info.Name {
+		return "", fmt.Errorf("profile workspace %q does not match %q", loadedProfile.Workspace, info.Name)
+	}
+	if loadedProfile.Jira.User != jiraUser {
+		return "", fmt.Errorf("profile jira.user %q does not match %q", loadedProfile.Jira.User, jiraUser)
+	}
+	if loadedProfile.Jira.Project != jiraProject {
+		return "", fmt.Errorf("profile jira.project %q does not match %q", loadedProfile.Jira.Project, jiraProject)
+	}
+	if issues := profile.Validate(loadedProfile); len(issues) > 0 {
+		return "", fmt.Errorf("workflow profile validation failed: %s", issues[0].Code)
+	}
+	registry, err := repoProcessRegistry()
+	if err != nil {
+		return "", err
+	}
+	if issues := profile.ValidateProcesses(loadedProfile, registry); len(issues) > 0 {
+		return "", fmt.Errorf("workflow profile process validation failed: %s", issues[0].Code)
+	}
+	data, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return "", err
+	}
+	targetPath := filepath.Join(info.ProfilesDir, info.Name+".yaml")
+	if err := os.WriteFile(targetPath, data, 0o644); err != nil {
+		return "", err
+	}
+	return targetPath, nil
 }
 
 func runAgentInit(args []string, stdout io.Writer) int {
@@ -263,6 +366,11 @@ func runAgentInit(args []string, stdout io.Writer) int {
 			"resume_takeover",
 			"write_evidence",
 			"release_agent",
+			"inspect_workspace",
+			"prepare_pr",
+			"read_pr_comments",
+			"check_ci_status",
+			"fix_pr_comments",
 			"feedback_report",
 			"feedback_bundle",
 		},
@@ -483,10 +591,18 @@ func runProfileValidate(args []string, stdout io.Writer) int {
 		}))
 	}
 	issues := profile.Validate(loadedProfile)
+	if len(issues) == 0 {
+		registry, err := repoProcessRegistry()
+		if err != nil {
+			issues = append(issues, profile.ValidationIssue{Code: "standard_process_missing", Message: err.Error()})
+		} else {
+			issues = append(issues, profile.ValidateProcesses(loadedProfile, registry)...)
+		}
+	}
 	if len(issues) > 0 {
 		return writeJSON(stdout, output.FailureWithContext("profile_validate", output.FailureContext{
 			Code:                "profile_validation_failed",
-			Message:             "workflow profile validation failed",
+			Message:             "workflow profile validation failed: " + issues[0].Code,
 			RequiredHumanAction: "请修复 workflow profile 中的字段、分类、流程、状态或 transition 映射",
 			TaskType:            "profile_validation",
 			CurrentStage:        "profile_validation",
@@ -734,7 +850,11 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 	if err != nil {
 		return writeJSON(stdout, output.Failure("takeover_task", "jira_current_user_failed", err.Error(), "请检查 Jira 适配器登录状态"))
 	}
-	decision := jira.ValidateTakeover(issue, workspaceProfile, currentJiraUser, agentID())
+	processRegistry, err := repoProcessRegistry()
+	if err != nil {
+		processRegistry = defaultProcessRegistry()
+	}
+	decision := jira.ValidateTakeoverWithProcesses(issue, workspaceProfile, currentJiraUser, agentID(), processRegistry)
 	if !decision.OK {
 		missingField := missingJiraFieldName(decision.Code)
 		_ = appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
@@ -791,36 +911,39 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 		}
 	}
 	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
-		RunID:          runID,
-		IssueKey:       issue.Key,
-		TaskType:       "task_takeover",
-		Operation:      "takeover_task",
-		CurrentStage:   "takeover_started",
-		NextAction:     "proceed",
-		AgentID:        currentAgentID,
-		CurrentAgentID: currentAgentID,
-		TakeoverAt:     takeoverAt,
-		TaskClass:      decision.TaskClass,
-		ProcessID:      decision.ProcessID,
-		OK:             true,
-		Gate:           "takeover_task",
-		GateStatus:     "passed",
+		RunID:           runID,
+		IssueKey:        issue.Key,
+		TaskType:        "task_takeover",
+		Operation:       "takeover_task",
+		CurrentStage:    "takeover_started",
+		NextAction:      "proceed",
+		AgentID:         currentAgentID,
+		CurrentAgentID:  currentAgentID,
+		TakeoverAt:      takeoverAt,
+		TargetRepo:      decision.TargetRepo,
+		TaskClass:       decision.TaskClass,
+		TaskClassSource: decision.TaskClassSource,
+		ProcessID:       decision.ProcessID,
+		OK:              true,
+		Gate:            "takeover_task",
+		GateStatus:      "passed",
 	}); err != nil {
 		return writeJSON(stdout, output.Failure("takeover_task", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 	}
 	return writeJSON(stdout, output.Success("takeover_task", map[string]any{
-		"workspace":        workspaceName,
-		"issue_key":        issue.Key,
-		"run_id":           runID,
-		"agent_id":         currentAgentID,
-		"current_agent_id": currentAgentID,
-		"takeover_at":      takeoverAt,
-		"task_type":        "task_takeover",
-		"task_class":       decision.TaskClass,
-		"process_id":       decision.ProcessID,
-		"current_stage":    "takeover_started",
-		"target_repo":      issue.TargetRepo,
-		"next_action":      "proceed",
+		"workspace":         workspaceName,
+		"issue_key":         issue.Key,
+		"run_id":            runID,
+		"agent_id":          currentAgentID,
+		"current_agent_id":  currentAgentID,
+		"takeover_at":       takeoverAt,
+		"task_type":         "task_takeover",
+		"task_class":        decision.TaskClass,
+		"task_class_source": decision.TaskClassSource,
+		"process_id":        decision.ProcessID,
+		"current_stage":     "takeover_started",
+		"target_repo":       decision.TargetRepo,
+		"next_action":       "proceed",
 	}))
 }
 
@@ -874,16 +997,226 @@ func runResumeTakeover(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.Failure("resume_takeover", "missing_run_id", "缺少 run_id", "请提供 --run-id"))
 	}
 	workspaceName := readFlag(args, "--workspace", "default")
-	if err := appendWorkspaceEvent(workspaceName, runID, "", "task_takeover", "resume_takeover", "takeover_resumed", "continue_development", true, false); err != nil {
+	root, err := workspaceRoot()
+	if err != nil {
+		return writeJSON(stdout, output.Failure("resume_takeover", "workspace_root_failed", "无法读取当前工作目录", "请在项目 AI 工作空间中重试"))
+	}
+	state, err := resumableRunState(root, workspaceName, runID)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("resume_takeover", output.FailureContext{
+			Code:                resumeErrorCode(err),
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 run_id、workspace 和本地事件日志是否对应同一次有效接管",
+			TaskType:            "task_takeover",
+			CurrentStage:        "resume_gate",
+			NextAction:          "ask_owner",
+		}))
+	}
+	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
+		RunID:          runID,
+		IssueKey:       state.IssueKey,
+		TaskType:       "task_takeover",
+		Operation:      "resume_takeover",
+		CurrentStage:   "takeover_resumed",
+		NextAction:     "continue_development",
+		AgentID:        state.AgentID,
+		CurrentAgentID: state.CurrentAgentID,
+		TaskClass:      state.TaskClass,
+		ProcessID:      state.ProcessID,
+		OK:             true,
+		Gate:           "resume_takeover",
+		GateStatus:     "passed",
+	}); err != nil {
 		return writeJSON(stdout, output.Failure("resume_takeover", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 	}
 	return writeJSON(stdout, output.Success("resume_takeover", map[string]any{
-		"workspace":     workspaceName,
-		"run_id":        runID,
-		"task_type":     "task_takeover",
-		"current_stage": "takeover_resumed",
-		"next_action":   "continue_development",
+		"workspace":        workspaceName,
+		"run_id":           runID,
+		"issue_key":        state.IssueKey,
+		"task_type":        "task_takeover",
+		"agent_id":         state.AgentID,
+		"current_agent_id": state.CurrentAgentID,
+		"task_class":       state.TaskClass,
+		"process_id":       state.ProcessID,
+		"previous_stage":   state.PreviousStage,
+		"current_stage":    "takeover_resumed",
+		"next_action":      "continue_development",
 	}))
+}
+
+type resumeRunState struct {
+	IssueKey       string
+	AgentID        string
+	CurrentAgentID string
+	TaskClass      string
+	ProcessID      string
+	PreviousStage  string
+}
+
+type evidenceRunContext struct {
+	IssueKey       string
+	AgentID        string
+	CurrentAgentID string
+	TaskClass      string
+	ProcessID      string
+	PreviousStage  string
+	TargetRepo     string
+}
+
+var errResumeRunNotFound = errors.New("run_not_found")
+var errResumeWorkspaceMismatch = errors.New("workspace_mismatch")
+var errResumeLocalStateMismatch = errors.New("local_state_mismatch")
+
+func resumableRunState(root string, workspaceName string, runID string) (resumeRunState, error) {
+	events, err := feedback.ReadEvents(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
+	if err != nil {
+		return resumeRunState{}, err
+	}
+	var latest *feedback.Event
+	for i := range events {
+		if events[i].RunID == runID && (events[i].Operation == "takeover_task" || events[i].Operation == "resume_takeover") {
+			latest = &events[i]
+		}
+	}
+	if latest == nil {
+		return resumeRunState{}, errResumeRunNotFound
+	}
+	if latest.Workspace != workspaceName {
+		return resumeRunState{}, errResumeWorkspaceMismatch
+	}
+	if latest.IssueKey == "" ||
+		latest.AgentID == "" ||
+		latest.CurrentAgentID == "" ||
+		latest.CurrentAgentID != latest.AgentID ||
+		latest.CurrentAgentID != agentID() ||
+		latest.TaskClass == "" ||
+		latest.ProcessID == "" ||
+		latest.CurrentStage == "" ||
+		!latest.OK ||
+		latest.CurrentStage == "completed" ||
+		latest.NextAction == "task_audit_submitted" {
+		return resumeRunState{}, errResumeLocalStateMismatch
+	}
+	return resumeRunState{
+		IssueKey:       latest.IssueKey,
+		AgentID:        latest.AgentID,
+		CurrentAgentID: latest.CurrentAgentID,
+		TaskClass:      latest.TaskClass,
+		ProcessID:      latest.ProcessID,
+		PreviousStage:  latest.CurrentStage,
+	}, nil
+}
+
+func resumeErrorCode(err error) string {
+	switch err {
+	case errResumeRunNotFound:
+		return "run_not_found"
+	case errResumeWorkspaceMismatch:
+		return "workspace_mismatch"
+	case errResumeLocalStateMismatch:
+		return "local_state_mismatch"
+	default:
+		return "event_read_failed"
+	}
+}
+
+func evidenceRunState(root string, workspaceName string, runID string) (evidenceRunContext, error) {
+	events, err := feedback.ReadEvents(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
+	if err != nil {
+		return evidenceRunContext{}, err
+	}
+	var latest *feedback.Event
+	targetRepo := ""
+	for i := range events {
+		if events[i].RunID == runID && (events[i].Operation == "takeover_task" || events[i].Operation == "resume_takeover") {
+			latest = &events[i]
+			if events[i].TargetRepo != "" {
+				targetRepo = events[i].TargetRepo
+			}
+		}
+	}
+	if latest == nil {
+		return evidenceRunContext{}, errResumeRunNotFound
+	}
+	if latest.Workspace != workspaceName {
+		return evidenceRunContext{}, errResumeWorkspaceMismatch
+	}
+	if latest.IssueKey == "" ||
+		latest.AgentID == "" ||
+		latest.CurrentAgentID == "" ||
+		latest.CurrentAgentID != latest.AgentID ||
+		latest.CurrentAgentID != agentID() ||
+		latest.TaskClass == "" ||
+		latest.ProcessID == "" ||
+		latest.CurrentStage == "" ||
+		!latest.OK ||
+		latest.CurrentStage == "completed" ||
+		latest.NextAction == "task_audit_submitted" {
+		return evidenceRunContext{}, errResumeLocalStateMismatch
+	}
+	return evidenceRunContext{
+		IssueKey:       latest.IssueKey,
+		AgentID:        latest.AgentID,
+		CurrentAgentID: latest.CurrentAgentID,
+		TaskClass:      latest.TaskClass,
+		ProcessID:      latest.ProcessID,
+		PreviousStage:  latest.CurrentStage,
+		TargetRepo:     targetRepo,
+	}, nil
+}
+
+func evidenceStateErrorCode(err error) string {
+	return resumeErrorCode(err)
+}
+
+func evidenceTemplate(workspaceProfile profile.Profile) (string, string, error) {
+	templateName := workspaceProfile.Templates["development_completed"]
+	if strings.TrimSpace(templateName) == "" {
+		return "", "", fmt.Errorf("development_completed evidence template is required")
+	}
+	root, err := repoRoot()
+	if err != nil {
+		return "", "", err
+	}
+	templatePath := filepath.Join(root, "assets", templateName)
+	if strings.HasPrefix(templateName, "assets/") {
+		templatePath = filepath.Join(root, templateName)
+	}
+	data, err := os.ReadFile(templatePath)
+	if err != nil {
+		return "", "", err
+	}
+	return templatePath, string(data), nil
+}
+
+func evidencePolicyGateName(jiraMode string) string {
+	if jiraMode == "real" {
+		return "write_jira_comment"
+	}
+	return "write_local_evidence"
+}
+
+func policyRequiresHumanGate(gateName string) (string, bool, error) {
+	policyPath, err := repoPolicyPath()
+	if err != nil {
+		return "", false, err
+	}
+	loadedPolicy, err := policy.LoadFile(policyPath)
+	if err != nil {
+		return policyPath, false, err
+	}
+	if issues := policy.Validate(loadedPolicy); len(issues) > 0 {
+		return policyPath, false, fmt.Errorf("policy validation failed: %s", issues[0].Code)
+	}
+	return policyPath, policy.RequiresHumanGate(loadedPolicy, gateName), nil
+}
+
+func renderEvidenceTemplate(template string, values map[string]string) string {
+	rendered := template
+	for key, value := range values {
+		rendered = strings.ReplaceAll(rendered, "<"+key+">", value)
+	}
+	return rendered
 }
 
 func runWriteEvidence(args []string, stdout io.Writer) int {
@@ -904,21 +1237,77 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 	if err != nil {
 		return writeJSON(stdout, output.Failure("write_evidence", "workspace_root_failed", "无法读取当前工作目录", "请在项目 AI 工作空间中重试"))
 	}
+	state, err := evidenceRunState(root, workspaceName, runID)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("write_evidence", output.FailureContext{
+			Code:                evidenceStateErrorCode(err),
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 run_id 是否存在有效接管事件，且仍属于当前 AIAgent",
+			TaskType:            "evidence_write",
+			CurrentStage:        "evidence_write_gate",
+			NextAction:          "ask_owner",
+		}))
+	}
 	path := filepath.Join(root, ".agentic-ops", "runs", runID, "evidence.md")
-	content := fmt.Sprintf("# Evidence\n\n- workspace: %s\n- run_id: %s\n- status: evidence_written\n", workspaceName, runID)
 	workspaceProfile := takeoverProfile(workspaceName)
 	selection, err := selectJiraClient(workspaceName, workspaceProfile)
 	if err != nil {
 		return writeJSON(stdout, output.Failure("write_evidence", "jira_adapter_config_failed", err.Error(), "请检查 Jira adapter 配置"))
 	}
-	issueKey := readFlag(args, "--issue-key", "")
+	issueKey := readFlag(args, "--issue-key", state.IssueKey)
+	gateName := evidencePolicyGateName(selection.Mode)
+	policyPath, requiresHumanGate, err := policyRequiresHumanGate(gateName)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("write_evidence", output.FailureContext{
+			Code:                "policy_not_found",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 assets/policies/default.yaml 是否存在且通过校验",
+			TaskType:            "evidence_write",
+			CurrentStage:        "evidence_write_gate",
+			NextAction:          "fix_policy",
+		}))
+	}
+	if requiresHumanGate {
+		_ = appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
+			RunID:               runID,
+			IssueKey:            state.IssueKey,
+			TaskType:            "evidence_write",
+			Operation:           "write_evidence",
+			CurrentStage:        "evidence_write_gate",
+			NextAction:          "ask_owner",
+			AgentID:             state.AgentID,
+			CurrentAgentID:      state.CurrentAgentID,
+			TargetRepo:          state.TargetRepo,
+			TaskClass:           state.TaskClass,
+			ProcessID:           state.ProcessID,
+			OK:                  false,
+			Code:                "policy_gate_required",
+			Gate:                gateName,
+			GateStatus:          "blocked",
+			HumanGate:           true,
+			RequiresHumanAction: true,
+		})
+		return writeJSON(stdout, output.FailureWithContext("write_evidence", output.FailureContext{
+			Code:                "policy_gate_required",
+			Message:             gateName + " requires a human gate in " + policyPath,
+			RequiredHumanAction: "请由负责人确认该 evidence 写入策略，或调整 policy gate 后重试",
+			TaskType:            "evidence_write",
+			CurrentStage:        "evidence_write_gate",
+			NextAction:          "ask_owner",
+		}))
+	}
+	templatePath, template, err := evidenceTemplate(workspaceProfile)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("write_evidence", output.FailureContext{
+			Code:                "evidence_template_missing",
+			Message:             err.Error(),
+			RequiredHumanAction: "请维护 workflow profile 的 development_completed 证据模板",
+			TaskType:            "evidence_write",
+			CurrentStage:        "evidence_write_gate",
+			NextAction:          "fix_profile",
+		}))
+	}
 	if selection.Mode == "real" {
-		if issueKey == "" {
-			issueKey, err = issueKeyForRun(root, runID)
-			if err != nil {
-				return writeJSON(stdout, output.Failure("write_evidence", "run_not_found", err.Error(), "请检查 run_id 是否存在有效接管事件"))
-			}
-		}
 		if issueKey == "" {
 			return writeJSON(stdout, output.Failure("write_evidence", "run_not_found", "未找到 run_id 对应的 Jira 卡片", "请检查 run_id 是否存在有效接管事件"))
 		}
@@ -934,6 +1323,15 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 			}))
 		}
 	}
+	content := renderEvidenceTemplate(template, map[string]string{
+		"workspace":      workspaceName,
+		"run_id":         runID,
+		"issue_key":      state.IssueKey,
+		"task_class":     state.TaskClass,
+		"process_id":     state.ProcessID,
+		"previous_stage": state.PreviousStage,
+		"target_repo":    state.TargetRepo,
+	})
 	if err := evidence.Write(path, content); err != nil {
 		return writeJSON(stdout, output.Failure("write_evidence", "write_failed", err.Error(), "请检查工作空间目录权限"))
 	}
@@ -946,15 +1344,41 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 			return writeJSON(stdout, output.Failure("write_evidence", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 		}
 	}
-	if err := appendWorkspaceEvent(workspaceName, runID, "", "evidence_write", "write_evidence", "evidence_written", "request_owner_confirmation", true, true); err != nil {
+	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
+		RunID:          runID,
+		IssueKey:       state.IssueKey,
+		TaskType:       "evidence_write",
+		Operation:      "write_evidence",
+		CurrentStage:   "evidence_written",
+		NextAction:     "request_owner_confirmation",
+		AgentID:        state.AgentID,
+		CurrentAgentID: state.CurrentAgentID,
+		TargetRepo:     state.TargetRepo,
+		TaskClass:      state.TaskClass,
+		ProcessID:      state.ProcessID,
+		AuditTarget:    "local_file",
+		AuditSubmitted: true,
+		AuditReference: path,
+		OK:             true,
+		Gate:           "write_evidence",
+		GateStatus:     "passed",
+	}); err != nil {
 		return writeJSON(stdout, output.Failure("write_evidence", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 	}
 	return writeJSON(stdout, output.Success("write_evidence", map[string]any{
-		"workspace":     workspaceName,
-		"run_id":        runID,
-		"evidence":      path,
-		"current_stage": "evidence_written",
-		"next_action":   "request_owner_confirmation",
+		"workspace":       workspaceName,
+		"run_id":          runID,
+		"issue_key":       state.IssueKey,
+		"task_class":      state.TaskClass,
+		"process_id":      state.ProcessID,
+		"target_repo":     state.TargetRepo,
+		"evidence":        path,
+		"template":        templatePath,
+		"audit_target":    "local_file",
+		"audit_submitted": true,
+		"audit_reference": path,
+		"current_stage":   "evidence_written",
+		"next_action":     "request_owner_confirmation",
 	}))
 }
 
@@ -1000,6 +1424,50 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 	selection, err := selectJiraClient(workspaceName, workspaceProfile)
 	if err != nil {
 		return writeJSON(stdout, output.Failure("release_agent", "jira_adapter_config_failed", err.Error(), "请检查 Jira 适配器配置"))
+	}
+	auditTarget := "jira_comment"
+	auditReference := completionEvidence
+	auditSubmitted := true
+	if selection.Mode != "real" {
+		root, err := workspaceRoot()
+		if err != nil {
+			return writeJSON(stdout, output.Failure("release_agent", "workspace_root_failed", "无法读取当前工作目录", "请在项目 AI 工作空间中重试"))
+		}
+		runContext, err := evidenceRunState(root, workspaceName, runID)
+		if err != nil {
+			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
+				Code:                "run_not_found",
+				Message:             err.Error(),
+				RequiredHumanAction: "请检查 run_id 是否存在有效接管事件，且仍属于当前 AIAgent",
+				TaskType:            "task_takeover",
+				CurrentStage:        "completion_cleanup",
+				NextAction:          "ask_owner",
+			}))
+		}
+		if runContext.IssueKey != issueKey {
+			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
+				Code:                "run_not_found",
+				Message:             "run_id 与 issue_key 不匹配",
+				RequiredHumanAction: "请检查 run_id 和 Jira 卡片编号是否来自同一次接管",
+				TaskType:            "task_takeover",
+				CurrentStage:        "completion_cleanup",
+				NextAction:          "ask_owner",
+			}))
+		}
+		status, err := completionEvidenceStatus(root, runID, completionEvidence)
+		if err != nil {
+			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
+				Code:                "completion_evidence_missing",
+				Message:             err.Error(),
+				RequiredHumanAction: "请先执行 write-evidence，或提供已提交任务级审计记录的引用",
+				TaskType:            "task_takeover",
+				CurrentStage:        "completion_cleanup",
+				NextAction:          "ask_owner",
+			}))
+		}
+		auditTarget = status.Target
+		auditReference = status.Reference
+		auditSubmitted = status.Submitted
 	}
 	if selection.Mode == "real" {
 		if !hasFlag(args, "--confirm-real-jira-write") {
@@ -1100,6 +1568,9 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		CompletedAt:           completedAt,
 		CompletionEvidence:    completionEvidence,
 		CurrentAgentIDCleared: true,
+		AuditTarget:           auditTarget,
+		AuditSubmitted:        auditSubmitted,
+		AuditReference:        auditReference,
 		OK:                    true,
 		Gate:                  "release_agent",
 		GateStatus:            "passed",
@@ -1115,9 +1586,415 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		"jira_transition_id":       jiraTransitionID,
 		"completed_at":             completedAt,
 		"completion_evidence":      completionEvidence,
+		"audit_target":             auditTarget,
+		"audit_submitted":          auditSubmitted,
+		"audit_reference":          auditReference,
 		"current_stage":            "completed",
 		"next_action":              "task_audit_submitted",
 	}))
+}
+
+type completionEvidenceCheck struct {
+	Target    string
+	Reference string
+	Submitted bool
+}
+
+func completionEvidenceStatus(root string, runID string, completionEvidence string) (completionEvidenceCheck, error) {
+	if strings.TrimSpace(completionEvidence) == "" {
+		return completionEvidenceCheck{}, fmt.Errorf("completion evidence is required")
+	}
+	if filepath.IsAbs(completionEvidence) {
+		if fileExists(completionEvidence) {
+			return completionEvidenceCheck{Target: "local_file", Reference: completionEvidence, Submitted: true}, nil
+		}
+		return completionEvidenceCheck{}, fmt.Errorf("completion evidence file not found: %s", completionEvidence)
+	}
+	runEvidencePath := filepath.Join(root, ".agentic-ops", "runs", runID, completionEvidence)
+	if fileExists(runEvidencePath) {
+		return completionEvidenceCheck{Target: "local_file", Reference: runEvidencePath, Submitted: true}, nil
+	}
+	events, err := feedback.ReadEvents(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
+	if err != nil {
+		return completionEvidenceCheck{}, err
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		event := events[i]
+		if event.RunID == runID && event.AuditSubmitted && event.AuditReference == completionEvidence {
+			return completionEvidenceCheck{Target: event.AuditTarget, Reference: event.AuditReference, Submitted: true}, nil
+		}
+	}
+	return completionEvidenceCheck{}, fmt.Errorf("completion evidence not found: %s", completionEvidence)
+}
+
+func fileExists(path string) bool {
+	stat, err := os.Stat(path)
+	return err == nil && !stat.IsDir()
+}
+
+func runInspectWorkspace(args []string, stdout io.Writer) int {
+	workspaceName := readFlag(args, "--workspace", "default")
+	workspaceProfile := takeoverProfile(workspaceName)
+	sourceRoot, err := sourceRootForOperation(args, workspaceProfile)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("inspect_workspace", output.FailureContext{
+			Code:                "source_root_not_found",
+			Message:             err.Error(),
+			RequiredHumanAction: "请提供 --source-root，或维护 workflow profile 的 local.source_root",
+			TaskType:            "workspace_inspection",
+			CurrentStage:        "workspace_inspection",
+			NextAction:          "fix_workspace",
+		}))
+	}
+	status, err := inspectGitWorkspace(context.Background(), sourceRoot)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("inspect_workspace", output.FailureContext{
+			Code:                "git_inspect_failed",
+			Message:             err.Error(),
+			RequiredHumanAction: "请确认当前目录是 Git 仓库且 Git 可用",
+			TaskType:            "workspace_inspection",
+			CurrentStage:        "workspace_inspection",
+			NextAction:          "fix_workspace",
+		}))
+	}
+	nextAction := "continue_development"
+	if status.Dirty {
+		nextAction = "prepare_pr"
+	}
+	return writeJSON(stdout, output.Success("inspect_workspace", map[string]any{
+		"workspace":     workspaceName,
+		"source_root":   sourceRoot,
+		"branch":        status.Branch,
+		"commit":        status.Commit,
+		"dirty":         status.Dirty,
+		"changed_files": status.ChangedFiles,
+		"current_stage": "workspace_inspected",
+		"next_action":   nextAction,
+	}))
+}
+
+func runPreparePR(args []string, stdout io.Writer) int {
+	workspaceName := readFlag(args, "--workspace", "default")
+	runID := readFlag(args, "--run-id", "")
+	if runID == "" {
+		return writeJSON(stdout, output.FailureWithContext("prepare_pr", output.FailureContext{
+			Code:                "missing_run_id",
+			Message:             "缺少 run_id",
+			RequiredHumanAction: "请提供 --run-id",
+			TaskType:            "pr_preparation",
+			CurrentStage:        "pr_plan_preparation",
+			NextAction:          "ask_owner",
+		}))
+	}
+	root, err := workspaceRoot()
+	if err != nil {
+		return writeJSON(stdout, output.Failure("prepare_pr", "workspace_root_failed", "无法读取当前工作目录", "请在项目 AI 工作空间中重试"))
+	}
+	state, err := evidenceRunState(root, workspaceName, runID)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("prepare_pr", output.FailureContext{
+			Code:                evidenceStateErrorCode(err),
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 run_id 是否存在有效接管事件，且仍属于当前 AIAgent",
+			TaskType:            "pr_preparation",
+			CurrentStage:        "pr_plan_preparation",
+			NextAction:          "ask_owner",
+		}))
+	}
+	workspaceProfile := takeoverProfile(workspaceName)
+	sourceRoot, err := sourceRootForOperation(args, workspaceProfile)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("prepare_pr", output.FailureContext{
+			Code:                "source_root_not_found",
+			Message:             err.Error(),
+			RequiredHumanAction: "请提供 --source-root，或维护 workflow profile 的 local.source_root",
+			TaskType:            "pr_preparation",
+			CurrentStage:        "pr_plan_preparation",
+			NextAction:          "fix_workspace",
+		}))
+	}
+	status, err := inspectGitWorkspace(context.Background(), sourceRoot)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("prepare_pr", output.FailureContext{
+			Code:                "git_inspect_failed",
+			Message:             err.Error(),
+			RequiredHumanAction: "请确认当前目录是 Git 仓库且 Git 可用",
+			TaskType:            "pr_preparation",
+			CurrentStage:        "pr_plan_preparation",
+			NextAction:          "fix_workspace",
+		}))
+	}
+	policyPath, gateInfo, err := prPolicyGateInfo()
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("prepare_pr", output.FailureContext{
+			Code:                "policy_not_found",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 assets/policies/default.yaml 是否存在且通过校验",
+			TaskType:            "pr_preparation",
+			CurrentStage:        "pr_plan_preparation",
+			NextAction:          "fix_policy",
+		}))
+	}
+	base := readFlag(args, "--base", "main")
+	title := readFlag(args, "--title", state.IssueKey+" task update")
+	body := readFlag(args, "--body", "由 AgenticOps 生成的拉取请求计划，等待负责人确认后再推送和创建 PR。")
+	targetRepo := state.TargetRepo
+	if targetRepo == "" {
+		targetRepo = workspaceProfile.GitHub.Repositories.Default
+	}
+	_ = appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
+		RunID:          runID,
+		IssueKey:       state.IssueKey,
+		TaskType:       "pr_preparation",
+		Operation:      "prepare_pr",
+		CurrentStage:   "pr_plan_prepared",
+		NextAction:     "ask_owner_to_push_and_create_pr",
+		AgentID:        state.AgentID,
+		CurrentAgentID: state.CurrentAgentID,
+		TargetRepo:     targetRepo,
+		TaskClass:      state.TaskClass,
+		ProcessID:      state.ProcessID,
+		OK:             true,
+		Gate:           "prepare_pr",
+		GateStatus:     "passed",
+	})
+	return writeJSON(stdout, output.Success("prepare_pr", map[string]any{
+		"workspace":               workspaceName,
+		"run_id":                  runID,
+		"issue_key":               state.IssueKey,
+		"task_class":              state.TaskClass,
+		"process_id":              state.ProcessID,
+		"target_repo":             targetRepo,
+		"source_root":             sourceRoot,
+		"branch":                  status.Branch,
+		"commit":                  status.Commit,
+		"dirty":                   status.Dirty,
+		"changed_files":           status.ChangedFiles,
+		"base":                    base,
+		"title":                   title,
+		"body":                    body,
+		"policy":                  policyPath,
+		"policy_gates":            gateInfo,
+		"policy_gate_code":        "policy_gate_required",
+		"git_push_gate_required":  gateInfo["git_push"],
+		"create_pr_gate_required": gateInfo["create_pr"],
+		"blocked_operations":      gatedOperations(gateInfo),
+		"current_stage":           "pr_plan_prepared",
+		"next_action":             "ask_owner_to_push_and_create_pr",
+	}))
+}
+
+func runReadPRComments(args []string, stdout io.Writer) int {
+	workspaceName := readFlag(args, "--workspace", "default")
+	repo := readFlag(args, "--repo", "")
+	pr := readFlag(args, "--pr", "")
+	if repo == "" || pr == "" {
+		return writeJSON(stdout, output.FailureWithContext("read_pr_comments", output.FailureContext{
+			Code:                "missing_pr_reference",
+			Message:             "缺少 repo 或 pr",
+			RequiredHumanAction: "请提供 --repo 和 --pr",
+			TaskType:            "pr_review",
+			CurrentStage:        "pr_comment_read",
+			NextAction:          "ask_owner",
+		}))
+	}
+	comments, err := gitHubClient.ReadPRComments(context.Background(), repo, pr)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("read_pr_comments", output.FailureContext{
+			Code:                "github_pr_read_failed",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 GitHub CLI 登录状态、仓库权限和 PR 编号",
+			TaskType:            "pr_review",
+			CurrentStage:        "pr_comment_read",
+			NextAction:          "fix_environment",
+		}))
+	}
+	return writeJSON(stdout, output.Success("read_pr_comments", map[string]any{
+		"workspace":      workspaceName,
+		"repo":           repo,
+		"pr":             pr,
+		"comments_count": len(comments),
+		"comments":       comments,
+		"current_stage":  "pr_comments_read",
+		"next_action":    "classify_or_fix_pr_comments",
+	}))
+}
+
+func runCheckCIStatus(args []string, stdout io.Writer) int {
+	workspaceName := readFlag(args, "--workspace", "default")
+	repo := readFlag(args, "--repo", "")
+	pr := readFlag(args, "--pr", "")
+	if repo == "" || pr == "" {
+		return writeJSON(stdout, output.FailureWithContext("check_ci_status", output.FailureContext{
+			Code:                "missing_pr_reference",
+			Message:             "缺少 repo 或 pr",
+			RequiredHumanAction: "请提供 --repo 和 --pr",
+			TaskType:            "ci_check",
+			CurrentStage:        "ci_status_check",
+			NextAction:          "ask_owner",
+		}))
+	}
+	status, err := gitHubClient.CheckCIStatus(context.Background(), repo, pr)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("check_ci_status", output.FailureContext{
+			Code:                "github_ci_read_failed",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 GitHub CLI 登录状态、仓库权限和 PR 编号",
+			TaskType:            "ci_check",
+			CurrentStage:        "ci_status_check",
+			NextAction:          "fix_environment",
+		}))
+	}
+	nextAction := "continue_review"
+	if status.Status == "failed" {
+		nextAction = "fix_ci_failures"
+	}
+	if status.Status == "pending" {
+		nextAction = "wait_ci"
+	}
+	return writeJSON(stdout, output.Success("check_ci_status", map[string]any{
+		"workspace":            workspaceName,
+		"repo":                 repo,
+		"pr":                   pr,
+		"status":               status.Status,
+		"checks":               status.Checks,
+		"failing_checks":       status.FailingChecks,
+		"failing_checks_count": len(status.FailingChecks),
+		"current_stage":        "ci_status_checked",
+		"next_action":          nextAction,
+	}))
+}
+
+func runFixPRComments(args []string, stdout io.Writer) int {
+	workspaceName := readFlag(args, "--workspace", "default")
+	repo := readFlag(args, "--repo", "")
+	pr := readFlag(args, "--pr", "")
+	if repo == "" || pr == "" {
+		return writeJSON(stdout, output.FailureWithContext("fix_pr_comments", output.FailureContext{
+			Code:                "missing_pr_reference",
+			Message:             "缺少 repo 或 pr",
+			RequiredHumanAction: "请提供 --repo 和 --pr",
+			TaskType:            "pr_comment_fix",
+			CurrentStage:        "pr_comment_fix_gate",
+			NextAction:          "ask_owner",
+		}))
+	}
+	comments, err := gitHubClient.ReadPRComments(context.Background(), repo, pr)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("fix_pr_comments", output.FailureContext{
+			Code:                "github_pr_read_failed",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 GitHub CLI 登录状态、仓库权限和 PR 编号",
+			TaskType:            "pr_comment_fix",
+			CurrentStage:        "pr_comment_fix_gate",
+			NextAction:          "fix_environment",
+		}))
+	}
+	policyPath, gateInfo, err := prPolicyGateInfo()
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("fix_pr_comments", output.FailureContext{
+			Code:                "policy_not_found",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 assets/policies/default.yaml 是否存在且通过校验",
+			TaskType:            "pr_comment_fix",
+			CurrentStage:        "pr_comment_fix_gate",
+			NextAction:          "fix_policy",
+		}))
+	}
+	result := output.FailureWithContext("fix_pr_comments", output.FailureContext{
+		Code:                "policy_gate_required",
+		Message:             "PR review fix requires human gate before code changes or resubmission",
+		RequiredHumanAction: "请由研发负责人确认评论取舍、修改范围，以及后续 git_commit/git_push 策略门禁",
+		TaskType:            "pr_comment_fix",
+		CurrentStage:        "pr_comment_fix_gate",
+		NextAction:          "ask_owner",
+	})
+	result["workspace"] = workspaceName
+	result["repo"] = repo
+	result["pr"] = pr
+	result["comments_count"] = len(comments)
+	result["fix_plan"] = classifyPRComments(comments)
+	result["policy"] = policyPath
+	result["policy_gates"] = gateInfo
+	result["blocked_operations"] = gatedOperations(gateInfo)
+	return writeJSON(stdout, result)
+}
+
+func sourceRootForOperation(args []string, workspaceProfile profile.Profile) (string, error) {
+	if sourceRoot := readFlag(args, "--source-root", ""); sourceRoot != "" {
+		return sourceRoot, nil
+	}
+	if strings.TrimSpace(workspaceProfile.Local.SourceRoot) != "" {
+		return workspaceProfile.Local.SourceRoot, nil
+	}
+	root, err := workspaceRoot()
+	if err != nil {
+		return "", err
+	}
+	return root, nil
+}
+
+func prPolicyGateInfo() (string, map[string]bool, error) {
+	policyPath, err := repoPolicyPath()
+	if err != nil {
+		return "", nil, err
+	}
+	loadedPolicy, err := policy.LoadFile(policyPath)
+	if err != nil {
+		return policyPath, nil, err
+	}
+	if issues := policy.Validate(loadedPolicy); len(issues) > 0 {
+		return policyPath, nil, fmt.Errorf("policy validation failed: %s", issues[0].Code)
+	}
+	return policyPath, map[string]bool{
+		"git_commit":      policy.RequiresHumanGate(loadedPolicy, "git_commit"),
+		"git_push":        policy.RequiresHumanGate(loadedPolicy, "git_push"),
+		"create_pr":       policy.RequiresHumanGate(loadedPolicy, "create_pr"),
+		"fix_pr_comments": policy.RequiresHumanGate(loadedPolicy, "fix_pr_comments"),
+	}, nil
+}
+
+func gatedOperations(gates map[string]bool) []string {
+	var operations []string
+	for _, operation := range []string{"git_commit", "git_push", "create_pr", "fix_pr_comments"} {
+		if gates[operation] {
+			operations = append(operations, operation)
+		}
+	}
+	return operations
+}
+
+func classifyPRComments(comments []github.PRComment) []map[string]string {
+	plan := make([]map[string]string, 0, len(comments))
+	for _, comment := range comments {
+		plan = append(plan, map[string]string{
+			"category": classifyPRComment(comment.Body),
+			"author":   comment.Author,
+			"url":      comment.URL,
+			"summary":  firstLine(comment.Body),
+		})
+	}
+	return plan
+}
+
+func classifyPRComment(body string) string {
+	lower := strings.ToLower(body)
+	switch {
+	case strings.Contains(lower, "test") || strings.Contains(body, "测试"):
+		return "test"
+	case strings.Contains(lower, "doc") || strings.Contains(body, "文档"):
+		return "docs"
+	default:
+		return "code"
+	}
+}
+
+func firstLine(value string) string {
+	value = strings.TrimSpace(value)
+	if index := strings.IndexAny(value, "\r\n"); index >= 0 {
+		return value[:index]
+	}
+	return value
 }
 
 func resolveJiraTransitionID(ctx context.Context, client jira.Client, issueKey string, workspaceProfile profile.Profile, action string) (string, error) {
@@ -1399,6 +2276,38 @@ func repoPolicyPath() (string, error) {
 	return filepath.Join(root, "assets", "policies", "default.yaml"), nil
 }
 
+func repoProcessRegistry() (map[string]process.Process, error) {
+	root, err := repoRoot()
+	if err != nil {
+		return nil, err
+	}
+	return process.LoadRegistry(filepath.Join(root, "contracts", "processes"))
+}
+
+func defaultProcessRegistry() map[string]process.Process {
+	return map[string]process.Process{
+		"development_change_v1": {
+			ProcessID:  "development_change_v1",
+			EntryStage: "waiting_takeover",
+			Stages: []process.Stage{
+				{ID: "waiting_takeover"},
+				{ID: "implementation"},
+				{ID: "completed"},
+			},
+		},
+		"investigation_v1": {
+			ProcessID:  "investigation_v1",
+			EntryStage: "waiting_takeover",
+			Stages:     []process.Stage{{ID: "waiting_takeover"}, {ID: "investigation"}, {ID: "completed"}},
+		},
+		"agenticops_improvement_v1": {
+			ProcessID:  "agenticops_improvement_v1",
+			EntryStage: "waiting_takeover",
+			Stages:     []process.Stage{{ID: "waiting_takeover"}, {ID: "implementation"}, {ID: "completed"}},
+		},
+	}
+}
+
 func checkInstallDir(installDir string) map[string]string {
 	if installDir == "" {
 		return map[string]string{"status": "failed", "message": "install dir is empty"}
@@ -1432,7 +2341,121 @@ func checkProfile(workspaceName string) map[string]string {
 	if issues := profile.Validate(loadedProfile); len(issues) > 0 {
 		return map[string]string{"status": "failed", "message": issues[0].Code}
 	}
+	registry, err := repoProcessRegistry()
+	if err != nil {
+		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	if issues := profile.ValidateProcesses(loadedProfile, registry); len(issues) > 0 {
+		return map[string]string{"status": "failed", "message": issues[0].Code}
+	}
 	return map[string]string{"status": "ok", "message": path}
+}
+
+func checkCurrentInstall(installDir string) map[string]string {
+	path := config.CurrentPath(installDir)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return map[string]string{"status": "skipped", "message": "current.json not found"}
+		}
+		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	var current assets.Current
+	if err := json.Unmarshal(data, &current); err != nil {
+		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	if strings.TrimSpace(current.AssetVersion) == "" {
+		return map[string]string{"status": "failed", "message": "asset_version missing in current.json"}
+	}
+	if current.AgentTaskOpsVersion != "" && current.AgentTaskOpsVersion != Version {
+		return map[string]string{"status": "failed", "message": "installed CLI version " + current.AgentTaskOpsVersion + " does not match running " + Version}
+	}
+	return map[string]string{"status": "ok", "message": path}
+}
+
+func checkLocalPaths(workspaceName string) map[string]string {
+	workspaceProfile, err := loadWorkspaceProfile(workspaceName)
+	if err != nil {
+		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	root, err := workspaceRoot()
+	if err != nil {
+		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	sourceRoot := workspace.ResolveProjectPath(workspaceProfile.Local.SourceRoot, root)
+	if strings.TrimSpace(sourceRoot) == "." || strings.TrimSpace(sourceRoot) == "" {
+		sourceRoot = root
+	}
+	if stat, err := os.Stat(sourceRoot); err != nil || !stat.IsDir() {
+		if err != nil {
+			return map[string]string{"status": "failed", "message": "source_root " + sourceRoot + ": " + err.Error()}
+		}
+		return map[string]string{"status": "failed", "message": "source_root is not a directory: " + sourceRoot}
+	}
+	for name, path := range map[string]string{
+		"runs_dir":     workspaceProfile.Local.RunsDir,
+		"feedback_dir": workspaceProfile.Local.FeedbackDir,
+		"run_logs_dir": workspaceProfile.Local.RunLogsDir,
+	} {
+		resolved := workspace.ResolveProjectPath(path, root)
+		status := workspace.DirectoryStatus(resolved)
+		if status.Status != "ok" {
+			return map[string]string{"status": "failed", "message": name + " " + resolved + ": " + status.Message}
+		}
+	}
+	return map[string]string{"status": "ok", "message": "local paths valid"}
+}
+
+func checkCurrentDirectoryAllowed(workspaceProfile profile.Profile) map[string]string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	root, err := workspaceRoot()
+	if err != nil {
+		return map[string]string{"status": "failed", "message": err.Error()}
+	}
+	sourceRoot := workspace.ResolveProjectPath(workspaceProfile.Local.SourceRoot, root)
+	if strings.TrimSpace(sourceRoot) == "." || strings.TrimSpace(sourceRoot) == "" {
+		sourceRoot = root
+	}
+	if pathWithin(cwd, root) || pathWithin(cwd, sourceRoot) {
+		return map[string]string{"status": "ok", "message": cwd}
+	}
+	return map[string]string{"status": "failed", "message": cwd + " is outside workspace_root and source_root"}
+}
+
+func loadWorkspaceProfile(workspaceName string) (profile.Profile, error) {
+	path, err := repoProfilePath(workspaceName)
+	if err != nil {
+		return profile.Profile{}, err
+	}
+	return profile.LoadFile(path)
+}
+
+func pathWithin(path string, root string) bool {
+	pathAbs, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(rootAbs, pathAbs)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && rel != "..")
+}
+
+func statusFromChecks(checks map[string]map[string]string) string {
+	for _, check := range checks {
+		if check["status"] == "failed" {
+			return "failed"
+		}
+	}
+	return "ok"
 }
 
 func checkPolicy() map[string]string {

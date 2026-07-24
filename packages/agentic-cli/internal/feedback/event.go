@@ -26,11 +26,16 @@ type Event struct {
 	AgentID               string `json:"agent_id,omitempty"`
 	CurrentAgentID        string `json:"current_agent_id,omitempty"`
 	TakeoverAt            string `json:"takeover_at,omitempty"`
+	TargetRepo            string `json:"target_repo,omitempty"`
 	CompletedAt           string `json:"completed_at,omitempty"`
 	CompletionEvidence    string `json:"completion_evidence,omitempty"`
 	TaskClass             string `json:"task_class,omitempty"`
+	TaskClassSource       string `json:"task_class_source,omitempty"`
 	ProcessID             string `json:"process_id,omitempty"`
 	CurrentAgentIDCleared bool   `json:"current_agent_id_cleared,omitempty"`
+	AuditTarget           string `json:"audit_target,omitempty"`
+	AuditSubmitted        bool   `json:"audit_submitted,omitempty"`
+	AuditReference        string `json:"audit_reference,omitempty"`
 	OK                    bool   `json:"ok"`
 	Code                  string `json:"code,omitempty"`
 	MissingField          string `json:"missing_field,omitempty"`

@@ -1,6 +1,9 @@
 package jira
 
-import "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
+import (
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/process"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
+)
 
 type TakeoverDecision struct {
 	OK                  bool
@@ -8,12 +11,22 @@ type TakeoverDecision struct {
 	Message             string
 	RequiredHumanAction string
 	TaskClass           string
+	TaskClassSource     string
 	ProcessID           string
+	TargetRepo          string
 	CurrentStage        string
 	NextAction          string
 }
 
 func ValidateTakeover(issue Issue, p profile.Profile, currentUser string, agentID string) TakeoverDecision {
+	return validateTakeover(issue, p, currentUser, agentID, nil)
+}
+
+func ValidateTakeoverWithProcesses(issue Issue, p profile.Profile, currentUser string, agentID string, registry map[string]process.Process) TakeoverDecision {
+	return validateTakeover(issue, p, currentUser, agentID, registry)
+}
+
+func validateTakeover(issue Issue, p profile.Profile, currentUser string, agentID string, registry map[string]process.Process) TakeoverDecision {
 	if issue.Owner == "" || issue.Owner != currentUser {
 		return blocked("owner_mismatch", "当前研发负责人与 Jira 卡片负责人不匹配", "请确认当前用户是否为该 Jira 卡片的研发负责人")
 	}
@@ -23,7 +36,7 @@ func ValidateTakeover(issue Issue, p profile.Profile, currentUser string, agentI
 	if issue.CurrentAgentID != "" && issue.CurrentAgentID != agentID {
 		return blocked("agent_ownership_conflict", "当前 Jira 卡片已绑定其他 AIAgent", "请研发负责人确认是否释放当前代理绑定")
 	}
-	taskClass := taskClassFor(issue, p)
+	taskClass, taskClassSource := taskClassFor(issue, p)
 	if taskClass == "" {
 		return blocked("task_class_mapping_gap", "Jira 卡片类型或标签无法映射到标准任务分类", "请维护工作流配置的 task_class_mapping")
 	}
@@ -31,13 +44,24 @@ func ValidateTakeover(issue Issue, p profile.Profile, currentUser string, agentI
 	if processID == "" {
 		return blocked("standard_process_mapping_gap", "标准任务分类无法映射到标准流程", "请维护工作流配置的 standard_process_mapping")
 	}
-	if _, ok := p.StatusMapping[issue.Status]; !ok {
+	mappedStage, ok := p.StatusMapping[issue.Status]
+	if !ok {
 		return blocked("unknown_jira_status", "当前 Jira 状态未配置映射", "请维护工作流配置的 status_mapping")
+	}
+	if registry != nil {
+		registeredProcess, ok := registry[processID]
+		if !ok {
+			return blocked("standard_process_mapping_gap", "标准流程注册处缺少任务分类对应流程", "请维护 contracts/processes 中的标准流程定义")
+		}
+		if mappedStage != registeredProcess.EntryStage {
+			return blocked("invalid_takeover_stage", "当前 Jira 状态不允许作为接管入口", "请把 Jira 卡片调整到可接管状态，或维护 workflow profile 和标准流程入口阶段")
+		}
 	}
 	if issue.AcceptanceCriteria == "" {
 		return blocked("missing_acceptance_criteria", "Jira 卡片缺少验收标准", "请在 Jira 卡片补充验收标准")
 	}
-	if issue.TargetRepo == "" {
+	targetRepo := targetRepoFor(issue, p)
+	if targetRepo == "" {
 		return blocked("missing_target_repo", "Jira 卡片缺少目标仓库信息", "请在 Jira 卡片补充目标仓库，或维护工作空间代码仓库映射")
 	}
 	if issue.VerificationMethod == "" {
@@ -47,19 +71,51 @@ func ValidateTakeover(issue Issue, p profile.Profile, currentUser string, agentI
 		return blocked("missing_risk_level", "Jira 卡片缺少风险等级", "请在 Jira 卡片补充风险等级")
 	}
 	return TakeoverDecision{
-		OK:           true,
-		TaskClass:    taskClass,
-		ProcessID:    processID,
-		CurrentStage: "takeover_started",
-		NextAction:   "proceed",
+		OK:              true,
+		TaskClass:       taskClass,
+		TaskClassSource: taskClassSource,
+		ProcessID:       processID,
+		TargetRepo:      targetRepo,
+		CurrentStage:    "takeover_started",
+		NextAction:      "proceed",
 	}
 }
 
-func taskClassFor(issue Issue, p profile.Profile) string {
+func taskClassFor(issue Issue, p profile.Profile) (string, string) {
 	if taskClass := p.TaskClassMapping.IssueTypes[issue.IssueType]; taskClass != "" {
-		return taskClass
+		return taskClass, "issue_type:" + issue.IssueType
 	}
-	return ""
+	for _, label := range issue.Labels {
+		if taskClass := p.TaskClassMapping.Labels[label]; taskClass != "" {
+			return taskClass, "label:" + label
+		}
+	}
+	for _, component := range issue.Components {
+		if taskClass := p.TaskClassMapping.Components[component]; taskClass != "" {
+			return taskClass, "component:" + component
+		}
+	}
+	return "", ""
+}
+
+func targetRepoFor(issue Issue, p profile.Profile) string {
+	if issue.TargetRepo != "" {
+		return issue.TargetRepo
+	}
+	for _, component := range issue.Components {
+		if repo := p.GitHub.Repositories.ByComponent[component]; repo != "" {
+			return repo
+		}
+	}
+	for _, label := range issue.Labels {
+		if repo := p.GitHub.Repositories.ByLabel[label]; repo != "" {
+			return repo
+		}
+	}
+	if repo := p.GitHub.Repositories.ByIssueType[issue.IssueType]; repo != "" {
+		return repo
+	}
+	return p.GitHub.Repositories.Default
 }
 
 func blocked(code string, message string, requiredHumanAction string) TakeoverDecision {

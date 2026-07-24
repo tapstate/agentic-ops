@@ -29,6 +29,14 @@ output:
     type: string
   run_id:
     type: string
+  agent_id:
+    type: string
+  current_agent_id:
+    type: string
+  task_class:
+    type: string
+  process_id:
+    type: string
   previous_stage:
     type: string
   current_stage:

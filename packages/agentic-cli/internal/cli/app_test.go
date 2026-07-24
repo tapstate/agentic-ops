@@ -8,10 +8,14 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	gitops "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/git"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/github"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/update"
@@ -48,7 +52,10 @@ func TestUnknownCommandFailsWithStableCode(t *testing.T) {
 	}
 }
 
-func TestPreflightOutputsInstallDirAndNextAction(t *testing.T) {
+func TestPreflightOutputsEnvironmentChecks(t *testing.T) {
+	withCommandAvailabilityForTest(t, func(name string) bool {
+		return name == "git" || name == "gh"
+	})
 	installDir := t.TempDir()
 	t.Setenv("AGENTIC_OPS_HOME", installDir)
 	var stdout bytes.Buffer
@@ -60,14 +67,74 @@ func TestPreflightOutputsInstallDirAndNextAction(t *testing.T) {
 	assertJSONField(t, stdout.String(), "operation", "preflight")
 	assertJSONField(t, stdout.String(), "workspace", "tapstate")
 	assertJSONField(t, stdout.String(), "install_dir", installDir)
-	assertJSONField(t, stdout.String(), "go_runtime", "not_required_for_installed_cli")
+	assertJSONField(t, stdout.String(), "os", runtime.GOOS)
+	assertJSONField(t, stdout.String(), "arch", runtime.GOARCH)
+	assertJSONField(t, stdout.String(), "version", "SRC-source")
+	assertJSONField(t, stdout.String(), "status", "ok")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "git", "status"}, "ok")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "github_cli", "status"}, "ok")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "github_auth", "status"}, "skipped")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "profile", "status"}, "ok")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "current_directory", "status"}, "ok")
 	assertJSONField(t, stdout.String(), "next_action", "workspace_init")
 }
 
-func TestDoctorOutputsLocalDiagnosticChecks(t *testing.T) {
+func TestPreflightReportsMissingGit(t *testing.T) {
+	withCommandAvailabilityForTest(t, func(name string) bool {
+		return name == "gh"
+	})
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"doctor", "--workspace", "tapstate"}, &stdout, &stderr)
+	code := Run([]string{"preflight", "--workspace", "tapstate"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "status", "failed")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "git", "status"}, "failed")
+	assertJSONField(t, stdout.String(), "next_action", "fix_environment")
+}
+
+func TestPreflightReportsProfileFailure(t *testing.T) {
+	withCommandAvailabilityForTest(t, func(name string) bool {
+		return true
+	})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"preflight", "--workspace", "missing-workspace"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "status", "failed")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "profile", "status"}, "failed")
+	assertJSONField(t, stdout.String(), "next_action", "fix_environment")
+}
+
+func TestPreflightReportsCurrentDirectoryMismatch(t *testing.T) {
+	withCommandAvailabilityForTest(t, func(name string) bool {
+		return true
+	})
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", t.TempDir())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"preflight", "--workspace", "tapstate"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "status", "failed")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "current_directory", "status"}, "failed")
+	assertJSONField(t, stdout.String(), "next_action", "fix_environment")
+}
+
+func TestDoctorOutputsLocalDiagnosticChecks(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatalf("MkdirAll source root error = %v", err)
+	}
+	installDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"doctor", "--workspace", "tapstate", "--install-dir", installDir}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
@@ -82,9 +149,53 @@ func TestDoctorOutputsLocalDiagnosticChecks(t *testing.T) {
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "github", "status"}, "skipped")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "workspace", "status"}, "ok")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "contracts", "status"}, "ok")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "current", "status"}, "skipped")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "local_paths", "status"}, "ok")
+}
+
+func TestDoctorReportsCurrentVersionMismatch(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatalf("MkdirAll source root error = %v", err)
+	}
+	installDir := t.TempDir()
+	writeCLITestFile(t, filepath.Join(installDir, "current.json"), `{
+  "agentic_cli_version": "RES-v0.0.1-old",
+  "asset_version": "RES-v0.0.1-old"
+}
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"doctor", "--workspace", "tapstate", "--install-dir", installDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "status", "failed")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "current", "status"}, "failed")
+	assertJSONField(t, stdout.String(), "next_action", "fix_environment")
+}
+
+func TestDoctorReportsMissingSourceRoot(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"doctor", "--workspace", "tapstate"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "status", "failed")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "local_paths", "status"}, "failed")
+	assertJSONField(t, stdout.String(), "next_action", "fix_environment")
 }
 
 func TestDoctorChecksRealJiraAdapterWhenRequested(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatalf("MkdirAll source root error = %v", err)
+	}
 	withJiraClientForTest(t, jiraClientSelection{Client: &recordingJiraClient{issue: realModeIssue()}, Mode: "real"})
 
 	var stdout bytes.Buffer
@@ -115,6 +226,11 @@ func TestDoctorFailsRealJiraCheckWhenAdapterIsNotReal(t *testing.T) {
 }
 
 func TestDoctorChecksGitHubAuthWhenRequested(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatalf("MkdirAll source root error = %v", err)
+	}
 	original := runGitHubAuthStatus
 	called := false
 	runGitHubAuthStatus = func(ctx context.Context) error {
@@ -159,6 +275,26 @@ func TestWorkspaceInitOutputsNextAction(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"run_logs_dir":"`) {
 		t.Fatalf("stdout missing run_logs_dir: %s", stdout.String())
 	}
+}
+
+func TestWorkspaceInitMaterializesWorkspaceProfile(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"workspace", "init", "--workspace", "tapdata", "--jira-user", "harsen@tapdata.io", "--jira-project", "TAP"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	profilePath := filepath.Join(root, ".agentic-ops", "profiles", "tapdata.yaml")
+	data, err := os.ReadFile(profilePath)
+	if err != nil {
+		t.Fatalf("profile was not materialized: %v", err)
+	}
+	if !strings.Contains(string(data), "workspace: tapdata") {
+		t.Fatalf("materialized profile mismatch: %s", string(data))
+	}
+	assertJSONField(t, stdout.String(), "profile", profilePath)
 }
 
 func TestAgentInitOutputsTaskModel(t *testing.T) {
@@ -296,6 +432,7 @@ func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 	assertJSONField(t, stdout.String(), "current_agent_id", "agentic-cli-local-agent")
 	assertJSONField(t, stdout.String(), "takeover_at", "2026-07-21T10:30:12Z")
 	assertJSONField(t, stdout.String(), "task_class", "technical_task")
+	assertJSONField(t, stdout.String(), "task_class_source", "issue_type:Task")
 	assertJSONField(t, stdout.String(), "process_id", "development_change_v1")
 	events, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
 	if err != nil {
@@ -329,43 +466,52 @@ func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 	}
 }
 
-func TestTakeoverTaskBlocksMissingTargetRepo(t *testing.T) {
+func TestTakeoverTaskUsesTargetRepoFallback(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"takeover-task", "TAP-MISSING-REPO", "--workspace", "tapstate"}, &stdout, &stderr)
-	if code != 1 {
+	if code != 0 {
 		t.Fatalf("code = %d stdout = %s", code, stdout.String())
 	}
 	assertJSONField(t, stdout.String(), "operation", "takeover_task")
-	assertJSONField(t, stdout.String(), "code", "missing_target_repo")
-	assertJSONField(t, stdout.String(), "current_stage", "takeover_gate")
-	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
-	assertJSONField(t, stdout.String(), "required_human_action", "请在 Jira 卡片补充目标仓库，或维护工作空间代码仓库映射")
-	if !strings.Contains(stdout.String(), `"completion_template"`) {
-		t.Fatalf("stdout missing completion_template: %s", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "缺失字段：`target_repo`") {
-		t.Fatalf("stdout missing rendered missing field template: %s", stdout.String())
-	}
+	assertJSONField(t, stdout.String(), "issue_key", "TAP-MISSING-REPO")
+	assertJSONField(t, stdout.String(), "target_repo", "tapstate/tap-api")
+	assertJSONField(t, stdout.String(), "current_stage", "takeover_started")
+	assertJSONField(t, stdout.String(), "next_action", "proceed")
 	events, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
 	if err != nil {
 		t.Fatalf("ReadFile events error = %v", err)
 	}
-	if !strings.Contains(string(events), `"code":"missing_target_repo"`) {
+	if !strings.Contains(string(events), `"target_repo":"tapstate/tap-api"`) {
 		t.Fatalf("events = %s", string(events))
 	}
-	if !strings.Contains(string(events), `"missing_field":"target_repo"`) {
-		t.Fatalf("events = %s", string(events))
-	}
-	if !strings.Contains(string(events), `"gate_status":"blocked"`) {
+	if !strings.Contains(string(events), `"gate_status":"passed"`) {
 		t.Fatalf("events = %s", string(events))
 	}
 }
 
+func TestTakeoverTaskBlocksStatusOutsideProcessEntryStage(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"takeover-task", "TAP-IN-PROGRESS", "--workspace", "tapstate"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "takeover_task")
+	assertJSONField(t, stdout.String(), "code", "invalid_takeover_stage")
+	assertJSONField(t, stdout.String(), "current_stage", "takeover_gate")
+	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+}
+
 func TestResumeTakeoverReturnsRunIDAndNextAction(t *testing.T) {
-	t.Chdir(t.TempDir())
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"takeover_task","gate_status":"passed"}
+`)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"resume-takeover", "--workspace", "tapstate", "--run-id", "run-1"}, &stdout, &stderr)
@@ -374,7 +520,58 @@ func TestResumeTakeoverReturnsRunIDAndNextAction(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "operation", "resume_takeover")
 	assertJSONField(t, stdout.String(), "run_id", "run-1")
+	assertJSONField(t, stdout.String(), "issue_key", "TAP-123")
+	assertJSONField(t, stdout.String(), "previous_stage", "takeover_started")
+	assertJSONField(t, stdout.String(), "current_stage", "takeover_resumed")
 	assertJSONField(t, stdout.String(), "next_action", "continue_development")
+}
+
+func TestResumeTakeoverRejectsMissingRun(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"other-run","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"takeover_task","gate_status":"passed"}
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"resume-takeover", "--workspace", "tapstate", "--run-id", "run-1"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "resume_takeover")
+	assertJSONField(t, stdout.String(), "code", "run_not_found")
+	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+}
+
+func TestResumeTakeoverRejectsWorkspaceMismatch(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"other","run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"takeover_task","gate_status":"passed"}
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"resume-takeover", "--workspace", "tapstate", "--run-id", "run-1"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "resume_takeover")
+	assertJSONField(t, stdout.String(), "code", "workspace_mismatch")
+	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+}
+
+func TestResumeTakeoverRejectsIncompleteLocalState(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","ok":true,"gate":"takeover_task","gate_status":"passed"}
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"resume-takeover", "--workspace", "tapstate", "--run-id", "run-1"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "resume_takeover")
+	assertJSONField(t, stdout.String(), "code", "local_state_mismatch")
+	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
 }
 
 func TestWriteEvidenceRequiresRunID(t *testing.T) {
@@ -405,15 +602,33 @@ func TestWriteEvidenceRequiresRunID(t *testing.T) {
 
 func TestWriteEvidenceOutputsNextAction(t *testing.T) {
 	root := t.TempDir()
-	t.Chdir(root)
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+`)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", "run-1"}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d", code)
 	}
 	assertJSONField(t, stdout.String(), "operation", "write_evidence")
+	assertJSONField(t, stdout.String(), "issue_key", "TAP-123")
+	assertJSONField(t, stdout.String(), "task_class", "technical_task")
+	assertJSONField(t, stdout.String(), "process_id", "development_change_v1")
+	assertJSONField(t, stdout.String(), "target_repo", "tapstate/example-repo")
+	assertJSONField(t, stdout.String(), "audit_submitted", true)
 	assertJSONField(t, stdout.String(), "next_action", "request_owner_confirmation")
+	evidencePath := filepath.Join(root, ".agentic-ops", "runs", runID, "evidence.md")
+	evidenceData, err := os.ReadFile(evidencePath)
+	if err != nil {
+		t.Fatalf("ReadFile evidence error = %v", err)
+	}
+	for _, want := range []string{"issue_key: TAP-123", "task_class: technical_task", "process_id: development_change_v1", "target_repo: tapstate/example-repo"} {
+		if !strings.Contains(string(evidenceData), want) {
+			t.Fatalf("evidence missing %q: %s", want, string(evidenceData))
+		}
+	}
 	events, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
 	if err != nil {
 		t.Fatalf("ReadFile events error = %v", err)
@@ -421,13 +636,80 @@ func TestWriteEvidenceOutputsNextAction(t *testing.T) {
 	if !strings.Contains(string(events), `"operation":"write_evidence"`) {
 		t.Fatalf("events = %s", string(events))
 	}
+	if !strings.Contains(string(events), `"audit_submitted":true`) {
+		t.Fatalf("events = %s", string(events))
+	}
+}
+
+func TestWriteEvidencePreservesTargetRepoAfterResume(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+{"timestamp":"2026-07-21T10:31:00Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"resume_takeover","task_type":"task_takeover","current_stage":"takeover_resumed","next_action":"continue_development","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"resume_takeover","gate_status":"passed"}
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "target_repo", "tapstate/example-repo")
+	evidenceData, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "runs", runID, "evidence.md"))
+	if err != nil {
+		t.Fatalf("ReadFile evidence error = %v", err)
+	}
+	if !strings.Contains(string(evidenceData), "target_repo: tapstate/example-repo") {
+		t.Fatalf("evidence = %s", string(evidenceData))
+	}
+}
+
+func TestWriteEvidenceBlocksWhenLocalPolicyRequiresHumanGate(t *testing.T) {
+	repo := t.TempDir()
+	t.Chdir(repo)
+	writeCLITestFile(t, filepath.Join(repo, "go.mod"), "module example.local/test\n")
+	writeCLITestFile(t, filepath.Join(repo, "contracts", "operations", ".keep"), "")
+	writeCLITestFile(t, filepath.Join(repo, "assets", "policies", "default.yaml"), validCLIPolicyYAMLWithEvidenceGate("default", false, true))
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "write_evidence")
+	assertJSONField(t, stdout.String(), "code", "policy_gate_required")
+	assertJSONField(t, stdout.String(), "current_stage", "evidence_write_gate")
+	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	if _, err := os.Stat(filepath.Join(root, ".agentic-ops", "runs", runID, "evidence.md")); !os.IsNotExist(err) {
+		t.Fatalf("evidence file should not be written when policy gate blocks, stat err = %v", err)
+	}
+}
+
+func TestWriteEvidenceRejectsMissingRun(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", "missing-run"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "write_evidence")
+	assertJSONField(t, stdout.String(), "code", "run_not_found")
+	assertJSONField(t, stdout.String(), "current_stage", "evidence_write_gate")
+	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
 }
 
 func TestWriteEvidenceRequiresConfirmationForRealJiraComment(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	withJiraClientForTest(t, jiraClientSelection{Client: &recordingJiraClient{issue: realModeBoundIssue()}, Mode: "real"})
 
@@ -448,7 +730,7 @@ func TestWriteEvidenceRecordsPassedRealJiraCommentGate(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	client := &recordingJiraClient{issue: realModeBoundIssue()}
 	withJiraClientForTest(t, jiraClientSelection{Client: client, Mode: "real"})
@@ -599,6 +881,26 @@ func TestPolicyUpdateAndRollbackUseLocalPolicyBackup(t *testing.T) {
 	if !strings.Contains(string(restored), "write_jira_comment:\n    required: false") {
 		t.Fatalf("restored policy = %s", string(restored))
 	}
+}
+
+func TestProfileValidateReportsMissingProcessRegistryTarget(t *testing.T) {
+	repo := t.TempDir()
+	t.Chdir(repo)
+	writeCLITestFile(t, filepath.Join(repo, "go.mod"), "module example.local/test\n")
+	writeCLITestFile(t, filepath.Join(repo, "contracts", "operations", ".keep"), "")
+	writeCLITestFile(t, filepath.Join(repo, "contracts", "processes", "development-change-v1.yaml"), validCLIProcessYAML("development_change_v1"))
+	profileYAML := strings.Replace(validCLIProfileYAML("tapstate", "TAP"), "technical_task: development_change_v1", "technical_task: missing_process_v1", 1)
+	writeCLITestFile(t, filepath.Join(repo, "profiles", "tapstate.yaml"), profileYAML)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"profile", "validate", "--workspace", "tapstate"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "profile_validate")
+	assertJSONField(t, stdout.String(), "code", "profile_validation_failed")
+	assertJSONField(t, stdout.String(), "next_action", "fix_profile")
 }
 
 func TestTakeoverTaskRequiresConfirmationForRealJiraWrite(t *testing.T) {
@@ -795,6 +1097,7 @@ func TestReleaseAgentRecordsCurrentAgentCleanup(t *testing.T) {
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
 	Run([]string{"takeover-task", "TAP-123", "--workspace", "tapstate"}, &bytes.Buffer{}, &bytes.Buffer{})
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "runs", runID, "evidence.md"), "# Evidence\n")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -806,6 +1109,8 @@ func TestReleaseAgentRecordsCurrentAgentCleanup(t *testing.T) {
 	assertJSONField(t, stdout.String(), "run_id", runID)
 	assertJSONField(t, stdout.String(), "current_stage", "completed")
 	assertJSONField(t, stdout.String(), "current_agent_id_cleared", true)
+	assertJSONField(t, stdout.String(), "audit_submitted", true)
+	assertJSONField(t, stdout.String(), "audit_target", "local_file")
 	assertJSONField(t, stdout.String(), "next_action", "task_audit_submitted")
 
 	events, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
@@ -818,6 +1123,8 @@ func TestReleaseAgentRecordsCurrentAgentCleanup(t *testing.T) {
 		`"current_agent_id_cleared":true`,
 		`"completed_at":"2026-07-21T10:30:12Z"`,
 		`"completion_evidence":"evidence.md"`,
+		`"audit_submitted":true`,
+		`"audit_target":"local_file"`,
 	} {
 		if !strings.Contains(string(events), want) {
 			t.Fatalf("events missing %s: %s", want, string(events))
@@ -825,11 +1132,172 @@ func TestReleaseAgentRecordsCurrentAgentCleanup(t *testing.T) {
 	}
 }
 
+func TestInspectWorkspaceOutputsSafeGitSummary(t *testing.T) {
+	sourceRoot := t.TempDir()
+	initGitRepoForCLITest(t, sourceRoot, "feature/tap-123")
+	writeCLITestFile(t, filepath.Join(sourceRoot, "README.md"), "# Demo\n\nchanged\n")
+	writeCLITestFile(t, filepath.Join(sourceRoot, "new.txt"), "new\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"inspect-workspace", "--workspace", "tapstate", "--source-root", sourceRoot}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "inspect_workspace")
+	assertJSONField(t, stdout.String(), "workspace", "tapstate")
+	assertJSONField(t, stdout.String(), "source_root", sourceRoot)
+	assertJSONField(t, stdout.String(), "branch", "feature/tap-123")
+	assertJSONField(t, stdout.String(), "dirty", true)
+	assertJSONField(t, stdout.String(), "current_stage", "workspace_inspected")
+	assertJSONField(t, stdout.String(), "next_action", "prepare_pr")
+	if !strings.Contains(stdout.String(), `"README.md"`) || !strings.Contains(stdout.String(), `"new.txt"`) {
+		t.Fatalf("stdout missing changed files: %s", stdout.String())
+	}
+}
+
+func TestInspectWorkspaceCanUseFakeGitInspector(t *testing.T) {
+	withGitInspectorForTest(t, func(ctx context.Context, root string) (gitops.WorkspaceStatus, error) {
+		return gitops.WorkspaceStatus{
+			Root:         root,
+			Branch:       "feature/fake",
+			Commit:       "abc123",
+			Dirty:        true,
+			ChangedFiles: []string{"fake.go"},
+		}, nil
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"inspect-workspace", "--workspace", "tapstate", "--source-root", "/tmp/source"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "inspect_workspace")
+	assertJSONField(t, stdout.String(), "branch", "feature/fake")
+	assertJSONField(t, stdout.String(), "commit", "abc123")
+	assertJSONField(t, stdout.String(), "dirty", true)
+	if !strings.Contains(stdout.String(), `"fake.go"`) {
+		t.Fatalf("stdout missing fake changed file: %s", stdout.String())
+	}
+}
+
+func TestPreparePROutputsPlanAndHumanGateForCreation(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	sourceRoot := t.TempDir()
+	initGitRepoForCLITest(t, sourceRoot, "feature/tap-123")
+	writeCLITestFile(t, filepath.Join(sourceRoot, "README.md"), "# Demo\n\nchanged\n")
+	Run([]string{"takeover-task", "TAP-123", "--workspace", "tapstate"}, &bytes.Buffer{}, &bytes.Buffer{})
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"prepare-pr", "--workspace", "tapstate", "--run-id", runID, "--source-root", sourceRoot, "--base", "main", "--title", "Fix TAP-123"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "prepare_pr")
+	assertJSONField(t, stdout.String(), "run_id", runID)
+	assertJSONField(t, stdout.String(), "issue_key", "TAP-123")
+	assertJSONField(t, stdout.String(), "branch", "feature/tap-123")
+	assertJSONField(t, stdout.String(), "base", "main")
+	assertJSONField(t, stdout.String(), "title", "Fix TAP-123")
+	assertJSONField(t, stdout.String(), "policy_gate_code", "policy_gate_required")
+	assertJSONField(t, stdout.String(), "create_pr_gate_required", true)
+	assertJSONField(t, stdout.String(), "git_push_gate_required", true)
+	assertJSONField(t, stdout.String(), "current_stage", "pr_plan_prepared")
+	assertJSONField(t, stdout.String(), "next_action", "ask_owner_to_push_and_create_pr")
+}
+
+func TestReadPRCommentsUsesGitHubReader(t *testing.T) {
+	fake := &cliFakeGitHubRunner{outputs: map[string]string{
+		"pr view 42 --repo tapdata/tapdata --json comments,reviews": `{"comments":[{"author":{"login":"reviewer"},"body":"请补测试","url":"https://github.example/comment/1"}],"reviews":[]}`,
+	}}
+	withGitHubClientForTest(t, github.Client{Runner: fake})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"read-pr-comments", "--workspace", "tapstate", "--repo", "tapdata/tapdata", "--pr", "42"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "read_pr_comments")
+	assertJSONField(t, stdout.String(), "repo", "tapdata/tapdata")
+	assertJSONField(t, stdout.String(), "pr", "42")
+	assertJSONNumber(t, stdout.String(), "comments_count", 1)
+	assertJSONField(t, stdout.String(), "next_action", "classify_or_fix_pr_comments")
+	if !strings.Contains(stdout.String(), "请补测试") {
+		t.Fatalf("stdout missing comment body: %s", stdout.String())
+	}
+}
+
+func TestCheckCIStatusUsesGitHubReader(t *testing.T) {
+	fake := &cliFakeGitHubRunner{outputs: map[string]string{
+		"pr checks 42 --repo tapdata/tapdata --json name,state,conclusion,detailsUrl": `[{"name":"unit","state":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.example/checks/1"},{"name":"e2e","state":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.example/checks/2"}]`,
+	}}
+	withGitHubClientForTest(t, github.Client{Runner: fake})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"check-ci-status", "--workspace", "tapstate", "--repo", "tapdata/tapdata", "--pr", "42"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "check_ci_status")
+	assertJSONField(t, stdout.String(), "status", "failed")
+	assertJSONNumber(t, stdout.String(), "failing_checks_count", 1)
+	assertJSONField(t, stdout.String(), "next_action", "fix_ci_failures")
+	if !strings.Contains(stdout.String(), `"e2e"`) {
+		t.Fatalf("stdout missing failing check: %s", stdout.String())
+	}
+}
+
+func TestFixPRCommentsOutputsHumanGatedFixPlan(t *testing.T) {
+	fake := &cliFakeGitHubRunner{outputs: map[string]string{
+		"pr view 42 --repo tapdata/tapdata --json comments,reviews": `{"comments":[{"author":{"login":"reviewer"},"body":"请补测试","url":"https://github.example/comment/1"},{"author":{"login":"reviewer"},"body":"文档也要更新","url":"https://github.example/comment/2"}],"reviews":[]}`,
+	}}
+	withGitHubClientForTest(t, github.Client{Runner: fake})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"fix-pr-comments", "--workspace", "tapstate", "--repo", "tapdata/tapdata", "--pr", "42"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "fix_pr_comments")
+	assertJSONField(t, stdout.String(), "code", "policy_gate_required")
+	assertJSONField(t, stdout.String(), "comments_count", float64(2))
+	assertJSONField(t, stdout.String(), "current_stage", "pr_comment_fix_gate")
+	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	if !strings.Contains(stdout.String(), `"test"`) || !strings.Contains(stdout.String(), `"docs"`) {
+		t.Fatalf("stdout missing fix categories: %s", stdout.String())
+	}
+}
+
+func TestReleaseAgentRejectsMissingCompletionEvidenceFile(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	Run([]string{"takeover-task", "TAP-123", "--workspace", "tapstate"}, &bytes.Buffer{}, &bytes.Buffer{})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"release-agent", "--workspace", "tapstate", "--run-id", runID, "--issue-key", "TAP-123", "--completion-evidence", "missing.md"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "release_agent")
+	assertJSONField(t, stdout.String(), "code", "completion_evidence_missing")
+	assertJSONField(t, stdout.String(), "current_stage", "completion_cleanup")
+	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+}
+
 func TestFeedbackReportOutputsReportPath(t *testing.T) {
 	root := t.TempDir()
-	t.Chdir(root)
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	Run([]string{"takeover-task", "TAP-123", "--workspace", "tapstate"}, &bytes.Buffer{}, &bytes.Buffer{})
-	Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", "run-1"}, &bytes.Buffer{}, &bytes.Buffer{})
+	Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", "TAP-123-takeover-20260721103012-a8f3"}, &bytes.Buffer{}, &bytes.Buffer{})
 	Run([]string{"takeover-task", "TAP-MISSING-REPO", "--workspace", "tapstate"}, &bytes.Buffer{}, &bytes.Buffer{})
 
 	var stdout bytes.Buffer
@@ -841,14 +1309,13 @@ func TestFeedbackReportOutputsReportPath(t *testing.T) {
 	assertJSONField(t, stdout.String(), "operation", "feedback_report")
 	assertJSONField(t, stdout.String(), "next_action", "review_proposals")
 	assertJSONNumber(t, stdout.String(), "runs", 3)
-	if !strings.Contains(stdout.String(), `"missing_fields":{"target_repo":1}`) {
-		t.Fatalf("stdout missing missing_fields: %s", stdout.String())
-	}
+	assertJSONNumber(t, stdout.String(), "succeeded", 3)
+	assertJSONNumber(t, stdout.String(), "blocked", 0)
 	data, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "reports", "2026-07-21.md"))
 	if err != nil {
 		t.Fatalf("ReadFile report error = %v", err)
 	}
-	if !strings.Contains(string(data), "runs: 3") || !strings.Contains(string(data), "target_repo: 1") {
+	if !strings.Contains(string(data), "runs: 3") || !strings.Contains(string(data), "blocked: 0") {
 		t.Fatalf("report = %s", string(data))
 	}
 }
@@ -941,6 +1408,25 @@ func writeCLITestFile(t *testing.T, path string, content string) {
 	}
 }
 
+func initGitRepoForCLITest(t *testing.T, dir string, branch string) {
+	t.Helper()
+	runGitForCLITest(t, dir, "init", "-b", branch)
+	runGitForCLITest(t, dir, "config", "user.email", "agent@example.com")
+	runGitForCLITest(t, dir, "config", "user.name", "Agentic Ops")
+	writeCLITestFile(t, filepath.Join(dir, "README.md"), "# Demo\n")
+	runGitForCLITest(t, dir, "add", "README.md")
+	runGitForCLITest(t, dir, "commit", "-m", "initial")
+}
+
+func runGitForCLITest(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, string(output))
+	}
+}
+
 func validCLIProfileYAML(workspace string, jiraProject string) string {
 	return "workspace: " + workspace + "\n" +
 		"jira:\n" +
@@ -972,22 +1458,53 @@ func validCLIProfileYAML(workspace string, jiraProject string) string {
 }
 
 func validCLIPolicyYAML(policyName string, requireJiraComment bool) string {
+	return validCLIPolicyYAMLWithEvidenceGate(policyName, requireJiraComment, false)
+}
+
+func validCLIProcessYAML(processID string) string {
+	return "process_id: " + processID + "\n" +
+		"task_classes:\n" +
+		"  - technical_task\n" +
+		"entry_stage: waiting_takeover\n" +
+		"stages:\n" +
+		"  - id: waiting_takeover\n" +
+		"  - id: implementation\n" +
+		"  - id: completed\n"
+}
+
+func validCLIPolicyYAMLWithEvidenceGate(policyName string, requireJiraComment bool, requireLocalEvidence bool) string {
 	jiraCommentRequired := "false"
 	if requireJiraComment {
 		jiraCommentRequired = "true"
+	}
+	localEvidenceRequired := "false"
+	if requireLocalEvidence {
+		localEvidenceRequired = "true"
 	}
 	return "policy: " + policyName + "\n" +
 		"version: 1\n" +
 		"gates:\n" +
 		"  write_jira_comment:\n" +
 		"    required: " + jiraCommentRequired + "\n" +
+		"  write_local_evidence:\n" +
+		"    required: " + localEvidenceRequired + "\n" +
 		"  transition_jira_status:\n" +
 		"    required: true\n" +
 		"  git_commit:\n" +
 		"    required: true\n" +
 		"  git_push:\n" +
 		"    required: true\n" +
+		"  git_merge:\n" +
+		"    required: true\n" +
+		"  git_rebase:\n" +
+		"    required: true\n" +
+		"  git_clean:\n" +
+		"    required: true\n" +
 		"  create_pr:\n" +
+		"    required: true\n" +
+		"  update_pr:\n" +
+		"    required: true\n" +
+		"  fix_pr_comments:\n" +
 		"    required: true\n" +
 		"  scope_change:\n" +
 		"    required: true\n"
@@ -1072,6 +1589,46 @@ func assertEventLogContains(t *testing.T, root string, want string) {
 	if !strings.Contains(string(events), want) {
 		t.Fatalf("events missing %s: %s", want, string(events))
 	}
+}
+
+func withGitHubClientForTest(t *testing.T, client github.Client) {
+	t.Helper()
+	original := gitHubClient
+	gitHubClient = client
+	t.Cleanup(func() {
+		gitHubClient = original
+	})
+}
+
+func withGitInspectorForTest(t *testing.T, inspector func(context.Context, string) (gitops.WorkspaceStatus, error)) {
+	t.Helper()
+	original := inspectGitWorkspace
+	inspectGitWorkspace = inspector
+	t.Cleanup(func() {
+		inspectGitWorkspace = original
+	})
+}
+
+func withCommandAvailabilityForTest(t *testing.T, check func(string) bool) {
+	t.Helper()
+	original := commandAvailable
+	commandAvailable = check
+	t.Cleanup(func() {
+		commandAvailable = original
+	})
+}
+
+type cliFakeGitHubRunner struct {
+	outputs map[string]string
+}
+
+func (f *cliFakeGitHubRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
+	command := strings.Join(args, " ")
+	output, ok := f.outputs[command]
+	if !ok {
+		return nil, errors.New("unexpected gh command: " + command)
+	}
+	return []byte(output), nil
 }
 
 type cliRoundTripFunc func(*http.Request) *http.Response

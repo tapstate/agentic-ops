@@ -48,14 +48,7 @@ rm -f "$policy_backup"
 
 "${cmd[@]}" workspace init --workspace tapstate --jira-user dev@example.com --jira-project TAP | grep '"operation":"workspace_init"'
 test -d "$workspace_root/.agentic-ops/run-logs"
-set +e
-missing_repo_output="$("${cmd[@]}" takeover-task TAP-MISSING-REPO --workspace tapstate 2>/dev/null)"
-missing_repo_code="$?"
-set -e
-test "$missing_repo_code" -eq 1
-printf '%s\n' "$missing_repo_output" | grep '"code":"missing_target_repo"'
-printf '%s\n' "$missing_repo_output" | grep '"missing_field":"target_repo"'
-printf '%s\n' "$missing_repo_output" | grep '"completion_template"'
+"${cmd[@]}" takeover-task TAP-MISSING-REPO --workspace tapstate | grep '"target_repo":"tapstate/tap-api"'
 
 "${cmd[@]}" takeover-task TAP-123 --workspace tapstate | grep '"operation":"takeover_task"'
 "${cmd[@]}" write-evidence --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"operation":"write_evidence"'
@@ -74,5 +67,5 @@ if grep -E 'abc123|password=hidden' "$bundle_path"; then
   exit 1
 fi
 
-"${cmd[@]}" feedback report --workspace tapstate --date 2026-07-21 | grep '"missing_fields":{"target_repo":1}'
-grep 'target_repo: 1' "$workspace_root/.agentic-ops/feedback/reports/2026-07-21.md"
+"${cmd[@]}" feedback report --workspace tapstate --date 2026-07-21 | grep '"blocked":1'
+grep 'blocked: 1' "$workspace_root/.agentic-ops/feedback/reports/2026-07-21.md"

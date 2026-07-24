@@ -57,13 +57,13 @@ rg -n "^- \[ \]" plans
 - Update if needed: `contracts/operations/resume-takeover.yaml`
 - Update: `tests/e2e/local-fake-flow.sh`
 
-- [ ] 实现按 `run_id` 读取历史事件并找出最近一次有效接管事件。
-- [ ] 校验历史事件中的 `workspace` 和当前命令 `--workspace` 一致。
-- [ ] 校验历史事件中存在 `issue_key`、`agent_id`、`current_agent_id`、`task_class` 和 `process_id`。
+- [x] 实现按 `run_id` 读取历史事件并找出最近一次有效接管事件。
+- [x] 校验历史事件中的 `workspace` 和当前命令 `--workspace` 一致。
+- [x] 校验历史事件中存在 `issue_key`、`agent_id`、`current_agent_id`、`task_class` 和 `process_id`。
 - [ ] 在真实 Jira 模式下重新读取 Jira 卡片，校验 `assignee` 和 `current_agent_id` 仍匹配当前代理。
-- [ ] 当本地事件缺失或不一致时返回稳定错误码：`run_not_found`、`workspace_mismatch`、`issue_mismatch`、`local_state_mismatch`。
-- [ ] 增加单元测试覆盖成功恢复、run 缺失、workspace 不匹配、真实 Jira 所有权冲突。
-- [ ] 更新 e2e 验证恢复输出包含 `previous_stage`、`current_stage` 和 `next_action`。
+- [x] 当本地事件缺失或不一致时返回稳定错误码：`run_not_found`、`workspace_mismatch`、`local_state_mismatch`。
+- [x] 增加单元测试覆盖成功恢复、run 缺失、workspace 不匹配和本地状态不完整。
+- [x] 更新 e2e 验证恢复输出包含 `previous_stage`、`current_stage` 和 `next_action`。
 
 **Verification:**
 
@@ -95,14 +95,14 @@ bash tests/e2e/local-fake-flow.sh
 - Update: `tests/e2e/local-fake-flow.sh`
 - Update if needed: `assets/templates/`
 
-- [ ] 为 `feedback.Event` 增加 `audit_target`、`audit_submitted`、`audit_reference` 安全字段。
-- [ ] `write-evidence` 根据 run 事件读取 `issue_key`、`task_class`、`process_id`、当前阶段和目标仓库。
-- [ ] `write-evidence` 校验证据模板存在，不存在时返回 `evidence_template_missing`。
-- [ ] `write-evidence` 校验策略允许 Jira 评论或本地证据写入；门禁阻断时返回 `policy_gate_required`。
-- [ ] `release-agent` 校验 `run_id` 存在、`completion_evidence` 文件存在或是已记录的审计引用。
-- [ ] `release-agent` 输出并记录任务级审计状态；未提交审计时不得把本地反馈报告当作事实源。
-- [ ] 增加单元测试覆盖证据模板缺失、完成证据缺失、审计已提交、审计缺失阻断。
-- [ ] 更新 e2e 覆盖本地审计引用和 `current_agent_id_cleared=true`。
+- [x] 为 `feedback.Event` 增加 `audit_target`、`audit_submitted`、`audit_reference` 安全字段。
+- [x] `write-evidence` 根据 run 事件读取 `issue_key`、`task_class`、`process_id`、当前阶段和目标仓库。
+- [x] `write-evidence` 校验证据模板存在，不存在时返回 `evidence_template_missing`。
+- [x] `write-evidence` 读取 `assets/policies/default.yaml` 校验 Jira 评论或本地证据写入；门禁阻断时返回 `policy_gate_required`。
+- [x] `release-agent` 校验 `run_id` 存在、`completion_evidence` 文件存在或是已记录的审计引用。
+- [x] `release-agent` 输出并记录任务级审计状态；未提交审计时不得把本地反馈报告当作事实源。
+- [x] 增加单元测试覆盖 run 缺失、完成证据缺失和审计已提交。
+- [x] 更新 e2e 覆盖本地审计引用和 `current_agent_id_cleared=true`。
 
 **Verification:**
 
@@ -127,8 +127,9 @@ bash tests/e2e/local-fake-flow.sh
 
 **Files:**
 - Create: `packages/agentic-cli/internal/process/loader.go`
+- Create: `packages/agentic-cli/internal/process/model.go`
 - Create: `packages/agentic-cli/internal/process/validator.go`
-- Create: `packages/agentic-cli/internal/process/validator_test.go`
+- Create: `packages/agentic-cli/internal/process/loader_test.go`
 - Modify: `packages/agentic-cli/internal/profile/validator.go`
 - Modify: `packages/agentic-cli/internal/jira/gate.go`
 - Modify: `packages/agentic-cli/internal/jira/model.go`
@@ -136,14 +137,14 @@ bash tests/e2e/local-fake-flow.sh
 - Modify: `packages/agentic-cli/internal/jira/fake.go`
 - Modify: `packages/agentic-cli/internal/jira/gate_test.go`
 
-- [ ] 增加 process loader，读取 `contracts/processes/*.yaml`。
-- [ ] `profile validate` 校验所有 `standard_process_mapping` 目标都有对应 process 文件。
-- [ ] 校验 Jira status 映射结果符合 process `entry_stage` 或允许接管阶段。
-- [ ] 为 Jira issue model 增加 labels / components，真实 Jira 和 fake Jira 均映射。
-- [ ] `taskClassFor` 按 issue type、label、component 顺序解析任务分类，并输出映射来源。
-- [ ] 实现 `target_repo` fallback：字段缺失时按 component / label / issue type / default repository 映射。
-- [ ] 校验 `review_gates`、`retry_redo` 引用的 stage 和 `next_action` 与 process 定义一致。
-- [ ] 增加单元测试覆盖缺失 process、非法入口阶段、label 映射、repo fallback。
+- [x] 增加 process loader，读取 `contracts/processes/*.yaml`。
+- [x] `profile validate` 校验所有 `standard_process_mapping` 目标都有对应 process 文件。
+- [x] 校验 Jira status 映射结果符合 process `entry_stage` 或允许接管阶段。
+- [x] 为 Jira issue model 增加 labels / components，真实 Jira 和 fake Jira 均映射。
+- [x] `taskClassFor` 按 issue type、label、component 顺序解析任务分类，并输出映射来源。
+- [x] 实现 `target_repo` fallback：字段缺失时按 component / label / issue type / default repository 映射。
+- [x] 校验 `review_gates`、`retry_redo` 引用的 stage 和 `next_action` 与 process 定义一致。
+- [x] 增加单元测试覆盖缺失 process、非法入口阶段、label 映射、component 映射、repo fallback 和映射来源输出。
 
 **Verification:**
 
@@ -179,13 +180,13 @@ go test ./...
 - Create: `contracts/operations/write-pr-evidence.yaml`
 - Update: `assets/policies/default.yaml`
 
-- [ ] 实现只读 Git 检查：`inspect-workspace` 输出 branch、dirty status、changed files、安全摘要。
-- [ ] 实现 `prepare-pr` 只生成结构化拉取请求计划，不自动创建拉取请求。
-- [ ] 实现 GitHub 读取型接口：读取拉取请求审查意见和 CI 状态。
-- [ ] `fix-pr-comments` 输出按评论分类后的修复计划，并要求人工确认后再进入修改。
-- [ ] 策略门禁读取 `assets/policies/default.yaml`，不再只靠硬编码。
-- [ ] 对 `git_commit`、`git_push`、`create_pr`、`merge` 等高风险动作返回 `policy_gate_required`，直到人工确认路径具备审计记录。
-- [ ] 增加契约验证、CLI 单元测试和 fake `gh` / fake git 测试。
+- [x] 实现只读 Git 检查：`inspect-workspace` 输出 branch、dirty status、changed files、安全摘要。
+- [x] 实现 `prepare-pr` 只生成结构化拉取请求计划，不自动创建拉取请求。
+- [x] 实现 GitHub 读取型接口：读取拉取请求审查意见和 CI 状态。
+- [x] `fix-pr-comments` 输出按评论分类后的修复计划，并要求人工确认后再进入修改。
+- [x] 策略门禁读取 `assets/policies/default.yaml`，不再只靠硬编码。
+- [x] 对 `git_commit`、`git_push`、`create_pr`、`merge` 等高风险动作返回 `policy_gate_required`，直到人工确认路径具备审计记录。
+- [x] 增加契约验证、CLI 单元测试和 fake `gh` / fake git 测试。
 
 **Verification:**
 
@@ -212,13 +213,13 @@ go test ./...
 - Update: `contracts/operations/preflight.yaml` if created during implementation
 - Update: `contracts/operations/doctor.yaml`
 
-- [ ] `preflight` 检查 OS、CPU 架构、当前 CLI 版本、Git 可用性、GitHub CLI 可用性。
-- [ ] `preflight` 检查工作流配置存在且通过 `profile validate`。
-- [ ] `preflight` 检查当前目录是否位于工作流配置允许的项目 AI 工作空间或 source root。
-- [ ] `doctor` 检查 `current.json` 中的 CLI 版本、资产版本和当前运行版本是否一致或兼容。
-- [ ] `doctor` 检查 `local.source_root`、`local.runs_dir`、`local.feedback_dir` 是否存在或可创建。
-- [ ] 外部 Jira / GitHub 检查继续保持显式 opt-in，不默认访问外部服务。
-- [ ] 增加单元测试覆盖缺失 Git、缺失 source root、profile 失败、版本不匹配。
+- [x] `preflight` 检查 OS、CPU 架构、当前 CLI 版本、Git 可用性、GitHub CLI 可用性。
+- [x] `preflight` 检查工作流配置存在且通过 `profile validate`。
+- [x] `preflight` 检查当前目录是否位于工作流配置允许的项目 AI 工作空间或 source root。
+- [x] `doctor` 检查 `current.json` 中的 CLI 版本、资产版本和当前运行版本是否一致或兼容。
+- [x] `doctor` 检查 `local.source_root`、`local.runs_dir`、`local.feedback_dir` 是否存在或可创建。
+- [x] 外部 Jira / GitHub 检查继续保持显式 opt-in，不默认访问外部服务。
+- [x] 增加单元测试覆盖缺失 Git、缺失 source root、profile 失败、版本不匹配。
 
 **Verification:**
 

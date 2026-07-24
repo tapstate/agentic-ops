@@ -1,9 +1,9 @@
-workspace: tapstate
+workspace: tapdata
 
 jira:
-  user: dev@example.com
+  user: harsen@tapdata.io
   project: TAP
-  task_query: "assignee = currentUser() AND status in (\"To Do\", \"In Progress\")"
+  task_query: "project = TAP AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC"
 
 jira_form_mapping:
   fields:
@@ -12,58 +12,71 @@ jira_form_mapping:
       jira_field: assignee
       required_from_stage: waiting_takeover
     acceptance_criteria:
+      source: jira_description_section
+      section: "## 建议优化"
+      required_from_stage: takeover_gate
+    issue_analysis:
       source: jira_field
-      jira_field: customfield_acceptance
-      required_from_stage: iteration_ready
+      jira_field: customfield_10092
+      required_from_stage: implementation
+    fix_details:
+      source: jira_field
+      jira_field: customfield_10093
+      required_from_stage: implementation
     target_repo:
-      source: jira_field
-      jira_field: customfield_target_repo
+      source: workspace_repo_mapping
       fallback: workspace_repo_mapping
       required_from_stage: takeover_gate
     target_branch:
-      source: jira_field
-      jira_field: customfield_target_branch
+      source: workspace_repo_mapping
       fallback: workspace_repo_mapping
       required_from_stage: takeover_gate
     verification_method:
-      source: jira_description_section
-      section: 验证方式
+      source: jira_field
+      jira_field: customfield_10049
       required_from_stage: takeover_gate
     risk_level:
       source: jira_field
-      jira_field: customfield_risk
-      required_from_stage: iteration_ready
+      jira_field: labels
+      required_from_stage: takeover_gate
     current_agent_id:
-      source: jira_field
-      jira_field: customfield_current_agent_id
+      source: jira_comment
       required_from_stage: takeover_gate
     takeover_at:
-      source: jira_field
-      jira_field: customfield_takeover_at
+      source: jira_comment
       required_from_stage: takeover_gate
 
 task_class_mapping:
   issue_types:
     Story: feature_change
+    故事: feature_change
     Bug: bug_fix
+    缺陷: bug_fix
     Task: technical_task
+    任务: technical_task
   labels:
-    investigation: investigation
-    agenticops-improvement: process_improvement
+    investigation: technical_task
+    defect: bug_fix
+    bug: bug_fix
   components:
-    api: technical_task
-    web: technical_task
+    backend: technical_task
+    frontend: technical_task
 
 standard_process_mapping:
   feature_change: development_change_v1
   bug_fix: development_change_v1
   technical_task: development_change_v1
-  investigation: investigation_v1
-  process_improvement: agenticops_improvement_v1
 
 status_mapping:
+  打开: waiting_takeover
+  待办: waiting_takeover
   To Do: waiting_takeover
+  On Hold: waiting_takeover
+  正在进行: implementation
   In Progress: implementation
+  Pull Request Submitted: implementation
+  Tests Passed: implementation
+  完成: completed
   Done: completed
 
 transition_mapping:
@@ -74,29 +87,39 @@ jira_transition_mapping:
   start_progress:
     name: "Start Progress"
   complete:
-    name: "Done"
+    name: "Tests Pass"
 
 github:
-  organization: tapstate
+  organization: tapdata
   repositories:
-    default: tapstate/example-repo
+    default: tapdata/tapdata
     by_component:
-      api: tapstate/tap-api
-      web: tapstate/tap-web
+      tapdata: tapdata/tapdata
+      connectors: tapdata/tapdata-connectors
+      web: tapdata/tapdata-web
+      common-lib: tapdata/tapdata-common-lib
+      mcp: tapdata/mcp-tap-server
     by_label:
-      cli: tapstate/agentic-ops
+      backend: tapdata/tapdata
+      frontend: tapdata/tapdata-web
+      connector: tapdata/tapdata-connectors
+      pdk: tapdata/tapdata-connectors
+    by_issue_type:
+      缺陷: tapdata/tapdata
+      Bug: tapdata/tapdata
 
 local:
-  workspace_root: "<project-ai-workspace>"
-  source_root: "<project-ai-workspace>/src"
-  runs_dir: "<project-ai-workspace>/.agentic-ops/runs"
-  run_logs_dir: "<project-ai-workspace>/.agentic-ops/run-logs"
-  feedback_dir: "<project-ai-workspace>/.agentic-ops/feedback"
+  workspace_root: "/Users/lhs/works/spaces/agentic-ops-tapdata"
+  source_root: "/Users/lhs/works/spaces/agentic-ops-tapdata/tapdata"
+  runs_dir: "/Users/lhs/works/spaces/agentic-ops-tapdata/.agentic-ops/runs"
+  run_logs_dir: "/Users/lhs/works/spaces/agentic-ops-tapdata/.agentic-ops/run-logs"
+  feedback_dir: "/Users/lhs/works/spaces/agentic-ops-tapdata/.agentic-ops/feedback"
 
 human_gates:
   - push
   - create_pr
   - merge
+  - transition_jira_status
   - scope_change
 
 review_gates:
@@ -105,7 +128,7 @@ review_gates:
     decision_field: developer_owner_decision
     returned_next_action: fix_and_verify
   pr_review:
-    role: reviewer
+    role: code_reviewer
     decision_field: reviewer_decision
     returned_next_action: fix_and_verify
   qa_verification:

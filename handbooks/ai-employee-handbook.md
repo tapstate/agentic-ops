@@ -77,6 +77,11 @@ agentic-cli preflight --workspace tapstate
 agentic-cli list-tasks --workspace tapstate
 agentic-cli takeover-task TAP-123 --workspace tapstate
 agentic-cli resume-takeover --run-id <run_id> --workspace tapstate
+agentic-cli inspect-workspace --workspace tapstate
+agentic-cli prepare-pr --workspace tapstate --run-id <run_id>
+agentic-cli read-pr-comments --workspace tapstate --repo <owner/repo> --pr <number>
+agentic-cli check-ci-status --workspace tapstate --repo <owner/repo> --pr <number>
+agentic-cli fix-pr-comments --workspace tapstate --repo <owner/repo> --pr <number>
 agentic-cli write-evidence --workspace tapstate --run-id <run_id>
 agentic-cli release-agent --workspace tapstate --run-id <run_id> --issue-key TAP-123 --completion-evidence evidence.md
 agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact

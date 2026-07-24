@@ -33,6 +33,11 @@ failure:
     - missing_form_mapping
     - task_class_mapping_gap
     - standard_process_mapping_gap
+    - standard_process_missing
+    - standard_process_invalid
+    - review_gate_mapping_gap
+    - retry_redo_stage_gap
+    - next_action_mapping_gap
     - lifecycle_mapping_gap
     - transition_mapping_gap
     - jira_transition_mapping_gap

@@ -1,0 +1,58 @@
+operation: write_pr_evidence
+version: 1
+purpose: 将拉取请求链接、CI 状态、审查结论和风险摘要写入任务证据链。
+task_type: evidence_write
+allowed_stages:
+  - pr_created
+  - ci_passed
+  - review_approved
+required_inputs:
+  - workspace
+  - run_id
+  - pr_url
+input:
+  workspace:
+    type: string
+    required: true
+  run_id:
+    type: string
+    required: true
+  pr_url:
+    type: string
+    required: true
+preconditions:
+  - run_must_exist
+  - pr_url_must_be_known
+  - policy_must_allow_evidence_write
+output:
+  workspace:
+    type: string
+  run_id:
+    type: string
+  pr_url:
+    type: string
+  audit_reference:
+    type: string
+  current_stage:
+    type: string
+  next_action:
+    type: string
+failure:
+  codes:
+    - missing_run_id
+    - missing_pr_url
+    - run_not_found
+    - policy_not_found
+    - policy_gate_required
+    - evidence_write_failed
+side_effects:
+  - may_write_jira_comment
+  - may_write_local_event
+  - may_write_pr_comment
+human_gate:
+  required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: pr_created
+redo_from_stage: pr_created

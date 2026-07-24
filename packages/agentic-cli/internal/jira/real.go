@@ -169,6 +169,8 @@ func (client *RealClient) issueFields() []string {
 		"issuetype":   true,
 		"assignee":    true,
 		"description": true,
+		"labels":      true,
+		"components":  true,
 	}
 	for _, field := range client.profile.JiraFormMapping.Fields {
 		if field.JiraField != "" {
@@ -186,11 +188,13 @@ func (client *RealClient) issueFields() []string {
 func (client *RealClient) mapIssue(raw jiraIssueResponse) Issue {
 	fields := raw.Fields
 	issue := Issue{
-		Key:       raw.Key,
-		Summary:   stringField(fields["summary"]),
-		Assignee:  userIdentifier(fields["assignee"]),
-		IssueType: objectName(fields["issuetype"]),
-		Status:    objectName(fields["status"]),
+		Key:        raw.Key,
+		Summary:    stringField(fields["summary"]),
+		Assignee:   userIdentifier(fields["assignee"]),
+		IssueType:  objectName(fields["issuetype"]),
+		Status:     objectName(fields["status"]),
+		Labels:     stringList(fields["labels"]),
+		Components: objectNameList(fields["components"]),
 	}
 	issue.Owner = mappedField(fields, client.profile, "owner")
 	if issue.Owner == "" {
@@ -228,6 +232,36 @@ func stringField(value any) string {
 		}
 	}
 	return ""
+}
+
+func stringList(value any) []string {
+	values, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for _, item := range values {
+		text := stringField(item)
+		if text != "" {
+			result = append(result, text)
+		}
+	}
+	return result
+}
+
+func objectNameList(value any) []string {
+	values, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for _, item := range values {
+		name := objectName(item)
+		if name != "" {
+			result = append(result, name)
+		}
+	}
+	return result
 }
 
 func userIdentifier(value any) string {

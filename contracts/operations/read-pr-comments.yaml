@@ -1,0 +1,55 @@
+operation: read_pr_comments
+version: 1
+purpose: 通过 GitHub CLI 读取拉取请求评论和审查意见。
+task_type: pr_review
+allowed_stages:
+  - pr_created
+  - review_requested
+  - changes_requested
+required_inputs:
+  - workspace
+  - repo
+  - pr
+input:
+  workspace:
+    type: string
+    required: true
+  repo:
+    type: string
+    required: true
+  pr:
+    type: string
+    required: true
+preconditions:
+  - github_cli_must_be_available
+  - github_auth_must_be_valid
+  - pr_must_be_readable
+output:
+  workspace:
+    type: string
+  repo:
+    type: string
+  pr:
+    type: string
+  comments_count:
+    type: integer
+  comments:
+    type: array
+  current_stage:
+    type: string
+  next_action:
+    type: string
+failure:
+  codes:
+    - missing_pr_reference
+    - github_pr_read_failed
+side_effects:
+  - must_not_write_github
+  - must_not_modify_git
+human_gate:
+  required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: review_requested
+redo_from_stage: review_requested

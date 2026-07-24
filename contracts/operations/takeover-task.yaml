@@ -41,6 +41,8 @@ output:
     type: string
   task_class:
     type: string
+  task_class_source:
+    type: string
   process_id:
     type: string
   current_stage:
@@ -87,6 +89,7 @@ failure:
     - task_class_mapping_gap
     - standard_process_mapping_gap
     - unknown_jira_status
+    - invalid_takeover_stage
     - missing_acceptance_criteria
     - missing_target_repo
     - missing_verification_method

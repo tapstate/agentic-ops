@@ -47,22 +47,29 @@ rm -f "$policy_backup"
 $cmd doctor --workspace tapstate | grep '"operation":"doctor"'
 $cmd preflight --workspace tapstate | grep '"operation":"preflight"'
 $cmd workspace init --workspace tapstate --jira-user dev@example.com --jira-project TAP | grep '"operation":"workspace_init"'
+$cmd workspace init --workspace tapstate --jira-user dev@example.com --jira-project TAP | grep '"profile":'
 $cmd agent init --workspace tapstate | grep '"operation":"agent_init"'
 $cmd list-tasks --workspace tapstate | grep '"key":"TAP-123"'
+$cmd takeover-task TAP-MISSING-REPO --workspace tapstate | grep '"target_repo":"tapstate/tap-api"'
 set +e
-missing_repo_output="$($cmd takeover-task TAP-MISSING-REPO --workspace tapstate 2>/dev/null)"
-missing_repo_code="$?"
+in_progress_output="$($cmd takeover-task TAP-IN-PROGRESS --workspace tapstate 2>/dev/null)"
+in_progress_code="$?"
 set -e
-test "$missing_repo_code" -eq 1
-printf '%s\n' "$missing_repo_output" | grep '"code":"missing_target_repo"'
+test "$in_progress_code" -eq 1
+printf '%s\n' "$in_progress_output" | grep '"code":"invalid_takeover_stage"'
 $cmd takeover-task TAP-123 --workspace tapstate | grep '"current_agent_id":"agentic-cli-local-agent"'
-$cmd resume-takeover --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"operation":"resume_takeover"'
-$cmd write-evidence --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"operation":"write_evidence"'
-$cmd release-agent --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 --issue-key TAP-123 --completion-evidence evidence.md | grep '"current_agent_id_cleared":true'
+$cmd resume-takeover --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"previous_stage":"takeover_started"'
+$cmd inspect-workspace --workspace tapstate --source-root . | grep '"operation":"inspect_workspace"'
+$cmd prepare-pr --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 --source-root . --base main --title "Fix TAP-123" | grep '"create_pr_gate_required":true'
+$cmd write-evidence --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"audit_submitted":true'
+release_output="$($cmd release-agent --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 --issue-key TAP-123 --completion-evidence evidence.md)"
+printf '%s\n' "$release_output" | grep '"audit_submitted":true'
+printf '%s\n' "$release_output" | grep '"current_agent_id_cleared":true'
 $cmd feedback bundle --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 --redact | grep '"operation":"feedback_bundle"'
-$cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"runs":5'
+$cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"runs":7'
 $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"blocked":1'
 test -f "$workspace_root/.agentic-ops/feedback/events.ndjson"
+test -f "$workspace_root/.agentic-ops/profiles/tapstate.yaml"
 test -d "$workspace_root/.agentic-ops/run-logs"
 test -f "$workspace_root/.agentic-ops/feedback/bundles/TAP-123-takeover-20260721103012-a8f3.md"
 test -f "$workspace_root/.agentic-ops/feedback/reports/2026-07-21.md"

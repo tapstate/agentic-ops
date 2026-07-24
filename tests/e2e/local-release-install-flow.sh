@@ -37,23 +37,25 @@ test -x "$bin"
 "$bin" --version | grep "\"version\":\"$version\""
 "$bin" --version | grep '"version_state":"RES"'
 
-workspace_root="$tmp_dir/workspaces/cyntex"
+workspace_root="$tmp_dir/workspaces/tapstate"
 mkdir -p "$workspace_root"
 export AGENTIC_OPS_HOME="$deploy_home/.agentic-ops"
 export AGENTIC_OPS_WORKSPACE_ROOT="$workspace_root"
 
-"$bin" preflight --workspace CYNTEX | grep '"operation":"preflight"'
-"$bin" preflight --workspace CYNTEX | grep "\"install_dir\":\"$AGENTIC_OPS_HOME\""
-"$bin" workspace init --workspace CYNTEX --jira-user dev@example.com --jira-project CYNTEX | grep '"operation":"workspace_init"'
-"$bin" agent init --workspace CYNTEX | grep '"operation":"agent_init"'
-"$bin" list-tasks --workspace CYNTEX | grep '"key":"TAP-123"'
-"$bin" takeover-task TAP-123 --workspace CYNTEX | grep '"target_repo":"CYNTEX/example-repo"'
-"$bin" resume-takeover --workspace CYNTEX --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"operation":"resume_takeover"'
-"$bin" write-evidence --workspace CYNTEX --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"operation":"write_evidence"'
-"$bin" feedback report --workspace CYNTEX --date 2026-07-22 | grep '"runs":3'
+"$bin" preflight --workspace tapstate | grep '"operation":"preflight"'
+"$bin" preflight --workspace tapstate | grep "\"install_dir\":\"$AGENTIC_OPS_HOME\""
+"$bin" workspace init --workspace tapstate --jira-user dev@example.com --jira-project TAP | grep '"operation":"workspace_init"'
+"$bin" workspace init --workspace tapstate --jira-user dev@example.com --jira-project TAP | grep '"profile":'
+"$bin" agent init --workspace tapstate | grep '"operation":"agent_init"'
+"$bin" list-tasks --workspace tapstate | grep '"key":"TAP-123"'
+"$bin" takeover-task TAP-123 --workspace tapstate | grep '"target_repo":"tapstate/example-repo"'
+"$bin" resume-takeover --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"previous_stage":"takeover_started"'
+"$bin" write-evidence --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"operation":"write_evidence"'
+"$bin" feedback report --workspace tapstate --date 2026-07-22 | grep '"runs":3'
 
 test -f "$deploy_home/.agentic-ops/assets/$version/manifest.json"
 test -f "$deploy_home/.agentic-ops/current.json"
+test -f "$workspace_root/.agentic-ops/profiles/tapstate.yaml"
 test -d "$workspace_root/.agentic-ops/run-logs"
 test -f "$workspace_root/.agentic-ops/feedback/events.ndjson"
 test -f "$workspace_root/.agentic-ops/feedback/reports/2026-07-22.md"

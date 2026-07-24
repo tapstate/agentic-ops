@@ -3,13 +3,25 @@ version: 1
 gates:
   write_jira_comment:
     required: false
+  write_local_evidence:
+    required: false
   transition_jira_status:
     required: true
   git_commit:
     required: true
   git_push:
     required: true
+  git_merge:
+    required: true
+  git_rebase:
+    required: true
+  git_clean:
+    required: true
   create_pr:
+    required: true
+  update_pr:
+    required: true
+  fix_pr_comments:
     required: true
   scope_change:
     required: true

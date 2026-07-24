@@ -15,7 +15,7 @@ func TestEnsureCreatesWorkspaceDirs(t *testing.T) {
 	if info.Name != "tapstate" {
 		t.Fatalf("Name = %s", info.Name)
 	}
-	for _, dir := range []string{info.RunsDir, info.RunLogsDir, info.FeedbackDir} {
+	for _, dir := range []string{info.RunsDir, info.RunLogsDir, info.FeedbackDir, info.ProfilesDir} {
 		stat, err := os.Stat(dir)
 		if err != nil {
 			t.Fatalf("missing dir %s: %v", dir, err)
@@ -30,11 +30,34 @@ func TestEnsureCreatesWorkspaceDirs(t *testing.T) {
 	if filepath.Base(info.RunLogsDir) != "run-logs" {
 		t.Fatalf("RunLogsDir = %s", info.RunLogsDir)
 	}
+	if filepath.Base(info.ProfilesDir) != "profiles" {
+		t.Fatalf("ProfilesDir = %s", info.ProfilesDir)
+	}
 }
 
 func TestEnsureRejectsEmptyWorkspaceName(t *testing.T) {
 	_, err := Ensure(t.TempDir(), "")
 	if err == nil {
 		t.Fatal("expected error for empty workspace name")
+	}
+}
+
+func TestResolveProjectPathReplacesWorkspacePlaceholder(t *testing.T) {
+	got := ResolveProjectPath("<project-ai-workspace>/src", "/tmp/agentic-workspace")
+	if got != "/tmp/agentic-workspace/src" {
+		t.Fatalf("ResolveProjectPath = %q", got)
+	}
+}
+
+func TestDirectoryStatusReportsExistsAndCreatable(t *testing.T) {
+	root := t.TempDir()
+	existing := DirectoryStatus(root)
+	if existing.Status != "ok" || existing.Message != "exists" {
+		t.Fatalf("existing status = %#v", existing)
+	}
+
+	creatable := DirectoryStatus(filepath.Join(root, "new", "dir"))
+	if creatable.Status != "ok" || creatable.Message != "creatable" {
+		t.Fatalf("creatable status = %#v", creatable)
 	}
 }

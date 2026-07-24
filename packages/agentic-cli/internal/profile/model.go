@@ -43,6 +43,7 @@ type FormField struct {
 type TaskClassMapping struct {
 	IssueTypes map[string]string `yaml:"issue_types"`
 	Labels     map[string]string `yaml:"labels"`
+	Components map[string]string `yaml:"components"`
 }
 
 type GitHubConfig struct {

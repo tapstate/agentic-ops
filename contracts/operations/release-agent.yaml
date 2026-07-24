@@ -48,6 +48,12 @@ output:
     type: string
   completion_evidence:
     type: string
+  audit_target:
+    type: string
+  audit_submitted:
+    type: boolean
+  audit_reference:
+    type: string
   jira_transition_id:
     type: string
   current_stage:

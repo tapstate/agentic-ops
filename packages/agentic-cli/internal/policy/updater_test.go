@@ -104,13 +104,25 @@ func validPolicyYAML(policyName string, requireJiraComment bool) string {
 		"gates:\n" +
 		"  write_jira_comment:\n" +
 		"    required: " + jiraCommentRequired + "\n" +
+		"  write_local_evidence:\n" +
+		"    required: false\n" +
 		"  transition_jira_status:\n" +
 		"    required: true\n" +
 		"  git_commit:\n" +
 		"    required: true\n" +
 		"  git_push:\n" +
 		"    required: true\n" +
+		"  git_merge:\n" +
+		"    required: true\n" +
+		"  git_rebase:\n" +
+		"    required: true\n" +
+		"  git_clean:\n" +
+		"    required: true\n" +
 		"  create_pr:\n" +
+		"    required: true\n" +
+		"  update_pr:\n" +
+		"    required: true\n" +
+		"  fix_pr_comments:\n" +
 		"    required: true\n" +
 		"  scope_change:\n" +
 		"    required: true\n"

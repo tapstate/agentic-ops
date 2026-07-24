@@ -1,0 +1,30 @@
+process_id: investigation_v1
+task_classes:
+  - investigation
+entry_stage: waiting_takeover
+stages:
+  - id: waiting_takeover
+    responsible_role: developer_owner
+    input_fields:
+      - assignee
+      - task_class
+      - target_repo
+      - verification_method
+    output_fields:
+      - run_id
+      - current_agent_id
+      - takeover_at
+      - current_stage
+      - next_action
+    review_gate: null
+  - id: investigation
+    responsible_role: ai_agent
+    output_fields:
+      - investigation_summary
+      - evidence_links
+      - recommended_next_action
+    review_gate: developer_owner
+  - id: completed
+    responsible_role: developer_owner
+    completion_cleanup:
+      clear_current_agent_id: true

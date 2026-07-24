@@ -64,6 +64,7 @@ func fakeIssues(workspace string) []Issue {
 	missingRepo := valid
 	missingRepo.Key = "TAP-MISSING-REPO"
 	missingRepo.TargetRepo = ""
+	missingRepo.Components = []string{"api"}
 	otherOwner := valid
 	otherOwner.Key = "TAP-OTHER-OWNER"
 	otherOwner.Owner = "other-user"
@@ -73,5 +74,8 @@ func fakeIssues(workspace string) []Issue {
 	unknownStatus := valid
 	unknownStatus.Key = "TAP-UNKNOWN-STATUS"
 	unknownStatus.Status = "Custom Review"
-	return []Issue{valid, missingRepo, otherOwner, agentConflict, unknownStatus}
+	inProgress := valid
+	inProgress.Key = "TAP-IN-PROGRESS"
+	inProgress.Status = "In Progress"
+	return []Issue{valid, missingRepo, otherOwner, agentConflict, unknownStatus, inProgress}
 }

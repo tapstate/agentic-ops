@@ -37,7 +37,7 @@ func TestRealClientSearchIssuesMapsProfileFields(t *testing.T) {
 		if body["jql"] != "assignee = currentUser()" {
 			t.Fatalf("jql = %v", body["jql"])
 		}
-		return jsonResponse(http.StatusOK, `{"issues":[{"key":"TAP-123","fields":{"summary":"修复示例任务","assignee":{"accountId":"account-123"},"issuetype":{"name":"Task"},"status":{"name":"To Do"},"customfield_acceptance":"单元测试通过","customfield_target_repo":"tapstate/example-repo","customfield_risk":{"value":"low"},"customfield_current_agent_id":"agent-1","description":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"验证方式"}]},{"type":"paragraph","content":[{"type":"text","text":"go test ./..."}]}]}}}]}`)
+		return jsonResponse(http.StatusOK, `{"issues":[{"key":"TAP-123","fields":{"summary":"修复示例任务","assignee":{"accountId":"account-123"},"issuetype":{"name":"Task"},"status":{"name":"To Do"},"labels":["cli","investigation"],"components":[{"name":"api"}],"customfield_acceptance":"单元测试通过","customfield_target_repo":"tapstate/example-repo","customfield_risk":{"value":"low"},"customfield_current_agent_id":"agent-1","description":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"验证方式"}]},{"type":"paragraph","content":[{"type":"text","text":"go test ./..."}]}]}}}]}`)
 	})
 
 	issues, err := client.SearchIssues(context.Background(), "tapstate", "assignee = currentUser()")
@@ -56,6 +56,9 @@ func TestRealClientSearchIssuesMapsProfileFields(t *testing.T) {
 	}
 	if got.RiskLevel != "low" || got.CurrentAgentID != "agent-1" {
 		t.Fatalf("issue gate field mapping failed: %+v", got)
+	}
+	if strings.Join(got.Labels, ",") != "cli,investigation" || strings.Join(got.Components, ",") != "api" {
+		t.Fatalf("issue labels/components mapping failed: %+v", got)
 	}
 }
 

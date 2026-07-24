@@ -7,10 +7,16 @@ type ValidationIssue struct {
 
 var requiredGates = []string{
 	"write_jira_comment",
+	"write_local_evidence",
 	"transition_jira_status",
 	"git_commit",
 	"git_push",
+	"git_merge",
+	"git_rebase",
+	"git_clean",
 	"create_pr",
+	"update_pr",
+	"fix_pr_comments",
 	"scope_change",
 }
 
