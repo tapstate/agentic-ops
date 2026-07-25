@@ -47,6 +47,9 @@ gh api -H 'Accept: application/vnd.github.raw' \
   "source": "managed_clone",
   "path_configured": false,
   "path_entry": "~/.agentic-ops/bin",
+  "path_profile": "~/.zshrc",
+  "path_profile_configured": true,
+  "path_profile_updated": true,
   "next_action": "workspace_init"
 }
 ```
@@ -70,6 +73,8 @@ gh api -H 'Accept: application/vnd.github.raw' \
 - zsh 环境下 GitHub API contents 路径带引号，`?ref=main` 不会触发 shell glob 错误。
 - 安装后 `agentic-cli --version` 可用。
 - 如果 `~/.agentic-ops/bin` 不在 `PATH` 中，安装输出必须明确提示 `agentic-cli` 的完整路径和当前 shell 的幂等 `PATH` 修复命令。
+- 安装脚本必须幂等写入 shell 启动文件；重复安装或更新不得重复追加同一条 PATH 配置。
+- 安装输出必须说明管道执行的脚本不能修改父 shell 的当前 `PATH`，当前终端需要临时 PATH 命令、`source` 启动文件或重新打开终端。
 - 安装后 `agentic-cli preflight` 可用。
 - 安装目录是 `~/.agentic-ops`。
 - `~/.agentic-ops` 是 AgenticOps managed clone，不作为具体项目运行目录。
@@ -102,7 +107,7 @@ gh api -H 'Accept: application/vnd.github.raw' \
 - `agentic-cli --version` 输出。
 - `agentic-cli preflight` 输出。
 - 安装输出中的 `operation=install`、`install_dir` 和 `next_action`。
-- 安装输出中的 `path_configured` 和 `path_entry`。
+- 安装输出中的 `path_configured`、`path_entry`、`path_profile`、`path_profile_configured` 和 `path_profile_updated`。
 - `bash tests/e2e/local-install-flow.sh`
 
 ### 关联设计

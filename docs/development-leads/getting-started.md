@@ -45,6 +45,8 @@ gh api -H 'Accept: application/vnd.github.raw' \
 
 3. 让当前 shell 能找到 `agentic-cli`，并验证安装结果。
 
+安装脚本会把 PATH 配置幂等写入 shell 启动文件，例如 zsh 写入 `~/.zshrc`。但是通过管道执行的安装脚本不能反向修改当前终端进程的 `PATH`，所以安装完成后当前终端仍需要执行下面的临时 PATH 命令，或重新打开一个终端。
+
 ```sh
 case ":$PATH:" in
   *":$HOME/.agentic-ops/bin:"*) ;;
@@ -53,12 +55,11 @@ esac
 agentic-cli --version
 ```
 
-如果希望后续新终端也能直接使用 `agentic-cli`，把配置写入当前 shell 的启动文件。zsh 示例会先检查同一行是否已经存在，不会重复追加：
+如果希望当前终端立即读取已经写入的 zsh 配置，也可以执行：
 
 ```sh
-agentic_ops_path_line='export PATH="$HOME/.agentic-ops/bin:$PATH"'
-touch "$HOME/.zshrc"
-grep -qxF "$agentic_ops_path_line" "$HOME/.zshrc" || printf '\n%s\n' "$agentic_ops_path_line" >> "$HOME/.zshrc"
+source "$HOME/.zshrc"
+agentic-cli --version
 ```
 
 4. 创建并进入项目 AI 工作空间。
@@ -118,6 +119,8 @@ case ":$PATH:" in
 esac
 agentic-cli --version
 ```
+
+安装脚本已经幂等写入 shell 启动文件；如果当前终端仍找不到命令，原因通常是当前终端尚未重新读取启动文件。可以重新打开终端，或执行 `source "$HOME/.zshrc"`。
 
 也可以直接使用完整路径排查：
 

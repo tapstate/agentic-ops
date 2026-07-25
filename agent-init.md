@@ -48,6 +48,8 @@ agentic-cli --version
 
 如果这样可以输出版本，不要重新安装，继续后续初始化步骤。
 
+如果仍然不可用，提示研发负责人重新打开终端，或执行 `source "$HOME/.zshrc"` 后再重试。不要重复向 `~/.zshrc` 追加 PATH 配置。
+
 如果命令不存在，使用安装入口：
 
 ```sh
@@ -84,6 +86,8 @@ case ":$PATH:" in
 esac
 agentic-cli --version
 ```
+
+安装脚本会幂等写入 shell 启动文件，但不能修改管道命令所在父 shell 的当前 `PATH`。如果当前终端仍找不到 `agentic-cli`，执行上面的临时 PATH 命令，或重新打开终端。
 
 ### 2. 初始化项目 AI 工作空间
 

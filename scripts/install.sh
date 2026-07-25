@@ -150,6 +150,36 @@ path_contains_dir() {
   esac
 }
 
+shell_profile_path() {
+  local shell_name=""
+
+  shell_name="$(basename "${SHELL:-}")"
+  case "$shell_name" in
+    zsh|"") printf '%s\n' "$HOME/.zshrc" ;;
+    bash) printf '%s\n' "$HOME/.bashrc" ;;
+    *) printf '%s\n' "$HOME/.profile" ;;
+  esac
+}
+
+path_profile_line() {
+  if [ "$INSTALL_DIR" = "$HOME/.agentic-ops" ]; then
+    printf '%s\n' 'export PATH="$HOME/.agentic-ops/bin:$PATH"'
+  else
+    printf 'export PATH="%s:$PATH"\n' "$bin_dir"
+  fi
+}
+
+ensure_path_profile() {
+  local profile="$1"
+  local line="$2"
+
+  mkdir -p "$(dirname "$profile")"
+  touch "$profile"
+  printf '\n%s\n' "$line" >> "$profile"
+  echo "PATH entry added to shell profile: $profile" >&2
+  return 0
+}
+
 trap rollback ERR
 
 if ! command -v git >/dev/null 2>&1; then
@@ -196,11 +226,32 @@ current_ref="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
 write_local_state "$current_ref" "$operation"
 
 path_configured="false"
+path_profile="$(shell_profile_path)"
+path_profile_line_value="$(path_profile_line)"
+path_profile_configured="false"
+path_profile_updated="false"
+
+if [ -f "$path_profile" ] && grep -qxF "$path_profile_line_value" "$path_profile"; then
+  path_profile_configured="true"
+fi
+
 if path_contains_dir "$bin_dir"; then
   path_configured="true"
 else
   echo "agentic-cli is installed but not on PATH: $bin_dir/agentic-cli" >&2
   echo "For this shell, run: case \":\$PATH:\" in *\":$bin_dir:\"*) ;; *) export PATH=\"$bin_dir:\$PATH\" ;; esac" >&2
+  echo "This installer cannot modify the parent shell PATH when it is run through a pipe." >&2
 fi
 
-printf '{"ok":true,"operation":"%s","install_dir":"%s","bin":"%s","target":"%s","current_ref":"%s","source":"managed_clone","path_configured":%s,"path_entry":"%s","next_action":"workspace_init"}\n' "$operation" "$INSTALL_DIR" "$bin_dir/agentic-cli" "$target" "$current_ref" "$path_configured" "$bin_dir"
+if [ "$path_profile_configured" = "true" ]; then
+  echo "PATH entry already exists in shell profile: $path_profile" >&2
+elif ensure_path_profile "$path_profile" "$path_profile_line_value"; then
+  path_profile_configured="true"
+  path_profile_updated="true"
+fi
+
+if [ "$path_configured" = "false" ]; then
+  echo "Open a new terminal or run: source \"$path_profile\"" >&2
+fi
+
+printf '{"ok":true,"operation":"%s","install_dir":"%s","bin":"%s","target":"%s","current_ref":"%s","source":"managed_clone","path_configured":%s,"path_entry":"%s","path_profile":"%s","path_profile_configured":%s,"path_profile_updated":%s,"next_action":"workspace_init"}\n' "$operation" "$INSTALL_DIR" "$bin_dir/agentic-cli" "$target" "$current_ref" "$path_configured" "$bin_dir" "$path_profile" "$path_profile_configured" "$path_profile_updated"
