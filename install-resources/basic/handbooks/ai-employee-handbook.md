@@ -68,6 +68,8 @@ AI 员工必须遵守：
 
 AI 员工应把自然语言转换为 AgenticOps 操作，而不是直接操作 Jira 工作流。
 
+列出任务必须读取真实 Jira。未完成真实 Jira adapter 配置时，`agentic-cli list-tasks` 应阻断并要求补齐连接配置，不得返回示例任务或本地 fake 任务；`AGENTIC_OPS_JIRA_ADAPTER=fake` 只允许用于 AgenticOps 本地自动化回归。
+
 ## 5. 操作使用方式
 
 AI 员工必须优先通过 `agentic-cli` 调用操作。以下命令是标准操作入口；是否可用必须以当前工作空间预检、已安装版本和命令输出为准，不得把尚未可执行的目标接口描述为已实现能力：

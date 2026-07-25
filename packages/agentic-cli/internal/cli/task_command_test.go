@@ -3,23 +3,72 @@ package cli
 import (
 	"bytes"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/clihandlers"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestListTasksUsesFakeJira(t *testing.T) {
+func TestListTasksRejectsFakeJiraByDefault(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"list-tasks", "--workspace", "tapstate"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "list_tasks")
+	assertJSONField(t, stdout.String(), "code", "jira_adapter_config_failed")
+	if strings.Contains(stdout.String(), "TAP-123") || strings.Contains(stdout.String(), "TAP-BUG-123") {
+		t.Fatalf("list-tasks returned sample Jira tasks: %s", stdout.String())
+	}
+}
+
+func TestListTasksReadsRealJiraTasks(t *testing.T) {
+	var sawSearch bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/rest/api/3/search/jql" {
+			t.Fatalf("unexpected Jira request %s %s", r.Method, r.URL.Path)
+		}
+		user, token, ok := r.BasicAuth()
+		if !ok || user != "bot@example.com" || token != "token-123" {
+			t.Fatalf("unexpected Jira auth user=%q token=%q ok=%v", user, token, ok)
+		}
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body error = %v", err)
+		}
+		if !strings.Contains(string(data), `assignee = currentUser()`) {
+			t.Fatalf("request body missing profile task query: %s", string(data))
+		}
+		sawSearch = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"issues":[{"key":"TAP-999","fields":{"summary":"真实 Jira 任务","assignee":{"accountId":"account-999"},"issuetype":{"name":"Task"},"status":{"name":"To Do"},"customfield_acceptance":"真实验收","customfield_target_repo":"tapstate/real-repo","customfield_risk":{"value":"low"},"description":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"验证方式"}]},{"type":"paragraph","content":[{"type":"text","text":"go test ./real"}]}]}}}]}`))
+	}))
+	defer server.Close()
+	t.Setenv("AGENTIC_OPS_JIRA_ADAPTER", "real")
+	t.Setenv("AGENTIC_OPS_JIRA_BASE_URL", server.URL)
+	t.Setenv("AGENTIC_OPS_JIRA_EMAIL", "bot@example.com")
+	t.Setenv("AGENTIC_OPS_JIRA_API_TOKEN", "token-123")
+
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"list-tasks", "--workspace", "tapstate"}, &stdout, &stderr)
 	if code != 0 {
-		t.Fatalf("code = %d", code)
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
-	for _, want := range []string{`"operation":"list_tasks"`, `"workspace":"tapstate"`, `"key":"TAP-123"`} {
+	if !sawSearch {
+		t.Fatal("Jira search endpoint was not called")
+	}
+	for _, want := range []string{`"operation":"list_tasks"`, `"workspace":"tapstate"`, `"key":"TAP-999"`, `"summary":"真实 Jira 任务"`, `"verification_method":"go test ./real"`} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %s: %s", want, stdout.String())
 		}
+	}
+	if strings.Contains(stdout.String(), "TAP-123") || strings.Contains(stdout.String(), "TAP-BUG-123") {
+		t.Fatalf("list-tasks returned sample Jira tasks: %s", stdout.String())
 	}
 }
 

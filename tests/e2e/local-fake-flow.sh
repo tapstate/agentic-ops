@@ -3,6 +3,7 @@ set -euo pipefail
 
 export GOCACHE="${GOCACHE:-/tmp/agentic-ops-go-cache}"
 export GOMODCACHE="${GOMODCACHE:-/tmp/agentic-ops-go-mod-cache}"
+export AGENTIC_OPS_JIRA_ADAPTER="fake"
 
 workspace_root="$(mktemp -d)"
 trap 'rm -rf "$workspace_root"' EXIT

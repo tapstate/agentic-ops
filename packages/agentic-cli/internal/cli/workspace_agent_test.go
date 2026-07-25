@@ -157,6 +157,7 @@ func TestAgentInitInfersWorkspaceFromAgentConfig(t *testing.T) {
 func TestTaskCommandsInferWorkspaceFromAgentConfig(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_JIRA_ADAPTER", "fake")
 	Run([]string{"workspace", "init", "--project", "tapstate", "--jira-user", "dev@example.com"}, &bytes.Buffer{}, &bytes.Buffer{})
 
 	var listStdout bytes.Buffer

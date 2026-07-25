@@ -159,7 +159,7 @@ func writeAgentInstructions(info workspace.Info, jiraUser string, jiraProject st
 		"1. Run `agentic-cli agent init` to load AgenticOps capabilities.",
 		"2. Run `agentic-cli preflight` before taking over Jira tasks.",
 		"3. Read `$HOME/.agentic-ops/agent-guides.md` and `$HOME/.agentic-ops/install-resources/basic/ai-assets/README.md` before executing tasks.",
-		"4. Use `agentic-cli list-tasks` to find available Jira tasks.",
+		"4. Use `agentic-cli list-tasks` to find available Jira tasks from the real Jira adapter; do not use sample or fake Jira tasks for business work.",
 		"5. Use `agentic-cli task run <issue-key>` to take over a task and start the matched capability.",
 		"6. Use `agentic-cli takeover-task <issue-key>` only when you need the lower-level takeover operation.",
 		"7. Use `agentic-cli write-evidence --run-id <run-id>` and `agentic-cli release-agent --run-id <run-id> --issue-key <issue-key> --completion-evidence <file>` to finish or hand off work.",

@@ -27,6 +27,8 @@ failure:
     - workspace_not_initialized
     - current_user_unavailable
     - task_query_failed
+    - jira_adapter_config_failed
+    - jira_search_failed
 side_effects:
   - must_not_write_jira
   - must_not_modify_code
