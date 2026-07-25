@@ -14,6 +14,7 @@
 
 - [设计审阅清单](review-checklist.md)
 - [设计决策记录](decision-log.md)
+- [项目目标](strategy/project-goals.md)
 - [目标定位](strategy/positioning.md)
 - [长期定位](strategy/long-term-positioning.md)
 - [项目规则](project-rules.md)
@@ -64,6 +65,8 @@
 - [正式使用前问题修复计划](../plans/problem-resolution-plan-v1.md)
 
 ## 规划规则
+
+涉及设计、优化、计划、架构调整、流程调整、标准资产调整或会影响项目演进方向的变更前，必须先读取 [项目目标](strategy/project-goals.md)。
 
 所有计划必须基于已确认的故事线和相对稳定的架构拆解。推荐顺序是：
 

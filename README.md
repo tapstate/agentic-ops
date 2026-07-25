@@ -54,6 +54,7 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 
 - [项目维护者上手](docs/maintainers/getting-started.md)
 - [文档索引](docs/README.md)
+- [项目目标](docs/strategy/project-goals.md)
 - [当前设计](docs/architecture/agenticops-current-design.md)
 - [项目规则](docs/project-rules.md)
 - [开发风格](docs/development-style.md)
