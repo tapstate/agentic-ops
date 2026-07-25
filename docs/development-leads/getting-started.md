@@ -4,28 +4,17 @@
 
 ## 快速开始
 
-AgenticOps 安装是全局动作，项目初始化是工作空间动作。安装脚本会把 `tapstate/agentic-ops` clone 到 `~/.agentic-ops`，更新到 `origin/main` 最新版本，校验 `install-resources/checksums.txt`，再把当前平台已经编译并提交的 `agentic-cli` 复制到 `~/.agentic-ops/bin/agentic-cli`。安装过程不在研发负责人机器上编译。
+选择一条路径执行。路径 A 适合先在终端完成安装；路径 B 适合让 Codex 托管初始化。
 
-下面两条路径二选一，不要混用：
+### 路径 A：终端安装，Codex 初始化能力
 
-- 推荐路径：研发负责人先在终端完成安装和工作空间初始化，再让 Codex 初始化 AgenticOps 能力。
-- Codex 托管路径：研发负责人只创建工作目录并启动 Codex，由 Codex 按 `agent-init.md` 完成安装、工作空间初始化和能力初始化。
-
-### 路径 A：终端安装后启动 Codex
-
-1. 确认 GitHub CLI 已登录，并具备访问 `tapstate/agentic-ops` 私有仓库的权限。
-
-```sh
-gh auth status
-```
-
-如果尚未登录，先执行：
+1. 登录 GitHub。
 
 ```sh
 gh auth login -h github.com -p ssh -s repo
 ```
 
-2. 安装 AgenticOps：
+2. 安装 AgenticOps。
 
 ```sh
 gh api -H 'Accept: application/vnd.github.raw' \
@@ -33,29 +22,7 @@ gh api -H 'Accept: application/vnd.github.raw' \
   | AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
 ```
 
-`/repos/.../install.sh?ref=main` 必须用引号包起来，避免 zsh 把 `?ref=main` 当成通配符。`AGENTIC_OPS_REPO_URL` 显式指定 SSH clone 地址；如果需要改用其它 clone 地址，可以替换该变量值。
-
-如果本机已经存在 `~/.agentic-ops`，安装脚本会进入更新模式，展示当前 ref 和目标分支，并要求确认后才更新。非交互环境必须在研发负责人确认后显式增加 `AGENTIC_OPS_ASSUME_YES=1`。
-
-```sh
-gh api -H 'Accept: application/vnd.github.raw' \
-  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
-  | AGENTIC_OPS_ASSUME_YES=1 AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
-```
-
-3. 让当前 shell 能找到 `agentic-cli`，并验证安装结果。
-
-安装脚本会把 PATH 配置幂等写入 shell 启动文件，例如 zsh 写入 `~/.zshrc`。但是通过管道执行的安装脚本不能反向修改当前终端进程的 `PATH`，所以安装完成后当前终端仍需要执行下面的临时 PATH 命令，或重新打开一个终端。
-
-```sh
-case ":$PATH:" in
-  *":$HOME/.agentic-ops/bin:"*) ;;
-  *) export PATH="$HOME/.agentic-ops/bin:$PATH" ;;
-esac
-agentic-cli --version
-```
-
-如果希望当前终端立即读取已经写入的 zsh 配置，也可以执行：
+3. 让当前终端读取安装后的命令路径。
 
 ```sh
 source "$HOME/.zshrc"
@@ -75,57 +42,37 @@ cd ~/agentic-ops-tapdata
 agentic-cli workspace init --workspace tapdata --jira-user harsen@tapdata.io --jira-project TAP
 ```
 
-6. 在 `~/agentic-ops-tapdata` 启动 Codex。
+6. 启动 Codex。
 
-7. 启动 Codex 后输入能力初始化指令。
+```sh
+codex
+```
+
+7. 让 Codex 初始化 AgenticOps 能力。
 
 ```text
 初始化 AgenticOps 能力，工作空间是 tapdata。
 ```
 
-Codex 应读取 AI 资产入口、执行 `agentic-cli agent init --workspace tapdata` 和 `agentic-cli preflight --workspace tapdata`，然后说明当前可用能力、人工确认点和下一步指令。
-
 ### 路径 B：让 Codex 托管初始化
 
-如果研发负责人希望由 Codex 完成安装检查和初始化，只需要先创建项目 AI 工作空间并在其中启动 Codex。
+1. 创建并进入项目 AI 工作空间。
 
 ```sh
 mkdir -p ~/agentic-ops-tapdata
 cd ~/agentic-ops-tapdata
 ```
 
-在 Codex 中输入一条包含初始化参数的完整托管初始化指令：
+2. 启动 Codex。
+
+```sh
+codex
+```
+
+3. 让 Codex 托管安装、工作空间初始化和能力初始化。
 
 ```text
 安装 https://github.com/tapstate/agentic-ops/blob/main/agent-init.md 并初始化。工作空间是 tapdata，Jira 用户是 harsen@tapdata.io，Jira 项目是 TAP。
-```
-
-Codex 应按 `agent-init.md` 检查当前目录、确认 `gh` 登录状态、处理 `agentic-cli` 是否已安装但不在 `PATH` 的情况、在需要更新已有 `~/.agentic-ops` 时先征得研发负责人确认、初始化工作空间、初始化 AIAgent 能力，并在预检通过后提示如何开始工作。
-
-### 安装后找不到 `agentic-cli`
-
-安装产物固定在：
-
-```text
-~/.agentic-ops/bin/agentic-cli
-```
-
-如果安装后执行 `agentic-cli` 提示 command not found，先在当前终端执行：
-
-```sh
-case ":$PATH:" in
-  *":$HOME/.agentic-ops/bin:"*) ;;
-  *) export PATH="$HOME/.agentic-ops/bin:$PATH" ;;
-esac
-agentic-cli --version
-```
-
-安装脚本已经幂等写入 shell 启动文件；如果当前终端仍找不到命令，原因通常是当前终端尚未重新读取启动文件。可以重新打开终端，或执行 `source "$HOME/.zshrc"`。
-
-也可以直接使用完整路径排查：
-
-```sh
-~/.agentic-ops/bin/agentic-cli --version
 ```
 
 ### 下一步指令
@@ -137,6 +84,75 @@ agentic-cli --version
 接管 TAP-123，并先说明计划、验证方式和风险点。
 回写本次执行证据。
 提交 TAP-123 本次执行的任务审计记录。
+```
+
+## 常见问题
+
+### `gh` 未登录或权限不足
+
+检查 GitHub 登录状态。
+
+```sh
+gh auth status
+```
+
+重新登录 GitHub。
+
+```sh
+gh auth login -h github.com -p ssh -s repo
+```
+
+### 已安装后再次更新
+
+交互式更新 AgenticOps。
+
+```sh
+gh api -H 'Accept: application/vnd.github.raw' \
+  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
+  | AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
+```
+
+已确认更新时，非交互更新 AgenticOps。
+
+```sh
+gh api -H 'Accept: application/vnd.github.raw' \
+  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
+  | AGENTIC_OPS_ASSUME_YES=1 AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
+```
+
+### 当前终端找不到 `agentic-cli`
+
+重新读取 zsh 配置。
+
+```sh
+source "$HOME/.zshrc"
+agentic-cli --version
+```
+
+临时修复当前终端 PATH。
+
+```sh
+case ":$PATH:" in
+  *":$HOME/.agentic-ops/bin:"*) ;;
+  *) export PATH="$HOME/.agentic-ops/bin:$PATH" ;;
+esac
+agentic-cli --version
+```
+
+使用完整路径验证安装结果。
+
+```sh
+~/.agentic-ops/bin/agentic-cli --version
+```
+
+### zsh 提示 `no matches found`
+
+使用带引号的 GitHub API 路径。
+
+```sh
+gh api -H 'Accept: application/vnd.github.raw' \
+  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
+  | AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
 ```
 
 ## 工作空间初始化
