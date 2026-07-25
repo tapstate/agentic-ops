@@ -39,7 +39,7 @@ cd ~/agentic-ops-tapdata
 5. 初始化工作空间。
 
 ```sh
-agentic-cli workspace init --workspace tapdata --jira-user harsen@tapdata.io --jira-project TAP
+agentic-cli workspace init --project tapdata --jira-user harsen@tapdata.io
 ```
 
 6. 启动 Codex。
@@ -51,7 +51,7 @@ codex
 7. 让 Codex 初始化 AgenticOps 能力。
 
 ```text
-初始化 AgenticOps 能力，工作空间是 tapdata。
+初始化 AgenticOps 能力，项目是 tapdata。
 ```
 
 ### 路径 B：让 Codex 托管初始化
@@ -72,7 +72,7 @@ codex
 3. 让 Codex 托管安装、工作空间初始化和能力初始化。
 
 ```text
-安装 https://github.com/tapstate/agentic-ops/blob/main/agent-init.md 并初始化。工作空间是 tapdata，Jira 用户是 harsen@tapdata.io，Jira 项目是 TAP。
+安装 https://github.com/tapstate/agentic-ops/blob/main/agent-init.md 并初始化。项目是 tapdata，Jira 用户是 harsen@tapdata.io。
 ```
 
 ### 下一步指令
@@ -162,16 +162,13 @@ gh api -H 'Accept: application/vnd.github.raw' \
 初始化时需要明确：
 
 - Jira 用户。
-- Jira 项目。
+- 项目配置项，例如 `tapdata`。
 - 项目 AI 工作空间目录。
-- Jira 空间到代码仓库的映射。
-- 本地源码根目录。
-- 工作流配置。
 
-`tapdata` 示例要求当前安装版本中存在匹配的 `install-resources/basic/profiles/tapdata.yaml`。如果使用其它工作空间，`--workspace`、`--jira-user` 和 `--jira-project` 必须与对应工作流配置匹配。
+`tapdata` 示例要求当前安装版本中存在匹配的 `install-resources/basic/profiles/tapdata.yaml`。Jira 项目、Jira 到代码仓库的映射、本地源码根目录和工作流配置由该 profile 定义。
 
 ```sh
-agentic-cli workspace init --workspace tapdata --jira-user harsen@tapdata.io --jira-project TAP
+agentic-cli workspace init --project tapdata --jira-user harsen@tapdata.io
 ```
 
 ## 指挥 AIAgent
@@ -179,7 +176,7 @@ agentic-cli workspace init --workspace tapdata --jira-user harsen@tapdata.io --j
 研发负责人可以用自然语言给 AIAgent 下达任务：
 
 ```text
-初始化 AgenticOps 能力，工作空间是 tapdata。
+初始化 AgenticOps 能力，项目是 tapdata。
 列出我名下可以接管的 Jira 任务。
 接管 TAP-123，并先说明计划、验证方式和风险点。
 回写本次执行证据。

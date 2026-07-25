@@ -507,11 +507,11 @@ gh api -H 'Accept: application/vnd.github.raw' \
 
 首次安装直接 clone managed clone。检测到 `~/.agentic-ops` 已安装时，安装脚本进入更新模式，先展示当前 ref 和目标分支，并要求研发负责人确认；非交互环境只能在用户确认后通过 `AGENTIC_OPS_ASSUME_YES=1` 继续。
 
-项目 AI 工作空间初始化必须在项目 AI 工作空间目录内执行，并显式绑定 Jira 用户和 Jira 空间：
+项目 AI 工作空间初始化必须在项目 AI 工作空间目录内执行。研发负责人只需要指定项目配置项和 Jira 用户；Jira 空间、仓库映射、本地路径和工作流配置由 workflow profile 定义：
 
 ```sh
 cd <project-ai-workspace>
-agentic-cli workspace init --workspace tapstate --jira-user dev@example.com --jira-project TAP
+agentic-cli workspace init --project tapstate --jira-user dev@example.com
 ```
 
 典型使用：

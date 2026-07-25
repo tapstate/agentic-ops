@@ -5,11 +5,10 @@ task_type: workspace_initialization
 allowed_stages:
   - installed
 required_inputs:
-  - workspace
+  - project
   - jira_user
-  - jira_project
 input:
-  workspace:
+  project:
     type: string
     required: true
   jira_user:
@@ -17,7 +16,7 @@ input:
     required: true
   jira_project:
     type: string
-    required: true
+    required: false
 preconditions:
   - workspace_root_must_be_available
   - workspace_root_must_be_writable
@@ -43,8 +42,8 @@ output:
 failure:
   codes:
     - missing_workspace
+    - missing_project
     - missing_jira_user
-    - missing_jira_project
     - workspace_root_failed
     - workspace_init_failed
 side_effects:

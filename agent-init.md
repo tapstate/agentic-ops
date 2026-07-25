@@ -93,17 +93,16 @@ agentic-cli --version
 
 确认研发负责人提供了以下信息：
 
-- 工作空间名称，例如 `tapdata`。
+- 项目配置项，例如 `tapdata`。
 - Jira 用户，例如 `harsen@tapdata.io`。
-- Jira 空间，例如 `TAP`。
 
 在当前项目 AI 工作空间目录中执行：
 
 ```sh
-agentic-cli workspace init --workspace tapdata --jira-user harsen@tapdata.io --jira-project TAP
+agentic-cli workspace init --project tapdata --jira-user harsen@tapdata.io
 ```
 
-初始化参数必须与当前 AgenticOps 版本中的 `install-resources/basic/profiles/<workspace>.yaml` 匹配。以 `tapdata` 为例，`workspace`、`jira.user` 和 `jira.project` 必须分别匹配 `tapdata`、`harsen@tapdata.io` 和 `TAP`。
+初始化时只要求研发负责人选择项目配置项。以 `tapdata` 为例，Codex 应加载当前 AgenticOps 版本中的 `install-resources/basic/profiles/tapdata.yaml`，再从该 profile 中读取 Jira project、Jira 到代码仓库的映射、本地路径和工作流配置。`--jira-project` 只在研发负责人明确要求校验某个 Jira project 时使用。
 
 ### 3. 初始化 AIAgent 能力
 
@@ -120,7 +119,7 @@ agentic-cli preflight --workspace tapdata
 
 初始化完成后，向研发负责人说明：
 
-- 当前工作空间名称。
+- 当前项目配置项。
 - 当前 `agentic-cli` 版本。
 - 工作空间预检结果。
 - 必须人工确认的动作：真实 Jira 写操作、推送、创建或更新拉取请求、合并、发布、范围变更。

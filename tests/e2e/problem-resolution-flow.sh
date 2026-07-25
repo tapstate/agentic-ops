@@ -46,7 +46,7 @@ cp install-resources/basic/policies/default.yaml "$policy_source"
 "${cmd[@]}" policy rollback --workspace tapstate | grep '"operation":"policy_rollback"'
 rm -f "$policy_backup"
 
-"${cmd[@]}" workspace init --workspace tapstate --jira-user dev@example.com --jira-project TAP | grep '"operation":"workspace_init"'
+"${cmd[@]}" workspace init --project tapstate --jira-user dev@example.com | grep '"operation":"workspace_init"'
 test -d "$workspace_root/.agentic-ops/run-logs"
 "${cmd[@]}" takeover-task TAP-MISSING-REPO --workspace tapstate | grep '"target_repo":"tapstate/tap-api"'
 

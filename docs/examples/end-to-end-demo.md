@@ -68,20 +68,20 @@ gh api -H 'Accept: application/vnd.github.raw' \
 
 ```sh
 cd <project-ai-workspace>
-agentic-cli workspace init --workspace tapstate --jira-user dev@example.com --jira-project TAP
+agentic-cli workspace init --project tapstate --jira-user dev@example.com
 ```
 
 期望说明：
 
 - `workspace init` 在项目 AI 工作空间目录内执行。
-- 工作空间绑定 Jira 用户和 Jira 空间。
-- 工作空间维护该 Jira 空间对应的一组 GitHub 仓库和本地源码目录。
+- 工作空间绑定 Jira 用户和项目配置项。
+- 工作空间从项目配置项读取 Jira 空间、GitHub 仓库和本地源码目录。
 - 工作空间创建 `.agentic-ops/runs`、`.agentic-ops/run-logs` 和 `.agentic-ops/feedback`。
 
 ### 步骤 3：初始化 AIAgent
 
 ```text
-初始化 AgenticOps 能力，工作空间是 tapstate。
+初始化 AgenticOps 能力，项目是 tapstate。
 ```
 
 期望说明：

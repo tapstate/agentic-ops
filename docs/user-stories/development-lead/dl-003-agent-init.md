@@ -13,7 +13,7 @@ agentic-cli agent init --workspace tapstate
 或由研发负责人在 AIAgent 会话中输入：
 
 ```text
-初始化 AgenticOps 能力，工作空间是 tapstate。
+初始化 AgenticOps 能力，项目是 tapstate。
 ```
 
 ### 前置条件

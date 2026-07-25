@@ -259,11 +259,12 @@ func TestWorkspaceInitOutputsNextAction(t *testing.T) {
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"workspace", "init", "--workspace", "tapstate", "--jira-user", "dev@example.com", "--jira-project", "TAP"}, &stdout, &stderr)
+	code := Run([]string{"workspace", "init", "--project", "tapstate", "--jira-user", "dev@example.com"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d", code)
 	}
 	assertJSONField(t, stdout.String(), "operation", "workspace_init")
+	assertJSONField(t, stdout.String(), "workspace", "tapstate")
 	assertJSONField(t, stdout.String(), "jira_user", "dev@example.com")
 	assertJSONField(t, stdout.String(), "jira_project", "TAP")
 	assertJSONField(t, stdout.String(), "next_action", "init_agent_capability")
@@ -282,7 +283,7 @@ func TestWorkspaceInitMaterializesWorkspaceProfile(t *testing.T) {
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"workspace", "init", "--workspace", "tapdata", "--jira-user", "harsen@tapdata.io", "--jira-project", "TAP"}, &stdout, &stderr)
+	code := Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
@@ -291,10 +292,22 @@ func TestWorkspaceInitMaterializesWorkspaceProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("profile was not materialized: %v", err)
 	}
-	if !strings.Contains(string(data), "workspace: tapdata") {
+	if !strings.Contains(string(data), "workspace: tapdata") || !strings.Contains(string(data), "user: lead@example.com") || !strings.Contains(string(data), "project: TAP") {
 		t.Fatalf("materialized profile mismatch: %s", string(data))
 	}
 	assertJSONField(t, stdout.String(), "profile", profilePath)
+}
+
+func TestWorkspaceInitRejectsMismatchedJiraProjectOverride(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com", "--jira-project", "OTHER"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "workspace_profile_failed")
 }
 
 func TestAgentInitOutputsTaskModel(t *testing.T) {

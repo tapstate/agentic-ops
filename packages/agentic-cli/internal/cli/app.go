@@ -28,6 +28,7 @@ import (
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/update"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/workspace"
+	"gopkg.in/yaml.v3"
 )
 
 var Version = "SRC-source"
@@ -261,29 +262,36 @@ func runPreflight(args []string, stdout io.Writer) int {
 }
 
 func runWorkspaceInit(args []string, stdout io.Writer) int {
-	workspaceName := readFlag(args, "--workspace", "default")
+	projectName := readFlag(args, "--project", "")
+	workspaceName := readFlag(args, "--workspace", "")
+	if projectName != "" && workspaceName != "" && projectName != workspaceName {
+		return writeJSON(stdout, output.Failure("workspace_init", "project_workspace_mismatch", "项目配置项与工作空间名称不一致", "请只提供 --project，或让 --project 与 --workspace 使用相同值"))
+	}
+	if projectName == "" {
+		projectName = workspaceName
+	}
+	if projectName == "" {
+		return writeJSON(stdout, output.Failure("workspace_init", "missing_project", "缺少项目配置项", "请提供 --project"))
+	}
 	jiraUser := readFlag(args, "--jira-user", "")
-	jiraProject := readFlag(args, "--jira-project", "")
+	jiraProjectOverride := readFlag(args, "--jira-project", "")
 	if jiraUser == "" {
 		return writeJSON(stdout, output.Failure("workspace_init", "missing_jira_user", "缺少 Jira 用户", "请提供 --jira-user"))
-	}
-	if jiraProject == "" {
-		return writeJSON(stdout, output.Failure("workspace_init", "missing_jira_project", "缺少 Jira 空间", "请提供 --jira-project"))
 	}
 	root, err := workspaceRoot()
 	if err != nil {
 		return writeJSON(stdout, output.Failure("workspace_init", "workspace_root_failed", "无法读取当前工作目录", "请在项目 AI 工作空间中重试"))
 	}
-	info, err := workspace.Ensure(root, workspaceName)
+	info, err := workspace.Ensure(root, projectName)
 	if err != nil {
 		return writeJSON(stdout, output.Failure("workspace_init", "workspace_init_failed", err.Error(), "请检查工作空间目录权限"))
 	}
-	profilePath, err := materializeWorkspaceProfile(info, jiraUser, jiraProject)
+	profilePath, jiraProject, err := materializeWorkspaceProfile(info, jiraUser, jiraProjectOverride)
 	if err != nil {
 		return writeJSON(stdout, output.FailureWithContext("workspace_init", output.FailureContext{
 			Code:                "workspace_profile_failed",
 			Message:             err.Error(),
-			RequiredHumanAction: "请检查 install-resources/basic/profiles 目录中的工作流配置，并确认 workspace、jira.user 和 jira.project 与初始化参数一致",
+			RequiredHumanAction: "请检查 install-resources/basic/profiles/<project>.yaml，并确认 workspace 与项目配置项一致、jira.project 已配置",
 			TaskType:            "workspace_initialization",
 			CurrentStage:        "workspace_profile",
 			NextAction:          "fix_profile",
@@ -302,43 +310,41 @@ func runWorkspaceInit(args []string, stdout io.Writer) int {
 	}))
 }
 
-func materializeWorkspaceProfile(info workspace.Info, jiraUser string, jiraProject string) (string, error) {
+func materializeWorkspaceProfile(info workspace.Info, jiraUser string, jiraProjectOverride string) (string, string, error) {
 	sourcePath, err := repoProfilePath(info.Name)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	loadedProfile, err := profile.LoadFile(sourcePath)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if loadedProfile.Workspace != info.Name {
-		return "", fmt.Errorf("profile workspace %q does not match %q", loadedProfile.Workspace, info.Name)
+		return "", "", fmt.Errorf("profile workspace %q does not match project %q", loadedProfile.Workspace, info.Name)
 	}
-	if loadedProfile.Jira.User != jiraUser {
-		return "", fmt.Errorf("profile jira.user %q does not match %q", loadedProfile.Jira.User, jiraUser)
+	if jiraProjectOverride != "" && loadedProfile.Jira.Project != jiraProjectOverride {
+		return "", "", fmt.Errorf("profile jira.project %q does not match %q", loadedProfile.Jira.Project, jiraProjectOverride)
 	}
-	if loadedProfile.Jira.Project != jiraProject {
-		return "", fmt.Errorf("profile jira.project %q does not match %q", loadedProfile.Jira.Project, jiraProject)
-	}
+	loadedProfile.Jira.User = jiraUser
 	if issues := profile.Validate(loadedProfile); len(issues) > 0 {
-		return "", fmt.Errorf("workflow profile validation failed: %s", issues[0].Code)
+		return "", "", fmt.Errorf("workflow profile validation failed: %s", issues[0].Code)
 	}
 	registry, err := repoProcessRegistry()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if issues := profile.ValidateProcesses(loadedProfile, registry); len(issues) > 0 {
-		return "", fmt.Errorf("workflow profile process validation failed: %s", issues[0].Code)
+		return "", "", fmt.Errorf("workflow profile process validation failed: %s", issues[0].Code)
 	}
-	data, err := os.ReadFile(sourcePath)
+	data, err := yaml.Marshal(loadedProfile)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	targetPath := filepath.Join(info.ProfilesDir, info.Name+".yaml")
 	if err := os.WriteFile(targetPath, data, 0o644); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return targetPath, nil
+	return targetPath, loadedProfile.Jira.Project, nil
 }
 
 func runAgentInit(args []string, stdout io.Writer) int {

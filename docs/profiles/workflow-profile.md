@@ -8,10 +8,12 @@ AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira 工作
 
 ## 2. 配置范围
 
+一个工作流配置以项目配置项命名，例如 `tapdata` 或 `tapstate`，文件位于 `install-resources/basic/profiles/<project>.yaml`。研发负责人初始化时只选择项目配置项；Jira project、代码仓库、本地路径、流程和策略映射由该 profile 定义。
+
 一个工作流配置至少应描述：
 
-- 项目 AI 工作空间名称。
-- Jira 用户、Jira 空间和查询规则。
+- 项目配置项名称。
+- Jira 空间和查询规则；初始化时写入当前 Jira 用户。
 - Jira Form Mapping，把 AgenticOps 标准字段映射到具体 Jira 字段、描述模板、评论模板或工作空间配置。
 - 任务分类映射，把 Jira 卡片类型、标签、组件、自定义字段或描述模板映射到 AgenticOps `task_class`。
 - 标准流程映射，把 `task_class` 映射到 Standard Process Registry 中的 `process_id`。
@@ -125,6 +127,9 @@ templates:
 - 工作流配置可以绑定具体 Jira 工作流，但核心操作不能依赖某个固定 Jira 状态名。
 - 工作流配置必须适配 Task Form Standard；AIAgent 只消费标准字段，不直接消费 Jira 自定义字段。
 - `Profile` 必须适配 Standard Process Registry；AIAgent 先识别 `task_class`，再选择 `process_id`。
+- `Profile.workspace` 必须与 profile 文件名中的项目配置项一致，例如 `tapdata.yaml` 对应 `workspace: tapdata`。
+- `Profile.jira.project` 是该项目配置项绑定的 Jira project；快速开始初始化不要求研发负责人重复输入。
+- `Profile.jira.user` 在共享 profile 中可以是默认值或占位值；`workspace init` 会使用研发负责人提供的 Jira 用户写入项目 AI 工作空间中的本地 profile。
 - `Profile` 必须说明关键专业审查节点如何映射到标准字段、Jira 状态、拉取请求审查、CI 或人工确认。
 - `Profile` 必须说明失败后允许重试还是必须重做前序阶段。
 - `Profile` 必须能被 `agentic-cli preflight` 校验。

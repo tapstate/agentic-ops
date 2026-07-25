@@ -48,7 +48,7 @@ test -x "$cmd"
 test -f "$home_dir/.agentic-ops/install-resources/basic/profiles/tapdata.yaml"
 
 cd "$workspace_root"
-"$cmd" workspace init --workspace tapdata --jira-user harsen@tapdata.io --jira-project TAP | grep '"operation":"workspace_init"'
+"$cmd" workspace init --project tapdata --jira-user harsen@tapdata.io | grep '"operation":"workspace_init"'
 "$cmd" agent init --workspace tapdata --agent-type codex | grep '"operation":"agent_init"'
 AGENTIC_OPS_WORKSPACE_ROOT="$workspace_root" "$cmd" preflight --workspace tapdata | grep '"operation":"preflight"'
 
