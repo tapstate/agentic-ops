@@ -32,6 +32,7 @@ test -x "install-resources/darwin-amd64/agentic-cli"
 test -x "install-resources/linux-arm64/agentic-cli"
 test -x "install-resources/linux-amd64/agentic-cli"
 test -x "install-resources/$target_dir/agentic-cli"
+test -f "skills/design-takeover-capability/SKILL.md"
 test -f install-resources/checksums.txt
 grep 'basic/manifest.json' install-resources/checksums.txt >/dev/null
 grep "$target_dir/agentic-cli" install-resources/checksums.txt >/dev/null
