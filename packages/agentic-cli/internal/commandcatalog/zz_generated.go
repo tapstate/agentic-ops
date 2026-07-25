@@ -4,59 +4,59 @@ package commandcatalog
 
 import (
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/cmdkit"
-	cmd000 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/agent/init"
-	cmd001 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/assets/install"
-	cmd002 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/check-ci-status"
-	cmd003 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/contract/validate"
-	cmd004 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/doctor"
-	cmd005 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/feedback/bundle"
-	cmd006 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/feedback/report"
-	cmd007 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/fix-pr-comments"
-	cmd008 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/inspect-workspace"
-	cmd009 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/list-tasks"
-	cmd010 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/policy/rollback"
-	cmd011 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/policy/update"
-	cmd012 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/policy/validate"
-	cmd013 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/preflight"
-	cmd014 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/prepare-pr"
-	cmd015 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/profile/rollback"
-	cmd016 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/profile/update"
-	cmd017 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/profile/validate"
-	cmd018 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/read-pr-comments"
-	cmd019 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/release-agent"
-	cmd020 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/resume-takeover"
-	cmd021 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/takeover-task"
-	cmd022 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update/apply"
-	cmd023 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update/check"
-	cmd024 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/workspace/init"
-	cmd025 "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/write-evidence"
+	agent_init_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/agent/init"
+	assets_install_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/assets/install"
+	check_ci_status_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/check-ci-status"
+	contract_validate_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/contract/validate"
+	doctor_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/doctor"
+	feedback_bundle_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/feedback/bundle"
+	feedback_report_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/feedback/report"
+	fix_pr_comments_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/fix-pr-comments"
+	inspect_workspace_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/inspect-workspace"
+	list_tasks_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/list-tasks"
+	policy_rollback_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/policy/rollback"
+	policy_update_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/policy/update"
+	policy_validate_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/policy/validate"
+	preflight_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/preflight"
+	prepare_pr_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/prepare-pr"
+	profile_rollback_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/profile/rollback"
+	profile_update_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/profile/update"
+	profile_validate_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/profile/validate"
+	read_pr_comments_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/read-pr-comments"
+	release_agent_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/release-agent"
+	resume_takeover_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/resume-takeover"
+	takeover_task_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/takeover-task"
+	update_apply_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update/apply"
+	update_check_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update/check"
+	workspace_init_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/workspace/init"
+	write_evidence_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/write-evidence"
 )
 
 func RegisterAll(registry *cmdkit.Registry) {
-	cmd000.Register(registry)
-	cmd001.Register(registry)
-	cmd002.Register(registry)
-	cmd003.Register(registry)
-	cmd004.Register(registry)
-	cmd005.Register(registry)
-	cmd006.Register(registry)
-	cmd007.Register(registry)
-	cmd008.Register(registry)
-	cmd009.Register(registry)
-	cmd010.Register(registry)
-	cmd011.Register(registry)
-	cmd012.Register(registry)
-	cmd013.Register(registry)
-	cmd014.Register(registry)
-	cmd015.Register(registry)
-	cmd016.Register(registry)
-	cmd017.Register(registry)
-	cmd018.Register(registry)
-	cmd019.Register(registry)
-	cmd020.Register(registry)
-	cmd021.Register(registry)
-	cmd022.Register(registry)
-	cmd023.Register(registry)
-	cmd024.Register(registry)
-	cmd025.Register(registry)
+	agent_init_cmd.Register(registry)
+	assets_install_cmd.Register(registry)
+	check_ci_status_cmd.Register(registry)
+	contract_validate_cmd.Register(registry)
+	doctor_cmd.Register(registry)
+	feedback_bundle_cmd.Register(registry)
+	feedback_report_cmd.Register(registry)
+	fix_pr_comments_cmd.Register(registry)
+	inspect_workspace_cmd.Register(registry)
+	list_tasks_cmd.Register(registry)
+	policy_rollback_cmd.Register(registry)
+	policy_update_cmd.Register(registry)
+	policy_validate_cmd.Register(registry)
+	preflight_cmd.Register(registry)
+	prepare_pr_cmd.Register(registry)
+	profile_rollback_cmd.Register(registry)
+	profile_update_cmd.Register(registry)
+	profile_validate_cmd.Register(registry)
+	read_pr_comments_cmd.Register(registry)
+	release_agent_cmd.Register(registry)
+	resume_takeover_cmd.Register(registry)
+	takeover_task_cmd.Register(registry)
+	update_apply_cmd.Register(registry)
+	update_check_cmd.Register(registry)
+	workspace_init_cmd.Register(registry)
+	write_evidence_cmd.Register(registry)
 }
