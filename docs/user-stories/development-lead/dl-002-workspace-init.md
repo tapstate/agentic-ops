@@ -27,7 +27,8 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 4. CLI 根据项目配置项加载 workflow profile。
 5. CLI 从 workflow profile 读取 Jira project、JQL、字段映射、状态映射、目标仓库映射、GitHub 组织和本地源码根目录。
 6. CLI 创建工作空间事件和执行日志目录，例如 `<project-ai-workspace>/.agentic-ops/runs/`、`<project-ai-workspace>/.agentic-ops/run-logs/`。
-7. CLI 运行工作空间预检。
+7. CLI 写入 `.agentic-ops/agent.json` 和根目录 `AGENTS.md`，让 AIAgent 能识别当前项目并知道如何调用 `agentic-cli`。
+8. CLI 运行工作空间预检。
 
 ### 输出
 
@@ -40,6 +41,8 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
   "jira_user": "dev@example.com",
   "jira_project": "TAP",
   "profile": "tapstate",
+  "agent_config": "<project-ai-workspace>/.agentic-ops/agent.json",
+  "agent_instructions": "<project-ai-workspace>/AGENTS.md",
   "runs_dir": "<project-ai-workspace>/.agentic-ops/runs",
   "run_logs_dir": "<project-ai-workspace>/.agentic-ops/run-logs",
   "next_action": "init_agent_capability"
@@ -58,6 +61,7 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 - 一个工作空间能绑定一个具体 Jira 空间和一组 GitHub 仓库。
 - 不同工作空间可以使用不同 Jira / GitHub / 代码仓库配置。
 - 初始化时研发负责人只需要提供项目配置项和 Jira 用户；Jira project 和资源映射由 workflow profile 定义。
+- 初始化后，项目 AI 工作空间中存在 `.agentic-ops/agent.json` 和 `AGENTS.md`。
 - 工作空间产物写入项目 AI 工作空间，不写入 `~/.agentic-ops`。
 - Jira 空间到代码仓库的映射由工作流配置维护，AIAgent 不得在接管真实卡片时猜测目标仓库。
 - `agentic-cli preflight --workspace <name>` 能验证工作空间可用性。
@@ -80,7 +84,7 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 
 - `agentic-cli workspace init --project <project-name> --jira-user <user>` 输出。
 - `agentic-cli preflight --workspace <name>` 输出。
-- 项目 AI 工作空间中的 `.agentic-ops/runs/`、`.agentic-ops/run-logs/` 和 `.agentic-ops/feedback/`。
+- 项目 AI 工作空间中的 `.agentic-ops/runs/`、`.agentic-ops/run-logs/`、`.agentic-ops/feedback/`、`.agentic-ops/agent.json` 和 `AGENTS.md`。
 - workflow profile 中的 Jira / GitHub / 本地路径映射。
 
 ### 关联设计

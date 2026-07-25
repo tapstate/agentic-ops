@@ -317,8 +317,8 @@ packages/agentic-cli/
 AIAgent 始终调用统一入口：
 
 ```sh
-agentic-cli list-tasks --workspace tapstate
-agentic-cli takeover-task TAP-123 --workspace tapstate
+agentic-cli list-tasks
+agentic-cli takeover-task TAP-123
 agentic-cli write-evidence --run-id ...
 agentic-cli prepare-pr --run-id ...
 ```
@@ -514,12 +514,14 @@ cd <project-ai-workspace>
 agentic-cli workspace init --project tapstate --jira-user dev@example.com
 ```
 
+初始化会在项目 AI 工作空间中写入 `.agentic-ops/agent.json` 和 `AGENTS.md`。AIAgent 在该目录中启动后，可以从本地配置推断当前项目，并按 `AGENTS.md` 中的规则调用 `agentic-cli`。
+
 典型使用：
 
 ```sh
-agentic-cli preflight --workspace tapstate
-agentic-cli list-tasks --workspace tapstate
-agentic-cli takeover-task TAP-123 --workspace tapstate
+agentic-cli preflight
+agentic-cli list-tasks
+agentic-cli takeover-task TAP-123
 agentic-cli write-evidence --run-id ...
 ```
 

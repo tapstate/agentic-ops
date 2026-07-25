@@ -78,10 +78,10 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 - 工作空间从项目配置项读取 Jira 空间、GitHub 仓库和本地源码目录。
 - 工作空间创建 `.agentic-ops/runs`、`.agentic-ops/run-logs` 和 `.agentic-ops/feedback`。
 
-### 步骤 3：初始化 AIAgent
+### 步骤 3：启用 AgenticOps 工作模式
 
 ```text
-初始化 AgenticOps 能力，项目是 tapstate。
+启用 AgenticOps 工作模式。
 ```
 
 期望说明：
@@ -175,4 +175,4 @@ bash tests/e2e/local-fake-flow.sh
 bash tests/e2e/local-install-flow.sh
 ```
 
-该命令会准备临时 managed clone，通过 `scripts/install.sh` 安装到临时 `~/.agentic-ops`，再使用安装后的 `agentic-cli` 完成工作空间初始化、AIAgent 初始化和预检。
+该命令会准备临时 managed clone，通过 `scripts/install.sh` 安装到临时 `~/.agentic-ops`，再使用安装后的 `agentic-cli` 完成工作空间初始化、AIAgent 配置生成、AIAgent 初始化和预检。

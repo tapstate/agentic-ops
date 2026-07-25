@@ -7,7 +7,7 @@
 ### 触发方式
 
 ```sh
-agentic-cli takeover-task TAP-123 --workspace tapstate
+agentic-cli takeover-task TAP-123
 ```
 
 或自然语言：

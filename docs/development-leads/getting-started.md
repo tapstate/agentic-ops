@@ -48,10 +48,10 @@ agentic-cli workspace init --project tapdata --jira-user harsen@tapdata.io
 codex
 ```
 
-7. 让 Codex 初始化 AgenticOps 能力。
+7. 启用 AgenticOps 工作模式。
 
 ```text
-初始化 AgenticOps 能力，项目是 tapdata。
+启用 AgenticOps 工作模式。
 ```
 
 ### 路径 B：让 Codex 托管初始化
@@ -165,7 +165,7 @@ gh api -H 'Accept: application/vnd.github.raw' \
 - 项目配置项，例如 `tapdata`。
 - 项目 AI 工作空间目录。
 
-`tapdata` 示例要求当前安装版本中存在匹配的 `install-resources/basic/profiles/tapdata.yaml`。Jira 项目、Jira 到代码仓库的映射、本地源码根目录和工作流配置由该 profile 定义。
+`tapdata` 示例要求当前安装版本中存在匹配的 `install-resources/basic/profiles/tapdata.yaml`。Jira 项目、Jira 到代码仓库的映射、本地源码根目录和工作流配置由该 profile 定义。初始化会在当前目录生成 `.agentic-ops/agent.json` 和 `AGENTS.md`，用于让 Codex 识别当前项目并知道如何调用 `agentic-cli`。
 
 ```sh
 agentic-cli workspace init --project tapdata --jira-user harsen@tapdata.io
@@ -176,7 +176,7 @@ agentic-cli workspace init --project tapdata --jira-user harsen@tapdata.io
 研发负责人可以用自然语言给 AIAgent 下达任务：
 
 ```text
-初始化 AgenticOps 能力，项目是 tapdata。
+启用 AgenticOps 工作模式。
 列出我名下可以接管的 Jira 任务。
 接管 TAP-123，并先说明计划、验证方式和风险点。
 回写本次执行证据。

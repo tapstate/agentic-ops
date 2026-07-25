@@ -31,6 +31,10 @@ output:
     type: string
   profile:
     type: string
+  agent_config:
+    type: string
+  agent_instructions:
+    type: string
   runs_dir:
     type: string
   run_logs_dir:
@@ -46,6 +50,8 @@ failure:
     - missing_jira_user
     - workspace_root_failed
     - workspace_init_failed
+    - agent_config_failed
+    - agent_instructions_failed
 side_effects:
   - may_write_workspace_state
   - must_not_write_jira

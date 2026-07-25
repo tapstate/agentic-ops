@@ -4,12 +4,11 @@ purpose: 初始化 AIAgent 在当前工作空间内可使用的能力说明。
 task_type: capability_initialization
 allowed_stages:
   - workspace_initialized
-required_inputs:
-  - workspace
+required_inputs: []
 input:
   workspace:
     type: string
-    required: true
+    required: false
 preconditions:
   - workspace_must_be_initialized
 output:
@@ -25,7 +24,6 @@ output:
     type: array
 failure:
   codes:
-    - missing_workspace
     - workspace_not_initialized
     - capability_init_failed
 side_effects:

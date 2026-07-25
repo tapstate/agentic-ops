@@ -7,19 +7,20 @@
 ### 触发方式
 
 ```sh
-agentic-cli agent init --workspace tapstate
+agentic-cli agent init
 ```
 
 或由研发负责人在 AIAgent 会话中输入：
 
 ```text
-初始化 AgenticOps 能力，项目是 tapstate。
+启用 AgenticOps 工作模式。
 ```
 
 ### 前置条件
 
 - AgenticOps 已安装。
 - 项目 AI 工作空间已初始化。
+- 项目 AI 工作空间中存在 `.agentic-ops/agent.json` 和 `AGENTS.md`。
 - AIAgent 当前会话可以读取本地文件并调用 `agentic-cli`。
 
 ### 主流程
@@ -28,7 +29,7 @@ agentic-cli agent init --workspace tapstate
 2. AIAgent 读取任务类型、阶段和下一步动作规则。
 3. AIAgent 读取 工作流配置摘要。
 4. AIAgent 读取 操作契约列表。
-5. AIAgent 执行 `agentic-cli preflight --workspace tapstate`。
+5. AIAgent 执行 `agentic-cli preflight`。
 6. AIAgent 向研发负责人输出当前可用能力、阶段判断方式和限制。
 
 ### 输出
@@ -89,8 +90,8 @@ agentic-cli agent init --workspace tapstate
 
 ### 验收证据
 
-- `agentic-cli agent init --workspace <name>` 输出。
-- `agentic-cli preflight --workspace <name>` 输出。
+- `agentic-cli agent init` 输出。
+- `agentic-cli preflight` 输出。
 - AIAgent 对能力、阶段判断和人工确认点的说明。
 - AI 员工手册和操作契约读取记录。
 

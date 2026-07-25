@@ -49,9 +49,11 @@ test -f "$home_dir/.agentic-ops/install-resources/basic/profiles/tapdata.yaml"
 
 cd "$workspace_root"
 "$cmd" workspace init --project tapdata --jira-user harsen@tapdata.io | grep '"operation":"workspace_init"'
-"$cmd" agent init --workspace tapdata --agent-type codex | grep '"operation":"agent_init"'
-AGENTIC_OPS_WORKSPACE_ROOT="$workspace_root" "$cmd" preflight --workspace tapdata | grep '"operation":"preflight"'
+"$cmd" agent init | grep '"workspace":"tapdata"'
+AGENTIC_OPS_WORKSPACE_ROOT="$workspace_root" "$cmd" preflight | grep '"workspace":"tapdata"'
 
 test -f "$workspace_root/.agentic-ops/profiles/tapdata.yaml"
+test -f "$workspace_root/.agentic-ops/agent.json"
+test -f "$workspace_root/AGENTS.md"
 
 printf '{"ok":true,"operation":"local_install_flow","target":"%s-%s"}\n' "$target_os" "$target_arch"

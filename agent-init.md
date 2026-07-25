@@ -104,16 +104,16 @@ agentic-cli workspace init --project tapdata --jira-user harsen@tapdata.io
 
 初始化时只要求研发负责人选择项目配置项。以 `tapdata` 为例，Codex 应加载当前 AgenticOps 版本中的 `install-resources/basic/profiles/tapdata.yaml`，再从该 profile 中读取 Jira project、Jira 到代码仓库的映射、本地路径和工作流配置。`--jira-project` 只在研发负责人明确要求校验某个 Jira project 时使用。
 
-### 3. 初始化 AIAgent 能力
+### 3. 启用 AgenticOps 工作模式
 
 执行：
 
 ```sh
-agentic-cli agent init --workspace tapdata
-agentic-cli preflight --workspace tapdata
+agentic-cli agent init
+agentic-cli preflight
 ```
 
-如果 `preflight` 失败，停止接管任务，并把缺失配置、权限或路径问题说明给研发负责人。
+`workspace init` 会在当前目录生成 `.agentic-ops/agent.json` 和 `AGENTS.md`。Codex 应从这些文件识别当前项目配置项，并按 `AGENTS.md` 中的 `agentic-cli` 使用规则工作。如果 `preflight` 失败，停止接管任务，并把缺失配置、权限或路径问题说明给研发负责人。
 
 ## 初始化完成后的回复
 
