@@ -26,6 +26,19 @@ func (FakeClient) ListTasks(workspace string) []Issue {
 			VerificationMethod: "go test ./...",
 			RiskLevel:          "low",
 		},
+		{
+			Key:                "TAP-BUG-123",
+			Summary:            "修复缺陷示例任务",
+			Owner:              "current-user",
+			Assignee:           "current-user",
+			IssueType:          "Bug",
+			Status:             "To Do",
+			Labels:             []string{"defect"},
+			TargetRepo:         workspace + "/example-repo",
+			AcceptanceCriteria: "缺陷已修复并验证",
+			VerificationMethod: "go test ./...",
+			RiskLevel:          "medium",
+		},
 	}
 }
 
@@ -60,7 +73,8 @@ func (FakeClient) TransitionIssue(ctx context.Context, key string, transitionID 
 }
 
 func fakeIssues(workspace string) []Issue {
-	valid := (FakeClient{}).ListTasks(workspace)[0]
+	listed := (FakeClient{}).ListTasks(workspace)
+	valid := listed[0]
 	missingRepo := valid
 	missingRepo.Key = "TAP-MISSING-REPO"
 	missingRepo.TargetRepo = ""
@@ -77,5 +91,5 @@ func fakeIssues(workspace string) []Issue {
 	inProgress := valid
 	inProgress.Key = "TAP-IN-PROGRESS"
 	inProgress.Status = "In Progress"
-	return []Issue{valid, missingRepo, otherOwner, agentConflict, unknownStatus, inProgress}
+	return append(listed, missingRepo, otherOwner, agentConflict, unknownStatus, inProgress)
 }

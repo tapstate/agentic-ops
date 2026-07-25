@@ -32,6 +32,8 @@ type Event struct {
 	TaskClass             string `json:"task_class,omitempty"`
 	TaskClassSource       string `json:"task_class_source,omitempty"`
 	ProcessID             string `json:"process_id,omitempty"`
+	CapabilityID          string `json:"capability_id,omitempty"`
+	DefectComplexity      string `json:"defect_complexity,omitempty"`
 	CurrentAgentIDCleared bool   `json:"current_agent_id_cleared,omitempty"`
 	AuditTarget           string `json:"audit_target,omitempty"`
 	AuditSubmitted        bool   `json:"audit_submitted,omitempty"`

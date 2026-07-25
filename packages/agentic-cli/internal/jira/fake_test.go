@@ -4,15 +4,24 @@ import "testing"
 
 func TestFakeClientListsTaskWithRequiredFields(t *testing.T) {
 	issues := FakeClient{}.ListTasks("tapstate")
-	if len(issues) != 1 {
-		t.Fatalf("len = %d, want 1", len(issues))
+	if len(issues) != 2 {
+		t.Fatalf("len = %d, want 2", len(issues))
 	}
-	got := issues[0]
-	if got.Key != "TAP-123" {
-		t.Fatalf("Key = %s", got.Key)
+	byKey := map[string]Issue{}
+	for _, issue := range issues {
+		byKey[issue.Key] = issue
 	}
-	if got.TargetRepo == "" || got.AcceptanceCriteria == "" || got.VerificationMethod == "" {
-		t.Fatalf("issue missing required fields: %+v", got)
+	for _, key := range []string{"TAP-123", "TAP-BUG-123"} {
+		got := byKey[key]
+		if got.Key == "" {
+			t.Fatalf("%s missing from fake list: %+v", key, issues)
+		}
+		if got.TargetRepo == "" || got.AcceptanceCriteria == "" || got.VerificationMethod == "" {
+			t.Fatalf("issue missing required fields: %+v", got)
+		}
+	}
+	if byKey["TAP-BUG-123"].IssueType != "Bug" {
+		t.Fatalf("TAP-BUG-123 IssueType = %s", byKey["TAP-BUG-123"].IssueType)
 	}
 }
 

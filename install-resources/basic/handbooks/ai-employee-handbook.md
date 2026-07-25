@@ -75,6 +75,7 @@ AI 员工必须优先通过 `agentic-cli` 调用操作。以下命令是标准�
 ```sh
 agentic-cli preflight --workspace tapstate
 agentic-cli list-tasks --workspace tapstate
+agentic-cli task run TAP-123 --workspace tapstate
 agentic-cli takeover-task TAP-123 --workspace tapstate
 agentic-cli resume-takeover --run-id <run_id> --workspace tapstate
 agentic-cli inspect-workspace --workspace tapstate

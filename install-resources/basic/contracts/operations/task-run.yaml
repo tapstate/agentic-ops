@@ -1,0 +1,109 @@
+operation: task_run
+version: 1
+purpose: 统一执行 Jira 任务接管、能力处理和任务回写。
+task_type: task_takeover
+allowed_stages:
+  - waiting_takeover
+  - takeover_gate
+  - takeover_started
+  - capability_resolution
+  - implementation
+  - completed
+  - completion_cleanup
+required_inputs:
+  - issue_key
+  - workspace
+input:
+  issue_key:
+    type: string
+    required: true
+  workspace:
+    type: string
+    required: true
+  process:
+    type: string
+    required: false
+preconditions:
+  - current_user_must_match_owner
+  - current_agent_id_must_be_empty_or_match_agent_id
+  - task_class_must_be_mapped_to_standard_process
+  - issue_must_be_in_allowed_project
+  - issue_must_have_acceptance_criteria
+  - issue_must_have_target_repo
+  - issue_must_have_verification_method
+  - jira_status_must_map_to_entry_stage
+output:
+  workspace:
+    type: string
+  issue_key:
+    type: string
+  run_id:
+    type: string
+  agent_id:
+    type: string
+  current_agent_id:
+    type: string
+  takeover_at:
+    type: string
+  task_type:
+    type: string
+  task_class:
+    type: string
+  task_class_source:
+    type: string
+  process_id:
+    type: string
+  capability_id:
+    type: string
+  defect_complexity:
+    type: string
+  current_stage:
+    type: string
+  target_repo:
+    type: string
+  next_action:
+    type: string
+  current_agent_id_cleared:
+    type: boolean
+  audit_submitted:
+    type: boolean
+  audit_target:
+    type: string
+  audit_reference:
+    type: string
+failure:
+  codes:
+    - owner_mismatch
+    - assignee_mismatch
+    - agent_ownership_conflict
+    - task_class_mapping_gap
+    - standard_process_mapping_gap
+    - unknown_jira_status
+    - invalid_takeover_stage
+    - missing_acceptance_criteria
+    - missing_target_repo
+    - missing_verification_method
+    - missing_risk_level
+    - capability_mapping_gap
+    - design_impact_assessment_required
+    - jira_adapter_config_failed
+    - jira_issue_read_failed
+    - jira_current_user_failed
+    - real_jira_confirmation_required
+    - missing_jira_write_mapping
+    - jira_takeover_write_failed
+    - agent_release_failed
+    - event_write_failed
+side_effects:
+  - may_write_jira_field
+  - may_write_local_event
+  - may_confirm_task_audit_submission
+  - may_clear_current_agent_id
+  - must_not_create_pr
+human_gate:
+  required: true
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: takeover_gate
+redo_from_stage: takeover_gate

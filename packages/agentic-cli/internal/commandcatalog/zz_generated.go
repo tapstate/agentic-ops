@@ -26,6 +26,7 @@ import (
 	release_agent_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/release-agent"
 	resume_takeover_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/resume-takeover"
 	takeover_task_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/takeover-task"
+	task_run_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/task/run"
 	update_apply_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update/apply"
 	update_check_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update/check"
 	workspace_init_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/workspace/init"
@@ -55,6 +56,7 @@ func RegisterAll(registry *cmdkit.Registry) {
 	release_agent_cmd.Register(registry)
 	resume_takeover_cmd.Register(registry)
 	takeover_task_cmd.Register(registry)
+	task_run_cmd.Register(registry)
 	update_apply_cmd.Register(registry)
 	update_check_cmd.Register(registry)
 	workspace_init_cmd.Register(registry)

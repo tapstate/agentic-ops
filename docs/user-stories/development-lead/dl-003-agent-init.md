@@ -46,6 +46,7 @@ agentic-cli agent init
   },
   "capabilities": [
     "list_tasks",
+    "task_run",
     "takeover_task",
     "resume_takeover",
     "write_evidence",

@@ -88,6 +88,10 @@ func RunResumeTakeover(args []string, stdout io.Writer) int {
 	return runResumeTakeover(args, stdout)
 }
 
+func RunTaskRun(args []string, stdout io.Writer) int {
+	return runTaskRun(args, stdout)
+}
+
 func RunWriteEvidence(args []string, stdout io.Writer) int {
 	return runWriteEvidence(args, stdout)
 }
