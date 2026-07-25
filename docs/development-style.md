@@ -42,7 +42,7 @@ AgenticOps 开发必须遵守：
 Go CLI 运行时的实现方向如下：
 
 - CLI 运行时使用 Go 作为主实现语言。
-- shell 只用于 `curl | bash` 安装引导，不承载业务逻辑。
+- shell 只用于 `gh api | bash` 认证安装引导，不承载业务逻辑。
 - CLI 入口统一为 `agentic-cli`。
 - Go 代码应拆分为清晰的命令、契约、策略、适配器、工作空间和反馈模块，不写巨大单文件。
 - stdout 只输出结构化 JSON。

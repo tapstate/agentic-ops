@@ -45,7 +45,7 @@ Jira 交互中的人可见内容必须使用中文，包括标题、描述、评
 
 ## 运行时方向
 
-AgenticCLI 使用 Go 实现，统一入口为 `agentic-cli`。shell 只用于 `curl | bash` 安装引导、轻量环境检测、managed clone 更新、校验安装资源和复制当前平台二进制，不承载 Jira、GitHub、Git、操作契约、策略门禁、证据或反馈的业务逻辑。
+AgenticCLI 使用 Go 实现，统一入口为 `agentic-cli`。shell 只用于 `gh api | bash` 认证安装引导、轻量环境检测、managed clone 更新、校验安装资源和复制当前平台二进制，不承载 Jira、GitHub、Git、操作契约、策略门禁、证据或反馈的业务逻辑。
 
 `~/.agentic-ops` 是 `tapstate/agentic-ops` 的完整 managed clone，不是具体项目运行目录。具体项目运行目录是项目 AI 工作空间，例如 `tapstate` 或 `tapdata`。
 

@@ -291,7 +291,7 @@ TapData / TapState 的方案 C 是第一套默认工作流配置，但不能硬�
 
 控制层采用本地优先的 Go CLI 运行时，不默认引入常驻 daemon 或 Web 平台。
 
-shell 只用于 `curl | bash` 安装引导。业务逻辑、操作、策略、适配器、事件日志和反馈分析由 Go CLI 承载。
+shell 只用于 `gh api | bash` 认证安装引导。业务逻辑、操作、策略、适配器、事件日志和反馈分析由 Go CLI 承载。
 
 推荐形态：
 
@@ -494,7 +494,9 @@ Observation -> Proposal -> Accepted Change
 全局安装目标入口：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/main/scripts/install.sh | bash
+gh api -H 'Accept: application/vnd.github.raw' \
+  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
+  | AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
 ```
 
 默认安装到：
@@ -502,6 +504,8 @@ curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/main/scripts/i
 ```text
 ~/.agentic-ops
 ```
+
+首次安装直接 clone managed clone。检测到 `~/.agentic-ops` 已安装时，安装脚本进入更新模式，先展示当前 ref 和目标分支，并要求研发负责人确认；非交互环境只能在用户确认后通过 `AGENTIC_OPS_ASSUME_YES=1` 继续。
 
 项目 AI 工作空间初始化必须在项目 AI 工作空间目录内执行，并显式绑定 Jira 用户和 Jira 空间：
 

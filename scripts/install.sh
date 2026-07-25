@@ -2,7 +2,7 @@
 set -euo pipefail
 
 INSTALL_DIR="${AGENTIC_OPS_HOME:-$HOME/.agentic-ops}"
-REPO_URL="${AGENTIC_OPS_REPO_URL:-https://github.com/tapstate/agentic-ops.git}"
+REPO_URL="${AGENTIC_OPS_REPO_URL:-git@github.com:tapstate/agentic-ops.git}"
 BRANCH="${AGENTIC_OPS_BRANCH:-main}"
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -98,6 +98,50 @@ rollback() {
   echo "install failed; rolled back to $previous_ref" >&2
 }
 
+confirm_update() {
+  local current_ref=""
+  local answer=""
+
+  current_ref="$(git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || printf 'unknown')"
+  echo "AgenticOps is already installed at $INSTALL_DIR" >&2
+  echo "Current ref: $current_ref" >&2
+  echo "Target: origin/$BRANCH latest" >&2
+
+  case "${AGENTIC_OPS_ASSUME_YES:-}" in
+    1|true|TRUE|yes|YES|y|Y)
+      echo "update confirmed by AGENTIC_OPS_ASSUME_YES" >&2
+      return
+      ;;
+    0|false|FALSE|no|NO|n|N)
+      echo "update cancelled by AGENTIC_OPS_ASSUME_YES" >&2
+      exit 2
+      ;;
+  esac
+
+  if [ ! -r /dev/tty ]; then
+    echo "update cancelled: confirmation required; rerun with AGENTIC_OPS_ASSUME_YES=1 to update non-interactively" >&2
+    exit 2
+  fi
+
+  if ! printf 'Update existing AgenticOps installation at %s? [y/N] ' "$INSTALL_DIR" > /dev/tty 2>/dev/null; then
+    echo "update cancelled: confirmation required; rerun with AGENTIC_OPS_ASSUME_YES=1 to update non-interactively" >&2
+    exit 2
+  fi
+  if ! IFS= read -r answer < /dev/tty 2>/dev/null; then
+    echo "update cancelled: confirmation required; rerun with AGENTIC_OPS_ASSUME_YES=1 to update non-interactively" >&2
+    exit 2
+  fi
+  case "$answer" in
+    y|Y|yes|YES)
+      echo "update confirmed by user" >&2
+      ;;
+    *)
+      echo "update cancelled by user" >&2
+      exit 2
+      ;;
+  esac
+}
+
 trap rollback ERR
 
 if ! command -v git >/dev/null 2>&1; then
@@ -117,6 +161,7 @@ if [ ! -d "$INSTALL_DIR/.git" ]; then
   git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" >/dev/null
 else
   operation="update"
+  confirm_update
   mkdir -p "$local_dir"
   previous_ref="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
   printf '%s\n' "$previous_ref" > "$local_dir/previous-ref"

@@ -49,7 +49,10 @@ CLI 命令 new 改为 create
 ### 步骤 1：全局安装
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/main/scripts/install.sh | bash
+gh auth status
+gh api -H 'Accept: application/vnd.github.raw' \
+  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
+  | AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
 ```
 
 期望说明：
@@ -57,6 +60,8 @@ curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/main/scripts/i
 - 安装到 `~/.agentic-ops`。
 - 该目录不是具体项目运行目录。
 - 安装动作是全局动作，不绑定具体 Jira 空间或代码仓库。
+- 安装入口通过 GitHub CLI 认证读取私有仓库脚本，不依赖匿名 raw URL。
+- 已安装时，脚本会要求研发负责人确认后才更新 `~/.agentic-ops`。
 - 安装脚本使用 `install-resources/<os-arch>/agentic-cli` 中已经编译并提交到仓库的产物，不在研发负责人机器上编译。
 
 ### 步骤 2：初始化工作空间

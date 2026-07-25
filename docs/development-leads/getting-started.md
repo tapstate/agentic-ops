@@ -8,28 +8,52 @@ AgenticOps 安装是全局动作，项目初始化是工作空间动作。安装
 
 ### 标准路径
 
-1. 安装 AgenticOps：
+1. 确认 GitHub CLI 已登录，并具备访问 `tapstate/agentic-ops` 私有仓库的权限：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/main/scripts/install.sh | bash
+gh auth status
 ```
 
-2. 创建并进入项目 AI 工作空间：
+如果尚未登录，先执行：
+
+```sh
+gh auth login -h github.com -p ssh -s repo
+```
+
+2. 安装 AgenticOps：
+
+```sh
+gh api -H 'Accept: application/vnd.github.raw' \
+  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
+  | AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
+```
+
+`/repos/.../install.sh?ref=main` 必须用引号包起来，避免 zsh 把 `?ref=main` 当成通配符。`AGENTIC_OPS_REPO_URL` 显式指定 SSH clone 地址；如果需要改用其它 clone 地址，可以替换该变量值。
+
+如果本机已经存在 `~/.agentic-ops`，安装脚本会进入更新模式，展示当前 ref 和目标分支，并要求确认后才更新。非交互环境必须在研发负责人确认后显式增加 `AGENTIC_OPS_ASSUME_YES=1`：
+
+```sh
+gh api -H 'Accept: application/vnd.github.raw' \
+  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
+  | AGENTIC_OPS_ASSUME_YES=1 AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
+```
+
+3. 创建并进入项目 AI 工作空间：
 
 ```sh
 mkdir -p ~/agentic-ops-tapdata
 cd ~/agentic-ops-tapdata
 ```
 
-3. 初始化工作空间：
+4. 初始化工作空间：
 
 ```sh
 agentic-cli workspace init --workspace tapdata --jira-user harsen@tapdata.io --jira-project TAP
 ```
 
-4. 在 `~/agentic-ops-tapdata` 启动 Codex。
+5. 在 `~/agentic-ops-tapdata` 启动 Codex。
 
-5. 给 Codex 发送：
+6. 给 Codex 发送：
 
 ```text
 初始化 AgenticOps 能力，工作空间是 tapdata。
@@ -52,7 +76,7 @@ cd ~/agentic-ops-tapdata
 安装 https://github.com/tapstate/agentic-ops/blob/main/agent-init.md 并初始化
 ```
 
-Codex 应按 `agent-init.md` 检查当前目录、确认或安装 `agentic-cli`、初始化工作空间、初始化 AIAgent 能力，并在预检通过后提示如何开始工作。
+Codex 应按 `agent-init.md` 检查当前目录、确认 `gh` 登录状态、确认或安装 `agentic-cli`、初始化工作空间、初始化 AIAgent 能力，并在预检通过后提示如何开始工作。
 
 ### 下一步指令
 

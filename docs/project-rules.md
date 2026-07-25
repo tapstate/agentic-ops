@@ -194,12 +194,18 @@ AgenticOps 默认安装到：
 安装入口约定为：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/main/scripts/install.sh | bash
+gh api -H 'Accept: application/vnd.github.raw' \
+  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
+  | AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
 ```
+
+安装前必须通过 `gh auth status` 确认 GitHub CLI 已登录并具备访问 `tapstate/agentic-ops` 私有仓库的权限；未登录时先执行 `gh auth login -h github.com -p ssh -s repo`。GitHub API contents 路径必须加引号，避免 zsh 把 `?ref=main` 当作通配符。`AGENTIC_OPS_REPO_URL` 用于显式指定 managed clone 地址。
 
 安装脚本必须支持 Linux (linux-amd64 / linux-arm64)、macOS Intel (darwin-amd64) 和 macOS Apple Silicon (darwin-arm64)，并且不得覆盖用户已有本地配置。
 
 安装脚本必须把 `tapstate/agentic-ops` clone 或更新到 `~/.agentic-ops`，校验 `install-resources/checksums.txt`，再安装仓库中已经编译并提交的 `install-resources/<os-arch>/agentic-cli`；不得在研发负责人机器上编译安装。
+
+如果 `~/.agentic-ops` 已存在，安装脚本必须先展示当前 ref 和目标分支，并要求研发负责人确认后才更新。交互式终端由用户输入确认；非交互环境必须先取得用户确认，再显式设置 `AGENTIC_OPS_ASSUME_YES=1`。未确认时安装脚本必须停止，不能静默更新。
 
 ## 8. 项目 AI 工作空间边界
 
@@ -323,7 +329,7 @@ TapData / TapState 方案 C 可以作为第一套默认工作流配置，但不�
 
 控制层必须采用本地优先的 Go CLI 运行时。
 
-shell 只用于安装引导，例如 `curl | bash` 的 `install.sh`。业务逻辑、操作、策略、适配器、日志和反馈分析不得写在 shell 中。
+shell 只用于安装引导，例如 `gh api | bash` 的 `install.sh`。业务逻辑、操作、策略、适配器、日志和反馈分析不得写在 shell 中。
 
 统一入口为：
 

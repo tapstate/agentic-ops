@@ -43,7 +43,7 @@
 ## 4. 上线前运行时方向
 
 - 主 CLI 使用 Go 实现，统一入口为 `agentic-cli`。
-- shell 只用于 `curl | bash` 安装引导、轻量环境检测、managed clone 更新、校验安装资源和复制当前平台已经编译好的 Go 二进制。
+- shell 只用于 `gh api | bash` 认证安装引导、轻量环境检测、managed clone 更新、校验安装资源和复制当前平台已经编译好的 Go 二进制。
 - shell 不承载 Jira、GitHub、Git、操作契约、策略门禁、证据或反馈的业务逻辑。
 - 不优先引入常驻服务或 Web 控制台；如需改变，必须先形成明确设计决策。
 - 主 CLI 发布目标包括 `darwin-arm64`、`darwin-amd64`、`linux-amd64` 和 `linux-arm64`。
@@ -62,7 +62,7 @@
 
 第一阶段最低验收标准：
 
-- 研发负责人能通过安装命令完成安装。
+- [DL-001 安装 AgenticOps](user-stories/development-lead/dl-001-install.md) 是发版验收条件；研发负责人必须能通过安装入口完成安装，否则不得发版。
 - 研发负责人能初始化项目 AI 工作空间。
 - AIAgent 能初始化 AgenticOps 能力。
 - AI 能列出负责人名下 Jira 待办。

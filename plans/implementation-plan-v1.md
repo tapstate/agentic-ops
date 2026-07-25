@@ -6,7 +6,7 @@
 
 **Goal:** 构建 AgenticOps 第一阶段最小可运行闭环，让研发负责人可以安装 Go CLI、初始化工作空间、初始化 AIAgent 能力、用 fake Jira 数据接管任务、写入 evidence，并生成每日反馈报告。
 
-**Architecture:** 第一阶段采用本地优先的 Go CLI 运行时，shell 只做 `curl | bash` 安装引导。Go CLI 以操作契约为操作边界，先接模拟 Jira 适配器跑通本地闭环，再接真实 Jira / GitHub。机器可读操作契约的源头是仓库顶层 `contracts/operations/`，Go package 不维护第二份契约源头。
+**Architecture:** 第一阶段采用本地优先的 Go CLI 运行时，shell 只做 `gh api | bash` 认证安装引导。Go CLI 以操作契约为操作边界，先接模拟 Jira 适配器跑通本地闭环，再接真实 Jira / GitHub。机器可读操作契约的源头是仓库顶层 `contracts/operations/`，Go package 不维护第二份契约源头。
 
 **Tech Stack:** Go 1.22+、标准库优先、`gopkg.in/yaml.v3` 用于 YAML、`gh` 作为 GitHub 登录状态检查、Jira 第一阶段先 fake adapter。
 

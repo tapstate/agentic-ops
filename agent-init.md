@@ -39,7 +39,26 @@ agentic-cli --version
 如果命令不存在，使用安装入口：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/main/scripts/install.sh | bash
+gh auth status
+gh api -H 'Accept: application/vnd.github.raw' \
+  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
+  | AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
+```
+
+如果 `gh auth status` 失败，先要求研发负责人完成 GitHub CLI 登录：
+
+```sh
+gh auth login -h github.com -p ssh -s repo
+```
+
+`/repos/.../install.sh?ref=main` 必须用引号包起来，避免 zsh 把 `?ref=main` 当成通配符。`AGENTIC_OPS_REPO_URL` 显式指定 SSH clone 地址；如果当前机器只能使用其它 clone 地址，再由研发负责人确认后替换该变量值。
+
+如果检测到 `~/.agentic-ops` 已存在，安装脚本会进入更新模式。Codex 不得自行确认更新；必须先向研发负责人说明当前目录会被更新到 `origin/main` 最新版本，并等待明确同意。获得同意后，非交互执行时使用：
+
+```sh
+gh api -H 'Accept: application/vnd.github.raw' \
+  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
+  | AGENTIC_OPS_ASSUME_YES=1 AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
 ```
 
 安装脚本会把 `tapstate/agentic-ops` clone 到 `~/.agentic-ops`，更新到 `origin/main` 最新版本，校验 `install-resources/checksums.txt`，并把当前平台已经编译并提交的 `install-resources/<os-arch>/agentic-cli` 复制到 `~/.agentic-ops/bin/agentic-cli`。安装过程不在当前机器上编译。

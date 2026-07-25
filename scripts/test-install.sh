@@ -50,7 +50,15 @@ test -f "$install_dir/.local/current-ref"
 test -f "$install_dir/.local/install-log.json"
 
 printf '# local tracked change\n' >> "$install_dir/README.md"
-HOME="$home_dir" AGENTIC_OPS_REPO_URL="$source_repo" bash "$install_dir/scripts/install.sh" | grep '"operation":"update"'
+update_out="$tmp_dir/update.out"
+update_err="$tmp_dir/update.err"
+if HOME="$home_dir" AGENTIC_OPS_REPO_URL="$source_repo" bash "$install_dir/scripts/install.sh" >"$update_out" 2>"$update_err"; then
+  echo "expected update without confirmation to fail" >&2
+  exit 1
+fi
+grep "update cancelled" "$update_err"
+
+HOME="$home_dir" AGENTIC_OPS_REPO_URL="$source_repo" AGENTIC_OPS_ASSUME_YES=1 bash "$install_dir/scripts/install.sh" | grep '"operation":"update"'
 test -f "$install_dir/.local/previous-ref"
 test -f "$install_dir/.local/update-stash"
 test -x "$install_dir/bin/agentic-cli"

@@ -17,13 +17,14 @@ bash tests/e2e/local-install-flow.sh
 - 设计、契约、运行资产、测试和文档已经同步。
 - 发布内容不包含 secrets、tokens、private keys 或原始敏感日志。
 - 构建、提交、人工确认和审计要求已经满足。
+- [DL-001 安装 AgenticOps](../development-lead/dl-001-install.md) 已作为本次发版验收条件纳入验证清单。
 
 ### 主流程
 
 1. 维护者构建当前平台或多平台 `agentic-cli` 二进制到 `install-resources/<os-arch>/agentic-cli`。
 2. 维护者确认 `install-resources/basic/` 中的标准资产已经同步。
 3. 维护者生成并校验 `install-resources/checksums.txt`。
-4. 维护者运行本地安装闭环验证。
+4. 维护者按 [DL-001 安装 AgenticOps](../development-lead/dl-001-install.md) 运行安装故事验收。
 5. 维护者在人工确认后提交 `install-resources/` 中的已编译产物和校验和。
 6. 维护者记录构建和安装验证审计信息。
 
@@ -47,6 +48,7 @@ bash tests/e2e/local-install-flow.sh
 
 ### 验收标准
 
+- [DL-001 安装 AgenticOps](../development-lead/dl-001-install.md) 必须通过；安装失败、入口不可访问、权限提示不可执行或安装后 `agentic-cli` 不可用时不得发版。
 - `install-resources/basic/`、平台二进制和 `checksums.txt` 一致。
 - 安装脚本能从 managed clone 安装最新 `agentic-cli` 和运行资产。
 - 安装脚本使用仓库中已提交的二进制，不在研发负责人机器上编译。
@@ -69,6 +71,7 @@ bash tests/e2e/local-install-flow.sh
 
 ### 验收证据
 
+- DL-001 发版验收记录。
 - `bash scripts/test-build.sh`
 - `bash tests/e2e/local-install-flow.sh`
 - `install-resources/checksums.txt`
