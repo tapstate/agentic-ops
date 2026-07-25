@@ -51,7 +51,7 @@ func validateTakeover(issue Issue, p profile.Profile, currentUser string, agentI
 	if registry != nil {
 		registeredProcess, ok := registry[processID]
 		if !ok {
-			return blocked("standard_process_mapping_gap", "标准流程注册处缺少任务分类对应流程", "请维护 contracts/processes 中的标准流程定义")
+			return blocked("standard_process_mapping_gap", "标准流程注册处缺少任务分类对应流程", "请维护 install-resources/basic/contracts/processes 中的标准流程定义")
 		}
 		if mappedStage != registeredProcess.EntryStage {
 			return blocked("invalid_takeover_stage", "当前 Jira 状态不允许作为接管入口", "请把 Jira 卡片调整到可接管状态，或维护 workflow profile 和标准流程入口阶段")

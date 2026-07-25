@@ -82,12 +82,14 @@ git@github.com:tapstate/agentic-ops.git
 
 ```text
 docs/          架构、目标定位、故事线、流程、计划
-contracts/     操作契约和结构定义
+install-resources/basic/
+               运行期通用安装资源：AI 资产入口、手册、契约、配置、策略、runbook、模板
+install-resources/<os-arch>/
+               已编译平台二进制 agentic-cli
+bin/           本地安装后的命令目录，只提交 .gitkeep
+.local/        本地安装和更新状态，只提交 .gitkeep
 skills/        AgenticOps 技能和 AI 员工工作规则
-handbooks/     AI 员工手册
-profiles/      工作流配置示例和默认配置
 packages/      agentic-cli Go CLI 运行时
-templates/     Jira / 拉取请求 / 证据模板
 examples/      端到端演示样例
 tests/         自动化测试
 scripts/       本地和 CI 辅助脚本
@@ -99,7 +101,7 @@ scripts/       本地和 CI 辅助脚本
 ~/.agentic-ops
 ```
 
-`~/.agentic-ops` 是全局安装和配置目录，不是具体项目或具体任务的运行目录。它可以保存从 release 安装得到的 Go 二进制、安装元数据、全局配置、通用手册、通用 skills、通用 templates 和可安全重建的缓存。
+`~/.agentic-ops` 是 `tapstate/agentic-ops` 的完整 managed clone。它的目录结构与 GitHub 仓库一致，不是具体项目或具体任务的运行目录。安装脚本只负责 clone/update、校验 `install-resources/checksums.txt`、复制当前平台二进制到 `bin/agentic-cli`，并写入 `.local/` 本地状态。
 
 具体项目的运行目录应是项目 AI 工作空间，例如：
 
@@ -310,7 +312,7 @@ packages/agentic-cli/
   testdata/
 ```
 
-操作契约的机器可读源头在仓库顶层 `contracts/operations/`。Go CLI 可以在构建或运行时读取这些契约，但不在 package 内维护第二份契约源头。
+操作契约的机器可读源头在 `install-resources/basic/contracts/operations/`。Go CLI 可以在构建或运行时读取这些契约，但不在 package 内维护第二份契约源头。
 
 AIAgent 始终调用统一入口：
 
@@ -492,7 +494,7 @@ Observation -> Proposal -> Accepted Change
 全局安装目标入口：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
+curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/main/scripts/install.sh | bash
 ```
 
 默认安装到：

@@ -14,7 +14,7 @@
 
 - 当前阶段先执行本计划，不直接扩展到 Web 控制台、后台常驻进程、自动创建拉取请求或完整自更新。
 - CLI 统一入口为 `agentic-cli`。
-- Go 是主实现语言；shell 只用于安装引导、轻量环境检测、下载或切换 Go release 二进制。
+- Go 是主实现语言；shell 只用于安装引导、轻量环境检测、managed clone 更新、校验安装资源和复制当前平台已编译 Go 二进制。
 - `agentic-cli` 运行时不得依赖本地 Python、`jq` 或 shell 业务脚本。
 - stdout 只输出结构化 JSON；stderr 输出人类诊断日志。
 - 所有失败必须返回稳定 `code`。
@@ -91,7 +91,7 @@ agentic-ops/
         workspace/
         jira/
   scripts/
-    init.sh
+    install.sh
 ```
 
 ## 2. 第一阶段命令范围
@@ -1186,16 +1186,16 @@ git commit -m "Feat(feedback): add feedback report"
 ### Task 8: 安装 bootstrap 草案
 
 **Files:**
-- Create: `scripts/init.sh`
-- Create: `scripts/test-init.sh`
+- Create: `scripts/install.sh`
+- Create: `scripts/test-install.sh`
 
 **Interfaces:**
-- Consumes: release artifact naming convention `agentic-cli_<os>_<arch>.tar.gz`
+- Consumes: install resource binary convention `install-resources/<os-arch>/agentic-cli`
 - Produces: `~/.agentic-ops/bin/agentic-cli`
 
 - [x] **Step 1: Add bootstrap script**
 
-Create `scripts/init.sh`:
+Create `scripts/install.sh`:
 
 ```sh
 #!/usr/bin/env bash
@@ -1233,11 +1233,11 @@ chmod +x "$BIN_DIR/agentic-cli"
 printf '{"ok":true,"operation":"install","install_dir":"%s","bin":"%s","target":"%s-%s","version":"%s","next_action":"workspace_init"}\n' "$INSTALL_DIR" "$BIN_DIR/agentic-cli" "$target_os" "$target_arch" "$VERSION"
 ```
 
-This script is a first-stage bootstrap stub that does not download a real binary. Replace the embedded stub with real release download logic when release artifacts exist.
+This script is a first-stage bootstrap stub that does not install a real binary. Replace the embedded stub with managed clone install logic when install resources exist.
 
 - [x] **Step 2: Add bootstrap smoke test**
 
-Create `scripts/test-init.sh`:
+Create `scripts/test-install.sh`:
 
 ```sh
 #!/usr/bin/env bash
@@ -1246,19 +1246,19 @@ set -euo pipefail
 tmp_home="$(mktemp -d)"
 trap 'rm -rf "$tmp_home"' EXIT
 
-HOME="$tmp_home" bash scripts/init.sh > "$tmp_home/out.json"
+HOME="$tmp_home" bash scripts/install.sh > "$tmp_home/out.json"
 
 grep '"ok":true' "$tmp_home/out.json"
 test -x "$tmp_home/.agentic-ops/bin/agentic-cli"
 ```
 
-Run: `bash scripts/test-init.sh`
+Run: `bash scripts/test-install.sh`
 Expected: command exits 0 and prints the matched JSON line containing `"ok":true`.
 
 - [x] **Step 3: Commit**
 
 ```bash
-git add scripts/init.sh scripts/test-init.sh
+git add scripts/install.sh scripts/test-install.sh
 git commit -m "Feat(install): add bootstrap installer"
 ```
 
@@ -1316,7 +1316,7 @@ git commit -m "Test(e2e): add local fake flow"
 第一阶段实现完成时，必须满足：
 
 - `go test ./...` 通过。
-- `bash scripts/test-init.sh` 通过。
+- `bash scripts/test-install.sh` 通过。
 - `bash tests/e2e/local-fake-flow.sh` 通过。
 - 所有 CLI 成功输出包含 `ok: true` 和 `operation`。
 - 所有 CLI 失败输出包含 `ok: false`、`operation`、`code`、`message`。
@@ -1351,4 +1351,4 @@ git commit -m "Test(e2e): add local fake flow"
 - Contract source: 顶层 `contracts/operations/` 是唯一机器可读契约源头。
 - Runtime boundary: Go CLI 承载业务逻辑，shell 只做安装引导。
 - Human gate: 推送、创建拉取请求、合并、发布不在第一批自动执行范围内。
-- 实现说明：第一阶段实现补齐了计划命令范围中的 `preflight`、`agent init`、`resume-takeover`、本地 `assets install`、`scripts/build.sh` 和 `scripts/release.sh`，并创建本地模拟流程所需操作 YAML；真实 Jira / GitHub 写操作仍未接入。
+- 实现说明：第一阶段实现补齐了计划命令范围中的 `preflight`、`agent init`、`resume-takeover`、本地 `assets install` 和 `scripts/build.sh`，并创建本地模拟流程所需操作 YAML；真实 Jira / GitHub 写操作仍未接入。

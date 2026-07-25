@@ -283,7 +283,7 @@ func runWorkspaceInit(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.FailureWithContext("workspace_init", output.FailureContext{
 			Code:                "workspace_profile_failed",
 			Message:             err.Error(),
-			RequiredHumanAction: "请检查 profiles 目录中的工作流配置，并确认 workspace、jira.user 和 jira.project 与初始化参数一致",
+			RequiredHumanAction: "请检查 install-resources/basic/profiles 目录中的工作流配置，并确认 workspace、jira.user 和 jira.project 与初始化参数一致",
 			TaskType:            "workspace_initialization",
 			CurrentStage:        "workspace_profile",
 			NextAction:          "fix_profile",
@@ -518,12 +518,12 @@ func runContractValidate(args []string, stdout io.Writer) int {
 	if err != nil {
 		return writeJSON(stdout, output.Failure("contract_validate", "repo_root_not_found", "未找到仓库根目录", "请在 AgenticOps 仓库内运行"))
 	}
-	paths, err := filepath.Glob(filepath.Join(root, "contracts", "operations", "*.yaml"))
+	paths, err := filepath.Glob(filepath.Join(repoBasicResourcesPath(root), "contracts", "operations", "*.yaml"))
 	if err != nil {
-		return writeJSON(stdout, output.Failure("contract_validate", "contract_glob_failed", err.Error(), "请检查 contracts/operations 目录"))
+		return writeJSON(stdout, output.Failure("contract_validate", "contract_glob_failed", err.Error(), "请检查 install-resources/basic/contracts/operations 目录"))
 	}
 	if len(paths) == 0 {
-		return writeJSON(stdout, output.Failure("contract_validate", "contract_not_found", "未找到 operation contract", "请检查 contracts/operations 目录"))
+		return writeJSON(stdout, output.Failure("contract_validate", "contract_not_found", "未找到 operation contract", "请检查 install-resources/basic/contracts/operations 目录"))
 	}
 	var allIssues []map[string]any
 	for _, path := range paths {
@@ -549,7 +549,7 @@ func runContractValidate(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.FailureWithContext("contract_validate", output.FailureContext{
 			Code:                "contract_validation_failed",
 			Message:             "operation contract validation failed",
-			RequiredHumanAction: "请修复 contracts/operations 中的契约字段",
+			RequiredHumanAction: "请修复 install-resources/basic/contracts/operations 中的契约字段",
 			TaskType:            "contract_validation",
 			CurrentStage:        "contract_validation",
 			NextAction:          "fix_contracts",
@@ -578,13 +578,13 @@ func runProfileValidate(args []string, stdout io.Writer) int {
 	if err != nil {
 		return writeJSON(stdout, output.Failure("profile_validate", "repo_root_not_found", "未找到仓库根目录", "请在 AgenticOps 仓库内运行"))
 	}
-	profilePath := filepath.Join(root, "profiles", workspaceName+".yaml")
+	profilePath := filepath.Join(repoBasicResourcesPath(root), "profiles", workspaceName+".yaml")
 	loadedProfile, err := profile.LoadFile(profilePath)
 	if err != nil {
 		return writeJSON(stdout, output.FailureWithContext("profile_validate", output.FailureContext{
 			Code:                "profile_not_found",
 			Message:             err.Error(),
-			RequiredHumanAction: "请检查 profiles 目录中的 workspace 配置",
+			RequiredHumanAction: "请检查 install-resources/basic/profiles 目录中的 workspace 配置",
 			TaskType:            "profile_validation",
 			CurrentStage:        "profile_validation",
 			NextAction:          "fix_profile",
@@ -719,7 +719,7 @@ func runPolicyValidate(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.FailureWithContext("policy_validate", output.FailureContext{
 			Code:                "policy_not_found",
 			Message:             err.Error(),
-			RequiredHumanAction: "请检查 assets/policies/default.yaml",
+			RequiredHumanAction: "请检查 install-resources/basic/policies/default.yaml",
 			TaskType:            "policy_validation",
 			CurrentStage:        "policy_validation",
 			NextAction:          "fix_policy",
@@ -983,7 +983,7 @@ func jiraMissingFieldTemplate() (string, string) {
 	if err != nil {
 		return "", fallback
 	}
-	path := filepath.Join(root, "assets", "templates", "jira-missing-field.md")
+	path := filepath.Join(repoBasicResourcesPath(root), "templates", "jira-missing-field.md")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", fallback
@@ -1178,8 +1178,8 @@ func evidenceTemplate(workspaceProfile profile.Profile) (string, string, error) 
 	if err != nil {
 		return "", "", err
 	}
-	templatePath := filepath.Join(root, "assets", templateName)
-	if strings.HasPrefix(templateName, "assets/") {
+	templatePath := filepath.Join(repoBasicResourcesPath(root), templateName)
+	if strings.HasPrefix(templateName, "install-resources/basic/") {
 		templatePath = filepath.Join(root, templateName)
 	}
 	data, err := os.ReadFile(templatePath)
@@ -1261,7 +1261,7 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.FailureWithContext("write_evidence", output.FailureContext{
 			Code:                "policy_not_found",
 			Message:             err.Error(),
-			RequiredHumanAction: "请检查 assets/policies/default.yaml 是否存在且通过校验",
+			RequiredHumanAction: "请检查 install-resources/basic/policies/default.yaml 是否存在且通过校验",
 			TaskType:            "evidence_write",
 			CurrentStage:        "evidence_write_gate",
 			NextAction:          "fix_policy",
@@ -1729,7 +1729,7 @@ func runPreparePR(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.FailureWithContext("prepare_pr", output.FailureContext{
 			Code:                "policy_not_found",
 			Message:             err.Error(),
-			RequiredHumanAction: "请检查 assets/policies/default.yaml 是否存在且通过校验",
+			RequiredHumanAction: "请检查 install-resources/basic/policies/default.yaml 是否存在且通过校验",
 			TaskType:            "pr_preparation",
 			CurrentStage:        "pr_plan_preparation",
 			NextAction:          "fix_policy",
@@ -1895,7 +1895,7 @@ func runFixPRComments(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.FailureWithContext("fix_pr_comments", output.FailureContext{
 			Code:                "policy_not_found",
 			Message:             err.Error(),
-			RequiredHumanAction: "请检查 assets/policies/default.yaml 是否存在且通过校验",
+			RequiredHumanAction: "请检查 install-resources/basic/policies/default.yaml 是否存在且通过校验",
 			TaskType:            "pr_comment_fix",
 			CurrentStage:        "pr_comment_fix_gate",
 			NextAction:          "fix_policy",
@@ -2246,9 +2246,27 @@ func repoRoot() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if root, err := findRepoRootFrom(dir); err == nil {
+		return root, nil
+	}
+	home, _ := os.UserHomeDir()
+	installDir := os.Getenv("AGENTIC_OPS_HOME")
+	if installDir == "" {
+		installDir = config.DefaultInstallDir(home)
+	}
+	if root, err := findRepoRootFrom(installDir); err == nil {
+		return root, nil
+	}
+	return "", os.ErrNotExist
+}
+
+func findRepoRootFrom(dir string) (string, error) {
+	if dir == "" {
+		return "", os.ErrNotExist
+	}
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			if _, err := os.Stat(filepath.Join(dir, "contracts", "operations")); err == nil {
+			if _, err := os.Stat(filepath.Join(repoBasicResourcesPath(dir), "contracts", "operations")); err == nil {
 				return dir, nil
 			}
 		}
@@ -2260,12 +2278,16 @@ func repoRoot() (string, error) {
 	}
 }
 
+func repoBasicResourcesPath(root string) string {
+	return filepath.Join(root, "install-resources", "basic")
+}
+
 func repoProfilePath(workspaceName string) (string, error) {
 	root, err := repoRoot()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, "profiles", workspaceName+".yaml"), nil
+	return filepath.Join(repoBasicResourcesPath(root), "profiles", workspaceName+".yaml"), nil
 }
 
 func repoPolicyPath() (string, error) {
@@ -2273,7 +2295,7 @@ func repoPolicyPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, "assets", "policies", "default.yaml"), nil
+	return filepath.Join(repoBasicResourcesPath(root), "policies", "default.yaml"), nil
 }
 
 func repoProcessRegistry() (map[string]process.Process, error) {
@@ -2281,7 +2303,7 @@ func repoProcessRegistry() (map[string]process.Process, error) {
 	if err != nil {
 		return nil, err
 	}
-	return process.LoadRegistry(filepath.Join(root, "contracts", "processes"))
+	return process.LoadRegistry(filepath.Join(repoBasicResourcesPath(root), "contracts", "processes"))
 }
 
 func defaultProcessRegistry() map[string]process.Process {
@@ -2478,7 +2500,7 @@ func checkContracts() map[string]string {
 	if err != nil {
 		return map[string]string{"status": "failed", "message": "repo root not found"}
 	}
-	paths, err := filepath.Glob(filepath.Join(root, "contracts", "operations", "*.yaml"))
+	paths, err := filepath.Glob(filepath.Join(repoBasicResourcesPath(root), "contracts", "operations", "*.yaml"))
 	if err != nil {
 		return map[string]string{"status": "failed", "message": err.Error()}
 	}

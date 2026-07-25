@@ -78,6 +78,6 @@ agentic-cli policy validate --workspace <name>
 ### 关联设计
 
 - `docs/runtime/problem-resolution-and-update.md`
-- `assets/runbooks/problem-resolution.md`
+- `install-resources/basic/runbooks/problem-resolution.md`
 - `docs/workflows/feedback-loop.md`
 - `docs/templates/evidence-templates.md`

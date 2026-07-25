@@ -9,13 +9,13 @@ AgenticOps 第一个版本发布正式上线前，必须遵守 `docs/development
 核心目录约定：
 
 - `docs/`：人读文档，包括架构、规则、用户故事、流程和设计说明。
-- `ai-assets/`：AIAgent 执行前读取的 AI 资产入口；当前作为索引层，运行资产源文件暂不迁移。
-- `handbooks/`：AI 员工手册，面向 AIAgent 和研发负责人。
+- `install-resources/basic/`：跨平台通用安装资源，包括 AI 资产入口、手册、操作契约、工作流配置、策略、运行手册和模板。
+- `install-resources/<os-arch>/`：平台二进制产物，只放对应平台的 `agentic-cli`。
+- `install-resources/checksums.txt`：安装资源校验和。
+- `bin/`：安装后的本机命令目录，仓库只提交 `bin/.gitkeep`，本地 `bin/agentic-cli` 不提交。
+- `.local/`：本机安装和更新状态，仓库只提交 `.local/.gitkeep`，本地状态文件不提交。
 - `plans/`：可执行推进计划，使用勾选项跟踪实施进度。
-- `contracts/`：后续机器可读操作契约源头。
-- `profiles/`：工作流配置示例和默认配置。
 - `skills/`：AgenticOps skills。
-- `templates/`：Jira、拉取请求和证据回写模板。
 - `packages/agentic-cli/`：Go CLI 运行时的未来实现位置。
 - `examples/`：端到端演示样例。
 - `tests/`：合同、脚本和文档一致性测试。
@@ -45,9 +45,9 @@ Jira 交互中的人可见内容必须使用中文，包括标题、描述、评
 
 ## 运行时方向
 
-AgenticCLI 使用 Go 实现，统一入口为 `agentic-cli`。shell 只用于 `curl | bash` 安装引导、轻量环境检测、下载或切换 Go release 二进制，不承载 Jira、GitHub、Git、操作契约、策略门禁、证据或反馈的业务逻辑。
+AgenticCLI 使用 Go 实现，统一入口为 `agentic-cli`。shell 只用于 `curl | bash` 安装引导、轻量环境检测、managed clone 更新、校验安装资源和复制当前平台二进制，不承载 Jira、GitHub、Git、操作契约、策略门禁、证据或反馈的业务逻辑。
 
-`~/.agentic-ops` 是全局安装和配置目录，不是具体项目运行目录。具体项目运行目录是项目 AI 工作空间，例如 `tapstate` 或 `tapdata`。
+`~/.agentic-ops` 是 `tapstate/agentic-ops` 的完整 managed clone，不是具体项目运行目录。具体项目运行目录是项目 AI 工作空间，例如 `tapstate` 或 `tapdata`。
 
 ## 测试与验证
 

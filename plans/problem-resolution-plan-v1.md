@@ -90,7 +90,7 @@ agentic-cli policy rollback --workspace <name>
   - 增加工作流配置热修复端到端测试。
   - 增加策略回滚端到端测试。
   - 增加缺失 Jira 字段门禁端到端测试。
-  - 实现说明：已新增 `tests/e2e/problem-resolution-flow.sh`，并与 `tests/e2e/local-fake-flow.sh`、`tests/e2e/local-release-install-flow.sh` 共同覆盖问题修复路径和 release install flow。
+  - 实现说明：已新增 `tests/e2e/problem-resolution-flow.sh`，并与 `tests/e2e/local-fake-flow.sh`、`tests/e2e/local-install-flow.sh` 共同覆盖问题修复路径和本地安装闭环。
 
 ## 4. 验收命令
 
@@ -98,7 +98,7 @@ agentic-cli policy rollback --workspace <name>
 
 ```sh
 go test ./...
-bash scripts/test-init.sh
+bash scripts/test-install.sh
 bash tests/e2e/local-fake-flow.sh
 bash tests/e2e/problem-resolution-flow.sh
 ```

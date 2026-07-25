@@ -312,47 +312,42 @@ agentic-cli policy rollback --workspace tapstate
 - 收紧门禁可以快速发布，但仍必须可回滚。
 - 所有门禁变更必须写入事件日志和版本记录。
 
-## 11. 发布与同步模型
+## 11. 安装与同步模型
 
-AgenticOps 需要两类发布物：
-
-```text
-binary release
-  agentic-cli 多平台二进制
-
-asset release
-  操作契约
-  工作流配置
-  policies
-  templates
-  handbooks
-```
-
-本机建议结构：
+AgenticOps 只维护 latest 安装路径。GitHub 仓库和本机 `~/.agentic-ops` managed clone 结构一致：
 
 ```text
 ~/.agentic-ops/
+  install-resources/
+    basic/
+      contracts/
+      profiles/
+      policies/
+      runbooks/
+      templates/
+      handbooks/
+    <os-arch>/
+      agentic-cli
+    checksums.txt
   bin/
     agentic-cli
-  versions/
-    agentic-cli/
-      RES-v0.1.2-7f31a2b/
-      RES-v0.1.3-a68372d/
-  assets/
-    RES-v0.1.2-7f31a2b/
-    RES-v0.1.3-a68372d/
-  current.json
-  config.yaml
+  .local/
+    current-ref
+    previous-ref
+    install-log.json
+    update-stash
 ```
 
-`current.json` 必须记录：
+`install-resources/` 是 Git 跟踪的安装资源源头；`bin/agentic-cli` 和 `.local/*` 是本地产生文件，必须被 `.gitignore` 忽略。
+
+`.local/install-log.json` 必须记录：
 
 ```json
 {
-  "agentic_cli_version": "RES-v0.1.3-a68372d",
-  "asset_version": "RES-v0.1.3-a68372d",
-  "previous_agentic_cli_version": "RES-v0.1.2-7f31a2b",
-  "previous_asset_version": "RES-v0.1.2-7f31a2b"
+  "operation": "update",
+  "target": "darwin-arm64",
+  "current_ref": "<git-commit>",
+  "bin": "~/.agentic-ops/bin/agentic-cli"
 }
 ```
 
@@ -362,11 +357,11 @@ asset release
 
 - 每类问题都有稳定错误码、人工动作和事件日志。
 - 研发可以一条命令生成脱敏诊断包。
-- CLI 逻辑错误可以通过发布新的 latest 版本修复，并推荐研发侧自动更新。
+- CLI 逻辑错误可以通过提交新的 latest 版本修复，并推荐研发侧自动更新。
 - Jira `status` / `transition` 差异可以通过工作流配置更新修复并回滚。
 - Jira 卡片属性缺失会阻断接管，并给出补全模板。
 - 关键门禁可以通过策略更新调整，并保留审计记录。
-- `update check` / `update apply` 的输出全部是结构化 JSON；如实现 `rollback`，它只用于本地恢复，不用于旧版本修复线。
+- 安装或更新失败时可回退到 `.local/previous-ref`；回退只用于本地恢复，不用于旧版本修复线。
 - 必要更新只阻断受影响操作，不应无差别阻断所有命令。
 - 所有修复进入任务级审计记录，并可通过按需反馈报告观察问题是否减少。
 

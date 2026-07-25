@@ -79,10 +79,10 @@ AIAgent 和 `agentic-cli` 不作为第三类故事主角。AIAgent 是流程执�
 
 - [PM-001：维护故事线、设计和计划边界](project-maintainer/pm-001-document-boundary.md)。
 - [PM-002：维护操作契约、标准流程和工作流配置](project-maintainer/pm-002-standard-assets.md)。
-- [PM-003：发布 AgenticOps 版本和安装资产](project-maintainer/pm-003-release-assets.md)。
+- [PM-003：构建 AgenticOps 安装资源](project-maintainer/pm-003-release-assets.md)。
 - [PM-004：诊断问题并选择修复载体](project-maintainer/pm-004-problem-diagnosis.md)。
 - [PM-005：处理反馈并形成改进建议](project-maintainer/pm-005-feedback-proposal.md)。
-- [PM-006：治理发布权限、回滚和兼容性](project-maintainer/pm-006-release-governance.md)。
+- [PM-006：治理 latest 更新、回滚和兼容性](project-maintainer/pm-006-release-governance.md)。
 
 ### 研发负责人故事
 

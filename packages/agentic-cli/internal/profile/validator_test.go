@@ -9,7 +9,7 @@ import (
 )
 
 func TestValidateAcceptsTapstateProfile(t *testing.T) {
-	p, err := LoadFile(filepath.Join("..", "..", "..", "..", "profiles", "tapstate.yaml"))
+	p, err := LoadFile(filepath.Join("..", "..", "..", "..", "install-resources", "basic", "profiles", "tapstate.yaml"))
 	if err != nil {
 		t.Fatalf("LoadFile error = %v", err)
 	}
@@ -19,7 +19,7 @@ func TestValidateAcceptsTapstateProfile(t *testing.T) {
 }
 
 func TestValidateAcceptsTapdataProfile(t *testing.T) {
-	p, err := LoadFile(filepath.Join("..", "..", "..", "..", "profiles", "tapdata.yaml"))
+	p, err := LoadFile(filepath.Join("..", "..", "..", "..", "install-resources", "basic", "profiles", "tapdata.yaml"))
 	if err != nil {
 		t.Fatalf("LoadFile error = %v", err)
 	}

@@ -2,18 +2,72 @@
 
 本文面向使用 AgenticOps 指挥 AIAgent 处理日常 Jira 任务的研发负责人。研发负责人不需要理解 AgenticOps 源码结构，重点是完成安装、项目 AI 工作空间初始化，并让 AIAgent 按标准资产执行。
 
-## 第一次使用
+## 快速开始
 
-推荐路径：
+AgenticOps 安装是全局动作，项目初始化是工作空间动作。安装脚本会把 `tapstate/agentic-ops` clone 到 `~/.agentic-ops`，更新到 `origin/main` 最新版本，校验 `install-resources/checksums.txt`，再把当前平台已经编译并提交的 `agentic-cli` 复制到 `~/.agentic-ops/bin/agentic-cli`。安装过程不在研发负责人机器上编译。
 
-1. 阅读 [AI 员工手册](../../handbooks/ai-employee-handbook.md)，理解研发负责人和 AIAgent 的协作方式。
-2. 阅读 [端到端演示](../examples/end-to-end-demo.md)，理解从安装到任务审计的完整流程。
-3. 在项目 AI 工作空间目录内执行 `workspace init`，不要在 AgenticOps 源头仓库或 `~/.agentic-ops` 里初始化业务项目。
-4. 指示 AIAgent 初始化 AgenticOps 能力，并要求它读取 AI 资产入口。
+### 标准路径
+
+1. 安装 AgenticOps：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/main/scripts/install.sh | bash
+```
+
+2. 创建并进入项目 AI 工作空间：
+
+```sh
+mkdir -p ~/agentic-ops-tapdata
+cd ~/agentic-ops-tapdata
+```
+
+3. 初始化工作空间：
+
+```sh
+agentic-cli workspace init --workspace tapdata --jira-user harsen@tapdata.io --jira-project TAP
+```
+
+4. 在 `~/agentic-ops-tapdata` 启动 Codex。
+
+5. 给 Codex 发送：
+
+```text
+初始化 AgenticOps 能力，工作空间是 tapdata。
+```
+
+Codex 应读取 AI 资产入口、执行 `agentic-cli agent init --workspace tapdata` 和 `agentic-cli preflight --workspace tapdata`，然后说明当前可用能力、人工确认点和下一步指令。
+
+### Codex 初始化路径
+
+如果研发负责人希望由 Codex 完成安装检查和初始化，可以先创建工作目录并在其中启动 Codex：
+
+```sh
+mkdir -p ~/agentic-ops-tapdata
+cd ~/agentic-ops-tapdata
+```
+
+然后给 Codex 发送：
+
+```text
+安装 https://github.com/tapstate/agentic-ops/blob/main/agent-init.md 并初始化
+```
+
+Codex 应按 `agent-init.md` 检查当前目录、确认或安装 `agentic-cli`、初始化工作空间、初始化 AIAgent 能力，并在预检通过后提示如何开始工作。
+
+### 下一步指令
+
+初始化完成后，研发负责人可以继续发送：
+
+```text
+列出我名下可以接管的 Jira 任务。
+接管 TAP-123，并先说明计划、验证方式和风险点。
+回写本次执行证据。
+提交 TAP-123 本次执行的任务审计记录。
+```
 
 ## 工作空间初始化
 
-`~/.agentic-ops` 是全局安装目录；项目 AI 工作空间是具体业务项目的运行目录，例如 `tapstate/` 或 `tapdata/`。
+`~/.agentic-ops` 是全局安装目录，也是 AgenticOps 的 managed clone；项目 AI 工作空间是具体业务项目的运行目录，例如 `tapstate/` 或 `tapdata/`。不要在 `~/.agentic-ops` 或 AgenticOps 源头仓库中初始化业务工作空间。
 
 初始化时需要明确：
 
@@ -24,10 +78,10 @@
 - 本地源码根目录。
 - 工作流配置。
 
-示例命令以当前安装版本输出为准：
+`tapdata` 示例要求当前安装版本中存在匹配的 `install-resources/basic/profiles/tapdata.yaml`。如果使用其它工作空间，`--workspace`、`--jira-user` 和 `--jira-project` 必须与对应工作流配置匹配。
 
 ```sh
-agentic-cli workspace init --workspace tapdata --jira-user <jira-user> --jira-project TAP
+agentic-cli workspace init --workspace tapdata --jira-user harsen@tapdata.io --jira-project TAP
 ```
 
 ## 指挥 AIAgent
@@ -42,7 +96,7 @@ agentic-cli workspace init --workspace tapdata --jira-user <jira-user> --jira-pr
 提交 TAP-123 本次执行的任务审计记录。
 ```
 
-AIAgent 应读取 [AI 资产入口](../../ai-assets/README.md)，再按 AI 员工手册、操作契约、工作流配置、策略和模板推进。研发负责人不应要求 AIAgent 依赖临场聊天上下文猜流程。
+AIAgent 应读取 [AI 资产入口](../../install-resources/basic/ai-assets/README.md)，再按 AI 员工手册、操作契约、工作流配置、策略和模板推进。研发负责人不应要求 AIAgent 依赖临场聊天上下文猜流程。
 
 ## 人工确认点
 

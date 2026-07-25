@@ -6,7 +6,7 @@ import (
 )
 
 func TestLoadRegistryReadsProcessesByID(t *testing.T) {
-	registry, err := LoadRegistry(filepath.Join("..", "..", "..", "..", "contracts", "processes"))
+	registry, err := LoadRegistry(filepath.Join("..", "..", "..", "..", "install-resources", "basic", "contracts", "processes"))
 	if err != nil {
 		t.Fatalf("LoadRegistry error = %v", err)
 	}

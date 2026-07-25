@@ -1,4 +1,12 @@
 .superpowers/
 .idea/
-.agentic-ops/
 dist/
+
+bin/*
+!bin/.gitkeep
+
+.local/*
+!.local/.gitkeep
+
+.agentic-ops/
+releases/

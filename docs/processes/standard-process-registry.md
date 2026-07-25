@@ -16,7 +16,7 @@ Standard Process Registry 是 AgenticOps 维护标准流程的源头。它定义
 | 操作契约 | 定义 `agentic-cli` 操作如何校验、执行、输出和记录事件。 |
 | 反馈闭环 | 聚合执行日志、失败码、审查退回、重试重做和流程改进建议。 |
 
-后续机器可读源头建议放入 `contracts/processes/`，发布资产同步到 `assets/processes/`。当前文档是第一阶段设计源头，不表示机器可读流程契约已经实现。
+机器可读源头放入 `install-resources/basic/contracts/processes/`。当前文档是第一阶段设计源头，用于解释标准流程注册处的职责边界。
 
 ## 3. 流程选择顺序
 

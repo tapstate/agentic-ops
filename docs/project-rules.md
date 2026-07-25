@@ -134,14 +134,14 @@ git@github.com:tapstate/agentic-ops.git
 
 ```text
 docs/          人读文档，包括架构、目标定位、故事线、流程和计划
-ai-assets/     AIAgent 执行前读取的 AI 资产入口，当前作为索引层
-assets/        安装后交付给研发负责人和 AIAgent 使用的运行资产源头
-contracts/     操作契约和结构定义
+install-resources/basic/
+               跨平台通用安装资源：AI 资产入口、手册、契约、配置、策略、runbook、模板
+install-resources/<os-arch>/
+               已编译平台二进制 agentic-cli
+bin/           本地安装后的命令目录，只提交 .gitkeep
+.local/        本地安装和更新状态，只提交 .gitkeep
 skills/        AgenticOps 技能和 AI 员工工作规则
-handbooks/     AI 员工手册
-profiles/      工作流配置示例和默认配置
 packages/      agentic-cli Go CLI 运行时
-templates/     Jira / 拉取请求 / 证据模板
 examples/      端到端演示样例
 tests/         自动化测试
 scripts/       本地和 CI 辅助脚本
@@ -149,7 +149,7 @@ scripts/       本地和 CI 辅助脚本
 
 仓库内文档、目录和脚本文件名默认使用英文 ASCII lowercase-kebab-case。面向用户的正文优先使用中文。
 
-同一个仓库内使用目录区分资料职责，不使用不同分支分管源码、设计、计划或运行资产。正式交付时通过 release 包控制使用者可见内容，研发负责人和 AIAgent 默认只接触安装后的命令、资产、模板和规范。
+同一个仓库内使用目录区分资料职责，不使用不同分支分管源码、设计、计划或运行资产。正式交付时通过 managed clone 和 `install-resources/` 控制使用者可见内容，研发负责人和 AIAgent 默认只接触安装后的命令、资产、模板和规范。
 
 当前项目规则只适用于 `tapstate/agentic-ops` 项目本身。不得把其它项目的研发规范、分支策略、验证命令、目录约定或上线前临时规则合并进 AgenticOps 当前项目规则。
 
@@ -171,11 +171,11 @@ AgenticOps 默认安装到：
 ~/.agentic-ops
 ```
 
-`~/.agentic-ops` 是用户本机的全局安装和配置目录，不是具体项目或具体任务的运行目录。
+`~/.agentic-ops` 是 `tapstate/agentic-ops` 的完整 managed clone，不是具体项目或具体任务的运行目录。
 
 `~/.agentic-ops` 可以保存：
 
-- AgenticOps release 二进制和安装元数据。
+- 已安装的 `bin/agentic-cli` 和 `.local/` 安装元数据。
 - 全局配置。
 - 通用 AI 员工手册。
 - 通用 skills。
@@ -194,10 +194,12 @@ AgenticOps 默认安装到：
 安装入口约定为：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
+curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/main/scripts/install.sh | bash
 ```
 
 安装脚本必须支持 Linux (linux-amd64 / linux-arm64)、macOS Intel (darwin-amd64) 和 macOS Apple Silicon (darwin-arm64)，并且不得覆盖用户已有本地配置。
+
+安装脚本必须把 `tapstate/agentic-ops` clone 或更新到 `~/.agentic-ops`，校验 `install-resources/checksums.txt`，再安装仓库中已经编译并提交的 `install-resources/<os-arch>/agentic-cli`；不得在研发负责人机器上编译安装。
 
 ## 8. 项目 AI 工作空间边界
 
@@ -321,7 +323,7 @@ TapData / TapState 方案 C 可以作为第一套默认工作流配置，但不�
 
 控制层必须采用本地优先的 Go CLI 运行时。
 
-shell 只用于安装引导，例如 `curl | bash` 的 `init.sh`。业务逻辑、操作、策略、适配器、日志和反馈分析不得写在 shell 中。
+shell 只用于安装引导，例如 `curl | bash` 的 `install.sh`。业务逻辑、操作、策略、适配器、日志和反馈分析不得写在 shell 中。
 
 统一入口为：
 
@@ -487,7 +489,7 @@ Jira / GitHub 写操作必须可审计。任何写操作都必须关联 `operati
 面向用户、研发负责人和审阅者的可见文档标题和正文默认使用中文。只有以下内容保留英文或缩写：
 
 - 属性名、状态名、配置键、协议字段和错误码，例如 `run_id`、`current_agent_id`、`side_effects`、`missing_form_field`。
-- 命令、参数、文件路径、目录名和代码符号，例如 `agentic-cli workspace init`、`--jira-project`、`contracts/operations/`。
+- 命令、参数、文件路径、目录名和代码符号，例如 `agentic-cli workspace init`、`--jira-project`、`install-resources/basic/contracts/operations/`。
 - 产品名、平台名、组件名和行业通用稳定名词，例如 `AgenticOps`、`AIAgent`、`Jira`、`GitHub`、`CI`、`CLI`。
 - 故事线、任务或契约的稳定编号，例如 `PM-001`、`DL-001`。
 

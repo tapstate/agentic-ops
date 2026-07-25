@@ -23,7 +23,7 @@ func TestValidateReportsMissingRequiredContractSections(t *testing.T) {
 }
 
 func TestValidateAcceptsRepositoryOperationContracts(t *testing.T) {
-	paths, err := filepath.Glob(filepath.Join("..", "..", "..", "..", "contracts", "operations", "*.yaml"))
+	paths, err := filepath.Glob(filepath.Join("..", "..", "..", "..", "install-resources", "basic", "contracts", "operations", "*.yaml"))
 	if err != nil {
 		t.Fatalf("Glob error = %v", err)
 	}

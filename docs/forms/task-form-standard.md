@@ -28,7 +28,7 @@ AgenticOps 表单体系分为三层。
 | --- | --- | --- |
 | Task Form Standard | 定义 AgenticOps 标准字段、字段语义、值类型、负责人和敏感性。 | `docs/forms/`，后续 `contracts/forms/` |
 | Lifecycle Form Requirements | 定义每个生命周期阶段需要哪些字段、何时必填、缺失时如何处理。 | `docs/forms/`，后续 `contracts/forms/` |
-| Jira Form Mapping | 把标准字段映射到具体 Jira 项目的字段、描述模板、评论模板、状态或 `transition`。 | `profiles/<workspace>/`，后续 `assets/profiles/` |
+| Jira Form Mapping | 把标准字段映射到具体 Jira 项目的字段、描述模板、评论模板、状态或 `transition`。 | `install-resources/basic/profiles/<workspace>.yaml` |
 
 操作契约只引用标准字段，不直接引用 Jira 字段。工作流配置负责把标准字段映射到具体系统事实。
 
@@ -290,7 +290,7 @@ AI 员工手册：
 - `docs/contracts/operation-contract.md`
 - `docs/profiles/workflow-profile.md`
 - `docs/templates/evidence-templates.md`
-- `handbooks/ai-employee-handbook.md`
+- `install-resources/basic/handbooks/ai-employee-handbook.md`
 - 工作流配置中的 Jira Form Mapping。
 
 字段变更分为三类：

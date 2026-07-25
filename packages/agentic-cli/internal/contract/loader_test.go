@@ -6,7 +6,7 @@ import (
 )
 
 func TestLoadFileReadsOperationContract(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "..", "contracts", "operations", "takeover-task.yaml")
+	path := filepath.Join("..", "..", "..", "..", "install-resources", "basic", "contracts", "operations", "takeover-task.yaml")
 	op, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("LoadFile error = %v", err)
@@ -23,7 +23,7 @@ func TestLoadFileReadsOperationContract(t *testing.T) {
 }
 
 func TestLoadFileReadsTakeoverGateSchema(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "..", "contracts", "operations", "takeover-task.yaml")
+	path := filepath.Join("..", "..", "..", "..", "install-resources", "basic", "contracts", "operations", "takeover-task.yaml")
 	op, err := LoadFile(path)
 	if err != nil {
 		t.Fatalf("LoadFile error = %v", err)

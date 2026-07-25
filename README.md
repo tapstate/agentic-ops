@@ -60,7 +60,7 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 - [项目结构](docs/architecture/project-structure.md)
 - [实施计划](plans/)
 - [CLI 实现](packages/agentic-cli/)
-- [机器可读操作契约](contracts/operations/)
+- [机器可读操作契约](install-resources/basic/contracts/operations/)
 
 ### 研发负责人
 
@@ -69,12 +69,12 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 从这里开始：
 
 - [研发负责人上手](docs/development-leads/getting-started.md)
-- [AI 员工手册](handbooks/ai-employee-handbook.md)
+- [AI 员工手册](install-resources/basic/handbooks/ai-employee-handbook.md)
 - [端到端演示](docs/examples/end-to-end-demo.md)
 - [故事线总览](docs/user-stories/agenticops-user-stories.md)
 - [问题修复与同步路径](docs/runtime/problem-resolution-and-update.md)
 
-研发负责人读人用指引，AIAgent 读 AI 资产入口。初始化工作空间后，应要求 AIAgent 先读取 [AI 资产入口](ai-assets/README.md)，再接管具体 Jira 任务。
+研发负责人读人用指引，AIAgent 读 AI 资产入口。初始化工作空间后，应要求 AIAgent 先读取 [AI 资产入口](install-resources/basic/ai-assets/README.md)，再接管具体 Jira 任务。
 
 ### AIAgent
 
@@ -82,10 +82,10 @@ AIAgent 不应主要依赖 README 或人用 `docs/` 执行任务，也不需要�
 
 执行前读取：
 
-- [AI 资产入口](ai-assets/README.md)
-- [AI 员工手册](handbooks/ai-employee-handbook.md)
+- [AI 资产入口](install-resources/basic/ai-assets/README.md)
+- [AI 员工手册](install-resources/basic/handbooks/ai-employee-handbook.md)
 - [操作契约说明](docs/contracts/operation-contract.md)
-- [机器可读操作契约](contracts/operations/)
+- [机器可读操作契约](install-resources/basic/contracts/operations/)
 - [工作流配置](docs/profiles/workflow-profile.md)
 
 如果 AIAgent 是在维护 AgenticOps 源头仓库，还必须额外读取 [AIAgent 工作规则](docs/ai-working-rules.md) 和 [项目研发期规则](docs/development-phase-rules.md)。
@@ -107,7 +107,7 @@ AgenticOps 通过稳定标准资产约束 AIAgent 的执行行为：
 
 ## 工作目录边界
 
-`~/.agentic-ops` 是全局安装和配置目录，不是具体项目运行目录。它用于保存安装后的 `agentic-cli`、安装元数据、全局配置和可安全重建的运行资产。
+`~/.agentic-ops` 是 `tapstate/agentic-ops` 的完整 managed clone。它的目录结构与 GitHub 仓库一致，用于保存安装后的 `agentic-cli`、安装元数据、全局配置和可安全重建的运行资产。
 
 具体项目运行目录是项目 AI 工作空间，例如：
 
@@ -123,14 +123,14 @@ tapdata/
 | 目录 | 用途 |
 | --- | --- |
 | `docs/` | 人读文档，包括项目维护者、研发负责人、架构、规则、故事线、流程和设计说明。 |
-| `ai-assets/` | AIAgent 执行前读取的 AI 资产入口；当前先做索引，运行资产源文件暂不迁移。 |
-| `handbooks/` | AI 员工手册，面向 AIAgent 和研发负责人。 |
-| `assets/` | 安装后交付给研发负责人和 AIAgent 使用的运行资产源头。 |
-| `contracts/` | 机器可读操作契约和标准流程定义。 |
-| `profiles/` | 工作流配置示例和默认配置。 |
+| `install-resources/basic/` | 跨平台通用安装资源，包括 AI 资产入口、手册、操作契约、工作流配置、策略、运行手册和模板。 |
+| `install-resources/<os-arch>/` | Git 跟踪的平台二进制产物，只放对应平台的 `agentic-cli`。 |
+| `install-resources/checksums.txt` | 安装资源校验和，安装和更新时必须通过校验。 |
+| `bin/` | 本机安装后的命令目录，仓库只跟踪 `bin/.gitkeep`，本地生成的 `bin/agentic-cli` 不提交。 |
+| `.local/` | 本机安装和更新状态目录，仓库只跟踪 `.local/.gitkeep`，本地状态文件不提交。 |
 | `plans/` | 基于稳定架构拆解的可执行推进计划。 |
 | `packages/agentic-cli/` | AgenticCLI Go 运行时实现。 |
-| `scripts/` | 安装、构建、发布和本地检查脚本。 |
+| `scripts/` | 安装、构建和本地检查脚本。 |
 | `tests/` | 合同、脚本和端到端验证。 |
 
 阶段状态、验收记录和剩余工作只由 [实施计划](plans/) 维护。

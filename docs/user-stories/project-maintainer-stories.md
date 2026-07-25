@@ -2,7 +2,7 @@
 
 ## 1. 范围
 
-本文是 AgenticOps 项目维护者故事索引。项目维护者是维护 `tapstate/agentic-ops` 源头仓库、发布资产和标准规范的人，负责让 AgenticOps 的设计、契约、运行资产、CLI、测试和文档持续一致。
+本文是 AgenticOps 项目维护者故事索引。项目维护者是维护 `tapstate/agentic-ops` 源头仓库、安装资源和标准规范的人，负责让 AgenticOps 的设计、契约、运行资产、CLI、测试和文档持续一致。
 
 详细故事按单文件维护，便于逐条审核、评论和变更追踪。本文只维护索引，不记录实施计划、勾选项、当前完成度或剩余工作。
 
@@ -12,10 +12,10 @@
 | --- | --- | --- | --- |
 | PM-001 | 维护故事线、设计和计划边界 | 故事线、设计、计划和实现状态不混写 | [pm-001-document-boundary.md](project-maintainer/pm-001-document-boundary.md) |
 | PM-002 | 维护操作契约、标准流程和工作流配置 | AIAgent 不直接猜测 Jira / GitHub / Git 底层事实 | [pm-002-standard-assets.md](project-maintainer/pm-002-standard-assets.md) |
-| PM-003 | 发布 AgenticOps 版本和安装资产 | 发布产物、清单、校验和、安装和审计可验证 | [pm-003-release-assets.md](project-maintainer/pm-003-release-assets.md) |
+| PM-003 | 构建 AgenticOps 安装资源 | 安装资源、校验和、安装和审计可验证 | [pm-003-release-assets.md](project-maintainer/pm-003-release-assets.md) |
 | PM-004 | 诊断问题并选择修复载体 | 问题能归入 CLI、profile、policy、补卡、release / update 等修复载体 | [pm-004-problem-diagnosis.md](project-maintainer/pm-004-problem-diagnosis.md) |
 | PM-005 | 处理反馈并形成改进建议 | 反馈只形成 proposal，不自动修改源头规则 | [pm-005-feedback-proposal.md](project-maintainer/pm-005-feedback-proposal.md) |
-| PM-006 | 治理发布权限、回滚和兼容性 | latest-only、阻断范围、回滚和审计边界清晰 | [pm-006-release-governance.md](project-maintainer/pm-006-release-governance.md) |
+| PM-006 | 治理 latest 更新、回滚和兼容性 | latest-only、阻断范围、回滚和审计边界清晰 | [pm-006-release-governance.md](project-maintainer/pm-006-release-governance.md) |
 
 ## 3. 审核方式
 

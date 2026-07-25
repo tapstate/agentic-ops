@@ -32,7 +32,7 @@ AIAgent 做任何结论前必须先找证据。
 AIAgent 不得声称以下内容已经存在，除非当前仓库中有文件或命令输出证明：
 
 - `agentic-cli` 已实现。
-- `init.sh` 已存在。
+- `install.sh` 已存在。
 - Operation YAML 已存在。
 - 工作流配置可运行。
 - Jira adapter 已可用。

@@ -49,7 +49,7 @@ CLI 命令 new 改为 create
 ### 步骤 1：全局安装
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
+curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/main/scripts/install.sh | bash
 ```
 
 期望说明：
@@ -57,6 +57,7 @@ curl -fsSL https://raw.githubusercontent.com/tapstate/agentic-ops/init.sh | bash
 - 安装到 `~/.agentic-ops`。
 - 该目录不是具体项目运行目录。
 - 安装动作是全局动作，不绑定具体 Jira 空间或代码仓库。
+- 安装脚本使用 `install-resources/<os-arch>/agentic-cli` 中已经编译并提交到仓库的产物，不在研发负责人机器上编译。
 
 ### 步骤 2：初始化工作空间
 
@@ -163,10 +164,10 @@ bash tests/e2e/local-fake-flow.sh
 
 该命令使用模拟 Jira 数据跑通本地 CLI 闭环，不执行真实 Jira 或 GitHub 写操作；它是自动化回归验证，不替代真实 Jira 卡片演示。
 
-第一阶段本地发布安装闭环验证命令：
+第一阶段本地安装闭环验证命令：
 
 ```sh
-bash tests/e2e/local-release-install-flow.sh
+bash tests/e2e/local-install-flow.sh
 ```
 
-该命令会编译当前平台二进制、生成本地发布包、通过 `scripts/init.sh` 安装到临时 `~/.agentic-ops`，再使用安装后的 `agentic-cli` 完成工作空间初始化、AIAgent 初始化、任务接管、恢复、证据写入和反馈报告。
+该命令会准备临时 managed clone，通过 `scripts/install.sh` 安装到临时 `~/.agentic-ops`，再使用安装后的 `agentic-cli` 完成工作空间初始化、AIAgent 初始化和预检。

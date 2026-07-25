@@ -37,13 +37,13 @@
 
 - 维护文档、目录结构、操作契约、工作流配置、AI 员工手册和反馈闭环。
 - 实现 `agentic-cli` Go CLI 的本地模拟流程。
-- 实现 `scripts/init.sh` 安装 bootstrap。
+- 实现 `scripts/install.sh` 安装 bootstrap。
 - 实现本地单元测试、脚本冒烟测试和模拟流程端到端测试。
 
 ## 4. 上线前运行时方向
 
 - 主 CLI 使用 Go 实现，统一入口为 `agentic-cli`。
-- shell 只用于 `curl | bash` 安装引导、轻量环境检测、下载或切换 Go release 二进制。
+- shell 只用于 `curl | bash` 安装引导、轻量环境检测、managed clone 更新、校验安装资源和复制当前平台已经编译好的 Go 二进制。
 - shell 不承载 Jira、GitHub、Git、操作契约、策略门禁、证据或反馈的业务逻辑。
 - 不优先引入常驻服务或 Web 控制台；如需改变，必须先形成明确设计决策。
 - 主 CLI 发布目标包括 `darwin-arm64`、`darwin-amd64`、`linux-amd64` 和 `linux-arm64`。

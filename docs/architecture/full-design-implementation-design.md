@@ -19,7 +19,7 @@
 
 ### 操作契约
 
-`contracts/operations/` 是机器可读操作契约的唯一源头。操作契约必须能表达：
+`install-resources/basic/contracts/operations/` 是机器可读操作契约的唯一源头。操作契约必须能表达：
 
 - 结构化输入和输出。
 - 前置门禁。

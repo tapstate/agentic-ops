@@ -11,7 +11,7 @@
 5. [故事线总览](user-stories/agenticops-user-stories.md)：确认后续推进遵循“故事线 -> 设计 -> 计划 / 开发 -> 验收”。
 6. [项目维护者故事](user-stories/project-maintainer-stories.md)：确认源头仓库维护、标准资产治理、发布、诊断、反馈、回滚和兼容性故事。
 7. [研发负责人故事](user-stories/development-lead-stories.md)：确认安装、初始化、任务接管、恢复接管、任务完成审计和按需反馈分析。
-8. [AI 员工手册](../handbooks/ai-employee-handbook.md)：确认 AIAgent 如何工作、何时停止、如何回写证据。
+8. [AI 员工手册](../install-resources/basic/handbooks/ai-employee-handbook.md)：确认 AIAgent 如何工作、何时停止、如何回写证据。
 9. [操作契约](contracts/operation-contract.md)：确认 AIAgent 能调用哪些受控操作，以及每个操作的输入、输出和副作用。
 10. [工作流配置](profiles/workflow-profile.md)：确认如何屏蔽 Jira 事实，并把具体项目流程映射成稳定配置。
 11. [CLI 运行时](runtime/cli-runtime.md)：确认第一阶段控制层采用 Go CLI 运行时，shell 只做安装引导，不做常驻服务或 Web 平台。
@@ -56,7 +56,7 @@
 
 需要你决策的情况是：
 
-- 希望把 `contracts/`、`profiles/`、`skills/`、`templates/` 提前填充成运行时默认配置，而不是继续作为设计说明。
+- 希望把 `install-resources/basic/` 中的默认运行资源和 `skills/` 提前填充完整，而不是继续作为设计说明。
 - 希望第一阶段改为常驻服务或 Web 控制台，而不是本地 Go CLI。
 - 希望 AgenticOps 强绑定某个固定 Jira 工作流，而不是通过工作流配置做项目级映射。
 - 希望降低人工确认门槛，例如允许低风险任务自动推送或自动创建拉取请求。

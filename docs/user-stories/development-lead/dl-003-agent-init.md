@@ -96,7 +96,7 @@ agentic-cli agent init --workspace tapstate
 
 ### 关联设计
 
-- `handbooks/ai-employee-handbook.md`
+- `install-resources/basic/handbooks/ai-employee-handbook.md`
 - `docs/ai-working-rules.md`
 - `docs/contracts/operation-contract.md`
 - `docs/profiles/workflow-profile.md`

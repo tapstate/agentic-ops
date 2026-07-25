@@ -1,58 +1,43 @@
 operation: update_apply
 version: 1
-purpose: 基于本地或远程 release manifest 应用更新，下载并校验 artifact，切换本地 current.json 并保留 previous 版本。
+purpose: 基于 managed clone 应用 latest 更新，校验 install-resources/checksums.txt，刷新本机二进制并保留 previous ref。
 task_type: update
 allowed_stages:
   - update_required
   - update_available
   - update_apply
-required_inputs:
-  - manifest_or_manifest_url
 optional_inputs:
   - install_dir
-  - target
 input:
-  manifest:
-    type: string
-    required: false
-  manifest_url:
-    type: string
-    required: false
   install_dir:
     type: string
     required: false
-  target:
-    type: string
-    required: false
 preconditions:
-  - release_manifest_must_exist
+  - install_dir_must_be_managed_clone
+  - checksums_must_exist
   - install_dir_must_be_writable
 output:
-  source:
+  install_dir:
     type: string
-  version:
+  bin:
     type: string
-  asset_version:
+  target:
     type: string
-  previous_version:
+  previous_ref:
     type: string
-  previous_asset_version:
-    type: string
-  current:
-    type: string
-  downloaded_artifacts:
-    type: array
-  activated_binary:
+  current_ref:
     type: string
   next_action:
     type: string
 failure:
   codes:
-    - missing_manifest
+    - managed_clone_missing
+    - checksum_mismatch
     - update_apply_failed
 side_effects:
   - may_write_global_install_dir
-  - may_download_release_artifacts
+  - may_fetch_git_remote
+  - may_write_local_install_state
   - must_not_write_jira
   - must_not_modify_code
 human_gate:

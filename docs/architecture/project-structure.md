@@ -24,6 +24,8 @@
 ```text
 agentic-ops/
   README.md
+  agent-init.md
+  .gitignore
   docs/
     maintainers/
       getting-started.md
@@ -61,28 +63,32 @@ agentic-ops/
     ai-working-rules.md
     development-style.md
     project-rules.md
-  ai-assets/
-    README.md
-  handbooks/
-    ai-employee-handbook.md
-  assets/
-    manifest.json
-    handbooks/
-    contracts/
-    profiles/
-    policies/
-    runbooks/
-    templates/
+  install-resources/
+    basic/
+      ai-assets/
+      handbooks/
+      contracts/
+      profiles/
+      policies/
+      runbooks/
+      templates/
+      manifest.json
+    darwin-arm64/
+      agentic-cli
+    darwin-amd64/
+      agentic-cli
+    linux-arm64/
+      agentic-cli
+    linux-amd64/
+      agentic-cli
+    checksums.txt
+  bin/
+    .gitkeep
+  .local/
+    .gitkeep
   plans/
     implementation-plan-v1.md
-  contracts/
-    operations/
-  profiles/
   skills/
-  templates/
-    evidence/
-    jira-comments/
-    pr-comments/
   packages/
     agentic-cli/
       cmd/
@@ -109,14 +115,13 @@ agentic-ops/
 | Directory | Responsibility |
 | --- | --- |
 | `docs/` | 人读文档，包括项目维护者、研发负责人、架构、规则、故事线、流程和设计说明。 |
-| `ai-assets/` | AIAgent 执行前读取的 AI 资产入口；当前作为索引层，运行资产源文件暂不迁移。 |
-| `handbooks/` | AI 员工手册，面向 AIAgent 和研发负责人。 |
-| `assets/` | 安装后交付给研发负责人和 AIAgent 使用的运行资产源头。 |
+| `install-resources/basic/` | Git 跟踪的跨平台通用安装资源，包括 AI 资产入口、手册、操作契约、工作流配置、策略、运行手册和模板。 |
+| `install-resources/<os-arch>/` | Git 跟踪的平台二进制产物，只放对应平台的 `agentic-cli`。 |
+| `install-resources/checksums.txt` | 安装资源校验和，覆盖 `basic` 和平台二进制。 |
+| `bin/` | 安装后的本机命令目录；仓库只跟踪 `bin/.gitkeep`，本地 `bin/agentic-cli` 被 `.gitignore` 忽略。 |
+| `.local/` | 本机安装和更新状态目录；仓库只跟踪 `.local/.gitkeep`，本地状态文件被 `.gitignore` 忽略。 |
 | `plans/` | 面向维护者和项目维护代理的可执行推进计划。 |
-| `contracts/` | 可机器读取的 操作契约，以 YAML / JSON 管理。 |
-| `profiles/` | 工作流配置示例和默认配置。 |
 | `skills/` | AgenticOps skills，让 AIAgent 知道如何工作。 |
-| `templates/` | Jira / 拉取请求 / 证据回写模板。 |
 | `packages/agentic-cli/` | Go CLI 运行时源码位置。 |
 | `examples/` | 端到端演示样例。 |
 | `tests/` | 合同、脚本和文档一致性测试。 |
@@ -124,15 +129,19 @@ agentic-ops/
 
 ## 5. 安装边界
 
-`~/.agentic-ops` 是用户本机全局安装和配置目录，可保存从 release 安装得到的 Go 二进制、安装元数据、全局配置、通用手册、通用 skills 和可安全重建的缓存。
+`~/.agentic-ops` 是用户本机全局安装目录，也是 `tapstate/agentic-ops` 的完整 managed clone。它的目录结构与 GitHub 仓库一致。
 
 `~/.agentic-ops` 不是具体项目或具体任务运行目录。
 
-本仓库使用目录区分源码、设计、计划和运行资产，不使用不同分支分管资料。发布时再按交付对象拆分：
+安装和更新行为：
 
-- 维护者面对完整仓库。
-- 研发负责人和 AIAgent 面对安装后的 `agentic-cli`、`~/.agentic-ops/current.json` 和 `~/.agentic-ops/assets/<version>/`。
-- 设计文档和推进资料不进入普通使用者的日常入口。
+- 首次安装 clone GitHub 仓库到 `~/.agentic-ops`。
+- 更新时暂存 tracked 本地改动，记录 `.local/previous-ref`，再更新到 `origin/main` 最新版本。
+- 每次安装或更新都校验 `install-resources/checksums.txt`。
+- 当前平台二进制从 `install-resources/<os-arch>/agentic-cli` 复制到 `bin/agentic-cli`。
+- 安装和更新状态写入 `.local/current-ref`、`.local/previous-ref`、`.local/install-log.json` 或 `.local/update-stash`。
+
+`bin/agentic-cli` 和 `.local/*` 是本地产生文件，必须被 `.gitignore` 忽略，避免 managed clone 更新时产生冲突。
 
 ## 6. 工作空间边界
 
@@ -160,4 +169,4 @@ tapdata/
 
 `plans/` 保留在仓库顶层。原因是推进资料需要独立于设计说明维护，并且需要比 `docs/` 中的设计说明更容易被定位和更新。
 
-如果要改变 `contracts/`、`profiles/`、`skills/`、`templates/` 的职责边界，需要先确认对应内容属于“设计样例”还是“运行时默认配置”；该取舍应由用户决策。
+运行时默认资源统一放在 `install-resources/basic/`；不要重新引入旧的顶层运行资源目录或旧的 release 目录作为安装资源源头。

@@ -246,7 +246,7 @@ bash tests/e2e/local-fake-flow.sh
 - Modify: `packages/agentic-cli/internal/assets/installer.go`
 - Modify: `packages/agentic-cli/internal/cli/app.go`
 - Modify: `packages/agentic-cli/internal/cli/app_test.go`
-- Modify: `scripts/release.sh`
+- Modify: `scripts/build.sh`
 - Modify: `assets/manifest.json`
 - Create: `contracts/operations/update-rollback.yaml`
 - Update: `contracts/operations/update-check.yaml`
@@ -264,7 +264,7 @@ bash tests/e2e/local-fake-flow.sh
 
 ```sh
 go test ./packages/agentic-cli/internal/update ./packages/agentic-cli/internal/assets ./packages/agentic-cli/internal/cli
-bash scripts/test-build-release.sh
+bash scripts/test-build.sh
 bash tests/e2e/problem-resolution-flow.sh
 ```
 
@@ -285,7 +285,7 @@ bash tests/e2e/problem-resolution-flow.sh
 - Modify: `packages/agentic-cli/internal/cli/app.go`
 - Modify: `packages/agentic-cli/internal/cli/app_test.go`
 - Modify: `scripts/publish-release.sh`
-- Modify: `scripts/test-build-release.sh`
+- Modify: `scripts/test-build.sh`
 - Update: `assets/policies/default.yaml`
 
 - [ ] 定义 `release_publish` 操作契约，声明输入、输出、失败码、副作用和人工门禁。
@@ -299,7 +299,7 @@ bash tests/e2e/problem-resolution-flow.sh
 
 ```sh
 go test ./packages/agentic-cli/internal/release ./packages/agentic-cli/internal/cli
-bash scripts/test-build-release.sh
+bash scripts/test-build.sh
 ```
 
 ### Task 8: 补齐反馈分析与改进建议闭环
@@ -360,8 +360,8 @@ bash tests/e2e/problem-resolution-flow.sh
 
 ```sh
 go test ./...
-bash scripts/test-init.sh
-bash scripts/test-build-release.sh
+bash scripts/test-install.sh
+bash scripts/test-build.sh
 bash tests/e2e/local-fake-flow.sh
 bash tests/e2e/problem-resolution-flow.sh
 ```

@@ -12,7 +12,7 @@ cmd="go run ./packages/agentic-cli/cmd/agentic-cli"
 install_root="$workspace_root/install"
 
 $cmd --version | grep '"operation":"version"'
-$cmd assets install --source assets --install-dir "$install_root" --version RES-v0.1.1-a68372d | grep '"operation":"assets_install"'
+$cmd assets install --source install-resources/basic --install-dir "$install_root" --version INS-v0.1.1-a68372d | grep '"operation":"assets_install"'
 update_manifest="$workspace_root/update-manifest.json"
 cat > "$update_manifest" <<'JSON'
 {
@@ -28,18 +28,18 @@ $cmd update apply --manifest "$update_manifest" --install-dir "$install_root" | 
 $cmd contract validate | grep '"operation":"contract_validate"'
 $cmd profile validate --workspace tapstate | grep '"operation":"profile_validate"'
 profile_source="$workspace_root/tapstate-profile-hotfix.yaml"
-profile_backup="profiles/tapstate.yaml.bak"
+profile_backup="install-resources/basic/profiles/tapstate.yaml.bak"
 test ! -e "$profile_backup"
-cp profiles/tapstate.yaml "$profile_source"
+cp install-resources/basic/profiles/tapstate.yaml "$profile_source"
 $cmd profile update --workspace tapstate --source "$profile_source" | grep '"operation":"profile_update"'
 $cmd profile validate --workspace tapstate | grep '"operation":"profile_validate"'
 $cmd profile rollback --workspace tapstate | grep '"operation":"profile_rollback"'
 rm -f "$profile_backup"
 $cmd policy validate --workspace tapstate | grep '"operation":"policy_validate"'
 policy_source="$workspace_root/default-policy-hotfix.yaml"
-policy_backup="assets/policies/default.yaml.bak"
+policy_backup="install-resources/basic/policies/default.yaml.bak"
 test ! -e "$policy_backup"
-cp assets/policies/default.yaml "$policy_source"
+cp install-resources/basic/policies/default.yaml "$policy_source"
 $cmd policy update --workspace tapstate --source "$policy_source" | grep '"operation":"policy_update"'
 $cmd policy validate --workspace tapstate | grep '"operation":"policy_validate"'
 $cmd policy rollback --workspace tapstate | grep '"operation":"policy_rollback"'
@@ -73,5 +73,5 @@ test -f "$workspace_root/.agentic-ops/profiles/tapstate.yaml"
 test -d "$workspace_root/.agentic-ops/run-logs"
 test -f "$workspace_root/.agentic-ops/feedback/bundles/TAP-123-takeover-20260721103012-a8f3.md"
 test -f "$workspace_root/.agentic-ops/feedback/reports/2026-07-21.md"
-test -f "$install_root/assets/RES-v0.1.1-a68372d/manifest.json"
+test -f "$install_root/assets/INS-v0.1.1-a68372d/manifest.json"
 test -f "$install_root/current.json"

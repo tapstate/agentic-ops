@@ -6,7 +6,7 @@ import (
 )
 
 func TestValidateAcceptsDefaultPolicy(t *testing.T) {
-	p, err := LoadFile(filepath.Join("..", "..", "..", "..", "assets", "policies", "default.yaml"))
+	p, err := LoadFile(filepath.Join("..", "..", "..", "..", "install-resources", "basic", "policies", "default.yaml"))
 	if err != nil {
 		t.Fatalf("LoadFile error = %v", err)
 	}

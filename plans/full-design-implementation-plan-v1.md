@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - CLI 统一入口为 `agentic-cli`。
-- Go 是主实现语言；shell 只用于安装引导、轻量环境检测、下载或切换 Go release 二进制。
+- Go 是主实现语言；shell 只用于安装引导、轻量环境检测、managed clone 更新、校验安装资源和复制当前平台已编译 Go 二进制。
 - `agentic-cli` 运行时不得依赖本地 Python、`jq` 或 shell 业务脚本。
 - stdout 只输出结构化 JSON；stderr 输出人类诊断日志。
 - 所有失败必须返回稳定 `code`、`message`、`required_human_action`、`task_type`、`current_stage` 和 `next_action`。
@@ -341,9 +341,9 @@ Run:
 
 ```sh
 go test ./...
-bash scripts/test-init.sh
+bash scripts/test-install.sh
 bash tests/e2e/local-fake-flow.sh
-bash tests/e2e/local-release-install-flow.sh
+bash tests/e2e/local-install-flow.sh
 ```
 
 Expected: all commands exit 0.
@@ -1057,7 +1057,7 @@ Added separate `jira_transition_mapping` entries for Jira transition ids or name
 
 `update check` now accepts `--manifest-url` and downloads the remote release manifest before comparing it with the current AgenticCLI version.
 
-- [x] **Step 2: Download release artifacts**
+- [x] **Step 2: Prepare install resources**
 
 `update apply` now accepts `--manifest-url`, selects the binary artifact for the current or explicit `--target`, downloads the matching assets artifact, and stores both under the install directory.
 
@@ -1095,7 +1095,7 @@ The script checks whether the release already exists, creates it when absent, or
 
 - [x] **Step 3: Verify publish flow without network**
 
-`scripts/test-build-release.sh` uses a fake `gh` binary to verify the publish command shape and release asset set without contacting GitHub.
+`scripts/test-build.sh` verifies the install resource build output and checksums without contacting GitHub.
 
 ## 11. Later Phases
 

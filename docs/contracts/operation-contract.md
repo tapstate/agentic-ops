@@ -32,7 +32,7 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 | `doctor` | 输出安装、版本、工作流配置、策略、契约、适配器和工作空间的本地诊断结果。 |
 | `assets_install` | 安装或更新 AI 员工手册、契约、工作流配置、策略、运行手册和模板等运行资产。 |
 | `update_check` | 基于本地发布清单检查是否存在可用更新，并返回更新级别和受影响操作。 |
-| `update_apply` | 基于本地发布清单应用更新，切换本地 `current.json` 并保留上一版本。 |
+| `update_apply` | 基于 managed clone 应用 latest 更新，记录 `.local/previous-ref` 并刷新本机二进制。 |
 | `contract_validate` | 校验机器可读 操作契约是否满足完整设计基线。 |
 | `profile_validate` | 校验工作流配置是否能映射标准字段、任务分类、标准流程、状态和 `transition`。 |
 | `profile_update` | 使用经过校验的本地来源工作流配置更新当前工作流配置，并保存可回滚备份。 |
@@ -58,7 +58,7 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 | `feedback_report` | 按需生成执行分析报告，用于发现重复问题和 AgenticOps 改进建议。 |
 | `feedback_propose` | 生成改进建议。 |
 
-当前 `contracts/operations/` 维护已落地或直接需要的机器可读 YAML，并通过 `agentic-cli contract validate` 校验。未进入当前可运行闭环的操作先保留在本文档中作为后续契约范围，不视为已实现 CLI 命令。
+当前 `install-resources/basic/contracts/operations/` 维护已落地或直接需要的机器可读 YAML，并通过 `agentic-cli contract validate` 校验。未进入当前可运行闭环的操作先保留在本文档中作为后续契约范围，不视为已实现 CLI 命令。
 
 ## 4. 契约结构
 

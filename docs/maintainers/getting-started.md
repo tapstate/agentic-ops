@@ -19,7 +19,7 @@
 ```sh
 git status --short
 go test ./...
-bash scripts/test-init.sh
+bash scripts/test-install.sh
 bash tests/e2e/local-fake-flow.sh
 ```
 

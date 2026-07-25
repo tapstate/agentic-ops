@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-state="${1:-DEV}"
+state="${1:-INS}"
 
 case "$state" in
   source|src|SRC) state="SRC" ;;
+  install|ins|INS) state="INS" ;;
   dev|DEV) state="DEV" ;;
-  release|res|RES) state="RES" ;;
   *) echo "unsupported version state: $state" >&2; exit 1 ;;
 esac
 

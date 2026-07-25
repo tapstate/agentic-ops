@@ -55,7 +55,7 @@ packages/agentic-cli/
 
 以上是目标结构。当前已实现 `cli`、`config`、`contract`、`evidence`、`feedback`、`jira`、`output`、`policy` 和 `workspace` 的本地模拟流程；`git`、`github` 等真实集成目录仍属于后续阶段。
 
-操作契约的机器可读源头在仓库顶层 `contracts/operations/`。Go CLI 可以在构建或运行时读取这些契约，但不在 package 内维护第二份契约源头。
+操作契约的机器可读源头在 `install-resources/basic/contracts/operations/`。Go CLI 可以在构建或运行时读取这些契约，但不在 package 内维护第二份契约源头。
 
 ## 4. 平台要求
 
@@ -141,18 +141,18 @@ AgenticOps 面向公司研发分发，运行时必须支持快速修复和快速
 
 正式使用前的问题分类、诊断、发布、同步和回滚路径见 `docs/runtime/problem-resolution-and-update.md`。
 
-第一阶段发布流程应满足：
+第一阶段安装资源流程应满足：
 
-- 每次 release 生成多平台二进制。
-- 安装脚本按 OS 和 CPU 架构下载对应二进制。
-- 版本号使用 `STATE-vMAJOR.ITERATION.COMMIT_INDEX-COMMIT` 格式，例如 `RES-v0.1.3-a68372d`。
+- `scripts/build.sh` 生成多平台二进制到 `install-resources/<os-arch>/agentic-cli`。
+- 安装脚本 clone 或更新 `~/.agentic-ops` managed clone，并按 OS 和 CPU 架构复制已编译二进制到 `bin/agentic-cli`。
+- 版本号使用 `STATE-vMAJOR.ITERATION.COMMIT_INDEX-COMMIT` 格式，例如 `INS-v0.1.3-a68372d`。
 - `agentic-cli version` 能输出当前版本、`version_state`、`iteration_version`、`commit_index`、commit 和构建时间。
-- `version_state` 必须区分 `SRC`、`DEV` 和 `RES`，分别表示源码运行、开发版和正式版。
-- build version、release version 和 asset version 均由脚本自动生成，不允许手工指定。
-- `agentic-cli self-update` 能升级到最新稳定版本；有新版本时推荐自动更新应用。
+- `version_state` 必须区分 `SRC` 和 `INS`，分别表示源码运行和已编译安装资源。
+- build version 由脚本自动生成，不允许手工指定。
+- `scripts/install.sh` 能更新到 latest；有新版本时推荐自动更新应用。
 - 安装和升级不得覆盖用户本地配置。
 - 项目采用 latest-only 支持策略，BUG 只在最新版本修复，不维护旧版本补丁线。
-- 如后续实现 rollback，它只用于安装失败或新版本不可用时的本地恢复，不作为旧版本修复策略。
+- 安装失败或新版本不可用时，通过 `.local/previous-ref` 回退本地 clone，不作为旧版本修复策略。
 
 ## 9. 语言边界
 
@@ -160,9 +160,9 @@ Go 是 AgenticOps 主 CLI 的实现语言。
 
 shell 只允许用于：
 
-- `init.sh` 安装引导。
+- `install.sh` 安装引导。
 - 轻量环境检测。
-- 下载或切换 Go release 二进制。
+- managed clone 更新、校验安装资源和复制当前平台已编译 Go 二进制。
 
 shell 不允许承载：
 

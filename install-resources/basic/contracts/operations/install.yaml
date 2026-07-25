@@ -1,6 +1,6 @@
 operation: install
 version: 1
-purpose: 安装 AgenticOps 全局 CLI 到用户本机。
+purpose: clone 或更新 AgenticOps managed clone，并安装当前平台已编译 CLI 到用户本机。
 task_type: installation
 allowed_stages:
   - not_installed
@@ -12,7 +12,9 @@ input:
     required: true
 preconditions:
   - platform_must_be_supported
+  - git_must_be_available
   - install_dir_must_be_writable
+  - checksums_must_exist
 output:
   install_dir:
     type: string
@@ -20,17 +22,21 @@ output:
     type: string
   target:
     type: string
-  version:
+  current_ref:
     type: string
   next_action:
     type: string
 failure:
   codes:
     - unsupported_platform
+    - git_not_available
     - install_dir_not_writable
+    - checksum_mismatch
     - install_failed
 side_effects:
   - may_write_global_install_dir
+  - may_clone_or_fetch_git_remote
+  - may_write_local_install_state
   - must_not_modify_project_workspace
 human_gate:
   required: false

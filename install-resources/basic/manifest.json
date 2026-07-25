@@ -1,6 +1,6 @@
 {
   "asset_version": "2026.07.22.1",
-  "description": "AgenticOps first-stage local assets package",
+  "description": "AgenticOps basic install resources",
   "channels": ["local-fake-flow"],
   "includes": [
     "handbooks",
