@@ -36,6 +36,18 @@
 agentic-cli --version
 ```
 
+如果命令不存在，但 `~/.agentic-ops/bin/agentic-cli` 已存在，说明通常只是当前 shell 没有配置 `PATH`。先执行：
+
+```sh
+case ":$PATH:" in
+  *":$HOME/.agentic-ops/bin:"*) ;;
+  *) export PATH="$HOME/.agentic-ops/bin:$PATH" ;;
+esac
+agentic-cli --version
+```
+
+如果这样可以输出版本，不要重新安装，继续后续初始化步骤。
+
 如果命令不存在，使用安装入口：
 
 ```sh
@@ -66,6 +78,10 @@ gh api -H 'Accept: application/vnd.github.raw' \
 安装后再次执行：
 
 ```sh
+case ":$PATH:" in
+  *":$HOME/.agentic-ops/bin:"*) ;;
+  *) export PATH="$HOME/.agentic-ops/bin:$PATH" ;;
+esac
 agentic-cli --version
 ```
 

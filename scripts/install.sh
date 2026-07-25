@@ -142,6 +142,14 @@ confirm_update() {
   esac
 }
 
+path_contains_dir() {
+  local dir="$1"
+  case ":${PATH:-}:" in
+    *":$dir:"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 trap rollback ERR
 
 if ! command -v git >/dev/null 2>&1; then
@@ -187,4 +195,12 @@ copy_binary
 current_ref="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
 write_local_state "$current_ref" "$operation"
 
-printf '{"ok":true,"operation":"%s","install_dir":"%s","bin":"%s","target":"%s","current_ref":"%s","source":"managed_clone","next_action":"workspace_init"}\n' "$operation" "$INSTALL_DIR" "$bin_dir/agentic-cli" "$target" "$current_ref"
+path_configured="false"
+if path_contains_dir "$bin_dir"; then
+  path_configured="true"
+else
+  echo "agentic-cli is installed but not on PATH: $bin_dir/agentic-cli" >&2
+  echo "For this shell, run: case \":\$PATH:\" in *\":$bin_dir:\"*) ;; *) export PATH=\"$bin_dir:\$PATH\" ;; esac" >&2
+fi
+
+printf '{"ok":true,"operation":"%s","install_dir":"%s","bin":"%s","target":"%s","current_ref":"%s","source":"managed_clone","path_configured":%s,"path_entry":"%s","next_action":"workspace_init"}\n' "$operation" "$INSTALL_DIR" "$bin_dir/agentic-cli" "$target" "$current_ref" "$path_configured" "$bin_dir"

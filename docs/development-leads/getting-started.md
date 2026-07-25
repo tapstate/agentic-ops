@@ -6,9 +6,14 @@
 
 AgenticOps 安装是全局动作，项目初始化是工作空间动作。安装脚本会把 `tapstate/agentic-ops` clone 到 `~/.agentic-ops`，更新到 `origin/main` 最新版本，校验 `install-resources/checksums.txt`，再把当前平台已经编译并提交的 `agentic-cli` 复制到 `~/.agentic-ops/bin/agentic-cli`。安装过程不在研发负责人机器上编译。
 
-### 标准路径
+下面两条路径二选一，不要混用：
 
-1. 确认 GitHub CLI 已登录，并具备访问 `tapstate/agentic-ops` 私有仓库的权限：
+- 推荐路径：研发负责人先在终端完成安装和工作空间初始化，再让 Codex 初始化 AgenticOps 能力。
+- Codex 托管路径：研发负责人只创建工作目录并启动 Codex，由 Codex 按 `agent-init.md` 完成安装、工作空间初始化和能力初始化。
+
+### 路径 A：终端安装后启动 Codex
+
+1. 确认 GitHub CLI 已登录，并具备访问 `tapstate/agentic-ops` 私有仓库的权限。
 
 ```sh
 gh auth status
@@ -30,7 +35,7 @@ gh api -H 'Accept: application/vnd.github.raw' \
 
 `/repos/.../install.sh?ref=main` 必须用引号包起来，避免 zsh 把 `?ref=main` 当成通配符。`AGENTIC_OPS_REPO_URL` 显式指定 SSH clone 地址；如果需要改用其它 clone 地址，可以替换该变量值。
 
-如果本机已经存在 `~/.agentic-ops`，安装脚本会进入更新模式，展示当前 ref 和目标分支，并要求确认后才更新。非交互环境必须在研发负责人确认后显式增加 `AGENTIC_OPS_ASSUME_YES=1`：
+如果本机已经存在 `~/.agentic-ops`，安装脚本会进入更新模式，展示当前 ref 和目标分支，并要求确认后才更新。非交互环境必须在研发负责人确认后显式增加 `AGENTIC_OPS_ASSUME_YES=1`。
 
 ```sh
 gh api -H 'Accept: application/vnd.github.raw' \
@@ -38,22 +43,40 @@ gh api -H 'Accept: application/vnd.github.raw' \
   | AGENTIC_OPS_ASSUME_YES=1 AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
 ```
 
-3. 创建并进入项目 AI 工作空间：
+3. 让当前 shell 能找到 `agentic-cli`，并验证安装结果。
+
+```sh
+case ":$PATH:" in
+  *":$HOME/.agentic-ops/bin:"*) ;;
+  *) export PATH="$HOME/.agentic-ops/bin:$PATH" ;;
+esac
+agentic-cli --version
+```
+
+如果希望后续新终端也能直接使用 `agentic-cli`，把配置写入当前 shell 的启动文件。zsh 示例会先检查同一行是否已经存在，不会重复追加：
+
+```sh
+agentic_ops_path_line='export PATH="$HOME/.agentic-ops/bin:$PATH"'
+touch "$HOME/.zshrc"
+grep -qxF "$agentic_ops_path_line" "$HOME/.zshrc" || printf '\n%s\n' "$agentic_ops_path_line" >> "$HOME/.zshrc"
+```
+
+4. 创建并进入项目 AI 工作空间。
 
 ```sh
 mkdir -p ~/agentic-ops-tapdata
 cd ~/agentic-ops-tapdata
 ```
 
-4. 初始化工作空间：
+5. 初始化工作空间。
 
 ```sh
 agentic-cli workspace init --workspace tapdata --jira-user harsen@tapdata.io --jira-project TAP
 ```
 
-5. 在 `~/agentic-ops-tapdata` 启动 Codex。
+6. 在 `~/agentic-ops-tapdata` 启动 Codex。
 
-6. 给 Codex 发送：
+7. 启动 Codex 后输入能力初始化指令。
 
 ```text
 初始化 AgenticOps 能力，工作空间是 tapdata。
@@ -61,22 +84,46 @@ agentic-cli workspace init --workspace tapdata --jira-user harsen@tapdata.io --j
 
 Codex 应读取 AI 资产入口、执行 `agentic-cli agent init --workspace tapdata` 和 `agentic-cli preflight --workspace tapdata`，然后说明当前可用能力、人工确认点和下一步指令。
 
-### Codex 初始化路径
+### 路径 B：让 Codex 托管初始化
 
-如果研发负责人希望由 Codex 完成安装检查和初始化，可以先创建工作目录并在其中启动 Codex：
+如果研发负责人希望由 Codex 完成安装检查和初始化，只需要先创建项目 AI 工作空间并在其中启动 Codex。
 
 ```sh
 mkdir -p ~/agentic-ops-tapdata
 cd ~/agentic-ops-tapdata
 ```
 
-然后给 Codex 发送：
+在 Codex 中输入一条包含初始化参数的完整托管初始化指令：
 
 ```text
-安装 https://github.com/tapstate/agentic-ops/blob/main/agent-init.md 并初始化
+安装 https://github.com/tapstate/agentic-ops/blob/main/agent-init.md 并初始化。工作空间是 tapdata，Jira 用户是 harsen@tapdata.io，Jira 项目是 TAP。
 ```
 
-Codex 应按 `agent-init.md` 检查当前目录、确认 `gh` 登录状态、确认或安装 `agentic-cli`、初始化工作空间、初始化 AIAgent 能力，并在预检通过后提示如何开始工作。
+Codex 应按 `agent-init.md` 检查当前目录、确认 `gh` 登录状态、处理 `agentic-cli` 是否已安装但不在 `PATH` 的情况、在需要更新已有 `~/.agentic-ops` 时先征得研发负责人确认、初始化工作空间、初始化 AIAgent 能力，并在预检通过后提示如何开始工作。
+
+### 安装后找不到 `agentic-cli`
+
+安装产物固定在：
+
+```text
+~/.agentic-ops/bin/agentic-cli
+```
+
+如果安装后执行 `agentic-cli` 提示 command not found，先在当前终端执行：
+
+```sh
+case ":$PATH:" in
+  *":$HOME/.agentic-ops/bin:"*) ;;
+  *) export PATH="$HOME/.agentic-ops/bin:$PATH" ;;
+esac
+agentic-cli --version
+```
+
+也可以直接使用完整路径排查：
+
+```sh
+~/.agentic-ops/bin/agentic-cli --version
+```
 
 ### 下一步指令
 

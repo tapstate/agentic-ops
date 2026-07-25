@@ -45,6 +45,8 @@ gh api -H 'Accept: application/vnd.github.raw' \
   "install_dir": "~/.agentic-ops",
   "bin": "~/.agentic-ops/bin/agentic-cli",
   "source": "managed_clone",
+  "path_configured": false,
+  "path_entry": "~/.agentic-ops/bin",
   "next_action": "workspace_init"
 }
 ```
@@ -67,6 +69,7 @@ gh api -H 'Accept: application/vnd.github.raw' \
 - 私有仓库安装入口不依赖匿名 raw URL。
 - zsh 环境下 GitHub API contents 路径带引号，`?ref=main` 不会触发 shell glob 错误。
 - 安装后 `agentic-cli --version` 可用。
+- 如果 `~/.agentic-ops/bin` 不在 `PATH` 中，安装输出必须明确提示 `agentic-cli` 的完整路径和当前 shell 的幂等 `PATH` 修复命令。
 - 安装后 `agentic-cli preflight` 可用。
 - 安装目录是 `~/.agentic-ops`。
 - `~/.agentic-ops` 是 AgenticOps managed clone，不作为具体项目运行目录。
@@ -99,6 +102,7 @@ gh api -H 'Accept: application/vnd.github.raw' \
 - `agentic-cli --version` 输出。
 - `agentic-cli preflight` 输出。
 - 安装输出中的 `operation=install`、`install_dir` 和 `next_action`。
+- 安装输出中的 `path_configured` 和 `path_entry`。
 - `bash tests/e2e/local-install-flow.sh`
 
 ### 关联设计

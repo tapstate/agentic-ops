@@ -40,7 +40,13 @@ git -C "$source_repo" config user.name "AgenticOps Test"
 git -C "$source_repo" add .
 git -C "$source_repo" commit -m "test source" >/dev/null
 
-HOME="$home_dir" AGENTIC_OPS_REPO_URL="$source_repo" bash "$source_repo/scripts/install.sh" | grep '"source":"managed_clone"'
+install_out="$tmp_dir/install.out"
+install_err="$tmp_dir/install.err"
+HOME="$home_dir" AGENTIC_OPS_REPO_URL="$source_repo" bash "$source_repo/scripts/install.sh" >"$install_out" 2>"$install_err"
+grep '"source":"managed_clone"' "$install_out"
+grep '"path_configured":false' "$install_out"
+grep "agentic-cli is installed but not on PATH" "$install_err"
+grep 'case ":\$PATH:" in' "$install_err"
 
 install_dir="$home_dir/.agentic-ops"
 test -d "$install_dir/.git"
