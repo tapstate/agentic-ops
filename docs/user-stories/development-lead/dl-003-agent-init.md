@@ -13,7 +13,7 @@ agentic-cli agent init
 或由研发负责人在 AIAgent 会话中输入：
 
 ```text
-启用 AgenticOps 工作模式。
+按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。
 ```
 
 ### 前置条件
@@ -25,12 +25,15 @@ agentic-cli agent init
 
 ### 主流程
 
-1. AIAgent 读取 AI 员工手册。
-2. AIAgent 读取任务类型、阶段和下一步动作规则。
-3. AIAgent 读取 工作流配置摘要。
-4. AIAgent 读取 操作契约列表。
-5. AIAgent 执行 `agentic-cli preflight`。
-6. AIAgent 向研发负责人输出当前可用能力、阶段判断方式和限制。
+1. AIAgent 读取 `~/.agentic-ops/agent-guides.md`。
+2. AIAgent 读取当前工作空间的 `AGENTS.md` 和 `.agentic-ops/agent.json`。
+3. AIAgent 执行 `agentic-cli agent init`，从输出中确认全局指引和本地 AI 资产入口。
+4. AIAgent 读取 AI 资产入口、AI 员工手册、任务类型、阶段和下一步动作规则。
+5. AIAgent 读取工作流配置摘要和操作契约列表。
+6. AIAgent 执行 `agentic-cli preflight`。
+7. AIAgent 向研发负责人输出当前可用能力、阶段判断方式和限制。
+
+AIAgent 不得依赖研发负责人个人 Obsidian wiki、长期记忆或上一段聊天上下文完成初始化。初始化事实源必须来自当前项目 AI 工作空间和 `~/.agentic-ops/install-resources/basic/` 中的已安装资产。
 
 ### 输出
 
@@ -39,12 +42,16 @@ agentic-cli agent init
   "ok": true,
   "operation": "agent_init",
   "workspace": "tapstate",
-  "task_model": {
-    "type_source": "operation_contract",
-    "stage_source": "event_log",
-    "next_action_source": "operation_result"
-  },
+  "task_type": "capability_initialization",
+  "current_stage": "agent_capability_initialized",
+  "next_action": "list_tasks",
+  "activation_phrase": "按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。",
+  "guide_entry": "$HOME/.agentic-ops/agent-guides.md",
+  "asset_entry": "$HOME/.agentic-ops/install-resources/basic/ai-assets/README.md",
+  "instruction_source": "agent_guides_and_workspace_state",
+  "memory_dependency": false,
   "capabilities": [
+    "preflight",
     "list_tasks",
     "task_run",
     "takeover_task",
@@ -54,10 +61,19 @@ agentic-cli agent init
     "feedback_report"
   ],
   "human_gates": [
-    "push",
+    "real_jira_write",
+    "git_push",
     "create_pr",
+    "update_pr",
     "merge",
+    "release",
     "scope_change"
+  ],
+  "next_steps": [
+    "read_guide_entry",
+    "read_asset_entry",
+    "run_preflight",
+    "list_tasks"
   ]
 }
 ```
@@ -74,10 +90,11 @@ agentic-cli agent init
 - AIAgent 能明确说明哪些动作必须人工确认。
 - AIAgent 知道不能直接面对 Jira 字段和状态，必须通过操作契约和 CLI 工作。
 - 初始化完成后，研发负责人可以直接说“列出我的任务”或“接管 TAP-123”。
+- 研发负责人只说“按 `~/.agentic-ops/agent-guides.md` 启用 AgenticOps。”时，新 AIAgent 能基于全局指引、本地 `AGENTS.md`、`.agentic-ops/agent.json` 和安装资产初始化，不依赖个人 wiki。
 
 ### 保护行为
 
-- AIAgent 必须读取 AI 员工手册、操作契约和工作流配置摘要后才能接管任务。
+- AIAgent 必须读取全局指引、本地 AI 资产入口、AI 员工手册、操作契约和工作流配置摘要后才能接管任务。
 - AIAgent 必须说明人工确认点，包括推送、创建拉取请求、合并、范围变更等。
 - AIAgent 不能直接面对 Jira 字段、状态或 `transition` 做临场猜测。
 - `workspace preflight` 失败时，AIAgent 不能开始接管任务。

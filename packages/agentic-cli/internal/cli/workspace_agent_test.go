@@ -98,6 +98,10 @@ func TestWorkspaceInitWritesAgentInstructionsForCodex(t *testing.T) {
 		"AgenticOps",
 		"project: tapdata",
 		"jira_project: TAP",
+		"按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。",
+		"$HOME/.agentic-ops/agent-guides.md",
+		"Do not rely on private wiki",
+		"$HOME/.agentic-ops/install-resources/basic/ai-assets/README.md",
 		"agentic-cli agent init",
 		"agentic-cli preflight",
 		"agentic-cli list-tasks",
@@ -106,6 +110,10 @@ func TestWorkspaceInitWritesAgentInstructionsForCodex(t *testing.T) {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("agent instructions missing %s: %s", want, string(data))
 		}
+	}
+	legacyActivationPhrase := "启用 AgenticOps " + "工作模式。"
+	if strings.Contains(string(data), legacyActivationPhrase) {
+		t.Fatalf("agent instructions should not include legacy activation phrase: %s", string(data))
 	}
 	assertJSONField(t, stdout.String(), "agent_instructions", instructionsPath)
 }
@@ -194,5 +202,20 @@ func TestAgentInitOutputsTaskModel(t *testing.T) {
 	assertJSONField(t, stdout.String(), "next_action", "list_tasks")
 	if !strings.Contains(stdout.String(), `"contract_validate"`) {
 		t.Fatalf("stdout missing contract_validate capability: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"asset_entry":"$HOME/.agentic-ops/install-resources/basic/ai-assets/README.md"`) {
+		t.Fatalf("stdout missing local asset entry: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"guide_entry":"$HOME/.agentic-ops/agent-guides.md"`) {
+		t.Fatalf("stdout missing global guide entry: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"activation_phrase":"按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。"`) {
+		t.Fatalf("stdout missing activation phrase: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"memory_dependency":false`) {
+		t.Fatalf("stdout should declare no private wiki dependency: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"real_jira_write"`) || !strings.Contains(stdout.String(), `"create_pr"`) {
+		t.Fatalf("stdout missing human gates: %s", stdout.String())
 	}
 }

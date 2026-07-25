@@ -20,6 +20,20 @@ output:
     type: string
   next_action:
     type: string
+  activation_phrase:
+    type: string
+  guide_entry:
+    type: string
+  asset_entry:
+    type: string
+  instruction_source:
+    type: string
+  memory_dependency:
+    type: boolean
+  human_gates:
+    type: array
+  next_steps:
+    type: array
   capabilities:
     type: array
 failure:

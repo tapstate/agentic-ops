@@ -104,7 +104,15 @@ agentic-cli workspace init --project tapdata --jira-user harsen@tapdata.io
 
 初始化时只要求研发负责人选择项目配置项。以 `tapdata` 为例，Codex 应加载当前 AgenticOps 版本中的 `install-resources/basic/profiles/tapdata.yaml`，再从该 profile 中读取 Jira project、Jira 到代码仓库的映射、本地路径和工作流配置。`--jira-project` 只在研发负责人明确要求校验某个 Jira project 时使用。
 
-### 3. 启用 AgenticOps 工作模式
+### 3. 按全局指引启用 AgenticOps
+
+当研发负责人只发送：
+
+```text
+按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。
+```
+
+Codex 应先读取 `~/.agentic-ops/agent-guides.md`，再依赖当前项目 AI 工作空间和已安装 AgenticOps 资产完成初始化。不得要求读取研发负责人个人 Obsidian wiki、个人长期记忆或上一段聊天上下文。
 
 执行：
 
@@ -113,7 +121,7 @@ agentic-cli agent init
 agentic-cli preflight
 ```
 
-`workspace init` 会在当前目录生成 `.agentic-ops/agent.json` 和 `AGENTS.md`。Codex 应从这些文件识别当前项目配置项，并按 `AGENTS.md` 中的 `agentic-cli` 使用规则工作。如果 `preflight` 失败，停止接管任务，并把缺失配置、权限或路径问题说明给研发负责人。
+`workspace init` 会在当前目录生成 `.agentic-ops/agent.json` 和 `AGENTS.md`。Codex 应从这些文件识别当前项目配置项，再按 `agentic-cli agent init` 输出的 `guide_entry` 和 `asset_entry` 读取全局指引与本地 AI 资产入口。默认入口分别是 `$HOME/.agentic-ops/agent-guides.md` 和 `$HOME/.agentic-ops/install-resources/basic/ai-assets/README.md`。如果 `preflight` 失败，停止接管任务，并把缺失配置、权限或路径问题说明给研发负责人。
 
 ## 初始化完成后的回复
 

@@ -78,14 +78,15 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 - 工作空间从项目配置项读取 Jira 空间、GitHub 仓库和本地源码目录。
 - 工作空间创建 `.agentic-ops/runs`、`.agentic-ops/run-logs` 和 `.agentic-ops/feedback`。
 
-### 步骤 3：启用 AgenticOps 工作模式
+### 步骤 3：按全局指引启用 AgenticOps
 
 ```text
-启用 AgenticOps 工作模式。
+按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。
 ```
 
 期望说明：
 
+- AIAgent 先读取 `~/.agentic-ops/agent-guides.md`。
 - AIAgent 加载 AI 员工手册。
 - AIAgent 加载 操作契约。
 - AIAgent 说明人工确认点。

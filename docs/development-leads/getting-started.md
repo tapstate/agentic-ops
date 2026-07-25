@@ -48,11 +48,13 @@ agentic-cli workspace init --project tapdata --jira-user harsen@tapdata.io
 codex
 ```
 
-7. 启用 AgenticOps 工作模式。
+7. 按全局指引启用 AgenticOps。
 
 ```text
-启用 AgenticOps 工作模式。
+按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。
 ```
+
+这句话明确要求 AIAgent 先读取 `~/.agentic-ops/agent-guides.md`，再依赖当前项目 AI 工作空间中的 `AGENTS.md`、`.agentic-ops/agent.json`，以及安装目录 `~/.agentic-ops/install-resources/basic/` 下的 AI 资产。新 AIAgent 不需要、也不应依赖研发负责人本机的 Obsidian wiki、个人长期记忆或上一段聊天上下文完成初始化。
 
 ### 路径 B：让 Codex 托管初始化
 
@@ -176,7 +178,7 @@ agentic-cli workspace init --project tapdata --jira-user harsen@tapdata.io
 研发负责人可以用自然语言给 AIAgent 下达任务：
 
 ```text
-启用 AgenticOps 工作模式。
+按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。
 列出我名下可以接管的 Jira 任务。
 接管 TAP-123，并先说明计划、验证方式和风险点。
 回写本次执行证据。
@@ -184,6 +186,8 @@ agentic-cli workspace init --project tapdata --jira-user harsen@tapdata.io
 ```
 
 AIAgent 应读取 [AI 资产入口](../../install-resources/basic/ai-assets/README.md)，再按 AI 员工手册、操作契约、工作流配置、策略和模板推进。研发负责人不应要求 AIAgent 依赖临场聊天上下文猜流程。
+
+当研发负责人说“按 `~/.agentic-ops/agent-guides.md` 启用 AgenticOps。”时，AIAgent 应先读取全局指引，再使用当前工作空间生成的 `AGENTS.md`、`.agentic-ops/agent.json` 和 `agentic-cli agent init` 输出定位本地 AI 资产入口；不得要求读取研发负责人个人 wiki。
 
 ## 人工确认点
 

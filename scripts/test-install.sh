@@ -57,6 +57,8 @@ test "$(grep -cF "$profile_line" "$profile_file")" -eq 1
 
 install_dir="$home_dir/.agentic-ops"
 test -d "$install_dir/.git"
+test -f "$install_dir/agent-guides.md"
+grep "按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。" "$install_dir/agent-guides.md" >/dev/null
 test -f "$install_dir/install-resources/basic/manifest.json"
 test -x "$install_dir/bin/agentic-cli"
 test -f "$install_dir/.local/current-ref"
