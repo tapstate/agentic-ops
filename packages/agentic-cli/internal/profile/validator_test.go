@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,6 +35,16 @@ func TestValidateAcceptsTapdataProfile(t *testing.T) {
 	}
 	if p.Jira.Project != "TAP" {
 		t.Fatalf("Jira.Project = %s", p.Jira.Project)
+	}
+	if p.Local.SourceRoot != "/Users/lhs/works/spaces/agentic-ops-tapdata/repos/tapdata" {
+		t.Fatalf("Local.SourceRoot = %s", p.Local.SourceRoot)
+	}
+	if !containsString(p.Standards, "standards/tapdata-development-rules.md") {
+		t.Fatalf("Standards missing tapdata development rules: %#v", p.Standards)
+	}
+	standardPath := filepath.Join("..", "..", "..", "..", "install-resources", "basic", "standards", "tapdata-development-rules.md")
+	if info, err := os.Stat(standardPath); err != nil || info.IsDir() {
+		t.Fatalf("tapdata standard file is not readable: info=%v err=%v", info, err)
 	}
 	for name, value := range map[string]string{
 		"workspace_root": p.Local.WorkspaceRoot,
@@ -200,6 +211,15 @@ func validProcessForTest() process.Process {
 func hasIssue(issues []ValidationIssue, code string) bool {
 	for _, issue := range issues {
 		if issue.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func containsString(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
 			return true
 		}
 	}

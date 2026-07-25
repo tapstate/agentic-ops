@@ -2,13 +2,17 @@ package clihandlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/feedback"
+	gitops "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/git"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/github"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/output"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/policy"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -51,6 +55,165 @@ func runInspectWorkspace(args []string, stdout io.Writer) int {
 		"current_stage": "workspace_inspected",
 		"next_action":   nextAction,
 	}))
+}
+
+func runSwitchBranch(args []string, stdout io.Writer) int {
+	workspaceName := workspaceNameFromArgsOrAgentConfig(args, "tapdata")
+	if workspaceName != "tapdata" {
+		return writeJSON(stdout, output.FailureWithContext("switch_branch", output.FailureContext{
+			Code:                "workspace_not_supported",
+			Message:             "switch-branch 当前只支持 tapdata 工作区",
+			RequiredHumanAction: "请确认目标工作区，或先为该工作区补充项目级分支规范",
+			TaskType:            "branch_switch",
+			CurrentStage:        "branch_switch_gate",
+			NextAction:          "ask_owner",
+		}))
+	}
+	mode := positionalArg(args, "switch-branch")
+	if mode == "" {
+		return writeJSON(stdout, output.FailureWithContext("switch_branch", output.FailureContext{
+			Code:                "missing_mode",
+			Message:             "缺少分支对齐动作",
+			RequiredHumanAction: "请按 agentic-cli switch-branch plan develop --workspace tapdata 重试，或使用 list/status/apply",
+			TaskType:            "branch_switch",
+			CurrentStage:        "branch_switch_gate",
+			NextAction:          "ask_owner",
+		}))
+	}
+	workspaceProfile := takeoverProfile(workspaceName)
+	workRoot, err := tapdataWorkRootForOperation(args, workspaceProfile)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("switch_branch", output.FailureContext{
+			Code:                "work_root_not_found",
+			Message:             err.Error(),
+			RequiredHumanAction: "请提供 --work-root，设置 TAPDATA_WORK_ROOT，或维护 tapdata profile 的 local.source_root",
+			TaskType:            "branch_switch",
+			CurrentStage:        "branch_switch_gate",
+			NextAction:          "fix_workspace",
+		}))
+	}
+	remote := readFlag(args, "--remote", os.Getenv("TAPDATA_GIT_REMOTE"))
+	if remote == "" {
+		remote = "origin"
+	}
+	ctx := context.Background()
+	switch mode {
+	case "list":
+		filter := positionalArg(args[1:], "list")
+		if !hasFlag(args, "--no-fetch") {
+			if err := gitops.FetchTapdataAlignmentRepos(ctx, workRoot, remote, false); err != nil {
+				return writeJSON(stdout, branchAlignmentFailure("list", err))
+			}
+		}
+		branches, err := gitops.ListTapdataBranches(ctx, workRoot, remote, filter)
+		if err != nil {
+			return writeJSON(stdout, branchAlignmentFailure("list", err))
+		}
+		return writeJSON(stdout, output.Success("switch_branch", map[string]any{
+			"workspace":     workspaceName,
+			"mode":          "list",
+			"work_root":     workRoot,
+			"remote":        remote,
+			"filter":        filter,
+			"branches":      branches,
+			"match_count":   len(branches),
+			"current_stage": "branch_candidates_listed",
+			"next_action":   "plan_branch_alignment",
+		}))
+	case "status":
+		rows := gitops.TapdataAlignmentStatus(ctx, workRoot)
+		return writeJSON(stdout, output.Success("switch_branch", map[string]any{
+			"workspace":     workspaceName,
+			"mode":          "status",
+			"work_root":     workRoot,
+			"rows":          rows,
+			"rows_count":    len(rows),
+			"current_stage": "branch_status_inspected",
+			"next_action":   "plan_branch_alignment",
+		}))
+	case "plan", "apply":
+		branchSpec := positionalArg(args[1:], mode)
+		if branchSpec == "" {
+			return writeJSON(stdout, output.FailureWithContext("switch_branch", output.FailureContext{
+				Code:                "missing_branch_spec",
+				Message:             "缺少 TapData 主仓分支或分支组",
+				RequiredHumanAction: "请提供 develop、main、release-vX.Y.Z，或 <tapdata>,<enterprise>,<web> 格式",
+				TaskType:            "branch_switch",
+				CurrentStage:        "branch_switch_gate",
+				NextAction:          "ask_owner",
+			}))
+		}
+		if !hasFlag(args, "--no-fetch") {
+			if err := gitops.FetchTapdataAlignmentRepos(ctx, workRoot, remote, true); err != nil {
+				return writeJSON(stdout, branchAlignmentFailure(mode, err))
+			}
+		}
+		plan, err := gitops.PlanTapdataBranchAlignment(ctx, gitops.BranchAlignmentRequest{
+			WorkRoot:   workRoot,
+			Remote:     remote,
+			BranchSpec: branchSpec,
+			NoFetch:    hasFlag(args, "--no-fetch"),
+		})
+		if err != nil {
+			return writeJSON(stdout, branchAlignmentFailure(mode, err))
+		}
+		if mode == "plan" {
+			nextAction := "apply_branch_alignment"
+			if plan.Blocked {
+				nextAction = "resolve_branch_alignment"
+			}
+			return writeJSON(stdout, output.Success("switch_branch", map[string]any{
+				"workspace":     workspaceName,
+				"mode":          "plan",
+				"work_root":     workRoot,
+				"remote":        remote,
+				"branch_spec":   branchSpec,
+				"tap_branch":    plan.TapBranch,
+				"ent_branch":    plan.EntBranch,
+				"web_branch":    plan.WebBranch,
+				"blocked":       plan.Blocked,
+				"rows":          plan.Rows,
+				"rows_count":    len(plan.Rows),
+				"current_stage": "branch_alignment_planned",
+				"next_action":   nextAction,
+			}))
+		}
+		if plan.Blocked {
+			return writeJSON(stdout, output.FailureWithContext("switch_branch", output.FailureContext{
+				Code:                "branch_alignment_blocked",
+				Message:             "分支对齐计划存在 UNRESOLVED 或缺失仓库，未执行切换",
+				RequiredHumanAction: "请补齐缺失仓库或在分支组中显式指定 enterprise/web 分支后重试",
+				TaskType:            "branch_switch",
+				CurrentStage:        "branch_alignment_gate",
+				NextAction:          "resolve_branch_alignment",
+			}))
+		}
+		switched, err := gitops.ApplyTapdataBranchAlignment(ctx, plan)
+		if err != nil {
+			return writeJSON(stdout, branchAlignmentFailure(mode, err))
+		}
+		return writeJSON(stdout, output.Success("switch_branch", map[string]any{
+			"workspace":      workspaceName,
+			"mode":           "apply",
+			"work_root":      workRoot,
+			"remote":         remote,
+			"branch_spec":    branchSpec,
+			"tap_branch":     plan.TapBranch,
+			"switched_rows":  switched,
+			"switched_count": len(switched),
+			"current_stage":  "branch_alignment_applied",
+			"next_action":    "continue_development",
+		}))
+	default:
+		return writeJSON(stdout, output.FailureWithContext("switch_branch", output.FailureContext{
+			Code:                "unsupported_mode",
+			Message:             "不支持的分支对齐动作: " + mode,
+			RequiredHumanAction: "请使用 list、status、plan 或 apply",
+			TaskType:            "branch_switch",
+			CurrentStage:        "branch_switch_gate",
+			NextAction:          "ask_owner",
+		}))
+	}
 }
 
 func runPreparePR(args []string, stdout io.Writer) int {
@@ -162,6 +325,49 @@ func runPreparePR(args []string, stdout io.Writer) int {
 		"current_stage":           "pr_plan_prepared",
 		"next_action":             "ask_owner_to_push_and_create_pr",
 	}))
+}
+
+func branchAlignmentFailure(mode string, err error) map[string]any {
+	context := output.FailureContext{
+		Message:      err.Error(),
+		TaskType:     "branch_switch",
+		CurrentStage: "branch_switch_gate",
+		NextAction:   "ask_owner",
+	}
+	switch {
+	case errors.Is(err, gitops.ErrInvalidBranch):
+		context.Code = "invalid_branch"
+		context.RequiredHumanAction = "请确认分支名只包含安全字符，或使用 <tapdata>,<enterprise>,<web> 格式指定分支组"
+	case errors.Is(err, gitops.ErrMissingTapdataBranch):
+		context.Code = "tapdata_branch_not_found"
+		context.RequiredHumanAction = "请先确认 tapdata 主仓存在该本地或远程分支"
+	case errors.Is(err, gitops.ErrBranchAlignmentBlocked):
+		context.Code = "branch_alignment_blocked"
+		context.RequiredHumanAction = "请先解决分支计划中的 blocked 行"
+	default:
+		context.Code = "git_branch_alignment_failed"
+		context.RequiredHumanAction = "请检查 work root 下 TapData 多仓是否存在、Git 是否可用，以及远程分支是否已 fetch"
+	}
+	return output.FailureWithContext("switch_branch", context)
+}
+
+func tapdataWorkRootForOperation(args []string, workspaceProfile profile.Profile) (string, error) {
+	if workRoot := readFlag(args, "--work-root", ""); workRoot != "" {
+		return filepath.Clean(workRoot), nil
+	}
+	if workRoot := os.Getenv("TAPDATA_WORK_ROOT"); strings.TrimSpace(workRoot) != "" {
+		return filepath.Clean(workRoot), nil
+	}
+	if sourceRoot := readFlag(args, "--source-root", ""); sourceRoot != "" {
+		return filepath.Dir(filepath.Clean(sourceRoot)), nil
+	}
+	if sourceRoot := strings.TrimSpace(workspaceProfile.Local.SourceRoot); sourceRoot != "" {
+		return filepath.Dir(filepath.Clean(sourceRoot)), nil
+	}
+	if workspaceProfile.Local.WorkspaceRoot != "" {
+		return filepath.Join(workspaceProfile.Local.WorkspaceRoot, "repos"), nil
+	}
+	return "", fmt.Errorf("tapdata work root not configured")
 }
 
 func runReadPRComments(args []string, stdout io.Writer) int {

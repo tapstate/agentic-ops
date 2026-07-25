@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -67,6 +68,15 @@ func readFlag(args []string, name string, fallback string) string {
 		}
 	}
 	return fallback
+}
+
+func positionalArg(args []string, command string) string {
+	for i, arg := range args {
+		if arg == command && i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 func hasFlag(args []string, name string) bool {

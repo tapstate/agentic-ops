@@ -57,6 +57,7 @@ AIAgent 不得依赖研发负责人个人 Obsidian wiki、长期记忆或上一�
     "takeover_task",
     "resume_takeover",
     "write_evidence",
+    "switch_branch",
     "prepare_pr",
     "feedback_report"
   ],

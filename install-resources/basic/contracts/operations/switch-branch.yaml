@@ -1,0 +1,113 @@
+operation: switch_branch
+version: 1
+purpose: 按 TapData 多仓分支规范计算或执行分支对齐，等价沉淀自 tap-align-branches.py。
+task_type: branch_switch
+allowed_stages:
+  - waiting_takeover
+  - takeover_started
+  - takeover_resumed
+  - implementation
+required_inputs:
+  - workspace
+  - mode
+input:
+  workspace:
+    type: string
+    required: true
+    allowed_values:
+      - tapdata
+  mode:
+    type: string
+    required: true
+    allowed_values:
+      - list
+      - status
+      - plan
+      - apply
+  branch_spec:
+    type: string
+    required_when:
+      - mode_is_plan
+      - mode_is_apply
+    description: develop、main、release-vX.Y.Z、任务分支，或 <tapdata>,<enterprise>,<web> 格式。
+  work_root:
+    type: string
+    required: false
+    description: TapData 多仓工作根目录，目录下应包含 tapdata、tapdata-enterprise、tapdata-web 等仓库。
+  remote:
+    type: string
+    required: false
+    default: origin
+  no_fetch:
+    type: boolean
+    required: false
+    default: false
+preconditions:
+  - workspace_must_be_tapdata
+  - work_root_must_not_escape_current_tapdata_workspace
+  - tapdata_repo_must_exist
+  - tapdata_branch_must_exist_local_or_remote
+  - apply_requires_no_blocked_rows
+hard_rules:
+  - plan_is_read_only_and_must_be_run_before_apply_when_target_is_unclear
+  - tapdata_application_must_keep_current_branch_by_default
+  - tapdata_license_must_use_main_when_tapdata_branch_is_develop
+  - connectors_and_common_lib_must_be_inferred_from_tapdata_pluginKit_version
+  - unresolved_enterprise_or_web_branch_must_block_apply
+  - command_must_not_push_git
+  - command_must_not_write_jira
+  - command_must_not_write_github
+output:
+  workspace:
+    type: string
+  mode:
+    type: string
+  work_root:
+    type: string
+  remote:
+    type: string
+  branch_spec:
+    type: string
+  tap_branch:
+    type: string
+  blocked:
+    type: boolean
+  rows:
+    type: array
+  rows_count:
+    type: integer
+  switched_rows:
+    type: array
+  switched_count:
+    type: integer
+  current_stage:
+    type: string
+  next_action:
+    type: string
+failure:
+  codes:
+    - missing_mode
+    - unsupported_mode
+    - missing_branch_spec
+    - workspace_not_supported
+    - work_root_not_found
+    - invalid_branch
+    - tapdata_branch_not_found
+    - branch_alignment_blocked
+    - git_branch_alignment_failed
+side_effects:
+  - list_reads_tapdata_branches
+  - status_reads_multi_repo_git_state
+  - plan_reads_multi_repo_git_state
+  - apply_may_stash_and_pop_dirty_repo_changes
+  - apply_modifies_business_repo_git_branches
+  - must_not_write_jira
+  - must_not_write_github
+  - must_not_push_git
+human_gate:
+  required: false
+retry_policy:
+  retryable: false
+  max_attempts: 1
+  redo_from_stage: waiting_takeover
+redo_from_stage: waiting_takeover

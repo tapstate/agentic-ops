@@ -104,6 +104,10 @@ func RunInspectWorkspace(args []string, stdout io.Writer) int {
 	return runInspectWorkspace(args, stdout)
 }
 
+func RunSwitchBranch(args []string, stdout io.Writer) int {
+	return runSwitchBranch(args, stdout)
+}
+
 func RunPreparePR(args []string, stdout io.Writer) int {
 	return runPreparePR(args, stdout)
 }

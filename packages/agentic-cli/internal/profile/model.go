@@ -11,6 +11,7 @@ type Profile struct {
 	JiraTransitionMapping  map[string]JiraTransition  `yaml:"jira_transition_mapping"`
 	GitHub                 GitHubConfig               `yaml:"github"`
 	Local                  LocalConfig                `yaml:"local"`
+	Standards              []string                   `yaml:"standards"`
 	HumanGates             []string                   `yaml:"human_gates"`
 	ReviewGates            map[string]ReviewGate      `yaml:"review_gates"`
 	RetryRedo              map[string]RetryRedoPolicy `yaml:"retry_redo"`

@@ -277,6 +277,7 @@ func runAgentInit(args []string, stdout io.Writer) int {
 			"write_evidence",
 			"release_agent",
 			"inspect_workspace",
+			"switch_branch",
 			"prepare_pr",
 			"read_pr_comments",
 			"check_ci_status",

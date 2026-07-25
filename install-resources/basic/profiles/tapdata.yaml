@@ -110,10 +110,13 @@ github:
 
 local:
   workspace_root: "/Users/lhs/works/spaces/agentic-ops-tapdata"
-  source_root: "/Users/lhs/works/spaces/agentic-ops-tapdata/tapdata"
+  source_root: "/Users/lhs/works/spaces/agentic-ops-tapdata/repos/tapdata"
   runs_dir: "/Users/lhs/works/spaces/agentic-ops-tapdata/.agentic-ops/runs"
   run_logs_dir: "/Users/lhs/works/spaces/agentic-ops-tapdata/.agentic-ops/run-logs"
   feedback_dir: "/Users/lhs/works/spaces/agentic-ops-tapdata/.agentic-ops/feedback"
+
+standards:
+  - standards/tapdata-development-rules.md
 
 human_gates:
   - push

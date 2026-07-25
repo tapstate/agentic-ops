@@ -5,6 +5,7 @@ import (
 	"context"
 	gitops "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/git"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/github"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -58,6 +59,70 @@ func TestInspectWorkspaceCanUseFakeGitInspector(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"fake.go"`) {
 		t.Fatalf("stdout missing fake changed file: %s", stdout.String())
 	}
+}
+
+func TestSwitchBranchPlanOutputsTapdataAlignmentRows(t *testing.T) {
+	workRoot := t.TempDir()
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata", "develop", nil)
+	writeCLITestFile(t, filepath.Join(workRoot, "tapdata", "iengine/iengine-app/src/main/resources/pluginKit.properties"), "tapdata.api.verison=4.9-SNAPSHOT\n")
+	runGitForCLITest(t, filepath.Join(workRoot, "tapdata"), "add", "iengine/iengine-app/src/main/resources/pluginKit.properties")
+	runGitForCLITest(t, filepath.Join(workRoot, "tapdata"), "commit", "-m", "plugin")
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata-enterprise", "main", []string{"develop"})
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata-web", "main", []string{"develop"})
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata-connectors", "main", []string{"release-v4.9"})
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata-connectors-enterprise", "main", []string{"release-v4.9"})
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata-license", "develop", []string{"main"})
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata-common-lib", "main", []string{"release-v5.0"})
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata-application", "feature/local", nil)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"switch-branch", "plan", "develop", "--workspace", "tapdata", "--work-root", workRoot, "--no-fetch"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "switch_branch")
+	assertJSONField(t, stdout.String(), "workspace", "tapdata")
+	assertJSONField(t, stdout.String(), "mode", "plan")
+	assertJSONField(t, stdout.String(), "work_root", workRoot)
+	assertJSONField(t, stdout.String(), "tap_branch", "develop")
+	assertJSONField(t, stdout.String(), "blocked", false)
+	assertJSONNumber(t, stdout.String(), "rows_count", 8)
+	assertJSONField(t, stdout.String(), "current_stage", "branch_alignment_planned")
+	assertJSONField(t, stdout.String(), "next_action", "apply_branch_alignment")
+	if !strings.Contains(stdout.String(), `"target":"release-v4.9"`) || !strings.Contains(stdout.String(), `"repo":"tapdata-application"`) {
+		t.Fatalf("stdout missing expected alignment rows: %s", stdout.String())
+	}
+}
+
+func TestSwitchBranchStatusOutputsTapdataRepoRows(t *testing.T) {
+	workRoot := t.TempDir()
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata", "develop", nil)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"switch-branch", "status", "--workspace", "tapdata", "--work-root", workRoot}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "switch_branch")
+	assertJSONField(t, stdout.String(), "mode", "status")
+	assertJSONNumber(t, stdout.String(), "rows_count", 8)
+	if !strings.Contains(stdout.String(), `"repo":"tapdata"`) || !strings.Contains(stdout.String(), `"missing":true`) {
+		t.Fatalf("stdout missing status rows: %s", stdout.String())
+	}
+}
+
+func TestSwitchBranchRequiresTapdataWorkspace(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"switch-branch", "plan", "develop", "--workspace", "tapstate", "--work-root", "/tmp/source"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "switch_branch")
+	assertJSONField(t, stdout.String(), "code", "workspace_not_supported")
+	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
 }
 
 func TestPreparePROutputsPlanAndHumanGateForCreation(t *testing.T) {
@@ -150,5 +215,17 @@ func TestFixPRCommentsOutputsHumanGatedFixPlan(t *testing.T) {
 	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
 	if !strings.Contains(stdout.String(), `"test"`) || !strings.Contains(stdout.String(), `"docs"`) {
 		t.Fatalf("stdout missing fix categories: %s", stdout.String())
+	}
+}
+
+func initTapdataAlignmentCLIRepo(t *testing.T, workRoot string, repo string, branch string, extraBranches []string) {
+	t.Helper()
+	root := filepath.Join(workRoot, repo)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("MkdirAll repo error = %v", err)
+	}
+	initGitRepoForCLITest(t, root, branch)
+	for _, extra := range extraBranches {
+		runGitForCLITest(t, root, "branch", extra)
 	}
 }

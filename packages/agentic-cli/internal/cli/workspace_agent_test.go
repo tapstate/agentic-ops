@@ -49,6 +49,12 @@ func TestWorkspaceInitMaterializesWorkspaceProfile(t *testing.T) {
 	if !strings.Contains(string(data), "workspace: tapdata") || !strings.Contains(string(data), "user: lead@example.com") || !strings.Contains(string(data), "project: TAP") {
 		t.Fatalf("materialized profile mismatch: %s", string(data))
 	}
+	if !strings.Contains(string(data), "source_root: /Users/lhs/works/spaces/agentic-ops-tapdata/repos/tapdata") {
+		t.Fatalf("materialized profile missing repos source root: %s", string(data))
+	}
+	if !strings.Contains(string(data), "standards/tapdata-development-rules.md") {
+		t.Fatalf("materialized profile missing tapdata standards: %s", string(data))
+	}
 	assertJSONField(t, stdout.String(), "profile", profilePath)
 }
 
@@ -152,6 +158,9 @@ func TestAgentInitInfersWorkspaceFromAgentConfig(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "operation", "agent_init")
 	assertJSONField(t, stdout.String(), "workspace", "tapdata")
+	if !strings.Contains(stdout.String(), `"switch_branch"`) {
+		t.Fatalf("agent init missing switch_branch capability: %s", stdout.String())
+	}
 }
 
 func TestTaskCommandsInferWorkspaceFromAgentConfig(t *testing.T) {

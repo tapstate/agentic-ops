@@ -12,7 +12,8 @@ AIAgent 执行业务 Jira 任务前按以下顺序读取：
 4. [标准流程定义](../contracts/processes/)：读取任务分类、标准流程和阶段标准。
 5. [工作流配置说明](../../../docs/profiles/workflow-profile.md)：理解工作空间和 Jira / GitHub / 本地源码映射。
 6. [工作流配置源头](../profiles/)：读取当前项目或示例工作流配置。
-7. [策略](../policies/)、[运行手册](../runbooks/) 和 [模板](../templates/)：读取安装后分发给 AIAgent 的门禁、处理步骤和证据格式。
+7. [项目级规范](../standards/)：读取当前工作流配置中 `standards` 引用的项目硬规则。
+8. [策略](../policies/)、[运行手册](../runbooks/) 和 [模板](../templates/)：读取安装后分发给 AIAgent 的门禁、处理步骤和证据格式。
 
 ## 源头仓库维护读取顺序
 
@@ -25,7 +26,7 @@ AIAgent 执行业务 Jira 任务前按以下顺序读取：
 ## 使用边界
 
 - AIAgent 不应把 README 或 `docs/` 当作执行事实源；README 和 `docs/` 主要帮助人理解项目。
-- AIAgent 执行具体业务 Jira 任务时，以 AI 员工手册、操作契约、标准流程、工作流配置、策略、运行手册和模板为准。
+- AIAgent 执行具体业务 Jira 任务时，以 AI 员工手册、操作契约、标准流程、工作流配置、项目级规范、策略、运行手册和模板为准。
 - AIAgent 收到“按 `~/.agentic-ops/agent-guides.md` 启用 AgenticOps。”时，应先读取全局指引，再从当前工作空间 `AGENTS.md`、`.agentic-ops/agent.json` 和本入口初始化；不得要求读取研发负责人个人 wiki、个人长期记忆或上一段聊天上下文。
 - AIAgent 不得临场猜测 Jira 字段、目标仓库、状态流转或人工门禁。
 - 缺少字段、映射、权限、验收标准或目标仓库时，必须停止并请求研发负责人或流程负责人补齐。
@@ -39,6 +40,7 @@ AIAgent 执行业务 Jira 任务前按以下顺序读取：
 - `handbooks/`
 - `contracts/`
 - `profiles/`
+- `standards/`
 - `assets/`
 - `docs/ai-working-rules.md`
 - `docs/contracts/`
