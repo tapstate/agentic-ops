@@ -25,6 +25,10 @@
 - 不得直接提交到 `main`、`develop`、`master` 或 `release-*`。
 - 即使远程凭证允许，也不得直接推送到受保护分支。
 - 受保护分支必须走 PR 流程。
+- 创建工作分支时，分支名至少必须包含用户名、Jira 任务编号和检出分支。
+- 检出分支为 `release-vX.Y.Z` 时，工作分支名中只保留 `vX.Y.Z`，不得保留 `release-` 前缀。
+- 推荐工作分支格式为 `<username>/<jira-key>/<source-branch>`，例如 `harsen/TAP-1234/develop`、`harsen/TAP-1234/v3.8.0`。
+- 无法确认用户名、Jira 任务编号或检出分支时，必须停止并请求研发负责人补齐，不得创建不可追踪分支。
 - TapData 多仓开发必须以 `tapdata` 主仓分支为输入对齐相关仓库，不得凭直觉把所有仓库切到同名分支。
 - AIAgent 应优先使用 `agentic-cli tapdata branch-align plan <branch_spec>` 生成分支对齐计划，确认无 blocked 行后才能执行 `agentic-cli tapdata branch-align apply <branch_spec>`。
 - `branch_spec` 可以是 `develop`、`main`、`release-vX.Y.Z`、任务分支，或 `<tapdata>,<enterprise>,<web>` 格式；enterprise/web 分支不明确时必须显式指定或停止。
@@ -53,10 +57,11 @@
 
 - 提交信息必须使用英文，一个提交只包含一个 Jira 卡片或一个独立标准资产变更。
 - 该规则同样适用于 `tapstate`、`tapdata`、`cyntex` 业务项目；`tapstate/agentic-ops` 是 AgenticOps 内部项目，提交标题和提交描述正文使用中文。
-- 提交格式必须是 `<type>(<scope>): <tag> <subject>`；没有 Jira key 或任务标签时省略 `<tag>`。
+- `tag` 指 Jira 任务编号，例如 `TAP-1234`。
+- 提交格式必须是 `<type>(<scope>): <tag> <subject>`，不得省略 `<tag>`。
 - 允许的 `type`：`Feat`、`Fix`、`Docs`、`Style`、`Refactor`、`Test`、`Chore`。
 - `scope` 使用英文模块名、包名或目录名；没有清晰模块时可以省略。
-- 从分支名或 Jira key 提取 `TAP-1234` 风格 tag；存在 tag 时 footer 必须添加 `Refs: <tag>`。
+- 从分支名、用户指令、Jira 卡片或任务上下文提取 `TAP-1234` 风格 tag；无法确认 Jira 任务编号时必须停止并请求研发负责人补齐。
 - `subject` 使用英文祈使句，末尾不加句号。
 - 非平凡提交必须包含 body，说明 root cause、change、verification 和 risk。
 - 不得在提交信息中粘贴完整 Jira 描述、敏感日志、凭证或未经脱敏的客户信息。

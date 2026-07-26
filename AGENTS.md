@@ -73,7 +73,9 @@ AgenticCLI 使用 Go 实现，统一入口为 `agentic-cli`。shell 只用于 `g
 
 AgenticOps 是内部项目，提交标题和提交描述正文使用中文。
 
-`type`、`scope`、Jira key、命令和配置字段作为结构化标识可以保留英文。存在 Jira key 或任务标签时，从分支名、任务号或用户指令中提取 `TAP-1234` 这类 `<tag>`，没有则省略。常用类型：`Feat`、`Fix`、`Docs`、`Style`、`Refactor`、`Test`、`Chore`。
+`type`、`scope`、Jira key、命令和配置字段作为结构化标识可以保留英文。`tag` 指 Jira 任务编号，例如 `TAP-1234`。TapData 公司代码提交必须绑定 Jira 任务卡片，不得省略 `<tag>`。常用类型：`Feat`、`Fix`、`Docs`、`Style`、`Refactor`、`Test`、`Chore`。
+
+Jira 任务编号必须能从分支名、用户指令、Jira 卡片或任务上下文中确认；无法确认时必须停止并请求研发负责人补齐，不得创建无 Jira 绑定的代码提交。
 
 `scope` 使用英文模块名、包名或目录名；没有清晰模块时可以省略。`subject` 使用中文，简洁说明本次提交做了什么，末尾不加句号。
 

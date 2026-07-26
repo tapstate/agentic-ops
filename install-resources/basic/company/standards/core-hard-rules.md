@@ -21,14 +21,20 @@
 
 ## Git 提交
 
+- TapData 公司仓库创建工作分支时，分支名至少必须包含用户名、Jira 任务编号和检出分支。
+- 检出分支为 `release-vX.Y.Z` 时，工作分支名中只保留 `vX.Y.Z`，不得保留 `release-` 前缀。
+- 推荐工作分支格式为 `<username>/<jira-key>/<source-branch>`，例如 `harsen/TAP-1234/develop`、`harsen/TAP-1234/v3.8.0`。
+- 无法确认用户名、Jira 任务编号或检出分支时，必须停止并请求研发负责人补齐，不得创建不可追踪分支。
 - Git 提交必须围绕当前 Jira 卡片或当前标准资产变更，一个提交只包含一个逻辑变更。
-- 提交信息语言必须按项目规范执行，不得跨项目混用。
-- AgenticOps 内部项目提交标题和提交描述使用中文。
+- TapData 公司规范默认使用英文提交标题和英文提交描述。
+- 公司下部分项目可以显式覆盖为中文，这是项目级特殊情况；例如 AgenticOps 内部项目提交标题和提交描述使用中文。
 - `type`、`scope`、Jira key、命令和配置字段作为结构化标识可以保留英文。
-- `tapstate`、`tapdata`、`cyntex` 业务项目提交标题和提交描述使用英文；`tapstate/agentic-ops` 属于 AgenticOps 内部项目，不套用 `tapstate` 业务项目提交语言规则。
-- 推荐格式为 `<type>(<scope>): <tag> <subject>`；没有 Jira key 或任务标签时省略 `<tag>`。
+- `tapstate`、`tapdata`、`cyntex` 业务项目提交标题和提交描述使用英文，遵守 TapData 公司默认规范。
+- `tapstate/agentic-ops` 属于 AgenticOps 内部项目，不套用 `tapstate` 业务项目提交语言规则。
+- TapData 公司代码提交必须绑定 Jira 任务卡片；`tag` 指 Jira 任务编号，例如 `TAP-1234`。
+- 提交格式为 `<type>(<scope>): <tag> <subject>`，不得省略 `<tag>`。
 - 允许的 `type` 为 `Feat`、`Fix`、`Docs`、`Style`、`Refactor`、`Test`、`Chore`。
-- 存在 Jira key 时必须在 subject 或 footer 中保留 `TAP-1234` 这类可追溯标签。
+- Jira 任务编号必须能从分支名、用户指令、Jira 卡片或任务上下文中确认；无法确认时必须停止并请求研发负责人补齐，不得创建无 Jira 绑定的代码提交。
 - 非平凡提交必须包含 body，说明问题、处理方式、验证结果和风险；不得在提交信息中粘贴完整 Jira 描述、敏感日志或凭证。
 
 ## 保密
