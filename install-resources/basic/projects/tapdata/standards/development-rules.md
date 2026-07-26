@@ -2,6 +2,10 @@
 
 本文是 Tapdata 项目级开发规范，供 AIAgent 执行 Tapdata Jira 任务前读取。它只记录硬规定和禁止项，不收录泛泛最佳实践。
 
+规则类别：项目规则。本文只记录 Tapdata 项目规则；AIAgent 执行时必须同时遵守 AI 员工手册、操作契约、策略门禁和工作空间 `AGENTS.md` 中的 AIAgent 规则。
+
+规则冲突时按 `项目规则 > AIAgent 规则 > 公司规则 > 个人规则` 执行。
+
 ## 适用范围
 
 - 适用于 `tapdata` 项目 AI 工作空间中的 Tapdata Jira 研发任务。
@@ -56,7 +60,6 @@
 ## 提交
 
 - 提交信息必须使用英文，一个提交只包含一个 Jira 卡片或一个独立标准资产变更。
-- 该规则同样适用于 `tapstate`、`tapdata`、`cyntex` 业务项目；`tapstate/agentic-ops` 是 AgenticOps 内部项目，提交标题和提交描述正文使用中文。
 - `tag` 指 Jira 任务编号，例如 `TAP-1234`。
 - 提交格式必须是 `<type>(<scope>): <tag> <subject>`，不得省略 `<tag>`。
 - 允许的 `type`：`Feat`、`Fix`、`Docs`、`Style`、`Refactor`、`Test`、`Chore`。
@@ -78,5 +81,5 @@
 
 - 一次任务中的临场判断不得直接升级为 Tapdata 默认规范。
 - 重复出现的问题应先进入任务审计或反馈事件，再形成规范改进建议。
-- 规范改进必须标明层级：公司级、项目级或 AIAgent 执行级。
+- 规范改进必须标明规则类别：个人规则、公司规则、项目规则或 AIAgent 规则。
 - 未经研发负责人或流程负责人确认，不得自动修改项目级规范、工作流配置或默认策略。

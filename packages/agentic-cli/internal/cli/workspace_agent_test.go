@@ -355,6 +355,9 @@ func TestAgentInitInfersWorkspaceFromAgentConfig(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"asset_resolution"`) || !strings.Contains(stdout.String(), `"workspace_overlay"`) {
 		t.Fatalf("agent init missing asset resolution: %s", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), `"rule_resolution"`) || !strings.Contains(stdout.String(), `"project_rule"`) {
+		t.Fatalf("agent init missing rule resolution: %s", stdout.String())
+	}
 }
 
 func TestTaskCommandsInferWorkspaceFromAgentConfig(t *testing.T) {

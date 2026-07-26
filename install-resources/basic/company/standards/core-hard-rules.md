@@ -1,5 +1,11 @@
 # 公司级硬规定
 
+规则类别：公司规则。
+
+本文件只记录 TapData 跨项目硬规定。具体项目的语言例外、分支例外、工具入口和验证差异必须写入 `install-resources/basic/projects/<project>/` 或项目工作空间规则，不得写入公司规则。
+
+规则冲突时按 `项目规则 > AIAgent 规则 > 公司规则 > 个人规则` 执行。
+
 ## 事实源边界
 
 - Jira 是任务、负责人、迭代、状态、评论和任务证据的事实源。
@@ -27,10 +33,7 @@
 - 无法确认用户名、Jira 任务编号或检出分支时，必须停止并请求研发负责人补齐，不得创建不可追踪分支。
 - Git 提交必须围绕当前 Jira 卡片或当前标准资产变更，一个提交只包含一个逻辑变更。
 - TapData 公司规范默认使用英文提交标题和英文提交描述。
-- 公司下部分项目可以显式覆盖为中文，这是项目级特殊情况；例如 AgenticOps 内部项目提交标题和提交描述使用中文。
 - `type`、`scope`、Jira key、命令和配置字段作为结构化标识可以保留英文。
-- `tapstate`、`tapdata`、`cyntex` 业务项目提交标题和提交描述使用英文，遵守 TapData 公司默认规范。
-- `tapstate/agentic-ops` 属于 AgenticOps 内部项目，不套用 `tapstate` 业务项目提交语言规则。
 - TapData 公司代码提交必须绑定 Jira 任务卡片；`tag` 指 Jira 任务编号，例如 `TAP-1234`。
 - 提交格式为 `<type>(<scope>): <tag> <subject>`，不得省略 `<tag>`。
 - 允许的 `type` 为 `Feat`、`Fix`、`Docs`、`Style`、`Refactor`、`Test`、`Chore`。

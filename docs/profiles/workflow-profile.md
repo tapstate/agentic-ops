@@ -20,6 +20,8 @@ AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira 工作
 > agentic-cli 内置兜底
 ```
 
+该顺序只用于配置和 profile 字段来源解析，不等同于规则冲突优先级。规则冲突必须按 `项目规则 > AIAgent 规则 > 公司规则 > 个人规则` 执行；个人层可以提供本机默认值，但不能覆盖更高优先级规则。
+
 项目 AI 工作空间只保存 `.agentic-ops/profile.local.yaml` 这类本地 overlay，不复制完整全局项目 profile。全局 `~/.agentic-ops` 更新后，已有工作空间通过 `agentic-cli profile resolve --project <project>` 自动读取最新项目包。
 
 一个工作流配置至少应描述：

@@ -501,6 +501,15 @@ func runAgentInit(args []string, stdout io.Writer) int {
 			"company":           "$HOME/.agentic-ops/install-resources/basic/company/",
 			"builtin":           "agentic-cli",
 		},
+		"rule_resolution": map[string]any{
+			"order": []string{
+				"project_rule",
+				"aiagent_rule",
+				"company_rule",
+				"personal_rule",
+			},
+			"note": "asset_resolution is for profile/config sources; rule conflicts follow this rule_resolution order",
+		},
 		"project_tools": projectTools,
 		"human_gates": []string{
 			"real_jira_write",
