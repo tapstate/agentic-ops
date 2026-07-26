@@ -90,6 +90,7 @@ failure:
     - interactive_input_required
     - interactive_input_failed
     - existing_config_confirmation_required
+    - invalid_jira_token_env_name
     - workspace_root_failed
     - workspace_init_failed
     - jira_config_failed

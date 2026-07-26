@@ -9,7 +9,7 @@ func Register(registry *cmdkit.Registry) {
 	registry.MustRegister(cmdkit.CommandSpec{
 		Path:    []string{"workspace", "init"},
 		Summary: "初始化项目 AI 工作空间本地 overlay",
-		Usage:   "agentic-cli workspace init --project <project> [--interactive] [--jira-user <email>] [--jira-base-url <url>] [--jira-token-env <env>]",
+		Usage:   "agentic-cli workspace init --project <project> [--interactive] [--jira-user <email>] [--jira-base-url <url>] [--jira-token-env <env-name>]",
 		Examples: []string{
 			"agentic-cli workspace init --project tapdata --interactive",
 			"agentic-cli workspace init --project tapdata --jira-user lead@example.com --jira-token-env AGENTIC_OPS_JIRA_API_TOKEN",

@@ -114,6 +114,16 @@ func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr i
 	}
 	jiraConfig, err := prepareWorkspaceJiraConfig(info, jiraUser, jiraBaseURL, jiraTokenEnv)
 	if err != nil {
+		if errors.Is(err, errInvalidJiraTokenEnvName) {
+			return writeJSON(stdout, output.FailureWithContext("workspace_init", output.FailureContext{
+				Code:                "invalid_jira_token_env_name",
+				Message:             "Jira token env 必须是环境变量名，不是 Jira API token 值",
+				RequiredHumanAction: "请使用 AGENTIC_OPS_JIRA_API_TOKEN 这类环境变量名，并把真实 Jira API token 写入 ~/.agentic-ops/user/.env",
+				TaskType:            "workspace_initialization",
+				CurrentStage:        "jira_config",
+				NextAction:          "set_jira_token_env_name",
+			}))
+		}
 		return writeJSON(stdout, output.Failure("workspace_init", "jira_config_failed", err.Error(), "请检查个人配置目录权限"))
 	}
 	payload := output.Success("workspace_init", map[string]any{
@@ -227,13 +237,18 @@ type workspaceJiraConfigGuide struct {
 	NextAction string
 }
 
+var errInvalidJiraTokenEnvName = errors.New("invalid jira token env name")
+
 func prepareWorkspaceJiraConfig(info workspace.Info, jiraUser string, jiraBaseURL string, jiraTokenEnv string) (workspaceJiraConfigGuide, error) {
-	if strings.TrimSpace(jiraTokenEnv) == "" {
-		jiraTokenEnv = jiraFieldDefault(jiraRuntimeModuleSpec(), "api_token_env")
-	}
 	scope := runtimeconfig.NewScope(agenticOpsInstallDir(), info.Root, info.Name)
 	configPath := scope.UserConfigPath()
 	envFile := scope.UserEnvPath()
+	if strings.TrimSpace(jiraTokenEnv) == "" {
+		jiraTokenEnv = jiraFieldDefault(jiraRuntimeModuleSpec(), "api_token_env")
+	}
+	if !validJiraTokenEnvName(jiraTokenEnv) {
+		return workspaceJiraConfigGuide{}, fmt.Errorf("%w: use an environment variable name such as AGENTIC_OPS_JIRA_API_TOKEN, then store the token in %s", errInvalidJiraTokenEnvName, envFile)
+	}
 	jiraBaseURL = jira.NormalizeBaseURL(jiraBaseURL)
 	if jiraBaseURL != "" {
 		if err := writePersonalProjectJiraConfig(scope, jiraUser, jiraBaseURL, jiraTokenEnv); err != nil {
@@ -285,6 +300,26 @@ func prepareWorkspaceJiraConfig(info workspace.Info, jiraUser string, jiraBaseUR
 		EnvFile:    envFile,
 		NextAction: "rerun_workspace_init_with_--jira-base-url",
 	}, nil
+}
+
+func validJiraTokenEnvName(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 80 {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if i == 0 {
+			if !((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch == '_') {
+				return false
+			}
+			continue
+		}
+		if !((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func writePersonalProjectJiraConfig(scope runtimeconfig.Scope, jiraUser string, jiraBaseURL string, jiraTokenEnv string) error {

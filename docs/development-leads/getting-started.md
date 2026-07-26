@@ -175,7 +175,7 @@ agentic-cli workspace init --project tapdata --interactive
 
 - 项目配置项，例如 `tapdata`。
 - Jira 邮箱；Tapdata 的 Jira base URL 默认是 `https://tapdata.atlassian.net`。
-- token 环境变量名，默认 `AGENTIC_OPS_JIRA_API_TOKEN`。
+- token 环境变量名，默认 `AGENTIC_OPS_JIRA_API_TOKEN`；这里填变量名，不填 Jira API token 值。
 - 本地源码目录；默认是当前工作空间下的 `repos/<project>`。
 
 脚本、CI 或非终端环境使用参数形式：
@@ -236,6 +236,8 @@ projects:
 ```sh
 agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --jira-token-env TAPDATA_JIRA_TOKEN
 ```
+
+`--jira-token-env` 只接受 `TAPDATA_JIRA_TOKEN` 这类环境变量名。真实 Jira API token 必须写入输出中的 `jira_env_file`、当前进程环境变量或项目工作空间 `.agentic-ops/.env`。
 
 `needs_token_env` 时：
 

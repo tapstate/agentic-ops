@@ -92,6 +92,33 @@ func TestWorkspaceInitWritesPersonalConfigAndEnvWhenBaseURLProvided(t *testing.T
 	}
 }
 
+func TestWorkspaceInitRejectsRawJiraTokenAsTokenEnv(t *testing.T) {
+	root := t.TempDir()
+	installDir := t.TempDir()
+	rawToken := "this-is-not-an-env-var=raw-jira-token-value"
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", installDir)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com", "--jira-base-url", "https://jira.example.test", "--jira-token-env", rawToken}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "workspace_init")
+	assertJSONField(t, stdout.String(), "code", "invalid_jira_token_env_name")
+	if !strings.Contains(stdout.String(), "AGENTIC_OPS_JIRA_API_TOKEN") || !strings.Contains(stdout.String(), ".env") {
+		t.Fatalf("stdout missing token env guidance: %s", stdout.String())
+	}
+	configData, err := os.ReadFile(filepath.Join(installDir, "user", "config.local.yaml"))
+	if err == nil && strings.Contains(string(configData), rawToken) {
+		t.Fatalf("config.local.yaml must not contain raw token: %s", string(configData))
+	}
+	envData, err := os.ReadFile(filepath.Join(installDir, "user", ".env"))
+	if err == nil && strings.Contains(string(envData), rawToken) {
+		t.Fatalf(".env must not contain raw token: %s", string(envData))
+	}
+}
+
 func TestWorkspaceInitUsesProjectDefaultJiraBaseURL(t *testing.T) {
 	root := t.TempDir()
 	installDir := t.TempDir()
@@ -185,6 +212,35 @@ func TestWorkspaceInitInteractivePromptsForMissingJiraConfig(t *testing.T) {
 	}
 	if strings.TrimSpace(stdout.String()) == "" || strings.Contains(stdout.String(), "Jira user") {
 		t.Fatalf("stdout should only contain JSON result: %s", stdout.String())
+	}
+}
+
+func TestWorkspaceInitInteractiveRejectsRawJiraTokenAsTokenEnv(t *testing.T) {
+	root := t.TempDir()
+	installDir := t.TempDir()
+	rawToken := "this-is-not-an-env-var=raw-jira-token-value"
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", installDir)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	input := strings.NewReader("lead@example.com\nhttps://jira.example.test\n" + rawToken + "\n")
+	code := RunWithIO([]string{"workspace", "init", "--project", "tapdata", "--interactive"}, input, &stdout, &stderr, true)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "workspace_init")
+	assertJSONField(t, stdout.String(), "code", "invalid_jira_token_env_name")
+	if !strings.Contains(stdout.String(), "Jira token env") || !strings.Contains(stdout.String(), "AGENTIC_OPS_JIRA_API_TOKEN") {
+		t.Fatalf("stdout missing token env guidance: %s", stdout.String())
+	}
+	configData, err := os.ReadFile(filepath.Join(installDir, "user", "config.local.yaml"))
+	if err == nil && strings.Contains(string(configData), rawToken) {
+		t.Fatalf("config.local.yaml must not contain raw token: %s", string(configData))
+	}
+	envData, err := os.ReadFile(filepath.Join(installDir, "user", ".env"))
+	if err == nil && strings.Contains(string(envData), rawToken) {
+		t.Fatalf(".env must not contain raw token: %s", string(envData))
 	}
 }
 
