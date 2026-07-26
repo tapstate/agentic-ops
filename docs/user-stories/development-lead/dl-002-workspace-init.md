@@ -17,7 +17,7 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 - 研发负责人已确定当前项目配置项，例如 `tapstate` 或 `tapdata`。
 - 当前 shell 已进入项目 AI 工作空间目录。
 - 本机可以访问对应项目的 GitHub 仓库和 Jira 空间。
-- AgenticOps 当前版本中存在对应的项目包 profile，例如 `install-resources/basic/projects/tapdata/profile.yaml`；旧 `install-resources/basic/profiles/<project>.yaml` 只作为兼容 fallback。
+- AgenticOps 当前版本中存在对应的项目包 profile，例如 `install-resources/basic/projects/tapdata/profile.yaml`。
 
 ### 主流程
 
@@ -75,7 +75,7 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 
 - `workspace init` 必须在项目 AI 工作空间目录内执行。
 - 工作空间配置必须通过项目配置项绑定 Jira 用户、Jira 空间、仓库映射和本地源码根目录。
-- 覆盖已有 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml`、遗留 `.agentic-ops/profiles/<project>.yaml` 或 AgenticOps 管理的 `AGENTS.md` 配置块前，必须由研发负责人显式确认。
+- 覆盖已有 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 或 AgenticOps 管理的 `AGENTS.md` 配置块前，必须由研发负责人显式确认。
 - 具体项目运行产物必须写入项目 AI 工作空间，不能写入 `~/.agentic-ops`。
 - 目标仓库选择必须来自 workflow profile 或 Jira 字段映射，不能由 AIAgent 临场猜测。
 

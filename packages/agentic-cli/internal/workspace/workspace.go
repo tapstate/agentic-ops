@@ -13,7 +13,6 @@ type Info struct {
 	RunsDir     string
 	RunLogsDir  string
 	FeedbackDir string
-	ProfilesDir string
 }
 
 type DirStatus struct {
@@ -36,7 +35,6 @@ func Ensure(root string, name string) (Info, error) {
 		RunsDir:     filepath.Join(base, "runs"),
 		RunLogsDir:  filepath.Join(base, "run-logs"),
 		FeedbackDir: filepath.Join(base, "feedback"),
-		ProfilesDir: filepath.Join(base, "profiles"),
 	}
 	if err := os.MkdirAll(info.RunsDir, 0o755); err != nil {
 		return Info{}, err
@@ -45,9 +43,6 @@ func Ensure(root string, name string) (Info, error) {
 		return Info{}, err
 	}
 	if err := os.MkdirAll(info.FeedbackDir, 0o755); err != nil {
-		return Info{}, err
-	}
-	if err := os.MkdirAll(info.ProfilesDir, 0o755); err != nil {
 		return Info{}, err
 	}
 	return info, nil

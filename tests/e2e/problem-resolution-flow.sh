@@ -30,9 +30,9 @@ JSON
 
 "${cmd[@]}" profile validate --workspace tapstate | grep '"operation":"profile_validate"'
 profile_source="$workspace_root/tapstate-profile-hotfix.yaml"
-profile_backup="install-resources/basic/profiles/tapstate.yaml.bak"
+profile_backup="install-resources/basic/projects/tapstate/profile.yaml.bak"
 test ! -e "$profile_backup"
-cp install-resources/basic/profiles/tapstate.yaml "$profile_source"
+cp install-resources/basic/projects/tapstate/profile.yaml "$profile_source"
 "${cmd[@]}" profile update --workspace tapstate --source "$profile_source" | grep '"operation":"profile_update"'
 "${cmd[@]}" profile rollback --workspace tapstate | grep '"operation":"profile_rollback"'
 rm -f "$profile_backup"

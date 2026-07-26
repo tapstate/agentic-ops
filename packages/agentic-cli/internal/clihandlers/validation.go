@@ -79,7 +79,7 @@ func runProfileValidate(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.FailureWithContext("profile_validate", output.FailureContext{
 			Code:                "profile_not_found",
 			Message:             err.Error(),
-			RequiredHumanAction: "请检查 install-resources/basic/profiles 目录中的 workspace 配置",
+			RequiredHumanAction: "请检查 install-resources/basic/projects/<project>/profile.yaml 中的 workspace 配置",
 			TaskType:            "profile_validation",
 			CurrentStage:        "profile_validation",
 			NextAction:          "fix_profile",

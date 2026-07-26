@@ -58,11 +58,7 @@ func repoBasicResourcesPath(root string) string {
 }
 
 func repoProfilePath(workspaceName string) (string, error) {
-	root, err := repoRoot()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(repoBasicResourcesPath(root), "profiles", workspaceName+".yaml"), nil
+	return repoProjectProfilePath(workspaceName)
 }
 
 func repoProjectPath(workspaceName string) (string, error) {
@@ -78,11 +74,7 @@ func repoProjectProfilePath(workspaceName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(projectPath, "profile.yaml")
-	if stat, err := os.Stat(path); err == nil && !stat.IsDir() {
-		return path, nil
-	}
-	return repoProfilePath(workspaceName)
+	return filepath.Join(projectPath, "profile.yaml"), nil
 }
 
 func repoCompanyPath() (string, error) {

@@ -13,8 +13,8 @@ input:
     type: string
     required: true
 preconditions:
-  - profiles_dir_must_exist
-  - workspace_profile_must_exist
+  - project_profile_must_exist
+  - workspace_profile_must_match_project
 output:
   workspace:
     type: string

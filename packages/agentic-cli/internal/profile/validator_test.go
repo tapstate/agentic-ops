@@ -10,7 +10,7 @@ import (
 )
 
 func TestValidateAcceptsTapstateProfile(t *testing.T) {
-	p, err := LoadFile(filepath.Join("..", "..", "..", "..", "install-resources", "basic", "profiles", "tapstate.yaml"))
+	p, err := LoadFile(filepath.Join("..", "..", "..", "..", "install-resources", "basic", "projects", "tapstate", "profile.yaml"))
 	if err != nil {
 		t.Fatalf("LoadFile error = %v", err)
 	}
@@ -20,7 +20,7 @@ func TestValidateAcceptsTapstateProfile(t *testing.T) {
 }
 
 func TestValidateAcceptsTapdataProfile(t *testing.T) {
-	p, err := LoadFile(filepath.Join("..", "..", "..", "..", "install-resources", "basic", "profiles", "tapdata.yaml"))
+	p, err := LoadFile(filepath.Join("..", "..", "..", "..", "install-resources", "basic", "projects", "tapdata", "profile.yaml"))
 	if err != nil {
 		t.Fatalf("LoadFile error = %v", err)
 	}
@@ -39,10 +39,10 @@ func TestValidateAcceptsTapdataProfile(t *testing.T) {
 	if p.Local.SourceRoot != "<project-ai-workspace>/repos/tapdata" {
 		t.Fatalf("Local.SourceRoot = %s", p.Local.SourceRoot)
 	}
-	if !containsString(p.Standards, "standards/tapdata-development-rules.md") {
+	if !containsString(p.Standards, "projects/tapdata/standards/development-rules.md") {
 		t.Fatalf("Standards missing tapdata development rules: %#v", p.Standards)
 	}
-	standardPath := filepath.Join("..", "..", "..", "..", "install-resources", "basic", "standards", "tapdata-development-rules.md")
+	standardPath := filepath.Join("..", "..", "..", "..", "install-resources", "basic", "projects", "tapdata", "standards", "development-rules.md")
 	if info, err := os.Stat(standardPath); err != nil || info.IsDir() {
 		t.Fatalf("tapdata standard file is not readable: info=%v err=%v", info, err)
 	}

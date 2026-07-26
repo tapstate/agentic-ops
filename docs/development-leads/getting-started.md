@@ -180,7 +180,7 @@ agentic-cli workspace init --project tapdata --jira-user <your-jira-email>
 agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --source-root /path/to/source
 ```
 
-如果当前目录已经存在 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml`、遗留 `.agentic-ops/profiles/<project>.yaml` 或 AgenticOps 管理的 `AGENTS.md` 配置块，初始化会停止并要求确认。确认需要覆盖已有本地配置时重新执行：
+如果当前目录已经存在 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 或 AgenticOps 管理的 `AGENTS.md` 配置块，初始化会停止并要求确认。确认需要覆盖已有本地配置时重新执行：
 
 ```sh
 agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --confirm-existing-config

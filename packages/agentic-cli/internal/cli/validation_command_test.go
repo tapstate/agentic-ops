@@ -61,7 +61,7 @@ func TestProfileUpdateAndRollbackUseLocalProfileBackup(t *testing.T) {
 	t.Chdir(repo)
 	writeCLITestFile(t, filepath.Join(repo, "go.mod"), "module example.local/test\n")
 	writeCLITestFile(t, filepath.Join(repo, "install-resources", "basic", "contracts", "operations", ".keep"), "")
-	target := filepath.Join(repo, "install-resources", "basic", "profiles", "tapstate.yaml")
+	target := filepath.Join(repo, "install-resources", "basic", "projects", "tapstate", "profile.yaml")
 	source := filepath.Join(repo, "incoming", "tapstate.yaml")
 	writeCLITestFile(t, target, validCLIProfileYAML("tapstate", "TAP"))
 	writeCLITestFile(t, source, validCLIProfileYAML("tapstate", "OPS"))
@@ -169,7 +169,7 @@ func TestProfileValidateReportsMissingProcessRegistryTarget(t *testing.T) {
 	writeCLITestFile(t, filepath.Join(repo, "install-resources", "basic", "contracts", "operations", ".keep"), "")
 	writeCLITestFile(t, filepath.Join(repo, "install-resources", "basic", "contracts", "processes", "development-change-v1.yaml"), validCLIProcessYAML("development_change_v1"))
 	profileYAML := strings.Replace(validCLIProfileYAML("tapstate", "TAP"), "technical_task: development_change_v1", "technical_task: missing_process_v1", 1)
-	writeCLITestFile(t, filepath.Join(repo, "install-resources", "basic", "profiles", "tapstate.yaml"), profileYAML)
+	writeCLITestFile(t, filepath.Join(repo, "install-resources", "basic", "projects", "tapstate", "profile.yaml"), profileYAML)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

@@ -52,7 +52,6 @@ AIAgent 执行业务 Jira 任务前按以下顺序读取：
 - `contracts/`
 - `company/`
 - `projects/`
-- `profiles/`
 - `standards/`
 - `assets/`
 - `docs/ai-working-rules.md`

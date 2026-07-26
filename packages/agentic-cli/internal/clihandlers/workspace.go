@@ -149,7 +149,6 @@ func existingWorkspaceConfigPaths(info workspace.Info) []string {
 	candidates := []string{
 		filepath.Join(info.Root, ".agentic-ops", "agent.json"),
 		filepath.Join(info.Root, ".agentic-ops", "profile.local.yaml"),
-		filepath.Join(info.ProfilesDir, info.Name+".yaml"),
 	}
 	var existing []string
 	for _, path := range candidates {
