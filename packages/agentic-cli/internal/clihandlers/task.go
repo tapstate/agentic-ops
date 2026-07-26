@@ -19,7 +19,7 @@ func runListTasks(args []string, stdout io.Writer) int {
 	workspaceProfile := takeoverProfile(workspaceName)
 	selection, err := selectJiraClient(workspaceName, workspaceProfile)
 	if err != nil {
-		return writeJSON(stdout, output.Failure("list_tasks", "jira_adapter_config_failed", err.Error(), "请检查 Jira adapter 配置"))
+		return writeJSON(stdout, jiraAdapterConfigFailure("list_tasks", workspaceName, err, "请检查 Jira adapter 配置"))
 	}
 	if selection.Mode != "real" && os.Getenv("AGENTIC_OPS_JIRA_ADAPTER") != "fake" {
 		return writeJSON(stdout, output.Failure("list_tasks", "jira_adapter_config_failed", "list-tasks 必须读取真实 Jira；未显式启用本地 fake adapter", jiraRealConfigRequiredAction(workspaceName)))
@@ -36,7 +36,7 @@ func runListTasks(args []string, stdout io.Writer) int {
 }
 
 func jiraRealConfigRequiredAction(workspaceName string) string {
-	return "请设置 AGENTIC_OPS_JIRA_ADAPTER=real 并提供 Jira 连接配置，或维护本地配置文件：" + strings.Join(jiraRuntimeConfigPaths(workspaceName), ", ")
+	return "请设置 AGENTIC_OPS_JIRA_ADAPTER=real 并提供 Jira 连接配置，或维护本地配置文件：" + strings.Join(runtimeConfigScope(workspaceName).ConfigPaths(), ", ")
 }
 
 func runTakeoverTask(args []string, stdout io.Writer) int {

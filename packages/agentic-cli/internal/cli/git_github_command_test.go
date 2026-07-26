@@ -61,7 +61,7 @@ func TestInspectWorkspaceCanUseFakeGitInspector(t *testing.T) {
 	}
 }
 
-func TestSwitchBranchPlanOutputsTapdataAlignmentRows(t *testing.T) {
+func TestBranchAlignPlanOutputsTapdataAlignmentRows(t *testing.T) {
 	workRoot := t.TempDir()
 	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata", "develop", nil)
 	writeCLITestFile(t, filepath.Join(workRoot, "tapdata", "iengine/iengine-app/src/main/resources/pluginKit.properties"), "tapdata.api.verison=4.9-SNAPSHOT\n")
@@ -77,11 +77,11 @@ func TestSwitchBranchPlanOutputsTapdataAlignmentRows(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"switch-branch", "plan", "develop", "--workspace", "tapdata", "--work-root", workRoot, "--no-fetch"}, &stdout, &stderr)
+	code := Run([]string{"tapdata", "branch-align", "plan", "develop", "--work-root", workRoot, "--no-fetch"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
-	assertJSONField(t, stdout.String(), "operation", "switch_branch")
+	assertJSONField(t, stdout.String(), "operation", "branch_align")
 	assertJSONField(t, stdout.String(), "workspace", "tapdata")
 	assertJSONField(t, stdout.String(), "mode", "plan")
 	assertJSONField(t, stdout.String(), "work_root", workRoot)
@@ -115,7 +115,7 @@ func TestTapdataBranchAlignPlanOutputsTapdataAlignmentRows(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
-	assertJSONField(t, stdout.String(), "operation", "switch_branch")
+	assertJSONField(t, stdout.String(), "operation", "branch_align")
 	assertJSONField(t, stdout.String(), "workspace", "tapdata")
 	assertJSONField(t, stdout.String(), "mode", "plan")
 	assertJSONField(t, stdout.String(), "tap_branch", "develop")
@@ -125,29 +125,27 @@ func TestTapdataBranchAlignPlanOutputsTapdataAlignmentRows(t *testing.T) {
 	}
 }
 
-func TestSwitchBranchHelpShowsLegacyMigration(t *testing.T) {
+func TestTopLevelBranchAlignIsNotRegistered(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"switch-branch", "-h"}, &stdout, &stderr)
-	if code != 0 {
+	code := Run([]string{"branch-align", "-h"}, &stdout, &stderr)
+	if code != 1 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "legacy") || !strings.Contains(stdout.String(), "agentic-cli tapdata branch-align") {
-		t.Fatalf("legacy help missing migration guidance: %s", stdout.String())
-	}
+	assertJSONField(t, stdout.String(), "code", "unknown_command")
 }
 
-func TestSwitchBranchStatusOutputsTapdataRepoRows(t *testing.T) {
+func TestBranchAlignStatusOutputsTapdataRepoRows(t *testing.T) {
 	workRoot := t.TempDir()
 	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata", "develop", nil)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"switch-branch", "status", "--workspace", "tapdata", "--work-root", workRoot}, &stdout, &stderr)
+	code := Run([]string{"tapdata", "branch-align", "status", "--work-root", workRoot}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
-	assertJSONField(t, stdout.String(), "operation", "switch_branch")
+	assertJSONField(t, stdout.String(), "operation", "branch_align")
 	assertJSONField(t, stdout.String(), "mode", "status")
 	assertJSONNumber(t, stdout.String(), "rows_count", 8)
 	if !strings.Contains(stdout.String(), `"repo":"tapdata"`) || !strings.Contains(stdout.String(), `"missing":true`) {
@@ -155,14 +153,14 @@ func TestSwitchBranchStatusOutputsTapdataRepoRows(t *testing.T) {
 	}
 }
 
-func TestSwitchBranchRequiresTapdataWorkspace(t *testing.T) {
+func TestBranchAlignRequiresTapdataWorkspace(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"switch-branch", "plan", "develop", "--workspace", "tapstate", "--work-root", "/tmp/source"}, &stdout, &stderr)
+	code := Run([]string{"tapdata", "branch-align", "plan", "develop", "--workspace", "tapstate", "--work-root", "/tmp/source"}, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
-	assertJSONField(t, stdout.String(), "operation", "switch_branch")
+	assertJSONField(t, stdout.String(), "operation", "branch_align")
 	assertJSONField(t, stdout.String(), "code", "workspace_not_supported")
 	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
 }

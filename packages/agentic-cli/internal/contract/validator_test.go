@@ -22,6 +22,44 @@ func TestValidateReportsMissingRequiredContractSections(t *testing.T) {
 	}
 }
 
+func TestValidateReportsBrokenFailureContextSchemas(t *testing.T) {
+	issues := Validate(Operation{
+		Operation: "list_tasks",
+		Input: map[string]FieldSpec{
+			"workspace": {Type: "string"},
+		},
+		Output: map[string]FieldSpec{
+			"workspace": {Type: "string"},
+		},
+		Failure: FailureSpec{
+			Codes: []string{"jira_adapter_config_failed"},
+			Context: map[string]FailureContextSpec{
+				"unknown_failure": {
+					MayInclude: map[string]FieldSpec{
+						"jira_token_env": {Type: "string"},
+					},
+				},
+				"jira_adapter_config_failed": {
+					MayInclude: map[string]FieldSpec{
+						"jira_token_env_has_value": {},
+					},
+				},
+			},
+		},
+		SideEffects: []string{"must_not_write_jira"},
+		HumanGate:   &HumanGate{},
+	})
+
+	for _, code := range []string{
+		"unknown_failure_context_code",
+		"missing_failure_context_field_type",
+	} {
+		if !hasIssue(issues, code) {
+			t.Fatalf("missing validation issue %s in %#v", code, issues)
+		}
+	}
+}
+
 func TestValidateAcceptsRepositoryOperationContracts(t *testing.T) {
 	paths, err := filepath.Glob(filepath.Join("..", "..", "..", "..", "install-resources", "basic", "contracts", "operations", "*.yaml"))
 	if err != nil {

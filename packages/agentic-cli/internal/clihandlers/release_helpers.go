@@ -3,15 +3,16 @@ package clihandlers
 import (
 	"context"
 	"fmt"
-	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/config"
-	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/feedback"
-	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
-	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/config"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/feedback"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/output"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/runtimeconfig"
 )
 
 type completionEvidenceCheck struct {
@@ -104,84 +105,173 @@ func defaultJiraClient(workspaceName string, workspaceProfile profile.Profile) (
 }
 
 type jiraRuntimeConfig struct {
-	Adapter     string `yaml:"adapter"`
-	BaseURL     string `yaml:"base_url"`
-	Email       string `yaml:"email"`
-	APIToken    string `yaml:"api_token"`
-	APITokenEnv string `yaml:"api_token_env"`
-	Source      string `yaml:"-"`
+	Adapter     string   `yaml:"adapter"`
+	BaseURL     string   `yaml:"base_url"`
+	Email       string   `yaml:"email"`
+	APIToken    string   `yaml:"-"`
+	APITokenEnv string   `yaml:"api_token_env"`
+	EnvFile     string   `yaml:"-"`
+	EnvFiles    []string `yaml:"-"`
+	Source      string   `yaml:"-"`
+}
+
+const jiraTokenHelpURL = "https://id.atlassian.com/manage-profile/security/api-tokens"
+
+func addJiraTokenGuidance(payload map[string]any, status string, tokenEnv string, envFile string) {
+	if status != "needs_token_env" {
+		return
+	}
+	tokenEnv = strings.TrimSpace(tokenEnv)
+	if tokenEnv == "" {
+		tokenEnv = jiraFieldDefault(jiraRuntimeModuleSpec(), "api_token_env")
+	}
+	if strings.TrimSpace(envFile) != "" {
+		payload["jira_env_file"] = envFile
+	}
+	payload["jira_token_env_has_value"] = jiraTokenConfigured(tokenEnv, envFile)
+	payload["jira_token_help_url"] = jiraTokenHelpURL
+	if strings.TrimSpace(envFile) != "" {
+		payload["jira_token_setup"] = "edit " + envFile + " and set " + tokenEnv + "=<api-token>"
+	} else {
+		payload["jira_token_setup"] = "read -s " + tokenEnv + " && export " + tokenEnv
+	}
+}
+
+func addJiraTokenDiagnostics(payload map[string]any, runtimeConfig jiraRuntimeConfig) {
+	tokenEnv := jiraTokenEnvName(runtimeConfig)
+	payload["jira_token_env"] = tokenEnv
+	payload["jira_token_env_has_value"] = jiraTokenConfiguredInFiles(tokenEnv, runtimeConfig.EnvFiles)
+	if strings.TrimSpace(runtimeConfig.EnvFile) != "" {
+		payload["jira_env_file"] = runtimeConfig.EnvFile
+	}
+	if strings.TrimSpace(runtimeConfig.Source) != "" {
+		payload["jira_config_source"] = runtimeConfig.Source
+	}
+	addJiraTokenGuidance(payload, "needs_token_env", tokenEnv, runtimeConfig.EnvFile)
+}
+
+func jiraTokenEnvName(runtimeConfig jiraRuntimeConfig) string {
+	if tokenEnv := strings.TrimSpace(runtimeConfig.APITokenEnv); tokenEnv != "" {
+		return tokenEnv
+	}
+	return jiraFieldDefault(jiraRuntimeModuleSpec(), "api_token_env")
+}
+
+func jiraTokenEnvHasValue(tokenEnv string) bool {
+	return strings.TrimSpace(os.Getenv(strings.TrimSpace(tokenEnv))) != ""
+}
+
+func jiraTokenConfigured(tokenEnv string, envFile string) bool {
+	return jiraTokenConfiguredInFiles(tokenEnv, []string{envFile})
+}
+
+func jiraTokenConfiguredInFiles(tokenEnv string, envFiles []string) bool {
+	tokenEnv = strings.TrimSpace(tokenEnv)
+	if tokenEnv == "" {
+		return false
+	}
+	scope := runtimeConfigScope("")
+	if len(envFiles) == 0 {
+		envFiles = scope.EnvPaths()
+	}
+	value, ok, err := lookupTokenEnv(tokenEnv, envFiles)
+	return err == nil && ok && strings.TrimSpace(value) != ""
+}
+
+func jiraAdapterConfigFailure(operation string, workspaceName string, err error, requiredHumanAction string) map[string]any {
+	result := output.Failure(operation, "jira_adapter_config_failed", err.Error(), requiredHumanAction)
+	if err == nil || !strings.Contains(err.Error(), "jira API token is required") {
+		return result
+	}
+	runtimeConfig, configErr := resolveJiraRuntimeConfig(workspaceName)
+	if configErr != nil {
+		runtimeConfig = jiraRuntimeConfig{}
+	}
+	addJiraTokenDiagnostics(result, runtimeConfig)
+	tokenEnv := jiraTokenEnvName(runtimeConfig)
+	if runtimeConfig.EnvFile != "" {
+		result["required_human_action"] = "请到 Atlassian 创建 Jira API token，然后写入 " + runtimeConfig.EnvFile + " 中的 " + tokenEnv
+	} else {
+		result["required_human_action"] = "请到 Atlassian 创建 Jira API token，然后设置进程环境变量 " + tokenEnv
+	}
+	result["next_action"] = "set_jira_token_env"
+	return result
 }
 
 func resolveJiraRuntimeConfig(workspaceName string) (jiraRuntimeConfig, error) {
 	if adapter := strings.TrimSpace(os.Getenv("AGENTIC_OPS_JIRA_ADAPTER")); adapter != "" {
 		return jiraRuntimeConfig{
 			Adapter:  strings.ToLower(adapter),
-			BaseURL:  os.Getenv("AGENTIC_OPS_JIRA_BASE_URL"),
+			BaseURL:  jira.NormalizeBaseURL(os.Getenv("AGENTIC_OPS_JIRA_BASE_URL")),
 			Email:    os.Getenv("AGENTIC_OPS_JIRA_EMAIL"),
 			APIToken: os.Getenv("AGENTIC_OPS_JIRA_API_TOKEN"),
 			Source:   "environment",
 		}, nil
 	}
-	for _, path := range jiraRuntimeConfigPaths(workspaceName) {
-		config, used, err := loadJiraRuntimeConfig(path)
-		if err != nil {
-			return jiraRuntimeConfig{}, err
-		}
-		if used {
-			return config, nil
-		}
+	scope := runtimeConfigScope(workspaceName)
+	var config jiraRuntimeConfig
+	source, used, err := runtimeconfig.ResolveProjectModule(scope, "jira", &config)
+	if err != nil {
+		return jiraRuntimeConfig{}, err
+	}
+	if used {
+		return finalizeJiraRuntimeConfig(scope, source, config)
 	}
 	return jiraRuntimeConfig{Adapter: "fake", Source: "default"}, nil
 }
 
 func loadJiraRuntimeConfig(path string) (jiraRuntimeConfig, bool, error) {
-	stat, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return jiraRuntimeConfig{}, false, nil
-		}
-		return jiraRuntimeConfig{}, false, err
-	}
-	if stat.IsDir() {
-		return jiraRuntimeConfig{}, false, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return jiraRuntimeConfig{}, false, err
-	}
 	var config jiraRuntimeConfig
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return jiraRuntimeConfig{}, false, fmt.Errorf("load jira config %s: %w", path, err)
+	used, err := runtimeconfig.ReadProjectModule(path, "", "jira", &config)
+	if err != nil || !used {
+		return jiraRuntimeConfig{}, used, err
 	}
+	finalized, err := finalizeJiraRuntimeConfig(runtimeConfigScope(""), path, config)
+	return finalized, true, err
+}
+
+func finalizeJiraRuntimeConfig(scope runtimeconfig.Scope, source string, config jiraRuntimeConfig) (jiraRuntimeConfig, error) {
 	config.Adapter = strings.ToLower(strings.TrimSpace(config.Adapter))
-	config.BaseURL = strings.TrimSpace(config.BaseURL)
+	config.BaseURL = jira.NormalizeBaseURL(config.BaseURL)
 	config.Email = strings.TrimSpace(config.Email)
-	config.APIToken = strings.TrimSpace(config.APIToken)
 	config.APITokenEnv = strings.TrimSpace(config.APITokenEnv)
+	config.EnvFile = scope.UserEnvPath()
+	config.EnvFiles = scope.EnvPaths()
 	if config.Adapter == "" && config.BaseURL == "" && config.Email == "" && config.APIToken == "" && config.APITokenEnv == "" {
-		return jiraRuntimeConfig{}, false, nil
+		return jiraRuntimeConfig{}, nil
 	}
 	if config.APIToken == "" && config.APITokenEnv != "" {
-		config.APIToken = os.Getenv(config.APITokenEnv)
+		value, ok, err := lookupTokenEnv(config.APITokenEnv, config.EnvFiles)
+		if err != nil {
+			return jiraRuntimeConfig{}, err
+		}
+		if ok {
+			config.APIToken = value
+		}
 	}
 	if config.Adapter == "" && (config.BaseURL != "" || config.Email != "" || config.APIToken != "" || config.APITokenEnv != "") {
 		config.Adapter = "real"
 	}
-	config.Source = path
-	return config, true, nil
+	config.Source = source
+	return config, nil
 }
 
-func jiraRuntimeConfigPaths(workspaceName string) []string {
-	paths := []string{}
+func lookupTokenEnv(tokenEnv string, envFiles []string) (string, bool, error) {
+	scope := runtimeConfigScope("")
+	if value := strings.TrimSpace(os.Getenv(strings.TrimSpace(tokenEnv))); value != "" {
+		return value, true, nil
+	}
+	if value, ok, err := runtimeconfig.LookupEnvFiles(envFiles, tokenEnv); err != nil || ok {
+		return value, ok, err
+	}
+	return scope.LookupEnv(tokenEnv)
+}
+
+func runtimeConfigScope(workspaceName string) runtimeconfig.Scope {
 	if root, err := workspaceRoot(); err == nil && root != "" {
-		paths = append(paths, filepath.Join(root, ".agentic-ops", "jira.local.yaml"))
+		return runtimeconfig.NewScope(agenticOpsInstallDir(), root, workspaceName)
 	}
-	installDir := agenticOpsInstallDir()
-	if workspaceName != "" {
-		paths = append(paths, filepath.Join(installDir, "user", "projects", workspaceName, "jira.local.yaml"))
-	}
-	paths = append(paths, filepath.Join(installDir, "user", "jira.local.yaml"))
-	return paths
+	return runtimeconfig.NewScope(agenticOpsInstallDir(), "", workspaceName)
 }
 
 func agenticOpsInstallDir() string {

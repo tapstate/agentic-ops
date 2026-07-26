@@ -30,6 +30,21 @@ failure:
     - task_query_failed
     - jira_adapter_config_failed
     - jira_search_failed
+  context:
+    jira_adapter_config_failed:
+      may_include:
+        jira_token_env:
+          type: string
+        jira_env_file:
+          type: string
+        jira_token_env_has_value:
+          type: boolean
+        jira_token_help_url:
+          type: string
+        jira_token_setup:
+          type: string
+        jira_config_source:
+          type: string
 side_effects:
   - must_not_write_jira
   - must_not_modify_code

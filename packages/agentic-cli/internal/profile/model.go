@@ -20,6 +20,7 @@ type Profile struct {
 
 type JiraConfig struct {
 	User      string `yaml:"user"`
+	BaseURL   string `yaml:"base_url"`
 	Project   string `yaml:"project"`
 	TaskQuery string `yaml:"task_query"`
 }

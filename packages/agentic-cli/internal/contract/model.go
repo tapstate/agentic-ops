@@ -25,7 +25,12 @@ type FieldSpec struct {
 }
 
 type FailureSpec struct {
-	Codes []string `yaml:"codes"`
+	Codes   []string                      `yaml:"codes"`
+	Context map[string]FailureContextSpec `yaml:"context"`
+}
+
+type FailureContextSpec struct {
+	MayInclude map[string]FieldSpec `yaml:"may_include"`
 }
 
 type HumanGate struct {

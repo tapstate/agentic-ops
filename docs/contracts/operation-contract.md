@@ -50,7 +50,7 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 | `release_agent` | 完成或明确交接后释放当前 AIAgent 绑定，并记录 `current_agent_id_cleared=true`。 |
 | `mark_blocked` | 记录阻塞原因和人工动作。 |
 | `request_owner_confirmation` | 请求研发负责人确认。 |
-| `switch_branch` | 按 TapData 项目级分支规范计算或执行多仓分支对齐。 |
+| `branch_align` | 按 TapData 项目级分支规范计算或执行多仓分支对齐。 |
 | `prepare_pr` | 准备拉取请求，不绕过人工确认。 |
 | `fix_pr_comments` | 按拉取请求审查意见修复。 |
 | `feedback_collect` | 收集工作空间事件日志。 |

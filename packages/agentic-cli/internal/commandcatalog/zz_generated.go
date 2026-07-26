@@ -7,6 +7,7 @@ import (
 	agent_init_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/agent/init"
 	assets_install_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/assets/install"
 	check_ci_status_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/check-ci-status"
+	conf_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/conf"
 	contract_validate_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/contract/validate"
 	doctor_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/doctor"
 	feedback_bundle_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/feedback/bundle"
@@ -26,7 +27,6 @@ import (
 	read_pr_comments_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/read-pr-comments"
 	release_agent_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/release-agent"
 	resume_takeover_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/resume-takeover"
-	switch_branch_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/switch-branch"
 	takeover_task_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/takeover-task"
 	tapdata_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/tapdata"
 	tapdata_branch_align_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/tapdata/branch-align"
@@ -41,6 +41,7 @@ func RegisterAll(registry *cmdkit.Registry) {
 	agent_init_cmd.Register(registry)
 	assets_install_cmd.Register(registry)
 	check_ci_status_cmd.Register(registry)
+	conf_cmd.Register(registry)
 	contract_validate_cmd.Register(registry)
 	doctor_cmd.Register(registry)
 	feedback_bundle_cmd.Register(registry)
@@ -60,7 +61,6 @@ func RegisterAll(registry *cmdkit.Registry) {
 	read_pr_comments_cmd.Register(registry)
 	release_agent_cmd.Register(registry)
 	resume_takeover_cmd.Register(registry)
-	switch_branch_cmd.Register(registry)
 	takeover_task_cmd.Register(registry)
 	tapdata_branch_align_cmd.Register(registry)
 	tapdata_cmd.Register(registry)

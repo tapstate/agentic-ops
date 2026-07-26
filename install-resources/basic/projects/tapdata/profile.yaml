@@ -2,6 +2,7 @@ workspace: tapdata
 
 jira:
   user: "<jira-user>"
+  base_url: https://tapdata.atlassian.net
   project: TAP
   task_query: "project = TAP AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC"
 

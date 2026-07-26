@@ -65,6 +65,18 @@ output:
     type: string
   jira_token_env:
     type: string
+  jira_env_file:
+    type: string
+    required: false
+  jira_token_env_has_value:
+    type: boolean
+    required: false
+  jira_token_help_url:
+    type: string
+    required: false
+  jira_token_setup:
+    type: string
+    required: false
   jira_config_next_action:
     type: string
   next_action:

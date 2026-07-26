@@ -25,7 +25,7 @@ func TestWorkspaceInitOutputsNextAction(t *testing.T) {
 	assertJSONField(t, stdout.String(), "jira_project", "TAP")
 	assertJSONField(t, stdout.String(), "next_action", "init_agent_capability")
 	assertJSONField(t, stdout.String(), "jira_config_status", "needs_configuration")
-	assertJSONField(t, stdout.String(), "jira_config_path", filepath.Join(installDir, "user", "projects", "tapstate", "jira.local.yaml"))
+	assertJSONField(t, stdout.String(), "jira_config_path", filepath.Join(installDir, "user", "config.local.yaml"))
 	if !strings.Contains(stdout.String(), "--jira-base-url") {
 		t.Fatalf("stdout missing jira config guidance: %s", stdout.String())
 	}
@@ -34,7 +34,7 @@ func TestWorkspaceInitOutputsNextAction(t *testing.T) {
 			t.Fatalf("workspace dir %s was not created: %v", dir, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(installDir, "user", "projects", "tapstate", "jira.local.yaml")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(installDir, "user", "config.local.yaml")); !os.IsNotExist(err) {
 		t.Fatalf("jira config should not be written without jira base URL: %v", err)
 	}
 	if !strings.Contains(stdout.String(), `"run_logs_dir":"`) {
@@ -42,7 +42,7 @@ func TestWorkspaceInitOutputsNextAction(t *testing.T) {
 	}
 }
 
-func TestWorkspaceInitWritesPersonalProjectJiraConfigWhenBaseURLProvided(t *testing.T) {
+func TestWorkspaceInitWritesPersonalConfigAndEnvWhenBaseURLProvided(t *testing.T) {
 	root := t.TempDir()
 	installDir := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
@@ -53,15 +53,24 @@ func TestWorkspaceInitWritesPersonalProjectJiraConfigWhenBaseURLProvided(t *test
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
-	configPath := filepath.Join(installDir, "user", "projects", "tapdata", "jira.local.yaml")
+	configPath := filepath.Join(installDir, "user", "config.local.yaml")
+	envPath := filepath.Join(installDir, "user", ".env")
 	assertJSONField(t, stdout.String(), "jira_config_status", "needs_token_env")
 	assertJSONField(t, stdout.String(), "jira_config_path", configPath)
 	assertJSONField(t, stdout.String(), "jira_token_env", "TAPDATA_JIRA_TOKEN")
+	assertJSONField(t, stdout.String(), "jira_env_file", envPath)
+	assertJSONField(t, stdout.String(), "jira_token_help_url", "https://id.atlassian.com/manage-profile/security/api-tokens")
+	if !strings.Contains(stdout.String(), ".env") || !strings.Contains(stdout.String(), "TAPDATA_JIRA_TOKEN=") {
+		t.Fatalf("stdout missing token setup guidance: %s", stdout.String())
+	}
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatalf("jira config was not written: %v", err)
 	}
 	for _, want := range []string{
+		"projects:",
+		"tapdata:",
+		"jira:",
 		"adapter: real",
 		"base_url: https://jira.example.test",
 		"email: lead@example.com",
@@ -73,6 +82,60 @@ func TestWorkspaceInitWritesPersonalProjectJiraConfigWhenBaseURLProvided(t *test
 	}
 	if strings.Contains(string(data), "api_token:") {
 		t.Fatalf("jira config must not write raw token: %s", string(data))
+	}
+	envData, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("agentic env file was not written: %v", err)
+	}
+	if !strings.Contains(string(envData), "TAPDATA_JIRA_TOKEN=") {
+		t.Fatalf("agentic env file missing token placeholder: %s", string(envData))
+	}
+}
+
+func TestWorkspaceInitUsesProjectDefaultJiraBaseURL(t *testing.T) {
+	root := t.TempDir()
+	installDir := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", installDir)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	configPath := filepath.Join(installDir, "user", "config.local.yaml")
+	envPath := filepath.Join(installDir, "user", ".env")
+	assertJSONField(t, stdout.String(), "jira_config_status", "needs_token_env")
+	assertJSONField(t, stdout.String(), "jira_config_path", configPath)
+	assertJSONField(t, stdout.String(), "jira_token_env", "AGENTIC_OPS_JIRA_API_TOKEN")
+	assertJSONField(t, stdout.String(), "jira_env_file", envPath)
+	assertJSONField(t, stdout.String(), "jira_token_help_url", "https://id.atlassian.com/manage-profile/security/api-tokens")
+	if !strings.Contains(stdout.String(), ".env") || !strings.Contains(stdout.String(), "AGENTIC_OPS_JIRA_API_TOKEN=") {
+		t.Fatalf("stdout missing token setup guidance: %s", stdout.String())
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("jira config was not written: %v", err)
+	}
+	for _, want := range []string{
+		"projects:",
+		"tapdata:",
+		"jira:",
+		"adapter: real",
+		"base_url: https://tapdata.atlassian.net",
+		"email: lead@example.com",
+		"api_token_env: AGENTIC_OPS_JIRA_API_TOKEN",
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("jira config missing %s: %s", want, string(data))
+		}
+	}
+	envData, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("agentic env file was not written: %v", err)
+	}
+	if !strings.Contains(string(envData), "AGENTIC_OPS_JIRA_API_TOKEN=") {
+		t.Fatalf("agentic env file missing token placeholder: %s", string(envData))
 	}
 }
 
@@ -91,7 +154,8 @@ func TestWorkspaceInitInteractivePromptsForMissingJiraConfig(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "jira_user", "lead@example.com")
 	assertJSONField(t, stdout.String(), "jira_config_status", "needs_token_env")
-	configPath := filepath.Join(installDir, "user", "projects", "tapdata", "jira.local.yaml")
+	assertJSONField(t, stdout.String(), "jira_token_help_url", "https://id.atlassian.com/manage-profile/security/api-tokens")
+	configPath := filepath.Join(installDir, "user", "config.local.yaml")
 	assertJSONField(t, stdout.String(), "jira_config_path", configPath)
 	if !strings.Contains(stderr.String(), "Jira user") || !strings.Contains(stderr.String(), "Jira base URL") || !strings.Contains(stderr.String(), "Jira token env") {
 		t.Fatalf("stderr missing prompts: %s", stderr.String())
@@ -101,6 +165,9 @@ func TestWorkspaceInitInteractivePromptsForMissingJiraConfig(t *testing.T) {
 		t.Fatalf("jira config was not written: %v", err)
 	}
 	for _, want := range []string{
+		"projects:",
+		"tapdata:",
+		"jira:",
 		"base_url: https://jira.example.test",
 		"email: lead@example.com",
 		"api_token_env: TAPDATA_JIRA_TOKEN",
@@ -108,6 +175,13 @@ func TestWorkspaceInitInteractivePromptsForMissingJiraConfig(t *testing.T) {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("jira config missing %s: %s", want, string(data))
 		}
+	}
+	envData, err := os.ReadFile(filepath.Join(installDir, "user", ".env"))
+	if err != nil {
+		t.Fatalf("agentic env file was not written: %v", err)
+	}
+	if !strings.Contains(string(envData), "TAPDATA_JIRA_TOKEN=") {
+		t.Fatalf("agentic env file missing token placeholder: %s", string(envData))
 	}
 	if strings.TrimSpace(stdout.String()) == "" || strings.Contains(stdout.String(), "Jira user") {
 		t.Fatalf("stdout should only contain JSON result: %s", stdout.String())
@@ -119,9 +193,9 @@ func TestWorkspaceInitInteractiveAcceptsExistingJiraConfigDefaults(t *testing.T)
 	installDir := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	t.Setenv("AGENTIC_OPS_HOME", installDir)
-	t.Setenv("TAPDATA_JIRA_TOKEN", "token-123")
-	configPath := filepath.Join(installDir, "user", "projects", "tapdata", "jira.local.yaml")
-	writeCLITestFile(t, configPath, "adapter: real\nbase_url: https://jira.example.test\nemail: existing@example.com\napi_token_env: TAPDATA_JIRA_TOKEN\n")
+	configPath := filepath.Join(installDir, "user", "config.local.yaml")
+	writeCLITestFile(t, configPath, "projects:\n  tapdata:\n    jira:\n      adapter: real\n      base_url: https://jira.example.test\n      email: existing@example.com\n      api_token_env: TAPDATA_JIRA_TOKEN\n")
+	writeCLITestFile(t, filepath.Join(installDir, "user", ".env"), "TAPDATA_JIRA_TOKEN=token-123\n")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -157,6 +231,7 @@ func TestWorkspaceInitInteractiveRequiresTerminal(t *testing.T) {
 func TestWorkspaceInitWritesLocalProfileOverlay(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", t.TempDir())
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com"}, &stdout, &stderr)
@@ -195,6 +270,7 @@ func TestWorkspaceInitWritesLocalProfileOverlay(t *testing.T) {
 func TestWorkspaceInitRequiresConfirmationBeforeReplacingExistingConfig(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", t.TempDir())
 	Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com"}, &bytes.Buffer{}, &bytes.Buffer{})
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -211,6 +287,7 @@ func TestWorkspaceInitRequiresConfirmationBeforeReplacingExistingConfig(t *testi
 func TestWorkspaceInitCanReplaceExistingConfigAfterConfirmation(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", t.TempDir())
 	Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com"}, &bytes.Buffer{}, &bytes.Buffer{})
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -232,6 +309,7 @@ func TestWorkspaceInitAcceptsConfirmedSourceRoot(t *testing.T) {
 	root := t.TempDir()
 	sourceRoot := filepath.Join(root, "repos", "custom-source")
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", t.TempDir())
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com", "--source-root", sourceRoot}, &stdout, &stderr)
@@ -251,6 +329,7 @@ func TestWorkspaceInitAcceptsConfirmedSourceRoot(t *testing.T) {
 func TestWorkspaceInitWritesAgentConfigForCodexActivation(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", t.TempDir())
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com"}, &stdout, &stderr)
@@ -280,6 +359,7 @@ func TestWorkspaceInitWritesAgentConfigForCodexActivation(t *testing.T) {
 func TestWorkspaceInitWritesAgentInstructionsForCodex(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", t.TempDir())
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com"}, &stdout, &stderr)

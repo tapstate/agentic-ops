@@ -109,6 +109,7 @@ func runPreflight(args []string, stdout io.Writer) int {
 		"github_cli":        checkCommandAvailable("gh"),
 		"github_auth":       checkGitHubAuth(hasFlag(args, "--check-github")),
 		"profile":           checkProfile(workspaceName),
+		"jira_config":       checkJiraRuntimeConfig(workspaceName),
 		"current_directory": checkCurrentDirectoryAllowed(workspaceProfile),
 	}
 	status := statusFromChecks(checks)
@@ -116,7 +117,7 @@ func runPreflight(args []string, stdout io.Writer) int {
 	if status != "ok" {
 		nextAction = "fix_environment"
 	}
-	return writeJSON(stdout, output.Success("preflight", map[string]any{
+	result := output.Success("preflight", map[string]any{
 		"workspace":   workspaceName,
 		"install_dir": installDir,
 		"os":          runtime.GOOS,
@@ -125,7 +126,43 @@ func runPreflight(args []string, stdout io.Writer) int {
 		"status":      status,
 		"checks":      checks,
 		"next_action": nextAction,
-	}))
+	})
+	if checks["jira_config"]["code"] == "jira_token_env_missing" {
+		if runtimeConfig, err := resolveJiraRuntimeConfig(workspaceName); err == nil {
+			addJiraTokenDiagnostics(result, runtimeConfig)
+		}
+		result["next_action"] = "set_jira_token_env"
+	}
+	return writeJSON(stdout, result)
+}
+
+func checkJiraRuntimeConfig(workspaceName string) map[string]string {
+	runtimeConfig, err := resolveJiraRuntimeConfig(workspaceName)
+	if err != nil {
+		return map[string]string{"status": "failed", "message": err.Error(), "code": "jira_config_read_failed"}
+	}
+	if runtimeConfig.Adapter != "real" {
+		if runtimeConfig.Adapter == "fake" && strings.TrimSpace(os.Getenv("AGENTIC_OPS_JIRA_ADAPTER")) == "fake" {
+			return map[string]string{"status": "ok", "message": "fake Jira adapter explicitly enabled", "source": runtimeConfig.Source}
+		}
+		return map[string]string{"status": "skipped", "message": "real Jira config not configured", "source": runtimeConfig.Source}
+	}
+	if runtimeConfig.BaseURL == "" {
+		return map[string]string{"status": "failed", "message": "Jira base URL is required", "code": "jira_base_url_missing", "source": runtimeConfig.Source}
+	}
+	if runtimeConfig.Email == "" {
+		return map[string]string{"status": "failed", "message": "Jira email is required", "code": "jira_email_missing", "source": runtimeConfig.Source}
+	}
+	if runtimeConfig.APIToken == "" {
+		tokenEnv := jiraTokenEnvName(runtimeConfig)
+		return map[string]string{
+			"status":  "failed",
+			"message": "Jira token env " + tokenEnv + " is not configured in process env or user/.env",
+			"code":    "jira_token_env_missing",
+			"source":  runtimeConfig.Source,
+		}
+	}
+	return map[string]string{"status": "ok", "message": "real Jira config resolved", "source": runtimeConfig.Source}
 }
 
 func checkInstallDir(installDir string) map[string]string {

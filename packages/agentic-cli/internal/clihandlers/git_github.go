@@ -57,21 +57,21 @@ func runInspectWorkspace(args []string, stdout io.Writer) int {
 	}))
 }
 
-func runSwitchBranch(args []string, stdout io.Writer) int {
+func runBranchAlign(args []string, stdout io.Writer) int {
 	workspaceName := workspaceNameFromArgsOrAgentConfig(args, "tapdata")
 	if workspaceName != "tapdata" {
-		return writeJSON(stdout, output.FailureWithContext("switch_branch", output.FailureContext{
+		return writeJSON(stdout, output.FailureWithContext("branch_align", output.FailureContext{
 			Code:                "workspace_not_supported",
-			Message:             "switch-branch 当前只支持 tapdata 工作区",
+			Message:             "branch-align 当前只支持 tapdata 工作区",
 			RequiredHumanAction: "请确认目标工作区，或先为该工作区补充项目级分支规范",
 			TaskType:            "branch_switch",
 			CurrentStage:        "branch_switch_gate",
 			NextAction:          "ask_owner",
 		}))
 	}
-	mode := positionalArg(args, "switch-branch")
+	mode := positionalArg(args, "branch-align")
 	if mode == "" {
-		return writeJSON(stdout, output.FailureWithContext("switch_branch", output.FailureContext{
+		return writeJSON(stdout, output.FailureWithContext("branch_align", output.FailureContext{
 			Code:                "missing_mode",
 			Message:             "缺少分支对齐动作",
 			RequiredHumanAction: "请按 agentic-cli tapdata branch-align plan develop 重试，或使用 list/status/apply",
@@ -83,7 +83,7 @@ func runSwitchBranch(args []string, stdout io.Writer) int {
 	workspaceProfile := takeoverProfile(workspaceName)
 	workRoot, err := tapdataWorkRootForOperation(args, workspaceProfile)
 	if err != nil {
-		return writeJSON(stdout, output.FailureWithContext("switch_branch", output.FailureContext{
+		return writeJSON(stdout, output.FailureWithContext("branch_align", output.FailureContext{
 			Code:                "work_root_not_found",
 			Message:             err.Error(),
 			RequiredHumanAction: "请提供 --work-root，设置 TAPDATA_WORK_ROOT，或维护 tapdata profile 的 local.source_root",
@@ -109,7 +109,7 @@ func runSwitchBranch(args []string, stdout io.Writer) int {
 		if err != nil {
 			return writeJSON(stdout, branchAlignmentFailure("list", err))
 		}
-		return writeJSON(stdout, output.Success("switch_branch", map[string]any{
+		return writeJSON(stdout, output.Success("branch_align", map[string]any{
 			"workspace":     workspaceName,
 			"mode":          "list",
 			"work_root":     workRoot,
@@ -122,7 +122,7 @@ func runSwitchBranch(args []string, stdout io.Writer) int {
 		}))
 	case "status":
 		rows := gitops.TapdataAlignmentStatus(ctx, workRoot)
-		return writeJSON(stdout, output.Success("switch_branch", map[string]any{
+		return writeJSON(stdout, output.Success("branch_align", map[string]any{
 			"workspace":     workspaceName,
 			"mode":          "status",
 			"work_root":     workRoot,
@@ -134,7 +134,7 @@ func runSwitchBranch(args []string, stdout io.Writer) int {
 	case "plan", "apply":
 		branchSpec := positionalArg(args[1:], mode)
 		if branchSpec == "" {
-			return writeJSON(stdout, output.FailureWithContext("switch_branch", output.FailureContext{
+			return writeJSON(stdout, output.FailureWithContext("branch_align", output.FailureContext{
 				Code:                "missing_branch_spec",
 				Message:             "缺少 TapData 主仓分支或分支组",
 				RequiredHumanAction: "请提供 develop、main、release-vX.Y.Z，或 <tapdata>,<enterprise>,<web> 格式",
@@ -162,7 +162,7 @@ func runSwitchBranch(args []string, stdout io.Writer) int {
 			if plan.Blocked {
 				nextAction = "resolve_branch_alignment"
 			}
-			return writeJSON(stdout, output.Success("switch_branch", map[string]any{
+			return writeJSON(stdout, output.Success("branch_align", map[string]any{
 				"workspace":     workspaceName,
 				"mode":          "plan",
 				"work_root":     workRoot,
@@ -179,7 +179,7 @@ func runSwitchBranch(args []string, stdout io.Writer) int {
 			}))
 		}
 		if plan.Blocked {
-			return writeJSON(stdout, output.FailureWithContext("switch_branch", output.FailureContext{
+			return writeJSON(stdout, output.FailureWithContext("branch_align", output.FailureContext{
 				Code:                "branch_alignment_blocked",
 				Message:             "分支对齐计划存在 UNRESOLVED 或缺失仓库，未执行切换",
 				RequiredHumanAction: "请补齐缺失仓库或在分支组中显式指定 enterprise/web 分支后重试",
@@ -192,7 +192,7 @@ func runSwitchBranch(args []string, stdout io.Writer) int {
 		if err != nil {
 			return writeJSON(stdout, branchAlignmentFailure(mode, err))
 		}
-		return writeJSON(stdout, output.Success("switch_branch", map[string]any{
+		return writeJSON(stdout, output.Success("branch_align", map[string]any{
 			"workspace":      workspaceName,
 			"mode":           "apply",
 			"work_root":      workRoot,
@@ -205,7 +205,7 @@ func runSwitchBranch(args []string, stdout io.Writer) int {
 			"next_action":    "continue_development",
 		}))
 	default:
-		return writeJSON(stdout, output.FailureWithContext("switch_branch", output.FailureContext{
+		return writeJSON(stdout, output.FailureWithContext("branch_align", output.FailureContext{
 			Code:                "unsupported_mode",
 			Message:             "不支持的分支对齐动作: " + mode,
 			RequiredHumanAction: "请使用 list、status、plan 或 apply",
@@ -348,7 +348,7 @@ func branchAlignmentFailure(mode string, err error) map[string]any {
 		context.Code = "git_branch_alignment_failed"
 		context.RequiredHumanAction = "请检查 work root 下 TapData 多仓是否存在、Git 是否可用，以及远程分支是否已 fetch"
 	}
-	return output.FailureWithContext("switch_branch", context)
+	return output.FailureWithContext("branch_align", context)
 }
 
 func tapdataWorkRootForOperation(args []string, workspaceProfile profile.Profile) (string, error) {

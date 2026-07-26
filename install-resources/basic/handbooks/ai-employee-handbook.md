@@ -73,7 +73,7 @@ AI 员工应把自然语言转换为 AgenticOps 操作，而不是直接操作 J
 
 列出任务必须读取真实 Jira。未完成真实 Jira adapter 配置时，`agentic-cli list-tasks` 应阻断并要求补齐连接配置，不得返回示例任务或本地 fake 任务；`AGENTIC_OPS_JIRA_ADAPTER=fake` 只允许用于 AgenticOps 本地自动化回归。
 
-真实 Jira adapter 的连接配置属于运行时本地配置，不属于项目 profile。研发负责人初始化工作空间时应优先通过 `agentic-cli workspace init --project <project> --interactive` 进入交互式引导；非终端、脚本或 CI 场景再使用 `--jira-user <email> --jira-base-url <url> --jira-token-env <env>` 参数形式。AIAgent 应按以下顺序查找配置：显式环境变量、当前项目 AI 工作空间 `.agentic-ops/jira.local.yaml`、`$AGENTIC_OPS_HOME/user/projects/<workspace>/jira.local.yaml`、`$AGENTIC_OPS_HOME/user/jira.local.yaml`。配置文件推荐使用 `api_token_env` 引用本机环境变量，不得把 token 输出到日志、事件或提交内容。
+项目 profile 可以提供默认 Jira base URL；真实 Jira adapter 的本地连接配置仍属于运行时配置，不直接依赖共享 profile。Jira Cloud `base_url` 必须使用站点根地址，例如 `https://tapdata.atlassian.net`，不得写成带 `/jira` 的地址。研发负责人初始化工作空间时应优先通过 `agentic-cli workspace init --project <project> --interactive` 进入交互式引导；非终端、脚本或 CI 场景再使用 `--jira-user <email> --jira-token-env <env>` 参数形式，只有项目默认 URL 不适用时才补充 `--jira-base-url <url>`。AIAgent 应通过 `agentic-cli conf <key>` 读取配置，不直接解析 YAML 或 `.env`。应用配置集中在 `.agentic-ops/config.local.yaml` 或 `$AGENTIC_OPS_HOME/user/config.local.yaml`，按项目和模块分段；token 值必须放在当前进程环境变量、`.agentic-ops/.env` 或 `$AGENTIC_OPS_HOME/user/.env` 中，不得写入 YAML、日志、事件或提交内容。缺少 Jira token 或 `jira_token_env_has_value=false` 时，必须引导研发负责人到 `https://id.atlassian.com/manage-profile/security/api-tokens` 创建 API token，并在输出的 `jira_env_file` 中设置 `jira_token_env` 对应的值。
 
 ## 5. 操作使用方式
 
@@ -102,7 +102,7 @@ agentic-cli feedback report --workspace tapstate --date <yyyy-mm-dd>
 
 AI 员工不应直接依赖 Jira 字段名、Jira 状态名或 Jira `transition` 名称做判断。
 
-`agentic-cli tapdata branch-align` 是 Tapdata 项目级研发基础工具。命令支持 `list`、`status`、`plan`、`apply`，其中 `plan` 只读，`apply` 只在分支对齐计划无 blocked 行时切换本地多仓分支；命令不推送、不写 Jira、不写 GitHub、不创建拉取请求。旧 `switch-branch` 入口只作为 legacy alias 保留。
+`agentic-cli tapdata branch-align` 是 Tapdata 项目级研发基础工具。命令支持 `list`、`status`、`plan`、`apply`，其中 `plan` 只读，`apply` 只在分支对齐计划无 blocked 行时切换本地多仓分支；命令不推送、不写 Jira、不写 GitHub、不创建拉取请求。
 
 Jira 字段名、状态名、`transition` 名称和 `issue_key` 可以按原始值引用；面向研发负责人的 Jira 文本和 AIAgent 自然语言交互必须使用中文。
 

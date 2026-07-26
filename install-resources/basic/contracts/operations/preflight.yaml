@@ -34,6 +34,24 @@ output:
     type: string
   checks:
     type: object
+  jira_token_env:
+    type: string
+    required: false
+  jira_env_file:
+    type: string
+    required: false
+  jira_token_env_has_value:
+    type: boolean
+    required: false
+  jira_token_help_url:
+    type: string
+    required: false
+  jira_token_setup:
+    type: string
+    required: false
+  jira_config_source:
+    type: string
+    required: false
   next_action:
     type: string
 failure:

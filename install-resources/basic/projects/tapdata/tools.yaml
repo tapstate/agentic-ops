@@ -15,9 +15,7 @@ tools:
       apply: local_git_branch_switch
     human_gate:
       apply: false
-    legacy_alias:
-      - agentic-cli switch-branch
-    contract: switch_branch
+    contract: branch_align
     examples:
       - agentic-cli tapdata branch-align list TAP-12289
       - agentic-cli tapdata branch-align status

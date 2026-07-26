@@ -12,13 +12,13 @@ func Register(registry *cmdkit.Registry) {
 		Usage:    "agentic-cli tapdata branch-align <list|status|plan|apply> [args]",
 		Examples: []string{"agentic-cli tapdata branch-align list TAP-12289", "agentic-cli tapdata branch-align status", "agentic-cli tapdata branch-align plan develop", "agentic-cli tapdata branch-align apply develop"},
 		Risk:     "apply 会切换本地多仓分支；plan/list/status 只读",
-		Contract: "switch_branch",
+		Contract: "branch_align",
 		Run: func(ctx cmdkit.Context, args []string) int {
-			transformed := append([]string{"switch-branch"}, args[2:]...)
+			transformed := append([]string{"branch-align"}, args[2:]...)
 			if !hasWorkspaceFlag(transformed) {
 				transformed = append(transformed, "--workspace", "tapdata")
 			}
-			return clihandlers.RunSwitchBranch(transformed, ctx.Stdout)
+			return clihandlers.RunBranchAlign(transformed, ctx.Stdout)
 		},
 	})
 }

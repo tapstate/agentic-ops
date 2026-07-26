@@ -83,6 +83,36 @@ func TestPreflightReportsCurrentDirectoryMismatch(t *testing.T) {
 	assertJSONField(t, stdout.String(), "next_action", "fix_environment")
 }
 
+func TestPreflightReportsMissingJiraTokenEnv(t *testing.T) {
+	withCommandAvailabilityForTest(t, func(name string) bool {
+		return true
+	})
+	root := t.TempDir()
+	installDir := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", installDir)
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatalf("MkdirAll source root error = %v", err)
+	}
+	t.Chdir(filepath.Join(root, "src"))
+	writeCLITestFile(t, filepath.Join(installDir, "user", "config.local.yaml"), "projects:\n  tapstate:\n    jira:\n      adapter: real\n      base_url: https://jira.example.test\n      email: lead@example.com\n      api_token_env: PERSONAL_JIRA_TOKEN\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"preflight", "--workspace", "tapstate"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "status", "failed")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "jira_config", "status"}, "failed")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "jira_config", "message"}, "Jira token env PERSONAL_JIRA_TOKEN is not configured in process env or user/.env")
+	assertJSONField(t, stdout.String(), "jira_token_env", "PERSONAL_JIRA_TOKEN")
+	assertJSONField(t, stdout.String(), "jira_token_env_has_value", false)
+	assertJSONField(t, stdout.String(), "jira_env_file", filepath.Join(installDir, "user", ".env"))
+	assertJSONField(t, stdout.String(), "jira_token_help_url", "https://id.atlassian.com/manage-profile/security/api-tokens")
+	assertJSONField(t, stdout.String(), "next_action", "set_jira_token_env")
+}
+
 func TestDoctorOutputsLocalDiagnosticChecks(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)

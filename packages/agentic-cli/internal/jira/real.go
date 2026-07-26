@@ -41,7 +41,7 @@ func NewRealClient(config RealClientConfig) (*RealClient, error) {
 	if config.APIToken == "" {
 		return nil, fmt.Errorf("jira API token is required")
 	}
-	baseURL, err := url.Parse(config.BaseURL)
+	baseURL, err := url.Parse(NormalizeBaseURL(config.BaseURL))
 	if err != nil {
 		return nil, fmt.Errorf("parse jira base URL: %w", err)
 	}
@@ -56,6 +56,21 @@ func NewRealClient(config RealClientConfig) (*RealClient, error) {
 		profile:    config.Profile,
 		httpClient: httpClient,
 	}, nil
+}
+
+func NormalizeBaseURL(value string) string {
+	value = strings.TrimSpace(value)
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return strings.TrimRight(value, "/")
+	}
+	normalizedPath := strings.TrimRight(parsed.Path, "/")
+	if normalizedPath == "/jira" {
+		parsed.Path = ""
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return strings.TrimRight(parsed.String(), "/")
 }
 
 func (client *RealClient) CurrentUser(ctx context.Context) (string, error) {

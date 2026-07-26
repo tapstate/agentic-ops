@@ -5,14 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/output"
-	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
-	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/workspace"
-	"gopkg.in/yaml.v3"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/output"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/runtimeconfig"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/workspace"
+
+	"gopkg.in/yaml.v3"
 )
 
 func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, interactiveAvailable bool) int {
@@ -62,7 +66,7 @@ func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr i
 			}
 		}
 		if jiraTokenEnv == "" && (jiraBaseURL != "" || defaults.APITokenEnv != "") {
-			jiraTokenEnv, err = prompter.promptOptional("Jira token env", firstNonEmpty(defaults.APITokenEnv, "AGENTIC_OPS_JIRA_API_TOKEN"))
+			jiraTokenEnv, err = prompter.promptOptional("Jira token env", defaults.APITokenEnv)
 			if err != nil {
 				return writeJSON(stdout, output.Failure("workspace_init", "interactive_input_failed", err.Error(), "请重新运行交互式初始化"))
 			}
@@ -112,7 +116,7 @@ func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr i
 	if err != nil {
 		return writeJSON(stdout, output.Failure("workspace_init", "jira_config_failed", err.Error(), "请检查个人配置目录权限"))
 	}
-	return writeJSON(stdout, output.Success("workspace_init", map[string]any{
+	payload := output.Success("workspace_init", map[string]any{
 		"workspace":               info.Name,
 		"workspace_root":          info.Root,
 		"source_root":             materializedSourceRoot,
@@ -128,9 +132,12 @@ func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr i
 		"jira_config_status":      jiraConfig.Status,
 		"jira_config_path":        jiraConfig.Path,
 		"jira_token_env":          jiraConfig.TokenEnv,
+		"jira_env_file":           jiraConfig.EnvFile,
 		"jira_config_next_action": jiraConfig.NextAction,
 		"next_action":             "init_agent_capability",
-	}))
+	})
+	addJiraTokenGuidance(payload, jiraConfig.Status, jiraConfig.TokenEnv, jiraConfig.EnvFile)
+	return writeJSON(stdout, payload)
 }
 
 type workspaceInitPrompter struct {
@@ -174,20 +181,25 @@ func (prompter workspaceInitPrompter) promptOptional(label string, fallback stri
 }
 
 func workspaceJiraPromptDefaults(workspaceName string) jiraRuntimeConfig {
+	jiraSpec := jiraRuntimeModuleSpec()
 	envDefaults := jiraRuntimeConfig{
 		BaseURL:     os.Getenv("AGENTIC_OPS_JIRA_BASE_URL"),
 		Email:       os.Getenv("AGENTIC_OPS_JIRA_EMAIL"),
-		APITokenEnv: "AGENTIC_OPS_JIRA_API_TOKEN",
+		APITokenEnv: jiraFieldDefault(jiraSpec, "api_token_env"),
 	}
+	projectDefaultBaseURL := projectJiraDefaultBaseURL(workspaceName)
 	config, err := resolveJiraRuntimeConfig(workspaceName)
 	if err != nil || config.Adapter != "real" {
 		if envDefaults.BaseURL != "" || envDefaults.Email != "" {
+			if envDefaults.BaseURL == "" {
+				envDefaults.BaseURL = projectDefaultBaseURL
+			}
 			return envDefaults
 		}
-		return jiraRuntimeConfig{}
+		return jiraRuntimeConfig{BaseURL: projectDefaultBaseURL}
 	}
 	if config.BaseURL == "" {
-		config.BaseURL = envDefaults.BaseURL
+		config.BaseURL = firstNonEmpty(envDefaults.BaseURL, projectDefaultBaseURL)
 	}
 	if config.Email == "" {
 		config.Email = envDefaults.Email
@@ -211,33 +223,32 @@ type workspaceJiraConfigGuide struct {
 	Status     string
 	Path       string
 	TokenEnv   string
+	EnvFile    string
 	NextAction string
-}
-
-type jiraLocalConfigFile struct {
-	Adapter     string `yaml:"adapter"`
-	BaseURL     string `yaml:"base_url"`
-	Email       string `yaml:"email"`
-	APITokenEnv string `yaml:"api_token_env"`
 }
 
 func prepareWorkspaceJiraConfig(info workspace.Info, jiraUser string, jiraBaseURL string, jiraTokenEnv string) (workspaceJiraConfigGuide, error) {
 	if strings.TrimSpace(jiraTokenEnv) == "" {
-		jiraTokenEnv = "AGENTIC_OPS_JIRA_API_TOKEN"
+		jiraTokenEnv = jiraFieldDefault(jiraRuntimeModuleSpec(), "api_token_env")
 	}
-	configPath := filepath.Join(agenticOpsInstallDir(), "user", "projects", info.Name, "jira.local.yaml")
-	jiraBaseURL = strings.TrimSpace(jiraBaseURL)
+	scope := runtimeconfig.NewScope(agenticOpsInstallDir(), info.Root, info.Name)
+	configPath := scope.UserConfigPath()
+	envFile := scope.UserEnvPath()
+	jiraBaseURL = jira.NormalizeBaseURL(jiraBaseURL)
 	if jiraBaseURL != "" {
-		if err := writePersonalProjectJiraConfig(configPath, jiraUser, jiraBaseURL, jiraTokenEnv); err != nil {
+		if err := writePersonalProjectJiraConfig(scope, jiraUser, jiraBaseURL, jiraTokenEnv); err != nil {
+			return workspaceJiraConfigGuide{}, err
+		}
+		if err := scope.EnsureUserEnvPlaceholder(jiraTokenEnv, "Create a Jira API token: "+jiraTokenHelpURL); err != nil {
 			return workspaceJiraConfigGuide{}, err
 		}
 		status := "needs_token_env"
 		nextAction := "set_jira_token_env"
-		if os.Getenv(jiraTokenEnv) != "" {
+		if jiraTokenConfiguredInFiles(jiraTokenEnv, scope.EnvPaths()) {
 			status = "configured"
 			nextAction = "agent_init"
 		}
-		return workspaceJiraConfigGuide{Status: status, Path: configPath, TokenEnv: jiraTokenEnv, NextAction: nextAction}, nil
+		return workspaceJiraConfigGuide{Status: status, Path: configPath, TokenEnv: jiraTokenEnv, EnvFile: envFile, NextAction: nextAction}, nil
 	}
 	runtimeConfig, err := resolveJiraRuntimeConfig(info.Name)
 	if err != nil {
@@ -250,30 +261,51 @@ func prepareWorkspaceJiraConfig(info workspace.Info, jiraUser string, jiraBaseUR
 			status = "needs_token_env"
 			nextAction = "set_jira_token_env"
 		}
-		return workspaceJiraConfigGuide{Status: status, Path: runtimeConfig.Source, TokenEnv: runtimeConfig.APITokenEnv, NextAction: nextAction}, nil
+		return workspaceJiraConfigGuide{Status: status, Path: runtimeConfig.Source, TokenEnv: runtimeConfig.APITokenEnv, EnvFile: runtimeConfig.EnvFile, NextAction: nextAction}, nil
+	}
+	if defaultBaseURL := projectJiraDefaultBaseURL(info.Name); defaultBaseURL != "" {
+		if err := writePersonalProjectJiraConfig(scope, jiraUser, defaultBaseURL, jiraTokenEnv); err != nil {
+			return workspaceJiraConfigGuide{}, err
+		}
+		if err := scope.EnsureUserEnvPlaceholder(jiraTokenEnv, "Create a Jira API token: "+jiraTokenHelpURL); err != nil {
+			return workspaceJiraConfigGuide{}, err
+		}
+		status := "needs_token_env"
+		nextAction := "set_jira_token_env"
+		if jiraTokenConfiguredInFiles(jiraTokenEnv, scope.EnvPaths()) {
+			status = "configured"
+			nextAction = "agent_init"
+		}
+		return workspaceJiraConfigGuide{Status: status, Path: configPath, TokenEnv: jiraTokenEnv, EnvFile: envFile, NextAction: nextAction}, nil
 	}
 	return workspaceJiraConfigGuide{
 		Status:     "needs_configuration",
 		Path:       configPath,
 		TokenEnv:   jiraTokenEnv,
+		EnvFile:    envFile,
 		NextAction: "rerun_workspace_init_with_--jira-base-url",
 	}, nil
 }
 
-func writePersonalProjectJiraConfig(path string, jiraUser string, jiraBaseURL string, jiraTokenEnv string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	data, err := yaml.Marshal(jiraLocalConfigFile{
+func writePersonalProjectJiraConfig(scope runtimeconfig.Scope, jiraUser string, jiraBaseURL string, jiraTokenEnv string) error {
+	return runtimeconfig.WriteProjectModule(scope.UserConfigPath(), scope.Project, "jira", jiraRuntimeConfig{
 		Adapter:     "real",
-		BaseURL:     jiraBaseURL,
+		BaseURL:     jira.NormalizeBaseURL(jiraBaseURL),
 		Email:       jiraUser,
 		APITokenEnv: jiraTokenEnv,
 	})
+}
+
+func projectJiraDefaultBaseURL(workspaceName string) string {
+	sourcePath, err := repoProjectProfilePath(workspaceName)
 	if err != nil {
-		return err
+		return ""
 	}
-	return os.WriteFile(path, data, 0o600)
+	loadedProfile, err := profile.LoadFile(sourcePath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(loadedProfile.Jira.BaseURL)
 }
 
 func materializeWorkspaceProfile(info workspace.Info, jiraUser string, jiraProjectOverride string, sourceRootOverride string) (string, string, string, string, error) {
@@ -401,7 +433,7 @@ func writeAgentInstructions(info workspace.Info, jiraUser string, jiraProject st
 		"2. Run `agentic-cli preflight` before taking over Jira tasks.",
 		"3. Read `$HOME/.agentic-ops/agent-guides.md` and `$HOME/.agentic-ops/install-resources/basic/ai-assets/README.md` before executing tasks.",
 		"4. Use `agentic-cli list-tasks` to find available Jira tasks from the real Jira adapter; do not use sample or fake Jira tasks for business work.",
-		"5. If Jira adapter config is missing, ask the development lead to provide runtime local config through environment variables, `.agentic-ops/jira.local.yaml`, `$AGENTIC_OPS_HOME/user/projects/<workspace>/jira.local.yaml`, or `$AGENTIC_OPS_HOME/user/jira.local.yaml`; never use fake Jira for business work.",
+		"5. If Jira adapter config is missing, ask the development lead to provide runtime local config through process environment variables, `.agentic-ops/config.local.yaml`, or `$AGENTIC_OPS_HOME/user/config.local.yaml`; secrets belong in `.agentic-ops/.env` or `$AGENTIC_OPS_HOME/user/.env`; never use fake Jira for business work.",
 		"6. Use `agentic-cli task run <issue-key>` to take over a task and start the matched capability.",
 		"7. Use `agentic-cli takeover-task <issue-key>` only when you need the lower-level takeover operation.",
 		"8. Use `agentic-cli write-evidence --run-id <run-id>` and `agentic-cli release-agent --run-id <run-id> --issue-key <issue-key> --completion-evidence <file>` to finish or hand off work.",
@@ -539,6 +571,7 @@ func runAgentInit(args []string, stdout io.Writer) int {
 			"policy_validate",
 			"policy_update",
 			"policy_rollback",
+			"conf",
 			"workspace_init",
 			"list_tasks",
 			"task_run",
@@ -547,7 +580,7 @@ func runAgentInit(args []string, stdout io.Writer) int {
 			"write_evidence",
 			"release_agent",
 			"inspect_workspace",
-			"switch_branch",
+			"branch_align",
 			"tapdata branch-align",
 			"prepare_pr",
 			"read_pr_comments",
