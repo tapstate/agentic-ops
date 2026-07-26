@@ -3,12 +3,15 @@ package clihandlers
 import (
 	"context"
 	"fmt"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/config"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/feedback"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 type completionEvidenceCheck struct {
@@ -75,24 +78,121 @@ func resolveJiraTransitionID(ctx context.Context, client jira.Client, issueKey s
 type jiraClientSelection struct {
 	Client jira.Client
 	Mode   string
+	Source string
 }
 
 var selectJiraClient = defaultJiraClient
 
 func defaultJiraClient(workspaceName string, workspaceProfile profile.Profile) (jiraClientSelection, error) {
-	if os.Getenv("AGENTIC_OPS_JIRA_ADAPTER") == "real" {
+	runtimeConfig, err := resolveJiraRuntimeConfig(workspaceName)
+	if err != nil {
+		return jiraClientSelection{}, err
+	}
+	if runtimeConfig.Adapter == "real" {
 		client, err := jira.NewRealClient(jira.RealClientConfig{
-			BaseURL:  os.Getenv("AGENTIC_OPS_JIRA_BASE_URL"),
-			Email:    os.Getenv("AGENTIC_OPS_JIRA_EMAIL"),
-			APIToken: os.Getenv("AGENTIC_OPS_JIRA_API_TOKEN"),
+			BaseURL:  runtimeConfig.BaseURL,
+			Email:    runtimeConfig.Email,
+			APIToken: runtimeConfig.APIToken,
 			Profile:  workspaceProfile,
 		})
 		if err != nil {
 			return jiraClientSelection{}, err
 		}
-		return jiraClientSelection{Client: client, Mode: "real"}, nil
+		return jiraClientSelection{Client: client, Mode: "real", Source: runtimeConfig.Source}, nil
 	}
-	return jiraClientSelection{Client: jira.FakeClient{}, Mode: "fake"}, nil
+	return jiraClientSelection{Client: jira.FakeClient{}, Mode: "fake", Source: runtimeConfig.Source}, nil
+}
+
+type jiraRuntimeConfig struct {
+	Adapter     string `yaml:"adapter"`
+	BaseURL     string `yaml:"base_url"`
+	Email       string `yaml:"email"`
+	APIToken    string `yaml:"api_token"`
+	APITokenEnv string `yaml:"api_token_env"`
+	Source      string `yaml:"-"`
+}
+
+func resolveJiraRuntimeConfig(workspaceName string) (jiraRuntimeConfig, error) {
+	if adapter := strings.TrimSpace(os.Getenv("AGENTIC_OPS_JIRA_ADAPTER")); adapter != "" {
+		return jiraRuntimeConfig{
+			Adapter:  strings.ToLower(adapter),
+			BaseURL:  os.Getenv("AGENTIC_OPS_JIRA_BASE_URL"),
+			Email:    os.Getenv("AGENTIC_OPS_JIRA_EMAIL"),
+			APIToken: os.Getenv("AGENTIC_OPS_JIRA_API_TOKEN"),
+			Source:   "environment",
+		}, nil
+	}
+	for _, path := range jiraRuntimeConfigPaths(workspaceName) {
+		config, used, err := loadJiraRuntimeConfig(path)
+		if err != nil {
+			return jiraRuntimeConfig{}, err
+		}
+		if used {
+			return config, nil
+		}
+	}
+	return jiraRuntimeConfig{Adapter: "fake", Source: "default"}, nil
+}
+
+func loadJiraRuntimeConfig(path string) (jiraRuntimeConfig, bool, error) {
+	stat, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return jiraRuntimeConfig{}, false, nil
+		}
+		return jiraRuntimeConfig{}, false, err
+	}
+	if stat.IsDir() {
+		return jiraRuntimeConfig{}, false, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return jiraRuntimeConfig{}, false, err
+	}
+	var config jiraRuntimeConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return jiraRuntimeConfig{}, false, fmt.Errorf("load jira config %s: %w", path, err)
+	}
+	config.Adapter = strings.ToLower(strings.TrimSpace(config.Adapter))
+	config.BaseURL = strings.TrimSpace(config.BaseURL)
+	config.Email = strings.TrimSpace(config.Email)
+	config.APIToken = strings.TrimSpace(config.APIToken)
+	config.APITokenEnv = strings.TrimSpace(config.APITokenEnv)
+	if config.Adapter == "" && config.BaseURL == "" && config.Email == "" && config.APIToken == "" && config.APITokenEnv == "" {
+		return jiraRuntimeConfig{}, false, nil
+	}
+	if config.APIToken == "" && config.APITokenEnv != "" {
+		config.APIToken = os.Getenv(config.APITokenEnv)
+	}
+	if config.Adapter == "" && (config.BaseURL != "" || config.Email != "" || config.APIToken != "" || config.APITokenEnv != "") {
+		config.Adapter = "real"
+	}
+	config.Source = path
+	return config, true, nil
+}
+
+func jiraRuntimeConfigPaths(workspaceName string) []string {
+	paths := []string{}
+	if root, err := workspaceRoot(); err == nil && root != "" {
+		paths = append(paths, filepath.Join(root, ".agentic-ops", "jira.local.yaml"))
+	}
+	installDir := agenticOpsInstallDir()
+	if workspaceName != "" {
+		paths = append(paths, filepath.Join(installDir, "user", "projects", workspaceName, "jira.local.yaml"))
+	}
+	paths = append(paths, filepath.Join(installDir, "user", "jira.local.yaml"))
+	return paths
+}
+
+func agenticOpsInstallDir() string {
+	if installDir := os.Getenv("AGENTIC_OPS_HOME"); installDir != "" {
+		return installDir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".agentic-ops"
+	}
+	return config.DefaultInstallDir(home)
 }
 
 func jiraTakeoverFields(workspaceProfile profile.Profile, currentAgentID string, takeoverAt string) map[string]any {

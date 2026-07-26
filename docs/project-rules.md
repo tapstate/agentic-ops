@@ -177,6 +177,7 @@ AgenticOps 默认安装到：
 
 - 已安装的 `bin/agentic-cli` 和 `.local/` 安装元数据。
 - 全局配置。
+- 本机个人配置目录 `user/`；该目录必须保持 local-only，不得提交。
 - 通用 AI 员工手册。
 - 通用 skills。
 - 通用 templates。
@@ -189,7 +190,7 @@ AgenticOps 默认安装到：
 - 业务仓库代码变更。
 - 未脱敏的原始 Jira 内容。
 - 未脱敏的测试日志。
-- secrets、tokens、private keys。
+- 提交资产中的 secrets、tokens、private keys；本机个人配置如需使用凭据，优先引用环境变量或系统凭据，不得输出到日志、事件或提交内容。
 
 安装入口约定为：
 

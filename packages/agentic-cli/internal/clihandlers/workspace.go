@@ -1,6 +1,7 @@
 package clihandlers
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,7 +15,11 @@ import (
 	"strings"
 )
 
-func runWorkspaceInit(args []string, stdout io.Writer) int {
+func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, interactiveAvailable bool) int {
+	interactive := hasFlag(args, "--interactive")
+	if interactive && !interactiveAvailable {
+		return writeJSON(stdout, output.Failure("workspace_init", "interactive_terminal_required", "交互式初始化需要终端输入", "请在终端中运行，或改用完整参数形式"))
+	}
 	projectName := readFlag(args, "--project", "")
 	workspaceName := readFlag(args, "--workspace", "")
 	if projectName != "" && workspaceName != "" && projectName != workspaceName {
@@ -22,6 +27,14 @@ func runWorkspaceInit(args []string, stdout io.Writer) int {
 	}
 	if projectName == "" {
 		projectName = workspaceName
+	}
+	prompter := workspaceInitPrompter{reader: bufio.NewReader(stdinOrEmpty(stdin)), writer: stderr}
+	if interactive && projectName == "" {
+		var err error
+		projectName, err = prompter.promptRequired("Project", projectName)
+		if err != nil {
+			return writeJSON(stdout, output.Failure("workspace_init", "interactive_input_required", err.Error(), "请补齐交互式输入，或改用完整参数形式"))
+		}
 	}
 	if projectName == "" {
 		return writeJSON(stdout, output.Failure("workspace_init", "missing_project", "缺少项目配置项", "请提供 --project"))
@@ -31,6 +44,30 @@ func runWorkspaceInit(args []string, stdout io.Writer) int {
 	agentType := readFlag(args, "--agent-type", "codex")
 	confirmExistingConfig := hasFlag(args, "--confirm-existing-config")
 	sourceRoot := readFlag(args, "--source-root", "")
+	jiraBaseURL := readFlag(args, "--jira-base-url", "")
+	jiraTokenEnv := readFlag(args, "--jira-token-env", "")
+	if interactive {
+		defaults := workspaceJiraPromptDefaults(projectName)
+		var err error
+		if jiraUser == "" {
+			jiraUser, err = prompter.promptRequired("Jira user", defaults.Email)
+			if err != nil {
+				return writeJSON(stdout, output.Failure("workspace_init", "interactive_input_required", err.Error(), "请补齐交互式输入，或改用完整参数形式"))
+			}
+		}
+		if jiraBaseURL == "" {
+			jiraBaseURL, err = prompter.promptOptional("Jira base URL", defaults.BaseURL)
+			if err != nil {
+				return writeJSON(stdout, output.Failure("workspace_init", "interactive_input_failed", err.Error(), "请重新运行交互式初始化"))
+			}
+		}
+		if jiraTokenEnv == "" && (jiraBaseURL != "" || defaults.APITokenEnv != "") {
+			jiraTokenEnv, err = prompter.promptOptional("Jira token env", firstNonEmpty(defaults.APITokenEnv, "AGENTIC_OPS_JIRA_API_TOKEN"))
+			if err != nil {
+				return writeJSON(stdout, output.Failure("workspace_init", "interactive_input_failed", err.Error(), "请重新运行交互式初始化"))
+			}
+		}
+	}
 	if jiraUser == "" {
 		return writeJSON(stdout, output.Failure("workspace_init", "missing_jira_user", "缺少 Jira 用户", "请提供 --jira-user"))
 	}
@@ -71,21 +108,172 @@ func runWorkspaceInit(args []string, stdout io.Writer) int {
 	if err != nil {
 		return writeJSON(stdout, output.Failure("workspace_init", "agent_instructions_failed", err.Error(), "请检查工作空间目录权限"))
 	}
+	jiraConfig, err := prepareWorkspaceJiraConfig(info, jiraUser, jiraBaseURL, jiraTokenEnv)
+	if err != nil {
+		return writeJSON(stdout, output.Failure("workspace_init", "jira_config_failed", err.Error(), "请检查个人配置目录权限"))
+	}
 	return writeJSON(stdout, output.Success("workspace_init", map[string]any{
-		"workspace":          info.Name,
-		"workspace_root":     info.Root,
-		"source_root":        materializedSourceRoot,
-		"jira_user":          jiraUser,
-		"jira_project":       jiraProject,
-		"profile_ref":        "$HOME/.agentic-ops/install-resources/basic/projects/" + info.Name + "/profile.yaml",
-		"profile_overlay":    profileOverlayPath,
-		"agent_config":       agentConfigPath,
-		"agent_instructions": agentInstructionsPath,
-		"runs_dir":           info.RunsDir,
-		"run_logs_dir":       info.RunLogsDir,
-		"feedback_dir":       info.FeedbackDir,
-		"next_action":        "init_agent_capability",
+		"workspace":               info.Name,
+		"workspace_root":          info.Root,
+		"source_root":             materializedSourceRoot,
+		"jira_user":               jiraUser,
+		"jira_project":            jiraProject,
+		"profile_ref":             "$HOME/.agentic-ops/install-resources/basic/projects/" + info.Name + "/profile.yaml",
+		"profile_overlay":         profileOverlayPath,
+		"agent_config":            agentConfigPath,
+		"agent_instructions":      agentInstructionsPath,
+		"runs_dir":                info.RunsDir,
+		"run_logs_dir":            info.RunLogsDir,
+		"feedback_dir":            info.FeedbackDir,
+		"jira_config_status":      jiraConfig.Status,
+		"jira_config_path":        jiraConfig.Path,
+		"jira_token_env":          jiraConfig.TokenEnv,
+		"jira_config_next_action": jiraConfig.NextAction,
+		"next_action":             "init_agent_capability",
 	}))
+}
+
+type workspaceInitPrompter struct {
+	reader *bufio.Reader
+	writer io.Writer
+}
+
+func stdinOrEmpty(stdin io.Reader) io.Reader {
+	if stdin != nil {
+		return stdin
+	}
+	return strings.NewReader("")
+}
+
+func (prompter workspaceInitPrompter) promptRequired(label string, fallback string) (string, error) {
+	value, err := prompter.promptOptional(label, fallback)
+	if err != nil {
+		return "", err
+	}
+	if value == "" {
+		return "", fmt.Errorf("%s is required", label)
+	}
+	return value, nil
+}
+
+func (prompter workspaceInitPrompter) promptOptional(label string, fallback string) (string, error) {
+	if fallback != "" {
+		fmt.Fprintf(prompter.writer, "%s [%s]: ", label, fallback)
+	} else {
+		fmt.Fprintf(prompter.writer, "%s: ", label)
+	}
+	line, err := prompter.reader.ReadString('\n')
+	if err != nil && len(line) == 0 {
+		return "", err
+	}
+	value := strings.TrimSpace(line)
+	if value == "" {
+		return fallback, nil
+	}
+	return value, nil
+}
+
+func workspaceJiraPromptDefaults(workspaceName string) jiraRuntimeConfig {
+	envDefaults := jiraRuntimeConfig{
+		BaseURL:     os.Getenv("AGENTIC_OPS_JIRA_BASE_URL"),
+		Email:       os.Getenv("AGENTIC_OPS_JIRA_EMAIL"),
+		APITokenEnv: "AGENTIC_OPS_JIRA_API_TOKEN",
+	}
+	config, err := resolveJiraRuntimeConfig(workspaceName)
+	if err != nil || config.Adapter != "real" {
+		if envDefaults.BaseURL != "" || envDefaults.Email != "" {
+			return envDefaults
+		}
+		return jiraRuntimeConfig{}
+	}
+	if config.BaseURL == "" {
+		config.BaseURL = envDefaults.BaseURL
+	}
+	if config.Email == "" {
+		config.Email = envDefaults.Email
+	}
+	if config.APITokenEnv == "" {
+		config.APITokenEnv = envDefaults.APITokenEnv
+	}
+	return config
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+type workspaceJiraConfigGuide struct {
+	Status     string
+	Path       string
+	TokenEnv   string
+	NextAction string
+}
+
+type jiraLocalConfigFile struct {
+	Adapter     string `yaml:"adapter"`
+	BaseURL     string `yaml:"base_url"`
+	Email       string `yaml:"email"`
+	APITokenEnv string `yaml:"api_token_env"`
+}
+
+func prepareWorkspaceJiraConfig(info workspace.Info, jiraUser string, jiraBaseURL string, jiraTokenEnv string) (workspaceJiraConfigGuide, error) {
+	if strings.TrimSpace(jiraTokenEnv) == "" {
+		jiraTokenEnv = "AGENTIC_OPS_JIRA_API_TOKEN"
+	}
+	configPath := filepath.Join(agenticOpsInstallDir(), "user", "projects", info.Name, "jira.local.yaml")
+	jiraBaseURL = strings.TrimSpace(jiraBaseURL)
+	if jiraBaseURL != "" {
+		if err := writePersonalProjectJiraConfig(configPath, jiraUser, jiraBaseURL, jiraTokenEnv); err != nil {
+			return workspaceJiraConfigGuide{}, err
+		}
+		status := "needs_token_env"
+		nextAction := "set_jira_token_env"
+		if os.Getenv(jiraTokenEnv) != "" {
+			status = "configured"
+			nextAction = "agent_init"
+		}
+		return workspaceJiraConfigGuide{Status: status, Path: configPath, TokenEnv: jiraTokenEnv, NextAction: nextAction}, nil
+	}
+	runtimeConfig, err := resolveJiraRuntimeConfig(info.Name)
+	if err != nil {
+		return workspaceJiraConfigGuide{}, err
+	}
+	if runtimeConfig.Adapter == "real" {
+		status := "configured"
+		nextAction := "agent_init"
+		if runtimeConfig.APIToken == "" {
+			status = "needs_token_env"
+			nextAction = "set_jira_token_env"
+		}
+		return workspaceJiraConfigGuide{Status: status, Path: runtimeConfig.Source, TokenEnv: runtimeConfig.APITokenEnv, NextAction: nextAction}, nil
+	}
+	return workspaceJiraConfigGuide{
+		Status:     "needs_configuration",
+		Path:       configPath,
+		TokenEnv:   jiraTokenEnv,
+		NextAction: "rerun_workspace_init_with_--jira-base-url",
+	}, nil
+}
+
+func writePersonalProjectJiraConfig(path string, jiraUser string, jiraBaseURL string, jiraTokenEnv string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	data, err := yaml.Marshal(jiraLocalConfigFile{
+		Adapter:     "real",
+		BaseURL:     jiraBaseURL,
+		Email:       jiraUser,
+		APITokenEnv: jiraTokenEnv,
+	})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
 }
 
 func materializeWorkspaceProfile(info workspace.Info, jiraUser string, jiraProjectOverride string, sourceRootOverride string) (string, string, string, string, error) {
@@ -213,9 +401,10 @@ func writeAgentInstructions(info workspace.Info, jiraUser string, jiraProject st
 		"2. Run `agentic-cli preflight` before taking over Jira tasks.",
 		"3. Read `$HOME/.agentic-ops/agent-guides.md` and `$HOME/.agentic-ops/install-resources/basic/ai-assets/README.md` before executing tasks.",
 		"4. Use `agentic-cli list-tasks` to find available Jira tasks from the real Jira adapter; do not use sample or fake Jira tasks for business work.",
-		"5. Use `agentic-cli task run <issue-key>` to take over a task and start the matched capability.",
-		"6. Use `agentic-cli takeover-task <issue-key>` only when you need the lower-level takeover operation.",
-		"7. Use `agentic-cli write-evidence --run-id <run-id>` and `agentic-cli release-agent --run-id <run-id> --issue-key <issue-key> --completion-evidence <file>` to finish or hand off work.",
+		"5. If Jira adapter config is missing, ask the development lead to provide runtime local config through environment variables, `.agentic-ops/jira.local.yaml`, `$AGENTIC_OPS_HOME/user/projects/<workspace>/jira.local.yaml`, or `$AGENTIC_OPS_HOME/user/jira.local.yaml`; never use fake Jira for business work.",
+		"6. Use `agentic-cli task run <issue-key>` to take over a task and start the matched capability.",
+		"7. Use `agentic-cli takeover-task <issue-key>` only when you need the lower-level takeover operation.",
+		"8. Use `agentic-cli write-evidence --run-id <run-id>` and `agentic-cli release-agent --run-id <run-id> --issue-key <issue-key> --completion-evidence <file>` to finish or hand off work.",
 		"",
 		"Do not guess Jira fields, repositories, workflow states, or evidence format. Use AgenticOps profiles, operation contracts, policies, templates, and runbooks.",
 		"",

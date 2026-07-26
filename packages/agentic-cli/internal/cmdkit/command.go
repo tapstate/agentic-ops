@@ -3,8 +3,10 @@ package cmdkit
 import "io"
 
 type Context struct {
-	Stdout io.Writer
-	Stderr io.Writer
+	Stdin       io.Reader
+	Stdout      io.Writer
+	Stderr      io.Writer
+	Interactive bool
 }
 
 type Handler func(ctx Context, args []string) int

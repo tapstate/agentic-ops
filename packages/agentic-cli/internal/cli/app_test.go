@@ -77,6 +77,25 @@ func TestTapdataNamespaceHelpListsBranchAlign(t *testing.T) {
 	}
 }
 
+func TestWorkspaceInitHelpListsInteractiveAndFlagModes(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"workspace", "init", "-h"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		"Usage: agentic-cli workspace init --project <project> [--interactive]",
+		"workspace init --project tapdata --interactive",
+		"--jira-base-url",
+		"--jira-token-env",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("workspace init help missing %s: %s", want, stdout.String())
+		}
+	}
+}
+
 func TestTapdataBranchAlignHelpListsActions(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

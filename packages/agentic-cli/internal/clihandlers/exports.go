@@ -29,7 +29,11 @@ func RunPreflight(args []string, stdout io.Writer) int {
 }
 
 func RunWorkspaceInit(args []string, stdout io.Writer) int {
-	return runWorkspaceInit(args, stdout)
+	return runWorkspaceInit(args, nil, stdout, io.Discard, false)
+}
+
+func RunWorkspaceInitInteractive(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, interactive bool) int {
+	return runWorkspaceInit(args, stdin, stdout, stderr, interactive)
 }
 
 func RunAgentInit(args []string, stdout io.Writer) int {

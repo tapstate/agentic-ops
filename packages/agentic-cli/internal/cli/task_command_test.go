@@ -72,6 +72,80 @@ func TestListTasksReadsRealJiraTasks(t *testing.T) {
 	}
 }
 
+func TestListTasksReadsWorkspaceJiraConfigFile(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	var sawSearch bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/rest/api/3/search/jql" {
+			t.Fatalf("unexpected Jira request %s %s", r.Method, r.URL.Path)
+		}
+		user, token, ok := r.BasicAuth()
+		if !ok || user != "workspace@example.com" || token != "workspace-token" {
+			t.Fatalf("unexpected Jira auth user=%q token=%q ok=%v", user, token, ok)
+		}
+		sawSearch = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"issues":[{"key":"TAP-998","fields":{"summary":"工作空间 Jira 配置任务","assignee":{"accountId":"account-998"},"issuetype":{"name":"Task"},"status":{"name":"To Do"},"customfield_acceptance":"真实验收","customfield_target_repo":"tapstate/real-repo","customfield_risk":{"value":"low"},"description":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"go test ./config"}]}]}}}]}`))
+	}))
+	defer server.Close()
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "jira.local.yaml"), "adapter: real\nbase_url: "+server.URL+"\nemail: workspace@example.com\napi_token: workspace-token\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"list-tasks", "--workspace", "tapstate"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	if !sawSearch {
+		t.Fatal("Jira search endpoint was not called")
+	}
+	for _, want := range []string{`"operation":"list_tasks"`, `"workspace":"tapstate"`, `"key":"TAP-998"`, `"summary":"工作空间 Jira 配置任务"`} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %s: %s", want, stdout.String())
+		}
+	}
+}
+
+func TestListTasksReadsPersonalProjectJiraConfigFile(t *testing.T) {
+	root := t.TempDir()
+	installDir := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", installDir)
+	t.Setenv("PERSONAL_JIRA_TOKEN", "personal-token")
+	var sawSearch bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/rest/api/3/search/jql" {
+			t.Fatalf("unexpected Jira request %s %s", r.Method, r.URL.Path)
+		}
+		user, token, ok := r.BasicAuth()
+		if !ok || user != "personal@example.com" || token != "personal-token" {
+			t.Fatalf("unexpected Jira auth user=%q token=%q ok=%v", user, token, ok)
+		}
+		sawSearch = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"issues":[{"key":"TAP-997","fields":{"summary":"个人项目 Jira 配置任务","assignee":{"accountId":"account-997"},"issuetype":{"name":"Task"},"status":{"name":"To Do"},"customfield_acceptance":"真实验收","customfield_target_repo":"tapstate/real-repo","customfield_risk":{"value":"low"},"description":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"go test ./personal"}]}]}}}]}`))
+	}))
+	defer server.Close()
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "jira.local.yaml"), "\n")
+	writeCLITestFile(t, filepath.Join(installDir, "user", "projects", "tapstate", "jira.local.yaml"), "adapter: real\nbase_url: "+server.URL+"\nemail: personal@example.com\napi_token_env: PERSONAL_JIRA_TOKEN\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"list-tasks", "--workspace", "tapstate"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	if !sawSearch {
+		t.Fatal("Jira search endpoint was not called")
+	}
+	for _, want := range []string{`"operation":"list_tasks"`, `"workspace":"tapstate"`, `"key":"TAP-997"`, `"summary":"个人项目 Jira 配置任务"`} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %s: %s", want, stdout.String())
+		}
+	}
+}
+
 func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)

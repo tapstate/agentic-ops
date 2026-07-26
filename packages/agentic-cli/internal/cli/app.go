@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/clihandlers"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/cmdkit"
@@ -19,6 +20,10 @@ var Commit = "unknown"
 var BuildTime = ""
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) int {
+	return RunWithIO(args, os.Stdin, stdout, stderr, stdinIsTerminal())
+}
+
+func RunWithIO(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, interactive bool) int {
 	syncHandlerVersionInfo()
 
 	if len(args) == 0 {
@@ -41,7 +46,15 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		}))
 	}
 
-	return registry.Dispatch(cmdkit.Context{Stdout: stdout, Stderr: stderr}, args, unknownCommand)
+	return registry.Dispatch(cmdkit.Context{Stdin: stdin, Stdout: stdout, Stderr: stderr, Interactive: interactive}, args, unknownCommand)
+}
+
+func stdinIsTerminal() bool {
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (stat.Mode() & os.ModeCharDevice) != 0
 }
 
 func syncHandlerVersionInfo() {

@@ -6,18 +6,26 @@ allowed_stages:
   - installed
 required_inputs:
   - project
-  - jira_user
 input:
   project:
     type: string
     required: true
   jira_user:
     type: string
-    required: true
+    required: false
+  interactive:
+    type: boolean
+    required: false
   jira_project:
     type: string
     required: false
   source_root:
+    type: string
+    required: false
+  jira_base_url:
+    type: string
+    required: false
+  jira_token_env:
     type: string
     required: false
   confirm_existing_config:
@@ -27,6 +35,7 @@ preconditions:
   - workspace_root_must_be_available
   - workspace_root_must_be_writable
   - existing_config_requires_confirmation
+  - interactive_mode_requires_terminal
 output:
   workspace:
     type: string
@@ -50,6 +59,14 @@ output:
     type: string
   feedback_dir:
     type: string
+  jira_config_status:
+    type: string
+  jira_config_path:
+    type: string
+  jira_token_env:
+    type: string
+  jira_config_next_action:
+    type: string
   next_action:
     type: string
 failure:
@@ -57,13 +74,18 @@ failure:
     - missing_workspace
     - missing_project
     - missing_jira_user
+    - interactive_terminal_required
+    - interactive_input_required
+    - interactive_input_failed
     - existing_config_confirmation_required
     - workspace_root_failed
     - workspace_init_failed
+    - jira_config_failed
     - agent_config_failed
     - agent_instructions_failed
 side_effects:
   - may_write_workspace_state
+  - may_write_personal_jira_config
   - must_not_write_jira
 human_gate:
   required: false

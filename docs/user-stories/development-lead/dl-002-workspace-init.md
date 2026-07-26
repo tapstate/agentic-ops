@@ -26,10 +26,12 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 3. CLI 创建项目 AI 工作空间配置。
 4. CLI 根据项目配置项加载 workflow profile。
 5. CLI 从 workflow profile 读取 Jira project、JQL、字段映射、状态映射、目标仓库映射、GitHub 组织和本地路径占位默认值。
-6. CLI 使用研发负责人提供的 Jira 用户、当前项目 AI 工作空间目录和可选 `--source-root` 写入 `.agentic-ops/profile.local.yaml` 本地 overlay；未提供 `--source-root` 时默认使用 `<project-ai-workspace>/repos/<project>`。
-7. CLI 创建工作空间事件和执行日志目录，例如 `<project-ai-workspace>/.agentic-ops/runs/`、`<project-ai-workspace>/.agentic-ops/run-logs/`。
-8. CLI 写入 `.agentic-ops/agent.json` 和根目录 `AGENTS.md`，让 AIAgent 能识别当前项目并知道如何调用 `agentic-cli`。
-9. CLI 运行工作空间预检。
+6. 使用 `--interactive` 时，CLI 从参数、环境变量、当前工作空间配置和个人项目层配置读取已有值，已配置项只需回车确认，缺失项才询问；非终端、脚本或 CI 场景使用完整参数形式。
+7. CLI 使用研发负责人提供或确认的 Jira 用户、当前项目 AI 工作空间目录和可选 `--source-root` 写入 `.agentic-ops/profile.local.yaml` 本地 overlay；未提供 `--source-root` 时默认使用 `<project-ai-workspace>/repos/<project>`。
+8. CLI 在提供或确认 `--jira-base-url` 时写入个人项目层 `$AGENTIC_OPS_HOME/user/projects/<project>/jira.local.yaml`，只保存 `base_url`、`email` 和 `api_token_env`，不写入 Jira API token。
+9. CLI 创建工作空间事件和执行日志目录，例如 `<project-ai-workspace>/.agentic-ops/runs/`、`<project-ai-workspace>/.agentic-ops/run-logs/`。
+10. CLI 写入 `.agentic-ops/agent.json` 和根目录 `AGENTS.md`，让 AIAgent 能识别当前项目并知道如何调用 `agentic-cli`。
+11. CLI 运行工作空间预检。
 
 ### 输出
 
@@ -48,13 +50,18 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
   "agent_instructions": "<project-ai-workspace>/AGENTS.md",
   "runs_dir": "<project-ai-workspace>/.agentic-ops/runs",
   "run_logs_dir": "<project-ai-workspace>/.agentic-ops/run-logs",
+  "jira_config_status": "needs_token_env",
+  "jira_config_path": "$HOME/.agentic-ops/user/projects/tapstate/jira.local.yaml",
+  "jira_token_env": "AGENTIC_OPS_JIRA_API_TOKEN",
+  "jira_config_next_action": "set_jira_token_env",
   "next_action": "init_agent_capability"
 }
 ```
 
 ### 失败处理
 
-- Jira 配置缺失时，停止并要求补充。
+- Jira base URL 未提供时，初始化继续完成，但输出 `jira_config_status: needs_configuration` 和补齐指引；后续 `list-tasks` 仍会在真实 Jira 配置缺失时阻断。
+- 非终端环境使用 `--interactive` 时，返回 `interactive_terminal_required`，要求改用完整参数形式。
 - GitHub 登录状态不可用时，提示执行 `gh auth login`。
 - 本地源码目录不存在时，提示克隆或配置正确路径。
 - 已有本地 AgenticOps 配置时，停止并要求研发负责人确认；确认覆盖时使用 `--confirm-existing-config`。

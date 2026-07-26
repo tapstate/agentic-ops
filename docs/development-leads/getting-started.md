@@ -170,20 +170,52 @@ gh api -H 'Accept: application/vnd.github.raw' \
 
 `tapdata` 示例要求当前安装版本中存在匹配的 `install-resources/basic/projects/tapdata/profile.yaml`。Jira 项目、Jira 到代码仓库的映射、流程、表单和模板由项目包 profile 定义。本地 Jira 用户、项目 AI 工作空间目录、本地源码目录、运行日志目录和反馈目录由 `workspace init` 写入当前工作空间 `.agentic-ops/profile.local.yaml`，不复制完整共享 profile。
 
+推荐使用交互式初始化，让 CLI 检查已有配置并只询问缺失项：
+
 ```sh
-agentic-cli workspace init --project tapdata --jira-user <your-jira-email>
+agentic-cli workspace init --project tapdata --interactive
+```
+
+脚本、CI 或非终端环境使用完整参数形式：
+
+```sh
+agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --jira-base-url https://your-domain.atlassian.net
 ```
 
 如果源码目录不是默认的 `repos/tapdata`，初始化时显式确认：
 
 ```sh
-agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --source-root /path/to/source
+agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --jira-base-url https://your-domain.atlassian.net --source-root /path/to/source
 ```
 
 如果当前目录已经存在 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 或 AgenticOps 管理的 `AGENTS.md` 配置块，初始化会停止并要求确认。确认需要覆盖已有本地配置时重新执行：
 
 ```sh
 agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --confirm-existing-config
+```
+
+## Jira 连接配置
+
+`workspace init` 不会复制或写入 Jira API token。交互式初始化会从已有环境变量、当前工作空间配置和个人项目层配置读取默认值，已配置项只需回车确认，缺失项才会询问。初始化时提供或确认 Jira base URL 后，CLI 会在个人项目层生成 `$AGENTIC_OPS_HOME/user/projects/<project>/jira.local.yaml`，并默认使用 `AGENTIC_OPS_JIRA_API_TOKEN` 作为 token 环境变量名。`agentic-cli list-tasks` 需要真实 Jira adapter，CLI 会按以下顺序读取运行时本地配置：
+
+1. 显式环境变量：`AGENTIC_OPS_JIRA_ADAPTER=real`、`AGENTIC_OPS_JIRA_BASE_URL`、`AGENTIC_OPS_JIRA_EMAIL`、`AGENTIC_OPS_JIRA_API_TOKEN`。
+2. 当前项目 AI 工作空间：`.agentic-ops/jira.local.yaml`。
+3. 个人项目层：`$AGENTIC_OPS_HOME/user/projects/<project>/jira.local.yaml`。
+4. 个人全局层：`$AGENTIC_OPS_HOME/user/jira.local.yaml`。
+
+推荐把非敏感连接信息放在个人层，并用 `api_token_env` 引用本机环境变量：
+
+```yaml
+adapter: real
+base_url: https://your-domain.atlassian.net
+email: your-email@example.com
+api_token_env: AGENTIC_OPS_JIRA_API_TOKEN
+```
+
+如果需要自定义 token 环境变量名：
+
+```sh
+agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --jira-base-url https://your-domain.atlassian.net --jira-token-env TAPDATA_JIRA_TOKEN
 ```
 
 查看最终合并结果和字段来源：

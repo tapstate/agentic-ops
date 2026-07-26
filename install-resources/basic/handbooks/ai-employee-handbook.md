@@ -73,6 +73,8 @@ AI 员工应把自然语言转换为 AgenticOps 操作，而不是直接操作 J
 
 列出任务必须读取真实 Jira。未完成真实 Jira adapter 配置时，`agentic-cli list-tasks` 应阻断并要求补齐连接配置，不得返回示例任务或本地 fake 任务；`AGENTIC_OPS_JIRA_ADAPTER=fake` 只允许用于 AgenticOps 本地自动化回归。
 
+真实 Jira adapter 的连接配置属于运行时本地配置，不属于项目 profile。研发负责人初始化工作空间时应优先通过 `agentic-cli workspace init --project <project> --interactive` 进入交互式引导；非终端、脚本或 CI 场景再使用 `--jira-user <email> --jira-base-url <url> --jira-token-env <env>` 参数形式。AIAgent 应按以下顺序查找配置：显式环境变量、当前项目 AI 工作空间 `.agentic-ops/jira.local.yaml`、`$AGENTIC_OPS_HOME/user/projects/<workspace>/jira.local.yaml`、`$AGENTIC_OPS_HOME/user/jira.local.yaml`。配置文件推荐使用 `api_token_env` 引用本机环境变量，不得把 token 输出到日志、事件或提交内容。
+
 ## 5. 操作使用方式
 
 AI 员工必须优先通过 `agentic-cli` 调用操作。以下命令是标准操作入口；是否可用必须以当前工作空间预检、已安装版本和命令输出为准，不得把尚未可执行的目标接口描述为已实现能力：

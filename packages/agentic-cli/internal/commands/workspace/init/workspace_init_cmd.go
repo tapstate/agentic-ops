@@ -7,13 +7,16 @@ import (
 
 func Register(registry *cmdkit.Registry) {
 	registry.MustRegister(cmdkit.CommandSpec{
-		Path:     []string{"workspace", "init"},
-		Summary:  "初始化项目 AI 工作空间本地 overlay",
-		Usage:    "agentic-cli workspace init --project <project> --jira-user <email>",
-		Examples: []string{"agentic-cli workspace init --project tapdata --jira-user lead@example.com"},
+		Path:    []string{"workspace", "init"},
+		Summary: "初始化项目 AI 工作空间本地 overlay",
+		Usage:   "agentic-cli workspace init --project <project> [--interactive] [--jira-user <email>] [--jira-base-url <url>] [--jira-token-env <env>]",
+		Examples: []string{
+			"agentic-cli workspace init --project tapdata --interactive",
+			"agentic-cli workspace init --project tapdata --jira-user lead@example.com --jira-base-url https://jira.example.test --jira-token-env AGENTIC_OPS_JIRA_API_TOKEN",
+		},
 		Contract: "workspace_init",
 		Run: func(ctx cmdkit.Context, args []string) int {
-			return clihandlers.RunWorkspaceInit(args, ctx.Stdout)
+			return clihandlers.RunWorkspaceInitInteractive(args, ctx.Stdin, ctx.Stdout, ctx.Stderr, ctx.Interactive)
 		},
 	})
 }

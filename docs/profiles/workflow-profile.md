@@ -142,6 +142,7 @@ templates:
 - `Profile.workspace` 必须与 profile 文件名中的项目配置项一致，例如 `tapdata.yaml` 对应 `workspace: tapdata`。
 - `Profile.jira.project` 是该项目配置项绑定的 Jira project；快速开始初始化不要求研发负责人重复输入。
 - `Profile.jira.user` 在共享 profile 中只能使用默认占位值；`workspace init` 会使用研发负责人提供的 Jira 用户写入 `.agentic-ops/profile.local.yaml`。
+- Jira adapter 的真实连接配置不属于 `Profile`，必须放在运行时本地配置或环境变量中；`workspace init --jira-base-url <url>` 可生成个人项目层配置脚手架，CLI 查找顺序为显式环境变量、项目 AI 工作空间 `.agentic-ops/jira.local.yaml`、`$AGENTIC_OPS_HOME/user/projects/<workspace>/jira.local.yaml`、`$AGENTIC_OPS_HOME/user/jira.local.yaml`。
 - `Profile.local.*` 在共享 profile 中只能使用 `<project-ai-workspace>` 这类占位值；`workspace init` 会把本地路径写入 `.agentic-ops/profile.local.yaml`。源码目录默认是 `<project-ai-workspace>/repos/<project>`，研发负责人可以通过 `--source-root` 显式确认其它目录。
 - 如果项目 AI 工作空间已有 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 或 AgenticOps 管理的 `AGENTS.md` 配置块，`workspace init` 必须停止并要求研发负责人确认；确认覆盖时使用 `--confirm-existing-config`。
 - `Profile` 必须说明关键专业审查节点如何映射到标准字段、Jira 状态、拉取请求审查、CI 或人工确认。

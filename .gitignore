@@ -9,4 +9,5 @@ bin/*
 !.local/.gitkeep
 
 .agentic-ops/
+user/
 releases/

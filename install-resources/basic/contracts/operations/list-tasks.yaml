@@ -14,6 +14,7 @@ preconditions:
   - workspace_must_be_initialized
   - current_user_must_be_known
   - profile_task_query_must_be_valid
+  - jira_runtime_config_must_resolve_real_adapter
 output:
   workspace:
     type: string
