@@ -19,6 +19,7 @@ import (
 	policy_validate_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/policy/validate"
 	preflight_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/preflight"
 	prepare_pr_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/prepare-pr"
+	profile_resolve_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/profile/resolve"
 	profile_rollback_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/profile/rollback"
 	profile_update_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/profile/update"
 	profile_validate_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/profile/validate"
@@ -27,6 +28,8 @@ import (
 	resume_takeover_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/resume-takeover"
 	switch_branch_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/switch-branch"
 	takeover_task_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/takeover-task"
+	tapdata_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/tapdata"
+	tapdata_branch_align_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/tapdata/branch-align"
 	task_run_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/task/run"
 	update_apply_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update/apply"
 	update_check_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update/check"
@@ -50,6 +53,7 @@ func RegisterAll(registry *cmdkit.Registry) {
 	policy_validate_cmd.Register(registry)
 	preflight_cmd.Register(registry)
 	prepare_pr_cmd.Register(registry)
+	profile_resolve_cmd.Register(registry)
 	profile_rollback_cmd.Register(registry)
 	profile_update_cmd.Register(registry)
 	profile_validate_cmd.Register(registry)
@@ -58,6 +62,8 @@ func RegisterAll(registry *cmdkit.Registry) {
 	resume_takeover_cmd.Register(registry)
 	switch_branch_cmd.Register(registry)
 	takeover_task_cmd.Register(registry)
+	tapdata_branch_align_cmd.Register(registry)
+	tapdata_cmd.Register(registry)
 	task_run_cmd.Register(registry)
 	update_apply_cmd.Register(registry)
 	update_check_cmd.Register(registry)

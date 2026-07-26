@@ -74,7 +74,7 @@ func runSwitchBranch(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.FailureWithContext("switch_branch", output.FailureContext{
 			Code:                "missing_mode",
 			Message:             "缺少分支对齐动作",
-			RequiredHumanAction: "请按 agentic-cli switch-branch plan develop --workspace tapdata 重试，或使用 list/status/apply",
+			RequiredHumanAction: "请按 agentic-cli tapdata branch-align plan develop 重试，或使用 list/status/apply",
 			TaskType:            "branch_switch",
 			CurrentStage:        "branch_switch_gate",
 			NextAction:          "ask_owner",

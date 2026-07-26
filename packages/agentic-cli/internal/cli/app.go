@@ -24,6 +24,12 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
 		return writeJSON(stdout, output.Failure("unknown", "missing_command", "缺少命令", "请提供命令"))
 	}
+	registry := cmdkit.NewRegistry()
+	commandcatalog.RegisterAll(registry)
+	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+		registry.WriteRootHelp(stdout)
+		return 0
+	}
 	if args[0] == "--version" || args[0] == "version" {
 		return writeJSON(stdout, output.Success("version", map[string]any{
 			"version":           Version,
@@ -35,8 +41,6 @@ func Run(args []string, stdout io.Writer, stderr io.Writer) int {
 		}))
 	}
 
-	registry := cmdkit.NewRegistry()
-	commandcatalog.RegisterAll(registry)
 	return registry.Dispatch(cmdkit.Context{Stdout: stdout, Stderr: stderr}, args, unknownCommand)
 }
 
@@ -50,7 +54,7 @@ func unknownCommand(ctx cmdkit.Context, args []string) int {
 		command = args[0]
 		fmt.Fprintf(ctx.Stderr, "unknown command: %s\n", args[0])
 	}
-	return writeJSON(ctx.Stdout, output.Failure(command, "unknown_command", "未知命令", "请检查命令名称"))
+	return writeJSON(ctx.Stdout, output.Failure(command, "unknown_command", "未知命令", "请检查命令名称，或运行 agentic-cli -h 查看可用命令"))
 }
 
 func parseCommitIndex(value string) int {

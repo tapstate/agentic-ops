@@ -11,9 +11,20 @@ AIAgent 执行业务 Jira 任务前按以下顺序读取：
 3. [机器可读操作契约](../contracts/operations/)：读取当前可执行操作定义。
 4. [标准流程定义](../contracts/processes/)：读取任务分类、标准流程和阶段标准。
 5. [工作流配置说明](../../../docs/profiles/workflow-profile.md)：理解工作空间和 Jira / GitHub / 本地源码映射。
-6. [工作流配置源头](../profiles/)：读取当前项目或示例工作流配置。
-7. [项目级规范](../standards/)：读取当前工作流配置中 `standards` 引用的项目硬规则。
-8. [策略](../policies/)、[运行手册](../runbooks/) 和 [模板](../templates/)：读取安装后分发给 AIAgent 的门禁、处理步骤和证据格式。
+6. [公司级硬规定](../company/standards/core-hard-rules.md)：读取跨项目通用硬规则和人工门禁。
+7. [项目资产包](../projects/)：读取当前项目的 profile、规范、运行手册、模板和工具声明。
+8. 当前项目 AI 工作空间 `.agentic-ops/profile.local.yaml`：只读取本地 overlay，不要求复制完整全局资源。
+9. [策略](../policies/)、[运行手册](../runbooks/) 和 [模板](../templates/)：读取安装后分发给 AIAgent 的门禁、处理步骤和证据格式。
+
+实际执行前应运行 `agentic-cli profile resolve --project <project>` 查看 effective profile 和字段来源。资产解析优先级固定为：
+
+```text
+项目工作空间 overlay
+> ~/.agentic-ops/user/
+> install-resources/basic/projects/<project>/
+> install-resources/basic/company/
+> agentic-cli 内置兜底
+```
 
 ## 源头仓库维护读取顺序
 
@@ -39,6 +50,8 @@ AIAgent 执行业务 Jira 任务前按以下顺序读取：
 
 - `handbooks/`
 - `contracts/`
+- `company/`
+- `projects/`
 - `profiles/`
 - `standards/`
 - `assets/`

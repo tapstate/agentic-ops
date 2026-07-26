@@ -95,6 +95,48 @@ func TestSwitchBranchPlanOutputsTapdataAlignmentRows(t *testing.T) {
 	}
 }
 
+func TestTapdataBranchAlignPlanOutputsTapdataAlignmentRows(t *testing.T) {
+	workRoot := t.TempDir()
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata", "develop", nil)
+	writeCLITestFile(t, filepath.Join(workRoot, "tapdata", "iengine/iengine-app/src/main/resources/pluginKit.properties"), "tapdata.api.verison=4.9-SNAPSHOT\n")
+	runGitForCLITest(t, filepath.Join(workRoot, "tapdata"), "add", "iengine/iengine-app/src/main/resources/pluginKit.properties")
+	runGitForCLITest(t, filepath.Join(workRoot, "tapdata"), "commit", "-m", "plugin")
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata-enterprise", "main", []string{"develop"})
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata-web", "main", []string{"develop"})
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata-connectors", "main", []string{"release-v4.9"})
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata-connectors-enterprise", "main", []string{"release-v4.9"})
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata-license", "develop", []string{"main"})
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata-common-lib", "main", []string{"release-v5.0"})
+	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata-application", "feature/local", nil)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"tapdata", "branch-align", "plan", "develop", "--work-root", workRoot, "--no-fetch"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "switch_branch")
+	assertJSONField(t, stdout.String(), "workspace", "tapdata")
+	assertJSONField(t, stdout.String(), "mode", "plan")
+	assertJSONField(t, stdout.String(), "tap_branch", "develop")
+	assertJSONField(t, stdout.String(), "blocked", false)
+	if !strings.Contains(stdout.String(), `"target":"release-v4.9"`) {
+		t.Fatalf("stdout missing release target: %s", stdout.String())
+	}
+}
+
+func TestSwitchBranchHelpShowsLegacyMigration(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"switch-branch", "-h"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "legacy") || !strings.Contains(stdout.String(), "agentic-cli tapdata branch-align") {
+		t.Fatalf("legacy help missing migration guidance: %s", stdout.String())
+	}
+}
+
 func TestSwitchBranchStatusOutputsTapdataRepoRows(t *testing.T) {
 	workRoot := t.TempDir()
 	initTapdataAlignmentCLIRepo(t, workRoot, "tapdata", "develop", nil)

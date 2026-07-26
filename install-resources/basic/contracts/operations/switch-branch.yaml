@@ -2,6 +2,9 @@ operation: switch_branch
 version: 1
 purpose: 按 TapData 多仓分支规范计算或执行分支对齐，等价沉淀自 tap-align-branches.py。
 task_type: branch_switch
+command:
+  primary: agentic-cli tapdata branch-align
+  legacy_alias: agentic-cli switch-branch
 allowed_stages:
   - waiting_takeover
   - takeover_started

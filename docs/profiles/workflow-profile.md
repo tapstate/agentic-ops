@@ -8,7 +8,19 @@ AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira 工作
 
 ## 2. 配置范围
 
-一个工作流配置以项目配置项命名，例如 `tapdata` 或 `tapstate`，文件位于 `install-resources/basic/profiles/<project>.yaml`。研发负责人初始化时只选择项目配置项；Jira project、代码仓库、本地路径、流程和策略映射由该 profile 定义。
+一个工作流配置以项目配置项命名，例如 `tapdata` 或 `tapstate`。项目级源头优先位于 `install-resources/basic/projects/<project>/profile.yaml`；旧 `install-resources/basic/profiles/<project>.yaml` 只作为兼容 fallback。研发负责人初始化时只选择项目配置项；Jira project、代码仓库、本地路径、流程和策略映射由该 profile 定义。
+
+运行时 effective profile 按以下顺序解析：
+
+```text
+项目工作空间 overlay
+> ~/.agentic-ops/user/
+> install-resources/basic/projects/<project>/
+> install-resources/basic/company/
+> agentic-cli 内置兜底
+```
+
+项目 AI 工作空间只保存 `.agentic-ops/profile.local.yaml` 这类本地 overlay，不复制完整全局项目 profile。全局 `~/.agentic-ops` 更新后，已有工作空间通过 `agentic-cli profile resolve --project <project>` 自动读取最新项目包。
 
 一个工作流配置至少应描述：
 
@@ -129,9 +141,9 @@ templates:
 - `Profile` 必须适配 Standard Process Registry；AIAgent 先识别 `task_class`，再选择 `process_id`。
 - `Profile.workspace` 必须与 profile 文件名中的项目配置项一致，例如 `tapdata.yaml` 对应 `workspace: tapdata`。
 - `Profile.jira.project` 是该项目配置项绑定的 Jira project；快速开始初始化不要求研发负责人重复输入。
-- `Profile.jira.user` 在共享 profile 中只能使用默认占位值；`workspace init` 会使用研发负责人提供的 Jira 用户写入项目 AI 工作空间中的本地 profile。
-- `Profile.local.*` 在共享 profile 中只能使用 `<project-ai-workspace>` 这类占位值；`workspace init` 会把它们物化为当前项目 AI 工作空间中的本地路径。源码目录默认是 `<project-ai-workspace>/repos/<project>`，研发负责人可以通过 `--source-root` 显式确认其它目录。
-- 如果项目 AI 工作空间已有 `.agentic-ops/agent.json`、`.agentic-ops/profiles/<project>.yaml` 或 AgenticOps 管理的 `AGENTS.md` 配置块，`workspace init` 必须停止并要求研发负责人确认；确认覆盖时使用 `--confirm-existing-config`。
+- `Profile.jira.user` 在共享 profile 中只能使用默认占位值；`workspace init` 会使用研发负责人提供的 Jira 用户写入 `.agentic-ops/profile.local.yaml`。
+- `Profile.local.*` 在共享 profile 中只能使用 `<project-ai-workspace>` 这类占位值；`workspace init` 会把本地路径写入 `.agentic-ops/profile.local.yaml`。源码目录默认是 `<project-ai-workspace>/repos/<project>`，研发负责人可以通过 `--source-root` 显式确认其它目录。
+- 如果项目 AI 工作空间已有 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml`、遗留 `.agentic-ops/profiles/<project>.yaml` 或 AgenticOps 管理的 `AGENTS.md` 配置块，`workspace init` 必须停止并要求研发负责人确认；确认覆盖时使用 `--confirm-existing-config`。
 - `Profile` 必须说明关键专业审查节点如何映射到标准字段、Jira 状态、拉取请求审查、CI 或人工确认。
 - `Profile` 必须说明失败后允许重试还是必须重做前序阶段。
 - `Profile` 必须能被 `agentic-cli preflight` 校验。

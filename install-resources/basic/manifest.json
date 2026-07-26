@@ -3,8 +3,10 @@
   "description": "AgenticOps basic install resources",
   "channels": ["local-fake-flow"],
   "includes": [
+    "company",
     "handbooks",
     "contracts",
+    "projects",
     "profiles",
     "policies",
     "runbooks",

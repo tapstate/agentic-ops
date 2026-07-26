@@ -320,10 +320,9 @@ func resumeErrorCode(err error) string {
 }
 
 func takeoverProfile(workspaceName string) profile.Profile {
-	if path, err := repoProfilePath(workspaceName); err == nil {
-		if loadedProfile, err := profile.LoadFile(path); err == nil {
-			return loadedProfile
-		}
+	root, _ := workspaceRoot()
+	if loadedProfile, err := resolveEffectiveProfile(workspaceName, root); err == nil {
+		return loadedProfile
 	}
 	return profile.Profile{
 		Workspace: workspaceName,

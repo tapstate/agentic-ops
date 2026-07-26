@@ -65,6 +65,34 @@ func repoProfilePath(workspaceName string) (string, error) {
 	return filepath.Join(repoBasicResourcesPath(root), "profiles", workspaceName+".yaml"), nil
 }
 
+func repoProjectPath(workspaceName string) (string, error) {
+	root, err := repoRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(repoBasicResourcesPath(root), "projects", workspaceName), nil
+}
+
+func repoProjectProfilePath(workspaceName string) (string, error) {
+	projectPath, err := repoProjectPath(workspaceName)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(projectPath, "profile.yaml")
+	if stat, err := os.Stat(path); err == nil && !stat.IsDir() {
+		return path, nil
+	}
+	return repoProfilePath(workspaceName)
+}
+
+func repoCompanyPath() (string, error) {
+	root, err := repoRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(repoBasicResourcesPath(root), "company"), nil
+}
+
 func repoPolicyPath() (string, error) {
 	root, err := repoRoot()
 	if err != nil {
@@ -106,11 +134,8 @@ func defaultProcessRegistry() map[string]process.Process {
 }
 
 func loadWorkspaceProfile(workspaceName string) (profile.Profile, error) {
-	path, err := repoProfilePath(workspaceName)
-	if err != nil {
-		return profile.Profile{}, err
-	}
-	return profile.LoadFile(path)
+	root, _ := workspaceRoot()
+	return resolveEffectiveProfile(workspaceName, root)
 }
 
 func pathWithin(path string, root string) bool {

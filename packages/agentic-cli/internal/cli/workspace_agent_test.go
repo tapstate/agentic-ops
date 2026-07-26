@@ -32,7 +32,7 @@ func TestWorkspaceInitOutputsNextAction(t *testing.T) {
 	}
 }
 
-func TestWorkspaceInitMaterializesWorkspaceProfile(t *testing.T) {
+func TestWorkspaceInitWritesLocalProfileOverlay(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	var stdout bytes.Buffer
@@ -41,15 +41,21 @@ func TestWorkspaceInitMaterializesWorkspaceProfile(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
-	profilePath := filepath.Join(root, ".agentic-ops", "profiles", "tapdata.yaml")
-	data, err := os.ReadFile(profilePath)
-	if err != nil {
-		t.Fatalf("profile was not materialized: %v", err)
+	legacyProfilePath := filepath.Join(root, ".agentic-ops", "profiles", "tapdata.yaml")
+	if _, err := os.Stat(legacyProfilePath); !os.IsNotExist(err) {
+		t.Fatalf("legacy copied profile exists = %v, want not exist", err)
 	}
-	if !strings.Contains(string(data), "workspace: tapdata") || !strings.Contains(string(data), "user: lead@example.com") || !strings.Contains(string(data), "project: TAP") {
-		t.Fatalf("materialized profile mismatch: %s", string(data))
+	overlayPath := filepath.Join(root, ".agentic-ops", "profile.local.yaml")
+	data, err := os.ReadFile(overlayPath)
+	if err != nil {
+		t.Fatalf("profile overlay was not written: %v", err)
+	}
+	if strings.Contains(string(data), "standard_process_mapping:") || strings.Contains(string(data), "task_class_mapping:") {
+		t.Fatalf("overlay should only contain local differences: %s", string(data))
 	}
 	for _, want := range []string{
+		"workspace: tapdata",
+		"user: lead@example.com",
 		"workspace_root: " + root,
 		"source_root: " + filepath.Join(root, "repos", "tapdata"),
 		"runs_dir: " + filepath.Join(root, ".agentic-ops", "runs"),
@@ -60,10 +66,8 @@ func TestWorkspaceInitMaterializesWorkspaceProfile(t *testing.T) {
 			t.Fatalf("materialized profile missing %s: %s", want, string(data))
 		}
 	}
-	if !strings.Contains(string(data), "standards/tapdata-development-rules.md") {
-		t.Fatalf("materialized profile missing tapdata standards: %s", string(data))
-	}
-	assertJSONField(t, stdout.String(), "profile", profilePath)
+	assertJSONField(t, stdout.String(), "profile_overlay", overlayPath)
+	assertJSONField(t, stdout.String(), "profile_ref", "$HOME/.agentic-ops/install-resources/basic/projects/tapdata/profile.yaml")
 }
 
 func TestWorkspaceInitRequiresConfirmationBeforeReplacingExistingConfig(t *testing.T) {
@@ -93,12 +97,12 @@ func TestWorkspaceInitCanReplaceExistingConfigAfterConfirmation(t *testing.T) {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
 	assertJSONField(t, stdout.String(), "jira_user", "other@example.com")
-	data, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "profiles", "tapdata.yaml"))
+	data, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "profile.local.yaml"))
 	if err != nil {
-		t.Fatalf("read profile error = %v", err)
+		t.Fatalf("read profile overlay error = %v", err)
 	}
 	if !strings.Contains(string(data), "user: other@example.com") {
-		t.Fatalf("profile was not replaced after confirmation: %s", string(data))
+		t.Fatalf("profile overlay was not replaced after confirmation: %s", string(data))
 	}
 }
 
@@ -113,12 +117,12 @@ func TestWorkspaceInitAcceptsConfirmedSourceRoot(t *testing.T) {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
 	assertJSONField(t, stdout.String(), "source_root", sourceRoot)
-	data, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "profiles", "tapdata.yaml"))
+	data, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "profile.local.yaml"))
 	if err != nil {
-		t.Fatalf("read profile error = %v", err)
+		t.Fatalf("read profile overlay error = %v", err)
 	}
 	if !strings.Contains(string(data), "source_root: "+sourceRoot) {
-		t.Fatalf("profile missing confirmed source root: %s", string(data))
+		t.Fatalf("profile overlay missing confirmed source root: %s", string(data))
 	}
 }
 
@@ -142,7 +146,8 @@ func TestWorkspaceInitWritesAgentConfigForCodexActivation(t *testing.T) {
 		`"jira_user":"lead@example.com"`,
 		`"jira_project":"TAP"`,
 		`"agent_type":"codex"`,
-		`"profile":"` + filepath.Join(root, ".agentic-ops", "profiles", "tapdata.yaml") + `"`,
+		`"profile_overlay":"` + filepath.Join(root, ".agentic-ops", "profile.local.yaml") + `"`,
+		`"profile_ref":"$HOME/.agentic-ops/install-resources/basic/projects/tapdata/profile.yaml"`,
 	} {
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("agent config missing %s: %s", want, string(data))
@@ -222,8 +227,11 @@ func TestAgentInitInfersWorkspaceFromAgentConfig(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "operation", "agent_init")
 	assertJSONField(t, stdout.String(), "workspace", "tapdata")
-	if !strings.Contains(stdout.String(), `"switch_branch"`) {
-		t.Fatalf("agent init missing switch_branch capability: %s", stdout.String())
+	if !strings.Contains(stdout.String(), `"tapdata branch-align"`) {
+		t.Fatalf("agent init missing tapdata branch-align project tool: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"asset_resolution"`) || !strings.Contains(stdout.String(), `"workspace_overlay"`) {
+		t.Fatalf("agent init missing asset resolution: %s", stdout.String())
 	}
 }
 

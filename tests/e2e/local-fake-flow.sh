@@ -48,7 +48,8 @@ rm -f "$policy_backup"
 $cmd doctor --workspace tapstate | grep '"operation":"doctor"'
 $cmd preflight --workspace tapstate | grep '"operation":"preflight"'
 $cmd workspace init --project tapstate --jira-user dev@example.com | grep '"operation":"workspace_init"'
-$cmd workspace init --project tapstate --jira-user dev@example.com --confirm-existing-config | grep '"profile":'
+$cmd workspace init --project tapstate --jira-user dev@example.com --confirm-existing-config | grep '"profile_overlay":'
+$cmd profile resolve --workspace tapstate | grep '"operation":"profile_resolve"'
 $cmd agent init --workspace tapstate | grep '"operation":"agent_init"'
 $cmd list-tasks --workspace tapstate | grep '"key":"TAP-123"'
 $cmd task run TAP-123 --workspace tapstate --process empty | grep '"capability_id":"empty_task_v1"'
@@ -72,7 +73,7 @@ $cmd feedback bundle --workspace tapstate --run-id TAP-123-takeover-202607211030
 $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"runs":12'
 $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"blocked":1'
 test -f "$workspace_root/.agentic-ops/feedback/events.ndjson"
-test -f "$workspace_root/.agentic-ops/profiles/tapstate.yaml"
+test -f "$workspace_root/.agentic-ops/profile.local.yaml"
 test -d "$workspace_root/.agentic-ops/run-logs"
 test -f "$workspace_root/.agentic-ops/feedback/bundles/TAP-123-takeover-20260721103012-a8f3.md"
 test -f "$workspace_root/.agentic-ops/feedback/reports/2026-07-21.md"

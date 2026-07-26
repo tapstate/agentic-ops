@@ -81,8 +81,8 @@ agentic-cli task run TAP-123 --workspace tapstate
 agentic-cli takeover-task TAP-123 --workspace tapstate
 agentic-cli resume-takeover --run-id <run_id> --workspace tapstate
 agentic-cli inspect-workspace --workspace tapstate
-agentic-cli switch-branch plan develop --workspace tapdata
-agentic-cli switch-branch apply develop --workspace tapdata
+agentic-cli tapdata branch-align plan develop
+agentic-cli tapdata branch-align apply develop
 agentic-cli prepare-pr --workspace tapstate --run-id <run_id>
 agentic-cli read-pr-comments --workspace tapstate --repo <owner/repo> --pr <number>
 agentic-cli check-ci-status --workspace tapstate --repo <owner/repo> --pr <number>
@@ -97,7 +97,7 @@ agentic-cli feedback report --workspace tapstate --date <yyyy-mm-dd>
 
 AI 员工不应直接依赖 Jira 字段名、Jira 状态名或 Jira `transition` 名称做判断。
 
-`switch-branch` 当前是 Tapdata 项目级研发基础工具，只能在 `tapdata` 工作区使用。命令支持 `list`、`status`、`plan`、`apply`，其中 `plan` 只读，`apply` 只在分支对齐计划无 blocked 行时切换本地多仓分支；命令不推送、不写 Jira、不写 GitHub、不创建拉取请求。
+`agentic-cli tapdata branch-align` 是 Tapdata 项目级研发基础工具。命令支持 `list`、`status`、`plan`、`apply`，其中 `plan` 只读，`apply` 只在分支对齐计划无 blocked 行时切换本地多仓分支；命令不推送、不写 Jira、不写 GitHub、不创建拉取请求。旧 `switch-branch` 入口只作为 legacy alias 保留。
 
 Jira 字段名、状态名、`transition` 名称和 `issue_key` 可以按原始值引用；面向研发负责人的 Jira 文本必须使用中文。
 

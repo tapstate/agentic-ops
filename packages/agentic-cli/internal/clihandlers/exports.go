@@ -60,6 +60,10 @@ func RunProfileValidate(args []string, stdout io.Writer) int {
 	return runProfileValidate(args, stdout)
 }
 
+func RunProfileResolve(args []string, stdout io.Writer) int {
+	return runProfileResolve(args, stdout)
+}
+
 func RunProfileUpdate(args []string, stdout io.Writer) int {
 	return runProfileUpdate(args, stdout)
 }

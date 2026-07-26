@@ -70,11 +70,10 @@ func runProfileValidate(args []string, stdout io.Writer) int {
 			NextAction:          "ask_owner",
 		}))
 	}
-	root, err := repoRoot()
+	profilePath, err := repoProjectProfilePath(workspaceName)
 	if err != nil {
 		return writeJSON(stdout, output.Failure("profile_validate", "repo_root_not_found", "未找到仓库根目录", "请在 AgenticOps 仓库内运行"))
 	}
-	profilePath := filepath.Join(repoBasicResourcesPath(root), "profiles", workspaceName+".yaml")
 	loadedProfile, err := profile.LoadFile(profilePath)
 	if err != nil {
 		return writeJSON(stdout, output.FailureWithContext("profile_validate", output.FailureContext{
@@ -109,6 +108,62 @@ func runProfileValidate(args []string, stdout io.Writer) int {
 		"workspace":   loadedProfile.Workspace,
 		"issues":      0,
 		"next_action": "continue",
+	}))
+}
+
+func runProfileResolve(args []string, stdout io.Writer) int {
+	workspaceName := workspaceNameFromArgsOrAgentConfig(args, "")
+	if workspaceName == "" {
+		return writeJSON(stdout, output.FailureWithContext("profile_resolve", output.FailureContext{
+			Code:                "missing_workspace",
+			Message:             "缺少 workspace",
+			RequiredHumanAction: "请提供 --workspace 或 --project",
+			TaskType:            "profile_resolution",
+			CurrentStage:        "profile_resolution",
+			NextAction:          "ask_owner",
+		}))
+	}
+	workspaceRoot, err := workspaceRoot()
+	if err != nil {
+		return writeJSON(stdout, output.Failure("profile_resolve", "workspace_root_failed", "无法读取当前工作目录", "请在项目 AI 工作空间中重试"))
+	}
+	resolution, err := resolveProfileWithLayers(workspaceName, workspaceRoot)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("profile_resolve", output.FailureContext{
+			Code:                "profile_resolve_failed",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查公司层、项目层、个人层和工作空间 overlay 是否存在且格式正确",
+			TaskType:            "profile_resolution",
+			CurrentStage:        "profile_resolution",
+			NextAction:          "fix_profile_layers",
+		}))
+	}
+	issues := profile.Validate(resolution.Effective)
+	if len(issues) == 0 {
+		registry, err := repoProcessRegistry()
+		if err != nil {
+			issues = append(issues, profile.ValidationIssue{Code: "standard_process_missing", Message: err.Error()})
+		} else {
+			issues = append(issues, profile.ValidateProcesses(resolution.Effective, registry)...)
+		}
+	}
+	if len(issues) > 0 {
+		return writeJSON(stdout, output.FailureWithContext("profile_resolve", output.FailureContext{
+			Code:                "profile_resolve_validation_failed",
+			Message:             "effective profile validation failed: " + issues[0].Code,
+			RequiredHumanAction: "请修复 profile 分层配置或 overlay 覆盖字段",
+			TaskType:            "profile_resolution",
+			CurrentStage:        "profile_resolution",
+			NextAction:          "fix_profile_layers",
+		}))
+	}
+	return writeJSON(stdout, output.Success("profile_resolve", map[string]any{
+		"workspace":    resolution.Effective.Workspace,
+		"jira_user":    resolution.Effective.Jira.User,
+		"jira_project": resolution.Effective.Jira.Project,
+		"source_root":  resolution.Effective.Local.SourceRoot,
+		"layers":       resolution.Layers,
+		"next_action":  "continue",
 	}))
 }
 

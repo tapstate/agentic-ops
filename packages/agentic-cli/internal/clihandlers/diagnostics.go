@@ -150,25 +150,27 @@ func checkWorkspaceRoot() map[string]string {
 }
 
 func checkProfile(workspaceName string) map[string]string {
-	path, err := repoProfilePath(workspaceName)
-	if err != nil {
-		return map[string]string{"status": "failed", "message": "repo root not found"}
-	}
-	loadedProfile, err := profile.LoadFile(path)
+	root, _ := workspaceRoot()
+	resolution, err := resolveProfileWithLayers(workspaceName, root)
 	if err != nil {
 		return map[string]string{"status": "failed", "message": err.Error()}
 	}
-	if issues := profile.Validate(loadedProfile); len(issues) > 0 {
+	if issues := profile.Validate(resolution.Effective); len(issues) > 0 {
 		return map[string]string{"status": "failed", "message": issues[0].Code}
 	}
 	registry, err := repoProcessRegistry()
 	if err != nil {
 		return map[string]string{"status": "failed", "message": err.Error()}
 	}
-	if issues := profile.ValidateProcesses(loadedProfile, registry); len(issues) > 0 {
+	if issues := profile.ValidateProcesses(resolution.Effective, registry); len(issues) > 0 {
 		return map[string]string{"status": "failed", "message": issues[0].Code}
 	}
-	return map[string]string{"status": "ok", "message": path}
+	for _, layer := range resolution.Layers {
+		if layer.Name == "project_package" {
+			return map[string]string{"status": "ok", "message": layer.Path}
+		}
+	}
+	return map[string]string{"status": "ok", "message": "effective profile resolved"}
 }
 
 func checkCurrentInstall(installDir string) map[string]string {

@@ -168,7 +168,7 @@ gh api -H 'Accept: application/vnd.github.raw' \
 - 项目 AI 工作空间目录。
 - 本地源码目录；未指定时默认使用当前项目 AI 工作空间下的 `repos/<project>`。
 
-`tapdata` 示例要求当前安装版本中存在匹配的 `install-resources/basic/profiles/tapdata.yaml`。Jira 项目、Jira 到代码仓库的映射、流程、表单和模板由该 profile 定义。本地 Jira 用户、项目 AI 工作空间目录、本地源码目录、运行日志目录和反馈目录由 `workspace init` 在当前工作空间内生成，不写入共享安装资源。
+`tapdata` 示例要求当前安装版本中存在匹配的 `install-resources/basic/projects/tapdata/profile.yaml`。Jira 项目、Jira 到代码仓库的映射、流程、表单和模板由项目包 profile 定义。本地 Jira 用户、项目 AI 工作空间目录、本地源码目录、运行日志目录和反馈目录由 `workspace init` 写入当前工作空间 `.agentic-ops/profile.local.yaml`，不复制完整共享 profile。
 
 ```sh
 agentic-cli workspace init --project tapdata --jira-user <your-jira-email>
@@ -180,10 +180,16 @@ agentic-cli workspace init --project tapdata --jira-user <your-jira-email>
 agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --source-root /path/to/source
 ```
 
-如果当前目录已经存在 `.agentic-ops/agent.json`、`.agentic-ops/profiles/<project>.yaml` 或 AgenticOps 管理的 `AGENTS.md` 配置块，初始化会停止并要求确认。确认需要覆盖已有本地配置时重新执行：
+如果当前目录已经存在 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml`、遗留 `.agentic-ops/profiles/<project>.yaml` 或 AgenticOps 管理的 `AGENTS.md` 配置块，初始化会停止并要求确认。确认需要覆盖已有本地配置时重新执行：
 
 ```sh
 agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --confirm-existing-config
+```
+
+查看最终合并结果和字段来源：
+
+```sh
+agentic-cli profile resolve --project tapdata
 ```
 
 ## 指挥 AIAgent

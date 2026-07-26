@@ -33,6 +33,29 @@ func TestProfileValidateOutputsIssueCount(t *testing.T) {
 	assertJSONField(t, stdout.String(), "next_action", "continue")
 }
 
+func TestProfileResolveMergesProjectPackageAndWorkspaceOverlay(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com"}, &bytes.Buffer{}, &bytes.Buffer{})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"profile", "resolve", "--project", "tapdata"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "profile_resolve")
+	assertJSONField(t, stdout.String(), "workspace", "tapdata")
+	assertJSONField(t, stdout.String(), "jira_user", "lead@example.com")
+	assertJSONField(t, stdout.String(), "source_root", filepath.Join(root, "repos", "tapdata"))
+	if !strings.Contains(stdout.String(), `"project_package"`) || !strings.Contains(stdout.String(), `"workspace_overlay"`) {
+		t.Fatalf("stdout missing source layers: %s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `projects/tapdata/profile.yaml`) {
+		t.Fatalf("stdout missing project profile source: %s", stdout.String())
+	}
+}
+
 func TestProfileUpdateAndRollbackUseLocalProfileBackup(t *testing.T) {
 	repo := t.TempDir()
 	t.Chdir(repo)
