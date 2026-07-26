@@ -12,6 +12,25 @@
 - 真实 Jira 写入、Git push、创建或更新 Pull Request、合并、发布、范围变更和线上风险相关动作必须先获得研发负责人确认。
 - AIAgent 可以准备计划、证据和命令，但不得绕过人工确认执行高风险副作用。
 
+## 交互语言
+
+- AIAgent 面向研发负责人、流程负责人、审阅者或 Jira 参与者的自然语言交互必须使用中文。
+- Jira 中人可见的摘要、标题、描述、评论、工作日志、证据正文、阻塞说明、补卡说明和任务审计记录必须使用中文。
+- Jira 字段名、状态名、`transition` 名称、`issue_key`、命令、配置字段、错误码、代码标识和日志关键字可以保留原始英文或缩写。
+- 不得把英文 Jira 字段值或命令输出原样贴给研发负责人作为结论；必须用中文解释影响、风险和需要人工处理的动作。
+
+## Git 提交
+
+- Git 提交必须围绕当前 Jira 卡片或当前标准资产变更，一个提交只包含一个逻辑变更。
+- 提交信息语言必须按项目规范执行，不得跨项目混用。
+- AgenticOps 内部项目提交标题和提交描述使用中文。
+- `type`、`scope`、Jira key、命令和配置字段作为结构化标识可以保留英文。
+- `tapstate`、`tapdata`、`cyntex` 业务项目提交标题和提交描述使用英文；`tapstate/agentic-ops` 属于 AgenticOps 内部项目，不套用 `tapstate` 业务项目提交语言规则。
+- 推荐格式为 `<type>(<scope>): <tag> <subject>`；没有 Jira key 或任务标签时省略 `<tag>`。
+- 允许的 `type` 为 `Feat`、`Fix`、`Docs`、`Style`、`Refactor`、`Test`、`Chore`。
+- 存在 Jira key 时必须在 subject 或 footer 中保留 `TAP-1234` 这类可追溯标签。
+- 非平凡提交必须包含 body，说明问题、处理方式、验证结果和风险；不得在提交信息中粘贴完整 Jira 描述、敏感日志或凭证。
+
 ## 保密
 
 - 不得提交 secrets、tokens、credentials、private keys 或原始敏感日志。

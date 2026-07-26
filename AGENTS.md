@@ -45,7 +45,9 @@ AgenticOps 第一个版本发布正式上线前，必须遵守 `docs/development
 
 面向用户、研发负责人和审阅者的可见文档标题默认使用中文。产品名、角色名、工具名、命令、配置字段、协议字段、文件名、目录名和稳定编号可以保留英文或缩写。
 
-Jira 交互中的人可见内容必须使用中文，包括标题、描述、评论、工作日志、证据正文、阻塞说明和补卡说明。Jira 字段名、状态名、transition 名称、issue key、命令、配置字段和协议字段可以保留原始英文或缩写。
+AIAgent 面向用户、研发负责人、流程负责人、审阅者或 Jira 参与者的自然语言交互必须使用中文。
+
+Jira 交互中的人可见内容必须使用中文，包括摘要、标题、描述、评论、工作日志、证据正文、阻塞说明、补卡说明和任务审计记录。Jira 字段名、状态名、transition 名称、issue key、命令、配置字段、协议字段、错误码、代码标识和日志关键字可以保留原始英文或缩写，但必须用中文解释结论、风险和需要人工处理的动作。
 
 目录名和文件名默认使用英文 ASCII lowercase-kebab-case。Markdown 正文以中文为主，首次出现关键术语时可中英并列。
 
@@ -66,11 +68,15 @@ AgenticCLI 使用 Go 实现，统一入口为 `agentic-cli`。shell 只用于 `g
 提交信息推荐格式：
 
 ```text
-<type>(<scope>): <subject>
+<type>(<scope>): <tag> <subject>
 ```
 
-`type` 和 `scope` 使用英文；`subject` 使用中文，简洁说明本次提交做了什么。常用类型：`Feat`、`Fix`、`Docs`、`Style`、`Refactor`、`Test`、`Chore`。
+AgenticOps 是内部项目，提交标题和提交描述正文使用中文。
 
-commit body / description 使用中文，说明做了什么、解决什么问题以及为什么这样做。
+`type`、`scope`、Jira key、命令和配置字段作为结构化标识可以保留英文。存在 Jira key 或任务标签时，从分支名、任务号或用户指令中提取 `TAP-1234` 这类 `<tag>`，没有则省略。常用类型：`Feat`、`Fix`、`Docs`、`Style`、`Refactor`、`Test`、`Chore`。
 
-每个提交只包含一个逻辑变更。非平凡提交必须包含中文 commit body / description。
+`scope` 使用英文模块名、包名或目录名；没有清晰模块时可以省略。`subject` 使用中文，简洁说明本次提交做了什么，末尾不加句号。
+
+commit body / description 使用中文，说明做了什么、解决什么问题、为什么这样做、验证结果和风险。非平凡提交必须包含 body。
+
+每个提交只包含一个逻辑变更。不得在提交信息中粘贴完整 Jira 描述、敏感日志、凭证或未经脱敏的客户信息。
