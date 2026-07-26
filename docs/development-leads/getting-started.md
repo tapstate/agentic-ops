@@ -1,6 +1,6 @@
 # 研发负责人上手
 
-本文面向使用 AgenticOps 指挥 AIAgent 处理日常 Jira 任务的研发负责人。研发负责人不需要理解 AgenticOps 源码结构，重点是完成安装、项目 AI 工作空间初始化，并让 AIAgent 按标准资产执行。
+本文面向使用 AgenticOps 指挥 AIAgent 处理日常 Jira 任务的研发负责人。重点是安装、初始化项目 AI 工作空间，并让 AIAgent 按标准资产执行。
 
 ## 快速开始
 
@@ -39,8 +39,10 @@ cd ~/agentic-ops-tapdata
 5. 初始化工作空间。
 
 ```sh
-agentic-cli workspace init --project tapdata --jira-user <your-jira-email>
+agentic-cli workspace init --project tapdata --interactive
 ```
+
+交互式初始化会复用已有配置，只询问缺失项。首次初始化时请准备 Jira 邮箱、Jira base URL 和 token 环境变量名；token 本身只放在本机环境变量中，不写入配置文件。
 
 6. 启动 Codex。
 
@@ -54,7 +56,7 @@ codex
 按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。
 ```
 
-这句话明确要求 AIAgent 先读取 `~/.agentic-ops/agent-guides.md`，再依赖当前项目 AI 工作空间中的 `AGENTS.md`、`.agentic-ops/agent.json`，以及安装目录 `~/.agentic-ops/install-resources/basic/` 下的 AI 资产。新 AIAgent 不需要、也不应依赖研发负责人本机的 Obsidian wiki、个人长期记忆或上一段聊天上下文完成初始化。
+AIAgent 会从全局指引、当前工作空间 `AGENTS.md` 和安装资产初始化，不依赖个人 wiki 或上一段聊天上下文。
 
 ### 路径 B：让 Codex 托管初始化
 
@@ -74,7 +76,7 @@ codex
 3. 让 Codex 托管安装、工作空间初始化和能力初始化。
 
 ```text
-安装 https://github.com/tapstate/agentic-ops/blob/main/agent-init.md 并初始化。项目是 tapdata，Jira 用户是 <your-jira-email>。
+安装 https://github.com/tapstate/agentic-ops/blob/main/agent-init.md 并初始化。项目是 tapdata，请使用交互式引导配置项目 AI 工作空间和 Jira 连接。
 ```
 
 ### 下一步指令
@@ -159,51 +161,66 @@ gh api -H 'Accept: application/vnd.github.raw' \
 
 ## 工作空间初始化
 
-`~/.agentic-ops` 是全局安装目录，也是 AgenticOps 的 managed clone；项目 AI 工作空间是具体业务项目的运行目录，例如 `tapstate/` 或 `tapdata/`。不要在 `~/.agentic-ops` 或 AgenticOps 源头仓库中初始化业务工作空间。
+不要在 `~/.agentic-ops` 或 AgenticOps 源头仓库中初始化业务工作空间。项目 AI 工作空间是具体业务项目的运行目录，例如 `~/agentic-ops-tapdata`。
 
-初始化时需要明确：
-
-- Jira 用户。
-- 项目配置项，例如 `tapdata`。
-- 项目 AI 工作空间目录。
-- 本地源码目录；未指定时默认使用当前项目 AI 工作空间下的 `repos/<project>`。
-
-`tapdata` 示例要求当前安装版本中存在匹配的 `install-resources/basic/projects/tapdata/profile.yaml`。Jira 项目、Jira 到代码仓库的映射、流程、表单和模板由项目包 profile 定义。本地 Jira 用户、项目 AI 工作空间目录、本地源码目录、运行日志目录和反馈目录由 `workspace init` 写入当前工作空间 `.agentic-ops/profile.local.yaml`，不复制完整共享 profile。
-
-推荐使用交互式初始化，让 CLI 检查已有配置并只询问缺失项：
+推荐命令：
 
 ```sh
+mkdir -p ~/agentic-ops-tapdata
+cd ~/agentic-ops-tapdata
 agentic-cli workspace init --project tapdata --interactive
 ```
 
-脚本、CI 或非终端环境使用完整参数形式：
+交互式初始化会检查已有配置，只询问缺失项。首次初始化前准备好：
+
+- 项目配置项，例如 `tapdata`。
+- Jira 邮箱和 Jira base URL。
+- token 环境变量名，默认 `AGENTIC_OPS_JIRA_API_TOKEN`。
+- 本地源码目录；默认是当前工作空间下的 `repos/<project>`。
+
+脚本、CI 或非终端环境使用参数形式：
 
 ```sh
 agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --jira-base-url https://your-domain.atlassian.net
 ```
 
-如果源码目录不是默认的 `repos/tapdata`，初始化时显式确认：
+源码目录不是 `repos/tapdata` 时：
 
 ```sh
 agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --jira-base-url https://your-domain.atlassian.net --source-root /path/to/source
 ```
 
-如果当前目录已经存在 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 或 AgenticOps 管理的 `AGENTS.md` 配置块，初始化会停止并要求确认。确认需要覆盖已有本地配置时重新执行：
+已有 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 或 AgenticOps 管理的 `AGENTS.md` 时，初始化会停止。确认覆盖后再执行：
 
 ```sh
 agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --confirm-existing-config
 ```
 
+初始化成功后重点看：
+
+- `jira_config_status`：`configured`、`needs_token_env` 或 `needs_configuration`。
+- `profile_overlay`：当前工作空间的 `.agentic-ops/profile.local.yaml`。
+- `agent_instructions`：当前工作空间的 `AGENTS.md`。
+
+再运行：
+
+```sh
+agentic-cli profile resolve --project tapdata
+agentic-cli preflight
+```
+
 ## Jira 连接配置
 
-`workspace init` 不会复制或写入 Jira API token。交互式初始化会从已有环境变量、当前工作空间配置和个人项目层配置读取默认值，已配置项只需回车确认，缺失项才会询问。初始化时提供或确认 Jira base URL 后，CLI 会在个人项目层生成 `$AGENTIC_OPS_HOME/user/projects/<project>/jira.local.yaml`，并默认使用 `AGENTIC_OPS_JIRA_API_TOKEN` 作为 token 环境变量名。`agentic-cli list-tasks` 需要真实 Jira adapter，CLI 会按以下顺序读取运行时本地配置：
+`workspace init` 不写入 Jira API token。它只记录 base URL、email 和 `api_token_env`，token 放在本机环境变量中。
+
+`agentic-cli list-tasks` 读取真实 Jira 配置的顺序：
 
 1. 显式环境变量：`AGENTIC_OPS_JIRA_ADAPTER=real`、`AGENTIC_OPS_JIRA_BASE_URL`、`AGENTIC_OPS_JIRA_EMAIL`、`AGENTIC_OPS_JIRA_API_TOKEN`。
 2. 当前项目 AI 工作空间：`.agentic-ops/jira.local.yaml`。
 3. 个人项目层：`$AGENTIC_OPS_HOME/user/projects/<project>/jira.local.yaml`。
 4. 个人全局层：`$AGENTIC_OPS_HOME/user/jira.local.yaml`。
 
-推荐把非敏感连接信息放在个人层，并用 `api_token_env` 引用本机环境变量：
+配置示例：
 
 ```yaml
 adapter: real
@@ -212,16 +229,24 @@ email: your-email@example.com
 api_token_env: AGENTIC_OPS_JIRA_API_TOKEN
 ```
 
-如果需要自定义 token 环境变量名：
+自定义 token 环境变量名：
 
 ```sh
 agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --jira-base-url https://your-domain.atlassian.net --jira-token-env TAPDATA_JIRA_TOKEN
 ```
 
-查看最终合并结果和字段来源：
+`needs_token_env` 时：
 
 ```sh
-agentic-cli profile resolve --project tapdata
+read -s AGENTIC_OPS_JIRA_API_TOKEN
+export AGENTIC_OPS_JIRA_API_TOKEN
+agentic-cli list-tasks
+```
+
+`needs_configuration` 时：
+
+```sh
+agentic-cli workspace init --project tapdata --interactive
 ```
 
 ## 指挥 AIAgent
@@ -236,9 +261,7 @@ agentic-cli profile resolve --project tapdata
 提交 TAP-123 本次执行的任务审计记录。
 ```
 
-AIAgent 应读取 [AI 资产入口](../../install-resources/basic/ai-assets/README.md)，再按 AI 员工手册、操作契约、工作流配置、策略和模板推进。研发负责人不应要求 AIAgent 依赖临场聊天上下文猜流程。
-
-当研发负责人说“按 `~/.agentic-ops/agent-guides.md` 启用 AgenticOps。”时，AIAgent 应先读取全局指引，再使用当前工作空间生成的 `AGENTS.md`、`.agentic-ops/agent.json` 和 `agentic-cli agent init` 输出定位本地 AI 资产入口；不得要求读取研发负责人个人 wiki。
+AIAgent 应按全局指引和当前工作空间资产执行，不依赖临场聊天上下文猜流程。
 
 ## 人工确认点
 

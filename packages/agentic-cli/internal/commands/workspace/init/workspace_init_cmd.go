@@ -13,6 +13,7 @@ func Register(registry *cmdkit.Registry) {
 		Examples: []string{
 			"agentic-cli workspace init --project tapdata --interactive",
 			"agentic-cli workspace init --project tapdata --jira-user lead@example.com --jira-base-url https://jira.example.test --jira-token-env AGENTIC_OPS_JIRA_API_TOKEN",
+			"agentic-cli workspace init --project tapdata --interactive --source-root /path/to/tapdata",
 		},
 		Contract: "workspace_init",
 		Run: func(ctx cmdkit.Context, args []string) int {
