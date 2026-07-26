@@ -48,7 +48,7 @@ rm -f "$policy_backup"
 $cmd doctor --workspace tapstate | grep '"operation":"doctor"'
 $cmd preflight --workspace tapstate | grep '"operation":"preflight"'
 $cmd workspace init --project tapstate --jira-user dev@example.com | grep '"operation":"workspace_init"'
-$cmd workspace init --project tapstate --jira-user dev@example.com | grep '"profile":'
+$cmd workspace init --project tapstate --jira-user dev@example.com --confirm-existing-config | grep '"profile":'
 $cmd agent init --workspace tapstate | grep '"operation":"agent_init"'
 $cmd list-tasks --workspace tapstate | grep '"key":"TAP-123"'
 $cmd task run TAP-123 --workspace tapstate --process empty | grep '"capability_id":"empty_task_v1"'

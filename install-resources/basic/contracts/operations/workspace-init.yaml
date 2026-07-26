@@ -17,13 +17,22 @@ input:
   jira_project:
     type: string
     required: false
+  source_root:
+    type: string
+    required: false
+  confirm_existing_config:
+    type: boolean
+    required: false
 preconditions:
   - workspace_root_must_be_available
   - workspace_root_must_be_writable
+  - existing_config_requires_confirmation
 output:
   workspace:
     type: string
   workspace_root:
+    type: string
+  source_root:
     type: string
   jira_user:
     type: string
@@ -48,6 +57,7 @@ failure:
     - missing_workspace
     - missing_project
     - missing_jira_user
+    - existing_config_confirmation_required
     - workspace_root_failed
     - workspace_init_failed
     - agent_config_failed

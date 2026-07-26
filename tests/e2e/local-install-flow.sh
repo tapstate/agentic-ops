@@ -48,11 +48,19 @@ test -x "$cmd"
 test -f "$home_dir/.agentic-ops/install-resources/basic/profiles/tapdata.yaml"
 
 cd "$workspace_root"
-"$cmd" workspace init --project tapdata --jira-user harsen@tapdata.io | grep '"operation":"workspace_init"'
+mkdir -p "$workspace_root/repos/tapdata"
+"$cmd" workspace init --project tapdata --jira-user lead@example.com | grep '"operation":"workspace_init"'
 "$cmd" agent init | grep '"workspace":"tapdata"'
 AGENTIC_OPS_WORKSPACE_ROOT="$workspace_root" "$cmd" preflight | grep '"workspace":"tapdata"'
 
 test -f "$workspace_root/.agentic-ops/profiles/tapdata.yaml"
+grep "source_root: $workspace_root/repos/tapdata" "$workspace_root/.agentic-ops/profiles/tapdata.yaml" >/dev/null
+maintainer_path_pattern='/Users/lhs/works/'"spaces"
+local_user_pattern='user: lead@'"example.com"
+if grep -E "$maintainer_path_pattern|$local_user_pattern" "$home_dir/.agentic-ops/install-resources/basic/profiles/tapdata.yaml"; then
+  echo "shared install profile must not contain maintainer-local configuration" >&2
+  exit 1
+fi
 test -f "$workspace_root/.agentic-ops/agent.json"
 test -f "$workspace_root/AGENTS.md"
 

@@ -1,7 +1,7 @@
 workspace: tapdata
 
 jira:
-  user: harsen@tapdata.io
+  user: "<jira-user>"
   project: TAP
   task_query: "project = TAP AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC"
 
@@ -109,11 +109,11 @@ github:
       Bug: tapdata/tapdata
 
 local:
-  workspace_root: "/Users/lhs/works/spaces/agentic-ops-tapdata"
-  source_root: "/Users/lhs/works/spaces/agentic-ops-tapdata/repos/tapdata"
-  runs_dir: "/Users/lhs/works/spaces/agentic-ops-tapdata/.agentic-ops/runs"
-  run_logs_dir: "/Users/lhs/works/spaces/agentic-ops-tapdata/.agentic-ops/run-logs"
-  feedback_dir: "/Users/lhs/works/spaces/agentic-ops-tapdata/.agentic-ops/feedback"
+  workspace_root: "<project-ai-workspace>"
+  source_root: "<project-ai-workspace>/repos/tapdata"
+  runs_dir: "<project-ai-workspace>/.agentic-ops/runs"
+  run_logs_dir: "<project-ai-workspace>/.agentic-ops/run-logs"
+  feedback_dir: "<project-ai-workspace>/.agentic-ops/feedback"
 
 standards:
   - standards/tapdata-development-rules.md

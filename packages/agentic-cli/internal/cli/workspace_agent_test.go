@@ -49,13 +49,77 @@ func TestWorkspaceInitMaterializesWorkspaceProfile(t *testing.T) {
 	if !strings.Contains(string(data), "workspace: tapdata") || !strings.Contains(string(data), "user: lead@example.com") || !strings.Contains(string(data), "project: TAP") {
 		t.Fatalf("materialized profile mismatch: %s", string(data))
 	}
-	if !strings.Contains(string(data), "source_root: /Users/lhs/works/spaces/agentic-ops-tapdata/repos/tapdata") {
-		t.Fatalf("materialized profile missing repos source root: %s", string(data))
+	for _, want := range []string{
+		"workspace_root: " + root,
+		"source_root: " + filepath.Join(root, "repos", "tapdata"),
+		"runs_dir: " + filepath.Join(root, ".agentic-ops", "runs"),
+		"run_logs_dir: " + filepath.Join(root, ".agentic-ops", "run-logs"),
+		"feedback_dir: " + filepath.Join(root, ".agentic-ops", "feedback"),
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("materialized profile missing %s: %s", want, string(data))
+		}
 	}
 	if !strings.Contains(string(data), "standards/tapdata-development-rules.md") {
 		t.Fatalf("materialized profile missing tapdata standards: %s", string(data))
 	}
 	assertJSONField(t, stdout.String(), "profile", profilePath)
+}
+
+func TestWorkspaceInitRequiresConfirmationBeforeReplacingExistingConfig(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com"}, &bytes.Buffer{}, &bytes.Buffer{})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "other@example.com"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "existing_config_confirmation_required")
+	if !strings.Contains(stdout.String(), "--confirm-existing-config") {
+		t.Fatalf("stdout missing confirmation guidance: %s", stdout.String())
+	}
+}
+
+func TestWorkspaceInitCanReplaceExistingConfigAfterConfirmation(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com"}, &bytes.Buffer{}, &bytes.Buffer{})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "other@example.com", "--confirm-existing-config"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "jira_user", "other@example.com")
+	data, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "profiles", "tapdata.yaml"))
+	if err != nil {
+		t.Fatalf("read profile error = %v", err)
+	}
+	if !strings.Contains(string(data), "user: other@example.com") {
+		t.Fatalf("profile was not replaced after confirmation: %s", string(data))
+	}
+}
+
+func TestWorkspaceInitAcceptsConfirmedSourceRoot(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot := filepath.Join(root, "repos", "custom-source")
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com", "--source-root", sourceRoot}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "source_root", sourceRoot)
+	data, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "profiles", "tapdata.yaml"))
+	if err != nil {
+		t.Fatalf("read profile error = %v", err)
+	}
+	if !strings.Contains(string(data), "source_root: "+sourceRoot) {
+		t.Fatalf("profile missing confirmed source root: %s", string(data))
+	}
 }
 
 func TestWorkspaceInitWritesAgentConfigForCodexActivation(t *testing.T) {

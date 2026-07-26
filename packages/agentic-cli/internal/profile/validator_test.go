@@ -30,13 +30,13 @@ func TestValidateAcceptsTapdataProfile(t *testing.T) {
 	if p.Workspace != "tapdata" {
 		t.Fatalf("Workspace = %s", p.Workspace)
 	}
-	if p.Jira.User != "harsen@tapdata.io" {
+	if p.Jira.User != "<jira-user>" {
 		t.Fatalf("Jira.User = %s", p.Jira.User)
 	}
 	if p.Jira.Project != "TAP" {
 		t.Fatalf("Jira.Project = %s", p.Jira.Project)
 	}
-	if p.Local.SourceRoot != "/Users/lhs/works/spaces/agentic-ops-tapdata/repos/tapdata" {
+	if p.Local.SourceRoot != "<project-ai-workspace>/repos/tapdata" {
 		t.Fatalf("Local.SourceRoot = %s", p.Local.SourceRoot)
 	}
 	if !containsString(p.Standards, "standards/tapdata-development-rules.md") {
@@ -53,8 +53,8 @@ func TestValidateAcceptsTapdataProfile(t *testing.T) {
 		"run_logs_dir":   p.Local.RunLogsDir,
 		"feedback_dir":   p.Local.FeedbackDir,
 	} {
-		if strings.Contains(value, "<project-ai-workspace>") {
-			t.Fatalf("%s still contains placeholder: %s", name, value)
+		if !strings.Contains(value, "<project-ai-workspace>") {
+			t.Fatalf("%s should keep shared install placeholder: %s", name, value)
 		}
 	}
 }

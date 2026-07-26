@@ -29,6 +29,8 @@ func runWorkspaceInit(args []string, stdout io.Writer) int {
 	jiraUser := readFlag(args, "--jira-user", "")
 	jiraProjectOverride := readFlag(args, "--jira-project", "")
 	agentType := readFlag(args, "--agent-type", "codex")
+	confirmExistingConfig := hasFlag(args, "--confirm-existing-config")
+	sourceRoot := readFlag(args, "--source-root", "")
 	if jiraUser == "" {
 		return writeJSON(stdout, output.Failure("workspace_init", "missing_jira_user", "缺少 Jira 用户", "请提供 --jira-user"))
 	}
@@ -40,7 +42,17 @@ func runWorkspaceInit(args []string, stdout io.Writer) int {
 	if err != nil {
 		return writeJSON(stdout, output.Failure("workspace_init", "workspace_init_failed", err.Error(), "请检查工作空间目录权限"))
 	}
-	profilePath, jiraProject, err := materializeWorkspaceProfile(info, jiraUser, jiraProjectOverride)
+	if existing := existingWorkspaceConfigPaths(info); len(existing) > 0 && !confirmExistingConfig {
+		return writeJSON(stdout, output.FailureWithContext("workspace_init", output.FailureContext{
+			Code:                "existing_config_confirmation_required",
+			Message:             "工作空间已有 AgenticOps 本地配置",
+			RequiredHumanAction: "请确认是否覆盖已有配置；确认后使用 --confirm-existing-config 重新执行 workspace init",
+			TaskType:            "workspace_initialization",
+			CurrentStage:        "config_confirmation",
+			NextAction:          "confirm_existing_config",
+		}))
+	}
+	profilePath, jiraProject, materializedSourceRoot, err := materializeWorkspaceProfile(info, jiraUser, jiraProjectOverride, sourceRoot)
 	if err != nil {
 		return writeJSON(stdout, output.FailureWithContext("workspace_init", output.FailureContext{
 			Code:                "workspace_profile_failed",
@@ -62,6 +74,7 @@ func runWorkspaceInit(args []string, stdout io.Writer) int {
 	return writeJSON(stdout, output.Success("workspace_init", map[string]any{
 		"workspace":          info.Name,
 		"workspace_root":     info.Root,
+		"source_root":        materializedSourceRoot,
 		"jira_user":          jiraUser,
 		"jira_project":       jiraProject,
 		"profile":            profilePath,
@@ -74,41 +87,67 @@ func runWorkspaceInit(args []string, stdout io.Writer) int {
 	}))
 }
 
-func materializeWorkspaceProfile(info workspace.Info, jiraUser string, jiraProjectOverride string) (string, string, error) {
+func materializeWorkspaceProfile(info workspace.Info, jiraUser string, jiraProjectOverride string, sourceRootOverride string) (string, string, string, error) {
 	sourcePath, err := repoProfilePath(info.Name)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	loadedProfile, err := profile.LoadFile(sourcePath)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if loadedProfile.Workspace != info.Name {
-		return "", "", fmt.Errorf("profile workspace %q does not match project %q", loadedProfile.Workspace, info.Name)
+		return "", "", "", fmt.Errorf("profile workspace %q does not match project %q", loadedProfile.Workspace, info.Name)
 	}
 	if jiraProjectOverride != "" && loadedProfile.Jira.Project != jiraProjectOverride {
-		return "", "", fmt.Errorf("profile jira.project %q does not match %q", loadedProfile.Jira.Project, jiraProjectOverride)
+		return "", "", "", fmt.Errorf("profile jira.project %q does not match %q", loadedProfile.Jira.Project, jiraProjectOverride)
+	}
+	sourceRoot := strings.TrimSpace(sourceRootOverride)
+	if sourceRoot == "" {
+		sourceRoot = filepath.Join(info.Root, "repos", info.Name)
 	}
 	loadedProfile.Jira.User = jiraUser
+	loadedProfile.Local.WorkspaceRoot = info.Root
+	loadedProfile.Local.SourceRoot = sourceRoot
+	loadedProfile.Local.RunsDir = info.RunsDir
+	loadedProfile.Local.RunLogsDir = info.RunLogsDir
+	loadedProfile.Local.FeedbackDir = info.FeedbackDir
 	if issues := profile.Validate(loadedProfile); len(issues) > 0 {
-		return "", "", fmt.Errorf("workflow profile validation failed: %s", issues[0].Code)
+		return "", "", "", fmt.Errorf("workflow profile validation failed: %s", issues[0].Code)
 	}
 	registry, err := repoProcessRegistry()
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if issues := profile.ValidateProcesses(loadedProfile, registry); len(issues) > 0 {
-		return "", "", fmt.Errorf("workflow profile process validation failed: %s", issues[0].Code)
+		return "", "", "", fmt.Errorf("workflow profile process validation failed: %s", issues[0].Code)
 	}
 	data, err := yaml.Marshal(loadedProfile)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	targetPath := filepath.Join(info.ProfilesDir, info.Name+".yaml")
 	if err := os.WriteFile(targetPath, data, 0o644); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
-	return targetPath, loadedProfile.Jira.Project, nil
+	return targetPath, loadedProfile.Jira.Project, sourceRoot, nil
+}
+
+func existingWorkspaceConfigPaths(info workspace.Info) []string {
+	candidates := []string{
+		filepath.Join(info.Root, ".agentic-ops", "agent.json"),
+		filepath.Join(info.ProfilesDir, info.Name+".yaml"),
+	}
+	var existing []string
+	for _, path := range candidates {
+		if stat, err := os.Stat(path); err == nil && !stat.IsDir() {
+			existing = append(existing, path)
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(info.Root, "AGENTS.md")); err == nil && strings.Contains(string(data), "BEGIN AGENTICOPS MANAGED BLOCK") {
+		existing = append(existing, filepath.Join(info.Root, "AGENTS.md"))
+	}
+	return existing
 }
 
 func writeAgentConfig(info workspace.Info, jiraUser string, jiraProject string, profilePath string, agentType string) (string, error) {

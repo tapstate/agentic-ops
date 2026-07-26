@@ -39,7 +39,7 @@ cd ~/agentic-ops-tapdata
 5. 初始化工作空间。
 
 ```sh
-agentic-cli workspace init --project tapdata --jira-user harsen@tapdata.io
+agentic-cli workspace init --project tapdata --jira-user <your-jira-email>
 ```
 
 6. 启动 Codex。
@@ -74,7 +74,7 @@ codex
 3. 让 Codex 托管安装、工作空间初始化和能力初始化。
 
 ```text
-安装 https://github.com/tapstate/agentic-ops/blob/main/agent-init.md 并初始化。项目是 tapdata，Jira 用户是 harsen@tapdata.io。
+安装 https://github.com/tapstate/agentic-ops/blob/main/agent-init.md 并初始化。项目是 tapdata，Jira 用户是 <your-jira-email>。
 ```
 
 ### 下一步指令
@@ -166,11 +166,24 @@ gh api -H 'Accept: application/vnd.github.raw' \
 - Jira 用户。
 - 项目配置项，例如 `tapdata`。
 - 项目 AI 工作空间目录。
+- 本地源码目录；未指定时默认使用当前项目 AI 工作空间下的 `repos/<project>`。
 
-`tapdata` 示例要求当前安装版本中存在匹配的 `install-resources/basic/profiles/tapdata.yaml`。Jira 项目、Jira 到代码仓库的映射、本地源码根目录和工作流配置由该 profile 定义。初始化会在当前目录生成 `.agentic-ops/agent.json` 和 `AGENTS.md`，用于让 Codex 识别当前项目并知道如何调用 `agentic-cli`。
+`tapdata` 示例要求当前安装版本中存在匹配的 `install-resources/basic/profiles/tapdata.yaml`。Jira 项目、Jira 到代码仓库的映射、流程、表单和模板由该 profile 定义。本地 Jira 用户、项目 AI 工作空间目录、本地源码目录、运行日志目录和反馈目录由 `workspace init` 在当前工作空间内生成，不写入共享安装资源。
 
 ```sh
-agentic-cli workspace init --project tapdata --jira-user harsen@tapdata.io
+agentic-cli workspace init --project tapdata --jira-user <your-jira-email>
+```
+
+如果源码目录不是默认的 `repos/tapdata`，初始化时显式确认：
+
+```sh
+agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --source-root /path/to/source
+```
+
+如果当前目录已经存在 `.agentic-ops/agent.json`、`.agentic-ops/profiles/<project>.yaml` 或 AgenticOps 管理的 `AGENTS.md` 配置块，初始化会停止并要求确认。确认需要覆盖已有本地配置时重新执行：
+
+```sh
+agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --confirm-existing-config
 ```
 
 ## 指挥 AIAgent

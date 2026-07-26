@@ -10,7 +10,7 @@
 
 ## 身份与任务
 
-- Git identity 必须是 `harsen <harsen@tapdata.io>`。
+- Git identity 必须使用研发负责人在本地配置中确认的姓名和邮箱；未确认或与当前执行身份不一致时必须停止。
 - 单次执行只处理一个 Jira 卡片。
 - 开始前必须读取 Jira 当前状态、`assignee`、任务类型、验收要求、目标仓库和验证方式。
 - Jira 人可见标题、描述、评论、工作日志、证据正文、阻塞说明和补卡说明必须使用中文。
@@ -18,7 +18,7 @@
 
 ## 仓库与分支
 
-- 业务仓库必须位于项目 AI 工作空间的 `repos/` 目录下，例如 `/Users/lhs/works/spaces/agentic-ops-tapdata/repos/tapdata`。
+- 业务仓库必须位于项目 AI 工作空间的 `repos/` 目录下，例如 `<project-ai-workspace>/repos/tapdata`。
 - 修改前必须先更新代码。
 - 不得直接提交到 `main`、`develop`、`master` 或 `release-*`。
 - 即使远程凭证允许，也不得直接推送到受保护分支。

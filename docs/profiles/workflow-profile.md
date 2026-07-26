@@ -19,7 +19,7 @@ AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira 工作
 - 标准流程映射，把 `task_class` 映射到 Standard Process Registry 中的 `process_id`。
 - Jira 状态和 `transition` 映射。
 - 专业审查节点和对应角色映射。
-- Jira 空间到代码仓库的映射：一个 Jira 空间可以对应若干 GitHub 仓库，必须说明默认仓库、匹配规则和本地源码目录。
+- Jira 空间到代码仓库的映射：一个 Jira 空间可以对应若干 GitHub 仓库，必须说明默认仓库和匹配规则；本地源码目录由工作空间初始化生成，可使用共享 profile 的占位默认值。
 - 允许的写操作。
 - 人工确认点。
 - 重试和重做规则。
@@ -129,7 +129,9 @@ templates:
 - `Profile` 必须适配 Standard Process Registry；AIAgent 先识别 `task_class`，再选择 `process_id`。
 - `Profile.workspace` 必须与 profile 文件名中的项目配置项一致，例如 `tapdata.yaml` 对应 `workspace: tapdata`。
 - `Profile.jira.project` 是该项目配置项绑定的 Jira project；快速开始初始化不要求研发负责人重复输入。
-- `Profile.jira.user` 在共享 profile 中可以是默认值或占位值；`workspace init` 会使用研发负责人提供的 Jira 用户写入项目 AI 工作空间中的本地 profile。
+- `Profile.jira.user` 在共享 profile 中只能使用默认占位值；`workspace init` 会使用研发负责人提供的 Jira 用户写入项目 AI 工作空间中的本地 profile。
+- `Profile.local.*` 在共享 profile 中只能使用 `<project-ai-workspace>` 这类占位值；`workspace init` 会把它们物化为当前项目 AI 工作空间中的本地路径。源码目录默认是 `<project-ai-workspace>/repos/<project>`，研发负责人可以通过 `--source-root` 显式确认其它目录。
+- 如果项目 AI 工作空间已有 `.agentic-ops/agent.json`、`.agentic-ops/profiles/<project>.yaml` 或 AgenticOps 管理的 `AGENTS.md` 配置块，`workspace init` 必须停止并要求研发负责人确认；确认覆盖时使用 `--confirm-existing-config`。
 - `Profile` 必须说明关键专业审查节点如何映射到标准字段、Jira 状态、拉取请求审查、CI 或人工确认。
 - `Profile` 必须说明失败后允许重试还是必须重做前序阶段。
 - `Profile` 必须能被 `agentic-cli preflight` 校验。
