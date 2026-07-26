@@ -51,10 +51,10 @@ func TestRealClientSearchIssuesMapsProfileFields(t *testing.T) {
 	if got.Key != "TAP-123" || got.Owner != "account-123" || got.Assignee != "account-123" {
 		t.Fatalf("issue owner mapping failed: %+v", got)
 	}
-	if got.TargetRepo != "tapstate/example-repo" || got.AcceptanceCriteria != "单元测试通过" || got.VerificationMethod != "go test ./..." {
+	if got.TargetRepo != "tapstate/example-repo" || got.FormValues["acceptance_criteria"] != "单元测试通过" || got.FormValues["verification_method"] != "go test ./..." {
 		t.Fatalf("issue standard field mapping failed: %+v", got)
 	}
-	if got.RiskLevel != "low" || got.CurrentAgentID != "agent-1" {
+	if got.FormValues["risk_level"] != "low" || got.CurrentAgentID != "agent-1" {
 		t.Fatalf("issue gate field mapping failed: %+v", got)
 	}
 	if strings.Join(got.Labels, ",") != "cli,investigation" || strings.Join(got.Components, ",") != "api" {
@@ -94,8 +94,34 @@ func TestRealClientMapsRiskLevelFromLabels(t *testing.T) {
 	if len(issues) != 1 {
 		t.Fatalf("len = %d", len(issues))
 	}
-	if got := issues[0].RiskLevel; got != "T3" {
+	if got := issues[0].FormValues["risk_level"]; got != "T3" {
 		t.Fatalf("RiskLevel = %q, want %q", got, "T3")
+	}
+}
+
+func TestRealClientMapsAgentOwnershipFromLatestAgenticOpsComment(t *testing.T) {
+	client := newTestRealClient(t, func(r *http.Request) *http.Response {
+		assertRealJiraRequest(t, r, http.MethodGet, "/rest/api/3/issue/TAP-125")
+		if got := r.URL.Query().Get("fields"); !strings.Contains(got, "comment") {
+			t.Fatalf("fields query should include comment when profile uses jira_comment: %s", got)
+		}
+		return jsonResponse(http.StatusOK, `{"key":"TAP-125","fields":{"summary":"Comment ownership task","assignee":{"accountId":"account-123"},"issuetype":{"name":"Task"},"status":{"name":"To Do"},"labels":[],"components":[],"comment":{"comments":[{"id":"1","body":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"AgenticOps ownership"}]},{"type":"paragraph","content":[{"type":"text","text":"current_agent_id: old-agent"}]},{"type":"paragraph","content":[{"type":"text","text":"takeover_at: 2026-07-20T10:30:12Z"}]}]}},{"id":"2","body":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"AgenticOps ownership"}]},{"type":"paragraph","content":[{"type":"text","text":"current_agent_id: agentic-cli-local-agent"}]},{"type":"paragraph","content":[{"type":"text","text":"takeover_at: 2026-07-21T10:30:12Z"}]}]}}]}}}`)
+	})
+	client.profile.JiraFormMapping.Fields["current_agent_id"] = profile.FormField{Source: "jira_comment"}
+	client.profile.JiraFormMapping.Fields["takeover_at"] = profile.FormField{Source: "jira_comment"}
+
+	issue, ok, err := client.GetIssueByKey(context.Background(), "tapstate", "TAP-125")
+	if err != nil {
+		t.Fatalf("GetIssueByKey error = %v", err)
+	}
+	if !ok {
+		t.Fatal("issue not found")
+	}
+	if issue.CurrentAgentID != "agentic-cli-local-agent" {
+		t.Fatalf("CurrentAgentID = %q", issue.CurrentAgentID)
+	}
+	if issue.FormValues["takeover_at"] != "2026-07-21T10:30:12Z" {
+		t.Fatalf("takeover_at = %q", issue.FormValues["takeover_at"])
 	}
 }
 

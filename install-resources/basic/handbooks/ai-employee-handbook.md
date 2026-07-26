@@ -83,6 +83,7 @@ AI 员工必须优先通过 `agentic-cli` 调用操作。以下命令是标准�
 agentic-cli preflight --workspace tapstate
 agentic-cli list-tasks --workspace tapstate
 agentic-cli task run TAP-123 --workspace tapstate
+agentic-cli inspect-task TAP-123 --workspace tapstate
 agentic-cli takeover-task TAP-123 --workspace tapstate
 agentic-cli resume-takeover --run-id <run_id> --workspace tapstate
 agentic-cli inspect-workspace --workspace tapstate
@@ -101,6 +102,8 @@ agentic-cli feedback report --workspace tapstate --date <yyyy-mm-dd>
 `feedback report` 是按需分析工具，不是每天必须生成的日报。AI 员工完成一个任务、阻塞交接或进入完成清理节点时，必须优先提交任务级审计记录。
 
 AI 员工不应直接依赖 Jira 字段名、Jira 状态名或 Jira `transition` 名称做判断。
+
+`agentic-cli inspect-task` 是只读事实检查操作。它只输出 Jira 事实、表单值、通用门禁事实和项目资产引用，不判断项目准入是否通过，不写 Jira，不绑定 AIAgent。AIAgent 必须基于该输出和项目标准资产判断是否需要补卡、分析或请求研发负责人确认。
 
 `agentic-cli tapdata branch-align` 是 Tapdata 项目级研发基础工具。命令支持 `list`、`status`、`plan`、`apply`，其中 `plan` 只读，`apply` 只在分支对齐计划无 blocked 行时切换本地多仓分支；命令不推送、不写 Jira、不写 GitHub、不创建拉取请求。
 

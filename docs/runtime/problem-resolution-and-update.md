@@ -214,7 +214,7 @@ agentic-cli profile rollback --workspace tapstate
 }
 ```
 
-## 9. 修复路径三：Jira 卡片属性丢失
+## 9. 修复路径三：Jira 卡片事实不足
 
 适用场景：
 
@@ -224,32 +224,37 @@ agentic-cli profile rollback --workspace tapstate
 - 缺少负责人字段。
 - 缺少风险等级或范围边界。
 
-这类问题默认不是工具自动修复，而是任务数据质量问题。AgenticOps 必须停止接管，并输出明确补全动作。
+这类问题默认不是 CLI 自动修复，也不属于 `takeover-task` 的项目准入判断范围。AIAgent 必须先执行只读检查，结合项目资产判断卡片事实是否足够；如果不足，应输出分析结果和补卡建议，由研发负责人确认后再回写 Jira。
 
 示例：
 
 ```json
 {
-  "ok": false,
-  "operation": "takeover_task",
-  "code": "missing_target_repo",
-  "message": "Jira 卡片缺少目标仓库信息",
-  "required_human_action": "请在 Jira 卡片补充目标仓库，或维护工作空间代码仓库映射",
-  "missing_field": "target_repo",
-  "completion_template": "# Jira 卡片信息缺失\n\nAgenticOps 无法继续接管该任务，因为 Jira 卡片缺少必要信息。\n\n- 缺失字段：`target_repo`\n- 当前操作：`takeover_task`\n- 建议动作：请补充该字段，或维护工作流配置中的字段映射。\n"
+  "ok": true,
+  "operation": "inspect_task",
+  "issue_key": "TAP-123",
+  "form_values": {
+    "target_repo": "",
+    "problem_branch": "release-v4.0.0"
+  },
+  "asset_refs": {
+    "admission_dir": "install-resources/basic/projects/tapdata/admission",
+    "templates_dir": "install-resources/basic/projects/tapdata/templates"
+  },
+  "recommended_next_action": "inspect_by_agent"
 }
 ```
 
 处理流程：
 
 ```text
-门禁发现必填属性缺失
--> 停止接管
--> 生成 required_human_action
--> 输出 Jira comment 补全模板
--> 记录 missing_field 事件
--> 按需反馈报告聚合缺失字段
--> 提出 Jira 创建模板或字段校验改进建议
+inspect-task 输出 Jira 事实、表单值和项目资产路径
+-> AIAgent 读取项目准入资产和模板
+-> AIAgent 结合卡片与代码做先行分析
+-> 输出一次性补卡建议和可回写模板
+-> 研发负责人确认后再回写 Jira
+-> 用户再次要求接管时，AIAgent 重新 inspect-task
+-> 准入判断通过后再调用 takeover-task
 ```
 
 如果字段实际存在但名称不同，应修复 `field_mapping`：

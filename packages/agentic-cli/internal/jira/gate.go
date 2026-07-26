@@ -10,7 +10,6 @@ type TakeoverDecision struct {
 	Code                string
 	Message             string
 	RequiredHumanAction string
-	MissingFields       []string
 	TaskClass           string
 	TaskClassSource     string
 	ProcessID           string
@@ -20,18 +19,18 @@ type TakeoverDecision struct {
 }
 
 func ValidateTakeover(issue Issue, p profile.Profile, currentUser string, agentID string) TakeoverDecision {
-	return validateTakeover(issue, p, currentUser, agentID, nil, true)
+	return validateTakeover(issue, p, currentUser, agentID, nil)
 }
 
 func ValidateTakeoverWithProcesses(issue Issue, p profile.Profile, currentUser string, agentID string, registry map[string]process.Process) TakeoverDecision {
-	return validateTakeover(issue, p, currentUser, agentID, registry, true)
+	return validateTakeover(issue, p, currentUser, agentID, registry)
 }
 
 func ValidateTakeoverEntryWithProcesses(issue Issue, p profile.Profile, currentUser string, agentID string, registry map[string]process.Process) TakeoverDecision {
-	return validateTakeover(issue, p, currentUser, agentID, registry, false)
+	return validateTakeover(issue, p, currentUser, agentID, registry)
 }
 
-func validateTakeover(issue Issue, p profile.Profile, currentUser string, agentID string, registry map[string]process.Process, checkRequiredFields bool) TakeoverDecision {
+func validateTakeover(issue Issue, p profile.Profile, currentUser string, agentID string, registry map[string]process.Process) TakeoverDecision {
 	if issue.Owner == "" || issue.Owner != currentUser {
 		return blocked("owner_mismatch", "当前研发负责人与 Jira 卡片负责人不匹配", "请确认当前用户是否为该 Jira 卡片的研发负责人")
 	}
@@ -63,20 +62,6 @@ func validateTakeover(issue Issue, p profile.Profile, currentUser string, agentI
 		}
 	}
 	targetRepo := targetRepoFor(issue, p)
-	if checkRequiredFields {
-		missingFields := missingTakeoverFields(issue, taskClass, targetRepo)
-		if len(missingFields) > 0 {
-			return TakeoverDecision{
-				OK:                  false,
-				Code:                missingTakeoverFieldsCode(missingFields),
-				Message:             "Jira 卡片缺少接管必填信息",
-				RequiredHumanAction: "请一次性补齐 Jira 卡片接管必填信息，或维护工作流配置中的字段映射",
-				MissingFields:       missingFields,
-				CurrentStage:        "takeover_gate",
-				NextAction:          "ask_owner",
-			}
-		}
-	}
 	return TakeoverDecision{
 		OK:              true,
 		TaskClass:       taskClass,
@@ -85,53 +70,6 @@ func validateTakeover(issue Issue, p profile.Profile, currentUser string, agentI
 		TargetRepo:      targetRepo,
 		CurrentStage:    "takeover_started",
 		NextAction:      "proceed",
-	}
-}
-
-func missingTakeoverFields(issue Issue, taskClass string, targetRepo string) []string {
-	var fields []string
-	if taskClass == "bug_fix" {
-		if issue.ProblemBranch == "" {
-			fields = append(fields, "problem_branch")
-		}
-		if issue.TargetBranch == "" {
-			fields = append(fields, "target_branch")
-		}
-		if issue.ProblemSummary == "" && issue.Summary == "" {
-			fields = append(fields, "problem_summary")
-		}
-		return fields
-	}
-	if issue.AcceptanceCriteria == "" {
-		fields = append(fields, "acceptance_criteria")
-	}
-	if targetRepo == "" {
-		fields = append(fields, "target_repo")
-	}
-	if issue.VerificationMethod == "" {
-		fields = append(fields, "verification_method")
-	}
-	if issue.RiskLevel == "" {
-		fields = append(fields, "risk_level")
-	}
-	return fields
-}
-
-func missingTakeoverFieldsCode(fields []string) string {
-	if len(fields) != 1 {
-		return "missing_takeover_fields"
-	}
-	switch fields[0] {
-	case "acceptance_criteria":
-		return "missing_acceptance_criteria"
-	case "target_repo":
-		return "missing_target_repo"
-	case "verification_method":
-		return "missing_verification_method"
-	case "risk_level":
-		return "missing_risk_level"
-	default:
-		return "missing_takeover_fields"
 	}
 }
 
@@ -155,6 +93,9 @@ func taskClassFor(issue Issue, p profile.Profile) (string, string) {
 func targetRepoFor(issue Issue, p profile.Profile) string {
 	if issue.TargetRepo != "" {
 		return issue.TargetRepo
+	}
+	if issue.FormValues != nil && issue.FormValues["target_repo"] != "" {
+		return issue.FormValues["target_repo"]
 	}
 	for _, component := range issue.Components {
 		if repo := p.GitHub.Repositories.ByComponent[component]; repo != "" {

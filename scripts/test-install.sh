@@ -59,7 +59,8 @@ fi
 grep "AgenticOps install failed before bin/agentic-cli was installed" "$bad_install_err"
 grep "Resource checksum mismatch" "$bad_install_err"
 grep "Changed file: install-resources/basic/ai-assets/README.md" "$bad_install_err"
-grep "Run from tapstate/agentic-ops source repo: bash scripts/build.sh" "$bad_install_err"
+grep "Resource-only change: run from tapstate/agentic-ops source repo: bash scripts/update-checksums.sh" "$bad_install_err"
+grep "CLI code or platform binary change: run bash scripts/test-build.sh" "$bad_install_err"
 test ! -e "$bad_home_dir/.agentic-ops/bin/agentic-cli"
 
 install_out="$tmp_dir/install.out"

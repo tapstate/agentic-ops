@@ -1,7 +1,6 @@
 package jira
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/process"
@@ -27,7 +26,7 @@ func TestValidateTakeoverAcceptsMappedIssue(t *testing.T) {
 	}
 }
 
-func TestValidateTakeoverBlocksMissingTargetRepo(t *testing.T) {
+func TestValidateTakeoverAllowsMissingTargetRepoForAgentInspection(t *testing.T) {
 	issue := validIssue()
 	issue.TargetRepo = ""
 
@@ -35,36 +34,8 @@ func TestValidateTakeoverBlocksMissingTargetRepo(t *testing.T) {
 	p.GitHub.Repositories = profile.RepositoryMapping{}
 
 	decision := ValidateTakeover(issue, p, "current-user", "agent-1")
-	if decision.OK {
-		t.Fatalf("decision OK, want blocked")
-	}
-	if decision.Code != "missing_target_repo" {
-		t.Fatalf("Code = %s", decision.Code)
-	}
-}
-
-func TestValidateTakeoverReportsAllMissingBugFixTakeoverFields(t *testing.T) {
-	issue := validIssue()
-	issue.IssueType = "Bug"
-	issue.ProblemBranch = ""
-	issue.TargetBranch = ""
-	issue.ProblemSummary = ""
-	issue.Summary = ""
-
-	p := validTakeoverProfile()
-	p.TaskClassMapping.IssueTypes["Bug"] = "bug_fix"
-	p.StandardProcessMapping["bug_fix"] = "development_change_v1"
-
-	decision := ValidateTakeover(issue, p, "current-user", "agent-1")
-	if decision.OK {
-		t.Fatalf("decision OK, want blocked")
-	}
-	if decision.Code != "missing_takeover_fields" {
-		t.Fatalf("Code = %s", decision.Code)
-	}
-	want := []string{"problem_branch", "target_branch", "problem_summary"}
-	if strings.Join(decision.MissingFields, ",") != strings.Join(want, ",") {
-		t.Fatalf("MissingFields = %#v, want %#v", decision.MissingFields, want)
+	if !decision.OK {
+		t.Fatalf("decision = %+v", decision)
 	}
 }
 
@@ -216,19 +187,21 @@ func TestValidateTakeoverBlocksStatusOutsideProcessEntryStage(t *testing.T) {
 
 func validIssue() Issue {
 	return Issue{
-		Key:                "TAP-123",
-		Summary:            "修复示例任务",
-		Owner:              "current-user",
-		Assignee:           "current-user",
-		IssueType:          "Task",
-		Status:             "To Do",
-		ProblemBranch:      "develop",
-		TargetBranch:       "develop",
-		ProblemSummary:     "修复示例任务",
-		TargetRepo:         "tapstate/example-repo",
-		AcceptanceCriteria: "单元测试通过",
-		VerificationMethod: "go test ./...",
-		RiskLevel:          "low",
+		Key:        "TAP-123",
+		Summary:    "修复示例任务",
+		Owner:      "current-user",
+		Assignee:   "current-user",
+		IssueType:  "Task",
+		Status:     "To Do",
+		TargetRepo: "tapstate/example-repo",
+		FormValues: map[string]string{
+			"problem_branch":      "develop",
+			"target_branch":       "develop",
+			"problem_summary":     "修复示例任务",
+			"acceptance_criteria": "单元测试通过",
+			"verification_method": "go test ./...",
+			"risk_level":          "low",
+		},
 	}
 }
 

@@ -154,13 +154,22 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 			jiraTransitionID = resolvedTransitionID
 		}
 		fields := jiraReleaseFields(workspaceProfile)
-		if len(fields) == 0 {
+		releaseComment := jiraReleaseComment(workspaceProfile, runID, completedAt)
+		if len(fields) == 0 && releaseComment == "" {
 			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completion_cleanup", "ask_owner", "missing_jira_write_mapping", false, true)
 			return writeJSON(stdout, output.Failure("release_agent", "missing_jira_write_mapping", "缺少 current_agent_id 字段映射", "请维护 workflow profile 的所有权字段映射"))
 		}
-		if err := selection.Client.UpdateFields(context.Background(), issueKey, fields); err != nil {
-			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completion_cleanup", "ask_owner", "agent_release_failed", false, false)
-			return writeJSON(stdout, output.Failure("release_agent", "agent_release_failed", err.Error(), "请检查 Jira 字段权限并由研发负责人决策是否人工释放"))
+		if len(fields) > 0 {
+			if err := selection.Client.UpdateFields(context.Background(), issueKey, fields); err != nil {
+				_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completion_cleanup", "ask_owner", "agent_release_failed", false, false)
+				return writeJSON(stdout, output.Failure("release_agent", "agent_release_failed", err.Error(), "请检查 Jira 字段权限并由研发负责人决策是否人工释放"))
+			}
+		}
+		if releaseComment != "" {
+			if err := selection.Client.AddComment(context.Background(), issueKey, releaseComment); err != nil {
+				_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completion_cleanup", "ask_owner", "agent_release_failed", false, false)
+				return writeJSON(stdout, output.Failure("release_agent", "agent_release_failed", err.Error(), "请检查 Jira 评论权限并由研发负责人决策是否人工释放"))
+			}
 		}
 		if jiraTransitionID != "" {
 			if err := selection.Client.TransitionIssue(context.Background(), issueKey, jiraTransitionID); err != nil {

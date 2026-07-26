@@ -191,6 +191,9 @@ func (client *RealClient) issueFields() []string {
 		if field.JiraField != "" {
 			fields[field.JiraField] = true
 		}
+		if field.Source == "jira_comment" {
+			fields["comment"] = true
+		}
 	}
 	result := make([]string, 0, len(fields))
 	for field := range fields {
@@ -202,6 +205,7 @@ func (client *RealClient) issueFields() []string {
 
 func (client *RealClient) mapIssue(raw jiraIssueResponse) Issue {
 	fields := raw.Fields
+	formValues := mappedFormValues(fields, client.profile)
 	issue := Issue{
 		Key:        raw.Key,
 		Summary:    stringField(fields["summary"]),
@@ -210,24 +214,28 @@ func (client *RealClient) mapIssue(raw jiraIssueResponse) Issue {
 		Status:     objectName(fields["status"]),
 		Labels:     stringList(fields["labels"]),
 		Components: objectNameList(fields["components"]),
+		FormValues: formValues,
 	}
-	issue.Owner = mappedField(fields, client.profile, "owner")
+	issue.Owner = formValues["owner"]
 	if issue.Owner == "" {
 		issue.Owner = issue.Assignee
 	}
-	issue.ProblemBranch = mappedField(fields, client.profile, "problem_branch")
-	issue.TargetBranch = mappedField(fields, client.profile, "target_branch")
-	issue.ProblemSummary = mappedField(fields, client.profile, "problem_summary")
-	if issue.ProblemSummary == "" {
-		issue.ProblemSummary = issue.Summary
-	}
-	issue.ReproductionPath = mappedField(fields, client.profile, "reproduction_path")
-	issue.AcceptanceCriteria = mappedField(fields, client.profile, "acceptance_criteria")
-	issue.TargetRepo = mappedField(fields, client.profile, "target_repo")
-	issue.VerificationMethod = mappedField(fields, client.profile, "verification_method")
-	issue.RiskLevel = mappedField(fields, client.profile, "risk_level")
-	issue.CurrentAgentID = mappedField(fields, client.profile, "current_agent_id")
+	issue.TargetRepo = formValues["target_repo"]
+	issue.CurrentAgentID = formValues["current_agent_id"]
 	return issue
+}
+
+func mappedFormValues(fields map[string]any, p profile.Profile) map[string]string {
+	values := map[string]string{}
+	commentValues := jiraCommentOwnershipValues(fields["comment"])
+	for name, field := range p.JiraFormMapping.Fields {
+		if field.Source == "jira_comment" {
+			values[name] = commentValues[name]
+			continue
+		}
+		values[name] = mappedField(fields, p, name)
+	}
+	return values
 }
 
 func mappedField(fields map[string]any, p profile.Profile, name string) string {
@@ -350,6 +358,40 @@ func plainText(value any) string {
 	default:
 		return ""
 	}
+}
+
+func jiraCommentOwnershipValues(value any) map[string]string {
+	result := map[string]string{}
+	container, ok := value.(map[string]any)
+	if !ok {
+		return result
+	}
+	comments, ok := container["comments"].([]any)
+	if !ok {
+		return result
+	}
+	for _, item := range comments {
+		comment, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		text := plainText(comment["body"])
+		if !strings.Contains(text, "AgenticOps ownership") {
+			continue
+		}
+		for _, line := range strings.Split(text, "\n") {
+			key, value, ok := strings.Cut(line, ":")
+			if !ok {
+				continue
+			}
+			key = strings.TrimSpace(key)
+			switch key {
+			case "current_agent_id", "takeover_at":
+				result[key] = strings.TrimSpace(value)
+			}
+		}
+	}
+	return result
 }
 
 func extractSection(text string, section string) string {

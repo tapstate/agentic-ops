@@ -306,51 +306,110 @@ func TestTakeoverTaskBlocksStatusOutsideProcessEntryStage(t *testing.T) {
 	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
 }
 
-func TestTakeoverTaskReportsAllMissingBugFixTakeoverFields(t *testing.T) {
+func TestInspectTaskOutputsFactsAndProjectAssetRefsWithoutSideEffects(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	issue := realModeIssue()
 	issue.IssueType = "Bug"
-	issue.ProblemBranch = ""
-	issue.TargetBranch = ""
-	issue.ProblemSummary = "TM 启动时持续输出 Elasticsearch health check refused 告警"
-	issue.AcceptanceCriteria = ""
-	issue.VerificationMethod = ""
-	issue.RiskLevel = ""
+	issue.FormValues["problem_branch"] = ""
+	issue.FormValues["target_branch"] = ""
+	issue.FormValues["problem_summary"] = "TM 启动时持续输出 Elasticsearch health check refused 告警"
+	client := &recordingJiraClient{issue: issue}
+	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"inspect-task", "TAP-123", "--workspace", "tapdata"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "inspect_task")
+	assertJSONField(t, stdout.String(), "issue_key", "TAP-123")
+	assertJSONField(t, stdout.String(), "current_jira_user", "current-user")
+	assertNestedJSONField(t, stdout.String(), []string{"gate_facts", "task_class"}, "bug_fix")
+	assertNestedJSONField(t, stdout.String(), []string{"gate_facts", "standard_process_id"}, "development_change_v1")
+	assertNestedJSONField(t, stdout.String(), []string{"gate_facts", "mapped_stage"}, "waiting_takeover")
+	assertNestedJSONField(t, stdout.String(), []string{"gate_facts", "assignee_matches_current_user"}, true)
+	assertNestedJSONField(t, stdout.String(), []string{"form_values", "problem_branch"}, "")
+	assertNestedJSONField(t, stdout.String(), []string{"form_values", "target_branch"}, "")
+	assertNestedJSONField(t, stdout.String(), []string{"form_values", "problem_summary"}, "TM 启动时持续输出 Elasticsearch health check refused 告警")
+	assertNestedJSONField(t, stdout.String(), []string{"asset_refs", "admission_dir"}, "install-resources/basic/projects/tapdata/admission")
+	assertJSONField(t, stdout.String(), "recommended_next_action", "inspect_by_agent")
+	for _, notWant := range []string{"admission_check_failed", "completion_template", "suggestions"} {
+		if strings.Contains(stdout.String(), notWant) {
+			t.Fatalf("inspect-task should not contain %s: %s", notWant, stdout.String())
+		}
+	}
+	if client.updatedKey != "" || client.commentKey != "" {
+		t.Fatalf("inspect-task wrote Jira: updated=%s comment=%s", client.updatedKey, client.commentKey)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson")); !os.IsNotExist(err) {
+		t.Fatalf("inspect-task should not write takeover event, stat err = %v", err)
+	}
+}
+
+func TestTakeoverTaskDoesNotEnforceProjectAdmissionFields(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	issue := realModeIssue()
+	issue.IssueType = "Bug"
+	issue.FormValues["problem_branch"] = ""
+	issue.FormValues["target_branch"] = ""
+	issue.FormValues["problem_summary"] = "TM 启动时持续输出 Elasticsearch health check refused 告警"
+	issue.FormValues["acceptance_criteria"] = ""
+	issue.FormValues["verification_method"] = ""
+	issue.FormValues["risk_level"] = ""
+	client := &recordingJiraClient{issue: issue}
+	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"takeover-task", "TAP-123", "--workspace", "tapstate", "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "takeover_task")
+	assertJSONField(t, stdout.String(), "current_stage", "takeover_started")
+	assertJSONField(t, stdout.String(), "next_action", "proceed")
+	if client.updatedKey != "TAP-123" {
+		t.Fatalf("updatedKey = %s", client.updatedKey)
+	}
+	if client.commentKey != "" {
+		t.Fatalf("takeover-task should not write admission comment, commentKey = %s body = %s", client.commentKey, client.commentBody)
+	}
+	for _, notWant := range []string{"admission_check_failed", "admission_standard_path", "admission_template_path", "missing_field_guidance", "suggestions", "completion_template"} {
+		if strings.Contains(stdout.String(), notWant) {
+			t.Fatalf("takeover-task should not contain %s: %s", notWant, stdout.String())
+		}
+	}
+}
+
+func TestTakeoverTaskWritesAgentOwnershipCommentWhenProfileUsesJiraComment(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	issue := realModeIssue()
+	issue.CurrentAgentID = ""
+	issue.FormValues["current_agent_id"] = ""
 	client := &recordingJiraClient{issue: issue}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"takeover-task", "TAP-123", "--workspace", "tapdata", "--confirm-real-jira-write"}, &stdout, &stderr)
-	if code != 1 {
+	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
 	assertJSONField(t, stdout.String(), "operation", "takeover_task")
-	assertJSONField(t, stdout.String(), "code", "admission_check_failed")
-	for _, want := range []string{
-		`"missing_fields":["problem_branch","target_branch"]`,
-		`"jira_comment_written":true`,
-		`"admission_standard_path"`,
-		`projects/tapdata/admission/defect-fix.yaml`,
-		`projects/tapdata/templates/admission/defect-fix-missing.md`,
-		"问题分支",
-		"修复分支",
-		"问题现象",
-	} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("stdout missing %s: %s", want, stdout.String())
-		}
-	}
+	assertJSONField(t, stdout.String(), "current_stage", "takeover_started")
 	if client.updatedKey != "" {
-		t.Fatalf("updatedKey = %s, want no takeover field write", client.updatedKey)
+		t.Fatalf("takeover-task should not update Jira fields for jira_comment mapping: %s %#v", client.updatedKey, client.updatedFields)
 	}
 	if client.commentKey != "TAP-123" {
-		t.Fatalf("commentKey = %s", client.commentKey)
+		t.Fatalf("commentKey = %s body = %s", client.commentKey, client.commentBody)
 	}
-	for _, want := range []string{"TapData 缺陷修复准入信息缺失", "问题分支", "修复分支", "复现路径", "验收标准", "研发负责人必须确认后再继续执行"} {
+	for _, want := range []string{"AgenticOps ownership", "current_agent_id: agentic-cli-local-agent", "takeover_at: 2026-07-21T10:30:12Z"} {
 		if !strings.Contains(client.commentBody, want) {
-			t.Fatalf("comment body missing %s: %s", want, client.commentBody)
+			t.Fatalf("ownership comment missing %q: %s", want, client.commentBody)
 		}
 	}
 }

@@ -16,7 +16,7 @@ AIAgent 执行业务 Jira 任务前按以下顺序读取：
 8. 当前项目 AI 工作空间 `.agentic-ops/profile.local.yaml`：只读取本地 overlay，不要求复制完整全局资源。
 9. [策略](../policies/)、[运行手册](../runbooks/) 和 [模板](../templates/)：读取安装后分发给 AIAgent 的门禁、处理步骤和证据格式。
 
-实际执行前应运行 `agentic-cli profile resolve --project <project>` 查看 effective profile 和字段来源。资产解析优先级固定为：
+实际执行前应运行 `agentic-cli profile resolve --project <project>` 查看 effective profile 和字段来源；处理具体 Jira 卡片前应运行 `agentic-cli inspect-task <issue-key> --workspace <project>` 获取事实和项目资产引用。资产解析优先级固定为：
 
 ```text
 项目工作空间 overlay

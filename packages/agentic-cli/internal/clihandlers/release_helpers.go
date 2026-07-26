@@ -296,10 +296,43 @@ func jiraTakeoverFields(workspaceProfile profile.Profile, currentAgentID string,
 	return fields
 }
 
+func jiraTakeoverComment(workspaceProfile profile.Profile, runID string, currentAgentID string, takeoverAt string) string {
+	if !usesJiraCommentOwnership(workspaceProfile) {
+		return ""
+	}
+	return strings.Join([]string{
+		"AgenticOps ownership",
+		"run_id: " + runID,
+		"current_agent_id: " + currentAgentID,
+		"takeover_at: " + takeoverAt,
+	}, "\n")
+}
+
 func jiraReleaseFields(workspaceProfile profile.Profile) map[string]any {
 	fields := map[string]any{}
 	if field := workspaceProfile.JiraFormMapping.Fields["current_agent_id"].JiraField; field != "" {
 		fields[field] = nil
 	}
 	return fields
+}
+
+func jiraReleaseComment(workspaceProfile profile.Profile, runID string, completedAt string) string {
+	if !usesJiraCommentOwnership(workspaceProfile) {
+		return ""
+	}
+	return strings.Join([]string{
+		"AgenticOps ownership",
+		"run_id: " + runID,
+		"current_agent_id: ",
+		"released_at: " + completedAt,
+	}, "\n")
+}
+
+func usesJiraCommentOwnership(workspaceProfile profile.Profile) bool {
+	for _, name := range []string{"current_agent_id", "takeover_at"} {
+		if field := workspaceProfile.JiraFormMapping.Fields[name]; field.Source == "jira_comment" {
+			return true
+		}
+	}
+	return false
 }

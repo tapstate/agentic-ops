@@ -92,6 +92,10 @@ func RunTakeoverTask(args []string, stdout io.Writer) int {
 	return runTakeoverTask(args, stdout)
 }
 
+func RunInspectTask(args []string, stdout io.Writer) int {
+	return runInspectTask(args, stdout)
+}
+
 func RunResumeTakeover(args []string, stdout io.Writer) int {
 	return runResumeTakeover(args, stdout)
 }

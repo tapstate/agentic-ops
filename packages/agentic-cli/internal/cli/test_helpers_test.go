@@ -296,19 +296,21 @@ func cliHTTPResponse(statusCode int, body string) *http.Response {
 
 func realModeIssue() jira.Issue {
 	return jira.Issue{
-		Key:                "TAP-123",
-		Summary:            "修复示例任务",
-		Owner:              "current-user",
-		Assignee:           "current-user",
-		IssueType:          "Task",
-		Status:             "To Do",
-		ProblemBranch:      "develop",
-		TargetBranch:       "develop",
-		ProblemSummary:     "修复示例任务",
-		TargetRepo:         "tapstate/example-repo",
-		AcceptanceCriteria: "单元测试通过",
-		VerificationMethod: "go test ./...",
-		RiskLevel:          "low",
+		Key:        "TAP-123",
+		Summary:    "修复示例任务",
+		Owner:      "current-user",
+		Assignee:   "current-user",
+		IssueType:  "Task",
+		Status:     "To Do",
+		TargetRepo: "tapstate/example-repo",
+		FormValues: map[string]string{
+			"problem_branch":      "develop",
+			"target_branch":       "develop",
+			"problem_summary":     "修复示例任务",
+			"acceptance_criteria": "单元测试通过",
+			"verification_method": "go test ./...",
+			"risk_level":          "low",
+		},
 	}
 }
 

@@ -68,9 +68,16 @@ fail_checksum_mismatch() {
   echo "Actual sha256: $actual" >&2
   echo "Install dir: $INSTALL_DIR" >&2
   echo "Expected CLI path: $bin_dir/agentic-cli" >&2
-  echo "This usually means install-resources changed but checksums and platform binaries were not regenerated." >&2
-  echo "Next action: Run from tapstate/agentic-ops source repo: bash scripts/build.sh" >&2
-  echo "Then verify: bash scripts/test-build.sh && bash scripts/test-install.sh" >&2
+  if [ "${rel#basic/}" != "$rel" ]; then
+    echo "This usually means install-resources/basic changed but checksums were not updated." >&2
+    echo "Next action: Resource-only change: run from tapstate/agentic-ops source repo: bash scripts/update-checksums.sh" >&2
+    echo "CLI code or platform binary change: run bash scripts/test-build.sh" >&2
+    echo "Then verify: bash scripts/test-resources.sh && bash scripts/test-install.sh" >&2
+  else
+    echo "This usually means a platform binary changed or is stale." >&2
+    echo "Next action: CLI code or platform binary change: run bash scripts/test-build.sh" >&2
+    echo "Then verify: bash scripts/test-install.sh" >&2
+  fi
   exit 1
 }
 
@@ -86,7 +93,7 @@ verify_checksums() {
       "install_resource_checksums_missing" \
       "Install resource checksum file is missing." \
       "Missing file: $checksums" \
-      "Run from tapstate/agentic-ops source repo: bash scripts/build.sh"
+      "Run from tapstate/agentic-ops source repo: bash scripts/update-checksums.sh, or bash scripts/test-build.sh after CLI code changes"
   fi
 
   while read -r expected rel; do
@@ -99,7 +106,7 @@ verify_checksums() {
         "install_resource_checksum_target_missing" \
         "Install resource listed in checksums.txt is missing." \
         "Missing file: install-resources/$rel" \
-        "Run from tapstate/agentic-ops source repo: bash scripts/build.sh"
+        "Run from tapstate/agentic-ops source repo: bash scripts/update-checksums.sh, or bash scripts/test-build.sh after CLI code changes"
     fi
     actual="$(checksum_file "$file")"
     if [ "$actual" != "$expected" ]; then

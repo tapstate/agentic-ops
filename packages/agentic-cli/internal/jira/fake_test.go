@@ -16,7 +16,7 @@ func TestFakeClientListsTaskWithRequiredFields(t *testing.T) {
 		if got.Key == "" {
 			t.Fatalf("%s missing from fake list: %+v", key, issues)
 		}
-		if got.TargetRepo == "" || got.AcceptanceCriteria == "" || got.VerificationMethod == "" {
+		if got.TargetRepo == "" || got.FormValues["acceptance_criteria"] == "" || got.FormValues["verification_method"] == "" {
 			t.Fatalf("issue missing required fields: %+v", got)
 		}
 	}

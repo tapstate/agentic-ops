@@ -574,6 +574,7 @@ func runAgentInit(args []string, stdout io.Writer) int {
 			"conf",
 			"workspace_init",
 			"list_tasks",
+			"inspect_task",
 			"task_run",
 			"takeover_task",
 			"resume_takeover",

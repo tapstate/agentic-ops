@@ -40,33 +40,6 @@ iteration_with_index="${version_tail%-*}"
 iteration_version="${iteration_with_index%.*}"
 commit_index="${iteration_with_index##*.}"
 
-checksum_file() {
-  local file="$1"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$file" | awk '{print $1}'
-  else
-    shasum -a 256 "$file" | awk '{print $1}'
-  fi
-}
-
-write_checksums() {
-  local checksums="$install_resources_dir/checksums.txt"
-  local tmp_checksums="$checksums.tmp"
-  : > "$tmp_checksums"
-
-  while IFS= read -r file; do
-    rel="${file#"$install_resources_dir"/}"
-    printf '%s  %s\n' "$(checksum_file "$file")" "$rel" >> "$tmp_checksums"
-  done < <(find "$install_resources_dir/basic" -type f -print | LC_ALL=C sort)
-
-  while IFS= read -r file; do
-    rel="${file#"$install_resources_dir"/}"
-    printf '%s  %s\n' "$(checksum_file "$file")" "$rel" >> "$tmp_checksums"
-  done < <(find "$install_resources_dir" -mindepth 2 -maxdepth 2 -type f -name agentic-cli -print | LC_ALL=C sort)
-
-  mv "$tmp_checksums" "$checksums"
-}
-
 if [ ! -d "$install_resources_dir/basic" ]; then
   echo "install resource base not found: $install_resources_dir/basic" >&2
   exit 1
@@ -89,6 +62,6 @@ for target in $targets; do
   chmod 0755 "$binary"
 done
 
-write_checksums
+AGENTIC_OPS_INSTALL_RESOURCES_DIR="$install_resources_dir" bash scripts/update-checksums.sh >/dev/null
 
 printf '{"ok":true,"operation":"build","version":"%s","version_state":"%s","iteration_version":"%s","commit_index":%s,"commit":"%s","build_time":"%s","install_resources_dir":"%s"}\n' "$version" "$version_state" "$iteration_version" "$commit_index" "$commit" "$build_time" "$install_resources_dir"

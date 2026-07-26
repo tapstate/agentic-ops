@@ -54,9 +54,10 @@
 
 - `git status --short`
 - `find . -maxdepth 3 -type f | sort`
+- 仅修改 `install-resources/basic/` 资源时，执行 `bash scripts/update-checksums.sh` 和 `bash scripts/test-resources.sh`，不要求重新编译 `agentic-cli`。
 - 使用 `rg` 检查 README、docs、handbooks 和 plans 中的常见占位词。
 
-引入或修改运行代码时，还必须在同一变更中补充并执行对应验证命令。
+引入或修改运行代码时，还必须在同一变更中补充并执行对应验证命令，包括 `go test ./...`；影响发布二进制时执行 `bash scripts/test-build.sh`。
 
 ## 6. 第一阶段验收
 

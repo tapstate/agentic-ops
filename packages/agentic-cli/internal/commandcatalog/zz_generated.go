@@ -13,6 +13,7 @@ import (
 	feedback_bundle_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/feedback/bundle"
 	feedback_report_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/feedback/report"
 	fix_pr_comments_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/fix-pr-comments"
+	inspect_task_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/inspect-task"
 	inspect_workspace_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/inspect-workspace"
 	list_tasks_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/list-tasks"
 	policy_rollback_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/policy/rollback"
@@ -47,6 +48,7 @@ func RegisterAll(registry *cmdkit.Registry) {
 	feedback_bundle_cmd.Register(registry)
 	feedback_report_cmd.Register(registry)
 	fix_pr_comments_cmd.Register(registry)
+	inspect_task_cmd.Register(registry)
 	inspect_workspace_cmd.Register(registry)
 	list_tasks_cmd.Register(registry)
 	policy_rollback_cmd.Register(registry)
