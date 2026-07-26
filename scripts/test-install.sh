@@ -40,6 +40,28 @@ git -C "$source_repo" config user.name "AgenticOps Test"
 git -C "$source_repo" add .
 git -C "$source_repo" commit -m "test source" >/dev/null
 
+bad_repo="$tmp_dir/bad-source"
+bad_home_dir="$tmp_dir/bad-home"
+mkdir -p "$bad_home_dir"
+git clone "$source_repo" "$bad_repo" >/dev/null 2>&1
+git -C "$bad_repo" config user.email agentic-ops-test@example.test
+git -C "$bad_repo" config user.name "AgenticOps Test"
+printf '\n# checksum drift\n' >> "$bad_repo/install-resources/basic/ai-assets/README.md"
+git -C "$bad_repo" add install-resources/basic/ai-assets/README.md
+git -C "$bad_repo" commit -m "break checksum" >/dev/null
+
+bad_install_out="$tmp_dir/bad-install.out"
+bad_install_err="$tmp_dir/bad-install.err"
+if HOME="$bad_home_dir" SHELL=/bin/zsh AGENTIC_OPS_REPO_URL="$bad_repo" bash "$bad_repo/scripts/install.sh" >"$bad_install_out" 2>"$bad_install_err"; then
+  echo "expected install with checksum drift to fail" >&2
+  exit 1
+fi
+grep "AgenticOps install failed before bin/agentic-cli was installed" "$bad_install_err"
+grep "Resource checksum mismatch" "$bad_install_err"
+grep "Changed file: install-resources/basic/ai-assets/README.md" "$bad_install_err"
+grep "Run from tapstate/agentic-ops source repo: bash scripts/build.sh" "$bad_install_err"
+test ! -e "$bad_home_dir/.agentic-ops/bin/agentic-cli"
+
 install_out="$tmp_dir/install.out"
 install_err="$tmp_dir/install.err"
 HOME="$home_dir" SHELL=/bin/zsh AGENTIC_OPS_REPO_URL="$source_repo" bash "$source_repo/scripts/install.sh" >"$install_out" 2>"$install_err"

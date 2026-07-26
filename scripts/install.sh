@@ -37,6 +37,43 @@ checksum_file() {
   fi
 }
 
+fail_before_binary() {
+  local code="$1"
+  local summary="$2"
+  local detail="$3"
+  local action="$4"
+
+  echo "AgenticOps install failed before bin/agentic-cli was installed." >&2
+  echo "Failure code: $code" >&2
+  echo "$summary" >&2
+  if [ -n "$detail" ]; then
+    echo "$detail" >&2
+  fi
+  echo "Install dir: $INSTALL_DIR" >&2
+  echo "Expected CLI path: $bin_dir/agentic-cli" >&2
+  echo "Next action: $action" >&2
+  exit 1
+}
+
+fail_checksum_mismatch() {
+  local rel="$1"
+  local expected="$2"
+  local actual="$3"
+
+  echo "AgenticOps install failed before bin/agentic-cli was installed." >&2
+  echo "Failure code: install_resource_checksum_mismatch" >&2
+  echo "Resource checksum mismatch." >&2
+  echo "Changed file: install-resources/$rel" >&2
+  echo "Expected sha256: $expected" >&2
+  echo "Actual sha256: $actual" >&2
+  echo "Install dir: $INSTALL_DIR" >&2
+  echo "Expected CLI path: $bin_dir/agentic-cli" >&2
+  echo "This usually means install-resources changed but checksums and platform binaries were not regenerated." >&2
+  echo "Next action: Run from tapstate/agentic-ops source repo: bash scripts/build.sh" >&2
+  echo "Then verify: bash scripts/test-build.sh && bash scripts/test-install.sh" >&2
+  exit 1
+}
+
 verify_checksums() {
   local checksums="$install_resources_dir/checksums.txt"
   local expected=""
@@ -45,8 +82,11 @@ verify_checksums() {
   local file=""
 
   if [ ! -f "$checksums" ]; then
-    echo "checksums not found: $checksums" >&2
-    exit 1
+    fail_before_binary \
+      "install_resource_checksums_missing" \
+      "Install resource checksum file is missing." \
+      "Missing file: $checksums" \
+      "Run from tapstate/agentic-ops source repo: bash scripts/build.sh"
   fi
 
   while read -r expected rel; do
@@ -55,21 +95,26 @@ verify_checksums() {
     fi
     file="$install_resources_dir/$rel"
     if [ ! -f "$file" ]; then
-      echo "checksum file target not found: $rel" >&2
-      exit 1
+      fail_before_binary \
+        "install_resource_checksum_target_missing" \
+        "Install resource listed in checksums.txt is missing." \
+        "Missing file: install-resources/$rel" \
+        "Run from tapstate/agentic-ops source repo: bash scripts/build.sh"
     fi
     actual="$(checksum_file "$file")"
     if [ "$actual" != "$expected" ]; then
-      echo "checksum mismatch for: $rel" >&2
-      exit 1
+      fail_checksum_mismatch "$rel" "$expected" "$actual"
     fi
   done < "$checksums"
 }
 
 copy_binary() {
   if [ ! -f "$source_binary" ]; then
-    echo "platform binary not found: $source_binary" >&2
-    exit 1
+    fail_before_binary \
+      "install_platform_binary_missing" \
+      "Platform binary is missing." \
+      "Missing file: $source_binary" \
+      "Run from tapstate/agentic-ops source repo: bash scripts/build.sh"
   fi
   mkdir -p "$bin_dir"
   install -m 0755 "$source_binary" "$bin_dir/agentic-cli"
