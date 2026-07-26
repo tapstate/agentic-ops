@@ -1,6 +1,7 @@
 package jira
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/process"
@@ -39,6 +40,31 @@ func TestValidateTakeoverBlocksMissingTargetRepo(t *testing.T) {
 	}
 	if decision.Code != "missing_target_repo" {
 		t.Fatalf("Code = %s", decision.Code)
+	}
+}
+
+func TestValidateTakeoverReportsAllMissingBugFixTakeoverFields(t *testing.T) {
+	issue := validIssue()
+	issue.IssueType = "Bug"
+	issue.ProblemBranch = ""
+	issue.TargetBranch = ""
+	issue.ProblemSummary = ""
+	issue.Summary = ""
+
+	p := validTakeoverProfile()
+	p.TaskClassMapping.IssueTypes["Bug"] = "bug_fix"
+	p.StandardProcessMapping["bug_fix"] = "development_change_v1"
+
+	decision := ValidateTakeover(issue, p, "current-user", "agent-1")
+	if decision.OK {
+		t.Fatalf("decision OK, want blocked")
+	}
+	if decision.Code != "missing_takeover_fields" {
+		t.Fatalf("Code = %s", decision.Code)
+	}
+	want := []string{"problem_branch", "target_branch", "problem_summary"}
+	if strings.Join(decision.MissingFields, ",") != strings.Join(want, ",") {
+		t.Fatalf("MissingFields = %#v, want %#v", decision.MissingFields, want)
 	}
 }
 
@@ -196,6 +222,9 @@ func validIssue() Issue {
 		Assignee:           "current-user",
 		IssueType:          "Task",
 		Status:             "To Do",
+		ProblemBranch:      "develop",
+		TargetBranch:       "develop",
+		ProblemSummary:     "修复示例任务",
 		TargetRepo:         "tapstate/example-repo",
 		AcceptanceCriteria: "单元测试通过",
 		VerificationMethod: "go test ./...",

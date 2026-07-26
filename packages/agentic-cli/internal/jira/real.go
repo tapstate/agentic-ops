@@ -215,6 +215,13 @@ func (client *RealClient) mapIssue(raw jiraIssueResponse) Issue {
 	if issue.Owner == "" {
 		issue.Owner = issue.Assignee
 	}
+	issue.ProblemBranch = mappedField(fields, client.profile, "problem_branch")
+	issue.TargetBranch = mappedField(fields, client.profile, "target_branch")
+	issue.ProblemSummary = mappedField(fields, client.profile, "problem_summary")
+	if issue.ProblemSummary == "" {
+		issue.ProblemSummary = issue.Summary
+	}
+	issue.ReproductionPath = mappedField(fields, client.profile, "reproduction_path")
 	issue.AcceptanceCriteria = mappedField(fields, client.profile, "acceptance_criteria")
 	issue.TargetRepo = mappedField(fields, client.profile, "target_repo")
 	issue.VerificationMethod = mappedField(fields, client.profile, "verification_method")
@@ -230,6 +237,9 @@ func mappedField(fields map[string]any, p profile.Profile, name string) string {
 	}
 	if field.Source == "jira_description_section" {
 		return extractSection(plainText(fields["description"]), field.Section)
+	}
+	if name == "risk_level" && field.JiraField == "labels" {
+		return riskLevelFromLabels(stringList(fields[field.JiraField]))
 	}
 	return stringField(fields[field.JiraField])
 }
@@ -303,6 +313,22 @@ func objectName(value any) string {
 	return ""
 }
 
+func riskLevelFromLabels(labels []string) string {
+	for _, label := range labels {
+		trimmed := strings.TrimSpace(label)
+		normalized := strings.ToUpper(trimmed)
+		normalized = strings.TrimPrefix(normalized, "RISK:")
+		normalized = strings.TrimPrefix(normalized, "RISK-")
+		normalized = strings.TrimPrefix(normalized, "RISK_")
+		normalized = strings.TrimPrefix(normalized, "RISK/")
+		switch normalized {
+		case "T1", "T2", "T3", "T4", "P0", "P1", "P2", "P3", "P4", "LOW", "MEDIUM", "HIGH":
+			return trimmed
+		}
+	}
+	return ""
+}
+
 func plainText(value any) string {
 	switch typed := value.(type) {
 	case string:
@@ -335,7 +361,7 @@ func extractSection(text string, section string) string {
 	inSection := false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == section {
+		if sectionTitleMatches(trimmed, section) {
 			inSection = true
 			continue
 		}
@@ -347,6 +373,18 @@ func extractSection(text string, section string) string {
 		}
 	}
 	return strings.Join(collected, "\n")
+}
+
+func sectionTitleMatches(line string, section string) bool {
+	line = normalizeSectionTitle(line)
+	section = normalizeSectionTitle(section)
+	return line != "" && section != "" && line == section
+}
+
+func normalizeSectionTitle(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimLeft(value, "#")
+	return strings.TrimSpace(value)
 }
 
 func adfDocument(text string) map[string]any {

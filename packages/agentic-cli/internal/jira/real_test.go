@@ -62,6 +62,43 @@ func TestRealClientSearchIssuesMapsProfileFields(t *testing.T) {
 	}
 }
 
+func TestExtractSectionMatchesMarkdownHeadingAgainstPlainJiraHeading(t *testing.T) {
+	text := strings.Join([]string{
+		"日志：",
+		"Elasticsearch health check failed",
+		"建议优化",
+		"验证 AgenticOps 对 TAP-12289 的空执行接管流程可以跑通。",
+	}, "\n")
+
+	got := extractSection(text, "## 建议优化")
+	want := "验证 AgenticOps 对 TAP-12289 的空执行接管流程可以跑通。"
+	if got != want {
+		t.Fatalf("extractSection() = %q, want %q", got, want)
+	}
+}
+
+func TestRealClientMapsRiskLevelFromLabels(t *testing.T) {
+	client := newTestRealClient(t, func(r *http.Request) *http.Response {
+		assertRealJiraRequest(t, r, http.MethodPost, "/rest/api/3/search/jql")
+		return jsonResponse(http.StatusOK, `{"issues":[{"key":"TAP-124","fields":{"summary":"标签风险等级任务","assignee":{"accountId":"account-123"},"issuetype":{"name":"Bug"},"status":{"name":"To Do"},"labels":["backend","T3"],"components":[],"customfield_acceptance":"验收通过","customfield_target_repo":"tapdata/tapdata","description":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"验证方式"}]},{"type":"paragraph","content":[{"type":"text","text":"go test ./..."}]}]}}}]}`)
+	})
+	client.profile.JiraFormMapping.Fields["risk_level"] = profile.FormField{
+		Source:    "jira_field",
+		JiraField: "labels",
+	}
+
+	issues, err := client.SearchIssues(context.Background(), "tapdata", "assignee = currentUser()")
+	if err != nil {
+		t.Fatalf("SearchIssues error = %v", err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("len = %d", len(issues))
+	}
+	if got := issues[0].RiskLevel; got != "T3" {
+		t.Fatalf("RiskLevel = %q, want %q", got, "T3")
+	}
+}
+
 func TestRealClientUpdateFieldsUsesIssueEditEndpoint(t *testing.T) {
 	client := newTestRealClient(t, func(r *http.Request) *http.Response {
 		assertRealJiraRequest(t, r, http.MethodPut, "/rest/api/3/issue/TAP-123")

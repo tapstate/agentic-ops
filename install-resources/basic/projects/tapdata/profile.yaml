@@ -12,10 +12,13 @@ jira_form_mapping:
       source: jira_field
       jira_field: assignee
       required_from_stage: waiting_takeover
+    problem_branch:
+      source: jira_description_section
+      section: "问题分支"
+      required_from_stage: takeover_gate
     acceptance_criteria:
       source: jira_description_section
-      section: "## 建议优化"
-      required_from_stage: takeover_gate
+      section: "验收标准"
     issue_analysis:
       source: jira_field
       jira_field: customfield_10092
@@ -29,9 +32,16 @@ jira_form_mapping:
       fallback: workspace_repo_mapping
       required_from_stage: takeover_gate
     target_branch:
-      source: workspace_repo_mapping
-      fallback: workspace_repo_mapping
+      source: jira_description_section
+      section: "修复分支"
       required_from_stage: takeover_gate
+    problem_summary:
+      source: jira_field
+      jira_field: summary
+      required_from_stage: takeover_gate
+    reproduction_path:
+      source: jira_description_section
+      section: "复现路径"
     verification_method:
       source: jira_field
       jira_field: customfield_10049

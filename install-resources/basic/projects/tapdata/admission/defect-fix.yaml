@@ -1,0 +1,49 @@
+task_class: bug_fix
+template: templates/admission/defect-fix-missing.md
+required_fields:
+  - problem_branch
+  - target_branch
+  - problem_summary
+optional_fields:
+  - reproduction_path
+  - acceptance_criteria
+guidance:
+  problem_branch:
+    label: 问题分支
+    location: Jira 描述 `问题分支` 章节或项目字段
+    example: develop
+    description: 说明缺陷在哪个分支可以复现或被发现。
+  target_branch:
+    label: 修复分支
+    location: Jira 描述 `修复分支` 章节或项目字段
+    example: develop
+    description: 说明本次修复应在哪个分支完成并验证。
+  problem_summary:
+    label: 问题现象
+    location: Jira 摘要、Jira 描述 `问题现象` 章节或项目字段
+    example: TM 启动时持续输出 Elasticsearch health check refused 告警。
+    description: 说明用户、日志或系统实际观察到的问题现象。
+  reproduction_path:
+    label: 复现路径
+    location: Jira 描述 `复现路径` 章节或项目字段
+    example: 启动 TM，观察启动日志中 Elasticsearch health check 输出。
+    description: 可选；说明问题如何复现，无法稳定复现时写明已知触发条件。
+  acceptance_criteria:
+    label: 验收标准
+    location: Jira 描述 `验收标准` 章节或项目字段
+    example: 启动 TM 不再持续输出 Elasticsearch health check refused 告警，相关回归验证通过。
+    description: 可选；说明缺陷修复后怎样判断可以验收。
+analysis_hints:
+  problem_branch:
+    source: jira_or_local_source_branch
+    message: 可以结合 Jira 描述、当前本地源码分支和 TapData 分支对齐候选给出建议，但必须由研发负责人确认。
+  target_branch:
+    source: jira_or_branch_align_candidates
+    message: 可以结合 `agentic-cli tapdata branch-align list <issue-key>` 的候选分支给出建议，但不得替研发负责人确认。
+  problem_summary:
+    source: jira_summary_and_project_code
+    message: 可以结合 Jira 摘要、日志、源码搜索结果补全问题现象描述，但必须保留研发负责人确认环节。
+pre_fix_gate:
+  required: true
+  must_confirm: true
+  message: 准入通过后，AIAgent 必须先结合 Jira 卡片和项目代码形成修复方案；研发负责人确认目标、边界和风险前，AIAgent 不得修改代码。

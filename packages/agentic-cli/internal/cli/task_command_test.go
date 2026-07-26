@@ -306,6 +306,55 @@ func TestTakeoverTaskBlocksStatusOutsideProcessEntryStage(t *testing.T) {
 	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
 }
 
+func TestTakeoverTaskReportsAllMissingBugFixTakeoverFields(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	issue := realModeIssue()
+	issue.IssueType = "Bug"
+	issue.ProblemBranch = ""
+	issue.TargetBranch = ""
+	issue.ProblemSummary = "TM 启动时持续输出 Elasticsearch health check refused 告警"
+	issue.AcceptanceCriteria = ""
+	issue.VerificationMethod = ""
+	issue.RiskLevel = ""
+	client := &recordingJiraClient{issue: issue}
+	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"takeover-task", "TAP-123", "--workspace", "tapdata", "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "takeover_task")
+	assertJSONField(t, stdout.String(), "code", "admission_check_failed")
+	for _, want := range []string{
+		`"missing_fields":["problem_branch","target_branch"]`,
+		`"jira_comment_written":true`,
+		`"admission_standard_path"`,
+		`projects/tapdata/admission/defect-fix.yaml`,
+		`projects/tapdata/templates/admission/defect-fix-missing.md`,
+		"问题分支",
+		"修复分支",
+		"问题现象",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %s: %s", want, stdout.String())
+		}
+	}
+	if client.updatedKey != "" {
+		t.Fatalf("updatedKey = %s, want no takeover field write", client.updatedKey)
+	}
+	if client.commentKey != "TAP-123" {
+		t.Fatalf("commentKey = %s", client.commentKey)
+	}
+	for _, want := range []string{"TapData 缺陷修复准入信息缺失", "问题分支", "修复分支", "复现路径", "验收标准", "研发负责人必须确认后再继续执行"} {
+		if !strings.Contains(client.commentBody, want) {
+			t.Fatalf("comment body missing %s: %s", want, client.commentBody)
+		}
+	}
+}
+
 func TestResumeTakeoverReturnsRunIDAndNextAction(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)

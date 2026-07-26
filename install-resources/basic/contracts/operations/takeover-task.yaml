@@ -20,9 +20,7 @@ preconditions:
   - current_agent_id_must_be_empty_or_match_agent_id
   - task_class_must_be_mapped_to_standard_process
   - issue_must_be_in_allowed_project
-  - issue_must_have_acceptance_criteria
-  - issue_must_have_target_repo
-  - issue_must_have_verification_method
+  - issue_must_pass_project_admission_standard
   - jira_status_must_map_to_entry_stage
 output:
   workspace:
@@ -62,6 +60,30 @@ output:
   missing_field:
     type: string
     optional: true
+  missing_fields:
+    type: array
+    optional: true
+  admission_standard_path:
+    type: string
+    optional: true
+  admission_template_path:
+    type: string
+    optional: true
+  missing_field_guidance:
+    type: array
+    optional: true
+  suggestions:
+    type: array
+    optional: true
+  jira_comment_written:
+    type: boolean
+    optional: true
+  jira_comment_requires_confirmation:
+    type: boolean
+    optional: true
+  jira_comment_error:
+    type: string
+    optional: true
   completion_template:
     type: string
     optional: true
@@ -90,10 +112,8 @@ failure:
     - standard_process_mapping_gap
     - unknown_jira_status
     - invalid_takeover_stage
-    - missing_acceptance_criteria
-    - missing_target_repo
-    - missing_verification_method
-    - missing_risk_level
+    - admission_check_failed
+    - missing_takeover_fields
     - jira_adapter_config_failed
     - jira_issue_read_failed
     - jira_current_user_failed
