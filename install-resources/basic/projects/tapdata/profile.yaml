@@ -107,13 +107,20 @@ github:
     by_component:
       tapdata: tapdata/tapdata
       connectors: tapdata/tapdata-connectors
+      connectors-enterprise: tapdata/tapdata-connectors-enterprise
+      enterprise: tapdata/tapdata-enterprise
       web: tapdata/tapdata-web
       common-lib: tapdata/tapdata-common-lib
+      license: tapdata/tapdata-license
       mcp: tapdata/mcp-tap-server
     by_label:
       backend: tapdata/tapdata
+      enterprise: tapdata/tapdata-enterprise
       frontend: tapdata/tapdata-web
       connector: tapdata/tapdata-connectors
+      connector-enterprise: tapdata/tapdata-connectors-enterprise
+      connectors-enterprise: tapdata/tapdata-connectors-enterprise
+      license: tapdata/tapdata-license
       pdk: tapdata/tapdata-connectors
     by_issue_type:
       缺陷: tapdata/tapdata
