@@ -96,12 +96,20 @@ func RunInspectTask(args []string, stdout io.Writer) int {
 	return runInspectTask(args, stdout)
 }
 
-func RunResumeTakeover(args []string, stdout io.Writer) int {
-	return runResumeTakeover(args, stdout)
+func RunAddTaskComment(args []string, stdout io.Writer) int {
+	return runAddTaskComment(args, stdout)
 }
 
-func RunTaskRun(args []string, stdout io.Writer) int {
-	return runTaskRun(args, stdout)
+func RunUpdateTaskDescriptionSections(args []string, stdout io.Writer) int {
+	return runUpdateTaskDescriptionSections(args, stdout)
+}
+
+func RunUpdateTaskForm(args []string, stdout io.Writer) int {
+	return runUpdateTaskForm(args, stdout)
+}
+
+func RunResumeTakeover(args []string, stdout io.Writer) int {
+	return runResumeTakeover(args, stdout)
 }
 
 func RunWriteEvidence(args []string, stdout io.Writer) int {

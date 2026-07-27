@@ -76,7 +76,7 @@ Go CLI 运行时的实现方向如下：
 - `docs/architecture/agenticops-current-design.md`
 - `docs/user-stories/agenticops-user-stories.md`
 - `docs/user-stories/project-maintainer-stories.md`
-- `docs/user-stories/development-lead-stories.md`
+- `docs/user-stories/development-engineer-stories.md`
 - `install-resources/basic/handbooks/ai-employee-handbook.md`
 - `docs/contracts/operation-contract.md`
 - `docs/profiles/workflow-profile.md`

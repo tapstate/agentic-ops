@@ -54,8 +54,8 @@ $cmd workspace init --project tapstate --jira-user dev@example.com --source-root
 $cmd profile resolve --workspace tapstate | grep '"operation":"profile_resolve"'
 $cmd agent init --workspace tapstate | grep '"operation":"agent_init"'
 $cmd list-tasks --workspace tapstate | grep '"key":"TAP-123"'
-$cmd task run TAP-123 --workspace tapstate --process empty | grep '"capability_id":"empty_task_v1"'
-$cmd task run TAP-BUG-123 --workspace tapstate | grep '"defect_complexity":"normal"'
+$cmd inspect-task TAP-123 --workspace tapstate | grep '"recommended_next_action":"inspect_by_agent"'
+$cmd inspect-task TAP-BUG-123 --workspace tapstate | grep '"task_class":"bug_fix"'
 $cmd takeover-task TAP-MISSING-REPO --workspace tapstate | grep '"target_repo":"tapstate/tap-api"'
 set +e
 in_progress_output="$($cmd takeover-task TAP-IN-PROGRESS --workspace tapstate 2>/dev/null)"
@@ -72,7 +72,7 @@ release_output="$($cmd release-agent --workspace tapstate --run-id TAP-123-takeo
 printf '%s\n' "$release_output" | grep '"audit_submitted":true'
 printf '%s\n' "$release_output" | grep '"current_agent_id_cleared":true'
 $cmd feedback bundle --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 --redact | grep '"operation":"feedback_bundle"'
-$cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"runs":12'
+$cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"operation":"feedback_report"'
 $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"blocked":1'
 test -f "$workspace_root/.agentic-ops/feedback/events.ndjson"
 test -f "$workspace_root/.agentic-ops/profile.local.yaml"

@@ -42,6 +42,21 @@ func TestValidateAcceptsTapdataProfile(t *testing.T) {
 	if !containsString(p.Standards, "projects/tapdata/standards/development-rules.md") {
 		t.Fatalf("Standards missing tapdata development rules: %#v", p.Standards)
 	}
+	if field := p.JiraFormMapping.Fields["problem_summary"]; field.Source != "jira_description_section" || field.Section != "问题现象" {
+		t.Fatalf("problem_summary must map to confirmed description section: %#v", field)
+	}
+	for _, name := range []string{"issue_analysis", "fix_details", "verification_method"} {
+		field := p.JiraFormMapping.Fields[name]
+		if field.Source != "jira_field" || field.JiraField == "" || !field.Writable {
+			t.Fatalf("%s must be a writable Jira field mapping: %#v", name, field)
+		}
+	}
+	if p.JiraFormMapping.Fields["owner"].Writable {
+		t.Fatal("owner mapping must not be writable through update-task-form")
+	}
+	if gate := p.ReviewGates["development_engineer_review"]; gate.Role != "development_engineer" || gate.DecisionField != "development_engineer_decision" {
+		t.Fatalf("development engineer review gate mismatch: %#v", gate)
+	}
 	standardPath := filepath.Join("..", "..", "..", "..", "install-resources", "basic", "projects", "tapdata", "standards", "development-rules.md")
 	if info, err := os.Stat(standardPath); err != nil || info.IsDir() {
 		t.Fatalf("tapdata standard file is not readable: info=%v err=%v", info, err)
@@ -191,7 +206,11 @@ func validDeepProfileForTest() Profile {
 		},
 		StandardProcessMapping: map[string]string{"technical_task": "development_change_v1"},
 		ReviewGates: map[string]ReviewGate{
-			"developer_review": {Role: "developer_owner", ReturnedNextAction: "fix_and_verify"},
+			"development_engineer_review": {
+				Role:               "development_engineer",
+				DecisionField:      "development_engineer_decision",
+				ReturnedNextAction: "fix_and_verify",
+			},
 		},
 	}
 }

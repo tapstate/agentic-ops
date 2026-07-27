@@ -29,7 +29,7 @@ agentic-ops/
   docs/
     maintainers/
       getting-started.md
-    development-leads/
+    development-engineers/
       getting-started.md
     strategy/
       positioning.md
@@ -49,12 +49,12 @@ agentic-ops/
     user-stories/
       agenticops-user-stories.md
       project-maintainer-stories.md
-      development-lead-stories.md
+      development-engineer-stories.md
       project-maintainer/
         pm-001-document-boundary.md
         ...
-      development-lead/
-        dl-001-install.md
+      development-engineer/
+        de-001-install.md
         ...
     workflows/
       feedback-loop.md
@@ -86,6 +86,8 @@ agentic-ops/
     .gitkeep
   .local/
     .gitkeep
+  .superpowers/
+    # local execution state, ignored by Git
   plans/
     implementation-plan-v1.md
   skills/
@@ -114,12 +116,13 @@ agentic-ops/
 
 | Directory | Responsibility |
 | --- | --- |
-| `docs/` | 人读文档，包括项目维护者、研发负责人、架构、规则、故事线、流程和设计说明。 |
+| `docs/` | 人读文档，包括项目维护者、研发工程师、架构、规则、故事线、流程和设计说明。 |
 | `install-resources/basic/` | Git 跟踪的跨平台通用安装资源，包括 AI 资产入口、手册、操作契约、工作流配置、策略、运行手册和模板。 |
 | `install-resources/<os-arch>/` | Git 跟踪的平台二进制产物，只放对应平台的 `agentic-cli`。 |
 | `install-resources/checksums.txt` | 安装资源校验和，覆盖 `basic` 和平台二进制。 |
 | `bin/` | 安装后的本机命令目录；仓库只跟踪 `bin/.gitkeep`，本地 `bin/agentic-cli` 被 `.gitignore` 忽略。 |
 | `.local/` | 本机安装和更新状态目录；仓库只跟踪 `.local/.gitkeep`，本地状态文件被 `.gitignore` 忽略。 |
+| `.superpowers/` | 项目工作空间中的本地执行状态目录，保存工具检查点、临时分析和缓存；被 `.gitignore` 忽略，不属于项目资料。 |
 | `plans/` | 面向维护者和项目维护代理的可执行推进计划。 |
 | `skills/` | AgenticOps skills，让 AIAgent 知道如何工作。 |
 | `packages/agentic-cli/` | Go CLI 运行时源码位置。 |
@@ -161,12 +164,18 @@ tapdata/
   .agentic-ops/
     runs/
     feedback/
+  .superpowers/
+    # local execution state only
 ```
+
+`.superpowers/` 只保存当前项目工作空间的本地执行状态，不得承载正式设计、实施计划、项目规范或运行资产。正式设计进入 `docs/` 的对应主题目录，可执行计划进入顶层 `plans/`。工具的默认输出路径与本约定冲突时，以本约定为准；不得创建或提交 `docs/superpowers/`。
 
 ## 7. 结构决策
 
 该结构满足 AgenticOps 设计文档、运行资产、计划和运行时代码分层维护要求，不需要额外目录决策。
 
 `plans/` 保留在仓库顶层。原因是推进资料需要独立于设计说明维护，并且需要比 `docs/` 中的设计说明更容易被定位和更新。
+
+`.superpowers/` 保留为工作空间本地目录并由 Git 忽略。它只反映一次或一段本地工具执行过程，不具备项目事实源地位，也不随安装资源发布。
 
 运行时默认资源统一放在 `install-resources/basic/`；不要重新引入旧的顶层运行资源目录或旧的 release 目录作为安装资源源头。

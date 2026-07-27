@@ -70,6 +70,10 @@ func (FakeClient) AddComment(ctx context.Context, key string, body string) error
 	return nil
 }
 
+func (FakeClient) UpdateDescriptionSections(ctx context.Context, key string, sections map[string]string) error {
+	return nil
+}
+
 func (FakeClient) UpdateFields(ctx context.Context, key string, fields map[string]any) error {
 	return nil
 }

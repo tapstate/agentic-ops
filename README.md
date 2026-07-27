@@ -2,7 +2,7 @@
 
 AgenticOps 是把公司员工执行标准沉淀成 AI 可执行标准流程的本地控制体系。
 
-它面向研发 Jira 任务处理场景，让 Jira 继续管理任务事实源，让研发负责人继续负责关键授权，让代码审查人、QA、运维、安全等专业角色在对应节点审查结果，同时把 AI 员工的执行动作收敛到可审计的命令、操作契约、标准表单、工作日志、证据和人工门禁里。
+它面向研发 Jira 任务处理场景，让 Jira 继续管理任务事实源，让研发工程师继续负责关键授权，让代码审查人、QA、运维、安全等专业角色在对应节点审查结果，同时把 AI 员工的执行动作收敛到可审计的命令、操作契约、标准表单、工作日志、证据和人工门禁里。
 
 AgenticOps 的目标不是让 AIAgent 靠临场聊天上下文猜流程，而是让 AIAgent 面向稳定标准资产工作：先识别任务类型和当前阶段，再按操作契约、工作流配置、策略门禁、运行手册和模板执行，最后把关键状态、关键信息、表单数据和证据回写到合适的位置，用于恢复、复盘和持续优化。
 
@@ -10,7 +10,7 @@ AgenticOps 的目标不是让 AIAgent 靠临场聊天上下文猜流程，而是
 
 ```text
 Jira 任务
--> 研发负责人授权
+-> 研发工程师授权
 -> AgenticOps 标准流程
 -> agentic-cli 受控执行
 -> AIAgent 开发、验证和证据整理
@@ -29,7 +29,7 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 
 - `AgenticOps` 是项目和执行控制体系。
 - `AgenticCLI` 是 AgenticOps 成熟经验沉淀后的执行入口组件。
-- `agentic-cli` 是安装后给 AIAgent 和研发负责人使用的 CLI 二进制。
+- `agentic-cli` 是安装后给 AIAgent 和研发工程师使用的 CLI 二进制。
 
 ## 设计原则
 
@@ -63,19 +63,19 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 - [CLI 实现](packages/agentic-cli/)
 - [机器可读操作契约](install-resources/basic/contracts/operations/)
 
-### 研发负责人
+### 研发工程师
 
-研发负责人是使用 AgenticOps 指挥 AI 处理 Jira 任务的人。研发负责人不需要关心 AgenticOps 源码细节，主要面对安装后的 `agentic-cli`、AI 员工手册、工作流配置、模板和证据链。
+研发工程师是使用 AgenticOps 指挥 AI 处理 Jira 任务的人。研发工程师不需要关心 AgenticOps 源码细节，主要面对安装后的 `agentic-cli`、AI 员工手册、工作流配置、模板和证据链。
 
 从这里开始：
 
-- [研发负责人上手](docs/development-leads/getting-started.md)
+- [研发工程师上手](docs/development-engineers/getting-started.md)
 - [AI 员工手册](install-resources/basic/handbooks/ai-employee-handbook.md)
 - [端到端演示](docs/examples/end-to-end-demo.md)
 - [故事线总览](docs/user-stories/agenticops-user-stories.md)
 - [问题修复与同步路径](docs/runtime/problem-resolution-and-update.md)
 
-研发负责人读人用指引，AIAgent 读 AI 资产入口。初始化工作空间后，应要求 AIAgent 先读取 [AI 资产入口](install-resources/basic/ai-assets/README.md)，再接管具体 Jira 任务。
+研发工程师读人用指引，AIAgent 读 AI 资产入口。初始化工作空间后，应要求 AIAgent 先读取 [AI 资产入口](install-resources/basic/ai-assets/README.md)，再接管具体 Jira 任务。
 
 ### AIAgent
 
@@ -97,7 +97,7 @@ AgenticOps 通过稳定标准资产约束 AIAgent 的执行行为：
 
 | 资产 | 用途 |
 | --- | --- |
-| AI 员工手册 | 说明 AIAgent 和研发负责人如何协作；AIAgent 工作规则是手册中的执行约束。 |
+| AI 员工手册 | 说明 AIAgent 和研发工程师如何协作；AIAgent 工作规则是手册中的执行约束。 |
 | 操作契约 | 定义可执行操作的输入、输出、失败码、副作用和人工门禁。 |
 | 任务表单标准 | 定义任务各阶段必须形成的标准字段和审查依据。 |
 | 工作流配置 | 把标准流程映射到具体 Jira、GitHub 和本地工作空间。 |
@@ -123,12 +123,13 @@ tapdata/
 
 | 目录 | 用途 |
 | --- | --- |
-| `docs/` | 人读文档，包括项目维护者、研发负责人、架构、规则、故事线、流程和设计说明。 |
+| `docs/` | 人读文档，包括项目维护者、研发工程师、架构、规则、故事线、流程和设计说明。 |
 | `install-resources/basic/` | 跨平台通用安装资源，包括 AI 资产入口、手册、操作契约、工作流配置、策略、运行手册和模板。 |
 | `install-resources/<os-arch>/` | Git 跟踪的平台二进制产物，只放对应平台的 `agentic-cli`。 |
 | `install-resources/checksums.txt` | 安装资源校验和，安装和更新时必须通过校验。 |
 | `bin/` | 本机安装后的命令目录，仓库只跟踪 `bin/.gitkeep`，本地生成的 `bin/agentic-cli` 不提交。 |
 | `.local/` | 本机安装和更新状态目录，仓库只跟踪 `.local/.gitkeep`，本地状态文件不提交。 |
+| `.superpowers/` | 项目工作空间的本地执行状态目录，由 Git 忽略，不保存正式设计、计划或运行资产。 |
 | `plans/` | 基于稳定架构拆解的可执行推进计划。 |
 | `packages/agentic-cli/` | AgenticCLI Go 运行时实现。 |
 | `scripts/` | 安装、构建和本地检查脚本。 |

@@ -41,17 +41,17 @@ AgenticOps 表单体系分为三层。
 | `issue_key` | Jira 卡片编号。 | Jira | 创建后 |
 | `issue_type` | 任务类型，例如需求、缺陷、技术任务。 | 需求负责人、Jira | 创建后 |
 | `business_goal` | 任务要解决的业务或研发目标。 | 需求负责人 | 卡片创建 |
-| `scope_boundary` | 明确包含和不包含的范围。 | 需求负责人、研发负责人 | 进入迭代 |
-| `acceptance_criteria` | 验收标准。 | 需求负责人、研发负责人 | 进入迭代 |
-| `owner` | 当前研发负责人。 | Jira / 迭代管理员 | 进入迭代 |
+| `scope_boundary` | 明确包含和不包含的范围。 | 需求负责人、研发工程师 | 进入迭代 |
+| `acceptance_criteria` | 验收标准。 | 需求负责人、研发工程师 | 进入迭代 |
+| `owner` | 当前研发工程师。 | Jira / 迭代管理员 | 进入迭代 |
 | `iteration` | 所属迭代或计划窗口。 | 迭代管理员 | 进入迭代 |
 | `priority` | 任务优先级。 | 需求负责人、迭代管理员 | 进入迭代 |
-| `risk_level` | 风险等级。 | 研发负责人 | 进入迭代 |
-| `target_repo` | AI 需要读取和修改的目标仓库。 | 研发负责人、工作流配置 | AI 接管 |
-| `target_branch` | 目标基线分支。 | 研发负责人、工作流配置 | AI 接管 |
-| `verification_method` | 最小验证方式，例如命令、手动验收或 CI。 | 研发负责人 | AI 接管 |
-| `environment_context` | 需要的环境、账号、测试数据或约束摘要。 | 研发负责人 | AI 接管 |
-| `dependencies` | 外部依赖、前置任务或阻塞条件。 | 需求负责人、研发负责人 | AI 接管 |
+| `risk_level` | 风险等级。 | 研发工程师 | 进入迭代 |
+| `target_repo` | AI 需要读取和修改的目标仓库。 | 研发工程师、工作流配置 | AI 接管 |
+| `target_branch` | 目标基线分支。 | 研发工程师、工作流配置 | AI 接管 |
+| `verification_method` | 最小验证方式，例如命令、手动验收或 CI。 | 研发工程师 | AI 接管 |
+| `environment_context` | 需要的环境、账号、测试数据或约束摘要。 | 研发工程师 | AI 接管 |
+| `dependencies` | 外部依赖、前置任务或阻塞条件。 | 需求负责人、研发工程师 | AI 接管 |
 | `run_id` | 一次 AI 执行记录的唯一编号；同一任务可以有多个历史 `run_id`。 | AgenticOps | 接管后 |
 | `agent_id` | 当前 AIAgent 的稳定身份编号；同一 `agent_id` 可以产生多个 `run_id`。 | AgenticOps | AIAgent 初始化 |
 | `current_agent_id` | 当前任务绑定的 `agent_id`，用于所有权门禁和并发冲突检测；不是新的身份字段。 | AgenticOps、Jira 映射 | AI 接管 |
@@ -64,16 +64,16 @@ AgenticOps 表单体系分为三层。
 | `implementation_summary` | 本地实现摘要。 | AIAgent | 开发完成 |
 | `verification_result` | 实际验证结果。 | AIAgent | 开发完成 |
 | `residual_risk` | 剩余风险和未验证部分。 | AIAgent | 开发完成 |
-| `pr_link` | 拉取请求链接。 | 研发负责人、AIAgent（门禁后） | 拉取请求阶段 |
+| `pr_link` | 拉取请求链接。 | 研发工程师、AIAgent（门禁后） | 拉取请求阶段 |
 | `ci_status` | CI 状态摘要。 | GitHub / CI | 拉取请求阶段 |
-| `review_status` | 审查意见处理状态。 | AIAgent、研发负责人 | 拉取请求阶段 |
-| `reviewer_decision` | 专业审查结论，例如通过、退回、要求补充、阻断。 | 代码审查人、QA、运维、安全、研发负责人 | 审查节点 |
-| `reviewer_required_action` | 审查后要求 AIAgent 或负责人执行的动作。 | 代码审查人、QA、运维、安全、研发负责人 | 审查节点 |
+| `review_status` | 审查意见处理状态。 | AIAgent、研发工程师 | 拉取请求阶段 |
+| `reviewer_decision` | 专业审查结论，例如通过、退回、要求补充、阻断。 | 代码审查人、QA、运维、安全、研发工程师 | 审查节点 |
+| `reviewer_required_action` | 审查后要求 AIAgent 或负责人执行的动作。 | 代码审查人、QA、运维、安全、研发工程师 | 审查节点 |
 | `retry_policy` | 当前失败是否允许重试、最大次数或重试前置条件。 | AgenticOps、工作流配置 | 失败后 |
-| `redo_from_stage` | 信息变更或审查退回时需要重做的起始阶段。 | AgenticOps、代码审查人、研发负责人 | 重做时 |
-| `completion_evidence` | 最终完成证据。 | AIAgent、研发负责人 | 完成 |
-| `follow_up_items` | 后续问题或新任务建议。 | AIAgent、研发负责人 | 完成 |
-| `completed_at` | 标准流程完成或交接结束时间。 | AgenticOps、研发负责人 | 完成 |
+| `redo_from_stage` | 信息变更或审查退回时需要重做的起始阶段。 | AgenticOps、代码审查人、研发工程师 | 重做时 |
+| `completion_evidence` | 最终完成证据。 | AIAgent、研发工程师 | 完成 |
+| `follow_up_items` | 后续问题或新任务建议。 | AIAgent、研发工程师 | 完成 |
+| `completed_at` | 标准流程完成或交接结束时间。 | AgenticOps、研发工程师 | 完成 |
 | `current_agent_id_cleared` | 完成或交接后是否已清理任务上的 `current_agent_id`。 | AgenticOps | 完成 |
 
 字段值不得包含 secrets、tokens、private keys、原始敏感日志或完整敏感代码片段。写入 Jira 的人可见内容必须使用中文。
@@ -96,7 +96,7 @@ AgenticOps 表单体系分为三层。
 | --- | --- | --- |
 | 卡片创建 | `business_goal`、`issue_type` | 缺失时卡片不能作为 AI 可接管任务。 |
 | 进入迭代 | `scope_boundary`、`acceptance_criteria`、`owner`、`iteration`、`priority`、`risk_level` | 缺失时不能进入 AI 接管候选列表。 |
-| AI 接管 | `target_repo`、`target_branch`、`verification_method`、`environment_context`、`task_class`、`agent_id` | 缺失时 `takeover_task` 阻断并输出补卡动作或分类决策。 |
+| AI 接管 | `target_repo`、`target_branch`、`verification_method`、`environment_context`、`task_class`、`agent_id` | AIAgent 在调用 `takeover_task` 前按项目准入资产检查；不足时先分析、补卡并重新检查。CLI 只执行通用接管安全门禁。 |
 | 本地开发 | `run_id`、`agent_id`、`current_agent_id`、`takeover_at`、`task_type`、`task_class`、`process_id`、`current_stage`、`next_action` | 缺失时恢复接管或重新初始化执行记录。 |
 | 开发完成 | `implementation_summary`、`verification_result`、`residual_risk` | 缺失时不能请求推送或创建拉取请求的确认。 |
 | 拉取请求审查 | `pr_link`、`ci_status`、`review_status`、`reviewer_decision` | 缺失时不能进入完成证据。 |
@@ -157,6 +157,7 @@ jira_form_mapping:
     acceptance_criteria:
       source: jira_field
       jira_field: customfield_acceptance
+      writable: true
       required_from_stage: iteration_ready
     target_repo:
       source: jira_field
@@ -170,6 +171,7 @@ jira_form_mapping:
     risk_level:
       source: jira_field
       jira_field: customfield_risk
+      writable: true
       required_from_stage: iteration_ready
 
   lifecycle_status_mapping:
@@ -193,6 +195,8 @@ jira_form_mapping:
       cli: tapstate/agentic-ops
 ```
 
+`writable: true` 必须按逻辑字段逐项声明，只用于允许 `update-task-form` 写入的业务结论字段。负责人、assignee、代理所有权、Description 章节和 Comment 映射必须保持只读，并使用各自专用原子操作维护。
+
 `source` 可以是：
 
 - `jira_field`
@@ -213,15 +217,15 @@ Jira 对接不满足 AgenticOps 标准时，先适配，再决策。
 | 缺口 | 处理方式 |
 | --- | --- |
 | Jira 有字段但名称不同 | 更新 Jira Form Mapping。 |
-| Jira 字段存在但值为空 | 阻断当前阶段，输出补卡模板。 |
+| Jira 字段存在但值为空 | AIAgent 阻断当前阶段，按项目资产结合代码形成补卡建议，经确认后使用通用 Jira 原子操作写回。 |
 | Jira 没有字段但描述模板稳定包含 | 在映射中声明 `jira_description_section`。 |
 | Jira 没有字段也没有稳定模板 | 记录 `missing_form_field`，请求流程负责人决策。 |
 | Jira 状态无法对应生命周期阶段 | 记录 `lifecycle_mapping_gap`，请求工作流决策。 |
 | 标准字段不适合某类任务 | 记录 `task_form_standard_gap`，请求是否调整标准。 |
 | 专业审查节点无法映射 | 记录 `review_gate_mapping_gap`，请求工作流决策。 |
 | 重试或重做规则缺失 | 记录 `retry_redo_policy_gap`，请求工作流配置或策略决策。 |
-| 任务分类无法映射 | 记录 `task_class_mapping_gap`，请求研发负责人或流程负责人决策。 |
-| 完成后无法清理 `current_agent_id` | 记录 `agent_release_failed`，请求研发负责人决策是否人工释放。 |
+| 任务分类无法映射 | 记录 `task_class_mapping_gap`，请求研发工程师或流程负责人决策。 |
+| 完成后无法清理 `current_agent_id` | 记录 `agent_release_failed`，请求研发工程师决策是否人工释放。 |
 
 稳定错误码建议：
 

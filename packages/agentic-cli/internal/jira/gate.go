@@ -32,13 +32,13 @@ func ValidateTakeoverEntryWithProcesses(issue Issue, p profile.Profile, currentU
 
 func validateTakeover(issue Issue, p profile.Profile, currentUser string, agentID string, registry map[string]process.Process) TakeoverDecision {
 	if issue.Owner == "" || issue.Owner != currentUser {
-		return blocked("owner_mismatch", "当前研发负责人与 Jira 卡片负责人不匹配", "请确认当前用户是否为该 Jira 卡片的研发负责人")
+		return blocked("owner_mismatch", "当前研发工程师与 Jira 卡片负责人不匹配", "请确认当前用户是否为该 Jira 卡片的研发工程师")
 	}
 	if issue.Assignee == "" || issue.Assignee != currentUser {
-		return blocked("assignee_mismatch", "当前 Jira assignee 与当前用户不匹配", "请把 Jira assignee 调整为当前研发负责人后重试")
+		return blocked("assignee_mismatch", "当前 Jira assignee 与当前用户不匹配", "请把 Jira assignee 调整为当前研发工程师后重试")
 	}
 	if issue.CurrentAgentID != "" && issue.CurrentAgentID != agentID {
-		return blocked("agent_ownership_conflict", "当前 Jira 卡片已绑定其他 AIAgent", "请研发负责人确认是否释放当前代理绑定")
+		return blocked("agent_ownership_conflict", "当前 Jira 卡片已绑定其他 AIAgent", "请研发工程师确认是否释放当前代理绑定")
 	}
 	taskClass, taskClassSource := taskClassFor(issue, p)
 	if taskClass == "" {

@@ -10,7 +10,7 @@
 4. [项目结构](architecture/project-structure.md)：确认仓库目录、全局安装目录和项目 AI 工作空间边界。
 5. [故事线总览](user-stories/agenticops-user-stories.md)：确认后续推进遵循“故事线 -> 设计 -> 计划 / 开发 -> 验收”。
 6. [项目维护者故事](user-stories/project-maintainer-stories.md)：确认源头仓库维护、标准资产治理、发布、诊断、反馈、回滚和兼容性故事。
-7. [研发负责人故事](user-stories/development-lead-stories.md)：确认安装、初始化、任务接管、恢复接管、任务完成审计和按需反馈分析。
+7. [研发工程师故事](user-stories/development-engineer-stories.md)：确认安装、初始化、任务接管、恢复接管、任务完成审计和按需反馈分析。
 8. [AI 员工手册](../install-resources/basic/handbooks/ai-employee-handbook.md)：确认 AIAgent 如何工作、何时停止、如何回写证据。
 9. [操作契约](contracts/operation-contract.md)：确认 AIAgent 能调用哪些受控操作，以及每个操作的输入、输出和副作用。
 10. [工作流配置](profiles/workflow-profile.md)：确认如何屏蔽 Jira 事实，并把具体项目流程映射成稳定配置。
@@ -19,9 +19,9 @@
 
 ## 2. 必须确认的设计项
 
-- AgenticOps 是 AI 执行控制体系，不替代 Jira、研发负责人、拉取请求审查或 CI。
-- 第一阶段从已进入迭代、已指定研发负责人的 Jira 卡片开始。
-- 研发负责人手动触发任务接管，AIAgent 不能全自动接管任务。
+- AgenticOps 是 AI 执行控制体系，不替代 Jira、研发工程师、拉取请求审查或 CI。
+- 第一阶段从已进入迭代、已指定研发工程师的 Jira 卡片开始。
+- 研发工程师手动触发任务接管，AIAgent 不能全自动接管任务。
 - `tapstate/agentic-ops` 是源码、规则、手册、契约、配置模板和通用文档的源头仓库。
 - `~/.agentic-ops` 是本机全局安装和配置目录，不是具体项目运行目录。
 - 具体项目 AI 工作空间才是运行目录，例如 `tapstate`、`tapdata`。
@@ -35,7 +35,7 @@
 
 - 是否有文档暗示尚未实现的命令、脚本、配置或适配器已经存在。
 - 是否有资料边界混淆，把全局安装目录、源头仓库和项目 AI 工作空间混在一起。
-- 是否有 AIAgent 可以绕过研发负责人的人工确认点。
+- 是否有 AIAgent 可以绕过研发工程师的人工确认点。
 - 是否有 Jira、GitHub、Git 或本地路径的事实被写死在通用规则中。
 - 是否有标题、术语或文件说明不利于试点研发理解。
 - 是否有故事线缺少失败路径、输出证据或验收标准。

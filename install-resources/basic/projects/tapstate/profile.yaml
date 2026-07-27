@@ -100,9 +100,9 @@ human_gates:
   - scope_change
 
 review_gates:
-  developer_owner_review:
-    role: developer_owner
-    decision_field: developer_owner_decision
+  development_engineer_review:
+    role: development_engineer
+    decision_field: development_engineer_decision
     returned_next_action: fix_and_verify
   pr_review:
     role: reviewer

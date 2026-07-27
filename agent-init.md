@@ -1,6 +1,6 @@
 # AgenticOps 初始化入口
 
-本文面向 Codex / AIAgent。研发负责人在项目 AI 工作空间中启动 Codex 后，可以发送：
+本文面向 Codex / AIAgent。研发工程师在项目 AI 工作空间中启动 Codex 后，可以发送：
 
 ```text
 安装 https://github.com/tapstate/agentic-ops/blob/main/agent-init.md 并初始化
@@ -13,7 +13,7 @@
 - 确认或安装 AgenticOps 全局命令 `agentic-cli`。
 - 在当前项目 AI 工作空间内初始化工作空间配置。
 - 初始化当前 AIAgent 的 AgenticOps 能力。
-- 向研发负责人说明下一步可以如何开始工作。
+- 向研发工程师说明下一步可以如何开始工作。
 
 ## 前置判断
 
@@ -24,7 +24,7 @@
 - 不得在 `tapstate/agentic-ops` 源头仓库中初始化业务工作空间。
 - 当前目录应可写，并用于保存 `.agentic-ops/` 运行状态、执行记录和反馈记录。
 
-如果目录不符合要求，停止并要求研发负责人切换到正确的项目 AI 工作空间。
+如果目录不符合要求，停止并要求研发工程师切换到正确的项目 AI 工作空间。
 
 ## 初始化步骤
 
@@ -48,7 +48,7 @@ agentic-cli --version
 
 如果这样可以输出版本，不要重新安装，继续后续初始化步骤。
 
-如果仍然不可用，提示研发负责人重新打开终端，或执行 `source "$HOME/.zshrc"` 后再重试。不要重复向 `~/.zshrc` 追加 PATH 配置。
+如果仍然不可用，提示研发工程师重新打开终端，或执行 `source "$HOME/.zshrc"` 后再重试。不要重复向 `~/.zshrc` 追加 PATH 配置。
 
 如果命令不存在，使用安装入口：
 
@@ -59,15 +59,15 @@ gh api -H 'Accept: application/vnd.github.raw' \
   | AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
 ```
 
-如果 `gh auth status` 失败，先要求研发负责人完成 GitHub CLI 登录：
+如果 `gh auth status` 失败，先要求研发工程师完成 GitHub CLI 登录：
 
 ```sh
 gh auth login -h github.com -p ssh -s repo
 ```
 
-`/repos/.../install.sh?ref=main` 必须用引号包起来，避免 zsh 把 `?ref=main` 当成通配符。`AGENTIC_OPS_REPO_URL` 显式指定 SSH clone 地址；如果当前机器只能使用其它 clone 地址，再由研发负责人确认后替换该变量值。
+`/repos/.../install.sh?ref=main` 必须用引号包起来，避免 zsh 把 `?ref=main` 当成通配符。`AGENTIC_OPS_REPO_URL` 显式指定 SSH clone 地址；如果当前机器只能使用其它 clone 地址，再由研发工程师确认后替换该变量值。
 
-如果检测到 `~/.agentic-ops` 已存在，安装脚本会进入更新模式。Codex 不得自行确认更新；必须先向研发负责人说明当前目录会被更新到 `origin/main` 最新版本，并等待明确同意。获得同意后，非交互执行时使用：
+如果检测到 `~/.agentic-ops` 已存在，安装脚本会进入更新模式。Codex 不得自行确认更新；必须先向研发工程师说明当前目录会被更新到 `origin/main` 最新版本，并等待明确同意。获得同意后，非交互执行时使用：
 
 ```sh
 gh api -H 'Accept: application/vnd.github.raw' \
@@ -91,7 +91,7 @@ agentic-cli --version
 
 ### 2. 初始化项目 AI 工作空间
 
-确认研发负责人提供了以下信息：
+确认研发工程师提供了以下信息：
 
 - 项目配置项，例如 `tapdata`。
 - Jira 用户，例如 `harsen@tapdata.io`。
@@ -103,17 +103,17 @@ agentic-cli --version
 agentic-cli workspace init --project tapdata --jira-user harsen@tapdata.io
 ```
 
-初始化时只要求研发负责人选择项目配置项。以 `tapdata` 为例，Codex 应加载当前 AgenticOps 版本中的 `install-resources/basic/projects/tapdata/profile.yaml`，再从该 profile 中读取 Jira project、Jira 到代码仓库的映射、本地路径和工作流配置。`--jira-project` 只在研发负责人明确要求校验某个 Jira project 时使用。
+初始化时只要求研发工程师选择项目配置项。以 `tapdata` 为例，Codex 应加载当前 AgenticOps 版本中的 `install-resources/basic/projects/tapdata/profile.yaml`，再从该 profile 中读取 Jira project、Jira 到代码仓库的映射、本地路径和工作流配置。`--jira-project` 只在研发工程师明确要求校验某个 Jira project 时使用。
 
 ### 3. 按全局指引启用 AgenticOps
 
-当研发负责人只发送：
+当研发工程师只发送：
 
 ```text
 按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。
 ```
 
-Codex 应先读取 `~/.agentic-ops/agent-guides.md`，再依赖当前项目 AI 工作空间和已安装 AgenticOps 资产完成初始化。不得要求读取研发负责人个人 Obsidian wiki、个人长期记忆或上一段聊天上下文。
+Codex 应先读取 `~/.agentic-ops/agent-guides.md`，再依赖当前项目 AI 工作空间和已安装 AgenticOps 资产完成初始化。不得要求读取研发工程师个人 Obsidian wiki、个人长期记忆或上一段聊天上下文。
 
 执行：
 
@@ -122,11 +122,11 @@ agentic-cli agent init
 agentic-cli preflight
 ```
 
-`workspace init` 会在当前目录生成 `.agentic-ops/agent.json` 和 `AGENTS.md`。Codex 应从这些文件识别当前项目配置项，再按 `agentic-cli agent init` 输出的 `guide_entry` 和 `asset_entry` 读取全局指引与本地 AI 资产入口。默认入口分别是 `$HOME/.agentic-ops/agent-guides.md` 和 `$HOME/.agentic-ops/install-resources/basic/ai-assets/README.md`。如果 `preflight` 失败，停止接管任务，并把缺失配置、权限或路径问题说明给研发负责人。
+`workspace init` 会在当前目录生成 `.agentic-ops/agent.json` 和 `AGENTS.md`。Codex 应从这些文件识别当前项目配置项，再按 `agentic-cli agent init` 输出的 `guide_entry` 和 `asset_entry` 读取全局指引与本地 AI 资产入口。默认入口分别是 `$HOME/.agentic-ops/agent-guides.md` 和 `$HOME/.agentic-ops/install-resources/basic/ai-assets/README.md`。如果 `preflight` 失败，停止接管任务，并把缺失配置、权限或路径问题说明给研发工程师。
 
 ## 初始化完成后的回复
 
-初始化完成后，向研发负责人说明：
+初始化完成后，向研发工程师说明：
 
 - 当前项目配置项。
 - 当前 `agentic-cli` 版本。
@@ -138,7 +138,7 @@ agentic-cli preflight
 
 ```text
 列出我名下可以接管的 Jira 任务。
-接管 TAP-123，并先说明计划、验证方式和风险点。
+接管 TAP-123；信息不足时先结合代码形成补卡建议并写回 Jira，接管后先把修复计划写入 Jira 等我确认。
 回写本次执行证据。
 提交 TAP-123 本次执行的任务审计记录。
 ```

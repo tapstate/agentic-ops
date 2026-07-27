@@ -1,6 +1,6 @@
 operation: takeover_task
 version: 1
-purpose: 研发负责人授权 AIAgent 接管一个已进入迭代的任务。
+purpose: 研发工程师授权 AIAgent 接管一个已进入迭代的任务。
 task_type: task_takeover
 allowed_stages:
   - waiting_takeover
@@ -56,33 +56,6 @@ output:
       - proceed
       - ask_owner
       - blocked
-  missing_field:
-    type: string
-    optional: true
-  missing_fields:
-    type: array
-    optional: true
-  jira_comment_written:
-    type: boolean
-    optional: true
-  jira_comment_requires_confirmation:
-    type: boolean
-    optional: true
-  jira_comment_error:
-    type: string
-    optional: true
-  form_updates:
-    type: object
-    fields:
-      - run_id
-      - agent_id
-      - current_agent_id
-      - takeover_at
-      - task_type
-      - task_class
-      - process_id
-      - current_stage
-      - next_action
 failure:
   codes:
     - owner_mismatch
@@ -102,7 +75,7 @@ failure:
     - missing_permission
     - workflow_transition_not_allowed
 side_effects:
-  - may_write_jira_comment
+  - may_write_jira_ownership
   - may_create_takeover_record
   - may_write_local_event
   - must_not_modify_code

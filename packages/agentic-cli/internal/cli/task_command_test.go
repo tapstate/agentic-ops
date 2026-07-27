@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/clihandlers"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
 )
 
 func TestListTasksRejectsFakeJiraByDefault(t *testing.T) {
@@ -340,6 +341,7 @@ func TestInspectTaskOutputsFactsAndProjectAssetRefsWithoutSideEffects(t *testing
 	issue.FormValues["problem_branch"] = ""
 	issue.FormValues["target_branch"] = ""
 	issue.FormValues["problem_summary"] = "TM 启动时持续输出 Elasticsearch health check refused 告警"
+	issue.Comments = []jira.Comment{{ID: "101", Author: "current-user", Body: "修复计划 v1 已确认"}}
 	client := &recordingJiraClient{issue: issue}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
 
@@ -360,6 +362,9 @@ func TestInspectTaskOutputsFactsAndProjectAssetRefsWithoutSideEffects(t *testing
 	assertNestedJSONField(t, stdout.String(), []string{"form_values", "target_branch"}, "")
 	assertNestedJSONField(t, stdout.String(), []string{"form_values", "problem_summary"}, "TM 启动时持续输出 Elasticsearch health check refused 告警")
 	assertNestedJSONField(t, stdout.String(), []string{"asset_refs", "admission_dir"}, "install-resources/basic/projects/tapdata/admission")
+	if !strings.Contains(stdout.String(), `"comments":[{"id":"101","author":"current-user","body":"修复计划 v1 已确认"}]`) {
+		t.Fatalf("inspect-task comments missing: %s", stdout.String())
+	}
 	assertJSONField(t, stdout.String(), "recommended_next_action", "inspect_by_agent")
 	for _, notWant := range []string{"admission_check_failed", "completion_template", "suggestions"} {
 		if strings.Contains(stdout.String(), notWant) {

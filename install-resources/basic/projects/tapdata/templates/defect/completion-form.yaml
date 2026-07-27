@@ -1,0 +1,4 @@
+values:
+  issue_analysis: <confirmed_root_cause_and_evidence>
+  fix_details: <implemented_changes_and_scope>
+  verification_method: <executed_tests_and_results>

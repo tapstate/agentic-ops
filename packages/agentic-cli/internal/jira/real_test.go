@@ -77,6 +77,28 @@ func TestExtractSectionMatchesMarkdownHeadingAgainstPlainJiraHeading(t *testing.
 	}
 }
 
+func TestExtractADFSectionStopsAtNextHeading(t *testing.T) {
+	description := map[string]any{
+		"type":    "doc",
+		"version": 1,
+		"content": []any{
+			adfHeading("问题分支", 2),
+			adfParagraph("develop"),
+			adfHeading("修复分支", 2),
+			adfParagraph("release-v3.31"),
+			adfHeading("验收标准", 2),
+			adfParagraph("告警不再重复出现"),
+		},
+	}
+
+	if got := extractADFSection(description, "问题分支"); got != "develop" {
+		t.Fatalf("problem branch = %q, want develop", got)
+	}
+	if got := extractADFSection(description, "修复分支"); got != "release-v3.31" {
+		t.Fatalf("target branch = %q, want release-v3.31", got)
+	}
+}
+
 func TestRealClientMapsRiskLevelFromLabels(t *testing.T) {
 	client := newTestRealClient(t, func(r *http.Request) *http.Response {
 		assertRealJiraRequest(t, r, http.MethodPost, "/rest/api/3/search/jql")
@@ -123,6 +145,9 @@ func TestRealClientMapsAgentOwnershipFromLatestAgenticOpsComment(t *testing.T) {
 	if issue.FormValues["takeover_at"] != "2026-07-21T10:30:12Z" {
 		t.Fatalf("takeover_at = %q", issue.FormValues["takeover_at"])
 	}
+	if len(issue.Comments) != 2 || issue.Comments[1].ID != "2" || !strings.Contains(issue.Comments[1].Body, "agentic-cli-local-agent") {
+		t.Fatalf("comments = %#v", issue.Comments)
+	}
 }
 
 func TestRealClientUpdateFieldsUsesIssueEditEndpoint(t *testing.T) {
@@ -147,6 +172,48 @@ func TestRealClientUpdateFieldsUsesIssueEditEndpoint(t *testing.T) {
 	}
 }
 
+func TestRealClientUpdateDescriptionSectionsReadsAndSafelyMergesADF(t *testing.T) {
+	requestCount := 0
+	client := newTestRealClient(t, func(r *http.Request) *http.Response {
+		requestCount++
+		switch requestCount {
+		case 1:
+			assertRealJiraRequest(t, r, http.MethodGet, "/rest/api/3/issue/TAP-123")
+			if got := r.URL.Query().Get("fields"); got != "description" {
+				t.Fatalf("fields = %q, want description", got)
+			}
+			return jsonResponse(http.StatusOK, `{"key":"TAP-123","fields":{"description":{"type":"doc","version":1,"content":[{"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"背景"}]},{"type":"paragraph","content":[{"type":"text","text":"保留内容"}]},{"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"问题分支"}]},{"type":"paragraph","content":[{"type":"text","text":"main"}]}]}}}`)
+		case 2:
+			assertRealJiraRequest(t, r, http.MethodPut, "/rest/api/3/issue/TAP-123")
+			var body map[string]map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("Decode body error = %v", err)
+			}
+			text := plainText(body["fields"]["description"])
+			for _, want := range []string{"背景", "保留内容", "问题分支", "develop", "修复分支", "release-v3.31"} {
+				if !strings.Contains(text, want) {
+					t.Fatalf("description missing %q: %s", want, text)
+				}
+			}
+			return jsonResponse(http.StatusNoContent, "")
+		default:
+			t.Fatalf("unexpected Jira request %s %s", r.Method, r.URL.Path)
+			return jsonResponse(http.StatusInternalServerError, "")
+		}
+	})
+
+	err := client.UpdateDescriptionSections(context.Background(), "TAP-123", map[string]string{
+		"问题分支": "develop",
+		"修复分支": "release-v3.31",
+	})
+	if err != nil {
+		t.Fatalf("UpdateDescriptionSections error = %v", err)
+	}
+	if requestCount != 2 {
+		t.Fatalf("requestCount = %d, want 2", requestCount)
+	}
+}
+
 func TestRealClientAddCommentUsesADFBody(t *testing.T) {
 	client := newTestRealClient(t, func(r *http.Request) *http.Response {
 		assertRealJiraRequest(t, r, http.MethodPost, "/rest/api/3/issue/TAP-123/comment")
@@ -155,13 +222,13 @@ func TestRealClientAddCommentUsesADFBody(t *testing.T) {
 			t.Fatalf("Decode body error = %v", err)
 		}
 		raw, _ := json.Marshal(body["body"])
-		if !strings.Contains(string(raw), "请研发负责人确认") {
+		if !strings.Contains(string(raw), "请研发工程师确认") {
 			t.Fatalf("comment body = %s", string(raw))
 		}
 		return jsonResponse(http.StatusCreated, `{"id":"10000"}`)
 	})
 
-	if err := client.AddComment(context.Background(), "TAP-123", "请研发负责人确认"); err != nil {
+	if err := client.AddComment(context.Background(), "TAP-123", "请研发工程师确认"); err != nil {
 		t.Fatalf("AddComment error = %v", err)
 	}
 }

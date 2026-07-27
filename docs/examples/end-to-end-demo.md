@@ -2,31 +2,33 @@
 
 ## 1. 目的
 
-本文定义 AgenticOps 第一阶段端到端演示脚本。演示主线必须使用真实 Jira 卡片，展示研发负责人如何在真实任务上完成受控接管、开发、验证和证据回写。本地模拟流程只作为自动化回归验证，不作为对外演示主线。
+本文定义 AgenticOps 第一阶段端到端演示脚本。演示主线必须使用真实 Jira 卡片，展示研发工程师如何在真实任务上完成受控接管、开发、验证和证据回写。本地模拟流程只作为自动化回归验证，不作为对外演示主线。
 
 ## 2. 演示目标
 
-演示研发负责人如何使用 AIAgent 完成一个受控任务接管：
+演示研发工程师如何使用 AIAgent 完成一个受控缺陷任务接管：
 
 ```text
 安装
 -> 初始化工作空间
 -> 初始化 AIAgent 能力
--> 接管新任务
+-> 准入分析与 Jira 补卡
+-> 重新检查并接管任务
+-> 修复计划写入 Jira 并确认
 -> 本地开发和验证
--> 回写证据
+-> 结构化结论和证据回写
 -> 等待人工确认拉取请求
 -> 上报工作日志
 ```
 
 ## 3. 演示场景
 
-演示任务必须来自真实 Jira 卡片，例如 `TAP-123`。演示前可以使用脱敏标题和描述，但卡片本身必须存在于真实 Jira 空间，并具备负责人、验收标准、目标仓库或仓库映射依据。
+演示任务必须来自真实 Jira 缺陷卡片，例如 `TAP-123`。演示前可以使用脱敏标题和描述，但卡片本身必须存在于真实 Jira 空间。为了展示准入闭环，首次检查时应至少有一项缺陷准入信息不足。
 
 示例卡片标题：
 
 ```text
-CLI 命令 new 改为 create
+任务启动后重复输出同一告警
 ```
 
 该标题只作为演示故事，不应成为 AgenticOps 架构边界。
@@ -37,10 +39,8 @@ CLI 命令 new 改为 create
 
 - 一个真实 Jira 卡片，可以脱敏展示。
 - 明确负责人。
-- 明确目标仓库。
-- 明确验收标准。
-- 明确验证方式。
-- 一个本地项目 AI 工作空间，例如 `tapstate`。
+- 能通过 Jira 事实或 Tapdata 仓库映射定位候选目标仓库。
+- 一个本地 Tapdata 项目 AI 工作空间。
 - 当前执行目录已经进入项目 AI 工作空间。
 - Jira 用户、Jira 空间和该 Jira 空间对应的代码仓库映射已明确。
 
@@ -61,14 +61,14 @@ gh api -H 'Accept: application/vnd.github.raw' \
 - 该目录不是具体项目运行目录。
 - 安装动作是全局动作，不绑定具体 Jira 空间或代码仓库。
 - 安装入口通过 GitHub CLI 认证读取私有仓库脚本，不依赖匿名 raw URL。
-- 已安装时，脚本会要求研发负责人确认后才更新 `~/.agentic-ops`。
-- 安装脚本使用 `install-resources/<os-arch>/agentic-cli` 中已经编译并提交到仓库的产物，不在研发负责人机器上编译。
+- 已安装时，脚本会要求研发工程师确认后才更新 `~/.agentic-ops`。
+- 安装脚本使用 `install-resources/<os-arch>/agentic-cli` 中已经编译并提交到仓库的产物，不在研发工程师机器上编译。
 
 ### 步骤 2：初始化工作空间
 
 ```sh
 cd <project-ai-workspace>
-agentic-cli workspace init --project tapstate --jira-user dev@example.com
+agentic-cli workspace init --project tapdata --interactive
 ```
 
 期望说明：
@@ -91,7 +91,7 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 - AIAgent 加载 操作契约。
 - AIAgent 说明人工确认点。
 
-### 步骤 4：接管任务
+### 步骤 4：首次准入检查
 
 ```text
 接管 TAP-123。
@@ -99,12 +99,45 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 
 期望说明：
 
-- 门禁通过后生成 `run_id`。
-- 真实卡片的 `target_repo` 来自 Jira 字段或工作流配置中的 `workspace_repo_mapping`。
-- 写入接管成功证据。
-- AIAgent 输出计划和风险点。
+- AIAgent 先执行 `inspect-task`，不直接调用 `takeover-task`。
+- AIAgent 一次性列出全部缺失或冲突项，并结合候选仓库和目标分支代码形成准入分析。
+- 研发工程师确认真实写入后，AIAgent 使用 `add-task-comment --category analysis` 写入 Jira。
+- 写入后 AIAgent 结束本次接管，不自动绑定任务。
 
-### 步骤 5：开发与验证
+### 步骤 5：补卡确认
+
+```text
+我确认补卡建议，请更新 Jira。
+```
+
+期望说明：
+
+- AIAgent 使用 `update-task-description-sections` 更新问题分支、修复分支、问题现象、复现路径和验收标准。
+- AIAgent 使用 `add-task-comment --category decision` 记录确认结果。
+- AIAgent 再次结束本次接管。
+
+### 步骤 6：重新检查并接管
+
+```text
+重新接管 TAP-123。
+```
+
+期望说明：
+
+- AIAgent 重新执行 `inspect-task`，不复用补卡前的判断。
+- 准入通过后，AIAgent 执行 `takeover-task` 并获得 `run_id`。
+- CLI 只执行负责人、代理所有权、任务分类、标准流程、状态入口和真实 Jira 写入门禁。
+
+### 步骤 7：修复计划确认
+
+期望说明：
+
+- AIAgent 结合 Jira 和代码形成版本化修复计划。
+- 计划包含根因与证据、修改和不修改范围、目标模块或文件、实施步骤、测试与验收映射、风险与回滚。
+- AIAgent 使用 `add-task-comment --category plan --run-id <run_id>` 写入 Jira，然后停止代码修改。
+- 研发工程师确认后，AIAgent 使用 `add-task-comment --category decision` 写入确认结果。
+
+### 步骤 8：开发与验证
 
 ```text
 请按计划修改并运行最小验证。
@@ -116,7 +149,7 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 - AIAgent 记录测试结果。
 - AIAgent 不自动推送或创建拉取请求。
 
-### 步骤 6：写入证据
+### 步骤 9：写入结构化结论和证据
 
 ```text
 回写本次开发证据。
@@ -124,9 +157,10 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 
 期望说明：
 
-- 证据包含变更摘要、验证结果、残留风险和下一步。
+- AIAgent 使用 `update-task-form` 更新问题分析、修复详情和测试计划。
+- AIAgent 使用 `add-task-comment --category evidence` 写入变更摘要、验证结果、验收映射、残留风险和下一步。
 
-### 步骤 7：研发负责人确认
+### 步骤 10：研发工程师确认
 
 ```text
 我确认本地结果，可以准备 PR。
@@ -137,7 +171,7 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 - AIAgent 可以进入 `prepare_pr` 操作。
 - 未确认前不得推送或创建拉取请求。
 
-### 步骤 8：任务审计与按需反馈分析
+### 步骤 11：任务审计与按需反馈分析
 
 ```text
 提交 TAP-123 本次执行的任务审计记录。
@@ -158,6 +192,8 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 - 能解释 `~/.agentic-ops` 和项目 AI 工作空间的区别。
 - 能解释 AIAgent 为什么不直接面对 Jira 工作流。
 - 能展示任务接管门禁。
+- 能展示准入失败后的代码分析、Jira 补卡评论和重新检查。
+- 能展示修复计划与研发工程师确认都写入 Jira，且确认前没有代码修改。
 - 能展示 `run_id` 和证据。
 - 能展示人工确认点。
 - 能展示反馈报告的输入和输出。

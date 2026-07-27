@@ -30,7 +30,7 @@ Produce a concise draft covering:
 - Required Jira task properties at each stage.
 - Output data written back at each stage.
 - Completion evidence required for audit.
-- Roles that must make human decisions, such as 研发负责人、流程负责人、代码审查人、QA.
+- Roles that must make human decisions, such as 研发工程师、流程负责人、代码审查人、QA.
 
 Then present a task property matrix:
 

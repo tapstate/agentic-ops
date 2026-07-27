@@ -35,7 +35,7 @@ Jira 卡片
 -> 根据表单、审查结论、失败码和门禁决定继续、重试、重做或停止
 ```
 
-如果无法判断任务分类，AIAgent 必须停止接管并输出 `task_classification_required`，请求研发负责人或流程负责人补充分类依据。
+如果无法判断任务分类，AIAgent 必须停止接管并输出 `task_classification_required`，请求研发工程师或流程负责人补充分类依据。
 
 ## 4. 初始任务分类
 
@@ -78,12 +78,11 @@ task_classes:
 entry_stage: waiting_takeover
 stages:
   - id: waiting_takeover
-    responsible_role: developer_owner
+    responsible_role: development_engineer
     input_fields:
       - assignee
       - task_class
       - target_repo
-      - verification_method
     output_fields:
       - run_id
       - current_agent_id
@@ -97,9 +96,9 @@ stages:
       - implementation_summary
       - verification_result
       - residual_risk
-    review_gate: developer_owner
+    review_gate: development_engineer_review
   - id: completed
-    responsible_role: developer_owner
+    responsible_role: development_engineer
     completion_cleanup:
       clear_current_agent_id: true
 ```
@@ -114,7 +113,7 @@ stages:
 | Jira 字段存在但没有配置映射 | `unmapped_jira_field` | 请求维护工作流配置的 Jira 表单映射。 |
 | Jira 状态无法映射到标准阶段 | `lifecycle_mapping_gap` | 请求流程负责人决策状态映射或调整 Jira 工作流。 |
 | Jira `transition` 无法映射到标准推进动作 | `transition_mapping_gap` / `jira_transition_mapping_gap` | 请求流程负责人决策标准 `transition` 映射、Jira `transition` 标识映射或新增人工门禁。 |
-| Jira 卡片类型或标签无法映射任务分类 | `task_class_mapping_gap` | 请求研发负责人或流程负责人补充任务分类规则。 |
+| Jira 卡片类型或标签无法映射任务分类 | `task_class_mapping_gap` | 请求研发工程师或流程负责人补充任务分类规则。 |
 | 审查节点无法映射到人、拉取请求审查、CI 或 Jira 状态 | `review_gate_mapping_gap` | 请求流程负责人决策审查节点和责任角色。 |
 
 缺口输出必须包含：
@@ -164,7 +163,7 @@ stages:
 | `current_agent_id` 已不是当前 AIAgent 的 `agent_id` | `agent_ownership_conflict` | 记录当前字段值、当前 `agent_id`、操作和停止阶段。 |
 | `current_agent_id` 为空但已有未完成 `run_id` | `agent_binding_lost` | 记录 `run_id`、`issue_key` 和需要人工判断的恢复动作。 |
 
-这些情况不允许自动抢回任务，也不允许清理 `current_agent_id`。AIAgent 必须记录事件，输出中文阻塞说明，并等待研发负责人决策。
+这些情况不允许自动抢回任务，也不允许清理 `current_agent_id`。AIAgent 必须记录事件，输出中文阻塞说明，并等待研发工程师决策。
 
 ## 9. 完成清理规则
 
@@ -185,7 +184,7 @@ stages:
 - 完成阶段和完成证据引用。
 - `current_agent_id_cleared=true`。
 
-异常停止、阻塞、权限冲突、`assignee` 变更或代理冲突时不得自动清理 `current_agent_id`。这些场景保留字段值用于审计和恢复，由研发负责人决策是否释放。
+异常停止、阻塞、权限冲突、`assignee` 变更或代理冲突时不得自动清理 `current_agent_id`。这些场景保留字段值用于审计和恢复，由研发工程师决策是否释放。
 
 ## 10. 阶段处理标准和责任
 
@@ -193,13 +192,13 @@ stages:
 
 | 阶段 | AIAgent 工作 | 责任角色 | 合格判断 |
 | --- | --- | --- | --- |
-| 分类 | 读取标准字段，识别 `task_class`。 | 研发负责人、流程负责人 | 分类能选择正确流程，缺口已阻断并请求决策。 |
-| 接管 | 校验所有权、字段、状态和流程入口。 | 研发负责人 | 任务确实属于当前登录用户，且未被其他 AIAgent 占用。 |
-| 分析 | 理解范围、风险、依赖和验证方式。 | 研发负责人 | 范围未扩大，风险和阻塞被说明。 |
-| 实现 | 修改代码或配置，遵守项目规范。 | AIAgent 执行，研发负责人负责最终判断 | 代码差异解决目标问题，未引入无关变更。 |
-| 验证 | 运行约定验证并记录结果。 | AIAgent 执行，研发负责人或 QA 判断 | 验证覆盖验收标准，未验证部分明确。 |
-| 审查 | 整理证据、拉取请求信息和待审内容。 | 代码审查人、QA、运维、安全、研发负责人 | 专业角色能判断通过、退回、阻断或要求补充。 |
-| 完成 | 写入完成证据，清理 `current_agent_id`。 | 研发负责人 | 完成条件满足，代理绑定已释放或有明确不释放原因。 |
+| 分类 | 读取标准字段，识别 `task_class`。 | 研发工程师、流程负责人 | 分类能选择正确流程，缺口已阻断并请求决策。 |
+| 接管 | 校验所有权、字段、状态和流程入口。 | 研发工程师 | 任务确实属于当前登录用户，且未被其他 AIAgent 占用。 |
+| 分析 | 理解范围、风险、依赖和验证方式。 | 研发工程师 | 范围未扩大，风险和阻塞被说明。 |
+| 实现 | 修改代码或配置，遵守项目规范。 | AIAgent 执行，研发工程师负责最终判断 | 代码差异解决目标问题，未引入无关变更。 |
+| 验证 | 运行约定验证并记录结果。 | AIAgent 执行，研发工程师或 QA 判断 | 验证覆盖验收标准，未验证部分明确。 |
+| 审查 | 整理证据、拉取请求信息和待审内容。 | 代码审查人、QA、运维、安全、研发工程师 | 专业角色能判断通过、退回、阻断或要求补充。 |
+| 完成 | 写入完成证据，清理 `current_agent_id`。 | 研发工程师 | 完成条件满足，代理绑定已释放或有明确不释放原因。 |
 
 ## 11. 日志上报要求
 

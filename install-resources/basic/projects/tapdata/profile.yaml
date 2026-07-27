@@ -22,10 +22,12 @@ jira_form_mapping:
     issue_analysis:
       source: jira_field
       jira_field: customfield_10092
+      writable: true
       required_from_stage: implementation
     fix_details:
       source: jira_field
       jira_field: customfield_10093
+      writable: true
       required_from_stage: implementation
     target_repo:
       source: workspace_repo_mapping
@@ -36,8 +38,8 @@ jira_form_mapping:
       section: "修复分支"
       required_from_stage: takeover_gate
     problem_summary:
-      source: jira_field
-      jira_field: summary
+      source: jira_description_section
+      section: "问题现象"
       required_from_stage: takeover_gate
     reproduction_path:
       source: jira_description_section
@@ -45,11 +47,10 @@ jira_form_mapping:
     verification_method:
       source: jira_field
       jira_field: customfield_10049
-      required_from_stage: takeover_gate
+      writable: true
     risk_level:
       source: jira_field
       jira_field: labels
-      required_from_stage: takeover_gate
     current_agent_id:
       source: jira_comment
       required_from_stage: takeover_gate
@@ -145,9 +146,9 @@ human_gates:
   - scope_change
 
 review_gates:
-  developer_owner_review:
-    role: developer_owner
-    decision_field: developer_owner_decision
+  development_engineer_review:
+    role: development_engineer
+    decision_field: development_engineer_decision
     returned_next_action: fix_and_verify
   pr_review:
     role: code_reviewer
@@ -173,3 +174,10 @@ templates:
   takeover_failed: templates/evidence/takeover-failed.md
   blocked: templates/evidence/blocked.md
   development_completed: templates/evidence/development-completed.md
+  defect_admission_analysis: projects/tapdata/templates/defect/admission-analysis-comment.md
+  defect_admission_decision: projects/tapdata/templates/defect/admission-decision-comment.md
+  defect_description_sections: projects/tapdata/templates/defect/description-sections.yaml
+  defect_fix_plan: projects/tapdata/templates/defect/fix-plan-comment.md
+  defect_plan_decision: projects/tapdata/templates/defect/plan-decision-comment.md
+  defect_completion_form: projects/tapdata/templates/defect/completion-form.yaml
+  defect_completion_evidence: projects/tapdata/templates/defect/completion-evidence-comment.md

@@ -30,6 +30,8 @@ output:
     type: string
   form_values:
     type: object
+  comments:
+    type: array
   gate_facts:
     type: object
   asset_refs:

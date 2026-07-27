@@ -4,6 +4,7 @@ package commandcatalog
 
 import (
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/cmdkit"
+	add_task_comment_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/add-task-comment"
 	agent_init_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/agent/init"
 	assets_install_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/assets/install"
 	check_ci_status_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/check-ci-status"
@@ -31,7 +32,8 @@ import (
 	takeover_task_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/takeover-task"
 	tapdata_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/tapdata"
 	tapdata_branch_align_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/tapdata/branch-align"
-	task_run_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/task/run"
+	update_task_description_sections_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update-task-description-sections"
+	update_task_form_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update-task-form"
 	update_apply_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update/apply"
 	update_check_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update/check"
 	workspace_init_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/workspace/init"
@@ -39,6 +41,7 @@ import (
 )
 
 func RegisterAll(registry *cmdkit.Registry) {
+	add_task_comment_cmd.Register(registry)
 	agent_init_cmd.Register(registry)
 	assets_install_cmd.Register(registry)
 	check_ci_status_cmd.Register(registry)
@@ -66,7 +69,8 @@ func RegisterAll(registry *cmdkit.Registry) {
 	takeover_task_cmd.Register(registry)
 	tapdata_branch_align_cmd.Register(registry)
 	tapdata_cmd.Register(registry)
-	task_run_cmd.Register(registry)
+	update_task_description_sections_cmd.Register(registry)
+	update_task_form_cmd.Register(registry)
 	update_apply_cmd.Register(registry)
 	update_check_cmd.Register(registry)
 	workspace_init_cmd.Register(registry)

@@ -40,6 +40,7 @@ type FormField struct {
 	Section           string `yaml:"section"`
 	Fallback          string `yaml:"fallback"`
 	RequiredFromStage string `yaml:"required_from_stage"`
+	Writable          bool   `yaml:"writable"`
 }
 
 type TaskClassMapping struct {

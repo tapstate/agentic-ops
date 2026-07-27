@@ -22,7 +22,7 @@ AgenticOps 的故事线分为两类。
 | 故事线 | 主角 | 关注点 | 详细文档 |
 | --- | --- | --- | --- |
 | 项目维护者故事 | 维护 `tapstate/agentic-ops` 源头仓库的人 | 定义标准、维护契约、发布版本、处理反馈、治理兼容和回滚 | [项目维护者故事](project-maintainer-stories.md) |
-| 研发负责人故事 | 在具体业务项目中使用 AgenticOps 管理 AIAgent 执行 Jira 任务的人 | 安装、初始化、配置工作空间、接管任务、确认人工门禁、验收任务证据 | [研发负责人故事](development-lead-stories.md) |
+| 研发工程师故事 | 在具体业务项目中使用 AgenticOps 管理 AIAgent 执行 Jira 任务的人 | 安装、初始化、配置工作空间、接管任务、确认人工门禁、验收任务证据 | [研发工程师故事](development-engineer-stories.md) |
 
 AIAgent 和 `agentic-cli` 不作为第三类故事主角。AIAgent 是流程执行者，`agentic-cli` 是受控运行时；它们出现在两类故事线的流程和验收中，用来表达执行动作、门禁、副作用和结构化输出。
 
@@ -42,7 +42,7 @@ AIAgent 和 `agentic-cli` 不作为第三类故事主角。AIAgent 是流程执�
 每条可审核故事必须补充以下字段：
 
 - 保护行为：该故事已经确认后不能被随意改坏的用户可见行为、门禁、副作用或输出。
-- 审核问题：研发负责人或项目维护者审阅故事时必须回答的问题。
+- 审核问题：研发工程师或项目维护者审阅故事时必须回答的问题。
 - 验收证据：证明该故事成立的命令、演示、结构化输出、日志、审计记录或人工确认材料。
 - 关联设计：该故事依赖的设计、规则、契约、配置、模板或运行资产。
 
@@ -69,7 +69,7 @@ AIAgent 和 `agentic-cli` 不作为第三类故事主角。AIAgent 是流程执�
 验收必须回到故事线，而不是只看代码模块或文档文件是否存在。
 
 - 项目维护者故事验收：维护者能否按规则更新源头资产、发布版本、处理反馈、完成回滚和审计。
-- 研发负责人故事验收：研发负责人能否完成安装、初始化、任务接管、恢复、证据回写、人工确认和任务审计。
+- 研发工程师故事验收：研发工程师能否完成安装、初始化、任务接管、恢复、证据回写、人工确认和任务审计。
 
 本地 fake flow 只作为自动化回归验证；对外演示和正式试点必须使用真实 Jira 卡片。
 
@@ -84,11 +84,11 @@ AIAgent 和 `agentic-cli` 不作为第三类故事主角。AIAgent 是流程执�
 - [PM-005：处理反馈并形成改进建议](project-maintainer/pm-005-feedback-proposal.md)。
 - [PM-006：治理 latest 更新、回滚和兼容性](project-maintainer/pm-006-release-governance.md)。
 
-### 研发负责人故事
+### 研发工程师故事
 
-- [DL-001：安装 AgenticOps](development-lead/dl-001-install.md)。
-- [DL-002：初始化项目 AI 工作空间](development-lead/dl-002-workspace-init.md)。
-- [DL-003：初始化 AIAgent 能力](development-lead/dl-003-agent-init.md)。
-- [DL-004：新任务接管](development-lead/dl-004-takeover-task.md)。
-- [DL-005：恢复接管任务](development-lead/dl-005-resume-takeover.md)。
-- [DL-006：任务完成审计与反馈分析](development-lead/dl-006-task-audit-feedback.md)。
+- [DE-001：安装 AgenticOps](development-engineer/de-001-install.md)。
+- [DE-002：初始化项目 AI 工作空间](development-engineer/de-002-workspace-init.md)。
+- [DE-003：初始化 AIAgent 能力](development-engineer/de-003-agent-init.md)。
+- [DE-004：新任务接管](development-engineer/de-004-takeover-task.md)。
+- [DE-005：恢复接管任务](development-engineer/de-005-resume-takeover.md)。
+- [DE-006：任务完成审计与反馈分析](development-engineer/de-006-task-audit-feedback.md)。

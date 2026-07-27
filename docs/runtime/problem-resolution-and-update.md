@@ -224,7 +224,7 @@ agentic-cli profile rollback --workspace tapstate
 - 缺少负责人字段。
 - 缺少风险等级或范围边界。
 
-这类问题默认不是 CLI 自动修复，也不属于 `takeover-task` 的项目准入判断范围。AIAgent 必须先执行只读检查，结合项目资产判断卡片事实是否足够；如果不足，应输出分析结果和补卡建议，由研发负责人确认后再回写 Jira。
+这类问题默认不是 CLI 自动修复，也不属于 `takeover-task` 的项目准入判断范围。AIAgent 必须先执行只读检查，结合项目资产判断卡片事实是否足够；如果不足，应输出分析结果和补卡建议，由研发工程师确认后再回写 Jira。
 
 示例：
 
@@ -251,23 +251,37 @@ agentic-cli profile rollback --workspace tapstate
 inspect-task 输出 Jira 事实、表单值和项目资产路径
 -> AIAgent 读取项目准入资产和模板
 -> AIAgent 结合卡片与代码做先行分析
--> 输出一次性补卡建议和可回写模板
--> 研发负责人确认后再回写 Jira
+-> 一次性列出全部缺失或冲突项
+-> 研发工程师确认真实写入
+-> add-task-comment 写入准入分析与补卡建议
+-> 结束本次接管
+-> 研发工程师确认补卡内容
+-> update-task-description-sections 更新稳定任务契约
+-> add-task-comment 写入补卡确认结果
+-> 再次结束本次接管
 -> 用户再次要求接管时，AIAgent 重新 inspect-task
 -> 准入判断通过后再调用 takeover-task
+-> 接管后 add-task-comment 写入版本化修复计划
+-> 研发工程师确认且决策评论写入 Jira 后才允许修改代码
 ```
 
-如果字段实际存在但名称不同，应修复 `field_mapping`：
+Description 用于保存确认后的稳定任务契约，Comment 用于保存分析、计划、决策、阻塞和证据轨迹，Custom field 用于保存 profile 已映射的结构化结论。Worklog 只记录真实耗时，不承载门禁或决策。
+
+如果字段实际存在但名称不同，应修复 `jira_form_mapping`：
 
 ```yaml
-field_mapping:
-  target_repo:
-    jira_field: customfield_12345
-  acceptance_criteria:
-    jira_field: customfield_23456
+jira_form_mapping:
+  fields:
+    target_repo:
+      source: jira_field
+      jira_field: customfield_12345
+    acceptance_criteria:
+      source: jira_field
+      jira_field: customfield_23456
+      writable: true
 ```
 
-如果字段确实缺失，必须由研发负责人或流程负责人补卡，不允许 AIAgent 编造。
+只有明确声明 `writable: true` 的 `jira_field` 映射可以由 `update-task-form` 写入。负责人、assignee、代理所有权、Description 和 Comment 必须由对应专用操作维护。如果字段确实缺失，必须由研发工程师或流程负责人补卡，不允许 AIAgent 编造。
 
 ## 10. 修复路径四：关键步骤门禁调整
 

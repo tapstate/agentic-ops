@@ -4,7 +4,7 @@ task_classes:
 entry_stage: waiting_takeover
 stages:
   - id: waiting_takeover
-    responsible_role: developer_owner
+    responsible_role: development_engineer
     input_fields:
       - assignee
       - task_class
@@ -23,8 +23,8 @@ stages:
       - investigation_summary
       - evidence_links
       - recommended_next_action
-    review_gate: developer_owner
+    review_gate: development_engineer_review
   - id: completed
-    responsible_role: developer_owner
+    responsible_role: development_engineer
     completion_cleanup:
       clear_current_agent_id: true

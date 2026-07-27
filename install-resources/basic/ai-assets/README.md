@@ -40,9 +40,10 @@ AIAgent 执行业务 Jira 任务前按以下顺序读取：
 
 - AIAgent 不应把 README 或 `docs/` 当作执行事实源；README 和 `docs/` 主要帮助人理解项目。
 - AIAgent 执行具体业务 Jira 任务时，以 AI 员工手册、操作契约、标准流程、工作流配置、项目级规范、策略、运行手册和模板为准。
-- AIAgent 收到“按 `~/.agentic-ops/agent-guides.md` 启用 AgenticOps。”时，应先读取全局指引，再从当前工作空间 `AGENTS.md`、`.agentic-ops/agent.json` 和本入口初始化；不得要求读取研发负责人个人 wiki、个人长期记忆或上一段聊天上下文。
+- AIAgent 收到“按 `~/.agentic-ops/agent-guides.md` 启用 AgenticOps。”时，应先读取全局指引，再从当前工作空间 `AGENTS.md`、`.agentic-ops/agent.json` 和本入口初始化；不得要求读取研发工程师个人 wiki、个人长期记忆或上一段聊天上下文。
 - AIAgent 不得临场猜测 Jira 字段、状态流转或人工门禁。
-- 卡片不满足项目准入标准、字段映射缺失或权限不足时，必须停止并请求研发负责人或流程负责人补齐。
+- 卡片不满足项目准入标准时，AIAgent 必须先读取项目准入资产和目标代码，形成结构化分析与补卡建议；按项目规定写回 Jira 后结束当前接管，不能用会话内推断绕过重新检查。
+- 字段映射缺失、权限不足或无法安全更新 Jira 事实时，必须停止并请求研发工程师或流程负责人处理。
 
 ## 当前目录说明
 

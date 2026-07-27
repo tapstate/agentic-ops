@@ -6,12 +6,11 @@ task_classes:
 entry_stage: waiting_takeover
 stages:
   - id: waiting_takeover
-    responsible_role: developer_owner
+    responsible_role: development_engineer
     input_fields:
       - assignee
       - task_class
       - target_repo
-      - verification_method
     output_fields:
       - run_id
       - current_agent_id
@@ -21,12 +20,25 @@ stages:
     review_gate: null
   - id: implementation
     responsible_role: ai_agent
+    required_before_code_change:
+      - jira_admission_facts_reinspected
+      - task_taken_over
+      - versioned_fix_plan_written_to_jira
+      - development_engineer_decision_written_to_jira
     output_fields:
+      - issue_analysis
+      - fix_plan
+      - development_engineer_decision
       - implementation_summary
       - verification_result
       - residual_risk
-    review_gate: developer_owner
+    review_gate: development_engineer_review
   - id: completed
-    responsible_role: developer_owner
+    responsible_role: development_engineer
+    required_writeback:
+      - issue_analysis
+      - fix_details
+      - verification_method
+      - completion_evidence
     completion_cleanup:
       clear_current_agent_id: true

@@ -43,13 +43,17 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 | `workspace_init` | 在项目 AI 工作空间目录内初始化运行配置，并绑定 Jira 用户、Jira 空间和代码仓库映射。 |
 | `agent_init` | 初始化 AIAgent 能力。 |
 | `list_tasks` | 列出当前负责人可处理任务。 |
+| `inspect_task` | 只读输出 Jira 事实、通用门禁事实和项目资产引用。 |
+| `add_task_comment` | 向 Jira 追加分析、计划、决策、证据或阻塞评论。 |
+| `update_task_description_sections` | 安全更新 Jira Description 的指定章节并保留其它内容。 |
+| `update_task_form` | 按项目 profile 的逻辑字段映射更新 Jira 表单。 |
 | `takeover_task` | 接管一个新的 Jira 卡片。 |
 | `resume_takeover` | 恢复已有 `run_id` 的接管任务。 |
 | `read_task_context` | 读取任务上下文摘要。 |
 | `write_evidence` | 写入 Jira / 拉取请求证据。 |
 | `release_agent` | 完成或明确交接后释放当前 AIAgent 绑定，并记录 `current_agent_id_cleared=true`。 |
 | `mark_blocked` | 记录阻塞原因和人工动作。 |
-| `request_owner_confirmation` | 请求研发负责人确认。 |
+| `request_owner_confirmation` | 请求研发工程师确认。 |
 | `branch_align` | 按 TapData 项目级分支规范计算或执行多仓分支对齐。 |
 | `prepare_pr` | 准备拉取请求，不绕过人工确认。 |
 | `fix_pr_comments` | 按拉取请求审查意见修复。 |
@@ -68,7 +72,7 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 ```yaml
 operation: takeover_task
 version: 1
-purpose: 研发负责人授权 AIAgent 接管一个已进入迭代的任务。
+purpose: 研发工程师授权 AIAgent 接管一个已进入迭代的任务。
 
 task_type: task_takeover
 
@@ -89,9 +93,7 @@ preconditions:
   - current_agent_id_must_be_empty_or_match_agent_id
   - task_class_must_be_mapped_to_standard_process
   - issue_must_be_in_allowed_project
-  - issue_must_have_acceptance_criteria
-  - issue_must_have_target_repo
-  - issue_must_have_verification_method
+  - jira_status_must_map_to_entry_stage
 
 output:
   run_id:
@@ -108,18 +110,6 @@ output:
       - proceed
       - ask_owner
       - blocked
-  form_updates:
-    type: object
-    fields:
-      - run_id
-      - agent_id
-      - current_agent_id
-      - takeover_at
-      - task_type
-      - task_class
-      - process_id
-      - current_stage
-      - next_action
   retry_policy:
     type: object
     required: false
@@ -134,8 +124,9 @@ failure:
       - assignee_mismatch
       - agent_ownership_conflict
       - task_class_mapping_gap
-      - missing_acceptance_criteria
-      - missing_target_repo
+      - standard_process_mapping_gap
+      - unknown_jira_status
+      - invalid_takeover_stage
       - missing_permission
       - workflow_transition_not_allowed
   message:
@@ -144,7 +135,7 @@ failure:
     type: string
 
 side_effects:
-  - may_write_jira_comment
+  - may_write_jira_ownership
   - may_create_takeover_record
   - must_not_modify_code
   - must_not_create_pr

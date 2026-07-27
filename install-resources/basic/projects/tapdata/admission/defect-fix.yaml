@@ -36,14 +36,50 @@ guidance:
 analysis_hints:
   problem_branch:
     source: jira_or_local_source_branch
-    message: 可以结合 Jira 描述、当前本地源码分支和 TapData 分支对齐候选给出建议，但必须由研发负责人确认。
+    message: 可以结合 Jira 描述、当前本地源码分支和 TapData 分支对齐候选给出建议，但必须由研发工程师确认。
   target_branch:
     source: jira_or_branch_align_candidates
-    message: 可以结合 `agentic-cli tapdata branch-align list <issue-key>` 的候选分支给出建议，但不得替研发负责人确认。
+    message: 可以结合 `agentic-cli tapdata branch-align list <issue-key>` 的候选分支给出建议，但不得替研发工程师确认。
   problem_summary:
     source: jira_summary_and_project_code
-    message: 可以结合 Jira 摘要、日志、源码搜索结果补全问题现象描述，但必须保留研发负责人确认环节。
+    message: 可以结合 Jira 摘要、日志、源码搜索结果补全问题现象描述，但必须保留研发工程师确认环节。
+admission_failure_flow:
+  stop_takeover: true
+  required_actions:
+    - inspect_jira_facts
+    - inspect_target_branch_code
+    - identify_all_missing_or_conflicting_information
+    - prepare_admission_analysis_comment
+    - request_development_engineer_confirmation
+  jira_comment:
+    category: analysis
+    template: templates/defect/admission-analysis-comment.md
+    command: agentic-cli add-task-comment <issue-key> --workspace tapdata --category analysis --content-file <path> --confirm-real-jira-write
+  after_comment:
+    next_action: stop_current_takeover
+    message: 写入准入分析与补卡建议后必须结束本次接管，不得在同一次执行中自动绑定任务。
+admission_confirmation_flow:
+  required_actions:
+    - read_development_engineer_decision
+    - update_confirmed_description_sections
+    - append_admission_decision_comment
+    - stop_current_takeover
+  description_template: templates/defect/description-sections.yaml
+  description_command: agentic-cli update-task-description-sections <issue-key> --workspace tapdata --sections-file <path> --confirm-real-jira-write
+  decision_template: templates/defect/admission-decision-comment.md
+  decision_command: agentic-cli add-task-comment <issue-key> --workspace tapdata --category decision --content-file <path> --confirm-real-jira-write
+  next_activation: 必须重新执行 inspect-task，以 Jira 当前事实重新判断准入；不得复用写入前的判断结果。
 pre_fix_gate:
   required: true
   must_confirm: true
-  message: 准入通过后，AIAgent 必须先结合 Jira 卡片和项目代码形成修复方案；研发负责人确认目标、边界和风险前，AIAgent 不得修改代码。
+  plan_template: templates/defect/fix-plan-comment.md
+  plan_command: agentic-cli add-task-comment <issue-key> --workspace tapdata --category plan --content-file <path> --run-id <run-id> --confirm-real-jira-write
+  decision_template: templates/defect/plan-decision-comment.md
+  decision_command: agentic-cli add-task-comment <issue-key> --workspace tapdata --category decision --content-file <path> --run-id <run-id> --confirm-real-jira-write
+  material_change_requires_reconfirmation: true
+  message: 接管成功后，AIAgent 必须结合 Jira 卡片和项目代码形成版本化修复计划并写入 Jira；研发工程师确认目标、边界和风险且确认结果已写入 Jira 前，AIAgent 不得修改代码。
+completion_writeback:
+  form_template: templates/defect/completion-form.yaml
+  form_command: agentic-cli update-task-form <issue-key> --workspace tapdata --values-file <path> --run-id <run-id> --confirm-real-jira-write
+  evidence_template: templates/defect/completion-evidence-comment.md
+  evidence_command: agentic-cli add-task-comment <issue-key> --workspace tapdata --category evidence --content-file <path> --run-id <run-id> --confirm-real-jira-write

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 防止安装资源携带维护者本机配置，并让工作空间初始化显式生成和确认研发负责人本地配置。
+**Goal:** 防止安装资源携带维护者本机配置，并让工作空间初始化显式生成和确认研发工程师本地配置。
 
-**Architecture:** 共享 `install-resources/basic/profiles/*.yaml` 只保存项目标准流程、表单、仓库和模板映射；`workspace init` 在项目 AI 工作空间中物化本地 profile 时写入 Jira 用户和本地目录。若目标工作空间已有 AgenticOps 本地配置，初始化默认阻断并要求研发负责人通过显式参数确认覆盖。
+**Architecture:** 共享 `install-resources/basic/profiles/*.yaml` 只保存项目标准流程、表单、仓库和模板映射；`workspace init` 在项目 AI 工作空间中物化本地 profile 时写入 Jira 用户和本地目录。若目标工作空间已有 AgenticOps 本地配置，初始化默认阻断并要求研发工程师通过显式参数确认覆盖。
 
 **Tech Stack:** Go `agentic-cli`、YAML profile、Bash installer、Markdown docs、Go unit tests、shell e2e tests。
 
@@ -14,7 +14,7 @@
 - 标准流程、表单映射、Jira 字段映射、仓库映射、策略、运行手册和模板仍在项目开发时适配完成，并可随安装资源发布。
 - 已有本地工作空间配置必须由用户显式确认后才能覆盖。
 - 不改变 shell 安装脚本承载边界；shell 只做安装、更新、校验和 PATH 引导。
-- 面向用户、研发负责人和审阅者的文档正文使用中文。
+- 面向用户、研发工程师和审阅者的文档正文使用中文。
 
 ---
 
@@ -122,7 +122,7 @@ Expected: PASS.
 ### Task 2: Documentation And E2E Alignment
 
 **Files:**
-- Modify: `docs/development-leads/getting-started.md`
+- Modify: `docs/development-engineers/getting-started.md`
 - Modify: `docs/profiles/workflow-profile.md`
 - Modify: `tests/e2e/local-install-flow.sh`
 - Modify: `tests/e2e/local-fake-flow.sh`

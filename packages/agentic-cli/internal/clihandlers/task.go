@@ -67,6 +67,10 @@ func runInspectTask(args []string, stdout io.Writer) int {
 		processRegistry = defaultProcessRegistry()
 	}
 	gateFacts := inspectTaskGateFacts(issue, workspaceProfile, currentJiraUser, agentID(), processRegistry)
+	comments := issue.Comments
+	if comments == nil {
+		comments = []jira.Comment{}
+	}
 	return writeJSON(stdout, output.Success("inspect_task", map[string]any{
 		"workspace":               workspaceName,
 		"issue_key":               issue.Key,
@@ -74,6 +78,7 @@ func runInspectTask(args []string, stdout io.Writer) int {
 		"current_jira_user":       currentJiraUser,
 		"target_repo":             gateFacts["target_repo"],
 		"form_values":             issueFormValues(issue, workspaceProfile),
+		"comments":                comments,
 		"gate_facts":              gateFacts,
 		"asset_refs":              projectAssetRefs(workspaceName, workspaceProfile),
 		"recommended_next_action": "inspect_by_agent",

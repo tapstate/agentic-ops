@@ -87,7 +87,7 @@ side_effects:
   - must_not_create_pr
 human_gate:
   required: true
-  reason: 清理 `current_agent_id` 代表完成或交接结束，必须由研发负责人确认完成证据。
+  reason: 清理 `current_agent_id` 代表完成或交接结束，必须由研发工程师确认完成证据。
 retry_policy:
   retryable: true
   max_attempts: 1

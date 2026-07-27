@@ -227,16 +227,19 @@ func withJiraClientForTest(t *testing.T, selection clihandlers.JiraClientSelecti
 }
 
 type recordingJiraClient struct {
-	issue         jira.Issue
-	updatedKey    string
-	updatedFields map[string]any
-	updateErr     error
-	commentKey    string
-	commentBody   string
-	commentErr    error
-	transitionKey string
-	transitionID  string
-	transitionErr error
+	issue               jira.Issue
+	updatedKey          string
+	updatedFields       map[string]any
+	updateErr           error
+	commentKey          string
+	commentBody         string
+	commentErr          error
+	descriptionKey      string
+	descriptionSections map[string]string
+	descriptionErr      error
+	transitionKey       string
+	transitionID        string
+	transitionErr       error
 }
 
 func (client *recordingJiraClient) CurrentUser(ctx context.Context) (string, error) {
@@ -268,6 +271,15 @@ func (client *recordingJiraClient) UpdateFields(ctx context.Context, key string,
 	client.updatedFields = fields
 	if client.updateErr != nil {
 		return client.updateErr
+	}
+	return nil
+}
+
+func (client *recordingJiraClient) UpdateDescriptionSections(ctx context.Context, key string, sections map[string]string) error {
+	client.descriptionKey = key
+	client.descriptionSections = sections
+	if client.descriptionErr != nil {
+		return client.descriptionErr
 	}
 	return nil
 }

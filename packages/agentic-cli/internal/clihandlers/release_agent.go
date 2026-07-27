@@ -122,7 +122,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
 				Code:                "assignee_changed",
 				Message:             "当前 Jira assignee 已不是当前用户",
-				RequiredHumanAction: "请研发负责人确认是否继续释放代理绑定",
+				RequiredHumanAction: "请研发工程师确认是否继续释放代理绑定",
 				TaskType:            "task_takeover",
 				CurrentStage:        "completion_cleanup",
 				NextAction:          "ask_owner",
@@ -132,7 +132,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
 				Code:                "agent_ownership_conflict",
 				Message:             "当前 Jira 卡片未绑定当前 AIAgent",
-				RequiredHumanAction: "请研发负责人确认是否释放当前代理绑定",
+				RequiredHumanAction: "请研发工程师确认是否释放当前代理绑定",
 				TaskType:            "task_takeover",
 				CurrentStage:        "completion_cleanup",
 				NextAction:          "ask_owner",
@@ -162,13 +162,13 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		if len(fields) > 0 {
 			if err := selection.Client.UpdateFields(context.Background(), issueKey, fields); err != nil {
 				_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completion_cleanup", "ask_owner", "agent_release_failed", false, false)
-				return writeJSON(stdout, output.Failure("release_agent", "agent_release_failed", err.Error(), "请检查 Jira 字段权限并由研发负责人决策是否人工释放"))
+				return writeJSON(stdout, output.Failure("release_agent", "agent_release_failed", err.Error(), "请检查 Jira 字段权限并由研发工程师决策是否人工释放"))
 			}
 		}
 		if releaseComment != "" {
 			if err := selection.Client.AddComment(context.Background(), issueKey, releaseComment); err != nil {
 				_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completion_cleanup", "ask_owner", "agent_release_failed", false, false)
-				return writeJSON(stdout, output.Failure("release_agent", "agent_release_failed", err.Error(), "请检查 Jira 评论权限并由研发负责人决策是否人工释放"))
+				return writeJSON(stdout, output.Failure("release_agent", "agent_release_failed", err.Error(), "请检查 Jira 评论权限并由研发工程师决策是否人工释放"))
 			}
 		}
 		if jiraTransitionID != "" {

@@ -130,6 +130,21 @@ func (client *RealClient) AddComment(ctx context.Context, key string, body strin
 	return client.doJSON(ctx, http.MethodPost, requestPath, payload, nil)
 }
 
+func (client *RealClient) UpdateDescriptionSections(ctx context.Context, key string, sections map[string]string) error {
+	requestPath := "/rest/api/3/issue/" + url.PathEscape(key)
+	query := url.Values{}
+	query.Set("fields", "description")
+	var issue jiraIssueResponse
+	if err := client.doJSON(ctx, http.MethodGet, requestPath+"?"+query.Encode(), nil, &issue); err != nil {
+		return err
+	}
+	merged, err := mergeDescriptionSections(issue.Fields["description"], sections)
+	if err != nil {
+		return err
+	}
+	return client.UpdateFields(ctx, key, map[string]any{"description": merged})
+}
+
 func (client *RealClient) UpdateFields(ctx context.Context, key string, fields map[string]any) error {
 	requestPath := "/rest/api/3/issue/" + url.PathEscape(key)
 	payload := map[string]any{
@@ -184,6 +199,7 @@ func (client *RealClient) issueFields() []string {
 		"issuetype":   true,
 		"assignee":    true,
 		"description": true,
+		"comment":     true,
 		"labels":      true,
 		"components":  true,
 	}
@@ -215,6 +231,7 @@ func (client *RealClient) mapIssue(raw jiraIssueResponse) Issue {
 		Labels:     stringList(fields["labels"]),
 		Components: objectNameList(fields["components"]),
 		FormValues: formValues,
+		Comments:   jiraComments(fields["comment"]),
 	}
 	issue.Owner = formValues["owner"]
 	if issue.Owner == "" {
@@ -223,6 +240,32 @@ func (client *RealClient) mapIssue(raw jiraIssueResponse) Issue {
 	issue.TargetRepo = formValues["target_repo"]
 	issue.CurrentAgentID = formValues["current_agent_id"]
 	return issue
+}
+
+func jiraComments(value any) []Comment {
+	container, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	items, ok := container["comments"].([]any)
+	if !ok {
+		return nil
+	}
+	comments := make([]Comment, 0, len(items))
+	for _, item := range items {
+		raw, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		comments = append(comments, Comment{
+			ID:      stringField(raw["id"]),
+			Author:  userIdentifier(raw["author"]),
+			Created: stringField(raw["created"]),
+			Updated: stringField(raw["updated"]),
+			Body:    strings.TrimSpace(plainText(raw["body"])),
+		})
+	}
+	return comments
 }
 
 func mappedFormValues(fields map[string]any, p profile.Profile) map[string]string {
@@ -244,12 +287,47 @@ func mappedField(fields map[string]any, p profile.Profile, name string) string {
 		return ""
 	}
 	if field.Source == "jira_description_section" {
-		return extractSection(plainText(fields["description"]), field.Section)
+		return extractADFSection(fields["description"], field.Section)
 	}
 	if name == "risk_level" && field.JiraField == "labels" {
 		return riskLevelFromLabels(stringList(fields[field.JiraField]))
 	}
 	return stringField(fields[field.JiraField])
+}
+
+func extractADFSection(description any, section string) string {
+	document, ok := description.(map[string]any)
+	if !ok {
+		return extractSection(plainText(description), section)
+	}
+	content, ok := document["content"].([]any)
+	if !ok {
+		return extractSection(plainText(description), section)
+	}
+	normalizedSection := normalizeSectionTitle(section)
+	collected := make([]string, 0)
+	inSection := false
+	for _, node := range content {
+		if title, isTitle := nodeTitle(node); isTitle {
+			if inSection {
+				break
+			}
+			if normalizeSectionTitle(title) == normalizedSection {
+				inSection = true
+			}
+			continue
+		}
+		if inSection {
+			text := strings.TrimSpace(plainText(node))
+			if text != "" {
+				collected = append(collected, text)
+			}
+		}
+	}
+	if inSection {
+		return strings.Join(collected, "\n")
+	}
+	return extractSection(plainText(description), section)
 }
 
 func stringField(value any) string {
@@ -426,6 +504,8 @@ func sectionTitleMatches(line string, section string) bool {
 func normalizeSectionTitle(value string) string {
 	value = strings.TrimSpace(value)
 	value = strings.TrimLeft(value, "#")
+	value = strings.TrimSpace(value)
+	value = strings.TrimRight(value, "：:")
 	return strings.TrimSpace(value)
 }
 

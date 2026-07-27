@@ -2,12 +2,12 @@
 
 本文是 `docs/` 目录索引，用于帮助人审阅 AgenticOps 的终态设计、规则、故事线和实施计划入口。README 只保留终态定位和入口导航；阶段性成果、当前实现边界和剩余工作只在 `plans/` 中维护。
 
-`docs/` 面向项目维护者和研发负责人阅读。AIAgent 执行任务前的资产入口见 [AI 资产入口](../install-resources/basic/ai-assets/README.md)。
+`docs/` 面向项目维护者和研发工程师阅读。AIAgent 执行任务前的资产入口见 [AI 资产入口](../install-resources/basic/ai-assets/README.md)。
 
 ## 角色入口
 
 - [项目维护者上手](maintainers/getting-started.md)
-- [研发负责人上手](development-leads/getting-started.md)
+- [研发工程师上手](development-engineers/getting-started.md)
 - [AI 资产入口](../install-resources/basic/ai-assets/README.md)
 
 ## 核心文档
@@ -27,6 +27,7 @@
 
 - [当前设计](architecture/agenticops-current-design.md)
 - [完整设计实现方案](architecture/full-design-implementation-design.md)
+- [Jira 门禁式缺陷修复流程](architecture/jira-gated-defect-workflow.md)
 - [项目结构](architecture/project-structure.md)
 
 ## 推进计划
@@ -35,12 +36,13 @@
 - [完整设计实现计划](../plans/full-design-implementation-plan-v1.md)
 - [第一阶段实施计划](../plans/implementation-plan-v1.md)
 - [正式使用前问题修复计划](../plans/problem-resolution-plan-v1.md)
+- [Jira 门禁式缺陷修复流程实施计划](../plans/jira-gated-defect-workflow-plan.md)
 
 ## 产品流程
 
 - [故事线总览](user-stories/agenticops-user-stories.md)
 - [项目维护者故事](user-stories/project-maintainer-stories.md)
-- [研发负责人故事](user-stories/development-lead-stories.md)
+- [研发工程师故事](user-stories/development-engineer-stories.md)
 - [标准流程注册处](processes/standard-process-registry.md)
 - [反馈闭环](workflows/feedback-loop.md)
 - [端到端演示](examples/end-to-end-demo.md)

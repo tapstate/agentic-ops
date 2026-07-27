@@ -4,7 +4,7 @@
 
 AgenticOps 是把公司员工执行标准沉淀成 AI 可执行标准流程的 AI 执行控制体系。
 
-AgenticOps 主要落地研发 Jira 任务：帮助研发负责人操作 AIAgent 从 Jira 接管任务到完成任务。AgenticOps 不替代 Jira、不替代研发负责人、不替代拉取请求审查，也不以绕过人工授权、专业审查和策略门禁的全自动开发作为目标。它的核心价值是把 AI 员工从临时聊天助手变成流程内可管理、可追踪、可复盘的执行主体。
+AgenticOps 主要落地研发 Jira 任务：帮助研发工程师操作 AIAgent 从 Jira 接管任务到完成任务。AgenticOps 不替代 Jira、不替代研发工程师、不替代拉取请求审查，也不以绕过人工授权、专业审查和策略门禁的全自动开发作为目标。它的核心价值是把 AI 员工从临时聊天助手变成流程内可管理、可追踪、可复盘的执行主体。
 
 不同任务会涉及不同流程，例如新任务接管、恢复接管、拉取请求审查意见修复、阻塞上报和任务完成审计。AgenticOps 通过操作契约和工作流配置选择流程，通过 Task Form Standard、事件日志、`run_id`、证据、任务级审计记录和按需反馈分析记录执行过程，并把关键状态、关键信息、表单数据和证据回写到 Jira、拉取请求、审计服务或项目 AI 工作空间，用于后续分析和优化。
 
@@ -20,14 +20,14 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 
 ```text
 Jira 卡片已进入迭代
--> 研发负责人手动触发 AI
+-> 研发工程师手动触发 AI
 -> AI 拉取 负责人名下待办
--> 研发负责人选择一个卡片
+-> 研发工程师选择一个卡片
 -> AI 执行任务接管门禁
 -> AI 生成 `run_id` 和接管记录
 -> AI 本地开发与验证
 -> AI 回写 Jira 证据
--> 研发负责人确认
+-> 研发工程师确认
 -> 授权推送 / 创建拉取请求
 -> 进入既有 CI / 审查 / 合入流程
 ```
@@ -48,7 +48,7 @@ AgenticOps 后续推进使用故事线驱动模型：
 故事线分为两类：
 
 - 项目维护者故事：面向维护 `tapstate/agentic-ops` 源头仓库的人，覆盖设计治理、标准资产维护、发布、诊断、反馈、回滚和兼容性。
-- 研发负责人故事：面向具体业务项目中使用 AgenticOps 管理 AIAgent 执行 Jira 任务的人，覆盖安装、初始化、任务接管、恢复、人工确认、证据和任务审计。
+- 研发工程师故事：面向具体业务项目中使用 AgenticOps 管理 AIAgent 执行 Jira 任务的人，覆盖安装、初始化、任务接管、恢复、人工确认、证据和任务审计。
 
 AIAgent 是流程执行者，`agentic-cli` 是受控运行时，不单独作为故事线主角。新增能力必须先能归属到明确故事线；如果能力改变产品形态、流程权限、自动化程度、发布权限、事实源归属或冲突裁决，必须先形成用户决策。
 
@@ -147,7 +147,7 @@ AgenticOps 必须包含 AI 员工手册，作为 AIAgent 在研发流程中工�
 AI 员工手册同时服务两个对象：
 
 - AIAgent：明确任务类型、当前阶段、下一步动作、工具、流程、门禁、证据和停止条件。
-- 研发负责人：提供快捷操作方式，让研发能用自然语言或 CLI 指挥 AI 完成任务。
+- 研发工程师：提供快捷操作方式，让研发能用自然语言或 CLI 指挥 AI 完成任务。
 
 AI 员工手册应覆盖：
 
@@ -169,6 +169,10 @@ AIAgent 不应直接理解 Jira 字段、状态、`transition` 或 `comment` 格
 
 ```text
 list_tasks
+inspect_task
+add_task_comment
+update_task_description_sections
+update_task_form
 takeover_task
 resume_takeover
 read_task_context
@@ -202,7 +206,7 @@ feedback_propose
 ```yaml
 operation: takeover_task
 version: 1
-purpose: 研发负责人授权 AIAgent 接管一个已进入迭代的任务。
+purpose: 研发工程师授权 AIAgent 接管一个已进入迭代的任务。
 
 task_type: task_takeover
 
@@ -217,16 +221,13 @@ input:
   workspace:
     type: string
     required: true
-  owner:
-    type: string
-    required: true
 
 preconditions:
   - current_user_must_match_owner
+  - current_agent_id_must_be_empty_or_match_agent_id
+  - task_class_must_be_mapped_to_standard_process
   - issue_must_be_in_allowed_project
-  - issue_must_have_acceptance_criteria
-  - issue_must_have_target_repo
-  - issue_must_have_verification_method
+  - jira_status_must_map_to_entry_stage
 
 output:
   run_id:
@@ -248,8 +249,12 @@ failure:
   code:
     enum:
       - owner_mismatch
-      - missing_acceptance_criteria
-      - missing_target_repo
+      - assignee_mismatch
+      - agent_ownership_conflict
+      - task_class_mapping_gap
+      - standard_process_mapping_gap
+      - unknown_jira_status
+      - invalid_takeover_stage
       - missing_permission
       - workflow_transition_not_allowed
   message:
@@ -258,7 +263,7 @@ failure:
     type: string
 
 side_effects:
-  - may_write_jira_comment
+  - may_write_jira_ownership
   - may_create_takeover_record
   - must_not_modify_code
   - must_not_create_pr
@@ -276,7 +281,7 @@ Task Form Standard 定义 AI 操作任务从创建到完成所需的标准字段
 - Jira 表单映射，例如把 `owner`、`sprint`、`acceptance_criteria`、`target_repo`、`risk` 等 AgenticOps 标准字段映射到具体 Jira 字段、描述模板或工作空间配置。
 - Jira 空间到代码仓库的映射，包括默认仓库、按 `component` / `label` / `issue_type` 匹配的仓库，以及本地源码目录。
 - Jira 状态和 `transition` 映射。
-- 专业审查节点映射，例如研发负责人确认、PR 代码审查人退回、QA 验证、运维或安全审批。
+- 专业审查节点映射，例如研发工程师确认、PR 代码审查人退回、QA 验证、运维或安全审批。
 - GitHub 组织和代码仓库映射。
 - 本地项目 AI 工作空间路径。
 - 允许的写操作。
@@ -446,14 +451,14 @@ Go CLI 执行操作
   "current_stage": "takeover_gate",
   "next_action": "ask_owner",
   "ok": false,
-  "code": "missing_target_repo",
+  "code": "real_jira_confirmation_required",
   "duration_ms": 842,
-  "human_gate": false,
+  "human_gate": true,
   "requires_human_action": true,
   "audit_target": "jira_issue",
   "audit_submitted": false,
   "audit_reference": null,
-  "safe_message": "Jira 卡片缺少目标仓库信息"
+  "safe_message": "真实 Jira 写入需要研发工程师确认"
 }
 ```
 
@@ -505,9 +510,9 @@ gh api -H 'Accept: application/vnd.github.raw' \
 ~/.agentic-ops
 ```
 
-首次安装直接 clone managed clone。检测到 `~/.agentic-ops` 已安装时，安装脚本进入更新模式，先展示当前 ref 和目标分支，并要求研发负责人确认；非交互环境只能在用户确认后通过 `AGENTIC_OPS_ASSUME_YES=1` 继续。
+首次安装直接 clone managed clone。检测到 `~/.agentic-ops` 已安装时，安装脚本进入更新模式，先展示当前 ref 和目标分支，并要求研发工程师确认；非交互环境只能在用户确认后通过 `AGENTIC_OPS_ASSUME_YES=1` 继续。
 
-项目 AI 工作空间初始化必须在项目 AI 工作空间目录内执行。研发负责人只需要指定项目配置项和 Jira 用户；Jira 空间、仓库映射、本地路径和工作流配置由 workflow profile 定义：
+项目 AI 工作空间初始化必须在项目 AI 工作空间目录内执行。研发工程师只需要指定项目配置项和 Jira 用户；Jira 空间、仓库映射、本地路径和工作流配置由 workflow profile 定义：
 
 ```sh
 cd <project-ai-workspace>

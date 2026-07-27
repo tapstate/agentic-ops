@@ -49,12 +49,31 @@ func TestRootHelpListsGlobalCommandsAndProjectNamespaces(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Usage: agentic-cli <command>",
+		"add-task-comment",
+		"update-task-description-sections",
+		"update-task-form",
 		"workspace init",
 		"agent init",
 		"tapdata",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("root help missing %s: %s", want, stdout.String())
+		}
+	}
+}
+
+func TestJiraWriteCommandHelpDeclaresHumanGate(t *testing.T) {
+	for _, command := range []string{"add-task-comment", "update-task-description-sections", "update-task-form"} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		code := Run([]string{command, "-h"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("%s code = %d stdout = %s stderr = %s", command, code, stdout.String(), stderr.String())
+		}
+		for _, want := range []string{"--confirm-real-jira-write", "risk: external_write", "human_gate: true"} {
+			if !strings.Contains(stdout.String(), want) {
+				t.Fatalf("%s help missing %s: %s", command, want, stdout.String())
+			}
 		}
 	}
 }

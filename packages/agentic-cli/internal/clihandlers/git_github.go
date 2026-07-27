@@ -490,7 +490,7 @@ func runFixPRComments(args []string, stdout io.Writer) int {
 	result := output.FailureWithContext("fix_pr_comments", output.FailureContext{
 		Code:                "policy_gate_required",
 		Message:             "PR review fix requires human gate before code changes or resubmission",
-		RequiredHumanAction: "请由研发负责人确认评论取舍、修改范围，以及后续 git_commit/git_push 策略门禁",
+		RequiredHumanAction: "请由研发工程师确认评论取舍、修改范围，以及后续 git_commit/git_push 策略门禁",
 		TaskType:            "pr_comment_fix",
 		CurrentStage:        "pr_comment_fix_gate",
 		NextAction:          "ask_owner",
