@@ -25,9 +25,6 @@ input:
   jira_base_url:
     type: string
     required: false
-  jira_token_env:
-    type: string
-    required: false
   confirm_existing_config:
     type: boolean
     required: false
@@ -96,7 +93,7 @@ failure:
     - interactive_input_required
     - interactive_input_failed
     - existing_config_confirmation_required
-    - invalid_jira_token_env_name
+    - unsupported_jira_token_env_name
     - source_checkout_failed
     - workspace_root_failed
     - workspace_init_failed
@@ -106,6 +103,7 @@ failure:
 side_effects:
   - may_write_workspace_state
   - may_write_personal_jira_config
+  - may_write_user_secret_env
   - may_clone_source_repository
   - must_not_write_jira
 human_gate:

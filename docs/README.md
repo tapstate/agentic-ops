@@ -18,6 +18,7 @@
 - [目标定位](strategy/positioning.md)
 - [长期定位](strategy/long-term-positioning.md)
 - [项目规则](project-rules.md)
+- [配置规范](configuration-standards.md)
 - [项目研发期规则](development-phase-rules.md)
 - [开发风格](development-style.md)
 - [AIAgent 工作规则](ai-working-rules.md)
@@ -47,6 +48,7 @@
 ## 契约与配置
 
 - [操作契约](contracts/operation-contract.md)
+- [配置规范](configuration-standards.md)
 - [AI 操作任务表单标准](forms/task-form-standard.md)
 - [工作流配置](profiles/workflow-profile.md)
 - [CLI 运行时](runtime/cli-runtime.md)

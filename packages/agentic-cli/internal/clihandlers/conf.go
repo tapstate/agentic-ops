@@ -59,8 +59,6 @@ func RunConf(args []string, stdout io.Writer) int {
 		payload["value"] = runtimeConfig.BaseURL
 	case "jira.email":
 		payload["value"] = runtimeConfig.Email
-	case "jira.api_token_env":
-		payload["value"] = jiraTokenEnvName(runtimeConfig)
 	case "jira.api_token_configured":
 		payload["value"] = strings.TrimSpace(runtimeConfig.APIToken) != ""
 	}
@@ -109,13 +107,6 @@ func jiraRuntimeModuleSpec() runtimeconfig.ModuleSpec {
 				Required: true,
 			},
 			{
-				Key:      "api_token_env",
-				Default:  "AGENTIC_OPS_JIRA_API_TOKEN",
-				Prompt:   "Jira API token env name",
-				Target:   "config",
-				Required: true,
-			},
-			{
 				Key:      "api_token",
 				EnvName:  "AGENTIC_OPS_JIRA_API_TOKEN",
 				Prompt:   "Jira API token",
@@ -129,13 +120,4 @@ func jiraRuntimeModuleSpec() runtimeconfig.ModuleSpec {
 			},
 		},
 	}
-}
-
-func jiraFieldDefault(spec runtimeconfig.ModuleSpec, key string) string {
-	for _, field := range spec.Fields {
-		if field.Key == key {
-			return strings.TrimSpace(field.Default)
-		}
-	}
-	return ""
 }

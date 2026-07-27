@@ -29,7 +29,7 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 6. 使用 `--interactive` 时，CLI 从参数、进程环境变量、当前工作空间配置和个人配置读取已有值，已配置项只需回车确认，缺失项才询问；非终端、脚本或 CI 场景使用完整参数形式。
 7. CLI 使用研发负责人提供或确认的 Jira 用户、当前项目 AI 工作空间目录和可选 `--source-root` 写入 `.agentic-ops/profile.local.yaml` 本地 overlay；未提供 `--source-root` 时默认使用 `<project-ai-workspace>/repos/<project>`。
 8. CLI 检查 `source_root`；目录不存在或为空时，从 workflow profile 的 `github.repositories.default` 下载项目代码；目录已存在且非空时直接复用，不覆盖、不拉取、不切换分支。
-9. CLI 优先复用已有真实 Jira 本地配置；没有本地配置时，在提供、确认或读取到项目默认 Jira base URL 后写入个人配置 `$AGENTIC_OPS_HOME/user/config.local.yaml` 的 `projects.<project>.jira` 分段，只保存 `base_url`、`email` 和 `api_token_env`，不写入 Jira API token。
+9. CLI 优先复用已有真实 Jira 本地配置；没有本地配置时，在提供、确认或读取到项目默认 Jira base URL 后写入个人配置 `$AGENTIC_OPS_HOME/user/config.local.yaml` 的 `projects.<project>.jira` 分段，只保存 `adapter`、`base_url` 和 `email`。Jira API token 只保存到 `$AGENTIC_OPS_HOME/user/.env` 的 `AGENTIC_OPS_JIRA_API_TOKEN`，不写入 YAML。
 10. CLI 创建工作空间事件和执行日志目录，例如 `<project-ai-workspace>/.agentic-ops/runs/`、`<project-ai-workspace>/.agentic-ops/run-logs/`。
 11. CLI 写入 `.agentic-ops/agent.json` 和根目录 `AGENTS.md`，让 AIAgent 能识别当前项目并知道如何调用 `agentic-cli`。
 12. CLI 运行工作空间预检。
@@ -54,13 +54,13 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
   "agent_instructions": "<project-ai-workspace>/AGENTS.md",
   "runs_dir": "<project-ai-workspace>/.agentic-ops/runs",
   "run_logs_dir": "<project-ai-workspace>/.agentic-ops/run-logs",
-  "jira_config_status": "needs_token_env",
+  "jira_config_status": "needs_jira_api_token",
   "jira_config_path": "$HOME/.agentic-ops/user/config.local.yaml",
   "jira_env_file": "$HOME/.agentic-ops/user/.env",
   "jira_token_env": "AGENTIC_OPS_JIRA_API_TOKEN",
   "jira_token_help_url": "https://id.atlassian.com/manage-profile/security/api-tokens",
   "jira_token_setup": "edit $HOME/.agentic-ops/user/.env and set AGENTIC_OPS_JIRA_API_TOKEN=<api-token>",
-  "jira_config_next_action": "set_jira_token_env",
+  "jira_config_next_action": "set_jira_api_token",
   "next_action": "init_agent_capability"
 }
 ```
@@ -83,6 +83,7 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 - 初始化后，项目 AI 工作空间中存在 `.agentic-ops/agent.json` 和 `AGENTS.md`。
 - 初始化后，默认 `source_root` 存在并可作为项目源码目录使用。
 - 工作空间产物写入项目 AI 工作空间，不写入 `~/.agentic-ops`。
+- Jira API token 不写入 YAML；初始化缺失 token 时只引导写入 `$AGENTIC_OPS_HOME/user/.env` 的 `AGENTIC_OPS_JIRA_API_TOKEN`。
 - Jira 空间到代码仓库的映射由工作流配置维护，AIAgent 不得在接管真实卡片时猜测目标仓库。
 - `agentic-cli preflight --workspace <name>` 能验证工作空间可用性。
 

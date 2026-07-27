@@ -159,6 +159,10 @@ func (scope Scope) EnsureUserEnvPlaceholder(key string, comment string) error {
 	return EnsureEnvPlaceholder(scope.UserEnvPath(), key, comment)
 }
 
+func (scope Scope) WriteUserEnvValue(key string, value string, comment string) error {
+	return WriteEnvValue(scope.UserEnvPath(), key, value, comment)
+}
+
 func EnsureEnvPlaceholder(path string, key string, comment string) error {
 	key = strings.TrimSpace(key)
 	if key == "" {
@@ -192,6 +196,43 @@ func EnsureEnvPlaceholder(path string, key string, comment string) error {
 	}
 	_, err = file.WriteString(key + "=\n")
 	return err
+}
+
+func WriteEnvValue(path string, key string, value string, comment string) error {
+	key = strings.TrimSpace(key)
+	value = strings.TrimSpace(value)
+	if key == "" || value == "" {
+		return nil
+	}
+	lines := []string{}
+	found := false
+	if data, err := os.ReadFile(path); err == nil {
+		for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+			trimmed := strings.TrimSpace(line)
+			candidate := strings.TrimPrefix(trimmed, "export ")
+			name, _, ok := strings.Cut(candidate, "=")
+			if ok && strings.TrimSpace(name) == key {
+				if !found {
+					lines = append(lines, key+"="+value)
+					found = true
+				}
+				continue
+			}
+			lines = append(lines, line)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if !found {
+		if comment = strings.TrimSpace(comment); comment != "" {
+			lines = append(lines, "# "+comment)
+		}
+		lines = append(lines, key+"="+value)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(strings.TrimRight(strings.Join(lines, "\n"), "\n")+"\n"), 0o600)
 }
 
 func ResolveProjectModule(scope Scope, module string, out any) (string, bool, error) {

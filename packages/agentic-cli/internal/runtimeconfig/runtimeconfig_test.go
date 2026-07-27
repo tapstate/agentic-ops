@@ -80,6 +80,34 @@ func TestEnsureEnvPlaceholderCreatesAndAppendsCentralEnv(t *testing.T) {
 	}
 }
 
+func TestWriteEnvValueUpdatesPlaceholderWithoutDuplicatingKey(t *testing.T) {
+	scope := NewScope(filepath.Join(t.TempDir(), ".agentic-ops"), "", "tapdata")
+
+	if err := scope.EnsureUserEnvPlaceholder("TOKEN_A", "first token"); err != nil {
+		t.Fatalf("EnsureUserEnvPlaceholder TOKEN_A error = %v", err)
+	}
+	if err := scope.WriteUserEnvValue("TOKEN_A", "secret-token", "first token"); err != nil {
+		t.Fatalf("WriteUserEnvValue TOKEN_A error = %v", err)
+	}
+	if err := scope.WriteUserEnvValue("TOKEN_B", "second-token", "second token"); err != nil {
+		t.Fatalf("WriteUserEnvValue TOKEN_B error = %v", err)
+	}
+
+	data, err := os.ReadFile(scope.UserEnvPath())
+	if err != nil {
+		t.Fatalf("ReadFile env error = %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{"TOKEN_A=secret-token", "# second token\nTOKEN_B=second-token"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("env file missing %q: %s", want, got)
+		}
+	}
+	if strings.Count(got, "TOKEN_A=") != 1 {
+		t.Fatalf("TOKEN_A should be written once: %s", got)
+	}
+}
+
 func TestRegistryFindsRegisteredModuleFields(t *testing.T) {
 	registry := NewRegistry()
 	registry.Register(ModuleSpec{

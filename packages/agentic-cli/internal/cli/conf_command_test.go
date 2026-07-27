@@ -9,7 +9,7 @@ import (
 func TestConfGetsEffectiveJiraConfigValue(t *testing.T) {
 	installDir := t.TempDir()
 	t.Setenv("AGENTIC_OPS_HOME", installDir)
-	writeCLITestFile(t, filepath.Join(installDir, "user", "config.local.yaml"), "projects:\n  tapdata:\n    jira:\n      adapter: real\n      base_url: https://tapdata.atlassian.net\n      email: lead@example.com\n      api_token_env: TAPDATA_JIRA_TOKEN\n")
+	writeCLITestFile(t, filepath.Join(installDir, "user", "config.local.yaml"), "projects:\n  tapdata:\n    jira:\n      adapter: real\n      base_url: https://tapdata.atlassian.net\n      email: lead@example.com\n")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -41,8 +41,8 @@ func TestConfReturnsCentralConfigPaths(t *testing.T) {
 func TestConfDoesNotRevealJiraTokenValue(t *testing.T) {
 	installDir := t.TempDir()
 	t.Setenv("AGENTIC_OPS_HOME", installDir)
-	writeCLITestFile(t, filepath.Join(installDir, "user", "config.local.yaml"), "projects:\n  tapdata:\n    jira:\n      adapter: real\n      base_url: https://tapdata.atlassian.net\n      email: lead@example.com\n      api_token_env: TAPDATA_JIRA_TOKEN\n")
-	writeCLITestFile(t, filepath.Join(installDir, "user", ".env"), "TAPDATA_JIRA_TOKEN=secret-token\n")
+	writeCLITestFile(t, filepath.Join(installDir, "user", "config.local.yaml"), "projects:\n  tapdata:\n    jira:\n      adapter: real\n      base_url: https://tapdata.atlassian.net\n      email: lead@example.com\n")
+	writeCLITestFile(t, filepath.Join(installDir, "user", ".env"), "AGENTIC_OPS_JIRA_API_TOKEN=secret-token\n")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -54,4 +54,19 @@ func TestConfDoesNotRevealJiraTokenValue(t *testing.T) {
 	assertJSONField(t, stdout.String(), "code", "conf_secret_redacted")
 	assertJSONField(t, stdout.String(), "key", "jira.api_token")
 	assertJSONField(t, stdout.String(), "secret", true)
+}
+
+func TestConfDoesNotExposeJiraTokenEnvAsConfigKey(t *testing.T) {
+	installDir := t.TempDir()
+	t.Setenv("AGENTIC_OPS_HOME", installDir)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"conf", "jira.api_token_env", "--workspace", "tapdata"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "conf_get")
+	assertJSONField(t, stdout.String(), "code", "conf_key_not_found")
+	assertJSONField(t, stdout.String(), "key", "jira.api_token_env")
 }

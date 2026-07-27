@@ -109,21 +109,22 @@ type jiraRuntimeConfig struct {
 	BaseURL     string   `yaml:"base_url"`
 	Email       string   `yaml:"email"`
 	APIToken    string   `yaml:"-"`
-	APITokenEnv string   `yaml:"api_token_env"`
+	APITokenEnv string   `yaml:"-"`
 	EnvFile     string   `yaml:"-"`
 	EnvFiles    []string `yaml:"-"`
 	Source      string   `yaml:"-"`
 }
 
+const jiraAPITokenEnvName = "AGENTIC_OPS_JIRA_API_TOKEN"
 const jiraTokenHelpURL = "https://id.atlassian.com/manage-profile/security/api-tokens"
 
 func addJiraTokenGuidance(payload map[string]any, status string, tokenEnv string, envFile string) {
-	if status != "needs_token_env" {
+	if status != "needs_jira_api_token" {
 		return
 	}
 	tokenEnv = strings.TrimSpace(tokenEnv)
 	if tokenEnv == "" {
-		tokenEnv = jiraFieldDefault(jiraRuntimeModuleSpec(), "api_token_env")
+		tokenEnv = jiraAPITokenEnvName
 	}
 	if strings.TrimSpace(envFile) != "" {
 		payload["jira_env_file"] = envFile
@@ -147,14 +148,11 @@ func addJiraTokenDiagnostics(payload map[string]any, runtimeConfig jiraRuntimeCo
 	if strings.TrimSpace(runtimeConfig.Source) != "" {
 		payload["jira_config_source"] = runtimeConfig.Source
 	}
-	addJiraTokenGuidance(payload, "needs_token_env", tokenEnv, runtimeConfig.EnvFile)
+	addJiraTokenGuidance(payload, "needs_jira_api_token", tokenEnv, runtimeConfig.EnvFile)
 }
 
 func jiraTokenEnvName(runtimeConfig jiraRuntimeConfig) string {
-	if tokenEnv := strings.TrimSpace(runtimeConfig.APITokenEnv); tokenEnv != "" {
-		return tokenEnv
-	}
-	return jiraFieldDefault(jiraRuntimeModuleSpec(), "api_token_env")
+	return jiraAPITokenEnvName
 }
 
 func jiraTokenEnvHasValue(tokenEnv string) bool {
@@ -169,10 +167,6 @@ func jiraTokenConfiguredInFiles(tokenEnv string, envFiles []string) bool {
 	tokenEnv = strings.TrimSpace(tokenEnv)
 	if tokenEnv == "" {
 		return false
-	}
-	scope := runtimeConfigScope("")
-	if len(envFiles) == 0 {
-		envFiles = scope.EnvPaths()
 	}
 	value, ok, err := lookupTokenEnv(tokenEnv, envFiles)
 	return err == nil && ok && strings.TrimSpace(value) != ""
@@ -194,7 +188,7 @@ func jiraAdapterConfigFailure(operation string, workspaceName string, err error,
 	} else {
 		result["required_human_action"] = "请到 Atlassian 创建 Jira API token，然后设置进程环境变量 " + tokenEnv
 	}
-	result["next_action"] = "set_jira_token_env"
+	result["next_action"] = "set_jira_api_token"
 	return result
 }
 
@@ -234,12 +228,12 @@ func finalizeJiraRuntimeConfig(scope runtimeconfig.Scope, source string, config 
 	config.Adapter = strings.ToLower(strings.TrimSpace(config.Adapter))
 	config.BaseURL = jira.NormalizeBaseURL(config.BaseURL)
 	config.Email = strings.TrimSpace(config.Email)
-	config.APITokenEnv = strings.TrimSpace(config.APITokenEnv)
-	config.EnvFile = scope.UserEnvPath()
-	config.EnvFiles = scope.EnvPaths()
-	if config.Adapter == "" && config.BaseURL == "" && config.Email == "" && config.APIToken == "" && config.APITokenEnv == "" {
+	if config.Adapter == "" && config.BaseURL == "" && config.Email == "" && config.APIToken == "" {
 		return jiraRuntimeConfig{}, nil
 	}
+	config.APITokenEnv = jiraAPITokenEnvName
+	config.EnvFile = scope.UserEnvPath()
+	config.EnvFiles = jiraRuntimeEnvFiles(scope)
 	if config.APIToken == "" && config.APITokenEnv != "" {
 		value, ok, err := lookupTokenEnv(config.APITokenEnv, config.EnvFiles)
 		if err != nil {
@@ -257,14 +251,20 @@ func finalizeJiraRuntimeConfig(scope runtimeconfig.Scope, source string, config 
 }
 
 func lookupTokenEnv(tokenEnv string, envFiles []string) (string, bool, error) {
-	scope := runtimeConfigScope("")
 	if value := strings.TrimSpace(os.Getenv(strings.TrimSpace(tokenEnv))); value != "" {
 		return value, true, nil
 	}
 	if value, ok, err := runtimeconfig.LookupEnvFiles(envFiles, tokenEnv); err != nil || ok {
 		return value, ok, err
 	}
-	return scope.LookupEnv(tokenEnv)
+	return "", false, nil
+}
+
+func jiraRuntimeEnvFiles(scope runtimeconfig.Scope) []string {
+	if strings.TrimSpace(scope.UserEnvPath()) == "" {
+		return nil
+	}
+	return []string{scope.UserEnvPath()}
 }
 
 func runtimeConfigScope(workspaceName string) runtimeconfig.Scope {

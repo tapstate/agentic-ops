@@ -127,11 +127,11 @@ func runPreflight(args []string, stdout io.Writer) int {
 		"checks":      checks,
 		"next_action": nextAction,
 	})
-	if checks["jira_config"]["code"] == "jira_token_env_missing" {
+	if checks["jira_config"]["code"] == "jira_api_token_missing" {
 		if runtimeConfig, err := resolveJiraRuntimeConfig(workspaceName); err == nil {
 			addJiraTokenDiagnostics(result, runtimeConfig)
 		}
-		result["next_action"] = "set_jira_token_env"
+		result["next_action"] = "set_jira_api_token"
 	}
 	return writeJSON(stdout, result)
 }
@@ -157,8 +157,8 @@ func checkJiraRuntimeConfig(workspaceName string) map[string]string {
 		tokenEnv := jiraTokenEnvName(runtimeConfig)
 		return map[string]string{
 			"status":  "failed",
-			"message": "Jira token env " + tokenEnv + " is not configured in process env or user/.env",
-			"code":    "jira_token_env_missing",
+			"message": "Jira API token " + tokenEnv + " is not configured in process env or user/.env",
+			"code":    "jira_api_token_missing",
 			"source":  runtimeConfig.Source,
 		}
 	}

@@ -17,7 +17,6 @@ func Register(registry *cmdkit.Registry) {
 			"agentic-cli conf paths.workspace_env --workspace tapdata",
 			"agentic-cli conf jira.base_url --workspace tapdata",
 			"agentic-cli conf jira.email --workspace tapdata",
-			"agentic-cli conf jira.api_token_env --workspace tapdata",
 			"agentic-cli conf jira.api_token_configured --workspace tapdata",
 		},
 		Risk:      "read-only; secret values are redacted by default",

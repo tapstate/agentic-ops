@@ -42,7 +42,7 @@ cd ~/agentic-ops-tapdata
 agentic-cli workspace init --project tapdata --interactive
 ```
 
-交互式初始化会复用已有配置，只询问缺失项。Tapdata 的 Jira base URL 默认使用 `https://tapdata.atlassian.net`；token 本身只放在本机 `$AGENTIC_OPS_HOME/user/.env`、项目工作空间 `.agentic-ops/.env` 或进程环境变量中，不写入 YAML 配置。
+交互式初始化会复用已有配置，只询问缺失项。Tapdata 的 Jira base URL 默认使用 `https://tapdata.atlassian.net`；Jira API token 只保存到本机 `$AGENTIC_OPS_HOME/user/.env` 的 `AGENTIC_OPS_JIRA_API_TOKEN`，不写入 YAML 配置。
 
 6. 启动 Codex。
 
@@ -175,7 +175,7 @@ agentic-cli workspace init --project tapdata --interactive
 
 - 项目配置项，例如 `tapdata`。
 - Jira 邮箱；Tapdata 的 Jira base URL 默认是 `https://tapdata.atlassian.net`。
-- token 环境变量名，默认 `AGENTIC_OPS_JIRA_API_TOKEN`；这里填变量名，不填 Jira API token 值。
+- Jira API token；首次缺失时交互式初始化会提示输入，并保存到 `$AGENTIC_OPS_HOME/user/.env` 的 `AGENTIC_OPS_JIRA_API_TOKEN`。
 - 本地源码目录；默认是当前工作空间下的 `repos/<project>`，目录不存在时初始化会从项目 profile 的默认 GitHub 仓库下载代码。
 
 脚本、CI 或非终端环境使用参数形式：
@@ -200,7 +200,7 @@ agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --con
 
 初始化成功后重点看：
 
-- `jira_config_status`：`configured`、`needs_token_env` 或 `needs_configuration`。
+- `jira_config_status`：`configured`、`needs_jira_api_token` 或 `needs_configuration`。
 - `source_checkout_status`：`cloned` 表示已下载源码，`existing` 表示复用了已有源码目录。
 - `profile_overlay`：当前工作空间的 `.agentic-ops/profile.local.yaml`。
 - `agent_instructions`：当前工作空间的 `AGENTS.md`。
@@ -214,12 +214,12 @@ agentic-cli preflight
 
 ## Jira 连接配置
 
-`workspace init` 不写入 Jira API token 到 YAML。应用配置集中写入 `$AGENTIC_OPS_HOME/user/config.local.yaml`，按项目和模块分段；token 值集中放在 `$AGENTIC_OPS_HOME/user/.env`、项目工作空间 `.agentic-ops/.env` 或进程环境变量中。
+`workspace init` 不写入 Jira API token 到 YAML。应用配置集中写入 `$AGENTIC_OPS_HOME/user/config.local.yaml`，按项目和模块分段；Jira API token 的持久化落点只有 `$AGENTIC_OPS_HOME/user/.env` 中的 `AGENTIC_OPS_JIRA_API_TOKEN`。
 
 `agentic-cli list-tasks` 读取真实 Jira 配置的顺序：
 
 1. 显式环境变量：`AGENTIC_OPS_JIRA_ADAPTER=real`、`AGENTIC_OPS_JIRA_BASE_URL`、`AGENTIC_OPS_JIRA_EMAIL`、`AGENTIC_OPS_JIRA_API_TOKEN`。
-2. 当前项目 AI 工作空间：`.agentic-ops/config.local.yaml` 和 `.agentic-ops/.env`。
+2. 当前项目 AI 工作空间：`.agentic-ops/config.local.yaml`。
 3. 个人层：`$AGENTIC_OPS_HOME/user/config.local.yaml` 和 `$AGENTIC_OPS_HOME/user/.env`。
 
 配置示例：
@@ -231,18 +231,9 @@ projects:
       adapter: real
       base_url: https://tapdata.atlassian.net
       email: your-email@example.com
-      api_token_env: AGENTIC_OPS_JIRA_API_TOKEN
 ```
 
-自定义 token 环境变量名：
-
-```sh
-agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --jira-token-env TAPDATA_JIRA_TOKEN
-```
-
-`--jira-token-env` 只接受 `TAPDATA_JIRA_TOKEN` 这类环境变量名。真实 Jira API token 必须写入输出中的 `jira_env_file`、当前进程环境变量或项目工作空间 `.agentic-ops/.env`。
-
-`needs_token_env` 时：
+`needs_jira_api_token` 时：
 
 先打开 [Atlassian API token 页面](https://id.atlassian.com/manage-profile/security/api-tokens) 创建 token，再把下面内容写入输出中的 `jira_env_file`：
 
@@ -256,7 +247,7 @@ AGENTIC_OPS_JIRA_API_TOKEN=<api-token>
 agentic-cli list-tasks
 ```
 
-`api_token_env` 只保存环境变量名，不保存 token 值。CLI 会先读当前进程环境变量，再按顺序读取 `.agentic-ops/.env` 和 `$AGENTIC_OPS_HOME/user/.env`。真实 `.env` 属于本机配置，不能提交；如果 `agentic-cli preflight` 或 `agentic-cli list-tasks` 输出 `jira_token_env_has_value: false`，说明当前进程环境和本机 `.env` 都没有读到有效 token。
+`AGENTIC_OPS_JIRA_API_TOKEN` 是固定配置名，不需要在 YAML 中声明。CLI 会先读当前进程环境变量，再读取 `$AGENTIC_OPS_HOME/user/.env`。真实 `.env` 属于本机配置，不能提交；如果 `agentic-cli preflight` 或 `agentic-cli list-tasks` 输出 `jira_token_env_has_value: false`，说明当前进程环境和本机 `.env` 都没有读到有效 token。
 
 外部脚本和 AIAgent 读取配置时应通过统一入口，不直接解析 YAML 或 `.env`：
 

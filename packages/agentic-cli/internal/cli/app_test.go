@@ -88,7 +88,6 @@ func TestWorkspaceInitHelpListsInteractiveAndFlagModes(t *testing.T) {
 		"Usage: agentic-cli workspace init --project <project> [--interactive]",
 		"workspace init --project tapdata --interactive",
 		"--jira-base-url",
-		"--jira-token-env",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("workspace init help missing %s: %s", want, stdout.String())

@@ -12,6 +12,7 @@
 - `docs/user-stories/development-lead-stories.md`
 - `docs/development-style.md`
 - `docs/ai-working-rules.md`
+- `docs/configuration-standards.md`
 - `docs/processes/standard-process-registry.md`
 - `docs/strategy/positioning.md`
 - `docs/runtime/cli-runtime.md`
@@ -176,11 +177,17 @@ AgenticOps 中所有规则写入前必须先区分类别，不能因为同一条
 
 项目规则覆盖公司规则或 AIAgent 规则时，必须在项目规则文件或项目工作空间配置中显式体现来源；不得只依赖聊天上下文。个人规则只能在缺少更高优先级规则时补充执行偏好，不能覆盖项目、AIAgent 或公司规则。
 
-## 7. 项目研发期规则
+## 7. 配置规范
+
+AgenticOps 配置项必须按 [配置规范](configuration-standards.md) 维护。新增、调整或删除配置时，必须先确认配置分类、来源优先级、密钥落点、统一读取入口、初始化表单、帮助信息、操作契约、上手文档和测试是否同步更新。
+
+任何绕过统一配置模块、让功能直接解析 YAML / `.env`、新增第二个 token 名称、把 secret 写入 YAML，或让文档与 CLI 行为不一致的调整，都必须先停止实现，输出审查分析和推荐方案，等待研发负责人决策。
+
+## 8. 项目研发期规则
 
 AgenticOps 第一个版本发布正式上线前的临时规范统一维护在 `docs/development-phase-rules.md`。正式上线后，应删除本节或解除对该文档的依赖，再把仍需长期保留的内容迁移到对应永久规则区块。
 
-## 8. 安装边界
+## 9. 安装边界
 
 AgenticOps 默认安装到：
 
@@ -225,7 +232,7 @@ gh api -H 'Accept: application/vnd.github.raw' \
 
 如果 `~/.agentic-ops` 已存在，安装脚本必须先展示当前 ref 和目标分支，并要求研发负责人确认后才更新。交互式终端由用户输入确认；非交互环境必须先取得用户确认，再显式设置 `AGENTIC_OPS_ASSUME_YES=1`。未确认时安装脚本必须停止，不能静默更新。
 
-## 8. 项目 AI 工作空间边界
+## 10. 项目 AI 工作空间边界
 
 具体项目的运行目录必须是对应项目 AI 工作空间，例如：
 
@@ -255,7 +262,7 @@ tapdata/
     feedback/
 ```
 
-## 9. AI 员工手册规则
+## 11. AI 员工手册规则
 
 AgenticOps 必须包含 AI 员工手册，并将其作为一等交付物。
 
@@ -277,7 +284,7 @@ AI 员工手册必须覆盖：
 
 所有技能、操作契约、工作流配置、CLI 命令和证据模板必须与 AI 员工手册保持一致。
 
-## 10. 操作契约规则
+## 12. 操作契约规则
 
 AgenticOps 必须通过操作契约管理 AIAgent 可执行操作的输入、输出、失败模型和副作用。
 
@@ -322,7 +329,7 @@ feedback_propose
 
 写操作必须声明副作用。任何涉及 Jira 写入、Git 提交、Git 推送、GitHub 拉取请求创建或拉取请求更新的操作必须经过策略、门禁和人工确认检查。
 
-## 11. 工作流配置规则
+## 13. 工作流配置规则
 
 AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira 工作流。
 
@@ -343,7 +350,7 @@ AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira 工作
 
 TapData / TapState 方案 C 可以作为第一套默认工作流配置，但不得硬编码进核心模型。
 
-## 12. CLI 运行时规则
+## 14. CLI 运行时规则
 
 控制层必须采用本地优先的 Go CLI 运行时。
 
@@ -394,7 +401,7 @@ CLI 操作和脚本入口必须遵守成熟度边界：
 - 框架负责大的流程环节、门禁、状态和演进机制，不把每个任务的临场细节写死。
 - AIAgent 在具体环节内执行任务并沉淀经验，周期性复盘再决定是否固化为标准资产。
 
-## 13. Git 和 GitHub 规则
+## 15. Git 和 GitHub 规则
 
 GitHub / Git 当前不会替换，因此不需要做可替换平台级抽象，但必须做安全操作级封装。
 
@@ -421,7 +428,7 @@ gh pr edit
 
 未经研发负责人确认，AIAgent 不得执行推送、创建拉取请求、重新提交修复或合并。
 
-## 14. 人工门禁规则
+## 16. 人工门禁规则
 
 以下动作必须暂停并等待人工确认：
 
@@ -436,7 +443,7 @@ gh pr edit
 
 AIAgent 必须能向研发负责人说明暂停原因、当前证据、建议下一步和需要谁确认。
 
-## 15. 反馈闭环规则
+## 17. 反馈闭环规则
 
 AgenticOps 必须包含 AIAgent 反馈通道，用于在任务完成、阻塞或交接时提交任务级审计记录，并在需要时按执行记录分析和优化 AgenticOps。
 
@@ -472,7 +479,7 @@ Go CLI 执行操作
 Observation -> Proposal -> Accepted Change
 ```
 
-## 16. 安全规则
+## 18. 安全规则
 
 严禁提交或持久化：
 
@@ -488,7 +495,7 @@ Observation -> Proposal -> Accepted Change
 
 Jira / GitHub 写操作必须可审计。任何写操作都必须关联 `operation`、`workspace`、`issue_key`、`run_id`、`task_type`、`current_stage`、`next_action` 和事件日志。
 
-## 17. 文档规则
+## 19. 文档规则
 
 项目至少维护：
 

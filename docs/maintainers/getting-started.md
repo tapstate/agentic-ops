@@ -9,8 +9,9 @@
 1. [README](../../README.md)：了解 AgenticOps 定位、核心模型和角色入口。
 2. [当前设计](../architecture/agenticops-current-design.md)：确认长期架构和事实源边界。
 3. [项目规则](../project-rules.md)：确认文档、运行资产、提交和安全边界。
-4. [项目研发期规则](../development-phase-rules.md)：确认第一个版本上线前的临时门禁。
-5. [项目结构](../architecture/project-structure.md)：确认目录职责。
+4. [配置规范](../configuration-standards.md)：确认配置分类、密钥落点、统一读取入口和变更审查要求。
+5. [项目研发期规则](../development-phase-rules.md)：确认第一个版本上线前的临时门禁。
+6. [项目结构](../architecture/project-structure.md)：确认目录职责。
 
 ## 初始化本地项目
 

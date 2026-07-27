@@ -47,8 +47,10 @@ $cmd policy rollback --workspace tapstate | grep '"operation":"policy_rollback"'
 rm -f "$policy_backup"
 $cmd doctor --workspace tapstate | grep '"operation":"doctor"'
 $cmd preflight --workspace tapstate | grep '"operation":"preflight"'
-$cmd workspace init --project tapstate --jira-user dev@example.com | grep '"operation":"workspace_init"'
-$cmd workspace init --project tapstate --jira-user dev@example.com --confirm-existing-config | grep '"profile_overlay":'
+mkdir -p "$workspace_root/src"
+printf '# fake source root\n' > "$workspace_root/src/README.md"
+$cmd workspace init --project tapstate --jira-user dev@example.com --source-root "$workspace_root/src" | grep '"operation":"workspace_init"'
+$cmd workspace init --project tapstate --jira-user dev@example.com --source-root "$workspace_root/src" --confirm-existing-config | grep '"profile_overlay":'
 $cmd profile resolve --workspace tapstate | grep '"operation":"profile_resolve"'
 $cmd agent init --workspace tapstate | grep '"operation":"agent_init"'
 $cmd list-tasks --workspace tapstate | grep '"key":"TAP-123"'

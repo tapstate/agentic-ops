@@ -33,7 +33,8 @@ func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr i
 	if projectName == "" {
 		projectName = workspaceName
 	}
-	prompter := workspaceInitPrompter{reader: bufio.NewReader(stdinOrEmpty(stdin)), writer: stderr}
+	promptInput := stdinOrEmpty(stdin)
+	prompter := workspaceInitPrompter{reader: bufio.NewReader(promptInput), input: promptInput, writer: stderr}
 	if interactive && projectName == "" {
 		var err error
 		projectName, err = prompter.promptRequired("Project", projectName)
@@ -51,6 +52,18 @@ func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr i
 	sourceRoot := readFlag(args, "--source-root", "")
 	jiraBaseURL := readFlag(args, "--jira-base-url", "")
 	jiraTokenEnv := readFlag(args, "--jira-token-env", "")
+	jiraAPIToken := ""
+	if strings.TrimSpace(jiraTokenEnv) != "" && strings.TrimSpace(jiraTokenEnv) != jiraAPITokenEnvName {
+		return writeJSON(stdout, output.FailureWithContext("workspace_init", output.FailureContext{
+			Code:                "unsupported_jira_token_env_name",
+			Message:             "Jira API token 配置名已统一为 " + jiraAPITokenEnvName,
+			RequiredHumanAction: "请把真实 Jira API token 写入 ~/.agentic-ops/user/.env 中的 " + jiraAPITokenEnvName,
+			TaskType:            "workspace_initialization",
+			CurrentStage:        "jira_config",
+			NextAction:          "set_jira_api_token",
+		}))
+	}
+	jiraTokenEnv = jiraAPITokenEnvName
 	if interactive {
 		defaults := workspaceJiraPromptDefaults(projectName)
 		var err error
@@ -66,25 +79,17 @@ func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr i
 				return writeJSON(stdout, output.Failure("workspace_init", "interactive_input_failed", err.Error(), "请重新运行交互式初始化"))
 			}
 		}
-		if jiraTokenEnv == "" && (jiraBaseURL != "" || defaults.APITokenEnv != "") {
-			jiraTokenEnv, err = prompter.promptOptional("Jira token env", defaults.APITokenEnv)
-			if err != nil {
-				return writeJSON(stdout, output.Failure("workspace_init", "interactive_input_failed", err.Error(), "请重新运行交互式初始化"))
+		if jiraBaseURL != "" || defaults.BaseURL != "" {
+			if !jiraTokenConfiguredInFiles(jiraTokenEnv, jiraRuntimeEnvFiles(runtimeConfigScope(projectName))) {
+				jiraAPIToken, err = prompter.promptSecretOptional("Jira API token", "")
+				if err != nil {
+					return writeJSON(stdout, output.Failure("workspace_init", "interactive_input_failed", err.Error(), "请重新运行交互式初始化"))
+				}
 			}
 		}
 	}
 	if jiraUser == "" {
 		return writeJSON(stdout, output.Failure("workspace_init", "missing_jira_user", "缺少 Jira 用户", "请提供 --jira-user"))
-	}
-	if strings.TrimSpace(jiraTokenEnv) != "" && !validJiraTokenEnvName(jiraTokenEnv) {
-		return writeJSON(stdout, output.FailureWithContext("workspace_init", output.FailureContext{
-			Code:                "invalid_jira_token_env_name",
-			Message:             "Jira token env 必须是环境变量名，不是 Jira API token 值",
-			RequiredHumanAction: "请使用 AGENTIC_OPS_JIRA_API_TOKEN 这类环境变量名，并把真实 Jira API token 写入 ~/.agentic-ops/user/.env",
-			TaskType:            "workspace_initialization",
-			CurrentStage:        "jira_config",
-			NextAction:          "set_jira_token_env_name",
-		}))
 	}
 	root, err := workspaceRoot()
 	if err != nil {
@@ -134,16 +139,16 @@ func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr i
 	if err != nil {
 		return writeJSON(stdout, output.Failure("workspace_init", "agent_instructions_failed", err.Error(), "请检查工作空间目录权限"))
 	}
-	jiraConfig, err := prepareWorkspaceJiraConfig(info, jiraUser, jiraBaseURL, jiraTokenEnv)
+	jiraConfig, err := prepareWorkspaceJiraConfig(info, jiraUser, jiraBaseURL, jiraTokenEnv, jiraAPIToken)
 	if err != nil {
 		if errors.Is(err, errInvalidJiraTokenEnvName) {
 			return writeJSON(stdout, output.FailureWithContext("workspace_init", output.FailureContext{
 				Code:                "invalid_jira_token_env_name",
-				Message:             "Jira token env 必须是环境变量名，不是 Jira API token 值",
-				RequiredHumanAction: "请使用 AGENTIC_OPS_JIRA_API_TOKEN 这类环境变量名，并把真实 Jira API token 写入 ~/.agentic-ops/user/.env",
+				Message:             "Jira API token 配置名异常",
+				RequiredHumanAction: "请把真实 Jira API token 写入 ~/.agentic-ops/user/.env 中的 " + jiraAPITokenEnvName,
 				TaskType:            "workspace_initialization",
 				CurrentStage:        "jira_config",
-				NextAction:          "set_jira_token_env_name",
+				NextAction:          "set_jira_api_token",
 			}))
 		}
 		return writeJSON(stdout, output.Failure("workspace_init", "jira_config_failed", err.Error(), "请检查个人配置目录权限"))
@@ -177,6 +182,7 @@ func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr i
 
 type workspaceInitPrompter struct {
 	reader *bufio.Reader
+	input  io.Reader
 	writer io.Writer
 }
 
@@ -215,12 +221,46 @@ func (prompter workspaceInitPrompter) promptOptional(label string, fallback stri
 	return value, nil
 }
 
+func (prompter workspaceInitPrompter) promptSecretOptional(label string, fallback string) (string, error) {
+	if file, ok := prompter.input.(*os.File); ok && isTerminalFile(file) {
+		if fallback != "" {
+			fmt.Fprintf(prompter.writer, "%s [configured]: ", label)
+		} else {
+			fmt.Fprintf(prompter.writer, "%s: ", label)
+		}
+		echoDisabled := exec.Command("stty", "-echo")
+		echoDisabled.Stdin = file
+		if err := echoDisabled.Run(); err == nil {
+			defer func() {
+				echoEnabled := exec.Command("stty", "echo")
+				echoEnabled.Stdin = file
+				_ = echoEnabled.Run()
+				fmt.Fprintln(prompter.writer)
+			}()
+			line, err := prompter.reader.ReadString('\n')
+			if err != nil && len(line) == 0 {
+				return "", err
+			}
+			value := strings.TrimSpace(line)
+			if value == "" {
+				return fallback, nil
+			}
+			return value, nil
+		}
+	}
+	return prompter.promptOptional(label, fallback)
+}
+
+func isTerminalFile(file *os.File) bool {
+	stat, err := file.Stat()
+	return err == nil && (stat.Mode()&os.ModeCharDevice) != 0
+}
+
 func workspaceJiraPromptDefaults(workspaceName string) jiraRuntimeConfig {
-	jiraSpec := jiraRuntimeModuleSpec()
 	envDefaults := jiraRuntimeConfig{
 		BaseURL:     os.Getenv("AGENTIC_OPS_JIRA_BASE_URL"),
 		Email:       os.Getenv("AGENTIC_OPS_JIRA_EMAIL"),
-		APITokenEnv: jiraFieldDefault(jiraSpec, "api_token_env"),
+		APITokenEnv: jiraAPITokenEnvName,
 	}
 	projectDefaultBaseURL := projectJiraDefaultBaseURL(workspaceName)
 	config, err := resolveJiraRuntimeConfig(workspaceName)
@@ -264,12 +304,12 @@ type workspaceJiraConfigGuide struct {
 
 var errInvalidJiraTokenEnvName = errors.New("invalid jira token env name")
 
-func prepareWorkspaceJiraConfig(info workspace.Info, jiraUser string, jiraBaseURL string, jiraTokenEnv string) (workspaceJiraConfigGuide, error) {
+func prepareWorkspaceJiraConfig(info workspace.Info, jiraUser string, jiraBaseURL string, jiraTokenEnv string, jiraAPIToken string) (workspaceJiraConfigGuide, error) {
 	scope := runtimeconfig.NewScope(agenticOpsInstallDir(), info.Root, info.Name)
 	configPath := scope.UserConfigPath()
 	envFile := scope.UserEnvPath()
 	if strings.TrimSpace(jiraTokenEnv) == "" {
-		jiraTokenEnv = jiraFieldDefault(jiraRuntimeModuleSpec(), "api_token_env")
+		jiraTokenEnv = jiraAPITokenEnvName
 	}
 	if !validJiraTokenEnvName(jiraTokenEnv) {
 		return workspaceJiraConfigGuide{}, fmt.Errorf("%w: use an environment variable name such as AGENTIC_OPS_JIRA_API_TOKEN, then store the token in %s", errInvalidJiraTokenEnvName, envFile)
@@ -282,8 +322,13 @@ func prepareWorkspaceJiraConfig(info workspace.Info, jiraUser string, jiraBaseUR
 		if err := scope.EnsureUserEnvPlaceholder(jiraTokenEnv, "Create a Jira API token: "+jiraTokenHelpURL); err != nil {
 			return workspaceJiraConfigGuide{}, err
 		}
-		status := "needs_token_env"
-		nextAction := "set_jira_token_env"
+		if strings.TrimSpace(jiraAPIToken) != "" {
+			if err := scope.WriteUserEnvValue(jiraTokenEnv, jiraAPIToken, "Create a Jira API token: "+jiraTokenHelpURL); err != nil {
+				return workspaceJiraConfigGuide{}, err
+			}
+		}
+		status := "needs_jira_api_token"
+		nextAction := "set_jira_api_token"
 		if jiraTokenConfiguredInFiles(jiraTokenEnv, scope.EnvPaths()) {
 			status = "configured"
 			nextAction = "agent_init"
@@ -298,8 +343,8 @@ func prepareWorkspaceJiraConfig(info workspace.Info, jiraUser string, jiraBaseUR
 		status := "configured"
 		nextAction := "agent_init"
 		if runtimeConfig.APIToken == "" {
-			status = "needs_token_env"
-			nextAction = "set_jira_token_env"
+			status = "needs_jira_api_token"
+			nextAction = "set_jira_api_token"
 		}
 		return workspaceJiraConfigGuide{Status: status, Path: runtimeConfig.Source, TokenEnv: runtimeConfig.APITokenEnv, EnvFile: runtimeConfig.EnvFile, NextAction: nextAction}, nil
 	}
@@ -310,8 +355,13 @@ func prepareWorkspaceJiraConfig(info workspace.Info, jiraUser string, jiraBaseUR
 		if err := scope.EnsureUserEnvPlaceholder(jiraTokenEnv, "Create a Jira API token: "+jiraTokenHelpURL); err != nil {
 			return workspaceJiraConfigGuide{}, err
 		}
-		status := "needs_token_env"
-		nextAction := "set_jira_token_env"
+		if strings.TrimSpace(jiraAPIToken) != "" {
+			if err := scope.WriteUserEnvValue(jiraTokenEnv, jiraAPIToken, "Create a Jira API token: "+jiraTokenHelpURL); err != nil {
+				return workspaceJiraConfigGuide{}, err
+			}
+		}
+		status := "needs_jira_api_token"
+		nextAction := "set_jira_api_token"
 		if jiraTokenConfiguredInFiles(jiraTokenEnv, scope.EnvPaths()) {
 			status = "configured"
 			nextAction = "agent_init"
@@ -349,10 +399,9 @@ func validJiraTokenEnvName(value string) bool {
 
 func writePersonalProjectJiraConfig(scope runtimeconfig.Scope, jiraUser string, jiraBaseURL string, jiraTokenEnv string) error {
 	return runtimeconfig.WriteProjectModule(scope.UserConfigPath(), scope.Project, "jira", jiraRuntimeConfig{
-		Adapter:     "real",
-		BaseURL:     jira.NormalizeBaseURL(jiraBaseURL),
-		Email:       jiraUser,
-		APITokenEnv: jiraTokenEnv,
+		Adapter: "real",
+		BaseURL: jira.NormalizeBaseURL(jiraBaseURL),
+		Email:   jiraUser,
 	})
 }
 
@@ -573,7 +622,7 @@ func writeAgentInstructions(info workspace.Info, jiraUser string, jiraProject st
 		"2. Run `agentic-cli preflight` before taking over Jira tasks.",
 		"3. Read `$HOME/.agentic-ops/agent-guides.md` and `$HOME/.agentic-ops/install-resources/basic/ai-assets/README.md` before executing tasks.",
 		"4. Use `agentic-cli list-tasks` to find available Jira tasks from the real Jira adapter; do not use sample or fake Jira tasks for business work.",
-		"5. If Jira adapter config is missing, ask the development lead to provide runtime local config through process environment variables, `.agentic-ops/config.local.yaml`, or `$AGENTIC_OPS_HOME/user/config.local.yaml`; secrets belong in `.agentic-ops/.env` or `$AGENTIC_OPS_HOME/user/.env`; never use fake Jira for business work.",
+		"5. If Jira adapter config is missing, ask the development lead to provide runtime local config through process environment variables, `.agentic-ops/config.local.yaml`, or `$AGENTIC_OPS_HOME/user/config.local.yaml`; Jira API token persists only in `$AGENTIC_OPS_HOME/user/.env` as `AGENTIC_OPS_JIRA_API_TOKEN`; never use fake Jira for business work.",
 		"6. Use `agentic-cli task run <issue-key>` to take over a task and start the matched capability.",
 		"7. Use `agentic-cli takeover-task <issue-key>` only when you need the lower-level takeover operation.",
 		"8. Use `agentic-cli write-evidence --run-id <run-id>` and `agentic-cli release-agent --run-id <run-id> --issue-key <issue-key> --completion-evidence <file>` to finish or hand off work.",

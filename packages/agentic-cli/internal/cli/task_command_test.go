@@ -75,7 +75,9 @@ func TestListTasksReadsRealJiraTasks(t *testing.T) {
 
 func TestListTasksReadsWorkspaceJiraConfigFile(t *testing.T) {
 	root := t.TempDir()
+	installDir := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", installDir)
 	var sawSearch bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/rest/api/3/search/jql" {
@@ -90,8 +92,8 @@ func TestListTasksReadsWorkspaceJiraConfigFile(t *testing.T) {
 		_, _ = w.Write([]byte(`{"issues":[{"key":"TAP-998","fields":{"summary":"工作空间 Jira 配置任务","assignee":{"accountId":"account-998"},"issuetype":{"name":"Task"},"status":{"name":"To Do"},"customfield_acceptance":"真实验收","customfield_target_repo":"tapstate/real-repo","customfield_risk":{"value":"low"},"description":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"go test ./config"}]}]}}}]}`))
 	}))
 	defer server.Close()
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "config.local.yaml"), "projects:\n  tapstate:\n    jira:\n      adapter: real\n      base_url: "+server.URL+"\n      email: workspace@example.com\n      api_token_env: WORKSPACE_JIRA_TOKEN\n")
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", ".env"), "WORKSPACE_JIRA_TOKEN=workspace-token\n")
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "config.local.yaml"), "projects:\n  tapstate:\n    jira:\n      adapter: real\n      base_url: "+server.URL+"\n      email: workspace@example.com\n")
+	writeCLITestFile(t, filepath.Join(installDir, "user", ".env"), "AGENTIC_OPS_JIRA_API_TOKEN=workspace-token\n")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -114,7 +116,7 @@ func TestListTasksReadsPersonalProjectJiraConfigFromCentralConfig(t *testing.T) 
 	installDir := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	t.Setenv("AGENTIC_OPS_HOME", installDir)
-	t.Setenv("PERSONAL_JIRA_TOKEN", "personal-token")
+	t.Setenv("AGENTIC_OPS_JIRA_API_TOKEN", "personal-token")
 	var sawSearch bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/rest/api/3/search/jql" {
@@ -130,7 +132,7 @@ func TestListTasksReadsPersonalProjectJiraConfigFromCentralConfig(t *testing.T) 
 	}))
 	defer server.Close()
 	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "config.local.yaml"), "\n")
-	writeCLITestFile(t, filepath.Join(installDir, "user", "config.local.yaml"), "projects:\n  tapstate:\n    jira:\n      adapter: real\n      base_url: "+server.URL+"\n      email: personal@example.com\n      api_token_env: PERSONAL_JIRA_TOKEN\n")
+	writeCLITestFile(t, filepath.Join(installDir, "user", "config.local.yaml"), "projects:\n  tapstate:\n    jira:\n      adapter: real\n      base_url: "+server.URL+"\n      email: personal@example.com\n")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -168,8 +170,8 @@ func TestListTasksReadsPersonalConfigAndAgenticEnv(t *testing.T) {
 	}))
 	defer server.Close()
 	userDir := filepath.Join(installDir, "user")
-	writeCLITestFile(t, filepath.Join(userDir, "config.local.yaml"), "projects:\n  tapstate:\n    jira:\n      adapter: real\n      base_url: "+server.URL+"\n      email: dotenv@example.com\n      api_token_env: PERSONAL_JIRA_TOKEN\n")
-	writeCLITestFile(t, filepath.Join(userDir, ".env"), "PERSONAL_JIRA_TOKEN=dotenv-token\n")
+	writeCLITestFile(t, filepath.Join(userDir, "config.local.yaml"), "projects:\n  tapstate:\n    jira:\n      adapter: real\n      base_url: "+server.URL+"\n      email: dotenv@example.com\n")
+	writeCLITestFile(t, filepath.Join(userDir, ".env"), "AGENTIC_OPS_JIRA_API_TOKEN=dotenv-token\n")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -187,13 +189,13 @@ func TestListTasksReadsPersonalConfigAndAgenticEnv(t *testing.T) {
 	}
 }
 
-func TestListTasksGuidesJiraTokenWhenTokenEnvMissing(t *testing.T) {
+func TestListTasksDoesNotReadJiraTokenFromWorkspaceEnv(t *testing.T) {
 	root := t.TempDir()
 	installDir := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	t.Setenv("AGENTIC_OPS_HOME", installDir)
-	userDir := filepath.Join(installDir, "user")
-	writeCLITestFile(t, filepath.Join(userDir, "config.local.yaml"), "projects:\n  tapstate:\n    jira:\n      adapter: real\n      base_url: https://jira.example.test\n      email: personal@example.com\n      api_token_env: PERSONAL_JIRA_TOKEN\n")
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "config.local.yaml"), "projects:\n  tapstate:\n    jira:\n      adapter: real\n      base_url: https://jira.example.test\n      email: workspace@example.com\n")
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", ".env"), "AGENTIC_OPS_JIRA_API_TOKEN=workspace-token\n")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -203,12 +205,36 @@ func TestListTasksGuidesJiraTokenWhenTokenEnvMissing(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "operation", "list_tasks")
 	assertJSONField(t, stdout.String(), "code", "jira_adapter_config_failed")
-	assertJSONField(t, stdout.String(), "jira_token_env", "PERSONAL_JIRA_TOKEN")
+	assertJSONField(t, stdout.String(), "jira_token_env", "AGENTIC_OPS_JIRA_API_TOKEN")
+	assertJSONField(t, stdout.String(), "jira_token_env_has_value", false)
+	assertJSONField(t, stdout.String(), "jira_env_file", filepath.Join(installDir, "user", ".env"))
+	if strings.Contains(stdout.String(), "workspace-token") {
+		t.Fatalf("stdout must not reveal or use workspace env token: %s", stdout.String())
+	}
+}
+
+func TestListTasksGuidesJiraTokenWhenTokenEnvMissing(t *testing.T) {
+	root := t.TempDir()
+	installDir := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", installDir)
+	userDir := filepath.Join(installDir, "user")
+	writeCLITestFile(t, filepath.Join(userDir, "config.local.yaml"), "projects:\n  tapstate:\n    jira:\n      adapter: real\n      base_url: https://jira.example.test\n      email: personal@example.com\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"list-tasks", "--workspace", "tapstate"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "list_tasks")
+	assertJSONField(t, stdout.String(), "code", "jira_adapter_config_failed")
+	assertJSONField(t, stdout.String(), "jira_token_env", "AGENTIC_OPS_JIRA_API_TOKEN")
 	assertJSONField(t, stdout.String(), "jira_token_env_has_value", false)
 	assertJSONField(t, stdout.String(), "jira_env_file", filepath.Join(userDir, ".env"))
 	assertJSONField(t, stdout.String(), "jira_config_source", filepath.Join(userDir, "config.local.yaml"))
 	assertJSONField(t, stdout.String(), "jira_token_help_url", "https://id.atlassian.com/manage-profile/security/api-tokens")
-	if !strings.Contains(stdout.String(), ".env") || !strings.Contains(stdout.String(), "PERSONAL_JIRA_TOKEN=") {
+	if !strings.Contains(stdout.String(), ".env") || !strings.Contains(stdout.String(), "AGENTIC_OPS_JIRA_API_TOKEN=") {
 		t.Fatalf("stdout missing token setup guidance: %s", stdout.String())
 	}
 }
