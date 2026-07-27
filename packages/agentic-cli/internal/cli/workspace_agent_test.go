@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,7 +102,7 @@ func TestWorkspaceInitClonesDefaultRepositoryToSourceRoot(t *testing.T) {
 	t.Setenv("AGENTIC_OPS_HOME", installDir)
 	var clonedURL string
 	var clonedTarget string
-	restore := clihandlers.SetRunGitCloneForTest(func(repoURL string, targetPath string) error {
+	restore := clihandlers.SetRunGitCloneForTest(func(repoURL string, targetPath string, _ io.Writer) error {
 		clonedURL = repoURL
 		clonedTarget = targetPath
 		writeCLITestFile(t, filepath.Join(targetPath, ".git", "HEAD"), "ref: refs/heads/main\n")
@@ -122,6 +124,45 @@ func TestWorkspaceInitClonesDefaultRepositoryToSourceRoot(t *testing.T) {
 	if clonedURL != "git@github.com:tapdata/tapdata.git" || clonedTarget != sourceRoot {
 		t.Fatalf("clone = (%s, %s), want (%s, %s)", clonedURL, clonedTarget, "git@github.com:tapdata/tapdata.git", sourceRoot)
 	}
+	if !strings.Contains(stderr.String(), "正在下载项目源码") || !strings.Contains(stderr.String(), sourceRoot) {
+		t.Fatalf("stderr missing source checkout progress: %s", stderr.String())
+	}
+}
+
+func TestWorkspaceInitPersistsJiraTokenWhenSourceCheckoutFails(t *testing.T) {
+	root := t.TempDir()
+	installDir := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", installDir)
+	restore := clihandlers.SetRunGitCloneForTest(func(repoURL string, targetPath string, _ io.Writer) error {
+		return errors.New("ssh authentication failed")
+	})
+	defer restore()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	input := strings.NewReader("lead@example.com\nhttps://jira.example.test\nsecret-token\n")
+	code := RunWithIO([]string{"workspace", "init", "--project", "tapdata", "--interactive"}, input, &stdout, &stderr, true)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "source_checkout_failed")
+	assertJSONField(t, stdout.String(), "jira_config_status", "configured")
+	assertJSONField(t, stdout.String(), "workspace_repairable", true)
+	envPath := filepath.Join(installDir, "user", ".env")
+	envData, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("Jira token was not persisted before source checkout: %v", err)
+	}
+	if !strings.Contains(string(envData), "AGENTIC_OPS_JIRA_API_TOKEN=secret-token") {
+		t.Fatalf("user env missing Jira token: %s", string(envData))
+	}
+	if strings.Contains(stdout.String(), "secret-token") || strings.Contains(stderr.String(), "secret-token") {
+		t.Fatalf("token value must not be echoed; stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, ".agentic-ops", "profile.local.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("failed initialization must not create a new profile overlay: %v", err)
+	}
 }
 
 func TestWorkspaceInitDoesNotCloneWhenSourceRootExists(t *testing.T) {
@@ -131,7 +172,7 @@ func TestWorkspaceInitDoesNotCloneWhenSourceRootExists(t *testing.T) {
 	writeCLITestFile(t, filepath.Join(sourceRoot, "README.md"), "# Existing\n")
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	t.Setenv("AGENTIC_OPS_HOME", installDir)
-	restore := clihandlers.SetRunGitCloneForTest(func(repoURL string, targetPath string) error {
+	restore := clihandlers.SetRunGitCloneForTest(func(repoURL string, targetPath string, _ io.Writer) error {
 		t.Fatalf("git clone should not run for existing source root: %s %s", repoURL, targetPath)
 		return nil
 	})
@@ -146,6 +187,33 @@ func TestWorkspaceInitDoesNotCloneWhenSourceRootExists(t *testing.T) {
 	assertJSONField(t, stdout.String(), "source_root", sourceRoot)
 	assertJSONField(t, stdout.String(), "source_checkout_status", "existing")
 	assertJSONField(t, stdout.String(), "source_repo", "tapdata/tapdata")
+}
+
+func TestWorkspaceInitRepairsIncompleteManagedWorkspaceWithoutConfirmation(t *testing.T) {
+	root := t.TempDir()
+	installDir := t.TempDir()
+	sourceRoot := filepath.Join(root, "repos", "tapdata")
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "profile.local.yaml"), "workspace: tapdata\n")
+	writeCLITestFile(t, filepath.Join(sourceRoot, ".git", "HEAD"), "ref: refs/heads/main\n")
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", installDir)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "workspace_repaired", true)
+	for _, path := range []string{
+		filepath.Join(root, ".agentic-ops", "profile.local.yaml"),
+		filepath.Join(root, ".agentic-ops", "agent.json"),
+		filepath.Join(root, "AGENTS.md"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("repaired workspace missing %s: %v", path, err)
+		}
+	}
 }
 
 func TestWorkspaceInitRejectsUnsupportedJiraTokenEnvName(t *testing.T) {
@@ -586,6 +654,22 @@ func TestAgentInitInfersWorkspaceFromAgentConfig(t *testing.T) {
 	}
 }
 
+func TestAgentInitRejectsIncompleteWorkspace(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "profile.local.yaml"), "workspace: tapdata\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"agent", "init"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "workspace_initialization_incomplete")
+	assertJSONField(t, stdout.String(), "next_action", "workspace_init")
+	assertJSONField(t, stdout.String(), "workspace", "tapdata")
+}
+
 func TestTaskCommandsInferWorkspaceFromAgentConfig(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
@@ -623,6 +707,13 @@ func TestWorkspaceInitRejectsMismatchedJiraProjectOverride(t *testing.T) {
 }
 
 func TestAgentInitOutputsTaskModel(t *testing.T) {
+	root := t.TempDir()
+	sourceRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd error = %v", err)
+	}
+	writeCompleteWorkspaceState(t, root, "tapstate", sourceRoot)
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"agent", "init", "--workspace", "tapstate"}, &stdout, &stderr)

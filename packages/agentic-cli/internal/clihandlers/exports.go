@@ -180,7 +180,7 @@ func SetGitHubClientForTest(client github.Client) func() {
 	return func() { gitHubClient = original }
 }
 
-func SetRunGitCloneForTest(fn func(string, string) error) func() {
+func SetRunGitCloneForTest(fn func(string, string, io.Writer) error) func() {
 	original := runGitClone
 	runGitClone = fn
 	return func() { runGitClone = original }

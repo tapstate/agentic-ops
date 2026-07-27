@@ -38,7 +38,7 @@ output:
     type: array
 failure:
   codes:
-    - workspace_not_initialized
+    - workspace_initialization_incomplete
     - capability_init_failed
 side_effects:
   - may_write_workspace_state

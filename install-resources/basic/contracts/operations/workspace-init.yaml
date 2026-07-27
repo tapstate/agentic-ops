@@ -82,6 +82,12 @@ output:
     required: false
   jira_config_next_action:
     type: string
+  workspace_repaired:
+    type: boolean
+    required: false
+  workspace_repairable:
+    type: boolean
+    required: false
   next_action:
     type: string
 failure:
@@ -97,6 +103,8 @@ failure:
     - source_checkout_failed
     - workspace_root_failed
     - workspace_init_failed
+    - workspace_profile_failed
+    - workspace_profile_write_failed
     - jira_config_failed
     - agent_config_failed
     - agent_instructions_failed

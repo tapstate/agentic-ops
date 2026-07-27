@@ -14,8 +14,16 @@ func TestPreflightOutputsEnvironmentChecks(t *testing.T) {
 	withCommandAvailabilityForTest(t, func(name string) bool {
 		return name == "git" || name == "gh"
 	})
+	root := t.TempDir()
 	installDir := t.TempDir()
+	sourceRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd error = %v", err)
+	}
+	writeCompleteWorkspaceState(t, root, "tapstate", sourceRoot)
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	t.Setenv("AGENTIC_OPS_HOME", installDir)
+	t.Setenv("AGENTIC_OPS_JIRA_ADAPTER", "fake")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"preflight", "--workspace", "tapstate"}, &stdout, &stderr)
@@ -33,14 +41,23 @@ func TestPreflightOutputsEnvironmentChecks(t *testing.T) {
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "github_cli", "status"}, "ok")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "github_auth", "status"}, "skipped")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "profile", "status"}, "ok")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "workspace", "status"}, "ok")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "current_directory", "status"}, "ok")
-	assertJSONField(t, stdout.String(), "next_action", "workspace_init")
+	assertJSONField(t, stdout.String(), "next_action", "list_tasks")
 }
 
 func TestPreflightReportsMissingGit(t *testing.T) {
 	withCommandAvailabilityForTest(t, func(name string) bool {
 		return name == "gh"
 	})
+	root := t.TempDir()
+	sourceRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd error = %v", err)
+	}
+	writeCompleteWorkspaceState(t, root, "tapstate", sourceRoot)
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_JIRA_ADAPTER", "fake")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"preflight", "--workspace", "tapstate"}, &stdout, &stderr)
@@ -64,14 +81,17 @@ func TestPreflightReportsProfileFailure(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "status", "failed")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "profile", "status"}, "failed")
-	assertJSONField(t, stdout.String(), "next_action", "fix_environment")
+	assertJSONField(t, stdout.String(), "next_action", "workspace_init")
 }
 
 func TestPreflightReportsCurrentDirectoryMismatch(t *testing.T) {
 	withCommandAvailabilityForTest(t, func(name string) bool {
 		return true
 	})
-	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", t.TempDir())
+	root := t.TempDir()
+	writeCompleteWorkspaceState(t, root, "tapstate", filepath.Join(root, "src"))
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_JIRA_ADAPTER", "fake")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"preflight", "--workspace", "tapstate"}, &stdout, &stderr)
@@ -91,10 +111,11 @@ func TestPreflightReportsMissingJiraTokenEnv(t *testing.T) {
 	installDir := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	t.Setenv("AGENTIC_OPS_HOME", installDir)
-	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
-		t.Fatalf("MkdirAll source root error = %v", err)
+	sourceRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd error = %v", err)
 	}
-	t.Chdir(filepath.Join(root, "src"))
+	writeCompleteWorkspaceState(t, root, "tapstate", sourceRoot)
 	writeCLITestFile(t, filepath.Join(installDir, "user", "config.local.yaml"), "projects:\n  tapstate:\n    jira:\n      adapter: real\n      base_url: https://jira.example.test\n      email: lead@example.com\n")
 
 	var stdout bytes.Buffer
@@ -111,6 +132,53 @@ func TestPreflightReportsMissingJiraTokenEnv(t *testing.T) {
 	assertJSONField(t, stdout.String(), "jira_env_file", filepath.Join(installDir, "user", ".env"))
 	assertJSONField(t, stdout.String(), "jira_token_help_url", "https://id.atlassian.com/manage-profile/security/api-tokens")
 	assertJSONField(t, stdout.String(), "next_action", "set_jira_api_token")
+}
+
+func TestPreflightRejectsIncompleteWorkspace(t *testing.T) {
+	withCommandAvailabilityForTest(t, func(name string) bool {
+		return true
+	})
+	root := t.TempDir()
+	installDir := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", installDir)
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "profile.local.yaml"), "workspace: tapdata\nlocal:\n  source_root: "+filepath.Join(root, "repos", "tapdata")+"\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"preflight", "--workspace", "tapdata"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "status", "failed")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "workspace", "status"}, "failed")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "workspace", "code"}, "workspace_initialization_incomplete")
+	assertJSONField(t, stdout.String(), "next_action", "workspace_init")
+}
+
+func TestPreflightRejectsWorkspaceWithMissingSourceRoot(t *testing.T) {
+	withCommandAvailabilityForTest(t, func(name string) bool {
+		return true
+	})
+	root := t.TempDir()
+	installDir := t.TempDir()
+	sourceRoot := filepath.Join(root, "repos", "tapdata")
+	writeCompleteWorkspaceState(t, root, "tapdata", sourceRoot)
+	if err := os.RemoveAll(sourceRoot); err != nil {
+		t.Fatalf("RemoveAll source root error = %v", err)
+	}
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", installDir)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"preflight", "--workspace", "tapdata"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "status", "failed")
+	assertNestedJSONField(t, stdout.String(), []string{"checks", "workspace", "code"}, "workspace_initialization_incomplete")
+	assertJSONField(t, stdout.String(), "next_action", "workspace_init")
 }
 
 func TestDoctorOutputsLocalDiagnosticChecks(t *testing.T) {
@@ -245,10 +313,12 @@ func TestPreflightInfersWorkspaceFromAgentConfig(t *testing.T) {
 	})
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	if err := os.MkdirAll(filepath.Join(root, "tapdata"), 0o755); err != nil {
-		t.Fatalf("MkdirAll source root error = %v", err)
+	t.Setenv("AGENTIC_OPS_HOME", t.TempDir())
+	sourceRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd error = %v", err)
 	}
-	Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com"}, &bytes.Buffer{}, &bytes.Buffer{})
+	Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com", "--source-root", sourceRoot}, &bytes.Buffer{}, &bytes.Buffer{})
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"preflight"}, &stdout, &stderr)

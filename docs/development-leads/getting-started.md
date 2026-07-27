@@ -190,13 +190,15 @@ agentic-cli workspace init --project tapdata --jira-user <your-jira-email>
 agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --source-root /path/to/source
 ```
 
-如果 `source_root` 已存在且非空，初始化不会覆盖、拉取或切换分支；如果目录不存在或为空，初始化会执行 `git clone`。克隆失败时，先检查 GitHub SSH 权限，或使用 `--source-root` 指向已有本地源码目录。
+如果 `source_root` 已存在且非空，初始化不会覆盖、拉取或切换分支；如果目录不存在或为空，初始化会执行 `git clone`，并在终端持续显示下载进度。克隆失败时，先检查 GitHub SSH 权限，或使用 `--source-root` 指向已有本地源码目录。
 
-已有 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 或 AgenticOps 管理的 `AGENTS.md` 时，初始化会停止。确认覆盖后再执行：
+已有完整的 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 和 AgenticOps 管理的 `AGENTS.md` 时，初始化会停止。确认覆盖后再执行：
 
 ```sh
 agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --confirm-existing-config
 ```
+
+上一次初始化中断且只留下部分受管文件时，重新运行同一条 `workspace init` 命令会自动修复，不要求 `--confirm-existing-config`。初始化会先保存 Jira 本机配置和 token，再下载源码；源码下载失败不会丢失已经输入的 Jira 配置，也不会新建可被误认为初始化完成的 workspace overlay。
 
 初始化成功后重点看：
 
@@ -211,6 +213,8 @@ agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --con
 agentic-cli profile resolve --project tapdata
 agentic-cli preflight
 ```
+
+`agent init` 和 `preflight` 都会检查 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml`、`AGENTS.md` 管理块及 `source_root`。任何一项缺失时，工作空间都不会被标记为可接管任务，需重新运行 `workspace init` 完成修复。
 
 ## Jira 连接配置
 

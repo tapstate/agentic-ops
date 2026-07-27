@@ -75,6 +75,8 @@ AI 员工应把自然语言转换为 AgenticOps 操作，而不是直接操作 J
 
 项目 profile 可以提供默认 Jira base URL；真实 Jira adapter 的本地连接配置仍属于运行时配置，不直接依赖共享 profile。Jira Cloud `base_url` 必须使用站点根地址，例如 `https://tapdata.atlassian.net`，不得写成带 `/jira` 的地址。研发负责人初始化工作空间时应优先通过 `agentic-cli workspace init --project <project> --interactive` 进入交互式引导；非终端、脚本或 CI 场景使用 `--jira-user <email>` 参数形式，只有项目默认 URL 不适用时才补充 `--jira-base-url <url>`。AIAgent 应通过 `agentic-cli conf <key>` 读取配置，不直接解析 YAML 或 `.env`。应用配置集中在 `.agentic-ops/config.local.yaml` 或 `$AGENTIC_OPS_HOME/user/config.local.yaml`，按项目和模块分段；Jira API token 的持久化落点只有 `$AGENTIC_OPS_HOME/user/.env` 中的 `AGENTIC_OPS_JIRA_API_TOKEN`，不得写入 YAML、日志、事件或提交内容。缺少 Jira token 或 `jira_token_env_has_value=false` 时，必须引导研发负责人到 `https://id.atlassian.com/manage-profile/security/api-tokens` 创建 API token，并在输出的 `jira_env_file` 中设置 `AGENTIC_OPS_JIRA_API_TOKEN=<api-token>`。
 
+`agent init` 或 `preflight` 返回 `workspace_initialization_incomplete` 时，AIAgent 不得把 profile 可解析视为初始化成功，也不得继续 `list-tasks`。应要求研发负责人在项目 AI 工作空间重新运行 `agentic-cli workspace init --project <project> --interactive`；该命令会复用已经保存的 Jira 本机配置并修复未完成的工作空间。
+
 ## 5. 操作使用方式
 
 AI 员工必须优先通过 `agentic-cli` 调用操作。以下命令是标准操作入口；是否可用必须以当前工作空间预检、已安装版本和命令输出为准，不得把尚未可执行的目标接口描述为已实现能力：

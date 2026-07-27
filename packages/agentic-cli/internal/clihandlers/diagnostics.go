@@ -108,13 +108,16 @@ func runPreflight(args []string, stdout io.Writer) int {
 		"git":               checkCommandAvailable("git"),
 		"github_cli":        checkCommandAvailable("gh"),
 		"github_auth":       checkGitHubAuth(hasFlag(args, "--check-github")),
+		"workspace":         checkWorkspaceInitialization(workspaceName),
 		"profile":           checkProfile(workspaceName),
 		"jira_config":       checkJiraRuntimeConfig(workspaceName),
 		"current_directory": checkCurrentDirectoryAllowed(workspaceProfile),
 	}
 	status := statusFromChecks(checks)
-	nextAction := "workspace_init"
-	if status != "ok" {
+	nextAction := "list_tasks"
+	if checks["workspace"]["status"] == "failed" {
+		nextAction = "workspace_init"
+	} else if status != "ok" {
 		nextAction = "fix_environment"
 	}
 	result := output.Success("preflight", map[string]any{
@@ -127,13 +130,63 @@ func runPreflight(args []string, stdout io.Writer) int {
 		"checks":      checks,
 		"next_action": nextAction,
 	})
-	if checks["jira_config"]["code"] == "jira_api_token_missing" {
+	if checks["jira_config"]["code"] == "jira_api_token_missing" && checks["workspace"]["status"] == "ok" {
 		if runtimeConfig, err := resolveJiraRuntimeConfig(workspaceName); err == nil {
 			addJiraTokenDiagnostics(result, runtimeConfig)
 		}
 		result["next_action"] = "set_jira_api_token"
+	} else if checks["jira_config"]["code"] == "jira_config_missing" && checks["workspace"]["status"] == "ok" {
+		result["next_action"] = "workspace_init"
 	}
 	return writeJSON(stdout, result)
+}
+
+func checkWorkspaceInitialization(workspaceName string) map[string]string {
+	root, err := workspaceRoot()
+	if err != nil {
+		return map[string]string{"status": "failed", "code": "workspace_initialization_incomplete", "message": err.Error()}
+	}
+	info := workspace.Info{
+		Name: workspaceName,
+		Root: root,
+	}
+	if !workspaceConfigFilesComplete(info) {
+		return map[string]string{
+			"status":  "failed",
+			"code":    "workspace_initialization_incomplete",
+			"message": "工作空间缺少 .agentic-ops/agent.json、.agentic-ops/profile.local.yaml 或 AGENTS.md 管理块",
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "agent.json"))
+	if err != nil {
+		return map[string]string{"status": "failed", "code": "workspace_initialization_incomplete", "message": err.Error()}
+	}
+	var config agentConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return map[string]string{"status": "failed", "code": "workspace_initialization_incomplete", "message": "无法解析 .agentic-ops/agent.json: " + err.Error()}
+	}
+	configWorkspace := firstNonEmpty(config.Workspace, config.Project)
+	if configWorkspace != workspaceName {
+		return map[string]string{
+			"status":  "failed",
+			"code":    "workspace_initialization_incomplete",
+			"message": ".agentic-ops/agent.json 的 workspace 与当前项目不一致",
+		}
+	}
+	effective, err := resolveEffectiveProfile(workspaceName, root)
+	if err != nil {
+		return map[string]string{"status": "failed", "code": "workspace_initialization_incomplete", "message": err.Error()}
+	}
+	sourceRoot := workspace.ResolveProjectPath(effective.Local.SourceRoot, root)
+	stat, err := os.Stat(sourceRoot)
+	if err != nil || !stat.IsDir() {
+		message := "source_root 不是有效目录: " + sourceRoot
+		if err != nil {
+			message = "source_root " + sourceRoot + ": " + err.Error()
+		}
+		return map[string]string{"status": "failed", "code": "workspace_initialization_incomplete", "message": message}
+	}
+	return map[string]string{"status": "ok", "message": "workspace initialization complete", "source_root": sourceRoot}
 }
 
 func checkJiraRuntimeConfig(workspaceName string) map[string]string {
@@ -145,7 +198,7 @@ func checkJiraRuntimeConfig(workspaceName string) map[string]string {
 		if runtimeConfig.Adapter == "fake" && strings.TrimSpace(os.Getenv("AGENTIC_OPS_JIRA_ADAPTER")) == "fake" {
 			return map[string]string{"status": "ok", "message": "fake Jira adapter explicitly enabled", "source": runtimeConfig.Source}
 		}
-		return map[string]string{"status": "skipped", "message": "real Jira config not configured", "source": runtimeConfig.Source}
+		return map[string]string{"status": "failed", "message": "真实 Jira 配置未完成，请重新运行 workspace init --interactive", "code": "jira_config_missing", "source": runtimeConfig.Source}
 	}
 	if runtimeConfig.BaseURL == "" {
 		return map[string]string{"status": "failed", "message": "Jira base URL is required", "code": "jira_base_url_missing", "source": runtimeConfig.Source}

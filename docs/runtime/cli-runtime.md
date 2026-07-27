@@ -133,6 +133,8 @@ CLI 必须遵守：
 - GitHub 登录状态。
 - Jira 凭证配置。
 - 工作流配置完整性。
+- `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 和 `AGENTS.md` 管理块完整性。
+- `source_root` 是否存在。
 - 当前业务仓库与工作空间是否匹配。
 
 ## 8. 发布与修复

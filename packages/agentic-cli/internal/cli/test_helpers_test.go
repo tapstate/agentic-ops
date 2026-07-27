@@ -20,7 +20,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	restore := clihandlers.SetRunGitCloneForTest(func(repoURL string, targetPath string) error {
+	restore := clihandlers.SetRunGitCloneForTest(func(repoURL string, targetPath string, _ io.Writer) error {
 		if strings.TrimSpace(repoURL) == "" {
 			return fmt.Errorf("repo URL is required")
 		}
@@ -85,6 +85,34 @@ func writeCLITestFile(t *testing.T, path string, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile error = %v", err)
+	}
+}
+
+func writeCompleteWorkspaceState(t *testing.T, root string, workspaceName string, sourceRoot string) {
+	t.Helper()
+	if _, err := os.Stat(sourceRoot); errors.Is(err, os.ErrNotExist) {
+		writeCLITestFile(t, filepath.Join(sourceRoot, ".git", "HEAD"), "ref: refs/heads/main\n")
+	} else if err != nil {
+		t.Fatalf("Stat source root error = %v", err)
+	}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "profile.local.yaml"),
+		"workspace: "+workspaceName+"\n"+
+			"local:\n"+
+			"  workspace_root: "+root+"\n"+
+			"  source_root: "+sourceRoot+"\n"+
+			"  runs_dir: "+filepath.Join(root, ".agentic-ops", "runs")+"\n"+
+			"  run_logs_dir: "+filepath.Join(root, ".agentic-ops", "run-logs")+"\n"+
+			"  feedback_dir: "+filepath.Join(root, ".agentic-ops", "feedback")+"\n")
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "agent.json"),
+		`{"workspace":"`+workspaceName+`","project":"`+workspaceName+`"}`)
+	writeCLITestFile(t, filepath.Join(root, "AGENTS.md"),
+		"<!-- BEGIN AGENTICOPS MANAGED BLOCK -->\n"+
+			"# AgenticOps workspace instructions\n"+
+			"<!-- END AGENTICOPS MANAGED BLOCK -->\n")
+	for _, dir := range []string{"runs", "run-logs", "feedback"} {
+		if err := os.MkdirAll(filepath.Join(root, ".agentic-ops", dir), 0o755); err != nil {
+			t.Fatalf("MkdirAll %s error = %v", dir, err)
+		}
 	}
 }
 

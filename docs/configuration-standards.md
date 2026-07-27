@@ -54,6 +54,8 @@ projects:
 
 Jira Cloud `base_url` 必须使用站点根地址，例如 `https://tapdata.atlassian.net`，不得写成带 `/jira` 的地址。
 
+交互式初始化收到研发负责人确认的本机配置后，应先持久化非密钥配置和 secret，再执行可能耗时或失败的源码下载。workspace overlay、`agent.json` 和 `AGENTS.md` 管理块只在源码准备完成后写入，避免外部操作失败造成“配置丢失但工作空间看似已初始化”的半状态。
+
 ## 4. 统一读取入口
 
 外部脚本和 AIAgent 必须通过 `agentic-cli conf <key>` 读取 effective 配置，不直接解析 YAML 或 `.env`。
@@ -92,4 +94,5 @@ secret 原值默认不得输出。需要判断 secret 是否可用时，使用 `
 - `agentic-cli conf <key>` 的读取结果。
 - 依赖该配置的命令是否能按同一契约读取。
 - secret 不出现在 YAML、stdout、stderr、事件、日志或提交内容中。
+- 初始化在源码下载失败或中断时保留已确认的本机配置，并允许不带覆盖确认地修复不完整工作空间。
 - 文档示例中的 key、路径和默认值与 CLI 行为一致。

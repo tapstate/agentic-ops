@@ -84,6 +84,7 @@ AIAgent 不得依赖研发负责人个人 Obsidian wiki、长期记忆或上一�
 - 如果 AIAgent 无法读取手册，停止并提示安装或路径问题。
 - 如果 `agentic-cli` 不可用，提示重新安装或修复 PATH。
 - 如果 `workspace preflight` 失败，AIAgent 不能开始接管任务。
+- 如果 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml`、`AGENTS.md` 管理块或 `source_root` 缺失，`agent init` 返回 `workspace_initialization_incomplete`，AIAgent 必须引导研发负责人重新运行 `workspace init`。
 
 ### 验收标准
 

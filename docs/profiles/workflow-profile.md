@@ -146,7 +146,8 @@ templates:
 - `Profile.jira.user` 在共享 profile 中只能使用默认占位值；`workspace init` 会使用研发负责人提供的 Jira 用户写入 `.agentic-ops/profile.local.yaml`。
 - `Profile.jira.base_url` 可以提供项目默认 Jira 地址；Jira Cloud 使用站点根地址，例如 `https://tapdata.atlassian.net`，不包含 `/jira`。真实连接配置必须写入运行时本地配置或进程环境变量中：应用配置集中在 `.agentic-ops/config.local.yaml` 或 `$AGENTIC_OPS_HOME/user/config.local.yaml`；Jira API token 的持久化落点只有 `$AGENTIC_OPS_HOME/user/.env` 中的 `AGENTIC_OPS_JIRA_API_TOKEN`。外部脚本和 AIAgent 读取配置时使用 `agentic-cli conf <key>`。
 - `Profile.local.*` 在共享 profile 中只能使用 `<project-ai-workspace>` 这类占位值；`workspace init` 会把本地路径写入 `.agentic-ops/profile.local.yaml`。源码目录默认是 `<project-ai-workspace>/repos/<project>`，目录不存在或为空时初始化会从 `github.repositories.default` 下载项目代码；目录已存在且非空时直接复用。研发负责人可以通过 `--source-root` 显式确认其它目录。
-- 如果项目 AI 工作空间已有 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 或 AgenticOps 管理的 `AGENTS.md` 配置块，`workspace init` 必须停止并要求研发负责人确认；确认覆盖时使用 `--confirm-existing-config`。
+- 如果项目 AI 工作空间已有完整的 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 和 AgenticOps 管理的 `AGENTS.md` 配置块，`workspace init` 必须停止并要求研发负责人确认；确认覆盖时使用 `--confirm-existing-config`。只存在部分受管文件时视为上次初始化未完成，允许同项目初始化自动修复。
+- `workspace init` 必须先持久化已确认的 Jira 本机配置，再执行源码下载，最后写入 workspace overlay、`agent.json` 和 `AGENTS.md` 管理块。源码下载失败时不得丢失用户已输入的 Jira token，也不得新建表示初始化完成的 overlay。
 - `Profile` 必须说明关键专业审查节点如何映射到标准字段、Jira 状态、拉取请求审查、CI 或人工确认。
 - `Profile` 必须说明失败后允许重试还是必须重做前序阶段。
 - `Profile` 必须能被 `agentic-cli preflight` 校验。

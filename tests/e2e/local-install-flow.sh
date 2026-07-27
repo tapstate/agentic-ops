@@ -47,8 +47,20 @@ cmd="$home_dir/.agentic-ops/bin/agentic-cli"
 test -x "$cmd"
 test -f "$home_dir/.agentic-ops/install-resources/basic/projects/tapdata/profile.yaml"
 
+project_repo="$tmp_dir/tapdata-project"
+mkdir -p "$project_repo"
+git -C "$project_repo" init -b main >/dev/null
+git -C "$project_repo" config user.email agentic-ops-test@example.test
+git -C "$project_repo" config user.name "AgenticOps Test"
+printf '# Tapdata project fixture\n' > "$project_repo/README.md"
+git -C "$project_repo" add README.md
+git -C "$project_repo" commit -m "test project source" >/dev/null
+
+personal_profile="$home_dir/.agentic-ops/user/projects/tapdata/profile.local.yaml"
+mkdir -p "$(dirname "$personal_profile")"
+printf 'github:\n  repositories:\n    default: %s\n' "$project_repo" > "$personal_profile"
+
 cd "$workspace_root"
-mkdir -p "$workspace_root/repos/tapdata"
 "$cmd" workspace init --project tapdata --jira-user lead@example.com | grep '"operation":"workspace_init"'
 "$cmd" agent init | grep '"workspace":"tapdata"'
 AGENTIC_OPS_WORKSPACE_ROOT="$workspace_root" "$cmd" preflight | grep '"workspace":"tapdata"'
@@ -56,6 +68,8 @@ AGENTIC_OPS_WORKSPACE_ROOT="$workspace_root" "$cmd" profile resolve --project ta
 
 test -f "$workspace_root/.agentic-ops/profile.local.yaml"
 test ! -f "$workspace_root/.agentic-ops/profiles/tapdata.yaml"
+test -d "$workspace_root/repos/tapdata/.git"
+test -f "$workspace_root/repos/tapdata/README.md"
 grep "source_root: $workspace_root/repos/tapdata" "$workspace_root/.agentic-ops/profile.local.yaml" >/dev/null
 maintainer_path_pattern='/Users/lhs/works/'"spaces"
 local_user_pattern='user: lead@'"example.com"
