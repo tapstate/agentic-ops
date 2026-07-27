@@ -176,7 +176,7 @@ agentic-cli workspace init --project tapdata --interactive
 - 项目配置项，例如 `tapdata`。
 - Jira 邮箱；Tapdata 的 Jira base URL 默认是 `https://tapdata.atlassian.net`。
 - token 环境变量名，默认 `AGENTIC_OPS_JIRA_API_TOKEN`；这里填变量名，不填 Jira API token 值。
-- 本地源码目录；默认是当前工作空间下的 `repos/<project>`。
+- 本地源码目录；默认是当前工作空间下的 `repos/<project>`，目录不存在时初始化会从项目 profile 的默认 GitHub 仓库下载代码。
 
 脚本、CI 或非终端环境使用参数形式：
 
@@ -190,6 +190,8 @@ agentic-cli workspace init --project tapdata --jira-user <your-jira-email>
 agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --source-root /path/to/source
 ```
 
+如果 `source_root` 已存在且非空，初始化不会覆盖、拉取或切换分支；如果目录不存在或为空，初始化会执行 `git clone`。克隆失败时，先检查 GitHub SSH 权限，或使用 `--source-root` 指向已有本地源码目录。
+
 已有 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 或 AgenticOps 管理的 `AGENTS.md` 时，初始化会停止。确认覆盖后再执行：
 
 ```sh
@@ -199,6 +201,7 @@ agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --con
 初始化成功后重点看：
 
 - `jira_config_status`：`configured`、`needs_token_env` 或 `needs_configuration`。
+- `source_checkout_status`：`cloned` 表示已下载源码，`existing` 表示复用了已有源码目录。
 - `profile_overlay`：当前工作空间的 `.agentic-ops/profile.local.yaml`。
 - `agent_instructions`：当前工作空间的 `AGENTS.md`。
 

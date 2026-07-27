@@ -95,6 +95,7 @@ agentic-cli --version
 
 - 项目配置项，例如 `tapdata`。
 - Jira 用户，例如 `harsen@tapdata.io`。
+- 本机可以访问项目 GitHub 仓库；默认源码目录不存在时，初始化会下载项目代码到当前工作空间的 `repos/<project>`。
 
 在当前项目 AI 工作空间目录中执行：
 
@@ -102,7 +103,7 @@ agentic-cli --version
 agentic-cli workspace init --project tapdata --jira-user harsen@tapdata.io
 ```
 
-初始化时只要求研发负责人选择项目配置项。以 `tapdata` 为例，Codex 应加载当前 AgenticOps 版本中的 `install-resources/basic/profiles/tapdata.yaml`，再从该 profile 中读取 Jira project、Jira 到代码仓库的映射、本地路径和工作流配置。`--jira-project` 只在研发负责人明确要求校验某个 Jira project 时使用。
+初始化时只要求研发负责人选择项目配置项。以 `tapdata` 为例，Codex 应加载当前 AgenticOps 版本中的 `install-resources/basic/projects/tapdata/profile.yaml`，再从该 profile 中读取 Jira project、Jira 到代码仓库的映射、本地路径和工作流配置。`--jira-project` 只在研发负责人明确要求校验某个 Jira project 时使用。
 
 ### 3. 按全局指引启用 AgenticOps
 

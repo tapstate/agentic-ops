@@ -180,6 +180,12 @@ func SetGitHubClientForTest(client github.Client) func() {
 	return func() { gitHubClient = original }
 }
 
+func SetRunGitCloneForTest(fn func(string, string) error) func() {
+	original := runGitClone
+	runGitClone = fn
+	return func() { runGitClone = original }
+}
+
 func SetJiraClientSelectorForTest(fn func(string, profile.Profile) (JiraClientSelection, error)) func() {
 	original := selectJiraClient
 	selectJiraClient = fn

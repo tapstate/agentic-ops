@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/clihandlers"
 )
 
 func TestWorkspaceInitOutputsNextAction(t *testing.T) {
@@ -90,6 +92,61 @@ func TestWorkspaceInitWritesPersonalConfigAndEnvWhenBaseURLProvided(t *testing.T
 	if !strings.Contains(string(envData), "TAPDATA_JIRA_TOKEN=") {
 		t.Fatalf("agentic env file missing token placeholder: %s", string(envData))
 	}
+}
+
+func TestWorkspaceInitClonesDefaultRepositoryToSourceRoot(t *testing.T) {
+	root := t.TempDir()
+	installDir := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", installDir)
+	var clonedURL string
+	var clonedTarget string
+	restore := clihandlers.SetRunGitCloneForTest(func(repoURL string, targetPath string) error {
+		clonedURL = repoURL
+		clonedTarget = targetPath
+		writeCLITestFile(t, filepath.Join(targetPath, ".git", "HEAD"), "ref: refs/heads/main\n")
+		return nil
+	})
+	defer restore()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	sourceRoot := filepath.Join(root, "repos", "tapdata")
+	assertJSONField(t, stdout.String(), "source_root", sourceRoot)
+	assertJSONField(t, stdout.String(), "source_repo", "tapdata/tapdata")
+	assertJSONField(t, stdout.String(), "source_repo_url", "git@github.com:tapdata/tapdata.git")
+	assertJSONField(t, stdout.String(), "source_checkout_status", "cloned")
+	if clonedURL != "git@github.com:tapdata/tapdata.git" || clonedTarget != sourceRoot {
+		t.Fatalf("clone = (%s, %s), want (%s, %s)", clonedURL, clonedTarget, "git@github.com:tapdata/tapdata.git", sourceRoot)
+	}
+}
+
+func TestWorkspaceInitDoesNotCloneWhenSourceRootExists(t *testing.T) {
+	root := t.TempDir()
+	installDir := t.TempDir()
+	sourceRoot := filepath.Join(root, "repos", "tapdata")
+	writeCLITestFile(t, filepath.Join(sourceRoot, "README.md"), "# Existing\n")
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	t.Setenv("AGENTIC_OPS_HOME", installDir)
+	restore := clihandlers.SetRunGitCloneForTest(func(repoURL string, targetPath string) error {
+		t.Fatalf("git clone should not run for existing source root: %s %s", repoURL, targetPath)
+		return nil
+	})
+	defer restore()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"workspace", "init", "--project", "tapdata", "--jira-user", "lead@example.com"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "source_root", sourceRoot)
+	assertJSONField(t, stdout.String(), "source_checkout_status", "existing")
+	assertJSONField(t, stdout.String(), "source_repo", "tapdata/tapdata")
 }
 
 func TestWorkspaceInitRejectsRawJiraTokenAsTokenEnv(t *testing.T) {

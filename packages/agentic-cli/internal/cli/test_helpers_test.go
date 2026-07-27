@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/clihandlers"
 	gitops "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/git"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/github"
@@ -17,6 +18,24 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestMain(m *testing.M) {
+	restore := clihandlers.SetRunGitCloneForTest(func(repoURL string, targetPath string) error {
+		if strings.TrimSpace(repoURL) == "" {
+			return fmt.Errorf("repo URL is required")
+		}
+		if strings.TrimSpace(targetPath) == "" {
+			return fmt.Errorf("target path is required")
+		}
+		if err := os.MkdirAll(filepath.Join(targetPath, ".git"), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(targetPath, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0o644)
+	})
+	code := m.Run()
+	restore()
+	os.Exit(code)
+}
 
 func assertJSONField(t *testing.T, raw string, key string, want any) {
 	t.Helper()

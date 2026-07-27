@@ -28,10 +28,11 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 5. CLI 从 workflow profile 读取 Jira project、默认 Jira base URL、JQL、字段映射、状态映射、目标仓库映射、GitHub 组织和本地路径占位默认值。
 6. 使用 `--interactive` 时，CLI 从参数、进程环境变量、当前工作空间配置和个人配置读取已有值，已配置项只需回车确认，缺失项才询问；非终端、脚本或 CI 场景使用完整参数形式。
 7. CLI 使用研发负责人提供或确认的 Jira 用户、当前项目 AI 工作空间目录和可选 `--source-root` 写入 `.agentic-ops/profile.local.yaml` 本地 overlay；未提供 `--source-root` 时默认使用 `<project-ai-workspace>/repos/<project>`。
-8. CLI 优先复用已有真实 Jira 本地配置；没有本地配置时，在提供、确认或读取到项目默认 Jira base URL 后写入个人配置 `$AGENTIC_OPS_HOME/user/config.local.yaml` 的 `projects.<project>.jira` 分段，只保存 `base_url`、`email` 和 `api_token_env`，不写入 Jira API token。
-9. CLI 创建工作空间事件和执行日志目录，例如 `<project-ai-workspace>/.agentic-ops/runs/`、`<project-ai-workspace>/.agentic-ops/run-logs/`。
-10. CLI 写入 `.agentic-ops/agent.json` 和根目录 `AGENTS.md`，让 AIAgent 能识别当前项目并知道如何调用 `agentic-cli`。
-11. CLI 运行工作空间预检。
+8. CLI 检查 `source_root`；目录不存在或为空时，从 workflow profile 的 `github.repositories.default` 下载项目代码；目录已存在且非空时直接复用，不覆盖、不拉取、不切换分支。
+9. CLI 优先复用已有真实 Jira 本地配置；没有本地配置时，在提供、确认或读取到项目默认 Jira base URL 后写入个人配置 `$AGENTIC_OPS_HOME/user/config.local.yaml` 的 `projects.<project>.jira` 分段，只保存 `base_url`、`email` 和 `api_token_env`，不写入 Jira API token。
+10. CLI 创建工作空间事件和执行日志目录，例如 `<project-ai-workspace>/.agentic-ops/runs/`、`<project-ai-workspace>/.agentic-ops/run-logs/`。
+11. CLI 写入 `.agentic-ops/agent.json` 和根目录 `AGENTS.md`，让 AIAgent 能识别当前项目并知道如何调用 `agentic-cli`。
+12. CLI 运行工作空间预检。
 
 ### 输出
 
@@ -42,6 +43,9 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
   "workspace": "tapstate",
   "workspace_root": "<project-ai-workspace>",
   "source_root": "<project-ai-workspace>/repos/tapstate",
+  "source_repo": "tapstate/example-repo",
+  "source_repo_url": "git@github.com:tapstate/example-repo.git",
+  "source_checkout_status": "cloned",
   "jira_user": "dev@example.com",
   "jira_project": "TAP",
   "profile_ref": "$HOME/.agentic-ops/install-resources/basic/projects/tapstate/profile.yaml",
@@ -65,8 +69,8 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 
 - Jira base URL 未提供且项目 profile 也没有默认值时，初始化继续完成，但输出 `jira_config_status: needs_configuration` 和补齐指引；后续 `list-tasks` 仍会在真实 Jira 配置缺失时阻断。
 - 非终端环境使用 `--interactive` 时，返回 `interactive_terminal_required`，要求改用完整参数形式。
-- GitHub 登录状态不可用时，提示执行 `gh auth login`。
-- 本地源码目录不存在时，提示克隆或配置正确路径。
+- GitHub 登录状态、SSH key 或仓库权限不可用导致源码下载失败时，返回 `source_checkout_failed`，提示修复 GitHub 权限或使用 `--source-root` 指向已有本地源码目录。
+- 本地源码目录已存在且非空时，初始化复用该目录，不覆盖、不拉取、不切换分支。
 - 已有本地 AgenticOps 配置时，停止并要求研发负责人确认；确认覆盖时使用 `--confirm-existing-config`。
 - 工作流配置不完整时，输出缺失字段。
 
@@ -74,9 +78,10 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 
 - 一个工作空间能绑定一个具体 Jira 空间和一组 GitHub 仓库。
 - 不同工作空间可以使用不同 Jira / GitHub / 代码仓库配置。
-- 初始化时研发负责人必须提供项目配置项和 Jira 用户，并确认项目 AI 工作空间目录；本地源码目录可通过 `--source-root` 显式指定，未指定时使用默认目录。
+- 初始化时研发负责人必须提供项目配置项和 Jira 用户，并确认项目 AI 工作空间目录；本地源码目录可通过 `--source-root` 显式指定，未指定时使用默认目录并下载项目代码。
 - 共享安装资源中的 workflow profile 不包含研发负责人个人 Jira 用户或本机绝对路径；本地 overlay 由 `workspace init` 写入项目 AI 工作空间。
 - 初始化后，项目 AI 工作空间中存在 `.agentic-ops/agent.json` 和 `AGENTS.md`。
+- 初始化后，默认 `source_root` 存在并可作为项目源码目录使用。
 - 工作空间产物写入项目 AI 工作空间，不写入 `~/.agentic-ops`。
 - Jira 空间到代码仓库的映射由工作流配置维护，AIAgent 不得在接管真实卡片时猜测目标仓库。
 - `agentic-cli preflight --workspace <name>` 能验证工作空间可用性。

@@ -43,6 +43,12 @@ output:
     type: string
   source_root:
     type: string
+  source_repo:
+    type: string
+  source_repo_url:
+    type: string
+  source_checkout_status:
+    type: string
   jira_user:
     type: string
   jira_project:
@@ -91,6 +97,7 @@ failure:
     - interactive_input_failed
     - existing_config_confirmation_required
     - invalid_jira_token_env_name
+    - source_checkout_failed
     - workspace_root_failed
     - workspace_init_failed
     - jira_config_failed
@@ -99,6 +106,7 @@ failure:
 side_effects:
   - may_write_workspace_state
   - may_write_personal_jira_config
+  - may_clone_source_repository
   - must_not_write_jira
 human_gate:
   required: false
