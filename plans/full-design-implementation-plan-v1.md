@@ -1,5 +1,7 @@
 # AgenticOps 完整设计实现计划
 
+> **历史计划说明（2026-07-28）：** 本文件保留完整设计实施过程和当时的完成记录，不作为当前能力清单。当前实现差距以 `plans/design-implementation-gap-todo-v1.md` 为准；事实判定规则见 `docs/architecture/fact-source-convergence-design.md`。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将 AgenticOps 从本地模拟流程升级为符合完整设计的受控 CLI 运行时。
@@ -1083,19 +1085,14 @@ Default `doctor` keeps local checks and does not access external Jira or GitHub 
 
 `doctor --check-github` runs the GitHub CLI auth check and reports failed status when authentication is unavailable.
 
-## 10. GitHub Release Publish Baseline
+## 10. GitHub Release 发布基线历史纠正
 
-- [x] **Step 1: Add publish script**
+2026-07-28 核对当前仓库后确认：
 
-Added `scripts/publish-release.sh <release_dir>` to publish a generated release directory through GitHub CLI.
-
-- [x] **Step 2: Create or update GitHub Release**
-
-The script checks whether the release already exists, creates it when absent, or uploads assets with `--clobber` when present.
-
-- [x] **Step 3: Verify publish flow without network**
-
-`scripts/test-build.sh` verifies the install resource build output and checksums without contacting GitHub.
+- 当前不存在 `scripts/publish-release.sh`。
+- `scripts/test-build.sh` 只验证安装资源构建和校验和，不验证 GitHub Release 发布。
+- 因此本节原有“发布脚本、创建或更新 GitHub Release、无网络发布测试均已完成”的结论无有效实现支撑，完成状态撤销。
+- 受控发布继续由 `plans/design-implementation-gap-todo-v1.md` Task 7 跟踪，并等待发布权责和审计位置决策。
 
 ## 11. Later Phases
 

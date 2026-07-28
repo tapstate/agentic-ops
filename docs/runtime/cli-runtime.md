@@ -53,7 +53,7 @@ packages/agentic-cli/
   testdata/
 ```
 
-以上是目标结构。当前已实现 `cli`、`config`、`contract`、`evidence`、`feedback`、`jira`、`output`、`policy` 和 `workspace` 的本地模拟流程；`git`、`github` 等真实集成目录仍属于后续阶段。
+以上目录用于表达稳定职责边界，不是阶段性进度清单。当前已实现 `git` 工作区只读检查、拉取请求准备计划、GitHub 拉取请求评论和 CI 状态读取、评论修复计划等受控基线。Git 推送、创建或更新拉取请求、合并和发布等高风险副作用仍必须经过策略门禁、人工确认和审计；未具备受控写入操作时不得由 AIAgent 或 shell 绕过。
 
 操作契约的机器可读源头在 `install-resources/basic/contracts/operations/`。Go CLI 可以在构建或运行时读取这些契约，但不在 package 内维护第二份契约源头。
 
