@@ -143,6 +143,27 @@ func TestWriteEvidenceRejectsMissingRun(t *testing.T) {
 	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
 }
 
+func TestWriteEvidenceRejectsCompletedRun(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+{"timestamp":"2026-07-21T10:31:00Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"release_agent","task_type":"task_release","current_stage":"completed","next_action":"task_audit_submitted","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"release_agent","gate_status":"passed"}
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "write_evidence")
+	assertJSONField(t, stdout.String(), "code", "local_state_mismatch")
+	if _, err := os.Stat(filepath.Join(root, ".agentic-ops", "runs", runID, "evidence.md")); !os.IsNotExist(err) {
+		t.Fatalf("evidence file should not be written for a completed run, stat err = %v", err)
+	}
+}
+
 func TestWriteEvidenceRequiresConfirmationForRealJiraComment(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)

@@ -1,7 +1,9 @@
 package clihandlers
 
 import (
+	"errors"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/config"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/contract"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/process"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
 	"os"
@@ -101,11 +103,33 @@ func repoProcessRegistry() (map[string]process.Process, error) {
 	return process.LoadRegistry(filepath.Join(repoBasicResourcesPath(root), "contracts", "processes"))
 }
 
+func repoOperationContract(operation string) (contract.Operation, error) {
+	root, err := repoRoot()
+	if err != nil {
+		return contract.Operation{}, err
+	}
+	path := filepath.Join(
+		repoBasicResourcesPath(root),
+		"contracts",
+		"operations",
+		strings.ReplaceAll(operation, "_", "-")+".yaml",
+	)
+	return contract.LoadFile(path)
+}
+
+func operationContractErrorCode(err error) string {
+	if errors.Is(err, os.ErrNotExist) {
+		return "operation_contract_not_found"
+	}
+	return "operation_contract_load_failed"
+}
+
 func defaultProcessRegistry() map[string]process.Process {
 	return map[string]process.Process{
 		"development_change_v1": {
-			ProcessID:  "development_change_v1",
-			EntryStage: "waiting_takeover",
+			ProcessID:   "development_change_v1",
+			TaskClasses: []string{"feature_change", "bug_fix", "technical_task"},
+			EntryStage:  "waiting_takeover",
 			Stages: []process.Stage{
 				{ID: "waiting_takeover"},
 				{ID: "implementation"},
@@ -113,14 +137,16 @@ func defaultProcessRegistry() map[string]process.Process {
 			},
 		},
 		"investigation_v1": {
-			ProcessID:  "investigation_v1",
-			EntryStage: "waiting_takeover",
-			Stages:     []process.Stage{{ID: "waiting_takeover"}, {ID: "investigation"}, {ID: "completed"}},
+			ProcessID:   "investigation_v1",
+			TaskClasses: []string{"investigation"},
+			EntryStage:  "waiting_takeover",
+			Stages:      []process.Stage{{ID: "waiting_takeover"}, {ID: "investigation"}, {ID: "completed"}},
 		},
 		"agenticops_improvement_v1": {
-			ProcessID:  "agenticops_improvement_v1",
-			EntryStage: "waiting_takeover",
-			Stages:     []process.Stage{{ID: "waiting_takeover"}, {ID: "implementation"}, {ID: "completed"}},
+			ProcessID:   "agenticops_improvement_v1",
+			TaskClasses: []string{"process_improvement"},
+			EntryStage:  "waiting_takeover",
+			Stages:      []process.Stage{{ID: "waiting_takeover"}, {ID: "implementation"}, {ID: "completed"}},
 		},
 	}
 }

@@ -64,7 +64,12 @@ set -e
 test "$in_progress_code" -eq 1
 printf '%s\n' "$in_progress_output" | grep '"code":"invalid_takeover_stage"'
 $cmd takeover-task TAP-123 --workspace tapstate | grep '"current_agent_id":"agentic-cli-local-agent"'
-$cmd resume-takeover --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"previous_stage":"takeover_started"'
+resume_output=$($cmd resume-takeover --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3)
+printf '%s\n' "$resume_output" | grep '"previous_stage":"takeover_started"'
+printf '%s\n' "$resume_output" | grep '"current_stage":"takeover_started"'
+printf '%s\n' "$resume_output" | grep '"next_action":"proceed"'
+printf '%s\n' "$resume_output" | grep '"target_repo":"tapstate/example-repo"'
+printf '%s\n' "$resume_output" | grep '"standard_process_stage":"waiting_takeover"'
 $cmd inspect-workspace --workspace tapstate --source-root . | grep '"operation":"inspect_workspace"'
 $cmd prepare-pr --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 --source-root . --base main --title "Fix TAP-123" | grep '"create_pr_gate_required":true'
 $cmd write-evidence --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"audit_submitted":true'

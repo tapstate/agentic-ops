@@ -47,13 +47,18 @@ rg -n '^- \[ \]' plans
 - `docs/architecture/full-design-implementation-design.md`
 
 **Current status:**
-- 本地模式已经按 `run_id` 读取历史事件，并校验 `workspace`、`issue_key`、`agent_id`、`current_agent_id`、`task_class` 和 `process_id`。
-- 本地状态缺失或不一致时已经返回稳定错误码。
-- 剩余缺口包括：真实 Jira 模式重新读取卡片并复核所有权、恢复状态补齐 `target_repo`，以及按 Standard Process Registry 校验当前阶段是否允许恢复。
+- 已通过统一 `RunContextReader` 按 `run_id` 恢复历史上下文，并校验不可变事实、最近任务阶段、终态和人工门禁。
+- fake 与真实 Jira 模式都会重新读取卡片；真实模式额外复核 `assignee` 和 `current_agent_id`。
+- 操作阶段由 `resume-takeover` 契约校验，Jira 状态映射后的业务阶段由 Standard Process Registry 校验。
+- 历史 `target_repo` 存在时必须与当前 Jira/profile 解析结果一致；旧 run 缺失时允许使用当前确定性映射补齐。
+- 可信任务级阻塞会生成中文 Jira 评论材料，并通过现有 `add-task-comment` 原子操作受控回写。
 
 **Implementation evidence:**
 - `packages/agentic-cli/internal/commands/resume-takeover/resume_takeover_cmd.go`
+- `packages/agentic-cli/internal/runcontext/context.go`
+- `packages/agentic-cli/internal/jira/resume_gate.go`
 - `packages/agentic-cli/internal/clihandlers/task.go`
+- `packages/agentic-cli/internal/clihandlers/resume_feedback.go`
 - `packages/agentic-cli/internal/cli/task_command_test.go`
 - `install-resources/basic/contracts/operations/resume-takeover.yaml`
 - `tests/e2e/local-fake-flow.sh`
@@ -61,9 +66,9 @@ rg -n '^- \[ \]' plans
 - [x] 实现按 `run_id` 读取历史事件并找出最近一次有效接管事件。
 - [x] 校验历史事件中的 `workspace` 和当前命令 `--workspace` 一致。
 - [x] 校验历史事件中存在 `issue_key`、`agent_id`、`current_agent_id`、`task_class` 和 `process_id`。
-- [ ] 在真实 Jira 模式下重新读取 Jira 卡片，校验 `assignee` 和 `current_agent_id` 仍匹配当前代理。
-- [ ] 从历史事件或当前 profile 映射恢复并校验 `target_repo`，不得在恢复时临场猜测。
-- [ ] 按 Standard Process Registry 校验历史 `current_stage` 是否允许恢复。
+- [x] 在真实 Jira 模式下重新读取 Jira 卡片，校验 `assignee` 和 `current_agent_id` 仍匹配当前代理。
+- [x] 从历史事件或当前 profile 映射恢复并校验 `target_repo`，不得在恢复时临场猜测。
+- [x] 分别按操作契约和 Standard Process Registry 校验操作阶段与 Jira 映射后的业务流程阶段。
 - [x] 当本地事件缺失或不一致时返回稳定错误码：`run_not_found`、`workspace_mismatch`、`local_state_mismatch`。
 - [x] 增加单元测试覆盖成功恢复、run 缺失、workspace 不匹配和本地状态不完整。
 - [x] 更新 e2e 验证恢复输出包含 `previous_stage`、`current_stage` 和 `next_action`。

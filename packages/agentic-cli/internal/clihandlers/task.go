@@ -2,12 +2,12 @@ package clihandlers
 
 import (
 	"context"
-	"errors"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/feedback"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/output"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/process"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/runcontext"
 	"io"
 	"os"
 	"path/filepath"
@@ -317,10 +317,13 @@ func runResumeTakeover(args []string, stdout io.Writer) int {
 	if err != nil {
 		return writeJSON(stdout, output.Failure("resume_takeover", "workspace_root_failed", "无法读取当前工作目录", "请在项目 AI 工作空间中重试"))
 	}
-	state, err := resumableRunState(root, workspaceName, runID)
+	state, err := runcontext.ReadFile(
+		filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"),
+		runcontext.Query{RunID: runID, Workspace: workspaceName, AgentID: agentID()},
+	)
 	if err != nil {
 		return writeJSON(stdout, output.FailureWithContext("resume_takeover", output.FailureContext{
-			Code:                resumeErrorCode(err),
+			Code:                runcontext.ErrorCode(err),
 			Message:             err.Error(),
 			RequiredHumanAction: "请检查 run_id、workspace 和本地事件日志是否对应同一次有效接管",
 			TaskType:            "task_takeover",
@@ -328,15 +331,117 @@ func runResumeTakeover(args []string, stdout io.Writer) int {
 			NextAction:          "ask_owner",
 		}))
 	}
+	workspaceProfile := takeoverProfile(workspaceName)
+	operationContract, err := repoOperationContract("resume_takeover")
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("resume_takeover", output.FailureContext{
+			Code:                operationContractErrorCode(err),
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查 resume-takeover 操作契约资源",
+			TaskType:            "task_takeover",
+			CurrentStage:        "resume_gate",
+			NextAction:          "ask_owner",
+		}))
+	}
+	processRegistry, err := repoProcessRegistry()
+	if err != nil {
+		processRegistry = defaultProcessRegistry()
+	}
+	selection, err := selectJiraClient(workspaceName, workspaceProfile)
+	if err != nil {
+		return writeJSON(stdout, output.Failure("resume_takeover", "jira_adapter_config_failed", err.Error(), "请检查 Jira adapter 配置"))
+	}
+	issue, ok, err := selection.Client.GetIssueByKey(context.Background(), workspaceName, state.IssueKey)
+	if err != nil {
+		return writeJSON(stdout, output.Failure("resume_takeover", "jira_issue_read_failed", err.Error(), "请检查 Jira adapter 配置和卡片权限"))
+	}
+	if !ok {
+		return writeJSON(stdout, output.Failure("resume_takeover", "issue_not_found", "未找到 Jira 卡片", "请检查 run_id 对应的 Jira 卡片"))
+	}
+	currentJiraUser, err := selection.Client.CurrentUser(context.Background())
+	if err != nil {
+		return writeJSON(stdout, output.Failure("resume_takeover", "jira_current_user_failed", err.Error(), "请检查 Jira adapter 登录状态"))
+	}
+	decision := jira.ValidateResume(jira.ResumeInput{
+		Context:         state,
+		Issue:           issue,
+		CurrentUser:     currentJiraUser,
+		AgentID:         agentID(),
+		AdapterMode:     selection.Mode,
+		Profile:         workspaceProfile,
+		Contract:        operationContract,
+		ProcessRegistry: processRegistry,
+	})
+	if !decision.OK {
+		jiraFeedback, feedbackErr := writeResumeFeedback(root, state, decision)
+		if feedbackErr != nil {
+			return writeJSON(stdout, output.FailureWithContext("resume_takeover", output.FailureContext{
+				Code:                "feedback_write_failed",
+				Message:             feedbackErr.Error(),
+				RequiredHumanAction: "请检查工作空间 runs 目录权限",
+				TaskType:            "task_takeover",
+				CurrentStage:        state.CurrentStage,
+				NextAction:          "ask_owner",
+			}))
+		}
+		nextAction := "ask_owner"
+		if jiraFeedback.Required {
+			nextAction = jiraFeedback.NextAction
+		}
+		_ = appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
+			RunID:               runID,
+			IssueKey:            state.IssueKey,
+			TaskType:            "task_takeover",
+			Operation:           "resume_takeover",
+			CurrentStage:        "resume_gate",
+			NextAction:          nextAction,
+			AgentID:             state.AgentID,
+			CurrentAgentID:      state.CurrentAgentID,
+			TargetRepo:          state.TargetRepo,
+			TaskClass:           state.TaskClass,
+			ProcessID:           state.ProcessID,
+			OK:                  false,
+			Code:                decision.Code,
+			Gate:                "resume_takeover",
+			GateStatus:          "blocked",
+			HumanGate:           true,
+			RequiresHumanAction: true,
+		})
+		result := output.FailureWithContext("resume_takeover", output.FailureContext{
+			Code:                decision.Code,
+			Message:             decision.Message,
+			RequiredHumanAction: decision.RequiredHumanAction,
+			TaskType:            "task_takeover",
+			CurrentStage:        state.CurrentStage,
+			NextAction:          nextAction,
+		})
+		result["workspace"] = workspaceName
+		result["run_id"] = runID
+		result["issue_key"] = state.IssueKey
+		result["task_class"] = state.TaskClass
+		result["process_id"] = state.ProcessID
+		result["target_repo"] = state.TargetRepo
+		if decision.StandardProcessStage != "" {
+			result["standard_process_stage"] = decision.StandardProcessStage
+		}
+		if jiraFeedback.Required {
+			result["jira_feedback_required"] = true
+			result["jira_feedback_write_allowed"] = jiraFeedback.WriteAllowed
+			result["jira_feedback_file"] = jiraFeedback.File
+			result["jira_feedback_category"] = jiraFeedback.Category
+		}
+		return writeJSON(stdout, result)
+	}
 	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
 		RunID:          runID,
 		IssueKey:       state.IssueKey,
 		TaskType:       "task_takeover",
 		Operation:      "resume_takeover",
-		CurrentStage:   "takeover_resumed",
-		NextAction:     "continue_development",
+		CurrentStage:   state.CurrentStage,
+		NextAction:     state.NextAction,
 		AgentID:        state.AgentID,
 		CurrentAgentID: state.CurrentAgentID,
+		TargetRepo:     decision.TargetRepo,
 		TaskClass:      state.TaskClass,
 		ProcessID:      state.ProcessID,
 		OK:             true,
@@ -346,86 +451,20 @@ func runResumeTakeover(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.Failure("resume_takeover", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 	}
 	return writeJSON(stdout, output.Success("resume_takeover", map[string]any{
-		"workspace":        workspaceName,
-		"run_id":           runID,
-		"issue_key":        state.IssueKey,
-		"task_type":        "task_takeover",
-		"agent_id":         state.AgentID,
-		"current_agent_id": state.CurrentAgentID,
-		"task_class":       state.TaskClass,
-		"process_id":       state.ProcessID,
-		"previous_stage":   state.PreviousStage,
-		"current_stage":    "takeover_resumed",
-		"next_action":      "continue_development",
+		"workspace":              workspaceName,
+		"run_id":                 runID,
+		"issue_key":              state.IssueKey,
+		"task_type":              "task_takeover",
+		"agent_id":               state.AgentID,
+		"current_agent_id":       state.CurrentAgentID,
+		"task_class":             state.TaskClass,
+		"process_id":             state.ProcessID,
+		"target_repo":            decision.TargetRepo,
+		"previous_stage":         state.CurrentStage,
+		"current_stage":          state.CurrentStage,
+		"standard_process_stage": decision.StandardProcessStage,
+		"next_action":            state.NextAction,
 	}))
-}
-
-type resumeRunState struct {
-	IssueKey       string
-	AgentID        string
-	CurrentAgentID string
-	TaskClass      string
-	ProcessID      string
-	PreviousStage  string
-}
-
-var errResumeRunNotFound = errors.New("run_not_found")
-
-var errResumeWorkspaceMismatch = errors.New("workspace_mismatch")
-
-var errResumeLocalStateMismatch = errors.New("local_state_mismatch")
-
-func resumableRunState(root string, workspaceName string, runID string) (resumeRunState, error) {
-	events, err := feedback.ReadEvents(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
-	if err != nil {
-		return resumeRunState{}, err
-	}
-	var latest *feedback.Event
-	for i := range events {
-		if events[i].RunID == runID && (events[i].Operation == "takeover_task" || events[i].Operation == "resume_takeover") {
-			latest = &events[i]
-		}
-	}
-	if latest == nil {
-		return resumeRunState{}, errResumeRunNotFound
-	}
-	if latest.Workspace != workspaceName {
-		return resumeRunState{}, errResumeWorkspaceMismatch
-	}
-	if latest.IssueKey == "" ||
-		latest.AgentID == "" ||
-		latest.CurrentAgentID == "" ||
-		latest.CurrentAgentID != latest.AgentID ||
-		latest.CurrentAgentID != agentID() ||
-		latest.TaskClass == "" ||
-		latest.ProcessID == "" ||
-		latest.CurrentStage == "" ||
-		!latest.OK ||
-		latest.CurrentStage == "completed" ||
-		latest.NextAction == "task_audit_submitted" {
-		return resumeRunState{}, errResumeLocalStateMismatch
-	}
-	return resumeRunState{
-		IssueKey:       latest.IssueKey,
-		AgentID:        latest.AgentID,
-		CurrentAgentID: latest.CurrentAgentID,
-		TaskClass:      latest.TaskClass,
-		ProcessID:      latest.ProcessID,
-		PreviousStage:  latest.CurrentStage,
-	}, nil
-}
-
-func resumeErrorCode(err error) string {
-	switch err {
-	case errResumeRunNotFound:
-		return "run_not_found"
-	case errResumeWorkspaceMismatch:
-		return "workspace_mismatch"
-	case errResumeLocalStateMismatch:
-		return "local_state_mismatch"
-	default:
-		return "event_read_failed"
-	}
 }
 
 func takeoverProfile(workspaceName string) profile.Profile {

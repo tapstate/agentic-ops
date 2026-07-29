@@ -19,17 +19,18 @@ agentic-cli resume-takeover --run-id TAP-123-takeover-20260721103012-a8f3 --work
 ### 前置条件
 
 - 已存在接管记录。
-- `run_id` 对应的 `issue`、`workspace`、`task_type`、`current_stage` 和目标仓库可验证。
-- 本地工作区仍能定位到相关代码状态。
+- `run_id` 对应的 `issue`、`workspace`、`agent_id`、`task_class`、`process_id` 和任务阶段可验证。
+- 当前 Jira 卡片和项目 profile 能确定负责人、代理绑定、状态和目标仓库。
 
 ### 主流程
 
 1. AIAgent 调用 `resume_takeover` 操作。
-2. CLI 读取 `run_id` 对应的 run summary 和 events。
-3. CLI 校验当前 `workspace`、`issue`、负责人、目标仓库和本地分支状态。
-4. CLI 返回上次阶段、已完成动作、失败原因、下一步建议。
-5. AIAgent 向研发工程师简短说明恢复点。
-6. AIAgent 从恢复点继续执行，而不是重新生成新的接管记录。
+2. CLI 从同一 `run_id` 的事件中恢复接管基准和最近任务阶段。
+3. CLI 读取当前 Jira 卡片和当前用户，复核 `assignee`、`current_agent_id` 和目标仓库。
+4. CLI 使用操作契约校验操作阶段，并把 Jira 状态映射为 Standard Process Registry 阶段进行校验。
+5. CLI 返回原任务阶段、标准流程阶段和下一步动作，不推进业务阶段。
+6. AIAgent 调用 `inspect-workspace` 检查当前本地代码状态，再向研发工程师说明恢复点。
+7. AIAgent 从返回的恢复点继续执行，不创建新的接管记录。
 
 ### 输出
 
@@ -40,46 +41,58 @@ agentic-cli resume-takeover --run-id TAP-123-takeover-20260721103012-a8f3 --work
   "workspace": "tapstate",
   "issue_key": "TAP-123",
   "run_id": "TAP-123-takeover-20260721103012-a8f3",
-  "previous_stage": "verification_failed",
-  "current_stage": "verification_failed",
-  "next_action": "fix_and_verify"
+  "target_repo": "tapstate/example-repo",
+  "previous_stage": "takeover_started",
+  "current_stage": "takeover_started",
+  "standard_process_stage": "waiting_takeover",
+  "next_action": "proceed"
 }
 ```
 
 ### 失败处理
 
-- `run_id` 不存在时，提示可恢复的最近 run。
+- `run_id` 不存在、workspace 不匹配或本地事件不可信时，只返回本地错误，不生成 Jira 评论材料。
 - 当前 `workspace` 与 `run_id` 不匹配时，拒绝恢复。
-- 本地代码状态不一致时，要求研发工程师确认。
-- 如果上次失败原因属于人工确认点，AIAgent 不能自动继续。
+- Jira `assignee` 已变化、代理绑定丢失或绑定其他 AIAgent 时，停止恢复，不自动抢回绑定。
+- 当前目标仓库与接管时不一致时，停止恢复，不允许同一个 `run_id` 静默切换仓库。
+- 操作阶段、任务分类、标准流程或 Jira 状态映射不一致时，停止并请求维护对应标准资产。
+- 上次失败原因属于人工确认点时，AIAgent 不能自动继续。
+- 可信任务级阻塞生成 `jira_feedback_file`。允许当前 AIAgent 写入时，经研发工程师确认后调用 `add-task-comment`；失去任务所有权时只把材料交给研发工程师或当前负责人。
 
 ### 验收标准
 
 - 恢复任务不会创建新的 `run_id`。
-- 恢复前必须校验 `workspace`、`issue`、负责人和目标仓库一致。
-- AIAgent 能说明从哪个阶段恢复。
+- 恢复前必须校验 `workspace`、`issue`、负责人、代理绑定、目标仓库、操作阶段和标准流程阶段。
+- AIAgent 能说明从哪个操作阶段、哪个标准流程阶段恢复。
 - 恢复过程继续写入同一个 run 的事件日志。
+- `resume-takeover` 本身不写 Jira。
+- 可信任务级阻塞能通过受控 `add-task-comment` 形成 Jira 轨迹。
 
 ### 保护行为
 
 - 恢复接管必须复用已有 `run_id`，不能创建新 `run_id`。
-- 恢复前必须校验 `workspace`、`issue`、负责人、目标仓库和本地代码状态。
+- 恢复前必须重新读取 Jira，校验 `workspace`、`issue`、负责人、代理绑定、目标仓库和流程阶段。
+- 本地代码状态由恢复成功后的 `inspect-workspace` 单独检查。
 - 上次停在人工确认点时，AIAgent 不能自动继续。
+- 恢复成功不能生成 `takeover_resumed` 业务阶段或固定改写 `next_action`。
 - 恢复过程必须继续写入同一个 run 的事件日志。
 
 ### 审核问题
 
 - `run_id` 是否存在且与当前工作空间匹配。
-- 当前 Jira 卡片负责人和目标仓库是否仍一致。
+- 当前 Jira 卡片负责人、代理绑定和目标仓库是否仍一致。
+- 操作阶段与标准流程阶段是否分别通过对应契约校验。
 - 本地代码状态是否允许继续，是否需要研发工程师确认。
-- AIAgent 是否清楚说明 previous stage、current stage 和 next action。
+- AIAgent 是否清楚说明 previous stage、current stage、standard process stage 和 next action。
+- 恢复阻塞是否按写入资格形成 Jira 反馈或交给当前负责人。
 
 ### 验收证据
 
 - `agentic-cli resume-takeover --run-id <run_id> --workspace <name>` 输出。
 - 同一 `run_id` 的 run summary 和 events。
-- 输出中的 `previous_stage`、`current_stage` 和 `next_action`。
+- 输出中的 `previous_stage`、`current_stage`、`standard_process_stage`、`target_repo` 和 `next_action`。
 - 恢复失败时的结构化失败记录。
+- 任务级阻塞对应的 Jira 评论材料和 `add_task_comment` 审计记录。
 
 ### 关联设计
 
@@ -87,3 +100,4 @@ agentic-cli resume-takeover --run-id TAP-123-takeover-20260721103012-a8f3 --work
 - `docs/processes/standard-process-registry.md`
 - `docs/workflows/feedback-loop.md`
 - `docs/architecture/full-design-implementation-design.md`
+- `docs/architecture/resume-takeover-recovery-gate-design.md`

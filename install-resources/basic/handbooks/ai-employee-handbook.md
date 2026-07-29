@@ -111,6 +111,8 @@ AI 员工不应直接依赖 Jira 字段名、Jira 状态名或 Jira `transition`
 
 `add-task-comment`、`update-task-description-sections` 和 `update-task-form` 是通用 Jira 原子写操作。它们只执行身份、代理所有权、配置映射、输入结构和真实写入确认门禁，不判断项目业务流程。AIAgent 必须先按项目资产决定写入内容和执行时机。
 
+`resume-takeover` 是只读 Jira 恢复门禁。成功时复用原 `run_id`，保留最近任务阶段和 `next_action`，并分别返回操作阶段与 `standard_process_stage`，不得把恢复动作本身当作业务阶段推进。失败输出中 `jira_feedback_required=true` 时，AIAgent 必须使用返回的 `jira_feedback_file` 和 `category=blocked` 形成 Jira 轨迹；`jira_feedback_write_allowed=true` 时仍需研发工程师确认后调用 `add-task-comment --run-id <run_id> --confirm-real-jira-write`，为 false 时只能把材料交给研发工程师或当前负责人，不得由失去所有权的 AIAgent 写 Jira。写入前先执行 `inspect-task` 检查评论中的稳定反馈编号，远端写入结果不明确时不得盲目重试。
+
 Jira Description 保存确认后的稳定任务契约；Jira Comment 保存分析、计划、决策、阻塞和证据轨迹；Jira Custom field 保存 profile 已映射的结构化结论；Worklog 只记录真实投入时间。不得用 Worklog 承载计划或人工确认，也不得覆盖已有 Comment 来改写历史。
 
 `agentic-cli tapdata branch-align` 是 Tapdata 项目级研发基础工具。命令支持 `list`、`status`、`plan`、`apply`，其中 `plan` 只读，`apply` 只在分支对齐计划无 blocked 行时切换本地多仓分支；命令不推送、不写 Jira、不写 GitHub、不创建拉取请求。

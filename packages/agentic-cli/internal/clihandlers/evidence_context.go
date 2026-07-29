@@ -2,9 +2,9 @@ package clihandlers
 
 import (
 	"fmt"
-	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/feedback"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/policy"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/runcontext"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,52 +21,29 @@ type evidenceRunContext struct {
 }
 
 func evidenceRunState(root string, workspaceName string, runID string) (evidenceRunContext, error) {
-	events, err := feedback.ReadEvents(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
+	context, err := runcontext.ReadFile(
+		filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"),
+		runcontext.Query{RunID: runID, Workspace: workspaceName, AgentID: agentID()},
+	)
 	if err != nil {
 		return evidenceRunContext{}, err
 	}
-	var latest *feedback.Event
-	targetRepo := ""
-	for i := range events {
-		if events[i].RunID == runID && (events[i].Operation == "takeover_task" || events[i].Operation == "resume_takeover") {
-			latest = &events[i]
-			if events[i].TargetRepo != "" {
-				targetRepo = events[i].TargetRepo
-			}
-		}
-	}
-	if latest == nil {
-		return evidenceRunContext{}, errResumeRunNotFound
-	}
-	if latest.Workspace != workspaceName {
-		return evidenceRunContext{}, errResumeWorkspaceMismatch
-	}
-	if latest.IssueKey == "" ||
-		latest.AgentID == "" ||
-		latest.CurrentAgentID == "" ||
-		latest.CurrentAgentID != latest.AgentID ||
-		latest.CurrentAgentID != agentID() ||
-		latest.TaskClass == "" ||
-		latest.ProcessID == "" ||
-		latest.CurrentStage == "" ||
-		!latest.OK ||
-		latest.CurrentStage == "completed" ||
-		latest.NextAction == "task_audit_submitted" {
-		return evidenceRunContext{}, errResumeLocalStateMismatch
+	if context.Terminal {
+		return evidenceRunContext{}, runcontext.ErrLocalStateMismatch
 	}
 	return evidenceRunContext{
-		IssueKey:       latest.IssueKey,
-		AgentID:        latest.AgentID,
-		CurrentAgentID: latest.CurrentAgentID,
-		TaskClass:      latest.TaskClass,
-		ProcessID:      latest.ProcessID,
-		PreviousStage:  latest.CurrentStage,
-		TargetRepo:     targetRepo,
+		IssueKey:       context.IssueKey,
+		AgentID:        context.AgentID,
+		CurrentAgentID: context.CurrentAgentID,
+		TaskClass:      context.TaskClass,
+		ProcessID:      context.ProcessID,
+		PreviousStage:  context.CurrentStage,
+		TargetRepo:     context.TargetRepo,
 	}, nil
 }
 
 func evidenceStateErrorCode(err error) string {
-	return resumeErrorCode(err)
+	return runcontext.ErrorCode(err)
 }
 
 func evidenceTemplate(workspaceProfile profile.Profile) (string, string, error) {
