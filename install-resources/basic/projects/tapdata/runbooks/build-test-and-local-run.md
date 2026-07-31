@@ -108,6 +108,14 @@ FE 当前入口类：
 io.tapdata.Application
 ```
 
+FE 和 TM 的本地运行均必须包含：
+
+```text
+app_type=DAAS
+```
+
+通过 TapData 启动器启动时，启动器会默认注入该环境变量；手动或自定义启动方式必须显式设置。
+
 常见配置名：
 
 ```text
@@ -115,6 +123,17 @@ app_type=DAAS
 TAPDATA_MONGO_URI=<mongo-uri>
 TAPDATA_WORK_DIR=.
 backend_url=<tm-api-url>
+```
+
+以下配置仅为结构和值的参考样例，不代表当前用户、工作空间或任务的真实运行配置。真实启动前，AIAgent 必须向用户展示拟使用的 FE 与 TM 配置，并要求用户修改或逐项确认；未完成确认时不得启动。FE 与 TM 必须连接同一个已确认的 MongoDB 环境，FE 的 `backend_url` 必须指向本次使用的 TM API。
+
+FE 参考配置：
+
+```text
+app_type=DAAS
+backend_url=http://localhost:3000/api/
+TAPDATA_MONGO_URI=mongodb://mongo/tapdata
+TAPDATA_WORK_DIR=.
 ```
 
 TM 当前入口类：
@@ -126,11 +145,21 @@ com.tapdata.tm.TMApplication
 常见配置名：
 
 ```text
+app_type=DAAS
 TAPDATA_MONGO_URI=<mongo-uri>
 tapdata_websocket_port=<unique-port>
 ```
 
-目标分支如果改用 Spring 配置项，应按目标分支配置执行。相同主机运行多个 TM 时，必须为每个实例分配不同的 HTTP 和 WebSocket 端口。
+TM 参考配置：
+
+```text
+app_type=DAAS
+spring.data.mongodb.default.uri=mongodb://mongo/tapdata
+spring.data.mongodb.log.uri=mongodb://mongo/tapdata
+spring.data.mongodb.obs.uri=mongodb://mongo/tapdata
+```
+
+用户确认时至少需要核对 MongoDB URI、FE `backend_url`、FE 与 TM 工作目录，以及 TM 的 HTTP 和 WebSocket 端口。目标分支如果改用 Spring 配置项，应按目标分支配置执行。相同主机运行多个 TM 时，必须为每个实例分配不同的 HTTP 和 WebSocket 端口。
 
 常见日志位置：
 
