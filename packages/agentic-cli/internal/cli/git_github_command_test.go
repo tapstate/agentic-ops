@@ -29,7 +29,7 @@ func TestInspectWorkspaceOutputsSafeGitSummary(t *testing.T) {
 	assertJSONField(t, stdout.String(), "branch", "feature/tap-123")
 	assertJSONField(t, stdout.String(), "dirty", true)
 	assertJSONField(t, stdout.String(), "current_stage", "workspace_inspected")
-	assertJSONField(t, stdout.String(), "next_action", "prepare_pr")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "prepare_pr")
 	if !strings.Contains(stdout.String(), `"README.md"`) || !strings.Contains(stdout.String(), `"new.txt"`) {
 		t.Fatalf("stdout missing changed files: %s", stdout.String())
 	}
@@ -89,7 +89,7 @@ func TestBranchAlignPlanOutputsTapdataAlignmentRows(t *testing.T) {
 	assertJSONField(t, stdout.String(), "blocked", false)
 	assertJSONNumber(t, stdout.String(), "rows_count", 8)
 	assertJSONField(t, stdout.String(), "current_stage", "branch_alignment_planned")
-	assertJSONField(t, stdout.String(), "next_action", "apply_branch_alignment")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "apply_branch_alignment")
 	if !strings.Contains(stdout.String(), `"target":"release-v4.9"`) || !strings.Contains(stdout.String(), `"repo":"tapdata-application"`) {
 		t.Fatalf("stdout missing expected alignment rows: %s", stdout.String())
 	}
@@ -162,7 +162,7 @@ func TestBranchAlignRequiresTapdataWorkspace(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "operation", "branch_align")
 	assertJSONField(t, stdout.String(), "code", "workspace_not_supported")
-	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner")
 }
 
 func TestPreparePROutputsPlanAndHumanGateForCreation(t *testing.T) {
@@ -181,7 +181,7 @@ func TestPreparePROutputsPlanAndHumanGateForCreation(t *testing.T) {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
 	assertJSONField(t, stdout.String(), "operation", "prepare_pr")
-	assertJSONField(t, stdout.String(), "run_id", runID)
+	assertJSONField(t, stdout.String(), "agentic_run_id", runID)
 	assertJSONField(t, stdout.String(), "issue_key", "TAP-123")
 	assertJSONField(t, stdout.String(), "branch", "feature/tap-123")
 	assertJSONField(t, stdout.String(), "base", "main")
@@ -190,7 +190,7 @@ func TestPreparePROutputsPlanAndHumanGateForCreation(t *testing.T) {
 	assertJSONField(t, stdout.String(), "create_pr_gate_required", true)
 	assertJSONField(t, stdout.String(), "git_push_gate_required", true)
 	assertJSONField(t, stdout.String(), "current_stage", "pr_plan_prepared")
-	assertJSONField(t, stdout.String(), "next_action", "ask_owner_to_push_and_create_pr")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner_to_push_and_create_pr")
 }
 
 func TestReadPRCommentsUsesGitHubReader(t *testing.T) {
@@ -209,7 +209,7 @@ func TestReadPRCommentsUsesGitHubReader(t *testing.T) {
 	assertJSONField(t, stdout.String(), "repo", "tapdata/tapdata")
 	assertJSONField(t, stdout.String(), "pr", "42")
 	assertJSONNumber(t, stdout.String(), "comments_count", 1)
-	assertJSONField(t, stdout.String(), "next_action", "classify_or_fix_pr_comments")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "classify_or_fix_pr_comments")
 	if !strings.Contains(stdout.String(), "请补测试") {
 		t.Fatalf("stdout missing comment body: %s", stdout.String())
 	}
@@ -230,7 +230,7 @@ func TestCheckCIStatusUsesGitHubReader(t *testing.T) {
 	assertJSONField(t, stdout.String(), "operation", "check_ci_status")
 	assertJSONField(t, stdout.String(), "status", "failed")
 	assertJSONNumber(t, stdout.String(), "failing_checks_count", 1)
-	assertJSONField(t, stdout.String(), "next_action", "fix_ci_failures")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "fix_ci_failures")
 	if !strings.Contains(stdout.String(), `"e2e"`) {
 		t.Fatalf("stdout missing failing check: %s", stdout.String())
 	}
@@ -252,7 +252,7 @@ func TestFixPRCommentsOutputsHumanGatedFixPlan(t *testing.T) {
 	assertJSONField(t, stdout.String(), "code", "policy_gate_required")
 	assertJSONField(t, stdout.String(), "comments_count", float64(2))
 	assertJSONField(t, stdout.String(), "current_stage", "pr_comment_fix_gate")
-	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner")
 	if !strings.Contains(stdout.String(), `"test"`) || !strings.Contains(stdout.String(), `"docs"`) {
 		t.Fatalf("stdout missing fix categories: %s", stdout.String())
 	}

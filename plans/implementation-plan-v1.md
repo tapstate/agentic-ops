@@ -22,9 +22,9 @@
 - 支持 Linux (linux-amd64 / linux-arm64)、macOS Intel (darwin-amd64) 和 macOS Apple Silicon (darwin-arm64)。
 - `~/.agentic-ops` 是全局安装和配置目录，不是具体项目或具体任务运行目录。
 - 项目运行目录是项目 AI 工作空间，例如 `tapstate` 或 `tapdata`。
-- AIAgent 不按固定角色工作，必须按 `task_type`、`current_stage`、`next_action` 推进。
+- AIAgent 不按固定角色工作，必须按 `task_type`、`current_stage`、`agentic_next_action` 推进。
 - AIAgent 执行 Jira 任务前必须先识别 `task_class`，再选择 Standard Process Registry 中的 `process_id`。
-- `agent_id` 是 AIAgent 唯一编号；`current_agent_id` 是任务运行中绑定字段，任务完成或交接结束后必须清理。
+- `agent_id` 是 AIAgent 唯一编号；`agentic_id` 是任务运行中绑定字段，任务完成或交接结束后必须清理。
 - 第一阶段操作名称集合以 `docs/contracts/operation-contract.md` 为文档权威。
 
 ---
@@ -105,7 +105,7 @@ agentic-cli workspace init --workspace <name>
 agentic-cli agent init --workspace <name>
 agentic-cli list-tasks --workspace <name>
 agentic-cli takeover-task <issue-key> --workspace <name>
-agentic-cli write-evidence --run-id <run_id> --workspace <name>
+agentic-cli write-evidence --run-id <agentic_run_id> --workspace <name>
 agentic-cli feedback report --workspace <name> --date <yyyy-mm-dd>
 ```
 
@@ -477,7 +477,7 @@ case "workspace":
 			"workspace":   readFlag(args, "--workspace", "default"),
 			"profile":     readFlag(args, "--workspace", "default"),
 			"runs_dir":    "<project-ai-workspace>/.agentic-ops/runs",
-			"next_action": "init_agent_capability",
+			"agentic_next_action": "init_agent_capability",
 		}))
 	}
 ```
@@ -508,7 +508,7 @@ func TestWorkspaceInitOutputsNextAction(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"operation":"workspace_init"`) {
 		t.Fatalf("stdout = %s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), `"next_action":"init_agent_capability"`) {
+	if !strings.Contains(stdout.String(), `"agentic_next_action":"init_agent_capability"`) {
 		t.Fatalf("stdout = %s", stdout.String())
 	}
 }
@@ -599,7 +599,7 @@ allowed_stages:
   - blocked
 required_inputs:
   - workspace
-  - run_id
+  - agentic_run_id
 side_effects:
   - may_write_jira_comment
   - may_write_local_event
@@ -769,7 +769,7 @@ case "list-tasks":
 	return writeJSON(stdout, output.Success("list_tasks", map[string]any{
 		"workspace":   workspaceName,
 		"tasks":       issues,
-		"next_action": "takeover_task",
+		"agentic_next_action": "takeover_task",
 	}))
 ```
 
@@ -832,12 +832,12 @@ import (
 type Event struct {
 	Timestamp           string `json:"timestamp"`
 	Workspace           string `json:"workspace"`
-	RunID               string `json:"run_id"`
+	RunID               string `json:"agentic_run_id"`
 	IssueKey            string `json:"issue_key,omitempty"`
 	TaskType            string `json:"task_type"`
 	Operation           string `json:"operation"`
 	CurrentStage        string `json:"current_stage"`
-	NextAction          string `json:"next_action"`
+	NextAction          string `json:"agentic_next_action"`
 	OK                  bool   `json:"ok"`
 	Code                string `json:"code,omitempty"`
 	HumanGate           bool   `json:"human_gate"`
@@ -921,11 +921,11 @@ case "takeover-task":
 	return writeJSON(stdout, output.Success("takeover_task", map[string]any{
 		"workspace":     workspaceName,
 		"issue_key":     issue.Key,
-		"run_id":        "TAP-123-takeover-20260721103012-a8f3",
+		"agentic_run_id":        "TAP-123-takeover-20260721103012-a8f3",
 		"task_type":     "task_takeover",
 		"current_stage": "takeover_started",
 		"target_repo":   issue.TargetRepo,
-		"next_action":   "proceed",
+		"agentic_next_action":   "proceed",
 	}))
 ```
 
@@ -939,7 +939,7 @@ func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d", code)
 	}
-	for _, want := range []string{`"operation":"takeover_task"`, `"task_type":"task_takeover"`, `"current_stage":"takeover_started"`, `"next_action":"proceed"`} {
+	for _, want := range []string{`"operation":"takeover_task"`, `"task_type":"task_takeover"`, `"current_stage":"takeover_started"`, `"agentic_next_action":"proceed"`} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %s: %s", want, stdout.String())
 		}
@@ -1027,13 +1027,13 @@ case "write-evidence":
 	workspaceName := readFlag(args, "--workspace", "default")
 	runID := readFlag(args, "--run-id", "")
 	if runID == "" {
-		return writeJSON(stdout, output.Failure("write_evidence", "missing_run_id", "缺少 run_id", "请提供 --run-id"))
+		return writeJSON(stdout, output.Failure("write_evidence", "missing_agentic_run_id", "缺少 agentic_run_id", "请提供 --run-id"))
 	}
 	return writeJSON(stdout, output.Success("write_evidence", map[string]any{
 		"workspace":     workspaceName,
-		"run_id":        runID,
+		"agentic_run_id":        runID,
 		"current_stage": "evidence_written",
-		"next_action":   "request_owner_confirmation",
+		"agentic_next_action":   "request_owner_confirmation",
 	}))
 ```
 
@@ -1047,7 +1047,7 @@ func TestWriteEvidenceRequiresRunID(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("code = %d", code)
 	}
-	if !strings.Contains(stdout.String(), `"code":"missing_run_id"`) {
+	if !strings.Contains(stdout.String(), `"code":"missing_agentic_run_id"`) {
 		t.Fatalf("stdout = %s", stdout.String())
 	}
 }
@@ -1149,7 +1149,7 @@ case "feedback":
 			"blocked":     0,
 			"failed":      0,
 			"report":      "<project-ai-workspace>/.agentic-ops/feedback/daily/" + date + ".md",
-			"next_action": "review_proposals",
+			"agentic_next_action": "review_proposals",
 		}))
 	}
 ```
@@ -1167,7 +1167,7 @@ func TestFeedbackReportOutputsReportPath(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"operation":"feedback_report"`) {
 		t.Fatalf("stdout = %s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), `"next_action":"review_proposals"`) {
+	if !strings.Contains(stdout.String(), `"agentic_next_action":"review_proposals"`) {
 		t.Fatalf("stdout = %s", stdout.String())
 	}
 }
@@ -1230,7 +1230,7 @@ SH
 
 chmod +x "$BIN_DIR/agentic-cli"
 
-printf '{"ok":true,"operation":"install","install_dir":"%s","bin":"%s","target":"%s-%s","version":"%s","next_action":"workspace_init"}\n' "$INSTALL_DIR" "$BIN_DIR/agentic-cli" "$target_os" "$target_arch" "$VERSION"
+printf '{"ok":true,"operation":"install","install_dir":"%s","bin":"%s","target":"%s-%s","version":"%s","agentic_next_action":"workspace_init"}\n' "$INSTALL_DIR" "$BIN_DIR/agentic-cli" "$target_os" "$target_arch" "$VERSION"
 ```
 
 This script is a first-stage bootstrap stub that does not install a real binary. Replace the embedded stub with managed clone install logic when install resources exist.
@@ -1320,8 +1320,8 @@ git commit -m "Test(e2e): add local fake flow"
 - `bash tests/e2e/local-fake-flow.sh` 通过。
 - 所有 CLI 成功输出包含 `ok: true` 和 `operation`。
 - 所有 CLI 失败输出包含 `ok: false`、`operation`、`code`、`message`。
-- fake takeover 输出包含 `run_id`、`task_type`、`current_stage`、`next_action`。
-- 后续真实 Jira 接管门禁必须校验 `assignee`、`current_agent_id`、`task_class` 和 `process_id`；当前本地模拟流程只验证本地最小闭环。
+- fake takeover 输出包含 `agentic_run_id`、`task_type`、`current_stage`、`agentic_next_action`。
+- 后续真实 Jira 接管门禁必须校验 `assignee`、`agentic_id`、`task_class` 和 `process_id`；当前本地模拟流程只验证本地最小闭环。
 - 没有真实 Jira / GitHub 写操作。
 - 没有 secrets、tokens、private keys 或原始敏感日志。
 
@@ -1338,9 +1338,9 @@ git commit -m "Test(e2e): add local fake flow"
 - task class 到 process id 的映射。
 - 负责人和 `assignee` 匹配门禁。
 - `agent_id` 初始化和持久化。
-- `current_agent_id` 接管写入、执行过程校验和完成清理。
-- `takeover_at`、`completed_at` 和 `current_agent_id_cleared` 回写。
-- AIAgent 结构化事件上报字段扩展，包括 `agent_id`、`current_agent_id`、`task_class`、`process_id` 和 `current_agent_id_cleared`。
+- `agentic_id` 接管写入、执行过程校验和完成清理。
+- `agentic_takeover_at`、`completed_at` 和 `agentic_id_cleared` 回写。
+- AIAgent 结构化事件上报字段扩展，包括 `agent_id`、`agentic_id`、`task_class`、`process_id` 和 `agentic_id_cleared`。
 
 不要在第一阶段本地模拟流程中混入真实 Jira 接入。
 

@@ -249,14 +249,15 @@ func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d", code)
 	}
-	for _, want := range []string{`"operation":"takeover_task"`, `"task_type":"task_takeover"`, `"current_stage":"takeover_started"`, `"next_action":"proceed"`} {
+	for _, want := range []string{`"operation":"takeover_task"`, `"task_type":"task_takeover"`, `"current_stage":"takeover_started"`, `"agentic_next_action":"proceed"`} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %s: %s", want, stdout.String())
 		}
 	}
 	assertJSONField(t, stdout.String(), "agent_id", "agentic-cli-local-agent")
-	assertJSONField(t, stdout.String(), "current_agent_id", "agentic-cli-local-agent")
-	assertJSONField(t, stdout.String(), "takeover_at", "2026-07-21T10:30:12Z")
+	assertJSONField(t, stdout.String(), "agentic_id", "agentic-cli-local-agent")
+	assertJSONField(t, stdout.String(), "agentic_takeover_at", "2026-07-21T10:30:12Z")
+	assertJSONField(t, stdout.String(), "agentic_heartbeat_at", "2026-07-21T10:30:12Z")
 	assertJSONField(t, stdout.String(), "task_class", "technical_task")
 	assertJSONField(t, stdout.String(), "task_class_source", "issue_type:Task")
 	assertJSONField(t, stdout.String(), "process_id", "development_change_v1")
@@ -281,8 +282,8 @@ func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"agent_id":"agentic-cli-local-agent"`,
-		`"current_agent_id":"agentic-cli-local-agent"`,
-		`"takeover_at":"2026-07-21T10:30:12Z"`,
+		`"agentic_id":"agentic-cli-local-agent"`,
+		`"agentic_takeover_at":"2026-07-21T10:30:12Z"`,
 		`"task_class":"technical_task"`,
 		`"process_id":"development_change_v1"`,
 	} {
@@ -305,7 +306,7 @@ func TestTakeoverTaskUsesTargetRepoFallback(t *testing.T) {
 	assertJSONField(t, stdout.String(), "issue_key", "TAP-MISSING-REPO")
 	assertJSONField(t, stdout.String(), "target_repo", "tapstate/tap-api")
 	assertJSONField(t, stdout.String(), "current_stage", "takeover_started")
-	assertJSONField(t, stdout.String(), "next_action", "proceed")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "proceed")
 	events, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
 	if err != nil {
 		t.Fatalf("ReadFile events error = %v", err)
@@ -330,7 +331,7 @@ func TestTakeoverTaskBlocksStatusOutsideProcessEntryStage(t *testing.T) {
 	assertJSONField(t, stdout.String(), "operation", "takeover_task")
 	assertJSONField(t, stdout.String(), "code", "invalid_takeover_stage")
 	assertJSONField(t, stdout.String(), "current_stage", "takeover_gate")
-	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner")
 }
 
 func TestInspectTaskOutputsFactsAndProjectAssetRefsWithoutSideEffects(t *testing.T) {
@@ -401,7 +402,7 @@ func TestTakeoverTaskDoesNotEnforceProjectAdmissionFields(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "operation", "takeover_task")
 	assertJSONField(t, stdout.String(), "current_stage", "takeover_started")
-	assertJSONField(t, stdout.String(), "next_action", "proceed")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "proceed")
 	if client.updatedKey != "TAP-123" {
 		t.Fatalf("updatedKey = %s", client.updatedKey)
 	}
@@ -419,8 +420,8 @@ func TestTakeoverTaskWritesAgentOwnershipCommentWhenProfileUsesJiraComment(t *te
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	issue := realModeIssue()
-	issue.CurrentAgentID = ""
-	issue.FormValues["current_agent_id"] = ""
+	issue.AgenticID = ""
+	issue.FormValues["agentic_id"] = ""
 	client := &recordingJiraClient{issue: issue}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
 
@@ -438,7 +439,7 @@ func TestTakeoverTaskWritesAgentOwnershipCommentWhenProfileUsesJiraComment(t *te
 	if client.commentKey != "TAP-123" {
 		t.Fatalf("commentKey = %s body = %s", client.commentKey, client.commentBody)
 	}
-	for _, want := range []string{"AgenticOps ownership", "current_agent_id: agentic-cli-local-agent", "takeover_at: 2026-07-21T10:30:12Z"} {
+	for _, want := range []string{"AgenticOps ownership", "agentic_id: agentic-cli-local-agent", "agentic_takeover_at: 2026-07-21T10:30:12Z"} {
 		if !strings.Contains(client.commentBody, want) {
 			t.Fatalf("ownership comment missing %q: %s", want, client.commentBody)
 		}
@@ -448,7 +449,7 @@ func TestTakeoverTaskWritesAgentOwnershipCommentWhenProfileUsesJiraComment(t *te
 func TestResumeTakeoverReturnsRunIDAndNextAction(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -457,11 +458,11 @@ func TestResumeTakeoverReturnsRunIDAndNextAction(t *testing.T) {
 		t.Fatalf("code = %d", code)
 	}
 	assertJSONField(t, stdout.String(), "operation", "resume_takeover")
-	assertJSONField(t, stdout.String(), "run_id", "run-1")
+	assertJSONField(t, stdout.String(), "agentic_run_id", "run-1")
 	assertJSONField(t, stdout.String(), "issue_key", "TAP-123")
 	assertJSONField(t, stdout.String(), "previous_stage", "takeover_started")
 	assertJSONField(t, stdout.String(), "current_stage", "takeover_started")
-	assertJSONField(t, stdout.String(), "next_action", "proceed")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "proceed")
 	assertJSONField(t, stdout.String(), "target_repo", "tapstate/example-repo")
 	assertJSONField(t, stdout.String(), "standard_process_stage", "waiting_takeover")
 }
@@ -469,7 +470,7 @@ func TestResumeTakeoverReturnsRunIDAndNextAction(t *testing.T) {
 func TestResumeTakeoverRechecksRealJiraWithoutWriting(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	client := &recordingJiraClient{issue: realModeBoundIssue()}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
@@ -493,7 +494,7 @@ func TestResumeTakeoverRechecksRealJiraWithoutWriting(t *testing.T) {
 func TestResumeTakeoverCreatesWritableJiraFeedbackForLostBinding(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	client := &recordingJiraClient{issue: realModeIssue()}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
@@ -509,7 +510,7 @@ func TestResumeTakeoverCreatesWritableJiraFeedbackForLostBinding(t *testing.T) {
 	assertJSONField(t, stdout.String(), "jira_feedback_required", true)
 	assertJSONField(t, stdout.String(), "jira_feedback_write_allowed", true)
 	assertJSONField(t, stdout.String(), "jira_feedback_category", "blocked")
-	assertJSONField(t, stdout.String(), "next_action", "add_task_comment")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "add_task_comment")
 	feedbackFile := filepath.Join(root, ".agentic-ops", "runs", "run-1", "resume-blocked-agent_binding_lost.md")
 	if _, err := os.Stat(feedbackFile); err != nil {
 		t.Fatalf("feedback file error = %v", err)
@@ -522,10 +523,10 @@ func TestResumeTakeoverCreatesWritableJiraFeedbackForLostBinding(t *testing.T) {
 func TestResumeTakeoverCreatesOwnerOnlyFeedbackForOwnershipConflict(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	issue := realModeBoundIssue()
-	issue.CurrentAgentID = "other-agent"
+	issue.AgenticID = "other-agent"
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: &recordingJiraClient{issue: issue}, Mode: "real"})
 
 	var stdout bytes.Buffer
@@ -538,13 +539,13 @@ func TestResumeTakeoverCreatesOwnerOnlyFeedbackForOwnershipConflict(t *testing.T
 	assertJSONField(t, stdout.String(), "code", "agent_ownership_conflict")
 	assertJSONField(t, stdout.String(), "jira_feedback_required", true)
 	assertJSONField(t, stdout.String(), "jira_feedback_write_allowed", false)
-	assertJSONField(t, stdout.String(), "next_action", "ask_owner_to_add_task_comment")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner_to_add_task_comment")
 }
 
 func TestGeneratedResumeFeedbackCanBePassedToAddTaskComment(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	client := &recordingJiraClient{issue: realModeIssue()}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
@@ -581,7 +582,7 @@ func TestGeneratedResumeFeedbackCanBePassedToAddTaskComment(t *testing.T) {
 func TestResumeTakeoverRejectsMissingRun(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"other-run","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"other-run","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -591,7 +592,7 @@ func TestResumeTakeoverRejectsMissingRun(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "operation", "resume_takeover")
 	assertJSONField(t, stdout.String(), "code", "run_not_found")
-	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner")
 	if strings.Contains(stdout.String(), "jira_feedback") {
 		t.Fatalf("untrusted local failure should not produce Jira feedback: %s", stdout.String())
 	}
@@ -600,7 +601,7 @@ func TestResumeTakeoverRejectsMissingRun(t *testing.T) {
 func TestResumeTakeoverRejectsWorkspaceMismatch(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"other","run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"other","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -610,13 +611,13 @@ func TestResumeTakeoverRejectsWorkspaceMismatch(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "operation", "resume_takeover")
 	assertJSONField(t, stdout.String(), "code", "workspace_mismatch")
-	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner")
 }
 
 func TestResumeTakeoverRejectsIncompleteLocalState(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -626,7 +627,7 @@ func TestResumeTakeoverRejectsIncompleteLocalState(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "operation", "resume_takeover")
 	assertJSONField(t, stdout.String(), "code", "local_state_mismatch")
-	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner")
 }
 
 func TestTakeoverTaskRequiresConfirmationForRealJiraWrite(t *testing.T) {
@@ -643,7 +644,7 @@ func TestTakeoverTaskRequiresConfirmationForRealJiraWrite(t *testing.T) {
 	assertJSONField(t, stdout.String(), "operation", "takeover_task")
 	assertJSONField(t, stdout.String(), "code", "real_jira_confirmation_required")
 	assertJSONField(t, stdout.String(), "current_stage", "takeover_gate")
-	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner")
 	assertEventLogContains(t, root, `"gate":"real_jira_write"`)
 	assertEventLogContains(t, root, `"gate_status":"blocked"`)
 	assertEventLogContains(t, root, `"code":"real_jira_confirmation_required"`)

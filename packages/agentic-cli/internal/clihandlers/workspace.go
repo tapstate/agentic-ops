@@ -60,7 +60,7 @@ func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr i
 			RequiredHumanAction: "请把真实 Jira API token 写入 ~/.agentic-ops/user/.env 中的 " + jiraAPITokenEnvName,
 			TaskType:            "workspace_initialization",
 			CurrentStage:        "jira_config",
-			NextAction:          "set_jira_api_token",
+			AgenticNextAction:   "set_jira_api_token",
 		}))
 	}
 	jiraTokenEnv = jiraAPITokenEnvName
@@ -108,7 +108,7 @@ func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr i
 			RequiredHumanAction: "请确认是否覆盖已有配置；确认后使用 --confirm-existing-config 重新执行 workspace init",
 			TaskType:            "workspace_initialization",
 			CurrentStage:        "config_confirmation",
-			NextAction:          "confirm_existing_config",
+			AgenticNextAction:   "confirm_existing_config",
 		}))
 	}
 	profilePlan, err := prepareWorkspaceProfile(info, jiraUser, jiraProjectOverride, sourceRoot)
@@ -119,7 +119,7 @@ func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr i
 			RequiredHumanAction: "请检查 install-resources/basic/projects/<project>/profile.yaml，并确认 workspace 与项目配置项一致、jira.project 已配置",
 			TaskType:            "workspace_initialization",
 			CurrentStage:        "workspace_profile",
-			NextAction:          "fix_profile",
+			AgenticNextAction:   "fix_profile",
 		}))
 	}
 	jiraConfig, err := prepareWorkspaceJiraConfig(info, jiraUser, jiraBaseURL, jiraTokenEnv, jiraAPIToken)
@@ -131,7 +131,7 @@ func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr i
 				RequiredHumanAction: "请把真实 Jira API token 写入 ~/.agentic-ops/user/.env 中的 " + jiraAPITokenEnvName,
 				TaskType:            "workspace_initialization",
 				CurrentStage:        "jira_config",
-				NextAction:          "set_jira_api_token",
+				AgenticNextAction:   "set_jira_api_token",
 			}))
 		}
 		return writeJSON(stdout, output.Failure("workspace_init", "jira_config_failed", err.Error(), "请检查个人配置目录权限"))
@@ -144,7 +144,7 @@ func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr i
 			RequiredHumanAction: "请检查 GitHub 仓库访问权限、SSH key 或使用 --source-root 指向已有本地源码目录",
 			TaskType:            "workspace_initialization",
 			CurrentStage:        "source_checkout",
-			NextAction:          "fix_source_checkout",
+			AgenticNextAction:   "fix_source_checkout",
 		})
 		addWorkspaceJiraConfigResult(payload, jiraConfig)
 		payload["workspace"] = info.Name
@@ -186,9 +186,9 @@ func runWorkspaceInit(args []string, stdin io.Reader, stdout io.Writer, stderr i
 		"jira_config_path":        jiraConfig.Path,
 		"jira_token_env":          jiraConfig.TokenEnv,
 		"jira_env_file":           jiraConfig.EnvFile,
-		"jira_config_next_action": jiraConfig.NextAction,
+		"jira_config_next_action": jiraConfig.AgenticNextAction,
 		"workspace_repaired":      workspaceRepair,
-		"next_action":             "init_agent_capability",
+		"agentic_next_action":     "init_agent_capability",
 	})
 	addJiraTokenGuidance(payload, jiraConfig.Status, jiraConfig.TokenEnv, jiraConfig.EnvFile)
 	return writeJSON(stdout, payload)
@@ -309,11 +309,11 @@ func firstNonEmpty(values ...string) string {
 }
 
 type workspaceJiraConfigGuide struct {
-	Status     string
-	Path       string
-	TokenEnv   string
-	EnvFile    string
-	NextAction string
+	Status            string
+	Path              string
+	TokenEnv          string
+	EnvFile           string
+	AgenticNextAction string
 }
 
 func addWorkspaceJiraConfigResult(payload map[string]any, config workspaceJiraConfigGuide) {
@@ -321,7 +321,7 @@ func addWorkspaceJiraConfigResult(payload map[string]any, config workspaceJiraCo
 	payload["jira_config_path"] = config.Path
 	payload["jira_token_env"] = config.TokenEnv
 	payload["jira_env_file"] = config.EnvFile
-	payload["jira_config_next_action"] = config.NextAction
+	payload["jira_config_next_action"] = config.AgenticNextAction
 }
 
 var errInvalidJiraTokenEnvName = errors.New("invalid jira token env name")
@@ -355,7 +355,7 @@ func prepareWorkspaceJiraConfig(info workspace.Info, jiraUser string, jiraBaseUR
 			status = "configured"
 			nextAction = "agent_init"
 		}
-		return workspaceJiraConfigGuide{Status: status, Path: configPath, TokenEnv: jiraTokenEnv, EnvFile: envFile, NextAction: nextAction}, nil
+		return workspaceJiraConfigGuide{Status: status, Path: configPath, TokenEnv: jiraTokenEnv, EnvFile: envFile, AgenticNextAction: nextAction}, nil
 	}
 	runtimeConfig, err := resolveJiraRuntimeConfig(info.Name)
 	if err != nil {
@@ -368,7 +368,7 @@ func prepareWorkspaceJiraConfig(info workspace.Info, jiraUser string, jiraBaseUR
 			status = "needs_jira_api_token"
 			nextAction = "set_jira_api_token"
 		}
-		return workspaceJiraConfigGuide{Status: status, Path: runtimeConfig.Source, TokenEnv: runtimeConfig.APITokenEnv, EnvFile: runtimeConfig.EnvFile, NextAction: nextAction}, nil
+		return workspaceJiraConfigGuide{Status: status, Path: runtimeConfig.Source, TokenEnv: runtimeConfig.APITokenEnv, EnvFile: runtimeConfig.EnvFile, AgenticNextAction: nextAction}, nil
 	}
 	if defaultBaseURL := projectJiraDefaultBaseURL(info.Name); defaultBaseURL != "" {
 		if err := writePersonalProjectJiraConfig(scope, jiraUser, defaultBaseURL, jiraTokenEnv); err != nil {
@@ -388,14 +388,14 @@ func prepareWorkspaceJiraConfig(info workspace.Info, jiraUser string, jiraBaseUR
 			status = "configured"
 			nextAction = "agent_init"
 		}
-		return workspaceJiraConfigGuide{Status: status, Path: configPath, TokenEnv: jiraTokenEnv, EnvFile: envFile, NextAction: nextAction}, nil
+		return workspaceJiraConfigGuide{Status: status, Path: configPath, TokenEnv: jiraTokenEnv, EnvFile: envFile, AgenticNextAction: nextAction}, nil
 	}
 	return workspaceJiraConfigGuide{
-		Status:     "needs_configuration",
-		Path:       configPath,
-		TokenEnv:   jiraTokenEnv,
-		EnvFile:    envFile,
-		NextAction: "rerun_workspace_init_with_--jira-base-url",
+		Status:            "needs_configuration",
+		Path:              configPath,
+		TokenEnv:          jiraTokenEnv,
+		EnvFile:           envFile,
+		AgenticNextAction: "rerun_workspace_init_with_--jira-base-url",
 	}, nil
 }
 
@@ -779,7 +779,7 @@ func runAgentInit(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请在项目 AI 工作空间重新运行 agentic-cli workspace init --project " + workspaceName + " --interactive",
 			TaskType:            "capability_initialization",
 			CurrentStage:        "workspace_initialization",
-			NextAction:          "workspace_init",
+			AgenticNextAction:   "workspace_init",
 		})
 		payload["workspace"] = workspaceName
 		return writeJSON(stdout, payload)
@@ -789,15 +789,15 @@ func runAgentInit(args []string, stdout io.Writer) int {
 		projectTools = append(projectTools, "tapdata branch-align")
 	}
 	return writeJSON(stdout, output.Success("agent_init", map[string]any{
-		"workspace":          workspaceName,
-		"task_type":          "capability_initialization",
-		"current_stage":      "agent_capability_initialized",
-		"next_action":        "list_tasks",
-		"activation_phrase":  "按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。",
-		"guide_entry":        "$HOME/.agentic-ops/agent-guides.md",
-		"asset_entry":        "$HOME/.agentic-ops/install-resources/basic/ai-assets/README.md",
-		"instruction_source": "agent_guides_and_workspace_state",
-		"memory_dependency":  false,
+		"workspace":           workspaceName,
+		"task_type":           "capability_initialization",
+		"current_stage":       "agent_capability_initialized",
+		"agentic_next_action": "list_tasks",
+		"activation_phrase":   "按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。",
+		"guide_entry":         "$HOME/.agentic-ops/agent-guides.md",
+		"asset_entry":         "$HOME/.agentic-ops/install-resources/basic/ai-assets/README.md",
+		"instruction_source":  "agent_guides_and_workspace_state",
+		"memory_dependency":   false,
 		"asset_resolution": map[string]any{
 			"order": []string{
 				"workspace_overlay",

@@ -8,13 +8,13 @@ allowed_stages:
   - review_approved
 required_inputs:
   - workspace
-  - run_id
+  - agentic_run_id
   - pr_url
 input:
   workspace:
     type: string
     required: true
-  run_id:
+  agentic_run_id:
     type: string
     required: true
   pr_url:
@@ -27,7 +27,7 @@ preconditions:
 output:
   workspace:
     type: string
-  run_id:
+  agentic_run_id:
     type: string
   pr_url:
     type: string
@@ -35,11 +35,11 @@ output:
     type: string
   current_stage:
     type: string
-  next_action:
+  agentic_next_action:
     type: string
 failure:
   codes:
-    - missing_run_id
+    - missing_agentic_run_id
     - missing_pr_url
     - run_not_found
     - policy_not_found

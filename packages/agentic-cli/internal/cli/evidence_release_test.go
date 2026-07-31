@@ -21,16 +21,16 @@ func TestWriteEvidenceRequiresRunID(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("code = %d", code)
 	}
-	assertJSONField(t, stdout.String(), "code", "missing_run_id")
+	assertJSONField(t, stdout.String(), "code", "missing_agentic_run_id")
 	assertJSONField(t, stdout.String(), "task_type", "evidence_write")
 	assertJSONField(t, stdout.String(), "current_stage", "input_validation")
-	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner")
 	assertJSONField(t, stdout.String(), "required_human_action", "请提供 --run-id")
 	events, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
 	if err != nil {
 		t.Fatalf("ReadFile events error = %v", err)
 	}
-	if !strings.Contains(string(events), `"code":"missing_run_id"`) {
+	if !strings.Contains(string(events), `"code":"missing_agentic_run_id"`) {
 		t.Fatalf("events = %s", string(events))
 	}
 	if !strings.Contains(string(events), `"gate_status":"blocked"`) {
@@ -42,7 +42,7 @@ func TestWriteEvidenceOutputsNextAction(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -56,7 +56,7 @@ func TestWriteEvidenceOutputsNextAction(t *testing.T) {
 	assertJSONField(t, stdout.String(), "process_id", "development_change_v1")
 	assertJSONField(t, stdout.String(), "target_repo", "tapstate/example-repo")
 	assertJSONField(t, stdout.String(), "audit_submitted", true)
-	assertJSONField(t, stdout.String(), "next_action", "request_owner_confirmation")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "request_owner_confirmation")
 	evidencePath := filepath.Join(root, ".agentic-ops", "runs", runID, "evidence.md")
 	evidenceData, err := os.ReadFile(evidencePath)
 	if err != nil {
@@ -83,8 +83,8 @@ func TestWriteEvidencePreservesTargetRepoAfterResume(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
-{"timestamp":"2026-07-21T10:31:00Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"resume_takeover","task_type":"task_takeover","current_stage":"takeover_resumed","next_action":"continue_development","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"resume_takeover","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+{"timestamp":"2026-07-21T10:31:00Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"resume_takeover","task_type":"task_takeover","current_stage":"takeover_resumed","agentic_next_action":"continue_development","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"resume_takeover","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -111,7 +111,7 @@ func TestWriteEvidenceBlocksWhenLocalPolicyRequiresHumanGate(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -122,7 +122,7 @@ func TestWriteEvidenceBlocksWhenLocalPolicyRequiresHumanGate(t *testing.T) {
 	assertJSONField(t, stdout.String(), "operation", "write_evidence")
 	assertJSONField(t, stdout.String(), "code", "policy_gate_required")
 	assertJSONField(t, stdout.String(), "current_stage", "evidence_write_gate")
-	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner")
 	if _, err := os.Stat(filepath.Join(root, ".agentic-ops", "runs", runID, "evidence.md")); !os.IsNotExist(err) {
 		t.Fatalf("evidence file should not be written when policy gate blocks, stat err = %v", err)
 	}
@@ -140,15 +140,15 @@ func TestWriteEvidenceRejectsMissingRun(t *testing.T) {
 	assertJSONField(t, stdout.String(), "operation", "write_evidence")
 	assertJSONField(t, stdout.String(), "code", "run_not_found")
 	assertJSONField(t, stdout.String(), "current_stage", "evidence_write_gate")
-	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner")
 }
 
 func TestWriteEvidenceRejectsCompletedRun(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
-{"timestamp":"2026-07-21T10:31:00Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"release_agent","task_type":"task_release","current_stage":"completed","next_action":"task_audit_submitted","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"release_agent","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+{"timestamp":"2026-07-21T10:31:00Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"release_agent","task_type":"task_release","current_stage":"completed","agentic_next_action":"task_audit_submitted","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"release_agent","gate_status":"passed"}
 `)
 
 	var stdout bytes.Buffer
@@ -168,7 +168,7 @@ func TestWriteEvidenceRequiresConfirmationForRealJiraComment(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: &recordingJiraClient{issue: realModeBoundIssue()}, Mode: "real"})
 
@@ -189,7 +189,7 @@ func TestWriteEvidenceRecordsPassedRealJiraCommentGate(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","next_action":"proceed","agent_id":"agentic-cli-local-agent","current_agent_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	client := &recordingJiraClient{issue: realModeBoundIssue()}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
@@ -225,7 +225,7 @@ func TestReleaseAgentRequiresConfirmationForRealJiraWrite(t *testing.T) {
 	assertJSONField(t, stdout.String(), "operation", "release_agent")
 	assertJSONField(t, stdout.String(), "code", "real_jira_confirmation_required")
 	assertJSONField(t, stdout.String(), "current_stage", "completion_cleanup")
-	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner")
 	assertEventLogContains(t, root, `"operation":"release_agent"`)
 	assertEventLogContains(t, root, `"gate":"real_jira_write"`)
 	assertEventLogContains(t, root, `"gate_status":"blocked"`)
@@ -317,25 +317,35 @@ func TestJiraWriteFieldsUseProfileMapping(t *testing.T) {
 	p := profile.Profile{
 		JiraFormMapping: profile.FormMapping{
 			Fields: map[string]profile.FormField{
-				"current_agent_id": {JiraField: "customfield_current_agent_id"},
-				"takeover_at":      {JiraField: "customfield_takeover_at"},
+				"agentic_id":                  {JiraField: "customfield_agentic_id"},
+				"agentic_run_id":              {JiraField: "customfield_agentic_run_id"},
+				"agentic_takeover_at":         {JiraField: "customfield_agentic_takeover_at"},
+				"agentic_next_action":         {JiraField: "customfield_agentic_next_action"},
+				"agentic_completion_evidence": {JiraField: "customfield_agentic_completion_evidence"},
+				"agentic_heartbeat_at":        {JiraField: "customfield_agentic_heartbeat_at"},
 			},
 		},
 	}
 
-	takeoverFields := clihandlers.JiraTakeoverFields(p, "agent-1", "2026-07-21T10:30:12Z")
-	if takeoverFields["customfield_current_agent_id"] != "agent-1" {
+	takeoverFields := clihandlers.JiraTakeoverFields(p, "run-1", "agent-1", "2026-07-21T10:30:12Z", "proceed")
+	if takeoverFields["customfield_agentic_id"] != "agent-1" {
 		t.Fatalf("takeoverFields = %#v", takeoverFields)
 	}
-	if takeoverFields["customfield_takeover_at"] != "2026-07-21T10:30:12Z" {
+	if takeoverFields["customfield_agentic_run_id"] != "run-1" ||
+		takeoverFields["customfield_agentic_takeover_at"] != "2026-07-21T10:30:12Z" ||
+		takeoverFields["customfield_agentic_next_action"] != "proceed" ||
+		takeoverFields["customfield_agentic_heartbeat_at"] != "2026-07-21T10:30:12Z" {
 		t.Fatalf("takeoverFields = %#v", takeoverFields)
+	}
+	if value, ok := takeoverFields["customfield_agentic_completion_evidence"]; !ok || value != nil {
+		t.Fatalf("takeoverFields must clear completion evidence: %#v", takeoverFields)
 	}
 	releaseFields := clihandlers.JiraReleaseFields(p)
-	if _, ok := releaseFields["customfield_current_agent_id"]; !ok {
+	if _, ok := releaseFields["customfield_agentic_id"]; !ok {
 		t.Fatalf("releaseFields missing current agent field: %#v", releaseFields)
 	}
-	if releaseFields["customfield_current_agent_id"] != nil {
-		t.Fatalf("release current agent field = %#v", releaseFields["customfield_current_agent_id"])
+	if releaseFields["customfield_agentic_id"] != nil {
+		t.Fatalf("release current agent field = %#v", releaseFields["customfield_agentic_id"])
 	}
 }
 
@@ -374,12 +384,12 @@ func TestReleaseAgentRecordsCurrentAgentCleanup(t *testing.T) {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
 	assertJSONField(t, stdout.String(), "operation", "release_agent")
-	assertJSONField(t, stdout.String(), "run_id", runID)
+	assertJSONField(t, stdout.String(), "agentic_run_id", runID)
 	assertJSONField(t, stdout.String(), "current_stage", "completed")
-	assertJSONField(t, stdout.String(), "current_agent_id_cleared", true)
+	assertJSONField(t, stdout.String(), "agentic_id_cleared", true)
 	assertJSONField(t, stdout.String(), "audit_submitted", true)
 	assertJSONField(t, stdout.String(), "audit_target", "local_file")
-	assertJSONField(t, stdout.String(), "next_action", "task_audit_submitted")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "task_audit_submitted")
 
 	events, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
 	if err != nil {
@@ -387,10 +397,10 @@ func TestReleaseAgentRecordsCurrentAgentCleanup(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"operation":"release_agent"`,
-		`"current_agent_id":"agentic-cli-local-agent"`,
-		`"current_agent_id_cleared":true`,
+		`"agentic_id":"agentic-cli-local-agent"`,
+		`"agentic_id_cleared":true`,
 		`"completed_at":"2026-07-21T10:30:12Z"`,
-		`"completion_evidence":"evidence.md"`,
+		`"agentic_completion_evidence":"evidence.md"`,
 		`"audit_submitted":true`,
 		`"audit_target":"local_file"`,
 	} {
@@ -413,7 +423,7 @@ func TestReleaseAgentRejectsMissingCompletionEvidenceFile(t *testing.T) {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
 	assertJSONField(t, stdout.String(), "operation", "release_agent")
-	assertJSONField(t, stdout.String(), "code", "completion_evidence_missing")
+	assertJSONField(t, stdout.String(), "code", "agentic_completion_evidence_missing")
 	assertJSONField(t, stdout.String(), "current_stage", "completion_cleanup")
-	assertJSONField(t, stdout.String(), "next_action", "ask_owner")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner")
 }

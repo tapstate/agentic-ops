@@ -1,7 +1,7 @@
 # 缺陷修复完成证据
 
 - Jira 卡片：`<issue_key>`
-- run_id：`<run_id>`
+- agentic_run_id：`<agentic_run_id>`
 - 修复计划版本：`<plan_version>`
 
 ## 变更摘要

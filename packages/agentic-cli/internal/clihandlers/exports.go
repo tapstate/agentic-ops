@@ -152,8 +152,8 @@ func RunFeedbackBundle(args []string, stdout io.Writer) int {
 	return runFeedbackBundle(args, stdout)
 }
 
-func JiraTakeoverFields(workspaceProfile profile.Profile, currentAgentID string, takeoverAt string) map[string]any {
-	return jiraTakeoverFields(workspaceProfile, currentAgentID, takeoverAt)
+func JiraTakeoverFields(workspaceProfile profile.Profile, runID string, currentAgentID string, takeoverAt string, nextAction string) map[string]any {
+	return jiraTakeoverFields(workspaceProfile, runID, currentAgentID, takeoverAt, nextAction)
 }
 
 func JiraReleaseFields(workspaceProfile profile.Profile) map[string]any {

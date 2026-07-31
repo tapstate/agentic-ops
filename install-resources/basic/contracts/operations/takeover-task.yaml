@@ -17,7 +17,7 @@ input:
     required: true
 preconditions:
   - current_user_must_match_owner
-  - current_agent_id_must_be_empty_or_match_agent_id
+  - agentic_id_must_be_empty_or_match_agent_id
   - task_class_must_be_mapped_to_standard_process
   - issue_must_be_in_allowed_project
   - jira_status_must_map_to_entry_stage
@@ -26,13 +26,15 @@ output:
     type: string
   issue_key:
     type: string
-  run_id:
+  agentic_run_id:
     type: string
   agent_id:
     type: string
-  current_agent_id:
+  agentic_id:
     type: string
-  takeover_at:
+  agentic_takeover_at:
+    type: string
+  agentic_heartbeat_at:
     type: string
   task_type:
     type: string
@@ -50,7 +52,7 @@ output:
       - waiting_owner_confirmation
   target_repo:
     type: string
-  next_action:
+  agentic_next_action:
     type: string
     enum:
       - proceed

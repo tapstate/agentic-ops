@@ -33,13 +33,13 @@ jira_form_mapping:
       source: jira_field
       jira_field: customfield_risk
       required_from_stage: iteration_ready
-    current_agent_id:
+    agentic_id:
       source: jira_field
-      jira_field: customfield_current_agent_id
+      jira_field: customfield_agentic_id
       required_from_stage: takeover_gate
-    takeover_at:
+    agentic_takeover_at:
       source: jira_field
-      jira_field: customfield_takeover_at
+      jira_field: customfield_agentic_takeover_at
       required_from_stage: takeover_gate
 
 task_class_mapping:
@@ -117,11 +117,11 @@ retry_redo:
   verification_failed:
     retry: true
     max_attempts: 3
-    next_action: fix_and_verify
+    agentic_next_action: fix_and_verify
   scope_changed:
     retry: false
     redo_from_stage: waiting_takeover
-    next_action: redo_previous_stage
+    agentic_next_action: redo_previous_stage
 
 templates:
   takeover_success: templates/evidence/takeover-success.md

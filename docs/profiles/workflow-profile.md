@@ -65,12 +65,24 @@ jira_form_mapping:
     risk_level:
       source: jira_field
       jira_field: customfield_risk
-    current_agent_id:
+    agentic_id:
       source: jira_field
-      jira_field: customfield_current_agent_id
-    takeover_at:
+      jira_field: customfield_agentic_id
+    agentic_run_id:
       source: jira_field
-      jira_field: customfield_takeover_at
+      jira_field: customfield_agentic_run_id
+    agentic_takeover_at:
+      source: jira_field
+      jira_field: customfield_agentic_takeover_at
+    agentic_next_action:
+      source: jira_field
+      jira_field: customfield_agentic_next_action
+    agentic_completion_evidence:
+      source: jira_field
+      jira_field: customfield_agentic_completion_evidence
+    agentic_heartbeat_at:
+      source: jira_field
+      jira_field: customfield_agentic_heartbeat_at
 
 task_class_mapping:
   issue_types:
@@ -228,25 +240,25 @@ retry_redo:
   verification_failed:
     retry: true
     max_attempts: 3
-    next_action: fix_and_verify
+    agentic_next_action: fix_and_verify
   missing_target_repo:
     retry: false
     redo_from_stage: takeover_gate
-    next_action: ask_owner
+    agentic_next_action: ask_owner
 ```
 
 当审查节点、重试规则或重做边界无法映射时，工作流配置校验必须返回 `review_gate_mapping_gap` 或 `retry_redo_policy_gap`，并要求流程负责人决策。
 
 ## 7. 所有权字段映射
 
-工作流配置必须声明 `current_agent_id` 和 `takeover_at` 如何落到 Jira 或稳定描述模板。`current_agent_id` 是任务当前绑定的 `agent_id`，不是新的身份字段；接管门禁依赖这些字段防止多个 AIAgent 同时处理同一任务。
+工作流配置必须声明 `agentic_id`、`agentic_run_id`、`agentic_takeover_at`、`agentic_next_action`、`agentic_completion_evidence` 和 `agentic_heartbeat_at` 如何映射到 Jira。`agentic_id` 是任务当前绑定的 `agent_id`，不是新的身份字段；接管门禁依赖状态转换和这些字段防止多个 AIAgent 同时处理同一任务。
 
 规则：
 
-- `current_agent_id` 为空时，当前 AIAgent 可以在接管成功后写入自己的 `agent_id`。
-- `current_agent_id` 等于当前 AIAgent 的 `agent_id` 时，允许恢复同一代理的执行。
-- `current_agent_id` 不为空且不等于当前 AIAgent 的 `agent_id` 时，必须返回 `agent_ownership_conflict`。
-- 任务完成或交接结束后，必须清理 Jira 上的 `current_agent_id`，并记录 `current_agent_id_cleared=true`。
+- `agentic_id` 为空时，当前 AIAgent 可以在接管成功后写入自己的 `agent_id`。
+- `agentic_id` 等于当前 AIAgent 的 `agent_id` 时，允许恢复同一代理的执行。
+- `agentic_id` 不为空且不等于当前 AIAgent 的 `agent_id` 时，必须返回 `agent_ownership_conflict`。
+- 任务完成或交接结束后，必须清理 Jira 上的 `agentic_id`，并记录 `agentic_id_cleared=true`。
 - `assignee` 不是当前登录用户时，必须返回 `assignee_mismatch` 或 `assignee_changed`，不得自动接管或自动释放代理绑定。
 
 ## 8. 第一批默认配置

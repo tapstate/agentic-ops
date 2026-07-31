@@ -98,7 +98,7 @@ func fakeIssues(workspace string) []Issue {
 	otherOwner.Owner = "other-user"
 	agentConflict := valid
 	agentConflict.Key = "TAP-AGENT-CONFLICT"
-	agentConflict.CurrentAgentID = "other-agent"
+	agentConflict.AgenticID = "other-agent"
 	unknownStatus := valid
 	unknownStatus.Key = "TAP-UNKNOWN-STATUS"
 	unknownStatus.Status = "Custom Review"

@@ -1,7 +1,7 @@
 # 缺陷修复计划确认结果
 
 - Jira 卡片：`<issue_key>`
-- run_id：`<run_id>`
+- agentic_run_id：`<agentic_run_id>`
 - 计划版本：`<plan_version>`
 - 决策：`<approved|rejected|changes_requested>`
 - 决策人：`<development_engineer>`

@@ -9,20 +9,20 @@ import (
 )
 
 func TestReadRestoresTakeoverContext(t *testing.T) {
-	got, err := Read([]feedback.Event{takeoverEvent()}, Query{RunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"})
+	got, err := Read([]feedback.Event{takeoverEvent()}, Query{AgenticRunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"})
 	if err != nil {
 		t.Fatalf("Read error = %v", err)
 	}
 	if got.Workspace != "tapstate" ||
-		got.RunID != "run-1" ||
+		got.AgenticRunID != "run-1" ||
 		got.IssueKey != "TAP-123" ||
 		got.AgentID != "agent-1" ||
-		got.CurrentAgentID != "agent-1" ||
+		got.AgenticID != "agent-1" ||
 		got.TaskClass != "technical_task" ||
 		got.ProcessID != "development_change_v1" ||
 		got.TargetRepo != "tapstate/example-repo" ||
 		got.CurrentStage != "takeover_started" ||
-		got.NextAction != "proceed" {
+		got.AgenticNextAction != "proceed" {
 		t.Fatalf("Context = %#v", got)
 	}
 }
@@ -31,18 +31,18 @@ func TestReadRejectsImmutableFieldConflict(t *testing.T) {
 	events := []feedback.Event{
 		takeoverEvent(),
 		{
-			Workspace:    "tapstate",
-			RunID:        "run-1",
-			IssueKey:     "TAP-123",
-			Operation:    "prepare_pr",
-			CurrentStage: "pr_plan_prepared",
-			NextAction:   "ask_owner_to_push_and_create_pr",
-			TargetRepo:   "tapstate/other-repo",
-			OK:           true,
+			Workspace:         "tapstate",
+			AgenticRunID:      "run-1",
+			IssueKey:          "TAP-123",
+			Operation:         "prepare_pr",
+			CurrentStage:      "pr_plan_prepared",
+			AgenticNextAction: "ask_owner_to_push_and_create_pr",
+			TargetRepo:        "tapstate/other-repo",
+			OK:                true,
 		},
 	}
 
-	_, err := Read(events, Query{RunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"})
+	_, err := Read(events, Query{AgenticRunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"})
 	if !errors.Is(err, ErrLocalStateMismatch) {
 		t.Fatalf("Read error = %v, want %v", err, ErrLocalStateMismatch)
 	}
@@ -61,19 +61,19 @@ func TestReadReturnsStableLocalStateErrors(t *testing.T) {
 		{
 			name:   "run not found",
 			events: []feedback.Event{takeoverEvent()},
-			query:  Query{RunID: "other-run", Workspace: "tapstate", AgentID: "agent-1"},
+			query:  Query{AgenticRunID: "other-run", Workspace: "tapstate", AgentID: "agent-1"},
 			want:   ErrRunNotFound,
 		},
 		{
 			name:   "workspace mismatch",
 			events: []feedback.Event{takeoverEvent()},
-			query:  Query{RunID: "run-1", Workspace: "other", AgentID: "agent-1"},
+			query:  Query{AgenticRunID: "run-1", Workspace: "other", AgentID: "agent-1"},
 			want:   ErrWorkspaceMismatch,
 		},
 		{
 			name:   "incomplete takeover",
 			events: []feedback.Event{incomplete},
-			query:  Query{RunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"},
+			query:  Query{AgenticRunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"},
 			want:   ErrLocalStateMismatch,
 		},
 	}
@@ -92,19 +92,19 @@ func TestReadBackfillsMissingTargetRepoFromLaterEvent(t *testing.T) {
 	anchor := takeoverEvent()
 	anchor.TargetRepo = ""
 	later := feedback.Event{
-		Workspace:    "tapstate",
-		RunID:        "run-1",
-		IssueKey:     "TAP-123",
-		Operation:    "prepare_pr",
-		CurrentStage: "pr_plan_prepared",
-		NextAction:   "ask_owner_to_push_and_create_pr",
-		TargetRepo:   "tapstate/example-repo",
-		OK:           true,
+		Workspace:         "tapstate",
+		AgenticRunID:      "run-1",
+		IssueKey:          "TAP-123",
+		Operation:         "prepare_pr",
+		CurrentStage:      "pr_plan_prepared",
+		AgenticNextAction: "ask_owner_to_push_and_create_pr",
+		TargetRepo:        "tapstate/example-repo",
+		OK:                true,
 	}
 
 	got, err := Read(
 		[]feedback.Event{anchor, later},
-		Query{RunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"},
+		Query{AgenticRunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"},
 	)
 	if err != nil {
 		t.Fatalf("Read error = %v", err)
@@ -118,48 +118,48 @@ func TestReadUsesLatestStateBearingEventAndIgnoresAuditEvents(t *testing.T) {
 	events := []feedback.Event{
 		takeoverEvent(),
 		{
-			Workspace:    "tapstate",
-			RunID:        "run-1",
-			IssueKey:     "TAP-123",
-			Operation:    "write_evidence",
-			CurrentStage: "evidence_written",
-			NextAction:   "request_owner_confirmation",
-			OK:           true,
+			Workspace:         "tapstate",
+			AgenticRunID:      "run-1",
+			IssueKey:          "TAP-123",
+			Operation:         "write_evidence",
+			CurrentStage:      "evidence_written",
+			AgenticNextAction: "request_owner_confirmation",
+			OK:                true,
 		},
 		{
-			Workspace:    "tapstate",
-			RunID:        "run-1",
-			IssueKey:     "TAP-123",
-			Operation:    "add_task_comment",
-			CurrentStage: "jira_write_completed",
-			NextAction:   "inspect_by_agent",
-			OK:           true,
+			Workspace:         "tapstate",
+			AgenticRunID:      "run-1",
+			IssueKey:          "TAP-123",
+			Operation:         "add_task_comment",
+			CurrentStage:      "jira_write_completed",
+			AgenticNextAction: "inspect_by_agent",
+			OK:                true,
 		},
 		{
-			Workspace:    "tapstate",
-			RunID:        "run-1",
-			IssueKey:     "TAP-123",
-			Operation:    "resume_takeover",
-			CurrentStage: "resume_gate",
-			NextAction:   "ask_owner",
-			OK:           false,
+			Workspace:         "tapstate",
+			AgenticRunID:      "run-1",
+			IssueKey:          "TAP-123",
+			Operation:         "resume_takeover",
+			CurrentStage:      "resume_gate",
+			AgenticNextAction: "ask_owner",
+			OK:                false,
 		},
 		{
-			Workspace:    "tapstate",
-			RunID:        "run-1",
-			IssueKey:     "TAP-123",
-			Operation:    "resume_takeover",
-			CurrentStage: "takeover_resumed",
-			NextAction:   "continue_development",
-			OK:           true,
+			Workspace:         "tapstate",
+			AgenticRunID:      "run-1",
+			IssueKey:          "TAP-123",
+			Operation:         "resume_takeover",
+			CurrentStage:      "takeover_resumed",
+			AgenticNextAction: "continue_development",
+			OK:                true,
 		},
 	}
 
-	got, err := Read(events, Query{RunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"})
+	got, err := Read(events, Query{AgenticRunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"})
 	if err != nil {
 		t.Fatalf("Read error = %v", err)
 	}
-	if got.CurrentStage != "evidence_written" || got.NextAction != "request_owner_confirmation" {
+	if got.CurrentStage != "evidence_written" || got.AgenticNextAction != "request_owner_confirmation" {
 		t.Fatalf("Context = %#v", got)
 	}
 }
@@ -174,13 +174,13 @@ func TestReadMarksTerminalAndHumanGateStates(t *testing.T) {
 		{
 			name: "terminal",
 			event: feedback.Event{
-				Workspace:    "tapstate",
-				RunID:        "run-1",
-				IssueKey:     "TAP-123",
-				Operation:    "release_agent",
-				CurrentStage: "completed",
-				NextAction:   "task_audit_submitted",
-				OK:           true,
+				Workspace:         "tapstate",
+				AgenticRunID:      "run-1",
+				IssueKey:          "TAP-123",
+				Operation:         "release_agent",
+				CurrentStage:      "completed",
+				AgenticNextAction: "task_audit_submitted",
+				OK:                true,
 			},
 			wantTerminal: true,
 		},
@@ -188,11 +188,11 @@ func TestReadMarksTerminalAndHumanGateStates(t *testing.T) {
 			name: "human gate",
 			event: feedback.Event{
 				Workspace:           "tapstate",
-				RunID:               "run-1",
+				AgenticRunID:        "run-1",
 				IssueKey:            "TAP-123",
 				Operation:           "write_evidence",
 				CurrentStage:        "evidence_write_gate",
-				NextAction:          "ask_owner",
+				AgenticNextAction:   "ask_owner",
 				RequiresHumanAction: true,
 			},
 			wantHumanPending: true,
@@ -203,7 +203,7 @@ func TestReadMarksTerminalAndHumanGateStates(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := Read(
 				[]feedback.Event{takeoverEvent(), test.event},
-				Query{RunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"},
+				Query{AgenticRunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"},
 			)
 			if err != nil {
 				t.Fatalf("Read error = %v", err)
@@ -221,7 +221,7 @@ func TestReadFileAndErrorCode(t *testing.T) {
 		t.Fatalf("AppendEvent error = %v", err)
 	}
 
-	got, err := ReadFile(path, Query{RunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"})
+	got, err := ReadFile(path, Query{AgenticRunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"})
 	if err != nil {
 		t.Fatalf("ReadFile error = %v", err)
 	}
@@ -247,17 +247,17 @@ func TestReadFileAndErrorCode(t *testing.T) {
 
 func takeoverEvent() feedback.Event {
 	return feedback.Event{
-		Workspace:      "tapstate",
-		RunID:          "run-1",
-		IssueKey:       "TAP-123",
-		Operation:      "takeover_task",
-		CurrentStage:   "takeover_started",
-		NextAction:     "proceed",
-		AgentID:        "agent-1",
-		CurrentAgentID: "agent-1",
-		TaskClass:      "technical_task",
-		ProcessID:      "development_change_v1",
-		TargetRepo:     "tapstate/example-repo",
-		OK:             true,
+		Workspace:         "tapstate",
+		AgenticRunID:      "run-1",
+		IssueKey:          "TAP-123",
+		Operation:         "takeover_task",
+		CurrentStage:      "takeover_started",
+		AgenticNextAction: "proceed",
+		AgentID:           "agent-1",
+		AgenticID:         "agent-1",
+		TaskClass:         "technical_task",
+		ProcessID:         "development_change_v1",
+		TargetRepo:        "tapstate/example-repo",
+		OK:                true,
 	}
 }

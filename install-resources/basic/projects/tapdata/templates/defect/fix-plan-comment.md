@@ -1,7 +1,7 @@
 # 缺陷修复计划 <plan_version>
 
 - Jira 卡片：`<issue_key>`
-- run_id：`<run_id>`
+- agentic_run_id：`<agentic_run_id>`
 - 状态：待研发工程师确认
 
 ## 根因判断与证据

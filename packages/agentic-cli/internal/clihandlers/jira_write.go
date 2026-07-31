@@ -34,12 +34,12 @@ type taskFormInput struct {
 }
 
 type taskWriteContext struct {
-	Workspace string
-	IssueKey  string
-	RunID     string
-	Profile   profile.Profile
-	Selection jiraClientSelection
-	Issue     jira.Issue
+	Workspace    string
+	IssueKey     string
+	AgenticRunID string
+	Profile      profile.Profile
+	Selection    jiraClientSelection
+	Issue        jira.Issue
 }
 
 type TaskWriteContext = taskWriteContext
@@ -88,12 +88,12 @@ func runAddTaskComment(args []string, stdout io.Writer) int {
 		return taskWriteAuditCompletionFailure(stdout, writeContext, "add_task_comment", err)
 	}
 	return writeJSON(stdout, output.Success("add_task_comment", map[string]any{
-		"workspace":     writeContext.Workspace,
-		"issue_key":     writeContext.IssueKey,
-		"run_id":        writeContext.RunID,
-		"category":      category,
-		"current_stage": "jira_write_completed",
-		"next_action":   "inspect_by_agent",
+		"workspace":           writeContext.Workspace,
+		"issue_key":           writeContext.IssueKey,
+		"agentic_run_id":      writeContext.AgenticRunID,
+		"category":            category,
+		"current_stage":       "jira_write_completed",
+		"agentic_next_action": "inspect_by_agent",
 	}))
 }
 
@@ -133,10 +133,10 @@ func runUpdateTaskDescriptionSections(args []string, stdout io.Writer) int {
 	return writeJSON(stdout, output.Success("update_task_description_sections", map[string]any{
 		"workspace":             writeContext.Workspace,
 		"issue_key":             writeContext.IssueKey,
-		"run_id":                writeContext.RunID,
+		"agentic_run_id":        writeContext.AgenticRunID,
 		"updated_section_count": len(input.Sections),
 		"current_stage":         "jira_write_completed",
-		"next_action":           "inspect_by_agent",
+		"agentic_next_action":   "inspect_by_agent",
 	}))
 }
 
@@ -175,10 +175,10 @@ func runUpdateTaskForm(args []string, stdout io.Writer) int {
 	return writeJSON(stdout, output.Success("update_task_form", map[string]any{
 		"workspace":           writeContext.Workspace,
 		"issue_key":           writeContext.IssueKey,
-		"run_id":              writeContext.RunID,
+		"agentic_run_id":      writeContext.AgenticRunID,
 		"updated_field_count": len(fields),
 		"current_stage":       "jira_write_completed",
-		"next_action":         "inspect_by_agent",
+		"agentic_next_action": "inspect_by_agent",
 	}))
 }
 
@@ -210,7 +210,7 @@ func prepareTaskWrite(args []string, stdout io.Writer, operation string) (taskWr
 	if issue.Assignee == "" || issue.Assignee != currentJiraUser {
 		return taskWriteContext{}, writeJSON(stdout, output.Failure(operation, "assignee_mismatch", "当前 Jira assignee 与当前用户不匹配", "请把 Jira assignee 调整为当前研发工程师后重试"))
 	}
-	if issue.CurrentAgentID != "" && issue.CurrentAgentID != agentID() {
+	if issue.AgenticID != "" && issue.AgenticID != agentID() {
 		return taskWriteContext{}, writeJSON(stdout, output.Failure(operation, "agent_ownership_conflict", "当前 Jira 卡片已绑定其他 AIAgent", "请研发工程师确认是否释放当前代理绑定"))
 	}
 	mappedStage, ok := workspaceProfile.StatusMapping[issue.Status]
@@ -228,19 +228,19 @@ func prepareTaskWrite(args []string, stdout io.Writer, operation string) (taskWr
 		}
 		state, err := evidenceRunState(root, workspaceName, runID)
 		if err != nil {
-			return taskWriteContext{}, writeJSON(stdout, output.Failure(operation, evidenceStateErrorCode(err), err.Error(), "请检查 run_id 是否属于当前任务和 AIAgent"))
+			return taskWriteContext{}, writeJSON(stdout, output.Failure(operation, evidenceStateErrorCode(err), err.Error(), "请检查 agentic_run_id 是否属于当前任务和 AIAgent"))
 		}
 		if state.IssueKey != issueKey {
-			return taskWriteContext{}, writeJSON(stdout, output.Failure(operation, "run_issue_mismatch", "run_id 与 Jira 卡片不匹配", "请使用该卡片对应的 run_id"))
+			return taskWriteContext{}, writeJSON(stdout, output.Failure(operation, "run_issue_mismatch", "agentic_run_id 与 Jira 卡片不匹配", "请使用该卡片对应的 agentic_run_id"))
 		}
 	}
 	return taskWriteContext{
-		Workspace: workspaceName,
-		IssueKey:  issueKey,
-		RunID:     runID,
-		Profile:   workspaceProfile,
-		Selection: selection,
-		Issue:     issue,
+		Workspace:    workspaceName,
+		IssueKey:     issueKey,
+		AgenticRunID: runID,
+		Profile:      workspaceProfile,
+		Selection:    selection,
+		Issue:        issue,
 	}, 0
 }
 
@@ -255,7 +255,7 @@ func requireRealJiraWriteConfirmation(args []string, stdout io.Writer, writeCont
 		RequiredHumanAction: "请研发工程师确认写入内容后添加 --confirm-real-jira-write",
 		TaskType:            "jira_write",
 		CurrentStage:        "jira_write_gate",
-		NextAction:          "ask_owner",
+		AgenticNextAction:   "ask_owner",
 	}))
 }
 
@@ -270,14 +270,14 @@ func taskWriteFailure(stdout io.Writer, writeContext taskWriteContext, operation
 
 func appendTaskWriteEvent(writeContext taskWriteContext, operation string, stage string, code string, ok bool, requiresHumanAction bool) error {
 	return appendWorkspaceEventWithDetails(writeContext.Workspace, feedback.Event{
-		RunID:               writeContext.RunID,
+		AgenticRunID:        writeContext.AgenticRunID,
 		IssueKey:            writeContext.IssueKey,
 		TaskType:            "jira_write",
 		Operation:           operation,
 		CurrentStage:        stage,
-		NextAction:          taskWriteNextAction(stage, ok, requiresHumanAction),
+		AgenticNextAction:   taskWriteNextAction(stage, ok, requiresHumanAction),
 		AgentID:             agentID(),
-		CurrentAgentID:      writeContext.Issue.CurrentAgentID,
+		AgenticID:           writeContext.Issue.AgenticID,
 		OK:                  ok,
 		Code:                code,
 		Gate:                "real_jira_write",
@@ -314,11 +314,11 @@ func taskWriteAuditCompletionFailure(stdout io.Writer, writeContext taskWriteCon
 		RequiredHumanAction: "不要盲目重试 Jira 写入；请先执行 inspect-task 核对远端结果并修复本地审计目录",
 		TaskType:            "jira_write",
 		CurrentStage:        "jira_write_audit_failed",
-		NextAction:          "inspect_by_agent",
+		AgenticNextAction:   "inspect_by_agent",
 	})
 	result["workspace"] = writeContext.Workspace
 	result["issue_key"] = writeContext.IssueKey
-	result["run_id"] = writeContext.RunID
+	result["agentic_run_id"] = writeContext.AgenticRunID
 	result["remote_write_completed"] = true
 	result["retry_safe"] = false
 	return writeJSON(stdout, result)
@@ -345,7 +345,7 @@ func validateTaskWriteStage(stdout io.Writer, operation string, mappedStage stri
 		RequiredHumanAction: "请按操作合同确认 Jira 状态和允许阶段",
 		TaskType:            "jira_write",
 		CurrentStage:        mappedStage,
-		NextAction:          "inspect_by_agent",
+		AgenticNextAction:   "inspect_by_agent",
 	}))
 }
 
@@ -356,8 +356,8 @@ func renderTaskComment(writeContext taskWriteContext, category string, content s
 		"工作空间: " + writeContext.Workspace,
 		"Jira 卡片: " + writeContext.IssueKey,
 	}
-	if writeContext.RunID != "" {
-		lines = append(lines, "run_id: "+writeContext.RunID)
+	if writeContext.AgenticRunID != "" {
+		lines = append(lines, "agentic_run_id: "+writeContext.AgenticRunID)
 	}
 	return strings.Join(lines, "\n") + "\n\n" + strings.TrimSpace(content)
 }

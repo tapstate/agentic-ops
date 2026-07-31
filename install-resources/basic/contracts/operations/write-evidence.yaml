@@ -8,24 +8,24 @@ allowed_stages:
   - blocked
 required_inputs:
   - workspace
-  - run_id
+  - agentic_run_id
 input:
   workspace:
     type: string
     required: true
-  run_id:
+  agentic_run_id:
     type: string
     required: true
 preconditions:
   - run_must_exist
   - current_user_must_match_owner
-  - current_agent_id_must_match_agent_id
+  - agentic_id_must_match_agent_id
   - evidence_template_must_exist
   - policy_must_allow_evidence_write
 output:
   workspace:
     type: string
-  run_id:
+  agentic_run_id:
     type: string
   issue_key:
     type: string
@@ -47,11 +47,11 @@ output:
     type: string
   current_stage:
     type: string
-  next_action:
+  agentic_next_action:
     type: string
 failure:
   codes:
-    - missing_run_id
+    - missing_agentic_run_id
     - run_not_found
     - workspace_mismatch
     - local_state_mismatch

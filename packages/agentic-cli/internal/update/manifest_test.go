@@ -40,8 +40,8 @@ func TestCheckReportsRequiredUpdateWithBlockedOperations(t *testing.T) {
 	if len(result.BlockedOperations) != 2 || result.BlockedOperations[0] != "takeover_task" {
 		t.Fatalf("BlockedOperations = %#v", result.BlockedOperations)
 	}
-	if result.NextAction != "update_apply" {
-		t.Fatalf("NextAction = %s", result.NextAction)
+	if result.AgenticNextAction != "update_apply" {
+		t.Fatalf("AgenticNextAction = %s", result.AgenticNextAction)
 	}
 }
 
@@ -62,8 +62,8 @@ func TestCheckReportsNoUpdateForSameVersion(t *testing.T) {
 	if result.UpdateAvailable {
 		t.Fatalf("UpdateAvailable = true, want false")
 	}
-	if result.NextAction != "continue" {
-		t.Fatalf("NextAction = %s", result.NextAction)
+	if result.AgenticNextAction != "continue" {
+		t.Fatalf("AgenticNextAction = %s", result.AgenticNextAction)
 	}
 }
 
@@ -129,8 +129,8 @@ func TestCheckRemoteDownloadsManifestURL(t *testing.T) {
 	if !result.UpdateAvailable || result.LatestVersion != "RES-v0.1.20-deadbee" {
 		t.Fatalf("result = %#v", result)
 	}
-	if result.NextAction != "update_apply" {
-		t.Fatalf("NextAction = %s", result.NextAction)
+	if result.AgenticNextAction != "update_apply" {
+		t.Fatalf("AgenticNextAction = %s", result.AgenticNextAction)
 	}
 }
 

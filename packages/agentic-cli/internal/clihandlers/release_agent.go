@@ -13,12 +13,12 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 	runID := readFlag(args, "--run-id", "")
 	if runID == "" {
 		return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
-			Code:                "missing_run_id",
-			Message:             "缺少 run_id",
+			Code:                "missing_agentic_run_id",
+			Message:             "缺少 agentic_run_id",
 			RequiredHumanAction: "请提供 --run-id",
 			TaskType:            "task_takeover",
 			CurrentStage:        "completion_cleanup",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	issueKey := readFlag(args, "--issue-key", "")
@@ -30,18 +30,18 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --issue-key",
 			TaskType:            "task_takeover",
 			CurrentStage:        "completion_cleanup",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	completionEvidence := readFlag(args, "--completion-evidence", "")
 	if completionEvidence == "" {
 		return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
-			Code:                "missing_completion_evidence",
+			Code:                "missing_agentic_completion_evidence",
 			Message:             "缺少完成证据",
 			RequiredHumanAction: "请提供 --completion-evidence",
 			TaskType:            "task_takeover",
 			CurrentStage:        "completion_cleanup",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	currentAgentID := agentID()
@@ -64,31 +64,31 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
 				Code:                "run_not_found",
 				Message:             err.Error(),
-				RequiredHumanAction: "请检查 run_id 是否存在有效接管事件，且仍属于当前 AIAgent",
+				RequiredHumanAction: "请检查 agentic_run_id 是否存在有效接管事件，且仍属于当前 AIAgent",
 				TaskType:            "task_takeover",
 				CurrentStage:        "completion_cleanup",
-				NextAction:          "ask_owner",
+				AgenticNextAction:   "ask_owner",
 			}))
 		}
 		if runContext.IssueKey != issueKey {
 			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
 				Code:                "run_not_found",
-				Message:             "run_id 与 issue_key 不匹配",
-				RequiredHumanAction: "请检查 run_id 和 Jira 卡片编号是否来自同一次接管",
+				Message:             "agentic_run_id 与 issue_key 不匹配",
+				RequiredHumanAction: "请检查 agentic_run_id 和 Jira 卡片编号是否来自同一次接管",
 				TaskType:            "task_takeover",
 				CurrentStage:        "completion_cleanup",
-				NextAction:          "ask_owner",
+				AgenticNextAction:   "ask_owner",
 			}))
 		}
 		status, err := completionEvidenceStatus(root, runID, completionEvidence)
 		if err != nil {
 			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
-				Code:                "completion_evidence_missing",
+				Code:                "agentic_completion_evidence_missing",
 				Message:             err.Error(),
 				RequiredHumanAction: "请先执行 write-evidence，或提供已提交任务级审计记录的引用",
 				TaskType:            "task_takeover",
 				CurrentStage:        "completion_cleanup",
-				NextAction:          "ask_owner",
+				AgenticNextAction:   "ask_owner",
 			}))
 		}
 		auditTarget = status.Target
@@ -104,7 +104,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 				RequiredHumanAction: "请确认完成证据、策略和门禁后添加 --confirm-real-jira-write",
 				TaskType:            "task_takeover",
 				CurrentStage:        "completion_cleanup",
-				NextAction:          "ask_owner",
+				AgenticNextAction:   "ask_owner",
 			}))
 		}
 		issue, ok, err := selection.Client.GetIssueByKey(context.Background(), workspaceName, issueKey)
@@ -125,17 +125,17 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 				RequiredHumanAction: "请研发工程师确认是否继续释放代理绑定",
 				TaskType:            "task_takeover",
 				CurrentStage:        "completion_cleanup",
-				NextAction:          "ask_owner",
+				AgenticNextAction:   "ask_owner",
 			}))
 		}
-		if issue.CurrentAgentID != currentAgentID {
+		if issue.AgenticID != currentAgentID {
 			return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
 				Code:                "agent_ownership_conflict",
 				Message:             "当前 Jira 卡片未绑定当前 AIAgent",
 				RequiredHumanAction: "请研发工程师确认是否释放当前代理绑定",
 				TaskType:            "task_takeover",
 				CurrentStage:        "completion_cleanup",
-				NextAction:          "ask_owner",
+				AgenticNextAction:   "ask_owner",
 			}))
 		}
 		if jiraTransitionID == "" {
@@ -148,7 +148,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 					RequiredHumanAction: "请维护 workflow profile 的 jira_transition_mapping，或显式提供 --jira-transition-id",
 					TaskType:            "task_takeover",
 					CurrentStage:        "jira_transition",
-					NextAction:          "ask_owner",
+					AgenticNextAction:   "ask_owner",
 				}))
 			}
 			jiraTransitionID = resolvedTransitionID
@@ -157,7 +157,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		releaseComment := jiraReleaseComment(workspaceProfile, runID, completedAt)
 		if len(fields) == 0 && releaseComment == "" {
 			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "completion_cleanup", "ask_owner", "missing_jira_write_mapping", false, true)
-			return writeJSON(stdout, output.Failure("release_agent", "missing_jira_write_mapping", "缺少 current_agent_id 字段映射", "请维护 workflow profile 的所有权字段映射"))
+			return writeJSON(stdout, output.Failure("release_agent", "missing_jira_write_mapping", "缺少 agentic_id 字段映射", "请维护 workflow profile 的所有权字段映射"))
 		}
 		if len(fields) > 0 {
 			if err := selection.Client.UpdateFields(context.Background(), issueKey, fields); err != nil {
@@ -180,7 +180,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 					RequiredHumanAction: "请检查 Jira transition 权限、transition id 和 workflow profile 映射",
 					TaskType:            "task_takeover",
 					CurrentStage:        "jira_transition",
-					NextAction:          "ask_owner",
+					AgenticNextAction:   "ask_owner",
 				}))
 			}
 			if err := appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "jira_transition", "completion_cleanup", "", true, false); err != nil {
@@ -192,39 +192,39 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		}
 	}
 	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
-		RunID:                 runID,
-		IssueKey:              issueKey,
-		TaskType:              "task_takeover",
-		Operation:             "release_agent",
-		CurrentStage:          "completed",
-		NextAction:            "task_audit_submitted",
-		AgentID:               currentAgentID,
-		CurrentAgentID:        currentAgentID,
-		CompletedAt:           completedAt,
-		CompletionEvidence:    completionEvidence,
-		CurrentAgentIDCleared: true,
-		AuditTarget:           auditTarget,
-		AuditSubmitted:        auditSubmitted,
-		AuditReference:        auditReference,
-		OK:                    true,
-		Gate:                  "release_agent",
-		GateStatus:            "passed",
+		AgenticRunID:              runID,
+		IssueKey:                  issueKey,
+		TaskType:                  "task_takeover",
+		Operation:                 "release_agent",
+		CurrentStage:              "completed",
+		AgenticNextAction:         "task_audit_submitted",
+		AgentID:                   currentAgentID,
+		AgenticID:                 currentAgentID,
+		CompletedAt:               completedAt,
+		AgenticCompletionEvidence: completionEvidence,
+		AgenticIDCleared:          true,
+		AuditTarget:               auditTarget,
+		AuditSubmitted:            auditSubmitted,
+		AuditReference:            auditReference,
+		OK:                        true,
+		Gate:                      "release_agent",
+		GateStatus:                "passed",
 	}); err != nil {
 		return writeJSON(stdout, output.Failure("release_agent", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 	}
 	return writeJSON(stdout, output.Success("release_agent", map[string]any{
-		"workspace":                workspaceName,
-		"issue_key":                issueKey,
-		"run_id":                   runID,
-		"agent_id":                 currentAgentID,
-		"current_agent_id_cleared": true,
-		"jira_transition_id":       jiraTransitionID,
-		"completed_at":             completedAt,
-		"completion_evidence":      completionEvidence,
-		"audit_target":             auditTarget,
-		"audit_submitted":          auditSubmitted,
-		"audit_reference":          auditReference,
-		"current_stage":            "completed",
-		"next_action":              "task_audit_submitted",
+		"workspace":                   workspaceName,
+		"issue_key":                   issueKey,
+		"agentic_run_id":              runID,
+		"agent_id":                    currentAgentID,
+		"agentic_id_cleared":          true,
+		"jira_transition_id":          jiraTransitionID,
+		"completed_at":                completedAt,
+		"agentic_completion_evidence": completionEvidence,
+		"audit_target":                auditTarget,
+		"audit_submitted":             auditSubmitted,
+		"audit_reference":             auditReference,
+		"current_stage":               "completed",
+		"agentic_next_action":         "task_audit_submitted",
 	}))
 }

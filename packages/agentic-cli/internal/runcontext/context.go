@@ -7,24 +7,24 @@ import (
 )
 
 type Query struct {
-	RunID     string
-	Workspace string
-	AgentID   string
+	AgenticRunID string
+	Workspace    string
+	AgentID      string
 }
 
 type Context struct {
-	Workspace        string
-	RunID            string
-	IssueKey         string
-	AgentID          string
-	CurrentAgentID   string
-	TaskClass        string
-	ProcessID        string
-	TargetRepo       string
-	CurrentStage     string
-	NextAction       string
-	Terminal         bool
-	HumanGatePending bool
+	Workspace         string
+	AgenticRunID      string
+	IssueKey          string
+	AgentID           string
+	AgenticID         string
+	TaskClass         string
+	ProcessID         string
+	TargetRepo        string
+	CurrentStage      string
+	AgenticNextAction string
+	Terminal          bool
+	HumanGatePending  bool
 }
 
 var ErrRunNotFound = errors.New("run_not_found")
@@ -37,7 +37,7 @@ func Read(events []feedback.Event, query Query) (Context, error) {
 	var context Context
 	anchorIndex := -1
 	for index, event := range events {
-		if event.RunID != query.RunID || event.Operation != "takeover_task" || !event.OK {
+		if event.AgenticRunID != query.AgenticRunID || event.Operation != "takeover_task" || !event.OK {
 			continue
 		}
 		if event.Workspace != query.Workspace {
@@ -45,26 +45,26 @@ func Read(events []feedback.Event, query Query) (Context, error) {
 		}
 		if event.IssueKey == "" ||
 			event.AgentID == "" ||
-			event.CurrentAgentID == "" ||
+			event.AgenticID == "" ||
 			event.AgentID != query.AgentID ||
-			event.CurrentAgentID != event.AgentID ||
+			event.AgenticID != event.AgentID ||
 			event.TaskClass == "" ||
 			event.ProcessID == "" ||
 			event.CurrentStage == "" ||
-			event.NextAction == "" {
+			event.AgenticNextAction == "" {
 			return Context{}, ErrLocalStateMismatch
 		}
 		context = Context{
-			Workspace:      event.Workspace,
-			RunID:          event.RunID,
-			IssueKey:       event.IssueKey,
-			AgentID:        event.AgentID,
-			CurrentAgentID: event.CurrentAgentID,
-			TaskClass:      event.TaskClass,
-			ProcessID:      event.ProcessID,
-			TargetRepo:     event.TargetRepo,
-			CurrentStage:   event.CurrentStage,
-			NextAction:     event.NextAction,
+			Workspace:         event.Workspace,
+			AgenticRunID:      event.AgenticRunID,
+			IssueKey:          event.IssueKey,
+			AgentID:           event.AgentID,
+			AgenticID:         event.AgenticID,
+			TaskClass:         event.TaskClass,
+			ProcessID:         event.ProcessID,
+			TargetRepo:        event.TargetRepo,
+			CurrentStage:      event.CurrentStage,
+			AgenticNextAction: event.AgenticNextAction,
 		}
 		anchorIndex = index
 		break
@@ -73,13 +73,13 @@ func Read(events []feedback.Event, query Query) (Context, error) {
 		return Context{}, ErrRunNotFound
 	}
 	for _, event := range events[anchorIndex+1:] {
-		if event.RunID != query.RunID {
+		if event.AgenticRunID != query.AgenticRunID {
 			continue
 		}
 		if immutableConflict(event.Workspace, context.Workspace) ||
 			immutableConflict(event.IssueKey, context.IssueKey) ||
 			immutableConflict(event.AgentID, context.AgentID) ||
-			immutableConflict(event.CurrentAgentID, context.CurrentAgentID) ||
+			immutableConflict(event.AgenticID, context.AgenticID) ||
 			immutableConflict(event.TaskClass, context.TaskClass) ||
 			immutableConflict(event.ProcessID, context.ProcessID) {
 			return Context{}, ErrLocalStateMismatch
@@ -97,12 +97,12 @@ func Read(events []feedback.Event, query Query) (Context, error) {
 		if event.Operation == "resume_takeover" && (!event.OK || event.CurrentStage == "takeover_resumed") {
 			continue
 		}
-		if event.CurrentStage == "" || event.NextAction == "" {
+		if event.CurrentStage == "" || event.AgenticNextAction == "" {
 			return Context{}, ErrLocalStateMismatch
 		}
 		context.CurrentStage = event.CurrentStage
-		context.NextAction = event.NextAction
-		context.Terminal = event.CurrentStage == "completed" || event.NextAction == "task_audit_submitted"
+		context.AgenticNextAction = event.AgenticNextAction
+		context.Terminal = event.CurrentStage == "completed" || event.AgenticNextAction == "task_audit_submitted"
 		context.HumanGatePending = event.RequiresHumanAction
 	}
 	return context, nil

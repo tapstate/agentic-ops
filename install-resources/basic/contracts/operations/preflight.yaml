@@ -52,7 +52,7 @@ output:
   jira_config_source:
     type: string
     required: false
-  next_action:
+  agentic_next_action:
     type: string
 failure:
   codes:

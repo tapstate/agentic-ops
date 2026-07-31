@@ -26,7 +26,7 @@
 
 ```text
 agentic-cli doctor --workspace <name>
-agentic-cli feedback bundle --workspace <name> --run-id <run_id> --redact
+agentic-cli feedback bundle --workspace <name> --run-id <agentic_run_id> --redact
 agentic-cli update check
 agentic-cli update apply
 agentic-cli profile validate --workspace <name>
@@ -48,8 +48,8 @@ agentic-cli policy rollback --workspace <name>
 - [x] **Task 1: 稳定错误码与事件模型**
   - 为四类问题定义稳定 `code`。
   - 失败输出必须包含 `required_human_action`。
-  - 事件日志记录 CLI 版本、资产版本、操作、`task_type`、`current_stage`、`next_action`、`code` 和门禁状态。
-  - 实现说明：当前已完成结构化失败输出基线，失败输出包含 `required_human_action`、`task_type`、`current_stage` 和 `next_action`；事件模型已包含 `agentic_cli_version`、`version_state`、`asset_version`、`code`、`gate` 和 `gate_status`。当前只覆盖已实现本地模拟流程的命令，四类问题的完整业务门禁分别在后续 Task 4、Task 5 和 Task 6 中继续落地。
+  - 事件日志记录 CLI 版本、资产版本、操作、`task_type`、`current_stage`、`agentic_next_action`、`code` 和门禁状态。
+  - 实现说明：当前已完成结构化失败输出基线，失败输出包含 `required_human_action`、`task_type`、`current_stage` 和 `agentic_next_action`；事件模型已包含 `agentic_cli_version`、`version_state`、`asset_version`、`code`、`gate` 和 `gate_status`。当前只覆盖已实现本地模拟流程的命令，四类问题的完整业务门禁分别在后续 Task 4、Task 5 和 Task 6 中继续落地。
 
 - [x] **Task 2: 脱敏诊断包**
   - 实现 `doctor`。

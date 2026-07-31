@@ -46,7 +46,7 @@ output:
     type: object
   local_paths:
     type: object
-  next_action:
+  agentic_next_action:
     type: string
 failure:
   codes:

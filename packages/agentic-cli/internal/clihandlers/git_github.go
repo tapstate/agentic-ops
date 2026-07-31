@@ -27,7 +27,7 @@ func runInspectWorkspace(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --source-root，或维护 workflow profile 的 local.source_root",
 			TaskType:            "workspace_inspection",
 			CurrentStage:        "workspace_inspection",
-			NextAction:          "fix_workspace",
+			AgenticNextAction:   "fix_workspace",
 		}))
 	}
 	status, err := inspectGitWorkspace(context.Background(), sourceRoot)
@@ -38,7 +38,7 @@ func runInspectWorkspace(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请确认当前目录是 Git 仓库且 Git 可用",
 			TaskType:            "workspace_inspection",
 			CurrentStage:        "workspace_inspection",
-			NextAction:          "fix_workspace",
+			AgenticNextAction:   "fix_workspace",
 		}))
 	}
 	nextAction := "continue_development"
@@ -46,14 +46,14 @@ func runInspectWorkspace(args []string, stdout io.Writer) int {
 		nextAction = "prepare_pr"
 	}
 	return writeJSON(stdout, output.Success("inspect_workspace", map[string]any{
-		"workspace":     workspaceName,
-		"source_root":   sourceRoot,
-		"branch":        status.Branch,
-		"commit":        status.Commit,
-		"dirty":         status.Dirty,
-		"changed_files": status.ChangedFiles,
-		"current_stage": "workspace_inspected",
-		"next_action":   nextAction,
+		"workspace":           workspaceName,
+		"source_root":         sourceRoot,
+		"branch":              status.Branch,
+		"commit":              status.Commit,
+		"dirty":               status.Dirty,
+		"changed_files":       status.ChangedFiles,
+		"current_stage":       "workspace_inspected",
+		"agentic_next_action": nextAction,
 	}))
 }
 
@@ -66,7 +66,7 @@ func runBranchAlign(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请确认目标工作区，或先为该工作区补充项目级分支规范",
 			TaskType:            "branch_switch",
 			CurrentStage:        "branch_switch_gate",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	mode := positionalArg(args, "branch-align")
@@ -77,7 +77,7 @@ func runBranchAlign(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请按 agentic-cli tapdata branch-align plan develop 重试，或使用 list/status/apply",
 			TaskType:            "branch_switch",
 			CurrentStage:        "branch_switch_gate",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	workspaceProfile := takeoverProfile(workspaceName)
@@ -89,7 +89,7 @@ func runBranchAlign(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --work-root，设置 TAPDATA_WORK_ROOT，或维护 tapdata profile 的 local.source_root",
 			TaskType:            "branch_switch",
 			CurrentStage:        "branch_switch_gate",
-			NextAction:          "fix_workspace",
+			AgenticNextAction:   "fix_workspace",
 		}))
 	}
 	remote := readFlag(args, "--remote", os.Getenv("TAPDATA_GIT_REMOTE"))
@@ -110,26 +110,26 @@ func runBranchAlign(args []string, stdout io.Writer) int {
 			return writeJSON(stdout, branchAlignmentFailure("list", err))
 		}
 		return writeJSON(stdout, output.Success("branch_align", map[string]any{
-			"workspace":     workspaceName,
-			"mode":          "list",
-			"work_root":     workRoot,
-			"remote":        remote,
-			"filter":        filter,
-			"branches":      branches,
-			"match_count":   len(branches),
-			"current_stage": "branch_candidates_listed",
-			"next_action":   "plan_branch_alignment",
+			"workspace":           workspaceName,
+			"mode":                "list",
+			"work_root":           workRoot,
+			"remote":              remote,
+			"filter":              filter,
+			"branches":            branches,
+			"match_count":         len(branches),
+			"current_stage":       "branch_candidates_listed",
+			"agentic_next_action": "plan_branch_alignment",
 		}))
 	case "status":
 		rows := gitops.TapdataAlignmentStatus(ctx, workRoot)
 		return writeJSON(stdout, output.Success("branch_align", map[string]any{
-			"workspace":     workspaceName,
-			"mode":          "status",
-			"work_root":     workRoot,
-			"rows":          rows,
-			"rows_count":    len(rows),
-			"current_stage": "branch_status_inspected",
-			"next_action":   "plan_branch_alignment",
+			"workspace":           workspaceName,
+			"mode":                "status",
+			"work_root":           workRoot,
+			"rows":                rows,
+			"rows_count":          len(rows),
+			"current_stage":       "branch_status_inspected",
+			"agentic_next_action": "plan_branch_alignment",
 		}))
 	case "plan", "apply":
 		branchSpec := positionalArg(args[1:], mode)
@@ -140,7 +140,7 @@ func runBranchAlign(args []string, stdout io.Writer) int {
 				RequiredHumanAction: "请提供 develop、main、release-vX.Y.Z，或 <tapdata>,<enterprise>,<web> 格式",
 				TaskType:            "branch_switch",
 				CurrentStage:        "branch_switch_gate",
-				NextAction:          "ask_owner",
+				AgenticNextAction:   "ask_owner",
 			}))
 		}
 		if !hasFlag(args, "--no-fetch") {
@@ -163,19 +163,19 @@ func runBranchAlign(args []string, stdout io.Writer) int {
 				nextAction = "resolve_branch_alignment"
 			}
 			return writeJSON(stdout, output.Success("branch_align", map[string]any{
-				"workspace":     workspaceName,
-				"mode":          "plan",
-				"work_root":     workRoot,
-				"remote":        remote,
-				"branch_spec":   branchSpec,
-				"tap_branch":    plan.TapBranch,
-				"ent_branch":    plan.EntBranch,
-				"web_branch":    plan.WebBranch,
-				"blocked":       plan.Blocked,
-				"rows":          plan.Rows,
-				"rows_count":    len(plan.Rows),
-				"current_stage": "branch_alignment_planned",
-				"next_action":   nextAction,
+				"workspace":           workspaceName,
+				"mode":                "plan",
+				"work_root":           workRoot,
+				"remote":              remote,
+				"branch_spec":         branchSpec,
+				"tap_branch":          plan.TapBranch,
+				"ent_branch":          plan.EntBranch,
+				"web_branch":          plan.WebBranch,
+				"blocked":             plan.Blocked,
+				"rows":                plan.Rows,
+				"rows_count":          len(plan.Rows),
+				"current_stage":       "branch_alignment_planned",
+				"agentic_next_action": nextAction,
 			}))
 		}
 		if plan.Blocked {
@@ -185,7 +185,7 @@ func runBranchAlign(args []string, stdout io.Writer) int {
 				RequiredHumanAction: "请补齐缺失仓库或在分支组中显式指定 enterprise/web 分支后重试",
 				TaskType:            "branch_switch",
 				CurrentStage:        "branch_alignment_gate",
-				NextAction:          "resolve_branch_alignment",
+				AgenticNextAction:   "resolve_branch_alignment",
 			}))
 		}
 		switched, err := gitops.ApplyTapdataBranchAlignment(ctx, plan)
@@ -193,16 +193,16 @@ func runBranchAlign(args []string, stdout io.Writer) int {
 			return writeJSON(stdout, branchAlignmentFailure(mode, err))
 		}
 		return writeJSON(stdout, output.Success("branch_align", map[string]any{
-			"workspace":      workspaceName,
-			"mode":           "apply",
-			"work_root":      workRoot,
-			"remote":         remote,
-			"branch_spec":    branchSpec,
-			"tap_branch":     plan.TapBranch,
-			"switched_rows":  switched,
-			"switched_count": len(switched),
-			"current_stage":  "branch_alignment_applied",
-			"next_action":    "continue_development",
+			"workspace":           workspaceName,
+			"mode":                "apply",
+			"work_root":           workRoot,
+			"remote":              remote,
+			"branch_spec":         branchSpec,
+			"tap_branch":          plan.TapBranch,
+			"switched_rows":       switched,
+			"switched_count":      len(switched),
+			"current_stage":       "branch_alignment_applied",
+			"agentic_next_action": "continue_development",
 		}))
 	default:
 		return writeJSON(stdout, output.FailureWithContext("branch_align", output.FailureContext{
@@ -211,7 +211,7 @@ func runBranchAlign(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请使用 list、status、plan 或 apply",
 			TaskType:            "branch_switch",
 			CurrentStage:        "branch_switch_gate",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 }
@@ -221,12 +221,12 @@ func runPreparePR(args []string, stdout io.Writer) int {
 	runID := readFlag(args, "--run-id", "")
 	if runID == "" {
 		return writeJSON(stdout, output.FailureWithContext("prepare_pr", output.FailureContext{
-			Code:                "missing_run_id",
-			Message:             "缺少 run_id",
+			Code:                "missing_agentic_run_id",
+			Message:             "缺少 agentic_run_id",
 			RequiredHumanAction: "请提供 --run-id",
 			TaskType:            "pr_preparation",
 			CurrentStage:        "pr_plan_preparation",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	root, err := workspaceRoot()
@@ -238,10 +238,10 @@ func runPreparePR(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.FailureWithContext("prepare_pr", output.FailureContext{
 			Code:                evidenceStateErrorCode(err),
 			Message:             err.Error(),
-			RequiredHumanAction: "请检查 run_id 是否存在有效接管事件，且仍属于当前 AIAgent",
+			RequiredHumanAction: "请检查 agentic_run_id 是否存在有效接管事件，且仍属于当前 AIAgent",
 			TaskType:            "pr_preparation",
 			CurrentStage:        "pr_plan_preparation",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	workspaceProfile := takeoverProfile(workspaceName)
@@ -253,7 +253,7 @@ func runPreparePR(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --source-root，或维护 workflow profile 的 local.source_root",
 			TaskType:            "pr_preparation",
 			CurrentStage:        "pr_plan_preparation",
-			NextAction:          "fix_workspace",
+			AgenticNextAction:   "fix_workspace",
 		}))
 	}
 	status, err := inspectGitWorkspace(context.Background(), sourceRoot)
@@ -264,7 +264,7 @@ func runPreparePR(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请确认当前目录是 Git 仓库且 Git 可用",
 			TaskType:            "pr_preparation",
 			CurrentStage:        "pr_plan_preparation",
-			NextAction:          "fix_workspace",
+			AgenticNextAction:   "fix_workspace",
 		}))
 	}
 	policyPath, gateInfo, err := prPolicyGateInfo()
@@ -275,7 +275,7 @@ func runPreparePR(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查 install-resources/basic/policies/default.yaml 是否存在且通过校验",
 			TaskType:            "pr_preparation",
 			CurrentStage:        "pr_plan_preparation",
-			NextAction:          "fix_policy",
+			AgenticNextAction:   "fix_policy",
 		}))
 	}
 	base := readFlag(args, "--base", "main")
@@ -286,24 +286,24 @@ func runPreparePR(args []string, stdout io.Writer) int {
 		targetRepo = workspaceProfile.GitHub.Repositories.Default
 	}
 	_ = appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
-		RunID:          runID,
-		IssueKey:       state.IssueKey,
-		TaskType:       "pr_preparation",
-		Operation:      "prepare_pr",
-		CurrentStage:   "pr_plan_prepared",
-		NextAction:     "ask_owner_to_push_and_create_pr",
-		AgentID:        state.AgentID,
-		CurrentAgentID: state.CurrentAgentID,
-		TargetRepo:     targetRepo,
-		TaskClass:      state.TaskClass,
-		ProcessID:      state.ProcessID,
-		OK:             true,
-		Gate:           "prepare_pr",
-		GateStatus:     "passed",
+		AgenticRunID:      runID,
+		IssueKey:          state.IssueKey,
+		TaskType:          "pr_preparation",
+		Operation:         "prepare_pr",
+		CurrentStage:      "pr_plan_prepared",
+		AgenticNextAction: "ask_owner_to_push_and_create_pr",
+		AgentID:           state.AgentID,
+		AgenticID:         state.AgenticID,
+		TargetRepo:        targetRepo,
+		TaskClass:         state.TaskClass,
+		ProcessID:         state.ProcessID,
+		OK:                true,
+		Gate:              "prepare_pr",
+		GateStatus:        "passed",
 	})
 	return writeJSON(stdout, output.Success("prepare_pr", map[string]any{
 		"workspace":               workspaceName,
-		"run_id":                  runID,
+		"agentic_run_id":          runID,
 		"issue_key":               state.IssueKey,
 		"task_class":              state.TaskClass,
 		"process_id":              state.ProcessID,
@@ -323,16 +323,16 @@ func runPreparePR(args []string, stdout io.Writer) int {
 		"create_pr_gate_required": gateInfo["create_pr"],
 		"blocked_operations":      gatedOperations(gateInfo),
 		"current_stage":           "pr_plan_prepared",
-		"next_action":             "ask_owner_to_push_and_create_pr",
+		"agentic_next_action":     "ask_owner_to_push_and_create_pr",
 	}))
 }
 
 func branchAlignmentFailure(mode string, err error) map[string]any {
 	context := output.FailureContext{
-		Message:      err.Error(),
-		TaskType:     "branch_switch",
-		CurrentStage: "branch_switch_gate",
-		NextAction:   "ask_owner",
+		Message:           err.Error(),
+		TaskType:          "branch_switch",
+		CurrentStage:      "branch_switch_gate",
+		AgenticNextAction: "ask_owner",
 	}
 	switch {
 	case errors.Is(err, gitops.ErrInvalidBranch):
@@ -381,7 +381,7 @@ func runReadPRComments(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --repo 和 --pr",
 			TaskType:            "pr_review",
 			CurrentStage:        "pr_comment_read",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	comments, err := gitHubClient.ReadPRComments(context.Background(), repo, pr)
@@ -392,17 +392,17 @@ func runReadPRComments(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查 GitHub CLI 登录状态、仓库权限和 PR 编号",
 			TaskType:            "pr_review",
 			CurrentStage:        "pr_comment_read",
-			NextAction:          "fix_environment",
+			AgenticNextAction:   "fix_environment",
 		}))
 	}
 	return writeJSON(stdout, output.Success("read_pr_comments", map[string]any{
-		"workspace":      workspaceName,
-		"repo":           repo,
-		"pr":             pr,
-		"comments_count": len(comments),
-		"comments":       comments,
-		"current_stage":  "pr_comments_read",
-		"next_action":    "classify_or_fix_pr_comments",
+		"workspace":           workspaceName,
+		"repo":                repo,
+		"pr":                  pr,
+		"comments_count":      len(comments),
+		"comments":            comments,
+		"current_stage":       "pr_comments_read",
+		"agentic_next_action": "classify_or_fix_pr_comments",
 	}))
 }
 
@@ -417,7 +417,7 @@ func runCheckCIStatus(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --repo 和 --pr",
 			TaskType:            "ci_check",
 			CurrentStage:        "ci_status_check",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	status, err := gitHubClient.CheckCIStatus(context.Background(), repo, pr)
@@ -428,7 +428,7 @@ func runCheckCIStatus(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查 GitHub CLI 登录状态、仓库权限和 PR 编号",
 			TaskType:            "ci_check",
 			CurrentStage:        "ci_status_check",
-			NextAction:          "fix_environment",
+			AgenticNextAction:   "fix_environment",
 		}))
 	}
 	nextAction := "continue_review"
@@ -447,7 +447,7 @@ func runCheckCIStatus(args []string, stdout io.Writer) int {
 		"failing_checks":       status.FailingChecks,
 		"failing_checks_count": len(status.FailingChecks),
 		"current_stage":        "ci_status_checked",
-		"next_action":          nextAction,
+		"agentic_next_action":  nextAction,
 	}))
 }
 
@@ -462,7 +462,7 @@ func runFixPRComments(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --repo 和 --pr",
 			TaskType:            "pr_comment_fix",
 			CurrentStage:        "pr_comment_fix_gate",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	comments, err := gitHubClient.ReadPRComments(context.Background(), repo, pr)
@@ -473,7 +473,7 @@ func runFixPRComments(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查 GitHub CLI 登录状态、仓库权限和 PR 编号",
 			TaskType:            "pr_comment_fix",
 			CurrentStage:        "pr_comment_fix_gate",
-			NextAction:          "fix_environment",
+			AgenticNextAction:   "fix_environment",
 		}))
 	}
 	policyPath, gateInfo, err := prPolicyGateInfo()
@@ -484,7 +484,7 @@ func runFixPRComments(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查 install-resources/basic/policies/default.yaml 是否存在且通过校验",
 			TaskType:            "pr_comment_fix",
 			CurrentStage:        "pr_comment_fix_gate",
-			NextAction:          "fix_policy",
+			AgenticNextAction:   "fix_policy",
 		}))
 	}
 	result := output.FailureWithContext("fix_pr_comments", output.FailureContext{
@@ -493,7 +493,7 @@ func runFixPRComments(args []string, stdout io.Writer) int {
 		RequiredHumanAction: "请由研发工程师确认评论取舍、修改范围，以及后续 git_commit/git_push 策略门禁",
 		TaskType:            "pr_comment_fix",
 		CurrentStage:        "pr_comment_fix_gate",
-		NextAction:          "ask_owner",
+		AgenticNextAction:   "ask_owner",
 	})
 	result["workspace"] = workspaceName
 	result["repo"] = repo

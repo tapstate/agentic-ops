@@ -20,13 +20,13 @@ input:
   sections_file:
     type: string
     required: true
-  run_id:
+  agentic_run_id:
     type: string
     required: false
 preconditions:
   - current_user_must_match_owner_and_assignee
-  - current_agent_id_must_be_empty_or_match_agent_id
-  - run_id_must_match_issue_when_provided
+  - agentic_id_must_be_empty_or_match_agent_id
+  - agentic_run_id_must_match_issue_when_provided
   - description_must_be_safe_to_merge
   - real_jira_write_must_be_confirmed
 output:
@@ -34,13 +34,13 @@ output:
     type: string
   issue_key:
     type: string
-  run_id:
+  agentic_run_id:
     type: string
   updated_section_count:
     type: integer
   current_stage:
     type: string
-  next_action:
+  agentic_next_action:
     type: string
 failure:
   codes:

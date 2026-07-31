@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让 `resume-takeover` 从同一 `run_id` 恢复可信上下文，在恢复前完成 Jira 所有权、目标仓库、操作阶段和标准流程阶段校验，并为任务级阻塞生成受控 Jira 反馈材料。
+**Goal:** 让 `resume-takeover` 从同一 `agentic_run_id` 恢复可信上下文，在恢复前完成 Jira 所有权、目标仓库、操作阶段和标准流程阶段校验，并为任务级阻塞生成受控 Jira 反馈材料。
 
 **Architecture:** 新增 `internal/runcontext` 统一读取事件上下文，在 `internal/jira` 增加纯 `ResumeGate`，由 CLI handler 负责加载资源、执行 Jira 只读查询、记录本地审计并生成阻塞评论文件。Jira 评论继续通过现有 `add-task-comment` 原子操作和显式人工门禁写入。
 
@@ -14,9 +14,9 @@
 - Jira 是任务事实源；本地事件不能覆盖 Jira 当前负责人、代理绑定、状态或目标仓库。
 - `resume-takeover` 只能读取 Jira，不得调用 `AddComment`、`UpdateFields`、`TransitionIssue` 或其它 Jira 写接口。
 - 代理绑定为空时返回 `agent_binding_lost`，不得自动重新绑定。
-- 目标仓库变化时返回 `target_repo_changed`，不得让同一个 `run_id` 静默切换仓库。
+- 目标仓库变化时返回 `target_repo_changed`，不得让同一个 `agentic_run_id` 静默切换仓库。
 - 操作阶段与标准流程阶段分别校验，不得直接比较。
-- 恢复成功不得推进业务阶段，不得生成新的 `run_id`。
+- 恢复成功不得推进业务阶段，不得生成新的 `agentic_run_id`。
 - 真实 Jira 评论必须通过 `add-task-comment` 和 `--confirm-real-jira-write`。
 - 测试只能使用 fake adapter、recording client 或 `httptest`，不得调用真实 Jira 写操作。
 - 不引入新的第三方依赖，不实现通用工作流引擎或通用 Jira 评论幂等系统。
@@ -338,7 +338,7 @@ Expected: PASS。
 | 条件 | code | feedback required | write allowed |
 | --- | --- | --- | --- |
 | assignee 改变 | `assignee_changed` | true | false |
-| `current_agent_id` 为空 | `agent_binding_lost` | true | true |
+| `agentic_id` 为空 | `agent_binding_lost` | true | true |
 | 绑定其他代理 | `agent_ownership_conflict` | true | false |
 | fake adapter 绑定为空 | success | false | false |
 
@@ -428,7 +428,7 @@ Expected: 无范围外文件；不提交。
 ```go
 assertJSONField(t, stdout.String(), "previous_stage", "takeover_started")
 assertJSONField(t, stdout.String(), "current_stage", "takeover_started")
-assertJSONField(t, stdout.String(), "next_action", "proceed")
+assertJSONField(t, stdout.String(), "agentic_next_action", "proceed")
 assertJSONField(t, stdout.String(), "target_repo", "tapstate/example-repo")
 assertJSONField(t, stdout.String(), "standard_process_stage", "waiting_takeover")
 ```
@@ -474,13 +474,13 @@ func repoOperationContract(operation string) (contract.Operation, error) {
 
 处理顺序必须与设计一致：
 
-1. 读取 `run_id` 和 workspace root。
+1. 读取 `agentic_run_id` 和 workspace root。
 2. `runcontext.ReadFile`。
 3. 加载 profile、operation contract 和 process registry。
 4. 选择 Jira adapter。
 5. `GetIssueByKey` 和 `CurrentUser`。
 6. 调用 `jira.ValidateResume`。
-7. 成功时写入保留原阶段和原 `next_action` 的 `resume_takeover` 事件。
+7. 成功时写入保留原阶段和原 `agentic_next_action` 的 `resume_takeover` 事件。
 8. 输出 decision 中经过校验或补齐的 `target_repo` 和 `standard_process_stage`。
 9. 成功恢复事件写入经过校验或补齐的 `target_repo`。
 
@@ -585,15 +585,15 @@ Expected: FAIL，因为 helper 尚不存在。
 
 - [x] **Step 3: 实现反馈文件生成**
 
-文件名只使用经过既有 run id 安全约束的 `run_id` 和稳定 code。内容固定使用以下结构：
+文件名只使用经过既有 run id 安全约束的 `agentic_run_id` 和稳定 code。内容固定使用以下结构：
 
 ```text
 # AgenticOps 恢复阻塞
 
-- 反馈编号: resume-blocked:<run_id>:<code>
+- 反馈编号: resume-blocked:<agentic_run_id>:<code>
 - 工作空间: <workspace>
 - Jira 卡片: <issue_key>
-- run_id: <run_id>
+- agentic_run_id: <agentic_run_id>
 - 错误码: <code>
 - 说明: <message>
 - 需要处理: <required_human_action>
@@ -626,7 +626,7 @@ result["jira_feedback_file"] = feedback.File
 result["jira_feedback_category"] = feedback.Category
 ```
 
-4. `next_action` 使用 feedback 决定值。
+4. `agentic_next_action` 使用 feedback 决定值。
 5. 文件写入失败返回 `feedback_write_failed`，不尝试 Jira 写入。
 
 - [x] **Step 6: 写 CLI 反馈闭环测试**
@@ -638,7 +638,7 @@ result["jira_feedback_category"] = feedback.Category
 - `TestResumeTakeoverDoesNotCreateFeedbackForUntrustedLocalFailure`
 - `TestGeneratedResumeFeedbackCanBePassedToAddTaskComment`
 
-最后一个测试使用 fake/recording client 调用现有 `add-task-comment`，携带同一 `run_id` 和生成的文件，断言 category 为 `blocked`。
+最后一个测试使用 fake/recording client 调用现有 `add-task-comment`，携带同一 `agentic_run_id` 和生成的文件，断言 category 为 `blocked`。
 
 - [x] **Step 7: 运行定向测试**
 
@@ -772,7 +772,7 @@ Expected: 无范围外文件；不提交。
 ```text
 "previous_stage":"takeover_started"
 "current_stage":"takeover_started"
-"next_action":"proceed"
+"agentic_next_action":"proceed"
 "target_repo":"tapstate/example-repo"
 "standard_process_stage":"waiting_takeover"
 ```
@@ -820,7 +820,7 @@ side_effects:
 
 在恢复命令后增加行为规则：
 
-1. `jira_feedback_required=false` 时按返回的 `next_action` 处理。
+1. `jira_feedback_required=false` 时按返回的 `agentic_next_action` 处理。
 2. `jira_feedback_required=true` 且 write allowed 时，研发工程师确认后调用 `add-task-comment`。
 3. write allowed 为 false 时，停止并把评论材料交给研发工程师或当前负责人。
 4. 写入前先 `inspect-task` 检查反馈编号，避免重复评论。

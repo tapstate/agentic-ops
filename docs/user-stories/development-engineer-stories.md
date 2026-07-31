@@ -14,7 +14,7 @@
 | DE-002 | 初始化项目 AI 工作空间 | 工作空间绑定 Jira、仓库、本地目录和 workflow profile | [de-002-workspace-init.md](development-engineer/de-002-workspace-init.md) |
 | DE-003 | 初始化 AIAgent 能力 | AIAgent 知道手册、契约、门禁和停止条件 | [de-003-agent-init.md](development-engineer/de-003-agent-init.md) |
 | DE-004 | 新任务接管 | 项目准入、Jira 补卡、接管所有权和修复计划确认形成闭环 | [de-004-takeover-task.md](development-engineer/de-004-takeover-task.md) |
-| DE-005 | 恢复接管任务 | 恢复使用同一 `run_id`，不重新开始或混淆执行记录 | [de-005-resume-takeover.md](development-engineer/de-005-resume-takeover.md) |
+| DE-005 | 恢复接管任务 | 恢复使用同一 `agentic_run_id`，不重新开始或混淆执行记录 | [de-005-resume-takeover.md](development-engineer/de-005-resume-takeover.md) |
 | DE-006 | 任务完成审计与反馈分析 | 提交任务级审计，不把反馈报告当作主链路事实源 | [de-006-task-audit-feedback.md](development-engineer/de-006-task-audit-feedback.md) |
 
 ## 3. 审核方式

@@ -47,16 +47,16 @@ func runDoctor(args []string, stdout io.Writer) int {
 		nextAction = "fix_environment"
 	}
 	return writeJSON(stdout, output.Success("doctor", map[string]any{
-		"workspace":         workspaceName,
-		"version":           Version,
-		"version_state":     VersionState,
-		"iteration_version": IterationVersion,
-		"commit":            Commit,
-		"status":            status,
-		"checks":            checks,
-		"current":           checks["current"],
-		"local_paths":       checks["local_paths"],
-		"next_action":       nextAction,
+		"workspace":           workspaceName,
+		"version":             Version,
+		"version_state":       VersionState,
+		"iteration_version":   IterationVersion,
+		"commit":              Commit,
+		"status":              status,
+		"checks":              checks,
+		"current":             checks["current"],
+		"local_paths":         checks["local_paths"],
+		"agentic_next_action": nextAction,
 	}))
 }
 
@@ -121,22 +121,22 @@ func runPreflight(args []string, stdout io.Writer) int {
 		nextAction = "fix_environment"
 	}
 	result := output.Success("preflight", map[string]any{
-		"workspace":   workspaceName,
-		"install_dir": installDir,
-		"os":          runtime.GOOS,
-		"arch":        runtime.GOARCH,
-		"version":     Version,
-		"status":      status,
-		"checks":      checks,
-		"next_action": nextAction,
+		"workspace":           workspaceName,
+		"install_dir":         installDir,
+		"os":                  runtime.GOOS,
+		"arch":                runtime.GOARCH,
+		"version":             Version,
+		"status":              status,
+		"checks":              checks,
+		"agentic_next_action": nextAction,
 	})
 	if checks["jira_config"]["code"] == "jira_api_token_missing" && checks["workspace"]["status"] == "ok" {
 		if runtimeConfig, err := resolveJiraRuntimeConfig(workspaceName); err == nil {
 			addJiraTokenDiagnostics(result, runtimeConfig)
 		}
-		result["next_action"] = "set_jira_api_token"
+		result["agentic_next_action"] = "set_jira_api_token"
 	} else if checks["jira_config"]["code"] == "jira_config_missing" && checks["workspace"]["status"] == "ok" {
-		result["next_action"] = "workspace_init"
+		result["agentic_next_action"] = "workspace_init"
 	}
 	return writeJSON(stdout, result)
 }

@@ -151,7 +151,7 @@ func TestValidateTakeoverBlocksOwnerMismatch(t *testing.T) {
 
 func TestValidateTakeoverBlocksAgentConflict(t *testing.T) {
 	issue := validIssue()
-	issue.CurrentAgentID = "agent-2"
+	issue.AgenticID = "agent-2"
 
 	decision := ValidateTakeover(issue, validTakeoverProfile(), "current-user", "agent-1")
 	if decision.Code != "agent_ownership_conflict" {

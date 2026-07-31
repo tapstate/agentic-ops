@@ -43,7 +43,7 @@ func TestValidateResumeChecksRealJiraOwnership(t *testing.T) {
 		{
 			name: "agent binding lost",
 			change: func(input *ResumeInput) {
-				input.Issue.CurrentAgentID = ""
+				input.Issue.AgenticID = ""
 			},
 			wantCode:     "agent_binding_lost",
 			wantRequired: true,
@@ -52,7 +52,7 @@ func TestValidateResumeChecksRealJiraOwnership(t *testing.T) {
 		{
 			name: "other agent",
 			change: func(input *ResumeInput) {
-				input.Issue.CurrentAgentID = "agent-2"
+				input.Issue.AgenticID = "agent-2"
 			},
 			wantCode:     "agent_ownership_conflict",
 			wantRequired: true,
@@ -61,7 +61,7 @@ func TestValidateResumeChecksRealJiraOwnership(t *testing.T) {
 			name: "fake adapter skips remote binding",
 			change: func(input *ResumeInput) {
 				input.AdapterMode = "fake"
-				input.Issue.CurrentAgentID = ""
+				input.Issue.AgenticID = ""
 			},
 			wantOK: true,
 		},
@@ -228,7 +228,7 @@ func TestValidateResumeDoesNotAuthorizeEarlyFeedbackAfterOwnershipLoss(t *testin
 			name: "disallowed stage with other agent",
 			change: func(input *ResumeInput) {
 				input.Context.CurrentStage = "evidence_written"
-				input.Issue.CurrentAgentID = "agent-2"
+				input.Issue.AgenticID = "agent-2"
 			},
 			wantCode: "resume_stage_not_allowed",
 		},
@@ -264,24 +264,24 @@ func TestValidateResumeBackfillsMissingHistoricalTargetRepo(t *testing.T) {
 func validResumeInput() ResumeInput {
 	return ResumeInput{
 		Context: runcontext.Context{
-			Workspace:      "tapstate",
-			RunID:          "run-1",
-			IssueKey:       "TAP-123",
-			AgentID:        "agent-1",
-			CurrentAgentID: "agent-1",
-			TaskClass:      "technical_task",
-			ProcessID:      "development_change_v1",
-			TargetRepo:     "tapstate/example-repo",
-			CurrentStage:   "takeover_started",
-			NextAction:     "proceed",
+			Workspace:         "tapstate",
+			AgenticRunID:      "run-1",
+			IssueKey:          "TAP-123",
+			AgentID:           "agent-1",
+			AgenticID:         "agent-1",
+			TaskClass:         "technical_task",
+			ProcessID:         "development_change_v1",
+			TargetRepo:        "tapstate/example-repo",
+			CurrentStage:      "takeover_started",
+			AgenticNextAction: "proceed",
 		},
 		Issue: Issue{
-			Key:            "TAP-123",
-			Assignee:       "user-1",
-			IssueType:      "Task",
-			Status:         "To Do",
-			TargetRepo:     "tapstate/example-repo",
-			CurrentAgentID: "agent-1",
+			Key:        "TAP-123",
+			Assignee:   "user-1",
+			IssueType:  "Task",
+			Status:     "To Do",
+			TargetRepo: "tapstate/example-repo",
+			AgenticID:  "agent-1",
 		},
 		CurrentUser: "user-1",
 		AgentID:     "agent-1",

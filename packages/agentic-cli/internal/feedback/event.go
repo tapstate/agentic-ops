@@ -12,43 +12,44 @@ import (
 )
 
 type Event struct {
-	Timestamp             string   `json:"timestamp"`
-	Workspace             string   `json:"workspace"`
-	RunID                 string   `json:"run_id"`
-	IssueKey              string   `json:"issue_key,omitempty"`
-	AgentTaskOpsVersion   string   `json:"agentic_cli_version"`
-	VersionState          string   `json:"version_state"`
-	AssetVersion          string   `json:"asset_version"`
-	TaskType              string   `json:"task_type"`
-	Operation             string   `json:"operation"`
-	CurrentStage          string   `json:"current_stage"`
-	NextAction            string   `json:"next_action"`
-	AgentID               string   `json:"agent_id,omitempty"`
-	CurrentAgentID        string   `json:"current_agent_id,omitempty"`
-	TakeoverAt            string   `json:"takeover_at,omitempty"`
-	TargetRepo            string   `json:"target_repo,omitempty"`
-	CompletedAt           string   `json:"completed_at,omitempty"`
-	CompletionEvidence    string   `json:"completion_evidence,omitempty"`
-	TaskClass             string   `json:"task_class,omitempty"`
-	TaskClassSource       string   `json:"task_class_source,omitempty"`
-	ProcessID             string   `json:"process_id,omitempty"`
-	CapabilityID          string   `json:"capability_id,omitempty"`
-	DefectComplexity      string   `json:"defect_complexity,omitempty"`
-	CurrentAgentIDCleared bool     `json:"current_agent_id_cleared,omitempty"`
-	AuditTarget           string   `json:"audit_target,omitempty"`
-	AuditSubmitted        bool     `json:"audit_submitted,omitempty"`
-	AuditReference        string   `json:"audit_reference,omitempty"`
-	OK                    bool     `json:"ok"`
-	Code                  string   `json:"code,omitempty"`
-	MissingField          string   `json:"missing_field,omitempty"`
-	MissingFields         []string `json:"missing_fields,omitempty"`
-	Gate                  string   `json:"gate"`
-	GateStatus            string   `json:"gate_status"`
-	HumanGate             bool     `json:"human_gate"`
-	RequiresHumanAction   bool     `json:"requires_human_action"`
+	Timestamp                 string   `json:"timestamp"`
+	Workspace                 string   `json:"workspace"`
+	AgenticRunID              string   `json:"agentic_run_id"`
+	IssueKey                  string   `json:"issue_key,omitempty"`
+	AgentTaskOpsVersion       string   `json:"agentic_cli_version"`
+	VersionState              string   `json:"version_state"`
+	AssetVersion              string   `json:"asset_version"`
+	TaskType                  string   `json:"task_type"`
+	Operation                 string   `json:"operation"`
+	CurrentStage              string   `json:"current_stage"`
+	AgenticNextAction         string   `json:"agentic_next_action"`
+	AgentID                   string   `json:"agent_id,omitempty"`
+	AgenticID                 string   `json:"agentic_id,omitempty"`
+	AgenticTakeoverAt         string   `json:"agentic_takeover_at,omitempty"`
+	AgenticHeartbeatAt        string   `json:"agentic_heartbeat_at,omitempty"`
+	TargetRepo                string   `json:"target_repo,omitempty"`
+	CompletedAt               string   `json:"completed_at,omitempty"`
+	AgenticCompletionEvidence string   `json:"agentic_completion_evidence,omitempty"`
+	TaskClass                 string   `json:"task_class,omitempty"`
+	TaskClassSource           string   `json:"task_class_source,omitempty"`
+	ProcessID                 string   `json:"process_id,omitempty"`
+	CapabilityID              string   `json:"capability_id,omitempty"`
+	DefectComplexity          string   `json:"defect_complexity,omitempty"`
+	AgenticIDCleared          bool     `json:"agentic_id_cleared,omitempty"`
+	AuditTarget               string   `json:"audit_target,omitempty"`
+	AuditSubmitted            bool     `json:"audit_submitted,omitempty"`
+	AuditReference            string   `json:"audit_reference,omitempty"`
+	OK                        bool     `json:"ok"`
+	Code                      string   `json:"code,omitempty"`
+	MissingField              string   `json:"missing_field,omitempty"`
+	MissingFields             []string `json:"missing_fields,omitempty"`
+	Gate                      string   `json:"gate"`
+	GateStatus                string   `json:"gate_status"`
+	HumanGate                 bool     `json:"human_gate"`
+	RequiresHumanAction       bool     `json:"requires_human_action"`
 }
 
-func RunID(issueKey string, taskType string, now time.Time, suffix string) string {
+func AgenticRunID(issueKey string, taskType string, now time.Time, suffix string) string {
 	cleanIssue := strings.ReplaceAll(strings.TrimSpace(issueKey), " ", "-")
 	cleanTask := strings.TrimPrefix(strings.TrimSpace(taskType), "task_")
 	return fmt.Sprintf("%s-%s-%s-%s", cleanIssue, cleanTask, now.Format("20060102150405"), suffix)

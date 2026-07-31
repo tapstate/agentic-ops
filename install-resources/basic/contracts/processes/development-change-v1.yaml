@@ -12,11 +12,12 @@ stages:
       - task_class
       - target_repo
     output_fields:
-      - run_id
-      - current_agent_id
-      - takeover_at
+      - agentic_run_id
+      - agentic_id
+      - agentic_takeover_at
+      - agentic_heartbeat_at
       - current_stage
-      - next_action
+      - agentic_next_action
     review_gate: null
   - id: implementation
     responsible_role: ai_agent
@@ -39,6 +40,6 @@ stages:
       - issue_analysis
       - fix_details
       - verification_method
-      - completion_evidence
+      - agentic_completion_evidence
     completion_cleanup:
-      clear_current_agent_id: true
+      clear_agentic_id: true

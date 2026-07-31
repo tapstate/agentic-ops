@@ -11,24 +11,24 @@ import (
 )
 
 type resumeFeedback struct {
-	Required     bool
-	WriteAllowed bool
-	File         string
-	Category     string
-	NextAction   string
+	Required          bool
+	WriteAllowed      bool
+	File              string
+	Category          string
+	AgenticNextAction string
 }
 
 func writeResumeFeedback(root string, context runcontext.Context, decision jira.ResumeDecision) (resumeFeedback, error) {
 	if !decision.JiraFeedbackRequired {
 		return resumeFeedback{}, nil
 	}
-	if !safeResumeFeedbackSegment(context.RunID) || !safeResumeFeedbackSegment(decision.Code) {
+	if !safeResumeFeedbackSegment(context.AgenticRunID) || !safeResumeFeedbackSegment(decision.Code) {
 		return resumeFeedback{}, fmt.Errorf("invalid resume feedback path segment")
 	}
 	relativePath := filepath.Join(
 		".agentic-ops",
 		"runs",
-		context.RunID,
+		context.AgenticRunID,
 		"resume-blocked-"+decision.Code+".md",
 	)
 	absolutePath := filepath.Join(root, relativePath)
@@ -41,10 +41,10 @@ func writeResumeFeedback(root string, context runcontext.Context, decision jira.
 	content := strings.Join([]string{
 		"# AgenticOps 恢复阻塞",
 		"",
-		"- 反馈编号: resume-blocked:" + context.RunID + ":" + decision.Code,
+		"- 反馈编号: resume-blocked:" + context.AgenticRunID + ":" + decision.Code,
 		"- 工作空间: " + context.Workspace,
 		"- Jira 卡片: " + context.IssueKey,
-		"- run_id: " + context.RunID,
+		"- agentic_run_id: " + context.AgenticRunID,
 		"- 错误码: " + decision.Code,
 		"- 说明: " + decision.Message,
 		"- 需要处理: " + decision.RequiredHumanAction,
@@ -58,11 +58,11 @@ func writeResumeFeedback(root string, context runcontext.Context, decision jira.
 		nextAction = "add_task_comment"
 	}
 	return resumeFeedback{
-		Required:     true,
-		WriteAllowed: decision.JiraFeedbackWriteAllowed,
-		File:         filepath.ToSlash(relativePath),
-		Category:     "blocked",
-		NextAction:   nextAction,
+		Required:          true,
+		WriteAllowed:      decision.JiraFeedbackWriteAllowed,
+		File:              filepath.ToSlash(relativePath),
+		Category:          "blocked",
+		AgenticNextAction: nextAction,
 	}, nil
 }
 

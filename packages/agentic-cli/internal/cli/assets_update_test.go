@@ -51,7 +51,7 @@ func TestUpdateCheckAndApplyUseLocalManifest(t *testing.T) {
 	assertJSONField(t, checkStdout.String(), "operation", "update_check")
 	assertJSONField(t, checkStdout.String(), "update_available", true)
 	assertJSONField(t, checkStdout.String(), "severity", "required")
-	assertJSONField(t, checkStdout.String(), "next_action", "update_apply")
+	assertJSONField(t, checkStdout.String(), "agentic_next_action", "update_apply")
 	if !strings.Contains(checkStdout.String(), `"takeover_task"`) {
 		t.Fatalf("check stdout missing blocked operation: %s", checkStdout.String())
 	}
@@ -65,7 +65,7 @@ func TestUpdateCheckAndApplyUseLocalManifest(t *testing.T) {
 	assertJSONField(t, applyStdout.String(), "operation", "update_apply")
 	assertJSONField(t, applyStdout.String(), "version", "RES-v0.1.20-deadbee")
 	assertJSONField(t, applyStdout.String(), "asset_version", "RES-v0.1.20-deadbee")
-	assertJSONField(t, applyStdout.String(), "next_action", "doctor")
+	assertJSONField(t, applyStdout.String(), "agentic_next_action", "doctor")
 	if _, err := os.Stat(filepath.Join(installDir, "current.json")); err != nil {
 		t.Fatalf("current.json missing: %v", err)
 	}
@@ -94,5 +94,5 @@ func TestUpdateCheckUsesRemoteManifestURL(t *testing.T) {
 	assertJSONField(t, stdout.String(), "operation", "update_check")
 	assertJSONField(t, stdout.String(), "latest_version", "RES-v0.1.20-deadbee")
 	assertJSONField(t, stdout.String(), "source", "remote")
-	assertJSONField(t, stdout.String(), "next_action", "update_apply")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "update_apply")
 }

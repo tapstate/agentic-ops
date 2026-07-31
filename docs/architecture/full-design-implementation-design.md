@@ -59,9 +59,9 @@ Jira 适配器必须隔离 Jira Cloud REST API、模拟 Jira 数据和具体团�
 - 执行受控字段写入。
 - 读取并执行受控 `transition`。
 
-任务接管必须检查负责人、`assignee`、`current_agent_id`、任务分类、标准流程、入口状态、目标仓库、验收标准和验证方式。接管成功后，运行记录必须包含 `run_id`、`agent_id`、`current_agent_id`、`task_class`、`process_id`、`current_stage` 和 `next_action`。
+任务接管必须检查负责人、`assignee`、`agentic_id`、任务分类、标准流程、入口状态、目标仓库、验收标准和验证方式。接管成功后，运行记录必须包含 `agentic_run_id`、`agent_id`、`agentic_id`、`task_class`、`process_id`、`current_stage` 和 `agentic_next_action`。
 
-执行过程中如 `assignee` 变更或 `current_agent_id` 不等于当前 `agent_id`，AIAgent 必须停止并记录原因。任务完成或明确交接后，必须通过受控操作清理 `current_agent_id`，并记录 `current_agent_id_cleared=true`。
+执行过程中如 `assignee` 变更或 `agentic_id` 不等于当前 `agent_id`，AIAgent 必须停止并记录原因。任务完成或明确交接后，必须通过受控操作清理 `agentic_id`，并记录 `agentic_id_cleared=true`。
 
 ### 问题修复与同步
 

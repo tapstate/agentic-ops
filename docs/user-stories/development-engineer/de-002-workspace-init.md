@@ -61,7 +61,7 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
   "jira_token_help_url": "https://id.atlassian.com/manage-profile/security/api-tokens",
   "jira_token_setup": "edit $HOME/.agentic-ops/user/.env and set AGENTIC_OPS_JIRA_API_TOKEN=<api-token>",
   "jira_config_next_action": "set_jira_api_token",
-  "next_action": "init_agent_capability"
+  "agentic_next_action": "init_agent_capability"
 }
 ```
 

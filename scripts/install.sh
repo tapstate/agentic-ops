@@ -306,4 +306,4 @@ if [ "$path_configured" = "false" ]; then
   echo "Open a new terminal or run: source \"$path_profile\"" >&2
 fi
 
-printf '{"ok":true,"operation":"%s","install_dir":"%s","bin":"%s","target":"%s","current_ref":"%s","source":"managed_clone","path_configured":%s,"path_entry":"%s","path_profile":"%s","path_profile_configured":%s,"path_profile_updated":%s,"jira_config_next_action":"workspace_init_interactive","next_action":"workspace_init"}\n' "$operation" "$INSTALL_DIR" "$bin_dir/agentic-cli" "$target" "$current_ref" "$path_configured" "$bin_dir" "$path_profile" "$path_profile_configured" "$path_profile_updated"
+printf '{"ok":true,"operation":"%s","install_dir":"%s","bin":"%s","target":"%s","current_ref":"%s","source":"managed_clone","path_configured":%s,"path_entry":"%s","path_profile":"%s","path_profile_configured":%s,"path_profile_updated":%s,"jira_config_next_action":"workspace_init_interactive","agentic_next_action":"workspace_init"}\n' "$operation" "$INSTALL_DIR" "$bin_dir/agentic-cli" "$target" "$current_ref" "$path_configured" "$bin_dir" "$path_profile" "$path_profile_configured" "$path_profile_updated"

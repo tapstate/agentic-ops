@@ -6,7 +6,7 @@ AgenticOps 是把公司员工执行标准沉淀成 AI 可执行标准流程的 A
 
 AgenticOps 主要落地研发 Jira 任务：帮助研发工程师操作 AIAgent 从 Jira 接管任务到完成任务。AgenticOps 不替代 Jira、不替代研发工程师、不替代拉取请求审查，也不以绕过人工授权、专业审查和策略门禁的全自动开发作为目标。它的核心价值是把 AI 员工从临时聊天助手变成流程内可管理、可追踪、可复盘的执行主体。
 
-不同任务会涉及不同流程，例如新任务接管、恢复接管、拉取请求审查意见修复、阻塞上报和任务完成审计。AgenticOps 通过操作契约和工作流配置选择流程，通过 Task Form Standard、事件日志、`run_id`、证据、任务级审计记录和按需反馈分析记录执行过程，并把关键状态、关键信息、表单数据和证据回写到 Jira、拉取请求、审计服务或项目 AI 工作空间，用于后续分析和优化。
+不同任务会涉及不同流程，例如新任务接管、恢复接管、拉取请求审查意见修复、阻塞上报和任务完成审计。AgenticOps 通过操作契约和工作流配置选择流程，通过 Task Form Standard、事件日志、`agentic_run_id`、证据、任务级审计记录和按需反馈分析记录执行过程，并把关键状态、关键信息、表单数据和证据回写到 Jira、拉取请求、审计服务或项目 AI 工作空间，用于后续分析和优化。
 
 一句话定义：
 
@@ -24,7 +24,7 @@ Jira 卡片已进入迭代
 -> AI 拉取 负责人名下待办
 -> 研发工程师选择一个卡片
 -> AI 执行任务接管门禁
--> AI 生成 `run_id` 和接管记录
+-> AI 生成 `agentic_run_id` 和接管记录
 -> AI 本地开发与验证
 -> AI 回写 Jira 证据
 -> 研发工程师确认
@@ -58,8 +58,8 @@ AIAgent 是流程执行者，`agentic-cli` 是受控运行时，不单独作为�
 - Git 仓库是代码、测试、提交和分支的事实源。
 - GitHub 拉取请求与 CI 是拉取请求审查、CI、审查评论和合入记录的事实源。
 - AgenticOps 不创建新的任务管理事实源。
-- `run_id` 只追踪一次 AI 执行，不替代 Jira 卡片编号，也不替代 Jira 状态。
-- `agent_id` 是 AIAgent 的稳定身份；`current_agent_id` 是任务上的当前绑定字段，用于表达当前由哪个 `agent_id` 持有任务所有权。
+- `agentic_run_id` 只追踪一次 AI 执行，不替代 Jira 卡片编号，也不替代 Jira 状态。
+- `agent_id` 是 AIAgent 的稳定身份；`agentic_id` 是任务上的当前绑定字段，用于表达当前由哪个 `agent_id` 持有任务所有权。
 - AIAgent 可以推进研发阶段，但不能绕过工作流配置、门禁和人工确认点。
 - 控制规范不能只靠提示词；提示词负责指导，Go CLI 运行时负责强制检查和结构化输出。
 - 每次执行都必须产生可聚合记录，关键状态和信息必须回写到对应事实源或项目 AI 工作空间。
@@ -136,7 +136,7 @@ AgenticOps 必须严格区分两类资料。
 - 本地执行日志
 - Jira 评论和证据
 - GitHub 拉取请求、CI、审查意见
-- `run_id` 对应的证据
+- `agentic_run_id` 对应的证据
 
 具体工作空间产物不应混入 `~/.agentic-ops` 的全局安装和配置资料；需要保留时应写入对应 AI 工作空间、目标业务仓库、Jira / 拉取请求证据链，或受控的任务执行记录位置。
 
@@ -224,13 +224,13 @@ input:
 
 preconditions:
   - current_user_must_match_owner
-  - current_agent_id_must_be_empty_or_match_agent_id
+  - agentic_id_must_be_empty_or_match_agent_id
   - task_class_must_be_mapped_to_standard_process
   - issue_must_be_in_allowed_project
   - jira_status_must_map_to_entry_stage
 
 output:
-  run_id:
+  agentic_run_id:
     type: string
   current_stage:
     enum:
@@ -239,7 +239,7 @@ output:
       - waiting_owner_confirmation
   target_repo:
     type: string
-  next_action:
+  agentic_next_action:
     enum:
       - proceed
       - ask_owner
@@ -288,7 +288,7 @@ Task Form Standard 定义 AI 操作任务从创建到完成所需的标准字段
 - 人工确认点。
 - 证据模板。
 
-不同 Jira 工作流对接时应先通过 Jira 表单映射适配 AgenticOps 标准。不符合标准的地方记录缺口并请求人工决策，不能让 AIAgent 直接猜测。工作流配置还必须说明哪些节点允许重试、哪些节点必须重做前序表单，以及哪些审查结论会把 `next_action` 置为 `ask_owner`、`fix_and_verify`、`redo_previous_stage` 或 `blocked`。
+不同 Jira 工作流对接时应先通过 Jira 表单映射适配 AgenticOps 标准。不符合标准的地方记录缺口并请求人工决策，不能让 AIAgent 直接猜测。工作流配置还必须说明哪些节点允许重试、哪些节点必须重做前序表单，以及哪些审查结论会把 `agentic_next_action` 置为 `ask_owner`、`fix_and_verify`、`redo_previous_stage` 或 `blocked`。
 
 TapData / TapState 的方案 C 是第一套默认工作流配置，但不能硬编码进核心模型。
 
@@ -406,7 +406,7 @@ Go CLI 执行操作
 -> 产生结构化事件日志
 -> 到达完成、阻塞或交接节点
 -> AIAgent 提交任务级审计记录到 Jira 卡片、审计服务或目标仓库证据链
--> 维护者按需按 `run_id`、任务类型、失败码、时间范围或 `workspace` 聚合分析
+-> 维护者按需按 `agentic_run_id`、任务类型、失败码、时间范围或 `workspace` 聚合分析
 -> AIAgent 分析失败、卡点、重复人工确认、规则缺口
 -> 生成改进建议
 -> 人确认后更新 AgenticOps 规则、手册、契约和 Go CLI
@@ -444,12 +444,12 @@ Go CLI 执行操作
 {
   "timestamp": "2026-07-21T10:30:12+08:00",
   "workspace": "tapstate",
-  "run_id": "TAP-123-takeover-20260721103012-a8f3",
+  "agentic_run_id": "TAP-123-takeover-20260721103012-a8f3",
   "issue_key": "TAP-123",
   "task_type": "task_takeover",
   "operation": "takeover_task",
   "current_stage": "takeover_gate",
-  "next_action": "ask_owner",
+  "agentic_next_action": "ask_owner",
   "ok": false,
   "code": "real_jira_confirmation_required",
   "duration_ms": 842,
@@ -465,15 +465,15 @@ Go CLI 执行操作
 建议提供反馈命令：
 
 ```sh
-agentic-cli write-evidence --workspace tapstate --run-id <run_id>
-agentic-cli release-agent --workspace tapstate --run-id <run_id> --issue-key TAP-123 --completion-evidence evidence.md
-agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
+agentic-cli write-evidence --workspace tapstate --run-id <agentic_run_id>
+agentic-cli release-agent --workspace tapstate --run-id <agentic_run_id> --issue-key TAP-123 --completion-evidence evidence.md
+agentic-cli feedback bundle --workspace tapstate --run-id <agentic_run_id> --redact
 agentic-cli feedback report --workspace tapstate --date 2026-07-21
 agentic-cli feedback analyze --workspace tapstate --date 2026-07-21
 agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 ```
 
-`feedback report` 是按需分析报告，不是日报。反馈分析可以按 `run_id`、`issue_key`、`task_type`、失败码、时间范围或 `workspace` 查询。
+`feedback report` 是按需分析报告，不是日报。反馈分析可以按 `agentic_run_id`、`issue_key`、`task_type`、失败码、时间范围或 `workspace` 查询。
 
 反馈进入 AgenticOps 源头规则前必须经过：
 

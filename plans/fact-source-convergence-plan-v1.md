@@ -123,7 +123,7 @@ Expected: 命中错误总览、Git / GitHub 旧状态、缺失发布脚本和迁
 
 按现有勾选项和源码证据修改各任务的 `Current gap`：
 
-- Task 1：本地 run、workspace 和基础状态恢复校验已实现；保留缺口是真实 Jira 模式重新读取卡片并复核 `assignee`、`current_agent_id`，恢复并校验 `target_repo`，以及按 Standard Process Registry 判断当前阶段是否允许恢复。
+- Task 1：本地 run、workspace 和基础状态恢复校验已实现；保留缺口是真实 Jira 模式重新读取卡片并复核 `assignee`、`agentic_id`，恢复并校验 `target_repo`，以及按 Standard Process Registry 判断当前阶段是否允许恢复。
 - Task 2：证据模板、策略门禁、完成证据和任务级审计基线已实现；本任务标记为已完成基线，不再保留修改前的缺口陈述。
 - Task 3：process loader、任务分类、仓库 fallback 和 process/profile 一致性校验已实现；本任务标记为已完成基线。
 - Task 4：Git / GitHub 只读检查、拉取请求计划、评论和 CI 读取、策略门禁已实现；`write-pr-evidence` 只有机器可读契约，没有 CLI 注册入口。自动 push、创建拉取请求和 merge 等副作用也未开放。

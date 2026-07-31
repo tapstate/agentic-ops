@@ -88,7 +88,7 @@ output:
   workspace_repairable:
     type: boolean
     required: false
-  next_action:
+  agentic_next_action:
     type: string
 failure:
   codes:

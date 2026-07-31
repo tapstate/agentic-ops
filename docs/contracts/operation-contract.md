@@ -6,7 +6,7 @@
 
 AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `transition` 或 Jira `comment` 模板。
 
-操作契约还必须说明每次操作如何读取或更新 Task Form Standard 中的标准字段。AIAgent 后续判断 `current_stage`、`next_action`、重试、重做和人工审查时，应以操作输出、表单数据和事件记录为准，而不是以聊天上下文为准。
+操作契约还必须说明每次操作如何读取或更新 Task Form Standard 中的标准字段。AIAgent 后续判断 `current_stage`、`agentic_next_action`、重试、重做和人工审查时，应以操作输出、表单数据和事件记录为准，而不是以聊天上下文为准。
 
 操作契约必须引用 Standard Process Registry 中的任务分类和流程阶段。AIAgent 执行任务前必须先得到 `task_class` 和 `process_id`，再进入对应流程阶段。
 
@@ -48,17 +48,17 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 | `update_task_description_sections` | 安全更新 Jira Description 的指定章节并保留其它内容。 |
 | `update_task_form` | 按项目 profile 的逻辑字段映射更新 Jira 表单。 |
 | `takeover_task` | 接管一个新的 Jira 卡片。 |
-| `resume_takeover` | 恢复已有 `run_id` 的接管任务。 |
+| `resume_takeover` | 恢复已有 `agentic_run_id` 的接管任务。 |
 | `read_task_context` | 读取任务上下文摘要。 |
 | `write_evidence` | 写入 Jira / 拉取请求证据。 |
-| `release_agent` | 完成或明确交接后释放当前 AIAgent 绑定，并记录 `current_agent_id_cleared=true`。 |
+| `release_agent` | 完成或明确交接后释放当前 AIAgent 绑定，并记录 `agentic_id_cleared=true`。 |
 | `mark_blocked` | 记录阻塞原因和人工动作。 |
 | `request_owner_confirmation` | 请求研发工程师确认。 |
 | `branch_align` | 按 TapData 项目级分支规范计算或执行多仓分支对齐。 |
 | `prepare_pr` | 准备拉取请求，不绕过人工确认。 |
 | `fix_pr_comments` | 按拉取请求审查意见修复。 |
 | `feedback_collect` | 收集工作空间事件日志。 |
-| `feedback_bundle` | 为指定 `run_id` 生成脱敏诊断包。 |
+| `feedback_bundle` | 为指定 `agentic_run_id` 生成脱敏诊断包。 |
 | `feedback_analyze` | 分析执行失败、阻塞和重复问题。 |
 | `feedback_report` | 按需生成执行分析报告，用于发现重复问题和 AgenticOps 改进建议。 |
 | `feedback_propose` | 生成改进建议。 |
@@ -90,13 +90,13 @@ input:
 
 preconditions:
   - current_user_must_match_owner
-  - current_agent_id_must_be_empty_or_match_agent_id
+  - agentic_id_must_be_empty_or_match_agent_id
   - task_class_must_be_mapped_to_standard_process
   - issue_must_be_in_allowed_project
   - jira_status_must_map_to_entry_stage
 
 output:
-  run_id:
+  agentic_run_id:
     type: string
   current_stage:
     enum:
@@ -105,7 +105,7 @@ output:
       - waiting_owner_confirmation
   target_repo:
     type: string
-  next_action:
+  agentic_next_action:
     enum:
       - proceed
       - ask_owner
@@ -171,7 +171,7 @@ human_gate:
 - `required_human_action`
 - `task_type`
 - `current_stage`
-- `next_action`
+- `agentic_next_action`
 - `retryable`
 - `redo_from_stage`
 
@@ -183,7 +183,7 @@ human_gate:
 - 是否写拉取请求。
 - 是否写本地事件日志。
 - 事件日志必须能记录 `agentic_cli_version`、`version_state`、`asset_version`、`code`、`gate` 和 `gate_status`。
-- 事件日志必须能记录 `agent_id`、`current_agent_id`、`task_class`、`process_id` 和 `current_agent_id_cleared`。
+- 事件日志必须能记录 `agent_id`、`agentic_id`、`task_class`、`process_id` 和 `agentic_id_cleared`。
 - 写入 Jira 的标题、描述、评论、工作日志、证据正文、阻塞说明和补卡说明必须使用中文。
 - 是否修改代码。
 - 是否创建 `commit`。

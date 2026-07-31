@@ -76,8 +76,8 @@ type ReviewGate struct {
 }
 
 type RetryRedoPolicy struct {
-	Retry         bool   `yaml:"retry"`
-	MaxAttempts   int    `yaml:"max_attempts"`
-	RedoFromStage string `yaml:"redo_from_stage"`
-	NextAction    string `yaml:"next_action"`
+	Retry             bool   `yaml:"retry"`
+	MaxAttempts       int    `yaml:"max_attempts"`
+	RedoFromStage     string `yaml:"redo_from_stage"`
+	AgenticNextAction string `yaml:"agentic_next_action"`
 }

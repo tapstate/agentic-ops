@@ -8,12 +8,12 @@ allowed_stages:
   - development_completed
 required_inputs:
   - workspace
-  - run_id
+  - agentic_run_id
 input:
   workspace:
     type: string
     required: true
-  run_id:
+  agentic_run_id:
     type: string
     required: true
   source_root:
@@ -30,13 +30,13 @@ input:
     required: false
 preconditions:
   - run_must_exist
-  - current_agent_id_must_match_agent_id
+  - agentic_id_must_match_agent_id
   - git_workspace_must_be_inspectable
   - policy_must_define_git_and_github_gates
 output:
   workspace:
     type: string
-  run_id:
+  agentic_run_id:
     type: string
   issue_key:
     type: string
@@ -60,11 +60,11 @@ output:
     type: array
   current_stage:
     type: string
-  next_action:
+  agentic_next_action:
     type: string
 failure:
   codes:
-    - missing_run_id
+    - missing_agentic_run_id
     - run_not_found
     - workspace_mismatch
     - local_state_mismatch

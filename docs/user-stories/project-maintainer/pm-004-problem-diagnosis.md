@@ -8,7 +8,7 @@
 
 ```sh
 agentic-cli doctor --workspace <name>
-agentic-cli feedback bundle --workspace <name> --run-id <run_id> --redact
+agentic-cli feedback bundle --workspace <name> --run-id <agentic_run_id> --redact
 agentic-cli update check
 agentic-cli profile validate --workspace <name>
 agentic-cli policy validate --workspace <name>
@@ -38,7 +38,7 @@ agentic-cli policy validate --workspace <name>
   "operation": "classify_problem",
   "problem_type": "workflow_profile_mismatch",
   "repair_carrier": "profile_update",
-  "next_action": "prepare_profile_change"
+  "agentic_next_action": "prepare_profile_change"
 }
 ```
 
@@ -71,7 +71,7 @@ agentic-cli policy validate --workspace <name>
 ### 验收证据
 
 - `agentic-cli doctor --workspace <name>` 的结构化输出。
-- `agentic-cli feedback bundle --workspace <name> --run-id <run_id> --redact` 生成的脱敏包。
+- `agentic-cli feedback bundle --workspace <name> --run-id <agentic_run_id> --redact` 生成的脱敏包。
 - `bash tests/e2e/problem-resolution-flow.sh`
 - 失败码、问题分类和建议修复载体的输出记录。
 

@@ -18,7 +18,7 @@ output:
     type: string
   current_stage:
     type: string
-  next_action:
+  agentic_next_action:
     type: string
   activation_phrase:
     type: string

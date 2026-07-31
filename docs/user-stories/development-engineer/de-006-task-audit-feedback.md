@@ -7,9 +7,9 @@
 ### 触发方式
 
 ```sh
-agentic-cli write-evidence --workspace tapstate --run-id <run_id>
-agentic-cli release-agent --workspace tapstate --run-id <run_id> --issue-key TAP-123 --completion-evidence evidence.md
-agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
+agentic-cli write-evidence --workspace tapstate --run-id <agentic_run_id>
+agentic-cli release-agent --workspace tapstate --run-id <agentic_run_id> --issue-key TAP-123 --completion-evidence evidence.md
+agentic-cli feedback bundle --workspace tapstate --run-id <agentic_run_id> --redact
 agentic-cli feedback report --workspace tapstate --date 2026-07-21
 agentic-cli feedback analyze --workspace tapstate --date 2026-07-21
 agentic-cli feedback propose --workspace tapstate --date 2026-07-21
@@ -24,14 +24,14 @@ agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 
 ### 前置条件
 
-- 工作空间中存在对应 `run_id` 的事件日志和证据。
+- 工作空间中存在对应 `agentic_run_id` 的事件日志和证据。
 - Jira 卡片、审计服务或目标仓库证据链可作为任务级审计记录提交目标。
 - 事件日志使用安全摘要，不包含 secrets、原始敏感日志、完整 Jira 描述或敏感代码片段。
 
 ### 主流程
 
-1. AIAgent 在完成、阻塞或交接节点整理当前 `run_id` 的任务审计摘要。
-2. CLI 写入证据，并在完成或交接后执行 `release-agent` 清理 `current_agent_id`。
+1. AIAgent 在完成、阻塞或交接节点整理当前 `agentic_run_id` 的任务审计摘要。
+2. CLI 写入证据，并在完成或交接后执行 `release-agent` 清理 `agentic_id`。
 3. AIAgent 将审计记录提交到 Jira 卡片、审计服务或目标仓库证据链。
 4. 需要诊断时，CLI 生成脱敏 `feedback bundle`。
 5. 需要复盘时，CLI 按需生成 `feedback report`。
@@ -52,7 +52,7 @@ agentic-cli feedback propose --workspace tapstate --date 2026-07-21
   "blocked": 2,
   "failed": 1,
   "report": "<project-ai-workspace>/.agentic-ops/feedback/reports/2026-07-21.md",
-  "next_action": "review_proposals"
+  "agentic_next_action": "review_proposals"
 }
 ```
 
@@ -74,7 +74,7 @@ agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 ### 保护行为
 
 - AIAgent 完成、阻塞或交接任务时必须提交任务级审计记录。
-- `release-agent` 完成清理后必须记录 `current_agent_id` 清理状态。
+- `release-agent` 完成清理后必须记录 `agentic_id` 清理状态。
 - 本地反馈报告不能替代 Jira 卡片、审计服务或目标仓库证据链中的任务审计记录。
 - 反馈分析只能形成改进建议，不能自动修改 AgenticOps 源头规则。
 - 审计记录和反馈报告不得包含 secrets 或敏感原始内容。
@@ -83,14 +83,14 @@ agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 
 - 任务最终状态是完成、阻塞还是交接。
 - 审计记录最终写入 Jira 卡片、审计服务还是目标仓库证据链。
-- `current_agent_id` 是否已清理或保留了未清理原因。
+- `agentic_id` 是否已清理或保留了未清理原因。
 - 反馈报告是否只是按需分析，而不是任务完成主路径。
 - 改进建议是否已经过人工确认。
 
 ### 验收证据
 
-- `agentic-cli write-evidence --workspace <name> --run-id <run_id>` 输出。
-- `agentic-cli release-agent --workspace <name> --run-id <run_id> --issue-key <issue>` 输出。
+- `agentic-cli write-evidence --workspace <name> --run-id <agentic_run_id>` 输出。
+- `agentic-cli release-agent --workspace <name> --run-id <agentic_run_id> --issue-key <issue>` 输出。
 - 任务级审计记录或 Jira 中文工作日志。
 - `agentic-cli feedback report --workspace <name> --date <date>` 输出。
 - 脱敏反馈包和人工确认记录。

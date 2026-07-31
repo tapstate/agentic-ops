@@ -33,7 +33,7 @@ agentic-cli feedback propose --workspace <name> --date 2026-07-23
   "ok": true,
   "operation": "feedback_propose",
   "proposals": 3,
-  "next_action": "owner_review"
+  "agentic_next_action": "owner_review"
 }
 ```
 

@@ -33,7 +33,7 @@ bash tests/e2e/local-install-flow.sh
   "operation": "update",
   "previous_ref": "<git-commit>",
   "current_ref": "<git-commit>",
-  "next_action": "workspace_init"
+  "agentic_next_action": "workspace_init"
 }
 ```
 

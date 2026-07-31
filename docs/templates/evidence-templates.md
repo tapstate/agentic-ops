@@ -12,7 +12,7 @@
 
 - 关联 Jira 卡片编号。
 - 关联 workspace。
-- 关联 `run_id`。
+- 关联 `agentic_run_id`。
 - 关联任务类型、当前阶段和下一步动作。
 - 说明当前阶段。
 - 说明下一步。
@@ -30,10 +30,10 @@
 - 工作空间: `<workspace>`
 - 研发工程师: `<owner>`
 - 任务类型: `task_takeover`
-- 运行 ID: `<run_id>`
+- 运行 ID: `<agentic_run_id>`
 - 目标仓库: `<target_repo>`
 - 当前阶段: `takeover_started`
-- 下一步: `<next_action>`
+- 下一步: `<agentic_next_action>`
 
 ### 执行计划
 
@@ -57,10 +57,10 @@ AI 员工将读取目标仓库上下文并开始本地开发。未经研发工�
 - 事项: `<issue-key>`
 - 工作空间: `<workspace>`
 - 任务类型: `task_takeover`
-- 运行 ID: `<run_id>`
+- 运行 ID: `<agentic_run_id>`
 - 当前阶段: `takeover_gate`
 - 失败码: `<code>`
-- 下一步: `<next_action>`
+- 下一步: `<agentic_next_action>`
 - 可重试: `<retryable>`
 - 重做起点: `<redo_from_stage>`
 
@@ -85,10 +85,10 @@ AI 员工将读取目标仓库上下文并开始本地开发。未经研发工�
 - 事项: `<issue-key>`
 - 工作空间: `<workspace>`
 - 任务类型: `<task_type>`
-- 运行 ID: `<run_id>`
+- 运行 ID: `<agentic_run_id>`
 - 当前阶段: `<current_stage>`
 - 阻塞码: `<code>`
-- 下一步: `<next_action>`
+- 下一步: `<agentic_next_action>`
 - 可重试: `<retryable>`
 - 重做起点: `<redo_from_stage>`
 
@@ -113,7 +113,7 @@ AI 员工将读取目标仓库上下文并开始本地开发。未经研发工�
 - 事项: `<issue-key>`
 - 工作空间: `<workspace>`
 - 任务类型: `task_takeover`
-- 运行 ID: `<run_id>`
+- 运行 ID: `<agentic_run_id>`
 - 当前阶段: `development_completed`
 - 下一步: `request_owner_confirmation`
 - 已更新表单: `implementation_summary`、`verification_result`、`residual_risk`
@@ -143,11 +143,11 @@ AI 员工将读取目标仓库上下文并开始本地开发。未经研发工�
 - 事项: `<issue-key>`
 - 工作空间: `<workspace>`
 - 任务类型: `<task_type>`
-- 运行 ID: `<run_id>`
+- 运行 ID: `<agentic_run_id>`
 - 审查节点: `<review-gate>`
 - 审查角色: `<review-role>`
 - 当前阶段: `<current_stage>`
-- 下一步: `<next_action>`
+- 下一步: `<agentic_next_action>`
 - 重做起点: `<redo_from_stage>`
 
 ### 审查结论

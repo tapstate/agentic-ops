@@ -38,7 +38,7 @@
     "standard_process_registry",
     "workflow_profile"
   ],
-  "next_action": "run_e2e"
+  "agentic_next_action": "run_e2e"
 }
 ```
 

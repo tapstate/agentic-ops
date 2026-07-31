@@ -16,11 +16,11 @@
 - Go 是主实现语言；shell 只用于安装引导、轻量环境检测、managed clone 更新、校验安装资源和复制当前平台已编译 Go 二进制。
 - `agentic-cli` 运行时不得依赖本地 Python、`jq` 或 shell 业务脚本。
 - stdout 只输出结构化 JSON；stderr 输出人类诊断日志。
-- 所有失败必须返回稳定 `code`、`message`、`required_human_action`、`task_type`、`current_stage` 和 `next_action`。
+- 所有失败必须返回稳定 `code`、`message`、`required_human_action`、`task_type`、`current_stage` 和 `agentic_next_action`。
 - secrets 不允许出现在 stdout、stderr、事件日志或诊断包中。
 - `contracts/operations/` 是唯一机器可读操作契约源头。
 - AIAgent 执行 Jira 任务前必须先识别 `task_class`，再选择 Standard Process Registry 中的 `process_id`。
-- `agent_id` 是 AIAgent 唯一编号；`current_agent_id` 是任务运行中绑定字段，任务完成或交接结束后必须清理。
+- `agent_id` 是 AIAgent 唯一编号；`agentic_id` 是任务运行中绑定字段，任务完成或交接结束后必须清理。
 - 真实 Jira 写操作、Git 推送、GitHub 拉取请求创建、合并和发布必须经过策略、门禁和人工确认。
 - 历史 `rd-agentic` / `td-agentic` 只作为参考来源，不作为当前事实源。
 
@@ -275,7 +275,7 @@ if code != 0 {
 	t.Fatalf("code = %d stdout = %s", code, stdout.String())
 }
 assertJSONField(t, stdout.String(), "operation", "contract_validate")
-assertJSONField(t, stdout.String(), "next_action", "continue")
+assertJSONField(t, stdout.String(), "agentic_next_action", "continue")
 ```
 
 Run: `go test ./packages/agentic-cli/internal/cli`
@@ -301,7 +301,7 @@ case "contract":
   "operation": "contract_validate",
   "contracts": 10,
   "issues": 0,
-  "next_action": "continue"
+  "agentic_next_action": "continue"
 }
 ```
 
@@ -434,7 +434,7 @@ Test `Run([]string{"profile", "validate", "--workspace", "tapstate"}, ...)` retu
   "operation": "profile_validate",
   "workspace": "tapstate",
   "issues": 0,
-  "next_action": "continue"
+  "agentic_next_action": "continue"
 }
 ```
 
@@ -539,9 +539,9 @@ Scope:
 
 Definition:
 
-- 模拟 Jira 卡片暴露 `owner`、`assignee`、卡片类型、状态、风险等级和 `current_agent_id`。
+- 模拟 Jira 卡片暴露 `owner`、`assignee`、卡片类型、状态、风险等级和 `agentic_id`。
 - `takeover-task` validates owner, assignee, agent binding, task class mapping, process mapping, status mapping and required Jira fields before creating a run.
-- Gate failures return stable JSON with `current_stage: takeover_gate`, `next_action: ask_owner` and Chinese `required_human_action`.
+- Gate failures return stable JSON with `current_stage: takeover_gate`, `agentic_next_action: ask_owner` and Chinese `required_human_action`.
 - Gate failures write blocked feedback events.
 
 - [x] **Step 1: Write failing Jira gate tests**
@@ -556,7 +556,7 @@ Run `takeover-task TAP-MISSING-REPO --workspace tapstate` and assert:
 
 - `code: missing_target_repo`
 - `current_stage: takeover_gate`
-- `next_action: ask_owner`
+- `agentic_next_action: ask_owner`
 - blocked feedback event exists.
 
 Expected: FAIL because fake Jira does not return this issue and takeover does not run the gate.
@@ -643,9 +643,9 @@ Definition:
 - Default runtime still uses fake Jira adapter.
 - `AGENTIC_OPS_JIRA_ADAPTER=real` selects the real Jira client only when `AGENTIC_OPS_JIRA_BASE_URL`, `AGENTIC_OPS_JIRA_EMAIL` and `AGENTIC_OPS_JIRA_API_TOKEN` are all present.
 - Real Jira field writes in `takeover-task` and `release-agent` require `--confirm-real-jira-write`.
-- `takeover-task` writes profile-mapped `current_agent_id` and `takeover_at` fields only after ownership gate and explicit confirmation.
-- `release-agent` checks real Jira assignee and `current_agent_id` before clearing the profile-mapped `current_agent_id` field after explicit confirmation.
-- Missing real Jira confirmation returns `real_jira_confirmation_required` with `next_action: ask_owner`.
+- `takeover-task` writes profile-mapped `agentic_id` and `agentic_takeover_at` fields only after ownership gate and explicit confirmation.
+- `release-agent` checks real Jira assignee and `agentic_id` before clearing the profile-mapped `agentic_id` field after explicit confirmation.
+- Missing real Jira confirmation returns `real_jira_confirmation_required` with `agentic_next_action: ask_owner`.
 
 - [x] **Step 1: Write CLI confirmation gate tests**
 
@@ -762,7 +762,7 @@ Scope:
 
 Definition:
 
-- Successful fake takeover returns `agent_id`, `current_agent_id`, `takeover_at`, `task_class` and `process_id`.
+- Successful fake takeover returns `agent_id`, `agentic_id`, `agentic_takeover_at`, `task_class` and `process_id`.
 - Successful fake takeover writes the same fields into the local feedback event.
 - This is the local event/form baseline for later real Jira adapter writeback; it does not claim real Jira mutation is implemented.
 
@@ -771,8 +771,8 @@ Definition:
 Assert successful `takeover-task TAP-123 --workspace tapstate` output and event contain:
 
 - `agent_id`
-- `current_agent_id`
-- `takeover_at`
+- `agentic_id`
+- `agentic_takeover_at`
 - `task_class`
 - `process_id`
 
@@ -810,24 +810,24 @@ Scope:
 
 Definition:
 
-- Add `release-agent --workspace <name> --run-id <run_id> --issue-key <key> --completion-evidence <ref>`.
-- The command records a local completion cleanup event with `current_agent_id_cleared=true`, `completed_at` and `completion_evidence`.
-- The command is the local event/form baseline for later real Jira `current_agent_id` clearing; it does not claim real Jira mutation is implemented.
+- Add `release-agent --workspace <name> --run-id <agentic_run_id> --issue-key <key> --completion-evidence <ref>`.
+- The command records a local completion cleanup event with `agentic_id_cleared=true`, `completed_at` and `agentic_completion_evidence`.
+- The command is the local event/form baseline for later real Jira `agentic_id` clearing; it does not claim real Jira mutation is implemented.
 
 - [x] **Step 1: Write failing CLI test for cleanup event**
 
-Assert `release-agent` returns `current_agent_id_cleared=true` and writes a `release_agent` event containing:
+Assert `release-agent` returns `agentic_id_cleared=true` and writes a `release_agent` event containing:
 
-- `current_agent_id`
-- `current_agent_id_cleared`
+- `agentic_id`
+- `agentic_id_cleared`
 - `completed_at`
-- `completion_evidence`
+- `agentic_completion_evidence`
 
 Expected: FAIL because the command does not exist.
 
 - [x] **Step 2: Implement command and event fields**
 
-Add optional `completed_at` and `completion_evidence` to feedback events. Add the `release-agent` CLI route and `release_agent` capability.
+Add optional `completed_at` and `agentic_completion_evidence` to feedback events. Add the `release-agent` CLI route and `release_agent` capability.
 
 - [x] **Step 3: Add Operation Contract and e2e coverage**
 
@@ -908,8 +908,8 @@ Scope:
 
 Definition:
 
-- Add `feedback bundle --workspace <name> --run-id <run_id> --redact`.
-- The command reads local feedback events and writes `.agentic-ops/feedback/bundles/<run_id>.md`.
+- Add `feedback bundle --workspace <name> --run-id <agentic_run_id> --redact`.
+- The command reads local feedback events and writes `.agentic-ops/feedback/bundles/<agentic_run_id>.md`.
 - When `--redact` is present, obvious `token=...`, `password=...`, `secret=...` and `authorization=...` values must be replaced with `[REDACTED]`.
 - This is the local diagnostic bundle baseline; it does not call external services or include raw Jira descriptions.
 
@@ -957,7 +957,7 @@ Definition:
 - Add `update check --manifest <path>`.
 - Add `update apply --manifest <path> --install-dir <dir>`.
 - Local manifest mode reads a local release manifest and does not download remote artifacts.
-- `check` returns `update_available`, `severity`, `reason`, `blocked_operations` and `next_action`.
+- `check` returns `update_available`, `severity`, `reason`, `blocked_operations` and `agentic_next_action`.
 - `apply` writes `current.json` in the install dir and preserves previous `agentic_cli_version` / `asset_version`.
 - This is the local manifest baseline; it does not claim remote self-update, checksum validation, artifact download or real binary replacement.
 
@@ -1043,7 +1043,7 @@ Added `TransitionIssue` to the Jira client interface and implemented the Jira Cl
 
 - [x] **Step 2: Guard release-agent transition writes**
 
-`release-agent` now supports an explicit `--jira-transition-id` in real Jira mode. The transition runs only after `--confirm-real-jira-write`, ownership checks, and current_agent_id cleanup succeed.
+`release-agent` now supports an explicit `--jira-transition-id` in real Jira mode. The transition runs only after `--confirm-real-jira-write`, ownership checks, and agentic_id cleanup succeed.
 
 - [x] **Step 3: Record transition gate events**
 

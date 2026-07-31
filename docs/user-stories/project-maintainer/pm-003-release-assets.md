@@ -35,7 +35,7 @@ bash tests/e2e/local-install-flow.sh
   "ok": true,
   "operation": "build",
   "artifact": "agentic-cli",
-  "next_action": "verify_install"
+  "agentic_next_action": "verify_install"
 }
 ```
 

@@ -1,6 +1,6 @@
 operation: release_agent
 version: 1
-purpose: 完成或明确交接后释放当前 AIAgent 绑定，记录 `current_agent_id` 清理事件，并确认任务级审计记录已经提交或可追溯。
+purpose: 完成或明确交接后释放当前 AIAgent 绑定，记录 `agentic_id` 清理事件，并确认任务级审计记录已经提交或可追溯。
 task_type: task_takeover
 allowed_stages:
   - completed
@@ -8,20 +8,20 @@ allowed_stages:
   - completion_cleanup
 required_inputs:
   - workspace
-  - run_id
+  - agentic_run_id
   - issue_key
-  - completion_evidence
+  - agentic_completion_evidence
 input:
   workspace:
     type: string
     required: true
-  run_id:
+  agentic_run_id:
     type: string
     required: true
   issue_key:
     type: string
     required: true
-  completion_evidence:
+  agentic_completion_evidence:
     type: string
     required: true
   jira_transition_id:
@@ -30,23 +30,23 @@ input:
 preconditions:
   - run_must_exist
   - current_user_must_match_owner
-  - current_agent_id_must_match_agent_id
-  - completion_evidence_must_exist
+  - agentic_id_must_match_agent_id
+  - agentic_completion_evidence_must_exist
   - task_audit_evidence_must_be_submitted_or_referenced
 output:
   workspace:
     type: string
   issue_key:
     type: string
-  run_id:
+  agentic_run_id:
     type: string
   agent_id:
     type: string
-  current_agent_id_cleared:
+  agentic_id_cleared:
     type: boolean
   completed_at:
     type: string
-  completion_evidence:
+  agentic_completion_evidence:
     type: string
   audit_target:
     type: string
@@ -58,17 +58,17 @@ output:
     type: string
   current_stage:
     type: string
-  next_action:
+  agentic_next_action:
     type: string
 failure:
   codes:
-    - missing_run_id
+    - missing_agentic_run_id
     - missing_issue_key
-    - missing_completion_evidence
+    - missing_agentic_completion_evidence
     - run_not_found
     - assignee_changed
     - agent_ownership_conflict
-    - completion_evidence_missing
+    - agentic_completion_evidence_missing
     - jira_adapter_config_failed
     - jira_issue_read_failed
     - jira_current_user_failed
@@ -87,7 +87,7 @@ side_effects:
   - must_not_create_pr
 human_gate:
   required: true
-  reason: 清理 `current_agent_id` 代表完成或交接结束，必须由研发工程师确认完成证据。
+  reason: 清理 `agentic_id` 代表完成或交接结束，必须由研发工程师确认完成证据。
 retry_policy:
   retryable: true
   max_attempts: 1

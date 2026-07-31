@@ -13,14 +13,14 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 	workspaceName := workspaceNameFromArgsOrAgentConfig(args, "default")
 	runID := readFlag(args, "--run-id", "")
 	if runID == "" {
-		_ = appendWorkspaceEventWithCode(workspaceName, "", "", "evidence_write", "write_evidence", "input_validation", "ask_owner", "missing_run_id", "input_validation", false, true)
+		_ = appendWorkspaceEventWithCode(workspaceName, "", "", "evidence_write", "write_evidence", "input_validation", "ask_owner", "missing_agentic_run_id", "input_validation", false, true)
 		return writeJSON(stdout, output.FailureWithContext("write_evidence", output.FailureContext{
-			Code:                "missing_run_id",
-			Message:             "缺少 run_id",
+			Code:                "missing_agentic_run_id",
+			Message:             "缺少 agentic_run_id",
 			RequiredHumanAction: "请提供 --run-id",
 			TaskType:            "evidence_write",
 			CurrentStage:        "input_validation",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	root, err := workspaceRoot()
@@ -32,10 +32,10 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.FailureWithContext("write_evidence", output.FailureContext{
 			Code:                evidenceStateErrorCode(err),
 			Message:             err.Error(),
-			RequiredHumanAction: "请检查 run_id 是否存在有效接管事件，且仍属于当前 AIAgent",
+			RequiredHumanAction: "请检查 agentic_run_id 是否存在有效接管事件，且仍属于当前 AIAgent",
 			TaskType:            "evidence_write",
 			CurrentStage:        "evidence_write_gate",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	path := filepath.Join(root, ".agentic-ops", "runs", runID, "evidence.md")
@@ -54,19 +54,19 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查 install-resources/basic/policies/default.yaml 是否存在且通过校验",
 			TaskType:            "evidence_write",
 			CurrentStage:        "evidence_write_gate",
-			NextAction:          "fix_policy",
+			AgenticNextAction:   "fix_policy",
 		}))
 	}
 	if requiresHumanGate {
 		_ = appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
-			RunID:               runID,
+			AgenticRunID:        runID,
 			IssueKey:            state.IssueKey,
 			TaskType:            "evidence_write",
 			Operation:           "write_evidence",
 			CurrentStage:        "evidence_write_gate",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 			AgentID:             state.AgentID,
-			CurrentAgentID:      state.CurrentAgentID,
+			AgenticID:           state.AgenticID,
 			TargetRepo:          state.TargetRepo,
 			TaskClass:           state.TaskClass,
 			ProcessID:           state.ProcessID,
@@ -83,7 +83,7 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请由负责人确认该 evidence 写入策略，或调整 policy gate 后重试",
 			TaskType:            "evidence_write",
 			CurrentStage:        "evidence_write_gate",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	templatePath, template, err := evidenceTemplate(workspaceProfile)
@@ -94,12 +94,12 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请维护 workflow profile 的 development_completed 证据模板",
 			TaskType:            "evidence_write",
 			CurrentStage:        "evidence_write_gate",
-			NextAction:          "fix_profile",
+			AgenticNextAction:   "fix_profile",
 		}))
 	}
 	if selection.Mode == "real" {
 		if issueKey == "" {
-			return writeJSON(stdout, output.Failure("write_evidence", "run_not_found", "未找到 run_id 对应的 Jira 卡片", "请检查 run_id 是否存在有效接管事件"))
+			return writeJSON(stdout, output.Failure("write_evidence", "run_not_found", "未找到 agentic_run_id 对应的 Jira 卡片", "请检查 agentic_run_id 是否存在有效接管事件"))
 		}
 		if !hasFlag(args, "--confirm-real-jira-write") {
 			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "write_evidence", "evidence_write_gate", "ask_owner", "real_jira_confirmation_required", false, true)
@@ -109,13 +109,13 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 				RequiredHumanAction: "请确认证据内容、策略和门禁后添加 --confirm-real-jira-write",
 				TaskType:            "evidence_write",
 				CurrentStage:        "evidence_write_gate",
-				NextAction:          "ask_owner",
+				AgenticNextAction:   "ask_owner",
 			}))
 		}
 	}
 	content := renderEvidenceTemplate(template, map[string]string{
 		"workspace":      workspaceName,
-		"run_id":         runID,
+		"agentic_run_id": runID,
 		"issue_key":      state.IssueKey,
 		"task_class":     state.TaskClass,
 		"process_id":     state.ProcessID,
@@ -135,39 +135,39 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 		}
 	}
 	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
-		RunID:          runID,
-		IssueKey:       state.IssueKey,
-		TaskType:       "evidence_write",
-		Operation:      "write_evidence",
-		CurrentStage:   "evidence_written",
-		NextAction:     "request_owner_confirmation",
-		AgentID:        state.AgentID,
-		CurrentAgentID: state.CurrentAgentID,
-		TargetRepo:     state.TargetRepo,
-		TaskClass:      state.TaskClass,
-		ProcessID:      state.ProcessID,
-		AuditTarget:    "local_file",
-		AuditSubmitted: true,
-		AuditReference: path,
-		OK:             true,
-		Gate:           "write_evidence",
-		GateStatus:     "passed",
+		AgenticRunID:      runID,
+		IssueKey:          state.IssueKey,
+		TaskType:          "evidence_write",
+		Operation:         "write_evidence",
+		CurrentStage:      "evidence_written",
+		AgenticNextAction: "request_owner_confirmation",
+		AgentID:           state.AgentID,
+		AgenticID:         state.AgenticID,
+		TargetRepo:        state.TargetRepo,
+		TaskClass:         state.TaskClass,
+		ProcessID:         state.ProcessID,
+		AuditTarget:       "local_file",
+		AuditSubmitted:    true,
+		AuditReference:    path,
+		OK:                true,
+		Gate:              "write_evidence",
+		GateStatus:        "passed",
 	}); err != nil {
 		return writeJSON(stdout, output.Failure("write_evidence", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 	}
 	return writeJSON(stdout, output.Success("write_evidence", map[string]any{
-		"workspace":       workspaceName,
-		"run_id":          runID,
-		"issue_key":       state.IssueKey,
-		"task_class":      state.TaskClass,
-		"process_id":      state.ProcessID,
-		"target_repo":     state.TargetRepo,
-		"evidence":        path,
-		"template":        templatePath,
-		"audit_target":    "local_file",
-		"audit_submitted": true,
-		"audit_reference": path,
-		"current_stage":   "evidence_written",
-		"next_action":     "request_owner_confirmation",
+		"workspace":           workspaceName,
+		"agentic_run_id":      runID,
+		"issue_key":           state.IssueKey,
+		"task_class":          state.TaskClass,
+		"process_id":          state.ProcessID,
+		"target_repo":         state.TargetRepo,
+		"evidence":            path,
+		"template":            templatePath,
+		"audit_target":        "local_file",
+		"audit_submitted":     true,
+		"audit_reference":     path,
+		"current_stage":       "evidence_written",
+		"agentic_next_action": "request_owner_confirmation",
 	}))
 }

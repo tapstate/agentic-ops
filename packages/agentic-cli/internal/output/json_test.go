@@ -32,8 +32,11 @@ func TestFailureIncludesStableCode(t *testing.T) {
 	if got["current_stage"] != "failed" {
 		t.Fatalf("current_stage = %v", got["current_stage"])
 	}
-	if got["next_action"] != "ask_owner" {
-		t.Fatalf("next_action = %v", got["next_action"])
+	if got["agentic_next_action"] != "ask_owner" {
+		t.Fatalf("agentic_next_action = %v", got["agentic_next_action"])
+	}
+	if _, exists := got["next_action"]; exists {
+		t.Fatalf("legacy next_action must not be present: %#v", got)
 	}
 }
 
@@ -44,7 +47,7 @@ func TestFailureWithContextIncludesTaskProgress(t *testing.T) {
 		RequiredHumanAction: "请补充目标仓库",
 		TaskType:            "task_takeover",
 		CurrentStage:        "takeover_gate",
-		NextAction:          "ask_owner",
+		AgenticNextAction:   "ask_owner",
 	})
 	if got["code"] != "missing_jira_field" {
 		t.Fatalf("code = %v", got["code"])
@@ -55,7 +58,10 @@ func TestFailureWithContextIncludesTaskProgress(t *testing.T) {
 	if got["current_stage"] != "takeover_gate" {
 		t.Fatalf("current_stage = %v", got["current_stage"])
 	}
-	if got["next_action"] != "ask_owner" {
-		t.Fatalf("next_action = %v", got["next_action"])
+	if got["agentic_next_action"] != "ask_owner" {
+		t.Fatalf("agentic_next_action = %v", got["agentic_next_action"])
+	}
+	if _, exists := got["next_action"]; exists {
+		t.Fatalf("legacy next_action must not be present: %#v", got)
 	}
 }

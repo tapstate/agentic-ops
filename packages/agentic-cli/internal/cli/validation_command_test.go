@@ -17,7 +17,7 @@ func TestContractValidateOutputsIssueCount(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "operation", "contract_validate")
 	assertJSONNumber(t, stdout.String(), "issues", 0)
-	assertJSONField(t, stdout.String(), "next_action", "continue")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "continue")
 }
 
 func TestProfileValidateOutputsIssueCount(t *testing.T) {
@@ -30,7 +30,7 @@ func TestProfileValidateOutputsIssueCount(t *testing.T) {
 	assertJSONField(t, stdout.String(), "operation", "profile_validate")
 	assertJSONField(t, stdout.String(), "workspace", "tapstate")
 	assertJSONNumber(t, stdout.String(), "issues", 0)
-	assertJSONField(t, stdout.String(), "next_action", "continue")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "continue")
 }
 
 func TestProfileResolveMergesProjectPackageAndWorkspaceOverlay(t *testing.T) {
@@ -74,7 +74,7 @@ func TestProfileUpdateAndRollbackUseLocalProfileBackup(t *testing.T) {
 	}
 	assertJSONField(t, updateStdout.String(), "operation", "profile_update")
 	assertJSONField(t, updateStdout.String(), "workspace", "tapstate")
-	assertJSONField(t, updateStdout.String(), "next_action", "profile_validate")
+	assertJSONField(t, updateStdout.String(), "agentic_next_action", "profile_validate")
 	updated, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatalf("ReadFile updated error = %v", err)
@@ -91,7 +91,7 @@ func TestProfileUpdateAndRollbackUseLocalProfileBackup(t *testing.T) {
 	}
 	assertJSONField(t, rollbackStdout.String(), "operation", "profile_rollback")
 	assertJSONField(t, rollbackStdout.String(), "workspace", "tapstate")
-	assertJSONField(t, rollbackStdout.String(), "next_action", "profile_validate")
+	assertJSONField(t, rollbackStdout.String(), "agentic_next_action", "profile_validate")
 	restored, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatalf("ReadFile restored error = %v", err)
@@ -112,7 +112,7 @@ func TestPolicyValidateOutputsIssueCount(t *testing.T) {
 	assertJSONField(t, stdout.String(), "workspace", "tapstate")
 	assertJSONField(t, stdout.String(), "policy", "default")
 	assertJSONNumber(t, stdout.String(), "issues", 0)
-	assertJSONField(t, stdout.String(), "next_action", "continue")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "continue")
 }
 
 func TestPolicyUpdateAndRollbackUseLocalPolicyBackup(t *testing.T) {
@@ -134,7 +134,7 @@ func TestPolicyUpdateAndRollbackUseLocalPolicyBackup(t *testing.T) {
 	assertJSONField(t, updateStdout.String(), "operation", "policy_update")
 	assertJSONField(t, updateStdout.String(), "workspace", "tapstate")
 	assertJSONField(t, updateStdout.String(), "policy", "default")
-	assertJSONField(t, updateStdout.String(), "next_action", "policy_validate")
+	assertJSONField(t, updateStdout.String(), "agentic_next_action", "policy_validate")
 	updated, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatalf("ReadFile updated error = %v", err)
@@ -152,7 +152,7 @@ func TestPolicyUpdateAndRollbackUseLocalPolicyBackup(t *testing.T) {
 	assertJSONField(t, rollbackStdout.String(), "operation", "policy_rollback")
 	assertJSONField(t, rollbackStdout.String(), "workspace", "tapstate")
 	assertJSONField(t, rollbackStdout.String(), "policy", "default")
-	assertJSONField(t, rollbackStdout.String(), "next_action", "policy_validate")
+	assertJSONField(t, rollbackStdout.String(), "agentic_next_action", "policy_validate")
 	restored, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatalf("ReadFile restored error = %v", err)
@@ -179,5 +179,5 @@ func TestProfileValidateReportsMissingProcessRegistryTarget(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "operation", "profile_validate")
 	assertJSONField(t, stdout.String(), "code", "profile_validation_failed")
-	assertJSONField(t, stdout.String(), "next_action", "fix_profile")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "fix_profile")
 }

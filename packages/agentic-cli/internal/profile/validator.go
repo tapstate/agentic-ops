@@ -82,8 +82,8 @@ func ValidateProcesses(p Profile, registry map[string]process.Process) []Validat
 		if retryRedo.RedoFromStage != "" && !stageIDs[retryRedo.RedoFromStage] {
 			issues = append(issues, ValidationIssue{Code: "retry_redo_stage_gap", Message: name + " redo_from_stage references unknown process stage " + retryRedo.RedoFromStage})
 		}
-		if retryRedo.NextAction != "" && !isKnownNextAction(retryRedo.NextAction) {
-			issues = append(issues, ValidationIssue{Code: "next_action_mapping_gap", Message: name + " next_action is unknown: " + retryRedo.NextAction})
+		if retryRedo.AgenticNextAction != "" && !isKnownNextAction(retryRedo.AgenticNextAction) {
+			issues = append(issues, ValidationIssue{Code: "next_action_mapping_gap", Message: name + " agentic_next_action is unknown: " + retryRedo.AgenticNextAction})
 		}
 	}
 	for name, gate := range p.ReviewGates {

@@ -30,9 +30,9 @@ func runListTasks(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.Failure("list_tasks", "jira_search_failed", err.Error(), "请检查 Jira adapter 配置"))
 	}
 	return writeJSON(stdout, output.Success("list_tasks", map[string]any{
-		"workspace":   workspaceName,
-		"tasks":       issues,
-		"next_action": "takeover_task",
+		"workspace":           workspaceName,
+		"tasks":               issues,
+		"agentic_next_action": "takeover_task",
 	}))
 }
 
@@ -118,7 +118,7 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 			TaskType:            "task_takeover",
 			Operation:           "takeover_task",
 			CurrentStage:        decision.CurrentStage,
-			NextAction:          decision.NextAction,
+			AgenticNextAction:   decision.AgenticNextAction,
 			OK:                  false,
 			Code:                decision.Code,
 			Gate:                "takeover_gate",
@@ -132,11 +132,11 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 			RequiredHumanAction: decision.RequiredHumanAction,
 			TaskType:            "task_takeover",
 			CurrentStage:        decision.CurrentStage,
-			NextAction:          decision.NextAction,
+			AgenticNextAction:   decision.AgenticNextAction,
 		})
 		return writeJSON(stdout, result)
 	}
-	runID := feedback.RunID(issue.Key, "task_takeover", fixedNow(), "a8f3")
+	runID := feedback.AgenticRunID(issue.Key, "task_takeover", fixedNow(), "a8f3")
 	takeoverAt := fixedNow().Format(time.RFC3339)
 	currentAgentID := agentID()
 	if selection.Mode == "real" {
@@ -148,14 +148,14 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 				RequiredHumanAction: "请确认 policy/gate 允许写入后添加 --confirm-real-jira-write",
 				TaskType:            "task_takeover",
 				CurrentStage:        "takeover_gate",
-				NextAction:          "ask_owner",
+				AgenticNextAction:   "ask_owner",
 			}))
 		}
-		fields := jiraTakeoverFields(workspaceProfile, currentAgentID, takeoverAt)
-		ownershipComment := jiraTakeoverComment(workspaceProfile, runID, currentAgentID, takeoverAt)
+		fields := jiraTakeoverFields(workspaceProfile, runID, currentAgentID, takeoverAt, "proceed")
+		ownershipComment := jiraTakeoverComment(workspaceProfile, runID, currentAgentID, takeoverAt, "proceed")
 		if len(fields) == 0 && ownershipComment == "" {
 			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issue.Key, "takeover_task", "takeover_gate", "ask_owner", "missing_jira_write_mapping", false, true)
-			return writeJSON(stdout, output.Failure("takeover_task", "missing_jira_write_mapping", "缺少 current_agent_id 或 takeover_at 字段映射", "请维护 workflow profile 的所有权字段映射"))
+			return writeJSON(stdout, output.Failure("takeover_task", "missing_jira_write_mapping", "缺少 agentic_id 或 agentic_takeover_at 字段映射", "请维护 workflow profile 的所有权字段映射"))
 		}
 		if len(fields) > 0 {
 			if err := selection.Client.UpdateFields(context.Background(), issue.Key, fields); err != nil {
@@ -174,39 +174,41 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 		}
 	}
 	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
-		RunID:           runID,
-		IssueKey:        issue.Key,
-		TaskType:        "task_takeover",
-		Operation:       "takeover_task",
-		CurrentStage:    "takeover_started",
-		NextAction:      "proceed",
-		AgentID:         currentAgentID,
-		CurrentAgentID:  currentAgentID,
-		TakeoverAt:      takeoverAt,
-		TargetRepo:      decision.TargetRepo,
-		TaskClass:       decision.TaskClass,
-		TaskClassSource: decision.TaskClassSource,
-		ProcessID:       decision.ProcessID,
-		OK:              true,
-		Gate:            "takeover_task",
-		GateStatus:      "passed",
+		AgenticRunID:       runID,
+		IssueKey:           issue.Key,
+		TaskType:           "task_takeover",
+		Operation:          "takeover_task",
+		CurrentStage:       "takeover_started",
+		AgenticNextAction:  "proceed",
+		AgentID:            currentAgentID,
+		AgenticID:          currentAgentID,
+		AgenticTakeoverAt:  takeoverAt,
+		AgenticHeartbeatAt: takeoverAt,
+		TargetRepo:         decision.TargetRepo,
+		TaskClass:          decision.TaskClass,
+		TaskClassSource:    decision.TaskClassSource,
+		ProcessID:          decision.ProcessID,
+		OK:                 true,
+		Gate:               "takeover_task",
+		GateStatus:         "passed",
 	}); err != nil {
 		return writeJSON(stdout, output.Failure("takeover_task", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 	}
 	return writeJSON(stdout, output.Success("takeover_task", map[string]any{
-		"workspace":         workspaceName,
-		"issue_key":         issue.Key,
-		"run_id":            runID,
-		"agent_id":          currentAgentID,
-		"current_agent_id":  currentAgentID,
-		"takeover_at":       takeoverAt,
-		"task_type":         "task_takeover",
-		"task_class":        decision.TaskClass,
-		"task_class_source": decision.TaskClassSource,
-		"process_id":        decision.ProcessID,
-		"current_stage":     "takeover_started",
-		"target_repo":       decision.TargetRepo,
-		"next_action":       "proceed",
+		"workspace":            workspaceName,
+		"issue_key":            issue.Key,
+		"agentic_run_id":       runID,
+		"agent_id":             currentAgentID,
+		"agentic_id":           currentAgentID,
+		"agentic_takeover_at":  takeoverAt,
+		"agentic_heartbeat_at": takeoverAt,
+		"task_type":            "task_takeover",
+		"task_class":           decision.TaskClass,
+		"task_class_source":    decision.TaskClassSource,
+		"process_id":           decision.ProcessID,
+		"current_stage":        "takeover_started",
+		"target_repo":          decision.TargetRepo,
+		"agentic_next_action":  "proceed",
 	}))
 }
 
@@ -224,10 +226,10 @@ func inspectTaskGateFacts(issue jira.Issue, p profile.Profile, currentUser strin
 	return map[string]any{
 		"owner":                                 issue.Owner,
 		"assignee":                              issue.Assignee,
-		"current_agent_id":                      issue.CurrentAgentID,
+		"agentic_id":                            issue.AgenticID,
 		"owner_matches_current_user":            issue.Owner != "" && issue.Owner == currentUser,
 		"assignee_matches_current_user":         issue.Assignee != "" && issue.Assignee == currentUser,
-		"current_agent_id_empty_or_match":       issue.CurrentAgentID == "" || issue.CurrentAgentID == currentAgentID,
+		"agentic_id_empty_or_match":       issue.AgenticID == "" || issue.AgenticID == currentAgentID,
 		"task_class":                            taskClass,
 		"task_class_source":                     taskClassSource,
 		"standard_process_id":                   processID,
@@ -310,7 +312,7 @@ func projectAssetRefs(workspaceName string, p profile.Profile) map[string]any {
 func runResumeTakeover(args []string, stdout io.Writer) int {
 	runID := readFlag(args, "--run-id", "")
 	if runID == "" {
-		return writeJSON(stdout, output.Failure("resume_takeover", "missing_run_id", "缺少 run_id", "请提供 --run-id"))
+		return writeJSON(stdout, output.Failure("resume_takeover", "missing_agentic_run_id", "缺少 agentic_run_id", "请提供 --run-id"))
 	}
 	workspaceName := workspaceNameFromArgsOrAgentConfig(args, "default")
 	root, err := workspaceRoot()
@@ -319,16 +321,16 @@ func runResumeTakeover(args []string, stdout io.Writer) int {
 	}
 	state, err := runcontext.ReadFile(
 		filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"),
-		runcontext.Query{RunID: runID, Workspace: workspaceName, AgentID: agentID()},
+		runcontext.Query{AgenticRunID: runID, Workspace: workspaceName, AgentID: agentID()},
 	)
 	if err != nil {
 		return writeJSON(stdout, output.FailureWithContext("resume_takeover", output.FailureContext{
 			Code:                runcontext.ErrorCode(err),
 			Message:             err.Error(),
-			RequiredHumanAction: "请检查 run_id、workspace 和本地事件日志是否对应同一次有效接管",
+			RequiredHumanAction: "请检查 agentic_run_id、workspace 和本地事件日志是否对应同一次有效接管",
 			TaskType:            "task_takeover",
 			CurrentStage:        "resume_gate",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	workspaceProfile := takeoverProfile(workspaceName)
@@ -340,7 +342,7 @@ func runResumeTakeover(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查 resume-takeover 操作契约资源",
 			TaskType:            "task_takeover",
 			CurrentStage:        "resume_gate",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	processRegistry, err := repoProcessRegistry()
@@ -356,7 +358,7 @@ func runResumeTakeover(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.Failure("resume_takeover", "jira_issue_read_failed", err.Error(), "请检查 Jira adapter 配置和卡片权限"))
 	}
 	if !ok {
-		return writeJSON(stdout, output.Failure("resume_takeover", "issue_not_found", "未找到 Jira 卡片", "请检查 run_id 对应的 Jira 卡片"))
+		return writeJSON(stdout, output.Failure("resume_takeover", "issue_not_found", "未找到 Jira 卡片", "请检查 agentic_run_id 对应的 Jira 卡片"))
 	}
 	currentJiraUser, err := selection.Client.CurrentUser(context.Background())
 	if err != nil {
@@ -381,22 +383,22 @@ func runResumeTakeover(args []string, stdout io.Writer) int {
 				RequiredHumanAction: "请检查工作空间 runs 目录权限",
 				TaskType:            "task_takeover",
 				CurrentStage:        state.CurrentStage,
-				NextAction:          "ask_owner",
+				AgenticNextAction:   "ask_owner",
 			}))
 		}
 		nextAction := "ask_owner"
 		if jiraFeedback.Required {
-			nextAction = jiraFeedback.NextAction
+			nextAction = jiraFeedback.AgenticNextAction
 		}
 		_ = appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
-			RunID:               runID,
+			AgenticRunID:        runID,
 			IssueKey:            state.IssueKey,
 			TaskType:            "task_takeover",
 			Operation:           "resume_takeover",
 			CurrentStage:        "resume_gate",
-			NextAction:          nextAction,
+			AgenticNextAction:   nextAction,
 			AgentID:             state.AgentID,
-			CurrentAgentID:      state.CurrentAgentID,
+			AgenticID:           state.AgenticID,
 			TargetRepo:          state.TargetRepo,
 			TaskClass:           state.TaskClass,
 			ProcessID:           state.ProcessID,
@@ -413,10 +415,10 @@ func runResumeTakeover(args []string, stdout io.Writer) int {
 			RequiredHumanAction: decision.RequiredHumanAction,
 			TaskType:            "task_takeover",
 			CurrentStage:        state.CurrentStage,
-			NextAction:          nextAction,
+			AgenticNextAction:   nextAction,
 		})
 		result["workspace"] = workspaceName
-		result["run_id"] = runID
+		result["agentic_run_id"] = runID
 		result["issue_key"] = state.IssueKey
 		result["task_class"] = state.TaskClass
 		result["process_id"] = state.ProcessID
@@ -433,37 +435,37 @@ func runResumeTakeover(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, result)
 	}
 	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
-		RunID:          runID,
-		IssueKey:       state.IssueKey,
-		TaskType:       "task_takeover",
-		Operation:      "resume_takeover",
-		CurrentStage:   state.CurrentStage,
-		NextAction:     state.NextAction,
-		AgentID:        state.AgentID,
-		CurrentAgentID: state.CurrentAgentID,
-		TargetRepo:     decision.TargetRepo,
-		TaskClass:      state.TaskClass,
-		ProcessID:      state.ProcessID,
-		OK:             true,
-		Gate:           "resume_takeover",
-		GateStatus:     "passed",
+		AgenticRunID:      runID,
+		IssueKey:          state.IssueKey,
+		TaskType:          "task_takeover",
+		Operation:         "resume_takeover",
+		CurrentStage:      state.CurrentStage,
+		AgenticNextAction: state.AgenticNextAction,
+		AgentID:           state.AgentID,
+		AgenticID:         state.AgenticID,
+		TargetRepo:        decision.TargetRepo,
+		TaskClass:         state.TaskClass,
+		ProcessID:         state.ProcessID,
+		OK:                true,
+		Gate:              "resume_takeover",
+		GateStatus:        "passed",
 	}); err != nil {
 		return writeJSON(stdout, output.Failure("resume_takeover", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 	}
 	return writeJSON(stdout, output.Success("resume_takeover", map[string]any{
 		"workspace":              workspaceName,
-		"run_id":                 runID,
+		"agentic_run_id":         runID,
 		"issue_key":              state.IssueKey,
 		"task_type":              "task_takeover",
 		"agent_id":               state.AgentID,
-		"current_agent_id":       state.CurrentAgentID,
+		"agentic_id":             state.AgenticID,
 		"task_class":             state.TaskClass,
 		"process_id":             state.ProcessID,
 		"target_repo":            decision.TargetRepo,
 		"previous_stage":         state.CurrentStage,
 		"current_stage":          state.CurrentStage,
 		"standard_process_stage": decision.StandardProcessStage,
-		"next_action":            state.NextAction,
+		"agentic_next_action":    state.AgenticNextAction,
 	}))
 }
 

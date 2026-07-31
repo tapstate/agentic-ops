@@ -47,8 +47,8 @@ rg -n '^- \[ \]' plans
 - `docs/architecture/full-design-implementation-design.md`
 
 **Current status:**
-- 已通过统一 `RunContextReader` 按 `run_id` 恢复历史上下文，并校验不可变事实、最近任务阶段、终态和人工门禁。
-- fake 与真实 Jira 模式都会重新读取卡片；真实模式额外复核 `assignee` 和 `current_agent_id`。
+- 已通过统一 `RunContextReader` 按 `agentic_run_id` 恢复历史上下文，并校验不可变事实、最近任务阶段、终态和人工门禁。
+- fake 与真实 Jira 模式都会重新读取卡片；真实模式额外复核 `assignee` 和 `agentic_id`。
 - 操作阶段由 `resume-takeover` 契约校验，Jira 状态映射后的业务阶段由 Standard Process Registry 校验。
 - 历史 `target_repo` 存在时必须与当前 Jira/profile 解析结果一致；旧 run 缺失时允许使用当前确定性映射补齐。
 - 可信任务级阻塞会生成中文 Jira 评论材料，并通过现有 `add-task-comment` 原子操作受控回写。
@@ -63,15 +63,15 @@ rg -n '^- \[ \]' plans
 - `install-resources/basic/contracts/operations/resume-takeover.yaml`
 - `tests/e2e/local-fake-flow.sh`
 
-- [x] 实现按 `run_id` 读取历史事件并找出最近一次有效接管事件。
+- [x] 实现按 `agentic_run_id` 读取历史事件并找出最近一次有效接管事件。
 - [x] 校验历史事件中的 `workspace` 和当前命令 `--workspace` 一致。
-- [x] 校验历史事件中存在 `issue_key`、`agent_id`、`current_agent_id`、`task_class` 和 `process_id`。
-- [x] 在真实 Jira 模式下重新读取 Jira 卡片，校验 `assignee` 和 `current_agent_id` 仍匹配当前代理。
+- [x] 校验历史事件中存在 `issue_key`、`agent_id`、`agentic_id`、`task_class` 和 `process_id`。
+- [x] 在真实 Jira 模式下重新读取 Jira 卡片，校验 `assignee` 和 `agentic_id` 仍匹配当前代理。
 - [x] 从历史事件或当前 profile 映射恢复并校验 `target_repo`，不得在恢复时临场猜测。
 - [x] 分别按操作契约和 Standard Process Registry 校验操作阶段与 Jira 映射后的业务流程阶段。
 - [x] 当本地事件缺失或不一致时返回稳定错误码：`run_not_found`、`workspace_mismatch`、`local_state_mismatch`。
 - [x] 增加单元测试覆盖成功恢复、run 缺失、workspace 不匹配和本地状态不完整。
-- [x] 更新 e2e 验证恢复输出包含 `previous_stage`、`current_stage` 和 `next_action`。
+- [x] 更新 e2e 验证恢复输出包含 `previous_stage`、`current_stage` 和 `agentic_next_action`。
 
 **Verification:**
 
@@ -104,10 +104,10 @@ bash tests/e2e/local-fake-flow.sh
 - [x] `write-evidence` 根据 run 事件读取 `issue_key`、`task_class`、`process_id`、当前阶段和目标仓库。
 - [x] `write-evidence` 校验证据模板存在，不存在时返回 `evidence_template_missing`。
 - [x] `write-evidence` 读取 `install-resources/basic/policies/default.yaml` 校验 Jira 评论或本地证据写入；门禁阻断时返回 `policy_gate_required`。
-- [x] `release-agent` 校验 `run_id` 存在、`completion_evidence` 文件存在或是已记录的审计引用。
+- [x] `release-agent` 校验 `agentic_run_id` 存在、`agentic_completion_evidence` 文件存在或是已记录的审计引用。
 - [x] `release-agent` 输出并记录任务级审计状态；未提交审计时不得把本地反馈报告当作事实源。
 - [x] 增加单元测试覆盖 run 缺失、完成证据缺失和审计已提交。
-- [x] 更新 e2e 覆盖本地审计引用和 `current_agent_id_cleared=true`。
+- [x] 更新 e2e 覆盖本地审计引用和 `agentic_id_cleared=true`。
 
 **Verification:**
 
@@ -125,7 +125,7 @@ bash tests/e2e/local-fake-flow.sh
 
 **Current status:**
 - 已实现 process loader、process/profile 引用校验、接管入口阶段校验、任务分类映射和目标仓库 fallback。
-- 已校验 `review_gates`、`retry_redo` 与 process stage、`next_action` 的一致性。
+- 已校验 `review_gates`、`retry_redo` 与 process stage、`agentic_next_action` 的一致性。
 - 本任务基线已经完成，后续只做回归验证。
 
 **Implementation evidence:**
@@ -141,7 +141,7 @@ bash tests/e2e/local-fake-flow.sh
 - [x] 为 Jira issue model 增加 labels / components，真实 Jira 和 fake Jira 均映射。
 - [x] `taskClassFor` 按 issue type、label、component 顺序解析任务分类，并输出映射来源。
 - [x] 实现 `target_repo` fallback：字段缺失时按 component / label / issue type / default repository 映射。
-- [x] 校验 `review_gates`、`retry_redo` 引用的 stage 和 `next_action` 与 process 定义一致。
+- [x] 校验 `review_gates`、`retry_redo` 引用的 stage 和 `agentic_next_action` 与 process 定义一致。
 - [x] 增加单元测试覆盖缺失 process、非法入口阶段、label 映射、component 映射、repo fallback 和映射来源输出。
 
 **Verification:**
@@ -311,7 +311,7 @@ bash scripts/test-build.sh
 **Current gap:**
 - 当前只有 `feedback report` 和 `feedback bundle`。
 - 设计中出现的 `feedback analyze`、`feedback propose` 尚未实现。
-- `feedback report` 只按 date 输出汇总，尚未支持按 `run_id`、`issue_key`、`task_type`、失败码或时间范围过滤。
+- `feedback report` 只按 date 输出汇总，尚未支持按 `agentic_run_id`、`issue_key`、`task_type`、失败码或时间范围过滤。
 - 尚未追踪修复前后问题是否减少。
 
 **Files:**

@@ -171,7 +171,7 @@ func TestValidateProcessesReportsMissingReviewGateRole(t *testing.T) {
 func TestValidateProcessesReportsUnknownRetryRedoStage(t *testing.T) {
 	p := validDeepProfileForTest()
 	p.RetryRedo = map[string]RetryRedoPolicy{
-		"scope_changed": {RedoFromStage: "missing_stage", NextAction: "redo_previous_stage"},
+		"scope_changed": {RedoFromStage: "missing_stage", AgenticNextAction: "redo_previous_stage"},
 	}
 	registry := map[string]process.Process{
 		"development_change_v1": validProcessForTest(),
@@ -186,7 +186,7 @@ func TestValidateProcessesReportsUnknownRetryRedoStage(t *testing.T) {
 func TestValidateProcessesReportsUnknownNextAction(t *testing.T) {
 	p := validDeepProfileForTest()
 	p.RetryRedo = map[string]RetryRedoPolicy{
-		"verification_failed": {NextAction: "surprise_action"},
+		"verification_failed": {AgenticNextAction: "surprise_action"},
 	}
 	registry := map[string]process.Process{
 		"development_change_v1": validProcessForTest(),

@@ -125,7 +125,7 @@ agentic-cli workspace init --project tapdata --interactive
 期望说明：
 
 - AIAgent 重新执行 `inspect-task`，不复用补卡前的判断。
-- 准入通过后，AIAgent 执行 `takeover-task` 并获得 `run_id`。
+- 准入通过后，AIAgent 执行 `takeover-task` 并获得 `agentic_run_id`。
 - CLI 只执行负责人、代理所有权、任务分类、标准流程、状态入口和真实 Jira 写入门禁。
 
 ### 步骤 7：修复计划确认
@@ -134,7 +134,7 @@ agentic-cli workspace init --project tapdata --interactive
 
 - AIAgent 结合 Jira 和代码形成版本化修复计划。
 - 计划包含根因与证据、修改和不修改范围、目标模块或文件、实施步骤、测试与验收映射、风险与回滚。
-- AIAgent 使用 `add-task-comment --category plan --run-id <run_id>` 写入 Jira，然后停止代码修改。
+- AIAgent 使用 `add-task-comment --category plan --run-id <agentic_run_id>` 写入 Jira，然后停止代码修改。
 - 研发工程师确认后，AIAgent 使用 `add-task-comment --category decision` 写入确认结果。
 
 ### 步骤 8：开发与验证
@@ -194,7 +194,7 @@ agentic-cli workspace init --project tapdata --interactive
 - 能展示任务接管门禁。
 - 能展示准入失败后的代码分析、Jira 补卡评论和重新检查。
 - 能展示修复计划与研发工程师确认都写入 Jira，且确认前没有代码修改。
-- 能展示 `run_id` 和证据。
+- 能展示 `agentic_run_id` 和证据。
 - 能展示人工确认点。
 - 能展示反馈报告的输入和输出。
 

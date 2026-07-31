@@ -60,8 +60,8 @@ func ValidateResume(input ResumeInput) ResumeDecision {
 	if input.Issue.Key != input.Context.IssueKey {
 		return blockedResume(
 			"issue_mismatch",
-			"当前 Jira 卡片与 run_id 中的卡片不一致",
-			"请检查 run_id 和 Jira 卡片是否来自同一次接管",
+			"当前 Jira 卡片与 agentic_run_id 中的卡片不一致",
+			"请检查 agentic_run_id 和 Jira 卡片是否来自同一次接管",
 			false,
 			false,
 		)
@@ -76,7 +76,7 @@ func ValidateResume(input ResumeInput) ResumeDecision {
 				false,
 			)
 		}
-		if input.Issue.CurrentAgentID == "" {
+		if input.Issue.AgenticID == "" {
 			return blockedResume(
 				"agent_binding_lost",
 				"Jira 上的 AIAgent 绑定已丢失",
@@ -85,7 +85,7 @@ func ValidateResume(input ResumeInput) ResumeDecision {
 				true,
 			)
 		}
-		if input.Issue.CurrentAgentID != input.AgentID {
+		if input.Issue.AgenticID != input.AgentID {
 			return blockedResume(
 				"agent_ownership_conflict",
 				"当前 Jira 卡片已绑定其他 AIAgent",
@@ -192,5 +192,5 @@ func resumeFeedbackWriteAllowed(input ResumeInput) bool {
 		return true
 	}
 	return input.Issue.Assignee == input.CurrentUser &&
-		(input.Issue.CurrentAgentID == "" || input.Issue.CurrentAgentID == input.AgentID)
+		(input.Issue.AgenticID == "" || input.Issue.AgenticID == input.AgentID)
 }

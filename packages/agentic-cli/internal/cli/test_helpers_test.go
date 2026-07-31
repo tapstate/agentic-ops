@@ -375,6 +375,6 @@ func realModeIssue() jira.Issue {
 
 func realModeBoundIssue() jira.Issue {
 	issue := realModeIssue()
-	issue.CurrentAgentID = "agentic-cli-local-agent"
+	issue.AgenticID = "agentic-cli-local-agent"
 	return issue
 }

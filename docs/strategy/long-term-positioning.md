@@ -48,7 +48,7 @@ AIAgent 使用 AgenticOps 的目标，是按这些标准完成任务，而不是
 
 - `task_type`
 - `current_stage`
-- `next_action`
+- `agentic_next_action`
 
 AIAgent 不按固定角色工作，也不靠临场记忆猜流程。每个操作的输出都应能解释当前阶段是否完成、下一步是什么、是否允许重试、是否必须重做前序节点、是否需要专业角色审查。
 
@@ -139,12 +139,12 @@ AIAgent 发现缺少 target_repo
 
 AgenticOps 必须显式支持重试和重做。
 
-- 重试：当前节点动作失败，但输入、审查结论和流程阶段仍然有效，可以在同一 `run_id` 或同一阶段内再次执行。
+- 重试：当前节点动作失败，但输入、审查结论和流程阶段仍然有效，可以在同一 `agentic_run_id` 或同一阶段内再次执行。
 - 重做：前序节点的输入、表单数据、审查结论或范围边界发生变化，必须回到对应节点重新生成表单和证据。
 
 是否重试或重做不能由 AIAgent 凭感觉决定，必须基于：
 
-- 当前 `task_type`、`current_stage`、`next_action`。
+- 当前 `task_type`、`current_stage`、`agentic_next_action`。
 - 最近一次操作输出。
 - 标准表单字段是否完整。
 - 专业审查结论是否通过。

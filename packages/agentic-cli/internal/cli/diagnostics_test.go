@@ -43,7 +43,7 @@ func TestPreflightOutputsEnvironmentChecks(t *testing.T) {
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "profile", "status"}, "ok")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "workspace", "status"}, "ok")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "current_directory", "status"}, "ok")
-	assertJSONField(t, stdout.String(), "next_action", "list_tasks")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "list_tasks")
 }
 
 func TestPreflightReportsMissingGit(t *testing.T) {
@@ -66,7 +66,7 @@ func TestPreflightReportsMissingGit(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "status", "failed")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "git", "status"}, "failed")
-	assertJSONField(t, stdout.String(), "next_action", "fix_environment")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "fix_environment")
 }
 
 func TestPreflightReportsProfileFailure(t *testing.T) {
@@ -81,7 +81,7 @@ func TestPreflightReportsProfileFailure(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "status", "failed")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "profile", "status"}, "failed")
-	assertJSONField(t, stdout.String(), "next_action", "workspace_init")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "workspace_init")
 }
 
 func TestPreflightReportsCurrentDirectoryMismatch(t *testing.T) {
@@ -100,7 +100,7 @@ func TestPreflightReportsCurrentDirectoryMismatch(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "status", "failed")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "current_directory", "status"}, "failed")
-	assertJSONField(t, stdout.String(), "next_action", "fix_environment")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "fix_environment")
 }
 
 func TestPreflightReportsMissingJiraTokenEnv(t *testing.T) {
@@ -131,7 +131,7 @@ func TestPreflightReportsMissingJiraTokenEnv(t *testing.T) {
 	assertJSONField(t, stdout.String(), "jira_token_env_has_value", false)
 	assertJSONField(t, stdout.String(), "jira_env_file", filepath.Join(installDir, "user", ".env"))
 	assertJSONField(t, stdout.String(), "jira_token_help_url", "https://id.atlassian.com/manage-profile/security/api-tokens")
-	assertJSONField(t, stdout.String(), "next_action", "set_jira_api_token")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "set_jira_api_token")
 }
 
 func TestPreflightRejectsIncompleteWorkspace(t *testing.T) {
@@ -153,7 +153,7 @@ func TestPreflightRejectsIncompleteWorkspace(t *testing.T) {
 	assertJSONField(t, stdout.String(), "status", "failed")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "workspace", "status"}, "failed")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "workspace", "code"}, "workspace_initialization_incomplete")
-	assertJSONField(t, stdout.String(), "next_action", "workspace_init")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "workspace_init")
 }
 
 func TestPreflightRejectsWorkspaceWithMissingSourceRoot(t *testing.T) {
@@ -178,7 +178,7 @@ func TestPreflightRejectsWorkspaceWithMissingSourceRoot(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "status", "failed")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "workspace", "code"}, "workspace_initialization_incomplete")
-	assertJSONField(t, stdout.String(), "next_action", "workspace_init")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "workspace_init")
 }
 
 func TestDoctorOutputsLocalDiagnosticChecks(t *testing.T) {
@@ -197,7 +197,7 @@ func TestDoctorOutputsLocalDiagnosticChecks(t *testing.T) {
 	assertJSONField(t, stdout.String(), "operation", "doctor")
 	assertJSONField(t, stdout.String(), "workspace", "tapstate")
 	assertJSONField(t, stdout.String(), "version", "SRC-source")
-	assertJSONField(t, stdout.String(), "next_action", "continue")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "continue")
 	assertJSONField(t, stdout.String(), "status", "ok")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "profile", "status"}, "ok")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "policy", "status"}, "ok")
@@ -229,7 +229,7 @@ func TestDoctorReportsCurrentVersionMismatch(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "status", "failed")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "current", "status"}, "failed")
-	assertJSONField(t, stdout.String(), "next_action", "fix_environment")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "fix_environment")
 }
 
 func TestDoctorReportsMissingSourceRoot(t *testing.T) {
@@ -243,7 +243,7 @@ func TestDoctorReportsMissingSourceRoot(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "status", "failed")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "local_paths", "status"}, "failed")
-	assertJSONField(t, stdout.String(), "next_action", "fix_environment")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "fix_environment")
 }
 
 func TestDoctorChecksRealJiraAdapterWhenRequested(t *testing.T) {
@@ -277,7 +277,7 @@ func TestDoctorFailsRealJiraCheckWhenAdapterIsNotReal(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "operation", "doctor")
 	assertJSONField(t, stdout.String(), "status", "failed")
-	assertJSONField(t, stdout.String(), "next_action", "fix_environment")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "fix_environment")
 	assertNestedJSONField(t, stdout.String(), []string{"checks", "jira_adapter", "status"}, "failed")
 }
 

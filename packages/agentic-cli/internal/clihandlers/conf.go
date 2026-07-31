@@ -16,9 +16,9 @@ func RunConf(args []string, stdout io.Writer) int {
 	workspaceName := workspaceNameFromArgsOrAgentConfig(args, "default")
 	scope := runtimeConfigScope(workspaceName)
 	payload := map[string]any{
-		"key":         key,
-		"workspace":   workspaceName,
-		"next_action": "continue",
+		"key":                 key,
+		"workspace":           workspaceName,
+		"agentic_next_action": "continue",
 	}
 	switch key {
 	case "paths.user_config":

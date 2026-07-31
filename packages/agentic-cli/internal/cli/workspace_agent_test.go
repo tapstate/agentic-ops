@@ -27,7 +27,7 @@ func TestWorkspaceInitOutputsNextAction(t *testing.T) {
 	assertJSONField(t, stdout.String(), "workspace", "tapstate")
 	assertJSONField(t, stdout.String(), "jira_user", "dev@example.com")
 	assertJSONField(t, stdout.String(), "jira_project", "TAP")
-	assertJSONField(t, stdout.String(), "next_action", "init_agent_capability")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "init_agent_capability")
 	assertJSONField(t, stdout.String(), "jira_config_status", "needs_configuration")
 	assertJSONField(t, stdout.String(), "jira_config_path", filepath.Join(installDir, "user", "config.local.yaml"))
 	if !strings.Contains(stdout.String(), "--jira-base-url") {
@@ -666,7 +666,7 @@ func TestAgentInitRejectsIncompleteWorkspace(t *testing.T) {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
 	assertJSONField(t, stdout.String(), "code", "workspace_initialization_incomplete")
-	assertJSONField(t, stdout.String(), "next_action", "workspace_init")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "workspace_init")
 	assertJSONField(t, stdout.String(), "workspace", "tapdata")
 }
 
@@ -723,7 +723,7 @@ func TestAgentInitOutputsTaskModel(t *testing.T) {
 	assertJSONField(t, stdout.String(), "operation", "agent_init")
 	assertJSONField(t, stdout.String(), "task_type", "capability_initialization")
 	assertJSONField(t, stdout.String(), "current_stage", "agent_capability_initialized")
-	assertJSONField(t, stdout.String(), "next_action", "list_tasks")
+	assertJSONField(t, stdout.String(), "agentic_next_action", "list_tasks")
 	if !strings.Contains(stdout.String(), `"contract_validate"`) {
 		t.Fatalf("stdout missing contract_validate capability: %s", stdout.String())
 	}

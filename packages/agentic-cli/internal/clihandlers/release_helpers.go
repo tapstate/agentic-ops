@@ -41,7 +41,7 @@ func completionEvidenceStatus(root string, runID string, completionEvidence stri
 	}
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
-		if event.RunID == runID && event.AuditSubmitted && event.AuditReference == completionEvidence {
+		if event.AgenticRunID == runID && event.AuditSubmitted && event.AuditReference == completionEvidence {
 			return completionEvidenceCheck{Target: event.AuditTarget, Reference: event.AuditReference, Submitted: true}, nil
 		}
 	}
@@ -188,7 +188,7 @@ func jiraAdapterConfigFailure(operation string, workspaceName string, err error,
 	} else {
 		result["required_human_action"] = "请到 Atlassian 创建 Jira API token，然后设置进程环境变量 " + tokenEnv
 	}
-	result["next_action"] = "set_jira_api_token"
+	result["agentic_next_action"] = "set_jira_api_token"
 	return result
 }
 
@@ -285,32 +285,42 @@ func agenticOpsInstallDir() string {
 	return config.DefaultInstallDir(home)
 }
 
-func jiraTakeoverFields(workspaceProfile profile.Profile, currentAgentID string, takeoverAt string) map[string]any {
+func jiraTakeoverFields(workspaceProfile profile.Profile, runID string, currentAgentID string, takeoverAt string, nextAction string) map[string]any {
 	fields := map[string]any{}
-	if field := workspaceProfile.JiraFormMapping.Fields["current_agent_id"].JiraField; field != "" {
-		fields[field] = currentAgentID
+	values := map[string]any{
+		"agentic_id":                  currentAgentID,
+		"agentic_run_id":              runID,
+		"agentic_takeover_at":         takeoverAt,
+		"agentic_next_action":         nextAction,
+		"agentic_completion_evidence": nil,
+		"agentic_heartbeat_at":        takeoverAt,
 	}
-	if field := workspaceProfile.JiraFormMapping.Fields["takeover_at"].JiraField; field != "" {
-		fields[field] = takeoverAt
+	for name, value := range values {
+		if field := workspaceProfile.JiraFormMapping.Fields[name].JiraField; field != "" {
+			fields[field] = value
+		}
 	}
 	return fields
 }
 
-func jiraTakeoverComment(workspaceProfile profile.Profile, runID string, currentAgentID string, takeoverAt string) string {
+func jiraTakeoverComment(workspaceProfile profile.Profile, runID string, currentAgentID string, takeoverAt string, nextAction string) string {
 	if !usesJiraCommentOwnership(workspaceProfile) {
 		return ""
 	}
 	return strings.Join([]string{
 		"AgenticOps ownership",
-		"run_id: " + runID,
-		"current_agent_id: " + currentAgentID,
-		"takeover_at: " + takeoverAt,
+		"agentic_run_id: " + runID,
+		"agentic_id: " + currentAgentID,
+		"agentic_takeover_at: " + takeoverAt,
+		"agentic_next_action: " + nextAction,
+		"agentic_completion_evidence: ",
+		"agentic_heartbeat_at: " + takeoverAt,
 	}, "\n")
 }
 
 func jiraReleaseFields(workspaceProfile profile.Profile) map[string]any {
 	fields := map[string]any{}
-	if field := workspaceProfile.JiraFormMapping.Fields["current_agent_id"].JiraField; field != "" {
+	if field := workspaceProfile.JiraFormMapping.Fields["agentic_id"].JiraField; field != "" {
 		fields[field] = nil
 	}
 	return fields
@@ -322,14 +332,14 @@ func jiraReleaseComment(workspaceProfile profile.Profile, runID string, complete
 	}
 	return strings.Join([]string{
 		"AgenticOps ownership",
-		"run_id: " + runID,
-		"current_agent_id: ",
+		"agentic_run_id: " + runID,
+		"agentic_id: ",
 		"released_at: " + completedAt,
 	}, "\n")
 }
 
 func usesJiraCommentOwnership(workspaceProfile profile.Profile) bool {
-	for _, name := range []string{"current_agent_id", "takeover_at"} {
+	for _, name := range []string{"agentic_id", "agentic_run_id", "agentic_takeover_at", "agentic_next_action", "agentic_completion_evidence", "agentic_heartbeat_at"} {
 		if field := workspaceProfile.JiraFormMapping.Fields[name]; field.Source == "jira_comment" {
 			return true
 		}

@@ -37,9 +37,9 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 - Git 仓库是代码、测试、提交和分支的事实源。
 - GitHub 拉取请求与 CI 是代码审查、CI、审查评论和合入记录的事实源。
 - AgenticOps 不创建新的任务管理事实源。
-- `run_id` 只追踪一次 AI 执行，不替代 Jira 卡片编号，也不替代 Jira 状态。
-- `agent_id` 标识一个 AIAgent 身份；`current_agent_id` 是任务当前绑定的 `agent_id`，不是新的身份字段。
-- AIAgent 必须按任务类型 `task_type`、当前阶段 `current_stage` 和下一步动作 `next_action` 推进，不按固定角色推进。
+- `agentic_run_id` 只追踪一次 AI 执行，不替代 Jira 卡片编号，也不替代 Jira 状态。
+- `agent_id` 标识一个 AIAgent 身份；`agentic_id` 是任务当前绑定的 `agent_id`，不是新的身份字段。
+- AIAgent 必须按任务类型 `task_type`、当前阶段 `current_stage` 和下一步动作 `agentic_next_action` 推进，不按固定角色推进。
 - 架构先稳定大的流程环节、门禁、状态、容错和演进机制；计划再从大阶段拆到中任务和小步骤。
 - 成熟固化的交互逻辑应沉淀为稳定、原子化的 CLI 操作；脚本入口只做受控编排或调用，不承载业务判断。
 - 真实 Jira 写操作、Git 推送、GitHub 拉取请求创建、合并和发布必须经过策略、门禁和人工确认。

@@ -173,7 +173,7 @@ func TestTaskWriteRejectsOtherAgentOwnership(t *testing.T) {
 	contentPath := filepath.Join(root, "analysis.md")
 	writeCLITestFile(t, contentPath, "分析内容")
 	issue := realModeIssue()
-	issue.CurrentAgentID = "other-agent"
+	issue.AgenticID = "other-agent"
 	client := &recordingJiraClient{issue: issue}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
 

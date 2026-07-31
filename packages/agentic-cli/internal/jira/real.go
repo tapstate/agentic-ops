@@ -238,7 +238,7 @@ func (client *RealClient) mapIssue(raw jiraIssueResponse) Issue {
 		issue.Owner = issue.Assignee
 	}
 	issue.TargetRepo = formValues["target_repo"]
-	issue.CurrentAgentID = formValues["current_agent_id"]
+	issue.AgenticID = formValues["agentic_id"]
 	return issue
 }
 
@@ -464,7 +464,7 @@ func jiraCommentOwnershipValues(value any) map[string]string {
 			}
 			key = strings.TrimSpace(key)
 			switch key {
-			case "current_agent_id", "takeover_at":
+			case "agentic_id", "agentic_run_id", "agentic_takeover_at", "agentic_next_action", "agentic_completion_evidence", "agentic_heartbeat_at":
 				result[key] = strings.TrimSpace(value)
 			}
 		}

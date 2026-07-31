@@ -23,7 +23,7 @@ output:
     type: string
   layers:
     type: array
-  next_action:
+  agentic_next_action:
     type: string
 failure:
   codes:

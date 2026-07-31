@@ -7,12 +7,12 @@ allowed_stages:
   - blocked
 required_inputs:
   - workspace
-  - run_id
+  - agentic_run_id
 input:
   workspace:
     type: string
     required: true
-  run_id:
+  agentic_run_id:
     type: string
     required: true
 preconditions:
@@ -20,7 +20,7 @@ preconditions:
   - run_workspace_must_match
   - run_issue_must_match
   - current_user_must_match_assignee
-  - current_agent_id_must_match_agent_id
+  - agentic_id_must_match_agent_id
   - target_repo_must_match_takeover_context
   - operation_stage_must_be_allowed
   - standard_process_stage_must_be_registered
@@ -30,11 +30,11 @@ output:
     type: string
   issue_key:
     type: string
-  run_id:
+  agentic_run_id:
     type: string
   agent_id:
     type: string
-  current_agent_id:
+  agentic_id:
     type: string
   task_class:
     type: string
@@ -48,7 +48,7 @@ output:
     type: string
   standard_process_stage:
     type: string
-  next_action:
+  agentic_next_action:
     type: string
   jira_feedback_required:
     type: boolean
@@ -60,7 +60,7 @@ output:
     type: string
 failure:
   codes:
-    - missing_run_id
+    - missing_agentic_run_id
     - workspace_root_failed
     - run_not_found
     - workspace_mismatch

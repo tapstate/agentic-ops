@@ -1,14 +1,14 @@
 # `resume-takeover` 完整恢复门禁设计
 
-本文定义 `resume-takeover` 如何从已有 `run_id` 恢复可信任务上下文，重新校验 Jira 所有权、目标仓库和标准流程阶段，并在恢复阻塞时形成受控的 Jira 反馈闭环。
+本文定义 `resume-takeover` 如何从已有 `agentic_run_id` 恢复可信任务上下文，重新校验 Jira 所有权、目标仓库和标准流程阶段，并在恢复阻塞时形成受控的 Jira 反馈闭环。
 
 本设计只完善恢复门禁，不实现通用工作流引擎，不执行真实 Jira 写入，也不改变 Git、GitHub、拉取请求、合并或发布边界。
 
 ## 1. 背景
 
-当前 `resume-takeover` 已能读取本地事件，并校验 `workspace`、`issue_key`、`agent_id`、`current_agent_id`、`task_class` 和 `process_id`。现有实现仍有以下缺口：
+当前 `resume-takeover` 已能读取本地事件，并校验 `workspace`、`issue_key`、`agent_id`、`agentic_id`、`task_class` 和 `process_id`。现有实现仍有以下缺口：
 
-- 真实 Jira 模式不会重新读取卡片并复核 `assignee` 和 `current_agent_id`。
+- 真实 Jira 模式不会重新读取卡片并复核 `assignee` 和 `agentic_id`。
 - 恢复结果没有带回并校验接管时确定的 `target_repo`。
 - 历史事件阶段没有同时经过操作契约和 Standard Process Registry 校验。
 - `resume-takeover` 与 `write-evidence` 分别维护相似的运行上下文读取逻辑。
@@ -21,7 +21,7 @@
 
 ### 2.1 目标
 
-- 从同一个 `run_id` 恢复可信且完整的接管上下文。
+- 从同一个 `agentic_run_id` 恢复可信且完整的接管上下文。
 - 真实 Jira 模式下，在恢复前重新检查卡片、当前用户、代理绑定和目标仓库。
 - 分别校验操作阶段和标准流程阶段，避免混用两套阶段命名空间。
 - 恢复成功只通过门禁，不擅自推进业务流程。
@@ -33,8 +33,8 @@
 
 - 不实现覆盖所有操作的通用工作流恢复引擎。
 - 不让 `resume-takeover` 直接或静默写入 Jira。
-- 不自动重新绑定丢失的 `current_agent_id`。
-- 不允许同一个 `run_id` 静默切换目标仓库、任务分类或标准流程。
+- 不自动重新绑定丢失的 `agentic_id`。
+- 不允许同一个 `agentic_run_id` 静默切换目标仓库、任务分类或标准流程。
 - 不在本次设计中建立新的通用 Jira 评论幂等系统。
 - 不执行真实 Jira 写入、Git 推送、拉取请求创建、合并或发布。
 
@@ -67,10 +67,10 @@ AgenticOps 当前存在两类阶段，恢复时必须分别处理。
 
 恢复成功只表示门禁通过：
 
-- 复用原有 `run_id`。
+- 复用原有 `agentic_run_id`。
 - `previous_stage` 返回最近有效操作阶段。
 - `current_stage` 保持该阶段。
-- `next_action` 保持该阶段原有动作。
+- `agentic_next_action` 保持该阶段原有动作。
 - 额外返回当前 `standard_process_stage`。
 - 写入一条 `resume_takeover` 本地审计事件，但不生成 `takeover_resumed` 业务阶段。
 
@@ -80,11 +80,11 @@ AgenticOps 当前存在两类阶段，恢复时必须分别处理。
 
 新增独立的运行上下文读取组件，负责：
 
-- 读取同一个 `run_id` 的事件。
+- 读取同一个 `agentic_run_id` 的事件。
 - 从首个成功的 `takeover_task` 事件建立接管基准。
-- 恢复 `workspace`、`issue_key`、`agent_id`、`current_agent_id`、`task_class`、`process_id` 和 `target_repo`。
+- 恢复 `workspace`、`issue_key`、`agent_id`、`agentic_id`、`task_class`、`process_id` 和 `target_repo`。
 - 检测后续事件中的非空身份字段是否与接管基准冲突。
-- 从会改变任务运行状态的事件中找到最近有效操作阶段和 `next_action`。
+- 从会改变任务运行状态的事件中找到最近有效操作阶段和 `agentic_next_action`。
 - 识别终态、待人工确认状态和旧版 `takeover_resumed` 审计事件。
 
 恢复点按事件写入顺序选择。第一阶段认定会改变任务运行状态的操作为 `takeover_task`、`resume_takeover`、`write_evidence`、`prepare_pr` 和 `release_agent`；`add_task_comment`、`update_task_form`、`update_task_description_sections` 等通用 Jira 原子写操作只记录操作审计，不覆盖任务恢复点。失败的 `resume_takeover` 尝试和旧版成功事件中的 `takeover_resumed` 也只用于审计，不覆盖之前的恢复点。这样既能保留任务真实进度，也允许在 Jira 事实修复后重新执行恢复门禁。
@@ -117,7 +117,7 @@ AgenticOps 当前存在两类阶段，恢复时必须分别处理。
 
 `runResumeTakeover` 只负责：
 
-1. 解析 `workspace` 和 `run_id`。
+1. 解析 `workspace` 和 `agentic_run_id`。
 2. 使用 `RunContextReader` 恢复历史上下文。
 3. 加载 profile、操作契约和 Standard Process Registry。
 4. 通过当前 Jira adapter 读取卡片和当前用户。
@@ -130,7 +130,7 @@ AgenticOps 当前存在两类阶段，恢复时必须分别处理。
 
 恢复门禁按以下顺序执行，首次失败立即停止：
 
-1. 校验 `run_id` 是否存在。
+1. 校验 `agentic_run_id` 是否存在。
 2. 校验运行上下文是否完整且 `workspace` 一致。
 3. 校验同一 run 中不可变身份字段没有冲突。
 4. 检查最近事件是否为终态或仍处于人工确认点。
@@ -138,7 +138,7 @@ AgenticOps 当前存在两类阶段，恢复时必须分别处理。
 6. 读取 Jira 卡片和当前 Jira 用户。
 7. 校验 Jira 卡片编号与历史 `issue_key` 一致。
 8. 在真实 Jira 模式下校验当前 `assignee`。
-9. 在真实 Jira 模式下校验 `current_agent_id`。
+9. 在真实 Jira 模式下校验 `agentic_id`。
 10. 从当前 Jira/profile 解析 `target_repo`，并与接管基准比较。
 11. 校验历史 `process_id` 存在于 Standard Process Registry。
 12. 校验历史 `task_class` 属于该流程。
@@ -152,20 +152,20 @@ fake adapter 用于自动化验证，并参与卡片、目标仓库和标准流�
 真实 Jira 模式必须使用当前卡片事实执行以下判断：
 
 - `assignee` 不再等于当前 Jira 用户时，返回 `assignee_changed`。
-- `current_agent_id` 为空时，返回 `agent_binding_lost`，不得根据本地记录自动抢回绑定。
-- `current_agent_id` 不等于当前 AIAgent 时，返回 `agent_ownership_conflict`。
+- `agentic_id` 为空时，返回 `agent_binding_lost`，不得根据本地记录自动抢回绑定。
+- `agentic_id` 不等于当前 AIAgent 时，返回 `agent_ownership_conflict`。
 - 当前无法解析目标仓库时，返回 `target_repo_missing`。
 - 当前目标仓库与接管基准不同时，返回 `target_repo_changed`。
 
 旧接管事件没有 `target_repo` 时，允许使用当前 Jira 字段或 profile 仓库映射的确定性结果补齐；恢复成功事件必须写入补齐后的 `target_repo`，供后续操作校验。历史事件已经有 `target_repo` 时必须执行一致性比较，不得用当前映射覆盖历史值。
 
-目标仓库变化后不得让同一个 `run_id` 静默进入其它仓库。研发工程师确认范围变化后，应结束或释放旧接管，再按新事实重新接管。
+目标仓库变化后不得让同一个 `agentic_run_id` 静默进入其它仓库。研发工程师确认范围变化后，应结束或释放旧接管，再按新事实重新接管。
 
 ## 7. 失败码
 
 保留已有错误码：
 
-- `missing_run_id`
+- `missing_agentic_run_id`
 - `run_not_found`
 - `workspace_mismatch`
 - `issue_mismatch`
@@ -197,25 +197,25 @@ fake adapter 用于自动化验证，并参与卡片、目标仓库和标准流�
 
 所有失败都必须：
 
-- 不创建新 `run_id`。
+- 不创建新 `agentic_run_id`。
 - 不改变 Jira、代理绑定、目标仓库或流程。
 - 输出中文 `required_human_action`。
-- 在本地上下文可信时记录同一 `run_id` 的失败审计事件。
+- 在本地上下文可信时记录同一 `agentic_run_id` 的失败审计事件。
 
 ## 8. Jira 阻塞反馈闭环
 
 ### 8.1 两步原子流程
 
-`resume-takeover` 保持只读。确认 `run_id`、`issue_key` 和工作空间可信后，如果发生任务级阻塞，生成：
+`resume-takeover` 保持只读。确认 `agentic_run_id`、`issue_key` 和工作空间可信后，如果发生任务级阻塞，生成：
 
 ```text
-.agentic-ops/runs/<run_id>/resume-blocked-<code>.md
+.agentic-ops/runs/<agentic_run_id>/resume-blocked-<code>.md
 ```
 
 文件包含：
 
 - 稳定反馈编号。
-- `run_id`、Jira 卡片和工作空间。
+- `agentic_run_id`、Jira 卡片和工作空间。
 - 失败码和中文说明。
 - 接管时与当前值的安全摘要。
 - 需要研发工程师处理的动作。
@@ -228,9 +228,9 @@ CLI 失败输出增加：
 {
   "jira_feedback_required": true,
   "jira_feedback_write_allowed": true,
-  "jira_feedback_file": ".agentic-ops/runs/<run_id>/resume-blocked-<code>.md",
+  "jira_feedback_file": ".agentic-ops/runs/<agentic_run_id>/resume-blocked-<code>.md",
   "jira_feedback_category": "blocked",
-  "next_action": "add_task_comment"
+  "agentic_next_action": "add_task_comment"
 }
 ```
 
@@ -261,14 +261,14 @@ agentic-cli add-task-comment <issue-key> \
 - `invalid_process_stage`
 - `human_gate_pending`
 
-以下情况说明当前 AIAgent 已失去任务写入资格，只生成评论材料，设置 `jira_feedback_write_allowed: false` 和 `next_action: ask_owner_to_add_task_comment`，由研发工程师或当前负责人处理：
+以下情况说明当前 AIAgent 已失去任务写入资格，只生成评论材料，设置 `jira_feedback_write_allowed: false` 和 `agentic_next_action: ask_owner_to_add_task_comment`，由研发工程师或当前负责人处理：
 
 - `assignee_changed`
 - `agent_ownership_conflict`
 
 以下本地或连接问题不生成 Jira 反馈：
 
-- `missing_run_id`
+- `missing_agentic_run_id`
 - `run_not_found`
 - `workspace_mismatch`
 - `issue_mismatch`
@@ -283,22 +283,22 @@ agentic-cli add-task-comment <issue-key> \
 成功输出至少包含：
 
 - `workspace`
-- `run_id`
+- `agentic_run_id`
 - `issue_key`
 - `agent_id`
-- `current_agent_id`
+- `agentic_id`
 - `task_class`
 - `process_id`
 - `target_repo`
 - `previous_stage`
 - `current_stage`
 - `standard_process_stage`
-- `next_action`
+- `agentic_next_action`
 
 失败输出除通用字段外，在上下文可信时应尽可能包含：
 
 - `workspace`
-- `run_id`
+- `agentic_run_id`
 - `issue_key`
 - `task_class`
 - `process_id`
@@ -318,7 +318,7 @@ agentic-cli add-task-comment <issue-key> \
 
 - 从成功接管事件恢复完整上下文。
 - 检测 workspace、issue、agent、任务分类、流程和仓库冲突。
-- 保留最近有效阶段和 `next_action`。
+- 保留最近有效阶段和 `agentic_next_action`。
 - 通用 Jira 原子写事件不覆盖任务恢复点。
 - 忽略旧版 `takeover_resumed` 对业务阶段的推进。
 - 识别终态和待人工确认状态。
@@ -347,7 +347,7 @@ agentic-cli add-task-comment <issue-key> \
 - 失去 assignee 或代理所有权时禁止返回可直接写 Jira 的动作。
 - 不可信本地错误不生成 Jira 评论文件。
 - `resume-takeover` 不调用 Jira 写接口。
-- 原子 `add-task-comment` 可以携带同一 `run_id` 写入生成的阻塞评论。
+- 原子 `add-task-comment` 可以携带同一 `agentic_run_id` 写入生成的阻塞评论。
 
 ### 10.4 E2E 和资源验证
 

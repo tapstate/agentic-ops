@@ -25,7 +25,7 @@ func TestWriteResumeFeedbackCreatesSafeWritableComment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("writeResumeFeedback error = %v", err)
 	}
-	if !got.Required || !got.WriteAllowed || got.Category != "blocked" || got.NextAction != "add_task_comment" {
+	if !got.Required || !got.WriteAllowed || got.Category != "blocked" || got.AgenticNextAction != "add_task_comment" {
 		t.Fatalf("resumeFeedback = %#v", got)
 	}
 	wantFile := filepath.ToSlash(filepath.Join(
@@ -93,7 +93,7 @@ func TestWriteResumeFeedbackRoutesOwnerOnlyAndNonFeedbackFailures(t *testing.T) 
 			if err != nil {
 				t.Fatalf("writeResumeFeedback error = %v", err)
 			}
-			if (got.File != "") != test.wantFile || got.NextAction != test.wantAction {
+			if (got.File != "") != test.wantFile || got.AgenticNextAction != test.wantAction {
 				t.Fatalf("resumeFeedback = %#v", got)
 			}
 		})
@@ -102,15 +102,15 @@ func TestWriteResumeFeedbackRoutesOwnerOnlyAndNonFeedbackFailures(t *testing.T) 
 
 func resumeFeedbackContext() runcontext.Context {
 	return runcontext.Context{
-		Workspace:      "tapstate",
-		RunID:          "run-1",
-		IssueKey:       "TAP-123",
-		AgentID:        "agent-1",
-		CurrentAgentID: "agent-1",
-		TaskClass:      "technical_task",
-		ProcessID:      "development_change_v1",
-		TargetRepo:     "tapstate/example-repo",
-		CurrentStage:   "takeover_started",
-		NextAction:     "proceed",
+		Workspace:         "tapstate",
+		AgenticRunID:      "run-1",
+		IssueKey:          "TAP-123",
+		AgentID:           "agent-1",
+		AgenticID:         "agent-1",
+		TaskClass:         "technical_task",
+		ProcessID:         "development_change_v1",
+		TargetRepo:        "tapstate/example-repo",
+		CurrentStage:      "takeover_started",
+		AgenticNextAction: "proceed",
 	}
 }

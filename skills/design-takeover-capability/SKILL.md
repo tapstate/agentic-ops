@@ -51,7 +51,7 @@ Check:
 - Required transitions exist for start, blocked, review, completion, and release.
 - Required fields exist, are visible, and are writable at the stage where AgenticOps needs them.
 - Required fields are mapped in the workflow profile.
-- `current_agent_id` and `takeover_at` have a stable Jira field or comment/template mapping.
+- `agentic_id` and `agentic_takeover_at` have a stable Jira field or comment/template mapping.
 - Missing fields have an approved fallback, such as a Jira comment template or description template.
 
 If Jira does not satisfy the process, do not proceed to development planning. Output a configuration guide with:

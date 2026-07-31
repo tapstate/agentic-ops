@@ -30,7 +30,7 @@ output:
     type: string
   source:
     type: string
-  next_action:
+  agentic_next_action:
     type: string
 failure:
   codes:

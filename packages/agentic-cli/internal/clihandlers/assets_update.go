@@ -23,10 +23,10 @@ func runAssetsInstall(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.Failure("assets_install", "assets_install_failed", err.Error(), "请检查资产源目录和安装目录权限"))
 	}
 	return writeJSON(stdout, output.Success("assets_install", map[string]any{
-		"asset_version": result.AssetVersion,
-		"assets_dir":    result.AssetsDir,
-		"current":       result.CurrentPath,
-		"next_action":   "agent_init",
+		"asset_version":       result.AssetVersion,
+		"assets_dir":          result.AssetsDir,
+		"current":             result.CurrentPath,
+		"agentic_next_action": "agent_init",
 	}))
 }
 
@@ -40,7 +40,7 @@ func runUpdateCheck(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --manifest 或 --manifest-url",
 			TaskType:            "update",
 			CurrentStage:        "update_check",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	source := "local"
@@ -59,19 +59,19 @@ func runUpdateCheck(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查 release manifest 路径、URL 和格式",
 			TaskType:            "update",
 			CurrentStage:        "update_check",
-			NextAction:          "fix_manifest",
+			AgenticNextAction:   "fix_manifest",
 		}))
 	}
 	return writeJSON(stdout, output.Success("update_check", map[string]any{
-		"source":             source,
-		"current_version":    result.CurrentVersion,
-		"latest_version":     result.LatestVersion,
-		"asset_version":      result.AssetVersion,
-		"update_available":   result.UpdateAvailable,
-		"severity":           result.Severity,
-		"reason":             result.Reason,
-		"blocked_operations": result.BlockedOperations,
-		"next_action":        result.NextAction,
+		"source":              source,
+		"current_version":     result.CurrentVersion,
+		"latest_version":      result.LatestVersion,
+		"asset_version":       result.AssetVersion,
+		"update_available":    result.UpdateAvailable,
+		"severity":            result.Severity,
+		"reason":              result.Reason,
+		"blocked_operations":  result.BlockedOperations,
+		"agentic_next_action": result.AgenticNextAction,
 	}))
 }
 
@@ -85,7 +85,7 @@ func runUpdateApply(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --manifest 或 --manifest-url",
 			TaskType:            "update",
 			CurrentStage:        "update_apply",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	installDir := readInstallDir(args)
@@ -106,7 +106,7 @@ func runUpdateApply(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查 release manifest、artifact checksum 和安装目录权限",
 			TaskType:            "update",
 			CurrentStage:        "update_apply",
-			NextAction:          "fix_update_source",
+			AgenticNextAction:   "fix_update_source",
 		}))
 	}
 	downloadedArtifacts := result.DownloadedArtifacts
@@ -122,6 +122,6 @@ func runUpdateApply(args []string, stdout io.Writer) int {
 		"current":                result.CurrentPath,
 		"downloaded_artifacts":   downloadedArtifacts,
 		"activated_binary":       result.ActivatedBinary,
-		"next_action":            "doctor",
+		"agentic_next_action":    "doctor",
 	}))
 }

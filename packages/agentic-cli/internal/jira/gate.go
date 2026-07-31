@@ -15,7 +15,7 @@ type TakeoverDecision struct {
 	ProcessID           string
 	TargetRepo          string
 	CurrentStage        string
-	NextAction          string
+	AgenticNextAction   string
 }
 
 func ValidateTakeover(issue Issue, p profile.Profile, currentUser string, agentID string) TakeoverDecision {
@@ -37,7 +37,7 @@ func validateTakeover(issue Issue, p profile.Profile, currentUser string, agentI
 	if issue.Assignee == "" || issue.Assignee != currentUser {
 		return blocked("assignee_mismatch", "当前 Jira assignee 与当前用户不匹配", "请把 Jira assignee 调整为当前研发工程师后重试")
 	}
-	if issue.CurrentAgentID != "" && issue.CurrentAgentID != agentID {
+	if issue.AgenticID != "" && issue.AgenticID != agentID {
 		return blocked("agent_ownership_conflict", "当前 Jira 卡片已绑定其他 AIAgent", "请研发工程师确认是否释放当前代理绑定")
 	}
 	taskClass, taskClassSource := taskClassFor(issue, p)
@@ -63,13 +63,13 @@ func validateTakeover(issue Issue, p profile.Profile, currentUser string, agentI
 	}
 	targetRepo := targetRepoFor(issue, p)
 	return TakeoverDecision{
-		OK:              true,
-		TaskClass:       taskClass,
-		TaskClassSource: taskClassSource,
-		ProcessID:       processID,
-		TargetRepo:      targetRepo,
-		CurrentStage:    "takeover_started",
-		NextAction:      "proceed",
+		OK:                true,
+		TaskClass:         taskClass,
+		TaskClassSource:   taskClassSource,
+		ProcessID:         processID,
+		TargetRepo:        targetRepo,
+		CurrentStage:      "takeover_started",
+		AgenticNextAction: "proceed",
 	}
 }
 
@@ -120,6 +120,6 @@ func blocked(code string, message string, requiredHumanAction string) TakeoverDe
 		Message:             message,
 		RequiredHumanAction: requiredHumanAction,
 		CurrentStage:        "takeover_gate",
-		NextAction:          "ask_owner",
+		AgenticNextAction:   "ask_owner",
 	}
 }

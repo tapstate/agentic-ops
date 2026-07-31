@@ -13,12 +13,12 @@ func appendWorkspaceEvent(workspaceName string, runID string, issueKey string, t
 
 func appendWorkspaceEventWithCode(workspaceName string, runID string, issueKey string, taskType string, operation string, currentStage string, nextAction string, code string, gate string, ok bool, requiresHumanAction bool) error {
 	return appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
-		RunID:               runID,
+		AgenticRunID:        runID,
 		IssueKey:            issueKey,
 		TaskType:            taskType,
 		Operation:           operation,
 		CurrentStage:        currentStage,
-		NextAction:          nextAction,
+		AgenticNextAction:   nextAction,
 		OK:                  ok,
 		Code:                code,
 		Gate:                gate,
@@ -47,14 +47,14 @@ func appendRealJiraWriteGateEvent(workspaceName string, runID string, issueKey s
 		taskType = "evidence_write"
 	}
 	return appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
-		RunID:               runID,
+		AgenticRunID:        runID,
 		IssueKey:            issueKey,
 		TaskType:            taskType,
 		Operation:           operation,
 		CurrentStage:        currentStage,
-		NextAction:          nextAction,
+		AgenticNextAction:   nextAction,
 		AgentID:             agentID(),
-		CurrentAgentID:      agentID(),
+		AgenticID:           agentID(),
 		OK:                  ok,
 		Code:                code,
 		Gate:                "real_jira_write",
@@ -70,7 +70,7 @@ func issueKeyForRun(root string, runID string) (string, error) {
 		return "", err
 	}
 	for _, event := range events {
-		if event.RunID == runID && event.IssueKey != "" {
+		if event.AgenticRunID == runID && event.IssueKey != "" {
 			return event.IssueKey, nil
 		}
 	}

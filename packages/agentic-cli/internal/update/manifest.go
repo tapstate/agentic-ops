@@ -41,7 +41,7 @@ type CheckResult struct {
 	Severity          string
 	Reason            string
 	BlockedOperations []string
-	NextAction        string
+	AgenticNextAction string
 }
 
 type ApplyResult struct {
@@ -105,7 +105,7 @@ func checkManifest(manifest Manifest, currentVersion string) CheckResult {
 		Severity:          severity,
 		Reason:            manifest.Reason,
 		BlockedOperations: manifest.BlockedOperations,
-		NextAction:        nextAction,
+		AgenticNextAction: nextAction,
 	}
 }
 

@@ -44,7 +44,7 @@ AIAgent 不得依赖研发工程师个人 Obsidian wiki、长期记忆或上一�
   "workspace": "tapstate",
   "task_type": "capability_initialization",
   "current_stage": "agent_capability_initialized",
-  "next_action": "list_tasks",
+  "agentic_next_action": "list_tasks",
   "activation_phrase": "按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。",
   "guide_entry": "$HOME/.agentic-ops/agent-guides.md",
   "asset_entry": "$HOME/.agentic-ops/install-resources/basic/ai-assets/README.md",

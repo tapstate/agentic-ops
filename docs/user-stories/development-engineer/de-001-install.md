@@ -50,7 +50,7 @@ gh api -H 'Accept: application/vnd.github.raw' \
   "path_profile": "~/.zshrc",
   "path_profile_configured": true,
   "path_profile_updated": true,
-  "next_action": "workspace_init"
+  "agentic_next_action": "workspace_init"
 }
 ```
 
@@ -106,7 +106,7 @@ gh api -H 'Accept: application/vnd.github.raw' \
 - 已安装场景下的确认更新输出或 `update cancelled` 输出。
 - `agentic-cli --version` 输出。
 - `agentic-cli preflight` 输出。
-- 安装输出中的 `operation=install`、`install_dir` 和 `next_action`。
+- 安装输出中的 `operation=install`、`install_dir` 和 `agentic_next_action`。
 - 安装输出中的 `path_configured`、`path_entry`、`path_profile`、`path_profile_configured` 和 `path_profile_updated`。
 - `bash tests/e2e/local-install-flow.sh`
 

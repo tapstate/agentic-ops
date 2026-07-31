@@ -48,13 +48,13 @@ func runContractValidate(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请修复 install-resources/basic/contracts/operations 中的契约字段",
 			TaskType:            "contract_validation",
 			CurrentStage:        "contract_validation",
-			NextAction:          "fix_contracts",
+			AgenticNextAction:   "fix_contracts",
 		}))
 	}
 	return writeJSON(stdout, output.Success("contract_validate", map[string]any{
-		"contracts":   len(paths),
-		"issues":      0,
-		"next_action": "continue",
+		"contracts":           len(paths),
+		"issues":              0,
+		"agentic_next_action": "continue",
 	}))
 }
 
@@ -67,7 +67,7 @@ func runProfileValidate(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --workspace",
 			TaskType:            "profile_validation",
 			CurrentStage:        "profile_validation",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	profilePath, err := repoProjectProfilePath(workspaceName)
@@ -82,7 +82,7 @@ func runProfileValidate(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查 install-resources/basic/projects/<project>/profile.yaml 中的 workspace 配置",
 			TaskType:            "profile_validation",
 			CurrentStage:        "profile_validation",
-			NextAction:          "fix_profile",
+			AgenticNextAction:   "fix_profile",
 		}))
 	}
 	issues := profile.Validate(loadedProfile)
@@ -101,13 +101,13 @@ func runProfileValidate(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请修复 workflow profile 中的字段、分类、流程、状态或 transition 映射",
 			TaskType:            "profile_validation",
 			CurrentStage:        "profile_validation",
-			NextAction:          "fix_profile",
+			AgenticNextAction:   "fix_profile",
 		}))
 	}
 	return writeJSON(stdout, output.Success("profile_validate", map[string]any{
-		"workspace":   loadedProfile.Workspace,
-		"issues":      0,
-		"next_action": "continue",
+		"workspace":           loadedProfile.Workspace,
+		"issues":              0,
+		"agentic_next_action": "continue",
 	}))
 }
 
@@ -120,7 +120,7 @@ func runProfileResolve(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --workspace 或 --project",
 			TaskType:            "profile_resolution",
 			CurrentStage:        "profile_resolution",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	workspaceRoot, err := workspaceRoot()
@@ -135,7 +135,7 @@ func runProfileResolve(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查公司层、项目层、个人层和工作空间 overlay 是否存在且格式正确",
 			TaskType:            "profile_resolution",
 			CurrentStage:        "profile_resolution",
-			NextAction:          "fix_profile_layers",
+			AgenticNextAction:   "fix_profile_layers",
 		}))
 	}
 	issues := profile.Validate(resolution.Effective)
@@ -154,16 +154,16 @@ func runProfileResolve(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请修复 profile 分层配置或 overlay 覆盖字段",
 			TaskType:            "profile_resolution",
 			CurrentStage:        "profile_resolution",
-			NextAction:          "fix_profile_layers",
+			AgenticNextAction:   "fix_profile_layers",
 		}))
 	}
 	return writeJSON(stdout, output.Success("profile_resolve", map[string]any{
-		"workspace":    resolution.Effective.Workspace,
-		"jira_user":    resolution.Effective.Jira.User,
-		"jira_project": resolution.Effective.Jira.Project,
-		"source_root":  resolution.Effective.Local.SourceRoot,
-		"layers":       resolution.Layers,
-		"next_action":  "continue",
+		"workspace":           resolution.Effective.Workspace,
+		"jira_user":           resolution.Effective.Jira.User,
+		"jira_project":        resolution.Effective.Jira.Project,
+		"source_root":         resolution.Effective.Local.SourceRoot,
+		"layers":              resolution.Layers,
+		"agentic_next_action": "continue",
 	}))
 }
 
@@ -176,7 +176,7 @@ func runProfileUpdate(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --workspace",
 			TaskType:            "profile_update",
 			CurrentStage:        "input_validation",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	sourcePath := readFlag(args, "--source", "")
@@ -187,7 +187,7 @@ func runProfileUpdate(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --source",
 			TaskType:            "profile_update",
 			CurrentStage:        "input_validation",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	targetPath, err := repoProfilePath(workspaceName)
@@ -202,15 +202,15 @@ func runProfileUpdate(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查 source profile 是否存在、workspace 是否匹配且能通过校验",
 			TaskType:            "profile_update",
 			CurrentStage:        "profile_update",
-			NextAction:          "fix_profile",
+			AgenticNextAction:   "fix_profile",
 		}))
 	}
 	return writeJSON(stdout, output.Success("profile_update", map[string]any{
-		"workspace":   result.Workspace,
-		"profile":     result.TargetPath,
-		"backup":      result.BackupPath,
-		"source":      result.SourcePath,
-		"next_action": "profile_validate",
+		"workspace":           result.Workspace,
+		"profile":             result.TargetPath,
+		"backup":              result.BackupPath,
+		"source":              result.SourcePath,
+		"agentic_next_action": "profile_validate",
 	}))
 }
 
@@ -223,7 +223,7 @@ func runProfileRollback(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --workspace",
 			TaskType:            "profile_rollback",
 			CurrentStage:        "input_validation",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	targetPath, err := repoProfilePath(workspaceName)
@@ -238,14 +238,14 @@ func runProfileRollback(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查 profile 备份是否存在且能通过校验",
 			TaskType:            "profile_rollback",
 			CurrentStage:        "profile_rollback",
-			NextAction:          "fix_profile",
+			AgenticNextAction:   "fix_profile",
 		}))
 	}
 	return writeJSON(stdout, output.Success("profile_rollback", map[string]any{
-		"workspace":     result.Workspace,
-		"profile":       result.TargetPath,
-		"restored_from": result.RestoredFrom,
-		"next_action":   "profile_validate",
+		"workspace":           result.Workspace,
+		"profile":             result.TargetPath,
+		"restored_from":       result.RestoredFrom,
+		"agentic_next_action": "profile_validate",
 	}))
 }
 
@@ -258,7 +258,7 @@ func runPolicyValidate(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --workspace",
 			TaskType:            "policy_validation",
 			CurrentStage:        "policy_validation",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	policyPath, err := repoPolicyPath()
@@ -273,7 +273,7 @@ func runPolicyValidate(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查 install-resources/basic/policies/default.yaml",
 			TaskType:            "policy_validation",
 			CurrentStage:        "policy_validation",
-			NextAction:          "fix_policy",
+			AgenticNextAction:   "fix_policy",
 		}))
 	}
 	issues := policy.Validate(loadedPolicy)
@@ -284,14 +284,14 @@ func runPolicyValidate(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请修复 policy 中的名称、版本和关键 gate 配置",
 			TaskType:            "policy_validation",
 			CurrentStage:        "policy_validation",
-			NextAction:          "fix_policy",
+			AgenticNextAction:   "fix_policy",
 		}))
 	}
 	return writeJSON(stdout, output.Success("policy_validate", map[string]any{
-		"workspace":   workspaceName,
-		"policy":      loadedPolicy.Policy,
-		"issues":      0,
-		"next_action": "continue",
+		"workspace":           workspaceName,
+		"policy":              loadedPolicy.Policy,
+		"issues":              0,
+		"agentic_next_action": "continue",
 	}))
 }
 
@@ -304,7 +304,7 @@ func runPolicyUpdate(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --workspace",
 			TaskType:            "policy_update",
 			CurrentStage:        "input_validation",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	sourcePath := readFlag(args, "--source", "")
@@ -315,7 +315,7 @@ func runPolicyUpdate(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --source",
 			TaskType:            "policy_update",
 			CurrentStage:        "input_validation",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	targetPath, err := repoPolicyPath()
@@ -330,16 +330,16 @@ func runPolicyUpdate(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查 source policy 是否存在、名称是否匹配且能通过校验",
 			TaskType:            "policy_update",
 			CurrentStage:        "policy_update",
-			NextAction:          "fix_policy",
+			AgenticNextAction:   "fix_policy",
 		}))
 	}
 	return writeJSON(stdout, output.Success("policy_update", map[string]any{
-		"workspace":   workspaceName,
-		"policy":      result.Policy,
-		"path":        result.TargetPath,
-		"backup":      result.BackupPath,
-		"source":      result.SourcePath,
-		"next_action": "policy_validate",
+		"workspace":           workspaceName,
+		"policy":              result.Policy,
+		"path":                result.TargetPath,
+		"backup":              result.BackupPath,
+		"source":              result.SourcePath,
+		"agentic_next_action": "policy_validate",
 	}))
 }
 
@@ -352,7 +352,7 @@ func runPolicyRollback(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请提供 --workspace",
 			TaskType:            "policy_rollback",
 			CurrentStage:        "input_validation",
-			NextAction:          "ask_owner",
+			AgenticNextAction:   "ask_owner",
 		}))
 	}
 	targetPath, err := repoPolicyPath()
@@ -367,14 +367,14 @@ func runPolicyRollback(args []string, stdout io.Writer) int {
 			RequiredHumanAction: "请检查 policy 备份是否存在且能通过校验",
 			TaskType:            "policy_rollback",
 			CurrentStage:        "policy_rollback",
-			NextAction:          "fix_policy",
+			AgenticNextAction:   "fix_policy",
 		}))
 	}
 	return writeJSON(stdout, output.Success("policy_rollback", map[string]any{
-		"workspace":     workspaceName,
-		"policy":        result.Policy,
-		"path":          result.TargetPath,
-		"restored_from": result.RestoredFrom,
-		"next_action":   "policy_validate",
+		"workspace":           workspaceName,
+		"policy":              result.Policy,
+		"path":                result.TargetPath,
+		"restored_from":       result.RestoredFrom,
+		"agentic_next_action": "policy_validate",
 	}))
 }

@@ -17,7 +17,7 @@ type FailureContext struct {
 	RequiredHumanAction string
 	TaskType            string
 	CurrentStage        string
-	NextAction          string
+	AgenticNextAction   string
 }
 
 func Failure(operation string, code string, message string, requiredHumanAction string) map[string]any {
@@ -27,7 +27,7 @@ func Failure(operation string, code string, message string, requiredHumanAction 
 		RequiredHumanAction: requiredHumanAction,
 		TaskType:            "unknown",
 		CurrentStage:        "failed",
-		NextAction:          "ask_owner",
+		AgenticNextAction:   "ask_owner",
 	})
 }
 
@@ -38,8 +38,8 @@ func FailureWithContext(operation string, context FailureContext) map[string]any
 	if context.CurrentStage == "" {
 		context.CurrentStage = "failed"
 	}
-	if context.NextAction == "" {
-		context.NextAction = "ask_owner"
+	if context.AgenticNextAction == "" {
+		context.AgenticNextAction = "ask_owner"
 	}
 	if context.RequiredHumanAction == "" {
 		context.RequiredHumanAction = "请联系 AgenticOps 维护者处理"
@@ -51,7 +51,7 @@ func FailureWithContext(operation string, context FailureContext) map[string]any
 		"message":               context.Message,
 		"task_type":             context.TaskType,
 		"current_stage":         context.CurrentStage,
-		"next_action":           context.NextAction,
+		"agentic_next_action":   context.AgenticNextAction,
 		"required_human_action": context.RequiredHumanAction,
 	}
 	return result

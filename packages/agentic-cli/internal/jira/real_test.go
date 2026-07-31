@@ -37,7 +37,7 @@ func TestRealClientSearchIssuesMapsProfileFields(t *testing.T) {
 		if body["jql"] != "assignee = currentUser()" {
 			t.Fatalf("jql = %v", body["jql"])
 		}
-		return jsonResponse(http.StatusOK, `{"issues":[{"key":"TAP-123","fields":{"summary":"修复示例任务","assignee":{"accountId":"account-123"},"issuetype":{"name":"Task"},"status":{"name":"To Do"},"labels":["cli","investigation"],"components":[{"name":"api"}],"customfield_acceptance":"单元测试通过","customfield_target_repo":"tapstate/example-repo","customfield_risk":{"value":"low"},"customfield_current_agent_id":"agent-1","description":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"验证方式"}]},{"type":"paragraph","content":[{"type":"text","text":"go test ./..."}]}]}}}]}`)
+		return jsonResponse(http.StatusOK, `{"issues":[{"key":"TAP-123","fields":{"summary":"修复示例任务","assignee":{"accountId":"account-123"},"issuetype":{"name":"Task"},"status":{"name":"To Do"},"labels":["cli","investigation"],"components":[{"name":"api"}],"customfield_acceptance":"单元测试通过","customfield_target_repo":"tapstate/example-repo","customfield_risk":{"value":"low"},"customfield_agentic_id":"agent-1","description":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"验证方式"}]},{"type":"paragraph","content":[{"type":"text","text":"go test ./..."}]}]}}}]}`)
 	})
 
 	issues, err := client.SearchIssues(context.Background(), "tapstate", "assignee = currentUser()")
@@ -54,7 +54,7 @@ func TestRealClientSearchIssuesMapsProfileFields(t *testing.T) {
 	if got.TargetRepo != "tapstate/example-repo" || got.FormValues["acceptance_criteria"] != "单元测试通过" || got.FormValues["verification_method"] != "go test ./..." {
 		t.Fatalf("issue standard field mapping failed: %+v", got)
 	}
-	if got.FormValues["risk_level"] != "low" || got.CurrentAgentID != "agent-1" {
+	if got.FormValues["risk_level"] != "low" || got.AgenticID != "agent-1" {
 		t.Fatalf("issue gate field mapping failed: %+v", got)
 	}
 	if strings.Join(got.Labels, ",") != "cli,investigation" || strings.Join(got.Components, ",") != "api" {
@@ -127,10 +127,10 @@ func TestRealClientMapsAgentOwnershipFromLatestAgenticOpsComment(t *testing.T) {
 		if got := r.URL.Query().Get("fields"); !strings.Contains(got, "comment") {
 			t.Fatalf("fields query should include comment when profile uses jira_comment: %s", got)
 		}
-		return jsonResponse(http.StatusOK, `{"key":"TAP-125","fields":{"summary":"Comment ownership task","assignee":{"accountId":"account-123"},"issuetype":{"name":"Task"},"status":{"name":"To Do"},"labels":[],"components":[],"comment":{"comments":[{"id":"1","body":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"AgenticOps ownership"}]},{"type":"paragraph","content":[{"type":"text","text":"current_agent_id: old-agent"}]},{"type":"paragraph","content":[{"type":"text","text":"takeover_at: 2026-07-20T10:30:12Z"}]}]}},{"id":"2","body":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"AgenticOps ownership"}]},{"type":"paragraph","content":[{"type":"text","text":"current_agent_id: agentic-cli-local-agent"}]},{"type":"paragraph","content":[{"type":"text","text":"takeover_at: 2026-07-21T10:30:12Z"}]}]}}]}}}`)
+		return jsonResponse(http.StatusOK, `{"key":"TAP-125","fields":{"summary":"Comment ownership task","assignee":{"accountId":"account-123"},"issuetype":{"name":"Task"},"status":{"name":"To Do"},"labels":[],"components":[],"comment":{"comments":[{"id":"1","body":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"AgenticOps ownership"}]},{"type":"paragraph","content":[{"type":"text","text":"agentic_id: old-agent"}]},{"type":"paragraph","content":[{"type":"text","text":"agentic_takeover_at: 2026-07-20T10:30:12Z"}]}]}},{"id":"2","body":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"AgenticOps ownership"}]},{"type":"paragraph","content":[{"type":"text","text":"agentic_id: agentic-cli-local-agent"}]},{"type":"paragraph","content":[{"type":"text","text":"agentic_takeover_at: 2026-07-21T10:30:12Z"}]}]}}]}}}`)
 	})
-	client.profile.JiraFormMapping.Fields["current_agent_id"] = profile.FormField{Source: "jira_comment"}
-	client.profile.JiraFormMapping.Fields["takeover_at"] = profile.FormField{Source: "jira_comment"}
+	client.profile.JiraFormMapping.Fields["agentic_id"] = profile.FormField{Source: "jira_comment"}
+	client.profile.JiraFormMapping.Fields["agentic_takeover_at"] = profile.FormField{Source: "jira_comment"}
 
 	issue, ok, err := client.GetIssueByKey(context.Background(), "tapstate", "TAP-125")
 	if err != nil {
@@ -139,11 +139,11 @@ func TestRealClientMapsAgentOwnershipFromLatestAgenticOpsComment(t *testing.T) {
 	if !ok {
 		t.Fatal("issue not found")
 	}
-	if issue.CurrentAgentID != "agentic-cli-local-agent" {
-		t.Fatalf("CurrentAgentID = %q", issue.CurrentAgentID)
+	if issue.AgenticID != "agentic-cli-local-agent" {
+		t.Fatalf("AgenticID = %q", issue.AgenticID)
 	}
-	if issue.FormValues["takeover_at"] != "2026-07-21T10:30:12Z" {
-		t.Fatalf("takeover_at = %q", issue.FormValues["takeover_at"])
+	if issue.FormValues["agentic_takeover_at"] != "2026-07-21T10:30:12Z" {
+		t.Fatalf("agentic_takeover_at = %q", issue.FormValues["agentic_takeover_at"])
 	}
 	if len(issue.Comments) != 2 || issue.Comments[1].ID != "2" || !strings.Contains(issue.Comments[1].Body, "agentic-cli-local-agent") {
 		t.Fatalf("comments = %#v", issue.Comments)
@@ -157,15 +157,15 @@ func TestRealClientUpdateFieldsUsesIssueEditEndpoint(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("Decode body error = %v", err)
 		}
-		if body["fields"]["customfield_current_agent_id"] != "agent-1" {
+		if body["fields"]["customfield_agentic_id"] != "agent-1" {
 			t.Fatalf("fields = %#v", body["fields"])
 		}
 		return jsonResponse(http.StatusNoContent, "")
 	})
 
 	err := client.UpdateFields(context.Background(), "TAP-123", map[string]any{
-		"customfield_current_agent_id": "agent-1",
-		"customfield_takeover_at":      "2026-07-21T10:30:12Z",
+		"customfield_agentic_id": "agent-1",
+		"customfield_agentic_takeover_at":      "2026-07-21T10:30:12Z",
 	})
 	if err != nil {
 		t.Fatalf("UpdateFields error = %v", err)
@@ -335,9 +335,9 @@ func validRealClientProfile() profile.Profile {
 					Source:    "jira_field",
 					JiraField: "customfield_risk",
 				},
-				"current_agent_id": {
+				"agentic_id": {
 					Source:    "jira_field",
-					JiraField: "customfield_current_agent_id",
+					JiraField: "customfield_agentic_id",
 				},
 			},
 		},

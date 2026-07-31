@@ -10,7 +10,7 @@ func TestSummarizeCountsRuns(t *testing.T) {
 	got := Summarize([]Event{
 		{OK: true},
 		{OK: false, RequiresHumanAction: true, MissingField: "target_repo"},
-		{OK: false, NextAction: "retry"},
+		{OK: false, AgenticNextAction: "retry"},
 	})
 	if got.Runs != 3 {
 		t.Fatalf("Runs = %d", got.Runs)

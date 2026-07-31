@@ -11,19 +11,19 @@ import (
 )
 
 type evidenceRunContext struct {
-	IssueKey       string
-	AgentID        string
-	CurrentAgentID string
-	TaskClass      string
-	ProcessID      string
-	PreviousStage  string
-	TargetRepo     string
+	IssueKey      string
+	AgentID       string
+	AgenticID     string
+	TaskClass     string
+	ProcessID     string
+	PreviousStage string
+	TargetRepo    string
 }
 
 func evidenceRunState(root string, workspaceName string, runID string) (evidenceRunContext, error) {
 	context, err := runcontext.ReadFile(
 		filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"),
-		runcontext.Query{RunID: runID, Workspace: workspaceName, AgentID: agentID()},
+		runcontext.Query{AgenticRunID: runID, Workspace: workspaceName, AgentID: agentID()},
 	)
 	if err != nil {
 		return evidenceRunContext{}, err
@@ -32,13 +32,13 @@ func evidenceRunState(root string, workspaceName string, runID string) (evidence
 		return evidenceRunContext{}, runcontext.ErrLocalStateMismatch
 	}
 	return evidenceRunContext{
-		IssueKey:       context.IssueKey,
-		AgentID:        context.AgentID,
-		CurrentAgentID: context.CurrentAgentID,
-		TaskClass:      context.TaskClass,
-		ProcessID:      context.ProcessID,
-		PreviousStage:  context.CurrentStage,
-		TargetRepo:     context.TargetRepo,
+		IssueKey:      context.IssueKey,
+		AgentID:       context.AgentID,
+		AgenticID:     context.AgenticID,
+		TaskClass:     context.TaskClass,
+		ProcessID:     context.ProcessID,
+		PreviousStage: context.CurrentStage,
+		TargetRepo:    context.TargetRepo,
 	}, nil
 }
 

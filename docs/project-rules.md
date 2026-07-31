@@ -49,7 +49,7 @@ Jira 卡片已进入迭代
 -> 研发工程师选择一个卡片
 -> AI 识别任务分类并选择标准流程
 -> AI 执行任务接管门禁
--> AI 生成 `run_id` 和接管记录
+-> AI 生成 `agentic_run_id` 和接管记录
 -> AI 本地开发与验证
 -> AI 回写 Jira 证据
 -> 研发工程师确认
@@ -90,26 +90,26 @@ AgenticOps 必须保持事实源边界清晰：
 - GitHub 拉取请求与 CI 是拉取请求审查、CI、审查评论和合入记录的事实源。
 - AgenticOps 只提供执行控制、操作契约、证据模板和反馈闭环。
 
-`run_id` 只用于追踪一次 AI 执行：
+`agentic_run_id` 只用于追踪一次 AI 执行：
 
 - 不替代 Jira 卡片编号。
 - 不替代 Jira 状态。
 - 不要求研发工程师手工填写。
 - 必须能串联 Jira 证据、事件日志、测试结果、拉取请求和反馈分析。
 
-`agent_id` 和 `current_agent_id` 属于所有权控制：
+`agent_id` 和 `agentic_id` 属于所有权控制：
 
-- `agent_id` 标识一个 AIAgent 身份，同一个 `agent_id` 可以产生多个 `run_id`。
-- `current_agent_id` 是任务当前绑定的 `agent_id`，用于所有权门禁和并发冲突检测。
-- 同一个 Jira 卡片可以有多个历史 `run_id`，但同一时刻最多只能有一个有效的 `current_agent_id`。
-- 任务完成或明确交接结束后，必须清理 `current_agent_id`；清理动作不删除历史 `run_id`。
+- `agent_id` 标识一个 AIAgent 身份，同一个 `agent_id` 可以产生多个 `agentic_run_id`。
+- `agentic_id` 是任务当前绑定的 `agent_id`，用于所有权门禁和并发冲突检测。
+- 同一个 Jira 卡片可以有多个历史 `agentic_run_id`，但同一时刻最多只能有一个有效的 `agentic_id`。
+- 任务完成或明确交接结束后，必须清理 `agentic_id`；清理动作不删除历史 `agentic_run_id`。
 
 执行记录必须覆盖：
 
 - 当前任务类型 `task_type`。
 - 当前任务分类 `task_class` 和标准流程编号 `process_id`。
 - 当前阶段 `current_stage`。
-- 下一步动作 `next_action`。
+- 下一步动作 `agentic_next_action`。
 - 人工门禁状态。
 - 当前节点表单状态。
 - 专业审查结论。
@@ -497,7 +497,7 @@ Observation -> Proposal -> Accepted Change
 
 本地凭证只能通过被忽略的环境文件、系统凭证管理或运行时注入。
 
-Jira / GitHub 写操作必须可审计。任何写操作都必须关联 `operation`、`workspace`、`issue_key`、`run_id`、`task_type`、`current_stage`、`next_action` 和事件日志。
+Jira / GitHub 写操作必须可审计。任何写操作都必须关联 `operation`、`workspace`、`issue_key`、`agentic_run_id`、`task_type`、`current_stage`、`agentic_next_action` 和事件日志。
 
 ## 19. 文档规则
 
@@ -523,7 +523,7 @@ Jira / GitHub 写操作必须可审计。任何写操作都必须关联 `operati
 
 面向用户、研发工程师和审阅者的可见文档标题和正文默认使用中文。只有以下内容保留英文或缩写：
 
-- 属性名、状态名、配置键、协议字段和错误码，例如 `run_id`、`current_agent_id`、`side_effects`、`missing_form_field`。
+- 属性名、状态名、配置键、协议字段和错误码，例如 `agentic_run_id`、`agentic_id`、`side_effects`、`missing_form_field`。
 - 命令、参数、文件路径、目录名和代码符号，例如 `agentic-cli workspace init`、`--jira-project`、`install-resources/basic/contracts/operations/`。
 - 产品名、平台名、组件名和行业通用稳定名词，例如 `AgenticOps`、`AIAgent`、`Jira`、`GitHub`、`CI`、`CLI`。
 - 故事线、任务或契约的稳定编号，例如 `PM-001`、`DE-001`。

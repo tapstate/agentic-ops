@@ -55,7 +55,7 @@ test -d "$workspace_root/.agentic-ops/run-logs"
 
 events_path="$workspace_root/.agentic-ops/feedback/events.ndjson"
 cat >> "$events_path" <<'JSON'
-{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","run_id":"diagnosis-secret","agentic_cli_version":"SRC-source","version_state":"SRC","asset_version":"unknown","task_type":"diagnosis","operation":"doctor","current_stage":"diagnosis","next_action":"ask_owner","ok":false,"code":"agentic_cli_logic_error","gate":"doctor","gate_status":"blocked","human_gate":true,"requires_human_action":true,"message":"token=abc123 password=hidden"}
+{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"diagnosis-secret","agentic_cli_version":"SRC-source","version_state":"SRC","asset_version":"unknown","task_type":"diagnosis","operation":"doctor","current_stage":"diagnosis","agentic_next_action":"ask_owner","ok":false,"code":"agentic_cli_logic_error","gate":"doctor","gate_status":"blocked","human_gate":true,"requires_human_action":true,"message":"token=abc123 password=hidden"}
 JSON
 
 "${cmd[@]}" feedback bundle --workspace tapstate --run-id diagnosis-secret --redact | grep '"redacted":true'

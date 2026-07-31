@@ -70,7 +70,7 @@
 
 | 问题类型 | 典型表现 | 修复载体 | 同步方式 |
 | --- | --- | --- | --- |
-| `agentic-cli` 逻辑错误 | 命令输出错误、`run_id` 生成错误、事件写入错误、`adapter` 行为错误 | Go CLI 二进制 | 发布最新版本 + `update apply` |
+| `agentic-cli` 逻辑错误 | 命令输出错误、`agentic_run_id` 生成错误、事件写入错误、`adapter` 行为错误 | Go CLI 二进制 | 发布最新版本 + `update apply` |
 | Jira 流程状态没适配 | 未知 Jira `status` / `transition`、状态映射失败、项目工作流差异 | 工作流配置 / 适配器映射 | `asset update` + `profile update` |
 | Jira 卡片属性丢失 | 缺少负责人、验收标准、目标仓库、验证方式、风险等级 | 门禁失败 + 补全模板 / 字段映射 | 阻断接管 + 人工补卡或工作流配置修复 |
 | 关键步骤门禁调整 | 推送 / 创建拉取请求 / Jira 评论 / 范围变更的确认要求变化 | 策略包 | `policy update` + 审查 + 回滚 |
@@ -89,7 +89,7 @@
   "operation": "takeover_task",
   "task_type": "task_takeover",
   "current_stage": "takeover_gate",
-  "next_action": "ask_owner",
+  "agentic_next_action": "ask_owner",
   "ok": false,
   "code": "missing_target_repo",
   "required_human_action": "请补充 target_repo 或维护工作空间代码仓库映射"
@@ -100,7 +100,7 @@
 
 ```sh
 agentic-cli doctor --workspace tapstate
-agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
+agentic-cli feedback bundle --workspace tapstate --run-id <agentic_run_id> --redact
 ```
 
 `doctor` 用于判断安装、版本、工作流配置、策略、Jira / GitHub 凭证和工作空间是否一致。
@@ -110,10 +110,10 @@ agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
 
 当前本地模拟流程已实现以下基线能力：
 
-- 失败输出固定包含 `ok`、`operation`、`code`、`message`、`required_human_action`、`task_type`、`current_stage` 和 `next_action`。
-- 事件日志固定支持 `agentic_cli_version`、`version_state`、`asset_version`、`operation`、`task_type`、`current_stage`、`next_action`、`code`、`gate` 和 `gate_status`。
+- 失败输出固定包含 `ok`、`operation`、`code`、`message`、`required_human_action`、`task_type`、`current_stage` 和 `agentic_next_action`。
+- 事件日志固定支持 `agentic_cli_version`、`version_state`、`asset_version`、`operation`、`task_type`、`current_stage`、`agentic_next_action`、`code`、`gate` 和 `gate_status`。
 - `gate_status` 当前取值为 `passed`、`blocked` 或 `failed`。
-- 已实现命令中的校验失败会优先给出明确 `required_human_action`，例如缺少 `run_id` 时要求补充 `--run-id`。
+- 已实现命令中的校验失败会优先给出明确 `required_human_action`，例如缺少 `agentic_run_id` 时要求补充 `--run-id`。
 
 四类正式问题的稳定错误码规划如下：
 

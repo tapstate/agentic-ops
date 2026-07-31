@@ -34,7 +34,7 @@
   "ok": true,
   "operation": "maintain_document_boundary",
   "changed_layer": "storyline",
-  "next_action": "review_design_impact"
+  "agentic_next_action": "review_design_impact"
 }
 ```
 

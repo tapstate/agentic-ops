@@ -65,7 +65,7 @@ func TestJiraRuntimeConfigContractCoversInitPreflightAndListTasks(t *testing.T) 
 	assertNestedJSONField(t, preflightStdout.String(), []string{"checks", "jira_config", "code"}, "jira_api_token_missing")
 	assertJSONField(t, preflightStdout.String(), "jira_config_source", jiraConfigPath)
 	assertJSONField(t, preflightStdout.String(), "jira_env_file", jiraEnvPath)
-	assertJSONField(t, preflightStdout.String(), "next_action", "set_jira_api_token")
+	assertJSONField(t, preflightStdout.String(), "agentic_next_action", "set_jira_api_token")
 
 	var listStdout bytes.Buffer
 	var listStderr bytes.Buffer

@@ -63,11 +63,11 @@ in_progress_code="$?"
 set -e
 test "$in_progress_code" -eq 1
 printf '%s\n' "$in_progress_output" | grep '"code":"invalid_takeover_stage"'
-$cmd takeover-task TAP-123 --workspace tapstate | grep '"current_agent_id":"agentic-cli-local-agent"'
+$cmd takeover-task TAP-123 --workspace tapstate | grep '"agentic_id":"agentic-cli-local-agent"'
 resume_output=$($cmd resume-takeover --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3)
 printf '%s\n' "$resume_output" | grep '"previous_stage":"takeover_started"'
 printf '%s\n' "$resume_output" | grep '"current_stage":"takeover_started"'
-printf '%s\n' "$resume_output" | grep '"next_action":"proceed"'
+printf '%s\n' "$resume_output" | grep '"agentic_next_action":"proceed"'
 printf '%s\n' "$resume_output" | grep '"target_repo":"tapstate/example-repo"'
 printf '%s\n' "$resume_output" | grep '"standard_process_stage":"waiting_takeover"'
 $cmd inspect-workspace --workspace tapstate --source-root . | grep '"operation":"inspect_workspace"'
@@ -75,7 +75,7 @@ $cmd prepare-pr --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8
 $cmd write-evidence --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 | grep '"audit_submitted":true'
 release_output="$($cmd release-agent --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 --issue-key TAP-123 --completion-evidence evidence.md)"
 printf '%s\n' "$release_output" | grep '"audit_submitted":true'
-printf '%s\n' "$release_output" | grep '"current_agent_id_cleared":true'
+printf '%s\n' "$release_output" | grep '"agentic_id_cleared":true'
 $cmd feedback bundle --workspace tapstate --run-id TAP-123-takeover-20260721103012-a8f3 --redact | grep '"operation":"feedback_bundle"'
 $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"operation":"feedback_report"'
 $cmd feedback report --workspace tapstate --date 2026-07-21 | grep '"blocked":1'

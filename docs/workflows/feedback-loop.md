@@ -14,7 +14,7 @@ Go CLI 执行操作
 -> 到达完成、阻塞或交接节点
 -> AIAgent 提交任务级审计记录到 Jira 卡片、审计服务或目标仓库证据链
 -> 研发工程师或流程负责人审查任务审计记录
--> 维护者按需按 `run_id`、任务类型、失败码、时间范围或 `workspace` 聚合分析
+-> 维护者按需按 `agentic_run_id`、任务类型、失败码、时间范围或 `workspace` 聚合分析
 -> AIAgent 生成 AgenticOps 改进建议
 -> 人确认后更新 AgenticOps 规则 / 手册 / contracts / Go CLI
 ```
@@ -62,16 +62,16 @@ Go CLI 执行操作
   "timestamp": "2026-07-21T10:30:12+08:00",
   "workspace": "tapstate",
   "agent_id": "agent-local-7f31a2b",
-  "run_id": "TAP-123-takeover-20260721103012-a8f3",
+  "agentic_run_id": "TAP-123-takeover-20260721103012-a8f3",
   "issue_key": "TAP-123",
   "assignee": "dev@example.com",
-  "current_agent_id": "agent-local-7f31a2b",
+  "agentic_id": "agent-local-7f31a2b",
   "task_type": "task_takeover",
   "task_class": "bug_fix",
   "process_id": "development_change_v1",
   "operation": "takeover_task",
   "current_stage": "takeover_gate",
-  "next_action": "ask_owner",
+  "agentic_next_action": "ask_owner",
   "ok": false,
   "code": "missing_target_repo",
   "duration_ms": 842,
@@ -81,7 +81,7 @@ Go CLI 执行操作
   "review_decision": null,
   "retryable": false,
   "redo_from_stage": "takeover_gate",
-  "current_agent_id_cleared": false,
+  "agentic_id_cleared": false,
   "audit_target": "jira_issue",
   "audit_submitted": false,
   "audit_reference": null,
@@ -104,7 +104,7 @@ Go CLI 执行操作
 
 - `workspace`
 - `agent_id`
-- `run_id`
+- `agentic_run_id`
 - `issue_key`
 - `task_type`
 - `task_class`
@@ -116,7 +116,7 @@ Go CLI 执行操作
 - 验证命令和结果
 - 专业审查结论、重试依据或重做起点
 - 完成证据引用
-- `current_agent_id` 是否已清理
+- `agentic_id` 是否已清理
 - 残留风险和需要人工处理的动作
 
 任务审计记录不得包含原始敏感日志。需要诊断时，应生成脱敏 `feedback bundle`，再由维护者判断是否提交到审计服务。
@@ -126,9 +126,9 @@ Go CLI 执行操作
 第一阶段建议操作：
 
 ```sh
-agentic-cli write-evidence --workspace tapstate --run-id <run_id>
-agentic-cli release-agent --workspace tapstate --run-id <run_id> --issue-key TAP-123 --completion-evidence evidence.md
-agentic-cli feedback bundle --workspace tapstate --run-id <run_id> --redact
+agentic-cli write-evidence --workspace tapstate --run-id <agentic_run_id>
+agentic-cli release-agent --workspace tapstate --run-id <agentic_run_id> --issue-key TAP-123 --completion-evidence evidence.md
+agentic-cli feedback bundle --workspace tapstate --run-id <agentic_run_id> --redact
 agentic-cli feedback report --workspace tapstate --date 2026-07-21
 agentic-cli feedback analyze --workspace tapstate --date 2026-07-21
 agentic-cli feedback propose --workspace tapstate --date 2026-07-21
@@ -150,7 +150,7 @@ agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 - 重试次数和失败后仍未解决的节点。
 - 重做来源阶段。
 - 所有权冲突、`assignee` 变更和代理绑定丢失。
-- 任务完成后未清理 `current_agent_id` 的记录。
+- 任务完成后未清理 `agentic_id` 的记录。
 - 重复问题。
 - 可复用经验。
 - 候选原子操作。
@@ -162,7 +162,7 @@ agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 - 审计服务不可用时，不能阻断本地证据落盘，但必须记录服务不可用事件和后续补交动作。
 - 目标仓库证据写入失败时，不得继续执行推送、拉取请求或完成清理。
 - 发现敏感内容时，必须停止外部提交，生成脱敏版本或请求人工判断。
-- 完成或交接后如果 `current_agent_id` 清理失败，任务不能视为已完成审计。
+- 完成或交接后如果 `agentic_id` 清理失败，任务不能视为已完成审计。
 
 ## 9. 变更门禁
 

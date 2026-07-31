@@ -28,7 +28,7 @@ func Summarize(events []Event) Report {
 			}
 			report.MissingFields[event.MissingField]++
 		}
-		if event.RequiresHumanAction || event.NextAction == "ask_owner" {
+		if event.RequiresHumanAction || event.AgenticNextAction == "ask_owner" {
 			report.Blocked++
 			continue
 		}

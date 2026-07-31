@@ -1,6 +1,6 @@
 operation: feedback_bundle
 version: 1
-purpose: 为指定 `run_id` 生成脱敏诊断包，供维护者定位失败、阻塞和环境问题；它可以补充任务审计，但不能替代 Jira、审计服务或目标仓库上的任务级审计提交。
+purpose: 为指定 `agentic_run_id` 生成脱敏诊断包，供维护者定位失败、阻塞和环境问题；它可以补充任务审计，但不能替代 Jira、审计服务或目标仓库上的任务级审计提交。
 task_type: diagnosis
 allowed_stages:
   - failed
@@ -9,14 +9,14 @@ allowed_stages:
   - diagnosis
 required_inputs:
   - workspace
-  - run_id
+  - agentic_run_id
 optional_inputs:
   - redact
 input:
   workspace:
     type: string
     required: true
-  run_id:
+  agentic_run_id:
     type: string
     required: true
   redact:
@@ -28,17 +28,17 @@ preconditions:
 output:
   workspace:
     type: string
-  run_id:
+  agentic_run_id:
     type: string
   bundle:
     type: string
   redacted:
     type: boolean
-  next_action:
+  agentic_next_action:
     type: string
 failure:
   codes:
-    - missing_run_id
+    - missing_agentic_run_id
     - workspace_root_failed
     - event_read_failed
     - bundle_write_failed
