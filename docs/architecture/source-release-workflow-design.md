@@ -9,7 +9,8 @@
 ## 2. 分支职责
 
 - `main` 是稳定主分支，也是 GitHub 默认分支和安装脚本读取的分支。
-- `develop` 是日常开发分支。正常发布只能通过 `develop → main` 拉取请求完成。
+- `develop` 是日常开发分支。正常发布必须以完成验证的 `develop` HEAD 为来源，通过拉取请求合入 `main`。
+- `release/vX.Y` 是软门禁模式从已验证 `develop` HEAD 创建的固定发布分支，用于避免等待人工合并期间 `develop` 的后续提交改变发布内容。
 - `<user>/<jira-id>/fix-main` 是紧急修复分支，只能从最新 `origin/main` 创建，只能通过拉取请求合回 `main`。
 - `main` 禁止直接提交、直接推送、强制推送和删除。
 - 所有合入 `main` 的拉取请求使用 Merge commit，不要求 GitHub CI 或代码审查批准。
@@ -107,6 +108,12 @@ scripts/release.sh prepare --version v0.3
 scripts/release.sh publish --version v0.3
 ```
 
+GitHub Free 私有仓库无法使用所需 Ruleset 和 Auto-merge 时，必须显式启用软门禁：
+
+```bash
+scripts/release.sh publish --version v0.3 --allow-soft-gate
+```
+
 顺序：
 
 1. 重复执行仓库和研发流程门禁。
@@ -117,12 +124,15 @@ scripts/release.sh publish --version v0.3
 6. 展示版本、目标仓库、源分支、目标分支、待推送提交和验证结果。
 7. 交互取得最终人工确认；非交互环境必须显式传入 `--confirm-release`。
 8. 推送 `develop`。
-9. 创建或复用唯一的开放 `develop → main` 拉取请求。
-10. 使用 Merge commit 并启用 Auto-merge。
-11. 等待拉取请求实际合并。
-12. fetch `origin/main`，确认发布时的 `develop` HEAD 已包含在 `origin/main`。
-13. 确认本地 tag 目标已包含在 `origin/main` 后推送 tag。
-14. 写入结构化发布审计并输出发布结果。
+9. 硬门禁模式创建或复用唯一的开放 `develop → main` 拉取请求，使用 Merge commit 启用 Auto-merge 并等待合并。
+10. 软门禁模式从固定发布 HEAD 创建或复用 `release/vX.Y`，推送后创建或复用 `release/vX.Y → main` 拉取请求。
+11. 软门禁首次执行在创建 PR 后返回状态码 `2`，输出 PR 地址和原继续命令，等待研发工程师在 GitHub 页面选择 Merge commit 人工合并。
+12. 软门禁人工合并后重新执行同一条 `publish` 命令；脚本使用固定发布分支恢复上下文，再次执行完整验证。
+13. fetch `origin/main`，确认 PR 已合并、合并结果保留固定发布 HEAD 的提交历史且该 HEAD 已包含在 `origin/main`；Squash 或 Rebase 合并必须停止 Tag 发布。
+14. 确认本地 tag 目标已包含在 `origin/main` 后推送 tag。
+15. 写入结构化发布审计并输出发布结果。
+
+`release/vX.Y` 不自动删除。本地或远端已存在同名分支时，只有其目标与第一次验证的固定发布 HEAD 完全一致才允许恢复执行。
 
 ## 6. Hotfix 流程
 
@@ -169,6 +179,12 @@ scripts/hotfix.sh prepare
 scripts/hotfix.sh publish
 ```
 
+软门禁命令：
+
+```bash
+scripts/hotfix.sh publish --allow-soft-gate
+```
+
 顺序：
 
 1. 校验修复分支、Jira ID、工作区和远端同步状态。
@@ -177,11 +193,15 @@ scripts/hotfix.sh publish
 4. 展示修复范围、目标仓库、验证结果和最终人工确认。
 5. 推送修复分支。
 6. 创建或复用修复分支到 `main` 的开放拉取请求。
-7. 使用 Merge commit 并启用 Auto-merge。
-8. 等待并验证 `origin/main` 包含修复分支 HEAD。
-9. 写入结构化审计并提示研发工程师人工把修复同步回 `develop`。
+7. 硬门禁模式使用 Merge commit 启用 Auto-merge 并等待合并。
+8. 软门禁模式记录固定修复 HEAD，创建 PR 后返回状态码 `2`，等待研发工程师在 GitHub 页面选择 Merge commit 人工合并。
+9. 软门禁人工合并后重新执行同一条 `publish` 命令，再次完整验证固定修复 HEAD；HEAD 漂移或 Squash/Rebase 合并时停止发布。
+10. 验证 `origin/main` 包含固定修复 HEAD。
+11. 写入结构化审计并提示研发工程师人工把修复同步回 `develop`。
 
 ## 7. 研发流程配置门禁
+
+### 7.1 硬门禁
 
 发布脚本在任何测试、推送或拉取请求操作前检查：
 
@@ -201,6 +221,22 @@ scripts/hotfix.sh publish
 
 非交互环境默认只检查并失败；只有显式传入 `--configure-workflow` 时才允许执行配置。
 
+### 7.2 GitHub Free 软门禁
+
+GitHub Free 私有仓库无法配置本设计要求的 `main` Ruleset 与 Auto-merge。此时允许发布者在 `prepare` 和 `publish` 显式传入 `--allow-soft-gate`，普通发布和 Hotfix 使用相同模式。脚本不得自动探测并静默降级，也不得把软门禁保存为仓库默认值。
+
+软门禁仍强制检查：
+
+- GitHub CLI 认证可用。
+- `core.hooksPath` 指向 `.githooks`，且本地 `pre-commit`、`pre-push` 可执行。
+- 远端 `develop` 存在。
+- GitHub 默认分支是 `main`。
+- 仓库允许 Merge commit。
+
+软门禁只放宽 Ruleset 和 Auto-merge，不允许直接推送 `main`。由于服务器端无法阻止其他账号直推，命令输出、PR 描述、等待记录和完成审计都必须标记 `protection_mode=soft` 并显示风险说明。
+
+软门禁首次 `publish` 创建 PR 后以专用状态码 `2` 表示 `waiting_for_manual_merge`。该状态不是发布成功；调用方必须在人工 Merge commit 后重新执行完全相同的 `publish` 命令。第二次执行不得复用首次测试结论，必须重新验证固定发布 HEAD。
+
 ## 8. 完整验证
 
 `publish` 在临时 Git worktree 中固定执行：
@@ -216,13 +252,16 @@ bash tests/e2e/local-install-flow.sh
 bash tests/e2e/problem-resolution-flow.sh
 ```
 
-验证命令不可由普通参数替换或跳过。任一命令失败时，不执行推送、创建拉取请求、Auto-merge 或 tag 推送。
+验证命令不可由普通参数替换或跳过。任一命令失败时，不执行后续推送、创建拉取请求、Auto-merge 或 tag 推送。软门禁恢复执行时，即使 PR 已人工合并，也必须在 Tag 或完成审计前重新执行全部验证。
 
 ## 9. 幂等、失败与恢复
 
 - 本地分支落后或与远端分叉时停止，不自动 pull、merge 或 rebase。
 - 已存在源分支和目标分支匹配的开放拉取请求时复用。
 - 匹配的拉取请求已合并时直接进入远端包含关系验证。
+- 软门禁根据版本和固定 HEAD 恢复发布，不使用执行时可能已前进的 `develop` HEAD 替换 `release/vX.Y`。
+- 软门禁 PR 仍开放时返回状态码 `2`，不轮询、不自动合并，也不推送 tag。
+- 软门禁 PR 已关闭但未合并、HEAD 漂移或合并结果未保留固定 HEAD 历史时停止并返回稳定错误码。
 - 推送后失败不回滚远端分支，不自动关闭拉取请求。
 - 不删除分支，不移动或强制更新远端 tag。
 - 重复执行从当前可验证阶段继续，不重复创建拉取请求或重复推送相同 tag。
@@ -237,6 +276,7 @@ bash tests/e2e/problem-resolution-flow.sh
 - 待合并 HEAD。
 - 固定验证命令及结论。
 - 本地验证完成时间。
+- 保护模式；软门禁必须显示 GitHub Free 私有仓库缺少服务器端 PR-only 保护的风险。
 
 脚本在 `.local/release-runs/` 写入结构化 JSON，至少包含：
 
@@ -247,6 +287,7 @@ bash tests/e2e/problem-resolution-flow.sh
 - Merge commit。
 - Tag 及其目标（正常发布）。
 - 验证时间和最终状态。
+- `protection_mode`；等待人工合并时写入 `waiting_for_manual_merge` 状态。
 
 GitHub PR 和 Merge commit 是发布事实源，本地 JSON 是执行审计记录。输出不得包含 token、完整环境变量或原始敏感日志。
 
@@ -275,6 +316,10 @@ scripts/test-release-workflow.sh
 - Jira ID 和修复分支命名校验。
 - tag 格式、冲突、祖先关系、远端不可覆盖和 Hotfix 不创建 tag。
 - 拉取请求创建、复用、已合并恢复和等待超时。
+- `--allow-soft-gate` 显式启用、默认不降级和软门禁保留的基础检查。
+- 普通发布固定 `release/vX.Y` 分支、首次返回状态码 `2`、人工 Merge commit 后同命令恢复和二次完整验证。
+- Hotfix 软门禁等待、恢复、固定 HEAD 校验和不创建 tag。
+- 软门禁拒绝 PR HEAD 漂移、关闭未合并、Squash 和 Rebase 合并。
 - 任一验证失败时没有远端写入。
 - Merge commit 后 `origin/main` 包含关系验证。
 - 审计 JSON 不包含敏感信息。
