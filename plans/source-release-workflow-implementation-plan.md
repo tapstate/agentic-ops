@@ -621,7 +621,7 @@ git commit -m "Docs(workflow): TAP-12371 启用正式源码发布规则" -m "删
 **Interfaces:**
 - Produces: 全部计划勾选、验证证据、长期分支与发布决策记忆。
 
-- [ ] **Step 1: 运行发布脚本合同测试和 shell 语法检查**
+- [x] **Step 1: 运行发布脚本合同测试和 shell 语法检查**
 
 Run:
 
@@ -632,7 +632,7 @@ bash -n .githooks/pre-commit .githooks/pre-push scripts/release.sh scripts/hotfi
 
 Expected: PASS。
 
-- [ ] **Step 2: 运行完整 Go、资源、构建、安装和 E2E 回归**
+- [x] **Step 2: 运行完整 Go、资源、构建、安装和 E2E 回归**
 
 Run:
 
@@ -649,7 +649,7 @@ bash tests/e2e/problem-resolution-flow.sh
 
 Expected: 全部退出 0，输出各自 `"ok":true` 结果。
 
-- [ ] **Step 3: 验证需求和仓库状态**
+- [x] **Step 3: 验证需求和仓库状态**
 
 Run:
 
@@ -663,18 +663,18 @@ git status --short
 
 Expected: diff check 退出 0；`rg` 无当前规则命中；状态只包含已知、待提交的计划勾选或既有范围改动。
 
-- [ ] **Step 4: 更新计划勾选和长期记忆**
+- [x] **Step 4: 更新计划勾选和长期记忆**
 
 把本计划已完成步骤改为 `[x]`。在写入 wiki 前检查现有 AgenticOps 项目页、分支规则和冲突处理规则；用新决策替换“研发期 main 直提”记忆，并记录读取链路超过 5 个文件的优化观察，不保存凭证或原始日志。
 
-- [ ] **Step 5: 提交计划收口**
+- [x] **Step 5: 提交计划收口**
 
 ```bash
 git add plans/source-release-workflow-implementation-plan.md
 git commit -m "Docs(plan): TAP-12371 完成源码发布流程实施计划" -m "记录正式分支、正常发布、Hotfix、规则迁移和完整回归的实施结果与验证入口。"
 ```
 
-- [ ] **Step 6: 推送前最终核对**
+- [x] **Step 6: 推送前最终核对**
 
 Run:
 
