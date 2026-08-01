@@ -697,7 +697,7 @@ Expected: 只包含已审阅的聚焦提交；工作区没有遗漏的未知改�
 - Produces: `workflow_check_github_auth()`；状态检查成功时直接通过，状态检查失败但 API 探测成功时回退通过，两项都失败时返回失败。
 - Security: 两项认证命令的标准输出和标准错误都重定向到 `/dev/null`，不得输出令牌或认证响应正文。
 
-- [ ] **Step 1: 写认证回退失败测试**
+- [x] **Step 1: 写认证回退失败测试**
 
 扩展 fake `gh`，用状态文件分别控制认证状态检查和 API 探测：
 
@@ -733,7 +733,7 @@ grep 'workflow_github_auth_required' "$tmp_dir/auth-failed.err" >/dev/null
 
 把脚本末尾用例计数从 `32` 调整为 `34`。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run:
 
@@ -743,7 +743,7 @@ bash scripts/test-release-workflow.sh
 
 Expected: FAIL；`deny-auth-status` 存在时现有实现直接返回 `workflow_github_auth_required`，尚未执行 `api user` 回退。
 
-- [ ] **Step 3: 实现最小认证回退**
+- [x] **Step 3: 实现最小认证回退**
 
 在 `scripts/lib/development-workflow.sh` 新增：
 
@@ -759,7 +759,7 @@ workflow_check_github_auth() {
 
 `workflow_check_or_configure()` 调用 `workflow_check_github_auth`；失败时保持现有 `workflow_github_auth_required` 错误码、中文提示和人工动作不变。
 
-- [ ] **Step 4: 验证 GREEN 和回归**
+- [x] **Step 4: 验证 GREEN 和回归**
 
 Run:
 
@@ -772,7 +772,7 @@ git diff --check
 
 Expected: shell 语法检查和差异检查退出 0；发布工作流输出 `"cases":34`，资源测试输出 `"ok":true`。
 
-- [ ] **Step 5: 更新勾选并提交实现**
+- [x] **Step 5: 更新勾选并提交实现**
 
 把 Task 9 的步骤全部改为 `[x]`，然后执行：
 

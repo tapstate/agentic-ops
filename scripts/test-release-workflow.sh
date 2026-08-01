@@ -66,6 +66,15 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$FAKE_GH_STATE_DIR/calls.log"
 
 if [ "${1:-}" = "auth" ] && [ "${2:-}" = "status" ]; then
+  [ ! -f "$FAKE_GH_STATE_DIR/deny-auth-status" ]
+  exit 0
+fi
+
+if [ "${1:-}" = "api" ] && [ "${2:-}" = "user" ]; then
+  if [ -f "$FAKE_GH_STATE_DIR/deny-api-user" ]; then
+    exit 1
+  fi
+  printf 'HarsenLin\n'
   exit 0
 fi
 
@@ -256,6 +265,18 @@ workflow_check_or_configure configure "$workflow_repo"
 writes_after="$(wc -l < "$fake_gh_state/writes.log" | tr -d ' ')"
 test "$writes_after" = "$writes_before"
 workflow_check_or_configure check "$workflow_repo"
+
+touch "$fake_gh_state/deny-auth-status"
+workflow_check_or_configure check "$workflow_repo"
+grep '^api user$' "$fake_gh_state/calls.log" >/dev/null
+
+touch "$fake_gh_state/deny-api-user"
+if workflow_check_or_configure check "$workflow_repo" >"$tmp_dir/auth-failed.out" 2>"$tmp_dir/auth-failed.err"; then
+  echo "expected unavailable GitHub authentication to fail" >&2
+  exit 1
+fi
+grep 'workflow_github_auth_required' "$tmp_dir/auth-failed.err" >/dev/null
+rm -f "$fake_gh_state/deny-auth-status" "$fake_gh_state/deny-api-user"
 
 if [ ! -f "$repo_root/scripts/lib/release-common.sh" ]; then
   echo "missing release common functions" >&2
@@ -663,4 +684,4 @@ if release_require_synced_hotfix_branch "$sync_local" "$sync_branch" >"$tmp_dir/
 fi
 grep 'hotfix_branch_diverged' "$tmp_dir/hotfix-diverged.err" >/dev/null
 
-printf '{"ok":true,"operation":"test_release_workflow","cases":32}\n'
+printf '{"ok":true,"operation":"test_release_workflow","cases":34}\n'

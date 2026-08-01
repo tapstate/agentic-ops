@@ -162,6 +162,14 @@ workflow_configure_main_ruleset() {
   rm -f "$workflow_payload"
 }
 
+workflow_check_github_auth() {
+  workflow_gh_bin="${AGENTIC_OPS_GH_BIN:-gh}"
+  if "$workflow_gh_bin" auth status -h github.com >/dev/null 2>&1; then
+    return 0
+  fi
+  "$workflow_gh_bin" api user >/dev/null 2>&1
+}
+
 workflow_check_or_configure() {
   workflow_mode="$1"
   workflow_repo_root="${2:-$(pwd)}"
@@ -186,7 +194,7 @@ workflow_check_or_configure() {
     fi
   fi
 
-  if ! "${AGENTIC_OPS_GH_BIN:-gh}" auth status -h github.com >/dev/null 2>&1; then
+  if ! workflow_check_github_auth; then
     workflow_fail "workflow_github_auth_required" "GitHub CLI 未登录或凭证无效" "请执行 gh auth login -h github.com"
     return 1
   fi
