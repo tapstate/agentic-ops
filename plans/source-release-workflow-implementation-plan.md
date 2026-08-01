@@ -684,3 +684,99 @@ git status --short --branch
 ```
 
 Expected: 只包含已审阅的聚焦提交；工作区没有遗漏的未知改动。根据用户已给出的推送授权推送 `develop`，不直接推送 `main`。
+
+## Task 9: 兼容 GitHub CLI 认证状态误报
+
+**Files:**
+- Modify: `scripts/lib/development-workflow.sh`
+- Modify: `scripts/test-release-workflow.sh`
+- Modify: `plans/source-release-workflow-implementation-plan.md`
+
+**Interfaces:**
+- Consumes: `${AGENTIC_OPS_GH_BIN:-gh}` 的 `auth status -h github.com` 与 `api user`。
+- Produces: `workflow_check_github_auth()`；状态检查成功时直接通过，状态检查失败但 API 探测成功时回退通过，两项都失败时返回失败。
+- Security: 两项认证命令的标准输出和标准错误都重定向到 `/dev/null`，不得输出令牌或认证响应正文。
+
+- [ ] **Step 1: 写认证回退失败测试**
+
+扩展 fake `gh`，用状态文件分别控制认证状态检查和 API 探测：
+
+```bash
+if [ "${1:-}" = "auth" ] && [ "${2:-}" = "status" ]; then
+  [ ! -f "$FAKE_GH_STATE_DIR/deny-auth-status" ]
+  exit
+fi
+
+if [ "${1:-}" = "api" ] && [ "${2:-}" = "user" ]; then
+  if [ -f "$FAKE_GH_STATE_DIR/deny-api-user" ]; then
+    exit 1
+  fi
+  printf 'HarsenLin\n'
+  exit 0
+fi
+```
+
+在正式研发流程已经配置完成的 fixture 上新增两个断言：
+
+```bash
+touch "$fake_gh_state/deny-auth-status"
+workflow_check_or_configure check "$workflow_repo"
+grep '^api user$' "$fake_gh_state/calls.log" >/dev/null
+
+touch "$fake_gh_state/deny-api-user"
+if workflow_check_or_configure check "$workflow_repo" >"$tmp_dir/auth-failed.out" 2>"$tmp_dir/auth-failed.err"; then
+  echo "expected unavailable GitHub authentication to fail" >&2
+  exit 1
+fi
+grep 'workflow_github_auth_required' "$tmp_dir/auth-failed.err" >/dev/null
+```
+
+把脚本末尾用例计数从 `32` 调整为 `34`。
+
+- [ ] **Step 2: 运行测试并确认 RED**
+
+Run:
+
+```bash
+bash scripts/test-release-workflow.sh
+```
+
+Expected: FAIL；`deny-auth-status` 存在时现有实现直接返回 `workflow_github_auth_required`，尚未执行 `api user` 回退。
+
+- [ ] **Step 3: 实现最小认证回退**
+
+在 `scripts/lib/development-workflow.sh` 新增：
+
+```bash
+workflow_check_github_auth() {
+  workflow_gh_bin="${AGENTIC_OPS_GH_BIN:-gh}"
+  if "$workflow_gh_bin" auth status -h github.com >/dev/null 2>&1; then
+    return 0
+  fi
+  "$workflow_gh_bin" api user >/dev/null 2>&1
+}
+```
+
+`workflow_check_or_configure()` 调用 `workflow_check_github_auth`；失败时保持现有 `workflow_github_auth_required` 错误码、中文提示和人工动作不变。
+
+- [ ] **Step 4: 验证 GREEN 和回归**
+
+Run:
+
+```bash
+bash -n scripts/lib/development-workflow.sh scripts/test-release-workflow.sh
+bash scripts/test-release-workflow.sh
+bash scripts/test-resources.sh
+git diff --check
+```
+
+Expected: shell 语法检查和差异检查退出 0；发布工作流输出 `"cases":34`，资源测试输出 `"ok":true`。
+
+- [ ] **Step 5: 更新勾选并提交实现**
+
+把 Task 9 的步骤全部改为 `[x]`，然后执行：
+
+```bash
+git add scripts/lib/development-workflow.sh scripts/test-release-workflow.sh plans/source-release-workflow-implementation-plan.md
+git commit -m "Fix(workflow): TAP-12371 兼容 GitHub 认证状态误报" -m "发布门禁在 gh auth status 失败时回退调用 gh api user 验证实际认证能力；两项检查均失败时继续阻断。补充认证回退和完全失败回归，并确认资源与 shell 检查通过。"
+```
