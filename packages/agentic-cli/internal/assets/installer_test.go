@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -36,6 +37,61 @@ func TestInstallCopiesAssetsAndWritesCurrent(t *testing.T) {
 	}
 	if current.AssetVersion != "RES-v0.1.1-a68372d" {
 		t.Fatalf("current AssetVersion = %s", current.AssetVersion)
+	}
+}
+
+func TestInstallCompatibleValidatesExactPairManifest(t *testing.T) {
+	source := t.TempDir()
+	writeAssetTestManifest(t, source, "AST-v0.1.2-b794810", "RES-v0.1.2-b794810")
+	writeTestFile(t, filepath.Join(source, "handbooks", "ai-employee-handbook.md"), "# handbook\n")
+
+	result, err := InstallCompatible(source, t.TempDir(), "AST-v0.1.2-b794810", "RES-v0.1.2-b794810")
+	if err != nil {
+		t.Fatalf("InstallCompatible error = %v", err)
+	}
+	if result.CompatibilityPolicy != "exact_pair" {
+		t.Fatalf("CompatibilityPolicy = %s", result.CompatibilityPolicy)
+	}
+}
+
+func TestInstallCompatibleRejectsMissingManifest(t *testing.T) {
+	_, err := InstallCompatible(t.TempDir(), t.TempDir(), "AST-v0.1.2-b794810", "RES-v0.1.2-b794810")
+	if err == nil || !strings.Contains(err.Error(), "asset_manifest_missing") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestInstallCompatibleRejectsAssetVersionMismatch(t *testing.T) {
+	source := t.TempDir()
+	writeAssetTestManifest(t, source, "AST-v0.1.2-b794810", "RES-v0.1.2-b794810")
+
+	_, err := InstallCompatible(source, t.TempDir(), "AST-v0.1.3-deadbee", "RES-v0.1.2-b794810")
+	if err == nil || !strings.Contains(err.Error(), "asset_version_mismatch") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestInstallCompatibleRejectsCLIOutsideExactPair(t *testing.T) {
+	source := t.TempDir()
+	writeAssetTestManifest(t, source, "AST-v0.1.2-b794810", "RES-v0.1.2-b794810")
+
+	_, err := InstallCompatible(source, t.TempDir(), "AST-v0.1.2-b794810", "RES-v0.1.1-a68372d")
+	if err == nil || !strings.Contains(err.Error(), "incompatible_cli_version") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestInstallCompatibleRejectsUnsafeAssetVersionBeforeWriting(t *testing.T) {
+	source := t.TempDir()
+	writeAssetTestManifest(t, source, "../escape", "RES-v0.1.2-b794810")
+	installDir := t.TempDir()
+
+	_, err := InstallCompatible(source, installDir, "../escape", "RES-v0.1.2-b794810")
+	if err == nil || !strings.Contains(err.Error(), "unsafe asset version") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(installDir, "current.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("current.json changed after validation failure: %v", statErr)
 	}
 }
 
@@ -81,4 +137,18 @@ func writeTestFile(t *testing.T, path string, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile error = %v", err)
 	}
+}
+
+func writeAssetTestManifest(t *testing.T, source string, assetVersion string, cliVersion string) {
+	t.Helper()
+	writeTestFile(t, filepath.Join(source, "manifest.json"), `{
+  "asset_version": "`+assetVersion+`",
+  "min_cli_version": "`+cliVersion+`",
+  "compatibility_policy": "exact_pair",
+  "asset_source": {
+    "kind": "local_directory",
+    "path": "."
+  }
+}
+`)
 }

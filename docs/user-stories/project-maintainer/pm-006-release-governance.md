@@ -75,4 +75,4 @@ bash tests/e2e/local-install-flow.sh
 - `docs/runtime/versioning.md`
 - `docs/runtime/problem-resolution-and-update.md`
 - `docs/architecture/full-design-implementation-design.md`
-- `docs/development-phase-rules.md`
+- `docs/architecture/source-release-workflow-design.md`

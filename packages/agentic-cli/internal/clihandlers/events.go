@@ -43,7 +43,7 @@ func appendWorkspaceEventWithDetails(workspaceName string, event feedback.Event)
 
 func appendRealJiraWriteGateEvent(workspaceName string, runID string, issueKey string, operation string, currentStage string, nextAction string, code string, ok bool, requiresHumanAction bool) error {
 	taskType := "task_takeover"
-	if operation == "write_evidence" {
+	if operation == "write_evidence" || operation == "write_pr_evidence" {
 		taskType = "evidence_write"
 	}
 	return appendWorkspaceEventWithDetails(workspaceName, feedback.Event{

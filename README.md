@@ -58,6 +58,8 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 - [当前设计](docs/architecture/agenticops-current-design.md)
 - [项目规则](docs/project-rules.md)
 - [开发风格](docs/development-style.md)
+- [源码发布流程](docs/architecture/source-release-workflow-design.md)
+- [发布检查清单](docs/review-checklist.md)
 - [项目结构](docs/architecture/project-structure.md)
 - [实施计划](plans/)
 - [CLI 实现](packages/agentic-cli/)
@@ -89,7 +91,7 @@ AIAgent 不应主要依赖 README 或人用 `docs/` 执行任务，也不需要�
 - [机器可读操作契约](install-resources/basic/contracts/operations/)
 - [工作流配置](docs/profiles/workflow-profile.md)
 
-如果 AIAgent 是在维护 AgenticOps 源头仓库，还必须额外读取 [AIAgent 工作规则](docs/ai-working-rules.md) 和 [项目研发期规则](docs/development-phase-rules.md)。
+如果 AIAgent 是在维护 AgenticOps 源头仓库，还必须额外读取 [AIAgent 工作规则](docs/ai-working-rules.md)、[项目规则](docs/project-rules.md) 和 [源码发布流程](docs/architecture/source-release-workflow-design.md)。
 
 ## 标准资产
 

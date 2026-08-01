@@ -7,9 +7,8 @@
 ### 触发方式
 
 ```sh
-bash scripts/build.sh
-bash scripts/test-build.sh
-bash tests/e2e/local-install-flow.sh
+scripts/release.sh prepare --version vX.Y
+scripts/release.sh publish --version vX.Y
 ```
 
 ### 前置条件
@@ -21,12 +20,13 @@ bash tests/e2e/local-install-flow.sh
 
 ### 主流程
 
-1. 维护者构建当前平台或多平台 `agentic-cli` 二进制到 `install-resources/<os-arch>/agentic-cli`。
+1. 维护者在 `develop` 使用 `prepare` 创建本地二段式版本基线，并构建多平台 `agentic-cli` 二进制到 `install-resources/<os-arch>/agentic-cli`。
 2. 维护者确认 `install-resources/basic/` 中的标准资产已经同步。
 3. 维护者生成并校验 `install-resources/checksums.txt`。
 4. 维护者按 [DE-001 安装 AgenticOps](../development-engineer/de-001-install.md) 运行安装故事验收。
 5. 维护者在人工确认后提交 `install-resources/` 中的已编译产物和校验和。
-6. 维护者记录构建和安装验证审计信息。
+6. 维护者执行 `publish` 固定完整验证，确认后通过 PR 的 Merge commit 合入受保护的 `main`。
+7. 脚本验证 `origin/main` 包含发布 HEAD 后推送不可变 tag，并记录构建、安装和发布审计信息。
 
 ### 输出
 
@@ -53,6 +53,7 @@ bash tests/e2e/local-install-flow.sh
 - 安装脚本能从 managed clone 安装最新 `agentic-cli` 和运行资产。
 - 安装脚本使用仓库中已提交的二进制，不在研发工程师机器上编译。
 - 安装资源提交动作受人工确认和审计约束。
+- `main` 只通过受保护 PR 合入，远端 tag 只在合并验证后创建。
 
 ### 保护行为
 
@@ -77,11 +78,13 @@ bash tests/e2e/local-install-flow.sh
 - `install-resources/checksums.txt`
 - `install-resources/<os-arch>/agentic-cli`
 - 发布或安装审计记录。
+- `.local/release-runs/release-vX.Y-<head>.json`
 
 ### 关联设计
 
 - `docs/runtime/versioning.md`
 - `docs/runtime/cli-runtime.md`
 - `docs/runtime/problem-resolution-and-update.md`
+- `docs/architecture/source-release-workflow-design.md`
 - `scripts/build.sh`
 - `scripts/install.sh`

@@ -16,6 +16,7 @@ type evidenceRunContext struct {
 	AgenticID     string
 	TaskClass     string
 	ProcessID     string
+	CurrentStage  string
 	PreviousStage string
 	TargetRepo    string
 }
@@ -37,6 +38,7 @@ func evidenceRunState(root string, workspaceName string, runID string) (evidence
 		AgenticID:     context.AgenticID,
 		TaskClass:     context.TaskClass,
 		ProcessID:     context.ProcessID,
+		CurrentStage:  context.CurrentStage,
 		PreviousStage: context.CurrentStage,
 		TargetRepo:    context.TargetRepo,
 	}, nil

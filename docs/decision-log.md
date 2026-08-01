@@ -6,7 +6,7 @@
 
 | 编号 | 决策 | 说明 |
 | --- | --- | --- |
-| D-001 | 第一阶段进入本地实现 | 已允许实现 `agentic-cli` Go CLI 的本地模拟流程；真实 Jira / GitHub 写操作、推送、创建拉取请求、合并和发布仍不接入。 |
+| D-001 | 第一阶段进入本地实现（已被 D-031 取代） | 该历史决策只记录最初本地实现范围，不再限制当前真实 Jira / GitHub 门禁操作或源头仓库正式发布流程。 |
 | D-002 | AgenticOps 是 AI 执行控制体系 | 它不替代 Jira、研发工程师、拉取请求审查、CI 或发布流程。 |
 | D-003 | 第一阶段由研发工程师手动触发 | 不做全自动任务接管，低风险任务也先保留人工确认。 |
 | D-004 | 主流程从已进入迭代的 Jira 卡片开始 | 需求复杂度、风险、优先级和范围边界应在进入迭代前完成确认。 |
@@ -28,7 +28,7 @@
 | D-020 | AgenticOps 的目标重心是形成 AI 可执行标准 | AgenticOps 不只是提供 CLI，而是通过 AI 员工手册、操作契约、工作流配置、策略、运行手册、模板 和 反馈闭环 形成标准；除非问题来自 `agentic-cli` 二进制逻辑错误，否则 AIAgent 应优先按标准资产自助处理、阻断或转人工。 |
 | D-021 | 同仓库按目录分管资料，发布时拆分交付物 | 当前项目不使用不同分支分管源码、设计、计划或运行资产；分支只用于开发协作和发布准备。维护者面对完整仓库，研发工程师和 AIAgent 默认只接触安装后的命令、资产、模板和规范。 |
 | D-022 | 发布支持策略采用 latest-only | AgenticOps 不维护旧版本补丁线；BUG 只在最新版本修复，有新版本时推荐自动更新应用。rollback 只用于安装失败或新版本不可用时的本地恢复，不作为旧版本修复策略。 |
-| D-023 | 版本号采用运行状态、迭代版本、提交序号和提交编号 | AgenticOps 版本号格式为 `STATE-vMAJOR.ITERATION.COMMIT_INDEX-COMMIT`，例如 `INS-v0.1.3-a68372d`。迭代开始时维护者打 `vMAJOR.ITERATION` tag；build 自动按最近迭代 tag 到 HEAD 的提交计数生成 `COMMIT_INDEX`，并注入当前 Git short commit。运行时通过 `version_state` 区分 `SRC` 和 `INS`；build version 不允许手工指定。 |
+| D-023 | 版本号采用运行状态、迭代版本、提交序号和提交编号 | AgenticOps 版本号格式为 `STATE-vMAJOR.ITERATION.COMMIT_INDEX-COMMIT`，例如 `INS-v0.1.3-a68372d`。正常发布准备时维护者创建 annotated `vMAJOR.ITERATION` tag；build 自动按最近迭代 tag 到 HEAD 的提交计数生成 `COMMIT_INDEX`，并注入当前 Git short commit。提交计数允许因合并和 Hotfix 跳号；Hotfix 复用最近版本基线，不创建新 tag。 |
 | D-024 | Jira 交互人可见内容使用中文 | 写入 Jira 的标题、描述、评论、工作日志、证据正文、阻塞说明和补卡说明必须使用中文；Jira 字段名、状态名、`transition` 名称、卡片编号、命令、配置字段和协议字段可以保留原始英文或缩写。 |
 | D-025 | AI 操作任务表单标准是 AgenticOps 源头标准 | AgenticOps 维护标准任务字段和生命周期要求；不同 Jira 项目、工作流、页面或自定义字段先通过 Jira 表单映射适配。不符合标准的地方记录缺口并请求人工决策，不能让 AIAgent 直接按 Jira 字段猜测。 |
 | D-026 | AgenticOps 承载公司员工执行标准 | AgenticOps 的定位从“公司事务处理方式”进一步收敛为“公司员工执行标准”：AIAgent 按标准动作执行任务，每个节点输出标准表单数据，不同专业角色在对应节点审查产出，后续操作根据表单数据、审查结论、失败码和门禁决定继续、重试、重做或停止。 |
@@ -36,6 +36,7 @@
 | D-028 | CLI 组件命名为 AgenticCLI | 旧名 `agent-task-ops` 过度强调任务操作，不能表达二进制是 AgenticOps 成熟经验沉淀结晶。项目尚未上线，不保留兼容别名；组件名使用 `AgenticCLI`，二进制命令、安装资源中的可执行文件和 Go package 目录统一使用 `agentic-cli`。 |
 | D-029 | 标准流程由 Standard Process Registry 维护 | 任务必须先分类，再进入对应标准流程；工作流配置只负责把标准流程映射到具体 Jira 字段、状态和 transition。接管任务必须校验 assignee 和 `agentic_id`，执行过程中持续检查所有权；任务完成或交接结束后必须清理 `agentic_id`，异常停止或所有权冲突时不得自动清理。 |
 | D-030 | 代码推送后必须回写 Jira 变更总结 | 能可靠确认对应 Jira 编号时，AIAgent 必须在推送成功后追加中文 Jira 评论。推送总结只描述做了哪些调整，不固定附带分支、提交、验证结果或残留风险。评论失败时明确标记回写未完成，恢复后只重试评论，不重复推送；真实 Jira 写入仍遵守既有门禁。 |
+| D-031 | 源头仓库采用正式分支和脚本发布流程 | GitHub 默认分支为 `main`，日常开发使用 `develop`；`main` 禁止直提直推，只能通过受保护 PR 的 Merge commit 合入。正常发布使用 `scripts/release.sh`，Hotfix 使用 `scripts/hotfix.sh`，固定执行完整验证、最终确认、合并事实校验和本地审计。 |
 
 ## 2. 当前无需决策事项
 

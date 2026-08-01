@@ -16,17 +16,22 @@ install_root="$workspace_root/install"
 "${cmd[@]}" doctor --workspace tapstate | grep '"github":{"message":"GitHub CLI check requires --check-github","status":"skipped"}'
 
 update_manifest="$workspace_root/update-manifest.json"
-cat > "$update_manifest" <<'JSON'
+cat > "$update_manifest" <<JSON
 {
-  "version": "RES-v0.1.20-deadbee",
-  "asset_version": "RES-v0.1.20-deadbee",
+  "version": "SRC-source",
+  "asset_version": "2026.07.22.1",
+  "min_cli_version": "SRC-source",
+  "min_asset_version": "2026.07.22.1",
+  "compatibility_policy": "exact_pair",
+  "migration_required": true,
+  "asset_source": {"kind": "local_directory", "path": "$repo_root/install-resources/basic"},
   "severity": "required",
   "reason": "takeover_task 可能写入无效证据",
   "blocked_operations": ["takeover_task"]
 }
 JSON
-"${cmd[@]}" update check --manifest "$update_manifest" | grep '"severity":"required"'
-"${cmd[@]}" update check --manifest "$update_manifest" | grep '"blocked_operations":\["takeover_task"\]'
+"${cmd[@]}" update check --manifest "$update_manifest" --install-dir "$install_root" | grep '"severity":"required"'
+"${cmd[@]}" update check --manifest "$update_manifest" --install-dir "$install_root" | grep '"blocked_operations":\["takeover_task"\]'
 "${cmd[@]}" update apply --manifest "$update_manifest" --install-dir "$install_root" | grep '"operation":"update_apply"'
 
 "${cmd[@]}" profile validate --workspace tapstate | grep '"operation":"profile_validate"'

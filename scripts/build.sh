@@ -45,6 +45,16 @@ if [ ! -d "$install_resources_dir/basic" ]; then
   exit 1
 fi
 
+asset_manifest="$install_resources_dir/basic/manifest.json"
+if [ ! -f "$asset_manifest" ]; then
+  echo "asset manifest not found: $asset_manifest" >&2
+  exit 1
+fi
+grep -q '"asset_version"' "$asset_manifest"
+grep -q '"min_cli_version"' "$asset_manifest"
+grep -q '"compatibility_policy": "exact_pair"' "$asset_manifest"
+grep -q '"asset_source"' "$asset_manifest"
+
 for target in $targets; do
   goos="${target%/*}"
   goarch="${target#*/}"

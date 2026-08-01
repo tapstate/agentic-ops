@@ -31,6 +31,22 @@ output:
     type: string
   pr_url:
     type: string
+  pr_number:
+    type: string
+  ci_status:
+    type: string
+  review_status:
+    type: string
+  review_count:
+    type: integer
+  failing_check_count:
+    type: integer
+  evidence:
+    type: string
+  audit_target:
+    type: string
+  audit_submitted:
+    type: boolean
   audit_reference:
     type: string
   current_stage:

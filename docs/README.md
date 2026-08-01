@@ -12,14 +12,13 @@
 
 ## 核心文档
 
-- [设计审阅清单](review-checklist.md)
+- [发布检查清单](review-checklist.md)
 - [设计决策记录](decision-log.md)
 - [项目目标](strategy/project-goals.md)
 - [目标定位](strategy/positioning.md)
 - [长期定位](strategy/long-term-positioning.md)
 - [项目规则](project-rules.md)
 - [配置规范](configuration-standards.md)
-- [项目研发期规则](development-phase-rules.md)
 - [开发风格](development-style.md)
 - [AIAgent 工作规则](ai-working-rules.md)
 
@@ -28,6 +27,7 @@
 - [当前设计](architecture/agenticops-current-design.md)
 - [完整设计实现方案](architecture/full-design-implementation-design.md)
 - [Jira 门禁式缺陷修复流程](architecture/jira-gated-defect-workflow.md)
+- [源码发布流程](architecture/source-release-workflow-design.md)
 - [项目结构](architecture/project-structure.md)
 
 ## 推进计划

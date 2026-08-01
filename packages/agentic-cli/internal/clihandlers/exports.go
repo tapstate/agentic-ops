@@ -52,6 +52,10 @@ func RunUpdateApply(args []string, stdout io.Writer) int {
 	return runUpdateApply(args, stdout)
 }
 
+func RunUpdateRollback(args []string, stdout io.Writer) int {
+	return runUpdateRollback(args, stdout)
+}
+
 func RunListTasks(args []string, stdout io.Writer) int {
 	return runListTasks(args, stdout)
 }
@@ -114,6 +118,10 @@ func RunResumeTakeover(args []string, stdout io.Writer) int {
 
 func RunWriteEvidence(args []string, stdout io.Writer) int {
 	return runWriteEvidence(args, stdout)
+}
+
+func RunWritePREvidence(args []string, stdout io.Writer) int {
+	return runWritePREvidence(args, stdout)
 }
 
 func RunReleaseAgent(args []string, stdout io.Writer) int {

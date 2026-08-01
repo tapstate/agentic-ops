@@ -38,5 +38,6 @@ grep 'basic/manifest.json' install-resources/checksums.txt >/dev/null
 grep "$target_dir/agentic-cli" install-resources/checksums.txt >/dev/null
 
 "install-resources/$target_dir/agentic-cli" --version | grep '"operation":"version"'
+"install-resources/$target_dir/agentic-cli" update rollback -h | grep 'Usage: agentic-cli update rollback'
 
 printf '{"ok":true,"operation":"test_build","target":"%s"}\n' "$target_dir"

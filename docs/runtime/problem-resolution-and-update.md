@@ -6,7 +6,7 @@
 
 研发日常使用的是安装后的 `agentic-cli`、AI 员工手册、操作契约、工作流配置、策略、运行手册和模板。项目出现问题时，AgenticOps 必须能快速判断问题类型，选择正确修复载体，完成验证、发布、同步和回滚。
 
-当前仓库已实现本地资产安装、构建资源校验、操作契约校验、`profile validate / update / rollback`、`policy validate / update / rollback`、工作流配置驱动 Jira `transition` 标识映射、远程发布清单和产物下载校验、真实二进制切换、`doctor` 显式真实外部检查、真实 Jira REST 客户端合同测试基线，以及真实 Jira 字段、评论和 `transition` 写入门禁与人工确认。当前不存在 GitHub Release 发布脚本或受控 `release publish` 入口；更新回滚、跨版本兼容治理和发布权限治理仍由当前差距计划跟踪。本文是正式使用前的目标设计和验收基线。
+当前仓库已实现本地资产清单校验与安装、构建资源校验、操作契约校验、`profile validate / update / rollback`、`policy validate / update / rollback`、工作流配置驱动 Jira `transition` 标识映射、`exact_pair` 更新兼容判断、远程产物 checksum 校验、版本化暂存与原子二进制切换、本地 checksum 回滚、必要更新统一阻断、`doctor` 显式真实外部检查、真实 Jira REST 客户端合同测试基线，以及真实 Jira 字段、评论和 `transition` 写入门禁与人工确认。当前不存在 GitHub Release 发布脚本或受控 `release publish` 入口；发布权限治理仍由当前差距计划跟踪。本文是正式使用前的目标设计和验收基线。
 
 ## 2. 架构适配性评估
 
@@ -14,18 +14,18 @@
 
 | 架构部分 | 当前状态 | 适配性判断 | 必须补齐的能力 |
 | --- | --- | --- | --- |
-| Go CLI 运行时 | 已有 `agentic-cli` 本地模拟流程、真实 Jira REST 客户端合同测试基线、工作流配置驱动 `transition` 映射、真实二进制切换和 `doctor` 显式外部检查 | 适合承载强制检查、结构化输出、诊断、更新和回滚 | 操作兼容性版本治理 |
-| 操作契约 | 已有机器可读 YAML 和 `contract validate` 基线 | 适合沉淀标准操作输入输出和失败码 | 操作兼容性版本、跨版本迁移规则 |
+| Go CLI 运行时 | 已有 `agentic-cli` 本地模拟流程、真实 Jira REST 客户端合同测试基线、工作流配置驱动 `transition` 映射、`exact_pair` 更新门禁、本地回滚和 `doctor` 显式外部检查 | 适合承载强制检查、结构化输出、诊断、更新和回滚 | 跨版本迁移框架 |
+| 操作契约 | 已有机器可读 YAML、`contract validate`、更新兼容与回滚契约基线 | 适合沉淀标准操作输入输出和失败码 | 跨版本迁移规则 |
 | 工作流配置 | 已有默认工作流配置、`profile validate / update / rollback` 基线 | 适合处理不同团队和 Jira 工作流差异 | 真实 Jira `status` / `transition` 门禁、资产包来源、工作流配置版本审计 |
 | 策略 / 门禁 | 已有 `policy validate / update / rollback` 本地基线 | 适合控制关键步骤门禁 | 真实写操作门禁变更审计和人工确认 |
 | 证据 / 反馈 | 已有本地证据、反馈诊断包和按需反馈报告 | 适合提交任务审计、发现重复问题并推动规范优化 | 任务级审计提交、问题分类统计、修复效果追踪 |
-| 发布 / 安装 | 已有安装引导、本地构建、资源校验、远程清单 / 产物下载校验和真实二进制切换 | 适合快速分发 | 更新回滚、跨版本兼容治理、资产来源治理和发布权限治理 |
+| 发布 / 安装 | 已有安装引导、本地构建、资产来源与 exact_pair 校验、远程产物 checksum 校验、原子切换和本地回滚 | 适合快速分发 | 发布权限治理 |
 | 项目资料边界 | 已明确 `~/.agentic-ops` 和项目 AI 工作空间边界 | 适合隔离全局工具资产和任务运行产物 | 资产版本目录、工作空间覆盖配置、敏感信息检查 |
 
 结论：
 
 - 当前架构方向适配“渐进形成公司标准流程”和“快速修复上线”两个目标。
-- 最大缺口不在目录结构；远程清单、产物校验、二进制切换和显式外部诊断已有基线，剩余重点是更新回滚、跨版本兼容治理、必要更新的统一阻断检查、发布权限治理和更完整的工作流配置版本审计。
+- 最大缺口不在目录结构；远程清单、产物校验、原子切换、`exact_pair` 兼容门禁、本地回滚和显式外部诊断已有基线，剩余重点是发布权限治理和更完整的工作流配置版本审计。
 - 修复能力应优先作为 `agentic-cli` 的一组受控操作实现，而不是分散在 shell 脚本、人工说明或提示词中。
 
 ## 3. 设计目标
@@ -155,9 +155,10 @@ agentic-cli feedback bundle --workspace tapstate --run-id <agentic_run_id> --red
 ```sh
 agentic-cli update check
 agentic-cli update apply
+agentic-cli update rollback
 ```
 
-AgenticOps 不支持为旧版本单独做 BUG 修复。修复完成后只发布新的 latest 版本，研发侧应优先自动更新到最新版本。后续如果实现 rollback，它只用于安装失败或新版本不可用时的本地恢复，不作为旧版本修复策略。
+AgenticOps 不支持为旧版本单独做 BUG 修复。修复完成后只发布新的 latest 版本，研发侧应优先更新到最新版本。`update rollback` 只使用本地保存并通过 checksum 校验的上一状态，用于安装失败或新版本不可用时的恢复，不作为旧版本修复策略。
 
 严重逻辑错误可以在 manifest 中标记：
 
@@ -168,6 +169,10 @@ blocked_operations:
   - takeover_task
   - write_evidence
 ```
+
+`update check` 把兼容状态写入安装目录 `.local/update-state.json`。统一命令门禁只读取该本地状态，并仅阻断 `blocked_operations` 中的操作；`help`、`version`、`doctor`、`preflight`、`update check`、`update apply` 和 `update rollback` 始终可用。
+
+本地 `--manifest` 更新只用于当前运行 CLI 的资产同步，release manifest 中的 CLI 版本必须等于当前 CLI；需要替换 CLI 二进制时必须使用带 checksum 的远程产物流程。release manifest 必须显式声明 `exact_pair` 和资产来源，不能通过省略兼容字段降级。
 
 `required` 更新只允许用于安全、数据损坏、错误证据回写、严重流程越权等问题。
 

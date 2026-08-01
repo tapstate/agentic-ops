@@ -6,6 +6,7 @@ import (
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/update"
 	"io"
 	"runtime"
+	"strings"
 )
 
 func runAssetsInstall(args []string, stdout io.Writer) int {
@@ -18,15 +19,16 @@ func runAssetsInstall(args []string, stdout io.Writer) int {
 		return writeJSON(stdout, output.Failure("assets_install", "missing_asset_version", "缺少资产版本", "请提供 --version"))
 	}
 	installDir := readInstallDir(args)
-	result, err := assets.Install(source, installDir, version)
+	result, err := assets.InstallCompatible(source, installDir, version, Version)
 	if err != nil {
 		return writeJSON(stdout, output.Failure("assets_install", "assets_install_failed", err.Error(), "请检查资产源目录和安装目录权限"))
 	}
 	return writeJSON(stdout, output.Success("assets_install", map[string]any{
-		"asset_version":       result.AssetVersion,
-		"assets_dir":          result.AssetsDir,
-		"current":             result.CurrentPath,
-		"agentic_next_action": "agent_init",
+		"asset_version":        result.AssetVersion,
+		"assets_dir":           result.AssetsDir,
+		"current":              result.CurrentPath,
+		"compatibility_policy": result.CompatibilityPolicy,
+		"agentic_next_action":  "agent_init",
 	}))
 }
 
@@ -46,11 +48,13 @@ func runUpdateCheck(args []string, stdout io.Writer) int {
 	source := "local"
 	var result update.CheckResult
 	var err error
+	installDir := readInstallDir(args)
+	_, currentAssetVersion := update.ReadCurrentPair(installDir)
 	if manifestURL != "" {
 		source = "remote"
-		result, err = update.CheckRemote(manifestURL, Version)
+		result, err = update.CheckRemoteWithCurrent(manifestURL, Version, currentAssetVersion)
 	} else {
-		result, err = update.Check(manifestPath, Version)
+		result, err = update.CheckWithCurrent(manifestPath, Version, currentAssetVersion)
 	}
 	if err != nil {
 		return writeJSON(stdout, output.FailureWithContext("update_check", output.FailureContext{
@@ -62,17 +66,67 @@ func runUpdateCheck(args []string, stdout io.Writer) int {
 			AgenticNextAction:   "fix_manifest",
 		}))
 	}
+	if err := update.SaveCheckState(installDir, result); err != nil {
+		return writeJSON(stdout, output.FailureWithContext("update_check", output.FailureContext{
+			Code:                "update_state_write_failed",
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查安装目录权限",
+			TaskType:            "update",
+			CurrentStage:        "update_check",
+			AgenticNextAction:   "doctor",
+		}))
+	}
 	return writeJSON(stdout, output.Success("update_check", map[string]any{
-		"source":              source,
-		"current_version":     result.CurrentVersion,
-		"latest_version":      result.LatestVersion,
-		"asset_version":       result.AssetVersion,
-		"update_available":    result.UpdateAvailable,
-		"severity":            result.Severity,
-		"reason":              result.Reason,
-		"blocked_operations":  result.BlockedOperations,
-		"agentic_next_action": result.AgenticNextAction,
+		"source":                source,
+		"current_version":       result.CurrentVersion,
+		"latest_version":        result.LatestVersion,
+		"asset_version":         result.AssetVersion,
+		"current_asset_version": result.CurrentAssetVersion,
+		"min_cli_version":       result.MinCLIVersion,
+		"min_asset_version":     result.MinAssetVersion,
+		"compatibility_policy":  result.CompatibilityPolicy,
+		"compatibility_state":   result.CompatibilityState,
+		"migration_required":    result.MigrationRequired,
+		"update_available":      result.UpdateAvailable,
+		"severity":              result.Severity,
+		"reason":                result.Reason,
+		"blocked_operations":    result.BlockedOperations,
+		"agentic_next_action":   result.AgenticNextAction,
 	}))
+}
+
+func runUpdateRollback(args []string, stdout io.Writer) int {
+	installDir := readInstallDir(args)
+	result, err := update.Rollback(installDir)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("update_rollback", output.FailureContext{
+			Code:                updateErrorCode(err, "update_rollback_failed"),
+			Message:             err.Error(),
+			RequiredHumanAction: "请检查本地上一版本状态、二进制与资产目录",
+			TaskType:            "update",
+			CurrentStage:        "update_rollback",
+			AgenticNextAction:   "doctor",
+		}))
+	}
+	return writeJSON(stdout, output.Success("update_rollback", map[string]any{
+		"version":                result.AgenticCLIVersion,
+		"asset_version":          result.AssetVersion,
+		"previous_version":       result.PreviousAgenticCLIVersion,
+		"previous_asset_version": result.PreviousAssetVersion,
+		"current":                result.CurrentPath,
+		"activated_binary":       result.ActivatedBinary,
+		"agentic_next_action":    "doctor",
+	}))
+}
+
+func updateErrorCode(err error, fallback string) string {
+	message := err.Error()
+	for _, code := range []string{"rollback_state_missing", "rollback_target_invalid", "rollback_failed"} {
+		if strings.HasPrefix(message, code+":") {
+			return code
+		}
+	}
+	return fallback
 }
 
 func runUpdateApply(args []string, stdout io.Writer) int {
@@ -97,7 +151,7 @@ func runUpdateApply(args []string, stdout io.Writer) int {
 		source = "remote"
 		result, err = update.ApplyRemote(manifestURL, installDir, target)
 	} else {
-		result, err = update.Apply(manifestPath, installDir)
+		result, err = update.ApplyLocal(manifestPath, installDir, Version)
 	}
 	if err != nil {
 		return writeJSON(stdout, output.FailureWithContext("update_apply", output.FailureContext{
