@@ -780,3 +780,22 @@ Expected: shell 语法检查和差异检查退出 0；发布工作流输出 `"ca
 git add scripts/lib/development-workflow.sh scripts/test-release-workflow.sh plans/source-release-workflow-implementation-plan.md
 git commit -m "Fix(workflow): TAP-12371 兼容 GitHub 认证状态误报" -m "发布门禁在 gh auth status 失败时回退调用 gh api user 验证实际认证能力；两项检查均失败时继续阻断。补充认证回退和完全失败回归，并确认资源与 shell 检查通过。"
 ```
+
+## 后续外部平台待办
+
+- [ ] **由 `tapstate` 组织管理员完成私有仓库正式发布门禁配置**
+
+  2026-08-01 经用户确认暂缓，不阻塞本次仓库代码与文档变更收口。当前事实为：`tapstate` 使用 GitHub Free，`agentic-ops` 是私有仓库，`HarsenLin` 保持 `maintain`；GitHub API 返回 `allow_auto_merge=false`，Rulesets API 返回当前套餐不支持私有仓库 Ruleset。
+
+  后续由组织 Owner 将 `tapstate` 升级到 GitHub Team 或更高套餐，并由仓库 Admin 或具备“编辑仓库规则”权限的自定义角色完成一次性配置：
+
+  1. 保持默认分支为 `main`。
+  2. 启用 Auto-merge 和 Merge commit。
+  3. 创建并启用 `agentic-ops-main-pull-request-only` Ruleset，目标为 `main`，禁止删除和强推，只允许通过 PR 的 Merge commit 合入，不要求 GitHub CI 或 Review。
+  4. 在当前 clone 保持 `core.hooksPath=.githooks`，并执行只读门禁复检：
+
+     ```bash
+     bash -c '. scripts/lib/development-workflow.sh; workflow_check_or_configure check "$PWD"'
+     ```
+
+  完成标准：复检输出 `"ok":true`；在此之前，`scripts/release.sh` 和 `scripts/hotfix.sh` 的正式发布门禁继续阻断，不得绕过。
