@@ -39,6 +39,9 @@ type Event struct {
 	AuditTarget               string   `json:"audit_target,omitempty"`
 	AuditSubmitted            bool     `json:"audit_submitted,omitempty"`
 	AuditReference            string   `json:"audit_reference,omitempty"`
+	ResolutionType            string   `json:"resolution_type,omitempty"`
+	ResolutionVersion         string   `json:"resolution_version,omitempty"`
+	ResolutionStatus          string   `json:"resolution_status,omitempty"`
 	OK                        bool     `json:"ok"`
 	Code                      string   `json:"code,omitempty"`
 	MissingField              string   `json:"missing_field,omitempty"`

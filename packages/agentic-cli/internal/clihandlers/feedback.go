@@ -8,19 +8,16 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 func runFeedbackReport(args []string, stdout io.Writer) int {
 	workspaceName := workspaceNameFromArgsOrAgentConfig(args, "default")
 	date := readFlag(args, "--date", time.Now().Format("2006-01-02"))
-	root, err := workspaceRoot()
+	events, root, err := readFilteredFeedbackEvents(args, workspaceName)
 	if err != nil {
-		return writeJSON(stdout, output.Failure("feedback_report", "workspace_root_failed", "无法读取当前工作目录", "请在项目 AI 工作空间中重试"))
-	}
-	events, err := feedback.ReadEvents(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
-	if err != nil {
-		return writeJSON(stdout, output.Failure("feedback_report", "event_read_failed", err.Error(), "请检查工作空间反馈日志"))
+		return writeJSON(stdout, output.Failure("feedback_report", err.code, err.message, err.action))
 	}
 	report := feedback.Summarize(events)
 	reportPath := filepath.Join(root, ".agentic-ops", "feedback", "reports", date+".md")
@@ -41,6 +38,95 @@ func runFeedbackReport(args []string, stdout io.Writer) int {
 		payload["missing_fields"] = report.MissingFields
 	}
 	return writeJSON(stdout, output.Success("feedback_report", payload))
+}
+
+func runFeedbackAnalyze(args []string, stdout io.Writer) int {
+	workspaceName := workspaceNameFromArgsOrAgentConfig(args, "default")
+	events, root, err := readFilteredFeedbackEvents(args, workspaceName)
+	if err != nil {
+		return writeJSON(stdout, output.Failure("feedback_analyze", err.code, err.message, err.action))
+	}
+	analysis := feedback.Analyze(events)
+	scope := feedbackScope(args)
+	analysisPath := filepath.Join(root, ".agentic-ops", "feedback", "reports", "analysis-"+scope+".md")
+	if err := feedback.WriteAnalysisMarkdown(analysisPath, workspaceName, scope, analysis); err != nil {
+		return writeJSON(stdout, output.Failure("feedback_analyze", "report_write_failed", err.Error(), "请检查工作空间目录权限"))
+	}
+	return writeJSON(stdout, output.Success("feedback_analyze", map[string]any{
+		"workspace":            workspaceName,
+		"scope":                scope,
+		"runs":                 analysis.Runs,
+		"failure_patterns":     analysis.FailurePatterns,
+		"human_gate_hotspots":  analysis.HumanGateHotspots,
+		"missing_field_trends": analysis.MissingFieldTrends,
+		"suggested_assets":     analysis.SuggestedAssets,
+		"analysis_report":      analysisPath,
+		"agentic_next_action":  "review_proposals",
+	}))
+}
+
+func runFeedbackPropose(args []string, stdout io.Writer) int {
+	workspaceName := workspaceNameFromArgsOrAgentConfig(args, "default")
+	events, root, err := readFilteredFeedbackEvents(args, workspaceName)
+	if err != nil {
+		return writeJSON(stdout, output.Failure("feedback_propose", err.code, err.message, err.action))
+	}
+	proposals := feedback.Propose(events)
+	scope := feedbackScope(args)
+	proposalPath := filepath.Join(root, ".agentic-ops", "feedback", "reports", "proposals-"+scope+".md")
+	if err := feedback.WriteProposalsMarkdown(proposalPath, workspaceName, scope, proposals); err != nil {
+		return writeJSON(stdout, output.Failure("feedback_propose", "report_write_failed", err.Error(), "请检查工作空间目录权限"))
+	}
+	return writeJSON(stdout, output.Success("feedback_propose", map[string]any{
+		"workspace":           workspaceName,
+		"scope":               scope,
+		"proposals":           proposals,
+		"proposal_report":     proposalPath,
+		"agentic_next_action": "maintainer_decision_required",
+	}))
+}
+
+type feedbackReadError struct {
+	code    string
+	message string
+	action  string
+}
+
+func readFilteredFeedbackEvents(args []string, workspaceName string) ([]feedback.Event, string, *feedbackReadError) {
+	root, err := workspaceRoot()
+	if err != nil {
+		return nil, "", &feedbackReadError{code: "workspace_root_failed", message: "无法读取当前工作目录", action: "请在项目 AI 工作空间中重试"}
+	}
+	events, err := feedback.ReadEvents(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
+	if err != nil {
+		return nil, "", &feedbackReadError{code: "event_read_failed", message: err.Error(), action: "请检查工作空间反馈日志"}
+	}
+	filtered, err := feedback.FilterEvents(events, feedback.EventFilter{
+		Workspace:    workspaceName,
+		AgenticRunID: readFlag(args, "--run-id", ""),
+		IssueKey:     readFlag(args, "--issue-key", ""),
+		TaskType:     readFlag(args, "--task-type", ""),
+		Code:         readFlag(args, "--code", ""),
+		Date:         readFlag(args, "--date", ""),
+		From:         readFlag(args, "--from", ""),
+		To:           readFlag(args, "--to", ""),
+	})
+	if err != nil {
+		return nil, "", &feedbackReadError{code: "invalid_filter", message: err.Error(), action: "请检查日期和时间范围参数"}
+	}
+	return filtered, root, nil
+}
+
+func feedbackScope(args []string) string {
+	if date := readFlag(args, "--date", ""); date != "" {
+		return date
+	}
+	from := readFlag(args, "--from", "")
+	to := readFlag(args, "--to", "")
+	if from != "" || to != "" {
+		return strings.ReplaceAll(strings.Trim(from+"-"+to, "-"), ":", "-")
+	}
+	return time.Now().Format("2006-01-02")
 }
 
 func runFeedbackBundle(args []string, stdout io.Writer) int {

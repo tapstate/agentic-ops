@@ -148,6 +148,14 @@ func RunFeedbackReport(args []string, stdout io.Writer) int {
 	return runFeedbackReport(args, stdout)
 }
 
+func RunFeedbackAnalyze(args []string, stdout io.Writer) int {
+	return runFeedbackAnalyze(args, stdout)
+}
+
+func RunFeedbackPropose(args []string, stdout io.Writer) int {
+	return runFeedbackPropose(args, stdout)
+}
+
 func RunFeedbackBundle(args []string, stdout io.Writer) int {
 	return runFeedbackBundle(args, stdout)
 }

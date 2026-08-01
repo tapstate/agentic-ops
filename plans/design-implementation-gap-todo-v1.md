@@ -309,31 +309,62 @@ bash scripts/test-build.sh
 - `docs/workflows/feedback-loop.md`
 
 **Current gap:**
-- 当前只有 `feedback report` 和 `feedback bundle`。
-- 设计中出现的 `feedback analyze`、`feedback propose` 尚未实现。
-- `feedback report` 只按 date 输出汇总，尚未支持按 `agentic_run_id`、`issue_key`、`task_type`、失败码或时间范围过滤。
-- 尚未追踪修复前后问题是否减少。
+- 已实现 `feedback report`、`feedback analyze` 和 `feedback propose` 的本地分析基线。
+- `feedback report` 已支持按 `agentic_run_id`、`issue_key`、`task_type`、失败码、日期和时间范围过滤。
+- 事件模型已增加 `resolution_type`、`resolution_version`、`resolution_status`，为后续修复效果追踪保留稳定字段。
+- 分析和建议只写入项目 AI 工作空间，不自动修改 AgenticOps 源头规则、Jira 或 GitHub。
 
 **Files:**
 - Modify: `packages/agentic-cli/internal/feedback/report.go`
-- Modify: `packages/agentic-cli/internal/cli/app.go`
-- Modify: `packages/agentic-cli/internal/cli/app_test.go`
+- Modify: `packages/agentic-cli/internal/feedback/event.go`
+- Modify: `packages/agentic-cli/internal/clihandlers/feedback.go`
+- Modify: `packages/agentic-cli/internal/clihandlers/exports.go`
+- Modify: `packages/agentic-cli/internal/commandcatalog/zz_generated.go`
+- Modify: `packages/agentic-cli/internal/cli/feedback_command_test.go`
+- Modify: `packages/agentic-cli/internal/feedback/report_test.go`
+- Create: `packages/agentic-cli/internal/commands/feedback/analyze/feedback_analyze_cmd.go`
+- Create: `packages/agentic-cli/internal/commands/feedback/propose/feedback_propose_cmd.go`
 - Create: `install-resources/basic/contracts/operations/feedback-analyze.yaml`
 - Create: `install-resources/basic/contracts/operations/feedback-propose.yaml`
 - Update: `install-resources/basic/contracts/operations/feedback-report.yaml`
 - Update: `tests/e2e/problem-resolution-flow.sh`
 
-- [ ] `feedback report` 支持 `--run-id`、`--issue-key`、`--task-type`、`--code`、`--from`、`--to` 过滤。
-- [ ] `feedback analyze` 输出重复失败模式、人工确认热点、缺失字段趋势和建议修复载体。
-- [ ] `feedback propose` 输出结构化改进建议，但不自动修改 AgenticOps 源头规则。
-- [ ] 增加事件模型字段以支持修复效果追踪：`resolution_type`、`resolution_version`、`resolution_status`。
-- [ ] 增加单元测试和 e2e，覆盖缺失字段聚合、失败码过滤、建议输出。
+- [x] `feedback report` 支持 `--run-id`、`--issue-key`、`--task-type`、`--code`、`--from`、`--to` 过滤。
+- [x] `feedback analyze` 输出重复失败模式、人工确认热点、缺失字段趋势和建议修复载体。
+- [x] `feedback propose` 输出结构化改进建议，但不自动修改 AgenticOps 源头规则。
+- [x] 增加事件模型字段以支持修复效果追踪：`resolution_type`、`resolution_version`、`resolution_status`。
+- [x] 增加单元测试和 e2e，覆盖缺失字段聚合、失败码过滤、建议输出。
 
 **Verification:**
 
 ```sh
 go test ./packages/agentic-cli/internal/feedback ./packages/agentic-cli/internal/cli
 bash tests/e2e/problem-resolution-flow.sh
+```
+
+### Task 9: 接入 AO Jira 项目与 AgenticOps 测试代码工程
+
+**Design source:**
+- `docs/architecture/ao-agentic-defect-jira-workflow-design.md`
+- `docs/configuration/ao-agentic-defect-jira-configuration.md`
+
+**Implementation evidence:**
+- `install-resources/basic/projects/ao/profile.yaml` 绑定 Jira project `AO`、工作类型 `Agentic 缺陷` 和 `agenticops_improvement_v1`。
+- AO 默认代码仓库映射为 `tapstate/agentic-ops`，Jira 自定义字段使用已回读的 `customfield_10353`、`customfield_10360` 至 `customfield_10369`。
+- `tests/e2e/ao-profile-flow.sh` 验证 AO profile 与新增反馈契约；`tests/e2e/problem-resolution-flow.sh` 使用当前 `agentic-ops` 源码目录作为测试工程。
+- 本地 profile/e2e 验证不执行真实 Jira 写入；真实 AO 卡片只做显式只读回读。
+
+- [x] 增加 AO project profile、任务分类、状态和 transition 映射。
+- [x] 将默认测试代码工程映射为 `tapstate/agentic-ops`。
+- [x] 增加 profile 单元测试、AO profile e2e 和资源校验。
+- [x] 使用 Jira Cloud AO 项目元数据及 `AO-1` 只读回读结果核对项目、工作类型、字段和状态。
+
+**Verification:**
+
+```sh
+go test ./packages/agentic-cli/internal/profile
+bash tests/e2e/ao-profile-flow.sh
+bash scripts/test-resources.sh
 ```
 
 ## 2. 需要用户先决策的事项
@@ -353,7 +384,7 @@ bash tests/e2e/problem-resolution-flow.sh
 2. 在兼容承诺决策后推进 Task 6。
 3. 在发布权责和审计位置决策后推进 Task 7。
 4. 明确 Task 4 的 `write-pr-evidence` 与 `write-evidence` 职责边界，再新增运行入口或删除重复契约。
-5. 推进 Task 8 的反馈分析和改进建议闭环。
+5. Task 8 和 Task 9 已完成本地基线，后续只需按真实 AO 卡片和运行反馈补充回归证据。
 6. Task 2、Task 3 和 Task 5 只保留已完成基线和回归验证，不再作为待开发事项。
 
 ## 4. 总体验证入口

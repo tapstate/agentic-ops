@@ -4,6 +4,8 @@
 
 本记录保存 2026-08-01 在 Jira Cloud `tapdata.atlassian.net` 的 AO 业务空间中实际回读的 `Agentic 缺陷` 配置。它是后续 AgenticOps project profile 的映射材料，不替代 Jira 当前配置。
 
+当前已落地的共享 profile 为 `install-resources/basic/projects/ao/profile.yaml`：它绑定 Jira project `AO`，把 `Agentic 缺陷` 映射到 `agenticops_improvement_v1`，并将默认测试代码工程映射到 `tapstate/agentic-ops`。profile 校验和本地流程测试不执行真实 Jira 写入；真实卡片读取仍需显式配置 Jira adapter。
+
 ## 2. 项目与表单
 
 | 配置项 | 实际值 |
@@ -128,6 +130,14 @@ AO 是 `business / next-gen / simplified` 空间。Jira 的项目内简化工作
 - Jira 全局工作流列表按 `Agentic`、`AO:` 和 `agentic-ops` 查询均无匹配，符合项目内简化工作流边界。
 - Jira 项目元数据确认 AO 的 Project ID 为 `10248`，工作类型 ID 为 `10103`。
 - Jira 创建元数据确认十一个自定义字段 ID 和执行模式选项 ID。
+
+AgenticOps 源头仓库中的本地对接验证入口为：
+
+```sh
+bash tests/e2e/ao-profile-flow.sh
+```
+
+该验证会校验 AO profile、反馈分析契约和反馈建议契约；它只验证配置与本地 CLI 行为，不创建或修改真实 Jira 工作项。
 
 ## 9. 实例验证证据
 

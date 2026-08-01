@@ -74,6 +74,40 @@ func TestValidateAcceptsTapdataProfile(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsAOProfileForAgenticOpsRepository(t *testing.T) {
+	p, err := LoadFile(filepath.Join("..", "..", "..", "..", "install-resources", "basic", "projects", "ao", "profile.yaml"))
+	if err != nil {
+		t.Fatalf("LoadFile AO error = %v", err)
+	}
+	if issues := Validate(p); len(issues) != 0 {
+		t.Fatalf("Validate AO issues = %#v", issues)
+	}
+	if p.Workspace != "ao" || p.Jira.Project != "AO" {
+		t.Fatalf("AO binding = workspace:%s project:%s", p.Workspace, p.Jira.Project)
+	}
+	if p.TaskClassMapping.IssueTypes["Agentic 缺陷"] != "process_improvement" {
+		t.Fatalf("Agentic 缺陷 mapping = %#v", p.TaskClassMapping.IssueTypes)
+	}
+	if p.GitHub.Repositories.Default != "tapstate/agentic-ops" {
+		t.Fatalf("AO default repository = %s", p.GitHub.Repositories.Default)
+	}
+	for name, fieldID := range map[string]string{
+		"agentic_id":                  "customfield_10364",
+		"agentic_run_id":              "customfield_10365",
+		"agentic_takeover_at":         "customfield_10366",
+		"agentic_next_action":         "customfield_10367",
+		"agentic_completion_evidence": "customfield_10368",
+		"agentic_heartbeat_at":        "customfield_10369",
+	} {
+		if got := p.JiraFormMapping.Fields[name].JiraField; got != fieldID {
+			t.Fatalf("%s field = %s, want %s", name, got, fieldID)
+		}
+	}
+	if p.JiraTransitionMapping["start_progress"].ID != "2" || p.JiraTransitionMapping["complete"].ID != "5" {
+		t.Fatalf("AO transitions = %#v", p.JiraTransitionMapping)
+	}
+}
+
 func TestValidateReportsMissingRequiredMappings(t *testing.T) {
 	issues := Validate(Profile{})
 	for _, code := range []string{

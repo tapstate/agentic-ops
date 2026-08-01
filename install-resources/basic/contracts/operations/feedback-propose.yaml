@@ -1,22 +1,20 @@
-operation: feedback_report
+operation: feedback_propose
 version: 1
-purpose: 按需生成当前工作空间的 AIAgent 执行分析报告，用于发现重复问题和 AgenticOps 改进建议。
-task_type: feedback_reporting
+purpose: 根据反馈分析证据生成结构化改进建议，不自动修改 AgenticOps 标准资产。
+task_type: feedback_proposal
 allowed_stages:
   - evidence_written
   - blocked
   - completed
 required_inputs:
   - workspace
-  - date
 input:
   workspace:
     type: string
     required: true
   date:
     type: string
-    required: true
-    description: 第一阶段作为兼容过滤和报告命名参数，不代表必须生成日报。
+    required: false
   agentic_run_id:
     type: string
     required: false
@@ -41,20 +39,11 @@ preconditions:
 output:
   workspace:
     type: string
-  date:
+  scope:
     type: string
-  runs:
-    type: integer
-  succeeded:
-    type: integer
-  blocked:
-    type: integer
-  failed:
-    type: integer
-  missing_fields:
+  proposals:
     type: object
-    optional: true
-  report:
+  proposal_report:
     type: string
   agentic_next_action:
     type: string
@@ -62,11 +51,13 @@ failure:
   codes:
     - workspace_root_failed
     - event_read_failed
+    - invalid_filter
     - report_write_failed
 side_effects:
   - may_write_workspace_feedback
   - must_not_write_jira
-  - must_not_replace_task_audit_submission
+  - must_not_write_github
+  - must_not_modify_agenticops_rules
 human_gate:
   required: false
 retry_policy:

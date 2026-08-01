@@ -72,3 +72,45 @@ func TestFeedbackBundleRedactsSensitiveEventData(t *testing.T) {
 		t.Fatalf("bundle missing redaction marker: %s", string(data))
 	}
 }
+
+func TestFeedbackReportFiltersEventsByRunAndCode(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), ""+
+		`{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","task_type":"defect","operation":"takeover_task","ok":false,"code":"missing_jira_field"}`+"\n"+`{"timestamp":"2026-07-21T10:40:12Z","workspace":"tapstate","agentic_run_id":"run-2","issue_key":"TAP-123","task_type":"defect","operation":"write_evidence","ok":false,"code":"policy_gate_required"}`+"\n")
+
+	var stdout bytes.Buffer
+	code := Run([]string{"feedback", "report", "--workspace", "tapstate", "--date", "2026-07-21", "--run-id", "run-1", "--code", "missing_jira_field"}, &stdout, &bytes.Buffer{})
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s", code, stdout.String())
+	}
+	assertJSONNumber(t, stdout.String(), "runs", 1)
+	assertJSONNumber(t, stdout.String(), "failed", 1)
+}
+
+func TestFeedbackAnalyzeAndProposeReturnStructuredOutputs(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), ""+
+		`{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","task_type":"defect","operation":"takeover_task","ok":false,"code":"missing_jira_field","missing_field":"target_repo","gate":"takeover_gate","requires_human_action":true}`+"\n")
+
+	var analysisStdout bytes.Buffer
+	code := Run([]string{"feedback", "analyze", "--workspace", "tapstate", "--date", "2026-07-21"}, &analysisStdout, &bytes.Buffer{})
+	if code != 0 {
+		t.Fatalf("analyze code = %d stdout = %s", code, analysisStdout.String())
+	}
+	assertJSONField(t, analysisStdout.String(), "operation", "feedback_analyze")
+	if !strings.Contains(analysisStdout.String(), "missing_jira_field") {
+		t.Fatalf("analysis = %s", analysisStdout.String())
+	}
+
+	var proposalStdout bytes.Buffer
+	code = Run([]string{"feedback", "propose", "--workspace", "tapstate", "--date", "2026-07-21"}, &proposalStdout, &bytes.Buffer{})
+	if code != 0 {
+		t.Fatalf("propose code = %d stdout = %s", code, proposalStdout.String())
+	}
+	assertJSONField(t, proposalStdout.String(), "operation", "feedback_propose")
+	if !strings.Contains(proposalStdout.String(), "recommended_asset") {
+		t.Fatalf("proposals = %s", proposalStdout.String())
+	}
+}

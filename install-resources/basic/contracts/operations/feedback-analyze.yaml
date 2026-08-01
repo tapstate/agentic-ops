@@ -1,22 +1,20 @@
-operation: feedback_report
+operation: feedback_analyze
 version: 1
-purpose: 按需生成当前工作空间的 AIAgent 执行分析报告，用于发现重复问题和 AgenticOps 改进建议。
-task_type: feedback_reporting
+purpose: 从反馈事件中分析重复失败模式、人工门禁热点和缺失字段趋势。
+task_type: feedback_analysis
 allowed_stages:
   - evidence_written
   - blocked
   - completed
 required_inputs:
   - workspace
-  - date
 input:
   workspace:
     type: string
     required: true
   date:
     type: string
-    required: true
-    description: 第一阶段作为兼容过滤和报告命名参数，不代表必须生成日报。
+    required: false
   agentic_run_id:
     type: string
     required: false
@@ -41,20 +39,19 @@ preconditions:
 output:
   workspace:
     type: string
-  date:
+  scope:
     type: string
   runs:
     type: integer
-  succeeded:
-    type: integer
-  blocked:
-    type: integer
-  failed:
-    type: integer
-  missing_fields:
+  failure_patterns:
     type: object
-    optional: true
-  report:
+  human_gate_hotspots:
+    type: object
+  missing_field_trends:
+    type: object
+  suggested_assets:
+    type: object
+  analysis_report:
     type: string
   agentic_next_action:
     type: string
@@ -62,11 +59,13 @@ failure:
   codes:
     - workspace_root_failed
     - event_read_failed
+    - invalid_filter
     - report_write_failed
 side_effects:
   - may_write_workspace_feedback
   - must_not_write_jira
-  - must_not_replace_task_audit_submission
+  - must_not_write_github
+  - must_not_modify_agenticops_rules
 human_gate:
   required: false
 retry_policy:

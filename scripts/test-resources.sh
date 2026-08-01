@@ -13,6 +13,7 @@ diff -u install-resources/checksums.txt "$tmp_checksums" >/dev/null
 
 test -f install-resources/basic/manifest.json
 test -f install-resources/basic/projects/tapdata/profile.yaml
+test -f install-resources/basic/projects/ao/profile.yaml
 test -f install-resources/basic/projects/tapdata/tools.yaml
 test -f install-resources/basic/projects/tapdata/runbooks/README.md
 test -f install-resources/basic/projects/tapdata/runbooks/build-test-and-local-run.md
@@ -35,6 +36,7 @@ grep 'basic/projects/tapdata/runbooks/README.md' install-resources/checksums.txt
 grep 'basic/projects/tapdata/runbooks/build-test-and-local-run.md' install-resources/checksums.txt >/dev/null
 grep 'basic/projects/tapdata/runbooks/common-lib-upgrade.md' install-resources/checksums.txt >/dev/null
 grep 'basic/projects/tapdata/templates/defect/fix-plan-comment.md' install-resources/checksums.txt >/dev/null
+grep 'basic/projects/ao/profile.yaml' install-resources/checksums.txt >/dev/null
 grep 'darwin-arm64/agentic-cli' install-resources/checksums.txt >/dev/null
 
 tapdata_assets="install-resources/basic/projects/tapdata"
@@ -48,6 +50,8 @@ grep -- '-DskipTests' "$tapdata_assets/standards/development-rules.md" >/dev/nul
 grep 'update-task-description-sections' "$tapdata_assets/admission/defect-fix.yaml" >/dev/null
 grep 'add-task-comment' "$tapdata_assets/admission/defect-fix.yaml" >/dev/null
 grep 'update-task-form' "$tapdata_assets/admission/defect-fix.yaml" >/dev/null
+grep '^  project: AO$' install-resources/basic/projects/ao/profile.yaml >/dev/null
+grep 'tapstate/agentic-ops' install-resources/basic/projects/ao/profile.yaml >/dev/null
 
 if grep -ERn '研发负责人|developer_owner|development-leads|development-lead|DL-[0-9]|dl-[0-9]' \
   AGENTS.md README.md agent-init.md agent-guides.md docs install-resources/basic packages plans skills; then

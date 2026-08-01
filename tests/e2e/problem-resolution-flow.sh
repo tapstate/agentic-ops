@@ -9,6 +9,7 @@ trap 'chmod -R u+w "$workspace_root" 2>/dev/null || true; rm -rf "$workspace_roo
 export AGENTIC_OPS_WORKSPACE_ROOT="$workspace_root"
 
 cmd=(go run ./packages/agentic-cli/cmd/agentic-cli)
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 install_root="$workspace_root/install"
 
 "${cmd[@]}" doctor --workspace tapstate | grep '"status":"ok"'
@@ -46,7 +47,7 @@ cp install-resources/basic/policies/default.yaml "$policy_source"
 "${cmd[@]}" policy rollback --workspace tapstate | grep '"operation":"policy_rollback"'
 rm -f "$policy_backup"
 
-"${cmd[@]}" workspace init --project tapstate --jira-user dev@example.com | grep '"operation":"workspace_init"'
+"${cmd[@]}" workspace init --project tapstate --jira-user dev@example.com --source-root "$repo_root" | grep '"operation":"workspace_init"'
 test -d "$workspace_root/.agentic-ops/run-logs"
 "${cmd[@]}" takeover-task TAP-MISSING-REPO --workspace tapstate | grep '"target_repo":"tapstate/tap-api"'
 
@@ -69,3 +70,8 @@ fi
 
 "${cmd[@]}" feedback report --workspace tapstate --date 2026-07-21 | grep '"blocked":1'
 grep 'blocked: 1' "$workspace_root/.agentic-ops/feedback/reports/2026-07-21.md"
+
+"${cmd[@]}" feedback analyze --workspace tapstate --date 2026-07-21 | grep '"operation":"feedback_analyze"'
+test -f "$workspace_root/.agentic-ops/feedback/reports/analysis-2026-07-21.md"
+"${cmd[@]}" feedback propose --workspace tapstate --date 2026-07-21 | grep '"operation":"feedback_propose"'
+test -f "$workspace_root/.agentic-ops/feedback/reports/proposals-2026-07-21.md"

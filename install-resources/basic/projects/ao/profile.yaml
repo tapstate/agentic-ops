@@ -1,0 +1,156 @@
+workspace: ao
+
+jira:
+  user: "<jira-user>"
+  base_url: https://tapdata.atlassian.net
+  project: AO
+  task_query: "project = AO AND issuetype = \"Agentic 缺陷\" AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC"
+
+jira_form_mapping:
+  fields:
+    owner:
+      source: jira_field
+      jira_field: assignee
+      required_from_stage: waiting_takeover
+    execution_mode:
+      source: jira_field
+      jira_field: customfield_10353
+    task_branch:
+      source: jira_field
+      jira_field: customfield_10360
+    decision_request:
+      source: jira_field
+      jira_field: customfield_10361
+    decision_deadline:
+      source: jira_field
+      jira_field: customfield_10362
+    decision_result:
+      source: jira_field
+      jira_field: customfield_10363
+    agentic_id:
+      source: jira_field
+      jira_field: customfield_10364
+      required_from_stage: takeover_gate
+    agentic_run_id:
+      source: jira_field
+      jira_field: customfield_10365
+    agentic_takeover_at:
+      source: jira_field
+      jira_field: customfield_10366
+      required_from_stage: takeover_gate
+    agentic_next_action:
+      source: jira_field
+      jira_field: customfield_10367
+    agentic_completion_evidence:
+      source: jira_field
+      jira_field: customfield_10368
+    agentic_heartbeat_at:
+      source: jira_field
+      jira_field: customfield_10369
+    target_repo:
+      source: workspace_repo_mapping
+      fallback: workspace_repo_mapping
+      required_from_stage: takeover_gate
+    target_branch:
+      source: jira_field
+      jira_field: customfield_10360
+      required_from_stage: takeover_gate
+    verification_method:
+      source: jira_description_section
+      section: "验证方式"
+      required_from_stage: takeover_gate
+    improvement_summary:
+      source: jira_description_section
+      section: "问题说明"
+    changed_assets:
+      source: jira_description_section
+      section: "影响范围"
+
+task_class_mapping:
+  issue_types:
+    Agentic 缺陷: process_improvement
+  labels:
+    agenticops-improvement: process_improvement
+
+standard_process_mapping:
+  process_improvement: agenticops_improvement_v1
+
+status_mapping:
+  待接管: waiting_takeover
+  执行中: implementation
+  等待决策: implementation
+  待重新分配: waiting_takeover
+  已完成: completed
+
+transition_mapping:
+  start_progress: implementation
+  request_decision: implementation
+  continue: implementation
+  complete: completed
+  release: waiting_takeover
+  reassign: waiting_takeover
+  reopen: waiting_takeover
+
+jira_transition_mapping:
+  start_progress:
+    id: "2"
+  request_decision:
+    id: "3"
+  continue:
+    id: "4"
+  complete:
+    id: "5"
+  release:
+    id: "7"
+  reassign:
+    id: "8"
+  reopen:
+    id: "9"
+
+github:
+  organization: tapstate
+  repositories:
+    default: tapstate/agentic-ops
+    by_label:
+      agenticops-improvement: tapstate/agentic-ops
+    by_issue_type:
+      Agentic 缺陷: tapstate/agentic-ops
+
+local:
+  workspace_root: "<project-ai-workspace>"
+  source_root: "<project-ai-workspace>/repos/agentic-ops"
+  runs_dir: "<project-ai-workspace>/.agentic-ops/runs"
+  run_logs_dir: "<project-ai-workspace>/.agentic-ops/run-logs"
+  feedback_dir: "<project-ai-workspace>/.agentic-ops/feedback"
+
+standards:
+  - company/standards/core-hard-rules.md
+
+human_gates:
+  - push
+  - create_pr
+  - merge
+  - transition_jira_status
+  - scope_change
+
+review_gates:
+  development_engineer_review:
+    role: development_engineer
+    decision_field: decision_result
+    returned_next_action: fix_and_verify
+
+retry_redo:
+  verification_failed:
+    retry: true
+    max_attempts: 3
+    agentic_next_action: fix_and_verify
+  scope_changed:
+    retry: false
+    redo_from_stage: waiting_takeover
+    agentic_next_action: redo_previous_stage
+
+templates:
+  takeover_success: templates/evidence/takeover-success.md
+  takeover_failed: templates/evidence/takeover-failed.md
+  blocked: templates/evidence/blocked.md
+  development_completed: templates/evidence/development-completed.md

@@ -11,7 +11,9 @@ import (
 	conf_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/conf"
 	contract_validate_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/contract/validate"
 	doctor_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/doctor"
+	feedback_analyze_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/feedback/analyze"
 	feedback_bundle_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/feedback/bundle"
+	feedback_propose_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/feedback/propose"
 	feedback_report_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/feedback/report"
 	fix_pr_comments_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/fix-pr-comments"
 	inspect_task_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/inspect-task"
@@ -48,7 +50,9 @@ func RegisterAll(registry *cmdkit.Registry) {
 	conf_cmd.Register(registry)
 	contract_validate_cmd.Register(registry)
 	doctor_cmd.Register(registry)
+	feedback_analyze_cmd.Register(registry)
 	feedback_bundle_cmd.Register(registry)
+	feedback_propose_cmd.Register(registry)
 	feedback_report_cmd.Register(registry)
 	fix_pr_comments_cmd.Register(registry)
 	inspect_task_cmd.Register(registry)
