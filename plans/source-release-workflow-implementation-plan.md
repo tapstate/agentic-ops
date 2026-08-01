@@ -406,7 +406,7 @@ git commit -m "Feat(release): TAP-12371 实现 develop 到 main 受控发布" -m
 - CLI: `scripts/hotfix.sh prepare [--configure-workflow]`。
 - Produces: `release_parse_hotfix_branch()`、`release_find_iteration_tag()`。
 
-- [ ] **Step 1: 写 Hotfix 分支和版本基线测试**
+- [x] **Step 1: 写 Hotfix 分支和版本基线测试**
 
 覆盖：
 
@@ -421,13 +421,13 @@ main 历史没有 vX.Y -> iteration_tag_missing
 
 断言 `create` 从 fetch 后的 `origin/main` 创建分支，不从本地陈旧 `main` 创建。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run: `bash scripts/test-release-workflow.sh`
 
 Expected: FAIL，因为 `scripts/hotfix.sh` 不存在。
 
-- [ ] **Step 3: 实现 create 和 prepare**
+- [x] **Step 3: 实现 create 和 prepare**
 
 Jira ID 使用：
 
@@ -439,7 +439,7 @@ Jira ID 使用：
 
 `prepare` 解析最近的已合并二段式 tag，调用 `bash scripts/build.sh`，但不创建 tag、不提交、不推送。
 
-- [ ] **Step 4: 验证 Hotfix prepare GREEN**
+- [x] **Step 4: 验证 Hotfix prepare GREEN**
 
 Run:
 
@@ -450,7 +450,7 @@ bash -n scripts/hotfix.sh
 
 Expected: PASS。
 
-- [ ] **Step 5: 提交 Hotfix create 和 prepare**
+- [x] **Step 5: 提交 Hotfix create 和 prepare**
 
 ```bash
 git add scripts/hotfix.sh scripts/lib/release-common.sh scripts/test-release-workflow.sh

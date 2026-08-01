@@ -429,3 +429,84 @@ release_write_audit() {
     "$version" "$head" "$RELEASE_VERIFIED_AT" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "$version" "$RELEASE_TAG_COMMIT" > "$audit_file"
   RELEASE_AUDIT_FILE="$audit_file"
 }
+
+release_validate_jira_id() {
+  local jira_id="$1"
+  if ! printf '%s\n' "$jira_id" | grep -Eq '^[A-Z][A-Z0-9]+-[1-9][0-9]*$'; then
+    release_fail "invalid_jira_id" "hotfix_branch" "Jira ID 格式无效" "请使用例如 AO-123 或 TAP-12371 的大写任务编号"
+    return 1
+  fi
+}
+
+release_normalize_git_user() {
+  local raw_user="$1"
+  local normalized_user
+  normalized_user="$(printf '%s' "$raw_user" |
+    LC_ALL=C tr '[:upper:]' '[:lower:]' |
+    sed -E 's/[[:space:]_.]+/-/g; s/-+/-/g; s/^-//; s/-$//')"
+  if ! printf '%s\n' "$normalized_user" | grep -Eq '^[a-z0-9][a-z0-9-]*$'; then
+    release_fail "invalid_git_user" "hotfix_branch" "Git 用户名无法转换为安全分支片段" "请通过 --user 提供小写字母、数字和连字符组成的用户名"
+    return 1
+  fi
+  printf '%s\n' "$normalized_user"
+}
+
+release_parse_hotfix_branch() {
+  local branch="$1"
+  local user_part
+  local remainder
+  local jira_part
+
+  case "$branch" in
+    */*/fix-main)
+      user_part="${branch%%/*}"
+      remainder="${branch#*/}"
+      jira_part="${remainder%%/*}"
+      ;;
+    *)
+      release_fail "invalid_hotfix_branch" "hotfix_branch" "当前分支不符合 <user>/<jira-id>/fix-main" "请使用 scripts/hotfix.sh create 创建修复分支"
+      return 1
+      ;;
+  esac
+  if [ "$branch" != "$user_part/$jira_part/fix-main" ] ||
+    ! printf '%s\n' "$user_part" | grep -Eq '^[a-z0-9][a-z0-9-]*$' ||
+    ! printf '%s\n' "$jira_part" | grep -Eq '^[A-Z][A-Z0-9]+-[1-9][0-9]*$'; then
+    release_fail "invalid_hotfix_branch" "hotfix_branch" "当前分支不符合 <user>/<jira-id>/fix-main" "请使用 scripts/hotfix.sh create 创建修复分支"
+    return 1
+  fi
+  HOTFIX_USER="$user_part"
+  HOTFIX_JIRA_ID="$jira_part"
+  HOTFIX_BRANCH="$branch"
+}
+
+release_require_main_base() {
+  local repo_root="$1"
+  if ! git -C "$repo_root" fetch origin main >/dev/null 2>&1; then
+    release_fail "hotfix_main_fetch_failed" "hotfix_base" "无法刷新 origin/main" "请检查网络和远端权限后重试"
+    return 1
+  fi
+  if ! git -C "$repo_root" merge-base --is-ancestor refs/remotes/origin/main HEAD; then
+    release_fail "hotfix_main_not_current" "hotfix_base" "修复分支未包含最新 origin/main" "请重新从最新 main 创建修复分支或人工处理基线"
+    return 1
+  fi
+}
+
+release_find_iteration_tag() {
+  local repo_root="$1"
+  local candidate
+  if ! git -C "$repo_root" fetch origin main --tags >/dev/null 2>&1; then
+    release_fail "hotfix_main_fetch_failed" "version_baseline" "无法刷新 main 和远端 Tag" "请检查网络后重试"
+    return 1
+  fi
+  for candidate in $(git -C "$repo_root" tag --merged refs/remotes/origin/main --sort=-version:refname); do
+    if printf '%s\n' "$candidate" | grep -Eq '^v[0-9]+\.[0-9]+$' &&
+      [ "$(git -C "$repo_root" cat-file -t "refs/tags/$candidate" 2>/dev/null || true)" = "tag" ] &&
+      [ -n "$(git -C "$repo_root" ls-remote --tags --refs origin "refs/tags/$candidate" 2>/dev/null)" ]; then
+      HOTFIX_VERSION="$candidate"
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  release_fail "iteration_tag_missing" "version_baseline" "origin/main 历史中没有可复用的 annotated vX.Y Tag" "请先完成一个正常版本发布"
+  return 1
+}

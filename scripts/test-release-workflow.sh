@@ -428,4 +428,97 @@ test ! -s "$fake_gh_state/writes.log"
 test "$(git --git-dir="$workflow_remote" rev-parse refs/heads/main)" = "$remote_main_after_publish"
 test "$(git --git-dir="$workflow_remote" rev-parse refs/tags/v0.3^{})" = "$remote_tag_after_publish"
 
-printf '{"ok":true,"operation":"test_release_workflow","cases":17}\n'
+if [ ! -x "$repo_root/scripts/hotfix.sh" ]; then
+  echo "missing hotfix entrypoint" >&2
+  exit 1
+fi
+
+hotfix_remote="$tmp_dir/hotfix-remote.git"
+hotfix_repo="$tmp_dir/hotfix-repo"
+git init --bare "$hotfix_remote" >/dev/null
+git clone "$hotfix_remote" "$hotfix_repo" >/dev/null 2>&1
+git -C "$hotfix_repo" config user.email agentic-ops-test@example.test
+git -C "$hotfix_repo" config user.name "Harsen Lin"
+printf '# hotfix fixture\n' > "$hotfix_repo/README.md"
+printf '.local/\ninstall-resources/\n' > "$hotfix_repo/.gitignore"
+mkdir -p "$hotfix_repo/scripts/lib" "$hotfix_repo/.githooks"
+cp "$repo_root/scripts/hotfix.sh" "$hotfix_repo/scripts/hotfix.sh"
+cp "$repo_root/scripts/lib/release-common.sh" "$hotfix_repo/scripts/lib/release-common.sh"
+cp "$repo_root/scripts/lib/development-workflow.sh" "$hotfix_repo/scripts/lib/development-workflow.sh"
+cp "$repo_root/.githooks/pre-commit" "$hotfix_repo/.githooks/pre-commit"
+cp "$repo_root/.githooks/pre-push" "$hotfix_repo/.githooks/pre-push"
+cat > "$hotfix_repo/scripts/build.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p install-resources
+printf 'hotfix assets:%s\n' "$(git rev-parse --short HEAD)" > install-resources/checksums.txt
+printf '{"ok":true,"operation":"build"}\n'
+EOF
+chmod 0755 "$hotfix_repo/scripts/hotfix.sh" "$hotfix_repo/scripts/build.sh" "$hotfix_repo/scripts/lib/release-common.sh" "$hotfix_repo/scripts/lib/development-workflow.sh"
+git -C "$hotfix_repo" add README.md .gitignore scripts .githooks
+git -C "$hotfix_repo" commit -m "initial hotfix fixture" >/dev/null
+git -C "$hotfix_repo" branch -M main
+git -C "$hotfix_repo" tag -a v0.3 -m "v0.3 baseline"
+git -C "$hotfix_repo" push -u origin main >/dev/null
+git -C "$hotfix_repo" push origin refs/tags/v0.3 >/dev/null
+git -C "$hotfix_repo" switch -c develop >/dev/null
+git -C "$hotfix_repo" push -u origin develop >/dev/null
+git -C "$hotfix_repo" switch main >/dev/null
+git -C "$hotfix_repo" remote set-url origin git@github.com:tapstate/agentic-ops.git
+git -C "$hotfix_repo" config "url.$hotfix_remote.insteadOf" git@github.com:tapstate/agentic-ops.git
+git -C "$hotfix_repo" config core.hooksPath .githooks
+
+if (cd "$hotfix_repo" && scripts/hotfix.sh create --jira-id ao-123 --user harsen) >"$tmp_dir/invalid-jira.out" 2>"$tmp_dir/invalid-jira.err"; then
+  echo "expected lowercase Jira ID to fail" >&2
+  exit 1
+fi
+grep 'invalid_jira_id' "$tmp_dir/invalid-jira.err" >/dev/null
+
+(cd "$hotfix_repo" && scripts/hotfix.sh create --jira-id AO-123 --user harsen) >"$tmp_dir/hotfix-create.out" 2>"$tmp_dir/hotfix-create.err"
+grep '"operation":"hotfix_create"' "$tmp_dir/hotfix-create.out" >/dev/null
+test "$(git -C "$hotfix_repo" branch --show-current)" = "harsen/AO-123/fix-main"
+test "$(git -C "$hotfix_repo" rev-parse HEAD)" = "$(git -C "$hotfix_repo" rev-parse refs/remotes/origin/main)"
+
+if (cd "$hotfix_repo" && scripts/hotfix.sh create --jira-id AO-123 --user harsen) >"$tmp_dir/existing-hotfix.out" 2>"$tmp_dir/existing-hotfix.err"; then
+  echo "expected duplicate hotfix branch to fail" >&2
+  exit 1
+fi
+grep 'hotfix_branch_exists' "$tmp_dir/existing-hotfix.err" >/dev/null
+
+git -C "$hotfix_repo" switch develop >/dev/null
+if (cd "$hotfix_repo" && scripts/hotfix.sh prepare) >"$tmp_dir/invalid-hotfix-branch.out" 2>"$tmp_dir/invalid-hotfix-branch.err"; then
+  echo "expected non-hotfix prepare to fail" >&2
+  exit 1
+fi
+grep 'invalid_hotfix_branch' "$tmp_dir/invalid-hotfix-branch.err" >/dev/null
+
+git -C "$hotfix_repo" switch harsen/AO-123/fix-main >/dev/null
+hotfix_tag_count_before="$(git -C "$hotfix_repo" tag --list | wc -l | tr -d ' ')"
+(cd "$hotfix_repo" && scripts/hotfix.sh prepare) >"$tmp_dir/hotfix-prepare.out" 2>"$tmp_dir/hotfix-prepare.err"
+grep '"operation":"hotfix_prepare"' "$tmp_dir/hotfix-prepare.out" >/dev/null
+grep '"version":"v0.3"' "$tmp_dir/hotfix-prepare.out" >/dev/null
+test -f "$hotfix_repo/install-resources/checksums.txt"
+test "$(git -C "$hotfix_repo" tag --list | wc -l | tr -d ' ')" = "$hotfix_tag_count_before"
+test -z "$(git -C "$hotfix_repo" ls-remote --heads origin refs/heads/harsen/AO-123/fix-main)"
+
+no_tag_remote="$tmp_dir/no-tag-remote.git"
+no_tag_repo="$tmp_dir/no-tag-repo"
+git init --bare "$no_tag_remote" >/dev/null
+git clone "$no_tag_remote" "$no_tag_repo" >/dev/null 2>&1
+git -C "$no_tag_repo" config user.email agentic-ops-test@example.test
+git -C "$no_tag_repo" config user.name "AgenticOps Test"
+printf 'no tag\n' > "$no_tag_repo/README.md"
+git -C "$no_tag_repo" add README.md
+git -C "$no_tag_repo" commit -m "no tag fixture" >/dev/null
+git -C "$no_tag_repo" branch -M main
+git -C "$no_tag_repo" push -u origin main >/dev/null
+git -C "$no_tag_repo" switch -c tester/AO-999/fix-main >/dev/null
+# shellcheck source=scripts/lib/release-common.sh
+. "$repo_root/scripts/lib/release-common.sh"
+if release_find_iteration_tag "$no_tag_repo" >"$tmp_dir/no-tag.out" 2>"$tmp_dir/no-tag.err"; then
+  echo "expected missing iteration tag to fail" >&2
+  exit 1
+fi
+grep 'iteration_tag_missing' "$tmp_dir/no-tag.err" >/dev/null
+
+printf '{"ok":true,"operation":"test_release_workflow","cases":23}\n'
