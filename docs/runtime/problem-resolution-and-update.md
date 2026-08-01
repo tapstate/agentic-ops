@@ -6,7 +6,7 @@
 
 研发日常使用的是安装后的 `agentic-cli`、AI 员工手册、操作契约、工作流配置、策略、运行手册和模板。项目出现问题时，AgenticOps 必须能快速判断问题类型，选择正确修复载体，完成验证、发布、同步和回滚。
 
-当前仓库已实现本地资产清单校验与安装、构建资源校验、操作契约校验、`profile validate / update / rollback`、`policy validate / update / rollback`、工作流配置驱动 Jira `transition` 标识映射、`exact_pair` 更新兼容判断、远程产物 checksum 校验、版本化暂存与原子二进制切换、本地 checksum 回滚、必要更新统一阻断、`doctor` 显式真实外部检查、真实 Jira REST 客户端合同测试基线，以及真实 Jira 字段、评论和 `transition` 写入门禁与人工确认。当前不存在 GitHub Release 发布脚本或受控 `release publish` 入口；发布权限治理仍由当前差距计划跟踪。本文是正式使用前的目标设计和验收基线。
+当前仓库已实现本地资产清单校验与安装、构建资源校验、操作契约校验、`profile validate / update / rollback`、`policy validate / update / rollback`、工作流配置驱动 Jira `transition` 标识映射、`exact_pair` 更新兼容判断、远程产物 checksum 校验、版本化暂存与原子二进制切换、本地 checksum 回滚、必要更新统一阻断、`doctor` 显式真实外部检查、真实 Jira REST 客户端合同测试基线，以及真实 Jira 字段、评论和 `transition` 写入门禁与人工确认。源码发布已经由 `scripts/release.sh`、`scripts/hotfix.sh`、PR、验证、Tag 和审计流程覆盖。当前不存在受控 `agentic-cli release publish`，只表示可选 GitHub Release 制品页能力尚未实现；它不等同于源码发布，也不阻塞当前正式研发流程。本文保留问题修复、同步和本地回滚的稳定设计与验收基线。
 
 ## 2. 架构适配性评估
 
@@ -19,13 +19,13 @@
 | 工作流配置 | 已有默认工作流配置、`profile validate / update / rollback` 基线 | 适合处理不同团队和 Jira 工作流差异 | 真实 Jira `status` / `transition` 门禁、资产包来源、工作流配置版本审计 |
 | 策略 / 门禁 | 已有 `policy validate / update / rollback` 本地基线 | 适合控制关键步骤门禁 | 真实写操作门禁变更审计和人工确认 |
 | 证据 / 反馈 | 已有本地证据、反馈诊断包和按需反馈报告 | 适合提交任务审计、发现重复问题并推动规范优化 | 任务级审计提交、问题分类统计、修复效果追踪 |
-| 发布 / 安装 | 已有安装引导、本地构建、资产来源与 exact_pair 校验、远程产物 checksum 校验、原子切换和本地回滚 | 适合快速分发 | 发布权限治理 |
+| 发布 / 安装 | 已有安装引导、本地构建、源码发布脚本、PR 与 Tag 审计、资产来源与 exact_pair 校验、远程产物 checksum 校验、原子切换和本地回滚 | 适合快速分发 | 可选 GitHub Release 制品页能力按实际需求另行决策，不是当前阻塞项 |
 | 项目资料边界 | 已明确 `~/.agentic-ops` 和项目 AI 工作空间边界 | 适合隔离全局工具资产和任务运行产物 | 资产版本目录、工作空间覆盖配置、敏感信息检查 |
 
 结论：
 
 - 当前架构方向适配“渐进形成公司标准流程”和“快速修复上线”两个目标。
-- 最大缺口不在目录结构；远程清单、产物校验、原子切换、`exact_pair` 兼容门禁、本地回滚和显式外部诊断已有基线，剩余重点是发布权限治理和更完整的工作流配置版本审计。
+- 最大缺口不在目录结构；源码发布、远程清单、产物校验、原子切换、`exact_pair` 兼容门禁、本地回滚和显式外部诊断已有基线。后续重点是基于真实试运行修复已证实的运行缺陷，并按需完善工作流配置版本审计；可选 GitHub Release 制品发布不作为正式使用前置条件。
 - 修复能力应优先作为 `agentic-cli` 的一组受控操作实现，而不是分散在 shell 脚本、人工说明或提示词中。
 
 ## 3. 设计目标

@@ -66,7 +66,7 @@ AIAgent 必须严格区分：
 
 ## 6. 源头仓库执行门禁
 
-维护 AgenticOps 源头仓库时，AIAgent 必须遵守 `develop` 日常开发、`main` PR-only 和统一发布脚本规则。不得直接提交或推送 `main`，不得绕过 `.githooks`、GitHub ruleset、固定完整验证或最终人工确认。
+维护 AgenticOps 源头仓库时，AIAgent 必须遵守 `develop` 日常开发、`main` PR-only 和统一发布脚本规则。不得直接提交或推送 `main`，不得绕过 `.githooks`、固定完整验证或最终人工确认。硬门禁模式不得绕过 GitHub Ruleset 和 Auto-merge；GitHub Free 私有仓库必须显式传入 `--allow-soft-gate`，使用固定发布或修复 HEAD、人工 Merge commit、合并事实校验和二次完整验证，不得静默降级。
 
 面向用户、研发工程师、流程负责人、审阅者或 Jira 参与者的自然语言交互必须使用中文。
 

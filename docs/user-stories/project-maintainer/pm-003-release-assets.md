@@ -25,7 +25,7 @@ scripts/release.sh publish --version vX.Y
 3. 维护者生成并校验 `install-resources/checksums.txt`。
 4. 维护者按 [DE-001 安装 AgenticOps](../development-engineer/de-001-install.md) 运行安装故事验收。
 5. 维护者在人工确认后提交 `install-resources/` 中的已编译产物和校验和。
-6. 维护者执行 `publish` 固定完整验证，确认后通过 PR 的 Merge commit 合入受保护的 `main`。
+6. 维护者执行 `publish` 固定完整验证，确认后通过 PR 的 Merge commit 合入 `main`；硬门禁由 Ruleset 强制，GitHub Free 私有仓库则显式使用软门禁并等待人工合并。
 7. 脚本验证 `origin/main` 包含发布 HEAD 后推送不可变 tag，并记录构建、安装和发布审计信息。
 
 ### 输出
@@ -53,7 +53,7 @@ scripts/release.sh publish --version vX.Y
 - 安装脚本能从 managed clone 安装最新 `agentic-cli` 和运行资产。
 - 安装脚本使用仓库中已提交的二进制，不在研发工程师机器上编译。
 - 安装资源提交动作受人工确认和审计约束。
-- `main` 只通过受保护 PR 合入，远端 tag 只在合并验证后创建。
+- 流程禁止直推 `main`，只通过 PR 的 Merge commit 合入；软门禁不能伪装成服务器端保护，远端 tag 只在合并验证和二次完整验证后创建。
 
 ### 保护行为
 

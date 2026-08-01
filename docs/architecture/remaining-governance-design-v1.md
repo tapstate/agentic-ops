@@ -1,8 +1,8 @@
 # AgenticOps 剩余治理设计草案
 
-> **状态：** Task 4 已决策并完成实现；Task 6、Task 7 及其它全局治理项仍待决策。
+> **状态：** Task 4 和 Task 6 已决策并完成实现；Task 7 仅保留为可选 GitHub Release 制品能力设计，不阻塞当前源码发布或正式研发流程；其它全局治理项按实际需求单独决策。
 >
-> **范围：** 本文承接 `plans/design-implementation-gap-todo-v1.md` 的 Task 4、Task 6 和 Task 7，先明确职责边界、兼容承诺、权限、审计和回滚，再生成实现任务。
+> **范围：** 本文保留 `plans/design-implementation-gap-todo-v1.md` 的 Task 4、Task 6 已完成设计基线，以及 Task 7 的可选候选设计；实现状态以代码、测试和当前差距计划为准。
 
 ## 1. 设计约束
 
@@ -93,7 +93,7 @@ release manifest 同时描述 CLI 和资产，不允许仅凭一个版本字符�
 
 `update rollback` 只读取本地保存的 previous metadata 和路径，不重新从远程下载。它必须验证回滚目标仍存在且 checksum / manifest 关系有效；成功后恢复 CLI、资产和 current metadata，失败时返回 `rollback_state_missing`、`rollback_target_invalid` 或 `rollback_failed`，并给出人工恢复动作。
 
-当前实现直接覆盖 `bin/agentic-cli`，因此设计要求先改为版本隔离的激活路径或保留上一份二进制副本，不能只保存 previous version 字符串。
+实施前缺口（历史，已由 3.7 节实施结果取代）：当时实现会直接覆盖 `bin/agentic-cli`，因此设计要求改为版本隔离的激活路径或保留上一份二进制副本，不能只保存 previous version 字符串。
 
 ### 3.4 必要更新阻断
 
@@ -140,7 +140,7 @@ Guard 只阻断受影响操作，不把普通推荐更新扩大为全局阻断�
 - **授权：** 每次发布都必须有显式人工确认，CLI 同时校验策略门禁、目标仓库、release version、资产清单和 checksum；凭证由受控 GitHub 客户端提供，CLI 不保存 token。
 - **事实源：** GitHub Release 记录发布对象和产物；本地结构化事件记录操作输入、版本、资产 checksum、确认人和 `audit_reference`。
 - **回滚：** CLI 只负责本地安装回滚和阻断后续更新；删除或改写已发布 GitHub Release 不作为自动回滚动作，由 release owner 人工处理。
-- **实现边界：** 必须实现契约、权限判断、资产集合校验、fake GitHub client 和审计事件；真实 GitHub 写入只有在显式 opt-in、策略允许且取得人工确认后才能执行。
+- **实现边界：** 只有项目后续明确选择实现该可选能力时，才补充契约、权限判断、资产集合校验、fake GitHub client 和审计事件；真实 GitHub 写入仍只能在显式 opt-in、策略允许且取得人工确认后执行。
 
 ### 4.2 `release_publish` 契约
 
@@ -172,20 +172,14 @@ Guard 只阻断受影响操作，不把普通推荐更新扩大为全局阻断�
 - 成功 fake 发布输出可关联的 `audit_reference`；失败输出人工补救动作。
 - 发布操作不引入常驻服务或恢复发布 shell 业务逻辑。
 
-## 5. 决策门
+## 5. 当前状态与后续决策门
 
-开始实现前需要研发工程师确认：
+1. `write-pr-evidence` 已确认保留独立契约和独立 CLI 入口，并完成实现。
+2. 兼容承诺已确认采用 `exact_pair`，更新、回滚、资产来源和必要更新阻断已完成实现。
+3. Task 7 的 GitHub Release 制品发布不是当前源码发布链路，也不是正式使用阻塞项；只有出现明确制品页需求时，才重新确认 release owner、授权、审计、回滚和是否需要 shell 包装。
+4. 产品形态继续使用受控 CLI 和标准资产；引入 Web 控制台或后台常驻进程属于独立产品决策。
+5. 默认不自动创建或更新 PR、不自动推送；任何低风险例外仍需独立策略、审计和回滚设计。
+6. Jira 卡片承载任务级业务审计结论，本地结构化事件承载完整执行轨迹；本地反馈报告不能替代 Jira 任务审计。
+7. transition 继续优先使用 profile 中明确配置的 ID；ID 缺失或候选冲突时阻断，不按名称或顺序猜测。
 
-1. `write-pr-evidence`：已确认保留独立契约和独立 CLI 入口，并按本文设计完成实现。
-2. 兼容承诺：采用推荐的 `exact_pair`，还是承诺 `same_major` / 其它兼容窗口。
-3. 发布治理：是否接受“release owner + 每次显式确认 + GitHub Release 为发布事实源 + 本地事件保存审计引用 + 客户端本地回滚、发布删除/改写由人工处理”的推荐模型。
-4. 发布入口：是否不新增 shell 包装，仅提供受控 `agentic-cli release publish`；若需要 shell 包装，需明确调用场景和人工门禁位置。
-
-同时确认以下全局设计项：
-
-5. **产品形态：** 推荐暂不引入 Web 控制台或后台常驻进程，继续以受控 CLI 和标准资产为运行入口。
-6. **低风险自动化：** 默认不自动创建或更新 PR、不自动推送；低风险例外必须具备独立策略、审计和回滚设计，并取得研发工程师确认。
-7. **任务审计事实源：** 推荐 Jira 卡片承载任务级业务审计结论，本地结构化事件承载完整执行轨迹；本地反馈报告不能替代 Jira 任务审计，也暂不新增独立审计服务。
-8. **transition 冲突裁决：** 推荐优先使用 profile 中明确配置的 transition ID；同名 transition 只作为展示别名，若 ID 缺失或存在多个候选则阻断并返回 `transition_mapping_ambiguous`，不按名称或顺序猜测。
-
-收到决策后，按 Task 4 -> Task 6 -> Task 7 顺序拆分实现、补测试、更新契约和安装资源，并在每个阶段完成独立验证。
+当前直接推进项是使用已发布版本完成真实 AO 试运行，并把已证实问题转化为下一版本改进设计和实施计划。
