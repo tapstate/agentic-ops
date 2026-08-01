@@ -781,6 +781,102 @@ git add scripts/lib/development-workflow.sh scripts/test-release-workflow.sh pla
 git commit -m "Fix(workflow): TAP-12371 兼容 GitHub 认证状态误报" -m "发布门禁在 gh auth status 失败时回退调用 gh api user 验证实际认证能力；两项检查均失败时继续阻断。补充认证回退和完全失败回归，并确认资源与 shell 检查通过。"
 ```
 
+## Task 10: GitHub Free 软门禁发布与人工合并恢复
+
+**Files:**
+- Modify: `scripts/lib/development-workflow.sh`
+- Modify: `scripts/lib/release-common.sh`
+- Modify: `scripts/release.sh`
+- Modify: `scripts/hotfix.sh`
+- Modify: `scripts/test-release-workflow.sh`
+- Modify: `docs/architecture/source-release-workflow-design.md`
+- Modify: `docs/maintainers/getting-started.md`
+- Modify: `docs/review-checklist.md`
+- Modify: `plans/source-release-workflow-implementation-plan.md`
+
+**Interfaces:**
+- Consumes: `--allow-soft-gate`，GitHub 仓库默认分支和 Merge commit 设置，固定发布 HEAD，PR 状态与 Merge commit。
+- Produces: `protection_mode=soft`，普通发布固定分支 `release/vX.Y`，`waiting_for_manual_merge` 状态码 `2`，同一 `publish` 命令的幂等恢复和二次完整验证。
+- Invariants: 默认仍执行硬门禁；软门禁不自动合并、不直推 `main`、不接受 Squash/Rebase、不移动 Tag、不删除发布分支。
+
+- [ ] **Step 1: 为软门禁基础检查和显式参数写失败测试**
+
+扩展 fake `gh` 和工作流 fixture，覆盖：默认硬门禁仍因缺少 Ruleset/Auto-merge 失败；显式软门禁在 Hooks、认证、远端 `develop`、默认 `main` 和 Merge commit 均满足时通过；任一保留检查失败时仍阻断。
+
+Run:
+
+```bash
+bash scripts/test-release-workflow.sh
+```
+
+Expected: RED；当前脚本不识别 `--allow-soft-gate`，也没有软门禁检查模式。
+
+- [ ] **Step 2: 实现软门禁参数与基础检查**
+
+在 `release.sh` 和 `hotfix.sh` 的 `prepare`、`publish` 接受 `--allow-soft-gate`。在 `development-workflow.sh` 增加只读软门禁检查，只放宽 Ruleset 与 Auto-merge；命令输出显式返回 `protection_mode=soft` 和风险提示，不自动检测套餐、不持久化默认值。
+
+- [ ] **Step 3: 为普通发布固定分支和等待状态写失败测试**
+
+覆盖第一次软门禁 `publish`：完整验证后从固定 develop HEAD 创建/复用 `release/vX.Y`，推送该分支并创建 `release/vX.Y → main` PR，不调用 `gh pr merge`，不推送 Tag，写入等待审计，输出 PR URL 和继续命令并返回 `2`。同名本地或远端分支目标不一致时失败。
+
+Run:
+
+```bash
+bash scripts/test-release-workflow.sh
+```
+
+Expected: RED；当前实现仍创建 `develop → main` PR 并启用 Auto-merge。
+
+- [ ] **Step 4: 实现普通发布等待与恢复状态机**
+
+在公共库中实现固定发布分支、等待审计、PR 状态读取和人工合并恢复。第二次同命令执行以 `release/vX.Y` 的固定 HEAD 为准，重新运行完整验证；PR 开放时继续返回 `2`，关闭未合并、HEAD 漂移或 `origin/main` 不包含固定 HEAD 时返回稳定错误码。只有验证通过且 Merge commit 保留原提交历史后才推送 `vX.Y` Tag。
+
+- [ ] **Step 5: 为 Hotfix 软门禁写失败测试并实现**
+
+覆盖 Hotfix 首次 `publish` 记录固定修复 HEAD、创建 PR 后返回 `2`、不调用 Auto-merge、不创建 Tag；人工 Merge commit 后同命令重新完整验证并完成审计。拒绝修复 HEAD 漂移、关闭未合并和不保留原提交历史的合并。
+
+- [ ] **Step 6: 同步维护者文档与发布检查清单**
+
+记录硬门禁默认、`--allow-soft-gate` 显式例外、普通发布固定分支、人工 Merge commit、返回码 `2`、继续命令、二次验证、Tag 最后推送和 GitHub Free 无服务器端保护风险。
+
+- [ ] **Step 7: 运行聚焦测试与完整回归**
+
+Run:
+
+```bash
+bash -n .githooks/pre-commit .githooks/pre-push scripts/release.sh scripts/hotfix.sh scripts/lib/release-common.sh scripts/lib/development-workflow.sh scripts/test-release-workflow.sh
+bash scripts/test-release-workflow.sh
+go test ./...
+bash scripts/test-resources.sh
+bash scripts/test-build.sh
+bash scripts/test-install.sh
+bash tests/e2e/ao-profile-flow.sh
+bash tests/e2e/local-fake-flow.sh
+bash tests/e2e/local-install-flow.sh
+bash tests/e2e/problem-resolution-flow.sh
+git diff --check
+```
+
+Expected: 全部退出 0；测试明确证明默认不降级、软门禁两阶段恢复和 Tag 最后推送。
+
+- [ ] **Step 8: 代码审查、提交并推送 develop**
+
+检查相对 `origin/develop` 的全部差异，确认没有 secrets、真实平台测试副作用和无关改动。使用 `TAP-12371` 提交计划与实现，根据用户已给出的推送授权推送 `develop`。
+
+- [ ] **Step 9: 使用软门禁发布 v0.3**
+
+Run:
+
+```bash
+scripts/release.sh prepare --version v0.3 --allow-soft-gate
+# 审阅并提交四平台构建产物与 checksums
+scripts/release.sh publish --version v0.3 --allow-soft-gate --confirm-release
+# 返回 2 后由研发工程师在 GitHub 页面使用 Merge commit 合并 PR
+scripts/release.sh publish --version v0.3 --allow-soft-gate --confirm-release
+```
+
+Expected: 首次 `publish` 创建 `release/v0.3 → main` PR 并等待人工合并；第二次重新完整验证、确认 `main` 包含固定 HEAD、最后推送 annotated Tag `v0.3` 并写完成审计。
+
 ## 后续外部平台待办
 
 - [ ] **由 `tapstate` 组织管理员完成私有仓库正式发布门禁配置**
@@ -798,4 +894,4 @@ git commit -m "Fix(workflow): TAP-12371 兼容 GitHub 认证状态误报" -m "�
      bash -c '. scripts/lib/development-workflow.sh; workflow_check_or_configure check "$PWD"'
      ```
 
-  完成标准：复检输出 `"ok":true`；在此之前，`scripts/release.sh` 和 `scripts/hotfix.sh` 的正式发布门禁继续阻断，不得绕过。
+  完成标准：硬门禁复检输出 `"ok":true`。在此之前，默认硬门禁继续阻断；确需发布时只能由研发工程师显式传入 `--allow-soft-gate`，按固定发布分支、人工 Merge commit 和二次完整验证流程执行。
