@@ -863,7 +863,7 @@ Expected: 全部退出 0；测试明确证明默认不降级、软门禁两阶�
 
 检查相对 `origin/develop` 的全部差异，确认没有 secrets、真实平台测试副作用和无关改动。使用 `TAP-12371` 提交计划与实现，根据用户已给出的推送授权推送 `develop`。
 
-- [ ] **Step 9: 使用软门禁发布 v0.3**
+- [x] **Step 9: 使用软门禁发布 v0.3**
 
 Run:
 
@@ -876,6 +876,8 @@ scripts/release.sh publish --version v0.3 --allow-soft-gate --confirm-release
 ```
 
 Expected: 首次 `publish` 创建 `release/v0.3 → main` PR 并等待人工合并；第二次重新完整验证、确认 `main` 包含固定 HEAD、最后推送 annotated Tag `v0.3` 并写完成审计。
+
+完成结果：PR #2 已使用 Merge commit `fa7402a` 合并到 `main`；第二轮完整验证于 `2026-08-01T15:23:09Z` 通过，远端 annotated Tag `v0.3` 已推送，完成审计已写入 `.local/release-runs/`。
 
 ## 后续外部平台待办
 
