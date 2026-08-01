@@ -244,11 +244,14 @@ release_confirm_publish() {
   local version="$2"
   local head="$3"
   local confirmed="$4"
+  local source_branch="${5:-develop}"
+  local target_branch="${6:-main}"
   local answer
 
   printf '即将发布 AgenticOps %s\n' "$version" >&2
   printf '仓库：%s\n' "${AGENTIC_OPS_RELEASE_REPOSITORY:-tapstate/agentic-ops}" >&2
   printf '发布 HEAD：%s\n' "$head" >&2
+  printf '合并方向：%s -> %s\n' "$source_branch" "$target_branch" >&2
   printf '完整验证：通过（%s）\n' "$RELEASE_VERIFIED_AT" >&2
   printf '待发布提交：\n' >&2
   git -C "$repo_root" log --format='  %h %s' "refs/remotes/origin/main..$head" >&2 || true
@@ -260,7 +263,7 @@ release_confirm_publish() {
     release_fail "release_confirmation_required" "confirmation" "非交互发布缺少最终确认" "确认展示内容后显式传入 --confirm-release"
     return 1
   fi
-  printf '确认执行 develop -> main 发布并在合并后推送 %s？[y/N] ' "$version" >&2
+  printf '确认执行 %s -> %s 合并？[y/N] ' "$source_branch" "$target_branch" >&2
   if ! IFS= read -r answer; then
     answer=""
   fi
@@ -281,11 +284,18 @@ release_write_pr_body() {
   local source_branch="$3"
   local target_branch="$4"
   local head="$5"
+  local jira_id="${6:-}"
+  local jira_evidence=""
+
+  if [ -n "$jira_id" ]; then
+    jira_evidence="- Jira 任务：\`$jira_id\`"
+  fi
 
   cat > "$body_file" <<EOF
 ## 发布证据
 
 - 版本基线：\`$version\`
+$jira_evidence
 - 源分支：\`$source_branch\`
 - 目标分支：\`$target_branch\`
 - 待合并 HEAD：\`$head\`
@@ -312,8 +322,11 @@ release_find_or_create_pr() {
   local target_branch="$3"
   local head="$4"
   local version="$5"
+  local publish_mode="${6:-release}"
+  local jira_id="${7:-}"
   local existing
   local body_file
+  local pr_title
 
   existing="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list \
     --repo "$repository" \
@@ -328,12 +341,17 @@ release_find_or_create_pr() {
   fi
 
   body_file="$(mktemp)"
-  release_write_pr_body "$body_file" "$version" "$source_branch" "$target_branch" "$head"
+  release_write_pr_body "$body_file" "$version" "$source_branch" "$target_branch" "$head" "$jira_id"
+  if [ "$publish_mode" = "hotfix" ]; then
+    pr_title="Hotfix: $jira_id 修复合并到 $target_branch"
+  else
+    pr_title="Release: $version 合并 $source_branch 到 $target_branch"
+  fi
   if ! RELEASE_PR_URL="$("${AGENTIC_OPS_GH_BIN:-gh}" pr create \
     --repo "$repository" \
     --base "$target_branch" \
     --head "$source_branch" \
-    --title "Release: $version 合并 $source_branch 到 $target_branch" \
+    --title "$pr_title" \
     --body-file "$body_file")"; then
     rm -f "$body_file"
     release_fail "release_pr_create_failed" "pull_request" "无法创建发布 PR" "请检查 GitHub 权限和现有 PR 后重试"
@@ -481,14 +499,26 @@ release_parse_hotfix_branch() {
 
 release_require_main_base() {
   local repo_root="$1"
+  local branch
+  local local_head
+  local remote_branch_head
   if ! git -C "$repo_root" fetch origin main >/dev/null 2>&1; then
     release_fail "hotfix_main_fetch_failed" "hotfix_base" "无法刷新 origin/main" "请检查网络和远端权限后重试"
     return 1
   fi
-  if ! git -C "$repo_root" merge-base --is-ancestor refs/remotes/origin/main HEAD; then
-    release_fail "hotfix_main_not_current" "hotfix_base" "修复分支未包含最新 origin/main" "请重新从最新 main 创建修复分支或人工处理基线"
-    return 1
+  if git -C "$repo_root" merge-base --is-ancestor refs/remotes/origin/main HEAD; then
+    return 0
   fi
+  local_head="$(git -C "$repo_root" rev-parse HEAD)"
+  if git -C "$repo_root" merge-base --is-ancestor "$local_head" refs/remotes/origin/main; then
+    branch="$(git -C "$repo_root" branch --show-current)"
+    remote_branch_head="$(git -C "$repo_root" ls-remote --heads origin "refs/heads/$branch" 2>/dev/null | awk '{print $1}')"
+    if [ "$remote_branch_head" = "$local_head" ]; then
+      return 0
+    fi
+  fi
+  release_fail "hotfix_main_not_current" "hotfix_base" "修复分支未包含最新 origin/main，且不能证明该 HEAD 已合并" "请重新从最新 main 创建修复分支或人工处理基线"
+  return 1
 }
 
 release_find_iteration_tag() {
@@ -509,4 +539,47 @@ release_find_iteration_tag() {
   done
   release_fail "iteration_tag_missing" "version_baseline" "origin/main 历史中没有可复用的 annotated vX.Y Tag" "请先完成一个正常版本发布"
   return 1
+}
+
+release_require_synced_hotfix_branch() {
+  local repo_root="$1"
+  local branch="$2"
+  local remote_branch
+  local local_head
+  local remote_head
+
+  remote_branch="$(git -C "$repo_root" ls-remote --heads origin "refs/heads/$branch" 2>/dev/null | awk '{print $1}')"
+  if [ -z "$remote_branch" ]; then
+    return 0
+  fi
+  if ! git -C "$repo_root" fetch origin "$branch" >/dev/null 2>&1; then
+    release_fail "hotfix_branch_fetch_failed" "branch_sync" "无法刷新远端修复分支" "请检查网络后重试"
+    return 1
+  fi
+  local_head="$(git -C "$repo_root" rev-parse HEAD)"
+  remote_head="$(git -C "$repo_root" rev-parse "refs/remotes/origin/$branch")"
+  if [ "$local_head" = "$remote_head" ] ||
+    git -C "$repo_root" merge-base --is-ancestor "$remote_head" "$local_head"; then
+    return 0
+  fi
+  if git -C "$repo_root" merge-base --is-ancestor "$local_head" "$remote_head"; then
+    release_fail "hotfix_branch_behind_remote" "branch_sync" "本地修复分支落后于远端同名分支" "请人工同步远端变更后重新验证"
+    return 1
+  fi
+  release_fail "hotfix_branch_diverged" "branch_sync" "本地与远端修复分支已分叉" "请人工处理分叉，不要由发布脚本自动 merge 或 rebase"
+  return 1
+}
+
+release_write_hotfix_audit() {
+  local repo_root="$1"
+  local jira_id="$2"
+  local version="$3"
+  local head="$4"
+  local branch="$5"
+  local audit_dir="$repo_root/.local/release-runs"
+  local audit_file="$audit_dir/hotfix-$jira_id-$head.json"
+  mkdir -p "$audit_dir"
+  printf '{"operation":"hotfix_publish","status":"completed","jira_id":"%s","version":"%s","branch":"%s","head":"%s","verified_at":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","next_action":"sync_hotfix_to_develop"}\n' \
+    "$jira_id" "$version" "$branch" "$head" "$RELEASE_VERIFIED_AT" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" > "$audit_file"
+  RELEASE_AUDIT_FILE="$audit_file"
 }

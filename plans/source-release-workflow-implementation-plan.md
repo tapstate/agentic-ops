@@ -468,7 +468,7 @@ git commit -m "Feat(hotfix): TAP-12371 实现 main 紧急修复准备流程" -m 
 - CLI: `scripts/hotfix.sh publish [--confirm-release] [--configure-workflow]`。
 - Reuses: Task 4 的完整验证、最终确认、PR、Auto-merge、等待和远端包含关系函数。
 
-- [ ] **Step 1: 写 Hotfix publish 测试**
+- [x] **Step 1: 写 Hotfix publish 测试**
 
 成功场景断言：
 
@@ -484,13 +484,13 @@ merge method=merge auto=true
 
 失败场景覆盖分支落后/分叉、验证失败、确认拒绝、PR 创建失败和等待超时。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run: `bash scripts/test-release-workflow.sh`
 
 Expected: FAIL，因为 Hotfix `publish` 尚未注册。
 
-- [ ] **Step 3: 实现 publish 和 Hotfix 审计**
+- [x] **Step 3: 实现 publish 和 Hotfix 审计**
 
 审计路径固定为：
 
@@ -500,7 +500,7 @@ Expected: FAIL，因为 Hotfix `publish` 尚未注册。
 
 成功输出 `operation=hotfix_publish`、Jira ID、PR URL、merge commit、版本基线和 `agentic_next_action=sync_hotfix_to_develop`。
 
-- [ ] **Step 4: 验证 Hotfix publish GREEN**
+- [x] **Step 4: 验证 Hotfix publish GREEN**
 
 Run:
 
@@ -511,7 +511,7 @@ bash -n scripts/hotfix.sh scripts/lib/release-common.sh
 
 Expected: PASS，且 fake push 日志中没有 tag。
 
-- [ ] **Step 5: 提交 Hotfix publish**
+- [x] **Step 5: 提交 Hotfix publish**
 
 ```bash
 git add scripts/hotfix.sh scripts/lib/release-common.sh scripts/test-release-workflow.sh

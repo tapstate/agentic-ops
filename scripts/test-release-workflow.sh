@@ -82,9 +82,20 @@ if [ "${1:-}" = "pr" ]; then
       exit 0
       ;;
     create)
+      if [ -f "$FAKE_GH_STATE_DIR/deny-pr-create" ]; then
+        echo "pull request creation denied" >&2
+        exit 1
+      fi
       printf 'pr-create\n' >> "$FAKE_GH_STATE_DIR/writes.log"
       touch "$FAKE_GH_STATE_DIR/pr-created"
       git rev-parse HEAD > "$FAKE_GH_STATE_DIR/pr-head"
+      previous_argument=""
+      for current_argument in "$@"; do
+        if [ "$previous_argument" = "--head" ]; then
+          printf '%s\n' "$current_argument" > "$FAKE_GH_STATE_DIR/pr-branch"
+        fi
+        previous_argument="$current_argument"
+      done
       printf 'https://github.com/tapstate/agentic-ops/pull/7\n'
       exit 0
       ;;
@@ -111,7 +122,7 @@ if [ "${1:-}" = "pr" ]; then
         git -C "$fake_merge_dir/repo" config user.email agentic-ops-test@example.test
         git -C "$fake_merge_dir/repo" config user.name "AgenticOps Test"
         git -C "$fake_merge_dir/repo" switch main >/dev/null
-        git -C "$fake_merge_dir/repo" merge --no-ff origin/develop -m "Merge release PR" >/dev/null
+        git -C "$fake_merge_dir/repo" merge --no-ff "origin/$(cat "$FAKE_GH_STATE_DIR/pr-branch")" -m "Merge release PR" >/dev/null
         git -C "$fake_merge_dir/repo" push origin main >/dev/null
         git -C "$fake_merge_dir/repo" rev-parse HEAD > "$FAKE_GH_STATE_DIR/merge-commit"
         touch "$FAKE_GH_STATE_DIR/pr-merged"
@@ -501,6 +512,105 @@ test -f "$hotfix_repo/install-resources/checksums.txt"
 test "$(git -C "$hotfix_repo" tag --list | wc -l | tr -d ' ')" = "$hotfix_tag_count_before"
 test -z "$(git -C "$hotfix_repo" ls-remote --heads origin refs/heads/harsen/AO-123/fix-main)"
 
+for verification_script in \
+  scripts/test-resources.sh \
+  scripts/test-build.sh \
+  scripts/test-install.sh \
+  tests/e2e/ao-profile-flow.sh \
+  tests/e2e/local-fake-flow.sh \
+  tests/e2e/local-install-flow.sh \
+  tests/e2e/problem-resolution-flow.sh; do
+  mkdir -p "$hotfix_repo/$(dirname "$verification_script")"
+  verification_name="$(printf '%s' "$verification_script" | tr '/' '-')"
+  cat > "$hotfix_repo/$verification_script" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' '$verification_name' >> "\${FAKE_VERIFY_LOG:?}"
+EOF
+  chmod 0755 "$hotfix_repo/$verification_script"
+done
+printf 'fix AO-123\n' > "$hotfix_repo/fix.txt"
+git -C "$hotfix_repo" add scripts tests fix.txt
+git -C "$hotfix_repo" commit -m "fix AO-123" >/dev/null
+hotfix_publish_head="$(git -C "$hotfix_repo" rev-parse HEAD)"
+hotfix_remote_tags_before="$(git --git-dir="$hotfix_remote" show-ref --tags)"
+export FAKE_GH_REMOTE="$hotfix_remote"
+rm -f "$fake_gh_state/pr-created" "$fake_gh_state/pr-merged" "$fake_gh_state/pr-head" "$fake_gh_state/pr-branch" "$fake_gh_state/merge-commit"
+: > "$fake_gh_state/writes.log"
+: > "$FAKE_VERIFY_LOG"
+
+if hotfix_failed_output="$(cd "$hotfix_repo" && FAKE_GO_FAIL=true scripts/hotfix.sh publish --confirm-release 2>&1)"; then
+  echo "expected failed Hotfix verification to stop publish" >&2
+  exit 1
+fi
+printf '%s\n' "$hotfix_failed_output" | grep 'release_verification_failed' >/dev/null
+test ! -s "$fake_gh_state/writes.log"
+test -z "$(git -C "$hotfix_repo" ls-remote --heads origin refs/heads/harsen/AO-123/fix-main)"
+
+: > "$FAKE_VERIFY_LOG"
+if (cd "$hotfix_repo" && scripts/hotfix.sh publish) >"$tmp_dir/hotfix-unconfirmed.out" 2>"$tmp_dir/hotfix-unconfirmed.err"; then
+  echo "expected unconfirmed Hotfix publish to fail" >&2
+  exit 1
+fi
+grep 'release_confirmation_required' "$tmp_dir/hotfix-unconfirmed.err" >/dev/null
+test ! -s "$fake_gh_state/writes.log"
+
+touch "$fake_gh_state/deny-pr-create"
+if (cd "$hotfix_repo" && scripts/hotfix.sh publish --confirm-release) >"$tmp_dir/hotfix-pr-denied.out" 2>"$tmp_dir/hotfix-pr-denied.err"; then
+  echo "expected denied Hotfix PR creation to fail" >&2
+  exit 1
+fi
+grep 'release_pr_create_failed' "$tmp_dir/hotfix-pr-denied.err" >/dev/null
+test "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/harsen/AO-123/fix-main)" = "$hotfix_publish_head"
+test ! -f "$fake_gh_state/pr-created"
+rm -f "$fake_gh_state/deny-pr-create"
+
+: > "$fake_gh_state/writes.log"
+: > "$FAKE_VERIFY_LOG"
+if ! (cd "$hotfix_repo" && scripts/hotfix.sh publish --confirm-release) >"$tmp_dir/hotfix-publish.out" 2>"$tmp_dir/hotfix-publish.err"; then
+  cat "$tmp_dir/hotfix-publish.err" >&2
+  echo "expected Hotfix publish to succeed" >&2
+  exit 1
+fi
+grep '"operation":"hotfix_publish"' "$tmp_dir/hotfix-publish.out" >/dev/null
+grep '"jira_id":"AO-123"' "$tmp_dir/hotfix-publish.out" >/dev/null
+grep '"version":"v0.3"' "$tmp_dir/hotfix-publish.out" >/dev/null
+grep '"agentic_next_action":"sync_hotfix_to_develop"' "$tmp_dir/hotfix-publish.out" >/dev/null
+test -f "$fake_gh_state/pr-created"
+test -f "$fake_gh_state/pr-merged"
+test "$(cat "$fake_gh_state/pr-branch")" = "harsen/AO-123/fix-main"
+hotfix_remote_main="$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)"
+git --git-dir="$hotfix_remote" merge-base --is-ancestor "$hotfix_publish_head" "$hotfix_remote_main"
+test "$(git --git-dir="$hotfix_remote" show-ref --tags)" = "$hotfix_remote_tags_before"
+if grep 'refs/tags/' "$fake_gh_state/calls.log" >/dev/null; then
+  echo "Hotfix publish attempted a tag operation" >&2
+  exit 1
+fi
+hotfix_audit="$hotfix_repo/.local/release-runs/hotfix-AO-123-$hotfix_publish_head.json"
+test -f "$hotfix_audit"
+grep '"status":"completed"' "$hotfix_audit" >/dev/null
+grep '"next_action":"sync_hotfix_to_develop"' "$hotfix_audit" >/dev/null
+
+: > "$fake_gh_state/writes.log"
+: > "$FAKE_VERIFY_LOG"
+(cd "$hotfix_repo" && scripts/hotfix.sh publish --confirm-release) >"$tmp_dir/hotfix-resume.out" 2>"$tmp_dir/hotfix-resume.err"
+grep '"operation":"hotfix_publish"' "$tmp_dir/hotfix-resume.out" >/dev/null
+test ! -s "$fake_gh_state/writes.log"
+test "$(git --git-dir="$hotfix_remote" show-ref --tags)" = "$hotfix_remote_tags_before"
+
+# shellcheck source=scripts/lib/release-common.sh
+. "$repo_root/scripts/lib/release-common.sh"
+rm -f "$fake_gh_state/pr-merged"
+RELEASE_PR_URL="https://github.com/tapstate/agentic-ops/pull/7"
+sleep() { :; }
+if release_wait_for_merge "tapstate/agentic-ops" >"$tmp_dir/merge-timeout.out" 2>"$tmp_dir/merge-timeout.err"; then
+  echo "expected merge wait timeout" >&2
+  exit 1
+fi
+unset -f sleep
+grep 'release_merge_timeout' "$tmp_dir/merge-timeout.err" >/dev/null
+touch "$fake_gh_state/pr-merged"
+
 no_tag_remote="$tmp_dir/no-tag-remote.git"
 no_tag_repo="$tmp_dir/no-tag-repo"
 git init --bare "$no_tag_remote" >/dev/null
@@ -513,12 +623,44 @@ git -C "$no_tag_repo" commit -m "no tag fixture" >/dev/null
 git -C "$no_tag_repo" branch -M main
 git -C "$no_tag_repo" push -u origin main >/dev/null
 git -C "$no_tag_repo" switch -c tester/AO-999/fix-main >/dev/null
-# shellcheck source=scripts/lib/release-common.sh
-. "$repo_root/scripts/lib/release-common.sh"
 if release_find_iteration_tag "$no_tag_repo" >"$tmp_dir/no-tag.out" 2>"$tmp_dir/no-tag.err"; then
   echo "expected missing iteration tag to fail" >&2
   exit 1
 fi
 grep 'iteration_tag_missing' "$tmp_dir/no-tag.err" >/dev/null
 
-printf '{"ok":true,"operation":"test_release_workflow","cases":23}\n'
+sync_remote="$tmp_dir/sync-remote.git"
+sync_seed="$tmp_dir/sync-seed"
+sync_local="$tmp_dir/sync-local"
+sync_branch="tester/AO-100/fix-main"
+git init --bare "$sync_remote" >/dev/null
+git clone "$sync_remote" "$sync_seed" >/dev/null 2>&1
+git -C "$sync_seed" config user.email agentic-ops-test@example.test
+git -C "$sync_seed" config user.name "AgenticOps Test"
+printf 'initial\n' > "$sync_seed/sync.txt"
+git -C "$sync_seed" add sync.txt
+git -C "$sync_seed" commit -m "initial sync fixture" >/dev/null
+git -C "$sync_seed" branch -M "$sync_branch"
+git -C "$sync_seed" push -u origin "$sync_branch" >/dev/null
+git clone --branch "$sync_branch" "$sync_remote" "$sync_local" >/dev/null 2>&1
+git -C "$sync_local" config user.email agentic-ops-test@example.test
+git -C "$sync_local" config user.name "AgenticOps Test"
+printf 'remote ahead\n' >> "$sync_seed/sync.txt"
+git -C "$sync_seed" add sync.txt
+git -C "$sync_seed" commit -m "remote ahead" >/dev/null
+git -C "$sync_seed" push origin "$sync_branch" >/dev/null
+if release_require_synced_hotfix_branch "$sync_local" "$sync_branch" >"$tmp_dir/hotfix-behind.out" 2>"$tmp_dir/hotfix-behind.err"; then
+  echo "expected behind Hotfix branch to fail" >&2
+  exit 1
+fi
+grep 'hotfix_branch_behind_remote' "$tmp_dir/hotfix-behind.err" >/dev/null
+printf 'local diverged\n' > "$sync_local/local.txt"
+git -C "$sync_local" add local.txt
+git -C "$sync_local" commit -m "local diverged" >/dev/null
+if release_require_synced_hotfix_branch "$sync_local" "$sync_branch" >"$tmp_dir/hotfix-diverged.out" 2>"$tmp_dir/hotfix-diverged.err"; then
+  echo "expected diverged Hotfix branch to fail" >&2
+  exit 1
+fi
+grep 'hotfix_branch_diverged' "$tmp_dir/hotfix-diverged.err" >/dev/null
+
+printf '{"ok":true,"operation":"test_release_workflow","cases":32}\n'

@@ -19,6 +19,7 @@ shift
 jira_id=""
 requested_user=""
 configure_workflow="false"
+confirm_release="false"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --jira-id)
@@ -39,6 +40,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --configure-workflow)
       configure_workflow="true"
+      shift
+      ;;
+    --confirm-release)
+      confirm_release="true"
       shift
       ;;
     *)
@@ -91,8 +96,33 @@ case "$command_name" in
       "$HOTFIX_JIRA_ID" "$HOTFIX_BRANCH" "$hotfix_version"
     ;;
   publish)
-    release_fail "hotfix_publish_not_implemented" "argument_parsing" "Hotfix publish 尚未实现" "请先完成发布脚本实施计划 Task 6"
-    exit 1
+    release_require_command git || exit 1
+    release_require_command go || exit 1
+    release_require_command "${AGENTIC_OPS_GH_BIN:-gh}" || exit 1
+    release_require_repo "$repo_root" || exit 1
+    hotfix_branch="$(git -C "$repo_root" branch --show-current)"
+    release_parse_hotfix_branch "$hotfix_branch" || exit 1
+    release_require_clean "$repo_root" || exit 1
+    workflow_mode="$(release_workflow_mode "$configure_workflow")"
+    workflow_check_or_configure "$workflow_mode" "$repo_root" >/dev/null || exit 1
+    release_require_main_base "$repo_root" || exit 1
+    release_require_synced_hotfix_branch "$repo_root" "$hotfix_branch" || exit 1
+    hotfix_version="$(release_find_iteration_tag "$repo_root")" || exit 1
+    hotfix_head="$(git -C "$repo_root" rev-parse HEAD)"
+    release_run_full_verification "$repo_root" "$hotfix_head" || exit 1
+    release_confirm_publish "$repo_root" "$hotfix_version" "$hotfix_head" "$confirm_release" "$hotfix_branch" main || exit 1
+    if ! git -C "$repo_root" push -u origin "$hotfix_branch"; then
+      release_fail "hotfix_branch_push_failed" "branch_push" "无法推送修复分支" "请检查远端权限和分支状态后重试"
+      exit 1
+    fi
+    release_repository="${AGENTIC_OPS_RELEASE_REPOSITORY:-tapstate/agentic-ops}"
+    release_find_or_create_pr "$release_repository" "$hotfix_branch" main "$hotfix_head" "$hotfix_version" hotfix "$HOTFIX_JIRA_ID" || exit 1
+    release_enable_auto_merge "$release_repository" || exit 1
+    release_wait_for_merge "$release_repository" || exit 1
+    release_verify_remote_contains "$repo_root" "$hotfix_head" || exit 1
+    release_write_hotfix_audit "$repo_root" "$HOTFIX_JIRA_ID" "$hotfix_version" "$hotfix_head" "$hotfix_branch"
+    printf '{"ok":true,"operation":"hotfix_publish","jira_id":"%s","version":"%s","branch":"%s","head":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","audit_file":"%s","agentic_next_action":"sync_hotfix_to_develop"}\n' \
+      "$HOTFIX_JIRA_ID" "$hotfix_version" "$hotfix_branch" "$hotfix_head" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "$RELEASE_AUDIT_FILE"
     ;;
   *)
     release_fail "invalid_hotfix_command" "argument_parsing" "不支持的 Hotfix 子命令 $command_name" "请使用 create、prepare 或 publish"
