@@ -1,10 +1,10 @@
-# 设计与实现审阅清单
+# 发布检查清单
 
-本文是第一个版本发布正式上线前的审阅资料，用于审阅 AgenticOps 第一阶段设计和当前本地实现是否一致。上线前审阅规则源头见 `docs/development-phase-rules.md`；正式上线后如果仍需审阅清单，应另建面向正式使用期的清单，不继续依赖本文。
+本文用于审阅 AgenticOps 源头仓库变更是否满足正式研发和发布要求。设计一致性、运行资产、分支保护、完整验证、版本基线、PR 合并事实和审计证据都必须在发布前确认。
 
 ## 1. 建议阅读顺序
 
-1. [目标定位](strategy/positioning.md)：确认 AgenticOps 的价值、边界和第一阶段目标。
+1. [目标定位](strategy/positioning.md)：确认 AgenticOps 的价值和边界。
 2. [项目规则](project-rules.md)：确认项目资料、运行资料、人工门禁和安全约束。
 3. [当前设计](architecture/agenticops-current-design.md)：确认整体架构、运行边界和主流程。
 4. [项目结构](architecture/project-structure.md)：确认仓库目录、全局安装目录和项目 AI 工作空间边界。
@@ -14,13 +14,14 @@
 8. [AI 员工手册](../install-resources/basic/handbooks/ai-employee-handbook.md)：确认 AIAgent 如何工作、何时停止、如何回写证据。
 9. [操作契约](contracts/operation-contract.md)：确认 AIAgent 能调用哪些受控操作，以及每个操作的输入、输出和副作用。
 10. [工作流配置](profiles/workflow-profile.md)：确认如何屏蔽 Jira 事实，并把具体项目流程映射成稳定配置。
-11. [CLI 运行时](runtime/cli-runtime.md)：确认第一阶段控制层采用 Go CLI 运行时，shell 只做安装引导，不做常驻服务或 Web 平台。
+11. [CLI 运行时](runtime/cli-runtime.md)：确认控制层采用 Go CLI 运行时，源头发布脚本与安装后业务运行时保持边界。
 12. [反馈闭环](workflows/feedback-loop.md)：确认工作日志如何沉淀为 AgenticOps 改进建议。
+13. [源码发布流程](architecture/source-release-workflow-design.md)：确认 `develop`、`main`、Tag 和 Hotfix 规则。
 
 ## 2. 必须确认的设计项
 
 - AgenticOps 是 AI 执行控制体系，不替代 Jira、研发工程师、拉取请求审查或 CI。
-- 第一阶段从已进入迭代、已指定研发工程师的 Jira 卡片开始。
+- 业务任务从已进入迭代、已指定研发工程师的 Jira 卡片开始。
 - 研发工程师手动触发任务接管，AIAgent 不能全自动接管任务。
 - `tapstate/agentic-ops` 是源码、规则、手册、契约、配置模板和通用文档的源头仓库。
 - `~/.agentic-ops` 是本机全局安装和配置目录，不是具体项目运行目录。
@@ -29,7 +30,9 @@
 - AIAgent 必须通过操作契约使用工具，不能直接猜测 Jira 字段、状态或工作流。
 - Git 和 GitHub 可以轻封装，但推送、创建拉取请求、合并和发布必须有人确认。
 - 工作日志可以生成改进建议，但不能未经人工确认自动改写 AgenticOps 源头规则。
-- 当前阶段只允许本地模拟流程实现；真实 Jira / GitHub 写操作、推送、创建拉取请求、合并和发布必须继续等待单独确认。
+- GitHub 默认分支是 `main`，日常开发使用 `develop`，`main` 只通过受保护 PR 的 Merge commit 合入。
+- 正常发布只使用 `scripts/release.sh`，Hotfix 只使用 `scripts/hotfix.sh`；两个 `publish` 都必须固定执行完整验证并取得最终确认。
+- 正常发布只推送二段式 annotated `vX.Y` tag；Hotfix 复用最近版本基线且不产生新 tag。
 
 ## 3. 审阅时重点找的问题
 
@@ -50,26 +53,26 @@
 - 验收证据是否能证明故事成立，而不是只说明“应该可以”。
 - 关联设计是否指向真实存在的设计、规则、契约、配置、模板或运行资产。
 
-## 4. 当前结构判断
+## 4. 发布前检查
 
-当前文档结构可以支持第一阶段审阅，不需要立即请求额外目录决策。
+执行发布前必须逐项确认：
 
-需要你决策的情况是：
+- 当前分支、目标版本和 Jira 绑定正确，工作区干净。
+- `core.hooksPath=.githooks`，远端 `develop` 存在，GitHub 默认分支和 `main` ruleset 配置符合预期。
+- `go test ./...`、资源、构建、安装和四个 E2E 验证全部通过。
+- `prepare` 生成的四平台安装资源和 checksum 已审查并提交。
+- 最终确认展示的 HEAD、提交列表、版本基线和合并方向正确。
+- PR 实际以 Merge commit 合入，`origin/main` 包含待发布 HEAD。
+- 正常发布的远端 tag 在合并验证后创建且不可变；Hotfix 没有 tag 写操作。
+- `.local/release-runs/` 审计不包含凭证或原始敏感日志。
 
-- 希望把 `install-resources/basic/` 中的默认运行资源和 `skills/` 提前填充完整，而不是继续作为设计说明。
-- 希望第一阶段改为常驻服务或 Web 控制台，而不是本地 Go CLI。
-- 希望 AgenticOps 强绑定某个固定 Jira 工作流，而不是通过工作流配置做项目级映射。
-- 希望降低人工确认门槛，例如允许低风险任务自动推送或自动创建拉取请求。
-- 希望把 Git / GitHub 做成完全封装的上层领域模型，而不是轻 guard。
+任一检查不满足时停止发布，按脚本稳定错误码处理，不手工绕过门禁。
 
-## 5. 当前审阅后的下一步
+## 5. 发布后的下一步
 
 后续推进必须先对齐故事线，再保持设计、计划、文档、契约、测试和代码同步。阶段性实现状态、剩余工作和验收命令只维护在 `plans/` 中。
 
-下一步计划必须先明确：
-
-- 真实 Jira 只读接入和写入接入的边界。
-- 工作流配置的真实字段映射和校验方式。
-- Git / GitHub guard 的人工门禁和审计记录。
-- release 二进制下载、安装、自动更新、本地恢复和 latest-only 支持策略。
-- 本地模拟流程到真实项目试点的验收标准。
+- 正常发布确认远端 tag 与发布记录一致。
+- Hotfix 明确提示并由研发工程师人工把修复同步回 `develop`。
+- 若能可靠确认 Jira 编号，推送成功后回写中文变更总结；回写失败只重试评论，不重复推送或发布。
+- 保留 PR、Merge commit 和本地 JSON 审计作为发布证据。

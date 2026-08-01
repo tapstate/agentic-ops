@@ -162,7 +162,7 @@ scripts/       本地和 CI 辅助脚本
 
 当前项目维护规范只约束维护 `tapstate/agentic-ops` 源头仓库的维护者或项目维护代理，不等同于安装后 AIAgent 执行业务 Jira 任务的运行规范。
 
-安装后 AIAgent 的执行规范必须维护在 AI 员工手册、操作契约、工作流配置、运行资产、模板和对应运行文档中。不得把当前项目研发期规则、提交规则、分支规则或仓库维护流程直接套用为 AIAgent 运行期执行规范；也不得把某个业务项目的 AIAgent 执行细则反向写成 AgenticOps 当前项目维护规则。
+安装后 AIAgent 的执行规范必须维护在 AI 员工手册、操作契约、工作流配置、运行资产、模板和对应运行文档中。不得把当前项目的提交规则、分支规则或仓库维护流程直接套用为 AIAgent 运行期执行规范；也不得把某个业务项目的 AIAgent 执行细则反向写成 AgenticOps 当前项目维护规则。
 
 ## 6. 规则类别与优先级
 
@@ -187,9 +187,32 @@ AgenticOps 配置项必须按 [配置规范](configuration-standards.md) 维护�
 
 任何绕过统一配置模块、让功能直接解析 YAML / `.env`、新增第二个 token 名称、把 secret 写入 YAML，或让文档与 CLI 行为不一致的调整，都必须先停止实现，输出审查分析和推荐方案，等待研发工程师决策。
 
-## 8. 项目研发期规则
+## 8. 源头仓库分支与发布规则
 
-AgenticOps 第一个版本发布正式上线前的临时规范统一维护在 `docs/development-phase-rules.md`。正式上线后，应删除本节或解除对该文档的依赖，再把仍需长期保留的内容迁移到对应永久规则区块。
+`tapstate/agentic-ops` 的 GitHub 默认分支必须是 `main`，日常开发必须在 `develop` 进行。`main` 不允许直接提交、直接推送、强推或删除，必须通过版本化 `.githooks` 和 GitHub Repository Ruleset 双重保护；合入方式只允许 PR 的 Merge commit。
+
+正常发布必须使用统一入口：
+
+```sh
+scripts/release.sh prepare --version vX.Y
+scripts/release.sh publish --version vX.Y
+```
+
+`prepare` 只创建本地 annotated `vX.Y` tag 并构建四平台安装资源，不暂存、不提交、不推送。研发工程师审查并提交生成资源后，`publish` 固定执行完整本地验证，取得最终确认，推送 `develop`，创建或复用 `develop -> main` PR，启用 Merge Auto-merge，等待实际合并并验证 `origin/main` 包含发布 HEAD，最后才推送不可变 tag。
+
+紧急修复必须使用统一入口：
+
+```sh
+scripts/hotfix.sh create --jira-id <KEY>
+scripts/hotfix.sh prepare
+scripts/hotfix.sh publish
+```
+
+修复分支必须从最新 `origin/main` 创建，格式为 `<user>/<jira-id>/fix-main`。Hotfix 复用 `main` 最近的二段式版本基线，沿用既有 `STATE-vX.Y.COMMIT_INDEX-COMMIT` 构造，不创建、移动或推送新 tag；合入 `main` 后必须提示研发工程师人工同步 `develop`。
+
+两个 `publish` 入口都必须在临时 worktree 中固定执行 Go、资源、构建、安装和四个 E2E 验证。验证命令不得通过参数替换或跳过；验证失败和最终确认前不得产生远端写入。非交互发布必须显式传入 `--confirm-release`。
+
+脚本必须在执行前检查本地 Hooks、远端 `develop`、GitHub 默认分支、Auto-merge 和 `main` ruleset。发现缺失或漂移时应逐项展示并取得确认后幂等修复；非交互配置必须显式传入 `--configure-workflow`。PR 和 Merge commit 是发布事实源，`.local/release-runs/` JSON 是本地执行审计。
 
 ## 9. 安装边界
 
@@ -358,7 +381,7 @@ TapData / TapState 方案 C 可以作为第一套默认工作流配置，但不�
 
 控制层必须采用本地优先的 Go CLI 运行时。
 
-shell 只用于安装引导，例如 `gh api | bash` 的 `install.sh`。业务逻辑、操作、策略、适配器、日志和反馈分析不得写在 shell 中。
+shell 只用于安装引导，例如 `gh api | bash` 的 `install.sh`。安装后 AIAgent 的业务逻辑、操作、策略、适配器、日志和反馈分析不得写在 shell 中。维护 AgenticOps 源头仓库时，`scripts/release.sh`、`scripts/hotfix.sh` 和 `scripts/lib/` 是项目级例外，可以编排 Git、GitHub、版本化 Hooks 和固定验证，但不得扩展为业务 Jira 任务运行时。
 
 统一入口为：
 
@@ -398,7 +421,7 @@ linux-arm64
 CLI 操作和脚本入口必须遵守成熟度边界：
 
 - 成熟固化的交互逻辑可以沉淀为原子化操作。
-- 脚本入口只做受控编排或调用，不承载 Jira、GitHub、Git、策略、门禁、证据或反馈的业务判断。
+- 安装后脚本入口只做受控编排或调用，不承载 AIAgent 的 Jira、GitHub、Git、策略、门禁、证据或反馈业务判断；源头仓库发布脚本按第 8 节例外执行。
 - 原子操作必须输入输出稳定、失败码明确、副作用可审计。
 - 原子操作必须能说明失败后应重试、重做、阻断还是转人工。
 - 尚未稳定的流程判断必须先进入运行手册、工作流配置、策略草案或反馈建议。
@@ -430,7 +453,7 @@ gh pr create
 gh pr edit
 ```
 
-未经研发工程师确认，AIAgent 不得执行推送、创建拉取请求、重新提交修复或合并。
+推送、创建拉取请求、重新提交修复和合并都属于人工门禁，只有在研发工程师明确授权的范围内才能执行。日常变更只允许推送 `develop` 或符合规则的任务分支，不得直接推送 `main`；正式发布和 Hotfix 必须使用第 8 节脚本，在完整验证后取得最终确认。
 
 ## 16. 人工门禁规则
 
@@ -441,7 +464,7 @@ gh pr edit
 - 实际影响范围超出 Jira 已确认边界。
 - 需要改变复杂度、风险等级或需求范围。
 - AI 连续修复失败或无法解释失败原因。
-- 推送、创建拉取请求、重新提交修复。
+- 未获得明确授权的推送、创建拉取请求或重新提交修复。
 - 拉取请求审查意见存在需要取舍的修改。
 - 合入、发布、线上风险相关动作。
 
@@ -546,7 +569,7 @@ Jira 任务编号必须能从分支名、用户指令、Jira 卡片或任务上�
 
 非平凡提交必须包含 body，用中文说明问题、处理方式、验证结果和风险。提交信息不得包含完整 Jira 描述、敏感日志、凭证或未经脱敏的客户信息。
 
-AIAgent 执行本仓库任务时，即使项目规则允许直提 `main`，也只有在研发工程师明确要求“提交变更”或“提交代码”后才能执行 `git commit`。提交完成后不得自动推送。
+AIAgent 只有在研发工程师明确要求“提交变更”或“提交代码”后才能执行 `git commit`，只有在明确要求推送或执行发布后才能 `git push`。不得直接提交或推送 `main`；日常开发使用 `develop`，正式发布与 Hotfix 使用第 8 节脚本。若能可靠确认 Jira 编号，推送成功后应将中文变更总结评论到对应 Jira 任务；评论失败时必须明确反馈“代码已推送但 Jira 回写未完成”，后续只重试评论，不重复推送。
 
 当规则变化影响 AIAgent 行为时，必须同步更新：
 

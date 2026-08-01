@@ -9,7 +9,7 @@ AgenticOps 的版本号必须让维护者和 AIAgent 快速识别：
 - 这是当前迭代起点后的第几次提交。
 - 这个产物来自哪个 Git 提交。
 
-版本号只允许在迭代开始时人工确定一次，例如打上 `v0.1` tag。后续构建必须自动生成完整版本，减少手工输入造成的错误。
+版本号只允许在正常发布准备时人工确定一次二段式版本基线，例如创建 annotated `v0.2` tag。后续构建必须自动生成完整版本，减少手工输入造成的错误。
 
 ## 2. 版本号格式
 
@@ -95,17 +95,23 @@ INS-vMAJOR.ITERATION.COMMIT_INDEX-COMMIT
 - 从迭代 tag 到当前 HEAD 的提交计数，作为 `COMMIT_INDEX`。
 - 当前 Git short commit 作为 `COMMIT`。
 
+`COMMIT_INDEX` 沿用现有分支无关的提交计数算法。正常开发、合并提交和 Hotfix 可能使编号出现跳跃，允许跳号，不通过修改提交策略来追求连续编号。
+
 如果当前仓库没有 `vMAJOR.ITERATION` 格式的迭代 tag，`scripts/version.sh` 和 `scripts/build.sh` 必须失败，并提示先创建迭代 tag，例如：
 
 ```sh
-git tag v0.1
+git tag -a v0.1 -m "AgenticOps v0.1 version baseline"
 ```
 
 ## 5. 设计考虑
 
 ### 迭代可读性
 
-`v0.1` 表示当前迭代，维护者不需要从日期反推业务阶段。大版本和迭代号只在迭代开始时人工确定一次，后续不再手工输入。
+`v0.1` 表示当前迭代，维护者不需要从日期反推业务阶段。大版本和迭代号只在正常发布时人工确定一次，后续不再手工输入。远端 tag 不得移动或覆盖。
+
+### Hotfix 版本
+
+Hotfix 从最新 `origin/main` 创建修复分支，复用 `main` 历史中最近的二段式 annotated tag。修复构建继续自动生成 `STATE-vX.Y.COMMIT_INDEX-COMMIT`，不创建补丁位、不创建新 tag，也不修改 `STATE` 含义。合并提交导致的 `COMMIT_INDEX` 跳跃属于允许结果。
 
 ### 可追溯性
 

@@ -177,6 +177,7 @@ takeover_task
 resume_takeover
 read_task_context
 write_evidence
+write_pr_evidence
 mark_blocked
 request_owner_confirmation
 prepare_pr
@@ -296,7 +297,7 @@ TapData / TapState 的方案 C 是第一套默认工作流配置，但不能硬�
 
 控制层采用本地优先的 Go CLI 运行时，不默认引入常驻 daemon 或 Web 平台。
 
-shell 只用于 `gh api | bash` 认证安装引导。业务逻辑、操作、策略、适配器、事件日志和反馈分析由 Go CLI 承载。
+shell 只用于 `gh api | bash` 认证安装引导。安装后 AIAgent 的业务逻辑、操作、策略、适配器、事件日志和反馈分析由 Go CLI 承载。维护 AgenticOps 源头仓库时，版本化 Hooks、`scripts/release.sh`、`scripts/hotfix.sh` 和共享库是项目级发布编排例外，不进入业务任务运行时。
 
 推荐形态：
 
@@ -347,6 +348,8 @@ darwin-amd64
 linux-amd64
 linux-arm64
 ```
+
+源头仓库以 `main` 为 GitHub 默认分支，以 `develop` 为日常开发分支。正常发布通过 `scripts/release.sh` 把完整验证后的 `develop` 以 Merge commit 合入受保护的 `main`，并在合并事实验证后推送二段式 annotated tag。紧急修复通过 `scripts/hotfix.sh` 从最新 `origin/main` 创建标准 `fix-main` 分支，合回 `main` 后人工同步 `develop`，且不创建新 tag。详细规则见 [源码发布工作流设计](source-release-workflow-design.md)。
 
 安装 bootstrap 允许依赖 `bash`、`curl` 和系统解压工具。`agentic-cli` 运行时不得依赖 `jq` 或本地 Python 环境。
 

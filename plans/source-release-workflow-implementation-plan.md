@@ -542,7 +542,7 @@ git commit -m "Feat(hotfix): TAP-12371 实现紧急修复发布流程" -m "复�
 - Consumes: `docs/architecture/source-release-workflow-design.md`。
 - Produces: 不依赖研发期文件的永久规则、维护者入口和发布故事。
 
-- [ ] **Step 1: 写资源一致性失败检查**
+- [x] **Step 1: 写资源一致性失败检查**
 
 在 `scripts/test-resources.sh` 增加：
 
@@ -555,13 +555,13 @@ test -x scripts/hotfix.sh
 test -x scripts/test-release-workflow.sh
 ```
 
-- [ ] **Step 2: 运行资源测试并确认 RED**
+- [x] **Step 2: 运行资源测试并确认 RED**
 
 Run: `bash scripts/test-resources.sh`
 
 Expected: FAIL，因为研发期文件仍存在。
 
-- [ ] **Step 3: 迁移永久规则并删除研发期文件**
+- [x] **Step 3: 迁移永久规则并删除研发期文件**
 
 按设计文档第 11 节迁移。必须保留：
 
@@ -575,7 +575,7 @@ bash scripts/test-install.sh
 
 必须删除研发期一律禁止真实 Jira/GitHub 写入、Git push、PR、merge 和发布的表述，改为永久策略门禁与明确人工确认。
 
-- [ ] **Step 4: 校正文档链接和当前计划**
+- [x] **Step 4: 校正文档链接和当前计划**
 
 Run:
 
@@ -587,7 +587,7 @@ rg -n 'development-phase-rules\.md|第一个版本发布正式上线前|当前�
 
 Expected: 不再出现研发期文件引用；GitHub Release 只在明确区分“不是本次源码发布”或历史纠正时出现。
 
-- [ ] **Step 5: 验证文档和资源 GREEN**
+- [x] **Step 5: 验证文档和资源 GREEN**
 
 Run:
 
@@ -598,7 +598,7 @@ git diff --check
 
 Expected: PASS。
 
-- [ ] **Step 6: 提交正式规则迁移**
+- [x] **Step 6: 提交正式规则迁移**
 
 ```bash
 git add AGENTS.md README.md docs/README.md docs/project-rules.md docs/ai-working-rules.md \

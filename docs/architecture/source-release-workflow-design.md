@@ -112,7 +112,7 @@ scripts/release.sh publish --version v0.3
 1. 重复执行仓库和研发流程门禁。
 2. 要求当前分支为 `develop`、工作区干净且全部变更已提交。
 3. fetch 远端；本地 `develop` 可以领先 `origin/develop`，但不得落后或分叉。
-4. 校验本地 tag 存在、远端同名 tag 不存在，且 tag 是当前 HEAD 的祖先。
+4. 校验本地 tag 存在且是当前 HEAD 的祖先；远端同名 tag 只允许在其目标与本地完全一致的恢复执行场景中复用。
 5. 在临时 Git worktree 中执行完整验证。
 6. 展示版本、目标仓库、源分支、目标分支、待推送提交和验证结果。
 7. 交互取得最终人工确认；非交互环境必须显式传入 `--confirm-release`。
@@ -249,15 +249,13 @@ bash tests/e2e/problem-resolution-flow.sh
 
 GitHub PR 和 Merge commit 是发布事实源，本地 JSON 是执行审计记录。输出不得包含 token、完整环境变量或原始敏感日志。
 
-## 11. 正式规则迁移
+## 11. 正式规则状态
 
-- 删除 `docs/development-phase-rules.md` 和所有研发期引用。
-- 删除“只能本地模拟”“禁止真实 GitHub/Jira 写入”“提交后必须停下且不能推送”等临时限制。
-- 将分支职责、质量门禁、版本、发布、Hotfix、人工确认和审计要求迁入永久项目规则。
-- 真实 Git、GitHub 和 Jira 操作继续受永久策略和明确人工确认约束，但不再被研发期规则一律禁止。
-- `docs/review-checklist.md` 改造成永久发布检查清单。
-- 当前架构、版本设计、项目维护者故事、维护者上手、README 索引和当前推进计划同步新流程。
-- 长期记忆中的 AgenticOps `main` 直提规则由本设计替代。
+- 原临时开发限制已移除，不再作为当前执行规则。
+- 分支职责、质量门禁、版本、发布、Hotfix、人工确认和审计要求已迁入永久项目规则。
+- 真实 Git、GitHub 和 Jira 操作继续受永久策略和明确人工确认约束，不再一律禁止。
+- 发布检查清单、当前架构、版本设计、项目维护者故事、维护者上手和 README 索引必须与本流程保持一致。
+- `main` 直提规则已由 `develop` 日常开发和 PR-only 发布流程替代。
 
 ## 12. 测试要求
 

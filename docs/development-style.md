@@ -4,7 +4,7 @@
 
 本文定义 AgenticOps 的开发风格和协作约束，用于提高 AIAgent 工作效率、减少幻觉、降低误改风险。
 
-开发必须保持文档、契约、测试和代码同步。真实 Jira / GitHub 写操作、推送、创建拉取请求、合并和发布必须经过策略、门禁和人工确认。第一个版本发布正式上线前的临时限制见 `docs/development-phase-rules.md`。
+开发必须保持文档、契约、测试和代码同步。真实 Jira / GitHub 写操作、推送、创建拉取请求、合并和发布必须经过策略、门禁和人工确认；AgenticOps 源头仓库按正式分支与发布流程执行。
 
 ## 2. 开发原则
 
@@ -42,7 +42,7 @@ AgenticOps 开发必须遵守：
 Go CLI 运行时的实现方向如下：
 
 - CLI 运行时使用 Go 作为主实现语言。
-- shell 只用于 `gh api | bash` 认证安装引导，不承载业务逻辑。
+- shell 不承载安装后 AIAgent 的业务逻辑。维护 AgenticOps 源头仓库时，`scripts/release.sh`、`scripts/hotfix.sh` 和共享库可以作为项目级发布编排例外。
 - CLI 入口统一为 `agentic-cli`。
 - Go 代码应拆分为清晰的命令、契约、策略、适配器、工作空间和反馈模块，不写巨大单文件。
 - stdout 只输出结构化 JSON。
@@ -51,6 +51,8 @@ Go CLI 运行时的实现方向如下：
 - 写操作必须经过策略、门禁和人工确认检查。
 - Linux (linux-amd64 / linux-arm64)、macOS Intel (darwin-amd64) 和 macOS Apple Silicon (darwin-arm64) 都必须通过对应平台二进制运行。
 - 发布流程必须支持快速构建、发布和自更新。
+- GitHub 默认分支是 `main`，日常开发使用 `develop`；`main` 只能通过受保护 PR 的 Merge commit 合入。
+- 正常发布与 Hotfix 必须分别使用统一脚本入口，固定执行完整验证、最终确认、合并事实校验和审计。
 
 ## 5. 测试方向
 
@@ -92,4 +94,4 @@ Go CLI 运行时的实现方向如下：
 - 检查标题结构。
 - 搜索未完成占位标记。
 - 检查新文档是否被 README 或相关索引引用。
-- 检查实现是否仍遵守真实 Jira / GitHub 写操作、推送、创建拉取请求、合并和发布的人工门禁。
+- 检查实现是否仍遵守真实 Jira / GitHub 写操作、推送、创建拉取请求、合并和发布的人工门禁，以及 `main` PR-only 规则。

@@ -26,6 +26,9 @@ agentic-ops/
   README.md
   agent-init.md
   .gitignore
+  .githooks/
+    pre-commit
+    pre-push
   docs/
     maintainers/
       getting-started.md
@@ -110,6 +113,11 @@ agentic-ops/
   examples/
   tests/
   scripts/
+    release.sh
+    hotfix.sh
+    lib/
+      development-workflow.sh
+      release-common.sh
 ```
 
 ## 4. 目录职责
@@ -123,12 +131,13 @@ agentic-ops/
 | `bin/` | 安装后的本机命令目录；仓库只跟踪 `bin/.gitkeep`，本地 `bin/agentic-cli` 被 `.gitignore` 忽略。 |
 | `.local/` | 本机安装和更新状态目录；仓库只跟踪 `.local/.gitkeep`，本地状态文件被 `.gitignore` 忽略。 |
 | `.superpowers/` | 项目工作空间中的本地执行状态目录，保存工具检查点、临时分析和缓存；被 `.gitignore` 忽略，不属于项目资料。 |
+| `.githooks/` | 源头仓库版本化 Git Hooks，阻止直接提交或推送 `main`。 |
 | `plans/` | 面向维护者和项目维护代理的可执行推进计划。 |
 | `skills/` | AgenticOps skills，让 AIAgent 知道如何工作。 |
 | `packages/agentic-cli/` | Go CLI 运行时源码位置。 |
 | `examples/` | 端到端演示样例。 |
 | `tests/` | 合同、脚本和文档一致性测试。 |
-| `scripts/` | 安装、检查和辅助脚本。 |
+| `scripts/` | 安装、检查和辅助脚本；`release.sh` 与 `hotfix.sh` 是源头仓库正式发布入口，共享实现位于 `scripts/lib/`。 |
 
 ## 5. 安装边界
 

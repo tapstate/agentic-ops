@@ -10,8 +10,9 @@
 2. [当前设计](../architecture/agenticops-current-design.md)：确认长期架构和事实源边界。
 3. [项目规则](../project-rules.md)：确认文档、运行资产、提交和安全边界。
 4. [配置规范](../configuration-standards.md)：确认配置分类、密钥落点、统一读取入口和变更审查要求。
-5. [项目研发期规则](../development-phase-rules.md)：确认第一个版本上线前的临时门禁。
-6. [项目结构](../architecture/project-structure.md)：确认目录职责。
+5. [源码发布流程](../architecture/source-release-workflow-design.md)：确认 `develop`、`main`、Tag 和 Hotfix 规则。
+6. [发布检查清单](../review-checklist.md)：确认完整验证和人工门禁。
+7. [项目结构](../architecture/project-structure.md)：确认目录职责。
 
 ## 初始化本地项目
 
@@ -35,6 +36,8 @@ bash tests/e2e/local-fake-flow.sh
 3. 修改源头文档、运行资产或 `agentic-cli` 实现。
 4. 执行验证命令。
 5. 用聚焦提交记录一个逻辑变更。
+
+日常开发在 `develop` 分支进行。发布前先执行 `scripts/release.sh prepare --version vX.Y`，审查并提交生成资源，再执行 `scripts/release.sh publish --version vX.Y`。`main` 只能通过受保护 PR 合入，不得直接提交或推送。紧急修复统一使用 `scripts/hotfix.sh`。
 
 ## 不要混用的资料
 
