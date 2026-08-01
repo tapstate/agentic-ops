@@ -1,5 +1,7 @@
 # AgenticOps 正式使用前问题修复计划
 
+> **状态：** 历史计划 / 已完成基线（2026-08-01）。本计划中的问题修复路径、诊断、更新、profile 和 policy 基线已落地；当前更新回滚、兼容治理和受控发布差距以 `plans/design-implementation-gap-todo-v1.md` 为准。
+
 > **For agentic workers:** 本计划用于实现正式使用前的成熟修复路径。执行时必须保持文档、契约、CLI、测试和发布资产同步，不得把未实现能力描述为当前能力。
 
 **Goal:** 让 AgenticOps 在正式给研发日常使用前，具备问题诊断、分类修复和快速同步能力；项目采用 latest-only 支持策略，BUG 只在最新版本修复，有新版本时推荐自动更新应用。
@@ -49,7 +51,7 @@ agentic-cli policy rollback --workspace <name>
   - 为四类问题定义稳定 `code`。
   - 失败输出必须包含 `required_human_action`。
   - 事件日志记录 CLI 版本、资产版本、操作、`task_type`、`current_stage`、`agentic_next_action`、`code` 和门禁状态。
-  - 实现说明：当前已完成结构化失败输出基线，失败输出包含 `required_human_action`、`task_type`、`current_stage` 和 `agentic_next_action`；事件模型已包含 `agentic_cli_version`、`version_state`、`asset_version`、`code`、`gate` 和 `gate_status`。当前只覆盖已实现本地模拟流程的命令，四类问题的完整业务门禁分别在后续 Task 4、Task 5 和 Task 6 中继续落地。
+  - 实现说明：结构化失败输出和事件字段基线已落地；当前可执行边界以源码、命令注册和自动化测试为准，未完成的更新兼容治理与受控发布不在本历史计划的完成结论内。
 
 - [x] **Task 2: 脱敏诊断包**
   - 实现 `doctor`。

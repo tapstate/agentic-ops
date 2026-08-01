@@ -1,5 +1,7 @@
 # Jira 门禁式缺陷修复流程实施计划
 
+> **状态：** 历史计划 / 已完成基线（2026-08-01）。本计划记录 Jira 门禁式缺陷修复流程的实施过程；AO 项目实际配置以 `docs/configuration/ao-agentic-defect-jira-configuration.md` 为准。
+
 > 本计划依据同日设计文档实施。未经用户明确指令，不执行 Git commit 或 push。
 
 ## 1. 角色统一

@@ -1,5 +1,7 @@
 # AO Agentic 缺陷 Jira 配置实施计划
 
+> **状态：** 历史计划 / 已完成基线（2026-08-01）。Jira 配置和 `AO-1` 实例验证已完成；实际配置以 `docs/configuration/ao-agentic-defect-jira-configuration.md` 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 在 Jira AO 团队管理业务空间中，把现有 `Agentic 缺陷` 表单切换到专用工作类型，并配置隔离的 Agentic 任务接管工作流及所需字段。

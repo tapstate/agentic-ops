@@ -1,10 +1,12 @@
 # Install And Init Configuration Guidance Implementation Plan
 
+> **状态：** 历史计划 / 已完成基线（2026-08-01）。本计划记录安装与工作空间初始化配置治理的实施过程，不再作为当前待执行计划。实际实现采用 `install-resources/basic/projects/<project>/profile.yaml` 加工作空间 `.agentic-ops/profile.local.yaml` overlay；当前状态和剩余差距以 `plans/design-implementation-gap-todo-v1.md` 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 防止安装资源携带维护者本机配置，并让工作空间初始化显式生成和确认研发工程师本地配置。
 
-**Architecture:** 共享 `install-resources/basic/profiles/*.yaml` 只保存项目标准流程、表单、仓库和模板映射；`workspace init` 在项目 AI 工作空间中物化本地 profile 时写入 Jira 用户和本地目录。若目标工作空间已有 AgenticOps 本地配置，初始化默认阻断并要求研发工程师通过显式参数确认覆盖。
+**Architecture:** 共享 `install-resources/basic/projects/<project>/profile.yaml` 只保存项目标准流程、表单、仓库和模板映射；`workspace init` 在项目 AI 工作空间中写入本地 `profile.local.yaml` overlay、Jira 用户和本地目录。若目标工作空间已有 AgenticOps 本地配置，初始化默认阻断并要求研发工程师通过显式参数确认覆盖。
 
 **Tech Stack:** Go `agentic-cli`、YAML profile、Bash installer、Markdown docs、Go unit tests、shell e2e tests。
 
@@ -23,15 +25,15 @@
 **Files:**
 - Modify: `packages/agentic-cli/internal/cli/workspace_agent_test.go`
 - Modify: `packages/agentic-cli/internal/clihandlers/workspace.go`
-- Modify: `install-resources/basic/profiles/tapdata.yaml`
+- Modify: `install-resources/basic/projects/tapdata/profile.yaml`
 - Modify: `packages/agentic-cli/internal/profile/validator_test.go`
 
 **Interfaces:**
-- Consumes: `workspace.Info{Root,RunsDir,RunLogsDir,FeedbackDir,ProfilesDir}` from `packages/agentic-cli/internal/workspace/workspace.go`.
-- Produces: `workspace init --confirm-existing-config`, which permits rewriting existing `.agentic-ops/agent.json`, `.agentic-ops/profiles/<project>.yaml`, or AgenticOps managed `AGENTS.md` block.
-- Produces: `materializeWorkspaceProfile(info workspace.Info, jiraUser string, jiraProjectOverride string) (string, string, error)` writes local paths derived from `info`.
+- Consumes: `workspace.Info{Name,Root,RunsDir,RunLogsDir,FeedbackDir}` from `packages/agentic-cli/internal/workspace/workspace.go`.
+- Produces: `workspace init --confirm-existing-config`, which permits rewriting existing `.agentic-ops/agent.json`, `.agentic-ops/profile.local.yaml`, or AgenticOps managed `AGENTS.md` block.
+- Produces: `prepareWorkspaceProfile(info workspace.Info, jiraUser string, jiraProjectOverride string, sourceRootOverride string) (workspaceProfilePlan, error)` writes a local overlay with paths derived from `info`.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```go
 func TestWorkspaceInitMaterializesLocalPathsFromCurrentWorkspace(t *testing.T) {
@@ -43,7 +45,7 @@ func TestWorkspaceInitMaterializesLocalPathsFromCurrentWorkspace(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
-	data, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "profiles", "tapdata.yaml"))
+	data, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "profile.local.yaml"))
 	if err != nil {
 		t.Fatalf("profile was not materialized: %v", err)
 	}
@@ -77,13 +79,13 @@ func TestWorkspaceInitRequiresConfirmationBeforeReplacingExistingConfig(t *testi
 }
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `go test ./packages/agentic-cli/internal/cli -run 'TestWorkspaceInit(MaterializesLocalPathsFromCurrentWorkspace|RequiresConfirmationBeforeReplacingExistingConfig)' -count=1`
 
 Expected: FAIL because `tapdata.yaml` still carries `/Users/lhs/...`, and `workspace init` silently rewrites existing local configuration.
 
-- [ ] **Step 3: Implement minimal code and profile cleanup**
+- [x] **Step 3: Implement minimal code and profile cleanup**
 
 ```go
 confirmExistingConfig := hasFlag(args, "--confirm-existing-config")
@@ -111,9 +113,9 @@ loadedProfile.Local.RunLogsDir = info.RunLogsDir
 loadedProfile.Local.FeedbackDir = info.FeedbackDir
 ```
 
-Change shared `install-resources/basic/profiles/tapdata.yaml` to use `user: "<jira-user>"` and `<project-ai-workspace>` placeholders for `local.*`.
+Change shared `install-resources/basic/projects/tapdata/profile.yaml` to use `user: "<jira-user>"` and `<project-ai-workspace>` placeholders for `local.*`; write user-specific values to the workspace overlay.
 
-- [ ] **Step 4: Run tests to verify pass**
+- [x] **Step 4: Run tests to verify pass**
 
 Run: `go test ./packages/agentic-cli/internal/cli ./packages/agentic-cli/internal/profile -count=1`
 
@@ -132,26 +134,26 @@ Expected: PASS.
 - Consumes: `workspace init --confirm-existing-config`.
 - Produces: documentation that distinguishes shared standard assets from local user configuration.
 
-- [ ] **Step 1: Write failing e2e/doc checks**
+- [x] **Step 1: Write failing e2e/doc checks**
 
-Update e2e expectations so repeated initialization uses `--confirm-existing-config`, and add checks that materialized `tapdata.yaml` contains the temporary workspace root instead of `/Users/lhs`.
+Update e2e expectations so repeated initialization uses `--confirm-existing-config`, and add checks that materialized `profile.local.yaml` contains the temporary workspace root instead of `/Users/lhs`.
 
-- [ ] **Step 2: Run e2e subset to verify failure**
+- [x] **Step 2: Run e2e subset to verify failure**
 
 Run: `bash tests/e2e/local-install-flow.sh`
 
 Expected before implementation alignment: FAIL if local path expectations still point to `/Users/lhs/...`.
 
-- [ ] **Step 3: Update docs and e2e scripts**
+- [x] **Step 3: Update docs and e2e scripts**
 
 Document that:
 
 - installation confirms existing global installation before update;
 - `workspace init` asks the user to provide Jira user and confirms before replacing existing local config;
-- shared profiles may use placeholders for user and local paths;
+- shared project profiles may use placeholders for user and local paths;
 - standards, forms, processes and repo mappings remain pre-adapted standard assets.
 
-- [ ] **Step 4: Run final verification**
+- [x] **Step 4: Run final verification**
 
 Run:
 

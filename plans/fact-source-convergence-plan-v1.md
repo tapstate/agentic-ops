@@ -1,5 +1,7 @@
 # AgenticOps 事实源收敛实施计划
 
+> **状态：** 历史计划 / 已完成基线（2026-08-01）。本计划记录上一轮事实源收敛过程；当前差距、过时设计和待决策事项以 `plans/design-implementation-gap-todo-v1.md` 及当前架构/运行文档为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让 AgenticOps 当前运行文档、实施计划和项目长期记忆与可执行源码、命令注册、机器可读契约、安装资源和自动化测试保持一致。

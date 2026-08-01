@@ -1,19 +1,19 @@
 # `resume-takeover` 完整恢复门禁设计
 
-本文定义 `resume-takeover` 如何从已有 `agentic_run_id` 恢复可信任务上下文，重新校验 Jira 所有权、目标仓库和标准流程阶段，并在恢复阻塞时形成受控的 Jira 反馈闭环。
+本文定义 `resume-takeover` 如何从已有 `agentic_run_id` 恢复可信任务上下文，重新校验 Jira 所有权、目标仓库和标准流程阶段，并在恢复阻塞时形成受控的 Jira 反馈闭环。`resume-takeover` 本身只执行读取和本地审计；Jira 评论由独立的 `add-task-comment` 操作按策略门禁和人工确认执行。
 
-本设计只完善恢复门禁，不实现通用工作流引擎，不执行真实 Jira 写入，也不改变 Git、GitHub、拉取请求、合并或发布边界。
+本设计只完善恢复门禁，不实现通用工作流引擎，不让恢复操作直接执行 Jira 写入，也不改变 Git、GitHub、拉取请求、合并或发布边界。
 
 ## 1. 背景
 
-当前 `resume-takeover` 已能读取本地事件，并校验 `workspace`、`issue_key`、`agent_id`、`agentic_id`、`task_class` 和 `process_id`。现有实现仍有以下缺口：
+恢复设计必须持续满足以下要求：
 
-- 真实 Jira 模式不会重新读取卡片并复核 `assignee` 和 `agentic_id`。
-- 恢复结果没有带回并校验接管时确定的 `target_repo`。
-- 历史事件阶段没有同时经过操作契约和 Standard Process Registry 校验。
-- `resume-takeover` 与 `write-evidence` 分别维护相似的运行上下文读取逻辑。
-- 恢复成功会把阶段改写为 `takeover_resumed`，无法准确表达真正的恢复点。
-- 任务级恢复阻塞只留在本地时，Jira 事实源缺少研发工程师和后续 AIAgent 可见的阻塞轨迹。
+- 真实 Jira 模式重新读取卡片并复核 `assignee` 和 `agentic_id`。
+- 恢复结果带回并校验接管时确定的 `target_repo`。
+- 历史事件阶段同时经过操作契约和 Standard Process Registry 校验。
+- `resume-takeover` 与 `write-evidence` 使用统一的运行上下文读取逻辑。
+- 恢复成功保留真正的恢复点，不把旧版 `takeover_resumed` 当作新的业务阶段。
+- 任务级恢复阻塞在本地可信时生成可由独立 Jira 原子写操作提交的阻塞反馈材料。
 
 恢复能力必须继续遵守事实源边界：Jira 是任务、负责人、状态和任务证据的事实源，本地事件只保存执行连续性和审计信息，不能覆盖 Jira 当前事实。
 
@@ -310,11 +310,11 @@ agentic-cli add-task-comment <issue-key> \
 - `jira_feedback_file`
 - `jira_feedback_category`
 
-## 10. 测试策略
+## 10. 验证重点
 
-实现采用测试驱动开发。
+恢复能力的验证必须覆盖以下行为，不限定具体测试文件或实施步骤：
 
-### 10.1 `RunContextReader` 单元测试
+### 10.1 运行上下文恢复
 
 - 从成功接管事件恢复完整上下文。
 - 检测 workspace、issue、agent、任务分类、流程和仓库冲突。
@@ -323,7 +323,7 @@ agentic-cli add-task-comment <issue-key> \
 - 忽略旧版 `takeover_resumed` 对业务阶段的推进。
 - 识别终态和待人工确认状态。
 
-### 10.2 `ResumeGate` 单元测试
+### 10.2 恢复门禁
 
 - 所有事实匹配时允许恢复。
 - assignee 已变化。
@@ -338,7 +338,7 @@ agentic-cli add-task-comment <issue-key> \
 - 流程已经终止。
 - 最近状态等待人工确认。
 
-### 10.3 CLI 集成测试
+### 10.3 CLI 行为
 
 - fake 模式成功恢复并保留阶段和下一步。
 - real 模式使用 recording client 完成只读复核。
@@ -349,39 +349,10 @@ agentic-cli add-task-comment <issue-key> \
 - `resume-takeover` 不调用 Jira 写接口。
 - 原子 `add-task-comment` 可以携带同一 `agentic_run_id` 写入生成的阻塞评论。
 
-### 10.4 E2E 和资源验证
+### 10.4 资源与流程一致性
 
-- 更新 `tests/e2e/local-fake-flow.sh`。
-- 更新并校验 `resume-takeover.yaml` 的失败码和输出字段。
-- 更新 DE-005 用户故事和 AI 员工手册中的两步 Jira 反馈流程。
-- 更新当前设计实现缺口计划的完成状态。
+- `resume-takeover` 的失败码和输出字段与操作契约一致。
+- 两步 Jira 反馈流程与用户故事、AI 员工手册和独立原子写操作一致。
+- fake 与 recording client 验证不调用真实 Jira 写接口。
 
-验证命令包括：
-
-```sh
-go test ./...
-bash scripts/test-build.sh
-bash scripts/test-resources.sh
-bash tests/e2e/local-fake-flow.sh
-git diff --check
-```
-
-## 11. 预计实现范围
-
-预计新增或修改：
-
-- `packages/agentic-cli/internal/runcontext/`
-- `packages/agentic-cli/internal/jira/resume_gate.go`
-- `packages/agentic-cli/internal/clihandlers/task.go`
-- `packages/agentic-cli/internal/clihandlers/evidence_context.go`
-- `packages/agentic-cli/internal/clihandlers/repo_paths.go`
-- `packages/agentic-cli/internal/cli/task_command_test.go`
-- `install-resources/basic/contracts/operations/resume-takeover.yaml`
-- `docs/user-stories/development-engineer/de-005-resume-takeover.md`
-- `install-resources/basic/handbooks/ai-employee-handbook.md`
-- `install-resources/<os-arch>/agentic-cli`
-- `install-resources/checksums.txt`
-- `tests/e2e/local-fake-flow.sh`
-- `plans/design-implementation-gap-todo-v1.md`
-
-实现不得调用真实 Jira 写操作。设计、计划、代码和测试完成后均先保留本地变更，只有研发工程师明确要求时才提交；提交后不得由 AIAgent 自动推送。
+具体验证入口、实现文件和阶段状态不属于架构设计事实源，由当前 `plans/` 计划和源码测试维护。任何实现仍必须遵守本设计的恢复只读边界，并在 Jira 写入时调用受控的独立原子操作。

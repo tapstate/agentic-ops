@@ -28,7 +28,7 @@
 rg -n '^- \[ \]' plans
 ```
 
-截至 2026-07-28，本计划仍包含真实 Jira 恢复校验、Git / GitHub 契约与运行入口对齐、更新回滚与兼容治理、受控发布和反馈分析等未完成项。计划状态必须以本文件勾选项和当前仓库验证结果为准。
+截至 2026-08-01，`resume-takeover`、问题修复基线、AO profile 和反馈分析本地基线已完成；当前仍待处理的是 `write-pr-evidence` 契约归属、更新回滚与兼容治理、受控发布治理，以及列出的产品/权限/事实源决策。计划状态必须以本文件勾选项和当前仓库验证结果为准。
 
 已有计划文件：
 
@@ -37,6 +37,8 @@ rg -n '^- \[ \]' plans
 - `plans/problem-resolution-plan-v1.md`
 - `plans/documentation-layering-cleanup-plan-v1.md`
 - `plans/fact-source-convergence-plan-v1.md`
+- `plans/install-init-configuration-guidance-plan-v1.md`
+- `plans/ao-agentic-defect-jira-configuration-plan.md`
 
 ## 1. 可直接推进的实现代办
 
@@ -47,6 +49,7 @@ rg -n '^- \[ \]' plans
 - `docs/architecture/full-design-implementation-design.md`
 
 **Current status:**
+- 本任务已完成，不再作为当前剩余实现差距；后续只做回归验证。
 - 已通过统一 `RunContextReader` 按 `agentic_run_id` 恢复历史上下文，并校验不可变事实、最近任务阶段、终态和人工门禁。
 - fake 与真实 Jira 模式都会重新读取卡片；真实模式额外复核 `assignee` 和 `agentic_id`。
 - 操作阶段由 `resume-takeover` 契约校验，Jira 状态映射后的业务阶段由 Standard Process Registry 校验。
@@ -380,12 +383,10 @@ bash scripts/test-resources.sh
 
 ## 3. 建议推进顺序
 
-1. 完成 Task 1 剩余的真实 Jira 所有权复核、`target_repo` 恢复和可恢复阶段校验。
-2. 在兼容承诺决策后推进 Task 6。
-3. 在发布权责和审计位置决策后推进 Task 7。
-4. 明确 Task 4 的 `write-pr-evidence` 与 `write-evidence` 职责边界，再新增运行入口或删除重复契约。
-5. Task 8 和 Task 9 已完成本地基线，后续只需按真实 AO 卡片和运行反馈补充回归证据。
-6. Task 2、Task 3 和 Task 5 只保留已完成基线和回归验证，不再作为待开发事项。
+1. 先明确 Task 4 的 `write-pr-evidence` 与 `write-evidence` 职责边界；未决前不新增运行入口，也不把孤立契约当作已实现能力。
+2. 在兼容承诺决策后推进 Task 6 的更新回滚、资产兼容校验和必要更新阻断。
+3. 在发布权责、授权方式、审计位置和回滚责任决策后推进 Task 7。
+4. Task 1、Task 2、Task 3、Task 5、Task 8 和 Task 9 只保留已完成基线和回归验证，不再作为待开发事项。
 
 ## 4. 总体验证入口
 

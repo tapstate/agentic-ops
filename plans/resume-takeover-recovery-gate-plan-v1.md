@@ -1,5 +1,7 @@
 # `resume-takeover` 完整恢复门禁实施计划
 
+> **状态：** 历史计划 / 已完成基线（2026-08-01）。本计划记录恢复门禁的实施过程；当前能力以源码、契约、测试和 `plans/design-implementation-gap-todo-v1.md` 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让 `resume-takeover` 从同一 `agentic_run_id` 恢复可信上下文，在恢复前完成 Jira 所有权、目标仓库、操作阶段和标准流程阶段校验，并为任务级阻塞生成受控 Jira 反馈材料。
