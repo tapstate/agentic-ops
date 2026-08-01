@@ -77,6 +77,18 @@ workflow_check_repository_settings() {
     [ "$workflow_merge_commit" = "true" ]
 }
 
+workflow_check_default_main() {
+  workflow_repository="$1"
+  workflow_default_branch="$(workflow_gh_value "repos/$workflow_repository" '.default_branch' 2>/dev/null)" || return 1
+  [ "$workflow_default_branch" = "main" ]
+}
+
+workflow_check_merge_commit() {
+  workflow_repository="$1"
+  workflow_merge_commit="$(workflow_gh_value "repos/$workflow_repository" '.allow_merge_commit' 2>/dev/null)" || return 1
+  [ "$workflow_merge_commit" = "true" ]
+}
+
 workflow_ruleset_id() {
   workflow_repository="$1"
   workflow_gh_value \
@@ -170,10 +182,45 @@ workflow_check_github_auth() {
   "$workflow_gh_bin" api user >/dev/null 2>&1
 }
 
+workflow_check_soft_gate() {
+  workflow_repo_root="$1"
+  workflow_repository="${AGENTIC_OPS_RELEASE_REPOSITORY:-tapstate/agentic-ops}"
+
+  if ! workflow_check_hooks "$workflow_repo_root"; then
+    workflow_fail "workflow_soft_gate_required" "软门禁要求当前 clone 启用版本化 Git Hooks" "请执行 git config core.hooksPath .githooks 后重试"
+    return 1
+  fi
+  if ! workflow_check_develop "$workflow_repo_root"; then
+    workflow_fail "workflow_soft_gate_required" "软门禁要求远端 develop 分支存在" "请先创建并推送 develop 分支"
+    return 1
+  fi
+  if ! workflow_check_github_auth; then
+    workflow_fail "workflow_github_auth_required" "GitHub CLI 未登录或凭证无效" "请执行 gh auth login -h github.com"
+    return 1
+  fi
+  if ! workflow_check_default_main "$workflow_repository"; then
+    workflow_fail "workflow_soft_gate_required" "软门禁要求 GitHub 默认分支为 main" "请由仓库管理员把默认分支设置为 main"
+    return 1
+  fi
+  if ! workflow_check_merge_commit "$workflow_repository"; then
+    workflow_fail "workflow_soft_gate_required" "软门禁要求仓库允许 Merge commit" "请由仓库管理员启用 Merge commit"
+    return 1
+  fi
+
+  printf '警告：protection_mode=soft，GitHub Free 私有仓库无法从服务器端阻止 main 直接推送。\n' >&2
+  printf '{"ok":true,"operation":"development_workflow","repository":"%s","default_branch":"main","development_branch":"develop","protection_mode":"soft"}\n' \
+    "$workflow_repository"
+}
+
 workflow_check_or_configure() {
   workflow_mode="$1"
   workflow_repo_root="${2:-$(pwd)}"
   workflow_repository="${AGENTIC_OPS_RELEASE_REPOSITORY:-tapstate/agentic-ops}"
+
+  if [ "$workflow_mode" = "soft" ]; then
+    workflow_check_soft_gate "$workflow_repo_root"
+    return $?
+  fi
 
   if ! workflow_check_hooks "$workflow_repo_root"; then
     workflow_confirm_change "$workflow_mode" "本地 Git Hooks 尚未启用" || return 1

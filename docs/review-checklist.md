@@ -30,7 +30,7 @@
 - AIAgent 必须通过操作契约使用工具，不能直接猜测 Jira 字段、状态或工作流。
 - Git 和 GitHub 可以轻封装，但推送、创建拉取请求、合并和发布必须有人确认。
 - 工作日志可以生成改进建议，但不能未经人工确认自动改写 AgenticOps 源头规则。
-- GitHub 默认分支是 `main`，日常开发使用 `develop`，`main` 只通过受保护 PR 的 Merge commit 合入。
+- GitHub 默认分支是 `main`，日常开发使用 `develop`，`main` 只通过 PR 的 Merge commit 合入；硬门禁依赖 Ruleset，软门禁依赖显式人工控制且不得伪装成服务器端保护。
 - 正常发布只使用 `scripts/release.sh`，Hotfix 只使用 `scripts/hotfix.sh`；两个 `publish` 都必须固定执行完整验证并取得最终确认。
 - 正常发布只推送二段式 annotated `vX.Y` tag；Hotfix 复用最近版本基线且不产生新 tag。
 
@@ -58,13 +58,15 @@
 执行发布前必须逐项确认：
 
 - 当前分支、目标版本和 Jira 绑定正确，工作区干净。
-- `core.hooksPath=.githooks`，远端 `develop` 存在，GitHub 默认分支和 `main` ruleset 配置符合预期。
+- `core.hooksPath=.githooks`，远端 `develop` 存在且 GitHub 默认分支为 `main`。
+- 默认硬门禁要求 `main` Ruleset、Auto-merge 和 Merge commit 配置符合预期；GitHub Free 私有仓库只有显式传入 `--allow-soft-gate` 才允许放宽 Ruleset 与 Auto-merge。
 - `go test ./...`、资源、构建、安装和四个 E2E 验证全部通过。
 - `prepare` 生成的四平台安装资源和 checksum 已审查并提交。
 - 最终确认展示的 HEAD、提交列表、版本基线和合并方向正确。
+- 软门禁普通发布使用固定 `release/vX.Y`；首次 `publish` 返回状态码 `2` 后未自动合并、未推送 Tag，人工合并后使用原命令恢复并完成第二次完整验证。
 - PR 实际以 Merge commit 合入，`origin/main` 包含待发布 HEAD。
 - 正常发布的远端 tag 在合并验证后创建且不可变；Hotfix 没有 tag 写操作。
-- `.local/release-runs/` 审计不包含凭证或原始敏感日志。
+- `.local/release-runs/` 审计记录正确的 `protection_mode` 和等待/完成状态，且不包含凭证或原始敏感日志。
 
 任一检查不满足时停止发布，按脚本稳定错误码处理，不手工绕过门禁。
 

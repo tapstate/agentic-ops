@@ -81,12 +81,21 @@ fi
 if [ "${1:-}" = "pr" ]; then
   case "${2:-}" in
     list)
+      if [ -f "$FAKE_GH_STATE_DIR/deny-pr-list" ]; then
+        echo "pull request list denied" >&2
+        exit 1
+      fi
       if [ -f "$FAKE_GH_STATE_DIR/pr-created" ]; then
+        if [[ "$*" == *"select(.headRefOid"* ]] && [[ "$*" != *"$(cat "$FAKE_GH_STATE_DIR/pr-head")"* ]]; then
+          exit 0
+        fi
         fake_pr_state="OPEN"
         if [ -f "$FAKE_GH_STATE_DIR/pr-merged" ]; then
           fake_pr_state="MERGED"
+        elif [ -f "$FAKE_GH_STATE_DIR/pr-closed" ]; then
+          fake_pr_state="CLOSED"
         fi
-        printf '7\thttps://github.com/tapstate/agentic-ops/pull/7\t%s\n' "$fake_pr_state"
+        printf '7\thttps://github.com/tapstate/agentic-ops/pull/7\t%s\t%s\n' "$fake_pr_state" "$(cat "$FAKE_GH_STATE_DIR/pr-head")"
       fi
       exit 0
       ;;
@@ -98,6 +107,7 @@ if [ "${1:-}" = "pr" ]; then
       printf 'pr-create\n' >> "$FAKE_GH_STATE_DIR/writes.log"
       touch "$FAKE_GH_STATE_DIR/pr-created"
       git rev-parse HEAD > "$FAKE_GH_STATE_DIR/pr-head"
+      git rev-parse HEAD > "$FAKE_GH_STATE_DIR/pr-fixed-head"
       previous_argument=""
       for current_argument in "$@"; do
         if [ "$previous_argument" = "--head" ]; then
@@ -110,14 +120,25 @@ if [ "${1:-}" = "pr" ]; then
       ;;
     view)
       case " $* " in
+        *" --json body "*)
+          printf '<!-- agentic-ops-fixed-head:%s -->\n' "$(cat "$FAKE_GH_STATE_DIR/pr-fixed-head")"
+          ;;
         *" --jq .number "*)
           printf '7\n'
           ;;
         *)
+          fake_view_state="OPEN"
+          fake_view_merge="-"
           if [ -f "$FAKE_GH_STATE_DIR/pr-merged" ]; then
-            printf 'MERGED\t%s\thttps://github.com/tapstate/agentic-ops/pull/7\t7\n' "$(cat "$FAKE_GH_STATE_DIR/merge-commit")"
+            fake_view_state="MERGED"
+            fake_view_merge="$(cat "$FAKE_GH_STATE_DIR/merge-commit")"
+          elif [ -f "$FAKE_GH_STATE_DIR/pr-closed" ]; then
+            fake_view_state="CLOSED"
+          fi
+          if [[ " $* " = *"headRefOid"* ]]; then
+            printf '%s\t%s\thttps://github.com/tapstate/agentic-ops/pull/7\t7\t%s\n' "$fake_view_state" "$fake_view_merge" "$(cat "$FAKE_GH_STATE_DIR/pr-head")"
           else
-            printf 'OPEN\t\thttps://github.com/tapstate/agentic-ops/pull/7\t7\n'
+            printf '%s\t%s\thttps://github.com/tapstate/agentic-ops/pull/7\t7\n' "$fake_view_state" "$fake_view_merge"
           fi
           ;;
       esac
@@ -170,11 +191,15 @@ case " $* " in
 esac
 
 case "$*" in
-  *".default_branch"*) printf 'main\n' ;;
+  *".default_branch"*)
+    if [ -f "$FAKE_GH_STATE_DIR/wrong-default-branch" ]; then printf 'develop\n'; else printf 'main\n'; fi
+    ;;
   *".allow_auto_merge"*)
     if [ -f "$FAKE_GH_STATE_DIR/repository-configured" ]; then printf 'true\n'; else printf 'false\n'; fi
     ;;
-  *".allow_merge_commit"*) printf 'true\n' ;;
+  *".allow_merge_commit"*)
+    if [ -f "$FAKE_GH_STATE_DIR/deny-merge-commit" ]; then printf 'false\n'; else printf 'true\n'; fi
+    ;;
   *"/rulesets/42"*)
     if [ -f "$FAKE_GH_STATE_DIR/ruleset-configured" ]; then
       printf 'active\tbranch\ttrue\t0\ttrue\ttrue\ttrue\ttrue\t0\tfalse\tfalse\tfalse\n'
@@ -190,6 +215,19 @@ case "$*" in
 esac
 EOF
 chmod 0755 "$fake_gh"
+
+fake_merge_pr_manually() {
+  fake_merge_dir="$(mktemp -d)"
+  git clone "$FAKE_GH_REMOTE" "$fake_merge_dir/repo" >/dev/null 2>&1
+  git -C "$fake_merge_dir/repo" config user.email agentic-ops-test@example.test
+  git -C "$fake_merge_dir/repo" config user.name "AgenticOps Test"
+  git -C "$fake_merge_dir/repo" switch main >/dev/null
+  git -C "$fake_merge_dir/repo" merge --no-ff "origin/$(cat "$FAKE_GH_STATE_DIR/pr-branch")" -m "Manual Merge release PR" >/dev/null
+  git -C "$fake_merge_dir/repo" push origin main >/dev/null
+  git -C "$fake_merge_dir/repo" rev-parse HEAD > "$FAKE_GH_STATE_DIR/merge-commit"
+  touch "$FAKE_GH_STATE_DIR/pr-merged"
+  rm -rf "$fake_merge_dir"
+}
 
 workflow_remote="$tmp_dir/workflow-remote.git"
 workflow_repo="$tmp_dir/workflow-repo"
@@ -277,6 +315,39 @@ if workflow_check_or_configure check "$workflow_repo" >"$tmp_dir/auth-failed.out
 fi
 grep 'workflow_github_auth_required' "$tmp_dir/auth-failed.err" >/dev/null
 rm -f "$fake_gh_state/deny-auth-status" "$fake_gh_state/deny-api-user"
+
+: > "$fake_gh_state/writes.log"
+rm -f "$fake_gh_state/repository-configured" "$fake_gh_state/ruleset-configured"
+if ! workflow_check_or_configure soft "$workflow_repo" >"$tmp_dir/soft-gate.out" 2>"$tmp_dir/soft-gate.err"; then
+  cat "$tmp_dir/soft-gate.err" >&2
+  echo "expected explicit soft gate to allow missing Auto-merge and ruleset" >&2
+  exit 1
+fi
+grep '"protection_mode":"soft"' "$tmp_dir/soft-gate.out" >/dev/null
+test ! -s "$fake_gh_state/writes.log"
+
+touch "$fake_gh_state/deny-merge-commit"
+if workflow_check_or_configure soft "$workflow_repo" >"$tmp_dir/soft-merge.out" 2>"$tmp_dir/soft-merge.err"; then
+  echo "expected soft gate to require Merge commit" >&2
+  exit 1
+fi
+grep 'workflow_soft_gate_required' "$tmp_dir/soft-merge.err" >/dev/null
+rm -f "$fake_gh_state/deny-merge-commit"
+
+touch "$fake_gh_state/wrong-default-branch"
+if workflow_check_or_configure soft "$workflow_repo" >"$tmp_dir/soft-default.out" 2>"$tmp_dir/soft-default.err"; then
+  echo "expected soft gate to require main as default branch" >&2
+  exit 1
+fi
+grep 'workflow_soft_gate_required' "$tmp_dir/soft-default.err" >/dev/null
+rm -f "$fake_gh_state/wrong-default-branch"
+
+if workflow_check_or_configure check "$workflow_repo" >"$tmp_dir/no-auto-downgrade.out" 2>"$tmp_dir/no-auto-downgrade.err"; then
+  echo "expected hard gate to remain the default" >&2
+  exit 1
+fi
+grep 'workflow_configuration_required' "$tmp_dir/no-auto-downgrade.err" >/dev/null
+touch "$fake_gh_state/repository-configured" "$fake_gh_state/ruleset-configured"
 
 if [ ! -f "$repo_root/scripts/lib/release-common.sh" ]; then
   echo "missing release common functions" >&2
@@ -460,6 +531,59 @@ test ! -s "$fake_gh_state/writes.log"
 test "$(git --git-dir="$workflow_remote" rev-parse refs/heads/main)" = "$remote_main_after_publish"
 test "$(git --git-dir="$workflow_remote" rev-parse refs/tags/v0.3^{})" = "$remote_tag_after_publish"
 
+rm -f "$fake_gh_state/repository-configured" "$fake_gh_state/ruleset-configured"
+rm -f "$fake_gh_state/pr-created" "$fake_gh_state/pr-merged" "$fake_gh_state/pr-head" "$fake_gh_state/pr-fixed-head" "$fake_gh_state/pr-branch" "$fake_gh_state/merge-commit"
+: > "$fake_gh_state/writes.log"
+printf 'soft release\n' > "$workflow_repo/soft-release.txt"
+git -C "$workflow_repo" add soft-release.txt
+git -C "$workflow_repo" commit -m "soft release change" >/dev/null
+
+if ! (cd "$workflow_repo" && scripts/release.sh prepare --version v0.6 --allow-soft-gate) >"$tmp_dir/soft-prepare.out" 2>"$tmp_dir/soft-prepare.err"; then
+  cat "$tmp_dir/soft-prepare.err" >&2
+  echo "expected explicit soft release prepare to succeed" >&2
+  exit 1
+fi
+grep '"protection_mode":"soft"' "$tmp_dir/soft-prepare.out" >/dev/null
+git -C "$workflow_repo" add install-resources
+git -C "$workflow_repo" commit -m "commit soft release assets" >/dev/null
+soft_publish_head="$(git -C "$workflow_repo" rev-parse HEAD)"
+
+: > "$FAKE_VERIFY_LOG"
+set +e
+(cd "$workflow_repo" && scripts/release.sh publish --version v0.6 --allow-soft-gate --confirm-release) >"$tmp_dir/soft-publish-wait.out" 2>"$tmp_dir/soft-publish-wait.err"
+soft_wait_status=$?
+set -e
+if [ "$soft_wait_status" != "2" ]; then
+  cat "$tmp_dir/soft-publish-wait.err" >&2
+  echo "expected soft publish to pause with status 2, got $soft_wait_status" >&2
+  exit 1
+fi
+grep '"status":"waiting_for_manual_merge"' "$tmp_dir/soft-publish-wait.out" >/dev/null
+grep '"protection_mode":"soft"' "$tmp_dir/soft-publish-wait.out" >/dev/null
+grep '"agentic_next_action":"merge_pr_with_merge_commit_then_rerun"' "$tmp_dir/soft-publish-wait.out" >/dev/null
+test "$(cat "$fake_gh_state/pr-branch")" = "release/v0.6"
+test "$(git --git-dir="$workflow_remote" rev-parse refs/heads/release/v0.6)" = "$soft_publish_head"
+test -z "$(git --git-dir="$workflow_remote" show-ref --tags v0.6 || true)"
+if grep '^pr-merge$' "$fake_gh_state/writes.log" >/dev/null; then
+  echo "soft publish must not invoke automatic PR merge" >&2
+  exit 1
+fi
+soft_wait_audit="$workflow_repo/.local/release-runs/release-v0.6-$soft_publish_head.json"
+grep '"status":"waiting_for_manual_merge"' "$soft_wait_audit" >/dev/null
+grep '"protection_mode":"soft"' "$soft_wait_audit" >/dev/null
+
+fake_merge_pr_manually
+: > "$fake_gh_state/writes.log"
+(cd "$workflow_repo" && scripts/release.sh publish --version v0.6 --allow-soft-gate --confirm-release) >"$tmp_dir/soft-publish-complete.out" 2>"$tmp_dir/soft-publish-complete.err"
+grep '"operation":"release_publish"' "$tmp_dir/soft-publish-complete.out" >/dev/null
+grep '"protection_mode":"soft"' "$tmp_dir/soft-publish-complete.out" >/dev/null
+test "$(git --git-dir="$workflow_remote" rev-parse refs/tags/v0.6^{})" = "$(git -C "$workflow_repo" rev-list -n 1 v0.6)"
+test "$(grep -c '^go-test$' "$FAKE_VERIFY_LOG")" = "2"
+grep '"status":"completed"' "$soft_wait_audit" >/dev/null
+grep '"protection_mode":"soft"' "$soft_wait_audit" >/dev/null
+test "$(git --git-dir="$workflow_remote" rev-parse refs/heads/release/v0.6)" = "$soft_publish_head"
+touch "$fake_gh_state/repository-configured" "$fake_gh_state/ruleset-configured"
+
 if [ ! -x "$repo_root/scripts/hotfix.sh" ]; then
   echo "missing hotfix entrypoint" >&2
   exit 1
@@ -556,7 +680,7 @@ git -C "$hotfix_repo" commit -m "fix AO-123" >/dev/null
 hotfix_publish_head="$(git -C "$hotfix_repo" rev-parse HEAD)"
 hotfix_remote_tags_before="$(git --git-dir="$hotfix_remote" show-ref --tags)"
 export FAKE_GH_REMOTE="$hotfix_remote"
-rm -f "$fake_gh_state/pr-created" "$fake_gh_state/pr-merged" "$fake_gh_state/pr-head" "$fake_gh_state/pr-branch" "$fake_gh_state/merge-commit"
+rm -f "$fake_gh_state/pr-created" "$fake_gh_state/pr-merged" "$fake_gh_state/pr-head" "$fake_gh_state/pr-fixed-head" "$fake_gh_state/pr-branch" "$fake_gh_state/merge-commit"
 : > "$fake_gh_state/writes.log"
 : > "$FAKE_VERIFY_LOG"
 
@@ -619,8 +743,119 @@ grep '"operation":"hotfix_publish"' "$tmp_dir/hotfix-resume.out" >/dev/null
 test ! -s "$fake_gh_state/writes.log"
 test "$(git --git-dir="$hotfix_remote" show-ref --tags)" = "$hotfix_remote_tags_before"
 
+rm -f "$fake_gh_state/repository-configured" "$fake_gh_state/ruleset-configured"
+rm -f "$fake_gh_state/pr-created" "$fake_gh_state/pr-merged" "$fake_gh_state/pr-closed" "$fake_gh_state/pr-head" "$fake_gh_state/pr-fixed-head" "$fake_gh_state/pr-branch" "$fake_gh_state/merge-commit"
+: > "$fake_gh_state/writes.log"
+(cd "$hotfix_repo" && scripts/hotfix.sh create --jira-id AO-124 --user harsen) >"$tmp_dir/soft-hotfix-create.out" 2>"$tmp_dir/soft-hotfix-create.err"
+printf 'fix AO-124\n' > "$hotfix_repo/fix-124.txt"
+git -C "$hotfix_repo" add fix-124.txt
+git -C "$hotfix_repo" commit -m "fix AO-124" >/dev/null
+soft_hotfix_head="$(git -C "$hotfix_repo" rev-parse HEAD)"
+
+if ! (cd "$hotfix_repo" && scripts/hotfix.sh prepare --allow-soft-gate) >"$tmp_dir/soft-hotfix-prepare.out" 2>"$tmp_dir/soft-hotfix-prepare.err"; then
+  cat "$tmp_dir/soft-hotfix-prepare.err" >&2
+  echo "expected explicit soft Hotfix prepare to succeed" >&2
+  exit 1
+fi
+grep '"protection_mode":"soft"' "$tmp_dir/soft-hotfix-prepare.out" >/dev/null
+
+: > "$FAKE_VERIFY_LOG"
+set +e
+(cd "$hotfix_repo" && scripts/hotfix.sh publish --allow-soft-gate --confirm-release) >"$tmp_dir/soft-hotfix-wait.out" 2>"$tmp_dir/soft-hotfix-wait.err"
+soft_hotfix_wait_status=$?
+set -e
+if [ "$soft_hotfix_wait_status" != "2" ]; then
+  cat "$tmp_dir/soft-hotfix-wait.err" >&2
+  echo "expected soft Hotfix publish to pause with status 2, got $soft_hotfix_wait_status" >&2
+  exit 1
+fi
+grep '"status":"waiting_for_manual_merge"' "$tmp_dir/soft-hotfix-wait.out" >/dev/null
+grep '"protection_mode":"soft"' "$tmp_dir/soft-hotfix-wait.out" >/dev/null
+test "$(cat "$fake_gh_state/pr-branch")" = "harsen/AO-124/fix-main"
+test "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/harsen/AO-124/fix-main)" = "$soft_hotfix_head"
+if grep '^pr-merge$' "$fake_gh_state/writes.log" >/dev/null; then
+  echo "soft Hotfix must not invoke automatic PR merge" >&2
+  exit 1
+fi
+soft_hotfix_audit="$hotfix_repo/.local/release-runs/hotfix-AO-124-$soft_hotfix_head.json"
+grep '"status":"waiting_for_manual_merge"' "$soft_hotfix_audit" >/dev/null
+grep '"jira_id":"AO-124"' "$soft_hotfix_audit" >/dev/null
+
+fake_merge_pr_manually
+: > "$fake_gh_state/writes.log"
+(cd "$hotfix_repo" && scripts/hotfix.sh publish --allow-soft-gate --confirm-release) >"$tmp_dir/soft-hotfix-complete.out" 2>"$tmp_dir/soft-hotfix-complete.err"
+grep '"operation":"hotfix_publish"' "$tmp_dir/soft-hotfix-complete.out" >/dev/null
+grep '"protection_mode":"soft"' "$tmp_dir/soft-hotfix-complete.out" >/dev/null
+test "$(grep -c '^go-test$' "$FAKE_VERIFY_LOG")" = "2"
+grep '"status":"completed"' "$soft_hotfix_audit" >/dev/null
+grep '"protection_mode":"soft"' "$soft_hotfix_audit" >/dev/null
+test "$(git --git-dir="$hotfix_remote" show-ref --tags)" = "$hotfix_remote_tags_before"
+touch "$fake_gh_state/repository-configured" "$fake_gh_state/ruleset-configured"
+
 # shellcheck source=scripts/lib/release-common.sh
 . "$repo_root/scripts/lib/release-common.sh"
+
+RELEASE_PR_URL="https://github.com/tapstate/agentic-ops/pull/7"
+RELEASE_VERIFIED_AT="2026-08-01T00:00:00Z"
+rm -f "$fake_gh_state/pr-merged" "$fake_gh_state/pr-closed"
+printf '%s\n' "$zero_sha" > "$fake_gh_state/pr-head"
+printf '%s\n' "$soft_hotfix_head" > "$fake_gh_state/pr-fixed-head"
+if release_wait_for_manual_merge "$hotfix_repo" "tapstate/agentic-ops" hotfix_publish v0.3 "$soft_hotfix_head" "harsen/AO-124/fix-main" AO-124 >"$tmp_dir/head-drift.out" 2>"$tmp_dir/head-drift.err"; then
+  echo "expected soft gate to reject PR HEAD drift" >&2
+  exit 1
+fi
+grep 'release_pr_head_drift' "$tmp_dir/head-drift.err" >/dev/null
+
+printf '%s\n' "$soft_hotfix_head" > "$fake_gh_state/pr-head"
+printf '%s\n' "$soft_hotfix_head" > "$fake_gh_state/pr-fixed-head"
+touch "$fake_gh_state/pr-closed"
+if release_wait_for_manual_merge "$hotfix_repo" "tapstate/agentic-ops" hotfix_publish v0.3 "$soft_hotfix_head" "harsen/AO-124/fix-main" AO-124 >"$tmp_dir/pr-closed.out" 2>"$tmp_dir/pr-closed.err"; then
+  echo "expected soft gate to reject a closed unmerged PR" >&2
+  exit 1
+fi
+grep 'release_pr_closed' "$tmp_dir/pr-closed.err" >/dev/null
+rm -f "$fake_gh_state/pr-closed"
+
+printf '%s\n' "$soft_hotfix_head" > "$fake_gh_state/pr-head"
+printf '%s\n' "$zero_sha" > "$fake_gh_state/pr-fixed-head"
+set +e
+release_wait_for_manual_merge "$hotfix_repo" "tapstate/agentic-ops" hotfix_publish v0.3 "$soft_hotfix_head" "harsen/AO-124/fix-main" AO-124 >"$tmp_dir/fixed-head-drift.out" 2>"$tmp_dir/fixed-head-drift.err"
+fixed_head_status=$?
+set -e
+if [ "$fixed_head_status" != "1" ]; then
+  echo "expected PR evidence to preserve the original Hotfix HEAD" >&2
+  exit 1
+fi
+grep 'release_pr_head_drift' "$tmp_dir/fixed-head-drift.err" >/dev/null
+printf '%s\n' "$soft_hotfix_head" > "$fake_gh_state/pr-fixed-head"
+
+git -C "$hotfix_repo" fetch origin main >/dev/null 2>&1
+soft_merge_commit="$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)"
+wrong_merge_head="$(git -C "$hotfix_repo" rev-parse "$soft_merge_commit^1")"
+if release_verify_merge_commit "$hotfix_repo" "$wrong_merge_head" "$soft_merge_commit" >"$tmp_dir/merge-method.out" 2>"$tmp_dir/merge-method.err"; then
+  echo "expected soft gate to reject a merge commit with a different second parent" >&2
+  exit 1
+fi
+grep 'release_merge_method_invalid' "$tmp_dir/merge-method.err" >/dev/null
+
+synthetic_tree="$(git -C "$hotfix_repo" write-tree)"
+synthetic_merge="$(printf 'synthetic merge outside main\n' | git -C "$hotfix_repo" commit-tree "$synthetic_tree" -p "$wrong_merge_head" -p "$soft_hotfix_head")"
+if release_verify_merge_commit "$hotfix_repo" "$soft_hotfix_head" "$synthetic_merge" >"$tmp_dir/merge-history.out" 2>"$tmp_dir/merge-history.err"; then
+  echo "expected soft gate to require the Merge commit in origin/main history" >&2
+  exit 1
+fi
+grep 'release_merge_commit_not_in_main' "$tmp_dir/merge-history.err" >/dev/null
+
+touch "$fake_gh_state/deny-pr-list"
+: > "$fake_gh_state/writes.log"
+if release_find_or_create_pr "tapstate/agentic-ops" "harsen/AO-124/fix-main" main "$soft_hotfix_head" v0.3 hotfix AO-124 soft >"$tmp_dir/pr-list-failed.out" 2>"$tmp_dir/pr-list-failed.err"; then
+  echo "expected PR list failure to stop before PR creation" >&2
+  exit 1
+fi
+grep 'release_pr_list_failed' "$tmp_dir/pr-list-failed.err" >/dev/null
+test ! -s "$fake_gh_state/writes.log"
+rm -f "$fake_gh_state/deny-pr-list"
+
 rm -f "$fake_gh_state/pr-merged"
 RELEASE_PR_URL="https://github.com/tapstate/agentic-ops/pull/7"
 sleep() { :; }
@@ -684,4 +919,4 @@ if release_require_synced_hotfix_branch "$sync_local" "$sync_branch" >"$tmp_dir/
 fi
 grep 'hotfix_branch_diverged' "$tmp_dir/hotfix-diverged.err" >/dev/null
 
-printf '{"ok":true,"operation":"test_release_workflow","cases":34}\n'
+printf '{"ok":true,"operation":"test_release_workflow","cases":52}\n'

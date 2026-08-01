@@ -799,7 +799,7 @@ git commit -m "Fix(workflow): TAP-12371 兼容 GitHub 认证状态误报" -m "�
 - Produces: `protection_mode=soft`，普通发布固定分支 `release/vX.Y`，`waiting_for_manual_merge` 状态码 `2`，同一 `publish` 命令的幂等恢复和二次完整验证。
 - Invariants: 默认仍执行硬门禁；软门禁不自动合并、不直推 `main`、不接受 Squash/Rebase、不移动 Tag、不删除发布分支。
 
-- [ ] **Step 1: 为软门禁基础检查和显式参数写失败测试**
+- [x] **Step 1: 为软门禁基础检查和显式参数写失败测试**
 
 扩展 fake `gh` 和工作流 fixture，覆盖：默认硬门禁仍因缺少 Ruleset/Auto-merge 失败；显式软门禁在 Hooks、认证、远端 `develop`、默认 `main` 和 Merge commit 均满足时通过；任一保留检查失败时仍阻断。
 
@@ -811,11 +811,11 @@ bash scripts/test-release-workflow.sh
 
 Expected: RED；当前脚本不识别 `--allow-soft-gate`，也没有软门禁检查模式。
 
-- [ ] **Step 2: 实现软门禁参数与基础检查**
+- [x] **Step 2: 实现软门禁参数与基础检查**
 
 在 `release.sh` 和 `hotfix.sh` 的 `prepare`、`publish` 接受 `--allow-soft-gate`。在 `development-workflow.sh` 增加只读软门禁检查，只放宽 Ruleset 与 Auto-merge；命令输出显式返回 `protection_mode=soft` 和风险提示，不自动检测套餐、不持久化默认值。
 
-- [ ] **Step 3: 为普通发布固定分支和等待状态写失败测试**
+- [x] **Step 3: 为普通发布固定分支和等待状态写失败测试**
 
 覆盖第一次软门禁 `publish`：完整验证后从固定 develop HEAD 创建/复用 `release/vX.Y`，推送该分支并创建 `release/vX.Y → main` PR，不调用 `gh pr merge`，不推送 Tag，写入等待审计，输出 PR URL 和继续命令并返回 `2`。同名本地或远端分支目标不一致时失败。
 
@@ -827,19 +827,19 @@ bash scripts/test-release-workflow.sh
 
 Expected: RED；当前实现仍创建 `develop → main` PR 并启用 Auto-merge。
 
-- [ ] **Step 4: 实现普通发布等待与恢复状态机**
+- [x] **Step 4: 实现普通发布等待与恢复状态机**
 
 在公共库中实现固定发布分支、等待审计、PR 状态读取和人工合并恢复。第二次同命令执行以 `release/vX.Y` 的固定 HEAD 为准，重新运行完整验证；PR 开放时继续返回 `2`，关闭未合并、HEAD 漂移或 `origin/main` 不包含固定 HEAD 时返回稳定错误码。只有验证通过且 Merge commit 保留原提交历史后才推送 `vX.Y` Tag。
 
-- [ ] **Step 5: 为 Hotfix 软门禁写失败测试并实现**
+- [x] **Step 5: 为 Hotfix 软门禁写失败测试并实现**
 
 覆盖 Hotfix 首次 `publish` 记录固定修复 HEAD、创建 PR 后返回 `2`、不调用 Auto-merge、不创建 Tag；人工 Merge commit 后同命令重新完整验证并完成审计。拒绝修复 HEAD 漂移、关闭未合并和不保留原提交历史的合并。
 
-- [ ] **Step 6: 同步维护者文档与发布检查清单**
+- [x] **Step 6: 同步维护者文档与发布检查清单**
 
 记录硬门禁默认、`--allow-soft-gate` 显式例外、普通发布固定分支、人工 Merge commit、返回码 `2`、继续命令、二次验证、Tag 最后推送和 GitHub Free 无服务器端保护风险。
 
-- [ ] **Step 7: 运行聚焦测试与完整回归**
+- [x] **Step 7: 运行聚焦测试与完整回归**
 
 Run:
 

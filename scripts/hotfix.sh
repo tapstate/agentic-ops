@@ -20,6 +20,7 @@ jira_id=""
 requested_user=""
 configure_workflow="false"
 confirm_release="false"
+allow_soft_gate="false"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --jira-id)
@@ -44,6 +45,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --confirm-release)
       confirm_release="true"
+      shift
+      ;;
+    --allow-soft-gate)
+      allow_soft_gate="true"
       shift
       ;;
     *)
@@ -87,13 +92,15 @@ case "$command_name" in
     hotfix_branch="$(git -C "$repo_root" branch --show-current)"
     release_parse_hotfix_branch "$hotfix_branch" || exit 1
     release_require_clean "$repo_root" || exit 1
-    workflow_mode="$(release_workflow_mode "$configure_workflow")"
+    workflow_mode="$(release_workflow_mode "$configure_workflow" "$allow_soft_gate")"
     workflow_check_or_configure "$workflow_mode" "$repo_root" >/dev/null || exit 1
     release_require_main_base "$repo_root" || exit 1
     hotfix_version="$(release_find_iteration_tag "$repo_root")" || exit 1
     release_build_assets "$repo_root" || exit 1
-    printf '{"ok":true,"operation":"hotfix_prepare","jira_id":"%s","branch":"%s","version":"%s","tag_action":"reuse_only","agentic_next_action":"review_and_commit_generated_assets"}\n' \
-      "$HOTFIX_JIRA_ID" "$HOTFIX_BRANCH" "$hotfix_version"
+    protection_mode="hard"
+    if [ "$allow_soft_gate" = "true" ]; then protection_mode="soft"; fi
+    printf '{"ok":true,"operation":"hotfix_prepare","jira_id":"%s","branch":"%s","version":"%s","tag_action":"reuse_only","protection_mode":"%s","agentic_next_action":"review_and_commit_generated_assets"}\n' \
+      "$HOTFIX_JIRA_ID" "$HOTFIX_BRANCH" "$hotfix_version" "$protection_mode"
     ;;
   publish)
     release_require_command git || exit 1
@@ -103,12 +110,14 @@ case "$command_name" in
     hotfix_branch="$(git -C "$repo_root" branch --show-current)"
     release_parse_hotfix_branch "$hotfix_branch" || exit 1
     release_require_clean "$repo_root" || exit 1
-    workflow_mode="$(release_workflow_mode "$configure_workflow")"
+    workflow_mode="$(release_workflow_mode "$configure_workflow" "$allow_soft_gate")"
     workflow_check_or_configure "$workflow_mode" "$repo_root" >/dev/null || exit 1
     release_require_main_base "$repo_root" || exit 1
     release_require_synced_hotfix_branch "$repo_root" "$hotfix_branch" || exit 1
     hotfix_version="$(release_find_iteration_tag "$repo_root")" || exit 1
     hotfix_head="$(git -C "$repo_root" rev-parse HEAD)"
+    protection_mode="hard"
+    if [ "$allow_soft_gate" = "true" ]; then protection_mode="soft"; fi
     release_run_full_verification "$repo_root" "$hotfix_head" || exit 1
     release_confirm_publish "$repo_root" "$hotfix_version" "$hotfix_head" "$confirm_release" "$hotfix_branch" main || exit 1
     if ! git -C "$repo_root" push -u origin "$hotfix_branch"; then
@@ -116,13 +125,27 @@ case "$command_name" in
       exit 1
     fi
     release_repository="${AGENTIC_OPS_RELEASE_REPOSITORY:-tapstate/agentic-ops}"
-    release_find_or_create_pr "$release_repository" "$hotfix_branch" main "$hotfix_head" "$hotfix_version" hotfix "$HOTFIX_JIRA_ID" || exit 1
-    release_enable_auto_merge "$release_repository" || exit 1
-    release_wait_for_merge "$release_repository" || exit 1
+    release_find_or_create_pr "$release_repository" "$hotfix_branch" main "$hotfix_head" "$hotfix_version" hotfix "$HOTFIX_JIRA_ID" "$protection_mode" || exit 1
+    if [ "$allow_soft_gate" = "true" ]; then
+      manual_status=0
+      release_wait_for_manual_merge "$repo_root" "$release_repository" hotfix_publish "$hotfix_version" "$hotfix_head" "$hotfix_branch" "$HOTFIX_JIRA_ID" || manual_status=$?
+      if [ "$manual_status" -eq 2 ]; then
+        exit 2
+      fi
+      if [ "$manual_status" -ne 0 ]; then
+        exit 1
+      fi
+    else
+      release_enable_auto_merge "$release_repository" || exit 1
+      release_wait_for_merge "$release_repository" || exit 1
+    fi
     release_verify_remote_contains "$repo_root" "$hotfix_head" || exit 1
-    release_write_hotfix_audit "$repo_root" "$HOTFIX_JIRA_ID" "$hotfix_version" "$hotfix_head" "$hotfix_branch"
-    printf '{"ok":true,"operation":"hotfix_publish","jira_id":"%s","version":"%s","branch":"%s","head":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","audit_file":"%s","agentic_next_action":"sync_hotfix_to_develop"}\n' \
-      "$HOTFIX_JIRA_ID" "$hotfix_version" "$hotfix_branch" "$hotfix_head" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "$RELEASE_AUDIT_FILE"
+    if [ "$allow_soft_gate" = "true" ]; then
+      release_verify_merge_commit "$repo_root" "$hotfix_head" "$RELEASE_MERGE_COMMIT" || exit 1
+    fi
+    release_write_hotfix_audit "$repo_root" "$HOTFIX_JIRA_ID" "$hotfix_version" "$hotfix_head" "$hotfix_branch" "$protection_mode"
+    printf '{"ok":true,"operation":"hotfix_publish","jira_id":"%s","version":"%s","branch":"%s","head":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","protection_mode":"%s","audit_file":"%s","agentic_next_action":"sync_hotfix_to_develop"}\n' \
+      "$HOTFIX_JIRA_ID" "$hotfix_version" "$hotfix_branch" "$hotfix_head" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "$protection_mode" "$RELEASE_AUDIT_FILE"
     ;;
   *)
     release_fail "invalid_hotfix_command" "argument_parsing" "不支持的 Hotfix 子命令 $command_name" "请使用 create、prepare 或 publish"
