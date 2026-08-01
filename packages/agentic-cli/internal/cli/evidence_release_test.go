@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/clihandlers"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/github"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
 	"os"
@@ -36,6 +37,59 @@ func TestWriteEvidenceRequiresRunID(t *testing.T) {
 	if !strings.Contains(string(events), `"gate_status":"blocked"`) {
 		t.Fatalf("events = %s", string(events))
 	}
+}
+
+func TestWritePREvidenceRequiresPRURL(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"write-pr-evidence", "--workspace", "tapstate", "--run-id", "run-1"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "write_pr_evidence")
+	assertJSONField(t, stdout.String(), "code", "missing_pr_url")
+	assertJSONField(t, stdout.String(), "current_stage", "pr_evidence_gate")
+}
+
+func TestWritePREvidenceReadsGitHubFactsAndWritesLocalAudit(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+{"timestamp":"2026-07-21T10:40:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"prepare_pr","task_type":"pr_preparation","current_stage":"pr_created","agentic_next_action":"check_ci","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"prepare_pr","gate_status":"passed"}
+`)
+	withGitHubClientForTest(t, github.Client{Runner: &cliFakeGitHubRunner{outputs: map[string]string{
+		"pr view 42 --repo tapstate/example-repo --json comments,reviews":                   `{"comments":[],"reviews":[{"author":{"login":"reviewer"},"body":"通过","state":"APPROVED","url":"https://github.example/review/1"}]}`,
+		"pr checks 42 --repo tapstate/example-repo --json name,state,conclusion,detailsUrl": `[ {"name":"unit","state":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.example/check/1"} ]`,
+	}}})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"write-pr-evidence", "--workspace", "tapstate", "--run-id", runID, "--pr-url", "https://github.com/tapstate/example-repo/pull/42"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "operation", "write_pr_evidence")
+	assertJSONField(t, stdout.String(), "pr_url", "https://github.com/tapstate/example-repo/pull/42")
+	assertJSONField(t, stdout.String(), "ci_status", "passed")
+	assertJSONField(t, stdout.String(), "review_status", "approved")
+	assertJSONField(t, stdout.String(), "audit_submitted", true)
+	assertJSONField(t, stdout.String(), "agentic_next_action", "request_owner_confirmation")
+
+	evidencePath := filepath.Join(root, ".agentic-ops", "runs", runID, "pr-evidence.md")
+	evidenceData, err := os.ReadFile(evidencePath)
+	if err != nil {
+		t.Fatalf("ReadFile PR evidence error = %v", err)
+	}
+	for _, want := range []string{"pr_url: https://github.com/tapstate/example-repo/pull/42", "ci_status: passed", "review_status: approved"} {
+		if !strings.Contains(string(evidenceData), want) {
+			t.Fatalf("PR evidence missing %q: %s", want, string(evidenceData))
+		}
+	}
+	assertEventLogContains(t, root, `"operation":"write_pr_evidence"`)
+	assertEventLogContains(t, root, `"audit_reference":"`+evidencePath+`"`)
 }
 
 func TestWriteEvidenceOutputsNextAction(t *testing.T) {

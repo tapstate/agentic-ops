@@ -87,7 +87,7 @@ AgenticOps 当前存在两类阶段，恢复时必须分别处理。
 - 从会改变任务运行状态的事件中找到最近有效操作阶段和 `agentic_next_action`。
 - 识别终态、待人工确认状态和旧版 `takeover_resumed` 审计事件。
 
-恢复点按事件写入顺序选择。第一阶段认定会改变任务运行状态的操作为 `takeover_task`、`resume_takeover`、`write_evidence`、`prepare_pr` 和 `release_agent`；`add_task_comment`、`update_task_form`、`update_task_description_sections` 等通用 Jira 原子写操作只记录操作审计，不覆盖任务恢复点。失败的 `resume_takeover` 尝试和旧版成功事件中的 `takeover_resumed` 也只用于审计，不覆盖之前的恢复点。这样既能保留任务真实进度，也允许在 Jira 事实修复后重新执行恢复门禁。
+恢复点按事件写入顺序选择。第一阶段认定会改变任务运行状态的操作为 `takeover_task`、`resume_takeover`、`write_evidence`、`write_pr_evidence`、`prepare_pr` 和 `release_agent`；`add_task_comment`、`update_task_form`、`update_task_description_sections` 等通用 Jira 原子写操作只记录操作审计，不覆盖任务恢复点。失败的 `resume_takeover` 尝试和旧版成功事件中的 `takeover_resumed` 也只用于审计，不覆盖之前的恢复点。这样既能保留任务真实进度，也允许在 Jira 事实修复后重新执行恢复门禁。
 
 该组件只依赖事件模型，不读取 Jira，不决定业务门禁。`resume-takeover` 和 `write-evidence` 统一使用该组件，删除重复的上下文恢复判断。
 

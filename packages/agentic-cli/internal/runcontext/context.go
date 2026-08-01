@@ -135,7 +135,7 @@ func immutableConflict(value string, expected string) bool {
 
 func stateBearingOperation(operation string) bool {
 	switch operation {
-	case "takeover_task", "resume_takeover", "write_evidence", "prepare_pr", "release_agent":
+	case "takeover_task", "resume_takeover", "write_evidence", "write_pr_evidence", "prepare_pr", "release_agent":
 		return true
 	default:
 		return false

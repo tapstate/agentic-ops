@@ -30,9 +30,10 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 | --- | --- |
 | `install` | 安装 AgenticOps 到 `~/.agentic-ops`。 |
 | `doctor` | 输出安装、版本、工作流配置、策略、契约、适配器和工作空间的本地诊断结果。 |
-| `assets_install` | 安装或更新 AI 员工手册、契约、工作流配置、策略、运行手册和模板等运行资产。 |
-| `update_check` | 基于本地发布清单检查是否存在可用更新，并返回更新级别和受影响操作。 |
-| `update_apply` | 基于 managed clone 应用 latest 更新，记录 `.local/previous-ref` 并刷新本机二进制。 |
+| `assets_install` | 校验源资产 manifest 与当前 CLI 的 `exact_pair` 后安装版本化运行资产。 |
+| `update_check` | 基于本地或远程 release manifest 判断 CLI / 资产兼容状态，返回更新级别和受影响操作。 |
+| `update_apply` | 校验 manifest 与 checksum，版本化暂存产物，保存上一状态并原子切换激活二进制。 |
+| `update_rollback` | 只使用本地上一状态和 checksum 恢复 CLI、资产指针与 current metadata。 |
 | `contract_validate` | 校验机器可读 操作契约是否满足完整设计基线。 |
 | `profile_validate` | 校验工作流配置是否能映射标准字段、任务分类、标准流程、状态和 `transition`。 |
 | `profile_update` | 使用经过校验的本地来源工作流配置更新当前工作流配置，并保存可回滚备份。 |
@@ -50,7 +51,8 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 | `takeover_task` | 接管一个新的 Jira 卡片。 |
 | `resume_takeover` | 恢复已有 `agentic_run_id` 的接管任务。 |
 | `read_task_context` | 读取任务上下文摘要。 |
-| `write_evidence` | 写入 Jira / 拉取请求证据。 |
+| `write_evidence` | 写入任务阶段证据、阻塞说明和完成审计主体。 |
+| `write_pr_evidence` | 读取 GitHub PR、CI 和 Review 事实，并写入任务关联的拉取请求证据。 |
 | `release_agent` | 完成或明确交接后释放当前 AIAgent 绑定，并记录 `agentic_id_cleared=true`。 |
 | `mark_blocked` | 记录阻塞原因和人工动作。 |
 | `request_owner_confirmation` | 请求研发工程师确认。 |

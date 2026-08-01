@@ -10,21 +10,27 @@ trap 'rm -rf "$workspace_root"' EXIT
 export AGENTIC_OPS_WORKSPACE_ROOT="$workspace_root"
 
 cmd="go run ./packages/agentic-cli/cmd/agentic-cli"
+repo_root="$(pwd)"
 install_root="$workspace_root/install"
 
 $cmd --version | grep '"operation":"version"'
-$cmd assets install --source install-resources/basic --install-dir "$install_root" --version INS-v0.1.1-a68372d | grep '"operation":"assets_install"'
+$cmd assets install --source install-resources/basic --install-dir "$install_root" --version 2026.07.22.1 | grep '"operation":"assets_install"'
 update_manifest="$workspace_root/update-manifest.json"
-cat > "$update_manifest" <<'JSON'
+cat > "$update_manifest" <<JSON
 {
-  "version": "RES-v0.1.20-deadbee",
-  "asset_version": "RES-v0.1.20-deadbee",
+  "version": "SRC-source",
+  "asset_version": "2026.07.22.1",
+  "min_cli_version": "SRC-source",
+  "min_asset_version": "2026.07.22.1",
+  "compatibility_policy": "exact_pair",
+  "migration_required": true,
+  "asset_source": {"kind": "local_directory", "path": "$repo_root/install-resources/basic"},
   "severity": "required",
   "reason": "takeover_task 可能写入无效证据",
   "blocked_operations": ["takeover_task"]
 }
 JSON
-$cmd update check --manifest "$update_manifest" | grep '"severity":"required"'
+$cmd update check --manifest "$update_manifest" --install-dir "$install_root" | grep '"severity":"required"'
 $cmd update apply --manifest "$update_manifest" --install-dir "$install_root" | grep '"operation":"update_apply"'
 $cmd contract validate | grep '"operation":"contract_validate"'
 $cmd profile validate --workspace tapstate | grep '"operation":"profile_validate"'
@@ -84,5 +90,5 @@ test -f "$workspace_root/.agentic-ops/profile.local.yaml"
 test -d "$workspace_root/.agentic-ops/run-logs"
 test -f "$workspace_root/.agentic-ops/feedback/bundles/TAP-123-takeover-20260721103012-a8f3.md"
 test -f "$workspace_root/.agentic-ops/feedback/reports/2026-07-21.md"
-test -f "$install_root/assets/INS-v0.1.1-a68372d/manifest.json"
+test -f "$install_root/assets/2026.07.22.1/manifest.json"
 test -f "$install_root/current.json"

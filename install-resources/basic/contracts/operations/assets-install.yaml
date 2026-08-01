@@ -1,6 +1,6 @@
 operation: assets_install
-version: 1
-purpose: 安装或更新 AgenticOps 运行资产到全局安装目录。
+version: 2
+purpose: 校验源目录资产 manifest 与当前 CLI 的 exact_pair 关系后，将版本化运行资产安装到全局目录。
 task_type: asset_installation
 allowed_stages:
   - installed
@@ -21,8 +21,10 @@ input:
     type: string
     required: false
 preconditions:
-  - source_must_exist
-  - version_must_be_explicit
+  - source_manifest_must_exist
+  - asset_version_must_match_manifest
+  - current_cli_must_match_exact_pair
+  - asset_source_must_be_declared
   - install_dir_must_be_writable
 output:
   asset_version:
@@ -30,6 +32,8 @@ output:
   assets_dir:
     type: string
   current:
+    type: string
+  compatibility_policy:
     type: string
   agentic_next_action:
     type: string
@@ -40,6 +44,7 @@ failure:
     - assets_install_failed
 side_effects:
   - may_write_global_install_dir
+  - may_write_local_install_state
   - must_not_modify_project_workspace
   - must_not_modify_business_repo
 human_gate:

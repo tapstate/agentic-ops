@@ -38,8 +38,10 @@ import (
 	update_task_form_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update-task-form"
 	update_apply_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update/apply"
 	update_check_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update/check"
+	update_rollback_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/update/rollback"
 	workspace_init_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/workspace/init"
 	write_evidence_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/write-evidence"
+	write_pr_evidence_cmd "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commands/write-pr-evidence"
 )
 
 func RegisterAll(registry *cmdkit.Registry) {
@@ -77,6 +79,8 @@ func RegisterAll(registry *cmdkit.Registry) {
 	update_task_form_cmd.Register(registry)
 	update_apply_cmd.Register(registry)
 	update_check_cmd.Register(registry)
+	update_rollback_cmd.Register(registry)
 	workspace_init_cmd.Register(registry)
 	write_evidence_cmd.Register(registry)
+	write_pr_evidence_cmd.Register(registry)
 }

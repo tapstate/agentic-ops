@@ -1,45 +1,62 @@
 operation: update_apply
-version: 1
-purpose: 基于 managed clone 应用 latest 更新，校验 install-resources/checksums.txt，刷新本机二进制并保留 previous ref。
+version: 2
+purpose: 校验 release manifest 与 checksum，暂存版本化产物，保存上一状态并原子切换当前 CLI 与资产元数据。
 task_type: update
 allowed_stages:
   - update_required
   - update_available
   - update_apply
 optional_inputs:
+  - manifest
+  - manifest_url
   - install_dir
+  - target
 input:
+  manifest:
+    type: string
+    required: false
+  manifest_url:
+    type: string
+    required: false
   install_dir:
     type: string
     required: false
-preconditions:
-  - install_dir_must_be_managed_clone
-  - checksums_must_exist
-  - install_dir_must_be_writable
-output:
-  install_dir:
-    type: string
-  bin:
-    type: string
   target:
     type: string
-  previous_ref:
+    required: false
+preconditions:
+  - exactly_one_manifest_source_must_be_available
+  - release_manifest_must_be_valid
+  - local_manifest_cli_version_must_equal_running_cli
+  - remote_artifacts_must_match_checksums
+  - install_dir_must_be_writable
+output:
+  version:
     type: string
-  current_ref:
+  asset_version:
+    type: string
+  previous_version:
+    type: string
+  previous_asset_version:
+    type: string
+  downloaded_artifacts:
+    type: array
+  activated_binary:
     type: string
   agentic_next_action:
     type: string
 failure:
   codes:
-    - managed_clone_missing
+    - missing_manifest
     - checksum_mismatch
     - update_apply_failed
 side_effects:
-  - may_write_global_install_dir
-  - may_fetch_git_remote
+  - may_download_release_artifacts
+  - may_write_versioned_install_artifacts
+  - may_switch_active_binary_atomically
   - may_write_local_install_state
   - must_not_write_jira
-  - must_not_modify_code
+  - must_not_modify_business_repo
 human_gate:
   required: false
 retry_policy:

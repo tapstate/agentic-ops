@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/clihandlers"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/cmdkit"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/commandcatalog"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/config"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/output"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/update"
 )
 
 var Version = "SRC-source"
@@ -45,8 +48,54 @@ func RunWithIO(args []string, stdin io.Reader, stdout io.Writer, stderr io.Write
 			"build_time":        BuildTime,
 		}))
 	}
+	if !containsHelpArg(args) {
+		if spec, ok := registry.Match(args); ok {
+			operation := strings.ReplaceAll(strings.Join(spec.Path, "_"), "-", "_")
+			if err := update.GuardOperation(cliInstallDir(args), operation); err != nil {
+				code := "update_state_invalid"
+				nextAction := "doctor"
+				if strings.HasPrefix(err.Error(), "required_update_blocked:") {
+					code = "required_update_blocked"
+					nextAction = "update_apply"
+				}
+				return writeJSON(stdout, output.FailureWithContext(operation, output.FailureContext{
+					Code:                code,
+					Message:             err.Error(),
+					RequiredHumanAction: "请先执行 agentic-cli update apply；如需恢复，请执行 update rollback",
+					TaskType:            "update",
+					CurrentStage:        "required_update_gate",
+					AgenticNextAction:   nextAction,
+				}))
+			}
+		}
+	}
 
 	return registry.Dispatch(cmdkit.Context{Stdin: stdin, Stdout: stdout, Stderr: stderr, Interactive: interactive}, args, unknownCommand)
+}
+
+func cliInstallDir(args []string) string {
+	for index := 0; index+1 < len(args); index++ {
+		if args[index] == "--install-dir" {
+			return args[index+1]
+		}
+	}
+	if installDir := os.Getenv("AGENTIC_OPS_HOME"); installDir != "" {
+		return installDir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".agentic-ops"
+	}
+	return config.DefaultInstallDir(home)
+}
+
+func containsHelpArg(args []string) bool {
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" || arg == "help" {
+			return true
+		}
+	}
+	return false
 }
 
 func stdinIsTerminal() bool {

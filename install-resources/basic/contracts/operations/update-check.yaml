@@ -1,46 +1,62 @@
 operation: update_check
-version: 1
-purpose: 检查 managed clone 当前 ref 与 origin/main latest 是否一致，并返回是否需要更新。
+version: 2
+purpose: 读取本地或远程 release manifest，判断 CLI 与资产 exact_pair 兼容状态，并保存本地门禁状态。
 task_type: update
 allowed_stages:
   - installed
   - update_check
+  - update_available
+  - update_required
   - failed
-required_inputs:
+optional_inputs:
+  - manifest
+  - manifest_url
   - install_dir
 input:
+  manifest:
+    type: string
+    required: false
+  manifest_url:
+    type: string
+    required: false
   install_dir:
     type: string
-    required: true
+    required: false
 preconditions:
-  - install_dir_must_be_managed_clone
-  - git_remote_must_be_available
+  - exactly_one_manifest_source_must_be_available
+  - release_manifest_must_be_valid
 output:
-  current_ref:
+  current_version:
     type: string
-  latest_ref:
+  current_asset_version:
     type: string
-  update_available:
+  latest_version:
+    type: string
+  asset_version:
+    type: string
+  min_cli_version:
+    type: string
+  min_asset_version:
+    type: string
+  compatibility_policy:
+    type: string
+  compatibility_state:
+    type: string
+  migration_required:
     type: boolean
-  severity:
-    type: string
-    enum:
-      - optional
-      - recommended
-      - required
-  reason:
-    type: string
   blocked_operations:
     type: array
   agentic_next_action:
     type: string
 failure:
   codes:
-    - managed_clone_missing
-    - git_fetch_failed
+    - missing_manifest
+    - update_manifest_invalid
+    - update_state_write_failed
 side_effects:
-  - must_not_modify_install_dir
-  - may_fetch_git_remote
+  - may_read_remote_manifest
+  - may_write_local_update_state
+  - must_not_apply_update
   - must_not_write_jira
   - must_not_modify_code
 human_gate:

@@ -28,7 +28,7 @@
 rg -n '^- \[ \]' plans
 ```
 
-截至 2026-08-01，`resume-takeover`、问题修复基线、AO profile 和反馈分析本地基线已完成；当前仍待处理的是 `write-pr-evidence` 契约归属、更新回滚与兼容治理、受控发布治理，以及列出的产品/权限/事实源决策。计划状态必须以本文件勾选项和当前仓库验证结果为准。
+截至 2026-08-01，`resume-takeover`、问题修复基线、AO profile、反馈分析和独立 PR 证据入口本地基线已完成；当前仍待处理的是更新回滚与兼容治理、受控发布治理，以及列出的产品/权限/事实源决策。三组剩余治理事项的设计草案见 `docs/architecture/remaining-governance-design-v1.md`，实现状态以本文件和当前验证结果为准。
 
 已有计划文件：
 
@@ -162,9 +162,9 @@ go test ./...
 - `install-resources/basic/policies/default.yaml`
 
 **Current status:**
-- 已实现 `inspect-workspace`、`prepare-pr`、`read-pr-comments`、`fix-pr-comments` 和 `check-ci-status` 的受控基线。
+- 已实现 `inspect-workspace`、`prepare-pr`、`read-pr-comments`、`fix-pr-comments`、`check-ci-status` 和独立 `write-pr-evidence` 的受控基线。
 - 策略门禁已读取 `install-resources/basic/policies/default.yaml`，高风险动作在未满足人工确认和审计条件时保持阻断。
-- `install-resources/basic/contracts/operations/write-pr-evidence.yaml` 已存在，但命令注册表中没有 `write-pr-evidence`，当前只能判定为契约已定义、运行入口未实现。
+- `write-pr-evidence` 独立读取 GitHub PR、CI 和 Review 事实，写入本地 PR 证据和审计事件；真实 Jira 评论仍沿用现有策略与显式确认门禁。
 - 自动 push、创建或更新拉取请求和 merge 等副作用仍未开放。
 
 **Implementation evidence:**
@@ -180,6 +180,9 @@ go test ./...
 - `install-resources/basic/contracts/operations/write-pr-evidence.yaml` 已存在，但命令注册表中没有 `write-pr-evidence`。
 - 需要确认该契约应新增 CLI 入口，还是由现有 `write-evidence` 统一承载拉取请求证据后删除重复契约。
 
+**Design status:**
+- 研发工程师已确认保留两个契约和两个入口；该项已按设计实现并完成契约、CLI 单元测试和资源校验。
+
 - [x] 实现只读 Git 检查：`inspect-workspace` 输出 branch、dirty status、changed files、安全摘要。
 - [x] 实现 `prepare-pr` 只生成结构化拉取请求计划，不自动创建拉取请求。
 - [x] 实现 GitHub 读取型接口：读取拉取请求审查意见和 CI 状态。
@@ -187,7 +190,7 @@ go test ./...
 - [x] 策略门禁读取 `install-resources/basic/policies/default.yaml`，不再只靠硬编码。
 - [x] 对 `git_commit`、`git_push`、`create_pr`、`merge` 等高风险动作返回 `policy_gate_required`，直到人工确认路径具备审计记录。
 - [x] 增加契约验证、CLI 单元测试和 fake `gh` / fake git 测试。
-- [ ] 明确 `write-pr-evidence` 与 `write-evidence` 的职责边界，并让机器可读契约与命令注册入口保持一致。
+- [x] 明确 `write-pr-evidence` 与 `write-evidence` 的职责边界，并让机器可读契约与命令注册入口保持一致。
 
 **Verification:**
 
@@ -242,6 +245,9 @@ bash tests/e2e/local-fake-flow.sh
 - `assets install` 只按 source directory 复制，不验证资产 manifest 与 CLI 兼容性。
 - 必要更新的 `blocked_operations` 尚未进入所有 CLI 操作执行前的统一阻断检查。
 
+**Design status:**
+- 研发工程师已确认采用 `exact_pair`；版本关系、更新切换、回滚、资产来源和 required update guard 已按设计实施。
+
 **Files:**
 - Modify: `packages/agentic-cli/internal/update/manifest.go`
 - Modify: `packages/agentic-cli/internal/assets/installer.go`
@@ -253,13 +259,13 @@ bash tests/e2e/local-fake-flow.sh
 - Update: `install-resources/basic/contracts/operations/update-check.yaml`
 - Update: `install-resources/basic/contracts/operations/update-apply.yaml`
 
-- [ ] 扩展 release manifest：`min_cli_version`、`min_asset_version`、`asset_source`、`compatibility_policy`、`migration_required`。
-- [ ] `update check` 输出兼容性判断和受影响操作。
-- [ ] `update apply` 在切换前保存可回滚的 previous metadata 和 previous binary path。
-- [ ] 实现 `update rollback`，仅用于安装失败或新版本不可用的本地恢复。
-- [ ] `assets install` 校验资产 manifest 与当前 CLI version / asset version 兼容。
-- [ ] 在 CLI 统一入口增加 required update 阻断检查，对 `blocked_operations` 中的操作返回稳定错误码。
-- [ ] 增加 update / assets 单元测试和构建、更新脚本测试。
+- [x] 扩展 release manifest：`min_cli_version`、`min_asset_version`、`asset_source`、`compatibility_policy`、`migration_required`。
+- [x] `update check` 输出兼容性判断和受影响操作。
+- [x] `update apply` 在切换前保存可回滚的 previous metadata、previous binary path 和 SHA-256。
+- [x] 实现 `update rollback`，仅用于安装失败或新版本不可用的本地恢复。
+- [x] `assets install` 校验资产 manifest 与当前 CLI version / asset version 兼容。
+- [x] 在 CLI 统一入口增加 required update 阻断检查，对 `blocked_operations` 中的操作返回稳定错误码。
+- [x] 增加 update / assets 单元测试和构建、更新脚本测试。
 
 **Verification:**
 
@@ -280,6 +286,9 @@ bash tests/e2e/problem-resolution-flow.sh
 - 当前不存在受控 `agentic-cli release publish` 操作、发布权限策略、人工确认记录、发布审计事件和回滚说明。
 - 发布属于高风险动作，必须先确认发布责任人、授权方式、审计位置和回滚责任，再进入实现。
 - shell 只能作为轻量调用包装，不能直接承载 GitHub 发布业务流程。
+
+**Design status:**
+- 已形成 release owner、显式确认、GitHub Release 事实源、本地审计引用和 fake 发布测试设计；发布权责和入口包装选择等待研发工程师确认后实施。
 
 **Files:**
 - Create: `install-resources/basic/contracts/operations/release-publish.yaml`
@@ -372,7 +381,7 @@ bash scripts/test-resources.sh
 
 ## 2. 需要用户先决策的事项
 
-以下事项涉及产品、流程、权限或事实源取舍，不能直接写成默认实现任务：
+以下事项涉及产品、流程、权限或事实源取舍，不能直接写成默认实现任务；具体候选方案和推荐项见 `docs/architecture/remaining-governance-design-v1.md`：
 
 - [ ] 是否引入 Web 控制台或后台常驻进程。
 - [ ] 是否允许某些低风险场景自动创建拉取请求或自动推送。
@@ -383,9 +392,9 @@ bash scripts/test-resources.sh
 
 ## 3. 建议推进顺序
 
-1. 先明确 Task 4 的 `write-pr-evidence` 与 `write-evidence` 职责边界；未决前不新增运行入口，也不把孤立契约当作已实现能力。
-2. 在兼容承诺决策后推进 Task 6 的更新回滚、资产兼容校验和必要更新阻断。
-3. 在发布权责、授权方式、审计位置和回滚责任决策后推进 Task 7。
+1. 先确认 Task 4 的 `write-pr-evidence` 与 `write-evidence` 职责边界；未决前不新增运行入口，也不把孤立契约当作已实现能力。
+2. 确认最低兼容承诺后推进 Task 6 的更新回滚、资产兼容校验和必要更新阻断。
+3. 确认发布权责、授权方式、审计位置、回滚责任和 shell 包装选择后推进 Task 7。
 4. Task 1、Task 2、Task 3、Task 5、Task 8 和 Task 9 只保留已完成基线和回归验证，不再作为待开发事项。
 
 ## 4. 总体验证入口

@@ -1,0 +1,51 @@
+operation: update_rollback
+version: 1
+purpose: 只使用本地保存的上一版本二进制、资产路径和 checksum 恢复安装状态，不重新下载远程产物。
+task_type: update
+allowed_stages:
+  - update_apply
+  - update_failed
+  - rollback_required
+  - update_rollback
+optional_inputs:
+  - install_dir
+input:
+  install_dir:
+    type: string
+    required: false
+preconditions:
+  - previous_local_state_must_exist
+  - previous_binary_checksum_must_match
+  - previous_asset_path_must_exist_when_recorded
+output:
+  version:
+    type: string
+  asset_version:
+    type: string
+  previous_version:
+    type: string
+  previous_asset_version:
+    type: string
+  activated_binary:
+    type: string
+  agentic_next_action:
+    type: string
+failure:
+  codes:
+    - rollback_state_missing
+    - rollback_target_invalid
+    - rollback_failed
+side_effects:
+  - may_restore_previous_local_binary
+  - may_restore_previous_local_asset_pointer
+  - may_write_local_install_state
+  - must_not_download_remote_artifacts
+  - must_not_write_jira
+  - must_not_modify_business_repo
+human_gate:
+  required: false
+retry_policy:
+  retryable: false
+  max_attempts: 0
+  redo_from_stage: update_check
+redo_from_stage: update_check
