@@ -548,22 +548,18 @@ git commit -m "Feat(hotfix): TAP-12371 实现紧急修复发布流程" -m "复�
 
 ```bash
 test ! -e docs/development-phase-rules.md
-if rg -n 'development-phase-rules\.md|第一个版本发布正式上线前|当前阶段只允许本地模拟' \
-  AGENTS.md README.md docs/README.md docs/project-rules.md docs/ai-working-rules.md \
-  docs/development-style.md docs/maintainers/getting-started.md docs/review-checklist.md; then
-  echo "development-phase restrictions must not remain" >&2
-  exit 1
-fi
-grep 'develop' AGENTS.md >/dev/null
-grep 'scripts/release.sh' docs/maintainers/getting-started.md >/dev/null
-grep 'scripts/hotfix.sh' docs/maintainers/getting-started.md >/dev/null
+test -x .githooks/pre-commit
+test -x .githooks/pre-push
+test -x scripts/release.sh
+test -x scripts/hotfix.sh
+test -x scripts/test-release-workflow.sh
 ```
 
 - [ ] **Step 2: 运行资源测试并确认 RED**
 
 Run: `bash scripts/test-resources.sh`
 
-Expected: FAIL，命中现有研发期文件和引用。
+Expected: FAIL，因为研发期文件仍存在。
 
 - [ ] **Step 3: 迁移永久规则并删除研发期文件**
 
