@@ -69,6 +69,59 @@ if [ "${1:-}" = "auth" ] && [ "${2:-}" = "status" ]; then
   exit 0
 fi
 
+if [ "${1:-}" = "pr" ]; then
+  case "${2:-}" in
+    list)
+      if [ -f "$FAKE_GH_STATE_DIR/pr-created" ]; then
+        fake_pr_state="OPEN"
+        if [ -f "$FAKE_GH_STATE_DIR/pr-merged" ]; then
+          fake_pr_state="MERGED"
+        fi
+        printf '7\thttps://github.com/tapstate/agentic-ops/pull/7\t%s\n' "$fake_pr_state"
+      fi
+      exit 0
+      ;;
+    create)
+      printf 'pr-create\n' >> "$FAKE_GH_STATE_DIR/writes.log"
+      touch "$FAKE_GH_STATE_DIR/pr-created"
+      git rev-parse HEAD > "$FAKE_GH_STATE_DIR/pr-head"
+      printf 'https://github.com/tapstate/agentic-ops/pull/7\n'
+      exit 0
+      ;;
+    view)
+      case " $* " in
+        *" --jq .number "*)
+          printf '7\n'
+          ;;
+        *)
+          if [ -f "$FAKE_GH_STATE_DIR/pr-merged" ]; then
+            printf 'MERGED\t%s\thttps://github.com/tapstate/agentic-ops/pull/7\t7\n' "$(cat "$FAKE_GH_STATE_DIR/merge-commit")"
+          else
+            printf 'OPEN\t\thttps://github.com/tapstate/agentic-ops/pull/7\t7\n'
+          fi
+          ;;
+      esac
+      exit 0
+      ;;
+    merge)
+      if [ ! -f "$FAKE_GH_STATE_DIR/pr-merged" ]; then
+        printf 'pr-merge\n' >> "$FAKE_GH_STATE_DIR/writes.log"
+        fake_merge_dir="$(mktemp -d)"
+        git clone "$FAKE_GH_REMOTE" "$fake_merge_dir/repo" >/dev/null 2>&1
+        git -C "$fake_merge_dir/repo" config user.email agentic-ops-test@example.test
+        git -C "$fake_merge_dir/repo" config user.name "AgenticOps Test"
+        git -C "$fake_merge_dir/repo" switch main >/dev/null
+        git -C "$fake_merge_dir/repo" merge --no-ff origin/develop -m "Merge release PR" >/dev/null
+        git -C "$fake_merge_dir/repo" push origin main >/dev/null
+        git -C "$fake_merge_dir/repo" rev-parse HEAD > "$FAKE_GH_STATE_DIR/merge-commit"
+        touch "$FAKE_GH_STATE_DIR/pr-merged"
+        rm -rf "$fake_merge_dir"
+      fi
+      exit 0
+      ;;
+  esac
+fi
+
 if [ "${1:-}" != "api" ]; then
   echo "unsupported fake gh command: $*" >&2
   exit 2
@@ -142,6 +195,7 @@ mkdir -p "$fake_gh_state"
 export AGENTIC_OPS_GH_BIN="$fake_gh"
 export AGENTIC_OPS_RELEASE_REPOSITORY="tapstate/agentic-ops"
 export FAKE_GH_STATE_DIR="$fake_gh_state"
+export FAKE_GH_REMOTE="$workflow_remote"
 # shellcheck source=scripts/lib/development-workflow.sh
 . "$repo_root/scripts/lib/development-workflow.sh"
 
@@ -217,8 +271,26 @@ mkdir -p install-resources
 printf 'fixture checksums\n' > install-resources/checksums.txt
 printf '{"ok":true,"operation":"build"}\n'
 EOF
+for verification_script in \
+  scripts/test-resources.sh \
+  scripts/test-build.sh \
+  scripts/test-install.sh \
+  tests/e2e/ao-profile-flow.sh \
+  tests/e2e/local-fake-flow.sh \
+  tests/e2e/local-install-flow.sh \
+  tests/e2e/problem-resolution-flow.sh; do
+  mkdir -p "$workflow_repo/$(dirname "$verification_script")"
+  verification_name="$(printf '%s' "$verification_script" | tr '/' '-')"
+  cat > "$workflow_repo/$verification_script" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' '$verification_name' >> "\${FAKE_VERIFY_LOG:?}"
+EOF
+  chmod 0755 "$workflow_repo/$verification_script"
+done
+printf '.local/\n' > "$workflow_repo/.gitignore"
 chmod 0755 "$workflow_repo/scripts/release.sh" "$workflow_repo/scripts/build.sh" "$workflow_repo/scripts/lib/release-common.sh" "$workflow_repo/scripts/lib/development-workflow.sh"
-git -C "$workflow_repo" add scripts .githooks
+git -C "$workflow_repo" add scripts tests .githooks .gitignore
 git -C "$workflow_repo" commit -m "add release fixture" >/dev/null
 
 git -C "$workflow_repo" remote set-url origin git@github.com:tapstate/agentic-ops.git
@@ -255,4 +327,105 @@ grep '"operation":"release_prepare"' "$tmp_dir/prepare-again.out" >/dev/null
 git -C "$workflow_repo" merge-base --is-ancestor refs/tags/v0.3 HEAD
 test -z "$(git -C "$workflow_repo" ls-remote --tags origin refs/tags/v0.3)"
 
-printf '{"ok":true,"operation":"test_release_workflow","cases":10}\n'
+remote_develop_before_publish="$(git -C "$workflow_repo" rev-parse refs/remotes/origin/develop)"
+: > "$fake_gh_state/writes.log"
+if (cd "$workflow_repo" && scripts/release.sh publish --version v0.3 --confirm-release) >"$tmp_dir/dirty-publish.out" 2>"$tmp_dir/dirty-publish.err"; then
+  echo "expected dirty publish to fail" >&2
+  exit 1
+fi
+grep 'dirty_worktree' "$tmp_dir/dirty-publish.err" >/dev/null
+test ! -s "$fake_gh_state/writes.log"
+test "$(git -C "$workflow_repo" rev-parse refs/remotes/origin/develop)" = "$remote_develop_before_publish"
+
+git -C "$workflow_repo" add install-resources
+git -C "$workflow_repo" commit -m "refresh generated assets" >/dev/null
+publish_head="$(git -C "$workflow_repo" rev-parse HEAD)"
+
+if (cd "$workflow_repo" && scripts/release.sh publish --version v0.4 --confirm-release) >"$tmp_dir/missing-tag.out" 2>"$tmp_dir/missing-tag.err"; then
+  echo "expected missing publish tag to fail" >&2
+  exit 1
+fi
+grep 'release_tag_missing' "$tmp_dir/missing-tag.err" >/dev/null
+test ! -s "$fake_gh_state/writes.log"
+
+fixture_tree="$(git -C "$workflow_repo" write-tree)"
+fixture_unrelated_commit="$(printf 'unrelated release baseline\n' | git -C "$workflow_repo" commit-tree "$fixture_tree")"
+git -C "$workflow_repo" tag -a v0.5 "$fixture_unrelated_commit" -m "unrelated baseline"
+if (cd "$workflow_repo" && scripts/release.sh publish --version v0.5 --confirm-release) >"$tmp_dir/unrelated-tag.out" 2>"$tmp_dir/unrelated-tag.err"; then
+  echo "expected unrelated publish tag to fail" >&2
+  exit 1
+fi
+grep 'release_tag_conflict' "$tmp_dir/unrelated-tag.err" >/dev/null
+test ! -s "$fake_gh_state/writes.log"
+
+fake_bin="$tmp_dir/fake-bin"
+mkdir -p "$fake_bin"
+cat > "$fake_bin/go" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'go-test\n' >> "${FAKE_VERIFY_LOG:?}"
+if [ "${FAKE_GO_FAIL:-false}" = "true" ]; then
+  exit 1
+fi
+EOF
+chmod 0755 "$fake_bin/go"
+export PATH="$fake_bin:$PATH"
+export FAKE_VERIFY_LOG="$tmp_dir/verification.log"
+: > "$FAKE_VERIFY_LOG"
+if scripts_output="$(cd "$workflow_repo" && FAKE_GO_FAIL=true scripts/release.sh publish --version v0.3 --confirm-release 2>&1)"; then
+  echo "expected failed verification to stop publish" >&2
+  exit 1
+fi
+printf '%s\n' "$scripts_output" | grep 'release_verification_failed' >/dev/null
+test ! -s "$fake_gh_state/writes.log"
+test "$(git -C "$workflow_repo" rev-parse refs/remotes/origin/develop)" = "$remote_develop_before_publish"
+
+: > "$FAKE_VERIFY_LOG"
+if (cd "$workflow_repo" && scripts/release.sh publish --version v0.3) >"$tmp_dir/unconfirmed.out" 2>"$tmp_dir/unconfirmed.err"; then
+  echo "expected unconfirmed noninteractive publish to fail" >&2
+  exit 1
+fi
+grep 'release_confirmation_required' "$tmp_dir/unconfirmed.err" >/dev/null
+test ! -s "$fake_gh_state/writes.log"
+
+: > "$FAKE_VERIFY_LOG"
+(cd "$workflow_repo" && scripts/release.sh publish --version v0.3 --confirm-release) >"$tmp_dir/publish.out" 2>"$tmp_dir/publish.err"
+grep '"operation":"release_publish"' "$tmp_dir/publish.out" >/dev/null
+test -f "$fake_gh_state/pr-created"
+test -f "$fake_gh_state/pr-merged"
+grep '^pr-create$' "$fake_gh_state/writes.log" >/dev/null
+grep '^pr-merge$' "$fake_gh_state/writes.log" >/dev/null
+remote_develop_after_publish="$(git --git-dir="$workflow_remote" rev-parse refs/heads/develop)"
+remote_main_after_publish="$(git --git-dir="$workflow_remote" rev-parse refs/heads/main)"
+test "$remote_develop_after_publish" = "$publish_head"
+git --git-dir="$workflow_remote" merge-base --is-ancestor "$publish_head" "$remote_main_after_publish"
+test "$(git --git-dir="$workflow_remote" rev-parse refs/tags/v0.3^{})" = "$(git -C "$workflow_repo" rev-list -n 1 v0.3)"
+for expected_verification in \
+  go-test \
+  scripts-test-resources.sh \
+  scripts-test-build.sh \
+  scripts-test-install.sh \
+  tests-e2e-ao-profile-flow.sh \
+  tests-e2e-local-fake-flow.sh \
+  tests-e2e-local-install-flow.sh \
+  tests-e2e-problem-resolution-flow.sh; do
+  grep "^$expected_verification$" "$FAKE_VERIFY_LOG" >/dev/null
+done
+audit_file="$workflow_repo/.local/release-runs/release-v0.3-$publish_head.json"
+test -f "$audit_file"
+grep '"status":"completed"' "$audit_file" >/dev/null
+if grep -Ei 'token|secret|credential' "$audit_file" >/dev/null; then
+  echo "release audit contains sensitive field names" >&2
+  exit 1
+fi
+
+remote_tag_after_publish="$(git --git-dir="$workflow_remote" rev-parse refs/tags/v0.3^{})"
+: > "$fake_gh_state/writes.log"
+: > "$FAKE_VERIFY_LOG"
+(cd "$workflow_repo" && scripts/release.sh publish --version v0.3 --confirm-release) >"$tmp_dir/publish-resume.out" 2>"$tmp_dir/publish-resume.err"
+grep '"operation":"release_publish"' "$tmp_dir/publish-resume.out" >/dev/null
+test ! -s "$fake_gh_state/writes.log"
+test "$(git --git-dir="$workflow_remote" rev-parse refs/heads/main)" = "$remote_main_after_publish"
+test "$(git --git-dir="$workflow_remote" rev-parse refs/tags/v0.3^{})" = "$remote_tag_after_publish"
+
+printf '{"ok":true,"operation":"test_release_workflow","cases":17}\n'

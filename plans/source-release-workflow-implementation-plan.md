@@ -324,7 +324,7 @@ git commit -m "Feat(release): TAP-12371 实现正常发布准备阶段" -m "增�
 - Produces: `release_run_full_verification(head)`、`release_confirm_publish()`、`release_find_or_create_pr(head, base)`、`release_enable_auto_merge(pr)`、`release_wait_for_merge(pr)`、`release_verify_remote_contains(commit)`。
 - CLI: `scripts/release.sh publish --version vX.Y [--confirm-release] [--configure-workflow]`。
 
-- [ ] **Step 1: 写 publish 无副作用失败测试**
+- [x] **Step 1: 写 publish 无副作用失败测试**
 
 覆盖：工作区脏、Tag 缺失、Tag 非祖先、验证失败、拒绝确认。每个场景断言 fake 远端写日志为空：
 
@@ -335,13 +335,13 @@ test ! -s "$fake_gh_writes"
 
 再覆盖成功路径：push develop、创建 PR、`gh pr merge --merge --auto`、轮询 `gh pr view --json state,mergeCommit,url,number`、fetch main、祖先关系验证、push tag。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run: `bash scripts/test-release-workflow.sh`
 
 Expected: FAIL，因为 `publish` 尚未注册。
 
-- [ ] **Step 3: 实现固定完整验证**
+- [x] **Step 3: 实现固定完整验证**
 
 `release_run_full_verification` 使用 `mktemp -d` 和 detached worktree，依次执行：
 
@@ -358,7 +358,7 @@ bash tests/e2e/problem-resolution-flow.sh
 
 函数结束时删除仅由本次创建的临时 worktree；验证命令列表不得通过 CLI 参数替换或跳过。
 
-- [ ] **Step 4: 实现确认、PR、Auto-merge 和审计**
+- [x] **Step 4: 实现确认、PR、Auto-merge 和审计**
 
 交互确认展示版本、仓库、HEAD、提交列表和验证结果。无 TTY 时只有 `--confirm-release` 才通过。
 
@@ -376,7 +376,7 @@ PR body 包含版本、HEAD、固定验证命令和 UTC 完成时间。审计写
 
 成功输出 `operation=release_publish`、PR URL、merge commit、tag 和 `agentic_next_action=release_completed`。
 
-- [ ] **Step 5: 验证 publish GREEN**
+- [x] **Step 5: 验证 publish GREEN**
 
 Run:
 
@@ -387,7 +387,7 @@ bash -n scripts/release.sh scripts/lib/release-common.sh
 
 Expected: PASS；测试证明验证失败和确认拒绝发生在任何远端写之前。
 
-- [ ] **Step 6: 提交正常发布 publish**
+- [x] **Step 6: 提交正常发布 publish**
 
 ```bash
 git add scripts/release.sh scripts/lib/release-common.sh scripts/test-release-workflow.sh
