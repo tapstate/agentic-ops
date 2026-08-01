@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+branch="$(git branch --show-current)"
+if [ "$branch" = "main" ]; then
+  echo "direct commit to main is prohibited; use develop or a fix-main branch" >&2
+  exit 1
+fi

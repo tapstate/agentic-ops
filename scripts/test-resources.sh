@@ -27,6 +27,9 @@ test -f install-resources/basic/contracts/operations/add-task-comment.yaml
 test -f install-resources/basic/contracts/operations/update-task-description-sections.yaml
 test -f install-resources/basic/contracts/operations/update-task-form.yaml
 test -f install-resources/checksums.txt
+test -x .githooks/pre-commit
+test -x .githooks/pre-push
+test -x scripts/test-release-workflow.sh
 test ! -d docs/superpowers
 grep '^\.superpowers/$' .gitignore >/dev/null
 grep '本地执行状态' AGENTS.md | grep '\.superpowers/' >/dev/null
