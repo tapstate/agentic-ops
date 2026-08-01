@@ -10,7 +10,7 @@
 
 - 适用于 `tapdata` 项目 AI 工作空间中的 Tapdata Jira 研发任务。
 - 适用于 Tapdata 业务仓库，例如 `tapdata/tapdata`、`tapdata/tapdata-web`、`tapdata/tapdata-connectors`。
-- 不适用于维护 `tapstate/agentic-ops` 源头仓库；AgenticOps 源头仓库规则由 `docs/project-rules.md` 和 `docs/development-phase-rules.md` 约束。
+- 不适用于维护 `tapstate/agentic-ops` 源头仓库；AgenticOps 源头仓库规则由 `AGENTS.md`、`docs/project-rules.md` 和源码发布流程约束。
 
 ## 身份与任务
 

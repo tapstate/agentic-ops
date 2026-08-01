@@ -33,8 +33,8 @@ AIAgent 执行业务 Jira 任务前按以下顺序读取：
 如果 AIAgent 维护的是 AgenticOps 源头仓库，而不是执行业务 Jira 任务，还必须额外读取：
 
 1. [AIAgent 工作规则](../../../docs/ai-working-rules.md)：理解维护 AgenticOps 源头仓库时的工作约束。
-2. [项目研发期规则](../../../docs/development-phase-rules.md)：理解第一个版本上线前的临时门禁。
-3. [项目规则](../../../docs/project-rules.md)：理解源头仓库的长期维护规则。
+2. [项目规则](../../../docs/project-rules.md)：理解源头仓库的长期维护规则。
+3. [源码发布流程](../../../docs/architecture/source-release-workflow-design.md)：理解 `develop`、`main`、Tag 和 Hotfix 流程。
 
 ## 使用边界
 
