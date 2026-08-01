@@ -859,7 +859,7 @@ git diff --check
 
 Expected: 全部退出 0；测试明确证明默认不降级、软门禁两阶段恢复和 Tag 最后推送。
 
-- [ ] **Step 8: 代码审查、提交并推送 develop**
+- [x] **Step 8: 代码审查、提交并推送 develop**
 
 检查相对 `origin/develop` 的全部差异，确认没有 secrets、真实平台测试副作用和无关改动。使用 `TAP-12371` 提交计划与实现，根据用户已给出的推送授权推送 `develop`。
 
