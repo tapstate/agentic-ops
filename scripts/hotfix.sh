@@ -118,13 +118,16 @@ case "$command_name" in
     hotfix_head="$(git -C "$repo_root" rev-parse HEAD)"
     protection_mode="hard"
     if [ "$allow_soft_gate" = "true" ]; then protection_mode="soft"; fi
+    release_repository="${AGENTIC_OPS_RELEASE_REPOSITORY:-tapstate/agentic-ops}"
+    if [ "$allow_soft_gate" = "true" ]; then
+      release_check_soft_pr_fixed_head_if_exists "$release_repository" "$hotfix_branch" main "$hotfix_head" || exit 1
+    fi
     release_run_full_verification "$repo_root" "$hotfix_head" || exit 1
     release_confirm_publish "$repo_root" "$hotfix_version" "$hotfix_head" "$confirm_release" "$hotfix_branch" main || exit 1
     if ! git -C "$repo_root" push -u origin "$hotfix_branch"; then
       release_fail "hotfix_branch_push_failed" "branch_push" "无法推送修复分支" "请检查远端权限和分支状态后重试"
       exit 1
     fi
-    release_repository="${AGENTIC_OPS_RELEASE_REPOSITORY:-tapstate/agentic-ops}"
     release_find_or_create_pr "$release_repository" "$hotfix_branch" main "$hotfix_head" "$hotfix_version" hotfix "$HOTFIX_JIRA_ID" "$protection_mode" || exit 1
     if [ "$allow_soft_gate" = "true" ]; then
       manual_status=0

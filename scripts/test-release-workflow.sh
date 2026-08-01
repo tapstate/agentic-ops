@@ -781,6 +781,19 @@ soft_hotfix_audit="$hotfix_repo/.local/release-runs/hotfix-AO-124-$soft_hotfix_h
 grep '"status":"waiting_for_manual_merge"' "$soft_hotfix_audit" >/dev/null
 grep '"jira_id":"AO-124"' "$soft_hotfix_audit" >/dev/null
 
+printf 'drift after verification\n' > "$hotfix_repo/drift.txt"
+git -C "$hotfix_repo" add drift.txt
+git -C "$hotfix_repo" commit -m "drift after soft Hotfix wait" >/dev/null
+if (cd "$hotfix_repo" && scripts/hotfix.sh publish --allow-soft-gate --confirm-release) >"$tmp_dir/soft-hotfix-drift.out" 2>"$tmp_dir/soft-hotfix-drift.err"; then
+  echo "expected soft Hotfix to reject local HEAD drift" >&2
+  exit 1
+fi
+grep 'release_pr_head_drift' "$tmp_dir/soft-hotfix-drift.err" >/dev/null
+test "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/harsen/AO-124/fix-main)" = "$soft_hotfix_head"
+git -C "$hotfix_repo" switch --detach "$soft_hotfix_head" >/dev/null
+git -C "$hotfix_repo" branch -f harsen/AO-124/fix-main "$soft_hotfix_head"
+git -C "$hotfix_repo" switch harsen/AO-124/fix-main >/dev/null
+
 fake_merge_pr_manually
 : > "$fake_gh_state/writes.log"
 (cd "$hotfix_repo" && scripts/hotfix.sh publish --allow-soft-gate --confirm-release) >"$tmp_dir/soft-hotfix-complete.out" 2>"$tmp_dir/soft-hotfix-complete.err"
@@ -919,4 +932,4 @@ if release_require_synced_hotfix_branch "$sync_local" "$sync_branch" >"$tmp_dir/
 fi
 grep 'hotfix_branch_diverged' "$tmp_dir/hotfix-diverged.err" >/dev/null
 
-printf '{"ok":true,"operation":"test_release_workflow","cases":52}\n'
+printf '{"ok":true,"operation":"test_release_workflow","cases":53}\n'

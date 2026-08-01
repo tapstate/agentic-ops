@@ -394,6 +394,41 @@ release_find_or_create_pr() {
   RELEASE_PR_HEAD="$head"
 }
 
+release_check_soft_pr_fixed_head_if_exists() {
+  local repository="$1"
+  local source_branch="$2"
+  local target_branch="$3"
+  local head="$4"
+  local pr_list
+  local existing
+
+  if ! pr_list="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list \
+    --repo "$repository" \
+    --base "$target_branch" \
+    --head "$source_branch" \
+    --state all \
+    --json number,url,state,headRefOid \
+    --jq '.[] | [.number, .url, .state, .headRefOid] | @tsv' 2>/dev/null)"; then
+    release_fail "release_pr_list_failed" "pre_push" "无法在推送前查询现有发布 PR" "请检查 GitHub 认证和网络后重试"
+    return 1
+  fi
+  existing="$(printf '%s\n' "$pr_list" | head -n 1)"
+  if [ -z "$existing" ]; then
+    return 0
+  fi
+
+  IFS=$'\t' read -r RELEASE_PR_NUMBER RELEASE_PR_URL RELEASE_PR_STATE RELEASE_PR_HEAD <<< "$existing"
+  if [ "$RELEASE_PR_HEAD" != "$head" ]; then
+    release_fail "release_pr_head_drift" "pre_push" "本地修复 HEAD 与现有 PR HEAD 不一致" "禁止推送；请恢复首次验证的固定 HEAD 后重试"
+    return 1
+  fi
+  release_read_pr_fixed_head "$repository" || return 1
+  if [ "$RELEASE_PR_FIXED_HEAD" != "$head" ]; then
+    release_fail "release_pr_head_drift" "pre_push" "本地修复 HEAD 已偏离 PR 记录的首次验证 HEAD" "禁止推送；请恢复首次验证的固定 HEAD 后重试"
+    return 1
+  fi
+}
+
 release_refresh_pr_state() {
   local repository="$1"
   local result
