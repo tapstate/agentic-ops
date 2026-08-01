@@ -185,6 +185,7 @@ scripts/hotfix.sh publish
 
 发布脚本在任何测试、推送或拉取请求操作前检查：
 
+- GitHub CLI 认证可用：先执行 `gh auth status -h github.com`；状态检查失败时回退执行 `gh api user`，只有两项都失败才阻断，且不输出令牌或认证响应正文。
 - `core.hooksPath` 指向 `.githooks`。
 - 远端 `develop` 存在。
 - GitHub 默认分支是 `main`。
