@@ -60,7 +60,7 @@
 - Consumes: Git 标准环境变量、pre-push stdin 的 `<local-ref> <local-sha> <remote-ref> <remote-sha>`。
 - Produces: 可执行 Hooks；`bash scripts/test-release-workflow.sh` 测试入口。
 
-- [ ] **Step 1: 写 Hook 失败测试**
+- [x] **Step 1: 写 Hook 失败测试**
 
 在 `scripts/test-release-workflow.sh` 中创建临时仓库，复制 `.githooks/`，设置 `core.hooksPath .githooks`，并断言：
 
@@ -80,7 +80,7 @@ git -C "$repo" commit -m "develop commit" >/dev/null
 
 为 pre-push 直接执行 Hook，输入 `refs/heads/main`，断言返回非零；输入 `refs/heads/develop`，断言返回零。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run:
 
@@ -90,7 +90,7 @@ bash scripts/test-release-workflow.sh
 
 Expected: FAIL，因为 `.githooks/pre-commit` 和 `.githooks/pre-push` 不存在。
 
-- [ ] **Step 3: 实现最小 Hooks**
+- [x] **Step 3: 实现最小 Hooks**
 
 `pre-commit` 使用：
 
@@ -116,7 +116,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 done
 ```
 
-- [ ] **Step 4: 验证 GREEN 和资源入口**
+- [x] **Step 4: 验证 GREEN 和资源入口**
 
 Run:
 
@@ -128,7 +128,7 @@ bash scripts/test-resources.sh
 
 Expected: 两个命令均输出 `"ok":true` 且退出码为 0。
 
-- [ ] **Step 5: 提交 Hook 和测试骨架**
+- [x] **Step 5: 提交 Hook 和测试骨架**
 
 ```bash
 git add .githooks/pre-commit .githooks/pre-push scripts/test-release-workflow.sh scripts/test-resources.sh
@@ -145,7 +145,7 @@ git commit -m "Test(release): TAP-12371 增加 main 本地防护测试" -m "新�
 - Produces: `workflow_check_or_configure(mode)`、`workflow_check_hooks()`、`workflow_check_develop()`、`workflow_check_main_ruleset()`。
 - Side effects: 经用户确认后设置 `core.hooksPath`、推送初始 `develop`、通过 `gh api` 创建或修复唯一命名的 ruleset。
 
-- [ ] **Step 1: 写缺失配置和拒绝配置测试**
+- [x] **Step 1: 写缺失配置和拒绝配置测试**
 
 测试通过 fake `gh` 记录参数，覆盖：
 
@@ -165,13 +165,13 @@ test ! -s "$fake_gh_writes"
 
 再测试 `--configure-workflow` 等价的非交互模式会配置并复检成功，第二次执行不产生新增写调用。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run: `bash scripts/test-release-workflow.sh`
 
 Expected: FAIL，提示 `scripts/lib/development-workflow.sh` 不存在。
 
-- [ ] **Step 3: 实现配置检查数据模型**
+- [x] **Step 3: 实现配置检查数据模型**
 
 使用固定 ruleset 名：
 
@@ -220,13 +220,13 @@ git push -u origin develop
 {"default_branch":"main","allow_auto_merge":true,"allow_merge_commit":true}
 ```
 
-- [ ] **Step 4: 验证配置幂等和无权限失败**
+- [x] **Step 4: 验证配置幂等和无权限失败**
 
 Run: `bash scripts/test-release-workflow.sh`
 
 Expected: PASS，并覆盖 `workflow_configuration_required`、`workflow_configuration_rejected`、`workflow_configuration_permission_denied`。
 
-- [ ] **Step 5: 提交配置门禁**
+- [x] **Step 5: 提交配置门禁**
 
 ```bash
 git add scripts/lib/development-workflow.sh scripts/test-release-workflow.sh
@@ -244,7 +244,7 @@ git commit -m "Feat(release): TAP-12371 增加正式研发流程配置门禁" -m
 - Produces: `release_fail(code, stage, message, action)`、`release_require_repo()`、`release_require_clean()`、`release_validate_version()`、`release_require_synced_branch()`、`release_build_assets()`、`release_write_audit()`。
 - CLI: `scripts/release.sh prepare --version vX.Y [--configure-workflow]`。
 
-- [ ] **Step 1: 写 prepare 参数、Tag 和构建测试**
+- [x] **Step 1: 写 prepare 参数、Tag 和构建测试**
 
 覆盖以下行为：
 
@@ -261,13 +261,13 @@ scripts/release.sh prepare --version v0.3
 
 fake build 函数写入四个平台产物和 checksum；测试断言 prepare 结束后工作区只出现这些生成变更。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run: `bash scripts/test-release-workflow.sh`
 
 Expected: FAIL，因为 `scripts/release.sh` 不存在。
 
-- [ ] **Step 3: 实现公共失败输出和 prepare**
+- [x] **Step 3: 实现公共失败输出和 prepare**
 
 稳定错误码至少包括：
 
@@ -295,7 +295,7 @@ git tag -a "$version" -m "AgenticOps $version version baseline"
 {"ok":true,"operation":"release_prepare","version":"v0.3","agentic_next_action":"review_and_commit_generated_assets"}
 ```
 
-- [ ] **Step 4: 验证 prepare GREEN**
+- [x] **Step 4: 验证 prepare GREEN**
 
 Run:
 
@@ -306,7 +306,7 @@ bash -n scripts/release.sh scripts/lib/release-common.sh scripts/lib/development
 
 Expected: PASS，且 shell 语法检查退出 0。
 
-- [ ] **Step 5: 提交正常发布 prepare**
+- [x] **Step 5: 提交正常发布 prepare**
 
 ```bash
 git add scripts/release.sh scripts/lib/release-common.sh scripts/test-release-workflow.sh

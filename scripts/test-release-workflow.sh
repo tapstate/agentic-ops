@@ -192,4 +192,67 @@ writes_after="$(wc -l < "$fake_gh_state/writes.log" | tr -d ' ')"
 test "$writes_after" = "$writes_before"
 workflow_check_or_configure check "$workflow_repo"
 
-printf '{"ok":true,"operation":"test_release_workflow","cases":7}\n'
+if [ ! -f "$repo_root/scripts/lib/release-common.sh" ]; then
+  echo "missing release common functions" >&2
+  exit 1
+fi
+if [ ! -x "$repo_root/scripts/release.sh" ]; then
+  echo "missing release entrypoint" >&2
+  exit 1
+fi
+
+mkdir -p "$workflow_repo/scripts/lib"
+cp "$repo_root/scripts/release.sh" "$workflow_repo/scripts/release.sh"
+cp "$repo_root/scripts/lib/release-common.sh" "$workflow_repo/scripts/lib/release-common.sh"
+cp "$repo_root/scripts/lib/development-workflow.sh" "$workflow_repo/scripts/lib/development-workflow.sh"
+cat > "$workflow_repo/scripts/build.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p install-resources/darwin-arm64 install-resources/darwin-amd64 install-resources/linux-arm64 install-resources/linux-amd64
+for target in darwin-arm64 darwin-amd64 linux-arm64 linux-amd64; do
+  printf 'binary:%s:%s\n' "$target" "$(git rev-parse --short HEAD)" > "install-resources/$target/agentic-cli"
+  chmod 0755 "install-resources/$target/agentic-cli"
+done
+mkdir -p install-resources
+printf 'fixture checksums\n' > install-resources/checksums.txt
+printf '{"ok":true,"operation":"build"}\n'
+EOF
+chmod 0755 "$workflow_repo/scripts/release.sh" "$workflow_repo/scripts/build.sh" "$workflow_repo/scripts/lib/release-common.sh" "$workflow_repo/scripts/lib/development-workflow.sh"
+git -C "$workflow_repo" add scripts .githooks
+git -C "$workflow_repo" commit -m "add release fixture" >/dev/null
+
+git -C "$workflow_repo" remote set-url origin git@github.com:tapstate/agentic-ops.git
+git -C "$workflow_repo" config "url.$workflow_remote.insteadOf" git@github.com:tapstate/agentic-ops.git
+
+if (cd "$workflow_repo" && scripts/release.sh prepare --version 0.3) >"$tmp_dir/invalid-version.out" 2>"$tmp_dir/invalid-version.err"; then
+  echo "expected invalid release version to fail" >&2
+  exit 1
+fi
+grep 'invalid_release_version' "$tmp_dir/invalid-version.err" >/dev/null
+
+prepare_head="$(git -C "$workflow_repo" rev-parse HEAD)"
+remote_develop_before="$(git -C "$workflow_repo" rev-parse refs/remotes/origin/develop)"
+if ! (cd "$workflow_repo" && scripts/release.sh prepare --version v0.3) >"$tmp_dir/prepare.out" 2>"$tmp_dir/prepare.err"; then
+  cat "$tmp_dir/prepare.err" >&2
+  echo "expected release prepare to succeed" >&2
+  exit 1
+fi
+grep '"operation":"release_prepare"' "$tmp_dir/prepare.out" >/dev/null
+test "$(git -C "$workflow_repo" cat-file -t refs/tags/v0.3)" = "tag"
+test "$(git -C "$workflow_repo" rev-list -n 1 v0.3)" = "$prepare_head"
+test "$(git -C "$workflow_repo" rev-parse HEAD)" = "$prepare_head"
+test "$(git -C "$workflow_repo" rev-parse refs/remotes/origin/develop)" = "$remote_develop_before"
+test -f "$workflow_repo/install-resources/darwin-arm64/agentic-cli"
+test -f "$workflow_repo/install-resources/darwin-amd64/agentic-cli"
+test -f "$workflow_repo/install-resources/linux-arm64/agentic-cli"
+test -f "$workflow_repo/install-resources/linux-amd64/agentic-cli"
+test -f "$workflow_repo/install-resources/checksums.txt"
+
+git -C "$workflow_repo" add install-resources
+git -C "$workflow_repo" commit -m "commit generated assets" >/dev/null
+(cd "$workflow_repo" && scripts/release.sh prepare --version v0.3) >"$tmp_dir/prepare-again.out" 2>"$tmp_dir/prepare-again.err"
+grep '"operation":"release_prepare"' "$tmp_dir/prepare-again.out" >/dev/null
+git -C "$workflow_repo" merge-base --is-ancestor refs/tags/v0.3 HEAD
+test -z "$(git -C "$workflow_repo" ls-remote --tags origin refs/tags/v0.3)"
+
+printf '{"ok":true,"operation":"test_release_workflow","cases":10}\n'
