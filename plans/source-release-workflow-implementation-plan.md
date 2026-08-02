@@ -615,8 +615,8 @@ git commit -m "Docs(workflow): TAP-12371 启用正式源码发布规则" -m "删
 
 **Files:**
 - Modify: `plans/source-release-workflow-implementation-plan.md`
-- Modify outside repo after conflict check: `/Users/lhs/wiki/30-projects/agentic-ops.md`
-- Modify outside repo when threshold applies: `/Users/lhs/wiki/00-inbox/wiki-optimization-observations.md`
+- Modify outside repo after conflict check: `$WIKI_ROOT/30-projects/agentic-ops.md`
+- Modify outside repo when threshold applies: `$WIKI_ROOT/00-inbox/wiki-optimization-observations.md`
 
 **Interfaces:**
 - Produces: 全部计划勾选、验证证据、长期分支与发布决策记忆。
@@ -879,21 +879,12 @@ Expected: 首次 `publish` 创建 `release/v0.3 → main` PR 并等待人工合�
 
 完成结果：PR #2 已使用 Merge commit `fa7402a` 合并到 `main`；第二轮完整验证于 `2026-08-01T15:23:09Z` 通过，远端 annotated Tag `v0.3` 已推送，完成审计已写入 `.local/release-runs/`。
 
-## 后续外部平台待办
+## 外部平台门禁决策
 
-- [ ] **由 `tapstate` 组织管理员完成私有仓库正式发布门禁配置**
+- [x] **长期使用 GitHub Free 私有仓库软门禁，不实施套餐升级待办**
 
-  2026-08-01 经用户确认暂缓，不阻塞本次仓库代码与文档变更收口。当前事实为：`tapstate` 使用 GitHub Free，`agentic-ops` 是私有仓库，`HarsenLin` 保持 `maintain`；GitHub API 返回 `allow_auto_merge=false`，Rulesets API 返回当前套餐不支持私有仓库 Ruleset。
+  2026-08-02 经研发工程师确认，`tapstate` 保持 GitHub Free，`agentic-ops` 保持私有仓库，不再把升级套餐、启用 Auto-merge 或配置私有仓库 Ruleset 作为项目待办。实时事实为：默认分支是 `main`，允许 Merge commit，`allow_auto_merge=false`，Rulesets API 因当前套餐返回 403。
 
-  后续由组织 Owner 将 `tapstate` 升级到 GitHub Team 或更高套餐，并由仓库 Admin 或具备“编辑仓库规则”权限的自定义角色完成一次性配置：
+  日常开发继续使用 `develop`；流程禁止直提直推 `main`。当前 clone 保持 `core.hooksPath=.githooks`，普通发布和 Hotfix 只有在研发工程师显式传入 `--allow-soft-gate` 时才使用固定发布分支、人工 Merge commit、合并事实校验、二次完整验证和审计继续执行。
 
-  1. 保持默认分支为 `main`。
-  2. 启用 Auto-merge 和 Merge commit。
-  3. 创建并启用 `agentic-ops-main-pull-request-only` Ruleset，目标为 `main`，禁止删除和强推，只允许通过 PR 的 Merge commit 合入，不要求 GitHub CI 或 Review。
-  4. 在当前 clone 保持 `core.hooksPath=.githooks`，并执行只读门禁复检：
-
-     ```bash
-     bash -c '. scripts/lib/development-workflow.sh; workflow_check_or_configure check "$PWD"'
-     ```
-
-  完成标准：硬门禁复检输出 `"ok":true`。在此之前，默认硬门禁继续阻断；确需发布时只能由研发工程师显式传入 `--allow-soft-gate`，按固定发布分支、人工 Merge commit 和二次完整验证流程执行。
+  该软门禁不能在 GitHub 服务端阻止其它 clone、`--no-verify` 或网页操作直接修改 `main`，项目明确接受该剩余风险。若未来平台能力或风险接受发生变化，应创建新的治理决策，不恢复本节已关闭的套餐升级待办。

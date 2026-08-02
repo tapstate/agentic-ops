@@ -36,7 +36,8 @@
 | D-028 | CLI 组件命名为 AgenticCLI | 旧名 `agent-task-ops` 过度强调任务操作，不能表达二进制是 AgenticOps 成熟经验沉淀结晶。项目尚未上线，不保留兼容别名；组件名使用 `AgenticCLI`，二进制命令、安装资源中的可执行文件和 Go package 目录统一使用 `agentic-cli`。 |
 | D-029 | 标准流程由 Standard Process Registry 维护 | 任务必须先分类，再进入对应标准流程；工作流配置只负责把标准流程映射到具体 Jira 字段、状态和 transition。接管任务必须校验 assignee 和 `agentic_id`，执行过程中持续检查所有权；任务完成或交接结束后必须清理 `agentic_id`，异常停止或所有权冲突时不得自动清理。 |
 | D-030 | 代码推送后必须回写 Jira 变更总结 | 能可靠确认对应 Jira 编号时，AIAgent 必须在推送成功后追加中文 Jira 评论。推送总结只描述做了哪些调整，不固定附带分支、提交、验证结果或残留风险。评论失败时明确标记回写未完成，恢复后只重试评论，不重复推送；真实 Jira 写入仍遵守既有门禁。 |
-| D-031 | 源头仓库采用正式分支和脚本发布流程 | GitHub 默认分支为 `main`，日常开发使用 `develop`；`main` 禁止直提直推，只能通过受保护 PR 的 Merge commit 合入。正常发布使用 `scripts/release.sh`，Hotfix 使用 `scripts/hotfix.sh`，固定执行完整验证、最终确认、合并事实校验和本地审计。 |
+| D-031 | 源头仓库采用正式分支和脚本发布流程 | GitHub 默认分支为 `main`，日常开发使用 `develop`；流程禁止直提直推 `main`，只允许通过 PR 的 Merge commit 合入。正常发布使用 `scripts/release.sh`，Hotfix 使用 `scripts/hotfix.sh`，固定执行完整验证、最终确认、合并事实校验和本地审计。 |
+| D-032 | 长期采用 GitHub Free 私有仓库软门禁 | `tapstate/agentic-ops` 保持私有仓库且不升级 GitHub 套餐。硬门禁可用时由 Ruleset 和 Auto-merge 强制；当前 GitHub Free 私有仓库显式使用本地 Hooks、发布脚本、固定发布分支、人工 Merge commit、合并事实校验、二次完整验证和审计组成的软门禁。软门禁不能在 GitHub 服务端阻止其它 clone、`--no-verify` 或网页操作直接修改 `main`，项目明确接受该剩余风险，不再保留套餐升级待办。 |
 
 ## 2. 当前无需决策事项
 

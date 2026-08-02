@@ -28,7 +28,7 @@
 rg -n '^- \[ \]' plans
 ```
 
-截至 2026-08-01，`resume-takeover`、问题修复基线、AO profile、反馈分析和独立 PR 证据入口本地基线已完成；当前仍待处理的是更新回滚与兼容治理、受控发布治理，以及列出的产品/权限/事实源决策。三组剩余治理事项的设计草案见 `docs/architecture/remaining-governance-design-v1.md`，实现状态以本文件和当前验证结果为准。
+截至 2026-08-02，`resume-takeover`、问题修复基线、AO profile、反馈分析、独立 PR 证据入口，以及 Task 6 的 `exact_pair` 更新、回滚和必要更新阻断均已完成。Task 7 只表示可选 GitHub Release 制品页能力，当前不需要、不阻塞源码发布或正式研发流程。当前直接推进项是 v0.3 真实 AO 试运行及其 v0.4 改进设计，执行计划见 `plans/v0.3-ao-pilot-and-v0.4-planning-plan.md`。
 
 已有计划文件：
 
@@ -176,9 +176,9 @@ go test ./...
 - `install-resources/basic/contracts/operations/fix-pr-comments.yaml`
 - `install-resources/basic/contracts/operations/check-ci-status.yaml`
 
-**Contract-only gap:**
-- `install-resources/basic/contracts/operations/write-pr-evidence.yaml` 已存在，但命令注册表中没有 `write-pr-evidence`。
-- 需要确认该契约应新增 CLI 入口，还是由现有 `write-evidence` 统一承载拉取请求证据后删除重复契约。
+**实施前契约缺口（历史，已由下方设计状态取代）：**
+- `install-resources/basic/contracts/operations/write-pr-evidence.yaml` 当时已存在，但命令注册表中还没有 `write-pr-evidence`。
+- 当时需要确认该契约应新增 CLI 入口，还是由现有 `write-evidence` 统一承载拉取请求证据后删除重复契约；后续已确认保留两个入口并完成实现。
 
 **Design status:**
 - 研发工程师已确认保留两个契约和两个入口；该项已按设计实现并完成契约、CLI 单元测试和资源校验。
@@ -239,11 +239,11 @@ bash tests/e2e/local-fake-flow.sh
 - `docs/runtime/problem-resolution-and-update.md`
 - `docs/runtime/versioning.md`
 
-**Current gap:**
-- `update apply` 已支持远程清单、下载、校验和真实二进制切换，但没有 `update rollback`。
-- release manifest 尚未表达最低兼容 CLI 版本、最低兼容资产版本、迁移策略和资产来源可信边界。
-- `assets install` 只按 source directory 复制，不验证资产 manifest 与 CLI 兼容性。
-- 必要更新的 `blocked_operations` 尚未进入所有 CLI 操作执行前的统一阻断检查。
+**Resolved gap:**
+- `update rollback` 已实现并校验本地上一状态与 SHA-256。
+- release manifest 已表达最低兼容 CLI 版本、最低兼容资产版本、迁移策略和资产来源可信边界。
+- `assets install` 已在复制前验证资产 manifest 与 CLI 的 `exact_pair` 兼容关系。
+- 必要更新的 `blocked_operations` 已进入 CLI 操作执行前的统一阻断检查。
 
 **Design status:**
 - 研发工程师已确认采用 `exact_pair`；版本关系、更新切换、回滚、资产来源和 required update guard 已按设计实施。
@@ -275,20 +275,20 @@ bash scripts/test-build.sh
 bash tests/e2e/problem-resolution-flow.sh
 ```
 
-### Task 7: 受控发布权限与发布审计
+### Task 7: 可选 GitHub Release 制品发布与审计
 
 **Design source:**
 - `docs/architecture/full-design-implementation-design.md`
 - `docs/runtime/problem-resolution-and-update.md`
 
-**Current gap:**
+**Optional gap:**
 - 当前仓库不存在可用的 `scripts/publish-release.sh`，历史计划中的完成结论已撤销。
 - 当前不存在受控 `agentic-cli release publish` 操作、发布权限策略、人工确认记录、发布审计事件和回滚说明。
-- 发布属于高风险动作，必须先确认发布责任人、授权方式、审计位置和回滚责任，再进入实现。
+- 若后续选择实现，发布属于高风险动作，必须先确认发布责任人、授权方式、审计位置和回滚责任，再进入实现。
 - shell 只能作为轻量调用包装，不能直接承载 GitHub 发布业务流程。
 
 **Design status:**
-- 已形成 release owner、显式确认、GitHub Release 事实源、本地审计引用和 fake 发布测试设计；发布权责和入口包装选择等待研发工程师确认后实施。
+- 已形成 release owner、显式确认、GitHub Release 事实源、本地审计引用和 fake 发布测试候选设计；当前明确不作为源码发布或正式使用阻塞项，不进入实施排期。
 
 **Files:**
 - Create: `install-resources/basic/contracts/operations/release-publish.yaml`
@@ -385,17 +385,18 @@ bash scripts/test-resources.sh
 
 - [ ] 是否引入 Web 控制台或后台常驻进程。
 - [ ] 是否允许某些低风险场景自动创建拉取请求或自动推送。
-- [ ] 发布权限由谁持有、如何授权、如何审计、如何回滚。
-- [ ] 跨版本兼容治理的最低承诺范围。
+- [ ] 如需实现可选 GitHub Release 制品页能力，发布权限由谁持有、如何授权、如何审计、如何回滚。
+- [x] 跨版本兼容治理采用 `exact_pair`，并已完成实现。
 - [ ] 任务级审计记录最终写入 Jira 卡片、审计服务还是目标仓库证据链。
 - [ ] 真实 Jira 工作流中名称相同或含义冲突的 `transition` 如何裁决。
 
 ## 3. 建议推进顺序
 
-1. 先确认 Task 4 的 `write-pr-evidence` 与 `write-evidence` 职责边界；未决前不新增运行入口，也不把孤立契约当作已实现能力。
-2. 确认最低兼容承诺后推进 Task 6 的更新回滚、资产兼容校验和必要更新阻断。
-3. 确认发布权责、授权方式、审计位置、回滚责任和 shell 包装选择后推进 Task 7。
-4. Task 1、Task 2、Task 3、Task 5、Task 8 和 Task 9 只保留已完成基线和回归验证，不再作为待开发事项。
+1. Task 4 和 Task 6 只保留已完成基线和回归验证，不再作为待开发事项。
+2. 使用已发布 v0.3 完成 AO 真实试运行，记录事实、失败模式和恢复证据。
+3. 根据试运行证据形成 v0.4 改进设计和实施计划，不把未经验证的问题扩入范围。
+4. Task 7 仅在出现明确 GitHub Release 制品页需求时重新进入决策，不与源码发布脚本混用。
+5. Task 1、Task 2、Task 3、Task 5、Task 8 和 Task 9 只保留已完成基线和回归验证。
 
 ## 4. 总体验证入口
 

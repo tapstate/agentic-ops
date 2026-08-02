@@ -79,10 +79,10 @@ AgenticCLI 使用 Go 实现，统一入口为 `agentic-cli`。shell 只用于 `g
 ## 分支与发布规则
 
 - GitHub 默认分支是 `main`，日常开发分支是 `develop`。
-- `main` 禁止直接提交和直接推送，必须启用版本化 `.githooks`，并通过 GitHub Repository Ruleset 要求 PR 合入、禁止强推和删除。
-- 正常发布使用 `scripts/release.sh prepare --version vX.Y` 准备本地 annotated tag 和四平台安装资源；研发工程师审查并提交生成资源后，使用 `scripts/release.sh publish --version vX.Y` 从 `develop` 创建或复用 PR，以 Merge commit 和 Auto-merge 合入 `main`。
+- `main` 禁止直接提交和直接推送，必须启用版本化 `.githooks`。硬门禁模式还必须通过 GitHub Repository Ruleset 要求 PR 合入、禁止强推和删除；GitHub Free 私有仓库使用显式软门禁时，接受服务器端无法阻止其它入口直推的剩余风险，但仍不得由本项目流程直接推送 `main`。
+- 正常发布使用 `scripts/release.sh prepare --version vX.Y` 准备本地 annotated tag 和四平台安装资源；研发工程师审查并提交生成资源后，硬门禁模式使用 `scripts/release.sh publish --version vX.Y` 从 `develop` 创建或复用 PR，以 Merge commit 和 Auto-merge 合入 `main`；软门禁模式必须显式增加 `--allow-soft-gate`，从固定 `release/vX.Y` 创建 PR，等待人工 Merge commit 后以同一命令恢复并再次执行完整验证。
 - Hotfix 使用 `scripts/hotfix.sh create --jira-id <KEY>` 从最新 `origin/main` 创建 `<user>/<jira-id>/fix-main`，再用同一入口执行 `prepare` 和 `publish`。Hotfix 复用 `main` 最近的 `vX.Y` 版本基线，不创建或推送新 tag；完成后由研发工程师把修复同步回 `develop`。
-- 发布脚本在执行前检查 Hooks、远端 `develop`、默认分支、Auto-merge 和 `main` ruleset；配置缺失时逐项引导确认，非交互配置必须显式传入 `--configure-workflow`。
+- 发布脚本在执行前检查 Hooks、远端 `develop` 和默认分支。硬门禁模式还检查 Auto-merge 和 `main` Ruleset，配置缺失时逐项引导确认，非交互配置必须显式传入 `--configure-workflow`；软门禁模式只放宽 Ruleset 和 Auto-merge，并强制检查 Merge commit 可用、固定发布 HEAD、人工合并、合并事实和二次完整验证。
 - `publish` 只有在完整验证通过后才展示最终确认；非交互发布必须显式传入 `--confirm-release`。脚本必须等待 PR 实际合并并验证 `origin/main` 包含发布 HEAD，正常发布最后才允许推送不可变 tag。
 
 ## 提交规则

@@ -189,7 +189,7 @@ AgenticOps 配置项必须按 [配置规范](configuration-standards.md) 维护�
 
 ## 8. 源头仓库分支与发布规则
 
-`tapstate/agentic-ops` 的 GitHub 默认分支必须是 `main`，日常开发必须在 `develop` 进行。`main` 不允许直接提交、直接推送、强推或删除，必须通过版本化 `.githooks` 和 GitHub Repository Ruleset 双重保护；合入方式只允许 PR 的 Merge commit。
+`tapstate/agentic-ops` 的 GitHub 默认分支必须是 `main`，日常开发必须在 `develop` 进行。`main` 不允许直接提交或直接推送，必须启用版本化 `.githooks`；合入方式只允许 PR 的 Merge commit。硬门禁模式还必须通过 GitHub Repository Ruleset 禁止直接推送、强推和删除；GitHub Free 私有仓库使用显式软门禁时，接受服务器端无法阻止其它入口直推的剩余风险，但本项目流程不得因此绕过 PR。
 
 正常发布必须使用统一入口：
 
@@ -198,7 +198,7 @@ scripts/release.sh prepare --version vX.Y
 scripts/release.sh publish --version vX.Y
 ```
 
-`prepare` 只创建本地 annotated `vX.Y` tag 并构建四平台安装资源，不暂存、不提交、不推送。研发工程师审查并提交生成资源后，`publish` 固定执行完整本地验证，取得最终确认，推送 `develop`，创建或复用 `develop -> main` PR，启用 Merge Auto-merge，等待实际合并并验证 `origin/main` 包含发布 HEAD，最后才推送不可变 tag。
+`prepare` 只创建本地 annotated `vX.Y` tag 并构建四平台安装资源，不暂存、不提交、不推送。研发工程师审查并提交生成资源后，`publish` 固定执行完整本地验证并取得最终确认。硬门禁模式推送 `develop`，创建或复用 `develop -> main` PR，启用 Merge Auto-merge；软门禁模式必须显式传入 `--allow-soft-gate`，从已验证 HEAD 创建固定 `release/vX.Y -> main` PR，等待研发工程师人工 Merge commit 后以同一命令恢复并再次完整验证。两种模式都必须验证 `origin/main` 包含固定发布 HEAD，最后才推送不可变 tag。
 
 紧急修复必须使用统一入口：
 
@@ -212,7 +212,7 @@ scripts/hotfix.sh publish
 
 两个 `publish` 入口都必须在临时 worktree 中固定执行 Go、资源、构建、安装和四个 E2E 验证。验证命令不得通过参数替换或跳过；验证失败和最终确认前不得产生远端写入。非交互发布必须显式传入 `--confirm-release`。
 
-脚本必须在执行前检查本地 Hooks、远端 `develop`、GitHub 默认分支、Auto-merge 和 `main` ruleset。发现缺失或漂移时应逐项展示并取得确认后幂等修复；非交互配置必须显式传入 `--configure-workflow`。PR 和 Merge commit 是发布事实源，`.local/release-runs/` JSON 是本地执行审计。
+脚本必须在执行前检查本地 Hooks、远端 `develop` 和 GitHub 默认分支。硬门禁模式还检查 Auto-merge 和 `main` Ruleset，发现缺失或漂移时应逐项展示并取得确认后幂等修复；非交互配置必须显式传入 `--configure-workflow`。软门禁只放宽 Ruleset 和 Auto-merge，仍强制检查 Merge commit 可用、固定发布或修复 HEAD、人工合并、合并事实和二次完整验证。PR 和 Merge commit 是发布事实源，`.local/release-runs/` JSON 是本地执行审计。
 
 ## 9. 安装边界
 

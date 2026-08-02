@@ -51,7 +51,7 @@ Go CLI 运行时的实现方向如下：
 - 写操作必须经过策略、门禁和人工确认检查。
 - Linux (linux-amd64 / linux-arm64)、macOS Intel (darwin-amd64) 和 macOS Apple Silicon (darwin-arm64) 都必须通过对应平台二进制运行。
 - 发布流程必须支持快速构建、发布和自更新。
-- GitHub 默认分支是 `main`，日常开发使用 `develop`；`main` 只能通过受保护 PR 的 Merge commit 合入。
+- GitHub 默认分支是 `main`，日常开发使用 `develop`；流程禁止直提直推 `main`，只允许通过 PR 的 Merge commit 合入。硬门禁可用时由 Ruleset 强制；GitHub Free 私有仓库使用显式软门禁，并保留“无法从服务器端阻止其它入口直推”的风险提示。
 - 正常发布与 Hotfix 必须分别使用统一脚本入口，固定执行完整验证、最终确认、合并事实校验和审计。
 
 ## 5. 测试方向
