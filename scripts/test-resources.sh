@@ -76,4 +76,9 @@ if grep -ERn '研发负责人|developer_owner|development-leads|development-lead
   exit 1
 fi
 
+if rg -n '^[[:space:]]+-m ".*\\n' plans --glob '*.md'; then
+  echo "git commit body examples must use real line breaks instead of literal \\n" >&2
+  exit 1
+fi
+
 printf '{"ok":true,"operation":"test_resources"}\n'
