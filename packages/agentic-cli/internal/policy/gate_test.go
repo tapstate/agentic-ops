@@ -19,3 +19,20 @@ func TestRequiresHumanGateForWriteOperations(t *testing.T) {
 		t.Fatal("unknown gates should not require a human gate")
 	}
 }
+
+func TestTaskAuthorizationDoesNotDisableHumanGate(t *testing.T) {
+	p := Policy{
+		Gates: map[string]Gate{
+			"git_push": {Required: true},
+		},
+		AuthorizationScopes: map[string]AuthorizationScope{
+			"task_execution": {CoveredOperations: []string{"git_push"}},
+		},
+	}
+	if !RequiresHumanGate(p, "git_push") {
+		t.Fatal("git_push must remain human gated")
+	}
+	if scope, ok := AuthorizationScopeForOperation(p, "git_push"); !ok || scope != "task_execution" {
+		t.Fatalf("authorization scope = %q, %v", scope, ok)
+	}
+}
