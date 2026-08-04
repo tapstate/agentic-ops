@@ -71,6 +71,12 @@ grep 'authorization_reference' install-resources/basic/contracts/operations/add-
 grep 'authorization_scope' install-resources/basic/contracts/operations/prepare-pr.yaml >/dev/null
 grep 'fixed_head_sha' install-resources/basic/contracts/operations/prepare-pr.yaml >/dev/null
 grep 'authorization_reference' install-resources/basic/contracts/operations/write-pr-evidence.yaml >/dev/null
+grep '工作项级连续执行授权' install-resources/basic/company/standards/core-hard-rules.md >/dev/null
+grep '工作项级连续执行授权' install-resources/basic/handbooks/ai-employee-handbook.md >/dev/null
+grep '工作项级连续执行授权' docs/project-rules.md >/dev/null
+grep '工作项级连续执行授权' docs/architecture/agenticops-current-design.md >/dev/null
+grep '拉取请求审查包' docs/templates/evidence-templates.md >/dev/null
+grep 'D-033' docs/decision-log.md | grep '连续执行授权' >/dev/null
 
 if rg -n 'development-phase-rules\.md|第一个版本发布正式上线前|当前阶段只允许本地模拟' \
   AGENTS.md README.md docs install-resources/basic; then

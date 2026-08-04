@@ -147,7 +147,7 @@ agentic-cli workspace init --project tapdata --interactive
 
 - AIAgent 只修改当前卡片范围内内容。
 - AIAgent 记录测试结果。
-- AIAgent 不自动推送或创建拉取请求。
+- 尚未取得工作项级连续执行授权时，AIAgent 不推送或创建拉取请求；授权生效后连续推进到拉取请求审查。
 
 ### 步骤 9：写入结构化结论和证据
 

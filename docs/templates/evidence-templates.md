@@ -46,7 +46,7 @@
 
 ### 下一步
 
-AI 员工将读取目标仓库上下文并开始本地开发。未经研发工程师确认，不会推送或创建拉取请求。
+AI 员工将读取目标仓库上下文并开始本地开发。未经研发工程师确认版本化设计或修复计划并授予工作项级连续执行授权，不会推送或创建拉取请求。
 ```
 
 ## 4. 任务接管失败
@@ -105,37 +105,93 @@ AI 员工将读取目标仓库上下文并开始本地开发。未经研发工�
 - `<required-human-action>`
 ```
 
-## 6. 本地开发完成
+## 6. 工作项连续执行授权
 
 ```markdown
-## 本地开发完成
+## 工作项连续执行授权
 
 - 事项: `<issue-key>`
 - 工作空间: `<workspace>`
 - 任务类型: `task_takeover`
 - 运行 ID: `<agentic_run_id>`
-- 当前阶段: `development_completed`
-- 下一步: `request_owner_confirmation`
-- 已更新表单: `implementation_summary`、`verification_result`、`residual_risk`
+- Agent ID: `<agent-id>`
+- Agentic ID: `<agentic-id>`
+- 目标仓库: `<target-repo>`
+- 工作分支: `<work-branch>`
+- 目标分支: `<base-branch>`
+- 计划版本: `<approved-plan-version>`
+- 授权引用: `<authorization-reference>`
+- 当前阶段: `implementation`
+- 下一步: `continue_to_pr_review`
 
-### 变更摘要
+### 已确认范围
+
+- `<approved-scope>`
+
+### 验证方式
+
+- `<verification-method>`
+
+### 明确非范围
+
+- `<excluded-scope>`
+
+### 授权动作
+
+- 实现、验证和提交。
+- 推送任务分支。
+- 必要 Jira 回写。
+- 创建或更新拉取请求。
+
+### 失效条件
+
+- 所有权或绑定事实变化。
+- 范围或风险扩大。
+- 必要验证受阻或连续失败。
+- 外部写入结果不明确。
+```
+
+## 7. 拉取请求审查包
+
+```markdown
+## 拉取请求审查包
+
+- 事项: `<issue-key>`
+- 工作空间: `<workspace>`
+- 运行 ID: `<agentic_run_id>`
+- 授权引用: `<authorization-reference>`
+- 拉取请求: `<pr-url>`
+- Base: `<base-branch>`
+- Head: `<work-branch>`
+- 固定 Head SHA: `<fixed-head-sha>`
+- 当前阶段: `pr_review`
+- 下一步: `<agentic_next_action>`
+
+### 变更与提交
 
 - `<change-summary>`
+- `<commit-summary>`
 
-### 验证结果
+### 验证与审查事实
 
 - `<verification-result>`
+- `<ci-fact>`
+- `<review-fact>`
+
+### Jira 回写
+
+- `<jira-writeback-reference>`
 
 ### 残留风险
 
 - `<residual-risk>`
 
-### 人工确认
+### 需要人工处理
 
-等待研发工程师确认是否允许推送或创建拉取请求。
+- `<required-human-action>`
 ```
 
-## 7. 专业审查退回
+## 8. 专业审查退回
 
 ```markdown
 ## 专业审查退回
@@ -163,7 +219,7 @@ AI 员工将读取目标仓库上下文并开始本地开发。未经研发工�
 AI 员工将按审查结论修复、重新验证，并在必要时重做受影响阶段表单。
 ```
 
-## 8. 反馈建议
+## 9. 反馈建议
 
 ```markdown
 ## AgenticOps 改进建议
