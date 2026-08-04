@@ -36,7 +36,7 @@
 - Consumes: 现有 `Policy.Gates` 和 `RequiresHumanGate`。
 - Produces: `Policy.AuthorizationScopes`、`AuthorizationScope`、`AuthorizationScopeForOperation`；既有 gate 的 `required` 值保持不变。
 
-- [ ] **Step 1: 为默认策略授权范围编写失败测试**
+- [x] **Step 1: 为默认策略授权范围编写失败测试**
 
 在 `validator_test.go` 增加测试，要求默认策略存在 `task_execution`：
 
@@ -80,13 +80,13 @@ func TestTaskAuthorizationDoesNotDisableHumanGate(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行测试并确认失败**
+- [x] **Step 2: 运行测试并确认失败**
 
 Run: `go test ./packages/agentic-cli/internal/policy`
 
 Expected: FAIL，提示 `AuthorizationScopes`、`AuthorizationScope` 或 `AuthorizationScopeForOperation` 尚不存在。
 
-- [ ] **Step 3: 实现最小策略模型和查询函数**
+- [x] **Step 3: 实现最小策略模型和查询函数**
 
 在 `model.go` 增加：
 
@@ -122,7 +122,7 @@ func AuthorizationScopeForOperation(p Policy, operation string) (string, bool) {
 }
 ```
 
-- [ ] **Step 4: 在默认策略声明授权范围**
+- [x] **Step 4: 在默认策略声明授权范围**
 
 在 `default.yaml` 保留所有现有 `required` 值，并增加：
 
@@ -165,7 +165,7 @@ authorization_scopes:
       - ambiguous_external_write
 ```
 
-- [ ] **Step 5: 校验授权范围完整性**
+- [x] **Step 5: 校验授权范围完整性**
 
 在 `validator.go` 增加稳定错误码：
 
@@ -174,13 +174,13 @@ authorization_scopes:
 
 校验 `task_execution` 的确认来源、绑定事实、覆盖动作、禁止动作和失效条件都非空；同时拒绝同一个动作同时出现在 `covered_operations` 和 `excluded_operations`。
 
-- [ ] **Step 6: 运行策略测试**
+- [x] **Step 6: 运行策略测试**
 
 Run: `go test ./packages/agentic-cli/internal/policy`
 
 Expected: PASS。
 
-- [ ] **Step 7: 提交策略模型**
+- [x] **Step 7: 提交策略模型**
 
 ```bash
 git add \
@@ -213,7 +213,7 @@ git commit \
 - Consumes: 策略范围 `task_execution`。
 - Produces: `execution_authorization`、`authorization_reference`、`fixed_head_sha` 和 `pr_review` 标准节点。
 
-- [ ] **Step 1: 先增加资源合同失败断言**
+- [x] **Step 1: 先增加资源合同失败断言**
 
 在 `scripts/test-resources.sh` 增加：
 
@@ -228,13 +228,13 @@ grep 'fixed_head_sha' install-resources/basic/contracts/operations/prepare-pr.ya
 grep 'authorization_reference' install-resources/basic/contracts/operations/write-pr-evidence.yaml >/dev/null
 ```
 
-- [ ] **Step 2: 运行资源测试并确认失败**
+- [x] **Step 2: 运行资源测试并确认失败**
 
 Run: `bash scripts/test-resources.sh`
 
 Expected: FAIL，首个尚未实现的授权合同断言返回非零。
 
-- [ ] **Step 3: 更新两个标准流程**
+- [x] **Step 3: 更新两个标准流程**
 
 在 `implementation.output_fields` 增加：
 
@@ -262,7 +262,7 @@ Expected: FAIL，首个尚未实现的授权合同断言返回非零。
     review_gate: development_engineer_review
 ```
 
-- [ ] **Step 4: 更新三个操作契约**
+- [x] **Step 4: 更新三个操作契约**
 
 - `add-task-comment.yaml`：增加可选 `authorization_reference` 输入；前置条件改为真实 Jira 写入已由当前动作确认或由有效 `task_execution` 授权覆盖。
 - `prepare-pr.yaml`：输出 `authorization_scope`、`authorization_reference`、`fixed_head_sha`；仍保持 `must_not_push_git` 和 `must_not_create_pr`。
@@ -270,7 +270,7 @@ Expected: FAIL，首个尚未实现的授权合同断言返回非零。
 
 操作契约必须明确：复用授权只表示人工确认已存在，不能跳过所有权、策略、输入、幂等和事实回读门禁。
 
-- [ ] **Step 5: 更新人读操作契约**
+- [x] **Step 5: 更新人读操作契约**
 
 在 `docs/contracts/operation-contract.md` 增加“工作项级连续执行授权”章节，写明：
 
@@ -280,7 +280,7 @@ Expected: FAIL，首个尚未实现的授权合同断言返回非零。
 - 无授权记录的旧任务继续逐项确认。
 - 合并、发布、Tag、强推、历史改写和范围变化不能消费该授权。
 
-- [ ] **Step 6: 运行合同和资源测试**
+- [x] **Step 6: 运行合同和资源测试**
 
 Run: `go test ./packages/agentic-cli/internal/contract ./packages/agentic-cli/internal/process`
 
@@ -290,7 +290,7 @@ Run: `bash scripts/test-resources.sh`
 
 Expected: 如果 checksums 尚未更新，只因 `install-resources/checksums.txt` 漂移失败；其它新增合同断言通过。
 
-- [ ] **Step 7: 提交流程和契约**
+- [x] **Step 7: 提交流程和契约**
 
 ```bash
 git add \
@@ -326,7 +326,7 @@ git commit \
 - Consumes: 设计文档和 `task_execution` 策略范围。
 - Produces: 研发工程师自然语言授权方式、AIAgent 停止条件、授权记录模板和 PR 审查包模板。
 
-- [ ] **Step 1: 增加人读标准失败断言**
+- [x] **Step 1: 增加人读标准失败断言**
 
 在 `scripts/test-resources.sh` 增加：
 
@@ -339,13 +339,13 @@ grep '拉取请求审查包' docs/templates/evidence-templates.md >/dev/null
 grep 'D-033' docs/decision-log.md | grep '连续执行授权' >/dev/null
 ```
 
-- [ ] **Step 2: 运行资源测试并确认失败**
+- [x] **Step 2: 运行资源测试并确认失败**
 
 Run: `bash scripts/test-resources.sh`
 
 Expected: FAIL，首个尚未同步的人读标准断言返回非零。
 
-- [ ] **Step 3: 更新公司规则和 AI 员工手册**
+- [x] **Step 3: 更新公司规则和 AI 员工手册**
 
 公司规则明确：高风险动作必须先确认；同一工作项已有可回读、未失效的授权时，后续覆盖动作不重复询问。手册增加：
 
@@ -356,7 +356,7 @@ Expected: FAIL，首个尚未同步的人读标准断言返回非零。
 - 正常结束统一停在 PR 审查。
 - 合并和发布仍独立确认。
 
-- [ ] **Step 4: 更新项目规则、当前设计和 AGENTS**
+- [x] **Step 4: 更新项目规则、当前设计和 AGENTS**
 
 把主链路更新为：
 
@@ -368,7 +368,7 @@ Expected: FAIL，首个尚未同步的人读标准断言返回非零。
 
 明确源头仓库维护也可以在研发工程师明确授权的任务范围内连续提交、推送和创建 PR，但不能直接修改 `main`，不能把工作项授权扩展到发布或 Tag。
 
-- [ ] **Step 5: 更新研发工程师指南和证据模板**
+- [x] **Step 5: 更新研发工程师指南和证据模板**
 
 增加推荐自然语言：
 
@@ -378,7 +378,7 @@ Expected: FAIL，首个尚未同步的人读标准断言返回非零。
 
 增加“工作项连续执行授权”和“拉取请求审查包”模板，必须包含授权引用、固定 Head SHA、验证结果、CI 事实、Jira 回写引用、残留风险和下一步人工动作。
 
-- [ ] **Step 6: 记录长期设计决策**
+- [x] **Step 6: 记录长期设计决策**
 
 在 `docs/decision-log.md` 增加：
 
@@ -388,13 +388,13 @@ D-033 | 设计确认形成工作项级连续执行授权 | 授权绑定 Jira、�
 
 同时从“当前无需决策事项”删除“是否允许低风险任务自动推送或自动创建拉取请求”，因为本设计不是按低风险自动放行，而是已形成明确的工作项授权机制。
 
-- [ ] **Step 7: 运行资源测试**
+- [x] **Step 7: 运行资源测试**
 
 Run: `bash scripts/test-resources.sh`
 
 Expected: 除 checksums 漂移外，新增语义断言全部通过。
 
-- [ ] **Step 8: 提交人读标准**
+- [x] **Step 8: 提交人读标准**
 
 ```bash
 git add \
@@ -427,13 +427,13 @@ git commit \
 - Consumes: 前三项全部实现。
 - Produces: 可复查的完整验证记录和已完成计划状态。
 
-- [ ] **Step 1: 更新安装资源校验和**
+- [x] **Step 1: 更新安装资源校验和**
 
 Run: `bash scripts/update-checksums.sh`
 
 Expected: `install-resources/checksums.txt` 只因本计划修改的 `install-resources/basic/` 文件发生对应变化。
 
-- [ ] **Step 2: 执行完整验证**
+- [x] **Step 2: 执行完整验证**
 
 Run: `go test ./...`
 
@@ -451,7 +451,7 @@ Run: `git diff --check origin/develop...HEAD`
 
 Expected: 无输出，退出码为 0。
 
-- [ ] **Step 3: 回读关键约束**
+- [x] **Step 3: 回读关键约束**
 
 确认：
 
@@ -461,11 +461,11 @@ Expected: 无输出，退出码为 0。
 - 流程正常结束于 `pr_review`，不直接进入合并或完成状态。
 - 所有 commit body 使用真实换行，不含字面量 `\n`。
 
-- [ ] **Step 4: 更新计划执行状态和 AO-2 记录**
+- [x] **Step 4: 更新计划执行状态和 AO-2 记录**
 
 把本计划已完成步骤标记为 `[x]`；在 `plans/v0.3-ao-pilot-and-v0.4-planning-plan.md` 记录新增设计、策略模型、标准资产、验证结果、提交和后续 PR 事实，删除已经完成的“待推送”表述。
 
-- [ ] **Step 5: 提交校验和与执行记录**
+- [x] **Step 5: 提交校验和与执行记录**
 
 ```bash
 git add \
