@@ -25,3 +25,39 @@ gates:
     required: true
   scope_change:
     required: true
+authorization_scopes:
+  task_execution:
+    confirmation_source: jira_decision
+    required_bindings:
+      - issue_key
+      - agentic_run_id
+      - agent_id
+      - agentic_id
+      - target_repo
+      - work_branch
+      - base_branch
+      - approved_plan_version
+      - approved_scope
+      - verification_method
+    covered_operations:
+      - git_commit
+      - git_push
+      - write_jira_comment
+      - create_pr
+      - update_pr
+    excluded_operations:
+      - git_merge
+      - release
+      - git_tag
+      - protected_branch_push
+      - force_push
+      - history_rewrite
+      - scope_change
+    invalidated_by:
+      - ownership_changed
+      - binding_mismatch
+      - scope_changed
+      - risk_increased
+      - verification_blocked
+      - repeated_failure
+      - ambiguous_external_write
