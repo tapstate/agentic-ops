@@ -63,6 +63,14 @@ grep 'tapstate/agentic-ops' install-resources/basic/projects/ao/profile.yaml >/d
 grep '"compatibility_policy": "exact_pair"' install-resources/basic/manifest.json >/dev/null
 grep 'scripts/release.sh publish' docs/project-rules.md >/dev/null
 grep 'scripts/hotfix.sh publish' docs/project-rules.md >/dev/null
+grep 'authorization_scopes:' install-resources/basic/policies/default.yaml >/dev/null
+grep 'task_execution:' install-resources/basic/policies/default.yaml >/dev/null
+grep 'execution_authorization' install-resources/basic/contracts/processes/development-change-v1.yaml >/dev/null
+grep 'execution_authorization' install-resources/basic/contracts/processes/agenticops-improvement-v1.yaml >/dev/null
+grep 'authorization_reference' install-resources/basic/contracts/operations/add-task-comment.yaml >/dev/null
+grep 'authorization_scope' install-resources/basic/contracts/operations/prepare-pr.yaml >/dev/null
+grep 'fixed_head_sha' install-resources/basic/contracts/operations/prepare-pr.yaml >/dev/null
+grep 'authorization_reference' install-resources/basic/contracts/operations/write-pr-evidence.yaml >/dev/null
 
 if rg -n 'development-phase-rules\.md|第一个版本发布正式上线前|当前阶段只允许本地模拟' \
   AGENTS.md README.md docs install-resources/basic; then

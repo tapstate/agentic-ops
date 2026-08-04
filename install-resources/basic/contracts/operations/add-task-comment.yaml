@@ -6,6 +6,7 @@ allowed_stages:
   - waiting_takeover
   - takeover_gate
   - implementation
+  - pr_review
   - completed
 required_inputs:
   - issue_key
@@ -34,17 +35,22 @@ input:
   agentic_run_id:
     type: string
     required: false
+  authorization_reference:
+    type: string
+    required: false
 preconditions:
   - current_user_must_match_owner_and_assignee
   - agentic_id_must_be_empty_or_match_agent_id
   - agentic_run_id_must_match_issue_when_provided
-  - real_jira_write_must_be_confirmed
+  - real_jira_write_must_be_confirmed_or_covered_by_valid_task_execution_authorization
 output:
   workspace:
     type: string
   issue_key:
     type: string
   agentic_run_id:
+    type: string
+  authorization_reference:
     type: string
   category:
     type: string

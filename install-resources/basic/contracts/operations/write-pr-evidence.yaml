@@ -20,10 +20,14 @@ input:
   pr_url:
     type: string
     required: true
+  authorization_reference:
+    type: string
+    required: false
 preconditions:
   - run_must_exist
   - pr_url_must_be_known
   - policy_must_allow_evidence_write
+  - real_jira_write_must_be_confirmed_or_covered_by_valid_task_execution_authorization
 output:
   workspace:
     type: string
@@ -49,6 +53,8 @@ output:
     type: boolean
   audit_reference:
     type: string
+  authorization_reference:
+    type: string
   current_stage:
     type: string
   agentic_next_action:
@@ -66,7 +72,7 @@ side_effects:
   - may_write_local_event
   - may_write_pr_comment
 human_gate:
-  required: false
+  required: true
 retry_policy:
   retryable: true
   max_attempts: 1
