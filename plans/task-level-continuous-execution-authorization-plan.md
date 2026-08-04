@@ -492,21 +492,21 @@ git commit \
 - Consumes: 当前 AO-2 连续执行授权和完整验证结果。
 - Produces: 远端任务分支、AO-2 中文证据评论和目标为 `develop` 的拉取请求。
 
-- [ ] **Step 1: 执行推送前事实检查**
+- [x] **Step 1: 执行推送前事实检查**
 
 检查工作区干净、当前分支为 `harsen/AO-2/develop`、上游为同名远端分支、`origin/develop` 可达且没有开放的重复 PR。
 
-- [ ] **Step 2: 推送任务分支**
+- [x] **Step 2: 推送任务分支**
 
 Run: `git push origin harsen/AO-2/develop`
 
 Expected: 远端分支 HEAD 与本地 HEAD 完全一致。
 
-- [ ] **Step 3: 回写 AO-2 推送与授权证据**
+- [x] **Step 3: 回写 AO-2 推送与授权证据**
 
 写入一条中文 Jira 评论，说明工作项级授权、标准资产变更、验证结果和下一步 PR 审查；写入后按评论 ID 回读。失败时只重试 Jira 评论，不重复推送。
 
-- [ ] **Step 4: 创建或复用 develop 拉取请求**
+- [x] **Step 4: 创建或复用 develop 拉取请求**
 
 Title: `Docs(workflow): AO-2 采用工作项连续执行流程`
 
@@ -516,6 +516,8 @@ Head: `harsen/AO-2/develop`
 
 PR 正文必须包含授权边界、全部变更、提交、验证、CI 事实、固定 Head SHA、残留风险和明确非范围。
 
-- [ ] **Step 5: 回读并输出拉取请求审查包**
+- [x] **Step 5: 回读并输出拉取请求审查包**
 
 回读 PR URL、状态、Base、Head、固定 Head SHA、可合并状态、check runs、commit statuses、Reviews、普通评论和行级评论；把 PR 证据写入 AO-2 后按评论 ID 回读。然后暂停，等待研发工程师审查和人工 Merge commit。
+
+执行记录：AO-2 工作项级连续执行授权已写入 Jira 评论 `46524`，推送总结已写入评论 `46525`，两条评论均回读一致。任务分支首次推送后远端 HEAD 与本地 `97f38bf5f02a95a5d3bfa7a21f2cd9e8cf16614d` 一致；PR #4 已创建为 `harsen/AO-2/develop -> develop`，状态开放、非草稿、可合并且 `mergeable_state=clean`。首次 PR 回读没有 check run、commit status、Review、普通评论或行级评论，不能声称 CI 通过。本执行记录提交推送后，以 PR #4 和 AO-2 最终 PR 证据评论回读的 Head SHA 作为固定审查事实。
