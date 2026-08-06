@@ -79,10 +79,10 @@ AgenticCLI 使用 Go 实现，统一入口为 `agentic-cli`。shell 只用于 `g
 ## 分支与发布规则
 
 - GitHub 默认分支是 `main`，日常开发分支是 `develop`。
-- `main` 禁止直接提交和直接推送，必须启用版本化 `.githooks`，并通过 GitHub Repository Ruleset 要求 PR 合入、禁止强推和删除。
-- 正常发布使用 `scripts/release.sh prepare --version vX.Y` 准备本地 annotated tag 和四平台安装资源；研发工程师审查并提交生成资源后，使用 `scripts/release.sh publish --version vX.Y` 从 `develop` 创建或复用 PR，以 Merge commit 和 Auto-merge 合入 `main`。
+- `main` 禁止直接提交和直接推送，必须启用版本化 `.githooks`。硬门禁模式还必须通过 GitHub Repository Ruleset 要求 PR 合入、禁止强推和删除；GitHub Free 私有仓库使用显式软门禁时，接受服务器端无法阻止其它入口直推的剩余风险，但仍不得由本项目流程直接推送 `main`。
+- 正常发布使用 `scripts/release.sh prepare --version vX.Y` 准备本地 annotated tag 和四平台安装资源；研发工程师审查并提交生成资源后，硬门禁模式使用 `scripts/release.sh publish --version vX.Y` 从 `develop` 创建或复用 PR，以 Merge commit 和 Auto-merge 合入 `main`；软门禁模式必须显式增加 `--allow-soft-gate`，从固定 `release/vX.Y` 创建 PR，等待人工 Merge commit 后以同一命令恢复并再次执行完整验证。
 - Hotfix 使用 `scripts/hotfix.sh create --jira-id <KEY>` 从最新 `origin/main` 创建 `<user>/<jira-id>/fix-main`，再用同一入口执行 `prepare` 和 `publish`。Hotfix 复用 `main` 最近的 `vX.Y` 版本基线，不创建或推送新 tag；完成后由研发工程师把修复同步回 `develop`。
-- 发布脚本在执行前检查 Hooks、远端 `develop`、默认分支、Auto-merge 和 `main` ruleset；配置缺失时逐项引导确认，非交互配置必须显式传入 `--configure-workflow`。
+- 发布脚本在执行前检查 Hooks、远端 `develop` 和默认分支。硬门禁模式还检查 Auto-merge 和 `main` Ruleset，配置缺失时逐项引导确认，非交互配置必须显式传入 `--configure-workflow`；软门禁模式只放宽 Ruleset 和 Auto-merge，并强制检查 Merge commit 可用、固定发布 HEAD、人工合并、合并事实和二次完整验证。
 - `publish` 只有在完整验证通过后才展示最终确认；非交互发布必须显式传入 `--confirm-release`。脚本必须等待 PR 实际合并并验证 `origin/main` 包含发布 HEAD，正常发布最后才允许推送不可变 tag。
 
 ## 提交规则
@@ -105,6 +105,20 @@ Jira 任务编号必须能从分支名、用户指令、Jira 卡片或任务上�
 
 commit body / description 使用中文，说明做了什么、解决什么问题、为什么这样做、验证结果和风险。非平凡提交必须包含 body。
 
+在 shell 中创建非平凡提交时使用以下模板：
+
+```bash
+git commit \
+  -m "<type>(<scope>): <tag> <subject>" \
+  -m "<body>"
+```
+
+Git 会在两个 `-m` 之间生成一个空行。`<body>` 可以包含真实换行，但不得使用字面量 `\n` 代替换行。
+
 每个提交只包含一个逻辑变更。不得在提交信息中粘贴完整 Jira 描述、敏感日志、凭证或未经脱敏的客户信息。
 
-AIAgent 只有在研发工程师明确要求“提交变更”或“提交代码”后才能执行 `git commit`，只有在明确要求推送或执行发布后才能 `git push`。日常变更只推送 `develop` 或符合规则的任务分支，不得直接推送 `main`；正式发布和 Hotfix 必须使用对应脚本并经过最终确认。若能可靠确认 Jira 编号，推送成功后应将中文变更总结评论到对应 Jira 任务；评论失败时必须明确反馈“代码已推送但 Jira 回写未完成”，后续只重试评论，不重复推送。
+AIAgent 只有在研发工程师明确要求“提交变更”或“提交代码”，或确认版本化设计或修复计划并授予工作项级连续执行授权后，才能执行 `git commit`。只有在明确要求推送、执行发布或有效工作项级连续执行授权覆盖推送时，才能执行 `git push`。
+
+工作项级连续执行授权必须绑定 Jira 工作项、`agentic_run_id`、目标仓库、工作分支、目标分支、修改范围和验证方式。授权范围内可以连续完成实现、验证、提交、任务分支推送、必要 Jira 回写以及创建或更新 PR，并统一停在 PR 审查；不再为每个已覆盖动作重复确认。所有权或绑定事实变化、范围或风险扩大、必要验证受阻、连续失败或外部写入结果不明确时，授权立即失效。合并、发布、Git Tag、直接修改 `main`、强推、历史改写和范围变化始终需要新的人工确认。
+
+日常变更只推送 `develop` 或符合规则的任务分支，不得直接推送 `main`；正式发布和 Hotfix 必须使用对应脚本并经过最终确认。若能可靠确认 Jira 编号，推送成功后应将中文变更总结评论到对应 Jira 任务；评论失败时必须明确反馈“代码已推送但 Jira 回写未完成”，后续只重试评论，不重复推送。

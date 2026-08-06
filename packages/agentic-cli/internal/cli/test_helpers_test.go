@@ -215,7 +215,18 @@ func validCLIPolicyYAMLWithEvidenceGate(policyName string, requireJiraComment bo
 		"  fix_pr_comments:\n" +
 		"    required: true\n" +
 		"  scope_change:\n" +
-		"    required: true\n"
+		"    required: true\n" +
+		"authorization_scopes:\n" +
+		"  task_execution:\n" +
+		"    confirmation_source: jira_decision\n" +
+		"    required_bindings:\n" +
+		"      - issue_key\n" +
+		"    covered_operations:\n" +
+		"      - git_push\n" +
+		"    excluded_operations:\n" +
+		"      - git_merge\n" +
+		"    invalidated_by:\n" +
+		"      - scope_changed\n"
 }
 
 func withJiraClientForTest(t *testing.T, selection clihandlers.JiraClientSelection) {

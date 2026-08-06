@@ -54,6 +54,12 @@ output:
     type: array
   policy_gates:
     type: object
+  authorization_scope:
+    type: string
+  authorization_reference:
+    type: string
+  fixed_head_sha:
+    type: string
   policy_gate_code:
     type: string
   blocked_operations:

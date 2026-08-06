@@ -46,6 +46,7 @@
 - [标准流程注册处](processes/standard-process-registry.md)
 - [反馈闭环](workflows/feedback-loop.md)
 - [端到端演示](examples/end-to-end-demo.md)
+- [v0.3 AO 真实试运行结果](examples/v0.3-ao-pilot-result.md)
 
 ## 契约与配置
 

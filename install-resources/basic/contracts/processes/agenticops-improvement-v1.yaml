@@ -24,6 +24,24 @@ stages:
       - improvement_summary
       - changed_assets
       - verification_result
+      - residual_risk
+      - execution_authorization
+      - authorization_reference
+    review_gate: development_engineer_review
+  - id: pr_review
+    responsible_role: development_engineer
+    input_fields:
+      - execution_authorization
+      - authorization_reference
+      - improvement_summary
+      - changed_assets
+      - verification_result
+      - residual_risk
+      - pr_url
+      - fixed_head_sha
+    output_fields:
+      - review_decision
+      - agentic_next_action
     review_gate: development_engineer_review
   - id: completed
     responsible_role: development_engineer

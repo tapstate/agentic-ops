@@ -66,7 +66,7 @@ AIAgent 必须严格区分：
 
 ## 6. 源头仓库执行门禁
 
-维护 AgenticOps 源头仓库时，AIAgent 必须遵守 `develop` 日常开发、`main` PR-only 和统一发布脚本规则。不得直接提交或推送 `main`，不得绕过 `.githooks`、GitHub ruleset、固定完整验证或最终人工确认。
+维护 AgenticOps 源头仓库时，AIAgent 必须遵守 `develop` 日常开发、`main` PR-only 和统一发布脚本规则。不得直接提交或推送 `main`，不得绕过 `.githooks`、固定完整验证或最终人工确认。硬门禁模式不得绕过 GitHub Ruleset 和 Auto-merge；GitHub Free 私有仓库必须显式传入 `--allow-soft-gate`，使用固定发布或修复 HEAD、人工 Merge commit、合并事实校验和二次完整验证，不得静默降级。
 
 面向用户、研发工程师、流程负责人、审阅者或 Jira 参与者的自然语言交互必须使用中文。
 
@@ -74,7 +74,7 @@ AIAgent 必须严格区分：
 
 规则冲突时按 `项目规则 > AIAgent 规则 > 公司规则 > 个人规则` 执行。Git 提交信息遵守仓库 `AGENTS.md` 的项目提交规则：AgenticOps 是内部项目，提交标题和提交描述正文使用中文；`tag` 指 Jira 任务编号，例如 `TAP-1234`，所有代码提交都必须绑定 Jira 任务卡片；非平凡提交必须包含 body，说明问题、处理方式、验证结果和风险；不得在提交信息中粘贴完整 Jira 描述、敏感日志或凭证。
 
-AIAgent 只有在研发工程师明确要求“提交变更”或“提交代码”后才能执行 `git commit`，只有在明确要求推送或执行发布后才能 `git push`。日常提交和推送目标是 `develop` 或标准 Hotfix 分支；正常发布必须使用 `scripts/release.sh`，紧急修复必须使用 `scripts/hotfix.sh`。研发工程师确认推送成功后，若能可靠确认对应 Jira 编号，AIAgent 应将中文变更总结评论到该 Jira 任务；评论失败时必须明确反馈“代码已推送但 Jira 回写未完成”，后续只重试评论，不重复推送。
+AIAgent 只有在研发工程师明确要求对应动作，或确认版本化设计或修复计划并授予仍有效的工作项级连续执行授权后，才能提交、推送任务分支、写入必要 Jira 证据以及创建或更新拉取请求。有效授权范围内不重复请求确认，完成后统一停在拉取请求审查；合并、发布、Git Tag、直接修改受保护分支、强推、历史改写、范围变化和授权失效仍需新的人工确认。日常提交和推送目标是 `develop` 或标准 Hotfix 分支；正常发布必须使用 `scripts/release.sh`，紧急修复必须使用 `scripts/hotfix.sh`。推送成功后，若能可靠确认对应 Jira 编号，AIAgent 应将中文变更总结评论到该 Jira 任务；评论失败时必须明确反馈“代码已推送但 Jira 回写未完成”，后续只重试评论，不重复推送。
 
 ## 7. 输出纪律
 
