@@ -39,6 +39,56 @@ func TestWriteEvidenceRequiresRunID(t *testing.T) {
 	}
 }
 
+func TestWriteEvidenceRequiresCompletionContentBeforeWrites(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+`)
+	client := &recordingJiraClient{issue: realModeBoundIssue()}
+	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "missing_evidence_content")
+	if client.commentCalls != 0 {
+		t.Fatalf("Jira comment calls = %d", client.commentCalls)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".agentic-ops", "runs", runID, "evidence.md")); !os.IsNotExist(err) {
+		t.Fatalf("evidence file should not exist, stat err = %v", err)
+	}
+}
+
+func TestWriteEvidenceRejectsInvalidCompletionContentBeforeWrites(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+`)
+	contentPath := filepath.Join(root, "completion.md")
+	writeCLITestFile(t, contentPath, "## 变更内容\n\n只有一个章节。\n")
+	client := &recordingJiraClient{issue: realModeBoundIssue()}
+	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", contentPath, "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "invalid_evidence_sections")
+	if client.commentCalls != 0 {
+		t.Fatalf("Jira comment calls = %d", client.commentCalls)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".agentic-ops", "runs", runID, "evidence.md")); !os.IsNotExist(err) {
+		t.Fatalf("evidence file should not exist, stat err = %v", err)
+	}
+}
+
 func TestWritePREvidenceRequiresPRURL(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
@@ -100,7 +150,7 @@ func TestWriteEvidenceOutputsNextAction(t *testing.T) {
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", writeCompletionBodyFile(t, root)}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d", code)
 	}
@@ -116,7 +166,7 @@ func TestWriteEvidenceOutputsNextAction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile evidence error = %v", err)
 	}
-	for _, want := range []string{"issue_key: TAP-123", "task_class: technical_task", "process_id: development_change_v1", "target_repo: tapstate/example-repo"} {
+	for _, want := range []string{"Jira 卡片：TAP-123", "任务分类：technical_task", "标准流程：development_change_v1", "目标仓库：tapstate/example-repo", "## 事实来源"} {
 		if !strings.Contains(string(evidenceData), want) {
 			t.Fatalf("evidence missing %q: %s", want, string(evidenceData))
 		}
@@ -143,7 +193,7 @@ func TestWriteEvidenceSkipsIncompleteHistoricalTakeoverEvent(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", writeCompletionBodyFile(t, root)}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
@@ -160,7 +210,7 @@ func TestWriteEvidencePreservesTargetRepoAfterResume(t *testing.T) {
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", writeCompletionBodyFile(t, root)}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
@@ -169,7 +219,7 @@ func TestWriteEvidencePreservesTargetRepoAfterResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile evidence error = %v", err)
 	}
-	if !strings.Contains(string(evidenceData), "target_repo: tapstate/example-repo") {
+	if !strings.Contains(string(evidenceData), "目标仓库：tapstate/example-repo") {
 		t.Fatalf("evidence = %s", string(evidenceData))
 	}
 }
@@ -187,7 +237,7 @@ func TestWriteEvidenceBlocksWhenLocalPolicyRequiresHumanGate(t *testing.T) {
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", writeCompletionBodyFile(t, root)}, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
@@ -205,7 +255,7 @@ func TestWriteEvidenceRejectsMissingRun(t *testing.T) {
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", "missing-run"}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", "missing-run", "--content-file", writeCompletionBodyFile(t, root)}, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
@@ -225,7 +275,7 @@ func TestWriteEvidenceRejectsCompletedRun(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", writeCompletionBodyFile(t, root)}, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
@@ -246,7 +296,7 @@ func TestWriteEvidenceRequiresConfirmationForRealJiraComment(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", writeCompletionBodyFile(t, root)}, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
@@ -268,14 +318,14 @@ func TestWriteEvidenceRecordsPassedRealJiraCommentGate(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--confirm-real-jira-write"}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", writeCompletionBodyFile(t, root), "--confirm-real-jira-write"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
 	if client.commentKey != "TAP-123" {
 		t.Fatalf("commentKey = %s", client.commentKey)
 	}
-	if !strings.Contains(client.commentBody, "status: evidence_written") {
+	if !strings.Contains(client.commentBody, "证据状态：已写入") || !strings.Contains(client.commentBody, "## 事实来源") {
 		t.Fatalf("commentBody = %s", client.commentBody)
 	}
 	assertEventLogContains(t, root, `"operation":"write_evidence"`)
@@ -498,4 +548,30 @@ func TestReleaseAgentRejectsMissingCompletionEvidenceFile(t *testing.T) {
 	assertJSONField(t, stdout.String(), "code", "agentic_completion_evidence_missing")
 	assertJSONField(t, stdout.String(), "current_stage", "completion_cleanup")
 	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner")
+}
+
+func writeCompletionBodyFile(t *testing.T, root string) string {
+	t.Helper()
+	path := filepath.Join(root, "completion-body.md")
+	writeCLITestFile(t, path, `## 变更内容
+
+修复接管原子性和证据链。
+
+## 验证命令与结果
+
+go test ./...：通过。
+
+## 风险
+
+未发现额外风险。
+
+## 恢复说明
+
+无需恢复。
+
+## 事实来源
+
+Jira AO、Git 和 GitHub PR 回读。
+`)
+	return path
 }
