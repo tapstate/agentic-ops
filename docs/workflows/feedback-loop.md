@@ -12,7 +12,7 @@
 Go CLI 执行操作
 -> 产生结构化事件日志
 -> 到达完成、阻塞或交接节点
--> AIAgent 提交任务级审计记录到 Jira 卡片、审计服务或目标仓库证据链
+-> AIAgent 将任务级审计记录写入本地 Jira 编号目录，并回写 Jira 关键结论和稳定引用
 -> 研发工程师或流程负责人审查任务审计记录
 -> 维护者按需按 `agentic_run_id`、任务类型、失败码、时间范围或 `workspace` 聚合分析
 -> AIAgent 生成 AgenticOps 改进建议
@@ -25,33 +25,31 @@ Go CLI 执行操作
 
 ## 3. 事件位置
 
-本地事件日志必须写入具体项目 AI 工作空间；任务级审计记录还必须提交到至少一个外部或仓库内事实源。
+本地事件日志和任务级审计日志必须写入具体项目 AI 工作空间中的 Jira 编号目录。Jira 卡片回写任务级关键结论、状态和稳定引用；独立审计服务属于后续可选扩展，不是当前前置条件。
 
 ```text
 <project-ai-workspace>/
   .agentic-ops/
-    runs/
-      2026-07-21/
-        TAP-123-takeover-20260721103012-a8f3/
-          events.ndjson
-          summary.json
-          evidence.md
-    feedback/
-      bundles/
-        TAP-123-takeover-20260721103012-a8f3.md
-      reports/
-        2026-07-21.md
-        2026-07-21.json
+    tasks/
+      TAP-123/
+        runs/
+          <agentic_run_id>/
+            events.ndjson
+            summary.json
+            evidence.md
+        audit/
+        feedback/
+        handoff/
 ```
 
 `~/.agentic-ops` 不保存具体任务运行日志。
 
 任务级审计记录的提交目标按优先级选择：
 
-1. Jira 卡片：任务接管、阻塞、完成、证据和清理结果应优先写回任务卡片。
-2. 审计服务：当团队部署独立审计服务时，AIAgent 应提交同一份脱敏审计摘要。
+1. 项目 AI 工作空间：当前审计、运行、反馈和交接材料的最终管理位置，按 Jira 编号隔离。
+2. Jira 卡片：回写任务接管、阻塞、完成、证据和清理的关键结论与稳定引用。
 3. 目标仓库：如果流程要求仓库内保留证据，应写入受控证据位置或关联拉取请求证据链。
-4. 项目 AI 工作空间：本地 `runs/`、`feedback/bundles/` 和 `feedback/reports/` 只作为运行记录与诊断材料，不能替代应回写的任务事实源。
+4. 审计服务：后续可选扩展，接入时提交本地任务目录中的同一份脱敏审计摘要。
 
 ## 4. 事件结构
 

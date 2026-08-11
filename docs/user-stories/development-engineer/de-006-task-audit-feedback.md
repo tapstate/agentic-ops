@@ -75,7 +75,7 @@ agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 
 - AIAgent 完成、阻塞或交接任务时必须提交任务级审计记录。
 - `release-agent` 完成清理后必须记录 `agentic_id` 清理状态。
-- 本地反馈报告不能替代 Jira 卡片、审计服务或目标仓库证据链中的任务审计记录。
+- 本地反馈报告不能替代 `.agentic-ops/tasks/<ISSUE-KEY>/` 中的任务审计记录；Jira 回写关键结论和稳定引用，审计服务属于后续可选扩展。
 - 反馈分析只能形成改进建议，不能自动修改 AgenticOps 源头规则。
 - 审计记录和反馈报告不得包含 secrets 或敏感原始内容。
 

@@ -6,7 +6,7 @@ AgenticOps 是把公司员工执行标准沉淀成 AI 可执行标准流程的 A
 
 AgenticOps 主要落地研发 Jira 任务：帮助研发工程师操作 AIAgent 从 Jira 接管任务到完成任务。AgenticOps 不替代 Jira、不替代研发工程师、不替代拉取请求审查，也不以绕过人工授权、专业审查和策略门禁的全自动开发作为目标。它的核心价值是把 AI 员工从临时聊天助手变成流程内可管理、可追踪、可复盘的执行主体。
 
-不同任务会涉及不同流程，例如新任务接管、恢复接管、拉取请求审查意见修复、阻塞上报和任务完成审计。AgenticOps 通过操作契约和工作流配置选择流程，通过 Task Form Standard、事件日志、`agentic_run_id`、证据、任务级审计记录和按需反馈分析记录执行过程，并把关键状态、关键信息、表单数据和证据回写到 Jira、拉取请求、审计服务或项目 AI 工作空间，用于后续分析和优化。
+不同任务会涉及不同流程，例如新任务接管、恢复接管、拉取请求审查意见修复、阻塞上报和任务完成审计。AgenticOps 通过操作契约和工作流配置选择流程，通过 Task Form Standard、事件日志、`agentic_run_id`、证据、任务级审计记录和按需反馈分析记录执行过程；当前完整运行材料保存在按 Jira 编号隔离的项目 AI 工作空间，并将关键结论和稳定引用回写 Jira。
 
 一句话定义：
 
@@ -398,6 +398,17 @@ check_ci_status
 write_pr_evidence
 ```
 
+工作项级连续执行授权生效后，AIAgent 可以自动完成 `git commit`、推送任务分支和创建目标为 `develop` 的拉取请求，并统一停在拉取请求审查节点。以下分支模式禁止自动推送：
+
+```text
+master
+main
+develop
+release/*
+```
+
+任务分支推送与 PR 目标分支是两个独立事实：允许推送任务分支，不代表允许向目标分支推送。合并、发布、Tag、强推、历史改写和范围变化仍需独立人工确认。保护分支匹配规则必须由 policy、操作契约和测试共同验证，不能只依赖提示词或分支命名约定。
+
 ## 12. 反馈闭环
 
 AgenticOps 应包含 AIAgent 反馈通道。反馈通道的主路径是任务完成、阻塞或交接时提交任务级审计记录；按 `workspace`、时间范围或失败码聚合只是后续分析方式，不作为每日必交付。
@@ -408,7 +419,7 @@ AgenticOps 应包含 AIAgent 反馈通道。反馈通道的主路径是任务完
 Go CLI 执行操作
 -> 产生结构化事件日志
 -> 到达完成、阻塞或交接节点
--> AIAgent 提交任务级审计记录到 Jira 卡片、审计服务或目标仓库证据链
+-> AIAgent 将任务级审计记录写入本地 Jira 编号目录，并回写 Jira 关键结论和稳定引用
 -> 维护者按需按 `agentic_run_id`、任务类型、失败码、时间范围或 `workspace` 聚合分析
 -> AIAgent 分析失败、卡点、重复人工确认、规则缺口
 -> 生成改进建议
@@ -417,26 +428,21 @@ Go CLI 执行操作
 
 反馈通道只做分析和建议，不允许 AIAgent 根据日志自动修改 AgenticOps 源头规则。
 
-运行日志应放在具体项目 AI 工作空间，任务级审计记录应回写到 Jira 卡片、审计服务或目标仓库证据链：
-执行日志文件名使用 `JIRA_ID.AGENT.TIMESTAMP.log`，其中 `TIMESTAMP` 使用 `YYYYMMDDHHmmss`。
+运行日志和任务审计的当前管理位置是具体项目 AI 工作空间中的 Jira 编号目录；Jira 卡片回写关键结论、状态和稳定引用，后续再评估对接独立审计服务。
 
 ```text
 <project-ai-workspace>/
   .agentic-ops/
-    run-logs/
-      TAP-123.codex.20260721103012.log
-    runs/
-      2026-07-21/
-        TAP-123-takeover-20260721103012-a8f3/
-          events.ndjson
-          summary.json
-          evidence.md
-    feedback/
-      bundles/
-        TAP-123-takeover-20260721103012-a8f3.md
-      reports/
-        2026-07-21.md
-        2026-07-21.json
+    tasks/
+      TAP-123/
+        runs/
+          <agentic_run_id>/
+            events.ndjson
+            summary.json
+            evidence.md
+        audit/
+        feedback/
+        handoff/
 ```
 
 事件日志使用 NDJSON，每条事件只记录安全摘要，不记录 secrets、原始敏感日志、完整 Jira 描述或敏感代码片段。
@@ -487,6 +493,8 @@ Observation -> Proposal -> Accepted Change
 ## 13. 人工门禁
 
 AgenticOps 使用工作项级连续执行授权减少重复中断。研发工程师确认版本化设计或修复计划后，可以授权 AIAgent 在绑定的 Jira 工作项、`agentic_run_id`、仓库、工作分支、目标分支、范围和验证方式内连续完成实现、验证、提交、任务分支推送、必要 Jira 回写以及创建或更新拉取请求，并统一停在拉取请求审查。该机制复用已有人工确认，不取消高风险 gate。
+
+当前自动推进规则限定为：任务分支允许自动提交和推送，拉取请求目标为 `develop`；`master`、`main`、`develop`、`release/*` 及同类保护分支禁止自动推送。合并、发布、Git Tag、范围变化、强推和历史改写不在连续授权范围内。
 
 以下动作必须暂停并等待人工确认：
 

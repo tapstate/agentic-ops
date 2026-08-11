@@ -35,7 +35,7 @@ agentic-ops/
     development-engineers/
       getting-started.md
     strategy/
-      positioning.md
+      agenticops-project-overview.md
     architecture/
       agenticops-current-design.md
       project-structure.md
@@ -171,8 +171,12 @@ tapdata/
 ```text
 <project-ai-workspace>/
   .agentic-ops/
-    runs/
-    feedback/
+    tasks/
+      <ISSUE-KEY>/
+        runs/
+        audit/
+        feedback/
+        handoff/
   .superpowers/
     # local execution state only
 ```
