@@ -36,40 +36,30 @@ var ErrLocalStateMismatch = errors.New("local_state_mismatch")
 func Read(events []feedback.Event, query Query) (Context, error) {
 	var context Context
 	anchorIndex := -1
-	for index, event := range events {
+	incompleteFound := false
+	for index := len(events) - 1; index >= 0; index-- {
+		event := events[index]
 		if event.AgenticRunID != query.AgenticRunID || event.Operation != "takeover_task" || !event.OK {
 			continue
 		}
 		if event.Workspace != query.Workspace {
 			return Context{}, ErrWorkspaceMismatch
 		}
-		if event.IssueKey == "" ||
-			event.AgentID == "" ||
-			event.AgenticID == "" ||
-			event.AgentID != query.AgentID ||
-			event.AgenticID != event.AgentID ||
-			event.TaskClass == "" ||
-			event.ProcessID == "" ||
-			event.CurrentStage == "" ||
-			event.AgenticNextAction == "" {
+		if immutableConflict(event.AgentID, query.AgentID) || immutableConflict(event.AgenticID, query.AgentID) {
 			return Context{}, ErrLocalStateMismatch
 		}
-		context = Context{
-			Workspace:         event.Workspace,
-			AgenticRunID:      event.AgenticRunID,
-			IssueKey:          event.IssueKey,
-			AgentID:           event.AgentID,
-			AgenticID:         event.AgenticID,
-			TaskClass:         event.TaskClass,
-			ProcessID:         event.ProcessID,
-			TargetRepo:        event.TargetRepo,
-			CurrentStage:      event.CurrentStage,
-			AgenticNextAction: event.AgenticNextAction,
+		if !completeTakeoverEvent(event, query.AgentID) {
+			incompleteFound = true
+			continue
 		}
+		context = contextFromTakeover(event)
 		anchorIndex = index
 		break
 	}
 	if anchorIndex < 0 {
+		if incompleteFound {
+			return Context{}, ErrLocalStateMismatch
+		}
 		return Context{}, ErrRunNotFound
 	}
 	for _, event := range events[anchorIndex+1:] {
@@ -106,6 +96,33 @@ func Read(events []feedback.Event, query Query) (Context, error) {
 		context.HumanGatePending = event.RequiresHumanAction
 	}
 	return context, nil
+}
+
+func completeTakeoverEvent(event feedback.Event, agentID string) bool {
+	return event.IssueKey != "" &&
+		event.AgentID != "" &&
+		event.AgenticID != "" &&
+		event.AgentID == agentID &&
+		event.AgenticID == event.AgentID &&
+		event.TaskClass != "" &&
+		event.ProcessID != "" &&
+		event.CurrentStage != "" &&
+		event.AgenticNextAction != ""
+}
+
+func contextFromTakeover(event feedback.Event) Context {
+	return Context{
+		Workspace:         event.Workspace,
+		AgenticRunID:      event.AgenticRunID,
+		IssueKey:          event.IssueKey,
+		AgentID:           event.AgentID,
+		AgenticID:         event.AgenticID,
+		TaskClass:         event.TaskClass,
+		ProcessID:         event.ProcessID,
+		TargetRepo:        event.TargetRepo,
+		CurrentStage:      event.CurrentStage,
+		AgenticNextAction: event.AgenticNextAction,
+	}
 }
 
 func ReadFile(path string, query Query) (Context, error) {
