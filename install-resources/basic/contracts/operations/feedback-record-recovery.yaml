@@ -1,0 +1,122 @@
+operation: feedback_record_recovery
+version: 1
+purpose: 在研发工程师确认外部写入、回读和重试事实后，幂等记录结构化人工恢复证据；该本地事件不能替代 Jira、GitHub 或 Git 事实。
+task_type: feedback_recovery
+allowed_stages:
+  - takeover_started
+  - evidence_written
+  - pr_created
+  - blocked
+  - failed
+required_inputs:
+  - workspace
+  - agentic_run_id
+  - original_operation
+  - original_code
+  - evidence_file
+  - external_reference
+  - readback_verified
+  - remote_write_completed
+  - retry_safe
+  - confirm_recovery_record
+input:
+  workspace:
+    type: string
+    required: true
+  agentic_run_id:
+    type: string
+    required: true
+  original_operation:
+    type: string
+    required: true
+  original_code:
+    type: string
+    required: true
+  evidence_file:
+    type: string
+    required: true
+    max_bytes: 1048576
+  external_reference:
+    type: string
+    required: true
+  readback_verified:
+    type: boolean
+    required: true
+  remote_write_completed:
+    type: boolean
+    required: true
+  retry_safe:
+    type: boolean
+    required: true
+  confirm_recovery_record:
+    type: boolean
+    required: true
+preconditions:
+  - workspace_must_be_initialized
+  - run_context_must_match_current_agent
+  - evidence_file_must_be_inside_workspace
+  - external_fact_must_be_read_back
+output:
+  workspace:
+    type: string
+  agentic_run_id:
+    type: string
+  issue_key:
+    type: string
+  original_operation:
+    type: string
+  original_code:
+    type: string
+  evidence_sha256:
+    type: string
+  external_reference:
+    type: string
+  readback_verified:
+    type: boolean
+  remote_write_completed:
+    type: boolean
+  retry_safe:
+    type: boolean
+  fingerprint:
+    type: string
+  appended:
+    type: boolean
+  current_stage:
+    type: string
+  agentic_next_action:
+    type: string
+failure:
+  codes:
+    - recovery_record_confirmation_required
+    - missing_agentic_run_id
+    - missing_original_operation
+    - missing_original_code
+    - missing_evidence_file
+    - missing_external_reference
+    - invalid_external_reference
+    - missing_readback_verified
+    - missing_remote_write_completed
+    - missing_retry_safe
+    - invalid_boolean_flag
+    - workspace_root_failed
+    - run_not_found
+    - workspace_mismatch
+    - local_state_mismatch
+    - recovery_evidence_outside_workspace
+    - recovery_evidence_read_failed
+    - event_read_failed
+    - event_write_failed
+side_effects:
+  - may_append_local_feedback_event
+  - must_not_write_jira
+  - must_not_write_github
+  - must_not_modify_git
+  - must_not_replace_external_fact_sources
+human_gate:
+  required: true
+  gate: recovery_record_confirmation
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: recovery_record_gate
+redo_from_stage: recovery_record_gate
