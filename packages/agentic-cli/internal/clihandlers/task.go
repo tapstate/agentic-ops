@@ -136,8 +136,9 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 		})
 		return writeJSON(stdout, result)
 	}
-	runID := feedback.AgenticRunID(issue.Key, "task_takeover", fixedNow(), "a8f3")
-	takeoverAt := fixedNow().Format(time.RFC3339)
+	operationTime := currentClock.Now().UTC()
+	runID := feedback.AgenticRunID(issue.Key, "task_takeover", operationTime, "a8f3")
+	takeoverAt := operationTime.Format(time.RFC3339)
 	currentAgentID := agentID()
 	if selection.Mode == "real" {
 		if !hasFlag(args, "--confirm-real-jira-write") {
@@ -174,6 +175,7 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 		}
 	}
 	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
+		Timestamp:          takeoverAt,
 		AgenticRunID:       runID,
 		IssueKey:           issue.Key,
 		TaskType:           "task_takeover",
@@ -229,7 +231,7 @@ func inspectTaskGateFacts(issue jira.Issue, p profile.Profile, currentUser strin
 		"agentic_id":                            issue.AgenticID,
 		"owner_matches_current_user":            issue.Owner != "" && issue.Owner == currentUser,
 		"assignee_matches_current_user":         issue.Assignee != "" && issue.Assignee == currentUser,
-		"agentic_id_empty_or_match":       issue.AgenticID == "" || issue.AgenticID == currentAgentID,
+		"agentic_id_empty_or_match":             issue.AgenticID == "" || issue.AgenticID == currentAgentID,
 		"task_class":                            taskClass,
 		"task_class_source":                     taskClassSource,
 		"standard_process_id":                   processID,
