@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/clihandlers"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/feedback"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
 )
 
@@ -413,7 +415,7 @@ func TestTakeoverTaskDoesNotEnforceProjectAdmissionFields(t *testing.T) {
 	issue.FormValues["acceptance_criteria"] = ""
 	issue.FormValues["verification_method"] = ""
 	issue.FormValues["risk_level"] = ""
-	client := &recordingJiraClient{issue: issue}
+	client := &recordingJiraClient{issueReads: []jira.Issue{issue, takeoverReadbackIssue(issue, "In Progress")}}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
 
 	var stdout bytes.Buffer
@@ -425,11 +427,11 @@ func TestTakeoverTaskDoesNotEnforceProjectAdmissionFields(t *testing.T) {
 	assertJSONField(t, stdout.String(), "operation", "takeover_task")
 	assertJSONField(t, stdout.String(), "current_stage", "takeover_started")
 	assertJSONField(t, stdout.String(), "agentic_next_action", "proceed")
-	if client.updatedKey != "TAP-123" {
-		t.Fatalf("updatedKey = %s", client.updatedKey)
+	if client.transitionCalls != 1 || client.transitionKey != "TAP-123" || client.transitionRequest.ID != "11" {
+		t.Fatalf("transition = calls:%d key:%s request:%+v", client.transitionCalls, client.transitionKey, client.transitionRequest)
 	}
-	if client.commentKey != "" {
-		t.Fatalf("takeover-task should not write admission comment, commentKey = %s body = %s", client.commentKey, client.commentBody)
+	if client.updateCalls != 0 || client.commentCalls != 0 {
+		t.Fatalf("takeover-task performed independent Jira writes: update=%d comment=%d", client.updateCalls, client.commentCalls)
 	}
 	for _, notWant := range []string{"admission_check_failed", "admission_standard_path", "admission_template_path", "missing_field_guidance", "suggestions", "completion_template"} {
 		if strings.Contains(stdout.String(), notWant) {
@@ -444,7 +446,7 @@ func TestTakeoverTaskWritesAgentOwnershipCommentWhenProfileUsesJiraComment(t *te
 	issue := realModeIssue()
 	issue.AgenticID = ""
 	issue.FormValues["agentic_id"] = ""
-	client := &recordingJiraClient{issue: issue}
+	client := &recordingJiraClient{issueReads: []jira.Issue{issue, takeoverReadbackIssue(issue, "In Progress")}}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
 
 	var stdout bytes.Buffer
@@ -455,15 +457,12 @@ func TestTakeoverTaskWritesAgentOwnershipCommentWhenProfileUsesJiraComment(t *te
 	}
 	assertJSONField(t, stdout.String(), "operation", "takeover_task")
 	assertJSONField(t, stdout.String(), "current_stage", "takeover_started")
-	if client.updatedKey != "" {
-		t.Fatalf("takeover-task should not update Jira fields for jira_comment mapping: %s %#v", client.updatedKey, client.updatedFields)
-	}
-	if client.commentKey != "TAP-123" {
-		t.Fatalf("commentKey = %s body = %s", client.commentKey, client.commentBody)
+	if client.updateCalls != 0 || client.commentCalls != 0 {
+		t.Fatalf("takeover-task performed independent Jira writes: update=%d comment=%d", client.updateCalls, client.commentCalls)
 	}
 	for _, want := range []string{"AgenticOps ownership", "agentic_id: agentic-cli-local-agent", "agentic_takeover_at: 2026-07-21T10:30:12Z"} {
-		if !strings.Contains(client.commentBody, want) {
-			t.Fatalf("ownership comment missing %q: %s", want, client.commentBody)
+		if !strings.Contains(client.transitionRequest.Comment, want) {
+			t.Fatalf("ownership comment missing %q: %s", want, client.transitionRequest.Comment)
 		}
 	}
 }
@@ -672,10 +671,11 @@ func TestTakeoverTaskRequiresConfirmationForRealJiraWrite(t *testing.T) {
 	assertEventLogContains(t, root, `"code":"real_jira_confirmation_required"`)
 }
 
-func TestTakeoverTaskRecordsPassedRealJiraWriteGate(t *testing.T) {
+func TestTakeoverTaskWritesSingleCompleteSuccessEvent(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	client := &recordingJiraClient{issue: realModeIssue()}
+	issue := realModeIssue()
+	client := &recordingJiraClient{issueReads: []jira.Issue{issue, takeoverReadbackIssue(issue, "In Progress")}}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
 
 	var stdout bytes.Buffer
@@ -684,10 +684,159 @@ func TestTakeoverTaskRecordsPassedRealJiraWriteGate(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
-	if client.updatedKey != "TAP-123" {
-		t.Fatalf("updatedKey = %s", client.updatedKey)
+	if client.transitionCalls != 1 || client.getIssueCalls != 2 {
+		t.Fatalf("Jira calls = transition:%d reads:%d", client.transitionCalls, client.getIssueCalls)
 	}
-	assertEventLogContains(t, root, `"operation":"takeover_task"`)
-	assertEventLogContains(t, root, `"gate":"real_jira_write"`)
-	assertEventLogContains(t, root, `"gate_status":"passed"`)
+	events, err := feedback.ReadEvents(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"))
+	if err != nil {
+		t.Fatalf("ReadEvents error = %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %+v, want one complete takeover event", events)
+	}
+	event := events[0]
+	if !event.OK || event.Operation != "takeover_task" || event.AgenticRunID == "" || event.AgentID == "" || event.AgenticID == "" || event.AgenticTakeoverAt == "" || event.AgenticHeartbeatAt == "" || event.TaskClass == "" || event.ProcessID == "" || event.TargetRepo == "" {
+		t.Fatalf("incomplete takeover event = %+v", event)
+	}
+}
+
+func TestTakeoverTaskUsesAtomicTransitionAndAOStartProgressID(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	issue := realModeAOIssue()
+	client := &recordingJiraClient{issueReads: []jira.Issue{issue, takeoverReadbackIssue(issue, "执行中")}}
+	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"takeover-task", "AO-6", "--workspace", "ao", "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	if client.transitionCalls != 1 || client.transitionRequest.ID != "2" || client.getIssueCalls != 2 {
+		t.Fatalf("Jira calls = transition:%d request:%+v reads:%d", client.transitionCalls, client.transitionRequest, client.getIssueCalls)
+	}
+	if client.updateCalls != 0 || client.commentCalls != 0 {
+		t.Fatalf("independent Jira writes = update:%d comment:%d", client.updateCalls, client.commentCalls)
+	}
+	for _, field := range []string{"customfield_10364", "customfield_10365", "customfield_10366", "customfield_10369"} {
+		if _, ok := client.transitionRequest.Fields[field]; !ok {
+			t.Fatalf("transition fields missing %s: %+v", field, client.transitionRequest.Fields)
+		}
+	}
+}
+
+func TestTakeoverTaskRejectsMissingStartProgressMappingBeforeRemoteWrite(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	client := &recordingJiraClient{issue: realModeIssue()}
+	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"takeover-task", "TAP-123", "--workspace", "unmapped", "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "jira_transition_mapping_gap")
+	assertJSONField(t, stdout.String(), "remote_write_completed", false)
+	assertJSONField(t, stdout.String(), "readback_verified", false)
+	assertJSONField(t, stdout.String(), "retry_safe", true)
+	if client.transitionCalls != 0 {
+		t.Fatalf("transition calls = %d, want 0", client.transitionCalls)
+	}
+}
+
+func TestTakeoverTaskReportsAtomicWriteFailureAsUnsafeToRetry(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	issue := realModeAOIssue()
+	client := &recordingJiraClient{issue: issue, transitionErr: errors.New("jira write failed")}
+	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"takeover-task", "AO-6", "--workspace", "ao", "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "jira_takeover_atomic_write_failed")
+	assertJSONField(t, stdout.String(), "remote_write_completed", false)
+	assertJSONField(t, stdout.String(), "readback_verified", false)
+	assertJSONField(t, stdout.String(), "retry_safe", false)
+	if client.transitionCalls != 1 || client.getIssueCalls != 1 {
+		t.Fatalf("Jira calls = transition:%d reads:%d", client.transitionCalls, client.getIssueCalls)
+	}
+}
+
+func TestTakeoverTaskReportsReadbackFailureAsUnsafeToRetry(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	issue := realModeAOIssue()
+	client := &recordingJiraClient{
+		issueReads:      []jira.Issue{issue},
+		issueReadErrors: []error{nil, errors.New("jira readback failed")},
+	}
+	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"takeover-task", "AO-6", "--workspace", "ao", "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "jira_takeover_readback_failed")
+	assertJSONField(t, stdout.String(), "remote_write_completed", true)
+	assertJSONField(t, stdout.String(), "readback_verified", false)
+	assertJSONField(t, stdout.String(), "retry_safe", false)
+	if client.transitionCalls != 1 || client.getIssueCalls != 2 {
+		t.Fatalf("Jira calls = transition:%d reads:%d", client.transitionCalls, client.getIssueCalls)
+	}
+}
+
+func TestTakeoverTaskReportsReadbackMismatchAsUnsafeToRetry(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	issue := realModeAOIssue()
+	client := &recordingJiraClient{issueReads: []jira.Issue{issue, issue}}
+	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"takeover-task", "AO-6", "--workspace", "ao", "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "jira_takeover_readback_mismatch")
+	assertJSONField(t, stdout.String(), "remote_write_completed", true)
+	assertJSONField(t, stdout.String(), "readback_verified", false)
+	assertJSONField(t, stdout.String(), "retry_safe", false)
+	if client.transitionCalls != 1 || client.getIssueCalls != 2 {
+		t.Fatalf("Jira calls = transition:%d reads:%d", client.transitionCalls, client.getIssueCalls)
+	}
+}
+
+func TestTakeoverTaskReportsEventFailureAfterVerifiedRemoteWrite(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback"), "not a directory")
+	issue := realModeAOIssue()
+	client := &recordingJiraClient{issueReads: []jira.Issue{issue, takeoverReadbackIssue(issue, "执行中")}}
+	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"takeover-task", "AO-6", "--workspace", "ao", "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "event_write_failed")
+	assertJSONField(t, stdout.String(), "remote_write_completed", true)
+	assertJSONField(t, stdout.String(), "readback_verified", true)
+	assertJSONField(t, stdout.String(), "retry_safe", false)
+	assertJSONField(t, stdout.String(), "agentic_run_id", "AO-6-takeover-20260721103012-a8f3")
+	assertJSONField(t, stdout.String(), "issue_key", "AO-6")
+	if client.transitionCalls != 1 || client.getIssueCalls != 2 {
+		t.Fatalf("Jira calls = transition:%d reads:%d", client.transitionCalls, client.getIssueCalls)
+	}
 }

@@ -76,6 +76,23 @@ func resolveJiraTransitionID(ctx context.Context, client jira.Client, issueKey s
 	return "", fmt.Errorf("jira transition %q not found for %s", transition.Name, action)
 }
 
+func jiraTakeoverFailure(code string, message string, requiredHumanAction string, runID string, issueKey string, remoteWriteCompleted bool, readbackVerified bool, retrySafe bool) map[string]any {
+	result := output.FailureWithContext("takeover_task", output.FailureContext{
+		Code:                code,
+		Message:             message,
+		RequiredHumanAction: requiredHumanAction,
+		TaskType:            "task_takeover",
+		CurrentStage:        "takeover_gate",
+		AgenticNextAction:   "ask_owner",
+	})
+	result["remote_write_completed"] = remoteWriteCompleted
+	result["readback_verified"] = readbackVerified
+	result["retry_safe"] = retrySafe
+	result["agentic_run_id"] = runID
+	result["issue_key"] = issueKey
+	return result
+}
+
 type jiraClientSelection struct {
 	Client jira.Client
 	Mode   string
