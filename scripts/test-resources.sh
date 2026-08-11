@@ -27,6 +27,7 @@ test -f install-resources/basic/contracts/operations/add-task-comment.yaml
 test -f install-resources/basic/contracts/operations/update-task-description-sections.yaml
 test -f install-resources/basic/contracts/operations/update-task-form.yaml
 test -f install-resources/basic/contracts/operations/update-rollback.yaml
+test -f install-resources/basic/contracts/operations/feedback-record-recovery.yaml
 test -f install-resources/checksums.txt
 test -x .githooks/pre-commit
 test -x .githooks/pre-push
@@ -40,6 +41,7 @@ grep '本地执行状态' AGENTS.md | grep '\.superpowers/' >/dev/null
 grep '本地执行状态' docs/architecture/project-structure.md | grep '\.superpowers/' >/dev/null
 grep 'basic/manifest.json' install-resources/checksums.txt >/dev/null
 grep 'basic/contracts/operations/update-rollback.yaml' install-resources/checksums.txt >/dev/null
+grep 'basic/contracts/operations/feedback-record-recovery.yaml' install-resources/checksums.txt >/dev/null
 grep 'basic/projects/tapdata/runbooks/README.md' install-resources/checksums.txt >/dev/null
 grep 'basic/projects/tapdata/runbooks/build-test-and-local-run.md' install-resources/checksums.txt >/dev/null
 grep 'basic/projects/tapdata/runbooks/common-lib-upgrade.md' install-resources/checksums.txt >/dev/null
@@ -71,6 +73,10 @@ grep 'authorization_reference' install-resources/basic/contracts/operations/add-
 grep 'authorization_scope' install-resources/basic/contracts/operations/prepare-pr.yaml >/dev/null
 grep 'fixed_head_sha' install-resources/basic/contracts/operations/prepare-pr.yaml >/dev/null
 grep 'authorization_reference' install-resources/basic/contracts/operations/write-pr-evidence.yaml >/dev/null
+grep '# 任务完成证据' install-resources/basic/templates/evidence/development-completed.md >/dev/null
+grep 'content_file' install-resources/basic/contracts/operations/write-evidence.yaml >/dev/null
+grep 'max_bytes: 65536' install-resources/basic/contracts/operations/write-evidence.yaml >/dev/null
+grep 'readback_verified' install-resources/basic/contracts/operations/feedback-record-recovery.yaml >/dev/null
 grep '工作项级连续执行授权' install-resources/basic/company/standards/core-hard-rules.md >/dev/null
 grep '工作项级连续执行授权' install-resources/basic/handbooks/ai-employee-handbook.md >/dev/null
 grep '工作项级连续执行授权' docs/project-rules.md >/dev/null
