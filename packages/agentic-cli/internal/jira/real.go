@@ -166,12 +166,22 @@ func (client *RealClient) Transitions(ctx context.Context, key string) ([]Transi
 	return transitions, nil
 }
 
-func (client *RealClient) TransitionIssue(ctx context.Context, key string, transitionID string) error {
+func (client *RealClient) TransitionIssue(ctx context.Context, key string, request TransitionRequest) error {
 	requestPath := "/rest/api/3/issue/" + url.PathEscape(key) + "/transitions"
 	payload := map[string]any{
 		"transition": map[string]string{
-			"id": transitionID,
+			"id": request.ID,
 		},
+	}
+	if len(request.Fields) > 0 {
+		payload["fields"] = request.Fields
+	}
+	if strings.TrimSpace(request.Comment) != "" {
+		payload["update"] = map[string]any{
+			"comment": []any{map[string]any{
+				"add": map[string]any{"body": adfDocument(request.Comment)},
+			}},
+		}
 	}
 	return client.doJSON(ctx, http.MethodPost, requestPath, payload, nil)
 }

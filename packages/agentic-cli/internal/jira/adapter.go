@@ -10,10 +10,16 @@ type Client interface {
 	UpdateDescriptionSections(ctx context.Context, key string, sections map[string]string) error
 	UpdateFields(ctx context.Context, key string, fields map[string]any) error
 	Transitions(ctx context.Context, key string) ([]Transition, error)
-	TransitionIssue(ctx context.Context, key string, transitionID string) error
+	TransitionIssue(ctx context.Context, key string, request TransitionRequest) error
 }
 
 type Transition struct {
 	ID   string
 	Name string
+}
+
+type TransitionRequest struct {
+	ID      string
+	Fields  map[string]any
+	Comment string
 }

@@ -3,6 +3,7 @@ package clihandlers
 import (
 	"context"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/feedback"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/output"
 	"io"
 	"time"
@@ -172,7 +173,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 			}
 		}
 		if jiraTransitionID != "" {
-			if err := selection.Client.TransitionIssue(context.Background(), issueKey, jiraTransitionID); err != nil {
+			if err := selection.Client.TransitionIssue(context.Background(), issueKey, jira.TransitionRequest{ID: jiraTransitionID}); err != nil {
 				_ = appendRealJiraWriteGateEvent(workspaceName, runID, issueKey, "release_agent", "jira_transition", "ask_owner", "jira_transition_failed", false, false)
 				return writeJSON(stdout, output.FailureWithContext("release_agent", output.FailureContext{
 					Code:                "jira_transition_failed",

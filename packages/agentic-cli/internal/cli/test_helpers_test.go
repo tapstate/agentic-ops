@@ -250,18 +250,26 @@ func withJiraClientForTest(t *testing.T, selection clihandlers.JiraClientSelecti
 
 type recordingJiraClient struct {
 	issue               jira.Issue
+	issueReads          []jira.Issue
+	issueReadErrors     []error
+	getIssueCalls       int
 	updatedKey          string
 	updatedFields       map[string]any
+	updateCalls         int
 	updateErr           error
 	commentKey          string
 	commentBody         string
+	commentCalls        int
 	commentErr          error
 	descriptionKey      string
 	descriptionSections map[string]string
 	descriptionErr      error
 	transitionKey       string
-	transitionID        string
+	transitionRequest   jira.TransitionRequest
+	transitionCalls     int
 	transitionErr       error
+	transitions         []jira.Transition
+	transitionsErr      error
 }
 
 func (client *recordingJiraClient) CurrentUser(ctx context.Context) (string, error) {
@@ -273,6 +281,21 @@ func (client *recordingJiraClient) SearchIssues(ctx context.Context, workspace s
 }
 
 func (client *recordingJiraClient) GetIssueByKey(ctx context.Context, workspace string, key string) (jira.Issue, bool, error) {
+	callIndex := client.getIssueCalls
+	client.getIssueCalls++
+	if callIndex < len(client.issueReadErrors) && client.issueReadErrors[callIndex] != nil {
+		return jira.Issue{}, false, client.issueReadErrors[callIndex]
+	}
+	if len(client.issueReads) > 0 {
+		if callIndex >= len(client.issueReads) {
+			callIndex = len(client.issueReads) - 1
+		}
+		issue := client.issueReads[callIndex]
+		if issue.Key == key {
+			return issue, true, nil
+		}
+		return jira.Issue{}, false, nil
+	}
 	if client.issue.Key == key {
 		return client.issue, true, nil
 	}
@@ -280,6 +303,7 @@ func (client *recordingJiraClient) GetIssueByKey(ctx context.Context, workspace 
 }
 
 func (client *recordingJiraClient) AddComment(ctx context.Context, key string, body string) error {
+	client.commentCalls++
 	client.commentKey = key
 	client.commentBody = body
 	if client.commentErr != nil {
@@ -289,6 +313,7 @@ func (client *recordingJiraClient) AddComment(ctx context.Context, key string, b
 }
 
 func (client *recordingJiraClient) UpdateFields(ctx context.Context, key string, fields map[string]any) error {
+	client.updateCalls++
 	client.updatedKey = key
 	client.updatedFields = fields
 	if client.updateErr != nil {
@@ -307,12 +332,19 @@ func (client *recordingJiraClient) UpdateDescriptionSections(ctx context.Context
 }
 
 func (client *recordingJiraClient) Transitions(ctx context.Context, key string) ([]jira.Transition, error) {
-	return []jira.Transition{{ID: "31", Name: "Done"}}, nil
+	if client.transitionsErr != nil {
+		return nil, client.transitionsErr
+	}
+	if len(client.transitions) > 0 {
+		return client.transitions, nil
+	}
+	return []jira.Transition{{ID: "11", Name: "Start Progress"}, {ID: "31", Name: "Done"}}, nil
 }
 
-func (client *recordingJiraClient) TransitionIssue(ctx context.Context, key string, transitionID string) error {
+func (client *recordingJiraClient) TransitionIssue(ctx context.Context, key string, request jira.TransitionRequest) error {
+	client.transitionCalls++
 	client.transitionKey = key
-	client.transitionID = transitionID
+	client.transitionRequest = request
 	if client.transitionErr != nil {
 		return client.transitionErr
 	}
@@ -399,4 +431,32 @@ func realModeBoundIssue() jira.Issue {
 	issue := realModeIssue()
 	issue.AgenticID = "agentic-cli-local-agent"
 	return issue
+}
+
+func takeoverReadbackIssue(issue jira.Issue, status string) jira.Issue {
+	readback := issue
+	readback.Status = status
+	readback.AgenticID = "agentic-cli-local-agent"
+	readback.FormValues = map[string]string{}
+	for key, value := range issue.FormValues {
+		readback.FormValues[key] = value
+	}
+	readback.FormValues["agentic_id"] = "agentic-cli-local-agent"
+	readback.FormValues["agentic_run_id"] = issue.Key + "-takeover-20260721103012-a8f3"
+	readback.FormValues["agentic_takeover_at"] = "2026-07-21T10:30:12Z"
+	readback.FormValues["agentic_heartbeat_at"] = "2026-07-21T10:30:12Z"
+	return readback
+}
+
+func realModeAOIssue() jira.Issue {
+	return jira.Issue{
+		Key:        "AO-6",
+		Summary:    "实现 Jira 原子接管与事实回读",
+		Owner:      "current-user",
+		Assignee:   "current-user",
+		IssueType:  "Agentic 缺陷",
+		Status:     "待接管",
+		TargetRepo: "tapstate/agentic-ops",
+		FormValues: map[string]string{},
+	}
 }

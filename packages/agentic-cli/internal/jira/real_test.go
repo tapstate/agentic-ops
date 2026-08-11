@@ -164,8 +164,8 @@ func TestRealClientUpdateFieldsUsesIssueEditEndpoint(t *testing.T) {
 	})
 
 	err := client.UpdateFields(context.Background(), "TAP-123", map[string]any{
-		"customfield_agentic_id": "agent-1",
-		"customfield_agentic_takeover_at":      "2026-07-21T10:30:12Z",
+		"customfield_agentic_id":          "agent-1",
+		"customfield_agentic_takeover_at": "2026-07-21T10:30:12Z",
 	})
 	if err != nil {
 		t.Fatalf("UpdateFields error = %v", err)
@@ -234,20 +234,48 @@ func TestRealClientAddCommentUsesADFBody(t *testing.T) {
 }
 
 func TestRealClientTransitionIssueUsesTransitionEndpoint(t *testing.T) {
+	requestCount := 0
 	client := newTestRealClient(t, func(r *http.Request) *http.Response {
+		requestCount++
 		assertRealJiraRequest(t, r, http.MethodPost, "/rest/api/3/issue/TAP-123/transitions")
-		var body map[string]map[string]string
+		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("Decode body error = %v", err)
 		}
-		if body["transition"]["id"] != "31" {
+		transition, _ := body["transition"].(map[string]any)
+		if transition["id"] != "31" {
 			t.Fatalf("transition body = %#v", body)
+		}
+		fields, _ := body["fields"].(map[string]any)
+		if fields["customfield_agentic_id"] != "agent-1" || fields["customfield_agentic_run_id"] != "run-1" {
+			t.Fatalf("fields body = %#v", fields)
+		}
+		update, _ := body["update"].(map[string]any)
+		comments, _ := update["comment"].([]any)
+		if len(comments) != 1 {
+			t.Fatalf("comment update = %#v", update)
+		}
+		comment, _ := comments[0].(map[string]any)
+		add, _ := comment["add"].(map[string]any)
+		rawComment, _ := json.Marshal(add["body"])
+		if !strings.Contains(string(rawComment), "AgenticOps ownership") || !strings.Contains(string(rawComment), "agentic_id: agent-1") {
+			t.Fatalf("comment body = %s", string(rawComment))
 		}
 		return jsonResponse(http.StatusNoContent, "")
 	})
 
-	if err := client.TransitionIssue(context.Background(), "TAP-123", "31"); err != nil {
+	if err := client.TransitionIssue(context.Background(), "TAP-123", TransitionRequest{
+		ID: "31",
+		Fields: map[string]any{
+			"customfield_agentic_id":     "agent-1",
+			"customfield_agentic_run_id": "run-1",
+		},
+		Comment: "AgenticOps ownership\nagentic_id: agent-1",
+	}); err != nil {
 		t.Fatalf("TransitionIssue error = %v", err)
+	}
+	if requestCount != 1 {
+		t.Fatalf("request count = %d, want 1", requestCount)
 	}
 }
 
