@@ -195,7 +195,8 @@ func TestPreparePROutputsPlanAndHumanGateForCreation(t *testing.T) {
 
 func TestReadPRCommentsUsesGitHubReader(t *testing.T) {
 	fake := &cliFakeGitHubRunner{outputs: map[string]string{
-		"pr view 42 --repo tapdata/tapdata --json comments,reviews": `{"comments":[{"author":{"login":"reviewer"},"body":"请补测试","url":"https://github.example/comment/1"}],"reviews":[]}`,
+		"api --paginate --slurp repos/tapdata/tapdata/issues/42/comments?per_page=100": `[[{"user":{"login":"reviewer"},"body":"请补测试","html_url":"https://github.example/comment/1"}]]`,
+		"api --paginate --slurp repos/tapdata/tapdata/pulls/42/reviews?per_page=100":   `[[]]`,
 	}}
 	withGitHubClientForTest(t, github.Client{Runner: fake})
 
@@ -217,7 +218,9 @@ func TestReadPRCommentsUsesGitHubReader(t *testing.T) {
 
 func TestCheckCIStatusUsesGitHubReader(t *testing.T) {
 	fake := &cliFakeGitHubRunner{outputs: map[string]string{
-		"pr checks 42 --repo tapdata/tapdata --json name,state,conclusion,detailsUrl": `[{"name":"unit","state":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.example/checks/1"},{"name":"e2e","state":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://github.example/checks/2"}]`,
+		"api --method GET repos/tapdata/tapdata/pulls/42":                                     `{"html_url":"https://github.com/tapdata/tapdata/pull/42","head":{"sha":"abc123"}}`,
+		"api --paginate --slurp repos/tapdata/tapdata/commits/abc123/check-runs?per_page=100": `[{"check_runs":[{"name":"unit","status":"completed","conclusion":"success","details_url":"https://github.example/checks/1"},{"name":"e2e","status":"completed","conclusion":"failure","details_url":"https://github.example/checks/2"}]}]`,
+		"api --paginate --slurp repos/tapdata/tapdata/commits/abc123/status?per_page=100":     `[{"statuses":[]}]`,
 	}}
 	withGitHubClientForTest(t, github.Client{Runner: fake})
 
@@ -238,7 +241,8 @@ func TestCheckCIStatusUsesGitHubReader(t *testing.T) {
 
 func TestFixPRCommentsOutputsHumanGatedFixPlan(t *testing.T) {
 	fake := &cliFakeGitHubRunner{outputs: map[string]string{
-		"pr view 42 --repo tapdata/tapdata --json comments,reviews": `{"comments":[{"author":{"login":"reviewer"},"body":"请补测试","url":"https://github.example/comment/1"},{"author":{"login":"reviewer"},"body":"文档也要更新","url":"https://github.example/comment/2"}],"reviews":[]}`,
+		"api --paginate --slurp repos/tapdata/tapdata/issues/42/comments?per_page=100": `[[{"user":{"login":"reviewer"},"body":"请补测试","html_url":"https://github.example/comment/1"},{"user":{"login":"reviewer"},"body":"文档也要更新","html_url":"https://github.example/comment/2"}]]`,
+		"api --paginate --slurp repos/tapdata/tapdata/pulls/42/reviews?per_page=100":   `[[]]`,
 	}}
 	withGitHubClientForTest(t, github.Client{Runner: fake})
 
