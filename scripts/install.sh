@@ -4,6 +4,7 @@ set -euo pipefail
 INSTALL_DIR="${AGENTIC_OPS_HOME:-$HOME/.agentic-ops}"
 REPO_URL="${AGENTIC_OPS_REPO_URL:-git@github.com:tapstate/agentic-ops.git}"
 BRANCH="${AGENTIC_OPS_BRANCH:-main}"
+default_install_dir="$HOME/.agentic-ops"
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
@@ -232,6 +233,36 @@ ensure_path_profile() {
   return 0
 }
 
+is_default_install() {
+  local normalized_install_dir=""
+  local normalized_default_install_dir=""
+
+  normalized_install_dir="$(cd "$(dirname "$INSTALL_DIR")" && pwd -P)/$(basename "$INSTALL_DIR")"
+  normalized_default_install_dir="$(cd "$(dirname "$default_install_dir")" && pwd -P)/$(basename "$default_install_dir")"
+  [ "$normalized_install_dir" = "$normalized_default_install_dir" ]
+}
+
+configure_path_profile() {
+  local profile="$1"
+  local line="$2"
+
+  if ! is_default_install && [ "${AGENTIC_OPS_CONFIGURE_PATH:-0}" != "1" ]; then
+    path_profile_action="skipped_custom_home"
+    echo "Custom AGENTIC_OPS_HOME detected; shell profile was not modified." >&2
+    return 0
+  fi
+  if [ -f "$profile" ] && grep -qxF "$line" "$profile"; then
+    path_profile_configured="true"
+    path_profile_action="already_configured"
+    echo "PATH entry already exists in shell profile: $profile" >&2
+    return 0
+  fi
+  ensure_path_profile "$profile" "$line"
+  path_profile_configured="true"
+  path_profile_updated="true"
+  path_profile_action="added"
+}
+
 trap rollback ERR
 
 if ! command -v git >/dev/null 2>&1; then
@@ -282,10 +313,7 @@ path_profile="$(shell_profile_path)"
 path_profile_line_value="$(path_profile_line)"
 path_profile_configured="false"
 path_profile_updated="false"
-
-if [ -f "$path_profile" ] && grep -qxF "$path_profile_line_value" "$path_profile"; then
-  path_profile_configured="true"
-fi
+path_profile_action=""
 
 if path_contains_dir "$bin_dir"; then
   path_configured="true"
@@ -295,15 +323,10 @@ else
   echo "This installer cannot modify the parent shell PATH when it is run through a pipe." >&2
 fi
 
-if [ "$path_profile_configured" = "true" ]; then
-  echo "PATH entry already exists in shell profile: $path_profile" >&2
-elif ensure_path_profile "$path_profile" "$path_profile_line_value"; then
-  path_profile_configured="true"
-  path_profile_updated="true"
-fi
+configure_path_profile "$path_profile" "$path_profile_line_value"
 
-if [ "$path_configured" = "false" ]; then
+if [ "$path_configured" = "false" ] && [ "$path_profile_action" != "skipped_custom_home" ]; then
   echo "Open a new terminal or run: source \"$path_profile\"" >&2
 fi
 
-printf '{"ok":true,"operation":"%s","install_dir":"%s","bin":"%s","target":"%s","current_ref":"%s","source":"managed_clone","path_configured":%s,"path_entry":"%s","path_profile":"%s","path_profile_configured":%s,"path_profile_updated":%s,"jira_config_next_action":"workspace_init_interactive","agentic_next_action":"workspace_init"}\n' "$operation" "$INSTALL_DIR" "$bin_dir/agentic-cli" "$target" "$current_ref" "$path_configured" "$bin_dir" "$path_profile" "$path_profile_configured" "$path_profile_updated"
+printf '{"ok":true,"operation":"%s","install_dir":"%s","bin":"%s","target":"%s","current_ref":"%s","source":"managed_clone","path_configured":%s,"path_entry":"%s","path_profile":"%s","path_profile_configured":%s,"path_profile_updated":%s,"path_profile_action":"%s","jira_config_next_action":"workspace_init_interactive","agentic_next_action":"workspace_init"}\n' "$operation" "$INSTALL_DIR" "$bin_dir/agentic-cli" "$target" "$current_ref" "$path_configured" "$bin_dir" "$path_profile" "$path_profile_configured" "$path_profile_updated" "$path_profile_action"
