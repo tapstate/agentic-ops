@@ -60,6 +60,21 @@ func TestLoadFileReadsFailureContextMayIncludeSchema(t *testing.T) {
 	}
 }
 
+func TestLoadFileReadsWriteEvidenceContentLimit(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "..", "install-resources", "basic", "contracts", "operations", "write-evidence.yaml")
+	op, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile error = %v", err)
+	}
+	contentFile := op.Input["content_file"]
+	if !contentFile.Required || contentFile.Type != "file" || contentFile.MaxBytes != 65536 {
+		t.Fatalf("content_file = %#v", contentFile)
+	}
+	if !contains(op.RequiredInputs, "content_file") {
+		t.Fatalf("required inputs = %#v", op.RequiredInputs)
+	}
+}
+
 func contains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

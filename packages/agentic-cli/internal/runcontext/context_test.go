@@ -27,6 +27,101 @@ func TestReadRestoresTakeoverContext(t *testing.T) {
 	}
 }
 
+func TestReadSkipsIncompleteTakeoverAndUsesLatestCompleteAnchor(t *testing.T) {
+	incomplete := takeoverEvent()
+	incomplete.TaskClass = ""
+	incomplete.ProcessID = ""
+	incomplete.TargetRepo = ""
+
+	latest := takeoverEvent()
+	latest.CurrentStage = "implementation"
+	latest.AgenticNextAction = "continue_development"
+
+	got, err := Read(
+		[]feedback.Event{incomplete, latest},
+		Query{AgenticRunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"},
+	)
+	if err != nil {
+		t.Fatalf("Read error = %v", err)
+	}
+	if got.CurrentStage != "implementation" || got.AgenticNextAction != "continue_development" {
+		t.Fatalf("Context = %#v", got)
+	}
+}
+
+func TestReadLatestCompleteAnchorIgnoresEarlierStateBearingEvents(t *testing.T) {
+	older := takeoverEvent()
+	beforeLatest := feedback.Event{
+		Workspace:         "tapstate",
+		AgenticRunID:      "run-1",
+		IssueKey:          "TAP-123",
+		Operation:         "prepare_pr",
+		CurrentStage:      "pr_created",
+		AgenticNextAction: "check_ci",
+		OK:                true,
+	}
+	latest := takeoverEvent()
+	latest.CurrentStage = "implementation"
+	latest.AgenticNextAction = "continue_development"
+	afterLatest := feedback.Event{
+		Workspace:         "tapstate",
+		AgenticRunID:      "run-1",
+		IssueKey:          "TAP-123",
+		Operation:         "write_evidence",
+		CurrentStage:      "evidence_written",
+		AgenticNextAction: "request_owner_confirmation",
+		OK:                true,
+	}
+
+	got, err := Read(
+		[]feedback.Event{older, beforeLatest, latest, afterLatest},
+		Query{AgenticRunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"},
+	)
+	if err != nil {
+		t.Fatalf("Read error = %v", err)
+	}
+	if got.CurrentStage != "evidence_written" || got.AgenticNextAction != "request_owner_confirmation" {
+		t.Fatalf("Context = %#v", got)
+	}
+
+	withoutTail, err := Read(
+		[]feedback.Event{older, beforeLatest, latest},
+		Query{AgenticRunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"},
+	)
+	if err != nil {
+		t.Fatalf("Read without tail error = %v", err)
+	}
+	if withoutTail.CurrentStage != "implementation" || withoutTail.AgenticNextAction != "continue_development" {
+		t.Fatalf("Context before latest anchor leaked = %#v", withoutTail)
+	}
+}
+
+func TestReadLatestTakeoverStillRejectsIdentityConflict(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*feedback.Event)
+		want   error
+	}{
+		{name: "workspace conflict", mutate: func(event *feedback.Event) { event.Workspace = "other" }, want: ErrWorkspaceMismatch},
+		{name: "agent conflict", mutate: func(event *feedback.Event) { event.AgentID = "agent-2" }, want: ErrLocalStateMismatch},
+		{name: "agentic id conflict", mutate: func(event *feedback.Event) { event.AgenticID = "agent-2" }, want: ErrLocalStateMismatch},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			latest := takeoverEvent()
+			test.mutate(&latest)
+			_, err := Read(
+				[]feedback.Event{takeoverEvent(), latest},
+				Query{AgenticRunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"},
+			)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("Read error = %v, want %v", err, test.want)
+			}
+		})
+	}
+}
+
 func TestReadRejectsImmutableFieldConflict(t *testing.T) {
 	events := []feedback.Event{
 		takeoverEvent(),
