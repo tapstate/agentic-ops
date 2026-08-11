@@ -7,6 +7,7 @@ import (
 	gitops "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/git"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/github"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/runtimeclock"
 )
 
 type JiraClientSelection = jiraClientSelection
@@ -188,6 +189,12 @@ func SetRunGitHubAuthStatusForTest(fn func(context.Context) error) func() {
 	original := runGitHubAuthStatus
 	runGitHubAuthStatus = fn
 	return func() { runGitHubAuthStatus = original }
+}
+
+func SetClockForTest(clock runtimeclock.Clock) func() {
+	original := currentClock
+	currentClock = clock
+	return func() { currentClock = original }
 }
 
 func SetCommandAvailableForTest(fn func(string) bool) func() {
