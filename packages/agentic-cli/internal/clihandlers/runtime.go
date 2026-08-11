@@ -7,12 +7,12 @@ import (
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/config"
 	gitops "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/git"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/github"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/runtimeclock"
 	"io"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
-	"time"
 )
 
 var Version = "SRC-source"
@@ -39,6 +39,8 @@ var commandAvailable = func(name string) bool {
 var inspectGitWorkspace = gitops.InspectWorkspace
 
 var gitHubClient = github.Client{Runner: github.ExecRunner{}}
+
+var currentClock runtimeclock.Clock = runtimeclock.SystemClock{}
 
 func parseCommitIndex(value string) int {
 	var index int
@@ -105,10 +107,6 @@ func readInstallDir(args []string) string {
 	}
 	home, _ := os.UserHomeDir()
 	return config.DefaultInstallDir(home)
-}
-
-func fixedNow() time.Time {
-	return time.Date(2026, 7, 21, 10, 30, 12, 0, time.UTC)
 }
 
 func currentUser() string {

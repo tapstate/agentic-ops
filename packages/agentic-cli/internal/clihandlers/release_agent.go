@@ -45,7 +45,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		}))
 	}
 	currentAgentID := agentID()
-	completedAt := fixedNow().Format(time.RFC3339)
+	completedAt := currentClock.Now().UTC().Format(time.RFC3339)
 	workspaceProfile := takeoverProfile(workspaceName)
 	selection, err := selectJiraClient(workspaceName, workspaceProfile)
 	if err != nil {
@@ -192,6 +192,7 @@ func runReleaseAgent(args []string, stdout io.Writer) int {
 		}
 	}
 	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
+		Timestamp:                 completedAt,
 		AgenticRunID:              runID,
 		IssueKey:                  issueKey,
 		TaskType:                  "task_takeover",

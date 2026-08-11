@@ -17,9 +17,19 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
+type staticClock struct {
+	now time.Time
+}
+
+func (clock staticClock) Now() time.Time {
+	return clock.now
+}
+
 func TestMain(m *testing.M) {
+	restoreClock := clihandlers.SetClockForTest(staticClock{now: time.Date(2026, 7, 21, 10, 30, 12, 0, time.UTC)})
 	restore := clihandlers.SetRunGitCloneForTest(func(repoURL string, targetPath string, _ io.Writer) error {
 		if strings.TrimSpace(repoURL) == "" {
 			return fmt.Errorf("repo URL is required")
@@ -34,6 +44,7 @@ func TestMain(m *testing.M) {
 	})
 	code := m.Run()
 	restore()
+	restoreClock()
 	os.Exit(code)
 }
 

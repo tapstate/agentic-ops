@@ -9,10 +9,21 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/clihandlers"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/jira"
 )
+
+type countingClock struct {
+	now   time.Time
+	calls int
+}
+
+func (clock *countingClock) Now() time.Time {
+	clock.calls++
+	return clock.now
+}
 
 func TestListTasksRejectsFakeJiraByDefault(t *testing.T) {
 	var stdout bytes.Buffer
@@ -243,6 +254,10 @@ func TestListTasksGuidesJiraTokenWhenTokenEnvMissing(t *testing.T) {
 func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 	root := t.TempDir()
 	t.Chdir(root)
+	operationTime := time.Date(2026, 8, 11, 9, 8, 7, 0, time.UTC)
+	clock := &countingClock{now: operationTime}
+	restoreClock := clihandlers.SetClockForTest(clock)
+	defer restoreClock()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run([]string{"takeover-task", "TAP-123", "--workspace", "tapstate"}, &stdout, &stderr)
@@ -256,8 +271,9 @@ func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 	}
 	assertJSONField(t, stdout.String(), "agent_id", "agentic-cli-local-agent")
 	assertJSONField(t, stdout.String(), "agentic_id", "agentic-cli-local-agent")
-	assertJSONField(t, stdout.String(), "agentic_takeover_at", "2026-07-21T10:30:12Z")
-	assertJSONField(t, stdout.String(), "agentic_heartbeat_at", "2026-07-21T10:30:12Z")
+	assertJSONField(t, stdout.String(), "agentic_run_id", "TAP-123-takeover-20260811090807-a8f3")
+	assertJSONField(t, stdout.String(), "agentic_takeover_at", "2026-08-11T09:08:07Z")
+	assertJSONField(t, stdout.String(), "agentic_heartbeat_at", "2026-08-11T09:08:07Z")
 	assertJSONField(t, stdout.String(), "task_class", "technical_task")
 	assertJSONField(t, stdout.String(), "task_class_source", "issue_type:Task")
 	assertJSONField(t, stdout.String(), "process_id", "development_change_v1")
@@ -280,10 +296,16 @@ func TestTakeoverTaskReturnsRunIDAndStage(t *testing.T) {
 	if !strings.Contains(string(events), `"gate_status":"passed"`) {
 		t.Fatalf("events = %s", string(events))
 	}
+	if !strings.Contains(string(events), `"timestamp":"2026-08-11T09:08:07Z"`) {
+		t.Fatalf("events missing operation timestamp: %s", string(events))
+	}
+	if clock.calls != 1 {
+		t.Fatalf("clock calls = %d, want 1", clock.calls)
+	}
 	for _, want := range []string{
 		`"agent_id":"agentic-cli-local-agent"`,
 		`"agentic_id":"agentic-cli-local-agent"`,
-		`"agentic_takeover_at":"2026-07-21T10:30:12Z"`,
+		`"agentic_takeover_at":"2026-08-11T09:08:07Z"`,
 		`"task_class":"technical_task"`,
 		`"process_id":"development_change_v1"`,
 	} {
