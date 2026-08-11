@@ -57,6 +57,7 @@ func runFeedbackAnalyze(args []string, stdout io.Writer) int {
 		"scope":                scope,
 		"runs":                 analysis.Runs,
 		"failure_patterns":     analysis.FailurePatterns,
+		"recovery_patterns":    analysis.RecoveryPatterns,
 		"human_gate_hotspots":  analysis.HumanGateHotspots,
 		"missing_field_trends": analysis.MissingFieldTrends,
 		"suggested_assets":     analysis.SuggestedAssets,
