@@ -317,8 +317,8 @@ func TestReleaseAgentTransitionsRealJiraIssueWhenTransitionIDProvided(t *testing
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
-	if client.transitionKey != "TAP-123" || client.transitionID != "31" {
-		t.Fatalf("transition = %s %s", client.transitionKey, client.transitionID)
+	if client.transitionKey != "TAP-123" || client.transitionRequest.ID != "31" {
+		t.Fatalf("transition = %s %+v", client.transitionKey, client.transitionRequest)
 	}
 	assertEventLogContains(t, root, `"operation":"release_agent"`)
 	assertEventLogContains(t, root, `"current_stage":"jira_transition"`)
@@ -338,8 +338,8 @@ func TestReleaseAgentUsesProfileJiraTransitionMapping(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
-	if client.transitionKey != "TAP-123" || client.transitionID != "31" {
-		t.Fatalf("transition = %s %s", client.transitionKey, client.transitionID)
+	if client.transitionKey != "TAP-123" || client.transitionRequest.ID != "31" {
+		t.Fatalf("transition = %s %+v", client.transitionKey, client.transitionRequest)
 	}
 	assertJSONField(t, stdout.String(), "jira_transition_id", "31")
 	assertEventLogContains(t, root, `"current_stage":"jira_transition"`)

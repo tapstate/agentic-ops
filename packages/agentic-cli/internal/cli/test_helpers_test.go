@@ -260,7 +260,7 @@ type recordingJiraClient struct {
 	descriptionSections map[string]string
 	descriptionErr      error
 	transitionKey       string
-	transitionID        string
+	transitionRequest   jira.TransitionRequest
 	transitionErr       error
 }
 
@@ -310,9 +310,9 @@ func (client *recordingJiraClient) Transitions(ctx context.Context, key string) 
 	return []jira.Transition{{ID: "31", Name: "Done"}}, nil
 }
 
-func (client *recordingJiraClient) TransitionIssue(ctx context.Context, key string, transitionID string) error {
+func (client *recordingJiraClient) TransitionIssue(ctx context.Context, key string, request jira.TransitionRequest) error {
 	client.transitionKey = key
-	client.transitionID = transitionID
+	client.transitionRequest = request
 	if client.transitionErr != nil {
 		return client.transitionErr
 	}
