@@ -22,14 +22,14 @@ Jira 任务
 一句话定义：
 
 ```text
-AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操作契约 + 任务表单标准 + 工作流配置 + 策略门禁 + 运行手册 + 模板 + AgenticCLI + 证据与反馈闭环
+AgenticOps = Skill + Python Runtime + Shell Bootstrap + Rule + 标准资产 + 本地任务状态 + 证据与反馈闭环
 ```
 
 术语边界：
 
 - `AgenticOps` 是项目和执行控制体系。
-- `AgenticCLI` 是 AgenticOps 成熟经验沉淀后的执行入口组件。
-- `agentic-cli` 是安装后给 AIAgent 和研发工程师使用的 CLI 二进制。
+- `AgenticCLI` 是 AgenticOps 成熟经验沉淀后的执行入口组件，目标实现是 Python Runtime。
+- `agentic-cli` 是安装后给 AIAgent 和研发工程师使用的稳定命令入口。
 
 ## 设计原则
 
@@ -41,7 +41,7 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 - `agent_id` 标识一个 AIAgent 身份；`agentic_id` 是任务当前绑定的 `agent_id`，不是新的身份字段。
 - AIAgent 必须按任务类型 `task_type`、当前阶段 `current_stage` 和下一步动作 `agentic_next_action` 推进，不按固定角色推进。
 - 架构先稳定大的流程环节、门禁、状态、容错和演进机制；计划再从大阶段拆到中任务和小步骤。
-- 成熟固化的交互逻辑应沉淀为稳定、原子化的 CLI 操作；脚本入口只做受控编排或调用，不承载业务判断。
+- 成熟固化的交互逻辑应沉淀为稳定、原子化的 Python 操作；Shell Bootstrap 只负责安装、更新、回滚、环境准备和启动，不承载业务判断。
 - 真实 Jira 写操作、Git 推送、GitHub 拉取请求创建、合并和发布必须经过策略、门禁和人工确认。
 
 ## 谁会使用
@@ -55,15 +55,16 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 - [项目维护者上手](docs/maintainers/getting-started.md)
 - [文档索引](docs/README.md)
 - [项目目标](docs/strategy/project-goals.md)
-- [当前设计](docs/architecture/agenticops-current-design.md)
+- [目标全景](docs/strategy/skill-python-agenticops-project-overview.md)
+- [当前 Go 迁移基线](docs/architecture/agenticops-current-design.md)
 - [项目规则](docs/project-rules.md)
 - [开发风格](docs/development-style.md)
 - [源码发布流程](docs/architecture/source-release-workflow-design.md)
 - [发布检查清单](docs/review-checklist.md)
 - [项目结构](docs/architecture/project-structure.md)
-- [实施计划](plans/)
-- [CLI 实现](packages/agentic-cli/)
-- [机器可读操作契约](install-resources/basic/contracts/operations/)
+- [Python Runtime 设计](docs/runtime/python-runtime.md)
+- Jira `AO-11`：本次重构实施计划、进度和验收事实源
+- [当前机器可读操作契约](install-resources/basic/contracts/operations/)
 
 ### 研发工程师
 
@@ -81,7 +82,7 @@ AgenticOps = AI 员工手册（含 AIAgent 工作规则）+ 项目规则 + 操�
 
 ### AIAgent
 
-AIAgent 不应主要依赖 README 或人用 `docs/` 执行任务，也不需要读取 AgenticOps 源码或关心 Go 编译环境。AIAgent 面对的是安装后的命令行工具和 AI 资产。
+AIAgent 不应主要依赖 README 或人用 `docs/` 执行任务，也不需要读取 AgenticOps 源码或关心运行环境实现。AIAgent 面对的是安装后的 Skill、Rule、命令入口和标准资产。
 
 执行前读取：
 
@@ -126,15 +127,17 @@ tapdata/
 | 目录 | 用途 |
 | --- | --- |
 | `docs/` | 人读文档，包括项目维护者、研发工程师、架构、规则、故事线、流程和设计说明。 |
-| `install-resources/basic/` | 跨平台通用安装资源，包括 AI 资产入口、手册、操作契约、工作流配置、策略、运行手册和模板。 |
-| `install-resources/<os-arch>/` | Git 跟踪的平台二进制产物，只放对应平台的 `agentic-cli`。 |
-| `install-resources/checksums.txt` | 安装资源校验和，安装和更新时必须通过校验。 |
+| `runtime/` | Python Runtime 源码与运行时测试的目标位置。 |
+| `bootstrap/` | 安装、更新、回滚、环境准备和 `agentic-cli` Shell 包装入口的目标位置。 |
+| `skills/` | AIAgent 可发现、可复用的标准流程入口。 |
+| `rules/` | 事实源、权限、语言、分支、授权和停止条件。 |
+| `standards/` | 公司、契约、标准流程、策略、运行手册、模板和项目差异资产的目标位置。 |
+| `install-resources/`、`packages/agentic-cli/` | 迁移期间保留的旧安装资源与 Go 能力基线，替代能力验收后逐项删除。 |
 | `bin/` | 本机安装后的命令目录，仓库只跟踪 `bin/.gitkeep`，本地生成的 `bin/agentic-cli` 不提交。 |
 | `.local/` | 本机安装和更新状态目录，仓库只跟踪 `.local/.gitkeep`，本地状态文件不提交。 |
 | `.superpowers/` | 项目工作空间的本地执行状态目录，由 Git 忽略，不保存正式设计、计划或运行资产。 |
-| `plans/` | 基于稳定架构拆解的可执行推进计划。 |
-| `packages/agentic-cli/` | AgenticCLI Go 运行时实现。 |
-| `scripts/` | 安装、构建和本地检查脚本。 |
+| `plans/` | 历史实施记录；目标结构中删除，新的计划、进度和验收统一进入 Jira。 |
+| `scripts/` | AgenticOps 源头仓库发布与固定验证编排；不承载安装后业务逻辑。 |
 | `tests/` | 合同、脚本和端到端验证。 |
 
-阶段状态、验收记录和剩余工作只由 [实施计划](plans/) 维护。
+实施计划、阶段状态、验收记录和剩余工作由 Jira 管理；仓库只保存长期有效的目标、架构、规则、标准资产和测试。

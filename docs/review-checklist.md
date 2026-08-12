@@ -6,7 +6,7 @@
 
 1. [目标定位](strategy/positioning.md)：确认 AgenticOps 的价值和边界。
 2. [项目规则](project-rules.md)：确认项目资料、运行资料、人工门禁和安全约束。
-3. [当前设计](architecture/agenticops-current-design.md)：确认整体架构、运行边界和主流程。
+3. [目标全景](strategy/skill-python-agenticops-project-overview.md)：确认目标架构、运行边界和可验证主流程；[当前设计](architecture/agenticops-current-design.md)只用于核对迁移基线。
 4. [项目结构](architecture/project-structure.md)：确认仓库目录、全局安装目录和项目 AI 工作空间边界。
 5. [故事线总览](user-stories/agenticops-user-stories.md)：确认后续推进遵循“故事线 -> 设计 -> 计划 / 开发 -> 验收”。
 6. [项目维护者故事](user-stories/project-maintainer-stories.md)：确认源头仓库维护、标准资产治理、发布、诊断、反馈、回滚和兼容性故事。
@@ -14,7 +14,7 @@
 8. [AI 员工手册](../install-resources/basic/handbooks/ai-employee-handbook.md)：确认 AIAgent 如何工作、何时停止、如何回写证据。
 9. [操作契约](contracts/operation-contract.md)：确认 AIAgent 能调用哪些受控操作，以及每个操作的输入、输出和副作用。
 10. [工作流配置](profiles/workflow-profile.md)：确认如何屏蔽 Jira 事实，并把具体项目流程映射成稳定配置。
-11. [CLI 运行时](runtime/cli-runtime.md)：确认控制层采用 Go CLI 运行时，源头发布脚本与安装后业务运行时保持边界。
+11. [Python Runtime](runtime/python-runtime.md)：确认 Python 结构化操作层与 Shell Bootstrap 保持边界；[现有 CLI 运行时](runtime/cli-runtime.md)只用于迁移基线核对。
 12. [反馈闭环](workflows/feedback-loop.md)：确认工作日志如何沉淀为 AgenticOps 改进建议。
 13. [源码发布流程](architecture/source-release-workflow-design.md)：确认 `develop`、`main`、Tag 和 Hotfix 规则。
 
@@ -60,8 +60,8 @@
 - 当前分支、目标版本和 Jira 绑定正确，工作区干净。
 - `core.hooksPath=.githooks`，远端 `develop` 存在且 GitHub 默认分支为 `main`。
 - 默认硬门禁要求 `main` Ruleset、Auto-merge 和 Merge commit 配置符合预期；GitHub Free 私有仓库只有显式传入 `--allow-soft-gate` 才允许放宽 Ruleset 与 Auto-merge。
-- `go test ./...`、资源、构建、安装和四个 E2E 验证全部通过。
-- `prepare` 生成的四平台安装资源和 checksum 已审查并提交。
+- 迁移期间 `go test ./...`、资源、构建、安装和四个 E2E 验证全部通过；新增 Python 能力还必须通过对应单元、契约、安装和 E2E 验证。
+- Go 安装资产退出前，`prepare` 生成的四平台安装资源和 checksum 已审查并提交。
 - 最终确认展示的 HEAD、提交列表、版本基线和合并方向正确。
 - 软门禁普通发布使用固定 `release/vX.Y`；首次 `publish` 返回状态码 `2` 后未自动合并、未推送 Tag，人工合并后使用原命令恢复并完成第二次完整验证。
 - PR 实际以 Merge commit 合入，`origin/main` 包含待发布 HEAD。
@@ -72,7 +72,7 @@
 
 ## 5. 发布后的下一步
 
-后续推进必须先对齐故事线，再保持设计、计划、文档、契约、测试和代码同步。阶段性实现状态、剩余工作和验收命令只维护在 `plans/` 中。
+后续推进必须先对齐故事线，再保持 Jira 计划、文档、契约、测试和代码同步。阶段性状态、剩余工作和验收命令只维护在对应 Jira 工作项中。
 
 - 正常发布确认远端 tag 与发布记录一致。
 - Hotfix 明确提示并由研发工程师人工把修复同步回 `develop`。

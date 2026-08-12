@@ -1,5 +1,7 @@
 # 问题修复与同步路径
 
+> **迁移说明：** 本文中的 Go 二进制、资产包和 `exact_pair` 内容记录现役问题处理基线。目标修复路径改为更新稳定 `main` 中的 Skill、Rule、标准资产或 Python Runtime，再由 Shell Bootstrap 更新并回滚；具体替换顺序以迁移计划为准。
+
 ## 1. 目的
 
 本文定义 AgenticOps 正式使用前必须具备的问题修复路径。
@@ -25,16 +27,16 @@
 结论：
 
 - 当前架构方向适配“渐进形成公司标准流程”和“快速修复上线”两个目标。
-- 最大缺口不在目录结构；源码发布、远程清单、产物校验、原子切换、`exact_pair` 兼容门禁、本地回滚和显式外部诊断已有基线。后续重点是基于真实试运行修复已证实的运行缺陷，并按需完善工作流配置版本审计；可选 GitHub Release 制品发布不作为正式使用前置条件。
-- 修复能力应优先作为 `agentic-cli` 的一组受控操作实现，而不是分散在 shell 脚本、人工说明或提示词中。
+- 现有源码发布、远程清单、产物校验、原子切换、`exact_pair` 兼容门禁、本地回滚和显式外部诊断是迁移基线；目标目录和运行边界已调整，需要用真实任务逐项复验后替换。
+- 修复能力应优先作为 Python Runtime 的受控操作、Skill、Rule 或标准资产实现，而不是分散在 Shell Bootstrap、临时人工说明或聊天上下文中。
 
 ## 3. 设计目标
 
 持续快速优化能力必须做到：
 
 - 发现问题时，研发能用一条命令生成脱敏诊断信息。
-- 维护者能按问题类型判断应该修 Go 代码、工作流配置、策略、模板还是 Jira 卡片数据。
-- 修复后能快速发布二进制或资产包。
+- 维护者能按问题类型判断应该修 Python Runtime、Skill、Rule、工作流配置、模板还是 Jira 卡片数据。
+- 修复合入稳定 `main` 后，研发侧能快速更新 managed clone，无需等待项目二进制构建。
 - 研发侧能快速同步更新，并在异常时回滚。
 - 所有修复动作能进入任务级审计记录，并可被按需反馈报告分析，用于判断问题是否减少。
 - 所有能力以 `agentic-ops` 当前项目为权威维护；历史 `rd-agentic` / `td-agentic` 后缀项目只作为参考来源，不作为当前设计、计划或目标的事实源。
@@ -50,7 +52,7 @@
 -> 判断问题类型
 -> 选择修复载体
 -> 本地和合同验证
--> 发布二进制或资产包
+-> 通过受保护 main 发布源码和标准资产
 -> 研发侧同步更新
 -> 必要时回滚
 -> 按需反馈报告观察问题是否减少
@@ -61,8 +63,8 @@
 - 不把 secrets、tokens、private keys、原始 Jira 描述、敏感代码片段写入诊断包。
 - 不让 AIAgent 猜 Jira 字段、状态或工作流。
 - 不让 AIAgent 未经人工确认自动修改全局规范、工作流配置或策略。
-- 不把标准资产不完善的问题误判为 `agentic-cli` 二进制问题。
-- 不把所有问题都升级成二进制发布；能通过工作流配置、策略或模板修复的问题优先走资产包。
+- 不把 Skill、Rule 或标准资产不完善的问题误判为 Python Runtime 问题。
+- 不把所有问题都升级成 Runtime 修复；能通过 Skill、Rule、工作流配置或模板修复的问题优先修改对应资产。
 - 不维护旧版本补丁线；BUG 只在最新版本修复，有新版本时推荐自动更新应用。
 - 任何放宽门禁、真实 Jira 写操作、Git 推送、创建拉取请求、合并和发布都必须可审计、可回滚。
 
@@ -70,7 +72,7 @@
 
 | 问题类型 | 典型表现 | 修复载体 | 同步方式 |
 | --- | --- | --- | --- |
-| `agentic-cli` 逻辑错误 | 命令输出错误、`agentic_run_id` 生成错误、事件写入错误、`adapter` 行为错误 | Go CLI 二进制 | 发布最新版本 + `update apply` |
+| `agentic-cli` Runtime 逻辑错误 | 命令输出错误、`agentic_run_id` 生成错误、事件写入错误、`adapter` 行为错误 | Python Runtime | 合入稳定 `main` + Bootstrap 更新 |
 | Jira 流程状态没适配 | 未知 Jira `status` / `transition`、状态映射失败、项目工作流差异 | 工作流配置 / 适配器映射 | `asset update` + `profile update` |
 | Jira 卡片属性丢失 | 缺少负责人、验收标准、目标仓库、验证方式、风险等级 | 门禁失败 + 补全模板 / 字段映射 | 阻断接管 + 人工补卡或工作流配置修复 |
 | 关键步骤门禁调整 | 推送 / 创建拉取请求 / Jira 评论 / 范围变更的确认要求变化 | 策略包 | `policy update` + 审查 + 回滚 |
@@ -124,7 +126,7 @@ agentic-cli feedback bundle --workspace tapstate --run-id <agentic_run_id> --red
 | Jira 卡片属性丢失 | `missing_jira_field` | 模拟 Jira 接管门禁已覆盖必填字段阻断；真实 Jira 字段读取映射基线、补全模板输出和反馈报告缺失字段聚合已落地。 |
 | 关键步骤门禁调整 | `policy_gate_required` | `policy validate / update / rollback` 本地基线已落地；真实 Jira 字段写入、Jira 评论写入和显式 `transition` 写入已要求 `--confirm-real-jira-write`，并记录 `real_jira_write` 门禁审计事件。 |
 
-## 7. 修复路径一：CLI 逻辑错误
+## 7. 修复路径一：Python Runtime 逻辑错误
 
 适用场景：
 
@@ -140,14 +142,13 @@ agentic-cli feedback bundle --workspace tapstate --run-id <agentic_run_id> --red
 研发发现错误
 -> 执行 doctor / feedback bundle
 -> 维护者复现
--> 修复 Go 代码
--> go test ./...
--> contract test
--> 本地模拟流程端到端测试
--> 构建多平台二进制
--> 发布新的 latest release
--> 更新 release manifest
--> 研发 update apply 或自动更新到最新版本
+-> 修复 Python Runtime
+-> 执行单元测试与 contract test
+-> 执行本地 fixture 和真实场景回归
+-> 任务分支 PR 合入 develop
+-> 通过受控发布 PR 合入 main
+-> 研发执行 update apply 更新 managed clone
+-> 回到原输入复验
 ```
 
 目标命令：
@@ -158,9 +159,9 @@ agentic-cli update apply
 agentic-cli update rollback
 ```
 
-AgenticOps 不支持为旧版本单独做 BUG 修复。修复完成后只发布新的 latest 版本，研发侧应优先更新到最新版本。`update rollback` 只使用本地保存并通过 checksum 校验的上一状态，用于安装失败或新版本不可用时的恢复，不作为旧版本修复策略。
+AgenticOps 不支持为旧版本单独做 BUG 修复。修复完成后只更新稳定 `main`，研发侧应优先更新到最新提交。`update rollback` 只恢复本地保存的上一稳定 Git 引用和对应锁定 Python 环境，用于安装失败或新版本不可用时的恢复，不作为旧版本修复策略。
 
-严重逻辑错误可以在 manifest 中标记：
+严重逻辑错误可以在版本化更新策略中标记：
 
 ```yaml
 severity: required
@@ -170,9 +171,9 @@ blocked_operations:
   - write_evidence
 ```
 
-`update check` 把兼容状态写入安装目录 `.local/update-state.json`。统一命令门禁只读取该本地状态，并仅阻断 `blocked_operations` 中的操作；`help`、`version`、`doctor`、`preflight`、`update check`、`update apply` 和 `update rollback` 始终可用。
+`update check` 把目标 Git 引用、兼容状态和受影响操作写入安装目录 `.local/update-state.json`。统一命令门禁只读取该本地状态，并仅阻断 `blocked_operations` 中的操作；`help`、`version`、`doctor`、`preflight`、`update check`、`update apply` 和 `update rollback` 始终可用。
 
-本地 `--manifest` 更新只用于当前运行 CLI 的资产同步，release manifest 中的 CLI 版本必须等于当前 CLI；需要替换 CLI 二进制时必须使用带 checksum 的远程产物流程。release manifest 必须显式声明 `exact_pair` 和资产来源，不能通过省略兼容字段降级。
+`update apply` 只能快进到受保护 `main` 中已经确认的提交，执行 `uv sync --locked` 和固定自检后才切换 `current-ref`。更新不得修改 `user/` 或任何项目 AI 工作空间；依赖锁变化和目标提交必须进入安装审计。
 
 `required` 更新只允许用于安全、数据损坏、错误证据回写、严重流程越权等问题。
 
@@ -185,7 +186,7 @@ blocked_operations:
 - 不同工作空间的 Jira 工作流不一致。
 - AIAgent 看到未知状态，无法判断下一步。
 
-这类问题优先修复 工作流配置，不优先发布二进制。
+这类问题优先修复工作流配置或项目映射，不优先修改 Python Runtime。
 
 示例：
 
@@ -243,8 +244,8 @@ agentic-cli profile rollback --workspace tapstate
     "problem_branch": "release-v4.0.0"
   },
   "asset_refs": {
-    "admission_dir": "install-resources/basic/projects/tapdata/admission",
-    "templates_dir": "install-resources/basic/projects/tapdata/templates"
+    "admission_dir": "standards/projects/tapdata/admission",
+    "templates_dir": "standards/projects/tapdata/templates"
   },
   "recommended_next_action": "inspect_by_agent"
 }
@@ -338,41 +339,36 @@ agentic-cli policy rollback --workspace tapstate
 
 ## 11. 安装与同步模型
 
-AgenticOps 只维护 latest 安装路径。GitHub 仓库和本机 `~/.agentic-ops` managed clone 结构一致：
+AgenticOps 只维护 latest 安装路径。GitHub 仓库和本机 `~/.agentic-ops` managed clone 的 Git 跟踪结构一致；本机只增加隔离环境、用户配置和安装状态：
 
 ```text
 ~/.agentic-ops/
-  install-resources/
-    basic/
-      ai-assets/
-      company/
-      contracts/
-      policies/
-      projects/
-      runbooks/
-      templates/
-      handbooks/
-    <os-arch>/
-      agentic-cli
-    checksums.txt
+  bootstrap/
+  runtime/
+  skills/
+  rules/
+  standards/
+  .venv/
+  user/
   bin/
     agentic-cli
   .local/
     current-ref
     previous-ref
     install-log.json
-    update-stash
+    update-stash/
 ```
 
-`install-resources/` 是 Git 跟踪的安装资源源头；`bin/agentic-cli` 和 `.local/*` 是本地产生文件，必须被 `.gitignore` 忽略。
+`runtime/`、`skills/`、`rules/` 和 `standards/` 是 Git 跟踪的运行资产源头；`.venv/`、`user/`、`bin/agentic-cli` 和 `.local/*` 是本地产生内容，必须被 `.gitignore` 忽略。
 
 `.local/install-log.json` 必须记录：
 
 ```json
 {
   "operation": "update",
-  "target": "darwin-arm64",
   "current_ref": "<git-commit>",
+  "previous_ref": "<git-commit>",
+  "lock_digest": "<sha256>",
   "bin": "~/.agentic-ops/bin/agentic-cli"
 }
 ```
@@ -383,7 +379,7 @@ AgenticOps 只维护 latest 安装路径。GitHub 仓库和本机 `~/.agentic-op
 
 - 每类问题都有稳定错误码、人工动作和事件日志。
 - 研发可以一条命令生成脱敏诊断包。
-- CLI 逻辑错误可以通过提交新的 latest 版本修复，并推荐研发侧自动更新。
+- Python Runtime、Skill、Rule 或标准资产问题可以通过受保护 `main` 的 latest 提交修复，并由研发侧快速更新。
 - Jira `status` / `transition` 差异可以通过工作流配置更新修复并回滚。
 - Jira 卡片属性缺失会阻断接管，并给出补全模板。
 - 关键门禁可以通过策略更新调整，并保留审计记录。
@@ -393,4 +389,4 @@ AgenticOps 只维护 latest 安装路径。GitHub 仓库和本机 `~/.agentic-op
 
 ## 13. 阶段计划入口
 
-阶段性实现状态、当前实现边界、剩余工作和验收命令只维护在 `plans/` 中。本文只保留问题修复与同步路径的稳定设计、门禁和运行边界。
+阶段性实现状态、当前实现边界、剩余工作和验收命令只维护在对应 Jira 工作项中。本文只保留问题修复与同步路径的稳定设计、门禁和运行边界。

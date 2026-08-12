@@ -11,19 +11,20 @@
 核心目录约定：
 
 - `docs/`：人读文档，包括架构、规则、用户故事、流程和设计说明。
-- `install-resources/basic/`：跨平台通用安装资源，包括 AI 资产入口、手册、操作契约、工作流配置、策略、运行手册和模板。
-- `install-resources/<os-arch>/`：平台二进制产物，只放对应平台的 `agentic-cli`。
-- `install-resources/checksums.txt`：安装资源校验和。
+- `runtime/`：Python Runtime 源码与运行时测试的目标位置。
+- `bootstrap/`：安装、更新、回滚、环境准备和 `agentic-cli` 包装入口的目标位置。
+- `rules/`：不能由当前任务临场改变的 AIAgent 和源头维护规则。
+- `standards/`：公司、操作契约、标准流程、策略、运行手册、模板和项目差异资产的目标位置。
 - `bin/`：安装后的本机命令目录，仓库只提交 `bin/.gitkeep`，本地 `bin/agentic-cli` 不提交。
 - `.local/`：本机安装和更新状态，仓库只提交 `.local/.gitkeep`，本地状态文件不提交。
-- `plans/`：可执行推进计划，使用勾选项跟踪实施进度。
+- `plans/`：历史实施记录，重构期间不再新增；长期事实迁入正式资料，实施计划、进度和验收改由 Jira 管理，最终删除该目录。
 - `skills/`：AgenticOps skills。
-- `packages/agentic-cli/`：Go CLI 运行时的未来实现位置。
+- `packages/agentic-cli/`、`install-resources/`：重构输入；提取仍需保留的契约、安全门禁、失败码和 fixture 后，可按 `AO-11` 实施需要删除，旧版本由版本分支、Tag 和 Git 历史保留。
 - `examples/`：端到端演示样例。
 - `tests/`：合同、脚本和文档一致性测试。
 - `scripts/`：安装、检查和辅助脚本。
 
-项目工作空间下的 `.superpowers/` 只保存 Superpowers 等工具的本地执行状态、检查点、临时分析和缓存，不属于项目资料，不维护、不提交。正式设计必须写入 `docs/` 的对应主题目录，可执行计划必须写入顶层 `plans/`；不得创建或提交 `docs/superpowers/`。
+项目工作空间下的 `.superpowers/` 只保存 Superpowers 等工具的本地执行状态、检查点、临时分析和缓存，不属于项目资料，不维护、不提交，也不能作为计划、任务状态或审计事实源。正式设计必须写入 `docs/` 的对应主题目录；实施计划、进度、阻塞和验收写入 Jira，不得创建新的仓库计划文件或提交 `docs/superpowers/`。
 
 ## 项目边界与工作区隔离
 
@@ -48,8 +49,8 @@
 ```
 
 - 个人规则：只记录个人偏好、本机身份、个人 wiki 和本地工作流，维护在个人记忆库或本地 `~/.agentic-ops/user/`，不得写入公司或项目标准资产。
-- 公司规则：只记录 TapData 跨项目硬规定、事实源边界、人工门禁、保密和通用提交要求，维护在 `install-resources/basic/company/`。
-- 项目规则：只记录具体项目的语言、分支、提交、验证和工具例外，维护在对应项目仓库规则、项目 AI 工作空间或 `install-resources/basic/projects/<project>/`。
+- 公司规则：只记录 TapData 跨项目硬规定、事实源边界、人工门禁、保密和通用提交要求，目标位置是 `standards/company/`；迁移完成前的现役资产仍位于 `install-resources/basic/company/`。
+- 项目规则：只记录具体项目的语言、分支、提交、验证和工具例外，维护在对应项目仓库规则、项目 AI 工作空间或目标目录 `standards/projects/<project>/`；迁移完成前继续兼容 `install-resources/basic/projects/<project>/`。
 - AIAgent 规则：只记录 AIAgent 执行时的停止条件、交互语言、门禁、证据、审计和工具调用要求，维护在 AI 员工手册、操作契约、策略、运行手册、模板或当前工作空间 `AGENTS.md`。
 
 项目规则覆盖公司规则或 AIAgent 规则时，必须能从项目规则文件或项目工作空间配置中看到明确来源；不得只依赖聊天上下文。
@@ -66,13 +67,15 @@ Jira 交互中的人可见内容必须使用中文，包括摘要、标题、描
 
 ## 运行时方向
 
-AgenticCLI 使用 Go 实现，统一入口为 `agentic-cli`。shell 只用于 `gh api | bash` 认证安装引导、轻量环境检测、managed clone 更新、校验安装资源和复制当前平台二进制，不承载安装后 AIAgent 的 Jira、GitHub、Git、操作契约、策略门禁、证据或反馈业务逻辑。维护 AgenticOps 源头仓库时，`scripts/release.sh`、`scripts/hotfix.sh` 及 `scripts/lib/` 可以作为项目级例外编排 Git、GitHub 和固定验证命令。
+目标运行架构是 `Skill + Python Runtime + Shell Bootstrap + Rule`，统一入口继续使用 `agentic-cli`。Python Runtime 承载契约、状态、API、门禁、证据、恢复和反馈；shell 只负责 `gh api | bash` 认证安装引导、轻量环境检测、managed clone 更新、`uv` 环境准备、启动和回滚，不承载安装后 AIAgent 的 Jira、GitHub、Git、操作契约、策略门禁、证据或反馈业务逻辑。维护 AgenticOps 源头仓库时，`scripts/release.sh`、`scripts/hotfix.sh` 及 `scripts/lib/` 可以作为项目级例外编排 Git、GitHub 和固定验证命令。现有 Go 运行时只作为迁移基线，不新增 Go 业务能力。
+
+运行规则必须区分 `source_maintenance` 和 `project_execution`。前者用于 AgenticOps 源头维护，后者用于 Tapdata 等业务项目任务；两种模式不得交叉加载对方的项目规则、分支策略、验证命令或发布流程。目标结构中的每个 Skill 必须声明 `allowed_modes`。
 
 `~/.agentic-ops` 是 `tapstate/agentic-ops` 的完整 managed clone，不是具体项目运行目录。具体项目运行目录是项目 AI 工作空间，例如 `tapstate` 或 `tapdata`。
 
 ## 测试与验证
 
-引入运行代码后，必须在同一变更中补充可执行验证命令。发布前必须执行固定完整验证：`go test ./...`、资源测试、构建测试、安装测试和四个 E2E 流程；以 `scripts/release.sh` 和 `scripts/hotfix.sh` 的固化命令为准，不得跳过。
+引入运行代码后，必须在同一变更中补充可执行验证命令。迁移期间发布前仍必须执行固定完整验证：`go test ./...`、资源测试、构建测试、安装测试和四个 E2E 流程；新增 Python Runtime 后还必须执行其单元、契约、安装和 E2E 验证。固定验证以 `scripts/release.sh` 和 `scripts/hotfix.sh` 的现役固化命令为准，只有对应迁移阶段验收并同步脚本后才允许删除 Go 验证。
 
 所有 secrets、tokens、private keys 和原始敏感日志都不得提交。
 
@@ -80,7 +83,7 @@ AgenticCLI 使用 Go 实现，统一入口为 `agentic-cli`。shell 只用于 `g
 
 - GitHub 默认分支是 `main`，日常开发分支是 `develop`。
 - `main` 禁止直接提交和直接推送，必须启用版本化 `.githooks`。硬门禁模式还必须通过 GitHub Repository Ruleset 要求 PR 合入、禁止强推和删除；GitHub Free 私有仓库使用显式软门禁时，接受服务器端无法阻止其它入口直推的剩余风险，但仍不得由本项目流程直接推送 `main`。
-- 正常发布使用 `scripts/release.sh prepare --version vX.Y` 准备本地 annotated tag 和四平台安装资源；研发工程师审查并提交生成资源后，硬门禁模式使用 `scripts/release.sh publish --version vX.Y` 从 `develop` 创建或复用 PR，以 Merge commit 和 Auto-merge 合入 `main`；软门禁模式必须显式增加 `--allow-soft-gate`，从固定 `release/vX.Y` 创建 PR，等待人工 Merge commit 后以同一命令恢复并再次执行完整验证。
+- 迁移期间正常发布继续使用 `scripts/release.sh prepare --version vX.Y` 准备本地 annotated tag 和现役四平台安装资源；研发工程师审查并提交生成资源后，硬门禁模式使用 `scripts/release.sh publish --version vX.Y` 从 `develop` 创建或复用 PR，以 Merge commit 和 Auto-merge 合入 `main`；软门禁模式必须显式增加 `--allow-soft-gate`，从固定 `release/vX.Y` 创建 PR，等待人工 Merge commit 后以同一命令恢复并再次执行完整验证。
 - Hotfix 使用 `scripts/hotfix.sh create --jira-id <KEY>` 从最新 `origin/main` 创建 `<user>/<jira-id>/fix-main`，再用同一入口执行 `prepare` 和 `publish`。Hotfix 复用 `main` 最近的 `vX.Y` 版本基线，不创建或推送新 tag；完成后由研发工程师把修复同步回 `develop`。
 - 发布脚本在执行前检查 Hooks、远端 `develop` 和默认分支。硬门禁模式还检查 Auto-merge 和 `main` Ruleset，配置缺失时逐项引导确认，非交互配置必须显式传入 `--configure-workflow`；软门禁模式只放宽 Ruleset 和 Auto-merge，并强制检查 Merge commit 可用、固定发布 HEAD、人工合并、合并事实和二次完整验证。
 - `publish` 只有在完整验证通过后才展示最终确认；非交互发布必须显式传入 `--confirm-release`。脚本必须等待 PR 实际合并并验证 `origin/main` 包含发布 HEAD，正常发布最后才允许推送不可变 tag。

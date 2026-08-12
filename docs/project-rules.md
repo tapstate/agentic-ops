@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-本文定义 AgenticOps 项目开始阶段必须遵守的项目规则。规则用于约束 AgenticOps 源码、文档、AI 员工手册、操作契约、工作流配置、Go CLI 运行时、项目 AI 工作空间和反馈闭环。
+本文定义 AgenticOps 必须遵守的项目规则。规则用于约束 AgenticOps 源码、文档、Skill、Python Runtime、Shell Bootstrap、Rule、标准资产、项目 AI 工作空间和反馈闭环。
 
 相关设计文档：
 
@@ -16,6 +16,7 @@
 - `docs/processes/standard-process-registry.md`
 - `docs/strategy/positioning.md`
 - `docs/runtime/cli-runtime.md`
+- `docs/runtime/python-runtime.md`
 - `docs/runtime/problem-resolution-and-update.md`
 - `docs/templates/evidence-templates.md`
 - `docs/examples/end-to-end-demo.md`
@@ -65,19 +66,19 @@ AgenticOps 文档必须按职责分层：
 - `docs/architecture/` 定义稳定架构边界，包括流程环节、门禁、状态、容错、事实源、角色责任、安全边界、能力边界和标准资产演进机制。
 - `docs/user-stories/` 定义故事线，包括主角、目标、触发方式、关键输出、失败路径和验收口径；故事线不记录实施计划或当前完成度。
 - `docs/runtime/` 记录稳定运行时设计、命令能力、操作说明和运行边界，不记录阶段性任务、当前完成度或剩余工作。
-- `plans/` 基于稳定架构从大阶段拆到中任务和小步骤，用勾选项跟踪实施进度。
+- Jira 基于稳定架构管理可交付目标、实施步骤、阶段状态、阻塞和验收；Description 保存确认计划，Comment 保存过程轨迹。
 - 项目工作空间 `.superpowers/` 只保存工具本地执行状态、检查点、临时分析和缓存，由 Git 忽略；不得保存或提交正式设计、计划、规范和运行资产。
-- 工具建议使用 `docs/superpowers/` 等默认路径时，必须服从本仓库分层：正式设计进入 `docs/` 对应主题目录，可执行计划进入顶层 `plans/`。
-- 阶段性范围、阶段任务、勾选项、阶段验收命令、当前实现状态、剩余工作和实现说明只能写入 `plans/`，不得混入 README、架构设计、项目规则、故事线或运行时设计。
+- 工具建议使用 `docs/superpowers/` 等默认路径时，必须服从本仓库分层：正式设计进入 `docs/` 对应主题目录，实施计划进入 Jira，临时草稿留在被忽略的 `.superpowers/`。
+- 阶段性范围、阶段任务、当前状态、验收命令、剩余工作和实现说明写入 Jira，不得混入 README、架构设计、项目规则、故事线或运行时设计。
 - 设计文档只维护终态设计事实、能力边界、风险和约束，不记录阶段性推进信息。
 - 设计文档发现缺口时，只能说明能力边界、风险和约束；如果缺口背后涉及产品、流程、权限或事实源取舍，必须明确标记为需要用户决策，不得伪装成默认计划或默认实现。
 
 阶段性文字必须按职责分类处理：
 
 - 终态原则：影响 AgenticOps 长期形态、事实源、角色责任、门禁或安全边界的规则，保留在设计、规则、手册或契约文档中，不使用阶段限定弱化规则。
-- 阶段执行限制：只在某个计划执行期间成立的限制，保留在对应 `plans/` 中，计划完成后作为历史推进记录。
-- 当前实现缺口：只说明当前版本尚未完成的能力，写入对应 `plans/`，不写入目标、架构、规则、故事线或运行时设计主叙事。
-- 判断一句话归属时，先问它是在定义 AgenticOps 终态形态，还是只解释当前阶段先做什么、暂不做什么；后者必须进入 `plans/`。
+- 阶段执行限制：只在某个实施期间成立的限制，保留在对应 Jira 工作项中。
+- 当前实现缺口：只说明当前版本尚未完成的能力，写入对应 Jira，不写入目标、架构、规则、故事线或运行时设计主叙事。
+- 判断一句话归属时，先问它是在定义 AgenticOps 终态形态，还是只解释当前阶段先做什么、暂不做什么；后者必须进入 Jira。
 
 做任何计划前，必须先确认其所依赖的故事线和架构文档已经存在且相对稳定。故事线不清时，应先确定故事线；架构不清时，应先更新或补齐架构；不得直接用零散功能点堆砌计划。
 
@@ -123,7 +124,7 @@ AgenticOps 必须保持事实源边界清晰：
 - 缺少 Jira 关键字段或上下文时，阻断接管并输出补全动作和模板。
 - 标准资产不适配时，生成工作流配置、策略、模板或运行手册的改进建议。
 - 存在风险、权限不足、标准冲突或连续失败时，转人工确认。
-- 只有确认问题来自 `agentic-cli` CLI 二进制逻辑错误时，才进入二进制修复发布路径。
+- 只有确认问题来自 `agentic-cli` Runtime 逻辑时，才进入 Runtime 修复发布路径。
 
 ## 5. 仓库边界
 
@@ -137,24 +138,26 @@ git@github.com:tapstate/agentic-ops.git
 
 ```text
 docs/          人读文档，包括架构、目标定位、故事线、流程和设计
-plans/         可执行推进计划和历史实施记录
 .superpowers/  本地执行状态、检查点、临时分析和缓存，不提交
-install-resources/basic/
-               跨平台通用安装资源：AI 资产入口、手册、契约、配置、策略、runbook、模板
-install-resources/<os-arch>/
-               已编译平台二进制 agentic-cli
+bootstrap/     安装、更新、回滚、环境准备和 agentic-cli 包装入口
+runtime/       Python Runtime 源码和运行时测试
+skills/        AIAgent 标准流程入口
+rules/         AIAgent 与源头维护规则
+standards/     公司、契约、流程、策略、runbook、模板和项目差异资产
 bin/           本地安装后的命令目录，只提交 .gitkeep
 .local/        本地安装和更新状态，只提交 .gitkeep
-skills/        AgenticOps 技能和 AI 员工工作规则
-packages/      agentic-cli Go CLI 运行时
 examples/      端到端演示样例
-tests/         自动化测试
-scripts/       本地和 CI 辅助脚本
+tests/         安装、资源和端到端验证
+scripts/       源头仓库发布与固定验证编排
+
+# 迁移基线：替代能力验收前保留，完成后删除
+install-resources/
+packages/agentic-cli/
 ```
 
 仓库内文档、目录和脚本文件名默认使用英文 ASCII lowercase-kebab-case。面向用户的正文优先使用中文。
 
-同一个仓库内使用目录区分资料职责，不使用不同分支分管源码、设计、计划或运行资产。正式交付时通过 managed clone 和 `install-resources/` 控制使用者可见内容，研发工程师和 AIAgent 默认只接触安装后的命令、资产、模板和规范。
+同一个仓库内使用目录区分资料职责，不使用不同分支分管源码、设计、计划或运行资产。正式交付时通过稳定 `main` 的 managed clone 直接提供 Skill、Rule、标准资产和 Python Runtime；研发工程师和 AIAgent 默认只接触安装后的命令、资产、模板和规范。
 
 当前项目规则只适用于 `tapstate/agentic-ops` 项目本身。不得把其它项目的研发规范、分支策略、验证命令、目录约定或上线前临时规则合并进 AgenticOps 当前项目规则。
 
@@ -175,8 +178,8 @@ AgenticOps 中所有规则写入前必须先区分类别，不能因为同一条
 ```
 
 - 个人规则：个人偏好、本机身份、个人 wiki 和本地工作流，只能维护在个人记忆库或本地 `~/.agentic-ops/user/`，不得写入公司或项目标准资产。
-- 公司规则：TapData 跨项目硬规定、事实源边界、人工门禁、保密、审查职责和通用提交要求，维护在 `install-resources/basic/company/`。
-- 项目规则：具体项目的语言、分支、提交、验证、工具和流程差异，维护在项目仓库规则、项目 AI 工作空间或 `install-resources/basic/projects/<project>/`。
+- 公司规则：TapData 跨项目硬规定、事实源边界、人工门禁、保密、审查职责和通用提交要求，目标位置是 `standards/company/`；迁移期间继续兼容现役 `install-resources/basic/company/`。
+- 项目规则：具体项目的语言、分支、提交、验证、工具和流程差异，维护在项目仓库规则、项目 AI 工作空间或目标目录 `standards/projects/<project>/`；迁移期间继续兼容现役 `install-resources/basic/projects/<project>/`。
 - AIAgent 规则：AIAgent 执行时的停止条件、交互语言、门禁、证据、审计和工具调用要求，维护在 AI 员工手册、操作契约、策略、运行手册、模板或当前工作空间 `AGENTS.md`。
 
 项目规则覆盖公司规则或 AIAgent 规则时，必须在项目规则文件或项目工作空间配置中显式体现来源；不得只依赖聊天上下文。个人规则只能在缺少更高优先级规则时补充执行偏好，不能覆盖项目、AIAgent 或公司规则。
@@ -198,7 +201,7 @@ scripts/release.sh prepare --version vX.Y
 scripts/release.sh publish --version vX.Y
 ```
 
-`prepare` 只创建本地 annotated `vX.Y` tag 并构建四平台安装资源，不暂存、不提交、不推送。研发工程师审查并提交生成资源后，`publish` 固定执行完整本地验证并取得最终确认。硬门禁模式推送 `develop`，创建或复用 `develop -> main` PR，启用 Merge Auto-merge；软门禁模式必须显式传入 `--allow-soft-gate`，从已验证 HEAD 创建固定 `release/vX.Y -> main` PR，等待研发工程师人工 Merge commit 后以同一命令恢复并再次完整验证。两种模式都必须验证 `origin/main` 包含固定发布 HEAD，最后才推送不可变 tag。
+迁移期间，`prepare` 仍创建本地 annotated `vX.Y` tag 并构建现役四平台安装资源，不暂存、不提交、不推送。阶段五验收后，`prepare` 改为固定并验证 Python、Skill、Rule、标准与 Bootstrap 交付集合，不再构建平台二进制。两种形态下，研发工程师审查并提交生成或更新的资源后，`publish` 都必须执行完整本地验证并取得最终确认。硬门禁模式推送 `develop`，创建或复用 `develop -> main` PR，启用 Merge Auto-merge；软门禁模式必须显式传入 `--allow-soft-gate`，从已验证 HEAD 创建固定 `release/vX.Y -> main` PR，等待研发工程师人工 Merge commit 后以同一命令恢复并再次完整验证。两种模式都必须验证 `origin/main` 包含固定发布 HEAD，最后才推送不可变 tag。
 
 紧急修复必须使用统一入口：
 
@@ -383,9 +386,9 @@ TapData / TapState 方案 C 可以作为第一套默认工作流配置，但不�
 
 ## 14. CLI 运行时规则
 
-控制层必须采用本地优先的 Go CLI 运行时。
+控制层必须采用本地优先的 Python Runtime。Skill 负责组织标准流程，Rule 负责保存不能由当前任务临场改变的约束。
 
-shell 只用于安装引导，例如 `gh api | bash` 的 `install.sh`。安装后 AIAgent 的业务逻辑、操作、策略、适配器、日志和反馈分析不得写在 shell 中。维护 AgenticOps 源头仓库时，`scripts/release.sh`、`scripts/hotfix.sh` 和 `scripts/lib/` 是项目级例外，可以编排 Git、GitHub、版本化 Hooks 和固定验证，但不得扩展为业务 Jira 任务运行时。
+Shell Bootstrap 只用于安装、更新、回滚、环境准备和启动，例如 `gh api | bash` 的 `install.sh`。安装后 AIAgent 的业务逻辑、操作、策略、适配器、日志和反馈分析不得写在 shell 中。维护 AgenticOps 源头仓库时，`scripts/release.sh`、`scripts/hotfix.sh` 和 `scripts/lib/` 是项目级例外，可以编排 Git、GitHub、版本化 Hooks 和固定验证，但不得扩展为业务 Jira 任务运行时。
 
 统一入口为：
 
@@ -407,18 +410,11 @@ CLI 必须遵守：
 - 退出码有固定语义。
 - 写操作必须检查策略、门禁和人工确认。
 - secrets 不允许出现在 stdout、stderr 或事件日志中。
-- Linux (linux-amd64 / linux-arm64)、macOS Intel (darwin-amd64) 和 macOS Apple Silicon (darwin-arm64) 都应通过对应平台二进制运行。
+- 本地任务状态必须使用版本化 JSON / NDJSON、任务级锁和原子替换，不能由 shell 文本命令直接修改。
+- 外部写操作必须遵守 `plan -> apply -> readback`，结果不明确时阻断，不得猜测成功。
+- Linux 和 macOS 必须通过仓库锁定的同一 Python 主链路运行，不构建 AgenticOps 自有平台二进制。
 
-主 CLI 发布目标：
-
-```text
-darwin-arm64
-darwin-amd64
-linux-amd64
-linux-arm64
-```
-
-安装 bootstrap 允许依赖 `bash`、`curl` 和系统解压工具。`agentic-cli` 运行时不得依赖 `jq` 或本地 Python 环境。
+Bootstrap 允许依赖 `bash`、`curl`、Git 和 `uv`。Python 版本与依赖必须由 `.python-version`、`pyproject.toml` 和 `uv.lock` 锁定；运行时不得依赖业务项目自己的 Python 环境。
 
 `agentic-cli preflight` 必须检查 OS、CPU 架构、GitHub CLI、GitHub 登录状态、Jira 凭证、工作流配置和当前业务仓库匹配关系。
 
@@ -482,14 +478,14 @@ AgenticOps 必须包含 AIAgent 反馈通道，用于在任务完成、阻塞或
 反馈闭环必须遵守：
 
 ```text
-Go CLI 执行操作
+Python Runtime 执行操作
 -> 产生结构化事件日志
 -> 到达完成、阻塞或交接节点
 -> AIAgent 将任务级审计记录写入本地 Jira 编号目录，并回写 Jira 关键结论和稳定引用
 -> 维护者按需按运行、任务类型、失败码、时间范围或工作空间聚合分析
 -> AIAgent 分析失败、卡点、重复人工确认、专业审查退回、重试、重做、有效经验和规则缺口
 -> 生成改进建议
--> 人确认后更新 AgenticOps 规则、手册、契约和 Go CLI
+-> 人确认后更新 AgenticOps Skill、Rule、标准资产和 Python Runtime
 ```
 
 反馈通道只做分析和建议，不允许 AIAgent 根据日志自动修改 AgenticOps 源头规则。
@@ -548,7 +544,7 @@ Jira / GitHub 写操作必须可审计。任何写操作都必须关联 `operati
 - 工作流配置说明。
 - 反馈闭环说明。
 - 端到端演示脚本。
-- CLI 运行时设计说明。
+- Python Runtime 与 Shell Bootstrap 设计说明。
 - 证据模板设计说明。
 
 文档必须保持简洁、可执行、便于试点研发直接使用。

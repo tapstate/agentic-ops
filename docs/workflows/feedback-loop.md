@@ -9,14 +9,14 @@
 ## 2. 流程
 
 ```text
-Go CLI 执行操作
+Python Runtime 执行操作
 -> 产生结构化事件日志
 -> 到达完成、阻塞或交接节点
 -> AIAgent 将任务级审计记录写入本地 Jira 编号目录，并回写 Jira 关键结论和稳定引用
 -> 研发工程师或流程负责人审查任务审计记录
 -> 维护者按需按 `agentic_run_id`、任务类型、失败码、时间范围或 `workspace` 聚合分析
 -> AIAgent 生成 AgenticOps 改进建议
--> 人确认后更新 AgenticOps 规则 / 手册 / contracts / Go CLI
+-> 人确认后更新 AgenticOps Skill / Rule / 标准资产 / Python Runtime
 ```
 
 反馈闭环不只记录失败，也负责发现可固化经验。AIAgent 在具体环节中形成的有效处理方式，必须先以安全摘要进入事件、任务审计记录或反馈建议；只有重复出现、边界清晰、输入输出稳定后，才能建议升级为原子操作、运行手册、工作流配置、策略或模板。
@@ -170,4 +170,4 @@ agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 Observation -> Proposal -> Accepted Change
 ```
 
-AIAgent 可以生成 proposal，但不得未经人工确认直接修改项目规则、AI 员工手册、操作契约、工作流配置或 CLI 运行时。
+AIAgent 可以生成 proposal，但不得未经人工确认直接修改 Skill、Rule、项目规则、AI 员工手册、操作契约、工作流配置或 Python Runtime。

@@ -1,194 +1,325 @@
 # AgenticOps 项目结构
 
+> **状态：** Skill + Python Runtime + Shell Bootstrap + Rule 目标结构。当前仓库仍保留 Go CLI、`install-resources/` 和历史 `plans/`；本次重构的计划、进度和验收以 Jira `AO-11` 为准。
+
 ## 1. 目的
 
-本文定义 AgenticOps 仓库的目标结构、资料边界和各目录职责。
+本文定义 AgenticOps 目标仓库、安装目录和项目 AI 工作空间的结构，确保标准资产、运行时代码、安装状态和具体任务事实不会混用。
 
-## 2. 仓库范围
+## 2. 三个边界
 
-`tapstate/agentic-ops` 是 AgenticOps 的权威源头仓库，管理全局通用资料：
+AgenticOps 必须区分三类位置：
 
-- 源码设计。
-- 项目规则。
-- AI 员工手册。
-- 操作契约。
-- 工作流配置。
-- Skills。
-- Templates。
-- 运行资产源头。
-- CLI 运行时设计。
-- 文档、示例和测试规划。
+| 位置 | 作用 | 可以保存 | 不得保存 |
+| --- | --- | --- | --- |
+| 源头仓库 | 维护、测试和发布 AgenticOps | Skill、Python Runtime、Rule、标准、模板、项目映射、Bootstrap、文档和测试 | 用户 token、业务任务运行状态 |
+| `~/.agentic-ops` | 稳定 `main` 的 managed clone 和本机安装 | 源头仓库稳定资产、锁定 Python 环境、本机配置、安装引用和回滚点 | 具体 Jira 任务的分析、进展和证据 |
+| 项目 AI 工作空间 | 执行 Tapdata、AO 等项目任务 | 项目 overlay、本地源码、任务状态、报告、证据、反馈和 worktree 引用 | AgenticOps 全局源码副本、其它项目任务状态 |
 
-## 3. 目标结构
+## 3. 目标仓库结构
 
 ```text
 agentic-ops/
   README.md
+  AGENTS.md
   agent-init.md
-  .gitignore
+  agent-guides.md
+  .python-version
+  pyproject.toml
+  uv.lock
   .githooks/
     pre-commit
     pre-push
-  docs/
-    maintainers/
-      getting-started.md
-    development-engineers/
-      getting-started.md
-    strategy/
-      agenticops-project-overview.md
-    architecture/
-      agenticops-current-design.md
-      project-structure.md
-    contracts/
-      operation-contract.md
-    examples/
-      end-to-end-demo.md
-    profiles/
-      workflow-profile.md
-    runtime/
-      cli-runtime.md
-    templates/
-      evidence-templates.md
-    user-stories/
-      agenticops-user-stories.md
-      project-maintainer-stories.md
-      development-engineer-stories.md
-      project-maintainer/
-        pm-001-document-boundary.md
-        ...
-      development-engineer/
-        de-001-install.md
-        ...
-    workflows/
-      feedback-loop.md
-    review-checklist.md
-    decision-log.md
-    ai-working-rules.md
-    development-style.md
-    project-rules.md
-  install-resources/
-    basic/
-      ai-assets/
-      handbooks/
-      contracts/
-      profiles/
-      policies/
-      runbooks/
-      templates/
-      manifest.json
-    darwin-arm64/
-      agentic-cli
-    darwin-amd64/
-      agentic-cli
-    linux-arm64/
-      agentic-cli
-    linux-amd64/
-      agentic-cli
-    checksums.txt
-  bin/
-    .gitkeep
-  .local/
-    .gitkeep
-  .superpowers/
-    # local execution state, ignored by Git
-  plans/
-    implementation-plan-v1.md
-  skills/
-  packages/
-    agentic-cli/
-      cmd/
-        agentic-cli/
-      internal/
-        cli/
+
+  bootstrap/
+    install.sh
+    update.sh
+    rollback.sh
+    agentic-cli
+    lib/
+      common.sh
+
+  runtime/
+    src/
+      agentic_ops/
+        __init__.py
+        __main__.py
+        cli.py
+        output.py
         config/
-        contract/
-        evidence/
-        feedback/
+        contracts/
+        task_state/
+        workflow/
+        jira/
         git/
         github/
-        jira/
-        policy/
-        workspace/
-      testdata/
+        evidence/
+        feedback/
+    tests/
+      unit/
+      contract/
+      fixtures/
+
+  skills/
+    task-execution/
+      SKILL.md
+    workspace-init/
+      SKILL.md
+    feedback-improvement/
+      SKILL.md
+
+  rules/
+    design-guardrails.md
+    ai-execution.md
+    source-maintenance.md
+
+  standards/
+    company/
+      core-hard-rules.md
+    contracts/
+      operations/
+      processes/
+    policies/
+    runbooks/
+    templates/
+    projects/
+      tapdata/
+        profile.yaml
+        rules/
+        runbooks/
+        templates/
+      ao/
+        profile.yaml
+        rules/
+        runbooks/
+        templates/
+
+  docs/
   examples/
+  .superpowers/                 # 本地执行状态、检查点和缓存，不提交
   tests/
+    e2e/
+    install/
+    resources/
+
   scripts/
     release.sh
     hotfix.sh
     lib/
       development-workflow.sh
       release-common.sh
+
+  bin/
+    .gitkeep
+  .local/
+    .gitkeep
 ```
 
 ## 4. 目录职责
 
-| Directory | Responsibility |
-| --- | --- |
-| `docs/` | 人读文档，包括项目维护者、研发工程师、架构、规则、故事线、流程和设计说明。 |
-| `install-resources/basic/` | Git 跟踪的跨平台通用安装资源，包括 AI 资产入口、手册、操作契约、工作流配置、策略、运行手册和模板。 |
-| `install-resources/<os-arch>/` | Git 跟踪的平台二进制产物，只放对应平台的 `agentic-cli`。 |
-| `install-resources/checksums.txt` | 安装资源校验和，覆盖 `basic` 和平台二进制。 |
-| `bin/` | 安装后的本机命令目录；仓库只跟踪 `bin/.gitkeep`，本地 `bin/agentic-cli` 被 `.gitignore` 忽略。 |
-| `.local/` | 本机安装和更新状态目录；仓库只跟踪 `.local/.gitkeep`，本地状态文件被 `.gitignore` 忽略。 |
-| `.superpowers/` | 项目工作空间中的本地执行状态目录，保存工具检查点、临时分析和缓存；被 `.gitignore` 忽略，不属于项目资料。 |
-| `.githooks/` | 源头仓库版本化 Git Hooks，阻止直接提交或推送 `main`。 |
-| `plans/` | 面向维护者和项目维护代理的可执行推进计划。 |
-| `skills/` | AgenticOps skills，让 AIAgent 知道如何工作。 |
-| `packages/agentic-cli/` | Go CLI 运行时源码位置。 |
-| `examples/` | 端到端演示样例。 |
-| `tests/` | 合同、脚本和文档一致性测试。 |
-| `scripts/` | 安装、检查和辅助脚本；`release.sh` 与 `hotfix.sh` 是源头仓库正式发布入口，共享实现位于 `scripts/lib/`。 |
+`.superpowers/` 只保存工具的本地执行状态、检查点、临时分析和缓存，由 Git 忽略。正式设计进入 `docs/`；实施计划、进度、阻塞和验收进入 Jira，不在仓库建立第二份计划事实源。
 
-## 5. 安装边界
+### 4.1 `bootstrap/`
 
-`~/.agentic-ops` 是用户本机全局安装目录，也是 `tapstate/agentic-ops` 的完整 managed clone。它的目录结构与 GitHub 仓库一致。
+`bootstrap/` 是安装后允许运行的 Shell 边界，只负责：
 
-`~/.agentic-ops` 不是具体项目或具体任务运行目录。
+- clone、fast-forward 更新和回滚 `~/.agentic-ops`。
+- 安装或定位 `uv`。
+- 根据 `.python-version`、`pyproject.toml` 和 `uv.lock` 准备隔离 Python 环境。
+- 保留 `bin/agentic-cli` 入口名称，将其替换为把参数原样传给 Python Runtime 的轻量包装脚本。
+- 执行环境存在性、目录权限和安装引用等轻量检查。
 
-安装和更新行为：
+`bootstrap/` 不解析工作流 profile、不维护任务状态、不调用 Jira / GitHub 业务 API、不生成证据、不判断人工门禁。
 
-- 首次安装 clone GitHub 仓库到 `~/.agentic-ops`。
-- 更新时暂存 tracked 本地改动，记录 `.local/previous-ref`，再更新到 `origin/main` 最新版本。
-- 每次安装或更新都校验 `install-resources/checksums.txt`。
-- 当前平台二进制从 `install-resources/<os-arch>/agentic-cli` 复制到 `bin/agentic-cli`。
-- 安装和更新状态写入 `.local/current-ref`、`.local/previous-ref`、`.local/install-log.json` 或 `.local/update-stash`。
+### 4.2 `runtime/`
 
-`bin/agentic-cli` 和 `.local/*` 是本地产生文件，必须被 `.gitignore` 忽略，避免 managed clone 更新时产生冲突。
+`runtime/` 是 Python Runtime 的唯一源码位置，负责所有结构化和有状态操作：
 
-## 6. 工作空间边界
+- 稳定 CLI、JSON 输出、退出码和失败码。
+- 配置、标准流程、操作契约、策略和项目映射解析。
+- 项目工作空间与任务状态的原子读写、任务级锁和 schema 迁移。
+- Jira Description、Comment、字段与 transition 的受控读写和回读。
+- Git 工作区、worktree、分支和提交事实检查。
+- GitHub PR、CI、Review 和评论事实读取及受控操作。
+- 证据、恢复、反馈和脱敏诊断。
 
-具体项目运行目录必须是项目 AI 工作空间，例如：
+Python Runtime 不保存项目私有规则；项目差异必须来自 `standards/projects/<project>/` 或项目工作空间 overlay。
+
+### 4.3 `skills/`
+
+`skills/` 保存面向 AIAgent 的流程入口。Skill 负责识别任务、读取 Rule 和标准资产、调用 Python 操作、解释结果并在能力缺口时转入 AI 判断或人工确认。
+
+Skill 不复制 Python 实现，不直接通过 `curl`、`git` 或 `gh` 绕过 Runtime 已提供的操作。
+
+### 4.4 `rules/`
+
+`rules/` 保存安装后直接约束 AIAgent 的运行规则：
+
+- `design-guardrails.md`：AgenticOps 源头设计和规划的红线，只在 `source_maintenance` 加载。
+- `ai-execution.md`：业务任务中的语言、事实源、人工门禁、证据和停止条件，只在 `project_execution` 加载。
+- `source-maintenance.md`：维护 AgenticOps 源头仓库时的 Jira、worktree、分支、提交、推送和发布规则。
+
+公司与项目业务规则不放在这里混写，分别进入 `standards/company/` 和 `standards/projects/`。
+
+### 4.5 `standards/`
+
+`standards/` 是安装后标准资产的唯一版本化源头：
+
+- `company/`：跨项目公司硬规定。
+- `contracts/operations/`：Python 原子操作输入、输出、失败码、副作用和门禁。
+- `contracts/processes/`：任务分类、标准阶段和推进规则。
+- `policies/`：外部写入、授权和风险门禁。
+- `runbooks/`：已知异常的排查、恢复和转人工路径。
+- `templates/`：通用 Jira、证据和反馈模板。
+- `projects/<project>/`：Tapdata、AO 等项目 profile、规则、runbook 和模板。
+
+目标结构不再维护重复的 `install-resources/basic/` 副本。`~/.agentic-ops` 是完整 managed clone，顶层标准资产本身就是安装后的运行资产。
+
+### 4.6 `scripts/`
+
+`scripts/` 只服务 AgenticOps 源头仓库维护：
+
+- `release.sh` 和 `hotfix.sh` 编排 Git、GitHub、固定验证和发布审计。
+- 不作为安装后业务任务的运行入口。
+- 不与 `bootstrap/` 混用。
+
+### 4.7 `tests/`
+
+- `runtime/tests/`：Python 单元、契约和 fixture 测试，与 Runtime 模块一起维护。
+- `tests/install/`：无 Go 环境下的安装、更新、配置保留和回滚测试。
+- `tests/resources/`：Skill、Rule、标准、模板和项目映射一致性测试。
+- `tests/e2e/`：本地 fixture、Tapdata 受控验收、AO 试验和问题修复闭环。
+
+## 5. Python 项目与依赖边界
+
+Python Runtime 固定使用：
 
 ```text
-tapstate/
-tapdata/
+.python-version   Python 3.12 主次版本
+pyproject.toml    包元数据、直接依赖、入口和工具配置
+uv.lock           跨平台锁定的完整依赖图
 ```
 
-项目 AI 工作空间保存该项目的 Jira 用户、Jira 空间、Jira 空间到代码仓库的映射、本地源码、工作流配置、任务执行上下文和反馈日志。`~/.agentic-ops` 只保存全局安装和通用资产，不保存具体项目的运行事实。
+规则：
 
-建议工作空间内运行资料位置：
+- 使用 `uv sync --locked` 准备环境；锁文件漂移时停止安装或验证。
+- Python 环境位于 `~/.agentic-ops/.venv`，由安装流程管理并由 Git 忽略。
+- 不复用业务项目的 `.venv`、Conda 环境或系统 site-packages。
+- 首选 Python 标准库；需要 YAML、HTTP 重试、文件锁等第三方依赖时必须进入锁文件。
+- Runtime 源码更新不需要构建项目自有二进制；依赖未变化时更新后直接生效。
+- 不把 `.venv`、wheel、缓存或下载的 Python 运行时提交到仓库。
+
+## 6. 安装后的 `~/.agentic-ops`
+
+`~/.agentic-ops` 是源头仓库稳定 `main` 的完整 managed clone。除 Git 跟踪内容外，本机增加：
+
+```text
+~/.agentic-ops/
+  .venv/                 # uv 管理，Git 忽略
+  bin/
+    agentic-cli          # Bootstrap 生成的稳定入口
+  user/                  # Git 忽略
+    config.local.yaml
+    .env
+  .local/                # Git 忽略
+    current-ref
+    previous-ref
+    install-log.json
+    update-stash/
+```
+
+安装入口执行：
+
+```text
+clone / fetch main
+-> 校验仓库和目标提交
+-> 安装或定位 uv
+-> uv sync --locked
+-> 生成 bin/agentic-cli
+-> 执行 Python preflight
+-> 写入 current-ref 和 previous-ref
+```
+
+更新失败时，回退 Git 引用并重新执行 `uv sync --locked`；不得覆盖 `user/` 和项目 AI 工作空间中的任务状态。
+
+## 7. 项目 AI 工作空间
+
+Tapdata、AO 等项目分别使用独立工作空间：
 
 ```text
 <project-ai-workspace>/
+  AGENTS.md
+  repos/
+    <repository>/
   .agentic-ops/
+    agent.json
+    config.local.yaml
+    profile.local.yaml
+    locks/
+      <ISSUE-KEY>.lock
     tasks/
       <ISSUE-KEY>/
-        runs/
-        audit/
+        task.json
+        progress.json
+        decisions.ndjson
+        sync.json
+        journal.ndjson
+        reports/
+          analysis.md
+          plan.md
+          blocked.md
+          verification.md
+          review.md
+          completion.md
         feedback/
-        handoff/
-  .superpowers/
-    # local execution state only
+          observation.md
+        runs/
+          <agentic_run_id>/
+            summary.json
+            evidence/
+    worktrees/
+      <ISSUE-KEY>/
 ```
 
-`.superpowers/` 只保存当前项目工作空间的本地执行状态，不得承载正式设计、实施计划、项目规范或运行资产。正式设计进入 `docs/` 的对应主题目录，可执行计划进入顶层 `plans/`。工具的默认输出路径与本约定冲突时，以本约定为准；不得创建或提交 `docs/superpowers/`。
+运行状态使用 JSON / NDJSON，因为它由 Python Runtime 维护并需要严格 schema、原子写入和恢复；Markdown 只保存需要人审阅和外部汇报的内容。YAML 只用于人工维护的本机配置与项目 overlay。
 
-## 7. 结构决策
+同一 Jira 任务同时只允许一个活动运行；历史 `runs/` 只读保留。任务级锁阻止两个本地操作同时更新状态，但不能替代 Jira 所有权、GitHub 分支保护或人工门禁。
 
-该结构满足 AgenticOps 设计文档、运行资产、计划和运行时代码分层维护要求，不需要额外目录决策。
+## 8. 从当前结构迁移
 
-`plans/` 保留在仓库顶层。原因是推进资料需要独立于设计说明维护，并且需要比 `docs/` 中的设计说明更容易被定位和更新。
+| 当前位置 | 目标位置或处理 |
+| --- | --- |
+| `packages/agentic-cli/`、`go.mod` | 提取仍需保留的契约、门禁和 fixture 后，按重构需要删除；替代实现进入 `runtime/src/agentic_ops/` |
+| `install-resources/basic/` | 按类别迁移到 `standards/`、`rules/`、`skills/`；消除重复副本 |
+| `install-resources/<os-arch>/agentic-cli` | Python 主链路验收后删除 |
+| `install-resources/checksums.txt` | 改为 Git 提交、锁文件和安装审计校验后删除 |
+| `scripts/install.sh` | 重写并迁移为 `bootstrap/install.sh` |
+| `scripts/build.sh`、`scripts/test-build.sh` | Go 移除时删除 |
+| `bin/agentic-cli` Go 二进制 | 保留命令名，替换为调用 Python Runtime 的 Shell 包装入口 |
+| `.local/` | 保留本机状态职责，字段改为 Git/Python 安装语义 |
+| `docs/` | 保留长期目标、架构、规则说明和决策，不保存阶段进度 |
+| `plans/` | 长期事实迁入正式资料，未完成工作转入 Jira，其余由 Git 历史保留，最终删除顶层目录 |
 
-`.superpowers/` 保留为工作空间本地目录并由 Git 忽略。它只反映一次或一段本地工具执行过程，不具备项目事实源地位，也不随安装资源发布。
+旧 Go 由版本分支、Tag 和 Git 历史保留，不维护 Go/Python 双轨。实施中可根据工程需要删除旧实现，但删除前必须提取仍需保留的行为、契约、错误码、fixture 和安全门禁；合入 `develop` 前 Python 主链路必须整体可验证。
 
-运行时默认资源统一放在 `install-resources/basic/`；不要重新引入旧的顶层运行资源目录或旧的 release 目录作为安装资源源头。
+## 9. 运行模式加载
+
+`source_maintenance` 用于 AgenticOps 源头仓库和改进 worktree，加载设计红线、源头维护规则、项目目标、公司标准和维护 Skill。
+
+`project_execution` 用于 Tapdata 等业务任务，加载业务仓库规则、`ai-execution.md`、公司标准、项目标准、任务 Skill 和项目 overlay；不得加载 AgenticOps 设计红线、源头发布规则或 AO 专用工作流。
+
+每个 Skill 必须声明 `allowed_modes`。Runtime 结合 `agent.json`、Git remote、仓库根目录、Profile 和操作要求验证模式，不一致时返回 `workspace_mode_mismatch`。
+
+## 10. 结构验收
+
+目标结构完成必须证明：
+
+- `~/.agentic-ops` 更新后 Skill、Rule、标准和 Python 源码立即生效。
+- 没有本机 Go 环境也能安装、运行、更新和回滚。
+- Bootstrap 不包含 Jira、GitHub、Git 业务判断。
+- Python Runtime 不硬编码 Tapdata 或 AO 项目差异。
+- 具体任务资料只存在于项目 AI 工作空间，并按 Jira 编号隔离。
+- 本地状态损坏、并发更新和外部写入不确定时能够阻断或恢复。
+- `main`、`develop`、Hotfix 和发布 PR 治理不因结构调整而弱化。
+- 顶层 `plans/` 已退出当前事实源，Jira 承担计划、进度和验收管理。
+- `source_maintenance` 与 `project_execution` 的加载集合可自动验证且不会交叉污染。

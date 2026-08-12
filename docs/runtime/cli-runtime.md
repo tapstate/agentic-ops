@@ -1,5 +1,7 @@
 # AgenticCLI 运行时
 
+> **迁移基线：** 本文记录现有 Go AgenticCLI 的能力和约束，只用于迁移核对。目标运行时见《Python Runtime》，统一命令仍为 `agentic-cli`。
+
 ## 1. 目的
 
 本文定义 AgenticOps AgenticCLI 运行时的终态设计和稳定运行边界。阶段性实现状态、当前实现边界和剩余工作维护在 `plans/` 中。

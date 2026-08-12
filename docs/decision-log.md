@@ -16,7 +16,7 @@
 | D-008 | AI 员工手册是一等交付物 | 它同时服务 AIAgent 和研发工程师，定义工作方式、停止条件、工具使用和证据回写。 |
 | D-009 | 操作契约屏蔽 Jira 事实 | AIAgent 面向操作工作，不直接依赖 Jira 字段、状态名和工作流细节。 |
 | D-010 | 工作流配置管理项目差异 | 不同项目通过工作流配置映射 Jira 状态、字段、权限、仓库和人工门禁。 |
-| D-011 | 第一阶段控制层采用 Go CLI 运行时 | shell 只用于安装引导；主 CLI 使用 Go 编译为 Linux、macOS Intel 和 macOS Apple Silicon 对应二进制，不优先做常驻服务或 Web 平台。 |
+| D-011 | 第一阶段控制层采用 Go CLI 运行时（目标方向已被 D-038 取代） | 该决策记录现有 Go 能力基线。迁移完成前仍用于解释当前代码和发布资产，但不得据此继续扩展新的 Go 业务能力。 |
 | D-012 | Git / GitHub 轻 guard，不完全封装 | Git 和 GitHub 不会换，重点控制危险动作、记录证据和阻止越权。 |
 | D-013 | 反馈闭环只生成改进建议 | AIAgent 可以分析工作日志并提出 proposal，但不能未经人工确认自动改写源头规则。 |
 | D-014 | 文档可见标题默认中文 | 产品名、工具名、命令、字段、目录名和稳定编号可保留英文或缩写。 |
@@ -43,10 +43,17 @@
 | D-035 | 授权后自动推进到 `develop` PR | 有效工作项级连续执行授权覆盖提交、任务分支推送和创建目标为 `develop` 的 PR，并统一停在 PR 审查；`master`、`main`、`develop`、`release/*` 及同类保护分支禁止自动推送，合并和发布仍单独确认。 |
 | D-036 | 任务审计以本地 Jira 编号目录为当前最终位置 | `.agentic-ops/tasks/<ISSUE-KEY>/` 保存运行、审计、证据、反馈和交接材料；Jira 回写关键结论和稳定引用，后续再评估独立审计服务。 |
 | D-037 | Jira `transition` 采用严格标准与受控容错 | Profile 声明稳定 ID 时必须优先使用并校验来源、目标状态；仅在没有 ID 且名称唯一、来源状态和目标状态均匹配时允许名称兜底。候选重复、目标不符、当前不可用或回读不一致时阻断；禁止模糊匹配。 |
+| D-038 | 目标运行架构采用 Skill + Python Runtime + Shell Bootstrap + Rule | Skill 组织标准流程；Python Runtime 承载契约、状态、API、门禁、证据、恢复和反馈；Shell Bootstrap 只负责安装、更新、回滚、环境准备和启动；Rule 保存事实源、权限、语言、分支、授权和停止条件。Python 环境由 `uv` 和锁文件管理，现有 `agentic-cli` 命令名保持不变。 |
+| D-039 | 目标仓库按运行职责重新分层 | Python 源码进入 `runtime/`，安装入口进入 `bootstrap/`，AIAgent 流程入口进入 `skills/`，不可临场改变的约束进入 `rules/`，标准资产进入 `standards/`。由于 `~/.agentic-ops` 是完整 managed clone，迁移完成后不再维护 `install-resources/basic/` 重复副本。具体任务状态只保存在项目 AI 工作空间，并使用 JSON / NDJSON 由 Runtime 原子维护。 |
+| D-040 | Go 不维护双轨，由版本历史保留 | 旧版本通过版本分支、Tag 和 Git 历史恢复。`AO-11` 实施中可以按工程需要删除 Go 源码、module、平台二进制、checksum、构建测试和旧分发脚本，但必须先提取仍需保留的行为、契约、失败码、安全门禁和 fixture；合入 `develop` 前 Python 主链路必须整体可验证。 |
+| D-041 | Jira 是实施计划与进度的唯一团队事实源 | 仓库不再新增计划文件。Jira Description 保存确认后的目标、范围、非目标、实施计划和验收标准，Comment 保存进度、阻塞和验证；现有 `plans/` 的长期事实迁入正式资料，其余由 Git 历史保留，目标结构删除顶层 `plans/`。 |
+| D-042 | 源头维护与业务任务使用双运行模式 | `source_maintenance` 加载 AgenticOps 设计红线、项目目标和源头维护规则；`project_execution` 加载业务仓库规则、AI 执行规则和项目标准。模式由工作空间配置、Git remote、仓库根、Profile 和操作要求共同验证，Skill 必须声明 `allowed_modes`。 |
+| D-043 | Jira 适配采用 Connection、Profile 与工作空间分层 | Jira Connection 管理站点、认证引用和 API 能力，Project Profile 管理项目字段与工作流映射，项目 AI 工作空间选择二者。Custom Field 的普通映射缺失按配置修复处理，涉及 Jira 元数据或跨项目语义才进入专题治理；Worklog 记录真实处理耗时、中文标题和明确工作内容。 |
+| D-044 | 业务任务结束后可直接形成 AgenticOps 改进 PR | 业务任务优先通过人工校正确保正确完成；任务结束后 AI 基于脱敏证据总结自动化和质量问题。人工确认后切换到独立 AgenticOps worktree 与 `source_maintenance` 模式，完成改进、原场景回归并创建 `develop` PR，无需重新描述问题。 |
 
 ## 2. 当前无需决策事项
 
-当前文档目录结构能够承载第一阶段设计审阅，不需要马上调整。
+目标目录结构已经由 D-039 确认；本次重构的实施计划、进度和验收统一由 Jira `AO-11` 管理。
 
 当前不需要决策的事项：
 

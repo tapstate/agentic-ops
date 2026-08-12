@@ -1,5 +1,7 @@
 # AgenticOps 当前设计
 
+> **迁移基线：** 本文记录现有 Go 实现所承载的设计事实，用于迁移能力核对，不再定义目标运行时和目标目录。目标事实以《AgenticOps Skill 与 Python Runtime 驱动项目全景》《项目结构》和《Python Runtime》为准；实施顺序与当前进度以迁移计划为准。
+
 ## 1. 定位
 
 AgenticOps 是把公司员工执行标准沉淀成 AI 可执行标准流程的 AI 执行控制体系。
