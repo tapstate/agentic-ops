@@ -18,6 +18,7 @@
 - [目标定位](strategy/positioning.md)
 - [长期定位](strategy/long-term-positioning.md)
 - [AgenticOps 项目全景](strategy/agenticops-project-overview.md)
+- [AgenticOps Skill 与 Shell 驱动项目全景](strategy/skill-shell-agenticops-project-overview.md)
 - [项目规则](project-rules.md)
 - [配置规范](configuration-standards.md)
 - [开发风格](development-style.md)
