@@ -37,17 +37,20 @@ type Pattern struct {
 type Analysis struct {
 	Runs               int       `json:"runs"`
 	FailurePatterns    []Pattern `json:"failure_patterns,omitempty"`
+	RecoveryPatterns   []Pattern `json:"recovery_patterns,omitempty"`
 	HumanGateHotspots  []Pattern `json:"human_gate_hotspots,omitempty"`
 	MissingFieldTrends []Pattern `json:"missing_field_trends,omitempty"`
 	SuggestedAssets    []string  `json:"suggested_assets,omitempty"`
 }
 
 type Proposal struct {
-	Key              string `json:"key"`
-	Title            string `json:"title"`
-	EvidenceCount    int    `json:"evidence_count"`
-	RecommendedAsset string `json:"recommended_asset"`
-	Rationale        string `json:"rationale"`
+	Key              string   `json:"key"`
+	Title            string   `json:"title"`
+	EvidenceCount    int      `json:"evidence_count"`
+	RecommendedAsset string   `json:"recommended_asset"`
+	Rationale        string   `json:"rationale"`
+	RecoveredCount   int      `json:"recovered_count,omitempty"`
+	EvidenceRefs     []string `json:"evidence_refs,omitempty"`
 }
 
 func FilterEvents(events []Event, filter EventFilter) ([]Event, error) {
@@ -89,7 +92,11 @@ func FilterEvents(events []Event, filter EventFilter) ([]Event, error) {
 		if filter.TaskType != "" && event.TaskType != filter.TaskType && event.TaskClass != filter.TaskType {
 			continue
 		}
-		if filter.Code != "" && event.Code != filter.Code {
+		eventCode := event.Code
+		if verifiedRecovery(event) {
+			eventCode = event.Recovery.OriginalCode
+		}
+		if filter.Code != "" && eventCode != filter.Code {
 			continue
 		}
 		if hasStart || hasEnd {
@@ -112,6 +119,8 @@ func FilterEvents(events []Event, filter EventFilter) ([]Event, error) {
 func Analyze(events []Event) Analysis {
 	analysis := Analysis{Runs: len(events)}
 	failureCounts := map[string]int{}
+	recoveryCounts := map[string]int{}
+	seenRecoveries := map[string]bool{}
 	humanGateCounts := map[string]int{}
 	missingFieldCounts := map[string]int{}
 	for _, event := range events {
@@ -122,6 +131,13 @@ func Analyze(events []Event) Analysis {
 			}
 			if key != "" {
 				failureCounts[key]++
+			}
+		}
+		if verifiedRecovery(event) {
+			fingerprint := RecoveryFingerprint(event)
+			if !seenRecoveries[fingerprint] && event.Recovery.OriginalCode != "" {
+				recoveryCounts[event.Recovery.OriginalCode]++
+				seenRecoveries[fingerprint] = true
 			}
 		}
 		if event.RequiresHumanAction || event.AgenticNextAction == "ask_owner" {
@@ -143,6 +159,7 @@ func Analyze(events []Event) Analysis {
 		}
 	}
 	analysis.FailurePatterns = patternsFromCounts(failureCounts)
+	analysis.RecoveryPatterns = patternsFromCounts(recoveryCounts)
 	analysis.HumanGateHotspots = patternsFromCounts(humanGateCounts)
 	analysis.MissingFieldTrends = patternsFromCounts(missingFieldCounts)
 	proposalList := Propose(events)
@@ -157,36 +174,76 @@ func Analyze(events []Event) Analysis {
 }
 
 func Propose(events []Event) []Proposal {
-	counts := map[string]int{}
+	type proposalEvidence struct {
+		identities   map[string]bool
+		recoveries   map[string]bool
+		evidenceRefs map[string]bool
+	}
+	evidenceByCode := map[string]*proposalEvidence{}
+	ensureEvidence := func(key string) *proposalEvidence {
+		if evidenceByCode[key] == nil {
+			evidenceByCode[key] = &proposalEvidence{
+				identities:   map[string]bool{},
+				recoveries:   map[string]bool{},
+				evidenceRefs: map[string]bool{},
+			}
+		}
+		return evidenceByCode[key]
+	}
 	for _, event := range events {
-		if event.OK {
-			continue
+		if !event.OK {
+			key := event.Code
+			if key == "" {
+				key = event.Operation
+			}
+			if key != "" {
+				evidence := ensureEvidence(key)
+				evidence.identities[feedbackEvidenceIdentity(event.Workspace, event.AgenticRunID, event.Operation, key)] = true
+			}
 		}
-		key := event.Code
-		if key == "" {
-			key = event.Operation
-		}
-		if key != "" {
-			counts[key]++
+		if verifiedRecovery(event) && event.Recovery.OriginalCode != "" {
+			key := event.Recovery.OriginalCode
+			evidence := ensureEvidence(key)
+			evidence.identities[feedbackEvidenceIdentity(event.Workspace, event.AgenticRunID, event.Recovery.OriginalOperation, key)] = true
+			evidence.recoveries[RecoveryFingerprint(event)] = true
+			if event.Recovery.ExternalReference != "" {
+				evidence.evidenceRefs[event.Recovery.ExternalReference] = true
+			}
 		}
 	}
-	keys := make([]string, 0, len(counts))
-	for key := range counts {
+	keys := make([]string, 0, len(evidenceByCode))
+	for key := range evidenceByCode {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	proposals := make([]Proposal, 0, len(keys))
 	for _, key := range keys {
 		asset, rationale := proposalAsset(key)
+		evidence := evidenceByCode[key]
+		refs := make([]string, 0, len(evidence.evidenceRefs))
+		for ref := range evidence.evidenceRefs {
+			refs = append(refs, ref)
+		}
+		sort.Strings(refs)
 		proposals = append(proposals, Proposal{
 			Key:              key,
 			Title:            "分析重复失败模式：" + key,
-			EvidenceCount:    counts[key],
+			EvidenceCount:    len(evidence.identities),
 			RecommendedAsset: asset,
 			Rationale:        rationale,
+			RecoveredCount:   len(evidence.recoveries),
+			EvidenceRefs:     refs,
 		})
 	}
 	return proposals
+}
+
+func verifiedRecovery(event Event) bool {
+	return event.Recovery != nil && event.Recovery.ReadbackVerified
+}
+
+func feedbackEvidenceIdentity(workspace string, runID string, operation string, code string) string {
+	return strings.Join([]string{workspace, runID, operation, code}, "\x00")
 }
 
 func patternsFromCounts(counts map[string]int) []Pattern {
@@ -298,6 +355,10 @@ func WriteAnalysisMarkdown(path string, workspace string, scope string, analysis
 	for _, pattern := range analysis.FailurePatterns {
 		content += fmt.Sprintf("- %s: %d\n", pattern.Key, pattern.Count)
 	}
+	content += "\n## Recovery patterns\n\n"
+	for _, pattern := range analysis.RecoveryPatterns {
+		content += fmt.Sprintf("- %s: %d\n", pattern.Key, pattern.Count)
+	}
 	content += "\n## Human gate hotspots\n\n"
 	for _, pattern := range analysis.HumanGateHotspots {
 		content += fmt.Sprintf("- %s: %d\n", pattern.Key, pattern.Count)
@@ -315,7 +376,10 @@ func WriteProposalsMarkdown(path string, workspace string, scope string, proposa
 	}
 	content := fmt.Sprintf("# AgenticOps Feedback Proposals\n\n- workspace: %s\n- scope: %s\n", workspace, scope)
 	for _, proposal := range proposals {
-		content += fmt.Sprintf("\n## %s\n\n- evidence_count: %d\n- recommended_asset: %s\n- rationale: %s\n", proposal.Title, proposal.EvidenceCount, proposal.RecommendedAsset, proposal.Rationale)
+		content += fmt.Sprintf("\n## %s\n\n- evidence_count: %d\n- recovered_count: %d\n- recommended_asset: %s\n- rationale: %s\n", proposal.Title, proposal.EvidenceCount, proposal.RecoveredCount, proposal.RecommendedAsset, proposal.Rationale)
+		for _, ref := range proposal.EvidenceRefs {
+			content += fmt.Sprintf("- evidence_ref: %s\n", ref)
+		}
 	}
 	return os.WriteFile(path, []byte(content), 0o644)
 }

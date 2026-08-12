@@ -136,9 +136,12 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 		})
 		return writeJSON(stdout, result)
 	}
-	runID := feedback.AgenticRunID(issue.Key, "task_takeover", fixedNow(), "a8f3")
-	takeoverAt := fixedNow().Format(time.RFC3339)
+	operationTime := currentClock.Now().UTC()
+	runID := feedback.AgenticRunID(issue.Key, "task_takeover", operationTime, "a8f3")
+	takeoverAt := operationTime.Format(time.RFC3339)
 	currentAgentID := agentID()
+	remoteWriteCompleted := false
+	readbackVerified := false
 	if selection.Mode == "real" {
 		if !hasFlag(args, "--confirm-real-jira-write") {
 			_ = appendWorkspaceEventWithCode(workspaceName, "", issue.Key, "task_takeover", "takeover_task", "takeover_gate", "ask_owner", "real_jira_confirmation_required", "real_jira_write", false, true)
@@ -153,27 +156,50 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 		}
 		fields := jiraTakeoverFields(workspaceProfile, runID, currentAgentID, takeoverAt, "proceed")
 		ownershipComment := jiraTakeoverComment(workspaceProfile, runID, currentAgentID, takeoverAt, "proceed")
+		targetStage := workspaceProfile.TransitionMapping["start_progress"]
+		transitionID, transitionErr := resolveJiraTransitionID(context.Background(), selection.Client, issue.Key, workspaceProfile, "start_progress")
+		if transitionErr != nil || targetStage == "" {
+			message := "jira transition mapping missing for start_progress"
+			if transitionErr != nil {
+				message = transitionErr.Error()
+			}
+			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issue.Key, "takeover_task", "takeover_gate", "ask_owner", "jira_transition_mapping_gap", false, true)
+			return writeJSON(stdout, jiraTakeoverFailure("jira_transition_mapping_gap", message, "请维护 workflow profile 的 start_progress 转换映射后重试", runID, issue.Key, false, false, true))
+		}
 		if len(fields) == 0 && ownershipComment == "" {
 			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issue.Key, "takeover_task", "takeover_gate", "ask_owner", "missing_jira_write_mapping", false, true)
 			return writeJSON(stdout, output.Failure("takeover_task", "missing_jira_write_mapping", "缺少 agentic_id 或 agentic_takeover_at 字段映射", "请维护 workflow profile 的所有权字段映射"))
 		}
-		if len(fields) > 0 {
-			if err := selection.Client.UpdateFields(context.Background(), issue.Key, fields); err != nil {
-				_ = appendRealJiraWriteGateEvent(workspaceName, runID, issue.Key, "takeover_task", "takeover_gate", "ask_owner", "jira_takeover_write_failed", false, false)
-				return writeJSON(stdout, output.Failure("takeover_task", "jira_takeover_write_failed", err.Error(), "请检查 Jira 字段权限和 policy gate"))
+		request := jira.TransitionRequest{ID: transitionID, Fields: fields, Comment: ownershipComment}
+		if err := selection.Client.TransitionIssue(context.Background(), issue.Key, request); err != nil {
+			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issue.Key, "takeover_task", "takeover_gate", "ask_owner", "jira_takeover_atomic_write_failed", false, true)
+			return writeJSON(stdout, jiraTakeoverFailure("jira_takeover_atomic_write_failed", err.Error(), "远端结果可能不明确；请先只读回读 Jira 接管事实，不得直接重试", runID, issue.Key, false, false, false))
+		}
+		remoteWriteCompleted = true
+		readback, found, err := selection.Client.GetIssueByKey(context.Background(), workspaceName, issue.Key)
+		if err != nil || !found {
+			message := "接管写入后未找到 Jira 卡片"
+			if err != nil {
+				message = err.Error()
 			}
+			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issue.Key, "takeover_task", "takeover_gate", "ask_owner", "jira_takeover_readback_failed", false, true)
+			return writeJSON(stdout, jiraTakeoverFailure("jira_takeover_readback_failed", message, "请恢复 Jira 读取后只读核对状态和 Agentic 绑定，不得直接重试", runID, issue.Key, true, false, false))
 		}
-		if ownershipComment != "" {
-			if err := selection.Client.AddComment(context.Background(), issue.Key, ownershipComment); err != nil {
-				_ = appendRealJiraWriteGateEvent(workspaceName, runID, issue.Key, "takeover_task", "takeover_gate", "ask_owner", "jira_takeover_write_failed", false, false)
-				return writeJSON(stdout, output.Failure("takeover_task", "jira_takeover_write_failed", err.Error(), "请检查 Jira 评论权限和 policy gate"))
-			}
+		expectation := jira.TakeoverExpectation{
+			TargetStage:        targetStage,
+			AgenticID:          currentAgentID,
+			AgenticRunID:       runID,
+			AgenticTakeoverAt:  takeoverAt,
+			AgenticHeartbeatAt: takeoverAt,
 		}
-		if err := appendRealJiraWriteGateEvent(workspaceName, runID, issue.Key, "takeover_task", "takeover_started", "proceed", "", true, false); err != nil {
-			return writeJSON(stdout, output.Failure("takeover_task", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
+		if err := jira.ValidateTakeoverReadback(readback, workspaceProfile, expectation); err != nil {
+			_ = appendRealJiraWriteGateEvent(workspaceName, runID, issue.Key, "takeover_task", "takeover_gate", "ask_owner", "jira_takeover_readback_mismatch", false, true)
+			return writeJSON(stdout, jiraTakeoverFailure("jira_takeover_readback_mismatch", err.Error(), "请人工核对并修复 Jira 状态和 Agentic 绑定事实，不得直接重试", runID, issue.Key, true, false, false))
 		}
+		readbackVerified = true
 	}
 	if err := appendWorkspaceEventWithDetails(workspaceName, feedback.Event{
+		Timestamp:          takeoverAt,
 		AgenticRunID:       runID,
 		IssueKey:           issue.Key,
 		TaskType:           "task_takeover",
@@ -192,6 +218,9 @@ func runTakeoverTask(args []string, stdout io.Writer) int {
 		Gate:               "takeover_task",
 		GateStatus:         "passed",
 	}); err != nil {
+		if selection.Mode == "real" {
+			return writeJSON(stdout, jiraTakeoverFailure("event_write_failed", err.Error(), "远端接管已完成且回读通过；请修复本地事件目录并记录结构化恢复，不得重试 Jira 写入", runID, issue.Key, remoteWriteCompleted, readbackVerified, false))
+		}
 		return writeJSON(stdout, output.Failure("takeover_task", "event_write_failed", err.Error(), "请检查工作空间目录权限"))
 	}
 	return writeJSON(stdout, output.Success("takeover_task", map[string]any{
@@ -229,7 +258,7 @@ func inspectTaskGateFacts(issue jira.Issue, p profile.Profile, currentUser strin
 		"agentic_id":                            issue.AgenticID,
 		"owner_matches_current_user":            issue.Owner != "" && issue.Owner == currentUser,
 		"assignee_matches_current_user":         issue.Assignee != "" && issue.Assignee == currentUser,
-		"agentic_id_empty_or_match":       issue.AgenticID == "" || issue.AgenticID == currentAgentID,
+		"agentic_id_empty_or_match":             issue.AgenticID == "" || issue.AgenticID == currentAgentID,
 		"task_class":                            taskClass,
 		"task_class_source":                     taskClassSource,
 		"standard_process_id":                   processID,

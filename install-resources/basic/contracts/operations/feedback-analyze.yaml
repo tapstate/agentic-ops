@@ -1,6 +1,6 @@
 operation: feedback_analyze
 version: 1
-purpose: 从反馈事件中分析重复失败模式、人工门禁热点和缺失字段趋势。
+purpose: 从反馈事件中分析重复失败模式、已确认恢复模式、人工门禁热点和缺失字段趋势。
 task_type: feedback_analysis
 allowed_stages:
   - evidence_written
@@ -44,6 +44,8 @@ output:
   runs:
     type: integer
   failure_patterns:
+    type: object
+  recovery_patterns:
     type: object
   human_gate_hotspots:
     type: object

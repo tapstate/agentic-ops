@@ -39,6 +39,56 @@ func TestWriteEvidenceRequiresRunID(t *testing.T) {
 	}
 }
 
+func TestWriteEvidenceRequiresCompletionContentBeforeWrites(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+`)
+	client := &recordingJiraClient{issue: realModeBoundIssue()}
+	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "missing_evidence_content")
+	if client.commentCalls != 0 {
+		t.Fatalf("Jira comment calls = %d", client.commentCalls)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".agentic-ops", "runs", runID, "evidence.md")); !os.IsNotExist(err) {
+		t.Fatalf("evidence file should not exist, stat err = %v", err)
+	}
+}
+
+func TestWriteEvidenceRejectsInvalidCompletionContentBeforeWrites(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+`)
+	contentPath := filepath.Join(root, "completion.md")
+	writeCLITestFile(t, contentPath, "## 变更内容\n\n只有一个章节。\n")
+	client := &recordingJiraClient{issue: realModeBoundIssue()}
+	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", contentPath, "--confirm-real-jira-write"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "invalid_evidence_sections")
+	if client.commentCalls != 0 {
+		t.Fatalf("Jira comment calls = %d", client.commentCalls)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".agentic-ops", "runs", runID, "evidence.md")); !os.IsNotExist(err) {
+		t.Fatalf("evidence file should not exist, stat err = %v", err)
+	}
+}
+
 func TestWritePREvidenceRequiresPRURL(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
@@ -57,12 +107,22 @@ func TestWritePREvidenceReadsGitHubFactsAndWritesLocalAudit(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
-{"timestamp":"2026-07-21T10:40:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"prepare_pr","task_type":"pr_preparation","current_stage":"pr_created","agentic_next_action":"check_ci","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"prepare_pr","gate_status":"passed"}
-`)
+	sourceRoot := t.TempDir()
+	initGitRepoForCLITest(t, sourceRoot, "feature/tap-123")
+	writeCLITestFile(t, filepath.Join(sourceRoot, "README.md"), "# Demo\n")
+	Run([]string{"takeover-task", "TAP-123", "--workspace", "tapstate"}, &bytes.Buffer{}, &bytes.Buffer{})
+	var prepareStdout bytes.Buffer
+	var prepareStderr bytes.Buffer
+	if code := Run([]string{"prepare-pr", "--workspace", "tapstate", "--run-id", runID, "--source-root", sourceRoot, "--base", "main", "--title", "Fix TAP-123"}, &prepareStdout, &prepareStderr); code != 0 {
+		t.Fatalf("prepare-pr code = %d stdout = %s stderr = %s", code, prepareStdout.String(), prepareStderr.String())
+	}
+	assertJSONField(t, prepareStdout.String(), "current_stage", "pr_plan_prepared")
 	withGitHubClientForTest(t, github.Client{Runner: &cliFakeGitHubRunner{outputs: map[string]string{
-		"pr view 42 --repo tapstate/example-repo --json comments,reviews":                   `{"comments":[],"reviews":[{"author":{"login":"reviewer"},"body":"通过","state":"APPROVED","url":"https://github.example/review/1"}]}`,
-		"pr checks 42 --repo tapstate/example-repo --json name,state,conclusion,detailsUrl": `[ {"name":"unit","state":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.example/check/1"} ]`,
+		"api --method GET repos/tapstate/example-repo/pulls/42":                                     `{"html_url":"https://github.com/tapstate/example-repo/pull/42","head":{"sha":"abc123"}}`,
+		"api --paginate --slurp repos/tapstate/example-repo/commits/abc123/check-runs?per_page=100": `[{"check_runs":[{"name":"unit","status":"completed","conclusion":"success","details_url":"https://github.example/check/1"}]}]`,
+		"api --paginate --slurp repos/tapstate/example-repo/commits/abc123/status?per_page=100":     `[{"statuses":[]}]`,
+		"api --paginate --slurp repos/tapstate/example-repo/issues/42/comments?per_page=100":        `[[]]`,
+		"api --paginate --slurp repos/tapstate/example-repo/pulls/42/reviews?per_page=100":          `[[{"user":{"login":"reviewer"},"body":"通过","state":"APPROVED","html_url":"https://github.example/review/1"}]]`,
 	}}})
 
 	var stdout bytes.Buffer
@@ -74,6 +134,9 @@ func TestWritePREvidenceReadsGitHubFactsAndWritesLocalAudit(t *testing.T) {
 	assertJSONField(t, stdout.String(), "operation", "write_pr_evidence")
 	assertJSONField(t, stdout.String(), "pr_url", "https://github.com/tapstate/example-repo/pull/42")
 	assertJSONField(t, stdout.String(), "ci_status", "passed")
+	assertJSONField(t, stdout.String(), "head_sha", "abc123")
+	assertJSONNumber(t, stdout.String(), "check_count", 1)
+	assertJSONNumber(t, stdout.String(), "pending_check_count", 0)
 	assertJSONField(t, stdout.String(), "review_status", "approved")
 	assertJSONField(t, stdout.String(), "audit_submitted", true)
 	assertJSONField(t, stdout.String(), "agentic_next_action", "request_owner_confirmation")
@@ -83,7 +146,7 @@ func TestWritePREvidenceReadsGitHubFactsAndWritesLocalAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile PR evidence error = %v", err)
 	}
-	for _, want := range []string{"pr_url: https://github.com/tapstate/example-repo/pull/42", "ci_status: passed", "review_status: approved"} {
+	for _, want := range []string{"PR URL：https://github.com/tapstate/example-repo/pull/42", "PR head SHA：abc123", "CI 状态：passed", "Review 状态：approved", "事实来源：GitHub REST API"} {
 		if !strings.Contains(string(evidenceData), want) {
 			t.Fatalf("PR evidence missing %q: %s", want, string(evidenceData))
 		}
@@ -92,15 +155,88 @@ func TestWritePREvidenceReadsGitHubFactsAndWritesLocalAudit(t *testing.T) {
 	assertEventLogContains(t, root, `"audit_reference":"`+evidencePath+`"`)
 }
 
+func TestWritePREvidenceReportsNotConfiguredCIRisk(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true}
+{"timestamp":"2026-07-21T10:40:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"prepare_pr","current_stage":"pr_plan_prepared","agentic_next_action":"ask_owner_to_push_and_create_pr","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true}
+`)
+	withGitHubClientForTest(t, github.Client{Runner: &cliFakeGitHubRunner{outputs: map[string]string{
+		"api --method GET repos/tapstate/example-repo/pulls/42":                                     `{"html_url":"https://github.com/tapstate/example-repo/pull/42","head":{"sha":"abc123"}}`,
+		"api --paginate --slurp repos/tapstate/example-repo/commits/abc123/check-runs?per_page=100": `[{"check_runs":[]}]`,
+		"api --paginate --slurp repos/tapstate/example-repo/commits/abc123/status?per_page=100":     `[{"statuses":[]}]`,
+		"api --paginate --slurp repos/tapstate/example-repo/issues/42/comments?per_page=100":        `[[]]`,
+		"api --paginate --slurp repos/tapstate/example-repo/pulls/42/reviews?per_page=100":          `[[]]`,
+	}}})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"write-pr-evidence", "--workspace", "tapstate", "--run-id", runID, "--pr-url", "https://github.com/tapstate/example-repo/pull/42"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "ci_status", "not_configured")
+	assertJSONNumber(t, stdout.String(), "check_count", 0)
+	evidenceData, err := os.ReadFile(filepath.Join(root, ".agentic-ops", "runs", runID, "pr-evidence.md"))
+	if err != nil {
+		t.Fatalf("ReadFile error = %v", err)
+	}
+	if !strings.Contains(string(evidenceData), "风险：GitHub 未配置 CI 检查，不能视为 CI 已通过；是否继续由项目策略和研发工程师决定。") {
+		t.Fatalf("evidence = %s", string(evidenceData))
+	}
+}
+
+func TestWritePREvidencePreservesCIReadFailureCode(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true}
+{"timestamp":"2026-07-21T10:40:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"prepare_pr","current_stage":"pr_plan_prepared","agentic_next_action":"ask_owner_to_push_and_create_pr","target_repo":"tapstate/example-repo","ok":true}
+`)
+	withGitHubClientForTest(t, github.Client{Runner: &cliFakeGitHubRunner{
+		outputs: map[string]string{
+			"api --method GET repos/tapstate/example-repo/pulls/42": `{"html_url":"https://github.com/tapstate/example-repo/pull/42","head":{"sha":"abc123"}}`,
+		},
+		errors: map[string]error{
+			"api --paginate --slurp repos/tapstate/example-repo/commits/abc123/check-runs?per_page=100": errors.New("check-runs unavailable"),
+		},
+	}})
+
+	var stdout bytes.Buffer
+	code := Run([]string{"write-pr-evidence", "--workspace", "tapstate", "--run-id", runID, "--pr-url", "https://github.com/tapstate/example-repo/pull/42"}, &stdout, &bytes.Buffer{})
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s", code, stdout.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "github_ci_read_failed")
+	assertEventLogContains(t, root, `"code":"github_ci_read_failed"`)
+}
+
+func TestWritePREvidenceRejectsStageBeforePRPlan(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true}
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"write-pr-evidence", "--workspace", "tapstate", "--run-id", runID, "--pr-url", "https://github.com/tapstate/example-repo/pull/42"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "operation_stage_not_allowed")
+}
+
 func TestWriteEvidenceOutputsNextAction(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", writeCompletionBodyFile(t, root)}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d", code)
 	}
@@ -116,7 +252,7 @@ func TestWriteEvidenceOutputsNextAction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile evidence error = %v", err)
 	}
-	for _, want := range []string{"issue_key: TAP-123", "task_class: technical_task", "process_id: development_change_v1", "target_repo: tapstate/example-repo"} {
+	for _, want := range []string{"Jira 卡片：TAP-123", "任务分类：technical_task", "标准流程：development_change_v1", "目标仓库：tapstate/example-repo", "## 事实来源"} {
 		if !strings.Contains(string(evidenceData), want) {
 			t.Fatalf("evidence missing %q: %s", want, string(evidenceData))
 		}
@@ -133,16 +269,34 @@ func TestWriteEvidenceOutputsNextAction(t *testing.T) {
 	}
 }
 
+func TestWriteEvidenceSkipsIncompleteHistoricalTakeoverEvent(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_gate","agentic_next_action":"ask_owner","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","ok":true,"gate":"real_jira_write","gate_status":"passed"}
+{"timestamp":"2026-07-21T10:30:13Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", writeCompletionBodyFile(t, root)}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
+	}
+	assertJSONField(t, stdout.String(), "issue_key", "TAP-123")
+	assertJSONField(t, stdout.String(), "target_repo", "tapstate/example-repo")
+}
+
 func TestWriteEvidencePreservesTargetRepoAfterResume(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 {"timestamp":"2026-07-21T10:31:00Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"resume_takeover","task_type":"task_takeover","current_stage":"takeover_resumed","agentic_next_action":"continue_development","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"resume_takeover","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", writeCompletionBodyFile(t, root)}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
@@ -151,7 +305,7 @@ func TestWriteEvidencePreservesTargetRepoAfterResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile evidence error = %v", err)
 	}
-	if !strings.Contains(string(evidenceData), "target_repo: tapstate/example-repo") {
+	if !strings.Contains(string(evidenceData), "目标仓库：tapstate/example-repo") {
 		t.Fatalf("evidence = %s", string(evidenceData))
 	}
 }
@@ -165,11 +319,11 @@ func TestWriteEvidenceBlocksWhenLocalPolicyRequiresHumanGate(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", writeCompletionBodyFile(t, root)}, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
@@ -187,7 +341,7 @@ func TestWriteEvidenceRejectsMissingRun(t *testing.T) {
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", "missing-run"}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", "missing-run", "--content-file", writeCompletionBodyFile(t, root)}, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
@@ -201,13 +355,13 @@ func TestWriteEvidenceRejectsCompletedRun(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 {"timestamp":"2026-07-21T10:31:00Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"release_agent","task_type":"task_release","current_stage":"completed","agentic_next_action":"task_audit_submitted","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"release_agent","gate_status":"passed"}
 `)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", writeCompletionBodyFile(t, root)}, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
@@ -222,13 +376,13 @@ func TestWriteEvidenceRequiresConfirmationForRealJiraComment(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: &recordingJiraClient{issue: realModeBoundIssue()}, Mode: "real"})
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", writeCompletionBodyFile(t, root)}, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
@@ -243,21 +397,21 @@ func TestWriteEvidenceRecordsPassedRealJiraCommentGate(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	client := &recordingJiraClient{issue: realModeBoundIssue()}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--confirm-real-jira-write"}, &stdout, &stderr)
+	code := Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", runID, "--content-file", writeCompletionBodyFile(t, root), "--confirm-real-jira-write"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
 	if client.commentKey != "TAP-123" {
 		t.Fatalf("commentKey = %s", client.commentKey)
 	}
-	if !strings.Contains(client.commentBody, "status: evidence_written") {
+	if !strings.Contains(client.commentBody, "证据状态：已写入") || !strings.Contains(client.commentBody, "## 事实来源") {
 		t.Fatalf("commentBody = %s", client.commentBody)
 	}
 	assertEventLogContains(t, root, `"operation":"write_evidence"`)
@@ -317,8 +471,8 @@ func TestReleaseAgentTransitionsRealJiraIssueWhenTransitionIDProvided(t *testing
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
-	if client.transitionKey != "TAP-123" || client.transitionID != "31" {
-		t.Fatalf("transition = %s %s", client.transitionKey, client.transitionID)
+	if client.transitionKey != "TAP-123" || client.transitionRequest.ID != "31" {
+		t.Fatalf("transition = %s %+v", client.transitionKey, client.transitionRequest)
 	}
 	assertEventLogContains(t, root, `"operation":"release_agent"`)
 	assertEventLogContains(t, root, `"current_stage":"jira_transition"`)
@@ -338,8 +492,8 @@ func TestReleaseAgentUsesProfileJiraTransitionMapping(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stdout = %s stderr = %s", code, stdout.String(), stderr.String())
 	}
-	if client.transitionKey != "TAP-123" || client.transitionID != "31" {
-		t.Fatalf("transition = %s %s", client.transitionKey, client.transitionID)
+	if client.transitionKey != "TAP-123" || client.transitionRequest.ID != "31" {
+		t.Fatalf("transition = %s %+v", client.transitionKey, client.transitionRequest)
 	}
 	assertJSONField(t, stdout.String(), "jira_transition_id", "31")
 	assertEventLogContains(t, root, `"current_stage":"jira_transition"`)
@@ -480,4 +634,30 @@ func TestReleaseAgentRejectsMissingCompletionEvidenceFile(t *testing.T) {
 	assertJSONField(t, stdout.String(), "code", "agentic_completion_evidence_missing")
 	assertJSONField(t, stdout.String(), "current_stage", "completion_cleanup")
 	assertJSONField(t, stdout.String(), "agentic_next_action", "ask_owner")
+}
+
+func writeCompletionBodyFile(t *testing.T, root string) string {
+	t.Helper()
+	path := filepath.Join(root, "completion-body.md")
+	writeCLITestFile(t, path, `## 变更内容
+
+修复接管原子性和证据链。
+
+## 验证命令与结果
+
+go test ./...：通过。
+
+## 风险
+
+未发现额外风险。
+
+## 恢复说明
+
+无需恢复。
+
+## 事实来源
+
+Jira AO、Git 和 GitHub PR 回读。
+`)
+	return path
 }

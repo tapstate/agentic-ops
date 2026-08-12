@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 )
 
+const maxCompletionEvidenceBytes int64 = 65536
+
 func runWriteEvidence(args []string, stdout io.Writer) int {
 	workspaceName := workspaceNameFromArgsOrAgentConfig(args, "default")
 	runID := readFlag(args, "--run-id", "")
@@ -26,6 +28,28 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 	root, err := workspaceRoot()
 	if err != nil {
 		return writeJSON(stdout, output.Failure("write_evidence", "workspace_root_failed", "无法读取当前工作目录", "请在项目 AI 工作空间中重试"))
+	}
+	contentFile := readFlag(args, "--content-file", "")
+	if contentFile == "" {
+		return writeJSON(stdout, output.FailureWithContext("write_evidence", output.FailureContext{
+			Code:                "missing_evidence_content",
+			Message:             "缺少完整任务证据正文",
+			RequiredHumanAction: "请提供工作空间内的 --content-file，并填写全部中文证据章节",
+			TaskType:            "evidence_write",
+			CurrentStage:        "input_validation",
+			AgenticNextAction:   "ask_owner",
+		}))
+	}
+	evidenceBody, err := evidence.ReadCompletionBody(root, contentFile, maxCompletionEvidenceBytes)
+	if err != nil {
+		return writeJSON(stdout, output.FailureWithContext("write_evidence", output.FailureContext{
+			Code:                evidenceContentErrorCode(err),
+			Message:             err.Error(),
+			RequiredHumanAction: "请修正工作空间内的证据正文文件，确保大小合规且五个中文章节完整",
+			TaskType:            "evidence_write",
+			CurrentStage:        "input_validation",
+			AgenticNextAction:   "ask_owner",
+		}))
 	}
 	state, err := evidenceRunState(root, workspaceName, runID)
 	if err != nil {
@@ -121,6 +145,7 @@ func runWriteEvidence(args []string, stdout io.Writer) int {
 		"process_id":     state.ProcessID,
 		"previous_stage": state.PreviousStage,
 		"target_repo":    state.TargetRepo,
+		"evidence_body":  evidenceBody,
 	})
 	if err := evidence.Write(path, content); err != nil {
 		return writeJSON(stdout, output.Failure("write_evidence", "write_failed", err.Error(), "请检查工作空间目录权限"))

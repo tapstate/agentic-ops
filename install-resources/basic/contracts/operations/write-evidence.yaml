@@ -9,6 +9,7 @@ allowed_stages:
 required_inputs:
   - workspace
   - agentic_run_id
+  - content_file
 input:
   workspace:
     type: string
@@ -16,6 +17,10 @@ input:
   agentic_run_id:
     type: string
     required: true
+  content_file:
+    type: file
+    required: true
+    max_bytes: 65536
 preconditions:
   - run_must_exist
   - current_user_must_match_owner
@@ -52,6 +57,11 @@ output:
 failure:
   codes:
     - missing_agentic_run_id
+    - missing_evidence_content
+    - evidence_content_read_failed
+    - evidence_content_outside_workspace
+    - evidence_content_too_large
+    - invalid_evidence_sections
     - run_not_found
     - workspace_mismatch
     - local_state_mismatch

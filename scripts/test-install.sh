@@ -24,8 +24,10 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 source_repo="$tmp_dir/source"
 home_dir="$tmp_dir/home"
+custom_home_dir="$tmp_dir/custom-home"
+custom_install_dir="$tmp_dir/custom-agentic-ops"
 
-mkdir -p "$source_repo" "$home_dir"
+mkdir -p "$source_repo" "$home_dir" "$custom_home_dir"
 tar \
   --exclude .git \
   --exclude .agentic-ops \
@@ -72,6 +74,7 @@ grep "agentic-cli is installed but not on PATH" "$install_err"
 grep 'case ":\$PATH:" in' "$install_err"
 grep '"path_profile_configured":true' "$install_out"
 grep '"path_profile_updated":true' "$install_out"
+grep '"path_profile_action":"added"' "$install_out"
 grep "PATH entry added to shell profile" "$install_err"
 profile_file="$home_dir/.zshrc"
 profile_line='export PATH="$HOME/.agentic-ops/bin:$PATH"'
@@ -86,6 +89,45 @@ test -f "$install_dir/install-resources/basic/manifest.json"
 test -x "$install_dir/bin/agentic-cli"
 test -f "$install_dir/.local/current-ref"
 test -f "$install_dir/.local/install-log.json"
+
+custom_profile="$custom_home_dir/.zshrc"
+printf '%s\n' '# preserve me' > "$custom_profile"
+custom_profile_before="$(git hash-object "$custom_profile")"
+custom_install_out="$tmp_dir/custom-install.out"
+custom_install_err="$tmp_dir/custom-install.err"
+HOME="$custom_home_dir" \
+SHELL=/bin/zsh \
+AGENTIC_OPS_HOME="$custom_install_dir" \
+AGENTIC_OPS_REPO_URL="$source_repo" \
+bash "$source_repo/scripts/install.sh" >"$custom_install_out" 2>"$custom_install_err"
+custom_profile_after="$(git hash-object "$custom_profile")"
+test "$custom_profile_before" = "$custom_profile_after"
+grep '"path_profile_action":"skipped_custom_home"' "$custom_install_out"
+
+custom_profile_line="export PATH=\"$custom_install_dir/bin:\$PATH\""
+custom_update_out="$tmp_dir/custom-update.out"
+custom_update_err="$tmp_dir/custom-update.err"
+HOME="$custom_home_dir" \
+SHELL=/bin/zsh \
+AGENTIC_OPS_HOME="$custom_install_dir" \
+AGENTIC_OPS_CONFIGURE_PATH=1 \
+AGENTIC_OPS_ASSUME_YES=1 \
+AGENTIC_OPS_REPO_URL="$source_repo" \
+bash "$custom_install_dir/scripts/install.sh" >"$custom_update_out" 2>"$custom_update_err"
+grep '"path_profile_action":"added"' "$custom_update_out"
+test "$(grep -cF "$custom_profile_line" "$custom_profile")" -eq 1
+
+custom_second_update_out="$tmp_dir/custom-second-update.out"
+custom_second_update_err="$tmp_dir/custom-second-update.err"
+HOME="$custom_home_dir" \
+SHELL=/bin/zsh \
+AGENTIC_OPS_HOME="$custom_install_dir" \
+AGENTIC_OPS_CONFIGURE_PATH=1 \
+AGENTIC_OPS_ASSUME_YES=1 \
+AGENTIC_OPS_REPO_URL="$source_repo" \
+bash "$custom_install_dir/scripts/install.sh" >"$custom_second_update_out" 2>"$custom_second_update_err"
+grep '"path_profile_action":"already_configured"' "$custom_second_update_out"
+test "$(grep -cF "$custom_profile_line" "$custom_profile")" -eq 1
 
 printf '# local tracked change\n' >> "$install_dir/README.md"
 update_out="$tmp_dir/update.out"
@@ -102,6 +144,7 @@ HOME="$home_dir" SHELL=/bin/zsh AGENTIC_OPS_REPO_URL="$source_repo" AGENTIC_OPS_
 grep '"operation":"update"' "$confirmed_update_out"
 grep '"path_profile_configured":true' "$confirmed_update_out"
 grep '"path_profile_updated":false' "$confirmed_update_out"
+grep '"path_profile_action":"already_configured"' "$confirmed_update_out"
 grep "PATH entry already exists in shell profile" "$confirmed_update_err"
 test "$(grep -cF "$profile_line" "$profile_file")" -eq 1
 test -f "$install_dir/.local/previous-ref"

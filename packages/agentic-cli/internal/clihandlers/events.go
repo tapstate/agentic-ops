@@ -33,7 +33,9 @@ func appendWorkspaceEventWithDetails(workspaceName string, event feedback.Event)
 	if err != nil {
 		return err
 	}
-	event.Timestamp = fixedNow().Format(time.RFC3339)
+	if event.Timestamp == "" {
+		event.Timestamp = currentClock.Now().UTC().Format(time.RFC3339)
+	}
 	event.Workspace = workspaceName
 	event.AgentTaskOpsVersion = Version
 	event.VersionState = VersionState

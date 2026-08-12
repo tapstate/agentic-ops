@@ -75,17 +75,13 @@ func runWritePREvidence(args []string, stdout io.Writer) int {
 		}
 	}
 
-	comments, err := gitHubClient.ReadPRComments(context.Background(), repo, pr)
+	facts, err := gitHubClient.ReadPullRequestFacts(context.Background(), repo, pr)
 	if err != nil {
-		return writePREvidenceFailure(stdout, workspaceName, runID, state.IssueKey, "github_pr_read_failed", err.Error(), "请检查 GitHub CLI 登录状态、仓库权限和 PR URL", "pr_evidence_gate", "fix_environment")
+		return writePREvidenceFailure(stdout, workspaceName, runID, state.IssueKey, github.ReadErrorCode(err), err.Error(), "请检查 GitHub CLI 登录状态、仓库权限和 PR URL", "pr_evidence_gate", "fix_environment")
 	}
-	ciStatus, err := gitHubClient.CheckCIStatus(context.Background(), repo, pr)
-	if err != nil {
-		return writePREvidenceFailure(stdout, workspaceName, runID, state.IssueKey, "github_ci_read_failed", err.Error(), "请检查 GitHub CLI 登录状态、仓库权限和 GitHub 检查状态", "pr_evidence_gate", "fix_environment")
-	}
-	reviewStatus := summarizeReviewStatus(comments)
+	reviewStatus := summarizeReviewStatus(facts.Reviews)
 	path := filepath.Join(root, ".agentic-ops", "runs", runID, "pr-evidence.md")
-	content := renderPREvidence(workspaceName, runID, state, prURL, ciStatus, reviewStatus, len(comments))
+	content := renderPREvidence(workspaceName, runID, state, facts, reviewStatus)
 	if err := evidence.Write(path, content); err != nil {
 		return writeJSON(stdout, output.Failure("write_pr_evidence", "write_failed", err.Error(), "请检查工作空间目录权限"))
 	}
@@ -108,8 +104,8 @@ func runWritePREvidence(args []string, stdout io.Writer) int {
 	}
 	return writeJSON(stdout, output.Success("write_pr_evidence", map[string]any{
 		"workspace": workspaceName, "agentic_run_id": runID, "issue_key": state.IssueKey, "target_repo": state.TargetRepo,
-		"pr_url": prURL, "pr_number": pr, "ci_status": ciStatus.Status, "review_status": reviewStatus, "review_count": len(comments),
-		"failing_check_count": len(ciStatus.FailingChecks), "evidence": path, "audit_target": "local_file", "audit_submitted": true,
+		"pr_url": facts.URL, "pr_number": pr, "head_sha": facts.HeadSHA, "ci_status": facts.CI.Status, "review_status": reviewStatus, "review_count": len(facts.Reviews),
+		"check_count": len(facts.CI.Checks), "failing_check_count": len(facts.CI.FailingChecks), "pending_check_count": len(facts.CI.PendingChecks), "evidence": path, "audit_target": "local_file", "audit_submitted": true,
 		"audit_reference": path, "current_stage": "pr_evidence_written", "agentic_next_action": "request_owner_confirmation",
 	}))
 }
@@ -143,20 +139,17 @@ func parsePRURL(raw string) (string, string, error) {
 
 func isPREvidenceStage(stage string) bool {
 	switch stage {
-	case "pr_created", "ci_passed", "review_approved":
+	case "pr_plan_prepared", "pr_created", "ci_passed", "review_approved":
 		return true
 	default:
 		return false
 	}
 }
 
-func summarizeReviewStatus(comments []github.PRComment) string {
+func summarizeReviewStatus(reviews []github.PRReview) string {
 	status := "pending"
-	for _, comment := range comments {
-		if comment.Kind != "review" {
-			continue
-		}
-		switch strings.ToUpper(comment.State) {
+	for _, review := range reviews {
+		switch strings.ToUpper(review.State) {
 		case "CHANGES_REQUESTED":
 			return "changes_requested"
 		case "APPROVED":
@@ -166,6 +159,10 @@ func summarizeReviewStatus(comments []github.PRComment) string {
 	return status
 }
 
-func renderPREvidence(workspaceName string, runID string, state evidenceRunContext, prURL string, ciStatus github.CIStatus, reviewStatus string, reviewCount int) string {
-	return fmt.Sprintf("# Pull Request Evidence\n\nworkspace: %s\nagentic_run_id: %s\nissue_key: %s\ntarget_repo: %s\npr_url: %s\nci_status: %s\nreview_status: %s\nreview_count: %d\nfailing_check_count: %d\ncurrent_stage: pr_evidence_written\nagentic_next_action: request_owner_confirmation\n", workspaceName, runID, state.IssueKey, state.TargetRepo, prURL, ciStatus.Status, reviewStatus, reviewCount, len(ciStatus.FailingChecks))
+func renderPREvidence(workspaceName string, runID string, state evidenceRunContext, facts github.PullRequestFacts, reviewStatus string) string {
+	risk := "未发现 GitHub CI 事实风险。"
+	if facts.CI.Status == "not_configured" {
+		risk = "GitHub 未配置 CI 检查，不能视为 CI 已通过；是否继续由项目策略和研发工程师决定。"
+	}
+	return fmt.Sprintf("# 拉取请求证据\n\n- 工作空间：%s\n- Agentic 运行编号：%s\n- Jira 卡片：%s\n- 目标仓库：%s\n- PR URL：%s\n- PR head SHA：%s\n- CI 状态：%s\n- 检查总数：%d\n- 失败检查数：%d\n- 待完成检查数：%d\n- Review 状态：%s\n- Review 数量：%d\n- GitHub 事实读取时间：%s\n- 事实来源：GitHub REST API（gh api）\n\n## 当前结论\n\n已回读 PR、CI、评论和 Review 事实，等待研发工程师确认。\n\n## 风险\n\n风险：%s\n\n## 需要研发工程师处理\n\n请核对 PR head、CI 四态和 Review 结论后决定是否继续。\n", workspaceName, runID, state.IssueKey, state.TargetRepo, facts.URL, facts.HeadSHA, facts.CI.Status, len(facts.CI.Checks), len(facts.CI.FailingChecks), len(facts.CI.PendingChecks), reviewStatus, len(facts.Reviews), facts.ReadAt.Format("2006-01-02T15:04:05Z07:00"), risk)
 }

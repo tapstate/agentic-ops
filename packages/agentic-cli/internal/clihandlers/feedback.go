@@ -9,12 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 func runFeedbackReport(args []string, stdout io.Writer) int {
 	workspaceName := workspaceNameFromArgsOrAgentConfig(args, "default")
-	date := readFlag(args, "--date", time.Now().Format("2006-01-02"))
+	date := readFlag(args, "--date", currentClock.Now().UTC().Format("2006-01-02"))
 	events, root, err := readFilteredFeedbackEvents(args, workspaceName)
 	if err != nil {
 		return writeJSON(stdout, output.Failure("feedback_report", err.code, err.message, err.action))
@@ -57,6 +56,7 @@ func runFeedbackAnalyze(args []string, stdout io.Writer) int {
 		"scope":                scope,
 		"runs":                 analysis.Runs,
 		"failure_patterns":     analysis.FailurePatterns,
+		"recovery_patterns":    analysis.RecoveryPatterns,
 		"human_gate_hotspots":  analysis.HumanGateHotspots,
 		"missing_field_trends": analysis.MissingFieldTrends,
 		"suggested_assets":     analysis.SuggestedAssets,
@@ -126,7 +126,7 @@ func feedbackScope(args []string) string {
 	if from != "" || to != "" {
 		return strings.ReplaceAll(strings.Trim(from+"-"+to, "-"), ":", "-")
 	}
-	return time.Now().Format("2006-01-02")
+	return currentClock.Now().UTC().Format("2006-01-02")
 }
 
 func runFeedbackBundle(args []string, stdout io.Writer) int {
