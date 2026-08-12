@@ -1,6 +1,6 @@
 operation: feedback_propose
 version: 1
-purpose: 根据反馈分析证据生成结构化改进建议，不自动修改 AgenticOps 标准资产。
+purpose: 根据失败与结构化恢复证据生成包含恢复计数和外部证据引用的改进建议，不自动修改 AgenticOps 标准资产。
 task_type: feedback_proposal
 allowed_stages:
   - evidence_written

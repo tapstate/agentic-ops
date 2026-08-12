@@ -13,7 +13,7 @@ func TestFeedbackReportOutputsReportPath(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	Run([]string{"takeover-task", "TAP-123", "--workspace", "tapstate"}, &bytes.Buffer{}, &bytes.Buffer{})
-	Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", "TAP-123-takeover-20260721103012-a8f3"}, &bytes.Buffer{}, &bytes.Buffer{})
+	Run([]string{"write-evidence", "--workspace", "tapstate", "--run-id", "TAP-123-takeover-20260721103012-a8f3", "--content-file", writeCompletionBodyFile(t, root)}, &bytes.Buffer{}, &bytes.Buffer{})
 	Run([]string{"takeover-task", "TAP-MISSING-REPO", "--workspace", "tapstate"}, &bytes.Buffer{}, &bytes.Buffer{})
 
 	var stdout bytes.Buffer
@@ -113,4 +113,184 @@ func TestFeedbackAnalyzeAndProposeReturnStructuredOutputs(t *testing.T) {
 	if !strings.Contains(proposalStdout.String(), "recommended_asset") {
 		t.Fatalf("proposals = %s", proposalStdout.String())
 	}
+}
+
+func TestFeedbackRecordRecoveryRequiresConfirmation(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	evidencePath := filepath.Join(root, "recovery.md")
+	writeCLITestFile(t, evidencePath, "恢复证据\n")
+
+	var stdout bytes.Buffer
+	code := Run([]string{
+		"feedback", "record-recovery",
+		"--workspace", "tapstate",
+		"--run-id", "run-1",
+		"--original-operation", "check_ci_status",
+		"--original-code", "github_ci_read_failed",
+		"--evidence-file", evidencePath,
+		"--external-reference", "https://github.example/pull/1#checks",
+		"--readback-verified=true",
+		"--remote-write-completed=true",
+		"--retry-safe=false",
+	}, &stdout, &bytes.Buffer{})
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s", code, stdout.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "recovery_record_confirmation_required")
+}
+
+func TestFeedbackRecordRecoveryRequiresAllIdentityAndBooleanFacts(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	evidencePath := filepath.Join(root, "recovery.md")
+	writeCLITestFile(t, evidencePath, "恢复证据\n")
+	baseArgs := []string{
+		"feedback", "record-recovery",
+		"--workspace", "tapstate",
+		"--run-id", "run-1",
+		"--original-operation", "check_ci_status",
+		"--original-code", "github_ci_read_failed",
+		"--evidence-file", evidencePath,
+		"--external-reference", "https://github.example/pull/1#checks",
+		"--readback-verified=true",
+		"--remote-write-completed=true",
+		"--retry-safe=false",
+		"--confirm-recovery-record",
+	}
+	tests := []struct {
+		name       string
+		removeFlag string
+		wantCode   string
+	}{
+		{name: "run", removeFlag: "--run-id", wantCode: "missing_agentic_run_id"},
+		{name: "original operation", removeFlag: "--original-operation", wantCode: "missing_original_operation"},
+		{name: "original code", removeFlag: "--original-code", wantCode: "missing_original_code"},
+		{name: "evidence", removeFlag: "--evidence-file", wantCode: "missing_evidence_file"},
+		{name: "external reference", removeFlag: "--external-reference", wantCode: "missing_external_reference"},
+		{name: "readback", removeFlag: "--readback-verified", wantCode: "missing_readback_verified"},
+		{name: "remote write", removeFlag: "--remote-write-completed", wantCode: "missing_remote_write_completed"},
+		{name: "retry safe", removeFlag: "--retry-safe", wantCode: "missing_retry_safe"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			args := removeFeedbackRecoveryFlag(baseArgs, test.removeFlag)
+			var stdout bytes.Buffer
+			if code := Run(args, &stdout, &bytes.Buffer{}); code != 1 {
+				t.Fatalf("code = %d stdout = %s", code, stdout.String())
+			}
+			assertJSONField(t, stdout.String(), "code", test.wantCode)
+		})
+	}
+}
+
+func TestFeedbackRecordRecoveryRejectsUnverifiedReadback(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	evidencePath := filepath.Join(root, "recovery.md")
+	writeCLITestFile(t, evidencePath, "恢复证据\n")
+
+	var stdout bytes.Buffer
+	code := Run([]string{
+		"feedback", "record-recovery",
+		"--workspace", "tapstate",
+		"--run-id", "run-1",
+		"--original-operation", "check_ci_status",
+		"--original-code", "github_ci_read_failed",
+		"--evidence-file", evidencePath,
+		"--external-reference", "https://github.example/pull/1#checks",
+		"--readback-verified=false",
+		"--remote-write-completed=true",
+		"--retry-safe=false",
+		"--confirm-recovery-record",
+	}, &stdout, &bytes.Buffer{})
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s", code, stdout.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "readback_not_verified")
+	if _, err := os.Stat(filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson")); !os.IsNotExist(err) {
+		t.Fatalf("unverified recovery must not append an event, stat err = %v", err)
+	}
+}
+
+func TestFeedbackRecordRecoveryValidatesInputsAndAppendsIdempotently(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-08-11T09:00:00Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}`+"\n")
+	evidencePath := filepath.Join(root, "recovery.md")
+	writeCLITestFile(t, evidencePath, "恢复证据\n")
+	args := []string{
+		"feedback", "record-recovery",
+		"--workspace", "tapstate",
+		"--run-id", "run-1",
+		"--original-operation", "check_ci_status",
+		"--original-code", "github_ci_read_failed",
+		"--evidence-file", evidencePath,
+		"--external-reference", "https://github.example/pull/1#checks",
+		"--readback-verified",
+		"--remote-write-completed=true",
+		"--retry-safe=false",
+		"--confirm-recovery-record",
+	}
+
+	var first bytes.Buffer
+	if code := Run(args, &first, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("first code = %d stdout = %s", code, first.String())
+	}
+	assertJSONField(t, first.String(), "operation", "feedback_record_recovery")
+	assertJSONField(t, first.String(), "appended", true)
+	assertJSONField(t, first.String(), "original_code", "github_ci_read_failed")
+	if !strings.Contains(first.String(), "evidence_sha256") || !strings.Contains(first.String(), "fingerprint") {
+		t.Fatalf("first output missing digest or fingerprint: %s", first.String())
+	}
+
+	var second bytes.Buffer
+	if code := Run(args, &second, &bytes.Buffer{}); code != 0 {
+		t.Fatalf("second code = %d stdout = %s", code, second.String())
+	}
+	assertJSONField(t, second.String(), "appended", false)
+}
+
+func TestFeedbackRecordRecoveryRejectsEvidenceOutsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	outsidePath := filepath.Join(t.TempDir(), "outside.md")
+	writeCLITestFile(t, outsidePath, "恢复证据\n")
+
+	var stdout bytes.Buffer
+	code := Run([]string{
+		"feedback", "record-recovery",
+		"--workspace", "tapstate",
+		"--run-id", "run-1",
+		"--original-operation", "check_ci_status",
+		"--original-code", "github_ci_read_failed",
+		"--evidence-file", outsidePath,
+		"--external-reference", "https://github.example/pull/1#checks",
+		"--readback-verified=true",
+		"--remote-write-completed=true",
+		"--retry-safe=false",
+		"--confirm-recovery-record",
+	}, &stdout, &bytes.Buffer{})
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s", code, stdout.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "recovery_evidence_outside_workspace")
+}
+
+func removeFeedbackRecoveryFlag(args []string, flag string) []string {
+	result := make([]string, 0, len(args))
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		if arg == flag {
+			if index+1 < len(args) && !strings.HasPrefix(args[index+1], "--") {
+				index++
+			}
+			continue
+		}
+		if strings.HasPrefix(arg, flag+"=") {
+			continue
+		}
+		result = append(result, arg)
+	}
+	return result
 }

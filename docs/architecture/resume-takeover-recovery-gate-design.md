@@ -209,7 +209,7 @@ fake adapter 用于自动化验证，并参与卡片、目标仓库和标准流�
 `resume-takeover` 保持只读。确认 `agentic_run_id`、`issue_key` 和工作空间可信后，如果发生任务级阻塞，生成：
 
 ```text
-.agentic-ops/runs/<agentic_run_id>/resume-blocked-<code>.md
+.agentic-ops/tasks/<ISSUE-KEY>/runs/<agentic_run_id>/resume-blocked-<code>.md
 ```
 
 文件包含：
@@ -228,7 +228,7 @@ CLI 失败输出增加：
 {
   "jira_feedback_required": true,
   "jira_feedback_write_allowed": true,
-  "jira_feedback_file": ".agentic-ops/runs/<agentic_run_id>/resume-blocked-<code>.md",
+  "jira_feedback_file": ".agentic-ops/tasks/<ISSUE-KEY>/runs/<agentic_run_id>/resume-blocked-<code>.md",
   "jira_feedback_category": "blocked",
   "agentic_next_action": "add_task_comment"
 }

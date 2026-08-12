@@ -42,6 +42,18 @@ rg -n '^- \[ \]' plans
 
 ## 1. 可直接推进的实现代办
 
+### Task 0：落实本地任务目录、接口隔离和自动推进分支门禁
+
+**已确认方向：** 不引入 Web 控制台或后台常驻服务；标准操作通过 Operation Contract 隔离；运行资料统一写入 `.agentic-ops/tasks/<ISSUE-KEY>/`；有效工作项授权允许自动提交、推送任务分支并创建目标为 `develop` 的 PR；`master`、`main`、`develop`、`release/*` 及同类保护分支禁止自动推送。
+
+- [ ] 定义任务目录结构、路径安全规则和 Jira 编号规范化规则。
+- [ ] 为运行、审计、证据、反馈和交接操作统一 Jira 编号目录输入输出接口。
+- [ ] 增加任务分支推送与保护分支拒绝的 policy / contract 字段。
+- [ ] 增加 PR 目标分支必须为 `develop` 的门禁和失败码。
+- [ ] 实现 Jira `transition` 解析器：ID 严格优先；无 ID 时仅允许唯一名称且来源/目标状态匹配；歧义、不可用或回读不一致时返回 `jira_transition_mapping_gap`、`jira_transition_ambiguous`、`jira_transition_source_mismatch`、`jira_transition_target_mismatch` 或 `jira_transition_unavailable`，并写入解析审计。
+- [ ] 增加 fake Git 测试、资源测试和 E2E，覆盖授权后自动推进、保护分支拒绝和外部事实回读。
+- [ ] 更新 AI 员工手册、项目规则和工作空间初始化文档。
+
 ### Task 1: 补齐 `resume-takeover` 恢复门禁
 
 **Design source:**
@@ -383,12 +395,12 @@ bash scripts/test-resources.sh
 
 以下事项涉及产品、流程、权限或事实源取舍，不能直接写成默认实现任务；具体候选方案和推荐项见 `docs/architecture/remaining-governance-design-v1.md`：
 
-- [ ] 是否引入 Web 控制台或后台常驻进程。
-- [ ] 是否允许某些低风险场景自动创建拉取请求或自动推送。
+- [x] 不引入 Web 控制台或后台常驻进程；标准操作通过隔离接口和本地 Jira 编号目录管理。
+- [x] 有效工作项授权允许自动提交、推送任务分支并创建目标为 `develop` 的拉取请求；`master`、`main`、`develop`、`release/*` 及同类保护分支禁止自动推送。
 - [ ] 如需实现可选 GitHub Release 制品页能力，发布权限由谁持有、如何授权、如何审计、如何回滚。
 - [x] 跨版本兼容治理采用 `exact_pair`，并已完成实现。
-- [ ] 任务级审计记录最终写入 Jira 卡片、审计服务还是目标仓库证据链。
-- [ ] 真实 Jira 工作流中名称相同或含义冲突的 `transition` 如何裁决。
+- [x] 任务级审计日志当前最终保存在项目 AI 工作空间的 Jira 编号目录；Jira 回写关键结论和引用，后续再评估审计服务。
+- [x] 真实 Jira 工作流中名称相同或含义冲突的 `transition` 采用 ID 严格优先、唯一名称受控兜底、歧义即阻断。
 
 ## 3. 建议推进顺序
 

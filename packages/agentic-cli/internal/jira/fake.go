@@ -82,7 +82,7 @@ func (FakeClient) Transitions(ctx context.Context, key string) ([]Transition, er
 	return []Transition{{ID: "31", Name: "Done"}}, nil
 }
 
-func (FakeClient) TransitionIssue(ctx context.Context, key string, transitionID string) error {
+func (FakeClient) TransitionIssue(ctx context.Context, key string, request TransitionRequest) error {
 	return nil
 }
 

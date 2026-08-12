@@ -1,7 +1,9 @@
 package clihandlers
 
 import (
+	"errors"
 	"fmt"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/evidence"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/policy"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/runcontext"
@@ -46,6 +48,19 @@ func evidenceRunState(root string, workspaceName string, runID string) (evidence
 
 func evidenceStateErrorCode(err error) string {
 	return runcontext.ErrorCode(err)
+}
+
+func evidenceContentErrorCode(err error) string {
+	switch {
+	case errors.Is(err, evidence.ErrOutsideWorkspace):
+		return "evidence_content_outside_workspace"
+	case errors.Is(err, evidence.ErrEvidenceTooLarge):
+		return "evidence_content_too_large"
+	case errors.Is(err, evidence.ErrInvalidEvidenceSections):
+		return "invalid_evidence_sections"
+	default:
+		return "evidence_content_read_failed"
+	}
 }
 
 func evidenceTemplate(workspaceProfile profile.Profile) (string, string, error) {

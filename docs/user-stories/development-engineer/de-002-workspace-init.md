@@ -30,7 +30,7 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 7. CLI 根据研发工程师提供或确认的 Jira 用户、当前项目 AI 工作空间目录和可选 `--source-root` 准备本地 overlay；未提供 `--source-root` 时默认使用 `<project-ai-workspace>/repos/<project>`，此时尚不写入表示初始化完成的受管文件。
 8. CLI 优先复用已有真实 Jira 本地配置；没有本地配置时，在提供、确认或读取到项目默认 Jira base URL 后写入个人配置 `$AGENTIC_OPS_HOME/user/config.local.yaml` 的 `projects.<project>.jira` 分段，只保存 `adapter`、`base_url` 和 `email`。Jira API token 只保存到 `$AGENTIC_OPS_HOME/user/.env` 的 `AGENTIC_OPS_JIRA_API_TOKEN`，不写入 YAML。
 9. CLI 检查 `source_root`；目录不存在或为空时，从 workflow profile 的 `github.repositories.default` 下载项目代码并显示进度；目录已存在且非空时直接复用，不覆盖、不拉取、不切换分支。
-10. CLI 创建工作空间事件和执行日志目录，例如 `<project-ai-workspace>/.agentic-ops/runs/`、`<project-ai-workspace>/.agentic-ops/run-logs/`。
+10. CLI 创建按 Jira 编号隔离的任务运行目录，例如 `<project-ai-workspace>/.agentic-ops/tasks/<ISSUE-KEY>/runs/`、`audit/`、`feedback/` 和 `handoff/`。
 11. CLI 写入 `.agentic-ops/agent.json` 和根目录 `AGENTS.md`，让 AIAgent 能识别当前项目并知道如何调用 `agentic-cli`。
 12. CLI 运行工作空间预检。
 
@@ -109,7 +109,7 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 - `agentic-cli workspace init --project <project-name> --jira-user <user>` 输出。
 - `agentic-cli profile resolve --project <project-name>` 输出。
 - `agentic-cli preflight --workspace <name>` 输出。
-- 项目 AI 工作空间中的 `.agentic-ops/runs/`、`.agentic-ops/run-logs/`、`.agentic-ops/feedback/`、`.agentic-ops/agent.json` 和 `AGENTS.md`。
+- 项目 AI 工作空间中的 `.agentic-ops/tasks/<ISSUE-KEY>/`、`.agentic-ops/agent.json` 和 `AGENTS.md`。
 - workflow profile 中的 Jira / GitHub / 本地路径映射。
 
 ### 关联设计

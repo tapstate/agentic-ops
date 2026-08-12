@@ -7,6 +7,7 @@ import (
 	gitops "github.com/tapstate/agentic-ops/packages/agentic-cli/internal/git"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/github"
 	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/profile"
+	"github.com/tapstate/agentic-ops/packages/agentic-cli/internal/runtimeclock"
 )
 
 type JiraClientSelection = jiraClientSelection
@@ -168,6 +169,10 @@ func RunFeedbackBundle(args []string, stdout io.Writer) int {
 	return runFeedbackBundle(args, stdout)
 }
 
+func RunFeedbackRecordRecovery(args []string, stdout io.Writer) int {
+	return runFeedbackRecordRecovery(args, stdout)
+}
+
 func JiraTakeoverFields(workspaceProfile profile.Profile, runID string, currentAgentID string, takeoverAt string, nextAction string) map[string]any {
 	return jiraTakeoverFields(workspaceProfile, runID, currentAgentID, takeoverAt, nextAction)
 }
@@ -184,6 +189,12 @@ func SetRunGitHubAuthStatusForTest(fn func(context.Context) error) func() {
 	original := runGitHubAuthStatus
 	runGitHubAuthStatus = fn
 	return func() { runGitHubAuthStatus = original }
+}
+
+func SetClockForTest(clock runtimeclock.Clock) func() {
+	original := currentClock
+	currentClock = clock
+	return func() { currentClock = original }
 }
 
 func SetCommandAvailableForTest(fn func(string) bool) func() {

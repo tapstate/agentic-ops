@@ -113,9 +113,12 @@ github:
 local:
   workspace_root: "<project-ai-workspace>"
   source_root: "<project-ai-workspace>/src"
-  runs_dir: "<project-ai-workspace>/.agentic-ops/runs"
-  run_logs_dir: "<project-ai-workspace>/.agentic-ops/run-logs"
-  feedback_dir: "<project-ai-workspace>/.agentic-ops/feedback"
+  tasks_dir: "<project-ai-workspace>/.agentic-ops/tasks"
+  runs_dir: "<project-ai-workspace>/.agentic-ops/tasks/<ISSUE-KEY>/runs"
+  run_logs_dir: "<project-ai-workspace>/.agentic-ops/tasks/<ISSUE-KEY>/runs/<agentic_run_id>"
+  feedback_dir: "<project-ai-workspace>/.agentic-ops/tasks/<ISSUE-KEY>/feedback"
+  audit_dir: "<project-ai-workspace>/.agentic-ops/tasks/<ISSUE-KEY>/audit"
+  handoff_dir: "<project-ai-workspace>/.agentic-ops/tasks/<ISSUE-KEY>/handoff"
 
 human_gates:
   - push

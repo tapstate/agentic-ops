@@ -20,6 +20,7 @@ type Operation struct {
 type FieldSpec struct {
 	Type     string   `yaml:"type"`
 	Required bool     `yaml:"required"`
+	MaxBytes int64    `yaml:"max_bytes,omitempty"`
 	Enum     []string `yaml:"enum"`
 	Fields   []string `yaml:"fields"`
 }
