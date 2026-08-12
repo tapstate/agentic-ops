@@ -104,8 +104,11 @@ func completeTakeoverEvent(event feedback.Event, agentID string) bool {
 		event.AgenticID != "" &&
 		event.AgentID == agentID &&
 		event.AgenticID == event.AgentID &&
+		event.AgenticTakeoverAt != "" &&
+		event.AgenticHeartbeatAt != "" &&
 		event.TaskClass != "" &&
 		event.ProcessID != "" &&
+		event.TargetRepo != "" &&
 		event.CurrentStage != "" &&
 		event.AgenticNextAction != ""
 }

@@ -470,7 +470,7 @@ func TestTakeoverTaskWritesAgentOwnershipCommentWhenProfileUsesJiraComment(t *te
 func TestResumeTakeoverReturnsRunIDAndNextAction(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -492,7 +492,7 @@ func TestResumeTakeoverSkipsIncompleteHistoricalTakeoverEvent(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_gate","agentic_next_action":"ask_owner","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","ok":true,"gate":"real_jira_write","gate_status":"passed"}
-{"timestamp":"2026-07-21T10:30:13Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+{"timestamp":"2026-07-21T10:30:13Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 
 	var stdout bytes.Buffer
@@ -508,7 +508,7 @@ func TestResumeTakeoverSkipsIncompleteHistoricalTakeoverEvent(t *testing.T) {
 func TestResumeTakeoverRechecksRealJiraWithoutWriting(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	client := &recordingJiraClient{issue: realModeBoundIssue()}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
@@ -532,7 +532,7 @@ func TestResumeTakeoverRechecksRealJiraWithoutWriting(t *testing.T) {
 func TestResumeTakeoverCreatesWritableJiraFeedbackForLostBinding(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	client := &recordingJiraClient{issue: realModeIssue()}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
@@ -561,7 +561,7 @@ func TestResumeTakeoverCreatesWritableJiraFeedbackForLostBinding(t *testing.T) {
 func TestResumeTakeoverCreatesOwnerOnlyFeedbackForOwnershipConflict(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	issue := realModeBoundIssue()
 	issue.AgenticID = "other-agent"
@@ -583,7 +583,7 @@ func TestResumeTakeoverCreatesOwnerOnlyFeedbackForOwnershipConflict(t *testing.T
 func TestGeneratedResumeFeedbackCanBePassedToAddTaskComment(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	client := &recordingJiraClient{issue: realModeIssue()}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
@@ -620,7 +620,7 @@ func TestGeneratedResumeFeedbackCanBePassedToAddTaskComment(t *testing.T) {
 func TestResumeTakeoverRejectsMissingRun(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"other-run","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"other-run","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -639,7 +639,7 @@ func TestResumeTakeoverRejectsMissingRun(t *testing.T) {
 func TestResumeTakeoverRejectsWorkspaceMismatch(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"other","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"other","agentic_run_id":"run-1","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

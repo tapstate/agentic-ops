@@ -43,7 +43,7 @@ func TestWriteEvidenceRequiresCompletionContentBeforeWrites(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	client := &recordingJiraClient{issue: realModeBoundIssue()}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})
@@ -67,7 +67,7 @@ func TestWriteEvidenceRejectsInvalidCompletionContentBeforeWrites(t *testing.T) 
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	contentPath := filepath.Join(root, "completion.md")
 	writeCLITestFile(t, contentPath, "## 变更内容\n\n只有一个章节。\n")
@@ -159,7 +159,7 @@ func TestWritePREvidenceReportsNotConfiguredCIRisk(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true}
 {"timestamp":"2026-07-21T10:40:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"prepare_pr","current_stage":"pr_plan_prepared","agentic_next_action":"ask_owner_to_push_and_create_pr","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true}
 `)
 	withGitHubClientForTest(t, github.Client{Runner: &cliFakeGitHubRunner{outputs: map[string]string{
@@ -187,11 +187,36 @@ func TestWritePREvidenceReportsNotConfiguredCIRisk(t *testing.T) {
 	}
 }
 
+func TestWritePREvidencePreservesCIReadFailureCode(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
+	runID := "TAP-123-takeover-20260721103012-a8f3"
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true}
+{"timestamp":"2026-07-21T10:40:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"prepare_pr","current_stage":"pr_plan_prepared","agentic_next_action":"ask_owner_to_push_and_create_pr","target_repo":"tapstate/example-repo","ok":true}
+`)
+	withGitHubClientForTest(t, github.Client{Runner: &cliFakeGitHubRunner{
+		outputs: map[string]string{
+			"api --method GET repos/tapstate/example-repo/pulls/42": `{"html_url":"https://github.com/tapstate/example-repo/pull/42","head":{"sha":"abc123"}}`,
+		},
+		errors: map[string]error{
+			"api --paginate --slurp repos/tapstate/example-repo/commits/abc123/check-runs?per_page=100": errors.New("check-runs unavailable"),
+		},
+	}})
+
+	var stdout bytes.Buffer
+	code := Run([]string{"write-pr-evidence", "--workspace", "tapstate", "--run-id", runID, "--pr-url", "https://github.com/tapstate/example-repo/pull/42"}, &stdout, &bytes.Buffer{})
+	if code != 1 {
+		t.Fatalf("code = %d stdout = %s", code, stdout.String())
+	}
+	assertJSONField(t, stdout.String(), "code", "github_ci_read_failed")
+	assertEventLogContains(t, root, `"code":"github_ci_read_failed"`)
+}
+
 func TestWritePREvidenceRejectsStageBeforePRPlan(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true}
 `)
 
 	var stdout bytes.Buffer
@@ -207,7 +232,7 @@ func TestWriteEvidenceOutputsNextAction(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -249,7 +274,7 @@ func TestWriteEvidenceSkipsIncompleteHistoricalTakeoverEvent(t *testing.T) {
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
 	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_gate","agentic_next_action":"ask_owner","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","ok":true,"gate":"real_jira_write","gate_status":"passed"}
-{"timestamp":"2026-07-21T10:30:13Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+{"timestamp":"2026-07-21T10:30:13Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 
 	var stdout bytes.Buffer
@@ -266,7 +291,7 @@ func TestWriteEvidencePreservesTargetRepoAfterResume(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 {"timestamp":"2026-07-21T10:31:00Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"resume_takeover","task_type":"task_takeover","current_stage":"takeover_resumed","agentic_next_action":"continue_development","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","ok":true,"gate":"resume_takeover","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
@@ -294,7 +319,7 @@ func TestWriteEvidenceBlocksWhenLocalPolicyRequiresHumanGate(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -330,7 +355,7 @@ func TestWriteEvidenceRejectsCompletedRun(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 {"timestamp":"2026-07-21T10:31:00Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"release_agent","task_type":"task_release","current_stage":"completed","agentic_next_action":"task_audit_submitted","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"release_agent","gate_status":"passed"}
 `)
 
@@ -351,7 +376,7 @@ func TestWriteEvidenceRequiresConfirmationForRealJiraComment(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: &recordingJiraClient{issue: realModeBoundIssue()}, Mode: "real"})
 
@@ -372,7 +397,7 @@ func TestWriteEvidenceRecordsPassedRealJiraCommentGate(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AGENTIC_OPS_WORKSPACE_ROOT", root)
 	runID := "TAP-123-takeover-20260721103012-a8f3"
-	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
+	writeCLITestFile(t, filepath.Join(root, ".agentic-ops", "feedback", "events.ndjson"), `{"timestamp":"2026-07-21T10:30:12Z","workspace":"tapstate","agentic_run_id":"TAP-123-takeover-20260721103012-a8f3","issue_key":"TAP-123","operation":"takeover_task","task_type":"task_takeover","current_stage":"takeover_started","agentic_next_action":"proceed","agent_id":"agentic-cli-local-agent","agentic_id":"agentic-cli-local-agent","agentic_takeover_at":"2026-07-21T10:30:12Z","agentic_heartbeat_at":"2026-07-21T10:30:12Z","task_class":"technical_task","process_id":"development_change_v1","target_repo":"tapstate/example-repo","ok":true,"gate":"takeover_task","gate_status":"passed"}
 `)
 	client := &recordingJiraClient{issue: realModeBoundIssue()}
 	withJiraClientForTest(t, clihandlers.JiraClientSelection{Client: client, Mode: "real"})

@@ -42,6 +42,8 @@ input:
   readback_verified:
     type: boolean
     required: true
+    enum:
+      - true
   remote_write_completed:
     type: boolean
     required: true
@@ -95,6 +97,7 @@ failure:
     - missing_external_reference
     - invalid_external_reference
     - missing_readback_verified
+    - readback_not_verified
     - missing_remote_write_completed
     - missing_retry_safe
     - invalid_boolean_flag

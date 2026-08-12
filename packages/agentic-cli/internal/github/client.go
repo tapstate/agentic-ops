@@ -3,11 +3,38 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 	"time"
 )
+
+const (
+	PRReadFailedCode = "github_pr_read_failed"
+	CIReadFailedCode = "github_ci_read_failed"
+)
+
+type ReadError struct {
+	Code string
+	Err  error
+}
+
+func (err *ReadError) Error() string {
+	return err.Err.Error()
+}
+
+func (err *ReadError) Unwrap() error {
+	return err.Err
+}
+
+func ReadErrorCode(err error) string {
+	var readErr *ReadError
+	if errors.As(err, &readErr) {
+		return readErr.Code
+	}
+	return PRReadFailedCode
+}
 
 type Runner interface {
 	Run(ctx context.Context, args ...string) ([]byte, error)
@@ -75,19 +102,19 @@ type CIStatus struct {
 func (client Client) ReadPullRequestFacts(ctx context.Context, repo string, pr string) (PullRequestFacts, error) {
 	url, headSHA, err := client.readPullRequest(ctx, repo, pr)
 	if err != nil {
-		return PullRequestFacts{}, err
+		return PullRequestFacts{}, &ReadError{Code: PRReadFailedCode, Err: err}
 	}
 	ci, err := client.readCIStatus(ctx, repo, headSHA)
 	if err != nil {
-		return PullRequestFacts{}, err
+		return PullRequestFacts{}, &ReadError{Code: CIReadFailedCode, Err: err}
 	}
 	comments, err := client.readComments(ctx, repo, pr)
 	if err != nil {
-		return PullRequestFacts{}, err
+		return PullRequestFacts{}, &ReadError{Code: PRReadFailedCode, Err: err}
 	}
 	reviews, err := client.readReviews(ctx, repo, pr)
 	if err != nil {
-		return PullRequestFacts{}, err
+		return PullRequestFacts{}, &ReadError{Code: PRReadFailedCode, Err: err}
 	}
 	return PullRequestFacts{
 		URL:      url,

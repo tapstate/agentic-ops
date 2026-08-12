@@ -183,7 +183,7 @@ func TestReadReturnsStableLocalStateErrors(t *testing.T) {
 	}
 }
 
-func TestReadBackfillsMissingTargetRepoFromLaterEvent(t *testing.T) {
+func TestReadRejectsMissingTargetRepoEvenWhenLaterEventSuppliesIt(t *testing.T) {
 	anchor := takeoverEvent()
 	anchor.TargetRepo = ""
 	later := feedback.Event{
@@ -197,15 +197,33 @@ func TestReadBackfillsMissingTargetRepoFromLaterEvent(t *testing.T) {
 		OK:                true,
 	}
 
-	got, err := Read(
+	_, err := Read(
 		[]feedback.Event{anchor, later},
 		Query{AgenticRunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"},
 	)
-	if err != nil {
-		t.Fatalf("Read error = %v", err)
+	if !errors.Is(err, ErrLocalStateMismatch) {
+		t.Fatalf("Read error = %v, want %v", err, ErrLocalStateMismatch)
 	}
-	if got.TargetRepo != "tapstate/example-repo" {
-		t.Fatalf("TargetRepo = %q", got.TargetRepo)
+}
+
+func TestReadRejectsTakeoverMissingRequiredAnchorField(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*feedback.Event)
+	}{
+		{name: "takeover time", mutate: func(event *feedback.Event) { event.AgenticTakeoverAt = "" }},
+		{name: "heartbeat time", mutate: func(event *feedback.Event) { event.AgenticHeartbeatAt = "" }},
+		{name: "target repo", mutate: func(event *feedback.Event) { event.TargetRepo = "" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			event := takeoverEvent()
+			test.mutate(&event)
+			_, err := Read([]feedback.Event{event}, Query{AgenticRunID: "run-1", Workspace: "tapstate", AgentID: "agent-1"})
+			if !errors.Is(err, ErrLocalStateMismatch) {
+				t.Fatalf("Read error = %v, want %v", err, ErrLocalStateMismatch)
+			}
+		})
 	}
 }
 
@@ -342,17 +360,19 @@ func TestReadFileAndErrorCode(t *testing.T) {
 
 func takeoverEvent() feedback.Event {
 	return feedback.Event{
-		Workspace:         "tapstate",
-		AgenticRunID:      "run-1",
-		IssueKey:          "TAP-123",
-		Operation:         "takeover_task",
-		CurrentStage:      "takeover_started",
-		AgenticNextAction: "proceed",
-		AgentID:           "agent-1",
-		AgenticID:         "agent-1",
-		TaskClass:         "technical_task",
-		ProcessID:         "development_change_v1",
-		TargetRepo:        "tapstate/example-repo",
-		OK:                true,
+		Workspace:          "tapstate",
+		AgenticRunID:       "run-1",
+		IssueKey:           "TAP-123",
+		Operation:          "takeover_task",
+		CurrentStage:       "takeover_started",
+		AgenticNextAction:  "proceed",
+		AgentID:            "agent-1",
+		AgenticID:          "agent-1",
+		AgenticTakeoverAt:  "2026-07-21T10:30:12Z",
+		AgenticHeartbeatAt: "2026-07-21T10:30:12Z",
+		TaskClass:          "technical_task",
+		ProcessID:          "development_change_v1",
+		TargetRepo:         "tapstate/example-repo",
+		OK:                 true,
 	}
 }

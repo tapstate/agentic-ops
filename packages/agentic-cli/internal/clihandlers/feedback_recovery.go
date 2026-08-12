@@ -57,6 +57,9 @@ func runFeedbackRecordRecovery(args []string, stdout io.Writer) int {
 	if code == "" {
 		return recoveryInputFailure(stdout, "missing_readback_verified", "缺少回读确认事实", "请显式提供 --readback-verified=true|false")
 	}
+	if !readbackVerified {
+		return recoveryInputFailure(stdout, "readback_not_verified", "外部事实尚未通过回读确认", "请先从外部事实源回读并确认结果，再使用 --readback-verified=true 记录恢复证据")
+	}
 	remoteWriteCompleted, code, err := explicitBoolFlag(args, "--remote-write-completed")
 	if err != nil {
 		return recoveryInputFailure(stdout, "invalid_boolean_flag", err.Error(), "请使用 --remote-write-completed=true|false")

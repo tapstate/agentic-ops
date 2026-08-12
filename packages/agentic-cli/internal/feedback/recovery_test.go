@@ -95,6 +95,18 @@ func TestAnalyzeAndProposeIncludeRecoveredFailure(t *testing.T) {
 	}
 }
 
+func TestAnalyzeAndProposeIgnoreUnverifiedRecovery(t *testing.T) {
+	event := testRecoveryEvent()
+	event.Recovery.ReadbackVerified = false
+
+	if analysis := Analyze([]Event{event}); len(analysis.RecoveryPatterns) != 0 {
+		t.Fatalf("recovery patterns = %+v", analysis.RecoveryPatterns)
+	}
+	if proposals := Propose([]Event{event}); len(proposals) != 0 {
+		t.Fatalf("proposals = %+v", proposals)
+	}
+}
+
 func TestProposeDeduplicatesOriginalFailureAndRecoveryEvidence(t *testing.T) {
 	recovery := testRecoveryEvent()
 	failure := Event{

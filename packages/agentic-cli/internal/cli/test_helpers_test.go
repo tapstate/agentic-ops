@@ -382,10 +382,14 @@ func withCommandAvailabilityForTest(t *testing.T, check func(string) bool) {
 
 type cliFakeGitHubRunner struct {
 	outputs map[string]string
+	errors  map[string]error
 }
 
 func (f *cliFakeGitHubRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
 	command := strings.Join(args, " ")
+	if err := f.errors[command]; err != nil {
+		return nil, err
+	}
 	output, ok := f.outputs[command]
 	if !ok {
 		return nil, errors.New("unexpected gh command: " + command)

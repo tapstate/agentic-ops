@@ -77,7 +77,7 @@ func runWritePREvidence(args []string, stdout io.Writer) int {
 
 	facts, err := gitHubClient.ReadPullRequestFacts(context.Background(), repo, pr)
 	if err != nil {
-		return writePREvidenceFailure(stdout, workspaceName, runID, state.IssueKey, "github_pr_read_failed", err.Error(), "请检查 GitHub CLI 登录状态、仓库权限和 PR URL", "pr_evidence_gate", "fix_environment")
+		return writePREvidenceFailure(stdout, workspaceName, runID, state.IssueKey, github.ReadErrorCode(err), err.Error(), "请检查 GitHub CLI 登录状态、仓库权限和 PR URL", "pr_evidence_gate", "fix_environment")
 	}
 	reviewStatus := summarizeReviewStatus(facts.Reviews)
 	path := filepath.Join(root, ".agentic-ops", "runs", runID, "pr-evidence.md")

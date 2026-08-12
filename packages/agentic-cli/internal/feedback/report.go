@@ -93,7 +93,7 @@ func FilterEvents(events []Event, filter EventFilter) ([]Event, error) {
 			continue
 		}
 		eventCode := event.Code
-		if event.Recovery != nil {
+		if verifiedRecovery(event) {
 			eventCode = event.Recovery.OriginalCode
 		}
 		if filter.Code != "" && eventCode != filter.Code {
@@ -133,7 +133,7 @@ func Analyze(events []Event) Analysis {
 				failureCounts[key]++
 			}
 		}
-		if event.Recovery != nil {
+		if verifiedRecovery(event) {
 			fingerprint := RecoveryFingerprint(event)
 			if !seenRecoveries[fingerprint] && event.Recovery.OriginalCode != "" {
 				recoveryCounts[event.Recovery.OriginalCode]++
@@ -201,7 +201,7 @@ func Propose(events []Event) []Proposal {
 				evidence.identities[feedbackEvidenceIdentity(event.Workspace, event.AgenticRunID, event.Operation, key)] = true
 			}
 		}
-		if event.Recovery != nil && event.Recovery.OriginalCode != "" {
+		if verifiedRecovery(event) && event.Recovery.OriginalCode != "" {
 			key := event.Recovery.OriginalCode
 			evidence := ensureEvidence(key)
 			evidence.identities[feedbackEvidenceIdentity(event.Workspace, event.AgenticRunID, event.Recovery.OriginalOperation, key)] = true
@@ -236,6 +236,10 @@ func Propose(events []Event) []Proposal {
 		})
 	}
 	return proposals
+}
+
+func verifiedRecovery(event Event) bool {
+	return event.Recovery != nil && event.Recovery.ReadbackVerified
 }
 
 func feedbackEvidenceIdentity(workspace string, runID string, operation string, code string) string {

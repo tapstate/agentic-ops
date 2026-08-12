@@ -101,6 +101,22 @@ func TestReadPullRequestFactsReturnsAPIError(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "API denied") {
 		t.Fatalf("error = %v", err)
 	}
+	if got := ReadErrorCode(err); got != CIReadFailedCode {
+		t.Fatalf("ReadErrorCode = %q, want %q", got, CIReadFailedCode)
+	}
+}
+
+func TestReadPullRequestFactsClassifiesPRMetadataError(t *testing.T) {
+	runner := &fixtureRunner{
+		errors: map[string]error{"api --method GET repos/tapdata/tapdata/pulls/42": errors.New("PR denied")},
+	}
+	_, err := (Client{Runner: runner}).ReadPullRequestFacts(context.Background(), "tapdata/tapdata", "42")
+	if err == nil {
+		t.Fatal("ReadPullRequestFacts error = nil")
+	}
+	if got := ReadErrorCode(err); got != PRReadFailedCode {
+		t.Fatalf("ReadErrorCode = %q, want %q", got, PRReadFailedCode)
+	}
 }
 
 func fixture(t *testing.T, name string) []byte {
