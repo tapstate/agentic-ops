@@ -13,6 +13,7 @@ from agentic_ops.output import (
     write_diagnostic,
     write_json,
 )
+from agentic_ops.authorization.cli import configure_authorization_parser, execute_authorization
 from agentic_ops.jira.cli import configure_jira_parser, execute_jira
 from agentic_ops.task_state import TaskIdentity, TaskStore
 from agentic_ops.workspace import PROJECT_EXECUTION, VALID_MODES, require_mode, resolve_workspace
@@ -57,6 +58,7 @@ def build_parser() -> argparse.ArgumentParser:
     report_write.add_argument("--agentic-run-id", required=True)
     report_write.add_argument("--kind", choices=("analysis", "plan"), required=True)
     report_write.add_argument("--content-file", required=True)
+    configure_authorization_parser(subparsers)
     configure_jira_parser(subparsers)
     return parser
 
@@ -82,6 +84,10 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             workspace_mode=workspace.mode,
             config_path=str(workspace.config_path) if workspace.config_path else None,
         )
+
+    if args.group == "auth":
+        state = execute_authorization(args, workspace, args.install_root)
+        return success(operation, workspace_mode=workspace.mode, **state)
 
     require_mode(workspace, frozenset({PROJECT_EXECUTION}))
     store = TaskStore(Path(workspace.root), lock_timeout=args.lock_timeout)

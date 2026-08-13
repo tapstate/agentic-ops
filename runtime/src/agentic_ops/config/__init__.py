@@ -1,4 +1,9 @@
-from agentic_ops.config.loader import JiraContext, load_jira_context
+from agentic_ops.config.loader import (
+    JiraContext,
+    list_jira_connections,
+    load_jira_connection,
+    load_jira_context,
+)
 from agentic_ops.config.model import FieldMapping, JiraConnection, ProjectProfile
 
 __all__ = [
@@ -6,5 +11,7 @@ __all__ = [
     "JiraConnection",
     "JiraContext",
     "ProjectProfile",
+    "list_jira_connections",
+    "load_jira_connection",
     "load_jira_context",
 ]

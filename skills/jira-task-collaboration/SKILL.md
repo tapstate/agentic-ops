@@ -11,11 +11,12 @@ allowed_modes:
 
 ## 能力顺序
 
-1. 用 `agentic-cli jira inspect` 读取 Connection、Profile 和任务事实。
-2. 用 `agentic-cli report write --kind analysis|plan` 保存本地报告。
-3. 对 Comment、Description 或 Worklog 先执行 `plan`，检查 `action`、`plan_id` 和内容摘要。
-4. 只有研发工程师确认计划，或有效连续执行授权明确覆盖该写入时，才以同一 `plan_id` 和可追溯的 `--authorization-reference` 执行 `apply`。
-5. `apply` 会执行回读并更新 `sync.json`。若返回 `jira_write_result_unknown`，只能执行 `readback`，不能直接重试。
+1. 用 `agentic-cli auth jira show` 查看授权状态；未就绪时调用 `configure-authorization` Skill，完成后执行 `auth jira verify`。
+2. 用 `agentic-cli jira inspect` 读取 Connection、Profile 和任务事实。
+3. 用 `agentic-cli report write --kind analysis|plan` 保存本地报告。
+4. 对 Comment、Description 或 Worklog 先执行 `plan`，检查 `action`、`plan_id` 和内容摘要。
+5. 只有研发工程师确认计划，或有效连续执行授权明确覆盖该写入时，才以同一 `plan_id` 和可追溯的 `--authorization-reference` 执行 `apply`。
+6. `apply` 会执行回读并更新 `sync.json`。若返回 `jira_write_result_unknown`，只能执行 `readback`，不能直接重试。
 
 ## 硬边界
 

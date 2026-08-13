@@ -202,7 +202,17 @@ class JiraClient:
         query: dict[str, str] | None = None,
         body: dict[str, Any] | None = None,
     ) -> Any:
-        response = self.transport.request(method, path, query=query, body=body)
+        try:
+            response = self.transport.request(method, path, query=query, body=body)
+        except JiraTransportError as error:
+            if method != "GET":
+                raise
+            raise RuntimeErrorResult(
+                code="jira_connection_failed",
+                message="无法连接 Jira 或请求超时",
+                retry_safe=True,
+                required_human_action="请检查网络、Connection base_url 和 Jira 服务状态后重试",
+            ) from error
         if 200 <= response.status < 300:
             return response.payload
         if response.status == 404:

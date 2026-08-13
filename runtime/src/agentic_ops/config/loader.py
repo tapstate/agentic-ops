@@ -79,18 +79,11 @@ def load_jira_context(workspace: Workspace, install_root: Path) -> JiraContext:
             required_human_action="请核对项目工作空间与 Jira Profile 绑定后重试",
         )
 
-    connection_payload = _load_layered_yaml(
-        [
-            install_root / "standards" / "connections" / f"{bound_connection_id}.yaml",
-            install_root / "user" / "connections" / f"{bound_connection_id}.local.yaml",
-            workspace.root / ".agentic-ops" / "connections" / f"{bound_connection_id}.local.yaml",
-        ],
-        "jira_connection_not_found",
+    connection = load_jira_connection(
+        install_root,
+        bound_connection_id,
+        workspace_root=workspace.root,
     )
-    try:
-        connection = _parse_connection(connection_payload, bound_connection_id)
-    except (TypeError, ValueError) as error:
-        raise _configuration_error("Jira Connection", error) from error
     env_paths = [workspace.root / ".agentic-ops" / ".env", install_root / "user" / ".env"]
     return JiraContext(
         connection=connection,
@@ -98,6 +91,46 @@ def load_jira_context(workspace: Workspace, install_root: Path) -> JiraContext:
         email=resolve_secret(connection.email_env, env_paths),
         token=resolve_secret(connection.token_env, env_paths),
     )
+
+
+def load_jira_connection(
+    install_root: Path,
+    connection_id: str,
+    *,
+    workspace_root: Path | None = None,
+) -> JiraConnection:
+    paths = [
+        install_root / "standards" / "connections" / f"{connection_id}.yaml",
+        install_root / "user" / "connections" / f"{connection_id}.local.yaml",
+    ]
+    if workspace_root is not None:
+        paths.append(
+            workspace_root / ".agentic-ops" / "connections" / f"{connection_id}.local.yaml"
+        )
+    connection_payload = _load_layered_yaml(paths, "jira_connection_not_found")
+    try:
+        return _parse_connection(connection_payload, connection_id)
+    except (TypeError, ValueError) as error:
+        raise _configuration_error("Jira Connection", error) from error
+
+
+def list_jira_connections(install_root: Path) -> list[str]:
+    connection_ids: set[str] = set()
+    for directory in (
+        install_root / "standards" / "connections",
+        install_root / "user" / "connections",
+    ):
+        if not directory.is_dir():
+            continue
+        for path in directory.glob("*.yaml"):
+            name = path.name
+            if name.endswith(".local.yaml"):
+                name = name[: -len(".local.yaml")]
+            else:
+                name = path.stem
+            if name:
+                connection_ids.add(name)
+    return sorted(connection_ids)
 
 
 def _load_agent_config(workspace: Workspace) -> dict[str, Any]:

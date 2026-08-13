@@ -143,3 +143,9 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 - Python 源码或标准资产更新后不需要构建项目自有平台二进制。
 - 两种运行模式不会交叉加载规则，多 Jira Connection 的任务身份和凭证保持隔离。
 - Worklog 可以解释每段真实耗时所包含的处理，并能安全回读避免重复登记。
+
+## 12. 授权入口
+
+外部系统授权统一通过 `agentic-cli auth` 管理。Jira 当前支持 `list`、`show`、`set`、`remove` 和 `verify`；用户不需要手工猜测环境变量名或编辑 `.env`。
+
+授权入口只返回配置状态、脱敏身份和来源，不返回 token。凭证文件使用锁、原子替换和 `0600` 权限；真实 Jira 操作前必须验证 Connection、当前身份和项目工作空间绑定。详细操作见 [AgenticOps 授权管理](authorization.md)。
