@@ -74,7 +74,10 @@ class ConfigTest(unittest.TestCase):
             user_env.parent.mkdir(parents=True)
             user_env.write_text("TEST_JIRA_TOKEN=user-token\nTEST_JIRA_EMAIL=user@example.test\n", encoding="utf-8")
             workspace_env = workspace_root / ".agentic-ops" / ".env"
-            workspace_env.write_text("TEST_JIRA_EMAIL=workspace@example.test\n", encoding="utf-8")
+            workspace_env.write_text(
+                "TEST_JIRA_EMAIL=workspace@example.test\nTEST_JIRA_TOKEN=workspace-token\n",
+                encoding="utf-8",
+            )
             override = workspace_root / ".agentic-ops" / "connections" / "tap-cloud.local.yaml"
             override.parent.mkdir()
             override.write_text("base_url: https://workspace.example.test\n", encoding="utf-8")
@@ -83,12 +86,30 @@ class ConfigTest(unittest.TestCase):
                 context = load_jira_context(workspace, install)
             self.assertEqual("https://workspace.example.test", context.connection.base_url)
             self.assertEqual("workspace@example.test", context.email)
-            self.assertEqual("user-token", context.token)
+            self.assertEqual("workspace-token", context.token)
             self.assertEqual(
                 {"email_configured": True, "token_configured": True},
                 context.credential_status(),
             )
             self.assertEqual({"customfield_10001"}, context.profile.active_custom_field_ids())
+
+    def test_profile_selects_connection_without_duplicate_workspace_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            install, workspace_root = self.prepare(Path(temporary))
+            agent_path = workspace_root / ".agentic-ops" / "agent.json"
+            agent_path.write_text(
+                json.dumps({"mode": "project_execution", "project_profile": "demo"}),
+                encoding="utf-8",
+            )
+            with mock.patch.dict(
+                os.environ,
+                {"TEST_JIRA_EMAIL": "owner@example.test", "TEST_JIRA_TOKEN": "token-value"},
+                clear=True,
+            ):
+                context = load_jira_context(
+                    resolve_workspace(str(workspace_root), PROJECT_EXECUTION), install
+                )
+            self.assertEqual("tap-cloud", context.connection.connection_id)
 
     def test_process_environment_has_highest_secret_precedence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

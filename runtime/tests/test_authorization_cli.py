@@ -69,10 +69,6 @@ auth:
             configured = self.run_cli(
                 *common,
                 "set",
-                "--connection-id",
-                "tap-cloud",
-                "--scope",
-                "user",
                 "--email",
                 "owner@example.test",
                 "--token-stdin",
@@ -82,16 +78,12 @@ auth:
             self.assertEqual(True, configured[1]["ready"])
             self.assertNotIn(token, configured[3])
             self.assertEqual("ow***@example.test", configured[1]["email_hint"])
-            env_path = install / "user" / ".env"
+            env_path = workspace / ".agentic-ops" / ".env"
             self.assertEqual(0o600, env_path.stat().st_mode & 0o777)
 
             modified = self.run_cli(
                 *common,
                 "set",
-                "--connection-id",
-                "tap-cloud",
-                "--scope",
-                "user",
                 "--email",
                 "changed@example.test",
             )
@@ -102,59 +94,39 @@ auth:
                 shown = self.run_cli(
                     *common,
                     "show",
-                    "--connection-id",
-                    "tap-cloud",
-                    "--scope",
-                    "effective",
                 )
-            self.assertEqual("user_env", shown[1]["token_source"])
+            self.assertEqual("workspace", shown[1]["account_scope"])
+            self.assertEqual("workspace", shown[1]["credential_source"])
             self.assertNotIn(token, shown[3])
 
             removed = self.run_cli(
                 *common,
                 "remove",
-                "--connection-id",
-                "tap-cloud",
-                "--scope",
-                "user",
                 "--field",
                 "token",
             )
             self.assertEqual(False, removed[1]["token_configured"])
             self.assertNotIn("TEST_JIRA_TOKEN", env_path.read_text())
 
-    def test_workspace_scope_overrides_user_and_source_is_visible(self) -> None:
+    def test_install_user_credentials_cannot_replace_workspace_account(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             install, workspace = self.prepare(Path(temporary))
             common = self.common(install, workspace)
-            user_env = install / "user" / ".env"
-            user_env.parent.mkdir(parents=True)
-            user_env.write_text(
+            install_env = install / "user" / ".env"
+            install_env.parent.mkdir(parents=True)
+            install_env.write_text(
                 "TEST_JIRA_EMAIL=user@example.test\nTEST_JIRA_TOKEN=user-token-123\n",
                 encoding="utf-8",
             )
-            configured = self.run_cli(
-                *common,
-                "set",
-                "--connection-id",
-                "tap-cloud",
-                "--scope",
-                "workspace",
-                "--email",
-                "workspace@example.test",
-                "--token-stdin",
-                stdin="workspace-token-123\n",
+            workspace_env = workspace / ".agentic-ops" / ".env"
+            workspace_env.write_text(
+                "TEST_JIRA_EMAIL=workspace@example.test\nTEST_JIRA_TOKEN=workspace-token-123\n",
+                encoding="utf-8",
             )
-            self.assertEqual(0, configured[0])
             with mock.patch.dict(os.environ, {}, clear=True):
-                shown = self.run_cli(
-                    *common,
-                    "show",
-                    "--connection-id",
-                    "tap-cloud",
-                )
-            self.assertEqual("workspace_env", shown[1]["email_source"])
-            self.assertEqual("workspace_env", shown[1]["token_source"])
+                shown = self.run_cli(*common, "show")
+            self.assertEqual("wo*******@example.test", shown[1]["email_hint"])
+            self.assertEqual("workspace", shown[1]["credential_source"])
 
     def test_verify_returns_identity_without_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -168,12 +140,7 @@ auth:
                 "agentic_ops.authorization.cli.UrllibJiraTransport",
                 return_value=FakeTransport(),
             ):
-                verified = self.run_cli(
-                    *common,
-                    "verify",
-                    "--connection-id",
-                    "tap-cloud",
-                )
+                verified = self.run_cli(*common, "verify")
             self.assertEqual(0, verified[0])
             self.assertEqual(True, verified[1]["verified"])
             self.assertEqual("owner-1", verified[1]["jira_user"])
@@ -186,20 +153,16 @@ auth:
             blocked = self.run_cli(
                 *common,
                 "set",
-                "--connection-id",
-                "tap-cloud",
                 "--email",
                 "not-an-email",
             )
             self.assertEqual(2, blocked[0])
             self.assertEqual("authorization_email_invalid", blocked[1]["code"])
-            self.assertFalse((install / "user" / ".env").exists())
+            self.assertFalse((workspace / ".agentic-ops" / ".env").exists())
 
             empty = self.run_cli(
                 *common,
                 "set",
-                "--connection-id",
-                "tap-cloud",
                 "--token-stdin",
                 stdin="\n",
             )

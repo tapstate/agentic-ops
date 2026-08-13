@@ -7,14 +7,22 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from agentic_ops.config import list_jira_connections, load_jira_connection
-from agentic_ops.config.env import read_env_file, resolve_secret_with_source, update_env_file
+from agentic_ops.config import (
+    list_jira_connections,
+    load_jira_connection,
+    resolve_workspace_connection_id,
+)
+from agentic_ops.config.env import (
+    read_env_file,
+    resolve_secret_pair_with_source,
+    update_env_file,
+)
 from agentic_ops.config.loader import default_install_root
 from agentic_ops.config.model import ProjectProfile
 from agentic_ops.jira.client import JiraClient, UrllibJiraTransport
 from agentic_ops.output import EXIT_BLOCKED, RuntimeErrorResult
 from agentic_ops.task_state.locking import TaskLock
-from agentic_ops.workspace import PROJECT_EXECUTION, Workspace
+from agentic_ops.workspace import Workspace
 
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
@@ -29,18 +37,15 @@ def configure_authorization_parser(subparsers: argparse._SubParsersAction[Any]) 
 
     show = actions.add_parser("show")
     _connection_argument(show)
-    show.add_argument("--scope", choices=("effective", "user", "workspace"), default="effective")
 
     set_parser = actions.add_parser("set")
     _connection_argument(set_parser)
-    set_parser.add_argument("--scope", choices=("user", "workspace"), default="user")
     set_parser.add_argument("--email")
     set_parser.add_argument("--token-stdin", action="store_true")
     set_parser.add_argument("--interactive", action="store_true")
 
     remove = actions.add_parser("remove")
     _connection_argument(remove)
-    remove.add_argument("--scope", choices=("user", "workspace"), default="user")
     remove.add_argument("--field", choices=("email", "token", "all"), required=True)
 
     verify = actions.add_parser("verify")
@@ -61,19 +66,24 @@ def execute_authorization(
         connections = list_jira_connections(install_root)
         return {"connections": connections, "count": len(connections)}
 
+    connection_id = resolve_workspace_connection_id(
+        workspace,
+        install_root,
+        getattr(args, "connection_id", None),
+    )
     connection = load_jira_connection(
         install_root,
-        args.connection_id,
-        workspace_root=workspace.root if workspace.mode == PROJECT_EXECUTION else None,
+        connection_id,
+        workspace_root=workspace.root,
     )
     if args.action == "show":
-        return _show(connection, install_root, workspace, args.scope)
+        return _show(connection, workspace)
     if args.action == "set":
-        return _set(connection, install_root, workspace, args)
+        return _set(connection, workspace, args)
     if args.action == "remove":
-        return _remove(connection, install_root, workspace, args.scope, args.field)
+        return _remove(connection, workspace, args.field)
     if args.action == "verify":
-        status = _effective_status(connection, install_root, workspace)
+        status = _effective_status(connection, workspace)
         email, token = _require_effective_credentials(status, connection)
         client = JiraClient(
             ProjectProfile(
@@ -92,8 +102,8 @@ def execute_authorization(
             "verified": True,
             "jira_user": current_user,
             "field_count": len(fields),
-            "email_source": status["email_source"],
-            "token_source": status["token_source"],
+            "account_scope": "workspace",
+            "credential_source": status["credential_source"],
         }
     raise RuntimeErrorResult(
         code="authorization_action_unsupported",
@@ -105,47 +115,29 @@ def execute_authorization(
 
 
 def _connection_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--connection-id", required=True)
+    parser.add_argument("--connection-id", help=argparse.SUPPRESS)
 
 
-def _show(connection: Any, install_root: Path, workspace: Workspace, scope: str) -> dict[str, Any]:
-    if scope == "effective":
-        status = _effective_status(connection, install_root, workspace)
-        return {
-            "connection_id": connection.connection_id,
-            "base_url": connection.base_url,
-            "scope": scope,
-            "email_env": connection.email_env,
-            "token_env": connection.token_env,
-            "email_configured": status["email"] is not None,
-            "token_configured": status["token"] is not None,
-            "email_source": status["email_source"],
-            "token_source": status["token_source"],
-            "email_hint": _mask_email(status["email"]),
-            "ready": status["email"] is not None and status["token"] is not None,
-        }
-    env_path = _scope_env_path(scope, install_root, workspace)
-    values = read_env_file(env_path)
-    email = values.get(connection.email_env)
+def _show(connection: Any, workspace: Workspace) -> dict[str, Any]:
+    status = _effective_status(connection, workspace)
     return {
         "connection_id": connection.connection_id,
         "base_url": connection.base_url,
-        "scope": scope,
-        "config_path": str(env_path),
-        "email_configured": bool(email),
-        "token_configured": bool(values.get(connection.token_env)),
-        "email_hint": _mask_email(email),
-        "ready": bool(email and values.get(connection.token_env)),
+        "account_scope": "workspace",
+        "email_configured": status["email"] is not None,
+        "token_configured": status["token"] is not None,
+        "credential_source": status["credential_source"],
+        "email_hint": _mask_email(status["email"]),
+        "ready": status["email"] is not None and status["token"] is not None,
     }
 
 
 def _set(
     connection: Any,
-    install_root: Path,
     workspace: Workspace,
     args: argparse.Namespace,
 ) -> dict[str, Any]:
-    env_path = _scope_env_path(args.scope, install_root, workspace)
+    env_path = workspace.root / ".agentic-ops" / ".env"
     current = read_env_file(env_path)
     interactive = args.interactive or (
         args.email is None and not args.token_stdin and sys.stdin.isatty()
@@ -187,7 +179,7 @@ def _set(
 
     with TaskLock(env_path.parent / ".authorization.lock", timeout=5):
         update_env_file(env_path, updates)
-    status = _show(connection, install_root, workspace, args.scope)
+    status = _show(connection, workspace)
     return {
         **status,
         "updated_fields": sorted(
@@ -199,12 +191,10 @@ def _set(
 
 def _remove(
     connection: Any,
-    install_root: Path,
     workspace: Workspace,
-    scope: str,
     field: str,
 ) -> dict[str, Any]:
-    env_path = _scope_env_path(scope, install_root, workspace)
+    env_path = workspace.root / ".agentic-ops" / ".env"
     updates: dict[str, str | None] = {}
     if field in {"email", "all"}:
         updates[connection.email_env] = None
@@ -212,39 +202,21 @@ def _remove(
         updates[connection.token_env] = None
     with TaskLock(env_path.parent / ".authorization.lock", timeout=5):
         update_env_file(env_path, updates)
-    status = _show(connection, install_root, workspace, scope)
+    status = _show(connection, workspace)
     return {**status, "removed_fields": [field] if field != "all" else ["email", "token"]}
 
 
-def _effective_status(connection: Any, install_root: Path, workspace: Workspace) -> dict[str, Any]:
-    paths: list[tuple[str, Path]] = []
-    if workspace.mode == PROJECT_EXECUTION:
-        paths.append(("workspace_env", workspace.root / ".agentic-ops" / ".env"))
-    paths.append(("user_env", install_root / "user" / ".env"))
-    email, email_source = resolve_secret_with_source(connection.email_env, paths)
-    token, token_source = resolve_secret_with_source(connection.token_env, paths)
+def _effective_status(connection: Any, workspace: Workspace) -> dict[str, Any]:
+    email, token, credential_source = resolve_secret_pair_with_source(
+        connection.email_env,
+        connection.token_env,
+        workspace.root / ".agentic-ops" / ".env",
+    )
     return {
         "email": email,
         "token": token,
-        "email_source": email_source,
-        "token_source": token_source,
+        "credential_source": credential_source,
     }
-
-
-def _scope_env_path(scope: str, install_root: Path, workspace: Workspace) -> Path:
-    if scope == "user":
-        return install_root / "user" / ".env"
-    if scope == "workspace":
-        if workspace.mode != PROJECT_EXECUTION:
-            raise RuntimeErrorResult(
-                code="workspace_mode_mismatch",
-                message="workspace scope 授权只允许在 project_execution 模式设置",
-                status="blocked",
-                exit_code=EXIT_BLOCKED,
-                required_human_action="请切换到业务项目 AI 工作空间，或使用 user scope",
-            )
-        return workspace.root / ".agentic-ops" / ".env"
-    raise _input_error("authorization_scope_invalid", "授权 scope 无效")
 
 
 def _require_effective_credentials(
@@ -261,10 +233,7 @@ def _require_effective_credentials(
             message=f"Jira 授权尚未配置完整：{', '.join(missing)}",
             status="blocked",
             exit_code=EXIT_BLOCKED,
-            required_human_action=(
-                f"请执行 agentic-cli auth jira set --connection-id {connection.connection_id} "
-                "--interactive"
-            ),
+            required_human_action="请在当前工作空间执行 agentic-cli auth jira set",
         )
     return str(status["email"]), str(status["token"])
 

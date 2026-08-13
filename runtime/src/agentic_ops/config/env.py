@@ -9,27 +9,23 @@ from agentic_ops.task_state.io import atomic_write_text
 ENV_NAME_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 
-def resolve_secret(name: str, paths: list[Path]) -> str | None:
-    process_value = os.environ.get(name, "").strip()
-    if process_value:
-        return process_value
-    for path in paths:
-        values = read_env_file(path)
-        value = values.get(name, "").strip()
-        if value:
-            return value
-    return None
+def resolve_secret_pair_with_source(
+    first_name: str,
+    second_name: str,
+    path: Path,
+) -> tuple[str | None, str | None, str]:
+    """Resolve one credential pair without combining values from different accounts."""
+    process_first = os.environ.get(first_name, "").strip()
+    process_second = os.environ.get(second_name, "").strip()
+    if process_first or process_second:
+        return process_first or None, process_second or None, "process_environment"
 
-
-def resolve_secret_with_source(name: str, paths: list[tuple[str, Path]]) -> tuple[str | None, str]:
-    process_value = os.environ.get(name, "").strip()
-    if process_value:
-        return process_value, "process_environment"
-    for source, path in paths:
-        value = read_env_file(path).get(name, "").strip()
-        if value:
-            return value, source
-    return None, "missing"
+    values = read_env_file(path)
+    file_first = values.get(first_name, "").strip()
+    file_second = values.get(second_name, "").strip()
+    if file_first or file_second:
+        return file_first or None, file_second or None, "workspace"
+    return None, None, "missing"
 
 
 def read_env_file(path: Path) -> dict[str, str]:

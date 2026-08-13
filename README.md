@@ -1,8 +1,8 @@
 # AgenticOps
 
-AgenticOps 是把公司员工执行标准沉淀成 AI 可执行标准流程的本地控制体系。
+AgenticOps 是把公司员工执行标准沉淀成 AI 可执行标准流程，并通过业务项目工作空间交付可持续进化的 AI 研发员的本地控制体系。
 
-它面向研发 Jira 任务处理场景，让 Jira 继续管理任务事实源，让研发工程师继续负责关键授权，让代码审查人、QA、运维、安全等专业角色在对应节点审查结果，同时把 AI 员工的执行动作收敛到可审计的命令、操作契约、标准表单、工作日志、证据和人工门禁里。
+一个业务项目 AgenticOps 工作空间代表一名研发员；`~/.agentic-ops` 只是共享安装，不代表人员。一台电脑可以维护多个彼此隔离的研发员工作空间。公司员工指导员负责安装、授权、校对和进化研发员；Jira 继续管理任务事实源，代码审查人、QA、运维、安全等专业角色继续在对应节点审查结果。
 
 AgenticOps 的目标不是让 AIAgent 靠临场聊天上下文猜流程，而是让 AIAgent 面向稳定标准资产工作：先识别任务类型和当前阶段，再按操作契约、工作流配置、策略门禁、运行手册和模板执行，最后把关键状态、关键信息、表单数据和证据回写到合适的位置，用于恢复、复盘和持续优化。
 
@@ -10,10 +10,10 @@ AgenticOps 的目标不是让 AIAgent 靠临场聊天上下文猜流程，而是
 
 ```text
 Jira 任务
--> 研发工程师授权
+-> 公司员工指导员授权
 -> AgenticOps 标准流程
 -> agentic-cli 受控执行
--> AIAgent 开发、验证和证据整理
+-> AgenticOps 研发员开发、验证和证据整理
 -> 专业角色审查
 -> 证据 / 反馈 / 人工门禁
 -> 标准资产迭代
@@ -28,6 +28,8 @@ AgenticOps = Skill + Python Runtime + Shell Bootstrap + Rule + 标准资产 + �
 术语边界：
 
 - `AgenticOps` 是项目和执行控制体系。
+- 一个业务项目工作空间是一名 AgenticOps 研发员；该工作空间只绑定一个 Jira 账户。
+- 项目维护者承担公司员工指导员职责，维护标准、能力和边界，指导研发员持续进化。
 - `AgenticCLI` 是 AgenticOps 成熟经验沉淀后的执行入口组件，目标实现是 Python Runtime。
 - `agentic-cli` 是安装后给 AIAgent 和研发工程师使用的稳定命令入口。
 
@@ -46,9 +48,9 @@ AgenticOps = Skill + Python Runtime + Shell Bootstrap + Rule + 标准资产 + �
 
 ## 谁会使用
 
-### 项目维护者
+### 公司员工指导员（项目维护者）
 
-项目维护者负责维护 AgenticOps 自身，包括架构、项目规则、操作契约、运行资产、AgenticCLI、实施计划、测试和发布链路。
+项目维护者承担公司员工指导员职责，负责维护 AgenticOps 自身的架构、项目规则、操作契约、运行资产、AgenticCLI、测试和发布链路，让研发员能力持续符合公司标准。
 
 从这里开始：
 
@@ -66,9 +68,9 @@ AgenticOps = Skill + Python Runtime + Shell Bootstrap + Rule + 标准资产 + �
 - Jira `AO-11`：本次重构实施计划、进度和验收事实源
 - [当前机器可读操作契约](install-resources/basic/contracts/operations/)
 
-### 研发工程师
+### 公司员工指导员（业务指导）
 
-研发工程师是使用 AgenticOps 指挥 AI 处理 Jira 任务的人。研发工程师不需要关心 AgenticOps 源码细节，主要面对安装后的 `agentic-cli`、AI 员工手册、工作流配置、模板和证据链。
+业务研发工程师在使用 AgenticOps 时承担公司员工指导员职责，负责创建研发员工作空间、明确任务、授权高风险动作、校对结果和反馈改进，不需要关心 AgenticOps 源码细节。
 
 从这里开始：
 
@@ -80,9 +82,9 @@ AgenticOps = Skill + Python Runtime + Shell Bootstrap + Rule + 标准资产 + �
 
 研发工程师读人用指引，AIAgent 读 AI 资产入口。初始化工作空间后，应要求 AIAgent 先读取 [AI 资产入口](install-resources/basic/ai-assets/README.md)，再接管具体 Jira 任务。
 
-### AIAgent
+### AgenticOps 研发员
 
-AIAgent 不应主要依赖 README 或人用 `docs/` 执行任务，也不需要读取 AgenticOps 源码或关心运行环境实现。AIAgent 面对的是安装后的 Skill、Rule、命令入口和标准资产。
+业务项目工作空间代表 AgenticOps 研发员。底层 AIAgent 不应主要依赖 README 或人用 `docs/` 执行任务，也不需要读取 AgenticOps 源码或关心运行环境实现；它面对的是安装后的 Skill、Rule、命令入口和标准资产。
 
 执行前读取：
 
@@ -120,7 +122,7 @@ tapstate/
 tapdata/
 ```
 
-项目 AI 工作空间保存该项目的 Jira 用户、Jira 空间、Jira 空间到代码仓库的映射、本地源码目录、工作流配置、任务执行上下文和反馈记录。一个 Jira 空间通常对应若干代码仓库，这个映射必须由工作流配置维护，不能由 AIAgent 临场猜测。
+项目 AI 工作空间保存该研发员唯一的 Jira 账户、Jira 空间、Jira 空间到代码仓库的映射、本地源码目录、工作流配置、任务执行上下文和反馈记录。一个 Jira 空间通常对应若干代码仓库，这个映射必须由工作流配置维护，不能由 AIAgent 临场猜测。
 
 ## 目录导航
 

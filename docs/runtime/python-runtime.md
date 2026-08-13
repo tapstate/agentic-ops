@@ -105,7 +105,7 @@ Runtime 必须区分两种运行模式：
 
 模式由项目工作空间配置、Git remote、仓库根目录、Profile 和操作要求共同验证；不一致时返回 `workspace_mode_mismatch`。
 
-Jira 配置分为 Connection、Project Profile 和 Project AI Workspace。一个工作空间默认绑定一个 `connection_id`；任务身份包含 `connection_id`、`jira_issue_id`、`issue_key` 和 `project_key`。站点、Profile 或 Issue 事实不一致时返回 `jira_workspace_mismatch`。
+Jira 配置分为研发员账户、Connection、Project Profile 和 Project AI Workspace。一个业务项目工作空间代表一名研发员并只维护一个 Jira 账户；`~/.agentic-ops` 共享安装没有人员身份，一台电脑可以维护多个隔离的研发员工作空间。项目工作空间通过 Project Profile 选择 Connection，旧工作空间中的显式 `connection_id` 只作一致性校验。任务身份仍包含 `connection_id`、`jira_issue_id`、`issue_key` 和 `project_key`；站点、Profile 或 Issue 事实不一致时返回 `jira_workspace_mismatch`。
 
 ## 8. Python 与依赖
 
@@ -146,6 +146,6 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 ## 12. 授权入口
 
-外部系统授权统一通过 `agentic-cli auth` 管理。Jira 当前支持 `list`、`show`、`set`、`remove` 和 `verify`；用户不需要手工猜测环境变量名或编辑 `.env`。
+外部系统授权统一通过 `agentic-cli auth` 管理。Jira 当前支持 `list`、`show`、`set`、`remove` 和 `verify`；常规 `show`、`set`、`verify` 不需要 Connection 或 scope 参数，用户不需要手工猜测环境变量名或编辑 `.env`。
 
 授权入口只返回配置状态、脱敏身份和来源，不返回 token。凭证文件使用锁、原子替换和 `0600` 权限；真实 Jira 操作前必须验证 Connection、当前身份和项目工作空间绑定。详细操作见 [AgenticOps 授权管理](authorization.md)。

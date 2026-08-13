@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from agentic_ops.config.env import resolve_secret
+from agentic_ops.config.env import resolve_secret_pair_with_source
 from agentic_ops.config.model import (
     FIELD_STATES,
     FieldMapping,
@@ -42,7 +42,7 @@ class JiraContext:
             message=f"Jira 凭证未配置：{', '.join(missing)}",
             status="blocked",
             exit_code=EXIT_BLOCKED,
-            required_human_action="请在用户或项目 .env 中配置对应变量，不要把凭证提交到仓库",
+            required_human_action="请执行 agentic-cli auth jira set 配置当前 AgenticOps 研发员账户",
         )
 
 
@@ -53,7 +53,6 @@ def default_install_root() -> Path:
 def load_jira_context(workspace: Workspace, install_root: Path) -> JiraContext:
     agent = _load_agent_config(workspace)
     profile_id = _required_text(agent, "project_profile", "workspace_project_profile_missing")
-    bound_connection_id = _required_text(agent, "connection_id", "workspace_connection_missing")
 
     profile_payload = _load_layered_yaml(
         [
@@ -67,11 +66,12 @@ def load_jira_context(workspace: Workspace, install_root: Path) -> JiraContext:
         profile = _parse_profile(profile_payload, profile_id)
     except (TypeError, ValueError) as error:
         raise _configuration_error("Project Profile", error) from error
-    if profile.connection_id != bound_connection_id:
+    configured_connection_id = _optional_text(agent.get("connection_id"))
+    if configured_connection_id and profile.connection_id != configured_connection_id:
         raise RuntimeErrorResult(
             code="jira_workspace_mismatch",
             message=(
-                f"工作空间 connection_id={bound_connection_id} 与项目 Profile "
+                f"工作空间 connection_id={configured_connection_id} 与项目 Profile "
                 f"connection_id={profile.connection_id} 不一致"
             ),
             status="blocked",
@@ -81,15 +81,79 @@ def load_jira_context(workspace: Workspace, install_root: Path) -> JiraContext:
 
     connection = load_jira_connection(
         install_root,
-        bound_connection_id,
+        profile.connection_id,
         workspace_root=workspace.root,
     )
-    env_paths = [workspace.root / ".agentic-ops" / ".env", install_root / "user" / ".env"]
+    email, token, _ = resolve_secret_pair_with_source(
+        connection.email_env,
+        connection.token_env,
+        workspace.root / ".agentic-ops" / ".env",
+    )
     return JiraContext(
         connection=connection,
         profile=profile,
-        email=resolve_secret(connection.email_env, env_paths),
-        token=resolve_secret(connection.token_env, env_paths),
+        email=email,
+        token=token,
+    )
+
+
+def resolve_workspace_connection_id(
+    workspace: Workspace,
+    install_root: Path,
+    explicit_connection_id: str | None = None,
+) -> str:
+    agent = _load_agent_config(workspace, required=False)
+    profile_id = _optional_text(agent.get("project_profile"))
+    configured_connection_id = _optional_text(agent.get("connection_id"))
+
+    profile_connection_id: str | None = None
+    if profile_id:
+        profile_payload = _load_layered_yaml(
+            [
+                install_root / "standards" / "projects" / profile_id / "profile.yaml",
+                install_root / "user" / "projects" / profile_id / "profile.local.yaml",
+                workspace.root / ".agentic-ops" / "profiles" / f"{profile_id}.local.yaml",
+            ],
+            "project_profile_not_found",
+        )
+        try:
+            profile_connection_id = _parse_profile(profile_payload, profile_id).connection_id
+        except (TypeError, ValueError) as error:
+            raise _configuration_error("Project Profile", error) from error
+
+    candidates = {
+        value
+        for value in (explicit_connection_id, configured_connection_id, profile_connection_id)
+        if value
+    }
+    if len(candidates) > 1:
+        raise RuntimeErrorResult(
+            code="jira_workspace_mismatch",
+            message="显式 Jira Connection、工作空间绑定与 Project Profile 不一致",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请修复工作空间绑定；不得在一个工作空间混用多个 Jira 站点",
+        )
+    if candidates:
+        return candidates.pop()
+
+    connections = list_jira_connections(install_root)
+    if len(connections) == 1:
+        return connections[0]
+    if not connections:
+        raise RuntimeErrorResult(
+            code="jira_connection_not_found",
+            message="当前安装没有可用的 Jira Connection",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请先安装或配置 Jira Connection",
+        )
+    raise RuntimeErrorResult(
+        code="jira_connection_selection_required",
+        message="当前安装包含多个 Jira 站点，工作空间尚未绑定默认站点",
+        status="blocked",
+        exit_code=EXIT_BLOCKED,
+        required_human_action="首次设置时请使用高级参数 --connection-id，之后可省略",
     )
 
 
@@ -133,8 +197,10 @@ def list_jira_connections(install_root: Path) -> list[str]:
     return sorted(connection_ids)
 
 
-def _load_agent_config(workspace: Workspace) -> dict[str, Any]:
+def _load_agent_config(workspace: Workspace, *, required: bool = True) -> dict[str, Any]:
     if workspace.config_path is None:
+        if not required:
+            return {}
         raise RuntimeErrorResult(
             code="workspace_config_missing",
             message="Jira 操作要求项目工作空间提供 .agentic-ops/agent.json",
