@@ -375,6 +375,7 @@ printf 'fixture checksums\n' > install-resources/checksums.txt
 printf '{"ok":true,"operation":"build"}\n'
 EOF
 for verification_script in \
+  scripts/test-python-runtime.sh \
   scripts/test-resources.sh \
   scripts/test-build.sh \
   scripts/test-install.sh \
@@ -505,6 +506,7 @@ git --git-dir="$workflow_remote" merge-base --is-ancestor "$publish_head" "$remo
 test "$(git --git-dir="$workflow_remote" rev-parse refs/tags/v0.3^{})" = "$(git -C "$workflow_repo" rev-list -n 1 v0.3)"
 for expected_verification in \
   go-test \
+  scripts-test-python-runtime.sh \
   scripts-test-resources.sh \
   scripts-test-build.sh \
   scripts-test-install.sh \
@@ -658,6 +660,7 @@ test "$(git -C "$hotfix_repo" tag --list | wc -l | tr -d ' ')" = "$hotfix_tag_co
 test -z "$(git -C "$hotfix_repo" ls-remote --heads origin refs/heads/harsen/AO-123/fix-main)"
 
 for verification_script in \
+  scripts/test-python-runtime.sh \
   scripts/test-resources.sh \
   scripts/test-build.sh \
   scripts/test-install.sh \

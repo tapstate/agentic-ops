@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+INSTALL_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)"
+PYTHON_BIN="$INSTALL_DIR/.venv/bin/python"
+
+if [ ! -x "$PYTHON_BIN" ]; then
+  printf 'AgenticOps：Python Runtime 尚未安装，请执行 bootstrap/install.sh\n' >&2
+  printf '{"ok":false,"operation":"bootstrap","status":"failed","code":"python_runtime_missing","retry_safe":true,"message":"Python Runtime 尚未安装","required_human_action":"请执行 bootstrap/install.sh"}\n'
+  exit 1
+fi
+
+export PYTHONPATH="$INSTALL_DIR/runtime/src${PYTHONPATH:+:$PYTHONPATH}"
+exec "$PYTHON_BIN" -m agentic_ops "$@"

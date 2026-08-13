@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentic-ops"
+version = "0.1.0"
+description = "AgenticOps Skill 与自动化操作的 Python Runtime"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "Proprietary" }
+authors = [{ name = "TapData" }]
+dependencies = []
+
+[project.scripts]
+agentic-cli = "agentic_ops.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["runtime/src/agentic_ops"]
+
+[tool.uv]
+package = true

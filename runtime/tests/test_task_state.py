@@ -1,0 +1,125 @@
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from datetime import datetime, timezone
+from pathlib import Path
+from unittest import mock
+
+from agentic_ops.output import RuntimeErrorResult
+from agentic_ops.task_state import TaskIdentity, TaskStore
+from agentic_ops.task_state.io import atomic_write_json, read_json
+
+
+IDENTITY = TaskIdentity(
+    connection_id="tapdata",
+    jira_issue_id="10001",
+    issue_key="TAP-123",
+    project_key="TAP",
+    agentic_run_id="run-20260813-001",
+)
+
+
+class TaskStateTest(unittest.TestCase):
+    def test_initialize_creates_complete_state_and_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            now = datetime(2026, 8, 13, 1, 2, 3, tzinfo=timezone.utc)
+            store = TaskStore(root, now=lambda: now)
+            created = store.initialize(IDENTITY)
+            repeated = store.initialize(IDENTITY)
+
+            self.assertEqual(True, created["created"])
+            self.assertEqual(False, repeated["created"])
+            task_dir = root / ".agentic-ops" / "tasks" / IDENTITY.issue_key
+            for name in ("task.json", "progress.json", "sync.json", "decisions.ndjson", "journal.ndjson"):
+                self.assertTrue((task_dir / name).is_file(), name)
+            journal = (task_dir / "journal.ndjson").read_text(encoding="utf-8").splitlines()
+            self.assertEqual(1, len(journal))
+            self.assertEqual("task_init", json.loads(journal[0])["operation"])
+
+    def test_identity_mismatch_does_not_overwrite_existing_task(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = TaskStore(root)
+            store.initialize(IDENTITY)
+            changed = TaskIdentity(**{**IDENTITY.__dict__, "agentic_run_id": "another-run"})
+            with self.assertRaises(RuntimeErrorResult) as captured:
+                store.initialize(changed)
+            self.assertEqual("task_identity_mismatch", captured.exception.code)
+            task = read_json(root / ".agentic-ops" / "tasks" / IDENTITY.issue_key / "task.json")
+            self.assertEqual(IDENTITY.agentic_run_id, task["agentic_run_id"])
+
+    def test_atomic_write_failure_keeps_previous_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "progress.json"
+            atomic_write_json(target, {"content_version": 1})
+            with mock.patch("agentic_ops.task_state.io.os.replace", side_effect=OSError("simulated")):
+                with self.assertRaises(OSError):
+                    atomic_write_json(target, {"content_version": 2})
+            self.assertEqual(1, read_json(target)["content_version"])
+            self.assertEqual([], list(target.parent.glob(".progress.json.*.tmp")))
+
+    def test_initialization_failure_does_not_publish_partial_task(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = TaskStore(root)
+            with mock.patch("agentic_ops.task_state.store.os.replace", side_effect=OSError("simulated")):
+                with self.assertRaises(OSError):
+                    store.initialize(IDENTITY)
+            task_dir = root / ".agentic-ops" / "tasks" / IDENTITY.issue_key
+            self.assertFalse(task_dir.exists())
+
+    def test_second_process_times_out_while_task_is_locked(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lock_path = root / ".agentic-ops" / "locks" / f"{IDENTITY.issue_key}.lock"
+            ready = root / "ready"
+            source_root = Path(__file__).resolve().parents[1] / "src"
+            code = "\n".join(
+                (
+                    "import pathlib, sys, time",
+                    "from agentic_ops.task_state.locking import TaskLock",
+                    "lock = pathlib.Path(sys.argv[1])",
+                    "ready = pathlib.Path(sys.argv[2])",
+                    "with TaskLock(lock, 1):",
+                    "    ready.write_text('ready')",
+                    "    time.sleep(2)",
+                )
+            )
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(source_root)
+            process = subprocess.Popen(
+                [sys.executable, "-c", code, str(lock_path), str(ready)],
+                env=environment,
+            )
+            try:
+                deadline = time.monotonic() + 2
+                while not ready.exists() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertTrue(ready.exists())
+                with self.assertRaises(RuntimeErrorResult) as captured:
+                    TaskStore(root, lock_timeout=0.05).initialize(IDENTITY)
+                self.assertEqual("task_lock_timeout", captured.exception.code)
+            finally:
+                process.terminate()
+                process.wait(timeout=5)
+
+    def test_superpowers_directory_is_not_required_for_inspection(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = TaskStore(root)
+            store.initialize(IDENTITY)
+            superpowers = root / ".superpowers"
+            superpowers.mkdir()
+            (superpowers / "temporary.txt").write_text("临时状态", encoding="utf-8")
+            for child in superpowers.iterdir():
+                child.unlink()
+            superpowers.rmdir()
+            inspected = store.inspect(IDENTITY.issue_key)
+            self.assertEqual(IDENTITY.issue_key, inspected["task"]["issue_key"])

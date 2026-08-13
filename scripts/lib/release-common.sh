@@ -224,6 +224,7 @@ release_run_full_verification() {
   (
     cd "$worktree_path"
     go test ./... &&
+      bash scripts/test-python-runtime.sh &&
       bash scripts/test-resources.sh &&
       bash scripts/test-build.sh &&
       bash scripts/test-install.sh &&
@@ -316,6 +317,7 @@ $protection_warning
 ### 固定完整验证
 
 - \`go test ./...\`
+- \`bash scripts/test-python-runtime.sh\`
 - \`bash scripts/test-resources.sh\`
 - \`bash scripts/test-build.sh\`
 - \`bash scripts/test-install.sh\`
