@@ -6,3 +6,20 @@ if [ "$branch" = "main" ]; then
   echo "direct commit to main is prohibited; use develop or a fix-main branch" >&2
   exit 1
 fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+story_registry="$repo_root/standards/stories/project-quality.yaml"
+if [ -f "$story_registry" ]; then
+  python_bin="$repo_root/.venv/bin/python"
+  if [ ! -x "$python_bin" ]; then
+    echo "AgenticOps story quality gate requires .venv/bin/python" >&2
+    exit 1
+  fi
+  PYTHONPATH="$repo_root/runtime/src${PYTHONPATH:+:$PYTHONPATH}" \
+    PYTHONPYCACHEPREFIX="$repo_root/.local/pycache" \
+    "$python_bin" -m agentic_ops \
+      --workspace-root "$repo_root" \
+      --mode source_maintenance \
+      story impact \
+      --change-source staged
+fi

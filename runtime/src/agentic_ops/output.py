@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 EXIT_FAILED = 1
@@ -18,6 +18,7 @@ class RuntimeErrorResult(Exception):
     exit_code: int = EXIT_FAILED
     retry_safe: bool = False
     required_human_action: str = "请联系 AgenticOps 维护者处理"
+    details: Mapping[str, Any] = field(default_factory=dict)
 
 
 def success(operation: str, **payload: Any) -> dict[str, Any]:
@@ -32,7 +33,7 @@ def success(operation: str, **payload: Any) -> dict[str, Any]:
 
 
 def failure(operation: str, error: RuntimeErrorResult) -> dict[str, Any]:
-    return {
+    result: dict[str, Any] = {
         "ok": False,
         "operation": operation,
         "status": error.status,
@@ -41,6 +42,8 @@ def failure(operation: str, error: RuntimeErrorResult) -> dict[str, Any]:
         "message": error.message,
         "required_human_action": error.required_human_action,
     }
+    result.update(error.details)
+    return result
 
 
 def write_json(result: Mapping[str, Any]) -> None:

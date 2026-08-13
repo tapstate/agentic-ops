@@ -149,3 +149,7 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 外部系统授权统一通过 `agentic-cli auth` 管理。Jira 当前支持 `list`、`show`、`set`、`remove` 和 `verify`；常规 `show`、`set`、`verify` 不需要 Connection 或 scope 参数，用户不需要手工猜测环境变量名或编辑 `.env`。
 
 授权入口只返回配置状态、脱敏身份和来源，不返回 token。凭证文件使用锁、原子替换和 `0600` 权限；真实 Jira 操作前必须验证 Connection、当前身份和项目工作空间绑定。详细操作见 [AgenticOps 授权管理](authorization.md)。
+
+## 13. 项目故事质量门禁
+
+`source_maintenance` 模式通过 `agentic-cli story impact|approve|verify` 守护项目维护故事和研发工程师故事。影响检测基于 Git 内容指纹和机器注册表；确认与固定验收必须匹配同一 `impact_id`。故事受影响、故事修订、验收失败或映射缺失时，pre-commit 停止提交。详细规则见 [项目故事质量门禁](story-quality-gate.md)。

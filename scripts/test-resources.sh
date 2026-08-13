@@ -31,6 +31,10 @@ test -f install-resources/basic/contracts/operations/feedback-record-recovery.ya
 test -f install-resources/checksums.txt
 test -x .githooks/pre-commit
 test -x .githooks/pre-push
+test -f standards/stories/project-quality.yaml
+test -f docs/user-stories/project-maintainer/pm-007-story-quality-gate.md
+test -f skills/guard-story-quality/SKILL.md
+test -f rules/source-maintenance.md
 test -x scripts/release.sh
 test -x scripts/hotfix.sh
 test -x scripts/test-release-workflow.sh
@@ -83,6 +87,9 @@ grep '工作项级连续执行授权' docs/project-rules.md >/dev/null
 grep '工作项级连续执行授权' docs/architecture/agenticops-current-design.md >/dev/null
 grep '拉取请求审查包' docs/templates/evidence-templates.md >/dev/null
 grep 'D-033' docs/decision-log.md | grep '连续执行授权' >/dev/null
+grep 'project_maintenance' standards/stories/project-quality.yaml >/dev/null
+grep 'development_engineer' standards/stories/project-quality.yaml >/dev/null
+grep 'maintenance_story_revision_required' docs/user-stories/project-maintainer/pm-007-story-quality-gate.md >/dev/null
 
 if rg -n 'development-phase-rules\.md|第一个版本发布正式上线前|当前阶段只允许本地模拟' \
   AGENTS.md README.md docs install-resources/basic; then

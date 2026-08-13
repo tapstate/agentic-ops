@@ -1,0 +1,240 @@
+schema_version: 1
+
+story_categories:
+  - project_maintenance
+  - development_engineer
+
+stories:
+  - story_id: PM-001
+    category: project_maintenance
+    title: 维护故事线、设计和计划边界
+    document: docs/user-stories/project-maintainer/pm-001-document-boundary.md
+    protected_paths:
+      - .gitignore
+      - AGENTS.md
+      - README.md
+      - docs/README.md
+      - docs/strategy/**
+      - docs/architecture/**
+      - docs/runtime/**
+      - docs/project-rules.md
+      - docs/review-checklist.md
+      - docs/user-stories/**
+    acceptance_checks:
+      - resource_contracts
+      - story_registry
+    evidence_requirements:
+      - 故事、设计、Jira 计划和实现状态边界检查
+      - 文档链接与格式检查
+
+  - story_id: PM-002
+    category: project_maintenance
+    title: 维护操作契约、标准流程和工作流配置
+    document: docs/user-stories/project-maintainer/pm-002-standard-assets.md
+    protected_paths:
+      - standards/**
+      - rules/**
+      - skills/**
+      - runtime/src/agentic_ops/config/**
+      - runtime/src/agentic_ops/jira/**
+      - install-resources/basic/contracts/**
+      - install-resources/basic/projects/**
+    acceptance_checks:
+      - python_runtime
+      - resource_contracts
+    evidence_requirements:
+      - 操作契约、Profile 和标准资产校验结果
+      - 缺失映射与未知状态的结构化失败证据
+
+  - story_id: PM-003
+    category: project_maintenance
+    title: 构建 AgenticOps 安装资源
+    document: docs/user-stories/project-maintainer/pm-003-release-assets.md
+    protected_paths:
+      - .python-version
+      - pyproject.toml
+      - uv.lock
+      - bootstrap/**
+      - scripts/install.sh
+      - scripts/update-checksums.sh
+      - install-resources/**
+    acceptance_checks:
+      - python_runtime
+      - resource_contracts
+      - release_workflow
+    evidence_requirements:
+      - 无 Go 安装与锁文件一致性结果
+      - 安装资源和校验和验证结果
+
+  - story_id: PM-004
+    category: project_maintenance
+    title: 诊断问题并选择修复载体
+    document: docs/user-stories/project-maintainer/pm-004-problem-diagnosis.md
+    protected_paths:
+      - runtime/src/agentic_ops/**
+      - standards/runbooks/**
+      - docs/runtime/problem-resolution-and-update.md
+      - docs/workflows/feedback-loop.md
+    acceptance_checks:
+      - python_runtime
+    evidence_requirements:
+      - 稳定失败码与修复载体分类结果
+      - 脱敏诊断边界检查
+
+  - story_id: PM-005
+    category: project_maintenance
+    title: 处理反馈并形成改进建议
+    document: docs/user-stories/project-maintainer/pm-005-feedback-proposal.md
+    protected_paths:
+      - runtime/src/agentic_ops/**
+      - standards/runbooks/**
+      - docs/workflows/feedback-loop.md
+      - docs/templates/evidence-templates.md
+    acceptance_checks:
+      - python_runtime
+      - resource_contracts
+    evidence_requirements:
+      - observation、proposal 和 accepted change 边界检查
+      - 敏感信息与人工确认门禁检查
+
+  - story_id: PM-006
+    category: project_maintenance
+    title: 治理 latest 更新、回滚和兼容性
+    document: docs/user-stories/project-maintainer/pm-006-release-governance.md
+    protected_paths:
+      - bootstrap/update.sh
+      - bootstrap/rollback.sh
+      - bootstrap/lib/**
+      - scripts/release.sh
+      - scripts/hotfix.sh
+      - scripts/lib/development-workflow.sh
+      - .githooks/**
+    acceptance_checks:
+      - resource_contracts
+      - release_workflow
+    evidence_requirements:
+      - 更新、回滚和固定 HEAD 验证结果
+      - 保护分支与人工合并门禁结果
+
+  - story_id: PM-007
+    category: project_maintenance
+    title: 守护两类项目故事质量基线
+    document: docs/user-stories/project-maintainer/pm-007-story-quality-gate.md
+    protected_paths:
+      - standards/stories/**
+      - runtime/src/agentic_ops/story_gate/**
+      - runtime/tests/test_story_gate.py
+      - runtime/tests/test_output.py
+      - skills/guard-story-quality/**
+      - rules/source-maintenance.md
+      - .githooks/pre-commit
+      - scripts/test-resources.sh
+    acceptance_checks:
+      - python_runtime
+      - resource_contracts
+      - release_workflow
+      - story_registry
+    evidence_requirements:
+      - 两类故事注册表完整性结果
+      - 未确认影响、故事修订、验收失败和缺失映射阻断证据
+      - 公司员工指导员确认与验收证据
+
+  - story_id: DE-001
+    category: development_engineer
+    title: 安装 AgenticOps
+    document: docs/user-stories/development-engineer/de-001-install.md
+    protected_paths:
+      - bootstrap/**
+      - scripts/install.sh
+      - install-resources/**
+      - agent-guides.md
+    acceptance_checks:
+      - python_runtime
+      - resource_contracts
+    evidence_requirements:
+      - 新工作空间安装和入口可用性结果
+      - 无 Go 环境安装结果
+
+  - story_id: DE-002
+    category: development_engineer
+    title: 初始化项目 AI 工作空间
+    document: docs/user-stories/development-engineer/de-002-workspace-init.md
+    protected_paths:
+      - runtime/src/agentic_ops/workspace.py
+      - runtime/src/agentic_ops/config/**
+      - standards/projects/**
+      - install-resources/basic/projects/**
+    acceptance_checks:
+      - python_runtime
+      - resource_contracts
+    evidence_requirements:
+      - 工作空间隔离、Profile 和模式校验结果
+      - 重复初始化与半状态恢复结果
+
+  - story_id: DE-003
+    category: development_engineer
+    title: 初始化研发工程师能力
+    document: docs/user-stories/development-engineer/de-003-agent-init.md
+    protected_paths:
+      - skills/**
+      - rules/**
+      - agent-init.md
+      - agent-guides.md
+      - install-resources/basic/ai-assets/**
+      - install-resources/basic/handbooks/**
+    acceptance_checks:
+      - resource_contracts
+      - story_registry
+    evidence_requirements:
+      - 双运行模式与能力加载结果
+      - 新会话不依赖聊天上下文的初始化结果
+
+  - story_id: DE-004
+    category: development_engineer
+    title: 新任务接管
+    document: docs/user-stories/development-engineer/de-004-takeover-task.md
+    protected_paths:
+      - runtime/src/agentic_ops/authorization/**
+      - runtime/src/agentic_ops/jira/**
+      - runtime/src/agentic_ops/task_state/**
+      - standards/contracts/operations/jira-*.yaml
+      - standards/projects/**
+      - skills/jira-task-collaboration/**
+    acceptance_checks:
+      - python_runtime
+      - resource_contracts
+    evidence_requirements:
+      - Jira 任务身份、授权和计划门禁结果
+      - Comment、Description 和 Worklog 幂等回读结果
+
+  - story_id: DE-005
+    category: development_engineer
+    title: 恢复接管任务
+    document: docs/user-stories/development-engineer/de-005-resume-takeover.md
+    protected_paths:
+      - runtime/src/agentic_ops/task_state/**
+      - runtime/src/agentic_ops/jira/**
+      - standards/runbooks/**
+    acceptance_checks:
+      - python_runtime
+    evidence_requirements:
+      - 中断、未知写入和幂等恢复结果
+      - 外部事实与本地状态冲突阻断结果
+
+  - story_id: DE-006
+    category: development_engineer
+    title: 任务完成审计与反馈分析
+    document: docs/user-stories/development-engineer/de-006-task-audit-feedback.md
+    protected_paths:
+      - runtime/src/agentic_ops/task_state/**
+      - runtime/src/agentic_ops/jira/**
+      - standards/contracts/**
+      - standards/runbooks/**
+      - docs/templates/evidence-templates.md
+      - docs/workflows/feedback-loop.md
+    acceptance_checks:
+      - python_runtime
+      - resource_contracts
+    evidence_requirements:
+      - 完成审计、Worklog 和反馈改进证据
+      - 任务事实源与本地审计边界检查

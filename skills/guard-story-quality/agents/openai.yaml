@@ -1,0 +1,4 @@
+interface:
+  display_name: "守护项目故事质量"
+  short_description: "检测代码变更影响的项目故事并执行公司员工指导员确认门禁"
+  default_prompt: "Use $guard-story-quality to inspect which AgenticOps quality stories a change affects before continuing automation."

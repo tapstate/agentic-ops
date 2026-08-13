@@ -15,6 +15,7 @@ from agentic_ops.output import (
 )
 from agentic_ops.authorization.cli import configure_authorization_parser, execute_authorization
 from agentic_ops.jira.cli import configure_jira_parser, execute_jira
+from agentic_ops.story_gate.cli import configure_story_parser, execute_story
 from agentic_ops.task_state import TaskIdentity, TaskStore
 from agentic_ops.workspace import PROJECT_EXECUTION, VALID_MODES, require_mode, resolve_workspace
 
@@ -60,6 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     report_write.add_argument("--content-file", required=True)
     configure_authorization_parser(subparsers)
     configure_jira_parser(subparsers)
+    configure_story_parser(subparsers)
     return parser
 
 
@@ -87,6 +89,11 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
 
     if args.group == "auth":
         state = execute_authorization(args, workspace, args.install_root)
+        return success(operation, workspace_mode=workspace.mode, **state)
+
+    if args.group == "story":
+        require_mode(workspace, frozenset({"source_maintenance"}))
+        state = execute_story(args, workspace)
         return success(operation, workspace_mode=workspace.mode, **state)
 
     require_mode(workspace, frozenset({PROJECT_EXECUTION}))

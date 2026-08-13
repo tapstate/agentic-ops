@@ -30,6 +30,20 @@ class OutputTest(unittest.TestCase):
         self.assertEqual("test_blocked", result["code"])
         self.assertEqual("请检查测试输入", result["required_human_action"])
 
+    def test_failure_can_include_structured_gate_details(self) -> None:
+        result = failure(
+            "story_impact",
+            RuntimeErrorResult(
+                code="maintenance_story_impacted",
+                message="故事受影响",
+                status="blocked",
+                exit_code=2,
+                details={"impact_id": "abc", "impacted_story_ids": ["PM-007"]},
+            ),
+        )
+        self.assertEqual("abc", result["impact_id"])
+        self.assertEqual(["PM-007"], result["impacted_story_ids"])
+
     def test_writer_outputs_exactly_one_json_object(self) -> None:
         stream = io.StringIO()
         with redirect_stdout(stream):
