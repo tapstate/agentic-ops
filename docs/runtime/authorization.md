@@ -16,6 +16,8 @@ agentic-cli auth jira verify
 
 `set` 无参数时自动进入交互设置，重复执行即为修改。token 只允许交互式隐藏输入或 `--token-stdin`，不提供 token 命令行参数。
 
+首次创建业务项目工作空间时，优先使用 `agentic-cli workspace init`。初始化入口会先确认 Project Profile 和 Jira 项目空间，再复用同一套工作空间授权规则完成凭证输入、身份验证和 Project 访问检查。
+
 Connection 默认从当前项目 Profile 推导；没有 Profile 且安装中只有一个 Connection 时自动选择。只有维护或迁移场景遇到多个未绑定站点时，才使用隐藏的高级参数 `--connection-id`。
 
 ## 研发员工作空间账户

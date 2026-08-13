@@ -1,123 +1,98 @@
 operation: workspace_init
-version: 1
-purpose: 初始化具体项目的 AI 工作空间运行目录。
+version: 2
+purpose: 确认研发员身份、Jira 项目空间和授权后初始化业务项目工作空间。
 task_type: workspace_initialization
 allowed_stages:
   - installed
-required_inputs:
-  - project
 input:
-  project:
-    type: string
-    required: true
-  jira_user:
-    type: string
-    required: false
   interactive:
     type: boolean
     required: false
-  jira_project:
+    default: true
+  project_profile:
     type: string
-    required: false
+    required_in_non_interactive: true
+  agent_id:
+    type: string
+    required_in_non_interactive: true
+    pattern: "^[0-9A-Za-z_-]+$"
+    interactive_default: normalized_lowercase_hostname
   source_root:
     type: string
     required: false
-  jira_base_url:
+  jira_email:
     type: string
-    required: false
-  confirm_existing_config:
-    type: boolean
-    required: false
+    required_with_token_stdin: true
+  jira_token:
+    type: secret
+    accepted_sources:
+      - hidden_prompt
+      - standard_input
+    command_argument_forbidden: true
+confirmation:
+  required: true
+  fields:
+    - agent_id
+    - workspace_root
+    - project_profile
+    - jira_base_url
+    - jira_project
+    - masked_jira_account
+    - repository
+    - source_root
 preconditions:
-  - workspace_root_must_be_available
-  - workspace_root_must_be_writable
+  - workspace_boundary_must_be_valid
   - existing_config_requires_confirmation
-  - interactive_mode_requires_terminal
+  - agent_id_must_be_valid_and_not_conflict
+  - project_profile_and_repository_mapping_must_exist
+  - jira_identity_and_project_access_must_be_verified
+  - source_repository_must_be_readable
 output:
-  workspace:
+  agent_id:
     type: string
-  workspace_root:
-    type: string
-  source_root:
-    type: string
-  source_repo:
-    type: string
-  source_repo_url:
-    type: string
-  source_checkout_status:
-    type: string
-  jira_user:
+  project_profile:
     type: string
   jira_project:
     type: string
-  profile:
+  jira_account:
+    type: masked_string
+  jira_identity:
     type: string
-  agent_config:
+  repository:
     type: string
-  agent_instructions:
+  source_root:
     type: string
-  runs_dir:
+  preflight_status:
     type: string
-  run_logs_dir:
+  post_preflight_status:
     type: string
-  feedback_dir:
-    type: string
-  jira_config_status:
-    type: string
-  jira_config_path:
-    type: string
-  jira_token_env:
-    type: string
-  jira_env_file:
-    type: string
-    required: false
-  jira_token_env_has_value:
-    type: boolean
-    required: false
-  jira_token_help_url:
-    type: string
-    required: false
-  jira_token_setup:
-    type: string
-    required: false
-  jira_config_next_action:
-    type: string
-  workspace_repaired:
-    type: boolean
-    required: false
-  workspace_repairable:
-    type: boolean
-    required: false
   agentic_next_action:
     type: string
 failure:
   codes:
-    - missing_workspace
-    - missing_project
-    - missing_jira_user
     - interactive_terminal_required
-    - interactive_input_required
-    - interactive_input_failed
+    - missing_project_profile
+    - missing_agent_id
+    - agent_id_invalid
+    - agent_id_conflict
+    - workspace_boundary_invalid
+    - workspace_not_writable
     - existing_config_confirmation_required
-    - unsupported_jira_token_env_name
+    - jira_credentials_missing
+    - authorization_email_invalid
+    - authorization_token_invalid
+    - jira_authorization_failed
+    - jira_workspace_mismatch
+    - workspace_repository_mapping_missing
+    - source_repository_access_failed
     - source_checkout_failed
-    - workspace_root_failed
-    - workspace_init_failed
-    - workspace_profile_failed
-    - workspace_profile_write_failed
-    - jira_config_failed
-    - agent_config_failed
-    - agent_instructions_failed
 side_effects:
-  - may_write_workspace_state
-  - may_write_personal_jira_config
-  - may_write_user_secret_env
   - may_clone_source_repository
+  - may_write_workspace_state
+  - may_write_workspace_credentials
+  - may_update_non_authoritative_workspace_index
   - must_not_write_jira
-human_gate:
-  required: false
-retry_policy:
-  retryable: true
-  max_attempts: 1
-  redo_from_stage: installed
-redo_from_stage: installed
+security:
+  - agent_json_completion_marker_written_last
+  - token_must_not_be_logged_or_returned
+  - workspace_index_must_not_store_credentials_or_authorize

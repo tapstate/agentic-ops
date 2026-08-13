@@ -38,6 +38,7 @@ class ProjectProfile:
     fields: dict[str, FieldMapping] = field(default_factory=dict)
     status_mapping: dict[str, str] = field(default_factory=dict)
     transition_mapping: dict[str, dict[str, str]] = field(default_factory=dict)
+    default_repository: str | None = None
 
     def requested_jira_fields(self) -> list[str]:
         requested = {

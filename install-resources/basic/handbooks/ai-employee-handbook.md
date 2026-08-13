@@ -80,16 +80,16 @@ AI 员工应把自然语言转换为 AgenticOps 操作，而不是直接操作 J
 
 列出任务必须读取真实 Jira。未完成真实 Jira adapter 配置时，`agentic-cli list-tasks` 应阻断并要求补齐连接配置，不得返回示例任务或本地 fake 任务；`AGENTIC_OPS_JIRA_ADAPTER=fake` 只允许用于 AgenticOps 本地自动化回归。
 
-项目 profile 可以提供默认 Jira base URL；真实 Jira adapter 的本地连接配置仍属于运行时配置，不直接依赖共享 profile。Jira Cloud `base_url` 必须使用站点根地址，例如 `https://tapdata.atlassian.net`，不得写成带 `/jira` 的地址。研发工程师初始化工作空间时应优先通过 `agentic-cli workspace init --project <project> --interactive` 进入交互式引导；非终端、脚本或 CI 场景使用 `--jira-user <email>` 参数形式，只有项目默认 URL 不适用时才补充 `--jira-base-url <url>`。AIAgent 应通过 `agentic-cli conf <key>` 读取配置，不直接解析 YAML 或 `.env`。应用配置集中在 `.agentic-ops/config.local.yaml` 或 `$AGENTIC_OPS_HOME/user/config.local.yaml`，按项目和模块分段；Jira API token 的持久化落点只有 `$AGENTIC_OPS_HOME/user/.env` 中的 `AGENTIC_OPS_JIRA_API_TOKEN`，不得写入 YAML、日志、事件或提交内容。缺少 Jira token 或 `jira_token_env_has_value=false` 时，必须引导研发工程师到 `https://id.atlassian.com/manage-profile/security/api-tokens` 创建 API token，并在输出的 `jira_env_file` 中设置 `AGENTIC_OPS_JIRA_API_TOKEN=<api-token>`。
+Project Profile 提供 Jira Connection、Project Key 和默认仓库映射；Jira Cloud `base_url` 必须使用站点根地址，例如 `https://tapdata.atlassian.net`，不得写成带 `/jira` 的地址。公司员工指导员初始化工作空间时优先直接运行 `agentic-cli workspace init`，确认 `agent_id`、Jira 项目空间、脱敏账户和源码仓库。Jira email 与 token 只保存在当前业务项目工作空间 `.agentic-ops/.env`，不得写入 YAML、日志、事件或共享安装；token 只允许隐藏输入或安全标准输入。AIAgent 不直接解析或修改 Runtime 管理的配置文件。
 
-`agent init` 或 `preflight` 返回 `workspace_initialization_incomplete` 时，AIAgent 不得把 profile 可解析视为初始化成功，也不得继续 `list-tasks`。应要求研发工程师在项目 AI 工作空间重新运行 `agentic-cli workspace init --project <project> --interactive`；该命令会复用已经保存的 Jira 本机配置并修复未完成的工作空间。
+`workspace preflight` 返回初始化不完整时，AIAgent 不得把 Profile 可解析视为初始化成功，也不得继续读取或接管任务。应要求公司员工指导员在业务项目工作空间重新运行 `agentic-cli workspace init`；相同候选配置允许修复半初始化状态，覆盖不同完整配置仍需明确确认。
 
 ## 5. 操作使用方式
 
 AI 员工必须优先通过 `agentic-cli` 调用操作。以下命令是标准操作入口；是否可用必须以当前工作空间预检、已安装版本和命令输出为准，不得把尚未可执行的目标接口描述为已实现能力：
 
 ```sh
-agentic-cli preflight --workspace tapstate
+agentic-cli workspace preflight
 agentic-cli list-tasks --workspace tapstate
 agentic-cli inspect-task TAP-123 --workspace tapstate
 agentic-cli add-task-comment TAP-123 --workspace tapstate --category analysis --content-file <path> --confirm-real-jira-write

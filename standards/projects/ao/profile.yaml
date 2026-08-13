@@ -9,6 +9,9 @@ jira:
     - 任务
   task_query: project = AO AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC
 
+repositories:
+  default: tapstate/agentic-ops
+
 fields:
   owner:
     source: jira_field

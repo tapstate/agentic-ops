@@ -1,0 +1,73 @@
+operation: workspace_init
+version: 1
+allowed_modes:
+  - uninitialized
+inputs:
+  interactive:
+    required: false
+    default: true
+  agent_id:
+    required_in_non_interactive: true
+    pattern: "^[0-9A-Za-z_-]+$"
+    interactive_default: normalized_lowercase_hostname
+  project_profile:
+    required_in_non_interactive: true
+  jira_email:
+    required_with_token_stdin: true
+  jira_token:
+    source: hidden_prompt_or_standard_input
+    command_argument_forbidden: true
+  source_root:
+    required: false
+    default: workspace_root/repos/project_profile
+confirmation:
+  required_fields:
+    - agent_id
+    - workspace_root
+    - project_profile
+    - jira_base_url
+    - jira_project
+    - masked_jira_account
+    - repository
+    - source_root
+preflight:
+  side_effects: none
+  blocking_checks:
+    - workspace_boundary
+    - workspace_writable
+    - existing_config
+    - agent_id_format
+    - agent_id_collision
+    - project_profile
+    - jira_credentials
+    - jira_identity
+    - jira_project_access
+    - git_available
+    - source_repository
+write_order:
+  - prepare_source_checkout
+  - write_profile_overlay_and_managed_instructions
+  - write_workspace_credentials_if_supplied
+  - update_non_authoritative_workspace_index
+  - write_agent_json_completion_marker_last
+postcondition:
+  - post_preflight_must_pass
+  - credentials_remain_workspace_scoped
+  - shared_install_index_must_not_authorize_or_supply_credentials
+failure:
+  - interactive_terminal_required
+  - missing_project_profile
+  - missing_agent_id
+  - agent_id_invalid
+  - agent_id_conflict
+  - workspace_boundary_invalid
+  - workspace_not_writable
+  - existing_config_confirmation_required
+  - jira_credentials_missing
+  - authorization_email_invalid
+  - authorization_token_invalid
+  - jira_authorization_failed
+  - jira_workspace_mismatch
+  - workspace_repository_mapping_missing
+  - source_repository_access_failed
+  - source_checkout_failed

@@ -18,6 +18,11 @@ from agentic_ops.jira.cli import configure_jira_parser, execute_jira
 from agentic_ops.story_gate.cli import configure_story_parser, execute_story
 from agentic_ops.task_state import TaskIdentity, TaskStore
 from agentic_ops.workspace import PROJECT_EXECUTION, VALID_MODES, require_mode, resolve_workspace
+from agentic_ops.workspace_init import (
+    configure_workspace_init_parser,
+    execute_workspace_init,
+    execute_workspace_preflight,
+)
 
 
 class ArgumentParserError(Exception):
@@ -40,6 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
     workspace_parser = subparsers.add_parser("workspace")
     workspace_commands = workspace_parser.add_subparsers(dest="command", required=True)
     workspace_commands.add_parser("inspect")
+    configure_workspace_init_parser(workspace_commands)
 
     task_parser = subparsers.add_parser("task")
     task_commands = task_parser.add_subparsers(dest="command", required=True)
@@ -77,6 +83,10 @@ def operation_name(args: argparse.Namespace | None) -> str:
 
 
 def execute(args: argparse.Namespace) -> dict[str, object]:
+    if args.group == "workspace" and args.command == "init":
+        state = execute_workspace_init(args, args.workspace_root, args.install_root)
+        return success("workspace_init", workspace_mode=PROJECT_EXECUTION, **state)
+
     workspace = resolve_workspace(args.workspace_root, args.mode)
     operation = operation_name(args)
     if args.group == "workspace" and args.command == "inspect":
@@ -86,6 +96,10 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             workspace_mode=workspace.mode,
             config_path=str(workspace.config_path) if workspace.config_path else None,
         )
+    if args.group == "workspace" and args.command == "preflight":
+        require_mode(workspace, frozenset({PROJECT_EXECUTION}))
+        state = execute_workspace_preflight(workspace, args.install_root)
+        return success(operation, workspace_mode=workspace.mode, **state)
 
     if args.group == "auth":
         state = execute_authorization(args, workspace, args.install_root)

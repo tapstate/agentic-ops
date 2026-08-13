@@ -161,8 +161,12 @@ stories:
     document: docs/user-stories/development-engineer/de-002-workspace-init.md
     protected_paths:
       - runtime/src/agentic_ops/workspace.py
+      - runtime/src/agentic_ops/workspace_init/**
+      - runtime/tests/test_workspace_init.py
       - runtime/src/agentic_ops/config/**
       - standards/projects/**
+      - standards/contracts/operations/workspace-init.yaml
+      - skills/initialize-project-workspace/**
       - install-resources/basic/projects/**
     acceptance_checks:
       - python_runtime

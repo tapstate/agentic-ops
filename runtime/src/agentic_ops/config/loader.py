@@ -97,6 +97,44 @@ def load_jira_context(workspace: Workspace, install_root: Path) -> JiraContext:
     )
 
 
+def list_project_profiles(install_root: Path) -> list[str]:
+    profile_ids: set[str] = set()
+    for directory in (
+        install_root / "standards" / "projects",
+        install_root / "user" / "projects",
+    ):
+        if not directory.is_dir():
+            continue
+        for path in directory.glob("*/profile.yaml"):
+            if path.parent.name:
+                profile_ids.add(path.parent.name)
+        for path in directory.glob("*/profile.local.yaml"):
+            if path.parent.name:
+                profile_ids.add(path.parent.name)
+    return sorted(profile_ids)
+
+
+def load_project_profile(
+    install_root: Path,
+    profile_id: str,
+    *,
+    workspace_root: Path | None = None,
+) -> ProjectProfile:
+    paths = [
+        install_root / "standards" / "projects" / profile_id / "profile.yaml",
+        install_root / "user" / "projects" / profile_id / "profile.local.yaml",
+    ]
+    if workspace_root is not None:
+        paths.append(
+            workspace_root / ".agentic-ops" / "profiles" / f"{profile_id}.local.yaml"
+        )
+    payload = _load_layered_yaml(paths, "project_profile_not_found")
+    try:
+        return _parse_profile(payload, profile_id)
+    except (TypeError, ValueError) as error:
+        raise _configuration_error("Project Profile", error) from error
+
+
 def resolve_workspace_connection_id(
     workspace: Workspace,
     install_root: Path,
@@ -296,6 +334,13 @@ def _parse_profile(payload: dict[str, Any], expected_id: str) -> ProjectProfile:
         str(key): {str(inner_key): str(inner_value) for inner_key, inner_value in require_mapping(value, str(key)).items()}
         for key, value in require_mapping(payload.get("transitions", {}), "transitions").items()
     }
+    repositories = require_mapping(payload.get("repositories", {}), "repositories")
+    default_repository = _optional_text(repositories.get("default"))
+    if default_repository and (
+        default_repository.count("/") != 1
+        or any(part in {"", ".", ".."} for part in default_repository.split("/"))
+    ):
+        raise ValueError("repositories.default must use owner/repository format")
     return ProjectProfile(
         profile_id=actual_id,
         connection_id=_required_text(payload, "connection_id", "project_profile_invalid"),
@@ -308,6 +353,7 @@ def _parse_profile(payload: dict[str, Any], expected_id: str) -> ProjectProfile:
             for key, value in require_mapping(payload.get("statuses", {}), "statuses").items()
         },
         transition_mapping=transition_mapping,
+        default_repository=default_repository,
     )
 
 

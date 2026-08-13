@@ -150,6 +150,14 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 授权入口只返回配置状态、脱敏身份和来源，不返回 token。凭证文件使用锁、原子替换和 `0600` 权限；真实 Jira 操作前必须验证 Connection、当前身份和项目工作空间绑定。详细操作见 [AgenticOps 授权管理](authorization.md)。
 
-## 13. 项目故事质量门禁
+## 13. 业务项目工作空间初始化
+
+常规入口为 `agentic-cli workspace init`。交互模式从安全默认值开始，统一确认 `agent_id`、Project Profile、Jira 站点与 Project Key、脱敏授权账户、默认仓库和源码目录。`agent_id` 默认由纯小写主机名规范化得到，最终必须匹配 `^[0-9A-Za-z_-]+$`。
+
+确认后 Runtime 先对候选配置执行无副作用预检，再准备源码和原子写入工作空间文件；`.agentic-ops/agent.json` 作为初始化完成标记最后写入。Jira 身份、目标 Project 访问、Git 远端访问或本机 `agent_id` 冲突任一检查失败时，不得进入任务执行。
+
+共享安装的 `user/workspace-index.json` 只是可重建冲突索引，不保存凭证、不授权、不代表研发员。Jira 凭证仍只在业务项目工作空间 `.agentic-ops/.env` 中维护。
+
+## 14. 项目故事质量门禁
 
 `source_maintenance` 模式通过 `agentic-cli story impact|approve|verify` 守护项目维护故事和研发工程师故事。影响检测基于 Git 内容指纹和机器注册表；确认与固定验收必须匹配同一 `impact_id`。故事受影响、故事修订、验收失败或映射缺失时，pre-commit 停止提交。详细规则见 [项目故事质量门禁](story-quality-gate.md)。

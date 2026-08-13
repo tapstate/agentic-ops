@@ -1,38 +1,58 @@
-# DE-002 初始化项目 AI 工作空间
+# DE-002 初始化业务项目工作空间
 
-作为研发工程师，
-我希望能为具体项目初始化 AI 工作空间，
-以便 AgenticOps 根据项目配置项找到 Jira 空间、代码仓库集合、本地源码目录、工作流配置和任务执行记录位置。
+作为公司员工指导员，
+我希望通过一个入口确认研发员身份、Jira 项目空间和授权并初始化工作空间，
+以便交付一个身份隔离、事实源明确且通过前置检查的 AgenticOps 研发员。
 
 ### 触发方式
 
+常规终端入口不要求参数：
+
 ```sh
-cd <project-ai-workspace>
-agentic-cli workspace init --project tapstate --jira-user dev@example.com
+cd <business-project-workspace>
+agentic-cli workspace init
+```
+
+脚本或 CI 使用完整非交互输入；token 只能从标准输入传递：
+
+```sh
+printf '%s\n' "$JIRA_TOKEN" | agentic-cli workspace init \
+  --non-interactive \
+  --project tapdata \
+  --agent-id developer-01 \
+  --jira-email developer@example.com \
+  --token-stdin \
+  --confirm
 ```
 
 ### 前置条件
 
-- AgenticOps 已安装。
-- 研发工程师已确定当前项目配置项，例如 `tapstate` 或 `tapdata`。
-- 当前 shell 已进入项目 AI 工作空间目录。
-- 本机可以访问对应项目的 GitHub 仓库和 Jira 空间。
-- AgenticOps 当前版本中存在对应的项目包 profile，例如 `install-resources/basic/projects/tapdata/profile.yaml`。
+- AgenticOps Python Runtime 已安装。
+- 当前目录是独立业务项目工作空间，不是 `~/.agentic-ops` 或 AgenticOps 源头仓库。
+- `standards/projects/<profile>/profile.yaml` 与对应 Jira Connection 已安装。
+- 公司员工指导员可以确认当前研发员身份和 Jira 项目空间。
+- 本机具备 Jira、GitHub 和目标仓库的只读访问能力。
 
 ### 主流程
 
-1. CLI 读取 `~/.agentic-ops` 中的全局配置和默认模板。
-2. CLI 确认当前执行目录是项目 AI 工作空间。
-3. CLI 创建项目 AI 工作空间配置。
-4. CLI 根据项目配置项加载 workflow profile。
-5. CLI 从 workflow profile 读取 Jira project、默认 Jira base URL、JQL、字段映射、状态映射、目标仓库映射、GitHub 组织和本地路径占位默认值。
-6. 使用 `--interactive` 时，CLI 从参数、进程环境变量、当前工作空间配置和个人配置读取已有值，已配置项只需回车确认，缺失项才询问；非终端、脚本或 CI 场景使用完整参数形式。
-7. CLI 根据研发工程师提供或确认的 Jira 用户、当前项目 AI 工作空间目录和可选 `--source-root` 准备本地 overlay；未提供 `--source-root` 时默认使用 `<project-ai-workspace>/repos/<project>`，此时尚不写入表示初始化完成的受管文件。
-8. CLI 优先复用已有真实 Jira 本地配置；没有本地配置时，在提供、确认或读取到项目默认 Jira base URL 后写入个人配置 `$AGENTIC_OPS_HOME/user/config.local.yaml` 的 `projects.<project>.jira` 分段，只保存 `adapter`、`base_url` 和 `email`。Jira API token 只保存到 `$AGENTIC_OPS_HOME/user/.env` 的 `AGENTIC_OPS_JIRA_API_TOKEN`，不写入 YAML。
-9. CLI 检查 `source_root`；目录不存在或为空时，从 workflow profile 的 `github.repositories.default` 下载项目代码并显示进度；目录已存在且非空时直接复用，不覆盖、不拉取、不切换分支。
-10. CLI 创建按 Jira 编号隔离的任务运行目录，例如 `<project-ai-workspace>/.agentic-ops/tasks/<ISSUE-KEY>/runs/`、`audit/`、`feedback/` 和 `handoff/`。
-11. CLI 写入 `.agentic-ops/agent.json` 和根目录 `AGENTS.md`，让 AIAgent 能识别当前项目并知道如何调用 `agentic-cli`。
-12. CLI 运行工作空间预检。
+1. Runtime 枚举已安装 Project Profile；只有一个或当前目录名匹配时提供默认值，否则要求选择。
+2. Runtime 生成 `agent_id` 默认值：读取主机名、转为纯小写、把非法字符段替换为 `-`。用户必须确认或修改；最终值只能匹配 `^[0-9A-Za-z_-]+$`。
+3. Runtime 从 Project Profile 推导 Jira Connection、站点、Project Key、默认仓库和源码目录，不要求用户输入 `connection_id`。
+4. Runtime 读取当前工作空间授权；缺少完整凭证对时，在同一入口询问 Jira email 和隐藏 token，不跨工作空间继承凭证。
+5. Runtime 展示工作空间根目录、`agent_id`、Project Profile、Jira 站点、Project Key、脱敏账户、默认仓库和源码目录，由公司员工指导员统一确认。
+6. 确认后执行无副作用候选配置预检：
+   - 工作空间边界与可写性；
+   - 已有配置和覆盖确认；
+   - `agent_id` 格式及本机工作空间冲突；
+   - Project Profile、Connection 和仓库映射；
+   - Jira 凭证完整性、当前身份和 Project 访问；
+   - Git 命令、源码目录、远端仓库和只读访问权限。
+7. 所有阻断检查通过后准备源码目录，原子写入 Profile overlay、授权文件、`AGENTS.md` 管理块和非权威工作空间索引，最后写入 `.agentic-ops/agent.json` 作为初始化完成标记。
+8. Runtime 使用同一候选配置执行初始化后 preflight；通过后输出下一步动作。
+
+### 工作空间身份索引
+
+`$AGENTIC_OPS_HOME/user/workspace-index.json` 只保存 `workspace_root`、`agent_id` 和 Project Profile，用于发现同一台电脑上的身份冲突。它是可重建索引，不保存凭证、不授予权限、不代表研发员，也不得用于跨工作空间自动加载身份。
 
 ### 输出
 
@@ -40,81 +60,55 @@ agentic-cli workspace init --project tapstate --jira-user dev@example.com
 {
   "ok": true,
   "operation": "workspace_init",
-  "workspace": "tapstate",
-  "workspace_root": "<project-ai-workspace>",
-  "source_root": "<project-ai-workspace>/repos/tapstate",
-  "source_repo": "tapstate/example-repo",
-  "source_repo_url": "git@github.com:tapstate/example-repo.git",
-  "source_checkout_status": "cloned",
-  "jira_user": "dev@example.com",
+  "workspace_mode": "project_execution",
+  "agent_id": "developer-01",
+  "project_profile": "tapdata",
+  "jira_base_url": "https://tapdata.atlassian.net",
   "jira_project": "TAP",
-  "profile_ref": "$HOME/.agentic-ops/install-resources/basic/projects/tapstate/profile.yaml",
-  "profile_overlay": "<project-ai-workspace>/.agentic-ops/profile.local.yaml",
-  "agent_config": "<project-ai-workspace>/.agentic-ops/agent.json",
-  "agent_instructions": "<project-ai-workspace>/AGENTS.md",
-  "runs_dir": "<project-ai-workspace>/.agentic-ops/runs",
-  "run_logs_dir": "<project-ai-workspace>/.agentic-ops/run-logs",
-  "jira_config_status": "needs_jira_api_token",
-  "jira_config_path": "$HOME/.agentic-ops/user/config.local.yaml",
-  "jira_env_file": "$HOME/.agentic-ops/user/.env",
-  "jira_token_env": "AGENTIC_OPS_JIRA_API_TOKEN",
-  "jira_token_help_url": "https://id.atlassian.com/manage-profile/security/api-tokens",
-  "jira_token_setup": "edit $HOME/.agentic-ops/user/.env and set AGENTIC_OPS_JIRA_API_TOKEN=<api-token>",
-  "jira_config_next_action": "set_jira_api_token",
-  "agentic_next_action": "init_agent_capability"
+  "jira_account": "de*******@example.com",
+  "jira_identity": "<jira-account-id>",
+  "repository": "tapdata/tapdata",
+  "source_checkout_status": "cloned",
+  "preflight_status": "passed",
+  "post_preflight_status": "passed",
+  "agentic_next_action": "list_assigned_jira_tasks"
 }
 ```
 
 ### 失败处理
 
-- Jira base URL 未提供且项目 profile 也没有默认值时，初始化继续完成，但输出 `jira_config_status: needs_configuration` 和补齐指引；后续 `list-tasks` 仍会在真实 Jira 配置缺失时阻断。
-- 非终端环境使用 `--interactive` 时，返回 `interactive_terminal_required`，要求改用完整参数形式。
-- GitHub 登录状态、SSH key 或仓库权限不可用导致源码下载失败时，返回 `source_checkout_failed`，提示修复 GitHub 权限或使用 `--source-root` 指向已有本地源码目录。
-- 源码下载失败时，已输入的 Jira 本机配置和 token 保持有效；workspace overlay、`agent.json` 和 `AGENTS.md` 管理块只在源码准备完成后写入。
-- 本地源码目录已存在且非空时，初始化复用该目录，不覆盖、不拉取、不切换分支。
-- 已有完整本地 AgenticOps 受管配置时，停止并要求研发工程师确认；确认覆盖时使用 `--confirm-existing-config`。只留下部分受管文件时允许同项目初始化直接修复。
-- 工作流配置不完整时，输出缺失字段。
+- 非终端环境使用默认交互入口时返回 `interactive_terminal_required`。
+- `agent_id` 非法时返回 `agent_id_invalid`；已被其它有效业务工作空间使用时返回 `agent_id_conflict` 并显示冲突工作空间。
+- 已有不同完整配置且未确认时返回 `existing_config_confirmation_required`；半初始化状态允许相同候选配置修复。
+- 凭证不完整、认证失败或目标 Project 无权访问时保持未初始化状态，不写 `agent.json`。
+- Profile、Connection、Jira Project 或仓库映射不一致时阻断，不允许 AI 猜测替代值。
+- 源码远端不可访问或 clone 失败时返回稳定失败码；只有 `agent.json` 写入后才视为初始化完成。
 
 ### 验收标准
 
-- 一个工作空间能绑定一个具体 Jira 空间和一组 GitHub 仓库。
-- 不同工作空间可以使用不同 Jira / GitHub / 代码仓库配置。
-- 初始化时研发工程师必须提供项目配置项和 Jira 用户，并确认项目 AI 工作空间目录；本地源码目录可通过 `--source-root` 显式指定，未指定时使用默认目录并下载项目代码。
-- 共享安装资源中的 workflow profile 不包含研发工程师个人 Jira 用户或本机绝对路径；本地 overlay 由 `workspace init` 写入项目 AI 工作空间。
-- 初始化后，项目 AI 工作空间中存在 `.agentic-ops/agent.json` 和 `AGENTS.md`。
-- 初始化后，默认 `source_root` 存在并可作为项目源码目录使用。
-- `agent init` 和 `preflight` 会检查工作空间受管文件与 `source_root`，半初始化状态不能通过任务接管前预检。
-- 工作空间产物写入项目 AI 工作空间，不写入 `~/.agentic-ops`。
-- Jira API token 不写入 YAML；初始化缺失 token 时只引导写入 `$AGENTIC_OPS_HOME/user/.env` 的 `AGENTIC_OPS_JIRA_API_TOKEN`。
-- Jira 空间到代码仓库的映射由工作流配置维护，AIAgent 不得在接管真实卡片时猜测目标仓库。
-- `agentic-cli preflight --workspace <name>` 能验证工作空间可用性。
+- `agentic-cli workspace init` 可以在终端以零必填参数开始引导。
+- 初始化摘要明确要求确认 `agent_id`、Jira 项目空间、授权账户和源码仓库。
+- 默认 `agent_id` 是规范化后的纯小写主机名，最终值只包含 `[0-9A-Za-z_-]`。
+- 同一 `agent_id` 不能绑定本机两个有效业务项目工作空间。
+- 一个业务项目工作空间只保存一组 Jira 账户，不从共享安装或其它工作空间继承凭证。
+- Jira 身份和 Project 访问、GitHub 仓库访问均在写入初始化完成标记前验证。
+- 非交互模式必须明确身份、Profile 和确认；token 不出现在命令参数和输出中。
+- `.agentic-ops/agent.json` 最后写入，半状态不能通过任务接管前检查。
+- 初始化结果包含前置检查和初始化后 preflight 结论。
 
 ### 保护行为
 
-- `workspace init` 必须在项目 AI 工作空间目录内执行。
-- 工作空间配置必须通过项目配置项绑定 Jira 用户、Jira 空间、仓库映射和本地源码根目录。
-- 覆盖一组完整的 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 和 AgenticOps 管理的 `AGENTS.md` 配置块前，必须由研发工程师显式确认；不完整的受管文件组允许同项目初始化修复。
-- 具体项目运行产物必须写入项目 AI 工作空间，不能写入 `~/.agentic-ops`。
-- 目标仓库选择必须来自 workflow profile 或 Jira 字段映射，不能由 AIAgent 临场猜测。
-
-### 审核问题
-
-- 当前目录是否是项目 AI 工作空间，而不是 AgenticOps 源头仓库或 `~/.agentic-ops`。
-- Jira 空间到代码仓库的映射是否完整。
-- 本地源码目录是否可访问。
-- 工作空间预检失败时是否能输出缺失配置。
+- 业务项目工作空间不能位于 AgenticOps 安装目录或源头仓库中。
+- `agent_id` 冲突、Jira 授权失败、Project 访问失败或仓库访问失败时禁止初始化完成。
+- 工作空间索引不得保存凭证、代表研发员身份或用于授权。
+- token 只允许隐藏输入或安全标准输入，输出只显示脱敏账户。
+- Profile、Connection、Jira Project 和仓库映射不得由 AI 临场猜测。
 
 ### 验收证据
 
-- `agentic-cli workspace init --project <project-name> --jira-user <user>` 输出。
-- `agentic-cli profile resolve --project <project-name>` 输出。
-- `agentic-cli preflight --workspace <name>` 输出。
-- 项目 AI 工作空间中的 `.agentic-ops/tasks/<ISSUE-KEY>/`、`.agentic-ops/agent.json` 和 `AGENTS.md`。
-- workflow profile 中的 Jira / GitHub / 本地路径映射。
-
-### 关联设计
-
-- `docs/architecture/project-structure.md`
-- `docs/profiles/workflow-profile.md`
-- `docs/project-rules.md`
-- `docs/runtime/cli-runtime.md`
+- 零参数交互初始化输出和确认摘要。
+- 非交互初始化、非法 `agent_id`、身份冲突和授权缺失测试。
+- Jira 当前身份与 Project 只读回读结果。
+- Git 远端只读检查与源码准备结果。
+- `.agentic-ops/agent.json`、Profile overlay、工作空间授权文件权限和 `AGENTS.md` 管理块。
+- `workspace preflight` 输出及敏感信息不泄漏检查。

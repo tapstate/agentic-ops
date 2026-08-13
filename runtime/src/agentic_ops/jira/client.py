@@ -102,6 +102,30 @@ class JiraClient:
         payload = self._request("GET", "/rest/api/3/field")
         return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
 
+    def project_access(self, project_key: str) -> dict[str, str]:
+        payload = self._request(
+            "GET",
+            f"/rest/api/3/project/{urllib.parse.quote(project_key, safe='')}",
+        )
+        if not isinstance(payload, dict):
+            raise RuntimeErrorResult(
+                code="jira_project_invalid",
+                message="Jira Project 返回了无法识别的响应",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请核对 Jira Project Key 和账户权限",
+            )
+        actual_key = str(payload.get("key", "")).strip()
+        if actual_key != project_key:
+            raise RuntimeErrorResult(
+                code="jira_workspace_mismatch",
+                message=f"Jira 返回的 Project Key {actual_key or '<empty>'} 与 {project_key} 不一致",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请核对 Project Profile 与 Jira 站点绑定",
+            )
+        return {"key": actual_key, "name": str(payload.get("name", "")).strip()}
+
     def get_issue(self, issue_key: str) -> JiraIssue:
         fields = ",".join(self.profile.requested_jira_fields())
         payload = self._request(
