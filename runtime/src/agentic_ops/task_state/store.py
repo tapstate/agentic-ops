@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import re
+import json
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import asdict, dataclass
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from agentic_ops.output import EXIT_BLOCKED, RuntimeErrorResult
-from agentic_ops.task_state.io import append_ndjson, atomic_write_json, read_json
+from agentic_ops.task_state.io import append_ndjson, atomic_write_json, atomic_write_text, read_json
 from agentic_ops.task_state.locking import TaskLock
 
 SCHEMA_VERSION = "1"
@@ -128,6 +129,143 @@ class TaskStore:
                 "task_dir": str(task_dir),
             }
 
+    def write_report(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        kind: str,
+        content: str,
+    ) -> dict[str, Any]:
+        if kind not in {"analysis", "plan"}:
+            raise _invalid_input("report_kind", kind)
+        if not content.strip():
+            raise _invalid_input("report_content", content)
+        with self._lock(issue_key):
+            task_dir = self._task_dir(issue_key)
+            self._require_complete_task_dir(task_dir)
+            task = read_json(task_dir / "task.json")
+            if task.get("agentic_run_id") != agentic_run_id:
+                raise RuntimeErrorResult(
+                    code="task_identity_mismatch",
+                    message="报告运行编号与任务绑定不一致",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请使用任务当前绑定的 agentic_run_id",
+                )
+            report_path = task_dir / "reports" / f"{kind}.md"
+            atomic_write_text(report_path, content)
+            event = self._journal_event(task, f"report_{kind}", "completed", retry_safe=True)
+            append_ndjson(task_dir / "journal.ndjson", event)
+            return {"report_kind": kind, "report_path": str(report_path)}
+
+    def append_decision(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        decision_type: str,
+        summary: str,
+        reference: str,
+    ) -> bool:
+        with self._lock(issue_key):
+            task_dir = self._task_dir(issue_key)
+            self._require_complete_task_dir(task_dir)
+            task = read_json(task_dir / "task.json")
+            if task.get("agentic_run_id") != agentic_run_id:
+                raise RuntimeErrorResult(
+                    code="task_identity_mismatch",
+                    message="决策运行编号与任务绑定不一致",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请使用任务当前绑定的 agentic_run_id",
+                )
+            decision_path = task_dir / "decisions.ndjson"
+            for line in decision_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                existing = json.loads(line)
+                if (
+                    existing.get("decision_type") == decision_type
+                    and existing.get("reference") == reference
+                ):
+                    if existing.get("summary") != summary:
+                        raise RuntimeErrorResult(
+                            code="decision_reference_conflict",
+                            message="相同决策引用对应了不同内容",
+                            status="blocked",
+                            exit_code=EXIT_BLOCKED,
+                            required_human_action="请核对授权引用和决策内容，不要覆盖已有决策",
+                        )
+                    return False
+            append_ndjson(
+                decision_path,
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "issue_key": issue_key,
+                    "agentic_run_id": agentic_run_id,
+                    "updated_at": self._timestamp(),
+                    "content_version": 1,
+                    "decision_type": decision_type,
+                    "summary": summary,
+                    "reference": reference,
+                },
+            )
+            return True
+
+    def record_external_readback(
+        self,
+        issue_key: str,
+        operation: str,
+        idempotency_key: str,
+        external_id: str,
+        status: str = "completed",
+    ) -> dict[str, Any]:
+        with self._lock(issue_key):
+            task_dir = self._task_dir(issue_key)
+            self._require_complete_task_dir(task_dir)
+            task = read_json(task_dir / "task.json")
+            sync_path = task_dir / "sync.json"
+            sync = read_json(sync_path)
+            writes = sync.setdefault("external_writes", {})
+            record_key = f"{operation}:{idempotency_key}"
+            existing = writes.get(record_key)
+            record = {
+                "operation": operation,
+                "idempotency_key": idempotency_key,
+                "external_id": external_id,
+                "status": status,
+                "readback_at": self._timestamp(),
+            }
+            if existing and existing != record:
+                stable_existing = dict(existing)
+                stable_existing.pop("readback_at", None)
+                stable_record = dict(record)
+                stable_record.pop("readback_at", None)
+                if stable_existing != stable_record:
+                    raise RuntimeErrorResult(
+                        code="local_state_mismatch",
+                        message="外部回读结果与本地同步记录不一致",
+                        status="blocked",
+                        exit_code=EXIT_BLOCKED,
+                        required_human_action="请人工核对 Jira 与 sync.json，不要重复写入",
+                    )
+            writes[record_key] = record
+            sync["updated_at"] = self._timestamp()
+            sync["last_readback_at"] = sync["updated_at"]
+            sync["content_version"] = int(sync.get("content_version", 0)) + 1
+            atomic_write_json(sync_path, sync)
+            append_ndjson(
+                task_dir / "journal.ndjson",
+                self._journal_event(
+                    task,
+                    operation,
+                    status,
+                    retry_safe=True,
+                    idempotency_key=idempotency_key,
+                    external_id=external_id,
+                ),
+            )
+            return record
+
     def _verify_identity(self, existing: dict[str, Any], identity: TaskIdentity) -> None:
         for field, expected in asdict(identity).items():
             if existing.get(field) != expected:
@@ -160,6 +298,30 @@ class TaskStore:
 
     def _timestamp(self) -> str:
         return self._now().astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def _journal_event(
+        self,
+        task: dict[str, Any],
+        operation: str,
+        status: str,
+        *,
+        retry_safe: bool,
+        idempotency_key: str | None = None,
+        external_id: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "issue_key": task["issue_key"],
+            "agentic_run_id": task["agentic_run_id"],
+            "updated_at": self._timestamp(),
+            "content_version": 1,
+            "operation": operation,
+            "status": status,
+            "code": None,
+            "retry_safe": retry_safe,
+            "idempotency_key": idempotency_key,
+            "external_id": external_id,
+        }
 
 
 def _invalid_input(field: str, value: str) -> RuntimeErrorResult:

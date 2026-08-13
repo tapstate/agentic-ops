@@ -123,3 +123,52 @@ class TaskStateTest(unittest.TestCase):
             superpowers.rmdir()
             inspected = store.inspect(IDENTITY.issue_key)
             self.assertEqual(IDENTITY.issue_key, inspected["task"]["issue_key"])
+
+    def test_reports_decisions_and_sync_are_durable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = TaskStore(root)
+            store.initialize(IDENTITY)
+            report = store.write_report(
+                IDENTITY.issue_key,
+                IDENTITY.agentic_run_id,
+                "analysis",
+                "# 问题分析\n\n确认需要补充 Jira 回读。",
+            )
+            self.assertEqual(
+                "# 问题分析\n\n确认需要补充 Jira 回读。\n",
+                Path(report["report_path"]).read_text(encoding="utf-8"),
+            )
+            created = store.append_decision(
+                IDENTITY.issue_key,
+                IDENTITY.agentic_run_id,
+                "plan_confirmed",
+                "研发工程师确认实施计划",
+                "jira-comment-100",
+            )
+            repeated = store.append_decision(
+                IDENTITY.issue_key,
+                IDENTITY.agentic_run_id,
+                "plan_confirmed",
+                "研发工程师确认实施计划",
+                "jira-comment-100",
+            )
+            self.assertEqual(True, created)
+            self.assertEqual(False, repeated)
+            record = store.record_external_readback(
+                IDENTITY.issue_key,
+                "jira_comment",
+                "run-1-analysis",
+                "comment-100",
+            )
+            self.assertEqual("comment-100", record["external_id"])
+            task_dir = root / ".agentic-ops" / "tasks" / IDENTITY.issue_key
+            decision = json.loads(
+                (task_dir / "decisions.ndjson").read_text(encoding="utf-8").splitlines()[0]
+            )
+            self.assertEqual("plan_confirmed", decision["decision_type"])
+            sync = read_json(task_dir / "sync.json")
+            self.assertEqual(
+                "completed",
+                sync["external_writes"]["jira_comment:run-1-analysis"]["status"],
+            )

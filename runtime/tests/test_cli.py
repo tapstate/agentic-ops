@@ -70,6 +70,47 @@ class CliTest(unittest.TestCase):
             self.assertEqual("workspace_mode_mismatch", result["code"])
             self.assertIn("AgenticOps：", stderr)
 
+    def test_report_write_uses_runtime_managed_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / ".agentic-ops" / "agent.json"
+            config.parent.mkdir(parents=True)
+            config.write_text('{"mode":"project_execution"}\n', encoding="utf-8")
+            common = ("--workspace-root", str(root), "--mode", "project_execution")
+            initialized = self.run_cli(
+                *common,
+                "task",
+                "init",
+                "--connection-id",
+                "tapdata",
+                "--jira-issue-id",
+                "10001",
+                "--issue-key",
+                "TAP-123",
+                "--project-key",
+                "TAP",
+                "--agentic-run-id",
+                "run-1",
+            )
+            self.assertEqual(0, initialized[0])
+            content = root / "analysis-input.md"
+            content.write_text("# 分析\n\n确认问题根因。\n", encoding="utf-8")
+            exit_code, result, _ = self.run_cli(
+                *common,
+                "report",
+                "write",
+                "--issue-key",
+                "TAP-123",
+                "--agentic-run-id",
+                "run-1",
+                "--kind",
+                "analysis",
+                "--content-file",
+                "analysis-input.md",
+            )
+            self.assertEqual(0, exit_code)
+            self.assertTrue(Path(result["report_path"]).is_file())
+
     def test_invalid_arguments_still_return_json(self) -> None:
         exit_code, result, stderr = self.run_cli("task", "inspect")
         self.assertEqual(2, exit_code)

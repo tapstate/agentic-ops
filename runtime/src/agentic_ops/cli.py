@@ -13,6 +13,7 @@ from agentic_ops.output import (
     write_diagnostic,
     write_json,
 )
+from agentic_ops.jira.cli import configure_jira_parser, execute_jira
 from agentic_ops.task_state import TaskIdentity, TaskStore
 from agentic_ops.workspace import PROJECT_EXECUTION, VALID_MODES, require_mode, resolve_workspace
 
@@ -30,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = JsonArgumentParser(prog="agentic-cli", add_help=True)
     parser.add_argument("--workspace-root", default=".")
     parser.add_argument("--mode", choices=sorted(VALID_MODES))
+    parser.add_argument("--install-root")
     parser.add_argument("--lock-timeout", type=float, default=5.0)
     subparsers = parser.add_subparsers(dest="group", required=True)
 
@@ -47,13 +49,26 @@ def build_parser() -> argparse.ArgumentParser:
     task_init.add_argument("--agentic-run-id", required=True)
     task_inspect = task_commands.add_parser("inspect")
     task_inspect.add_argument("--issue-key", required=True)
+
+    report_parser = subparsers.add_parser("report")
+    report_commands = report_parser.add_subparsers(dest="command", required=True)
+    report_write = report_commands.add_parser("write")
+    report_write.add_argument("--issue-key", required=True)
+    report_write.add_argument("--agentic-run-id", required=True)
+    report_write.add_argument("--kind", choices=("analysis", "plan"), required=True)
+    report_write.add_argument("--content-file", required=True)
+    configure_jira_parser(subparsers)
     return parser
 
 
 def operation_name(args: argparse.Namespace | None) -> str:
     if args is None:
         return "cli"
-    parts = [getattr(args, "group", None), getattr(args, "command", None)]
+    parts = [
+        getattr(args, "group", None),
+        getattr(args, "command", None),
+        getattr(args, "action", None),
+    ]
     return "_".join(part for part in parts if part) or "cli"
 
 
@@ -70,6 +85,18 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
 
     require_mode(workspace, frozenset({PROJECT_EXECUTION}))
     store = TaskStore(Path(workspace.root), lock_timeout=args.lock_timeout)
+    if args.group == "jira":
+        state = execute_jira(args, workspace, args.install_root, store)
+        return success(operation, workspace_mode=workspace.mode, **state)
+    if args.group == "report" and args.command == "write":
+        content_path = _workspace_content_file(workspace.root, args.content_file)
+        state = store.write_report(
+            args.issue_key,
+            args.agentic_run_id,
+            args.kind,
+            content_path.read_text(encoding="utf-8"),
+        )
+        return success(operation, workspace_mode=workspace.mode, **state)
     if args.group == "task" and args.command == "init":
         state = store.initialize(
             TaskIdentity(
@@ -148,6 +175,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         write_diagnostic(result.message)
         write_json(failure(operation_name(args), result))
         return result.exit_code
+
+
+def _workspace_content_file(root: Path, value: str) -> Path:
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    resolved = candidate.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as error:
+        raise RuntimeErrorResult(
+            code="workspace_path_escape",
+            message=f"内容文件越出项目工作空间：{value}",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请把报告内容文件放在项目 AI 工作空间内",
+        ) from error
+    if not resolved.is_file():
+        raise RuntimeErrorResult(
+            code="workspace_file_not_found",
+            message=f"内容文件不存在：{value}",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请检查内容文件路径后重试",
+        )
+    return resolved
 
 
 if __name__ == "__main__":

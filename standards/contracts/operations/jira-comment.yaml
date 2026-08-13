@@ -1,0 +1,20 @@
+operation: jira_comment
+version: 1
+allowed_modes:
+  - project_execution
+protocol:
+  - plan
+  - apply
+  - readback
+preconditions:
+  - task_identity_matches_connection_profile_and_issue
+  - current_user_matches_assignee
+  - content_is_chinese
+  - plan_file_is_runtime_managed_and_integrity_checked
+side_effects:
+  - add_jira_comment
+idempotency:
+  marker: "[agentic-ops-idempotency:<key>]"
+unknown_result:
+  retry_safe: false
+  next_action: readback

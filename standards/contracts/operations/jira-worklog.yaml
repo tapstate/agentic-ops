@@ -1,0 +1,21 @@
+operation: jira_worklog
+version: 1
+allowed_modes:
+  - project_execution
+protocol:
+  - plan
+  - apply
+  - readback
+preconditions:
+  - task_identity_matches_connection_profile_and_issue
+  - current_user_matches_assignee
+  - title_and_details_are_chinese
+  - duration_is_real_handling_time
+  - waiting_time_is_explicitly_excluded
+side_effects:
+  - add_jira_worklog
+idempotency:
+  marker: "[agentic-ops-idempotency:<key>]"
+unknown_result:
+  retry_safe: false
+  next_action: readback
