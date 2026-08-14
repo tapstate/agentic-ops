@@ -15,9 +15,31 @@ metadata:
 
 未收到用户对当前业务项目工作空间的明确授权确认前，只输出预检授权清单和安全配置入口；不得读取 `.env`，不得运行 `ao-work auth jira show`、`ao-work auth jira verify` 或任何 Jira probe，也不得从本机、Shell 环境、其它工作空间或历史对话发现凭证。需要配置时，由用户在隐藏输入中执行 `ao-work auth jira set`；确认授权后才能按 manifest 继续真实 Jira 读取或写入。
 
+业务工作空间尚未初始化时，让用户在目标业务工作空间执行：
+
+```sh
+ao-work workspace init
+```
+
+Project Profile 提供 Jira 站点、Project、状态/字段映射和默认仓库，token 使用隐藏输入。不要把完整 manifest 展开成用户问卷。
+
+每个任务按来源自动解析：工作空间提供研发员与仓库身份，Project Profile 提供项目默认，Jira 卡片提供任务事实，Runtime 生成 run/digest/timestamp，AI 只对卡片无法确定的计划、范围、分支和验证提出建议。用户只审查这些建议、权限与高风险决策；事实已一致时不得重复提问。
+
+收到 Jira key 且工作空间授权已确认后，先运行：
+
+```sh
+ao-work task start <ISSUE-KEY>
+```
+
+该入口自动读取并核对 Jira Issue ID、Project、经办人、状态、标题、描述与任务类型，复用工作空间 Profile、账户和仓库，生成或恢复 `agentic_run_id` 与 Jira 内容摘要。它只创建本地运行状态，不执行正式 Jira 接管、不写 Jira、不提交或推送。
+
+先按 `intake_gate.required_sequence` 分析信息：列出已知事实与缺项，再只从 Jira、Project Profile、业务源码和 Runtime 回读中做带证据的自动补全。向用户展示完整准入摘要，必须包含原始事实、补全值与来源、仍缺项、假设和影响；不得只请求确认一个 ID。必要信息仍缺失时停在 L4。用户确认准入摘要后才形成方案，并按 `solution_gate` 分级：L1 直接实施；L2 用户确认后实施；L3 先修改设计、重新分析和确认；L4 停止升级。事实、范围、风险或设计变化后必须重新计算级别。
+
+之后每个 `ao-work` 环节只执行当次 JSON 中结构化 `agentic_next_action` 指定的动作。`executor` 只是当前步骤执行者，不是任务转派；`task_ownership.task_owner` 从接管到 PR 审查保持同一研发员，所有现役下一动作的 `ownership_effect` 必须为 `none`。未知 executor/action、required inputs 不齐、下一操作不在 `allowed_operations` 或 `stop_workflow=true` 时停止。只在 `retry_gate.allowed=true` 时允许同一 `retry_key` 再试一次；重试前必须回读状态、改变输入并记录 retry 事件，耗尽后转人工。如需转派，只能停止并由人决定；当前 `task_transfer` 为 `capability_gap`，AI、Runtime、reviewer 和项目工具都不得改变负责人。
+
 ## 校验输入
 
-1. 核对 manifest 的 Jira key、业务工作空间、`agent_id`、Project Profile、业务仓库、基线/任务/目标分支、保护分支、修改与非范围、验证 argv、允许外部动作、授权引用、PR endpoint 和确认摘要；同时显式核对 `task_binding` 中 Jira issue 内容摘要、`inputs/` 下批准计划文件及其原始 UTF-8 SHA-256，以及 `execution_identity` 中 Git author/committer 姓名邮箱和 GitHub actor login。不得从操作系统用户名、主机名、既有 Git 配置或当前 `gh` 登录临场推断这些身份。
+1. 以 `task start` 输出和已确认工作空间身份生成 manifest；核对 Jira key、业务工作空间、`agent_id`、Project Profile、业务仓库、基线/任务/目标分支、保护分支、修改与非范围、验证 argv、允许外部动作、授权引用、PR endpoint 和确认摘要。同时显式核对 `task_binding` 中 Jira issue 内容摘要、`inputs/` 下批准计划文件及其原始 UTF-8 SHA-256；`execution_identity` 必须精确复用工作空间初始化时确认的 Git author/committer 姓名邮箱和 GitHub actor login，不得从操作系统用户名、主机名、全局 Git 配置或当前 `gh` 登录临场推断。
 2. 运行 `ao-work capability list|show`。已实现操作才调用 `ao-work`；能力缺口按中文 `next_action` 转用项目认可工具或请求人工，禁止虚构旧命令。
 3. 检查工作空间初始化、Jira 授权、源码和 GitHub 权限。任何事实不一致或输入缺失都在副作用前停止。
 4. 执行 `ao-work task-run open --manifest <工作空间内相对路径>`。只能传相对普通文件；不得使用绝对路径、越界路径或 symlink。open 失败时不继续外部操作。

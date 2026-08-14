@@ -158,7 +158,7 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 ## 13. 业务项目工作空间初始化
 
-常规入口为 `ao-work workspace init`。交互模式从安全默认值开始，统一确认 `agent_id`、Project Profile、Jira 站点与 Project Key、脱敏授权账户、默认仓库和源码目录。`agent_id` 默认由纯小写主机名规范化得到，最终必须匹配 `^[0-9A-Za-z_-]+$`。
+人用常规入口为 Python Runtime 的 `ao-work workspace init`。交互模式从 Project Profile 安全默认值开始，统一确认 `agent_id`、Jira 空间、脱敏授权账户、默认仓库和源码目录。`agent_id` 默认由纯小写主机名规范化得到，最终必须匹配 `^[0-9A-Za-z_-]+$`。站点、Project、状态/字段映射和默认仓库不按任务重复询问；任务事实来自 Jira，run/digest/time 由 Runtime 生成，用户只审查 AI 提议和高风险授权。
 
 确认后 Runtime 先对候选配置执行无副作用预检，再准备源码和原子写入工作空间文件；`.agentic-ops/agent.json` 作为初始化完成标记最后写入。Jira 身份、目标 Project 访问、Git 远端访问或本机 `agent_id` 冲突任一检查失败时，不得进入任务执行。
 

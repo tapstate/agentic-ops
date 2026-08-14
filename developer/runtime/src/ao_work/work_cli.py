@@ -19,6 +19,7 @@ from ao_work.output import (
     write_json,
 )
 from ao_work.task_state import TaskIdentity, TaskStore
+from ao_work.task_start import execute_task_start
 from ao_work.task_run import configure_task_run_parser, execute_task_run
 from ao_work.workspace import DEVELOPER, resolve_developer_workspace
 from ao_work.workspace_security import read_workspace_outbound_file
@@ -42,6 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     task_parser = subparsers.add_parser("task")
     task_commands = task_parser.add_subparsers(dest="command", required=True)
+    task_start = task_commands.add_parser("start")
+    task_start.add_argument("issue_key")
     task_init = task_commands.add_parser("init")
     task_init.add_argument("--connection-id", required=True)
     task_init.add_argument("--jira-issue-id", required=True)
@@ -102,6 +105,14 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         return success(operation, workplane=workspace.workplane, **state)
 
     store = TaskStore(Path(workspace.root), lock_timeout=args.lock_timeout)
+    if args.group == "task" and args.command == "start":
+        state = execute_task_start(
+            workspace,
+            install_root,
+            store,
+            args.issue_key,
+        )
+        return success(operation, workplane=workspace.workplane, **state)
     if args.group == "jira":
         state = execute_jira(args, workspace, install_root, store)
         return success(operation, workplane=workspace.workplane, **state)

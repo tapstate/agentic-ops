@@ -51,15 +51,42 @@ cd ~/agentic-ops-tapdata
 ao-work workspace init
 ```
 
-零参数入口进入交互确认。必须确认：
+从其它目录操作时显式指定工作空间：
+
+```sh
+ao-work --workspace-root ~/agentic-ops-tapdata workspace init
+```
+
+首次初始化确认：
 
 - `agent_id`：默认由纯小写主机名规范化得到，只能包含 `[0-9a-zA-Z_-]`。
 - Jira 项目空间 / Project Profile。
 - Jira 站点、研发员账户和授权状态。
 - 默认仓库和源码目录。
 - Git、GitHub、Jira 访问等前置检查。
+- Git author/committer 与 GitHub actor login；只在该工作空间确认一次，不读取全局 Git/GitHub 身份作为事实。
 
 只有缺失或冲突的项才需要额外参数；Connection 默认由 Project Profile 推导，不要求普通用户传 `--connection-id`。
+
+这不是每个 Jira 任务都要重复填写的清单。配置来源固定为：
+
+| 来源 | 自动提供的内容 | 需要人工动作 |
+| --- | --- | --- |
+| 业务工作空间 | 研发员、Project Profile、Jira 账户、源码仓库 | 首次配置与隐藏授权 |
+| Project Profile | Jira 站点、Project、状态/字段映射、默认仓库和固定策略 | 只有项目配置变化时审查 |
+| Jira 卡片 | Issue ID、经办人、状态、标题、描述和已配置业务字段 | 卡片缺失或冲突时决策 |
+| Runtime | run ID、时间、内容摘要、证据路径和协议摘要 | 无 |
+| AI 计划 | 实施计划、范围、任务分支和验证建议 | 每个任务审查并授权 |
+
+完整 task-to-PR manifest 是后台机器审计合同，不是用户配置表。普通任务只需给出 Jira key；AI 读取上述事实后汇总待审查计划，用户只确认计划/范围/验证/权限，以及 PR 等高风险动作。确定性字段不应逐项询问。
+
+授权完成后启动任务只需：
+
+```sh
+ao-work task start TAP-12289
+```
+
+Runtime 会自动获取 Jira Issue ID、Project、经办人、状态、标题、描述和任务类型，复用工作空间 Profile、账户、仓库与执行身份，并生成或恢复 `agentic_run_id`。该命令不写 Jira，也不代表正式接管；它把尚需审查的计划、范围、分支、验证和权限作为简短清单交给 AI 与用户。
 
 初始化最后写入 `.agentic-ops/agent.json`、当前工作空间 `AGENTS.md` 和 `.agents/skills/`。该 AI 入口固定进入 developer 工作面；Codex 从标准仓库级 `.agents/skills/` 发现受管 developer Skill，规则正文直接写入 `AGENTS.md`，标准资产由 `ao-work` 从受信安装根解析。业务仓库不需要也不应创建不存在的 `developer/...` 相对路径。
 

@@ -67,6 +67,15 @@ class IntegrationPrepareInputTest(unittest.TestCase):
             self.assertFalse(result["host_state_read"])
             self.assertFalse(result["business_workspace_read"])
             self.assertFalse(result["credentials_read"])
+            self.assertNotIn("required_inputs", result)
+            self.assertEqual(
+                [
+                    "启动 $test-task-to-pr-e2e 并确认本次真实测试允许的外部副作用范围",
+                    "运行时通过隐藏输入向隔离 developer 工作空间提供 Jira 授权",
+                    "测试结束后审查真实 PR、结果包和完整摩擦复盘",
+                ],
+                result["required_user_actions"],
+            )
             self.assertNotIn("wrong-local", serialized)
             self.assertNotIn("must-not-leak", serialized)
             self.assertNotIn(str(host_home), serialized)

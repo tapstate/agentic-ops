@@ -20,6 +20,16 @@ ao-work capability show takeover_task
 
 当前可执行入口只有能力查询。若 `ao-work capability show takeover_task` 未返回 `implemented`，AIAgent 必须报告 `capability_gap` 并停止；不得把下面的目标流程、目标输出或自然语言示例当作现役 Runtime 能力。
 
+现役另有一个低参数的接管前本地准备入口：
+
+```sh
+ao-work task start TAP-123
+```
+
+它从当前工作空间、Project Profile 和 Jira 卡片读取 Issue ID、Project、经办人、状态、标题、描述与任务类型，生成或恢复本地 `agentic_run_id`。之后先分析缺项并从带证据的 Jira、Profile、源码和 Runtime 回读中自动补全，必须展示完整准入摘要供用户确认，不能只给一个 ID。确认后再形成方案并按 L1 直接实施、L2 确认后实施、L3 修改设计并重新评估、L4 停止升级分流。它不写 Jira、不设置 `agentic_id`、不改变状态，也不代表 `takeover_task` 已实现；输出固定包含 `formal_takeover_verified=false`。
+
+从正式接管到 PR 审查由同一 `task_owner` 持续负责。`agentic_next_action.executor` 只表示当前步骤由 Runtime、当前 AI、人、reviewer 或项目工具执行，不代表 Jira 经办人或任务所有权变更。当前 `ownership_effect` 只允许 `none`；`task_transfer` 保留为 `capability_gap`，如需转派必须停止并由人决定，详细合同后续单独设计。
+
 ### 前置条件
 
 - AIAgent 能力已初始化。
@@ -27,6 +37,7 @@ ao-work capability show takeover_task
 - 当前 Jira 用户和卡片负责人匹配。
 - AIAgent 已通过 `inspect-task` 读取 Jira 事实和项目资产。
 - AIAgent 已按项目准入资产确认卡片满足接管要求。
+- 现役 `task start` 已验证当前工作空间 Jira 账户是卡片经办人，并建立本地运行上下文；这仍不能代替目标正式接管门禁。
 
 ### 目标主流程
 
@@ -55,7 +66,16 @@ ao-work capability show takeover_task
   "task_type": "task_takeover",
   "current_stage": "takeover_started",
   "target_repo": "tapstate/example-repo",
-  "agentic_next_action": "proceed"
+  "agentic_next_action": {
+    "executor": "ai",
+    "action": "analyze_and_complete_task_information",
+    "required_inputs": ["issue", "workspace_defaults", "agentic_run_id", "intake_gate", "solution_gate"],
+    "allowed_operations": ["report_write"],
+    "requires_authorization": false,
+    "stop_workflow": false,
+    "ownership_effect": "none",
+    "retry_gate": {"allowed": false}
+  }
 }
 ```
 
@@ -65,6 +85,7 @@ ao-work capability show takeover_task
 - 项目准入信息不足时，不调用 `takeover-task`，先完成代码分析和 Jira 补卡闭环。
 - 权限不足时，返回 `missing_permission`。
 - 风险边界不清时，要求人工确认。
+- 每个环节只按 Runtime 根据实际结果返回的结构化下一动作推进；只在 `retry_gate.allowed=true` 时可回读、改变输入后重试一次，耗尽后停止。
 
 ### 验收标准
 
@@ -95,6 +116,7 @@ ao-work capability show takeover_task
 
 ### 验收证据
 
+- `ao-work task start <KEY>` 的 Jira 只读解析、负责人/完成状态阻断和本地 run 幂等恢复测试。
 - `ao-work capability show takeover_task` 输出的当前状态；能力实现后再补正式接管输出。
 - `agentic_run_id` 对应的事件日志。
 - Jira 中文接管成功、失败、阻塞或补卡说明。

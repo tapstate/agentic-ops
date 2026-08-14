@@ -11,7 +11,12 @@ from unittest import mock
 
 from ao_work.work_cli import main
 from ao_work.jira.client import TransportResponse
-from ao_work.workspace_init.service import WorkspaceInitializer, normalize_agent_id
+from ao_work.output import RuntimeErrorResult
+from ao_work.workspace_init.service import (
+    WorkspaceInitializer,
+    build_execution_identity,
+    normalize_agent_id,
+)
 
 
 class TTYStringIO(io.StringIO):
@@ -36,6 +41,23 @@ class WorkspaceInitTransport:
 
 
 class WorkspaceInitTest(unittest.TestCase):
+    def test_execution_identity_is_confirmed_once_and_validated(self) -> None:
+        self.assertEqual(
+            "harsen-mini-test-bot",
+            build_execution_identity(
+                "harsen-mini-test-bot",
+                "harsen@example.test",
+                "harsen-mini-test-bot",
+            )["github_actor_login"],
+        )
+        for values in (
+            ("", "harsen@example.test", "harsen"),
+            ("harsen", "invalid", "harsen"),
+            ("harsen", "harsen@example.test", "bad_login"),
+        ):
+            with self.subTest(values=values), self.assertRaises(RuntimeErrorResult):
+                build_execution_identity(*values)
+
     def prepare_install(self, root: Path) -> Path:
         install = root / "install"
         self.install_root = install.resolve()
@@ -164,6 +186,12 @@ class WorkspaceInitTest(unittest.TestCase):
                 "developer_1",
                 "--jira-email",
                 "developer@example.test",
+                "--git-name",
+                "Developer One",
+                "--git-email",
+                "developer@example.test",
+                "--github-login",
+                "developer-one",
                 "--token-stdin",
                 "--confirm",
             )
@@ -180,6 +208,16 @@ class WorkspaceInitTest(unittest.TestCase):
             self.assertEqual("tapdata", agent["project_profile"])
             self.assertEqual(3, agent["schema_version"])
             self.assertEqual("tap-cloud", agent["connection_id"])
+            self.assertEqual(
+                {
+                    "git_author_name": "Developer One",
+                    "git_author_email": "developer@example.test",
+                    "git_committer_name": "Developer One",
+                    "git_committer_email": "developer@example.test",
+                    "github_actor_login": "developer-one",
+                },
+                agent["execution_identity"],
+            )
             self.assertEqual("https://jira.example.test", agent["jira_base_url"])
             self.assertEqual("jira.example.test", agent["jira_site"])
             self.assertEqual("developer-1", agent["jira_account_id"])
@@ -200,13 +238,32 @@ class WorkspaceInitTest(unittest.TestCase):
             )
             self.assertEqual("developer_1", index["workspaces"][0]["agent_id"])
 
+            preflight = self.run_cli(
+                (
+                    "--workspace-root",
+                    str(workspace),
+                    "workspace",
+                    "preflight",
+                ),
+                stdin=io.StringIO(""),
+            )
+            self.assertEqual(0, preflight[0], preflight[1])
+            preserved = json.loads(
+                (workspace / ".agentic-ops" / "agent.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(agent["execution_identity"], preserved["execution_identity"])
+
     def test_zero_parameter_interactive_entry_uses_hostname_default_and_confirms(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             install = self.prepare_install(root)
             workspace = root / "workspace"
             workspace.mkdir()
-            stdin = TTYStringIO("tapdata\n\ndeveloper@example.test\ny\n")
+            stdin = TTYStringIO(
+                "tapdata\n\ndeveloper@example.test\n\n\n\ny\n"
+            )
             with mock.patch(
                 "ao_work.workspace_init.cli.getpass.getpass",
                 return_value="token-secret-123",

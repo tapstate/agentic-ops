@@ -8,7 +8,7 @@
 
 - [项目维护者上手](maintainers/getting-started.md)
 - [研发工程师上手](development-engineers/getting-started.md)
-- developer 工作面入口由 `ao-work workspace init` 写入业务项目工作空间 `AGENTS.md`。
+- developer 工作面由 `ao-work workspace init` 初始化，并写入业务项目工作空间 `AGENTS.md`。
 
 ## 核心文档
 
@@ -62,7 +62,7 @@
 ## AI 入口
 
 - 根仓库：`../AGENTS.md` -> `../maintainer/AGENTS.md`。
-- 业务项目工作空间：由 `ao-work workspace init` 生成本地 `AGENTS.md`，并加载 developer 资产。
+- 业务项目工作空间：由 `ao-work workspace init` 生成本地 `AGENTS.md` 并加载 developer 资产。
 
 ## 规划规则
 

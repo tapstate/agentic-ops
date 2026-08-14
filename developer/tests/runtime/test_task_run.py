@@ -57,6 +57,13 @@ class TrustedTaskRunTest(unittest.TestCase):
                     "jira_account_id": "jira-account-1",
                     "source_root": str(self.source.resolve()),
                     "repository": "tapdata/tapdata",
+                    "execution_identity": {
+                        "git_author_name": "Harsen Test Bot",
+                        "git_author_email": "harsen-test-bot@example.com",
+                        "git_committer_name": "Harsen Test Bot",
+                        "git_committer_email": "harsen-test-bot@example.com",
+                        "github_actor_login": "harsen-mini-test-bot",
+                    },
                 }
             ),
             encoding="utf-8",
@@ -295,6 +302,18 @@ class TrustedTaskRunTest(unittest.TestCase):
         with self.assertRaises(Exception) as captured:
             validate_manifest(arbitrary_authorization)
         self.assertEqual("protocol_schema_invalid", getattr(captured.exception, "code", None))
+
+    def test_manifest_reuses_workspace_execution_identity(self) -> None:
+        self.manifest["execution_identity"]["github_actor_login"] = "another-user"  # type: ignore[index]
+        self.manifest["authorization"]["confirmed_manifest_sha256"] = manifest_digest(  # type: ignore[index]
+            self.manifest
+        )
+        self._write_manifest()
+        code, payload, _ = self._cli(
+            "task-run", "open", "--manifest", "inputs/manifest.json"
+        )
+        self.assertEqual(2, code)
+        self.assertEqual("manifest_execution_identity_mismatch", payload["code"])
 
     def test_verification_digest_binds_timeout_seconds(self) -> None:
         verification = self.manifest["verification"][0]  # type: ignore[index]

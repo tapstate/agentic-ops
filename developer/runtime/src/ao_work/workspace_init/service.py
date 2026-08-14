@@ -41,6 +41,7 @@ from ao_work.workspace_security import (
 
 AGENT_ID_PATTERN = re.compile(r"^[0-9A-Za-z_-]+$")
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+GITHUB_LOGIN_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 MANAGED_START = "<!-- agentic-ops:workspace:start -->"
 MANAGED_END = "<!-- agentic-ops:workspace:end -->"
 WORKSPACE_SKILLS_ROOT = Path(".agents") / "skills"
@@ -58,6 +59,7 @@ class WorkspaceCandidate:
     email: str | None
     token: str | None
     credential_source: str
+    execution_identity: dict[str, str] | None = None
     persist_credentials: bool = False
 
     def summary(self) -> dict[str, Any]:
@@ -71,6 +73,7 @@ class WorkspaceCandidate:
             "credential_source": self.credential_source,
             "repository": self.repository,
             "source_root": str(self.source_root),
+            "execution_identity": self.execution_identity,
         }
 
 
@@ -105,6 +108,41 @@ def mask_email(value: str | None) -> str | None:
     return f"{visible}{'*' * max(len(local) - len(visible), 1)}@{domain}"
 
 
+def build_execution_identity(
+    git_name: str,
+    git_email: str,
+    github_actor_login: str,
+) -> dict[str, str]:
+    name = git_name.strip()
+    email = git_email.strip()
+    login = github_actor_login.strip()
+    if not name or "\x00" in name or len(name) > 256:
+        raise _blocked(
+            "execution_identity_invalid",
+            "Git author/committer name 无效",
+            "请在工作空间初始化时确认当前研发员的 Git 姓名",
+        )
+    if not EMAIL_PATTERN.fullmatch(email):
+        raise _blocked(
+            "execution_identity_invalid",
+            "Git author/committer email 格式无效",
+            "请在工作空间初始化时确认当前研发员的 Git email",
+        )
+    if not GITHUB_LOGIN_PATTERN.fullmatch(login):
+        raise _blocked(
+            "execution_identity_invalid",
+            "GitHub actor login 格式无效",
+            "请在工作空间初始化时确认当前研发员的 GitHub login",
+        )
+    return {
+        "git_author_name": name,
+        "git_author_email": email,
+        "git_committer_name": name,
+        "git_committer_email": email,
+        "github_actor_login": login,
+    }
+
+
 class WorkspaceInitializer:
     def __init__(self, root: Path, install_root: Path, *, git_timeout: float = 20.0) -> None:
         self.root = root.expanduser().resolve()
@@ -119,6 +157,7 @@ class WorkspaceInitializer:
         *,
         source_root: str | None = None,
         credentials: tuple[str, str] | None = None,
+        execution_identity: dict[str, str] | None = None,
         persist_credentials: bool = False,
         allow_rebind: bool = False,
     ) -> WorkspaceCandidate:
@@ -196,6 +235,24 @@ class WorkspaceInitializer:
                 "Jira token 长度明显不合理",
                 "请重新输入当前 Jira 账户的 API token",
             )
+        if execution_identity is None:
+            agent_path = self.root / ".agentic-ops" / "agent.json"
+            if agent_path.is_file():
+                existing_agent = read_json(agent_path)
+                existing_identity = existing_agent.get("execution_identity")
+                if isinstance(existing_identity, dict):
+                    rebuilt_identity = build_execution_identity(
+                        str(existing_identity.get("git_author_name", "")),
+                        str(existing_identity.get("git_author_email", "")),
+                        str(existing_identity.get("github_actor_login", "")),
+                    )
+                    if existing_identity != rebuilt_identity:
+                        raise _blocked(
+                            "execution_identity_invalid",
+                            "工作空间中已保存的执行身份字段不完整或不一致",
+                            "请重新运行交互初始化并确认 Git/GitHub 执行身份",
+                        )
+                    execution_identity = rebuilt_identity
         resolved_source = (
             Path(source_root).expanduser().resolve()
             if source_root
@@ -213,6 +270,7 @@ class WorkspaceInitializer:
             email=email,
             token=token,
             credential_source=credential_source,
+            execution_identity=execution_identity,
             persist_credentials=persist_credentials,
         )
 
@@ -335,6 +393,11 @@ class WorkspaceInitializer:
                             "jira_account_id": preflight["jira_identity"],
                             "source_root": str(candidate.source_root),
                             "repository": candidate.repository,
+                            **(
+                                {"execution_identity": candidate.execution_identity}
+                                if candidate.execution_identity is not None
+                                else {}
+                            ),
                             "initialized_at": datetime.now(timezone.utc).isoformat(),
                         },
                     )
@@ -506,6 +569,8 @@ class WorkspaceInitializer:
                 "jira_site": jira_site_identity(candidate.connection.base_url),
             }.items()
         )
+        if candidate.execution_identity is not None:
+            same = same and existing.get("execution_identity") == candidate.execution_identity
         if not same and not confirmed:
             raise _blocked(
                 "existing_config_confirmation_required",

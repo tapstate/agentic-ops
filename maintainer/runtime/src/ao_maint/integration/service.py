@@ -50,7 +50,7 @@ class IntegrationService:
         return {
             "issue_key": issue_key,
             "manifest_path": str(output_path),
-            "manifest_status": "awaiting_explicit_input_and_confirmation",
+            "manifest_status": "awaiting_developer_resolution_and_confirmation",
             "protocol": "task_to_pr_review",
             "schema_path": str(
                 self.source_root
@@ -61,25 +61,35 @@ class IntegrationService:
             "host_state_read": False,
             "business_workspace_read": False,
             "credentials_read": False,
-            "confirmation_instruction": (
-                "填写所有 REQUIRED 后，将 authorization.confirmed_manifest_sha256 暂置为空字符串，"
-                "以 UTF-8、ensure_ascii=false、sort_keys=true、separators=(',',':') 生成 canonical JSON，"
-                "计算 SHA-256 并由确认人把摘要写回；任何字段变化都必须重新确认"
-            ),
-            "required_inputs": [
-                "独立 developer 工作空间绝对路径",
-                "Jira key、不可变 issue ID、Jira HTTPS 站点与 Project key",
-                "当前 Jira accountId 与真实经办 assignee accountId",
-                "Project Profile 状态映射、允许的状态分类与可选 agentic_id Custom Field",
-                "agent_id、Project Profile、唯一 agentic_run_id 与明确 execution_identity",
-                "canonical Jira issue 内容 SHA-256、inputs/ 下批准计划文件及其原始 UTF-8 SHA-256",
-                "业务仓库绝对路径、仓库 slug、remote 名称、基线/任务/目标/保护分支，且 base_branch 必须等于 target_branch",
-                "任务包含范围与明确排除范围",
-                "固定 argv、工作目录和超时的验证清单",
-                "GitHub PR provider、仓库 slug、目标分支与 CI 策略",
-                "允许的 Jira、Git、GitHub 外部动作",
-                "确认人、确认时间、授权引用与 canonical manifest SHA-256",
+            "configuration_model": {
+                "workspace_once": [
+                    "agent_id 与 developer 工作空间",
+                    "Project Profile 与工作空间 Jira 账户授权",
+                    "业务源码仓库与执行身份",
+                ],
+                "project_profile_defaults": [
+                    "Jira HTTPS 站点、Project Key、状态映射和字段映射",
+                    "默认仓库、项目流程和固定策略",
+                ],
+                "jira_task_facts": [
+                    "Issue ID、经办人、状态、标题、描述和已配置业务字段",
+                ],
+                "runtime_generated": [
+                    "agentic_run_id、内容摘要、时间、协议摘要和证据路径",
+                ],
+                "ai_proposed_for_review": [
+                    "实施计划、包含/排除范围、任务分支和验证命令",
+                ],
+            },
+            "required_user_actions": [
+                "启动 $test-task-to-pr-e2e 并确认本次真实测试允许的外部副作用范围",
+                "运行时通过隐藏输入向隔离 developer 工作空间提供 Jira 授权",
+                "测试结束后审查真实 PR、结果包和完整摩擦复盘",
             ],
+            "protocol_note": (
+                "manifest 是机器审计合同，不是用户配置表；REQUIRED 字段由 developer 工作面按"
+                "工作空间、Project Profile、Jira 卡片、Runtime 探测和已审查计划解析"
+            ),
             "forbidden_implicit_sources": [
                 "~/.agentic-ops",
                 ".env 或其它相邻凭据文件",
@@ -89,8 +99,8 @@ class IntegrationService:
                 "历史任务状态或聊天隐含信息",
             ],
             "next_action": (
-                "人工填写、审阅并确认 manifest 后，把该文件交给 developer 工作面的 "
-                "$run-task-to-pr-test；maintainer 不执行真实业务任务"
+                "由 maintainer 工作面的 $test-task-to-pr-e2e 创建隔离业务工作空间、"
+                "启动 developer Agent 并根据 ao-work 结构化 next_action 推进到 PR 审查"
             ),
         }
 
