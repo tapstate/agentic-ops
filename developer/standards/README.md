@@ -31,7 +31,13 @@ ao-work capability show <operation>
 
 只有目录返回 `status=implemented` 且列出当前命令路径时，才能继续调用。`status=capability_gap`、目录中不存在该操作、目录校验失败或只有 Operation Contract 时必须停止自动化，并按目录中的中文 `next_action` 处理。Operation Contract 保存目标输入、输出、门禁和副作用边界，不是实现状态事实源。
 
-当前公开支持的任务事实入口是 `ao-work jira inspect --issue-key <KEY>`，它只返回基础 Jira Issue 事实；不等价于旧 `inspect-task` 富输出。Project Profile 仍由工作空间初始化与 Runtime 内部加载。资产解析优先级固定为：
+每个 `ao-work` 子命令都是一个原子步骤控制入口。stdout 的唯一 JSON 对象固定包含 `ok`、`operation`、`status` 和结构化 `agentic_next_action`；下一步对象固定给出 `executor`、稳定 `action`、`required_inputs`、`allowed_operations`、`requires_authorization`、`stop_workflow`、`ownership_effect` 与 `retry_gate`。`executor` 只表示当前动作由 Runtime、当前 AI、人、reviewer 或项目工具执行，不是任务转派；当前版本 `ownership_effect` 只允许 `none`。Runtime 必须根据当前操作的实际结果选择下一动作；AI 只能从当前结果的事实/证据字段取齐 required inputs，并调用 allowed operations 中已实现的操作。失败只在 `retry_gate.allowed=true` 时可以按同一 `retry_key` 再试一次，且必须先回读状态、改变输入并记录 retry 事件；相同输入循环、未允许重试或重试耗尽都要停止转人工。自然语言说明只帮助人理解，不能替代这些机器字段或成为放行依据。
+
+任务负责人与步骤执行者必须分开。`task start` 输出的 `task_ownership.task_owner` 是当前工作空间代表的研发员，默认从接管到 PR 审查保持不变。Runtime、人工确认、reviewer 和项目工具参与单个步骤都不改变负责人。`task_transfer` 仍是 `capability_gap`；出现转派需求时必须停止并由人决定，身份变更、原授权失效、交接证据和 Jira 所有权变更后续通过独立专题设计，当前不预设放行行为。
+
+`ao-work` 只判定当前原子步骤是否完成，不把“命令成功”扩大为“整个任务成功”。例如 `task start` 成功只表示 Jira 事实与本地 run 已建立；`jira ... apply` 成功后仍要 readback；`task-run finalize` 才能给出本次协议结论，并且真实任务仍停在 PR 审查。
+
+当前低参数任务入口是 `ao-work task start <KEY>`：它从当前工作空间、Project Profile 与 Jira 卡片自动创建或恢复本地运行上下文，并要求 AI 先识别缺项、从可验证来源自动补全，展示完整准入摘要供用户确认。确认前不形成最终方案；确认后方案分为 L1 直接实施、L2 确认后实施、L3 先修改设计并重新分析、L4 停止升级。准入摘要必须展示事实、补全值及来源、仍缺项、假设、影响和方案级别，不能只给一个 ID。该入口不写 Jira、不提交代码，也不等价于正式 takeover。`ao-work jira inspect --issue-key <KEY>` 继续作为只读基础 Jira 事实入口；二者都不等价于旧 `inspect-task` 富输出。Project Profile 仍由工作空间初始化与 Runtime 内部加载。资产解析优先级固定为：
 
 ```text
 项目工作空间 overlay
@@ -59,7 +65,7 @@ ao-work task-run record-unverified-prohibitions --manifest <workspace-relative-m
 ao-work task-run finalize --manifest <workspace-relative-manifest.json> --status <ready_for_pr_review|blocked|failed> --next-action <明确下一步>
 ```
 
-正式 manifest 还必须显式绑定两组不可推断的事实：`task_binding` 记录 canonical Jira issue 内容摘要、`inputs/` 下批准计划文件和该文件原始 UTF-8 SHA-256；`execution_identity` 记录 Git author/committer 姓名邮箱及 GitHub actor login。Runtime 不得用操作系统用户名、主机名、既有 Git 配置或当前登录自动补齐这些字段。
+正式 manifest 还必须显式绑定两组不可推断的事实：`task_binding` 记录 canonical Jira issue 内容摘要、`inputs/` 下批准计划文件和该文件原始 UTF-8 SHA-256；`execution_identity` 复用工作空间初始化时已确认并写入 `agent.json` 的 Git author/committer 姓名邮箱及 GitHub actor login。Runtime 不得用操作系统用户名、主机名、全局 Git 配置或当前登录临场补齐这些字段；manifest 与工作空间身份漂移时必须阻断。
 
 可信执行顺序固定为：在干净任务分支执行写前 `probe-prohibition-baseline`；若远端任务分支已存在，本地 HEAD 必须等于它，否则必须等于远端目标分支，预置 commit 直接阻断。随后修改并创建最终 commit，在最终 HEAD 上执行全部 `verify`，验证通过后才 push 并执行 `probe-git`，再新建 PR 和执行 `probe-pr`，最后执行 `probe-prohibitions`。当前 PR 动作归因只支持基线无 open PR 的 create-only proof；基线已有 PR 时因不能证明本轮 update 而 fail closed。Git/PR 动作只证明写前基线至后置回读的区间，不把 probe 事件时间当作真实动作时间。任何失败修复或整理只要产生新 commit，就必须在新最终 HEAD 上重跑全部指定验证；旧 HEAD 的通过结果不能复用。
 

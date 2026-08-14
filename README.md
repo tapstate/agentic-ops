@@ -81,7 +81,7 @@ AgenticOps = 两个隔离工作面 + Skill + Python Runtime + Shell Bootstrap + 
 - [故事线总览](docs/user-stories/agenticops-user-stories.md)
 - [问题修复与同步路径](docs/runtime/problem-resolution-and-update.md)
 
-研发工程师读人用指引；`ao-work workspace init` 会在业务项目工作空间生成固定的 developer AI 入口，AIAgent 从当前工作空间 `AGENTS.md` 开始，并从 `.agents/skills/` 发现受管 developer Skill，不读取 maintainer 资产。
+研发工程师读人用指引；`ao-work workspace init` 会在业务项目工作空间生成固定的 developer AI 入口，AIAgent 从当前工作空间 `AGENTS.md` 开始，并从 `.agents/skills/` 发现受管 developer Skill，不读取 maintainer 资产。后续任务只给 Jira key；完整 manifest 由工作空间、Project Profile、Jira 卡片、Runtime 和已审查 AI 计划共同生成，不作为用户逐字段配置表。
 
 ### AgenticOps 研发员
 

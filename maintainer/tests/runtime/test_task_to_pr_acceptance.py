@@ -764,6 +764,13 @@ class TaskToPRAcceptanceTest(unittest.TestCase):
             self.assertFalse(result["host_state_read"])
             self.assertFalse(result["business_workspace_read"])
             self.assertFalse(result["credentials_read"])
+            self.assertEqual(
+                "awaiting_developer_resolution_and_confirmation",
+                result["manifest_status"],
+            )
+            self.assertIn("workspace_once", result["configuration_model"])
+            self.assertEqual(3, len(result["required_user_actions"]))
+            self.assertIn("不是用户配置表", result["protocol_note"])
             self.assertNotIn("must-not-leak", serialized)
             self.assertNotIn(str(fake_home), serialized)
 

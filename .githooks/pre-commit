@@ -306,25 +306,37 @@ if [ "$source_marker_head" = "maintainer" ] || \
     fi
   done
 
-  # 正式 launcher 需要锁定 venv；隔离快照只借用当前已准备的解释器，代码和
-  # 数据均来自 Git 快照。测试 fixture 的基线 launcher 不依赖该解释器。
+  # 隔离快照只借用当前已准备的解释器和第三方依赖；受信 Python
+  # 模块和注册表仍来自 HEAD 快照。不能把解释器链接到快照内的
+  # `.venv/bin/python`：Python 会按链接路径定位 `pyvenv.cfg`，从而丢失
+  # 原虚拟环境的标准库和 site-packages。
   python_bin="$repo_root/maintainer/.venv/bin/python"
-  if [ -x "$python_bin" ]; then
-    mkdir -p "$baseline_snapshot/maintainer/.venv/bin"
-    ln -s "$python_bin" "$baseline_snapshot/maintainer/.venv/bin/python"
-  fi
   baseline_cli="$baseline_snapshot/maintainer/bin/ao-maint"
   if [ ! -x "$baseline_cli" ]; then
     echo "AgenticOps trusted story quality gate requires maintainer/bin/ao-maint" >&2
     exit 1
   fi
-  env -u GIT_INDEX_FILE \
-    GIT_NO_REPLACE_OBJECTS=1 \
-    PYTHONPYCACHEPREFIX="$story_gate_temp/pycache" \
-    "$baseline_cli" \
-      --source-root "$candidate_snapshot" \
-      story impact \
-      --change-source range \
-      --base "$head_commit" \
-      --head "$snapshot_commit"
+  if [ -x "$python_bin" ]; then
+    env -u GIT_INDEX_FILE \
+      GIT_NO_REPLACE_OBJECTS=1 \
+      PYTHONPATH="$baseline_snapshot/maintainer/runtime/src" \
+      PYTHONPYCACHEPREFIX="$story_gate_temp/pycache" \
+      "$python_bin" -m ao_maint \
+        --source-root "$candidate_snapshot" \
+        story impact \
+        --change-source range \
+        --base "$head_commit" \
+        --head "$snapshot_commit"
+  else
+    # 纯 Shell 测试 fixture 没有 Python 环境，继续执行其受信基线 launcher。
+    env -u GIT_INDEX_FILE \
+      GIT_NO_REPLACE_OBJECTS=1 \
+      PYTHONPYCACHEPREFIX="$story_gate_temp/pycache" \
+      "$baseline_cli" \
+        --source-root "$candidate_snapshot" \
+        story impact \
+        --change-source range \
+        --base "$head_commit" \
+        --head "$snapshot_commit"
+  fi
 fi

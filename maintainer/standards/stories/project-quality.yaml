@@ -243,6 +243,8 @@ stories:
     title: 新任务接管
     document: docs/user-stories/development-engineer/de-004-takeover-task.md
     protected_paths:
+      - developer/runtime/src/ao_work/task_start.py
+      - developer/tests/runtime/test_task_start.py
       - developer/runtime/src/ao_work/authorization/**
       - developer/runtime/src/ao_work/jira/**
       - developer/runtime/src/ao_work/task_state/**

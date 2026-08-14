@@ -109,6 +109,33 @@ capabilities:
     summary: 拉取请求审查意见分类与修复目标契约，尚未迁移到 Python Runtime。
     next_action: 请使用项目认可的审查工具读取意见，遇到取舍时停止并请求研发工程师确认。
 
+  - id: git_commit
+    source: runtime
+    contract:
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 按批准计划、工作树状态、执行身份和最终验证证据创建业务任务提交的原子操作尚未实现。
+    next_action: 请停止真实全链路自动化；不能让 AI 直接调用 git commit 绕过批准摘要、身份、范围和写后回读门禁。
+
+  - id: git_push_task_branch
+    source: runtime
+    contract:
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 在任务级授权内推送业务任务分支并回读远端 SHA 的原子操作尚未实现。
+    next_action: 请停止真实全链路自动化；先实现保护分支阻断、非快进阻断、授权绑定和远端 SHA 回读，再允许自动推送。
+
+  - id: github_pr_create
+    source: runtime
+    contract:
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 创建真实 GitHub PR 并回读 URL、head/base、draft、merge 和 CI 事实的原子操作尚未实现。
+    next_action: 请停止在 PR 前；先实现 PR 创建计划、授权、写后回读与禁止 merge 门禁，不能让 AI 直接调用 gh pr create。
+
   - id: inspect_task
     source: contract
     contract: contracts/operations/inspect-task.yaml
@@ -321,6 +348,43 @@ capabilities:
     commands: []
     summary: Jira 任务接管和所有权绑定目标契约，尚未迁移到 Python Runtime。
     next_action: 请勿把 task init 当成接管；当前需要研发工程师人工管理 Jira 所有权并提交 takeover 能力专题。
+
+  - id: task_start
+    source: runtime
+    contract:
+    status: implemented
+    visibility: public
+    commands:
+      - [task, start]
+    summary: 使用当前工作空间、Project Profile 和 Jira 卡片自动创建或恢复本地任务运行，只把计划、范围、验证和权限留给人工审查。
+    next_action: 请只传 Jira key；先分析缺项并按有证据来源自动补全，用户确认准入摘要后再形成和分级方案。该操作不会写 Jira、提交代码、推送或创建 PR。
+
+  - id: task_intake_assess
+    source: runtime
+    contract:
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 校验任务信息分析、缺项、证据化自动补全和用户确认摘要的原子操作尚未实现。
+    next_action: 请先由 AI 形成带来源的准入摘要并请用户确认；在 Runtime 实现摘要 digest 与缺项门禁前，不得把信息补全描述成机器验收通过。
+
+  - id: solution_gate
+    source: runtime
+    contract:
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 根据已确认准入摘要和方案证据确定 L1 直接执行、L2 用户确认、L3 修改设计、L4 停止升级的原子门禁尚未实现。
+    next_action: 请按四级标准人工审查并记录结论；在 Runtime 实现稳定分类和变更后重算前，不得让 AI 自行降低级别。
+
+  - id: task_transfer
+    source: runtime
+    contract:
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 任务转派的身份变更、授权失效、交接证据和 Jira 所有权合同尚未设计与实现。
+    next_action: 当前任务负责人持续负责到 PR 审查；如确需转派必须停止并由人决定，后续通过独立专题设计和实现，AI、Runtime、reviewer 或项目工具均不得自行改变 task_owner。
 
   - id: task_state_init
     source: runtime

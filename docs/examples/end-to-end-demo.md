@@ -10,45 +10,65 @@
 
 | 工作面 | AI 入口 | 职责 | 禁止事项 |
 | --- | --- | --- | --- |
-| `maintainer` | 根入口与 `ao-maint` | 准备并确认 manifest；运行离线合同回归；只读验收结果包 | 不进入业务工作空间，不执行 Jira/业务 Git/GitHub 写入，不修改业务代码 |
+| `maintainer` | 根入口、`ao-maint` 与 `$test-task-to-pr-e2e` | 无副作用能力预检；创建隔离 developer 工作空间；启动相互隔离的 developer/reviewer AI；只读验收结果包 | 不在 maintainer 上下文中执行 Jira/业务 Git/GitHub 写入，不修改业务代码，不把子进程状态继承回源头工作面 |
 | `developer` | 业务工作空间入口与 `ao-work` | 执行真实任务、验证、提交、推送、新建 PR，生成审计与复盘 | 不加载维护规则，不修改 AgenticOps 源码，不 merge/Done/release/tag |
 
 两个工作面只通过显式 manifest 和脱敏结果包交接，不能共享 Python import、凭据、状态目录或聊天中的隐含信息。
 
-## 3. 测试前显式输入
+## 3. 一次性配置与每任务输入
 
-以 `TAP-12289` 为示例，maintainer 先准备清单：
+真实全链路首次使用时，maintainer 先创建一次性非敏感配置：
 
 ```sh
-./maintainer/bin/ao-maint integration prepare-task-to-pr TAP-12289 \
+./maintainer/bin/ao-maint integration prepare-task-to-pr-e2e-config \
   --agent-id harsen-mini-test-bot \
-  --confirmed-by harsen
+  --project-profile tapdata \
+  --expected-confirmer harsen
 ```
 
-本次只把用户已经显式给出的三个值预填为 `issue.key=TAP-12289`、`agent.agent_id=harsen-mini-test-bot` 和 `authorization.confirmed_by=harsen`。`confirmed_by` 是当前会话/协议包中的确认声明，不是 maintainer 独立核验的 Jira author 身份。通用命令省略两个可选参数时，对应字段仍为 `REQUIRED`；入口不得从 hostname、系统用户、Git/GitHub 身份、历史聊天或本机状态推断。
+该配置只保存测试研发员身份、Project Profile 和预期确认人，不保存 token，也不是任务授权。运行入口不得从 hostname、系统用户、Git/GitHub 身份、历史聊天或其它本机状态推断或覆盖这些值。变更配置必须走独立审查流程。
 
-测试前必须由用户逐项提供并确认以下正式 manifest 字段，不能从本机自动搜集：
+正式 manifest 是机器审计合同，不是用户配置表。字段按以下来源解析：
 
-- `workspace.root`：独立 developer 工作空间绝对路径；
-- `issue`：Jira key、不可变 issue ID、Project key；
-- `jira`：HTTPS 站点、当前 accountId、真实经办 assignee accountId、状态映射、允许的状态分类、可选 `agentic_id` Custom Field；
-- `agent`：`agent_id`、Project Profile、本次唯一 `agentic_run_id`；
-- `task_binding`：canonical Jira issue 内容 SHA-256、`inputs/` 下批准计划文件、该文件原始 UTF-8 SHA-256；
-- `execution_identity`：Git author/committer 姓名邮箱、GitHub actor login；
-- `repository`：业务仓库绝对路径、slug、remote 名称、基线/任务/目标/保护分支，且 `base_branch == target_branch`；
-- `scope`：包含范围与明确排除范围；
-- `verification`：每项固定 ID、argv、工作目录和超时；argv 必须是 Runtime 白名单内的非交互测试/静态检查，不能包含 Shell/`-c`、Git/GitHub/Jira/网络工具、安装/发布/部署、修改模式或受管状态路径；
-- `pr_endpoint`：GitHub provider、仓库 slug、目标分支和 CI 策略；
-- `permitted_external_actions`：逐项允许的 Jira、Git、GitHub 外部动作；
-- `authorization`：确认人声明、确认时间、精确绑定 issue/run/批准计划摘要的授权引用和 canonical manifest SHA-256。
+- 一次性工作空间配置：developer 工作空间、`agent_id`、Project Profile、Jira 账户、业务源码和执行身份；
+- Project Profile：Jira HTTPS 站点、Project、状态/字段映射、默认仓库和项目策略；
+- Jira 卡片：Issue ID、经办人、状态、标题、描述和已配置业务字段；
+- Runtime：唯一 `agentic_run_id`、canonical Jira 内容摘要、时间、manifest 摘要和证据路径；
+- AI 提议、人工审查：计划、包含/排除范围、任务分支、验证 argv 和本次外部动作权限。
+
+普通研发使用由 `ao-work workspace init` 初始化现有业务工作空间。本文的真实 E2E 测试则由 maintainer Skill 创建全新的隔离工作空间，不要求用户预先初始化；用户只在测试启动时确认真实副作用范围并隐藏输入凭证，结束后审查 PR、结果包和复盘。
+
+之后每次真实测试只指定 Jira key：
+
+```sh
+$test-task-to-pr-e2e TAP-12289
+```
+
+Skill 在创建工作空间或访问 Jira 前先执行：
+
+```sh
+./maintainer/bin/ao-maint integration preflight-task-to-pr-e2e TAP-12289
+```
+
+当前预检会安全阻断，并明确返回六个 `capability_gap`：`task_intake_assess`、`solution_gate`、`takeover_task`、`git_commit`、`git_push_task_branch`、`github_pr_create`。因此当前版本还不能满足“全程只依赖 `ao-work` 原子门禁完成真实任务到 PR”的正式运行条件。其中信息准入和方案分级尚只有 Skill 流程，还没有 Runtime digest/变更后重算门禁；Git/Jira 副作用缺口也不得由 AI 直接命令绕过。阻断发生在业务工作空间创建和任何 Jira/业务仓库访问之前，不得把它表述为真实全链路已执行。
 
 AgenticOps source/ref 只用于确认 `ao-maint` / `ao-work` 来自预期安装版本，是正式测试的安装前提，不是 task-to-PR manifest 字段，也不构成业务任务授权。
 
-当前尚未完成 Jira 授权，所以准备阶段必须停在本地 manifest 生成：不得读取业务工作空间、`.env`、进程凭据、`~/.agentic-ops` 或相邻文件；不得运行 `ao-work auth jira show`、`auth jira verify`、`probe-jira`、`probe-jira-write` 或其它外部 probe；不得访问 `TAP-12289` 或声称 Jira 身份、issue 内容与权限已验证。准备结果必须明确 `host_state_read=false`、`business_workspace_read=false` 和 `credentials_read=false`。
+当前尚未完成 Jira 授权，所以 maintainer 准备阶段必须停在后台 manifest 骨架和简化配置指引：不得读取业务工作空间、`.env`、进程凭据、`~/.agentic-ops` 或相邻文件；不得运行 `ao-work auth jira show`、`auth jira verify`、`probe-jira`、`probe-jira-write` 或其它外部 probe；不得访问 `TAP-12289` 或声称 Jira 身份、issue 内容与权限已验证。准备结果必须明确 `host_state_read=false`、`business_workspace_read=false` 和 `credentials_read=false`。
+
+maintainer Skill 在隔离工作空间中完成隐藏授权并明确允许读取当前任务后，developer 的任务入口只有一个 Jira key：
+
+```sh
+ao-work task start TAP-12289
+```
+
+该入口自动解析 Jira/工作空间/Profile/Runtime 确定性字段，生成或恢复本地 run。AI 必须先分析缺项，再从 Jira、Profile、业务源码和 Runtime 回读中做带来源的自动补全，展示完整准入摘要供用户确认。确认前不形成最终方案。确认后方案分为 L1 直接实施、L2 用户确认后实施、L3 先修改设计并重新分析、L4 停止升级。每个环节只消费 Runtime 基于实际结果返回的结构化 `agentic_next_action`。
+
+从接管到 PR 审查由全链路配置指定的同一 `task_owner` 完成。`agentic_next_action.executor` 只是当前步骤执行者，不是转派；现役 `ownership_effect` 只能为 `none`。人工确认和独立 reviewer 不改变负责人。转派只保留 `task_transfer=capability_gap` 的停止口，必须由人决定，详细设计后续单独推进。
 
 token、私钥和原始敏感响应不得写入 manifest、命令行、日志或结果包。清单确认后有任何变化，都必须重新展示摘要并确认。
 
-## 4. 正式执行
+## 4. 原子能力闭合后的正式执行
 
 在 manifest 指定的业务项目工作空间进入 developer AI 入口，调用 `$run-task-to-pr-test`：
 

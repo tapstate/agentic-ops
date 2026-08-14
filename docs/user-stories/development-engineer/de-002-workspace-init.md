@@ -21,6 +21,9 @@ printf '%s\n' "$JIRA_TOKEN" | ao-work workspace init \
   --project tapdata \
   --agent-id developer-01 \
   --jira-email developer@example.com \
+  --git-name 'Developer One' \
+  --git-email developer@example.com \
+  --github-login developer-one \
   --token-stdin \
   --confirm
 ```
@@ -39,7 +42,7 @@ printf '%s\n' "$JIRA_TOKEN" | ao-work workspace init \
 2. Runtime 生成 `agent_id` 默认值：读取主机名、转为纯小写、把非法字符段替换为 `-`。用户必须确认或修改；最终值只能匹配 `^[0-9A-Za-z_-]+$`。
 3. Runtime 从 Project Profile 推导 Jira Connection、站点、Project Key、默认仓库和源码目录，不要求用户输入 `connection_id`。
 4. Runtime 读取当前工作空间授权；缺少完整凭证对时，在同一入口询问 Jira email 和隐藏 token，不跨工作空间继承凭证。
-5. Runtime 展示工作空间根目录、`agent_id`、Project Profile、Jira 站点、Project Key、脱敏账户、默认仓库和源码目录，由公司员工指导员统一确认。
+5. Runtime 以本向导已确认的 `agent_id` 和 Jira email 提供 Git author/committer 与 GitHub login 可编辑默认值；不读取全局 Git/GitHub 身份。Runtime 展示工作空间根目录、研发员执行身份、Project Profile、Jira 站点、Project Key、脱敏账户、默认仓库和源码目录，由公司员工指导员统一确认。
 6. 确认后执行无副作用候选配置预检：
    - 工作空间边界与可写性；
    - 已有配置和覆盖确认；
@@ -49,6 +52,7 @@ printf '%s\n' "$JIRA_TOKEN" | ao-work workspace init \
    - Git 命令、源码目录、远端仓库和只读访问权限。
 7. 所有阻断检查通过后准备源码目录，原子写入 Profile overlay、授权文件、`AGENTS.md` 管理块和非权威工作空间索引，最后写入 `.agentic-ops/agent.json` 作为初始化完成标记。
 8. Runtime 使用同一候选配置执行初始化后 preflight；通过后输出下一步动作。
+9. 后续任务不重复填写工作空间与 Project 字段。Runtime 从 Profile 和 Jira 卡片解析确定性事实，AI 只汇总计划、范围、分支和验证建议，由指导员审查授权。
 
 ### 工作空间身份索引
 
@@ -91,10 +95,12 @@ printf '%s\n' "$JIRA_TOKEN" | ao-work workspace init \
 - 默认 `agent_id` 是规范化后的纯小写主机名，最终值只包含 `[0-9A-Za-z_-]`。
 - 同一 `agent_id` 不能绑定本机两个有效业务项目工作空间。
 - 一个业务项目工作空间只保存一组 Jira 账户，不从共享安装或其它工作空间继承凭证。
+- Git author/committer 与 GitHub actor login 作为研发员执行身份只在工作空间初始化时确认；后续任务复用，漂移时阻断。
 - Jira 身份和 Project 访问、GitHub 仓库访问均在写入初始化完成标记前验证。
 - 非交互模式必须明确身份、Profile 和确认；token 不出现在命令参数和输出中。
 - `.agentic-ops/agent.json` 最后写入，半状态不能通过任务接管前检查。
 - 初始化结果包含前置检查和初始化后 preflight 结论。
+- 完整 task-to-PR manifest 不作为用户逐项配置表；每个任务只要求计划/范围/验证/权限与高风险动作审查。
 
 ### 保护行为
 

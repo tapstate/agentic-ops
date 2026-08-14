@@ -1237,7 +1237,7 @@ class TaskRunProtocol:
                 "验证执行期间 Git HEAD 发生变化，结果不能绑定确定提交",
                 "请停止并在稳定 HEAD 上重新执行验证",
             )
-        return self._append_runtime_fact(
+        recorded = self._append_runtime_fact(
             manifest,
             "verification",
             {
@@ -1259,6 +1259,12 @@ class TaskRunProtocol:
             f"Runtime 执行 manifest 验证：{verification_id}",
             duration=duration,
         )
+        return {
+            **recorded,
+            "verification_status": status,
+            "exit_code": exit_code,
+            "head_sha": head_after,
+        }
 
     def probe_prohibitions(self, manifest_value: str) -> dict[str, Any]:
         manifest = self._load_open_manifest(manifest_value)
@@ -2869,6 +2875,16 @@ class TaskRunProtocol:
                     f"manifest {section}.{field} 与 agent.json 不一致",
                     "请基于当前工作空间身份重新确认 manifest",
                 )
+        configured_execution_identity = config.get("execution_identity")
+        if configured_execution_identity is not None and (
+            not isinstance(configured_execution_identity, dict)
+            or manifest["execution_identity"] != configured_execution_identity
+        ):
+            raise blocked(
+                "manifest_execution_identity_mismatch",
+                "manifest execution_identity 与工作空间研发员身份不一致",
+                "请使用工作空间初始化时已确认的 Git/GitHub 执行身份重新生成 manifest",
+            )
         profile = load_project_profile(
             self.install_root,
             str(config.get("project_profile", "")),

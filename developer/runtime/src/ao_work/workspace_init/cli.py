@@ -14,6 +14,7 @@ from ao_work.workspace import Workspace
 from ao_work.workspace_init.service import (
     WorkspaceCandidate,
     WorkspaceInitializer,
+    build_execution_identity,
     mask_email,
     normalize_agent_id,
 )
@@ -27,6 +28,9 @@ def configure_workspace_init_parser(
     init.add_argument("--agent-id")
     init.add_argument("--source-root")
     init.add_argument("--jira-email")
+    init.add_argument("--git-name")
+    init.add_argument("--git-email")
+    init.add_argument("--github-login")
     init.add_argument("--token-stdin", action="store_true")
     init.add_argument("--non-interactive", action="store_true")
     init.add_argument("--confirm", action="store_true")
@@ -78,11 +82,13 @@ def execute_workspace_init(
     assert agent_id is not None
 
     credentials = _stdin_credentials(args)
+    execution_identity = _argument_execution_identity(args)
     candidate = initializer.prepare(
         profile_id,
         agent_id,
         source_root=args.source_root,
         credentials=credentials,
+        execution_identity=execution_identity,
         persist_credentials=credentials is not None,
         allow_rebind=True,
     )
@@ -93,6 +99,19 @@ def execute_workspace_init(
             agent_id,
             source_root=args.source_root,
             credentials=credentials,
+            execution_identity=execution_identity,
+            persist_credentials=True,
+            allow_rebind=True,
+        )
+
+    if interactive:
+        execution_identity = _prompt_execution_identity(candidate)
+        candidate = initializer.prepare(
+            profile_id,
+            agent_id,
+            source_root=args.source_root,
+            credentials=credentials,
+            execution_identity=execution_identity,
             persist_credentials=True,
             allow_rebind=True,
         )
@@ -190,6 +209,42 @@ def _prompt_credentials(candidate: WorkspaceCandidate) -> tuple[str, str]:
             "请重新运行初始化并输入当前 Jira 账户的 API token",
         )
     return email, token
+
+
+def _argument_execution_identity(args: argparse.Namespace) -> dict[str, str] | None:
+    values = (args.git_name, args.git_email, args.github_login)
+    if all(value is None for value in values):
+        return None
+    if any(value is None for value in values):
+        raise _blocked(
+            "execution_identity_incomplete",
+            "执行身份必须同时提供 --git-name、--git-email 和 --github-login",
+            "请补齐当前研发员的一次性执行身份，或全部省略并使用交互初始化",
+        )
+    return build_execution_identity(*values)
+
+
+def _prompt_execution_identity(candidate: WorkspaceCandidate) -> dict[str, str]:
+    existing: dict[str, Any] = {}
+    agent_path = candidate.root / ".agentic-ops" / "agent.json"
+    if agent_path.is_file():
+        payload = read_json(agent_path)
+        raw_existing = payload.get("execution_identity")
+        if isinstance(raw_existing, dict):
+            existing = raw_existing
+    git_name = _prompt_required(
+        "Git author/committer name",
+        str(existing.get("git_author_name") or candidate.agent_id),
+    )
+    git_email = _prompt_required(
+        "Git author/committer email",
+        str(existing.get("git_author_email") or candidate.email or ""),
+    )
+    github_login = _prompt_required(
+        "GitHub actor login",
+        str(existing.get("github_actor_login") or candidate.agent_id),
+    )
+    return build_execution_identity(git_name, git_email, github_login)
 
 
 def _default_profile(root: Path, profiles: list[str], explicit: str | None) -> str:

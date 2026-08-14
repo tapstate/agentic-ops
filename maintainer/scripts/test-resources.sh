@@ -105,6 +105,13 @@ grep -q 'required_review_thread_resolution": true' \
 grep -q 'release_story_gate_baseline_upgrade_required' \
   maintainer/scripts/lib/release-common.sh ||
   fail "发布流程未在 origin/main 缺少故事门禁基线时失败关闭"
+grep -Fq 'PYTHONPATH="$baseline_snapshot/maintainer/runtime/src"' \
+  .githooks/pre-commit ||
+  fail "pre-commit 隔离快照未显式加载受信 HEAD Runtime"
+if grep -Fq 'ln -s "$python_bin" "$baseline_snapshot/maintainer/.venv/bin/python"' \
+  .githooks/pre-commit; then
+  fail "pre-commit 不得通过快照内解释器链接破坏虚拟环境定位"
+fi
 grep -q 'release_story_gate_trust_root_changed' \
   maintainer/scripts/lib/release-common.sh ||
   fail "发布流程未阻止信任根变更走自动 publish"

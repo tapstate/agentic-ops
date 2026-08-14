@@ -4,32 +4,40 @@
 
 本文区分两类测试输入：
 
-- 正式全链路使用用户逐项确认的真实 Jira、真实业务工作空间、真实仓库和真实 GitHub 权限，交付到 PR 审查。
+- 正式全链路从一次性业务工作空间配置、Project Profile、Jira 卡片、Runtime 探测和人工审查计划组合完整 manifest，交付到 PR 审查。
 - `offline_fake` 使用隔离本地 fixture 回归 Bootstrap、Runtime 和数据合同，不证明真实任务完成。
 
 仓库样例值只能帮助识别配置结构，不能成为真实执行默认值，也不能由 AI 从本机其它工作空间自动补全。
 
 ## 2. 工作面与交接
 
-maintainer 通过 `$run-local-integration` 准备 manifest、运行离线回归并只读验收；developer 通过 `$run-task-to-pr-test` 执行真实业务任务并生成结果包。两面只通过这两个显式工件交接：
+maintainer 通过 `$test-task-to-pr-e2e` 做无副作用能力预检、创建隔离 developer 工作空间并启动独立 developer/reviewer AI，通过 `$run-local-integration` 运行离线回归和只读验收；developer 通过 `$run-task-to-pr-test` 执行真实业务任务并生成结果包。跨面只通过显式 manifest、脱敏结果包和相互隔离的进程边界交接：
 
 ```text
 maintainer 确认 manifest
+-> maintainer 启动隔离 developer AI，但不在自身上下文执行业务动作
 -> developer 执行真实任务并产出原始审计/结果包
 -> maintainer 只读验收
 ```
 
 maintainer 不读取业务凭据或执行业务开发；developer 不加载源头维护规则、不修改 AgenticOps 源码。结果包不得反向携带业务 token、私钥、完整 Jira 描述或原始敏感日志。
 
+正式 Skill 必须先调用 `ao-maint integration preflight-task-to-pr-e2e <KEY>`。当前能力目录仍缺信息准入摘要门禁、方案分级门禁、正式接管、受控提交、任务分支推送和 PR 创建六个 `ao-work` 原子操作，所以预检固定在任何外部访问前失败关闭；这不是配置缺失，也不能通过增加用户输入解决。只有这些能力具有内容摘要/变更重算、批准计划绑定、失败码、保护分支/非快进门禁和写后回读后，才允许进入后续真实执行。
+
 ## 3. 正式测试输入规则
 
-用户必须在执行前明确确认：
+正式 E2E 的测试身份由一次性全链路配置确定：`agent_id`、Project Profile 和预期确认人不从每任务参数或本机身份推断。业务工作空间初始化时另外确认唯一 Jira 账户、业务仓库和执行身份；以后不按任务重复配置。Project Profile 提供站点、Project、状态/字段映射、默认仓库和项目策略；Jira 卡片提供任务事实；Runtime 生成 run、时间和摘要。
 
-- Jira key、站点、Project、Project Profile 与当前工作空间唯一账户；
-- AgenticOps ref、业务工作空间、业务仓库与基线/任务/目标分支；
-- 任务范围、禁止范围、验证方式与 PR 审查终点；
-- Jira、Git、GitHub 的允许操作、授权来源、清理和证据边界；
-- manifest 的规范化内容摘要。
+每个任务先由 AI 分析缺项，再从 Jira、Project Profile、业务源码和 Runtime 回读中自动补全，并将“原始事实、补全值、来源、仍缺项、假设和影响”作为一份完整准入摘要交给用户确认，不能只展示一个摘要 ID。确认后再形成方案，并分为 L1 直接实施、L2 确认后实施、L3 先修改设计并重新分析、L4 停止升级。每个任务只要求人工确认：
+
+- AI 汇总的计划、包含/排除范围、任务分支和验证方式；
+- Jira、Git、GitHub 的本次允许操作与 PR 审查终点；
+- 与批准计划摘要绑定的任务级授权；
+- 范围变化或高风险动作的新决策。
+
+每个 Runtime 环节必须基于实际返回状态给出唯一结构化下一动作。失败只在 `retry_gate.allowed=true` 时可以对同一 `retry_key` 再试一次，且必须先回读状态、改变输入并记录 retry 事件；相同输入循环、没有回读的重试或重试耗尽后继续均必须停止。
+
+完整 manifest 继续保留所有机器校验字段，但不作为用户逐项填写的配置界面。
 
 缺项或摘要变化时不得执行副作用。凭据只通过当前业务工作空间认可的安全入口配置，不放进 manifest 或结果包。
 
