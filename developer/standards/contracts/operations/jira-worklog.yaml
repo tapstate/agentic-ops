@@ -1,0 +1,48 @@
+operation: jira_worklog
+version: 5
+workplane: developer
+protocol:
+  - plan
+  - apply
+  - readback
+preconditions:
+  - task_identity_matches_connection_profile_and_issue
+  - current_user_matches_assignee
+  - title_and_details_are_chinese
+  - duration_is_real_handling_time
+  - waiting_time_is_explicitly_excluded
+  - included_work_is_non_empty_and_seconds_sum_matches_total
+  - excluded_waiting_categories_are_non_empty_and_explicit
+  - plan_file_is_new_and_strictly_bound_to_issue_run_jira_plans_directory
+  - outbound_content_is_safe_regular_file_and_contains_no_detected_credentials
+  - authorization_reference_strictly_binds_issue_run_and_plan
+  - jira_comment_authorization_must_be_read_back_with_current_marker
+authorization:
+  user_confirmation: "user-confirmation:<ISSUE-KEY>:<agentic-run-id>:<plan-id>"
+  jira_comment: "jira-comment:<ISSUE-KEY>:<positive-comment-id>:<plan-id>"
+  jira_comment_body_marker:
+    format: "[agentic-ops-authorization:<ISSUE-KEY>:<agentic-run-id>:<plan-id>]"
+    placement: standalone_line
+  validation_order:
+    - validate_task_and_plan
+    - validate_authorization_reference_and_optional_jira_comment
+    - append_decision
+    - write_jira
+side_effects:
+  - add_jira_worklog
+idempotency:
+  marker: "[agentic-ops-idempotency:<issue-key>:<agentic-run-id>:<key>]"
+  marker_match: exact_top_level_paragraph
+  readback: all_pages_until_total
+readback_binding:
+  required: [issue_key, agentic_run_id, plan_file, plan_id, idempotency_key, created, included_work, excluded_waiting_categories]
+  created_semantics: exact_current_run_marker_proves_this_run_created_the_worklog
+transport:
+  redirects: forbidden
+unknown_result:
+  retry_safe: false
+  next_action: readback
+failure:
+  - jira_authorization_reference_invalid
+  - jira_authorization_reference_not_found
+  - jira_pagination_invalid

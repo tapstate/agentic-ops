@@ -121,15 +121,15 @@ Python Runtime 执行操作
 
 ## 6. 反馈命令
 
+以下是目标命令合同；当前是否可调用必须先查询能力目录。AO-11 阶段聚合反馈与 maintainer `feedback report|analyze|propose` 均为 `capability_gap`，不能模拟命令成功。现役触发材料是 developer Runtime 通过 `ao-work task-run finalize` 生成的 `task_to_pr_review` 脱敏结果包：包内 retrospective 必须逐项覆盖四类质量结论并完整引用 finding、人工介入、失败、重试与等待；公司员工指导员显式选择该包并交接到独立 maintainer 工作面后，当前只能人工整理 observation/proposal。maintainer 不自动扫描业务工作空间，也不继承其授权或配置。
+
 第一阶段建议操作：
 
 ```sh
-agentic-cli write-evidence --workspace tapstate --run-id <agentic_run_id>
-agentic-cli release-agent --workspace tapstate --run-id <agentic_run_id> --issue-key TAP-123 --completion-evidence evidence.md
-agentic-cli feedback bundle --workspace tapstate --run-id <agentic_run_id> --redact
-agentic-cli feedback report --workspace tapstate --date 2026-07-21
-agentic-cli feedback analyze --workspace tapstate --date 2026-07-21
-agentic-cli feedback propose --workspace tapstate --date 2026-07-21
+ao-work capability show write_evidence
+ao-work capability show release_agent
+ao-work capability show feedback_bundle
+./maintainer/bin/ao-maint --help
 ```
 
 `feedback report` 是按需分析报告，不是每天必须生成的工作日志。第一阶段仍保留 `--date` 作为兼容过滤和报告命名参数；后续可扩展为 `--from`、`--to`、`--run-id`、`--issue-key`、`--task-type` 或 `--code`。

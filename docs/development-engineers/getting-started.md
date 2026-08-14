@@ -1,298 +1,149 @@
 # 研发工程师上手
 
-本文面向使用 AgenticOps 指挥 AIAgent 处理日常 Jira 任务的研发工程师。重点是安装、初始化项目 AI 工作空间，并让 AIAgent 按标准资产执行。
+本文面向使用 AgenticOps 指导研发员处理业务 Jira 任务的研发工程师。这里使用 developer 工作面；不得进入 `maintainer`、加载 AgenticOps 源头规则或调用 `ao-maint`。
 
-## 快速开始
+需要一页式初始化入口时，参阅 [初始化 AgenticOps 研发员](agent-init.md)。
 
-选择一条路径执行。路径 A 适合先在终端完成安装；路径 B 适合让 Codex 托管初始化。
+## 1. 准备清单
 
-### 路径 A：终端安装，Codex 初始化能力
+安装前确认：
 
-1. 登录 GitHub。
+- 可访问 `tapstate/agentic-ops` 的 GitHub 账户和 `gh` 登录状态。
+- 业务项目工作空间目录，例如 `~/agentic-ops-tapdata`。
+- Jira 项目空间或 Project Profile，例如 `tapdata` / `TAP`。
+- 该研发员唯一的 Jira 邮箱和 API token。
+- 默认源码仓库或明确的本地源码目录。
+
+不得从其它工作空间、本机全局 `.env`、个人记忆或旧聊天中自动补齐凭证和项目事实。
+
+## 2. 安装 developer 工作面
 
 ```sh
 gh auth login -h github.com -p ssh -s repo
-```
 
-2. 安装 AgenticOps。
-
-```sh
 gh api -H 'Accept: application/vnd.github.raw' \
-  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
-  | AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
+  '/repos/tapstate/agentic-ops/contents/developer/bootstrap/install.sh?ref=main' \
+  | bash
 ```
 
-3. 让当前终端读取安装后的命令路径。
+安装目标是 `~/.agentic-ops` 的 developer-only sparse managed clone。Bootstrap 与 `ao-work` 都会校验 origin 必须是 `tapstate/agentic-ops`，普通使用不能用环境变量改写受信仓库；正常文件树只包含 developer 生产资产、只读的 `shared/integration/` JSON 协议及运行所需的根版本元数据，不包含 `maintainer/`、`developer/tests/`、fixture 或 fake producer。
+
+验证入口：
 
 ```sh
 source "$HOME/.zshrc"
-agentic-cli --version
+ao-work --help
 ```
 
-4. 创建并进入项目 AI 工作空间。
+也可使用完整路径：
+
+```sh
+~/.agentic-ops/bin/ao-work --help
+```
+
+没有 `agentic-cli` 兼容别名；看到旧命令说明正在阅读冻结迁移基线或使用旧版本。
+
+## 3. 初始化业务项目工作空间
 
 ```sh
 mkdir -p ~/agentic-ops-tapdata
 cd ~/agentic-ops-tapdata
+ao-work workspace init
 ```
 
-5. 初始化工作空间。
+零参数入口进入交互确认。必须确认：
+
+- `agent_id`：默认由纯小写主机名规范化得到，只能包含 `[0-9a-zA-Z_-]`。
+- Jira 项目空间 / Project Profile。
+- Jira 站点、研发员账户和授权状态。
+- 默认仓库和源码目录。
+- Git、GitHub、Jira 访问等前置检查。
+
+只有缺失或冲突的项才需要额外参数；Connection 默认由 Project Profile 推导，不要求普通用户传 `--connection-id`。
+
+初始化最后写入 `.agentic-ops/agent.json`、当前工作空间 `AGENTS.md` 和 `.agents/skills/`。该 AI 入口固定进入 developer 工作面；Codex 从标准仓库级 `.agents/skills/` 发现受管 developer Skill，规则正文直接写入 `AGENTS.md`，标准资产由 `ao-work` 从受信安装根解析。业务仓库不需要也不应创建不存在的 `developer/...` 相对路径。
+
+业务项目 AI 工作空间与源码仓库必须使用两个独立目录，不能相同，也不能互相嵌套。默认源码目录会创建在工作空间同级目录。工作空间位于某个 Git 仓库时，初始化会把该工作空间的 `.agentic-ops/` 写入该仓库的 `.git/info/exclude`；Jira token 等身份状态不得出现在 `git status` 中。生成的 `AGENTS.md` 和 `.agents/skills/` 是 AI 直接可发现的受管副本；`workspace preflight` 会检查 Skill 缺失、漂移、额外资产和 maintainer 污染。
+
+不要在下列位置初始化业务工作空间：
+
+- `~/.agentic-ops`。
+- `tapstate/agentic-ops` 源头仓库或其 worktree。
+- 另一个研发员的业务项目工作空间。
+- 业务源码仓库本身或其任意子目录。
+
+## 4. 授权与验证
+
+首次初始化可以直接完成授权，也可以随后运行：
 
 ```sh
-agentic-cli workspace init --project tapdata --interactive
+ao-work auth jira show
+ao-work auth jira set
+ao-work auth jira verify
+ao-work capability list
 ```
 
-交互式初始化会复用已有配置，只询问缺失项。Tapdata 的 Jira base URL 默认使用 `https://tapdata.atlassian.net`；Jira API token 只保存到本机 `$AGENTIC_OPS_HOME/user/.env` 的 `AGENTIC_OPS_JIRA_API_TOKEN`，不写入 YAML 配置。
+`set` 无参数时进入隐藏输入；token 不通过命令行参数传递。授权只保存在当前业务项目工作空间，`~/.agentic-ops` 和其它工作空间不继承。执行具体业务操作前运行 `ao-work capability show <operation>`；`capability_gap` 表示当前版本没有安全原子操作，需要按中文 `next_action` 转人工，不能尝试旧命令。
 
-6. 启动 Codex。
+## 5. 启动 AIAgent
 
-```sh
-codex
-```
+在已初始化的业务项目工作空间中启动 Codex 或其它受支持 AIAgent。AI 应从当前目录的 `AGENTS.md` 自动进入 developer 工作面，不需要读取 AgenticOps 根 `AGENTS.md`。
 
-7. 按全局指引启用 AgenticOps。
-
-```text
-按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。
-```
-
-AIAgent 会从全局指引、当前工作空间 `AGENTS.md` 和安装资产初始化，不依赖个人 wiki 或上一段聊天上下文。
-
-### 路径 B：让 Codex 托管初始化
-
-1. 创建并进入项目 AI 工作空间。
-
-```sh
-mkdir -p ~/agentic-ops-tapdata
-cd ~/agentic-ops-tapdata
-```
-
-2. 启动 Codex。
-
-```sh
-codex
-```
-
-3. 让 Codex 托管安装、工作空间初始化和能力初始化。
-
-```text
-安装 https://github.com/tapstate/agentic-ops/blob/main/agent-init.md 并初始化。项目是 tapdata，请使用交互式引导配置项目 AI 工作空间和 Jira 连接。
-```
-
-### 下一步指令
-
-初始化完成后，研发工程师可以继续发送：
+初始化后可以发送：
 
 ```text
 列出我名下可以接管的 Jira 任务。
-接管 TAP-123；信息不足时先结合代码形成补卡建议并写回 Jira，接管后先把修复计划写入 Jira 等我确认。
+接管 TAP-123；信息不足时先结合代码形成补卡建议并写回 Jira，接管后先把修复计划写入 Jira等我确认。
 确认该设计，并授权在当前 Jira 工作项、仓库、任务分支、目标分支和验证范围内连续推进到拉取请求审查；范围或风险变化时停下。
 回写本次执行证据。
 提交 TAP-123 本次执行的任务审计记录。
 ```
 
-## 常见问题
+这些自然语言需求不代表对应自动化都已实现。AI 必须先查询能力目录；当前任务列表、正式接管与恢复、任务释放、PR / CI、分支对齐、完成审计和 Custom Field 写入等仍可能返回 `capability_gap`，应由研发工程师按目录指引接管，不能用内部 `task init` 冒充 Jira 接管。
 
-### `gh` 未登录或权限不足
+## 6. 问题反馈与快速改进
 
-检查 GitHub 登录状态。
+任务处理中出现无法自动完成、人工干预过多或输出质量不足时：
 
-```sh
-gh auth status
-```
+1. 先由研发工程师校对，确保当前业务任务正确完成。
+2. 让 AI 形成脱敏的问题总结、期望行为、建议沉淀位置和回归方法。
+3. 人工确认改进方案。
+4. 在独立 AgenticOps worktree 中切换到 maintainer 工作面完成改进并创建 `develop` PR。
 
-重新登录 GitHub。
+业务工作空间不得直接修改 `~/.agentic-ops` 或调用 `ao-maint`。工作面切换必须通过独立目录和独立 AI 入口完成。
 
-```sh
-gh auth login -h github.com -p ssh -s repo
-```
+## 7. 更新与回滚
 
-### 已安装后再次更新
-
-交互式更新 AgenticOps。
+更新使用安装目录中的独立 developer Bootstrap；不要通过重复执行安装命令静默替代更新确认：
 
 ```sh
-gh api -H 'Accept: application/vnd.github.raw' \
-  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
-  | AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
+~/.agentic-ops/developer/bootstrap/update.sh
 ```
 
-已确认更新时，非交互更新 AgenticOps。
+需要回滚时显式执行：
 
 ```sh
-gh api -H 'Accept: application/vnd.github.raw' \
-  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
-  | AGENTIC_OPS_ASSUME_YES=1 AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
+~/.agentic-ops/developer/bootstrap/rollback.sh
 ```
 
-### 当前终端找不到 `agentic-cli`
+更新和回滚只改变 developer-only managed clone 与锁定 Python 环境，不修改各业务项目工作空间的 Jira 身份和任务状态。更新目标与当前 ref 必须先展示并由研发工程师确认；非交互模式不得静默接受。
 
-重新读取 zsh 配置。
+## 8. 常见问题
+
+### 找不到 `ao-work`
 
 ```sh
 source "$HOME/.zshrc"
-agentic-cli --version
+~/.agentic-ops/bin/ao-work --help
 ```
 
-临时修复当前终端 PATH。
+### GitHub 权限不足
 
 ```sh
-case ":$PATH:" in
-  *":$HOME/.agentic-ops/bin:"*) ;;
-  *) export PATH="$HOME/.agentic-ops/bin:$PATH" ;;
-esac
-agentic-cli --version
+gh auth status
+gh auth login -h github.com -p ssh -s repo
 ```
 
-使用完整路径验证安装结果。
+### 工作面不匹配
 
-```sh
-~/.agentic-ops/bin/agentic-cli --version
-```
-
-### zsh 提示 `no matches found`
-
-使用带引号的 GitHub API 路径。
-
-```sh
-gh api -H 'Accept: application/vnd.github.raw' \
-  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
-  | AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
-```
-
-## 工作空间初始化
-
-不要在 `~/.agentic-ops` 或 AgenticOps 源头仓库中初始化业务工作空间。项目 AI 工作空间是具体业务项目的运行目录，例如 `~/agentic-ops-tapdata`。
-
-推荐命令：
-
-```sh
-mkdir -p ~/agentic-ops-tapdata
-cd ~/agentic-ops-tapdata
-agentic-cli workspace init --project tapdata --interactive
-```
-
-交互式初始化会检查已有配置，只询问缺失项。首次初始化前准备好：
-
-- 项目配置项，例如 `tapdata`。
-- Jira 邮箱；Tapdata 的 Jira base URL 默认是 `https://tapdata.atlassian.net`。
-- Jira API token；首次缺失时交互式初始化会提示输入，并保存到 `$AGENTIC_OPS_HOME/user/.env` 的 `AGENTIC_OPS_JIRA_API_TOKEN`。
-- 本地源码目录；默认是当前工作空间下的 `repos/<project>`，目录不存在时初始化会从项目 profile 的默认 GitHub 仓库下载代码。
-
-脚本、CI 或非终端环境使用参数形式：
-
-```sh
-agentic-cli workspace init --project tapdata --jira-user <your-jira-email>
-```
-
-源码目录不是 `repos/tapdata` 时：
-
-```sh
-agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --source-root /path/to/source
-```
-
-如果 `source_root` 已存在且非空，初始化不会覆盖、拉取或切换分支；如果目录不存在或为空，初始化会执行 `git clone`，并在终端持续显示下载进度。克隆失败时，先检查 GitHub SSH 权限，或使用 `--source-root` 指向已有本地源码目录。
-
-已有完整的 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 和 AgenticOps 管理的 `AGENTS.md` 时，初始化会停止。确认覆盖后再执行：
-
-```sh
-agentic-cli workspace init --project tapdata --jira-user <your-jira-email> --confirm-existing-config
-```
-
-上一次初始化中断且只留下部分受管文件时，重新运行同一条 `workspace init` 命令会自动修复，不要求 `--confirm-existing-config`。初始化会先保存 Jira 本机配置和 token，再下载源码；源码下载失败不会丢失已经输入的 Jira 配置，也不会新建可被误认为初始化完成的 workspace overlay。
-
-初始化成功后重点看：
-
-- `jira_config_status`：`configured`、`needs_jira_api_token` 或 `needs_configuration`。
-- `source_checkout_status`：`cloned` 表示已下载源码，`existing` 表示复用了已有源码目录。
-- `profile_overlay`：当前工作空间的 `.agentic-ops/profile.local.yaml`。
-- `agent_instructions`：当前工作空间的 `AGENTS.md`。
-
-再运行：
-
-```sh
-agentic-cli profile resolve --project tapdata
-agentic-cli preflight
-```
-
-`agent init` 和 `preflight` 都会检查 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml`、`AGENTS.md` 管理块及 `source_root`。任何一项缺失时，工作空间都不会被标记为可接管任务，需重新运行 `workspace init` 完成修复。
-
-## Jira 连接配置
-
-`workspace init` 不写入 Jira API token 到 YAML。应用配置集中写入 `$AGENTIC_OPS_HOME/user/config.local.yaml`，按项目和模块分段；Jira API token 的持久化落点只有 `$AGENTIC_OPS_HOME/user/.env` 中的 `AGENTIC_OPS_JIRA_API_TOKEN`。
-
-`agentic-cli list-tasks` 读取真实 Jira 配置的顺序：
-
-1. 显式环境变量：`AGENTIC_OPS_JIRA_ADAPTER=real`、`AGENTIC_OPS_JIRA_BASE_URL`、`AGENTIC_OPS_JIRA_EMAIL`、`AGENTIC_OPS_JIRA_API_TOKEN`。
-2. 当前项目 AI 工作空间：`.agentic-ops/config.local.yaml`。
-3. 个人层：`$AGENTIC_OPS_HOME/user/config.local.yaml` 和 `$AGENTIC_OPS_HOME/user/.env`。
-
-配置示例：
-
-```yaml
-projects:
-  tapdata:
-    jira:
-      adapter: real
-      base_url: https://tapdata.atlassian.net
-      email: your-email@example.com
-```
-
-`needs_jira_api_token` 时：
-
-先打开 [Atlassian API token 页面](https://id.atlassian.com/manage-profile/security/api-tokens) 创建 token，再把下面内容写入输出中的 `jira_env_file`：
-
-```dotenv
-AGENTIC_OPS_JIRA_API_TOKEN=<api-token>
-```
-
-然后重新验证：
-
-```sh
-agentic-cli list-tasks
-```
-
-`AGENTIC_OPS_JIRA_API_TOKEN` 是固定配置名，不需要在 YAML 中声明。CLI 会先读当前进程环境变量，再读取 `$AGENTIC_OPS_HOME/user/.env`。真实 `.env` 属于本机配置，不能提交；如果 `agentic-cli preflight` 或 `agentic-cli list-tasks` 输出 `jira_token_env_has_value: false`，说明当前进程环境和本机 `.env` 都没有读到有效 token。
-
-外部脚本和 AIAgent 读取配置时应通过统一入口，不直接解析 YAML 或 `.env`：
-
-```sh
-agentic-cli conf paths.user_config
-agentic-cli conf jira.base_url --workspace tapdata
-agentic-cli conf jira.api_token_configured --workspace tapdata
-```
-
-`needs_configuration` 时：
-
-```sh
-agentic-cli workspace init --project tapdata --interactive
-```
-
-## 指挥 AIAgent
-
-研发工程师可以用自然语言给 AIAgent 下达任务：
-
-```text
-按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。
-列出我名下可以接管的 Jira 任务。
-接管 TAP-123；信息不足时先结合代码形成补卡建议并写回 Jira，接管后先把修复计划写入 Jira 等我确认。
-回写本次执行证据。
-提交 TAP-123 本次执行的任务审计记录。
-```
-
-AIAgent 应按全局指引和当前工作空间资产执行，不依赖临场聊天上下文猜流程。
-
-## 人工确认点
-
-以下动作必须由研发工程师或对应专业角色确认后才能继续：
-
-- 真实 Jira 写操作。
-- 向 `master`、`main`、`develop`、`release/*` 或其它保护分支推送。
-- 合并、发布、Git Tag、强推或历史改写。
-- 合并。
-- 发布。
-- 需求范围、验收标准、目标仓库或风险边界发生变化。
-
-研发工程师确认版本化设计或修复计划时，可以一次性授予工作项级连续执行授权。有效授权覆盖当前任务范围内的实现、验证、提交、任务分支推送、必要 Jira 回写以及创建目标为 `develop` 的拉取请求，AIAgent 不再逐项中断，完成后统一提交拉取请求审查包。保护分支推送、合并、发布、Git Tag、强推、历史改写和范围变化不在该授权内。
-
-任务完成、阻塞或交接时，AIAgent 必须把任务级审计记录写入项目 AI 工作空间的 `.agentic-ops/tasks/<ISSUE-KEY>/` 目录，并将关键结论和稳定引用回写 Jira。本地反馈报告只能用于按需分析和改进建议，不能替代本地任务审计记录。
+如果输出 `workplane_mismatch`，检查当前目录是否为已初始化的业务项目工作空间、AI 是否读取了本目录 `AGENTS.md`、调用入口是否为 `ao-work`。不要用 mode 参数或复制维护规则规避阻断。

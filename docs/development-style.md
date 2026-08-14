@@ -41,9 +41,9 @@ AgenticOps 开发必须遵守：
 
 目标运行时的实现方向如下：
 
-- Python Runtime 是结构化操作层，版本和依赖由 `.python-version`、`pyproject.toml` 与 `uv.lock` 锁定。
-- Shell Bootstrap 不承载安装后 AIAgent 的业务逻辑，只负责安装、更新、回滚、环境准备和启动。维护 AgenticOps 源头仓库时，`scripts/release.sh`、`scripts/hotfix.sh` 和共享库可以作为项目级发布编排例外。
-- CLI 入口统一为 `agentic-cli`。
+- Python Runtime 是结构化操作层，版本由 `.python-version` 固定；两个工作面的依赖分别由 `maintainer/pyproject.toml`、`developer/pyproject.toml` 与各自 `uv.lock` 锁定。
+- Shell Bootstrap 不承载安装后 AIAgent 的业务逻辑，只负责 developer-only 安装、更新、回滚、环境准备和 `ao-work` 启动。维护 AgenticOps 源头仓库时，`maintainer/scripts/release.sh`、`maintainer/scripts/hotfix.sh` 和共享库可以作为项目级发布编排例外。
+- 工作面入口固定为 maintainer 的 `ao-maint` 和 developer 的 `ao-work`，不得保留统一兼容入口或 mode 切换。
 - Python 代码应拆分为清晰的命令、配置、契约、任务状态、工作流、适配器、证据和反馈模块，不写巨大单文件。
 - stdout 只输出结构化 JSON。
 - stderr 输出中文诊断日志。
@@ -68,7 +68,8 @@ AgenticOps 开发必须遵守：
 - workspace 与 `~/.agentic-ops` 边界。
 - feedback event 格式。
 - Python 命令、状态、策略和适配器的单元与契约测试。
-- 迁移期间尚未退出的 Go 能力继续执行现有回归测试，直到替代能力形成验收证据。
+- 资源合同测试必须确认旧 Go Runtime、`agentic-cli`、`install-resources/` 和根目录旧运行路径没有残留。
+- developer-only 安装边界、更新、回滚和发布门禁回归。
 
 外部服务相关测试必须提供本地替代验证方式。
 
@@ -81,7 +82,7 @@ AgenticOps 开发必须遵守：
 - `docs/user-stories/agenticops-user-stories.md`
 - `docs/user-stories/project-maintainer-stories.md`
 - `docs/user-stories/development-engineer-stories.md`
-- `install-resources/basic/handbooks/ai-employee-handbook.md`
+- `developer/AGENTS.md`
 - `docs/contracts/operation-contract.md`
 - `docs/profiles/workflow-profile.md`
 - `docs/workflows/feedback-loop.md`

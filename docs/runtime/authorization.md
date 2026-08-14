@@ -2,34 +2,35 @@
 
 ## 目的
 
-`agentic-cli auth jira` 是 Jira 授权的统一入口。一个业务项目 AgenticOps 工作空间代表一名研发员，并只配置一个 Jira 账户；`~/.agentic-ops` 共享安装不承载研发员身份。
+`ao-work auth jira` 是 developer 工作面的 Jira 授权入口。一个业务项目 AgenticOps 工作空间代表一名研发员，并只配置一个 Jira 账户；`~/.agentic-ops` developer-only 安装不承载研发员身份。maintainer 工作面的 `ao-maint` 不读取、修改或验证业务 Jira 凭证。
 
 ## 命令
 
 ```sh
-agentic-cli auth jira list
-agentic-cli auth jira show
-agentic-cli auth jira set
-agentic-cli auth jira remove --field token
-agentic-cli auth jira verify
+ao-work auth jira list
+ao-work auth jira show
+ao-work auth jira set
+ao-work auth jira remove --field token
+ao-work auth jira verify
 ```
 
 `set` 无参数时自动进入交互设置，重复执行即为修改。token 只允许交互式隐藏输入或 `--token-stdin`，不提供 token 命令行参数。
 
-首次创建业务项目工作空间时，优先使用 `agentic-cli workspace init`。初始化入口会先确认 Project Profile 和 Jira 项目空间，再复用同一套工作空间授权规则完成凭证输入、身份验证和 Project 访问检查。
+首次创建业务项目工作空间时，优先使用 `ao-work workspace init`。初始化入口会先确认 Project Profile 和 Jira 项目空间，再复用同一套工作空间授权规则完成凭证输入、身份验证和 Project 访问检查。
 
 Connection 默认从当前项目 Profile 推导；没有 Profile 且安装中只有一个 Connection 时自动选择。只有维护或迁移场景遇到多个未绑定站点时，才使用隐藏的高级参数 `--connection-id`。
 
 ## 研发员工作空间账户
 
 ```text
-完整的进程环境变量凭证对
-> 当前业务项目工作空间 .agentic-ops/.env
+当前业务项目工作空间 .agentic-ops/.env
 ```
 
-- email 和 token 必须来自同一来源；不得跨来源拼接账户。
+- 测试和真实运行所需的凭证、项目、任务 key、仓库和其它外部输入必须在运行前形成显式清单；不得从本机环境、其它工作空间或历史聊天中猜测补齐。
+- email 和 token 必须来自同一显式来源；不得跨来源拼接账户。
 - 一台电脑上的不同业务项目工作空间各自保存账户，互不继承。
 - `~/.agentic-ops/user/.env` 不作为研发员凭证来源。
+- 进程环境变量默认不作为凭证来源；只有调用方通过受控测试接口显式允许并完整提供同一账户凭证对时才可使用。
 - `show` 只显示账户层级、配置状态、来源和脱敏 email。
 
 ## 安全门禁

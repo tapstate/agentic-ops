@@ -1,0 +1,71 @@
+operation: preflight
+workplane: developer
+version: 1
+purpose: 在 AIAgent 执行任务前检查本机运行环境、CLI 版本、Git/GitHub CLI、工作流配置和当前目录归属。
+task_type: environment_preflight
+allowed_stages:
+  - installed
+  - workspace_initialized
+required_inputs:
+  - workspace
+input:
+  workspace:
+    type: string
+    required: true
+  install_dir:
+    type: string
+    required: false
+  check_github:
+    type: boolean
+    required: false
+preconditions:
+  - must_run_before_task_takeover
+output:
+  workspace:
+    type: string
+  install_dir:
+    type: string
+  os:
+    type: string
+  arch:
+    type: string
+  version:
+    type: string
+  status:
+    type: string
+  checks:
+    type: object
+  jira_token_env:
+    type: string
+    required: false
+  jira_env_file:
+    type: string
+    required: false
+  jira_token_env_has_value:
+    type: boolean
+    required: false
+  jira_token_help_url:
+    type: string
+    required: false
+  jira_token_setup:
+    type: string
+    required: false
+  jira_config_source:
+    type: string
+    required: false
+  agentic_next_action:
+    type: string
+failure:
+  codes:
+    - preflight_failed
+side_effects:
+  - must_not_write_jira
+  - must_not_write_github
+  - must_not_modify_git
+human_gate:
+  required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: installed
+redo_from_stage: installed

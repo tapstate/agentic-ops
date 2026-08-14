@@ -1,0 +1,39 @@
+operation: contract_validate
+workplane: developer
+version: 1
+purpose: 校验仓库中的机器可读 Operation Contract 是否满足完整设计基线。
+task_type: contract_validation
+allowed_stages:
+  - design_review
+  - implementation
+required_inputs: []
+input:
+  contracts_dir:
+    type: string
+    required: false
+preconditions:
+  - contracts_operations_dir_must_exist
+output:
+  contracts:
+    type: integer
+  issues:
+    type: integer
+  agentic_next_action:
+    type: string
+failure:
+  codes:
+    - contract_not_found
+    - contract_glob_failed
+    - contract_load_failed
+    - contract_validation_failed
+side_effects:
+  - must_not_write_jira
+  - must_not_modify_code
+  - must_not_modify_contracts
+human_gate:
+  required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: design_review
+redo_from_stage: design_review

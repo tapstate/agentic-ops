@@ -12,7 +12,7 @@ AgenticOps 的目标不是让 AIAgent 靠临场聊天上下文猜流程，而是
 Jira 任务
 -> 公司员工指导员授权
 -> AgenticOps 标准流程
--> agentic-cli 受控执行
+-> ao-work 受控执行
 -> AgenticOps 研发员开发、验证和证据整理
 -> 专业角色审查
 -> 证据 / 反馈 / 人工门禁
@@ -22,7 +22,7 @@ Jira 任务
 一句话定义：
 
 ```text
-AgenticOps = Skill + Python Runtime + Shell Bootstrap + Rule + 标准资产 + 本地任务状态 + 证据与反馈闭环
+AgenticOps = 两个隔离工作面 + Skill + Python Runtime + Shell Bootstrap + Rule + 标准资产 + 本地任务状态 + 证据与反馈闭环
 ```
 
 术语边界：
@@ -30,8 +30,9 @@ AgenticOps = Skill + Python Runtime + Shell Bootstrap + Rule + 标准资产 + �
 - `AgenticOps` 是项目和执行控制体系。
 - 一个业务项目工作空间是一名 AgenticOps 研发员；该工作空间只绑定一个 Jira 账户。
 - 项目维护者承担公司员工指导员职责，维护标准、能力和边界，指导研发员持续进化。
-- `AgenticCLI` 是 AgenticOps 成熟经验沉淀后的执行入口组件，目标实现是 Python Runtime。
-- `agentic-cli` 是安装后给 AIAgent 和研发工程师使用的稳定命令入口。
+- `maintainer` 是维护 AgenticOps 源头项目的工作面，唯一命令入口是 `ao-maint`。
+- `developer` 是研发员执行业务项目任务的工作面，唯一命令入口是 `ao-work`。
+- 两个命令不是两名员工，而是两个隔离工作面的操作入口；不得用同一命令的 mode 参数互相切换。
 
 ## 设计原则
 
@@ -50,7 +51,7 @@ AgenticOps = Skill + Python Runtime + Shell Bootstrap + Rule + 标准资产 + �
 
 ### 公司员工指导员（项目维护者）
 
-项目维护者承担公司员工指导员职责，负责维护 AgenticOps 自身的架构、项目规则、操作契约、运行资产、AgenticCLI、测试和发布链路，让研发员能力持续符合公司标准。
+项目维护者承担公司员工指导员职责，负责通过 `maintainer` 工作面维护 AgenticOps 自身的架构、项目规则、操作契约、运行资产、测试和发布链路，让研发员能力持续符合公司标准。
 
 从这里开始：
 
@@ -58,7 +59,7 @@ AgenticOps = Skill + Python Runtime + Shell Bootstrap + Rule + 标准资产 + �
 - [文档索引](docs/README.md)
 - [项目目标](docs/strategy/project-goals.md)
 - [目标全景](docs/strategy/skill-python-agenticops-project-overview.md)
-- [当前 Go 迁移基线](docs/architecture/agenticops-current-design.md)
+- [历史实现记录（冻结）](docs/architecture/agenticops-current-design.md)
 - [项目规则](docs/project-rules.md)
 - [开发风格](docs/development-style.md)
 - [源码发布流程](docs/architecture/source-release-workflow-design.md)
@@ -66,7 +67,7 @@ AgenticOps = Skill + Python Runtime + Shell Bootstrap + Rule + 标准资产 + �
 - [项目结构](docs/architecture/project-structure.md)
 - [Python Runtime 设计](docs/runtime/python-runtime.md)
 - Jira `AO-11`：本次重构实施计划、进度和验收事实源
-- [当前机器可读操作契约](install-resources/basic/contracts/operations/)
+- [当前机器可读操作契约](developer/standards/contracts/operations/)
 
 ### 公司员工指导员（业务指导）
 
@@ -75,26 +76,26 @@ AgenticOps = Skill + Python Runtime + Shell Bootstrap + Rule + 标准资产 + �
 从这里开始：
 
 - [研发工程师上手](docs/development-engineers/getting-started.md)
-- [AI 员工手册](install-resources/basic/handbooks/ai-employee-handbook.md)
+- [developer AI 执行规则](developer/AGENTS.md)
 - [端到端演示](docs/examples/end-to-end-demo.md)
 - [故事线总览](docs/user-stories/agenticops-user-stories.md)
 - [问题修复与同步路径](docs/runtime/problem-resolution-and-update.md)
 
-研发工程师读人用指引，AIAgent 读 AI 资产入口。初始化工作空间后，应要求 AIAgent 先读取 [AI 资产入口](install-resources/basic/ai-assets/README.md)，再接管具体 Jira 任务。
+研发工程师读人用指引；`ao-work workspace init` 会在业务项目工作空间生成固定的 developer AI 入口，AIAgent 从当前工作空间 `AGENTS.md` 开始，并从 `.agents/skills/` 发现受管 developer Skill，不读取 maintainer 资产。
 
 ### AgenticOps 研发员
 
-业务项目工作空间代表 AgenticOps 研发员。底层 AIAgent 不应主要依赖 README 或人用 `docs/` 执行任务，也不需要读取 AgenticOps 源码或关心运行环境实现；它面对的是安装后的 Skill、Rule、命令入口和标准资产。
+业务项目工作空间代表 AgenticOps 研发员。底层 AIAgent 不应主要依赖 README 或人用 `docs/` 执行任务，也不读取 AgenticOps 源头维护资产；它面对的是安装后的 `developer` Skill、Rule、`ao-work` 和标准资产。
 
 执行前读取：
 
-- [AI 资产入口](install-resources/basic/ai-assets/README.md)
-- [AI 员工手册](install-resources/basic/handbooks/ai-employee-handbook.md)
+- 当前业务项目工作空间 `AGENTS.md`
+- [developer AI 执行规则](developer/AGENTS.md)
 - [操作契约说明](docs/contracts/operation-contract.md)
-- [机器可读操作契约](install-resources/basic/contracts/operations/)
+- [机器可读操作契约](developer/standards/contracts/operations/)
 - [工作流配置](docs/profiles/workflow-profile.md)
 
-如果 AIAgent 是在维护 AgenticOps 源头仓库，还必须额外读取 [AIAgent 工作规则](docs/ai-working-rules.md)、[项目规则](docs/project-rules.md) 和 [源码发布流程](docs/architecture/source-release-workflow-design.md)。
+如果 AIAgent 在维护 AgenticOps 源头仓库，根 `AGENTS.md` 会固定导向 `maintainer/AGENTS.md`；它还必须读取 [项目规则](docs/project-rules.md) 和 [源码发布流程](docs/architecture/source-release-workflow-design.md)。业务项目 AI 入口不得加载这些维护规则。
 
 ## 标准资产
 
@@ -113,7 +114,7 @@ AgenticOps 通过稳定标准资产约束 AIAgent 的执行行为：
 
 ## 工作目录边界
 
-`~/.agentic-ops` 是 `tapstate/agentic-ops` 的完整 managed clone。它的目录结构与 GitHub 仓库一致，用于保存安装后的 `agentic-cli`、安装元数据、全局配置和可安全重建的运行资产。
+`~/.agentic-ops` 是稳定 `main` 的 developer-only sparse managed clone，只包含研发工程师工作面所需的 `ao-work`、Skill、Rule、标准资产、锁定 Python 环境和可安全重建的安装状态。它不包含 `maintainer/`、developer 测试、fixture 或 fake producer，不代表任何研发员，也不能作为 AgenticOps 源头维护入口。
 
 具体项目运行目录是项目 AI 工作空间，例如：
 
@@ -129,17 +130,12 @@ tapdata/
 | 目录 | 用途 |
 | --- | --- |
 | `docs/` | 人读文档，包括项目维护者、研发工程师、架构、规则、故事线、流程和设计说明。 |
-| `runtime/` | Python Runtime 源码与运行时测试的目标位置。 |
-| `bootstrap/` | 安装、更新、回滚、环境准备和 `agentic-cli` Shell 包装入口的目标位置。 |
-| `skills/` | AIAgent 可发现、可复用的标准流程入口。 |
-| `rules/` | 事实源、权限、语言、分支、授权和停止条件。 |
-| `standards/` | 公司、契约、标准流程、策略、运行手册、模板和项目差异资产的目标位置。 |
-| `install-resources/`、`packages/agentic-cli/` | 迁移期间保留的旧安装资源与 Go 能力基线，替代能力验收后逐项删除。 |
-| `bin/` | 本机安装后的命令目录，仓库只跟踪 `bin/.gitkeep`，本地生成的 `bin/agentic-cli` 不提交。 |
-| `.local/` | 本机安装和更新状态目录，仓库只跟踪 `.local/.gitkeep`，本地状态文件不提交。 |
+| `maintainer/` | 源头项目维护工作面：`ao-maint`、维护 Runtime、维护 Skill、规则、故事门禁、发布脚本和维护测试。 |
+| `developer/` | 业务研发工作面：`ao-work`、业务 Runtime、业务 Skill、规则、标准资产、Bootstrap 和业务测试。 |
+| `shared/` | 经审查后才允许两个工作面共同读取的中立资料；默认不共享代码和规则。 |
 | `.superpowers/` | 项目工作空间的本地执行状态目录，由 Git 忽略，不保存正式设计、计划或运行资产。 |
-| `plans/` | 历史实施记录；目标结构中删除，新的计划、进度和验收统一进入 Jira。 |
-| `scripts/` | AgenticOps 源头仓库发布与固定验证编排；不承载安装后业务逻辑。 |
-| `tests/` | 合同、脚本和端到端验证。 |
+| `maintainer/scripts/` | AgenticOps 源头仓库发布与固定验证编排；不承载安装后业务逻辑。 |
+
+旧 Go Runtime、平台二进制、`agentic-cli`、`install-resources/` 及根目录旧运行资产已删除。历史行为只通过版本分支、Tag 和 Git 历史查阅，不是现役入口或兼容层。
 
 实施计划、阶段状态、验收记录和剩余工作由 Jira 管理；仓库只保存长期有效的目标、架构、规则、标准资产和测试。

@@ -4,7 +4,7 @@
 
 本文定义 AIAgent 维护 AgenticOps 源头仓库时的工作规则，用于减少幻觉、提高效率并保护项目边界。
 
-这些规则适用于 AgenticOps 文档、实现、维护和正式发布流程。
+这些规则只适用于 maintainer 工作面中的 AgenticOps 文档、实现、维护和正式发布流程。根 `AGENTS.md` 固定加载 `maintainer/AGENTS.md`；业务项目工作空间不得加载本文。
 
 本文不等同于安装后 AIAgent 执行业务 Jira 任务的运行规范。安装后 AIAgent 的执行规范以 AI 员工手册、操作契约、工作流配置、运行资产、模板和对应运行文档为准。
 
@@ -31,7 +31,7 @@ AIAgent 做任何结论前必须先找证据。
 
 AIAgent 不得声称以下内容已经存在，除非当前仓库中有文件或命令输出证明：
 
-- `agentic-cli` 已实现。
+- `ao-maint` 或 `ao-work` 的某个子命令已实现。
 - `install.sh` 已存在。
 - Operation YAML 已存在。
 - 工作流配置可运行。
@@ -64,9 +64,11 @@ AIAgent 必须严格区分：
 
 不得把具体项目任务日志、代码变更、Jira 原文或敏感上下文写入 AgenticOps 全局资料。
 
+工作面硬隔离：源头仓库只调用 `ao-maint`，业务项目只调用 `ao-work`；不得通过 `--mode`、环境变量、兼容别名或聊天指令切换。maintainer 不读取业务授权与任务状态，developer 不读取源头发布规则与故事放行状态。
+
 ## 6. 源头仓库执行门禁
 
-维护 AgenticOps 源头仓库时，AIAgent 必须遵守 `develop` 日常开发、`main` PR-only 和统一发布脚本规则。不得直接提交或推送 `main`，不得绕过 `.githooks`、固定完整验证或最终人工确认。硬门禁模式不得绕过 GitHub Ruleset 和 Auto-merge；GitHub Free 私有仓库必须显式传入 `--allow-soft-gate`，使用固定发布或修复 HEAD、人工 Merge commit、合并事实校验和二次完整验证，不得静默降级。
+维护 AgenticOps 源头仓库时，AIAgent 必须遵守 `develop` 日常开发、`main` PR-only 和统一发布脚本规则。不得直接提交或推送 `main`，不得绕过 Git common directory trusted Hook launcher、固定完整验证或最终人工确认，也不得让 candidate Hook、Runtime 或发布脚本自证。硬门禁模式不得绕过 GitHub Ruleset 和 Auto-merge；GitHub Free 私有仓库必须显式传入 `--allow-soft-gate`，使用固定发布或修复 HEAD、人工 Merge commit、合并事实校验和二次完整验证，不得静默降级。发布信任根发生变更时必须停止自动 publish，改走受保护 `main` 的独立人工审查 PR。
 
 面向用户、研发工程师、流程负责人、审阅者或 Jira 参与者的自然语言交互必须使用中文。
 
@@ -74,7 +76,7 @@ AIAgent 必须严格区分：
 
 规则冲突时按 `项目规则 > AIAgent 规则 > 公司规则 > 个人规则` 执行。Git 提交信息遵守仓库 `AGENTS.md` 的项目提交规则：AgenticOps 是内部项目，提交标题和提交描述正文使用中文；`tag` 指 Jira 任务编号，例如 `TAP-1234`，所有代码提交都必须绑定 Jira 任务卡片；非平凡提交必须包含 body，说明问题、处理方式、验证结果和风险；不得在提交信息中粘贴完整 Jira 描述、敏感日志或凭证。
 
-AIAgent 只有在研发工程师明确要求对应动作，或确认版本化设计或修复计划并授予仍有效的工作项级连续执行授权后，才能提交、推送任务分支、写入必要 Jira 证据以及创建或更新拉取请求。有效授权范围内不重复请求确认，完成后统一停在拉取请求审查；合并、发布、Git Tag、直接修改受保护分支、强推、历史改写、范围变化和授权失效仍需新的人工确认。日常提交和推送目标是 `develop` 或标准 Hotfix 分支；正常发布必须使用 `scripts/release.sh`，紧急修复必须使用 `scripts/hotfix.sh`。推送成功后，若能可靠确认对应 Jira 编号，AIAgent 应将中文变更总结评论到该 Jira 任务；评论失败时必须明确反馈“代码已推送但 Jira 回写未完成”，后续只重试评论，不重复推送。
+AIAgent 只有在研发工程师明确要求对应动作，或确认版本化设计或修复计划并授予仍有效的工作项级连续执行授权后，才能提交、推送任务分支、写入必要 Jira 证据以及创建或更新拉取请求。有效授权范围内不重复请求确认，完成后统一停在拉取请求审查；合并、发布、Git Tag、直接修改受保护分支、强推、历史改写、范围变化和授权失效仍需新的人工确认。日常提交和推送目标是 `develop` 或标准 Hotfix 分支；正常发布必须使用 `maintainer/scripts/release.sh`，紧急修复必须使用 `maintainer/scripts/hotfix.sh`。推送成功后，若能可靠确认对应 Jira 编号，AIAgent 应将中文变更总结评论到该 Jira 任务；评论失败时必须明确反馈“代码已推送但 Jira 回写未完成”，后续只重试评论，不重复推送。
 
 ## 7. 输出纪律
 

@@ -18,21 +18,9 @@
 
 ## 3. 版本与 Tag
 
-### 3.1 编译版本
+### 3.1 运行版本
 
-保留现有版本格式和计算规则：
-
-```text
-TYPE-vX.Y.COMMIT_NUM-COMMIT
-```
-
-例如：
-
-```text
-INS-v0.2.17-a68372d
-```
-
-`TYPE` 继续表示源码态、开发态或安装产物，不使用分支名替换，也不增加独立分支字段。`COMMIT_NUM` 继续按现有全部可达提交数量计算；Merge commit 造成的序号跳跃属于允许行为，末尾 commit 标识负责保证完整版本可追溯。
+现役 Python 交付物不构建 AgenticOps 自有平台二进制。运行版本由固定 Git ref、`vX.Y` 版本线和 commit 标识追溯；旧 `TYPE-vX.Y.COMMIT_NUM-COMMIT` 只保留在冻结的 Go 版本号设计中，不作为 `ao-maint` / `ao-work` 的新构建协议。
 
 ### 3.2 Git tag
 
@@ -49,15 +37,15 @@ INS-v0.2.17-a68372d
 用户入口只保留两个脚本：
 
 ```text
-scripts/release.sh
-scripts/hotfix.sh
+maintainer/scripts/release.sh
+maintainer/scripts/hotfix.sh
 ```
 
 内部公共实现放在：
 
 ```text
-scripts/lib/release-common.sh
-scripts/lib/development-workflow.sh
+maintainer/scripts/lib/release-common.sh
+maintainer/scripts/lib/development-workflow.sh
 ```
 
 - `release.sh` 负责 `develop` 正常发布的 `prepare` 和 `publish`。
@@ -76,6 +64,10 @@ scripts/lib/development-workflow.sh
 - `pre-commit` 阻止在 `main` 直接提交。
 - `pre-push` 阻止直接向远端 `main` 推送。
 
+`.githooks` 只保存版本化策略源。`development-workflow.sh` 在 Git common directory 安装带版本标记的 trusted launcher，并把 `core.hooksPath` 指向该目录；launcher 从当前已接受 `HEAD` 提取并执行 Hook，不能直接执行 candidate 工作树文件。pre-commit 再用 `HEAD` Runtime 检查隔离的 index 快照。
+
+首次从不含新版 story Runtime 的旧 `HEAD` 迁移时，上述 launcher 必然仍执行旧 Hook，不能把 candidate 变成自己的信任根。本次基线提交采用一次性显式人工迁移：公司员工指导员确认完整 staged `impact_id`，候选 Runtime 完成同一 index 的固定验收与复检，记录 tree 后单次禁用旧 Hook 提交，再对真实 commit range 复检 impact/tree 并立即重装 launcher。它不是可重复的常规发布入口，也不证明旧 Hook 已保护该提交；首次进入受保护 `main` 仍必须由独立人工审查 PR 安装可信基线。
+
 ## 5. 正常发布流程
 
 ### 5.1 准备版本
@@ -83,7 +75,7 @@ scripts/lib/development-workflow.sh
 命令：
 
 ```bash
-scripts/release.sh prepare --version v0.3
+maintainer/scripts/release.sh prepare --version v0.3
 ```
 
 顺序：
@@ -93,25 +85,26 @@ scripts/release.sh prepare --version v0.3
 3. 检查本地 Hooks、远端 `develop` 和 `main` PR-only 保护；缺失时展示配置动作并逐项取得确认后修复。
 4. 要求当前分支为 `develop`、工作区干净且本地没有落后或分叉。
 5. 校验版本参数符合 `^v[0-9]+\.[0-9]+$`。
-6. 校验远端不存在同名 tag；同名本地 tag 只有在指向当前版本线基线时才允许复用。
-7. 在当前 HEAD 创建 annotated tag，暂不推送。
-8. 构建四个平台二进制并更新 `install-resources/checksums.txt`。
-9. 输出生成文件清单，停止在研发工程师审查和提交点。
+6. 在临时 worktree 对固定 HEAD 执行四项完整验证，覆盖 Python 锁文件、两个工作面边界、developer Skill / Rule / 标准资产、Shell Bootstrap、developer-only sparse 安装、`ao-work`、更新和回滚。
+7. 验证全部通过后，校验远端不存在同名 tag；同名本地 tag 只有在指向当前版本线基线时才允许复用。
+8. 在当前 HEAD 创建 annotated tag，暂不推送。
+9. 记录固定 HEAD、验证时间和验证清单。
+10. 输出待发布提交与验证清单，停止在研发工程师审查和提交点。
 
-`prepare` 不暂存、不提交、不推送代码。构建失败时保留本地 tag 和生成文件，修复后可以在同一版本线中重复执行。
+`prepare` 不暂存、不提交、不推送代码。验证失败时不得创建新 tag；修复后以同一版本重新执行。已有且合法的同名本地 tag 只在后续验证再次通过后复用。
 
 ### 5.2 发布版本
 
 命令：
 
 ```bash
-scripts/release.sh publish --version v0.3
+maintainer/scripts/release.sh publish --version v0.3
 ```
 
 GitHub Free 私有仓库无法使用所需 Ruleset 和 Auto-merge 时，必须显式启用软门禁：
 
 ```bash
-scripts/release.sh publish --version v0.3 --allow-soft-gate
+maintainer/scripts/release.sh publish --version v0.3 --allow-soft-gate
 ```
 
 顺序：
@@ -141,7 +134,7 @@ scripts/release.sh publish --version v0.3 --allow-soft-gate
 命令：
 
 ```bash
-scripts/hotfix.sh create --jira-id AO-123
+maintainer/scripts/hotfix.sh create --jira-id AO-123
 ```
 
 顺序：
@@ -158,7 +151,7 @@ scripts/hotfix.sh create --jira-id AO-123
 命令：
 
 ```bash
-scripts/hotfix.sh prepare
+maintainer/scripts/hotfix.sh prepare
 ```
 
 顺序：
@@ -166,8 +159,8 @@ scripts/hotfix.sh prepare
 1. 校验当前分支符合 `<user>/<jira-id>/fix-main`。
 2. 校验分支以 `origin/main` 为基础且工作区干净。
 3. 自动解析 `main` 历史中最近的二段式 `vX.Y`。
-4. 构建四平台二进制并更新 checksum。
-5. 输出生成文件清单，停止在研发工程师审查和提交点。
+4. 执行 maintainer/developer Runtime、工作面边界和 developer-only 安装验证。
+5. 输出固定修复 HEAD 和验证清单，停止在研发工程师审查和提交点。
 
 该命令不创建、移动或推送 tag，也不提交生成产物。
 
@@ -176,13 +169,13 @@ scripts/hotfix.sh prepare
 命令：
 
 ```bash
-scripts/hotfix.sh publish
+maintainer/scripts/hotfix.sh publish
 ```
 
 软门禁命令：
 
 ```bash
-scripts/hotfix.sh publish --allow-soft-gate
+maintainer/scripts/hotfix.sh publish --allow-soft-gate
 ```
 
 顺序：
@@ -206,11 +199,12 @@ scripts/hotfix.sh publish --allow-soft-gate
 发布脚本在任何测试、推送或拉取请求操作前检查：
 
 - GitHub CLI 认证可用：先执行 `gh auth status -h github.com`；状态检查失败时回退执行 `gh api user`，只有两项都失败才阻断，且不输出令牌或认证响应正文。
-- `core.hooksPath` 指向 `.githooks`。
+- `core.hooksPath` 指向 Git common directory 中带 `AGENTIC_OPS_TRUSTED_HOOK_LAUNCHER_V1` 标记的 trusted launcher 目录。
 - 远端 `develop` 存在。
 - GitHub 默认分支是 `main`。
-- `main` 的仓库规则禁止直接推送、强推和删除，并要求通过拉取请求合入。
-- `main` 不配置必需 GitHub CI 和必需 Review。
+- `main` 的仓库规则无 bypass，禁止直接推送、强推和删除，并要求通过拉取请求合入。
+- `main` 至少需要 1 个独立人工批准，最后推送者不能自批，新的提交撤销旧批准，且必须解决全部 review threads。这样 candidate 即使删除仓库内 release/story gate 调用也不能自动合并。
+- 当前不要求必需 GitHub CI；服务器信任根是上述独立人工审批 Ruleset，`origin/main` Runtime 是自动发布的确定性复检层。
 
 发现缺失或漂移时：
 
@@ -228,7 +222,7 @@ GitHub Free 私有仓库无法配置本设计要求的 `main` Ruleset 与 Auto-m
 软门禁仍强制检查：
 
 - GitHub CLI 认证可用。
-- `core.hooksPath` 指向 `.githooks`，且本地 `pre-commit`、`pre-push` 可执行。
+- `core.hooksPath` 指向 Git common directory trusted launcher 目录，且 launcher 能从已接受 `HEAD` 加载版本化 `pre-commit`、`pre-push`。
 - 远端 `develop` 存在。
 - GitHub 默认分支是 `main`。
 - 仓库允许 Merge commit。
@@ -239,20 +233,20 @@ GitHub Free 私有仓库无法配置本设计要求的 `main` Ruleset 与 Auto-m
 
 ## 8. 完整验证
 
-`publish` 在临时 Git worktree 中固定执行：
+`prepare` 与 `publish` 都在临时 Git worktree 中固定执行：
 
 ```bash
-go test ./...
-bash scripts/test-resources.sh
-bash scripts/test-build.sh
-bash scripts/test-install.sh
-bash tests/e2e/ao-profile-flow.sh
-bash tests/e2e/local-fake-flow.sh
-bash tests/e2e/local-install-flow.sh
-bash tests/e2e/problem-resolution-flow.sh
+bash maintainer/scripts/test-python-runtime.sh
+bash maintainer/scripts/test-resources.sh
+bash developer/tests/bootstrap/test_install_boundary.sh
+bash maintainer/scripts/test-release-workflow.sh
 ```
 
-验证命令不可由普通参数替换或跳过。任一命令失败时，不执行后续推送、创建拉取请求、Auto-merge 或 tag 推送。软门禁恢复执行时，即使 PR 已人工合并，也必须在 Tag 或完成审计前重新执行全部验证。
+其中 `test-python-runtime.sh` 统一运行 maintainer/developer Runtime 回归，`test-resources.sh` 验证工作面、Skill、Rule、标准资产和旧分发残留，`test_install_boundary.sh` 验证 developer-only sparse 安装、更新与回滚，`test-release-workflow.sh` 验证发布和 Hotfix 门禁。验证命令不可由普通参数替换或跳过。任一命令失败时，`prepare` 不得创建新 tag，`publish` 不得执行推送、创建拉取请求、Auto-merge 或 tag 推送。软门禁恢复执行时，即使 PR 已人工合并，也必须在 Tag 或完成审计前重新执行全部验证。
+
+`publish` 在完整验证前刷新官方 `origin/main`，分别创建 baseline 和固定 candidate worktree，只执行 baseline 的锁文件、launcher 和 Runtime 来检查 candidate 范围。`origin/main` 缺少新门禁时返回 `release_story_gate_baseline_upgrade_required`；Hook、故事门禁、注册表、锁文件或发布脚本等信任根发生净变更时返回 `release_story_gate_trust_root_changed`。两种情况都不能自动创建或合并 PR，必须先通过受保护 `main` 的独立人工审查 PR 安装或升级信任根。
+
+本地 trusted launcher 用于隔离 candidate Hook 和防止误操作，但拥有本机 Git 控制权的人仍能修改 Git 配置或使用 `--no-verify`。因此它不单独构成硬安全边界；无 bypass、强制独立人工批准且最后推送者不能自批的 `main` Ruleset 是服务器信任根，`origin/main` 基线负责确定性复检。
 
 ## 9. 幂等、失败与恢复
 
@@ -291,6 +285,8 @@ bash tests/e2e/problem-resolution-flow.sh
 
 GitHub PR 和 Merge commit 是发布事实源，本地 JSON 是执行审计记录。输出不得包含 token、完整环境变量或原始敏感日志。
 
+审计写入只允许在仓库物理根内逐级创建普通目录 `.local/release-runs`；任一祖先或叶子是符号链接、特殊文件或物理路径逃逸时，以 `release_audit_path_unsafe` 失败。JSON 使用同目录私有临时文件并以 rename 原子落盘，写后仍须是普通文件，不能跟随链接覆盖仓库外内容。
+
 ## 11. 正式规则状态
 
 - 原临时开发限制已移除，不再作为当前执行规则。
@@ -304,7 +300,7 @@ GitHub PR 和 Merge commit 是发布事实源，本地 JSON 是执行审计记�
 新增：
 
 ```text
-scripts/test-release-workflow.sh
+maintainer/scripts/test-release-workflow.sh
 ```
 
 测试使用临时 Git 仓库和 fake `gh`，不得真实修改 GitHub 仓库设置、推送分支、创建拉取请求或推送 tag。至少覆盖：

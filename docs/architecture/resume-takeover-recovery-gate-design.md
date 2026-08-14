@@ -1,6 +1,8 @@
 # `resume-takeover` 完整恢复门禁设计
 
-本文定义 `resume-takeover` 如何从已有 `agentic_run_id` 恢复可信任务上下文，重新校验 Jira 所有权、目标仓库和标准流程阶段，并在恢复阻塞时形成受控的 Jira 反馈闭环。`resume-takeover` 本身只执行读取和本地审计；Jira 评论由独立的 `add-task-comment` 操作按策略门禁和人工确认执行。
+> **目标设计，不是现役入口：** `resume_takeover` 当前在能力目录中为 `capability_gap`。本文保留未来恢复门禁合同；涉及 Jira 评论时使用现役 `jira_comment` 的 `plan -> apply -> readback` 协议，不能调用旧 `add-task-comment` 命令。
+
+本文定义目标能力 `resume_takeover` 如何从已有 `agentic_run_id` 恢复可信任务上下文，重新校验 Jira 所有权、目标仓库和标准流程阶段，并在恢复阻塞时形成受控的 Jira 反馈闭环。该能力当前为 `capability_gap`，没有可调用的 `resume-takeover` 命令；未来实现本身也只执行读取和本地审计。现役 Jira 评论只能按 `jira_comment` 的 `ao-work jira comment plan -> apply -> readback` 协议，在策略门禁和人工确认后执行。
 
 本设计只完善恢复门禁，不实现通用工作流引擎，不让恢复操作直接执行 Jira 写入，也不改变 Git、GitHub、拉取请求、合并或发布边界。
 
@@ -81,13 +83,13 @@ AgenticOps 当前存在两类阶段，恢复时必须分别处理。
 新增独立的运行上下文读取组件，负责：
 
 - 读取同一个 `agentic_run_id` 的事件。
-- 从首个成功的 `takeover_task` 事件建立接管基准。
+- 从未来目标能力 `takeover_task` 的首个成功事件建立接管基准；该能力当前为 `capability_gap`，现役流程不得生成或伪造该事件。
 - 恢复 `workspace`、`issue_key`、`agent_id`、`agentic_id`、`task_class`、`process_id` 和 `target_repo`。
 - 检测后续事件中的非空身份字段是否与接管基准冲突。
 - 从会改变任务运行状态的事件中找到最近有效操作阶段和 `agentic_next_action`。
 - 识别终态、待人工确认状态和旧版 `takeover_resumed` 审计事件。
 
-恢复点按事件写入顺序选择。第一阶段认定会改变任务运行状态的操作为 `takeover_task`、`resume_takeover`、`write_evidence`、`write_pr_evidence`、`prepare_pr` 和 `release_agent`；`add_task_comment`、`update_task_form`、`update_task_description_sections` 等通用 Jira 原子写操作只记录操作审计，不覆盖任务恢复点。失败的 `resume_takeover` 尝试和旧版成功事件中的 `takeover_resumed` 也只用于审计，不覆盖之前的恢复点。这样既能保留任务真实进度，也允许在 Jira 事实修复后重新执行恢复门禁。
+恢复点按事件写入顺序选择。目标模型中认定会改变任务运行状态的操作为 `takeover_task`、`resume_takeover`、`write_evidence`、`write_pr_evidence`、`prepare_pr` 和 `release_agent`；这些名称是否可执行必须以能力目录为准，`capability_gap` 不得生成成功事件。现役 `jira_comment`、`jira_description` 等通用 Jira 原子写操作只记录操作审计，不覆盖任务恢复点。历史事件中的 `add_task_comment`、`update_task_form`、`update_task_description_sections` 和 `takeover_resumed` 仅用于兼容读取与审计，不代表对应旧命令仍可调用，也不覆盖之前的恢复点。这样既能保留任务真实进度，也允许在 Jira 事实修复后重新执行恢复门禁。
 
 该组件只依赖事件模型，不读取 Jira，不决定业务门禁。`resume-takeover` 和 `write-evidence` 统一使用该组件，删除重复的上下文恢复判断。
 
@@ -230,22 +232,19 @@ CLI 失败输出增加：
   "jira_feedback_write_allowed": true,
   "jira_feedback_file": ".agentic-ops/tasks/<ISSUE-KEY>/runs/<agentic_run_id>/resume-blocked-<code>.md",
   "jira_feedback_category": "blocked",
-  "agentic_next_action": "add_task_comment"
+  "agentic_next_action": "jira_comment_plan"
 }
 ```
 
-AIAgent 随后调用现有原子操作：
+AIAgent 随后调用现役评论协议：
 
 ```sh
-agentic-cli add-task-comment <issue-key> \
-  --workspace <workspace> \
-  --category blocked \
-  --content-file <file> \
-  --run-id <run-id> \
-  --confirm-real-jira-write
+ao-work jira comment plan --issue-key <issue-key> --category blocked --content-file <file> --idempotency-key <key> --plan-file .agentic-ops/tasks/<issue-key>/runs/<agentic_run_id>/jira-plans/<name>.json
+ao-work jira comment apply --plan-file <managed-path> --confirm-plan-id <plan-id> --authorization-reference <reference>
+ao-work jira comment readback --issue-key <issue-key> --idempotency-key <key> --plan-file <managed-path> --confirm-plan-id <plan-id>
 ```
 
-真实 Jira 写入继续经过所有权、操作契约、策略和显式确认门禁。评论成功后，以 `add_task_comment` 的完成审计事件作为 Jira 反馈闭环证据。
+真实 Jira 写入继续经过所有权、操作契约、策略和显式确认门禁。评论成功后，以 `jira_comment` 的 plan、apply 和 readback 结果及其完成审计作为 Jira 反馈闭环证据。旧 `add_task_comment` 当前为 `capability_gap`，不得调用。
 
 ### 8.2 可写与不可写边界
 
@@ -261,7 +260,7 @@ agentic-cli add-task-comment <issue-key> \
 - `invalid_process_stage`
 - `human_gate_pending`
 
-以下情况说明当前 AIAgent 已失去任务写入资格，只生成评论材料，设置 `jira_feedback_write_allowed: false` 和 `agentic_next_action: ask_owner_to_add_task_comment`，由研发工程师或当前负责人处理：
+以下情况说明当前 AIAgent 已失去任务写入资格，只生成评论材料，设置 `jira_feedback_write_allowed: false` 和 `agentic_next_action: ask_owner_to_write_jira_comment`，由研发工程师或当前负责人处理：
 
 - `assignee_changed`
 - `agent_ownership_conflict`
@@ -276,7 +275,7 @@ agentic-cli add-task-comment <issue-key> \
 - 不可信或损坏的本地事件。
 - Jira 无法连接或无法确认目标卡片。
 
-评论包含稳定反馈编号。写入前应使用 `inspect-task` 检查 Jira 是否已经存在同一反馈，避免重复评论。远端写入成功但本地完成审计失败时，沿用现有 `retry_safe: false` 规则，必须先检查 Jira，不得盲目重试。
+评论包含稳定反馈编号。写入前先查询 `jira_inspect` 并执行现役 `ao-work jira inspect --issue-key <issue-key>` 读取基础任务事实；由于该入口当前不读取评论，还必须通过 Jira 界面或项目认可的只读工具检查是否已经存在同一反馈，避免重复评论。旧 `inspect-task` 对应的 `inspect_task` 当前为 `capability_gap`，不得调用。远端写入成功但本地完成审计失败时，沿用现有 `retry_safe: false` 规则，只能带原 `plan_file` 和 `plan_id` 执行 `ao-work jira comment readback`，并在必要时人工检查 Jira，不得盲目重试 apply。
 
 ## 9. 输出契约
 
@@ -347,7 +346,7 @@ agentic-cli add-task-comment <issue-key> \
 - 失去 assignee 或代理所有权时禁止返回可直接写 Jira 的动作。
 - 不可信本地错误不生成 Jira 评论文件。
 - `resume-takeover` 不调用 Jira 写接口。
-- 原子 `add-task-comment` 可以携带同一 `agentic_run_id` 写入生成的阻塞评论。
+- 现役 `jira_comment` 的 plan、apply、readback 可以携带同一 `agentic_run_id` 写入并回读生成的阻塞评论；旧 `add_task_comment` 为 `capability_gap`，不得作为验证入口。
 
 ### 10.4 资源与流程一致性
 
@@ -355,4 +354,4 @@ agentic-cli add-task-comment <issue-key> \
 - 两步 Jira 反馈流程与用户故事、AI 员工手册和独立原子写操作一致。
 - fake 与 recording client 验证不调用真实 Jira 写接口。
 
-具体验证入口、实现文件和阶段状态不属于架构设计事实源，由当前 `plans/` 计划和源码测试维护。任何实现仍必须遵守本设计的恢复只读边界，并在 Jira 写入时调用受控的独立原子操作。
+具体验证入口、实现文件和阶段状态不属于架构设计事实源，由对应 Jira 工作项和源码测试维护。任何实现仍必须遵守本设计的恢复只读边界，并在 Jira 写入时调用受控的独立原子操作。

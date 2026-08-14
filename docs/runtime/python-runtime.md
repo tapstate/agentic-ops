@@ -6,26 +6,29 @@
 
 ## 2. 运行入口
 
-统一入口：
+Python Runtime 按工作面提供两个入口：
 
 ```sh
-agentic-cli <operation> [args]
+./maintainer/bin/ao-maint <operation> [args]
+ao-work <operation> [args]
 ```
 
-`bin/agentic-cli` 是 Shell 包装入口，最终执行仓库锁定环境中的 Python module：
+`ao-maint` 只加载维护包，`ao-work` 只加载研发任务包：
 
 ```text
-~/.agentic-ops/.venv/bin/python -m agentic_ops
+ao-maint -> python -m ao_maint
+ao-work  -> ~/.agentic-ops/developer/.venv/bin/python -m ao_work
 ```
 
-安装实现可以使用等价的 `uv run --locked`，但业务项目的 Python 环境不得影响 Runtime。
+两个解析器不提供 `--mode`，两个 Python 包不得互相导入。安装实现可以使用等价的 `uv run --locked`，但业务项目的 Python 环境不得影响 Runtime。
 
 ## 3. 组件边界
 
 | 组件 | 职责 |
 | --- | --- |
 | Skill | 选择流程、组织操作、解释结果、触发 AI 判断或人工门禁 |
-| Python Runtime | 契约、配置、状态、API、证据、恢复和结构化输出 |
+| maintainer Python Runtime | 项目故事门禁、源头维护检查和维护结构化输出 |
+| developer Python Runtime | 业务契约、配置、状态、API、证据、恢复和结构化输出 |
 | Shell Bootstrap | 安装、更新、回滚、环境准备和统一启动 |
 | Rule | 事实源、权限、语言、分支、授权和停止条件 |
 
@@ -74,6 +77,8 @@ plan
 - `readback` 使用外部事实验证结果，更新本地 `sync.json` 和 journal。
 - 网络中断或响应不完整时返回 `retry_safe=false`，不得自动再次 `apply`。
 
+当前 Jira Comment 和 Worklog 公开独立 `readback`；Jira Description 在 `apply` 内完成写后回读，不公开独立 readback 子命令。能力目录必须精确反映这种差异，不能用目标协议推断 CLI 语法。
+
 ## 6. 本地状态
 
 - 人工维护配置和标准使用 YAML / Markdown。
@@ -86,33 +91,28 @@ plan
 
 ## 7. 配置解析
 
-effective 配置来源顺序：
+developer 工作面的 effective 配置来源顺序：
 
 ```text
 项目工作空间 overlay
 > ~/.agentic-ops/user/
-> standards/projects/<project>/
-> standards/company/
+> developer/standards/projects/<project>/
+> developer/standards/company/
 > Runtime 默认值
 ```
 
 该顺序只用于配置字段合并；规则冲突继续按 `项目规则 > AIAgent 规则 > 公司规则 > 个人规则` 处理。映射缺失时返回 `capability_gap` 或明确配置错误，不猜测 Jira 字段、状态和仓库。
 
-Runtime 必须区分两种运行模式：
-
-- `source_maintenance`：AgenticOps 源头维护，加载设计红线、源头维护规则和项目目标。
-- `project_execution`：业务项目任务执行，加载业务仓库规则、AI 执行规则和项目标准，不加载 AgenticOps 源头维护规则。
-
-模式由项目工作空间配置、Git remote、仓库根目录、Profile 和操作要求共同验证；不一致时返回 `workspace_mode_mismatch`。
+Runtime 不在同一进程中区分 mode。`ao_maint` 与 `ao_work` 分别由目录、AI 入口、命令、Python 包、Git remote、仓库根和项目工作空间标记验证；不一致时返回 `workplane_mismatch`。聊天指令、环境变量和 `--mode` 不能改变工作面。
 
 Jira 配置分为研发员账户、Connection、Project Profile 和 Project AI Workspace。一个业务项目工作空间代表一名研发员并只维护一个 Jira 账户；`~/.agentic-ops` 共享安装没有人员身份，一台电脑可以维护多个隔离的研发员工作空间。项目工作空间通过 Project Profile 选择 Connection，旧工作空间中的显式 `connection_id` 只作一致性校验。任务身份仍包含 `connection_id`、`jira_issue_id`、`issue_key` 和 `project_key`；站点、Profile 或 Issue 事实不一致时返回 `jira_workspace_mismatch`。
 
 ## 8. Python 与依赖
 
 - Python 3.12 由 `.python-version` 固定。
-- 依赖由 `pyproject.toml` 声明、`uv.lock` 锁定。
-- 安装和 CI 使用 `uv sync --locked`。
-- 单元测试、类型检查、格式检查和安全扫描命令写入 `pyproject.toml` 或固定脚本，发布流程不得临时替换。
+- 两个工作面的依赖分别由 `maintainer/pyproject.toml`、`developer/pyproject.toml` 声明，并由各自目录的 `uv.lock` 锁定；根目录不再提供混合 Python 项目。
+- 安装和 CI 使用 `uv sync --locked --project <workplane>`。
+- 单元测试、类型检查、格式检查和安全扫描命令写入对应工作面的 `pyproject.toml` 或固定脚本，发布流程不得临时替换。
 - 首选标准库，第三方库必须解决明确问题并提供测试。
 
 ## 9. 安全边界
@@ -127,11 +127,11 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 ## 10. Jira 字段与 Worklog
 
-- Custom Field 通过项目 Profile 中的稳定 field ID 映射，状态为 `active`、`read_only`、`pending_validation`、`unsupported` 或 `deprecated`。
+- Custom Field 的目标设计通过项目 Profile 中的稳定 field ID 映射，状态为 `active`、`read_only`、`pending_validation`、`unsupported` 或 `deprecated`；当前自动写入仍是 `capability_gap`，不得把设计映射描述为已实现命令。
 - 普通映射缺失属于配置修复；涉及 Jira 元数据、字段语义、Context、Screen、权限、自动化或跨项目影响时必须进入专题治理。
 - 未明确声明写入能力时默认只读，不允许按字段名称模糊匹配。
 - Worklog 记录中文标题、实际处理区间、累计耗时和本次耗时包含的工作；等待人工、等待外部系统、无人处理暂停和 CI 排队不计入。
-- Jira Comment、Description、Worklog 及其它副作用均执行 `plan -> apply -> readback`。
+- Jira Comment 和 Worklog 执行 `plan -> apply -> readback`；Jira Description 执行 `plan -> apply`，由 apply 内部回读。
 
 ## 11. 验收
 
@@ -141,23 +141,29 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 - Jira / GitHub 写入结果不明确时先回读，不重复副作用。
 - `capability_gap` 能被 Skill 识别，并生成任务级反馈而非静默继续。
 - Python 源码或标准资产更新后不需要构建项目自有平台二进制。
-- 两种运行模式不会交叉加载规则，多 Jira Connection 的任务身份和凭证保持隔离。
+- 两个工作面不会交叉加载规则、授权、配置或状态，多 Jira Connection 的任务身份和凭证保持隔离。
 - Worklog 可以解释每段真实耗时所包含的处理，并能安全回读避免重复登记。
 
 ## 12. 授权入口
 
-外部系统授权统一通过 `agentic-cli auth` 管理。Jira 当前支持 `list`、`show`、`set`、`remove` 和 `verify`；常规 `show`、`set`、`verify` 不需要 Connection 或 scope 参数，用户不需要手工猜测环境变量名或编辑 `.env`。
+业务外部系统授权统一通过 `ao-work auth` 管理。Jira 当前支持 `list`、`show`、`set`、`remove` 和 `verify`；常规 `show`、`set`、`verify` 不需要 Connection 或 scope 参数，用户不需要手工猜测环境变量名或编辑 `.env`。`ao-maint` 不读取业务工作空间凭证，也不提供该授权入口。
 
 授权入口只返回配置状态、脱敏身份和来源，不返回 token。凭证文件使用锁、原子替换和 `0600` 权限；真实 Jira 操作前必须验证 Connection、当前身份和项目工作空间绑定。详细操作见 [AgenticOps 授权管理](authorization.md)。
 
+## 12.1 developer 能力目录
+
+`developer/standards/capabilities/operations.yaml` 是 developer Runtime 可调用性的机器事实源，`ao-work capability list|show` 只读输出稳定 JSON。目录覆盖每个 Operation Contract，并把真实 parser 中没有等价实现的旧契约标记为 `capability_gap`；契约存在不等于命令存在。
+
+`status=implemented` 的公开能力必须声明实际 parser 命令路径；`status=capability_gap` 不得声明命令，并必须提供中文 `next_action`。`task init|inspect` 与 `report write` 属于 `visibility=internal` 的 Runtime 状态原语，只允许版本化 Skill 编排，不能对外解释为 Jira 接管、完成审计或 Jira 回写。
+
 ## 13. 业务项目工作空间初始化
 
-常规入口为 `agentic-cli workspace init`。交互模式从安全默认值开始，统一确认 `agent_id`、Project Profile、Jira 站点与 Project Key、脱敏授权账户、默认仓库和源码目录。`agent_id` 默认由纯小写主机名规范化得到，最终必须匹配 `^[0-9A-Za-z_-]+$`。
+常规入口为 `ao-work workspace init`。交互模式从安全默认值开始，统一确认 `agent_id`、Project Profile、Jira 站点与 Project Key、脱敏授权账户、默认仓库和源码目录。`agent_id` 默认由纯小写主机名规范化得到，最终必须匹配 `^[0-9A-Za-z_-]+$`。
 
 确认后 Runtime 先对候选配置执行无副作用预检，再准备源码和原子写入工作空间文件；`.agentic-ops/agent.json` 作为初始化完成标记最后写入。Jira 身份、目标 Project 访问、Git 远端访问或本机 `agent_id` 冲突任一检查失败时，不得进入任务执行。
 
-共享安装的 `user/workspace-index.json` 只是可重建冲突索引，不保存凭证、不授权、不代表研发员。Jira 凭证仍只在业务项目工作空间 `.agentic-ops/.env` 中维护。
+初始化生成的业务工作空间 `AGENTS.md` 固定进入 developer 工作面，不得引用根 `AGENTS.md` 或 `maintainer/`。共享安装的 `user/workspace-index.json` 只是可重建冲突索引，不保存凭证、不授权、不代表研发员。Jira 凭证仍只在业务项目工作空间 `.agentic-ops/.env` 中维护。
 
 ## 14. 项目故事质量门禁
 
-`source_maintenance` 模式通过 `agentic-cli story impact|approve|verify` 守护项目维护故事和研发工程师故事。影响检测基于 Git 内容指纹和机器注册表；确认与固定验收必须匹配同一 `impact_id`。故事受影响、故事修订、验收失败或映射缺失时，pre-commit 停止提交。详细规则见 [项目故事质量门禁](story-quality-gate.md)。
+maintainer 工作面通过 `ao-maint story impact|approve|verify` 守护项目维护故事和研发工程师故事。影响检测基于 Git 内容指纹和机器注册表；确认与固定验收必须匹配同一 `impact_id`。故事受影响、故事修订、验收失败或映射缺失时，pre-commit 停止提交。`ao-work` 不提供故事门禁子命令。详细规则见 [项目故事质量门禁](story-quality-gate.md)。

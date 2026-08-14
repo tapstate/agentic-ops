@@ -13,10 +13,10 @@ Standard Process Registry 是 AgenticOps 维护标准流程的源头。它定义
 | Standard Process Registry | 定义任务分类、标准流程、阶段标准、责任角色、日志和完成清理规则。 |
 | Task Form Standard | 定义标准字段、字段语义、生命周期要求和字段缺口处理。 |
 | 工作流配置 | 把标准流程、标准字段和阶段映射到具体 Jira 字段、状态、`transition` 和审查节点。 |
-| 操作契约 | 定义 `agentic-cli` 操作如何校验、执行、输出和记录事件。 |
+| 操作契约 | 定义 `ao-work` 业务操作如何校验、执行、输出和记录事件。 |
 | 反馈闭环 | 聚合执行日志、失败码、审查退回、重试重做和流程改进建议。 |
 
-机器可读源头放入 `install-resources/basic/contracts/processes/`。当前文档是第一阶段设计源头，用于解释标准流程注册处的职责边界。
+机器可读源头放入 `developer/standards/contracts/processes/`。当前文档用于解释 developer 标准流程注册处的职责边界；maintainer 流程不在此混写。
 
 ## 3. 流程选择顺序
 

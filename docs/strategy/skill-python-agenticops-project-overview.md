@@ -2,7 +2,7 @@
 
 > **状态：** 目标设计已确认。实施计划、阶段进度、阻塞和验收统一维护在 Jira `AO-11`。
 > **目标架构：** `Skill + Python Runtime + Shell Bootstrap + Rule`。
-> **实现说明：** 当前仓库仍包含 Go 与旧安装资源；它们是重构输入，不是目标形态。删除时机由 `AO-11` 实施需要决定，旧版本由版本分支、Tag 和 Git 历史保留。
+> **实现说明：** Go 与旧安装资源已退出当前工作树；旧版本只由版本分支、Tag 和 Git 历史保留。现役实现与验收均以两个 Python 工作面为准。
 
 ## 1. 定位
 
@@ -41,7 +41,7 @@ Python Runtime 负责配置、契约、状态、文件锁、原子写入、schem
 
 ### 2.3 Shell Bootstrap
 
-Shell Bootstrap 只负责 clone、更新和回滚 `~/.agentic-ops`，安装或定位 `uv`，准备锁定 Python 环境，生成 `agentic-cli` 包装入口以及轻量环境检查。
+Shell Bootstrap 只负责以 sparse checkout clone、更新和回滚 `~/.agentic-ops` 的 developer 工作面，安装或定位 `uv`，准备锁定 Python 环境，生成 `ao-work` 包装入口以及轻量环境检查。
 
 Shell 不解析 Jira、工作流、任务状态、证据或门禁。源头仓库发布脚本可以编排 Git、GitHub 和固定验证，但不进入安装后的业务运行时。
 
@@ -54,50 +54,53 @@ Rule 保存不能由当前任务临场改变的事实源、权限、语言、授
 | 位置 | 职责 | 不得保存 |
 | --- | --- | --- |
 | AgenticOps 源头仓库 | Skill、Runtime、Bootstrap、Rule、标准资产、设计和测试 | 用户凭证、具体业务任务状态 |
-| `~/.agentic-ops` | 稳定 `main` managed clone、锁定 Python 环境、本机配置、版本和回滚点 | Tapdata、AO 等具体任务资料 |
+| `~/.agentic-ops` | 稳定 `main` 的 developer-only sparse managed clone、锁定 Python 环境、版本和回滚点 | maintainer 资产、研发员身份、Tapdata / AO 等具体任务资料 |
 | 项目 AI 工作空间 | 项目配置、本地源码、worktree、任务状态、报告、证据和反馈 | AgenticOps 全局源码副本、其它项目任务状态 |
 
 具体任务资料统一位于 `<project-ai-workspace>/.agentic-ops/tasks/<ISSUE-KEY>/`。
 
 `.superpowers/` 只保存 Superpowers 等可选插件的临时状态、检查点、缓存和中间分析，可删除、可重建，不属于正式任务状态或审计。插件确认结果必须同步到 Jira 和 AgenticOps 正式任务状态；未安装插件不得影响主流程。
 
-## 4. 双运行模式与规则加载
+## 4. 双工作面与规则加载
 
-模式由项目工作空间配置、Git remote、仓库根目录、项目 Profile 和操作要求共同验证，不能只靠 AI 猜测。
+工作面由目录、独立命令、Python 包、AI 入口、Git remote、仓库根、项目 Profile 和操作要求共同验证，不能只靠 AI 猜测，也不能用 mode 参数切换。
 
-### 4.1 `source_maintenance`
+### 4.1 `maintainer`
 
 用于维护 `tapstate/agentic-ops` 或 AgenticOps 改进 worktree，加载：
 
 ```text
 AGENTS.md
-rules/design-guardrails.md
-rules/source-maintenance.md
+maintainer/AGENTS.md
+maintainer/rules/source-maintenance.md
 docs/strategy/project-goals.md
-standards/company/
-相关维护 Skill
+maintainer/standards/
+maintainer/skills/
+./maintainer/bin/ao-maint
 ```
 
-### 4.2 `project_execution`
+### 4.2 `developer`
 
 用于 Tapdata、Tapstate 等业务项目任务，加载：
 
 ```text
 业务仓库自己的 AGENTS.md
-rules/ai-execution.md
-standards/company/
-standards/projects/<project>/
+developer/AGENTS.md
+developer/rules/ai-execution.md
+developer/standards/company/
+developer/standards/projects/<project>/
 任务类型对应 Skill
 项目 AI 工作空间 overlay
+ao-work
 ```
 
-该模式不得加载 AgenticOps 的设计红线、源头维护规则、项目目标、分支发布规则或 AO 专用工作流。每个 Skill 必须声明 `allowed_modes`；模式、仓库或 Profile 不一致时返回 `workspace_mode_mismatch` 并阻断。
+该工作面不得加载 AgenticOps 的设计红线、源头维护规则、项目目标、分支发布规则或 AO 专用试验工作流。每个 Skill 必须在标准 frontmatter 的 `metadata.workplane` 声明唯一工作面；入口、仓库或 Profile 不一致时返回 `workplane_mismatch` 并阻断。
 
-业务任务完成并确认优化方案后，才创建 AgenticOps 独立 worktree，切换为 `source_maintenance` 并重新加载维护规则；业务项目规则不得被带入 AgenticOps 源头维护上下文。
+业务任务完成并确认优化方案后，才离开业务工作空间并创建 AgenticOps 独立 worktree，通过根 AI 入口进入 maintainer；业务项目规则不得被带入 AgenticOps 源头维护上下文。
 
 ## 5. AI 设计红线
 
-目标文件 `rules/design-guardrails.md` 是 AgenticOps 源头设计与规划的强制入口，至少禁止：
+根 `AGENTS.md` 与 `maintainer/AGENTS.md` 是 AgenticOps 源头设计与规划的强制入口，至少禁止：
 
 - 创建新的任务事实源替代 Jira。
 - 降低人工门禁、专业审查、分支保护或权限边界。
@@ -115,11 +118,12 @@ standards/projects/<project>/
 ## 6. Python 与依赖
 
 - 初始锁定 Python 3.12，由 `.python-version` 声明。
-- 根目录用 `pyproject.toml` 和 `uv.lock` 管理包、依赖和固定验证命令。
-- Shell Bootstrap 自动准备 `uv`、Python 和 `~/.agentic-ops/.venv`，不要求用户预装 Python 或 Go。
-- `bin/agentic-cli` 调用 `~/.agentic-ops/.venv/bin/python -m agentic_ops`。
+- 两个工作面分别用自己的 `pyproject.toml` 和 `uv.lock` 管理包与依赖；根目录不提供可同时安装两个 Runtime 的混合 Python 项目。
+- Shell Bootstrap 定位并要求可信的 `uv`，再按锁文件准备 Python 3.12 和 `~/.agentic-ops/developer/.venv`；当前不会自动下载 `uv`，用户必须先安装 `uv` 或显式提供 `AGENTIC_OPS_UV`。不要求用户预装 Go。
+- `./maintainer/bin/ao-maint` 只调用 `ao_maint`；安装后的 `bin/ao-work` 只调用 `ao_work`。
+- 两个包、解析器、授权、配置和状态不得互相导入或隐式读取。
 - 不使用系统 Python、全局 `pip`、业务项目虚拟环境或业务项目依赖。
-- 更新使用 `uv sync --locked`；声明与锁文件不一致时阻断。
+- 更新使用 `uv sync --locked --project developer`；维护环境使用 `--project maintainer`，声明与对应锁文件不一致时阻断。
 - 首选标准库，第三方依赖必须解决明确问题并有测试。
 - 首期支持 macOS 与 Linux，不构建 AgenticOps 自有平台二进制。
 
@@ -213,7 +217,7 @@ Skill
 
 业务任务处理中出现无法自动完成、人工干预过多或输出质量不足时，先通过人工校正确保业务任务正确完成。任务结束后，AI 生成包含问题表现、人工干预、期望行为、脱敏输入、影响范围、建议载体、回归方法、风险和原业务 Jira 引用的改进包。
 
-经人工确认后，AI 可以从最新 `origin/develop` 创建 AgenticOps 独立 worktree，切换为 `source_maintenance`，完成修改、原场景回归、提交、推送并创建目标为 `develop` 的 PR，停在人工审查。
+经人工确认后，AI 可以从最新 `origin/develop` 创建 AgenticOps 独立 worktree，通过根 AI 入口进入 maintainer，完成修改、原场景回归、提交、推送并创建目标为 `develop` 的 PR，停在人工审查。
 
 普通优化不要求重新创建 AO 卡片，可以关联发现问题的原 Jira 工作项；涉及 Jira 元数据、跨项目语义、安全、权限或发布机制时才开专题。本次重构期间统一关联 `AO-11`。
 
@@ -239,9 +243,9 @@ fetch origin/main
 
 ## 12. Go 与旧资料退出
 
-旧 Go 版本由版本分支、Tag 和 Git 历史保留，不维护 Go/Python 双轨。实施中可按工程需要删除 Go 源码、module、平台二进制、checksum、构建测试以及只服务旧分发方式的脚本和文档，不需要逐项再次确认。
+旧 Go 源码、module、平台二进制、checksum、构建测试和只服务旧分发方式的资产已从现役结构删除。旧版本只由版本分支、Tag 和 Git 历史保留，不维护 Go/Python 双轨，不恢复 `agentic-cli` 兼容入口。
 
-删除前必须提取仍需保留的行为、契约、错误码、fixture 和安全门禁。重构分支可以阶段性不可发布，但合入 `develop` 前 Python 主链路必须整体可验证，进入 `main` 前必须通过无 Go 安装、Tapdata 代表流程、AO 试验、恢复、更新、回滚和发布验证。
+已提取的行为、契约、错误码、fixture 和安全门禁由 Python Runtime、标准资产与固定验收继续保护。合入 `develop` 和进入 `main` 前都必须执行现役四项固定验证，确认 Python 主链路、developer-only 安装、更新、回滚、故事门禁和发布流程整体可验证。
 
 ## 13. 计划与资料治理
 
@@ -250,7 +254,7 @@ fetch origin/main
 - `AO-11` Comment 保存设计确认、阶段进展、验证结果、风险和变更说明。
 - 项目 AI 工作空间保存细粒度步骤、恢复点和临时分析。
 - 仓库最终不保留顶层 `plans/`，也不把 Jira 计划复制为 Markdown。
-- 现有计划中的长期事实迁入 `docs/`、`standards/`、`rules/` 或测试；未完成的有效工作转入 Jira；已完成、被替代或仅记录历史过程的计划删除，由 Git 历史追溯。
+- 现有计划中的长期事实迁入 `docs/`、对应工作面的 `standards/`、`rules/` 或测试；未完成的有效工作转入 Jira；已完成、被替代或仅记录历史过程的计划删除，由 Git 历史追溯。
 - 清理计划时发现未确认的产品决策，必须在 `AO-11` 提出并暂停相关部分。
 
 ## 14. 验证体系
@@ -263,11 +267,22 @@ fetch origin/main
 | 真实验收 | Tapdata 主流程和 AO AgenticOps 改进流程 |
 | 安装发布验收 | 无 Go 安装、更新、回滚、固定 HEAD、合并事实和正式版本复验 |
 
+现役固定完整验证不使用历史 Go 命令，只执行：
+
+```sh
+bash maintainer/scripts/test-python-runtime.sh
+bash maintainer/scripts/test-resources.sh
+bash developer/tests/bootstrap/test_install_boundary.sh
+bash maintainer/scripts/test-release-workflow.sh
+```
+
 固定覆盖信息不足、人工门禁、超时、写入结果不明确、重复执行、中断恢复、状态损坏、锁冲突、授权或范围变化、Custom Field 映射缺失、Worklog 回读和 Superpowers 不可用。CI 未配置或未执行必须标记 `not_configured` 或 `not_run`，不得视为通过。
 
 验证证据必须记录命令、输入范围、结果、未执行项和残留风险。实施矩阵与执行结果统一维护在 `AO-11`。
 
 ## 15. 成功标准
+
+以下是目标架构的产品级验收标准，不是 AO-11 当前实现完成声明。当前可执行范围以 `ao-work capability list|show` 为准；正式任务接管、恢复、完整审计与真实 Jira 集成在目录标记为 `capability_gap` 时仍不得执行或伪称通过。
 
 - 新研发工程师无需 Go 环境即可从 `main` 安装并完成 Tapdata 代表任务。
 - 确定性操作通过 Skill 与 Python Runtime 复用，AI 聚焦语义理解和专业取舍。

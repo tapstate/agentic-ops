@@ -4,7 +4,7 @@
 
 本记录保存 2026-08-01 在 Jira Cloud `tapdata.atlassian.net` 的 AO 业务空间中实际回读的 `Agentic 缺陷` 配置。它是后续 AgenticOps project profile 的映射材料，不替代 Jira 当前配置。
 
-当前已落地的共享 profile 为 `install-resources/basic/projects/ao/profile.yaml`：它绑定 Jira project `AO`，把 `Agentic 缺陷` 映射到 `agenticops_improvement_v1`，并将默认测试代码工程映射到 `tapstate/agentic-ops`。profile 校验和本地流程测试不执行真实 Jira 写入；真实卡片读取仍需显式配置 Jira adapter。
+AO 专用 `Agentic 缺陷` profile 保留为 maintainer 试验资产，位于 `maintainer/standards/experiments/ao/profile.yaml`。它不随 developer-only 安装交付，不成为 Tapdata 等业务项目默认工作流；profile 校验和本地流程测试不执行真实 Jira 写入，真实卡片读取仍需显式输入授权与测试清单。
 
 ## 2. 项目与表单
 

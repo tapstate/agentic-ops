@@ -1,5 +1,7 @@
 # Jira 门禁式缺陷修复流程设计
 
+> 本文定义目标业务流程。现役命令必须以 `ao-work capability list|show` 为准：Jira Comment 与 Description 已迁移到 `jira ... plan/apply/readback` 协议；`inspect_task`、`takeover_task` 与 `update_task_form` 当前仍是 `capability_gap`，不得把目标流程描述为已完成能力。
+
 ## 目标
 
 AgenticOps 只定义公司和项目层面的原则、职责边界与关键门禁。研发工程师负责目标、范围、风险和关键决策，AIAgent 在已确认边界内持续完成分析、设计、编码、测试、文档和反馈。
@@ -39,12 +41,12 @@ Description 表示当前有效任务契约，Comment 表示不可覆盖的决策
 
 ## 缺陷准入流程
 
-1. AIAgent 执行 `inspect-task`，读取 Jira 原始事实、Description、结构化表单值、Comment、所有权和项目资产路径。
+1. AIAgent 先查询 `inspect_task`；当前该目标能力为 `capability_gap`，不得调用旧 `inspect-task`。现役流程查询 `jira_inspect` 后执行 `ao-work jira inspect --issue-key <issue-key>` 读取基础 Jira 事实，并通过 Jira 界面或项目认可的只读工具补齐 Description、Comment、Custom Field、所有权和项目资产路径。
 2. AIAgent 按 Tapdata 缺陷准入资产检查问题分支、修复分支、问题现象、复现路径和验收标准。
 3. 若信息不足，AIAgent 读取候选仓库和目标分支代码，形成“准入分析与补卡建议”。
 4. 研发工程师确认真实 Jira 写入后，AIAgent把分析和建议写入 Jira Comment，然后停止本次接管。
 5. 研发工程师确认补卡内容后，AIAgent 更新 Description 对应章节，并追加“补卡确认结果”Comment，然后结束本次接管。
-6. 下一次启动时重新执行 `inspect-task`。只有 Jira 当前事实满足准入要求，才调用 `takeover-task`。
+6. 下一次启动时重新查询并执行现役 `jira_inspect`，同时补齐其未覆盖的 Jira 当前事实。只有准入要求满足后才查询 `takeover_task`；当前该目标能力为 `capability_gap`，必须停止自动接管并由研发工程师人工管理 Jira 所有权，不能调用旧 `takeover-task` 或用本地任务状态原语冒充接管。
 
 不允许在同一次补卡写入后自动接管任务，确保 Jira 成为下一次判断的事实源。
 
@@ -69,28 +71,16 @@ AIAgent 先把“修复计划 vN，待确认”写入 Jira Comment，然后停�
 2. 写入最终证据 Comment，包含变更摘要、验证命令、结果、未覆盖风险和后续事项。
 3. 代码提交、推送和 Pull Request 继续遵守各自人工门禁。
 
-## AgenticCLI 原子操作
+## ao-work 原子操作边界
 
-新增三个通用操作：
+当前已实现的 Comment 与 Description 使用分阶段协议：
 
 ```text
-agentic-cli add-task-comment <issue-key> \
-  --workspace <project> \
-  --category <analysis|plan|decision|evidence|blocked> \
-  --content-file <path> \
-  [--run-id <id>] \
-  --confirm-real-jira-write
-
-agentic-cli update-task-description-sections <issue-key> \
-  --workspace <project> \
-  --sections-file <path> \
-  --confirm-real-jira-write
-
-agentic-cli update-task-form <issue-key> \
-  --workspace <project> \
-  --values-file <path> \
-  --confirm-real-jira-write
+ao-work jira comment plan -> apply -> readback
+ao-work jira description plan -> apply（内部写后回读）
 ```
+
+Custom Field 写入对应 `update_task_form` 目标能力，当前为 `capability_gap`，必须开专题完成字段映射、Context、Screen、权限和验收后再启用。
 
 CLI 只负责：
 

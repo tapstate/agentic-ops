@@ -1,6 +1,6 @@
-# AgenticOps 当前设计
+# AgenticOps Go 实现迁移基线
 
-> **迁移基线：** 本文记录现有 Go 实现所承载的设计事实，用于迁移能力核对，不再定义目标运行时和目标目录。目标事实以《AgenticOps Skill 与 Python Runtime 驱动项目全景》《项目结构》和《Python Runtime》为准；实施顺序与当前进度以迁移计划为准。
+> **冻结历史 / 迁移基线，不是现役操作：** 本文记录旧 Go 实现与统一 `agentic-cli` 所承载的设计事实，只用于迁移能力核对。现役事实以《AgenticOps Skill 与 Python Runtime 驱动项目全景》《项目结构》和《Python Runtime》为准：工作面为 `maintainer` / `developer`，入口为 `ao-maint` / `ao-work`，实施进度与验收以 Jira `AO-11` 为准。
 
 ## 1. 定位
 

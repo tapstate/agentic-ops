@@ -10,13 +10,13 @@
 
 ```sh
 cd <business-project-workspace>
-agentic-cli workspace init
+ao-work workspace init
 ```
 
 脚本或 CI 使用完整非交互输入；token 只能从标准输入传递：
 
 ```sh
-printf '%s\n' "$JIRA_TOKEN" | agentic-cli workspace init \
+printf '%s\n' "$JIRA_TOKEN" | ao-work workspace init \
   --non-interactive \
   --project tapdata \
   --agent-id developer-01 \
@@ -60,7 +60,7 @@ printf '%s\n' "$JIRA_TOKEN" | agentic-cli workspace init \
 {
   "ok": true,
   "operation": "workspace_init",
-  "workspace_mode": "project_execution",
+  "workplane": "developer",
   "agent_id": "developer-01",
   "project_profile": "tapdata",
   "jira_base_url": "https://tapdata.atlassian.net",
@@ -86,7 +86,7 @@ printf '%s\n' "$JIRA_TOKEN" | agentic-cli workspace init \
 
 ### 验收标准
 
-- `agentic-cli workspace init` 可以在终端以零必填参数开始引导。
+- `ao-work workspace init` 可以在终端以零必填参数开始引导。
 - 初始化摘要明确要求确认 `agent_id`、Jira 项目空间、授权账户和源码仓库。
 - 默认 `agent_id` 是规范化后的纯小写主机名，最终值只包含 `[0-9A-Za-z_-]`。
 - 同一 `agent_id` 不能绑定本机两个有效业务项目工作空间。

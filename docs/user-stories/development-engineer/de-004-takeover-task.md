@@ -1,5 +1,7 @@
 # DE-004 新任务接管
 
+> **目标故事合同。** 本文不维护当前完成度；执行前必须以 `ao-work capability list|show` 为准。以下流程和输出定义未来验收合同，目录未声明实现时不得直接调用或声称任务已正式接管。
+
 作为研发工程师，
 我希望能让 AIAgent 接管一个新的 Jira 卡片，
 以便 AI 员工在完成门禁后开始读取上下文、制定计划、开发、验证并回写证据。
@@ -7,7 +9,7 @@
 ### 触发方式
 
 ```sh
-agentic-cli takeover-task TAP-123
+ao-work capability show takeover_task
 ```
 
 或自然语言：
@@ -15,6 +17,8 @@ agentic-cli takeover-task TAP-123
 ```text
 接管 TAP-123。
 ```
+
+当前可执行入口只有能力查询。若 `ao-work capability show takeover_task` 未返回 `implemented`，AIAgent 必须报告 `capability_gap` 并停止；不得把下面的目标流程、目标输出或自然语言示例当作现役 Runtime 能力。
 
 ### 前置条件
 
@@ -24,11 +28,13 @@ agentic-cli takeover-task TAP-123
 - AIAgent 已通过 `inspect-task` 读取 Jira 事实和项目资产。
 - AIAgent 已按项目准入资产确认卡片满足接管要求。
 
-### 主流程
+### 目标主流程
 
-1. AIAgent 调用 `inspect-task`，按项目资产判断准入。
+以下步骤只在能力目录明确声明对应能力为 `implemented` 后可执行：
+
+1. AIAgent 调用已实现的 `inspect-task`，按项目资产判断准入；未实现时返回 `capability_gap`。
 2. 准入不足时，AIAgent 结合 Jira 和代码形成补卡建议，写入 Jira 后结束本次接管；补卡确认后更新 Description 并再次结束。
-3. 后续执行重新调用 `inspect-task`。准入通过后，AIAgent 调用 `takeover_task`。
+3. 后续执行重新调用已实现的 `inspect-task`。准入通过后，AIAgent 调用已实现的 `takeover_task`；任一能力未实现都必须停止并报告 `capability_gap`。
 4. CLI 执行负责人、代理所有权、任务分类、标准流程、状态入口和真实 Jira 写入门禁。
 5. 门禁通过后，CLI 生成 `agentic_run_id` 并绑定当前 AIAgent。
 6. AIAgent 读取目标仓库上下文，形成版本化修复计划并写入 Jira Comment。
@@ -37,7 +43,7 @@ agentic-cli takeover-task TAP-123
 9. AIAgent 更新结构化 Jira 字段并写入最终证据 Comment。
 10. AIAgent 停在人工确认点，等待研发工程师确认提交、推送或创建拉取请求。
 
-### 输出
+### 目标输出
 
 ```json
 {
@@ -89,10 +95,10 @@ agentic-cli takeover-task TAP-123
 
 ### 验收证据
 
-- `agentic-cli takeover-task <issue> --workspace <name>` 输出。
+- `ao-work capability show takeover_task` 输出的当前状态；能力实现后再补正式接管输出。
 - `agentic_run_id` 对应的事件日志。
 - Jira 中文接管成功、失败、阻塞或补卡说明。
-- `bash tests/e2e/local-fake-flow.sh`
+- `./maintainer/bin/ao-maint integration run-offline <issue> --manifest <path>` 的离线烟测结果；它不证明正式接管。
 - 真实 Jira 卡片端到端演示记录。
 
 ### 关联设计

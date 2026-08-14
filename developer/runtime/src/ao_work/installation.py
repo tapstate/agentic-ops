@@ -1,0 +1,357 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import subprocess
+
+from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
+
+DEFAULT_REPOSITORY = "tapstate/agentic-ops"
+IDENTITY_OVERRIDE_ENVS = (
+    "AGENTIC_OPS_TEST_MODE",
+    "AGENTIC_OPS_TEST_LAUNCHER",
+    "AGENTIC_OPS_TEST_EXPECTED_REPOSITORY",
+    "AGENTIC_OPS_REPO_URL",
+    "AGENTIC_OPS_GITHUB_REPOSITORY",
+    "AGENTIC_OPS_BRANCH",
+)
+SHARED_SOURCE_ASSETS = {
+    "shared/README.md": ("100644", "blob"),
+    "shared/integration/README.md": ("100644", "blob"),
+    "shared/integration/task-to-pr-event.schema.json": ("100644", "blob"),
+    "shared/integration/task-to-pr-manifest.schema.json": ("100644", "blob"),
+    "shared/integration/task-to-pr-result.schema.json": ("100644", "blob"),
+}
+SHARED_DISTRIBUTION_ASSETS = {
+    "integration/README.md",
+    "integration/task-to-pr-event.schema.json",
+    "integration/task-to-pr-manifest.schema.json",
+    "integration/task-to-pr-result.schema.json",
+}
+DEVELOPER_SPARSE_PATHS = {
+    ".python-version",
+    "developer/AGENTS.md",
+    "developer/bootstrap",
+    "developer/pyproject.toml",
+    "developer/rules",
+    "developer/runtime",
+    "developer/skills",
+    "developer/standards",
+    "developer/uv.lock",
+    "shared/integration",
+}
+DEVELOPER_TOP_LEVEL_ASSETS = {
+    "AGENTS.md",
+    "bootstrap",
+    "pyproject.toml",
+    "rules",
+    "runtime",
+    "skills",
+    "standards",
+    "uv.lock",
+}
+DEVELOPER_FORBIDDEN_DISTRIBUTION_NAMES = {
+    "test",
+    "tests",
+    "fixtures",
+    "__pycache__",
+    "task_to_pr_producer.py",
+}
+
+
+def default_install_root() -> Path:
+    return Path(__file__).resolve().parents[4]
+
+
+def validate_install_root() -> Path:
+    _reject_identity_overrides()
+    root = default_install_root()
+    if not root.is_dir():
+        raise _blocked(
+            "install_root_not_found",
+            f"AgenticOps developer 安装根目录不存在：{root}",
+            "请通过 developer/bootstrap/install.sh 重新安装 AgenticOps",
+        )
+    if (root / ".agentic-ops-source").exists() or (root / "maintainer").exists():
+        raise _blocked(
+            "install_root_source_rejected",
+            f"当前 ao_work 模块位于 AgenticOps 源头或包含 maintainer 资产：{root}",
+            "请使用 developer-only managed clone 中安装的 ao-work",
+        )
+    if not (root / ".git").exists():
+        raise _blocked(
+            "install_root_identity_invalid",
+            f"AgenticOps developer 安装缺少 managed clone 身份：{root}",
+            "请通过 developer/bootstrap/install.sh 重新安装，不得使用仿造目录",
+        )
+    for required in (
+        root / "developer" / "AGENTS.md",
+        root / "developer" / "rules" / "ai-execution.md",
+        root / "developer" / "runtime" / "src" / "ao_work" / "__init__.py",
+        root / "shared" / "integration" / "README.md",
+        root / "shared" / "integration" / "task-to-pr-manifest.schema.json",
+        root / "shared" / "integration" / "task-to-pr-event.schema.json",
+        root / "shared" / "integration" / "task-to-pr-result.schema.json",
+    ):
+        if required.is_symlink() or not required.is_file():
+            raise _blocked(
+                "install_root_identity_invalid",
+                f"AgenticOps developer 安装资产不完整：{required}",
+                "请通过 developer/bootstrap/install.sh 重新安装",
+            )
+
+    origins = _run_git(root, "config", "--get-all", "remote.origin.url").splitlines()
+    effective_origins = _run_git(root, "remote", "get-url", "--all", "origin").splitlines()
+    effective_pushes = _run_git(
+        root, "remote", "get-url", "--push", "--all", "origin"
+    ).splitlines()
+    origin = origins[0] if len(origins) == 1 else ""
+    if (
+        len(origins) != 1
+        or len(effective_origins) != 1
+        or len(effective_pushes) != 1
+        or not _repository_matches(origin)
+    ):
+        raise _blocked(
+            "install_origin_mismatch",
+            f"AgenticOps managed clone origin 不是受信仓库：{origin or '未配置'}",
+            f"请重新安装并确保 origin 指向 {DEFAULT_REPOSITORY}",
+        )
+    if (
+        not _repository_matches(effective_origins[0])
+        or not _repository_matches(effective_pushes[0])
+        or _normalize_repository_url(origin)
+        != _normalize_repository_url(effective_origins[0])
+        or _normalize_repository_url(origin)
+        != _normalize_repository_url(effective_pushes[0])
+    ):
+        raise _blocked(
+            "install_transport_rewrite_forbidden",
+            "AgenticOps managed clone 的实际 fetch 或 push 地址被 Git 配置改写",
+            "请移除 url.*.insteadOf、pushInsteadOf 或 remote pushurl 后重新安装",
+        )
+
+    sparse = _run_git(root, "sparse-checkout", "list")
+    sparse_paths = {
+        line.strip().strip("/")
+        for line in sparse.splitlines()
+        if line.strip().strip("/")
+    }
+    if sparse_paths != DEVELOPER_SPARSE_PATHS:
+        raise _blocked(
+            "developer_sparse_checkout_invalid",
+            "AgenticOps managed clone 不是固定的 developer-only sparse checkout",
+            "请通过 developer/bootstrap/install.sh 重新安装",
+        )
+    _validate_shared_source_tree(root, "HEAD")
+    _validate_shared_distribution(root)
+    _validate_developer_distribution(root)
+    _validate_checkout_integrity(root)
+    return root
+
+
+def _reject_identity_overrides() -> None:
+    configured = sorted(name for name in IDENTITY_OVERRIDE_ENVS if os.environ.get(name))
+    if configured:
+        raise _blocked(
+            "install_identity_override_forbidden",
+            "AgenticOps 安装身份固定为 tapstate/agentic-ops 的 main，"
+            f"不能通过环境变量覆盖：{', '.join(configured)}",
+            "请移除安装身份覆盖环境变量后重试",
+        )
+
+
+def _run_git(root: Path, *arguments: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), *arguments],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise _blocked(
+            "install_identity_check_failed",
+            f"无法校验 AgenticOps managed clone：{type(error).__name__}",
+            "请检查 Git 安装和 ~/.agentic-ops 后重试",
+        ) from error
+    if result.returncode != 0:
+        raise _blocked(
+            "install_identity_check_failed",
+            "无法读取 AgenticOps managed clone 的 Git 身份",
+            "请通过 developer/bootstrap/install.sh 重新安装",
+        )
+    return result.stdout.strip()
+
+
+def _repository_matches(origin: str) -> bool:
+    normalized = _normalize_repository_url(origin)
+    return normalized in {
+        f"git@github.com:{DEFAULT_REPOSITORY}",
+        f"ssh://git@github.com/{DEFAULT_REPOSITORY}",
+        f"https://github.com/{DEFAULT_REPOSITORY}",
+    }
+
+
+def _normalize_repository_url(value: str) -> str:
+    normalized = value.strip().rstrip("/")
+    if normalized.endswith(".git"):
+        normalized = normalized[:-4]
+    return normalized
+
+
+def _validate_checkout_integrity(root: Path) -> None:
+    head = _run_git(root, "rev-parse", "--verify", "HEAD")
+    current_ref = root / ".local" / "current-ref"
+    try:
+        recorded = current_ref.read_text(encoding="utf-8").splitlines()[0].strip()
+    except (OSError, IndexError) as error:
+        raise _blocked(
+            "install_ref_integrity_invalid",
+            "AgenticOps developer 安装缺少有效的 .local/current-ref",
+            "请通过 developer/bootstrap/install.sh 重新安装",
+        ) from error
+    if recorded != head:
+        raise _blocked(
+            "install_ref_integrity_invalid",
+            "AgenticOps checkout 的 HEAD 与 .local/current-ref 不一致",
+            "请停止使用该目录，并通过正式 Bootstrap 重新安装或完成受控回滚",
+        )
+    _run_git(root, "cat-file", "-e", "refs/remotes/origin/main^{commit}")
+    _run_git(root, "merge-base", "--is-ancestor", head, "refs/remotes/origin/main")
+    tracked = _run_git(root, "status", "--porcelain=v1", "--untracked-files=no")
+    if tracked:
+        raise _blocked(
+            "install_tracked_changes_forbidden",
+            "AgenticOps developer 安装中的受管文件存在本地修改",
+            "请不要修改 ~/.agentic-ops；通过业务反馈流程改进后更新稳定 main",
+        )
+    for asset in (
+        "developer/AGENTS.md",
+        "developer/bootstrap/ao-work",
+        "developer/runtime/src/ao_work/__init__.py",
+        "shared/integration/README.md",
+        "shared/integration/task-to-pr-manifest.schema.json",
+        "shared/integration/task-to-pr-event.schema.json",
+        "shared/integration/task-to-pr-result.schema.json",
+    ):
+        _run_git(root, "cat-file", "-e", f"HEAD:{asset}")
+
+
+def _validate_shared_source_tree(root: Path, ref: str) -> None:
+    actual: dict[str, tuple[str, str]] = {}
+    for entry in _run_git(root, "ls-tree", "-r", ref, "--", "shared").splitlines():
+        metadata, separator, path = entry.partition("\t")
+        fields = metadata.split()
+        if separator != "\t" or len(fields) != 3 or path in actual:
+            raise _shared_source_invalid()
+        mode, object_type, _object_id = fields
+        actual[path] = (mode, object_type)
+    if actual != SHARED_SOURCE_ASSETS:
+        raise _shared_source_invalid()
+
+
+def _validate_shared_distribution(root: Path) -> None:
+    shared = root / "shared"
+    if shared.is_symlink() or not shared.is_dir():
+        raise _shared_distribution_invalid()
+
+    actual_directories: set[str] = set()
+    actual_files: set[str] = set()
+    for current, directories, files in os.walk(shared, followlinks=False):
+        current_path = Path(current)
+        for name in directories:
+            path = current_path / name
+            if path.is_symlink() or not path.is_dir():
+                raise _shared_distribution_invalid()
+            actual_directories.add(path.relative_to(shared).as_posix())
+        for name in files:
+            path = current_path / name
+            if path.is_symlink() or not path.is_file():
+                raise _shared_distribution_invalid()
+            try:
+                mode = path.stat().st_mode
+            except OSError as error:
+                raise _shared_distribution_invalid() from error
+            if mode & 0o111:
+                raise _shared_distribution_invalid()
+            actual_files.add(path.relative_to(shared).as_posix())
+
+    if actual_directories != {"integration"} or actual_files != SHARED_DISTRIBUTION_ASSETS:
+        raise _shared_distribution_invalid()
+
+
+def _validate_developer_distribution(root: Path) -> None:
+    developer = root / "developer"
+    if developer.is_symlink() or not developer.is_dir():
+        raise _developer_distribution_invalid()
+
+    actual_top_level = {
+        path.name for path in developer.iterdir() if path.name != ".venv"
+    }
+    if actual_top_level != DEVELOPER_TOP_LEVEL_ASSETS:
+        raise _developer_distribution_invalid(contaminated=True)
+
+    for required in DEVELOPER_TOP_LEVEL_ASSETS:
+        path = developer / required
+        if path.is_symlink() or not path.exists():
+            raise _developer_distribution_invalid()
+
+    for current, directories, files in os.walk(developer, followlinks=False):
+        current_path = Path(current)
+        if current_path == developer:
+            directories[:] = [name for name in directories if name != ".venv"]
+        for name in (*directories, *files):
+            path = current_path / name
+            lowered = name.lower()
+            if (
+                path.is_symlink()
+                or lowered in DEVELOPER_FORBIDDEN_DISTRIBUTION_NAMES
+                or lowered.endswith((".pyc", ".pyo"))
+                or ("fake" in lowered and "producer" in lowered)
+            ):
+                raise _developer_distribution_invalid(contaminated=True)
+
+
+def _developer_distribution_invalid(
+    *, contaminated: bool = False
+) -> RuntimeErrorResult:
+    if contaminated:
+        return _blocked(
+            "developer_distribution_contaminated",
+            "AgenticOps developer 安装混入测试、fixture、fake producer、缓存、符号链接或非生产资产",
+            "请停止使用该安装目录并重新安装；测试资产只能保留在源头仓库",
+        )
+    return _blocked(
+        "developer_distribution_invalid",
+        "AgenticOps developer 安装的生产资产不完整或类型不安全",
+        "请通过 developer/bootstrap/install.sh 重新安装",
+    )
+
+
+def _shared_source_invalid() -> RuntimeErrorResult:
+    return _blocked(
+        "developer_shared_source_invalid",
+        "AgenticOps 提交中的 shared 资产超出固定只读协议白名单，或包含不安全文件类型/权限",
+        "请停止使用该版本；由项目维护者移除非准入路径、可执行位、脚本或 AI 入口",
+    )
+
+
+def _shared_distribution_invalid() -> RuntimeErrorResult:
+    return _blocked(
+        "developer_shared_distribution_invalid",
+        "AgenticOps developer 安装中的 shared 可见树超出固定只读协议白名单",
+        "请停止使用该安装目录并通过 developer/bootstrap/install.sh 重新安装",
+    )
+
+
+def _blocked(code: str, message: str, action: str) -> RuntimeErrorResult:
+    return RuntimeErrorResult(
+        code=code,
+        message=message,
+        status="blocked",
+        exit_code=EXIT_BLOCKED,
+        retry_safe=True,
+        required_human_action=action,
+    )

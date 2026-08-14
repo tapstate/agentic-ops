@@ -1,0 +1,429 @@
+schema_version: "1"
+workplane: developer
+capabilities:
+  - id: add_task_comment
+    source: contract
+    contract: contracts/operations/add-task-comment.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 旧版分类 Jira 评论操作契约，当前 Python Runtime 不提供该命令。
+    next_action: 请停止调用旧 add-task-comment；需要写评论时先查询 jira_comment 能力并按当前 plan、apply、readback 协议执行。
+
+  - id: branch_align
+    source: contract
+    contract: contracts/operations/branch-align.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: TapData 多仓分支对齐目标契约，尚未迁移到 Python Runtime。
+    next_action: 请人工检查并对齐业务仓库分支，任务完成后提交 branch_align 能力改进建议。
+
+  - id: check_ci_status
+    source: contract
+    contract: contracts/operations/check-ci-status.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 拉取请求 CI 状态检查目标契约，尚未迁移到 Python Runtime。
+    next_action: 请使用项目认可的 GitHub 或 CI 工具只读检查，并在任务完成后提交能力改进建议。
+
+  - id: conf_get
+    source: contract
+    contract: contracts/operations/conf-get.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: effective configuration 单值读取目标契约，尚未迁移到 Python Runtime。
+    next_action: 请不要直接解析 Runtime 管理的凭证文件；需要配置事实时请求人工检查并提交能力改进建议。
+
+  - id: contract_validate
+    source: contract
+    contract: contracts/operations/contract-validate.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 业务工作面契约校验目标契约，尚未作为 ao-work 能力公开。
+    next_action: 请停止在业务任务中调用旧 contract-validate；契约维护应交接到 maintainer 工作面。
+
+  - id: doctor
+    source: contract
+    contract: contracts/operations/doctor.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: developer 综合诊断目标契约，尚未迁移到 Python Runtime。
+    next_action: 请分别执行现役 workspace preflight、workspace inspect 和授权检查，保留脱敏结果后提交诊断能力建议。
+
+  - id: feedback_analyze
+    source: contract
+    contract: contracts/operations/feedback-analyze.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 反馈聚合分析目标契约，尚未迁移到 Python Runtime。
+    next_action: 请人工整理脱敏问题事实和重复模式，再交接给 AgenticOps 维护者分析。
+
+  - id: feedback_bundle
+    source: contract
+    contract: contracts/operations/feedback-bundle.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 脱敏诊断包目标契约，尚未迁移到 Python Runtime。
+    next_action: 请人工整理最小脱敏复现材料，不得包含凭证或原始敏感日志，并提交能力改进建议。
+
+  - id: feedback_propose
+    source: contract
+    contract: contracts/operations/feedback-propose.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 标准改进建议生成目标契约，尚未迁移到 Python Runtime。
+    next_action: 请先完成当前业务任务并人工总结优化路径，再交接到独立 maintainer worktree。
+
+  - id: feedback_record_recovery
+    source: contract
+    contract: contracts/operations/feedback-record-recovery.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 外部写入人工恢复记录目标契约，尚未迁移到 Python Runtime。
+    next_action: 请人工回读外部事实并保留脱敏引用，不要把未确认结果写成已完成。
+
+  - id: feedback_report
+    source: contract
+    contract: contracts/operations/feedback-report.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 工作空间反馈报告目标契约，尚未迁移到 Python Runtime。
+    next_action: 请人工汇总当前任务的脱敏结论和下一步，并提交反馈报告能力建议。
+
+  - id: fix_pr_comments
+    source: contract
+    contract: contracts/operations/fix-pr-comments.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 拉取请求审查意见分类与修复目标契约，尚未迁移到 Python Runtime。
+    next_action: 请使用项目认可的审查工具读取意见，遇到取舍时停止并请求研发工程师确认。
+
+  - id: inspect_task
+    source: contract
+    contract: contracts/operations/inspect-task.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 旧版富任务检查契约，当前 jira inspect 只提供基础 Jira 事实。
+    next_action: 请查询 jira_inspect 能力读取基础 Jira 事实，再由 AI 按项目标准资产分析；不要假设旧富输出已经实现。
+
+  - id: inspect_workspace
+    source: contract
+    contract: contracts/operations/inspect-workspace.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 旧版 Git 工作区安全摘要契约，当前 workspace inspect 只检查 AI 工作空间身份。
+    next_action: 请查询 workspace_inspect 能力确认工作面；业务源码 Git 状态需使用项目认可的只读工具人工核对。
+
+  - id: jira_authorization
+    source: contract
+    contract: contracts/operations/jira-authorization.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [auth, jira, list]
+      - [auth, jira, show]
+      - [auth, jira, set]
+      - [auth, jira, remove]
+      - [auth, jira, verify]
+    summary: 查看、设置、删除和验证当前业务工作空间唯一 Jira 账户。
+    next_action: 请按命令帮助输入安全参数；真实验证会访问当前工作空间绑定的 Jira 站点。
+
+  - id: jira_comment
+    source: contract
+    contract: contracts/operations/jira-comment.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [jira, comment, plan]
+      - [jira, comment, apply]
+      - [jira, comment, readback]
+    summary: 以 plan、apply、readback 协议向 Jira 追加中文评论。
+    next_action: 请先生成计划，获得计划编号的明确授权后 apply；结果不明确时只执行 readback。
+
+  - id: jira_description
+    source: contract
+    contract: contracts/operations/jira-description.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [jira, description, plan]
+      - [jira, description, apply]
+    summary: 以 plan、apply 协议更新 Jira Description 的受控章节，并在 apply 内完成回读。
+    next_action: 请先生成计划，获得计划编号的明确授权后 apply；未知结果必须人工检查 Jira，不得盲目重试。
+
+  - id: jira_inspect
+    source: runtime
+    contract:
+    status: implemented
+    visibility: public
+    commands:
+      - [jira, inspect]
+    summary: 只读返回当前 Project Profile 下 Jira Issue 的基础事实和凭证配置状态。
+    next_action: 请把输出与项目标准资产结合分析；该能力不判断准入、不读取评论和自定义字段，也不写 Jira。
+
+  - id: jira_worklog
+    source: contract
+    contract: contracts/operations/jira-worklog.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [jira, worklog, plan]
+      - [jira, worklog, apply]
+      - [jira, worklog, readback]
+    summary: 以 plan、apply、readback 协议记录中文标题、逐项耗时组成和明确排除等待类别的真实耗时。
+    next_action: 请让 included_work 各项秒数之和等于真实总耗时，并明确 excluded_waiting_categories；获得计划编号的授权后 apply，结果不明确时只执行 readback。
+
+  - id: list_tasks
+    source: contract
+    contract: contracts/operations/list-tasks.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: Jira 待办列表目标契约，尚未迁移到 Python Runtime。
+    next_action: 请使用 Jira 界面或项目认可的只读查询获取任务，不得返回示例或本地伪造任务。
+
+  - id: policy_rollback
+    source: contract
+    contract: contracts/operations/policy-rollback.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 策略回滚目标契约，尚未迁移到 Python Runtime。
+    next_action: 请停止业务任务自动化并把策略回滚请求交接给 AgenticOps 维护者确认。
+
+  - id: policy_update
+    source: contract
+    contract: contracts/operations/policy-update.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 策略更新目标契约，尚未迁移到 Python Runtime。
+    next_action: 请勿从 developer 工作面修改共享策略；把改进建议交接给 maintainer 工作面。
+
+  - id: policy_validate
+    source: contract
+    contract: contracts/operations/policy-validate.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 策略校验目标契约，尚未迁移到 Python Runtime。
+    next_action: 请按当前版本化规则人工检查冲突，发现问题后交接给 AgenticOps 维护者。
+
+  - id: preflight
+    source: contract
+    contract: contracts/operations/preflight.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 旧版综合环境预检契约，其范围大于当前 workspace preflight。
+    next_action: 请查询 workspace_preflight 能力检查当前已初始化工作空间；其它 GitHub 和工具检查需按项目规则补充。
+
+  - id: prepare_pr
+    source: contract
+    contract: contracts/operations/prepare-pr.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 拉取请求准备目标契约，尚未迁移到 Python Runtime。
+    next_action: 请按项目分支与拉取请求规则人工准备，推送和创建拉取请求仍需有效授权。
+
+  - id: profile_resolve
+    source: contract
+    contract: contracts/operations/profile-resolve.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: effective Project Profile 解析目标契约，尚未迁移到 Python Runtime。
+    next_action: 请不要猜测合并后的字段；需要此能力时停止任务并提交 profile_resolve 改进建议。
+
+  - id: profile_rollback
+    source: contract
+    contract: contracts/operations/profile-rollback.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: Project Profile 回滚目标契约，尚未迁移到 Python Runtime。
+    next_action: 请停止业务自动化并把 Profile 回滚请求交接给 AgenticOps 维护者确认。
+
+  - id: profile_update
+    source: contract
+    contract: contracts/operations/profile-update.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: Project Profile 更新目标契约，尚未迁移到 Python Runtime。
+    next_action: 请勿从 developer 工作面修改共享 Profile；把改进建议交接给 maintainer 工作面。
+
+  - id: profile_validate
+    source: contract
+    contract: contracts/operations/profile-validate.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: Project Profile 完整映射校验目标契约，尚未迁移到 Python Runtime。
+    next_action: 请按当前 Profile 和项目规则人工检查缺口，并把缺口清单交接给维护者。
+
+  - id: read_pr_comments
+    source: contract
+    contract: contracts/operations/read-pr-comments.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 拉取请求评论读取目标契约，尚未迁移到 Python Runtime。
+    next_action: 请使用项目认可的 GitHub 只读工具获取审查意见，并保留稳定拉取请求引用。
+
+  - id: release_agent
+    source: contract
+    contract: contracts/operations/release-agent.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: Jira 任务 AI 绑定释放目标契约，尚未迁移到 Python Runtime。
+    next_action: 请勿假设 agentic_id 已清理；由研发工程师在 Jira 核对并人工处理后记录结果。
+
+  - id: report_write
+    source: runtime
+    contract:
+    status: implemented
+    visibility: internal
+    commands:
+      - [report, write]
+    summary: Runtime 内部写入当前任务 analysis 或 plan 本地报告，不是 Jira 回写或完成证据。
+    next_action: 仅由经过版本化 Skill 的任务流程调用；不得把本地报告视为 Jira 事实。
+
+  - id: resume_takeover
+    source: contract
+    contract: contracts/operations/resume-takeover.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: Jira 接管恢复目标契约，尚未迁移到 Python Runtime。
+    next_action: 请停止自动恢复，人工核对 Jira 所有权与本地任务状态后提交恢复能力建议。
+
+  - id: takeover_task
+    source: contract
+    contract: contracts/operations/takeover-task.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: Jira 任务接管和所有权绑定目标契约，尚未迁移到 Python Runtime。
+    next_action: 请勿把 task init 当成接管；当前需要研发工程师人工管理 Jira 所有权并提交 takeover 能力专题。
+
+  - id: task_state_init
+    source: runtime
+    contract:
+    status: implemented
+    visibility: internal
+    commands:
+      - [task, init]
+    summary: Runtime 内部按已确认 Jira 身份创建本地任务状态，不执行 Jira 接管或所有权写入。
+    next_action: 仅由经过版本化 Skill 的任务流程调用；不得向用户描述为 takeover-task。
+
+  - id: task_state_inspect
+    source: runtime
+    contract:
+    status: implemented
+    visibility: internal
+    commands:
+      - [task, inspect]
+    summary: Runtime 内部读取本地任务状态，不读取 Jira，也不判断任务所有权。
+    next_action: 仅用于恢复本地执行上下文；Jira 事实必须另外使用 jira_inspect 或人工核对。
+
+  - id: task_run_audit
+    source: runtime
+    contract:
+    status: implemented
+    visibility: public
+    commands:
+      - [task-run, open]
+      - [task-run, record]
+      - [task-run, probe-prohibition-baseline]
+      - [task-run, probe-jira]
+      - [task-run, probe-jira-write]
+      - [task-run, probe-git]
+      - [task-run, probe-pr]
+      - [task-run, verify]
+      - [task-run, probe-prohibitions]
+      - [task-run, record-unverified-prohibitions]
+      - [task-run, finalize]
+    summary: 按 shared 版本化协议打开 manifest、导入非关键过程事件，并由 Runtime 确定性采集写入前禁止动作基线、Jira、Jira Comment/Worklog 专用写后回读、Git、PR、CI、验证和最终禁止动作事实，生成 hash-chain 脱敏结果包。
+    next_action: 先确认完整 manifest，并在任何外部写前执行 prohibition baseline；ready 必须有 Comment 和结构化 Worklog 的真实回读，复盘四类各有 finding 或带理由与证据的 no_finding，最后显式 finalize。
+
+  - id: update_task_description_sections
+    source: contract
+    contract: contracts/operations/update-task-description-sections.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 旧版 Description 章节合并命令契约，当前入口已改为 jira_description 协议。
+    next_action: 请查询 jira_description 能力并按当前 plan、apply 协议执行，不得调用旧命令。
+
+  - id: update_task_form
+    source: contract
+    contract: contracts/operations/update-task-form.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: Jira Custom Field 表单更新目标契约，当前 Python Runtime 未实现。
+    next_action: 请停止自动写入 Custom Field；按专题适配要求提交字段映射与验收清单。
+
+  - id: workspace_init
+    source: contract
+    contract: contracts/operations/workspace-init.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [workspace, init]
+    summary: 从当前 ao_work 模块自定位并验证 developer 安装身份后，经确认和完整前置检查初始化一个代表单一研发员的业务项目工作空间。
+    next_action: 请优先使用交互入口；非交互模式必须显式提供完整输入并确认。
+
+  - id: workspace_inspect
+    source: runtime
+    contract:
+    status: implemented
+    visibility: public
+    commands:
+      - [workspace, inspect]
+    summary: 从当前 ao_work 模块自定位并验证 developer 安装身份后，只读确认当前目录是 developer 工作空间并返回配置文件位置。
+    next_action: 该能力不检查业务源码 Git 状态；需要源码事实时按项目规则使用只读 Git 工具。
+
+  - id: workspace_preflight
+    source: runtime
+    contract:
+    status: implemented
+    visibility: public
+    commands:
+      - [workspace, preflight]
+    summary: 从当前 ao_work 模块自定位并验证 developer 安装身份后，复用当前工作空间初始化候选执行授权、Jira Project 和源码访问前置检查。
+    next_action: 任一检查失败都必须按结构化失败码停止，不得把 Profile 可解析视为预检通过。
+
+  - id: write_evidence
+    source: contract
+    contract: contracts/operations/write-evidence.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 任务完成证据写入和审计提交目标契约，尚未迁移到 Python Runtime。
+    next_action: 请人工整理并回写已确认的任务证据，不得把 report write 的本地报告视为完成证据。
+
+  - id: write_pr_evidence
+    source: contract
+    contract: contracts/operations/write-pr-evidence.yaml
+    status: capability_gap
+    visibility: public
+    commands: []
+    summary: 拉取请求事实回写目标契约，尚未迁移到 Python Runtime。
+    next_action: 请人工回读拉取请求、CI 和审查事实，再按已授权 Jira 写入协议记录中文证据。

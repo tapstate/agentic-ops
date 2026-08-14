@@ -1,0 +1,7 @@
+workplane: developer
+sections:
+  问题分支: <confirmed_problem_branch>
+  修复分支: <confirmed_target_branch>
+  问题现象: <confirmed_problem_summary>
+  复现路径: <confirmed_reproduction_path_or_known_trigger>
+  验收标准: <confirmed_acceptance_criteria>
