@@ -1,0 +1,4 @@
+interface:
+  display_name: "配置 AgenticOps 授权"
+  short_description: "安全查看、设置、修改、删除并验证 AgenticOps 外部系统授权配置"
+  default_prompt: "Use $configure-authorization to inspect and safely configure my AgenticOps Jira authorization."

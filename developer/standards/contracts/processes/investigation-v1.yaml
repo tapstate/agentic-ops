@@ -1,0 +1,32 @@
+process_id: investigation_v1
+workplane: developer
+task_classes:
+  - investigation
+entry_stage: waiting_takeover
+stages:
+  - id: waiting_takeover
+    responsible_role: development_engineer
+    input_fields:
+      - assignee
+      - task_class
+      - target_repo
+      - verification_method
+    output_fields:
+      - agentic_run_id
+      - agentic_id
+      - agentic_takeover_at
+      - agentic_heartbeat_at
+      - current_stage
+      - agentic_next_action
+    review_gate: null
+  - id: investigation
+    responsible_role: ai_agent
+    output_fields:
+      - investigation_summary
+      - evidence_links
+      - recommended_next_action
+    review_gate: development_engineer_review
+  - id: completed
+    responsible_role: development_engineer
+    completion_cleanup:
+      clear_agentic_id: true

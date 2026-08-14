@@ -1,0 +1,10 @@
+project: tapdata
+workplane: developer
+tools:
+  branch-align:
+    capability: branch_align
+    capability_status: capability_gap
+    commands: []
+    summary: TapData 多仓分支对齐目标能力，当前 Runtime 未实现。
+    required_human_action: 使用项目认可的只读 Git 工具人工核对并对齐分支，完成当前任务后提交 branch_align 能力改进建议。
+    contract: branch_align

@@ -1,0 +1,62 @@
+process_id: development_change_v1
+workplane: developer
+task_classes:
+  - feature_change
+  - bug_fix
+  - technical_task
+entry_stage: waiting_takeover
+stages:
+  - id: waiting_takeover
+    responsible_role: development_engineer
+    input_fields:
+      - assignee
+      - task_class
+      - target_repo
+    output_fields:
+      - agentic_run_id
+      - agentic_id
+      - agentic_takeover_at
+      - agentic_heartbeat_at
+      - current_stage
+      - agentic_next_action
+    review_gate: null
+  - id: implementation
+    responsible_role: ai_agent
+    required_before_code_change:
+      - jira_admission_facts_reinspected
+      - task_taken_over
+      - versioned_fix_plan_written_to_jira
+      - development_engineer_decision_written_to_jira
+    output_fields:
+      - issue_analysis
+      - fix_plan
+      - development_engineer_decision
+      - implementation_summary
+      - verification_result
+      - residual_risk
+      - execution_authorization
+      - authorization_reference
+    review_gate: development_engineer_review
+  - id: pr_review
+    responsible_role: development_engineer
+    input_fields:
+      - execution_authorization
+      - authorization_reference
+      - implementation_summary
+      - verification_result
+      - residual_risk
+      - pr_url
+      - fixed_head_sha
+    output_fields:
+      - review_decision
+      - agentic_next_action
+    review_gate: development_engineer_review
+  - id: completed
+    responsible_role: development_engineer
+    required_writeback:
+      - issue_analysis
+      - fix_details
+      - verification_method
+      - agentic_completion_evidence
+    completion_cleanup:
+      clear_agentic_id: true

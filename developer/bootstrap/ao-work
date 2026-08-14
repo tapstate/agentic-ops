@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
+if [ "$(basename -- "$SCRIPT_DIR")" = "bin" ]; then
+  INSTALL_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)"
+else
+  INSTALL_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd -P)"
+fi
+PYTHON_BIN="$INSTALL_DIR/developer/.venv/bin/python"
+
+if [ ! -x "$PYTHON_BIN" ]; then
+  printf 'AgenticOps：研发工作 Runtime 尚未安装，请执行 developer/bootstrap/install.sh\n' >&2
+  exit 1
+fi
+
+unset PYTHONPATH
+export PYTHONPATH="$INSTALL_DIR/developer/runtime/src"
+export PYTHONDONTWRITEBYTECODE=1
+exec "$PYTHON_BIN" -m ao_work "$@"

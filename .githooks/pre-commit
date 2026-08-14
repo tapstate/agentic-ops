@@ -1,0 +1,330 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+branch="$(git branch --show-current)"
+if [ "$branch" = "main" ]; then
+  echo "direct commit to main is prohibited; use develop or a fix-main branch" >&2
+  exit 1
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+
+# 本地 approval/evidence 不属于 Git 快照，复制前必须把源目录和快照目标都
+# 当作不可信路径处理。普通的 `mkdir -p` / `cp` 会跟随祖先符号链接，因此
+# 这里逐级 lstat，并用物理路径再次确认没有逃出指定根目录。
+story_gate_state_error=""
+
+story_gate_require_plain_directory_chain() {
+  local root="$1"
+  local relative="$2"
+  local label="$3"
+  local root_real
+  local current
+  local current_real
+  local component
+  local components=()
+
+  case "$relative" in
+    ""|/*|*..*)
+      story_gate_state_error="$label 使用了非法相对路径"
+      return 1
+      ;;
+  esac
+  if [ -L "$root" ] || [ ! -d "$root" ]; then
+    story_gate_state_error="$label 的信任根不是普通目录"
+    return 1
+  fi
+  root_real="$(cd "$root" 2>/dev/null && pwd -P)" || {
+    story_gate_state_error="$label 的信任根无法解析真实路径"
+    return 1
+  }
+  current="$root"
+  IFS='/' read -r -a components <<< "$relative"
+  for component in "${components[@]}"; do
+    [ -n "$component" ] || {
+      story_gate_state_error="$label 包含空路径段"
+      return 1
+    }
+    current="$current/$component"
+    if [ -L "$current" ]; then
+      story_gate_state_error="$label 的路径包含符号链接：$relative"
+      return 1
+    fi
+    if [ -e "$current" ] && [ ! -d "$current" ]; then
+      story_gate_state_error="$label 的目录位置被特殊文件占用：$relative"
+      return 1
+    fi
+    if [ -d "$current" ]; then
+      current_real="$(cd "$current" 2>/dev/null && pwd -P)" || {
+        story_gate_state_error="$label 无法解析目录真实路径：$relative"
+        return 1
+      }
+      case "$current_real" in
+        "$root_real"|"$root_real"/*)
+          ;;
+        *)
+          story_gate_state_error="$label 的真实路径逃出信任根：$relative"
+          return 1
+          ;;
+      esac
+    fi
+  done
+}
+
+story_gate_list_directory_entries() {
+  local directory="$1"
+  local entries=()
+  shopt -s nullglob dotglob
+  entries=("$directory"/*)
+  shopt -u nullglob dotglob
+  if [ "${#entries[@]}" -gt 0 ]; then
+    printf '%s\n' "${entries[@]}"
+  fi
+}
+
+story_gate_validate_record_source() {
+  local root="$1"
+  local record_kind
+  local record_source
+  local record
+  local record_name
+
+  story_gate_require_plain_directory_chain "$root" "maintainer" \
+    "故事门禁本地状态源" || return 1
+  story_gate_require_plain_directory_chain "$root" "maintainer/.local" \
+    "故事门禁本地状态源" || return 1
+  for record_kind in story-approvals story-evidence; do
+    record_source="$root/maintainer/.local/$record_kind"
+    if [ ! -e "$record_source" ] && [ ! -L "$record_source" ]; then
+      continue
+    fi
+    story_gate_require_plain_directory_chain \
+      "$root" "maintainer/.local/$record_kind" \
+      "故事门禁本地状态源" || return 1
+    while IFS= read -r record; do
+      [ -n "$record" ] || continue
+      record_name="${record##*/}"
+      if [ -L "$record" ] || [ ! -f "$record" ]; then
+        story_gate_state_error="故事门禁本地状态只能包含普通 JSON 文件：$record_name"
+        return 1
+      fi
+      case "$record_name" in
+        *.json)
+          ;;
+        *)
+          story_gate_state_error="故事门禁本地状态包含非 JSON 文件：$record_name"
+          return 1
+          ;;
+      esac
+    done < <(story_gate_list_directory_entries "$record_source")
+  done
+}
+
+story_gate_prepare_record_target() {
+  local root="$1"
+  local record_kind="$2"
+  local target="$root/maintainer/.local/$record_kind"
+  local existing
+
+  story_gate_require_plain_directory_chain "$root" "maintainer" \
+    "故事门禁候选状态目标" || return 1
+  story_gate_require_plain_directory_chain "$root" "maintainer/.local" \
+    "故事门禁候选状态目标" || return 1
+  story_gate_require_plain_directory_chain \
+    "$root" "maintainer/.local/$record_kind" \
+    "故事门禁候选状态目标" || return 1
+  mkdir -p "$target" || {
+    story_gate_state_error="无法创建故事门禁候选状态目录：$record_kind"
+    return 1
+  }
+  story_gate_require_plain_directory_chain \
+    "$root" "maintainer/.local/$record_kind" \
+    "故事门禁候选状态目标" || return 1
+  while IFS= read -r existing; do
+    [ -n "$existing" ] || continue
+    story_gate_state_error="故事门禁候选状态目录不是空目录：$record_kind"
+    return 1
+  done < <(story_gate_list_directory_entries "$target")
+}
+
+story_gate_copy_record_kind() {
+  local source_root="$1"
+  local target_root="$2"
+  local record_kind="$3"
+  local record_source="$source_root/maintainer/.local/$record_kind"
+  local record_target="$target_root/maintainer/.local/$record_kind"
+  local record
+  local record_name
+  local pending
+
+  story_gate_prepare_record_target "$target_root" "$record_kind" || return 1
+  if [ ! -d "$record_source" ]; then
+    return 0
+  fi
+  while IFS= read -r record; do
+    [ -n "$record" ] || continue
+    record_name="${record##*/}"
+    if [ -L "$record" ] || [ ! -f "$record" ]; then
+      story_gate_state_error="复制前故事门禁本地状态已变为非普通文件：$record_name"
+      return 1
+    fi
+    pending="$(mktemp "$record_target/.record.XXXXXX")" || {
+      story_gate_state_error="无法在候选快照内创建故事门禁状态临时文件"
+      return 1
+    }
+    if ! cp "$record" "$pending" || ! chmod 0600 "$pending" || \
+      ! mv -f "$pending" "$record_target/$record_name"; then
+      rm -f "$pending"
+      story_gate_state_error="无法安全复制故事门禁本地状态：$record_name"
+      return 1
+    fi
+    if [ -L "$record_target/$record_name" ] || \
+      [ ! -f "$record_target/$record_name" ]; then
+      story_gate_state_error="候选快照中的故事门禁状态不是普通文件：$record_name"
+      return 1
+    fi
+    story_gate_require_plain_directory_chain \
+      "$target_root" "maintainer/.local/$record_kind" \
+      "故事门禁候选状态目标" || return 1
+  done < <(story_gate_list_directory_entries "$record_source")
+}
+
+story_registry="$repo_root/maintainer/standards/stories/project-quality.yaml"
+source_marker="$repo_root/.agentic-ops-source"
+source_marker_head="$(git show HEAD:.agentic-ops-source 2>/dev/null | sed -n '1p' || true)"
+source_marker_index="$(git show :.agentic-ops-source 2>/dev/null | sed -n '1p' || true)"
+if [ "$source_marker_head" = "maintainer" ] || \
+  [ "$source_marker_index" = "maintainer" ] || \
+  { [ -f "$source_marker" ] && [ "$(sed -n '1p' "$source_marker")" = "maintainer" ]; }; then
+  if [ "$source_marker_index" != "maintainer" ]; then
+    echo "AgenticOps source marker is missing or invalid in the staged snapshot; source commits are blocked" >&2
+    exit 1
+  fi
+  for required_path in \
+    .githooks/pre-commit \
+    .githooks/pre-push \
+    maintainer/bin/ao-maint \
+    maintainer/standards/stories/project-quality.yaml; do
+    if ! git cat-file -e ":$required_path" 2>/dev/null; then
+      echo "AgenticOps required gate asset is missing from the staged snapshot: $required_path" >&2
+      exit 1
+    fi
+  done
+  if [ ! -f "$story_registry" ]; then
+    echo "AgenticOps story quality registry is missing; source commits are blocked" >&2
+    exit 1
+  fi
+  if ! git diff --quiet -- \
+    maintainer/standards/stories/project-quality.yaml \
+    docs/user-stories/project-maintainer \
+    docs/user-stories/development-engineer; then
+    echo "AgenticOps story contracts have unstaged changes; stage or revert them before approval" >&2
+    exit 1
+  fi
+  # 门禁实现不能由未暂存的工作树代码自证。直到基线 Runtime 能在隔离快照中
+  # 运行前，至少保证实际执行文件逐字等于暂存快照；否则立即停止提交。
+  gate_runtime_paths=(
+    .githooks/pre-commit
+    maintainer/bin/ao-maint
+    maintainer/pyproject.toml
+    maintainer/uv.lock
+    maintainer/runtime/src/ao_maint
+    maintainer/scripts/test-python-runtime.sh
+    maintainer/scripts/test-resources.sh
+    maintainer/scripts/test-release-workflow.sh
+    developer/tests/bootstrap/test_install_boundary.sh
+  )
+  if ! git diff --quiet -- "${gate_runtime_paths[@]}"; then
+    echo "AgenticOps story gate implementation has unstaged changes; staged verification cannot trust the worktree runtime" >&2
+    exit 1
+  fi
+  if ! story_gate_validate_record_source "$repo_root"; then
+    echo "AgenticOps story gate local state is unsafe (story_gate_local_state_unsafe): $story_gate_state_error" >&2
+    exit 1
+  fi
+
+  # 不从工作树执行门禁。先把 index 写成一个无引用的临时提交，再在隔离
+  # worktree 中读取注册表、故事文档和变更范围。HEAD 已具备新门禁时，使用
+  # HEAD Runtime 验证候选快照。下面的 candidate fallback 只服务 AO-11
+  # 首次迁移中的“显式手工 staged impact/approve/verify”复检；旧 HEAD 的
+  # trusted launcher 不会自动到达新版 Hook，因此不能把它称为 Hook 保护。
+  # 正式 release 仍会在 origin/main 缺少可信基线时失败关闭。
+  head_commit="$(git rev-parse 'HEAD^{commit}')"
+  index_tree="$(git write-tree)"
+  snapshot_commit="$(
+    printf 'AgenticOps staged story-gate snapshot\n' |
+      git -c commit.gpgsign=false commit-tree "$index_tree" -p "$head_commit"
+  )"
+  story_gate_temp="$(mktemp -d)"
+  candidate_snapshot="$story_gate_temp/candidate"
+  baseline_snapshot=""
+  snapshot_error=""
+
+  cleanup_story_gate_snapshots() {
+    if [ -n "$baseline_snapshot" ] && [ "$baseline_snapshot" != "$candidate_snapshot" ]; then
+      env -u GIT_INDEX_FILE git -C "$repo_root" worktree remove \
+        --force "$baseline_snapshot" >/dev/null 2>&1 || true
+    fi
+    if [ -n "$candidate_snapshot" ]; then
+      env -u GIT_INDEX_FILE git -C "$repo_root" worktree remove \
+        --force "$candidate_snapshot" >/dev/null 2>&1 || true
+    fi
+    rm -rf -- "$story_gate_temp"
+  }
+  trap cleanup_story_gate_snapshots EXIT HUP INT TERM
+
+  if ! snapshot_error="$(env -u GIT_INDEX_FILE GIT_NO_REPLACE_OBJECTS=1 \
+    git -C "$repo_root" worktree add \
+    --detach "$candidate_snapshot" "$snapshot_commit" 2>&1)"; then
+    echo "AgenticOps staged story-gate snapshot could not be created: $snapshot_error" >&2
+    exit 1
+  fi
+
+  if git -C "$repo_root" cat-file -e \
+      "$head_commit:maintainer/runtime/src/ao_maint/story_gate/service.py" 2>/dev/null && \
+    git -C "$repo_root" cat-file -e \
+      "$head_commit:maintainer/bin/ao-maint" 2>/dev/null; then
+    baseline_snapshot="$story_gate_temp/baseline"
+    if ! snapshot_error="$(env -u GIT_INDEX_FILE GIT_NO_REPLACE_OBJECTS=1 \
+      git -C "$repo_root" worktree add \
+      --detach "$baseline_snapshot" "$head_commit" 2>&1)"; then
+      echo "AgenticOps trusted HEAD story-gate snapshot could not be created: $snapshot_error" >&2
+      exit 1
+    fi
+  else
+    baseline_snapshot="$candidate_snapshot"
+    echo "AgenticOps story gate is using the staged AO-11 bootstrap Runtime for an explicit manual migration check; this is not trusted Hook evidence, and origin/main release verification remains fail-closed until the baseline is installed" >&2
+  fi
+
+  # 确认和验收是本地、不入 Git 的记录。只复制普通 JSON 文件，让受信
+  # Runtime 在候选快照中重新校验内容，不跟随原工作区中的符号链接。
+  for record_kind in story-approvals story-evidence; do
+    if ! story_gate_copy_record_kind \
+      "$repo_root" "$candidate_snapshot" "$record_kind"; then
+      echo "AgenticOps story gate local state is unsafe (story_gate_local_state_unsafe): $story_gate_state_error" >&2
+      exit 1
+    fi
+  done
+
+  # 正式 launcher 需要锁定 venv；隔离快照只借用当前已准备的解释器，代码和
+  # 数据均来自 Git 快照。测试 fixture 的基线 launcher 不依赖该解释器。
+  python_bin="$repo_root/maintainer/.venv/bin/python"
+  if [ -x "$python_bin" ]; then
+    mkdir -p "$baseline_snapshot/maintainer/.venv/bin"
+    ln -s "$python_bin" "$baseline_snapshot/maintainer/.venv/bin/python"
+  fi
+  baseline_cli="$baseline_snapshot/maintainer/bin/ao-maint"
+  if [ ! -x "$baseline_cli" ]; then
+    echo "AgenticOps trusted story quality gate requires maintainer/bin/ao-maint" >&2
+    exit 1
+  fi
+  env -u GIT_INDEX_FILE \
+    GIT_NO_REPLACE_OBJECTS=1 \
+    PYTHONPYCACHEPREFIX="$story_gate_temp/pycache" \
+    "$baseline_cli" \
+      --source-root "$candidate_snapshot" \
+      story impact \
+      --change-source range \
+      --base "$head_commit" \
+      --head "$snapshot_commit"
+fi

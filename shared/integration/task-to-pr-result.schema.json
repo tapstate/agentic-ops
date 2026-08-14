@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-ops.local/schemas/shared/integration/task-to-pr-result.schema.json",
+  "title": "任务到 PR 审查脱敏结果包",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "protocol",
+    "status",
+    "delivery_passed",
+    "manifest_sha256",
+    "generated_at",
+    "facts",
+    "timeline",
+    "human_interventions",
+    "waitings",
+    "failures",
+    "quality_findings",
+    "retrospective",
+    "prohibitions",
+    "next_action",
+    "result_sha256"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "protocol": { "const": "task_to_pr_review" },
+    "status": { "enum": ["ready_for_pr_review", "blocked", "failed"] },
+    "delivery_passed": { "type": "boolean" },
+    "manifest_sha256": { "$ref": "#/$defs/sha256" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "facts": { "$ref": "#/$defs/facts" },
+    "timeline": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/journal_envelope" }
+    },
+    "human_interventions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/human_intervention_envelope" }
+    },
+    "waitings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/waiting_envelope" }
+    },
+    "failures": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/failure_envelope" }
+    },
+    "quality_findings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/quality_finding_envelope" }
+    },
+    "retrospective": { "$ref": "#/$defs/retrospective_envelope" },
+    "prohibitions": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/prohibition_envelope" }
+    },
+    "next_action": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "result_sha256": {
+      "allOf": [
+        { "$ref": "#/$defs/sha256" },
+        {
+          "description": "将 result_sha256 置空后对整个结果包的 canonical JSON 计算所得 SHA-256。"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "facts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jira_readback",
+        "remote_branch_readback",
+        "pr_readback",
+        "verifications",
+        "external_actions"
+      ],
+      "properties": {
+        "jira_readback": {
+          "oneOf": [
+            { "$ref": "task-to-pr-event.schema.json#/$defs/jira_readback" },
+            { "type": "null" }
+          ]
+        },
+        "remote_branch_readback": {
+          "oneOf": [
+            { "$ref": "task-to-pr-event.schema.json#/$defs/remote_branch_readback" },
+            { "type": "null" }
+          ]
+        },
+        "pr_readback": {
+          "oneOf": [
+            { "$ref": "task-to-pr-event.schema.json#/$defs/pr_readback" },
+            { "type": "null" }
+          ]
+        },
+        "verifications": {
+          "type": "array",
+          "items": {
+            "$ref": "task-to-pr-event.schema.json#/$defs/verification"
+          }
+        },
+        "external_actions": {
+          "type": "array",
+          "items": {
+            "$ref": "task-to-pr-event.schema.json#/$defs/external_action"
+          }
+        }
+      }
+    },
+    "journal_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "previous_event_sha256",
+        "event_sha256",
+        "event"
+      ],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 1 },
+        "previous_event_sha256": {
+          "oneOf": [
+            { "$ref": "#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        },
+        "event_sha256": { "$ref": "#/$defs/sha256" },
+        "event": { "$ref": "task-to-pr-event.schema.json" }
+      }
+    },
+    "human_intervention_envelope": {
+      "allOf": [
+        { "$ref": "#/$defs/journal_envelope" },
+        {
+          "properties": {
+            "event": {
+              "properties": { "action": { "const": "human_intervention" } }
+            }
+          }
+        }
+      ]
+    },
+    "failure_envelope": {
+      "allOf": [
+        { "$ref": "#/$defs/journal_envelope" },
+        {
+          "properties": {
+            "event": { "properties": { "action": { "const": "failure" } } }
+          }
+        }
+      ]
+    },
+    "waiting_envelope": {
+      "allOf": [
+        { "$ref": "#/$defs/journal_envelope" },
+        {
+          "properties": {
+            "event": { "properties": { "action": { "const": "waiting" } } }
+          }
+        }
+      ]
+    },
+    "quality_finding_envelope": {
+      "allOf": [
+        { "$ref": "#/$defs/journal_envelope" },
+        {
+          "properties": {
+            "event": {
+              "properties": { "action": { "const": "quality_finding" } }
+            }
+          }
+        }
+      ]
+    },
+    "retrospective_envelope": {
+      "allOf": [
+        { "$ref": "#/$defs/journal_envelope" },
+        {
+          "properties": {
+            "event": { "properties": { "action": { "const": "retrospective" } } }
+          }
+        }
+      ]
+    },
+    "prohibition_envelope": {
+      "allOf": [
+        { "$ref": "#/$defs/journal_envelope" },
+        {
+          "properties": {
+            "event": {
+              "properties": { "action": { "const": "prohibition_check" } }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
