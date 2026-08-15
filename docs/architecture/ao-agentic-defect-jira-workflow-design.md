@@ -1,5 +1,7 @@
 # AO Agentic 缺陷表单与工作流设计
 
+> **试验边界：** AO 专用 `Agentic 缺陷` 工作流保留为 maintainer 试验资产，不随 developer-only 安装成为默认流程。日常业务研发以 Tapdata 为主；未经专题确认，不得把本设计写入 Tapdata Profile 或通用 Runtime。
+
 ## 1. 目的
 
 本文定义 Jira AO 空间中 `Agentic 缺陷` 表单、专用工作类型和任务接管工作流。目标是让 Jira 成为任务状态、接管授权、当前代理绑定、决策等待和完成审计的事实源，并为研发模式与无人值守模式提供同一套可恢复流程。
@@ -212,7 +214,7 @@ AgenticOps profile 负责：
 - 任务候选 JQL、工作空间和仓库映射。
 - 明确缺口时阻断，不按显示名猜测。
 
-AgenticCLI 负责：
+试验 adapter 通过 developer 受控原子操作负责：
 
 - 所有权门禁、操作契约、显式真实 Jira 写确认和审计。
 - 三个原子操作、幂等恢复和错误码。

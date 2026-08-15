@@ -1,4 +1,6 @@
-# AgenticOps 项目全景
+# AgenticOps 旧统一 CLI 项目全景
+
+> **冻结历史 / 迁移基线，不是现役操作：** 本文记录旧统一 CLI 阶段的项目全景。现役全景见《AgenticOps Skill 与 Python Runtime 驱动项目全景》，现役目录和入口见《项目结构》。
 
 > 本文面向第一次接触 AgenticOps 的技术人员，集中说明项目本身的定位、优势、架构、能力、已实现内容和推进计划。本文不展开代码实现，聚焦 AgenticOps 自身。
 

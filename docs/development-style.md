@@ -28,9 +28,9 @@ AgenticOps 开发必须遵守：
 - 每个文档只承担一个主要职责。
 - README 只写终态定位、核心模型、角色入口和稳定导航，不写阶段性成果清单。
 - 目标、架构、规则、故事线和运行时设计只写终态形态、事实源、角色责任、门禁、安全边界、能力边界和稳定操作说明。
-- 阶段性范围、阶段任务、已完成事项、当前实现状态、剩余工作、验收命令和实现说明只写入 `plans/`。
-- 计划完成后保留为历史推进记录，不继续作为当前设计事实源；若计划内容已经变成长期规则，必须同步迁移到设计、规则、手册、契约或运行资产。
-- 判断一句话归属时，先问它是在定义 AgenticOps 终态形态，还是只解释当前阶段先做什么、暂不做什么；后者必须进入 `plans/`。
+- 阶段性范围、任务、已完成事项、当前状态、剩余工作、验收命令和实现说明只写入 Jira。
+- 实施中形成的长期规则必须同步迁移到设计、Rule、标准、契约或运行资产；不把 Jira 计划复制为仓库 Markdown。
+- 判断一句话归属时，先问它是在定义 AgenticOps 终态形态，还是只解释当前阶段先做什么、暂不做什么；后者必须进入 Jira。
 - 规则文档使用明确的“必须 / 不得 / 应”。
 - 设计文档说明背景、边界和取舍。
 - 故事线写清 trigger、preconditions、main flow、output、failure handling 和 acceptance criteria。
@@ -39,18 +39,19 @@ AgenticOps 开发必须遵守：
 
 ## 4. 代码风格
 
-Go CLI 运行时的实现方向如下：
+目标运行时的实现方向如下：
 
-- CLI 运行时使用 Go 作为主实现语言。
-- shell 不承载安装后 AIAgent 的业务逻辑。维护 AgenticOps 源头仓库时，`scripts/release.sh`、`scripts/hotfix.sh` 和共享库可以作为项目级发布编排例外。
-- CLI 入口统一为 `agentic-cli`。
-- Go 代码应拆分为清晰的命令、契约、策略、适配器、工作空间和反馈模块，不写巨大单文件。
+- Python Runtime 是结构化操作层，版本由 `.python-version` 固定；两个工作面的依赖分别由 `maintainer/pyproject.toml`、`developer/pyproject.toml` 与各自 `uv.lock` 锁定。
+- Shell Bootstrap 不承载安装后 AIAgent 的业务逻辑，只负责 developer-only 安装、更新、回滚、环境准备和 `ao-work` 启动。维护 AgenticOps 源头仓库时，`maintainer/scripts/release.sh`、`maintainer/scripts/hotfix.sh` 和共享库可以作为项目级发布编排例外。
+- 工作面入口固定为 maintainer 的 `ao-maint` 和 developer 的 `ao-work`，不得保留统一兼容入口或 mode 切换。
+- Python 代码应拆分为清晰的命令、配置、契约、任务状态、工作流、适配器、证据和反馈模块，不写巨大单文件。
 - stdout 只输出结构化 JSON。
-- stderr 输出人类诊断日志。
+- stderr 输出中文诊断日志。
 - 所有错误必须有稳定 `code`。
 - 写操作必须经过策略、门禁和人工确认检查。
-- Linux (linux-amd64 / linux-arm64)、macOS Intel (darwin-amd64) 和 macOS Apple Silicon (darwin-arm64) 都必须通过对应平台二进制运行。
-- 发布流程必须支持快速构建、发布和自更新。
+- 本地任务状态由 Runtime 使用 JSON / NDJSON、schema 版本、任务级锁和原子替换维护；人工配置和标准资产可以使用 YAML / Markdown。
+- Linux 和 macOS 必须通过同一锁定 Python 主链路运行，不构建项目自有平台二进制。
+- 发布流程必须支持从稳定 `main` 快速更新、失败回滚和原场景复验。
 - GitHub 默认分支是 `main`，日常开发使用 `develop`；流程禁止直提直推 `main`，只允许通过 PR 的 Merge commit 合入。硬门禁可用时由 Ruleset 强制；GitHub Free 私有仓库使用显式软门禁，并保留“无法从服务器端阻止其它入口直推”的风险提示。
 - 正常发布与 Hotfix 必须分别使用统一脚本入口，固定执行完整验证、最终确认、合并事实校验和审计。
 
@@ -66,7 +67,9 @@ Go CLI 运行时的实现方向如下：
 - 人工门禁拦截。
 - workspace 与 `~/.agentic-ops` 边界。
 - feedback event 格式。
-- Go 命令、策略和适配器的单元测试。
+- Python 命令、状态、策略和适配器的单元与契约测试。
+- 资源合同测试必须确认旧 Go Runtime、`agentic-cli`、`install-resources/` 和根目录旧运行路径没有残留。
+- developer-only 安装边界、更新、回滚和发布门禁回归。
 
 外部服务相关测试必须提供本地替代验证方式。
 
@@ -79,7 +82,7 @@ Go CLI 运行时的实现方向如下：
 - `docs/user-stories/agenticops-user-stories.md`
 - `docs/user-stories/project-maintainer-stories.md`
 - `docs/user-stories/development-engineer-stories.md`
-- `install-resources/basic/handbooks/ai-employee-handbook.md`
+- `developer/AGENTS.md`
 - `docs/contracts/operation-contract.md`
 - `docs/profiles/workflow-profile.md`
 - `docs/workflows/feedback-loop.md`

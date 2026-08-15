@@ -1,0 +1,69 @@
+operation: doctor
+workplane: developer
+version: 1
+purpose: 输出安装、版本、工作流配置、策略、契约、适配器、GitHub 和工作空间的诊断结果；真实外部检查必须显式启用。
+task_type: diagnosis
+allowed_stages:
+  - installed
+  - workspace_initialized
+  - failed
+required_inputs:
+  - workspace
+optional_inputs:
+  - install_dir
+  - check_real_jira
+  - check_github
+input:
+  workspace:
+    type: string
+    required: true
+  install_dir:
+    type: string
+    required: false
+  check_real_jira:
+    type: boolean
+    required: false
+  check_github:
+    type: boolean
+    required: false
+preconditions:
+  - workspace_name_must_be_known
+output:
+  workspace:
+    type: string
+  version:
+    type: string
+  version_state:
+    type: string
+  iteration_version:
+    type: string
+  commit:
+    type: string
+  status:
+    type: string
+  checks:
+    type: object
+  current:
+    type: object
+  local_paths:
+    type: object
+  agentic_next_action:
+    type: string
+failure:
+  codes:
+    - missing_workspace
+    - diagnosis_failed
+    - current_version_mismatch
+    - local_path_invalid
+side_effects:
+  - must_not_write_jira
+  - must_not_modify_profile
+  - must_not_modify_policy
+  - must_not_modify_code
+human_gate:
+  required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: installed
+redo_from_stage: installed

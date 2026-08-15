@@ -1,5 +1,7 @@
 # PM-004 诊断问题并选择修复载体
 
+> **实现状态：目标故事。** `feedback_bundle` 与 `ao-maint diagnose/update` 当前尚未实现。以下命令定义目标入口；现阶段先查询能力目录，人工提交最小脱敏材料，并由维护者按确认清单诊断。
+
 作为项目维护者，
 我希望能按问题类型选择正确修复载体，
 以便避免把所有问题都升级为二进制修复或临时人工绕过。
@@ -7,14 +9,13 @@
 ### 触发方式
 
 ```sh
-agentic-cli doctor --workspace <name>
-agentic-cli feedback bundle --workspace <name> --run-id <agentic_run_id> --redact
-agentic-cli update check
-agentic-cli profile validate --workspace <name>
-agentic-cli policy validate --workspace <name>
+ao-work capability show feedback_bundle
+./maintainer/bin/ao-maint --help
 ```
 
 ### 前置条件
+
+- 业务工作空间先由 `ao-work` 生成显式脱敏诊断包；`ao-maint` 不直接读取业务工作空间凭证、配置或任务状态。
 
 - 已有失败码、事件日志、诊断包或复现步骤。
 - 诊断数据已经脱敏。
@@ -70,14 +71,14 @@ agentic-cli policy validate --workspace <name>
 
 ### 验收证据
 
-- `agentic-cli doctor --workspace <name>` 的结构化输出。
-- `agentic-cli feedback bundle --workspace <name> --run-id <agentic_run_id> --redact` 生成的脱敏包。
-- `bash tests/e2e/problem-resolution-flow.sh`
+- `ao-work capability show feedback_bundle` 的当前状态和人工脱敏材料。
+- 维护者确认的输入清单、问题分类和修复载体结论。
+- 对应工作面的 Runtime、资源或安装回归结果。
 - 失败码、问题分类和建议修复载体的输出记录。
 
 ### 关联设计
 
 - `docs/runtime/problem-resolution-and-update.md`
-- `install-resources/basic/runbooks/problem-resolution.md`
+- `developer/standards/runbooks/jira-write-recovery.md`
 - `docs/workflows/feedback-loop.md`
 - `docs/templates/evidence-templates.md`

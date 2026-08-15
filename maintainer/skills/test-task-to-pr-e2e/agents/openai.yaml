@@ -1,0 +1,4 @@
+interface:
+  display_name: "真实任务到 PR 全链路测试"
+  short_description: "创建隔离研发员并真实运行 Jira 任务到 PR 审查"
+  default_prompt: "使用 $test-task-to-pr-e2e 对指定 Jira 任务执行真实全链路测试并停在 PR 审查。"

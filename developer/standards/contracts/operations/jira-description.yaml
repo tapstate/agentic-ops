@@ -1,0 +1,37 @@
+operation: jira_description
+version: 3
+workplane: developer
+protocol:
+  - plan
+  - apply
+preconditions:
+  - task_identity_matches_connection_profile_and_issue
+  - current_user_matches_assignee
+  - only_active_writable_profile_description_sections_are_supplied
+  - plan_file_is_new_and_strictly_bound_to_issue_run_jira_plans_directory
+  - outbound_content_is_safe_regular_file_and_contains_no_detected_credentials
+  - authorization_reference_strictly_binds_issue_run_and_plan
+  - jira_comment_authorization_must_be_read_back_with_current_marker
+authorization:
+  user_confirmation: "user-confirmation:<ISSUE-KEY>:<agentic-run-id>:<plan-id>"
+  jira_comment: "jira-comment:<ISSUE-KEY>:<positive-comment-id>:<plan-id>"
+  jira_comment_body_marker:
+    format: "[agentic-ops-authorization:<ISSUE-KEY>:<agentic-run-id>:<plan-id>]"
+    placement: standalone_line
+  validation_order:
+    - validate_task_and_plan
+    - validate_authorization_reference_and_optional_jira_comment
+    - append_decision
+    - write_jira
+side_effects:
+  - update_only_named_description_sections
+preserves:
+  - unmanaged_description_content
+unknown_result:
+  retry_safe: false
+  next_action: manual_jira_inspection
+notes:
+  - apply 内部执行写后回读；当前 CLI 不提供独立 description readback 子命令。
+failure:
+  - jira_authorization_reference_invalid
+  - jira_authorization_reference_not_found

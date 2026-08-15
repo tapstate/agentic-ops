@@ -1,90 +1,59 @@
-# PM-003 构建 AgenticOps 安装资源
+# PM-003 发布 AgenticOps developer 交付物
 
 作为项目维护者，
-我希望能受控构建 `agentic-cli`、标准资产、安装脚本和校验和，
-以便研发工程师能通过稳定安装入口获得 latest 可验证版本。
+我希望能受控验证和发布 developer 工作面，
+以便研发工程师通过稳定安装入口获得 latest 可验证版本，而不会收到 maintainer 能力。
 
 ### 触发方式
 
 ```sh
-scripts/release.sh prepare --version vX.Y
-scripts/release.sh publish --version vX.Y
+maintainer/scripts/release.sh prepare --version vX.Y
+maintainer/scripts/release.sh publish --version vX.Y
 ```
 
 ### 前置条件
 
-- 设计、契约、运行资产、测试和文档已经同步。
+- 设计、契约、两个工作面、测试和文档已同步。
+- [DE-001](../development-engineer/de-001-install.md) 已纳入发版验收。
 - 发布内容不包含 secrets、tokens、private keys 或原始敏感日志。
-- 构建、提交、人工确认和审计要求已经满足。
-- [DE-001 安装 AgenticOps](../development-engineer/de-001-install.md) 已作为本次发版验收条件纳入验证清单。
+- `main` 只允许通过 PR 的 Merge commit 合入。
 
 ### 主流程
 
-1. 维护者在 `develop` 使用 `prepare` 创建本地二段式版本基线，并构建多平台 `agentic-cli` 二进制到 `install-resources/<os-arch>/agentic-cli`。
-2. 维护者确认 `install-resources/basic/` 中的标准资产已经同步。
-3. 维护者生成并校验 `install-resources/checksums.txt`。
-4. 维护者按 [DE-001 安装 AgenticOps](../development-engineer/de-001-install.md) 运行安装故事验收。
-5. 维护者在人工确认后提交 `install-resources/` 中的已编译产物和校验和。
-6. 维护者执行 `publish` 固定完整验证，确认后通过 PR 的 Merge commit 合入 `main`；硬门禁由 Ruleset 强制，GitHub Free 私有仓库则显式使用软门禁并等待人工合并。
-7. 脚本验证 `origin/main` 包含发布 HEAD 后推送不可变 tag，并记录构建、安装和发布审计信息。
-
-### 输出
-
-```json
-{
-  "ok": true,
-  "operation": "build",
-  "artifact": "agentic-cli",
-  "agentic_next_action": "verify_install"
-}
-```
-
-### 失败处理
-
-- 构建失败时停止提交安装资源。
-- 校验和不匹配时停止安装或更新。
-- 权限不足时返回 `missing_permission`。
-- 更新后发现版本不可用时回退到 `.local/previous-ref`，维护者再修复并重新提交 latest。
+1. 维护者在 maintainer 工作面固定待发布 `develop` HEAD。
+2. `prepare` 验证 Python 锁文件、developer Skill / Rule / 标准资产、Shell Bootstrap 和工作面隔离。
+3. 在临时目录按 DE-001 执行 developer-only sparse 安装。
+4. 验证 `ao-work` 可运行、`maintainer/` 不在安装文件树、无兼容别名和跨包导入。
+5. `publish` 在最终确认后创建或复用目标为 `main` 的 PR，等待合并事实。
+6. 脚本确认 `origin/main` 包含固定发布 HEAD 后记录发布审计并完成 Tag 动作。
 
 ### 验收标准
 
-- [DE-001 安装 AgenticOps](../development-engineer/de-001-install.md) 必须通过；安装失败、入口不可访问、权限提示不可执行或安装后 `agentic-cli` 不可用时不得发版。
-- `install-resources/basic/`、平台二进制和 `checksums.txt` 一致。
-- 安装脚本能从 managed clone 安装最新 `agentic-cli` 和运行资产。
-- 安装脚本使用仓库中已提交的二进制，不在研发工程师机器上编译。
-- 安装资源提交动作受人工确认和审计约束。
-- 流程禁止直推 `main`，只通过 PR 的 Merge commit 合入；软门禁不能伪装成服务器端保护，远端 tag 只在合并验证和二次完整验证后创建。
+- DE-001 必须通过。
+- `ao-maint` 只在源头仓库使用，不进入 developer 安装。
+- `ao-work`、developer Runtime、Skill、Rule、标准和 Bootstrap 来自同一固定提交。
+- 不构建或发布 Go 平台二进制；旧 Go Runtime、`agentic-cli` 和旧分发资产已删除，资源验证必须阻止其重新进入现役结构。
+- 流程禁止直推 `main`，软门禁不能伪装成服务器端保护。
+- 更新后不可用时能按 Git ref 回滚 latest 安装。
 
 ### 保护行为
 
-- 构建必须产出可验证的 `agentic-cli` 二进制、标准资产和校验和。
-- 提交到仓库的 `install-resources/<os-arch>/agentic-cli` 必须是预先编译好的产物，并由 `checksums.txt` 校验。
-- 安装入口必须安装到 `~/.agentic-ops`，不能把具体项目运行资料写入全局安装目录。
-- 安装资源提交必须受权限、策略、人工确认和审计记录约束。
-- 失败或不可用版本必须能通过 Git 回退或重新提交 latest 修复。
-
-### 审核问题
-
-- 安装资源、版本号和校验和是否一致。
-- 安装脚本是否只处理全局安装和通用运行资产。
-- 发布过程是否需要人工确认，以及确认记录写在哪里。
-- 发布后如何证明安装后的 `agentic-cli` 可运行。
+- developer 发布物只能包含 `developer/` 及明确批准的根版本元数据，不得包含 `maintainer/`。
+- `ao-work` 必须由 developer Runtime 自检通过，且不能接受切换工作面的参数。
+- 发布、回滚和安装都必须保持同一 developer-only 资产集合；失败时不得留下可被误认为完成的安装状态。
+- `ao-maint`、项目维护授权和项目故事状态不得进入研发安装目录。
+- `.local/release-runs` 审计路径必须逐级拒绝符号链接、特殊文件和物理越界，并以同目录临时文件原子写入普通 JSON；审计落盘失败时不得报告发布完成或等待状态。
 
 ### 验收证据
 
 - DE-001 发版验收记录。
-- `bash scripts/test-build.sh`
-- `bash tests/e2e/local-install-flow.sh`
-- `install-resources/checksums.txt`
-- `install-resources/<os-arch>/agentic-cli`
-- 发布或安装审计记录。
-- `.local/release-runs/release-vX.Y-<head>.json`
+- maintainer/developer Runtime 与边界测试。
+- developer-only 安装、更新和回滚测试。
+- PR、合并事实和发布审计记录。
 
 ### 关联设计
 
-- `docs/runtime/versioning.md`
-- `docs/runtime/cli-runtime.md`
-- `docs/runtime/problem-resolution-and-update.md`
+- `docs/architecture/project-structure.md`
+- `docs/runtime/python-runtime.md`
 - `docs/architecture/source-release-workflow-design.md`
-- `scripts/build.sh`
-- `scripts/install.sh`
+- `maintainer/scripts/release.sh`

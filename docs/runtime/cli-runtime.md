@@ -1,8 +1,10 @@
-# AgenticCLI 运行时
+# AgenticCLI Go 运行时迁移基线
+
+> **冻结历史 / 迁移基线，不是现役操作：** 本文记录旧 Go AgenticCLI 与统一 `agentic-cli` 的能力和约束，只用于迁移核对。现役运行时见《Python Runtime》：维护入口为 `ao-maint`，业务研发入口为 `ao-work`，不保留兼容别名或 mode 切换。
 
 ## 1. 目的
 
-本文定义 AgenticOps AgenticCLI 运行时的终态设计和稳定运行边界。阶段性实现状态、当前实现边界和剩余工作维护在 `plans/` 中。
+本文记录旧 AgenticCLI 运行时设计，不能作为当前安装、命令或目录说明。阶段性实施与验收由 Jira `AO-11` 管理。
 
 AgenticCLI 的目标是给 AIAgent 提供稳定、结构化、可审计的操作入口，承载 AgenticOps 成熟经验沉淀后的原子操作，避免 AIAgent 直接面对 Jira / GitHub / Git 的底层事实和高风险动作。
 

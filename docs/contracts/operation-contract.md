@@ -28,12 +28,7 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 
 | `Operation` | 用途 |
 | --- | --- |
-| `install` | 安装 AgenticOps 到 `~/.agentic-ops`。 |
 | `doctor` | 输出安装、版本、工作流配置、策略、契约、适配器和工作空间的本地诊断结果。 |
-| `assets_install` | 校验源资产 manifest 与当前 CLI 的 `exact_pair` 后安装版本化运行资产。 |
-| `update_check` | 基于本地或远程 release manifest 判断 CLI / 资产兼容状态，返回更新级别和受影响操作。 |
-| `update_apply` | 校验 manifest 与 checksum，版本化暂存产物，保存上一状态并原子切换激活二进制。 |
-| `update_rollback` | 只使用本地上一状态和 checksum 恢复 CLI、资产指针与 current metadata。 |
 | `contract_validate` | 校验机器可读 操作契约是否满足完整设计基线。 |
 | `profile_validate` | 校验工作流配置是否能映射标准字段、任务分类、标准流程、状态和 `transition`。 |
 | `profile_update` | 使用经过校验的本地来源工作流配置更新当前工作流配置，并保存可回滚备份。 |
@@ -65,7 +60,11 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 | `feedback_report` | 按需生成执行分析报告，用于发现重复问题和 AgenticOps 改进建议。 |
 | `feedback_propose` | 生成改进建议。 |
 
-当前 `install-resources/basic/contracts/operations/` 维护已落地或直接需要的机器可读 YAML，并通过 `agentic-cli contract validate` 校验。未进入当前可运行闭环的操作先保留在本文档中作为后续契约范围，不视为已实现 CLI 命令。
+developer 工作面的机器可读操作契约位于 `developer/standards/contracts/operations/`。契约保存目标行为边界，不是实现状态事实源；`contract_validate` 本身在当前 Python Runtime 中也是 `capability_gap`，不能因为契约文件存在就声称有对应命令。
+
+当前可调用性以 `developer/standards/capabilities/operations.yaml` 和 `ao-work capability list|show` 为准。能力目录必须覆盖每个契约恰好一次，状态只能是 `implemented` 或 `capability_gap`；只有 `implemented` 且目录声明真实 parser 路径时才可以调用。旧 Go 契约未迁移时继续保留为验收目标，但必须标记能力缺口并给出中文人工动作。
+
+AgenticOps 安装、更新和回滚属于 `developer/bootstrap/` 的 Shell Bootstrap 责任：它们只管理 developer-only sparse managed clone、Git ref、`uv sync --locked`、`ao-work` 入口和本地回滚引用，不是 Jira / GitHub / Git 业务操作契约，也不使用旧二进制 manifest 或 checksum 流程。
 
 ## 4. 契约结构
 

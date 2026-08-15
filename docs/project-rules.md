@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-本文定义 AgenticOps 项目开始阶段必须遵守的项目规则。规则用于约束 AgenticOps 源码、文档、AI 员工手册、操作契约、工作流配置、Go CLI 运行时、项目 AI 工作空间和反馈闭环。
+本文定义 AgenticOps 必须遵守的项目规则。规则用于约束 AgenticOps 源码、文档、Skill、Python Runtime、Shell Bootstrap、Rule、标准资产、项目 AI 工作空间和反馈闭环。
 
 相关设计文档：
 
@@ -16,6 +16,7 @@
 - `docs/processes/standard-process-registry.md`
 - `docs/strategy/positioning.md`
 - `docs/runtime/cli-runtime.md`
+- `docs/runtime/python-runtime.md`
 - `docs/runtime/problem-resolution-and-update.md`
 - `docs/templates/evidence-templates.md`
 - `docs/examples/end-to-end-demo.md`
@@ -65,19 +66,19 @@ AgenticOps 文档必须按职责分层：
 - `docs/architecture/` 定义稳定架构边界，包括流程环节、门禁、状态、容错、事实源、角色责任、安全边界、能力边界和标准资产演进机制。
 - `docs/user-stories/` 定义故事线，包括主角、目标、触发方式、关键输出、失败路径和验收口径；故事线不记录实施计划或当前完成度。
 - `docs/runtime/` 记录稳定运行时设计、命令能力、操作说明和运行边界，不记录阶段性任务、当前完成度或剩余工作。
-- `plans/` 基于稳定架构从大阶段拆到中任务和小步骤，用勾选项跟踪实施进度。
+- Jira 基于稳定架构管理可交付目标、实施步骤、阶段状态、阻塞和验收；Description 保存确认计划，Comment 保存过程轨迹。
 - 项目工作空间 `.superpowers/` 只保存工具本地执行状态、检查点、临时分析和缓存，由 Git 忽略；不得保存或提交正式设计、计划、规范和运行资产。
-- 工具建议使用 `docs/superpowers/` 等默认路径时，必须服从本仓库分层：正式设计进入 `docs/` 对应主题目录，可执行计划进入顶层 `plans/`。
-- 阶段性范围、阶段任务、勾选项、阶段验收命令、当前实现状态、剩余工作和实现说明只能写入 `plans/`，不得混入 README、架构设计、项目规则、故事线或运行时设计。
+- 工具建议使用 `docs/superpowers/` 等默认路径时，必须服从本仓库分层：正式设计进入 `docs/` 对应主题目录，实施计划进入 Jira，临时草稿留在被忽略的 `.superpowers/`。
+- 阶段性范围、阶段任务、当前状态、验收命令、剩余工作和实现说明写入 Jira，不得混入 README、架构设计、项目规则、故事线或运行时设计。
 - 设计文档只维护终态设计事实、能力边界、风险和约束，不记录阶段性推进信息。
 - 设计文档发现缺口时，只能说明能力边界、风险和约束；如果缺口背后涉及产品、流程、权限或事实源取舍，必须明确标记为需要用户决策，不得伪装成默认计划或默认实现。
 
 阶段性文字必须按职责分类处理：
 
 - 终态原则：影响 AgenticOps 长期形态、事实源、角色责任、门禁或安全边界的规则，保留在设计、规则、手册或契约文档中，不使用阶段限定弱化规则。
-- 阶段执行限制：只在某个计划执行期间成立的限制，保留在对应 `plans/` 中，计划完成后作为历史推进记录。
-- 当前实现缺口：只说明当前版本尚未完成的能力，写入对应 `plans/`，不写入目标、架构、规则、故事线或运行时设计主叙事。
-- 判断一句话归属时，先问它是在定义 AgenticOps 终态形态，还是只解释当前阶段先做什么、暂不做什么；后者必须进入 `plans/`。
+- 阶段执行限制：只在某个实施期间成立的限制，保留在对应 Jira 工作项中。
+- 当前实现缺口：只说明当前版本尚未完成的能力，写入对应 Jira，不写入目标、架构、规则、故事线或运行时设计主叙事。
+- 判断一句话归属时，先问它是在定义 AgenticOps 终态形态，还是只解释当前阶段先做什么、暂不做什么；后者必须进入 Jira。
 
 做任何计划前，必须先确认其所依赖的故事线和架构文档已经存在且相对稳定。故事线不清时，应先确定故事线；架构不清时，应先更新或补齐架构；不得直接用零散功能点堆砌计划。
 
@@ -123,7 +124,7 @@ AgenticOps 必须保持事实源边界清晰：
 - 缺少 Jira 关键字段或上下文时，阻断接管并输出补全动作和模板。
 - 标准资产不适配时，生成工作流配置、策略、模板或运行手册的改进建议。
 - 存在风险、权限不足、标准冲突或连续失败时，转人工确认。
-- 只有确认问题来自 `agentic-cli` CLI 二进制逻辑错误时，才进入二进制修复发布路径。
+- 只有确认问题来自对应工作面的 Runtime 逻辑时，才进入 `ao-maint` 或 `ao-work` 的修复路径；不得跨工作面临时调用。
 
 ## 5. 仓库边界
 
@@ -136,25 +137,20 @@ git@github.com:tapstate/agentic-ops.git
 该仓库管理全局通用资料：
 
 ```text
+maintainer/    项目维护工作面：ao-maint、Runtime、Skill、Rule、故事门禁、发布和测试
+developer/     研发工程师工作面：ao-work、Runtime、Skill、Rule、标准、Bootstrap 和测试
+shared/        经明确审查允许跨面读取的中立资料，默认不共享代码或规则
 docs/          人读文档，包括架构、目标定位、故事线、流程和设计
-plans/         可执行推进计划和历史实施记录
 .superpowers/  本地执行状态、检查点、临时分析和缓存，不提交
-install-resources/basic/
-               跨平台通用安装资源：AI 资产入口、手册、契约、配置、策略、runbook、模板
-install-resources/<os-arch>/
-               已编译平台二进制 agentic-cli
-bin/           本地安装后的命令目录，只提交 .gitkeep
-.local/        本地安装和更新状态，只提交 .gitkeep
-skills/        AgenticOps 技能和 AI 员工工作规则
-packages/      agentic-cli Go CLI 运行时
-examples/      端到端演示样例
-tests/         自动化测试
-scripts/       本地和 CI 辅助脚本
 ```
+
+旧 Go Runtime、平台二进制、`agentic-cli`、`install-resources/` 和根目录旧运行资产已从现役仓库结构删除。历史实现只通过版本分支、Tag 和 Git 历史查阅，不得作为兼容入口或发布资产恢复。
 
 仓库内文档、目录和脚本文件名默认使用英文 ASCII lowercase-kebab-case。面向用户的正文优先使用中文。
 
-同一个仓库内使用目录区分资料职责，不使用不同分支分管源码、设计、计划或运行资产。正式交付时通过 managed clone 和 `install-resources/` 控制使用者可见内容，研发工程师和 AIAgent 默认只接触安装后的命令、资产、模板和规范。
+同一个仓库内先按 `maintainer` / `developer` 工作面隔离，再按资产类型划分；不使用不同分支分管源码、设计、计划或运行资产。正式交付时通过稳定 `main` 的 developer-only sparse managed clone 只提供 developer Skill、Rule、标准资产、Python Runtime 和 `ao-work`。
+
+根 `AGENTS.md` 固定进入 maintainer 并加载 `maintainer/AGENTS.md`；业务项目工作空间 `AGENTS.md` 固定进入 developer。命令分别为 `ao-maint` 和 `ao-work`，不得提供兼容别名或 `--mode` 切换。两个 Python 包、Skill、授权、配置、状态和测试不得交叉；Skill 必须在 `metadata.workplane` 声明唯一工作面。
 
 当前项目规则只适用于 `tapstate/agentic-ops` 项目本身。不得把其它项目的研发规范、分支策略、验证命令、目录约定或上线前临时规则合并进 AgenticOps 当前项目规则。
 
@@ -175,8 +171,8 @@ AgenticOps 中所有规则写入前必须先区分类别，不能因为同一条
 ```
 
 - 个人规则：个人偏好、本机身份、个人 wiki 和本地工作流，只能维护在个人记忆库或本地 `~/.agentic-ops/user/`，不得写入公司或项目标准资产。
-- 公司规则：TapData 跨项目硬规定、事实源边界、人工门禁、保密、审查职责和通用提交要求，维护在 `install-resources/basic/company/`。
-- 项目规则：具体项目的语言、分支、提交、验证、工具和流程差异，维护在项目仓库规则、项目 AI 工作空间或 `install-resources/basic/projects/<project>/`。
+- 公司规则：TapData 跨项目硬规定、事实源边界、人工门禁、保密、审查职责和通用提交要求，位于 `developer/standards/company/`。
+- 项目规则：具体项目的语言、分支、提交、验证、工具和流程差异，维护在项目仓库规则、项目 AI 工作空间或 `developer/standards/projects/<project>/`。
 - AIAgent 规则：AIAgent 执行时的停止条件、交互语言、门禁、证据、审计和工具调用要求，维护在 AI 员工手册、操作契约、策略、运行手册、模板或当前工作空间 `AGENTS.md`。
 
 项目规则覆盖公司规则或 AIAgent 规则时，必须在项目规则文件或项目工作空间配置中显式体现来源；不得只依赖聊天上下文。个人规则只能在缺少更高优先级规则时补充执行偏好，不能覆盖项目、AIAgent 或公司规则。
@@ -189,30 +185,39 @@ AgenticOps 配置项必须按 [配置规范](configuration-standards.md) 维护�
 
 ## 8. 源头仓库分支与发布规则
 
-`tapstate/agentic-ops` 的 GitHub 默认分支必须是 `main`，日常开发必须在 `develop` 进行。`main` 不允许直接提交或直接推送，必须启用版本化 `.githooks`；合入方式只允许 PR 的 Merge commit。硬门禁模式还必须通过 GitHub Repository Ruleset 禁止直接推送、强推和删除；GitHub Free 私有仓库使用显式软门禁时，接受服务器端无法阻止其它入口直推的剩余风险，但本项目流程不得因此绕过 PR。
+`tapstate/agentic-ops` 的 GitHub 默认分支必须是 `main`，日常开发必须在 `develop` 进行。`main` 不允许直接提交或直接推送；版本化 `.githooks` 是策略源，Git 必须通过 common directory trusted launcher 加载已接受 `HEAD` 的 Hook，不能直接执行 candidate 工作树 Hook。合入方式只允许 PR 的 Merge commit。硬门禁模式还必须通过无 bypass 的 GitHub Repository Ruleset 禁止直接推送、强推和删除，并要求至少 1 个独立人工批准、最后推送者不能自批、dismiss stale approvals、解决全部 review threads；GitHub Free 私有仓库使用显式软门禁时，接受服务器端无法阻止其它入口直推和强制独立审批的剩余风险，但本项目流程不得因此绕过 PR 或自动合并。
 
 正常发布必须使用统一入口：
 
 ```sh
-scripts/release.sh prepare --version vX.Y
-scripts/release.sh publish --version vX.Y
+maintainer/scripts/release.sh prepare --version vX.Y
+maintainer/scripts/release.sh publish --version vX.Y
 ```
 
-`prepare` 只创建本地 annotated `vX.Y` tag 并构建四平台安装资源，不暂存、不提交、不推送。研发工程师审查并提交生成资源后，`publish` 固定执行完整本地验证并取得最终确认。硬门禁模式推送 `develop`，创建或复用 `develop -> main` PR，启用 Merge Auto-merge；软门禁模式必须显式传入 `--allow-soft-gate`，从已验证 HEAD 创建固定 `release/vX.Y -> main` PR，等待研发工程师人工 Merge commit 后以同一命令恢复并再次完整验证。两种模式都必须验证 `origin/main` 包含固定发布 HEAD，最后才推送不可变 tag。
+`prepare` 先固定 HEAD，并完整验证 Python、两个工作面、Skill、Rule、标准资产、developer-only Bootstrap 和安装边界；全部通过后才创建或复用本地 annotated `vX.Y` tag，失败时不得留下新 tag。它不构建项目自有平台二进制，不暂存、不提交、不推送。研发工程师审查后，`publish` 必须再次执行完整本地验证并取得最终确认。硬门禁模式推送 `develop`，创建或复用 `develop -> main` PR，启用 Merge Auto-merge；软门禁模式必须显式传入 `--allow-soft-gate`，从已验证 HEAD 创建固定 `release/vX.Y -> main` PR，等待研发工程师人工 Merge commit 后以同一命令恢复并再次完整验证。两种模式都必须验证 `origin/main` 包含固定发布 HEAD，最后才推送不可变 tag。
 
 紧急修复必须使用统一入口：
 
 ```sh
-scripts/hotfix.sh create --jira-id <KEY>
-scripts/hotfix.sh prepare
-scripts/hotfix.sh publish
+maintainer/scripts/hotfix.sh create --jira-id <KEY>
+maintainer/scripts/hotfix.sh prepare
+maintainer/scripts/hotfix.sh publish
 ```
 
 修复分支必须从最新 `origin/main` 创建，格式为 `<user>/<jira-id>/fix-main`。Hotfix 复用 `main` 最近的二段式版本基线，沿用既有 `STATE-vX.Y.COMMIT_INDEX-COMMIT` 构造，不创建、移动或推送新 tag；合入 `main` 后必须提示研发工程师人工同步 `develop`。
 
-两个 `publish` 入口都必须在临时 worktree 中固定执行 Go、资源、构建、安装和四个 E2E 验证。验证命令不得通过参数替换或跳过；验证失败和最终确认前不得产生远端写入。非交互发布必须显式传入 `--confirm-release`。
+两个 `prepare` 和两个 `publish` 入口都必须在临时 worktree 中固定执行以下完整验证：
 
-脚本必须在执行前检查本地 Hooks、远端 `develop` 和 GitHub 默认分支。硬门禁模式还检查 Auto-merge 和 `main` Ruleset，发现缺失或漂移时应逐项展示并取得确认后幂等修复；非交互配置必须显式传入 `--configure-workflow`。软门禁只放宽 Ruleset 和 Auto-merge，仍强制检查 Merge commit 可用、固定发布或修复 HEAD、人工合并、合并事实和二次完整验证。PR 和 Merge commit 是发布事实源，`.local/release-runs/` JSON 是本地执行审计。
+```sh
+bash maintainer/scripts/test-python-runtime.sh
+bash maintainer/scripts/test-resources.sh
+bash developer/tests/bootstrap/test_install_boundary.sh
+bash maintainer/scripts/test-release-workflow.sh
+```
+
+验证命令不得通过参数替换或跳过；验证失败和最终确认前不得产生远端写入。非交互发布必须显式传入 `--confirm-release`。
+
+脚本必须在执行前检查 trusted Hook launcher、远端 `develop` 和 GitHub 默认分支。硬门禁模式还检查 Auto-merge 和 `main` Ruleset，发现缺失或漂移时应逐项展示并取得确认后幂等修复；非交互配置必须显式传入 `--configure-workflow`。软门禁只放宽 Ruleset 和 Auto-merge，仍强制检查 Merge commit 可用、固定发布或修复 HEAD、人工合并、合并事实和二次完整验证。publish 还必须用刷新后的 `origin/main` Runtime 检查固定 candidate；基线缺失或信任根发生净变更时，自动 publish 失败并改走受保护 `main` 的独立人工审查 PR。PR 和 Merge commit 是发布事实源，`.local/release-runs/` JSON 是本地执行审计。
 
 ## 9. 安装边界
 
@@ -222,11 +227,11 @@ AgenticOps 默认安装到：
 ~/.agentic-ops
 ```
 
-`~/.agentic-ops` 是 `tapstate/agentic-ops` 的完整 managed clone，不是具体项目或具体任务的运行目录。
+`~/.agentic-ops` 是稳定 `main` 的 developer-only sparse managed clone，不代表研发员，也不是具体项目或具体任务的运行目录；正常文件树不得包含 `maintainer/`。
 
 `~/.agentic-ops` 可以保存：
 
-- 已安装的 `bin/agentic-cli` 和 `.local/` 安装元数据。
+- 已安装的 `bin/ao-work`、developer 运行资产和 `.local/` 安装元数据。
 - 全局配置。
 - 本机个人配置目录 `user/`；该目录必须保持 local-only，不得提交。
 - 通用 AI 员工手册。
@@ -247,15 +252,13 @@ AgenticOps 默认安装到：
 
 ```sh
 gh api -H 'Accept: application/vnd.github.raw' \
-  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
-  | AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
+  '/repos/tapstate/agentic-ops/contents/developer/bootstrap/install.sh?ref=main' \
+  | bash
 ```
 
-安装前必须通过 `gh auth status` 确认 GitHub CLI 已登录并具备访问 `tapstate/agentic-ops` 私有仓库的权限；未登录时先执行 `gh auth login -h github.com -p ssh -s repo`。GitHub API contents 路径必须加引号，避免 zsh 把 `?ref=main` 当作通配符。`AGENTIC_OPS_REPO_URL` 用于显式指定 managed clone 地址。
+安装前必须通过 `gh auth status` 确认 GitHub CLI 已登录并具备访问 `tapstate/agentic-ops` 私有仓库的权限；未登录时先执行 `gh auth login -h github.com -p ssh -s repo`。GitHub API contents 路径必须加引号，避免 zsh 把 `?ref=main` 当作通配符。产品安装与更新固定使用受信 `tapstate/agentic-ops` 和稳定 `main`，不提供仓库或分支覆盖入口；遗留的身份覆盖环境变量只要非空就必须阻断。离线发布测试必须使用隔离 `PATH` 的 Git wrapper，只对 `fetch`、`push` 和非 `--get-url` 的 `ls-remote` 单进程注入 `-c url.<fixture>.insteadOf=<official>`；不得向仓库或 HOME 持久化 rewrite。产品脚本和 Runtime 始终看到并校验官方 origin，不得为测试保留第二套受信身份。
 
-安装脚本必须支持 Linux (linux-amd64 / linux-arm64)、macOS Intel (darwin-amd64) 和 macOS Apple Silicon (darwin-arm64)，并且不得覆盖用户已有本地配置。
-
-安装脚本必须把 `tapstate/agentic-ops` clone 或更新到 `~/.agentic-ops`，校验 `install-resources/checksums.txt`，再安装仓库中已经编译并提交的 `install-resources/<os-arch>/agentic-cli`；不得在研发工程师机器上编译安装。
+安装脚本必须支持 Linux 和 macOS，并且不得覆盖用户已有本地配置。它必须用 sparse checkout 把 developer 工作面更新到 `~/.agentic-ops`，用锁文件准备 Python 环境并生成 `bin/ao-work`；不得检出 maintainer 运行资产，也不构建项目自有平台二进制。
 
 如果 `~/.agentic-ops` 已存在，安装脚本必须先展示当前 ref 和目标分支，并要求研发工程师确认后才更新。交互式终端由用户输入确认；非交互环境必须先取得用户确认，再显式设置 `AGENTIC_OPS_ASSUME_YES=1`。未确认时安装脚本必须停止，不能静默更新。
 
@@ -383,20 +386,21 @@ TapData / TapState 方案 C 可以作为第一套默认工作流配置，但不�
 
 ## 14. CLI 运行时规则
 
-控制层必须采用本地优先的 Go CLI 运行时。
+控制层必须采用本地优先的 Python Runtime。Skill 负责组织标准流程，Rule 负责保存不能由当前任务临场改变的约束。
 
-shell 只用于安装引导，例如 `gh api | bash` 的 `install.sh`。安装后 AIAgent 的业务逻辑、操作、策略、适配器、日志和反馈分析不得写在 shell 中。维护 AgenticOps 源头仓库时，`scripts/release.sh`、`scripts/hotfix.sh` 和 `scripts/lib/` 是项目级例外，可以编排 Git、GitHub、版本化 Hooks 和固定验证，但不得扩展为业务 Jira 任务运行时。
+Shell Bootstrap 只用于安装、更新、回滚、环境准备和启动，例如 `gh api | bash` 的 `developer/bootstrap/install.sh`。安装后 AIAgent 的业务逻辑、操作、策略、适配器、日志和反馈分析不得写在 shell 中。维护 AgenticOps 源头仓库时，`maintainer/scripts/release.sh`、`maintainer/scripts/hotfix.sh` 和 `maintainer/scripts/lib/` 是项目级例外。
 
-统一入口为：
+工作面入口为：
 
 ```sh
-agentic-cli
+./maintainer/bin/ao-maint
+ao-work
 ```
 
-推荐安装位置：
+developer 安装位置：
 
 ```text
-~/.agentic-ops/bin/agentic-cli
+~/.agentic-ops/bin/ao-work
 ```
 
 CLI 必须遵守：
@@ -407,20 +411,13 @@ CLI 必须遵守：
 - 退出码有固定语义。
 - 写操作必须检查策略、门禁和人工确认。
 - secrets 不允许出现在 stdout、stderr 或事件日志中。
-- Linux (linux-amd64 / linux-arm64)、macOS Intel (darwin-amd64) 和 macOS Apple Silicon (darwin-arm64) 都应通过对应平台二进制运行。
+- 本地任务状态必须使用版本化 JSON / NDJSON、任务级锁和原子替换，不能由 shell 文本命令直接修改。
+- 外部写操作必须遵守 `plan -> apply -> readback`，结果不明确时阻断，不得猜测成功。
+- Linux 和 macOS 必须通过仓库锁定的同一 Python 主链路运行，不构建 AgenticOps 自有平台二进制。
 
-主 CLI 发布目标：
+Bootstrap 允许依赖 `bash`、`curl`、Git 和 `uv`。Python 版本由 `.python-version` 固定，依赖分别由 `maintainer/pyproject.toml`、`developer/pyproject.toml` 和各自 `uv.lock` 锁定；运行时不得依赖业务项目自己的 Python 环境。
 
-```text
-darwin-arm64
-darwin-amd64
-linux-amd64
-linux-arm64
-```
-
-安装 bootstrap 允许依赖 `bash`、`curl` 和系统解压工具。`agentic-cli` 运行时不得依赖 `jq` 或本地 Python 环境。
-
-`agentic-cli preflight` 必须检查 OS、CPU 架构、GitHub CLI、GitHub 登录状态、Jira 凭证、工作流配置和当前业务仓库匹配关系。
+`ao-work` 的前置检查必须验证 GitHub、Jira 授权、工作流配置、当前业务仓库和 developer 工作面；`ao-maint` 必须验证 AgenticOps 源头仓库、maintainer AI 入口和维护规则。两者不得通过 mode 参数互换。
 
 CLI 操作和脚本入口必须遵守成熟度边界：
 
@@ -482,14 +479,14 @@ AgenticOps 必须包含 AIAgent 反馈通道，用于在任务完成、阻塞或
 反馈闭环必须遵守：
 
 ```text
-Go CLI 执行操作
+Python Runtime 执行操作
 -> 产生结构化事件日志
 -> 到达完成、阻塞或交接节点
 -> AIAgent 将任务级审计记录写入本地 Jira 编号目录，并回写 Jira 关键结论和稳定引用
 -> 维护者按需按运行、任务类型、失败码、时间范围或工作空间聚合分析
 -> AIAgent 分析失败、卡点、重复人工确认、专业审查退回、重试、重做、有效经验和规则缺口
 -> 生成改进建议
--> 人确认后更新 AgenticOps 规则、手册、契约和 Go CLI
+-> 人确认后更新 AgenticOps Skill、Rule、标准资产和 Python Runtime
 ```
 
 反馈通道只做分析和建议，不允许 AIAgent 根据日志自动修改 AgenticOps 源头规则。
@@ -548,7 +545,7 @@ Jira / GitHub 写操作必须可审计。任何写操作都必须关联 `operati
 - 工作流配置说明。
 - 反馈闭环说明。
 - 端到端演示脚本。
-- CLI 运行时设计说明。
+- Python Runtime 与 Shell Bootstrap 设计说明。
 - 证据模板设计说明。
 
 文档必须保持简洁、可执行、便于试点研发直接使用。
@@ -556,7 +553,7 @@ Jira / GitHub 写操作必须可审计。任何写操作都必须关联 `operati
 面向用户、研发工程师和审阅者的可见文档标题和正文默认使用中文。只有以下内容保留英文或缩写：
 
 - 属性名、状态名、配置键、协议字段和错误码，例如 `agentic_run_id`、`agentic_id`、`side_effects`、`missing_form_field`。
-- 命令、参数、文件路径、目录名和代码符号，例如 `agentic-cli workspace init`、`--jira-project`、`install-resources/basic/contracts/operations/`。
+- 命令、参数、文件路径、目录名和代码符号，例如 `ao-work workspace init`、`--jira-project`、`developer/standards/contracts/operations/`。
 - 产品名、平台名、组件名和行业通用稳定名词，例如 `AgenticOps`、`AIAgent`、`Jira`、`GitHub`、`CI`、`CLI`。
 - 故事线、任务或契约的稳定编号，例如 `PM-001`、`DE-001`。
 

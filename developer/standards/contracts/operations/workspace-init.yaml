@@ -1,0 +1,105 @@
+operation: workspace_init
+version: 3
+workplane: developer
+allowed_states:
+  - uninitialized
+inputs:
+  interactive:
+    required: false
+    default: true
+  agent_id:
+    required_in_non_interactive: true
+    pattern: "^[0-9A-Za-z_-]+$"
+    interactive_default: normalized_lowercase_hostname
+  project_profile:
+    required_in_non_interactive: true
+  jira_email:
+    required_with_token_stdin: true
+  jira_token:
+    source: hidden_prompt_or_standard_input
+    command_argument_forbidden: true
+  source_root:
+    required: false
+    default: workspace_root/repos/project_profile
+confirmation:
+  required_fields:
+    - agent_id
+    - workspace_root
+    - project_profile
+    - jira_base_url
+    - jira_site
+    - verified_jira_account_id
+    - jira_project
+    - masked_jira_account
+    - repository
+    - source_root
+preflight:
+  side_effects: none
+  blocking_checks:
+    - workspace_boundary
+    - workspace_state_is_not_symlink
+    - all_managed_paths_are_contained_and_not_symlinks
+    - workspace_writable
+    - existing_config
+    - agent_id_format
+    - agent_id_collision
+    - project_profile
+    - jira_credentials
+    - jira_identity
+    - jira_project_access
+    - git_available
+    - workspace_env_is_not_symlink_or_git_tracked
+    - git_local_exclude_is_verified_before_secret_write
+    - source_repository
+    - github_repository_url_is_exact
+    - git_url_rewrite_is_absent_before_remote_access
+write_order:
+  - protect_workspace_state_from_git
+  - prepare_source_checkout_and_revalidate_source_boundary
+  - write_profile_overlay_and_managed_instructions
+  - write_workspace_credentials_if_supplied
+  - update_non_authoritative_workspace_index
+  - write_agent_json_completion_marker_last
+postcondition:
+  - post_preflight_must_pass
+  - credentials_remain_workspace_scoped
+  - agent_json_schema_v3_binds_connection_id_site_root_site_identity_and_verified_account_id
+  - connection_or_profile_overlay_drift_blocks_before_credential_read_and_network_request
+  - effective_profile_project_repository_and_source_root_equal_agent_json
+  - ordinary_preflight_cannot_confirm_or_rebind_drift
+  - raw_and_effective_fetch_and_push_urls_equal_exact_github_repository
+  - source_checkout_must_not_be_agenticops_source_or_descendant
+  - failed_source_checkout_revalidation_must_rollback_clone_and_completion_state
+  - shared_install_index_must_not_authorize_or_supply_credentials
+failure:
+  - interactive_terminal_required
+  - missing_project_profile
+  - missing_agent_id
+  - agent_id_invalid
+  - agent_id_conflict
+  - workspace_boundary_invalid
+  - workspace_state_symlink_forbidden
+  - workspace_managed_path_unsafe
+  - workspace_index_path_unsafe
+  - workspace_env_symlink_forbidden
+  - workspace_env_tracked
+  - workspace_git_tracking_check_failed
+  - workspace_git_exclude_failed
+  - workspace_not_writable
+  - existing_config_confirmation_required
+  - jira_credentials_missing
+  - authorization_email_invalid
+  - authorization_token_invalid
+  - jira_authorization_failed
+  - jira_workspace_mismatch
+  - workspace_jira_identity_upgrade_required
+  - jira_workspace_identity_drift
+  - jira_workspace_account_drift
+  - workspace_project_identity_drift
+  - existing_jira_account_confirmation_required
+  - workspace_repository_mapping_missing
+  - source_repository_access_failed
+  - git_url_rewrite_forbidden
+  - git_url_rewrite_check_failed
+  - source_checkout_failed
+  - source_checkout_invalid

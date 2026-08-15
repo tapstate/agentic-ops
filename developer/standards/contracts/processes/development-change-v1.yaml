@@ -1,0 +1,129 @@
+process_id: development_change_v1
+workplane: developer
+task_classes:
+  - feature_change
+  - bug_fix
+  - technical_task
+entry_stage: task_intake
+ownership:
+  source: business_workspace_agent_identity
+  continuity: same_owner_until_pr_review
+  step_executor_does_not_change_owner: true
+  transfer:
+    status: capability_gap
+    decision_authority: human_only
+    current_action: stop_and_request_human_decision
+stages:
+  - id: task_intake
+    responsible_role: ai_agent
+    input_fields:
+      - jira_issue_facts
+      - project_profile
+      - business_source_context
+      - runtime_readback
+    required_sequence:
+      - analyze_known_and_missing_information
+      - auto_fill_only_from_verified_sources
+      - present_full_intake_summary
+      - obtain_user_confirmation
+    output_fields:
+      - intake_facts
+      - auto_filled_values_with_sources
+      - unresolved_information
+      - assumptions
+      - impacts
+      - confirmed_intake_digest
+    review_gate: user_intake_confirmation
+  - id: solution_classification
+    responsible_role: ai_agent
+    required_before_solution:
+      - confirmed_intake_digest
+    levels:
+      L1: direct_implementation
+      L2: user_confirmation_required
+      L3: revise_design_and_reassess
+      L4: stop_and_escalate
+    recompute_on:
+      - facts_changed
+      - scope_changed
+      - risk_changed
+      - design_changed
+    output_fields:
+      - proposed_solution
+      - solution_level
+      - classification_evidence
+      - agentic_next_action
+    review_gate: level_specific_gate
+  - id: waiting_takeover
+    responsible_role: development_engineer
+    input_fields:
+      - assignee
+      - task_class
+      - target_repo
+    output_fields:
+      - agentic_run_id
+      - agentic_id
+      - agentic_takeover_at
+      - agentic_heartbeat_at
+      - current_stage
+      - agentic_next_action
+    review_gate: null
+  - id: implementation
+    responsible_role: ai_agent
+    required_before_code_change:
+      - jira_admission_facts_reinspected
+      - task_taken_over
+      - versioned_fix_plan_written_to_jira
+      - development_engineer_decision_written_to_jira
+    output_fields:
+      - issue_analysis
+      - fix_plan
+      - development_engineer_decision
+      - implementation_summary
+      - verification_result
+      - residual_risk
+      - execution_authorization
+      - authorization_reference
+    review_gate: development_engineer_review
+    next_action_contract:
+      source: ao_work_runtime_result
+      required_fields:
+        - executor
+        - action
+        - required_inputs
+        - allowed_operations
+        - requires_authorization
+        - stop_workflow
+        - ownership_effect
+        - retry_gate
+      ownership_effect_allowed_values:
+        - none
+      retry_policy:
+        max_additional_attempts_per_retry_key: 1
+        same_input_allowed: false
+        requires_state_readback: true
+        requires_recorded_retry_event: true
+        exhausted_action: escalate_to_human
+  - id: pr_review
+    responsible_role: development_engineer
+    input_fields:
+      - execution_authorization
+      - authorization_reference
+      - implementation_summary
+      - verification_result
+      - residual_risk
+      - pr_url
+      - fixed_head_sha
+    output_fields:
+      - review_decision
+      - agentic_next_action
+    review_gate: development_engineer_review
+  - id: completed
+    responsible_role: development_engineer
+    required_writeback:
+      - issue_analysis
+      - fix_details
+      - verification_method
+      - agentic_completion_evidence
+    completion_cleanup:
+      clear_agentic_id: true
