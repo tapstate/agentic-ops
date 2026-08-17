@@ -79,6 +79,16 @@ agentic_reject_identity_overrides() {
   done
 }
 
+agentic_reject_verification_mode() {
+  local install_dir="$1"
+  if [ -f "$install_dir/.agentic-ops/verification-only" ]; then
+    agentic_bootstrap_error \
+      "verification_only_install_forbidden" \
+      "检测到 verification-only 安装标记，当前安装目录不得执行生产维护动作" \
+      "请在此工作目录运行 verify 模式专用流程，不要在生产命令中指定此目录"
+  fi
+}
+
 agentic_expected_repository() {
   printf '%s\n' "tapstate/agentic-ops"
 }
@@ -655,10 +665,63 @@ agentic_verify_developer_checkout() {
   agentic_validate_shared_source_tree "$install_dir" HEAD
 }
 
-agentic_configure_developer_checkout() {
+agentic_verify_developer_checkout_for_verification() {
+  local install_dir="$1"
+  local expected_branch="$2"
+  local current_branch=""
+  local head_ref=""
+
+  agentic_require_managed_paths_safe "$install_dir"
+  head_ref="$(git -C "$install_dir" rev-parse --verify HEAD 2>/dev/null || true)"
+  if [ -z "$head_ref" ]; then
+    agentic_bootstrap_error \
+      "install_checkout_invalid" \
+      "安装工作树无法读取 HEAD：$install_dir" \
+      "请重新清理验证安装目录后重试"
+  fi
+  current_branch="$(git -C "$install_dir" symbolic-ref -q --short HEAD 2>/dev/null || true)"
+  if [ -z "$current_branch" ] || [ "$current_branch" != "$expected_branch" ]; then
+    agentic_bootstrap_error \
+      "install_checkout_invalid" \
+      "验证安装未停留在期望分支：$install_dir -> ${current_branch:-(detached)}" \
+      "请重新执行安装流程并指定正确源分支"
+  fi
+  agentic_verify_developer_sparse_configuration "$install_dir"
+  if [ -e "$install_dir/maintainer" ]; then
+    agentic_bootstrap_error \
+      "developer_distribution_contaminated" \
+      "developer 安装混入 maintainer 工作面资产" \
+      "请重建验证安装目录"
+  fi
+  agentic_validate_developer_distribution "$install_dir"
+  agentic_validate_shared_source_tree "$install_dir" "$head_ref"
+}
+
+agentic_sync_runtime_for_verification() {
+  local install_dir="$1"
+  local uv_bin="$2"
+  local expected_branch="${3:-develop}"
+  local head_ref=""
+
+  agentic_verify_developer_checkout_for_verification "$install_dir" "$expected_branch"
+  agentic_validate_shared_distribution "$install_dir"
+  if ! "$uv_bin" sync --locked --project "$install_dir/developer" --python 3.12; then
+    return 1
+  fi
+  if [ ! -e "$install_dir/bin" ]; then
+    mkdir -m 0755 "$install_dir/bin"
+  fi
+  if ! install -m 0755 "$install_dir/developer/bootstrap/ao-work" "$install_dir/bin/ao-work"; then
+    return 1
+  fi
+  head_ref="$(git -C "$install_dir" rev-parse HEAD)"
+  agentic_write_refs "$install_dir" "" "$head_ref"
+  "$install_dir/bin/ao-work" --help >/dev/null
+}
+
+agentic_configure_developer_sparse_checkout() {
   local install_dir="$1"
 
-  agentic_require_managed_clone "$install_dir"
   agentic_require_managed_paths_safe "$install_dir"
   git -C "$install_dir" sparse-checkout set --no-cone \
     /developer/AGENTS.md \
@@ -673,6 +736,13 @@ agentic_configure_developer_checkout() {
     /.python-version
   agentic_require_managed_paths_safe "$install_dir"
   agentic_verify_developer_sparse_configuration "$install_dir"
+}
+
+agentic_configure_developer_checkout() {
+  local install_dir="$1"
+
+  agentic_require_managed_clone "$install_dir"
+  agentic_configure_developer_sparse_checkout "$install_dir"
 }
 
 agentic_sync_runtime() {

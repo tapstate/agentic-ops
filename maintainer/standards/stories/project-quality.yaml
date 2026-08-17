@@ -301,3 +301,20 @@ stories:
       - 任务事实源与本地审计边界检查
       - 真实 Jira、Git、GitHub、验证事实的 Runtime 受信采集与 PR 前停止证据
       - 人工干预、等待、失败、重试、质量问题和优化候选的完整复盘证据
+
+  - story_id: DE-007
+    category: developer
+    title: 指定分支验证安装
+    document: docs/user-stories/development-engineer/de-007-verification-install.md
+    protected_paths:
+      - developer/bootstrap/install-verify-branch.sh
+      - developer/tests/bootstrap/test_install_verify_boundary.sh
+      - developer/runtime/src/ao_work/installation.py
+      - developer/tests/runtime/test_installation.py
+      - docs/architecture/verification-install-design.md
+    acceptance_checks:
+      - python_runtime
+      - resource_contracts
+    evidence_requirements:
+      - 远程模式可运行验证安装与本地模式流程验证结果
+      - 无标记非 main 阻断与 verification_branch_unreachable 门禁结果

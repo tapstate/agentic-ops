@@ -164,6 +164,8 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 初始化生成的业务工作空间 `AGENTS.md` 固定进入 developer 工作面，不得引用根 `AGENTS.md` 或 `maintainer/`。共享安装的 `user/workspace-index.json` 只是可重建冲突索引，不保存凭证、不授权、不代表研发员。Jira 凭证仍只在业务项目工作空间 `.agentic-ops/.env` 中维护。
 
+指定分支验证安装（`developer/bootstrap/install-verify-branch.sh` 远程模式）的 `ao-work` 复用同一套安装身份校验：origin 必须是 `tapstate/agentic-ops`、sparse 精确集与 shared/developer 分发白名单不变，仅把「HEAD 是 `origin/main` 祖先」放宽为「HEAD 可达于任一 `origin/*` 远端分支或 tag」；该放宽只在 `.agentic-ops/verification-only` 标记存在时生效。生产安装 `~/.agentic-ops` 仍固定 `main`，不接受分支覆盖。
+
 ## 14. 项目故事质量门禁
 
 maintainer 工作面通过 `ao-maint story impact|approve|verify` 守护项目维护故事和研发工程师故事。影响检测基于 Git 内容指纹和机器注册表；确认与固定验收必须匹配同一 `impact_id`。故事受影响、故事修订、验收失败或映射缺失时，pre-commit 停止提交。`ao-work` 不提供故事门禁子命令。详细规则见 [项目故事质量门禁](story-quality-gate.md)。

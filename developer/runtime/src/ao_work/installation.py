@@ -146,7 +146,10 @@ def validate_install_root() -> Path:
     _validate_shared_source_tree(root, "HEAD")
     _validate_shared_distribution(root)
     _validate_developer_distribution(root)
-    _validate_checkout_integrity(root)
+    if _is_verification_install(root):
+        _validate_verification_checkout_integrity(root)
+    else:
+        _validate_checkout_integrity(root)
     return root
 
 
@@ -237,6 +240,82 @@ def _validate_checkout_integrity(root: Path) -> None:
         "shared/integration/task-to-pr-result.schema.json",
     ):
         _run_git(root, "cat-file", "-e", f"HEAD:{asset}")
+
+
+VERIFICATION_MARKER = ".agentic-ops/verification-only"
+
+
+def _is_verification_install(root: Path) -> bool:
+    marker = root / VERIFICATION_MARKER
+    return not marker.is_symlink() and marker.is_file()
+
+
+def _validate_verification_checkout_integrity(root: Path) -> None:
+    head = _run_git(root, "rev-parse", "--verify", "HEAD")
+    current_ref = root / ".local" / "current-ref"
+    try:
+        recorded = current_ref.read_text(encoding="utf-8").splitlines()[0].strip()
+    except (OSError, IndexError) as error:
+        raise _blocked(
+            "install_ref_integrity_invalid",
+            "AgenticOps 验证安装缺少有效的 .local/current-ref",
+            "请重新执行 developer/bootstrap/install-verify-branch.sh 验证安装",
+        ) from error
+    if recorded != head:
+        raise _blocked(
+            "install_ref_integrity_invalid",
+            "AgenticOps 验证安装 checkout 的 HEAD 与 .local/current-ref 不一致",
+            "请停止使用该目录并重新执行验证安装",
+        )
+    if not _verification_head_reachable(root, head):
+        raise _blocked(
+            "verification_branch_unreachable",
+            "AgenticOps 验证安装的 HEAD 不可达于任一 origin 远端分支或 tag",
+            "请确认指定分支已推送到 tapstate/agentic-ops 后重新执行验证安装",
+        )
+    tracked = _run_git(root, "status", "--porcelain=v1", "--untracked-files=no")
+    if tracked:
+        raise _blocked(
+            "install_tracked_changes_forbidden",
+            "AgenticOps 验证安装中的受管文件存在本地修改",
+            "请不要修改验证安装目录；通过业务反馈流程改进后重新安装",
+        )
+    for asset in (
+        "developer/AGENTS.md",
+        "developer/bootstrap/ao-work",
+        "developer/runtime/src/ao_work/__init__.py",
+        "shared/integration/README.md",
+        "shared/integration/task-to-pr-manifest.schema.json",
+        "shared/integration/task-to-pr-event.schema.json",
+        "shared/integration/task-to-pr-result.schema.json",
+    ):
+        _run_git(root, "cat-file", "-e", f"HEAD:{asset}")
+
+
+def _verification_head_reachable(root: Path, head: str) -> bool:
+    refs = _run_git(
+        root, "for-each-ref", "--format=%(refname)", "refs/remotes/origin"
+    ).splitlines()
+    for ref in refs:
+        if not ref:
+            continue
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(root), "merge-base", "--is-ancestor", head, ref],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise _blocked(
+                "install_identity_check_failed",
+                f"无法校验 AgenticOps 验证安装远端可达性：{type(error).__name__}",
+                "请检查 Git 安装后重试",
+            ) from error
+        if result.returncode == 0:
+            return True
+    return False
 
 
 def _validate_shared_source_tree(root: Path, ref: str) -> None:

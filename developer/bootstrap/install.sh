@@ -37,6 +37,10 @@ else
   unset bootstrap_common
 fi
 
+if [ -e "$INSTALL_DIR" ]; then
+  agentic_reject_verification_mode "$INSTALL_DIR"
+fi
+
 if ! command -v git >/dev/null 2>&1; then
   agentic_bootstrap_error "git_not_found" "未找到 Git，无法安装 AgenticOps" "请先安装 Git"
 fi
