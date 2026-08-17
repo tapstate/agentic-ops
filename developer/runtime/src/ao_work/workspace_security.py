@@ -5,8 +5,9 @@ import re
 import stat
 import subprocess
 import tempfile
+import time
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 
@@ -474,6 +475,7 @@ def protect_workspace_env_from_git(
 
 
 def _run_git(arguments: list[str]) -> subprocess.CompletedProcess[str]:
+    started = time.monotonic()
     try:
         return subprocess.run(
             ["git", *arguments],
@@ -483,10 +485,17 @@ def _run_git(arguments: list[str]) -> subprocess.CompletedProcess[str]:
             timeout=20.0,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
+        command = " ".join(["git", *arguments])
+        elapsed = time.monotonic() - started
         raise _blocked(
             "git_check_failed",
-            f"Git 安全检查失败：{type(error).__name__}",
+            f"Git 安全检查失败（{command}，已等待 {elapsed:.1f}s）：{type(error).__name__}",
             "请检查 Git 安装和仓库状态后重试；在确认前不得写入凭证",
+            details={
+                "git_command": command,
+                "elapsed_seconds": round(elapsed, 1),
+                "git_timeout_seconds": 20.0,
+            },
         ) from error
 
 
@@ -497,7 +506,9 @@ def _git_metadata_ancestor(path: Path) -> Path | None:
     return None
 
 
-def _blocked(code: str, message: str, action: str) -> RuntimeErrorResult:
+def _blocked(
+    code: str, message: str, action: str, details: dict[str, Any] | None = None
+) -> RuntimeErrorResult:
     return RuntimeErrorResult(
         code=code,
         message=message,
@@ -505,4 +516,5 @@ def _blocked(code: str, message: str, action: str) -> RuntimeErrorResult:
         exit_code=EXIT_BLOCKED,
         retry_safe=True,
         required_human_action=action,
+        details=details or {},
     )

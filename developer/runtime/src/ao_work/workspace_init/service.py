@@ -7,6 +7,7 @@ import re
 import shutil
 import socket
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -898,19 +899,28 @@ class WorkspaceInitializer:
     def _run_git(
         self, arguments: list[str], *, timeout: float | None = None
     ) -> subprocess.CompletedProcess[str]:
+        effective_timeout = timeout or self.git_timeout
+        started = time.monotonic()
         try:
             return subprocess.run(
                 ["git", *arguments],
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=timeout or self.git_timeout,
+                timeout=effective_timeout,
             )
         except (OSError, subprocess.TimeoutExpired) as error:
+            command = " ".join(["git", *arguments])
+            elapsed = time.monotonic() - started
             raise _blocked(
                 "git_check_failed",
-                f"Git 前置检查失败：{type(error).__name__}",
+                f"Git 前置检查失败（{command}，已等待 {elapsed:.1f}s）：{type(error).__name__}",
                 "请检查 Git 安装、网络和仓库权限后重试",
+                details={
+                    "git_command": command,
+                    "elapsed_seconds": round(elapsed, 1),
+                    "git_timeout_seconds": effective_timeout,
+                },
             ) from error
 
     def _managed_agents_content(self, candidate: WorkspaceCandidate) -> str:
@@ -1126,7 +1136,9 @@ def _repository_short_name(repository: str) -> str:
     return name
 
 
-def _blocked(code: str, message: str, action: str) -> RuntimeErrorResult:
+def _blocked(
+    code: str, message: str, action: str, details: dict[str, Any] | None = None
+) -> RuntimeErrorResult:
     return RuntimeErrorResult(
         code=code,
         message=message,
@@ -1134,4 +1146,5 @@ def _blocked(code: str, message: str, action: str) -> RuntimeErrorResult:
         exit_code=EXIT_BLOCKED,
         retry_safe=True,
         required_human_action=action,
+        details=details or {},
     )
