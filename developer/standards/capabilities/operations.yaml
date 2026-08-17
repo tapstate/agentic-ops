@@ -360,22 +360,26 @@ capabilities:
     next_action: 请只传 Jira key；先分析缺项并按有证据来源自动补全，用户确认准入摘要后再形成和分级方案。该操作不会写 Jira、提交代码、推送或创建 PR。
 
   - id: task_intake_assess
-    source: runtime
-    contract:
-    status: capability_gap
+    source: contract
+    contract: contracts/operations/task-intake-assess.yaml
+    status: implemented
     visibility: public
-    commands: []
-    summary: 校验任务信息分析、缺项、证据化自动补全和用户确认摘要的原子操作尚未实现。
-    next_action: 请先由 AI 形成带来源的准入摘要并请用户确认；在 Runtime 实现摘要 digest 与缺项门禁前，不得把信息补全描述成机器验收通过。
+    commands:
+      - [task, intake, assess]
+      - [task, intake, confirm]
+    summary: 基于 task start 的 Jira、Profile、工作空间和 Runtime 快照，校验缺项、证据化补全、源码基线、稳定摘要及用户确认绑定。
+    next_action: 先执行 assess 并展示完整准入摘要；必要信息齐全后才能用当前 digest 确认，确认前不得形成最终方案或修改代码。
 
   - id: solution_gate
-    source: runtime
-    contract:
-    status: capability_gap
+    source: contract
+    contract: contracts/operations/solution-gate.yaml
+    status: implemented
     visibility: public
-    commands: []
-    summary: 根据已确认准入摘要和方案证据确定 L1 直接执行、L2 用户确认、L3 修改设计、L4 停止升级的原子门禁尚未实现。
-    next_action: 请按四级标准人工审查并记录结论；在 Runtime 实现稳定分类和变更后重算前，不得让 AI 自行降低级别。
+    commands:
+      - [task, solution, classify]
+      - [task, solution, confirm]
+    summary: 将方案严格绑定已确认准入摘要和源码 HEAD，根据固定风险标志与证据确定 L1 至 L4，并仅允许 L2 使用摘要绑定确认。
+    next_action: L1 进入正式接管门禁；L2 确认当前方案摘要；L3 先修改设计并重新准入；L4 停止并解决事实、权限或能力缺口。
 
   - id: task_transfer
     source: runtime

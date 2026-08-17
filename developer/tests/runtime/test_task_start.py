@@ -177,20 +177,24 @@ class TaskStartTest(unittest.TestCase):
         )
         self.assertEqual("none", payload["agentic_next_action"]["ownership_effect"])
         self.assertEqual(
-            "analyze_and_complete_task_information",
+            "assess_task_intake",
             payload["agentic_next_action"]["action"],
         )
         self.assertEqual(
             [
-                "issue",
-                "workspace_defaults",
+                "issue_key",
                 "agentic_run_id",
-                "intake_gate",
-                "solution_gate",
+                "intake_input_file",
             ],
             payload["agentic_next_action"]["required_inputs"],
         )
         self.assertFalse(payload["agentic_next_action"]["requires_authorization"])
+        self.assertEqual(
+            ["task_intake_assess"],
+            payload["agentic_next_action"]["allowed_operations"],
+        )
+        self.assertRegex(payload["intake_source"]["context_digest"], r"^[0-9a-f]{64}$")
+        self.assertTrue(Path(payload["intake_source"]["source_context_path"]).is_file())
         self.assertEqual(
             "present_filled_intake_for_user_confirmation",
             payload["intake_gate"]["required_sequence"][-1],

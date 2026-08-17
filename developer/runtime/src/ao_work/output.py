@@ -75,14 +75,38 @@ _SUCCESS_NEXT_ACTIONS: dict[str, dict[str, Any]] = {
     },
     "task_start": {
         "actor": "ai",
-        "action": "prepare_task_plan_for_review",
+        "action": "assess_task_intake",
         "required_inputs": [
-            "issue",
-            "workspace_defaults",
+            "issue_key",
             "agentic_run_id",
+            "intake_input_file",
         ],
-        "allowed_operations": ["report_write"],
+        "allowed_operations": ["task_intake_assess"],
+    },
+    "task_intake_assess": {
+        "actor": "human",
+        "action": "confirm_task_intake",
+        "required_inputs": ["intake_digest", "full_intake_summary"],
+        "allowed_operations": ["task_intake_confirm"],
         "requires_authorization": True,
+    },
+    "task_intake_confirm": {
+        "actor": "ai",
+        "action": "prepare_and_classify_solution",
+        "required_inputs": ["confirmed_intake_digest", "solution_input_file"],
+        "allowed_operations": ["task_solution_classify"],
+    },
+    "task_solution_classify": {
+        "actor": "ao_work",
+        "action": "follow_solution_level_gate",
+        "required_inputs": ["solution_level", "solution_digest"],
+        "allowed_operations": ["task_solution_confirm", "takeover_task"],
+    },
+    "task_solution_confirm": {
+        "actor": "ao_work",
+        "action": "perform_formal_task_takeover",
+        "required_inputs": ["intake_digest", "solution_digest"],
+        "allowed_operations": ["takeover_task"],
     },
     "task_init": {
         "actor": "ai",

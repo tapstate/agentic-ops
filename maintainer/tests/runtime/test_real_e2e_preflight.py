@@ -30,8 +30,6 @@ class RealTaskToPrE2EPreflightTest(unittest.TestCase):
         self.assertFalse(result["credentials_read"])
         self.assertEqual(
             {
-                "task_intake_assess",
-                "solution_gate",
                 "takeover_task",
                 "git_commit",
                 "git_push_task_branch",

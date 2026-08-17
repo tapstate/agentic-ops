@@ -33,7 +33,33 @@ ao-work task start <ISSUE-KEY>
 
 该入口自动读取并核对 Jira Issue ID、Project、经办人、状态、标题、描述与任务类型，复用工作空间 Profile、账户和仓库，生成或恢复 `agentic_run_id` 与 Jira 内容摘要。它只创建本地运行状态，不执行正式 Jira 接管、不写 Jira、不提交或推送。
 
-先按 `intake_gate.required_sequence` 分析信息：列出已知事实与缺项，再只从 Jira、Project Profile、业务源码和 Runtime 回读中做带证据的自动补全。向用户展示完整准入摘要，必须包含原始事实、补全值与来源、仍缺项、假设和影响；不得只请求确认一个 ID。必要信息仍缺失时停在 L4。用户确认准入摘要后才形成方案，并按 `solution_gate` 分级：L1 直接实施；L2 用户确认后实施；L3 先修改设计、重新分析和确认；L4 停止升级。事实、范围、风险或设计变化后必须重新计算级别。
+先由 AI 把语义分析写成工作空间普通 JSON 输入；用户不填写该文件。调用：
+
+```sh
+ao-work task intake assess --issue-key <KEY> --agentic-run-id <RUN> --input-file <相对JSON>
+```
+
+Runtime 自动合并 `task start` 保存的 Jira、Project Profile、工作空间与运行快照，校验 Profile 必填字段、源码证据摘要、干净 HEAD、缺项、假设和影响，输出完整准入摘要及 `intake_digest`。Jira/Profile/Runtime 来源必须与快照值精确匹配；源码推断必须引用工作空间绑定源码中的普通文件及其 SHA-256，并明确仍需人工判断语义。必要信息仍缺失时，只能按同一 `retry_key` 用改变后的证据重试一次；耗尽后停止。
+
+把输出中的原始事实、补全值与来源、仍缺项、假设和影响完整展示给用户，不能只展示 digest。确认后调用：
+
+```sh
+ao-work task intake confirm --issue-key <KEY> --agentic-run-id <RUN> --confirm-intake-digest <DIGEST> --confirmed-by <NAME> --authorization-reference user-confirmation:<KEY>:<RUN>:<DIGEST>
+```
+
+该引用只是当前会话确认声明，不是独立身份回读。确认前不得形成最终方案或修改代码。确认后 AI 才形成方案 JSON，并调用：
+
+```sh
+ao-work task solution classify --issue-key <KEY> --agentic-run-id <RUN> --input-file <相对JSON>
+```
+
+Runtime 按固定风险标志和证据确定级别，优先级为 L4、L3、L2、L1：L1 直接进入正式接管门禁；L2 必须展示完整方案并用以下入口绑定当前 `solution_digest`：
+
+```sh
+ao-work task solution confirm --issue-key <KEY> --agentic-run-id <RUN> --confirm-solution-digest <DIGEST> --confirmed-by <NAME> --authorization-reference user-confirmation:<KEY>:<RUN>:<DIGEST>
+```
+
+L3 停止，先修改设计后重新准入；L4 停止并解决事实、权限或能力缺口。Jira/Profile 快照、源码 HEAD、源码证据、范围、风险或方案变化后，旧摘要和确认不得继续使用。
 
 之后每个 `ao-work` 环节只执行当次 JSON 中结构化 `agentic_next_action` 指定的动作。`executor` 只是当前步骤执行者，不是任务转派；`task_ownership.task_owner` 从接管到 PR 审查保持同一研发员，所有现役下一动作的 `ownership_effect` 必须为 `none`。未知 executor/action、required inputs 不齐、下一操作不在 `allowed_operations` 或 `stop_workflow=true` 时停止。只在 `retry_gate.allowed=true` 时允许同一 `retry_key` 再试一次；重试前必须回读状态、改变输入并记录 retry 事件，耗尽后转人工。如需转派，只能停止并由人决定；当前 `task_transfer` 为 `capability_gap`，AI、Runtime、reviewer 和项目工具都不得改变负责人。
 

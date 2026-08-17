@@ -19,6 +19,7 @@ from ao_work.output import (
     write_json,
 )
 from ao_work.task_state import TaskIdentity, TaskStore
+from ao_work.task_gate import execute_task_gate
 from ao_work.task_start import execute_task_start
 from ao_work.task_run import configure_task_run_parser, execute_task_run
 from ao_work.workspace import DEVELOPER, resolve_developer_workspace
@@ -45,6 +46,30 @@ def build_parser() -> argparse.ArgumentParser:
     task_commands = task_parser.add_subparsers(dest="command", required=True)
     task_start = task_commands.add_parser("start")
     task_start.add_argument("issue_key")
+    task_intake = task_commands.add_parser("intake")
+    task_intake_actions = task_intake.add_subparsers(dest="action", required=True)
+    task_intake_assess = task_intake_actions.add_parser("assess")
+    task_intake_assess.add_argument("--issue-key", required=True)
+    task_intake_assess.add_argument("--agentic-run-id", required=True)
+    task_intake_assess.add_argument("--input-file", required=True)
+    task_intake_confirm = task_intake_actions.add_parser("confirm")
+    task_intake_confirm.add_argument("--issue-key", required=True)
+    task_intake_confirm.add_argument("--agentic-run-id", required=True)
+    task_intake_confirm.add_argument("--confirm-intake-digest", required=True)
+    task_intake_confirm.add_argument("--confirmed-by", required=True)
+    task_intake_confirm.add_argument("--authorization-reference", required=True)
+    task_solution = task_commands.add_parser("solution")
+    task_solution_actions = task_solution.add_subparsers(dest="action", required=True)
+    task_solution_classify = task_solution_actions.add_parser("classify")
+    task_solution_classify.add_argument("--issue-key", required=True)
+    task_solution_classify.add_argument("--agentic-run-id", required=True)
+    task_solution_classify.add_argument("--input-file", required=True)
+    task_solution_confirm = task_solution_actions.add_parser("confirm")
+    task_solution_confirm.add_argument("--issue-key", required=True)
+    task_solution_confirm.add_argument("--agentic-run-id", required=True)
+    task_solution_confirm.add_argument("--confirm-solution-digest", required=True)
+    task_solution_confirm.add_argument("--confirmed-by", required=True)
+    task_solution_confirm.add_argument("--authorization-reference", required=True)
     task_init = task_commands.add_parser("init")
     task_init.add_argument("--connection-id", required=True)
     task_init.add_argument("--jira-issue-id", required=True)
@@ -112,6 +137,9 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             store,
             args.issue_key,
         )
+        return success(operation, workplane=workspace.workplane, **state)
+    if args.group == "task" and args.command in {"intake", "solution"}:
+        state = execute_task_gate(args, workspace, store)
         return success(operation, workplane=workspace.workplane, **state)
     if args.group == "jira":
         state = execute_jira(args, workspace, install_root, store)

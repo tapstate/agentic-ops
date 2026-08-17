@@ -244,10 +244,14 @@ stories:
     document: docs/user-stories/development-engineer/de-004-takeover-task.md
     protected_paths:
       - developer/runtime/src/ao_work/task_start.py
+      - developer/runtime/src/ao_work/task_gate.py
       - developer/tests/runtime/test_task_start.py
+      - developer/tests/runtime/test_task_gate.py
       - developer/runtime/src/ao_work/authorization/**
       - developer/runtime/src/ao_work/jira/**
       - developer/runtime/src/ao_work/task_state/**
+      - developer/standards/contracts/operations/task-intake-assess.yaml
+      - developer/standards/contracts/operations/solution-gate.yaml
       - developer/standards/contracts/operations/jira-*.yaml
       - developer/standards/projects/**
       - developer/skills/jira-task-collaboration/**
@@ -255,7 +259,7 @@ stories:
       - python_runtime
       - resource_contracts
     evidence_requirements:
-      - Jira 任务身份、授权和计划门禁结果
+      - Jira 任务身份、完整准入摘要、摘要确认和 L1-L4 方案门禁结果
       - Comment、Description 和 Worklog 幂等回读结果
 
   - story_id: DE-005

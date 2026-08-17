@@ -43,8 +43,8 @@ class OutputTest(unittest.TestCase):
         )
         next_action = result["agentic_next_action"]
         self.assertEqual("ai", next_action["executor"])
-        self.assertEqual("prepare_task_plan_for_review", next_action["action"])
-        self.assertEqual(True, next_action["requires_authorization"])
+        self.assertEqual("assess_task_intake", next_action["action"])
+        self.assertEqual(False, next_action["requires_authorization"])
         self.assertEqual("请先审查 AI 提议的实施计划", next_action["reason"])
 
     def test_failure_has_chinese_human_action(self) -> None:
