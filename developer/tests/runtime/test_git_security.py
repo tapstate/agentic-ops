@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from ao_work import workspace_security
 from ao_work.git_security import parse_github_repository_url
 from ao_work.output import RuntimeErrorResult
 from ao_work.workspace_init.service import WorkspaceInitializer
@@ -105,3 +106,45 @@ class GitSecurityTest(unittest.TestCase):
                 with self.assertRaises(RuntimeErrorResult) as captured:
                     initializer._validate_repository_remotes(source, "tapdata/tapdata")
             self.assertEqual("source_repository_mismatch", captured.exception.code)
+
+    def test_git_check_timeout_reports_command_and_elapsed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            initializer = WorkspaceInitializer(workspace, root / "install")
+            with mock.patch(
+                "subprocess.run",
+                side_effect=subprocess.TimeoutExpired("git", 20.0),
+            ):
+                with self.assertRaises(RuntimeErrorResult) as captured:
+                    initializer._run_git(
+                        ["ls-remote", "git@github.com:tapdata/tapdata.git", "HEAD"]
+                    )
+        error = captured.exception
+        self.assertEqual("git_check_failed", error.code)
+        self.assertIn("git ls-remote git@github.com:tapdata/tapdata.git HEAD", error.message)
+        self.assertIn("已等待", error.message)
+        self.assertEqual(
+            "git ls-remote git@github.com:tapdata/tapdata.git HEAD",
+            error.details["git_command"],
+        )
+        self.assertGreaterEqual(error.details["elapsed_seconds"], 0)
+        self.assertEqual(20.0, error.details["git_timeout_seconds"])
+
+    def test_security_git_timeout_reports_command_and_elapsed(self) -> None:
+        with mock.patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired("git", 20.0),
+        ):
+            with self.assertRaises(RuntimeErrorResult) as captured:
+                workspace_security._run_git(
+                    ["config", "--get-regexp", r"^url\..*insteadOf$"]
+                )
+        error = captured.exception
+        self.assertEqual("git_check_failed", error.code)
+        self.assertIn("config --get-regexp", error.message)
+        self.assertIn("已等待", error.message)
+        self.assertIn("git_command", error.details)
+        self.assertGreaterEqual(error.details["elapsed_seconds"], 0)
+        self.assertEqual(20.0, error.details["git_timeout_seconds"])
