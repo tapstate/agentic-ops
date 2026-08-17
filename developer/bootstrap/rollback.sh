@@ -6,6 +6,7 @@ SOURCE_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 INSTALL_DIR="${AGENTIC_OPS_HOME:-$HOME/.agentic-ops}"
 
 . "$SOURCE_ROOT/developer/bootstrap/lib/common.sh"
+agentic_reject_verification_mode "$INSTALL_DIR"
 agentic_reject_identity_overrides
 agentic_require_managed_clone "$INSTALL_DIR"
 agentic_configure_developer_checkout "$INSTALL_DIR"

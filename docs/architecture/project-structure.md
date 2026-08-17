@@ -147,6 +147,8 @@ Skill 负责选择流程、组织 Runtime 操作、解释结果，并在能力�
 
 该 sparse checkout 是面向人和 AI 的工作树、入口与默认可见性隔离，用于防止误入，不是 Git 内容权限边界。同一 managed clone 的 Git 对象仍可能包含源头提交树；developer Rule 禁止读取、恢复或扩大 sparse 范围中的 maintainer 路径。若未来要求内容级不可达或独立权限，必须以独立 developer 分发仓库或导出制品开专题实现，不能把当前方案描述为安全沙箱。
 
+指定分支验证安装（`developer/bootstrap/install-verify-branch.sh`）在 `~/.agentic-ops` 之外的独立目录生成可运行的验证安装：默认从官方远端按指定分支克隆并写入 `.agentic-ops/verification-only` 标记；其 `ao-work` 的安装身份校验与生产一致，仅把「HEAD 是 `origin/main` 祖先」放宽为「HEAD 可达于任一 `origin/*` 远端引用」。本地 `--source-worktree` 模式只校验安装流程，origin 是本地路径，不可运行。验证安装不用于生产维护，`install.sh`、`update.sh`、`rollback.sh` 会拒绝它。详见《指定分支验证安装设计》。
+
 ## 7. `shared/` 准入
 
 默认不建立共享代码层。资产只有同时满足以下条件才可进入 `shared/`：

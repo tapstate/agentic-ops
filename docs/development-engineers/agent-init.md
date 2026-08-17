@@ -19,6 +19,22 @@ export PATH="$HOME/.agentic-ops/bin:$PATH"
 ao-work --help
 ```
 
+## 1.1 指定分支验证安装（仅本地验证）
+
+验证脚本用于本地功能验证，不参与生产发布流程。默认从官方远端 `tapstate/agentic-ops` 按 `--source-branch` 克隆（默认 `develop`），生成可运行的验证安装：
+
+```sh
+bash developer/bootstrap/install-verify-branch.sh \
+  --source-branch develop \
+  --json
+```
+
+默认写入独立验证目录（`~/test/agentic-ops-verify-<时间戳>`）；加 `--keep` 保留排障目录，`--log` 指定日志路径。该入口显式写入 `verification-only` 标记，拒绝写入 `~/.agentic-ops`，并在克隆前校验 `--source-branch` 已推送到官方远端。
+
+远程模式的产物是可运行的验证安装：安装身份校验（origin、sparse 精确集、developer 分发白名单、shared 协议树）与生产一致，只把「HEAD 必须是 `origin/main` 祖先」放宽为「HEAD 可达于任一 `origin/*` 远端分支或 tag」。因此可以用它的 `ao-work workspace init` 初始化一名研发员做端到端验证。`install.sh`、`update.sh`、`rollback.sh` 仍拒绝把该验证目录当生产目录维护。
+
+提供 `--source-worktree <path>` 时降级为本地流程验证：从本地源码目录克隆，只校验 sparse checkout、developer 分发白名单、shared 协议树和 `uv` 运行时同步能否跑通；其 origin 是本地路径，不可运行，也不能初始化研发员。用于验证尚未推送的本地改动能否正确完成安装。
+
 没有 `agentic-cli` 兼容命令，也不需要 Go 或项目自有平台二进制。
 
 ## 2. 初始化业务项目工作空间
@@ -28,6 +44,8 @@ ao-work --help
 ```sh
 ao-work workspace init
 ```
+
+`workspace init` 默认使用第 1 节稳定 `main` 安装的 `~/.agentic-ops/bin/ao-work`；如需验证未发布分支，用第 1.1 节远程模式的验证安装（`--source-worktree` 本地模式不可运行）。
 
 交互入口会让公司员工指导员确认：
 

@@ -37,7 +37,9 @@ require_executable developer/bootstrap/ao-work
 require_executable developer/bootstrap/install.sh
 require_executable developer/bootstrap/update.sh
 require_executable developer/bootstrap/rollback.sh
+require_executable developer/bootstrap/install-verify-branch.sh
 require_executable developer/tests/bootstrap/test_install_boundary.sh
+require_executable developer/tests/bootstrap/test_install_verify_boundary.sh
 require_executable maintainer/scripts/release.sh
 require_executable maintainer/scripts/hotfix.sh
 require_executable maintainer/scripts/test-python-runtime.sh
@@ -248,5 +250,12 @@ fi
 test ! -e docs/development-phase-rules.md
 test ! -d docs/superpowers
 grep '^\.superpowers/$' .gitignore >/dev/null
+
+grep -q 'verification_only_install_forbidden' developer/bootstrap/lib/common.sh ||
+  fail "生产维护命令未拒绝 verification-only 验证安装目录"
+grep -q 'verification_branch_unreachable' developer/runtime/src/ao_work/installation.py ||
+  fail "Runtime 未实现验证安装的远端可达性门禁"
+grep -q 'verification-only' developer/bootstrap/install-verify-branch.sh ||
+  fail "验证安装入口未写入 verification-only 标记"
 
 printf '{"ok":true,"operation":"test_resources","workplanes":["maintainer","developer"]}\n'

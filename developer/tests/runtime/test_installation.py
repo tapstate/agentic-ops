@@ -451,6 +451,78 @@ class InstallationIdentityTest(unittest.TestCase):
                 self._validate(source)
             self.assertEqual("install_root_source_rejected", captured.exception.code)
 
+    def _checkout_develop(self, install: Path) -> str:
+        subprocess.run(
+            ["git", "-C", str(install), "checkout", "-b", "develop"],
+            check=True,
+            capture_output=True,
+        )
+        (install / "developer" / "AGENTS.md").write_text("develop\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(install), "add", "developer/AGENTS.md"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(install), "commit", "-m", "develop ahead"],
+            check=True,
+            capture_output=True,
+        )
+        head = subprocess.run(
+            ["git", "-C", str(install), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "-C", str(install), "update-ref", "refs/remotes/origin/develop", head],
+            check=True,
+            capture_output=True,
+        )
+        (install / ".local" / "current-ref").write_text(head + "\n", encoding="utf-8")
+        return head
+
+    @staticmethod
+    def _write_verification_marker(install: Path) -> None:
+        (install / ".agentic-ops").mkdir(exist_ok=True)
+        (install / ".agentic-ops" / "verification-only").write_text(
+            '{"verification_only": true}\n', encoding="utf-8"
+        )
+
+    def test_verification_install_on_non_main_branch_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            install = self._prepare(Path(temporary))
+            self._checkout_develop(install)
+            self._write_verification_marker(install)
+            with mock.patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(install.resolve(), self._validate(install))
+
+    def test_non_main_install_without_verification_marker_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            install = self._prepare(Path(temporary))
+            self._checkout_develop(install)
+            with mock.patch.dict(os.environ, {}, clear=True), self.assertRaises(
+                RuntimeErrorResult
+            ) as captured:
+                self._validate(install)
+            self.assertEqual("install_identity_check_failed", captured.exception.code)
+
+    def test_verification_install_with_unreachable_head_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            install = self._prepare(Path(temporary))
+            self._checkout_develop(install)
+            self._write_verification_marker(install)
+            subprocess.run(
+                ["git", "-C", str(install), "update-ref", "-d", "refs/remotes/origin/develop"],
+                check=True,
+                capture_output=True,
+            )
+            with mock.patch.dict(os.environ, {}, clear=True), self.assertRaises(
+                RuntimeErrorResult
+            ) as captured:
+                self._validate(install)
+            self.assertEqual("verification_branch_unreachable", captured.exception.code)
+
 
 if __name__ == "__main__":
     unittest.main()

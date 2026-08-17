@@ -28,17 +28,11 @@ gh api -H 'Accept: application/vnd.github.raw' \
 
 安装目标是 `~/.agentic-ops` 的 developer-only sparse managed clone。Bootstrap 与 `ao-work` 都会校验 origin 必须是 `tapstate/agentic-ops`，普通使用不能用环境变量改写受信仓库；正常文件树只包含 developer 生产资产、只读的 `shared/integration/` JSON 协议及运行所需的根版本元数据，不包含 `maintainer/`、`developer/tests/`、fixture 或 fake producer。
 
-验证入口：
+安装完成后可使用：
 
 ```sh
 source "$HOME/.zshrc"
 ao-work --help
-```
-
-也可使用完整路径：
-
-```sh
-~/.agentic-ops/bin/ao-work --help
 ```
 
 没有 `agentic-cli` 兼容别名；看到旧命令说明正在阅读冻结迁移基线或使用旧版本。

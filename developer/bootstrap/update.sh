@@ -7,6 +7,7 @@ INSTALL_DIR="${AGENTIC_OPS_HOME:-$HOME/.agentic-ops}"
 BRANCH="main"
 
 . "$SOURCE_ROOT/developer/bootstrap/lib/common.sh"
+agentic_reject_verification_mode "$INSTALL_DIR"
 agentic_reject_identity_overrides
 agentic_require_managed_clone "$INSTALL_DIR"
 agentic_configure_developer_checkout "$INSTALL_DIR"

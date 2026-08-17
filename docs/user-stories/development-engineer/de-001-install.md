@@ -14,6 +14,21 @@ gh api -H 'Accept: application/vnd.github.raw' \
   | bash
 ```
 
+本地验证安装（方案B）：
+
+```sh
+bash developer/bootstrap/install-verify-branch.sh \
+  --source-branch develop \
+  --json
+```
+
+验收补充：
+
+- 验证入口与生产入口严格分离：默认从官方远端按指定分支克隆，写入 `verification-only` 标记，产物是可运行的验证安装，可用其 `ao-work workspace init` 初始化研发员做端到端验证。
+- 验证模式禁止写入 `~/.agentic-ops`；`--keep` 仅用于保留排障目录。
+- 提供 `--source-worktree` 时降级为本地流程验证：只校验安装流程，origin 是本地路径，不可运行。
+- 验证入口显式支持 `--source-branch`、`--source-worktree`、`--install-home`、`--log`、`--json`、`--keep`。
+
 ### 前置条件
 
 - 当前系统为 Linux 或 macOS。
