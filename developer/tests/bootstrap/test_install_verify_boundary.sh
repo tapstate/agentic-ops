@@ -140,7 +140,6 @@ run_local_verify test_success pass \
     --source-worktree "$source_repo" \
     --source-branch develop \
     --install-home "$test_root/verify-success" \
-    --log "$test_root/verify-success.log" \
     --json \
     --keep
 

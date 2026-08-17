@@ -20,7 +20,7 @@ usage() {
                      仅验证安装流程，不可运行。
   --source-worktree  本地 AgenticOps 源码目录（可选；提供后进入本地流程验证模式）
   --install-home     安装目录（默认 ~/test/agentic-ops-verify-<timestamp>）
-  --log              日志文件（默认 <install-home>/install-verify.log）
+  --log              日志文件（默认 <install-home>.log，与安装目录同级）
   --json             输出 machine-readable JSON
   --keep             失败时不清理，保留安装目录用于排障
 USAGE
@@ -174,7 +174,7 @@ else
 fi
 
 if [ -z "$LOG_PATH" ]; then
-  LOG_PATH="$INSTALL_HOME/install-verify.log"
+  LOG_PATH="${INSTALL_HOME}.log"
 fi
 
 if [ -e "$INSTALL_HOME" ]; then
