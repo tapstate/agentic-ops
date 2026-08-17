@@ -44,6 +44,8 @@ EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 GITHUB_LOGIN_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 MANAGED_START = "<!-- agentic-ops:workspace:start -->"
 MANAGED_END = "<!-- agentic-ops:workspace:end -->"
+MANAGED_CODE_START = "<!-- agentic-ops:workspace-code:start -->"
+MANAGED_CODE_END = "<!-- agentic-ops:workspace-code:end -->"
 WORKSPACE_SKILLS_ROOT = Path(".agents") / "skills"
 
 
@@ -61,6 +63,7 @@ class WorkspaceCandidate:
     credential_source: str
     execution_identity: dict[str, str] | None = None
     persist_credentials: bool = False
+    source_root_derived: bool = False
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -253,10 +256,11 @@ class WorkspaceInitializer:
                             "请重新运行交互初始化并确认 Git/GitHub 执行身份",
                         )
                     execution_identity = rebuilt_identity
+        source_root_derived = not source_root
         resolved_source = (
             Path(source_root).expanduser().resolve()
             if source_root
-            else self.root.parent / f"{self.root.name}-source" / profile.profile_id
+            else self.root.parent / f"{self.root.name}-code" / _repository_short_name(repository)
         )
         resolved_source = validate_business_source_root(self.root, resolved_source)
         return WorkspaceCandidate(
@@ -272,6 +276,7 @@ class WorkspaceInitializer:
             credential_source=credential_source,
             execution_identity=execution_identity,
             persist_credentials=persist_credentials,
+            source_root_derived=source_root_derived,
         )
 
     def preflight(
@@ -301,6 +306,7 @@ class WorkspaceInitializer:
             confirmed=confirm_existing_config,
         )
         source_status = self._check_source(candidate, checks, check_remote=check_remote)
+        self._check_source_root_conflict(candidate, checks)
         return {
             "status": "passed",
             "checks": checks,
@@ -332,6 +338,8 @@ class WorkspaceInitializer:
             with TaskLock(lock_path, timeout=5):
                 credential_protection = self._protect_workspace_state_from_git()
                 source_status = self._ensure_source_checkout(candidate)
+                if candidate.source_root_derived:
+                    self._write_source_container_readme(candidate)
                 for directory in (
                     state_root / "tasks",
                     state_root / "runs",
@@ -715,6 +723,32 @@ class WorkspaceInitializer:
         checks.append({"check": "source_repository", "status": "passed"})
         return "ready_to_clone"
 
+    def _check_source_root_conflict(
+        self, candidate: WorkspaceCandidate, checks: list[dict[str, str]]
+    ) -> None:
+        candidate_source = candidate.source_root.resolve()
+        for entry in self._workspace_entries():
+            other_root = Path(str(entry.get("workspace_root", ""))).expanduser()
+            if other_root == candidate.root:
+                continue
+            if not (other_root / ".agentic-ops" / "agent.json").is_file():
+                continue
+            raw_source = entry.get("source_root")
+            if not isinstance(raw_source, str) or not raw_source:
+                continue
+            other_source = Path(raw_source).expanduser().resolve()
+            if (
+                other_source == candidate_source
+                or other_source in candidate_source.parents
+                or candidate_source in other_source.parents
+            ):
+                raise _blocked(
+                    "source_root_conflict",
+                    f"业务源码目录已被另一业务项目工作空间使用：{candidate_source}",
+                    "请为每个工作空间使用独立源码目录；共享写树不受支持",
+                )
+        checks.append({"check": "source_root_conflict", "status": "passed"})
+
     def _require_remote_access(self, remote: str) -> None:
         result = self._run_git(["ls-remote", remote, "HEAD"])
         if result.returncode != 0:
@@ -750,6 +784,24 @@ class WorkspaceInitializer:
             self._rollback_source_checkout(source, restore_empty_directory)
             raise
         return "cloned"
+
+    def _write_source_container_readme(self, candidate: WorkspaceCandidate) -> None:
+        container = candidate.source_root.parent
+        container.mkdir(parents=True, exist_ok=True)
+        content = (
+            "# 业务源码目录\n\n"
+            f"{MANAGED_CODE_START}\n"
+            f"- 归属工作空间：{candidate.root}\n"
+            f"- agent_id：{candidate.agent_id}\n"
+            f"- project_profile：{candidate.profile.profile_id}\n"
+            f"- repository：{candidate.repository}\n"
+            f"- 生成时间：{datetime.now(timezone.utc).isoformat()}\n\n"
+            "本目录存放业务项目源代码，由 ao-work workspace init 管理。身份、凭证和任务状态保存在\n"
+            f"工作空间 {candidate.root}/.agentic-ops/ 内；本文件只是配套说明，权威映射以 .agentic-ops\n"
+            "受管配置为准。请勿手改管理块；重新初始化工作空间时会重新生成。\n"
+            f"{MANAGED_CODE_END}\n"
+        )
+        atomic_write_text(container / "README.md", content)
 
     def _validate_checked_out_source(self, candidate: WorkspaceCandidate) -> None:
         source = validate_business_source_root(candidate.root, candidate.source_root)
@@ -1046,6 +1098,7 @@ class WorkspaceInitializer:
                 "workspace_root": str(candidate.root),
                 "agent_id": candidate.agent_id,
                 "project_profile": candidate.profile.profile_id,
+                "source_root": str(candidate.source_root),
             }
         )
         atomic_write_json(
@@ -1056,6 +1109,21 @@ class WorkspaceInitializer:
 
 def _repository_url(repository: str) -> str:
     return f"git@github.com:{repository}.git"
+
+
+def _repository_short_name(repository: str) -> str:
+    name = repository.rsplit("/", 1)[-1].strip()
+    if (
+        not name
+        or name in {".", ".."}
+        or any(character in name for character in ("/", "\\", "\x00"))
+    ):
+        raise _blocked(
+            "source_root_repository_name_invalid",
+            f"无法从仓库映射推导源码目录名：{repository}",
+            "请检查 Project Profile 的 repositories.default 配置",
+        )
+    return name
 
 
 def _blocked(code: str, message: str, action: str) -> RuntimeErrorResult:

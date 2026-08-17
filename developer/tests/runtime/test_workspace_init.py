@@ -237,6 +237,16 @@ class WorkspaceInitTest(unittest.TestCase):
                 (install / "user" / "workspace-index.json").read_text(encoding="utf-8")
             )
             self.assertEqual("developer_1", index["workspaces"][0]["agent_id"])
+            expected_source = (root / "workspace-code" / "tapdata").resolve()
+            self.assertEqual(str(expected_source), agent["source_root"])
+            self.assertEqual(str(expected_source), index["workspaces"][0]["source_root"])
+            code_readme = root / "workspace-code" / "README.md"
+            self.assertTrue(code_readme.is_file())
+            self.assertIn(
+                "<!-- agentic-ops:workspace-code:start -->",
+                code_readme.read_text(encoding="utf-8"),
+            )
+            self.assertTrue((expected_source / ".git").exists())
 
             preflight = self.run_cli(
                 (
@@ -254,6 +264,106 @@ class WorkspaceInitTest(unittest.TestCase):
                 )
             )
             self.assertEqual(agent["execution_identity"], preserved["execution_identity"])
+
+    def test_explicit_source_root_reused_without_readme(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install = self.prepare_install(root)
+            workspace = root / "workspace"
+            source = root / "explicit-repo"
+            workspace.mkdir()
+            (source / ".git").mkdir(parents=True)
+            exit_code, payload, _, _ = self.run_cli(
+                (
+                    "--workspace-root",
+                    str(workspace),
+                    "workspace",
+                    "init",
+                    "--non-interactive",
+                    "--project",
+                    "tapdata",
+                    "--agent-id",
+                    "developer_explicit",
+                    "--source-root",
+                    str(source),
+                    "--jira-email",
+                    "developer@example.test",
+                    "--git-name",
+                    "Developer Explicit",
+                    "--git-email",
+                    "developer@example.test",
+                    "--github-login",
+                    "developer-explicit",
+                    "--token-stdin",
+                    "--confirm",
+                )
+            )
+            self.assertEqual(0, exit_code, payload)
+            self.assertEqual("reused", payload["source_checkout_status"])
+            self.assertEqual(str(source.resolve()), payload["source_root"])
+            self.assertFalse((root / "README.md").exists())
+
+    def test_source_root_conflict_with_another_workspace_is_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install = self.prepare_install(root)
+            first = root / "workspace-a"
+            first.mkdir()
+            first_result = self.run_cli(
+                (
+                    "--workspace-root",
+                    str(first),
+                    "workspace",
+                    "init",
+                    "--non-interactive",
+                    "--project",
+                    "tapdata",
+                    "--agent-id",
+                    "developer_a",
+                    "--jira-email",
+                    "developer@example.test",
+                    "--git-name",
+                    "Developer A",
+                    "--git-email",
+                    "developer@example.test",
+                    "--github-login",
+                    "developer-a",
+                    "--token-stdin",
+                    "--confirm",
+                )
+            )
+            self.assertEqual(0, first_result[0], first_result[1])
+            second = root / "workspace-b"
+            second.mkdir()
+            shared_source = (root / "workspace-a-code" / "tapdata").resolve()
+            second_result = self.run_cli(
+                (
+                    "--workspace-root",
+                    str(second),
+                    "workspace",
+                    "init",
+                    "--non-interactive",
+                    "--project",
+                    "tapdata",
+                    "--agent-id",
+                    "developer_b",
+                    "--source-root",
+                    str(shared_source),
+                    "--jira-email",
+                    "developer@example.test",
+                    "--git-name",
+                    "Developer B",
+                    "--git-email",
+                    "developer@example.test",
+                    "--github-login",
+                    "developer-b",
+                    "--token-stdin",
+                    "--confirm",
+                )
+            )
+            self.assertEqual(2, second_result[0])
+            self.assertEqual("source_root_conflict", second_result[1]["code"])
+            self.assertFalse((second / ".agentic-ops" / "agent.json").exists())
 
     def test_zero_parameter_interactive_entry_uses_hostname_default_and_confirms(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

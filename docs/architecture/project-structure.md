@@ -11,13 +11,14 @@ AgenticOps 先按工作面隔离，再在工作面内按资产类型划分。只
 
 两个工作面使用不同目录、AI 入口、命令、Python 包、Skill、Rule、授权、配置、状态和测试。不得用 `--mode`、环境变量或聊天指令把同一入口切换成另一工作面。
 
-## 2. 三个位置
+## 2. 四个位置
 
 | 位置 | 工作面 | 可以保存 | 不得保存 |
 | --- | --- | --- | --- |
 | AgenticOps 源头仓库 / worktree | `maintainer` | 两个工作面的版本化源文件、设计、维护状态和发布能力 | 用户 token、真实业务任务状态 |
 | `~/.agentic-ops` | `developer` | developer-only sparse managed clone、锁定 Python 环境、安装状态 | `maintainer/` 资产、业务任务状态、研发员身份 |
-| 业务项目 AI 工作空间 | `developer` | 一名研发员的 Jira 账户、项目配置、源码、任务状态、证据和反馈 | AgenticOps 维护规则、其它研发员身份和任务状态 |
+| 业务项目 AI 工作空间 | `developer` | 一名研发员的 Jira 账户、项目配置、任务状态、证据和反馈 | AgenticOps 维护规则、其它研发员身份和任务状态、业务源码 |
+| 业务源码目录（`<工作空间>-code/`，与工作空间同级） | `developer` | 业务项目源代码 | AgenticOps 受管状态、凭证、工作空间身份 |
 
 ## 3. 仓库结构
 
@@ -85,7 +86,13 @@ AI 在 AgenticOps 源头仓库或其 worktree 启动时：
 
 `.agents/skills/` 是 Codex 标准仓库级发现位置，保存受管普通文件副本，不使用指向安装根的 symlink，也不要求业务仓库存在 `developer/` 相对路径。`workspace preflight` 必须确认 Skill 集合、内容摘要和 developer 工作面归属与当前安装一致；缺失、漂移、额外 Skill 或 maintainer 污染都必须阻断并要求重新初始化。
 
-### 4.3 停止条件
+### 4.3 工作空间与源码目录拓扑
+
+业务项目 AI 工作空间是研发员身份容器（`.agentic-ops/`、`AGENTS.md` 管理块、`.agents/skills/`）；业务源码存放在与工作空间同级的 `<工作空间>-code/` 目录。`workspace init` 默认把 `repositories.default` 仓库克隆到 `<工作空间>-code/<仓库短名>`，并在 `-code` 容器目录写入受管 `README.md` 说明文件（记录归属工作空间、agent_id、Project Profile 和仓库；管理块由 `workspace init` 整体重写，权威映射仍以 `.agentic-ops` 受管配置为准）。显式 `--source-root` 指定的目录不生成 README，由使用者自行管理。
+
+四个实体在目录树上平级、互不嵌套：AgenticOps 源头仓库、`~/.agentic-ops` 安装目录、业务项目工作空间、业务源码目录。身份、凭证和任务状态严格限定在 `.agentic-ops/` 内；源码目录只放业务 git 仓库，不混入 AgenticOps 受管状态。一个源码目录只能绑定一个工作空间，多个工作空间不得共享同一源码目录（`workspace init` 对已注册占用返回 `source_root_conflict` 阻断）。
+
+### 4.4 停止条件
 
 出现下列任一情况必须停止：
 
