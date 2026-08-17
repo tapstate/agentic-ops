@@ -4,9 +4,11 @@ import json
 import hashlib
 import os
 import re
+import select
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -27,7 +29,7 @@ from ao_work.config import (
 from ao_work.config.env import resolve_secret_pair_with_source, update_env_file
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.git_security import github_repository_url_matches
-from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
+from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, write_diagnostic
 from ao_work.task_state.io import atomic_write_json, atomic_write_text, read_json
 from ao_work.task_state.locking import TaskLock
 from ao_work.workspace import Workspace, _source_ancestor, validate_business_source_root
@@ -337,10 +339,16 @@ class WorkspaceInitializer:
         lock_path = state_root / ".workspace-init.lock"
         try:
             with TaskLock(lock_path, timeout=5):
+                write_diagnostic("初始化步骤 1/5：校验并保护工作空间状态（防止凭证被 Git 跟踪）")
                 credential_protection = self._protect_workspace_state_from_git()
+                write_diagnostic(
+                    f"初始化步骤 2/5：下载业务源码仓库 {candidate.repository} → {candidate.source_root}"
+                )
                 source_status = self._ensure_source_checkout(candidate)
+                write_diagnostic(f"源码仓库下载完成（{source_status}）")
                 if candidate.source_root_derived:
                     self._write_source_container_readme(candidate)
+                write_diagnostic("初始化步骤 3/5：写入工作空间配置与 AGENTS.md")
                 for directory in (
                     state_root / "tasks",
                     state_root / "runs",
@@ -373,6 +381,7 @@ class WorkspaceInitializer:
                     ),
                     self._managed_agents_content(candidate),
                 )
+                write_diagnostic("初始化步骤 4/5：安装研发 Skill 并写入授权凭证")
                 self._install_workspace_skills(candidate)
                 if candidate.persist_credentials and candidate.email and candidate.token:
                     update_env_file(
@@ -382,7 +391,7 @@ class WorkspaceInitializer:
                             candidate.connection.token_env: candidate.token,
                         },
                     )
-
+                write_diagnostic("初始化步骤 5/5：写入研发员身份与工作空间索引")
                 index_path = self._index_path()
                 previous_index = index_path.read_bytes() if index_path.is_file() else None
                 try:
@@ -770,15 +779,15 @@ class WorkspaceInitializer:
             source.rmdir()
         try:
             self._reject_git_url_rewrites(None)
-            result = self._run_git(
-                ["clone", _repository_url(candidate.repository), str(source)],
-                timeout=max(self.git_timeout, 120.0),
+            result = self._run_git_streaming(
+                ["clone", "--progress", _repository_url(candidate.repository), str(source)]
             )
             if result.returncode != 0:
                 raise _blocked(
                     "source_checkout_failed",
                     "源码仓库下载失败",
                     "请检查 GitHub 权限和网络后重试；未写入初始化完成标记",
+                    details={"stderr_tail": _stderr_tail(result.stderr)},
                 )
             self._validate_checked_out_source(candidate)
         except BaseException:
@@ -922,6 +931,99 @@ class WorkspaceInitializer:
                     "git_timeout_seconds": effective_timeout,
                 },
             ) from error
+
+    def _run_git_streaming(
+        self,
+        arguments: list[str],
+        *,
+        stall_warn_interval: float = 30.0,
+    ) -> subprocess.CompletedProcess[str]:
+        """流式运行 git 命令（仅用于源码克隆），不设超时。
+
+        大仓库 + 慢网络下克隆可以无限期进行，git 的 --progress 输出通过
+        stderr 实时转发给用户自行判断快慢；仅当 stderr 持续无任何输出超过
+        stall_warn_interval 时输出停滞提示（不终止进程）。调用方可以用
+        Ctrl+C 中断，克隆残留由初始化回滚清理，不会污染工作空间。
+        """
+        command = " ".join(["git", *arguments])
+        process = subprocess.Popen(
+            ["git", *arguments],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        stdout_chunks: list[bytes] = []
+        stderr_chunks: list[bytes] = []
+        last_output = time.monotonic()
+        last_warned = last_output
+        active_streams: list[Any] = [process.stdout, process.stderr]
+        try:
+            while True:
+                now = time.monotonic()
+                if (
+                    now - last_output >= stall_warn_interval
+                    and now - last_warned >= stall_warn_interval
+                ):
+                    last_warned = now
+                    write_diagnostic(
+                        f"源码克隆已 {now - last_output:.0f}s 无新进度输出，可能网络停滞；"
+                        "请检查代理与 SSH 隧道（可 Ctrl+C 中断，初始化会自动回滚，不残留污染）"
+                    )
+                ready, _, _ = select.select(
+                    active_streams, [], [], min(1.0, max(0.05, stall_warn_interval / 2))
+                )
+                for stream in ready:
+                    try:
+                        chunk = os.read(stream.fileno(), 65536)
+                    except OSError:
+                        chunk = b""
+                    if not chunk:
+                        if stream in active_streams:
+                            active_streams.remove(stream)
+                        continue
+                    last_output = time.monotonic()
+                    if stream is process.stderr:
+                        _forward_stderr(chunk)
+                        stderr_chunks.append(chunk)
+                    else:
+                        stdout_chunks.append(chunk)
+                if process.poll() is not None:
+                    for stream in (process.stdout, process.stderr):
+                        if stream is None:
+                            continue
+                        while True:
+                            try:
+                                chunk = os.read(stream.fileno(), 65536)
+                            except OSError:
+                                chunk = b""
+                            if not chunk:
+                                break
+                            if stream is process.stderr:
+                                _forward_stderr(chunk)
+                                stderr_chunks.append(chunk)
+                            else:
+                                stdout_chunks.append(chunk)
+                    break
+        except BaseException:
+            try:
+                process.kill()
+            except OSError:
+                pass
+            process.wait()
+            self._close_streams(process)
+            raise
+        self._close_streams(process)
+        return subprocess.CompletedProcess(
+            ["git", *arguments],
+            process.returncode,
+            b"".join(stdout_chunks).decode("utf-8", errors="replace"),
+            b"".join(stderr_chunks).decode("utf-8", errors="replace"),
+        )
+
+    @staticmethod
+    def _close_streams(process: subprocess.Popen[bytes]) -> None:
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
 
     def _managed_agents_content(self, candidate: WorkspaceCandidate) -> str:
         path = validate_workspace_root_file(
@@ -1134,6 +1236,29 @@ def _repository_short_name(repository: str) -> str:
             "请检查 Project Profile 的 repositories.default 配置",
         )
     return name
+
+
+def _forward_stderr(chunk: bytes) -> None:
+    """把 git 的原始 stderr 字节实时转发给人读终端。
+
+    真实终端下走 sys.stderr.buffer 保持字节原样（git --progress 用 \\r
+    行内刷新，不能按 \\n 切行）；测试环境 stderr 被替换为文本流时降级解码。
+    """
+    stream = sys.stderr
+    binary = getattr(stream, "buffer", None)
+    if binary is not None:
+        binary.write(chunk)
+        binary.flush()
+    else:
+        stream.write(chunk.decode("utf-8", errors="replace"))
+        stream.flush()
+
+
+def _stderr_tail(stderr: str, limit: int = 4096) -> str:
+    """截取 git stderr 尾部，供失败 JSON 的诊断信息使用。"""
+    if len(stderr) <= limit:
+        return stderr
+    return stderr[-limit:]
 
 
 def _blocked(

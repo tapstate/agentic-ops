@@ -146,6 +146,20 @@ class WorkspaceInitTest(unittest.TestCase):
                 )
             return subprocess.CompletedProcess(command, 0, "HEAD\n", "")
 
+        def fake_git_streaming(
+            _initializer: object,
+            command: list[str],
+            *,
+            stall_warn_interval: float = 30.0,
+        ) -> subprocess.CompletedProcess[str]:
+            target = Path(command[-1])
+            (target / ".git").mkdir(parents=True)
+            if clone_source_marker:
+                (target / ".agentic-ops-source").write_text(
+                    "maintainer\n", encoding="utf-8"
+                )
+            return subprocess.CompletedProcess(command, 0, "", "")
+
         with (
             redirect_stdout(stdout),
             redirect_stderr(stderr),
@@ -157,6 +171,10 @@ class WorkspaceInitTest(unittest.TestCase):
             mock.patch(
                 "ao_work.workspace_init.service.WorkspaceInitializer._run_git",
                 new=fake_git,
+            ),
+            mock.patch(
+                "ao_work.workspace_init.service.WorkspaceInitializer._run_git_streaming",
+                new=fake_git_streaming,
             ),
             mock.patch(
                 "ao_work.work_cli.validate_install_root",
@@ -264,6 +282,47 @@ class WorkspaceInitTest(unittest.TestCase):
                 )
             )
             self.assertEqual(agent["execution_identity"], preserved["execution_identity"])
+
+    def test_non_interactive_init_emits_stage_progress_on_stderr(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install = self.prepare_install(root)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            exit_code, payload, stderr, _ = self.run_cli(
+                (
+                    "--workspace-root",
+                    str(workspace),
+                    "workspace",
+                    "init",
+                    "--non-interactive",
+                    "--project",
+                    "tapdata",
+                    "--agent-id",
+                    "progress-agent",
+                    "--jira-email",
+                    "developer@example.test",
+                    "--git-name",
+                    "Progress Agent",
+                    "--git-email",
+                    "developer@example.test",
+                    "--github-login",
+                    "progress-agent",
+                    "--token-stdin",
+                    "--confirm",
+                )
+            )
+            self.assertEqual(0, exit_code, payload)
+            for expected in (
+                "初始化步骤 1/5",
+                "初始化步骤 2/5：下载业务源码仓库",
+                "源码仓库下载完成",
+                "初始化步骤 3/5",
+                "初始化步骤 4/5",
+                "初始化步骤 5/5",
+                "初始化完成：业务项目工作空间已就绪",
+            ):
+                self.assertIn(expected, stderr, stderr)
 
     def test_explicit_source_root_reused_without_readme(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
