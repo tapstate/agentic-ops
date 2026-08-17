@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ao_work.config import list_project_profiles
-from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
+from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, write_diagnostic
 from ao_work.task_state.io import read_json
 from ao_work.workspace import Workspace
 from ao_work.workspace_init.service import (
@@ -153,6 +153,7 @@ def execute_workspace_init(
         confirm_existing_config=True,
         check_remote=False,
     )
+    write_diagnostic("初始化完成：业务项目工作空间已就绪")
     return {**result, "post_preflight_status": post_preflight["status"]}
 
 

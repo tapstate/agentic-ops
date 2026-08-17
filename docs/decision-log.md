@@ -52,6 +52,7 @@
 | D-044 | 业务任务结束后可直接形成 AgenticOps 改进 PR | 业务任务优先通过人工校正确保正确完成；任务结束后 AI 基于脱敏证据总结自动化和质量问题。人工确认后离开业务工作空间，在独立 AgenticOps worktree 的 maintainer 工作面完成改进、原场景回归并创建 `develop` PR，无需重新描述问题。 |
 | D-045 | 源头维护和业务研发采用两个硬隔离工作面 | 工作面命名为 `maintainer` / `developer`，命令分别为 `ao-maint` / `ao-work`。目录先按工作面再按类型分层；根 AI 入口固定 maintainer，业务项目 AI 入口固定 developer；Runtime、Skill、Rule、授权、配置、状态和测试不得交叉。不得保留 `agentic-cli` 别名或通过 `--mode` 切换；Skill 在标准 frontmatter 的 `metadata.workplane` 声明唯一工作面。 |
 | D-046 | `~/.agentic-ops` 只交付 developer 工作面 | 安装目录采用 developer-only sparse managed clone，不包含 maintainer 运行资产，也不代表研发员；研发员身份和 Jira 凭证保存在各业务项目工作空间。项目维护必须在源头仓库或独立 worktree 中通过 `ao-maint` 完成。 |
+| D-047 | 源码克隆不设超时，用流式进度、停滞提示与阶段日志保障可观测性 | 大仓库 + 慢网络下 `workspace init` 的 `git clone` 无限等待，`--progress` 输出经 stderr 实时转发给用户自行判断快慢；stderr 持续无输出超过 30s 输出停滞提示（只提示、不终止进程）；`Ctrl+C` 中断由初始化回滚清理，不残留污染。该决策修订 2026-08-17 曾选择暂不做的“阶段进度日志（方案 A）”，并取代固定 120s 克隆超时。preflight 的 `ls-remote` 等秒级 git 检查仍保留 20s 超时；失败 JSON 的 `source_checkout_failed` 增加 `stderr_tail` 诊断字段。 |
 
 ## 2. 当前无需决策事项
 
