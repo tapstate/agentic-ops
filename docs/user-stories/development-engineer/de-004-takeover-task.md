@@ -26,7 +26,16 @@ ao-work capability show takeover_task
 ao-work task start TAP-123
 ```
 
-它从当前工作空间、Project Profile 和 Jira 卡片读取 Issue ID、Project、经办人、状态、标题、描述与任务类型，生成或恢复本地 `agentic_run_id`。之后先分析缺项并从带证据的 Jira、Profile、源码和 Runtime 回读中自动补全，必须展示完整准入摘要供用户确认，不能只给一个 ID。确认后再形成方案并按 L1 直接实施、L2 确认后实施、L3 修改设计并重新评估、L4 停止升级分流。它不写 Jira、不设置 `agentic_id`、不改变状态，也不代表 `takeover_task` 已实现；输出固定包含 `formal_takeover_verified=false`。
+它从当前工作空间、Project Profile 和 Jira 卡片读取 Issue ID、Project、经办人、状态、标题、描述与任务类型，生成或恢复本地 `agentic_run_id`。之后由现役 `ao-work task intake assess|confirm` 校验带来源的 Jira、Profile、源码与 Runtime 补全信息，并展示完整准入摘要供用户确认，不能只给一个 ID；来源或 HEAD 变化会使旧确认失效。准入确认后由 `ao-work task solution classify|confirm` 按固定优先级分流：L1 直接进入下一门禁、L2 确认后进入下一门禁、L3 修改设计并重新评估、L4 停止升级。必要信息未补齐时只允许改变输入后重试一次。以上命令不写 Jira、不设置 `agentic_id`、不改变状态，也不代表 `takeover_task` 已实现；输出固定包含 `formal_takeover_verified=false`。
+
+现役命令为：
+
+```sh
+ao-work task intake assess --issue-key TAP-123 --agentic-run-id <RUN> --input-file <准入分析.json>
+ao-work task intake confirm --issue-key TAP-123 --agentic-run-id <RUN> --confirm-intake-digest <DIGEST> --confirmed-by <NAME> --authorization-reference user-confirmation:TAP-123:<RUN>:<DIGEST>
+ao-work task solution classify --issue-key TAP-123 --agentic-run-id <RUN> --input-file <方案.json>
+ao-work task solution confirm --issue-key TAP-123 --agentic-run-id <RUN> --confirm-solution-digest <DIGEST> --confirmed-by <NAME> --authorization-reference user-confirmation:TAP-123:<RUN>:<DIGEST>
+```
 
 从正式接管到 PR 审查由同一 `task_owner` 持续负责。`agentic_next_action.executor` 只表示当前步骤由 Runtime、当前 AI、人、reviewer 或项目工具执行，不代表 Jira 经办人或任务所有权变更。当前 `ownership_effect` 只允许 `none`；`task_transfer` 保留为 `capability_gap`，如需转派必须停止并由人决定，详细合同后续单独设计。
 

@@ -227,6 +227,61 @@ class TaskStore:
             )
             return True
 
+    def record_gate_transition(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        *,
+        stage: str,
+        next_action: str,
+        operation: str,
+        status: str,
+        evidence: dict[str, Any],
+    ) -> dict[str, Any]:
+        self._validate_issue_key(issue_key)
+        self._validate_run_id(agentic_run_id)
+        for field, value in (
+            ("stage", stage),
+            ("next_action", next_action),
+            ("operation", operation),
+            ("status", status),
+        ):
+            self._validate_component(field, value)
+        normalized_evidence = self._validate_readback_evidence(evidence)
+        with self._lock(issue_key):
+            task_dir = self._task_dir(issue_key)
+            self._require_complete_task_dir(task_dir)
+            task = read_json(task_dir / "task.json")
+            if task.get("agentic_run_id") != agentic_run_id:
+                raise RuntimeErrorResult(
+                    code="task_identity_mismatch",
+                    message="任务门禁事件运行编号与任务绑定不一致",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请使用当前任务绑定的 agentic_run_id",
+                )
+            progress_path = task_dir / "progress.json"
+            progress = read_json(progress_path)
+            progress.update(
+                {
+                    "stage": stage,
+                    "agentic_next_action": next_action,
+                    "terminal": False,
+                    "updated_at": self._timestamp(),
+                    "content_version": int(progress.get("content_version", 0)) + 1,
+                }
+            )
+            atomic_write_json(progress_path, progress)
+            event = self._journal_event(
+                task,
+                operation,
+                status,
+                retry_safe=status != "completed",
+            )
+            event["evidence"] = normalized_evidence
+            append_ndjson(task_dir / "journal.ndjson", event)
+            return {"progress": progress, "event": event}
+
     def record_external_readback(
         self,
         issue_key: str,

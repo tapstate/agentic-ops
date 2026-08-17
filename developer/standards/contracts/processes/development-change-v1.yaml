@@ -16,6 +16,9 @@ ownership:
 stages:
   - id: task_intake
     responsible_role: ai_agent
+    runtime_operations:
+      - task_intake_assess
+      - task_intake_confirm
     input_fields:
       - jira_issue_facts
       - project_profile
@@ -33,9 +36,23 @@ stages:
       - assumptions
       - impacts
       - confirmed_intake_digest
+      - source_context_digest
+      - source_head_sha
+      - intake_confirmation_reference
     review_gate: user_intake_confirmation
+    invalidated_by:
+      - jira_or_profile_context_changed
+      - source_head_changed
+      - source_evidence_changed
+    retry_policy:
+      max_additional_attempts_per_unchanged_source_cycle: 1
+      same_input_allowed: false
+      requires_state_readback: true
+      exhausted_action: escalate_to_human
   - id: solution_classification
     responsible_role: ai_agent
+    runtime_operations:
+      - solution_gate
     required_before_solution:
       - confirmed_intake_digest
     levels:
@@ -53,7 +70,19 @@ stages:
       - solution_level
       - classification_evidence
       - agentic_next_action
+      - solution_digest
+      - solution_confirmation_reference
     review_gate: level_specific_gate
+    deterministic_priority:
+      - L4
+      - L3
+      - L2
+      - L1
+    confirmation:
+      L1: not_required
+      L2: current_solution_digest_required
+      L3: forbidden_until_design_revision_and_reassessment
+      L4: forbidden
   - id: waiting_takeover
     responsible_role: development_engineer
     input_fields:

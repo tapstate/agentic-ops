@@ -88,6 +88,16 @@ ao-work task start TAP-12289
 
 Runtime 会自动获取 Jira Issue ID、Project、经办人、状态、标题、描述和任务类型，复用工作空间 Profile、账户、仓库与执行身份，并生成或恢复 `agentic_run_id`。该命令不写 Jira，也不代表正式接管；它把尚需审查的计划、范围、分支、验证和权限作为简短清单交给 AI 与用户。
 
+AI 随后把分析写入工作空间普通 JSON，并依次调用：
+
+```sh
+ao-work task intake assess --issue-key TAP-12289 --agentic-run-id <RUN> --input-file <准入分析.json>
+ao-work task intake confirm --issue-key TAP-12289 --agentic-run-id <RUN> --confirm-intake-digest <DIGEST> --confirmed-by <NAME> --authorization-reference user-confirmation:TAP-12289:<RUN>:<DIGEST>
+ao-work task solution classify --issue-key TAP-12289 --agentic-run-id <RUN> --input-file <方案.json>
+```
+
+Runtime 会自动合并 Jira、Project Profile、工作空间与 run 快照，核对源码证据和 HEAD，并给出完整准入摘要、固定 L1–L4 分级和唯一下一动作。用户确认的是完整内容，不是孤立 digest。只有 L2 需要再调用 `task solution confirm`；L1 直接进入下一门禁，L3 先修改设计并重新分析，L4 停止。必要信息未补齐时，同一来源周期只允许改变输入后重试一次。
+
 初始化最后写入 `.agentic-ops/agent.json`、当前工作空间 `AGENTS.md` 和 `.agents/skills/`。该 AI 入口固定进入 developer 工作面；Codex 从标准仓库级 `.agents/skills/` 发现受管 developer Skill，规则正文直接写入 `AGENTS.md`，标准资产由 `ao-work` 从受信安装根解析。业务仓库不需要也不应创建不存在的 `developer/...` 相对路径。
 
 业务项目 AI 工作空间与源码仓库必须使用两个独立目录，不能相同，也不能互相嵌套。默认源码目录会创建在工作空间同级目录。工作空间位于某个 Git 仓库时，初始化会把该工作空间的 `.agentic-ops/` 写入该仓库的 `.git/info/exclude`；Jira token 等身份状态不得出现在 `git status` 中。生成的 `AGENTS.md` 和 `.agents/skills/` 是 AI 直接可发现的受管副本；`workspace preflight` 会检查 Skill 缺失、漂移、额外资产和 maintainer 污染。

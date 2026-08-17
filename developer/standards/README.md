@@ -37,7 +37,7 @@ ao-work capability show <operation>
 
 `ao-work` 只判定当前原子步骤是否完成，不把“命令成功”扩大为“整个任务成功”。例如 `task start` 成功只表示 Jira 事实与本地 run 已建立；`jira ... apply` 成功后仍要 readback；`task-run finalize` 才能给出本次协议结论，并且真实任务仍停在 PR 审查。
 
-当前低参数任务入口是 `ao-work task start <KEY>`：它从当前工作空间、Project Profile 与 Jira 卡片自动创建或恢复本地运行上下文，并要求 AI 先识别缺项、从可验证来源自动补全，展示完整准入摘要供用户确认。确认前不形成最终方案；确认后方案分为 L1 直接实施、L2 确认后实施、L3 先修改设计并重新分析、L4 停止升级。准入摘要必须展示事实、补全值及来源、仍缺项、假设、影响和方案级别，不能只给一个 ID。该入口不写 Jira、不提交代码，也不等价于正式 takeover。`ao-work jira inspect --issue-key <KEY>` 继续作为只读基础 Jira 事实入口；二者都不等价于旧 `inspect-task` 富输出。Project Profile 仍由工作空间初始化与 Runtime 内部加载。资产解析优先级固定为：
+当前低参数任务入口是 `ao-work task start <KEY>`：它从当前工作空间、Project Profile 与 Jira 卡片自动创建或恢复本地运行上下文。随后 AI 只负责形成普通 JSON 语义输入，Runtime 依次执行 `ao-work task intake assess|confirm` 与 `ao-work task solution classify|confirm`：核对 Jira/Profile/Runtime 精确值、源码普通文件摘要和干净 HEAD，自动补齐确定性字段，展示完整准入摘要供用户确认，并按固定优先级给出 L1–L4。确认前不形成最终方案；L1 直接进入下一门禁，L2 绑定方案摘要后实施，L3 修改设计并重新分析，L4 停止升级。必要信息未补齐时只允许改变输入后重试一次；来源、HEAD、证据、范围或方案变化会使旧确认失效。准入摘要必须展示事实、补全值及来源、仍缺项、假设和影响，不能只给一个 ID。以上入口不写 Jira、不提交代码，也不等价于正式 takeover。`ao-work jira inspect --issue-key <KEY>` 继续作为只读基础 Jira 事实入口；它不等价于旧 `inspect-task` 富输出。Project Profile 仍由工作空间初始化与 Runtime 内部加载。资产解析优先级固定为：
 
 ```text
 项目工作空间 overlay

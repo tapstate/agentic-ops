@@ -174,6 +174,36 @@ class TaskStateTest(unittest.TestCase):
                 sync["external_writes"]["jira_comment:run-1-analysis"]["status"],
             )
 
+    def test_gate_transition_updates_progress_and_appends_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = TaskStore(root)
+            store.initialize(IDENTITY)
+            recorded = store.record_gate_transition(
+                IDENTITY.issue_key,
+                IDENTITY.agentic_run_id,
+                stage="task_intake_confirmed",
+                next_action="classify_solution",
+                operation="task_intake_confirm",
+                status="completed",
+                evidence={"intake_digest": "a" * 64},
+            )
+            self.assertEqual(
+                "classify_solution",
+                recorded["progress"]["agentic_next_action"],
+            )
+            self.assertEqual("task_intake_confirm", recorded["event"]["operation"])
+            self.assertEqual("a" * 64, recorded["event"]["evidence"]["intake_digest"])
+            task_dir = root / ".agentic-ops" / "tasks" / IDENTITY.issue_key
+            journal = [
+                json.loads(line)
+                for line in (task_dir / "journal.ndjson")
+                .read_text(encoding="utf-8")
+                .splitlines()
+            ]
+            self.assertEqual(2, len(journal))
+            self.assertEqual("task_intake_confirm", journal[-1]["operation"])
+
     def test_all_public_methods_reject_path_components_before_any_write(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

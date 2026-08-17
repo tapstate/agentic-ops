@@ -37,12 +37,13 @@ ao-maint integration preflight-task-to-pr-e2e <ISSUE-KEY>
 
 用稳定 main 安装的 developer `ao-work` 再次查询能力目录。若必要原子能力未实现，输出准确 capability id、当前状态、缺少的确定性门禁和建议实现位置，然后停止；不得创建半初始化业务工作空间或访问 Jira。
 3. 能力齐备后，向用户展示本次读取与真实副作用边界，获得 Jira 读取和隔离工作空间初始化授权；随后创建隔离目录并运行 `ao-work workspace init`。让用户通过终端隐藏输入完成唯一 Jira 账户授权，并确认配置指定的身份、Project Profile、源码仓库和执行身份。不要把 token 放入参数、prompt、日志或结果包。
-4. 运行 `ao-work workspace preflight` 和 `ao-work task start <ISSUE-KEY>`。developer AI 先完整分析 Jira、Project Profile 和业务源码，识别缺项，并只用带证据的已有信息自动补全；输出已知事实、补全值及来源、无法补齐项、假设和影响。必要信息仍缺失时进入 L4；否则先把补全后的准入摘要交给用户确认，此前不制定最终方案、不修改代码。
-5. 准入摘要确认后再形成方案，并按证据分级：
+4. 运行 `ao-work workspace preflight` 和 `ao-work task start <ISSUE-KEY>`。developer AI 先完整分析 Jira、Project Profile 和业务源码，把语义分析写入工作空间普通 JSON，再调用 `ao-work task intake assess --issue-key <KEY> --agentic-run-id <RUN> --input-file <相对JSON>`。Runtime 校验 Jira/Profile/Runtime 精确值、源码证据摘要和干净 HEAD，自动补齐确定性字段，并输出已知事实、补全值及来源、无法补齐项、假设、影响和 `intake_digest`。必要信息仍缺失时只按返回的同一 `retry_key` 改变输入后重试一次；否则把完整准入摘要交给用户确认，此前不制定最终方案、不修改代码。用户确认完整内容后调用 `ao-work task intake confirm`，其引用必须精确绑定 issue、run 与当前 digest。
+5. 准入确认后再形成方案 JSON，并调用 `ao-work task solution classify --issue-key <KEY> --agentic-run-id <RUN> --input-file <相对JSON>`。Runtime 按固定风险标志和证据分级：
    - L1：信息完整、范围明确、沿用既有设计且风险在已授权边界内，直接开始实现。
    - L2：方案可执行，但含用户选择、真实外部副作用或非平凡风险，确认后实现。
    - L3：触及架构、公共合同、安全边界、数据迁移或已确认设计，先修改设计并重新分析、确认和分级。
    - L4：事实冲突、必要信息无法补齐、权限或能力不足，停止并转人工。
+   只有 L2 调用 `ao-work task solution confirm` 绑定当前 `solution_digest`。Jira/Profile 快照、源码 HEAD、证据、范围、风险或方案变化后旧结论失效，必须重新准入和分级。
 6. 正式接管必须继续调用独立的 `takeover_task` 原子能力；`task start` 只建立本地 run，不能冒充接管。在隔离业务工作空间启动独立 developer AI，要求它加载工作空间 `AGENTS.md` 和 `$run-task-to-pr-test`，逐步消费 `agentic_next_action`。开放式代码理解、方案设计和实现由 AI 完成；Jira、Git、GitHub、验证、证据和门禁由 Runtime 判定。
 7. 每个原子步骤完成后，根据实际结果执行返回的唯一下一动作，直到 `stop_workflow=true`、L4、重试耗尽或到达 PR 审查。方案、范围、外部事实或批准摘要变化后，重新执行信息分析和方案分级，不沿用旧结论。
    从正式接管到 PR 审查保持配置指定的同一 `task_owner`。reviewer、人工确认、Runtime 或项目工具参与步骤不构成转派。如需转派，记录 `task_transfer` 能力缺口并停止，由人决定；本 Skill 不预设转派方案。

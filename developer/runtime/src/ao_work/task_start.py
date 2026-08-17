@@ -12,6 +12,7 @@ from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.jira.model import plain_text
 from ao_work.jira.service import JiraService
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
+from ao_work.task_gate import record_task_start_context
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.task_state.io import read_json
 from ao_work.workspace import Workspace
@@ -94,30 +95,44 @@ def execute_task_start(
     ).hexdigest()
     assert workspace.config_path is not None
     agent_config = read_json(workspace.config_path)
+    issue_payload = {
+        "id": issue.issue_id,
+        "key": issue.key,
+        "project_key": issue.project_key,
+        "summary": issue.summary,
+        "status": issue.status,
+        "mapped_status": mapped_status,
+        "issue_type": issue.issue_type,
+        "assignee_account_id": issue.assignee,
+        "description": description_text,
+        "issue_content_sha256": issue_content_sha256,
+    }
+    workspace_defaults = {
+        "agent_id": agent_config.get("agent_id"),
+        "project_profile": context.profile.profile_id,
+        "connection_id": context.connection.connection_id,
+        "jira_base_url": context.connection.base_url,
+        "jira_account_id": account["account_id"],
+        "repository": context.profile.default_repository,
+        "source_root": agent_config.get("source_root"),
+        "execution_identity": agent_config.get("execution_identity"),
+    }
+    profile_snapshot = _profile_snapshot(context.profile, issue)
+    intake_source = record_task_start_context(
+        workspace,
+        store,
+        issue_key=issue.key,
+        agentic_run_id=agentic_run_id,
+        issue=issue_payload,
+        workspace_defaults=workspace_defaults,
+        project_profile=profile_snapshot,
+    )
     return {
-        "issue": {
-            "id": issue.issue_id,
-            "key": issue.key,
-            "project_key": issue.project_key,
-            "summary": issue.summary,
-            "status": issue.status,
-            "mapped_status": mapped_status,
-            "issue_type": issue.issue_type,
-            "assignee_account_id": issue.assignee,
-            "description": description_text,
-            "issue_content_sha256": issue_content_sha256,
-        },
-        "workspace_defaults": {
-            "agent_id": agent_config.get("agent_id"),
-            "project_profile": context.profile.profile_id,
-            "connection_id": context.connection.connection_id,
-            "jira_base_url": context.connection.base_url,
-            "jira_account_id": account["account_id"],
-            "repository": context.profile.default_repository,
-            "execution_identity": agent_config.get("execution_identity"),
-        },
+        "issue": issue_payload,
+        "workspace_defaults": workspace_defaults,
         "agentic_run_id": agentic_run_id,
         "task_state_created": task_state_created,
+        "intake_source": intake_source,
         "configuration_sources": {
             "workspace": ["agent_id", "project_profile", "Jira 账户", "源码仓库", "执行身份"],
             "project_profile": ["Jira 站点", "Project", "状态/字段映射", "默认仓库"],
@@ -181,21 +196,112 @@ def execute_task_start(
         },
         "agentic_next_action": {
             "executor": "ai",
-            "action": "analyze_and_complete_task_information",
+            "action": "assess_task_intake",
             "required_inputs": [
-                "issue",
-                "workspace_defaults",
+                "issue_key",
                 "agentic_run_id",
-                "intake_gate",
-                "solution_gate",
+                "intake_input_file",
             ],
-            "allowed_operations": ["report_write"],
+            "allowed_operations": ["task_intake_assess"],
             "requires_authorization": False,
             "stop_workflow": False,
             "ownership_effect": "none",
-            "reason": "先分析缺项并按证据自动补全，展示准入摘要确认后再形成和分级方案",
+            "reason": "先由 Runtime 校验缺项、证据化补全和摘要 digest；确认完整准入摘要后才能形成方案",
         },
     }
+
+
+def _profile_snapshot(profile: Any, issue: Any) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    resolved: dict[str, Any] = {}
+    sections = _description_sections(issue.description)
+    for logical_name, mapping in sorted(profile.fields.items()):
+        declaration = {
+            "source": mapping.source,
+            "jira_field": mapping.jira_field,
+            "section": mapping.section,
+            "state": mapping.state,
+            "writable": mapping.writable,
+            "required": mapping.required,
+        }
+        fields[logical_name] = declaration
+        value: Any = None
+        reference = ""
+        if mapping.source == "workspace_repo_mapping":
+            value = profile.default_repository
+            reference = "workspace_defaults.repository"
+        elif mapping.source == "jira_field" and mapping.jira_field:
+            reference = f"issue.fields.{mapping.jira_field}"
+            if mapping.jira_field == "assignee":
+                value = issue.assignee
+            elif mapping.jira_field == "summary":
+                value = issue.summary
+            else:
+                value = _plain_field_value(issue.fields.get(mapping.jira_field))
+        elif mapping.source == "jira_description_section" and mapping.section:
+            reference = f"issue.description_sections.{mapping.section}"
+            value = sections.get(mapping.section)
+        resolved[logical_name] = {
+            **declaration,
+            "reference": reference,
+            "value": value,
+        }
+    return {
+        "profile_id": profile.profile_id,
+        "connection_id": profile.connection_id,
+        "project_key": profile.project_key,
+        "issue_types": list(profile.issue_types),
+        "default_repository": profile.default_repository,
+        "status_mapping": dict(sorted(profile.status_mapping.items())),
+        "fields": fields,
+        "resolved_fields": resolved,
+    }
+
+
+def _description_sections(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict) or value.get("type") != "doc":
+        return {}
+    content = value.get("content")
+    if not isinstance(content, list):
+        return {}
+    result: dict[str, list[str]] = {}
+    current = ""
+    for node in content:
+        if not isinstance(node, dict):
+            continue
+        text = plain_text(node).strip()
+        if node.get("type") == "heading":
+            current = text
+            if current:
+                result.setdefault(current, [])
+            continue
+        if current and text:
+            result[current].append(text)
+    return {
+        title: "\n".join(lines).strip()
+        for title, lines in result.items()
+        if "\n".join(lines).strip()
+    }
+
+
+def _plain_field_value(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, list):
+        return [_plain_field_value(item) for item in value]
+    if isinstance(value, dict):
+        if value.get("type") == "doc":
+            return plain_text(value).strip()
+        for key in ("accountId", "value", "name", "key"):
+            candidate = value.get(key)
+            if isinstance(candidate, (str, int, float, bool)):
+                return candidate
+        return {
+            str(key): _plain_field_value(item)
+            for key, item in sorted(value.items())
+            if isinstance(key, str)
+        }
+    return str(value)
 
 
 def _existing_task(store: TaskStore, issue_key: str) -> dict[str, Any] | None:
