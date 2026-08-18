@@ -1,6 +1,6 @@
 # 工作流配置
 
-> 本文定义目标配置语义，不代表所有对应 Runtime 命令已经实现。现役可调用性只以 `ao-work capability list|show` 为准；`profile_resolve`、`update_task_form` 和 Jira transition 当前为 `capability_gap` 时必须停止或转人工。
+> 本文定义目标配置语义，不代表所有对应 Runtime 命令已经实现。现役可调用性只以 `ao-work capability list|show` 为准；`profile_resolve`、`update_task_form` 当前为 `capability_gap` 时必须停止或转人工。Jira 状态流转已实现为 `jira_transition` 能力（`ao-work jira transition plan|apply|readback`）。
 
 ## 1. 目的
 
@@ -169,6 +169,20 @@ templates:
 - `Profile` 必须说明关键专业审查节点如何映射到标准字段、Jira 状态、拉取请求审查、CI 或人工确认。
 - `Profile` 必须说明失败后允许重试还是必须重做前序阶段。
 - `Profile` 必须能被 `ao-work` 前置检查校验。
+
+### 4.1 Jira 状态与 transition 映射（快速适配路径）
+
+Profile 的 `statuses` 与 `transitions` 节是 Jira 工作流适配的唯一配置点；Jira 状态流程易变，适配只改配置、不改 Runtime 代码：
+
+- `statuses`：Jira 状态名 -> 标准 stage（`waiting_takeover` / `implementation` / `completed`）。
+- `transitions`：transition key -> `{name, id, from, to}`。
+  - `id` 为 Jira 稳定 transition ID，配置后 D-037 优先按 ID 匹配并校验 `from`/`to`。
+  - 未配置 `id` 时按名称兜底，要求 Jira 可用列表中同名 transition 唯一且 `from`/`to` 匹配。
+  - `from` 为可发起该流转的 Jira 状态列表；`to` 为流转后目标状态名。
+  - 候选重复、目标不符、当前不可用或回读不一致一律阻断，禁止模糊匹配。
+- AIAgent 默认禁止把卡片推进到 `completed` stage 对应状态（无合入权）；完成态由研发工程师在 Jira 处理。
+- 匹配失败时 `jira transition plan` 输出适配对照材料（当前状态 + Jira 可用 transitions 完整列表 + 已配置条目），照抄补齐 `transitions` 节后重新 plan 即可。
+- 未配置的流转（例如 正在进行 -> Pull Request Submitted）按缺省可用、渐进补充原则，等真实工作流数据确认后逐条补齐。
 - `Profile` 不得包含 secrets、tokens 或 private keys。
 - `Profile` 中的 `repo` 映射必须能解释任务如何定位目标源码。
 - `Profile` 缺字段时，AIAgent 不能自行猜测，应请求研发工程师补充。

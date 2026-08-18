@@ -12,6 +12,7 @@ from ao_work.config import (
 )
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.jira.service import JiraService
+from ao_work.jira.transition import match_transition
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.workspace import Workspace
@@ -120,22 +121,24 @@ def execute_task_takeover(
     transitions: list[dict[str, str]] = []
     if issue.status != target_status:
         transitions = client.available_transitions(issue_key)
-        target_name = _transition_name_for(context.profile, issue.status)
+        target_key = _transition_key_for(context.profile, issue.status)
         match = None
-        if target_name:
-            match = next(
-                (item for item in transitions if item["name"] == target_name),
-                None,
+        if target_key:
+            match = match_transition(
+                issue.status,
+                transitions,
+                {"transitions": context.profile.transition_mapping},
+                target_key=target_key,
             )
         if match is None:
             raise _blocked(
                 "jira_transition_mapping_gap",
-                f"Jira 可用 transition 中没有目标 transition {target_name or target_status}",
+                f"Jira 可用 transition 中没有目标 transition {target_key or target_status}",
                 "请人工在 Jira 执行状态流转，或核对 Project Profile 状态映射",
             )
         client.execute_transition(
             issue_key,
-            match["id"],
+            match[0],
             comment=transition_comment,
         )
 
@@ -212,30 +215,27 @@ def execute_task_takeover(
     }
 
 
-def _transition_name_for(profile: Any, current_status: str) -> str | None:
-    """从 Project Profile transition_mapping 推导当前状态 → implementation 的 transition 名。
+def _transition_key_for(profile: Any, current_status: str) -> str | None:
+    """从 Project Profile transition_mapping 推导当前状态 → implementation 的 transition key。
 
-    transition_mapping 形如 {transition_key: {"name": "Start Progress", "from": [...]}}。
-    取第一个 from 包含当前状态且目标为 implementation 的 transition；否则回退到
-    key 为 start_progress / start 的条目。
+    transition_mapping 形如 {transition_key: {"name": ..., "id": ..., "from": [...], "to": ...}}。
+    优先取 from 包含当前状态的条目 key；否则回退到 key 为 start_progress / start / begin 的条目。
+    key 交给共享 D-037 匹配器（match_transition）做严格匹配。
     """
     raw = getattr(profile, "transition_mapping", None) or {}
-    candidates: list[tuple[str, dict[str, str]]] = []
+    candidates: list[tuple[str, dict[str, Any]]] = []
     for key, spec in raw.items():
         if not isinstance(spec, dict):
             continue
-        name = str(spec.get("name") or "").strip()
-        if not name:
-            continue
         from_states = spec.get("from")
-        candidates.append((key, {"name": name, "from": from_states}))
+        candidates.append((key, {"name": str(spec.get("name") or "").strip(), "from": from_states}))
     for key, spec in candidates:
         from_states = spec["from"]
         if isinstance(from_states, (list, tuple)) and current_status in from_states:
-            return spec["name"]
+            return key
     for key, spec in candidates:
         if key in ("start_progress", "start", "begin"):
-            return spec["name"]
+            return key
     return None
 
 

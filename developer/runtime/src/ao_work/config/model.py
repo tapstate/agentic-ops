@@ -59,7 +59,7 @@ class ProjectProfile:
     issue_types: tuple[str, ...] = ()
     fields: dict[str, FieldMapping] = field(default_factory=dict)
     status_mapping: dict[str, str] = field(default_factory=dict)
-    transition_mapping: dict[str, dict[str, str]] = field(default_factory=dict)
+    transition_mapping: dict[str, dict[str, Any]] = field(default_factory=dict)
     default_repository: str | None = None
     workspace_source_root: str | None = None
     workspace_repository: str | None = None

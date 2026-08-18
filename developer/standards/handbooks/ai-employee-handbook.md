@@ -125,6 +125,10 @@ ao-work jira description apply --plan-file <managed-path> --confirm-plan-id <pla
 ao-work jira worklog plan --issue-key TAP-123 --idempotency-key <key> --title <中文标题> --details-file <path> --included-work-file <yaml-or-json> --excluded-waiting-category <中文类别> --time-spent-seconds <seconds> --started <timestamp> --exclude-waiting --plan-file .agentic-ops/tasks/TAP-123/runs/<agentic_run_id>/jira-plans/<name>.json
 ao-work jira worklog apply --plan-file <managed-path> --confirm-plan-id <plan-id> --authorization-reference <reference>
 ao-work jira worklog readback --issue-key TAP-123 --idempotency-key <key> --plan-file <managed-path> --confirm-plan-id <plan-id>
+ao-work jira transition plan --issue-key TAP-123 --idempotency-key <key> --target-status <状态名> --plan-file .agentic-ops/tasks/TAP-123/runs/<agentic_run_id>/jira-plans/<name>.json
+ao-work jira transition plan --issue-key TAP-123 --idempotency-key <key> --target-transition <profile-key> --plan-file .agentic-ops/tasks/TAP-123/runs/<agentic_run_id>/jira-plans/<name>.json
+ao-work jira transition apply --plan-file <managed-path> --confirm-plan-id <plan-id> --authorization-reference <reference>
+ao-work jira transition readback --issue-key TAP-123 --idempotency-key <key> --plan-file <managed-path> --confirm-plan-id <plan-id>
 ```
 
 ### workspace init 非交互全参示例

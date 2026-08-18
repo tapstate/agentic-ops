@@ -174,6 +174,18 @@ capabilities:
     summary: 以 plan、apply、readback 协议向 Jira 追加中文评论。
     next_action: 请先生成计划，获得计划编号的明确授权后 apply；结果不明确时只执行 readback。
 
+  - id: jira_transition
+    source: contract
+    contract: contracts/operations/jira-transition.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [jira, transition, plan]
+      - [jira, transition, apply]
+      - [jira, transition, readback]
+    summary: 以 plan、apply、readback 协议把 Jira 任务卡片流转到项目工作流既有状态；D-037 严格匹配（稳定 ID 优先、名称兜底需唯一且 from/to 匹配、禁止模糊匹配），AIAgent 默认禁止推进完成态，apply 必须授权引用并回读确认。
+    next_action: 请先生成计划（目标状态必须来自 profile 映射 ∩ Jira 可用列表），获得计划编号的明确授权后 apply；结果不明确时只执行 readback。
+
   - id: jira_description
     source: contract
     contract: contracts/operations/jira-description.yaml
