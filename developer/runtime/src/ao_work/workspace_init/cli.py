@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from ao_work.config import list_project_profiles
+from ao_work.config import list_project_profiles, resolve_source_pool_root
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, write_diagnostic
 from ao_work.task_state.io import read_json
 from ao_work.workspace import Workspace
@@ -27,6 +27,7 @@ def configure_workspace_init_parser(
     init.add_argument("--project", dest="project_profile")
     init.add_argument("--agent-id")
     init.add_argument("--source-root")
+    init.add_argument("--source-pool-root")
     init.add_argument("--jira-email")
     init.add_argument("--git-name")
     init.add_argument("--git-email")
@@ -87,6 +88,7 @@ def execute_workspace_init(
         profile_id,
         agent_id,
         source_root=args.source_root,
+        source_pool_root=args.source_pool_root,
         credentials=credentials,
         execution_identity=execution_identity,
         persist_credentials=credentials is not None,
@@ -98,6 +100,7 @@ def execute_workspace_init(
             profile_id,
             agent_id,
             source_root=args.source_root,
+            source_pool_root=args.source_pool_root,
             credentials=credentials,
             execution_identity=execution_identity,
             persist_credentials=True,
@@ -110,6 +113,7 @@ def execute_workspace_init(
             profile_id,
             agent_id,
             source_root=args.source_root,
+            source_pool_root=args.source_pool_root,
             credentials=credentials,
             execution_identity=execution_identity,
             persist_credentials=True,
@@ -172,7 +176,14 @@ def execute_workspace_preflight(
     agent_id = _required_agent_value(agent, "agent_id")
     source_root = _required_agent_value(agent, "source_root")
     initializer = WorkspaceInitializer(workspace.root, install_root)
-    candidate = initializer.prepare(profile_id, agent_id, source_root=source_root)
+    configured_pool_root = resolve_source_pool_root(install_root)
+    pool_root_value = str(configured_pool_root) if configured_pool_root is not None else None
+    candidate = initializer.prepare(
+        profile_id,
+        agent_id,
+        source_root=source_root,
+        source_pool_root=pool_root_value,
+    )
     result = initializer.preflight(
         candidate,
         confirm_existing_config=False,

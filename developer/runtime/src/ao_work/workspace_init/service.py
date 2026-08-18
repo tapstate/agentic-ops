@@ -23,6 +23,7 @@ from ao_work.config import (
     load_jira_connection,
     load_project_profile,
     jira_site_identity,
+    resolve_source_pool_root,
     validate_workspace_jira_binding,
     validate_workspace_project_binding,
 )
@@ -32,7 +33,13 @@ from ao_work.git_security import github_repository_url_matches
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, write_diagnostic
 from ao_work.task_state.io import atomic_write_json, atomic_write_text, read_json
 from ao_work.task_state.locking import TaskLock
-from ao_work.workspace import Workspace, _source_ancestor, validate_business_source_root
+from ao_work.workspace import (
+    Workspace,
+    _source_ancestor,
+    task_worktree_path,
+    validate_business_source_root,
+    validate_source_pool_root,
+)
 from ao_work.workspace_security import (
     protect_workspace_env_from_git,
     read_workspace_root_file,
@@ -60,6 +67,7 @@ class WorkspaceCandidate:
     profile: ProjectProfile
     connection: JiraConnection
     source_root: Path
+    source_pool_root: Path | None
     repository: str
     email: str | None
     token: str | None
@@ -67,6 +75,7 @@ class WorkspaceCandidate:
     execution_identity: dict[str, str] | None = None
     persist_credentials: bool = False
     source_root_derived: bool = False
+    pool_mode: bool = False
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -79,6 +88,13 @@ class WorkspaceCandidate:
             "credential_source": self.credential_source,
             "repository": self.repository,
             "source_root": str(self.source_root),
+            "source_pool_root": str(self.source_pool_root) if self.source_pool_root else None,
+            "repository_count": len(self.profile.repository_candidates()),
+            "task_worktree_layout": (
+                "<pool_root>/<JIRA-KEY>/<from_branch>/<repo>"
+                if self.source_pool_root is not None
+                else None
+            ),
             "execution_identity": self.execution_identity,
         }
 
@@ -162,6 +178,7 @@ class WorkspaceInitializer:
         agent_id: str,
         *,
         source_root: str | None = None,
+        source_pool_root: str | None = None,
         credentials: tuple[str, str] | None = None,
         execution_identity: dict[str, str] | None = None,
         persist_credentials: bool = False,
@@ -260,12 +277,29 @@ class WorkspaceInitializer:
                         )
                     execution_identity = rebuilt_identity
         source_root_derived = not source_root
-        resolved_source = (
-            Path(source_root).expanduser().resolve()
-            if source_root
-            else self.root.parent / f"{self.root.name}-code" / _repository_short_name(repository)
-        )
-        resolved_source = validate_business_source_root(self.root, resolved_source)
+        # 池根必配：显式参数 > 研发员级配置 > 阻断（无兼容回退）。
+        if source_pool_root is not None:
+            pool_root = validate_source_pool_root(Path(source_pool_root))
+        else:
+            configured_pool_root = resolve_source_pool_root(self.install_root)
+            if configured_pool_root is None:
+                raise _blocked(
+                    "source_pool_root_invalid",
+                    "中央克隆池根（source_pool_root）未配置",
+                    "请先在 ~/.agentic-ops/user/config.yaml 配置 source_pool_root，"
+                    "或使用 --source-pool-root 显式指定（仅本次）",
+                )
+            pool_root = validate_source_pool_root(configured_pool_root)
+        if source_root:
+            resolved_source = validate_business_source_root(
+                self.root, Path(source_root).expanduser().resolve()
+            )
+            # 显式 source_root 等于池根时仍视为池模式（preflight 重放场景）。
+            pool_mode = resolved_source == pool_root
+        else:
+            # 池模式：source_root 语义改为池根（任务工作树在接管时创建）。
+            resolved_source = validate_business_source_root(self.root, pool_root)
+            pool_mode = True
         return WorkspaceCandidate(
             root=self.root,
             install_root=self.install_root,
@@ -273,6 +307,7 @@ class WorkspaceInitializer:
             profile=profile,
             connection=connection,
             source_root=resolved_source,
+            source_pool_root=pool_root,
             repository=repository,
             email=email,
             token=token,
@@ -280,6 +315,7 @@ class WorkspaceInitializer:
             execution_identity=execution_identity,
             persist_credentials=persist_credentials,
             source_root_derived=source_root_derived,
+            pool_mode=pool_mode,
         )
 
     def preflight(
@@ -341,13 +377,20 @@ class WorkspaceInitializer:
             with TaskLock(lock_path, timeout=5):
                 write_diagnostic("初始化步骤 1/5：校验并保护工作空间状态（防止凭证被 Git 跟踪）")
                 credential_protection = self._protect_workspace_state_from_git()
-                write_diagnostic(
-                    f"初始化步骤 2/5：下载业务源码仓库 {candidate.repository} → {candidate.source_root}"
-                )
-                source_status = self._ensure_source_checkout(candidate)
-                write_diagnostic(f"源码仓库下载完成（{source_status}）")
-                if candidate.source_root_derived:
-                    self._write_source_container_readme(candidate)
+                if candidate.pool_mode:
+                    write_diagnostic(
+                        f"初始化步骤 2/5：准备中央克隆池成员（{len(candidate.profile.repository_candidates())} 个仓库）→ {candidate.source_pool_root}"
+                    )
+                    source_status = self._prepare_pool_members(candidate)
+                    write_diagnostic(f"池成员准备完成（{source_status}）")
+                else:
+                    write_diagnostic(
+                        f"初始化步骤 2/5：下载业务源码仓库 {candidate.repository} → {candidate.source_root}"
+                    )
+                    source_status = self._ensure_source_checkout(candidate)
+                    write_diagnostic(f"源码仓库下载完成（{source_status}）")
+                    if candidate.source_root_derived:
+                        self._write_source_container_readme(candidate)
                 write_diagnostic("初始化步骤 3/5：写入工作空间配置与 AGENTS.md")
                 for directory in (
                     state_root / "tasks",
@@ -697,6 +740,23 @@ class WorkspaceInitializer:
                 "请安装 Git 后重试",
             )
         checks.append({"check": "git_available", "status": "passed"})
+        if candidate.pool_mode:
+            pool_root = validate_source_pool_root(candidate.source_pool_root or candidate.source_root)
+            pool_root.mkdir(parents=True, exist_ok=True)
+            repositories = candidate.profile.repository_candidates()
+            if not repositories:
+                raise _blocked(
+                    "source_pool_members_empty",
+                    "Project Profile 没有配置 repositories.default 或 repositories.list",
+                    "请先配置 profile 的默认仓库或仓库清单",
+                )
+            if check_remote:
+                self._reject_git_url_rewrites(None)
+                for repository in repositories:
+                    self._require_remote_access(_repository_url(repository))
+            checks.append({"check": "source_pool_root", "status": "passed"})
+            checks.append({"check": "source_pool_members_remote", "status": "passed"})
+            return "pool_ready"
         source = validate_business_source_root(candidate.root, candidate.source_root)
         if source.exists() and not source.is_dir():
             raise _blocked(
@@ -736,6 +796,11 @@ class WorkspaceInitializer:
     def _check_source_root_conflict(
         self, candidate: WorkspaceCandidate, checks: list[dict[str, str]]
     ) -> None:
+        if candidate.pool_mode:
+            # 池模式：池根由多个工作空间共享是设计意图，任务工作树按任务隔离；
+            # 旧式「共享写树不受支持」只适用于非池模式单仓库源码目录。
+            checks.append({"check": "source_root_conflict", "status": "pool_shared"})
+            return
         candidate_source = candidate.source_root.resolve()
         for entry in self._workspace_entries():
             other_root = Path(str(entry.get("workspace_root", ""))).expanduser()
@@ -813,15 +878,115 @@ class WorkspaceInitializer:
         )
         atomic_write_text(container / "README.md", content)
 
-    def _validate_checked_out_source(self, candidate: WorkspaceCandidate) -> None:
-        source = validate_business_source_root(candidate.root, candidate.source_root)
-        if not source.is_dir() or not (source / ".git").exists():
+    def _prepare_pool_members(self, candidate: WorkspaceCandidate) -> str:
+        """准备中央克隆池成员全集：认领已有池成员或流式克隆缺失成员。
+
+        - 池成员 = <pool_root>/<owner>/<repo> 普通完整克隆（保留主 checkout）。
+        - 已存在 → 认领（adopt）：校验 remotes 精确匹配、拒绝 URL 改写、
+          拒绝指向 AgenticOps 源头仓库；浅克隆自动流式 unshallow。
+        - 缺失 → 流式 clone；中断续传：已完成成员保留，下次补齐。
+        - 池成员级并发锁：<pool_root>/.locks/<owner>/<repo>.lock。
+        """
+        assert candidate.pool_mode
+        pool_root = validate_source_pool_root(
+            candidate.source_pool_root or candidate.source_root
+        )
+        pool_root.mkdir(parents=True, exist_ok=True)
+        repositories = candidate.profile.repository_candidates()
+        if not repositories:
+            raise _blocked(
+                "source_pool_members_empty",
+                "Project Profile 没有配置 repositories.default 或 repositories.list",
+                "请先配置 profile 的默认仓库或仓库清单",
+            )
+        prepared: list[str] = []
+        adopted = 0
+        cloned = 0
+        for repository in repositories:
+            member_dir = pool_root / repository
+            lock_path = pool_root / ".locks" / f"{repository.replace('/', '__')}.lock"
+            with TaskLock(lock_path, timeout=10):
+                if member_dir.is_dir() and any(member_dir.iterdir()):
+                    self._validate_checked_out_source(candidate, source=member_dir, repository=repository)
+                    if self._is_shallow_clone(member_dir):
+                        self._unshallow_pool_member(member_dir, repository)
+                        adopted += 1
+                    else:
+                        adopted += 1
+                    prepared.append(repository)
+                    continue
+                self._reject_git_url_rewrites(None)
+                result = self._run_git_streaming(
+                    ["clone", "--progress", _repository_url(repository), str(member_dir)]
+                )
+                if result.returncode != 0:
+                    raise _blocked(
+                        "source_checkout_failed",
+                        f"池成员克隆失败：{repository}",
+                        "请检查 GitHub 权限和网络后重试；未写入初始化完成标记，已完成成员保留",
+                        details={"stderr_tail": _stderr_tail(result.stderr)},
+                    )
+                self._validate_checked_out_source(candidate, source=member_dir, repository=repository)
+                cloned += 1
+                prepared.append(repository)
+        self._write_source_pool_readme(candidate, pool_root, repositories)
+        return f"adopted={adopted},cloned={cloned},total={len(prepared)}"
+
+    def _is_shallow_clone(self, source: Path) -> bool:
+        result = self._run_git(["-C", str(source), "rev-parse", "--is-shallow-repository"])
+        return result.returncode == 0 and result.stdout.strip() == "true"
+
+    def _unshallow_pool_member(self, source: Path, repository: str) -> None:
+        self._reject_git_url_rewrites(source)
+        result = self._run_git_streaming(["-C", str(source), "fetch", "--unshallow", "origin"])
+        if result.returncode != 0:
+            raise _blocked(
+                "source_pool_unshallow_failed",
+                f"池成员浅克隆自动转完整克隆失败：{repository}",
+                "请检查网络与远端可用性后重试；浅克隆成员不会被当作完整池成员",
+                details={"stderr_tail": _stderr_tail(result.stderr)},
+            )
+
+    def _write_source_pool_readme(
+        self,
+        candidate: WorkspaceCandidate,
+        pool_root: Path,
+        repositories: tuple[str, ...],
+    ) -> None:
+        pool_root.mkdir(parents=True, exist_ok=True)
+        content = (
+            "# 中央克隆池（AI 研发员源码池）\n\n"
+            f"{MANAGED_CODE_START}\n"
+            f"- 归属安装：{candidate.install_root}\n"
+            f"- agent_id：{candidate.agent_id}\n"
+            f"- project_profile：{candidate.profile.profile_id}\n"
+            f"- 池成员数：{len(repositories)}\n"
+            f"- 生成时间：{datetime.now(timezone.utc).isoformat()}\n\n"
+            "本目录存放业务项目源代码池，由 ao-work workspace init 管理。池成员按 "
+            "<owner>/<repo> 组织；任务执行时在任务根 <JIRA-KEY>/<from_branch>/ 下用 "
+            "git worktree 挂出任务级子工作树。身份、凭证和任务状态保存在业务项目工作空间 "
+            ".agentic-ops/ 内；本文件只是配套说明，权威映射以受管配置为准。请勿手改管理块。\n"
+            f"{MANAGED_CODE_END}\n"
+        )
+        atomic_write_text(pool_root / "README.md", content)
+
+    def _validate_checked_out_source(
+        self,
+        candidate: WorkspaceCandidate,
+        *,
+        source: Path | None = None,
+        repository: str | None = None,
+    ) -> None:
+        target = source if source is not None else candidate.source_root
+        expected_repository = repository if repository is not None else candidate.repository
+        validated = validate_business_source_root(candidate.root, target)
+        if not validated.is_dir() or not (validated / ".git").exists():
             raise _blocked(
                 "source_checkout_invalid",
                 "源码下载结果不是可识别的 Git 仓库",
                 "请检查源码目录；初始化已回滚，不要继续使用该下载结果",
             )
-        self._validate_repository_remotes(source, candidate.repository)
+        self._validate_repository_remotes(validated, expected_repository)
 
     def _validate_repository_remotes(
         self, source: Path, repository: str

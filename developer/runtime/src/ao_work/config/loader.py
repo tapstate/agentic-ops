@@ -14,9 +14,12 @@ from ao_work.config.env import ENV_NAME_PATTERN, resolve_secret_pair_with_source
 from ao_work.managed_io import read_managed_json, read_managed_text
 from ao_work.config.model import (
     FIELD_STATES,
+    AnalysisMount,
+    BranchDerivation,
     FieldMapping,
     JiraConnection,
     ProjectProfile,
+    RepositoryBranchRule,
     require_mapping,
 )
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
@@ -507,6 +510,9 @@ def _parse_profile(payload: dict[str, Any], expected_id: str) -> ProjectProfile:
         or any(part in {"", ".", ".."} for part in default_repository.split("/"))
     ):
         raise ValueError("repositories.default must use owner/repository format")
+    repository_list = _parse_repository_list(repositories, default_repository)
+    analysis_mount = _parse_analysis_mount(repositories, repository_list)
+    branch_derivation = _parse_branch_derivation(repositories, repository_list)
     return ProjectProfile(
         profile_id=actual_id,
         connection_id=_required_text(payload, "connection_id", "project_profile_invalid"),
@@ -522,7 +528,161 @@ def _parse_profile(payload: dict[str, Any], expected_id: str) -> ProjectProfile:
         default_repository=default_repository,
         workspace_source_root=_optional_text(workspace.get("source_root")),
         workspace_repository=_optional_text(workspace.get("repository")),
+        repository_list=repository_list,
+        analysis_mount=analysis_mount,
+        branch_derivation=branch_derivation,
     )
+
+
+def _parse_repository_list(
+    repositories: dict[str, Any], default_repository: str | None
+) -> tuple[str, ...]:
+    raw_list = repositories.get("list", [])
+    if not raw_list:
+        return ()
+    if not isinstance(raw_list, list) or not all(
+        isinstance(value, str) for value in raw_list
+    ):
+        raise ValueError("repositories.list must be a list of owner/repository strings")
+    normalized = tuple(value.strip() for value in raw_list if value.strip())
+    for repository in normalized:
+        if (
+            repository.count("/") != 1
+            or any(part in {"", ".", ".."} for part in repository.split("/"))
+        ):
+            raise ValueError(
+                f"repositories.list entry must use owner/repository format: {repository}"
+            )
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("repositories.list contains duplicate entries")
+    if default_repository and default_repository not in normalized:
+        raise ValueError("repositories.default must be included in repositories.list")
+    return normalized
+
+
+def _parse_analysis_mount(
+    repositories: dict[str, Any], repository_list: tuple[str, ...]
+) -> AnalysisMount:
+    raw = repositories.get("analysis_mount", {})
+    if not raw:
+        return AnalysisMount()
+    if not isinstance(raw, dict):
+        raise ValueError("repositories.analysis_mount must be a mapping")
+    mode = str(raw.get("mode", "all"))
+    if mode not in {"all", "include", "exclude"}:
+        raise ValueError("repositories.analysis_mount.mode must be all|include|exclude")
+    include = _repository_tuple(raw.get("include"), "analysis_mount.include")
+    exclude = _repository_tuple(raw.get("exclude"), "analysis_mount.exclude")
+    for repository in (*include, *exclude):
+        if repository_list and repository not in repository_list:
+            raise ValueError(
+                f"analysis_mount references unknown repository: {repository}"
+            )
+    if mode == "include" and not include:
+        raise ValueError("analysis_mount.mode=include requires non-empty include")
+    if mode == "exclude" and not exclude:
+        raise ValueError("analysis_mount.mode=exclude requires non-empty exclude")
+    return AnalysisMount(mode=mode, include=include, exclude=exclude)
+
+
+def _parse_branch_derivation(
+    repositories: dict[str, Any], repository_list: tuple[str, ...]
+) -> BranchDerivation:
+    raw = repositories.get("branches", {})
+    if not raw:
+        return BranchDerivation()
+    if not isinstance(raw, dict):
+        raise ValueError("repositories.branches must be a mapping")
+    derive_from = str(raw.get("derive_from", "default"))
+    default_rule = str(raw.get("default_rule", "same_name"))
+    if default_rule != "same_name":
+        raise ValueError("repositories.branches.default_rule only supports same_name")
+    if derive_from != "default" and (
+        repository_list and derive_from not in repository_list
+    ):
+        raise ValueError(
+            f"branches.derive_from references unknown repository: {derive_from}"
+        )
+    overrides: list[RepositoryBranchRule] = []
+    for raw_rule in raw.get("overrides", []):
+        if not isinstance(raw_rule, dict):
+            raise ValueError("branches.overrides entries must be mappings")
+        from_branch = _optional_text(raw_rule.get("from_branch"))
+        repo = _optional_text(raw_rule.get("repo"))
+        branch = _optional_text(raw_rule.get("branch"))
+        if not from_branch or not repo or not branch:
+            raise ValueError("branches.overrides entry requires from_branch/repo/branch")
+        if repository_list and repo not in repository_list:
+            raise ValueError(
+                f"branches.overrides references unknown repository: {repo}"
+            )
+        overrides.append(
+            RepositoryBranchRule(from_branch=from_branch, repo=repo, branch=branch)
+        )
+    return BranchDerivation(
+        derive_from=derive_from,
+        default_rule=default_rule,
+        overrides=tuple(overrides),
+    )
+
+
+def _repository_tuple(value: Any, label: str) -> tuple[str, ...]:
+    if not value:
+        return ()
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item.strip() for item in value
+    ):
+        raise ValueError(f"repositories.{label} must be a list of repository strings")
+    return tuple(item.strip() for item in value)
+
+
+def resolve_source_pool_root(install_root: Path) -> Path | None:
+    """研发员级配置 source_pool_root：~/.agentic-ops/user/config.yaml。
+
+    未配置返回 None（由调用方按 source_pool_root_invalid 阻断）。
+    """
+    config_path = install_root / "user" / "config.yaml"
+    try:
+        content = read_managed_text(
+            config_path,
+            label="研发员级配置 config.yaml",
+            allow_missing=True,
+            max_bytes=1024 * 1024,
+        )
+    except RuntimeErrorResult:
+        raise
+    except (OSError, ValueError) as error:
+        raise RuntimeErrorResult(
+            code="configuration_invalid",
+            message=f"研发员级配置无法读取：{error}",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请修复 ~/.agentic-ops/user/config.yaml 后重试",
+        ) from error
+    if content is None:
+        return None
+    try:
+        payload = yaml.safe_load(content) or {}
+    except yaml.YAMLError as error:
+        raise RuntimeErrorResult(
+            code="configuration_invalid",
+            message=f"研发员级配置语法无效：{error}",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请修复 ~/.agentic-ops/user/config.yaml 后重试",
+        ) from error
+    if not isinstance(payload, dict):
+        raise RuntimeErrorResult(
+            code="configuration_invalid",
+            message="研发员级配置根必须是映射",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请修复 ~/.agentic-ops/user/config.yaml 后重试",
+        )
+    value = payload.get("source_pool_root")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return Path(value.strip()).expanduser()
 
 
 def _workspace_config_path(workspace_root: Path, directory: str, name: str) -> Path:

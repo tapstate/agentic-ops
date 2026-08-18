@@ -5,24 +5,36 @@ from ao_work.config.loader import (
     list_jira_connections,
     load_jira_connection,
     load_jira_context,
+    resolve_source_pool_root,
     resolve_workspace_connection_id,
     jira_site_identity,
     normalize_jira_site_root,
     validate_workspace_jira_binding,
     validate_workspace_project_binding,
 )
-from ao_work.config.model import FieldMapping, JiraConnection, ProjectProfile
+from ao_work.config.model import (
+    AnalysisMount,
+    BranchDerivation,
+    FieldMapping,
+    JiraConnection,
+    ProjectProfile,
+    RepositoryBranchRule,
+)
 
 __all__ = [
+    "AnalysisMount",
+    "BranchDerivation",
     "FieldMapping",
     "JiraConnection",
     "JiraContext",
     "ProjectProfile",
+    "RepositoryBranchRule",
     "list_jira_connections",
     "list_project_profiles",
     "load_jira_connection",
     "load_jira_context",
     "load_project_profile",
+    "resolve_source_pool_root",
     "resolve_workspace_connection_id",
     "jira_site_identity",
     "normalize_jira_site_root",
