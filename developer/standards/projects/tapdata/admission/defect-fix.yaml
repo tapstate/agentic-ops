@@ -40,10 +40,10 @@ analysis_hints:
     message: 可以结合 Jira 描述、当前本地源码分支和 TapData 分支对齐候选给出建议，但必须由研发工程师确认。
   target_branch:
     source: jira_or_manually_verified_branch_candidates
-    capability: branch_align
-    capability_status: capability_gap
-    required_human_action: 使用项目认可的只读 Git 工具人工核对候选分支，并在任务结束后提交 branch_align 能力建议。
-    message: 可以结合 Jira 与人工核对的候选分支给出建议，但不得构造未实现命令或替研发工程师确认。
+    tool: branch-align
+    script: scripts/tap_align_branches.py
+    required_human_action: 使用项目脚本 scripts/tap_align_branches.py 的 plan 模式生成只读对齐候选，由研发工程师确认，不得替其确认或执行 apply。
+    message: 可以结合 Jira 与脚本生成的候选分支给出建议，但不得构造未实现命令或替研发工程师确认。
   problem_summary:
     source: jira_summary_and_project_code
     message: 可以结合 Jira 摘要、日志、源码搜索结果补全问题现象描述，但必须保留研发工程师确认环节。
