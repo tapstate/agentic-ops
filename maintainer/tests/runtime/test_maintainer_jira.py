@@ -297,6 +297,25 @@ class MaintainerJiraCliTest(unittest.TestCase):
         developer_commands = {"workspace", "auth", "task", "report"}
         self.assertEqual(set(), commands & developer_commands)
 
+    def test_apply_does_not_require_issue_key_argument(self) -> None:
+        """apply 只从计划文件读取 Issue 绑定，不需要（也没有）--issue-key 参数。"""
+        parser = build_maintainer_parser()
+        args = parser.parse_args(
+            [
+                "jira",
+                "comment",
+                "apply",
+                "--plan-file",
+                "plan.json",
+                "--confirm-plan-id",
+                "plan-abc",
+                "--authorization-reference",
+                "user-confirmation:AO-11:plan-abc",
+            ]
+        )
+        self.assertFalse(hasattr(args, "issue_key"))
+        self.assertEqual("apply", args.action)
+
     def test_cli_requires_source_workspace_for_ao_jira(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
