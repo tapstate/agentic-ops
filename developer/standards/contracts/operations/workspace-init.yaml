@@ -40,6 +40,10 @@ confirmation:
     - source_pool_root
 preflight:
   side_effects: none
+  # source_pool_members_remote：逐仓库只读可达性检查（ls-remote）。无权限（403/404/
+  # denied/认证失败等权限类错误）的仓库跳过，并在结果 skipped_repositories 中提示用户，
+  # 不整次阻断；网络类错误（超时/DNS/连接失败等）仍阻断 source_repository_access_failed。
+  # apply 阶段池成员克隆同样跳过权限类失败仓库并提示。
   blocking_checks:
     - workspace_boundary
     - workspace_state_is_not_symlink
