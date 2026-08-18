@@ -173,14 +173,6 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
 
     plan_path, path_issue_key, plan = _read_plan_candidate(source_root, args.plan_file)
     if args.action == "apply":
-        if args.issue_key != plan.issue_key:
-            raise RuntimeErrorResult(
-                code="jira_write_plan_mismatch",
-                message="Jira apply 输入与计划文件绑定不一致",
-                status="blocked",
-                exit_code=EXIT_BLOCKED,
-                required_human_action="请使用 plan 输出绑定的计划文件，不要混用",
-            )
         plan = _read_plan(plan_path)
         if plan.issue_key != path_issue_key:
             raise RuntimeErrorResult(
