@@ -18,6 +18,7 @@ from ao_maint.jira.config import (
     credential_status,
     env_file_path,
     load_maintainer_jira_config,
+    load_maintainer_workflow,
     plans_dir,
     remove_credentials,
     set_credentials,
@@ -54,6 +55,9 @@ def configure_jira_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
     worklog_parser = jira_commands.add_parser("worklog")
     _configure_write_actions(worklog_parser, "worklog")
 
+    transition_parser = jira_commands.add_parser("transition")
+    _configure_write_actions(transition_parser, "transition")
+
 
 def _configure_write_actions(
     parser: argparse.ArgumentParser, kind: str
@@ -67,6 +71,12 @@ def _configure_write_actions(
     if kind == "comment":
         plan.add_argument("--category", required=True)
         plan.add_argument("--content-file", required=True)
+    elif kind == "transition":
+        target = plan.add_mutually_exclusive_group(required=True)
+        target.add_argument("--target-status")
+        target.add_argument("--target-transition")
+        target.add_argument("--transition-id")
+        plan.add_argument("--comment-content-file")
     else:
         plan.add_argument("--title", required=True)
         plan.add_argument("--details-file", required=True)
@@ -138,6 +148,27 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
                 content,
                 maintainer_run_id=run_id,
             )
+        elif args.command == "transition":
+            workflow = load_maintainer_workflow(
+                source_root, config.connection.connection_id
+            )
+            comment = None
+            if args.comment_content_file:
+                comment = _read_input_file(
+                    source_root,
+                    args.comment_content_file,
+                    "Jira 状态流转说明评论文件",
+                )
+            plan = service.plan_transition(
+                args.issue_key,
+                args.idempotency_key,
+                maintainer_run_id=run_id,
+                workflow=workflow,
+                target_status=args.target_status,
+                target_transition=args.target_transition,
+                transition_id=args.transition_id,
+                comment=comment,
+            )
         else:
             details = _read_input_file(source_root, args.details_file, "Jira Worklog 内容文件")
             included_work_content = _read_input_file(
@@ -157,7 +188,7 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
             )
         service.validate_no_credentials(plan, email, token)
         _write_new_plan(plan_path, plan.to_dict())
-        return {
+        result: dict[str, Any] = {
             "connection_id": config.connection.connection_id,
             "issue_key": plan.issue_key,
             "plan_id": plan.plan_id,
@@ -170,6 +201,18 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
                 "（例如 user-confirmation:AO-11:<plan_id>）"
             ),
         }
+        if args.command == "transition":
+            result.update(
+                {
+                    "project_key": plan.payload.get("project_key"),
+                    "from_status": plan.payload.get("from_status"),
+                    "target_status": plan.payload.get("target_status"),
+                    "transition_id": plan.payload.get("transition_id"),
+                    "transition_name": plan.payload.get("transition_name"),
+                    "with_comment": bool(plan.payload.get("comment")),
+                }
+            )
+        return result
 
     plan_path, path_issue_key, plan = _read_plan_candidate(source_root, args.plan_file)
     if args.action == "apply":
@@ -199,6 +242,8 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
         )
         if args.command == "comment":
             result = service.apply_comment(plan, args.confirm_plan_id)
+        elif args.command == "transition":
+            result = service.apply_transition(plan, args.confirm_plan_id)
         else:
             result = service.apply_worklog(plan, args.confirm_plan_id)
         return {
@@ -232,6 +277,8 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
         )
     if args.command == "comment":
         result = service.readback_comment(plan)
+    elif args.command == "transition":
+        result = service.readback_transition(plan)
     else:
         result = service.readback_worklog(plan)
     return {

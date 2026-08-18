@@ -22,6 +22,7 @@ MAINTAINER_CONNECTIONS_DIR = "standards/connections"
 MAINTAINER_LOCAL_DIR = ".local"
 MAINTAINER_ENV_FILE = ".env"
 MAINTAINER_PLANS_DIR = "jira-plans"
+MAINTAINER_WORKFLOW_SUFFIX = "-workflow.yaml"
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,93 @@ def load_maintainer_jira_config(
         token=token,
         credential_source=credential_source,
     )
+
+
+def load_maintainer_workflow(
+    source_root: Path,
+    connection_id: str,
+) -> dict[str, Any]:
+    """加载 maintainer 面 Jira 工作流映射（快速适配路径标准资产）。
+
+    映射文件为 <connections>/<connection_id>-workflow.yaml，不存在时返回空
+    projects 映射（缺省可用，配合 --transition-id 精确流转）；存在但结构
+    无效时阻断，避免静默使用错误配置。
+    """
+    connection_id = _validated_config_id(connection_id, "Jira Connection")
+    path = (
+        source_root
+        / "maintainer"
+        / MAINTAINER_CONNECTIONS_DIR
+        / f"{connection_id}{MAINTAINER_WORKFLOW_SUFFIX}"
+    )
+    if not path.exists():
+        return {"projects": {}}
+    if path.is_symlink():
+        raise _invalid_workflow("工作流映射文件不允许是符号链接")
+    try:
+        content = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as error:
+        raise _invalid_workflow(f"工作流映射无法读取：{error}") from error
+    if not isinstance(content, dict):
+        raise _invalid_workflow("工作流映射必须是映射")
+    actual_id = str(content.get("connection_id", "")).strip()
+    if actual_id != connection_id:
+        raise _invalid_workflow(
+            f"connection_id {actual_id!r} does not match {connection_id!r}"
+        )
+    projects = content.get("projects", {})
+    if not isinstance(projects, dict):
+        raise _invalid_workflow("projects 必须是映射")
+    normalized: dict[str, Any] = {}
+    for project_key, spec in projects.items():
+        if not isinstance(project_key, str) or not project_key.strip():
+            raise _invalid_workflow("projects 键必须是项目 Key")
+        if not isinstance(spec, dict):
+            raise _invalid_workflow(f"project {project_key} 映射必须是映射")
+        statuses = spec.get("statuses", {})
+        transitions = spec.get("transitions", {})
+        if not isinstance(statuses, dict):
+            raise _invalid_workflow(f"project {project_key} statuses 必须是映射")
+        if not isinstance(transitions, dict):
+            raise _invalid_workflow(f"project {project_key} transitions 必须是映射")
+        normalized_statuses: dict[str, str] = {}
+        for status_name, stage in statuses.items():
+            if not isinstance(stage, str) or not stage.strip():
+                raise _invalid_workflow(
+                    f"project {project_key} 状态 {status_name!r} 的 stage 必须是字符串"
+                )
+            normalized_statuses[str(status_name)] = stage.strip()
+        normalized_transitions: dict[str, Any] = {}
+        for transition_key, entry in transitions.items():
+            if not isinstance(entry, dict):
+                raise _invalid_workflow(
+                    f"project {project_key} transition {transition_key!r} 必须是映射"
+                )
+            name = str(entry.get("name", "")).strip()
+            if not name:
+                raise _invalid_workflow(
+                    f"project {project_key} transition {transition_key!r} 缺少 name"
+                )
+            transition_id = str(entry.get("id", "")).strip()
+            from_states = entry.get("from", [])
+            if not isinstance(from_states, list) or not all(
+                isinstance(item, str) for item in from_states
+            ):
+                raise _invalid_workflow(
+                    f"project {project_key} transition {transition_key!r} from 必须是字符串列表"
+                )
+            to_status = str(entry.get("to", "")).strip()
+            normalized_transitions[str(transition_key)] = {
+                "name": name,
+                "id": transition_id,
+                "from": [item.strip() for item in from_states if item.strip()],
+                "to": to_status,
+            }
+        normalized[str(project_key)] = {
+            "statuses": normalized_statuses,
+            "transitions": normalized_transitions,
+        }
+    return {"projects": normalized}
 
 
 def load_maintainer_connection(
@@ -328,6 +416,19 @@ def _invalid_connection(message: str) -> RuntimeErrorResult:
         status="blocked",
         exit_code=EXIT_BLOCKED,
         required_human_action="请修复 maintainer/standards/connections/ 下的 Connection 定义",
+    )
+
+
+def _invalid_workflow(message: str) -> RuntimeErrorResult:
+    return RuntimeErrorResult(
+        code="jira_workflow_invalid",
+        message=f"maintainer Jira 工作流映射无效：{message}",
+        status="blocked",
+        exit_code=EXIT_BLOCKED,
+        required_human_action=(
+            "请修复 maintainer/standards/connections/ 下的工作流映射文件，"
+            "不要删除文件（删除会退回 --transition-id 精确流转）"
+        ),
     )
 
 
