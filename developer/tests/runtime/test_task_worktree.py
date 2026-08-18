@@ -182,6 +182,19 @@ class PlanTaskWorktreesTest(unittest.TestCase):
         repositories = {entry.repository for entry in plan.entries}
         self.assertEqual({"tapdata/tapdata"}, repositories)
 
+    def test_plan_mount_all_with_exclude_still_excludes(self) -> None:
+        profile = build_profile(
+            analysis_mount={"mode": "all", "exclude": ["tapdata/tapdata-web"]}
+        )
+        plan = plan_task_worktrees(
+            pool_root=self.pool,
+            profile=profile,
+            issue_key="TAP-123",
+            description_sections={},
+        )
+        repositories = {entry.repository for entry in plan.entries}
+        self.assertEqual({"tapdata/tapdata"}, repositories)
+
     def test_plan_target_repo_not_mounted_blocked(self) -> None:
         profile = build_profile(
             analysis_mount={"mode": "exclude", "exclude": ["tapdata/tapdata-web"]}

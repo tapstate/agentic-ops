@@ -7,6 +7,7 @@
 - Skill 入口：`developer/skills/`。
 - 能力事实入口：`ao-work capability list|show` 与 `developer/standards/capabilities/operations.yaml`。
 - 授权、配置和状态：只能使用当前业务项目工作空间 `.agentic-ops/` 及 developer 安装资产。
+- 源码（D-048 池模式）：业务源码在中央克隆池 `<source_pool_root>`（研发员级配置 `~/.agentic-ops/user/config.yaml`）；任务执行源码挂在 `<source_pool_root>/<JIRA-KEY>/<from_branch>/<repo>` 任务工作树集，分支由 Project Profile `branches` 推导，per-worktree 身份写入 worktree config。工作树内禁止直接 fetch，统一在池成员（`<source_pool_root>/<owner>/<repo>`）执行。
 
 禁止加载 `maintainer/AGENTS.md`、AgenticOps 源头设计红线、源头发布规则、维护授权或维护状态。业务任务发现能力不足时，只生成脱敏反馈并由人工交接给项目维护者，不得从业务工作面直接修改 AgenticOps 源头。
 

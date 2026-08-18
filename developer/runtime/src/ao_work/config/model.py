@@ -100,15 +100,18 @@ class ProjectProfile:
         )
 
     def mounts_for_analysis(self) -> tuple[str, ...]:
-        """按 analysis_mount 策略计算任务分析工作树集。"""
+        """按 analysis_mount 策略计算任务分析工作树集。
+
+        - mode=include：仅 include 声明的仓库。
+        - mode=exclude / mode=all：全量 candidates 减去 exclude。
+          （mode=all + exclude 用于排除超大仓库，如 t-layer3-test 9.3G 按需挂载。）
+        """
         candidates = self.repository_candidates()
+        excluded = set(self.analysis_mount.exclude)
         if self.analysis_mount.mode == "include":
-            include = tuple(self.analysis_mount.include)
+            include = set(self.analysis_mount.include)
             return tuple(repo for repo in candidates if repo in include)
-        if self.analysis_mount.mode == "exclude":
-            excluded = set(self.analysis_mount.exclude)
-            return tuple(repo for repo in candidates if repo not in excluded)
-        return candidates
+        return tuple(repo for repo in candidates if repo not in excluded)
 
     def derive_branch(self, repo: str, from_branch: str) -> str | None:
         """分支推导：主仓库/同名默认/overrides；返回目标分支，None 表示无法推导。

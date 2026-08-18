@@ -138,7 +138,6 @@ repositories:
     - tapdata/tapdata-application
     - tapdata/feishu_robot
     - tapdata/tapdata-cloud
-    - tapdata/license-platform
     - tapdata/t-layer3-test
     - tapdata/docs
     - tapdata/docs-en
