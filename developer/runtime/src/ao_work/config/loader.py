@@ -594,6 +594,7 @@ def _parse_branch_derivation(
     if not isinstance(raw, dict):
         raise ValueError("repositories.branches must be a mapping")
     derive_from = str(raw.get("derive_from", "default"))
+    default_branch = str(raw.get("default_branch", "main")).strip() or "main"
     default_rule = str(raw.get("default_rule", "same_name"))
     if default_rule != "same_name":
         raise ValueError("repositories.branches.default_rule only supports same_name")
@@ -621,6 +622,7 @@ def _parse_branch_derivation(
         )
     return BranchDerivation(
         derive_from=derive_from,
+        default_branch=default_branch,
         default_rule=default_rule,
         overrides=tuple(overrides),
     )

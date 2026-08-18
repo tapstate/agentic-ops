@@ -38,6 +38,7 @@ class RepositoryBranchRule:
 @dataclass(frozen=True)
 class BranchDerivation:
     derive_from: str = "default"
+    default_branch: str = "main"
     default_rule: str = "same_name"
     overrides: tuple[RepositoryBranchRule, ...] = ()
 
