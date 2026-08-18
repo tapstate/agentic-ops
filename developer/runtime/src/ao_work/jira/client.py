@@ -262,8 +262,9 @@ class JiraClient:
                 continue
             transition_id = str(item.get("id", "")).strip()
             name = str(item.get("name", "")).strip()
+            to_status = object_name(item.get("to"))
             if transition_id and name:
-                result.append({"id": transition_id, "name": name})
+                result.append({"id": transition_id, "name": name, "to": to_status})
         return result
 
     def execute_transition(

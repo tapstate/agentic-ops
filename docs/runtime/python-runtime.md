@@ -107,6 +107,8 @@ Runtime 不在同一进程中区分 mode。`ao_maint` 与 `ao_work` 分别由目
 
 Jira 配置分为研发员账户、Connection、Project Profile 和 Project AI Workspace。一个业务项目工作空间代表一名研发员并只维护一个 Jira 账户；`~/.agentic-ops` 共享安装没有人员身份，一台电脑可以维护多个隔离的研发员工作空间。项目工作空间通过 Project Profile 选择 Connection，旧工作空间中的显式 `connection_id` 只作一致性校验。任务身份仍包含 `connection_id`、`jira_issue_id`、`issue_key` 和 `project_key`；站点、Profile 或 Issue 事实不一致时返回 `jira_workspace_mismatch`。
 
+Jira 状态流转（`jira transition plan/apply/readback`，D-049）按 Project Profile `transitions` 映射执行 D-037 严格匹配：稳定 ID 优先、名称兜底需唯一且 from/to 匹配、禁止模糊匹配；目标状态必须来自 profile `statuses` 映射 ∩ Jira 可用列表，AIAgent 默认禁止推进 `completed` stage（无合入权）。映射失配时输出适配对照材料（当前状态 + Jira 可用 transitions + 已配置条目），适配只改 profile 配置、不改 Runtime 代码。
+
 ## 8. Python 与依赖
 
 - Python 3.12 由 `.python-version` 固定。

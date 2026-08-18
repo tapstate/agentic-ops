@@ -111,7 +111,12 @@ statuses:
   Done: completed
 
 transitions:
+  # tapdata 真实工作流实测（2026-08-18）：
+  #   打开 -> Implementation started(91) -> 正在进行
+  #   Pull Request Submitted -> PR Approved(291) -> Merged（Merged 属 completed，AIAgent 默认禁止）
+  # 未配的流转（如 正在进行 -> Pull Request Submitted）按快速适配路径渐进补充。
   start_progress:
-    name: Start Progress
-  complete:
-    name: Tests Pass
+    name: Implementation started
+    id: "91"
+    from: [打开]
+    to: 正在进行

@@ -47,6 +47,9 @@ def configure_jira_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
     description_parser = jira_commands.add_parser("description")
     _configure_write_actions(description_parser, "description", readback=False)
 
+    transition_parser = jira_commands.add_parser("transition")
+    _configure_write_actions(transition_parser, "transition")
+
 
 def _configure_write_actions(
     parser: argparse.ArgumentParser, kind: str, *, readback: bool = True
@@ -59,6 +62,11 @@ def _configure_write_actions(
     if kind == "comment":
         plan.add_argument("--category", required=True)
         plan.add_argument("--content-file", required=True)
+    elif kind == "transition":
+        target = plan.add_mutually_exclusive_group(required=True)
+        target.add_argument("--target-status")
+        target.add_argument("--target-transition")
+        plan.add_argument("--comment-content-file")
     elif kind == "worklog":
         plan.add_argument("--title", required=True)
         plan.add_argument("--details-file", required=True)
@@ -149,6 +157,22 @@ def execute_jira(
                 content,
                 agentic_run_id=agentic_run_id,
             )
+        elif args.command == "transition":
+            comment = None
+            if args.comment_content_file:
+                comment = read_workspace_outbound_file(
+                    workspace.root,
+                    args.comment_content_file,
+                    label="Jira 状态流转说明评论文件",
+                )
+            plan = service.plan_transition(
+                args.issue_key,
+                args.idempotency_key,
+                agentic_run_id=agentic_run_id,
+                target_status=args.target_status,
+                target_transition=args.target_transition,
+                comment=comment,
+            )
         elif args.command == "worklog":
             details = read_workspace_outbound_file(
                 workspace.root,
@@ -189,7 +213,7 @@ def execute_jira(
         _require_plan_task_binding(plan, task)
         _write_new_plan(plan_path, plan.to_dict())
         authorization = _authorization_guidance(plan, str(task["agentic_run_id"]))
-        return {
+        result: dict[str, Any] = {
             "connection_id": context.connection.connection_id,
             "profile_id": context.profile.profile_id,
             "issue_key": plan.issue_key,
@@ -199,6 +223,18 @@ def execute_jira(
             "plan_file": str(plan_path),
             **authorization,
         }
+        if args.command == "transition":
+            result.update(
+                {
+                    "project_key": plan.payload.get("project_key"),
+                    "from_status": plan.payload.get("from_status"),
+                    "target_status": plan.payload.get("target_status"),
+                    "transition_id": plan.payload.get("transition_id"),
+                    "transition_name": plan.payload.get("transition_name"),
+                    "with_comment": bool(plan.payload.get("comment")),
+                }
+            )
+        return result
 
     if args.action == "apply":
         plan_path, path_issue_key, path_run_id, plan = _read_plan_candidate(
@@ -219,6 +255,7 @@ def execute_jira(
             "comment": "jira_comment",
             "worklog": "jira_worklog",
             "description": "jira_description",
+            "transition": "jira_transition",
         }[args.command]
         service.validate_apply(plan, args.confirm_plan_id, operation)
         service.validate_no_credentials(plan, email, token)
@@ -257,6 +294,8 @@ def execute_jira(
                 args.confirm_plan_id,
                 begin_create=begin_create,
             )
+        elif args.command == "transition":
+            result = service.apply_transition(plan, args.confirm_plan_id)
         else:
             result = service.apply_description(plan, args.confirm_plan_id)
         record = store.record_external_readback(
@@ -304,6 +343,25 @@ def execute_jira(
         attempt = _read_attempt_if_present(_jira_attempt_file(plan_path), plan)
         result = service.readback_comment(plan, attempt=attempt)
         operation = "jira_comment"
+    elif args.command == "transition":
+        plan_path, path_issue_key, path_run_id, plan = _read_plan_candidate(
+            workspace.root,
+            args.plan_file,
+        )
+        _require_plan_path_binding(plan, path_issue_key, path_run_id)
+        if args.issue_key != plan.issue_key or args.idempotency_key != plan.idempotency_key:
+            raise RuntimeErrorResult(
+                code="jira_write_plan_mismatch",
+                message="Jira 回读输入与写入计划不一致",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请使用 plan 输出绑定的 Issue、幂等键和计划文件",
+            )
+        task = _validate_task_binding(store, context, service, args.issue_key)
+        _require_plan_task_binding(plan, task)
+        service.validate_apply(plan, args.confirm_plan_id, "jira_transition")
+        result = service.readback_transition(plan)
+        operation = "jira_transition"
     else:
         plan_path, path_issue_key, path_run_id, plan = _read_plan_candidate(
             workspace.root,
@@ -802,6 +860,9 @@ def _sync_evidence(result: dict[str, Any]) -> dict[str, Any]:
         "write_precondition",
         "write_attempt_id",
         "write_attempt_started_at",
+        "current_status",
+        "target_status",
+        "status_matched",
     }
     return {key: value for key, value in result.items() if key in allowed}
 

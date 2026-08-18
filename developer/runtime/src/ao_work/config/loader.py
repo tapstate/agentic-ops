@@ -572,10 +572,7 @@ def _parse_profile(payload: dict[str, Any], expected_id: str) -> ProjectProfile:
             writable=bool(mapping.get("writable", False)),
             required=bool(mapping.get("required", False)),
         )
-    transition_mapping = {
-        str(key): {str(inner_key): str(inner_value) for inner_key, inner_value in require_mapping(value, str(key)).items()}
-        for key, value in require_mapping(payload.get("transitions", {}), "transitions").items()
-    }
+    transition_mapping = _parse_transition_mapping(payload.get("transitions", {}))
     repositories = require_mapping(payload.get("repositories", {}), "repositories")
     workspace = require_mapping(payload.get("workspace", {}), "workspace")
     default_repository = _optional_text(repositories.get("default"))
@@ -632,6 +629,30 @@ def _parse_repository_list(
     if default_repository and default_repository not in normalized:
         raise ValueError("repositories.default must be included in repositories.list")
     return normalized
+
+
+def _parse_transition_mapping(value: Any) -> dict[str, dict[str, Any]]:
+    raw = require_mapping(value, "transitions")
+    result: dict[str, dict[str, Any]] = {}
+    for key, entry in raw.items():
+        spec = require_mapping(entry, f"transitions.{key}")
+        name = _optional_text(spec.get("name"))
+        if not name:
+            raise ValueError(f"transitions.{key} requires a name")
+        transition_id = _optional_text(spec.get("id"))
+        from_states = spec.get("from", [])
+        if not isinstance(from_states, list) or not all(
+            isinstance(item, str) for item in from_states
+        ):
+            raise ValueError(f"transitions.{key}.from must be a string list")
+        to_status = _optional_text(spec.get("to"))
+        result[str(key)] = {
+            "name": name,
+            "id": transition_id or "",
+            "from": [item.strip() for item in from_states if item.strip()],
+            "to": to_status or "",
+        }
+    return result
 
 
 def _parse_analysis_mount(

@@ -16,6 +16,11 @@ from ao_work.jira.adf import (
 )
 from ao_work.jira.client import JiraClient, JiraTransportError
 from ao_work.jira.model import JiraIssue, plain_text
+from ao_work.jira.transition import (
+    adaptation_material,
+    completed_stage_for,
+    match_transition,
+)
 from ao_work.output import EXIT_BLOCKED, EXIT_CAPABILITY_GAP, RuntimeErrorResult
 
 IDEMPOTENCY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -261,6 +266,8 @@ class JiraService:
                     "Description 受管章节结构无效",
                 )
             self._validate_description_sections(sections)
+        elif operation == "jira_transition":
+            self._validate_transition_plan(plan)
         else:
             raise _input_error("jira_write_plan_mismatch", "Jira 写入计划操作无效")
         self._validate_owner(self.inspect_issue(plan.issue_key))
@@ -416,6 +423,274 @@ class JiraService:
             created=created,
             attempt=attempt,
         )
+
+    def plan_transition(
+        self,
+        issue_key: str,
+        idempotency_key: str,
+        *,
+        agentic_run_id: str,
+        target_status: str | None = None,
+        target_transition: str | None = None,
+        comment: str | None = None,
+    ) -> WritePlan:
+        """计划一次 Jira 状态流转（D-037 严格匹配，禁止模糊猜测）。
+
+        - 目标来源二选一：--target-transition（profile 映射 key）、--target-status（目标状态名）。
+        - AIAgent 默认禁止推进 completed stage（无合入权，D-049）；例外需 profile 显式声明。
+        - 匹配失败输出适配对照材料（当前状态 + Jira 可用 transitions + 已配置映射）。
+        - 幂等锚点：目标状态达成即视为已执行（transition 无稳定外部 ID）。
+        """
+        provided = [
+            value is not None for value in (target_status, target_transition)
+        ]
+        if sum(provided) != 1:
+            raise _input_error(
+                "invalid_transition_target",
+                "目标必须且只能指定一个：--target-status / --target-transition",
+            )
+        issue = self.inspect_issue(issue_key)
+        self._validate_owner(issue)
+        mapping = {
+            "transitions": self.profile.transition_mapping,
+            "statuses": self.profile.status_mapping,
+        }
+        # 安全边界前置拦截：目标状态若映射到 completed stage，不依赖 transition
+        # 条目是否存在（D-049：AIAgent 无合入权，默认禁止推进完成态）
+        if target_status is not None:
+            completed = completed_stage_for(self.profile.status_mapping, target_status)
+            if completed is not None:
+                raise RuntimeErrorResult(
+                    code="jira_transition_completed_forbidden",
+                    message=(
+                        f"目标状态 {target_status!r} 属于完成态（{completed}），"
+                        "AIAgent 无合入权，默认禁止推进完成态"
+                    ),
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action=(
+                        "请由研发工程师在 Jira 处理完成态；确需 AIAgent 推进时，"
+                        "先确认 profile 显式例外"
+                    ),
+                    details={
+                        "issue_key": issue.key,
+                        "target_status": target_status,
+                        "completed_stage": completed,
+                    },
+                )
+        available = self.client.available_transitions(issue.key)
+        matched = match_transition(
+            issue.status,
+            available,
+            mapping,
+            target_status=target_status,
+            target_key=target_transition,
+        )
+        if matched is None:
+            raise RuntimeErrorResult(
+                code="jira_transition_mapping_gap",
+                message=(
+                    "无法按 D-037 规则匹配 Jira 状态流转目标，已停止连续自动化；"
+                    "details 提供可直接照抄的适配对照材料"
+                ),
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action=(
+                    "按 details 对照材料补齐 profile transitions 配置后重新 plan，"
+                    "不要临场猜测 Jira 状态"
+                ),
+                details=adaptation_material(
+                    issue.key,
+                    issue.project_key,
+                    issue.status,
+                    available,
+                    mapping,
+                ),
+            )
+        matched_id, matched_name, matched_status = matched
+        completed = completed_stage_for(self.profile.status_mapping, matched_status)
+        if completed is not None:
+            raise RuntimeErrorResult(
+                code="jira_transition_completed_forbidden",
+                message=(
+                    f"目标状态 {matched_status!r} 属于完成态（{completed}），"
+                    "AIAgent 无合入权，默认禁止推进完成态"
+                ),
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action=(
+                    "请由研发工程师在 Jira 处理完成态；确需 AIAgent 推进时，"
+                    "先确认 profile 显式例外"
+                ),
+                details={
+                    "issue_key": issue.key,
+                    "target_status": matched_status,
+                    "completed_stage": completed,
+                },
+            )
+        normalized_comment = comment.strip() if comment else ""
+        if normalized_comment:
+            _require_chinese(normalized_comment, "状态流转说明评论")
+        payload = {
+            "project_key": issue.project_key,
+            "from_status": issue.status,
+            "target_status": matched_status,
+            "transition_id": matched_id,
+            "transition_name": matched_name,
+            "comment": normalized_comment,
+            "body_sha256": (
+                _text_sha256(_rendered_markdown_text(normalized_comment))
+                if normalized_comment
+                else ""
+            ),
+            "available": available,
+        }
+        return _build_plan(
+            "jira_transition",
+            issue.key,
+            agentic_run_id,
+            idempotency_key,
+            payload,
+            "",
+        )
+
+    def apply_transition(self, plan: WritePlan, expected_plan_id: str) -> dict[str, Any]:
+        self.validate_apply(plan, expected_plan_id, "jira_transition")
+        target_status = str(plan.payload["target_status"])
+        from_status = str(plan.payload["from_status"])
+        transition_id = str(plan.payload["transition_id"])
+        comment = str(plan.payload.get("comment", ""))
+        issue = self.inspect_issue(plan.issue_key)
+        self._validate_owner(issue)
+        if issue.status == target_status:
+            return _transition_readback(plan, issue.status, created=False)
+        if issue.status != from_status:
+            raise RuntimeErrorResult(
+                code="jira_transition_mapping_gap",
+                message=(
+                    "Jira 当前状态与计划时不一致，状态流转前置条件已变化；"
+                    "禁止跨状态执行计划，请重新 plan"
+                ),
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=True,
+                required_human_action="请重新执行 plan 对齐 Jira 当前事实后再 apply",
+                details=adaptation_material(
+                    plan.issue_key,
+                    str(plan.payload.get("project_key", "")),
+                    issue.status,
+                    self.client.available_transitions(plan.issue_key),
+                    {
+                        "transitions": self.profile.transition_mapping,
+                        "statuses": self.profile.status_mapping,
+                    },
+                ),
+            )
+        available = self.client.available_transitions(plan.issue_key)
+        if not any(item["id"] == transition_id for item in available):
+            raise RuntimeErrorResult(
+                code="jira_transition_mapping_gap",
+                message="Jira 可用 transition 已变化，计划引用的 transition 不再可用；请重新 plan",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=True,
+                required_human_action="请重新 plan 获取最新可用 transition 列表",
+                details=adaptation_material(
+                    plan.issue_key,
+                    str(plan.payload.get("project_key", "")),
+                    issue.status,
+                    available,
+                    {
+                        "transitions": self.profile.transition_mapping,
+                        "statuses": self.profile.status_mapping,
+                    },
+                ),
+            )
+        try:
+            self.client.execute_transition(
+                plan.issue_key,
+                transition_id,
+                comment=comment or None,
+            )
+        except JiraTransportError as error:
+            raise RuntimeErrorResult(
+                code="jira_transition_failed",
+                message="Jira 状态流转执行失败（响应不明确）",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=False,
+                required_human_action="请先回读 Jira 实际状态，结果确认后再继续",
+            ) from error
+        readback = self.inspect_issue(plan.issue_key)
+        if readback.status != target_status:
+            raise RuntimeErrorResult(
+                code="jira_transition_readback_mismatch",
+                message=(
+                    f"状态流转后回读状态 {readback.status!r} 与目标状态 "
+                    f"{target_status!r} 不一致"
+                ),
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=False,
+                required_human_action="请人工核对 Jira 实际状态，不要盲目重试流转",
+                details={
+                    "issue_key": plan.issue_key,
+                    "current_status": readback.status,
+                    "target_status": target_status,
+                },
+            )
+        return _transition_readback(plan, readback.status, created=True)
+
+    def readback_transition(self, plan: WritePlan) -> dict[str, Any]:
+        self.validate_apply(plan, plan.plan_id, "jira_transition")
+        issue = self.inspect_issue(plan.issue_key)
+        matched = issue.status == str(plan.payload["target_status"])
+        return _transition_readback(plan, issue.status, created=matched)
+
+    def _validate_transition_plan(self, plan: WritePlan) -> None:
+        expected = {
+            "project_key",
+            "from_status",
+            "target_status",
+            "transition_id",
+            "transition_name",
+            "comment",
+            "body_sha256",
+            "available",
+        }
+        if set(plan.payload) != expected:
+            raise _input_error("jira_write_plan_invalid", "Jira 状态流转计划字段无效")
+        project_key = plan.payload.get("project_key")
+        from_status = plan.payload.get("from_status")
+        target_status = plan.payload.get("target_status")
+        transition_id = plan.payload.get("transition_id")
+        transition_name = plan.payload.get("transition_name")
+        comment = plan.payload.get("comment")
+        body_sha256 = plan.payload.get("body_sha256")
+        available = plan.payload.get("available")
+        if (
+            not isinstance(project_key, str)
+            or not project_key.strip()
+            or not isinstance(from_status, str)
+            or not from_status.strip()
+            or not isinstance(target_status, str)
+            or not target_status.strip()
+            or not isinstance(transition_id, str)
+            or not transition_id.isdigit()
+            or not isinstance(transition_name, str)
+            or not transition_name.strip()
+            or not isinstance(comment, str)
+            or not isinstance(available, list)
+        ):
+            raise _input_error("jira_write_plan_invalid", "Jira 状态流转计划内容无效")
+        if comment:
+            if not _is_sha256(body_sha256):
+                raise _input_error("jira_write_plan_invalid", "Jira 状态流转评论摘要无效")
+            if body_sha256 != _text_sha256(_rendered_markdown_text(comment)):
+                raise _input_error("jira_write_plan_invalid", "Jira 状态流转评论摘要不一致")
+            _require_chinese(comment, "状态流转说明评论")
+        elif body_sha256:
+            raise _input_error("jira_write_plan_invalid", "Jira 状态流转评论摘要无效")
 
     def plan_worklog(
         self,
@@ -984,6 +1259,24 @@ def _worklog_readback(
         ),
         "created": created,
         **_write_attempt_fields(plan, attempt),
+    }
+
+
+def _transition_readback(
+    plan: WritePlan, current_status: str, *, created: bool
+) -> dict[str, Any]:
+    return {
+        "issue_key": plan.issue_key,
+        "agentic_run_id": plan.agentic_run_id,
+        "idempotency_key": plan.idempotency_key,
+        "plan_id": plan.plan_id,
+        "content_sha256": plan.content_sha256,
+        "external_id": str(plan.payload["transition_id"]),
+        "created": created,
+        "current_status": current_status,
+        "target_status": str(plan.payload["target_status"]),
+        "status_matched": current_status == str(plan.payload["target_status"]),
+        "agentic_next_action": "continue_from_verified_jira_transition",
     }
 
 
