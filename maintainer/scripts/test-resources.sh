@@ -253,7 +253,7 @@ grep '^\.superpowers/$' .gitignore >/dev/null
 
 grep -q 'verification_only_install_forbidden' developer/bootstrap/lib/common.sh ||
   fail "生产维护命令未拒绝 verification-only 验证安装目录"
-grep -q 'verification_branch_unreachable' developer/runtime/src/ao_work/installation.py ||
+grep -q 'verification_branch_unreachable' developer/runtime/src/ao_work/installation/__init__.py ||
   fail "Runtime 未实现验证安装的远端可达性门禁"
 grep -q 'verification-only' developer/bootstrap/install-verify-branch.sh ||
   fail "验证安装入口未写入 verification-only 标记"

@@ -439,6 +439,21 @@ capabilities:
     summary: Jira Custom Field 表单更新目标契约，当前 Python Runtime 未实现。
     next_action: 请停止自动写入 Custom Field；按专题适配要求提交字段映射与验收清单。
 
+  - id: install_identity
+    source: runtime
+    contract:
+    status: implemented
+    visibility: public
+    commands:
+      - [install, identity, show]
+      - [install, identity, set]
+      - [install, identity, remove]
+      - [install, auth, show]
+      - [install, auth, set]
+      - [install, auth, remove]
+    summary: 配置安装目录（~/.agentic-ops/user/）的研发员级身份（agent_id、Git 执行身份、Jira 账户）与 Jira 凭证；阶段二工作空间初始化与任务执行的身份/凭证来源。
+    next_action: 请在安装目录身份缺失时优先运行 install identity set；Jira 凭证单独更新请使用 install auth set。
+
   - id: workspace_init
     source: contract
     contract: contracts/operations/workspace-init.yaml
