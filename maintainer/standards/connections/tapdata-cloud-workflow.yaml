@@ -1,0 +1,37 @@
+schema_version: 1
+connection_id: tapdata-cloud
+
+# maintainer 面 Jira 工作流映射（快速适配路径标准资产）
+#
+# Jira 状态流程与表单属性易变：本文件是唯一需要维护者修改的适配点，
+# 变更 Jira 工作流后只改这里，不改 Runtime 代码。
+# - statuses：Jira 状态名 -> 标准 stage（waiting_takeover / implementation / completed）
+# - transitions：transition key -> {name, id, from, to}
+#   id 优先（D-037：稳定 ID 优先校验来源/目标状态）；未配 id 时名称兜底
+#   需唯一且 from/to 匹配；禁止模糊匹配。
+# 映射失配时命令输出「当前状态 + Jira 可用 transitions 完整列表 + 已配置条目」
+# 对照材料，照抄即可补齐本文件。
+#
+# 2026-08-18 初稿：AO 项目真实工作流实测（tapdata.atlassian.net）
+#   transitions: To Do(id=21) -> 待办、In Progress(id=31) -> 正在进行、Done(id=41) -> 已完成
+
+projects:
+  AO:
+    statuses:
+      待办: waiting_takeover
+      To Do: waiting_takeover
+      正在进行: implementation
+      In Progress: implementation
+      已完成: completed
+      Done: completed
+    transitions:
+      start_progress:
+        name: In Progress
+        id: "31"
+        from: [待办, To Do]
+        to: 正在进行
+      complete:
+        name: Done
+        id: "41"
+        from: [正在进行, In Progress]
+        to: 已完成

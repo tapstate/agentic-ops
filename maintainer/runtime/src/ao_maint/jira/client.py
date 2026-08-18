@@ -235,6 +235,35 @@ class JiraClient:
         )
         return str(payload.get("id", "")) if isinstance(payload, dict) else ""
 
+    def available_transitions(self, issue_key: str) -> list[dict[str, str]]:
+        payload = self._request(
+            "GET",
+            f"/rest/api/3/issue/{urllib.parse.quote(issue_key, safe='')}/transitions",
+        )
+        raw = payload.get("transitions", []) if isinstance(payload, dict) else []
+        result: list[dict[str, str]] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            transition_id = str(item.get("id", "")).strip()
+            name = str(item.get("name", "")).strip()
+            to_status = object_name(item.get("to"))
+            if transition_id and name:
+                result.append({"id": transition_id, "name": name, "to": to_status})
+        return result
+
+    def execute_transition(
+        self, issue_key: str, transition_id: str, markdown: str | None = None
+    ) -> None:
+        body: dict[str, Any] = {"transition": {"id": transition_id}}
+        if markdown:
+            body["update"] = {"comment": [{"add": {"body": markdown_to_adf(markdown)}}]}
+        self._request(
+            "POST",
+            f"/rest/api/3/issue/{urllib.parse.quote(issue_key, safe='')}/transitions",
+            body=body,
+        )
+
     def _paginated(
         self,
         path: str,
