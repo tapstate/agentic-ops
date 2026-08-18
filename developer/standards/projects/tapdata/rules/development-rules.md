@@ -48,21 +48,48 @@
 
 ## 仓库与分支
 
+### 仓库归类
+
+TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
+
+- 联动仓（随 `tapdata` 主仓分支对齐）：`tapdata`、`tapdata-enterprise`、`tapdata-web`、`tapdata-enterprise-web`、`tapdata-connectors`、`tapdata-connectors-enterprise`、`tapdata-license`、`tapdata-common-lib`。
+- 运维仓（`status` 可见但不联动，保持当前分支）：`tapdata-application`、`feishu_robot`。
+- 单独管理（不纳入分支联动）：`tapdata-cloud`、`license-platform`、`t-layer3-test`、`docs`、`docs-en`、`mcp-tap-server`、`solutions`、`fhir-solution`、Hazelcast(fork)、mongo(fork)。
+
+### 分支类型
+
+`tapdata` 主仓分支分三类：
+
+- 为主（标准）：`main`、`develop`、`release-vX.Y.Z`。
+- 为辅（任务/工作分支）：`<user>/<jira_id>/<from_branch>[-<summary>]`。
+- 非规范（历史遗留，按全名匹配）：`LDP-x.y`、`master`、`develop-vX.Y`、`release-X.Y`（无 `v`）等。
+
+其它联动仓的分支命名与 `tapdata` 主仓一致。注意 `tapdata-connectors`、`tapdata-connectors-enterprise`、`tapdata-common-lib` 的 `release-v*` 是 PluginKit 版本号（v1.2.6~v2.0.x），与主仓的产品版本号（v2.x~v3.x）不是同一套数字，不能按同名对齐，必须按 pluginKit 版本推导。
+
+### 工作分支命名
+
+- 分支名必须包含用户名、Jira 任务编号和检出分支三项；summary 可选。
+- 格式：`<user>/<jira_id>/<from_branch>[-<summary>]`。
+  - `user`（必填）：GitHub 用户名，小写。
+  - `jira_id`（必填）：Jira 任务编号，`TAP-xxxx`。
+  - `from_branch`（必填）：检出/基准分支，规范化后写入：`develop`、`main` 原样；`release-vX.Y.Z` → `vX.Y.Z`（去掉 `release-` 前缀）；含 `/` 的分支 `/` 替换为 `-`。
+  - `summary`（可选）：kebab-case 简短描述（≤ 4 词）；变更类型作前缀书写（`fix-`/`feat-`/`perf-`/`test-`/`docs-`/`chore-`/`refactor-`），不单独占位。
+- 示例：`harsen/TAP-1234/develop`、`harsen/TAP-1234/v3.8.0`、`harsen/TAP-1234/develop-fix-connector-timeout`。
+- 无法确认用户名、Jira 任务编号或检出分支时必须停止并请求研发工程师补齐，不得创建不可追踪分支。
+
+### 分支对齐规则
+
 - 业务仓库必须位于项目 AI 工作空间的 `repos/` 目录下，例如 `<project-ai-workspace>/repos/tapdata`。
 - 修改前必须先更新代码。
-- 不得直接提交到 `main`、`develop`、`master` 或 `release-*`。
-- 即使远程凭证允许，也不得直接推送到受保护分支。
-- 受保护分支必须走 PR 流程。
-- 创建工作分支时，分支名至少必须包含用户名、Jira 任务编号和检出分支。
-- 检出分支为 `release-vX.Y.Z` 时，工作分支名中只保留 `vX.Y.Z`，不得保留 `release-` 前缀。
-- 推荐工作分支格式为 `<username>/<jira-key>/<source-branch>`，例如 `harsen/TAP-1234/develop`、`harsen/TAP-1234/v3.8.0`。
-- 无法确认用户名、Jira 任务编号或检出分支时，必须停止并请求研发工程师补齐，不得创建不可追踪分支。
-- TapData 多仓开发必须以 `tapdata` 主仓分支为输入对齐相关仓库，不得凭直觉把所有仓库切到同名分支。
-- `branch_align` 当前是 `capability_gap`。AIAgent 必须按以下分支规则生成只读人工对齐清单，由研发工程师确认后使用项目认可的 Git 操作逐仓处理，不得调用旧命令或声称 Runtime 已自动对齐。
+- 不得直接提交到 `main`、`develop`、`master` 或 `release-*`；即使远程凭证允许，也不得直接推送到受保护分支；受保护分支必须走 PR 流程。
+- 多仓开发必须以 `tapdata` 主仓分支为输入对齐相关仓库，不得凭直觉把所有仓库切到同名分支。
+- 分支对齐通过项目脚本 `scripts/tap_align_branches.py` 执行（项目工具，非 ao-work 通用命令）：AIAgent 必须先以 `plan` 模式生成只读对齐清单，由研发工程师确认后再 `apply`；不得凭直觉切分支或声称 Runtime 已自动对齐。
 - `branch_spec` 可以是 `develop`、`main`、`release-vX.Y.Z`、任务分支，或 `<tapdata>,<enterprise>,<web>` 格式；enterprise/web 分支不明确时必须显式指定或停止。
-- `tapdata-application` 默认必须保持当前分支，不参与自动对齐。
-- `tapdata` 为 `develop` 时，`tapdata-license` 必须切到 `main`，不得切到 `develop`。
-- `tapdata-connectors`、`tapdata-connectors-enterprise`、`tapdata-common-lib` 必须根据 `tapdata` 仓库 `iengine/iengine-app/src/main/resources/pluginKit.properties` 中的 `tapdata.api.verison` 推导 release 分支；找不到满足版本的 release 分支时才允许回退 `main`。
+- `tapdata` 为 `main` 时：所有联动仓切到 `main`。
+- `tapdata` 为 `develop` 时：`tapdata-enterprise`、`tapdata-web`、`tapdata-enterprise-web`、`tapdata-connectors`、`tapdata-connectors-enterprise` 切 `develop`；`tapdata-common-lib` 无 `develop` 分支，按 pluginKit 推导 release（取不到回退 `main`）；`tapdata-license` 切 `main`。
+- `tapdata` 为其它分支时：先按 `TAP-xxxx` 标记匹配；非标准分支名（非 `main`/`develop`/`release-v*`）按全名匹配同名分支；仍未命中时，`tapdata-enterprise`/`tapdata-web`/`tapdata-enterprise-web` 用同名分支（缺失则 `UNRESOLVED` 阻塞，不猜测）；`tapdata-connectors`/`tapdata-connectors-enterprise`/`tapdata-common-lib` 按 pluginKit 推导 release（取不到回退 `main`）；`tapdata-license` 取版本号 ≥ 主仓分支的 release（取不到回退 `main`）。
+- `tapdata-application`、`feishu_robot` 默认保持当前分支，不参与自动对齐。
+- pluginKit 推导：读 `tapdata` 分支 `iengine/iengine-app/src/main/resources/pluginKit.properties` 的 `tapdata.api.verison`（源码拼写即 `verison`，按字面读，勿当 typo 改），去 `-SNAPSHOT` 得 `release-v<version>`，在各仓 `release-v*` 分支中取第一个版本 ≥ 该值的分支。
 - 人工对齐脏仓库时，只有研发工程师确认后才允许按计划临时 `stash push -u`、切换分支后 `stash pop`；若 stash 或 pop 失败必须停止，不能继续跨仓切换。
 
 ## 修改范围

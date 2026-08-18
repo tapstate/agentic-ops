@@ -10,15 +10,6 @@ capabilities:
     summary: 旧版分类 Jira 评论操作契约，当前 Python Runtime 不提供该命令。
     next_action: 请停止调用旧 add-task-comment；需要写评论时先查询 jira_comment 能力并按当前 plan、apply、readback 协议执行。
 
-  - id: branch_align
-    source: contract
-    contract: contracts/operations/branch-align.yaml
-    status: capability_gap
-    visibility: public
-    commands: []
-    summary: TapData 多仓分支对齐目标契约，尚未迁移到 Python Runtime。
-    next_action: 请人工检查并对齐业务仓库分支，任务完成后提交 branch_align 能力改进建议。
-
   - id: check_ci_status
     source: contract
     contract: contracts/operations/check-ci-status.yaml
