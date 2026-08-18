@@ -13,7 +13,7 @@ from ao_maint.output import RuntimeErrorResult
 
 
 class RealTaskToPrE2EPreflightTest(unittest.TestCase):
-    def test_current_catalog_fails_closed_before_external_access(self) -> None:
+    def test_current_catalog_is_mainline_ready_without_external_access(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             source_root = self._source_with_current_catalog(Path(temporary))
             preflight = RealTaskToPrE2EPreflight(source_root)
@@ -24,21 +24,16 @@ class RealTaskToPrE2EPreflightTest(unittest.TestCase):
             )
             result = preflight.run("TAP-12289")
 
-        self.assertFalse(result["ready"])
+        self.assertTrue(result["ready"])
         self.assertFalse(result["external_access_performed"])
         self.assertFalse(result["business_workspace_created"])
         self.assertFalse(result["credentials_read"])
-        self.assertEqual(
-            {
-                "takeover_task",
-            },
-            {entry["id"] for entry in result["blocking_capabilities"]},
-        )
+        self.assertEqual([], result["blocking_capabilities"])
         self.assertEqual("harsen-mini-test-bot", result["test_identity"]["agent_id"])
         self.assertEqual("harsen", result["test_identity"]["expected_confirmer"])
         self.assertEqual("tapdata", result["test_identity"]["project_profile"])
         self.assertEqual("task_to_pr_e2e_config", result["test_identity"]["source"])
-        self.assertTrue(result["next_action"]["stop_workflow"])
+        self.assertFalse(result["next_action"]["stop_workflow"])
 
     def test_missing_configuration_blocks_without_identity_inference(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
