@@ -15,6 +15,33 @@ jira:
 
 repositories:
   default: tapdata/tapdata
+  list:
+    - tapdata/tapdata
+    - tapdata/tapdata-enterprise
+    - tapdata/tapdata-web
+    - tapdata/tapdata-connectors
+    - tapdata/tapdata-connectors-enterprise
+    - tapdata/tapdata-license
+    - tapdata/tapdata-common-lib
+    - tapdata/tapdata-application
+    - tapdata/feishu_robot
+    - tapdata/tapdata-cloud
+    - tapdata/t-layer3-test
+    - tapdata/docs
+    - tapdata/docs-en
+    - tapdata/mcp-tap-server
+    - tapdata/solutions
+    - tapdata/fhir-solution
+  analysis_mount:
+    mode: all
+    include: []
+    exclude:
+      - tapdata/t-layer3-test
+  branches:
+    derive_from: default
+    default_branch: main
+    default_rule: same_name
+    overrides: []
 
 fields:
   owner:

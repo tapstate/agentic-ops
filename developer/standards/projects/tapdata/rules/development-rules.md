@@ -54,7 +54,7 @@ TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
 
 - 联动仓（随 `tapdata` 主仓分支对齐）：`tapdata`、`tapdata-enterprise`、`tapdata-web`、`tapdata-connectors`、`tapdata-connectors-enterprise`、`tapdata-license`、`tapdata-common-lib`。
 - 运维仓（`status` 可见但不联动，保持当前分支）：`tapdata-application`、`feishu_robot`。
-- 单独管理（不纳入分支联动）：`tapdata-cloud`、`license-platform`、`t-layer3-test`、`docs`、`docs-en`、`mcp-tap-server`、`solutions`、`fhir-solution`、Hazelcast(fork)、mongo(fork)。
+- 单独管理（不纳入分支联动）：`tapdata-cloud`、`t-layer3-test`、`docs`、`docs-en`、`mcp-tap-server`、`solutions`、`fhir-solution`、Hazelcast(fork)、mongo(fork)。
 
 ### 分支类型
 

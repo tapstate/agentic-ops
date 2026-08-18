@@ -107,5 +107,13 @@ agentic_write_refs "$INSTALL_DIR" "$previous_ref" "$current_ref"
 agentic_require_checkout_integrity "$INSTALL_DIR"
 agentic_configure_path "$INSTALL_DIR"
 
+# 研发员级配置目录（D-048）：确保 user/ 与 config.yaml 存在；source_pool_root
+# 未配置时不强制引导（workspace init 会检测并阻断 source_pool_root_invalid）。
+user_dir="$INSTALL_DIR/user"
+mkdir -p "$user_dir"
+if [ ! -f "$user_dir/config.yaml" ]; then
+  : > "$user_dir/config.yaml"
+fi
+
 agentic_bootstrap_json_success bootstrap_install \
   install_dir "$INSTALL_DIR" current_ref "$current_ref" python "3.12"
