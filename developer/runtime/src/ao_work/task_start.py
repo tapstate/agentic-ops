@@ -7,7 +7,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ao_work.config import load_jira_context, validate_workspace_jira_binding
+from ao_work.config import (
+    load_jira_context,
+    resolve_source_pool_root,
+    validate_workspace_jira_binding,
+)
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.jira.model import plain_text
 from ao_work.jira.service import JiraService
@@ -15,6 +19,10 @@ from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_gate import record_task_start_context
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.task_state.io import read_json
+from ao_work.task_worktree import (
+    plan_task_worktrees,
+    prepare_task_worktrees,
+)
 from ao_work.workspace import Workspace
 
 
@@ -118,6 +126,42 @@ def execute_task_start(
         "execution_identity": agent_config.get("execution_identity"),
     }
     profile_snapshot = _profile_snapshot(context.profile, issue)
+    task_worktrees: dict[str, Any] | None = None
+    configured_pool_root = resolve_source_pool_root(install_root)
+    source_root_value = str(agent_config.get("source_root") or "")
+    if configured_pool_root is not None and source_root_value:
+        try:
+            pool_resolved = Path(source_root_value).expanduser().resolve()
+        except OSError:
+            pool_resolved = None
+        if pool_resolved == configured_pool_root:
+            sections = _description_sections(issue.description)
+            plan = plan_task_worktrees(
+                pool_root=configured_pool_root,
+                profile=context.profile,
+                issue_key=issue.key,
+                description_sections=sections,
+            )
+            prepared = prepare_task_worktrees(
+                plan,
+                execution_identity=agent_config.get("execution_identity"),
+            )
+            task_worktrees = {
+                "issue_key": prepared.issue_key,
+                "from_branch": prepared.from_branch,
+                "pool_root": str(prepared.pool_root),
+                "adopted": prepared.adopted,
+                "created": prepared.created,
+                "entries": [
+                    {
+                        "repository": entry.repository,
+                        "worktree_dir": str(entry.worktree_dir),
+                        "branch": entry.branch,
+                        "created": entry.created,
+                    }
+                    for entry in prepared.entries
+                ],
+            }
     intake_source = record_task_start_context(
         workspace,
         store,
@@ -133,6 +177,7 @@ def execute_task_start(
         "agentic_run_id": agentic_run_id,
         "task_state_created": task_state_created,
         "intake_source": intake_source,
+        "task_worktrees": task_worktrees,
         "configuration_sources": {
             "workspace": ["agent_id", "project_profile", "Jira 账户", "源码仓库", "执行身份"],
             "project_profile": ["Jira 站点", "Project", "状态/字段映射", "默认仓库"],
