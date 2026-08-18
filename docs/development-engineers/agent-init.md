@@ -37,6 +37,23 @@ bash developer/bootstrap/install-verify-branch.sh \
 
 没有 `agentic-cli` 兼容命令，也不需要 Go 或项目自有平台二进制。
 
+## 1.2 配置安装目录身份与凭证（推荐，可简化初始化）
+
+D-048 阶段二起，研发员身份与 Jira 凭证可以先配置到安装目录（`<安装目录>/user/identity.yaml` 与 `user/.env`，0600）。配置后 `workspace init` 会从安装目录继承执行身份与凭证，不再需要逐次传入 `--git-name/--git-email/--github-login` 与 `--jira-email/--token-stdin`：
+
+```sh
+printf '%s\n' "$JIRA_API_TOKEN" | ao-work install identity set \
+  --agent-id <agent-id> \
+  --jira-email <jira-account-email> \
+  --git-name <git-author-and-committer-name> \
+  --git-email <git-author-and-committer-email> \
+  --github-login <github-actor-login> \
+  --jira-token-stdin \
+  --non-interactive
+```
+
+`--jira-token-stdin` 把 token 一并写入安装目录凭证（等价于后续再执行 `ao-work install auth set`）。查看/清除：`ao-work install identity show|remove`、`ao-work install auth show|remove`。安装目录未配置身份时，`install auth set` 会阻断（`install_identity_missing`），必须先配身份。
+
 ## 2. 初始化业务项目工作空间
 
 一个业务项目工作空间代表一名研发员，并只绑定该研发员的一个 Jira 账户。在独立工作空间根目录运行：
@@ -46,6 +63,37 @@ ao-work workspace init
 ```
 
 `workspace init` 默认使用第 1 节稳定 `main` 安装的 `~/.agentic-ops/bin/ao-work`；如需验证未发布分支，用第 1.1 节远程模式的验证安装（`--source-worktree` 本地模式不可运行）。
+
+非交互初始化（脚本/CI）示例，token 通过安全标准输入传入，不得放入命令行参数。`--workspace-root` 是 `ao-work` 顶层全局参数（默认当前目录 `.`），在目标工作空间目录内运行时省略：
+
+```sh
+cd "$WS_DIR"   # 业务项目工作空间根目录
+printf '%s\n' "$JIRA_API_TOKEN" | ao-work workspace init \
+  --non-interactive \
+  --project tapdata \
+  --agent-id <agent-id> \
+  --source-pool-root <pool-root> \
+  --jira-email <jira-account-email> \
+  --git-name <git-author-and-committer-name> \
+  --git-email <git-author-and-committer-email> \
+  --github-login <github-actor-login> \
+  --token-stdin \
+  --confirm
+```
+
+必填项（非交互）：`--non-interactive` 与 `--confirm`、`--project`（Project Profile id）、`--agent-id`（只允许 `[0-9A-Za-z_-]`）、`--jira-email` 与 `--token-stdin`（成对）、池根（`--source-pool-root` 或 `~/.agentic-ops/user/config.yaml` 的 `source_pool_root` 二选一）。池根目录不存在时由 init 自动创建并写入容器 README（preflight 只读校验、不创建）。
+
+可省略项：已按第 1.2 节配置安装目录身份与凭证后，`--git-name/--git-email/--github-login` 与 `--jira-email/--token-stdin` 可以省略，init 从安装目录继承；此时非交互最小命令为：
+
+```sh
+cd "$WS_DIR"
+ao-work workspace init \
+  --non-interactive \
+  --project tapdata \
+  --agent-id <agent-id> \
+  --source-pool-root <pool-root> \
+  --confirm
+```
 
 交互入口会让公司员工指导员确认：
 
@@ -68,7 +116,7 @@ ao-work auth jira verify
 ao-work capability list
 ```
 
-只有 `preflight` 与授权验证都成功后，才能读取或执行真实 Jira 任务。调用具体操作前继续执行 `ao-work capability show <operation>`；只有 `status=implemented` 且返回明确命令路径时才能调用，`capability_gap` 必须停止或转人工。Jira token 只保存在当前业务项目工作空间 `.agentic-ops/.env`，共享安装、其它业务工作空间和 maintainer 工作面都不得继承。
+只有 `preflight` 与授权验证都成功后，才能读取或执行真实 Jira 任务。调用具体操作前继续执行 `ao-work capability show <operation>`；只有 `status=implemented` 且返回明确命令路径时才能调用，`capability_gap` 必须停止或转人工。Jira token 保存在安装目录 `user/.env`（第 1.2 节）或当前业务项目工作空间 `.agentic-ops/.env`（旧 schema 存量路径），两者由 init 阶段按 schema 选择其一；共享安装的其它业务工作空间和 maintainer 工作面不得继承。
 
 授权完成后，普通任务只传 Jira key：
 

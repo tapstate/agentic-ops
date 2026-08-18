@@ -48,13 +48,14 @@ Jira 站点、Project Key、状态/字段映射和默认仓库来自 Project Pro
 
 ## 非交互模式
 
-脚本或 CI 必须明确提供身份、Profile 和确认，并通过安全标准输入传 token：
+脚本或 CI 必须明确提供身份、Profile 和确认，并通过安全标准输入传 token。`--workspace-root` 是 `ao-work` 顶层全局参数（默认当前目录 `.`，必须放在 `workspace` 之前）；在目标工作空间目录内运行时省略即可：
 
 ```sh
 printf '%s\n' "$JIRA_TOKEN" | ao-work workspace init \
   --non-interactive \
   --project <profile> \
   --agent-id <agent-id> \
+  --source-pool-root <pool-root> \
   --jira-email <email> \
   --git-name <git-author-and-committer-name> \
   --git-email <git-author-and-committer-email> \
@@ -62,5 +63,21 @@ printf '%s\n' "$JIRA_TOKEN" | ao-work workspace init \
   --token-stdin \
   --confirm
 ```
+
+从其它目录初始化指定工作空间时，把 `--workspace-root <路径>` 放在 `ao-work` 之后、`workspace` 之前。
+
+必填项（非交互）：
+
+- `--non-interactive` 与 `--confirm`：确认初始化摘要，缺一不可。
+- `--project <profile>`：Project Profile id（如 `tapdata`）；Jira 站点、Project Key 与默认仓库无 CLI 参数，全部取自该 Profile。
+- `--agent-id <id>`：只允许 `[0-9A-Za-z_-]`。
+- `--jira-email` 与 `--token-stdin`：必须成对；token 从 stdin 第一行读取。已用 `ao-work install auth set` 配置安装目录凭证时可省略。
+- 池根必配：`--source-pool-root` 或 `~/.agentic-ops/user/config.yaml` 的 `source_pool_root` 二选一，否则 `source_pool_root_invalid` 阻断。池根目录不存在时 init 自动创建（preflight 只读校验，apply 创建并写容器 README）。
+
+可选：
+
+- `--source-root`：缺省为池模式（源码语义 = 池根）；显式传入非池根路径则为普通源码模式。
+- `--git-name` / `--git-email` / `--github-login`：all-or-none；已用 `ao-work install identity set` 配置安装身份时可省略。
+- `--confirm-existing-config`：覆盖已有不同完整配置时需要。
 
 不得把 token 放入命令参数、日志、报告或聊天内容。

@@ -24,7 +24,7 @@ inputs:
   source_pool_root:
     required: false
     default: user_config_source_pool_root_or_environment
-    note: 池模式必配；未配置时阻断 source_pool_root_invalid（无兼容回退）
+    note: 池模式必配；未配置时阻断 source_pool_root_invalid（无兼容回退）。目录不存在时由 init 自动创建并写入容器 README（preflight 只读校验、不创建）。
 confirmation:
   required_fields:
     - agent_id

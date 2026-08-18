@@ -52,8 +52,13 @@ def validate_business_source_root(workspace_root: Path, source_root: Path) -> Pa
     return source
 
 
-def validate_source_pool_root(pool_root: Path) -> Path:
-    """校验中央克隆池根：必配、存在、可写、不得为安装目录/源头仓库或其后代。"""
+def validate_source_pool_root(pool_root: Path, *, allow_missing: bool = False) -> Path:
+    """校验中央克隆池根：必配、存在或可创建、可写、不得为安装目录/源头仓库或其后代。
+
+    - `allow_missing=False`（默认）：池根必须已存在（任务工作树等运行时场景）。
+    - `allow_missing=True`：池根不存在时允许由 init 自动创建（workspace init 场景），
+      但仍校验父路径可创建与最终可写性，安全边界校验不放松。
+    """
     pool = pool_root.expanduser().resolve()
     if pool == Path.home() or pool == Path.home().resolve():
         raise _blocked(
@@ -73,13 +78,37 @@ def validate_source_pool_root(pool_root: Path) -> Path:
             "中央克隆池根不能是 AgenticOps 安装目录、业务工作空间或源头仓库（或其后代）",
             "请把 source_pool_root 指向独立的源码池目录",
         )
-    if not pool.is_dir():
+    if pool.exists() and not pool.is_dir():
         raise _blocked(
             "source_pool_root_invalid",
-            f"中央克隆池根不存在或不是目录：{pool}",
-            "请先创建池根目录并配置 source_pool_root",
+            f"中央克隆池根不是目录：{pool}",
+            "请把 source_pool_root 指向目录",
         )
-    if not os.access(pool, os.W_OK | os.X_OK):
+    if not allow_missing:
+        if not pool.is_dir():
+            raise _blocked(
+                "source_pool_root_invalid",
+                f"中央克隆池根不存在或不是目录：{pool}",
+                "请先创建池根目录并配置 source_pool_root",
+            )
+        if not os.access(pool, os.W_OK | os.X_OK):
+            raise _blocked(
+                "source_pool_root_invalid",
+                f"中央克隆池根不可写：{pool}",
+                "请修复池根目录权限后重试",
+            )
+        return pool
+    # allow_missing：允许 init 创建池根。定位最近的已存在祖先并校验其可创建性。
+    ancestor = pool
+    while not ancestor.exists() and ancestor != ancestor.parent:
+        ancestor = ancestor.parent
+    if not ancestor.is_dir() or not os.access(ancestor, os.W_OK | os.X_OK):
+        raise _blocked(
+            "source_pool_root_invalid",
+            f"无法创建中央克隆池根：{pool}",
+            "请修复池根父目录权限或指定其它 source_pool_root",
+        )
+    if pool.is_dir() and not os.access(pool, os.W_OK | os.X_OK):
         raise _blocked(
             "source_pool_root_invalid",
             f"中央克隆池根不可写：{pool}",

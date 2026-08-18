@@ -302,8 +302,11 @@ class WorkspaceInitializer:
                     execution_identity = rebuilt_identity
         source_root_derived = not source_root
         # 池根必配：显式参数 > 研发员级配置 > 阻断（无兼容回退）。
+        # init 场景 allow_missing=True：池根不存在时由 apply 自动创建（D-048 3.2）。
         if source_pool_root is not None:
-            pool_root = validate_source_pool_root(Path(source_pool_root))
+            pool_root = validate_source_pool_root(
+                Path(source_pool_root), allow_missing=True
+            )
         else:
             configured_pool_root = resolve_source_pool_root(self.install_root)
             if configured_pool_root is None:
@@ -313,7 +316,9 @@ class WorkspaceInitializer:
                     "请先在 ~/.agentic-ops/user/config.yaml 配置 source_pool_root，"
                     "或使用 --source-pool-root 显式指定（仅本次）",
                 )
-            pool_root = validate_source_pool_root(configured_pool_root)
+            pool_root = validate_source_pool_root(
+                configured_pool_root, allow_missing=True
+            )
         if source_root:
             resolved_source = validate_business_source_root(
                 self.root, Path(source_root).expanduser().resolve()
@@ -810,8 +815,11 @@ class WorkspaceInitializer:
             )
         checks.append({"check": "git_available", "status": "passed"})
         if candidate.pool_mode:
-            pool_root = validate_source_pool_root(candidate.source_pool_root or candidate.source_root)
-            pool_root.mkdir(parents=True, exist_ok=True)
+            # preflight 只读校验：池根不存在时允许（apply 阶段创建），但不在此创建。
+            pool_root = validate_source_pool_root(
+                candidate.source_pool_root or candidate.source_root,
+                allow_missing=True,
+            )
             repositories = candidate.profile.repository_candidates()
             if not repositories:
                 raise _blocked(
@@ -958,7 +966,8 @@ class WorkspaceInitializer:
         """
         assert candidate.pool_mode
         pool_root = validate_source_pool_root(
-            candidate.source_pool_root or candidate.source_root
+            candidate.source_pool_root or candidate.source_root,
+            allow_missing=True,
         )
         pool_root.mkdir(parents=True, exist_ok=True)
         repositories = candidate.profile.repository_candidates()

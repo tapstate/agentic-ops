@@ -127,6 +127,56 @@ ao-work jira worklog apply --plan-file <managed-path> --confirm-plan-id <plan-id
 ao-work jira worklog readback --issue-key TAP-123 --idempotency-key <key> --plan-file <managed-path> --confirm-plan-id <plan-id>
 ```
 
+### workspace init 非交互全参示例
+
+脚本或 CI 初始化业务项目工作空间必须明确提供身份、Profile 和确认，token 通过安全标准输入传入，不得放入命令行参数。`--workspace-root` 是 `ao-work` 顶层全局参数（默认当前目录 `.`，必须在操作组之前），在目标工作空间目录内运行时可以省略：
+
+```sh
+printf '%s\n' "$JIRA_API_TOKEN" | ao-work workspace init \
+  --non-interactive \
+  --project tapdata \
+  --agent-id <agent-id> \
+  --source-pool-root <pool-root> \
+  --jira-email <jira-account-email> \
+  --git-name <git-author-and-committer-name> \
+  --git-email <git-author-and-committer-email> \
+  --github-login <github-actor-login> \
+  --token-stdin \
+  --confirm
+```
+
+从其它目录初始化指定工作空间时，把 `--workspace-root <路径>` 放在 `ao-work` 之后、`workspace` 之前：
+
+```sh
+printf '%s\n' "$JIRA_API_TOKEN" | ao-work --workspace-root /path/to/workspace workspace init \
+  --non-interactive \
+  --project tapdata \
+  --agent-id <agent-id> \
+  --source-pool-root <pool-root> \
+  --jira-email <jira-account-email> \
+  --git-name <git-author-and-committer-name> \
+  --git-email <git-author-and-committer-email> \
+  --github-login <github-actor-login> \
+  --token-stdin \
+  --confirm
+```
+
+非交互模式必填项：
+
+- `--non-interactive` 与 `--confirm`：确认初始化摘要，缺一不可。
+- `--project <profile>`：Project Profile id（如 `tapdata`），来源 `developer/standards/projects/<profile>/profile.yaml`；Jira 站点、Project Key 与默认仓库没有 CLI 参数，全部取自该 Profile。
+- `--agent-id <id>`：只允许 `[0-9A-Za-z_-]`。
+- `--jira-email` 与 `--token-stdin`：必须成对（`jira_credential_pair_required` 拦截单边）；token 从 stdin 第一行读取。若已用 `ao-work install auth set` 配置安装目录凭证，可省略（安装凭证为优先源）。
+- 池根必配：`--source-pool-root` 或 `~/.agentic-ops/user/config.yaml` 的 `source_pool_root` 二选一，否则 `source_pool_root_invalid` 阻断，无兼容回退。池根目录不存在时由 init 自动创建并写入容器 README（preflight 只读校验、不创建）。
+
+可选参数：
+
+- `--source-root`：缺省为池模式（源码语义 = 池根，任务工作树在接管时创建）；显式传入非池根路径则为普通源码模式。
+- `--git-name` / `--git-email` / `--github-login`：执行身份三参数，all-or-none；已用 `ao-work install identity set` 配置安装身份时可省略，从安装身份继承。
+- `--confirm-existing-config`：已有不同完整配置需覆盖时提供，否则 `existing_config_confirmation_required` 阻断。
+
+> 维护约定：本节示例与 `developer/skills/initialize-project-workspace/SKILL.md` 的非交互示例随 `workspace init` 参数变更同步修正，不得只改实现不改文档。
+
 `jira_inspect` 只输出基础 Jira Issue 事实和凭证配置状态，不读取评论、Custom Field 或旧 `inspect_task` 契约定义的富门禁事实，不判断项目准入，也不绑定 AIAgent。AIAgent 必须把该输出与项目标准资产结合分析。
 
 Jira Comment、Description 和 Worklog 都要求先初始化一致的本地任务身份，并使用 Runtime 管理且绑定当前 Issue/run 的计划文件。Comment 与 Worklog 使用 `plan -> apply -> readback`，readback 仍必须提供原计划文件和 `plan_id`；Description 使用 `plan -> apply`，apply 内部完成写后回读。真实写入前必须获得与当前 Issue、`agentic_run_id` 和 `plan_id` 对应的明确授权，结果不明确时不得重新 apply。
