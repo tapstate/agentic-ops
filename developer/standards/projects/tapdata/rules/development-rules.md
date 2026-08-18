@@ -52,7 +52,7 @@
 
 TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
 
-- 联动仓（随 `tapdata` 主仓分支对齐）：`tapdata`、`tapdata-enterprise`、`tapdata-web`、`tapdata-enterprise-web`、`tapdata-connectors`、`tapdata-connectors-enterprise`、`tapdata-license`、`tapdata-common-lib`。
+- 联动仓（随 `tapdata` 主仓分支对齐）：`tapdata`、`tapdata-enterprise`、`tapdata-web`、`tapdata-connectors`、`tapdata-connectors-enterprise`、`tapdata-license`、`tapdata-common-lib`。
 - 运维仓（`status` 可见但不联动，保持当前分支）：`tapdata-application`、`feishu_robot`。
 - 单独管理（不纳入分支联动）：`tapdata-cloud`、`license-platform`、`t-layer3-test`、`docs`、`docs-en`、`mcp-tap-server`、`solutions`、`fhir-solution`、Hazelcast(fork)、mongo(fork)。
 
@@ -86,8 +86,8 @@ TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
 - 分支对齐通过项目脚本 `scripts/tap_align_branches.py` 执行（项目工具，非 ao-work 通用命令）：AIAgent 必须先以 `plan` 模式生成只读对齐清单，由研发工程师确认后再 `apply`；不得凭直觉切分支或声称 Runtime 已自动对齐。
 - `branch_spec` 可以是 `develop`、`main`、`release-vX.Y.Z`、任务分支，或 `<tapdata>,<enterprise>,<web>` 格式；enterprise/web 分支不明确时必须显式指定或停止。
 - `tapdata` 为 `main` 时：所有联动仓切到 `main`。
-- `tapdata` 为 `develop` 时：`tapdata-enterprise`、`tapdata-web`、`tapdata-enterprise-web`、`tapdata-connectors`、`tapdata-connectors-enterprise` 切 `develop`；`tapdata-common-lib` 无 `develop` 分支，按 pluginKit 推导 release（取不到回退 `main`）；`tapdata-license` 切 `main`。
-- `tapdata` 为其它分支时：先按 `TAP-xxxx` 标记匹配；非标准分支名（非 `main`/`develop`/`release-v*`）按全名匹配同名分支；仍未命中时，`tapdata-enterprise`/`tapdata-web`/`tapdata-enterprise-web` 用同名分支（缺失则 `UNRESOLVED` 阻塞，不猜测）；`tapdata-connectors`/`tapdata-connectors-enterprise`/`tapdata-common-lib` 按 pluginKit 推导 release（取不到回退 `main`）；`tapdata-license` 取版本号 ≥ 主仓分支的 release（取不到回退 `main`）。
+- `tapdata` 为 `develop` 时：`tapdata-enterprise`、`tapdata-web`、`tapdata-connectors`、`tapdata-connectors-enterprise` 切 `develop`；`tapdata-common-lib` 无 `develop` 分支，按 pluginKit 推导 release（取不到回退 `main`）；`tapdata-license` 切 `main`。
+- `tapdata` 为其它分支时：先按 `TAP-xxxx` 标记匹配；非标准分支名（非 `main`/`develop`/`release-v*`）按全名匹配同名分支；仍未命中时，`tapdata-enterprise`/`tapdata-web` 用同名分支（缺失则 `UNRESOLVED` 阻塞，不猜测）；`tapdata-connectors`/`tapdata-connectors-enterprise`/`tapdata-common-lib` 按 pluginKit 推导 release（取不到回退 `main`）；`tapdata-license` 取版本号 ≥ 主仓分支的 release（取不到回退 `main`）。
 - `tapdata-application`、`feishu_robot` 默认保持当前分支，不参与自动对齐。
 - pluginKit 推导：读 `tapdata` 分支 `iengine/iengine-app/src/main/resources/pluginKit.properties` 的 `tapdata.api.verison`（源码拼写即 `verison`，按字面读，勿当 typo 改），去 `-SNAPSHOT` 得 `release-v<version>`，在各仓 `release-v*` 分支中取第一个版本 ≥ 该值的分支。
 - 人工对齐脏仓库时，只有研发工程师确认后才允许按计划临时 `stash push -u`、切换分支后 `stash pop`；若 stash 或 pop 失败必须停止，不能继续跨仓切换。

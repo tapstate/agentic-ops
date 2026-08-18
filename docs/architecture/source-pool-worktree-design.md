@@ -13,7 +13,7 @@
 <source_root>/<jira_id>/<from_branch>/<repo>
 ```
 
-解决的核心问题：tapdata 项目 12 个仓库合计约 12.3G（`t-layer3-test` 单仓 9.3G），慢网络下重复全量克隆不可接受；项目运行需要多仓库分支组合对应；任务分析需要跨多仓库搜索；工作空间与源码目录耦合过深，任务隔离不清晰。
+解决的核心问题：tapdata 项目约 17 个业务仓库（本机已克隆 12 个、合计约 12.3G，`t-layer3-test` 单仓 9.3G），慢网络下重复全量克隆不可接受；项目运行需要多仓库分支组合对应；任务分析需要跨多仓库搜索；工作空间与源码目录耦合过深，任务隔离不清晰。
 
 本文改变「业务源码获取、布局、任务工作树、研发员身份归属」四条边界；不改变 Jira 绑定事实源、授权门禁、证据回写、`~/.agentic-ops` sparse managed clone 边界和 AgenticOps 源头仓库规则。
 
@@ -129,10 +129,23 @@ repositories:
   default: tapdata/tapdata
   list:
     - tapdata/tapdata
+    - tapdata/tapdata-enterprise
     - tapdata/tapdata-web
     - tapdata/tapdata-connectors
+    - tapdata/tapdata-connectors-enterprise
+    - tapdata/tapdata-license
+    - tapdata/tapdata-common-lib
+    - tapdata/tapdata-application
+    - tapdata/feishu_robot
+    - tapdata/tapdata-cloud
+    - tapdata/license-platform
     - tapdata/t-layer3-test
-    # ... 全量 12 个
+    - tapdata/docs
+    - tapdata/docs-en
+    - tapdata/mcp-tap-server
+    - tapdata/solutions
+    - tapdata/fhir-solution
+    # fork（Hazelcast/mongo）不默认纳入，任务明确要求时按需挂载
   analysis_mount:            # 任务分析挂载策略（配置，可渐进调整）
     mode: all                # all | include | exclude
     include: []              # mode=include 时仅挂这些仓库
@@ -140,9 +153,9 @@ repositories:
 ```
 
 - `default`：任务目标仓库缺省值（兼容既有校验与索引）。
-- `list`：profile 允许的全部仓库；池成员全集与 target 校验范围。
-- `analysis_mount`：任务接管时挂载的分析工作树集策略。缺省 `mode: all`（全量 list），可通过 `exclude` 排除超大仓库、`include` 精确指定；挂载策略是配置不是代码，维护者可随时调整，不需要一次性定全。按需挂载由 `ao-work` 命令在任务根下动态 add worktree 完成。
-- 最小可用配置只要求 `default` 与 `list`（已具备），`analysis_mount`、`branches` 缺省即可用，具体值后续逐步补充（先反馈后固化）。
+- `list`：profile 允许的全部业务仓库（17 个，含文档类 `docs`/`docs-en`；fork 如 `Hazelcast`/`mongo` 不默认纳入，任务明确要求时按需挂载）；池成员全集与 target 校验范围。
+- `analysis_mount`：任务接管时挂载的分析工作树集策略。缺省 `mode: all`（全量 list），可通过 `exclude` 排除超大仓库、`include` 精确指定；不同任务关注不同维度（TM/FE/连接器/云版/CI/CD/自动化测试），由挂载策略按任务筛选；挂载策略是配置不是代码，维护者可随时调整，不需要一次性定全。按需挂载由 `ao-work` 命令在任务根下动态 add worktree 完成。
+- 最小可用配置只要求 `default` 与 `list`，`analysis_mount`、`branches` 缺省即可用，具体值后续逐步补充（先反馈后固化）。
 
 #### 3.9.2 分支对应关系（推导接口，不要求一次性给全）
 
@@ -230,7 +243,7 @@ branches:
 - `developer/runtime/src/ao_work/workspace.py`：`validate_business_source_root` 增加池根/主 checkout 约束；工作树路径规范化与校验函数。
 - `developer/runtime/src/ao_work/workspace_init/cli.py`：`--source-pool-root` 参数；交互确认摘要展示池根、池成员全集与任务工作树路径规则。
 - `developer/runtime/src/ao_work/config/`：研发员级配置读取（`~/.agentic-ops/user/config.yaml` 的 `source_pool_root`）；ProjectProfile 增加 `repositories.list/analysis_mount`、`branches`（derive_from/default_rule/overrides）。
-- `developer/standards/projects/tapdata/profile.yaml`：`repositories` 扩展 list（12 个仓库）与 `analysis_mount`（缺省全量，可先排除 t-layer3-test）；`branches` 推导配置（derive_from: default，同名默认，overrides 渐进补充）；`target_repo` 字段 source 改为 `jira_description_section`（section: 目标仓库）。
+- `developer/standards/projects/tapdata/profile.yaml`：`repositories` 扩展 list（17 个业务仓库，含文档类，fork 按需）与 `analysis_mount`（缺省 all，按任务维度 exclude/include）；`branches` 推导配置（derive_from: default，同名默认，overrides 渐进补充）；`target_repo` 字段 source 改为 `jira_description_section`（section: 目标仓库）。
 - `developer/standards/contracts/operations/workspace-init.yaml`：`source_pool_root` 必配输入、`source_root` 语义说明、postcondition 增加池成员/身份隔离断言、failure 增加新失败码。
 - `developer/bootstrap/install.sh` / 配置命令：安装/首次配置时引导写入 `source_pool_root`（必配）。
 
