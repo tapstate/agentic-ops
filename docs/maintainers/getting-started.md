@@ -29,6 +29,24 @@ bash maintainer/scripts/test-python-runtime.sh
 
 根 `AGENTS.md` 是固定 maintainer AI 入口，并继续加载 `maintainer/AGENTS.md`。不要在源头仓库调用 `ao-work`，不要读取业务项目凭证或把业务仓库规则带入维护 worktree。
 
+## 初始化 maintainer Jira 配置
+
+维护者需要与 Jira AO 任务交互（读取任务、回写进度评论和 Worklog）时，先初始化维护工作面的 Jira 配置：
+
+```sh
+bash maintainer/bin/init-maintainer-config.sh
+```
+
+脚本会校验源头仓库身份（`.agentic-ops-source` 标记和固定官方 origin）、准备 `maintainer/.local/` 状态目录、校验 Connection 定义（`maintainer/standards/connections/`），并引导隐藏输入维护者 Jira 凭证写入 `maintainer/.local/.env`（权限 `0600`，已 gitignore，随 worktree 隔离）。之后即可使用 `ao-maint jira` 命令组：
+
+```sh
+./maintainer/bin/ao-maint jira auth show
+./maintainer/bin/ao-maint jira auth verify
+./maintainer/bin/ao-maint jira inspect --issue-key AO-11
+```
+
+`ao-maint jira` 与 developer 面的 `ao-work jira` 命令同名但独立实现，不读取业务项目工作空间凭证；写操作（评论、Worklog）沿用 `plan -> apply -> readback` 协议并显式要求 `user-confirmation:<KEY>:<plan_id>` 确认引用。同名命令只能通过入口识别工作面：`ao-maint` 的 jira 只用于维护 AgenticOps 源头任务（AO 项目），不用于执行业务研发任务。
+
 如果只是修改文档，至少检查工作区状态、目标文档链接和术语一致性。修改运行代码时，必须执行对应 maintainer/developer 单元、边界、安装或端到端验证。
 
 ## 开始推进工作

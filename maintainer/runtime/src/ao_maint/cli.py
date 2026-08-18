@@ -6,6 +6,7 @@ from typing import Sequence
 
 from ao_maint.cli_common import ArgumentParserError, JsonArgumentParser
 from ao_maint.integration.cli import configure_integration_parser, execute_integration
+from ao_maint.jira.cli import configure_jira_parser, execute_jira
 from ao_maint.output import EXIT_BLOCKED, RuntimeErrorResult, failure, success, write_diagnostic, write_json
 from ao_maint.story_gate.cli import configure_story_parser, execute_story
 from ao_maint.workspace import resolve_maintainer_workspace
@@ -17,6 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="group", required=True)
     configure_story_parser(subparsers)
     configure_integration_parser(subparsers)
+    configure_jira_parser(subparsers)
     return parser
 
 
@@ -34,6 +36,9 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         return success(operation_name(args), workplane=workspace.workplane, **state)
     if args.group == "integration":
         state = execute_integration(args, workspace)
+        return success(operation_name(args), workplane=workspace.workplane, **state)
+    if args.group == "jira":
+        state = execute_jira(args, workspace.root)
         return success(operation_name(args), workplane=workspace.workplane, **state)
     raise RuntimeErrorResult(
         code="capability_gap",
@@ -76,6 +81,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             code="runtime_failed",
             message=f"维护 Runtime 处理失败：{error}",
             required_human_action="请保留脱敏诊断并检查 AgenticOps 源头工作区",
+        )
+        write_diagnostic(result.message)
+        write_json(failure(operation_name(args), result))
+        return result.exit_code
+    except EOFError:
+        result = RuntimeErrorResult(
+            code="operation_interrupted",
+            message="交互输入被中断（EOF）",
+            retry_safe=True,
+            required_human_action="请在有交互终端的会话中重新执行，或改用 --token-stdin 输入",
         )
         write_diagnostic(result.message)
         write_json(failure(operation_name(args), result))

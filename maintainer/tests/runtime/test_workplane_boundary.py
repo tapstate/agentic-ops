@@ -26,10 +26,25 @@ class WorkplaneBoundaryTest(unittest.TestCase):
     SWITCH_FLAGS = frozenset({"--mode", "--role", "--workplane"})
 
     def test_cli_command_sets_are_disjoint(self) -> None:
+        """maintainer 顶层命令与 developer 命令的共享名只能是显式白名单。
+
+        命令名相同不表示代码串：同名命令的实现必须位于 ao_maint 包内，
+        由 ao_maint 自己的模块处理，不 import ao_work（后者由
+        test_workplane_packages_do_not_cross_import 保证）。
+        """
         parser = build_maintainer_parser()
         commands = self._subcommands(parser)
         self.assertIn("story", commands)
-        self.assertEqual(set(), commands & self.DEVELOPER_COMMANDS)
+        # jira 是唯一允许的共享顶层命令名；其它 developer 业务命令
+        # （workspace/auth/task/report）不得出现在 maintainer 顶层。
+        self.assertEqual({"jira"}, commands & self.DEVELOPER_COMMANDS)
+        # 同名命令必须由 ao_maint 独立实现，不能委托给 ao_work。
+        from ao_maint.jira.cli import execute_jira
+
+        self.assertTrue(
+            execute_jira.__module__.startswith("ao_maint."),
+            "maintainer 的 jira 命令必须由 ao_maint 包内模块实现",
+        )
 
     def test_no_parser_level_can_switch_workplane(self) -> None:
         parser = build_maintainer_parser()
