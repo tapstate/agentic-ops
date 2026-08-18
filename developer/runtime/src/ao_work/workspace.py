@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -13,6 +15,10 @@ from ao_work.workspace_security import (
 )
 
 DEVELOPER: Final = "developer"
+
+JIRA_KEY_PATTERN = re.compile(r"^[0-9A-Za-z]+-[1-9][0-9]*$")
+REPOSITORY_SHORT_NAME_PATTERN = re.compile(r"^[0-9A-Za-z_.-]+$")
+WORKTREE_PATH_MAX_LENGTH = 240
 
 
 @dataclass(frozen=True)
@@ -44,6 +50,117 @@ def validate_business_source_root(workspace_root: Path, source_root: Path) -> Pa
             "请把 source_root 指向业务项目代码仓库",
         )
     return source
+
+
+def validate_source_pool_root(pool_root: Path) -> Path:
+    """校验中央克隆池根：必配、存在、可写、不得为安装目录/源头仓库或其后代。"""
+    pool = pool_root.expanduser().resolve()
+    if pool == Path.home() or pool == Path.home().resolve():
+        raise _blocked(
+            "source_pool_root_invalid",
+            "中央克隆池根不能是用户主目录",
+            "请把 source_pool_root 指向独立的源码池目录（如 ~/github）",
+        )
+    install_root = pool / ".agentic-ops"
+    source_ancestor = _source_ancestor(pool)
+    if (
+        install_root in pool.parents
+        or (pool / ".agentic-ops" / "agent.json").exists()
+        or source_ancestor is not None
+    ):
+        raise _blocked(
+            "source_pool_root_invalid",
+            "中央克隆池根不能是 AgenticOps 安装目录、业务工作空间或源头仓库（或其后代）",
+            "请把 source_pool_root 指向独立的源码池目录",
+        )
+    if not pool.is_dir():
+        raise _blocked(
+            "source_pool_root_invalid",
+            f"中央克隆池根不存在或不是目录：{pool}",
+            "请先创建池根目录并配置 source_pool_root",
+        )
+    if not os.access(pool, os.W_OK | os.X_OK):
+        raise _blocked(
+            "source_pool_root_invalid",
+            f"中央克隆池根不可写：{pool}",
+            "请修复池根目录权限后重试",
+        )
+    return pool
+
+
+def normalize_worktree_from_branch(from_branch: str) -> str:
+    """任务工作树 from_branch 规范化：含 / 替换为 -（feature/x → feature-x）。"""
+    normalized = from_branch.strip().replace("/", "-")
+    _validate_worktree_segment(normalized, "from_branch")
+    return normalized
+
+
+def repository_short_name(repository: str) -> str:
+    """owner/repository → repository 短名（复用既有校验语义）。"""
+    if repository.count("/") != 1:
+        raise _blocked(
+            "repository_slug_invalid",
+            f"仓库标识必须使用 owner/repository 格式：{repository}",
+            "请修正 profile repositories 配置",
+        )
+    short_name = repository.split("/", 1)[1]
+    if not REPOSITORY_SHORT_NAME_PATTERN.fullmatch(short_name):
+        raise _blocked(
+            "repository_short_name_invalid",
+            f"仓库短名含非法字符：{short_name}",
+            "请修正 profile repositories 配置",
+        )
+    return short_name
+
+
+def task_worktree_path(
+    pool_root: Path,
+    jira_key: str,
+    from_branch: str,
+    repository: str,
+) -> Path:
+    """任务级子工作树路径：<pool_root>/<jira_id>/<from_branch>/<repo>。"""
+    pool = validate_source_pool_root(pool_root)
+    if not JIRA_KEY_PATTERN.fullmatch(jira_key):
+        raise _blocked(
+            "worktree_path_invalid",
+            f"Jira 编号格式无效：{jira_key}",
+            "请提供形如 TAP-123 的 Jira 编号",
+        )
+    normalized_branch = normalize_worktree_from_branch(from_branch)
+    short_name = repository_short_name(repository)
+    path = pool / jira_key / normalized_branch / short_name
+    if len(str(path)) > WORKTREE_PATH_MAX_LENGTH:
+        raise _blocked(
+            "worktree_path_invalid",
+            f"任务工作树路径超过 {WORKTREE_PATH_MAX_LENGTH} 字符限制：{path}",
+            "请缩短分支名或仓库名后重试",
+        )
+    return path
+
+
+def _validate_worktree_segment(value: str, label: str) -> None:
+    if (
+        not value
+        or value in {".", ".."}
+        or value.startswith("-")
+        or "/" in value
+        or "\\" in value
+        or "@{" in value
+        or value.startswith(".")
+        or ".." in value
+    ):
+        raise _blocked(
+            "worktree_path_invalid",
+            f"任务工作树 {label} 含非法字符或路径穿越：{value}",
+            "请修正分支名后重试",
+        )
+    if not re.fullmatch(r"[0-9A-Za-z_.-]+", value):
+        raise _blocked(
+            "worktree_path_invalid",
+            f"任务工作树 {label} 只能包含安全字符：{value}",
+            "请修正分支名后重试",
+        )
 
 
 def resolve_developer_workspace(root: str) -> Workspace:

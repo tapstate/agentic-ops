@@ -86,6 +86,7 @@ class OfflineFakeRunner:
             distribution = self._create_distribution_repository(jira.base_url)
             self._configure_isolated_git(distribution)
             self._deploy(distribution)
+            self._configure_pool_root()
             self._initialize_workspace()
             self._initialize_fixture_task_state()
             self._write_task_reports()
@@ -440,6 +441,15 @@ class OfflineFakeRunner:
             encoding="utf-8",
         )
         self._record("offline_adapter_configured", base_url="loopback_ephemeral")
+
+    def _configure_pool_root(self) -> None:
+        """隔离安装写入研发员级 source_pool_root（D-048 池根必配）。"""
+        user_dir = self.install_root / "user"
+        user_dir.mkdir(parents=True, exist_ok=True)
+        pool_root = self.sandbox / "source-pool"
+        pool_root.mkdir(parents=True, exist_ok=True)
+        config = user_dir / "config.yaml"
+        config.write_text(f"source_pool_root: {pool_root}\n", encoding="utf-8")
 
     def _initialize_workspace(self) -> None:
         self._ao_work(

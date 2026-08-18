@@ -80,7 +80,18 @@ class WorkspaceInitTest(unittest.TestCase):
             "  project_key: TAP\n"
             "  task_query: project = TAP\n"
             "repositories:\n"
-            "  default: tapdata/tapdata\n",
+            "  default: tapdata/tapdata\n"
+            "  list:\n"
+            "    - tapdata/tapdata\n"
+            "    - tapdata/tapdata-web\n",
+            encoding="utf-8",
+        )
+        user_config = install / "user" / "config.yaml"
+        user_config.parent.mkdir(parents=True)
+        pool_root = root / "source-pool"
+        pool_root.mkdir(parents=True, exist_ok=True)
+        user_config.write_text(
+            f"source_pool_root: {pool_root}\n",
             encoding="utf-8",
         )
         (install / "developer" / "AGENTS.md").write_text(
@@ -141,9 +152,15 @@ class WorkspaceInitTest(unittest.TestCase):
                     return subprocess.CompletedProcess(command, 1, "", "not a repository")
                 if command[2:] == ["config", "--get-all", "remote.origin.pushurl"]:
                     return subprocess.CompletedProcess(command, 1, "", "")
-                return subprocess.CompletedProcess(
-                    command, 0, "git@github.com:tapdata/tapdata.git\n", ""
+                # 池成员 remotes 校验：按仓库短名返回对应 URL。
+                repository_dir = Path(command[1])
+                short_name = repository_dir.name
+                url = (
+                    f"git@github.com:tapdata/{short_name}.git\n"
+                    if short_name in {"tapdata", "tapdata-web"}
+                    else "git@github.com:tapdata/tapdata.git\n"
                 )
+                return subprocess.CompletedProcess(command, 0, url, "")
             return subprocess.CompletedProcess(command, 0, "HEAD\n", "")
 
         def fake_git_streaming(
@@ -153,7 +170,8 @@ class WorkspaceInitTest(unittest.TestCase):
             stall_warn_interval: float = 30.0,
         ) -> subprocess.CompletedProcess[str]:
             target = Path(command[-1])
-            (target / ".git").mkdir(parents=True)
+            target.mkdir(parents=True, exist_ok=True)
+            (target / ".git").mkdir(parents=True, exist_ok=True)
             if clone_source_marker:
                 (target / ".agentic-ops-source").write_text(
                     "maintainer\n", encoding="utf-8"
@@ -255,16 +273,17 @@ class WorkspaceInitTest(unittest.TestCase):
                 (install / "user" / "workspace-index.json").read_text(encoding="utf-8")
             )
             self.assertEqual("developer_1", index["workspaces"][0]["agent_id"])
-            expected_source = (root / "workspace-code" / "tapdata").resolve()
+            expected_source = (root / "source-pool").resolve()
             self.assertEqual(str(expected_source), agent["source_root"])
             self.assertEqual(str(expected_source), index["workspaces"][0]["source_root"])
-            code_readme = root / "workspace-code" / "README.md"
-            self.assertTrue(code_readme.is_file())
+            pool_readme = root / "source-pool" / "README.md"
+            self.assertTrue(pool_readme.is_file())
             self.assertIn(
                 "<!-- agentic-ops:workspace-code:start -->",
-                code_readme.read_text(encoding="utf-8"),
+                pool_readme.read_text(encoding="utf-8"),
             )
-            self.assertTrue((expected_source / ".git").exists())
+            self.assertTrue((expected_source / "tapdata" / "tapdata" / ".git").exists())
+            self.assertTrue((expected_source / "tapdata" / "tapdata-web" / ".git").exists())
 
             preflight = self.run_cli(
                 (
@@ -315,8 +334,8 @@ class WorkspaceInitTest(unittest.TestCase):
             self.assertEqual(0, exit_code, payload)
             for expected in (
                 "初始化步骤 1/5",
-                "初始化步骤 2/5：下载业务源码仓库",
-                "源码仓库下载完成",
+                "初始化步骤 2/5：准备中央克隆池成员",
+                "池成员准备完成",
                 "初始化步骤 3/5",
                 "初始化步骤 4/5",
                 "初始化步骤 5/5",
@@ -394,8 +413,11 @@ class WorkspaceInitTest(unittest.TestCase):
             self.assertEqual(0, first_result[0], first_result[1])
             second = root / "workspace-b"
             second.mkdir()
-            shared_source = (root / "workspace-a-code" / "tapdata").resolve()
-            second_result = self.run_cli(
+            # 非池模式：两个全新工作空间显式指向同一源码目录仍应被阻断。
+            shared_source = root / "shared-explicit-repo"
+            shared_source.mkdir()
+            (shared_source / ".git").mkdir(parents=True)
+            first_shared = self.run_cli(
                 (
                     "--workspace-root",
                     str(second),
@@ -420,9 +442,37 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--confirm",
                 )
             )
+            self.assertEqual(0, first_shared[0], first_shared[1])
+            third = root / "workspace-c"
+            third.mkdir()
+            second_result = self.run_cli(
+                (
+                    "--workspace-root",
+                    str(third),
+                    "workspace",
+                    "init",
+                    "--non-interactive",
+                    "--project",
+                    "tapdata",
+                    "--agent-id",
+                    "developer_c",
+                    "--source-root",
+                    str(shared_source),
+                    "--jira-email",
+                    "developer@example.test",
+                    "--git-name",
+                    "Developer C",
+                    "--git-email",
+                    "developer@example.test",
+                    "--github-login",
+                    "developer-c",
+                    "--token-stdin",
+                    "--confirm",
+                )
+            )
             self.assertEqual(2, second_result[0])
             self.assertEqual("source_root_conflict", second_result[1]["code"])
-            self.assertFalse((second / ".agentic-ops" / "agent.json").exists())
+            self.assertFalse((third / ".agentic-ops" / "agent.json").exists())
 
     def test_zero_parameter_interactive_entry_uses_hostname_default_and_confirms(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -734,7 +784,7 @@ class WorkspaceInitTest(unittest.TestCase):
             external = root / "external-index.json"
             external.write_text('{"sentinel":true}\n', encoding="utf-8")
             user = install / "user"
-            user.mkdir()
+            user.mkdir(exist_ok=True)
             (user / "workspace-index.json").symlink_to(external)
             result = self.run_cli(
                 (
@@ -771,9 +821,9 @@ class WorkspaceInitTest(unittest.TestCase):
             original = agent_path.read_text(encoding="utf-8")
             profile = install / "developer/standards/projects/tapdata/profile.yaml"
             profile.write_text(
-                profile.read_text(encoding="utf-8").replace(
-                    "default: tapdata/tapdata", "default: attacker/repository"
-                ),
+                profile.read_text(encoding="utf-8")
+                .replace("default: tapdata/tapdata", "default: attacker/repository")
+                .replace("- tapdata/tapdata\n", "- attacker/repository\n"),
                 encoding="utf-8",
             )
             preflight = self.run_cli(
@@ -857,7 +907,12 @@ class WorkspaceInitTest(unittest.TestCase):
                     return_value=self.install_root,
                 ),
                 mock.patch.object(
-                    WorkspaceInitializer, "_check_source", return_value="ready_to_clone"
+                    WorkspaceInitializer, "_check_source", return_value="pool_ready"
+                ),
+                mock.patch.object(
+                    WorkspaceInitializer,
+                    "_prepare_pool_members",
+                    return_value="adopted=0,cloned=0,total=2",
                 ),
             ):
                 exit_code = main(
@@ -918,10 +973,12 @@ class WorkspaceInitTest(unittest.TestCase):
                     return_value=self.install_root,
                 ),
                 mock.patch.object(
-                    WorkspaceInitializer, "_check_source", return_value="ready_to_clone"
+                    WorkspaceInitializer, "_check_source", return_value="pool_ready"
                 ),
                 mock.patch.object(
-                    WorkspaceInitializer, "_ensure_source_checkout", return_value="cloned"
+                    WorkspaceInitializer,
+                    "_prepare_pool_members",
+                    return_value="adopted=0,cloned=0,total=2",
                 ),
             ):
                 exit_code = main(
