@@ -372,6 +372,7 @@ class WorkspaceInitializer:
         check_remote: bool = True,
     ) -> dict[str, Any]:
         validate_workspace_state_root(self.root)
+        write_diagnostic("初始化预检 1/3：工作空间边界、安装资产与既有配置检查")
         checks: list[dict[str, str]] = []
         self._check_workspace_boundary(checks)
         self._check_workspace_writable(checks)
@@ -384,12 +385,14 @@ class WorkspaceInitializer:
             self._check_workspace_ai_assets(candidate, checks)
         self._check_agent_id_collision(candidate, checks)
         self._check_authorization(candidate, checks)
+        write_diagnostic("初始化预检 2/3：Jira 授权与项目访问验证")
         jira_identity, jira_project = self._check_jira(candidate, checks)
         self._check_existing_jira_account(
             candidate,
             jira_identity,
             confirmed=confirm_existing_config,
         )
+        write_diagnostic("初始化预检 3/3：源码仓库只读访问与冲突校验")
         source_status = self._check_source(candidate, checks, check_remote=check_remote)
         self._check_source_root_conflict(candidate, checks)
         return {
@@ -829,7 +832,11 @@ class WorkspaceInitializer:
                 )
             if check_remote:
                 self._reject_git_url_rewrites(None)
-                for repository in repositories:
+                total = len(repositories)
+                for index, repository in enumerate(repositories, start=1):
+                    write_diagnostic(
+                        f"初始化预检：检查源码仓库 {repository}（{index}/{total}）"
+                    )
                     self._require_remote_access(_repository_url(repository))
             checks.append({"check": "source_pool_root", "status": "passed"})
             checks.append({"check": "source_pool_members_remote", "status": "passed"})

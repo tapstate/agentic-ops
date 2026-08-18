@@ -355,6 +355,10 @@ class WorkspaceInitTest(unittest.TestCase):
             )
             self.assertEqual(0, exit_code, payload)
             for expected in (
+                "初始化预检 1/3",
+                "初始化预检 2/3",
+                "初始化预检 3/3",
+                "初始化预检：检查源码仓库",
                 "初始化步骤 1/5",
                 "初始化步骤 2/5：准备中央克隆池成员",
                 "池成员准备完成",
