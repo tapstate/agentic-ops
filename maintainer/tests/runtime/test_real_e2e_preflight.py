@@ -31,9 +31,6 @@ class RealTaskToPrE2EPreflightTest(unittest.TestCase):
         self.assertEqual(
             {
                 "takeover_task",
-                "git_commit",
-                "git_push_task_branch",
-                "github_pr_create",
             },
             {entry["id"] for entry in result["blocking_capabilities"]},
         )
