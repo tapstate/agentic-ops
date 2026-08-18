@@ -103,29 +103,32 @@ capabilities:
   - id: git_commit
     source: runtime
     contract:
-    status: capability_gap
+    status: implemented
     visibility: public
-    commands: []
-    summary: 按批准计划、工作树状态、执行身份和最终验证证据创建业务任务提交的原子操作尚未实现。
-    next_action: 请停止真实全链路自动化；不能让 AI 直接调用 git commit 绕过批准摘要、身份、范围和写后回读门禁。
+    commands:
+      - [task-run, execute-git-commit]
+    summary: 按批准计划、任务分支、manifest 授权范围、执行身份和写前可信基线创建业务任务提交的原子操作；提交后回读 HEAD、校验 author/committer 身份与工作树干净，并记录 external_action + remote_branch_readback 事件。
+    next_action: 请在任务分支修改完成后、probe-git 验证前调用 execute-git-commit；必须引用与 manifest 一致的授权。
 
   - id: git_push_task_branch
     source: runtime
     contract:
-    status: capability_gap
+    status: implemented
     visibility: public
-    commands: []
-    summary: 在任务级授权内推送业务任务分支并回读远端 SHA 的原子操作尚未实现。
-    next_action: 请停止真实全链路自动化；先实现保护分支阻断、非快进阻断、授权绑定和远端 SHA 回读，再允许自动推送。
+    commands:
+      - [task-run, execute-git-push-task-branch]
+    summary: 在任务级授权内推送业务任务分支并回读远端 SHA 的原子操作；保护分支阻断、非快进阻断、授权绑定、远端 SHA 回读与 remote_branch_readback 事件记录。
+    next_action: 请在 execute-git-commit 成功后、probe-git 验证前调用；必须引用与 manifest 一致的授权。
 
   - id: github_pr_create
     source: runtime
     contract:
-    status: capability_gap
+    status: implemented
     visibility: public
-    commands: []
-    summary: 创建真实 GitHub PR 并回读 URL、head/base、draft、merge 和 CI 事实的原子操作尚未实现。
-    next_action: 请停止在 PR 前；先实现 PR 创建计划、授权、写后回读与禁止 merge 门禁，不能让 AI 直接调用 gh pr create。
+    commands:
+      - [task-run, execute-github-pr-create]
+    summary: 创建真实 GitHub PR 并回读 number/URL/head/base/merge/CI 事实的原子操作；GitHub actor 身份校验、禁止重复创建、禁止自动 merge、写后回读与 pr_readback 事件记录。
+    next_action: 请在 execute-git-push-task-branch 成功后、probe-pr 验证前调用；必须引用与 manifest 一致的授权。
 
   - id: inspect_task
     source: contract

@@ -723,6 +723,565 @@ class TaskRunProtocol:
             f"Runtime 实时回读并绑定 Jira 写入：{plan.operation}",
         )
 
+    def execute_git_commit(
+        self,
+        manifest_value: str,
+        *,
+        message: str,
+        authorization_reference: str,
+    ) -> dict[str, Any]:
+        """受控提交：在 manifest 授权范围与执行身份约束内创建任务提交。
+
+        - 前置：manifest open + prohibition_baseline（写入前可信基线）。
+        - 校验：工作树在任务分支、变更路径在授权范围内、执行身份完整。
+        - 执行：git add（授权范围）+ git commit（per-worktree 身份）。
+        - 回读：新 HEAD 是基线后代、工作树干净、author/committer 匹配 manifest。
+        - 记录：external_action(git_commit) + remote_branch_readback 事件。
+        """
+        manifest = self._load_open_manifest(manifest_value)
+        self._require_probe_permission(manifest, "git_commit", "execute-git-commit")
+        if authorization_reference != manifest["authorization"]["reference"]:
+            raise blocked(
+                "authorization_reference_mismatch",
+                "git_commit 授权引用与 manifest 明确授权不一致",
+                "请使用与 task-run open 相同的授权引用",
+            )
+        completed = self._completed_events(manifest)
+        baseline_event = self._latest_action(completed, "prohibition_baseline")
+        if baseline_event is None or baseline_event["evidence_origin"] != "runtime_probe":
+            raise blocked(
+                "git_commit_baseline_missing",
+                "execute-git-commit 前缺少写入前 Runtime 可信基线",
+                "请先执行 task-run probe-prohibition-baseline",
+            )
+        baseline = baseline_event["action_data"]
+        repository = manifest["repository"]
+        root = Path(repository["root"])
+        remote = repository["remote_name"]
+
+        top = self._git(root, "rev-parse", "--show-toplevel").strip()
+        if Path(top).resolve() != root:
+            raise blocked(
+                "git_commit_repository_mismatch",
+                "Git 顶层目录与 manifest repository.root 不一致",
+                "请停止执行并核对业务源码仓库绑定",
+            )
+        branch = self._git(root, "symbolic-ref", "--quiet", "--short", "HEAD").strip()
+        if branch != repository["task_branch"]:
+            raise blocked(
+                "git_commit_branch_mismatch",
+                f"当前分支 {branch or '<detached>'} 不是 manifest 任务分支",
+                "请切换到已授权任务分支后重试",
+            )
+        self._reject_git_url_rewrites(root)
+
+        status = self._git(root, "status", "--porcelain=v1", "--untracked-files=all")
+        if not status:
+            raise blocked(
+                "git_commit_no_changes",
+                "任务分支工作树没有待提交变更",
+                "请先完成授权范围内实现后再提交",
+            )
+        changed_paths = _porcelain_paths(status)
+        outside = [
+            path
+            for path in changed_paths
+            if not any(
+                fnmatch.fnmatchcase(path, pattern)
+                for pattern in manifest["scope"]["included"]
+            )
+            or any(
+                fnmatch.fnmatchcase(path, pattern)
+                for pattern in manifest["scope"]["excluded"]
+            )
+        ]
+        if outside:
+            raise blocked(
+                "git_commit_scope_violation",
+                f"待提交路径越出 manifest 授权范围：{', '.join(outside[:10])}",
+                "请停止执行；范围变化必须重新确认 manifest",
+            )
+        identity_names = (
+            "git_author_name",
+            "git_author_email",
+            "git_committer_name",
+            "git_committer_email",
+        )
+        expected_identity = {
+            field: manifest["execution_identity"][field] for field in identity_names
+        }
+
+        local_head_before = self._git(root, "rev-parse", "HEAD").strip()
+
+        add_result = self._git_result(
+            root, "add", "--", *manifest["scope"]["included"]
+        )
+        if add_result.returncode != 0:
+            raise blocked(
+                "git_commit_stage_failed",
+                f"git add 失败：{_stderr_tail(add_result.stderr)}",
+                "请检查授权范围内路径是否可读后重试",
+            )
+        author_spec = (
+            f"{expected_identity['git_author_name']} "
+            f"<{expected_identity['git_author_email']}>"
+        )
+        commit_result = self._git_result(
+            root,
+            "-c",
+            f"user.name={expected_identity['git_committer_name']}",
+            "-c",
+            f"user.email={expected_identity['git_committer_email']}",
+            "commit",
+            "--author",
+            author_spec,
+            "-m",
+            message,
+        )
+        if commit_result.returncode != 0:
+            self._git_result(root, "reset", "--mixed", "HEAD")
+            raise blocked(
+                "git_commit_failed",
+                f"git commit 失败：{_stderr_tail(commit_result.stderr)}",
+                "已回滚暂存区；请修复提交信息或状态后重试",
+            )
+        local_head_after = self._git(root, "rev-parse", "HEAD").strip()
+        if local_head_after == local_head_before:
+            raise blocked(
+                "git_commit_readback_mismatch",
+                "提交后 HEAD 未变化，无法证明提交创建成功",
+                "请检查提交钩子与仓库状态后重试",
+            )
+        self._git(root, "cat-file", "-e", f"{local_head_after}^{{commit}}")
+        ancestor = self._git_result(
+            root, "merge-base", "--is-ancestor", local_head_before, local_head_after
+        )
+        if ancestor.returncode != 0:
+            raise blocked(
+                "git_commit_baseline_not_ancestor",
+                "提交前 HEAD 不是提交后 HEAD 的祖先，禁止历史改写",
+                "请停止执行并检查是否发生 force 操作",
+            )
+        commit_identity = self._git(
+            root,
+            "log",
+            "--format=%H%x00%an%x00%ae%x00%cn%x00%ce",
+            "-1",
+        ).rstrip("\n").split("\0")
+        if len(commit_identity) != 5:
+            raise blocked(
+                "git_commit_identity_invalid",
+                "新提交缺少完整 author/committer 身份",
+                "请检查提交配置后重试",
+            )
+        actual_identity = dict(
+            zip(identity_names, commit_identity[1:], strict=True)
+        )
+        if actual_identity != expected_identity:
+            raise blocked(
+                "git_commit_identity_mismatch",
+                "新提交 author/committer 与 manifest 显式身份不一致",
+                "请停止执行并按已确认身份重建提交",
+            )
+        status_after = self._git(
+            root, "status", "--porcelain=v1", "--untracked-files=no"
+        )
+        if status_after:
+            raise blocked(
+                "git_commit_worktree_dirty_after",
+                "提交后仍有已跟踪变更未提交",
+                "请核对暂存范围；git commit 应只包含授权范围内变更",
+            )
+        commit_sha = local_head_after
+        target = f"git:{repository['slug']}:{branch}@{commit_sha}"
+        origin_url = self._git(root, "config", "--get-all", f"remote.{remote}.url").splitlines()[0]
+        commit_identity_values = {
+            "git_author_name": actual_identity["git_author_name"],
+            "git_author_email": actual_identity["git_author_email"],
+            "git_committer_name": actual_identity["git_committer_name"],
+            "git_committer_email": actual_identity["git_committer_email"],
+        }
+        return self._append_runtime_readback(
+            manifest,
+            [("git_commit", target)],
+            "remote_branch_readback",
+            {
+                "provider": "git",
+                "reference": target,
+                "url": f"https://github.com/{repository['slug']}/commit/{commit_sha}",
+                "repository_slug": repository["slug"],
+                "remote_name": remote,
+                "branch": branch,
+                "sha": commit_sha,
+                "status": "exists",
+                "protected": branch in repository["protected_branches"],
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+                "origin_url": origin_url,
+                "base_sha": local_head_before,
+                "head_sha": commit_sha,
+                "baseline_event_id": baseline_event["event_id"],
+                "baseline_local_head_sha": baseline["local_head_sha"],
+                "baseline_remote_sha": baseline.get("task_branch_remote_sha"),
+                "baseline_local_is_ancestor": True,
+                "baseline_remote_is_ancestor": None,
+                "attributed_actions": ["git_commit"],
+                "verification_event_ids": [],
+                "changed_paths": changed_paths,
+                "worktree_clean": True,
+                **commit_identity_values,
+                "commit_count": 1,
+                "commit_identity_sha256": digest(actual_identity),
+                "approved_plan_sha256": manifest["task_binding"]["approved_plan_sha256"],
+            },
+            f"Runtime 完成受控提交并回读：{commit_sha[:12]}",
+        )
+
+    def execute_git_push_task_branch(
+        self,
+        manifest_value: str,
+        *,
+        authorization_reference: str,
+    ) -> dict[str, Any]:
+        """受控推送：在任务级授权内推送任务分支并回读远端 SHA。
+
+        - 前置：manifest open + prohibition_baseline + execute-git-commit 已成功。
+        - 校验：任务分支不是保护分支、工作树干净、远端无同名分支或可快进。
+        - 执行：git push origin <task_branch>。
+        - 回读：ls-remote 远端 SHA == 本地 HEAD，记录 remote_branch_readback。
+        """
+        manifest = self._load_open_manifest(manifest_value)
+        self._require_probe_permission(
+            manifest, "git_push_task_branch", "execute-git-push-task-branch"
+        )
+        if authorization_reference != manifest["authorization"]["reference"]:
+            raise blocked(
+                "authorization_reference_mismatch",
+                "git_push 授权引用与 manifest 明确授权不一致",
+                "请使用与 task-run open 相同的授权引用",
+            )
+        completed = self._completed_events(manifest)
+        baseline_event = self._latest_action(completed, "prohibition_baseline")
+        if baseline_event is None or baseline_event["evidence_origin"] != "runtime_probe":
+            raise blocked(
+                "git_push_baseline_missing",
+                "execute-git-push 前缺少写入前 Runtime 可信基线",
+                "请先执行 task-run probe-prohibition-baseline",
+            )
+        commit_readback = self._latest_action(completed, "remote_branch_readback")
+        if commit_readback is None:
+            raise blocked(
+                "git_push_commit_missing",
+                "execute-git-push 前缺少受控提交回读",
+                "请先执行 task-run execute-git-commit",
+            )
+        baseline = baseline_event["action_data"]
+        repository = manifest["repository"]
+        root = Path(repository["root"])
+        remote = repository["remote_name"]
+        task_branch = repository["task_branch"]
+
+        if task_branch in repository["protected_branches"]:
+            raise blocked(
+                "push_protected_branch_forbidden",
+                f"任务分支 {task_branch} 是保护分支，禁止推送",
+                "任务分支必须是独立工作分支，不得直接推送 main/develop",
+            )
+        top = self._git(root, "rev-parse", "--show-toplevel").strip()
+        if Path(top).resolve() != root:
+            raise blocked(
+                "git_push_repository_mismatch",
+                "Git 顶层目录与 manifest repository.root 不一致",
+                "请停止执行并核对业务源码仓库绑定",
+            )
+        branch = self._git(root, "symbolic-ref", "--quiet", "--short", "HEAD").strip()
+        if branch != task_branch:
+            raise blocked(
+                "git_push_branch_mismatch",
+                f"当前分支 {branch or '<detached>'} 不是 manifest 任务分支",
+                "请切换到已授权任务分支后重试",
+            )
+        self._reject_git_url_rewrites(root)
+        local_head = self._git(root, "rev-parse", "HEAD").strip()
+        status = self._git(root, "status", "--porcelain=v1", "--untracked-files=no")
+        if status:
+            raise blocked(
+                "git_push_worktree_dirty",
+                "推送前任务分支仍有未提交变更",
+                "请先完成受控提交再推送",
+            )
+        refs = self._git(
+            root,
+            "ls-remote",
+            "--heads",
+            remote,
+            f"refs/heads/{task_branch}",
+        )
+        remote_sha = ""
+        for line in refs.splitlines():
+            if "\t" in line:
+                remote_sha = line.split("\t", 1)[0]
+                break
+        if remote_sha:
+            fast_forward = self._git_result(
+                root, "merge-base", "--is-ancestor", remote_sha, local_head
+            )
+            if fast_forward.returncode != 0:
+                raise blocked(
+                    "push_non_fast_forward_blocked",
+                    "远端任务分支存在本地不包含的提交，非快进推送被阻断",
+                    "请先 fetch 远端并处理冲突，禁止 force push",
+                )
+        push_result = self._git_result(
+            root, "push", remote, f"refs/heads/{task_branch}"
+        )
+        if push_result.returncode != 0:
+            raise blocked(
+                "push_failed",
+                f"git push 失败：{_stderr_tail(push_result.stderr)}",
+                "请检查远端权限与网络后重试",
+            )
+        refs_after = self._git(
+            root,
+            "ls-remote",
+            "--heads",
+            remote,
+            f"refs/heads/{task_branch}",
+        )
+        remote_sha_after = ""
+        for line in refs_after.splitlines():
+            if "\t" in line:
+                remote_sha_after = line.split("\t", 1)[0]
+                break
+        if remote_sha_after != local_head:
+            raise blocked(
+                "push_readback_mismatch",
+                "推送后远端任务分支 SHA 与本地 HEAD 不一致",
+                "请停止执行并核对推送结果，不得用本地 SHA 代替远端事实",
+            )
+        target = f"git:{repository['slug']}:{task_branch}@{remote_sha_after}"
+        return self._append_runtime_readback(
+            manifest,
+            [("git_push_task_branch", target)],
+            "remote_branch_readback",
+            {
+                "provider": "git",
+                "reference": target,
+                "url": f"https://github.com/{repository['slug']}/tree/{task_branch}",
+                "repository_slug": repository["slug"],
+                "remote_name": remote,
+                "branch": task_branch,
+                "sha": remote_sha_after,
+                "status": "exists",
+                "protected": False,
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+                "origin_url": self._git(
+                    root, "config", "--get-all", f"remote.{remote}.url"
+                ).splitlines()[0],
+                "base_sha": commit_readback["action_data"]["base_sha"],
+                "head_sha": remote_sha_after,
+                "baseline_event_id": baseline_event["event_id"],
+                "baseline_local_head_sha": baseline["local_head_sha"],
+                "baseline_remote_sha": baseline.get("task_branch_remote_sha"),
+                "baseline_local_is_ancestor": True,
+                "baseline_remote_is_ancestor": None,
+                "attributed_actions": ["git_push_task_branch"],
+                "verification_event_ids": [],
+                "changed_paths": commit_readback["action_data"]["changed_paths"],
+                "worktree_clean": True,
+                "git_author_name": commit_readback["action_data"]["git_author_name"],
+                "git_author_email": commit_readback["action_data"]["git_author_email"],
+                "git_committer_name": commit_readback["action_data"]["git_committer_name"],
+                "git_committer_email": commit_readback["action_data"]["git_committer_email"],
+                "commit_count": 1,
+                "commit_identity_sha256": commit_readback["action_data"][
+                    "commit_identity_sha256"
+                ],
+                "approved_plan_sha256": manifest["task_binding"][
+                    "approved_plan_sha256"
+                ],
+            },
+            f"Runtime 完成受控推送并回读：{remote_sha_after[:12]}",
+        )
+
+    def execute_github_pr_create(
+        self,
+        manifest_value: str,
+        *,
+        title: str,
+        body: str,
+        authorization_reference: str,
+    ) -> dict[str, Any]:
+        """受控 PR 创建：在任务级授权内创建 GitHub PR 并回读事实。
+
+        - 前置：manifest open + baseline + git push 回读。
+        - 校验：GitHub actor 身份匹配 manifest、无已存在 PR、禁止 merge。
+        - 执行：gh pr create（head=任务分支、base=target_branch）。
+        - 回读：gh pr view 校验 number/head/base/url，记录 pr_readback。
+        """
+        manifest = self._load_open_manifest(manifest_value)
+        self._require_probe_permission(
+            manifest, "github_pr_create_or_update", "execute-github-pr-create"
+        )
+        if authorization_reference != manifest["authorization"]["reference"]:
+            raise blocked(
+                "authorization_reference_mismatch",
+                "github_pr_create 授权引用与 manifest 明确授权不一致",
+                "请使用与 task-run open 相同的授权引用",
+            )
+        completed = self._completed_events(manifest)
+        baseline_event = self._latest_action(completed, "prohibition_baseline")
+        if baseline_event is None or baseline_event["evidence_origin"] != "runtime_probe":
+            raise blocked(
+                "pr_create_baseline_missing",
+                "execute-github-pr-create 前缺少写入前 Runtime 可信基线",
+                "请先执行 task-run probe-prohibition-baseline",
+            )
+        if baseline_event["action_data"].get("task_open_pr") is not None:
+            raise blocked(
+                "pr_already_exists",
+                "写入前已存在 open PR，不允许重复创建",
+                "请使用现有 PR 或人工处理；当前不支持自动更新 PR",
+            )
+        git_readback = self._latest_action(completed, "remote_branch_readback")
+        if git_readback is None:
+            raise blocked(
+                "pr_create_git_readback_missing",
+                "execute-github-pr-create 前缺少 Git push 回读",
+                "请先执行 task-run execute-git-push-task-branch",
+            )
+        repository = manifest["repository"]
+        root = Path(repository["root"])
+        actor_result = self._run_command(
+            ["gh", "api", "user", "--jq", ".login"],
+            cwd=root,
+            timeout=60,
+        )
+        github_actor = actor_result.stdout.strip()
+        if (
+            actor_result.returncode != 0
+            or github_actor != manifest["execution_identity"]["github_actor_login"]
+        ):
+            raise blocked(
+                "github_actor_identity_mismatch",
+                "当前 GitHub 登录身份与 manifest 显式 actor 不一致",
+                "请切换到已确认 GitHub 账户后重试，不得借用其它登录会话",
+            )
+        create_result = self._run_command(
+            [
+                "gh",
+                "pr",
+                "create",
+                "--repo",
+                repository["slug"],
+                "--head",
+                repository["task_branch"],
+                "--base",
+                repository["target_branch"],
+                "--title",
+                title,
+                "--body",
+                body,
+            ],
+            cwd=root,
+            timeout=120,
+        )
+        if create_result.returncode != 0:
+            raise blocked(
+                "pr_create_failed",
+                f"gh pr create 失败：{_stderr_tail(create_result.stderr)}",
+                "请检查 GitHub 授权、分支与目标分支后重试",
+            )
+        view_result = self._run_command(
+            [
+                "gh",
+                "pr",
+                "view",
+                repository["task_branch"],
+                "--repo",
+                repository["slug"],
+                "--json",
+                "number,url,state,isDraft,mergedAt,headRefName,headRefOid,baseRefName,reviewDecision,statusCheckRollup",
+            ],
+            cwd=root,
+            timeout=60,
+        )
+        if view_result.returncode != 0:
+            raise blocked(
+                "pr_readback_failed",
+                "gh 无法回读刚创建的 PR",
+                "请人工核对 PR 创建结果；Runtime 不假设创建成功",
+            )
+        try:
+            payload = json.loads(view_result.stdout)
+        except json.JSONDecodeError as error:
+            raise blocked(
+                "pr_readback_invalid",
+                "gh pr view 响应不是有效 JSON",
+                "请修复 gh 工具后重试",
+            ) from error
+        number = payload.get("number")
+        url = payload.get("url")
+        head_ref = payload.get("headRefName")
+        base_ref = payload.get("baseRefName")
+        head_oid = payload.get("headRefOid")
+        if (
+            not isinstance(number, int)
+            or not isinstance(url, str)
+            or head_ref != repository["task_branch"]
+            or base_ref != repository["target_branch"]
+            or not isinstance(head_oid, str)
+        ):
+            raise blocked(
+                "pr_readback_mismatch",
+                "回读 PR 的 head/base/编号与 manifest 不一致",
+                "请人工核对 PR 创建结果；不得假设创建成功",
+            )
+        merged = bool(payload.get("mergedAt"))
+        if merged:
+            raise blocked(
+                "pr_auto_merge_forbidden",
+                "刚创建的 PR 已被合并，Runtime 禁止自动合并 PR",
+                "请停止执行并人工调查；PR 生命周期必须人工控制",
+            )
+        review_decision = str(payload.get("reviewDecision") or "").upper()
+        review_state = {
+            "APPROVED": "approved",
+            "CHANGES_REQUESTED": "changes_requested",
+        }.get(review_decision, "awaiting_review")
+        ci_status = self._ci_status(payload.get("statusCheckRollup") or [])
+        readback_event_id = str(git_readback["event_id"])
+        target = str(url)
+        return self._append_runtime_readback(
+            manifest,
+            [("github_pr_create_or_update", target)],
+            "pr_readback",
+            {
+                "provider": "github",
+                "reference": target,
+                "url": url,
+                "repository_slug": repository["slug"],
+                "number": number,
+                "status": "open",
+                "merged": merged,
+                "head_branch": head_ref,
+                "head_sha": head_oid,
+                "base_branch": base_ref,
+                "review_state": review_state,
+                "ci_status": ci_status,
+                "draft": bool(payload.get("isDraft")),
+                "github_actor_login": github_actor,
+                "approved_plan_sha256": manifest["task_binding"][
+                    "approved_plan_sha256"
+                ],
+                "baseline_event_id": baseline_event["event_id"],
+                "git_readback_event_id": readback_event_id,
+                "attributed_actions": ["github_pr_create_or_update"],
+                "creation_proof": True,
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+            },
+            f"Runtime 完成受控 PR 创建并回读：#{number}",
+        )
+
     def probe_git(
         self, manifest_value: str, bind_actions: Iterable[str] = ()
     ) -> dict[str, Any]:
@@ -3134,3 +3693,23 @@ class TaskRunProtocol:
             "result_path": str(paths["result"]),
             "external_execution": False,
         }
+
+
+def _porcelain_paths(status: str) -> list[str]:
+    """解析 git status --porcelain=v1 输出为变更路径（含 rename 目标）。"""
+    paths: list[str] = []
+    for line in status.splitlines():
+        if len(line) < 4:
+            continue
+        entry = line[3:]
+        # rename/copy: "R  old -> new" 或 "R  old -> new (similarity N%)"
+        if " -> " in entry:
+            entry = entry.split(" -> ", 1)[1]
+        entry = entry.strip()
+        if entry:
+            paths.append(entry)
+    return paths
+
+
+def _stderr_tail(stderr: str | None, limit: int = 400) -> str:
+    return (stderr or "")[-limit:]

@@ -45,6 +45,18 @@ def configure_task_run_parser(subparsers: argparse._SubParsersAction[Any]) -> No
     jira_write.add_argument("--manifest", required=True)
     jira_write.add_argument("--plan-file", required=True)
     jira_write.add_argument("--confirm-plan-id", required=True)
+    commit_parser = commands.add_parser("execute-git-commit")
+    commit_parser.add_argument("--manifest", required=True)
+    commit_parser.add_argument("--message", required=True)
+    commit_parser.add_argument("--authorization-reference", required=True)
+    push_parser = commands.add_parser("execute-git-push-task-branch")
+    push_parser.add_argument("--manifest", required=True)
+    push_parser.add_argument("--authorization-reference", required=True)
+    pr_parser = commands.add_parser("execute-github-pr-create")
+    pr_parser.add_argument("--manifest", required=True)
+    pr_parser.add_argument("--title", required=True)
+    pr_parser.add_argument("--body", required=True)
+    pr_parser.add_argument("--authorization-reference", required=True)
     verify_parser = commands.add_parser("verify")
     verify_parser.add_argument("--manifest", required=True)
     verify_parser.add_argument("--verification-id", required=True)
@@ -92,6 +104,24 @@ def execute_task_run(
             args.manifest,
             args.plan_file,
             args.confirm_plan_id,
+        )
+    if args.command == "execute-git-commit":
+        return protocol.execute_git_commit(
+            args.manifest,
+            message=args.message,
+            authorization_reference=args.authorization_reference,
+        )
+    if args.command == "execute-git-push-task-branch":
+        return protocol.execute_git_push_task_branch(
+            args.manifest,
+            authorization_reference=args.authorization_reference,
+        )
+    if args.command == "execute-github-pr-create":
+        return protocol.execute_github_pr_create(
+            args.manifest,
+            title=args.title,
+            body=args.body,
+            authorization_reference=args.authorization_reference,
         )
     if args.command == "finalize":
         return protocol.finalize(args.manifest, args.status, args.next_action)

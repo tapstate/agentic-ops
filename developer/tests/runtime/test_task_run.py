@@ -19,6 +19,7 @@ from ao_work.config.model import ProjectProfile
 from ao_work.jira.adf import markdown_to_adf
 from ao_work.jira.model import JiraComment, JiraIssue, JiraWorklog, plain_text
 from ao_work.jira.service import JiraService, build_write_attempt
+from ao_work.output import RuntimeErrorResult
 from ao_work.task_run.protocol import (
     QUALITY_CATEGORIES,
     manifest_digest,
@@ -1576,6 +1577,512 @@ class TrustedTaskRunTest(unittest.TestCase):
                     "failed", protocol._ci_status([{"conclusion": conclusion}])
                 )
         self.assertEqual("not_configured", protocol._ci_status([]))
+
+
+class GitCommitExecutionTest(unittest.TestCase):
+    """execute-git-commit 在真实 Git 仓库上的受控提交行为。"""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name)
+        self.workspace = root / "workspace"
+        self.source = root / "source"
+        self.workspace.mkdir()
+        self.source.mkdir()
+        self.install = root / "install"
+        state = self.workspace / ".agentic-ops"
+        state.mkdir()
+        (state / "agent.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 3,
+                    "workplane": "developer",
+                    "agent_id": "harsen-mini-test-bot",
+                    "project_profile": "tapdata",
+                    "jira_project": "TAP",
+                    "connection_id": "tapdata-cloud",
+                    "jira_base_url": "https://tapdata.atlassian.net",
+                    "jira_site": "tapdata.atlassian.net",
+                    "jira_account_id": "jira-account-1",
+                    "source_root": str(self.source.resolve()),
+                    "repository": "tapdata/tapdata",
+                    "execution_identity": {
+                        "git_author_name": "Harsen Test Bot",
+                        "git_author_email": "harsen-test-bot@example.com",
+                        "git_committer_name": "Harsen Test Bot",
+                        "git_committer_email": "harsen-test-bot@example.com",
+                        "github_actor_login": "harsen-mini-test-bot",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        profile = self.install / "developer/standards/projects/tapdata/profile.yaml"
+        profile.parent.mkdir(parents=True)
+        profile.write_text(
+            "profile_id: tapdata\n"
+            "connection_id: tapdata-cloud\n"
+            "jira:\n"
+            "  project_key: TAP\n"
+            "  task_query: project = TAP\n"
+            "repositories:\n"
+            "  default: tapdata/tapdata\n",
+            encoding="utf-8",
+        )
+        overlay = state / "profiles/tapdata.local.yaml"
+        overlay.parent.mkdir(parents=True)
+        overlay.write_text(
+            "workspace:\n"
+            f"  source_root: {self.source.resolve()}\n"
+            "  repository: tapdata/tapdata\n",
+            encoding="utf-8",
+        )
+        self._git("init", "--initial-branch", "develop")
+        self._git("config", "user.name", "Baseline")
+        self._git("config", "user.email", "baseline@example.com")
+        (self.source / "src").mkdir()
+        (self.source / "src" / "app.py").write_text("print('baseline')\n", encoding="utf-8")
+        (self.source / "src" / "__init__.py").write_text("", encoding="utf-8")
+        self._git("add", ".")
+        self._git("commit", "-m", "baseline")
+        self._git("checkout", "-b", "codex/TAP-12289/commit-test")
+        self._git("remote", "add", "origin", "git@github.com:tapdata/tapdata.git")
+        self.approved_plan_path = self.workspace / "inputs" / "approved-plan.md"
+        self.approved_plan_path.parent.mkdir(parents=True)
+        self.approved_plan_path.write_text("# 计划\n", encoding="utf-8")
+        issue = JiraIssue(
+            issue_id="12289",
+            key="TAP-12289",
+            project_key="TAP",
+            summary="真实任务",
+            status="正在进行",
+            issue_type="任务",
+            assignee="jira-account-1",
+            description=None,
+        )
+        issue_content_sha256 = hashlib.sha256(
+            json.dumps(
+                {
+                    "assignee_account_id": issue.assignee,
+                    "description": issue.description,
+                    "issue_id": issue.issue_id,
+                    "issue_type": issue.issue_type,
+                    "key": issue.key,
+                    "project_key": issue.project_key,
+                    "status": issue.status,
+                    "summary": issue.summary,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        self.manifest: dict[str, object] = {
+            "schema_version": 1,
+            "protocol": "task_to_pr_review",
+            "workspace": {"root": str(self.workspace.resolve())},
+            "issue": {"key": "TAP-12289", "id": "12289", "project_key": "TAP"},
+            "jira": {
+                "base_url": "https://tapdata.atlassian.net",
+                "account_id": "jira-account-1",
+                "assignee_account_id": "jira-account-1",
+                "status_mapping": {"正在进行": "implementation"},
+                "allowed_status_categories": ["In Progress"],
+                "agentic_id_field": None,
+            },
+            "agent": {
+                "agent_id": "harsen-mini-test-bot",
+                "project_profile": "tapdata",
+                "agentic_run_id": "run-TAP-12289-commit",
+            },
+            "task_binding": {
+                "issue_content_sha256": issue_content_sha256,
+                "approved_plan_file": "inputs/approved-plan.md",
+                "approved_plan_sha256": hashlib.sha256(
+                    self.approved_plan_path.read_bytes()
+                ).hexdigest(),
+            },
+            "execution_identity": {
+                "git_author_name": "Harsen Test Bot",
+                "git_author_email": "harsen-test-bot@example.com",
+                "git_committer_name": "Harsen Test Bot",
+                "git_committer_email": "harsen-test-bot@example.com",
+                "github_actor_login": "harsen-mini-test-bot",
+            },
+            "repository": {
+                "root": str(self.source.resolve()),
+                "slug": "tapdata/tapdata",
+                "remote_name": "origin",
+                "base_branch": "develop",
+                "task_branch": "codex/TAP-12289/commit-test",
+                "target_branch": "develop",
+                "protected_branches": ["main", "develop"],
+            },
+            "scope": {"included": ["src/**"], "excluded": ["vendor/**", ".env"]},
+            "verification": [
+                {
+                    "id": "unit",
+                    "command": ["python3", "-m", "unittest"],
+                    "working_directory": ".",
+                    "timeout_seconds": 60,
+                }
+            ],
+            "pr_endpoint": {
+                "provider": "github",
+                "repository_slug": "tapdata/tapdata",
+                "target_branch": "develop",
+                "ci_policy": "require_passed",
+            },
+            "permitted_external_actions": [
+                "jira_read",
+                "git_commit",
+                "git_remote_read",
+                "git_push_task_branch",
+                "github_pr_create_or_update",
+                "github_pr_read",
+            ],
+            "authorization": {
+                "reference": (
+                    "user-confirmation:TAP-12289:run-TAP-12289-commit:"
+                    + hashlib.sha256(self.approved_plan_path.read_bytes()).hexdigest()
+                ),
+                "confirmed_by": "harsen",
+                "confirmed_at": "2026-08-18T02:00:00+00:00",
+                "confirmed_manifest_sha256": "",
+            },
+        }
+        self.manifest["authorization"]["confirmed_manifest_sha256"] = manifest_digest(
+            self.manifest
+        )  # type: ignore[index]
+        self.manifest_path = self.workspace / "inputs" / "manifest.json"
+        self.manifest_path.write_text(
+            json.dumps(self.manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def _git(self, *arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(self.source), *arguments],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def _write_manifest(self) -> None:
+        self.manifest_path.write_text(
+            json.dumps(self.manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def _protocol(self) -> TaskRunProtocol:
+        return TaskRunProtocol(
+            SimpleNamespace(
+                root=self.workspace.resolve(),
+                config_path=(self.workspace / ".agentic-ops" / "agent.json").resolve(),
+            ),
+            install_root=self.install,
+            lock_timeout=1,
+        )
+
+    def _open_with_baseline(self) -> tuple[TaskRunProtocol, str]:
+        protocol = self._protocol()
+        protocol.open("inputs/manifest.json")
+        local_head = self._git("rev-parse", "HEAD").stdout.strip()
+        baseline_id = protocol._append_runtime_fact(
+            self.manifest,
+            "prohibition_baseline",
+            {
+                "issue_key": "TAP-12289",
+                "repository_slug": "tapdata/tapdata",
+                "remote_name": "origin",
+                "jira_status": "正在进行",
+                "jira_status_category": "In Progress",
+                "tag_refs": [],
+                "release_records": [],
+                "protected_heads": [],
+                "local_head_sha": local_head,
+                "task_branch_remote_sha": None,
+                "task_open_pr": None,
+                "observed_at": "2026-08-18T02:00:00+00:00",
+                "reference": "runtime-prohibition-baseline:TAP-12289:run-TAP-12289-commit",
+            },
+            "写前基线",
+        )
+        return protocol, str(baseline_id["event_id"])
+
+    def test_execute_commit_creates_attributable_commit(self) -> None:
+        protocol, _ = self._open_with_baseline()
+        (self.source / "src" / "app.py").write_text(
+            "print('baseline')\nprint('change')\n", encoding="utf-8"
+        )
+        before = self._git("rev-parse", "HEAD").stdout.strip()
+        result = protocol.execute_git_commit(
+            "inputs/manifest.json",
+            message="Feat: 实现受控提交",
+            authorization_reference=str(
+                self.manifest["authorization"]["reference"]
+            ),
+        )
+        after = self._git("rev-parse", "HEAD").stdout.strip()
+        self.assertNotEqual(before, after)
+        self.assertTrue(result["recorded"])
+        self.assertIn("git_commit", result["bound_external_actions"])
+        readback = result["event_sha256"]
+        self.assertTrue(readback)
+        status = self._git("status", "--porcelain=v1", "--untracked-files=no").stdout
+        self.assertEqual("", status)
+        log = self._git("log", "--format=%an%x00%ae", "-1").stdout.strip()
+        self.assertEqual("Harsen Test Bot\u0000harsen-test-bot@example.com", log)
+
+    def test_execute_commit_blocks_when_authorization_mismatch(self) -> None:
+        protocol, _ = self._open_with_baseline()
+        (self.source / "src" / "app.py").write_text("changed\n", encoding="utf-8")
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            protocol.execute_git_commit(
+                "inputs/manifest.json",
+                message="Feat: 无授权提交",
+                authorization_reference="user-confirmation:stale",
+            )
+        self.assertEqual(
+            "authorization_reference_mismatch", captured.exception.code
+        )
+
+    def test_execute_commit_blocks_without_baseline(self) -> None:
+        protocol = self._protocol()
+        protocol.open("inputs/manifest.json")
+        (self.source / "src" / "app.py").write_text("changed\n", encoding="utf-8")
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            protocol.execute_git_commit(
+                "inputs/manifest.json",
+                message="Feat: 无基线提交",
+                authorization_reference=str(
+                    self.manifest["authorization"]["reference"]
+                ),
+            )
+        self.assertEqual("git_commit_baseline_missing", captured.exception.code)
+
+    def test_execute_commit_blocks_out_of_scope_paths(self) -> None:
+        protocol, _ = self._open_with_baseline()
+        (self.source / "vendor").mkdir(exist_ok=True)
+        (self.source / "vendor" / "dep.txt").write_text("x\n", encoding="utf-8")
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            protocol.execute_git_commit(
+                "inputs/manifest.json",
+                message="Feat: 越界提交",
+                authorization_reference=str(
+                    self.manifest["authorization"]["reference"]
+                ),
+            )
+        self.assertEqual("git_commit_scope_violation", captured.exception.code)
+
+    def test_execute_commit_blocks_on_clean_worktree(self) -> None:
+        protocol, _ = self._open_with_baseline()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            protocol.execute_git_commit(
+                "inputs/manifest.json",
+                message="Feat: 空提交",
+                authorization_reference=str(
+                    self.manifest["authorization"]["reference"]
+                ),
+            )
+        self.assertEqual("git_commit_no_changes", captured.exception.code)
+
+    def _push_origin(self) -> Path:
+        """创建本地 bare origin 并让 source remote 指向它。"""
+        origin = self.source.parent / "origin.git"
+        subprocess.run(
+            ["git", "init", "--bare", str(origin)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        # 先推 develop 基线，使远端有 base 分支。
+        self._git("push", str(origin), "develop")
+        self._git("remote", "set-url", "origin", str(origin))
+        return origin
+
+    def test_execute_push_creates_remote_branch_and_reads_back(self) -> None:
+        self._push_origin()
+        protocol, _ = self._open_with_baseline()
+        (self.source / "src" / "app.py").write_text(
+            "print('baseline')\nprint('change')\n", encoding="utf-8"
+        )
+        protocol.execute_git_commit(
+            "inputs/manifest.json",
+            message="Feat: 实现受控提交",
+            authorization_reference=str(
+                self.manifest["authorization"]["reference"]
+            ),
+        )
+        result = protocol.execute_git_push_task_branch(
+            "inputs/manifest.json",
+            authorization_reference=str(
+                self.manifest["authorization"]["reference"]
+            ),
+        )
+        self.assertTrue(result["recorded"])
+        self.assertIn("git_push_task_branch", result["bound_external_actions"])
+        readback = self._git(
+            "ls-remote", "origin", "refs/heads/codex/TAP-12289/commit-test"
+        ).stdout.strip()
+        local_head = self._git("rev-parse", "HEAD").stdout.strip()
+        self.assertTrue(readback.startswith(local_head))
+
+    def test_execute_push_requires_prior_commit(self) -> None:
+        protocol, _ = self._open_with_baseline()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            protocol.execute_git_push_task_branch(
+                "inputs/manifest.json",
+                authorization_reference=str(
+                    self.manifest["authorization"]["reference"]
+                ),
+            )
+        self.assertEqual("git_push_commit_missing", captured.exception.code)
+
+    def test_execute_pr_create_creates_and_reads_back(self) -> None:
+        self._push_origin()
+        protocol, _ = self._open_with_baseline()
+        (self.source / "src" / "app.py").write_text(
+            "print('baseline')\nprint('change')\n", encoding="utf-8"
+        )
+        protocol.execute_git_commit(
+            "inputs/manifest.json",
+            message="Feat: 实现受控提交",
+            authorization_reference=str(
+                self.manifest["authorization"]["reference"]
+            ),
+        )
+        protocol.execute_git_push_task_branch(
+            "inputs/manifest.json",
+            authorization_reference=str(
+                self.manifest["authorization"]["reference"]
+            ),
+        )
+        create_argv: list[list[str]] = []
+
+        def fake_run_command(argv, cwd, timeout, *, denied_environment_keys=None, verification_repository_root=None):
+            create_argv.append(argv)
+            if argv[0] == "gh" and argv[1] == "api" and argv[2] == "user":
+                return subprocess.CompletedProcess(
+                    argv, 0, "harsen-mini-test-bot\n", ""
+                )
+            if argv[0] == "gh" and argv[1] == "pr" and argv[2] == "create":
+                return subprocess.CompletedProcess(
+                    argv, 0, "https://github.com/tapdata/tapdata/pull/42\n", ""
+                )
+            if argv[0] == "gh" and argv[1] == "pr" and argv[2] == "view":
+                payload = json.dumps(
+                    {
+                        "number": 42,
+                        "url": "https://github.com/tapdata/tapdata/pull/42",
+                        "state": "OPEN",
+                        "isDraft": False,
+                        "mergedAt": None,
+                        "headRefName": "codex/TAP-12289/commit-test",
+                        "headRefOid": "a" * 40,
+                        "baseRefName": "develop",
+                        "reviewDecision": None,
+                        "statusCheckRollup": [],
+                    }
+                )
+                return subprocess.CompletedProcess(argv, 0, payload, "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch.object(
+            TaskRunProtocol, "_run_command", staticmethod(fake_run_command)
+        ):
+            result = protocol.execute_github_pr_create(
+                "inputs/manifest.json",
+                title="Feat: 实现受控提交",
+                body="修复 AgenticOps 配置阻塞",
+                authorization_reference=str(
+                    self.manifest["authorization"]["reference"]
+                ),
+            )
+        self.assertTrue(result["recorded"])
+        self.assertIn(
+            "github_pr_create_or_update", result["bound_external_actions"]
+        )
+        self.assertTrue(
+            any(argv[0] == "gh" and argv[1] == "pr" and argv[2] == "create" for argv in create_argv)
+        )
+
+    def test_execute_pr_create_requires_git_push_first(self) -> None:
+        protocol, _ = self._open_with_baseline()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            protocol.execute_github_pr_create(
+                "inputs/manifest.json",
+                title="Feat",
+                body="body",
+                authorization_reference=str(
+                    self.manifest["authorization"]["reference"]
+                ),
+            )
+        self.assertEqual(
+            "pr_create_git_readback_missing", captured.exception.code
+        )
+
+    def test_execute_pr_create_blocks_merged_pr(self) -> None:
+        self._push_origin()
+        protocol, _ = self._open_with_baseline()
+        (self.source / "src" / "app.py").write_text(
+            "print('baseline')\nprint('change')\n", encoding="utf-8"
+        )
+        protocol.execute_git_commit(
+            "inputs/manifest.json",
+            message="Feat: 实现受控提交",
+            authorization_reference=str(
+                self.manifest["authorization"]["reference"]
+            ),
+        )
+        protocol.execute_git_push_task_branch(
+            "inputs/manifest.json",
+            authorization_reference=str(
+                self.manifest["authorization"]["reference"]
+            ),
+        )
+
+        def fake_run_command(argv, cwd, timeout, *, denied_environment_keys=None, verification_repository_root=None):
+            if argv[0] == "gh" and argv[1] == "api" and argv[2] == "user":
+                return subprocess.CompletedProcess(
+                    argv, 0, "harsen-mini-test-bot\n", ""
+                )
+            if argv[0] == "gh" and argv[1] == "pr" and argv[2] == "create":
+                return subprocess.CompletedProcess(
+                    argv, 0, "https://github.com/tapdata/tapdata/pull/42\n", ""
+                )
+            if argv[0] == "gh" and argv[1] == "pr" and argv[2] == "view":
+                payload = json.dumps(
+                    {
+                        "number": 42,
+                        "url": "https://github.com/tapdata/tapdata/pull/42",
+                        "state": "OPEN",
+                        "isDraft": False,
+                        "mergedAt": "2026-08-18T03:00:00Z",
+                        "headRefName": "codex/TAP-12289/commit-test",
+                        "headRefOid": "a" * 40,
+                        "baseRefName": "develop",
+                        "reviewDecision": None,
+                        "statusCheckRollup": [],
+                    }
+                )
+                return subprocess.CompletedProcess(argv, 0, payload, "")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with mock.patch.object(
+            TaskRunProtocol, "_run_command", staticmethod(fake_run_command)
+        ):
+            with self.assertRaises(RuntimeErrorResult) as captured:
+                protocol.execute_github_pr_create(
+                    "inputs/manifest.json",
+                    title="Feat",
+                    body="body",
+                    authorization_reference=str(
+                        self.manifest["authorization"]["reference"]
+                    ),
+                )
+        self.assertEqual("pr_auto_merge_forbidden", captured.exception.code)
 
 
 if __name__ == "__main__":
