@@ -64,6 +64,22 @@ class SourcePoolPathTest(unittest.TestCase):
             with self.assertRaises(RuntimeErrorResult):
                 validate_source_pool_root(source_marker)
 
+    def test_pool_root_missing_requires_allow_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            pool = Path(temporary) / "pool"
+            # 默认必须存在：不存在时阻断。
+            with self.assertRaises(RuntimeErrorResult) as captured:
+                validate_source_pool_root(pool)
+            self.assertEqual("source_pool_root_invalid", captured.exception.code)
+            # allow_missing=True：允许不存在（init 会自动创建）。
+            validated = validate_source_pool_root(pool, allow_missing=True)
+            self.assertEqual(pool.resolve(), validated)
+            # 不是目录（是文件）时即使 allow_missing 也阻断。
+            pool_file = Path(temporary) / "not-a-dir"
+            pool_file.write_text("x\n", encoding="utf-8")
+            with self.assertRaises(RuntimeErrorResult):
+                validate_source_pool_root(pool_file, allow_missing=True)
+
 
 class SourcePoolRootRequiredTest(unittest.TestCase):
     def test_prepare_blocks_when_pool_root_unconfigured(self) -> None:
@@ -92,6 +108,83 @@ class SourcePoolRootRequiredTest(unittest.TestCase):
             with self.assertRaises(RuntimeErrorResult) as captured:
                 initializer.prepare("tapdata", "agent-1")
             self.assertEqual("source_pool_root_invalid", captured.exception.code)
+
+    def test_prepare_allows_missing_pool_root_dir(self) -> None:
+        # 池根已配置但目录不存在：prepare 不阻断（apply 自动创建），池模式生效。
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install = root / "install"
+            install.mkdir()
+            (install / "developer" / "standards" / "connections").mkdir(parents=True)
+            (install / "developer" / "standards" / "connections" / "tap.yaml").write_text(
+                "connection_id: tap\nbase_url: https://jira.example.test\n"
+                "auth:\n  email_env: E\n  token_env: T\n",
+                encoding="utf-8",
+            )
+            profile_dir = install / "developer" / "standards" / "projects" / "tapdata"
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "profile.yaml").write_text(
+                "profile_id: tapdata\nconnection_id: tap\n"
+                "jira:\n  project_key: TAP\n  task_query: project = TAP\n"
+                "repositories:\n"
+                "  default: tapdata/tapdata\n"
+                "  list:\n"
+                "    - tapdata/tapdata\n",
+                encoding="utf-8",
+            )
+            (install / "developer" / "AGENTS.md").write_text("# developer\n", encoding="utf-8")
+            user_config = install / "user" / "config.yaml"
+            user_config.parent.mkdir(parents=True)
+            pool = root / "source-pool" / "nested" / "pool"
+            user_config.write_text(
+                f"source_pool_root: {pool}\n",
+                encoding="utf-8",
+            )
+            workspace = root / "workspace"
+            workspace.mkdir()
+            initializer = WorkspaceInitializer(workspace, install)
+            candidate = initializer.prepare("tapdata", "agent-1")
+            self.assertTrue(candidate.pool_mode)
+            self.assertEqual(pool.resolve(), candidate.source_pool_root.resolve())
+
+            def fake_run_git(initializer_obj, command, *, timeout=None):
+                if "--get-regexp" in command:
+                    return subprocess.CompletedProcess(command, 1, "", "")
+                if command[0] == "-C" and command[2:] == [
+                    "config",
+                    "--get-all",
+                    "remote.origin.pushurl",
+                ]:
+                    return subprocess.CompletedProcess(command, 1, "", "")
+                if command[0] == "-C":
+                    repo_dir = Path(command[1])
+                    short = repo_dir.name
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        f"git@github.com:tapdata/{short}.git\n",
+                        "",
+                    )
+                return subprocess.CompletedProcess(command, 0, "HEAD\n", "")
+
+            def fake_run_git_streaming(initializer_obj, command, *, stall_warn_interval=30.0):
+                target = Path(command[-1])
+                (target / ".git").mkdir(parents=True, exist_ok=True)
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            # apply 阶段自动创建池根并写入容器 README。
+            with (
+                mock.patch.object(
+                    WorkspaceInitializer, "_run_git", new=fake_run_git
+                ),
+                mock.patch.object(
+                    WorkspaceInitializer, "_run_git_streaming", new=fake_run_git_streaming
+                ),
+            ):
+                result = initializer._prepare_pool_members(candidate)
+            self.assertIn("adopted=0", result)
+            self.assertTrue((pool / "README.md").is_file())
+            self.assertTrue((pool / "tapdata" / "tapdata" / ".git").exists())
 
 
 class SourcePoolMemberPrepareTest(unittest.TestCase):
