@@ -165,7 +165,12 @@ def prepare_task_worktrees(
                 created += 1
     except Exception:
         for worktree_dir in created_dirs:
-            _rollback_worktree(git, plan.pool_root, worktree_dir)
+            _rollback_worktree(
+                git,
+                plan.pool_root,
+                worktree_dir,
+                tuple(entry.repository for entry in plan.entries),
+            )
         raise
     return TaskWorktreePlan(
         issue_key=plan.issue_key,
@@ -230,17 +235,22 @@ def _write_worktree_identity(
         git(["-C", str(worktree_dir), "config", "--worktree", "user.email", email], timeout=60)
 
 
-def _rollback_worktree(git: Any, pool_root: Path, worktree_dir: Path) -> None:
-    for repository in pool_root.glob("*/*"):
+def _rollback_worktree(
+    git: Any,
+    pool_root: Path,
+    worktree_dir: Path,
+    repositories: tuple[str, ...],
+) -> None:
+    for repository in repositories:
         result = git(
-            ["-C", str(repository), "worktree", "list", "--porcelain"],
+            ["-C", str(pool_root / repository), "worktree", "list", "--porcelain"],
             timeout=60,
         )
         if result.returncode != 0:
             continue
         if str(worktree_dir.resolve()) in result.stdout:
             git(
-                ["-C", str(repository), "worktree", "remove", "--force", str(worktree_dir)],
+                ["-C", str(pool_root / repository), "worktree", "remove", "--force", str(worktree_dir)],
                 timeout=60,
             )
             return
