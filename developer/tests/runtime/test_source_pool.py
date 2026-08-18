@@ -181,8 +181,9 @@ class SourcePoolRootRequiredTest(unittest.TestCase):
                     WorkspaceInitializer, "_run_git_streaming", new=fake_run_git_streaming
                 ),
             ):
-                result = initializer._prepare_pool_members(candidate)
+                result, skipped = initializer._prepare_pool_members(candidate)
             self.assertIn("adopted=0", result)
+            self.assertEqual([], skipped)
             self.assertTrue((pool / "README.md").is_file())
             self.assertTrue((pool / "tapdata" / "tapdata" / ".git").exists())
 
@@ -258,7 +259,7 @@ class SourcePoolMemberPrepareTest(unittest.TestCase):
                 candidate = initializer.prepare(
                     "tapdata", "agent-1", source_pool_root=str(pool)
                 )
-                result = initializer._prepare_pool_members(candidate)
+                result, _ = initializer._prepare_pool_members(candidate)
             self.assertIn("adopted=1", result)
             self.assertIn("cloned=1", result)
             self.assertTrue((pool / "README.md").is_file())

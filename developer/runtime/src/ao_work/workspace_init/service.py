@@ -393,7 +393,9 @@ class WorkspaceInitializer:
             confirmed=confirm_existing_config,
         )
         write_diagnostic("初始化预检 3/3：源码仓库只读访问与冲突校验")
-        source_status = self._check_source(candidate, checks, check_remote=check_remote)
+        source_status, skipped_repositories = self._check_source(
+            candidate, checks, check_remote=check_remote
+        )
         self._check_source_root_conflict(candidate, checks)
         return {
             "status": "passed",
@@ -401,6 +403,7 @@ class WorkspaceInitializer:
             "jira_identity": jira_identity,
             "jira_project_name": jira_project,
             "source_checkout_status": source_status,
+            "skipped_repositories": skipped_repositories,
         }
 
     def apply(
@@ -430,13 +433,16 @@ class WorkspaceInitializer:
                     write_diagnostic(
                         f"初始化步骤 2/5：准备中央克隆池成员（{len(candidate.profile.repository_candidates())} 个仓库）→ {candidate.source_pool_root}"
                     )
-                    source_status = self._prepare_pool_members(candidate)
+                    source_status, skipped_members = self._prepare_pool_members(
+                        candidate, preflight
+                    )
                     write_diagnostic(f"池成员准备完成（{source_status}）")
                 else:
                     write_diagnostic(
                         f"初始化步骤 2/5：下载业务源码仓库 {candidate.repository} → {candidate.source_root}"
                     )
                     source_status = self._ensure_source_checkout(candidate)
+                    skipped_members = []
                     write_diagnostic(f"源码仓库下载完成（{source_status}）")
                     if candidate.source_root_derived:
                         self._write_source_container_readme(candidate)
@@ -551,11 +557,18 @@ class WorkspaceInitializer:
                 shutil.rmtree(state_root, ignore_errors=True)
             raise
 
+        if skipped_members:
+            names = "、".join(entry["repository"] for entry in skipped_members)
+            write_diagnostic(
+                f"初始化完成，但有 {len(skipped_members)} 个源码仓库因无权限被跳过："
+                f"{names}；请补权限后重新运行 ao-work workspace init 补齐"
+            )
         return {
             **candidate.summary(),
             "jira_identity": preflight["jira_identity"],
             "jira_project_name": preflight["jira_project_name"],
             "source_checkout_status": source_status,
+            "skipped_repositories": skipped_members,
             "agent_config": str(state_root / "agent.json"),
             "profile_overlay": str(overlay_path),
             "agent_instructions": str(candidate.root / "AGENTS.md"),
@@ -809,7 +822,7 @@ class WorkspaceInitializer:
         checks: list[dict[str, str]],
         *,
         check_remote: bool,
-    ) -> str:
+    ) -> tuple[str, list[dict[str, Any]]]:
         if shutil.which("git") is None:
             raise _blocked(
                 "git_missing",
@@ -830,6 +843,7 @@ class WorkspaceInitializer:
                     "Project Profile 没有配置 repositories.default 或 repositories.list",
                     "请先配置 profile 的默认仓库或仓库清单",
                 )
+            skipped: list[dict[str, Any]] = []
             if check_remote:
                 self._reject_git_url_rewrites(None)
                 total = len(repositories)
@@ -837,10 +851,37 @@ class WorkspaceInitializer:
                     write_diagnostic(
                         f"初始化预检：检查源码仓库 {repository}（{index}/{total}）"
                     )
-                    self._require_remote_access(_repository_url(repository))
+                    url = _repository_url(repository)
+                    result = self._run_git(["ls-remote", url, "HEAD"])
+                    if result.returncode == 0:
+                        continue
+                    reason = _classify_remote_permission_error(result.stderr)
+                    if reason is None:
+                        # 网络类错误（超时/DNS/连接失败等）保持阻断，不跳过。
+                        raise _blocked(
+                            "source_repository_access_failed",
+                            f"无法只读访问源码仓库 {repository}",
+                            "请检查 GitHub 登录、SSH key、网络和仓库权限后重试",
+                            details={
+                                "repository": repository,
+                                "stderr_tail": _stderr_tail(result.stderr),
+                            },
+                        )
+                    # 权限类错误：跳过该仓库并提示用户，其余仓库继续检查。
+                    write_diagnostic(
+                        f"初始化预检：跳过无权限源码仓库 {repository}（{reason}）"
+                    )
+                    skipped.append(
+                        {
+                            "repository": repository,
+                            "url": url,
+                            "reason": reason,
+                            "stderr_tail": _stderr_tail(result.stderr),
+                        }
+                    )
             checks.append({"check": "source_pool_root", "status": "passed"})
             checks.append({"check": "source_pool_members_remote", "status": "passed"})
-            return "pool_ready"
+            return "pool_ready", skipped
         source = validate_business_source_root(candidate.root, candidate.source_root)
         if source.exists() and not source.is_dir():
             raise _blocked(
@@ -860,7 +901,7 @@ class WorkspaceInitializer:
                 self._reject_git_url_rewrites(source)
                 self._require_remote_access(remote.stdout.strip())
             checks.append({"check": "source_repository", "status": "passed"})
-            return "reused"
+            return "reused", []
 
         parent = source if source.is_dir() else source.parent
         while not parent.exists() and parent != parent.parent:
@@ -875,7 +916,7 @@ class WorkspaceInitializer:
             self._reject_git_url_rewrites(None)
             self._require_remote_access(_repository_url(candidate.repository))
         checks.append({"check": "source_repository", "status": "passed"})
-        return "ready_to_clone"
+        return "ready_to_clone", []
 
     def _check_source_root_conflict(
         self, candidate: WorkspaceCandidate, checks: list[dict[str, str]]
@@ -962,13 +1003,19 @@ class WorkspaceInitializer:
         )
         atomic_write_text(container / "README.md", content)
 
-    def _prepare_pool_members(self, candidate: WorkspaceCandidate) -> str:
+    def _prepare_pool_members(
+        self,
+        candidate: WorkspaceCandidate,
+        preflight: dict[str, Any] | None = None,
+    ) -> tuple[str, list[dict[str, Any]]]:
         """准备中央克隆池成员全集：认领已有池成员或流式克隆缺失成员。
 
         - 池成员 = <pool_root>/<owner>/<repo> 普通完整克隆（保留主 checkout）。
         - 已存在 → 认领（adopt）：校验 remotes 精确匹配、拒绝 URL 改写、
           拒绝指向 AgenticOps 源头仓库；浅克隆自动流式 unshallow。
         - 缺失 → 流式 clone；中断续传：已完成成员保留，下次补齐。
+        - 无权限仓库（预检已跳过或克隆时权限类失败）→ 跳过并提示用户，
+          其余仓库继续准备；返回 (状态摘要, 跳过清单)。
         - 池成员级并发锁：<pool_root>/.locks/<owner>/<repo>.lock。
         """
         assert candidate.pool_mode
@@ -984,10 +1031,29 @@ class WorkspaceInitializer:
                 "Project Profile 没有配置 repositories.default 或 repositories.list",
                 "请先配置 profile 的默认仓库或仓库清单",
             )
+        preflight_skipped = {
+            entry["repository"]
+            for entry in (preflight or {}).get("skipped_repositories", [])
+            if isinstance(entry, dict) and entry.get("repository")
+        }
         prepared: list[str] = []
+        skipped_members: list[dict[str, Any]] = []
         adopted = 0
         cloned = 0
         for repository in repositories:
+            if repository in preflight_skipped:
+                # 预检已确认无权限，直接跳过，不重复尝试克隆。
+                write_diagnostic(
+                    f"池成员准备：跳过无权限源码仓库 {repository}（预检已跳过）"
+                )
+                skipped_members.append(
+                    {
+                        "repository": repository,
+                        "url": _repository_url(repository),
+                        "reason": "无访问权限（预检阶段已跳过）",
+                    }
+                )
+                continue
             member_dir = pool_root / repository
             lock_path = pool_root / ".locks" / f"{repository.replace('/', '__')}.lock"
             with TaskLock(lock_path, timeout=10):
@@ -1005,6 +1071,21 @@ class WorkspaceInitializer:
                     ["clone", "--progress", _repository_url(repository), str(member_dir)]
                 )
                 if result.returncode != 0:
+                    reason = _classify_remote_permission_error(result.stderr)
+                    if reason is not None:
+                        # 权限类错误：跳过该仓库并提示用户，其余仓库继续准备。
+                        write_diagnostic(
+                            f"池成员准备：跳过无权限源码仓库 {repository}（{reason}）"
+                        )
+                        skipped_members.append(
+                            {
+                                "repository": repository,
+                                "url": _repository_url(repository),
+                                "reason": reason,
+                                "stderr_tail": _stderr_tail(result.stderr),
+                            }
+                        )
+                        continue
                     raise _blocked(
                         "source_checkout_failed",
                         f"池成员克隆失败：{repository}",
@@ -1014,8 +1095,8 @@ class WorkspaceInitializer:
                 self._validate_checked_out_source(candidate, source=member_dir, repository=repository)
                 cloned += 1
                 prepared.append(repository)
-        self._write_source_pool_readme(candidate, pool_root, repositories)
-        return f"adopted={adopted},cloned={cloned},total={len(prepared)}"
+        self._write_source_pool_readme(candidate, pool_root, tuple(prepared))
+        return f"adopted={adopted},cloned={cloned},total={len(prepared)}", skipped_members
 
     def _is_shallow_clone(self, source: Path) -> bool:
         result = self._run_git(["-C", str(source), "rev-parse", "--is-shallow-repository"])
@@ -1471,6 +1552,36 @@ class WorkspaceInitializer:
 
 def _repository_url(repository: str) -> str:
     return f"git@github.com:{repository}.git"
+
+
+_PERMISSION_DENIED_MARKERS: tuple[tuple[str, str], ...] = (
+    ("permission denied", "SSH 权限被拒绝"),
+    ("permission to ", "仓库访问被拒绝"),
+    ("repository not found", "仓库不存在或无访问权限"),
+    ("access denied", "访问被拒绝"),
+    ("authentication failed", "认证失败"),
+    ("could not read username", "HTTPS 未提供凭证"),
+    ("not authorized", "未授权"),
+    ("403", "HTTP 403（无权限）"),
+    ("404", "HTTP 404（仓库不存在或无权限）"),
+)
+
+
+def _classify_remote_permission_error(stderr: str) -> str | None:
+    """判断 git 远端访问失败的 stderr 是否属于权限/认证类错误。
+
+    权限类错误（GitHub 私有仓库无权限、仓库不存在、SSH key 被拒、HTTPS 认证失败等）
+    在初始化时跳过该仓库并提示用户；返回匹配到的中文原因摘要，未匹配返回 None。
+    网络类错误（超时、DNS 解析失败、连接拒绝、传输中断等）不匹配任何标记，
+    由调用方保持阻断，避免把临时网络故障误判为无权限而静默跳过。
+    """
+    if not stderr:
+        return None
+    lowered = stderr.lower()
+    for marker, reason in _PERMISSION_DENIED_MARKERS:
+        if marker in lowered:
+            return reason
+    return None
 
 
 def _repository_short_name(repository: str) -> str:

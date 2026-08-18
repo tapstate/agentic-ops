@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import cast
 from unittest import mock
 
 from ao_work.work_cli import main
@@ -148,6 +149,8 @@ class WorkspaceInitTest(unittest.TestCase):
         stdin: io.StringIO | None = None,
         token: str = "token-secret-123",
         clone_source_marker: bool = False,
+        remote_denied: dict[str, str] | None = None,
+        clone_denied: dict[str, str] | None = None,
     ) -> tuple[int, dict[str, object], str, str]:
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -161,6 +164,14 @@ class WorkspaceInitTest(unittest.TestCase):
         ) -> subprocess.CompletedProcess[str]:
             if "--get-regexp" in command:
                 return subprocess.CompletedProcess(command, 1, "", "")
+            if command[0] == "ls-remote":
+                remote = command[1]
+                for repository, stderr_text in (remote_denied or {}).items():
+                    if repository in remote:
+                        return subprocess.CompletedProcess(
+                            command, 128, "", stderr_text
+                        )
+                return subprocess.CompletedProcess(command, 0, "HEAD\n", "")
             if command[0] == "clone":
                 target = Path(command[-1])
                 (target / ".git").mkdir(parents=True)
@@ -191,6 +202,14 @@ class WorkspaceInitTest(unittest.TestCase):
             *,
             stall_warn_interval: float = 30.0,
         ) -> subprocess.CompletedProcess[str]:
+            if command[0] == "clone":
+                # clone 命令形如 ["clone", "--progress", <url>, <target>]，URL 在 index 2。
+                remote = command[2]
+                for repository, stderr_text in (clone_denied or {}).items():
+                    if repository in remote:
+                        return subprocess.CompletedProcess(
+                            command, 128, "", stderr_text
+                        )
             target = Path(command[-1])
             target.mkdir(parents=True, exist_ok=True)
             (target / ".git").mkdir(parents=True, exist_ok=True)
@@ -368,6 +387,107 @@ class WorkspaceInitTest(unittest.TestCase):
                 "初始化完成：业务项目工作空间已就绪",
             ):
                 self.assertIn(expected, stderr, stderr)
+
+    def _init_common_args(self, workspace: Path, agent_id: str) -> tuple[str, ...]:
+        return (
+            "--workspace-root",
+            str(workspace),
+            "workspace",
+            "init",
+            "--non-interactive",
+            "--project",
+            "tapdata",
+            "--agent-id",
+            agent_id,
+            "--jira-email",
+            "developer@example.test",
+            "--git-name",
+            "Skip Denied",
+            "--git-email",
+            "developer@example.test",
+            "--github-login",
+            "skip-denied",
+            "--token-stdin",
+            "--confirm",
+        )
+
+    def test_non_interactive_init_skips_permission_denied_pool_member(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install = self.prepare_install(root)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            denied = {
+                "tapdata/tapdata-web": (
+                    "remote: Repository not found.\n"
+                    "fatal: repository 'git@github.com:tapdata/tapdata-web.git' not found\n"
+                )
+            }
+            exit_code, payload, stderr, _ = self.run_cli(
+                self._init_common_args(workspace, "skip-denied"),
+                remote_denied=denied,
+            )
+            self.assertEqual(0, exit_code, payload)
+            self.assertEqual("passed", payload["post_preflight_status"])
+            checks = {
+                check["check"]: check["status"]
+                for check in cast(list[dict[str, str]], payload["preflight_checks"])
+            }
+            self.assertEqual("passed", checks["source_pool_members_remote"])
+            skipped = cast(list[dict[str, object]], payload["skipped_repositories"])
+            self.assertEqual(1, len(skipped))
+            self.assertEqual("tapdata/tapdata-web", skipped[0]["repository"])
+            self.assertIn("初始化预检：跳过无权限源码仓库 tapdata/tapdata-web", stderr)
+            self.assertIn("1 个源码仓库因无权限被跳过", stderr)
+            pool = root / "source-pool"
+            self.assertTrue((pool / "tapdata" / "tapdata" / ".git").exists())
+            self.assertFalse((pool / "tapdata" / "tapdata-web").exists())
+
+    def test_pool_mode_clone_permission_error_skips_and_continues(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install = self.prepare_install(root)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            denied = {
+                "tapdata/tapdata-web": (
+                    "remote: Repository not found.\n"
+                    "fatal: repository 'git@github.com:tapdata/tapdata-web.git' not found\n"
+                )
+            }
+            exit_code, payload, stderr, _ = self.run_cli(
+                self._init_common_args(workspace, "clone-skip"),
+                clone_denied=denied,
+            )
+            self.assertEqual(0, exit_code, payload)
+            self.assertEqual("passed", payload["post_preflight_status"])
+            skipped = cast(list[dict[str, object]], payload["skipped_repositories"])
+            self.assertEqual(1, len(skipped))
+            self.assertEqual("tapdata/tapdata-web", skipped[0]["repository"])
+            self.assertIn("池成员准备：跳过无权限源码仓库 tapdata/tapdata-web", stderr)
+            pool = root / "source-pool"
+            self.assertTrue((pool / "tapdata" / "tapdata" / ".git").exists())
+            self.assertFalse((pool / "tapdata" / "tapdata-web").exists())
+
+    def test_pool_mode_preflight_blocks_on_network_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install = self.prepare_install(root)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            denied = {
+                "tapdata/tapdata-web": (
+                    "fatal: unable to access 'https://github.com/tapdata/tapdata-web.git/': "
+                    "Failed to connect to github.com port 443: Operation timed out\n"
+                )
+            }
+            exit_code, payload, _, _ = self.run_cli(
+                self._init_common_args(workspace, "network-block"),
+                remote_denied=denied,
+            )
+            self.assertEqual(2, exit_code)
+            self.assertEqual("source_repository_access_failed", payload["code"])
+            self.assertNotIn("skipped_repositories", payload)
 
     def test_explicit_source_root_reused_without_readme(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -933,12 +1053,12 @@ class WorkspaceInitTest(unittest.TestCase):
                     return_value=self.install_root,
                 ),
                 mock.patch.object(
-                    WorkspaceInitializer, "_check_source", return_value="pool_ready"
+                    WorkspaceInitializer, "_check_source", return_value=("pool_ready", [])
                 ),
                 mock.patch.object(
                     WorkspaceInitializer,
                     "_prepare_pool_members",
-                    return_value="adopted=0,cloned=0,total=2",
+                    return_value=("adopted=0,cloned=0,total=2", []),
                 ),
             ):
                 exit_code = main(
@@ -999,12 +1119,12 @@ class WorkspaceInitTest(unittest.TestCase):
                     return_value=self.install_root,
                 ),
                 mock.patch.object(
-                    WorkspaceInitializer, "_check_source", return_value="pool_ready"
+                    WorkspaceInitializer, "_check_source", return_value=("pool_ready", [])
                 ),
                 mock.patch.object(
                     WorkspaceInitializer,
                     "_prepare_pool_members",
-                    return_value="adopted=0,cloned=0,total=2",
+                    return_value=("adopted=0,cloned=0,total=2", []),
                 ),
             ):
                 exit_code = main(

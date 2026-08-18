@@ -29,7 +29,7 @@ Jira 站点、Project Key、状态/字段映射和默认仓库来自 Project Pro
 
 3. 只有初始化摘要正确时才确认。Runtime 随后执行只读预检，包括工作空间边界、全部受管路径、已有配置、`agent_id` 冲突、Profile、授权身份、Jira Project 访问和 Git 仓库访问。普通 `workspace preflight` 不能确认或覆盖漂移；重绑只能由指导员显式执行并确认 `workspace init`。
    初始化还把 developer Skill 作为普通文件副本写入当前工作空间 `.agents/skills/`，供 Codex 按仓库范围自动发现；规则正文进入当前 `AGENTS.md`，标准资产由 `ao-work` 从受信安装根解析。不得创建指向安装根的 Skill symlink，也不得把 `developer/...` 当作业务仓库相对路径。后续 `workspace preflight` 必须阻断 Skill 缺失、内容漂移、额外资产或 maintainer 污染。
-4. `ok=true`、`preflight_status=passed` 且 `post_preflight_status=passed` 后，只能检查用户显式给出的 Jira 任务。当前 `list_tasks` 是能力缺口，不得声称可以自动拉取研发员名下待办。
+4. `ok=true`、`preflight_status=passed` 且 `post_preflight_status=passed` 后，只能检查用户显式给出的 Jira 任务。当前 `list_tasks` 是能力缺口，不得声称可以自动拉取研发员名下待办。初始化结果含 `skipped_repositories` 时，把被跳过的源码仓库（无访问权限）明确告知用户，提示补权限后重新运行 `ao-work workspace init` 补齐；未补齐前不得声称源码池已就绪。
 5. 完成配置必须是 schema v3，并固化 `connection_id`、严格 HTTPS Jira 站点根、`jira_site`、实时验证的 `jira_account_id`、Project Key、默认仓库和源码规范路径。effective Profile 的这些值每次都必须与 `agent.json` 相同。业务仓库只接受精确 GitHub SCP/SSH/HTTPS URL，raw/effective fetch/push 全部一致，且不得配置 Git URL rewrite。
 
 ## 阻断处理
@@ -41,7 +41,7 @@ Jira 站点、Project Key、状态/字段映射和默认仓库来自 Project Pro
 - `workspace_project_identity_drift`：停止执行；普通 preflight 不得代替指导员确认重绑。
 - `workspace_managed_path_unsafe` 或 `workspace_index_path_unsafe`：移除越界路径或 symlink，核对是否发生身份/状态篡改。
 - `git_url_rewrite_forbidden` 或 `source_repository_mismatch`：移除 URL rewrite，核对 raw/effective fetch/push 都直接指向精确 GitHub 仓库。
-- `source_repository_access_failed`：修复 GitHub 登录、SSH key、网络或仓库权限后重试。
+- `source_repository_access_failed`：修复 GitHub 登录、SSH key、网络或仓库权限后重试。池模式下仅网络类错误（超时/DNS/连接失败等）走此阻断；无权限（403/404/denied/认证失败等）的仓库会跳过并提示，不整次阻断。
 - `existing_config_confirmation_required`：先核对已有配置；非交互模式只有明确提供 `--confirm-existing-config` 才能覆盖。
 
 阻断结果出现时，不手工补写 `agent.json` 伪造初始化成功。
