@@ -22,6 +22,7 @@ from ao_work.output import (
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.task_gate import execute_task_gate
 from ao_work.task_start import execute_task_start
+from ao_work.task_takeover import execute_task_takeover
 from ao_work.task_run import configure_task_run_parser, execute_task_run
 from ao_work.workspace import DEVELOPER, resolve_developer_workspace
 from ao_work.workspace_security import read_workspace_outbound_file
@@ -77,6 +78,11 @@ def build_parser() -> argparse.ArgumentParser:
     task_init.add_argument("--issue-key", required=True)
     task_init.add_argument("--project-key", required=True)
     task_init.add_argument("--agentic-run-id", required=True)
+    task_takeover = task_commands.add_parser("takeover")
+    task_takeover.add_argument("issue_key")
+    task_takeover.add_argument("--agent-id", required=True)
+    task_takeover.add_argument("--authorization-reference", required=True)
+    task_takeover.add_argument("--transition-comment", default=None)
     task_inspect = task_commands.add_parser("inspect")
     task_inspect.add_argument("--issue-key", required=True)
 
@@ -141,6 +147,17 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             install_root,
             store,
             args.issue_key,
+        )
+        return success(operation, workplane=workspace.workplane, **state)
+    if args.group == "task" and args.command == "takeover":
+        state = execute_task_takeover(
+            workspace,
+            install_root,
+            store,
+            args.issue_key,
+            agent_id=args.agent_id,
+            authorization_reference=args.authorization_reference,
+            transition_comment=args.transition_comment,
         )
         return success(operation, workplane=workspace.workplane, **state)
     if args.group == "task" and args.command in {"intake", "solution"}:

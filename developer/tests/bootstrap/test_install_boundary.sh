@@ -242,7 +242,7 @@ fi
 gap_output="$test_root/capability-gap.json"
 (
   cd "$test_root"
-  "$install_root/bin/ao-work" capability show takeover_task
+  "$install_root/bin/ao-work" capability show inspect_task
 ) > "$gap_output"
 grep '"status":"capability_gap"' "$gap_output" >/dev/null
 grep '"commands":\[\]' "$gap_output" >/dev/null

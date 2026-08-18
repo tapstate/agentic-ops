@@ -75,8 +75,8 @@ class CapabilityCatalogTest(unittest.TestCase):
         self.assertNotIn("report_write", public)
         self.assertIn("task_state_init", all_entries)
         takeover = catalog.show("takeover_task")
-        self.assertEqual("capability_gap", takeover["status"])
-        self.assertEqual([], takeover["commands"])
+        self.assertEqual("implemented", takeover["status"])
+        self.assertEqual([["task", "takeover"]], takeover["commands"])
 
     def test_cli_list_and_show_are_read_only_stable_json(self) -> None:
         first = self._run_cli("capability", "list")
@@ -146,7 +146,7 @@ class CapabilityCatalogTest(unittest.TestCase):
 
     def test_installed_markdown_does_not_publish_legacy_gap_commands(self) -> None:
         catalog = CapabilityCatalog.load(REPO_ROOT)
-        for capability_id in ("inspect_task", "takeover_task", "add_task_comment"):
+        for capability_id in ("inspect_task", "add_task_comment"):
             capability = catalog.show(capability_id)
             self.assertEqual("capability_gap", capability["status"])
             self.assertEqual([], capability["commands"])
