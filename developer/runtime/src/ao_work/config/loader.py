@@ -95,13 +95,27 @@ def load_jira_context(workspace: Workspace, install_root: Path) -> JiraContext:
         profile.connection_id,
         workspace_root=workspace.root,
     )
-    validate_workspace_jira_binding(workspace, connection)
-    validate_workspace_project_binding(workspace, profile)
-    email, token, _ = resolve_secret_pair_with_source(
-        connection.email_env,
-        connection.token_env,
-        workspace.root / ".agentic-ops" / ".env",
+    validate_workspace_jira_binding(
+        workspace,
+        connection,
+        install_root=install_root,
     )
+    validate_workspace_project_binding(workspace, profile)
+    if agent.get("schema_version") == 4:
+        # 阶段二：凭证从安装目录读取。
+        from ao_work.installation import load_install_credentials
+
+        install_credentials = load_install_credentials(install_root)
+        if install_credentials is not None:
+            email, token = install_credentials
+        else:
+            email, token = None, None
+    else:
+        email, token, _ = resolve_secret_pair_with_source(
+            connection.email_env,
+            connection.token_env,
+            workspace.root / ".agentic-ops" / ".env",
+        )
     return JiraContext(
         connection=connection,
         profile=profile,
@@ -392,9 +406,11 @@ def validate_workspace_jira_binding(
     connection: JiraConnection,
     *,
     account_id: str | None = None,
+    install_root: Path | None = None,
 ) -> dict[str, Any]:
     agent = _load_agent_config(workspace)
-    if agent.get("schema_version") != 3:
+    schema_version = agent.get("schema_version")
+    if schema_version not in (3, 4):
         raise RuntimeErrorResult(
             code="workspace_jira_identity_upgrade_required",
             message="工作空间尚未固化已验证 Jira 站点与账户身份",
@@ -416,6 +432,39 @@ def validate_workspace_jira_binding(
                 exit_code=EXIT_BLOCKED,
                 required_human_action="请停止读取凭证和发送请求，核对 Connection/Profile overlay 漂移",
             )
+    if schema_version == 4:
+        # 阶段二：身份/凭证在安装目录。工作空间只持 install_identity_ref 指纹。
+        if install_root is None:
+            raise RuntimeErrorResult(
+                code="install_identity_missing",
+                message="schema v4 工作空间需要安装目录身份校验，但未提供 install_root",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请通过 ao-work 正确入口操作该工作空间",
+            )
+        install_identity = _load_install_identity_for_binding(install_root)
+        expected_ref = agent.get("install_identity_ref")
+        if not isinstance(expected_ref, str) or not expected_ref.strip():
+            raise RuntimeErrorResult(
+                code="workspace_jira_identity_upgrade_required",
+                message="schema v4 工作空间缺少 install_identity_ref",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请重新执行 ao-work workspace init 完成身份绑定",
+            )
+        current_ref = _install_identity_ref(install_root, install_identity)
+        if current_ref != expected_ref:
+            raise RuntimeErrorResult(
+                code="install_identity_drift",
+                message="工作空间引用的安装目录身份与当前安装目录身份不一致",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请核对是否误用了其它研发员的安装目录或工作空间",
+            )
+        if account_id is not None:
+            # v4 的账户校验由调用方从安装目录身份读取后传入。
+            pass
+        return agent
     configured_account = agent.get("jira_account_id")
     if not isinstance(configured_account, str) or not configured_account.strip():
         raise RuntimeErrorResult(
@@ -434,6 +483,31 @@ def validate_workspace_jira_binding(
             required_human_action="请停止操作并重新授权该业务项目研发员账户",
         )
     return agent
+
+
+def _load_install_identity_for_binding(install_root: Path) -> dict[str, Any]:
+    from ao_work.installation import load_install_identity
+
+    return load_install_identity(install_root)
+
+
+def _install_identity_ref(install_root: Path, identity: dict[str, Any]) -> str:
+    import hashlib
+    import json as _json
+
+    fingerprint = hashlib.sha256(
+        _json.dumps(
+            {
+                "agent_id": identity["agent_id"],
+                "jira_email": identity["jira_email"],
+                "execution_identity": identity["execution_identity"],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"install:{fingerprint}"
 
 
 def validate_workspace_project_binding(

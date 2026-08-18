@@ -28,6 +28,12 @@ from ao_work.config import (
     validate_workspace_project_binding,
 )
 from ao_work.config.env import resolve_secret_pair_with_source, update_env_file
+from ao_work.installation import (
+    load_install_credentials,
+    load_install_identity,
+    save_install_credentials,
+    install_user_dir,
+)
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.git_security import github_repository_url_matches
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, write_diagnostic
@@ -76,6 +82,7 @@ class WorkspaceCandidate:
     persist_credentials: bool = False
     source_root_derived: bool = False
     pool_mode: bool = False
+    install_identity_ref: str | None = None
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -208,6 +215,23 @@ class WorkspaceInitializer:
                 f"Project Profile {profile.profile_id} 没有默认仓库映射",
                 "请先在 developer/standards/projects/<profile>/profile.yaml 配置 repositories.default",
             )
+        # 阶段二（D-048）：安装目录身份/凭证为优先源。已配置时不再交互收集；
+        # 未配置时保留存量路径（工作空间收集），不强制迁移。
+        install_identity: dict[str, Any] | None = None
+        try:
+            install_identity = load_install_identity(self.install_root)
+        except RuntimeErrorResult as error:
+            if error.code != "install_identity_missing":
+                raise
+        install_credentials = (
+            load_install_credentials(self.install_root)
+            if install_identity is not None
+            else None
+        )
+        if credentials is None and install_credentials is not None:
+            credentials = install_credentials
+        if execution_identity is None and install_identity is not None:
+            execution_identity = dict(install_identity["execution_identity"])
         if credentials is None:
             agent_path = self.root / ".agentic-ops" / "agent.json"
             if agent_path.is_file():
@@ -300,6 +324,22 @@ class WorkspaceInitializer:
             # 池模式：source_root 语义改为池根（任务工作树在接管时创建）。
             resolved_source = validate_business_source_root(self.root, pool_root)
             pool_mode = True
+        # 安装目录身份指纹（阶段二）：agent.json v4 引用，防错装。
+        install_identity_ref: str | None = None
+        if install_identity is not None:
+            identity_fingerprint = hashlib.sha256(
+                json.dumps(
+                    {
+                        "agent_id": install_identity["agent_id"],
+                        "jira_email": install_identity["jira_email"],
+                        "execution_identity": install_identity["execution_identity"],
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            install_identity_ref = f"install:{identity_fingerprint}"
         return WorkspaceCandidate(
             root=self.root,
             install_root=self.install_root,
@@ -316,6 +356,7 @@ class WorkspaceInitializer:
             persist_credentials=persist_credentials,
             source_root_derived=source_root_derived,
             pool_mode=pool_mode,
+            install_identity_ref=install_identity_ref,
         )
 
     def preflight(
@@ -427,41 +468,69 @@ class WorkspaceInitializer:
                 write_diagnostic("初始化步骤 4/5：安装研发 Skill 并写入授权凭证")
                 self._install_workspace_skills(candidate)
                 if candidate.persist_credentials and candidate.email and candidate.token:
-                    update_env_file(
-                        state_root / ".env",
-                        {
-                            candidate.connection.email_env: candidate.email,
-                            candidate.connection.token_env: candidate.token,
-                        },
-                    )
+                    if candidate.install_identity_ref is not None:
+                        # 阶段二：凭证写入安装目录 user/.env（不再入工作空间）。
+                        save_install_credentials(
+                            candidate.install_root,
+                            candidate.email,
+                            candidate.token,
+                        )
+                    else:
+                        update_env_file(
+                            state_root / ".env",
+                            {
+                                candidate.connection.email_env: candidate.email,
+                                candidate.connection.token_env: candidate.token,
+                            },
+                        )
                 write_diagnostic("初始化步骤 5/5：写入研发员身份与工作空间索引")
                 index_path = self._index_path()
                 previous_index = index_path.read_bytes() if index_path.is_file() else None
                 try:
                     self._write_workspace_index(candidate)
                     agent_path = state_root / "agent.json"
-                    atomic_write_json(
-                        agent_path,
-                        {
-                            "schema_version": 3,
-                            "workplane": "developer",
-                            "agent_id": candidate.agent_id,
-                            "project_profile": candidate.profile.profile_id,
-                            "jira_project": candidate.profile.project_key,
-                            "connection_id": candidate.connection.connection_id,
-                            "jira_base_url": candidate.connection.base_url,
-                            "jira_site": jira_site_identity(candidate.connection.base_url),
-                            "jira_account_id": preflight["jira_identity"],
-                            "source_root": str(candidate.source_root),
-                            "repository": candidate.repository,
-                            **(
-                                {"execution_identity": candidate.execution_identity}
-                                if candidate.execution_identity is not None
-                                else {}
-                            ),
-                            "initialized_at": datetime.now(timezone.utc).isoformat(),
-                        },
-                    )
+                    if candidate.install_identity_ref is not None:
+                        # 阶段二：agent.json schema v4——身份/凭证在安装目录，
+                        # 工作空间只保留项目绑定 + 安装目录身份引用（防错装）。
+                        atomic_write_json(
+                            agent_path,
+                            {
+                                "schema_version": 4,
+                                "workplane": "developer",
+                                "project_profile": candidate.profile.profile_id,
+                                "jira_project": candidate.profile.project_key,
+                                "connection_id": candidate.connection.connection_id,
+                                "jira_base_url": candidate.connection.base_url,
+                                "jira_site": jira_site_identity(candidate.connection.base_url),
+                                "source_root": str(candidate.source_root),
+                                "repository": candidate.repository,
+                                "install_identity_ref": candidate.install_identity_ref,
+                                "initialized_at": datetime.now(timezone.utc).isoformat(),
+                            },
+                        )
+                    else:
+                        atomic_write_json(
+                            agent_path,
+                            {
+                                "schema_version": 3,
+                                "workplane": "developer",
+                                "agent_id": candidate.agent_id,
+                                "project_profile": candidate.profile.profile_id,
+                                "jira_project": candidate.profile.project_key,
+                                "connection_id": candidate.connection.connection_id,
+                                "jira_base_url": candidate.connection.base_url,
+                                "jira_site": jira_site_identity(candidate.connection.base_url),
+                                "jira_account_id": preflight["jira_identity"],
+                                "source_root": str(candidate.source_root),
+                                "repository": candidate.repository,
+                                **(
+                                    {"execution_identity": candidate.execution_identity}
+                                    if candidate.execution_identity is not None
+                                    else {}
+                                ),
+                                "initialized_at": datetime.now(timezone.utc).isoformat(),
+                            },
+                        )
                 except BaseException:
                     if previous_index is None:
                         index_path.unlink(missing_ok=True)

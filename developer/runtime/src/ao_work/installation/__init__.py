@@ -3,6 +3,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import subprocess
+from typing import Any
+
+import yaml
 
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 
@@ -60,7 +63,138 @@ DEVELOPER_FORBIDDEN_DISTRIBUTION_NAMES = {
 
 
 def default_install_root() -> Path:
-    return Path(__file__).resolve().parents[4]
+    # installation/ 是包：__file__ = .../ao_work/installation/__init__.py
+    # parents[0]=installation, [1]=ao_work, [2]=src, [3]=runtime, [4]=developer, [5]=root
+    # 安装根 = managed clone 根（developer 的上级）。
+    return Path(__file__).resolve().parents[5]
+
+
+def install_user_dir(install_root: Path) -> Path:
+    """研发员级配置目录：~/.agentic-ops/user/（D-048 阶段二身份/凭证承载）。"""
+    user_dir = install_root / "user"
+    if user_dir.is_symlink() or (user_dir.exists() and not user_dir.is_dir()):
+        raise _blocked(
+            "install_user_dir_invalid",
+            f"研发员级配置目录被符号链接或非目录占用：{user_dir}",
+            "请修复 ~/.agentic-ops/user 后重试",
+        )
+    return user_dir
+
+
+def load_install_identity(install_root: Path) -> dict[str, Any]:
+    """读取研发员级身份：~/.agentic-ops/user/identity.yaml。
+
+    返回 {agent_id, execution_identity, jira_email}；缺失时抛 install_identity_missing。
+    """
+    user_dir = install_user_dir(install_root)
+    identity_path = user_dir / "identity.yaml"
+    if identity_path.is_symlink() or not identity_path.is_file():
+        raise _blocked(
+            "install_identity_missing",
+            "安装目录缺少研发员身份配置",
+            "请运行 ao-work install identity set 配置 agent_id、Git 执行身份与 Jira 账户",
+        )
+    try:
+        payload = yaml.safe_load(identity_path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError) as error:
+        raise _blocked(
+            "install_identity_invalid",
+            f"研发员身份配置无法解析：{identity_path}",
+            "请修复 ~/.agentic-ops/user/identity.yaml 后重试",
+        ) from error
+    agent_id = payload.get("agent_id")
+    execution_identity = payload.get("execution_identity")
+    jira_email = payload.get("jira_email")
+    if not agent_id or not isinstance(execution_identity, dict) or not jira_email:
+        raise _blocked(
+            "install_identity_invalid",
+            "研发员身份配置缺少 agent_id、execution_identity 或 jira_email",
+            "请运行 ao-work install identity set 重新配置",
+        )
+    required_execution = {
+        "git_author_name",
+        "git_author_email",
+        "git_committer_name",
+        "git_committer_email",
+        "github_actor_login",
+    }
+    if not required_execution.issubset(execution_identity):
+        raise _blocked(
+            "install_identity_invalid",
+            "研发员身份 execution_identity 缺少 Git 身份四字段或 github_actor_login",
+            "请运行 ao-work install identity set 重新配置",
+        )
+    return {
+        "agent_id": agent_id,
+        "execution_identity": execution_identity,
+        "jira_email": jira_email,
+    }
+
+
+def save_install_identity(install_root: Path, identity: dict[str, Any]) -> None:
+    """原子写入研发员级身份：~/.agentic-ops/user/identity.yaml（0600）。"""
+    user_dir = install_user_dir(install_root)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    identity_path = user_dir / "identity.yaml"
+    _atomic_write_private(identity_path, yaml.safe_dump(identity, allow_unicode=True, sort_keys=False))
+
+
+def load_install_credentials(install_root: Path) -> tuple[str, str] | None:
+    """读取研发员级 Jira 凭证：~/.agentic-ops/user/.env（email 已在 identity.yaml）。
+
+    返回 (email, token) 或 None（未配置）。
+    """
+    user_dir = install_user_dir(install_root)
+    env_path = user_dir / ".env"
+    if env_path.is_symlink() or not env_path.is_file():
+        return None
+    try:
+        content = env_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    values: dict[str, str] = {}
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    email = values.get("TAPDATA_JIRA_EMAIL")
+    token = values.get("TAPDATA_JIRA_API_TOKEN")
+    if not email or not token:
+        return None
+    return email, token
+
+
+def save_install_credentials(install_root: Path, email: str, token: str) -> None:
+    """原子写入研发员级 Jira 凭证：~/.agentic-ops/user/.env（0600）。"""
+    user_dir = install_user_dir(install_root)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    env_path = user_dir / ".env"
+    _atomic_write_private(
+        env_path,
+        f"TAPDATA_JIRA_EMAIL={email}\nTAPDATA_JIRA_API_TOKEN={token}\n",
+    )
+
+
+def _atomic_write_private(path: Path, content: str) -> None:
+    """原子写 + 0600 权限（复用既有 update_env_file 思路，独立实现避免跨面）。"""
+    directory = path.parent
+    temporary = directory / f".{path.name}.tmp"
+    try:
+        temporary.write_text(content, encoding="utf-8")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    except OSError as error:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise _blocked(
+            "install_identity_write_failed",
+            f"无法写入研发员级配置：{path}",
+            "请检查 ~/.agentic-ops/user 目录权限后重试",
+        ) from error
 
 
 def validate_install_root() -> Path:

@@ -114,3 +114,8 @@ failure:
   - source_pool_root_invalid
   - source_pool_members_empty
   - source_pool_unshallow_failed
+  - install_identity_missing
+  - install_identity_invalid
+  - install_identity_drift
+  - install_identity_write_failed
+  - install_user_dir_invalid

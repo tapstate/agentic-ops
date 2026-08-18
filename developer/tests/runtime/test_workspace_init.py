@@ -58,7 +58,7 @@ class WorkspaceInitTest(unittest.TestCase):
             with self.subTest(values=values), self.assertRaises(RuntimeErrorResult):
                 build_execution_identity(*values)
 
-    def prepare_install(self, root: Path) -> Path:
+    def prepare_install(self, root: Path, *, with_install_identity: bool = False) -> Path:
         install = root / "install"
         self.install_root = install.resolve()
         connection = install / "developer" / "standards" / "connections" / "tap-cloud.yaml"
@@ -94,6 +94,28 @@ class WorkspaceInitTest(unittest.TestCase):
             f"source_pool_root: {pool_root}\n",
             encoding="utf-8",
         )
+        if with_install_identity:
+            from ao_work.installation import save_install_credentials, save_install_identity
+
+            save_install_identity(
+                install.resolve(),
+                {
+                    "agent_id": "harsen-mini-test-bot",
+                    "jira_email": "developer@example.test",
+                    "execution_identity": {
+                        "git_author_name": "Harsen Test Bot",
+                        "git_author_email": "developer@example.test",
+                        "git_committer_name": "Harsen Test Bot",
+                        "git_committer_email": "developer@example.test",
+                        "github_actor_login": "harsen-mini-test-bot",
+                    },
+                },
+            )
+            save_install_credentials(
+                install.resolve(),
+                "developer@example.test",
+                "token-secret-123",
+            )
         (install / "developer" / "AGENTS.md").write_text(
             "# 研发工作入口\n\n不得加载 maintainer 工作面。\n",
             encoding="utf-8",
@@ -1052,6 +1074,40 @@ class WorkspaceInitTest(unittest.TestCase):
             )
             self.assertEqual(2, exit_code)
             self.assertEqual("workspace_ai_asset_contaminated", payload["code"])
+
+    def test_install_identity_used_for_v4_workspace_without_interactive_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install = self.prepare_install(root, with_install_identity=True)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            exit_code, payload, _, raw = self.run_cli(
+                (
+                    "--workspace-root",
+                    str(workspace),
+                    "workspace",
+                    "init",
+                    "--non-interactive",
+                    "--project",
+                    "tapdata",
+                    "--agent-id",
+                    "harsen-mini-test-bot",
+                    "--confirm",
+                ),
+                stdin=io.StringIO(""),
+            )
+            self.assertEqual(0, exit_code, payload)
+            agent = json.loads(
+                (workspace / ".agentic-ops" / "agent.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(4, agent["schema_version"])
+            self.assertNotIn("jira_account_id", agent)
+            self.assertNotIn("execution_identity", agent)
+            self.assertTrue(str(agent["install_identity_ref"]).startswith("install:"))
+            # 凭证写入安装目录，工作空间无 .env。
+            self.assertFalse((workspace / ".agentic-ops" / ".env").exists())
+            self.assertIn("TAPDATA_JIRA_API_TOKEN=token-secret-123", (install / "user" / ".env").read_text())
+            self.assertNotIn("token-secret-123", raw)
 
     def test_preflight_rejects_developer_rule_entry_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

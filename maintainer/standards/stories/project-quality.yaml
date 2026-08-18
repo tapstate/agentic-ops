@@ -309,7 +309,7 @@ stories:
     protected_paths:
       - developer/bootstrap/install-verify-branch.sh
       - developer/tests/bootstrap/test_install_verify_boundary.sh
-      - developer/runtime/src/ao_work/installation.py
+      - developer/runtime/src/ao_work/installation/
       - developer/tests/runtime/test_installation.py
       - docs/architecture/verification-install-design.md
     acceptance_checks:
