@@ -53,6 +53,7 @@
 | D-045 | 源头维护和业务研发采用两个硬隔离工作面 | 工作面命名为 `maintainer` / `developer`，命令分别为 `ao-maint` / `ao-work`。目录先按工作面再按类型分层；根 AI 入口固定 maintainer，业务项目 AI 入口固定 developer；Runtime、Skill、Rule、授权、配置、状态和测试不得交叉。不得保留 `agentic-cli` 别名或通过 `--mode` 切换；Skill 在标准 frontmatter 的 `metadata.workplane` 声明唯一工作面。 |
 | D-046 | `~/.agentic-ops` 只交付 developer 工作面 | 安装目录采用 developer-only sparse managed clone，不包含 maintainer 运行资产，也不代表研发员；研发员身份和 Jira 凭证保存在各业务项目工作空间。项目维护必须在源头仓库或独立 worktree 中通过 `ao-maint` 完成。 |
 | D-047 | 源码克隆不设超时，用流式进度、停滞提示与阶段日志保障可观测性 | 大仓库 + 慢网络下 `workspace init` 的 `git clone` 无限等待，`--progress` 输出经 stderr 实时转发给用户自行判断快慢；stderr 持续无输出超过 30s 输出停滞提示（只提示、不终止进程）；`Ctrl+C` 中断由初始化回滚清理，不残留污染。该决策修订 2026-08-17 曾选择暂不做的“阶段进度日志（方案 A）”，并取代固定 120s 克隆超时。preflight 的 `ls-remote` 等秒级 git 检查仍保留 20s 超时；失败 JSON 的 `source_checkout_failed` 增加 `stderr_tail` 诊断字段。 |
+| D-048 | 中央克隆池 + Git Worktree 源码管理（多仓库分支推导） | 业务源码从「按工作空间独立克隆」改为「中央克隆池 + 任务级子工作树」。池根 `source_pool_root` 写入安装目录 `~/.agentic-ops/user/config.yaml`（必配），未配置 `workspace init` 阻断 `source_pool_root_invalid`、不做兼容回退；池成员为 `<owner>/<repo>` 普通完整克隆并保留主 checkout，浅克隆认领自动流式 `git fetch --unshallow`。任务接管时按 `<pool_root>/<jira_id>/<from_branch>/<repo>` 用 `git worktree add --detach` 挂出任务级子工作树集（from_branch 含 `/` 替换 `-`），身份用 per-worktree config + 运行时 env 双保险。多仓库通过 `repositories.list` + `analysis_mount` 挂载策略 + `branches` 推导接口（derive_from 主仓库 + 同名默认 + overrides 渐进补充）+ Jira 描述「目标仓库」section 解析，配置缺省可用、渐进补充，不阻塞实现。阶段二把身份/凭证上移安装目录并修订 D-046。 |
 
 ## 2. 当前无需决策事项
 
