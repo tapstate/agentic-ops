@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from ao_maint.cli import build_parser as build_maintainer_parser
@@ -25,7 +26,11 @@ class FakeTransport:
         self.requests: list[tuple[str, str]] = []
         self.comments: list[dict[str, object]] = []
         self.worklogs: list[dict[str, object]] = []
+        self.issues: list[dict[str, object]] = []
         self.issue: dict[str, object] | None = None
+        self.next_issue_id = 1000
+        self.create_meta_payload: dict[str, object] | None = None
+        self.jql_handler: Any | None = None
 
     def request(
         self,
@@ -40,6 +45,18 @@ class FakeTransport:
             return TransportResponse(200, {"accountId": "user-1", "displayName": "维护者"})
         if path == "/rest/api/3/field":
             return TransportResponse(200, [{"id": "summary", "name": "Summary"}])
+        if path == "/rest/api/3/issue":
+            if method == "POST":
+                return self._create_issue(body)
+            raise AssertionError(f"unexpected method: {method} {path}")
+        if path == "/rest/api/3/issue/createmeta":
+            if self.create_meta_payload is not None:
+                return TransportResponse(200, self.create_meta_payload)
+            raise AssertionError("createmeta not configured")
+        if path == "/rest/api/3/search/jql":
+            if self.jql_handler is not None:
+                return TransportResponse(200, self.jql_handler(query or {}))
+            raise AssertionError("jql handler not configured")
         if path.startswith("/rest/api/3/issue/") and path.endswith("/comment"):
             if method == "GET":
                 return TransportResponse(200, {"comments": self.comments, "total": len(self.comments)})
@@ -60,8 +77,79 @@ class FakeTransport:
             )
             return TransportResponse(201, {"id": worklog_id})
         if path.startswith("/rest/api/3/issue/"):
-            return TransportResponse(200, self.issue or {})
+            issue_key = path.removeprefix("/rest/api/3/issue/").split("?")[0]
+            for item in self.issues:
+                if str(item.get("key", "")) == issue_key:
+                    return TransportResponse(200, item)
+            if self.issue is not None:
+                return TransportResponse(200, self.issue)
+            raise AssertionError(f"issue not found: {issue_key}")
         raise AssertionError(f"unexpected request: {method} {path}")
+
+    def _create_issue(self, body: dict[str, object] | None) -> TransportResponse:
+        fields = body.get("fields", {}) if isinstance(body, dict) else {}
+        if not isinstance(fields, dict):
+            raise AssertionError("create issue fields must be dict")
+        self.next_issue_id += 1
+        key = f"AO-{self.next_issue_id}"
+        item: dict[str, object] = {
+            "id": str(self.next_issue_id),
+            "key": key,
+            "fields": dict(fields),
+        }
+        self.issues.append(item)
+        return TransportResponse(201, {"id": str(self.next_issue_id), "key": key})
+
+
+def _ao_createmeta_payload() -> dict[str, object]:
+    return {
+        "projects": [
+            {
+                "key": "AO",
+                "name": "agentic-ops",
+                "issuetypes": [
+                    {
+                        "id": "10100",
+                        "name": "任务",
+                        "subtask": False,
+                        "fields": {
+                            "summary": {"required": True, "name": "摘要"},
+                            "project": {"required": True, "name": "项目"},
+                            "issuetype": {"required": True, "name": "事务类型"},
+                            "reporter": {"required": True, "name": "报告人"},
+                            "description": {"required": False, "name": "描述"},
+                            "customfield_10353": {
+                                "required": True,
+                                "name": "执行模式",
+                                "schema": {
+                                    "type": "option",
+                                    "custom": "com.atlassian.jira.plugin.system.customfieldtypes:select",
+                                    "customId": 10353,
+                                },
+                                "allowedValues": [
+                                    {"value": "研发模式"},
+                                    {"value": "评估模式"},
+                                ],
+                            },
+                        },
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def _adf_text(value: Any) -> str:
+    """提取 ADF 文档的纯文本，用于测试断言。"""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "\n".join(filter(None, (_adf_text(item) for item in value)))
+    if isinstance(value, dict):
+        if isinstance(value.get("text"), str):
+            return value["text"]
+        return _adf_text(value.get("content", []))
+    return ""
 
 
 class MaintainerJiraConfigTest(unittest.TestCase):
@@ -283,6 +371,168 @@ class MaintainerJiraServiceTest(unittest.TestCase):
             service.validate_no_credentials(plan, "user@example.com", "super-secret-token-1")
         self.assertEqual("jira_credential_exposure_forbidden", captured.exception.code)
 
+    def _create_service(self) -> tuple[MaintainerJiraService, FakeTransport]:
+        connection = JiraConnection(
+            connection_id="tapdata-cloud",
+            base_url="https://tapdata.atlassian.net",
+            email_env="TAPDATA_JIRA_EMAIL",
+            token_env="TAPDATA_JIRA_API_TOKEN",
+        )
+        transport = FakeTransport()
+        transport.create_meta_payload = _ao_createmeta_payload()
+        transport.jql_handler = self._make_jql_handler(transport)
+        client = JiraClient(connection, transport)
+        return MaintainerJiraService(client), transport
+
+    @staticmethod
+    def _make_jql_handler(transport: FakeTransport):
+        def handler(query: dict[str, str] | None) -> dict[str, object]:
+            # 简化 JQL：返回 issues 中 description 含幂等词的记录
+            matches = []
+            for item in transport.issues:
+                fields = item.get("fields", {})
+                description = fields.get("description", {}) if isinstance(fields, dict) else {}
+                text = _adf_text(description)
+                if "agentic-ops-maintainer-idempotency" in text:
+                    matches.append(item)
+            return {"issues": matches, "total": len(matches)}
+
+        return handler
+
+    def test_create_issue_roundtrip(self) -> None:
+        service, transport = self._create_service()
+        plan = service.plan_create_issue(
+            "AO",
+            "idem-c1",
+            maintainer_run_id="maint-test-1",
+            issuetype_name="任务",
+            summary="新增维护面建卡能力",
+            description="为维护面新增 Jira 建卡能力。",
+            assignee="712020:b86ae2c3-9527-4dad-9b5c-d1a79a9180f0",
+            extra_fields={"customfield_10353": "研发模式"},
+        )
+        self.assertEqual("create_or_update", plan.action)
+        self.assertEqual("AO", plan.issue_key)
+        result = service.apply_create_issue(plan, plan.plan_id)
+        self.assertEqual(True, result["created"])
+        self.assertEqual("AO-1001", result["external_id"])
+        # apply 时实际创建了任务
+        self.assertEqual(1, len(transport.issues))
+        created_fields = transport.issues[0]["fields"]
+        assert isinstance(created_fields, dict)
+        self.assertEqual("新增维护面建卡能力", created_fields["summary"])
+        self.assertEqual({"value": "研发模式"}, created_fields["customfield_10353"])
+        readback = service.readback_create_issue(plan, "AO-1001")
+        self.assertEqual("AO-1001", readback["external_id"])
+        self.assertEqual(True, readback["created"])
+
+    def test_create_issue_idempotent_no_op(self) -> None:
+        service, transport = self._create_service()
+        plan = service.plan_create_issue(
+            "AO",
+            "idem-c2",
+            maintainer_run_id="maint-test-1",
+            issuetype_name="任务",
+            summary="新增维护面建卡能力",
+            description="为维护面新增 Jira 建卡能力。",
+            extra_fields={"customfield_10353": "研发模式"},
+        )
+        service.apply_create_issue(plan, plan.plan_id)
+        # 幂等：相同幂等键重新 plan 应识别已有任务
+        plan2 = service.plan_create_issue(
+            "AO",
+            "idem-c2",
+            maintainer_run_id="maint-test-1",
+            issuetype_name="任务",
+            summary="新增维护面建卡能力",
+            description="为维护面新增 Jira 建卡能力。",
+            extra_fields={"customfield_10353": "研发模式"},
+        )
+        self.assertEqual("no_op", plan2.action)
+        self.assertEqual("AO-1001", plan2.existing_external_id)
+        result = service.apply_create_issue(plan2, plan2.plan_id)
+        self.assertEqual(False, result["created"])
+        self.assertEqual("AO-1001", result["external_id"])
+        # 没有重复建卡
+        self.assertEqual(1, len(transport.issues))
+
+    def test_create_issue_requires_chinese_summary(self) -> None:
+        service, _transport = self._create_service()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.plan_create_issue(
+                "AO",
+                "idem-c3",
+                maintainer_run_id="maint-test-1",
+                issuetype_name="任务",
+                summary="english only summary",
+                description="",
+            )
+        self.assertEqual("chinese_content_required", captured.exception.code)
+
+    def test_create_issue_missing_required_field(self) -> None:
+        service, _transport = self._create_service()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.plan_create_issue(
+                "AO",
+                "idem-c4",
+                maintainer_run_id="maint-test-1",
+                issuetype_name="任务",
+                summary="缺少必填字段",
+                description="",
+            )
+        self.assertEqual("jira_create_required_fields_missing", captured.exception.code)
+        self.assertIn("customfield_10353", captured.exception.details["required_fields"])
+
+    def test_create_issue_unknown_field_rejected(self) -> None:
+        service, _transport = self._create_service()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.plan_create_issue(
+                "AO",
+                "idem-c5",
+                maintainer_run_id="maint-test-1",
+                issuetype_name="任务",
+                summary="未知字段被拒绝",
+                description="",
+                extra_fields={
+                    "customfield_10353": "研发模式",
+                    "customfield_99999": "研发模式",
+                },
+            )
+        self.assertEqual("jira_create_unknown_field", captured.exception.code)
+
+    def test_create_issue_rejects_invalid_project_key(self) -> None:
+        service, _transport = self._create_service()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.plan_create_issue(
+                "AO-1",
+                "idem-c6",
+                maintainer_run_id="maint-test-1",
+                issuetype_name="任务",
+                summary="非法项目 Key",
+                description="",
+                extra_fields={"customfield_10353": "研发模式"},
+            )
+        self.assertEqual("invalid_project_key", captured.exception.code)
+
+    def test_create_issue_meta_changed_blocks_apply(self) -> None:
+        service, transport = self._create_service()
+        plan = service.plan_create_issue(
+            "AO",
+            "idem-c7",
+            maintainer_run_id="maint-test-1",
+            issuetype_name="任务",
+            summary="createmeta 变化阻断 apply",
+            description="",
+            extra_fields={"customfield_10353": "研发模式"},
+        )
+        # 篡改 createmeta 的 issuetype id，模拟 Jira 侧类型变化
+        payload = _ao_createmeta_payload()
+        payload["projects"][0]["issuetypes"][0]["id"] = "99999"
+        transport.create_meta_payload = payload
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.apply_create_issue(plan, plan.plan_id)
+        self.assertEqual("jira_create_meta_changed", captured.exception.code)
+
 
 class MaintainerJiraCliTest(unittest.TestCase):
     def test_ao_jira_parser_registered_and_disjoint_from_developer(self) -> None:
@@ -296,6 +546,72 @@ class MaintainerJiraCliTest(unittest.TestCase):
         self.assertIn("jira", commands)
         developer_commands = {"workspace", "auth", "task", "report"}
         self.assertEqual(set(), commands & developer_commands)
+
+    def test_create_parser_registered_with_plan_apply_readback(self) -> None:
+        parser = build_maintainer_parser()
+        # jira create plan 参数
+        args = parser.parse_args(
+            [
+                "jira",
+                "create",
+                "plan",
+                "--project-key",
+                "AO",
+                "--issuetype",
+                "任务",
+                "--summary",
+                "测试建卡",
+                "--description-file",
+                "desc.md",
+                "--assignee",
+                "712020:b86ae2c3-9527-4dad-9b5c-d1a79a9180f0",
+                "--field",
+                "customfield_10353=研发模式",
+                "--idempotency-key",
+                "idem-x",
+                "--plan-file",
+                "create.json",
+            ]
+        )
+        self.assertEqual("create", args.command)
+        self.assertEqual("plan", args.action)
+        self.assertEqual("AO", args.project_key)
+        self.assertEqual("任务", args.issuetype)
+        self.assertEqual(["customfield_10353=研发模式"], args.field)
+        # jira create apply 参数
+        args_apply = parser.parse_args(
+            [
+                "jira",
+                "create",
+                "apply",
+                "--plan-file",
+                "create.json",
+                "--confirm-plan-id",
+                "plan-abc",
+                "--authorization-reference",
+                "user-confirmation:AO-11:plan-abc",
+            ]
+        )
+        self.assertEqual("apply", args_apply.action)
+        self.assertFalse(hasattr(args_apply, "issue_key"))
+        # jira create readback 需要真实 issue key
+        args_readback = parser.parse_args(
+            [
+                "jira",
+                "create",
+                "readback",
+                "--issue-key",
+                "AO-99",
+                "--idempotency-key",
+                "idem-x",
+                "--plan-file",
+                "create.json",
+                "--confirm-plan-id",
+                "plan-abc",
+            ]
+        )
+        self.assertEqual("readback", args_readback.action)
+        self.assertEqual("AO-99", args_readback.issue_key)
 
     def test_apply_does_not_require_issue_key_argument(self) -> None:
         """apply 只从计划文件读取 Issue 绑定，不需要（也没有）--issue-key 参数。"""

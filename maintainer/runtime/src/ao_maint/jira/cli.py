@@ -49,6 +49,32 @@ def configure_jira_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
     inspect_parser = jira_commands.add_parser("inspect")
     inspect_parser.add_argument("--issue-key", required=True)
 
+    create_parser = jira_commands.add_parser("create")
+    create_actions = create_parser.add_subparsers(dest="action", required=True)
+    create_plan = create_actions.add_parser("plan")
+    create_plan.add_argument("--project-key", required=True)
+    create_plan.add_argument("--issuetype", required=True)
+    create_plan.add_argument("--summary", required=True)
+    create_plan.add_argument("--description-file")
+    create_plan.add_argument("--assignee")
+    create_plan.add_argument("--field", action="append", default=[])
+    create_plan.add_argument("--idempotency-key", required=True)
+    create_plan.add_argument("--run-id")
+    create_plan.add_argument("--plan-file", required=True)
+    create_apply = create_actions.add_parser("apply")
+    create_apply.add_argument("--plan-file", required=True)
+    create_apply.add_argument("--confirm-plan-id", required=True)
+    create_apply.add_argument("--authorization-reference", required=True)
+    create_apply.add_argument(
+        "--decision-summary",
+        default="项目维护者确认 Jira 写入计划",
+    )
+    create_readback = create_actions.add_parser("readback")
+    create_readback.add_argument("--issue-key", required=True)
+    create_readback.add_argument("--idempotency-key", required=True)
+    create_readback.add_argument("--plan-file", required=True)
+    create_readback.add_argument("--confirm-plan-id", required=True)
+
     comment_parser = jira_commands.add_parser("comment")
     _configure_write_actions(comment_parser, "comment")
 
@@ -139,7 +165,24 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
             source_root, args.plan_file, must_exist=False
         )
         run_id = args.run_id or _generate_run_id()
-        if args.command == "comment":
+        if args.command == "create":
+            description = ""
+            if args.description_file:
+                description = _read_input_file(
+                    source_root, args.description_file, "Jira 任务描述文件"
+                )
+            extra_fields = _parse_extra_fields(args.field)
+            plan = service.plan_create_issue(
+                args.project_key,
+                args.idempotency_key,
+                maintainer_run_id=run_id,
+                issuetype_name=args.issuetype,
+                summary=args.summary,
+                description=description,
+                assignee=args.assignee,
+                extra_fields=extra_fields,
+            )
+        elif args.command == "comment":
             content = _read_input_file(source_root, args.content_file, "Jira 评论内容文件")
             plan = service.plan_comment(
                 args.issue_key,
@@ -212,6 +255,15 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
                     "with_comment": bool(plan.payload.get("comment")),
                 }
             )
+        elif args.command == "create":
+            result.update(
+                {
+                    "project_key": plan.payload.get("project_key"),
+                    "issuetype_name": plan.payload.get("issuetype_name"),
+                    "summary": plan.payload.get("summary"),
+                    "assignee": plan.payload.get("assignee"),
+                }
+            )
         return result
 
     plan_path, path_issue_key, plan = _read_plan_candidate(source_root, args.plan_file)
@@ -244,6 +296,8 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
             result = service.apply_comment(plan, args.confirm_plan_id)
         elif args.command == "transition":
             result = service.apply_transition(plan, args.confirm_plan_id)
+        elif args.command == "create":
+            result = service.apply_create_issue(plan, args.confirm_plan_id)
         else:
             result = service.apply_worklog(plan, args.confirm_plan_id)
         return {
@@ -256,7 +310,19 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
         }
 
     # readback
-    if (
+    if args.command == "create":
+        if (
+            not args.issue_key.startswith(str(plan.issue_key) + "-")
+            or args.idempotency_key != plan.idempotency_key
+        ):
+            raise RuntimeErrorResult(
+                code="jira_write_plan_mismatch",
+                message="Jira 回读输入与写入计划不一致",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请使用 apply 输出绑定的 Issue、幂等键和计划文件",
+            )
+    elif (
         args.issue_key != plan.issue_key
         or args.idempotency_key != plan.idempotency_key
     ):
@@ -279,6 +345,8 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
         result = service.readback_comment(plan)
     elif args.command == "transition":
         result = service.readback_transition(plan)
+    elif args.command == "create":
+        result = service.readback_create_issue(plan, args.issue_key)
     else:
         result = service.readback_worklog(plan)
     return {
@@ -557,6 +625,33 @@ def _read_input_file(source_root: Path, value: str, label: str) -> str:
             exit_code=EXIT_BLOCKED,
             required_human_action="请提供 UTF-8 文本文件",
         ) from error
+
+
+def _parse_extra_fields(values: list[str]) -> dict[str, Any]:
+    """解析 --field KEY=VALUE 参数为字典。
+
+    值为合法 JSON 时按 JSON 解析（如 '{"value": "研发模式"}'），
+    否则作为普通字符串透传（如 customfield_10353=研发模式）。
+    """
+    result: dict[str, Any] = {}
+    for raw in values:
+        key, separator, value = raw.partition("=")
+        if not separator or not key.strip():
+            raise _input_error(
+                "invalid_extra_field", "--field 必须是 KEY=VALUE 格式"
+            )
+        parsed: Any = value
+        if value.strip().startswith(("{", "[", '"')):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                parsed = value
+        if key.strip() in result:
+            raise _input_error(
+                "invalid_extra_field", f"--field 重复指定字段 {key.strip()}"
+            )
+        result[key.strip()] = parsed
+    return result
 
 
 def _read_included_work(content: str) -> list[dict[str, object]]:

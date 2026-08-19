@@ -173,6 +173,105 @@ class JiraClient:
             fields=raw_fields,
         )
 
+    def create_issue(self, fields: dict[str, Any]) -> dict[str, str]:
+        """创建 Jira 任务，返回 {id, key}；失败抛异常（调用方负责回读验证）。"""
+        payload = self._request(
+            "POST",
+            "/rest/api/3/issue",
+            body={"fields": fields},
+        )
+        if not isinstance(payload, dict):
+            raise RuntimeErrorResult(
+                code="jira_create_response_invalid",
+                message="Jira 创建任务返回了无法识别的响应",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请回读 Jira 确认任务是否已创建，不要重复写入",
+            )
+        issue_id = str(payload.get("id", "")).strip()
+        key = str(payload.get("key", "")).strip()
+        if not issue_id or not key:
+            raise RuntimeErrorResult(
+                code="jira_create_response_invalid",
+                message="Jira 创建任务响应缺少 id 或 key",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请回读 Jira 确认任务是否已创建，不要重复写入",
+            )
+        return {"id": issue_id, "key": key}
+
+    def search_issues(
+        self, jql: str, fields: list[str] | None = None
+    ) -> list[dict[str, Any]]:
+        """JQL 搜索任务，返回原始 issue 对象列表（含 key/fields）。"""
+        payload = self._request(
+            "GET",
+            "/rest/api/3/search/jql",
+            query={
+                "jql": jql,
+                "fields": ",".join(fields or ["summary", "description"]),
+                "maxResults": "50",
+            },
+        )
+        raw = payload.get("issues", []) if isinstance(payload, dict) else []
+        return [item for item in raw if isinstance(item, dict)]
+
+    def create_meta(
+        self, project_key: str, issuetype_name: str
+    ) -> dict[str, Any]:
+        """查询项目+事务类型的 createmeta，返回该类型的必填字段与 schema。
+
+        返回形如 {"issuetype_id": ..., "issuetype_name": ..., "required": {field_id: name}, "fields": {field_id: schema}}。
+        """
+        payload = self._request(
+            "GET",
+            "/rest/api/3/issue/createmeta",
+            query={
+                "projectKeys": project_key,
+                "expand": "projects.issuetypes.fields",
+            },
+        )
+        projects = payload.get("projects", []) if isinstance(payload, dict) else []
+        for project in projects:
+            if not isinstance(project, dict):
+                continue
+            if str(project.get("key", "")) != project_key:
+                continue
+            for issuetype in project.get("issuetypes", []):
+                if not isinstance(issuetype, dict):
+                    continue
+                if str(issuetype.get("name", "")) != issuetype_name:
+                    continue
+                fields_raw = issuetype.get("fields", {})
+                if not isinstance(fields_raw, dict):
+                    fields_raw = {}
+                required: dict[str, str] = {}
+                schemas: dict[str, dict[str, Any]] = {}
+                for field_id, spec in fields_raw.items():
+                    if not isinstance(spec, dict):
+                        continue
+                    schemas[field_id] = spec
+                    if spec.get("required"):
+                        required[field_id] = str(spec.get("name", field_id))
+                return {
+                    "issuetype_id": str(issuetype.get("id", "")),
+                    "issuetype_name": str(issuetype.get("name", "")),
+                    "required": required,
+                    "fields": schemas,
+                }
+        raise RuntimeErrorResult(
+            code="jira_create_meta_missing",
+            message=(
+                f"Jira 项目 {project_key} 下未找到事务类型「{issuetype_name}」，"
+                "或 createmeta 查询结果不含该项目"
+            ),
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action=(
+                f"请核对项目 Key 与事务类型名称，可用 ao-maint jira create plan 前先确认"
+            ),
+        )
+
     def comments(self, issue_key: str) -> list[JiraComment]:
         items = self._paginated(
             f"/rest/api/3/issue/{urllib.parse.quote(issue_key, safe='')}/comment",
