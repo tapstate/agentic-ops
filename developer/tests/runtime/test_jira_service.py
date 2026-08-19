@@ -766,20 +766,20 @@ class JiraSearchJqlTest(unittest.TestCase):
 
 class WithForcedOrderTest(unittest.TestCase):
     def test_strips_profile_order_by_and_appends_forced_order(self) -> None:
-        from ao_work.jira.cli import _with_forced_order
+        from ao_work.jira.client import with_forced_order
 
         self.assertEqual(
             "project = TAP ORDER BY priority DESC, updated ASC",
-            _with_forced_order(
+            with_forced_order(
                 "project = TAP ORDER BY updated DESC",
                 "priority DESC, updated ASC",
             ),
         )
 
     def test_appends_order_when_profile_has_none(self) -> None:
-        from ao_work.jira.cli import _with_forced_order
+        from ao_work.jira.client import with_forced_order
 
         self.assertEqual(
             "assignee = currentUser() ORDER BY priority DESC",
-            _with_forced_order("assignee = currentUser()", "priority DESC"),
+            with_forced_order("assignee = currentUser()", "priority DESC"),
         )
