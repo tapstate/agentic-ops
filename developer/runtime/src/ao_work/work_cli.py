@@ -23,6 +23,7 @@ from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.task_gate import execute_task_gate
 from ao_work.task_start import execute_task_start
 from ao_work.task_takeover import execute_task_takeover
+from ao_work.task_resume import execute_task_resume
 from ao_work.task_run import configure_task_run_parser, execute_task_run
 from ao_work.workspace import DEVELOPER, resolve_developer_workspace
 from ao_work.workspace_security import read_workspace_outbound_file
@@ -83,6 +84,10 @@ def build_parser() -> argparse.ArgumentParser:
     task_takeover.add_argument("--agent-id", required=True)
     task_takeover.add_argument("--authorization-reference", required=True)
     task_takeover.add_argument("--transition-comment", default=None)
+    task_resume = task_commands.add_parser("resume")
+    resume_target = task_resume.add_mutually_exclusive_group()
+    resume_target.add_argument("--issue-key")
+    resume_target.add_argument("--agentic-run-id")
     task_inspect = task_commands.add_parser("inspect")
     task_inspect.add_argument("--issue-key", required=True)
 
@@ -158,6 +163,15 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             agent_id=args.agent_id,
             authorization_reference=args.authorization_reference,
             transition_comment=args.transition_comment,
+        )
+        return success(operation, workplane=workspace.workplane, **state)
+    if args.group == "task" and args.command == "resume":
+        state = execute_task_resume(
+            workspace,
+            install_root,
+            store,
+            issue_key=args.issue_key,
+            agentic_run_id=args.agentic_run_id,
         )
         return success(operation, workplane=workspace.workplane, **state)
     if args.group == "task" and args.command in {"intake", "solution"}:
