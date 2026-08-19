@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -10,6 +11,7 @@ from unittest import mock
 from ao_work.output import RuntimeErrorResult
 from ao_work.task_worktree import (
     TaskWorktreePlan,
+    _run_git,
     plan_task_worktrees,
     prepare_task_worktrees,
     resolve_from_branch,
@@ -334,6 +336,48 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
         # 第一个仓库的 worktree 应被回滚（目录不存在）。
         for entry in plan.entries:
             self.assertFalse(entry.worktree_dir.exists())
+
+
+class RunGitRealSubprocessRegressionTest(unittest.TestCase):
+    """回归：_run_git 必须补 git 可执行名前缀，经真实 subprocess 验证。
+
+    2026-08-19 实踩（AO-25）：_run_git 曾裸透传命令列表，而全部调用点都以
+    ["-C", ...] 开头，缺 git 前缀导致 subprocess 把 "-C" 当可执行文件，
+    FileNotFoundError → runtime_failed（task start/takeover 池模式主链路崩溃）。
+    既有测试全部注入 mock runner、从不经真实 subprocess，故未拦截。
+
+    本测试用 PATH 假 git + 真实 subprocess：若实现退化为裸透传，
+    subprocess 会把 "-C" 当程序执行而失败；补前缀后假 git 执行并把收到的
+    argv 打到 stdout，断言首个参数是 "-C"（即 argv[0]=git 已补上）。
+    """
+
+    def test_run_git_prepends_git_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            bindir = Path(tmp) / "fakebin"
+            bindir.mkdir()
+            script = bindir / "git"
+            script.write_text(
+                "#!/bin/sh\n"
+                'printf "%s\\n" "$*"\n'
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            script.chmod(0o755)
+            original_path = os.environ.get("PATH", "")
+            os.environ["PATH"] = f"{bindir}:{original_path}"
+            try:
+                result = _run_git(
+                    ["-C", tmp, "rev-parse", "--abbrev-ref", "HEAD"],
+                    timeout=30,
+                )
+            finally:
+                os.environ["PATH"] = original_path
+        self.assertEqual(0, result.returncode)
+        recorded = result.stdout.strip()
+        parts = recorded.split()
+        # 首个参数必须是 -C（git 前缀已由 _run_git 补上，subprocess 实际执行 git）。
+        self.assertEqual("-C", parts[0])
+        self.assertIn(tmp, parts)
 
 
 if __name__ == "__main__":

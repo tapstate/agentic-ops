@@ -262,7 +262,7 @@ def _run_git(
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        command,
+        ["git", *command],
         capture_output=True,
         text=True,
         timeout=timeout,
