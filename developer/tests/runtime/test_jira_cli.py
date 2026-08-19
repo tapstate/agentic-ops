@@ -248,6 +248,107 @@ repositories:
                 authorization_reference, json.loads(decisions[0])["reference"]
             )
 
+    def test_cli_create_plan_apply_readback(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            install, workspace = self.prepare(Path(temporary))
+            common = (
+                "--workspace-root",
+                str(workspace),
+            )
+            transport = FakeTransport()
+            transport.create_meta_payload = {
+                "projects": [
+                    {
+                        "key": "TAP",
+                        "name": "tapdata",
+                        "issuetypes": [
+                            {
+                                "id": "10100",
+                                "name": "任务",
+                                "subtask": False,
+                                "fields": {
+                                    "summary": {"required": True, "name": "摘要"},
+                                    "project": {"required": True, "name": "项目"},
+                                    "issuetype": {"required": True, "name": "事务类型"},
+                                    "reporter": {"required": True, "name": "报告人"},
+                                    "description": {"required": False, "name": "描述"},
+                                },
+                            }
+                        ],
+                    }
+                ]
+            }
+            env_file = workspace / ".agentic-ops" / ".env"
+            env_file.parent.mkdir(parents=True, exist_ok=True)
+            env_file.write_text(
+                "TEST_JIRA_EMAIL=owner@example.test\nTEST_JIRA_TOKEN=secret-token\n",
+                encoding="utf-8",
+            )
+            desc = workspace / "desc.md"
+            desc.write_text("为研发面新增 Jira 建卡能力。\n", encoding="utf-8")
+            plan_file = ".agentic-ops/tasks/TAP/runs/run-create/jira-plans/create.json"
+            with mock.patch(
+                "ao_work.jira.cli.UrllibJiraTransport", return_value=transport
+            ):
+                planned = self.run_cli(
+                    *common,
+                    "jira",
+                    "create",
+                    "plan",
+                    "--project-key",
+                    "TAP",
+                    "--issuetype",
+                    "任务",
+                    "--summary",
+                    "新增建卡能力",
+                    "--description-file",
+                    "desc.md",
+                    "--idempotency-key",
+                    "idem-create",
+                    "--run-id",
+                    "run-create",
+                    "--plan-file",
+                    plan_file,
+                )
+                self.assertEqual(0, planned[0])
+                plan_id = str(planned[1]["plan_id"])
+                authorization_reference = str(
+                    planned[1]["authorization_user_confirmation_reference"]
+                )
+                applied = self.run_cli(
+                    *common,
+                    "jira",
+                    "create",
+                    "apply",
+                    "--plan-file",
+                    plan_file,
+                    "--confirm-plan-id",
+                    plan_id,
+                    "--authorization-reference",
+                    authorization_reference,
+                    "--decision-summary",
+                    "确认建卡",
+                )
+                self.assertEqual(0, applied[0])
+                issue_key = str(applied[1]["external_id"])
+                readback = self.run_cli(
+                    *common,
+                    "jira",
+                    "create",
+                    "readback",
+                    "--issue-key",
+                    issue_key,
+                    "--idempotency-key",
+                    "idem-create",
+                    "--plan-file",
+                    plan_file,
+                    "--confirm-plan-id",
+                    plan_id,
+                )
+                self.assertEqual(0, readback[0])
+                self.assertEqual(issue_key, str(readback[1]["external_id"]))
+                self.assertTrue(applied[1]["created"])
+
     def test_apply_rejects_unbound_authorization_before_decision_or_jira_write(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             install, workspace = self.prepare(Path(temporary))

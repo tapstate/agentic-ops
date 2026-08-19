@@ -28,6 +28,9 @@ class FakeTransport:
         self.queries: list[dict[str, str]] = []
         self.search_issues: list[dict[str, Any]] = []
         self.search_total: int | None = None
+        self.created_issues: list[dict[str, Any]] = []
+        self.create_meta_payload: dict[str, Any] | None = None
+        self.next_issue_id = 10000
 
     def request(
         self,
@@ -53,6 +56,21 @@ class FakeTransport:
                     "maxResults": 50,
                 },
             )
+        if path == "/rest/api/3/issue/createmeta":
+            if self.create_meta_payload is not None:
+                return TransportResponse(200, self.create_meta_payload)
+            return TransportResponse(200, {"projects": []})
+        if path == "/rest/api/3/issue":
+            if method == "POST":
+                fields = body.get("fields", {}) if isinstance(body, dict) else {}
+                if not isinstance(fields, dict):
+                    return TransportResponse(400, {"errorMessages": ["invalid fields"]})
+                self.next_issue_id += 1
+                key = f"TAP-{self.next_issue_id}"
+                item: dict[str, Any] = {"id": str(self.next_issue_id), "key": key, "fields": dict(fields)}
+                self.created_issues.append(item)
+                return TransportResponse(201, {"id": str(self.next_issue_id), "key": key})
+            return TransportResponse(405, None)
         if path == "/rest/api/3/field":
             return TransportResponse(200, self.fields)
         if "/comment/" in path and method == "GET":
@@ -98,6 +116,10 @@ class FakeTransport:
             self.description = body["fields"]["description"]
             return TransportResponse(204, None)
         if "/rest/api/3/issue/" in path and method == "GET":
+            issue_key = path.removeprefix("/rest/api/3/issue/").split("?")[0]
+            for item in self.created_issues:
+                if str(item.get("key", "")) == issue_key:
+                    return TransportResponse(200, item)
             return TransportResponse(
                 200,
                 {
@@ -418,6 +440,150 @@ class JiraServiceTest(unittest.TestCase):
             agentic_run_id="run-1",
         )
         self.assertEqual("create_or_update", plan.action)
+
+    def _create_service_with_meta(self) -> tuple[JiraService, FakeTransport]:
+        transport = FakeTransport()
+        transport.create_meta_payload = {
+            "projects": [
+                {
+                    "key": "TAP",
+                    "name": "tapdata",
+                    "issuetypes": [
+                        {
+                            "id": "10100",
+                            "name": "任务",
+                            "subtask": False,
+                            "fields": {
+                                "summary": {"required": True, "name": "摘要"},
+                                "project": {"required": True, "name": "项目"},
+                                "issuetype": {"required": True, "name": "事务类型"},
+                                "reporter": {"required": True, "name": "报告人"},
+                                "description": {"required": False, "name": "描述"},
+                                "customfield_10092": {
+                                    "required": True,
+                                    "name": "问题分析",
+                                    "schema": {
+                                        "type": "string",
+                                        "custom": "com.atlassian.jira.plugin.system.customfieldtypes:textarea",
+                                    },
+                                },
+                            },
+                        }
+                    ],
+                }
+            ]
+        }
+        service = JiraService(profile(), JiraClient(profile(), transport))
+        return service, transport
+
+    def test_create_issue_roundtrip(self) -> None:
+        service, transport = self._create_service_with_meta()
+        plan = service.plan_create_issue(
+            "TAP",
+            "idem-c1",
+            agentic_run_id="run-1",
+            issuetype_name="任务",
+            summary="新增建卡能力",
+            description="为研发面新增 Jira 建卡能力。",
+            assignee="owner-1",
+            extra_fields={"customfield_10092": "问题分析内容"},
+        )
+        self.assertEqual("create_or_update", plan.action)
+        self.assertEqual("TAP", plan.issue_key)
+        result = service.apply_create_issue(
+            plan,
+            plan.plan_id,
+            begin_create=self._begin_create,
+        )
+        self.assertEqual(True, result["created"])
+        self.assertEqual("TAP-10001", result["external_id"])
+        self.assertEqual(1, len(transport.created_issues))
+        created_fields = transport.created_issues[0]["fields"]
+        assert isinstance(created_fields, dict)
+        self.assertEqual("新增建卡能力", created_fields["summary"])
+        self.assertEqual("问题分析内容", created_fields["customfield_10092"])
+        readback = service.readback_create_issue(
+            plan,
+            "TAP-10001",
+            attempt=self._begin_create(plan),
+        )
+        self.assertEqual("TAP-10001", readback["external_id"])
+        self.assertEqual(True, readback["created"])
+
+    def test_create_issue_idempotent_no_op(self) -> None:
+        service, transport = self._create_service_with_meta()
+        plan = service.plan_create_issue(
+            "TAP",
+            "idem-c2",
+            agentic_run_id="run-1",
+            issuetype_name="任务",
+            summary="新增建卡能力",
+            description="为研发面新增 Jira 建卡能力。",
+            extra_fields={"customfield_10092": "问题分析内容"},
+        )
+        service.apply_create_issue(plan, plan.plan_id, begin_create=self._begin_create)
+        # 模拟 JQL 幂等复查命中已创建任务
+        created = transport.created_issues[0]
+        transport.search_issues = [created]
+        plan2 = service.plan_create_issue(
+            "TAP",
+            "idem-c2",
+            agentic_run_id="run-1",
+            issuetype_name="任务",
+            summary="新增建卡能力",
+            description="为研发面新增 Jira 建卡能力。",
+            extra_fields={"customfield_10092": "问题分析内容"},
+        )
+        self.assertEqual("no_op", plan2.action)
+        self.assertEqual("TAP-10001", plan2.existing_external_id)
+        result = service.apply_create_issue(plan2, plan2.plan_id)
+        self.assertEqual(False, result["created"])
+        self.assertEqual(1, len(transport.created_issues))
+
+    def test_create_issue_requires_chinese_summary(self) -> None:
+        service, _transport = self._create_service_with_meta()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.plan_create_issue(
+                "TAP",
+                "idem-c3",
+                agentic_run_id="run-1",
+                issuetype_name="任务",
+                summary="english only",
+                description="",
+                extra_fields={"customfield_10092": "内容"},
+            )
+        self.assertEqual("jira_visible_content_not_chinese", captured.exception.code)
+
+    def test_create_issue_missing_required_field(self) -> None:
+        service, _transport = self._create_service_with_meta()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.plan_create_issue(
+                "TAP",
+                "idem-c4",
+                agentic_run_id="run-1",
+                issuetype_name="任务",
+                summary="缺少必填字段",
+                description="",
+            )
+        self.assertEqual("jira_create_required_fields_missing", captured.exception.code)
+        self.assertIn("customfield_10092", captured.exception.details["required_fields"])
+
+    def test_create_issue_unknown_field_rejected(self) -> None:
+        service, _transport = self._create_service_with_meta()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.plan_create_issue(
+                "TAP",
+                "idem-c5",
+                agentic_run_id="run-1",
+                issuetype_name="任务",
+                summary="未知字段被拒绝",
+                description="",
+                extra_fields={
+                    "customfield_10092": "内容",
+                    "customfield_99999": "内容",
+                },
+            )
+        self.assertEqual("jira_create_unknown_field", captured.exception.code)
 
     def test_comment_same_key_and_content_from_old_run_cannot_satisfy_new_run(self) -> None:
         old_plan = self.service.plan_comment(

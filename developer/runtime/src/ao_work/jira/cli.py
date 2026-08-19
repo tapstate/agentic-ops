@@ -6,6 +6,7 @@ import os
 import re
 import stat
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,32 @@ def configure_jira_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
 
     transition_parser = jira_commands.add_parser("transition")
     _configure_write_actions(transition_parser, "transition")
+
+    create_parser = jira_commands.add_parser("create")
+    create_actions = create_parser.add_subparsers(dest="action", required=True)
+    create_plan = create_actions.add_parser("plan")
+    create_plan.add_argument("--project-key", required=True)
+    create_plan.add_argument("--issuetype", required=True)
+    create_plan.add_argument("--summary", required=True)
+    create_plan.add_argument("--description-file")
+    create_plan.add_argument("--assignee")
+    create_plan.add_argument("--field", action="append", default=[])
+    create_plan.add_argument("--idempotency-key", required=True)
+    create_plan.add_argument("--run-id")
+    create_plan.add_argument("--plan-file", required=True)
+    create_apply = create_actions.add_parser("apply")
+    create_apply.add_argument("--plan-file", required=True)
+    create_apply.add_argument("--confirm-plan-id", required=True)
+    create_apply.add_argument("--authorization-reference", required=True)
+    create_apply.add_argument(
+        "--decision-summary",
+        default="研发工程师确认 Jira 写入计划",
+    )
+    create_readback = create_actions.add_parser("readback")
+    create_readback.add_argument("--issue-key", required=True)
+    create_readback.add_argument("--idempotency-key", required=True)
+    create_readback.add_argument("--plan-file", required=True)
+    create_readback.add_argument("--confirm-plan-id", required=True)
 
 
 def _configure_write_actions(
@@ -166,6 +193,130 @@ def execute_jira(
             "tasks": tasks,
             "credential_status": context.credential_status(),
         }
+
+    if args.command == "create":
+        # 建卡没有既有 issue key，不走任务接管绑定；agentic_run_id 显式提供或生成
+        if args.action == "plan":
+            agentic_run_id = args.run_id or _generate_run_id()
+            plan_path = _jira_plan_file(
+                workspace.root,
+                args.plan_file,
+                args.project_key.upper(),
+                agentic_run_id,
+                must_exist=False,
+            )
+            description = ""
+            if args.description_file:
+                description = read_workspace_outbound_file(
+                    workspace.root,
+                    args.description_file,
+                    label="Jira 任务描述文件",
+                )
+            extra_fields = _parse_extra_fields(args.field)
+            plan = service.plan_create_issue(
+                args.project_key,
+                args.idempotency_key,
+                agentic_run_id=agentic_run_id,
+                issuetype_name=args.issuetype,
+                summary=args.summary,
+                description=description,
+                assignee=args.assignee,
+                extra_fields=extra_fields,
+            )
+            service.validate_no_credentials(plan, email, token)
+            _write_new_plan(plan_path, plan.to_dict())
+            guidance = _authorization_guidance(plan, agentic_run_id)
+            result: dict[str, Any] = {
+                "connection_id": context.connection.connection_id,
+                "profile_id": context.profile.profile_id,
+                "issue_key": plan.issue_key,
+                "plan_id": plan.plan_id,
+                "action": plan.action,
+                "content_sha256": plan.content_sha256,
+                "plan_file": str(plan_path),
+                **guidance,
+            }
+            result.update(
+                {
+                    "project_key": plan.payload.get("project_key"),
+                    "issuetype_name": plan.payload.get("issuetype_name"),
+                    "summary": plan.payload.get("summary"),
+                    "assignee": plan.payload.get("assignee"),
+                }
+            )
+            return result
+        # create apply/readback 复用受管计划文件协议
+        plan_path, path_issue_key, path_run_id, plan = _read_plan_candidate(
+            workspace.root,
+            args.plan_file,
+        )
+        _require_plan_path_binding(plan, path_issue_key, path_run_id)
+        plan_path = _jira_plan_file(
+            workspace.root,
+            args.plan_file,
+            plan.issue_key,
+            plan.agentic_run_id,
+        )
+        plan = _read_plan(plan_path)
+        if args.action == "apply":
+            service.validate_apply(plan, args.confirm_plan_id, "jira_create")
+            service.validate_no_credentials(plan, email, token)
+            authorization_type = _validate_authorization_reference(
+                args.authorization_reference,
+                plan,
+                plan.agentic_run_id,
+                service,
+            )
+            # 建卡对象尚无本地任务状态，决策审计由 attempt 文件承载
+            decision_created = False
+            attempt_path = _jira_attempt_file(plan_path)
+
+            def begin_create(current_plan: WritePlan) -> WriteAttempt:
+                attempt = build_write_attempt(
+                    current_plan,
+                    args.authorization_reference,
+                )
+                _write_new_plan(attempt_path, attempt.to_dict())
+                return attempt
+
+            result = service.apply_create_issue(
+                plan,
+                args.confirm_plan_id,
+                begin_create=begin_create,
+            )
+            return {
+                "connection_id": context.connection.connection_id,
+                "profile_id": context.profile.profile_id,
+                "issue_key": result.get("issue_key", plan.issue_key),
+                "plan_id": plan.plan_id,
+                "decision_recorded": decision_created,
+                "authorization_reference": args.authorization_reference,
+                "authorization_type": authorization_type,
+                "attempt_file": (
+                    str(attempt_path) if result.get("write_attempt_id") else None
+                ),
+                **result,
+            }
+        # create readback
+        if (
+            not args.issue_key.startswith(str(plan.issue_key) + "-")
+            or args.idempotency_key != plan.idempotency_key
+        ):
+            raise RuntimeErrorResult(
+                code="jira_write_plan_mismatch",
+                message="Jira 回读输入与写入计划不一致",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请使用 apply 输出绑定的 Issue、幂等键和计划文件",
+            )
+        service.validate_apply(plan, args.confirm_plan_id, "jira_create")
+        attempt = _read_attempt_if_present(_jira_attempt_file(plan_path), plan)
+        result = service.readback_create_issue(
+            plan,
+            args.issue_key,
+            attempt=attempt,
+        )
+        return {**result}
 
     if args.action == "plan":
         task = _validate_task_binding(store, context, service, args.issue_key)
@@ -557,6 +708,48 @@ def load_comment_template_schema(install_root: Path) -> dict[str, Any]:
             required_human_action="请修复安装目录 shared/standards/jira-comment-template.schema.json",
         )
     return payload
+
+
+def _generate_run_id() -> str:
+    import hashlib
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    random_part = hashlib.sha256(os.urandom(16)).hexdigest()[:8]
+    return f"run-{stamp}-{random_part}"
+
+
+def _parse_extra_fields(values: list[str]) -> dict[str, Any]:
+    """解析 --field KEY=VALUE 参数为字典。
+
+    值为合法 JSON 时按 JSON 解析，否则作为普通字符串透传。
+    """
+    result: dict[str, Any] = {}
+    for raw in values:
+        key, separator, value = raw.partition("=")
+        if not separator or not key.strip():
+            raise RuntimeErrorResult(
+                code="invalid_extra_field",
+                message="--field 必须是 KEY=VALUE 格式",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请使用 KEY=VALUE 格式提供额外字段",
+            )
+        parsed: Any = value
+        if value.strip().startswith(("{", "[", '"')):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                parsed = value
+        if key.strip() in result:
+            raise RuntimeErrorResult(
+                code="invalid_extra_field",
+                message=f"--field 重复指定字段 {key.strip()}",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请移除重复字段后重试",
+            )
+        result[key.strip()] = parsed
+    return result
 
 
 def _read_sections(content: str) -> dict[str, str]:

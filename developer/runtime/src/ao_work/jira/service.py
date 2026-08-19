@@ -15,7 +15,13 @@ from ao_work.jira.adf import (
     normalize_title,
 )
 from ao_work.jira.client import JiraClient, JiraTransportError
-from ao_work.jira.model import JiraIssue, plain_text
+from ao_work.jira.model import (
+    JiraIssue,
+    object_name,
+    plain_text,
+    standalone_paragraph_lines,
+    user_identifier,
+)
 from ao_work.jira.transition import (
     adaptation_material,
     completed_stage_for,
@@ -163,7 +169,7 @@ def build_write_attempt(
 ) -> WriteAttempt:
     plan.validate_integrity()
     if (
-        plan.operation not in {"jira_comment", "jira_worklog"}
+        plan.operation not in {"jira_comment", "jira_worklog", "jira_create"}
         or plan.action != "create_or_update"
         or plan.existing_external_id
     ):
@@ -217,6 +223,184 @@ class JiraService:
         self.profile = profile
         self.client = client
 
+    def plan_create_issue(
+        self,
+        project_key: str,
+        idempotency_key: str,
+        *,
+        agentic_run_id: str,
+        issuetype_name: str,
+        summary: str,
+        description: str,
+        assignee: str | None = None,
+        extra_fields: dict[str, Any] | None = None,
+    ) -> WritePlan:
+        """计划一次 Jira 建卡。
+
+        - createmeta 实时校验事务类型与必填字段（禁止 AI 猜测字段默认值）。
+        - description 写入幂等 marker，JQL 复查项目内是否已存在相同 marker。
+        - plan 的 issue_key 使用 project_key 占位，apply 返回真实 issue key。
+        """
+        normalized_project = _validated_project_key(project_key)
+        _require_chinese(summary, "任务摘要")
+        if not issuetype_name.strip():
+            raise _input_error("invalid_issuetype_name", "事务类型名称不能为空")
+        meta = self.client.create_meta(normalized_project, issuetype_name.strip())
+        missing_required = [
+            field_id
+            for field_id in meta["required"]
+            if field_id
+            not in {
+                "project",
+                "issuetype",
+                "summary",
+                "reporter",
+                "description",
+            }
+            and field_id not in (extra_fields or {})
+        ]
+        if missing_required:
+            names = ", ".join(
+                f"{field_id}({meta['required'][field_id]})"
+                for field_id in sorted(missing_required)
+            )
+            raise RuntimeErrorResult(
+                code="jira_create_required_fields_missing",
+                message=(
+                    f"Jira 事务类型「{issuetype_name.strip()}」缺少必填字段："
+                    f"{names}；禁止猜测字段默认值"
+                ),
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action=(
+                    "请通过 --field 提供缺失必填字段，或核对事务类型与项目"
+                ),
+                details={
+                    "project_key": normalized_project,
+                    "issuetype_name": issuetype_name.strip(),
+                    "required_fields": meta["required"],
+                },
+            )
+        normalized_description = description.rstrip()
+        marker = _create_marker(
+            normalized_project, agentic_run_id, idempotency_key
+        )
+        markdown = (
+            f"{normalized_description}\n\n{marker}\n"
+            if normalized_description
+            else f"{marker}\n"
+        )
+        normalized_fields = _validate_extra_fields(extra_fields or {}, meta)
+        normalized_assignee = (assignee or "").strip()
+        if normalized_assignee:
+            if not re.fullmatch(r"[A-Za-z0-9:_-]{3,200}", normalized_assignee):
+                raise _input_error(
+                    "invalid_assignee", "assignee 必须是 Jira accountId"
+                )
+        payload = {
+            "project_key": normalized_project,
+            "issuetype_name": issuetype_name.strip(),
+            "issuetype_id": meta["issuetype_id"],
+            "summary": summary.strip(),
+            "description": normalized_description,
+            "markdown": markdown,
+            "body_sha256": _text_sha256(_rendered_markdown_text(markdown)),
+            "assignee": normalized_assignee,
+            "fields": normalized_fields,
+            "marker": marker,
+            "required_fields": sorted(meta["required"]),
+        }
+        existing = self._find_existing_by_marker(
+            normalized_project, marker, "jira_create_duplicate"
+        )
+        return _build_plan(
+            "jira_create",
+            normalized_project,
+            agentic_run_id,
+            idempotency_key,
+            payload,
+            existing.key if existing else "",
+        )
+
+    def apply_create_issue(
+        self,
+        plan: WritePlan,
+        expected_plan_id: str,
+        *,
+        begin_create: Callable[[WritePlan], WriteAttempt] | None = None,
+    ) -> dict[str, Any]:
+        self.validate_apply(plan, expected_plan_id, "jira_create")
+        project_key = str(plan.payload["project_key"])
+        marker = str(plan.payload["marker"])
+        existing = self._find_existing_by_marker(
+            project_key, marker, "jira_create_duplicate"
+        )
+        if existing:
+            _require_create_content(existing, plan)
+            if plan.action == "create_or_update":
+                raise _create_precondition_changed("Jira 任务")
+            return _create_readback(
+                plan,
+                existing.key,
+                created=False,
+                attempt=None,
+            )
+        attempt = _begin_create_attempt(plan, begin_create)
+        try:
+            created = self.client.create_issue(_create_fields(plan))
+        except JiraTransportError as error:
+            raise _unknown_write("Jira 任务", error, attempt) from error
+        issue_key = created["key"]
+        readback = self.inspect_issue(issue_key)
+        _require_create_content(readback, plan)
+        return _create_readback(
+            plan,
+            issue_key,
+            created=True,
+            attempt=attempt,
+        )
+
+    def readback_create_issue(
+        self,
+        plan: WritePlan,
+        issue_key: str,
+        *,
+        attempt: WriteAttempt | None = None,
+    ) -> dict[str, Any]:
+        self.validate_apply(plan, plan.plan_id, "jira_create")
+        readback = self.inspect_issue(issue_key)
+        _require_create_content(readback, plan)
+        created = _readback_creation_status(plan, attempt)
+        return _create_readback(
+            plan,
+            issue_key,
+            created=created,
+            attempt=attempt,
+        )
+
+    def _find_existing_by_marker(
+        self, project_key: str, marker: str, duplicate_code: str
+    ) -> JiraIssue | None:
+        # JQL 全文搜索对 []: 等特殊字符分词不可靠，搜索稳定词后再本地精确匹配 marker
+        jql = (
+            f'project = "{_escape_jql(project_key)}" '
+            'AND description ~ "agentic-ops-idempotency" '
+            "ORDER BY created ASC"
+        )
+        result = self.client.search_jql(
+            jql,
+            fields=("summary", "description", "key", "project"),
+        )
+        matches: list[JiraIssue] = []
+        for issue in result.issues:
+            description = issue.fields.get("description")
+            standalone = standalone_paragraph_lines(description)
+            if marker not in standalone:
+                continue
+            matches.append(issue)
+        _ensure_no_duplicates(matches, duplicate_code)
+        return matches[0] if matches else None
+
     def inspect_issue(self, issue_key: str) -> JiraIssue:
         self.validate_profile_fields()
         issue = self.client.get_issue(issue_key)
@@ -268,9 +452,13 @@ class JiraService:
             self._validate_description_sections(sections)
         elif operation == "jira_transition":
             self._validate_transition_plan(plan)
+        elif operation == "jira_create":
+            self._validate_create_plan(plan)
         else:
             raise _input_error("jira_write_plan_mismatch", "Jira 写入计划操作无效")
-        self._validate_owner(self.inspect_issue(plan.issue_key))
+        if operation != "jira_create":
+            # create 的 issue_key 是 project_key 占位，回读校验在 apply/readback 用真实 key
+            self._validate_owner(self.inspect_issue(plan.issue_key))
 
     @staticmethod
     def validate_no_credentials(plan: WritePlan, email: str, token: str) -> None:
@@ -653,6 +841,107 @@ class JiraService:
         issue = self.inspect_issue(plan.issue_key)
         matched = issue.status == str(plan.payload["target_status"])
         return _transition_readback(plan, issue.status, created=matched)
+
+    def _validate_create_plan(self, plan: WritePlan) -> None:
+        expected = {
+            "project_key",
+            "issuetype_name",
+            "issuetype_id",
+            "summary",
+            "description",
+            "markdown",
+            "body_sha256",
+            "assignee",
+            "fields",
+            "marker",
+            "required_fields",
+        }
+        if set(plan.payload) != expected:
+            raise _input_error("jira_write_plan_invalid", "Jira 建卡计划字段无效")
+        project_key = plan.payload.get("project_key")
+        issuetype_name = plan.payload.get("issuetype_name")
+        summary = plan.payload.get("summary")
+        markdown = plan.payload.get("markdown")
+        body_sha256 = plan.payload.get("body_sha256")
+        assignee = plan.payload.get("assignee")
+        marker = plan.payload.get("marker")
+        fields = plan.payload.get("fields")
+        if (
+            not isinstance(project_key, str)
+            or not isinstance(issuetype_name, str)
+            or not issuetype_name.strip()
+            or not isinstance(summary, str)
+            or not summary.strip()
+            or not isinstance(markdown, str)
+            or not _is_sha256(body_sha256)
+            or not isinstance(assignee, str)
+            or not isinstance(marker, str)
+            or not isinstance(fields, dict)
+        ):
+            raise _input_error("jira_write_plan_invalid", "Jira 建卡计划内容无效")
+        _require_chinese(summary, "任务摘要")
+        if marker != _create_marker(
+            project_key, plan.agentic_run_id, plan.idempotency_key
+        ):
+            raise _input_error("jira_write_plan_invalid", "Jira 建卡幂等标记无效")
+        expected_markdown = (
+            f"{str(plan.payload.get('description', '')).rstrip()}\n\n{marker}\n"
+            if str(plan.payload.get("description", "")).strip()
+            else f"{marker}\n"
+        )
+        if markdown != expected_markdown:
+            raise _input_error("jira_write_plan_invalid", "Jira 建卡正文或幂等标记无效")
+        if body_sha256 != _text_sha256(_rendered_markdown_text(markdown)):
+            raise _input_error("jira_write_plan_invalid", "Jira 建卡正文摘要不一致")
+        if not isinstance(plan.payload.get("issuetype_id"), str) or not isinstance(
+            plan.payload.get("required_fields"), list
+        ):
+            raise _input_error("jira_write_plan_invalid", "Jira 建卡元数据无效")
+        meta = self.client.create_meta(project_key, issuetype_name)
+        if str(meta.get("issuetype_id", "")) != str(plan.payload["issuetype_id"]):
+            raise RuntimeErrorResult(
+                code="jira_create_meta_changed",
+                message="Jira 事务类型已变化，计划与当前 createmeta 不一致；请重新 plan",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=True,
+                required_human_action="请重新执行 plan 对齐 Jira 当前事实后再 apply",
+            )
+        missing_required = [
+            field_id
+            for field_id in meta["required"]
+            if field_id
+            not in {
+                "project",
+                "issuetype",
+                "summary",
+                "reporter",
+                "description",
+            }
+            and field_id not in fields
+        ]
+        if missing_required:
+            raise RuntimeErrorResult(
+                code="jira_create_required_fields_missing",
+                message="Jira 建卡计划缺少当前必填字段；请重新 plan",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=True,
+                required_human_action="请重新执行 plan 补齐必填字段",
+                details={"missing": missing_required},
+            )
+        declared = set(meta["fields"])
+        unknown = [key for key in fields if key not in declared]
+        if unknown:
+            raise RuntimeErrorResult(
+                code="jira_create_meta_changed",
+                message="Jira 建卡计划包含当前 createmeta 未声明的字段；请重新 plan",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=True,
+                required_human_action="请重新执行 plan 对齐 Jira 当前事实后再 apply",
+                details={"unknown_fields": unknown},
+            )
 
     def _validate_transition_plan(self, plan: WritePlan) -> None:
         expected = {
@@ -1111,6 +1400,142 @@ def _marker(issue_key: str, agentic_run_id: str, idempotency_key: str) -> str:
 
 def _plan_marker(plan: WritePlan) -> str:
     return _marker(plan.issue_key, plan.agentic_run_id, plan.idempotency_key)
+
+
+def _create_marker(
+    project_key: str, agentic_run_id: str, idempotency_key: str
+) -> str:
+    _validated_project_key(project_key)
+    if not RUN_ID_PATTERN.fullmatch(agentic_run_id):
+        raise _input_error("invalid_agentic_run_id", "agentic_run_id 格式无效")
+    _validate_idempotency_key(idempotency_key)
+    return (
+        "[agentic-ops-idempotency:create:"
+        f"{project_key}:{agentic_run_id}:{idempotency_key}]"
+    )
+
+
+def _validated_project_key(value: str) -> str:
+    normalized = value.strip().upper()
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,9}", normalized):
+        raise _input_error(
+            "invalid_project_key", "project_key 必须是 Jira 项目 Key（大写字母开头）"
+        )
+    return normalized
+
+
+def _escape_jql(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _create_fields(plan: WritePlan) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "project": {"key": str(plan.payload["project_key"])},
+        "issuetype": {"name": str(plan.payload["issuetype_name"])},
+        "summary": str(plan.payload["summary"]),
+        "description": markdown_to_adf(str(plan.payload["markdown"])),
+    }
+    assignee = str(plan.payload.get("assignee", "")).strip()
+    if assignee:
+        fields["assignee"] = {"accountId": assignee}
+    for key, value in plan.payload.get("fields", {}).items():
+        fields[key] = value
+    return fields
+
+
+def _validate_extra_fields(
+    extra_fields: dict[str, Any], meta: dict[str, Any]
+) -> dict[str, Any]:
+    """校验并归一化建卡自定义字段。
+
+    - 只允许 createmeta 中声明过的字段（禁止猜测字段 id）。
+    - option/array 类型字段只接受字符串，自动转 Jira 选项结构。
+    - user 类型字段接受 accountId 字符串。
+    - 其余类型直接透传，但必须是非 dict 标量。
+    """
+    if not isinstance(extra_fields, dict):
+        raise _input_error("invalid_extra_fields", "额外字段必须是映射")
+    normalized: dict[str, Any] = {}
+    schemas = meta.get("fields", {})
+    for key, value in extra_fields.items():
+        if not isinstance(key, str) or not key.strip():
+            raise _input_error("invalid_extra_fields", "额外字段名必须是字符串")
+        schema = schemas.get(key)
+        if schema is None:
+            raise RuntimeErrorResult(
+                code="jira_create_unknown_field",
+                message=f"额外字段 {key} 不在 createmeta 声明中，禁止猜测字段",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请核对字段 id 或改用 createmeta 声明的字段",
+                details={"field_id": key, "declared_fields": sorted(schemas)},
+            )
+        field_type = schema.get("schema", {}).get("type", "") if isinstance(
+            schema.get("schema"), dict
+        ) else ""
+        if field_type in {"option", "array"}:
+            if not isinstance(value, str) or not value.strip():
+                raise _input_error(
+                    "invalid_extra_fields",
+                    f"字段 {key}（{field_type}）需要字符串选项值",
+                )
+            option = {"value": value.strip()}
+            normalized[key] = (
+                [option] if field_type == "array" else option
+            )
+        elif field_type == "user":
+            if not isinstance(value, str) or not value.strip():
+                raise _input_error(
+                    "invalid_extra_fields", f"字段 {key}（user）需要 accountId"
+                )
+            normalized[key] = {"accountId": value.strip()}
+        elif field_type in {"string", "number", "date", "datetime", "textarea"}:
+            if isinstance(value, dict) or isinstance(value, list):
+                raise _input_error(
+                    "invalid_extra_fields",
+                    f"字段 {key}（{field_type}）不接受对象或数组值",
+                )
+            normalized[key] = value
+        else:
+            raise RuntimeErrorResult(
+                code="jira_create_unsupported_field",
+                message=f"字段 {key} 的 schema 类型 {field_type!r} 暂不支持自动归一化",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请确认该字段取值结构后决定是否纳入建卡能力",
+                details={"field_id": key, "schema_type": field_type},
+            )
+    return normalized
+
+
+def _require_create_content(item: Any, plan: WritePlan) -> None:
+    marker = str(plan.payload["marker"])
+    expected_summary = str(plan.payload["summary"])
+    description = item.description or item.fields.get("description")
+    standalone = standalone_paragraph_lines(description)
+    if marker not in standalone:
+        raise _idempotency_conflict("Jira 任务")
+    if item.summary != expected_summary:
+        raise _idempotency_conflict("Jira 任务")
+
+
+def _create_readback(
+    plan: WritePlan,
+    issue_key: str,
+    *,
+    created: bool,
+    attempt: WriteAttempt | None,
+) -> dict[str, Any]:
+    return {
+        "issue_key": issue_key,
+        "agentic_run_id": plan.agentic_run_id,
+        "idempotency_key": plan.idempotency_key,
+        "plan_id": plan.plan_id,
+        "content_sha256": plan.content_sha256,
+        "external_id": issue_key,
+        "created": created,
+        **_write_attempt_fields(plan, attempt),
+    }
 
 
 def _has_exact_marker(item: Any, marker: str) -> bool:
