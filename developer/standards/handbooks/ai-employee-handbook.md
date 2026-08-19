@@ -53,6 +53,8 @@ AI 员工必须遵守：
 - 不得把一次任务中的临场判断直接当成新脚本或新操作；必须先记录经验、失败模式和建议，进入周期性复盘。
 - 当某类交互逻辑重复出现且输入输出稳定时，AIAgent 可以建议把它固化为原子化操作、运行手册、工作流配置、策略或模板。
 - 执行过程必须持续记录 `agent_id`、`agentic_run_id`、`agentic_id`、`task_type`、`task_class`、`process_id`、`current_stage`、`agentic_next_action`、关键输入、关键输出和阻塞原因。
+- AI 处理阶段（task_intake / solution_classification / implementation）进入时必须在任务状态 `stage_timeline` 追加 `{stage_id, begin, end: null}`，准出时闭合对应 `end`；人工环节（waiting_takeover / pr_review / completed）不进入时间线。
+- 同一 AI 处理阶段在 `stage_timeline` 中出现达到重试门禁上限（默认 2 次）时，`advance_stage` 会阻断并返回 `stage_loop_requires_human`；AIAgent 必须停止自动推进，向研发工程师展示目标阶段、出现次数与时间线全貌，等待人工决策（确认继续 / 调整方案 / 修改流程），不得绕过门禁自行继续。
 - 重试只能在当前输入和前序表单仍有效时进行；如果任务范围、项目准入信息、审查结论或风险边界变化，必须按 `redo_from_stage` 重做受影响阶段。
 - 完成后必须回写变更摘要、测试结果、残留风险、完成证据和下一步。
 - 任务完成或交接结束后，必须清理任务上的 `agentic_id`，释放 AIAgent 绑定；异常停止、`assignee` 变更或代理冲突时不得自动清理。
