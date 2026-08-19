@@ -25,3 +25,12 @@ Git 必须通过 common directory 中的 trusted launcher 从已接受 `HEAD` �
 `release` / `hotfix publish` 只允许刷新后的 `origin/main` 基线 Runtime 检查固定 candidate。基线缺失时返回 `release_story_gate_baseline_upgrade_required`；候选修改 Hook、门禁 Runtime、注册表或发布脚本等信任根时返回 `release_story_gate_trust_root_changed`。两者都必须改走受保护 `main` 的独立人工审查 PR，不能由自动 publish 放行。
 
 本地 Hook 是防误操作层，无法阻止本机控制者使用 `--no-verify` 或修改 Git 配置。硬门禁必须由无 bypass 的 `main` Ruleset 强制至少 1 个独立人工批准、最后推送者不能自批、dismiss stale approvals 和解决全部 review threads；即使 candidate 删除仓库内门禁调用也不能自动合并。`origin/main` 发布基线负责确定性复检；不得把单一本地 Hook 或仓库内脚本描述成不可绕过的信任根。
+
+## 维护任务处理约束
+
+maintainer 面处理任何 Jira 任务（建卡、实现、修复、规则演进等）时，必须遵守以下处理流程：
+
+1. 开始处理任务：先向任务写一条中文评论（说明开始处理的内容与计划），再把任务状态流转为「正在进行」。
+2. 合并代码后：向任务写一条中文总结评论（说明实现内容、验证结果与风险），再把任务状态流转为「已完成」。
+
+评论与状态流转必须通过 `ao-maint jira` 的 plan → apply → readback 门禁执行，并留下 `user-confirmation:<KEY>:<plan_id>` 授权引用与决策审计记录。不得绕过 Runtime 直接调用 Jira REST API 建卡、评论或流转状态；发现能力缺口时先补齐 Runtime 能力，再执行任务操作。
