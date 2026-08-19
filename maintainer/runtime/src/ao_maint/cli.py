@@ -5,6 +5,7 @@ import sys
 from typing import Sequence
 
 from ao_maint.cli_common import ArgumentParserError, JsonArgumentParser
+from ao_maint.install.cli import configure_install_parser, execute_install
 from ao_maint.integration.cli import configure_integration_parser, execute_integration
 from ao_maint.jira.cli import configure_jira_parser, execute_jira
 from ao_maint.output import EXIT_BLOCKED, RuntimeErrorResult, failure, success, write_diagnostic, write_json
@@ -18,6 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="group", required=True)
     configure_story_parser(subparsers)
     configure_integration_parser(subparsers)
+    configure_install_parser(subparsers)
     configure_jira_parser(subparsers)
     return parser
 
@@ -36,6 +38,9 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         return success(operation_name(args), workplane=workspace.workplane, **state)
     if args.group == "integration":
         state = execute_integration(args, workspace)
+        return success(operation_name(args), workplane=workspace.workplane, **state)
+    if args.group == "install":
+        state = execute_install(args, workspace.root)
         return success(operation_name(args), workplane=workspace.workplane, **state)
     if args.group == "jira":
         state = execute_jira(args, workspace.root)
