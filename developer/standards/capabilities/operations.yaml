@@ -219,6 +219,18 @@ capabilities:
     summary: 以 plan、apply、readback 协议记录中文标题、逐项耗时组成和明确排除等待类别的真实耗时。
     next_action: 请让 included_work 各项秒数之和等于真实总耗时，并明确 excluded_waiting_categories；获得计划编号的授权后 apply，结果不明确时只执行 readback。
 
+  - id: jira_create
+    source: contract
+    contract: contracts/operations/jira-create.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [jira, create, plan]
+      - [jira, create, apply]
+      - [jira, create, readback]
+    summary: 以 plan、apply、readback 协议在 Jira 项目新建任务：createmeta 实时校验事务类型与必填字段（禁止猜测字段默认值），description 写入幂等 marker，apply 后回读验证，readback 用真实 issue key。建卡无既有任务状态，决策审计由 attempt 文件承载。
+    next_action: 请先生成计划（项目 Key、事务类型与必填字段来自 createmeta），获得计划编号的明确授权后 apply；结果不明确时只执行 readback，不要重复写入。
+
   - id: list_tasks
     source: contract
     contract: contracts/operations/list-tasks.yaml
