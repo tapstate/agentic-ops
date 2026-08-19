@@ -80,6 +80,9 @@ def configure_jira_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
     comment_parser = jira_commands.add_parser("comment")
     _configure_write_actions(comment_parser, "comment")
 
+    description_parser = jira_commands.add_parser("description")
+    _configure_write_actions(description_parser, "description", readback=False)
+
     worklog_parser = jira_commands.add_parser("worklog")
     _configure_write_actions(worklog_parser, "worklog")
 
@@ -88,7 +91,7 @@ def configure_jira_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
 
 
 def _configure_write_actions(
-    parser: argparse.ArgumentParser, kind: str
+    parser: argparse.ArgumentParser, kind: str, *, readback: bool = True
 ) -> None:
     actions = parser.add_subparsers(dest="action", required=True)
     plan = actions.add_parser("plan")
@@ -98,6 +101,8 @@ def _configure_write_actions(
     plan.add_argument("--plan-file", required=True)
     if kind == "comment":
         plan.add_argument("--category", required=True)
+        plan.add_argument("--content-file", required=True)
+    elif kind == "description":
         plan.add_argument("--content-file", required=True)
     elif kind == "transition":
         target = plan.add_mutually_exclusive_group(required=True)
@@ -127,11 +132,12 @@ def _configure_write_actions(
         default="项目维护者确认 Jira 写入计划",
     )
 
-    readback_parser = actions.add_parser("readback")
-    readback_parser.add_argument("--issue-key", required=True)
-    readback_parser.add_argument("--idempotency-key", required=True)
-    readback_parser.add_argument("--plan-file", required=True)
-    readback_parser.add_argument("--confirm-plan-id", required=True)
+    if readback:
+        readback_parser = actions.add_parser("readback")
+        readback_parser.add_argument("--issue-key", required=True)
+        readback_parser.add_argument("--idempotency-key", required=True)
+        readback_parser.add_argument("--plan-file", required=True)
+        readback_parser.add_argument("--confirm-plan-id", required=True)
 
 
 def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
@@ -193,6 +199,14 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
                 content,
                 maintainer_run_id=run_id,
                 comment_template_schema=load_comment_template_schema(source_root),
+            )
+        elif args.command == "description":
+            content = _read_input_file(source_root, args.content_file, "Jira 任务描述内容文件")
+            plan = service.plan_description(
+                args.issue_key,
+                args.idempotency_key,
+                content,
+                maintainer_run_id=run_id,
             )
         elif args.command == "transition":
             workflow = load_maintainer_workflow(
@@ -312,6 +326,8 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
         )
         if args.command == "comment":
             result = service.apply_comment(plan, args.confirm_plan_id)
+        elif args.command == "description":
+            result = service.apply_description(plan, args.confirm_plan_id)
         elif args.command == "transition":
             result = service.apply_transition(plan, args.confirm_plan_id)
         elif args.command == "create":

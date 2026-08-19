@@ -200,6 +200,14 @@ class JiraClient:
             )
         return {"id": issue_id, "key": key}
 
+    def update_description(self, issue_key: str, description: dict[str, Any]) -> None:
+        """整体替换 Jira 任务 Description（ADF）；调用方负责回读验证。"""
+        self._request(
+            "PUT",
+            f"/rest/api/3/issue/{urllib.parse.quote(issue_key, safe='')}",
+            body={"fields": {"description": description}},
+        )
+
     def search_issues(
         self, jql: str, fields: list[str] | None = None
     ) -> list[dict[str, Any]]:
