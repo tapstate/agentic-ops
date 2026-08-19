@@ -1,14 +1,14 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "AgenticOps 节点注册表",
-  "description": "developer 面节点注册表结构校验（AO-39 POC）。节点 = 语义化 ID + 准入条件 + 准出决策；准出可声明 jira_transition 映射到项目 profile.transitions。",
+  "title": "AgenticOps 阶段注册表",
+  "description": "developer 面阶段注册表结构校验（AO-39/AO-41）。阶段（stage）= 粗粒度处理阶段（Jira 映射/审计/恢复）；阶段内步骤（step）= 处理步骤规范声明（可无实体，如访问 LLM 拿结果、执行脚本拿结果）。阶段准出可声明 jira_transition 映射到项目 profile.transitions。",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "workplane", "nodes"],
+  "required": ["schema_version", "workplane", "stages"],
   "properties": {
     "schema_version": { "type": "integer", "minimum": 1 },
     "workplane": { "const": "developer" },
-    "nodes": {
+    "stages": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
@@ -20,7 +20,7 @@
           "id": {
             "type": "string",
             "pattern": "^[a-z][a-z0-9_]*$",
-            "description": "语义化节点 ID：小写 snake_case，从 ID 能看出节点做什么"
+            "description": "语义化阶段 ID：小写 snake_case，从 ID 能看出阶段做什么"
           },
           "name": { "type": "string", "minLength": 1 },
           "description": { "type": "string", "minLength": 1 },
@@ -29,19 +29,19 @@
             "minItems": 1,
             "uniqueItems": true,
             "items": { "type": "string", "minLength": 1 },
-            "description": "准入条件：进入节点前任务需具备的信息/授权键"
+            "description": "准入条件：进入阶段前任务需具备的信息/授权键"
           },
           "exit": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["next_node"],
+            "required": ["next_stage"],
             "properties": {
-              "next_node": {
+              "next_stage": {
                 "anyOf": [
                   { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
                   { "type": "null" }
                 ],
-                "description": "准出后的下一步节点 ID；null 表示终态"
+                "description": "准出后的下一阶段 ID；null 表示终态"
               },
               "jira_transition": {
                 "type": "string",
@@ -61,16 +61,16 @@
                 "id": {
                   "type": "string",
                   "pattern": "^[a-z][a-z0-9_]*$",
-                  "description": "步骤级节点 ID（语义化，从 ID 看出做什么）"
+                  "description": "阶段内步骤 ID（语义化，从 ID 看出做什么）"
                 },
                 "name": { "type": "string", "minLength": 1 },
                 "description": { "type": "string", "minLength": 1 },
                 "exit": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["next_node"],
+                  "required": ["next_step"],
                   "properties": {
-                    "next_node": {
+                    "next_step": {
                       "anyOf": [
                         { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
                         { "type": "null" }
