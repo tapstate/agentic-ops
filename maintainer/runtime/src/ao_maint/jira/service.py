@@ -378,6 +378,59 @@ class MaintainerJiraService:
         _ensure_no_duplicates(matches, duplicate_code)
         return matches[0] if matches else None
 
+    def plan_description(
+        self,
+        issue_key: str,
+        idempotency_key: str,
+        content: str,
+        *,
+        maintainer_run_id: str,
+    ) -> WritePlan:
+        issue = self.inspect_issue(issue_key)
+        _require_chinese(content, "Jira 任务描述")
+        normalized = content.rstrip()
+        markdown = f"{normalized}\n"
+        existing_text = plain_text(issue.description)
+        unchanged = existing_text == _plain_text_of_markdown(markdown)
+        return _build_plan(
+            "jira_description",
+            issue.key,
+            maintainer_run_id,
+            idempotency_key,
+            {
+                "markdown": markdown,
+                "body_sha256": _text_sha256(_rendered_markdown_text(markdown)),
+            },
+            "description" if unchanged else "",
+        )
+
+    def apply_description(
+        self, plan: WritePlan, expected_plan_id: str
+    ) -> dict[str, Any]:
+        self._validate_apply_plan(plan, expected_plan_id, "jira_description")
+        self._validate_description_plan(plan)
+        issue = self.inspect_issue(plan.issue_key)
+        markdown = str(plan.payload["markdown"])
+        if plain_text(issue.description) == _plain_text_of_markdown(markdown):
+            return {"external_id": "description", "created": False}
+        try:
+            self.client.update_description(
+                plan.issue_key, markdown_to_adf(markdown)
+            )
+        except JiraTransportError as error:
+            raise _unknown_write("Jira 任务描述", error) from error
+        readback = self.inspect_issue(plan.issue_key)
+        if plain_text(readback.description) != _plain_text_of_markdown(markdown):
+            raise RuntimeErrorResult(
+                code="jira_description_readback_failed",
+                message="Jira 任务描述写入后回读不一致",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=False,
+                required_human_action="请人工核对任务描述，不要重复写入",
+            )
+        return {"external_id": "description", "created": True}
+
     def plan_comment(
         self,
         issue_key: str,
@@ -816,6 +869,17 @@ class MaintainerJiraService:
                     required_human_action="请移除凭证内容，重新生成 Jira 写入计划",
                 )
 
+    def _validate_description_plan(self, plan: WritePlan) -> None:
+        if set(plan.payload) != {"markdown", "body_sha256"}:
+            raise _input_error("jira_write_plan_invalid", "Jira 任务描述计划字段无效")
+        markdown = plan.payload.get("markdown")
+        body_sha256 = plan.payload.get("body_sha256")
+        if not isinstance(markdown, str) or not markdown.strip() or not _is_sha256(body_sha256):
+            raise _input_error("jira_write_plan_invalid", "Jira 任务描述计划内容无效")
+        _require_chinese(markdown, "Jira 任务描述")
+        if body_sha256 != _text_sha256(_rendered_markdown_text(markdown)):
+            raise _input_error("jira_write_plan_invalid", "Jira 任务描述正文摘要不一致")
+
     def _validate_comment_plan(self, plan: WritePlan) -> None:
         if set(plan.payload) != {"category", "content", "markdown", "body_sha256"}:
             raise _input_error("jira_write_plan_invalid", "Jira 评论计划字段无效")
@@ -940,6 +1004,11 @@ def _build_plan(
         payload=payload,
         existing_external_id=existing_external_id,
     )
+
+
+def _plain_text_of_markdown(markdown: str) -> str:
+    """markdown → ADF → plain text，用于描述幂等/回读的语义比较。"""
+    return plain_text(markdown_to_adf(markdown))
 
 
 def _verify_plan(plan: WritePlan, expected_plan_id: str, operation: str) -> None:

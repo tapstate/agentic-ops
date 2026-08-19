@@ -76,6 +76,12 @@ class FakeTransport:
                 }
             )
             return TransportResponse(201, {"id": worklog_id})
+        if path.startswith("/rest/api/3/issue/") and method == "PUT":
+            if self.issue is not None and isinstance(self.issue.get("fields"), dict):
+                fields = body.get("fields", {}) if isinstance(body, dict) else {}
+                if isinstance(fields, dict) and "description" in fields:
+                    self.issue["fields"]["description"] = fields["description"]  # type: ignore[index]
+            return TransportResponse(204, None)
         if path.startswith("/rest/api/3/issue/"):
             issue_key = path.removeprefix("/rest/api/3/issue/").split("?")[0]
             for item in self.issues:
@@ -268,6 +274,40 @@ class MaintainerJiraServiceTest(unittest.TestCase):
             },
         }
         return MaintainerJiraService(client), transport, client
+
+    def test_plan_description_roundtrip(self) -> None:
+        service, transport, _client = self._service()
+        plan = service.plan_description(
+            "AO-11",
+            "idem-desc-1",
+            "## 背景\n\n这是新的任务描述。",
+            maintainer_run_id="maint-test-1",
+        )
+        self.assertEqual("create_or_update", plan.action)
+        result = service.apply_description(plan, plan.plan_id)
+        self.assertEqual(True, result["created"])
+        self.assertEqual("description", result["external_id"])
+        # 幂等：重复 apply 应识别已一致
+        plan2 = service.plan_description(
+            "AO-11",
+            "idem-desc-1",
+            "## 背景\n\n这是新的任务描述。",
+            maintainer_run_id="maint-test-1",
+        )
+        self.assertEqual("no_op", plan2.action)
+        result2 = service.apply_description(plan2, plan2.plan_id)
+        self.assertEqual(False, result2["created"])
+
+    def test_plan_description_requires_chinese(self) -> None:
+        service, _transport, _client = self._service()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.plan_description(
+                "AO-11",
+                "idem-desc-2",
+                "english only description",
+                maintainer_run_id="maint-test-1",
+            )
+        self.assertEqual("chinese_content_required", captured.exception.code)
 
     def test_plan_comment_roundtrip(self) -> None:
         service, transport, _client = self._service()
