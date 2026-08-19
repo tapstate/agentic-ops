@@ -10,7 +10,7 @@ from ao_work.config import (
     load_jira_context,
     validate_workspace_jira_binding,
 )
-from ao_work.jira.client import JiraClient, UrllibJiraTransport
+from ao_work.jira.client import JiraClient, UrllibJiraTransport, with_forced_order
 from ao_work.jira.service import JiraService
 from ao_work.jira.transition import match_transition
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
@@ -55,14 +55,17 @@ def execute_task_takeover(
     workspace: Workspace,
     install_root: Path,
     store: TaskStore,
-    issue_key: str,
+    issue_key: str | None,
     *,
-    agent_id: str,
+    agent_id: str | None,
     authorization_reference: str,
     transition_comment: str | None = None,
 ) -> dict[str, Any]:
     """正式任务接管：校验所有权 → transition 到执行状态 → agentic_id 字段写入 → 本地接管记录。
 
+    - 无 issue_key：只读列出可接管候选（profile.task_query + 优先级排序），
+      不写 Jira、不 transition、不改字段；返回 selection_required 供用户确认后
+      带 key 重跑。agent-id 缺省从安装身份读取。
     - 校验：Jira 当前账户 == 任务经办人；agentic_id 字段为空或与当前 agent_id 一致；
       Jira 状态可映射到项目流程 entry stage。
     - Jira 写：若状态未在 entry stage，执行 transition（id 从可用 transition 列表按目标状态名匹配）；
@@ -83,6 +86,19 @@ def execute_task_takeover(
         context.connection,
         account_id=account["account_id"],
     )
+
+    if not issue_key:
+        return _takeover_candidates(context, client, account["account_id"])
+
+    if not authorization_reference:
+        raise _blocked(
+            "authorization_reference_required",
+            "正式接管必须提供授权引用（--authorization-reference）",
+            "请先确认目标任务并取得研发工程师授权后，以 user-confirmation:<KEY>:<plan_id> 重试",
+        )
+
+    if not agent_id:
+        agent_id = _default_agent_id(install_root)
     issue = service.inspect_issue(issue_key)
     if issue.assignee != account["account_id"]:
         raise _blocked(
@@ -256,6 +272,76 @@ def _existing_task(store: TaskStore, issue_key: str) -> dict[str, Any] | None:
     except Exception:
         return None
     return state if isinstance(state, dict) else None
+
+
+def _default_agent_id(install_root: Path) -> str:
+    """从安装目录身份读取 agent_id（D-048 阶段二）。缺失时阻断。"""
+    from ao_work.installation import load_install_identity
+
+    try:
+        identity = load_install_identity(install_root)
+    except RuntimeErrorResult as error:
+        raise _blocked(
+            "agent_identity_missing",
+            "未提供 --agent-id 且安装目录缺少研发员身份，无法确定接管身份",
+            "请运行 ao-work install identity set 配置 agent_id，或显式传 --agent-id",
+        ) from error
+    agent_id = str(identity.get("agent_id") or "").strip()
+    if not agent_id:
+        raise _blocked(
+            "agent_identity_missing",
+            "安装目录研发员身份缺少 agent_id，无法确定接管身份",
+            "请运行 ao-work install identity set 重新配置 agent_id",
+        )
+    return agent_id
+
+
+_PRIORITY_WEIGHTS: dict[str, int] = {
+    "Highest": 5,
+    "High": 4,
+    "Medium": 3,
+    "Low": 2,
+    "Lowest": 1,
+}
+
+
+def _takeover_candidates(context: Any, client: JiraClient, account_id: str) -> dict[str, Any]:
+    """无 issue_key 时的只读候选列表：profile.task_query + 优先级排序。
+
+    不写 Jira、不 transition、不改字段。排序：Jira 标准优先级权重降序，
+    同优先级按 updated 倒序（D6：profile.task_priority 配置留待渐进补充，
+    本期用内置 Jira 标准序）。返回 selection_required 供用户确认后带 key 重跑。
+    """
+    base = (context.profile.task_query or "").strip() or (
+        "assignee = currentUser() AND resolution = Unresolved"
+    )
+    jql = with_forced_order(base, "priority DESC, updated DESC")
+    result = client.search_jql(jql, max_results=50)
+    tasks = [
+        {
+            "issue_key": issue.key,
+            "summary": issue.summary,
+            "status": issue.status,
+            "issue_type": issue.issue_type,
+            "priority": issue.priority,
+            "updated": issue.updated,
+        }
+        for issue in result.issues
+    ]
+    tasks.sort(
+        key=lambda task: (
+            _PRIORITY_WEIGHTS.get(str(task["priority"]), 0),
+            str(task["updated"]),
+        ),
+        reverse=True,
+    )
+    return {
+        "selection_required": True,
+        "candidate_count": len(tasks),
+        "candidates": tasks,
+        "credential_status": context.credential_status(),
+        "note": "未提供 issue_key；请从候选列表确认目标任务后，带 issue_key 与授权引用重新执行 takeover",
+    }
 
 
 def _new_run_id(issue_key: str) -> str:

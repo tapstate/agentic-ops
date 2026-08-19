@@ -33,6 +33,7 @@ class TakeoverTransport:
         self.requests: list[tuple[str, str]] = []
         self.transition_executed: str | None = None
         self.field_written: dict[str, str] | None = None
+        self.search_issues: list[dict[str, object]] = []
 
     def request(
         self,
@@ -43,6 +44,16 @@ class TakeoverTransport:
         body: dict[str, object] | None = None,
     ) -> TransportResponse:
         self.requests.append((method, path))
+        if path == "/rest/api/3/search/jql":
+            return TransportResponse(
+                200,
+                {
+                    "issues": self.search_issues,
+                    "total": len(self.search_issues),
+                    "startAt": 0,
+                    "maxResults": 50,
+                },
+            )
         if path == "/rest/api/3/myself":
             return TransportResponse(
                 200,
@@ -172,9 +183,30 @@ class TaskTakeoverTest(unittest.TestCase):
         )
 
     def run_cli(
-        self, transport: TakeoverTransport
+        self,
+        transport: TakeoverTransport,
+        *extra: str,
+        agent_id: str | None = "harsen-mini-test-bot",
+        issue_key: str | None = "TAP-12289",
     ) -> tuple[int, dict[str, object], str]:
         stdout, stderr = io.StringIO(), io.StringIO()
+        arguments: list[str] = [
+            "--workspace-root",
+            str(self.workspace),
+            "task",
+            "takeover",
+        ]
+        if issue_key is not None:
+            arguments.append(issue_key)
+        if agent_id is not None:
+            arguments.extend(["--agent-id", agent_id])
+        arguments.extend(
+            [
+                "--authorization-reference",
+                "user-confirmation:TAP-12289:takeover-test",
+            ]
+        )
+        arguments.extend(extra)
         with (
             redirect_stdout(stdout),
             redirect_stderr(stderr),
@@ -184,19 +216,7 @@ class TaskTakeoverTest(unittest.TestCase):
                 return_value=transport,
             ),
         ):
-            code = main(
-                (
-                    "--workspace-root",
-                    str(self.workspace),
-                    "task",
-                    "takeover",
-                    "TAP-12289",
-                    "--agent-id",
-                    "harsen-mini-test-bot",
-                    "--authorization-reference",
-                    "user-confirmation:TAP-12289:takeover-test",
-                )
-            )
+            code = main(tuple(arguments))
         return code, json.loads(stdout.getvalue()), stderr.getvalue()
 
     def test_takeover_transitions_and_writes_agentic_id(self) -> None:
@@ -233,6 +253,131 @@ class TaskTakeoverTest(unittest.TestCase):
         code, payload, stderr = self.run_cli(transport)
         self.assertEqual(2, code, (payload, stderr))
         self.assertEqual("agent_ownership_conflict", payload["code"])
+
+    def _candidate_issue(
+        self,
+        key: str,
+        *,
+        summary: str,
+        status: str = "打开",
+        priority: str = "Medium",
+        updated: str = "2026-08-19T01:00:00.000+0800",
+    ) -> dict[str, object]:
+        return {
+            "id": "1000",
+            "key": key,
+            "fields": {
+                "project": {"key": "TAP"},
+                "summary": summary,
+                "status": {"name": status},
+                "issuetype": {"name": "任务"},
+                "assignee": {"accountId": "jira-account-1"},
+                "priority": {"name": priority},
+                "updated": updated,
+            },
+        }
+
+    def test_takeover_without_issue_key_lists_candidates_sorted_by_priority(self) -> None:
+        transport = TakeoverTransport()
+        transport.search_issues = [
+            self._candidate_issue(
+                "TAP-100",
+                summary="低优先任务",
+                priority="Low",
+                updated="2026-08-19T03:00:00.000+0800",
+            ),
+            self._candidate_issue(
+                "TAP-101",
+                summary="最高优先任务",
+                priority="Highest",
+                updated="2026-08-19T01:00:00.000+0800",
+            ),
+            self._candidate_issue(
+                "TAP-102",
+                summary="中等优先更新新",
+                priority="Medium",
+                updated="2026-08-19T02:00:00.000+0800",
+            ),
+        ]
+        code, payload, stderr = self.run_cli(transport, issue_key=None)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual(True, payload["selection_required"])
+        self.assertEqual(3, payload["candidate_count"])
+        candidates: list[dict[str, object]] = payload["candidates"]  # type: ignore[assignment]
+        keys = [str(task["issue_key"]) for task in candidates]
+        # 优先级 Highest > Medium > Low，同级按 updated 倒序。
+        self.assertEqual(["TAP-101", "TAP-102", "TAP-100"], keys)
+        # 无 key 路径必须只读：不执行 transition、不写字段。
+        self.assertIsNone(transport.transition_executed)
+        self.assertIsNone(transport.field_written)
+        self.assertNotIn(
+            ("POST", "/rest/api/3/issue/TAP-12289/transitions"),
+            transport.requests,
+        )
+
+    def test_takeover_without_issue_key_empty_candidates(self) -> None:
+        transport = TakeoverTransport()
+        code, payload, stderr = self.run_cli(transport, issue_key=None)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual(True, payload["selection_required"])
+        self.assertEqual(0, payload["candidate_count"])
+        self.assertEqual([], payload["candidates"])
+
+    def test_takeover_reads_agent_id_from_install_identity(self) -> None:
+        identity = self.install / "user" / "identity.yaml"
+        identity.parent.mkdir(parents=True)
+        identity.write_text(
+            "agent_id: harsen-mini-test-bot\n"
+            "jira_email: harsen@example.test\n"
+            "execution_identity:\n"
+            "  git_author_name: Harsen Test Bot\n"
+            "  git_author_email: harsen@example.test\n"
+            "  git_committer_name: Harsen Test Bot\n"
+            "  git_committer_email: harsen@example.test\n"
+            "  github_actor_login: harsen-mini-test-bot\n",
+            encoding="utf-8",
+        )
+        transport = TakeoverTransport(status="打开")
+        code, payload, stderr = self.run_cli(transport, agent_id=None)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual("harsen-mini-test-bot", payload["agent_id"])
+        self.assertEqual(
+            {"customfield_10042": "harsen-mini-test-bot"},
+            transport.field_written,
+        )
+
+    def test_takeover_blocks_when_agent_id_missing(self) -> None:
+        transport = TakeoverTransport(status="打开")
+        code, payload, stderr = self.run_cli(transport, agent_id=None)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("agent_identity_missing", payload["code"])
+
+    def test_takeover_blocks_when_authorization_reference_missing(self) -> None:
+        transport = TakeoverTransport(status="打开")
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+            mock.patch("ao_work.work_cli.validate_install_root", return_value=self.install),
+            mock.patch(
+                "ao_work.task_takeover.UrllibJiraTransport",
+                return_value=transport,
+            ),
+        ):
+            code = main(
+                (
+                    "--workspace-root",
+                    str(self.workspace),
+                    "task",
+                    "takeover",
+                    "TAP-12289",
+                    "--agent-id",
+                    "harsen-mini-test-bot",
+                )
+            )
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(2, code)
+        self.assertEqual("authorization_reference_required", payload["code"])
 
     def test_takeover_blocks_missing_transition(self) -> None:
         transport = TakeoverTransport(

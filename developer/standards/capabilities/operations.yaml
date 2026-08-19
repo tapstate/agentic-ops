@@ -355,8 +355,8 @@ capabilities:
     visibility: public
     commands:
       - [task, takeover]
-    summary: Jira 任务接管和所有权绑定：校验经办人/agentic_id 归属/状态映射，transition 到执行状态并写入 agentic_id 字段（字段 ID 从元数据探测），回读确认后写本地 takeover 记录。
-    next_action: 请在任务准入与方案确认（task intake/solution confirm）通过后调用 task takeover；必须引用与任务一致的授权。
+    summary: Jira 任务接管和所有权绑定：不带 issue_key 时只读列出可接管候选（profile.task_query + 优先级排序，selection_required 供确认）；带 issue_key 时校验经办人/agentic_id 归属/状态映射，transition 到执行状态并写入 agentic_id 字段（字段 ID 从元数据探测），回读确认后写本地 takeover 记录。agent-id 缺省从安装身份读取。
+    next_action: 无编号时先用候选列表确认目标任务，再带 issue_key 与授权引用重跑；授权引用必须与任务一致（user-confirmation:<KEY>:<plan_id>）。
 
   - id: task_start
     source: runtime

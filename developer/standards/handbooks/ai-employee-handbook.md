@@ -119,6 +119,7 @@ ao-work auth jira verify
 ao-work jira list [--max-results <n>]
 ao-work jira inspect --issue-key TAP-123
 ao-work task takeover TAP-123 --agent-id <agent-id> --authorization-reference <reference>
+ao-work task takeover [--agent-id <agent-id>]   # 无编号：列出候选（按优先级排序）供确认
 ao-work task resume [--issue-key TAP-123 | --agentic-run-id <run-id>]
 ao-work jira comment plan --issue-key TAP-123 --idempotency-key <key> --category <category> --content-file <path> --plan-file .agentic-ops/tasks/TAP-123/runs/<agentic_run_id>/jira-plans/<name>.json
 ao-work jira comment apply --plan-file <managed-path> --confirm-plan-id <plan-id> --authorization-reference <reference>

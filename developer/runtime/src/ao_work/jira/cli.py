@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 
 from ao_work.config import load_jira_context, validate_workspace_jira_binding
-from ao_work.jira.client import JiraClient, UrllibJiraTransport
+from ao_work.jira.client import JiraClient, UrllibJiraTransport, with_forced_order
 from ao_work.jira.service import (
     JiraService,
     WriteAttempt,
@@ -144,7 +144,7 @@ def execute_jira(
         base = (context.profile.task_query or "").strip() or (
             "assignee = currentUser() AND resolution = Unresolved"
         )
-        jql = _with_forced_order(base, "priority DESC, updated ASC")
+        jql = with_forced_order(base, "priority DESC, updated ASC")
         result = client.search_jql(jql, max_results=args.max_results)
         tasks = [
             {
@@ -572,28 +572,6 @@ def _read_included_work(content: str) -> list[dict[str, object]]:
             required_human_action="请逐项列出实际处理说明和对应秒数",
         )
     return payload
-
-
-def _with_forced_order(jql: str, order: str) -> str:
-    """剥离 JQL 尾部 ORDER BY 子句并追加统一排序。
-
-    JQL 不允许两个 ORDER BY；Runtime 需要接管排序（如优先级+更新时间），
-    而过滤条件仍来自 profile.task_query。仅剥离最后一个顶层 ORDER BY，
-    不解析 JQL 内部结构（ORDER BY 只能出现在 JQL 末尾）。
-    """
-    cleaned = jql.strip()
-    marker = cleaned.upper().rfind(" ORDER BY ")
-    if marker != -1:
-        cleaned = cleaned[:marker].rstrip()
-    if not cleaned:
-        raise RuntimeErrorResult(
-            code="task_query_failed",
-            message="Project Profile 的 task_query 为空或仅含排序子句",
-            status="blocked",
-            exit_code=EXIT_BLOCKED,
-            required_human_action="请在 Project Profile 配置有效的 task_query（JQL）后重试",
-        )
-    return f"{cleaned} ORDER BY {order}"
 
 
 def _jira_plan_file(
