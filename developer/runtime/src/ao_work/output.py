@@ -118,6 +118,11 @@ _SUCCESS_NEXT_ACTIONS: dict[str, dict[str, Any]] = {
         "action": "resume_task_from_recorded_state",
         "allowed_operations": ["report_write", "task-run_open"],
     },
+    "task_resume": {
+        "actor": "ai",
+        "action": "resume_task_from_recorded_state",
+        "allowed_operations": ["report_write", "task-run_open"],
+    },
     "jira_inspect": {
         "actor": "ai",
         "action": "analyze_verified_jira_facts",
