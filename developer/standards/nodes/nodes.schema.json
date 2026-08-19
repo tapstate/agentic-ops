@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgenticOps 节点注册表",
+  "description": "developer 面节点注册表结构校验（AO-39 POC）。节点 = 语义化 ID + 准入条件 + 准出决策；准出可声明 jira_transition 映射到项目 profile.transitions。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "workplane", "nodes"],
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "workplane": { "const": "developer" },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "description", "admission", "exit"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "description": "语义化节点 ID：小写 snake_case，从 ID 能看出节点做什么"
+          },
+          "name": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 },
+          "admission": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 },
+            "description": "准入条件：进入节点前任务需具备的信息/授权键"
+          },
+          "exit": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["next_node"],
+            "properties": {
+              "next_node": {
+                "anyOf": [
+                  { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+                  { "type": "null" }
+                ],
+                "description": "准出后的下一步节点 ID；null 表示终态"
+              },
+              "jira_transition": {
+                "type": "string",
+                "minLength": 1,
+                "description": "映射的 profile.transitions 键；声明了才会自动流转 Jira 状态"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,88 @@
+# developer 面节点注册表（AO-39 POC 第一批）
+#
+# 节点 = 可复用的标准处理步骤声明：语义化 ID + 准入条件 + 准出决策。
+# 节点独立于 Jira：节点是内部执行依据，Jira 状态是外部事实源；
+# 节点准出通过项目状态映射（profile.statuses/transitions）映射回 Jira。
+#
+# 约定：
+# - id：语义化小写 snake_case，从 ID 能看出节点做什么
+# - admission：进入该节点的前置条件（任务需具备的信息/授权）
+# - exit：准出决策。next_node 为下一步节点；jira_transition 为映射的
+#   profile.transitions 键（只有声明了 jira_transition 的节点才会自动流转
+#   Jira 状态，中间节点只推进内部状态）；jira_transition 缺省表示不流转
+# - 首批节点从 development-change-v1.yaml 的 stages 提炼（POC 粗粒度）
+
+schema_version: 1
+workplane: developer
+
+nodes:
+  - id: task_intake
+    name: 任务准入
+    description: 拉取任务事实、补全信息、输出准入摘要并获得确认
+    admission:
+      - jira_issue_facts
+      - project_profile
+      - business_source_context
+    exit:
+      next_node: solution_classification
+      # 准入不改变 Jira 状态（任务尚未接管），不流转
+
+  - id: solution_classification
+    name: 方案分级
+    description: 评估方案级别（L1-L4），确定直改/确认/改设计/升级
+    admission:
+      - confirmed_intake_digest
+    exit:
+      next_node: waiting_takeover
+      # 方案确认不改变 Jira 状态，不流转
+
+  - id: waiting_takeover
+    name: 等待接管
+    description: 研发员确认接管任务，写入 agentic_run_id 等接管事实
+    admission:
+      - assignee
+      - task_class
+      - target_repo
+    exit:
+      next_node: implementation
+      jira_transition: start_progress
+
+  - id: implementation
+    name: 实现与验证
+    description: 按修复计划实现代码、验证、整理证据
+    admission:
+      - jira_admission_facts_reinspected
+      - task_taken_over
+      - versioned_fix_plan_written_to_jira
+      - development_engineer_decision_written_to_jira
+    exit:
+      next_node: pr_review
+      # 实现完成进入 PR 审查，Jira 状态不变（仍 In Progress），不流转
+
+  - id: pr_review
+    name: PR 审查
+    description: 提交 PR，等待并处理审查意见直至通过
+    admission:
+      - execution_authorization
+      - authorization_reference
+      - implementation_summary
+      - verification_result
+      - residual_risk
+      - pr_url
+      - fixed_head_sha
+    exit:
+      next_node: completed
+      jira_transition: complete
+
+  - id: completed
+    name: 完成
+    description: 回写完成证据与审计，清理接管状态
+    admission:
+      - review_decision
+      - issue_analysis
+      - fix_details
+      - verification_method
+      - agentic_completion_evidence
+    exit:
+      next_node: null
+      # 终态节点，无下一步

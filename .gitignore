@@ -1,4 +1,5 @@
 .superpowers/
+.hermes/
 .idea/
 dist/
 .venv/
