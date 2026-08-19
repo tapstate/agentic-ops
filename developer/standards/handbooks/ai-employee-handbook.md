@@ -116,6 +116,7 @@ ao-work auth jira set
 ao-work auth jira remove --field <email|token|all>
 ao-work auth jira verify
 
+ao-work jira list [--max-results <n>]
 ao-work jira inspect --issue-key TAP-123
 ao-work jira comment plan --issue-key TAP-123 --idempotency-key <key> --category <category> --content-file <path> --plan-file .agentic-ops/tasks/TAP-123/runs/<agentic_run_id>/jira-plans/<name>.json
 ao-work jira comment apply --plan-file <managed-path> --confirm-plan-id <plan-id> --authorization-reference <reference>

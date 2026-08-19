@@ -33,6 +33,8 @@ class JiraIssue:
     assignee: str
     description: dict[str, Any] | None
     fields: dict[str, Any] = field(default_factory=dict)
+    priority: str = ""
+    updated: str = ""
 
 
 def plain_text(value: Any) -> str:
