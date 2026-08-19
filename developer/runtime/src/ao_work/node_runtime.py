@@ -190,6 +190,48 @@ def get_node(registry: dict[str, Any], node_id: str) -> dict[str, Any]:
     )
 
 
+def get_node_steps(registry: dict[str, Any], node_id: str) -> list[dict[str, Any]]:
+    """返回阶段节点的步骤级节点列表（无 steps 时返回空列表）。"""
+    node = get_node(registry, node_id)
+    steps = node.get("steps")
+    if not isinstance(steps, list):
+        return []
+    return [step for step in steps if isinstance(step, dict)]
+
+
+def get_step(registry: dict[str, Any], node_id: str, step_id: str) -> dict[str, Any]:
+    """在阶段节点内查找步骤级节点；不存在时阻断。"""
+    steps = get_node_steps(registry, node_id)
+    for step in steps:
+        if step.get("id") == step_id:
+            return step
+    raise _blocked(
+        "node_step_unknown",
+        f"步骤节点不存在：{node_id}/{step_id}",
+        "请使用节点注册表中已声明的步骤节点 ID",
+    )
+
+
+def validate_admission(
+    registry: dict[str, Any],
+    node_id: str,
+    available: dict[str, Any] | None,
+) -> list[str]:
+    """校验节点准入条件。
+
+    返回缺失的准入键列表（空列表 = 全部满足）。
+    节点声明的 admission 键必须在 available 中已具备；
+    available 缺省视为空（未提供任务上下文时全部缺失）。
+    """
+    node = get_node(registry, node_id)
+    admission = node.get("admission")
+    if not isinstance(admission, list):
+        return []
+    available_keys = set(available or {})
+    missing = [key for key in admission if key not in available_keys]
+    return missing
+
+
 def resolve_node_exit(
     registry: dict[str, Any],
     node_id: str,
@@ -231,4 +273,102 @@ def resolve_node_exit(
         "jira_transition": transition_key,
         "jira_mapping_valid": valid,
         "mapping_detail": mapping_detail,
+    }
+
+
+def resolve_step_exit(
+    registry: dict[str, Any],
+    node_id: str,
+    step_id: str,
+) -> dict[str, Any]:
+    """解析步骤级节点准出（步骤内推进）。
+
+    步骤准出 next_node 为该阶段内的下一步步骤；null 表示步骤级终态
+    （返回所属阶段节点的准出，由调用方继续 resolve_node_exit）。
+    """
+    step = get_step(registry, node_id, step_id)
+    exit_spec = step.get("exit", {})
+    next_step = exit_spec.get("next_node")
+    return {
+        "node_id": node_id,
+        "step_id": step_id,
+        "next_step": next_step,
+        "step_terminal": next_step is None,
+    }
+
+
+def advance_node(
+    registry: dict[str, Any],
+    current_node: str,
+    profile_transitions: dict[str, Any] | None,
+    *,
+    current_step: str | None = None,
+    available: dict[str, Any] | None = None,
+    require_admission: bool = True,
+) -> dict[str, Any]:
+    """节点推进（AO-41）：准入校验 → 步骤/阶段准出 → 自动流转意图。
+
+    返回：
+    {
+      "admission_ok": 准入是否满足,
+      "missing_admission": 缺失的准入键列表,
+      "current_node": 当前节点,
+      "current_step": 当前步骤（若在步骤内）,
+      "next_node": 准出后的下一步节点或 None,
+      "next_step": 步骤内下一步或 None,
+      "jira_transition": 需要自动流转的 transition 键或 None,
+      "jira_mapping_valid": transition 在项目 profile 中是否可解析,
+      "terminal": 是否到达终态,
+      "message": 面向 AI/人工的说明,
+    }
+
+    准入不满足且 require_admission=True 时阻断（抛 RuntimeErrorResult）。
+    """
+    if require_admission:
+        missing = validate_admission(registry, current_node, available)
+        if missing:
+            raise _blocked(
+                "node_admission_not_met",
+                f"节点 {current_node} 准入条件不满足，缺失：{', '.join(missing)}",
+                "请补齐缺失的任务信息/授权/证据后重新推进",
+            )
+    else:
+        missing = validate_admission(registry, current_node, available)
+
+    steps = get_node_steps(registry, current_node)
+    if steps and current_step is not None:
+        step_result = resolve_step_exit(registry, current_node, current_step)
+        if not step_result["step_terminal"]:
+            return {
+                "admission_ok": not missing,
+                "missing_admission": missing,
+                "current_node": current_node,
+                "current_step": current_step,
+                "next_node": None,
+                "next_step": step_result["next_step"],
+                "jira_transition": None,
+                "jira_mapping_valid": True,
+                "terminal": False,
+                "message": f"步骤 {current_node}/{current_step} 完成，下一步步骤：{step_result['next_step']}",
+            }
+        # 步骤级终态：回到阶段节点准出
+        current_step = None
+
+    exit_result = resolve_node_exit(registry, current_node, profile_transitions)
+    terminal = exit_result["next_node"] is None
+    return {
+        "admission_ok": not missing,
+        "missing_admission": missing,
+        "current_node": current_node,
+        "current_step": current_step,
+        "next_node": exit_result["next_node"],
+        "next_step": None,
+        "jira_transition": exit_result["jira_transition"],
+        "jira_mapping_valid": exit_result["jira_mapping_valid"],
+        "terminal": terminal,
+        "message": (
+            f"节点 {current_node} 完成，下一步节点：{exit_result['next_node']}"
+            if exit_result["next_node"]
+            else f"节点 {current_node} 完成，到达终态"
+        ),
     }
