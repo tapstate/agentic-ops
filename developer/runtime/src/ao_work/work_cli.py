@@ -7,7 +7,7 @@ from typing import Sequence
 
 from ao_work.authorization.cli import configure_authorization_parser, execute_authorization
 from ao_work.capabilities import configure_capability_parser, execute_capability
-from ao_work.cli_common import ArgumentParserError, JsonArgumentParser
+from ao_work.cli_common import ArgumentParserError, HelpRequested, JsonArgumentParser
 from ao_work.jira.cli import configure_jira_parser, execute_jira
 from ao_work.installation import validate_install_root
 from ao_work.installation.cli import configure_install_parser, execute_install
@@ -222,11 +222,11 @@ def _run(
     args: argparse.Namespace | None = None
     try:
         arguments = list(argv) if argv is not None else sys.argv[1:]
-        if "--help" in arguments or "-h" in arguments:
-            write_json(success("help", usage=parser.format_help()))
-            return 0
         args = parser.parse_args(arguments)
         write_json(executor(args))  # type: ignore[operator]
+        return 0
+    except HelpRequested as error:
+        write_json(success("help", usage=error.usage))
         return 0
     except ArgumentParserError as error:
         result = RuntimeErrorResult(
