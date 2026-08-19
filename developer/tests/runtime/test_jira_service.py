@@ -26,6 +26,8 @@ class FakeTransport:
         self.unknown_after_comment = False
         self.requests: list[tuple[str, str]] = []
         self.queries: list[dict[str, str]] = []
+        self.search_issues: list[dict[str, Any]] = []
+        self.search_total: int | None = None
 
     def request(
         self,
@@ -37,6 +39,20 @@ class FakeTransport:
     ) -> TransportResponse:
         self.requests.append((method, path))
         self.queries.append(dict(query or {}))
+        if path == "/rest/api/3/search/jql":
+            return TransportResponse(
+                200,
+                {
+                    "issues": self.search_issues,
+                    "total": (
+                        self.search_total
+                        if self.search_total is not None
+                        else len(self.search_issues)
+                    ),
+                    "startAt": 0,
+                    "maxResults": 50,
+                },
+            )
         if path == "/rest/api/3/field":
             return TransportResponse(200, self.fields)
         if "/comment/" in path and method == "GET":
@@ -679,3 +695,91 @@ class JiraRedirectSecurityTest(unittest.TestCase):
         self.assertEqual("jira.example.test", opener.requests[0].host)
         self.assertIn("Authorization", opener.requests[0].headers)
         self.assertNotEqual(location, opener.requests[0].full_url)
+
+
+class JiraSearchJqlTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.transport = FakeTransport()
+        self.client = JiraClient(profile(), self.transport)
+
+    def _issue(
+        self,
+        key: str = "TAP-1",
+        *,
+        summary: str = "任务一",
+        status: str = "打开",
+        issue_type: str = "任务",
+        priority: str = "Highest",
+        updated: str = "2026-08-19T01:00:00.000+0800",
+    ) -> dict[str, Any]:
+        return {
+            "id": "1000",
+            "key": key,
+            "fields": {
+                "project": {"key": "TAP"},
+                "summary": summary,
+                "status": {"name": status},
+                "issuetype": {"name": issue_type},
+                "assignee": {"accountId": "owner-1"},
+                "priority": {"name": priority},
+                "updated": updated,
+            },
+        }
+
+    def test_search_jql_returns_parsed_issues_with_total(self) -> None:
+        self.transport.search_issues = [self._issue("TAP-1"), self._issue("TAP-2", summary="任务二")]
+        self.transport.search_total = 7
+        result = self.client.search_jql("project = TAP", max_results=50)
+        self.assertEqual(7, result.total)
+        self.assertEqual(2, len(result.issues))
+        first = result.issues[0]
+        self.assertEqual("TAP-1", first.key)
+        self.assertEqual("任务一", first.summary)
+        self.assertEqual("打开", first.status)
+        self.assertEqual("Highest", first.priority)
+        self.assertEqual("2026-08-19T01:00:00.000+0800", first.updated)
+        self.assertEqual("TAP", first.project_key)
+        # 走 /rest/api/3/search/jql 端点（tapdata /search 已移除）。
+        self.assertEqual(("GET", "/rest/api/3/search/jql"), self.transport.requests[0])
+
+    def test_search_jql_uses_profile_fields_and_jql_query(self) -> None:
+        self.transport.search_issues = [self._issue()]
+        self.client.search_jql("assignee = currentUser()", max_results=20)
+        query = self.transport.queries[-1]
+        self.assertEqual("assignee = currentUser()", query["jql"])
+        self.assertEqual("20", query["maxResults"])
+        self.assertIn("priority", query["fields"])
+        self.assertIn("updated", query["fields"])
+
+    def test_search_jql_total_missing_falls_back_to_issue_count(self) -> None:
+        self.transport.search_issues = [self._issue("TAP-1"), self._issue("TAP-2")]
+        self.transport.search_total = None
+        result = self.client.search_jql("project = TAP")
+        self.assertEqual(2, result.total)
+        self.assertEqual(2, len(result.issues))
+
+    def test_search_jql_empty_result(self) -> None:
+        result = self.client.search_jql("project = NOPE")
+        self.assertEqual(0, result.total)
+        self.assertEqual([], result.issues)
+
+
+class WithForcedOrderTest(unittest.TestCase):
+    def test_strips_profile_order_by_and_appends_forced_order(self) -> None:
+        from ao_work.jira.cli import _with_forced_order
+
+        self.assertEqual(
+            "project = TAP ORDER BY priority DESC, updated ASC",
+            _with_forced_order(
+                "project = TAP ORDER BY updated DESC",
+                "priority DESC, updated ASC",
+            ),
+        )
+
+    def test_appends_order_when_profile_has_none(self) -> None:
+        from ao_work.jira.cli import _with_forced_order
+
+        self.assertEqual(
+            "assignee = currentUser() ORDER BY priority DESC",
+            _with_forced_order("assignee = currentUser()", "priority DESC"),
+        )

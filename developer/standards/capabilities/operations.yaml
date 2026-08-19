@@ -222,11 +222,12 @@ capabilities:
   - id: list_tasks
     source: contract
     contract: contracts/operations/list-tasks.yaml
-    status: capability_gap
+    status: implemented
     visibility: public
-    commands: []
-    summary: Jira 待办列表目标契约，尚未迁移到 Python Runtime。
-    next_action: 请使用 Jira 界面或项目认可的只读查询获取任务，不得返回示例或本地伪造任务。
+    commands:
+      - [jira, list]
+    summary: 列出当前研发员名下可处理任务（契约：分配给当前用户、按优先级+更新时间排序、一页 10 个）：过滤条件来自 Project Profile task_query（缺省 assignee = currentUser() AND resolution = Unresolved），排序由 Runtime 统一为 ORDER BY priority DESC, updated ASC，走 /rest/api/3/search/jql 端点，只读返回 key/summary/status/issue_type/priority/updated 与总数。
+    next_action: 请在任务接管前使用 jira list 查看名下待办；本操作只读，不写 Jira。
 
   - id: policy_rollback
     source: contract

@@ -29,6 +29,12 @@ class TransportResponse:
     payload: Any
 
 
+@dataclass(frozen=True)
+class JiraSearchResult:
+    issues: list[JiraIssue]
+    total: int
+
+
 class JiraTransport(Protocol):
     def request(
         self,
@@ -176,7 +182,87 @@ class JiraClient:
             assignee=user_identifier(raw_fields.get("assignee")),
             description=raw_fields.get("description") if isinstance(raw_fields.get("description"), dict) else None,
             fields=raw_fields,
+            priority=object_name(raw_fields.get("priority")),
+            updated=str(raw_fields.get("updated", "")),
         )
+
+    def search_jql(
+        self,
+        jql: str,
+        *,
+        fields: tuple[str, ...] | None = None,
+        max_results: int = 50,
+    ) -> JiraSearchResult:
+        """JQL 搜索任务列表（只读）。
+
+        使用 /rest/api/3/search/jql 端点：tapdata 站点 /rest/api/3/search 已移除
+        （Atlassian CHANGE-2046，2026-08-18 实测），必须迁移到 search/jql。
+        total 字段缺失时用返回 issues 数量兜底，不当作失败。
+        """
+        requested = fields or (
+            "summary",
+            "status",
+            "issuetype",
+            "assignee",
+            "priority",
+            "updated",
+            "project",
+        )
+        payload = self._request(
+            "GET",
+            "/rest/api/3/search/jql",
+            query={
+                "jql": jql,
+                "fields": ",".join(requested),
+                "maxResults": str(max_results),
+            },
+        )
+        if not isinstance(payload, dict):
+            raise RuntimeErrorResult(
+                code="jira_search_failed",
+                message="Jira 搜索返回了无法识别的响应",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请核对 Jira 站点、JQL 与账户权限后重试",
+            )
+        raw_issues = payload.get("issues", [])
+        if not isinstance(raw_issues, list):
+            raise RuntimeErrorResult(
+                code="jira_search_failed",
+                message="Jira 搜索响应缺少 issues 列表",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请核对 Jira 站点与账户权限后重试",
+            )
+        total_raw = payload.get("total")
+        total = total_raw if isinstance(total_raw, int) and total_raw >= 0 else len(raw_issues)
+        issues: list[JiraIssue] = []
+        for item in raw_issues:
+            if not isinstance(item, dict):
+                continue
+            raw_fields = item.get("fields", {})
+            if not isinstance(raw_fields, dict):
+                raw_fields = {}
+            project = raw_fields.get("project", {})
+            project_key = (
+                project.get("key", "") if isinstance(project, dict) else ""
+            ) or str(item.get("key", "")).partition("-")[0]
+            issues.append(
+                JiraIssue(
+                    issue_id=str(item.get("id", "")),
+                    key=str(item.get("key", "")),
+                    project_key=str(project_key),
+                    summary=str(raw_fields.get("summary", "")),
+                    status=object_name(raw_fields.get("status")),
+                    issue_type=object_name(raw_fields.get("issuetype")),
+                    assignee=user_identifier(raw_fields.get("assignee")),
+                    description=None,
+                    fields=raw_fields,
+                    priority=object_name(raw_fields.get("priority")),
+                    updated=str(raw_fields.get("updated", "")),
+                )
+            )
+        return JiraSearchResult(issues=issues, total=total)
 
     def comments(self, issue_key: str) -> list[JiraComment]:
         items = self._paginated(

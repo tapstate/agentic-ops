@@ -52,6 +52,7 @@ connection_id: tap-cloud
 jira:
   project_key: TAP
   issue_types: [任务]
+  task_query: project = TAP
 fields:
   issue_analysis:
     source: jira_field
@@ -848,3 +849,114 @@ repositories:
             self.assertFalse(
                 (workspace / ".agentic-ops/tasks/TAP-123/reports/analysis.md").exists()
             )
+
+    def test_cli_jira_list_returns_tasks_with_total(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _, workspace = self.prepare(Path(temporary))
+            common = self.initialize_task(workspace)
+            transport = FakeTransport()
+            transport.search_issues = [
+                {
+                    "id": "10001",
+                    "key": "TAP-1",
+                    "fields": {
+                        "project": {"key": "TAP"},
+                        "summary": "任务一",
+                        "status": {"name": "打开"},
+                        "issuetype": {"name": "任务"},
+                        "assignee": {"accountId": "owner-1"},
+                        "priority": {"name": "Highest"},
+                        "updated": "2026-08-19T01:00:00.000+0800",
+                    },
+                },
+                {
+                    "id": "10002",
+                    "key": "TAP-2",
+                    "fields": {
+                        "project": {"key": "TAP"},
+                        "summary": "任务二",
+                        "status": {"name": "正在进行"},
+                        "issuetype": {"name": "缺陷"},
+                        "assignee": {"accountId": "owner-1"},
+                        "priority": {"name": "Low"},
+                        "updated": "2026-08-19T02:00:00.000+0800",
+                    },
+                },
+            ]
+            transport.search_total = 5
+            with mock.patch(
+                "ao_work.jira.cli.UrllibJiraTransport", return_value=transport
+            ):
+                exit_code, result, _ = self.run_cli(
+                    *common,
+                    "jira",
+                    "list",
+                )
+            self.assertEqual(0, exit_code)
+            self.assertEqual("jira_list", result["operation"])
+            self.assertEqual(5, result["total"])
+            self.assertEqual(2, result["returned"])
+            self.assertEqual(
+                "project = TAP ORDER BY priority DESC, updated ASC",
+                result["jql"],
+            )
+            tasks: list[dict[str, object]] = result["tasks"]  # type: ignore[assignment]
+            self.assertEqual("TAP-1", tasks[0]["issue_key"])
+            self.assertEqual("任务一", tasks[0]["summary"])
+            self.assertEqual("Highest", tasks[0]["priority"])
+            self.assertEqual("正在进行", tasks[1]["status"])
+            # 走 /rest/api/3/search/jql（tapdata /search 已移除）。
+            self.assertEqual(
+                ("GET", "/rest/api/3/search/jql"),
+                transport.requests[-1],
+            )
+            # 一页默认 10 个任务。
+            self.assertEqual("10", transport.queries[-1]["maxResults"])
+
+    def test_cli_jira_list_falls_back_to_default_jql_when_task_query_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            install, workspace = self.prepare(Path(temporary))
+            profile = install / "developer" / "standards" / "projects" / "demo" / "profile.yaml"
+            profile.write_text(
+                "profile_id: demo\n"
+                "connection_id: tap-cloud\n"
+                "jira:\n"
+                "  project_key: TAP\n"
+                "  issue_types: [任务]\n"
+                "statuses: {}\n"
+                "transitions: {}\n"
+                "repositories:\n"
+                "  default: tapdata/tapdata\n",
+                encoding="utf-8",
+            )
+            common = self.initialize_task(workspace)
+            transport = FakeTransport()
+            transport.search_issues = [
+                {
+                    "id": "10001",
+                    "key": "TAP-1",
+                    "fields": {
+                        "project": {"key": "TAP"},
+                        "summary": "任务一",
+                        "status": {"name": "打开"},
+                        "issuetype": {"name": "任务"},
+                        "assignee": {"accountId": "owner-1"},
+                        "priority": {"name": "Highest"},
+                        "updated": "2026-08-19T01:00:00.000+0800",
+                    },
+                }
+            ]
+            with mock.patch(
+                "ao_work.jira.cli.UrllibJiraTransport",
+                return_value=transport,
+            ):
+                exit_code, result, _ = self.run_cli(*common, "jira", "list")
+            self.assertEqual(0, exit_code)
+            self.assertIn("assignee = currentUser()", str(result["jql"]))
+            self.assertTrue(
+                str(result["jql"]).endswith(
+                    "ORDER BY priority DESC, updated ASC"
+                ),
+                result["jql"],
+            )
+            self.assertEqual(1, result["returned"])

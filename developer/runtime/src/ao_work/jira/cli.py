@@ -38,6 +38,9 @@ def configure_jira_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
     inspect_parser = jira_commands.add_parser("inspect")
     inspect_parser.add_argument("--issue-key", required=True)
 
+    list_parser = jira_commands.add_parser("list")
+    list_parser.add_argument("--max-results", type=int, default=10)
+
     comment_parser = jira_commands.add_parser("comment")
     _configure_write_actions(comment_parser, "comment")
 
@@ -131,6 +134,36 @@ def execute_jira(
                 "issue_type": issue.issue_type,
                 "assignee": issue.assignee,
             },
+            "credential_status": context.credential_status(),
+        }
+
+    if args.command == "list":
+        # 契约（AO-27 确认）：任务必须分配给当前用户、按优先级+更新时间排序、一页 10 个。
+        # 过滤条件来自 profile.task_query（project/statusCategory 等），但排序统一由
+        # Runtime 接管：JQL 不能有两个 ORDER BY，先剥离 task_query 尾部排序再追加。
+        base = (context.profile.task_query or "").strip() or (
+            "assignee = currentUser() AND resolution = Unresolved"
+        )
+        jql = _with_forced_order(base, "priority DESC, updated ASC")
+        result = client.search_jql(jql, max_results=args.max_results)
+        tasks = [
+            {
+                "issue_key": issue.key,
+                "summary": issue.summary,
+                "status": issue.status,
+                "issue_type": issue.issue_type,
+                "priority": issue.priority,
+                "updated": issue.updated,
+            }
+            for issue in result.issues
+        ]
+        return {
+            "connection_id": context.connection.connection_id,
+            "profile_id": context.profile.profile_id,
+            "jql": jql,
+            "total": result.total,
+            "returned": len(tasks),
+            "tasks": tasks,
             "credential_status": context.credential_status(),
         }
 
@@ -539,6 +572,28 @@ def _read_included_work(content: str) -> list[dict[str, object]]:
             required_human_action="请逐项列出实际处理说明和对应秒数",
         )
     return payload
+
+
+def _with_forced_order(jql: str, order: str) -> str:
+    """剥离 JQL 尾部 ORDER BY 子句并追加统一排序。
+
+    JQL 不允许两个 ORDER BY；Runtime 需要接管排序（如优先级+更新时间），
+    而过滤条件仍来自 profile.task_query。仅剥离最后一个顶层 ORDER BY，
+    不解析 JQL 内部结构（ORDER BY 只能出现在 JQL 末尾）。
+    """
+    cleaned = jql.strip()
+    marker = cleaned.upper().rfind(" ORDER BY ")
+    if marker != -1:
+        cleaned = cleaned[:marker].rstrip()
+    if not cleaned:
+        raise RuntimeErrorResult(
+            code="task_query_failed",
+            message="Project Profile 的 task_query 为空或仅含排序子句",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请在 Project Profile 配置有效的 task_query（JQL）后重试",
+        )
+    return f"{cleaned} ORDER BY {order}"
 
 
 def _jira_plan_file(
