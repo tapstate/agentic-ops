@@ -660,6 +660,10 @@ class MaintainerJiraCliTest(unittest.TestCase):
         self.assertEqual("hermes-agent", args.agent_id)
         args_show = parser.parse_args(["install", "identity", "show"])
         self.assertEqual("show", args_show.action)
+        args_interactive = parser.parse_args(
+            ["install", "identity", "set", "--interactive"]
+        )
+        self.assertTrue(args_interactive.interactive)
 
     def test_create_parser_registered_with_plan_apply_readback(self) -> None:
         parser = build_maintainer_parser()

@@ -9,6 +9,7 @@ CONNECTION_ID="${AGENTIC_OPS_MAINTAINER_CONNECTION_ID:-tapdata-cloud}"
 CONNECTIONS_DIR="$SOURCE_ROOT/maintainer/standards/connections"
 LOCAL_DIR="$SOURCE_ROOT/maintainer/.local"
 ENV_FILE="$LOCAL_DIR/.env"
+IDENTITY_FILE="$LOCAL_DIR/identity.yaml"
 PYTHON_BIN="$SOURCE_ROOT/maintainer/.venv/bin/python"
 
 fail() {
@@ -49,4 +50,13 @@ if [ -f "$ENV_FILE" ] && [ -s "$ENV_FILE" ]; then
 else
   export PYTHONPATH="$SOURCE_ROOT/maintainer/runtime/src"
   exec "$PYTHON_BIN" -m ao_maint --source-root "$SOURCE_ROOT" jira auth set --interactive
+fi
+
+# 5. Agent 身份确认（A 方案：初始化 maintainer 时确认身份）
+if [ -f "$IDENTITY_FILE" ] && [ -s "$IDENTITY_FILE" ]; then
+  printf 'AgenticOps：检测到已有 Agent 身份 %s，如需修改请使用 ao-maint install identity set --interactive\n' "$IDENTITY_FILE"
+else
+  printf 'AgenticOps：开始配置 maintainer Agent 身份（执行维护任务的 Agent 标识）\n'
+  export PYTHONPATH="$SOURCE_ROOT/maintainer/runtime/src"
+  exec "$PYTHON_BIN" -m ao_maint --source-root "$SOURCE_ROOT" install identity set --interactive
 fi
