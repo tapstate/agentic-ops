@@ -1,25 +1,24 @@
-# developer 面节点注册表（AO-39 POC + AO-41 全量）
+# developer 面阶段注册表（AO-39 POC + AO-41 全量）
 #
-# 节点 = 可复用的标准处理步骤声明：语义化 ID + 准入条件 + 准出决策。
-# 节点独立于 Jira：节点是内部执行依据，Jira 状态是外部事实源；
-# 节点准出通过项目状态映射（profile.statuses/transitions）映射回 Jira。
+# 阶段（stage）= 可复用的标准处理步骤声明：语义化 ID + 准入条件 + 准出决策。
+# 阶段独立于 Jira：阶段是内部执行依据，Jira 状态是外部事实源；
+# 阶段准出通过项目状态映射（profile.statuses/transitions）映射回 Jira。
 #
 # 约定：
-# - id：语义化小写 snake_case，从 ID 能看出节点做什么
-# - admission：进入该节点的前置条件（任务需具备的信息/授权）
-# - exit：准出决策。next_node 为下一步节点；jira_transition 为映射的
-#   profile.transitions 键（只有声明了 jira_transition 的节点才会自动流转
-#   Jira 状态，中间节点只推进内部状态）；jira_transition 缺省表示不流转
-# - steps：阶段级节点内的步骤级节点（细粒度，供 AI 执行/恢复用）。
-#   步骤节点只有 id/name/description/exit，不重复声明 admission
-#   （继承所属阶段节点的准入）
-# - 阶段节点从 development-change-v1.yaml 的 stages 提炼；implementation
-#   阶段内拆出步骤级节点（AO-41）
+# - id：语义化小写 snake_case，从 ID 能看出阶段做什么
+# - admission：进入该阶段的前置条件（任务需具备的信息/授权）
+# - exit：准出决策。next_stage 为下一阶段；jira_transition 为映射的
+#   profile.transitions 键（只有声明了 jira_transition 的阶段才会自动流转
+#   Jira 状态，中间阶段只推进内部状态）；jira_transition 缺省表示不流转
+# - steps：阶段内的步骤（细粒度，供 AI 执行/恢复用）。步骤只有
+#   id/name/description/exit，不重复声明 admission（继承所属阶段的准入）
+# - 阶段从 development-change-v1.yaml 的 stages 提炼；implementation
+#   阶段内拆出步骤（AO-41）
 
 schema_version: 2
 workplane: developer
 
-nodes:
+stages:
   - id: task_intake
     name: 任务准入
     description: 拉取任务事实、补全信息、输出准入摘要并获得确认
@@ -28,7 +27,7 @@ nodes:
       - project_profile
       - business_source_context
     exit:
-      next_node: solution_classification
+      next_stage: solution_classification
       # 准入不改变 Jira 状态（任务尚未接管），不流转
 
   - id: solution_classification
@@ -37,7 +36,7 @@ nodes:
     admission:
       - confirmed_intake_digest
     exit:
-      next_node: waiting_takeover
+      next_stage: waiting_takeover
       # 方案确认不改变 Jira 状态，不流转
 
   - id: waiting_takeover
@@ -48,7 +47,7 @@ nodes:
       - task_class
       - target_repo
     exit:
-      next_node: implementation
+      next_stage: implementation
       jira_transition: start_progress
 
   - id: implementation
@@ -60,25 +59,25 @@ nodes:
       - versioned_fix_plan_written_to_jira
       - development_engineer_decision_written_to_jira
     exit:
-      next_node: pr_review
+      next_stage: pr_review
       # 实现完成进入 PR 审查，Jira 状态不变（仍 In Progress），不流转
     steps:
       - id: code_writing
         name: 编写代码
         description: 按修复计划实现代码变更
         exit:
-          next_node: test_writing
+          next_step: test_writing
       - id: test_writing
         name: 编写测试
         description: 为代码变更编写或更新测试
         exit:
-          next_node: verification
+          next_step: verification
       - id: verification
         name: 验证
         description: 运行测试与验证，整理验证结果与残留风险
         exit:
-          next_node: null
-          # 步骤级终态：返回所属阶段节点（implementation）的准出
+          next_step: null
+          # 步骤级终态：返回所属阶段（implementation）的准出
 
   - id: pr_review
     name: PR 审查
@@ -92,7 +91,7 @@ nodes:
       - pr_url
       - fixed_head_sha
     exit:
-      next_node: completed
+      next_stage: completed
       jira_transition: complete
 
   - id: completed
@@ -105,5 +104,5 @@ nodes:
       - verification_method
       - agentic_completion_evidence
     exit:
-      next_node: null
-      # 终态节点，无下一步
+      next_stage: null
+      # 终态阶段，无下一步

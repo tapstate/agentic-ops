@@ -1,12 +1,12 @@
 process_id: development_change_v1
 workplane: developer
-# 流程节点引用（AO-41）：stages 的节点定义（准入/准出/Jira 流转）由
-# developer/standards/nodes/registry.yaml 节点注册表统一驱动，本文件只保留
+# 流程阶段引用（AO-41）：stages 的阶段定义（准入/准出/Jira 流转）与阶段内步骤
+# （step）由 developer/standards/stages/stages.yaml 阶段注册表统一驱动，本文件只保留
 # 流程级编排信息（task_classes/ownership/review_gate 等），避免两处重复定义。
 # 对应关系：task_intake→task_intake、solution_classification→solution_classification、
-# waiting_takeover→waiting_takeover、implementation→implementation（含步骤级节点）、
+# waiting_takeover→waiting_takeover、implementation→implementation（含阶段内步骤）、
 # pr_review→pr_review、completed→completed。
-node_registry: developer/standards/nodes/registry.yaml
+stage_registry: developer/standards/stages/stages.yaml
 task_classes:
   - feature_change
   - bug_fix
