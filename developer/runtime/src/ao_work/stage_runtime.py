@@ -334,8 +334,10 @@ def advance_stage(
     current_step: str | None = None,
     available: dict[str, Any] | None = None,
     require_admission: bool = True,
+    stage_timeline: list[dict[str, Any]] | None = None,
+    loop_limit: int = 2,
 ) -> dict[str, Any]:
-    """阶段推进（AO-41）：准入校验 → 步骤/阶段准出 → 自动流转意图。
+    """阶段推进（AO-41/AO-42）：准入校验 → 步骤/阶段准出 → 自动流转意图 + 回环门禁。
 
     返回：
     {
@@ -348,10 +350,15 @@ def advance_stage(
       "jira_transition": 需要自动流转的 transition 键或 None,
       "jira_mapping_valid": transition 在项目 profile 中是否可解析,
       "terminal": 是否到达终态,
+      "loop_blocked": 是否触发回环门禁,
+      "next_stage_enter_count": 目标阶段在序列中的出现次数,
       "message": 面向 AI/人工的说明,
     }
 
     准入不满足且 require_admission=True 时阻断（抛 RuntimeErrorResult）。
+    目标下一阶段已出现在 stage_timeline（只记录 AI 处理阶段）中
+    ≥ loop_limit 次时，抛 stage_loop_requires_human 阻断转人工决策
+    （AO-42 回环门禁）。
     """
     if require_admission:
         missing = validate_admission(registry, current_stage, available)
@@ -385,6 +392,29 @@ def advance_stage(
 
     exit_result = resolve_stage_exit(registry, current_stage, profile_transitions)
     terminal = exit_result["next_stage"] is None
+
+    # 回环门禁（AO-42）：stage_timeline 只记录 AI 处理阶段（进入序列即
+    # 证明是 AI 阶段）。目标下一阶段若已在该序列中出现 ≥ loop_limit 次，
+    # 说明该 AI 阶段被反复进入（疑似回环），阻断转人工决策。
+    loop_blocked = False
+    stage_enter_count = 0
+    next_stage = exit_result["next_stage"]
+    if next_stage is not None and not terminal:
+        stage_enter_count = count_stage_in_timeline(
+            stage_timeline or [], next_stage
+        )
+        if stage_enter_count >= loop_limit:
+            loop_blocked = True
+            raise _blocked(
+                "stage_loop_requires_human",
+                (
+                    f"阶段 {current_stage} 准出目标 {next_stage} 为自动处理阶段，"
+                    f"但该阶段在本任务处理周期已进入 {stage_enter_count} 次"
+                    f"（上限 {loop_limit}），疑似回环，禁止自动进入"
+                ),
+                "请人工决策：确认继续进入 / 调整方案 / 修改流程定义",
+            )
+
     return {
         "admission_ok": not missing,
         "missing_admission": missing,
@@ -395,9 +425,46 @@ def advance_stage(
         "jira_transition": exit_result["jira_transition"],
         "jira_mapping_valid": exit_result["jira_mapping_valid"],
         "terminal": terminal,
+        "loop_blocked": loop_blocked,
+        "next_stage_enter_count": stage_enter_count,
         "message": (
             f"阶段 {current_stage} 完成，下一阶段：{exit_result['next_stage']}"
             if exit_result["next_stage"]
             else f"阶段 {current_stage} 完成，到达终态"
         ),
     }
+
+
+def count_stage_in_timeline(
+    sequence: list[dict[str, Any]], stage_id: str
+) -> int:
+    """统计 stage_id 在 AI 阶段有序序列中出现的次数。"""
+    return sum(1 for item in sequence if isinstance(item, dict) and item.get("stage_id") == stage_id)
+
+
+def append_stage_timeline(
+    sequence: list[dict[str, Any]],
+    stage_id: str,
+    begin: str,
+) -> list[dict[str, Any]]:
+    """进入 AI 阶段：追加 {stage_id, begin, end: None} 到序列尾部。"""
+    return [*sequence, {"stage_id": stage_id, "begin": begin, "end": None}]
+
+
+def close_stage_timeline(
+    sequence: list[dict[str, Any]],
+    stage_id: str,
+    end: str,
+) -> list[dict[str, Any]]:
+    """准出 AI 阶段：更新序列中该阶段最后一条（end 为 None 的）的 end 时间。"""
+    result = list(sequence)
+    for index in range(len(result) - 1, -1, -1):
+        item = result[index]
+        if (
+            isinstance(item, dict)
+            and item.get("stage_id") == stage_id
+            and item.get("end") is None
+        ):
+            result[index] = {**item, "end": end}
+            break
+    return result

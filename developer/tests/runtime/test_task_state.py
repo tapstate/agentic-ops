@@ -329,3 +329,58 @@ class TaskStateTest(unittest.TestCase):
                         store.inspect(IDENTITY.issue_key)
                 self.assertEqual("task_state_leaf_unsafe", captured.exception.code)
                 self.assertEqual(original, external.read_bytes())
+
+    def test_update_stage_timeline_writes_progress_and_journal(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            now = datetime(2026, 8, 13, 1, 2, 3, tzinfo=timezone.utc)
+            store = TaskStore(root, now=lambda: now)
+            store.initialize(IDENTITY)
+            sequence = [
+                {"stage_id": "task_intake", "begin": "t1", "end": "t2"},
+                {"stage_id": "implementation", "begin": "t3", "end": None},
+            ]
+            result = store.update_stage_timeline(
+                IDENTITY.issue_key,
+                IDENTITY.agentic_run_id,
+                sequence,
+            )
+            progress = result["progress"]
+            self.assertEqual(sequence, progress["stage_timeline"])
+            task_dir = root / ".agentic-ops" / "tasks" / IDENTITY.issue_key
+            on_disk = read_json(task_dir / "progress.json")
+            self.assertEqual(sequence, on_disk["stage_timeline"])
+            journal = (task_dir / "journal.ndjson").read_text(encoding="utf-8").splitlines()
+            self.assertEqual("stage_timeline_update", json.loads(journal[-1])["operation"])
+            self.assertEqual(sequence, json.loads(journal[-1])["sequence"])
+
+    def test_update_stage_timeline_rejects_bad_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = TaskStore(root)
+            store.initialize(IDENTITY)
+            with self.assertRaises(RuntimeErrorResult):
+                store.update_stage_timeline(
+                    IDENTITY.issue_key,
+                    IDENTITY.agentic_run_id,
+                    [{"stage_id": 123, "begin": "t1", "end": None}],
+                )
+            with self.assertRaises(RuntimeErrorResult):
+                store.update_stage_timeline(
+                    IDENTITY.issue_key,
+                    "run-other",
+                    [],
+                )
+
+    def test_update_stage_timeline_identity_mismatch_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = TaskStore(root)
+            store.initialize(IDENTITY)
+            with self.assertRaises(RuntimeErrorResult) as captured:
+                store.update_stage_timeline(
+                    IDENTITY.issue_key,
+                    "run-other-999",
+                    [],
+                )
+            self.assertEqual("task_identity_mismatch", captured.exception.code)

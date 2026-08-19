@@ -366,3 +366,97 @@ class StageRuntimeTest(unittest.TestCase):
         )
         self.assertIsNone(result["next_stage"])
         self.assertTrue(result["terminal"])
+
+    def test_advance_stage_loop_blocked_after_limit(self) -> None:
+        from ao_work.stage_runtime import advance_stage
+
+        root = self._install_root()
+        registry = load_stage_registry(root)
+        # implementation 已在序列中出现 2 次（默认上限），再次准出到 implementation 应阻断
+        sequence = [
+            {"stage_id": "task_intake", "begin": "t1", "end": "t2"},
+            {"stage_id": "implementation", "begin": "t3", "end": "t4"},
+            {"stage_id": "implementation", "begin": "t5", "end": "t6"},
+        ]
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            advance_stage(
+                registry,
+                "waiting_takeover",
+                {"start_progress": {"name": "In Progress", "id": "31"}},
+                available={"assignee": "u"},
+                stage_timeline=sequence,
+            )
+        self.assertEqual("stage_loop_requires_human", captured.exception.code)
+
+    def test_advance_stage_loop_not_blocked_below_limit(self) -> None:
+        from ao_work.stage_runtime import advance_stage
+
+        root = self._install_root()
+        registry = load_stage_registry(root)
+        # implementation 只在序列中出现 1 次，准出进入第 2 次不阻断
+        sequence = [
+            {"stage_id": "task_intake", "begin": "t1", "end": "t2"},
+            {"stage_id": "implementation", "begin": "t3", "end": "t4"},
+        ]
+        result = advance_stage(
+            registry,
+            "waiting_takeover",
+            {"start_progress": {"name": "In Progress", "id": "31"}},
+            available={"assignee": "u"},
+            stage_timeline=sequence,
+        )
+        self.assertEqual("implementation", result["next_stage"])
+        self.assertFalse(result["loop_blocked"])
+        self.assertEqual(1, result["next_stage_enter_count"])
+
+    def test_advance_stage_loop_limit_custom(self) -> None:
+        from ao_work.stage_runtime import advance_stage
+
+        root = self._install_root()
+        registry = load_stage_registry(root)
+        sequence = [
+            {"stage_id": "implementation", "begin": "t1", "end": "t2"},
+            {"stage_id": "implementation", "begin": "t3", "end": "t4"},
+            {"stage_id": "implementation", "begin": "t5", "end": "t6"},
+        ]
+        # 上限 5：出现 3 次仍允许
+        result = advance_stage(
+            registry,
+            "waiting_takeover",
+            {"start_progress": {"name": "In Progress", "id": "31"}},
+            available={"assignee": "u"},
+            stage_timeline=sequence,
+            loop_limit=5,
+        )
+        self.assertEqual("implementation", result["next_stage"])
+        # 上限 2：出现 3 次阻断
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            advance_stage(
+                registry,
+                "waiting_takeover",
+                {"start_progress": {"name": "In Progress", "id": "31"}},
+                available={"assignee": "u"},
+                stage_timeline=sequence,
+                loop_limit=2,
+            )
+        self.assertEqual("stage_loop_requires_human", captured.exception.code)
+
+    def test_sequence_helpers(self) -> None:
+        from ao_work.stage_runtime import (
+            append_stage_timeline,
+            close_stage_timeline,
+            count_stage_in_timeline,
+        )
+
+        seq: list[dict] = []
+        seq = append_stage_timeline(seq, "task_intake", "t1")
+        seq = append_stage_timeline(seq, "implementation", "t2")
+        self.assertEqual(2, len(seq))
+        self.assertIsNone(seq[1]["end"])
+        seq = close_stage_timeline(seq, "implementation", "t3")
+        self.assertEqual("t3", seq[1]["end"])
+        self.assertEqual(1, count_stage_in_timeline(seq, "implementation"))
+        # 追加同阶段再次进入
+        seq = append_stage_timeline(seq, "implementation", "t4")
+        self.assertEqual(2, count_stage_in_timeline(seq, "implementation"))
+        self.assertIsNone(seq[2]["end"])
