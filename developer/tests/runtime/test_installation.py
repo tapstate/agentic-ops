@@ -36,6 +36,7 @@ class InstallationIdentityTest(unittest.TestCase):
             install / "shared" / "integration" / "task-to-pr-manifest.schema.json",
             install / "shared" / "integration" / "task-to-pr-event.schema.json",
             install / "shared" / "integration" / "task-to-pr-result.schema.json",
+            install / "shared" / "standards" / "jira-comment-template.schema.json",
             install / ".python-version",
         ):
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,6 +92,7 @@ class InstallationIdentityTest(unittest.TestCase):
                 "/developer/standards/",
                 "/developer/uv.lock",
                 "/shared/integration/",
+                "/shared/standards/",
                 "/.python-version",
             ],
             check=True,
@@ -225,6 +227,7 @@ class InstallationIdentityTest(unittest.TestCase):
                     "/developer/standards/",
                     "/developer/uv.lock",
                     "/shared/integration/",
+                    "/shared/standards/",
                     "/.python-version",
                 ],
                 check=True,

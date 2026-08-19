@@ -371,6 +371,126 @@ class MaintainerJiraServiceTest(unittest.TestCase):
             service.validate_no_credentials(plan, "user@example.com", "super-secret-token-1")
         self.assertEqual("jira_credential_exposure_forbidden", captured.exception.code)
 
+    def _template_schema(self) -> dict[str, Any]:
+        return {
+            "templates": {
+                "progress": {
+                    "required_fields": [
+                        "run_id",
+                        "workspace",
+                        "executor",
+                        "current_stage",
+                        "next_action",
+                        "completed_actions",
+                        "execution_plan",
+                        "risk",
+                    ],
+                    "field_keys": {
+                        "run_id": "运行 ID",
+                        "workspace": "工作空间",
+                        "executor": "执行者",
+                        "current_stage": "当前阶段",
+                        "next_action": "下一步",
+                        "completed_actions": "已完成动作",
+                        "execution_plan": "执行计划",
+                        "risk": "风险",
+                    },
+                },
+                "evidence": {
+                    "required_fields": [
+                        "run_id",
+                        "workspace",
+                        "executor",
+                        "task_type",
+                        "current_stage",
+                        "next_action",
+                        "completed_content",
+                        "verification_result",
+                        "residual_risk",
+                        "output_fields",
+                    ],
+                    "field_keys": {
+                        "run_id": "运行 ID",
+                        "workspace": "工作空间",
+                        "executor": "执行者",
+                        "task_type": "任务类型",
+                        "current_stage": "当前阶段",
+                        "next_action": "下一步",
+                        "completed_content": "完成内容",
+                        "verification_result": "验证结果",
+                        "residual_risk": "残留风险",
+                        "output_fields": "已输出表单字段",
+                    },
+                },
+            }
+        }
+
+    def test_progress_comment_requires_template_fields(self) -> None:
+        service, _transport, _client = self._service()
+        schema = self._template_schema()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.plan_comment(
+                "AO-11",
+                "idem-t1",
+                "progress",
+                "开始处理任务。",
+                maintainer_run_id="maint-test-1",
+                comment_template_schema=schema,
+            )
+        self.assertEqual("jira_comment_template_fields_missing", captured.exception.code)
+        self.assertIn("run_id(运行 ID)", captured.exception.details["missing_fields"])
+
+    def test_progress_comment_passes_with_complete_template(self) -> None:
+        service, _transport, _client = self._service()
+        schema = self._template_schema()
+        content = (
+            "- 运行 ID: maint-test-1\n"
+            "- 工作空间: 源头仓库\n"
+            "- 执行者: 公司员工指导员\n"
+            "- 当前阶段: implementation\n"
+            "- 下一步: 完成实现\n"
+            "- 已完成动作: 开始处理\n"
+            "- 执行计划: 完成代码与验证\n"
+            "- 风险: 无\n"
+        )
+        plan = service.plan_comment(
+            "AO-11",
+            "idem-t2",
+            "progress",
+            content,
+            maintainer_run_id="maint-test-1",
+            comment_template_schema=schema,
+        )
+        self.assertEqual("create_or_update", plan.action)
+
+    def test_evidence_comment_requires_template_fields(self) -> None:
+        service, _transport, _client = self._service()
+        schema = self._template_schema()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.plan_comment(
+                "AO-11",
+                "idem-t3",
+                "evidence",
+                "任务完成。",
+                maintainer_run_id="maint-test-1",
+                comment_template_schema=schema,
+            )
+        self.assertEqual("jira_comment_template_fields_missing", captured.exception.code)
+        self.assertIn("task_type(任务类型)", captured.exception.details["missing_fields"])
+
+    def test_non_template_category_skips_validation(self) -> None:
+        service, _transport, _client = self._service()
+        schema = self._template_schema()
+        plan = service.plan_comment(
+            "AO-11",
+            "idem-t4",
+            "analysis",
+            "分析结论。",
+            maintainer_run_id="maint-test-1",
+            comment_template_schema=schema,
+        )
+        self.assertEqual("create_or_update", plan.action)
+
     def _create_service(self) -> tuple[MaintainerJiraService, FakeTransport]:
         connection = JiraConnection(
             connection_id="tapdata-cloud",

@@ -628,7 +628,16 @@ class OfflineFakeRunner:
         input_directory.mkdir(exist_ok=True)
         content = input_directory / "completion-evidence.md"
         content.write_text(
-            "Offline Fake 烟测完成：隔离部署、工作空间初始化、合成任务状态、固定验证与评论回读均通过；不代表正式接管或真实 Jira 完成。\n",
+            "- 运行 ID: <agentic_run_id>\n"
+            "- 工作空间: 离线烟测工作空间\n"
+            "- 执行者: 研发工程师\n"
+            "- 任务类型: 集成烟测\n"
+            "- 当前阶段: verification\n"
+            "- 下一步: 交付结果包\n"
+            "- 完成内容: Offline Fake 烟测完成：隔离部署、工作空间初始化、合成任务状态、固定验证与评论回读均通过；不代表正式接管或真实 Jira 完成。\n"
+            "- 验证结果: 固定验证通过，评论回读 external_id 一致\n"
+            "- 残留风险: 离线 Fake Jira 合同测试，不代表真实 Jira 任务已完成\n"
+            "- 已输出表单字段: completion-evidence 评论\n",
             encoding="utf-8",
         )
         relative_plan = (

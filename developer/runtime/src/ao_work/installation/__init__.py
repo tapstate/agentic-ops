@@ -24,12 +24,14 @@ SHARED_SOURCE_ASSETS = {
     "shared/integration/task-to-pr-event.schema.json": ("100644", "blob"),
     "shared/integration/task-to-pr-manifest.schema.json": ("100644", "blob"),
     "shared/integration/task-to-pr-result.schema.json": ("100644", "blob"),
+    "shared/standards/jira-comment-template.schema.json": ("100644", "blob"),
 }
 SHARED_DISTRIBUTION_ASSETS = {
     "integration/README.md",
     "integration/task-to-pr-event.schema.json",
     "integration/task-to-pr-manifest.schema.json",
     "integration/task-to-pr-result.schema.json",
+    "standards/jira-comment-template.schema.json",
 }
 DEVELOPER_SPARSE_PATHS = {
     ".python-version",
@@ -42,6 +44,7 @@ DEVELOPER_SPARSE_PATHS = {
     "developer/standards",
     "developer/uv.lock",
     "shared/integration",
+    "shared/standards",
 }
 DEVELOPER_TOP_LEVEL_ASSETS = {
     "AGENTS.md",
@@ -491,7 +494,10 @@ def _validate_shared_distribution(root: Path) -> None:
                 raise _shared_distribution_invalid()
             actual_files.add(path.relative_to(shared).as_posix())
 
-    if actual_directories != {"integration"} or actual_files != SHARED_DISTRIBUTION_ASSETS:
+    expected_directories = {
+        str(Path(item).parent) for item in SHARED_DISTRIBUTION_ASSETS
+    }
+    if actual_directories != expected_directories or actual_files != SHARED_DISTRIBUTION_ASSETS:
         raise _shared_distribution_invalid()
 
 

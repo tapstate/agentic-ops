@@ -70,6 +70,36 @@ def plans_dir(source_root: Path) -> Path:
     return local_root(source_root) / MAINTAINER_PLANS_DIR
 
 
+def load_comment_template_schema(source_root: Path) -> dict[str, Any]:
+    """加载 shared 评论模板 schema（公共规范，跨工作面/项目/Agent 类型通用）。
+
+    文件缺失或结构无效时返回空模板（无必填校验），但 progress/evidence
+    评论必须显式确认模板可用；调用方按模板字段校验评论正文。
+    """
+    path = source_root / "shared" / "standards" / "jira-comment-template.schema.json"
+    if not path.exists() or path.is_symlink():
+        return {"templates": {}}
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise RuntimeErrorResult(
+            code="comment_template_schema_invalid",
+            message=f"评论模板 schema 无法读取：{error}",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请修复 shared/standards/jira-comment-template.schema.json",
+        ) from error
+    if not isinstance(payload, dict) or not isinstance(payload.get("templates"), dict):
+        raise RuntimeErrorResult(
+            code="comment_template_schema_invalid",
+            message="评论模板 schema 结构无效（缺少 templates 映射）",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请修复 shared/standards/jira-comment-template.schema.json",
+        )
+    return payload
+
+
 def load_maintainer_jira_config(
     source_root: Path,
     connection_id: str = "tapdata-cloud",

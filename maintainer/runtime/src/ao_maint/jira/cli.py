@@ -17,6 +17,7 @@ from ao_maint.jira.client import JiraClient, UrllibJiraTransport
 from ao_maint.jira.config import (
     credential_status,
     env_file_path,
+    load_comment_template_schema,
     load_maintainer_jira_config,
     load_maintainer_workflow,
     plans_dir,
@@ -190,6 +191,7 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
                 args.category,
                 content,
                 maintainer_run_id=run_id,
+                comment_template_schema=load_comment_template_schema(source_root),
             )
         elif args.command == "transition":
             workflow = load_maintainer_workflow(

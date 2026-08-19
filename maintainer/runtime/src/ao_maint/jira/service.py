@@ -27,6 +27,12 @@ ALLOWED_COMMENT_CATEGORIES = frozenset(
     {"analysis", "plan", "decision", "evidence", "blocked", "progress"}
 )
 
+TEMPLATE_CATEGORIES = frozenset({"progress", "evidence"})
+
+COMMENT_TEMPLATE_SCHEMA_RELATIVE = (
+    "shared/standards/jira-comment-template.schema.json"
+)
+
 
 @dataclass(frozen=True)
 class WritePlan:
@@ -380,11 +386,18 @@ class MaintainerJiraService:
         content: str,
         *,
         maintainer_run_id: str,
+        comment_template_schema: dict[str, Any] | None = None,
     ) -> WritePlan:
         issue = self.inspect_issue(issue_key)
         _require_chinese(content, "Jira 评论")
         if category not in ALLOWED_COMMENT_CATEGORIES:
             raise _input_error("invalid_comment_category", "评论分类无效")
+        if category in TEMPLATE_CATEGORIES:
+            _validate_comment_template(
+                category,
+                content,
+                comment_template_schema or {},
+            )
         marker = _marker(issue.key, maintainer_run_id, idempotency_key)
         normalized_content = content.rstrip()
         markdown = f"{normalized_content}\n\n{marker}\n"
@@ -1206,6 +1219,63 @@ def _idempotency_conflict(label: str) -> RuntimeErrorResult:
 def _validate_idempotency_key(value: str) -> None:
     if not IDEMPOTENCY_PATTERN.fullmatch(value):
         raise _input_error("invalid_idempotency_key", "idempotency_key 格式无效")
+
+
+def _validate_comment_template(
+    category: str,
+    content: str,
+    schema: dict[str, Any],
+) -> None:
+    """按 shared 评论模板 schema 校验 progress/evidence 评论必填键。
+
+    schema 缺失时视为模板未启用（不阻断，兼容旧安装）；模板存在时
+    必须覆盖全部必填键，缺失即阻断，防止评论漏掉 Agent 审计信息。
+    键按「行首 - 键: 值」或「键: 值」形式匹配。
+    """
+    templates = schema.get("templates", {})
+    spec = templates.get(category)
+    if not isinstance(spec, dict):
+        return
+    required = spec.get("required_fields")
+    field_keys = spec.get("field_keys")
+    if not isinstance(required, list) or not isinstance(field_keys, dict):
+        raise RuntimeErrorResult(
+            code="comment_template_schema_invalid",
+            message=f"评论模板 schema 的 {category} 定义无效",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请修复 shared/standards/jira-comment-template.schema.json",
+        )
+    missing = []
+    for field_id in required:
+        key_label = str(field_keys.get(field_id, field_id))
+        if not _comment_has_field(content, key_label):
+            missing.append(f"{field_id}({key_label})")
+    if missing:
+        raise RuntimeErrorResult(
+            code="jira_comment_template_fields_missing",
+            message=(
+                f"{category} 评论缺少模板必填键：{', '.join(missing)}；"
+                "评论必须按公共评论模板记录 Agent 审计信息"
+            ),
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            retry_safe=True,
+            required_human_action=(
+                "请按 shared/standards/jira-comment-template.schema.json "
+                f"的 {category} 模板补齐必填键后重新 plan"
+            ),
+            details={"missing_fields": missing},
+        )
+
+
+def _comment_has_field(content: str, key_label: str) -> bool:
+    """检查评论正文是否包含「键: 值」独立行（支持 - 列表前缀与中英文冒号）。"""
+    pattern = re.compile(
+        rf"^\s*(?:-\s+|\*\s+)?{re.escape(key_label)}\s*[:：]",
+        re.MULTILINE,
+    )
+    return pattern.search(content) is not None
 
 
 def _require_chinese(value: str, label: str) -> None:
