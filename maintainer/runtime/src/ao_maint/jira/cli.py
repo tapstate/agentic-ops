@@ -13,6 +13,7 @@ from typing import Any
 
 import yaml
 
+from ao_maint.install.identity import load_maintainer_identity
 from ao_maint.jira.client import JiraClient, UrllibJiraTransport
 from ao_maint.jira.config import (
     credential_status,
@@ -233,6 +234,17 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
             )
         service.validate_no_credentials(plan, email, token)
         _write_new_plan(plan_path, plan.to_dict())
+        try:
+            maintainer_identity = load_maintainer_identity(source_root)
+            agent_id = maintainer_identity["agent_id"]
+            agent_type = maintainer_identity.get("agent_type", "")
+            model = maintainer_identity.get("model", "")
+            environment = maintainer_identity.get("environment", "")
+        except RuntimeErrorResult:
+            agent_id = ""
+            agent_type = ""
+            model = ""
+            environment = ""
         result: dict[str, Any] = {
             "connection_id": config.connection.connection_id,
             "issue_key": plan.issue_key,
@@ -241,6 +253,10 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
             "content_sha256": plan.content_sha256,
             "plan_file": str(plan_path),
             "maintainer_run_id": plan.maintainer_run_id,
+            "agent_id": agent_id,
+            "agent_type": agent_type,
+            "model": model,
+            "environment": environment,
             "authorization_guidance": (
                 "请人工审查计划后执行 apply，并显式提供确认引用 "
                 "（例如 user-confirmation:AO-11:<plan_id>）"

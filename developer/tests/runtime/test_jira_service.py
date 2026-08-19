@@ -326,20 +326,14 @@ class JiraServiceTest(unittest.TestCase):
                 "progress": {
                     "required_fields": [
                         "run_id",
-                        "workspace",
-                        "executor",
                         "current_stage",
-                        "next_action",
                         "completed_actions",
                         "execution_plan",
                         "risk",
                     ],
                     "field_keys": {
                         "run_id": "运行 ID",
-                        "workspace": "工作空间",
-                        "executor": "执行者",
                         "current_stage": "当前阶段",
-                        "next_action": "下一步",
                         "completed_actions": "已完成动作",
                         "execution_plan": "执行计划",
                         "risk": "风险",
@@ -348,11 +342,6 @@ class JiraServiceTest(unittest.TestCase):
                 "evidence": {
                     "required_fields": [
                         "run_id",
-                        "workspace",
-                        "executor",
-                        "task_type",
-                        "current_stage",
-                        "next_action",
                         "completed_content",
                         "verification_result",
                         "residual_risk",
@@ -360,11 +349,6 @@ class JiraServiceTest(unittest.TestCase):
                     ],
                     "field_keys": {
                         "run_id": "运行 ID",
-                        "workspace": "工作空间",
-                        "executor": "执行者",
-                        "task_type": "任务类型",
-                        "current_stage": "当前阶段",
-                        "next_action": "下一步",
                         "completed_content": "完成内容",
                         "verification_result": "验证结果",
                         "residual_risk": "残留风险",
@@ -392,10 +376,7 @@ class JiraServiceTest(unittest.TestCase):
         schema = self._template_schema()
         content = (
             "- 运行 ID: run-1\n"
-            "- 工作空间: tapdata 工作空间\n"
-            "- 执行者: 研发工程师\n"
             "- 当前阶段: implementation\n"
-            "- 下一步: 完成实现\n"
             "- 已完成动作: 开始处理\n"
             "- 执行计划: 完成代码与验证\n"
             "- 风险: 无\n"
@@ -422,7 +403,7 @@ class JiraServiceTest(unittest.TestCase):
                 comment_template_schema=schema,
             )
         self.assertEqual("jira_comment_template_fields_missing", captured.exception.code)
-        self.assertIn("task_type(任务类型)", captured.exception.details["missing_fields"])
+        self.assertIn("run_id(运行 ID)", captured.exception.details["missing_fields"])
 
     def test_progress_category_is_now_allowed(self) -> None:
         plan = self.service.plan_comment(
@@ -430,10 +411,7 @@ class JiraServiceTest(unittest.TestCase):
             "idem-t5",
             "progress",
             "- 运行 ID: run-1\n"
-            "- 工作空间: tapdata 工作空间\n"
-            "- 执行者: 研发工程师\n"
             "- 当前阶段: implementation\n"
-            "- 下一步: 继续\n"
             "- 已完成动作: 开始\n"
             "- 执行计划: 继续实现\n"
             "- 风险: 无\n",

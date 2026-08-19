@@ -141,7 +141,7 @@ fi
 if [ -e agent-guides.md ] || [ -e agent-init.md ]; then
   fail "developer 专属指引不得留在 maintainer 根工作面"
 fi
-if rg -n -- '--mode|--workplane|--role' maintainer/runtime/src developer/runtime/src; then
+if rg -n -- '--mode([^l]|$)|--workplane|--role' maintainer/runtime/src developer/runtime/src; then
   fail "CLI 不得通过参数切换工作面"
 fi
 
