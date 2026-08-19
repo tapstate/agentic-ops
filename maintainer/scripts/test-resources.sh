@@ -54,9 +54,11 @@ expected_shared_entries="$(printf '%s\n' \
   shared/integration/README.md \
   shared/integration/task-to-pr-event.schema.json \
   shared/integration/task-to-pr-manifest.schema.json \
-  shared/integration/task-to-pr-result.schema.json)"
+  shared/integration/task-to-pr-result.schema.json \
+  shared/standards \
+  shared/standards/jira-comment-template.schema.json)"
 if [ "$shared_entries" != "$expected_shared_entries" ]; then
-  fail "shared 只能包含根准入说明、integration 准入说明和三个 task-to-pr JSON Schema"
+  fail "shared 只能包含根准入说明、integration 准入说明、三个 task-to-pr JSON Schema 和 standards 评论模板"
 fi
 if find shared -type l -print -quit | grep . >/dev/null; then
   fail "shared 不得包含符号链接"

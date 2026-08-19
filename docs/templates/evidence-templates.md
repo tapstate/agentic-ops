@@ -49,6 +49,38 @@
 AI 员工将读取目标仓库上下文并开始本地开发。未经研发工程师确认版本化设计或修复计划并授予工作项级连续执行授权，不会推送或创建拉取请求。
 ```
 
+## 3.1 进度上报评论（progress，含开始处理）
+
+公共评论模板，跨工作面（maintainer/developer）、跨项目、对所有 Agent 类型通用；必填键由 `shared/standards/jira-comment-template.schema.json` 定义，两个工作面 Runtime 在 `comment plan` 时按该 Schema 校验，缺失即阻断。
+
+```markdown
+- 运行 ID: `<maintainer_run_id / agentic_run_id>`
+- 工作空间: `<workspace>`
+- 执行者: `公司员工指导员 / 研发工程师`
+- 当前阶段: `<current_stage>`
+- 下一步: `<agentic_next_action>`
+- 已完成动作: `<completed-actions>`
+- 执行计划: `<execution-plan>`
+- 风险: `<risk>`
+```
+
+## 3.2 结果反馈评论（evidence，含完成总结）
+
+公共评论模板，跨工作面、跨项目、对所有 Agent 类型通用；必填键由 `shared/standards/jira-comment-template.schema.json` 定义，两个工作面 Runtime 在 `comment plan` 时按该 Schema 校验，缺失即阻断。
+
+```markdown
+- 运行 ID: `<maintainer_run_id / agentic_run_id>`
+- 工作空间: `<workspace>`
+- 执行者: `公司员工指导员 / 研发工程师`
+- 任务类型: `<task_type>`
+- 当前阶段: `<current_stage>`
+- 下一步: `<agentic_next_action>`
+- 完成内容: `<completed-content>`
+- 验证结果: `<verification-result>`
+- 残留风险: `<residual-risk>`
+- 已输出表单字段: `<output-fields>`
+```
+
 ## 4. 任务接管失败
 
 ```markdown

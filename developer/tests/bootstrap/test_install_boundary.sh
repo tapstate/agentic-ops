@@ -135,9 +135,10 @@ expected_sparse_paths="$(printf '%s\n' \
   developer/skills \
   developer/standards \
   developer/uv.lock \
-  shared/integration | LC_ALL=C sort -u)"
+  shared/integration \
+  shared/standards | LC_ALL=C sort -u)"
 if [ "$normalized_sparse_paths" != "$expected_sparse_paths" ]; then
-  echo "developer 安装必须精确 checkout developer 生产资产、shared/integration 和 .python-version" >&2
+  echo "developer 安装必须精确 checkout developer 生产资产、shared/integration、shared/standards 和 .python-version" >&2
   exit 1
 fi
 shared_distribution="$(
@@ -149,9 +150,11 @@ expected_shared_distribution="$(printf '%s\n' \
   integration/README.md \
   integration/task-to-pr-event.schema.json \
   integration/task-to-pr-manifest.schema.json \
-  integration/task-to-pr-result.schema.json)"
+  integration/task-to-pr-result.schema.json \
+  standards \
+  standards/jira-comment-template.schema.json)"
 if [ "$shared_distribution" != "$expected_shared_distribution" ]; then
-  echo "developer 安装的 shared 可见树超出固定 integration 协议白名单" >&2
+  echo "developer 安装的 shared 可见树超出固定协议白名单" >&2
   exit 1
 fi
 if find "$install_root/shared" -type l -print -quit | grep . >/dev/null || \

@@ -189,6 +189,7 @@ def execute_jira(
                 args.category,
                 content,
                 agentic_run_id=agentic_run_id,
+                comment_template_schema=load_comment_template_schema(install_root),
             )
         elif args.command == "transition":
             comment = None
@@ -525,6 +526,36 @@ def _read_single_link_json(path: Path) -> dict[str, Any]:
             os.close(descriptor)
     if not isinstance(payload, dict):
         raise ValueError("managed JSON must be an object")
+    return payload
+
+
+def load_comment_template_schema(install_root: Path) -> dict[str, Any]:
+    """加载 shared 评论模板 schema（公共规范，跨工作面/项目/Agent 类型通用）。
+
+    安装目录缺失或结构无效时返回空模板（无必填校验）；安装包含模板时
+    必须覆盖全部必填键，缺失即阻断。
+    """
+    path = install_root / "shared" / "standards" / "jira-comment-template.schema.json"
+    if not path.exists() or path.is_symlink():
+        return {"templates": {}}
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise RuntimeErrorResult(
+            code="comment_template_schema_invalid",
+            message=f"评论模板 schema 无法读取：{error}",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请修复安装目录 shared/standards/jira-comment-template.schema.json",
+        ) from error
+    if not isinstance(payload, dict) or not isinstance(payload.get("templates"), dict):
+        raise RuntimeErrorResult(
+            code="comment_template_schema_invalid",
+            message="评论模板 schema 结构无效（缺少 templates 映射）",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请修复安装目录 shared/standards/jira-comment-template.schema.json",
+        )
     return payload
 
 

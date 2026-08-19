@@ -222,13 +222,14 @@ class WorkplaneBoundaryTest(unittest.TestCase):
 
     def test_shared_is_fixed_non_executable_protocol_allowlist(self) -> None:
         shared = self.ROOT / "shared"
-        expected_directories = {"integration"}
+        expected_directories = {"integration", "standards"}
         expected_files = {
             "README.md",
             "integration/README.md",
             "integration/task-to-pr-event.schema.json",
             "integration/task-to-pr-manifest.schema.json",
             "integration/task-to-pr-result.schema.json",
+            "standards/jira-comment-template.schema.json",
         }
         entries = list(shared.rglob("*"))
         self.assertFalse(

@@ -34,3 +34,5 @@ maintainer 面处理任何 Jira 任务（建卡、实现、修复、规则演进
 2. 合并代码后：向任务写一条中文总结评论（说明实现内容、验证结果与风险），再把任务状态流转为「已完成」。
 
 评论与状态流转必须通过 `ao-maint jira` 的 plan → apply → readback 门禁执行，并留下 `user-confirmation:<KEY>:<plan_id>` 授权引用与决策审计记录。不得绕过 Runtime 直接调用 Jira REST API 建卡、评论或流转状态；发现能力缺口时先补齐 Runtime 能力，再执行任务操作。
+
+评论正文必须按公共评论模板（`shared/standards/jira-comment-template.schema.json`，人读版见 `docs/templates/evidence-templates.md`）组织：`progress`（进度上报/开始处理）与 `evidence`（结果反馈/完成总结）评论必须包含 Schema 声明的全部必填键（运行 ID、工作空间、执行者、当前阶段、下一步等 Agent 审计信息），缺失即被 `ao-maint jira comment plan` 阻断。写评论前先读取任务 Description 与模板提取事实，不得只写一句话或凭记忆临场发挥。
