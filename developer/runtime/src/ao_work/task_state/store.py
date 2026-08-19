@@ -282,6 +282,56 @@ class TaskStore:
             append_ndjson(task_dir / "journal.ndjson", event)
             return {"progress": progress, "event": event}
 
+    def update_stage_timeline(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        sequence: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """更新 progress.json 的 stage_timeline（AO-42）。
+
+        进入 AI 阶段时传入追加后的序列；准出时传入闭合 end 后的序列。
+        只更新 stage_timeline 字段，不动其它 progress 字段（向后兼容）。
+        """
+        self._validate_issue_key(issue_key)
+        self._validate_run_id(agentic_run_id)
+        if not isinstance(sequence, list):
+            raise _invalid_input("stage_timeline", repr(sequence))
+        for item in sequence:
+            if not isinstance(item, dict) or not isinstance(item.get("stage_id"), str):
+                raise _invalid_input("stage_timeline_item", repr(item))
+        with self._lock(issue_key):
+            task_dir = self._task_dir(issue_key)
+            self._require_complete_task_dir(task_dir)
+            task = read_json(task_dir / "task.json")
+            if task.get("agentic_run_id") != agentic_run_id:
+                raise RuntimeErrorResult(
+                    code="task_identity_mismatch",
+                    message="阶段序列运行编号与任务绑定不一致",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请使用当前任务绑定的 agentic_run_id",
+                )
+            progress_path = task_dir / "progress.json"
+            progress = read_json(progress_path)
+            progress.update(
+                {
+                    "stage_timeline": sequence,
+                    "updated_at": self._timestamp(),
+                    "content_version": int(progress.get("content_version", 0)) + 1,
+                }
+            )
+            atomic_write_json(progress_path, progress)
+            event = self._journal_event(
+                task,
+                "stage_timeline_update",
+                "completed",
+                retry_safe=True,
+            )
+            event["sequence"] = sequence
+            append_ndjson(task_dir / "journal.ndjson", event)
+            return {"progress": progress}
+
     def record_external_readback(
         self,
         issue_key: str,
