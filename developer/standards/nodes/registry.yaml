@@ -1,4 +1,4 @@
-# developer 面节点注册表（AO-39 POC 第一批）
+# developer 面节点注册表（AO-39 POC + AO-41 全量）
 #
 # 节点 = 可复用的标准处理步骤声明：语义化 ID + 准入条件 + 准出决策。
 # 节点独立于 Jira：节点是内部执行依据，Jira 状态是外部事实源；
@@ -10,9 +10,13 @@
 # - exit：准出决策。next_node 为下一步节点；jira_transition 为映射的
 #   profile.transitions 键（只有声明了 jira_transition 的节点才会自动流转
 #   Jira 状态，中间节点只推进内部状态）；jira_transition 缺省表示不流转
-# - 首批节点从 development-change-v1.yaml 的 stages 提炼（POC 粗粒度）
+# - steps：阶段级节点内的步骤级节点（细粒度，供 AI 执行/恢复用）。
+#   步骤节点只有 id/name/description/exit，不重复声明 admission
+#   （继承所属阶段节点的准入）
+# - 阶段节点从 development-change-v1.yaml 的 stages 提炼；implementation
+#   阶段内拆出步骤级节点（AO-41）
 
-schema_version: 1
+schema_version: 2
 workplane: developer
 
 nodes:
@@ -58,6 +62,23 @@ nodes:
     exit:
       next_node: pr_review
       # 实现完成进入 PR 审查，Jira 状态不变（仍 In Progress），不流转
+    steps:
+      - id: code_writing
+        name: 编写代码
+        description: 按修复计划实现代码变更
+        exit:
+          next_node: test_writing
+      - id: test_writing
+        name: 编写测试
+        description: 为代码变更编写或更新测试
+        exit:
+          next_node: verification
+      - id: verification
+        name: 验证
+        description: 运行测试与验证，整理验证结果与残留风险
+        exit:
+          next_node: null
+          # 步骤级终态：返回所属阶段节点（implementation）的准出
 
   - id: pr_review
     name: PR 审查

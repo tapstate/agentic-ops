@@ -46,6 +46,22 @@ nodes:
       - task_taken_over
     exit:
       next_node: pr_review
+    steps:
+      - id: code_writing
+        name: 编写代码
+        description: 编写代码
+        exit:
+          next_node: test_writing
+      - id: test_writing
+        name: 编写测试
+        description: 编写测试
+        exit:
+          next_node: verification
+      - id: verification
+        name: 验证
+        description: 验证
+        exit:
+          next_node: null
   - id: pr_review
     name: PR 审查
     description: PR 审查
@@ -93,6 +109,31 @@ _SAMPLE_SCHEMA = {
                                 ]
                             },
                             "jira_transition": {"type": "string"},
+                        },
+                    },
+                    "steps": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["id", "name", "description", "exit"],
+                            "properties": {
+                                "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+                                "name": {"type": "string"},
+                                "description": {"type": "string"},
+                                "exit": {
+                                    "type": "object",
+                                    "required": ["next_node"],
+                                    "properties": {
+                                        "next_node": {
+                                            "anyOf": [
+                                                {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+                                                {"type": "null"},
+                                            ]
+                                        },
+                                        "jira_transition": {"type": "string"},
+                                    },
+                                },
+                            },
                         },
                     },
                 },
@@ -215,3 +256,108 @@ class NodeRuntimeTest(unittest.TestCase):
         path = node_registry_path(root)
         self.assertTrue(path.name == "registry.yaml")
         self.assertTrue(path.is_file())
+
+    def test_get_node_steps(self) -> None:
+        from ao_work.node_runtime import get_node_steps
+
+        root = self._install_root()
+        registry = load_node_registry(root)
+        steps = get_node_steps(registry, "implementation")
+        self.assertEqual(
+            ["code_writing", "test_writing", "verification"],
+            [s["id"] for s in steps],
+        )
+        self.assertEqual([], get_node_steps(registry, "waiting_takeover"))
+
+    def test_get_step_unknown_blocks(self) -> None:
+        from ao_work.node_runtime import get_step
+
+        root = self._install_root()
+        registry = load_node_registry(root)
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            get_step(registry, "implementation", "no_such_step")
+        self.assertEqual("node_step_unknown", captured.exception.code)
+
+    def test_validate_admission(self) -> None:
+        from ao_work.node_runtime import validate_admission
+
+        root = self._install_root()
+        registry = load_node_registry(root)
+        self.assertEqual([], validate_admission(registry, "waiting_takeover", {"assignee": "u"}))
+        self.assertEqual(["assignee"], validate_admission(registry, "waiting_takeover", {}))
+
+    def test_advance_node_with_jira_transition(self) -> None:
+        from ao_work.node_runtime import advance_node
+
+        root = self._install_root()
+        registry = load_node_registry(root)
+        result = advance_node(
+            registry,
+            "waiting_takeover",
+            {"start_progress": {"name": "In Progress", "id": "31"}},
+            available={"assignee": "u"},
+        )
+        self.assertTrue(result["admission_ok"])
+        self.assertEqual("implementation", result["next_node"])
+        self.assertEqual("start_progress", result["jira_transition"])
+        self.assertTrue(result["jira_mapping_valid"])
+        self.assertFalse(result["terminal"])
+
+    def test_advance_node_admission_blocked(self) -> None:
+        from ao_work.node_runtime import advance_node
+
+        root = self._install_root()
+        registry = load_node_registry(root)
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            advance_node(
+                registry,
+                "waiting_takeover",
+                {"start_progress": {"name": "In Progress", "id": "31"}},
+                available={},
+            )
+        self.assertEqual("node_admission_not_met", captured.exception.code)
+
+    def test_advance_node_step_progression(self) -> None:
+        from ao_work.node_runtime import advance_node
+
+        root = self._install_root()
+        registry = load_node_registry(root)
+        result = advance_node(
+            registry,
+            "implementation",
+            {},
+            current_step="code_writing",
+            available={"task_taken_over": True},
+        )
+        self.assertEqual("test_writing", result["next_step"])
+        self.assertIsNone(result["jira_transition"])
+        self.assertFalse(result["terminal"])
+
+    def test_advance_node_step_terminal_returns_stage_exit(self) -> None:
+        from ao_work.node_runtime import advance_node
+
+        root = self._install_root()
+        registry = load_node_registry(root)
+        result = advance_node(
+            registry,
+            "implementation",
+            {},
+            current_step="verification",
+            available={"task_taken_over": True},
+        )
+        self.assertEqual("pr_review", result["next_node"])
+        self.assertIsNone(result["jira_transition"])
+
+    def test_advance_node_terminal(self) -> None:
+        from ao_work.node_runtime import advance_node
+
+        root = self._install_root()
+        registry = load_node_registry(root)
+        result = advance_node(
+            registry,
+            "completed",
+            {},
+            available={"review_decision": "ok", "issue_analysis": "a", "fix_details": "f", "verification_method": "v", "agentic_completion_evidence": "e"},
+        )
+        self.assertIsNone(result["next_node"])
+        self.assertTrue(result["terminal"])
