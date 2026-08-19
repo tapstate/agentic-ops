@@ -147,6 +147,26 @@ class CliTest(unittest.TestCase):
         self.assertIn("ao-work", result["usage"])
         self.assertEqual("", stderr)
 
+    def test_subcommand_help_returns_its_own_usage(self) -> None:
+        """-h/--help 必须透传给子解析器：task -h 显示 task 组帮助。
+
+        2026-08-19 实踩（AO-26）：work_cli._run 曾对参数列表任意位置的
+        -h/--help 直接输出顶层 usage，导致 task -h、jira -h 拿不到子命令帮助。
+        """
+        for group in ("task", "jira", "workspace", "task-run"):
+            exit_code, result, stderr = self.run_cli(group, "-h")
+            self.assertEqual(0, exit_code, group)
+            self.assertEqual("help", result["operation"], group)
+            self.assertIn(f"usage: ao-work {group}", str(result["usage"]), group)
+            self.assertEqual("", stderr, group)
+
+    def test_help_anywhere_in_arguments_targets_that_parser(self) -> None:
+        """--help 出现在子命令之后时，应显示该子命令层级帮助而非顶层。"""
+        exit_code, result, _ = self.run_cli("jira", "comment", "--help")
+        self.assertEqual(0, exit_code)
+        self.assertEqual("help", result["operation"])
+        self.assertIn("usage: ao-work jira comment", str(result["usage"]))
+
     def test_complete_fake_git_install_cannot_be_selected_by_cli(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
