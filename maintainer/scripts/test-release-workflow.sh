@@ -123,6 +123,7 @@ mkdir -p \
   "$fixture/.githooks" \
   "$fixture/maintainer/scripts/lib" \
   "$fixture/maintainer/runtime/src/ao_maint/story_gate" \
+  "$fixture/maintainer/standards/git" \
   "$fixture/developer/tests/bootstrap"
 cp "$repo_root/.githooks/pre-commit" "$fixture/.githooks/pre-commit"
 cp "$repo_root/.githooks/pre-push" "$fixture/.githooks/pre-push"
@@ -163,6 +164,8 @@ printf '# trusted baseline fixture marker\n' \
   > "$fixture/maintainer/runtime/src/ao_maint/story_gate/service.py"
 printf 'schema_version: 1\nstory_categories: [maintainer, developer]\nstories: []\n' \
   > "$fixture/maintainer/standards/stories/project-quality.yaml"
+printf 'schema_version: 1\ndefault_target_branch: develop\nprotected_branches: [main]\ncommit_review_branches: [develop]\npr_review_branches: []\nspecial_branch_patterns: []\n' \
+  > "$fixture/maintainer/standards/git/story-review-policy.yaml"
 story_gate_log="$test_root/story-gate.log"
 : > "$story_gate_log"
 export FAKE_STORY_GATE_LOG="$story_gate_log"
@@ -205,6 +208,7 @@ git -C "$fixture" push -u origin develop >/dev/null
 
 pre_push_head="$(git -C "$fixture" rev-parse HEAD)"
 pre_push_main="$(git --git-dir="$remote" rev-parse refs/heads/main)"
+zero_sha="0000000000000000000000000000000000000000"
 if printf 'refs/heads/develop %s refs/heads/main %s\n' "$pre_push_head" "$pre_push_main" |
   (cd "$fixture" && .githooks/pre-push origin "$remote") \
     >"$test_root/pre-push-main.out" 2>"$test_root/pre-push-main.err"; then
@@ -216,6 +220,18 @@ if ! printf 'refs/heads/develop %s refs/heads/develop %s\n' "$pre_push_head" "$p
   (cd "$fixture" && .githooks/pre-push origin "$remote") \
     >"$test_root/pre-push-develop.out" 2>"$test_root/pre-push-develop.err"; then
   fail "pre-push 不得阻断 develop"
+fi
+if printf 'refs/tags/v0.0-test %s refs/tags/v0.0-test %s\n' "$pre_push_head" "$zero_sha" |
+  (cd "$fixture" && .githooks/pre-push origin "$remote") \
+    >"$test_root/pre-push-tag.out" 2>"$test_root/pre-push-tag.err"; then
+  fail "普通 git push 不得绕过版本化发布流程推送 Tag"
+fi
+grep -q 'story_review_channel_protected' "$test_root/pre-push-tag.err" ||
+  fail "pre-push 拒绝普通 Tag 推送时没有稳定提示"
+if ! printf 'refs/tags/v0.0-test %s refs/tags/v0.0-test %s\n' "$pre_push_head" "$zero_sha" |
+  (cd "$fixture" && AGENTIC_OPS_SPECIAL_PUSH=release .githooks/pre-push origin "$remote") \
+    >"$test_root/pre-push-release-tag.out" 2>"$test_root/pre-push-release-tag.err"; then
+  fail "版本化发布上下文必须允许推送 Tag"
 fi
 
 registry_backup="$test_root/project-quality.yaml"
@@ -312,6 +328,7 @@ git -C "$hook_audit" config user.name "AgenticOps Test"
 mkdir -p \
   "$hook_audit/.githooks" \
   "$hook_audit/maintainer/bin" \
+  "$hook_audit/maintainer/standards/git" \
   "$hook_audit/maintainer/standards/stories"
 cp "$repo_root/.githooks/pre-commit" "$hook_audit/.githooks/pre-commit"
 cp "$repo_root/.githooks/pre-push" "$hook_audit/.githooks/pre-push"
@@ -319,6 +336,8 @@ printf 'maintainer\n' > "$hook_audit/.agentic-ops-source"
 printf '# audit fixture\n' > "$hook_audit/README.md"
 printf 'schema_version: 1\nstory_categories: [maintainer, developer]\nstories: []\n' \
   > "$hook_audit/maintainer/standards/stories/project-quality.yaml"
+printf 'schema_version: 1\ndefault_target_branch: develop\nprotected_branches: [main]\ncommit_review_branches: [develop]\npr_review_branches: []\nspecial_branch_patterns: []\n' \
+  > "$hook_audit/maintainer/standards/git/story-review-policy.yaml"
 cat > "$hook_audit/maintainer/bin/ao-maint" <<'EOF'
 #!/usr/bin/env bash
 exit 9
@@ -851,7 +870,8 @@ grep -q 'invalid_jira_id' "$test_root/invalid-hotfix.err" ||
 
 git -C "$fixture" switch main >/dev/null
 git -C "$fixture" tag -a v9.8 -m 'hotfix baseline'
-git -C "$fixture" push origin refs/tags/v9.8 >/dev/null
+AGENTIC_OPS_SPECIAL_PUSH=release \
+  git -C "$fixture" push origin refs/tags/v9.8 >/dev/null
 git -C "$fixture" switch develop >/dev/null
 (
   cd "$fixture"

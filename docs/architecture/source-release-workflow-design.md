@@ -66,7 +66,7 @@ maintainer/scripts/lib/development-workflow.sh
 
 `.githooks` 只保存版本化策略源。`development-workflow.sh` 在 Git common directory 安装带版本标记的 trusted launcher，并把 `core.hooksPath` 指向该目录；launcher 从当前已接受 `HEAD` 提取并执行 Hook，不能直接执行 candidate 工作树文件。pre-commit 再用 `HEAD` Runtime 检查隔离的 index 快照。
 
-首次从不含新版 story Runtime 的旧 `HEAD` 迁移时，上述 launcher 必然仍执行旧 Hook，不能把 candidate 变成自己的信任根。本次基线提交采用一次性显式人工迁移：公司员工指导员确认完整 staged `impact_id`，候选 Runtime 完成同一 index 的固定验收与复检，记录 tree 后单次禁用旧 Hook 提交，再对真实 commit range 复检 impact/tree 并立即重装 launcher。它不是可重复的常规发布入口，也不证明旧 Hook 已保护该提交；首次进入受保护 `main` 仍必须由独立人工审查 PR 安装可信基线。
+AO-43 安装后，pre-commit 只校验故事映射、候选快照安全、固定验收证据和信任根，不要求人工批准先于 commit；pre-push 再按版本化分支策略检查 commit 审查或允许任务分支形成 PR。AO-43 安装提交的旧 `HEAD` 仍执行旧版 Hook，因此该笔候选按旧基线展示一次完整 staged 报告，由公司员工指导员确认报告资源、变更点和风险后内部完成旧版批准与验收，再通过正常 Hook 提交。该迁移不要求用户确认内部 `impact_id`，不使用 `--no-verify`，也不能在新基线进入 `HEAD` 后重复使用。信任根首次进入受保护 `main` 仍必须由独立人工审查 PR 安装。
 
 ## 5. 正常发布流程
 

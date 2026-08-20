@@ -473,6 +473,7 @@ release_verify_story_gate() {
   local record_target
   local record
   local trust_root_changes=""
+  local story_branch
 
   if [ "$base" != "origin/main" ]; then
     release_fail "release_story_gate_baseline_invalid" "story_gate" \
@@ -494,6 +495,13 @@ release_verify_story_gate() {
     GIT_NO_REPLACE_OBJECTS=1 git -C "$repo_root" rev-parse \
       "$head^{commit}" 2>/dev/null || true
   )"
+  story_branch="$(GIT_NO_REPLACE_OBJECTS=1 git -C "$repo_root" branch --show-current)"
+  if [ -z "$story_branch" ]; then
+    release_fail "release_story_gate_branch_unknown" "story_gate" \
+      "无法确定固定发布 HEAD 所属分支" \
+      "请在版本化发布或 Hotfix 分支上重新执行"
+    return 1
+  fi
   if [ -z "$base_commit" ] || [ -z "$head_commit" ] || \
     ! GIT_NO_REPLACE_OBJECTS=1 git -C "$repo_root" merge-base \
       --is-ancestor "$base_commit" "$head_commit"; then
@@ -537,6 +545,7 @@ release_verify_story_gate() {
     maintainer/pyproject.toml \
     maintainer/uv.lock \
     maintainer/runtime/src/ao_maint/story_gate/service.py \
+    maintainer/standards/git/story-review-policy.yaml \
     maintainer/standards/stories/project-quality.yaml; do
     if [ ! -f "$baseline_snapshot/$required_path" ] || \
       [ -L "$baseline_snapshot/$required_path" ]; then
@@ -614,6 +623,8 @@ release_verify_story_gate() {
   else
     baseline_cli="$baseline_snapshot/maintainer/bin/ao-maint"
     GIT_NO_REPLACE_OBJECTS=1 \
+      AGENTIC_OPS_STORY_BRANCH="$story_branch" \
+      AGENTIC_OPS_STORY_GATE_STAGE=release \
       PYTHONPYCACHEPREFIX="$temp_root/pycache" \
       "$baseline_cli" \
         --source-root "$candidate_snapshot" \
@@ -636,6 +647,7 @@ release_verify_story_gate() {
         maintainer/scripts/hotfix.sh \
         maintainer/scripts/lib/release-common.sh \
         maintainer/scripts/lib/development-workflow.sh \
+        maintainer/standards/git/story-review-policy.yaml \
         maintainer/standards/stories/project-quality.yaml
     )"
     if [ -n "$trust_root_changes" ]; then
@@ -1052,7 +1064,8 @@ release_push_fixed_branch() {
     release_fail "release_fixed_branch_conflict" "release_branch" "远端 $branch 不是固定发布 HEAD" "禁止覆盖远端发布分支，请人工核查"
     return 1
   fi
-  if [ -z "$remote_head" ] && ! git -C "$repo_root" push -u origin "refs/heads/$branch:refs/heads/$branch"; then
+  if [ -z "$remote_head" ] && ! AGENTIC_OPS_SPECIAL_PUSH=release \
+    git -C "$repo_root" push -u origin "refs/heads/$branch:refs/heads/$branch"; then
     release_fail "release_fixed_branch_push_failed" "release_branch" "无法推送固定发布分支 $branch" "请检查远端权限后重试"
     return 1
   fi
@@ -1064,7 +1077,8 @@ release_push_tag_if_needed() {
   if [ "$RELEASE_TAG_REMOTE_EXISTS" = "true" ]; then
     return 0
   fi
-  if ! git -C "$repo_root" push origin "refs/tags/$version"; then
+  if ! AGENTIC_OPS_SPECIAL_PUSH=release \
+    git -C "$repo_root" push origin "refs/tags/$version"; then
     release_fail "release_tag_push_failed" "tag_push" "main 已合并但 Tag $version 推送失败" "请修复远端权限后重新执行 publish，禁止强推 Tag"
     return 1
   fi

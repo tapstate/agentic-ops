@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from unittest import mock
 from ao_maint.cli import main
 from ao_maint.output import RuntimeErrorResult
 from ao_maint.story_gate.registry import load_story_registry, path_matches
+from ao_maint.story_gate.branch_policy import PullRequestFact, resolve_branch_review
 from ao_maint.story_gate.service import StoryGateService, _check_command
 
 STORY_BODY = """\
@@ -52,6 +54,19 @@ stories:
     evidence_requirements: [研发验收]
 """
 
+POLICY = """\
+schema_version: 1
+default_target_branch: develop
+protected_branches: [main]
+commit_review_branches: [develop]
+pr_review_branches:
+  - pattern: '^codex/AO-[1-9][0-9]+([-/].+)?$'
+    target_branch: develop
+special_branch_patterns:
+  - pattern: '^release/.+$'
+    target_branch: main
+"""
+
 
 class StoryGateTest(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[3]
@@ -62,13 +77,15 @@ class StoryGateTest(unittest.TestCase):
         pm_story = root / "docs" / "user-stories" / "project-maintainer" / "pm-001.md"
         de_story = root / "docs" / "user-stories" / "development-engineer" / "de-001.md"
         registry = root / "maintainer" / "standards" / "stories" / "project-quality.yaml"
-        for path in (goal, pm_story, de_story, registry):
+        policy = root / "maintainer" / "standards" / "git" / "story-review-policy.yaml"
+        for path in (goal, pm_story, de_story, registry, policy):
             path.parent.mkdir(parents=True, exist_ok=True)
         source_marker.write_text("maintainer\n", encoding="utf-8")
         goal.write_text("# 项目目标\n", encoding="utf-8")
         pm_story.write_text(STORY_BODY.format(story_id="PM-001"), encoding="utf-8")
         de_story.write_text(STORY_BODY.format(story_id="DE-001"), encoding="utf-8")
         registry.write_text(REGISTRY, encoding="utf-8")
+        policy.write_text(POLICY, encoding="utf-8")
         self.git(root, "init")
         self.git(
             root,
@@ -81,6 +98,7 @@ class StoryGateTest(unittest.TestCase):
         self.git(root, "config", "user.name", "Test")
         self.git(root, "add", ".")
         self.git(root, "commit", "-m", "baseline")
+        self.git(root, "branch", "-M", "develop")
 
     def git(self, root: Path, *arguments: str) -> None:
         subprocess.run(
@@ -105,26 +123,16 @@ class StoryGateTest(unittest.TestCase):
         path.write_text(content, encoding="utf-8")
         self.git(root, "add", relative_path)
 
-    def test_impacted_story_requires_approval_and_matching_acceptance(self) -> None:
+    def test_candidate_is_verified_before_commit_and_confirmed_after_commit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self.prepare(root)
             self.stage(root, "maintainer/runtime/example.py", "value = 1\n")
             service = StoryGateService(root)
-            with self.assertRaises(RuntimeErrorResult) as captured:
-                service.inspect("staged")
-            self.assertEqual("maintenance_story_impacted", captured.exception.code)
-            impact_id = str(captured.exception.details["impact_id"])
-
-            reference = f"user-confirmation:AO-11:{impact_id}"
-            approved = service.approve(
-                "staged", impact_id, reference
-            )
-            self.assertEqual(True, approved["approved"])
-            self.assertEqual(reference, approved["authorization_reference"])
-            with self.assertRaises(RuntimeErrorResult) as not_verified:
-                service.inspect("staged")
-            self.assertEqual("maintenance_story_acceptance_failed", not_verified.exception.code)
+            candidate = service.inspect("staged")
+            self.assertFalse(candidate["confirmation_required"])
+            self.assertFalse(candidate["approval_ready"])
+            self.assertIn("不得请求人工确认", candidate["required_human_action"])
 
             with mock.patch(
                 "ao_maint.story_gate.service._check_command",
@@ -132,9 +140,16 @@ class StoryGateTest(unittest.TestCase):
             ):
                 verified = service.verify("staged")
             self.assertEqual("passed", verified["acceptance_status"])
-            allowed = service.inspect("staged")
-            self.assertEqual(True, allowed["approved"])
-            self.assertEqual("passed", allowed["acceptance_status"])
+            base = self.git_output(root, "rev-parse", "HEAD")
+            self.git(root, "commit", "-m", "candidate")
+            head = self.git_output(root, "rev-parse", "HEAD")
+            review = service.inspect("range", base=base, head=head)
+            self.assertTrue(review["approval_ready"])
+            self.assertTrue(review["confirmation_required"])
+            reference = f"user-confirmation:AO-11:commit:{head}"
+            approved = service.approve("range", review["impact_id"], reference, base=base, head=head)
+            self.assertTrue(approved["approved"])
+            self.assertEqual(head, approved["authorization_record_id"])
 
     def test_story_document_change_requires_revision_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -145,10 +160,10 @@ class StoryGateTest(unittest.TestCase):
                 "docs/user-stories/project-maintainer/pm-001.md",
                 STORY_BODY.format(story_id="PM-001") + "\n补充故事。\n",
             )
-            with self.assertRaises(RuntimeErrorResult) as captured:
-                StoryGateService(root).inspect("staged")
-            self.assertEqual("maintenance_story_revision_required", captured.exception.code)
-            self.assertEqual(["PM-001"], captured.exception.details["revision_story_ids"])
+            result = StoryGateService(root).inspect("staged")
+            self.assertEqual(["PM-001"], result["revision_story_ids"])
+            self.assertFalse(result["confirmation_required"])
+            self.assertEqual("维护测试", result["review_report"]["impacted_stories"][0]["title"])
 
     def test_governed_path_without_story_mapping_is_capability_gap(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -176,19 +191,12 @@ class StoryGateTest(unittest.TestCase):
             self.stage(root, "maintainer/runtime/example.py", "value = 1\n")
             service = StoryGateService(root)
             initial = service.inspect("staged", enforce=False)
-            impact_id = str(initial["impact_id"])
-            service.approve(
-                "staged",
-                impact_id,
-                f"user-confirmation:AO-11:{impact_id}",
-            )
             self.stage(root, "maintainer/runtime/example.py", "value = 2\n")
             changed = service.inspect("staged", enforce=False)
             self.assertNotEqual(initial["impact_id"], changed["impact_id"])
             self.assertEqual(False, changed["approved"])
 
-    def test_first_gate_migration_commit_matches_explicit_staged_approval(self) -> None:
-        """首次迁移靠显式 staged gate，不伪称旧 HEAD Hook 已保护候选。"""
+    def test_staged_evidence_matches_post_commit_review_object(self) -> None:
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -198,11 +206,6 @@ class StoryGateTest(unittest.TestCase):
             service = StoryGateService(root)
             impact = service.inspect("staged", enforce=False)
             impact_id = str(impact["impact_id"])
-            service.approve(
-                "staged",
-                impact_id,
-                f"user-confirmation:AO-11:{impact_id}",
-            )
             with mock.patch(
                 "ao_maint.story_gate.service._check_command",
                 return_value=["/usr/bin/true"],
@@ -210,35 +213,14 @@ class StoryGateTest(unittest.TestCase):
                 service.verify("staged")
             allowed = service.inspect("staged")
             self.assertEqual("passed", allowed["acceptance_status"])
-            staged_tree = self.git_output(root, "write-tree")
-            candidate_tree = root / "maintainer" / ".local" / "migration-index-tree"
-            candidate_tree.parent.mkdir(parents=True, exist_ok=True)
-            candidate_tree.write_text(staged_tree + "\n", encoding="utf-8")
-
-            # 仅模拟“旧 HEAD 尚无新 Hook/Runtime”的一次性人工迁移提交；真实流程
-            # 必须先完成上面的同一 impact 显式确认与验收，不能把该 bypass 当常规入口。
-            self.git(
-                root,
-                "-c",
-                "core.hooksPath=/dev/null",
-                "commit",
-                "-m",
-                "install story gate baseline",
-            )
+            self.git(root, "commit", "-m", "install story gate baseline")
             head = self.git_output(root, "rev-parse", "HEAD")
-            self.assertEqual(
-                candidate_tree.read_text(encoding="utf-8").strip(),
-                self.git_output(root, "rev-parse", "HEAD^{tree}"),
-            )
-
-            committed = service.inspect(
-                "range",
-                base=baseline,
-                head=head,
-            )
+            committed = service.inspect("range", base=baseline, head=head)
             self.assertEqual(impact_id, committed["impact_id"])
-            self.assertEqual(True, committed["approved"])
+            self.assertEqual(False, committed["approved"])
             self.assertEqual("passed", committed["acceptance_status"])
+            self.assertEqual(head, committed["review_report"]["review_object"]["commit_sha"])
+            self.assertTrue(committed["confirmation_required"])
 
     def test_nonempty_but_unauditable_authorization_references_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -246,7 +228,12 @@ class StoryGateTest(unittest.TestCase):
             self.prepare(root)
             self.stage(root, "maintainer/runtime/example.py", "value = 1\n")
             service = StoryGateService(root)
-            impact = service.inspect("staged", enforce=False)
+            baseline = self.git_output(root, "rev-parse", "HEAD")
+            with mock.patch("ao_maint.story_gate.service._check_command", return_value=["/usr/bin/true"]):
+                service.verify("staged")
+            self.git(root, "commit", "-m", "candidate")
+            head = self.git_output(root, "rev-parse", "HEAD")
+            impact = service.inspect("range", base=baseline, head=head)
             impact_id = str(impact["impact_id"])
 
             for reference in (
@@ -255,44 +242,53 @@ class StoryGateTest(unittest.TestCase):
                 "jira-comment:ao-11:46645",
                 "jira-comment:AO-11:comment-46645",
                 "jira-comment:AO-11:id/unsafe",
-                f"user-confirmation:ao-11:{impact_id}",
+                f"user-confirmation:ao-11:commit:{head}",
+                f"user-confirmation:AO-11:commit:{'0' * 40}",
             ):
                 with self.subTest(reference=reference):
                     with self.assertRaises(RuntimeErrorResult) as captured:
-                        service.approve("staged", impact_id, reference)
+                        service.approve("range", impact_id, reference, base=baseline, head=head)
                     self.assertEqual(
                         "story_authorization_reference_invalid", captured.exception.code
                     )
 
-    def test_user_confirmation_must_bind_current_impact_id(self) -> None:
+    def test_user_confirmation_binds_reviewed_commit_not_impact_id(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self.prepare(root)
             self.stage(root, "maintainer/runtime/example.py", "value = 1\n")
             service = StoryGateService(root)
-            impact = service.inspect("staged", enforce=False)
+            baseline = self.git_output(root, "rev-parse", "HEAD")
+            with mock.patch("ao_maint.story_gate.service._check_command", return_value=["/usr/bin/true"]):
+                service.verify("staged")
+            self.git(root, "commit", "-m", "candidate")
+            head = self.git_output(root, "rev-parse", "HEAD")
+            impact = service.inspect("range", base=baseline, head=head)
             impact_id = str(impact["impact_id"])
 
             with self.assertRaises(RuntimeErrorResult) as captured:
                 service.approve(
-                    "staged",
+                    "range",
                     impact_id,
-                    f"user-confirmation:AO-11:{'0' * 64}",
+                    f"user-confirmation:AO-11:commit:{'0' * 40}",
+                    base=baseline,
+                    head=head,
                 )
-            self.assertEqual(
-                "story_authorization_impact_mismatch", captured.exception.code
-            )
+            self.assertEqual("story_authorization_reference_invalid", captured.exception.code)
 
             approved = service.approve(
-                "staged",
+                "range",
                 impact_id,
-                f"user-confirmation:AO-11:{impact_id}",
+                f"user-confirmation:AO-11:commit:{head}",
+                base=baseline,
+                head=head,
             )
             approval = json.loads(Path(approved["approval_path"]).read_text(encoding="utf-8"))
-            self.assertEqual(3, approval["schema_version"])
-            self.assertEqual("user_confirmation", approval["authorization_kind"])
+            self.assertEqual(4, approval["schema_version"])
+            self.assertEqual("commit_confirmation", approval["authorization_kind"])
             self.assertEqual("AO-11", approval["authorization_issue_key"])
-            self.assertEqual(impact_id, approval["authorization_record_id"])
+            self.assertEqual(head, approval["authorization_record_id"])
+            self.assertEqual(4, len(approval["confirmation_items"]))
 
     def test_tampered_authorization_record_does_not_open_gate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -300,10 +296,19 @@ class StoryGateTest(unittest.TestCase):
             self.prepare(root)
             self.stage(root, "maintainer/runtime/example.py", "value = 1\n")
             service = StoryGateService(root)
-            impact = service.inspect("staged", enforce=False)
+            baseline = self.git_output(root, "rev-parse", "HEAD")
+            with mock.patch("ao_maint.story_gate.service._check_command", return_value=["/usr/bin/true"]):
+                service.verify("staged")
+            self.git(root, "commit", "-m", "candidate")
+            head = self.git_output(root, "rev-parse", "HEAD")
+            impact = service.inspect("range", base=baseline, head=head)
             impact_id = str(impact["impact_id"])
             approved = service.approve(
-                "staged", impact_id, f"user-confirmation:AO-11:{impact_id}"
+                "range",
+                impact_id,
+                f"user-confirmation:AO-11:commit:{head}",
+                base=baseline,
+                head=head,
             )
             approval_path = Path(approved["approval_path"])
             payload = json.loads(approval_path.read_text(encoding="utf-8"))
@@ -318,10 +323,10 @@ class StoryGateTest(unittest.TestCase):
             )
             approval_path.write_text(json.dumps(payload), encoding="utf-8")
 
-            inspected = service.inspect("staged", enforce=False)
+            inspected = service.inspect("range", base=baseline, head=head, enforce=False)
             self.assertEqual(False, inspected["approved"])
 
-    def test_cli_blocked_output_contains_impact_report(self) -> None:
+    def test_cli_candidate_output_contains_human_review_report(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self.prepare(root)
@@ -342,10 +347,160 @@ class StoryGateTest(unittest.TestCase):
                     ]
                 )
             result = json.loads(stdout.getvalue())
-            self.assertEqual(2, exit_code)
-            self.assertEqual("maintenance_story_impacted", result["code"])
+            self.assertEqual(0, exit_code)
             self.assertEqual(["DE-001"], result["impacted_story_ids"])
             self.assertTrue(result["impact_id"])
+            self.assertFalse(result["confirmation_required"])
+            self.assertEqual("研发测试", result["review_report"]["impacted_stories"][0]["title"])
+            self.assertIn("confirmation_items", result["review_report"])
+
+    def test_versioned_branch_policy_selects_review_channel_and_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.prepare(root)
+            cases = {
+                "develop": ("commit_review", "develop"),
+                "main": ("protected", "main"),
+                "codex/AO-43-review": ("pr_review", "develop"),
+                "release/v1.2": ("special", "main"),
+            }
+            for branch, expected in cases.items():
+                with self.subTest(branch=branch), mock.patch.dict(
+                    os.environ, {"AGENTIC_OPS_STORY_BRANCH": branch}
+                ):
+                    review = resolve_branch_review(root)
+                    self.assertEqual(expected, (review.channel, review.target_branch))
+            with mock.patch.dict(
+                os.environ, {"AGENTIC_OPS_STORY_BRANCH": "unregistered-branch"}
+            ):
+                with self.assertRaises(ValueError):
+                    resolve_branch_review(root)
+
+    def test_pre_push_blocks_unconfirmed_commit_and_allows_exact_confirmed_sha(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.prepare(root)
+            baseline = self.git_output(root, "rev-parse", "HEAD")
+            self.stage(root, "maintainer/runtime/example.py", "value = 1\n")
+            service = StoryGateService(root)
+            with mock.patch("ao_maint.story_gate.service._check_command", return_value=["/usr/bin/true"]):
+                service.verify("staged")
+            self.git(root, "commit", "-m", "candidate")
+            head = self.git_output(root, "rev-parse", "HEAD")
+            review = service.inspect("range", base=baseline, head=head)
+            with mock.patch.dict(os.environ, {"AGENTIC_OPS_STORY_GATE_STAGE": "pre_push"}):
+                with self.assertRaises(RuntimeErrorResult) as captured:
+                    service.inspect("range", base=baseline, head=head)
+                self.assertEqual("story_commit_review_required", captured.exception.code)
+            service.approve(
+                "range",
+                review["impact_id"],
+                f"user-confirmation:AO-43:commit:{head}",
+                base=baseline,
+                head=head,
+            )
+            with mock.patch.dict(os.environ, {"AGENTIC_OPS_STORY_GATE_STAGE": "pre_push"}):
+                allowed = service.inspect("range", base=baseline, head=head)
+            self.assertTrue(allowed["approved"])
+
+    def test_pr_review_is_bound_to_current_head_and_new_push_invalidates_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.prepare(root)
+            self.git(root, "switch", "-c", "codex/AO-43-review")
+            baseline = self.git_output(root, "rev-parse", "develop")
+            self.stage(root, "maintainer/runtime/example.py", "value = 1\n")
+            service = StoryGateService(root)
+            with mock.patch("ao_maint.story_gate.service._check_command", return_value=["/usr/bin/true"]):
+                service.verify("staged")
+            self.git(root, "commit", "-m", "candidate")
+            head = self.git_output(root, "rev-parse", "HEAD")
+            pending = PullRequestFact(
+                number=7,
+                url="https://github.com/tapstate/agentic-ops/pull/7",
+                head_sha=head,
+                head_branch="codex/AO-43-review",
+                base_branch="develop",
+                approved_for_head=False,
+            )
+            with mock.patch(
+                "ao_maint.story_gate.service.read_pull_request_fact", return_value=pending
+            ):
+                review = service.inspect("range", base=baseline, head=head)
+            self.assertTrue(review["confirmation_required"])
+            self.assertEqual(pending.url, review["review_report"]["review_object"]["url"])
+
+            approved_fact = PullRequestFact(
+                **{**pending.__dict__, "approved_for_head": True, "reviewers": ("reviewer",)}
+            )
+            with mock.patch(
+                "ao_maint.story_gate.service.read_pull_request_fact", return_value=approved_fact
+            ):
+                service.approve(
+                    "range",
+                    review["impact_id"],
+                    f"github-pr-review:AO-43:7:{head}",
+                    base=baseline,
+                    head=head,
+                )
+                accepted = service.inspect("range", base=baseline, head=head)
+            self.assertTrue(accepted["approved"])
+
+            self.stage(root, "maintainer/runtime/example.py", "value = 2\n")
+            self.git(root, "commit", "-m", "new head")
+            new_head = self.git_output(root, "rev-parse", "HEAD")
+            with mock.patch("ao_maint.story_gate.service._check_command", return_value=["/usr/bin/true"]), mock.patch(
+                "ao_maint.story_gate.service.read_pull_request_fact",
+                return_value=PullRequestFact(
+                    number=7,
+                    url=pending.url,
+                    head_sha=new_head,
+                    head_branch="codex/AO-43-review",
+                    base_branch="develop",
+                ),
+            ):
+                service.verify("range", base=baseline, head=new_head)
+                changed = service.inspect("range", base=baseline, head=new_head)
+            self.assertFalse(changed["approved"])
+            self.assertTrue(changed["confirmation_required"])
+
+    def test_review_report_lists_required_sections_and_never_requests_raw_impact_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.prepare(root)
+            self.stage(root, "maintainer/runtime/example.py", "value = 1\n")
+            result = StoryGateService(root).inspect("staged")
+            report = result["review_report"]
+            self.assertEqual(
+                {
+                    "changed_paths",
+                    "impacted_stories",
+                    "story_revisions",
+                    "unmapped_paths",
+                    "acceptance_checks",
+                    "branch",
+                    "review_object",
+                    "confirmation_items",
+                    "change_points",
+                    "risks",
+                    "allowed_next_action_after_confirmation",
+                },
+                set(report),
+            )
+            self.assertNotIn(result["impact_id"], result["required_human_action"])
+            self.assertNotIn("确认 impact_id", json.dumps(result, ensure_ascii=False))
+
+    def test_runtime_rejects_symlinked_local_story_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, tempfile.TemporaryDirectory() as outside:
+            root = Path(temporary)
+            self.prepare(root)
+            self.stage(root, "maintainer/runtime/example.py", "value = 1\n")
+            local = root / "maintainer" / ".local"
+            local.mkdir(parents=True)
+            (local / "story-evidence").symlink_to(Path(outside), target_is_directory=True)
+            with self.assertRaises(RuntimeErrorResult) as captured:
+                StoryGateService(root).inspect("staged")
+            self.assertEqual("story_gate_local_state_unsafe", captured.exception.code)
 
     def test_current_registry_maps_all_workplane_assets_and_future_paths(self) -> None:
         registry = load_story_registry(self.ROOT)

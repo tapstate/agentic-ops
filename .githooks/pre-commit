@@ -204,6 +204,7 @@ if [ "$source_marker_head" = "maintainer" ] || \
     .githooks/pre-commit \
     .githooks/pre-push \
     maintainer/bin/ao-maint \
+    maintainer/standards/git/story-review-policy.yaml \
     maintainer/standards/stories/project-quality.yaml; do
     if ! git cat-file -e ":$required_path" 2>/dev/null; then
       echo "AgenticOps required gate asset is missing from the staged snapshot: $required_path" >&2
@@ -225,10 +226,12 @@ if [ "$source_marker_head" = "maintainer" ] || \
   # 运行前，至少保证实际执行文件逐字等于暂存快照；否则立即停止提交。
   gate_runtime_paths=(
     .githooks/pre-commit
+    .githooks/pre-push
     maintainer/bin/ao-maint
     maintainer/pyproject.toml
     maintainer/uv.lock
     maintainer/runtime/src/ao_maint
+    maintainer/standards/git/story-review-policy.yaml
     maintainer/scripts/test-python-runtime.sh
     maintainer/scripts/test-resources.sh
     maintainer/scripts/test-release-workflow.sh
@@ -319,6 +322,8 @@ if [ "$source_marker_head" = "maintainer" ] || \
   if [ -x "$python_bin" ]; then
     env -u GIT_INDEX_FILE \
       GIT_NO_REPLACE_OBJECTS=1 \
+      AGENTIC_OPS_STORY_BRANCH="$branch" \
+      AGENTIC_OPS_STORY_GATE_STAGE=pre_commit \
       PYTHONPATH="$baseline_snapshot/maintainer/runtime/src" \
       PYTHONPYCACHEPREFIX="$story_gate_temp/pycache" \
       "$python_bin" -m ao_maint \
@@ -331,6 +336,8 @@ if [ "$source_marker_head" = "maintainer" ] || \
     # 纯 Shell 测试 fixture 没有 Python 环境，继续执行其受信基线 launcher。
     env -u GIT_INDEX_FILE \
       GIT_NO_REPLACE_OBJECTS=1 \
+      AGENTIC_OPS_STORY_BRANCH="$branch" \
+      AGENTIC_OPS_STORY_GATE_STAGE=pre_commit \
       PYTHONPYCACHEPREFIX="$story_gate_temp/pycache" \
       "$baseline_cli" \
         --source-root "$candidate_snapshot" \

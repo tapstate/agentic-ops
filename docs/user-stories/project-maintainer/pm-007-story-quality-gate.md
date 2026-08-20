@@ -2,111 +2,130 @@
 
 作为公司员工指导员，
 我希望项目维护故事和研发工程师故事成为可执行的质量合同，
-以便任何影响已确认行为的代码变更都会停止连续自动化，并重新完成影响确认和故事验收。
+以便候选先完成固定验收，再通过可查阅的 commit 或 PR 完成人工审查，而不是让我确认内部哈希。
 
 ### 触发方式
 
 ```sh
 ./maintainer/bin/ao-maint story impact --change-source worktree
 ./maintainer/bin/ao-maint story impact --change-source staged
+./maintainer/bin/ao-maint story verify --change-source staged
 ```
+
+不新增用户命令。`story approve` 由 Agent 在用户确认 commit 报告或 Runtime 回读有效 PR Review 后调用。
 
 ### 前置条件
 
 - 当前工作位于 `tapstate/agentic-ops` 源头仓库或独立 worktree，并通过根 AI 入口进入 maintainer 工作面。
 - 两类故事已在机器注册表中声明文档、保护路径、验收检查和证据要求。
-- Git diff 可被 Runtime 确定性读取。
+- `maintainer/standards/git/story-review-policy.yaml` 能唯一确定当前分支的审查通道和目标分支。
+- Git diff 可被 Runtime 确定性读取；PR 通道还要求 GitHub PR 和 Review 可被 Runtime 回读。
 
 ### 主流程
 
-1. Runtime 读取项目维护故事和研发工程师故事注册表。
-2. Runtime 根据 Git diff 和显式路径映射生成稳定 `impact_id`。
-3. 变更命中保护路径时停止连续自动化，输出受影响故事、类别、验收检查和人工动作。
-4. 直接修改故事、注册表或验收条件时，将其标记为故事修订，原连续授权失效。
-5. 公司员工指导员确认影响报告后，以 `user-confirmation:<KEY>:<impact-id>` 引用当前交互中的明确确认，并严格绑定同一个 `impact_id`；maintainer 没有 Jira 评论回读能力，不接受 `jira-comment` 引用或旧版审批记录。
-6. Runtime 执行注册表声明的固定验收检查并写入本地证据。
-7. Git 从 common directory 中不可入库修改的 trusted launcher 加载已接受 `HEAD` 的版本化 Hook；Hook 再用已接受 `HEAD` Runtime 检查隔离的 index 快照，而不是执行工作树或候选 Runtime。
-8. 只有确认和验收均匹配当前 Git 内容指纹时，Git Hook 才允许继续提交。
-9. `release` / `hotfix publish` 刷新 `origin/main`，从该提交创建可信基线快照，并用基线 Runtime 检查固定 candidate 快照；candidate `ao-maint` 不参与自证。
+1. Runtime 读取故事注册表、版本化分支策略和 Git diff，生成内部 `impact_id`。
+2. worktree / staged 命中保护路径时输出候选预警和结构化 `review_report`，`confirmation_required=false`；Agent 只收敛候选并运行固定验收，不请求人工确认。
+3. 固定验收与候选 Git 内容指纹绑定，可在人工审查前执行；pre-commit 要求映射、安全快照和固定验收通过，但不要求提前批准。
+4. `pr_review` 分支继续形成 commit、推送任务分支并创建或更新 PR；Runtime 输出 PR 地址和精确 Head SHA，用户在 PR 上逐项审查确认事项、变更点和风险。
+5. `commit_review` 分支形成本地 commit 但保持未推送；Runtime 输出完整 commit SHA，用户在推送前逐项审查确认事项、变更点和风险。
+6. PR 通道由 Runtime 回读当前 Head 的有效独立 GitHub Review；commit 通道由 Agent 根据当前对话确认构造内部 commit 审计引用。用户不查看、复制或复述 `impact_id`。
+7. 批准记录同时绑定 `impact_id`、commit SHA 或 PR Head、报告摘要和确认事项；Git 内容、提交、PR Head 或报告变化后旧批准失效。
+8. pre-push 对 `commit_review` 要求当前待推送 range 的固定验收和 commit 批准；对 `pr_review` 允许推送任务分支以形成 PR，但禁止直接推送目标保护分支。
+9. `main`、release、tag、合并、强推和历史改写继续使用独立专用门禁。
 
-AO-11 首次安装新版门禁时，旧 `HEAD` trusted launcher 只执行旧 Hook，不能自动到达 staged candidate；这一笔提交不声称受新版 Hook 自动保护。公司员工指导员必须先显式确认 staged `impact_id`，候选 Runtime 对同一 index 完成 approve/verify/复检并锁定 tree，才可一次性绕过旧 Hook 创建基线提交；提交后对真实 commit range 复检同一 impact/tree 并立即安装新 trusted launcher。父提交已有 story Runtime 后，该迁移例外永久失效。
+AO-43 安装提交的旧 `HEAD` Hook 仍要求 staged 批准先于 commit。该笔变更按旧基线展示一次完整 staged 报告，由公司员工指导员确认报告资源、变更点和风险后，Agent 内部完成旧版 approve / verify，再使用正常 Hook 提交。该迁移不要求用户确认裸 `impact_id`，不使用 `--no-verify`，并在新 Hook 进入 `HEAD` 后永久失效。
 
 ### 输出
 
 ```json
 {
-  "ok": false,
+  "ok": true,
   "operation": "story_impact",
-  "status": "blocked",
-  "code": "maintenance_story_impacted",
-  "impact_id": "<sha256>",
-  "impacted_story_ids": ["PM-007", "DE-004"],
-  "required_human_action": "请公司员工指导员确认影响报告"
+  "review_channel": "commit_review",
+  "confirmation_stage": "pre_push_commit_review",
+  "approval_ready": true,
+  "confirmation_required": true,
+  "commit_sha": "<git-sha>",
+  "review_report": {
+    "changed_paths": ["maintainer/runtime/src/ao_maint/story_gate/service.py"],
+    "impacted_stories": [
+      {
+        "story_id": "PM-007",
+        "title": "守护两类项目故事质量基线",
+        "document": "docs/user-stories/project-maintainer/pm-007-story-quality-gate.md"
+      }
+    ],
+    "confirmation_items": [],
+    "change_points": [],
+    "risks": []
+  },
+  "required_human_action": "请审阅本地提交及逐项报告；确认前保持未推送"
 }
 ```
 
+`impact_id` 仍可出现在机器输出中，用于审计和失效判断，但不得出现在面向用户的确认主题或要求用户执行的动作中。
+
 ### 失败处理
 
-- 未确认故事影响时返回 `maintenance_story_impacted`。
-- 修改故事、注册表或验收条件时返回 `maintenance_story_revision_required`。
+- 治理路径缺少映射时返回 `maintenance_story_mapping_missing`，列出具体路径并失败关闭。
 - 固定验收未运行或失败时返回 `maintenance_story_acceptance_failed`。
-- 治理范围内代码没有故事映射时返回 `maintenance_story_mapping_missing`，不得由 AI 默认放行。
-- Git 内容变化后旧 `impact_id`、确认和验收证据自动失效。
-- 任意非空字符串、格式不合法的引用或没有绑定当前 `impact_id` 的对话确认均不能批准。
+- 分支策略缺失、歧义或 GitHub 回读失败时返回 `story_review_policy_unavailable`。
+- commit 通道推送前缺少当前提交批准时返回 `story_commit_review_required`。
+- 保护或专用通道被普通流程调用时返回 `story_review_channel_protected`。
+- 审查事实没有绑定当前 commit 或 PR Head 时返回 `story_authorization_reference_invalid`。
+- Git 内容、commit SHA、PR Head 或报告摘要变化后旧确认自动失效。
 
 ### 验收标准
 
 - 注册表只允许 `maintainer` 和 `developer` 两类故事，稳定编号仍使用 `PM-*` 与 `DE-*`。
-- 每个故事都有唯一编号、人读文档、保护路径、固定验收检查和证据要求。
-- 受影响故事未经确认时，pre-commit 阻断提交。
-- 只确认但未验收时，pre-commit 仍阻断提交。
-- 确认和验收只对完全相同的 Git 内容指纹有效。
-- 人工确认引用只接受与当前 `impact_id` 绑定的 `user-confirmation`；无回读能力时拒绝 Jira 评论引用。
-- 治理路径缺失映射时以能力缺口阻断。
-- 非 AgenticOps 仓库不因缺少故事注册表被项目 Hook 误伤。
-- 未暂存篡改 Hook、launcher、Runtime 或固定验收入口时，pre-commit 在执行门禁前阻断。
-- `maintainer/.local`、approval/evidence 目录或 JSON 叶子使用符号链接、特殊文件或逃出仓库 / candidate 真实路径时，Hook 与 release 必须在复制前失败，且仓库外 sentinel 不产生文件。
-- staged Hook 变更由 Git common directory trusted launcher 加载的 `HEAD` Hook 和 `HEAD` Runtime 检查，不能把 candidate Hook 当信任根。
-- `origin/main` 缺少新门禁时，发布以 `release_story_gate_baseline_upgrade_required` 失败关闭，不允许 AO-11 candidate 自证。
-- 首次迁移测试使用真实 Git staged tree 与 commit range，证明显式人工 approval/acceptance 绑定的 impact 在提交后不变；文档不得声称旧 HEAD Hook 自动执行了 candidate 门禁。
-- Hook、故事门禁 Runtime、注册表或发布脚本等信任根发生净变更时，自动 publish 以 `release_story_gate_trust_root_changed` 停止，改走受保护 `main` 的独立人工审查 PR。
+- 每个故事都有唯一编号、中文标题、人读文档、保护路径、固定验收检查和证据要求。
+- worktree / staged 影响输出 `confirmation_required=false`，人工动作不得要求确认或复制 `impact_id`。
+- `review_report` 完整列出变更路径、故事标题与文档、故事修订、未映射路径、固定验收、分支通道、审查对象、确认事项、变更点、风险和确认后动作。
+- `develop` 进入 `commit_review`；登记的功能、修复和 AO 任务分支进入 `pr_review`；`main` 进入 `protected`；release 分支进入 `special`；缺失或歧义规则失败关闭。
+- pre-commit 在固定验收通过后允许形成 commit，不要求人工批准先于 commit。
+- commit 通道形成提交后，pre-push 在批准前阻断，批准只绑定完整 commit SHA 和同一 range 报告。
+- PR 通道必须输出 URL 与当前 Head；只有 Runtime 回读到当前 Head 的独立批准才可记录，新的 push 使旧 Review 和本地批准失效。
+- 确认事项、变更点和风险必须逐项显示；无额外业务风险时仍明确保留本地 Hook 可绕过的残留风险。
+- 未暂存篡改 Hook、launcher、Runtime、策略或固定验收入口时，pre-commit 在执行门禁前阻断。
+- `maintainer/.local` 故事状态路径出现符号链接、特殊文件或路径逃逸时，Hook 与 release 失败关闭。
+- Hook、故事门禁 Runtime、分支策略、注册表或发布脚本等信任根发生净变更时，自动 publish 以 `release_story_gate_trust_root_changed` 停止，改走受保护 `main` 的独立人工审查 PR。
+- 执行四项固定完整验证，并覆盖候选预警、commit 审查、PR Review 回读、Head 失效和版本化资产措辞。
 
 ### 保护行为
 
 - 项目只维护项目维护故事和研发工程师故事，不建立第三类 AIAgent 故事。
 - 故事是仓库内版本化质量合同，Jira 只管理实施计划、进度、确认和验收记录。
-- 代码变更命中故事后必须停止连续自动化，原任务级授权不能隐式覆盖故事变化。
-- AI、Skill、Shell、Git Hook 和发布脚本不得绕过 Python Runtime 的故事影响结论。
-- 修改故事、保护路径或验收条件必须获得公司员工指导员确认。
+- 原任务级连续授权不能替代故事修订审查，也不能替代 commit 或 PR 代码审查事实。
+- 用户确认的是 PR 或本地 commit 及完整报告；`impact_id` 只用于 Runtime 内部绑定。
+- AI、Skill、Shell、Git Hook 和发布脚本不得绕过 Python Runtime 的影响、验收、分支和审查事实结论。
 - 验收检查必须来自 Runtime 固定白名单，注册表不得注入任意 Shell 命令。
-- 版本化 `.githooks` 是受信 launcher 加载的策略源，不直接作为可自我证明的工作树可执行文件。
-- 本地 Hook 是防误操作和快速反馈；拥有本机 Git 控制权的人仍可使用 `--no-verify` 或修改 Git 配置。硬门禁由无 bypass 的 `main` Ruleset 强制至少 1 个独立人工批准、最后推送者不能自批、dismiss stale approvals 和解决全部 review threads；即使 candidate 同时删除仓库内门禁调用，也不能自动合并。`origin/main` 发布基线提供确定性复检，不宣称单一本地 Hook 或仓库内脚本能抵抗恶意维护者。
-- 首次安装或升级发布信任根必须分两阶段：先由受保护 `main` 的人工审查 PR 安装基线，再由新 `origin/main` 基线验证后续普通发布。
+- 版本化 `.githooks` 是 trusted launcher 加载的策略源，不能由 candidate 自证。
+- 本地 Hook 是防误操作层；硬门禁依赖 `main` Ruleset 的独立批准、最后推送者不能自批、dismiss stale approvals 和 review thread resolution。
+- Agent 不自动批准 PR、不自动合并，也不把“已创建 PR”描述为“已人工确认”。
 
 ### 审核问题
 
-- 当前变更影响哪些项目维护故事和研发工程师故事。
-- 影响来自保护路径还是故事定义本身。
-- 当前 `impact_id` 是否与公司员工指导员确认记录一致。
-- 固定验收是否覆盖每个受影响故事的保护行为。
-- 是否存在治理范围内但未映射到故事的代码路径。
+- 当前审查对象是哪个 PR Head 或本地 commit。
+- 当前变更影响哪些故事，是否直接修订故事合同。
+- 固定验收是否与当前代码事实绑定并全部通过。
+- 确认事项、变更点和风险是否逐项完整。
+- 是否存在未映射路径、分支歧义、PR Head 漂移或旧批准复用。
 
 ### 验收证据
 
-- 未确认保护路径变更返回 `maintenance_story_impacted`。
-- 注册表或故事文档变更返回 `maintenance_story_revision_required`。
-- 未运行或失败验收返回 `maintenance_story_acceptance_failed`。
-- 未映射治理路径返回 `maintenance_story_mapping_missing`。
-- `ao-maint story approve` 生成与 `impact_id` 绑定的本地确认记录。
-- `ao-maint story verify` 生成固定检查结果和本地验收证据。
-- Git common directory trusted launcher 从已接受 `HEAD` 加载 `.githooks/pre-commit`；攻击复现中 `HEAD ao-maint` 拒绝、工作树未暂存改为成功且 index 只含 README 时仍必须阻断。
-- 发布 fixture 中 candidate `ao-maint` 即使无条件成功，`origin/main` 基线拒绝时 publish 仍返回 `release_story_gate_blocked`。
+- Runtime 单测证明 worktree / staged 不请求人工确认且报告字段完整。
+- 分支策略测试证明 PR、commit、protected、special 和未知分支的确定性结果。
+- pre-push 测试证明 develop 的未确认 commit 被阻断、精确确认后放行。
+- PR 测试证明当前 Head Review 可记录、新 Head 使旧批准失效。
+- `ao-maint story verify` 在批准前生成与内容指纹绑定的固定验收证据。
+- 版本化资产测试证明 AGENTS、Rule、Skill 和 PM-007 不指示用户确认裸 `impact_id`。
+- 发布 fixture 证明 candidate 信任根不能自证，受保护 `main` 仍要求独立人工审查。
 
 ### 关联设计
 
 - `docs/strategy/project-goals.md`
-- `docs/user-stories/agenticops-user-stories.md`
 - `maintainer/standards/stories/project-quality.yaml`
+- `maintainer/standards/git/story-review-policy.yaml`
 - `maintainer/rules/source-maintenance.md`
 - `maintainer/skills/guard-story-quality/SKILL.md`
 - `maintainer/runtime/src/ao_maint/story_gate/`

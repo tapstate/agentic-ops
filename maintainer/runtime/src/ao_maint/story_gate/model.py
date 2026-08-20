@@ -45,6 +45,15 @@ class StoryImpact:
     revision_story_ids: tuple[str, ...]
     unmapped_paths: tuple[str, ...]
     acceptance_checks: tuple[str, ...]
+    current_branch: str
+    review_channel: str
+    confirmation_stage: str
+    target_branch: str
+    commit_sha: str
+    pr_number: int | None
+    pr_url: str
+    pr_head_sha: str
+    pr_review_approved: bool
 
     @property
     def requires_revision_confirmation(self) -> bool:
@@ -65,4 +74,13 @@ class StoryImpact:
             "unmapped_paths": list(self.unmapped_paths),
             "acceptance_checks": list(self.acceptance_checks),
             "requires_revision_confirmation": self.requires_revision_confirmation,
+            "current_branch": self.current_branch,
+            "review_channel": self.review_channel,
+            "confirmation_stage": self.confirmation_stage,
+            "target_branch": self.target_branch,
+            "commit_sha": self.commit_sha,
+            "pr_number": self.pr_number,
+            "pr_url": self.pr_url,
+            "pr_head_sha": self.pr_head_sha,
+            "pr_review_approved": self.pr_review_approved,
         }

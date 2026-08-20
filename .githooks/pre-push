@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+zero_sha="0000000000000000000000000000000000000000"
+
+if ! git diff --quiet HEAD -- \
+  .githooks/pre-push \
+  maintainer/bin/ao-maint \
+  maintainer/pyproject.toml \
+  maintainer/uv.lock \
+  maintainer/runtime/src/ao_maint \
+  maintainer/standards/git/story-review-policy.yaml; then
+  echo "story gate implementation has uncommitted changes; pre-push cannot trust the worktree runtime" >&2
+  exit 1
+fi
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    echo "direct push to main is prohibited; use a pull request" >&2
+    exit 1
+  fi
+  if [ "$local_sha" = "$zero_sha" ]; then
+    continue
+  fi
+  case "$local_ref" in
+    refs/heads/*)
+      branch="${local_ref#refs/heads/}"
+      ;;
+    refs/tags/*)
+      if [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" = "release" ]; then
+        continue
+      fi
+      echo "story_review_channel_protected: tags require the versioned release workflow" >&2
+      exit 1
+      ;;
+    *)
+      echo "story_review_branch_unknown: only named branch pushes are supported" >&2
+      exit 1
+      ;;
+  esac
+  if [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" = "release" ]; then
+    continue
+  fi
+
+  AGENTIC_OPS_STORY_BRANCH="$branch" \
+    AGENTIC_OPS_STORY_GATE_STAGE=pre_push \
+    "$repo_root/maintainer/bin/ao-maint" \
+      story impact \
+      --change-source range \
+      --head "$local_sha"
+done

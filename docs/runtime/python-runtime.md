@@ -172,4 +172,4 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 ## 14. 项目故事质量门禁
 
-maintainer 工作面通过 `ao-maint story impact|approve|verify` 守护项目维护故事和研发工程师故事。影响检测基于 Git 内容指纹和机器注册表；确认与固定验收必须匹配同一 `impact_id`。故事受影响、故事修订、验收失败或映射缺失时，pre-commit 停止提交。`ao-work` 不提供故事门禁子命令。详细规则见 [项目故事质量门禁](story-quality-gate.md)。
+maintainer 工作面通过 `ao-maint story impact|approve|verify` 守护项目维护故事和研发工程师故事。worktree / staged 阶段输出候选预警并先执行与内容指纹绑定的固定验收；pre-commit 不要求人工批准先于 commit。版本化分支策略随后把功能、修复和任务分支送到 PR 当前 Head 审查，把 `develop` 等其它允许分支送到本地 commit 推送前审查；确认记录同时绑定内部 `impact_id`、代码事实和报告摘要。`ao-work` 不提供故事门禁子命令。详细规则见 [项目故事质量门禁](story-quality-gate.md)。

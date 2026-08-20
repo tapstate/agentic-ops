@@ -21,8 +21,8 @@ def configure_story_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
         "--authorization-reference",
         required=True,
         help=(
-            "与当前影响绑定的人工确认引用："
-            "user-confirmation:<KEY>:<impact-id>；不接受未回读的 Jira 评论"
+            "Agent 根据已审阅 commit 或 GitHub PR Review 构造的内部审计引用；"
+            "用户无需查看或复制 impact_id"
         ),
     )
 
