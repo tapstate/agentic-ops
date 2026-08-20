@@ -481,15 +481,14 @@ class WorkspaceInitializer:
                     ),
                     self._managed_agents_content(candidate),
                 )
-                for tool, filename in (("hermes", "HERMES.md"), ("claude", "CLAUDE.md")):
-                    atomic_write_text(
-                        validate_workspace_root_file(
-                            candidate.root,
-                            candidate.root / filename,
-                            label=filename,
-                        ),
-                        self._managed_guide_content(candidate, tool),
-                    )
+                atomic_write_text(
+                    validate_workspace_root_file(
+                        candidate.root,
+                        candidate.root / "CLAUDE.md",
+                        label="CLAUDE.md",
+                    ),
+                    self._managed_guide_content(candidate),
+                )
                 write_diagnostic("初始化步骤 4/5：安装研发 Skill 并写入授权凭证")
                 self._install_workspace_skills(candidate)
                 if candidate.persist_credentials and candidate.email and candidate.token:
@@ -650,25 +649,24 @@ class WorkspaceInitializer:
                 "业务工作空间 AGENTS.md 中的 developer Rule 入口缺失或已漂移",
                 "请由指导员重新运行 ao-work workspace init 同步当前 developer AI 入口",
             )
-        for tool, filename in (("hermes", "HERMES.md"), ("claude", "CLAUDE.md")):
-            guide_path = validate_workspace_root_file(
-                candidate.root,
-                candidate.root / filename,
-                label=filename,
+        guide_path = validate_workspace_root_file(
+            candidate.root,
+            candidate.root / "CLAUDE.md",
+            label="CLAUDE.md",
+        )
+        guide_content = read_workspace_root_file(
+            candidate.root,
+            guide_path,
+            label="CLAUDE.md",
+        )
+        if guide_content.count(MANAGED_START) != 1 or guide_content.count(
+            MANAGED_END
+        ) != 1:
+            raise _blocked(
+                "workspace_ai_entry_drift",
+                "业务工作空间 CLAUDE.md 中的 developer 引导入口缺失或管理块不完整",
+                "请由指导员重新运行 ao-work workspace init 同步当前 developer AI 入口",
             )
-            guide_content = read_workspace_root_file(
-                candidate.root,
-                guide_path,
-                label=filename,
-            )
-            if guide_content.count(MANAGED_START) != 1 or guide_content.count(
-                MANAGED_END
-            ) != 1:
-                raise _blocked(
-                    "workspace_ai_entry_drift",
-                    f"业务工作空间 {filename} 中的 developer 引导入口缺失或管理块不完整",
-                    "请由指导员重新运行 ao-work workspace init 同步当前 developer AI 入口",
-                )
         skill_assets = self._developer_skill_assets()
         skill_root = validate_managed_path(
             candidate.root,
@@ -1459,34 +1457,31 @@ class WorkspaceInitializer:
             return f"{existing.rstrip()}\n\n{block}"
         return block
 
-    def _managed_guide_content(
-        self, candidate: WorkspaceCandidate, tool: str
-    ) -> str:
-        """生成 Hermes / Claude Code 的轻量引导文件（HERMES.md / CLAUDE.md）。
+    def _managed_guide_content(self, candidate: WorkspaceCandidate) -> str:
+        """生成 Claude Code 的轻量引导文件（CLAUDE.md）。
 
-        - 只声明 developer 工作面与权威入口，规则正文在 AGENTS.md（避免三份重复维护）。
-        - Codex 兼容说明：AGENTS.md 是 Codex / Hermes / Claude Code 共同识别的
-          便携入口，本文件与 AGENTS.md 共存时由各自工具按自身优先级加载，
-          任何工具都不得把本文件当作独立规则源。
+        - 只声明 developer 工作面与权威入口，规则正文在 AGENTS.md（避免两份重复维护）。
+        - Codex 兼容说明：AGENTS.md 是 Codex / Claude Code 共同识别的便携入口；
+          Claude Code 不直接读 AGENTS.md，本文件用 @AGENTS.md 导入同一份规则。
+        - Skill 发现：Codex 直接扫描 .agents/skills/；Claude Code 通过
+          .claude/skills/ 下的 symlink 桥接（init 时创建）发现同一套 Skill。
         """
-        guide_name = "HERMES.md" if tool == "hermes" else "CLAUDE.md"
-        tool_label = "Hermes" if tool == "hermes" else "Claude Code"
         return (
             f"{MANAGED_START}\n"
-            f"# AgenticOps 业务项目工作空间（{tool_label} 引导）\n\n"
-            f"本文件（{guide_name}）只做入口引导，规则正文不在此维护。权威规则是仓库根的 "
+            "# AgenticOps 业务项目工作空间（Claude Code 引导）\n\n"
+            "本文件（CLAUDE.md）只做入口引导，规则正文不在此维护。权威规则是仓库根的 "
             "`AGENTS.md`（developer 工作面，由 ao-work workspace init 生成并受管）：\n\n"
-            "1. 请先加载 `AGENTS.md` 并按其中的 developer AI 规则执行，本文件不替代它。\n"
+            "@AGENTS.md\n\n"
+            "1. 请先按 `AGENTS.md` 中的 developer AI 规则执行，本文件不替代它。\n"
             "2. 工作空间固定使用 `developer` 工作面，命令入口为 `ao-work`；"
             "不得加载或调用 `maintainer` 工作面的规则、Skill、授权、配置或入口。\n"
             "3. 执行任务前先调用 `ao-work workspace preflight`；任何阻断结果都不得绕过。\n\n"
-            "## 与 Codex AGENTS.md 特性的兼容说明\n\n"
-            f"- {tool_label} 与 Codex 都识别仓库根的 `AGENTS.md` 作为项目指令入口；"
-            "本文件（HERMES.md/CLAUDE.md）是各自工具的额外引导，加载优先级按工具自身约定。\n"
+            "## 与 Codex 的兼容说明\n\n"
+            "- Codex 直接识别 `AGENTS.md` 并扫描 `.agents/skills/` 自动发现 Skill；"
+            "Claude Code 通过 `.claude/skills/` 下的 symlink（由 init 创建）"
+            "指向 `.agents/skills/` 发现同一套 Skill。\n"
             "- 若本文件与 `AGENTS.md` 内容冲突，以 `AGENTS.md` 为准；"
             "两者都不得把 `developer/...` 当作业务仓库相对路径，也不得搜索或恢复 maintainer 资产。\n"
-            "- Codex 可发现的 developer Skill 位于 `.agents/skills/`（受管副本），"
-            "需要流程能力时只从该目录选择；标准资产由 `ao-work` 从受信安装根解析。\n"
             f"- 本文件由 `ao-work workspace init` 维护（管理块标记之间），"
             "请勿手改管理块；重新初始化工作空间时会重新生成。\n"
             f"{MANAGED_END}"
@@ -1602,6 +1597,62 @@ class WorkspaceInitializer:
                 target_dir / "SKILL.md",
                 source.read_text(encoding="utf-8"),
             )
+        self._link_claude_skills(candidate, skill_root, expected)
+
+    def _link_claude_skills(
+        self,
+        candidate: WorkspaceCandidate,
+        skill_root: Path,
+        expected: dict[str, Path],
+    ) -> None:
+        """为 Claude Code 建 `.claude/skills/` symlink 桥接到 `.agents/skills/`。
+
+        Codex 直接扫描 `.agents/skills/`；Claude Code 只读 `.claude/skills/`，
+        这里用 symlink 让两个工具共享同一套 Skill 目录（Claude Code 官方认可
+        symlink 形式的项目 Skill）。每个 `<name>` 桥接为 `.claude/skills/<name>`
+        → `../.agents/skills/<name>`（相对路径）。
+        """
+        claude_root = validate_managed_path(
+            candidate.root,
+            candidate.root / ".claude" / "skills",
+            code="workspace_ai_asset_unsafe",
+        )
+        if claude_root.is_symlink() or (claude_root.exists() and not claude_root.is_dir()):
+            raise _blocked(
+                "workspace_ai_asset_unsafe",
+                "业务工作空间 .claude/skills 必须是工作空间内的普通目录",
+                "请移除异常路径并重新运行 ao-work workspace init",
+            )
+        claude_root.mkdir(parents=True, exist_ok=True)
+        for existing in claude_root.iterdir():
+            if existing.name not in expected and not existing.is_symlink():
+                raise _blocked(
+                    "workspace_ai_asset_contaminated",
+                    f"业务工作空间存在非准入 Claude Skill：{existing.name}",
+                    "请先人工核对并移除非准入 Skill，再重新初始化",
+                )
+        for name in expected:
+            link = validate_managed_path(
+                candidate.root,
+                claude_root / name,
+                code="workspace_ai_asset_unsafe",
+            )
+            target = os.path.relpath(skill_root / name, claude_root)
+            if link.is_symlink():
+                if os.readlink(link) != target:
+                    raise _blocked(
+                        "workspace_ai_asset_drift",
+                        f"业务工作空间 Claude Skill symlink 目标不一致：{name}",
+                        "请由指导员重新运行 ao-work workspace init 修复桥接",
+                    )
+                continue
+            if link.exists():
+                raise _blocked(
+                    "workspace_ai_asset_unsafe",
+                    f"业务工作空间 Claude Skill 路径类型不安全：{name}",
+                    "请移除异常路径并重新运行 ao-work workspace init",
+                )
+            link.symlink_to(target, target_is_directory=True)
 
     def _index_path(self) -> Path:
         return validate_managed_path(
