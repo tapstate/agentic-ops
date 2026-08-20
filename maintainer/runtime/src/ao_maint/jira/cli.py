@@ -320,7 +320,9 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
                 exit_code=EXIT_BLOCKED,
                 required_human_action="请核对 plan 输出并重新确认",
             )
-        _validate_authorization_reference(args.authorization_reference, plan)
+        _validate_authorization_reference(
+            args.authorization_reference, plan, source_root
+        )
         decision_created = _append_decision(
             source_root,
             plan,
@@ -595,7 +597,9 @@ def _append_decision(
     return True
 
 
-def _validate_authorization_reference(value: str, plan: WritePlan) -> None:
+def _validate_authorization_reference(
+    value: str, plan: WritePlan, source_root: Path
+) -> None:
     if not isinstance(value, str) or not value.strip():
         raise RuntimeErrorResult(
             code="jira_write_authorization_required",
@@ -604,7 +608,17 @@ def _validate_authorization_reference(value: str, plan: WritePlan) -> None:
             exit_code=EXIT_BLOCKED,
             required_human_action="请提供当前交互中的明确确认引用（user-confirmation:<KEY>:<plan_id>）",
         )
-    if "user-confirmation:" not in value:
+    if value.startswith("work-authorization:"):
+        from ao_maint.takeover.state import validate_work_authorization
+
+        validate_work_authorization(
+            source_root,
+            value,
+            issue_key=plan.issue_key,
+            operation=plan.operation,
+        )
+        return
+    if not value.startswith("user-confirmation:"):
         raise RuntimeErrorResult(
             code="jira_write_authorization_required",
             message="Jira 写入确认引用必须使用 user-confirmation 格式",

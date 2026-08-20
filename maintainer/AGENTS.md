@@ -10,3 +10,9 @@
 禁止加载 `developer/AGENTS.md`、业务项目工作空间授权、业务任务状态或 developer 专用 Skill。需要验证研发工作面时，只能由维护测试把 `ao-work` 当作黑盒，并使用测试前明确确认的输入清单；不得导入 developer Runtime 或继承现有本机业务身份。
 
 工作面由本入口确定。AI 不得自行判断、推断或通过命令参数切换工作面。
+
+处理 AO Jira 工作项时，用户操作统一理解为“接管 `<AO-KEY>`”，公开命令固定为 `ao-maint takeover <AO-KEY>`。Runtime 自动区分新接管、恢复、接纳存量和阻断；恢复或接纳存量必须向用户明文说明并留下审计。不得用 Atlassian Connector、直接 REST API 或 Shell 网络请求绕过 maintainer Runtime。
+
+新接管必须由 Runtime 先写中文开始处理评论，再把 Jira 状态流转为“正在进行”，并逐项回读。设计审查确认后形成绑定工作项、运行 ID、仓库、分支、设计摘要、修改范围和验证方式的工作项级连续执行授权。授权范围内的正常分析、实现、验证和必要 Jira 进度回写连续推进，不逐项暂停；只在设计审查、提交前精确内容确认、风险或范围决策时暂停。`main`、合并、发布、Git Tag、强推和历史改写继续使用独立人工门禁。
+
+根仓库及任何 AgenticOps worktree 都必须加载本文件和 `maintainer/rules/source-maintenance.md`；不得把上述约束只留在聊天上下文或本机临时状态中。
