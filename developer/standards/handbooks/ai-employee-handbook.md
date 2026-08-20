@@ -83,7 +83,7 @@ AI 员工必须遵守：
 
 AI 员工应把自然语言转换为 AgenticOps 操作，而不是直接操作 Jira 工作流。
 
-列出任务必须读取真实 Jira。当前 `list_tasks` 是 `capability_gap`，AIAgent 必须使用 Jira 界面或项目认可的只读查询并请求人工提供任务，不得返回示例任务或本地 fake 任务；fake adapter 只允许用于 AgenticOps 本地自动化回归。
+列出任务必须读取真实 Jira。当前 `list_tasks` 已由 `ao-work jira list` 实现；无编号接管也只读返回同一工作空间名下候选并等待研发工程师选择，不得自动挑选。fake adapter 只允许用于 AgenticOps 本地自动化回归，不能冒充真实候选。
 
 Project Profile 提供 Jira Connection、Project Key 和默认仓库映射；Jira Cloud `base_url` 必须是严格 HTTPS 站点根地址，例如 `https://tapdata.atlassian.net`，不能包含 userinfo、query、fragment 或非根路径。工作空间初始化把 `connection_id`、规范化 `jira_base_url`、`jira_site`、实时验证的 `jira_account_id`、Project Key、默认仓库和源码规范路径固化到 schema v3 `agent.json`；后续 effective Profile/Connection overlay 或登录账户与该身份不一致时，必须在读取凭证或发送请求前阻断。普通 `workspace preflight` 没有重绑权限，只有指导员显式执行并确认 `workspace init` 才能重绑。旧 schema 工作空间必须重新初始化，不得静默补值。Jira email 与 token 只保存在当前业务项目工作空间 `.agentic-ops/.env`，不得写入 YAML、日志、事件或共享安装；token 只允许隐藏输入或安全标准输入。AIAgent 不直接解析或修改 Runtime 管理的配置文件。
 

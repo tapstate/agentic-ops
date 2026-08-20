@@ -46,11 +46,6 @@ def execute_task_takeover(
     install_root: Path,
     store: TaskStore,
     issue_key: str | None,
-    *,
-    agent_id: str | None,
-    authorization_reference: str | None,
-    authorization_mode: str = "explicit_reference",
-    transition_comment: str | None = None,
 ) -> dict[str, Any]:
     """正式任务接管：稳定意图 → Comment 回读 → Status 回读 → 本地收口。
 
@@ -64,6 +59,15 @@ def execute_task_takeover(
     - 回读：Comment、Status 和本地交叉状态证据齐全后才返回成功。
     """
     context = load_jira_context(workspace, install_root)
+    if issue_key and not issue_key.startswith(f"{context.profile.project_key}-"):
+        raise _blocked(
+            "jira_workspace_mismatch",
+            (
+                f"Issue {issue_key} 不属于当前 developer 工作空间绑定的 "
+                f"{context.profile.project_key} 项目"
+            ),
+            "请切换到对应业务项目工作空间；AO 项目任务只能使用 ao-maint",
+        )
     email, token = context.require_credentials()
     client = JiraClient(
         context.profile,
@@ -80,21 +84,7 @@ def execute_task_takeover(
     if not issue_key:
         return _takeover_candidates(context, client, account["account_id"])
 
-    if authorization_mode not in {"explicit_reference", "takeover_instruction"}:
-        raise _blocked(
-            "takeover_authorization_mode_invalid",
-            "接管授权模式无效",
-            "请使用 ao-work takeover <KEY> 重新执行接管",
-        )
-    if authorization_mode == "explicit_reference" and not authorization_reference:
-        raise _blocked(
-            "authorization_reference_required",
-            "正式接管必须提供授权引用（--authorization-reference）",
-            "请先确认目标任务并取得研发工程师授权后，以 user-confirmation:<KEY>:<plan_id> 重试",
-        )
-
-    if not agent_id:
-        agent_id = _default_agent_id(install_root)
+    agent_id = _default_agent_id(install_root)
     issue = service.inspect_issue(issue_key)
     if issue.assignee != account["account_id"]:
         raise _blocked(
@@ -129,11 +119,10 @@ def execute_task_takeover(
         task_state_created = False
         progress_stage = str(progress.get("stage") or "")
 
-    if not authorization_reference:
-        authorization_reference = _takeover_instruction_reference(
-            issue.key,
-            agentic_run_id,
-        )
+    authorization_reference = _takeover_instruction_reference(
+        issue.key,
+        agentic_run_id,
+    )
 
     authorization_digest = hashlib.sha256(
         authorization_reference.encode("utf-8")
@@ -215,7 +204,7 @@ def execute_task_takeover(
         current_status=issue.status,
         target_status=target_status,
         marker=comment_marker,
-        extra=transition_comment,
+        extra=None,
     )
     comment_content_sha256 = _comment_content_sha256(comment_body)
     _find_takeover_comment(
@@ -863,7 +852,25 @@ def _find_takeover_comment(
     expected_comment_id: str | None = None,
     allow_legacy_digest: bool = False,
 ) -> JiraComment | None:
+    issue_prefix = f"[agentic-ops-takeover:{issue_key}:"
     run_prefix = f"[agentic-ops-takeover:{issue_key}:{agentic_run_id}"
+    foreign_run = [
+        comment
+        for comment in comments
+        if any(
+            line.startswith(issue_prefix) and not line.startswith(run_prefix)
+            for line in comment.standalone_lines
+        )
+    ]
+    if foreign_run:
+        raise _takeover_error(
+            "external_task_state_conflict",
+            "Jira 中存在属于其它运行的受管接管 Comment",
+            "请人工核对外来运行与当前工作空间；不得创建第二条接管记录",
+            conflicting_comment_ids=[
+                comment.comment_id for comment in foreign_run if comment.comment_id
+            ],
+        )
     scoped = [
         comment
         for comment in comments
@@ -1298,8 +1305,8 @@ def _default_agent_id(install_root: Path) -> str:
     except RuntimeErrorResult as error:
         raise _blocked(
             "agent_identity_missing",
-            "未提供 --agent-id 且安装目录缺少研发员身份，无法确定接管身份",
-            "请运行 ao-work install identity set 配置 agent_id，或显式传 --agent-id",
+            "安装目录缺少研发员身份，无法确定接管身份",
+            "请运行 ao-work install identity set 配置 agent_id",
         ) from error
     agent_id = str(identity.get("agent_id") or "").strip()
     if not agent_id:

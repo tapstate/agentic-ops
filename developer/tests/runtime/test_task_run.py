@@ -27,7 +27,10 @@ from ao_work.task_run.protocol import (
     validate_manifest,
     verification_digest,
 )
-from ao_work.task_run.service import TaskRunProtocol
+from ao_work.task_run.service import (
+    TaskRunProtocol,
+    is_current_managed_takeover_comment,
+)
 from ao_work.task_state.io import read_json
 from ao_work.work_cli import main
 
@@ -1187,6 +1190,53 @@ class TrustedTaskRunTest(unittest.TestCase):
         self.assertIsNone(readback["action_data"]["takeover_comment_id"])
         self.assertFalse(readback["action_data"]["formal_takeover_verified"])
         self.assertEqual("automation_gap", gap["action_data"]["category"])
+
+    def test_task_to_pr_accepts_only_current_standalone_marker_and_author(self) -> None:
+        current_marker = (
+            "[agentic-ops-takeover:TAP-12289:"
+            "run-TAP-12289-test:new_takeover:marker]"
+        )
+        current = JiraComment(
+            comment_id="9001",
+            body=f"接管记录\n\n{current_marker}",
+            author="jira-account-1",
+            standalone_lines=frozenset({"接管记录", current_marker}),
+        )
+        foreign_author = JiraComment(
+            comment_id="9002",
+            body=current.body,
+            author="foreign-account",
+            standalone_lines=current.standalone_lines,
+        )
+        foreign_run_marker = (
+            "[agentic-ops-takeover:TAP-12289:"
+            "run-foreign:new_takeover:marker]"
+        )
+        foreign_run = JiraComment(
+            comment_id="9003",
+            body=foreign_run_marker,
+            author="jira-account-1",
+            standalone_lines=frozenset({foreign_run_marker}),
+        )
+        copied_inline = JiraComment(
+            comment_id="9004",
+            body=f"复制文本 {current_marker}",
+            author="jira-account-1",
+            standalone_lines=frozenset({f"复制文本 {current_marker}"}),
+        )
+
+        def accepted(comment: JiraComment) -> bool:
+            return is_current_managed_takeover_comment(
+                comment,
+                issue_key="TAP-12289",
+                agentic_run_id="run-TAP-12289-test",
+                expected_author="jira-account-1",
+            )
+
+        self.assertTrue(accepted(current))
+        self.assertFalse(accepted(foreign_author))
+        self.assertFalse(accepted(foreign_run))
+        self.assertFalse(accepted(copied_inline))
 
     def test_git_probe_uses_fixed_checks_and_blocks_scope_escape(self) -> None:
         self._open()

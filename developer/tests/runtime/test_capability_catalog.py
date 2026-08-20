@@ -60,12 +60,7 @@ class CapabilityCatalogTest(unittest.TestCase):
             for command in capability.commands
         }
         self.assertEqual(
-            parser_paths
-            - {
-                ("capability", "list"),
-                ("capability", "show"),
-                ("task", "takeover"),
-            },
+            parser_paths - {("capability", "list"), ("capability", "show")},
             declared_paths,
         )
 
@@ -163,6 +158,32 @@ class CapabilityCatalogTest(unittest.TestCase):
             self.assertIsNone(
                 legacy_command.search(path.read_text(encoding="utf-8")), path
             )
+
+    def test_active_assets_publish_only_current_takeover_capability(self) -> None:
+        active_assets = (
+            REPO_ROOT / "developer/AGENTS.md",
+            REPO_ROOT / "developer/skills/daily-task-operations/SKILL.md",
+            REPO_ROOT / "developer/skills/run-task-to-pr-test/SKILL.md",
+            REPO_ROOT / "developer/standards/handbooks/ai-employee-handbook.md",
+            REPO_ROOT
+            / "developer/standards/projects/tapdata/rules/development-rules.md",
+            REPO_ROOT
+            / "developer/standards/projects/tapdata/templates/admission/defect-fix-missing.md",
+        )
+        for path in active_assets:
+            content = path.read_text(encoding="utf-8")
+            self.assertNotIn("ao-work task takeover", content, path)
+            self.assertNotRegex(
+                content,
+                r"takeover_task[^。\n]{0,80}(?:当前)?(?:是|为) `?capability_gap`?",
+                path,
+            )
+        self.assertIn(
+            "ao-work takeover <KEY>",
+            (REPO_ROOT / "developer/skills/daily-task-operations/SKILL.md").read_text(
+                encoding="utf-8"
+            ),
+        )
 
     def test_installed_markdown_does_not_direct_ai_to_unavailable_source_assets(
         self,
