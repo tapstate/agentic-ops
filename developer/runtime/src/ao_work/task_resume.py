@@ -149,7 +149,7 @@ def _resolve_local_context(
         raise _blocked(
             "run_not_found",
             "本地没有可恢复的已接管任务（stage ∈ takeover_started/blocked）",
-            "请先用 ao-work task takeover 接管任务，或用 --issue-key 指定任务",
+            "请先用 ao-work takeover <KEY> 接管任务，或用 --issue-key 指定任务",
         )
     return state
 

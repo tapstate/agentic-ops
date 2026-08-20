@@ -366,9 +366,9 @@ capabilities:
     status: implemented
     visibility: public
     commands:
-      - [task, takeover]
-    summary: Jira 任务接管 Runtime 原子能力：不带 issue_key 时只读列出候选；带 issue_key 时校验经办人和状态映射，自动判断新接管、接纳存量或恢复。本地状态引擎分离稳定意图、Comment 回读、Status 回读与最终收口；Jira Saga 由 AO-49 接入同一状态服务。不读写 Agentic 自定义字段。当前底层命令仍为 task takeover，顶层公开入口由 AO-48 收敛。
-    next_action: 无编号时展示候选并由研发工程师选择；带编号时把用户明确的“接管 <KEY>”指令作为常规操作授权，内部绑定授权引用后执行。非新接管必须明文提示并留痕，不得再要求用户确认内部摘要或授权标识。
+      - [takeover]
+    summary: Jira 任务单命令接管能力：不带 issue_key 时只读列出候选；带 issue_key 时由 Runtime 绑定明确的接管指令，校验经办人和状态映射，自动判断新接管、接纳存量或恢复，并通过同一 Saga 完成 Comment、Status 与本地状态回读。不读写 Agentic 自定义字段。
+    next_action: 无编号时展示候选并由研发工程师选择；带编号时直接执行 ao-work takeover <KEY>。非新接管必须明文提示并留痕，不得要求用户确认内部摘要或授权标识。
 
   - id: task_start
     source: runtime

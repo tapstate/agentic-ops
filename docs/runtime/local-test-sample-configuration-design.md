@@ -22,7 +22,7 @@ maintainer 确认 manifest
 
 maintainer 不读取业务凭据或执行业务开发；developer 不加载源头维护规则、不修改 AgenticOps 源码。结果包不得反向携带业务 token、私钥、完整 Jira 描述或原始敏感日志。
 
-正式 Skill 必须先调用 `ao-maint integration preflight-task-to-pr-e2e <KEY>`。统一接管由 `ao-work task takeover` 完成；接管后的信息分析与方案分级由 `ao-work task intake assess` 和 `ao-work task solution classify` 提供内容摘要、变更重算、固定分级和单次重试门禁。正式接管、受控提交、任务分支推送和 PR 创建已经进入能力目录，预检必须逐项核对当前安装版本与 manifest 授权，不能因目录声明而跳过所有权、保护分支/非快进门禁和写后回读。
+正式 Skill 必须先调用 `ao-maint integration preflight-task-to-pr-e2e <KEY>`。统一接管由 `ao-work takeover <KEY>` 完成；接管后的信息分析与方案分级由 `ao-work task intake assess` 和 `ao-work task solution classify` 提供内容摘要、变更重算、固定分级和单次重试门禁。正式接管、受控提交、任务分支推送和 PR 创建已经进入能力目录，预检必须逐项核对当前安装版本与 manifest 授权，不能因目录声明而跳过所有权、保护分支/非快进门禁和写后回读。
 
 ## 3. 正式测试输入规则
 

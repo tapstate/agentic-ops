@@ -49,19 +49,19 @@ ao-work jira inspect --issue-key <KEY>
 ### 3.3 接管任务（有编号）
 
 ```sh
-ao-work task takeover <KEY> --authorization-reference <reference>
+ao-work takeover <KEY>
 ```
 
-- `--agent-id` 可省略（缺省从安装身份 `~/.agentic-ops/user/identity.yaml` 读取；缺失时按 `agent_identity_missing` 处理，提示 `ao-work install identity set`）。
-- 研发工程师明确说“接管 <KEY>”即授权本次事实明确的常规接管。AIAgent 把该指令绑定为 Runtime 内部授权引用；不得要求研发工程师查看、复制或确认 plan ID、摘要 ID 或授权参数。
+- Runtime 从安装身份读取 `agent_id`；缺失时按 `agent_identity_missing` 处理，提示 `ao-work install identity set`。
+- 研发工程师明确说“接管 <KEY>”即授权本次事实明确的常规接管。Runtime 在 run 确定后绑定稳定内部授权摘要；不得要求研发工程师查看、复制或确认 plan ID、摘要 ID 或授权参数。
 - Runtime 自动返回 `takeover_kind=new_takeover|accept_existing_task|resume_takeover`。后两种在 Jira 评论中明文提示“不是新接管”，无需 AI 先选择另一个接管命令。
 - 成功后必须已回读 `takeover_comment_id`，进入本地 `takeover_started` 阶段。随后连续执行信息分析和方案分级，只在设计审查或真实风险决策处暂停。
-- 当前底层 Runtime 命令仍为 `ao-work task takeover`；不得把它扩散成用户需要理解的多级操作。顶层 `ao-work takeover` 由 AO-48 落地后替换本处示例。
+- 新工作空间和用户指引只使用本节顶层入口，不展示任何兼容调用方式。
 
 ### 3.4 接管任务（无编号，自动候选）
 
 ```sh
-ao-work task takeover
+ao-work takeover
 ```
 
 - 不带 `issue_key` 时，Runtime 只读返回候选列表（`selection_required: true`、`candidates` 按优先级+更新时间排序），**不写 Jira**。

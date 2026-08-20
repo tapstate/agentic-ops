@@ -563,7 +563,7 @@ class TaskRunProtocol:
                 "root_cause_hypothesis": "接管评论未写入、未回读，或评论不属于当前 agentic_run_id",
                 "reproduction": "在当前 Jira 任务缺少受管接管评论时执行 probe-jira",
                 "sanitized_example": "formal_takeover_verified=false; takeover_comment_id=null",
-                "improvement_candidate": "通过 ao-work task takeover 写入并回读当前运行的结构化接管评论",
+                "improvement_candidate": "通过 ao-work takeover <KEY> 写入并回读当前运行的结构化接管评论",
                 "suggested_asset": "python_runtime",
                 "benefit": "无需项目自定义字段即可核对正式接管审计轨迹",
                 "risk": "评论缺失时可能无法区分本地准备与正式接管",

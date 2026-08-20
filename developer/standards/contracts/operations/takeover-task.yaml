@@ -1,6 +1,6 @@
 operation: takeover_task
 workplane: developer
-version: 3
+version: 4
 purpose: 研发工程师明确要求接管任务后，由 Runtime 自动完成新接管、接纳存量或恢复留痕。
 task_type: task_takeover
 allowed_stages:
@@ -19,9 +19,10 @@ input:
     required: true
   authorization_reference:
     type: string
-    required_for_write: true
-    source: explicit_user_takeover_instruction
+    required_for_write: false
+    source: runtime_bound_takeover_instruction
     user_visible: false
+    note: 顶层 ao-work takeover 在 run 确定后按 issue_key + agentic_run_id 生成稳定内部引用；隐藏兼容入口保留显式引用。
 preconditions:
   - issue_must_be_in_allowed_project
   - current_user_must_match_assignee
@@ -35,6 +36,9 @@ selection_output:
     const: true
   candidates:
     type: array
+  human_notice:
+    type: string
+    note: 必须明确当前只列出候选且尚未执行接管。
   side_effects:
     - must_not_write_jira
     - must_not_transition_jira
@@ -144,6 +148,7 @@ failure:
     - jira_issue_read_failed
     - jira_current_user_failed
     - authorization_reference_required
+    - takeover_authorization_mode_invalid
     - jira_takeover_comment_write_failed
     - jira_takeover_comment_readback_mismatch
     - jira_takeover_readback_failed
