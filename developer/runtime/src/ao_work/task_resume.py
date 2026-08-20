@@ -63,6 +63,9 @@ def execute_task_resume(
     local = _resolve_local_context(store, issue_key=issue_key, agentic_run_id=agentic_run_id)
     task = local["task"]
     progress = local["progress"]
+    takeover_recovery = local.get("takeover_recovery")
+    if not isinstance(takeover_recovery, dict):
+        takeover_recovery = store.read_takeover_recovery(str(task["issue_key"]))
 
     issue = service.inspect_issue(task["issue_key"])
     if issue.assignee != account["account_id"]:
@@ -83,7 +86,11 @@ def execute_task_resume(
         )
 
     current_stage = str(progress.get("stage") or "").strip()
-    if current_stage not in RESUMABLE_STAGES:
+    recovery_operation = takeover_recovery.get("operation")
+    operation_resumable = isinstance(recovery_operation, dict) and recovery_operation.get(
+        "result"
+    ) in {"in_progress", "uncertain", "blocked"}
+    if current_stage not in RESUMABLE_STAGES and not operation_resumable:
         raise _blocked(
             "resume_stage_not_allowed",
             f"任务当前阶段 {current_stage or '<empty>'} 不允许恢复接管",
@@ -91,6 +98,9 @@ def execute_task_resume(
         )
 
     agentic_run_id = str(task["agentic_run_id"])
+    next_action: object = str(progress.get("agentic_next_action") or "")
+    if operation_resumable:
+        next_action = recovery_operation["agentic_next_action"]
     return {
         "workspace": str(workspace.root),
         "issue_key": task["issue_key"],
@@ -102,7 +112,8 @@ def execute_task_resume(
         "jira_status_stage": mapped_status,
         "previous_stage": current_stage,
         "current_stage": current_stage,
-        "agentic_next_action": str(progress.get("agentic_next_action") or ""),
+        "takeover_recovery": takeover_recovery,
+        "agentic_next_action": next_action,
         "credential_status": context.credential_status(),
     }
 
@@ -155,7 +166,14 @@ def _latest_resumable(store: TaskStore) -> dict[str, Any] | None:
     candidates: list[dict[str, Any]] = []
     for state in _iter_task_states(store):
         stage = str(state["progress"].get("stage") or "").strip()
-        if stage in RESUMABLE_STAGES:
+        recovery = state.get("takeover_recovery")
+        operation = recovery.get("operation") if isinstance(recovery, dict) else None
+        operation_resumable = isinstance(operation, dict) and operation.get("result") in {
+            "in_progress",
+            "uncertain",
+            "blocked",
+        }
+        if stage in RESUMABLE_STAGES or operation_resumable:
             candidates.append(state)
     if not candidates:
         return None
@@ -169,7 +187,7 @@ def _latest_resumable(store: TaskStore) -> dict[str, Any] | None:
 
 
 def _iter_task_states(store: TaskStore) -> list[dict[str, Any]]:
-    """遍历本地任务目录，返回 task/progress 快照（跳过损坏项）。
+    """遍历本地任务目录，返回统一 task/progress/takeover 快照（跳过损坏项）。
 
     agent_id 不在 task.json 中（takeover 时写入 journal 事件的 evidence），
     从 journal.ndjson 最近 takeover_task 事件回读，供所有权校验使用。
@@ -182,20 +200,36 @@ def _iter_task_states(store: TaskStore) -> list[dict[str, Any]]:
     for task_dir in sorted(tasks_root.iterdir()):
         if not task_dir.is_dir():
             continue
-        task_path = task_dir / "task.json"
-        progress_path = task_dir / "progress.json"
-        if not task_path.is_file() or not progress_path.is_file():
-            continue
         try:
-            task = json.loads(task_path.read_text(encoding="utf-8"))
-            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+            state = store.inspect(task_dir.name)
+        except RuntimeErrorResult:
+            task_path = task_dir / "task.json"
+            progress_path = task_dir / "progress.json"
+            if not task_path.is_file() or not progress_path.is_file():
+                continue
+            try:
+                state = {
+                    "task": json.loads(task_path.read_text(encoding="utf-8")),
+                    "progress": json.loads(progress_path.read_text(encoding="utf-8")),
+                    "takeover_recovery": None,
+                }
+            except (OSError, ValueError):
+                continue
         except (OSError, ValueError):
             continue
+        task = state["task"]
+        progress = state["progress"]
         if isinstance(task, dict) and isinstance(progress, dict):
             agent_id = _agent_id_from_journal(task_dir)
             if agent_id:
                 task = {**task, "agent_id": agent_id}
-            results.append({"task": task, "progress": progress})
+            results.append(
+                {
+                    "task": task,
+                    "progress": progress,
+                    "takeover_recovery": state.get("takeover_recovery"),
+                }
+            )
     return results
 
 

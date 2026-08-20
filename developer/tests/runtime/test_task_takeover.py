@@ -11,6 +11,7 @@ from unittest import mock
 from ao_work.jira.adf import markdown_to_adf, plain_text
 from ao_work.jira.client import TransportResponse
 from ao_work.output import RuntimeErrorResult
+from ao_work.task_state import TaskStore
 from ao_work.work_cli import main
 
 
@@ -238,7 +239,17 @@ class TaskTakeoverTest(unittest.TestCase):
         self.assertTrue(payload["transition_applied"])
         self.assertEqual("new_takeover", payload["takeover_kind"])
         self.assertEqual("completed", payload["takeover_status"])
+        self.assertEqual("local_finalized", payload["takeover_phase"])
+        self.assertEqual("completed", payload["takeover_result"])
+        self.assertEqual("verified", payload["external_result_certainty"])
+        self.assertTrue(payload["retry_safe"])
+        self.assertEqual("none", payload["recovery_action"])
         self.assertEqual("已完成新接管。", payload["human_notice"])
+        inspected = TaskStore(Path(self.workspace)).inspect("TAP-12289")
+        self.assertEqual(
+            payload["human_notice"],
+            inspected["takeover_recovery"]["operation"]["human_notice"],
+        )
         self.assertTrue(payload["takeover_comment_verified"])
         self.assertTrue(payload["agentic_takeover_at"])
         self.assertRegex(

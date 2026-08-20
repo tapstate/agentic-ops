@@ -261,6 +261,49 @@ class TaskResumeTest(unittest.TestCase):
         self.assertEqual(2, code)
         self.assertEqual("jira_status_mapping_missing", result["code"])
 
+    def test_resume_reads_incomplete_takeover_from_shared_recovery_state(self) -> None:
+        store = TaskStore(self.workspace)
+        store.initialize(
+            TaskIdentity(
+                connection_id="tapdata-cloud",
+                jira_issue_id="12289",
+                issue_key="TAP-12289",
+                project_key="TAP",
+                agentic_run_id="run-TAP-12289-partial",
+            )
+        )
+        digest = "a" * 64
+        intent = store.persist_takeover_intent(
+            "TAP-12289",
+            "run-TAP-12289-partial",
+            agent_id="harsen-mini-test-bot",
+            takeover_kind="new_takeover",
+            authorization_digest=digest,
+            preflight_facts_sha256="b" * 64,
+            jira_status_before="打开",
+            jira_status_target="正在进行",
+            transition_id="11",
+            comment_marker="[agentic-ops-takeover:TAP-12289:partial]",
+            comment_content_sha256="c" * 64,
+        )
+
+        transport = ResumeTransport()
+        code, result, _ = self.run_cli(
+            transport,
+            "--issue-key",
+            "TAP-12289",
+        )
+        self.assertEqual(0, code)
+        self.assertEqual("initialized", result["current_stage"])
+        self.assertEqual(
+            intent["operation"],
+            result["takeover_recovery"]["operation"],
+        )
+        self.assertEqual(
+            "ensure_takeover_comment",
+            result["agentic_next_action"]["action"],
+        )
+
 
 class TaskResumeUnitTest(unittest.TestCase):
     def setUp(self) -> None:

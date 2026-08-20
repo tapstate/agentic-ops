@@ -32,6 +32,8 @@ ao-work task takeover TAP-123 --authorization-reference <INTERNAL_REFERENCE>
 
 developer 不创建、映射、探测或读写 Agentic Jira Custom Field。
 
+本地 task state 将业务 `progress.stage` 与接管写入阶段分离。`sync.json.takeover_operation` 是稳定接管意图、Comment/Status 回读、结果确定性和恢复动作的权威快照；`task inspect`、`task resume` 与正式接管必须使用同一个恢复读取器。
+
 ## 接管前置条件
 
 - issue 属于当前业务工作空间允许的项目。
@@ -68,6 +70,17 @@ developer 不创建、映射、探测或读写 Agentic Jira Custom Field。
 | `resume_takeover` | 当前工作空间存在同任务、同运行的可验证恢复点 | 明文“不是新接管”，复用 run 并写恢复 Comment |
 | `blocked` | 所有权、身份、状态映射、运行或外部事实冲突 | 失败结果，不得作为 `takeover_kind`，停止并给出人工动作 |
 
+## 本地写入阶段
+
+```text
+intent_persisted
+-> comment_verified
+-> status_verified
+-> local_finalized
+```
+
+操作结果独立使用 `in_progress`、`uncertain`、`blocked`、`completed`。Comment 已确认但 Status 未确认、外部响应不确定或 Jira 已完成但本地落盘失败，都不得使用新的业务 stage 表达，也不得返回 `takeover_status=completed`。只有 `local_finalized/completed` 且快照、`progress.json` 和事件交叉一致时，业务阶段才进入 `takeover_started`。
+
 ## 成功输出
 
 ```json
@@ -84,6 +97,11 @@ developer 不创建、映射、探测或读写 Agentic Jira Custom Field。
   "human_notice": "已完成新接管。",
   "takeover_comment_id": "12345",
   "takeover_comment_verified": true,
+  "takeover_phase": "local_finalized",
+  "takeover_result": "completed",
+  "external_result_certainty": "verified",
+  "retry_safe": true,
+  "recovery_action": "none",
   "intake_source": {
     "context_digest": "<sha256>",
     "source_context_path": "<workspace-managed-path>"
@@ -118,7 +136,7 @@ developer 不创建、映射、探测或读写 Agentic Jira Custom Field。
 - 负责人不匹配、项目越界或 Agent 身份冲突时停止，不写开发证据。
 - Status/transition 未严格映射时在任何接管 Comment 写入前阻断。
 - 非新接管存在外来 Agent、运行或受管 Comment 冲突时进入风险决策，不能自动覆盖。
-- Jira 写入或回读结果不确定时停止并优先回读；AO-49/AO-50 负责完善 Saga 与本地恢复 phase。
+- Jira 写入或回读结果不确定时停止并优先回读；AO-50 的本地状态机保存确定性和恢复动作，AO-49 负责把 Jira Saga 接入该状态机。
 - 每个环节只按 Runtime 的结构化下一动作推进；未允许重试或重试耗尽时停止转人工。
 
 ### 验收标准
@@ -127,6 +145,8 @@ developer 不创建、映射、探测或读写 Agentic Jira Custom Field。
 - 成功 `takeover_kind` 只有三种，`blocked` 只作为失败结果。
 - 非新接管在终端输出、结构化字段和 Jira Comment 中均明文提示“不是新接管”。
 - 接管成功后 Jira Comment、必要 Status transition 和本地 run 均已回读或验证。
+- Comment 已写/Status 未写、外部结果不确定和 Jira 已完成/本地未完成均能输出确定的本地 phase、结果、`retry_safe` 与恢复动作，不误报成功。
+- legacy schema v1 只有在 Comment 作者/标记、运行编号、负责人和 Status 全部验证一致后才能迁移，失败不覆盖原状态。
 - 接管后信息分析自动推进，只在设计审查、代码审查和风险决策暂停。
 - developer 接管不依赖 Agentic Jira Custom Field。
 - 未经设计授权不得修改代码；未经代码审查不得推送 `develop` 或继续受保护动作。
@@ -150,6 +170,7 @@ developer 不创建、映射、探测或读写 Agentic Jira Custom Field。
 ## 关联设计
 
 - `docs/architecture/developer-task-takeover-comment-design.md`
+- `docs/architecture/developer-takeover-local-state-machine.md`
 - `docs/contracts/operation-contract.md`
 - `docs/processes/standard-process-registry.md`
 - `docs/forms/task-form-standard.md`

@@ -85,6 +85,8 @@ plan
 - Runtime 管理的任务状态使用 JSON / NDJSON。
 - `task.json`、`progress.json` 和 `sync.json` 保存当前快照；`decisions.ndjson` 和 `journal.ndjson` 只追加历史。
 - 每个状态文件包含 `schema_version`、`issue_key`、`agentic_run_id`、`updated_at` 和内容版本。
+- developer 接管操作在 `sync.json.takeover_operation` 使用独立 schema v2 保存稳定意图、外部写入阶段、结果确定性和恢复动作；`progress.json` 只保存业务阶段。
+- 接管写入阶段固定为 `intent_persisted`、`comment_verified`、`status_verified`、`local_finalized`。只有快照、`progress.json` 和接管事件交叉收口后才能报告 `takeover_started/completed`。
 - 更新在同目录写临时文件，flush / fsync 后原子替换。
 - journal 只追加，并记录操作、状态、失败码、幂等键和安全摘要。
 - 同一 Jira 任务使用任务级文件锁；锁超时返回稳定错误码，不自动破坏未知持有者的锁。

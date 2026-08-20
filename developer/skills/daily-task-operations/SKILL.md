@@ -74,9 +74,9 @@ ao-work task takeover
 ao-work task resume [--issue-key <KEY> | --agentic-run-id <RUN>]
 ```
 
-- 都不传时取本地最近可恢复记录（stage ∈ `takeover_started` / `blocked`）。
+- 都不传时取本地最近可恢复记录，包括 `takeover_started` / `blocked` 业务阶段和 Comment、Status、本地收口尚未全部完成的接管操作。
 - 这是只读恢复诊断入口。研发工程师直接说“接管 <KEY>”时仍使用 3.3，由 takeover 自动判断是否恢复并留下明文 Jira 轨迹。
-- 该命令不写 Jira，只校验 Jira Assignee、状态映射与本地状态后输出执行上下文。
+- 该命令不写 Jira，只校验 Jira Assignee、状态映射与本地状态后输出执行上下文。`takeover_recovery` 必须来自 Runtime 统一读取器，不能由 Skill 根据零散文件重新推断。
 - 负责人不一致（`assignee_changed`）或阶段不允许（`resume_stage_not_allowed`）时，按失败码提示人工核对，不自动放行。
 
 ## 4. 硬边界

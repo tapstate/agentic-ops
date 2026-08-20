@@ -20,6 +20,19 @@ from ao_work.task_state.io import (
     require_safe_regular_file,
 )
 from ao_work.task_state.locking import TaskLock
+from ao_work.task_state.takeover import (
+    TAKEOVER_SCHEMA_VERSION,
+    evidence_sha256,
+    human_notice,
+    immutable_intent,
+    phase_index,
+    require_phase_transition,
+    stable_takeover_operation_id,
+    takeover_error,
+    takeover_next_action,
+    validate_takeover_event,
+    validate_takeover_operation,
+)
 from ao_work.workspace_security import validate_workspace_managed_path, validate_workspace_state_root
 
 SCHEMA_VERSION = "1"
@@ -130,11 +143,20 @@ class TaskStore:
                     retry_safe=True,
                     required_human_action="请先初始化任务，或按恢复流程修复任务状态",
                 )
+            task = read_json(task_dir / "task.json")
+            progress = read_json(task_dir / "progress.json")
+            sync = read_json(task_dir / "sync.json")
             return {
-                "task": read_json(task_dir / "task.json"),
-                "progress": read_json(task_dir / "progress.json"),
-                "sync": read_json(task_dir / "sync.json"),
+                "task": task,
+                "progress": progress,
+                "sync": sync,
                 "task_dir": str(task_dir),
+                "takeover_recovery": self._read_takeover_recovery_locked(
+                    task_dir,
+                    task,
+                    progress,
+                    sync,
+                ),
             }
 
     def write_report(
@@ -422,6 +444,891 @@ class TaskStore:
                 ),
             )
             return record
+
+    def persist_takeover_intent(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        *,
+        agent_id: str,
+        takeover_kind: str,
+        authorization_digest: str,
+        preflight_facts_sha256: str,
+        jira_status_before: str,
+        jira_status_target: str,
+        transition_id: str | None,
+        comment_marker: str,
+        comment_content_sha256: str,
+        planned_at: str | None = None,
+    ) -> dict[str, Any]:
+        """在第一次外部写入前持久化稳定接管意图。"""
+        self._validate_issue_key(issue_key)
+        self._validate_run_id(agentic_run_id)
+        operation_id = stable_takeover_operation_id(
+            issue_key,
+            agentic_run_id,
+            authorization_digest,
+        )
+        timestamp = planned_at or self._timestamp()
+        operation = validate_takeover_operation(
+            {
+                "schema_version": TAKEOVER_SCHEMA_VERSION,
+                "operation_id": operation_id,
+                "issue_key": issue_key,
+                "agentic_run_id": agentic_run_id,
+                "agent_id": agent_id,
+                "takeover_kind": takeover_kind,
+                "authorization_digest": authorization_digest,
+                "preflight_facts_sha256": preflight_facts_sha256,
+                "jira_status_before": jira_status_before,
+                "jira_status_target": jira_status_target,
+                "transition_id": transition_id,
+                "comment_marker": comment_marker,
+                "comment_content_sha256": comment_content_sha256,
+                "comment_id": None,
+                "comment_author": None,
+                "comment_author_verified": False,
+                "status_after": None,
+                "phase": "intent_persisted",
+                "result": "in_progress",
+                "external_result_certainty": "not_attempted",
+                "takeover_status": "in_progress",
+                "human_notice": human_notice(takeover_kind, "in_progress"),
+                "agentic_next_action": takeover_next_action(
+                    "ensure_takeover_comment",
+                    reason="稳定接管意图已落盘，继续确保受管 Comment 存在并回读",
+                ),
+                "failure_code": None,
+                "retry_safe": True,
+                "recovery_action": "ensure_takeover_comment",
+                "planned_at": timestamp,
+                "updated_at": timestamp,
+                "content_version": 1,
+            }
+        )
+        with self._lock(issue_key):
+            task_dir, task, progress, sync = self._load_takeover_files(
+                issue_key, agentic_run_id
+            )
+            existing = sync.get("takeover_operation")
+            if existing is not None:
+                existing = validate_takeover_operation(existing)
+                if immutable_intent(existing) != immutable_intent(operation):
+                    raise takeover_error(
+                        "takeover_intent_conflict",
+                        "现有接管意图与本次请求不一致",
+                        "请核对已有运行、授权和 Jira 写前事实，不要覆盖稳定接管意图",
+                        existing_operation_id=existing["operation_id"],
+                    )
+                event = self._ensure_takeover_checkpoint_event(
+                    task_dir,
+                    task,
+                    progress,
+                    existing,
+                    phase_before=None,
+                )
+                return {
+                    "created": event is not None,
+                    "operation": existing,
+                    "event": event,
+                    "state_file": str(task_dir / "sync.json"),
+                }
+            sync["takeover_operation"] = operation
+            self._write_takeover_sync(task_dir, sync)
+            event = self._takeover_event(
+                task,
+                operation,
+                "takeover_intent_created",
+                phase_before=None,
+                evidence={"preflight_facts_sha256": preflight_facts_sha256},
+            )
+            append_ndjson(task_dir / "journal.ndjson", event)
+            return {
+                "created": True,
+                "operation": operation,
+                "event": event,
+                "state_file": str(task_dir / "sync.json"),
+            }
+
+    def verify_takeover_comment(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        operation_id: str,
+        *,
+        comment_id: str,
+        comment_author: str,
+        expected_author: str,
+        comment_marker: str,
+        comment_content_sha256: str,
+    ) -> dict[str, Any]:
+        with self._lock(issue_key):
+            task_dir, task, progress, sync = self._load_takeover_files(
+                issue_key, agentic_run_id
+            )
+            operation = self._bound_takeover_operation(sync, operation_id)
+            if (
+                comment_author != expected_author
+                or comment_marker != operation["comment_marker"]
+                or comment_content_sha256 != operation["comment_content_sha256"]
+            ):
+                raise takeover_error(
+                    "takeover_comment_evidence_conflict",
+                    "Jira Comment 回读证据与稳定接管意图不一致",
+                    "请核对 Comment ID、作者、稳定标记和内容摘要，不要复用可复制文本",
+                )
+            if phase_index(operation["phase"]) >= phase_index("comment_verified"):
+                if (
+                    operation["comment_id"] != comment_id
+                    or operation["comment_author"] != comment_author
+                ):
+                    raise takeover_error(
+                        "takeover_comment_evidence_conflict",
+                        "已记录的 Comment 证据与本次回读不一致",
+                        "请人工核对 Jira Comment，不要覆盖已验证外部事实",
+                    )
+                event = self._ensure_takeover_checkpoint_event(
+                    task_dir,
+                    task,
+                    progress,
+                    operation,
+                    phase_before="intent_persisted",
+                )
+                return {
+                    "created": event is not None,
+                    "operation": operation,
+                    "event": event,
+                }
+            require_phase_transition(operation["phase"], "comment_verified")
+            phase_before = operation["phase"]
+            updated = dict(operation)
+            updated.update(
+                {
+                    "comment_id": comment_id,
+                    "comment_author": comment_author,
+                    "comment_author_verified": True,
+                    "phase": "comment_verified",
+                    "result": "in_progress",
+                    "external_result_certainty": "verified",
+                    "takeover_status": "in_progress",
+                    "human_notice": human_notice(operation["takeover_kind"], "in_progress"),
+                    "agentic_next_action": takeover_next_action(
+                        "verify_takeover_status",
+                        reason="受管 Comment 已回读验证，继续执行或回读目标 Status",
+                    ),
+                    "failure_code": None,
+                    "retry_safe": True,
+                    "recovery_action": "verify_takeover_status",
+                }
+            )
+            updated = self._versioned_takeover(updated)
+            event = self._persist_takeover_transition(
+                task_dir,
+                task,
+                sync,
+                updated,
+                "takeover_comment_verified",
+                phase_before=phase_before,
+                evidence={
+                    "comment_id": comment_id,
+                    "comment_author": comment_author,
+                    "comment_content_sha256": comment_content_sha256,
+                },
+            )
+            return {"created": True, "operation": updated, "event": event}
+
+    def verify_takeover_status(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        operation_id: str,
+        *,
+        status_after: str,
+        transition_applied: bool,
+    ) -> dict[str, Any]:
+        with self._lock(issue_key):
+            task_dir, task, progress, sync = self._load_takeover_files(
+                issue_key, agentic_run_id
+            )
+            operation = self._bound_takeover_operation(sync, operation_id)
+            if status_after != operation["jira_status_target"]:
+                raise takeover_error(
+                    "takeover_status_evidence_conflict",
+                    "Jira Status 回读值与稳定接管意图的目标值不一致",
+                    "请核对 Jira 当前 Status 和 transition 结果，不要盲目重试",
+                )
+            if phase_index(operation["phase"]) >= phase_index("status_verified"):
+                if operation["status_after"] != status_after:
+                    raise takeover_error(
+                        "takeover_status_evidence_conflict",
+                        "已记录的 Status 证据与本次回读不一致",
+                        "请人工核对 Jira Status，不要覆盖已验证外部事实",
+                    )
+                event = self._ensure_takeover_checkpoint_event(
+                    task_dir,
+                    task,
+                    progress,
+                    operation,
+                    phase_before="comment_verified",
+                )
+                return {
+                    "created": event is not None,
+                    "operation": operation,
+                    "event": event,
+                }
+            require_phase_transition(operation["phase"], "status_verified")
+            phase_before = operation["phase"]
+            updated = dict(operation)
+            updated.update(
+                {
+                    "status_after": status_after,
+                    "phase": "status_verified",
+                    "result": "in_progress",
+                    "external_result_certainty": "verified",
+                    "takeover_status": "in_progress",
+                    "human_notice": human_notice(operation["takeover_kind"], "in_progress"),
+                    "agentic_next_action": takeover_next_action(
+                        "finalize_takeover_locally",
+                        reason="Jira Comment 和 Status 已回读验证，继续完成本地收口",
+                    ),
+                    "failure_code": None,
+                    "retry_safe": True,
+                    "recovery_action": "finalize_takeover_locally",
+                }
+            )
+            updated = self._versioned_takeover(updated)
+            event = self._persist_takeover_transition(
+                task_dir,
+                task,
+                sync,
+                updated,
+                "takeover_status_verified",
+                phase_before=phase_before,
+                evidence={
+                    "status_after": status_after,
+                    "transition_applied": transition_applied,
+                },
+            )
+            return {"created": True, "operation": updated, "event": event}
+
+    def mark_takeover_uncertain(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        operation_id: str,
+        *,
+        failure_code: str,
+        recovery_action: str,
+    ) -> dict[str, Any]:
+        return self._record_takeover_stop(
+            issue_key,
+            agentic_run_id,
+            operation_id,
+            failure_code=failure_code,
+            recovery_action=recovery_action,
+            result="uncertain",
+            certainty="uncertain",
+        )
+
+    def block_takeover(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        operation_id: str,
+        *,
+        failure_code: str,
+        recovery_action: str,
+    ) -> dict[str, Any]:
+        return self._record_takeover_stop(
+            issue_key,
+            agentic_run_id,
+            operation_id,
+            failure_code=failure_code,
+            recovery_action=recovery_action,
+            result="blocked",
+            certainty="conflict",
+        )
+
+    def finalize_takeover(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        operation_id: str,
+    ) -> dict[str, Any]:
+        """在 Comment/Status 均验证后完成本地逻辑事务。"""
+        with self._lock(issue_key):
+            task_dir, task, progress, sync = self._load_takeover_files(
+                issue_key, agentic_run_id
+            )
+            operation = self._bound_takeover_operation(sync, operation_id)
+            if operation["phase"] == "local_finalized":
+                recovery = self._read_takeover_recovery_locked(
+                    task_dir, task, progress, sync
+                )
+                if recovery["state_consistent"]:
+                    return {"created": False, **recovery}
+                progress.update(
+                    {
+                        "stage": "takeover_started",
+                        "agentic_next_action": "assess_task_intake",
+                        "terminal": False,
+                        "updated_at": self._timestamp(),
+                        "content_version": int(progress.get("content_version", 0)) + 1,
+                    }
+                )
+                atomic_write_json(task_dir / "progress.json", progress)
+                event = self._takeover_event(
+                    task,
+                    operation,
+                    "takeover_recovered",
+                    phase_before="status_verified",
+                    evidence={"recovery_action": "recover_local_takeover_state"},
+                )
+                append_ndjson(task_dir / "journal.ndjson", event)
+                return {
+                    "created": True,
+                    "operation": operation,
+                    "event": event,
+                    "state_consistent": True,
+                    "migration_required": False,
+                    "state_file": str(task_dir / "sync.json"),
+                }
+            require_phase_transition(operation["phase"], "local_finalized")
+            phase_before = operation["phase"]
+            updated = dict(operation)
+            updated.update(
+                {
+                    "phase": "local_finalized",
+                    "result": "completed",
+                    "external_result_certainty": "verified",
+                    "takeover_status": "completed",
+                    "human_notice": human_notice(operation["takeover_kind"], "completed"),
+                    "agentic_next_action": takeover_next_action(
+                        "assess_task_intake",
+                        executor="ai",
+                        reason="接管本地状态已最终收口，继续信息分析与设计流程",
+                    ),
+                    "failure_code": None,
+                    "retry_safe": True,
+                    "recovery_action": "none",
+                }
+            )
+            updated = self._versioned_takeover(updated)
+            sync["takeover_operation"] = validate_takeover_operation(updated)
+            self._write_takeover_sync(task_dir, sync)
+
+            progress.update(
+                {
+                    "stage": "takeover_started",
+                    "agentic_next_action": "assess_task_intake",
+                    "terminal": False,
+                    "updated_at": self._timestamp(),
+                    "content_version": int(progress.get("content_version", 0)) + 1,
+                }
+            )
+            atomic_write_json(task_dir / "progress.json", progress)
+            event = self._takeover_event(
+                task,
+                updated,
+                "takeover_completed",
+                phase_before=phase_before,
+                evidence={
+                    "comment_id": updated["comment_id"],
+                    "status_after": updated["status_after"],
+                },
+            )
+            append_ndjson(task_dir / "journal.ndjson", event)
+            return {
+                "created": True,
+                "operation": updated,
+                "event": event,
+                "state_consistent": True,
+                "migration_required": False,
+                "state_file": str(task_dir / "sync.json"),
+            }
+
+    def read_takeover_recovery(self, issue_key: str) -> dict[str, Any]:
+        self._validate_issue_key(issue_key)
+        with self._lock(issue_key):
+            task_dir = self._task_dir(issue_key)
+            self._require_complete_task_dir(task_dir)
+            task = read_json(task_dir / "task.json")
+            progress = read_json(task_dir / "progress.json")
+            sync = read_json(task_dir / "sync.json")
+            return self._read_takeover_recovery_locked(task_dir, task, progress, sync)
+
+    def migrate_legacy_takeover(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        evidence: dict[str, Any],
+    ) -> dict[str, Any]:
+        """验证 legacy v1 的 Jira/本地事实后合成 v2 检查点。"""
+        required = {
+            "agent_id",
+            "takeover_kind",
+            "authorization_digest",
+            "preflight_facts_sha256",
+            "jira_status_before",
+            "jira_status_target",
+            "jira_status_after",
+            "transition_id",
+            "comment_marker",
+            "comment_content_sha256",
+            "comment_id",
+            "comment_author",
+            "expected_comment_author",
+            "assignee",
+            "expected_assignee",
+        }
+        missing = sorted(required - set(evidence))
+        if missing:
+            raise takeover_error(
+                "takeover_legacy_state_unverified",
+                "legacy 接管迁移证据不完整",
+                "请先通过 AO-49 回读 Jira Comment、负责人和 Status，再执行迁移",
+                missing_fields=missing,
+            )
+        with self._lock(issue_key):
+            task_dir, task, progress, sync = self._load_takeover_files(
+                issue_key, agentic_run_id
+            )
+            if sync.get("takeover_operation") is not None:
+                recovery = self._read_takeover_recovery_locked(
+                    task_dir, task, progress, sync
+                )
+                operation = validate_takeover_operation(
+                    sync["takeover_operation"]
+                )
+                if recovery["state_consistent"] or operation[
+                    "phase"
+                ] != "local_finalized":
+                    return recovery
+                progress.update(
+                    {
+                        "stage": "takeover_started",
+                        "agentic_next_action": "assess_task_intake",
+                        "terminal": False,
+                        "updated_at": self._timestamp(),
+                        "content_version": int(progress.get("content_version", 0)) + 1,
+                    }
+                )
+                atomic_write_json(task_dir / "progress.json", progress)
+                event = self._ensure_takeover_checkpoint_event(
+                    task_dir,
+                    task,
+                    progress,
+                    operation,
+                    phase_before="status_verified",
+                )
+                return {
+                    "operation": operation,
+                    "event": event,
+                    "migration_required": False,
+                    "state_consistent": True,
+                    "state_file": str(task_dir / "sync.json"),
+                }
+            legacy_event = self._latest_legacy_takeover_event(task_dir)
+            legacy_evidence = legacy_event.get("evidence") if legacy_event else None
+            matches = (
+                legacy_event is not None
+                and legacy_event.get("status") == "completed"
+                and legacy_event.get("agentic_run_id") == agentic_run_id
+                and progress.get("stage") == "takeover_started"
+                and evidence["comment_author"] == evidence["expected_comment_author"]
+                and evidence["assignee"] == evidence["expected_assignee"]
+                and evidence["jira_status_after"] == evidence["jira_status_target"]
+                and isinstance(legacy_evidence, dict)
+                and legacy_evidence.get("takeover_kind") == evidence["takeover_kind"]
+                and legacy_evidence.get("takeover_comment_id") == evidence["comment_id"]
+                and legacy_evidence.get("takeover_comment_marker")
+                == evidence["comment_marker"]
+            )
+            if not matches:
+                raise takeover_error(
+                    "takeover_legacy_state_unverified",
+                    "legacy 接管状态与 Jira 回读证据不一致",
+                    "请人工核对 Comment 作者/标记、运行编号、负责人和 Status；原状态未被覆盖",
+                )
+            timestamp = str(
+                legacy_evidence.get("agentic_takeover_at")
+                or legacy_event.get("updated_at")
+                or self._timestamp()
+            )
+            operation = validate_takeover_operation(
+                {
+                    "schema_version": TAKEOVER_SCHEMA_VERSION,
+                    "operation_id": stable_takeover_operation_id(
+                        issue_key,
+                        agentic_run_id,
+                        str(evidence["authorization_digest"]),
+                    ),
+                    "issue_key": issue_key,
+                    "agentic_run_id": agentic_run_id,
+                    "agent_id": evidence["agent_id"],
+                    "takeover_kind": evidence["takeover_kind"],
+                    "authorization_digest": evidence["authorization_digest"],
+                    "preflight_facts_sha256": evidence["preflight_facts_sha256"],
+                    "jira_status_before": evidence["jira_status_before"],
+                    "jira_status_target": evidence["jira_status_target"],
+                    "transition_id": evidence["transition_id"],
+                    "comment_marker": evidence["comment_marker"],
+                    "comment_content_sha256": evidence["comment_content_sha256"],
+                    "comment_id": evidence["comment_id"],
+                    "comment_author": evidence["comment_author"],
+                    "comment_author_verified": True,
+                    "status_after": evidence["jira_status_after"],
+                    "phase": "local_finalized",
+                    "result": "completed",
+                    "external_result_certainty": "verified",
+                    "takeover_status": "completed",
+                    "human_notice": human_notice(
+                        str(evidence["takeover_kind"]), "completed"
+                    ),
+                    "agentic_next_action": takeover_next_action(
+                        "assess_task_intake",
+                        executor="ai",
+                        reason="legacy 接管事实已验证并迁移，继续信息分析与设计流程",
+                    ),
+                    "failure_code": None,
+                    "retry_safe": True,
+                    "recovery_action": "none",
+                    "planned_at": timestamp,
+                    "updated_at": self._timestamp(),
+                    "content_version": 1,
+                }
+            )
+            event = self._takeover_event(
+                task,
+                operation,
+                "takeover_recovered",
+                phase_before="status_verified",
+                evidence={
+                    "migration_source_schema": "1",
+                    "comment_id": evidence["comment_id"],
+                    "jira_status_after": evidence["jira_status_after"],
+                },
+            )
+            sync["takeover_operation"] = operation
+            self._write_takeover_sync(task_dir, sync)
+            append_ndjson(task_dir / "journal.ndjson", event)
+            return {
+                "operation": operation,
+                "event": event,
+                "migration_required": False,
+                "state_consistent": True,
+                "state_file": str(task_dir / "sync.json"),
+            }
+
+    def _record_takeover_stop(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        operation_id: str,
+        *,
+        failure_code: str,
+        recovery_action: str,
+        result: str,
+        certainty: str,
+    ) -> dict[str, Any]:
+        with self._lock(issue_key):
+            task_dir, task, _, sync = self._load_takeover_files(issue_key, agentic_run_id)
+            operation = self._bound_takeover_operation(sync, operation_id)
+            updated = dict(operation)
+            updated.update(
+                {
+                    "result": result,
+                    "external_result_certainty": certainty,
+                    "takeover_status": result,
+                    "human_notice": human_notice(operation["takeover_kind"], result),
+                    "agentic_next_action": takeover_next_action(
+                        recovery_action,
+                        executor="human" if result == "blocked" else "ao_work",
+                        stop_workflow=True,
+                        requires_authorization=True,
+                        reason=(
+                            "接管事实存在冲突，需要人工核对"
+                            if result == "blocked"
+                            else "外部结果不确定，需要先回读再决定是否继续"
+                        ),
+                    ),
+                    "failure_code": failure_code,
+                    "retry_safe": False,
+                    "recovery_action": recovery_action,
+                }
+            )
+            updated = self._versioned_takeover(updated)
+            event = self._persist_takeover_transition(
+                task_dir,
+                task,
+                sync,
+                updated,
+                "takeover_blocked",
+                phase_before=operation["phase"],
+                evidence={"failure_code": failure_code, "result": result},
+            )
+            return {"operation": updated, "event": event}
+
+    def _load_takeover_files(
+        self, issue_key: str, agentic_run_id: str
+    ) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
+        self._validate_issue_key(issue_key)
+        self._validate_run_id(agentic_run_id)
+        task_dir = self._task_dir(issue_key)
+        self._require_complete_task_dir(task_dir)
+        task = read_json(task_dir / "task.json")
+        if task.get("agentic_run_id") != agentic_run_id:
+            raise takeover_error(
+                "task_identity_mismatch",
+                "接管状态运行编号与任务绑定不一致",
+                "请使用任务当前绑定的 agentic_run_id",
+            )
+        return (
+            task_dir,
+            task,
+            read_json(task_dir / "progress.json"),
+            read_json(task_dir / "sync.json"),
+        )
+
+    @staticmethod
+    def _bound_takeover_operation(
+        sync: dict[str, Any], operation_id: str
+    ) -> dict[str, Any]:
+        raw = sync.get("takeover_operation")
+        if raw is None:
+            raise takeover_error(
+                "takeover_intent_missing",
+                "本地没有稳定接管意图",
+                "请先持久化接管意图，再执行外部写入或恢复",
+            )
+        operation = validate_takeover_operation(raw)
+        if operation["operation_id"] != operation_id:
+            raise takeover_error(
+                "takeover_intent_conflict",
+                "接管 operation_id 与本地稳定意图不一致",
+                "请使用本地已记录的接管意图，不要创建第二个运行",
+            )
+        return operation
+
+    def _versioned_takeover(self, operation: dict[str, Any]) -> dict[str, Any]:
+        operation["updated_at"] = self._timestamp()
+        operation["content_version"] = int(operation["content_version"]) + 1
+        return validate_takeover_operation(operation)
+
+    def _persist_takeover_transition(
+        self,
+        task_dir: Path,
+        task: dict[str, Any],
+        sync: dict[str, Any],
+        operation: dict[str, Any],
+        event_name: str,
+        *,
+        phase_before: str | None,
+        evidence: dict[str, Any],
+    ) -> dict[str, Any]:
+        sync["takeover_operation"] = validate_takeover_operation(operation)
+        event = self._takeover_event(
+            task,
+            operation,
+            event_name,
+            phase_before=phase_before,
+            evidence=evidence,
+        )
+        self._write_takeover_sync(task_dir, sync)
+        append_ndjson(task_dir / "journal.ndjson", event)
+        return event
+
+    def _write_takeover_sync(self, task_dir: Path, sync: dict[str, Any]) -> None:
+        sync["updated_at"] = self._timestamp()
+        sync["content_version"] = int(sync.get("content_version", 0)) + 1
+        atomic_write_json(task_dir / "sync.json", sync)
+
+    def _takeover_event(
+        self,
+        task: dict[str, Any],
+        operation: dict[str, Any],
+        event_name: str,
+        *,
+        phase_before: str | None,
+        evidence: dict[str, Any],
+    ) -> dict[str, Any]:
+        status = (
+            "uncertain"
+            if operation["result"] == "uncertain"
+            else "blocked"
+            if operation["result"] == "blocked"
+            else "completed"
+        )
+        event = {
+            **self._journal_event(
+                task,
+                event_name,
+                status,
+                retry_safe=bool(operation["retry_safe"]),
+            ),
+            "code": operation["failure_code"],
+            "operation_id": operation["operation_id"],
+            "phase_before": phase_before,
+            "phase_after": operation["phase"],
+            "result": operation["result"],
+            "evidence_sha256": evidence_sha256(evidence),
+        }
+        return validate_takeover_event(event)
+
+    def _ensure_takeover_checkpoint_event(
+        self,
+        task_dir: Path,
+        task: dict[str, Any],
+        progress: dict[str, Any],
+        operation: dict[str, Any],
+        *,
+        phase_before: str | None,
+    ) -> dict[str, Any] | None:
+        latest = self._latest_takeover_event(task_dir, operation["operation_id"])
+        if (
+            latest
+            and latest.get("phase_after") == operation["phase"]
+            and latest.get("result") == operation["result"]
+        ):
+            return None
+        if (
+            operation["phase"] != "local_finalized"
+            and progress.get("stage") == "takeover_started"
+        ):
+            raise takeover_error(
+                "takeover_local_state_incomplete",
+                "业务阶段早于接管本地最终收口",
+                "请核对 progress.json 与接管快照，不要追加恢复事件掩盖冲突",
+            )
+        event = self._takeover_event(
+            task,
+            operation,
+            "takeover_recovered",
+            phase_before=phase_before,
+            evidence={"recovery_action": "repair_takeover_checkpoint_event"},
+        )
+        append_ndjson(task_dir / "journal.ndjson", event)
+        return event
+
+    def _read_takeover_recovery_locked(
+        self,
+        task_dir: Path,
+        task: dict[str, Any],
+        progress: dict[str, Any],
+        sync: dict[str, Any],
+    ) -> dict[str, Any]:
+        raw = sync.get("takeover_operation")
+        if raw is None:
+            legacy_event = self._latest_legacy_takeover_event(task_dir)
+            return {
+                "operation": None,
+                "legacy_state": {
+                    "schema_version": "1",
+                    "progress_stage": progress.get("stage"),
+                    "legacy_takeover_event_found": legacy_event is not None,
+                    "agentic_run_id": task.get("agentic_run_id"),
+                },
+                "migration_required": legacy_event is not None,
+                "state_consistent": legacy_event is None,
+                "state_file": str(task_dir / "sync.json"),
+            }
+        operation = validate_takeover_operation(raw)
+        if (
+            operation["issue_key"] != task.get("issue_key")
+            or operation["agentic_run_id"] != task.get("agentic_run_id")
+        ):
+            raise takeover_error(
+                "takeover_state_identity_mismatch",
+                "接管状态与 task.json 身份不一致",
+                "请人工核对本地任务状态，不要覆盖冲突文件",
+            )
+        latest_event = self._latest_takeover_event(task_dir, operation["operation_id"])
+        event_matches_snapshot = bool(
+            latest_event
+            and latest_event.get("phase_after") == operation["phase"]
+            and latest_event.get("result") == operation["result"]
+        )
+        progress_finalized = progress.get("stage") == "takeover_started"
+        event_finalized = bool(
+            latest_event
+            and latest_event.get("operation")
+            in {"takeover_completed", "takeover_recovered"}
+            and latest_event.get("phase_after") == "local_finalized"
+        )
+        state_consistent = True
+        effective = operation
+        if operation["phase"] == "local_finalized":
+            state_consistent = progress_finalized and event_finalized
+        elif progress_finalized:
+            state_consistent = False
+        if not event_matches_snapshot:
+            state_consistent = False
+        if not state_consistent:
+            effective = dict(operation)
+            if effective["phase"] == "local_finalized":
+                effective["phase"] = "status_verified"
+            effective.update(
+                {
+                    "result": "uncertain",
+                    "external_result_certainty": operation[
+                        "external_result_certainty"
+                    ],
+                    "takeover_status": "uncertain",
+                    "human_notice": human_notice(
+                        effective["takeover_kind"], "uncertain"
+                    ),
+                    "agentic_next_action": takeover_next_action(
+                        "recover_local_takeover_state",
+                        stop_workflow=True,
+                        requires_authorization=True,
+                        reason="接管快照、业务阶段和事件未完成交叉收口，需要先恢复本地状态",
+                    ),
+                    "failure_code": "takeover_local_state_incomplete",
+                    "retry_safe": False,
+                    "recovery_action": "recover_local_takeover_state",
+                }
+            )
+            effective = validate_takeover_operation(effective)
+        return {
+            "operation": effective,
+            "persisted_phase": operation["phase"],
+            "migration_required": False,
+            "state_consistent": state_consistent,
+            "state_file": str(task_dir / "sync.json"),
+        }
+
+    @staticmethod
+    def _latest_legacy_takeover_event(task_dir: Path) -> dict[str, Any] | None:
+        journal_path = task_dir / "journal.ndjson"
+        for line in reversed(read_text(journal_path).splitlines()):
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if (
+                isinstance(event, dict)
+                and event.get("operation") == "takeover_task"
+            ):
+                return event
+        return None
+
+    @staticmethod
+    def _latest_takeover_event(
+        task_dir: Path, operation_id: str
+    ) -> dict[str, Any] | None:
+        journal_path = task_dir / "journal.ndjson"
+        for line in reversed(read_text(journal_path).splitlines()):
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict) and event.get("operation_id") == operation_id:
+                return event
+        return None
 
     def _validate_readback_evidence(
         self,

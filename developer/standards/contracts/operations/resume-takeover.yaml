@@ -1,9 +1,10 @@
 operation: resume_takeover
 workplane: developer
-version: 2
+version: 3
 purpose: 只读诊断并恢复一个已经存在的任务运行上下文；正式恢复留痕由统一 takeover 操作完成。
 task_type: task_takeover
 allowed_stages:
+  - initialized
   - takeover_started
   - blocked
 required_inputs:
@@ -48,6 +49,12 @@ output:
     type: string
   agentic_next_action:
     type: object
+  takeover_recovery:
+    type: object
+    required_fields:
+      - operation
+      - migration_required
+      - state_consistent
   jira_feedback_required:
     type: boolean
   jira_feedback_write_allowed:
@@ -90,6 +97,9 @@ failure:
     - human_gate_pending
     - feedback_write_failed
     - event_write_failed
+    - takeover_schema_invalid
+    - takeover_state_identity_mismatch
+    - takeover_local_state_incomplete
 side_effects:
   - may_write_local_event
   - may_write_local_feedback_artifact
@@ -102,3 +112,7 @@ retry_policy:
   max_attempts: 1
   redo_from_stage: takeover_started
 redo_from_stage: takeover_started
+recovery_source:
+  reader: read_takeover_recovery
+  authority: sync.json.takeover_operation
+  note: task inspect、task resume 与正式 takeover 必须读取同一恢复快照；本命令保持只读。

@@ -93,6 +93,10 @@ stages:
       - takeover_status
       - human_notice
       - takeover_comment_id
+      - takeover_phase
+      - takeover_result
+      - external_result_certainty
+      - recovery_action
       - current_stage
       - agentic_next_action
     review_gate: null
@@ -168,12 +172,18 @@ stages:
 - `takeover_status`
 - `human_notice`
 - `takeover_comment_id`
+- `takeover_phase`
+- `takeover_result`
+- `external_result_certainty`
+- `recovery_action`
 - `current_stage`
 - `agentic_next_action`
 
 接管后连续执行信息分析，补齐 `task_class`、`process_id`、目标仓库、分支和验证方式；这些事实缺失时阻止实现，不阻止建立接管轨迹。普通分析和方案分级不设置独立确认，正常进入设计审查；所有权或风险冲突进入风险决策。
 
 接管评论必须明文区分新接管、接纳存量任务和恢复运行；后两种同时在 `human_notice` 和 Comment 中提示“不是新接管”。如果 Jira `assignee` 不等于当前登录用户，返回 `owner_mismatch`。并发重复接管不是当前阶段的锁能力，出现真实需求后单独设计。
+
+本地接管状态必须把业务阶段与外部写入阶段分离。Comment 或 Status 部分完成、外部结果不确定以及本地最终落盘失败只更新 `sync.json.takeover_operation` 和接管事件，不得用新的业务 stage 表达，也不得返回接管成功。
 
 ## 8. 执行过程所有权检查
 

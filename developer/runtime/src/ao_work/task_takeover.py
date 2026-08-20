@@ -220,6 +220,48 @@ def execute_task_takeover(
             "authorization_reference": authorization_reference,
         },
     )
+    authorization_digest = hashlib.sha256(
+        authorization_reference.encode("utf-8")
+    ).hexdigest()
+    preflight_facts_sha256 = hashlib.sha256(
+        json.dumps(
+            {
+                "issue_key": issue.key,
+                "jira_issue_id": issue.issue_id,
+                "assignee": issue.assignee,
+                "jira_status_before": issue.status,
+                "jira_status_target": target_status,
+                "transition_id": matched_transition[0] if matched_transition else None,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    takeover_recovery = store.migrate_legacy_takeover(
+        issue.key,
+        agentic_run_id,
+        {
+            "agent_id": agent_id,
+            "takeover_kind": takeover_kind,
+            "authorization_digest": authorization_digest,
+            "preflight_facts_sha256": preflight_facts_sha256,
+            "jira_status_before": issue.status,
+            "jira_status_target": target_status,
+            "jira_status_after": readback.status,
+            "transition_id": matched_transition[0] if matched_transition else None,
+            "comment_marker": comment_marker,
+            "comment_content_sha256": hashlib.sha256(
+                comment_body.encode("utf-8")
+            ).hexdigest(),
+            "comment_id": takeover_comment_id,
+            "comment_author": account["account_id"],
+            "expected_comment_author": account["account_id"],
+            "assignee": readback.assignee,
+            "expected_assignee": account["account_id"],
+        },
+    )
+    takeover_operation = takeover_recovery["operation"]
     return {
         "workspace": str(workspace.root),
         "issue_key": issue.key,
@@ -234,6 +276,13 @@ def execute_task_takeover(
         "human_notice": human_notice,
         "takeover_comment_id": takeover_comment_id,
         "takeover_comment_verified": True,
+        "takeover_phase": takeover_operation["phase"],
+        "takeover_result": takeover_operation["result"],
+        "external_result_certainty": takeover_operation[
+            "external_result_certainty"
+        ],
+        "retry_safe": takeover_operation["retry_safe"],
+        "recovery_action": takeover_operation["recovery_action"],
         "agentic_takeover_at": agentic_takeover_at,
         "current_stage": "takeover_started",
         "intake_source": source_context["intake_source"],
@@ -300,7 +349,11 @@ def _existing_state(store: TaskStore, issue_key: str) -> dict[str, Any] | None:
     progress = state.get("progress")
     if not isinstance(task, dict) or not isinstance(progress, dict):
         return None
-    return {"task": task, "progress": progress}
+    return {
+        "task": task,
+        "progress": progress,
+        "takeover_recovery": state.get("takeover_recovery"),
+    }
 
 
 def _takeover_kind(

@@ -20,17 +20,17 @@ ao-work task resume --issue-key TAP-123
 
 ### 前置条件
 
-- 已存在接管记录。
+- 已存在接管记录，或存在已经持久化但尚未最终收口的接管意图。
 - `agentic_run_id` 对应的 `issue`、`workspace`、`agent_id`、`task_class`、`process_id` 和任务阶段可验证。
 - 当前 Jira 卡片和项目 profile 能确定负责人、状态和目标仓库。
 
 ### 主流程
 
 1. AIAgent 调用 `ao-work task resume` 进行只读恢复诊断。
-2. CLI 从同一 `agentic_run_id` 的事件中恢复接管基准和最近任务阶段。
+2. CLI 通过 `read_takeover_recovery` 联合读取 `sync.json.takeover_operation`、`progress.json` 和同一 `agentic_run_id` 的事件，恢复接管基准、写入阶段和最近业务阶段。
 3. CLI 读取当前 Jira 卡片和当前用户，复核 `Assignee`、状态映射和目标仓库。
 4. CLI 使用操作契约校验操作阶段，并把 Jira 状态映射为 Standard Process Registry 阶段进行校验。
-5. CLI 返回原任务阶段、标准流程阶段和下一步动作，不推进业务阶段。
+5. CLI 返回原任务阶段、接管恢复快照和下一步动作，不推进业务阶段；部分完成状态按 `intent_persisted`、`comment_verified`、`status_verified` 或待恢复的本地收口继续。
 6. AIAgent 说明恢复点并连续执行信息分析；只有事实冲突进入风险决策。
 7. 正式恢复留痕调用统一 takeover 操作，复用原 run，不创建新的接管记录。
 
@@ -46,8 +46,19 @@ ao-work task resume --issue-key TAP-123
   "target_repo": "tapstate/example-repo",
   "previous_stage": "takeover_started",
   "current_stage": "takeover_started",
-  "standard_process_stage": "waiting_takeover",
-  "agentic_next_action": "proceed"
+  "takeover_recovery": {
+    "migration_required": false,
+    "state_consistent": true,
+    "operation": {
+      "phase": "local_finalized",
+      "result": "completed",
+      "external_result_certainty": "verified",
+      "recovery_action": "none"
+    }
+  },
+  "agentic_next_action": {
+    "action": "resume_task_from_recorded_state"
+  }
 }
 ```
 
@@ -68,6 +79,8 @@ ao-work task resume --issue-key TAP-123
 - AIAgent 能说明从哪个操作阶段、哪个标准流程阶段恢复。
 - 恢复过程继续写入同一个 run 的事件日志。
 - `resume-takeover` 本身不写 Jira。
+- Comment 已确认/Status 未确认、外部结果不确定和本地收口中断时，`task resume` 与 `task inspect` 返回相同的 phase、result 和恢复动作。
+- legacy schema v1 未经 Jira Comment、作者、标记、负责人和 Status 验证时只提示迁移待验证，不在只读恢复中改写原状态。
 - 可信任务级阻塞能通过受控 `jira_comment` plan、apply、readback 形成 Jira 轨迹。
 
 ### 保护行为
@@ -77,6 +90,7 @@ ao-work task resume --issue-key TAP-123
 - 本地代码状态由恢复成功后的 `inspect-workspace` 单独检查。
 - 上次停在人工确认点时，AIAgent 不能自动继续。
 - 恢复成功不能生成 `takeover_resumed` 业务阶段或固定改写 `agentic_next_action`。
+- Comment/Status 部分完成和外部结果不确定不能伪装为新的业务 stage，也不能报告接管完成。
 - 恢复过程必须继续写入同一个 run 的事件日志。
 
 ### 审核问题
@@ -103,3 +117,4 @@ ao-work task resume --issue-key TAP-123
 - `docs/workflows/feedback-loop.md`
 - `docs/architecture/full-design-implementation-design.md`
 - `docs/architecture/resume-takeover-recovery-gate-design.md`
+- `docs/architecture/developer-takeover-local-state-machine.md`

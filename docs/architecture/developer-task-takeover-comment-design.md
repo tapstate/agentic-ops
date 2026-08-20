@@ -75,7 +75,7 @@ ao-work task takeover <KEY> --authorization-reference <INTERNAL_REFERENCE>
 
 非新接管必须同时在 `human_notice` 和 Comment 中写“不是新接管”。成功输出包含 `takeover_status=completed`、三种之一的 `takeover_kind`、Comment ID、Status 前后值和结构化下一动作。
 
-Comment 与 Status 目前不是单次 Jira 原子操作。Comment 写入结果不明确时必须在 transition 前停止；Comment 已确认而 transition 失败时保留 Comment 审计，不声称接管完成。AO-49、AO-50 负责后续 Saga 与本地 phase 完善。
+Comment 与 Status 不是单次 Jira 原子操作。Comment 写入结果不明确时必须在 transition 前停止；Comment 已确认而 transition 失败时保留 Comment 审计，不声称接管完成。AO-50 提供 `sync.json.takeover_operation` 本地状态机；AO-49 负责把现有 Jira 写入接入该状态机并完成 Saga。
 
 ## 6. task-to-PR 验收
 
