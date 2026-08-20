@@ -14,6 +14,7 @@ from ao_work.task_state import (
     validate_takeover_event,
     validate_takeover_operation,
 )
+from ao_work.task_state.takeover import normalized_comment_content_sha256
 
 
 IDENTITY = TaskIdentity(
@@ -182,6 +183,58 @@ class TakeoverStateMachineTest(unittest.TestCase):
             first["operation"]["planned_at"],
             repeated["operation"]["planned_at"],
         )
+
+    def test_comment_markdown_is_immutable_and_digest_bound(self) -> None:
+        markdown = "## 接管\n\n稳定正文"
+        digest = normalized_comment_content_sha256(markdown)
+        first = self.store.persist_takeover_intent(
+            IDENTITY.issue_key,
+            IDENTITY.agentic_run_id,
+            agent_id="developer-agent",
+            takeover_kind="new_takeover",
+            authorization_digest=AUTHORIZATION_DIGEST,
+            preflight_facts_sha256=HASH_A,
+            jira_status_before="待办",
+            jira_status_target="正在进行",
+            transition_id="31",
+            comment_marker=COMMENT_MARKER,
+            comment_content_sha256=digest,
+            comment_markdown=markdown,
+        )
+        self.assertEqual(markdown, first["operation"]["comment_markdown"])
+        changed = "被修改的正文"
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            self.store.persist_takeover_intent(
+                IDENTITY.issue_key,
+                IDENTITY.agentic_run_id,
+                agent_id="developer-agent",
+                takeover_kind="new_takeover",
+                authorization_digest=AUTHORIZATION_DIGEST,
+                preflight_facts_sha256=HASH_A,
+                jira_status_before="待办",
+                jira_status_target="正在进行",
+                transition_id="31",
+                comment_marker=COMMENT_MARKER,
+                comment_content_sha256=normalized_comment_content_sha256(changed),
+                comment_markdown=changed,
+            )
+        self.assertEqual("takeover_intent_conflict", captured.exception.code)
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            self.store.persist_takeover_intent(
+                IDENTITY.issue_key,
+                IDENTITY.agentic_run_id,
+                agent_id="developer-agent",
+                takeover_kind="new_takeover",
+                authorization_digest=AUTHORIZATION_DIGEST,
+                preflight_facts_sha256=HASH_A,
+                jira_status_before="待办",
+                jira_status_target="正在进行",
+                transition_id="31",
+                comment_marker=COMMENT_MARKER,
+                comment_content_sha256=digest,
+                comment_markdown=changed,
+            )
+        self.assertEqual("takeover_schema_invalid", captured.exception.code)
 
     def test_illegal_phase_skip_and_comment_conflict_are_blocked(self) -> None:
         intent = self.persist()

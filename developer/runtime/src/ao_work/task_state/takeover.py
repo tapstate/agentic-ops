@@ -6,6 +6,8 @@ import re
 from copy import deepcopy
 from typing import Any, Mapping
 
+from ao_work.jira.adf import markdown_to_adf
+from ao_work.jira.model import plain_text
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 
 TAKEOVER_SCHEMA_VERSION = 2
@@ -68,6 +70,7 @@ _REQUIRED_OPERATION_FIELDS = frozenset(
         "content_version",
     }
 )
+_OPTIONAL_OPERATION_FIELDS = frozenset({"comment_markdown"})
 
 
 def takeover_error(
@@ -155,7 +158,9 @@ def validate_takeover_operation(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, Mapping):
         raise _schema_invalid("接管状态必须是对象")
     missing = sorted(_REQUIRED_OPERATION_FIELDS - set(payload))
-    extra = sorted(set(payload) - _REQUIRED_OPERATION_FIELDS)
+    extra = sorted(
+        set(payload) - _REQUIRED_OPERATION_FIELDS - _OPTIONAL_OPERATION_FIELDS
+    )
     if missing or extra:
         raise _schema_invalid(
             "接管状态字段集合不合法",
@@ -180,6 +185,19 @@ def validate_takeover_operation(payload: Mapping[str, Any]) -> dict[str, Any]:
         "updated_at",
     ):
         _require_text(value[field], field)
+    if "comment_markdown" in value:
+        _require_text(
+            value["comment_markdown"],
+            "comment_markdown",
+            max_length=32768,
+        )
+        if (
+            normalized_comment_content_sha256(value["comment_markdown"])
+            != value["comment_content_sha256"]
+        ):
+            raise _schema_invalid(
+                "comment_markdown 与 comment_content_sha256 不一致"
+            )
     for field in (
         "authorization_digest",
         "preflight_facts_sha256",
@@ -298,6 +316,11 @@ def evidence_sha256(evidence: Mapping[str, Any]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def normalized_comment_content_sha256(markdown: str) -> str:
+    normalized = plain_text(markdown_to_adf(markdown))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def immutable_intent(payload: Mapping[str, Any]) -> dict[str, Any]:
     fields = (
         "operation_id",
@@ -313,7 +336,10 @@ def immutable_intent(payload: Mapping[str, Any]) -> dict[str, Any]:
         "comment_marker",
         "comment_content_sha256",
     )
-    return {field: payload[field] for field in fields}
+    value = {field: payload[field] for field in fields}
+    if "comment_markdown" in payload:
+        value["comment_markdown"] = payload["comment_markdown"]
+    return value
 
 
 def _validate_operation_combination(value: Mapping[str, Any]) -> None:
@@ -395,12 +421,12 @@ def _validate_next_action(value: Any) -> None:
             raise _schema_invalid(f"agentic_next_action.{field} 必须是布尔值")
 
 
-def _require_text(value: Any, field: str) -> None:
+def _require_text(value: Any, field: str, *, max_length: int = 4096) -> None:
     if (
         not isinstance(value, str)
         or not value.strip()
         or "\x00" in value
-        or len(value) > 4096
+        or len(value) > max_length
     ):
         raise _schema_invalid(f"{field} 必须是非空字符串")
 
