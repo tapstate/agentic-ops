@@ -481,6 +481,15 @@ class WorkspaceInitializer:
                     ),
                     self._managed_agents_content(candidate),
                 )
+                for tool, filename in (("hermes", "HERMES.md"), ("claude", "CLAUDE.md")):
+                    atomic_write_text(
+                        validate_workspace_root_file(
+                            candidate.root,
+                            candidate.root / filename,
+                            label=filename,
+                        ),
+                        self._managed_guide_content(candidate, tool),
+                    )
                 write_diagnostic("初始化步骤 4/5：安装研发 Skill 并写入授权凭证")
                 self._install_workspace_skills(candidate)
                 if candidate.persist_credentials and candidate.email and candidate.token:
@@ -641,6 +650,25 @@ class WorkspaceInitializer:
                 "业务工作空间 AGENTS.md 中的 developer Rule 入口缺失或已漂移",
                 "请由指导员重新运行 ao-work workspace init 同步当前 developer AI 入口",
             )
+        for tool, filename in (("hermes", "HERMES.md"), ("claude", "CLAUDE.md")):
+            guide_path = validate_workspace_root_file(
+                candidate.root,
+                candidate.root / filename,
+                label=filename,
+            )
+            guide_content = read_workspace_root_file(
+                candidate.root,
+                guide_path,
+                label=filename,
+            )
+            if guide_content.count(MANAGED_START) != 1 or guide_content.count(
+                MANAGED_END
+            ) != 1:
+                raise _blocked(
+                    "workspace_ai_entry_drift",
+                    f"业务工作空间 {filename} 中的 developer 引导入口缺失或管理块不完整",
+                    "请由指导员重新运行 ao-work workspace init 同步当前 developer AI 入口",
+                )
         skill_assets = self._developer_skill_assets()
         skill_root = validate_managed_path(
             candidate.root,
@@ -1430,6 +1458,39 @@ class WorkspaceInitializer:
         if existing.strip():
             return f"{existing.rstrip()}\n\n{block}"
         return block
+
+    def _managed_guide_content(
+        self, candidate: WorkspaceCandidate, tool: str
+    ) -> str:
+        """生成 Hermes / Claude Code 的轻量引导文件（HERMES.md / CLAUDE.md）。
+
+        - 只声明 developer 工作面与权威入口，规则正文在 AGENTS.md（避免三份重复维护）。
+        - Codex 兼容说明：AGENTS.md 是 Codex / Hermes / Claude Code 共同识别的
+          便携入口，本文件与 AGENTS.md 共存时由各自工具按自身优先级加载，
+          任何工具都不得把本文件当作独立规则源。
+        """
+        guide_name = "HERMES.md" if tool == "hermes" else "CLAUDE.md"
+        tool_label = "Hermes" if tool == "hermes" else "Claude Code"
+        return (
+            f"{MANAGED_START}\n"
+            f"# AgenticOps 业务项目工作空间（{tool_label} 引导）\n\n"
+            f"本文件（{guide_name}）只做入口引导，规则正文不在此维护。权威规则是仓库根的 "
+            "`AGENTS.md`（developer 工作面，由 ao-work workspace init 生成并受管）：\n\n"
+            "1. 请先加载 `AGENTS.md` 并按其中的 developer AI 规则执行，本文件不替代它。\n"
+            "2. 工作空间固定使用 `developer` 工作面，命令入口为 `ao-work`；"
+            "不得加载或调用 `maintainer` 工作面的规则、Skill、授权、配置或入口。\n"
+            "3. 执行任务前先调用 `ao-work workspace preflight`；任何阻断结果都不得绕过。\n\n"
+            "## 与 Codex AGENTS.md 特性的兼容说明\n\n"
+            f"- {tool_label} 与 Codex 都识别仓库根的 `AGENTS.md` 作为项目指令入口；"
+            "本文件（HERMES.md/CLAUDE.md）是各自工具的额外引导，加载优先级按工具自身约定。\n"
+            "- 若本文件与 `AGENTS.md` 内容冲突，以 `AGENTS.md` 为准；"
+            "两者都不得把 `developer/...` 当作业务仓库相对路径，也不得搜索或恢复 maintainer 资产。\n"
+            "- Codex 可发现的 developer Skill 位于 `.agents/skills/`（受管副本），"
+            "需要流程能力时只从该目录选择；标准资产由 `ao-work` 从受信安装根解析。\n"
+            f"- 本文件由 `ao-work workspace init` 维护（管理块标记之间），"
+            "请勿手改管理块；重新初始化工作空间时会重新生成。\n"
+            f"{MANAGED_END}"
+        )
 
     def _developer_ai_rules(self) -> str:
         assets = (
