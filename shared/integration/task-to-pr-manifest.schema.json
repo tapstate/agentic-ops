@@ -106,8 +106,7 @@
         "account_id",
         "assignee_account_id",
         "status_mapping",
-        "allowed_status_categories",
-        "agentic_id_field"
+        "allowed_status_categories"
       ],
       "properties": {
         "base_url": { "type": "string", "format": "uri", "pattern": "^https://" },
@@ -131,12 +130,6 @@
               { "pattern": "^(?![Dd][Oo][Nn][Ee]$).+$" }
             ]
           }
-        },
-        "agentic_id_field": {
-          "oneOf": [
-            { "type": "string", "pattern": "^customfield_[1-9][0-9]*$" },
-            { "type": "null" }
-          ]
         }
       }
     },

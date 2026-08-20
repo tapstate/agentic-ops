@@ -420,7 +420,6 @@ def validate_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
             "assignee_account_id",
             "status_mapping",
             "allowed_status_categories",
-            "agentic_id_field",
         },
         "jira",
     )
@@ -442,11 +441,6 @@ def validate_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
         category.casefold() == "done" for category in categories
     ):
         invalid("jira.allowed_status_categories", "不能重复或允许 Done")
-    if jira["agentic_id_field"] is not None:
-        field = require_string(jira["agentic_id_field"], "jira.agentic_id_field")
-        if not re.fullmatch(r"customfield_[1-9][0-9]*", field):
-            invalid("jira.agentic_id_field", "必须是明确的 Jira customfield id")
-
     repository = require_mapping(value["repository"], "repository")
     require_exact_keys(
         repository,
@@ -691,9 +685,7 @@ def validate_action_data(action: str, data: Mapping[str, Any]) -> None:
                 "assignee_account_id",
                 "status_category",
                 "mapped_status",
-                "agentic_id_field",
-                "agentic_id_value",
-                "agentic_id_mapping_status",
+                "takeover_comment_id",
                 "formal_takeover_verified",
                 "issue_content_sha256",
                 "approved_plan_sha256",
@@ -715,16 +707,8 @@ def validate_action_data(action: str, data: Mapping[str, Any]) -> None:
         require_string(data["assignee_account_id"], "action_data.assignee_account_id")
         require_string(data["status_category"], "action_data.status_category")
         require_id(data["mapped_status"], "action_data.mapped_status")
-        if data["agentic_id_field"] is not None:
-            require_string(data["agentic_id_field"], "action_data.agentic_id_field")
-        if data["agentic_id_value"] is not None:
-            require_string(data["agentic_id_value"], "action_data.agentic_id_value")
-        if data["agentic_id_mapping_status"] not in {
-            "active",
-            "pending_validation",
-            "not_configured",
-        }:
-            invalid("action_data.agentic_id_mapping_status", "不是受支持的字段适配状态")
+        if data["takeover_comment_id"] is not None:
+            require_string(data["takeover_comment_id"], "action_data.takeover_comment_id")
         if not isinstance(data["formal_takeover_verified"], bool):
             invalid("action_data.formal_takeover_verified", "必须是布尔值")
         for field in ("issue_content_sha256", "approved_plan_sha256"):

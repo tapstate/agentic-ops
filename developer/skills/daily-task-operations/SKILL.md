@@ -49,12 +49,13 @@ ao-work jira inspect --issue-key <KEY>
 ### 3.3 接管任务（有编号）
 
 ```sh
-ao-work task takeover <KEY> --agent-id <agent-id> --authorization-reference <reference>
+ao-work task takeover <KEY> --authorization-reference <reference>
 ```
 
 - `--agent-id` 可省略（缺省从安装身份 `~/.agentic-ops/user/identity.yaml` 读取；缺失时按 `agent_identity_missing` 处理，提示 `ao-work install identity set`）。
-- `--authorization-reference` **必须**提供（形如 `user-confirmation:<KEY>:<plan_id>`）；这是真实 Jira 写（状态流转 + agentic_id 字段），必须先展示计划并取得研发工程师确认，AI 不得自行构造。
-- 成功后进入本地 `takeover_started` 阶段，下一步是 `run_development`（交给 `run-task-to-pr-test` 或按任务内容继续）。
+- `--authorization-reference` **必须**提供（形如 `user-confirmation:<KEY>:<plan_id>`）；这是真实 Jira 写（结构化接管评论 + 必要状态流转），必须先展示计划并取得研发工程师确认，AI 不得自行构造。
+- Runtime 自动返回 `takeover_kind=new_takeover|accept_existing_task|resume_takeover`。后两种在 Jira 评论中明文提示“不是新接管”，无需 AI 先选择另一个接管命令。
+- 成功后必须已回读 `takeover_comment_id`，进入本地 `takeover_started` 阶段，下一步是 `run_development`。
 
 ### 3.4 接管任务（无编号，自动候选）
 
@@ -66,20 +67,22 @@ ao-work task takeover
 - 把候选列表（key / summary / priority）展示给研发工程师，**由研发工程师确认目标任务**后，再用 3.3 的完整命令接管。AI 不得擅自选择任务执行接管。
 - 候选为空时提示当前名下无待处理任务。
 
-### 3.5 恢复接管
+### 3.5 只读恢复诊断
 
 ```sh
 ao-work task resume [--issue-key <KEY> | --agentic-run-id <RUN>]
 ```
 
 - 都不传时取本地最近可恢复记录（stage ∈ `takeover_started` / `blocked`）。
-- 只读操作（不写 Jira），校验 Jira 所有权与本地状态一致后输出执行上下文。
-- 所有权不一致（`assignee_changed` / `agent_ownership_conflict`）或阶段不允许（`resume_stage_not_allowed`）时，按失败码提示人工核对，不自动放行。
+- 这是只读恢复诊断入口。研发工程师直接说“接管 <KEY>”时仍使用 3.3，由 takeover 自动判断是否恢复并留下明文 Jira 轨迹。
+- 该命令不写 Jira，只校验 Jira Assignee、状态映射与本地状态后输出执行上下文。
+- 负责人不一致（`assignee_changed`）或阶段不允许（`resume_stage_not_allowed`）时，按失败码提示人工核对，不自动放行。
 
 ## 4. 硬边界
 
 - 所有 Jira 可见内容使用中文；命令、字段名、issue key、状态名保留英文。
-- 真实 Jira 写（接管的状态流转、agentic_id 字段）必须有研发工程师确认的授权引用；只读操作（list / inspect / resume 候选定位）无授权要求。
+- 真实 Jira 写（接管评论和状态流转）必须有研发工程师确认的授权引用；只读操作（list / inspect / resume 候选定位）无授权要求。
+- developer 不读取、写入或清理 Agentic Jira Custom Field；运行信息由 Jira Comment 和本地 task state 承载。
 - 无编号接管只列候选，不擅自选择任务；正式接管必须带 key 与授权引用。
 - 能力目录是「能否调用」的唯一事实源：先 `capability list`，`capability_gap` 停止并按 `next_action` 处理。
 - 本 Skill 不替代 `run-task-to-pr-test`（完整任务链路）与 `jira-task-collaboration`（评论/工作日志/描述回写）；需要时按对应 Skill 编排。

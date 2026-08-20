@@ -445,18 +445,6 @@ class TaskRunProtocol:
                 "Project Profile 状态映射与 manifest 已确认版本不一致",
                 "请重新生成并确认 manifest，不得沿用旧状态映射",
             )
-        mapped_field = context.profile.fields.get("agentic_id")
-        configured_field = (
-            mapped_field.jira_field
-            if mapped_field and mapped_field.state in {"active", "read_only"}
-            else None
-        )
-        if configured_field != expected["agentic_id_field"]:
-            raise blocked(
-                "jira_probe_profile_changed",
-                "Project Profile agentic_id 字段映射与 manifest 不一致",
-                "请重新生成并确认 manifest；字段适配缺口必须单独跟进",
-            )
         client = JiraClient(
             context.profile,
             UrllibJiraTransport(context.connection, email, token),
@@ -518,25 +506,23 @@ class TaskRunProtocol:
                 f"Jira 状态 {issue.status or '<empty>'} 未安全映射或已完成",
                 "请先修复 Project Profile 状态映射并重新确认 manifest",
             )
-        agentic_value: str | None = None
-        if configured_field:
-            raw_value = issue.fields.get(configured_field)
-            agentic_value = str(raw_value).strip() if raw_value is not None else None
-            if agentic_value and agentic_value != manifest["agent"]["agent_id"]:
-                raise blocked(
-                    "jira_probe_agentic_id_mismatch",
-                    "Jira agentic_id 已绑定其它研发员",
-                    "请停止自动化并由研发工程师处理所有权冲突",
-                )
-            mapping_status = "active"
-            formal_takeover_verified = agentic_value == manifest["agent"]["agent_id"]
-        else:
-            mapping_status = (
-                "pending_validation"
-                if mapped_field and mapped_field.state == "pending_validation"
-                else "not_configured"
-            )
-            formal_takeover_verified = False
+        takeover_marker_prefix = (
+            f"[agentic-ops-takeover:{issue.key}:"
+            f"{manifest['agent']['agentic_run_id']}:"
+        )
+        takeover_comment = next(
+            (
+                comment
+                for comment in reversed(client.comments(issue.key))
+                if takeover_marker_prefix in comment.body
+                and comment.author == account_id
+            ),
+            None,
+        )
+        takeover_comment_id = (
+            takeover_comment.comment_id if takeover_comment is not None else None
+        )
+        formal_takeover_verified = takeover_comment_id is not None
         readback = self._append_runtime_readback(
             manifest,
             [("jira_read", f"jira:{issue.key}")],
@@ -554,9 +540,7 @@ class TaskRunProtocol:
                 "assignee_account_id": issue.assignee,
                 "status_category": category,
                 "mapped_status": mapped_status,
-                "agentic_id_field": configured_field,
-                "agentic_id_value": agentic_value,
-                "agentic_id_mapping_status": mapping_status,
+                "takeover_comment_id": takeover_comment_id,
                 "formal_takeover_verified": formal_takeover_verified,
                 "issue_content_sha256": issue_content_sha256,
                 "approved_plan_sha256": manifest["task_binding"][
@@ -573,19 +557,19 @@ class TaskRunProtocol:
             "quality_finding",
             {
                 "category": "automation_gap",
-                "detail": "当前 Project Profile 尚不能证明 agentic_id 正式接管绑定",
+                "detail": "当前 Jira 任务缺少与本次运行绑定的受管接管评论",
                 "evidence_reference": str(readback["event_id"]),
-                "impact": "本次只证明当前 Jira 账户等于 assignee，不声称正式 takeover 已完成",
-                "root_cause_hypothesis": "agentic_id Custom Field 尚未完成专题适配或验证",
-                "reproduction": "在未配置稳定 agentic_id_field 的 Project Profile 执行 probe-jira",
-                "sanitized_example": f"mapping_status={mapping_status}; formal_takeover_verified=false",
-                "improvement_candidate": "专题适配并验证该 Jira 工作空间的 agentic_id Custom Field",
-                "suggested_asset": "profile",
-                "benefit": "能够确定性核对 AI 研发员的正式任务绑定",
-                "risk": "错误字段映射可能把其它字段误当作所有权事实",
-                "frequency": "每次未适配 Profile 的真实 task→PR 测试",
+                "impact": "本次只证明当前 Jira 账户等于 assignee，不声称正式接管留痕已完成",
+                "root_cause_hypothesis": "接管评论未写入、未回读，或评论不属于当前 agentic_run_id",
+                "reproduction": "在当前 Jira 任务缺少受管接管评论时执行 probe-jira",
+                "sanitized_example": "formal_takeover_verified=false; takeover_comment_id=null",
+                "improvement_candidate": "通过 ao-work task takeover 写入并回读当前运行的结构化接管评论",
+                "suggested_asset": "python_runtime",
+                "benefit": "无需项目自定义字段即可核对正式接管审计轨迹",
+                "risk": "评论缺失时可能无法区分本地准备与正式接管",
+                "frequency": "每次未完成接管评论闭环的真实 task→PR 测试",
             },
-            "Runtime 记录 agentic_id 正式接管能力缺口",
+            "Runtime 记录接管评论缺失能力缺口",
         )
         return {"readback": readback, "automation_gap": gap}
 
@@ -2205,7 +2189,7 @@ class TaskRunProtocol:
                 ]
                 if not automation_gaps or not retrospective["action_data"]["residual_risks"]:
                     self._incomplete(
-                        "agentic_id 未完成正式接管核对时，必须记录 automation_gap 和残留风险"
+                        "接管评论未完成正式核对时，必须记录 automation_gap 和残留风险"
                     )
         else:
             if status == "failed" and not by_action["failure"]:

@@ -85,9 +85,8 @@ stages:
       - target_repo
     output_fields:
       - agentic_run_id
-      - agentic_id
       - agentic_takeover_at
-      - agentic_heartbeat_at
+      - takeover_comment_id
       - current_stage
       - agentic_next_action
     review_gate: null
@@ -101,7 +100,8 @@ stages:
   - id: completed
     responsible_role: development_engineer
     completion_cleanup:
-      clear_agentic_id: true
+      write_terminal_comment: true
+      close_local_run: true
 ```
 
 ## 6. Jira 适配缺口处理
@@ -128,14 +128,13 @@ stages:
 - 当前工作流配置中已配置的映射摘要。
 - 给开发者或流程负责人的中文决策选项。
 
-## 7. 接管所有权门禁
+## 7. developer 接管门禁
 
-`agent_id` 是识别 AIAgent 的稳定身份编号。`agentic_run_id` 是一次执行记录。`agentic_id` 是任务当前绑定的 `agent_id`，用于防止多个 AIAgent 同时处理同一任务，不是新的身份字段。
+`agent_id` 是识别 AIAgent 的稳定身份编号，`agentic_run_id` 是一次执行记录。developer 不使用 Jira Agentic Custom Field 表达任务锁；Jira `Assignee` 表达负责人，Comment 表达接管与执行轨迹，本地 task state 表达当前运行和恢复状态。
 
 接管任务前必须满足：
 
 - Jira `assignee` 必须等于当前登录用户。
-- `agentic_id` 必须为空，或等于当前 AIAgent 的 `agent_id`。
 - 当前任务必须能映射出 `task_class` 和 `process_id`。
 - 当前 Jira 状态必须能映射到标准流程入口阶段。
 
@@ -143,15 +142,15 @@ stages:
 
 - `agentic_run_id`
 - `agent_id`
-- `agentic_id`
 - `agentic_takeover_at`
-- `agentic_heartbeat_at`
+- `takeover_kind`
+- `takeover_comment_id`
 - `task_class`
 - `process_id`
 - `current_stage`
 - `agentic_next_action`
 
-如果 Jira `assignee` 不等于当前登录用户，返回 `assignee_mismatch`。如果 `agentic_id` 不为空且不等于当前 AIAgent 的 `agent_id`，返回 `agent_ownership_conflict`。
+接管评论必须明文区分新接管、接纳存量任务和恢复运行；后两种明确提示“不是新接管”。如果 Jira `assignee` 不等于当前登录用户，返回 `assignee_mismatch`。并发重复接管不是当前阶段的锁能力，出现真实需求后单独设计。
 
 ## 8. 执行过程所有权检查
 
@@ -162,31 +161,30 @@ stages:
 | 条件 | 代码 | 记录 |
 | --- | --- | --- |
 | Jira `assignee` 已不是当前登录用户 | `assignee_changed` | 记录当前 `assignee`、当前登录用户、操作和停止阶段。 |
-| `agentic_id` 已不是当前 AIAgent 的 `agent_id` | `agent_ownership_conflict` | 记录当前字段值、当前 `agent_id`、操作和停止阶段。 |
-| `agentic_id` 为空但已有未完成 `agentic_run_id` | `agent_binding_lost` | 记录 `agentic_run_id`、`issue_key` 和需要人工判断的恢复动作。 |
+| Jira 状态、受管评论与本地运行事实冲突 | `external_task_state_conflict` | 记录 `agentic_run_id`、`issue_key`、当前外部事实和需要人工判断的恢复动作。 |
 
-这些情况不允许自动抢回任务，也不允许清理 `agentic_id`。AIAgent 必须记录事件，输出中文阻塞说明，并等待研发工程师决策。
+这些情况不允许自动覆盖外部事实。AIAgent 必须记录事件，输出中文阻塞说明，并等待研发工程师决策。
 
-## 9. 完成清理规则
+## 9. 完成收口规则
 
-任务完成或明确交接结束后，必须清理任务上的 `agentic_id`，释放 AIAgent 绑定。
+任务完成或明确交接结束后，必须写入并回读 Jira 中文终止评论，关闭本地运行并保留审计记录。
 
 允许清理的完成条件：
 
 - 标准流程进入 `completed`、`handed_off` 或工作流配置明确声明的终态。
 - 完成阶段所需表单已经写入，例如 `agentic_completion_evidence`、`follow_up_items`、`reviewer_decision`。
 - 需要的专业审查已经完成，且责任人确认当前结果可交付。
-- 清理操作仍通过 `assignee` 和 `agentic_id` 所有权检查。
+- 收口操作仍通过 `assignee`、运行 ID 和本地状态检查。
 
-清理动作必须记录：
+收口动作必须记录：
 
-- 清理前的 `agentic_id`。
 - 执行清理的 `agent_id`。
 - `completed_at` 或 `handoff_at`。
 - 完成阶段和完成证据引用。
-- `agentic_id_cleared=true`。
+- `terminal_comment_id` 与回读结果。
+- 本地运行终态。
 
-异常停止、阻塞、权限冲突、`assignee` 变更或代理冲突时不得自动清理 `agentic_id`。这些场景保留字段值用于审计和恢复，由研发工程师决策是否释放。
+异常停止、阻塞、权限冲突或 `assignee` 变更时不得虚构正常完成；这些场景保留本地运行和 Jira 评论轨迹，由研发工程师决定后续动作。
 
 ## 10. 阶段处理标准和责任
 
@@ -195,12 +193,12 @@ stages:
 | 阶段 | AIAgent 工作 | 责任角色 | 合格判断 |
 | --- | --- | --- | --- |
 | 分类 | 读取标准字段，识别 `task_class`。 | 研发工程师、流程负责人 | 分类能选择正确流程，缺口已阻断并请求决策。 |
-| 接管 | 校验所有权、字段、状态和流程入口。 | 研发工程师 | 任务确实属于当前登录用户，且未被其他 AIAgent 占用。 |
+| 接管 | 校验负责人、状态和流程入口，写入并回读接管评论。 | 研发工程师 | 任务属于当前登录用户，接管类型和运行标识已明文留痕。 |
 | 分析 | 理解范围、风险、依赖和验证方式。 | 研发工程师 | 范围未扩大，风险和阻塞被说明。 |
 | 实现 | 修改代码或配置，遵守项目规范。 | AIAgent 执行，研发工程师负责最终判断 | 代码差异解决目标问题，未引入无关变更。 |
 | 验证 | 运行约定验证并记录结果。 | AIAgent 执行，研发工程师或 QA 判断 | 验证覆盖验收标准，未验证部分明确。 |
 | 审查 | 整理证据、拉取请求信息和待审内容。 | 代码审查人、QA、运维、安全、研发工程师 | 专业角色能判断通过、退回、阻断或要求补充。 |
-| 完成 | 写入完成证据，清理 `agentic_id`。 | 研发工程师 | 完成条件满足，代理绑定已释放或有明确不释放原因。 |
+| 完成 | 写入完成证据与终止评论，关闭本地运行。 | 研发工程师 | 完成条件满足，Jira 与本地终态均可回读。 |
 
 ## 11. 日志上报要求
 
@@ -213,7 +211,7 @@ stages:
 - `agentic_run_id`
 - `issue_key`
 - `assignee`
-- `agentic_id`
+- `takeover_comment_id`
 - `operation`
 - `task_class`
 - `process_id`
@@ -225,7 +223,7 @@ stages:
 - `retryable`
 - `redo_from_stage`
 - `artifact_refs`
-- `agentic_id_cleared`
+- `terminal_comment_id`
 
 日志写入项目 AI 工作空间，不写入 `~/.agentic-ops`。日志只能保存安全摘要，不得记录 secrets、tokens、private keys、原始敏感日志、完整 Jira 描述或敏感代码片段。
 
@@ -237,10 +235,10 @@ stages:
 
 - 任务分类缺口。
 - Jira 字段、状态和 transition 映射缺口。
-- 所有权冲突和代理绑定丢失。
+- Jira 外部事实与本地运行冲突。
 - 阶段标准不清导致的人工退回。
 - 重试次数、重做来源阶段和连续失败。
-- 完成后未清理 `agentic_id` 的任务。
+- 完成后缺少终止评论或本地运行未收口的任务。
 - 可沉淀为运行手册、工作流配置、策略、模板或操作的成熟经验。
 
 AIAgent 可以提出改进建议，但不能未经人工确认自动修改标准流程、工作流配置、Task Form Standard、操作契约或 Jira 工作流。

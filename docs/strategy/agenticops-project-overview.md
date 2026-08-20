@@ -242,7 +242,7 @@ AgenticOps 不依赖 Web 控制台或后台常驻服务。标准操作之间通�
 - 检查负责人、任务类型、项目、状态、目标仓库、标准流程和权限。
 - 根据 profile 将 Jira 状态映射为标准业务阶段。
 - 生成并绑定唯一 `agentic_run_id`。
-- 校验 `agentic_id`、工作空间和任务所有权。
+- 校验 Jira `Assignee`、工作空间、本地运行身份和受管接管 Comment；developer 不依赖 Agentic Jira Custom Field。
 - 缺少字段或映射不完整时阻断，并输出补卡或人工处理动作。
 
 ### 6.3 受控执行与人工门禁

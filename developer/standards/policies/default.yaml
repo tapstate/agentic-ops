@@ -33,7 +33,6 @@ authorization_scopes:
       - issue_key
       - agentic_run_id
       - agent_id
-      - agentic_id
       - target_repo
       - work_branch
       - base_branch

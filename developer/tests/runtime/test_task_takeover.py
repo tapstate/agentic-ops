@@ -8,10 +8,9 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from ao_work.jira.adf import markdown_to_adf
+from ao_work.jira.adf import markdown_to_adf, plain_text
 from ao_work.jira.client import TransportResponse
 from ao_work.output import RuntimeErrorResult
-from ao_work.task_takeover import _find_agentic_id_field
 from ao_work.work_cli import main
 
 
@@ -21,19 +20,19 @@ class TakeoverTransport:
         *,
         assignee: str = "jira-account-1",
         status: str = "打开",
-        agentic_value: str | None = None,
         transitions: list[dict[str, str]] | None = None,
-        field_id: str = "customfield_10042",
     ) -> None:
         self.assignee = assignee
         self.status = status
-        self.agentic_value = agentic_value
-        self.field_id = field_id
-        self.transitions = transitions or [{"id": "11", "name": "Start Progress"}]
+        self.transitions = (
+            transitions
+            if transitions is not None
+            else [{"id": "11", "name": "Start Progress"}]
+        )
         self.requests: list[tuple[str, str]] = []
         self.transition_executed: str | None = None
-        self.field_written: dict[str, str] | None = None
         self.search_issues: list[dict[str, object]] = []
+        self.comments: list[dict[str, object]] = []
 
     def request(
         self,
@@ -59,14 +58,31 @@ class TakeoverTransport:
                 200,
                 {"accountId": "jira-account-1", "displayName": "Harsen Test Bot"},
             )
-        if path == "/rest/api/3/field":
+        if path == "/rest/api/3/issue/TAP-12289/comment" and method == "GET":
             return TransportResponse(
                 200,
-                [
-                    {"id": "summary", "name": "Summary"},
-                    {"id": self.field_id, "name": "Agentic ID"},
-                ],
+                {
+                    "comments": self.comments,
+                    "total": len(self.comments),
+                    "startAt": 0,
+                    "maxResults": 50,
+                },
             )
+        if path == "/rest/api/3/issue/TAP-12289/comment" and method == "POST":
+            comment = {
+                "id": str(9000 + len(self.comments) + 1),
+                "body": body["body"],
+                "author": {"accountId": "jira-account-1"},
+                "created": "2026-08-20T08:00:00.000+0800",
+            }
+            self.comments.append(comment)
+            return TransportResponse(201, comment)
+        if path.startswith("/rest/api/3/issue/TAP-12289/comment/") and method == "GET":
+            comment_id = path.rsplit("/", 1)[-1]
+            for comment in self.comments:
+                if comment["id"] == comment_id:
+                    return TransportResponse(200, comment)
+            return TransportResponse(404, None)
         if path == "/rest/api/3/issue/TAP-12289" and method == "GET":
             fields: dict[str, object] = {
                 "project": {"key": "TAP"},
@@ -76,8 +92,6 @@ class TakeoverTransport:
                 "assignee": {"accountId": self.assignee},
                 "description": markdown_to_adf("从 Jira 自动读取任务信息。"),
             }
-            if self.field_id:
-                fields[self.field_id] = self.agentic_value or ""
             return TransportResponse(
                 200,
                 {
@@ -95,12 +109,6 @@ class TakeoverTransport:
                 self.transition_executed = str(body["transition"]["id"])
                 self.status = "正在进行"
                 return TransportResponse(204, None)
-        if path == "/rest/api/3/issue/TAP-12289" and method == "PUT":
-            self.field_written = {
-                str(key): str(value) for key, value in body["fields"].items()
-            }
-            self.agentic_value = str(body["fields"][self.field_id])
-            return TransportResponse(204, None)
         return TransportResponse(404, None)
 
 
@@ -219,20 +227,38 @@ class TaskTakeoverTest(unittest.TestCase):
             code = main(tuple(arguments))
         return code, json.loads(stdout.getvalue()), stderr.getvalue()
 
-    def test_takeover_transitions_and_writes_agentic_id(self) -> None:
+    def test_takeover_comments_then_transitions_without_custom_fields(self) -> None:
         transport = TakeoverTransport(status="打开")
         code, payload, stderr = self.run_cli(transport)
         self.assertEqual(0, code, (payload, stderr))
         self.assertEqual("takeover_started", payload["current_stage"])
         self.assertEqual("TAP-12289", payload["issue_key"])
         self.assertEqual("11", transport.transition_executed)
-        self.assertEqual(
-            {"customfield_10042": "harsen-mini-test-bot"},
-            transport.field_written,
-        )
         self.assertEqual("正在进行", payload["jira_status_after"])
         self.assertTrue(payload["transition_applied"])
-        self.assertTrue(payload["agentic_id_written"])
+        self.assertEqual("new_takeover", payload["takeover_kind"])
+        self.assertTrue(payload["takeover_comment_verified"])
+        self.assertTrue(payload["agentic_takeover_at"])
+        self.assertEqual(1, len(transport.comments))
+        comment = plain_text(transport.comments[0]["body"])
+        self.assertIn("操作类型: 新接管", comment)
+        self.assertIn("[agentic-ops-takeover:TAP-12289:", comment)
+        self.assertNotIn(("GET", "/rest/api/3/field"), transport.requests)
+        self.assertNotIn(("PUT", "/rest/api/3/issue/TAP-12289"), transport.requests)
+        comment_write = transport.requests.index(
+            ("POST", "/rest/api/3/issue/TAP-12289/comment")
+        )
+        transition_write = transport.requests.index(
+            ("POST", "/rest/api/3/issue/TAP-12289/transitions")
+        )
+        self.assertLess(comment_write, transition_write)
+
+    def test_takeover_checks_transition_before_writing_comment(self) -> None:
+        transport = TakeoverTransport(status="打开", transitions=[])
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("jira_transition_mapping_gap", payload["code"])
+        self.assertEqual([], transport.comments)
 
     def test_takeover_skips_transition_when_already_implementation(self) -> None:
         transport = TakeoverTransport(status="正在进行")
@@ -241,18 +267,17 @@ class TaskTakeoverTest(unittest.TestCase):
         self.assertIsNone(transport.transition_executed)
         self.assertFalse(payload["transition_applied"])
         self.assertEqual("正在进行", payload["jira_status_after"])
+        self.assertEqual("accept_existing_task", payload["takeover_kind"])
+        self.assertIn(
+            "接纳存量任务（不是新接管）",
+            plain_text(transport.comments[0]["body"]),
+        )
 
     def test_takeover_blocks_owner_mismatch(self) -> None:
         transport = TakeoverTransport(assignee="someone-else")
         code, payload, stderr = self.run_cli(transport)
         self.assertEqual(2, code, (payload, stderr))
         self.assertEqual("owner_mismatch", payload["code"])
-
-    def test_takeover_blocks_agent_ownership_conflict(self) -> None:
-        transport = TakeoverTransport(agentic_value="other-agent")
-        code, payload, stderr = self.run_cli(transport)
-        self.assertEqual(2, code, (payload, stderr))
-        self.assertEqual("agent_ownership_conflict", payload["code"])
 
     def _candidate_issue(
         self,
@@ -307,9 +332,9 @@ class TaskTakeoverTest(unittest.TestCase):
         keys = [str(task["issue_key"]) for task in candidates]
         # 优先级 Highest > Medium > Low，同级按 updated 倒序。
         self.assertEqual(["TAP-101", "TAP-102", "TAP-100"], keys)
-        # 无 key 路径必须只读：不执行 transition、不写字段。
+        # 无 key 路径必须只读：不执行 transition、不写评论。
         self.assertIsNone(transport.transition_executed)
-        self.assertIsNone(transport.field_written)
+        self.assertEqual([], transport.comments)
         self.assertNotIn(
             ("POST", "/rest/api/3/issue/TAP-12289/transitions"),
             transport.requests,
@@ -341,10 +366,6 @@ class TaskTakeoverTest(unittest.TestCase):
         code, payload, stderr = self.run_cli(transport, agent_id=None)
         self.assertEqual(0, code, (payload, stderr))
         self.assertEqual("harsen-mini-test-bot", payload["agent_id"])
-        self.assertEqual(
-            {"customfield_10042": "harsen-mini-test-bot"},
-            transport.field_written,
-        )
 
     def test_takeover_blocks_when_agent_id_missing(self) -> None:
         transport = TakeoverTransport(status="打开")
@@ -388,11 +409,11 @@ class TaskTakeoverTest(unittest.TestCase):
         self.assertEqual(2, code, (payload, stderr))
         self.assertEqual("jira_transition_mapping_gap", payload["code"])
 
-    def test_takeover_works_without_agentic_field(self) -> None:
-        transport = TakeoverTransport(field_id="")
+    def test_takeover_does_not_read_agentic_field_metadata(self) -> None:
+        transport = TakeoverTransport()
         code, payload, stderr = self.run_cli(transport)
         self.assertEqual(0, code, (payload, stderr))
-        self.assertFalse(payload["agentic_id_written"])
+        self.assertNotIn(("GET", "/rest/api/3/field"), transport.requests)
 
     def test_takeover_reuses_existing_task_state(self) -> None:
         """任务已初始化（task.json 存在）后再接管：复用 agentic_run_id，不 KeyError。"""
@@ -415,33 +436,69 @@ class TaskTakeoverTest(unittest.TestCase):
         self.assertEqual("run-TAP-12289-previous", payload["agentic_run_id"])
         self.assertFalse(payload["task_state_created"])
 
+    def test_takeover_resume_is_explicit_and_idempotent(self) -> None:
+        from ao_work.task_state import TaskIdentity, TaskStore
 
-class AgenticFieldProbeTest(unittest.TestCase):
-    def test_finds_agentic_id_field_by_common_names(self) -> None:
-        self.assertEqual(
-            "customfield_10042",
-            _find_agentic_id_field(
-                [
-                    {"id": "summary", "name": "Summary"},
-                    {"id": "customfield_10042", "name": "Agentic ID"},
-                ]
-            ),
-        )
-        self.assertEqual(
-            "customfield_10043",
-            _find_agentic_id_field(
-                [
-                    {"id": "customfield_10043", "name": "AI Agent ID"},
-                ]
-            ),
-        )
-
-    def test_returns_none_when_no_agentic_field(self) -> None:
-        self.assertIsNone(
-            _find_agentic_id_field(
-                [{"id": "summary", "name": "Summary"}]
+        store = TaskStore(Path(self.workspace))
+        store.initialize(
+            TaskIdentity(
+                connection_id="tapdata-cloud",
+                jira_issue_id="12289",
+                issue_key="TAP-12289",
+                project_key="TAP",
+                agentic_run_id="run-TAP-12289-resume",
             )
         )
+        store.record_gate_transition(
+            "TAP-12289",
+            "run-TAP-12289-resume",
+            stage="takeover_started",
+            next_action="run_development",
+            operation="takeover_task",
+            status="completed",
+            evidence={"agent_id": "harsen-mini-test-bot"},
+        )
+        transport = TakeoverTransport(status="正在进行")
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual("resume_takeover", payload["takeover_kind"])
+        self.assertIn(
+            "恢复既有运行（不是新接管）",
+            plain_text(transport.comments[0]["body"]),
+        )
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual(1, len(transport.comments))
+
+    def test_takeover_does_not_reuse_foreign_marker_comment(self) -> None:
+        from ao_work.task_state import TaskIdentity, TaskStore
+
+        store = TaskStore(Path(self.workspace))
+        store.initialize(
+            TaskIdentity(
+                connection_id="tapdata-cloud",
+                jira_issue_id="12289",
+                issue_key="TAP-12289",
+                project_key="TAP",
+                agentic_run_id="run-TAP-12289-foreign-marker",
+            )
+        )
+        store.record_gate_transition(
+            "TAP-12289",
+            "run-TAP-12289-foreign-marker",
+            stage="takeover_started",
+            next_action="run_development",
+            operation="takeover_task",
+            status="completed",
+            evidence={"agent_id": "harsen-mini-test-bot"},
+        )
+        transport = TakeoverTransport(status="正在进行")
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        transport.comments[0]["author"] = {"accountId": "someone-else"}
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual(2, len(transport.comments))
 
 
 if __name__ == "__main__":

@@ -98,9 +98,9 @@ stages:
       - target_repo
     output_fields:
       - agentic_run_id
-      - agentic_id
+      - takeover_kind
+      - takeover_comment_id
       - agentic_takeover_at
-      - agentic_heartbeat_at
       - current_stage
       - agentic_next_action
     review_gate: null
@@ -162,4 +162,5 @@ stages:
       - verification_method
       - agentic_completion_evidence
     completion_cleanup:
-      clear_agentic_id: true
+      write_terminal_comment: true
+      close_local_run: true

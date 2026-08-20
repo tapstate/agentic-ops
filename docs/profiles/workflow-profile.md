@@ -67,24 +67,6 @@ jira_form_mapping:
     risk_level:
       source: jira_field
       jira_field: customfield_risk
-    agentic_id:
-      source: jira_field
-      jira_field: customfield_agentic_id
-    agentic_run_id:
-      source: jira_field
-      jira_field: customfield_agentic_run_id
-    agentic_takeover_at:
-      source: jira_field
-      jira_field: customfield_agentic_takeover_at
-    agentic_next_action:
-      source: jira_field
-      jira_field: customfield_agentic_next_action
-    agentic_completion_evidence:
-      source: jira_field
-      jira_field: customfield_agentic_completion_evidence
-    agentic_heartbeat_at:
-      source: jira_field
-      jira_field: customfield_agentic_heartbeat_at
 
 task_class_mapping:
   issue_types:
@@ -268,17 +250,16 @@ retry_redo:
 
 当审查节点、重试规则或重做边界无法映射时，工作流配置校验必须返回 `review_gate_mapping_gap` 或 `retry_redo_policy_gap`，并要求流程负责人决策。
 
-## 7. 所有权字段映射
+## 7. developer 接管事实映射
 
-工作流配置必须声明 `agentic_id`、`agentic_run_id`、`agentic_takeover_at`、`agentic_next_action`、`agentic_completion_evidence` 和 `agentic_heartbeat_at` 如何映射到 Jira。`agentic_id` 是任务当前绑定的 `agent_id`，不是新的身份字段；接管门禁依赖状态转换和这些字段防止多个 AIAgent 同时处理同一任务。
+developer Project Profile 只映射实际影响项目流程执行的 Jira 字段、状态和 transition。接管所需事实分工固定为：
 
-规则：
+- Jira `Assignee`：当前负责人，必须等于当前登录用户。
+- Jira `Status` 与 transition：团队可见阶段，必须由 profile 严格映射。
+- 受管 Jira Comment：接管、恢复、进度和终态轨迹，由 Runtime 写入并回读，不配置为 Custom Field。
+- 本地 task state：`agentic_run_id`、细粒度阶段、恢复点和幂等记录。
 
-- `agentic_id` 为空时，当前 AIAgent 可以在接管成功后写入自己的 `agent_id`。
-- `agentic_id` 等于当前 AIAgent 的 `agent_id` 时，允许恢复同一代理的执行。
-- `agentic_id` 不为空且不等于当前 AIAgent 的 `agent_id` 时，必须返回 `agent_ownership_conflict`。
-- 任务完成或交接结束后，必须清理 Jira 上的 `agentic_id`，并记录 `agentic_id_cleared=true`。
-- `assignee` 不是当前登录用户时，必须返回 `assignee_mismatch` 或 `assignee_changed`，不得自动接管或自动释放代理绑定。
+因此业务项目不需要映射 `agentic_id`、`agentic_run_id`、心跳或完成证据等 Agentic Jira Custom Field。字段不是项目流程必需输入时不得为了 AgenticOps 增加映射。当前 Comment 模型不提供跨工作空间并发锁，真实并发需求后续专题设计。
 
 ## 8. 第一批默认配置
 

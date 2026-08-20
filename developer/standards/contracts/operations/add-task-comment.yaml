@@ -41,7 +41,6 @@ input:
     required: false
 preconditions:
   - current_user_must_match_owner_and_assignee
-  - agentic_id_must_be_empty_or_match_agent_id
   - agentic_run_id_must_match_issue_when_provided
   - real_jira_write_must_be_confirmed_or_covered_by_valid_task_execution_authorization
 output:

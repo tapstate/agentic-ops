@@ -138,7 +138,6 @@ class TrustedTaskRunTest(unittest.TestCase):
                 "assignee_account_id": "jira-account-1",
                 "status_mapping": {"正在进行": "implementation"},
                 "allowed_status_categories": ["In Progress"],
-                "agentic_id_field": None,
             },
             "agent": {
                 "agent_id": "harsen-mini-test-bot",
@@ -1160,6 +1159,7 @@ class TrustedTaskRunTest(unittest.TestCase):
                 "display_name": "研发员",
             },
             get_issue=lambda key: issue,
+            comments=lambda key: [],
         )
         protocol = TaskRunProtocol(
             SimpleNamespace(
@@ -1184,7 +1184,7 @@ class TrustedTaskRunTest(unittest.TestCase):
         readback = next(event for event in completed_events if event["action"] == "jira_readback")
         gap = next(event for event in completed_events if event["action"] == "quality_finding")
         self.assertEqual("runtime_probe", readback["evidence_origin"])
-        self.assertEqual("not_configured", readback["action_data"]["agentic_id_mapping_status"])
+        self.assertIsNone(readback["action_data"]["takeover_comment_id"])
         self.assertFalse(readback["action_data"]["formal_takeover_verified"])
         self.assertEqual("automation_gap", gap["action_data"]["category"])
 
@@ -1689,7 +1689,6 @@ class GitCommitExecutionTest(unittest.TestCase):
                 "assignee_account_id": "jira-account-1",
                 "status_mapping": {"正在进行": "implementation"},
                 "allowed_status_categories": ["In Progress"],
-                "agentic_id_field": None,
             },
             "agent": {
                 "agent_id": "harsen-mini-test-bot",

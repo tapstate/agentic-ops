@@ -50,7 +50,7 @@
 
 - `issue_key`
 - `agentic_run_id`
-- `agent_id` 和任务当前 `agentic_id`
+- `agent_id` 和已回读的 `takeover_comment_id`
 - 目标仓库
 - 工作分支
 - 拉取请求目标分支
@@ -94,7 +94,7 @@
 
 出现以下任一事实时，AIAgent 必须停止连续执行并请求新的决策：
 
-- Jira `assignee`、`agentic_id` 或任务所有权与授权记录不一致。
+- Jira `Assignee`、受管接管 Comment、本地运行身份或任务所有权与授权记录不一致。
 - `issue_key`、`agentic_run_id`、目标仓库、工作分支或目标分支不一致。
 - 实际变更超出已确认范围或验收标准需要调整。
 - 风险等级扩大，或出现未在设计中说明的安全、数据、兼容性或线上风险。

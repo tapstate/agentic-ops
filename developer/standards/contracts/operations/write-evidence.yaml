@@ -25,7 +25,6 @@ input:
 preconditions:
   - run_must_exist
   - current_user_must_match_owner
-  - agentic_id_must_match_agent_id
   - evidence_template_must_exist
   - policy_must_allow_evidence_write
 output:
@@ -67,7 +66,6 @@ failure:
     - workspace_mismatch
     - local_state_mismatch
     - assignee_changed
-    - agent_ownership_conflict
     - evidence_template_missing
     - jira_adapter_config_failed
     - policy_not_found

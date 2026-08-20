@@ -31,16 +31,16 @@ AI 员工必须遵守：
 - 单次任务接管只处理一个 Jira 卡片。
 - `agent_id` 是当前 AIAgent 的稳定身份编号；接管、日志、证据和反馈报告都必须能关联该编号。
 - `agentic_run_id` 是一次 AI 执行记录；同一个 `agent_id` 可以产生多个 `agentic_run_id`。
-- `agentic_id` 是任务当前绑定的 `agent_id`，用于所有权门禁，不是新的身份字段。
 - 开发前必须读取项目规则、AI 员工手册、工作流配置和操作契约。
 - 开发前必须读取 Standard Process Registry，确认当前 `task_class` 对应的 `process_id` 和阶段标准。
 - 开发前必须执行门禁。
-- 接管门禁必须确认 Jira `assignee` 是当前登录用户，且 `agentic_id` 为空或等于当前 AIAgent 的 `agent_id`。
-- 接管成功后必须在同一次受控写入中记录 `agentic_id`、`agentic_run_id`、`agentic_takeover_at`、`agentic_next_action` 和 `agentic_heartbeat_at`，并清空上一轮 `agentic_completion_evidence`。
-- 每个执行操作前必须重新检查 `assignee` 和 `agentic_id`；如果任务已经不属于当前登录用户，或 `agentic_id` 已不是当前 AIAgent 的 `agent_id`，必须停止并记录。
+- 接管门禁必须确认 Jira `assignee` 是当前登录用户，并确认状态可以映射到项目流程。
+- 接管操作自动判断新接管、接纳存量任务或恢复已有运行；后两种必须在 Jira 中文接管评论中明文提示“不是新接管”。
+- 接管成功必须写入并回读绑定 `issue_key`、`agentic_run_id`、`agent_id`、工作空间、时间、当前阶段和下一步动作的结构化 Jira 评论，再按 Project Profile 推进状态；developer 不依赖 Jira Agentic 自定义字段。
+- 每个执行操作前必须重新检查 `assignee`、Jira 状态和本地运行绑定；任务不再属于当前登录用户或外部事实与本地状态冲突时必须停止并记录。
 - 开发前必须输出简短计划、验证方式和风险点。
 - 研发工程师确认版本化设计或修复计划时，可以同时授予工作项级连续执行授权；授权事实必须能从 Jira 决策评论或项目配置的等价任务事实源回读。
-- 有效授权必须绑定 `issue_key`、`agentic_run_id`、`agent_id`、`agentic_id`、目标仓库、工作分支、目标分支、计划版本、修改范围和验证方式。
+- 有效授权必须绑定 `issue_key`、`agentic_run_id`、`agent_id`、目标仓库、工作分支、目标分支、计划版本、修改范围和验证方式。
 - 在有效授权范围内，AIAgent 应连续完成实现、验证、提交、任务分支推送、必要 Jira 回写以及创建目标为 `develop` 的拉取请求，然后统一停在拉取请求审查节点，不得为每个已覆盖动作重复请求确认。
 - 所有权、绑定事实、范围或风险变化，必要验证受阻、连续失败、外部写入结果不明确或出现专业取舍时，工作项级连续执行授权立即失效。
 - 代码修改必须围绕当前 Jira 卡片，不做无关重构。
@@ -52,12 +52,12 @@ AI 员工必须遵守：
 - 除非确认问题来自 `ao-work` Python Runtime 的确定性逻辑错误，否则不应把问题升级为工具修复。
 - 不得把一次任务中的临场判断直接当成新脚本或新操作；必须先记录经验、失败模式和建议，进入周期性复盘。
 - 当某类交互逻辑重复出现且输入输出稳定时，AIAgent 可以建议把它固化为原子化操作、运行手册、工作流配置、策略或模板。
-- 执行过程必须持续记录 `agent_id`、`agentic_run_id`、`agentic_id`、`task_type`、`task_class`、`process_id`、`current_stage`、`agentic_next_action`、关键输入、关键输出和阻塞原因。
+- 执行过程必须持续记录 `agent_id`、`agentic_run_id`、`task_type`、`task_class`、`process_id`、`current_stage`、`agentic_next_action`、关键输入、关键输出和阻塞原因。
 - AI 处理阶段（task_intake / solution_classification / implementation）进入时必须在任务状态 `stage_timeline` 追加 `{stage_id, begin, end: null}`，准出时闭合对应 `end`；人工环节（waiting_takeover / pr_review / completed）不进入时间线。
 - 同一 AI 处理阶段在 `stage_timeline` 中出现达到重试门禁上限（默认 2 次）时，`advance_stage` 会阻断并返回 `stage_loop_requires_human`；AIAgent 必须停止自动推进，向研发工程师展示目标阶段、出现次数与时间线全貌，等待人工决策（确认继续 / 调整方案 / 修改流程），不得绕过门禁自行继续。
 - 重试只能在当前输入和前序表单仍有效时进行；如果任务范围、项目准入信息、审查结论或风险边界变化，必须按 `redo_from_stage` 重做受影响阶段。
 - 完成后必须回写变更摘要、测试结果、残留风险、完成证据和下一步。
-- 任务完成或交接结束后，必须清理任务上的 `agentic_id`，释放 AIAgent 绑定；异常停止、`assignee` 变更或代理冲突时不得自动清理。
+- 任务完成或交接结束后，必须写入并回读中文终止评论，关闭本地运行并保留任务审计记录；不写入或清理 Jira Agentic 自定义字段。
 - 面向研发工程师、流程负责人、审阅者或 Jira 参与者的自然语言交互必须使用中文。
 - 写入 Jira 的标题、描述、评论、工作日志、证据正文、阻塞说明和补卡说明必须使用中文。
 - Jira 字段名、状态名、`transition` 名称、`issue_key`、命令、配置字段、错误码、代码标识和日志关键字可以保留原始英文或缩写，但必须用中文说明结论、风险和需要人工处理的动作。
@@ -193,9 +193,9 @@ Jira Comment、Description 和 Worklog 都要求先初始化一致的本地任�
 
 `plan` 会返回可直接使用的 `authorization_user_confirmation_reference`、需要写入 Jira 人工确认评论的 `authorization_comment_marker`，以及 `authorization_jira_comment_reference_format`。允许的引用只有 `user-confirmation:<ISSUE-KEY>:<agentic-run-id>:<plan-id>`，或已回读且正文以独立完整行包含当前 marker 的 `jira-comment:<ISSUE-KEY>:<正整数评论ID>:<plan-id>`。Runtime 必须在本地决策记录和 Jira 副作用之前完成严格校验；空值、任意字符串、其它任务、旧运行、旧计划、无对应评论或 marker 不一致都必须阻断。
 
-Jira Description 保存确认后的稳定任务契约；Jira Comment 保存分析、计划、决策、阻塞和证据轨迹；Jira Custom Field 适配尚未实现，不能自动写入；Worklog 只记录真实投入时间和中文标题总结。`included-work-file` 必须逐项提供中文 `description` 与正整数 `seconds`，总和等于 `time-spent-seconds`；至少一个 `--excluded-waiting-category` 明确列出排除的等待类别。不得用 Worklog 承载计划或人工确认，也不得覆盖已有 Comment 改写历史。
+Jira Description 保存确认后的稳定任务契约；Jira Comment 保存接管、恢复、分析、计划、决策、阻塞、证据和终止轨迹；developer 不把 Agentic 运行信息映射到 Jira Custom Field；Worklog 只记录真实投入时间和中文标题总结。`included-work-file` 必须逐项提供中文 `description` 与正整数 `seconds`，总和等于 `time-spent-seconds`；至少一个 `--excluded-waiting-category` 明确列出排除的等待类别。不得用 Worklog 承载计划或人工确认，也不得覆盖已有 Comment 改写历史。
 
-`list_tasks`、`takeover_task`、`resume_takeover`、`release_agent`、PR / CI、分支对齐、反馈包、完成证据和 Custom Field 写入目前都是 `capability_gap`。目标契约可以继续描述验收边界，但 AI 不能构造旧命令或把人工操作表述为 Runtime 已执行。
+`list_tasks`、`takeover_task` 和 `resume_takeover` 已由能力目录声明为 `implemented`；`release_agent`、PR / CI、分支对齐、反馈包和完成证据聚合仍可能是 `capability_gap`，执行前必须逐项查询能力目录。developer 不提供 Agentic Custom Field 写入能力。
 
 AI 员工不应直接依赖 Jira 字段名、Jira 状态名或 Jira `transition` 名称做判断。Jira 字段名、状态名、`transition` 名称和 `issue_key` 可以按原始值引用；面向研发工程师的 Jira 文本和 AIAgent 自然语言交互必须使用中文。
 
@@ -205,8 +205,7 @@ AI 员工不应直接依赖 Jira 字段名、Jira 状态名或 Jira `transition`
 
 - 负责人不匹配。
 - Jira `assignee` 不是当前登录用户。
-- `agentic_id` 不为空且不等于当前 AIAgent 的 `agent_id`。
-- 执行过程中 `assignee` 或 `agentic_id` 发生变化。
+- 执行过程中 `assignee` 发生变化，或 Jira 状态、受管评论与本地运行事实冲突。
 - Jira 卡片未进入允许接管范围。
 - 无法判断任务分类，或任务分类无法映射到标准流程。
 - 卡片不满足项目准入标准、字段映射缺失或权限不足。
@@ -231,7 +230,6 @@ AI 员工每次任务接管必须能形成证据链：
 - `task_class`
 - `process_id`
 - `agent_id`
-- `agentic_id`
 - `current_stage`
 - `agentic_next_action`
 - 接管成功或失败记录
@@ -259,4 +257,4 @@ AI 员工不得把“代码已修改”视为“任务已完成”。任务完�
 
 当一个标准流程进入完成、阻塞或交接节点时，AI 员工必须把任务级审计记录写入项目 AI 工作空间的 `.agentic-ops/tasks/<ISSUE-KEY>/` 目录。Issue Key、run id、决策、幂等键和外部引用必须通过 Runtime 的安全标识校验；`agent.json`、profiles、connections、tasks、runs、audit、feedback、handoff、locks、任务目录、报告目录及 workspace-index 的现存祖先和叶子均不得是符号链接，不能用相对跳转或手工路径读写工作空间外。Jira 卡片回写任务级关键结论、状态和稳定引用；后续如果团队配置审计服务，再提交同一份脱敏摘要。本地 `feedback bundle` 和 `feedback report` 只服务诊断与后续分析，不能替代本地任务审计记录。
 
-当标准流程进入完成或交接终态，并且完成表单、审查结论和证据已经写入后，AI 员工必须通过受控操作清理 Jira 任务上的 `agentic_id`。清理失败时必须记录 `agent_release_failed`，说明清理前字段值、当前 `agent_id`、完成证据引用和需要研发工程师判断的动作。
+当标准流程进入完成或交接终态，并且完成表单、审查结论和证据已经写入后，AI 员工必须通过受控操作写入并回读中文终止评论，随后关闭本地运行。评论或本地收口失败时必须记录稳定失败码、完成证据引用和需要研发工程师判断的动作；不得用 Agentic Custom Field 充当锁或完成事实。

@@ -21,7 +21,6 @@ preconditions:
   - run_workspace_must_match
   - run_issue_must_match
   - current_user_must_match_assignee
-  - agentic_id_must_match_agent_id
   - target_repo_must_match_takeover_context
   - operation_stage_must_be_allowed
   - standard_process_stage_must_be_registered
@@ -34,8 +33,6 @@ output:
   agentic_run_id:
     type: string
   agent_id:
-    type: string
-  agentic_id:
     type: string
   task_class:
     type: string
@@ -75,8 +72,6 @@ failure:
     - jira_current_user_failed
     - issue_mismatch
     - assignee_changed
-    - agent_binding_lost
-    - agent_ownership_conflict
     - target_repo_missing
     - target_repo_changed
     - resume_stage_not_allowed

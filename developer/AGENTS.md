@@ -13,4 +13,6 @@
 
 调用任何标准操作前，AI 必须先查询能力目录。只有 `status=implemented` 且目录明确给出当前命令路径的能力可以调用；`status=capability_gap`、目录缺失、目录无效或仅存在 Operation Contract 时都必须停止自动化，按中文 `next_action` 处理。Operation Contract 表示目标行为边界，不单独证明 Runtime 已实现。`visibility=internal` 的 `task`、`report` 命令只允许由版本化 Skill 编排，不能向用户描述成任务接管、完成审计或 Jira 回写能力。
 
+研发工程师说“接管 <KEY>”时统一调用 `ao-work task takeover <KEY>`；Runtime 根据 Jira 状态和本地任务状态自动判断新接管、接纳存量任务或恢复已有运行。不是新接管时，Jira 中文接管评论必须明文提示“不是新接管”。developer 不把 Agentic 运行信息映射到 Jira Custom Field：Jira Comment 记录接管、恢复、进度、证据和终止轨迹，Status/Assignee 记录团队阶段与负责人，本地 task state 记录运行、恢复和幂等事实。
+
 工作面由本入口确定。AI 不得自行判断、推断或通过命令参数切换工作面。

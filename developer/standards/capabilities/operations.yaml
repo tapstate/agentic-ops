@@ -337,8 +337,8 @@ capabilities:
     status: capability_gap
     visibility: public
     commands: []
-    summary: Jira 任务 AI 绑定释放目标契约，尚未迁移到 Python Runtime。
-    next_action: 请勿假设 agentic_id 已清理；由研发工程师在 Jira 核对并人工处理后记录结果。
+    summary: 任务运行结束与审计收口目标契约，尚未迁移到 Python Runtime；developer 不依赖 Jira Agentic 自定义字段。
+    next_action: 请通过 Jira 中文结果评论和本地任务审计记录结束事实；不要写入或清理 Agentic 自定义字段。
 
   - id: report_write
     source: runtime
@@ -357,7 +357,7 @@ capabilities:
     visibility: public
     commands:
       - [task, resume]
-    summary: 恢复已接管的 Jira 任务执行上下文（只读，不写 Jira）：定位本地 takeover_started/blocked 记录（显式 --issue-key / --agentic-run-id，或最近可恢复记录），校验本地 run 存在、Jira 回读经办人/agentic_id 所有权与状态映射，输出执行上下文。
+    summary: 恢复已接管的 Jira 任务执行上下文（只读，不写 Jira）：定位本地 takeover_started/blocked 记录（显式 --issue-key / --agentic-run-id，或最近可恢复记录），校验本地 run、Jira 经办人与状态映射，输出执行上下文。
     next_action: 请在已接管任务中断后续工时使用 task resume 恢复；所有权不一致或阶段不允许时按失败码人工核对。
 
   - id: takeover_task
@@ -367,7 +367,7 @@ capabilities:
     visibility: public
     commands:
       - [task, takeover]
-    summary: Jira 任务接管和所有权绑定：不带 issue_key 时只读列出可接管候选（profile.task_query + 优先级排序，selection_required 供确认）；带 issue_key 时校验经办人/agentic_id 归属/状态映射，transition 到执行状态并写入 agentic_id 字段（字段 ID 从元数据探测），回读确认后写本地 takeover 记录。agent-id 缺省从安装身份读取。
+    summary: Jira 任务接管：不带 issue_key 时只读列出候选；带 issue_key 时校验经办人和状态映射，自动判断新接管、接纳存量或恢复，先写并回读结构化中文接管评论，再 transition 到执行状态并写本地 takeover 记录；不读写 Agentic 自定义字段。agent-id 缺省从安装身份读取。
     next_action: 无编号时先用候选列表确认目标任务，再带 issue_key 与授权引用重跑；授权引用必须与任务一致（user-confirmation:<KEY>:<plan_id>）。
 
   - id: task_start

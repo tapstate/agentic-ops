@@ -26,7 +26,6 @@ input:
     required: false
 preconditions:
   - current_user_must_match_owner_and_assignee
-  - agentic_id_must_be_empty_or_match_agent_id
   - agentic_run_id_must_match_issue_when_provided
   - logical_fields_must_map_to_jira_fields
   - logical_fields_must_be_explicitly_writable

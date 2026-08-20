@@ -31,7 +31,6 @@ input:
     required: false
 preconditions:
   - run_must_exist
-  - agentic_id_must_match_agent_id
   - git_workspace_must_be_inspectable
   - policy_must_define_git_and_github_gates
 output:
