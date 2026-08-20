@@ -20,33 +20,41 @@ _SAMPLE_REGISTRY = """\
 schema_version: 2
 workplane: developer
 stages:
-  - id: task_intake
-    name: 任务准入
-    description: 任务准入
-    admission:
-      - jira_issue_facts
-    exit:
-      next_stage: solution_classification
-  - id: solution_classification
-    name: 方案分级
-    description: 方案分级
-    admission:
-      - confirmed_intake_digest
-    exit:
-      next_stage: waiting_takeover
   - id: waiting_takeover
     name: 等待接管
     description: 等待接管
     admission:
       - assignee
     exit:
-      next_stage: implementation
+      next_stage: task_intake
       jira_transition: start_progress
+  - id: task_intake
+    name: 任务信息分析
+    description: 任务信息分析
+    admission:
+      - task_taken_over
+    exit:
+      next_stage: solution_classification
+  - id: solution_classification
+    name: 方案分级
+    description: 方案分级
+    admission:
+      - intake_digest
+    exit:
+      next_stage: design_review
+  - id: design_review
+    name: 设计审查
+    description: 设计审查
+    admission:
+      - proposed_solution
+    exit:
+      next_stage: implementation
   - id: implementation
     name: 实现与验证
     description: 实现与验证
     admission:
       - task_taken_over
+      - design_review_approved
     exit:
       next_stage: pr_review
     steps:
@@ -77,6 +85,7 @@ stages:
     name: 完成
     description: 完成
     admission:
+      - review_decision
       - agentic_completion_evidence
     exit:
       next_stage: null
@@ -165,7 +174,7 @@ class StageRuntimeTest(unittest.TestCase):
         registry = load_stage_registry(root)
         self.assertEqual(2, registry["schema_version"])
         self.assertEqual("developer", registry["workplane"])
-        self.assertEqual(6, len(registry["stages"]))
+        self.assertEqual(7, len(registry["stages"]))
 
     def test_load_registry_missing_blocks(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -207,7 +216,7 @@ class StageRuntimeTest(unittest.TestCase):
 
     def test_load_registry_schema_invalid_blocks(self) -> None:
         bad = _SAMPLE_REGISTRY.replace(
-            "    admission:\n      - jira_issue_facts\n", "", 1
+            "    admission:\n      - task_taken_over\n", "", 1
         )
         root = self._install_root(bad)
         with self.assertRaises(RuntimeErrorResult) as captured:
@@ -231,7 +240,7 @@ class StageRuntimeTest(unittest.TestCase):
             "waiting_takeover",
             {"start_progress": {"name": "In Progress", "id": "31"}},
         )
-        self.assertEqual("implementation", result["next_stage"])
+        self.assertEqual("task_intake", result["next_stage"])
         self.assertEqual("start_progress", result["jira_transition"])
         self.assertTrue(result["jira_mapping_valid"])
         self.assertEqual("31", result["mapping_detail"]["configured"]["id"])
@@ -311,7 +320,7 @@ class StageRuntimeTest(unittest.TestCase):
             available={"assignee": "u"},
         )
         self.assertTrue(result["admission_ok"])
-        self.assertEqual("implementation", result["next_stage"])
+        self.assertEqual("task_intake", result["next_stage"])
         self.assertEqual("start_progress", result["jira_transition"])
         self.assertTrue(result["jira_mapping_valid"])
         self.assertFalse(result["terminal"])
@@ -336,7 +345,7 @@ class StageRuntimeTest(unittest.TestCase):
             "implementation",
             {},
             current_step="code_writing",
-            available={"task_taken_over": True},
+            available={"task_taken_over": True, "design_review_approved": True},
         )
         self.assertEqual("test_writing", result["next_step"])
         self.assertIsNone(result["jira_transition"])
@@ -350,7 +359,7 @@ class StageRuntimeTest(unittest.TestCase):
             "implementation",
             {},
             current_step="verification",
-            available={"task_taken_over": True},
+            available={"task_taken_over": True, "design_review_approved": True},
         )
         self.assertEqual("pr_review", result["next_stage"])
         self.assertIsNone(result["jira_transition"])
@@ -362,7 +371,7 @@ class StageRuntimeTest(unittest.TestCase):
             registry,
             "completed",
             {},
-            available={"agentic_completion_evidence": "e"},
+            available={"review_decision": "approved", "agentic_completion_evidence": "e"},
         )
         self.assertIsNone(result["next_stage"])
         self.assertTrue(result["terminal"])
@@ -372,11 +381,10 @@ class StageRuntimeTest(unittest.TestCase):
 
         root = self._install_root()
         registry = load_stage_registry(root)
-        # implementation 已在序列中出现 2 次（默认上限），再次准出到 implementation 应阻断
+        # task_intake 已在序列中出现 2 次（默认上限），再次准出到 task_intake 应阻断
         sequence = [
             {"stage_id": "task_intake", "begin": "t1", "end": "t2"},
-            {"stage_id": "implementation", "begin": "t3", "end": "t4"},
-            {"stage_id": "implementation", "begin": "t5", "end": "t6"},
+            {"stage_id": "task_intake", "begin": "t3", "end": "t4"},
         ]
         with self.assertRaises(RuntimeErrorResult) as captured:
             advance_stage(
@@ -393,10 +401,9 @@ class StageRuntimeTest(unittest.TestCase):
 
         root = self._install_root()
         registry = load_stage_registry(root)
-        # implementation 只在序列中出现 1 次，准出进入第 2 次不阻断
+        # task_intake 只在序列中出现 1 次，准出进入第 2 次不阻断
         sequence = [
             {"stage_id": "task_intake", "begin": "t1", "end": "t2"},
-            {"stage_id": "implementation", "begin": "t3", "end": "t4"},
         ]
         result = advance_stage(
             registry,
@@ -405,7 +412,7 @@ class StageRuntimeTest(unittest.TestCase):
             available={"assignee": "u"},
             stage_timeline=sequence,
         )
-        self.assertEqual("implementation", result["next_stage"])
+        self.assertEqual("task_intake", result["next_stage"])
         self.assertFalse(result["loop_blocked"])
         self.assertEqual(1, result["next_stage_enter_count"])
 
@@ -415,9 +422,9 @@ class StageRuntimeTest(unittest.TestCase):
         root = self._install_root()
         registry = load_stage_registry(root)
         sequence = [
-            {"stage_id": "implementation", "begin": "t1", "end": "t2"},
-            {"stage_id": "implementation", "begin": "t3", "end": "t4"},
-            {"stage_id": "implementation", "begin": "t5", "end": "t6"},
+            {"stage_id": "task_intake", "begin": "t1", "end": "t2"},
+            {"stage_id": "task_intake", "begin": "t3", "end": "t4"},
+            {"stage_id": "task_intake", "begin": "t5", "end": "t6"},
         ]
         # 上限 5：出现 3 次仍允许
         result = advance_stage(
@@ -428,7 +435,7 @@ class StageRuntimeTest(unittest.TestCase):
             stage_timeline=sequence,
             loop_limit=5,
         )
-        self.assertEqual("implementation", result["next_stage"])
+        self.assertEqual("task_intake", result["next_stage"])
         # 上限 2：出现 3 次阻断
         with self.assertRaises(RuntimeErrorResult) as captured:
             advance_stage(

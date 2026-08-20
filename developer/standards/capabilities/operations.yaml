@@ -367,18 +367,18 @@ capabilities:
     visibility: public
     commands:
       - [task, takeover]
-    summary: Jira 任务接管：不带 issue_key 时只读列出候选；带 issue_key 时校验经办人和状态映射，自动判断新接管、接纳存量或恢复，先写并回读结构化中文接管评论，再 transition 到执行状态并写本地 takeover 记录；不读写 Agentic 自定义字段。agent-id 缺省从安装身份读取。
-    next_action: 无编号时先用候选列表确认目标任务，再带 issue_key 与授权引用重跑；授权引用必须与任务一致（user-confirmation:<KEY>:<plan_id>）。
+    summary: Jira 任务接管 Runtime 原子能力：不带 issue_key 时只读列出候选；带 issue_key 时校验经办人和状态映射，自动判断新接管、接纳存量或恢复，先写并回读结构化中文接管评论，再 transition 到执行状态并写本地 takeover 记录；不读写 Agentic 自定义字段。当前底层命令仍为 task takeover，顶层公开入口由 AO-48 收敛。
+    next_action: 无编号时展示候选并由研发工程师选择；带编号时把用户明确的“接管 <KEY>”指令作为常规操作授权，内部绑定授权引用后执行。非新接管必须明文提示并留痕，不得再要求用户确认内部摘要或授权标识。
 
   - id: task_start
     source: runtime
     contract:
     status: implemented
-    visibility: public
+    visibility: internal
     commands:
       - [task, start]
-    summary: 使用当前工作空间、Project Profile 和 Jira 卡片自动创建或恢复本地任务运行，只把计划、范围、验证和权限留给人工审查。
-    next_action: 请只传 Jira key；先分析缺项并按有证据来源自动补全，用户确认准入摘要后再形成和分级方案。该操作不会写 Jira、提交代码、推送或创建 PR。
+    summary: 兼容旧运行的内部来源上下文准备原子能力；用户任务入口固定为 takeover，不应直接选择 task start。
+    next_action: 仅在 Runtime 兼容恢复明确要求时使用；正常流程由 takeover 直接建立来源快照并进入信息分析。
 
   - id: task_intake_assess
     source: contract
@@ -387,9 +387,8 @@ capabilities:
     visibility: public
     commands:
       - [task, intake, assess]
-      - [task, intake, confirm]
-    summary: 基于 task start 的 Jira、Profile、工作空间和 Runtime 快照，校验缺项、证据化补全、源码基线、稳定摘要及用户确认绑定。
-    next_action: 先执行 assess 并展示完整准入摘要；必要信息齐全后才能用当前 digest 确认，确认前不得形成最终方案或修改代码。
+    summary: 接管后基于 Jira、Profile、工作空间和 Runtime 快照校验缺项、证据化补全、源码基线和稳定摘要；普通准入分析不设置用户确认门禁。
+    next_action: 信息完整时直接形成并分级方案；缺项按允许次数补充证据，事实冲突或重试耗尽进入风险决策。
 
   - id: solution_gate
     source: contract
@@ -398,9 +397,8 @@ capabilities:
     visibility: public
     commands:
       - [task, solution, classify]
-      - [task, solution, confirm]
-    summary: 将方案严格绑定已确认准入摘要和源码 HEAD，根据固定风险标志与证据确定 L1 至 L4，并仅允许 L2 使用摘要绑定确认。
-    next_action: L1 进入正式接管门禁；L2 确认当前方案摘要；L3 先修改设计并重新准入；L4 停止并解决事实、权限或能力缺口。
+    summary: 将方案严格绑定当前准入摘要和源码 HEAD，根据固定风险标志与证据确定 L1 至 L4；不提供通用方案摘要确认门禁。
+    next_action: L1 进入设计审查；L2 进入逐项风险决策；L3 由 AI 修订设计并重新评估；L4 停止并解决事实、权限或能力缺口。
 
   - id: task_transfer
     source: runtime

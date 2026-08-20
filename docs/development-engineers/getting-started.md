@@ -74,23 +74,22 @@ ao-work --workspace-root ~/agentic-ops-tapdata workspace init
 
 完整 task-to-PR manifest 是后台机器审计合同，不是用户配置表。普通任务只需给出 Jira key；AI 读取上述事实后汇总待审查计划，用户只确认计划/范围/验证/权限，以及 PR 等高风险动作。确定性字段不应逐项询问。
 
-授权完成后启动任务只需：
+授权完成后，用户只需表达“接管任务”；当前 Runtime 原子入口为：
 
 ```sh
-ao-work task start TAP-12289
+ao-work task takeover TAP-12289 --authorization-reference <INTERNAL_REFERENCE>
 ```
 
-Runtime 会自动获取 Jira Issue ID、Project、经办人、状态、标题、描述和任务类型，复用工作空间 Profile、账户、仓库与执行身份，并生成或恢复 `agentic_run_id`。该命令不写 Jira，也不代表正式接管；它把尚需审查的计划、范围、分支、验证和权限作为简短清单交给 AI 与用户。
+`INTERNAL_REFERENCE` 由 AIAgent 根据用户明确的接管指令在内部绑定，用户不查看或确认。Runtime 自动判断新接管、接纳存量或恢复，完成中文 Comment、必要的 Status transition 和本地状态回读；非新接管明文留痕。顶层 `ao-work takeover` 由 AO-48 收敛。
 
 AI 随后把分析写入工作空间普通 JSON，并依次调用：
 
 ```sh
 ao-work task intake assess --issue-key TAP-12289 --agentic-run-id <RUN> --input-file <准入分析.json>
-ao-work task intake confirm --issue-key TAP-12289 --agentic-run-id <RUN> --confirm-intake-digest <DIGEST> --confirmed-by <NAME> --authorization-reference user-confirmation:TAP-12289:<RUN>:<DIGEST>
 ao-work task solution classify --issue-key TAP-12289 --agentic-run-id <RUN> --input-file <方案.json>
 ```
 
-Runtime 会自动合并 Jira、Project Profile、工作空间与 run 快照，核对源码证据和 HEAD，并给出完整准入摘要、固定 L1–L4 分级和唯一下一动作。用户确认的是完整内容，不是孤立 digest。只有 L2 需要再调用 `task solution confirm`；L1 直接进入下一门禁，L3 先修改设计并重新分析，L4 停止。必要信息未补齐时，同一来源周期只允许改变输入后重试一次。
+Runtime 会自动合并 Jira、Project Profile、工作空间与 run 快照，核对源码证据和 HEAD，并给出完整准入事实、固定 L1–L4 分级和唯一下一动作。信息分析与方案分级自动推进；L1 进入设计审查，L2 进入逐项风险决策，L3 由 AI 修订设计并重新分析，L4 停止。不得要求用户确认内部 digest 或通用准入摘要。必要信息未补齐时，同一来源周期只允许改变输入后重试一次。
 
 初始化最后写入 `.agentic-ops/agent.json`、当前工作空间 `AGENTS.md` 和 `.agents/skills/`。该 AI 入口固定进入 developer 工作面；Codex 从标准仓库级 `.agents/skills/` 发现受管 developer Skill，规则正文直接写入 `AGENTS.md`，标准资产由 `ao-work` 从受信安装根解析。业务仓库不需要也不应创建不存在的 `developer/...` 相对路径。
 
@@ -130,7 +129,7 @@ ao-work capability list
 提交 TAP-123 本次执行的任务审计记录。
 ```
 
-这些自然语言需求不代表对应自动化都已实现。AI 必须先查询能力目录；当前任务列表、正式接管与恢复、任务释放、PR / CI、分支对齐、完成审计和 Custom Field 写入等仍可能返回 `capability_gap`，应由研发工程师按目录指引接管，不能用内部 `task init` 冒充 Jira 接管。
+这些自然语言需求不代表对应自动化都已实现。AI 必须先查询能力目录；任务释放、部分 PR / CI 协作、分支对齐和完成审计等仍可能返回 `capability_gap`，应由研发工程师按目录指引处理。正式接管必须使用统一 takeover，不能用内部 `task init` 或 `task start` 冒充；developer 不提供 Agentic Custom Field 写入。
 
 ## 6. 问题反馈与快速改进
 

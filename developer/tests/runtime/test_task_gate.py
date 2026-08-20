@@ -120,41 +120,25 @@ class TaskGateTest(unittest.TestCase):
         )
         (self.workspace_root / "inputs").mkdir()
 
-    def test_intake_assess_and_confirm_bind_full_current_summary(self) -> None:
+    def test_intake_assess_continues_without_separate_confirmation(self) -> None:
         path = self._write_intake("intake.json")
         assessed = self.service.assess_intake(
             issue_key=ISSUE_KEY,
             agentic_run_id=RUN_ID,
             input_file=str(path.relative_to(self.workspace_root)),
         )
-        self.assertTrue(assessed["ready_for_confirmation"])
-        self.assertEqual("confirm_task_intake", assessed["agentic_next_action"]["action"])
+        self.assertTrue(assessed["ready_for_solution"])
+        self.assertEqual(
+            "prepare_and_classify_solution",
+            assessed["agentic_next_action"]["action"],
+        )
+        self.assertFalse(assessed["agentic_next_action"]["requires_authorization"])
         self.assertEqual(
             {"owner", "target_repo", "target_branch"},
             {item["field"] for item in assessed["intake"]["auto_filled_values"]},
         )
         self.assertTrue(assessed["intake"]["known_facts"])
-        digest = assessed["intake_digest"]
-        reference = f"user-confirmation:{ISSUE_KEY}:{RUN_ID}:{digest}"
-        confirmed = self.service.confirm_intake(
-            issue_key=ISSUE_KEY,
-            agentic_run_id=RUN_ID,
-            intake_digest=digest,
-            confirmed_by="harsen",
-            authorization_reference=reference,
-        )
-        self.assertEqual(digest, confirmed["intake_confirmation"]["intake_digest"])
-        self.assertEqual(
-            "session_user_confirmation_attestation",
-            confirmed["intake_confirmation"]["evidence_basis"],
-        )
-        self.assertFalse(
-            confirmed["intake_confirmation"]["independent_identity_readback"]
-        )
-        self.assertEqual(
-            "prepare_and_classify_solution",
-            confirmed["agentic_next_action"]["action"],
-        )
+        self.assertTrue(assessed["intake_digest"])
 
     def test_intake_rejects_forged_trusted_value_and_changed_source_evidence(self) -> None:
         forged = self._intake_payload()
@@ -202,7 +186,7 @@ class TaskGateTest(unittest.TestCase):
             agentic_run_id=RUN_ID,
             input_file=str(first_path.relative_to(self.workspace_root)),
         )
-        self.assertFalse(first["ready_for_confirmation"])
+        self.assertFalse(first["ready_for_solution"])
         self.assertTrue(first["agentic_next_action"]["retry_gate"]["allowed"])
         self.assertEqual(0, first["intake"]["retry_count"])
 
@@ -233,8 +217,8 @@ class TaskGateTest(unittest.TestCase):
             )
         self.assertEqual("task_intake_retry_exhausted", captured.exception.code)
 
-    def test_solution_levels_are_computed_and_only_l2_can_be_confirmed(self) -> None:
-        intake_digest = self._confirmed_intake()
+    def test_solution_levels_route_only_to_design_or_risk_gates(self) -> None:
+        intake_digest = self._assessed_intake()
         cases = {
             "L1": None,
             "L2": "external_side_effect",
@@ -251,43 +235,38 @@ class TaskGateTest(unittest.TestCase):
                     input_file=str(path.relative_to(self.workspace_root)),
                 )
                 self.assertEqual(level, result["solution_level"])
+                journal_path = (
+                    self.workspace_root
+                    / ".agentic-ops"
+                    / "tasks"
+                    / ISSUE_KEY
+                    / "journal.ndjson"
+                )
+                last_event = json.loads(
+                    journal_path.read_text(encoding="utf-8").splitlines()[-1]
+                )
+                self.assertEqual(
+                    "blocked" if level == "L4" else "completed",
+                    last_event["status"],
+                )
                 results[level] = result
         self.assertEqual(
-            "perform_formal_task_takeover",
+            "review_task_design",
             results["L1"]["agentic_next_action"]["action"],
         )
         self.assertEqual(
-            "confirm_l2_solution",
+            "decide_solution_risk",
             results["L2"]["agentic_next_action"]["action"],
         )
-        self.assertTrue(results["L3"]["agentic_next_action"]["stop_workflow"])
+        self.assertEqual(
+            "revise_design_and_reassess",
+            results["L3"]["agentic_next_action"]["action"],
+        )
+        self.assertFalse(results["L3"]["agentic_next_action"]["stop_workflow"])
         self.assertTrue(results["L4"]["agentic_next_action"]["stop_workflow"])
 
-        l2_path = self._write_solution(
-            "solution-L2-final.json", intake_digest, "external_side_effect"
-        )
-        l2 = self.service.classify_solution(
-            issue_key=ISSUE_KEY,
-            agentic_run_id=RUN_ID,
-            input_file=str(l2_path.relative_to(self.workspace_root)),
-        )
-        digest = str(l2["solution_digest"])
-        confirmed = self.service.confirm_solution(
-            issue_key=ISSUE_KEY,
-            agentic_run_id=RUN_ID,
-            solution_digest=digest,
-            confirmed_by="harsen",
-            authorization_reference=(
-                f"user-confirmation:{ISSUE_KEY}:{RUN_ID}:{digest}"
-            ),
-        )
-        self.assertEqual(
-            "perform_formal_task_takeover",
-            confirmed["agentic_next_action"]["action"],
-        )
-
-    def test_new_source_head_invalidates_confirmed_intake(self) -> None:
-        intake_digest = self._confirmed_intake()
+    def test_new_source_head_invalidates_current_intake(self) -> None:
+        intake_digest = self._assessed_intake()
         (self.source_root / "README.md").write_text(
             "# 任务证据\n\n目标分支发生变化。\n", encoding="utf-8"
         )
@@ -302,7 +281,7 @@ class TaskGateTest(unittest.TestCase):
             )
         self.assertEqual("task_intake_source_changed", captured.exception.code)
 
-    def _confirmed_intake(self) -> str:
+    def _assessed_intake(self) -> str:
         path = self._write_intake("confirmed-intake.json")
         assessed = self.service.assess_intake(
             issue_key=ISSUE_KEY,
@@ -310,15 +289,6 @@ class TaskGateTest(unittest.TestCase):
             input_file=str(path.relative_to(self.workspace_root)),
         )
         digest = str(assessed["intake_digest"])
-        self.service.confirm_intake(
-            issue_key=ISSUE_KEY,
-            agentic_run_id=RUN_ID,
-            intake_digest=digest,
-            confirmed_by="harsen",
-            authorization_reference=(
-                f"user-confirmation:{ISSUE_KEY}:{RUN_ID}:{digest}"
-            ),
-        )
         return digest
 
     def _write_intake(self, name: str) -> Path:
@@ -382,7 +352,7 @@ class TaskGateTest(unittest.TestCase):
             name,
             {
                 "schema_version": 1,
-                "confirmed_intake_digest": intake_digest,
+                "intake_digest": intake_digest,
                 "proposed_solution": "在 Runtime 中增加确定性准入与方案分级门禁。",
                 "scope": {
                     "included": ["src/task-gate.py"],

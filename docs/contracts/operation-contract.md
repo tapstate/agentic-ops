@@ -8,7 +8,7 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 
 操作契约还必须说明每次操作如何读取或更新 Task Form Standard 中的标准字段。AIAgent 后续判断 `current_stage`、`agentic_next_action`、重试、重做和人工审查时，应以操作输出、表单数据和事件记录为准，而不是以聊天上下文为准。
 
-操作契约必须引用 Standard Process Registry 中的任务分类和流程阶段。AIAgent 执行任务前必须先得到 `task_class` 和 `process_id`，再进入对应流程阶段。
+操作契约必须引用 Standard Process Registry 中的任务分类和流程阶段。统一接管操作是具体流程选择前的公共操作，只验证项目、负责人、状态映射、Agent 身份和恢复事实；接管后必须补齐 `task_class` 和 `process_id`，未补齐前不得进入实现。
 
 ## 2. 契约原则
 
@@ -43,8 +43,8 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 | `add_task_comment` | 向 Jira 追加分析、计划、决策、证据或阻塞评论。 |
 | `update_task_description_sections` | 安全更新 Jira Description 的指定章节并保留其它内容。 |
 | `update_task_form` | 按项目 profile 的逻辑字段映射更新 Jira 表单。 |
-| `takeover_task` | 接管一个新的 Jira 卡片。 |
-| `resume_takeover` | 恢复已有 `agentic_run_id` 的接管任务。 |
+| `takeover_task` | 自动判断新接管、接纳存量或恢复，并写入可见接管轨迹。 |
+| `resume_takeover` | 只读诊断已有 `agentic_run_id`；正式恢复留痕回到统一接管操作。 |
 | `read_task_context` | 读取任务上下文摘要。 |
 | `write_evidence` | 写入任务阶段证据、阻塞说明和完成审计主体。 |
 | `write_pr_evidence` | 读取 GitHub PR、CI 和 Review 事实，并写入任务关联的拉取请求证据。 |
@@ -72,32 +72,37 @@ AgenticOps 安装、更新和回滚属于 `developer/bootstrap/` 的 Shell Boots
 
 ```yaml
 operation: takeover_task
-version: 1
-purpose: 研发工程师授权 AIAgent 接管一个已进入迭代的任务。
+version: 2
+purpose: 研发工程师明确要求接管后，由 Runtime 自动完成新接管、接纳存量或恢复。
 
 task_type: task_takeover
 
 allowed_stages:
   - waiting_takeover
-  - takeover_gate
+  - takeover_started
+  - blocked
 
 input:
   issue_key:
     type: string
-    required: true
+    required: false
   workspace:
     type: string
     required: true
 
 preconditions:
-  - current_user_must_match_owner
-  - task_class_must_be_mapped_to_standard_process
   - issue_must_be_in_allowed_project
-  - jira_status_must_map_to_entry_stage
+  - current_user_must_match_assignee
+  - jira_status_and_transition_must_be_strictly_mapped
+  - workspace_agent_identity_must_be_available
+  - local_run_and_managed_comment_must_not_conflict
 
 output:
   agentic_run_id:
     type: string
+  takeover_status:
+    enum:
+      - completed
   takeover_kind:
     enum:
       - new_takeover
@@ -105,18 +110,13 @@ output:
       - resume_takeover
   takeover_comment_id:
     type: string
+  human_notice:
+    type: string
   current_stage:
     enum:
       - takeover_started
-      - blocked
-      - waiting_owner_confirmation
-  target_repo:
-    type: string
   agentic_next_action:
-    enum:
-      - proceed
-      - ask_owner
-      - blocked
+    type: object
   retry_policy:
     type: object
     required: false
@@ -128,12 +128,11 @@ failure:
   code:
     enum:
       - owner_mismatch
-      - assignee_mismatch
+      - assignee_changed
+      - external_task_state_conflict
       - jira_takeover_comment_readback_mismatch
-      - task_class_mapping_gap
-      - standard_process_mapping_gap
-      - unknown_jira_status
-      - invalid_takeover_stage
+      - jira_status_mapping_missing
+      - jira_transition_mapping_gap
       - missing_permission
       - workflow_transition_not_allowed
   message:
@@ -150,6 +149,7 @@ side_effects:
 
 human_gate:
   required: false
+  authorization_basis: 用户明确表达“接管 <KEY>”即授权事实明确的常规接管；冲突和不确定结果进入风险决策。
 ```
 
 ## 5. 错误模型

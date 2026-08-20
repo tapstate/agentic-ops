@@ -1,6 +1,6 @@
 # DE-005 恢复接管任务
 
-> **现役故事合同。** `resume_takeover` 已由只读命令 `ao-work task resume` 实现。用户说“接管 <KEY>”时不要求先选择本能力；`task takeover` 会自动判断并为恢复行为明文留痕。
+> **现役故事合同。** `resume_takeover` 已由只读命令 `ao-work task resume` 实现。用户说“接管 <KEY>”时不要求先选择本能力；统一 takeover 操作会自动判断并为恢复行为明文留痕。当前 Runtime 原子路径为 `task takeover`，顶层公开入口由 AO-48 收敛。
 
 作为研发工程师，
 我希望能恢复一个已接管但未完成的任务，
@@ -31,8 +31,8 @@ ao-work task resume --issue-key TAP-123
 3. CLI 读取当前 Jira 卡片和当前用户，复核 `Assignee`、状态映射和目标仓库。
 4. CLI 使用操作契约校验操作阶段，并把 Jira 状态映射为 Standard Process Registry 阶段进行校验。
 5. CLI 返回原任务阶段、标准流程阶段和下一步动作，不推进业务阶段。
-6. AIAgent 调用 `inspect-workspace` 检查当前本地代码状态，再向研发工程师说明恢复点。
-7. AIAgent 从返回的恢复点继续执行，不创建新的接管记录。
+6. AIAgent 说明恢复点并连续执行信息分析；只有事实冲突进入风险决策。
+7. 正式恢复留痕调用统一 takeover 操作，复用原 run，不创建新的接管记录。
 
 ### 输出
 

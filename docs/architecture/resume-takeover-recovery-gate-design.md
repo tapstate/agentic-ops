@@ -1,8 +1,8 @@
 # `resume-takeover` 完整恢复门禁设计
 
-> **现役设计：** `resume_takeover` 已由只读入口 `ao-work task resume` 实现。正式“接管 <KEY>”统一调用 `ao-work task takeover <KEY>`，由 Runtime 自动识别恢复场景并写入明文接管 Comment。
+> **现役设计：** `resume_takeover` 已由只读入口 `ao-work task resume` 实现。正式“接管 <KEY>”使用统一 takeover 操作，由 Runtime 自动识别恢复场景并写入明文接管 Comment；当前 Runtime 原子路径为 `ao-work task takeover <KEY>`，顶层公开入口由 AO-48 收敛。
 
-本文定义 `resume_takeover` 如何从已有 `agentic_run_id` 恢复可信任务上下文，重新校验 Jira 负责人、目标仓库和标准流程阶段，并在恢复阻塞时形成受控的 Jira 反馈闭环。该命令只执行读取和本地诊断；需要正式恢复留痕时调用统一 `task takeover`，其它 Jira 评论仍按 `jira_comment` 的 `plan -> apply -> readback` 协议执行。
+本文定义 `resume_takeover` 如何从已有 `agentic_run_id` 恢复可信任务上下文，重新校验 Jira 负责人、目标仓库和标准流程阶段，并在恢复阻塞时形成受控的 Jira 反馈闭环。该命令只执行读取和本地诊断；需要正式恢复留痕时调用统一 takeover 操作，复用原 run 并在人可见输出和 Comment 中写“不是新接管”。其它 Jira 评论仍按 `jira_comment` 的 `plan -> apply -> readback` 协议执行。
 
 本设计只完善恢复门禁，不实现通用工作流引擎，不让恢复操作直接执行 Jira 写入，也不改变 Git、GitHub、拉取请求、合并或发布边界。
 

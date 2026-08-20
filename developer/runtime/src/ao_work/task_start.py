@@ -83,6 +83,147 @@ def execute_task_start(
         agentic_run_id = str(existing["agentic_run_id"])
         task_state_created = False
 
+    source_context = record_current_task_source_context(
+        workspace,
+        store,
+        context=context,
+        account=account,
+        issue=issue,
+        agentic_run_id=agentic_run_id,
+        mapped_status=mapped_status,
+    )
+    issue_payload = source_context["issue"]
+    workspace_defaults = source_context["workspace_defaults"]
+    agent_config = source_context["agent_config"]
+    task_worktrees: dict[str, Any] | None = None
+    configured_pool_root = resolve_source_pool_root(install_root)
+    source_root_value = str(agent_config.get("source_root") or "")
+    if configured_pool_root is not None and source_root_value:
+        try:
+            pool_resolved = Path(source_root_value).expanduser().resolve()
+        except OSError:
+            pool_resolved = None
+        if pool_resolved == configured_pool_root:
+            sections = _description_sections(issue.description)
+            plan = plan_task_worktrees(
+                pool_root=configured_pool_root,
+                profile=context.profile,
+                issue_key=issue.key,
+                description_sections=sections,
+            )
+            prepared = prepare_task_worktrees(
+                plan,
+                execution_identity=agent_config.get("execution_identity"),
+            )
+            task_worktrees = {
+                "issue_key": prepared.issue_key,
+                "from_branch": prepared.from_branch,
+                "pool_root": str(prepared.pool_root),
+                "adopted": prepared.adopted,
+                "created": prepared.created,
+                "entries": [
+                    {
+                        "repository": entry.repository,
+                        "worktree_dir": str(entry.worktree_dir),
+                        "branch": entry.branch,
+                        "created": entry.created,
+                    }
+                    for entry in prepared.entries
+                ],
+            }
+    intake_source = source_context["intake_source"]
+    return {
+        "issue": issue_payload,
+        "workspace_defaults": workspace_defaults,
+        "agentic_run_id": agentic_run_id,
+        "task_state_created": task_state_created,
+        "intake_source": intake_source,
+        "task_worktrees": task_worktrees,
+        "configuration_sources": {
+            "workspace": ["agent_id", "project_profile", "Jira 账户", "源码仓库", "执行身份"],
+            "project_profile": ["Jira 站点", "Project", "状态/字段映射", "默认仓库"],
+            "jira_issue": ["Issue ID", "经办人", "状态", "标题", "描述", "任务类型"],
+            "runtime": ["agentic_run_id", "issue_content_sha256"],
+        },
+        "review_required": [
+            "设计审查中的实施方案、范围、任务分支和验证方式",
+            "逐项风险决策与本次允许的外部动作",
+            "代码审查中的 commit 或 PR 当前 Head",
+        ],
+        "intake_gate": {
+            "stage": "information_analysis",
+            "required_sequence": [
+                "analyze_jira_and_project_context",
+                "identify_missing_information",
+                "auto_fill_from_verified_sources",
+                "prepare_and_classify_solution",
+            ],
+            "auto_fill_source_priority": [
+                "jira_issue",
+                "project_profile",
+                "business_source_code",
+                "runtime_readback",
+            ],
+            "auto_fill_requires_evidence": True,
+            "unresolved_required_information_blocks": True,
+            "user_confirmation_required_before_solution": False,
+        },
+        "solution_gate": {
+            "levels": {
+                "L1": {
+                    "action": "review_task_design",
+                    "meaning": "信息完整且没有额外风险标志，进入设计审查",
+                },
+                "L2": {
+                    "action": "decide_solution_risk",
+                    "meaning": "方案包含用户选择、外部副作用或非平凡风险，逐项决策",
+                },
+                "L3": {
+                    "action": "revise_design_and_reassess",
+                    "meaning": "触及架构、公共合同、安全边界、数据迁移或已确认设计，需要先改设计",
+                },
+                "L4": {
+                    "action": "stop_and_escalate",
+                    "meaning": "事实冲突、必要信息无法补齐、权限或能力不足，当前无法推进",
+                },
+            },
+            "classification_requires_evidence": True,
+            "classification_must_be_recomputed_after_change": True,
+        },
+        "formal_takeover_verified": False,
+        "task_ownership": {
+            "task_owner": agent_config.get("agent_id"),
+            "continuity": "same_owner_until_pr_review",
+            "transfer_capability": "capability_gap",
+            "transfer_decision_authority": "human_only",
+        },
+        "agentic_next_action": {
+            "executor": "ai",
+            "action": "assess_task_intake",
+            "required_inputs": [
+                "issue_key",
+                "agentic_run_id",
+                "intake_input_file",
+            ],
+            "allowed_operations": ["task_intake_assess"],
+            "requires_authorization": False,
+            "stop_workflow": False,
+            "ownership_effect": "none",
+            "reason": "由 Runtime 校验缺项和证据化补全；事实完整后自动形成方案并进入设计审查或风险决策",
+        },
+    }
+
+
+def record_current_task_source_context(
+    workspace: Workspace,
+    store: TaskStore,
+    *,
+    context: Any,
+    account: dict[str, Any],
+    issue: Any,
+    agentic_run_id: str,
+    mapped_status: str,
+) -> dict[str, Any]:
     description_text = plain_text(issue.description).strip()
     issue_content_sha256 = hashlib.sha256(
         json.dumps(
@@ -125,43 +266,6 @@ def execute_task_start(
         "source_root": agent_config.get("source_root"),
         "execution_identity": agent_config.get("execution_identity"),
     }
-    profile_snapshot = _profile_snapshot(context.profile, issue)
-    task_worktrees: dict[str, Any] | None = None
-    configured_pool_root = resolve_source_pool_root(install_root)
-    source_root_value = str(agent_config.get("source_root") or "")
-    if configured_pool_root is not None and source_root_value:
-        try:
-            pool_resolved = Path(source_root_value).expanduser().resolve()
-        except OSError:
-            pool_resolved = None
-        if pool_resolved == configured_pool_root:
-            sections = _description_sections(issue.description)
-            plan = plan_task_worktrees(
-                pool_root=configured_pool_root,
-                profile=context.profile,
-                issue_key=issue.key,
-                description_sections=sections,
-            )
-            prepared = prepare_task_worktrees(
-                plan,
-                execution_identity=agent_config.get("execution_identity"),
-            )
-            task_worktrees = {
-                "issue_key": prepared.issue_key,
-                "from_branch": prepared.from_branch,
-                "pool_root": str(prepared.pool_root),
-                "adopted": prepared.adopted,
-                "created": prepared.created,
-                "entries": [
-                    {
-                        "repository": entry.repository,
-                        "worktree_dir": str(entry.worktree_dir),
-                        "branch": entry.branch,
-                        "created": entry.created,
-                    }
-                    for entry in prepared.entries
-                ],
-            }
     intake_source = record_task_start_context(
         workspace,
         store,
@@ -169,90 +273,13 @@ def execute_task_start(
         agentic_run_id=agentic_run_id,
         issue=issue_payload,
         workspace_defaults=workspace_defaults,
-        project_profile=profile_snapshot,
+        project_profile=_profile_snapshot(context.profile, issue),
     )
     return {
         "issue": issue_payload,
         "workspace_defaults": workspace_defaults,
-        "agentic_run_id": agentic_run_id,
-        "task_state_created": task_state_created,
+        "agent_config": agent_config,
         "intake_source": intake_source,
-        "task_worktrees": task_worktrees,
-        "configuration_sources": {
-            "workspace": ["agent_id", "project_profile", "Jira 账户", "源码仓库", "执行身份"],
-            "project_profile": ["Jira 站点", "Project", "状态/字段映射", "默认仓库"],
-            "jira_issue": ["Issue ID", "经办人", "状态", "标题", "描述", "任务类型"],
-            "runtime": ["agentic_run_id", "issue_content_sha256"],
-        },
-        "review_required": [
-            "信息分析、自动补全来源与仍未解决的缺项",
-            "AI 提议的实施计划与非范围",
-            "任务分支与目标分支",
-            "验证命令与超时",
-            "本次 Jira、Git、GitHub 外部动作权限",
-            "与批准计划摘要绑定的任务级授权",
-        ],
-        "intake_gate": {
-            "stage": "information_analysis",
-            "required_sequence": [
-                "analyze_jira_and_project_context",
-                "identify_missing_information",
-                "auto_fill_from_verified_sources",
-                "present_filled_intake_for_user_confirmation",
-            ],
-            "auto_fill_source_priority": [
-                "jira_issue",
-                "project_profile",
-                "business_source_code",
-                "runtime_readback",
-            ],
-            "auto_fill_requires_evidence": True,
-            "unresolved_required_information_blocks": True,
-            "user_confirmation_required_before_solution": True,
-        },
-        "solution_gate": {
-            "levels": {
-                "L1": {
-                    "action": "start_implementation",
-                    "meaning": "信息完整、范围明确、沿用既有设计且风险在已授权边界内",
-                },
-                "L2": {
-                    "action": "request_confirmation",
-                    "meaning": "方案可执行，但包含需要用户选择、外部副作用或非平凡风险",
-                },
-                "L3": {
-                    "action": "revise_design_and_reassess",
-                    "meaning": "触及架构、公共合同、安全边界、数据迁移或已确认设计，需要先改设计",
-                },
-                "L4": {
-                    "action": "stop_and_escalate",
-                    "meaning": "事实冲突、必要信息无法补齐、权限或能力不足，当前无法推进",
-                },
-            },
-            "classification_requires_evidence": True,
-            "classification_must_be_recomputed_after_change": True,
-        },
-        "formal_takeover_verified": False,
-        "task_ownership": {
-            "task_owner": agent_config.get("agent_id"),
-            "continuity": "same_owner_until_pr_review",
-            "transfer_capability": "capability_gap",
-            "transfer_decision_authority": "human_only",
-        },
-        "agentic_next_action": {
-            "executor": "ai",
-            "action": "assess_task_intake",
-            "required_inputs": [
-                "issue_key",
-                "agentic_run_id",
-                "intake_input_file",
-            ],
-            "allowed_operations": ["task_intake_assess"],
-            "requires_authorization": False,
-            "stop_workflow": False,
-            "ownership_effect": "none",
-            "reason": "先由 Runtime 校验缺项、证据化补全和摘要 digest；确认完整准入摘要后才能形成方案",
-        },
     }
 
 

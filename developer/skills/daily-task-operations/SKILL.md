@@ -7,7 +7,7 @@ metadata:
 
 # 研发日常任务操作
 
-本 Skill 只在业务项目 AI 工作空间的 `developer` 工作面使用。它负责研发工程师的日常任务操作：查看名下任务、查阅任务信息、接管任务（含无编号自动候选）、恢复接管。完整任务链路（准入 → 方案 → 接管 → 提交 → 推送 → PR）由 `run-task-to-pr-test` 编排；本 Skill 负责「接管并开始工作」之前的日常入口，不替代完整链路 Skill。
+本 Skill 只在业务项目 AI 工作空间的 `developer` 工作面使用。它负责研发工程师的日常任务操作：查看名下任务、查阅任务信息、接管任务（含无编号自动候选）、恢复接管。完整任务链路（接管 → 信息分析 → 设计审查 → 实现验证 → 代码审查）由 `run-task-to-pr-test` 编排；本 Skill 负责统一接管入口，不替代完整链路 Skill。
 
 ## 1. 第一步：从当前工作目录识别工作空间
 
@@ -53,9 +53,10 @@ ao-work task takeover <KEY> --authorization-reference <reference>
 ```
 
 - `--agent-id` 可省略（缺省从安装身份 `~/.agentic-ops/user/identity.yaml` 读取；缺失时按 `agent_identity_missing` 处理，提示 `ao-work install identity set`）。
-- `--authorization-reference` **必须**提供（形如 `user-confirmation:<KEY>:<plan_id>`）；这是真实 Jira 写（结构化接管评论 + 必要状态流转），必须先展示计划并取得研发工程师确认，AI 不得自行构造。
+- 研发工程师明确说“接管 <KEY>”即授权本次事实明确的常规接管。AIAgent 把该指令绑定为 Runtime 内部授权引用；不得要求研发工程师查看、复制或确认 plan ID、摘要 ID 或授权参数。
 - Runtime 自动返回 `takeover_kind=new_takeover|accept_existing_task|resume_takeover`。后两种在 Jira 评论中明文提示“不是新接管”，无需 AI 先选择另一个接管命令。
-- 成功后必须已回读 `takeover_comment_id`，进入本地 `takeover_started` 阶段，下一步是 `run_development`。
+- 成功后必须已回读 `takeover_comment_id`，进入本地 `takeover_started` 阶段。随后连续执行信息分析和方案分级，只在设计审查或真实风险决策处暂停。
+- 当前底层 Runtime 命令仍为 `ao-work task takeover`；不得把它扩散成用户需要理解的多级操作。顶层 `ao-work takeover` 由 AO-48 落地后替换本处示例。
 
 ### 3.4 接管任务（无编号，自动候选）
 
@@ -64,7 +65,7 @@ ao-work task takeover
 ```
 
 - 不带 `issue_key` 时，Runtime 只读返回候选列表（`selection_required: true`、`candidates` 按优先级+更新时间排序），**不写 Jira**。
-- 把候选列表（key / summary / priority）展示给研发工程师，**由研发工程师确认目标任务**后，再用 3.3 的完整命令接管。AI 不得擅自选择任务执行接管。
+- 把候选列表（key / summary / priority）展示给研发工程师，**由研发工程师选择目标任务**后，再用 3.3 的完整命令接管。AI 不得擅自选择任务执行接管。
 - 候选为空时提示当前名下无待处理任务。
 
 ### 3.5 只读恢复诊断
@@ -81,9 +82,10 @@ ao-work task resume [--issue-key <KEY> | --agentic-run-id <RUN>]
 ## 4. 硬边界
 
 - 所有 Jira 可见内容使用中文；命令、字段名、issue key、状态名保留英文。
-- 真实 Jira 写（接管评论和状态流转）必须有研发工程师确认的授权引用；只读操作（list / inspect / resume 候选定位）无授权要求。
+- 真实 Jira 写（接管评论和状态流转）必须绑定研发工程师明确的“接管 <KEY>”指令；事实明确时不再增加通用二次确认。所有权、状态、范围或外部结果不明确时进入风险决策。
+- 信息分析、带来源补全和方案分级正常连续推进；固定暂停点是设计审查、代码审查和风险决策。
 - developer 不读取、写入或清理 Agentic Jira Custom Field；运行信息由 Jira Comment 和本地 task state 承载。
-- 无编号接管只列候选，不擅自选择任务；正式接管必须带 key 与授权引用。
+- 无编号接管只列候选，不擅自选择任务；正式接管必须带 key，并由 AIAgent 在内部绑定用户接管指令。
 - 能力目录是「能否调用」的唯一事实源：先 `capability list`，`capability_gap` 停止并按 `next_action` 处理。
 - 本 Skill 不替代 `run-task-to-pr-test`（完整任务链路）与 `jira-task-collaboration`（评论/工作日志/描述回写）；需要时按对应 Skill 编排。
 - 不读取 `.env`、凭证或隐藏文件；不在业务工作空间修改 AgenticOps 源头。

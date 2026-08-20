@@ -50,7 +50,7 @@ Skill 在创建工作空间或访问 Jira 前先执行：
 ./maintainer/bin/ao-maint integration preflight-task-to-pr-e2e TAP-12289
 ```
 
-当前 `task_intake_assess` 与 `solution_gate` 已由 `ao-work task intake ...`、`ao-work task solution ...` 提供确定性 Runtime 门禁。预检仍会在任何外部访问前安全阻断，并明确返回四个 `capability_gap`：`takeover_task`、`git_commit`、`git_push_task_branch`、`github_pr_create`。因此当前版本仍不能满足“全程只依赖 `ao-work` 原子门禁完成真实任务到 PR”的正式运行条件；这四项副作用或所有权能力缺口不得由 AI 直接运行等价命令绕过，也不能通过增加用户配置解决。
+当前 `takeover_task`、`task_intake_assess`、`solution_gate`、`git_commit`、`git_push_task_branch` 与 `github_pr_create` 均已进入 `ao-work` 能力目录。预检在任何外部访问前核对当前安装版本、manifest 与授权；目录缺失、版本漂移或任一所有权/保护分支/写后回读条件不满足时失败关闭，不能由 AI 直接运行等价命令绕过。
 
 AgenticOps source/ref 只用于确认 `ao-maint` / `ao-work` 来自预期安装版本，是正式测试的安装前提，不是 task-to-PR manifest 字段，也不构成业务任务授权。
 
@@ -59,20 +59,19 @@ AgenticOps source/ref 只用于确认 `ao-maint` / `ao-work` 来自预期安装�
 maintainer Skill 在隔离工作空间中完成隐藏授权并明确允许读取当前任务后，developer 的任务入口只有一个 Jira key：
 
 ```sh
-ao-work task start TAP-12289
+ao-work task takeover TAP-12289 --authorization-reference <INTERNAL_REFERENCE>
 ```
 
-该入口自动解析 Jira/工作空间/Profile/Runtime 确定性字段，生成或恢复本地 run。AI 必须先分析缺项，再从 Jira、Profile、业务源码和 Runtime 回读中做带来源的自动补全，展示完整准入摘要供用户确认。确认前不形成最终方案。确认后方案分为 L1 直接实施、L2 用户确认后实施、L3 先修改设计并重新分析、L4 停止升级。每个环节只消费 Runtime 基于实际结果返回的结构化 `agentic_next_action`。
+`INTERNAL_REFERENCE` 由 AIAgent 根据用户明确的“接管任务”指令在内部绑定。该入口自动解析 Jira/工作空间/Profile/Runtime 确定性字段，完成新接管、接纳存量或恢复并生成或复用本地 run；非新接管明文留痕。AI 随后分析缺项，从 Jira、Profile、业务源码和 Runtime 回读中做带来源的自动补全，再直接形成方案。L1 进入设计审查，L2 进入逐项风险决策，L3 由 AI 修订设计并重新分析，L4 停止升级。每个环节只消费 Runtime 基于实际结果返回的结构化 `agentic_next_action`。
 
 现役准入与方案门禁依次调用：
 
 ```sh
 ao-work task intake assess --issue-key TAP-12289 --agentic-run-id <RUN> --input-file <准入分析.json>
-ao-work task intake confirm --issue-key TAP-12289 --agentic-run-id <RUN> --confirm-intake-digest <DIGEST> --confirmed-by <NAME> --authorization-reference user-confirmation:TAP-12289:<RUN>:<DIGEST>
 ao-work task solution classify --issue-key TAP-12289 --agentic-run-id <RUN> --input-file <方案.json>
 ```
 
-只有 L2 再执行 `ao-work task solution confirm`；L1 直接进入下一门禁，L3 修改设计并重新分析，L4 停止。Jira/Profile 快照、源码 HEAD、证据、范围、风险或方案变化后，Runtime 会拒绝沿用旧摘要与旧确认。
+不得增加准入摘要确认、通用方案摘要确认或内部 digest 确认。Jira/Profile 快照、源码 HEAD、证据、范围、风险或方案变化后，Runtime 会拒绝沿用旧分析与旧设计审查。
 
 从接管到 PR 审查由全链路配置指定的同一 `task_owner` 完成。`agentic_next_action.executor` 只是当前步骤执行者，不是转派；现役 `ownership_effect` 只能为 `none`。人工确认和独立 reviewer 不改变负责人。转派只保留 `task_transfer=capability_gap` 的停止口，必须由人决定，详细设计后续单独推进。
 

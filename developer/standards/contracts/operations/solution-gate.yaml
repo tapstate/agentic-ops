@@ -1,12 +1,11 @@
 operation: solution_gate
-version: 1
+version: 2
 workplane: developer
 actions:
   - classify
-  - confirm
 inputs:
   required:
-    - confirmed_intake_digest
+    - intake_digest
     - proposed_solution
     - scope
     - risk_flags
@@ -15,13 +14,13 @@ inputs:
 levels:
   L1:
     condition: no_fixed_risk_flag_enabled
-    action: proceed_to_formal_takeover
+    action: design_review
   L2:
     flags:
       - user_choice_required
       - external_side_effect
       - nontrivial_risk
-    action: require_current_solution_digest_confirmation
+    action: risk_decision
   L3:
     flags:
       - architecture_change
@@ -29,7 +28,7 @@ levels:
       - security_boundary_change
       - data_migration
       - confirmed_design_change
-    action: revise_design_then_reassess_intake
+    action: revise_design_then_reassess
   L4:
     flags:
       - fact_conflict
@@ -37,13 +36,16 @@ levels:
       - capability_gap
     action: stop_and_escalate
 gates:
-  - intake_confirmation_is_current
+  - current_intake_digest_is_current
   - source_context_and_head_are_unchanged
   - every_enabled_flag_has_classification_evidence
   - included_and_excluded_scope_do_not_overlap
-  - only_L2_accepts_solution_confirmation
-  - L2_confirmation_binds_issue_run_and_solution_digest
-  - source_or_solution_change_invalidates_previous_decision
+  - source_or_solution_change_invalidates_previous_design_review
+human_gate:
+  design_review: required
+  risk_decision: required
+  intake_confirmation: forbidden
+  generic_solution_digest_confirmation: forbidden
 side_effects:
   - write_local_task_gate_state
   - write_local_progress_and_journal
@@ -51,12 +53,9 @@ side_effects:
   - must_not_modify_business_source
   - must_not_commit_or_push
 failure:
-  - task_intake_not_confirmed
-  - task_intake_confirmation_stale
+  - task_intake_not_assessed
+  - task_intake_source_changed
   - solution_intake_digest_mismatch
   - solution_classification_evidence_missing
   - solution_scope_conflict
-  - solution_digest_mismatch
-  - solution_confirmation_not_applicable
-  - solution_confirmation_invalid
   - solution_gate_stale

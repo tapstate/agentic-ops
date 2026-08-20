@@ -8,26 +8,47 @@ stages:
     responsible_role: development_engineer
     input_fields:
       - assignee
-      - task_class
-      - target_repo
-      - verification_method
+      - jira_status
+      - workspace_agent_identity
+      - explicit_takeover_instruction
     output_fields:
       - agentic_run_id
       - takeover_kind
+      - takeover_status
+      - human_notice
       - takeover_comment_id
       - agentic_takeover_at
-      - current_stage
-      - agentic_next_action
     review_gate: null
+  - id: task_intake
+    responsible_role: ai_agent
+    output_fields:
+      - intake_facts
+      - task_class
+      - process_id
+      - target_repo
+      - verification_method
+    review_gate: null
+  - id: design_review
+    responsible_role: development_engineer
+    input_fields:
+      - investigation_plan
+      - scope
+      - verification_method
+      - residual_risks
+    output_fields:
+      - design_review_decision
+      - execution_authorization
+    review_gate: development_engineer_design_review
   - id: investigation
     responsible_role: ai_agent
     output_fields:
       - investigation_summary
       - evidence_links
       - recommended_next_action
-    review_gate: development_engineer_review
+    review_gate: null
   - id: completed
     responsible_role: development_engineer
+    review_gate: development_engineer_result_review
     completion_cleanup:
       write_terminal_comment: true
       close_local_run: true

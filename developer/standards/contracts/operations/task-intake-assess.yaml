@@ -1,9 +1,8 @@
 operation: task_intake_assess
-version: 1
+version: 2
 workplane: developer
 actions:
   - assess
-  - confirm
 inputs:
   task_identity:
     - issue_key
@@ -15,25 +14,26 @@ inputs:
       - unresolved_information
       - assumptions
       - impacts
-  confirmation:
-    required_fields:
-      - confirm_intake_digest
-      - confirmed_by
-      - authorization_reference
 source_priority:
   - jira_issue
   - project_profile
   - business_source_code
   - runtime_readback
 gates:
+  - task_must_already_be_taken_over
   - task_start_source_context_is_current
   - source_repository_head_is_valid_and_worktree_is_clean
   - trusted_source_values_match_exact_runtime_snapshot
   - business_source_evidence_file_digest_matches
   - required_profile_fields_are_resolved
-  - required_unresolved_information_blocks_confirmation
-  - confirmation_binds_issue_run_and_intake_digest
-  - source_context_head_or_evidence_change_invalidates_confirmation
+  - source_context_head_or_evidence_change_invalidates_analysis
+next_action:
+  complete: prepare_and_classify_solution
+  missing_but_recoverable: resolve_missing_task_information_and_retry_once
+  fact_conflict_or_retry_exhausted: risk_decision
+human_gate:
+  required: false
+  note: 完整准入分析自动进入方案分析，不设置独立确认门禁。
 retry:
   max_additional_attempts_per_unchanged_source_cycle: 1
   same_input_allowed: false
@@ -52,6 +52,4 @@ failure:
   - intake_verified_value_mismatch
   - intake_source_evidence_changed
   - task_intake_incomplete
-  - task_intake_digest_mismatch
-  - task_intake_confirmation_invalid
   - task_intake_retry_exhausted

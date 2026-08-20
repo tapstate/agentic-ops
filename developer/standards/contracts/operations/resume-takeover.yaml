@@ -1,29 +1,29 @@
 operation: resume_takeover
 workplane: developer
-version: 1
-purpose: 恢复一个已经存在的任务接管记录。
+version: 2
+purpose: 只读诊断并恢复一个已经存在的任务运行上下文；正式恢复留痕由统一 takeover 操作完成。
 task_type: task_takeover
 allowed_stages:
   - takeover_started
   - blocked
 required_inputs:
   - workspace
-  - agentic_run_id
 input:
   workspace:
     type: string
     required: true
+  issue_key:
+    type: string
+    required: false
   agentic_run_id:
     type: string
-    required: true
+    required: false
 preconditions:
-  - run_must_exist
-  - run_workspace_must_match
-  - run_issue_must_match
+  - exactly_one_explicit_target_or_latest_resumable_run
+  - run_workspace_and_issue_must_match
   - current_user_must_match_assignee
   - target_repo_must_match_takeover_context
-  - operation_stage_must_be_allowed
-  - standard_process_stage_must_be_registered
+  - operation_stage_must_be_resumable
   - local_state_must_be_verifiable
 output:
   workspace:
@@ -47,7 +47,7 @@ output:
   standard_process_stage:
     type: string
   agentic_next_action:
-    type: string
+    type: object
   jira_feedback_required:
     type: boolean
   jira_feedback_write_allowed:
@@ -56,6 +56,12 @@ output:
     type: string
   jira_feedback_category:
     type: string
+formal_resume:
+  operation: takeover_task
+  requirements:
+    - reuse_existing_agentic_run_id
+    - emit_human_notice_with_not_new_takeover
+    - write_and_read_back_managed_jira_comment
 failure:
   codes:
     - missing_agentic_run_id
@@ -72,6 +78,7 @@ failure:
     - jira_current_user_failed
     - issue_mismatch
     - assignee_changed
+    - agent_ownership_conflict
     - target_repo_missing
     - target_repo_changed
     - resume_stage_not_allowed
@@ -93,5 +100,5 @@ human_gate:
 retry_policy:
   retryable: true
   max_attempts: 1
-  redo_from_stage: takeover_gate
-redo_from_stage: takeover_gate
+  redo_from_stage: takeover_started
+redo_from_stage: takeover_started
