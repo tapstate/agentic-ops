@@ -1176,15 +1176,19 @@ class WorkspaceInitTest(unittest.TestCase):
             self.assertIn(".agents/skills/", agents)
             self.assertNotIn("developer/skills/", agents)
             self.assertNotIn(str(install / "developer" / "AGENTS.md"), agents)
-            hermes_guide = (workspace / "HERMES.md").read_text(encoding="utf-8")
+            self.assertFalse((workspace / "HERMES.md").exists(), "不应生成 HERMES.md")
             claude_guide = (workspace / "CLAUDE.md").read_text(encoding="utf-8")
-            for guide in (hermes_guide, claude_guide):
-                self.assertIn("AGENTS.md", guide)
-                self.assertIn("Codex", guide)
-                self.assertIn("developer", guide)
-                self.assertIn("preflight", guide)
-            self.assertIn("Hermes", hermes_guide)
-            self.assertIn("Claude Code", claude_guide)
+            self.assertIn("@AGENTS.md", claude_guide)
+            self.assertIn("Codex", claude_guide)
+            self.assertIn("developer", claude_guide)
+            self.assertIn("preflight", claude_guide)
+            # Claude Code skill symlink 桥接：.claude/skills/<name> → ../.agents/skills/<name>
+            claude_skills = workspace / ".claude" / "skills"
+            self.assertTrue(claude_skills.is_dir())
+            bridged = [p for p in claude_skills.iterdir() if p.is_symlink()]
+            self.assertTrue(bridged, "应存在 Claude skill symlink")
+            for link in bridged:
+                self.assertTrue(link.resolve().is_dir(), f"symlink 目标应存在: {link.name}")
             status = subprocess.run(
                 ["git", "-C", str(workspace), "status", "--porcelain", "--untracked-files=all"],
                 check=True,
