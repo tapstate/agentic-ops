@@ -56,6 +56,8 @@ TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
 - 运维仓（`status` 可见但不联动，保持当前分支）：`tapdata-application`、`feishu_robot`。
 - 单独管理（不纳入分支联动）：`tapdata-cloud`、`t-layer3-test`、`docs`、`docs-en`、`mcp-tap-server`、`solutions`、`fhir-solution`、Hazelcast(fork)、mongo(fork)。
 
+新功能开发（`from_branch` 为 `tapdata` 主仓 `develop`）时，各仓库工作树分支按 `profile.yaml` 的 `branches.dev_branches` 映射推导，见「新功能开发分支」小节。
+
 ### 分支类型
 
 `tapdata` 主仓分支分三类：
@@ -91,6 +93,29 @@ TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
 - `tapdata-application`、`feishu_robot` 默认保持当前分支，不参与自动对齐。
 - pluginKit 推导：读 `tapdata` 分支 `iengine/iengine-app/src/main/resources/pluginKit.properties` 的 `tapdata.api.verison`（源码拼写即 `verison`，按字面读，勿当 typo 改），去 `-SNAPSHOT` 得 `release-v<version>`，在各仓 `release-v*` 分支中取第一个版本 ≥ 该值的分支。
 - 人工对齐脏仓库时，只有研发工程师确认后才允许按计划临时 `stash push -u`、切换分支后 `stash pop`；若 stash 或 pop 失败必须停止，不能继续跨仓切换。
+
+### 新功能开发分支
+
+新功能开发任务的 `from_branch` 为 `tapdata` 主仓 `develop` 时，各仓库工作树分支按 `profile.yaml` `branches.dev_branches` 映射推导（确定性，不靠 AI 猜测）：
+
+| 仓库 | 新功能开发分支 |
+| --- | --- |
+| `tapdata/tapdata` | `develop` |
+| `tapdata/tapdata-cloud` | `develop` |
+| `tapdata/tapdata-common-lib` | `main` |
+| `tapdata/tapdata-connectors` | `develop` |
+| `tapdata/tapdata-connectors-enterprise` | `develop` |
+| `tapdata/tapdata-enterprise` | `develop` |
+| `tapdata/tapdata-license` | `main` |
+| `tapdata/tapdata-web` | `develop` |
+| `tapdata/hazelcast` | `release-v5.5.0` |
+| `tapdata/tapdata-application` | `main` |
+| `tapdata/feishu_robot` | `master` |
+| `tapdata/t-layer3-test` | `develop` |
+
+- `dev_branches` 只在 `from_branch` 等于 `tapdata/tapdata` 声明的开发分支（`develop`）时生效；其它 `from_branch`（release 等）仍走 `same_name` 与 `overrides`。
+- 未在 `dev_branches` 声明的仓库在开发分支场景回退 `same_name`（与主仓同名）。
+- 推导结果仍受「同名分支不存在回退 `default_branch`」约束；`hazelcast` 为 fork，开发基准是 `release-v5.5.0`。
 
 ## 修改范围
 

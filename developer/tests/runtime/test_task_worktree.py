@@ -50,6 +50,10 @@ def build_profile(
             derive_from=branch_derivation.get("derive_from", "default"),
             default_branch=branch_derivation.get("default_branch", "main"),
             default_rule=branch_derivation.get("default_rule", "same_name"),
+            dev_branches=tuple(
+                (str(repo), str(branch))
+                for repo, branch in branch_derivation.get("dev_branches", {}).items()
+            ),
             overrides=tuple(
                 RepositoryBranchRule(
                     from_branch=item["from_branch"],
@@ -170,6 +174,64 @@ class PlanTaskWorktreesTest(unittest.TestCase):
         by_repo = {entry.repository: entry for entry in plan.entries}
         self.assertEqual("v2.0.x", by_repo["tapdata/connectors"].branch)
         self.assertEqual("release-2.0", by_repo["tapdata/tapdata"].branch)
+
+    def test_plan_dev_branches_used_when_from_branch_is_primary_dev_branch(self) -> None:
+        profile = build_profile(
+            repository_list=(
+                "tapdata/tapdata",
+                "tapdata/tapdata-web",
+                "tapdata/tapdata-common-lib",
+            ),
+            analysis_mount={"mode": "all"},
+            branch_derivation={
+                "default_branch": "main",
+                "default_rule": "same_name",
+                "dev_branches": {
+                    "tapdata/tapdata": "develop",
+                    "tapdata/tapdata-web": "develop",
+                    "tapdata/tapdata-common-lib": "main",
+                },
+            },
+        )
+        plan = plan_task_worktrees(
+            pool_root=self.pool,
+            profile=profile,
+            issue_key="TAP-123",
+            description_sections={"修复分支": "develop\n"},
+        )
+        by_repo = {entry.repository: entry for entry in plan.entries}
+        self.assertEqual("develop", by_repo["tapdata/tapdata"].branch)
+        self.assertEqual("develop", by_repo["tapdata/tapdata-web"].branch)
+        self.assertEqual("main", by_repo["tapdata/tapdata-common-lib"].branch)
+
+    def test_plan_dev_branches_not_used_for_non_primary_dev_branch(self) -> None:
+        profile = build_profile(
+            repository_list=(
+                "tapdata/tapdata",
+                "tapdata/tapdata-web",
+                "tapdata/tapdata-common-lib",
+            ),
+            analysis_mount={"mode": "all"},
+            branch_derivation={
+                "default_branch": "main",
+                "default_rule": "same_name",
+                "dev_branches": {
+                    "tapdata/tapdata": "develop",
+                    "tapdata/tapdata-web": "develop",
+                    "tapdata/tapdata-common-lib": "main",
+                },
+            },
+        )
+        plan = plan_task_worktrees(
+            pool_root=self.pool,
+            profile=profile,
+            issue_key="TAP-123",
+            description_sections={"修复分支": "release-v3.8.0\n"},
+        )
+        by_repo = {entry.repository: entry for entry in plan.entries}
+        self.assertEqual("release-v3.8.0", by_repo["tapdata/tapdata"].branch)
+        self.assertEqual("release-v3.8.0", by_repo["tapdata/tapdata-web"].branch)
+        self.assertEqual("release-v3.8.0", by_repo["tapdata/tapdata-common-lib"].branch)
 
     def test_plan_mount_exclude_skips_repository(self) -> None:
         profile = build_profile(

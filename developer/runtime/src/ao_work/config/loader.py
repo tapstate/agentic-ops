@@ -715,10 +715,27 @@ def _parse_branch_derivation(
         overrides.append(
             RepositoryBranchRule(from_branch=from_branch, repo=repo, branch=branch)
         )
+    dev_branches_raw = raw.get("dev_branches", {})
+    dev_branches: list[tuple[str, str]] = []
+    if dev_branches_raw:
+        if not isinstance(dev_branches_raw, dict):
+            raise ValueError("branches.dev_branches must be a mapping")
+        for repo, branch in dev_branches_raw.items():
+            branch_text = _optional_text(branch)
+            if not branch_text:
+                raise ValueError(
+                    f"branches.dev_branches entry requires a branch: {repo}"
+                )
+            if repository_list and repo not in repository_list:
+                raise ValueError(
+                    f"branches.dev_branches references unknown repository: {repo}"
+                )
+            dev_branches.append((str(repo), branch_text))
     return BranchDerivation(
         derive_from=derive_from,
         default_branch=default_branch,
         default_rule=default_rule,
+        dev_branches=tuple(dev_branches),
         overrides=tuple(overrides),
     )
 

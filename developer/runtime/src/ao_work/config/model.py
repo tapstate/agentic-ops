@@ -40,6 +40,7 @@ class BranchDerivation:
     derive_from: str = "default"
     default_branch: str = "main"
     default_rule: str = "same_name"
+    dev_branches: tuple[tuple[str, str], ...] = ()
     overrides: tuple[RepositoryBranchRule, ...] = ()
 
 
@@ -114,16 +115,32 @@ class ProjectProfile:
         return tuple(repo for repo in candidates if repo not in excluded)
 
     def derive_branch(self, repo: str, from_branch: str) -> str | None:
-        """分支推导：主仓库/同名默认/overrides；返回目标分支，None 表示无法推导。
+        """分支推导：主仓库/overrides/dev_branches/same_name；返回目标分支，None 表示无法推导。
 
-        调用方负责校验 from_branch 非空与仓库合法性；这里只做确定性映射。
+        优先级（确定性）：
+        1. 主仓库（derive_from / default）→ from_branch。
+        2. overrides（from_branch + repo 精确匹配）→ 规则声明的 branch。
+        3. dev_branches：当 from_branch 等于主仓库声明的开发分支时，
+           repo 命中 dev_branches → 声明的开发分支（如 tapdata-common-lib 用 main、
+           feishu_robot 用 master、hazelcast 用 release-v5.5.0）。
+        4. default_rule=same_name → from_branch。
         """
         derivation = self.branch_derivation
-        if repo == (derivation.derive_from if derivation.derive_from != "default" else self.default_repository):
+        primary = (
+            derivation.derive_from
+            if derivation.derive_from != "default"
+            else self.default_repository
+        )
+        if repo == primary:
             return from_branch
         for rule in derivation.overrides:
             if rule.from_branch == from_branch and rule.repo == repo:
                 return rule.branch
+        dev_branches = dict(derivation.dev_branches)
+        if primary in dev_branches and dev_branches[primary] == from_branch:
+            declared = dev_branches.get(repo)
+            if declared is not None:
+                return declared
         if derivation.default_rule == "same_name":
             return from_branch
         return None
