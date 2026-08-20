@@ -357,7 +357,7 @@ capabilities:
     visibility: public
     commands:
       - [task, resume]
-    summary: 恢复已接管的 Jira 任务执行上下文（只读，不写 Jira）：定位本地 takeover_started/blocked 记录（显式 --issue-key / --agentic-run-id，或最近可恢复记录），校验本地 run、Jira 经办人与状态映射，输出执行上下文。
+    summary: 恢复已接管或处于部分完成状态的 Jira 任务执行上下文（只读，不写 Jira）：通过统一恢复读取器定位本地运行，校验接管快照、业务阶段、事件、Jira 经办人与状态映射，输出确定的恢复动作。
     next_action: 请在已接管任务中断后续工时使用 task resume 恢复；所有权不一致或阶段不允许时按失败码人工核对。
 
   - id: takeover_task
@@ -367,7 +367,7 @@ capabilities:
     visibility: public
     commands:
       - [task, takeover]
-    summary: Jira 任务接管 Runtime 原子能力：不带 issue_key 时只读列出候选；带 issue_key 时校验经办人和状态映射，自动判断新接管、接纳存量或恢复，先写并回读结构化中文接管评论，再 transition 到执行状态并写本地 takeover 记录；不读写 Agentic 自定义字段。当前底层命令仍为 task takeover，顶层公开入口由 AO-48 收敛。
+    summary: Jira 任务接管 Runtime 原子能力：不带 issue_key 时只读列出候选；带 issue_key 时校验经办人和状态映射，自动判断新接管、接纳存量或恢复。本地状态引擎分离稳定意图、Comment 回读、Status 回读与最终收口；Jira Saga 由 AO-49 接入同一状态服务。不读写 Agentic 自定义字段。当前底层命令仍为 task takeover，顶层公开入口由 AO-48 收敛。
     next_action: 无编号时展示候选并由研发工程师选择；带编号时把用户明确的“接管 <KEY>”指令作为常规操作授权，内部绑定授权引用后执行。非新接管必须明文提示并留痕，不得再要求用户确认内部摘要或授权标识。
 
   - id: task_start
