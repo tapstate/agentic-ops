@@ -9,6 +9,7 @@ from unittest import mock
 
 from ao_maint.cli import build_parser as build_maintainer_parser
 from ao_maint.cli import main as maintainer_main
+from ao_maint.jira.cli import _execute_auth, execute_jira
 from ao_maint.jira.client import JiraClient, JiraConnection, TransportResponse
 from ao_maint.jira.config import (
     env_file_path,
@@ -17,7 +18,7 @@ from ao_maint.jira.config import (
     plans_dir,
     set_credentials,
 )
-from ao_maint.jira.service import MaintainerJiraService
+from ao_maint.jira.service import MaintainerJiraService, _build_plan
 from ao_maint.output import RuntimeErrorResult
 
 
@@ -321,6 +322,50 @@ class MaintainerJiraServiceTest(unittest.TestCase):
             },
         }
         return MaintainerJiraService(client), transport, client
+
+    def test_non_ao_issue_is_blocked_before_transport(self) -> None:
+        service, transport, _client = self._service()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.inspect_issue("TAP-12289")
+        self.assertEqual(
+            "maintainer_jira_project_scope_mismatch", captured.exception.code
+        )
+        self.assertEqual([], transport.requests)
+
+    def test_remote_issue_project_mismatch_is_blocked(self) -> None:
+        service, transport, _client = self._service()
+        assert transport.issue is not None
+        fields = transport.issue["fields"]
+        assert isinstance(fields, dict)
+        fields["project"] = {"key": "TAP"}
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.inspect_issue("AO-11")
+        self.assertEqual(
+            "maintainer_jira_project_scope_mismatch", captured.exception.code
+        )
+        self.assertEqual([("GET", "/rest/api/3/issue/AO-11")], transport.requests)
+
+    def test_recomputed_non_ao_plan_is_blocked_before_transport(self) -> None:
+        service, transport, _client = self._service()
+        plan = _build_plan(
+            "jira_comment",
+            "TAP-12289",
+            "maint-test-1",
+            "idem-recomputed-scope",
+            {
+                "category": "analysis",
+                "content": "越界计划",
+                "markdown": "越界计划\n",
+                "body_sha256": "0" * 64,
+            },
+            "",
+        )
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.apply_comment(plan, plan.plan_id)
+        self.assertEqual(
+            "maintainer_jira_project_scope_mismatch", captured.exception.code
+        )
+        self.assertEqual([], transport.requests)
 
     def test_plan_description_roundtrip(self) -> None:
         service, transport, _client = self._service()
@@ -676,7 +721,10 @@ class MaintainerJiraServiceTest(unittest.TestCase):
                 description="",
                 parent_key="TAP-12289",
             )
-        self.assertEqual("jira_create_parent_project_mismatch", captured.exception.code)
+        self.assertEqual(
+            "maintainer_jira_project_scope_mismatch", captured.exception.code
+        )
+        self.assertEqual([], transport.requests)
 
     def test_create_subtask_parent_change_blocks_apply(self) -> None:
         service, transport = self._create_service()
@@ -810,6 +858,22 @@ class MaintainerJiraServiceTest(unittest.TestCase):
             )
         self.assertEqual("invalid_project_key", captured.exception.code)
 
+    def test_create_issue_rejects_non_ao_project_before_transport(self) -> None:
+        service, transport = self._create_service()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.plan_create_issue(
+                "TAP",
+                "idem-c-scope",
+                maintainer_run_id="maint-test-1",
+                issuetype_name="任务",
+                summary="拒绝业务项目建卡",
+                description="",
+            )
+        self.assertEqual(
+            "maintainer_jira_project_scope_mismatch", captured.exception.code
+        )
+        self.assertEqual([], transport.requests)
+
     def test_create_issue_meta_changed_blocks_apply(self) -> None:
         service, transport = self._create_service()
         plan = service.plan_create_issue(
@@ -831,6 +895,113 @@ class MaintainerJiraServiceTest(unittest.TestCase):
 
 
 class MaintainerJiraCliTest(unittest.TestCase):
+    def test_non_ao_inputs_are_blocked_before_config_and_credentials(self) -> None:
+        parser = build_maintainer_parser()
+        cases = (
+            ["jira", "inspect", "--issue-key", "TAP-12289"],
+            [
+                "jira",
+                "create",
+                "plan",
+                "--project-key",
+                "TAP",
+                "--issuetype",
+                "任务",
+                "--summary",
+                "禁止越界建卡",
+                "--idempotency-key",
+                "scope-preflight",
+                "--plan-file",
+                "scope.json",
+            ],
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            for argv in cases:
+                with self.subTest(argv=argv), mock.patch(
+                    "ao_maint.jira.cli.load_maintainer_jira_config"
+                ) as load_config:
+                    with self.assertRaises(RuntimeErrorResult) as captured:
+                        execute_jira(parser.parse_args(argv), Path(temporary))
+                    self.assertEqual(
+                        "maintainer_jira_project_scope_mismatch",
+                        captured.exception.code,
+                    )
+                    load_config.assert_not_called()
+
+    def test_auth_verify_reports_ao_scope_without_global_field_probe(self) -> None:
+        parser = build_maintainer_parser()
+        args = parser.parse_args(["jira", "auth", "verify"])
+        connection = JiraConnection(
+            connection_id="tapdata-cloud",
+            base_url="https://tapdata.atlassian.net",
+            email_env="TAPDATA_JIRA_EMAIL",
+            token_env="TAPDATA_JIRA_API_TOKEN",
+        )
+        config = mock.Mock(connection=connection)
+        config.require_credentials.return_value = (
+            "maintainer@example.com",
+            "token-123456",
+        )
+        transport = FakeTransport()
+        with (
+            mock.patch(
+                "ao_maint.jira.cli.credential_status",
+                return_value={"credential_source": "maintainer_local"},
+            ),
+            mock.patch(
+                "ao_maint.jira.cli.UrllibJiraTransport", return_value=transport
+            ),
+        ):
+            result = _execute_auth(args, Path("/unused"), config)
+        self.assertEqual(["AO"], result["allowed_project_keys"])
+        self.assertNotIn("field_count", result)
+        self.assertEqual([("GET", "/rest/api/3/myself")], transport.requests)
+
+    def test_non_ao_plan_file_blocks_before_config_and_decision_audit(self) -> None:
+        parser = build_maintainer_parser()
+        plan = _build_plan(
+            "jira_comment",
+            "TAP-12289",
+            "maint-test-1",
+            "scope-plan-file",
+            {
+                "category": "analysis",
+                "content": "越界计划",
+                "markdown": "越界计划\n",
+                "body_sha256": "0" * 64,
+            },
+            "",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan_directory = root / "maintainer" / ".local" / "jira-plans"
+            plan_directory.mkdir(parents=True)
+            (plan_directory / "scope.json").write_text(
+                json.dumps(plan.to_dict(), ensure_ascii=False), encoding="utf-8"
+            )
+            args = parser.parse_args(
+                [
+                    "jira",
+                    "comment",
+                    "apply",
+                    "--plan-file",
+                    "scope.json",
+                    "--confirm-plan-id",
+                    plan.plan_id,
+                    "--authorization-reference",
+                    f"user-confirmation:TAP-12289:{plan.plan_id}",
+                ]
+            )
+            with mock.patch(
+                "ao_maint.jira.cli.load_maintainer_jira_config"
+            ) as load_config, self.assertRaises(RuntimeErrorResult) as captured:
+                execute_jira(args, root)
+            self.assertEqual(
+                "maintainer_jira_project_scope_mismatch", captured.exception.code
+            )
+            load_config.assert_not_called()
+            self.assertFalse((root / "maintainer" / ".local" / "decisions.ndjson").exists())
+
     def test_ao_jira_parser_registered_and_disjoint_from_developer(self) -> None:
         parser = build_maintainer_parser()
         actions = [

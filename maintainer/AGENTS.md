@@ -13,6 +13,8 @@
 
 处理 AO Jira 工作项时，用户操作统一理解为“接管 `<AO-KEY>`”，公开命令固定为 `ao-maint takeover <AO-KEY>`。Runtime 自动区分新接管、恢复、接纳存量和阻断；恢复或接纳存量必须向用户明文说明并留下审计。不得用 Atlassian Connector、直接 REST API 或 Shell 网络请求绕过 maintainer Runtime。
 
+`ao-maint` 的全部 Jira 任务操作固定只允许 AO 项目，包括 inspect、takeover、建卡、评论、Description、Worklog 和状态流转。非 AO 的 issue key、project key、父任务、计划文件或远端回读必须在读取凭证、网络请求、计划落盘或决策审计前以 `maintainer_jira_project_scope_mismatch` 阻断；Service 还必须独立重复校验，不能只依赖 CLI。`jira auth` 只管理 maintainer 本地凭证并明示 `allowed_project_keys=["AO"]`，不能扩大为 TAP 等业务项目权限；业务项目任务必须在对应 developer 工作空间使用 `ao-work`。
+
 新接管必须由 Runtime 先写中文开始处理评论，再把 Jira 状态流转为“正在进行”，并逐项回读。设计审查确认后形成绑定工作项、运行 ID、仓库、分支、设计摘要、修改范围和验证方式的工作项级连续执行授权。授权范围内的正常分析、实现、验证和必要 Jira 进度回写连续推进，不逐项暂停；只在设计审查、提交前精确内容确认、风险或范围决策时暂停。`main`、合并、发布、Git Tag、强推和历史改写继续使用独立人工门禁。
 
 根仓库及任何 AgenticOps worktree 都必须加载本文件和 `maintainer/rules/source-maintenance.md`；不得把上述约束只留在聊天上下文或本机临时状态中。

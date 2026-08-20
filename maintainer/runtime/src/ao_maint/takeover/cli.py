@@ -19,6 +19,7 @@ from ao_maint.jira.config import (
     plans_dir,
 )
 from ao_maint.jira.service import MaintainerJiraService, WritePlan
+from ao_maint.jira.scope import validate_issue_readback
 from ao_maint.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_maint.takeover.state import (
     append_event,
@@ -84,6 +85,7 @@ def _takeover(
     connection_id: str,
 ) -> dict[str, Any]:
     issue = service.inspect_issue(issue_key)
+    validate_issue_readback(issue_key, issue.key, issue.project_key)
     stage = _workflow_stage(source_root, connection_id, issue.project_key, issue.status)
     if stage == "completed":
         raise _blocked(
@@ -271,6 +273,7 @@ def _execute_new_takeover(
         "用户指令授权 maintainer 接管任务",
     )
     readback = service.inspect_issue(issue.key)
+    validate_issue_readback(issue.key, readback.key, readback.project_key)
     if _workflow_stage(source_root, connection_id, issue.project_key, readback.status) != "implementation":
         raise _blocked(
             "maintainer_takeover_readback_mismatch",
@@ -348,6 +351,7 @@ def _confirm_pending_gate(
     pending_gate = str(state.get("pending_gate", ""))
     if pending_gate == "adopt":
         issue = service.inspect_issue(issue_key)
+        validate_issue_readback(issue_key, issue.key, issue.project_key)
         content = _takeover_comment(
             issue, identity, str(state["run_id"]), adopted=True
         )
@@ -484,6 +488,7 @@ def _required_state(
             f"请先运行 ao-maint takeover {issue_key}",
         )
     issue = service.inspect_issue(issue_key)
+    validate_issue_readback(issue_key, issue.key, issue.project_key)
     _require_same_owner_and_issue(state, identity, issue.issue_id)
     if _workflow_stage(
         source_root, connection_id, issue.project_key, issue.status

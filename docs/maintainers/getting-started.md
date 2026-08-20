@@ -45,7 +45,9 @@ bash maintainer/bin/init-maintainer-config.sh
 ./maintainer/bin/ao-maint jira inspect --issue-key AO-11
 ```
 
-`ao-maint jira` 与 developer 面的 `ao-work jira` 命令同名但独立实现，不读取业务项目工作空间凭证；建卡、评论、Worklog 和状态流转沿用 `plan -> apply -> readback` 协议并显式要求 `user-confirmation:<KEY>:<plan_id>` 确认引用。创建 Jira 子任务时必须使用 `jira create plan --issuetype 子任务 --parent <PARENT-KEY>`，Runtime 会回读父任务并校验项目、类型和写前事实；禁止通过通用 `--field` 猜测 `parent` 结构。同名命令只能通过入口识别工作面：`ao-maint` 的 jira 只用于维护 AgenticOps 源头任务（AO 项目），不用于执行业务研发任务。
+`ao-maint jira` 与 developer 面的 `ao-work jira` 命令同名但独立实现，不读取业务项目工作空间凭证；建卡、评论、Worklog 和状态流转沿用 `plan -> apply -> readback` 协议并显式要求 `user-confirmation:<KEY>:<plan_id>` 确认引用。创建 Jira 子任务时必须使用 `jira create plan --issuetype 子任务 --parent <PARENT-KEY>`，Runtime 会回读父任务并校验项目、类型和写前事实；禁止通过通用 `--field` 猜测 `parent` 结构。
+
+`ao-maint` 的 Jira 任务操作硬限制为 AO 项目。非 AO 的 issue、project、父任务、计划文件或远端回读会在读取凭证和联网前返回 `maintainer_jira_project_scope_mismatch`；直接调用 Service 也会重复校验。`jira auth show|set|remove|verify` 只管理 maintainer 本地凭证并输出 `allowed_project_keys: ["AO"]`，认证成功不表示可以处理 TAP 等业务项目；这类任务必须在对应 developer 工作空间使用 `ao-work`。
 
 处理 AO 维护任务时，对外只使用接管入口：
 

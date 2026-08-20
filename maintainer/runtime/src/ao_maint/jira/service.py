@@ -16,12 +16,17 @@ from ao_maint.jira.model import (
     standalone_paragraph_lines,
     user_identifier,
 )
+from ao_maint.jira.scope import (
+    validate_issue_readback,
+    validate_maintainer_issue_key,
+    validate_maintainer_project_key,
+    validate_write_plan_scope,
+)
 from ao_maint.output import EXIT_BLOCKED, RuntimeErrorResult
 
 IDEMPOTENCY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 CHINESE_PATTERN = re.compile(r"[\u3400-\u9fff]")
-ISSUE_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*$")
 
 ALLOWED_COMMENT_CATEGORIES = frozenset(
     {"analysis", "plan", "decision", "evidence", "blocked", "progress"}
@@ -104,7 +109,9 @@ class MaintainerJiraService:
         self.client = client
 
     def inspect_issue(self, issue_key: str) -> JiraIssue:
-        issue = self.client.get_issue(issue_key)
+        normalized = validate_maintainer_issue_key(issue_key)
+        issue = self.client.get_issue(normalized)
+        validate_issue_readback(normalized, issue.key, issue.project_key)
         return issue
 
     def plan_create_issue(
@@ -128,7 +135,10 @@ class MaintainerJiraService:
         - 新任务 issue_key 未知，plan 的 issue_key 字段使用 project_key 占位，
           apply 返回真实 issue key，readback 使用真实 key。
         """
-        normalized_project = _validated_project_key(project_key)
+        normalized_project = validate_maintainer_project_key(project_key)
+        normalized_parent = (
+            validate_maintainer_issue_key(parent_key) if parent_key else None
+        )
         _require_chinese(summary, "任务摘要")
         if not issuetype_name.strip():
             raise _input_error("invalid_issuetype_name", "事务类型名称不能为空")
@@ -144,7 +154,7 @@ class MaintainerJiraService:
             )
         parent = self._resolve_create_parent(
             normalized_project,
-            parent_key,
+            normalized_parent,
             meta,
         )
         if parent:
@@ -234,11 +244,11 @@ class MaintainerJiraService:
         parent_key: str | None,
         meta: dict[str, Any],
     ) -> dict[str, str]:
-        normalized_parent = (parent_key or "").strip().upper()
+        normalized_parent = (
+            validate_maintainer_issue_key(parent_key) if parent_key else ""
+        )
         if not normalized_parent:
             return {}
-        if not ISSUE_KEY_PATTERN.fullmatch(normalized_parent):
-            raise _input_error("invalid_issue_key", "parent issue key 格式无效")
         if "parent" not in meta.get("fields", {}):
             raise RuntimeErrorResult(
                 code="jira_create_parent_not_supported",
@@ -434,14 +444,17 @@ class MaintainerJiraService:
     def _find_existing_by_marker(
         self, project_key: str, marker: str, duplicate_code: str
     ) -> JiraIssue | None:
+        normalized_project = validate_maintainer_project_key(project_key)
         # JQL 全文搜索对 []: 等特殊字符分词不可靠，搜索稳定词后再本地精确匹配 marker
         jql = (
-            f'project = "{_escape_jql(project_key)}" '
+            f'project = "{_escape_jql(normalized_project)}" '
             'AND description ~ "agentic-ops-maintainer-idempotency" '
             "ORDER BY created ASC"
         )
         matches: list[JiraIssue] = []
-        for item in self.client.search_issues(jql, fields=["summary", "description", "key"]):
+        for item in self.client.search_issues(
+            jql, fields=["summary", "description", "project", "key"]
+        ):
             if not isinstance(item, dict):
                 continue
             raw_fields = item.get("fields", {}) if isinstance(item, dict) else {}
@@ -449,11 +462,19 @@ class MaintainerJiraService:
             standalone = standalone_paragraph_lines(description)
             if marker not in standalone:
                 continue
+            issue_key = validate_maintainer_issue_key(str(item.get("key", "")))
+            raw_project = raw_fields.get("project", {})
+            actual_project = (
+                str(raw_project.get("key", ""))
+                if isinstance(raw_project, dict)
+                else ""
+            )
+            validate_issue_readback(issue_key, issue_key, actual_project)
             matches.append(
                 JiraIssue(
                     issue_id=str(item.get("id", "")),
-                    key=str(item.get("key", "")),
-                    project_key=project_key,
+                    key=issue_key,
+                    project_key=normalized_project,
                     summary=str(raw_fields.get("summary", "")),
                     status=object_name(raw_fields.get("status")),
                     issue_type=object_name(raw_fields.get("issuetype")),
@@ -566,6 +587,7 @@ class MaintainerJiraService:
     def apply_comment(self, plan: WritePlan, expected_plan_id: str) -> dict[str, Any]:
         self._validate_apply_plan(plan, expected_plan_id, "jira_comment")
         self._validate_comment_plan(plan)
+        self.inspect_issue(plan.issue_key)
         marker = _plan_marker(plan)
         existing = [
             comment
@@ -594,6 +616,7 @@ class MaintainerJiraService:
     def readback_comment(self, plan: WritePlan) -> dict[str, Any]:
         self._validate_apply_plan(plan, plan.plan_id, "jira_comment")
         self._validate_comment_plan(plan)
+        self.inspect_issue(plan.issue_key)
         marker = _plan_marker(plan)
         found = [
             comment
@@ -676,6 +699,7 @@ class MaintainerJiraService:
     def apply_worklog(self, plan: WritePlan, expected_plan_id: str) -> dict[str, Any]:
         self._validate_apply_plan(plan, expected_plan_id, "jira_worklog")
         self._validate_worklog_plan(plan)
+        self.inspect_issue(plan.issue_key)
         marker = _plan_marker(plan)
         existing = [
             worklog
@@ -709,6 +733,7 @@ class MaintainerJiraService:
     def readback_worklog(self, plan: WritePlan) -> dict[str, Any]:
         self._validate_apply_plan(plan, plan.plan_id, "jira_worklog")
         self._validate_worklog_plan(plan)
+        self.inspect_issue(plan.issue_key)
         marker = _plan_marker(plan)
         found = [
             worklog
@@ -940,11 +965,13 @@ class MaintainerJiraService:
         self, plan: WritePlan, expected_plan_id: str, operation: str
     ) -> None:
         plan.validate_integrity()
+        validate_write_plan_scope(plan)
         _verify_plan(plan, expected_plan_id, operation)
 
     @staticmethod
     def validate_no_credentials(plan: WritePlan, email: str, token: str) -> None:
         plan.validate_integrity()
+        validate_write_plan_scope(plan)
         for label, secret in (("Jira email", email), ("Jira token", token)):
             if secret and _contains_text(plan.payload, secret):
                 raise RuntimeErrorResult(
@@ -1110,8 +1137,7 @@ def _verify_plan(plan: WritePlan, expected_plan_id: str, operation: str) -> None
 
 
 def _marker(issue_key: str, maintainer_run_id: str, idempotency_key: str) -> str:
-    if not ISSUE_KEY_PATTERN.fullmatch(issue_key):
-        raise _input_error("invalid_issue_key", "issue_key 格式无效")
+    issue_key = validate_maintainer_issue_key(issue_key)
     if not RUN_ID_PATTERN.fullmatch(maintainer_run_id):
         raise _input_error("invalid_maintainer_run_id", "maintainer_run_id 格式无效")
     _validate_idempotency_key(idempotency_key)
@@ -1128,7 +1154,7 @@ def _plan_marker(plan: WritePlan) -> str:
 def _create_marker(
     project_key: str, maintainer_run_id: str, idempotency_key: str
 ) -> str:
-    _validated_project_key(project_key)
+    project_key = validate_maintainer_project_key(project_key)
     if not RUN_ID_PATTERN.fullmatch(maintainer_run_id):
         raise _input_error("invalid_maintainer_run_id", "maintainer_run_id 格式无效")
     _validate_idempotency_key(idempotency_key)
@@ -1136,16 +1162,6 @@ def _create_marker(
         "[agentic-ops-maintainer-idempotency:create:"
         f"{project_key}:{maintainer_run_id}:{idempotency_key}]"
     )
-
-
-def _validated_project_key(value: str) -> str:
-    normalized = value.strip().upper()
-    if not re.fullmatch(r"[A-Z][A-Z0-9_]{1,9}", normalized):
-        raise _input_error(
-            "invalid_project_key", "project_key 必须是 Jira 项目 Key（大写字母开头）"
-        )
-    return normalized
-
 
 def _escape_jql(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
