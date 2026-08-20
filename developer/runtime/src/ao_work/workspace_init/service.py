@@ -1024,16 +1024,23 @@ class WorkspaceInitializer:
                     parsed = yaml.safe_load(content)
                     if isinstance(parsed, dict):
                         existing = parsed
-                except Exception:
+                except Exception as error:
+                    # 已有配置不可解析：留痕并覆盖为新配置（保留降级说明）。
+                    write_diagnostic(
+                        f"研发员级配置解析失败，将重建（{type(error).__name__}）"
+                    )
                     existing = {}
             existing["source_pool_root"] = str(candidate.source_pool_root)
             atomic_write_text(
                 config_path,
                 yaml.safe_dump(existing, allow_unicode=True, sort_keys=False),
             )
-        except Exception:
-            # 持久化失败不阻断本次池模式初始化。
-            return
+        except Exception as error:
+            # 持久化失败不阻断本次池模式初始化，但必须留痕供后续诊断。
+            write_diagnostic(
+                f"source_pool_root 持久化到研发员级配置失败（{type(error).__name__}）："
+                "本次运行内已生效，后续 preflight/takeover 若提示未配置请人工核对"
+            )
 
     def _prepare_pool_members(
         self,
