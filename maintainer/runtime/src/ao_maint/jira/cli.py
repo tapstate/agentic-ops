@@ -59,6 +59,7 @@ def configure_jira_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
     create_plan.add_argument("--summary", required=True)
     create_plan.add_argument("--description-file")
     create_plan.add_argument("--assignee")
+    create_plan.add_argument("--parent")
     create_plan.add_argument("--field", action="append", default=[])
     create_plan.add_argument("--idempotency-key", required=True)
     create_plan.add_argument("--run-id")
@@ -188,6 +189,7 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
                 summary=args.summary,
                 description=description,
                 assignee=args.assignee,
+                parent_key=args.parent,
                 extra_fields=extra_fields,
             )
         elif args.command == "comment":
@@ -294,6 +296,7 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
                     "issuetype_name": plan.payload.get("issuetype_name"),
                     "summary": plan.payload.get("summary"),
                     "assignee": plan.payload.get("assignee"),
+                    "parent": plan.payload.get("parent"),
                 }
             )
         return result

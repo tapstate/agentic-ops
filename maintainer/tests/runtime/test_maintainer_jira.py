@@ -145,6 +145,53 @@ def _ao_createmeta_payload() -> dict[str, object]:
     }
 
 
+def _ao_subtask_createmeta_payload() -> dict[str, object]:
+    return {
+        "projects": [
+            {
+                "key": "AO",
+                "name": "agentic-ops",
+                "issuetypes": [
+                    {
+                        "id": "10101",
+                        "name": "子任务",
+                        "subtask": True,
+                        "fields": {
+                            "summary": {"required": True, "name": "摘要"},
+                            "project": {"required": True, "name": "项目"},
+                            "issuetype": {"required": True, "name": "事务类型"},
+                            "reporter": {"required": True, "name": "报告人"},
+                            "description": {"required": False, "name": "描述"},
+                            "parent": {
+                                "required": True,
+                                "name": "父级",
+                                "schema": {"type": "issuelink", "system": "parent"},
+                            },
+                        },
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def _parent_issue(
+    *, key: str = "AO-43", issue_id: str = "41703", project_key: str = "AO"
+) -> dict[str, object]:
+    return {
+        "id": issue_id,
+        "key": key,
+        "fields": {
+            "summary": "使用测试任务验证接管流程",
+            "status": {"name": "待办"},
+            "issuetype": {"name": "任务", "subtask": False},
+            "assignee": {"accountId": "user-1"},
+            "project": {"key": project_key},
+            "description": None,
+        },
+    }
+
+
 def _adf_text(value: Any) -> str:
     """提取 ADF 文档的纯文本，用于测试断言。"""
     if isinstance(value, str):
@@ -567,6 +614,114 @@ class MaintainerJiraServiceTest(unittest.TestCase):
         self.assertEqual("AO-1001", readback["external_id"])
         self.assertEqual(True, readback["created"])
 
+    def test_create_subtask_roundtrip_with_typed_parent(self) -> None:
+        service, transport = self._create_service()
+        transport.create_meta_payload = _ao_subtask_createmeta_payload()
+        transport.issues.append(_parent_issue())
+        plan = service.plan_create_issue(
+            "AO",
+            "idem-subtask-1",
+            maintainer_run_id="maint-test-1",
+            issuetype_name="子任务",
+            summary="建立维护面工具路由门禁",
+            description="确保 AO Jira 写入只使用维护 Runtime。",
+            parent_key="AO-43",
+        )
+        self.assertEqual(
+            {
+                "key": "AO-43",
+                "issue_id": "41703",
+                "project_key": "AO",
+                "issue_type": "任务",
+            },
+            plan.payload["parent"],
+        )
+        self.assertEqual({"key": "AO-43"}, plan.payload["fields"]["parent"])
+        result = service.apply_create_issue(plan, plan.plan_id)
+        self.assertEqual(True, result["created"])
+        created_fields = transport.issues[-1]["fields"]
+        assert isinstance(created_fields, dict)
+        self.assertEqual({"key": "AO-43"}, created_fields["parent"])
+
+    def test_create_subtask_rejects_generic_parent_field(self) -> None:
+        service, transport = self._create_service()
+        transport.create_meta_payload = _ao_subtask_createmeta_payload()
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.plan_create_issue(
+                "AO",
+                "idem-subtask-2",
+                maintainer_run_id="maint-test-1",
+                issuetype_name="子任务",
+                summary="拒绝模糊父任务字段",
+                description="",
+                extra_fields={"parent": {"key": "AO-43"}},
+            )
+        self.assertEqual(
+            "jira_create_parent_requires_typed_argument", captured.exception.code
+        )
+
+    def test_create_subtask_rejects_cross_project_parent(self) -> None:
+        service, transport = self._create_service()
+        transport.create_meta_payload = _ao_subtask_createmeta_payload()
+        transport.issues.append(
+            _parent_issue(key="TAP-12289", issue_id="40000", project_key="TAP")
+        )
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.plan_create_issue(
+                "AO",
+                "idem-subtask-3",
+                maintainer_run_id="maint-test-1",
+                issuetype_name="子任务",
+                summary="拒绝跨项目父任务",
+                description="",
+                parent_key="TAP-12289",
+            )
+        self.assertEqual("jira_create_parent_project_mismatch", captured.exception.code)
+
+    def test_create_subtask_parent_change_blocks_apply(self) -> None:
+        service, transport = self._create_service()
+        transport.create_meta_payload = _ao_subtask_createmeta_payload()
+        transport.issues.append(_parent_issue())
+        plan = service.plan_create_issue(
+            "AO",
+            "idem-subtask-4",
+            maintainer_run_id="maint-test-1",
+            issuetype_name="子任务",
+            summary="父任务变化时阻断建卡",
+            description="",
+            parent_key="AO-43",
+        )
+        transport.issues[0]["id"] = "99999"
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.apply_create_issue(plan, plan.plan_id)
+        self.assertEqual("jira_create_parent_changed", captured.exception.code)
+
+    def test_create_subtask_parent_readback_mismatch_is_blocked(self) -> None:
+        service, transport = self._create_service()
+        transport.create_meta_payload = _ao_subtask_createmeta_payload()
+        transport.issues.append(_parent_issue())
+        plan = service.plan_create_issue(
+            "AO",
+            "idem-subtask-5",
+            maintainer_run_id="maint-test-1",
+            issuetype_name="子任务",
+            summary="回读校验子任务父级",
+            description="",
+            parent_key="AO-43",
+        )
+        result = service.apply_create_issue(plan, plan.plan_id)
+        created = next(
+            item for item in transport.issues if item.get("key") == result["external_id"]
+        )
+        fields = created["fields"]
+        assert isinstance(fields, dict)
+        fields["parent"] = {"key": "AO-44"}
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.readback_create_issue(plan, str(result["external_id"]))
+        self.assertEqual(
+            "jira_create_parent_readback_mismatch", captured.exception.code
+        )
+
     def test_create_issue_idempotent_no_op(self) -> None:
         service, transport = self._create_service()
         plan = service.plan_create_issue(
@@ -723,6 +878,8 @@ class MaintainerJiraCliTest(unittest.TestCase):
                 "desc.md",
                 "--assignee",
                 "712020:b86ae2c3-9527-4dad-9b5c-d1a79a9180f0",
+                "--parent",
+                "AO-43",
                 "--field",
                 "customfield_10353=研发模式",
                 "--idempotency-key",
@@ -735,6 +892,7 @@ class MaintainerJiraCliTest(unittest.TestCase):
         self.assertEqual("plan", args.action)
         self.assertEqual("AO", args.project_key)
         self.assertEqual("任务", args.issuetype)
+        self.assertEqual("AO-43", args.parent)
         self.assertEqual(["customfield_10353=研发模式"], args.field)
         # jira create apply 参数
         args_apply = parser.parse_args(

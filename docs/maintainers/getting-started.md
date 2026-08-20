@@ -45,7 +45,7 @@ bash maintainer/bin/init-maintainer-config.sh
 ./maintainer/bin/ao-maint jira inspect --issue-key AO-11
 ```
 
-`ao-maint jira` 与 developer 面的 `ao-work jira` 命令同名但独立实现，不读取业务项目工作空间凭证；写操作（评论、Worklog）沿用 `plan -> apply -> readback` 协议并显式要求 `user-confirmation:<KEY>:<plan_id>` 确认引用。同名命令只能通过入口识别工作面：`ao-maint` 的 jira 只用于维护 AgenticOps 源头任务（AO 项目），不用于执行业务研发任务。
+`ao-maint jira` 与 developer 面的 `ao-work jira` 命令同名但独立实现，不读取业务项目工作空间凭证；建卡、评论、Worklog 和状态流转沿用 `plan -> apply -> readback` 协议并显式要求 `user-confirmation:<KEY>:<plan_id>` 确认引用。创建 Jira 子任务时必须使用 `jira create plan --issuetype 子任务 --parent <PARENT-KEY>`，Runtime 会回读父任务并校验项目、类型和写前事实；禁止通过通用 `--field` 猜测 `parent` 结构。同名命令只能通过入口识别工作面：`ao-maint` 的 jira 只用于维护 AgenticOps 源头任务（AO 项目），不用于执行业务研发任务。
 
 如果只是修改文档，至少检查工作区状态、目标文档链接和术语一致性。修改运行代码时，必须执行对应 maintainer/developer 单元、边界、安装或端到端验证。
 

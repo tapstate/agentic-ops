@@ -149,6 +149,7 @@ class JiraClient:
                     "status",
                     "issuetype",
                     "assignee",
+                    "parent",
                     "project",
                 }
             )
