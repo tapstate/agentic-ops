@@ -13,7 +13,7 @@ from ao_work.config import (
 from ao_work.jira.client import JiraClient, UrllibJiraTransport, with_forced_order
 from ao_work.jira.service import JiraService
 from ao_work.jira.transition import match_transition
-from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
+from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, write_diagnostic
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.workspace import Workspace
 
@@ -269,8 +269,12 @@ def _entry_status(profile: Any) -> str:
 def _existing_task(store: TaskStore, issue_key: str) -> dict[str, Any] | None:
     try:
         state = store.inspect(issue_key)
-    except Exception:
-        return None
+    except RuntimeErrorResult as error:
+        if error.code == "task_state_not_found":
+            # 任务尚未初始化：可预期降级，留痕一次（首次完整信息）。
+            write_diagnostic(f"任务 {issue_key} 尚无本地状态，将新建接管记录")
+            return None
+        raise
     if not isinstance(state, dict):
         return None
     task = state.get("task")
