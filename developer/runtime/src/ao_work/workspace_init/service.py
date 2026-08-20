@@ -29,13 +29,14 @@ from ao_work.config import (
 )
 from ao_work.config.env import resolve_secret_pair_with_source, update_env_file
 from ao_work.installation import (
+    install_user_dir,
     load_install_credentials,
     load_install_identity,
     save_install_credentials,
-    install_user_dir,
 )
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.git_security import github_repository_url_matches
+from ao_work.managed_io import read_managed_text
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, write_diagnostic
 from ao_work.task_state.io import atomic_write_json, atomic_write_text, read_json
 from ao_work.task_state.locking import TaskLock
@@ -436,6 +437,7 @@ class WorkspaceInitializer:
                     source_status, skipped_members = self._prepare_pool_members(
                         candidate, preflight
                     )
+                    self._persist_pool_root(candidate)
                     write_diagnostic(f"池成员准备完成（{source_status}）")
                 else:
                     write_diagnostic(
@@ -1002,6 +1004,36 @@ class WorkspaceInitializer:
             f"{MANAGED_CODE_END}\n"
         )
         atomic_write_text(container / "README.md", content)
+
+    def _persist_pool_root(self, candidate: WorkspaceCandidate) -> None:
+        """把显式 --source-pool-root 持久化为研发员级配置（install user/config.yaml）。
+
+        只补 source_pool_root 键，保留 config.yaml 已有内容；写入失败不阻断初始化
+        （池根在本次运行内已生效，缺失时后续 preflight/takeover 会提示重新配置）。
+        """
+        if candidate.source_pool_root is None:
+            return
+        user_dir = install_user_dir(candidate.install_root)
+        config_path = user_dir / "config.yaml"
+        try:
+            user_dir.mkdir(parents=True, exist_ok=True)
+            existing: dict[str, Any] = {}
+            if config_path.is_file():
+                try:
+                    content = read_managed_text(config_path, label="研发员级配置 config.yaml") or ""
+                    parsed = yaml.safe_load(content)
+                    if isinstance(parsed, dict):
+                        existing = parsed
+                except Exception:
+                    existing = {}
+            existing["source_pool_root"] = str(candidate.source_pool_root)
+            atomic_write_text(
+                config_path,
+                yaml.safe_dump(existing, allow_unicode=True, sort_keys=False),
+            )
+        except Exception:
+            # 持久化失败不阻断本次池模式初始化。
+            return
 
     def _prepare_pool_members(
         self,

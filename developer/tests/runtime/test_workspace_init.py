@@ -411,6 +411,29 @@ class WorkspaceInitTest(unittest.TestCase):
             "--confirm",
         )
 
+    def test_pool_mode_init_persists_source_pool_root_to_user_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install = self.prepare_install(root)
+            # 移除预置的 config.yaml，模拟全新安装（只有 install.sh 创建的空配置）。
+            user_config = install / "user" / "config.yaml"
+            user_config.write_text("", encoding="utf-8")
+            workspace = root / "workspace"
+            workspace.mkdir()
+            explicit_pool = root / "explicit-pool"
+            explicit_pool.mkdir(parents=True, exist_ok=True)
+            exit_code, payload, stderr, _ = self.run_cli(
+                (
+                    *self._init_common_args(workspace, "persist-pool"),
+                    "--source-pool-root",
+                    str(explicit_pool),
+                )
+            )
+            self.assertEqual(0, exit_code, payload)
+            persisted = user_config.read_text(encoding="utf-8")
+            self.assertIn(str(explicit_pool), persisted)
+            self.assertIn("source_pool_root", persisted)
+
     def test_non_interactive_init_skips_permission_denied_pool_member(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
