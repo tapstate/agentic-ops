@@ -4,12 +4,13 @@ import argparse
 import sys
 from typing import Sequence
 
-from ao_maint.cli_common import ArgumentParserError, JsonArgumentParser
+from ao_maint.cli_common import ArgumentParserError, HelpRequested, JsonArgumentParser
 from ao_maint.install.cli import configure_install_parser, execute_install
 from ao_maint.integration.cli import configure_integration_parser, execute_integration
 from ao_maint.jira.cli import configure_jira_parser, execute_jira
 from ao_maint.output import EXIT_BLOCKED, RuntimeErrorResult, failure, success, write_diagnostic, write_json
 from ao_maint.story_gate.cli import configure_story_parser, execute_story
+from ao_maint.takeover.cli import configure_takeover_parser, execute_takeover
 from ao_maint.workspace import resolve_maintainer_workspace
 
 
@@ -21,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     configure_integration_parser(subparsers)
     configure_install_parser(subparsers)
     configure_jira_parser(subparsers)
+    configure_takeover_parser(subparsers)
     return parser
 
 
@@ -45,6 +47,9 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
     if args.group == "jira":
         state = execute_jira(args, workspace.root)
         return success(operation_name(args), workplane=workspace.workplane, **state)
+    if args.group == "takeover":
+        state = execute_takeover(args, workspace.root)
+        return success(operation_name(args), workplane=workspace.workplane, **state)
     raise RuntimeErrorResult(
         code="capability_gap",
         message="当前 maintainer Runtime 尚未提供该操作",
@@ -59,11 +64,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         arguments = list(argv) if argv is not None else sys.argv[1:]
         parser = build_parser()
-        if "--help" in arguments or "-h" in arguments:
-            write_json(success("help", usage=parser.format_help()))
-            return 0
         args = parser.parse_args(arguments)
         write_json(execute(args))
+        return 0
+    except HelpRequested as help_request:
+        write_json(success("help", usage=help_request.usage))
         return 0
     except ArgumentParserError as error:
         result = RuntimeErrorResult(

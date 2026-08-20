@@ -30,9 +30,22 @@ Git 必须通过 common directory 中的 trusted launcher 从已接受 `HEAD` �
 
 maintainer 面处理任何 Jira 任务（建卡、实现、修复、规则演进等）时，必须遵守以下处理流程：
 
-1. 开始处理任务：先向任务写一条中文评论（说明开始处理的内容与计划），再把任务状态流转为「正在进行」。
-2. 合并代码后：向任务写一条中文总结评论（说明实现内容、验证结果与风险），再把任务状态流转为「已完成」。
+1. 用户要求“接管 `<AO-KEY>`”时只调用 `ao-maint takeover <AO-KEY>`；Runtime 自动判断新接管、恢复、接纳存量或阻断。
+2. 新接管：Runtime 先向任务写一条中文评论（说明开始处理的内容与计划），再把任务状态流转为「正在进行」，并逐项回读。
+3. 恢复或接纳存量：必须向用户明文说明判定模式并留下审计；所有权、范围或外部事实不明确时进入风险决策门禁。
+4. 设计审查确认后：形成绑定 Jira 工作项、`maintainer_run_id`、Agent、源头仓库、工作分支、设计摘要、修改范围和验证方式的工作项级连续执行授权。
+5. 授权范围内：分析、实现、验证和必要 Jira 进度回写连续推进，不逐项暂停。
+6. 提交前：对精确 staged 内容、故事影响、验证结果、提交信息和推送目标进行一次人工确认；确认后才允许提交及其覆盖的允许分支推送。
+7. 合并代码后：向任务写一条中文总结评论（说明实现内容、验证结果与风险），再把任务状态流转为「已完成」。
 
-评论与状态流转必须通过 `ao-maint jira` 的 plan → apply → readback 门禁执行，并留下 `user-confirmation:<KEY>:<plan_id>` 授权引用与决策审计记录。不得绕过 Runtime 直接调用 Jira REST API 建卡、评论或流转状态；发现能力缺口时先补齐 Runtime 能力，再执行任务操作。
+接管、评论与状态流转必须通过 `ao-maint` Runtime 执行。底层 Jira 写入仍执行 plan → apply → readback：人工门禁使用精确的 `user-confirmation:<KEY>:<plan_id>`，设计确认后的常规写入可使用 Runtime 回读有效的 `work-authorization:<KEY>:<RUN>:<DESIGN-DIGEST>`，并留下决策审计记录。工作项连续授权不覆盖 Jira 建卡和任务描述整体替换，也不覆盖 `main`、合并、发布、Git Tag、强推、历史改写、范围变化或风险决策。不得绕过 Runtime 直接调用 Connector、Jira REST API 或 Shell 网络请求；发现能力缺口时先补齐 Runtime 能力，再执行任务操作。
+
+以下是 maintainer 工作面的固定暂停点：
+
+- 设计审查：确认版本化设计或当前任务设计摘要，并据此建立连续执行授权。
+- 提交前确认：绑定精确 staged 内容、故事影响、验证结果、提交信息和推送目标。
+- 风险决策：所有权、范围、仓库、分支、验证、外部事实发生变化，或外部写入结果不明确、连续失败时。
+
+除上述暂停点和独立的受保护操作门禁外，正常推进不得反复请求确认。
 
 评论正文必须按公共评论模板（`shared/standards/jira-comment-template.schema.json`，人读版见 `docs/templates/evidence-templates.md`）组织：`progress`（进度上报/开始处理，重点=进度与任务状态）与 `evidence`（结果反馈/完成总结，重点=总结）评论必须包含 Schema 声明的全部必填键（运行 ID、当前阶段/已完成动作/执行计划/风险 或 完成内容/验证结果/残留风险/已输出表单字段），缺失即被 `ao-maint jira comment plan` 阻断。执行者与工作空间只在任务接管评论声明（代表哪个 Agent 正在处理），字段为执行者 agent_id、Agent 类型、模型、接管环境、运行 ID；身份来自 `ao-maint install identity set` 配置（plan 输出带出 agent_id/agent_type/model/environment）。写评论前先读取任务 Description 与模板提取事实，不得只写一句话或凭记忆临场发挥。

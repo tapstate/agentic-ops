@@ -46,6 +46,19 @@ class WorkplaneBoundaryTest(unittest.TestCase):
             "maintainer 的 jira 命令必须由 ao_maint 包内模块实现",
         )
 
+    def test_maintainer_task_standard_is_versioned_for_every_worktree(self) -> None:
+        maintainer_entry = (self.ROOT / "maintainer/AGENTS.md").read_text(
+            encoding="utf-8"
+        )
+        source_rule = (
+            self.ROOT / "maintainer/rules/source-maintenance.md"
+        ).read_text(encoding="utf-8")
+        skill = self.ROOT / "maintainer/skills/maintain-ao-task/SKILL.md"
+        self.assertIn("ao-maint takeover <AO-KEY>", maintainer_entry)
+        self.assertIn("设计审查、提交前精确内容确认、风险", maintainer_entry)
+        self.assertIn("work-authorization:<KEY>:<RUN>:<DESIGN-DIGEST>", source_rule)
+        self.assertTrue(skill.is_file())
+
     def test_no_parser_level_can_switch_workplane(self) -> None:
         parser = build_maintainer_parser()
         self.assertEqual(set(), self._all_option_strings(parser) & self.SWITCH_FLAGS)
