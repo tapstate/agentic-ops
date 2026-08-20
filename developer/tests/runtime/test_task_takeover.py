@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from ao_work.jira.adf import markdown_to_adf, plain_text
-from ao_work.jira.client import TransportResponse
+from ao_work.jira.client import JiraTransportError, TransportResponse
 from ao_work.output import RuntimeErrorResult
 from ao_work.task_state import TaskStore
 from ao_work.work_cli import main
@@ -22,6 +22,11 @@ class TakeoverTransport:
         assignee: str = "jira-account-1",
         status: str = "打开",
         transitions: list[dict[str, str]] | None = None,
+        comment_post_mode: str = "normal",
+        transition_post_mode: str = "normal",
+        status_on_issue_read: dict[int, str] | None = None,
+        fail_comment_reads: set[int] | None = None,
+        fail_issue_reads: set[int] | None = None,
     ) -> None:
         self.assignee = assignee
         self.status = status
@@ -34,6 +39,13 @@ class TakeoverTransport:
         self.transition_executed: str | None = None
         self.search_issues: list[dict[str, object]] = []
         self.comments: list[dict[str, object]] = []
+        self.comment_post_mode = comment_post_mode
+        self.transition_post_mode = transition_post_mode
+        self.status_on_issue_read = status_on_issue_read or {}
+        self.issue_read_count = 0
+        self.comment_read_count = 0
+        self.fail_comment_reads = fail_comment_reads or set()
+        self.fail_issue_reads = fail_issue_reads or set()
 
     def request(
         self,
@@ -60,6 +72,9 @@ class TakeoverTransport:
                 {"accountId": "jira-account-1", "displayName": "Harsen Test Bot"},
             )
         if path == "/rest/api/3/issue/TAP-12289/comment" and method == "GET":
+            self.comment_read_count += 1
+            if self.comment_read_count in self.fail_comment_reads:
+                raise JiraTransportError("simulated comment read failure")
             return TransportResponse(
                 200,
                 {
@@ -70,6 +85,8 @@ class TakeoverTransport:
                 },
             )
         if path == "/rest/api/3/issue/TAP-12289/comment" and method == "POST":
+            if self.comment_post_mode == "raise_without_write":
+                raise JiraTransportError("simulated comment response loss")
             comment = {
                 "id": str(9000 + len(self.comments) + 1),
                 "body": body["body"],
@@ -77,6 +94,8 @@ class TakeoverTransport:
                 "created": "2026-08-20T08:00:00.000+0800",
             }
             self.comments.append(comment)
+            if self.comment_post_mode == "write_then_raise":
+                raise JiraTransportError("simulated comment response loss")
             return TransportResponse(201, comment)
         if path.startswith("/rest/api/3/issue/TAP-12289/comment/") and method == "GET":
             comment_id = path.rsplit("/", 1)[-1]
@@ -85,6 +104,12 @@ class TakeoverTransport:
                     return TransportResponse(200, comment)
             return TransportResponse(404, None)
         if path == "/rest/api/3/issue/TAP-12289" and method == "GET":
+            self.issue_read_count += 1
+            if self.issue_read_count in self.fail_issue_reads:
+                raise JiraTransportError("simulated issue read failure")
+            self.status = self.status_on_issue_read.get(
+                self.issue_read_count, self.status
+            )
             fields: dict[str, object] = {
                 "project": {"key": "TAP"},
                 "summary": "减少 AgenticOps 配置阻塞",
@@ -108,7 +133,14 @@ class TakeoverTransport:
                 )
             if method == "POST":
                 self.transition_executed = str(body["transition"]["id"])
+                if self.transition_post_mode == "raise_without_write":
+                    raise JiraTransportError("simulated transition response loss")
+                if self.transition_post_mode == "third_then_raise":
+                    self.status = "代码评审"
+                    raise JiraTransportError("simulated transition response loss")
                 self.status = "正在进行"
+                if self.transition_post_mode == "write_then_raise":
+                    raise JiraTransportError("simulated transition response loss")
                 return TransportResponse(204, None)
         return TransportResponse(404, None)
 
@@ -251,6 +283,10 @@ class TaskTakeoverTest(unittest.TestCase):
             inspected["takeover_recovery"]["operation"]["human_notice"],
         )
         self.assertTrue(payload["takeover_comment_verified"])
+        self.assertEqual("jira-account-1", payload["takeover_comment_author"])
+        self.assertTrue(payload["takeover_comment_author_verified"])
+        self.assertEqual("正在进行", payload["jira_status_target"])
+        self.assertTrue(payload["state_consistent"])
         self.assertTrue(payload["agentic_takeover_at"])
         self.assertRegex(
             payload["intake_source"]["context_digest"], r"^[0-9a-f]{64}$"
@@ -277,6 +313,21 @@ class TaskTakeoverTest(unittest.TestCase):
             ("POST", "/rest/api/3/issue/TAP-12289/transitions")
         )
         self.assertLess(comment_write, transition_write)
+        first_run = payload["agentic_run_id"]
+        transition_writes = transport.requests.count(
+            ("POST", "/rest/api/3/issue/TAP-12289/transitions")
+        )
+        code, repeated, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (repeated, stderr))
+        self.assertEqual(first_run, repeated["agentic_run_id"])
+        self.assertEqual("new_takeover", repeated["takeover_kind"])
+        self.assertEqual(1, len(transport.comments))
+        self.assertEqual(
+            transition_writes,
+            transport.requests.count(
+                ("POST", "/rest/api/3/issue/TAP-12289/transitions")
+            ),
+        )
 
     def test_takeover_checks_transition_before_writing_comment(self) -> None:
         transport = TakeoverTransport(status="打开", transitions=[])
@@ -470,69 +521,267 @@ class TaskTakeoverTest(unittest.TestCase):
         self.assertFalse(payload["task_state_created"])
 
     def test_takeover_resume_is_explicit_and_idempotent(self) -> None:
-        from ao_work.task_state import TaskIdentity, TaskStore
-
-        store = TaskStore(Path(self.workspace))
-        store.initialize(
-            TaskIdentity(
-                connection_id="tapdata-cloud",
-                jira_issue_id="12289",
-                issue_key="TAP-12289",
-                project_key="TAP",
-                agentic_run_id="run-TAP-12289-resume",
-            )
-        )
-        store.record_gate_transition(
-            "TAP-12289",
-            "run-TAP-12289-resume",
-            stage="takeover_started",
-            next_action="run_development",
-            operation="takeover_task",
-            status="completed",
-            evidence={"agent_id": "harsen-mini-test-bot"},
-        )
         transport = TakeoverTransport(status="正在进行")
         code, payload, stderr = self.run_cli(transport)
         self.assertEqual(0, code, (payload, stderr))
-        self.assertEqual("resume_takeover", payload["takeover_kind"])
+        self.assertEqual("accept_existing_task", payload["takeover_kind"])
         self.assertIn("不是新接管", payload["human_notice"])
         self.assertIn(
-            "恢复既有运行（不是新接管）",
+            "接纳存量任务（不是新接管）",
             plain_text(transport.comments[0]["body"]),
         )
+        first_run = payload["agentic_run_id"]
         code, payload, stderr = self.run_cli(transport)
         self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual("accept_existing_task", payload["takeover_kind"])
+        self.assertEqual(first_run, payload["agentic_run_id"])
         self.assertEqual(1, len(transport.comments))
 
     def test_takeover_does_not_reuse_foreign_marker_comment(self) -> None:
-        from ao_work.task_state import TaskIdentity, TaskStore
-
-        store = TaskStore(Path(self.workspace))
-        store.initialize(
-            TaskIdentity(
-                connection_id="tapdata-cloud",
-                jira_issue_id="12289",
-                issue_key="TAP-12289",
-                project_key="TAP",
-                agentic_run_id="run-TAP-12289-foreign-marker",
-            )
-        )
-        store.record_gate_transition(
-            "TAP-12289",
-            "run-TAP-12289-foreign-marker",
-            stage="takeover_started",
-            next_action="run_development",
-            operation="takeover_task",
-            status="completed",
-            evidence={"agent_id": "harsen-mini-test-bot"},
-        )
         transport = TakeoverTransport(status="正在进行")
         code, payload, stderr = self.run_cli(transport)
         self.assertEqual(0, code, (payload, stderr))
         transport.comments[0]["author"] = {"accountId": "someone-else"}
         code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("takeover_comment_evidence_conflict", payload["code"])
+        self.assertEqual(1, len(transport.comments))
+
+    def test_comment_response_loss_recovers_from_verified_readback(self) -> None:
+        transport = TakeoverTransport(comment_post_mode="write_then_raise")
+        code, payload, stderr = self.run_cli(transport)
         self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual("local_finalized", payload["takeover_phase"])
+        self.assertEqual(1, len(transport.comments))
+        self.assertEqual("11", transport.transition_executed)
+
+    def test_comment_response_loss_with_verified_absence_is_retryable(self) -> None:
+        transport = TakeoverTransport(comment_post_mode="raise_without_write")
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("takeover_comment_retryable_absent", payload["code"])
+        self.assertTrue(payload["retry_safe"])
+        self.assertIsNone(transport.transition_executed)
+        operation = TaskStore(Path(self.workspace)).inspect("TAP-12289")[
+            "takeover_recovery"
+        ]["operation"]
+        self.assertEqual("intent_persisted", operation["phase"])
+        self.assertEqual("in_progress", operation["result"])
+
+        transport.comment_post_mode = "normal"
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual(1, len(transport.comments))
+
+    def test_comment_write_without_reliable_readback_becomes_uncertain(self) -> None:
+        transport = TakeoverTransport(fail_comment_reads={3})
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("takeover_comment_result_uncertain", payload["code"])
+        self.assertFalse(payload["retry_safe"])
+        self.assertEqual(1, len(transport.comments))
+        self.assertIsNone(transport.transition_executed)
+        operation = TaskStore(Path(self.workspace)).inspect("TAP-12289")[
+            "takeover_recovery"
+        ]["operation"]
+        self.assertEqual("intent_persisted", operation["phase"])
+        self.assertEqual("uncertain", operation["result"])
+
+        transport.fail_comment_reads.clear()
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual(1, len(transport.comments))
+
+    def test_transition_response_loss_recovers_from_target_status(self) -> None:
+        transport = TakeoverTransport(transition_post_mode="write_then_raise")
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual("正在进行", payload["jira_status_after"])
+        self.assertTrue(payload["transition_applied"])
+        self.assertEqual(1, len(transport.comments))
+
+    def test_transition_response_loss_at_original_status_is_recoverable(self) -> None:
+        transport = TakeoverTransport(transition_post_mode="raise_without_write")
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("takeover_transition_retryable_original", payload["code"])
+        self.assertTrue(payload["retry_safe"])
+        self.assertEqual(1, len(transport.comments))
+        operation = TaskStore(Path(self.workspace)).inspect("TAP-12289")[
+            "takeover_recovery"
+        ]["operation"]
+        self.assertEqual("comment_verified", operation["phase"])
+
+        transport.transition_post_mode = "normal"
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual(1, len(transport.comments))
+
+    def test_transition_readback_failure_becomes_uncertain(self) -> None:
+        transport = TakeoverTransport(fail_issue_reads={4})
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("takeover_transition_result_uncertain", payload["code"])
+        self.assertFalse(payload["retry_safe"])
+        self.assertEqual(1, len(transport.comments))
+        operation = TaskStore(Path(self.workspace)).inspect("TAP-12289")[
+            "takeover_recovery"
+        ]["operation"]
+        self.assertEqual("comment_verified", operation["phase"])
+        self.assertEqual("uncertain", operation["result"])
+
+        transport.fail_issue_reads.clear()
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual(1, len(transport.comments))
+
+    def test_transition_third_party_status_stops_for_risk_review(self) -> None:
+        transport = TakeoverTransport(transition_post_mode="third_then_raise")
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("takeover_status_external_conflict", payload["code"])
+        self.assertFalse(payload["retry_safe"])
+        self.assertEqual(1, len(transport.comments))
+        transition_writes = transport.requests.count(
+            ("POST", "/rest/api/3/issue/TAP-12289/transitions")
+        )
+
+        transport.status = "正在进行"
+        transport.transition_post_mode = "normal"
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("takeover_status_external_conflict", payload["code"])
+        self.assertEqual(
+            transition_writes,
+            transport.requests.count(
+                ("POST", "/rest/api/3/issue/TAP-12289/transitions")
+            ),
+        )
+
+    def test_pre_comment_fact_drift_blocks_without_comment_or_transition(self) -> None:
+        transport = TakeoverTransport(status_on_issue_read={2: "正在进行"})
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("takeover_preflight_facts_changed", payload["code"])
+        self.assertEqual([], transport.comments)
+        self.assertIsNone(transport.transition_executed)
+
+    def test_jira_success_local_failure_recovers_without_external_rewrite(self) -> None:
+        transport = TakeoverTransport()
+        with mock.patch(
+            "ao_work.task_takeover.record_current_task_source_context",
+            side_effect=OSError("simulated local source failure"),
+        ):
+            code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("takeover_local_finalize_failed", payload["code"])
+        self.assertTrue(payload["retry_safe"])
+        self.assertEqual(1, len(transport.comments))
+        transition_writes = transport.requests.count(
+            ("POST", "/rest/api/3/issue/TAP-12289/transitions")
+        )
+        self.assertEqual(1, transition_writes)
+
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual(1, len(transport.comments))
+        self.assertEqual(
+            transition_writes,
+            transport.requests.count(
+                ("POST", "/rest/api/3/issue/TAP-12289/transitions")
+            ),
+        )
+
+    def test_structured_local_finalize_failure_uses_stable_saga_code(self) -> None:
+        transport = TakeoverTransport()
+        local_error = RuntimeErrorResult(
+            code="task_source_context_invalid",
+            message="simulated structured local failure",
+            status="blocked",
+            exit_code=2,
+            retry_safe=False,
+            required_human_action="检查本地状态",
+        )
+        with mock.patch(
+            "ao_work.task_takeover.record_current_task_source_context",
+            side_effect=local_error,
+        ):
+            code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("takeover_local_finalize_failed", payload["code"])
+        self.assertFalse(payload["retry_safe"])
+        self.assertEqual(1, len(transport.comments))
+        self.assertEqual(
+            1,
+            transport.requests.count(
+                ("POST", "/rest/api/3/issue/TAP-12289/transitions")
+            ),
+        )
+
+    def test_duplicate_exact_marker_is_blocked_on_completed_replay(self) -> None:
+        transport = TakeoverTransport(status="正在进行")
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        duplicate = dict(transport.comments[0])
+        duplicate["id"] = "9999"
+        transport.comments.append(duplicate)
+
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("takeover_comment_duplicate", payload["code"])
         self.assertEqual(2, len(transport.comments))
+
+    def test_verified_legacy_takeover_migrates_without_jira_rewrite(self) -> None:
+        from ao_work.task_state import TaskIdentity
+
+        store = TaskStore(Path(self.workspace))
+        run_id = "run-TAP-12289-legacy"
+        store.initialize(
+            TaskIdentity(
+                connection_id="tapdata-cloud",
+                jira_issue_id="12289",
+                issue_key="TAP-12289",
+                project_key="TAP",
+                agentic_run_id=run_id,
+            )
+        )
+        marker = f"[agentic-ops-takeover:TAP-12289:{run_id}:legacy]"
+        store.record_gate_transition(
+            "TAP-12289",
+            run_id,
+            stage="takeover_started",
+            next_action="assess_task_intake",
+            operation="takeover_task",
+            status="completed",
+            evidence={
+                "agent_id": "harsen-mini-test-bot",
+                "takeover_kind": "accept_existing_task",
+                "takeover_comment_id": "9001",
+                "takeover_comment_marker": marker,
+                "agentic_takeover_at": "2026-08-20T08:00:00Z",
+                "jira_status_before": "正在进行",
+                "jira_status_after": "正在进行",
+                "authorization_reference": (
+                    "user-confirmation:TAP-12289:takeover-test"
+                ),
+            },
+        )
+        transport = TakeoverTransport(status="正在进行")
+        transport.comments.append(
+            {
+                "id": "9001",
+                "body": markdown_to_adf(f"旧接管记录\n\n{marker}"),
+                "author": {"accountId": "jira-account-1"},
+                "created": "2026-08-20T08:00:00.000+0800",
+            }
+        )
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual(run_id, payload["agentic_run_id"])
+        self.assertEqual("accept_existing_task", payload["takeover_kind"])
+        self.assertEqual("local_finalized", payload["takeover_phase"])
+        self.assertEqual(1, len(transport.comments))
+        self.assertIsNone(transport.transition_executed)
 
 
 if __name__ == "__main__":

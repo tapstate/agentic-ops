@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -459,6 +460,7 @@ class TaskStore:
         transition_id: str | None,
         comment_marker: str,
         comment_content_sha256: str,
+        comment_markdown: str | None = None,
         planned_at: str | None = None,
     ) -> dict[str, Any]:
         """在第一次外部写入前持久化稳定接管意图。"""
@@ -470,42 +472,43 @@ class TaskStore:
             authorization_digest,
         )
         timestamp = planned_at or self._timestamp()
-        operation = validate_takeover_operation(
-            {
-                "schema_version": TAKEOVER_SCHEMA_VERSION,
-                "operation_id": operation_id,
-                "issue_key": issue_key,
-                "agentic_run_id": agentic_run_id,
-                "agent_id": agent_id,
-                "takeover_kind": takeover_kind,
-                "authorization_digest": authorization_digest,
-                "preflight_facts_sha256": preflight_facts_sha256,
-                "jira_status_before": jira_status_before,
-                "jira_status_target": jira_status_target,
-                "transition_id": transition_id,
-                "comment_marker": comment_marker,
-                "comment_content_sha256": comment_content_sha256,
-                "comment_id": None,
-                "comment_author": None,
-                "comment_author_verified": False,
-                "status_after": None,
-                "phase": "intent_persisted",
-                "result": "in_progress",
-                "external_result_certainty": "not_attempted",
-                "takeover_status": "in_progress",
-                "human_notice": human_notice(takeover_kind, "in_progress"),
-                "agentic_next_action": takeover_next_action(
-                    "ensure_takeover_comment",
-                    reason="稳定接管意图已落盘，继续确保受管 Comment 存在并回读",
-                ),
-                "failure_code": None,
-                "retry_safe": True,
-                "recovery_action": "ensure_takeover_comment",
-                "planned_at": timestamp,
-                "updated_at": timestamp,
-                "content_version": 1,
-            }
-        )
+        operation_payload = {
+            "schema_version": TAKEOVER_SCHEMA_VERSION,
+            "operation_id": operation_id,
+            "issue_key": issue_key,
+            "agentic_run_id": agentic_run_id,
+            "agent_id": agent_id,
+            "takeover_kind": takeover_kind,
+            "authorization_digest": authorization_digest,
+            "preflight_facts_sha256": preflight_facts_sha256,
+            "jira_status_before": jira_status_before,
+            "jira_status_target": jira_status_target,
+            "transition_id": transition_id,
+            "comment_marker": comment_marker,
+            "comment_content_sha256": comment_content_sha256,
+            "comment_id": None,
+            "comment_author": None,
+            "comment_author_verified": False,
+            "status_after": None,
+            "phase": "intent_persisted",
+            "result": "in_progress",
+            "external_result_certainty": "not_attempted",
+            "takeover_status": "in_progress",
+            "human_notice": human_notice(takeover_kind, "in_progress"),
+            "agentic_next_action": takeover_next_action(
+                "ensure_takeover_comment",
+                reason="稳定接管意图已落盘，继续确保受管 Comment 存在并回读",
+            ),
+            "failure_code": None,
+            "retry_safe": True,
+            "recovery_action": "ensure_takeover_comment",
+            "planned_at": timestamp,
+            "updated_at": timestamp,
+            "content_version": 1,
+        }
+        if comment_markdown is not None:
+            operation_payload["comment_markdown"] = comment_markdown
+        operation = validate_takeover_operation(operation_payload)
         with self._lock(issue_key):
             task_dir, task, progress, sync = self._load_takeover_files(
                 issue_key, agentic_run_id
@@ -1220,6 +1223,32 @@ class TaskStore:
         raw = sync.get("takeover_operation")
         if raw is None:
             legacy_event = self._latest_legacy_takeover_event(task_dir)
+            legacy_evidence = (
+                legacy_event.get("evidence")
+                if isinstance(legacy_event, dict)
+                and isinstance(legacy_event.get("evidence"), dict)
+                else {}
+            )
+            authorization_reference = str(
+                legacy_evidence.get("authorization_reference") or ""
+            )
+            recoverable_evidence = {
+                key: legacy_evidence.get(key)
+                for key in (
+                    "agent_id",
+                    "takeover_kind",
+                    "takeover_comment_id",
+                    "takeover_comment_marker",
+                    "agentic_takeover_at",
+                    "jira_status_before",
+                    "jira_status_after",
+                )
+                if legacy_evidence.get(key) is not None
+            }
+            if authorization_reference:
+                recoverable_evidence["authorization_digest"] = hashlib.sha256(
+                    authorization_reference.encode("utf-8")
+                ).hexdigest()
             return {
                 "operation": None,
                 "legacy_state": {
@@ -1227,6 +1256,7 @@ class TaskStore:
                     "progress_stage": progress.get("stage"),
                     "legacy_takeover_event_found": legacy_event is not None,
                     "agentic_run_id": task.get("agentic_run_id"),
+                    "evidence": recoverable_evidence,
                 },
                 "migration_required": legacy_event is not None,
                 "state_consistent": legacy_event is None,
