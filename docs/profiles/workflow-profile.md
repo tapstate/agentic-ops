@@ -156,7 +156,7 @@ templates:
 
 Profile 的 `statuses` 与 `transitions` 节是 Jira 工作流适配的唯一配置点；Jira 状态流程易变，适配只改配置、不改 Runtime 代码：
 
-- `statuses`：Jira 状态名 -> 标准 stage（`waiting_takeover` / `implementation` / `completed`）。
+- `statuses`：Jira 状态名 -> 团队可见标准 stage（`waiting_takeover` / `implementation` / `completed`）。接管后的 `task_intake`、`solution_classification` 和 `design_review` 是本地内部阶段，不要求新增 Jira 状态。
 - `transitions`：transition key -> `{name, id, from, to}`。
   - `id` 为 Jira 稳定 transition ID，配置后 D-037 优先按 ID 匹配并校验 `from`/`to`。
   - 未配置 `id` 时按名称兜底，要求 Jira 可用列表中同名 transition 唯一且 `from`/`to` 匹配。
@@ -191,11 +191,11 @@ jira_form_mapping:
       source: jira_field
       jira_field: customfield_target_repo
       fallback: workspace_repo_mapping
-      required_from_stage: takeover_gate
+      required_from_stage: design_review
     verification_method:
       source: jira_description_section
       section: 验证方式
-      required_from_stage: takeover_gate
+      required_from_stage: design_review
 ```
 
 ## 6. Jira Transition Mapping

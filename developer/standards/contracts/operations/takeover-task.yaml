@@ -1,26 +1,44 @@
 operation: takeover_task
 workplane: developer
-version: 1
-purpose: 研发工程师授权 AIAgent 接管一个已进入迭代的任务。
+version: 2
+purpose: 研发工程师明确要求接管任务后，由 Runtime 自动完成新接管、接纳存量或恢复留痕。
 task_type: task_takeover
 allowed_stages:
   - waiting_takeover
-  - takeover_gate
+  - takeover_started
+  - blocked
 required_inputs:
-  - issue_key
   - workspace
 input:
   issue_key:
     type: string
-    required: true
+    required: false
+    note: 缺省时只读列出候选，不执行接管。
   workspace:
     type: string
     required: true
+  authorization_reference:
+    type: string
+    required_for_write: true
+    source: explicit_user_takeover_instruction
+    user_visible: false
 preconditions:
-  - current_user_must_match_owner
-  - task_class_must_be_mapped_to_standard_process
   - issue_must_be_in_allowed_project
-  - jira_status_must_map_to_entry_stage
+  - current_user_must_match_assignee
+  - jira_status_and_transition_must_be_strictly_mapped
+  - workspace_agent_identity_must_be_available
+  - local_run_and_managed_comment_must_not_conflict
+selection_output:
+  takeover_status:
+    const: selection_required
+  selection_required:
+    const: true
+  candidates:
+    type: array
+  side_effects:
+    - must_not_write_jira
+    - must_not_transition_jira
+    - must_not_create_takeover_record
 output:
   workspace:
     type: string
@@ -32,52 +50,71 @@ output:
     type: string
   agentic_takeover_at:
     type: string
+  takeover_status:
+    type: string
+    enum:
+      - completed
   takeover_kind:
     type: string
     enum:
       - new_takeover
       - accept_existing_task
       - resume_takeover
+  human_notice:
+    type: string
+    non_new_must_include: 不是新接管
   takeover_comment_id:
     type: string
   takeover_comment_verified:
     type: boolean
-  task_type:
+  intake_source:
+    type: object
+    required_fields:
+      - context_digest
+      - source_context_path
+  jira_status_before:
     type: string
-  task_class:
+  jira_status_after:
     type: string
-  task_class_source:
-    type: string
-  process_id:
-    type: string
+  transition_applied:
+    type: boolean
   current_stage:
     type: string
     enum:
       - takeover_started
-      - blocked
-      - waiting_owner_confirmation
-  target_repo:
-    type: string
   agentic_next_action:
-    type: string
-    enum:
-      - proceed
-      - ask_owner
-      - blocked
+    type: object
+    required_fields:
+      - executor
+      - action
+      - required_inputs
+      - allowed_operations
+      - requires_authorization
+      - stop_workflow
+      - ownership_effect
+      - retry_gate
+post_takeover_analysis:
+  required_before_implementation:
+    - task_class
+    - process_id
+    - target_repo
+    - target_branch
+    - verification_method
+  missing_behavior: 自动从 Jira、Project Profile、源码和 Runtime 回读补全；事实冲突或必须由人取舍时进入风险决策。
 failure:
   codes:
     - owner_mismatch
-    - assignee_mismatch
     - assignee_changed
-    - task_class_mapping_gap
+    - agent_identity_missing
+    - agent_ownership_conflict
+    - external_task_state_conflict
+    - jira_status_mapping_missing
     - standard_process_mapping_gap
-    - unknown_jira_status
-    - invalid_takeover_stage
+    - jira_transition_mapping_gap
     - jira_adapter_config_failed
     - jira_issue_read_failed
     - jira_current_user_failed
-    - real_jira_confirmation_required
-    - jira_transition_mapping_gap
+    - authorization_reference_required
     - jira_takeover_comment_write_failed
     - jira_takeover_comment_readback_mismatch
     - jira_takeover_readback_failed
@@ -85,66 +122,19 @@ failure:
     - event_write_failed
     - missing_permission
     - workflow_transition_not_allowed
-  context:
-    jira_transition_mapping_gap:
-      may_include:
-        remote_write_completed:
-          type: boolean
-        readback_verified:
-          type: boolean
-        retry_safe:
-          type: boolean
-        agentic_run_id:
-          type: string
-        issue_key:
-          type: string
-    jira_takeover_readback_failed:
-      may_include:
-        remote_write_completed:
-          type: boolean
-        readback_verified:
-          type: boolean
-        retry_safe:
-          type: boolean
-        agentic_run_id:
-          type: string
-        issue_key:
-          type: string
-    jira_takeover_readback_mismatch:
-      may_include:
-        remote_write_completed:
-          type: boolean
-        readback_verified:
-          type: boolean
-        retry_safe:
-          type: boolean
-        agentic_run_id:
-          type: string
-        issue_key:
-          type: string
-    event_write_failed:
-      may_include:
-        remote_write_completed:
-          type: boolean
-        readback_verified:
-          type: boolean
-        retry_safe:
-          type: boolean
-        agentic_run_id:
-          type: string
-        issue_key:
-          type: string
 side_effects:
   - may_write_jira_comment
   - may_transition_jira_status
-  - may_create_takeover_record
+  - may_create_or_reuse_takeover_record
   - may_write_local_event
+  - may_write_local_source_context
   - must_not_modify_code
   - must_not_create_pr
 human_gate:
   required: false
+  authorization_basis: 用户明确表达“接管 <KEY>”即授权事实明确的常规接管；任务选择、事实冲突和不确定结果单独进入风险决策。
 retry_policy:
   retryable: false
   max_attempts: 0
-  redo_from_stage: takeover_gate
-redo_from_stage: takeover_gate
+  redo_from_stage: waiting_takeover
+redo_from_stage: waiting_takeover

@@ -25,13 +25,15 @@ Project Profile 提供 Jira 站点、Project、状态/字段映射和默认仓�
 
 每个任务按来源自动解析：工作空间提供研发员与仓库身份，Project Profile 提供项目默认，Jira 卡片提供任务事实，Runtime 生成 run/digest/timestamp，AI 只对卡片无法确定的计划、范围、分支和验证提出建议。用户只审查这些建议、权限与高风险决策；事实已一致时不得重复提问。
 
-收到 Jira key 且工作空间授权已确认后，先运行：
+收到 Jira key 且工作空间授权已确认后，先执行统一接管：
 
 ```sh
-ao-work task start <ISSUE-KEY>
+ao-work task takeover <ISSUE-KEY> --authorization-reference <INTERNAL_REFERENCE>
 ```
 
-该入口自动读取并核对 Jira Issue ID、Project、经办人、状态、标题、描述与任务类型，复用工作空间 Profile、账户和仓库，生成或恢复 `agentic_run_id` 与 Jira 内容摘要。它只创建本地运行状态，不执行正式 Jira 接管、不写 Jira、不提交或推送。
+用户明确表达“接管 <ISSUE-KEY>”即授权事实明确的常规接管，AIAgent 在内部生成 `INTERNAL_REFERENCE`，不得要求用户查看或确认。Runtime 自动读取并核对 Jira 负责人和状态，选择 `new_takeover`、`accept_existing_task` 或 `resume_takeover`，完成 Comment、必要的 Status transition 和本地状态回读；后两种必须明文提示“不是新接管”。当前 Runtime 原子入口仍为 `ao-work task takeover`，顶层 `ao-work takeover` 由 AO-48 收敛。
+
+接管成功后，Runtime 已提供或复用 `agentic_run_id`。随后由 AI 连续完成任务分类、流程、仓库、范围和验证方式分析；事实缺失时优先从 Jira、Project Profile、源码和 Runtime 回读补全，只有事实冲突、必须由人取舍或写入结果不明确时进入风险决策。
 
 先由 AI 把语义分析写成工作空间普通 JSON 输入；用户不填写该文件。调用：
 
@@ -39,33 +41,19 @@ ao-work task start <ISSUE-KEY>
 ao-work task intake assess --issue-key <KEY> --agentic-run-id <RUN> --input-file <相对JSON>
 ```
 
-Runtime 自动合并 `task start` 保存的 Jira、Project Profile、工作空间与运行快照，校验 Profile 必填字段、源码证据摘要、干净 HEAD、缺项、假设和影响，输出完整准入摘要及 `intake_digest`。Jira/Profile/Runtime 来源必须与快照值精确匹配；源码推断必须引用工作空间绑定源码中的普通文件及其 SHA-256，并明确仍需人工判断语义。必要信息仍缺失时，只能按同一 `retry_key` 用改变后的证据重试一次；耗尽后停止。
-
-把输出中的原始事实、补全值与来源、仍缺项、假设和影响完整展示给用户，不能只展示 digest。确认后调用：
-
-```sh
-ao-work task intake confirm --issue-key <KEY> --agentic-run-id <RUN> --confirm-intake-digest <DIGEST> --confirmed-by <NAME> --authorization-reference user-confirmation:<KEY>:<RUN>:<DIGEST>
-```
-
-该引用只是当前会话确认声明，不是独立身份回读。确认前不得形成最终方案或修改代码。确认后 AI 才形成方案 JSON，并调用：
+Runtime 自动合并接管后保存的 Jira、Project Profile、工作空间与运行快照，校验 Profile 必填字段、源码证据摘要、干净 HEAD、缺项、假设和影响，输出完整准入事实及 `intake_digest`。Jira/Profile/Runtime 来源必须与快照值精确匹配；源码推断必须引用工作空间绑定源码中的普通文件及其 SHA-256，并明确仍需人工判断语义。必要信息仍缺失时，只能按同一 `retry_key` 用改变后的证据重试一次；耗尽后停止。事实完整时不设置准入确认门禁，AI 直接形成方案 JSON，并调用：
 
 ```sh
 ao-work task solution classify --issue-key <KEY> --agentic-run-id <RUN> --input-file <相对JSON>
 ```
 
-Runtime 按固定风险标志和证据确定级别，优先级为 L4、L3、L2、L1：L1 直接进入正式接管门禁；L2 必须展示完整方案并用以下入口绑定当前 `solution_digest`：
-
-```sh
-ao-work task solution confirm --issue-key <KEY> --agentic-run-id <RUN> --confirm-solution-digest <DIGEST> --confirmed-by <NAME> --authorization-reference user-confirmation:<KEY>:<RUN>:<DIGEST>
-```
-
-L3 停止，先修改设计后重新准入；L4 停止并解决事实、权限或能力缺口。Jira/Profile 快照、源码 HEAD、源码证据、范围、风险或方案变化后，旧摘要和确认不得继续使用。
+Runtime 按固定风险标志和证据确定级别，优先级为 L4、L3、L2、L1：L1 展示完整设计并进入设计审查；L2 展示完整方案和逐项风险并进入风险决策；L3 由 AI 先修改设计再重新分析，之后仍进入设计审查；L4 停止并解决事实、权限或能力缺口。不得增加准入摘要确认、通用方案摘要确认或内部 digest 确认。Jira/Profile 快照、源码 HEAD、源码证据、范围、风险或方案变化后，旧分析和设计审查失效。
 
 之后每个 `ao-work` 环节只执行当次 JSON 中结构化 `agentic_next_action` 指定的动作。`executor` 只是当前步骤执行者，不是任务转派；`task_ownership.task_owner` 从接管到 PR 审查保持同一研发员，所有现役下一动作的 `ownership_effect` 必须为 `none`。未知 executor/action、required inputs 不齐、下一操作不在 `allowed_operations` 或 `stop_workflow=true` 时停止。只在 `retry_gate.allowed=true` 时允许同一 `retry_key` 再试一次；重试前必须回读状态、改变输入并记录 retry 事件，耗尽后转人工。如需转派，只能停止并由人决定；当前 `task_transfer` 为 `capability_gap`，AI、Runtime、reviewer 和项目工具都不得改变负责人。
 
 ## 校验输入
 
-1. 以 `task start` 输出和已确认工作空间身份生成 manifest；核对 Jira key、业务工作空间、`agent_id`、Project Profile、业务仓库、基线/任务/目标分支、保护分支、修改与非范围、验证 argv、允许外部动作、授权引用、PR endpoint 和确认摘要。同时显式核对 `task_binding` 中 Jira issue 内容摘要、`inputs/` 下批准计划文件及其原始 UTF-8 SHA-256；`execution_identity` 必须精确复用工作空间初始化时确认的 Git author/committer 姓名邮箱和 GitHub actor login，不得从操作系统用户名、主机名、全局 Git 配置或当前 `gh` 登录临场推断。
+1. 以统一接管输出和已确认工作空间身份生成 manifest；核对 Jira key、业务工作空间、`agent_id`、Project Profile、业务仓库、基线/任务/目标分支、保护分支、修改与非范围、验证 argv、允许外部动作、授权引用、PR endpoint 和设计审查事实。同时显式核对 `task_binding` 中 Jira issue 内容摘要、`inputs/` 下批准计划文件及其原始 UTF-8 SHA-256；`execution_identity` 必须精确复用工作空间初始化时确认的 Git author/committer 姓名邮箱和 GitHub actor login，不得从操作系统用户名、主机名、全局 Git 配置或当前 `gh` 登录临场推断。
 2. 运行 `ao-work capability list|show`。已实现操作才调用 `ao-work`；能力缺口按中文 `next_action` 转用项目认可工具或请求人工，禁止虚构旧命令。
 3. 检查工作空间初始化、Jira 授权、源码和 GitHub 权限。任何事实不一致或输入缺失都在副作用前停止。
 4. 执行 `ao-work task-run open --manifest <工作空间内相对路径>`。只能传相对普通文件；不得使用绝对路径、越界路径或 symlink。open 失败时不继续外部操作。

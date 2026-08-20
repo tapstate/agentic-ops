@@ -237,8 +237,22 @@ class TaskTakeoverTest(unittest.TestCase):
         self.assertEqual("正在进行", payload["jira_status_after"])
         self.assertTrue(payload["transition_applied"])
         self.assertEqual("new_takeover", payload["takeover_kind"])
+        self.assertEqual("completed", payload["takeover_status"])
+        self.assertEqual("已完成新接管。", payload["human_notice"])
         self.assertTrue(payload["takeover_comment_verified"])
         self.assertTrue(payload["agentic_takeover_at"])
+        self.assertRegex(
+            payload["intake_source"]["context_digest"], r"^[0-9a-f]{64}$"
+        )
+        self.assertTrue(
+            Path(payload["intake_source"]["source_context_path"]).is_file()
+        )
+        self.assertEqual(
+            "assess_task_intake", payload["agentic_next_action"]["action"]
+        )
+        self.assertFalse(
+            payload["agentic_next_action"]["requires_authorization"]
+        )
         self.assertEqual(1, len(transport.comments))
         comment = plain_text(transport.comments[0]["body"])
         self.assertIn("操作类型: 新接管", comment)
@@ -268,6 +282,7 @@ class TaskTakeoverTest(unittest.TestCase):
         self.assertFalse(payload["transition_applied"])
         self.assertEqual("正在进行", payload["jira_status_after"])
         self.assertEqual("accept_existing_task", payload["takeover_kind"])
+        self.assertIn("不是新接管", payload["human_notice"])
         self.assertIn(
             "接纳存量任务（不是新接管）",
             plain_text(transport.comments[0]["body"]),
@@ -327,6 +342,12 @@ class TaskTakeoverTest(unittest.TestCase):
         code, payload, stderr = self.run_cli(transport, issue_key=None)
         self.assertEqual(0, code, (payload, stderr))
         self.assertEqual(True, payload["selection_required"])
+        self.assertEqual("selection_required", payload["takeover_status"])
+        self.assertEqual(
+            "select_takeover_candidate",
+            payload["agentic_next_action"]["action"],
+        )
+        self.assertTrue(payload["agentic_next_action"]["stop_workflow"])
         self.assertEqual(3, payload["candidate_count"])
         candidates: list[dict[str, object]] = payload["candidates"]  # type: ignore[assignment]
         keys = [str(task["issue_key"]) for task in candidates]
@@ -345,6 +366,7 @@ class TaskTakeoverTest(unittest.TestCase):
         code, payload, stderr = self.run_cli(transport, issue_key=None)
         self.assertEqual(0, code, (payload, stderr))
         self.assertEqual(True, payload["selection_required"])
+        self.assertEqual("selection_required", payload["takeover_status"])
         self.assertEqual(0, payload["candidate_count"])
         self.assertEqual([], payload["candidates"])
 
@@ -462,6 +484,7 @@ class TaskTakeoverTest(unittest.TestCase):
         code, payload, stderr = self.run_cli(transport)
         self.assertEqual(0, code, (payload, stderr))
         self.assertEqual("resume_takeover", payload["takeover_kind"])
+        self.assertIn("不是新接管", payload["human_notice"])
         self.assertIn(
             "恢复既有运行（不是新接管）",
             plain_text(transport.comments[0]["body"]),

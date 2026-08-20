@@ -182,17 +182,17 @@ class TaskStateTest(unittest.TestCase):
             recorded = store.record_gate_transition(
                 IDENTITY.issue_key,
                 IDENTITY.agentic_run_id,
-                stage="task_intake_confirmed",
-                next_action="classify_solution",
-                operation="task_intake_confirm",
+                stage="solution_classification",
+                next_action="review_task_design",
+                operation="task_solution_classify",
                 status="completed",
                 evidence={"intake_digest": "a" * 64},
             )
             self.assertEqual(
-                "classify_solution",
+                "review_task_design",
                 recorded["progress"]["agentic_next_action"],
             )
-            self.assertEqual("task_intake_confirm", recorded["event"]["operation"])
+            self.assertEqual("task_solution_classify", recorded["event"]["operation"])
             self.assertEqual("a" * 64, recorded["event"]["evidence"]["intake_digest"])
             task_dir = root / ".agentic-ops" / "tasks" / IDENTITY.issue_key
             journal = [
@@ -202,7 +202,7 @@ class TaskStateTest(unittest.TestCase):
                 .splitlines()
             ]
             self.assertEqual(2, len(journal))
-            self.assertEqual("task_intake_confirm", journal[-1]["operation"])
+            self.assertEqual("task_solution_classify", journal[-1]["operation"])
 
     def test_all_public_methods_reject_path_components_before_any_write(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

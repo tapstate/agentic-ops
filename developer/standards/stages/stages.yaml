@@ -1,70 +1,61 @@
-# developer 面阶段注册表（AO-39 POC + AO-41 全量）
+# developer 面阶段注册表
 #
-# 阶段（stage）= 可复用的标准处理步骤声明：语义化 ID + 准入条件 + 准出决策。
-# 阶段独立于 Jira：阶段是内部执行依据，Jira 状态是外部事实源；
-# 阶段准出通过项目状态映射（profile.statuses/transitions）映射回 Jira。
-#
-# 约定：
-# - id：语义化小写 snake_case，从 ID 能看出阶段做什么
-# - admission：进入该阶段的前置条件（任务需具备的信息/授权）
-# - exit：准出决策。next_stage 为下一阶段；jira_transition 为映射的
-#   profile.transitions 键（只有声明了 jira_transition 的阶段才会自动流转
-#   Jira 状态，中间阶段只推进内部状态）；jira_transition 缺省表示不流转
-# - steps：阶段内的步骤（细粒度，供 AI 执行/恢复用）。步骤只有
-#   id/name/description/exit，不重复声明 admission（继承所属阶段的准入）
-# - 阶段从 development-change-v1.yaml 的 stages 提炼；implementation
-#   阶段内拆出步骤（AO-41）
+# 正式接管先于信息分析和具体流程选择。阶段独立于 Jira：Jira Status 是外部
+# 团队阶段，内部 stage 用于分析、设计、执行和恢复。只有声明 jira_transition
+# 的阶段才推动 Jira；其它内部阶段不改变 Jira 状态。
 
 schema_version: 2
 workplane: developer
 
 stages:
-  - id: task_intake
-    name: 任务准入
-    description: 拉取任务事实、补全信息、输出准入摘要并获得确认
-    admission:
-      - jira_issue_facts
-      - project_profile
-      - business_source_context
-    exit:
-      next_stage: solution_classification
-      # 准入不改变 Jira 状态（任务尚未接管），不流转
-
-  - id: solution_classification
-    name: 方案分级
-    description: 评估方案级别（L1-L4），确定直改/确认/改设计/升级
-    admission:
-      - confirmed_intake_digest
-    exit:
-      next_stage: waiting_takeover
-      # 方案确认不改变 Jira 状态，不流转
-
   - id: waiting_takeover
     name: 等待接管
-    description: 研发员确认接管任务，写入 agentic_run_id 等接管事实
+    description: 校验项目、负责人、状态映射和 Agent 身份，执行统一任务接管
     admission:
       - assignee
-      - task_class
-      - target_repo
+    exit:
+      next_stage: task_intake
+      jira_transition: start_progress
+
+  - id: task_intake
+    name: 任务信息分析
+    description: 接管后读取 Jira、Project Profile、源码和 Runtime 事实，自动补全可验证信息
+    admission:
+      - task_taken_over
+    exit:
+      next_stage: solution_classification
+
+  - id: solution_classification
+    name: 方案分析与风险分流
+    description: 自动形成方案并按证据分流到设计审查、风险决策、设计修订或阻断
+    admission:
+      - intake_digest
+    exit:
+      next_stage: design_review
+
+  - id: design_review
+    name: 设计审查
+    description: 展示完整方案、范围、验证方式和逐项风险，由研发工程师确认
+    admission:
+      - proposed_solution
+      - scope
+      - verification_method
+      - residual_risks
     exit:
       next_stage: implementation
-      jira_transition: start_progress
 
   - id: implementation
     name: 实现与验证
-    description: 按修复计划实现代码、验证、整理证据
+    description: 在有效设计授权范围内连续实现代码、验证并整理证据
     admission:
-      - jira_admission_facts_reinspected
       - task_taken_over
-      - versioned_fix_plan_written_to_jira
-      - development_engineer_decision_written_to_jira
+      - design_review_approved
     exit:
       next_stage: pr_review
-      # 实现完成进入 PR 审查，Jira 状态不变（仍 In Progress），不流转
     steps:
       - id: code_writing
         name: 编写代码
-        description: 按修复计划实现代码变更
+        description: 按已确认设计实现代码变更
         exit:
           next_step: test_writing
       - id: test_writing
@@ -74,35 +65,28 @@ stages:
           next_step: verification
       - id: verification
         name: 验证
-        description: 运行测试与验证，整理验证结果与残留风险
+        description: 运行测试与固定验收，整理验证结果和残留风险
         exit:
           next_step: null
-          # 步骤级终态：返回所属阶段（implementation）的准出
 
   - id: pr_review
-    name: PR 审查
-    description: 提交 PR，等待并处理审查意见直至通过
+    name: 代码审查
+    description: 绑定 PR 当前 Head 或 develop 本地 commit，展示变更、验证和风险
     admission:
       - execution_authorization
-      - authorization_reference
       - implementation_summary
       - verification_result
       - residual_risk
-      - pr_url
-      - fixed_head_sha
+      - code_review_reference
     exit:
       next_stage: completed
       jira_transition: complete
 
   - id: completed
     name: 完成
-    description: 回写完成证据与审计，清理接管状态
+    description: 回写完成证据与中文总结，关闭本地运行
     admission:
       - review_decision
-      - issue_analysis
-      - fix_details
-      - verification_method
       - agentic_completion_evidence
     exit:
       next_stage: null
-      # 终态阶段，无下一步

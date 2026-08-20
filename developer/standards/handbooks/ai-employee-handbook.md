@@ -120,8 +120,8 @@ ao-work auth jira verify
 
 ao-work jira list [--max-results <n>]
 ao-work jira inspect --issue-key TAP-123
-ao-work task takeover TAP-123 --agent-id <agent-id> --authorization-reference <reference>
-ao-work task takeover [--agent-id <agent-id>]   # 无编号：列出候选（按优先级排序）供确认
+ao-work task takeover TAP-123 --authorization-reference <internal-reference>  # 当前 Runtime 原子入口；用户只表达“接管 TAP-123”
+ao-work task takeover   # 无编号：只读列出候选供研发工程师选择
 ao-work task resume [--issue-key TAP-123 | --agentic-run-id <run-id>]
 ao-work jira comment plan --issue-key TAP-123 --idempotency-key <key> --category <category> --content-file <path> --plan-file .agentic-ops/tasks/TAP-123/runs/<agentic_run_id>/jira-plans/<name>.json
 ao-work jira comment apply --plan-file <managed-path> --confirm-plan-id <plan-id> --authorization-reference <reference>
@@ -136,6 +136,8 @@ ao-work jira transition plan --issue-key TAP-123 --idempotency-key <key> --targe
 ao-work jira transition apply --plan-file <managed-path> --confirm-plan-id <plan-id> --authorization-reference <reference>
 ao-work jira transition readback --issue-key TAP-123 --idempotency-key <key> --plan-file <managed-path> --confirm-plan-id <plan-id>
 ```
+
+任务接管发生在信息分析和具体流程选择之前。AIAgent 将研发工程师明确的“接管 <KEY>”指令绑定为内部授权引用，不要求研发工程师确认或复制内部参数。接管成功后，信息分析和方案分级连续推进，只在设计审查、代码审查或风险决策暂停。顶层 `ao-work takeover` 由 AO-48 落地前，本手册如实保留当前 Runtime 路径。
 
 ### workspace init 非交互全参示例
 

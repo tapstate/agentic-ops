@@ -15,6 +15,7 @@ from ao_work.jira.client import JiraClient, UrllibJiraTransport, with_forced_ord
 from ao_work.jira.service import JiraService
 from ao_work.jira.transition import match_transition
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, write_diagnostic
+from ao_work.task_start import record_current_task_source_context
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.workspace import Workspace
 
@@ -145,6 +146,7 @@ def execute_task_takeover(
         target_status=target_status,
         progress_stage=progress_stage,
     )
+    human_notice = _takeover_human_notice(takeover_kind)
     agentic_takeover_at = datetime.now(timezone.utc).isoformat()
     comment_marker = _takeover_comment_marker(
         issue.key,
@@ -183,11 +185,27 @@ def execute_task_takeover(
             "接管后 Jira 状态回读与目标状态不一致",
             "请人工核对 Jira 状态流转结果",
         )
+    mapped_readback_status = context.profile.status_mapping.get(readback.status)
+    if not mapped_readback_status:
+        raise _blocked(
+            "jira_status_mapping_missing",
+            f"Project Profile 未映射接管后 Jira 状态：{readback.status}",
+            "请核对 Project Profile 状态映射；来源快照未建立前不得继续分析",
+        )
+    source_context = record_current_task_source_context(
+        workspace,
+        store,
+        context=context,
+        account=account,
+        issue=readback,
+        agentic_run_id=agentic_run_id,
+        mapped_status=mapped_readback_status,
+    )
     store.record_gate_transition(
         issue.key,
         agentic_run_id,
         stage="takeover_started",
-        next_action="run_development",
+        next_action="assess_task_intake",
         operation="takeover_task",
         status="completed",
         evidence={
@@ -211,12 +229,24 @@ def execute_task_takeover(
         "jira_status_before": issue.status,
         "jira_status_after": readback.status,
         "transition_applied": bool(transitions),
+        "takeover_status": "completed",
         "takeover_kind": takeover_kind,
+        "human_notice": human_notice,
         "takeover_comment_id": takeover_comment_id,
         "takeover_comment_verified": True,
         "agentic_takeover_at": agentic_takeover_at,
         "current_stage": "takeover_started",
-        "agentic_next_action": "run_development",
+        "intake_source": source_context["intake_source"],
+        "agentic_next_action": {
+            "executor": "ai",
+            "action": "assess_task_intake",
+            "required_inputs": ["issue_key", "agentic_run_id", "intake_input_file"],
+            "allowed_operations": ["task_intake_assess"],
+            "requires_authorization": False,
+            "stop_workflow": False,
+            "ownership_effect": "none",
+            "reason": "接管与来源快照均已回读，继续执行信息分析和证据化补全",
+        },
     }
 
 
@@ -286,6 +316,15 @@ def _takeover_kind(
     return "new_takeover"
 
 
+def _takeover_human_notice(takeover_kind: str) -> str:
+    notices = {
+        "new_takeover": "已完成新接管。",
+        "accept_existing_task": "已接纳存量任务；这不是新接管。",
+        "resume_takeover": "已恢复当前工作空间的既有运行；这不是新接管。",
+    }
+    return notices[takeover_kind]
+
+
 def _takeover_comment_marker(
     issue_key: str,
     agentic_run_id: str,
@@ -330,7 +369,7 @@ def _takeover_comment(
         f"- 操作时间: `{takeover_at}`",
         f"- Jira 状态: `{current_status}` → `{target_status}`",
         "- 当前阶段: `takeover_started`",
-        "- 下一步动作: `run_development`",
+        "- 下一步动作: `assess_task_intake`",
     ]
     if extra and extra.strip():
         lines.extend(["- 补充说明:", extra.strip()])
@@ -439,11 +478,22 @@ def _takeover_candidates(context: Any, client: JiraClient, account_id: str) -> d
         reverse=True,
     )
     return {
+        "takeover_status": "selection_required",
         "selection_required": True,
         "candidate_count": len(tasks),
         "candidates": tasks,
         "credential_status": context.credential_status(),
         "note": "未提供 issue_key；请从候选列表确认目标任务后，带 issue_key 与授权引用重新执行 takeover",
+        "agentic_next_action": {
+            "executor": "human",
+            "action": "select_takeover_candidate",
+            "required_inputs": ["issue_key"],
+            "allowed_operations": ["takeover_task"],
+            "requires_authorization": True,
+            "stop_workflow": True,
+            "ownership_effect": "none",
+            "reason": "未指定任务编号；请从候选列表选择一个任务",
+        },
     }
 
 

@@ -162,7 +162,7 @@ class TaskStartTest(unittest.TestCase):
         )
         self.assertTrue(payload["task_state_created"])
         self.assertTrue(str(payload["agentic_run_id"]).startswith("run-TAP-12289-"))
-        self.assertEqual(6, len(payload["review_required"]))
+        self.assertEqual(3, len(payload["review_required"]))
         self.assertIn("从 Jira 自动读取", payload["issue"]["description"])
         self.assertEqual("ai", payload["agentic_next_action"]["executor"])
         self.assertEqual(
@@ -196,8 +196,19 @@ class TaskStartTest(unittest.TestCase):
         self.assertRegex(payload["intake_source"]["context_digest"], r"^[0-9a-f]{64}$")
         self.assertTrue(Path(payload["intake_source"]["source_context_path"]).is_file())
         self.assertEqual(
-            "present_filled_intake_for_user_confirmation",
+            "prepare_and_classify_solution",
             payload["intake_gate"]["required_sequence"][-1],
+        )
+        self.assertFalse(
+            payload["intake_gate"]["user_confirmation_required_before_solution"]
+        )
+        self.assertEqual(
+            "review_task_design",
+            payload["solution_gate"]["levels"]["L1"]["action"],
+        )
+        self.assertEqual(
+            "decide_solution_risk",
+            payload["solution_gate"]["levels"]["L2"]["action"],
         )
         self.assertEqual(
             {"L1", "L2", "L3", "L4"},

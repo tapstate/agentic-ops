@@ -47,17 +47,17 @@ AgenticOps 表单体系分为三层。
 | `iteration` | 所属迭代或计划窗口。 | 迭代管理员 | 进入迭代 |
 | `priority` | 任务优先级。 | 需求负责人、迭代管理员 | 进入迭代 |
 | `risk_level` | 风险等级。 | 研发工程师 | 进入迭代 |
-| `target_repo` | AI 需要读取和修改的目标仓库。 | 研发工程师、工作流配置 | AI 接管 |
-| `target_branch` | 目标基线分支。 | 研发工程师、工作流配置 | AI 接管 |
-| `verification_method` | 最小验证方式，例如命令、手动验收或 CI。 | 研发工程师 | AI 接管 |
-| `environment_context` | 需要的环境、账号、测试数据或约束摘要。 | 研发工程师 | AI 接管 |
-| `dependencies` | 外部依赖、前置任务或阻塞条件。 | 需求负责人、研发工程师 | AI 接管 |
+| `target_repo` | AI 需要读取和修改的目标仓库。 | 研发工程师、工作流配置 | 接管后分析、设计审查前 |
+| `target_branch` | 目标基线分支。 | 研发工程师、工作流配置 | 接管后分析、设计审查前 |
+| `verification_method` | 最小验证方式，例如命令、手动验收或 CI。 | 研发工程师 | 接管后分析、设计审查前 |
+| `environment_context` | 需要的环境、账号、测试数据或约束摘要。 | 研发工程师 | 接管后分析、实现前 |
+| `dependencies` | 外部依赖、前置任务或阻塞条件。 | 需求负责人、研发工程师 | 接管后分析、实现前 |
 | `agentic_run_id` | 一次 AI 执行记录的唯一编号；同一任务可以有多个历史 `agentic_run_id`。 | AgenticOps | 接管后 |
 | `agent_id` | 当前 AIAgent 的稳定身份编号；同一 `agent_id` 可以产生多个 `agentic_run_id`。 | AgenticOps | AIAgent 初始化 |
 | `agentic_takeover_at` | AIAgent 成功接管任务的时间；写入接管评论并保存在本地状态。 | AgenticOps | AI 接管 |
 | `task_type` | AgenticOps 任务类型。 | AgenticOps | 接管后 |
-| `task_class` | 标准任务分类，用于选择对应标准流程。 | AgenticOps、工作流配置 | 接管前 |
-| `process_id` | 标准流程编号。 | AgenticOps | 接管后 |
+| `task_class` | 标准任务分类，用于选择对应标准流程。 | AgenticOps、工作流配置 | 接管后分析、实现前 |
+| `process_id` | 标准流程编号。 | AgenticOps | 接管后分析、实现前 |
 | `current_stage` | 当前执行阶段。 | AgenticOps | 接管后 |
 | `agentic_next_action` | 下一步动作。 | AgenticOps | 接管后 |
 | `implementation_summary` | 本地实现摘要。 | AIAgent | 开发完成 |
@@ -95,8 +95,9 @@ developer 工作面不创建或映射 `agentic_id` 等 Agentic Jira Custom Field
 | --- | --- | --- |
 | 卡片创建 | `business_goal`、`issue_type` | 缺失时卡片不能作为 AI 可接管任务。 |
 | 进入迭代 | `scope_boundary`、`acceptance_criteria`、`owner`、`iteration`、`priority`、`risk_level` | 缺失时不能进入 AI 接管候选列表。 |
-| AI 接管 | `target_repo`、`target_branch`、`verification_method`、`environment_context`、`task_class`、`agent_id` | AIAgent 在调用 `takeover_task` 前按项目准入资产检查；不足时先分析、补卡并重新检查。CLI 只执行通用接管安全门禁。 |
-| 本地开发 | `agentic_run_id`、`agent_id`、`agentic_takeover_at`、`task_type`、`task_class`、`process_id`、`current_stage`、`agentic_next_action`、`takeover_comment_id` | 缺失时恢复接管或重新初始化执行记录。 |
+| AI 接管 | `owner`、`agent_id`、Jira 状态/transition 映射、用户接管指令 | Runtime 只执行通用接管安全门禁；所有权、映射或身份冲突时阻断。 |
+| 信息分析与设计审查 | `agentic_run_id`、`agentic_takeover_at`、`takeover_kind`、`takeover_comment_id`、`target_repo`、`target_branch`、`verification_method`、`task_class`、`process_id` | 可验证事实自动补全；缺失或冲突时进入风险决策，未确认设计不得进入实现。 |
+| 本地开发 | `agentic_run_id`、`agent_id`、`task_type`、`task_class`、`process_id`、`current_stage`、`agentic_next_action`、有效设计授权 | 缺失时恢复接管、补全分析或重新进入设计审查。 |
 | 开发完成 | `implementation_summary`、`verification_result`、`residual_risk` | 缺失时不能请求推送或创建拉取请求的确认。 |
 | 拉取请求审查 | `pr_link`、`ci_status`、`review_status`、`reviewer_decision` | 缺失时不能进入完成证据。 |
 | 完成 | `agentic_completion_evidence`、`follow_up_items`、`completed_at`、`terminal_comment_id` | 缺失时不能关闭 AI 执行记录；完成或交接结束后必须写入并回读终止评论。 |

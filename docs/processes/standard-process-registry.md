@@ -20,11 +20,13 @@ Standard Process Registry 是 AgenticOps 维护标准流程的源头。它定义
 
 ## 3. 流程选择顺序
 
-所有任务必须先分类，再进入对应流程。
+所有任务先执行公共接管操作，再完成分类并进入对应具体流程。接管只建立负责人、团队状态和可审计运行轨迹，不替代任务分类。
 
 ```text
 Jira 卡片
--> 读取标准字段和 Jira 映射
+-> 校验项目、负责人、状态映射和 Agent 身份
+-> 执行统一接管并回读 Comment/Status
+-> 读取标准字段、项目资产和源码事实
 -> 判断 task_class
 -> 选择 standard_process
 -> 校验 Jira 表单、状态和 transition 是否能映射
@@ -81,22 +83,40 @@ stages:
     responsible_role: development_engineer
     input_fields:
       - assignee
-      - task_class
-      - target_repo
+      - jira_status
+      - workspace_agent_identity
+      - explicit_takeover_instruction
     output_fields:
       - agentic_run_id
       - agentic_takeover_at
+      - takeover_kind
+      - takeover_status
+      - human_notice
       - takeover_comment_id
       - current_stage
       - agentic_next_action
     review_gate: null
+  - id: task_intake
+    responsible_role: ai_agent
+    output_fields:
+      - task_class
+      - process_id
+      - target_repo
+      - verification_method
+    review_gate: null
+  - id: design_review
+    responsible_role: development_engineer
+    output_fields:
+      - design_review_decision
+      - execution_authorization
+    review_gate: development_engineer_design_review
   - id: implementation
     responsible_role: ai_agent
     output_fields:
       - implementation_summary
       - verification_result
       - residual_risk
-    review_gate: development_engineer_review
+    review_gate: null
   - id: completed
     responsible_role: development_engineer
     completion_cleanup:
@@ -132,11 +152,12 @@ stages:
 
 `agent_id` 是识别 AIAgent 的稳定身份编号，`agentic_run_id` 是一次执行记录。developer 不使用 Jira Agentic Custom Field 表达任务锁；Jira `Assignee` 表达负责人，Comment 表达接管与执行轨迹，本地 task state 表达当前运行和恢复状态。
 
-接管任务前必须满足：
+初始接管前必须满足：
 
 - Jira `assignee` 必须等于当前登录用户。
-- 当前任务必须能映射出 `task_class` 和 `process_id`。
-- 当前 Jira 状态必须能映射到标准流程入口阶段。
+- 当前 Jira 状态和必要 transition 必须能严格映射。
+- 当前工作空间 Agent 身份、本地 run 和已有受管 Comment 不得存在已知冲突。
+- 研发工程师已经明确表达“接管 <KEY>”。
 
 接管成功后必须写入：
 
@@ -144,13 +165,15 @@ stages:
 - `agent_id`
 - `agentic_takeover_at`
 - `takeover_kind`
+- `takeover_status`
+- `human_notice`
 - `takeover_comment_id`
-- `task_class`
-- `process_id`
 - `current_stage`
 - `agentic_next_action`
 
-接管评论必须明文区分新接管、接纳存量任务和恢复运行；后两种明确提示“不是新接管”。如果 Jira `assignee` 不等于当前登录用户，返回 `assignee_mismatch`。并发重复接管不是当前阶段的锁能力，出现真实需求后单独设计。
+接管后连续执行信息分析，补齐 `task_class`、`process_id`、目标仓库、分支和验证方式；这些事实缺失时阻止实现，不阻止建立接管轨迹。普通分析和方案分级不设置独立确认，正常进入设计审查；所有权或风险冲突进入风险决策。
+
+接管评论必须明文区分新接管、接纳存量任务和恢复运行；后两种同时在 `human_notice` 和 Comment 中提示“不是新接管”。如果 Jira `assignee` 不等于当前登录用户，返回 `owner_mismatch`。并发重复接管不是当前阶段的锁能力，出现真实需求后单独设计。
 
 ## 8. 执行过程所有权检查
 

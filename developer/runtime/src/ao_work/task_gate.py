@@ -20,7 +20,6 @@ from ao_work.workspace_security import (
 
 SCHEMA_VERSION = 1
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 CHINESE_PATTERN = re.compile(r"[\u3400-\u9fff]")
 ALLOWED_EVIDENCE_SOURCES = frozenset(
     {"jira_issue", "project_profile", "business_source_code", "runtime_readback"}
@@ -85,27 +84,11 @@ def execute_task_gate(
             agentic_run_id=args.agentic_run_id,
             input_file=args.input_file,
         )
-    if args.command == "intake" and args.action == "confirm":
-        return service.confirm_intake(
-            issue_key=args.issue_key,
-            agentic_run_id=args.agentic_run_id,
-            intake_digest=args.confirm_intake_digest,
-            confirmed_by=args.confirmed_by,
-            authorization_reference=args.authorization_reference,
-        )
     if args.command == "solution" and args.action == "classify":
         return service.classify_solution(
             issue_key=args.issue_key,
             agentic_run_id=args.agentic_run_id,
             input_file=args.input_file,
-        )
-    if args.command == "solution" and args.action == "confirm":
-        return service.confirm_solution(
-            issue_key=args.issue_key,
-            agentic_run_id=args.agentic_run_id,
-            solution_digest=args.confirm_solution_digest,
-            confirmed_by=args.confirmed_by,
-            authorization_reference=args.authorization_reference,
         )
     raise _blocked(
         "task_gate_operation_invalid",
@@ -221,7 +204,7 @@ class TaskGateService:
         payload = {
             **stable,
             "intake_digest": intake_digest,
-            "ready_for_confirmation": ready,
+            "ready_for_solution": ready,
             "required_missing_fields": required_missing,
             "retry_count": retry_count,
             "assessed_at": _timestamp(),
@@ -230,14 +213,14 @@ class TaskGateService:
 
         if ready:
             next_action = _next_action(
-                executor="human",
-                action="confirm_task_intake",
-                required_inputs=["intake_digest", "full_intake_summary"],
-                allowed_operations=["task_intake_confirm"],
-                requires_authorization=True,
-                reason="请审查完整准入摘要；确认前不得形成最终方案或修改代码",
+                executor="ai",
+                action="prepare_and_classify_solution",
+                required_inputs=["intake_digest", "solution_input_file"],
+                allowed_operations=["task_solution_classify"],
+                requires_authorization=False,
+                reason="准入事实完整，继续形成方案并分流到设计审查或风险决策",
             )
-            progress_action = "confirm_task_intake"
+            progress_action = "prepare_and_classify_solution"
         elif retry_count == 0:
             next_action = _next_action(
                 executor="ai",
@@ -288,82 +271,9 @@ class TaskGateService:
             "intake": payload,
             "intake_digest": intake_digest,
             "intake_path": str(path),
-            "ready_for_confirmation": ready,
+            "ready_for_solution": ready,
             "required_missing_fields": required_missing,
             "agentic_next_action": next_action,
-        }
-
-    def confirm_intake(
-        self,
-        *,
-        issue_key: str,
-        agentic_run_id: str,
-        intake_digest: str,
-        confirmed_by: str,
-        authorization_reference: str,
-    ) -> dict[str, Any]:
-        self._require_digest("confirm_intake_digest", intake_digest)
-        self._require_id("confirmed_by", confirmed_by)
-        intake = self._current_intake(issue_key, agentic_run_id)
-        if intake.get("intake_digest") != intake_digest:
-            raise _blocked(
-                "task_intake_digest_mismatch",
-                "确认的准入摘要与当前摘要不一致",
-                "请重新读取完整准入摘要并确认当前 intake_digest",
-            )
-        if intake.get("ready_for_confirmation") is not True:
-            raise _blocked(
-                "task_intake_incomplete",
-                "准入摘要仍有必要信息缺失，不能确认",
-                "请先补充必要信息并重新执行 task intake assess",
-            )
-        self._verify_current_source(intake, issue_key, agentic_run_id)
-        expected_reference = (
-            f"user-confirmation:{issue_key}:{agentic_run_id}:{intake_digest}"
-        )
-        if authorization_reference != expected_reference:
-            raise _blocked(
-                "task_intake_confirmation_invalid",
-                "准入确认引用未绑定当前任务、运行和摘要",
-                f"请在完整审查后使用 {expected_reference}",
-            )
-        payload = {
-            "schema_version": SCHEMA_VERSION,
-            "issue_key": issue_key,
-            "agentic_run_id": agentic_run_id,
-            "intake_digest": intake_digest,
-            "source_context_digest": intake["source_context_digest"],
-            "head_sha": intake["source_revision"]["head_sha"],
-            "confirmed_by": confirmed_by,
-            "authorization_reference": authorization_reference,
-            "evidence_basis": "session_user_confirmation_attestation",
-            "independent_identity_readback": False,
-            "confirmed_at": _timestamp(),
-        }
-        path = self._gate_path(
-            issue_key, agentic_run_id, "intake-confirmation.json"
-        )
-        self._write(path, payload)
-        self.store.record_gate_transition(
-            issue_key,
-            agentic_run_id,
-            stage="intake_confirmed",
-            next_action="classify_solution",
-            operation="task_intake_confirm",
-            status="completed",
-            evidence={"intake_digest": intake_digest, "confirmed_by": confirmed_by},
-        )
-        return {
-            "intake_confirmation": payload,
-            "confirmation_path": str(path),
-            "agentic_next_action": _next_action(
-                executor="ai",
-                action="prepare_and_classify_solution",
-                required_inputs=["confirmed_intake_digest", "solution_input_file"],
-                allowed_operations=["task_solution_classify"],
-                requires_authorization=False,
-                reason="准入摘要已确认，现在可以形成方案并由 Runtime 执行 L1-L4 分级",
-            ),
         }
 
     def classify_solution(
@@ -373,24 +283,22 @@ class TaskGateService:
         agentic_run_id: str,
         input_file: str,
     ) -> dict[str, Any]:
-        confirmation = self._intake_confirmation(issue_key, agentic_run_id)
         intake = self._current_intake(issue_key, agentic_run_id)
-        self._verify_intake_confirmation(confirmation, intake)
         self._verify_current_source(intake, issue_key, agentic_run_id)
         raw = _load_json_input(self.root, input_file, "方案分级输入")
         normalized = self._normalize_solution_input(raw)
-        if normalized["confirmed_intake_digest"] != intake["intake_digest"]:
+        if normalized["intake_digest"] != intake["intake_digest"]:
             raise _blocked(
                 "solution_intake_digest_mismatch",
-                "方案未绑定当前已确认准入摘要",
-                "请使用当前 confirmed_intake_digest 重新形成方案",
+                "方案未绑定当前准入事实摘要",
+                "请使用当前 intake_digest 重新形成方案",
             )
         level = self._solution_level(normalized["risk_flags"])
         stable = {
             "schema_version": SCHEMA_VERSION,
             "issue_key": issue_key,
             "agentic_run_id": agentic_run_id,
-            "confirmed_intake_digest": intake["intake_digest"],
+            "intake_digest": intake["intake_digest"],
             "source_context_digest": intake["source_context_digest"],
             "head_sha": intake["source_revision"]["head_sha"],
             **normalized,
@@ -411,7 +319,7 @@ class TaskGateService:
             stage="solution_classification",
             next_action=str(next_action["action"]),
             operation="task_solution_classify",
-            status="completed" if level in {"L1", "L2"} else "blocked",
+            status="completed" if level in {"L1", "L2", "L3"} else "blocked",
             evidence={
                 "intake_digest": str(intake["intake_digest"]),
                 "solution_digest": solution_digest,
@@ -425,89 +333,6 @@ class TaskGateService:
             "solution_level": level,
             "solution_path": str(path),
             "agentic_next_action": next_action,
-        }
-
-    def confirm_solution(
-        self,
-        *,
-        issue_key: str,
-        agentic_run_id: str,
-        solution_digest: str,
-        confirmed_by: str,
-        authorization_reference: str,
-    ) -> dict[str, Any]:
-        self._require_digest("confirm_solution_digest", solution_digest)
-        self._require_id("confirmed_by", confirmed_by)
-        solution = self._required_read(
-            self._gate_path(issue_key, agentic_run_id, "solution.json"),
-            "solution_gate_not_classified",
-            "尚未形成可确认的方案分级",
-            "请先执行 task solution classify",
-        )
-        if solution.get("solution_digest") != solution_digest:
-            raise _blocked(
-                "solution_digest_mismatch",
-                "确认的方案摘要与当前方案不一致",
-                "请重新读取当前方案和 solution_digest 后确认",
-            )
-        if solution.get("solution_level") != "L2":
-            raise _blocked(
-                "solution_confirmation_not_applicable",
-                "只有 L2 方案需要当前确认入口",
-                "L1 直接进入下一门禁；L3 先改设计；L4 停止并解决阻塞",
-            )
-        intake = self._current_intake(issue_key, agentic_run_id)
-        confirmation = self._intake_confirmation(issue_key, agentic_run_id)
-        self._verify_intake_confirmation(confirmation, intake)
-        self._verify_current_source(intake, issue_key, agentic_run_id)
-        if solution.get("confirmed_intake_digest") != intake.get("intake_digest"):
-            raise _blocked(
-                "solution_gate_stale",
-                "方案绑定的准入摘要已经变化",
-                "请重新执行准入分析、确认和方案分级",
-            )
-        expected_reference = (
-            f"user-confirmation:{issue_key}:{agentic_run_id}:{solution_digest}"
-        )
-        if authorization_reference != expected_reference:
-            raise _blocked(
-                "solution_confirmation_invalid",
-                "方案确认引用未绑定当前任务、运行和方案摘要",
-                f"请在审查完整 L2 方案后使用 {expected_reference}",
-            )
-        payload = {
-            "schema_version": SCHEMA_VERSION,
-            "issue_key": issue_key,
-            "agentic_run_id": agentic_run_id,
-            "solution_digest": solution_digest,
-            "solution_level": "L2",
-            "confirmed_by": confirmed_by,
-            "authorization_reference": authorization_reference,
-            "evidence_basis": "session_user_confirmation_attestation",
-            "independent_identity_readback": False,
-            "confirmed_at": _timestamp(),
-        }
-        path = self._gate_path(
-            issue_key, agentic_run_id, "solution-confirmation.json"
-        )
-        self._write(path, payload)
-        self.store.record_gate_transition(
-            issue_key,
-            agentic_run_id,
-            stage="solution_confirmed",
-            next_action="perform_formal_task_takeover",
-            operation="task_solution_confirm",
-            status="completed",
-            evidence={
-                "solution_digest": solution_digest,
-                "solution_level": "L2",
-                "confirmed_by": confirmed_by,
-            },
-        )
-        return {
-            "solution_confirmation": payload,
-            "confirmation_path": str(path),
-            "agentic_next_action": _takeover_next_action(),
         }
 
     def _normalize_intake_input(
@@ -646,7 +471,7 @@ class TaskGateService:
     def _normalize_solution_input(self, payload: dict[str, Any]) -> dict[str, Any]:
         expected = {
             "schema_version",
-            "confirmed_intake_digest",
+            "intake_digest",
             "proposed_solution",
             "scope",
             "risk_flags",
@@ -656,10 +481,8 @@ class TaskGateService:
         _require_exact_keys(payload, expected, "方案分级输入")
         if payload["schema_version"] != SCHEMA_VERSION:
             raise _invalid("solution_schema_version", "schema_version 必须为 1")
-        confirmed = _text(
-            payload["confirmed_intake_digest"], "confirmed_intake_digest"
-        )
-        self._require_digest("confirmed_intake_digest", confirmed)
+        intake_digest = _text(payload["intake_digest"], "intake_digest")
+        self._require_digest("intake_digest", intake_digest)
         proposed_solution = _chinese_text(
             payload["proposed_solution"], "proposed_solution", maximum=32768
         )
@@ -717,7 +540,7 @@ class TaskGateService:
             payload["residual_risks"], "residual_risks"
         )
         return {
-            "confirmed_intake_digest": confirmed,
+            "intake_digest": intake_digest,
             "proposed_solution": proposed_solution,
             "scope": {"included": included, "excluded": excluded},
             "risk_flags": {name: bool(flags[name]) for name in RISK_FLAGS},
@@ -801,25 +624,33 @@ class TaskGateService:
         self, level: str, solution_digest: str
     ) -> dict[str, Any]:
         if level == "L1":
-            return _takeover_next_action()
+            return _next_action(
+                executor="human",
+                action="review_task_design",
+                required_inputs=["solution_digest", "proposed_solution", "scope", "residual_risks"],
+                allowed_operations=[],
+                requires_authorization=True,
+                stop_workflow=True,
+                reason="事实和方案已完整，当前固定暂停点是设计审查",
+            )
         if level == "L2":
             return _next_action(
                 executor="human",
-                action="confirm_l2_solution",
+                action="decide_solution_risk",
                 required_inputs=["solution_digest", "full_solution", "classification_evidence"],
-                allowed_operations=["task_solution_confirm"],
+                allowed_operations=[],
                 requires_authorization=True,
-                reason=f"L2 方案包含用户选择、外部副作用或非平凡风险；请确认 {solution_digest}",
+                stop_workflow=True,
+                reason="方案包含用户选择、外部副作用或非平凡风险，必须逐项进行风险决策",
             )
         if level == "L3":
             return _next_action(
-                executor="human",
+                executor="ai",
                 action="revise_design_and_reassess",
                 required_inputs=["proposed_solution", "classification_evidence"],
                 allowed_operations=["task_intake_assess"],
-                requires_authorization=True,
-                stop_workflow=True,
-                reason="L3 触及设计或项目红线，请先修改设计，再重新分析准入事实和方案",
+                requires_authorization=False,
+                reason="方案触及架构、公共合同或安全边界，先修订设计并重新评估，再进入设计审查",
             )
         return _next_action(
             executor="human",
@@ -846,34 +677,6 @@ class TaskGateService:
             "任务尚未完成准入分析",
             "请先执行 task intake assess",
         )
-
-    def _intake_confirmation(
-        self, issue_key: str, agentic_run_id: str
-    ) -> dict[str, Any]:
-        return self._required_read(
-            self._gate_path(
-                issue_key, agentic_run_id, "intake-confirmation.json"
-            ),
-            "task_intake_not_confirmed",
-            "当前准入摘要尚未获得用户确认",
-            "请先展示完整准入摘要并执行 task intake confirm",
-        )
-
-    def _verify_intake_confirmation(
-        self, confirmation: Mapping[str, Any], intake: Mapping[str, Any]
-    ) -> None:
-        if (
-            confirmation.get("intake_digest") != intake.get("intake_digest")
-            or confirmation.get("source_context_digest")
-            != intake.get("source_context_digest")
-            or confirmation.get("head_sha")
-            != intake.get("source_revision", {}).get("head_sha")
-        ):
-            raise _blocked(
-                "task_intake_confirmation_stale",
-                "准入确认与当前摘要或源码基线不一致",
-                "请重新执行准入分析并确认完整新摘要",
-            )
 
     def _verify_current_source(
         self,
@@ -980,7 +783,7 @@ class TaskGateService:
             previous.get("source_context_digest") == source_context_digest
             and previous.get("source_revision", {}).get("head_sha") == head_sha
         )
-        if not same_cycle or previous.get("ready_for_confirmation") is True:
+        if not same_cycle or previous.get("ready_for_solution") is True:
             return 0
         count = int(previous.get("retry_count", 0)) + 1
         if count > 1:
@@ -1040,23 +843,6 @@ class TaskGateService:
     def _require_digest(field: str, value: str) -> None:
         if not isinstance(value, str) or not SHA256_PATTERN.fullmatch(value):
             raise _invalid(field, f"{field} 必须是小写 SHA-256")
-
-    @staticmethod
-    def _require_id(field: str, value: str) -> None:
-        if not isinstance(value, str) or not SAFE_ID_PATTERN.fullmatch(value):
-            raise _invalid(field, f"{field} 格式无效")
-
-
-def _takeover_next_action() -> dict[str, Any]:
-    return _next_action(
-        executor="ao_work",
-        action="perform_formal_task_takeover",
-        required_inputs=["intake_digest", "solution_digest"],
-        allowed_operations=["takeover_task"],
-        requires_authorization=False,
-        reason="准入与方案门禁已通过；下一步必须调用正式 takeover 原子能力，不能修改代码",
-    )
-
 
 def _next_action(
     *,
