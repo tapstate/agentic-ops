@@ -1,6 +1,6 @@
 # DE-005 恢复接管任务
 
-> **目标故事合同。** 本文不维护当前完成度；以下阶段与输出只定义未来验收行为。`resume_takeover` 当前为 `capability_gap`，没有可调用的恢复命令；执行前必须查询能力目录，不得用本地 task 原语冒充恢复接管。涉及 Jira 评论时，现役入口只允许使用 `jira_comment` 的 `ao-work jira comment plan -> apply -> readback` 协议。
+> **现役故事合同。** `resume_takeover` 已由只读命令 `ao-work task resume` 实现。用户说“接管 <KEY>”时不要求先选择本能力；`task takeover` 会自动判断并为恢复行为明文留痕。
 
 作为研发工程师，
 我希望能恢复一个已接管但未完成的任务，
@@ -9,7 +9,7 @@
 ### 触发方式
 
 ```sh
-ao-work capability show resume_takeover
+ao-work task resume --issue-key TAP-123
 ```
 
 或自然语言：
@@ -22,13 +22,13 @@ ao-work capability show resume_takeover
 
 - 已存在接管记录。
 - `agentic_run_id` 对应的 `issue`、`workspace`、`agent_id`、`task_class`、`process_id` 和任务阶段可验证。
-- 当前 Jira 卡片和项目 profile 能确定负责人、代理绑定、状态和目标仓库。
+- 当前 Jira 卡片和项目 profile 能确定负责人、状态和目标仓库。
 
 ### 主流程
 
-1. AIAgent 查询 `resume_takeover`；当前为 `capability_gap` 时停止自动恢复并请求研发工程师人工核对，只有未来能力目录声明 `implemented` 后才可调用其现役命令。
+1. AIAgent 调用 `ao-work task resume` 进行只读恢复诊断。
 2. CLI 从同一 `agentic_run_id` 的事件中恢复接管基准和最近任务阶段。
-3. CLI 读取当前 Jira 卡片和当前用户，复核 `assignee`、`agentic_id` 和目标仓库。
+3. CLI 读取当前 Jira 卡片和当前用户，复核 `Assignee`、状态映射和目标仓库。
 4. CLI 使用操作契约校验操作阶段，并把 Jira 状态映射为 Standard Process Registry 阶段进行校验。
 5. CLI 返回原任务阶段、标准流程阶段和下一步动作，不推进业务阶段。
 6. AIAgent 调用 `inspect-workspace` 检查当前本地代码状态，再向研发工程师说明恢复点。
@@ -55,7 +55,7 @@ ao-work capability show resume_takeover
 
 - `agentic_run_id` 不存在、workspace 不匹配或本地事件不可信时，只返回本地错误，不生成 Jira 评论材料。
 - 当前 `workspace` 与 `agentic_run_id` 不匹配时，拒绝恢复。
-- Jira `assignee` 已变化、代理绑定丢失或绑定其他 AIAgent 时，停止恢复，不自动抢回绑定。
+- Jira `Assignee` 已变化时停止恢复；本地运行归属不一致时也不得静默复用。
 - 当前目标仓库与接管时不一致时，停止恢复，不允许同一个 `agentic_run_id` 静默切换仓库。
 - 操作阶段、任务分类、标准流程或 Jira 状态映射不一致时，停止并请求维护对应标准资产。
 - 上次失败原因属于人工确认点时，AIAgent 不能自动继续。
@@ -64,7 +64,7 @@ ao-work capability show resume_takeover
 ### 验收标准
 
 - 恢复任务不会创建新的 `agentic_run_id`。
-- 恢复前必须校验 `workspace`、`issue`、负责人、代理绑定、目标仓库、操作阶段和标准流程阶段。
+- 恢复前必须校验 `workspace`、`issue`、负责人、目标仓库、操作阶段和标准流程阶段。
 - AIAgent 能说明从哪个操作阶段、哪个标准流程阶段恢复。
 - 恢复过程继续写入同一个 run 的事件日志。
 - `resume-takeover` 本身不写 Jira。
@@ -73,7 +73,7 @@ ao-work capability show resume_takeover
 ### 保护行为
 
 - 恢复接管必须复用已有 `agentic_run_id`，不能创建新 `agentic_run_id`。
-- 恢复前必须重新读取 Jira，校验 `workspace`、`issue`、负责人、代理绑定、目标仓库和流程阶段。
+- 恢复前必须重新读取 Jira，校验 `workspace`、`issue`、负责人、目标仓库和流程阶段。
 - 本地代码状态由恢复成功后的 `inspect-workspace` 单独检查。
 - 上次停在人工确认点时，AIAgent 不能自动继续。
 - 恢复成功不能生成 `takeover_resumed` 业务阶段或固定改写 `agentic_next_action`。
@@ -82,7 +82,7 @@ ao-work capability show resume_takeover
 ### 审核问题
 
 - `agentic_run_id` 是否存在且与当前工作空间匹配。
-- 当前 Jira 卡片负责人、代理绑定和目标仓库是否仍一致。
+- 当前 Jira 卡片负责人和目标仓库是否仍一致。
 - 操作阶段与标准流程阶段是否分别通过对应契约校验。
 - 本地代码状态是否允许继续，是否需要研发工程师确认。
 - AIAgent 是否清楚说明 previous stage、current stage、standard process stage 和 next action。
@@ -90,7 +90,7 @@ ao-work capability show resume_takeover
 
 ### 验收证据
 
-- `ao-work capability show resume_takeover` 输出的当前状态；能力实现后再补正式恢复输出。
+- `ao-work capability show resume_takeover` 与 `ao-work task resume` 的只读恢复输出。
 - 同一 `agentic_run_id` 的 run summary 和 events。
 - 输出中的 `previous_stage`、`current_stage`、`standard_process_stage`、`target_repo` 和 `agentic_next_action`。
 - 恢复失败时的结构化失败记录。

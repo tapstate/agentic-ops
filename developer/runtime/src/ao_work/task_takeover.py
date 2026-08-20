@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 from datetime import datetime, timezone
@@ -29,28 +30,6 @@ def _blocked(code: str, message: str, action: str, **details: Any) -> RuntimeErr
     )
 
 
-def _find_agentic_id_field(metadata: list[dict[str, Any]]) -> str | None:
-    """按常见字段名探测 agentic_id 自定义字段 ID。
-
-    优先精确匹配 agentic id / agentic_id；再匹配包含 agentic 的字段名。
-    找不到返回 None（调用方按未配置处理，不阻断本地接管）。
-    """
-    for item in metadata:
-        name = str(item.get("name", "")).strip().lower()
-        field_id = str(item.get("id", "")).strip()
-        if not name or not field_id:
-            continue
-        normalized = name.replace("-", "").replace("_", "").replace(" ", "")
-        if normalized in {"agenticid", "agenticidfield", "aiagentid", "agentid"}:
-            return field_id
-    for item in metadata:
-        name = str(item.get("name", "")).strip().lower()
-        field_id = str(item.get("id", "")).strip()
-        if field_id and "agentic" in name:
-            return field_id
-    return None
-
-
 def execute_task_takeover(
     workspace: Workspace,
     install_root: Path,
@@ -61,17 +40,16 @@ def execute_task_takeover(
     authorization_reference: str,
     transition_comment: str | None = None,
 ) -> dict[str, Any]:
-    """正式任务接管：校验所有权 → transition 到执行状态 → agentic_id 字段写入 → 本地接管记录。
+    """正式任务接管：校验负责人 → 留下接管评论 → transition → 本地接管记录。
 
     - 无 issue_key：只读列出可接管候选（profile.task_query + 优先级排序），
-      不写 Jira、不 transition、不改字段；返回 selection_required 供用户确认后
+      不写 Jira、不 transition；返回 selection_required 供用户确认后
       带 key 重跑。agent-id 缺省从安装身份读取。
-    - 校验：Jira 当前账户 == 任务经办人；agentic_id 字段为空或与当前 agent_id 一致；
-      Jira 状态可映射到项目流程 entry stage。
-    - Jira 写：若状态未在 entry stage，执行 transition（id 从可用 transition 列表按目标状态名匹配）；
-      agentic_id 字段写入 agent_id（字段 ID 从元数据探测，未配置时跳过并记录）。
-    - 本地：写入 takeover 记录（agentic_run_id 由 task_state 初始化生成）。
-    - 回读：重新读取 issue，确认状态与 agentic_id 已按预期写入。
+    - 校验：Jira 当前账户 == 任务经办人；Jira 状态可映射到项目流程 entry stage。
+    - 自动判断：新接管、接纳已在执行状态的存量任务，或恢复已有本地运行；后两者在评论中明文提示。
+    - Jira 写：先写并回读结构化接管评论；若状态未在 entry stage，再执行映射后的 transition。
+    - 本地：生成或复用 agentic_run_id，写入 takeover 记录。
+    - 回读：重新读取 issue，确认状态已按预期推进。Agentic 自定义字段不参与 developer 接管。
     """
     context = load_jira_context(workspace, install_root)
     email, token = context.require_credentials()
@@ -107,19 +85,6 @@ def execute_task_takeover(
             "请在 Jira 按项目流程调整经办人，或切换到正确研发员工作空间",
         )
 
-    agentic_field_id = _find_agentic_id_field(client.field_metadata())
-    existing_agentic_id = ""
-    if agentic_field_id:
-        existing_agentic_id = str(
-            issue.fields.get(agentic_field_id) or ""
-        ).strip()
-    if existing_agentic_id and existing_agentic_id != agent_id:
-        raise _blocked(
-            "agent_ownership_conflict",
-            f"Jira 任务已绑定其它 AIAgent 身份：{existing_agentic_id}",
-            "请人工核对任务所有权；不得覆盖其它 AIAgent 的接管",
-        )
-
     mapped_status = context.profile.status_mapping.get(issue.status)
     if not mapped_status:
         raise _blocked(
@@ -134,56 +99,28 @@ def execute_task_takeover(
             "Project Profile 无法推导 entry stage 的目标状态",
             "请在 Project Profile 中确认状态映射包含 implementation 等执行阶段",
         )
+
     transitions: list[dict[str, str]] = []
+    matched_transition: tuple[str, str] | None = None
     if issue.status != target_status:
         transitions = client.available_transitions(issue_key)
         target_key = _transition_key_for(context.profile, issue.status)
-        match = None
         if target_key:
-            match = match_transition(
+            matched_transition = match_transition(
                 issue.status,
                 transitions,
                 {"transitions": context.profile.transition_mapping},
                 target_key=target_key,
             )
-        if match is None:
+        if matched_transition is None:
             raise _blocked(
                 "jira_transition_mapping_gap",
                 f"Jira 可用 transition 中没有目标 transition {target_key or target_status}",
                 "请人工在 Jira 执行状态流转，或核对 Project Profile 状态映射",
             )
-        client.execute_transition(
-            issue_key,
-            match[0],
-            comment=transition_comment,
-        )
 
-    agentic_written = False
-    if agentic_field_id:
-        client.update_issue_fields(issue_key, {agentic_field_id: agent_id})
-        agentic_written = True
-
-    readback = service.inspect_issue(issue_key)
-    status_verified = readback.status == target_status
-    if not status_verified:
-        raise _blocked(
-            "jira_takeover_readback_mismatch",
-            "接管后 Jira 状态回读与目标状态不一致",
-            "请人工核对 Jira 状态流转结果",
-        )
-    if agentic_written:
-        readback_agentic_id = str(
-            readback.fields.get(agentic_field_id, "") or ""
-        ).strip()
-        if readback_agentic_id != agent_id:
-            raise _blocked(
-                "jira_takeover_readback_mismatch",
-                "接管后 agentic_id 字段回读与写入值不一致",
-                "请人工核对 Jira 字段写入结果",
-            )
-
-    existing = _existing_task(store, issue.key)
-    if existing is None:
+    existing_state = _existing_state(store, issue.key)
+    if existing_state is None:
         agentic_run_id = _new_run_id(issue.key)
         initialized = store.initialize(
             TaskIdentity(
@@ -195,9 +132,57 @@ def execute_task_takeover(
             )
         )
         task_state_created = bool(initialized["created"])
+        progress_stage = "initialized"
     else:
-        agentic_run_id = str(existing["agentic_run_id"])
+        task = existing_state["task"]
+        progress = existing_state["progress"]
+        agentic_run_id = str(task["agentic_run_id"])
         task_state_created = False
+        progress_stage = str(progress.get("stage") or "")
+
+    takeover_kind = _takeover_kind(
+        issue_status=issue.status,
+        target_status=target_status,
+        progress_stage=progress_stage,
+    )
+    agentic_takeover_at = datetime.now(timezone.utc).isoformat()
+    comment_marker = _takeover_comment_marker(
+        issue.key,
+        agentic_run_id,
+        takeover_kind,
+        authorization_reference,
+    )
+    comment_body = _takeover_comment(
+        issue_key=issue.key,
+        agentic_run_id=agentic_run_id,
+        agent_id=agent_id,
+        workspace_name=workspace.root.name,
+        takeover_kind=takeover_kind,
+        takeover_at=agentic_takeover_at,
+        current_status=issue.status,
+        target_status=target_status,
+        marker=comment_marker,
+        extra=transition_comment,
+    )
+    takeover_comment_id = _ensure_takeover_comment(
+        client,
+        issue.key,
+        comment_marker,
+        comment_body,
+        expected_author=account["account_id"],
+    )
+
+    if matched_transition is not None:
+        client.execute_transition(issue_key, matched_transition[0])
+
+    readback = service.inspect_issue(issue_key)
+    status_verified = readback.status == target_status
+    if not status_verified:
+        raise _blocked(
+            "jira_takeover_readback_mismatch",
+            "接管后 Jira 状态回读与目标状态不一致",
+            "请人工核对 Jira 状态流转结果",
+        )
     store.record_gate_transition(
         issue.key,
         agentic_run_id,
@@ -210,8 +195,10 @@ def execute_task_takeover(
             "jira_status_before": issue.status,
             "jira_status_after": readback.status,
             "transition_used": bool(transitions),
-            "agentic_field_id": agentic_field_id,
-            "agentic_id_written": agentic_written,
+            "takeover_kind": takeover_kind,
+            "takeover_comment_id": takeover_comment_id,
+            "takeover_comment_marker": comment_marker,
+            "agentic_takeover_at": agentic_takeover_at,
             "authorization_reference": authorization_reference,
         },
     )
@@ -224,8 +211,10 @@ def execute_task_takeover(
         "jira_status_before": issue.status,
         "jira_status_after": readback.status,
         "transition_applied": bool(transitions),
-        "agentic_field_id": agentic_field_id,
-        "agentic_id_written": agentic_written,
+        "takeover_kind": takeover_kind,
+        "takeover_comment_id": takeover_comment_id,
+        "takeover_comment_verified": True,
+        "agentic_takeover_at": agentic_takeover_at,
         "current_stage": "takeover_started",
         "agentic_next_action": "run_development",
     }
@@ -266,7 +255,7 @@ def _entry_status(profile: Any) -> str:
     return inverted.get("entry", "")
 
 
-def _existing_task(store: TaskStore, issue_key: str) -> dict[str, Any] | None:
+def _existing_state(store: TaskStore, issue_key: str) -> dict[str, Any] | None:
     try:
         state = store.inspect(issue_key)
     except RuntimeErrorResult as error:
@@ -278,7 +267,114 @@ def _existing_task(store: TaskStore, issue_key: str) -> dict[str, Any] | None:
     if not isinstance(state, dict):
         return None
     task = state.get("task")
-    return task if isinstance(task, dict) else None
+    progress = state.get("progress")
+    if not isinstance(task, dict) or not isinstance(progress, dict):
+        return None
+    return {"task": task, "progress": progress}
+
+
+def _takeover_kind(
+    *,
+    issue_status: str,
+    target_status: str,
+    progress_stage: str,
+) -> str:
+    if progress_stage in {"takeover_started", "blocked"}:
+        return "resume_takeover"
+    if issue_status == target_status:
+        return "accept_existing_task"
+    return "new_takeover"
+
+
+def _takeover_comment_marker(
+    issue_key: str,
+    agentic_run_id: str,
+    takeover_kind: str,
+    authorization_reference: str,
+) -> str:
+    authorization_digest = hashlib.sha256(
+        authorization_reference.encode("utf-8")
+    ).hexdigest()[:16]
+    return (
+        f"[agentic-ops-takeover:{issue_key}:{agentic_run_id}:"
+        f"{takeover_kind}:{authorization_digest}]"
+    )
+
+
+def _takeover_comment(
+    *,
+    issue_key: str,
+    agentic_run_id: str,
+    agent_id: str,
+    workspace_name: str,
+    takeover_kind: str,
+    takeover_at: str,
+    current_status: str,
+    target_status: str,
+    marker: str,
+    extra: str | None,
+) -> str:
+    action_names = {
+        "new_takeover": "新接管",
+        "accept_existing_task": "接纳存量任务（不是新接管）",
+        "resume_takeover": "恢复既有运行（不是新接管）",
+    }
+    lines = [
+        "## AgenticOps 任务接管",
+        "",
+        f"- 事项: `{issue_key}`",
+        f"- 操作类型: {action_names[takeover_kind]}",
+        f"- 运行 ID: `{agentic_run_id}`",
+        f"- AIAgent: `{agent_id}`",
+        f"- 工作空间: `{workspace_name}`",
+        f"- 操作时间: `{takeover_at}`",
+        f"- Jira 状态: `{current_status}` → `{target_status}`",
+        "- 当前阶段: `takeover_started`",
+        "- 下一步动作: `run_development`",
+    ]
+    if extra and extra.strip():
+        lines.extend(["- 补充说明:", extra.strip()])
+    lines.extend(["", marker])
+    return "\n".join(lines)
+
+
+def _ensure_takeover_comment(
+    client: JiraClient,
+    issue_key: str,
+    marker: str,
+    markdown: str,
+    *,
+    expected_author: str,
+) -> str:
+    existing = next(
+        (
+            comment
+            for comment in client.comments(issue_key)
+            if marker in comment.body and comment.author == expected_author
+        ),
+        None,
+    )
+    if existing is not None and existing.comment_id:
+        return existing.comment_id
+    comment_id = client.add_comment(issue_key, markdown)
+    if not comment_id:
+        raise _blocked(
+            "jira_takeover_comment_write_failed",
+            "Jira 接管评论写入后未返回评论 ID",
+            "请回读 Jira 评论，确认是否已写入；结果不明确时不要重复接管",
+        )
+    readback = client.comment(issue_key, comment_id)
+    if (
+        readback.comment_id != comment_id
+        or readback.author != expected_author
+        or marker not in readback.body
+    ):
+        raise _blocked(
+            "jira_takeover_comment_readback_mismatch",
+            "Jira 接管评论回读与写入内容不一致",
+            "请人工核对 Jira 评论；确认留痕前不得继续状态流转",
+        )
+    return comment_id
 
 
 def _default_agent_id(install_root: Path) -> str:

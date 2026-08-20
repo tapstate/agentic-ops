@@ -48,7 +48,7 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 | `read_task_context` | 读取任务上下文摘要。 |
 | `write_evidence` | 写入任务阶段证据、阻塞说明和完成审计主体。 |
 | `write_pr_evidence` | 读取 GitHub PR、CI 和 Review 事实，并写入任务关联的拉取请求证据。 |
-| `release_agent` | 完成或明确交接后释放当前 AIAgent 绑定，并记录 `agentic_id_cleared=true`。 |
+| `release_agent` | 完成或明确交接后写入终态 Comment 并关闭本地任务运行；developer 不清理 Agentic Jira 字段。 |
 | `mark_blocked` | 记录阻塞原因和人工动作。 |
 | `request_owner_confirmation` | 请求研发工程师确认。 |
 | `branch_align` | 按 TapData 项目级分支规范计算或执行多仓分支对齐。 |
@@ -91,13 +91,19 @@ input:
 
 preconditions:
   - current_user_must_match_owner
-  - agentic_id_must_be_empty_or_match_agent_id
   - task_class_must_be_mapped_to_standard_process
   - issue_must_be_in_allowed_project
   - jira_status_must_map_to_entry_stage
 
 output:
   agentic_run_id:
+    type: string
+  takeover_kind:
+    enum:
+      - new_takeover
+      - accept_existing_task
+      - resume_takeover
+  takeover_comment_id:
     type: string
   current_stage:
     enum:
@@ -123,7 +129,7 @@ failure:
     enum:
       - owner_mismatch
       - assignee_mismatch
-      - agent_ownership_conflict
+      - jira_takeover_comment_readback_mismatch
       - task_class_mapping_gap
       - standard_process_mapping_gap
       - unknown_jira_status
@@ -136,7 +142,8 @@ failure:
     type: string
 
 side_effects:
-  - may_write_jira_ownership
+  - writes_managed_takeover_comment
+  - may_transition_jira_status
   - may_create_takeover_record
   - must_not_modify_code
   - must_not_create_pr
@@ -184,7 +191,7 @@ human_gate:
 - 是否写拉取请求。
 - 是否写本地事件日志。
 - 事件日志必须能记录 `agentic_cli_version`、`version_state`、`asset_version`、`code`、`gate` 和 `gate_status`。
-- 事件日志必须能记录 `agent_id`、`agentic_id`、`task_class`、`process_id` 和 `agentic_id_cleared`。
+- 事件日志必须能记录 `agent_id`、`agentic_run_id`、`takeover_kind`、`takeover_comment_id`、`task_class`、`process_id` 和终态收口结果。
 - 写入 Jira 的标题、描述、评论、工作日志、证据正文、阻塞说明和补卡说明必须使用中文。
 - 是否修改代码。
 - 是否创建 `commit`。
@@ -195,7 +202,7 @@ human_gate:
 
 ## 7. 工作项级连续执行授权
 
-研发工程师确认版本化设计或修复计划时，可以同时授予工作项级连续执行授权。该授权绑定 `issue_key`、`agentic_run_id`、`agent_id`、`agentic_id`、目标仓库、工作分支、目标分支、计划版本、修改范围和验证方式，并通过 Jira 决策评论或项目配置的等价任务事实源提供稳定引用。
+研发工程师确认版本化设计或修复计划时，可以同时授予工作项级连续执行授权。该授权绑定 `issue_key`、`agentic_run_id`、`agent_id`、已回读的 `takeover_comment_id`、目标仓库、工作分支、目标分支、计划版本、修改范围和验证方式，并通过 Jira 决策评论或项目配置的等价任务事实源提供稳定引用。
 
 操作消费该授权时必须遵守：
 

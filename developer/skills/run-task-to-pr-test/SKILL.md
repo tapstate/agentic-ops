@@ -74,7 +74,7 @@ L3 停止，先修改设计后重新准入；L4 停止并解决事实、权限�
 
 1. `record` 只导入 Skill、AI、人工或项目工具产生的非关键过程事件，并设置 `evidence_origin=imported`；不得设置 `actor=runtime`，不得导入 readback、verification 或 prohibition_check。
 2. 在任何 Jira/Git/GitHub 写入、提交或推送前，先切到 manifest 任务分支并确保工作树与索引干净，再执行 `ao-work task-run probe-prohibition-baseline --manifest <...>`。Runtime 使用 manifest 明确允许的三类只读权限，记录 Jira 非 Done 状态、完整远端 tag refs、GitHub release 记录、各保护分支 HEAD、本地 HEAD、可空远端任务分支 SHA和可空既有 open PR；若远端任务分支已存在，本地 HEAD 必须与其一致；若不存在，本地 HEAD 必须与远端目标分支一致。这样写前预置 commit 不能被后续微小提交伪装为本运行产出；基线失败或补录过晚必须停止并使用新的运行。
-3. 执行 `ao-work task-run probe-jira --manifest <...>`，由 Runtime 使用当前工作空间凭证实时 GET `myself` 和 issue，核对站点、Project、Issue ID、经办人、Profile 状态映射及非 Done 状态。没有稳定 `agentic_id` 映射时记录字段适配缺口和 `formal_takeover_verified=false`，不虚构正式接管。
+3. 执行 `ao-work task-run probe-jira --manifest <...>`，由 Runtime 使用当前工作空间凭证实时 GET `myself`、issue 和评论，核对站点、Project、Issue ID、经办人、Profile 状态映射、非 Done 状态及当前 `agentic_run_id` 的受管接管评论。评论缺失时记录自动化缺口和 `formal_takeover_verified=false`，不虚构正式接管。
 4. 使用 manifest 中既有 `agentic_run_id`，记录分析、计划、风险、验证和明确非范围。只有与 manifest 绑定且事件中引用相同授权的外部动作才执行写入。
 5. 在独立任务分支修改业务代码。持续记录 Skill、Runtime、项目工具、AI 和人工的边界；人工介入、失败、重试和每个质量问题必须使用对应事件类型，不得只藏在自然语言总结。
 6. 完成预期代码修改后，先按项目规则创建最终任务提交；此时还不推送。

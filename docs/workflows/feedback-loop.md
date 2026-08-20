@@ -63,7 +63,7 @@ Python Runtime 执行操作
   "agentic_run_id": "TAP-123-takeover-20260721103012-a8f3",
   "issue_key": "TAP-123",
   "assignee": "dev@example.com",
-  "agentic_id": "agent-local-7f31a2b",
+  "takeover_comment_id": "12345",
   "task_type": "task_takeover",
   "task_class": "bug_fix",
   "process_id": "development_change_v1",
@@ -79,7 +79,8 @@ Python Runtime 执行操作
   "review_decision": null,
   "retryable": false,
   "redo_from_stage": "takeover_gate",
-  "agentic_id_cleared": false,
+  "terminal_comment_id": null,
+  "local_run_closed": false,
   "audit_target": "jira_issue",
   "audit_submitted": false,
   "audit_reference": null,
@@ -114,7 +115,7 @@ Python Runtime 执行操作
 - 验证命令和结果
 - 专业审查结论、重试依据或重做起点
 - 完成证据引用
-- `agentic_id` 是否已清理
+- 接管 Comment 是否存在、终态 Comment 是否已回读、本地 run 是否已收口
 - 残留风险和需要人工处理的动作
 
 任务审计记录不得包含原始敏感日志。需要诊断时，应生成脱敏 `feedback bundle`，再由维护者判断是否提交到审计服务。
@@ -147,8 +148,8 @@ ao-work capability show feedback_bundle
 - 专业审查退回。
 - 重试次数和失败后仍未解决的节点。
 - 重做来源阶段。
-- 所有权冲突、`assignee` 变更和代理绑定丢失。
-- 任务完成后未清理 `agentic_id` 的记录。
+- 所有权冲突、`Assignee` 变更、接管 Comment 缺失和本地运行归属冲突。
+- 任务完成后终态 Comment 未确认或本地 run 未收口的记录。
 - 重复问题。
 - 可复用经验。
 - 候选原子操作。
@@ -160,7 +161,7 @@ ao-work capability show feedback_bundle
 - 审计服务不可用时，不能阻断本地证据落盘，但必须记录服务不可用事件和后续补交动作。
 - 目标仓库证据写入失败时，不得继续执行推送、拉取请求或完成清理。
 - 发现敏感内容时，必须停止外部提交，生成脱敏版本或请求人工判断。
-- 完成或交接后如果 `agentic_id` 清理失败，任务不能视为已完成审计。
+- 完成或交接后如果终态 Comment 未回读确认或本地 run 未收口，任务不能视为已完成审计。
 
 ## 9. 变更门禁
 

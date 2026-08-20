@@ -11,7 +11,7 @@
 本文不改变：
 
 - Jira 是任务事实源、状态由项目工作流决定的既有边界；
-- 接管（`task takeover`）的所有权校验、agentic_id 归属校验与「待办 → 执行状态」的一次性流转行为；
+- 接管（`task takeover`）的 `Assignee` 校验、受管接管 Comment 留痕与「待办 → 执行状态」流转行为；
 - 完成态语义：AIAgent 不拥有合入权，默认不得把卡片置为 `完成 / Done`（详见决策点 D5）；
 - 不新增任何 Jira 状态（decision-log「当前无需决策事项」已确认不新增 Jira 状态），只流转既有状态与既有 transition。
 
@@ -22,11 +22,11 @@
 ### 2.1 developer 面
 
 - `JiraClient.available_transitions()` 拉取可用 transition 列表、`execute_transition(issue_key, transition_id, comment)` 执行流转（可附带评论）、`update_issue_fields` 更新字段（`developer/runtime/src/ao_work/jira/client.py`）已存在。
-- 唯一真实的状态变更是 `task takeover`（`developer/runtime/src/ao_work/task_takeover.py`）：校验经办人 / agentic_id 归属 / 状态可映射后，用 `_transition_name_for` 按 transition 名匹配（profile `transitions.start_progress.name`）把卡片从等待状态流转到执行状态，回读确认后写本地接管记录。
+- `task takeover`（`developer/runtime/src/ao_work/task_takeover.py`）校验经办人和状态映射，先写并回读受管中文接管 Comment，再用共享严格匹配器把卡片从等待状态流转到执行状态，回读确认后写本地接管记录。
 - 处理过程中没有任何可用的状态变更能力：AIAgent 不能标记阻塞、不能标记 `Pull Request Submitted`、不能标记完成。
 - jira 写协议已成熟且同构可复用：`jira comment / worklog / description` 全部走 `plan → apply → readback`（`service.py` 的 `WritePlan` / `WriteAttempt` 框架，含 idempotency key、plan 文件、授权引用、`jira_write_plan_tampered` 完整性校验），`jira/cli.py` 的 `_configure_write_actions` 统一注册。
 - Project Profile（`developer/standards/projects/tapdata/profile.yaml`）已有 `statuses`（状态 → stage：`待办→waiting_takeover`、`正在进行/In Progress/Pull Request Submitted/Tests Passed→implementation`、`完成/Done→completed`）和 `transitions`（`start_progress.name=Start Progress`、`complete.name=Tests Pass`）；config model 加载为 `status_mapping` / `transition_mapping`。但 `transitions` 条目目前只有 `name`，缺少 D-037 要求的稳定 `id` / 来源 / 目标状态字段。
-- 能力目录（`developer/standards/capabilities/operations.yaml`）没有任何 transition 相关条目；`release_agent`（AI 绑定释放，含 `jira_transition_id` 输入）是 capability_gap，其语义（清理 agentic_id + 释放绑定）与本能力不同，不作为本期依赖。
+- `release_agent` 仍是 capability gap；其 developer 目标语义是写入终态 Comment 并关闭本地 run，不依赖 Jira Agentic 字段，也不作为本期 transition 能力依赖。
 
 ### 2.2 maintainer 面
 
@@ -114,7 +114,7 @@ Jira 状态流程与表单属性易变，适配必须发生在配置层，Runtim
 1. **配置化**：状态 → stage 映射、transition key → {name, id, from, to}、字段 ID 映射全部放在版本化标准资产（developer 面 `profile.yaml`；maintainer 面工作流映射配置，见决策点 D8）。Jira 工作流调整后只改配置、走正常 story gate，不改 Runtime 代码。
 2. **缺省可用、渐进补充**：映射条目未配 `id` 时按 D-037 名称兜底可运行（要求名称唯一 + 来源/目标匹配），配置补齐 `id` 后更稳；新状态未映射时 plan 提示「未映射状态」而非崩溃。maintainer 面在完全没有映射配置时可用 `--transition-id` 显式精确流转（安全退化路径），不阻塞维护者操作。
 3. **诊断输出即适配材料**：映射失配 / 状态未知时，plan 输出与失败 details 携带对照材料——当前状态、Jira 可用 transitions 完整列表（id + 名称 + to + 是否可用）、工作流映射已配置条目、未映射的状态名清单；维护者可直接照抄补配置。适配修改因此是「抄材料 → 补配置 → 重跑」，不依赖重新描述问题。
-4. **表单属性按名探测 + 降级记录**：transition 相关自定义字段（如状态说明字段、resolution、agentic_id 类字段）一律按字段名探测（沿用 `task takeover` 的 `_find_agentic_id_field` 模式），未配置 / 探测不到时跳过并记录，不硬编码字段 ID，也不阻断主流转。
+4. **表单属性显式配置 + 降级记录**：只有项目流程确实要求的 transition 表单属性才进入 profile 映射；developer 接管不探测、不映射、不读写 Agentic Jira Custom Field。未配置的非必填属性跳过并记录，不阻断主流转。
 
 ### 3.5 主链路自动推进预留（不实现）
 
@@ -125,7 +125,7 @@ profile 预留 `agent_transition_limits` 配置形态（如允许进入 `complet
 - 真实 Jira 写必须有明确授权引用与审计：apply 必须 `user-confirmation:<KEY>:<plan_id>` 授权引用，决策记录写审计（maintainer 面 `decisions.ndjson`、developer 面本地任务事件），计划文件留档。
 - 状态不得临场猜测：developer 面目标 transition 必须来自 profile 映射 ∩ Jira 可用列表；maintainer 面无映射时仅允许 `--transition-id` 显式精确指定（Jira 事实，不是猜测），禁止发明状态名或 transition 名。
 - D-037 完整落地：稳定 ID 优先、名称兜底需唯一且来源/目标状态匹配、候选重复/目标不符/不可用/回读不一致一律阻断、禁止模糊匹配。
-- 不弱化 `task takeover`：takeover 的所有权校验、agentic_id 归属校验与回读保持原样，即使匹配逻辑改为共享实现，takeover 行为不变。
+- 不弱化 `task takeover`：`Assignee` 校验、受管 Comment 回读、状态 transition 回读和本地运行记录保持强制；共享匹配器不得绕过这些门禁。
 - 不新增 Jira 状态、不改变项目工作流：只流转既有状态与既有 transition；快速适配只改映射配置，不允许通过配置「发明」Jira 不存在的状态或 transition。
 - 完成态默认禁止 AIAgent 推进（AIAgent 无合入权），例外必须由 profile 显式声明并经人工确认；maintainer 面由维护者操作，不受该限制。
 

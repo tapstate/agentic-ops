@@ -275,9 +275,7 @@
         "assignee_account_id",
         "status_category",
         "mapped_status",
-        "agentic_id_field",
-        "agentic_id_value",
-        "agentic_id_mapping_status",
+        "takeover_comment_id",
         "formal_takeover_verified",
         "issue_content_sha256",
         "approved_plan_sha256",
@@ -307,20 +305,11 @@
         "assignee_account_id": { "$ref": "#/$defs/non_empty_string" },
         "status_category": { "$ref": "#/$defs/non_empty_string" },
         "mapped_status": { "$ref": "#/$defs/identifier" },
-        "agentic_id_field": {
-          "oneOf": [
-            { "type": "string", "pattern": "^customfield_[1-9][0-9]*$" },
-            { "type": "null" }
-          ]
-        },
-        "agentic_id_value": {
+        "takeover_comment_id": {
           "oneOf": [
             { "$ref": "#/$defs/non_empty_string" },
             { "type": "null" }
           ]
-        },
-        "agentic_id_mapping_status": {
-          "enum": ["active", "pending_validation", "not_configured"]
         },
         "formal_takeover_verified": { "type": "boolean" },
         "issue_content_sha256": { "$ref": "#/$defs/sha256" },

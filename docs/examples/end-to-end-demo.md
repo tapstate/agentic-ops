@@ -129,7 +129,7 @@ maintainer 使用显式输入只读验收这份结果包，不改写 developer �
 
 `accept-task-to-pr` 严格验证字段闭合、canonical digest、事件 hash chain、逐事件授权、`runtime + runtime_probe` 来源、Jira/Git/PR/验证绑定、CI 策略、五项禁止动作、等待点和四类完整复盘。只有可信结果状态为 `ready_for_pr_review` 时输出 `delivery_passed=true`；`blocked` / `failed` 的完整结果包仍只表示“结果包可验收”，不表示交付通过。
 
-验收输出的证据基础是 `developer_runtime_probe_result_package`。maintainer 本身不访问 Jira、Git 或 GitHub，因此同时明确 `independent_external_readback=false`、`cryptographic_remote_attestation=false`；这是对 developer Runtime 实时证据链的协议验收，不得表述为 maintainer 独立外部回读或密码学远程证明。若 Jira Profile 尚未适配 `agentic_id`，可以交付到 PR 审查，但必须报告 `formal_takeover_verified=false`，并以绑定 Jira probe 的 `automation_gap` 和残留风险说明不能声称正式接管。
+验收输出的证据基础是 `developer_runtime_probe_result_package`。maintainer 本身不访问 Jira、Git 或 GitHub，因此同时明确 `independent_external_readback=false`、`cryptographic_remote_attestation=false`；这是对 developer Runtime 实时证据链的协议验收，不得表述为 maintainer 独立外部回读或密码学远程证明。若 Jira probe 未找到当前 run 的受管接管 Comment，可以交付到 PR 审查，但必须报告 `formal_takeover_verified=false`，并以绑定 Jira probe 的 `automation_gap` 和残留风险说明不能声称正式接管。
 
 `blocked` 或 `failed` 结果包在摘要、审计和复盘完整时可以显示 `package_status=accepted`；这只说明结果包可验收，不表示任务交付通过。任一事实缺失时，结论只能是阻塞或未通过，不能把本地代码修改、离线 fixture、结果包自报状态或 PR 准备状态表述为正式全链路完成。
 

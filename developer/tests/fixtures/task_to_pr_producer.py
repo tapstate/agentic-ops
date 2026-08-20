@@ -49,7 +49,7 @@ class FakeJiraClient:
         return ACCOUNT_ID
 
     def field_metadata(self) -> list[dict[str, str]]:
-        return [{"id": "customfield_10001", "name": "Agentic ID"}]
+        return []
 
     def get_issue(self, _issue_key: str) -> JiraIssue:
         return self.issue
@@ -66,6 +66,7 @@ class FakeJiraClient:
             JiraComment(
                 comment_id=comment_id,
                 body=plain_text(markdown_to_adf(markdown)),
+                author=ACCOUNT_ID,
                 standalone_lines=frozenset(
                     line.strip() for line in markdown.splitlines() if line.strip()
                 ),
@@ -135,7 +136,6 @@ class DeveloperProducer:
                         "name": "In Progress",
                     },
                 },
-                "customfield_10001": AGENT_ID,
             },
         )
         self.run_id = run_id
@@ -246,6 +246,18 @@ class DeveloperProducer:
         protocol = self.protocol()
         protocol.open(self.manifest_relative)
         fake_client = FakeJiraClient(self.issue)
+        fake_client.add_comment(
+            ISSUE_KEY,
+            "\n".join(
+                [
+                    "## AgenticOps 任务接管",
+                    "",
+                    "- 操作类型: 新接管",
+                    f"- 运行 ID: `{self.run_id}`",
+                    f"[agentic-ops-takeover:{ISSUE_KEY}:{self.run_id}:new_takeover:fixture]",
+                ]
+            ),
+        )
         context = self.jira_context()
         profile = context.profile
         jira_service = JiraService(profile, fake_client)
@@ -739,12 +751,6 @@ class DeveloperProducer:
             "  task_query: project = TAP\n"
             "repositories:\n"
             "  default: tapdata/tapdata\n"
-            "fields:\n"
-            "  agentic_id:\n"
-            "    source: jira_field\n"
-            "    jira_field: customfield_10001\n"
-            "    state: active\n"
-            "    writable: false\n"
             "statuses:\n"
             "  正在进行: implementation\n",
             encoding="utf-8",
@@ -820,7 +826,6 @@ class DeveloperProducer:
                 "assignee_account_id": ACCOUNT_ID,
                 "status_mapping": {"正在进行": "implementation"},
                 "allowed_status_categories": ["indeterminate"],
-                "agentic_id_field": "customfield_10001",
             },
             "agent": {
                 "agent_id": AGENT_ID,

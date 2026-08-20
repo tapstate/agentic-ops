@@ -1,8 +1,8 @@
 # `resume-takeover` 完整恢复门禁设计
 
-> **目标设计，不是现役入口：** `resume_takeover` 当前在能力目录中为 `capability_gap`。本文保留未来恢复门禁合同；涉及 Jira 评论时使用现役 `jira_comment` 的 `plan -> apply -> readback` 协议，不能调用旧 `add-task-comment` 命令。
+> **现役设计：** `resume_takeover` 已由只读入口 `ao-work task resume` 实现。正式“接管 <KEY>”统一调用 `ao-work task takeover <KEY>`，由 Runtime 自动识别恢复场景并写入明文接管 Comment。
 
-本文定义目标能力 `resume_takeover` 如何从已有 `agentic_run_id` 恢复可信任务上下文，重新校验 Jira 所有权、目标仓库和标准流程阶段，并在恢复阻塞时形成受控的 Jira 反馈闭环。该能力当前为 `capability_gap`，没有可调用的 `resume-takeover` 命令；未来实现本身也只执行读取和本地审计。现役 Jira 评论只能按 `jira_comment` 的 `ao-work jira comment plan -> apply -> readback` 协议，在策略门禁和人工确认后执行。
+本文定义 `resume_takeover` 如何从已有 `agentic_run_id` 恢复可信任务上下文，重新校验 Jira 负责人、目标仓库和标准流程阶段，并在恢复阻塞时形成受控的 Jira 反馈闭环。该命令只执行读取和本地诊断；需要正式恢复留痕时调用统一 `task takeover`，其它 Jira 评论仍按 `jira_comment` 的 `plan -> apply -> readback` 协议执行。
 
 本设计只完善恢复门禁，不实现通用工作流引擎，不让恢复操作直接执行 Jira 写入，也不改变 Git、GitHub、拉取请求、合并或发布边界。
 
@@ -10,7 +10,7 @@
 
 恢复设计必须持续满足以下要求：
 
-- 真实 Jira 模式重新读取卡片并复核 `assignee` 和 `agentic_id`。
+- 真实 Jira 模式重新读取卡片并复核 `Assignee` 和状态映射。
 - 恢复结果带回并校验接管时确定的 `target_repo`。
 - 历史事件阶段同时经过操作契约和 Standard Process Registry 校验。
 - `resume-takeover` 与 `write-evidence` 使用统一的运行上下文读取逻辑。
@@ -35,9 +35,9 @@
 
 - 不实现覆盖所有操作的通用工作流恢复引擎。
 - 不让 `resume-takeover` 直接或静默写入 Jira。
-- 不自动重新绑定丢失的 `agentic_id`。
+- 不根据本地记录静默改变 Jira `Assignee` 或重建运行归属。
 - 不允许同一个 `agentic_run_id` 静默切换目标仓库、任务分类或标准流程。
-- 不在本次设计中建立新的通用 Jira 评论幂等系统。
+- 正式接管 Comment 使用专用稳定标记去重；不扩展为通用 Jira 评论幂等系统。
 - 不执行真实 Jira 写入、Git 推送、拉取请求创建、合并或发布。
 
 ## 3. 阶段语义
@@ -83,8 +83,8 @@ AgenticOps 当前存在两类阶段，恢复时必须分别处理。
 新增独立的运行上下文读取组件，负责：
 
 - 读取同一个 `agentic_run_id` 的事件。
-- 从未来目标能力 `takeover_task` 的首个成功事件建立接管基准；该能力当前为 `capability_gap`，现役流程不得生成或伪造该事件。
-- 恢复 `workspace`、`issue_key`、`agent_id`、`agentic_id`、`task_class`、`process_id` 和 `target_repo`。
+- 从现役 `takeover_task` 的首个成功记录建立接管基准，并核对受管接管 Comment 引用。
+- 恢复 `workspace`、`issue_key`、`agent_id`、`takeover_comment_id`、`task_class`、`process_id` 和 `target_repo`。
 - 检测后续事件中的非空身份字段是否与接管基准冲突。
 - 从会改变任务运行状态的事件中找到最近有效操作阶段和 `agentic_next_action`。
 - 识别终态、待人工确认状态和旧版 `takeover_resumed` 审计事件。
@@ -140,7 +140,7 @@ AgenticOps 当前存在两类阶段，恢复时必须分别处理。
 6. 读取 Jira 卡片和当前 Jira 用户。
 7. 校验 Jira 卡片编号与历史 `issue_key` 一致。
 8. 在真实 Jira 模式下校验当前 `assignee`。
-9. 在真实 Jira 模式下校验 `agentic_id`。
+9. 在正式接管验证链中校验受管接管 Comment；只读恢复诊断不写 Jira。
 10. 从当前 Jira/profile 解析 `target_repo`，并与接管基准比较。
 11. 校验历史 `process_id` 存在于 Standard Process Registry。
 12. 校验历史 `task_class` 属于该流程。
@@ -154,8 +154,8 @@ fake adapter 用于自动化验证，并参与卡片、目标仓库和标准流�
 真实 Jira 模式必须使用当前卡片事实执行以下判断：
 
 - `assignee` 不再等于当前 Jira 用户时，返回 `assignee_changed`。
-- `agentic_id` 为空时，返回 `agent_binding_lost`，不得根据本地记录自动抢回绑定。
-- `agentic_id` 不等于当前 AIAgent 时，返回 `agent_ownership_conflict`。
+- 正式接管 Comment 缺失或与当前 run 不一致时，不得声称已完成正式接管；应重新执行统一接管入口或人工核对。
+- 本地 run 的 `agent_id` 与当前运行身份不一致时，返回本地运行归属冲突，不得静默复用。
 - 当前无法解析目标仓库时，返回 `target_repo_missing`。
 - 当前目标仓库与接管基准不同时，返回 `target_repo_changed`。
 
@@ -285,7 +285,7 @@ ao-work jira comment readback --issue-key <issue-key> --idempotency-key <key> --
 - `agentic_run_id`
 - `issue_key`
 - `agent_id`
-- `agentic_id`
+- `takeover_comment_id`
 - `task_class`
 - `process_id`
 - `target_repo`

@@ -128,7 +128,8 @@ class ResultBuilder:
         external_authorization: str = AUTHORIZATION,
         retrospective_categories: list[str] | None = None,
         include_git_commit: bool = True,
-        include_agentic_gap: bool = True,
+        include_takeover_comment: bool = True,
+        include_takeover_gap: bool = True,
         include_waiting: bool = False,
         include_jira_writes: bool = True,
     ) -> dict[str, object]:
@@ -194,8 +195,7 @@ class ResultBuilder:
             actor="project_tool",
             authorization_reference=external_authorization,
         )
-        configured_agentic_field = self.manifest["jira"]["agentic_id_field"]
-        formal_takeover_verified = configured_agentic_field is not None
+        formal_takeover_verified = include_takeover_comment
         self.record(
             "jira-readback",
             "jira_readback",
@@ -211,12 +211,8 @@ class ResultBuilder:
                 "assignee_account_id": "account-123",
                 "status_category": "indeterminate",
                 "mapped_status": "in_progress",
-                "agentic_id_field": configured_agentic_field,
-                "agentic_id_value": (
-                    "harsen-mini-test-bot" if formal_takeover_verified else None
-                ),
-                "agentic_id_mapping_status": (
-                    "active" if formal_takeover_verified else "not_configured"
+                "takeover_comment_id": (
+                    "9000" if formal_takeover_verified else None
                 ),
                 "formal_takeover_verified": formal_takeover_verified,
                 "issue_content_sha256": "9" * 64,
@@ -306,24 +302,24 @@ class ResultBuilder:
                     actor="runtime",
                 )
         quality_finding_ids: list[str] = []
-        if not formal_takeover_verified and include_agentic_gap:
+        if not formal_takeover_verified and include_takeover_gap:
             quality_finding_ids.append(
                 self.record(
-                    "agentic-id-gap",
+                    "takeover-comment-gap",
                     "quality_finding",
                     {
                         "category": "automation_gap",
-                        "detail": "Project Profile 尚未配置稳定 agentic_id 字段",
+                        "detail": "当前运行缺少受管接管评论",
                         "evidence_reference": jira_readback_id,
                         "impact": "只证明当前账户等于经办人，不声称正式接管",
-                        "root_cause_hypothesis": "Jira Custom Field 尚未完成专题适配",
-                        "reproduction": "使用 agentic_id_field=null 的 manifest 执行 Jira probe",
+                        "root_cause_hypothesis": "接管评论未写入或未绑定当前运行",
+                        "reproduction": "在缺少受管接管评论时执行 Jira probe",
                         "sanitized_example": "formal_takeover_verified=false",
-                        "improvement_candidate": "专题适配并验证 agentic_id Custom Field",
-                        "suggested_asset": "profile",
-                        "benefit": "可确定性核对正式任务绑定",
-                        "risk": "错误映射可能误认所有权",
-                        "frequency": "每次未适配 Profile 的真实测试",
+                        "improvement_candidate": "通过 Runtime 写入并回读结构化接管评论",
+                        "suggested_asset": "python_runtime",
+                        "benefit": "无需自定义字段即可核对正式接管留痕",
+                        "risk": "评论缺失时无法区分本地准备与正式接管",
+                        "frequency": "每次未完成接管评论闭环的真实测试",
                     },
                     actor="ai",
                 )
@@ -535,7 +531,7 @@ class ResultBuilder:
                 "waiting_event_ids": waiting_ids,
                 "ordered_improvement_event_ids": quality_finding_ids,
                 "residual_risks": (
-                    ["agentic_id 未适配，不能声称正式 takeover"]
+                    ["受管接管 Comment 缺失，不能声称正式 takeover"]
                     if quality_finding_ids
                     else []
                 ),
@@ -950,11 +946,13 @@ class TaskToPRAcceptanceTest(unittest.TestCase):
                     str(self._write(root / "result.json", result)),
                 )
 
-    def test_unadapted_agentic_id_requires_gap_and_never_claims_formal_takeover(self) -> None:
+    def test_missing_takeover_comment_requires_gap_and_never_claims_formal_takeover(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            manifest = self._manifest(root, agentic_id_field=None)
-            result = ResultBuilder(manifest).ready_result()
+            manifest = self._manifest(root)
+            result = ResultBuilder(manifest).ready_result(
+                include_takeover_comment=False
+            )
             accepted = IntegrationService(root).accept_task_to_pr(
                 ISSUE_KEY,
                 str(self._write(root / "manifest.json", manifest)),
@@ -965,8 +963,11 @@ class TaskToPRAcceptanceTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            manifest = self._manifest(root, agentic_id_field=None)
-            result = ResultBuilder(manifest).ready_result(include_agentic_gap=False)
+            manifest = self._manifest(root)
+            result = ResultBuilder(manifest).ready_result(
+                include_takeover_comment=False,
+                include_takeover_gap=False,
+            )
             with self.assertRaises(RuntimeErrorResult):
                 IntegrationService(root).accept_task_to_pr(
                     ISSUE_KEY,
@@ -1221,9 +1222,7 @@ class TaskToPRAcceptanceTest(unittest.TestCase):
                         captured.exception.code,
                     )
 
-    def _manifest(
-        self, root: Path, *, agentic_id_field: str | None = "customfield_10001"
-    ) -> dict[str, object]:
+    def _manifest(self, root: Path) -> dict[str, object]:
         manifest: dict[str, object] = {
             "schema_version": 1,
             "protocol": "task_to_pr_review",
@@ -1235,7 +1234,6 @@ class TaskToPRAcceptanceTest(unittest.TestCase):
                 "assignee_account_id": "account-123",
                 "status_mapping": {"进行中": "in_progress"},
                 "allowed_status_categories": ["indeterminate"],
-                "agentic_id_field": agentic_id_field,
             },
             "agent": {
                 "agent_id": "harsen-mini-test-bot",

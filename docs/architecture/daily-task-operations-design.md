@@ -147,7 +147,7 @@ def _run_git(command, *, timeout=None):
 
 **实现**（按 resume-takeover.yaml 契约）：
 - 输入：`--issue-key`（优先）或 `--agentic-run-id`（二选一，缺省用本地最近 takeover_started 记录）。
-- 校验链：本地 run 存在且 workspace 匹配 → Jira 回读（issue 存在、assignee == currentUser、agentic_id 与 agent_id 一致、状态映射）→ 本地状态允许恢复（takeover_started/blocked）→ 输出执行上下文。
+- 校验链：本地 run 存在且 workspace 匹配 → Jira 回读（issue 存在、Assignee == currentUser、状态映射）→ 本地状态允许恢复（takeover_started/blocked）→ 输出执行上下文。该只读诊断不依赖 Agentic Jira Custom Field。
 - 输出：workspace / issue_key / agentic_run_id / agent_id / task_class / previous_stage / current_stage / agentic_next_action。
 - 复用 TaskStore（task_state/）+ JiraClient 现有能力，不新增大块状态机。
 - 能力目录 `resume_takeover` → implemented，登记命令 `[task, resume]`。

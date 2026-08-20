@@ -32,7 +32,7 @@ ao-work capability show feedback_bundle
 ### 主流程
 
 1. AIAgent 在完成、阻塞或交接节点整理当前 `agentic_run_id` 的任务审计摘要。
-2. CLI 写入证据，并在完成或交接后执行 `release-agent` 清理 `agentic_id`。
+2. CLI 写入证据，并在完成或交接后写入中文终态 Comment、关闭本地 run；不清理不存在的 Agentic Jira 字段。
 3. AIAgent 将审计记录提交到 Jira 卡片、审计服务或目标仓库证据链。
 4. 需要诊断时，CLI 生成脱敏 `feedback bundle`。
 5. 需要复盘时，CLI 按需生成 `feedback report`。
@@ -77,7 +77,7 @@ ao-work capability show feedback_bundle
 ### 保护行为
 
 - AIAgent 完成、阻塞或交接任务时必须提交任务级审计记录。
-- `release-agent` 完成清理后必须记录 `agentic_id` 清理状态。
+- `release-agent` 实现后必须记录终态 Comment 的回读结果和本地 run 收口状态。
 - 本地反馈报告不能替代 `.agentic-ops/tasks/<ISSUE-KEY>/` 中的任务审计记录；Jira 回写关键结论和稳定引用，审计服务属于后续可选扩展。
 - 反馈分析只能形成改进建议，不能自动修改 AgenticOps 源头规则。
 - 审计记录和反馈报告不得包含 secrets 或敏感原始内容。
@@ -87,7 +87,7 @@ ao-work capability show feedback_bundle
 
 - 任务最终状态是完成、阻塞还是交接。
 - 审计记录最终写入 Jira 卡片、审计服务还是目标仓库证据链。
-- `agentic_id` 是否已清理或保留了未清理原因。
+- 终态 Comment 是否已回读确认，本地 run 是否已收口；失败时是否保留明确原因。
 - 反馈报告是否只是按需分析，而不是任务完成主路径。
 - 改进建议是否已经过人工确认。
 

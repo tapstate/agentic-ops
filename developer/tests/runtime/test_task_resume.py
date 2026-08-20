@@ -17,20 +17,16 @@ from ao_work.work_cli import main
 
 
 class ResumeTransport:
-    """只读 Jira transport：resume 不写 Jira，但校验链会回读 myself/field/issue。"""
+    """只读 Jira transport：resume 不写 Jira，只回读 myself/issue。"""
 
     def __init__(
         self,
         *,
         assignee: str = "jira-account-1",
         status: str = "正在进行",
-        agentic_value: str | None = None,
-        field_id: str = "customfield_10042",
     ) -> None:
         self.assignee = assignee
         self.status = status
-        self.agentic_value = agentic_value
-        self.field_id = field_id
         self.requests: list[tuple[str, str]] = []
 
     def request(
@@ -47,14 +43,6 @@ class ResumeTransport:
                 200,
                 {"accountId": "jira-account-1", "displayName": "Harsen Test Bot"},
             )
-        if path == "/rest/api/3/field":
-            return TransportResponse(
-                200,
-                [
-                    {"id": "summary", "name": "Summary"},
-                    {"id": self.field_id, "name": "Agentic ID"},
-                ],
-            )
         if path == "/rest/api/3/issue/TAP-12289" and method == "GET":
             fields: dict[str, object] = {
                 "project": {"key": "TAP"},
@@ -64,8 +52,6 @@ class ResumeTransport:
                 "assignee": {"accountId": self.assignee},
                 "description": markdown_to_adf("从 Jira 自动读取任务信息。"),
             }
-            if self.field_id:
-                fields[self.field_id] = self.agentic_value or ""
             return TransportResponse(
                 200,
                 {
@@ -216,7 +202,7 @@ class TaskResumeTest(unittest.TestCase):
 
     def test_resume_by_issue_key_returns_context(self) -> None:
         self._seed_takeover_state()
-        transport = ResumeTransport(agentic_value="harsen-mini-test-bot")
+        transport = ResumeTransport()
         code, result, _ = self.run_cli(transport, "--issue-key", "TAP-12289")
         self.assertEqual(0, code)
         self.assertEqual("task_resume", result["operation"])
@@ -230,17 +216,18 @@ class TaskResumeTest(unittest.TestCase):
             "resume_task_from_recorded_state",
             result["agentic_next_action"]["action"],  # type: ignore[index]
         )
+        self.assertNotIn(("GET", "/rest/api/3/field"), transport.requests)
 
     def test_resume_without_args_picks_latest_resumable(self) -> None:
         self._seed_takeover_state()
-        transport = ResumeTransport(agentic_value="harsen-mini-test-bot")
+        transport = ResumeTransport()
         code, result, _ = self.run_cli(transport)
         self.assertEqual(0, code)
         self.assertEqual("TAP-12289", result["issue_key"])
 
     def test_resume_by_run_id(self) -> None:
         self._seed_takeover_state()
-        transport = ResumeTransport(agentic_value="harsen-mini-test-bot")
+        transport = ResumeTransport()
         code, result, _ = self.run_cli(
             transport, "--agentic-run-id", "run-TAP-12289-abc123"
         )
@@ -249,36 +236,27 @@ class TaskResumeTest(unittest.TestCase):
 
     def test_resume_blocks_when_assignee_changed(self) -> None:
         self._seed_takeover_state()
-        transport = ResumeTransport(assignee="other-user", agentic_value="harsen-mini-test-bot")
+        transport = ResumeTransport(assignee="other-user")
         code, result, _ = self.run_cli(transport, "--issue-key", "TAP-12289")
         self.assertEqual(2, code)
         self.assertEqual("assignee_changed", result["code"])
 
-    def test_resume_blocks_when_agentic_id_conflicts(self) -> None:
-        self._seed_takeover_state()
-        transport = ResumeTransport(agentic_value="another-agent")
-        code, result, _ = self.run_cli(transport, "--issue-key", "TAP-12289")
-        self.assertEqual(2, code)
-        self.assertEqual("agent_ownership_conflict", result["code"])
-
     def test_resume_blocks_when_stage_not_allowed(self) -> None:
         self._seed_takeover_state(stage="initialized")
-        transport = ResumeTransport(agentic_value="harsen-mini-test-bot")
+        transport = ResumeTransport()
         code, result, _ = self.run_cli(transport, "--issue-key", "TAP-12289")
         self.assertEqual(2, code)
         self.assertEqual("resume_stage_not_allowed", result["code"])
 
     def test_resume_blocks_when_no_local_record(self) -> None:
-        transport = ResumeTransport(agentic_value="harsen-mini-test-bot")
+        transport = ResumeTransport()
         code, result, _ = self.run_cli(transport)
         self.assertEqual(2, code)
         self.assertEqual("run_not_found", result["code"])
 
     def test_resume_blocks_when_status_unmapped(self) -> None:
         self._seed_takeover_state()
-        transport = ResumeTransport(
-            status="未知状态", agentic_value="harsen-mini-test-bot"
-        )
+        transport = ResumeTransport(status="未知状态")
         code, result, _ = self.run_cli(transport, "--issue-key", "TAP-12289")
         self.assertEqual(2, code)
         self.assertEqual("jira_status_mapping_missing", result["code"])

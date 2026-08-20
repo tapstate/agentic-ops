@@ -131,7 +131,6 @@ def task_to_pr_manifest_template(issue_key: str) -> dict[str, Any]:
             "assignee_account_id": "REQUIRED",
             "status_mapping": {"REQUIRED": "REQUIRED"},
             "allowed_status_categories": ["REQUIRED"],
-            "agentic_id_field": "REQUIRED",
         },
         "agent": {
             "agent_id": "REQUIRED",
@@ -325,7 +324,6 @@ def validate_manifest(
             "assignee_account_id",
             "status_mapping",
             "allowed_status_categories",
-            "agentic_id_field",
         },
         "jira",
     )
@@ -347,12 +345,6 @@ def validate_manifest(
     )
     if any(category.casefold() == "done" for category in categories):
         _invalid("jira.allowed_status_categories", "不能允许 Done")
-    agentic_id_field = jira["agentic_id_field"]
-    if agentic_id_field is not None:
-        field = _require_string(agentic_id_field, "jira.agentic_id_field")
-        if not re.fullmatch(r"customfield_[1-9][0-9]*", field):
-            _invalid("jira.agentic_id_field", "必须是明确的 Jira customfield id 或 null")
-
     agent = _require_mapping(value["agent"], "agent")
     _require_exact_keys(
         agent, {"agent_id", "project_profile", "agentic_run_id"}, "agent"
@@ -929,9 +921,7 @@ def _validate_action_data(action: str, data: Mapping[str, Any]) -> None:
                 "assignee_account_id",
                 "status_category",
                 "mapped_status",
-                "agentic_id_field",
-                "agentic_id_value",
-                "agentic_id_mapping_status",
+                "takeover_comment_id",
                 "formal_takeover_verified",
                 "issue_content_sha256",
                 "approved_plan_sha256",
@@ -955,23 +945,9 @@ def _validate_action_data(action: str, data: Mapping[str, Any]) -> None:
         )
         _require_string(data["status_category"], "event.action_data.status_category")
         _require_id(data["mapped_status"], "event.action_data.mapped_status")
-        field = data["agentic_id_field"]
-        if field is not None:
-            field = _require_string(field, "event.action_data.agentic_id_field")
-            if not re.fullmatch(r"customfield_[1-9][0-9]*", field):
-                _invalid("event.action_data.agentic_id_field", "必须是 Jira customfield id")
-        if data["agentic_id_value"] is not None:
+        if data["takeover_comment_id"] is not None:
             _require_string(
-                data["agentic_id_value"], "event.action_data.agentic_id_value"
-            )
-        mapping_status = _require_string(
-            data["agentic_id_mapping_status"],
-            "event.action_data.agentic_id_mapping_status",
-        )
-        if mapping_status not in {"active", "pending_validation", "not_configured"}:
-            _invalid(
-                "event.action_data.agentic_id_mapping_status",
-                "不是受支持的字段适配状态",
+                data["takeover_comment_id"], "event.action_data.takeover_comment_id"
             )
         if not isinstance(data["formal_takeover_verified"], bool):
             _invalid("event.action_data.formal_takeover_verified", "必须是 boolean")
@@ -2181,29 +2157,10 @@ def _validate_fact_bindings(
             != task_binding["approved_plan_sha256"]
         ):
             _evidence_invalid("Jira 任务内容或批准计划摘要与 manifest 不一致")
-        expected_field = expected_jira["agentic_id_field"]
-        if expected_field is None:
-            if (
-                jira["agentic_id_field"] is not None
-                or jira["agentic_id_value"] is not None
-                or jira["agentic_id_mapping_status"]
-                not in {"pending_validation", "not_configured"}
-                or jira["formal_takeover_verified"]
-            ):
-                _evidence_invalid("未配置 agentic_id 字段时，Jira 接管事实声明不一致")
-        else:
-            expected_agent_id = manifest["agent"]["agent_id"]
-            if (
-                jira["agentic_id_field"] != expected_field
-                or jira["agentic_id_mapping_status"] != "active"
-                or (
-                    jira["agentic_id_value"] is not None
-                    and jira["agentic_id_value"] != expected_agent_id
-                )
-                or jira["formal_takeover_verified"]
-                != (jira["agentic_id_value"] == expected_agent_id)
-            ):
-                _evidence_invalid("Jira agentic_id 字段、值或正式接管结论不一致")
+        if jira["formal_takeover_verified"] != (
+            jira["takeover_comment_id"] is not None
+        ):
+            _evidence_invalid("Jira 接管评论引用与正式接管结论不一致")
         terminal = jira["status"].strip().casefold() in TERMINAL_JIRA_STATUSES
         if terminal and "jira_done" not in observed_prohibitions:
             _evidence_invalid("Jira 终态回读与 jira_done 禁止动作审计不一致")
@@ -2348,35 +2305,11 @@ def _validate_all_readback_bindings(
             _evidence_invalid(
                 f"Jira 回读事件 {event['event_id']} 的账户或状态映射不一致"
             )
-        expected_field = jira_manifest["agentic_id_field"]
-        expected_agent = manifest["agent"]["agent_id"]
-        if (
-            (
-                expected_field is None
-                and (
-                    data["agentic_id_field"] is not None
-                    or data["agentic_id_value"] is not None
-                    or data["agentic_id_mapping_status"]
-                    not in {"pending_validation", "not_configured"}
-                    or data["formal_takeover_verified"]
-                )
-            )
-            or (
-                expected_field is not None
-                and (
-                    data["agentic_id_field"] != expected_field
-                    or data["agentic_id_mapping_status"] != "active"
-                    or (
-                        data["agentic_id_value"] is not None
-                        and data["agentic_id_value"] != expected_agent
-                    )
-                    or data["formal_takeover_verified"]
-                    != (data["agentic_id_value"] == expected_agent)
-                )
-            )
+        if data["formal_takeover_verified"] != (
+            data["takeover_comment_id"] is not None
         ):
             _evidence_invalid(
-                f"Jira 回读事件 {event['event_id']} 的 agentic_id 结论不一致"
+                f"Jira 回读事件 {event['event_id']} 的接管评论结论不一致"
             )
         if (
             data["issue_content_sha256"]
@@ -2791,7 +2724,7 @@ def _validate_result_outcome(
                 or not retrospective["residual_risks"]
             ):
                 _evidence_invalid(
-                    "agentic_id 未正式核对时，必须记录绑定 Jira probe 的 automation_gap 和残留风险"
+                    "受管接管 Comment 未正式核对时，必须记录绑定 Jira probe 的 automation_gap 和残留风险"
                 )
         applied = {
             item["action"]

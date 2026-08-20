@@ -42,7 +42,7 @@ def execute_task_resume(
     - 定位：显式 --issue-key / --agentic-run-id，或本地最近可恢复记录（stage ∈
       takeover_started / blocked，按 updated_at 倒序取最新）。
     - 校验链：本地 run 存在且 workspace 匹配 → Jira 回读（issue 存在、
-      assignee == currentUser、agentic_id 与 agent_id 一致、状态可映射）→
+      assignee == currentUser、状态可映射）→
       本地 stage ∈ RESUMABLE_STAGES → 输出执行上下文。
     - side_effects：不写 Jira、不创建 PR；只允许本地事件/反馈物（本实现只读）。
     """
@@ -72,17 +72,7 @@ def execute_task_resume(
             "请人工核对 Jira 所有权；恢复接管前必须先确认经办人归属",
         )
 
-    agentic_field_id = _agentic_field_id(client)
-    existing_agentic_id = ""
-    if agentic_field_id:
-        existing_agentic_id = str(issue.fields.get(agentic_field_id) or "").strip()
     agent_id = str(task.get("agent_id") or "").strip()
-    if existing_agentic_id and agent_id and existing_agentic_id != agent_id:
-        raise _blocked(
-            "agent_ownership_conflict",
-            f"Jira 任务已绑定其它 AIAgent 身份：{existing_agentic_id}",
-            "请人工核对任务所有权；不得恢复其它 AIAgent 接管的执行上下文",
-        )
 
     mapped_status = context.profile.status_mapping.get(issue.status)
     if not mapped_status:
@@ -238,27 +228,6 @@ def _agent_id_from_journal(task_dir: Path) -> str | None:
                 agent_id = candidate
         break
     return agent_id
-
-
-def _agentic_field_id(client: JiraClient) -> str | None:
-    try:
-        metadata = client.field_metadata()
-    except Exception:
-        return None
-    for item in metadata:
-        name = str(item.get("name", "")).strip().lower()
-        field_id = str(item.get("id", "")).strip()
-        if not name or not field_id:
-            continue
-        normalized = name.replace("-", "").replace("_", "").replace(" ", "")
-        if normalized in {"agenticid", "agenticidfield", "aiagentid", "agentid"}:
-            return field_id
-    for item in metadata:
-        name = str(item.get("name", "")).strip().lower()
-        field_id = str(item.get("id", "")).strip()
-        if field_id and "agentic" in name:
-            return field_id
-    return None
 
 
 def _task_class(task: dict[str, Any]) -> str:

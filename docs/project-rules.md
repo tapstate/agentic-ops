@@ -99,12 +99,13 @@ AgenticOps 必须保持事实源边界清晰：
 - 不要求研发工程师手工填写。
 - 必须能串联 Jira 证据、事件日志、测试结果、拉取请求和反馈分析。
 
-`agent_id` 和 `agentic_id` 属于所有权控制：
+developer 任务所有权由 Jira 负责人和本地运行身份共同控制：
 
 - `agent_id` 标识一个 AIAgent 身份，同一个 `agent_id` 可以产生多个 `agentic_run_id`。
-- `agentic_id` 是任务当前绑定的 `agent_id`，用于所有权门禁和并发冲突检测。
-- 同一个 Jira 卡片可以有多个历史 `agentic_run_id`，但同一时刻最多只能有一个有效的 `agentic_id`。
-- 任务完成或明确交接结束后，必须清理 `agentic_id`；清理动作不删除历史 `agentic_run_id`。
+- Jira `Assignee` 标识当前负责人，受管 Comment 记录接管、恢复和终态轨迹，本地 task state 记录当前 `agentic_run_id` 和恢复点。
+- developer 不创建、映射、探测或读写 Agentic Jira Custom Field，也不把 Comment 声称为跨工作空间并发锁。
+- 任务完成或明确交接结束后，必须写入并回读中文终态 Comment、关闭本地 run；历史 `agentic_run_id` 继续保留用于审计。
+- AO maintainer 工作面的 Agentic 字段和并发控制由其独立规则约束。
 
 执行记录必须覆盖：
 
@@ -553,7 +554,7 @@ Jira / GitHub 写操作必须可审计。任何写操作都必须关联 `operati
 
 面向用户、研发工程师和审阅者的可见文档标题和正文默认使用中文。只有以下内容保留英文或缩写：
 
-- 属性名、状态名、配置键、协议字段和错误码，例如 `agentic_run_id`、`agentic_id`、`side_effects`、`missing_form_field`。
+- 属性名、状态名、配置键、协议字段和错误码，例如 `agentic_run_id`、`takeover_comment_id`、`side_effects`、`missing_form_field`。
 - 命令、参数、文件路径、目录名和代码符号，例如 `ao-work workspace init`、`--jira-project`、`developer/standards/contracts/operations/`。
 - 产品名、平台名、组件名和行业通用稳定名词，例如 `AgenticOps`、`AIAgent`、`Jira`、`GitHub`、`CI`、`CLI`。
 - 故事线、任务或契约的稳定编号，例如 `PM-001`、`DE-001`。
