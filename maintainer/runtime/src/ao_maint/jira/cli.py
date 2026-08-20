@@ -26,6 +26,12 @@ from ao_maint.jira.config import (
     set_credentials,
 )
 from ao_maint.jira.service import MaintainerJiraService, WritePlan
+from ao_maint.jira.scope import (
+    MAINTAINER_JIRA_PROJECT_KEY,
+    validate_maintainer_issue_key,
+    validate_maintainer_project_key,
+    validate_write_plan_scope,
+)
 from ao_maint.locking import TaskLock
 from ao_maint.output import EXIT_BLOCKED, RuntimeErrorResult
 
@@ -142,6 +148,8 @@ def _configure_write_actions(
 
 
 def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
+    if args.command != "auth":
+        _validate_jira_scope_preflight(args, source_root)
     config = load_maintainer_jira_config(source_root)
     if args.command == "auth":
         return _execute_auth(args, source_root, config)
@@ -403,11 +411,13 @@ def _execute_auth(
 ) -> dict[str, Any]:
     if args.action == "show":
         status = credential_status(source_root, config.connection)
-        return {**status, "account_scope": "maintainer"}
+        return _with_maintainer_auth_scope(status)
     if args.action == "set":
         return _set_auth(args, source_root, config)
     if args.action == "remove":
-        return remove_credentials(source_root, config.connection, args.field)
+        return _with_maintainer_auth_scope(
+            remove_credentials(source_root, config.connection, args.field)
+        )
     if args.action == "verify":
         status = credential_status(source_root, config.connection)
         email, token = config.require_credentials()
@@ -416,14 +426,13 @@ def _execute_auth(
             UrllibJiraTransport(config.connection, email, token),
         )
         current_user = client.current_user()
-        fields = client.field_metadata()
         return {
             "connection_id": config.connection.connection_id,
             "base_url": config.connection.base_url,
             "verified": True,
             "jira_user": current_user,
-            "field_count": len(fields),
             "account_scope": "maintainer",
+            "allowed_project_keys": [MAINTAINER_JIRA_PROJECT_KEY],
             "credential_source": status["credential_source"],
         }
     raise RuntimeErrorResult(
@@ -468,7 +477,38 @@ def _set_auth(
         email=email,
         token=token,
     )
-    return {**result, "account_scope": "maintainer"}
+    return _with_maintainer_auth_scope(result)
+
+
+def _with_maintainer_auth_scope(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **result,
+        "account_scope": "maintainer",
+        "allowed_project_keys": [MAINTAINER_JIRA_PROJECT_KEY],
+    }
+
+
+def _validate_jira_scope_preflight(
+    args: argparse.Namespace, source_root: Path
+) -> None:
+    """在加载 maintainer 凭证、联网或写审计前固定 AO 项目边界。"""
+    if args.command == "inspect":
+        validate_maintainer_issue_key(args.issue_key)
+        return
+
+    if args.action == "plan":
+        if args.command == "create":
+            validate_maintainer_project_key(args.project_key)
+            if args.parent:
+                validate_maintainer_issue_key(args.parent)
+        else:
+            validate_maintainer_issue_key(args.issue_key)
+        return
+
+    _, _, plan = _read_plan_candidate(source_root, args.plan_file)
+    validate_write_plan_scope(plan)
+    if args.action == "readback":
+        validate_maintainer_issue_key(args.issue_key)
 
 
 def _plan_file(

@@ -56,7 +56,10 @@ class WorkplaneBoundaryTest(unittest.TestCase):
         skill = self.ROOT / "maintainer/skills/maintain-ao-task/SKILL.md"
         self.assertIn("ao-maint takeover <AO-KEY>", maintainer_entry)
         self.assertIn("设计审查、提交前精确内容确认、风险", maintainer_entry)
+        self.assertIn("allowed_project_keys", maintainer_entry)
+        self.assertIn("maintainer_jira_project_scope_mismatch", maintainer_entry)
         self.assertIn("work-authorization:<KEY>:<RUN>:<DESIGN-DIGEST>", source_rule)
+        self.assertIn("对应 developer 工作空间使用 `ao-work`", source_rule)
         self.assertTrue(skill.is_file())
 
     def test_no_parser_level_can_switch_workplane(self) -> None:

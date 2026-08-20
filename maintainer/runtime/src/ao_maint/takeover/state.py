@@ -10,10 +10,10 @@ from typing import Any
 
 from ao_maint.io import atomic_write_json, read_json
 from ao_maint.jira.config import local_root
+from ao_maint.jira.scope import validate_maintainer_issue_key
 from ao_maint.locking import TaskLock
 from ao_maint.output import EXIT_BLOCKED, RuntimeErrorResult
 
-ISSUE_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*$")
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 WORK_AUTHORIZATION_PATTERN = re.compile(
@@ -140,10 +140,7 @@ def git_binding(source_root: Path) -> tuple[str, str]:
 
 
 def validate_issue_key(value: str) -> str:
-    normalized = value.strip().upper()
-    if not ISSUE_KEY_PATTERN.fullmatch(normalized):
-        raise _blocked("invalid_issue_key", "Jira issue key 格式无效")
-    return normalized
+    return validate_maintainer_issue_key(value)
 
 
 def validate_digest(value: str) -> str:

@@ -18,6 +18,7 @@ from ao_maint.takeover.cli import (
     _read_design,
     _record_design,
     _takeover,
+    execute_takeover,
 )
 from ao_maint.takeover.state import (
     load_state,
@@ -127,6 +128,24 @@ def _plan(
 
 
 class MaintainerTakeoverTest(unittest.TestCase):
+    def test_non_ao_takeover_blocks_before_identity_and_config(self) -> None:
+        args = build_parser().parse_args(["takeover", "TAP-12289"])
+        with (
+            mock.patch(
+                "ao_maint.takeover.cli.load_maintainer_identity"
+            ) as load_identity,
+            mock.patch(
+                "ao_maint.takeover.cli.load_maintainer_jira_config"
+            ) as load_config,
+            self.assertRaises(RuntimeErrorResult) as captured,
+        ):
+            execute_takeover(args, Path("/unused"))
+        self.assertEqual(
+            "maintainer_jira_project_scope_mismatch", captured.exception.code
+        )
+        load_identity.assert_not_called()
+        load_config.assert_not_called()
+
     def test_parser_exposes_single_takeover_entry(self) -> None:
         args = build_parser().parse_args(["takeover", "AO-45"])
         self.assertEqual("takeover", args.group)

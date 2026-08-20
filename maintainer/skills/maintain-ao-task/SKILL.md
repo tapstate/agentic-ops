@@ -17,6 +17,8 @@ ao-maint takeover <AO-KEY>
 
 不得把内部 Jira plan/apply/readback 子操作暴露为用户需要理解的接管步骤，不得调用 Atlassian Connector、直接 Jira REST API 或 Shell 网络请求写 Jira。
 
+`ao-maint` 只能处理 AO 项目任务。不得把 TAP 或其它业务项目的 issue key、project key、父任务或计划文件传给 maintainer Runtime；遇到 `maintainer_jira_project_scope_mismatch` 必须停止跨面操作，并提示在对应 developer 工作空间使用 `ao-work`。`ao-maint jira auth` 只维护凭证生命周期，输出的允许项目必须仍为 AO，不能把认证成功解释为可操作整个 Jira 站点。
+
 ## 消费接管结果
 
 - `mode=new`：Runtime 必须已经完成中文开始评论、流转“正在进行”和逐项回读。
