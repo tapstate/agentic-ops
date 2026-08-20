@@ -394,6 +394,27 @@ class TaskTakeoverTest(unittest.TestCase):
         self.assertEqual(0, code, (payload, stderr))
         self.assertFalse(payload["agentic_id_written"])
 
+    def test_takeover_reuses_existing_task_state(self) -> None:
+        """任务已初始化（task.json 存在）后再接管：复用 agentic_run_id，不 KeyError。"""
+        from ao_work.task_state import TaskIdentity, TaskStore
+
+        store = TaskStore(Path(self.workspace))
+        store.initialize(
+            TaskIdentity(
+                connection_id="tapdata-cloud",
+                jira_issue_id="12289",
+                issue_key="TAP-12289",
+                project_key="TAP",
+                agentic_run_id="run-TAP-12289-previous",
+            )
+        )
+        transport = TakeoverTransport(status="正在进行")
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual("takeover_started", payload["current_stage"])
+        self.assertEqual("run-TAP-12289-previous", payload["agentic_run_id"])
+        self.assertFalse(payload["task_state_created"])
+
 
 class AgenticFieldProbeTest(unittest.TestCase):
     def test_finds_agentic_id_field_by_common_names(self) -> None:

@@ -271,7 +271,10 @@ def _existing_task(store: TaskStore, issue_key: str) -> dict[str, Any] | None:
         state = store.inspect(issue_key)
     except Exception:
         return None
-    return state if isinstance(state, dict) else None
+    if not isinstance(state, dict):
+        return None
+    task = state.get("task")
+    return task if isinstance(task, dict) else None
 
 
 def _default_agent_id(install_root: Path) -> str:
