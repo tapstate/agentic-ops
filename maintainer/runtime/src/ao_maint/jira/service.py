@@ -117,6 +117,7 @@ class MaintainerJiraService:
         summary: str,
         description: str,
         assignee: str | None = None,
+        parent_key: str | None = None,
         extra_fields: dict[str, Any] | None = None,
     ) -> WritePlan:
         """计划一次 Jira 建卡。
@@ -132,6 +133,22 @@ class MaintainerJiraService:
         if not issuetype_name.strip():
             raise _input_error("invalid_issuetype_name", "事务类型名称不能为空")
         meta = self.client.create_meta(normalized_project, issuetype_name.strip())
+        supplied_fields = set(extra_fields or {})
+        if "parent" in supplied_fields:
+            raise RuntimeErrorResult(
+                code="jira_create_parent_requires_typed_argument",
+                message="父任务必须通过 --parent 提供，禁止使用通用 --field 猜测结构",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请删除 --field parent=... 并改用 --parent <ISSUE-KEY>",
+            )
+        parent = self._resolve_create_parent(
+            normalized_project,
+            parent_key,
+            meta,
+        )
+        if parent:
+            supplied_fields.add("parent")
         missing_required = [
             field_id
             for field_id in meta["required"]
@@ -143,7 +160,7 @@ class MaintainerJiraService:
                 "reporter",
                 "description",
             }
-            and field_id not in (extra_fields or {})
+            and field_id not in supplied_fields
         ]
         if missing_required:
             names = ", ".join(
@@ -177,6 +194,8 @@ class MaintainerJiraService:
             else f"{marker}\n"
         )
         normalized_fields = _validate_extra_fields(extra_fields or {}, meta)
+        if parent:
+            normalized_fields["parent"] = {"key": parent["key"]}
         normalized_assignee = (assignee or "").strip()
         if normalized_assignee:
             if not re.fullmatch(r"[A-Za-z0-9:_-]{3,200}", normalized_assignee):
@@ -192,6 +211,7 @@ class MaintainerJiraService:
             "markdown": markdown,
             "body_sha256": _text_sha256(_rendered_markdown_text(markdown)),
             "assignee": normalized_assignee,
+            "parent": parent,
             "fields": normalized_fields,
             "marker": marker,
             "required_fields": sorted(meta["required"]),
@@ -207,6 +227,50 @@ class MaintainerJiraService:
             payload,
             existing.key if existing else "",
         )
+
+    def _resolve_create_parent(
+        self,
+        project_key: str,
+        parent_key: str | None,
+        meta: dict[str, Any],
+    ) -> dict[str, str]:
+        normalized_parent = (parent_key or "").strip().upper()
+        if not normalized_parent:
+            return {}
+        if not ISSUE_KEY_PATTERN.fullmatch(normalized_parent):
+            raise _input_error("invalid_issue_key", "parent issue key 格式无效")
+        if "parent" not in meta.get("fields", {}):
+            raise RuntimeErrorResult(
+                code="jira_create_parent_not_supported",
+                message="当前 Jira 事务类型不支持父任务字段",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请核对事务类型，不要把普通任务伪装为子任务",
+            )
+        parent = self.inspect_issue(normalized_parent)
+        if parent.project_key != project_key:
+            raise RuntimeErrorResult(
+                code="jira_create_parent_project_mismatch",
+                message="父任务与待创建任务不属于同一 Jira 项目",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请提供当前项目中的有效父任务",
+            )
+        raw_type = parent.fields.get("issuetype", {})
+        if isinstance(raw_type, dict) and raw_type.get("subtask") is True:
+            raise RuntimeErrorResult(
+                code="jira_create_parent_invalid",
+                message="Jira 子任务不能作为另一个子任务的父任务",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请提供非子任务类型的父任务",
+            )
+        return {
+            "key": parent.key,
+            "issue_id": parent.issue_id,
+            "project_key": parent.project_key,
+            "issue_type": parent.issue_type,
+        }
 
     def apply_create_issue(
         self, plan: WritePlan, expected_plan_id: str
@@ -252,6 +316,7 @@ class MaintainerJiraService:
             "markdown",
             "body_sha256",
             "assignee",
+            "parent",
             "fields",
             "marker",
             "required_fields",
@@ -266,6 +331,7 @@ class MaintainerJiraService:
         assignee = plan.payload.get("assignee")
         marker = plan.payload.get("marker")
         fields = plan.payload.get("fields")
+        parent = plan.payload.get("parent")
         if (
             not isinstance(project_key, str)
             or not isinstance(issuetype_name, str)
@@ -277,6 +343,7 @@ class MaintainerJiraService:
             or not isinstance(assignee, str)
             or not isinstance(marker, str)
             or not isinstance(fields, dict)
+            or not isinstance(parent, dict)
         ):
             raise _input_error("jira_write_plan_invalid", "Jira 建卡计划内容无效")
         _require_chinese(summary, "任务摘要")
@@ -307,6 +374,26 @@ class MaintainerJiraService:
                 retry_safe=True,
                 required_human_action="请重新执行 plan 对齐 Jira 当前事实后再 apply",
             )
+        if parent:
+            expected_parent_keys = {"key", "issue_id", "project_key", "issue_type"}
+            if set(parent) != expected_parent_keys or fields.get("parent") != {
+                "key": parent.get("key")
+            }:
+                raise _input_error("jira_write_plan_invalid", "Jira 父任务计划字段无效")
+            current_parent = self._resolve_create_parent(
+                project_key,
+                str(parent.get("key", "")),
+                meta,
+            )
+            if current_parent != parent:
+                raise RuntimeErrorResult(
+                    code="jira_create_parent_changed",
+                    message="Jira 父任务事实已变化，原建卡计划失效",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    retry_safe=True,
+                    required_human_action="请重新执行 plan 对齐父任务当前事实后再 apply",
+                )
         missing_required = [
             field_id
             for field_id in meta["required"]
@@ -1152,6 +1239,24 @@ def _require_create_content(item: Any, plan: WritePlan) -> None:
         raise _idempotency_conflict("Jira 任务")
     if item.summary != expected_summary:
         raise _idempotency_conflict("Jira 任务")
+    expected_parent = plan.payload.get("parent", {})
+    if expected_parent:
+        raw_parent = item.fields.get("parent", {})
+        actual_parent_key = (
+            str(raw_parent.get("key", "")) if isinstance(raw_parent, dict) else ""
+        )
+        if actual_parent_key != str(expected_parent.get("key", "")):
+            raise RuntimeErrorResult(
+                code="jira_create_parent_readback_mismatch",
+                message="Jira 子任务父级回读与建卡计划不一致",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请人工核对 Jira 父子关系，不要重复创建任务",
+                details={
+                    "expected_parent_key": str(expected_parent.get("key", "")),
+                    "actual_parent_key": actual_parent_key,
+                },
+            )
 
 
 def _create_readback(
