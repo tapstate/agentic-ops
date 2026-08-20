@@ -46,6 +46,7 @@ require_executable maintainer/scripts/test-python-runtime.sh
 require_executable maintainer/scripts/test-release-workflow.sh
 require_executable .githooks/pre-commit
 require_executable .githooks/pre-push
+require_file maintainer/standards/git/story-review-policy.yaml
 
 shared_entries="$(find shared -mindepth 1 -print | LC_ALL=C sort)"
 expected_shared_entries="$(printf '%s\n' \
@@ -79,6 +80,14 @@ grep -q 'git cat-file -e ":\$required_path"' .githooks/pre-commit ||
   fail "pre-commit 未验证暂存快照中的故事门禁关键资产"
 grep -q 'git write-tree' .githooks/pre-commit ||
   fail "pre-commit 未从 index 创建隔离候选快照"
+grep -q 'AGENTIC_OPS_STORY_GATE_STAGE=pre_commit' .githooks/pre-commit ||
+  fail "pre-commit 未把候选检查限定为固定验收门禁"
+grep -q 'AGENTIC_OPS_STORY_GATE_STAGE=pre_push' .githooks/pre-push ||
+  fail "pre-push 未执行分支感知的后置代码审查门禁"
+grep -q 'git diff --quiet HEAD' .githooks/pre-push ||
+  fail "pre-push 未拒绝未提交的 Runtime 或分支策略篡改"
+grep -q 'maintainer/standards/git/story-review-policy.yaml' .githooks/pre-commit ||
+  fail "pre-commit 未要求版本化故事审查分支策略"
 grep -q 'head_commit:maintainer/runtime/src/ao_maint/story_gate/service.py' \
   .githooks/pre-commit ||
   fail "pre-commit 未优先从已接受 HEAD 加载故事门禁 Runtime"
@@ -124,6 +133,24 @@ grep -q 'story_gate_local_state_unsafe' .githooks/pre-commit ||
 grep -q 'release_story_gate_local_state_unsafe' \
   maintainer/scripts/lib/release-common.sh ||
   fail "发布流程未对故事确认/验收路径链接与特殊文件失败关闭"
+
+for story_review_asset in \
+  AGENTS.md \
+  maintainer/AGENTS.md \
+  maintainer/rules/source-maintenance.md \
+  maintainer/skills/guard-story-quality/SKILL.md \
+  docs/user-stories/project-maintainer/pm-007-story-quality-gate.md; do
+  grep -q '确认事项' "$story_review_asset" ||
+    fail "故事审查资产未逐项要求确认事项：$story_review_asset"
+  grep -q '变更点' "$story_review_asset" ||
+    fail "故事审查资产未逐项要求变更点：$story_review_asset"
+  grep -q '风险' "$story_review_asset" ||
+    fail "故事审查资产未逐项要求风险：$story_review_asset"
+  if grep -Eq 'user-confirmation:[^ ]*<impact|等待人工确认同一.*impact_id|请公司员工指导员确认影响报告' \
+    "$story_review_asset"; then
+    fail "故事审查资产仍要求用户确认裸 impact_id：$story_review_asset"
+  fi
+done
 
 grep -q '^ao-maint = "ao_maint\.cli:main"$' maintainer/pyproject.toml ||
   fail "maintainer Python 入口不是 ao-maint"

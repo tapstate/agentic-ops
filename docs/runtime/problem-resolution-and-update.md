@@ -69,7 +69,7 @@
 
 1. 根 `AGENTS.md` 固定进入 maintainer，并加载 `maintainer/AGENTS.md`。
 2. 只使用 `ao-maint` 执行维护操作；需要复现 developer 行为时，通过本地 fixture 或显式测试清单调用 developer 黑盒入口，不继承真实业务凭证。
-3. 变更命中项目故事时，运行 `ao-maint story impact`，等待人工确认同一 `impact_id`，再执行固定验收。
+3. 变更命中项目故事时，运行 `ao-maint story impact` 输出候选预警并先完成固定验收；功能、修复和任务分支形成 PR 后审查当前 Head，其它允许分支形成未推送 commit 后审查提交编号。人工确认逐项绑定确认事项、变更点和风险，不面向用户暴露内部 `impact_id`。
 4. 验证通过后创建目标为 `develop` 的 PR，停在人工审查。
 
 不要直接修改 `~/.agentic-ops` 验证修复。该目录代表稳定 developer 安装；未发布改进在 source worktree 中测试，发布后再通过 Bootstrap 更新。

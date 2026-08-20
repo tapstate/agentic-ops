@@ -55,7 +55,10 @@ class WorkplaneBoundaryTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         skill = self.ROOT / "maintainer/skills/maintain-ao-task/SKILL.md"
         self.assertIn("ao-maint takeover <AO-KEY>", maintainer_entry)
-        self.assertIn("设计审查、提交前精确内容确认、风险", maintainer_entry)
+        self.assertIn("设计审查、代码审查、风险", maintainer_entry)
+        self.assertIn("功能、修复和任务分支推进到 commit、push、PR", maintainer_entry)
+        self.assertIn("提供提交编号并在推送前逐项审查", maintainer_entry)
+        self.assertIn("不能要求用户确认或复制内部 `impact_id`", maintainer_entry)
         self.assertIn("allowed_project_keys", maintainer_entry)
         self.assertIn("maintainer_jira_project_scope_mismatch", maintainer_entry)
         self.assertIn("work-authorization:<KEY>:<RUN>:<DESIGN-DIGEST>", source_rule)

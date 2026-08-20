@@ -66,7 +66,7 @@ esac
 EOF
 chmod 0755 "$transport_git_dir/git"
 
-test_python="${AGENTIC_OPS_TEST_PYTHON:-$repo_root/.venv/bin/python}"
+test_python="${AGENTIC_OPS_TEST_PYTHON:-$repo_root/developer/.venv/bin/python}"
 if [ ! -x "$test_python" ]; then
   test_python="$(command -v python3)"
 fi

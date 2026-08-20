@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -13,19 +14,23 @@ from typing import Any
 from ao_maint.io import atomic_write_json, read_json
 from ao_maint.locking import TaskLock
 from ao_maint.output import EXIT_BLOCKED, EXIT_CAPABILITY_GAP, RuntimeErrorResult
+from ao_maint.story_gate.branch_policy import (
+    PullRequestFact,
+    read_pull_request_fact,
+    resolve_branch_review,
+)
 from ao_maint.story_gate.git_changes import collect_changes
 from ao_maint.story_gate.model import StoryImpact, StoryRegistry
 from ao_maint.story_gate.registry import load_story_registry, path_matches
 
-GOVERNED_PATHS = (
-    "**",
+GOVERNED_PATHS = ("**",)
+AUTHORIZATION_RECORD_SCHEMA_VERSION = 4
+_ISSUE_KEY = r"AO-[1-9][0-9]*"
+_COMMIT_CONFIRMATION_REFERENCE = re.compile(
+    rf"user-confirmation:(?P<issue_key>{_ISSUE_KEY}):commit:(?P<commit_sha>[0-9a-f]{{40,64}})"
 )
-
-AUTHORIZATION_RECORD_SCHEMA_VERSION = 3
-_ISSUE_KEY = r"[A-Z][A-Z0-9_]*-[1-9][0-9]*"
-_USER_CONFIRMATION_REFERENCE = re.compile(
-    rf"user-confirmation:(?P<issue_key>{_ISSUE_KEY}):"
-    r"(?P<record_id>[0-9a-f]{64})"
+_PR_REVIEW_REFERENCE = re.compile(
+    rf"github-pr-review:(?P<issue_key>{_ISSUE_KEY}):(?P<pr_number>[1-9][0-9]*):(?P<head_sha>[0-9a-f]{{40,64}})"
 )
 
 
@@ -42,68 +47,59 @@ class StoryGateService:
         enforce: bool = True,
     ) -> dict[str, Any]:
         registry, impact = self._calculate(source, base=base, head=head)
-        result = impact.as_dict()
+        evidence = self._read_matching_evidence(impact)
+        report = _review_report(registry, impact)
+        report_digest = _digest(report)
+        approval = self._read_matching_approval(impact, report_digest)
+        result = self._result(registry, impact, report, report_digest, approval=approval, evidence=evidence)
+
         if not impact.has_impact:
-            return {**result, "approved": False, "acceptance_status": "not_required"}
+            return result
         if impact.unmapped_paths:
             if enforce:
                 raise self._blocked(
                     "maintenance_story_mapping_missing",
                     "代码变更命中项目治理范围，但没有对应故事映射",
-                    "请由公司员工指导员补充故事影响映射后重新检查",
-                    impact,
+                    "请查阅审查报告中的未映射路径，补齐故事映射后重新检查",
+                    result,
                     EXIT_CAPABILITY_GAP,
                 )
-            return {**result, "approved": False, "acceptance_status": "mapping_missing"}
+            return result
 
-        approval = self._read_matching_approval(impact)
-        evidence = self._read_matching_evidence(impact)
-        if approval is not None and evidence is not None:
-            if evidence["authorization_reference"] != approval["authorization_reference"]:
-                evidence = None
-        if approval is None:
-            code = (
-                "maintenance_story_revision_required"
-                if impact.requires_revision_confirmation
-                else "maintenance_story_impacted"
-            )
-            if enforce:
-                raise self._blocked(
-                    code,
-                    "代码变更影响项目质量故事，连续自动化已停止",
-                    "请公司员工指导员确认影响报告，再执行 story approve",
-                    impact,
-                )
-            return {**result, "approved": False, "acceptance_status": "not_run"}
-        if evidence is None:
-            if enforce:
+        gate_stage = os.environ.get("AGENTIC_OPS_STORY_GATE_STAGE", "").strip()
+        if gate_stage == "pre_commit":
+            if evidence is None:
                 raise self._blocked(
                     "maintenance_story_acceptance_failed",
-                    "受影响故事尚未完成当前变更的固定验收",
-                    "请执行 ao-maint story verify；验收通过后才能继续提交",
-                    impact,
-                    acceptance_status="not_run",
+                    "候选提交尚未完成当前内容的固定验收",
+                    "请运行审查报告列出的固定验收；pre-commit 不要求提前人工批准",
+                    result,
                 )
-            return {
-                **result,
-                "approved": True,
-                "authorization_reference": approval["authorization_reference"],
-                "authorization_kind": approval["authorization_kind"],
-                "authorization_issue_key": approval["authorization_issue_key"],
-                "authorization_record_id": approval["authorization_record_id"],
-                "acceptance_status": "not_run",
-            }
-        return {
-            **result,
-            "approved": True,
-            "authorization_reference": approval["authorization_reference"],
-            "authorization_kind": approval["authorization_kind"],
-            "authorization_issue_key": approval["authorization_issue_key"],
-            "authorization_record_id": approval["authorization_record_id"],
-            "acceptance_status": "passed",
-            "evidence_path": str(self._evidence_path(impact.impact_id)),
-            "registry_digest": registry.digest,
-        }
+            return result
+        if gate_stage in {"pre_push", "release"}:
+            if impact.review_channel in {"protected", "special"}:
+                raise self._blocked(
+                    "story_review_channel_protected",
+                    "当前分支不能使用普通故事审查通道推送",
+                    "请使用版本化发布或 Hotfix 专用流程",
+                    result,
+                )
+            if evidence is None:
+                raise self._blocked(
+                    "maintenance_story_acceptance_failed",
+                    "待推送范围尚未完成同一内容的固定验收",
+                    "请对待推送 range 运行 story verify 后重试",
+                    result,
+                )
+            if impact.review_channel == "commit_review" and approval is None:
+                raise self._blocked(
+                    "story_commit_review_required",
+                    "待推送提交尚未获得推送前人工确认",
+                    "请审阅报告中的提交编号、确认事项、变更点和风险；确认后再推送",
+                    result,
+                )
+            return result
+        return result
 
     def approve(
         self,
@@ -114,75 +110,78 @@ class StoryGateService:
         base: str | None = None,
         head: str | None = None,
     ) -> dict[str, Any]:
-        _, impact = self._calculate(source, base=base, head=head)
+        registry, impact = self._calculate(source, base=base, head=head)
+        report = _review_report(registry, impact)
+        report_digest = _digest(report)
+        evidence = self._read_matching_evidence(impact)
+        result = self._result(registry, impact, report, report_digest, evidence=evidence)
         if impact.impact_id != impact_id:
             raise self._input_error(
-                "story_impact_changed",
-                "当前 Git 变更与待确认 impact_id 不一致",
-                "请重新执行 story impact，并让公司员工指导员确认新的影响报告",
-                impact,
+                "story_impact_changed", "当前 Git 变更与待确认内容不一致", "请重新生成提交或 PR 审查报告，并确认新的代码事实", result
             )
         if not impact.has_impact or impact.unmapped_paths:
             raise self._input_error(
-                "maintenance_story_mapping_missing",
-                "当前影响报告为空或仍有未映射路径，不能确认",
-                "请先补齐故事映射",
-                impact,
+                "maintenance_story_mapping_missing", "当前报告为空或仍有未映射路径，不能批准", "请先查阅报告并补齐故事映射", result
+            )
+        if source != "range" or not impact.commit_sha:
+            raise self._input_error(
+                "story_review_fact_not_ready", "尚未形成可供人工审查的 commit 或 PR", "请先完成候选验收并形成所属分支通道的代码事实", result
+            )
+        if evidence is None:
+            raise self._input_error(
+                "maintenance_story_acceptance_failed", "当前审查内容尚未完成固定验收", "请先运行报告列出的固定验收", result
             )
         reference = authorization_reference.strip()
         authorization, invalid_reason = _authorization_metadata(reference, impact)
         if authorization is None:
-            if invalid_reason == "missing":
-                code = "story_authorization_reference_missing"
-                message = "缺少公司员工指导员确认引用"
-            elif invalid_reason == "impact_mismatch":
-                code = "story_authorization_impact_mismatch"
-                message = "人工确认引用没有绑定当前 impact_id"
-            else:
-                code = "story_authorization_reference_invalid"
-                message = "公司员工指导员确认引用格式无效"
+            message = {
+                "missing": "缺少人工审查事实引用",
+                "review_object_mismatch": "人工审查事实没有绑定当前 commit 或 PR Head",
+                "pr_review_missing": "PR 当前 Head 没有有效的独立人工批准",
+            }.get(invalid_reason, "人工审查事实引用格式无效")
             raise self._input_error(
-                code,
+                "story_authorization_reference_invalid",
                 message,
-                "请提供与当前影响一致的 user-confirmation:<KEY>:<impact-id>；"
-                "maintainer 没有 Jira 评论回读能力，不接受 jira-comment 引用",
-                impact,
+                "请由 Agent 根据当前 commit 确认或 GitHub PR Review 回读构造内部审计引用",
+                result,
             )
         payload = {
             "schema_version": AUTHORIZATION_RECORD_SCHEMA_VERSION,
-            **impact.as_dict(),
+            **_impact_record_fields(impact),
+            "review_report_digest": report_digest,
             "authorization_reference": reference,
             **authorization,
+            "confirmation_items": report["confirmation_items"],
             "approved_by_role": "company_employee_instructor",
             "approved_at": _now(),
         }
         approval_path = self._approval_path(impact.impact_id)
+        _ensure_record_path_safe(self.root, approval_path)
         with TaskLock(approval_path.parent / ".lock", timeout=5):
             atomic_write_json(approval_path, payload)
         return {
-            **impact.as_dict(),
+            **result,
             "approved": True,
+            "confirmation_required": False,
             "authorization_reference": reference,
             **authorization,
             "approval_path": str(approval_path),
-            "next_action": "story_verify",
+            "next_action": (
+                "push_commit"
+                if impact.review_channel == "commit_review"
+                else "keep_pr_waiting_for_merge_gate"
+            ),
         }
 
-    def verify(
-        self,
-        source: str,
-        *,
-        base: str | None = None,
-        head: str | None = None,
-    ) -> dict[str, Any]:
-        _, impact = self._calculate(source, base=base, head=head)
-        approval = self._read_matching_approval(impact)
-        if not impact.has_impact or impact.unmapped_paths or approval is None:
+    def verify(self, source: str, *, base: str | None = None, head: str | None = None) -> dict[str, Any]:
+        registry, impact = self._calculate(source, base=base, head=head, read_pr_fact=False)
+        report = _review_report(registry, impact)
+        if not impact.has_impact or impact.unmapped_paths:
             raise self._input_error(
-                "maintenance_story_impacted",
-                "受影响故事尚未获得公司员工指导员确认",
-                "请先执行 story impact 和 story approve",
-                impact,
+                "maintenance_story_mapping_missing",
+                "当前候选为空或仍有未映射路径，不能执行故事验收",
+                "请先查阅审查报告并补齐故事映射",
+                self._result(registry, impact, report, _digest(report)),
             )
         results = []
         for check_id in impact.acceptance_checks:
@@ -197,14 +196,14 @@ class StoryGateService:
                 env=_check_environment(self.root),
             )
             output = completed.stdout.decode("utf-8", errors="replace")[-4000:]
-            result = {
+            check = {
                 "check_id": check_id,
                 "passed": completed.returncode == 0,
                 "exit_code": completed.returncode,
                 "duration_seconds": round(time.monotonic() - started, 3),
                 "output_tail": output,
             }
-            results.append(result)
+            results.append(check)
             if completed.returncode != 0:
                 raise RuntimeErrorResult(
                     code="maintenance_story_acceptance_failed",
@@ -212,24 +211,29 @@ class StoryGateService:
                     status="blocked",
                     exit_code=EXIT_BLOCKED,
                     retry_safe=True,
-                    required_human_action="请修复失败后重新生成 impact、确认并验收",
-                    details={**impact.as_dict(), "acceptance_status": "failed", "checks": results},
+                    required_human_action="请修复失败后重新生成报告并运行固定验收",
+                    details={
+                        **self._result(registry, impact, report, _digest(report)),
+                        "acceptance_status": "failed",
+                        "checks": results,
+                    },
                 )
         payload = {
             "schema_version": AUTHORIZATION_RECORD_SCHEMA_VERSION,
-            **impact.as_dict(),
-            "authorization_reference": approval["authorization_reference"],
-            "authorization_kind": approval["authorization_kind"],
-            "authorization_issue_key": approval["authorization_issue_key"],
-            "authorization_record_id": approval["authorization_record_id"],
+            **_impact_record_fields(impact),
             "acceptance_status": "passed",
             "checks": results,
             "verified_at": _now(),
         }
         evidence_path = self._evidence_path(impact.impact_id)
+        _ensure_record_path_safe(self.root, evidence_path)
         with TaskLock(evidence_path.parent / ".lock", timeout=5):
             atomic_write_json(evidence_path, payload)
-        return {**payload, "evidence_path": str(evidence_path)}
+        return {
+            **self._result(registry, impact, report, _digest(report), evidence=payload),
+            "checks": results,
+            "evidence_path": str(evidence_path),
+        }
 
     def _calculate(
         self,
@@ -237,18 +241,41 @@ class StoryGateService:
         *,
         base: str | None,
         head: str | None,
+        read_pr_fact: bool = True,
     ) -> tuple[StoryRegistry, StoryImpact]:
         try:
             registry = load_story_registry(self.root)
+            review = resolve_branch_review(self.root, head=head)
+            commit_sha = ""
+            if source == "range":
+                commit_sha = _git(self.root, "rev-parse", f"{head or 'HEAD'}^{{commit}}")
+                if base is None:
+                    base = _git(
+                        self.root,
+                        "merge-base",
+                        commit_sha,
+                        f"refs/remotes/origin/{review.target_branch}",
+                    )
             changes = collect_changes(self.root, source, base=base, head=head)
-        except (OSError, ValueError) as error:
+            gate_stage = os.environ.get("AGENTIC_OPS_STORY_GATE_STAGE", "").strip()
+            pr = PullRequestFact()
+            if (
+                read_pr_fact
+                and review.channel == "pr_review"
+                and source == "range"
+                and gate_stage not in {"pre_commit", "pre_push", "release"}
+            ):
+                pr = read_pull_request_fact(
+                    self.root, review, commit_sha, require_current_head_approval=True
+                )
+        except (OSError, ValueError, json.JSONDecodeError) as error:
             raise RuntimeErrorResult(
-                code="maintenance_story_mapping_missing",
-                message=f"项目故事质量配置无法使用：{error}",
+                code="story_review_policy_unavailable",
+                message=f"项目故事质量配置或审查事实无法使用：{error}",
                 status="capability_gap",
                 exit_code=EXIT_CAPABILITY_GAP,
                 retry_safe=True,
-                required_human_action="请由公司员工指导员修复故事注册表或 Git 工作区",
+                required_human_action="请修复故事注册表、分支策略、Git 工作区或 GitHub 回读能力",
             ) from error
 
         impacted: set[str] = set()
@@ -282,12 +309,10 @@ class StoryGateService:
             )
         }
         governed = {
-            path
-            for path in changes.paths
-            if any(path_matches(pattern, path) for pattern in GOVERNED_PATHS)
+            path for path in changes.paths if any(path_matches(pattern, path) for pattern in GOVERNED_PATHS)
         }
         unmapped = tuple(sorted(governed - mapped_paths))
-        impact_material = json.dumps(
+        material = json.dumps(
             {
                 "change_fingerprint": changes.fingerprint,
                 "registry_digest": registry.digest,
@@ -300,8 +325,14 @@ class StoryGateService:
             sort_keys=True,
             separators=(",", ":"),
         )
-        impact = StoryImpact(
-            impact_id=hashlib.sha256(impact_material.encode("utf-8")).hexdigest(),
+        confirmation_stage = {
+            "pr_review": "pull_request_review",
+            "commit_review": "pre_push_commit_review",
+            "protected": "protected_workflow",
+            "special": "special_workflow",
+        }[review.channel]
+        return registry, StoryImpact(
+            impact_id=hashlib.sha256(material.encode("utf-8")).hexdigest(),
             change_source=source,
             changed_paths=changes.paths,
             impacted_story_ids=tuple(sorted(impacted)),
@@ -309,14 +340,76 @@ class StoryGateService:
             revision_story_ids=tuple(sorted(revisions)),
             unmapped_paths=unmapped,
             acceptance_checks=tuple(sorted(checks)),
+            current_branch=review.branch,
+            review_channel=review.channel,
+            confirmation_stage=confirmation_stage,
+            target_branch=review.target_branch,
+            commit_sha=commit_sha,
+            pr_number=pr.number,
+            pr_url=pr.url,
+            pr_head_sha=pr.head_sha,
+            pr_review_approved=pr.approved_for_head,
         )
-        return registry, impact
 
-    def _read_matching_approval(self, impact: StoryImpact) -> dict[str, Any] | None:
-        return _matching_record(self._approval_path(impact.impact_id), impact, "approved")
+    def _result(
+        self,
+        registry: StoryRegistry,
+        impact: StoryImpact,
+        report: dict[str, Any],
+        report_digest: str,
+        *,
+        approval: dict[str, Any] | None = None,
+        evidence: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        review_fact_ready = bool(
+            impact.commit_sha
+            and (
+                impact.review_channel == "commit_review"
+                or (impact.review_channel == "pr_review" and impact.pr_url and impact.pr_head_sha == impact.commit_sha)
+            )
+        )
+        approval_ready = bool(
+            impact.has_impact
+            and not impact.unmapped_paths
+            and evidence is not None
+            and review_fact_ready
+        )
+        approved = approval is not None
+        return {
+            **impact.as_dict(),
+            "approved": approved,
+            "acceptance_status": (
+                "passed"
+                if evidence is not None
+                else ("not_required" if not impact.has_impact else "not_run")
+            ),
+            "approval_ready": approval_ready,
+            "confirmation_required": approval_ready and not approved,
+            "review_report": report,
+            "review_report_digest": report_digest,
+            "registry_digest": registry.digest,
+            "required_human_action": _required_action(impact, evidence is not None, approved),
+            **({"authorization_reference": approval["authorization_reference"]} if approval else {}),
+        }
+
+    def _read_matching_approval(self, impact: StoryImpact, report_digest: str) -> dict[str, Any] | None:
+        payload = _read_record(self._approval_path(impact.impact_id), self.root)
+        if payload is None or payload.get("schema_version") != AUTHORIZATION_RECORD_SCHEMA_VERSION:
+            return None
+        if not _record_matches_impact(payload, impact) or payload.get("review_report_digest") != report_digest:
+            return None
+        authorization, _ = _authorization_metadata(payload.get("authorization_reference"), impact)
+        if authorization is None or any(payload.get(key) != value for key, value in authorization.items()):
+            return None
+        return payload
 
     def _read_matching_evidence(self, impact: StoryImpact) -> dict[str, Any] | None:
-        return _matching_record(self._evidence_path(impact.impact_id), impact, "acceptance")
+        payload = _read_record(self._evidence_path(impact.impact_id), self.root)
+        if payload is None or payload.get("schema_version") not in {3, 4}:
+            return None
+        if not _record_matches_impact(payload, impact):
+            return None
+        return payload if payload.get("acceptance_status") == "passed" else None
 
     def _approval_path(self, impact_id: str) -> Path:
         return self.root / "maintainer" / ".local" / "story-approvals" / f"{impact_id}.json"
@@ -329,9 +422,8 @@ class StoryGateService:
         code: str,
         message: str,
         action: str,
-        impact: StoryImpact,
+        details: dict[str, Any],
         exit_code: int = EXIT_BLOCKED,
-        **extra: Any,
     ) -> RuntimeErrorResult:
         return RuntimeErrorResult(
             code=code,
@@ -340,72 +432,232 @@ class StoryGateService:
             exit_code=exit_code,
             retry_safe=True,
             required_human_action=action,
-            details={**impact.as_dict(), **extra},
+            details=details,
         )
 
-    def _input_error(
-        self,
-        code: str,
-        message: str,
-        action: str,
-        impact: StoryImpact,
-    ) -> RuntimeErrorResult:
-        return self._blocked(code, message, action, impact)
+    def _input_error(self, code: str, message: str, action: str, details: dict[str, Any]) -> RuntimeErrorResult:
+        return self._blocked(code, message, action, details)
 
 
-def _matching_record(path: Path, impact: StoryImpact, kind: str) -> dict[str, Any] | None:
+def _review_report(registry: StoryRegistry, impact: StoryImpact) -> dict[str, Any]:
+    by_id = {story.story_id: story for story in registry.stories}
+    stories = [
+        {
+            "story_id": story_id,
+            "title": by_id[story_id].title,
+            "document": by_id[story_id].document,
+            "revised": story_id in impact.revision_story_ids,
+        }
+        for story_id in impact.impacted_story_ids
+    ]
+    if impact.pr_url:
+        review_object: dict[str, Any] = {
+            "type": "pull_request", "url": impact.pr_url, "number": impact.pr_number, "head_sha": impact.pr_head_sha
+        }
+    elif impact.commit_sha:
+        review_object = {"type": "commit", "commit_sha": impact.commit_sha}
+    else:
+        review_object = {"type": "candidate", "change_source": impact.change_source}
+    risks = [
+        {
+            "risk_id": "local-hook-bypass",
+            "level": "residual",
+            "description": "本地 Hook 是防误操作层，最终保护仍依赖受保护分支与独立人工审查。",
+        }
+    ]
+    if impact.revision_story_ids:
+        risks.append(
+            {
+                "risk_id": "story-contract-revision",
+                "level": "high",
+                "description": "本次直接修订项目质量故事，需重点审查保护行为和验收条件。",
+            }
+        )
+    if impact.review_channel == "pr_review":
+        risks.append(
+            {
+                "risk_id": "stale-pr-review",
+                "level": "medium",
+                "description": "PR Head 变化后旧 Review 失效，必须重新审查最新 Head。",
+            }
+        )
+    return {
+        "changed_paths": list(impact.changed_paths),
+        "impacted_stories": stories,
+        "story_revisions": list(impact.revision_story_ids),
+        "unmapped_paths": list(impact.unmapped_paths),
+        "acceptance_checks": list(impact.acceptance_checks),
+        "branch": {"current": impact.current_branch, "type": impact.review_channel, "target": impact.target_branch},
+        "review_object": review_object,
+        "confirmation_items": [
+            {"item_id": "scope", "description": "确认审查对象只包含报告列出的变更路径。"},
+            {"item_id": "story", "description": "确认受影响故事及故事修订符合预期。"},
+            {"item_id": "acceptance", "description": "确认固定验收项与当前代码事实绑定且全部通过。"},
+            {"item_id": "risk", "description": "确认已逐项审阅风险及残留风险。"},
+        ],
+        "change_points": [
+            {"path": path, "description": _change_description(path)}
+            for path in impact.changed_paths
+        ],
+        "risks": risks,
+        "allowed_next_action_after_confirmation": (
+            "push_reviewed_commit" if impact.review_channel == "commit_review" else "wait_for_protected_merge_gate"
+        ),
+    }
+
+
+def _change_description(path: str) -> str:
+    if path == ".githooks/pre-commit":
+        return "调整提交门禁：候选固定验收通过后允许先形成 commit。"
+    if path == ".githooks/pre-push":
+        return "调整推送门禁：按版本化分支通道校验 commit 批准或允许形成 PR。"
+    if path.endswith("story-review-policy.yaml"):
+        return "登记 protected、special、commit_review 和 pr_review 的唯一分支分类。"
+    if "/story_gate/" in path:
+        return "实现结构化审查报告、后置批准、代码事实绑定和旧批准失效。"
+    if path.endswith("pm-007-story-quality-gate.md"):
+        return "修订 PM-007 质量合同，使用户审查 commit 或 PR 而非内部哈希。"
+    if path.endswith("AGENTS.md") or "/rules/" in path or "/skills/" in path:
+        return "固化新会话自动继承的 maintainer 代码审查交互。"
+    if "/tests/" in path or path.endswith("test-resources.sh") or path.endswith("test-release-workflow.sh"):
+        return "补充候选、commit、PR、Head 失效、资源措辞和发布回归测试。"
+    if path.startswith("docs/"):
+        return "同步人读架构和运行文档中的故事审查顺序与事实源边界。"
+    return "更新当前审查对象中的配套实现或版本化规范。"
+
+
+def _required_action(impact: StoryImpact, verified: bool, approved: bool) -> str:
+    if not impact.has_impact:
+        return "无需故事人工确认"
+    if impact.unmapped_paths:
+        return "请查阅报告中的未映射路径并补齐故事合同"
+    if not verified:
+        return "继续整理精确候选并运行报告列出的固定验收；当前不得请求人工确认"
+    if not impact.commit_sha:
+        return "固定验收已通过；请继续形成所属分支通道的 commit 或 PR，不得确认裸 impact_id"
+    if impact.review_channel == "pr_review" and not impact.pr_url:
+        return "请在连续授权范围内推送任务分支并创建或更新 PR"
+    if approved:
+        return "当前审查对象已确认，继续执行报告允许的下一动作"
+    if impact.review_channel == "pr_review":
+        return f"请访问 {impact.pr_url}，针对当前 Head {impact.pr_head_sha} 逐项审查确认事项、变更点和风险"
+    if impact.review_channel == "commit_review":
+        return f"请审阅本地提交 {impact.commit_sha} 的确认事项、变更点和风险；确认前保持未推送"
+    return "请使用受保护或专用工作流"
+
+
+def _authorization_metadata(reference: object, impact: StoryImpact) -> tuple[dict[str, str] | None, str | None]:
+    if not isinstance(reference, str) or not reference:
+        return None, "missing"
+    commit = _COMMIT_CONFIRMATION_REFERENCE.fullmatch(reference)
+    if commit is not None and impact.review_channel == "commit_review":
+        if commit.group("commit_sha") != impact.commit_sha:
+            return None, "review_object_mismatch"
+        return {
+            "authorization_kind": "commit_confirmation",
+            "authorization_issue_key": commit.group("issue_key"),
+            "authorization_record_id": impact.commit_sha,
+        }, None
+    pr = _PR_REVIEW_REFERENCE.fullmatch(reference)
+    if pr is not None and impact.review_channel == "pr_review":
+        if int(pr.group("pr_number")) != impact.pr_number or pr.group("head_sha") != impact.pr_head_sha:
+            return None, "review_object_mismatch"
+        if not impact.pr_review_approved:
+            return None, "pr_review_missing"
+        return {
+            "authorization_kind": "github_pr_review",
+            "authorization_issue_key": pr.group("issue_key"),
+            "authorization_record_id": f"{impact.pr_number}:{impact.pr_head_sha}",
+        }, None
+    return None, "invalid"
+
+
+def _impact_record_fields(impact: StoryImpact) -> dict[str, Any]:
+    return {
+        "impact_id": impact.impact_id,
+        "changed_paths": list(impact.changed_paths),
+        "impacted_story_ids": list(impact.impacted_story_ids),
+        "commit_sha": impact.commit_sha,
+        "pr_number": impact.pr_number,
+        "pr_head_sha": impact.pr_head_sha,
+        "review_channel": impact.review_channel,
+    }
+
+
+def _record_matches_impact(payload: dict[str, Any], impact: StoryImpact) -> bool:
+    return (
+        payload.get("impact_id") == impact.impact_id
+        and payload.get("changed_paths") == list(impact.changed_paths)
+        and payload.get("impacted_story_ids") == list(impact.impacted_story_ids)
+    )
+
+
+def _read_record(path: Path, root: Path) -> dict[str, Any] | None:
+    _ensure_record_path_safe(root, path)
     if not path.is_file():
         return None
     try:
         payload = read_json(path)
     except (OSError, ValueError, json.JSONDecodeError):
         return None
-    if payload.get("impact_id") != impact.impact_id:
-        return None
-    if payload.get("changed_paths") != list(impact.changed_paths):
-        return None
-    if payload.get("impacted_story_ids") != list(impact.impacted_story_ids):
-        return None
-    if payload.get("schema_version") != AUTHORIZATION_RECORD_SCHEMA_VERSION:
-        return None
-    authorization, _ = _authorization_metadata(
-        payload.get("authorization_reference"), impact
+    return payload if isinstance(payload, dict) else None
+
+
+def _ensure_record_path_safe(root: Path, path: Path) -> None:
+    expected_parent = root / "maintainer" / ".local"
+    try:
+        path.relative_to(expected_parent)
+    except ValueError as error:
+        raise _unsafe_local_state("故事状态路径逃出 maintainer/.local") from error
+    current = root
+    for component in path.relative_to(root).parts:
+        current = current / component
+        if not current.exists() and not current.is_symlink():
+            continue
+        if current.is_symlink():
+            raise _unsafe_local_state(f"故事状态路径包含符号链接：{current.relative_to(root)}")
+        if current == path:
+            if not current.is_file():
+                raise _unsafe_local_state(f"故事状态叶子不是普通文件：{current.relative_to(root)}")
+            if current.stat().st_nlink != 1:
+                raise _unsafe_local_state(f"故事状态叶子不能是硬链接：{current.relative_to(root)}")
+        elif not current.is_dir():
+            raise _unsafe_local_state(f"故事状态祖先不是目录：{current.relative_to(root)}")
+
+
+def _unsafe_local_state(message: str) -> RuntimeErrorResult:
+    return RuntimeErrorResult(
+        code="story_gate_local_state_unsafe",
+        message=message,
+        status="blocked",
+        exit_code=EXIT_BLOCKED,
+        retry_safe=True,
+        required_human_action="请移除故事状态路径中的符号链接或特殊文件后重试",
     )
-    if authorization is None:
-        return None
-    if any(payload.get(key) != value for key, value in authorization.items()):
-        return None
-    if kind == "acceptance" and payload.get("acceptance_status") != "passed":
-        return None
-    return payload
 
 
-def _authorization_metadata(
-    reference: object,
-    impact: StoryImpact,
-) -> tuple[dict[str, str] | None, str | None]:
-    if not isinstance(reference, str) or not reference:
-        return None, "missing"
+def _digest(payload: dict[str, Any]) -> str:
+    material = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
-    user_confirmation = _USER_CONFIRMATION_REFERENCE.fullmatch(reference)
-    if user_confirmation is not None:
-        record_id = user_confirmation.group("record_id")
-        if record_id != impact.impact_id:
-            return None, "impact_mismatch"
-        return {
-            "authorization_kind": "user_confirmation",
-            "authorization_issue_key": user_confirmation.group("issue_key"),
-            "authorization_record_id": record_id,
-        }, None
 
-    return None, "invalid"
+def _git(root: Path, *arguments: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(root), *arguments],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=20,
+    )
+    if completed.returncode != 0:
+        raise ValueError(completed.stderr.strip() or "Git 命令失败")
+    return completed.stdout.strip()
 
 
 def _check_command(root: Path, check_id: str) -> list[str]:
-    commands = {
-        "python_runtime": [
-            str(root / "maintainer" / "scripts" / "test-python-runtime.sh"),
-        ],
+    return {
+        "python_runtime": [str(root / "maintainer" / "scripts" / "test-python-runtime.sh")],
         "resource_contracts": [str(root / "maintainer" / "scripts" / "test-resources.sh")],
         "release_workflow": [str(root / "maintainer" / "scripts" / "test-release-workflow.sh")],
         "story_registry": [
@@ -418,24 +670,15 @@ def _check_command(root: Path, check_id: str) -> list[str]:
             "-p",
             "test_story_gate.py",
         ],
-    }
-    return commands[check_id]
+    }[check_id]
 
 
 def _check_environment(root: Path) -> dict[str, str]:
-    import os
-
     environment = dict(os.environ)
-    environment["PYTHONPYCACHEPREFIX"] = environment.get(
-        "PYTHONPYCACHEPREFIX", ".local/pycache"
-    )
+    environment["PYTHONPYCACHEPREFIX"] = environment.get("PYTHONPYCACHEPREFIX", ".local/pycache")
     maintainer_path = str(root / "maintainer" / "runtime" / "src")
     existing_path = environment.get("PYTHONPATH", "")
-    environment["PYTHONPATH"] = (
-        f"{maintainer_path}{os.pathsep}{existing_path}"
-        if existing_path
-        else maintainer_path
-    )
+    environment["PYTHONPATH"] = f"{maintainer_path}{os.pathsep}{existing_path}" if existing_path else maintainer_path
     return environment
 
 
