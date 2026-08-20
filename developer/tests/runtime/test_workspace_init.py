@@ -1168,7 +1168,7 @@ class WorkspaceInitTest(unittest.TestCase):
                     )
                 )
             payload = json.loads(stdout.getvalue())
-            self.assertEqual(0, exit_code)
+            self.assertEqual(0, exit_code, (payload, stderr.getvalue()[-800:]))
             self.assertEqual("git_local_exclude", payload["credential_protection"])
             agents = (workspace / "AGENTS.md").read_text(encoding="utf-8")
             self.assertIn("不得加载 maintainer 工作面", agents)
@@ -1176,6 +1176,15 @@ class WorkspaceInitTest(unittest.TestCase):
             self.assertIn(".agents/skills/", agents)
             self.assertNotIn("developer/skills/", agents)
             self.assertNotIn(str(install / "developer" / "AGENTS.md"), agents)
+            hermes_guide = (workspace / "HERMES.md").read_text(encoding="utf-8")
+            claude_guide = (workspace / "CLAUDE.md").read_text(encoding="utf-8")
+            for guide in (hermes_guide, claude_guide):
+                self.assertIn("AGENTS.md", guide)
+                self.assertIn("Codex", guide)
+                self.assertIn("developer", guide)
+                self.assertIn("preflight", guide)
+            self.assertIn("Hermes", hermes_guide)
+            self.assertIn("Claude Code", claude_guide)
             status = subprocess.run(
                 ["git", "-C", str(workspace), "status", "--porcelain", "--untracked-files=all"],
                 check=True,
