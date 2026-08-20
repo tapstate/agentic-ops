@@ -138,6 +138,8 @@ class TakeoverTransport:
                 if self.transition_post_mode == "third_then_raise":
                     self.status = "代码评审"
                     raise JiraTransportError("simulated transition response loss")
+                if self.transition_post_mode == "known_failure":
+                    return TransportResponse(409, {"errorMessages": ["blocked"]})
                 self.status = "正在进行"
                 if self.transition_post_mode == "write_then_raise":
                     raise JiraTransportError("simulated transition response loss")
@@ -227,66 +229,34 @@ class TaskTakeoverTest(unittest.TestCase):
         self,
         transport: TakeoverTransport,
         *extra: str,
-        agent_id: str | None = "harsen-mini-test-bot",
-        issue_key: str | None = "TAP-12289",
-    ) -> tuple[int, dict[str, object], str]:
-        stdout, stderr = io.StringIO(), io.StringIO()
-        arguments: list[str] = [
-            "--workspace-root",
-            str(self.workspace),
-            "task",
-            "takeover",
-        ]
-        if issue_key is not None:
-            arguments.append(issue_key)
-        if agent_id is not None:
-            arguments.extend(["--agent-id", agent_id])
-        arguments.extend(
-            [
-                "--authorization-reference",
-                "user-confirmation:TAP-12289:takeover-test",
-            ]
-        )
-        arguments.extend(extra)
-        with (
-            redirect_stdout(stdout),
-            redirect_stderr(stderr),
-            mock.patch("ao_work.work_cli.validate_install_root", return_value=self.install),
-            mock.patch(
-                "ao_work.task_takeover.UrllibJiraTransport",
-                return_value=transport,
-            ),
-        ):
-            code = main(tuple(arguments))
-        return code, json.loads(stdout.getvalue()), stderr.getvalue()
-
-    def run_top_level_cli(
-        self,
-        transport: TakeoverTransport,
-        *,
+        with_identity: bool = True,
         issue_key: str | None = "TAP-12289",
     ) -> tuple[int, dict[str, object], str]:
         stdout, stderr = io.StringIO(), io.StringIO()
         identity = self.install / "user" / "identity.yaml"
-        identity.parent.mkdir(parents=True, exist_ok=True)
-        identity.write_text(
-            "agent_id: harsen-mini-test-bot\n"
-            "jira_email: harsen@example.test\n"
-            "execution_identity:\n"
-            "  git_author_name: Harsen Test Bot\n"
-            "  git_author_email: harsen@example.test\n"
-            "  git_committer_name: Harsen Test Bot\n"
-            "  git_committer_email: harsen@example.test\n"
-            "  github_actor_login: harsen-mini-test-bot\n",
-            encoding="utf-8",
-        )
-        arguments = [
+        if with_identity:
+            identity.parent.mkdir(parents=True, exist_ok=True)
+            identity.write_text(
+                "agent_id: harsen-mini-test-bot\n"
+                "jira_email: harsen@example.test\n"
+                "execution_identity:\n"
+                "  git_author_name: Harsen Test Bot\n"
+                "  git_author_email: harsen@example.test\n"
+                "  git_committer_name: Harsen Test Bot\n"
+                "  git_committer_email: harsen@example.test\n"
+                "  github_actor_login: harsen-mini-test-bot\n",
+                encoding="utf-8",
+            )
+        elif identity.exists():
+            identity.unlink()
+        arguments: list[str] = [
             "--workspace-root",
             str(self.workspace),
             "takeover",
         ]
         if issue_key is not None:
             arguments.append(issue_key)
+        arguments.extend(extra)
         with (
             redirect_stdout(stdout),
             redirect_stderr(stderr),
@@ -301,7 +271,7 @@ class TaskTakeoverTest(unittest.TestCase):
 
     def test_top_level_takeover_generates_stable_internal_authorization(self) -> None:
         transport = TakeoverTransport(status="打开")
-        code, payload, stderr = self.run_top_level_cli(transport)
+        code, payload, stderr = self.run_cli(transport)
         self.assertEqual(0, code, (payload, stderr))
         self.assertEqual("takeover", payload["operation"])
         self.assertEqual("new_takeover", payload["takeover_kind"])
@@ -309,7 +279,7 @@ class TaskTakeoverTest(unittest.TestCase):
         first_run = payload["agentic_run_id"]
         first_comment = payload["takeover_comment_id"]
 
-        code, repeated, stderr = self.run_top_level_cli(transport)
+        code, repeated, stderr = self.run_cli(transport)
         self.assertEqual(0, code, (repeated, stderr))
         self.assertEqual(first_run, repeated["agentic_run_id"])
         self.assertEqual(first_comment, repeated["takeover_comment_id"])
@@ -326,7 +296,7 @@ class TaskTakeoverTest(unittest.TestCase):
         transport.search_issues = [
             self._candidate_issue("TAP-101", summary="候选任务", priority="Highest")
         ]
-        code, payload, stderr = self.run_top_level_cli(
+        code, payload, stderr = self.run_cli(
             transport,
             issue_key=None,
         )
@@ -337,17 +307,41 @@ class TaskTakeoverTest(unittest.TestCase):
         self.assertEqual([], transport.comments)
         self.assertFalse((self.workspace / ".agentic-ops" / "tasks").exists())
 
-    def test_legacy_takeover_alias_reports_deprecation(self) -> None:
-        transport = TakeoverTransport(status="正在进行")
-        code, payload, stderr = self.run_cli(transport)
-        self.assertEqual(0, code, (payload, stderr))
-        self.assertTrue(payload["deprecated_alias"])
-        self.assertIn("ao-work takeover", payload["deprecation_notice"])
-        self.assertEqual(
-            "ao-work takeover [<KEY>]",
-            payload["replacement_command"],
-        )
-        self.assertIn("不是新接管", payload["human_notice"])
+    def test_removed_takeover_alias_and_hidden_inputs_are_rejected(self) -> None:
+        for arguments in (
+            ("task", "takeover", "TAP-12289"),
+            ("takeover", "TAP-12289", "--agent-id", "legacy-agent"),
+            (
+                "takeover",
+                "TAP-12289",
+                "--authorization-reference",
+                "legacy-reference",
+            ),
+        ):
+            with self.subTest(arguments=arguments):
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with (
+                    redirect_stdout(stdout),
+                    redirect_stderr(stderr),
+                    mock.patch(
+                        "ao_work.work_cli.validate_install_root",
+                        return_value=self.install,
+                    ),
+                ):
+                    code = main(
+                        ("--workspace-root", str(self.workspace), *arguments)
+                    )
+                self.assertEqual(2, code)
+                self.assertEqual(
+                    "invalid_arguments", json.loads(stdout.getvalue())["code"]
+                )
+
+    def test_developer_takeover_rejects_ao_issue_before_jira_access(self) -> None:
+        transport = TakeoverTransport()
+        code, payload, stderr = self.run_cli(transport, issue_key="AO-51")
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("jira_workspace_mismatch", payload["code"])
+        self.assertEqual([], transport.requests)
 
     def test_takeover_comments_then_transitions_without_custom_fields(self) -> None:
         transport = TakeoverTransport(status="打开")
@@ -522,56 +516,16 @@ class TaskTakeoverTest(unittest.TestCase):
         self.assertEqual([], payload["candidates"])
 
     def test_takeover_reads_agent_id_from_install_identity(self) -> None:
-        identity = self.install / "user" / "identity.yaml"
-        identity.parent.mkdir(parents=True)
-        identity.write_text(
-            "agent_id: harsen-mini-test-bot\n"
-            "jira_email: harsen@example.test\n"
-            "execution_identity:\n"
-            "  git_author_name: Harsen Test Bot\n"
-            "  git_author_email: harsen@example.test\n"
-            "  git_committer_name: Harsen Test Bot\n"
-            "  git_committer_email: harsen@example.test\n"
-            "  github_actor_login: harsen-mini-test-bot\n",
-            encoding="utf-8",
-        )
         transport = TakeoverTransport(status="打开")
-        code, payload, stderr = self.run_cli(transport, agent_id=None)
+        code, payload, stderr = self.run_cli(transport)
         self.assertEqual(0, code, (payload, stderr))
         self.assertEqual("harsen-mini-test-bot", payload["agent_id"])
 
     def test_takeover_blocks_when_agent_id_missing(self) -> None:
         transport = TakeoverTransport(status="打开")
-        code, payload, stderr = self.run_cli(transport, agent_id=None)
+        code, payload, stderr = self.run_cli(transport, with_identity=False)
         self.assertEqual(2, code, (payload, stderr))
         self.assertEqual("agent_identity_missing", payload["code"])
-
-    def test_takeover_blocks_when_authorization_reference_missing(self) -> None:
-        transport = TakeoverTransport(status="打开")
-        stdout, stderr = io.StringIO(), io.StringIO()
-        with (
-            redirect_stdout(stdout),
-            redirect_stderr(stderr),
-            mock.patch("ao_work.work_cli.validate_install_root", return_value=self.install),
-            mock.patch(
-                "ao_work.task_takeover.UrllibJiraTransport",
-                return_value=transport,
-            ),
-        ):
-            code = main(
-                (
-                    "--workspace-root",
-                    str(self.workspace),
-                    "task",
-                    "takeover",
-                    "TAP-12289",
-                    "--agent-id",
-                    "harsen-mini-test-bot",
-                )
-            )
-        payload = json.loads(stdout.getvalue())
-        self.assertEqual(2, code)
-        self.assertEqual("authorization_reference_required", payload["code"])
 
     def test_takeover_blocks_missing_transition(self) -> None:
         transport = TakeoverTransport(
@@ -634,6 +588,39 @@ class TaskTakeoverTest(unittest.TestCase):
         code, payload, stderr = self.run_cli(transport)
         self.assertEqual(2, code, (payload, stderr))
         self.assertEqual("takeover_comment_evidence_conflict", payload["code"])
+        self.assertEqual(1, len(transport.comments))
+
+    def test_takeover_blocks_foreign_run_comment_before_writing(self) -> None:
+        transport = TakeoverTransport(status="正在进行")
+        transport.comments.append(
+            {
+                "id": "8801",
+                "body": markdown_to_adf(
+                    "外来运行\n\n"
+                    "[agentic-ops-takeover:TAP-12289:run-foreign:"
+                    "accept_existing_task:foreign]"
+                ),
+                "author": {"accountId": "jira-account-1"},
+                "created": "2026-08-20T08:00:00.000+0800",
+            }
+        )
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("external_task_state_conflict", payload["code"])
+        self.assertEqual(1, len(transport.comments))
+        self.assertIsNone(transport.transition_executed)
+
+    def test_takeover_blocks_foreign_agent_against_persisted_intent(self) -> None:
+        transport = TakeoverTransport(status="正在进行")
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        with mock.patch(
+            "ao_work.task_takeover._default_agent_id",
+            return_value="foreign-agent",
+        ):
+            code, conflict, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (conflict, stderr))
+        self.assertEqual("takeover_intent_conflict", conflict["code"])
         self.assertEqual(1, len(transport.comments))
 
     def test_comment_response_loss_recovers_from_verified_readback(self) -> None:
@@ -704,6 +691,23 @@ class TaskTakeoverTest(unittest.TestCase):
         transport.transition_post_mode = "normal"
         code, payload, stderr = self.run_cli(transport)
         self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual(1, len(transport.comments))
+
+    def test_confirmed_comment_and_known_transition_failure_is_recoverable(self) -> None:
+        transport = TakeoverTransport(transition_post_mode="known_failure")
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("takeover_transition_retryable_original", payload["code"])
+        self.assertTrue(payload["retry_safe"])
+        self.assertEqual(1, len(transport.comments))
+        operation = TaskStore(Path(self.workspace)).inspect("TAP-12289")[
+            "takeover_recovery"
+        ]["operation"]
+        self.assertEqual("comment_verified", operation["phase"])
+
+        transport.transition_post_mode = "normal"
+        code, recovered, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (recovered, stderr))
         self.assertEqual(1, len(transport.comments))
 
     def test_transition_readback_failure_becomes_uncertain(self) -> None:
@@ -869,6 +873,68 @@ class TaskTakeoverTest(unittest.TestCase):
         self.assertEqual(run_id, payload["agentic_run_id"])
         self.assertEqual("accept_existing_task", payload["takeover_kind"])
         self.assertEqual("local_finalized", payload["takeover_phase"])
+        self.assertEqual(1, len(transport.comments))
+        self.assertIsNone(transport.transition_executed)
+
+    def test_unverified_legacy_takeover_fails_closed_without_state_rewrite(self) -> None:
+        from ao_work.task_state import TaskIdentity
+
+        store = TaskStore(Path(self.workspace))
+        run_id = "run-TAP-12289-legacy-unverified"
+        store.initialize(
+            TaskIdentity(
+                connection_id="tapdata-cloud",
+                jira_issue_id="12289",
+                issue_key="TAP-12289",
+                project_key="TAP",
+                agentic_run_id=run_id,
+            )
+        )
+        marker = f"[agentic-ops-takeover:TAP-12289:{run_id}:legacy]"
+        store.record_gate_transition(
+            "TAP-12289",
+            run_id,
+            stage="takeover_started",
+            next_action="assess_task_intake",
+            operation="takeover_task",
+            status="completed",
+            evidence={
+                "agent_id": "harsen-mini-test-bot",
+                "takeover_kind": "accept_existing_task",
+                "takeover_comment_id": "9001",
+                "takeover_comment_marker": marker,
+                "agentic_takeover_at": "2026-08-20T08:00:00Z",
+                "jira_status_before": "正在进行",
+                "jira_status_after": "正在进行",
+                "authorization_reference": "legacy-authorization",
+            },
+        )
+        task_root = self.workspace / ".agentic-ops" / "tasks" / "TAP-12289"
+        before = {
+            path.relative_to(task_root): path.read_bytes()
+            for path in task_root.rglob("*")
+            if path.is_file()
+        }
+        transport = TakeoverTransport(status="正在进行")
+        transport.comments.append(
+            {
+                "id": "9001",
+                "body": markdown_to_adf(f"旧接管记录\n\n{marker}"),
+                "author": {"accountId": "foreign-account"},
+                "created": "2026-08-20T08:00:00.000+0800",
+            }
+        )
+
+        code, payload, stderr = self.run_cli(transport)
+
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("takeover_legacy_state_unverified", payload["code"])
+        after = {
+            path.relative_to(task_root): path.read_bytes()
+            for path in task_root.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(before, after)
         self.assertEqual(1, len(transport.comments))
         self.assertIsNone(transport.transition_executed)
 

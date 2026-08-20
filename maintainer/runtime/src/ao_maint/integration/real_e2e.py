@@ -17,7 +17,6 @@ REQUIRED_CAPABILITIES = (
     "workspace_init",
     "workspace_preflight",
     "jira_authorization",
-    "task_start",
     "task_intake_assess",
     "solution_gate",
     "takeover_task",

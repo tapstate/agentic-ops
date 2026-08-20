@@ -160,7 +160,7 @@ class CliTest(unittest.TestCase):
             self.assertIn(f"usage: ao-work {group}", str(result["usage"]), group)
             self.assertEqual("", stderr, group)
 
-    def test_takeover_is_top_level_and_legacy_alias_is_hidden(self) -> None:
+    def test_takeover_is_top_level_and_legacy_alias_is_removed(self) -> None:
         exit_code, result, stderr = self.run_cli("--help")
         self.assertEqual(0, exit_code)
         self.assertIn("takeover", str(result["usage"]))
@@ -176,6 +176,12 @@ class CliTest(unittest.TestCase):
         self.assertIn("ao-work takeover", str(result["usage"]))
         self.assertNotIn("authorization-reference", str(result["usage"]))
         self.assertEqual("", stderr)
+
+        exit_code, result, stderr = self.run_cli(
+            "task", "takeover", "TAP-12289"
+        )
+        self.assertEqual(2, exit_code)
+        self.assertEqual("invalid_arguments", result["code"])
 
     def test_help_anywhere_in_arguments_targets_that_parser(self) -> None:
         """--help 出现在子命令之后时，应显示该子命令层级帮助而非顶层。"""

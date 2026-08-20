@@ -53,6 +53,20 @@ from ao_work.workspace import Workspace
 MAX_COMMAND_OUTPUT_BYTES = 4_194_304
 
 
+def is_current_managed_takeover_comment(
+    comment: Any,
+    *,
+    issue_key: str,
+    agentic_run_id: str,
+    expected_author: str,
+) -> bool:
+    prefix = f"[agentic-ops-takeover:{issue_key}:{agentic_run_id}:"
+    return comment.author == expected_author and any(
+        line.startswith(prefix) and line.endswith("]")
+        for line in comment.standalone_lines
+    )
+
+
 class TaskRunProtocol:
     """可信 task→PR 审计；关键事实只能由 Runtime 的确定性 probe 追加。"""
 
@@ -506,16 +520,16 @@ class TaskRunProtocol:
                 f"Jira 状态 {issue.status or '<empty>'} 未安全映射或已完成",
                 "请先修复 Project Profile 状态映射并重新确认 manifest",
             )
-        takeover_marker_prefix = (
-            f"[agentic-ops-takeover:{issue.key}:"
-            f"{manifest['agent']['agentic_run_id']}:"
-        )
         takeover_comment = next(
             (
                 comment
                 for comment in reversed(client.comments(issue.key))
-                if takeover_marker_prefix in comment.body
-                and comment.author == account_id
+                if is_current_managed_takeover_comment(
+                    comment,
+                    issue_key=issue.key,
+                    agentic_run_id=manifest["agent"]["agentic_run_id"],
+                    expected_author=account_id,
+                )
             ),
             None,
         )

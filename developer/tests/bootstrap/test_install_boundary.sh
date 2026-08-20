@@ -227,10 +227,29 @@ printf '%s\n' \
 help_output="$test_root/help.json"
 PYTHONPATH="$poison_root" "$install_root/bin/ao-work" --help > "$help_output"
 grep '"operation":"help"' "$help_output" >/dev/null
+grep 'takeover' "$help_output" >/dev/null
 if grep 'poisoned' "$help_output" >/dev/null; then
   echo "ao-work 受到外部 PYTHONPATH 污染" >&2
   exit 1
 fi
+
+if "$install_root/bin/ao-work" task takeover TAP-12289 \
+    >"$test_root/removed-takeover-alias.out" \
+    2>"$test_root/removed-takeover-alias.err"; then
+  echo "安装产物不得继续解析 ao-work task takeover" >&2
+  exit 1
+fi
+grep -q 'invalid_arguments' "$test_root/removed-takeover-alias.out"
+
+if grep -RIl 'ao-work task takeover' \
+    "$install_root/developer/AGENTS.md" \
+    "$install_root/developer/skills" \
+    "$install_root/developer/standards" | grep . >/dev/null; then
+  echo "developer 安装的现役资产不得发布旧多级接管入口" >&2
+  exit 1
+fi
+grep -q 'ao-work takeover <KEY>' \
+  "$install_root/developer/skills/daily-task-operations/SKILL.md"
 
 capability_output="$test_root/capabilities.json"
 AGENTIC_OPS_HOME="$test_root/must-not-select-this-directory" \
@@ -275,12 +294,20 @@ initializer._install_workspace_skills(Candidate())
 PY
 test -f "$business_workspace/.agents/skills/configure-authorization/SKILL.md"
 test -f "$business_workspace/.agents/skills/initialize-project-workspace/SKILL.md"
+test -f "$business_workspace/.agents/skills/daily-task-operations/SKILL.md"
 test ! -e "$business_workspace/.agents/skills/guard-story-quality"
 test ! -e "$business_workspace/maintainer"
 if find "$business_workspace/.agents/skills" -type l -print -quit | grep . >/dev/null || \
   grep -RIl 'workplane:[[:space:]]*maintainer' \
     "$business_workspace/.agents/skills" | grep . >/dev/null; then
   echo "业务工作空间只能发现普通文件形式的 developer Skills" >&2
+  exit 1
+fi
+grep -q 'ao-work takeover <KEY>' \
+  "$business_workspace/.agents/skills/daily-task-operations/SKILL.md"
+if grep -RIl 'ao-work task takeover' \
+    "$business_workspace/.agents/skills" | grep . >/dev/null; then
+  echo "新工作空间不得继承旧多级接管入口" >&2
   exit 1
 fi
 

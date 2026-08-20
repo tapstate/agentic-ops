@@ -7,12 +7,12 @@ metadata:
 
 # 测试真实任务到 PR 全链路
 
-只在 `maintainer` 工作面使用。完成一次性全链路配置后，任务运行入口只有 Jira key；测试身份、Project Profile 和预期确认人从该配置读取，Jira 卡片和 Runtime 能确定的字段不得逐项询问。用户只承担隐藏凭据输入、补全后准入摘要确认、L2 方案与高风险决策确认以及最终 PR 审查。
+只在 `maintainer` 工作面使用。完成一次性全链路配置后，任务运行入口只有 Jira key；测试身份、Project Profile 和预期确认人从该配置读取，Jira 卡片和 Runtime 能确定的字段不得逐项询问。用户只承担隐藏凭据输入、设计审查、风险决策以及最终 PR 审查，不确认准入摘要、通用方案摘要或内部标识。
 
 ## 停止线
 
 - 未收到本次真实测试授权前，不读取 `~/.agentic-ops`、业务工作空间、凭据、Jira、GitHub 或其它本机身份。
-- 先查询 `ao-work capability list|show`。`workspace_init`、`task_start`、正式 `takeover_task`、任务审计、Jira Comment/Worklog、Git 提交、任务分支推送和 GitHub PR 创建必须都有 `implemented` 原子能力；任一项为 `capability_gap` 时停止，不让 AI 直接运行等价命令绕过。
+- 先查询 `ao-work capability list|show`。`workspace_init`、正式 `takeover_task`、信息分析、方案分级、任务审计、Jira Comment/Worklog、Git 提交、任务分支推送和 GitHub PR 创建必须都有 `implemented` 原子能力；任一项为 `capability_gap` 时停止，不让 AI 直接运行等价命令绕过。内部 `task_start` 不是用户入口，也不能作为接管前置步骤。
 - 每次 `ao-work` 调用只根据 JSON 的 `ok`、`status`、证据字段和结构化 `agentic_next_action` 推进。`executor` 只表示当前步骤执行者，不改变 `task_ownership.task_owner`；现役 `ownership_effect` 只能为 `none`。未知 executor/action、未列入 `allowed_operations` 的下一操作、缺失 required inputs 或要求 `stop_workflow=true` 时停止。只在 `retry_gate.allowed=true` 时允许按同一 `retry_key` 重试一次；必须先回读状态、改变输入并记录 retry 事件，耗尽后转人工，绝不自动循环。
 - 测试终点固定为真实 PR 等待审查；禁止 merge、Jira Done、release、tag、保护分支直推、强推和历史改写。
 
@@ -37,14 +37,14 @@ ao-maint integration preflight-task-to-pr-e2e <ISSUE-KEY>
 
 用稳定 main 安装的 developer `ao-work` 再次查询能力目录。若必要原子能力未实现，输出准确 capability id、当前状态、缺少的确定性门禁和建议实现位置，然后停止；不得创建半初始化业务工作空间或访问 Jira。
 3. 能力齐备后，向用户展示本次读取与真实副作用边界，获得 Jira 读取和隔离工作空间初始化授权；随后创建隔离目录并运行 `ao-work workspace init`。让用户通过终端隐藏输入完成唯一 Jira 账户授权，并确认配置指定的身份、Project Profile、源码仓库和执行身份。不要把 token 放入参数、prompt、日志或结果包。
-4. 运行 `ao-work workspace preflight` 和 `ao-work task start <ISSUE-KEY>`。developer AI 先完整分析 Jira、Project Profile 和业务源码，把语义分析写入工作空间普通 JSON，再调用 `ao-work task intake assess --issue-key <KEY> --agentic-run-id <RUN> --input-file <相对JSON>`。Runtime 校验 Jira/Profile/Runtime 精确值、源码证据摘要和干净 HEAD，自动补齐确定性字段，并输出已知事实、补全值及来源、无法补齐项、假设、影响和 `intake_digest`。必要信息仍缺失时只按返回的同一 `retry_key` 改变输入后重试一次；否则把完整准入摘要交给用户确认，此前不制定最终方案、不修改代码。用户确认完整内容后调用 `ao-work task intake confirm`，其引用必须精确绑定 issue、run 与当前 digest。
-5. 准入确认后再形成方案 JSON，并调用 `ao-work task solution classify --issue-key <KEY> --agentic-run-id <RUN> --input-file <相对JSON>`。Runtime 按固定风险标志和证据分级：
-   - L1：信息完整、范围明确、沿用既有设计且风险在已授权边界内，直接开始实现。
-   - L2：方案可执行，但含用户选择、真实外部副作用或非平凡风险，确认后实现。
-   - L3：触及架构、公共合同、安全边界、数据迁移或已确认设计，先修改设计并重新分析、确认和分级。
+4. 运行 `ao-work workspace preflight`，随后在隔离业务工作空间启动独立 developer AI。developer AI 必须先执行 `ao-work takeover <ISSUE-KEY>`；Runtime 自动判断新接管、接纳存量或恢复，完成 Comment、必要 Status transition 和本地状态回读。不得先调用内部 `task start`，也不得要求用户提供授权参数。接管成功后再分析 Jira、Project Profile 和业务源码，把语义分析写入工作空间普通 JSON，并调用 `ao-work task intake assess --issue-key <KEY> --agentic-run-id <RUN> --input-file <相对JSON>`。Runtime 校验 Jira/Profile/Runtime 精确值、源码证据摘要和干净 HEAD，自动补齐确定性字段。必要信息仍缺失时只按同一 `retry_key` 改变输入后重试一次；事实完整时直接形成方案，不增加准入确认。
+5. 调用 `ao-work task solution classify --issue-key <KEY> --agentic-run-id <RUN> --input-file <相对JSON>`。Runtime 按固定风险标志和证据分级：
+   - L1：信息完整、范围明确且风险可控，展示完整设计并进入设计审查。
+   - L2：方案可执行，但含用户选择、真实外部副作用或非平凡风险，逐项进入风险决策。
+   - L3：触及架构、公共合同、安全边界、数据迁移或已确认设计，由 AI 先修改设计并重新分析，之后仍进入设计审查。
    - L4：事实冲突、必要信息无法补齐、权限或能力不足，停止并转人工。
-   只有 L2 调用 `ao-work task solution confirm` 绑定当前 `solution_digest`。Jira/Profile 快照、源码 HEAD、证据、范围、风险或方案变化后旧结论失效，必须重新准入和分级。
-6. 正式接管必须继续调用独立的 `takeover_task` 原子能力；`task start` 只建立本地 run，不能冒充接管。在隔离业务工作空间启动独立 developer AI，要求它加载工作空间 `AGENTS.md` 和 `$run-task-to-pr-test`，逐步消费 `agentic_next_action`。开放式代码理解、方案设计和实现由 AI 完成；Jira、Git、GitHub、验证、证据和门禁由 Runtime 判定。
+   不调用已经删除的 intake/solution 通用确认命令。Jira/Profile 快照、源码 HEAD、证据、范围、风险或方案变化后旧结论失效，必须重新分析和分级。
+6. 设计或风险决策确认后，developer AI 加载工作空间 `AGENTS.md` 和 `$run-task-to-pr-test`，逐步消费 `agentic_next_action`。开放式代码理解、方案设计和实现由 AI 完成；Jira、Git、GitHub、验证、证据和门禁由 Runtime 判定。
 7. 每个原子步骤完成后，根据实际结果执行返回的唯一下一动作，直到 `stop_workflow=true`、L4、重试耗尽或到达 PR 审查。方案、范围、外部事实或批准摘要变化后，重新执行信息分析和方案分级，不沿用旧结论。
    从正式接管到 PR 审查保持配置指定的同一 `task_owner`。reviewer、人工确认、Runtime 或项目工具参与步骤不构成转派。如需转派，记录 `task_transfer` 能力缺口并停止，由人决定；本 Skill 不预设转派方案。
 8. developer AI 完成代码与验证后，启动独立 reviewer AI，以只读方式检查 Jira 验收条件、已确认准入摘要、分级方案、diff 和验证证据。reviewer 只能给出 `approve`、`request_changes` 或 `blocked`；不能修改代码、创建 PR 或代替用户批准高风险动作。`request_changes` 交回原 developer AI 修复、重新分析受影响信息并重新验证。

@@ -74,13 +74,6 @@ def build_parser() -> argparse.ArgumentParser:
     task_init.add_argument("--issue-key", required=True)
     task_init.add_argument("--project-key", required=True)
     task_init.add_argument("--agentic-run-id", required=True)
-    task_takeover = task_commands.add_parser("takeover", help=argparse.SUPPRESS)
-    _configure_takeover_parser(task_takeover)
-    task_commands._choices_actions = [
-        action
-        for action in task_commands._choices_actions
-        if action.dest != "takeover"
-    ]
     task_resume = task_commands.add_parser("resume")
     resume_target = task_resume.add_mutually_exclusive_group()
     resume_target.add_argument("--issue-key")
@@ -149,14 +142,6 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             install_root,
             store,
             args.issue_key,
-            agent_id=args.agent_id,
-            authorization_reference=args.authorization_reference,
-            authorization_mode=(
-                "explicit_reference"
-                if args.authorization_reference
-                else "takeover_instruction"
-            ),
-            transition_comment=args.transition_comment,
         )
         return success("takeover", workplane=workspace.workplane, **state)
     if args.group == "task" and args.command == "start":
@@ -165,28 +150,6 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             install_root,
             store,
             args.issue_key,
-        )
-        return success(operation, workplane=workspace.workplane, **state)
-    if args.group == "task" and args.command == "takeover":
-        state = execute_task_takeover(
-            workspace,
-            install_root,
-            store,
-            args.issue_key,
-            agent_id=args.agent_id,
-            authorization_reference=args.authorization_reference,
-            authorization_mode="explicit_reference",
-            transition_comment=args.transition_comment,
-        )
-        state.update(
-            {
-                "deprecated_alias": True,
-                "deprecation_notice": (
-                    "ao-work task takeover 是隐藏兼容入口；"
-                    "请迁移到 ao-work takeover [<KEY>]"
-                ),
-                "replacement_command": "ao-work takeover [<KEY>]",
-            }
         )
         return success(operation, workplane=workspace.workplane, **state)
     if args.group == "task" and args.command == "resume":
@@ -250,13 +213,6 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
 
 def _configure_takeover_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("issue_key", nargs="?")
-    parser.add_argument("--agent-id", default=None, help=argparse.SUPPRESS)
-    parser.add_argument(
-        "--authorization-reference",
-        default=None,
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument("--transition-comment", default=None, help=argparse.SUPPRESS)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
