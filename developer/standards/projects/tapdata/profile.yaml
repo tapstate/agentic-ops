@@ -32,6 +32,7 @@ repositories:
     - tapdata/mcp-tap-server
     - tapdata/solutions
     - tapdata/fhir-solution
+    - tapdata/hazelcast
   analysis_mount:
     mode: all
     include: []
@@ -41,6 +42,20 @@ repositories:
     derive_from: default
     default_branch: main
     default_rule: same_name
+    # 各仓库新功能开发分支（from_branch = tapdata 的 develop 时生效）
+    dev_branches:
+      tapdata/tapdata: develop
+      tapdata/tapdata-cloud: develop
+      tapdata/tapdata-common-lib: main
+      tapdata/tapdata-connectors: develop
+      tapdata/tapdata-connectors-enterprise: develop
+      tapdata/tapdata-enterprise: develop
+      tapdata/tapdata-license: main
+      tapdata/tapdata-web: develop
+      tapdata/hazelcast: release-v5.5.0
+      tapdata/tapdata-application: main
+      tapdata/feishu_robot: master
+      tapdata/t-layer3-test: develop
     overrides: []
 
 fields:
