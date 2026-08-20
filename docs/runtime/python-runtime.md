@@ -162,13 +162,13 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 ## 13. 业务项目工作空间初始化
 
-人用常规入口为 Python Runtime 的 `ao-work workspace init`。交互模式从 Project Profile 安全默认值开始，统一确认 `agent_id`、Jira 空间、脱敏授权账户、默认仓库和源码目录。`agent_id` 默认由纯小写主机名规范化得到，最终必须匹配 `^[0-9A-Za-z_-]+$`。站点、Project、状态/字段映射和默认仓库不按任务重复询问；任务事实来自 Jira，run/digest/time 由 Runtime 生成，用户只审查 AI 提议和高风险授权。
+人用常规入口先由 `ao-work install identity set` 配置当前 developer 安装的研发员唯一身份与 Jira 凭据，再由 `ao-work workspace init` 绑定 Project Profile。`agent_id` 最终必须匹配 `^[0-9A-Za-z_-]+$`。站点、Project、状态/字段映射和默认仓库不按任务重复询问；任务事实来自 Jira，run/digest/time 由 Runtime 生成，用户只审查 AI 提议和高风险授权。
 
 确认后 Runtime 先对候选配置执行无副作用预检，再准备源码和原子写入工作空间文件；`.agentic-ops/agent.json` 作为初始化完成标记最后写入。Jira 身份、目标 Project 访问、Git 远端访问或本机 `agent_id` 冲突任一检查失败时，不得进入任务执行。
 
 池模式（D-048）下，`source_pool_root` 为研发员级必配（`~/.agentic-ops/user/config.yaml` 或 `--source-pool-root`）；未配置时阻断 `source_pool_root_invalid`，无兼容回退。源码准备从「工作空间级单仓库克隆」改为「中央克隆池成员全集准备」：按 Project Profile `repositories.list` 逐仓库认领（校验 remotes 精确匹配、拒绝 URL 改写与 AgenticOps 源头仓库）或流式克隆；浅克隆自动 `git fetch --unshallow`；中断续传，已完成成员保留。任务执行源码在任务接管时以任务级子工作树集（`<pool_root>/<jira>/<from_branch>/<repo>`，`/` 规范化为 `-`）挂出，分支由 Profile `branches` 推导接口确定（主仓库=from_branch、override 命中优先、否则同名；缺省 `main`），per-worktree 身份写入 worktree config，同一任务同分支同仓库复用已有工作树。
 
-初始化生成的业务工作空间 `AGENTS.md` 固定进入 developer 工作面，不得引用根 `AGENTS.md` 或 `maintainer/`。共享安装的 `user/workspace-index.json` 只是可重建冲突索引，不保存凭证、不授权、不代表研发员。Jira 凭证仍只在业务项目工作空间 `.agentic-ops/.env` 中维护。
+初始化生成的业务工作空间 `AGENTS.md` 固定进入 developer 工作面，不得引用根 `AGENTS.md` 或 `maintainer/`。developer 安装的 `user/identity.yaml` 与 `user/.env` 保存研发员身份和 Jira 凭据；`user/workspace-index.json` 只是可重建冲突索引。新工作空间使用 schema v4，只持 `install_identity_ref` 和项目绑定；工作空间 `.agentic-ops/.env` 仅供 schema v3 存量迁移，不再作为新初始化目标。
 
 指定分支验证安装（`developer/bootstrap/install-verify-branch.sh` 远程模式）的 `ao-work` 复用同一套安装身份校验：origin 必须是 `tapstate/agentic-ops`、sparse 精确集与 shared/developer 分发白名单不变，仅把「HEAD 是 `origin/main` 祖先」放宽为「HEAD 可达于任一 `origin/*` 远端分支或 tag」；该放宽只在 `.agentic-ops/verification-only` 标记存在时生效。生产安装 `~/.agentic-ops` 仍固定 `main`，不接受分支覆盖。
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import tempfile
@@ -520,6 +521,53 @@ class TaskTakeoverTest(unittest.TestCase):
         code, payload, stderr = self.run_cli(transport)
         self.assertEqual(0, code, (payload, stderr))
         self.assertEqual("harsen-mini-test-bot", payload["agent_id"])
+
+    def test_schema_v4_takeover_revalidates_matching_install_identity(self) -> None:
+        identity = {
+            "agent_id": "harsen-mini-test-bot",
+            "jira_email": "harsen@example.test",
+            "execution_identity": {
+                "git_author_name": "Harsen Test Bot",
+                "git_author_email": "harsen@example.test",
+                "git_committer_name": "Harsen Test Bot",
+                "git_committer_email": "harsen@example.test",
+                "github_actor_login": "harsen-mini-test-bot",
+            },
+        }
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                identity,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        agent_path = self.workspace / ".agentic-ops" / "agent.json"
+        agent = json.loads(agent_path.read_text(encoding="utf-8"))
+        for field in ("agent_id", "jira_account_id", "execution_identity"):
+            agent.pop(field)
+        agent.update(
+            {
+                "schema_version": 4,
+                "install_identity_ref": f"install:{fingerprint}",
+            }
+        )
+        agent_path.write_text(json.dumps(agent), encoding="utf-8")
+        (self.install / "user").mkdir(parents=True, exist_ok=True)
+        (self.install / "user" / ".env").write_text(
+            "TAPDATA_JIRA_EMAIL=harsen@example.test\n"
+            "TAPDATA_JIRA_API_TOKEN=test-token-secret\n",
+            encoding="utf-8",
+        )
+
+        transport = TakeoverTransport(status="正在进行")
+        code, payload, stderr = self.run_cli(transport)
+
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual("accept_existing_task", payload["takeover_kind"])
+        self.assertEqual("harsen-mini-test-bot", payload["agent_id"])
+        self.assertEqual(1, len(transport.comments))
+        self.assertIsNone(transport.transition_executed)
 
     def test_takeover_blocks_when_agent_id_missing(self) -> None:
         transport = TakeoverTransport(status="打开")
