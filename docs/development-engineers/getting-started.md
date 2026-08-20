@@ -77,10 +77,10 @@ ao-work --workspace-root ~/agentic-ops-tapdata workspace init
 授权完成后，用户只需表达“接管任务”；当前 Runtime 原子入口为：
 
 ```sh
-ao-work task takeover TAP-12289 --authorization-reference <INTERNAL_REFERENCE>
+ao-work takeover TAP-12289
 ```
 
-`INTERNAL_REFERENCE` 由 AIAgent 根据用户明确的接管指令在内部绑定，用户不查看或确认。Runtime 自动判断新接管、接纳存量或恢复，完成中文 Comment、必要的 Status transition 和本地状态回读；非新接管明文留痕。顶层 `ao-work takeover` 由 AO-48 收敛。
+Runtime 根据用户明确的接管指令和当前 run 在内部绑定稳定授权摘要，用户不查看或确认。Runtime 自动判断新接管、接纳存量或恢复，完成中文 Comment、必要的 Status transition 和本地状态回读；非新接管明文留痕。无编号执行 `ao-work takeover` 时只读列出候选，必须由研发工程师选择。
 
 AI 随后把分析写入工作空间普通 JSON，并依次调用：
 

@@ -59,10 +59,10 @@ AgenticOps source/ref 只用于确认 `ao-maint` / `ao-work` 来自预期安装�
 maintainer Skill 在隔离工作空间中完成隐藏授权并明确允许读取当前任务后，developer 的任务入口只有一个 Jira key：
 
 ```sh
-ao-work task takeover TAP-12289 --authorization-reference <INTERNAL_REFERENCE>
+ao-work takeover TAP-12289
 ```
 
-`INTERNAL_REFERENCE` 由 AIAgent 根据用户明确的“接管任务”指令在内部绑定。该入口自动解析 Jira/工作空间/Profile/Runtime 确定性字段，完成新接管、接纳存量或恢复并生成或复用本地 run；非新接管明文留痕。AI 随后分析缺项，从 Jira、Profile、业务源码和 Runtime 回读中做带来源的自动补全，再直接形成方案。L1 进入设计审查，L2 进入逐项风险决策，L3 由 AI 修订设计并重新分析，L4 停止升级。每个环节只消费 Runtime 基于实际结果返回的结构化 `agentic_next_action`。
+Runtime 根据用户明确的“接管任务”指令和当前 run 在内部绑定稳定授权摘要。该入口自动解析 Jira/工作空间/Profile/Runtime 确定性字段，完成新接管、接纳存量或恢复并生成或复用本地 run；非新接管明文留痕。AI 随后分析缺项，从 Jira、Profile、业务源码和 Runtime 回读中做带来源的自动补全，再直接形成方案。L1 进入设计审查，L2 进入逐项风险决策，L3 由 AI 修订设计并重新分析，L4 停止升级。每个环节只消费 Runtime 基于实际结果返回的结构化 `agentic_next_action`。
 
 现役准入与方案门禁依次调用：
 

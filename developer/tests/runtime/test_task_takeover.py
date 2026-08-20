@@ -260,6 +260,95 @@ class TaskTakeoverTest(unittest.TestCase):
             code = main(tuple(arguments))
         return code, json.loads(stdout.getvalue()), stderr.getvalue()
 
+    def run_top_level_cli(
+        self,
+        transport: TakeoverTransport,
+        *,
+        issue_key: str | None = "TAP-12289",
+    ) -> tuple[int, dict[str, object], str]:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        identity = self.install / "user" / "identity.yaml"
+        identity.parent.mkdir(parents=True, exist_ok=True)
+        identity.write_text(
+            "agent_id: harsen-mini-test-bot\n"
+            "jira_email: harsen@example.test\n"
+            "execution_identity:\n"
+            "  git_author_name: Harsen Test Bot\n"
+            "  git_author_email: harsen@example.test\n"
+            "  git_committer_name: Harsen Test Bot\n"
+            "  git_committer_email: harsen@example.test\n"
+            "  github_actor_login: harsen-mini-test-bot\n",
+            encoding="utf-8",
+        )
+        arguments = [
+            "--workspace-root",
+            str(self.workspace),
+            "takeover",
+        ]
+        if issue_key is not None:
+            arguments.append(issue_key)
+        with (
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+            mock.patch("ao_work.work_cli.validate_install_root", return_value=self.install),
+            mock.patch(
+                "ao_work.task_takeover.UrllibJiraTransport",
+                return_value=transport,
+            ),
+        ):
+            code = main(tuple(arguments))
+        return code, json.loads(stdout.getvalue()), stderr.getvalue()
+
+    def test_top_level_takeover_generates_stable_internal_authorization(self) -> None:
+        transport = TakeoverTransport(status="打开")
+        code, payload, stderr = self.run_top_level_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual("takeover", payload["operation"])
+        self.assertEqual("new_takeover", payload["takeover_kind"])
+        self.assertNotIn("authorization_reference", payload)
+        first_run = payload["agentic_run_id"]
+        first_comment = payload["takeover_comment_id"]
+
+        code, repeated, stderr = self.run_top_level_cli(transport)
+        self.assertEqual(0, code, (repeated, stderr))
+        self.assertEqual(first_run, repeated["agentic_run_id"])
+        self.assertEqual(first_comment, repeated["takeover_comment_id"])
+        self.assertEqual(1, len(transport.comments))
+        self.assertEqual(
+            1,
+            transport.requests.count(
+                ("POST", "/rest/api/3/issue/TAP-12289/transitions")
+            ),
+        )
+
+    def test_top_level_takeover_without_key_is_read_only(self) -> None:
+        transport = TakeoverTransport()
+        transport.search_issues = [
+            self._candidate_issue("TAP-101", summary="候选任务", priority="Highest")
+        ]
+        code, payload, stderr = self.run_top_level_cli(
+            transport,
+            issue_key=None,
+        )
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertEqual("selection_required", payload["takeover_status"])
+        self.assertEqual(1, payload["candidate_count"])
+        self.assertIn("未执行接管", payload["human_notice"])
+        self.assertEqual([], transport.comments)
+        self.assertFalse((self.workspace / ".agentic-ops" / "tasks").exists())
+
+    def test_legacy_takeover_alias_reports_deprecation(self) -> None:
+        transport = TakeoverTransport(status="正在进行")
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertTrue(payload["deprecated_alias"])
+        self.assertIn("ao-work takeover", payload["deprecation_notice"])
+        self.assertEqual(
+            "ao-work takeover [<KEY>]",
+            payload["replacement_command"],
+        )
+        self.assertIn("不是新接管", payload["human_notice"])
+
     def test_takeover_comments_then_transitions_without_custom_fields(self) -> None:
         transport = TakeoverTransport(status="打开")
         code, payload, stderr = self.run_cli(transport)

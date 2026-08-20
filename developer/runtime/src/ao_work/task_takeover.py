@@ -48,7 +48,8 @@ def execute_task_takeover(
     issue_key: str | None,
     *,
     agent_id: str | None,
-    authorization_reference: str,
+    authorization_reference: str | None,
+    authorization_mode: str = "explicit_reference",
     transition_comment: str | None = None,
 ) -> dict[str, Any]:
     """正式任务接管：稳定意图 → Comment 回读 → Status 回读 → 本地收口。
@@ -79,7 +80,13 @@ def execute_task_takeover(
     if not issue_key:
         return _takeover_candidates(context, client, account["account_id"])
 
-    if not authorization_reference:
+    if authorization_mode not in {"explicit_reference", "takeover_instruction"}:
+        raise _blocked(
+            "takeover_authorization_mode_invalid",
+            "接管授权模式无效",
+            "请使用 ao-work takeover <KEY> 重新执行接管",
+        )
+    if authorization_mode == "explicit_reference" and not authorization_reference:
         raise _blocked(
             "authorization_reference_required",
             "正式接管必须提供授权引用（--authorization-reference）",
@@ -121,6 +128,12 @@ def execute_task_takeover(
         agentic_run_id = str(task["agentic_run_id"])
         task_state_created = False
         progress_stage = str(progress.get("stage") or "")
+
+    if not authorization_reference:
+        authorization_reference = _takeover_instruction_reference(
+            issue.key,
+            agentic_run_id,
+        )
 
     authorization_digest = hashlib.sha256(
         authorization_reference.encode("utf-8")
@@ -249,6 +262,10 @@ def execute_task_takeover(
         operation=persisted["operation"],
         task_state_created=task_state_created,
     )
+
+
+def _takeover_instruction_reference(issue_key: str, agentic_run_id: str) -> str:
+    return f"takeover-instruction:{issue_key}:{agentic_run_id}"
 
 
 def _run_takeover_saga(
@@ -1339,7 +1356,8 @@ def _takeover_candidates(context: Any, client: JiraClient, account_id: str) -> d
         "candidate_count": len(tasks),
         "candidates": tasks,
         "credential_status": context.credential_status(),
-        "note": "未提供 issue_key；请从候选列表确认目标任务后，带 issue_key 与授权引用重新执行 takeover",
+        "human_notice": "未执行接管：请从候选列表选择目标任务后运行 ao-work takeover <KEY>。",
+        "note": "未提供 issue_key；请从候选列表确认目标任务后，带 issue_key 重新执行 takeover",
         "agentic_next_action": {
             "executor": "human",
             "action": "select_takeover_candidate",

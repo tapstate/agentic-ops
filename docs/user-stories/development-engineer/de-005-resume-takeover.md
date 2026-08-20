@@ -1,6 +1,6 @@
 # DE-005 恢复接管任务
 
-> **现役故事合同。** `resume_takeover` 已由只读命令 `ao-work task resume` 实现。用户说“接管 <KEY>”时不要求先选择本能力；统一 takeover 操作会自动判断并为恢复行为明文留痕。当前 Runtime 原子路径为 `task takeover`，顶层公开入口由 AO-48 收敛。
+> **现役故事合同。** `resume_takeover` 已由只读命令 `ao-work task resume` 实现。用户说“接管 <KEY>”时不要求先选择本能力；正式入口 `ao-work takeover <KEY>` 会自动判断并为恢复行为明文留痕。
 
 作为研发工程师，
 我希望能恢复一个已接管但未完成的任务，

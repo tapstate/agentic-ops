@@ -37,7 +37,7 @@ ao-work capability show <operation>
 
 `ao-work` 只判定当前原子步骤是否完成，不把“命令成功”扩大为“整个任务成功”。例如统一接管成功只表示 Jira 接管轨迹、执行状态、本地 run 与来源快照已建立；`jira ... apply` 成功后仍要 readback；`task-run finalize` 才能给出本次协议结论，并且真实任务仍停在 PR 审查。
 
-用户任务入口是“接管 <KEY>”，当前 Runtime 原子命令为 `ao-work task takeover <KEY>`；顶层 `ao-work takeover` 由 AO-48 收敛。统一入口自动判断新接管、接纳存量或恢复，先完成受管 Comment、必要的 Status transition 和本地状态回读。接管后 AI 形成普通 JSON 语义输入，Runtime 依次执行 `ao-work task intake assess` 与 `ao-work task solution classify`：核对 Jira/Profile/Runtime 精确值、源码普通文件摘要和干净 HEAD，自动补齐确定性字段，并按固定优先级给出 L1–L4。L1 进入设计审查，L2 进入逐项风险决策，L3 由 AI 修改设计并重新分析，L4 停止升级；不得增加准入摘要、通用方案摘要或内部 digest 确认。必要信息未补齐时只允许改变输入后重试一次；来源、HEAD、证据、范围或方案变化会使旧分析与设计审查失效。`ao-work jira inspect --issue-key <KEY>` 继续作为只读基础 Jira 事实入口；它不等价于旧 `inspect-task` 富输出。Project Profile 仍由工作空间初始化与 Runtime 内部加载。资产解析优先级固定为：
+用户任务入口是“接管 <KEY>”，正式 Runtime 命令为 `ao-work takeover <KEY>`；无 KEY 时只读列出候选。统一入口在 run 确定后绑定内部授权摘要，自动判断新接管、接纳存量或恢复，先完成受管 Comment、必要的 Status transition 和本地状态回读。接管后 AI 形成普通 JSON 语义输入，Runtime 依次执行 `ao-work task intake assess` 与 `ao-work task solution classify`：核对 Jira/Profile/Runtime 精确值、源码普通文件摘要和干净 HEAD，自动补齐确定性字段，并按固定优先级给出 L1–L4。L1 进入设计审查，L2 进入逐项风险决策，L3 由 AI 修改设计并重新分析，L4 停止升级；不得增加准入摘要、通用方案摘要或内部 digest 确认。必要信息未补齐时只允许改变输入后重试一次；来源、HEAD、证据、范围或方案变化会使旧分析与设计审查失效。`ao-work jira inspect --issue-key <KEY>` 继续作为只读基础 Jira 事实入口；它不等价于旧 `inspect-task` 富输出。Project Profile 仍由工作空间初始化与 Runtime 内部加载。资产解析优先级固定为：
 
 ```text
 项目工作空间 overlay

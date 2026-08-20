@@ -79,7 +79,7 @@
 
 ### 3.4 任务级子工作树集（核心）
 
-任务接管（`task takeover` / `task start`）时：
+任务接管（公开入口 `ao-work takeover`，内部来源准备 `task start`）时：
 
 1. 确定任务主分支 `<from_branch>`（任务描述「修复分支」字段；缺失时用 profile `branches.default_branch`）。
 2. 确定任务工作树集：按 `analysis_mount` 挂载策略（3.9.1，缺省全量 list）。逐个仓库：

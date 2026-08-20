@@ -1,6 +1,6 @@
 # DE-004 任务接管、接纳与恢复留痕
 
-> **现役故事合同。** 用户只表达“接管 <KEY>”。当前 Runtime 原子能力路径为 `ao-work task takeover`；顶层公开命令由 AO-48 收敛。Runtime 自动判断新接管、接纳存量或恢复，不要求用户选择模式或确认内部标识。
+> **现役故事合同。** 用户只表达“接管 <KEY>”，正式入口为 `ao-work takeover <KEY>`。Runtime 自动绑定当前 run 的内部授权摘要并判断新接管、接纳存量或恢复，不要求用户选择模式或确认内部标识。
 
 作为研发工程师，
 我希望只说“接管某任务”就让 AIAgent 完成受控接管并开始分析，
@@ -17,7 +17,7 @@
 当前 Runtime 原子入口：
 
 ```sh
-ao-work task takeover TAP-123 --authorization-reference <INTERNAL_REFERENCE>
+ao-work takeover TAP-123
 ```
 
 `INTERNAL_REFERENCE` 由 AIAgent 绑定用户明确的接管指令，研发工程师不查看、复制或确认该内部参数。未提供任务编号时，Runtime 只读列出候选，由研发工程师选择后再执行正式接管。

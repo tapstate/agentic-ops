@@ -27,10 +27,10 @@ Jira Comment 不替代 Status，本地状态不覆盖 Jira 事实；三者冲突
 当前 Runtime 原子入口为：
 
 ```sh
-ao-work task takeover <KEY> --authorization-reference <INTERNAL_REFERENCE>
+ao-work takeover <KEY>
 ```
 
-`INTERNAL_REFERENCE` 由 AIAgent 绑定研发工程师明确的“接管 <KEY>”指令，用户不查看或复制。顶层公开命令 `ao-work takeover` 由 AO-48 落地；在此之前不得让用户理解多级内部命令。
+Runtime 在当前 run 确定后，把研发工程师明确的“接管 <KEY>”指令绑定为稳定内部授权摘要，用户不查看或复制内部引用。
 
 成功类型：
 
@@ -101,7 +101,7 @@ developer Runtime 的 Jira probe 通过当前 `issue_key + agentic_run_id` 对�
 
 后续工作项分工：
 
-- AO-48：顶层 `ao-work takeover` 与统一路由。
+- AO-48：顶层 `ao-work takeover` 与统一路由已接入同一接管服务。
 - AO-49：Comment/Status Jira Saga、回读和不确定结果恢复。
 - AO-50：本地操作 phase、事件和输出 Schema。
 - AO-51：Skill、文档、Fake Jira 与真实 Jira E2E 总验收。

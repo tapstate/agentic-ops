@@ -11,7 +11,7 @@
 本文不改变：
 
 - Jira 是任务事实源、状态由项目工作流决定的既有边界；
-- 接管（`task takeover`）的 `Assignee` 校验、受管接管 Comment 留痕与「待办 → 执行状态」流转行为；
+- 接管（`ao-work takeover`）的 `Assignee` 校验、受管接管 Comment 留痕与「待办 → 执行状态」流转行为；
 - 完成态语义：AIAgent 不拥有合入权，默认不得把卡片置为 `完成 / Done`（详见决策点 D5）；
 - 不新增任何 Jira 状态（decision-log「当前无需决策事项」已确认不新增 Jira 状态），只流转既有状态与既有 transition。
 
@@ -22,7 +22,7 @@
 ### 2.1 developer 面
 
 - `JiraClient.available_transitions()` 拉取可用 transition 列表、`execute_transition(issue_key, transition_id, comment)` 执行流转（可附带评论）、`update_issue_fields` 更新字段（`developer/runtime/src/ao_work/jira/client.py`）已存在。
-- `task takeover`（`developer/runtime/src/ao_work/task_takeover.py`）校验经办人和状态映射，先写并回读受管中文接管 Comment，再用共享严格匹配器把卡片从等待状态流转到执行状态，回读确认后写本地接管记录。
+- `ao-work takeover` 复用 `developer/runtime/src/ao_work/task_takeover.py` 服务校验经办人和状态映射，先写并回读受管中文接管 Comment，再用共享严格匹配器把卡片从等待状态流转到执行状态，回读确认后写本地接管记录。
 - 处理过程中没有任何可用的状态变更能力：AIAgent 不能标记阻塞、不能标记 `Pull Request Submitted`、不能标记完成。
 - jira 写协议已成熟且同构可复用：`jira comment / worklog / description` 全部走 `plan → apply → readback`（`service.py` 的 `WritePlan` / `WriteAttempt` 框架，含 idempotency key、plan 文件、授权引用、`jira_write_plan_tampered` 完整性校验），`jira/cli.py` 的 `_configure_write_actions` 统一注册。
 - Project Profile（`developer/standards/projects/tapdata/profile.yaml`）已有 `statuses`（状态 → stage：`待办→waiting_takeover`、`正在进行/In Progress/Pull Request Submitted/Tests Passed→implementation`、`完成/Done→completed`）和 `transitions`（`start_progress.name=Start Progress`、`complete.name=Tests Pass`）；config model 加载为 `status_mapping` / `transition_mapping`。但 `transitions` 条目目前只有 `name`，缺少 D-037 要求的稳定 `id` / 来源 / 目标状态字段。
@@ -52,7 +52,7 @@
 配套：
 
 - 契约：developer 面 `developer/standards/contracts/operations/jira-transition.yaml`；maintainer 面独立契约（maintainer 契约目录）或复用同一份共享契约（按两面的契约存放约定确认）。
-- D-037 匹配器：`ao_work` 与 `ao_maint` 各自独立实现同一规则（不跨面导入），`task takeover` 的匹配逻辑改为调用共享匹配器（行为兼容，见决策点 D6）。
+- D-037 匹配器：`ao_work` 与 `ao_maint` 各自独立实现同一规则（不跨面导入），developer 接管服务的匹配逻辑调用同工作面共享匹配器（行为兼容，见决策点 D6）。
 - developer profile `transitions` 条目扩展 `id` / `from` / `to` 字段；maintainer 面新增工作流映射配置（见 3.4 与决策点 D8）。
 
 ### 方案 B（备选，不单独做）：主链路自动推进状态
@@ -79,7 +79,7 @@
 **阶段二：developer 面（后）**
 
 - `ao_work/jira/transition.py` 新增（plan / apply / readback 编排，复用 `WritePlan` / `WriteAttempt`）。
-- `ao_work` D-037 匹配器收敛（共享实现，`task takeover` 改用，行为兼容）。
+- `ao_work` D-037 匹配器收敛（共享实现，developer 接管服务改用，行为兼容）。
 - `ao_work/jira/cli.py` 注册 `jira transition` 子命令。
 - profile `transitions` 扩展 `id` / `from` / `to`；能力目录登记 `jira_transition`（implemented）；契约新增。
 - 测试 `developer/tests/runtime/test_jira_transition.py` + `test_takeover` 回归。
@@ -125,7 +125,7 @@ profile 预留 `agent_transition_limits` 配置形态（如允许进入 `complet
 - 真实 Jira 写必须有明确授权引用与审计：apply 必须 `user-confirmation:<KEY>:<plan_id>` 授权引用，决策记录写审计（maintainer 面 `decisions.ndjson`、developer 面本地任务事件），计划文件留档。
 - 状态不得临场猜测：developer 面目标 transition 必须来自 profile 映射 ∩ Jira 可用列表；maintainer 面无映射时仅允许 `--transition-id` 显式精确指定（Jira 事实，不是猜测），禁止发明状态名或 transition 名。
 - D-037 完整落地：稳定 ID 优先、名称兜底需唯一且来源/目标状态匹配、候选重复/目标不符/不可用/回读不一致一律阻断、禁止模糊匹配。
-- 不弱化 `task takeover`：`Assignee` 校验、受管 Comment 回读、状态 transition 回读和本地运行记录保持强制；共享匹配器不得绕过这些门禁。
+- 不弱化 `ao-work takeover`：`Assignee` 校验、受管 Comment 回读、状态 transition 回读和本地运行记录保持强制；共享匹配器不得绕过这些门禁。
 - 不新增 Jira 状态、不改变项目工作流：只流转既有状态与既有 transition；快速适配只改映射配置，不允许通过配置「发明」Jira 不存在的状态或 transition。
 - 完成态默认禁止 AIAgent 推进（AIAgent 无合入权），例外必须由 profile 显式声明并经人工确认；maintainer 面由维护者操作，不受该限制。
 

@@ -89,7 +89,7 @@ if "--help" in arguments or "-h" in arguments:
 | --- | --- | --- |
 | `list_tasks` | capability_gap | 「Jira 待办列表目标契约，尚未迁移到 Python Runtime」，无现役命令 |
 | `resume_takeover` | capability_gap | 「Jira 接管恢复目标契约，尚未迁移到 Python Runtime」 |
-| `takeover_task` | implemented | `task takeover <key> --agent-id --authorization-reference`，要求手动传 agent-id 和授权引用 |
+| `takeover_task` | implemented | `ao-work takeover [<key>]`，Runtime 自动读取 agent-id 并绑定明确接管指令 |
 | `jira_inspect` | implemented | 单查 `jira inspect --issue-key <key>` |
 
 契约与配置已就绪：
@@ -154,14 +154,14 @@ def _run_git(command, *, timeout=None):
 
 ### 3.5 T6：接管简化 + 无编号自动接管
 
-**3.5.1 agent-id 自动读取**：`task takeover` 的 `--agent-id` 改为可选。缺省从安装目录身份（`~/.agentic-ops/user/identity.yaml`，D-048 阶段二）读取 `agent_id`；安装身份缺失时阻断并提示配置路径（`install identity set`）。授权引用（`--authorization-reference`）保持必填，人工门禁不弱化。
+**3.5.1 agent-id 与授权自动绑定**：`ao-work takeover` 从安装目录身份（`~/.agentic-ops/user/identity.yaml`，D-048 阶段二）读取 `agent_id`；安装身份缺失时阻断并提示配置路径（`install identity set`）。带 KEY 的明确接管指令由 Runtime 在 run 确定后绑定稳定内部授权摘要，不要求用户传入引用。
 
-**3.5.2 无编号自动接管**：`ao-work task takeover` 不带 issue_key 时：
+**3.5.2 无编号自动接管**：`ao-work takeover` 不带 issue_key 时：
 1. 调 list_tasks（T4）取名下未完成列表。
 2. 按优先级排序：`profile.task_priority` 映射（priority 名 → 权重，配置缺省可用、渐进补充；未配置时按 Jira priority 默认序 + updated 倒序）。
 3. 输出候选列表（key/summary/status/priority）并生成计划，**由研发工程师确认目标后**（授权引用 `user-confirmation:<KEY>:<plan_id>`）再执行接管，AI 不擅自选择任务。
 
-**3.5.3 编排层（Skill）**：`/ao-takeover TAP-123` 由 AI 按既定顺序编排：workspace 识别 → jira list/inspect → task start → task takeover（授权确认）→ 输出下一步。该编排写入版本化 Skill（T7）。
+**3.5.3 编排层（Skill）**：AI 按既定顺序编排：workspace 识别 → capability 查询 → `ao-work takeover [<KEY>]` → 输出下一步。该编排写入版本化 Skill（T7），不再暴露内部 `task start` 或授权参数。
 
 ### 3.6 T7：AI 入口技能重构
 

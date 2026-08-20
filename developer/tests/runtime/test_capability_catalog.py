@@ -60,7 +60,12 @@ class CapabilityCatalogTest(unittest.TestCase):
             for command in capability.commands
         }
         self.assertEqual(
-            parser_paths - {("capability", "list"), ("capability", "show")},
+            parser_paths
+            - {
+                ("capability", "list"),
+                ("capability", "show"),
+                ("task", "takeover"),
+            },
             declared_paths,
         )
 
@@ -76,7 +81,7 @@ class CapabilityCatalogTest(unittest.TestCase):
         self.assertIn("task_state_init", all_entries)
         takeover = catalog.show("takeover_task")
         self.assertEqual("implemented", takeover["status"])
-        self.assertEqual([["task", "takeover"]], takeover["commands"])
+        self.assertEqual([["takeover"]], takeover["commands"])
 
     def test_cli_list_and_show_are_read_only_stable_json(self) -> None:
         first = self._run_cli("capability", "list")

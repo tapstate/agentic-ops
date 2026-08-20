@@ -28,10 +28,10 @@ Project Profile 提供 Jira 站点、Project、状态/字段映射和默认仓�
 收到 Jira key 且工作空间授权已确认后，先执行统一接管：
 
 ```sh
-ao-work task takeover <ISSUE-KEY> --authorization-reference <INTERNAL_REFERENCE>
+ao-work takeover <ISSUE-KEY>
 ```
 
-用户明确表达“接管 <ISSUE-KEY>”即授权事实明确的常规接管，AIAgent 在内部生成 `INTERNAL_REFERENCE`，不得要求用户查看或确认。Runtime 自动读取并核对 Jira 负责人和状态，选择 `new_takeover`、`accept_existing_task` 或 `resume_takeover`，完成 Comment、必要的 Status transition 和本地状态回读；后两种必须明文提示“不是新接管”。当前 Runtime 原子入口仍为 `ao-work task takeover`，顶层 `ao-work takeover` 由 AO-48 收敛。
+用户明确表达“接管 <ISSUE-KEY>”即授权事实明确的常规接管，Runtime 在 run 确定后生成稳定内部授权摘要，不得要求用户查看或确认。Runtime 自动读取并核对 Jira 负责人和状态，选择 `new_takeover`、`accept_existing_task` 或 `resume_takeover`，完成 Comment、必要的 Status transition 和本地状态回读；后两种必须明文提示“不是新接管”。
 
 接管成功后，Runtime 已提供或复用 `agentic_run_id`。随后由 AI 连续完成任务分类、流程、仓库、范围和验证方式分析；事实缺失时优先从 Jira、Project Profile、源码和 Runtime 回读补全，只有事实冲突、必须由人取舍或写入结果不明确时进入风险决策。
 
