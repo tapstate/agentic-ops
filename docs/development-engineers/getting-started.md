@@ -37,6 +37,21 @@ ao-work --help
 
 没有 `agentic-cli` 兼容别名；看到旧命令说明正在阅读冻结迁移基线或使用旧版本。
 
+首次使用该安装时，先配置当前研发员唯一身份与 Jira 凭据：
+
+```sh
+printf '%s\n' "$JIRA_API_TOKEN" | ao-work install identity set \
+  --agent-id <agent-id> \
+  --jira-email <jira-account-email> \
+  --git-name <git-author-and-committer-name> \
+  --git-email <git-author-and-committer-email> \
+  --github-login <github-actor-login> \
+  --jira-token-stdin \
+  --non-interactive
+```
+
+使用 `ao-work install identity show` 回读脱敏身份。新工作空间必须从当前安装继承该身份并生成 schema v4 绑定；不得只把身份和凭据写入单个工作空间。
+
 ## 3. 初始化业务项目工作空间
 
 ```sh
@@ -53,12 +68,12 @@ ao-work --workspace-root ~/agentic-ops-tapdata workspace init
 
 首次初始化确认：
 
-- `agent_id`：默认由纯小写主机名规范化得到，只能包含 `[0-9a-zA-Z_-]`。
+- `agent_id`：必须与当前安装身份一致，只能包含 `[0-9a-zA-Z_-]`。
 - Jira 项目空间 / Project Profile。
-- Jira 站点、研发员账户和授权状态。
+- Jira 站点、从安装身份继承的研发员账户和授权状态。
 - 默认仓库和源码目录。
 - Git、GitHub、Jira 访问等前置检查。
-- Git author/committer 与 GitHub actor login；只在该工作空间确认一次，不读取全局 Git/GitHub 身份作为事实。
+- Git author/committer 与 GitHub actor login；从安装身份继承，不读取全局 Git/GitHub 身份作为事实。
 
 只有缺失或冲突的项才需要额外参数；Connection 默认由 Project Profile 推导，不要求普通用户传 `--connection-id`。
 

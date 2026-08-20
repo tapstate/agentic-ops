@@ -43,9 +43,9 @@ _SUCCESS_NEXT_ACTIONS: dict[str, dict[str, Any]] = {
     },
     "workspace_preflight": {
         "actor": "ao_work",
-        "action": "start_explicit_jira_task",
+        "action": "takeover_explicit_jira_task",
         "required_inputs": ["issue_key"],
-        "allowed_operations": ["task_start"],
+        "allowed_operations": ["takeover"],
     },
     "auth_jira_list": {
         "actor": "human",
@@ -114,8 +114,8 @@ _SUCCESS_NEXT_ACTIONS: dict[str, dict[str, Any]] = {
     },
     "jira_inspect": {
         "actor": "ai",
-        "action": "analyze_verified_jira_facts",
-        "allowed_operations": ["task_start"],
+        "action": "takeover_verified_jira_task",
+        "allowed_operations": ["takeover"],
     },
     "jira_comment_plan": {
         "actor": "human",

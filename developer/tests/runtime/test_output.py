@@ -47,6 +47,20 @@ class OutputTest(unittest.TestCase):
         self.assertEqual(False, next_action["requires_authorization"])
         self.assertEqual("请先审查 AI 提议的实施计划", next_action["reason"])
 
+    def test_workspace_preflight_routes_to_top_level_takeover(self) -> None:
+        next_action = success("workspace_preflight")["agentic_next_action"]
+
+        self.assertEqual("takeover_explicit_jira_task", next_action["action"])
+        self.assertEqual(["issue_key"], next_action["required_inputs"])
+        self.assertEqual(["takeover"], next_action["allowed_operations"])
+
+    def test_jira_inspect_does_not_route_to_internal_task_start(self) -> None:
+        next_action = success("jira_inspect")["agentic_next_action"]
+
+        self.assertEqual("takeover_verified_jira_task", next_action["action"])
+        self.assertEqual(["takeover"], next_action["allowed_operations"])
+        self.assertNotIn("task_start", next_action["allowed_operations"])
+
     def test_failure_has_chinese_human_action(self) -> None:
         result = failure(
             "task_init",

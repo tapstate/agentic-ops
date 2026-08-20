@@ -79,6 +79,7 @@ def execute_task_takeover(
         workspace,
         context.connection,
         account_id=account["account_id"],
+        install_root=install_root,
     )
 
     if not issue_key:
