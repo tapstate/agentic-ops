@@ -48,7 +48,7 @@ def execute_workspace_init(
 
     profiles = list_project_profiles(install_root)
     profile_id = args.project_profile
-    if interactive:
+    if interactive and not profile_id:
         default_profile = _default_profile(root, profiles, profile_id)
         profile_id = _prompt_required(
             f"Project Profile（可选：{', '.join(profiles)}）",
