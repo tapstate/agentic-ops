@@ -717,6 +717,230 @@ release_confirm_publish() {
   esac
 }
 
+release_print_confirmation_bundle() {
+  local repo_root="$1" action="$2" version="$3" head="$4"
+  local source_branch="$5" target_branch="$6" risk="$7"
+  local pr_reference="${8:-未关联 PR}" merge_reference="${9:-未关联 Merge commit}"
+  local verification_reference
+  if [ -n "${RELEASE_VERIFIED_AT:-}" ]; then
+    verification_reference="固定完整验证通过（${RELEASE_VERIFIED_AT}）"
+  else
+    verification_reference="尚未执行当前动作所需的固定完整验证"
+  fi
+  printf '发布确认事项：\n' >&2
+  printf '%s\n' "- 动作：${action}" >&2
+  printf '%s\n' "- 目标：tapstate/agentic-ops，${source_branch} -> ${target_branch}，版本 ${version}，固定 HEAD ${head}" >&2
+  printf '%s\n' "- 事实引用：main=$(git -C "$repo_root" rev-parse origin/main 2>/dev/null || printf unknown)，本地 Tag=$(git -C "$repo_root" rev-parse "$version^{}" 2>/dev/null || printf absent)，远端 Tag=${RELEASE_REMOTE_TAG_COMMIT:-未读取或不存在}，PR=${pr_reference}，Merge commit=${merge_reference}" >&2
+  printf '%s\n' "- 验证：${verification_reference}" >&2
+  printf '%s\n' "- 风险：${risk}" >&2
+  printf '%s\n' '- 不执行：不改写 main/develop，不删除或覆盖远端 Tag，不自动合并 PR。' >&2
+  printf '%s\n' '- 后续门禁：确认内容与当前事实绑定；任一引用变化都必须重新检查。' >&2
+}
+
+release_read_remote_tag() {
+  local repo_root="$1" version="$2" lines direct peeled
+  lines="$(git -C "$repo_root" ls-remote --tags origin "refs/tags/$version" "refs/tags/$version^{}" 2>/dev/null)" || {
+    release_fail "release_tag_remote_read_failed" "state_inspection" "无法读取远端 Tag 状态" "请检查网络后重新执行 release.sh inspect"
+    return 1
+  }
+  direct="$(printf '%s\n' "$lines" | awk -v ref="refs/tags/$version" '$2 == ref {print $1; exit}')"
+  peeled="$(printf '%s\n' "$lines" | awk -v ref="refs/tags/$version^{}" '$2 == ref {print $1; exit}')"
+  RELEASE_REMOTE_TAG_REF="$direct"
+  RELEASE_REMOTE_TAG_COMMIT="${peeled:-$direct}"
+  RELEASE_REMOTE_TAG_ANNOTATED="false"
+  [ -z "$direct" ] || [ -z "$peeled" ] || RELEASE_REMOTE_TAG_ANNOTATED="true"
+}
+
+release_read_merged_pr() {
+  local pr_number="$1" row
+  row="$("${AGENTIC_OPS_GH_BIN:-gh}" pr view "$pr_number" --repo tapstate/agentic-ops \
+    --json number,url,state,baseRefName,headRefOid,mergeCommit \
+    --jq '[.number,.url,.state,.baseRefName,.headRefOid,.mergeCommit.oid] | @tsv' 2>/dev/null)" || return 1
+  IFS=$'\t' read -r RELEASE_RECOVERY_PR_NUMBER RELEASE_RECOVERY_PR_URL \
+    RELEASE_RECOVERY_PR_STATE RELEASE_RECOVERY_PR_BASE RELEASE_RECOVERY_PR_HEAD \
+    RELEASE_RECOVERY_MERGE_COMMIT <<< "$row"
+}
+
+release_find_merged_pr() {
+  local preferred_merge="$1" preferred_tag="$2" rows number url state base head merge
+  rows="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list --repo tapstate/agentic-ops --base main \
+    --state merged --limit 100 --json number,url,state,baseRefName,headRefOid,mergeCommit \
+    --jq '.[] | [.number,.url,.state,.baseRefName,.headRefOid,.mergeCommit.oid] | @tsv' 2>/dev/null)" || return 1
+  while IFS=$'\t' read -r number url state base head merge; do
+    [ -n "$number" ] || continue
+    if [ "$merge" = "$preferred_merge" ] || { [ -n "$preferred_tag" ] && [ "$head" = "$preferred_tag" ]; }; then
+      RELEASE_RECOVERY_PR_NUMBER="$number"
+      RELEASE_RECOVERY_PR_URL="$url"
+      RELEASE_RECOVERY_PR_STATE="$state"
+      RELEASE_RECOVERY_PR_BASE="$base"
+      RELEASE_RECOVERY_PR_HEAD="$head"
+      RELEASE_RECOVERY_MERGE_COMMIT="$merge"
+      return 0
+    fi
+  done <<< "$rows"
+  return 1
+}
+
+release_find_open_release_pr() {
+  local release_branch="$1" rows
+  rows="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list --repo tapstate/agentic-ops \
+    --head "$release_branch" --base main --state open --limit 1 \
+    --json number,url,state,baseRefName,headRefOid,mergeCommit \
+    --jq '.[] | [.number,.url,.state,.baseRefName,.headRefOid,(.mergeCommit.oid // "")] | @tsv' 2>/dev/null)" || {
+    release_fail "release_pr_state_read_failed" "state_inspection" "无法读取发布分支关联的开放 PR" "请检查 GitHub 权限和网络后重新执行 release.sh inspect"
+    return 2
+  }
+  [ -n "$rows" ] || return 1
+  IFS=$'\t' read -r RELEASE_RECOVERY_PR_NUMBER RELEASE_RECOVERY_PR_URL \
+    RELEASE_RECOVERY_PR_STATE RELEASE_RECOVERY_PR_BASE RELEASE_RECOVERY_PR_HEAD \
+    RELEASE_RECOVERY_MERGE_COMMIT <<< "$(printf '%s\n' "$rows" | head -n 1)"
+  [ "$RELEASE_RECOVERY_PR_STATE" = "OPEN" ] && [ "$RELEASE_RECOVERY_PR_BASE" = "main" ]
+}
+
+release_candidate_is_in_main() {
+  local repo_root="$1"
+  local head="$2"
+  git -C "$repo_root" fetch origin main >/dev/null 2>&1 || {
+    release_fail "release_main_fetch_failed" "state_inspection" "无法刷新 origin/main" "请检查网络后重新执行 release.sh inspect 或 publish"
+    return 2
+  }
+  git -C "$repo_root" merge-base --is-ancestor "$head" origin/main
+}
+
+release_inspect_state() {
+  local repo_root="$1" version="$2"
+  local release_branch="release/$version"
+  local develop_head main_head local_tag local_release remote_release release_head state next_command open_pr_status
+
+  git -C "$repo_root" fetch origin main develop >/dev/null 2>&1 || {
+    release_fail "release_state_fetch_failed" "state_inspection" "无法刷新发布状态所需远端引用" "请检查网络后重新执行 release.sh inspect"
+    return 1
+  }
+  develop_head="$(git -C "$repo_root" rev-parse develop)"
+  main_head="$(git -C "$repo_root" rev-parse origin/main)"
+  local_tag="$(git -C "$repo_root" rev-parse "$version^{}" 2>/dev/null || true)"
+  release_read_remote_tag "$repo_root" "$version" || return 1
+  local_release="$(git -C "$repo_root" show-ref --hash --verify "refs/heads/$release_branch" 2>/dev/null || true)"
+  remote_release="$(git -C "$repo_root" ls-remote --heads origin "refs/heads/$release_branch" 2>/dev/null | awk '{print $1}')"
+  release_head="${remote_release:-${local_release:-$develop_head}}"
+  state="release_candidate_ready"
+  next_command="maintainer/scripts/release.sh publish --version $version --allow-soft-gate"
+  RELEASE_RECOVERY_PR_NUMBER=""; RELEASE_RECOVERY_PR_URL=""; RELEASE_RECOVERY_PR_HEAD=""; RELEASE_RECOVERY_MERGE_COMMIT=""
+  if [ -n "$local_release" ] && [ -n "$remote_release" ] && [ "$local_release" != "$remote_release" ]; then
+    state="release_reference_drift"; next_command=""
+  elif [ -n "$RELEASE_REMOTE_TAG_REF" ]; then
+    if [ "$RELEASE_REMOTE_TAG_ANNOTATED" != "true" ] || ! git -C "$repo_root" merge-base --is-ancestor "$RELEASE_REMOTE_TAG_COMMIT" origin/main; then
+      state="release_remote_tag_conflict"; next_command=""
+    elif [ "$local_tag" != "$RELEASE_REMOTE_TAG_COMMIT" ] || [ "$(git -C "$repo_root" cat-file -t "refs/tags/$version" 2>/dev/null || true)" != "tag" ]; then
+      if release_find_merged_pr "$release_head" "$RELEASE_REMOTE_TAG_COMMIT"; then
+        state="release_local_tag_repair_required"
+        next_command="maintainer/scripts/release.sh recover --version $version --merged-pr $RELEASE_RECOVERY_PR_NUMBER --allow-soft-gate"
+      else
+        state="release_merged_pr_missing"; next_command=""
+      fi
+    else
+      state="release_completed"; next_command=""
+    fi
+  elif git -C "$repo_root" merge-base --is-ancestor "$release_head" origin/main; then
+    if release_find_merged_pr "$release_head" "$local_tag"; then
+      if [ "$local_tag" != "$RELEASE_RECOVERY_PR_HEAD" ]; then
+        state="release_local_tag_repair_required"
+      else
+        state="release_candidate_already_in_main"
+      fi
+      next_command="maintainer/scripts/release.sh recover --version $version --merged-pr $RELEASE_RECOVERY_PR_NUMBER --allow-soft-gate"
+    else
+      state="release_merged_pr_missing"; next_command=""
+    fi
+  else
+    open_pr_status=0
+    release_find_open_release_pr "$release_branch" || open_pr_status=$?
+    if [ "$open_pr_status" -eq 0 ]; then
+      state="release_waiting_manual_merge"
+      next_command="maintainer/scripts/release.sh publish --version $version --allow-soft-gate"
+    elif [ "$open_pr_status" -eq 2 ]; then
+      return 1
+    elif [ -z "$local_tag" ]; then
+      next_command="maintainer/scripts/release.sh prepare --version $version --allow-soft-gate"
+    fi
+  fi
+  printf '{"ok":true,"operation":"release_inspect","version":"%s","state":"%s","develop_head":"%s","main_head":"%s","local_tag":"%s","remote_tag":"%s","local_release_branch":"%s","remote_release_branch":"%s","pr_number":"%s","pr_url":"%s","pr_head":"%s","merge_commit":"%s","next_command":"%s"}\n' \
+    "$version" "$state" "$develop_head" "$main_head" "${local_tag:-}" "${RELEASE_REMOTE_TAG_COMMIT:-}" "${local_release:-}" "${remote_release:-}" "${RELEASE_RECOVERY_PR_NUMBER:-}" "${RELEASE_RECOVERY_PR_URL:-}" "${RELEASE_RECOVERY_PR_HEAD:-}" "${RELEASE_RECOVERY_MERGE_COMMIT:-}" "$next_command"
+}
+
+release_recover_merged_candidate() {
+  local repo_root="$1" version="$2" pr_number="$3" confirmed="$4" confirmation_digest="$5" protection_mode="$6"
+  local candidate merge_commit pr_url local_tag local_release remote_release develop_head material digest tagger tag_object old_ref zero_ref
+  if ! printf '%s\n' "$pr_number" | grep -Eq '^[1-9][0-9]*$'; then
+    release_fail "invalid_release_merged_pr" "recovery_validation" "恢复发布必须提供正整数 --merged-pr" "请先运行 release.sh inspect 确认关联的已合并 PR 编号"
+    return 1
+  fi
+  if ! release_read_merged_pr "$pr_number"; then
+    release_fail "release_merged_pr_read_failed" "recovery_validation" "无法读取指定的已合并发布 PR" "请检查 PR 编号、GitHub 权限和网络后重试"
+    return 1
+  fi
+  candidate="$RELEASE_RECOVERY_PR_HEAD"; merge_commit="$RELEASE_RECOVERY_MERGE_COMMIT"; pr_url="$RELEASE_RECOVERY_PR_URL"
+  if [ "$RELEASE_RECOVERY_PR_STATE" != "MERGED" ] || [ "$RELEASE_RECOVERY_PR_BASE" != "main" ] || [ -z "$candidate" ] || [ -z "$merge_commit" ]; then
+    release_fail "release_merged_pr_invalid" "recovery_validation" "指定 PR 不是包含固定候选的 main Merge commit" "请使用实际已合并到 main 的发布候选 PR，禁止猜测或绕过合并事实"
+    return 1
+  fi
+  git -C "$repo_root" fetch origin main >/dev/null 2>&1 || {
+    release_fail "release_main_fetch_failed" "recovery_validation" "无法刷新 origin/main" "请检查网络后重试"
+    return 1
+  }
+  develop_head="$(git -C "$repo_root" rev-parse develop)"
+  local_release="$(git -C "$repo_root" show-ref --hash --verify "refs/heads/release/$version" 2>/dev/null || true)"
+  remote_release="$(git -C "$repo_root" ls-remote --heads origin "refs/heads/release/$version" 2>/dev/null | awk '{print $1}')"
+  if ! git -C "$repo_root" merge-base --is-ancestor "$candidate" "$merge_commit" || ! git -C "$repo_root" merge-base --is-ancestor "$merge_commit" origin/main; then
+    release_fail "release_merged_pr_invalid" "recovery_validation" "PR head、Merge commit 与当前 origin/main 的包含关系不成立" "请停止恢复并人工核查 main 历史"
+    return 1
+  fi
+  if [ "$merge_commit" != "$develop_head" ] && [ "$merge_commit" != "$local_release" ] && [ "$merge_commit" != "$remote_release" ]; then
+    release_fail "release_merged_pr_unbound" "recovery_validation" "指定 PR 未绑定当前 develop 或 release/$version 状态" "请使用 release.sh inspect 输出的精确 PR 编号"
+    return 1
+  fi
+  release_read_remote_tag "$repo_root" "$version" || return 1
+  if [ -n "$RELEASE_REMOTE_TAG_REF" ] && { [ "$RELEASE_REMOTE_TAG_ANNOTATED" != "true" ] || [ "$RELEASE_REMOTE_TAG_COMMIT" != "$candidate" ]; }; then
+    release_fail "release_remote_tag_conflict" "recovery_validation" "远端同名 Tag 已存在但不是正确的 annotated candidate Tag" "禁止删除或覆盖远端 Tag，请人工核查"
+    return 1
+  fi
+  release_run_full_verification "$repo_root" "$candidate" || return 1
+  local_tag="$(git -C "$repo_root" rev-parse "$version^{}" 2>/dev/null || true)"
+  material="$version|$pr_number|$candidate|$merge_commit|$(git -C "$repo_root" rev-parse origin/main)|$local_tag|${RELEASE_REMOTE_TAG_COMMIT:-}"
+  digest="$(printf '%s' "$material" | git -C "$repo_root" hash-object --stdin)"
+  release_print_confirmation_bundle "$repo_root" "恢复已提前合入候选并发布不可变 Tag" "$version" "$candidate" "PR #$pr_number" main "候选由基线升级 PR 提前合入；可能原子重建本地 Tag，远端正确 Tag 可幂等复用。" "$pr_url" "$merge_commit"
+  if [ "$confirmed" != "true" ]; then
+    release_fail "release_recovery_confirmation_required" "confirmation" "恢复计划已生成，尚未修改任何 Tag" "确认上述内容后执行 maintainer/scripts/release.sh recover --version $version --merged-pr $pr_number --allow-soft-gate --confirm-release --confirm-recovery $digest"
+    return 1
+  fi
+  if [ "$confirmation_digest" != "$digest" ]; then
+    release_fail "release_recovery_confirmation_stale" "confirmation" "恢复确认未绑定当前事实或状态已经变化" "重新执行不带确认参数的 recover，审查新的完整确认包"
+    return 1
+  fi
+  if [ "$local_tag" != "$candidate" ] || [ "$(git -C "$repo_root" cat-file -t "refs/tags/$version" 2>/dev/null || true)" != "tag" ]; then
+    tagger="$(git -C "$repo_root" var GIT_COMMITTER_IDENT)"
+    tag_object="$(printf 'object %s\ntype commit\ntag %s\ntagger %s\n\nAgenticOps %s version baseline\n' "$candidate" "$version" "$tagger" "$version" | git -C "$repo_root" mktag)" || {
+      release_fail "release_local_tag_repair_failed" "tag_repair" "无法准备新的本地 annotated Tag" "本地旧 Tag 未改变；请检查 Git 身份后重试"
+      return 1
+    }
+    old_ref="$(git -C "$repo_root" rev-parse "refs/tags/$version" 2>/dev/null || true)"
+    zero_ref="0000000000000000000000000000000000000000"
+    git -C "$repo_root" update-ref "refs/tags/$version" "$tag_object" "${old_ref:-$zero_ref}" || {
+      release_fail "release_local_tag_repair_failed" "tag_repair" "本地 Tag 原子替换失败" "旧 Tag 保持不变；重新检查状态后重试"
+      return 1
+    }
+  fi
+  RELEASE_TAG_COMMIT="$candidate"
+  RELEASE_TAG_REMOTE_EXISTS="false"; [ -z "$RELEASE_REMOTE_TAG_REF" ] || RELEASE_TAG_REMOTE_EXISTS="true"
+  RELEASE_PR_NUMBER="$pr_number"
+  RELEASE_PR_URL="$pr_url"
+  RELEASE_MERGE_COMMIT="$merge_commit"
+  release_push_tag_if_needed "$repo_root" "$version" || return 1
+  release_write_recovery_audit "$repo_root" "$version" "$candidate" "$protection_mode" || return 1
+  printf '{"ok":true,"operation":"release_recover","version":"%s","head":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","tag":"%s","audit_file":"%s"}\n' \
+    "$version" "$candidate" "$pr_number" "$pr_url" "$merge_commit" "$version" "$RELEASE_AUDIT_FILE"
+}
+
 release_write_pr_body() {
   local body_file="$1"
   local version="$2"
@@ -1178,6 +1402,13 @@ release_write_audit() {
   payload="$(printf '{"operation":"release_publish","status":"completed","version":"%s","head":"%s","verified_at":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","tag":"%s","tag_commit":"%s","protection_mode":"%s"}' \
     "$version" "$head" "$RELEASE_VERIFIED_AT" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "$version" "$RELEASE_TAG_COMMIT" "$protection_mode")"
   release_write_audit_json "$repo_root" "release-$version-$head.json" "$payload"
+}
+
+release_write_recovery_audit() {
+  local repo_root="$1" version="$2" head="$3" protection_mode="${4:-soft}" payload
+  payload="$(printf '{"operation":"release_recover","status":"completed","version":"%s","head":"%s","verified_at":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","tag":"%s","tag_commit":"%s","protection_mode":"%s","recovery_reason":"candidate_already_in_main"}' \
+    "$version" "$head" "$RELEASE_VERIFIED_AT" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "$version" "$RELEASE_TAG_COMMIT" "$protection_mode")"
+  release_write_audit_json "$repo_root" "release-recover-$version-$head.json" "$payload"
 }
 
 release_write_waiting_audit() {
