@@ -70,8 +70,12 @@ usage() {
   --git-name         Git author/committer name
   --git-email        Git author/committer email
   --github-login     GitHub login
+  --execution-auth-mode  Git/SSH/gh 授权模式：global 或 installation
+  --confirm-replace-authorization  精确绑定当前脱敏授权差异的确认摘要
   --token-stdin      从安全标准输入读取 Jira API token
   --non-interactive  非交互授权；不传授权信息时无终端安装输出待授权下一步
+
+首次远程验证下载和 clone 只能使用调用者已有的 Git/gh 启动账户；installation 授权完成后，后续 Git 操作使用 Runtime 固化的安装专属 SSH。
 USAGE
 }
 
@@ -182,7 +186,7 @@ while [ "$#" -gt 0 ]; do
       KEEP_HOME=1
       shift
       ;;
-    --agent-id|--jira-email|--git-name|--git-email|--github-login)
+    --agent-id|--jira-email|--git-name|--git-email|--github-login|--execution-auth-mode|--confirm-replace-authorization)
       if [ "$#" -lt 2 ] || [ -z "$2" ]; then
         fail_usage invalid_argument "授权参数缺少取值：$1" "请补齐参数"
       fi

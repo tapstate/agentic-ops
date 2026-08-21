@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -13,6 +15,8 @@ from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 AGENT_ID_PATTERN = re.compile(r"^[0-9A-Za-z_-]+$")
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 GITHUB_LOGIN_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
+EXECUTION_AUTHORIZATION_MODES = frozenset({"global", "installation"})
+SSH_FINGERPRINT_PATTERN = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
 
 DEFAULT_REPOSITORY = "tapstate/agentic-ops"
 IDENTITY_OVERRIDE_ENVS = (
@@ -177,12 +181,43 @@ def load_install_identity(install_root: Path) -> dict[str, Any]:
         ) from error
     agent_id = payload.get("agent_id")
     execution_identity = payload.get("execution_identity")
+    execution_authorization = payload.get("execution_authorization")
     jira_email = payload.get("jira_email")
     if not agent_id or not isinstance(execution_identity, dict) or not jira_email:
         raise _blocked(
             "install_identity_invalid",
             "研发员身份配置缺少 agent_id、execution_identity 或 jira_email",
             "请运行 ao-work auth 重新配置",
+        )
+    if not isinstance(execution_authorization, dict):
+        raise _blocked(
+            "install_execution_authorization_upgrade_required",
+            "安装身份缺少 Git/SSH/gh 授权模式",
+            "请运行 ao-work auth，明确选择 global 或 installation 授权模式；Runtime 不会静默沿用或覆盖机器现有授权",
+        )
+    mode = str(execution_authorization.get("mode", "")).strip()
+    if mode not in EXECUTION_AUTHORIZATION_MODES:
+        raise _blocked(
+            "install_execution_authorization_invalid",
+            "安装身份中的 Git/SSH/gh 授权模式无效",
+            "请运行 ao-work auth 重新配置授权模式",
+        )
+    ssh_key_fingerprint = str(
+        execution_authorization.get("ssh_key_fingerprint", "")
+    ).strip()
+    if mode == "installation" and not SSH_FINGERPRINT_PATTERN.fullmatch(
+        ssh_key_fingerprint
+    ):
+        raise _blocked(
+            "install_execution_authorization_invalid",
+            "安装级授权缺少有效 SSH 公钥指纹",
+            "请恢复当前安装的 SSH 授权，或经明确确认后重新授权",
+        )
+    if mode == "global" and ssh_key_fingerprint:
+        raise _blocked(
+            "install_execution_authorization_invalid",
+            "全局授权模式不能绑定安装级 SSH 公钥指纹",
+            "请核对授权模式，不要混用全局和安装级 SSH 身份",
         )
     required_execution = {
         "git_author_name",
@@ -200,8 +235,30 @@ def load_install_identity(install_root: Path) -> dict[str, Any]:
     return {
         "agent_id": agent_id,
         "execution_identity": execution_identity,
+        "execution_authorization": {
+            "mode": mode,
+            "ssh_key_fingerprint": ssh_key_fingerprint,
+        },
         "jira_email": jira_email,
     }
+
+
+def install_identity_ref(identity: dict[str, Any]) -> str:
+    """生成工作空间绑定使用的唯一安装身份摘要。"""
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {
+                "agent_id": identity["agent_id"],
+                "jira_email": identity["jira_email"],
+                "execution_identity": identity["execution_identity"],
+                "execution_authorization": identity["execution_authorization"],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"install:{fingerprint}"
 
 
 def save_install_identity(install_root: Path, identity: dict[str, Any]) -> None:

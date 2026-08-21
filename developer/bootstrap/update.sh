@@ -16,6 +16,9 @@ agentic_require_checkout_integrity "$INSTALL_DIR"
 uv_bin="$(agentic_find_uv)"
 previous_ref="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
 
+# ao-work auth 的 installation 模式会把安装专属 SSH 固化为本仓库本地
+# core.sshCommand。这里遵循该受管配置执行 fetch，不解析、不覆盖或回退授权。
+
 git -C "$INSTALL_DIR" fetch origin "$BRANCH"
 target_ref="$(git -C "$INSTALL_DIR" rev-parse "origin/$BRANCH")"
 agentic_confirm_update "$previous_ref" "$target_ref"

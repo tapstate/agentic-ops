@@ -16,6 +16,8 @@
 
 不得从其它工作空间、本机全局 `.env`、个人记忆或旧聊天中自动补齐凭证和项目事实。
 
+首次 Bootstrap 只能使用调用者当前账户下载脚本和 clone。安装授权时必须明确选择复用机器全局 Git/SSH/`gh`，或在安装目录创建隔离授权；公司网络环境继续使用 SSH，安装级模式通过 `ssh.github.com:443` 提升连通性，不改用 HTTPS。
+
 ## 2. 安装 developer 工作面
 
 提供两种安装方式；两者都安装稳定 `main` 的 developer-only managed clone 到 `~/.agentic-ops`。
@@ -58,6 +60,7 @@ gh auth login -h github.com -p ssh -s repo
     --git-name <git-author-and-committer-name> \
     --git-email <git-author-and-committer-email> \
     --github-login <github-actor-login> \
+    --execution-auth-mode global \
     --token-stdin \
     --non-interactive
 )
@@ -81,7 +84,7 @@ ao-work --help
 <install-root>/bin/ao-work auth --show
 ```
 
-若安装已完成，自动化或无交互场景也可单独使用完整授权参数；token 只通过标准输入传递：
+若安装已完成，自动化或无交互场景也可单独使用完整授权参数；以下 `global` 示例只复用并验证机器已有 Git/SSH/`gh`，不会改写它们。Jira token 只通过标准输入传递：
 
 ```sh
 printf '%s\n' "$JIRA_API_TOKEN" | ao-work auth \
@@ -90,11 +93,14 @@ printf '%s\n' "$JIRA_API_TOKEN" | ao-work auth \
   --git-name <git-author-and-committer-name> \
   --git-email <git-author-and-committer-email> \
   --github-login <github-actor-login> \
+  --execution-auth-mode global \
   --token-stdin \
   --non-interactive
 ```
 
-交互配置使用目标安装的 `<install-root>/bin/ao-work auth`，并以 `<install-root>/bin/ao-work auth --show` 回读脱敏身份。安装脚本也可以接收相同授权参数，但只负责调用 Runtime。新工作空间从当前安装继承身份与凭证并生成 schema v5 绑定与本地入口。
+需要隔离授权时，在终端运行 `<install-root>/bin/ao-work auth --execution-auth-mode installation`，按提示完成官方设备登录和安装专属 SSH 公钥登记。首次安装级 GitHub 登录不支持非交互方式，也不会复用 Jira token 或全局 `gh`。安装级 SSH 只使用当前安装私钥、禁用全局 Agent，并通过 SSH-over-443 访问 GitHub。
+
+交互配置使用目标安装的 `<install-root>/bin/ao-work auth`，并以 `<install-root>/bin/ao-work auth --show` 回读脱敏身份、模式、路径状态和公钥指纹。已有授权不同时先审查 `change_digest`，再用 `--confirm-replace-authorization <change_digest>` 精确确认；不同安装 `gh` 账户、既有私钥、自定义 `core.sshCommand` 或非受管文件仍失败关闭。安装脚本只负责调用 Runtime。新工作空间从当前安装继承身份与凭证并生成 schema v5 绑定与本地入口。
 
 ## 3. 初始化业务项目工作空间
 
@@ -133,6 +139,7 @@ cd ~/agentic-ops-tapdata
 - 默认仓库和源码目录。
 - Git、GitHub、Jira 访问等前置检查。
 - Git author/committer 与 GitHub actor login；从安装身份继承，不读取全局 Git/GitHub 身份作为事实。
+- Git 远端 SSH 与 `gh` API 分别按授权模式执行；`gh` 回读不能单独证明 SSH push actor。
 
 只有缺失或冲突的项才需要额外参数；Connection 默认由 Project Profile 推导，不要求普通用户传 `--connection-id`。源码池来自 `--source-pool-root` 或安装目录 `user/config.yaml` 的 `source_pool_root`；不存在时由 Runtime 创建并写入容器 README。
 
@@ -166,7 +173,7 @@ cd ~/agentic-ops-tapdata
 ./.agentic-ops/bin/ao-work capability list
 ```
 
-授权属于 developer 安装，不属于单个工作空间。`ao-work auth` 在终端进入引导；token 不通过命令行参数传递。同一安装下的业务工作空间继承同一身份和凭证，不同研发员必须使用隔离安装。只有授权已配置且 preflight 通过后，才能操作真实 Jira 任务。
+授权属于 developer 安装，不属于单个工作空间。`ao-work auth` 在终端进入引导；token 不通过命令行参数传递。同一安装下的业务工作空间继承同一身份和凭证，不同研发员必须使用隔离安装。授权模式、执行身份或安装 SSH 公钥指纹变化后必须明确重绑工作空间。项目验证子进程不会继承 SSH 私钥、Agent、`GH_CONFIG_DIR` 或 GitHub 凭证。只有授权已配置且 preflight 通过后，才能操作真实 Jira 任务。
 
 调用具体操作前运行 `./.agentic-ops/bin/ao-work capability show <operation>`；只有 `status=implemented` 且列出明确命令路径时才能调用。`capability_gap` 表示当前版本没有安全原子操作，应按中文 `next_action` 转人工，不能尝试旧命令。
 
@@ -211,7 +218,7 @@ cd ~/agentic-ops-tapdata
 ~/.agentic-ops/developer/bootstrap/rollback.sh
 ```
 
-更新和回滚只改变 developer-only managed clone 与锁定 Python 环境，不修改各业务项目工作空间的 Jira 身份和任务状态。更新目标与当前 ref 必须先展示并由研发工程师确认；非交互模式不得静默接受。
+更新和回滚只改变 developer-only managed clone 与锁定 Python 环境，不修改各业务项目工作空间的 Jira 身份和任务状态。`installation` 模式授权完成后，managed clone 的后续更新使用安装专属 SSH；回滚不联网。更新目标与当前 ref 必须先展示并由研发工程师确认；非交互模式不得静默接受。
 
 ## 8. 常见问题
 

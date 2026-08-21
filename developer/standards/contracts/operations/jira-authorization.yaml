@@ -1,5 +1,5 @@
 operation: jira_authorization
-version: 3
+version: 4
 workplane: developer
 actions:
   - configure
@@ -15,7 +15,29 @@ account:
 storage:
   identity: user/identity.yaml
   credentials: user/.env
+  installation_ssh: user/ssh
+  installation_gh: user/gh
   workspace_reference: install_identity_ref
+execution_authorization:
+  required_mode:
+    - global
+    - installation
+  facts:
+    - commit_identity
+    - git_remote_ssh_authorization
+    - github_cli_identity
+  global:
+    modifies_global_authorization: false
+    requires_git_identity_readback: true
+    requires_gh_actor_readback: true
+    ssh_push_actor_independently_proven: false
+  installation:
+    first_login_requires_interactive_terminal: true
+    github_login: official_gh_device_flow
+    ssh_transport: ssh.github.com:443
+    ssh_agent_fallback: forbidden
+    host_key_source: versioned_trusted_asset
+    managed_clone_ssh_command: installation_scoped
 security:
   - token_must_not_be_accepted_as_command_argument
   - token_must_not_be_returned_or_logged
@@ -25,7 +47,16 @@ security:
   - process_environment_must_not_be_read_implicitly
   - workspace_must_not_store_or_read_credentials
   - workspace_init_must_verify_jira_identity_and_project_access
-  - schema_v3_workspace_must_fail_closed_before_credential_read
+  - schema_v4_and_earlier_workspace_must_fail_closed_before_credential_read
+  - existing_authorization_must_be_inspected_before_write
+  - managed_difference_requires_exact_change_digest_confirmation
+  - private_key_must_not_be_silently_replaced
+  - different_gh_account_must_not_be_silently_replaced
+  - unmanaged_authorization_must_fail_closed
+  - custom_core_ssh_command_must_not_be_overwritten
+  - global_git_ssh_and_gh_configuration_must_not_be_modified
+  - project_verification_subprocess_must_not_receive_ssh_or_gh_credentials
+  - gh_actor_must_not_be_reported_as_ssh_push_actor_proof
 failure:
   - install_identity_missing
   - install_identity_incomplete
@@ -36,3 +67,11 @@ failure:
   - jira_credentials_missing
   - install_user_dir_invalid
   - install_identity_write_failed
+  - install_execution_authorization_upgrade_required
+  - install_execution_authorization_invalid
+  - global_authorization_identity_mismatch
+  - installation_github_interactive_authorization_required
+  - existing_authorization_change_confirmation_required
+  - existing_authorization_unmanaged_conflict
+  - existing_authorization_permissions_unsafe
+  - installation_authorization_incomplete

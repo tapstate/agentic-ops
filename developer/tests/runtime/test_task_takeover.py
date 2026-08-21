@@ -232,6 +232,9 @@ class TaskTakeoverTest(unittest.TestCase):
             identity.write_text(
                 "agent_id: harsen-mini-test-bot\n"
                 "jira_email: harsen@example.test\n"
+                "execution_authorization:\n"
+                "  mode: global\n"
+                "  ssh_key_fingerprint: ''\n"
                 "execution_identity:\n"
                 "  git_author_name: Harsen Test Bot\n"
                 "  git_author_email: harsen@example.test\n"
@@ -572,6 +575,10 @@ class TaskTakeoverTest(unittest.TestCase):
         identity = {
             "agent_id": "harsen-mini-test-bot",
             "jira_email": "harsen@example.test",
+            "execution_authorization": {
+                "mode": "global",
+                "ssh_key_fingerprint": "",
+            },
             "execution_identity": {
                 "git_author_name": "Harsen Test Bot",
                 "git_author_email": "harsen@example.test",
