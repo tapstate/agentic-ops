@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from ao_work.config.loader import _install_identity_ref, validate_workspace_jira_binding
+from ao_work.config.loader import _install_identity_ref, install_entry_sha256, validate_workspace_jira_binding
 from ao_work.installation import (
     install_user_dir,
     load_install_credentials,
@@ -38,6 +38,10 @@ class InstallIdentityStoreTest(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.install = Path(self.temporary.name) / "install"
         self.install.mkdir()
+        entry = self.install / "bin" / "ao-work"
+        entry.parent.mkdir()
+        entry.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        entry.chmod(0o700)
 
     def test_save_and_load_identity_roundtrip(self) -> None:
         save_install_identity(self.install, IDENTITY)
@@ -109,6 +113,10 @@ class InstallIdentityBindingTest(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.install = self.root / "install"
         self.install.mkdir()
+        entry = self.install / "bin" / "ao-work"
+        entry.parent.mkdir()
+        entry.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        entry.chmod(0o700)
         self.workspace = self.root / "workspace"
         (self.workspace / ".agentic-ops").mkdir(parents=True)
         self.connection = JiraConnection(
@@ -120,7 +128,7 @@ class InstallIdentityBindingTest(unittest.TestCase):
         )
         save_install_identity(self.install, IDENTITY)
 
-    def _agent(self, schema: int = 4, ref: str | None = None) -> dict:
+    def _agent(self, schema: int = 5, ref: str | None = None) -> dict:
         payload = {
             "schema_version": schema,
             "workplane": "developer",
@@ -132,10 +140,12 @@ class InstallIdentityBindingTest(unittest.TestCase):
             "source_root": str(self.root / "pool"),
             "repository": "tapdata/tapdata",
         }
-        if schema == 4:
+        if schema == 5:
             payload["install_identity_ref"] = ref or _install_identity_ref(
                 self.install, load_install_identity(self.install)
             )
+            payload["workspace_entry"] = ".agentic-ops/bin/ao-work"
+            payload["install_entry_sha256"] = install_entry_sha256(self.install)
         else:
             payload["jira_account_id"] = "jira-account-1"
             payload["agent_id"] = "harsen-mini-test-bot"
@@ -150,16 +160,16 @@ class InstallIdentityBindingTest(unittest.TestCase):
             config_path=config_path,
         )
 
-    def test_v4_binding_passes_with_matching_install_identity(self) -> None:
+    def test_v5_binding_passes_with_matching_install_identity(self) -> None:
         workspace = self._workspace(self._agent())
         agent = validate_workspace_jira_binding(
             workspace,
             self.connection,
             install_root=self.install,
         )
-        self.assertEqual(4, agent["schema_version"])
+        self.assertEqual(5, agent["schema_version"])
 
-    def test_v4_binding_drift_blocked(self) -> None:
+    def test_v5_binding_drift_blocked(self) -> None:
         other = dict(IDENTITY)
         other["agent_id"] = "other-engineer"
         workspace = self._workspace(self._agent(ref="install:stale-fingerprint"))
@@ -171,11 +181,36 @@ class InstallIdentityBindingTest(unittest.TestCase):
             )
         self.assertEqual("install_identity_drift", captured.exception.code)
 
-    def test_v4_binding_requires_install_root(self) -> None:
+    def test_v5_binding_requires_install_root(self) -> None:
         workspace = self._workspace(self._agent())
         with self.assertRaises(RuntimeErrorResult) as captured:
             validate_workspace_jira_binding(workspace, self.connection)
         self.assertEqual("install_identity_missing", captured.exception.code)
+
+    def test_v4_workspace_requires_explicit_reinitialization(self) -> None:
+        workspace = self._workspace(self._agent(schema=4))
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            validate_workspace_jira_binding(
+                workspace,
+                self.connection,
+                install_root=self.install,
+            )
+        self.assertEqual("workspace_jira_identity_upgrade_required", captured.exception.code)
+        self.assertIn("--confirm-existing-config", captured.exception.required_human_action)
+
+    def test_v5_binding_rejects_install_entry_drift(self) -> None:
+        payload = self._agent()
+        (self.install / "bin" / "ao-work").write_text(
+            "#!/usr/bin/env bash\necho changed\n", encoding="utf-8"
+        )
+        workspace = self._workspace(payload)
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            validate_workspace_jira_binding(
+                workspace,
+                self.connection,
+                install_root=self.install,
+            )
+        self.assertEqual("install_entry_drift", captured.exception.code)
 
     def test_v3_binding_is_rejected_before_workspace_credentials_are_used(self) -> None:
         workspace = self._workspace(self._agent(schema=3))

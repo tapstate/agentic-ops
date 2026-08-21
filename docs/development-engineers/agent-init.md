@@ -15,9 +15,8 @@ bash developer/bootstrap/install.sh
 安装未传授权参数时，有终端会直接进入 `ao-work auth` 引导；无终端会完成安装并输出授权待办。后续随时可以单独运行：
 
 ```sh
-export PATH="$HOME/.agentic-ops/bin:$PATH"
-ao-work auth
-ao-work auth --show
+<install-root>/bin/ao-work auth
+<install-root>/bin/ao-work auth --show
 ```
 
 自动化可以在安装时提供完整授权，Bootstrap 只转交给 Runtime：
@@ -33,7 +32,7 @@ printf '%s\n' "$JIRA_API_TOKEN" | bash developer/bootstrap/install.sh \
   --non-interactive
 ```
 
-如果安装已经完成，使用相同参数调用 `ao-work auth` 即可独立配置或轮换。身份保存在安装目录 `user/identity.yaml`，凭证保存在 `user/.env`，权限均为 `0600`；token 不进入命令参数或输出。
+如果安装已经完成，使用目标安装的 `<install-root>/bin/ao-work auth` 即可独立配置或轮换。身份保存在安装目录 `user/identity.yaml`，凭证保存在 `user/.env`，权限均为 `0600`；token 不进入命令参数或输出。
 
 ## 2. 指定分支验证安装
 
@@ -63,13 +62,13 @@ bash developer/bootstrap/install-verify-branch.sh \
 在独立业务项目 AI 工作空间运行：
 
 ```sh
-ao-work workspace init
+<install-root>/bin/ao-work workspace init
 ```
 
 非交互模式：
 
 ```sh
-ao-work workspace init \
+<install-root>/bin/ao-work workspace init \
   --non-interactive \
   --project tapdata \
   --source-pool-root <pool-root> \
@@ -80,24 +79,24 @@ ao-work workspace init \
 
 池根由 `--source-pool-root` 或安装目录 `user/config.yaml` 的 `source_pool_root` 提供。目录不存在时 init 创建并写入容器 README。`--workspace-root <路径>` 是 `ao-work` 顶层参数，必须放在 `workspace` 之前。
 
-新工作空间固定生成 schema v4 `.agentic-ops/agent.json`，只保存项目事实与 `install_identity_ref`，不生成 `.agentic-ops/.env`。schema v3 旧工作空间会在读取旧凭证和联网前阻断；先运行 `ao-work auth`，再由指导员明确重新初始化。Runtime 不自动复制或删除旧凭证。
+新工作空间固定生成 schema v5 `.agentic-ops/agent.json`，只保存项目事实、`install_identity_ref`、安装入口摘要和工作空间本地入口，不生成 `.agentic-ops/.env`。schema v4 及更早的工作空间会在联网前阻断；先使用目标安装运行 `ao-work auth`，再由指导员以 `<install-root>/bin/ao-work workspace init --confirm-existing-config` 明确重新初始化。Runtime 不自动复制或删除旧凭证，也不扫描 PATH。
 
 初始化会写入当前工作空间 `AGENTS.md` 和 `.agents/skills/` 普通文件副本。不得创建指向安装根的 symlink，也不得加载根项目维护规则。
 
 ## 4. 开始任务前检查
 
 ```sh
-ao-work auth --show
-ao-work workspace preflight
-ao-work capability list
+<install-root>/bin/ao-work auth --show
+./.agentic-ops/bin/ao-work workspace preflight
+./.agentic-ops/bin/ao-work capability list
 ```
 
-只有授权已配置且 workspace preflight 通过后，才能执行真实 Jira 任务。Jira 当前身份与 Project 权限由 workspace/task Runtime 入口回读。调用具体操作前执行 `ao-work capability show <operation>`；只有 `status=implemented` 且列出明确命令路径时才能调用。
+只有授权已配置且 workspace preflight 通过后，才能执行真实 Jira 任务。Jira 当前身份与 Project 权限由 workspace/task Runtime 入口回读。调用具体操作前执行 `./.agentic-ops/bin/ao-work capability show <operation>`；只有 `status=implemented` 且列出明确命令路径时才能调用。
 
 正式接管入口：
 
 ```sh
-ao-work takeover TAP-12289
+./.agentic-ops/bin/ao-work takeover TAP-12289
 ```
 
 Runtime 自动判断新接管、接纳存量或恢复；非新接管必须在人可见输出和 Jira Comment 中明文留痕。接管后信息分析和方案分级正常连续推进，只在设计审查、代码审查或风险决策暂停。

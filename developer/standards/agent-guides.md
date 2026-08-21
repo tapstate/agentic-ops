@@ -1,6 +1,6 @@
 # AgenticOps 研发员执行指引
 
-本指引只服务业务项目工作空间的 `developer` 工作面。命令入口固定为 `ao-work`；项目维护入口 `ao-maint` 不会随 developer 安装交付。
+本指引只服务业务项目工作空间的 `developer` 工作面。初始化后的命令入口固定为 `./.agentic-ops/bin/ao-work`；首次授权、初始化或恢复使用目标安装的 `<install-root>/bin/ao-work`。项目维护入口 `ao-maint` 不会随 developer 安装交付。
 
 ## 固定读取顺序
 
@@ -18,7 +18,7 @@
 开始真实任务前先执行：
 
 ```sh
-ao-work workspace preflight
+./.agentic-ops/bin/ao-work workspace preflight
 ao-work auth --show
 ao-work capability list
 ```

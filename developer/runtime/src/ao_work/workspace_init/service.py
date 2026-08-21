@@ -5,6 +5,7 @@ import hashlib
 import os
 import re
 import select
+import shlex
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,7 @@ from ao_work.config import (
     load_jira_connection,
     load_project_profile,
     jira_site_identity,
+    install_entry_sha256,
     resolve_source_pool_root,
     validate_workspace_jira_binding,
     validate_workspace_project_binding,
@@ -62,6 +64,7 @@ MANAGED_END = "<!-- agentic-ops:workspace:end -->"
 MANAGED_CODE_START = "<!-- agentic-ops:workspace-code:start -->"
 MANAGED_CODE_END = "<!-- agentic-ops:workspace-code:end -->"
 WORKSPACE_SKILLS_ROOT = Path(".agents") / "skills"
+WORKSPACE_ENTRY = Path(".agentic-ops") / "bin" / "ao-work"
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,7 @@ class WorkspaceCandidate:
     source_root_derived: bool = False
     pool_mode: bool = False
     install_identity_ref: str = ""
+    install_entry_sha256: str = ""
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -101,6 +105,7 @@ class WorkspaceCandidate:
                 else None
             ),
             "execution_identity": self.execution_identity,
+            "workspace_entry": str(WORKSPACE_ENTRY),
         }
 
 
@@ -228,6 +233,7 @@ class WorkspaceInitializer:
             ).encode("utf-8")
         ).hexdigest()
         install_identity_ref = f"install:{identity_fingerprint}"
+        entry_sha256 = install_entry_sha256(self.install_root)
         return WorkspaceCandidate(
             root=self.root,
             install_root=self.install_root,
@@ -244,6 +250,7 @@ class WorkspaceInitializer:
             source_root_derived=source_root_derived,
             pool_mode=pool_mode,
             install_identity_ref=install_identity_ref,
+            install_entry_sha256=entry_sha256,
         )
 
     def preflight(
@@ -263,7 +270,8 @@ class WorkspaceInitializer:
         checks.append({"check": "agent_id_format", "status": "passed"})
         checks.append({"check": "project_profile", "status": "passed"})
         self._check_existing_config(candidate, checks, confirm_existing_config)
-        if (candidate.root / ".agentic-ops" / "agent.json").is_file():
+        existing_agent = candidate.root / ".agentic-ops" / "agent.json"
+        if existing_agent.is_file() and read_json(existing_agent).get("schema_version") == 5:
             self._check_workspace_ai_assets(candidate, checks)
         self._check_agent_id_collision(candidate, checks)
         self._check_authorization(candidate, checks)
@@ -370,6 +378,7 @@ class WorkspaceInitializer:
                     ),
                     self._managed_guide_content(candidate),
                 )
+                self._write_workspace_entry(candidate)
                 write_diagnostic("初始化步骤 4/5：安装研发 Skill")
                 self._install_workspace_skills(candidate)
                 write_diagnostic("初始化步骤 5/5：写入研发员身份与工作空间索引")
@@ -378,11 +387,11 @@ class WorkspaceInitializer:
                 try:
                     self._write_workspace_index(candidate)
                     agent_path = state_root / "agent.json"
-                    # agent.json schema v4：身份/凭证只在安装目录，工作空间只保留绑定。
+                    # agent.json schema v5：身份/凭证只在安装目录，工作空间只保留绑定与本地入口摘要。
                     atomic_write_json(
                         agent_path,
                         {
-                            "schema_version": 4,
+                            "schema_version": 5,
                             "workplane": "developer",
                             "project_profile": candidate.profile.profile_id,
                             "jira_project": candidate.profile.project_key,
@@ -392,6 +401,8 @@ class WorkspaceInitializer:
                             "source_root": str(candidate.source_root),
                             "repository": candidate.repository,
                             "install_identity_ref": candidate.install_identity_ref,
+                            "workspace_entry": str(WORKSPACE_ENTRY),
+                            "install_entry_sha256": candidate.install_entry_sha256,
                             "initialized_at": datetime.now(timezone.utc).isoformat(),
                         },
                     )
@@ -422,6 +433,7 @@ class WorkspaceInitializer:
             "agent_config": str(state_root / "agent.json"),
             "profile_overlay": str(overlay_path),
             "agent_instructions": str(candidate.root / "AGENTS.md"),
+            "workspace_entry": str(candidate.root / WORKSPACE_ENTRY),
             "skill_root": str(candidate.root / WORKSPACE_SKILLS_ROOT),
             "credential_protection": credential_protection,
             "preflight_status": "passed",
@@ -560,7 +572,51 @@ class WorkspaceInitializer:
                 "业务工作空间 AI 入口包含非准入 Skill 或 maintainer 资产",
                 "请停止使用该工作空间，并由指导员核对后重新初始化",
             )
+        self._check_workspace_entry(candidate)
         checks.append({"check": "workspace_ai_assets", "status": "passed"})
+
+    def _workspace_entry_path(self, candidate: WorkspaceCandidate) -> Path:
+        return validate_workspace_managed_path(
+            candidate.root,
+            candidate.root / WORKSPACE_ENTRY,
+        )
+
+    def _workspace_entry_content(self, candidate: WorkspaceCandidate) -> str:
+        install_entry = candidate.install_root / "bin" / "ao-work"
+        return (
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n\n"
+            "SCRIPT_DIR=\"$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd -P)\"\n"
+            f"INSTALL_ENTRY={shlex.quote(str(install_entry))}\n\n"
+            "if [ ! -x \"$INSTALL_ENTRY\" ]; then\n"
+            "  printf 'AgenticOps：绑定的 developer 安装入口不可用；请使用该安装重新运行 "
+            "ao-work workspace init --confirm-existing-config 恢复工作空间。\\n' >&2\n"
+            "  exit 1\n"
+            "fi\n\n"
+            "exec \"$INSTALL_ENTRY\" \"$@\"\n"
+        )
+
+    def _write_workspace_entry(self, candidate: WorkspaceCandidate) -> None:
+        path = self._workspace_entry_path(candidate)
+        atomic_write_text(path, self._workspace_entry_content(candidate))
+        os.chmod(path, 0o700)
+
+    def _check_workspace_entry(self, candidate: WorkspaceCandidate) -> None:
+        path = self._workspace_entry_path(candidate)
+        try:
+            content = read_managed_text(path, label="工作空间本地 ao-work 入口")
+        except OSError as error:
+            raise _blocked(
+                "workspace_local_entry_missing",
+                "业务工作空间缺少可执行的本地 ao-work 入口",
+                "请使用绑定安装的 ao-work workspace init --confirm-existing-config 重新生成入口",
+            ) from error
+        if content != self._workspace_entry_content(candidate) or not os.access(path, os.X_OK):
+            raise _blocked(
+                "workspace_local_entry_drift",
+                "业务工作空间本地 ao-work 入口已漂移或不可执行",
+                "请使用绑定安装的 ao-work workspace init --confirm-existing-config 恢复入口",
+            )
 
     def _check_existing_config(
         self,
@@ -575,7 +631,7 @@ class WorkspaceInitializer:
             return
         existing = read_json(path)
         expected = {
-            "schema_version": 4,
+            "schema_version": 5,
             "workplane": "developer",
             "project_profile": candidate.profile.profile_id,
             "jira_project": candidate.profile.project_key,
@@ -585,6 +641,8 @@ class WorkspaceInitializer:
             "jira_base_url": candidate.connection.base_url,
             "jira_site": jira_site_identity(candidate.connection.base_url),
             "install_identity_ref": candidate.install_identity_ref,
+            "workspace_entry": str(WORKSPACE_ENTRY),
+            "install_entry_sha256": candidate.install_entry_sha256,
         }
         same = all(
             existing.get(key) == value
@@ -1282,9 +1340,9 @@ class WorkspaceInitializer:
             f"- Project Profile：`{candidate.profile.profile_id}`\n"
             f"- Jira Project：`{candidate.profile.project_key}`\n"
             f"- 源码目录：`{candidate.source_root}`\n\n"
-            "下面的 developer AI 规则已在初始化时从受信安装复制到本工作空间，AI 必须直接加载并执行；命令入口固定为 `ao-work`，不得自行选择或切换工作面。\n"
+            "下面的 developer AI 规则已在初始化时从受信安装复制到本工作空间，AI 必须直接加载并执行；命令入口固定为 `./.agentic-ops/bin/ao-work`，不得调用裸 `ao-work`、搜索 PATH 或自行选择、切换工作面。\n"
             "Codex 可发现的 developer Skill 已作为受管副本安装到当前工作空间 `.agents/skills/`；需要流程能力时只从该目录选择 Skill。标准资产由 `ao-work` 从受信安装根解析，不能把 `developer/...` 当作业务仓库相对路径，也不得搜索或恢复 maintainer 资产。\n"
-            "执行任务前先调用 `ao-work workspace preflight`；任何阻断结果都不得绕过。\n\n"
+            "执行任务前先调用 `./.agentic-ops/bin/ao-work workspace preflight`；任何阻断结果都不得绕过。\n\n"
             "## developer AI 规则（受管副本）\n\n"
             f"{developer_rules}\n"
             f"{MANAGED_END}"
@@ -1314,9 +1372,9 @@ class WorkspaceInitializer:
             "`AGENTS.md`（developer 工作面，由 ao-work workspace init 生成并受管）：\n\n"
             "@AGENTS.md\n\n"
             "1. 请先按 `AGENTS.md` 中的 developer AI 规则执行，本文件不替代它。\n"
-            "2. 工作空间固定使用 `developer` 工作面，命令入口为 `ao-work`；"
+            "2. 工作空间固定使用 `developer` 工作面，命令入口为 `./.agentic-ops/bin/ao-work`；"
             "不得加载或调用 `maintainer` 工作面的规则、Skill、授权、配置或入口。\n"
-            "3. 执行任务前先调用 `ao-work workspace preflight`；任何阻断结果都不得绕过。\n\n"
+            "3. 执行任务前先调用 `./.agentic-ops/bin/ao-work workspace preflight`；任何阻断结果都不得绕过。\n\n"
             "## 与 Codex 的兼容说明\n\n"
             "- Codex 直接识别 `AGENTS.md` 并扫描 `.agents/skills/` 自动发现 Skill；"
             "Claude Code 通过 `.claude/skills/` 下的 symlink（由 init 创建）"

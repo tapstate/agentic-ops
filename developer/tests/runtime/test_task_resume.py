@@ -14,7 +14,7 @@ from ao_work.output import RuntimeErrorResult
 from ao_work.task_resume import _agent_id_from_journal, _latest_resumable, _resolve_local_context
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.work_cli import main
-from install_auth_fixture import configure_install_authorization
+from install_auth_fixture import configure_install_authorization, v5_agent
 
 
 class ResumeTransport:
@@ -108,18 +108,16 @@ class TaskResumeTest(unittest.TestCase):
         (state / "profiles").mkdir(parents=True)
         (state / "agent.json").write_text(
             json.dumps(
-                {
-                    "schema_version": 4,
-                    "workplane": "developer",
-                    "install_identity_ref": install_identity_ref,
-                    "project_profile": "tapdata",
-                    "jira_project": "TAP",
-                    "connection_id": "tapdata-cloud",
-                    "jira_base_url": "https://tapdata.atlassian.net",
-                    "jira_site": "tapdata.atlassian.net",
-                    "source_root": str(self.source.resolve()),
-                    "repository": "tapdata/tapdata",
-                }
+                v5_agent(
+                    self.install,
+                    project_profile="tapdata",
+                    jira_project="TAP",
+                    connection_id="tapdata-cloud",
+                    jira_base_url="https://tapdata.atlassian.net",
+                    jira_site="tapdata.atlassian.net",
+                    source_root=str(self.source.resolve()),
+                    repository="tapdata/tapdata",
+                )
             ),
             encoding="utf-8",
         )
