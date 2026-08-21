@@ -1,0 +1,1020 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-ops.local/schemas/shared/integration/task-to-pr-event.schema.json",
+  "title": "任务到 PR 审查审计事件",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "protocol",
+    "event_id",
+    "agentic_run_id",
+    "step_id",
+    "recorded_at",
+    "status",
+    "actor",
+    "action",
+    "duration_seconds",
+    "summary",
+    "authorization_reference",
+    "action_data",
+    "evidence_origin"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "protocol": { "const": "task_to_pr_review" },
+    "event_id": { "$ref": "#/$defs/identifier" },
+    "agentic_run_id": { "$ref": "#/$defs/identifier" },
+    "step_id": { "$ref": "#/$defs/identifier" },
+    "recorded_at": { "type": "string", "format": "date-time" },
+    "status": { "enum": ["started", "completed", "blocked"] },
+    "actor": { "enum": ["skill", "runtime", "project_tool", "ai", "human"] },
+    "action": {
+      "enum": [
+        "step",
+        "external_action",
+        "jira_readback",
+        "jira_write_readback",
+        "prohibition_baseline",
+        "remote_branch_readback",
+        "pr_readback",
+        "verification",
+        "human_intervention",
+        "failure",
+        "retry",
+        "quality_finding",
+        "waiting",
+        "retrospective",
+        "prohibition_check"
+      ]
+    },
+    "duration_seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "authorization_reference": {
+      "oneOf": [
+        { "$ref": "#/$defs/reference" },
+        { "type": "null" }
+      ]
+    },
+    "action_data": { "type": "object" },
+    "evidence_origin": { "enum": ["imported", "runtime_probe"] }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "action": { "const": "step" },
+        "action_data": { "$ref": "#/$defs/step" }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "external_action" },
+        "action_data": { "$ref": "#/$defs/external_action" }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "jira_readback" },
+        "action_data": { "$ref": "#/$defs/jira_readback" }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "jira_write_readback" },
+        "action_data": { "$ref": "#/$defs/jira_write_readback" }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "prohibition_baseline" },
+        "action_data": { "$ref": "#/$defs/prohibition_baseline" }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "remote_branch_readback" },
+        "action_data": { "$ref": "#/$defs/remote_branch_readback" }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "pr_readback" },
+        "action_data": { "$ref": "#/$defs/pr_readback" }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "verification" },
+        "action_data": { "$ref": "#/$defs/verification" }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "human_intervention" },
+        "action_data": { "$ref": "#/$defs/human_intervention" }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "failure" },
+        "action_data": { "$ref": "#/$defs/failure" }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "retry" },
+        "action_data": { "$ref": "#/$defs/retry" }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "quality_finding" },
+        "action_data": { "$ref": "#/$defs/quality_finding" }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "waiting" },
+        "action_data": { "$ref": "#/$defs/waiting" }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "retrospective" },
+        "action_data": { "$ref": "#/$defs/retrospective" }
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "prohibition_check" },
+        "action_data": { "$ref": "#/$defs/prohibition_check" }
+      }
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": [
+              "jira_readback",
+              "jira_write_readback",
+              "prohibition_baseline",
+              "remote_branch_readback",
+              "pr_readback",
+              "verification",
+              "prohibition_check"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "actor": { "const": "runtime" },
+          "evidence_origin": { "const": "runtime_probe" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "evidence_origin": { "const": "runtime_probe" } },
+        "required": ["evidence_origin"]
+      },
+      "then": { "properties": { "actor": { "const": "runtime" } } }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[0-9A-Za-z][0-9A-Za-z._-]{0,127}$"
+    },
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "date_time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "git_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40,64}$"
+    },
+    "repository_slug": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+      "maxLength": 256
+    },
+    "branch_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*[~^:?*\\[\\]\\\\]).+$"
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "maxProperties": 0
+    },
+    "external_action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "target", "status", "readback_event_id"],
+      "properties": {
+        "action": {
+          "enum": [
+            "jira_read",
+            "jira_comment",
+            "jira_worklog",
+            "git_commit",
+            "git_remote_read",
+            "git_push_task_branch",
+            "github_pr_create_or_update",
+            "github_pr_read"
+          ]
+        },
+        "target": { "$ref": "#/$defs/reference" },
+        "status": { "enum": ["applied", "unknown", "not_applied"] },
+        "readback_event_id": {
+          "oneOf": [
+            { "$ref": "#/$defs/identifier" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "jira_readback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "issue_key",
+        "issue_id",
+        "project_key",
+        "url",
+        "status",
+        "assignee",
+        "account_id",
+        "assignee_account_id",
+        "status_category",
+        "mapped_status",
+        "takeover_comment_id",
+        "formal_takeover_verified",
+        "issue_content_sha256",
+        "approved_plan_sha256",
+        "observed_at",
+        "reference"
+      ],
+      "properties": {
+        "provider": { "const": "jira" },
+        "issue_key": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$"
+        },
+        "issue_id": { "$ref": "#/$defs/non_empty_string" },
+        "project_key": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        },
+        "url": { "type": "string", "format": "uri", "maxLength": 2048 },
+        "status": { "$ref": "#/$defs/non_empty_string" },
+        "assignee": {
+          "oneOf": [
+            { "$ref": "#/$defs/non_empty_string" },
+            { "type": "null" }
+          ]
+        },
+        "account_id": { "$ref": "#/$defs/non_empty_string" },
+        "assignee_account_id": { "$ref": "#/$defs/non_empty_string" },
+        "status_category": { "$ref": "#/$defs/non_empty_string" },
+        "mapped_status": { "$ref": "#/$defs/identifier" },
+        "takeover_comment_id": {
+          "oneOf": [
+            { "$ref": "#/$defs/non_empty_string" },
+            { "type": "null" }
+          ]
+        },
+        "formal_takeover_verified": { "type": "boolean" },
+        "issue_content_sha256": { "$ref": "#/$defs/sha256" },
+        "approved_plan_sha256": { "$ref": "#/$defs/sha256" },
+        "observed_at": { "$ref": "#/$defs/date_time" },
+        "reference": { "$ref": "#/$defs/reference" }
+      }
+    },
+    "jira_write_readback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "issue_key",
+        "agentic_run_id",
+        "operation",
+        "plan_file",
+        "attempt_file",
+        "plan_id",
+        "idempotency_key",
+        "external_id",
+        "created",
+        "write_precondition",
+        "write_attempt_id",
+        "write_attempt_started_at",
+        "content_sha256",
+        "body_sha256",
+        "title",
+        "details_sha256",
+        "time_spent_seconds",
+        "started",
+        "excludes_waiting",
+        "included_work",
+        "excluded_waiting_categories",
+        "observed_at",
+        "reference"
+      ],
+      "properties": {
+        "provider": { "const": "jira" },
+        "issue_key": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$"
+        },
+        "agentic_run_id": { "$ref": "#/$defs/identifier" },
+        "operation": { "enum": ["jira_comment", "jira_worklog"] },
+        "plan_file": { "$ref": "#/$defs/relative_path" },
+        "attempt_file": {
+          "oneOf": [
+            { "$ref": "#/$defs/relative_path" },
+            { "type": "null" }
+          ]
+        },
+        "plan_id": { "$ref": "#/$defs/identifier" },
+        "idempotency_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "external_id": { "$ref": "#/$defs/non_empty_string" },
+        "created": {
+          "type": "boolean",
+          "description": "只有首次计划证明 marker 不存在，且同一不可变 create 尝试发起后完成回读，才可为 true。"
+        },
+        "write_precondition": { "enum": ["absent", "preexisting"] },
+        "write_attempt_id": {
+          "oneOf": [
+            { "$ref": "#/$defs/identifier" },
+            { "type": "null" }
+          ]
+        },
+        "write_attempt_started_at": {
+          "oneOf": [
+            { "$ref": "#/$defs/date_time" },
+            { "type": "null" }
+          ]
+        },
+        "content_sha256": { "$ref": "#/$defs/sha256" },
+        "body_sha256": { "$ref": "#/$defs/sha256" },
+        "title": {
+          "oneOf": [
+            { "$ref": "#/$defs/non_empty_string" },
+            { "type": "null" }
+          ]
+        },
+        "details_sha256": {
+          "oneOf": [
+            { "$ref": "#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        },
+        "time_spent_seconds": {
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "null" }
+          ]
+        },
+        "started": {
+          "oneOf": [
+            { "$ref": "#/$defs/date_time" },
+            { "type": "null" }
+          ]
+        },
+        "excludes_waiting": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "null" }
+          ]
+        },
+        "included_work": {
+          "oneOf": [
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/worklog_included_work" }
+            },
+            { "type": "null" }
+          ]
+        },
+        "excluded_waiting_categories": {
+          "oneOf": [
+            {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/non_empty_string" }
+            },
+            { "type": "null" }
+          ]
+        },
+        "observed_at": { "$ref": "#/$defs/date_time" },
+        "reference": { "$ref": "#/$defs/reference" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "created": { "const": true } } },
+          "then": {
+            "properties": {
+              "write_precondition": { "const": "absent" },
+              "attempt_file": { "$ref": "#/$defs/relative_path" },
+              "write_attempt_id": { "$ref": "#/$defs/identifier" },
+              "write_attempt_started_at": { "$ref": "#/$defs/date_time" }
+            }
+          },
+          "else": {
+            "properties": {
+              "write_precondition": { "const": "preexisting" },
+              "attempt_file": { "type": "null" },
+              "write_attempt_id": { "type": "null" },
+              "write_attempt_started_at": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "jira_comment" } } },
+          "then": {
+            "properties": {
+              "title": { "type": "null" },
+              "details_sha256": { "type": "null" },
+              "time_spent_seconds": { "type": "null" },
+              "started": { "type": "null" },
+              "excludes_waiting": { "type": "null" },
+              "included_work": { "type": "null" },
+              "excluded_waiting_categories": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "jira_worklog" } } },
+          "then": {
+            "properties": {
+              "title": { "$ref": "#/$defs/non_empty_string" },
+              "details_sha256": { "$ref": "#/$defs/sha256" },
+              "time_spent_seconds": { "type": "integer", "minimum": 1 },
+              "started": { "$ref": "#/$defs/date_time" },
+              "excludes_waiting": { "const": true },
+              "included_work": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "$ref": "#/$defs/worklog_included_work" }
+              },
+              "excluded_waiting_categories": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "$ref": "#/$defs/non_empty_string" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "worklog_included_work": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "seconds"],
+      "properties": {
+        "description": { "$ref": "#/$defs/non_empty_string" },
+        "seconds": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "prohibition_baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issue_key",
+        "repository_slug",
+        "remote_name",
+        "jira_status",
+        "jira_status_category",
+        "tag_refs",
+        "release_records",
+        "protected_heads",
+        "local_head_sha",
+        "task_branch_remote_sha",
+        "task_open_pr",
+        "observed_at",
+        "reference"
+      ],
+      "properties": {
+        "issue_key": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$"
+        },
+        "repository_slug": { "$ref": "#/$defs/repository_slug" },
+        "remote_name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+$",
+          "maxLength": 128
+        },
+        "jira_status": { "$ref": "#/$defs/non_empty_string" },
+        "jira_status_category": { "$ref": "#/$defs/non_empty_string" },
+        "tag_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "sha"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^refs/tags/[^\\u0000-\\u0020~^:?*\\[\\]\\\\]+$",
+                "maxLength": 1024
+              },
+              "sha": { "$ref": "#/$defs/git_sha" }
+            }
+          }
+        },
+        "release_records": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tag_name", "published_at"],
+            "properties": {
+              "tag_name": { "$ref": "#/$defs/non_empty_string" },
+              "published_at": {
+                "oneOf": [
+                  { "$ref": "#/$defs/date_time" },
+                  { "type": "null" }
+                ]
+              }
+            }
+          }
+        },
+        "protected_heads": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["branch", "sha"],
+            "properties": {
+              "branch": { "$ref": "#/$defs/branch_name" },
+              "sha": {
+                "oneOf": [
+                  { "$ref": "#/$defs/git_sha" },
+                  { "type": "null" }
+                ]
+              }
+            }
+          }
+        },
+        "local_head_sha": { "$ref": "#/$defs/git_sha" },
+        "task_branch_remote_sha": {
+          "oneOf": [
+            { "$ref": "#/$defs/git_sha" },
+            { "type": "null" }
+          ]
+        },
+        "task_open_pr": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["number", "url", "head_sha", "base_branch"],
+              "properties": {
+                "number": { "type": "integer", "minimum": 1 },
+                "url": { "type": "string", "format": "uri", "maxLength": 2048 },
+                "head_sha": { "$ref": "#/$defs/git_sha" },
+                "base_branch": { "$ref": "#/$defs/branch_name" }
+              }
+            },
+            { "type": "null" }
+          ]
+        },
+        "observed_at": { "$ref": "#/$defs/date_time" },
+        "reference": { "$ref": "#/$defs/reference" }
+      }
+    },
+    "remote_branch_readback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "url",
+        "repository_slug",
+        "remote_name",
+        "branch",
+        "sha",
+        "status",
+        "protected",
+        "observed_at",
+        "reference",
+        "origin_url",
+        "base_sha",
+        "head_sha",
+        "baseline_event_id",
+        "baseline_local_head_sha",
+        "baseline_remote_sha",
+        "baseline_local_is_ancestor",
+        "baseline_remote_is_ancestor",
+        "attributed_actions",
+        "verification_event_ids",
+        "changed_paths",
+        "worktree_clean",
+        "git_author_name",
+        "git_author_email",
+        "git_committer_name",
+        "git_committer_email",
+        "commit_count",
+        "commit_identity_sha256",
+        "approved_plan_sha256"
+      ],
+      "properties": {
+        "provider": { "const": "git" },
+        "url": { "type": "string", "format": "uri", "maxLength": 2048 },
+        "repository_slug": { "$ref": "#/$defs/repository_slug" },
+        "remote_name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+$",
+          "maxLength": 128
+        },
+        "branch": { "$ref": "#/$defs/branch_name" },
+        "sha": { "$ref": "#/$defs/git_sha" },
+        "status": { "const": "exists" },
+        "protected": { "type": "boolean" },
+        "observed_at": { "$ref": "#/$defs/date_time" },
+        "reference": { "$ref": "#/$defs/reference" },
+        "origin_url": { "$ref": "#/$defs/non_empty_string" },
+        "base_sha": { "$ref": "#/$defs/git_sha" },
+        "head_sha": { "$ref": "#/$defs/git_sha" },
+        "baseline_event_id": { "$ref": "#/$defs/identifier" },
+        "baseline_local_head_sha": { "$ref": "#/$defs/git_sha" },
+        "baseline_remote_sha": {
+          "oneOf": [
+            { "$ref": "#/$defs/git_sha" },
+            { "type": "null" }
+          ]
+        },
+        "baseline_local_is_ancestor": { "type": "boolean" },
+        "baseline_remote_is_ancestor": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "type": "null" }
+          ]
+        },
+        "attributed_actions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["git_commit", "git_push_task_branch"] }
+        },
+        "verification_event_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "changed_paths": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1024 }
+        },
+        "worktree_clean": { "const": true },
+        "git_author_name": { "$ref": "#/$defs/non_empty_string" },
+        "git_author_email": { "$ref": "#/$defs/non_empty_string" },
+        "git_committer_name": { "$ref": "#/$defs/non_empty_string" },
+        "git_committer_email": { "$ref": "#/$defs/non_empty_string" },
+        "commit_count": { "type": "integer", "minimum": 1 },
+        "commit_identity_sha256": { "$ref": "#/$defs/sha256" },
+        "approved_plan_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "pr_readback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "repository_slug",
+        "number",
+        "url",
+        "status",
+        "merged",
+        "draft",
+        "head_branch",
+        "head_sha",
+        "base_branch",
+        "review_state",
+        "ci_status",
+        "github_actor_login",
+        "approved_plan_sha256",
+        "baseline_event_id",
+        "git_readback_event_id",
+        "attributed_actions",
+        "creation_proof",
+        "observed_at",
+        "reference"
+      ],
+      "properties": {
+        "provider": { "const": "github" },
+        "repository_slug": { "$ref": "#/$defs/repository_slug" },
+        "number": { "type": "integer", "minimum": 1 },
+        "url": { "type": "string", "format": "uri", "maxLength": 2048 },
+        "status": { "const": "open" },
+        "merged": { "type": "boolean" },
+        "draft": { "type": "boolean" },
+        "head_branch": { "$ref": "#/$defs/branch_name" },
+        "head_sha": { "$ref": "#/$defs/git_sha" },
+        "base_branch": { "$ref": "#/$defs/branch_name" },
+        "review_state": {
+          "enum": ["awaiting_review", "changes_requested", "approved"]
+        },
+        "ci_status": {
+          "enum": ["pending", "passed", "failed", "not_configured"]
+        },
+        "github_actor_login": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$"
+        },
+        "approved_plan_sha256": { "$ref": "#/$defs/sha256" },
+        "baseline_event_id": { "$ref": "#/$defs/identifier" },
+        "git_readback_event_id": { "$ref": "#/$defs/identifier" },
+        "attributed_actions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "const": "github_pr_create_or_update" }
+        },
+        "creation_proof": { "type": "boolean" },
+        "observed_at": { "$ref": "#/$defs/date_time" },
+        "reference": { "$ref": "#/$defs/reference" }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "command_sha256",
+        "evidence_reference",
+        "exit_code",
+        "duration_seconds",
+        "stdout_sha256",
+        "stderr_sha256",
+        "output_summary",
+        "head_sha"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "status": { "enum": ["passed", "failed", "blocked"] },
+        "command_sha256": {
+          "allOf": [
+            { "$ref": "#/$defs/sha256" },
+            {
+              "description": "授权清单中 command、working_directory 和 timeout_seconds 的 canonical JSON SHA-256；只能由 Runtime 精确执行。"
+            }
+          ]
+        },
+        "evidence_reference": { "$ref": "#/$defs/reference" },
+        "exit_code": { "type": "integer" },
+        "duration_seconds": { "type": "number", "minimum": 0 },
+        "stdout_sha256": { "$ref": "#/$defs/sha256" },
+        "stderr_sha256": { "$ref": "#/$defs/sha256" },
+        "output_summary": { "$ref": "#/$defs/non_empty_string" },
+        "head_sha": { "$ref": "#/$defs/git_sha" }
+      }
+    },
+    "waiting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "started_at", "ended_at", "duration_seconds"],
+      "properties": {
+        "reason": { "$ref": "#/$defs/non_empty_string" },
+        "started_at": { "$ref": "#/$defs/date_time" },
+        "ended_at": { "$ref": "#/$defs/date_time" },
+        "duration_seconds": { "type": "number", "minimum": 0 }
+      }
+    },
+    "human_intervention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "action", "impact_seconds"],
+      "properties": {
+        "reason": { "$ref": "#/$defs/non_empty_string" },
+        "action": { "$ref": "#/$defs/non_empty_string" },
+        "impact_seconds": { "type": "number", "minimum": 0 }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "detail", "retry_safe"],
+      "properties": {
+        "code": { "$ref": "#/$defs/identifier" },
+        "retry_safe": { "type": "boolean" },
+        "detail": { "$ref": "#/$defs/non_empty_string" }
+      }
+    },
+    "retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["failure_event_id", "attempt", "outcome"],
+      "properties": {
+        "failure_event_id": { "$ref": "#/$defs/identifier" },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "outcome": { "enum": ["succeeded", "failed", "blocked"] }
+      }
+    },
+    "quality_finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "detail",
+        "evidence_reference",
+        "impact",
+        "root_cause_hypothesis",
+        "reproduction",
+        "sanitized_example",
+        "improvement_candidate",
+        "suggested_asset",
+        "benefit",
+        "risk",
+        "frequency"
+      ],
+      "properties": {
+        "category": {
+          "enum": [
+            "automation_gap",
+            "manual_friction",
+            "output_quality",
+            "unreasonable_process"
+          ]
+        },
+        "detail": { "$ref": "#/$defs/non_empty_string" },
+        "evidence_reference": { "$ref": "#/$defs/reference" },
+        "impact": { "$ref": "#/$defs/non_empty_string" },
+        "root_cause_hypothesis": { "$ref": "#/$defs/non_empty_string" },
+        "reproduction": { "$ref": "#/$defs/non_empty_string" },
+        "sanitized_example": { "$ref": "#/$defs/non_empty_string" },
+        "improvement_candidate": { "$ref": "#/$defs/non_empty_string" },
+        "suggested_asset": {
+          "enum": ["skill", "python_runtime", "rule", "template", "profile", "test"]
+        },
+        "benefit": { "$ref": "#/$defs/non_empty_string" },
+        "risk": { "$ref": "#/$defs/non_empty_string" },
+        "frequency": { "$ref": "#/$defs/non_empty_string" }
+      }
+    },
+    "retrospective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewed_categories",
+        "category_reviews",
+        "quality_finding_event_ids",
+        "human_intervention_event_ids",
+        "failure_event_ids",
+        "retry_event_ids",
+        "waiting_event_ids",
+        "ordered_improvement_event_ids",
+        "residual_risks",
+        "summary"
+      ],
+      "properties": {
+        "reviewed_categories": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "automation_gap",
+              "manual_friction",
+              "output_quality",
+              "unreasonable_process"
+            ]
+          }
+        },
+        "category_reviews": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/retrospective_category_review" }
+        },
+        "quality_finding_event_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "human_intervention_event_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "failure_event_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "retry_event_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "waiting_event_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "ordered_improvement_event_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "residual_risks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/non_empty_string" }
+        },
+        "summary": { "$ref": "#/$defs/non_empty_string" }
+      }
+    },
+    "retrospective_category_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "outcome",
+        "rationale",
+        "evidence_references",
+        "source_event_ids"
+      ],
+      "properties": {
+        "category": {
+          "enum": [
+            "automation_gap",
+            "manual_friction",
+            "output_quality",
+            "unreasonable_process"
+          ]
+        },
+        "outcome": { "enum": ["finding", "no_finding"] },
+        "rationale": { "$ref": "#/$defs/non_empty_string" },
+        "evidence_references": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/reference" }
+        },
+        "source_event_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "description": "直接支撑本分类结论的审计事件；每条 failure、retry、human_intervention、waiting 必须出现在至少一个 finding 分类中。",
+          "items": { "$ref": "#/$defs/identifier" }
+        }
+      }
+    },
+    "prohibition_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action", "observed", "evidence_reference"],
+      "properties": {
+        "action": {
+          "enum": [
+            "merge_pr",
+            "jira_done",
+            "release",
+            "create_tag",
+            "push_protected_branch"
+          ]
+        },
+        "observed": {
+          "oneOf": [
+            { "type": "boolean" },
+            { "const": "not_verified" }
+          ],
+          "description": "非交付结果可在尚未到达对应外部系统时记录 not_verified；ready_for_pr_review 必须是 Runtime 实时核验后的 boolean。"
+        },
+        "evidence_reference": { "$ref": "#/$defs/reference" }
+      }
+    }
+  }
+}

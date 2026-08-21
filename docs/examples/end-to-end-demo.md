@@ -1,215 +1,144 @@
-# 端到端演示脚本
+# AgenticOps 真实任务到 PR 全链路测试
 
-## 1. 目的
+## 1. 可验证交付目标
 
-本文定义 AgenticOps 第一阶段端到端演示脚本。演示主线必须使用真实 Jira 卡片，展示研发工程师如何在真实任务上完成受控接管、开发、验证和证据回写。本地模拟流程只作为自动化回归验证，不作为对外演示主线。
+输入一个经确认的真实 Jira 编号，由业务项目工作空间代表的研发员使用真实 Jira、业务仓库、Git 和 GitHub 完成任务实现，并交付一个可审查的真实 PR 与完整结果包。
 
-## 2. 演示目标
+正式链路的终点固定为 **PR 审查**。测试不执行 merge、不把 Jira 置为 Done、不发布、不创建 tag、不直推保护分支。`offline_fake` 只做离线合同回归，不能代替正式全链路验收。
 
-演示研发工程师如何使用 AIAgent 完成一个受控缺陷任务接管：
+## 2. 两个工作面的职责
 
-```text
-安装
--> 初始化工作空间
--> 初始化 AIAgent 能力
--> 准入分析与 Jira 补卡
--> 重新检查并接管任务
--> 修复计划写入 Jira 并确认
--> 本地开发和验证
--> 结构化结论和证据回写
--> 等待人工确认拉取请求
--> 上报工作日志
-```
+| 工作面 | AI 入口 | 职责 | 禁止事项 |
+| --- | --- | --- | --- |
+| `maintainer` | 根入口、`ao-maint` 与 `$test-task-to-pr-e2e` | 无副作用能力预检；创建隔离 developer 工作空间；启动相互隔离的 developer/reviewer AI；只读验收结果包 | 不在 maintainer 上下文中执行 Jira/业务 Git/GitHub 写入，不修改业务代码，不把子进程状态继承回源头工作面 |
+| `developer` | 业务工作空间入口与 `ao-work` | 执行真实任务、验证、提交、推送、新建 PR，生成审计与复盘 | 不加载维护规则，不修改 AgenticOps 源码，不 merge/Done/release/tag |
 
-## 3. 演示场景
+两个工作面只通过显式 manifest 和脱敏结果包交接，不能共享 Python import、凭据、状态目录或聊天中的隐含信息。
 
-演示任务必须来自真实 Jira 缺陷卡片，例如 `TAP-123`。演示前可以使用脱敏标题和描述，但卡片本身必须存在于真实 Jira 空间。为了展示准入闭环，首次检查时应至少有一项缺陷准入信息不足。
+## 3. 一次性配置与每任务输入
 
-示例卡片标题：
-
-```text
-任务启动后重复输出同一告警
-```
-
-该标题只作为演示故事，不应成为 AgenticOps 架构边界。
-
-## 4. 前置条件
-
-演示前应准备：
-
-- 一个真实 Jira 卡片，可以脱敏展示。
-- 明确负责人。
-- 能通过 Jira 事实或 Tapdata 仓库映射定位候选目标仓库。
-- 一个本地 Tapdata 项目 AI 工作空间。
-- 当前执行目录已经进入项目 AI 工作空间。
-- Jira 用户、Jira 空间和该 Jira 空间对应的代码仓库映射已明确。
-
-## 5. 脚本流程
-
-### 步骤 1：全局安装
+真实全链路首次使用时，maintainer 先创建一次性非敏感配置：
 
 ```sh
-gh auth status
-gh api -H 'Accept: application/vnd.github.raw' \
-  '/repos/tapstate/agentic-ops/contents/scripts/install.sh?ref=main' \
-  | AGENTIC_OPS_REPO_URL='git@github.com:tapstate/agentic-ops.git' bash
+./maintainer/bin/ao-maint integration prepare-task-to-pr-e2e-config \
+  --agent-id harsen-mini-test-bot \
+  --project-profile tapdata \
+  --expected-confirmer harsen
 ```
 
-期望说明：
+该配置只保存测试研发员身份、Project Profile 和预期确认人，不保存 token，也不是任务授权。运行入口不得从 hostname、系统用户、Git/GitHub 身份、历史聊天或其它本机状态推断或覆盖这些值。变更配置必须走独立审查流程。
 
-- 安装到 `~/.agentic-ops`。
-- 该目录不是具体项目运行目录。
-- 安装动作是全局动作，不绑定具体 Jira 空间或代码仓库。
-- 安装入口通过 GitHub CLI 认证读取私有仓库脚本，不依赖匿名 raw URL。
-- 已安装时，脚本会要求研发工程师确认后才更新 `~/.agentic-ops`。
-- 安装脚本使用 `install-resources/<os-arch>/agentic-cli` 中已经编译并提交到仓库的产物，不在研发工程师机器上编译。
+正式 manifest 是机器审计合同，不是用户配置表。字段按以下来源解析：
 
-### 步骤 2：初始化工作空间
+- 一次性工作空间配置：developer 工作空间、`agent_id`、Project Profile、Jira 账户、业务源码和执行身份；
+- Project Profile：Jira HTTPS 站点、Project、状态/字段映射、默认仓库和项目策略；
+- Jira 卡片：Issue ID、经办人、状态、标题、描述和已配置业务字段；
+- Runtime：唯一 `agentic_run_id`、canonical Jira 内容摘要、时间、manifest 摘要和证据路径；
+- AI 提议、人工审查：计划、包含/排除范围、任务分支、验证 argv 和本次外部动作权限。
+
+普通研发使用由 `ao-work workspace init` 初始化现有业务工作空间。本文的真实 E2E 测试则由 maintainer Skill 创建全新的隔离工作空间，不要求用户预先初始化；用户只在测试启动时确认真实副作用范围并隐藏输入凭证，结束后审查 PR、结果包和复盘。
+
+之后每次真实测试只指定 Jira key：
 
 ```sh
-cd <project-ai-workspace>
-agentic-cli workspace init --project tapdata --interactive
+$test-task-to-pr-e2e TAP-12289
 ```
 
-期望说明：
-
-- `workspace init` 在项目 AI 工作空间目录内执行。
-- 工作空间绑定 Jira 用户和项目配置项。
-- 工作空间从项目配置项读取 Jira 空间、GitHub 仓库和本地源码目录。
-- 工作空间创建 `.agentic-ops/runs`、`.agentic-ops/run-logs` 和 `.agentic-ops/feedback`。
-
-### 步骤 3：按全局指引启用 AgenticOps
-
-```text
-按 ~/.agentic-ops/agent-guides.md 启用 AgenticOps。
-```
-
-期望说明：
-
-- AIAgent 先读取 `~/.agentic-ops/agent-guides.md`。
-- AIAgent 加载 AI 员工手册。
-- AIAgent 加载 操作契约。
-- AIAgent 说明人工确认点。
-
-### 步骤 4：首次准入检查
-
-```text
-接管 TAP-123。
-```
-
-期望说明：
-
-- AIAgent 先执行 `inspect-task`，不直接调用 `takeover-task`。
-- AIAgent 一次性列出全部缺失或冲突项，并结合候选仓库和目标分支代码形成准入分析。
-- 研发工程师确认真实写入后，AIAgent 使用 `add-task-comment --category analysis` 写入 Jira。
-- 写入后 AIAgent 结束本次接管，不自动绑定任务。
-
-### 步骤 5：补卡确认
-
-```text
-我确认补卡建议，请更新 Jira。
-```
-
-期望说明：
-
-- AIAgent 使用 `update-task-description-sections` 更新问题分支、修复分支、问题现象、复现路径和验收标准。
-- AIAgent 使用 `add-task-comment --category decision` 记录确认结果。
-- AIAgent 再次结束本次接管。
-
-### 步骤 6：重新检查并接管
-
-```text
-重新接管 TAP-123。
-```
-
-期望说明：
-
-- AIAgent 重新执行 `inspect-task`，不复用补卡前的判断。
-- 准入通过后，AIAgent 执行 `takeover-task` 并获得 `agentic_run_id`。
-- CLI 只执行负责人、代理所有权、任务分类、标准流程、状态入口和真实 Jira 写入门禁。
-
-### 步骤 7：修复计划确认
-
-期望说明：
-
-- AIAgent 结合 Jira 和代码形成版本化修复计划。
-- 计划包含根因与证据、修改和不修改范围、目标模块或文件、实施步骤、测试与验收映射、风险与回滚。
-- AIAgent 使用 `add-task-comment --category plan --run-id <agentic_run_id>` 写入 Jira，然后停止代码修改。
-- 研发工程师确认后，AIAgent 使用 `add-task-comment --category decision` 写入确认结果。
-
-### 步骤 8：开发与验证
-
-```text
-请按计划修改并运行最小验证。
-```
-
-期望说明：
-
-- AIAgent 只修改当前卡片范围内内容。
-- AIAgent 记录测试结果。
-- 尚未取得工作项级连续执行授权时，AIAgent 不推送或创建拉取请求；授权生效后连续推进到拉取请求审查。
-
-### 步骤 9：写入结构化结论和证据
-
-```text
-回写本次开发证据。
-```
-
-期望说明：
-
-- AIAgent 使用 `update-task-form` 更新问题分析、修复详情和测试计划。
-- AIAgent 使用 `add-task-comment --category evidence` 写入变更摘要、验证结果、验收映射、残留风险和下一步。
-
-### 步骤 10：研发工程师确认
-
-```text
-我确认本地结果，可以准备 PR。
-```
-
-期望说明：
-
-- AIAgent 可以进入 `prepare_pr` 操作。
-- 未确认前不得推送或创建拉取请求。
-
-### 步骤 11：任务审计与按需反馈分析
-
-```text
-提交 TAP-123 本次执行的任务审计记录。
-按需分析 tapstate 工作空间最近的 AI 执行记录，并给出 AgenticOps 改进建议。
-```
-
-期望说明：
-
-- 任务级审计记录回写 Jira 卡片、审计服务或目标仓库证据链。
-- 需要时生成反馈分析报告。
-- 生成改进建议。
-- 不自动修改 AgenticOps 源头规则。
-
-## 6. 演示验收
-
-演示成功标准：
-
-- 能解释 `~/.agentic-ops` 和项目 AI 工作空间的区别。
-- 能解释 AIAgent 为什么不直接面对 Jira 工作流。
-- 能展示任务接管门禁。
-- 能展示准入失败后的代码分析、Jira 补卡评论和重新检查。
-- 能展示修复计划与研发工程师确认都写入 Jira，且确认前没有代码修改。
-- 能展示 `agentic_run_id` 和证据。
-- 能展示人工确认点。
-- 能展示反馈报告的输入和输出。
-
-第一阶段本地模拟流程验证命令：
+Skill 在创建工作空间或访问 Jira 前先执行：
 
 ```sh
-bash tests/e2e/local-fake-flow.sh
+./maintainer/bin/ao-maint integration preflight-task-to-pr-e2e TAP-12289
 ```
 
-该命令使用模拟 Jira 数据跑通本地 CLI 闭环，不执行真实 Jira 或 GitHub 写操作；它是自动化回归验证，不替代真实 Jira 卡片演示。
+当前 `takeover_task`、`task_intake_assess`、`solution_gate`、`git_commit`、`git_push_task_branch` 与 `github_pr_create` 均已进入 `ao-work` 能力目录。预检在任何外部访问前核对当前安装版本、manifest 与授权；目录缺失、版本漂移或任一所有权/保护分支/写后回读条件不满足时失败关闭，不能由 AI 直接运行等价命令绕过。
 
-第一阶段本地安装闭环验证命令：
+AgenticOps source/ref 只用于确认 `ao-maint` / `ao-work` 来自预期安装版本，是正式测试的安装前提，不是 task-to-PR manifest 字段，也不构成业务任务授权。
+
+当前尚未完成 Jira 授权，所以 maintainer 准备阶段必须停在后台 manifest 骨架和简化配置指引：不得读取业务工作空间、`.env`、进程凭据、`~/.agentic-ops` 或相邻文件；不得运行 `ao-work auth --show`、`probe-jira`、`probe-jira-write` 或其它外部 probe；不得访问 `TAP-12289` 或声称 Jira 身份、issue 内容与权限已验证。准备结果必须明确 `host_state_read=false`、`business_workspace_read=false` 和 `credentials_read=false`。
+
+maintainer Skill 在隔离工作空间中完成隐藏授权并明确允许读取当前任务后，developer 的任务入口只有一个 Jira key：
 
 ```sh
-bash tests/e2e/local-install-flow.sh
+ao-work takeover TAP-12289
 ```
 
-该命令会准备临时 managed clone，通过 `scripts/install.sh` 安装到临时 `~/.agentic-ops`，再使用安装后的 `agentic-cli` 完成工作空间初始化、AIAgent 配置生成、AIAgent 初始化和预检。
+Runtime 根据用户明确的“接管任务”指令和当前 run 在内部绑定稳定授权摘要。该入口自动解析 Jira/工作空间/Profile/Runtime 确定性字段，完成新接管、接纳存量或恢复并生成或复用本地 run；非新接管明文留痕。AI 随后分析缺项，从 Jira、Profile、业务源码和 Runtime 回读中做带来源的自动补全，再直接形成方案。L1 进入设计审查，L2 进入逐项风险决策，L3 由 AI 修订设计并重新分析，L4 停止升级。每个环节只消费 Runtime 基于实际结果返回的结构化 `agentic_next_action`。
+
+现役准入与方案门禁依次调用：
+
+```sh
+ao-work task intake assess --issue-key TAP-12289 --agentic-run-id <RUN> --input-file <准入分析.json>
+ao-work task solution classify --issue-key TAP-12289 --agentic-run-id <RUN> --input-file <方案.json>
+```
+
+不得增加准入摘要确认、通用方案摘要确认或内部 digest 确认。Jira/Profile 快照、源码 HEAD、证据、范围、风险或方案变化后，Runtime 会拒绝沿用旧分析与旧设计审查。
+
+从接管到 PR 审查由全链路配置指定的同一 `task_owner` 完成。`agentic_next_action.executor` 只是当前步骤执行者，不是转派；现役 `ownership_effect` 只能为 `none`。人工确认和独立 reviewer 不改变负责人。转派只保留 `task_transfer=capability_gap` 的停止口，必须由人决定，详细设计后续单独推进。
+
+token、私钥和原始敏感响应不得写入 manifest、命令行、日志或结果包。清单确认后有任何变化，都必须重新展示摘要并确认。
+
+## 4. 原子能力闭合后的正式执行
+
+在 manifest 指定的业务项目工作空间进入 developer AI 入口，调用 `$run-task-to-pr-test`：
+
+1. 校验工作面、manifest 摘要、工作空间初始化、Jira 授权、业务源码和 GitHub 权限。
+2. 查询能力目录；只调用 `implemented` 的 `ao-work` 操作。能力缺口按 `next_action` 转人工或使用项目认可工具，不能假装 Runtime 已执行。
+3. 读取真实 Jira 并核对 Issue ID、Project、经办人、状态、范围与所有权。
+4. 建立 `agentic_run_id`，输出并确认任务计划、验证方式、风险和非范围。
+5. 在任何写入前记录干净任务分支基线：本地 HEAD 必须等于既有远端任务分支 SHA；远端任务分支不存在时，必须等于远端目标分支 SHA。随后才修改真实业务代码，并持续保留 AI 判断、人工干预、失败与重试记录。
+6. 执行项目验证；Runtime 在子进程前校验命令白名单，并以隔离 HOME、最小 PATH、无业务凭据和 offline/no-index 环境运行。该环境会抑制常见联网路径，但不是内核网络沙箱，结果必须如实标记 `network_policy=allowlist-only-no-sandbox`；范围扩大、验证受阻、需新增命令入口或出现专业取舍时停止。
+7. 按项目规则提交和推送任务分支，回读远端 SHA，并受控回写 Jira 中文变更总结和真实 Worklog。Comment/Worklog 的 `created=true` 必须同时证明首次计划时 marker 缺失、create 请求前已持久化当前 run 的不可变 attempt，以及同一 attempt 的写后回读；no-op 或缺少 attempt 时不得归因为本 run 写入。
+8. 创建真实 PR，回读 PR URL、Head SHA、CI 和审查事实。当前动作归因只支持写前无 open PR 的 create-only proof；若写前已有 PR，因无法可靠证明本轮 update 必须停止并记录能力缺口。
+9. 停在 PR 审查，生成结果包；不继续 merge、Done、release 或 tag。
+
+真实外部写入都要经过与当前内容绑定的门禁，并在写后回读。结果不明确时只允许回读，不能盲目重试。
+
+## 5. 结果包与完整复盘
+
+developer 必须从原始执行记录生成脱敏结果包。除交付证据外，必须真实记录测试中所有摩擦，而不是只写成功摘要：
+
+- Jira、仓库、分支、提交、远端 SHA、PR URL、Head SHA、CI 与授权引用；
+- 修改范围、验证结果、残留风险和当前 PR 审查状态；
+- 自动化无法完成、需要人工干预、重复操作、失败重试和等待点；
+- 输出质量不高、信息不足、流程不合理或容易误用的环节；
+- Skill、Runtime、Shell、项目工具、AI 判断与人工动作各自承担了什么；
+- 每个问题的证据、影响、根因假设、可复现条件、处理方式和耗时影响；
+- 可固化的优化候选，建议落点为 Skill、Python Runtime、Rule、模板、Profile 或固定测试，并标注收益、风险和复现频率。
+
+maintainer 使用显式输入只读验收这份结果包，不改写 developer 原始审计，也不进入 manifest 声明的业务工作空间：
+
+```sh
+./maintainer/bin/ao-maint integration accept-task-to-pr TAP-12289 \
+  --manifest <manifest.json> \
+  --result <result.json>
+```
+
+优化候选必须经过人工筛选，再进入独立 AgenticOps 维护任务；测试本身不直接修改共享标准。
+
+## 6. 验收结论
+
+只有以下事实同时成立且由 developer Runtime 的实时 probe 采集、在结果包中形成完整 hash chain，协议级全链路交付才通过：
+
+- 输入和授权完整且内容摘要匹配；
+- Jira 账户/经办人/状态映射、Git origin/基线/HEAD/变更范围、GitHub PR/CI 均由 Runtime 回读并与 manifest 绑定；
+- manifest 指定验证通过；
+- 任务分支已推送，真实 PR 已创建并停在审查；Git/PR 动作只给出写前基线至后置回读的可验证归因区间，不声称精确动作时刻；
+- 没有 merge、Jira Done、release、tag 或保护分支直推；
+- developer 原始审计、完整摩擦复盘和优化候选齐全且已脱敏。
+
+`accept-task-to-pr` 严格验证字段闭合、canonical digest、事件 hash chain、逐事件授权、`runtime + runtime_probe` 来源、Jira/Git/PR/验证绑定、CI 策略、五项禁止动作、等待点和四类完整复盘。只有可信结果状态为 `ready_for_pr_review` 时输出 `delivery_passed=true`；`blocked` / `failed` 的完整结果包仍只表示“结果包可验收”，不表示交付通过。
+
+验收输出的证据基础是 `developer_runtime_probe_result_package`。maintainer 本身不访问 Jira、Git 或 GitHub，因此同时明确 `independent_external_readback=false`、`cryptographic_remote_attestation=false`；这是对 developer Runtime 实时证据链的协议验收，不得表述为 maintainer 独立外部回读或密码学远程证明。若 Jira probe 未找到当前 run 的受管接管 Comment，可以交付到 PR 审查，但必须报告 `formal_takeover_verified=false`，并以绑定 Jira probe 的 `automation_gap` 和残留风险说明不能声称正式接管。
+
+`blocked` 或 `failed` 结果包在摘要、审计和复盘完整时可以显示 `package_status=accepted`；这只说明结果包可验收，不表示任务交付通过。任一事实缺失时，结论只能是阻塞或未通过，不能把本地代码修改、离线 fixture、结果包自报状态或 PR 准备状态表述为正式全链路完成。
+
+## 7. 离线合同回归
+
+先生成并人工确认离线清单，再运行离线回归：
+
+```sh
+./maintainer/bin/ao-maint integration prepare-offline TAP-12289
+./maintainer/bin/ao-maint integration run-offline TAP-12289 --manifest <offline-manifest.json>
+```
+
+`offline_fake` adapter 只验证隔离 Bootstrap、工作空间初始化、合成任务状态、固定验证与 Fake Jira 评论回读，输出固定为 `offline_fixture_completed`。它不访问 `TAP-12289` 的真实 Jira 卡片，不验证真实业务修改、推送、PR、CI 或审查，也不产生正式验收结论。不存在含混的 `integration prepare` / `integration run` 兼容入口。

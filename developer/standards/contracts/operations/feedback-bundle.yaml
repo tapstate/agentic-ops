@@ -1,0 +1,57 @@
+operation: feedback_bundle
+workplane: developer
+version: 1
+purpose: 为指定 `agentic_run_id` 生成脱敏诊断包，供维护者定位失败、阻塞和环境问题；它可以补充任务审计，但不能替代 Jira、审计服务或目标仓库上的任务级审计提交。
+task_type: diagnosis
+allowed_stages:
+  - failed
+  - blocked
+  - completed
+  - diagnosis
+required_inputs:
+  - workspace
+  - agentic_run_id
+optional_inputs:
+  - redact
+input:
+  workspace:
+    type: string
+    required: true
+  agentic_run_id:
+    type: string
+    required: true
+  redact:
+    type: boolean
+    required: false
+preconditions:
+  - workspace_feedback_log_must_exist
+  - secrets_must_be_redacted_when_requested
+output:
+  workspace:
+    type: string
+  agentic_run_id:
+    type: string
+  bundle:
+    type: string
+  redacted:
+    type: boolean
+  agentic_next_action:
+    type: string
+failure:
+  codes:
+    - missing_agentic_run_id
+    - workspace_root_failed
+    - event_read_failed
+    - bundle_write_failed
+side_effects:
+  - may_write_local_diagnostic_bundle
+  - must_not_write_jira
+  - must_not_replace_task_audit_submission
+  - must_not_modify_code
+human_gate:
+  required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: diagnosis
+redo_from_stage: diagnosis

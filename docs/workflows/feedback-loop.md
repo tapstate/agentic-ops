@@ -9,14 +9,14 @@
 ## 2. 流程
 
 ```text
-Go CLI 执行操作
+Python Runtime 执行操作
 -> 产生结构化事件日志
 -> 到达完成、阻塞或交接节点
 -> AIAgent 将任务级审计记录写入本地 Jira 编号目录，并回写 Jira 关键结论和稳定引用
 -> 研发工程师或流程负责人审查任务审计记录
 -> 维护者按需按 `agentic_run_id`、任务类型、失败码、时间范围或 `workspace` 聚合分析
 -> AIAgent 生成 AgenticOps 改进建议
--> 人确认后更新 AgenticOps 规则 / 手册 / contracts / Go CLI
+-> 人确认后更新 AgenticOps Skill / Rule / 标准资产 / Python Runtime
 ```
 
 反馈闭环不只记录失败，也负责发现可固化经验。AIAgent 在具体环节中形成的有效处理方式，必须先以安全摘要进入事件、任务审计记录或反馈建议；只有重复出现、边界清晰、输入输出稳定后，才能建议升级为原子操作、运行手册、工作流配置、策略或模板。
@@ -63,7 +63,7 @@ Go CLI 执行操作
   "agentic_run_id": "TAP-123-takeover-20260721103012-a8f3",
   "issue_key": "TAP-123",
   "assignee": "dev@example.com",
-  "agentic_id": "agent-local-7f31a2b",
+  "takeover_comment_id": "12345",
   "task_type": "task_takeover",
   "task_class": "bug_fix",
   "process_id": "development_change_v1",
@@ -79,7 +79,8 @@ Go CLI 执行操作
   "review_decision": null,
   "retryable": false,
   "redo_from_stage": "takeover_gate",
-  "agentic_id_cleared": false,
+  "terminal_comment_id": null,
+  "local_run_closed": false,
   "audit_target": "jira_issue",
   "audit_submitted": false,
   "audit_reference": null,
@@ -114,22 +115,22 @@ Go CLI 执行操作
 - 验证命令和结果
 - 专业审查结论、重试依据或重做起点
 - 完成证据引用
-- `agentic_id` 是否已清理
+- 接管 Comment 是否存在、终态 Comment 是否已回读、本地 run 是否已收口
 - 残留风险和需要人工处理的动作
 
 任务审计记录不得包含原始敏感日志。需要诊断时，应生成脱敏 `feedback bundle`，再由维护者判断是否提交到审计服务。
 
 ## 6. 反馈命令
 
+以下是目标命令合同；当前是否可调用必须先查询能力目录。AO-11 阶段聚合反馈与 maintainer `feedback report|analyze|propose` 均为 `capability_gap`，不能模拟命令成功。现役触发材料是 developer Runtime 通过 `ao-work task-run finalize` 生成的 `task_to_pr_review` 脱敏结果包：包内 retrospective 必须逐项覆盖四类质量结论并完整引用 finding、人工介入、失败、重试与等待；公司员工指导员显式选择该包并交接到独立 maintainer 工作面后，当前只能人工整理 observation/proposal。maintainer 不自动扫描业务工作空间，也不继承其授权或配置。
+
 第一阶段建议操作：
 
 ```sh
-agentic-cli write-evidence --workspace tapstate --run-id <agentic_run_id>
-agentic-cli release-agent --workspace tapstate --run-id <agentic_run_id> --issue-key TAP-123 --completion-evidence evidence.md
-agentic-cli feedback bundle --workspace tapstate --run-id <agentic_run_id> --redact
-agentic-cli feedback report --workspace tapstate --date 2026-07-21
-agentic-cli feedback analyze --workspace tapstate --date 2026-07-21
-agentic-cli feedback propose --workspace tapstate --date 2026-07-21
+ao-work capability show write_evidence
+ao-work capability show release_agent
+ao-work capability show feedback_bundle
+./maintainer/bin/ao-maint --help
 ```
 
 `feedback report` 是按需分析报告，不是每天必须生成的工作日志。第一阶段仍保留 `--date` 作为兼容过滤和报告命名参数；后续可扩展为 `--from`、`--to`、`--run-id`、`--issue-key`、`--task-type` 或 `--code`。
@@ -147,8 +148,8 @@ agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 - 专业审查退回。
 - 重试次数和失败后仍未解决的节点。
 - 重做来源阶段。
-- 所有权冲突、`assignee` 变更和代理绑定丢失。
-- 任务完成后未清理 `agentic_id` 的记录。
+- 所有权冲突、`Assignee` 变更、接管 Comment 缺失和本地运行归属冲突。
+- 任务完成后终态 Comment 未确认或本地 run 未收口的记录。
 - 重复问题。
 - 可复用经验。
 - 候选原子操作。
@@ -160,7 +161,7 @@ agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 - 审计服务不可用时，不能阻断本地证据落盘，但必须记录服务不可用事件和后续补交动作。
 - 目标仓库证据写入失败时，不得继续执行推送、拉取请求或完成清理。
 - 发现敏感内容时，必须停止外部提交，生成脱敏版本或请求人工判断。
-- 完成或交接后如果 `agentic_id` 清理失败，任务不能视为已完成审计。
+- 完成或交接后如果终态 Comment 未回读确认或本地 run 未收口，任务不能视为已完成审计。
 
 ## 9. 变更门禁
 
@@ -170,4 +171,4 @@ agentic-cli feedback propose --workspace tapstate --date 2026-07-21
 Observation -> Proposal -> Accepted Change
 ```
 
-AIAgent 可以生成 proposal，但不得未经人工确认直接修改项目规则、AI 员工手册、操作契约、工作流配置或 CLI 运行时。
+AIAgent 可以生成 proposal，但不得未经人工确认直接修改 Skill、Rule、项目规则、AI 员工手册、操作契约、工作流配置或 Python Runtime。

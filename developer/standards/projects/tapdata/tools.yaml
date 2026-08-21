@@ -1,0 +1,8 @@
+project: tapdata
+workplane: developer
+tools:
+  branch-align:
+    script: scripts/tap_align_branches.py
+    contract: tools/branch-align.yaml
+    summary: TapData 多仓分支对齐项目脚本，按 development-rules.md 分支规则计算或执行分支切换。
+    required_human_action: 先以 plan 模式生成只读对齐清单，由研发工程师确认后再 apply；apply 会 stash 脏仓库并切换分支，任一失败必须停止，不得跨仓继续。

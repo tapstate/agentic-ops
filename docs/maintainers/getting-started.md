@@ -7,12 +7,12 @@
 开始工作前先读：
 
 1. [README](../../README.md)：了解 AgenticOps 定位、核心模型和角色入口。
-2. [当前设计](../architecture/agenticops-current-design.md)：确认长期架构和事实源边界。
+2. [项目结构](../architecture/project-structure.md)：确认两个工作面和 AI 入口硬隔离。
 3. [项目规则](../project-rules.md)：确认文档、运行资产、提交和安全边界。
 4. [配置规范](../configuration-standards.md)：确认配置分类、密钥落点、统一读取入口和变更审查要求。
 5. [源码发布流程](../architecture/source-release-workflow-design.md)：确认 `develop`、`main`、Tag 和 Hotfix 规则。
 6. [发布检查清单](../review-checklist.md)：确认完整验证和人工门禁。
-7. [项目结构](../architecture/project-structure.md)：确认目录职责。
+7. [历史实现记录（冻结）](../architecture/agenticops-current-design.md)：只在追溯已删除实现时阅读，不作为现役操作说明。
 
 ## 初始化本地项目
 
@@ -20,30 +20,62 @@
 
 ```sh
 git status --short
-go test ./...
-bash scripts/test-install.sh
-bash tests/e2e/local-fake-flow.sh
+uv sync --locked --project maintainer
+./maintainer/bin/ao-maint --help
+bash maintainer/scripts/test-python-runtime.sh
 ```
 
-如果只是修改文档，至少检查工作区状态、目标文档链接和常见占位词。修改运行代码时，必须执行对应 Go 测试、脚本测试或端到端流程。
+维护入口和固定测试只使用 `maintainer/.venv`，不会回退根目录或系统 Python。
+
+根 `AGENTS.md` 是固定 maintainer AI 入口，并继续加载 `maintainer/AGENTS.md`。不要在源头仓库调用 `ao-work`，不要读取业务项目凭证或把业务仓库规则带入维护 worktree。
+
+## 初始化 maintainer Jira 配置
+
+维护者需要与 Jira AO 任务交互（读取任务、回写进度评论和 Worklog）时，先初始化维护工作面的 Jira 配置：
+
+```sh
+bash maintainer/bin/init-maintainer-config.sh
+```
+
+脚本会校验源头仓库身份（`.agentic-ops-source` 标记和固定官方 origin）、准备 `maintainer/.local/` 状态目录、校验 Connection 定义（`maintainer/standards/connections/`），并引导隐藏输入维护者 Jira 凭证写入 `maintainer/.local/.env`（权限 `0600`，已 gitignore，随 worktree 隔离）。之后即可使用 `ao-maint jira` 命令组：
+
+```sh
+./maintainer/bin/ao-maint jira auth show
+./maintainer/bin/ao-maint jira auth verify
+./maintainer/bin/ao-maint jira inspect --issue-key AO-11
+```
+
+`ao-maint jira` 与 developer 面的 `ao-work jira` 命令同名但独立实现，不读取业务项目工作空间凭证；建卡、评论、Worklog 和状态流转沿用 `plan -> apply -> readback` 协议并显式要求 `user-confirmation:<KEY>:<plan_id>` 确认引用。创建 Jira 子任务时必须使用 `jira create plan --issuetype 子任务 --parent <PARENT-KEY>`，Runtime 会回读父任务并校验项目、类型和写前事实；禁止通过通用 `--field` 猜测 `parent` 结构。
+
+`ao-maint` 的 Jira 任务操作硬限制为 AO 项目。非 AO 的 issue、project、父任务、计划文件或远端回读会在读取凭证和联网前返回 `maintainer_jira_project_scope_mismatch`；直接调用 Service 也会重复校验。`jira auth show|set|remove|verify` 只管理 maintainer 本地凭证并输出 `allowed_project_keys: ["AO"]`，认证成功不表示可以处理 TAP 等业务项目；这类任务必须在对应 developer 工作空间使用 `ao-work`。
+
+处理 AO 维护任务时，对外只使用接管入口：
+
+```sh
+./maintainer/bin/ao-maint takeover AO-45
+```
+
+Runtime 自动区分新接管、恢复、接纳存量和阻断。新接管会按固定顺序完成开始评论、流转“正在进行”和逐项回读；恢复或接纳存量会明文提示并留下审计。设计方案通过同一入口的 `--design-file` 绑定摘要，人工确认后用 `--confirm <DIGEST>` 建立工作项级连续执行授权。授权内的正常实现、验证和必要 Jira 回写连续推进；设计审查、提交前精确内容确认和风险决策是固定暂停点。根仓库及任何 AgenticOps worktree 都从版本化 maintainer 入口和 Rule 继承该规范，不依赖聊天上下文。
+
+如果只是修改文档，至少检查工作区状态、目标文档链接和术语一致性。修改运行代码时，必须执行对应 maintainer/developer 单元、边界、安装或端到端验证。
 
 ## 开始推进工作
 
 推荐顺序：
 
 1. 从 [文档索引](../README.md) 找到对应设计、规则或流程入口。
-2. 从 [实施计划](../../plans/) 确认当前阶段任务、已完成项和剩余差距。
-3. 修改源头文档、运行资产或 `agentic-cli` 实现。
+2. 从对应 Jira 工作项确认当前阶段、已完成项、阻塞和剩余工作。
+3. 在对应工作面修改源头文档、运行资产或 Python Runtime；跨工作面变更必须分别验证。
 4. 执行验证命令。
 5. 用聚焦提交记录一个逻辑变更。
 
-日常开发在 `develop` 分支进行。发布前先执行 `scripts/release.sh prepare --version vX.Y`，审查并提交生成资源，再执行 `scripts/release.sh publish --version vX.Y`。`main` 只能通过 PR 的 Merge commit 合入，不得直接提交或推送。紧急修复统一使用 `scripts/hotfix.sh`。
+日常开发在 `develop` 分支进行。发布前先执行 `maintainer/scripts/release.sh prepare --version vX.Y`，审查准备结果并提交待发布变更，再执行 `maintainer/scripts/release.sh publish --version vX.Y`。`main` 只能通过 PR 的 Merge commit 合入，不得直接提交或推送。紧急修复统一使用 `maintainer/scripts/hotfix.sh`。
 
 GitHub Free 私有仓库无法启用所需 Ruleset 与 Auto-merge 时，只能由发布者显式增加 `--allow-soft-gate`，脚本不会自动降级：
 
 ```sh
-scripts/release.sh prepare --version v0.3 --allow-soft-gate
-scripts/release.sh publish --version v0.3 --allow-soft-gate --confirm-release
+maintainer/scripts/release.sh prepare --version v0.3 --allow-soft-gate
+maintainer/scripts/release.sh publish --version v0.3 --allow-soft-gate --confirm-release
 ```
 
 普通发布会从已验证的 `develop` HEAD 创建固定 `release/vX.Y` 分支。首次 `publish` 创建 PR 后返回状态码 `2`，表示发布尚未完成；研发工程师必须在 GitHub 页面选择 Merge commit 人工合并，再重新执行输出中的同一条 `publish` 命令。第二次执行会对固定 HEAD 重新运行全部验证，确认 `main` 保留该提交历史后才推送 Tag。发布分支保留，不自动删除。

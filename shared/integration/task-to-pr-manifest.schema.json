@@ -1,0 +1,334 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-ops.local/schemas/shared/integration/task-to-pr-manifest.schema.json",
+  "title": "任务到 PR 审查授权清单",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "protocol",
+    "workspace",
+    "issue",
+    "jira",
+    "agent",
+    "task_binding",
+    "execution_identity",
+    "repository",
+    "scope",
+    "verification",
+    "pr_endpoint",
+    "permitted_external_actions",
+    "authorization"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "protocol": { "const": "task_to_pr_review" },
+    "workspace": { "$ref": "#/$defs/workspace" },
+    "issue": { "$ref": "#/$defs/issue" },
+    "jira": { "$ref": "#/$defs/jira" },
+    "agent": { "$ref": "#/$defs/agent" },
+    "task_binding": { "$ref": "#/$defs/task_binding" },
+    "execution_identity": { "$ref": "#/$defs/execution_identity" },
+    "repository": { "$ref": "#/$defs/repository" },
+    "scope": { "$ref": "#/$defs/scope" },
+    "verification": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/verification" }
+    },
+    "pr_endpoint": { "$ref": "#/$defs/pr_endpoint" },
+    "permitted_external_actions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "jira_read",
+          "jira_comment",
+          "jira_worklog",
+          "git_commit",
+          "git_remote_read",
+          "git_push_task_branch",
+          "github_pr_create_or_update",
+          "github_pr_read"
+        ]
+      }
+    },
+    "authorization": { "$ref": "#/$defs/authorization" }
+  },
+  "$defs": {
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "absolute_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?!/)(?![A-Za-z]:[\\\\/])(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root"],
+      "properties": {
+        "root": { "$ref": "#/$defs/absolute_path" }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "id", "project_key"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$"
+        },
+        "id": { "$ref": "#/$defs/non_empty_string" },
+        "project_key": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$"
+        }
+      }
+    },
+    "jira": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "base_url",
+        "account_id",
+        "assignee_account_id",
+        "status_mapping",
+        "allowed_status_categories"
+      ],
+      "properties": {
+        "base_url": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "account_id": { "$ref": "#/$defs/non_empty_string" },
+        "assignee_account_id": { "$ref": "#/$defs/non_empty_string" },
+        "status_mapping": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9A-Za-z][0-9A-Za-z._-]{0,127}$"
+          }
+        },
+        "allowed_status_categories": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "allOf": [
+              { "$ref": "#/$defs/non_empty_string" },
+              { "pattern": "^(?![Dd][Oo][Nn][Ee]$).+$" }
+            ]
+          }
+        }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "project_profile", "agentic_run_id"],
+      "properties": {
+        "agent_id": {
+          "type": "string",
+          "pattern": "^[0-9A-Za-z_-]+$",
+          "maxLength": 128
+        },
+        "project_profile": {
+          "type": "string",
+          "pattern": "^[0-9a-z][0-9a-z_-]*$",
+          "maxLength": 128
+        },
+        "agentic_run_id": {
+          "type": "string",
+          "pattern": "^[0-9A-Za-z][0-9A-Za-z._-]{0,127}$"
+        }
+      }
+    },
+    "task_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issue_content_sha256",
+        "approved_plan_file",
+        "approved_plan_sha256"
+      ],
+      "properties": {
+        "issue_content_sha256": { "$ref": "#/$defs/sha256" },
+        "approved_plan_file": {
+          "allOf": [
+            { "$ref": "#/$defs/relative_path" },
+            { "pattern": "^inputs/(?![.]|.*(?:^|/)[.])[^\\u0000]+$" }
+          ]
+        },
+        "approved_plan_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "execution_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "git_author_name",
+        "git_author_email",
+        "git_committer_name",
+        "git_committer_email",
+        "github_actor_login"
+      ],
+      "properties": {
+        "git_author_name": { "$ref": "#/$defs/non_empty_string" },
+        "git_author_email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 320,
+          "pattern": "^[^\\s@]+@[^\\s@]+$"
+        },
+        "git_committer_name": { "$ref": "#/$defs/non_empty_string" },
+        "git_committer_email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 320,
+          "pattern": "^[^\\s@]+@[^\\s@]+$"
+        },
+        "github_actor_login": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$"
+        }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "description": "Runtime 与验收器额外强制 base_branch == target_branch，使授权范围 diff 与真实 PR diff 共享同一基线。",
+      "additionalProperties": false,
+      "required": [
+        "root",
+        "slug",
+        "remote_name",
+        "base_branch",
+        "task_branch",
+        "target_branch",
+        "protected_branches"
+      ],
+      "properties": {
+        "root": { "$ref": "#/$defs/absolute_path" },
+        "slug": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+          "maxLength": 256
+        },
+        "remote_name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+          "maxLength": 128
+        },
+        "base_branch": { "$ref": "#/$defs/branch_name" },
+        "task_branch": { "$ref": "#/$defs/branch_name" },
+        "target_branch": { "$ref": "#/$defs/branch_name" },
+        "protected_branches": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/branch_name" }
+        }
+      }
+    },
+    "branch_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "pattern": "^(?![-/])(?!.*(?:\\.\\.|//|@\\{|[~^:?*\\[\\]\\\\]|\\s))(?!.*[/.]$).+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["included", "excluded"],
+      "properties": {
+        "included": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/relative_path" }
+        },
+        "excluded": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/relative_path" }
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "command", "working_directory", "timeout_seconds"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-Za-z][0-9A-Za-z._-]{0,127}$"
+        },
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "working_directory": { "$ref": "#/$defs/relative_path" },
+        "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 3600 }
+      }
+    },
+    "pr_endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "repository_slug", "target_branch", "ci_policy"],
+      "properties": {
+        "provider": { "const": "github" },
+        "repository_slug": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+          "maxLength": 256
+        },
+        "target_branch": { "$ref": "#/$defs/branch_name" },
+        "ci_policy": {
+          "enum": ["require_passed", "allow_pending", "not_required"],
+          "default": "require_passed"
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reference",
+        "confirmed_by",
+        "confirmed_at",
+        "confirmed_manifest_sha256"
+      ],
+      "properties": {
+        "reference": {
+          "type": "string",
+          "pattern": "^user-confirmation:[A-Z][A-Z0-9_]*-[1-9][0-9]*:[0-9A-Za-z][0-9A-Za-z._-]{0,127}:[0-9a-f]{64}$"
+        },
+        "confirmed_by": { "$ref": "#/$defs/non_empty_string" },
+        "confirmed_at": { "type": "string", "format": "date-time" },
+        "confirmed_manifest_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}

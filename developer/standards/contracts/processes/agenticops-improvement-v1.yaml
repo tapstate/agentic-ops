@@ -1,0 +1,67 @@
+process_id: agenticops_improvement_v1
+workplane: developer
+task_classes:
+  - process_improvement
+entry_stage: waiting_takeover
+stages:
+  - id: waiting_takeover
+    responsible_role: development_engineer
+    input_fields:
+      - assignee
+      - jira_status
+      - workspace_agent_identity
+      - explicit_takeover_instruction
+    output_fields:
+      - agentic_run_id
+      - takeover_kind
+      - takeover_status
+      - human_notice
+      - takeover_comment_id
+      - agentic_takeover_at
+    review_gate: null
+  - id: task_intake
+    responsible_role: ai_agent
+    output_fields:
+      - intake_facts
+      - task_class
+      - process_id
+      - target_repo
+      - verification_method
+    review_gate: null
+  - id: design_review
+    responsible_role: development_engineer
+    input_fields:
+      - proposed_solution
+      - changed_assets
+      - verification_method
+      - residual_risks
+    output_fields:
+      - design_review_decision
+      - execution_authorization
+    review_gate: development_engineer_design_review
+  - id: implementation
+    responsible_role: ai_agent
+    output_fields:
+      - improvement_summary
+      - changed_assets
+      - verification_result
+      - residual_risk
+    review_gate: null
+  - id: pr_review
+    responsible_role: development_engineer
+    input_fields:
+      - execution_authorization
+      - improvement_summary
+      - changed_assets
+      - verification_result
+      - residual_risk
+      - code_review_reference
+    output_fields:
+      - review_decision
+      - agentic_next_action
+    review_gate: development_engineer_code_review
+  - id: completed
+    responsible_role: development_engineer
+    completion_cleanup:
+      write_terminal_comment: true
+      close_local_run: true

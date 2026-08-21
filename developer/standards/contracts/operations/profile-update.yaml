@@ -1,0 +1,54 @@
+operation: profile_update
+workplane: developer
+version: 1
+purpose: 使用经过校验的本地源工作流配置更新当前工作空间的工作流配置，并在更新前保存可回滚备份。
+task_type: profile_update
+allowed_stages:
+  - profile_update_required
+  - process_improvement
+required_inputs:
+  - workspace
+  - source
+input:
+  workspace:
+    type: string
+    required: true
+  source:
+    type: string
+    required: true
+preconditions:
+  - repo_root_must_exist
+  - source_profile_must_exist
+  - source_profile_must_match_workspace
+  - source_profile_must_validate
+  - current_profile_must_exist
+output:
+  workspace:
+    type: string
+  profile:
+    type: string
+  backup:
+    type: string
+  source:
+    type: string
+  agentic_next_action:
+    type: string
+failure:
+  codes:
+    - missing_workspace
+    - missing_source
+    - repo_root_not_found
+    - profile_update_failed
+side_effects:
+  - may_modify_workspace_profile
+  - may_write_profile_backup
+  - must_not_write_jira
+  - must_not_modify_business_repo
+human_gate:
+  required: true
+  reason: 工作流配置更新会改变工作空间流程映射，执行前需要维护者确认源工作流配置。
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: profile_update_required
+redo_from_stage: profile_update_required

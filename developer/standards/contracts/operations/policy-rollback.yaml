@@ -1,0 +1,47 @@
+operation: policy_rollback
+workplane: developer
+version: 1
+purpose: 从最近一次策略更新生成的本地备份恢复当前默认策略。
+task_type: policy_update
+allowed_stages:
+  - policy_update_required
+  - rollback_required
+required_inputs:
+  - workspace
+input:
+  workspace:
+    type: string
+    required: true
+preconditions:
+  - repo_root_must_exist
+  - policy_backup_must_exist
+  - backup_policy_must_match_default_policy
+  - backup_policy_must_validate
+output:
+  workspace:
+    type: string
+  policy:
+    type: string
+  path:
+    type: string
+  restored_from:
+    type: string
+  agentic_next_action:
+    type: string
+failure:
+  codes:
+    - missing_workspace
+    - repo_root_not_found
+    - policy_rollback_failed
+side_effects:
+  - may_modify_policy
+  - must_not_write_jira
+  - must_not_modify_business_repo
+human_gate:
+  required: true
+  reason: Policy rollback 会恢复关键步骤门禁旧版本，执行前需要维护者确认。
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: policy_update_required
+redo_from_stage: policy_update_required

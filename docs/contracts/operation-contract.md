@@ -8,7 +8,7 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 
 操作契约还必须说明每次操作如何读取或更新 Task Form Standard 中的标准字段。AIAgent 后续判断 `current_stage`、`agentic_next_action`、重试、重做和人工审查时，应以操作输出、表单数据和事件记录为准，而不是以聊天上下文为准。
 
-操作契约必须引用 Standard Process Registry 中的任务分类和流程阶段。AIAgent 执行任务前必须先得到 `task_class` 和 `process_id`，再进入对应流程阶段。
+操作契约必须引用 Standard Process Registry 中的任务分类和流程阶段。统一接管操作是具体流程选择前的公共操作，只验证项目、负责人、状态映射、Agent 身份和恢复事实；接管后必须补齐 `task_class` 和 `process_id`，未补齐前不得进入实现。
 
 ## 2. 契约原则
 
@@ -28,12 +28,7 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 
 | `Operation` | 用途 |
 | --- | --- |
-| `install` | 安装 AgenticOps 到 `~/.agentic-ops`。 |
 | `doctor` | 输出安装、版本、工作流配置、策略、契约、适配器和工作空间的本地诊断结果。 |
-| `assets_install` | 校验源资产 manifest 与当前 CLI 的 `exact_pair` 后安装版本化运行资产。 |
-| `update_check` | 基于本地或远程 release manifest 判断 CLI / 资产兼容状态，返回更新级别和受影响操作。 |
-| `update_apply` | 校验 manifest 与 checksum，版本化暂存产物，保存上一状态并原子切换激活二进制。 |
-| `update_rollback` | 只使用本地上一状态和 checksum 恢复 CLI、资产指针与 current metadata。 |
 | `contract_validate` | 校验机器可读 操作契约是否满足完整设计基线。 |
 | `profile_validate` | 校验工作流配置是否能映射标准字段、任务分类、标准流程、状态和 `transition`。 |
 | `profile_update` | 使用经过校验的本地来源工作流配置更新当前工作流配置，并保存可回滚备份。 |
@@ -48,12 +43,12 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 | `add_task_comment` | 向 Jira 追加分析、计划、决策、证据或阻塞评论。 |
 | `update_task_description_sections` | 安全更新 Jira Description 的指定章节并保留其它内容。 |
 | `update_task_form` | 按项目 profile 的逻辑字段映射更新 Jira 表单。 |
-| `takeover_task` | 接管一个新的 Jira 卡片。 |
-| `resume_takeover` | 恢复已有 `agentic_run_id` 的接管任务。 |
+| `takeover_task` | 自动判断新接管、接纳存量或恢复，并写入可见接管轨迹。 |
+| `resume_takeover` | 只读诊断已有 `agentic_run_id`；正式恢复留痕回到统一接管操作。 |
 | `read_task_context` | 读取任务上下文摘要。 |
 | `write_evidence` | 写入任务阶段证据、阻塞说明和完成审计主体。 |
 | `write_pr_evidence` | 读取 GitHub PR、CI 和 Review 事实，并写入任务关联的拉取请求证据。 |
-| `release_agent` | 完成或明确交接后释放当前 AIAgent 绑定，并记录 `agentic_id_cleared=true`。 |
+| `release_agent` | 完成或明确交接后写入终态 Comment 并关闭本地任务运行；developer 不清理 Agentic Jira 字段。 |
 | `mark_blocked` | 记录阻塞原因和人工动作。 |
 | `request_owner_confirmation` | 请求研发工程师确认。 |
 | `branch_align` | 按 TapData 项目级分支规范计算或执行多仓分支对齐。 |
@@ -65,7 +60,11 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 | `feedback_report` | 按需生成执行分析报告，用于发现重复问题和 AgenticOps 改进建议。 |
 | `feedback_propose` | 生成改进建议。 |
 
-当前 `install-resources/basic/contracts/operations/` 维护已落地或直接需要的机器可读 YAML，并通过 `agentic-cli contract validate` 校验。未进入当前可运行闭环的操作先保留在本文档中作为后续契约范围，不视为已实现 CLI 命令。
+developer 工作面的机器可读操作契约位于 `developer/standards/contracts/operations/`。契约保存目标行为边界，不是实现状态事实源；`contract_validate` 本身在当前 Python Runtime 中也是 `capability_gap`，不能因为契约文件存在就声称有对应命令。
+
+当前可调用性以 `developer/standards/capabilities/operations.yaml` 和 `ao-work capability list|show` 为准。能力目录必须覆盖每个契约恰好一次，状态只能是 `implemented` 或 `capability_gap`；只有 `implemented` 且目录声明真实 parser 路径时才可以调用。旧 Go 契约未迁移时继续保留为验收目标，但必须标记能力缺口并给出中文人工动作。
+
+AgenticOps 安装、更新和回滚属于 `developer/bootstrap/` 的 Shell Bootstrap 责任：它们只管理 developer-only sparse managed clone、Git ref、`uv sync --locked`、`ao-work` 入口和本地回滚引用，不是 Jira / GitHub / Git 业务操作契约，也不使用旧二进制 manifest 或 checksum 流程。
 
 ## 4. 契约结构
 
@@ -73,45 +72,51 @@ AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `t
 
 ```yaml
 operation: takeover_task
-version: 1
-purpose: 研发工程师授权 AIAgent 接管一个已进入迭代的任务。
+version: 2
+purpose: 研发工程师明确要求接管后，由 Runtime 自动完成新接管、接纳存量或恢复。
 
 task_type: task_takeover
 
 allowed_stages:
   - waiting_takeover
-  - takeover_gate
+  - takeover_started
+  - blocked
 
 input:
   issue_key:
     type: string
-    required: true
+    required: false
   workspace:
     type: string
     required: true
 
 preconditions:
-  - current_user_must_match_owner
-  - agentic_id_must_be_empty_or_match_agent_id
-  - task_class_must_be_mapped_to_standard_process
   - issue_must_be_in_allowed_project
-  - jira_status_must_map_to_entry_stage
+  - current_user_must_match_assignee
+  - jira_status_and_transition_must_be_strictly_mapped
+  - workspace_agent_identity_must_be_available
+  - local_run_and_managed_comment_must_not_conflict
 
 output:
   agentic_run_id:
     type: string
+  takeover_status:
+    enum:
+      - completed
+  takeover_kind:
+    enum:
+      - new_takeover
+      - accept_existing_task
+      - resume_takeover
+  takeover_comment_id:
+    type: string
+  human_notice:
+    type: string
   current_stage:
     enum:
       - takeover_started
-      - blocked
-      - waiting_owner_confirmation
-  target_repo:
-    type: string
   agentic_next_action:
-    enum:
-      - proceed
-      - ask_owner
-      - blocked
+    type: object
   retry_policy:
     type: object
     required: false
@@ -123,12 +128,11 @@ failure:
   code:
     enum:
       - owner_mismatch
-      - assignee_mismatch
-      - agent_ownership_conflict
-      - task_class_mapping_gap
-      - standard_process_mapping_gap
-      - unknown_jira_status
-      - invalid_takeover_stage
+      - assignee_changed
+      - external_task_state_conflict
+      - jira_takeover_comment_readback_mismatch
+      - jira_status_mapping_missing
+      - jira_transition_mapping_gap
       - missing_permission
       - workflow_transition_not_allowed
   message:
@@ -137,13 +141,15 @@ failure:
     type: string
 
 side_effects:
-  - may_write_jira_ownership
+  - writes_managed_takeover_comment
+  - may_transition_jira_status
   - may_create_takeover_record
   - must_not_modify_code
   - must_not_create_pr
 
 human_gate:
   required: false
+  authorization_basis: 用户明确表达“接管 <KEY>”即授权事实明确的常规接管；冲突和不确定结果进入风险决策。
 ```
 
 ## 5. 错误模型
@@ -185,7 +191,7 @@ human_gate:
 - 是否写拉取请求。
 - 是否写本地事件日志。
 - 事件日志必须能记录 `agentic_cli_version`、`version_state`、`asset_version`、`code`、`gate` 和 `gate_status`。
-- 事件日志必须能记录 `agent_id`、`agentic_id`、`task_class`、`process_id` 和 `agentic_id_cleared`。
+- 事件日志必须能记录 `agent_id`、`agentic_run_id`、`takeover_kind`、`takeover_comment_id`、`task_class`、`process_id` 和终态收口结果。
 - 写入 Jira 的标题、描述、评论、工作日志、证据正文、阻塞说明和补卡说明必须使用中文。
 - 是否修改代码。
 - 是否创建 `commit`。
@@ -196,7 +202,7 @@ human_gate:
 
 ## 7. 工作项级连续执行授权
 
-研发工程师确认版本化设计或修复计划时，可以同时授予工作项级连续执行授权。该授权绑定 `issue_key`、`agentic_run_id`、`agent_id`、`agentic_id`、目标仓库、工作分支、目标分支、计划版本、修改范围和验证方式，并通过 Jira 决策评论或项目配置的等价任务事实源提供稳定引用。
+研发工程师确认版本化设计或修复计划时，可以同时授予工作项级连续执行授权。该授权绑定 `issue_key`、`agentic_run_id`、`agent_id`、已回读的 `takeover_comment_id`、目标仓库、工作分支、目标分支、计划版本、修改范围和验证方式，并通过 Jira 决策评论或项目配置的等价任务事实源提供稳定引用。
 
 操作消费该授权时必须遵守：
 

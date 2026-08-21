@@ -1,0 +1,43 @@
+{
+  "schema_version": 2,
+  "template_id": "jira-comment-template",
+  "description": "AgenticOps 评论公共规范：进度上报与结果反馈评论的必填键定义。跨工作面（maintainer/developer）、跨项目、对所有 Agent 类型通用；两个工作面的 Runtime 都必须按本 Schema 校验评论正文，不得各自复制、扩展或隐式猜测字段。执行者与工作空间只在任务接管评论中声明（代表哪个 Agent 在处理），进度与结果评论靠运行 ID 关联审计，不重复执行者/工作空间。",
+  "templates": {
+    "progress": {
+      "category": "progress",
+      "label": "进度上报（含开始处理）",
+      "required_fields": [
+        "run_id",
+        "current_stage",
+        "completed_actions",
+        "execution_plan",
+        "risk"
+      ],
+      "field_keys": {
+        "run_id": "运行 ID",
+        "current_stage": "当前阶段",
+        "completed_actions": "已完成动作",
+        "execution_plan": "执行计划",
+        "risk": "风险"
+      }
+    },
+    "evidence": {
+      "category": "evidence",
+      "label": "结果反馈（含完成总结）",
+      "required_fields": [
+        "run_id",
+        "completed_content",
+        "verification_result",
+        "residual_risk",
+        "output_fields"
+      ],
+      "field_keys": {
+        "run_id": "运行 ID",
+        "completed_content": "完成内容",
+        "verification_result": "验证结果",
+        "residual_risk": "残留风险",
+        "output_fields": "已输出表单字段"
+      }
+    }
+  }
+}

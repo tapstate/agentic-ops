@@ -1,0 +1,122 @@
+task_class: bug_fix
+workplane: developer
+template: templates/admission/defect-fix-missing.md
+required_fields:
+  - problem_branch
+  - target_branch
+  - problem_summary
+optional_fields:
+  - reproduction_path
+  - acceptance_criteria
+guidance:
+  problem_branch:
+    label: 问题分支
+    location: Jira 描述 `问题分支` 章节或项目字段
+    example: develop
+    description: 说明缺陷在哪个分支可以复现或被发现。
+  target_branch:
+    label: 修复分支
+    location: Jira 描述 `修复分支` 章节或项目字段
+    example: develop
+    description: 说明本次修复应在哪个分支完成并验证。
+  problem_summary:
+    label: 问题现象
+    location: Jira 摘要、Jira 描述 `问题现象` 章节或项目字段
+    example: TM 启动时持续输出 Elasticsearch health check refused 告警。
+    description: 说明用户、日志或系统实际观察到的问题现象。
+  reproduction_path:
+    label: 复现路径
+    location: Jira 描述 `复现路径` 章节或项目字段
+    example: 启动 TM，观察启动日志中 Elasticsearch health check 输出。
+    description: 可选；说明问题如何复现，无法稳定复现时写明已知触发条件。
+  acceptance_criteria:
+    label: 验收标准
+    location: Jira 描述 `验收标准` 章节或项目字段
+    example: 启动 TM 不再持续输出 Elasticsearch health check refused 告警，相关回归验证通过。
+    description: 可选；说明缺陷修复后怎样判断可以验收。
+analysis_hints:
+  problem_branch:
+    source: jira_or_local_source_branch
+    message: 可以结合 Jira 描述、当前本地源码分支和 TapData 分支对齐候选给出建议，但必须由研发工程师确认。
+  target_branch:
+    source: jira_or_manually_verified_branch_candidates
+    tool: branch-align
+    script: scripts/tap_align_branches.py
+    required_human_action: 使用项目脚本 scripts/tap_align_branches.py 的 plan 模式生成只读对齐候选，由研发工程师确认，不得替其确认或执行 apply。
+    message: 可以结合 Jira 与脚本生成的候选分支给出建议，但不得构造未实现命令或替研发工程师确认。
+  problem_summary:
+    source: jira_summary_and_project_code
+    message: 可以结合 Jira 摘要、日志、源码搜索结果补全问题现象描述，但必须保留研发工程师确认环节。
+admission_failure_flow:
+  stop_takeover: true
+  required_actions:
+    - inspect_jira_facts
+    - inspect_target_branch_code
+    - identify_all_missing_or_conflicting_information
+    - prepare_admission_analysis_comment
+    - request_development_engineer_confirmation
+  jira_comment:
+    category: analysis
+    template: templates/defect/admission-analysis-comment.md
+    capability: jira_comment
+    capability_status: implemented
+    protocol:
+      plan: [jira, comment, plan]
+      apply: [jira, comment, apply]
+      readback: [jira, comment, readback]
+    required_human_gate: apply 必须绑定 plan_id 的明确授权；结果不明确时只能 readback。
+  after_comment:
+    agentic_next_action: stop_current_takeover
+    message: 写入准入分析与补卡建议后必须结束本次接管，不得在同一次执行中自动绑定任务。
+admission_confirmation_flow:
+  required_actions:
+    - read_development_engineer_decision
+    - update_confirmed_description_sections
+    - append_admission_decision_comment
+    - stop_current_takeover
+  description_template: templates/defect/description-sections.yaml
+  description_capability: jira_description
+  description_capability_status: implemented
+  description_protocol:
+    plan: [jira, description, plan]
+    apply: [jira, description, apply]
+  description_human_gate: apply 必须绑定 plan_id 的明确授权，并由 apply 完成写后回读。
+  decision_template: templates/defect/admission-decision-comment.md
+  decision_capability: jira_comment
+  decision_capability_status: implemented
+  decision_protocol:
+    plan: [jira, comment, plan]
+    apply: [jira, comment, apply]
+    readback: [jira, comment, readback]
+  next_activation: 必须重新执行当前已实现的 jira_inspect，并结合能力目录与 Jira 当前事实重新判断准入；不得调用旧 inspect-task，也不得复用写入前的判断结果。
+pre_fix_gate:
+  required: true
+  must_confirm: true
+  plan_template: templates/defect/fix-plan-comment.md
+  plan_capability: jira_comment
+  plan_capability_status: implemented
+  plan_protocol:
+    plan: [jira, comment, plan]
+    apply: [jira, comment, apply]
+    readback: [jira, comment, readback]
+  decision_template: templates/defect/plan-decision-comment.md
+  decision_capability: jira_comment
+  decision_capability_status: implemented
+  decision_protocol:
+    plan: [jira, comment, plan]
+    apply: [jira, comment, apply]
+    readback: [jira, comment, readback]
+  material_change_requires_reconfirmation: true
+  message: 接管成功后，AIAgent 必须结合 Jira 卡片和项目代码形成版本化修复计划并写入 Jira；研发工程师确认目标、边界和风险且确认结果已写入 Jira 前，AIAgent 不得修改代码。
+completion_writeback:
+  form_template: templates/defect/completion-form.yaml
+  form_capability: update_task_form
+  form_capability_status: capability_gap
+  form_required_human_action: 停止自动写入 Custom Field；按 Jira Custom Field 专题适配并验收后再启用。
+  evidence_template: templates/defect/completion-evidence-comment.md
+  evidence_capability: jira_comment
+  evidence_capability_status: implemented
+  evidence_protocol:
+    plan: [jira, comment, plan]
+    apply: [jira, comment, apply]
+    readback: [jira, comment, readback]

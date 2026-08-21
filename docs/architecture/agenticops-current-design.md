@@ -1,4 +1,8 @@
-# AgenticOps 当前设计
+# AgenticOps Go 实现迁移基线
+
+> **冻结历史 / 迁移基线，不是现役操作：** 本文记录旧 Go 实现与统一 `agentic-cli` 所承载的设计事实，只用于迁移能力核对。现役事实以《AgenticOps Skill 与 Python Runtime 驱动项目全景》《项目结构》和《Python Runtime》为准：工作面为 `maintainer` / `developer`，入口为 `ao-maint` / `ao-work`，实施进度与验收以 Jira `AO-11` 为准。
+
+> 其中旧 developer `agentic_id` 字段绑定与清理模型已由 D-051 取代；AO maintainer 工作面的专用字段设计不受影响。
 
 ## 1. 定位
 
@@ -59,7 +63,7 @@ AIAgent 是流程执行者，`agentic-cli` 是受控运行时，不单独作为�
 - GitHub 拉取请求与 CI 是拉取请求审查、CI、审查评论和合入记录的事实源。
 - AgenticOps 不创建新的任务管理事实源。
 - `agentic_run_id` 只追踪一次 AI 执行，不替代 Jira 卡片编号，也不替代 Jira 状态。
-- `agent_id` 是 AIAgent 的稳定身份；`agentic_id` 是任务上的当前绑定字段，用于表达当前由哪个 `agent_id` 持有任务所有权。
+- `agent_id` 是 AIAgent 的稳定身份；旧实现曾以 `agentic_id` 表达 Jira 任务绑定，现役 developer 改由 `Assignee`、受管 Comment 和本地 run 共同表达。
 - AIAgent 可以推进研发阶段，但不能绕过工作流配置、门禁和人工确认点。
 - 控制规范不能只靠提示词；提示词负责指导，Go CLI 运行时负责强制检查和结构化输出。
 - 每次执行都必须产生可聚合记录，关键状态和信息必须回写到对应事实源或项目 AI 工作空间。
@@ -225,7 +229,7 @@ input:
 
 preconditions:
   - current_user_must_match_owner
-  - agentic_id_must_be_empty_or_match_agent_id
+  - managed_takeover_comment_must_be_verified
   - task_class_must_be_mapped_to_standard_process
   - issue_must_be_in_allowed_project
   - jira_status_must_map_to_entry_stage

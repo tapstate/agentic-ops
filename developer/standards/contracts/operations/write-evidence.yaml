@@ -1,0 +1,87 @@
+operation: write_evidence
+workplane: developer
+version: 1
+purpose: 写入 Jira / 拉取请求证据，并形成任务级审计记录的证据主体。
+task_type: evidence_write
+allowed_stages:
+  - takeover_started
+  - development_completed
+  - blocked
+required_inputs:
+  - workspace
+  - agentic_run_id
+  - content_file
+input:
+  workspace:
+    type: string
+    required: true
+  agentic_run_id:
+    type: string
+    required: true
+  content_file:
+    type: file
+    required: true
+    max_bytes: 65536
+preconditions:
+  - run_must_exist
+  - current_user_must_match_owner
+  - evidence_template_must_exist
+  - policy_must_allow_evidence_write
+output:
+  workspace:
+    type: string
+  agentic_run_id:
+    type: string
+  issue_key:
+    type: string
+  task_class:
+    type: string
+  process_id:
+    type: string
+  target_repo:
+    type: string
+  evidence:
+    type: string
+  template:
+    type: string
+  audit_target:
+    type: string
+  audit_submitted:
+    type: boolean
+  audit_reference:
+    type: string
+  current_stage:
+    type: string
+  agentic_next_action:
+    type: string
+failure:
+  codes:
+    - missing_agentic_run_id
+    - missing_evidence_content
+    - evidence_content_read_failed
+    - evidence_content_outside_workspace
+    - evidence_content_too_large
+    - invalid_evidence_sections
+    - run_not_found
+    - workspace_mismatch
+    - local_state_mismatch
+    - assignee_changed
+    - evidence_template_missing
+    - jira_adapter_config_failed
+    - policy_not_found
+    - real_jira_confirmation_required
+    - jira_comment_write_failed
+    - policy_gate_required
+    - write_failed
+    - event_write_failed
+side_effects:
+  - may_write_jira_comment
+  - may_write_local_event
+  - may_submit_task_audit_evidence
+human_gate:
+  required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: takeover_started
+redo_from_stage: takeover_started

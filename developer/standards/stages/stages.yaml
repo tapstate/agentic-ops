@@ -1,0 +1,92 @@
+# developer 面阶段注册表
+#
+# 正式接管先于信息分析和具体流程选择。阶段独立于 Jira：Jira Status 是外部
+# 团队阶段，内部 stage 用于分析、设计、执行和恢复。只有声明 jira_transition
+# 的阶段才推动 Jira；其它内部阶段不改变 Jira 状态。
+
+schema_version: 2
+workplane: developer
+
+stages:
+  - id: waiting_takeover
+    name: 等待接管
+    description: 校验项目、负责人、状态映射和 Agent 身份，执行统一任务接管
+    admission:
+      - assignee
+    exit:
+      next_stage: task_intake
+      jira_transition: start_progress
+
+  - id: task_intake
+    name: 任务信息分析
+    description: 接管后读取 Jira、Project Profile、源码和 Runtime 事实，自动补全可验证信息
+    admission:
+      - task_taken_over
+    exit:
+      next_stage: solution_classification
+
+  - id: solution_classification
+    name: 方案分析与风险分流
+    description: 自动形成方案并按证据分流到设计审查、风险决策、设计修订或阻断
+    admission:
+      - intake_digest
+    exit:
+      next_stage: design_review
+
+  - id: design_review
+    name: 设计审查
+    description: 展示完整方案、范围、验证方式和逐项风险，由研发工程师确认
+    admission:
+      - proposed_solution
+      - scope
+      - verification_method
+      - residual_risks
+    exit:
+      next_stage: implementation
+
+  - id: implementation
+    name: 实现与验证
+    description: 在有效设计授权范围内连续实现代码、验证并整理证据
+    admission:
+      - task_taken_over
+      - design_review_approved
+    exit:
+      next_stage: pr_review
+    steps:
+      - id: code_writing
+        name: 编写代码
+        description: 按已确认设计实现代码变更
+        exit:
+          next_step: test_writing
+      - id: test_writing
+        name: 编写测试
+        description: 为代码变更编写或更新测试
+        exit:
+          next_step: verification
+      - id: verification
+        name: 验证
+        description: 运行测试与固定验收，整理验证结果和残留风险
+        exit:
+          next_step: null
+
+  - id: pr_review
+    name: 代码审查
+    description: 绑定 PR 当前 Head 或 develop 本地 commit，展示变更、验证和风险
+    admission:
+      - execution_authorization
+      - implementation_summary
+      - verification_result
+      - residual_risk
+      - code_review_reference
+    exit:
+      next_stage: completed
+      jira_transition: complete
+
+  - id: completed
+    name: 完成
+    description: 回写完成证据与中文总结，关闭本地运行
+    admission:
+      - review_decision
+      - agentic_completion_evidence
+    exit:
+      next_stage: null

@@ -1,4 +1,6 @@
-# AgenticOps 项目全景
+# AgenticOps 旧统一 CLI 项目全景
+
+> **冻结历史 / 迁移基线，不是现役操作：** 本文记录旧统一 CLI 阶段的项目全景。现役全景见《AgenticOps Skill 与 Python Runtime 驱动项目全景》，现役目录和入口见《项目结构》。
 
 > 本文面向第一次接触 AgenticOps 的技术人员，集中说明项目本身的定位、优势、架构、能力、已实现内容和推进计划。本文不展开代码实现，聚焦 AgenticOps 自身。
 
@@ -240,7 +242,7 @@ AgenticOps 不依赖 Web 控制台或后台常驻服务。标准操作之间通�
 - 检查负责人、任务类型、项目、状态、目标仓库、标准流程和权限。
 - 根据 profile 将 Jira 状态映射为标准业务阶段。
 - 生成并绑定唯一 `agentic_run_id`。
-- 校验 `agentic_id`、工作空间和任务所有权。
+- 校验 Jira `Assignee`、工作空间、本地运行身份和受管接管 Comment；developer 不依赖 Agentic Jira Custom Field。
 - 缺少字段或映射不完整时阻断，并输出补卡或人工处理动作。
 
 ### 6.3 受控执行与人工门禁

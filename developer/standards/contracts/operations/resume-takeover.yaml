@@ -1,0 +1,118 @@
+operation: resume_takeover
+workplane: developer
+version: 3
+purpose: 只读诊断并恢复一个已经存在的任务运行上下文；正式恢复留痕由统一 takeover 操作完成。
+task_type: task_takeover
+allowed_stages:
+  - initialized
+  - takeover_started
+  - blocked
+required_inputs:
+  - workspace
+input:
+  workspace:
+    type: string
+    required: true
+  issue_key:
+    type: string
+    required: false
+  agentic_run_id:
+    type: string
+    required: false
+preconditions:
+  - exactly_one_explicit_target_or_latest_resumable_run
+  - run_workspace_and_issue_must_match
+  - current_user_must_match_assignee
+  - target_repo_must_match_takeover_context
+  - operation_stage_must_be_resumable
+  - local_state_must_be_verifiable
+output:
+  workspace:
+    type: string
+  issue_key:
+    type: string
+  agentic_run_id:
+    type: string
+  agent_id:
+    type: string
+  task_class:
+    type: string
+  process_id:
+    type: string
+  target_repo:
+    type: string
+  previous_stage:
+    type: string
+  current_stage:
+    type: string
+  standard_process_stage:
+    type: string
+  agentic_next_action:
+    type: object
+  takeover_recovery:
+    type: object
+    required_fields:
+      - operation
+      - migration_required
+      - state_consistent
+  jira_feedback_required:
+    type: boolean
+  jira_feedback_write_allowed:
+    type: boolean
+  jira_feedback_file:
+    type: string
+  jira_feedback_category:
+    type: string
+formal_resume:
+  operation: takeover_task
+  requirements:
+    - reuse_existing_agentic_run_id
+    - emit_human_notice_with_not_new_takeover
+    - write_and_read_back_managed_jira_comment
+failure:
+  codes:
+    - missing_agentic_run_id
+    - workspace_root_failed
+    - run_not_found
+    - workspace_mismatch
+    - local_state_mismatch
+    - event_read_failed
+    - operation_contract_not_found
+    - operation_contract_load_failed
+    - jira_adapter_config_failed
+    - jira_issue_read_failed
+    - issue_not_found
+    - jira_current_user_failed
+    - issue_mismatch
+    - assignee_changed
+    - agent_ownership_conflict
+    - target_repo_missing
+    - target_repo_changed
+    - resume_stage_not_allowed
+    - standard_process_not_found
+    - task_class_process_mismatch
+    - lifecycle_mapping_gap
+    - invalid_process_stage
+    - terminal_run
+    - human_gate_pending
+    - feedback_write_failed
+    - event_write_failed
+    - takeover_schema_invalid
+    - takeover_state_identity_mismatch
+    - takeover_local_state_incomplete
+side_effects:
+  - may_write_local_event
+  - may_write_local_feedback_artifact
+  - must_not_write_jira
+  - must_not_create_pr
+human_gate:
+  required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: takeover_started
+redo_from_stage: takeover_started
+recovery_source:
+  reader: read_takeover_recovery
+  authority: sync.json.takeover_operation
+  note: task inspect、task resume 与正式 takeover 必须读取同一恢复快照；本命令保持只读。

@@ -28,7 +28,7 @@ AgenticOps 表单体系分为三层。
 | --- | --- | --- |
 | Task Form Standard | 定义 AgenticOps 标准字段、字段语义、值类型、负责人和敏感性。 | `docs/forms/`，后续 `contracts/forms/` |
 | Lifecycle Form Requirements | 定义每个生命周期阶段需要哪些字段、何时必填、缺失时如何处理。 | `docs/forms/`，后续 `contracts/forms/` |
-| Jira Form Mapping | 把标准字段映射到具体 Jira 项目的字段、描述模板、评论模板、状态或 `transition`。 | `install-resources/basic/projects/<project>/profile.yaml` |
+| Jira Form Mapping | 把标准字段映射到具体 Jira 项目的字段、描述模板、评论模板、状态或 `transition`。 | `developer/standards/projects/<project>/profile.yaml` |
 
 操作契约只引用标准字段，不直接引用 Jira 字段。工作流配置负责把标准字段映射到具体系统事实。
 
@@ -47,19 +47,17 @@ AgenticOps 表单体系分为三层。
 | `iteration` | 所属迭代或计划窗口。 | 迭代管理员 | 进入迭代 |
 | `priority` | 任务优先级。 | 需求负责人、迭代管理员 | 进入迭代 |
 | `risk_level` | 风险等级。 | 研发工程师 | 进入迭代 |
-| `target_repo` | AI 需要读取和修改的目标仓库。 | 研发工程师、工作流配置 | AI 接管 |
-| `target_branch` | 目标基线分支。 | 研发工程师、工作流配置 | AI 接管 |
-| `verification_method` | 最小验证方式，例如命令、手动验收或 CI。 | 研发工程师 | AI 接管 |
-| `environment_context` | 需要的环境、账号、测试数据或约束摘要。 | 研发工程师 | AI 接管 |
-| `dependencies` | 外部依赖、前置任务或阻塞条件。 | 需求负责人、研发工程师 | AI 接管 |
+| `target_repo` | AI 需要读取和修改的目标仓库。 | 研发工程师、工作流配置 | 接管后分析、设计审查前 |
+| `target_branch` | 目标基线分支。 | 研发工程师、工作流配置 | 接管后分析、设计审查前 |
+| `verification_method` | 最小验证方式，例如命令、手动验收或 CI。 | 研发工程师 | 接管后分析、设计审查前 |
+| `environment_context` | 需要的环境、账号、测试数据或约束摘要。 | 研发工程师 | 接管后分析、实现前 |
+| `dependencies` | 外部依赖、前置任务或阻塞条件。 | 需求负责人、研发工程师 | 接管后分析、实现前 |
 | `agentic_run_id` | 一次 AI 执行记录的唯一编号；同一任务可以有多个历史 `agentic_run_id`。 | AgenticOps | 接管后 |
 | `agent_id` | 当前 AIAgent 的稳定身份编号；同一 `agent_id` 可以产生多个 `agentic_run_id`。 | AgenticOps | AIAgent 初始化 |
-| `agentic_id` | 当前任务绑定的 `agent_id`，用于所有权门禁和并发冲突检测；不是新的身份字段。 | AgenticOps、Jira 映射 | AI 接管 |
-| `agentic_takeover_at` | AIAgent 成功接管任务的时间。 | AgenticOps | AI 接管 |
-| `agentic_heartbeat_at` | 当前锁持有者最近一次成功心跳或持久化操作时间；不得使用 Jira 系统 `updated` 代替。 | AgenticOps、Jira 映射 | 接管后持续更新 |
+| `agentic_takeover_at` | AIAgent 成功接管任务的时间；写入接管评论并保存在本地状态。 | AgenticOps | AI 接管 |
 | `task_type` | AgenticOps 任务类型。 | AgenticOps | 接管后 |
-| `task_class` | 标准任务分类，用于选择对应标准流程。 | AgenticOps、工作流配置 | 接管前 |
-| `process_id` | 标准流程编号。 | AgenticOps | 接管后 |
+| `task_class` | 标准任务分类，用于选择对应标准流程。 | AgenticOps、工作流配置 | 接管后分析、实现前 |
+| `process_id` | 标准流程编号。 | AgenticOps | 接管后分析、实现前 |
 | `current_stage` | 当前执行阶段。 | AgenticOps | 接管后 |
 | `agentic_next_action` | 下一步动作。 | AgenticOps | 接管后 |
 | `implementation_summary` | 本地实现摘要。 | AIAgent | 开发完成 |
@@ -72,22 +70,22 @@ AgenticOps 表单体系分为三层。
 | `reviewer_required_action` | 审查后要求 AIAgent 或负责人执行的动作。 | 代码审查人、QA、运维、安全、研发工程师 | 审查节点 |
 | `retry_policy` | 当前失败是否允许重试、最大次数或重试前置条件。 | AgenticOps、工作流配置 | 失败后 |
 | `redo_from_stage` | 信息变更或审查退回时需要重做的起始阶段。 | AgenticOps、代码审查人、研发工程师 | 重做时 |
-| `agentic_completion_evidence` | 最终完成证据。 | AIAgent、研发工程师 | 完成 |
+| `agentic_completion_evidence` | 最终完成证据；写入 Jira 结果评论并保存在本地审计记录。 | AIAgent、研发工程师 | 完成 |
 | `follow_up_items` | 后续问题或新任务建议。 | AIAgent、研发工程师 | 完成 |
 | `completed_at` | 标准流程完成或交接结束时间。 | AgenticOps、研发工程师 | 完成 |
-| `agentic_id_cleared` | 完成或交接后是否已清理任务上的 `agentic_id`。 | AgenticOps | 完成 |
 
 字段值不得包含 secrets、tokens、private keys、原始敏感日志或完整敏感代码片段。写入 Jira 的人可见内容必须使用中文。
 
 ### 标识字段边界
 
-`agentic_run_id`、`agent_id` 和 `agentic_id` 不重复，分别处在执行记录、代理身份和任务绑定三层：
+`agentic_run_id` 和 `agent_id` 不重复，分别处在执行记录和代理身份两层：
 
 | 字段 | 表示 | 生命周期 | 关系 |
 | --- | --- | --- | --- |
 | `agent_id` | 一个 AIAgent 身份。 | AIAgent 初始化后长期稳定。 | 一个 `agent_id` 可以产生多个 `agentic_run_id`。 |
 | `agentic_run_id` | 一次任务执行记录。 | 接管或恢复执行时创建或加载，完成后保留用于审计。 | 一个 Jira 卡片可以有多个历史 `agentic_run_id`。 |
-| `agentic_id` | Jira 任务当前绑定的 `agent_id`。 | 接管成功后写入，完成或明确交接后清理。 | 同一时刻最多允许一个有效 `agentic_id`。 |
+
+developer 工作面不创建或映射 `agentic_id` 等 Agentic Jira Custom Field。Jira `Assignee` 表示负责人，受管 Comment 表示接管与执行轨迹，本地 task state 表示细粒度运行和恢复状态。并发锁不是当前阶段能力，出现真实需求后单独设计。
 
 ## 5. 生命周期要求
 
@@ -97,11 +95,12 @@ AgenticOps 表单体系分为三层。
 | --- | --- | --- |
 | 卡片创建 | `business_goal`、`issue_type` | 缺失时卡片不能作为 AI 可接管任务。 |
 | 进入迭代 | `scope_boundary`、`acceptance_criteria`、`owner`、`iteration`、`priority`、`risk_level` | 缺失时不能进入 AI 接管候选列表。 |
-| AI 接管 | `target_repo`、`target_branch`、`verification_method`、`environment_context`、`task_class`、`agent_id` | AIAgent 在调用 `takeover_task` 前按项目准入资产检查；不足时先分析、补卡并重新检查。CLI 只执行通用接管安全门禁。 |
-| 本地开发 | `agentic_run_id`、`agent_id`、`agentic_id`、`agentic_takeover_at`、`agentic_heartbeat_at`、`task_type`、`task_class`、`process_id`、`current_stage`、`agentic_next_action` | 缺失时恢复接管或重新初始化执行记录。 |
+| AI 接管 | `owner`、`agent_id`、Jira 状态/transition 映射、用户接管指令 | Runtime 只执行通用接管安全门禁；所有权、映射或身份冲突时阻断。 |
+| 信息分析与设计审查 | `agentic_run_id`、`agentic_takeover_at`、`takeover_kind`、`takeover_comment_id`、`target_repo`、`target_branch`、`verification_method`、`task_class`、`process_id` | 可验证事实自动补全；缺失或冲突时进入风险决策，未确认设计不得进入实现。 |
+| 本地开发 | `agentic_run_id`、`agent_id`、`task_type`、`task_class`、`process_id`、`current_stage`、`agentic_next_action`、有效设计授权 | 缺失时恢复接管、补全分析或重新进入设计审查。 |
 | 开发完成 | `implementation_summary`、`verification_result`、`residual_risk` | 缺失时不能请求推送或创建拉取请求的确认。 |
 | 拉取请求审查 | `pr_link`、`ci_status`、`review_status`、`reviewer_decision` | 缺失时不能进入完成证据。 |
-| 完成 | `agentic_completion_evidence`、`follow_up_items`、`completed_at`、`agentic_id_cleared` | 缺失时不能关闭 AI 执行记录；完成或交接结束后必须清理任务上的 `agentic_id`。 |
+| 完成 | `agentic_completion_evidence`、`follow_up_items`、`completed_at`、`terminal_comment_id` | 缺失时不能关闭 AI 执行记录；完成或交接结束后必须写入并回读终止评论。 |
 
 ## 6. 表单驱动推进规则
 
@@ -112,7 +111,7 @@ AgenticOps 表单体系分为三层。
 - 是否经过对应专业角色审查。
 - 当前结论允许进入哪个 `agentic_next_action`。
 - 失败时允许重试还是必须重做前序阶段。
-- 完成或交接结束后是否已经清理 `agentic_id`。
+- 完成或交接结束后是否已经写入并回读终止评论、关闭本地运行。
 
 标准推进语义：
 
@@ -124,7 +123,7 @@ AgenticOps 表单体系分为三层。
 | 前序输入发生变化 | 设置 `redo_from_stage`，从受影响阶段重新生成表单。 |
 | 操作执行失败但输入仍有效 | 根据 `retry_policy` 在当前阶段重试。 |
 | 风险、权限或标准冲突 | 停止并请求人工确认。 |
-| 任务完成或交接结束 | 写入完成表单并清理 `agentic_id`。 |
+| 任务完成或交接结束 | 写入完成表单与终止评论，回读后关闭本地运行。 |
 
 重试和重做的区别必须明确：
 
@@ -226,7 +225,7 @@ Jira 对接不满足 AgenticOps 标准时，先适配，再决策。
 | 专业审查节点无法映射 | 记录 `review_gate_mapping_gap`，请求工作流决策。 |
 | 重试或重做规则缺失 | 记录 `retry_redo_policy_gap`，请求工作流配置或策略决策。 |
 | 任务分类无法映射 | 记录 `task_class_mapping_gap`，请求研发工程师或流程负责人决策。 |
-| 完成后无法清理 `agentic_id` | 记录 `agent_release_failed`，请求研发工程师决策是否人工释放。 |
+| 完成后无法写入或回读终止评论 | 记录 `terminal_comment_write_failed` 或 `terminal_comment_readback_mismatch`，请求研发工程师决策。 |
 
 稳定错误码建议：
 
@@ -243,7 +242,8 @@ Jira 对接不满足 AgenticOps 标准时，先适配，再决策。
 - `assignee_changed`
 - `agent_ownership_conflict`
 - `agent_binding_lost`
-- `agent_release_failed`
+- `terminal_comment_write_failed`
+- `terminal_comment_readback_mismatch`
 
 错误输出必须包含：
 
@@ -295,7 +295,7 @@ AI 员工手册：
 - `docs/contracts/operation-contract.md`
 - `docs/profiles/workflow-profile.md`
 - `docs/templates/evidence-templates.md`
-- `install-resources/basic/handbooks/ai-employee-handbook.md`
+- `developer/AGENTS.md`
 - 工作流配置中的 Jira Form Mapping。
 
 字段变更分为三类：

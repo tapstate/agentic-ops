@@ -13,7 +13,7 @@ AgenticOps 后续推进必须按以下顺序展开：
 -> 按故事线验收
 ```
 
-设计文档承载稳定设计事实、角色责任、事实源、能力边界、门禁和安全约束；计划文档承载任务拆解、实施顺序、勾选项、验证命令和当前状态。
+设计文档承载稳定设计事实、角色责任、事实源、能力边界、门禁和安全约束；Jira Description 承载任务拆解、实施顺序和验收命令，Comment 承载当前状态、阻塞与验证结果。
 
 ## 2. 故事线分类
 
@@ -21,10 +21,14 @@ AgenticOps 的故事线分为两类。
 
 | 故事线 | 主角 | 关注点 | 详细文档 |
 | --- | --- | --- | --- |
-| 项目维护者故事 | 维护 `tapstate/agentic-ops` 源头仓库的人 | 定义标准、维护契约、发布版本、处理反馈、治理兼容和回滚 | [项目维护者故事](project-maintainer-stories.md) |
-| 研发工程师故事 | 在具体业务项目中使用 AgenticOps 管理 AIAgent 执行 Jira 任务的人 | 安装、初始化、配置工作空间、接管任务、确认人工门禁、验收任务证据 | [研发工程师故事](development-engineer-stories.md) |
+| 项目维护故事 | 公司员工指导员 | 定义标准、维护契约、发布版本、处理反馈、治理兼容、回滚和故事质量门禁 | [项目维护故事](project-maintainer-stories.md) |
+| 研发工程师故事 | 业务项目工作空间所代表的研发工程师 | 安装、初始化、授权、接管任务、受控开发、恢复、证据和任务审计 | [研发工程师故事](development-engineer-stories.md) |
 
-AIAgent 和 `agentic-cli` 不作为第三类故事主角。AIAgent 是流程执行者，`agentic-cli` 是受控运行时；它们出现在两类故事线的流程和验收中，用来表达执行动作、门禁、副作用和结构化输出。
+AIAgent、Skill 和 Python Runtime 不作为第三类故事主角。`ao-maint` 是项目维护工作面入口，`ao-work` 是研发工程师工作面入口；它们是工具，不是员工角色。
+
+两类故事都是仓库内版本化的项目质量合同。机器注册表声明故事文档、保护路径、固定验收和证据要求；代码变更命中任一故事后，连续自动化必须停止，直到公司员工指导员确认当前影响并完成固定验收。Jira 只管理实施计划、进度、确认和验收记录，不替代故事质量合同。
+
+故事描述的是目标保护行为，不等同于当前实现清单。现役可调用能力只以 `ao-work capability list|show` 和机器能力目录为事实源；标记为 `capability_gap` 的故事必须停止或转人工，不能因故事已版本化就推断命令存在。
 
 ## 3. 推进门禁
 
@@ -62,7 +66,7 @@ AIAgent 和 `agentic-cli` 不作为第三类故事主角。AIAgent 是流程执�
 
 ### 开发门禁
 
-设计确认后，才能进入计划和开发。计划文档必须写在 `plans/`，并包含任务拆解、勾选项、验证命令和需要同步更新的文档、契约、运行资产或测试。
+设计确认后，才能进入计划和开发。计划必须写入对应 Jira Description，并包含可验证交付目标、实施范围、非目标、验证方式和需要同步更新的长期资料；阶段进展、阻塞和验收通过 Comment 维护。
 
 ### 验收门禁
 
@@ -83,6 +87,7 @@ AIAgent 和 `agentic-cli` 不作为第三类故事主角。AIAgent 是流程执�
 - [PM-004：诊断问题并选择修复载体](project-maintainer/pm-004-problem-diagnosis.md)。
 - [PM-005：处理反馈并形成改进建议](project-maintainer/pm-005-feedback-proposal.md)。
 - [PM-006：治理 latest 更新、回滚和兼容性](project-maintainer/pm-006-release-governance.md)。
+- [PM-007：守护两类项目故事质量基线](project-maintainer/pm-007-story-quality-gate.md)。
 
 ### 研发工程师故事
 

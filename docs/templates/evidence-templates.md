@@ -23,30 +23,40 @@
 
 ## 3. 任务接管成功
 
+Agent 处理声明：代表哪个 Agent 正在处理任务，与任务信息（已在 Jira 卡片）无关。
+
 ```markdown
 ## 任务接管成功
 
-- 事项: `<issue-key>`
-- 工作空间: `<workspace>`
-- 研发工程师: `<owner>`
-- 任务类型: `task_takeover`
+- 执行者: `<agent_id>`（哪个 Agent 正在处理）
+- Agent 类型: `<agent_type>`（如 hermes-agent / codex / claude-code）
+- 模型: `<model>`（如 deepseek-v4-flash）
+- 接管环境: `<environment>`（如工作空间路径 / profile / 主机）
 - 运行 ID: `<agentic_run_id>`
-- 目标仓库: `<target_repo>`
-- 当前阶段: `takeover_started`
-- 下一步: `<agentic_next_action>`
+```
 
-### 执行计划
+## 3.1 进度上报评论（progress，含开始处理）
 
-1. `<step-1>`
-2. `<step-2>`
+公共评论模板，跨工作面（maintainer/developer）、跨项目、对所有 Agent 类型通用；必填键由 `shared/standards/jira-comment-template.schema.json` 定义，两个工作面 Runtime 在 `comment plan` 时按该 Schema 校验，缺失即阻断。评论重点：进度与任务状态；执行者/工作空间已在接管评论声明，不重复。
 
-### 验证方式
+```markdown
+- 运行 ID: `<maintainer_run_id / agentic_run_id>`
+- 当前阶段: `<current_stage>`
+- 已完成动作: `<completed-actions>`
+- 执行计划: `<execution-plan>`
+- 风险: `<risk>`
+```
 
-- `<verification-command>`
+## 3.2 结果反馈评论（evidence，含完成总结）
 
-### 下一步
+公共评论模板，跨工作面、跨项目、对所有 Agent 类型通用；必填键由 `shared/standards/jira-comment-template.schema.json` 定义，两个工作面 Runtime 在 `comment plan` 时按该 Schema 校验，缺失即阻断。评论重点：总结。
 
-AI 员工将读取目标仓库上下文并开始本地开发。未经研发工程师确认版本化设计或修复计划并授予工作项级连续执行授权，不会推送或创建拉取请求。
+```markdown
+- 运行 ID: `<maintainer_run_id / agentic_run_id>`
+- 完成内容: `<completed-content>`
+- 验证结果: `<verification-result>`
+- 残留风险: `<residual-risk>`
+- 已输出表单字段: `<output-fields>`
 ```
 
 ## 4. 任务接管失败

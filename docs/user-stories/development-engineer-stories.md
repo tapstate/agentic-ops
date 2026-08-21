@@ -16,6 +16,7 @@
 | DE-004 | 新任务接管 | 项目准入、Jira 补卡、接管所有权和修复计划确认形成闭环 | [de-004-takeover-task.md](development-engineer/de-004-takeover-task.md) |
 | DE-005 | 恢复接管任务 | 恢复使用同一 `agentic_run_id`，不重新开始或混淆执行记录 | [de-005-resume-takeover.md](development-engineer/de-005-resume-takeover.md) |
 | DE-006 | 任务完成审计与反馈分析 | 提交任务级审计，不把反馈报告当作主链路事实源 | [de-006-task-audit-feedback.md](development-engineer/de-006-task-audit-feedback.md) |
+| DE-007 | 指定分支验证安装 | 非 `main` 分支验证安装可运行，生产安装仍固定 `main` 且标记只放宽 `main` 祖先 | [de-007-verification-install.md](development-engineer/de-007-verification-install.md) |
 
 ## 3. 审核方式
 
