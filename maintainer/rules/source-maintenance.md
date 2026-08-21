@@ -50,4 +50,8 @@ maintainer 面处理任何 Jira 任务（建卡、实现、修复、规则演进
 
 除上述暂停点和独立的受保护操作门禁外，正常推进不得反复请求确认。
 
+原子步骤成功不是会话终点。AIAgent 必须在当前用户目标、授权、范围和风险边界内持续消费 Runtime 返回的 `agentic_next_action`，直到到达真实人工节点、流程终态或明确阻断。接管、分析、补卡、实现、验证、证据回写、提交、推送或 PR 等任一原子操作的 `ok=true`、`status=completed`、内部 action、digest、plan id 或“操作成功”都不能单独作为最终答复。
+
+停止时必须展示公司员工指导员可以直接判断的完整中文内容：信息补充节点展示缺失项和补卡建议，设计审查展示完整设计、范围、验证方式和风险，代码审查展示当前 commit 或 PR 事实、确认事项、变更点和风险，风险决策展示事实、选项、推荐和影响；恢复任务必须恢复真实 pending gate 及其正文。只有到达这些真实人工节点、完成/交接/取消等流程终态、出现需人工输入或权限/外部事实变化/能力补齐才能解除的结构化阻断，或用户显式限定为单步、只读或诊断时才允许停止。允许自助恢复或受控重试时必须先按 Runtime 指引执行；不得借连续推进跨越人工门禁、扩大授权、绕过能力目录或重试上限，也不得在输入不变时循环执行。
+
 评论正文必须按公共评论模板（`shared/standards/jira-comment-template.schema.json`，人读版见 `docs/templates/evidence-templates.md`）组织：`progress`（进度上报/开始处理，重点=进度与任务状态）与 `evidence`（结果反馈/完成总结，重点=总结）评论必须包含 Schema 声明的全部必填键（运行 ID、当前阶段/已完成动作/执行计划/风险 或 完成内容/验证结果/残留风险/已输出表单字段），缺失即被 `ao-maint jira comment plan` 阻断。执行者与工作空间只在任务接管评论声明（代表哪个 Agent 正在处理），字段为执行者 agent_id、Agent 类型、模型、接管环境、运行 ID；身份来自 `ao-maint install identity set` 配置（plan 输出带出 agent_id/agent_type/model/environment）。写评论前先读取任务 Description 与模板提取事实，不得只写一句话或凭记忆临场发挥。

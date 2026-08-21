@@ -77,6 +77,12 @@ grep -q 'SSH push actor' docs/runtime/authorization.md ||
   fail "授权文档未区分 gh 账户与 SSH push actor 证据"
 grep -q '^| D-053 | developer Git/SSH/gh 授权按全局复用或安装隔离显式选择 |' docs/decision-log.md ||
   fail "设计决策记录缺少 AO-66 developer 执行授权决策"
+grep -q '原子步骤成功不是会话终点' maintainer/rules/source-maintenance.md ||
+  fail "maintainer Rule 缺少会话连续推进约束"
+grep -q '原子步骤成功不是会话终点' developer/rules/ai-execution.md ||
+  fail "developer Rule 缺少会话连续推进约束"
+grep -q '^| D-054 | 原子步骤成功不是会话终点 |' docs/decision-log.md ||
+  fail "设计决策记录缺少 AO-68 会话推进与停止语义"
 
 shared_entries="$(find shared -mindepth 1 -print | LC_ALL=C sort)"
 expected_shared_entries="$(printf '%s\n' \
