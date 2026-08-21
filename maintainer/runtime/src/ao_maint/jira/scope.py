@@ -81,6 +81,21 @@ def validate_write_plan_scope(plan: Any) -> None:
         if parent:
             validate_maintainer_issue_key(str(parent.get("key", "")))
             validate_maintainer_project_key(str(parent.get("project_key", "")))
+            relation = payload.get("parent_relation", {})
+            if not isinstance(relation, dict):
+                raise RuntimeErrorResult(
+                    code="jira_write_plan_invalid",
+                    message="Jira 建卡计划 parent_relation 结构无效",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请丢弃计划文件并重新执行 plan",
+                )
+            validate_maintainer_issue_key(
+                str(relation.get("requested_parent_key", ""))
+            )
+            validate_maintainer_issue_key(
+                str(relation.get("effective_parent_key", ""))
+            )
         existing_external_id = str(
             getattr(plan, "existing_external_id", "") or ""
         )
