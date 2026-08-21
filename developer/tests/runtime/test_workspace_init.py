@@ -711,6 +711,28 @@ class WorkspaceInitTest(unittest.TestCase):
             self.assertIn("初始化摘要", stderr)
             self.assertNotIn("确认使用以上信息", stderr)
 
+    def test_interactive_init_does_not_prompt_explicit_project_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.prepare_install(root, with_install_identity=True)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            stdin = TTYStringIO("")
+            exit_code, payload, stderr, _ = self.run_cli(
+                (
+                    "--workspace-root",
+                    str(workspace),
+                    "workspace",
+                    "init",
+                    "--project",
+                    "tapdata",
+                ),
+                stdin=stdin,
+            )
+            self.assertEqual(0, exit_code, payload)
+            self.assertEqual("tapdata", payload["project_profile"])
+            self.assertNotIn("Project Profile（可选", stderr)
+
     def test_workspace_init_rejects_removed_confirm_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             self.prepare_install(Path(temporary))
