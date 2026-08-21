@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from ao_maint.jira.model import plain_text
@@ -13,6 +14,165 @@ _INLINE_PATTERN = re.compile(
 _ORDERED_LIST_PATTERN = re.compile(r"^(\d+)[.)]\s+(.*)$")
 _TASK_LIST_PATTERN = re.compile(r"^-?\s*\[([ xX])\]\s+(.*)$")
 _RULE_PATTERN = re.compile(r"^-{3,}$")
+
+
+@dataclass(frozen=True)
+class AdfRender:
+    """可审查的 ADF 回读结果；未知结构绝不静默降级。"""
+
+    markdown: str
+    plain_text: str
+    complete: bool
+    unsupported_node_types: tuple[str, ...]
+
+
+def adf_to_markdown(value: dict[str, Any] | None) -> AdfRender:
+    """严格转换 Jira ADF，为 Description 展示提供可解释的读模型。
+
+    原始 ADF 由调用方一并保留。这里遇到未知节点或 mark 时保留已知文本、
+    插入醒目占位，并将 ``complete`` 置为 False，以阻止调用方把结果当作
+    可安全覆盖的完整 Description。
+    """
+
+    if value is None:
+        return AdfRender("", "", True, ())
+    unknown: set[str] = set()
+
+    def unsupported(kind: str, value_type: Any) -> str:
+        label = str(value_type or "missing")
+        unknown.add(f"{kind}:{label}")
+        return f"[不支持的 ADF {kind}: {label}]"
+
+    def inline(node: Any) -> str:
+        if not isinstance(node, dict):
+            return unsupported("node", "invalid")
+        node_type = node.get("type")
+        if node_type == "text":
+            text = node.get("text")
+            if not isinstance(text, str):
+                return unsupported("node", "text-without-text")
+            marks = node.get("marks", [])
+            if not isinstance(marks, list):
+                return unsupported("mark", "invalid") + text
+            for mark in reversed(marks):
+                if not isinstance(mark, dict):
+                    text = unsupported("mark", "invalid") + text
+                    continue
+                mark_type = mark.get("type")
+                if mark_type == "strong":
+                    text = f"**{text}**"
+                elif mark_type == "em":
+                    text = f"*{text}*"
+                elif mark_type == "code":
+                    text = f"`{text}`"
+                elif mark_type == "strike":
+                    text = f"~~{text}~~"
+                elif mark_type == "underline":
+                    text = f"+{text}+"
+                elif mark_type == "subsup":
+                    subtype = (
+                        mark.get("attrs", {}).get("type")
+                        if isinstance(mark.get("attrs"), dict)
+                        else None
+                    )
+                    if subtype == "sup":
+                        text = f"^{text}^"
+                    elif subtype == "sub":
+                        text = f"~{text}~"
+                    else:
+                        text = unsupported("mark", "subsup") + text
+                elif mark_type == "link":
+                    href = (
+                        mark.get("attrs", {}).get("href")
+                        if isinstance(mark.get("attrs"), dict)
+                        else None
+                    )
+                    if isinstance(href, str) and href:
+                        text = f"[{text}]({href})"
+                    else:
+                        text = unsupported("mark", "link") + text
+                else:
+                    text = unsupported("mark", mark_type) + text
+            return text
+        if node_type == "hardBreak":
+            return "\n"
+        return unsupported("node", node_type)
+
+    def children_inline(node: dict[str, Any]) -> str:
+        content = node.get("content", [])
+        if not isinstance(content, list):
+            return unsupported("node", f"{node.get('type')}-content")
+        return "".join(inline(item) for item in content)
+
+    def block(node: Any, indent: str = "") -> str:
+        if not isinstance(node, dict):
+            return unsupported("node", "invalid")
+        node_type = node.get("type")
+        if node_type == "paragraph":
+            return children_inline(node)
+        if node_type == "heading":
+            attrs = node.get("attrs", {})
+            level = attrs.get("level", 2) if isinstance(attrs, dict) else 2
+            level = level if isinstance(level, int) and 1 <= level <= 6 else 2
+            return f"{'#' * level} {children_inline(node)}".rstrip()
+        if node_type == "rule":
+            return "---"
+        if node_type == "codeBlock":
+            return f"```\n{children_inline(node)}\n```"
+        if node_type in {"bulletList", "orderedList", "taskList"}:
+            content = node.get("content", [])
+            if not isinstance(content, list):
+                return unsupported("node", f"{node_type}-content")
+            order = 1
+            if node_type == "orderedList":
+                attrs = node.get("attrs", {})
+                if isinstance(attrs, dict) and isinstance(attrs.get("order"), int):
+                    order = attrs["order"]
+            lines: list[str] = []
+            for index, item in enumerate(content):
+                if not isinstance(item, dict):
+                    lines.append(indent + unsupported("node", "invalid"))
+                    continue
+                if node_type == "taskList":
+                    if item.get("type") != "taskItem":
+                        lines.append(indent + unsupported("node", item.get("type")))
+                        continue
+                    attrs = item.get("attrs", {})
+                    state = attrs.get("state") if isinstance(attrs, dict) else None
+                    if state not in {"TODO", "DONE"}:
+                        lines.append(indent + unsupported("node", "taskItem-state"))
+                    marker = "x" if state == "DONE" else " "
+                    lines.append(f"{indent}- [{marker}] {children_inline(item)}".rstrip())
+                    continue
+                if item.get("type") != "listItem":
+                    lines.append(indent + unsupported("node", item.get("type")))
+                    continue
+                item_content = item.get("content", [])
+                if not isinstance(item_content, list):
+                    lines.append(indent + unsupported("node", "listItem-content"))
+                    continue
+                first = block(item_content[0], indent + "  ") if item_content else ""
+                prefix = f"{order + index}. " if node_type == "orderedList" else "- "
+                lines.append(f"{indent}{prefix}{first}".rstrip())
+                for nested in item_content[1:]:
+                    lines.append(block(nested, indent + "  "))
+            return "\n".join(lines)
+        return unsupported("node", node_type)
+
+    if not isinstance(value, dict) or value.get("type") != "doc":
+        markdown = unsupported("node", value.get("type") if isinstance(value, dict) else "invalid")
+    else:
+        content = value.get("content", [])
+        if not isinstance(content, list):
+            markdown = unsupported("node", "doc-content")
+        else:
+            markdown = "\n\n".join(block(node) for node in content).strip()
+    return AdfRender(
+        markdown=markdown,
+        plain_text=plain_text(value),
+        complete=not unknown,
+        unsupported_node_types=tuple(sorted(unknown)),
+    )
 
 
 def markdown_to_adf(markdown: str) -> dict[str, Any]:

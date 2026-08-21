@@ -498,8 +498,10 @@ class MaintainerJiraService:
         _require_chinese(content, "Jira 任务描述")
         normalized = content.rstrip()
         markdown = f"{normalized}\n"
-        existing_text = plain_text(issue.description)
-        unchanged = existing_text == _plain_text_of_markdown(markdown)
+        target_adf = markdown_to_adf(markdown)
+        unchanged = _description_semantic_sha256(issue.description) == _description_semantic_sha256(
+            target_adf
+        )
         return _build_plan(
             "jira_description",
             issue.key,
@@ -508,6 +510,10 @@ class MaintainerJiraService:
             {
                 "markdown": markdown,
                 "body_sha256": _text_sha256(_rendered_markdown_text(markdown)),
+                "expected_previous_description_sha256": _description_sha256(
+                    issue.description
+                ),
+                "target_description_sha256": _description_semantic_sha256(target_adf),
             },
             "description" if unchanged else "",
         )
@@ -519,7 +525,19 @@ class MaintainerJiraService:
         self._validate_description_plan(plan)
         issue = self.inspect_issue(plan.issue_key)
         markdown = str(plan.payload["markdown"])
-        if plain_text(issue.description) == _plain_text_of_markdown(markdown):
+        expected_previous = str(plan.payload["expected_previous_description_sha256"])
+        target = str(plan.payload["target_description_sha256"])
+        current = _description_sha256(issue.description)
+        if current != expected_previous:
+            raise RuntimeErrorResult(
+                code="jira_description_precondition_changed",
+                message="Jira 任务描述在计划确认后已发生变化",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=False,
+                required_human_action="请重新回读完整 Description、生成新计划并重新确认",
+            )
+        if _description_semantic_sha256(issue.description) == target:
             return {"external_id": "description", "created": False}
         try:
             self.client.update_description(
@@ -528,7 +546,7 @@ class MaintainerJiraService:
         except JiraTransportError as error:
             raise _unknown_write("Jira 任务描述", error) from error
         readback = self.inspect_issue(plan.issue_key)
-        if plain_text(readback.description) != _plain_text_of_markdown(markdown):
+        if _description_semantic_sha256(readback.description) != target:
             raise RuntimeErrorResult(
                 code="jira_description_readback_failed",
                 message="Jira 任务描述写入后回读不一致",
@@ -538,6 +556,22 @@ class MaintainerJiraService:
                 required_human_action="请人工核对任务描述，不要重复写入",
             )
         return {"external_id": "description", "created": True}
+
+    def readback_description(self, plan: WritePlan) -> dict[str, Any]:
+        self._validate_apply_plan(plan, plan.plan_id, "jira_description")
+        self._validate_description_plan(plan)
+        issue = self.inspect_issue(plan.issue_key)
+        matched = (
+            _description_semantic_sha256(issue.description)
+            == str(plan.payload["target_description_sha256"])
+        )
+        return {
+            "external_id": "description",
+            "created": matched,
+            "agentic_next_action": "continue_from_verified_jira_description"
+            if matched
+            else "review_jira_description_readback",
+        }
 
     def plan_comment(
         self,
@@ -984,15 +1018,31 @@ class MaintainerJiraService:
                 )
 
     def _validate_description_plan(self, plan: WritePlan) -> None:
-        if set(plan.payload) != {"markdown", "body_sha256"}:
+        expected = {
+            "markdown",
+            "body_sha256",
+            "expected_previous_description_sha256",
+            "target_description_sha256",
+        }
+        if set(plan.payload) != expected:
             raise _input_error("jira_write_plan_invalid", "Jira 任务描述计划字段无效")
         markdown = plan.payload.get("markdown")
         body_sha256 = plan.payload.get("body_sha256")
-        if not isinstance(markdown, str) or not markdown.strip() or not _is_sha256(body_sha256):
+        expected_previous = plan.payload.get("expected_previous_description_sha256")
+        target = plan.payload.get("target_description_sha256")
+        if (
+            not isinstance(markdown, str)
+            or not markdown.strip()
+            or not _is_sha256(body_sha256)
+            or not _is_sha256(expected_previous)
+            or not _is_sha256(target)
+        ):
             raise _input_error("jira_write_plan_invalid", "Jira 任务描述计划内容无效")
         _require_chinese(markdown, "Jira 任务描述")
         if body_sha256 != _text_sha256(_rendered_markdown_text(markdown)):
             raise _input_error("jira_write_plan_invalid", "Jira 任务描述正文摘要不一致")
+        if target != _description_semantic_sha256(markdown_to_adf(markdown)):
+            raise _input_error("jira_write_plan_invalid", "Jira 任务描述目标摘要不一致")
 
     def _validate_comment_plan(self, plan: WritePlan) -> None:
         if set(plan.payload) != {"category", "content", "markdown", "body_sha256"}:
@@ -1297,6 +1347,46 @@ def _rendered_markdown_text(markdown: str) -> str:
 
 def _text_sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _description_sha256(value: dict[str, Any] | None) -> str:
+    """摘要原始 Jira ADF，作为写前事实绑定，不忽略任何字段。"""
+    return _json_sha256(value)
+
+
+def _description_semantic_sha256(value: dict[str, Any] | None) -> str:
+    """摘要 Description 语义，忽略 Jira 生成的 non-semantic localId。"""
+    return _json_sha256(_normalize_description_adf(value))
+
+
+def _normalize_description_adf(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_normalize_description_adf(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    normalized: dict[str, Any] = {}
+    for key, item in value.items():
+        if key == "attrs" and isinstance(item, dict):
+            semantic_attrs = {
+                attr_key: _normalize_description_adf(attr_value)
+                for attr_key, attr_value in item.items()
+                if attr_key != "localId"
+            }
+            if semantic_attrs:
+                normalized[key] = semantic_attrs
+        else:
+            normalized[key] = _normalize_description_adf(item)
+    return normalized
+
+
+def _json_sha256(value: Any) -> str:
+    canonical = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _is_sha256(value: Any) -> bool:

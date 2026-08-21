@@ -14,6 +14,7 @@ from typing import Any
 import yaml
 
 from ao_maint.install.identity import load_maintainer_identity
+from ao_maint.jira.adf import adf_to_markdown
 from ao_maint.jira.client import JiraClient, UrllibJiraTransport
 from ao_maint.jira.config import (
     credential_status,
@@ -25,7 +26,11 @@ from ao_maint.jira.config import (
     remove_credentials,
     set_credentials,
 )
-from ao_maint.jira.service import MaintainerJiraService, WritePlan
+from ao_maint.jira.service import (
+    MaintainerJiraService,
+    WritePlan,
+    _description_sha256,
+)
 from ao_maint.jira.scope import (
     MAINTAINER_JIRA_PROJECT_KEY,
     validate_maintainer_issue_key,
@@ -88,7 +93,7 @@ def configure_jira_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
     _configure_write_actions(comment_parser, "comment")
 
     description_parser = jira_commands.add_parser("description")
-    _configure_write_actions(description_parser, "description", readback=False)
+    _configure_write_actions(description_parser, "description")
 
     worklog_parser = jira_commands.add_parser("worklog")
     _configure_write_actions(worklog_parser, "worklog")
@@ -163,6 +168,7 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
 
     if args.command == "inspect":
         issue = service.inspect_issue(args.issue_key)
+        description = adf_to_markdown(issue.description)
         return {
             "connection_id": config.connection.connection_id,
             "issue": {
@@ -173,6 +179,17 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
                 "status": issue.status,
                 "issue_type": issue.issue_type,
                 "assignee": issue.assignee,
+                "description": {
+                    "format": "atlassian_adf",
+                    "adf": issue.description,
+                    "markdown": description.markdown,
+                    "plain_text": description.plain_text,
+                    "complete": description.complete,
+                    "unsupported_node_types": list(
+                        description.unsupported_node_types
+                    ),
+                    "sha256": _description_sha256(issue.description),
+                },
             },
             "credential_status": config.credential_status(),
         }
@@ -390,6 +407,8 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
         )
     if args.command == "comment":
         result = service.readback_comment(plan)
+    elif args.command == "description":
+        result = service.readback_description(plan)
     elif args.command == "transition":
         result = service.readback_transition(plan)
     elif args.command == "create":
