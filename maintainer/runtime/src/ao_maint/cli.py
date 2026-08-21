@@ -5,6 +5,7 @@ import sys
 from typing import Sequence
 
 from ao_maint.cli_common import ArgumentParserError, HelpRequested, JsonArgumentParser
+from ao_maint.diagnose.cli import configure_diagnose_parser, execute_diagnose
 from ao_maint.install.cli import configure_install_parser, execute_install
 from ao_maint.integration.cli import configure_integration_parser, execute_integration
 from ao_maint.jira.cli import configure_jira_parser, execute_jira
@@ -23,6 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
     configure_install_parser(subparsers)
     configure_jira_parser(subparsers)
     configure_takeover_parser(subparsers)
+    configure_diagnose_parser(subparsers)
     return parser
 
 
@@ -49,6 +51,9 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         return success(operation_name(args), workplane=workspace.workplane, **state)
     if args.group == "takeover":
         state = execute_takeover(args, workspace.root)
+        return success(operation_name(args), workplane=workspace.workplane, **state)
+    if args.group == "diagnose":
+        state = execute_diagnose(args, workspace.root)
         return success(operation_name(args), workplane=workspace.workplane, **state)
     raise RuntimeErrorResult(
         code="capability_gap",
