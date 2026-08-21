@@ -777,6 +777,8 @@ class TrustedTaskRunTest(unittest.TestCase):
         self.assertNotIn("JIRA_API_TOKEN", captured["env"])  # type: ignore[operator]
         self.assertNotIn("ATLASSIAN_EMAIL", captured["env"])  # type: ignore[operator]
         self.assertNotIn("SSH_AUTH_SOCK", captured["env"])  # type: ignore[operator]
+        self.assertNotIn("GH_CONFIG_DIR", captured["env"])  # type: ignore[operator]
+        self.assertNotIn("GIT_SSH_COMMAND", captured["env"])  # type: ignore[operator]
         self.assertNotIn("SAFE", captured["env"])  # type: ignore[operator]
         self.assertNotEqual("/sensitive/home", captured["env"]["HOME"])  # type: ignore[index]
         self.assertNotIn("/attacker/bin", captured["env"]["PATH"])  # type: ignore[index]

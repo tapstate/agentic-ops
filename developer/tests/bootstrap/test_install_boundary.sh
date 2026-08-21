@@ -66,6 +66,20 @@ case "$subcommand" in
 esac
 EOF
 chmod 0755 "$transport_git_dir/git"
+cat > "$transport_git_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$#" -ge 4 ] && [ "$1" = "api" ] && [ "$2" = "user" ] && \
+  [ "$3" = "--jq" ] && [ "$4" = ".login" ]; then
+  printf '%s\n' 'install-auth-test'
+  exit 0
+fi
+printf 'unexpected fake gh invocation: %s\n' "$*" >&2
+exit 1
+EOF
+chmod 0755 "$transport_git_dir/gh"
+git config --file "$test_home/.gitconfig" user.name 'Install Auth Test'
+git config --file "$test_home/.gitconfig" user.email developer@example.test
 
 test_python="${AGENTIC_OPS_TEST_PYTHON:-$repo_root/developer/.venv/bin/python}"
 if [ ! -x "$test_python" ]; then
@@ -115,6 +129,7 @@ PATH="$transport_git_dir:$PATH" \
     --git-name 'Install Auth Test' \
     --git-email developer@example.test \
     --github-login install-auth-test \
+    --execution-auth-mode global \
     --token-stdin \
     --non-interactive \
     >"$test_root/authorized-install.out"
