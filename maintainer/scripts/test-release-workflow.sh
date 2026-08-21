@@ -150,6 +150,7 @@ cat > "$fixture/$verification" <<EOF
 set -euo pipefail
 printf '%s\n' '$verification_id' >> "\${FAKE_VERIFY_LOG:?}"
 if [ "\${FAKE_VERIFY_FAIL_ID:-}" = '$verification_id' ]; then
+  printf 'fixture verification failure: %s\n' '$verification_id' >&2
   exit 17
 fi
 EOF
@@ -640,6 +641,19 @@ grep -q 'release_verification_failed' "$test_root/failed-prepare.err" || {
   cat "$test_root/failed-prepare.err" >&2
   fail "release prepare 验证失败未返回稳定失败码"
 }
+grep -q '"failed_check":"resource_contracts"' "$test_root/failed-prepare.err" ||
+  fail "release prepare 验证失败未输出精确失败项"
+grep -q '"exit_code":17' "$test_root/failed-prepare.err" ||
+  fail "release prepare 验证失败未输出子命令退出码"
+grep -q '重新执行原命令' "$test_root/failed-prepare.err" ||
+  fail "release prepare 验证失败仍错误要求固定从 publish 重试"
+failed_verification_log="$(sed -n 's/.*"log_file":"\([^"]*\)".*/\1/p' "$test_root/failed-prepare.err" | tail -n 1)"
+test -n "$failed_verification_log" && test -f "$failed_verification_log" ||
+  fail "release prepare 验证失败未保留可读取日志"
+grep -q 'fixture verification failure: maintainer-scripts-test-resources.sh' \
+  "$failed_verification_log" ||
+  fail "release prepare 验证日志不包含具体子测试失败"
+rm -f "$failed_verification_log"
 test -z "$(git -C "$fixture" tag --list v9.6)" ||
   fail "release prepare 验证失败前不得创建版本 Tag"
 expected_failed_prepare="$(printf '%s\n' \
