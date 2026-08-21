@@ -45,7 +45,7 @@
 ### 主流程
 
 1. 调用侧先通过已登录的 `gh` 完整下载脚本并确认成功，再交给 `bash`；404、未授权或路径错误响应不得进入 Shell。安装脚本随后读取 Bootstrap 公共库并验证 GitHub 登录与仓库访问。
-2. 首次安装时在 `~/.agentic-ops` 创建 managed clone，并启用 sparse checkout。
+2. 首次安装时在 `~/.agentic-ops` 创建 managed clone，并启用 sparse checkout；`--install-home <path>` 可显式指定隔离安装目录，且优先于兼容用的 `AGENTIC_OPS_HOME`。
 3. sparse checkout 只检出 `developer/`、只读 `shared/` JSON 协议及运行所需根版本元数据。
 4. Bootstrap 安装或定位 `uv`，按 `.python-version` 与 `developer/uv.lock` 准备 developer 独立 `.venv`。
 5. Bootstrap 生成 `~/.agentic-ops/bin/ao-work`。
@@ -70,7 +70,7 @@
 - 安装级 SSH 通过 `ssh.github.com:443` 且不使用全局 Agent；项目构建和测试子进程看不到安装 SSH/`gh` 凭证。
 - 更新需要人工确认，回滚不破坏业务项目工作空间状态。
 - 日志不包含 secrets、tokens、private keys 或原始敏感响应。
-- `gh api ... install.sh | bash` 的真实管道入口可执行；首次默认安装与重复安装不会重复写 PATH，自定义安装不污染 shell profile。
+- `gh api ... install.sh | bash` 的真实管道入口可执行；生产入口显式支持 `--install-home <path>`，首次默认安装与重复安装不会重复写 PATH，自定义安装不污染 shell profile。
 
 ### 保护行为
 

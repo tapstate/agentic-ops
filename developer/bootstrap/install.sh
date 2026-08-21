@@ -12,7 +12,10 @@ NEW_INSTALL=0
 usage() {
   cat <<'USAGE'
 用法：
-  install.sh [授权参数]
+  install.sh [--install-home <path>] [授权参数]
+
+安装参数：
+  --install-home <path>  安装目录（默认 ~/.agentic-ops；优先于 AGENTIC_OPS_HOME）
 
 可选授权参数（安装完成后原样转交 ao-work auth）：
   --agent-id <id>
@@ -32,6 +35,15 @@ USAGE
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --install-home)
+      if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+        printf 'AgenticOps：安装参数缺少目录：--install-home\n' >&2
+        usage >&2
+        exit 2
+      fi
+      INSTALL_DIR="$2"
+      shift 2
+      ;;
     --agent-id|--jira-email|--git-name|--git-email|--github-login|--execution-auth-mode|--confirm-replace-authorization)
       if [ "$#" -lt 2 ] || [ -z "$2" ]; then
         printf 'AgenticOps：授权参数缺少取值：%s\n' "$1" >&2

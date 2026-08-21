@@ -20,7 +20,8 @@
 
 ## 2. 安装 developer 工作面
 
-提供两种安装方式；两者都安装稳定 `main` 的 developer-only managed clone 到 `~/.agentic-ops`。
+提供两种安装方式；默认把稳定 `main` 的 developer-only managed clone 安装到 `~/.agentic-ops`，
+需要隔离时可显式指定其它目录。
 
 ### 方式一：极简参数（推荐）
 
@@ -39,12 +40,36 @@ gh auth login -h github.com -p ssh -s repo
 
 不传授权参数时，有终端会直接进入 `ao-work auth` 引导；无终端只完成安装并输出授权待办。
 
+### 指定安装目录
+
+需要为不同研发员或测试环境隔离安装时，使用 `--install-home`。该参数优先于旧的
+`AGENTIC_OPS_HOME` 环境变量；后者仍兼容，供已有自动化脚本使用。自定义目录不会修改 shell
+profile，当前会话需自行加入 PATH：
+
+```sh
+INS_HOME="$HOME/.agentic-ops-custom"
+
+(
+  set -e
+  bootstrap="$(gh api -H 'Accept: application/vnd.github.raw' \
+    '/repos/tapstate/agentic-ops/contents/developer/bootstrap/install.sh?ref=main')"
+  printf '%s\n' "$bootstrap" | bash -s -- \
+    --install-home "$INS_HOME"
+)
+
+export PATH="$INS_HOME/bin:$PATH"
+```
+
+之后调用该自定义安装中的 `update.sh` 或 `rollback.sh` 时，也要显式传入同一
+`AGENTIC_OPS_HOME="$INS_HOME"`，避免这些独立 Bootstrap 回退到默认目录。
+
 ### 方式二：全参数（非交互）
 
 适合脚本或 CI。先把远程 Bootstrap 下载到临时文件，再通过该脚本的标准输入传入 token；不能直接把脚本文本和 token 同时通过一个管道传给 `bash`：
 
 ```sh
 gh auth login -h github.com -p ssh -s repo
+INS_HOME="$HOME/.agentic-ops-custom"
 
 (
   set -eu
@@ -55,6 +80,7 @@ gh auth login -h github.com -p ssh -s repo
     > "$bootstrap_file"
   test -s "$bootstrap_file"
   printf '%s\n' "$JIRA_API_TOKEN" | bash "$bootstrap_file" \
+    --install-home "$INS_HOME" \
     --agent-id <agent-id> \
     --jira-email <jira-account-email> \
     --git-name <git-author-and-committer-name> \

@@ -104,19 +104,15 @@ printf '%s\n' \
   > "$fake_uv"
 chmod 0755 "$fake_uv"
 
-HOME="$test_home" \
-AGENTIC_OPS_HOME="$install_root" \
-AGENTIC_OPS_UV="$fake_uv" \
-AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
-AO_TEST_REAL_GIT="$real_git" \
-AO_TEST_FIXTURE_REPOSITORY="$source_repo" \
-AO_TEST_OFFICIAL_REPOSITORY="$official_repo_url" \
-PATH="$transport_git_dir:$PATH" \
-  bash "$source_repo/developer/bootstrap/install.sh" >/dev/null
+if bash "$source_repo/developer/bootstrap/install.sh" --install-home \
+    >"$test_root/missing-install-home.out" \
+    2>"$test_root/missing-install-home.err"; then
+  echo "--install-home 缺少目录时必须拒绝执行" >&2
+  exit 1
+fi
+grep -q '安装参数缺少目录：--install-home' "$test_root/missing-install-home.err"
 
-printf '%s\n' 'test-token-secret' | \
 HOME="$test_home" \
-AGENTIC_OPS_HOME="$authorized_install_root" \
 AGENTIC_OPS_UV="$fake_uv" \
 AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
 AO_TEST_REAL_GIT="$real_git" \
@@ -124,6 +120,19 @@ AO_TEST_FIXTURE_REPOSITORY="$source_repo" \
 AO_TEST_OFFICIAL_REPOSITORY="$official_repo_url" \
 PATH="$transport_git_dir:$PATH" \
   bash "$source_repo/developer/bootstrap/install.sh" \
+    --install-home "$install_root" >/dev/null
+
+printf '%s\n' 'test-token-secret' | \
+HOME="$test_home" \
+AGENTIC_OPS_HOME="$test_root/environment-install-root" \
+AGENTIC_OPS_UV="$fake_uv" \
+AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
+AO_TEST_REAL_GIT="$real_git" \
+AO_TEST_FIXTURE_REPOSITORY="$source_repo" \
+AO_TEST_OFFICIAL_REPOSITORY="$official_repo_url" \
+PATH="$transport_git_dir:$PATH" \
+  bash "$source_repo/developer/bootstrap/install.sh" \
+    --install-home "$authorized_install_root" \
     --agent-id install-auth-test \
     --jira-email developer@example.test \
     --git-name 'Install Auth Test' \
@@ -137,6 +146,7 @@ PATH="$transport_git_dir:$PATH" \
 grep -q '"authorization_status":"configured"' "$test_root/authorized-install.out"
 test -f "$authorized_install_root/user/identity.yaml"
 test -f "$authorized_install_root/user/.env"
+test ! -e "$test_root/environment-install-root"
 if stat -f '%Lp' "$authorized_install_root/user/identity.yaml" >/dev/null 2>&1; then
   test "$(stat -f '%Lp' "$authorized_install_root/user/identity.yaml")" = "600"
   test "$(stat -f '%Lp' "$authorized_install_root/user/.env")" = "600"
