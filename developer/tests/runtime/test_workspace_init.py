@@ -331,7 +331,6 @@ class WorkspaceInitTest(unittest.TestCase):
                 "--github-login",
                 "developer-one",
                 "--token-stdin",
-                "--confirm",
             )
             exit_code, payload, _, raw = self.run_cli(common)
             self.assertEqual(0, exit_code)
@@ -423,7 +422,6 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--github-login",
                     "progress-agent",
                     "--token-stdin",
-                    "--confirm",
                 )
             )
             self.assertEqual(0, exit_code, payload)
@@ -462,7 +460,6 @@ class WorkspaceInitTest(unittest.TestCase):
             "--github-login",
             "skip-denied",
             "--token-stdin",
-            "--confirm",
         )
 
     def test_pool_mode_init_persists_source_pool_root_to_user_config(self) -> None:
@@ -596,7 +593,6 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--github-login",
                     "developer-explicit",
                     "--token-stdin",
-                    "--confirm",
                 )
             )
             self.assertEqual(0, exit_code, payload)
@@ -630,7 +626,6 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--github-login",
                     "developer-a",
                     "--token-stdin",
-                    "--confirm",
                 )
             )
             self.assertEqual(0, first_result[0], first_result[1])
@@ -662,7 +657,6 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--github-login",
                     "developer-b",
                     "--token-stdin",
-                    "--confirm",
                 )
             )
             self.assertEqual(0, first_shared[0], first_shared[1])
@@ -690,20 +684,19 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--github-login",
                     "developer-c",
                     "--token-stdin",
-                    "--confirm",
                 )
             )
             self.assertEqual(2, second_result[0])
             self.assertEqual("source_root_conflict", second_result[1]["code"])
             self.assertFalse((third / ".agentic-ops" / "agent.json").exists())
 
-    def test_zero_parameter_interactive_entry_uses_hostname_default_and_confirms(self) -> None:
+    def test_zero_parameter_interactive_entry_only_prompts_missing_profile(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             install = self.prepare_install(root, with_install_identity=True)
             workspace = root / "workspace"
             workspace.mkdir()
-            stdin = TTYStringIO("tapdata\ny\n")
+            stdin = TTYStringIO("tapdata\n")
             exit_code, payload, stderr, _ = self.run_cli(
                 (
                     "--workspace-root",
@@ -716,7 +709,49 @@ class WorkspaceInitTest(unittest.TestCase):
             self.assertEqual(0, exit_code)
             self.assertEqual("harsen-mini-test-bot", payload["agent_id"])
             self.assertIn("初始化摘要", stderr)
-            self.assertIn("确认使用以上信息", stderr)
+            self.assertNotIn("确认使用以上信息", stderr)
+
+    def test_workspace_init_rejects_removed_confirm_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            self.prepare_install(Path(temporary))
+            exit_code, payload, _, _ = self.run_cli(
+                ("workspace", "init", "--confirm"),
+                migrate_legacy_args=False,
+            )
+            self.assertEqual(2, exit_code)
+            self.assertEqual("invalid_arguments", payload["code"])
+
+    def test_non_interactive_only_requires_confirmation_for_different_complete_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.prepare_install(root)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            initial = self.run_cli(self._init_common_args(workspace, "config-agent"))
+            self.assertEqual(0, initial[0], initial[1])
+            same = self.run_cli(self._init_common_args(workspace, "config-agent"))
+            self.assertNotEqual(
+                "existing_config_confirmation_required", same[1].get("code")
+            )
+            changed_pool = root / "other-pool"
+            changed = self.run_cli(
+                (*self._init_common_args(workspace, "config-agent"), "--source-pool-root", str(changed_pool))
+            )
+            self.assertEqual(2, changed[0])
+            self.assertEqual("existing_config_confirmation_required", changed[1]["code"])
+            differences = changed[1]["differences"]
+            self.assertTrue(any(item["field"] == "source_root" for item in differences))
+            confirmed = self.run_cli(
+                (
+                    *self._init_common_args(workspace, "config-agent"),
+                    "--source-pool-root",
+                    str(changed_pool),
+                    "--confirm-existing-config",
+                )
+            )
+            self.assertNotEqual(
+                "existing_config_confirmation_required", confirmed[1].get("code")
+            )
 
     def test_agent_id_collision_blocks_second_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -739,7 +774,6 @@ class WorkspaceInitTest(unittest.TestCase):
                         "--jira-email",
                         "developer@example.test",
                         "--token-stdin",
-                        "--confirm",
                     )
                 )
                 self.assertEqual(expected, result[0])
@@ -767,7 +801,6 @@ class WorkspaceInitTest(unittest.TestCase):
                         "tapdata",
                         "--agent-id",
                         "developer-2",
-                        "--confirm",
                     ),
                     stdin=io.StringIO(""),
                 )
@@ -795,7 +828,6 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--jira-email",
                     "not-an-email",
                     "--token-stdin",
-                    "--confirm",
                 )
             )
             self.assertEqual(2, result[0])
@@ -819,7 +851,6 @@ class WorkspaceInitTest(unittest.TestCase):
                     "tapdata",
                     "--agent-id",
                     "removed",
-                    "--confirm",
                 ),
                 migrate_legacy_args=False,
             )
@@ -851,7 +882,6 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--jira-email",
                     "developer@example.test",
                     "--token-stdin",
-                    "--confirm",
                 )
             )
             self.assertEqual(2, result[0])
@@ -882,7 +912,6 @@ class WorkspaceInitTest(unittest.TestCase):
                             "--jira-email",
                             "developer@example.test",
                             "--token-stdin",
-                            "--confirm",
                         )
                     )
                     self.assertEqual(2, result[0])
@@ -913,7 +942,6 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--jira-email",
                     "developer@example.test",
                     "--token-stdin",
-                    "--confirm",
                 ),
                 clone_source_marker=True,
             )
@@ -949,7 +977,6 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--jira-email",
                     "developer@example.test",
                     "--token-stdin",
-                    "--confirm",
                 )
             )
             self.assertEqual(2, result[0])
@@ -976,7 +1003,7 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--non-interactive", "--project", "tapdata",
                     "--agent-id", "agents-boundary-test",
                     "--jira-email", "developer@example.test",
-                    "--token-stdin", "--confirm",
+                    "--token-stdin",
                 )
             )
             self.assertEqual(2, result[0])
@@ -1003,7 +1030,7 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--non-interactive", "--project", "tapdata",
                     "--agent-id", "managed-path-test",
                     "--jira-email", "developer@example.test",
-                    "--token-stdin", "--confirm",
+                    "--token-stdin",
                 )
             )
             self.assertEqual(2, result[0])
@@ -1028,7 +1055,7 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--non-interactive", "--project", "tapdata",
                     "--agent-id", "index-path-test",
                     "--jira-email", "developer@example.test",
-                    "--token-stdin", "--confirm",
+                    "--token-stdin",
                 )
             )
             self.assertEqual(2, result[0])
@@ -1048,7 +1075,7 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--non-interactive", "--project", "tapdata",
                     "--agent-id", "profile-drift-test",
                     "--jira-email", "developer@example.test",
-                    "--token-stdin", "--confirm",
+                    "--token-stdin",
                 )
             )
             self.assertEqual(0, init[0])
@@ -1096,7 +1123,6 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--jira-email",
                     "developer@example.test",
                     "--token-stdin",
-                    "--confirm",
                 )
             )
             self.assertEqual(2, result[0])
@@ -1159,7 +1185,6 @@ class WorkspaceInitTest(unittest.TestCase):
                         "--non-interactive",
                         "--project",
                         "tapdata",
-                        "--confirm",
                     )
                 )
             payload = json.loads(stdout.getvalue())
@@ -1220,7 +1245,6 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--non-interactive",
                     "--project",
                     "tapdata",
-                    "--confirm",
                     )
                 )
             payload = json.loads(stdout.getvalue())
@@ -1264,7 +1288,7 @@ class WorkspaceInitTest(unittest.TestCase):
                 "--workspace-root", str(workspace), "workspace", "init",
                 "--non-interactive", "--project", "tapdata",
                 "--agent-id", "developer-skill-boundary",
-                "--jira-email", "developer@example.test", "--token-stdin", "--confirm",
+                "--jira-email", "developer@example.test", "--token-stdin",
             )
             self.assertEqual(0, self.run_cli(common)[0])
             missing = workspace / ".agents" / "skills" / "configure-authorization" / "SKILL.md"
@@ -1308,7 +1332,6 @@ class WorkspaceInitTest(unittest.TestCase):
                     "tapdata",
                     "--agent-id",
                     "harsen-mini-test-bot",
-                    "--confirm",
                 ),
                 stdin=io.StringIO(""),
             )
@@ -1335,7 +1358,7 @@ class WorkspaceInitTest(unittest.TestCase):
                 "--workspace-root", str(workspace), "workspace", "init",
                 "--non-interactive", "--project", "tapdata",
                 "--agent-id", "developer-rule-boundary",
-                "--jira-email", "developer@example.test", "--token-stdin", "--confirm",
+                "--jira-email", "developer@example.test", "--token-stdin",
             )
             self.assertEqual(0, self.run_cli(common)[0])
             agents = workspace / "AGENTS.md"

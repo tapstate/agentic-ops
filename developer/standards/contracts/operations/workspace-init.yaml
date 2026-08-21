@@ -1,5 +1,5 @@
 operation: workspace_init
-version: 4
+version: 5
 workplane: developer
 allowed_states:
   - uninitialized
@@ -20,18 +20,10 @@ inputs:
     default: user_config_source_pool_root_or_environment
     note: 池模式必配；未配置时阻断 source_pool_root_invalid（无兼容回退）。目录不存在时由 init 自动创建并写入容器 README（preflight 只读校验、不创建）。
 confirmation:
-  required_fields:
-    - install_identity_ref
-    - workspace_root
-    - project_profile
-    - jira_base_url
-    - jira_site
-    - verified_jira_account_id
-    - jira_project
-    - masked_jira_account
-    - repository
-    - source_root
-    - source_pool_root
+  only_when: existing_complete_workspace_config_would_be_overwritten
+  flag: --confirm-existing-config
+  interactive_behavior: show_field_differences_then_prompt_once
+  non_interactive_behavior: existing_config_confirmation_required
 preflight:
   side_effects: none
   # source_pool_members_remote：逐仓库只读可达性检查（ls-remote）。无权限（403/404/

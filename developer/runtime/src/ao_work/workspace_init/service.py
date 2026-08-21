@@ -644,18 +644,27 @@ class WorkspaceInitializer:
             "workspace_entry": str(WORKSPACE_ENTRY),
             "install_entry_sha256": candidate.install_entry_sha256,
         }
-        same = all(
-            existing.get(key) == value
+        differences = [
+            {
+                "field": key,
+                "existing": str(existing.get(key, "")),
+                "candidate": str(value),
+            }
             for key, value in expected.items()
-        )
-        if not same and not confirmed:
+            if existing.get(key) != value
+        ]
+        if differences and not confirmed:
             raise _blocked(
                 "existing_config_confirmation_required",
                 "工作空间已有不同的 AgenticOps 配置",
                 "请核对初始化摘要并明确确认覆盖已有配置",
+                details={"differences": differences},
             )
         checks.append(
-            {"check": "existing_config", "status": "same" if same else "confirmed"}
+            {
+                "check": "existing_config",
+                "status": "same" if not differences else "confirmed",
+            }
         )
 
     def _check_existing_jira_account(
