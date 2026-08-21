@@ -811,7 +811,10 @@ release_find_merged_pr() {
   local preferred_merge="$1" preferred_tag="$2" rows number url state base head merge
   rows="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list --repo tapstate/agentic-ops --base main \
     --state merged --limit 100 --json number,url,state,baseRefName,headRefOid,mergeCommit \
-    --jq '.[] | [.number,.url,.state,.baseRefName,.headRefOid,.mergeCommit.oid] | @tsv' 2>/dev/null)" || return 1
+    --jq '.[] | [.number,.url,.state,.baseRefName,.headRefOid,.mergeCommit.oid] | @tsv' 2>/dev/null)" || {
+    release_fail "release_pr_state_read_failed" "state_inspection" "无法读取已合并 PR 状态" "请检查 GitHub 权限和网络后重新执行 release.sh inspect；不得据此认定 PR 缺失"
+    return 2
+  }
   while IFS=$'\t' read -r number url state base head merge; do
     [ -n "$number" ] || continue
     if [ "$merge" = "$preferred_merge" ] || { [ -n "$preferred_tag" ] && [ "$head" = "$preferred_tag" ]; }; then
@@ -856,7 +859,7 @@ release_candidate_is_in_main() {
 release_inspect_state() {
   local repo_root="$1" version="$2"
   local release_branch="release/$version"
-  local develop_head main_head local_tag local_release remote_release release_head state next_command open_pr_status
+  local develop_head main_head local_tag local_release remote_release release_head state next_command open_pr_status merged_pr_status
 
   git -C "$repo_root" fetch origin main develop >/dev/null 2>&1 || {
     release_fail "release_state_fetch_failed" "state_inspection" "无法刷新发布状态所需远端引用" "请检查网络后重新执行 release.sh inspect"
@@ -878,9 +881,13 @@ release_inspect_state() {
     if [ "$RELEASE_REMOTE_TAG_ANNOTATED" != "true" ] || ! git -C "$repo_root" merge-base --is-ancestor "$RELEASE_REMOTE_TAG_COMMIT" origin/main; then
       state="release_remote_tag_conflict"; next_command=""
     elif [ "$local_tag" != "$RELEASE_REMOTE_TAG_COMMIT" ] || [ "$(git -C "$repo_root" cat-file -t "refs/tags/$version" 2>/dev/null || true)" != "tag" ]; then
-      if release_find_merged_pr "$release_head" "$RELEASE_REMOTE_TAG_COMMIT"; then
+      merged_pr_status=0
+      release_find_merged_pr "$release_head" "$RELEASE_REMOTE_TAG_COMMIT" || merged_pr_status=$?
+      if [ "$merged_pr_status" -eq 0 ]; then
         state="release_local_tag_repair_required"
         next_command="maintainer/scripts/release.sh recover --version $version --merged-pr $RELEASE_RECOVERY_PR_NUMBER --allow-soft-gate"
+      elif [ "$merged_pr_status" -eq 2 ]; then
+        return 1
       else
         state="release_merged_pr_missing"; next_command=""
       fi
@@ -888,13 +895,17 @@ release_inspect_state() {
       state="release_completed"; next_command=""
     fi
   elif git -C "$repo_root" merge-base --is-ancestor "$release_head" origin/main; then
-    if release_find_merged_pr "$release_head" "$local_tag"; then
+    merged_pr_status=0
+    release_find_merged_pr "$release_head" "$local_tag" || merged_pr_status=$?
+    if [ "$merged_pr_status" -eq 0 ]; then
       if [ "$local_tag" != "$RELEASE_RECOVERY_PR_HEAD" ]; then
         state="release_local_tag_repair_required"
       else
         state="release_candidate_already_in_main"
       fi
       next_command="maintainer/scripts/release.sh recover --version $version --merged-pr $RELEASE_RECOVERY_PR_NUMBER --allow-soft-gate"
+    elif [ "$merged_pr_status" -eq 2 ]; then
+      return 1
     else
       state="release_merged_pr_missing"; next_command=""
     fi
