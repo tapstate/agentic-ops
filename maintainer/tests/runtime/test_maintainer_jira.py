@@ -390,6 +390,95 @@ class MaintainerJiraServiceTest(unittest.TestCase):
         result2 = service.apply_description(plan2, plan2.plan_id)
         self.assertEqual(False, result2["created"])
 
+    def test_description_plan_binds_previous_adf_and_blocks_drift(self) -> None:
+        service, transport, _client = self._service()
+        plan = service.plan_description(
+            "AO-11",
+            "idem-desc-drift",
+            "## 背景\n\n这是新的任务描述。",
+            maintainer_run_id="maint-test-1",
+        )
+        self.assertIn("expected_previous_description_sha256", plan.payload)
+        self.assertIn("target_description_sha256", plan.payload)
+        assert transport.issue is not None
+        fields = transport.issue["fields"]
+        assert isinstance(fields, dict)
+        fields["description"] = {
+            "type": "doc",
+            "version": 1,
+            "content": [{"type": "paragraph", "content": [{"type": "text", "text": "他人更新"}]}],
+        }
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.apply_description(plan, plan.plan_id)
+        self.assertEqual("jira_description_precondition_changed", captured.exception.code)
+        self.assertNotIn(
+            ("PUT", "/rest/api/3/issue/AO-11"), transport.requests
+        )
+
+    def test_description_readback_rejects_same_text_with_different_structure(self) -> None:
+        service, transport, client = self._service()
+        plan = service.plan_description(
+            "AO-11",
+            "idem-desc-structure",
+            "## 新标题",
+            maintainer_run_id="maint-test-1",
+        )
+        original_update = client.update_description
+
+        def update_with_nonsemantic_structure(issue_key: str, description: dict[str, Any]) -> None:
+            original_update(issue_key, description)
+            assert transport.issue is not None
+            fields = transport.issue["fields"]
+            assert isinstance(fields, dict)
+            fields["description"] = {
+                "type": "doc",
+                "version": 1,
+                "content": [
+                    {
+                        "type": "paragraph",
+                        "content": [{"type": "text", "text": "新标题"}],
+                    }
+                ],
+            }
+
+        with mock.patch.object(client, "update_description", side_effect=update_with_nonsemantic_structure):
+            with self.assertRaises(RuntimeErrorResult) as captured:
+                service.apply_description(plan, plan.plan_id)
+        self.assertEqual("jira_description_readback_failed", captured.exception.code)
+
+    def test_description_readback_accepts_jira_generated_local_id_normalization(self) -> None:
+        service, transport, client = self._service()
+        plan = service.plan_description(
+            "AO-11",
+            "idem-desc-task-local-id",
+            "- [ ] 待办事项\n\n```\n命令\n```",
+            maintainer_run_id="maint-test-1",
+        )
+        original_update = client.update_description
+
+        def update_with_jira_local_ids(issue_key: str, description: dict[str, Any]) -> None:
+            original_update(issue_key, description)
+            assert transport.issue is not None
+            fields = transport.issue["fields"]
+            assert isinstance(fields, dict)
+            description = fields["description"]
+            assert isinstance(description, dict)
+            content = description["content"]
+            assert isinstance(content, list)
+            task_list = content[0]
+            assert isinstance(task_list, dict)
+            task_list["attrs"]["localId"] = "jira-generated-list-id"
+            task_list["content"][0]["attrs"]["localId"] = "jira-generated-item-id"
+            code_block = content[1]
+            assert isinstance(code_block, dict)
+            code_block["attrs"] = {"localId": "jira-generated-code-id"}
+
+        with mock.patch.object(client, "update_description", side_effect=update_with_jira_local_ids):
+            result = service.apply_description(plan, plan.plan_id)
+        self.assertTrue(result["created"])
+        readback = service.readback_description(plan)
+        self.assertTrue(readback["created"])
+
     def test_plan_description_requires_chinese(self) -> None:
         service, _transport, _client = self._service()
         with self.assertRaises(RuntimeErrorResult) as captured:
@@ -895,6 +984,46 @@ class MaintainerJiraServiceTest(unittest.TestCase):
 
 
 class MaintainerJiraCliTest(unittest.TestCase):
+    def test_inspect_returns_complete_description_readback(self) -> None:
+        parser = build_maintainer_parser()
+        args = parser.parse_args(["jira", "inspect", "--issue-key", "AO-11"])
+        connection = JiraConnection(
+            connection_id="tapdata-cloud",
+            base_url="https://tapdata.atlassian.net",
+            email_env="TAPDATA_JIRA_EMAIL",
+            token_env="TAPDATA_JIRA_API_TOKEN",
+        )
+        config = mock.Mock(connection=connection)
+        config.require_credentials.return_value = ("maintainer@example.com", "token-123456")
+        config.credential_status.return_value = {"credential_source": "maintainer_local"}
+        transport = FakeTransport()
+        transport.issue = _parent_issue(key="AO-11")
+        fields = transport.issue["fields"]
+        assert isinstance(fields, dict)
+        fields["description"] = {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "heading",
+                    "attrs": {"level": 2},
+                    "content": [{"type": "text", "text": "完整回读"}],
+                }
+            ],
+        }
+        with (
+            mock.patch("ao_maint.jira.cli.load_maintainer_jira_config", return_value=config),
+            mock.patch("ao_maint.jira.cli.UrllibJiraTransport", return_value=transport),
+        ):
+            result = execute_jira(args, Path("/unused"))
+        description = result["issue"]["description"]
+        self.assertEqual("atlassian_adf", description["format"])
+        self.assertEqual("## 完整回读", description["markdown"])
+        self.assertEqual("完整回读", description["plain_text"])
+        self.assertTrue(description["complete"])
+        self.assertEqual([], description["unsupported_node_types"])
+        self.assertRegex(description["sha256"], r"^[0-9a-f]{64}$")
+
     def test_non_ao_inputs_are_blocked_before_config_and_credentials(self) -> None:
         parser = build_maintainer_parser()
         cases = (

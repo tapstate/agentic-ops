@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from ao_maint.jira.adf import markdown_to_adf
+from ao_maint.jira.adf import adf_to_markdown, markdown_to_adf
 
 
 class MarkdownToAdfTest(unittest.TestCase):
@@ -87,6 +87,57 @@ class MarkdownToAdfTest(unittest.TestCase):
     def test_rule(self) -> None:
         doc = markdown_to_adf("---\n")
         self.assertEqual("rule", doc["content"][0]["type"])
+
+    def test_adf_readback_preserves_supported_structure(self) -> None:
+        source = (
+            "# 标题\n\n"
+            "- **粗体** 与 [链接](https://example.test)\n"
+            "- [x] 已完成\n\n"
+            "```\n代码\n```\n"
+        )
+        rendered = adf_to_markdown(markdown_to_adf(source))
+        self.assertTrue(rendered.complete)
+        self.assertEqual((), rendered.unsupported_node_types)
+        self.assertIn("# 标题", rendered.markdown)
+        self.assertIn("**粗体**", rendered.markdown)
+        self.assertIn("[链接](https://example.test)", rendered.markdown)
+        self.assertIn("- [x] 已完成", rendered.markdown)
+        self.assertIn("```\n代码\n```", rendered.markdown)
+        self.assertIn("标题", rendered.plain_text)
+
+    def test_adf_readback_marks_unknown_node_incomplete(self) -> None:
+        document = {
+            "type": "doc",
+            "version": 1,
+            "content": [{"type": "panel", "content": [{"type": "text", "text": "保留"}]}],
+        }
+        rendered = adf_to_markdown(document)
+        self.assertFalse(rendered.complete)
+        self.assertEqual(("node:panel",), rendered.unsupported_node_types)
+        self.assertIn("不支持的 ADF node: panel", rendered.markdown)
+        self.assertEqual("保留", rendered.plain_text)
+
+    def test_adf_readback_marks_unknown_mark_incomplete(self) -> None:
+        document = {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "文字",
+                            "marks": [{"type": "backgroundColor"}],
+                        }
+                    ],
+                }
+            ],
+        }
+        rendered = adf_to_markdown(document)
+        self.assertFalse(rendered.complete)
+        self.assertEqual(("mark:backgroundColor",), rendered.unsupported_node_types)
+        self.assertIn("文字", rendered.markdown)
 
 
 if __name__ == "__main__":
