@@ -479,7 +479,6 @@ class OfflineFakeRunner:
             "--source-root",
             str(self.source_checkout),
             "--non-interactive",
-            "--confirm",
         )
         self._process(
             "task_ref_checkout",

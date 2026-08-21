@@ -152,8 +152,7 @@ printf '%s\n' "$JIRA_API_TOKEN" | ao-work auth \
 ao-work workspace init \
   --non-interactive \
   --project tapdata \
-  --source-pool-root <pool-root> \
-  --confirm
+  --source-pool-root <pool-root>
 ```
 
 从其它目录初始化指定工作空间时，把 `--workspace-root <路径>` 放在 `ao-work` 之后、`workspace` 之前：
@@ -162,13 +161,12 @@ ao-work workspace init \
 ao-work --workspace-root /path/to/workspace workspace init \
   --non-interactive \
   --project tapdata \
-  --source-pool-root <pool-root> \
-  --confirm
+  --source-pool-root <pool-root>
 ```
 
 非交互模式必填项：
 
-- `--non-interactive` 与 `--confirm`：确认初始化摘要，缺一不可。
+- `--non-interactive`：不读取终端输入；普通显式参数不需要额外确认。
 - `--project <profile>`：Project Profile id（如 `tapdata`），来源 `developer/standards/projects/<profile>/profile.yaml`；Jira 站点、Project Key 与默认仓库没有 CLI 参数，全部取自该 Profile。
 - 安装身份必须已通过 `ao-work auth` 配置并包含 Jira 凭据；新工作空间从安装目录继承，不接收或保存工作空间级身份与凭据。
 - 池根必配：`--source-pool-root` 或 `~/.agentic-ops/user/config.yaml` 的 `source_pool_root` 二选一，否则 `source_pool_root_invalid` 阻断，无兼容回退。池根目录不存在时由 init 自动创建并写入容器 README（preflight 只读校验、不创建）。
@@ -176,7 +174,7 @@ ao-work --workspace-root /path/to/workspace workspace init \
 可选参数：
 
 - `--source-root`：缺省为池模式（源码语义 = 池根，任务工作树在接管时创建）；显式传入非池根路径则为普通源码模式。
-- `--confirm-existing-config`：已有不同完整配置需覆盖时提供，否则 `existing_config_confirmation_required` 阻断。
+- `--confirm-existing-config`：仅在已有不同完整配置将被覆盖时提供，否则 `existing_config_confirmation_required` 阻断。交互模式先显示字段差异并只询问一次；新建、半初始化修复和相同配置不确认。
 
 > 维护约定：本节示例与 `developer/skills/initialize-project-workspace/SKILL.md` 的非交互示例随 `workspace init` 参数变更同步修正，不得只改实现不改文档。
 

@@ -21,12 +21,11 @@ from ao_work.workspace_init.service import WorkspaceCandidate, WorkspaceInitiali
 def configure_workspace_init_parser(
     workspace_commands: argparse._SubParsersAction[Any],
 ) -> None:
-    init = workspace_commands.add_parser("init")
+    init = workspace_commands.add_parser("init", allow_abbrev=False)
     init.add_argument("--project", dest="project_profile")
     init.add_argument("--source-root")
     init.add_argument("--source-pool-root")
     init.add_argument("--non-interactive", action="store_true")
-    init.add_argument("--confirm", action="store_true")
     init.add_argument("--confirm-existing-config", action="store_true")
 
     workspace_commands.add_parser("preflight")
@@ -59,7 +58,7 @@ def execute_workspace_init(
         raise _blocked(
             "missing_project_profile",
             "非交互初始化缺少 --project",
-            "请明确提供 --project，并使用 --confirm",
+            "请明确提供 --project",
         )
     assert profile_id is not None
 
@@ -70,16 +69,8 @@ def execute_workspace_init(
         allow_rebind=True,
     )
 
-    confirmed = args.confirm
-    if interactive:
+    if interactive and not args.project_profile:
         _write_summary(candidate)
-        confirmed = _prompt_confirmation("确认使用以上信息初始化业务项目工作空间")
-    if not confirmed:
-        raise _blocked(
-            "workspace_init_confirmation_required",
-            "工作空间初始化摘要尚未确认",
-            "请核对安装身份、Jira 项目空间和源码仓库后确认",
-        )
 
     confirm_existing = args.confirm_existing_config
     try:
@@ -92,7 +83,7 @@ def execute_workspace_init(
         if (
             interactive
             and error.code == "existing_config_confirmation_required"
-            and _prompt_confirmation("已有不同完整配置，确认覆盖")
+            and _prompt_existing_config_overwrite(error)
         ):
             preflight = initializer.preflight(
                 candidate,
@@ -182,6 +173,21 @@ def _write_summary(candidate: WorkspaceCandidate) -> None:
     sys.stderr.write("AgenticOps：初始化摘要\n")
     sys.stderr.write(json.dumps(candidate.summary(), ensure_ascii=False, indent=2) + "\n")
     sys.stderr.flush()
+
+
+def _prompt_existing_config_overwrite(error: RuntimeErrorResult) -> bool:
+    details = error.details if isinstance(error.details, dict) else {}
+    differences = details.get("differences", [])
+    sys.stderr.write("AgenticOps：已有完整工作空间配置与本次有效配置不同：\n")
+    if isinstance(differences, list):
+        for item in differences:
+            if not isinstance(item, dict):
+                continue
+            field = str(item.get("field", ""))
+            existing = str(item.get("existing", ""))
+            candidate = str(item.get("candidate", ""))
+            sys.stderr.write(f"- {field}：{existing} -> {candidate}\n")
+    return _prompt_confirmation("确认覆盖以上配置")
 
 
 def _required_agent_value(agent: dict[str, Any], key: str) -> str:

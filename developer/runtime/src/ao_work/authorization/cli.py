@@ -118,11 +118,16 @@ def _set(args: argparse.Namespace, install_root: Path) -> dict[str, Any]:
         args.github_login or existing_execution.get("github_actor_login") or ""
     )
     if interactive:
-        agent_id = _prompt_required("agent_id（研发员标识，安装级唯一）", agent_id)
-        jira_email = _prompt_required("Jira email", jira_email)
-        git_name = _prompt_required("Git author/committer name", git_name)
-        git_email = _prompt_required("Git email", git_email)
-        github_login = _prompt_required("GitHub login", github_login)
+        if not agent_id:
+            agent_id = _prompt_required("agent_id（研发员标识，安装级唯一）")
+        if not jira_email:
+            jira_email = _prompt_required("Jira email")
+        if not git_name:
+            git_name = _prompt_required("Git author/committer name")
+        if not git_email:
+            git_email = _prompt_required("Git email")
+        if not github_login:
+            github_login = _prompt_required("GitHub login")
     if not all((agent_id, jira_email, git_name, git_email, github_login)):
         raise _blocked(
             "install_identity_incomplete",

@@ -71,11 +71,12 @@ bash developer/bootstrap/install-verify-branch.sh \
 <install-root>/bin/ao-work workspace init \
   --non-interactive \
   --project tapdata \
-  --source-pool-root <pool-root> \
-  --confirm
+  --source-pool-root <pool-root>
 ```
 
-`workspace init` 只接收项目、源码与确认参数，不接收 `agent_id`、Jira email/token 或 Git/GitHub 身份。Runtime 从当前安装继承身份和凭证，展示脱敏账户、Project Profile、Jira 站点与 Project Key、源码池和仓库供确认。
+`workspace init` 只接收项目和源码参数，不接收 `agent_id`、Jira email/token 或 Git/GitHub 身份。显式命令行参数优先于默认来源，已明确的值不会在交互终端再次询问。Runtime 从当前安装继承身份和凭证。
+
+`--confirm-existing-config` 是唯一的初始化确认：只有本次有效配置会覆盖已有、完整且不同的工作空间配置时才需要它。交互模式会先显示字段差异并只询问一次；新工作空间、半初始化修复和相同配置不确认。非交互覆盖未提供该参数时失败关闭。
 
 池根由 `--source-pool-root` 或安装目录 `user/config.yaml` 的 `source_pool_root` 提供。目录不存在时 init 创建并写入容器 README。`--workspace-root <路径>` 是 `ao-work` 顶层参数，必须放在 `workspace` 之前。
 
