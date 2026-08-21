@@ -8,7 +8,18 @@
 
 ### 触发方式
 
-远程模式（默认，可运行）：
+远程 API 启动模式（可运行，无需预先 checkout 源码）：
+
+```sh
+(
+  set -e
+  bootstrap="$(gh api -H 'Accept: application/vnd.github.raw' \
+    '/repos/tapstate/agentic-ops/contents/developer/bootstrap/install-verify-branch.sh?ref=develop')"
+  printf '%s\n' "$bootstrap" | bash -s -- --source-branch develop --json
+)
+```
+
+源码仓库内的远程模式（可运行）：
 
 ```sh
 bash developer/bootstrap/install-verify-branch.sh \
@@ -33,7 +44,7 @@ bash developer/bootstrap/install-verify-branch.sh \
 
 ### 主流程
 
-1. 远程模式先校验 Git URL 未被改写，再 `ls-remote` 确认分支存在；本地模式校验 worktree 与本地分支存在。
+1. 远程 API 启动先完整下载脚本并确认 `gh api` 成功，下载失败时不得把响应送入 `bash`；脚本再按 `--source-branch` 从同一分支读取公共库。远程模式随后校验 Git URL 未被改写，再 `ls-remote` 确认分支存在；本地模式校验 worktree 与本地分支存在。
 2. 从来源克隆 `--single-branch --branch <branch>`；远程模式固定 origin 为官方仓库。
 3. 配置 developer-only sparse checkout 后再检出，确保 `maintainer/` 与 `.agentic-ops-source` 不落盘。
 4. 写入 `.agentic-ops/verification-only` 标记，记录来源（remote/local）、分支与时间。
@@ -54,10 +65,12 @@ bash developer/bootstrap/install-verify-branch.sh \
 - 生产安装 `~/.agentic-ops` 仍固定 `main`，不接受分支覆盖。
 - `verification-only` 标记只放宽「`main` 祖先」一条，不授予任何额外能力。
 - origin 必须是官方 `tapstate/agentic-ops`，拒绝 `url.*.insteadOf` / `pushInsteadOf` 改写。
+- 远程 API 启动不接受 `AGENTIC_OPS_REPO_URL` 等身份覆盖变量；404、未授权和分支不存在必须在执行下载内容前失败关闭。
 
 ### 验收证据
 
-- 远程模式离线夹具安装，以及 `ao-work capability list` / `workspace inspect` 可运行结果。
+- 源码内远程模式和 `gh api` 管道模式的离线夹具安装，以及 `ao-work capability list` / `workspace inspect` 可运行结果。
+- `gh api` 返回 404 时没有 `command not found`，证明错误响应未进入 `bash`。
 - `source_branch_not_found`、`verification_home_forbidden` 与无标记非 `main` 阻断结果。
 - `verification_branch_unreachable` 阻断结果（HEAD 不可达于任一 `origin/*` 引用）。
 - 生产安装、更新、回滚回归结果。

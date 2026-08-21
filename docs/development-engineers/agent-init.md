@@ -37,7 +37,18 @@ printf '%s\n' "$JIRA_API_TOKEN" | bash developer/bootstrap/install.sh \
 
 ## 2. 指定分支验证安装
 
-本地验证使用：
+不在 AgenticOps 源码仓库中时，使用远程启动入口：
+
+```sh
+(
+  set -e
+  bootstrap="$(gh api -H 'Accept: application/vnd.github.raw' \
+    '/repos/tapstate/agentic-ops/contents/developer/bootstrap/install-verify-branch.sh?ref=develop')"
+  printf '%s\n' "$bootstrap" | bash -s -- --source-branch develop --json
+)
+```
+
+已经在 AgenticOps 源码仓库中时，也可以直接运行：
 
 ```sh
 bash developer/bootstrap/install-verify-branch.sh \
@@ -45,7 +56,7 @@ bash developer/bootstrap/install-verify-branch.sh \
   --json
 ```
 
-远程分支模式生成可运行的 verification-only developer 安装，也支持与正式安装相同的可选授权参数。`--source-worktree <path>` 只验证本地安装边界，产物不可运行，也不能配置授权或初始化工作空间。正式 `install.sh`、`update.sh`、`rollback.sh` 拒绝维护 verification-only 目录。
+远程启动必须先检查 `gh api` 成功，再把完整脚本交给 `bash`，避免 404 JSON 被当作命令执行。脚本会按 `--source-branch` 从同一分支取得 Bootstrap 公共库；不使用已被禁止的 `AGENTIC_OPS_REPO_URL` 或分支覆盖环境变量。远程分支模式生成可运行的 verification-only developer 安装，也支持与正式安装相同的可选授权参数；通过管道启动时标准输入用于脚本本身，安装后应单独运行生成结果中的 `ao-work auth` 完成授权。`--source-worktree <path>` 只验证本地安装边界，产物不可运行，也不能配置授权或初始化工作空间。正式 `install.sh`、`update.sh`、`rollback.sh` 拒绝维护 verification-only 目录。
 
 ## 3. 初始化业务项目工作空间
 

@@ -17,6 +17,7 @@
 引入「可运行的验证安装」：
 
 - `install-verify-branch.sh` 默认从官方远端 `git@github.com:tapstate/agentic-ops.git` 按 `--source-branch` 克隆，`ls-remote` 先校验分支存在，克隆后写 `.local/current-ref`，并写入 `.agentic-ops/verification-only` 标记。
+- `install-verify-branch.sh` 同时支持由 `gh api` 下载后通过标准输入启动；此时按 `--source-branch` 从同一远端分支加载 `developer/bootstrap/lib/common.sh`。调用侧必须先确认下载成功再执行完整脚本，404 或未授权响应不得进入 `bash`。
 - Runtime 识别 `.agentic-ops/verification-only` 标记进入「验证安装身份模式」：把「HEAD 必须是 `origin/main` 祖先」这一条放宽为「HEAD 必须可达于任一 `refs/remotes/origin/*` 远端分支或 tag」；origin、sparse 精确集、shared/developer 分发白名单、`.local/current-ref` 一致性、无受管改动等校验全部保持不变。
 - `--source-worktree` 保留为「仅验证安装流程」的本地场景：从本地 worktree 克隆、只校验 sparse/分发/runtime 同步，origin 是本地路径，因此不可运行（与现状一致），用于测试尚未推送的本地改动能否正确完成安装。
 
@@ -42,6 +43,7 @@
 
 - 新增 `REPO_URL="git@github.com:tapstate/agentic-ops.git"`。
 - `--source-worktree` 从必填默认改为可选：未提供时进入远程模式，`--source-branch` 指向远端分支（默认 `develop`）；提供时进入本地模式，仅验证安装流程。
+- 标准输入启动时不依赖本地 `SCRIPT_DIR`；先从参数只读解析 `--source-branch`，校验 ref 格式后通过 `gh api` 获取同分支公共库。公共库读取失败时输出稳定错误并停止，不能 `eval` GitHub 错误响应。
 - 远程模式顺序：`agentic_require_unrewritten_url "$REPO_URL"` → `git ls-remote --heads "$REPO_URL" "refs/heads/$SOURCE_BRANCH"` 校验存在 → `git clone --no-checkout --filter=blob:none --single-branch --branch "$SOURCE_BRANCH" "$REPO_URL" "$INSTALL_HOME"` → `git remote set-url origin "$REPO_URL"` → `git checkout "$SOURCE_BRANCH"`。
 - 标记 `.agentic-ops/verification-only` 记录 `source`（`remote` / `local`）、`source_branch` 与时间；`source` 用于区分模式。
 

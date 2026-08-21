@@ -1,18 +1,60 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
-SOURCE_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd -P)"
-
-. "$SCRIPT_DIR/lib/common.sh"
-
 REPO_URL="git@github.com:tapstate/agentic-ops.git"
+GITHUB_REPOSITORY="tapstate/agentic-ops"
+
+bootstrap_source_branch="develop"
+bootstrap_previous_argument=""
+for bootstrap_argument in "$@"; do
+  if [ "$bootstrap_previous_argument" = "--source-branch" ]; then
+    bootstrap_source_branch="$bootstrap_argument"
+    break
+  fi
+  bootstrap_previous_argument="$bootstrap_argument"
+done
+case "$bootstrap_source_branch" in
+  ""|-*|*[!A-Za-z0-9._/-]*|*..*|/*|*/)
+    printf 'AgenticOps：来源分支格式无效：%s\n' "$bootstrap_source_branch" >&2
+    printf '{"ok":false,"operation":"bootstrap_verify","status":"failed","code":"source_branch_invalid","retry_safe":true,"message":"来源分支格式无效","required_human_action":"请提供合法的 --source-branch"}\n'
+    exit 1
+    ;;
+esac
+
+SCRIPT_DIR=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+  SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+fi
+
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/lib/common.sh" ]; then
+  . "$SCRIPT_DIR/lib/common.sh"
+else
+  bootstrap_common="$({
+    command gh api -H 'Accept: application/vnd.github.raw' \
+      "/repos/$GITHUB_REPOSITORY/contents/developer/bootstrap/lib/common.sh?ref=$bootstrap_source_branch"
+  } 2>/dev/null)" || {
+    printf 'AgenticOps：无法读取 developer Bootstrap 公共库\n' >&2
+    printf '{"ok":false,"operation":"bootstrap_verify","status":"failed","code":"bootstrap_common_unavailable","retry_safe":true,"message":"无法读取 developer Bootstrap 公共库","required_human_action":"请确认 gh 已登录、来源分支存在且有权读取 %s"}\n' "$GITHUB_REPOSITORY"
+    exit 1
+  }
+  eval "$bootstrap_common"
+  unset bootstrap_common
+fi
+unset bootstrap_argument bootstrap_previous_argument bootstrap_source_branch
 
 usage() {
   cat <<'USAGE'
 用法：
   install-verify-branch.sh [--source-worktree <path>] [--source-branch <branch>] \
     [--install-home <path>] [--log <path>] [--json] [--keep] [授权参数]
+
+远程启动时，调用侧必须先确认 gh api 下载成功，再执行完整脚本：
+  (
+    set -e
+    bootstrap="$(gh api -H 'Accept: application/vnd.github.raw' \
+      '/repos/tapstate/agentic-ops/contents/developer/bootstrap/install-verify-branch.sh?ref=develop')"
+    printf '%s\n' "$bootstrap" | bash -s -- --source-branch develop --json
+  )
 
 参数说明：
   --source-branch    安装来源分支（默认 develop）。默认从官方远端 tapstate/agentic-ops 克隆，
