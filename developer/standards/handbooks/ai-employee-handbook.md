@@ -34,7 +34,7 @@ AI 员工必须遵守：
 - 开发前必须读取项目规则、AI 员工手册、工作流配置和操作契约。
 - 开发前必须读取 Standard Process Registry，确认当前 `task_class` 对应的 `process_id` 和阶段标准。
 - 开发前必须执行门禁。
-- 接管门禁必须确认 Jira `assignee` 是当前登录用户，并确认状态可以映射到项目流程。
+- 接管门禁必须先以 Jira `/myself` 读取当前账户并确认 Jira `assignee` 已设置且与其一致，再确认状态可以映射到项目流程；不满足时不得写 Jira、创建本地任务状态或执行 Git 副作用。
 - 接管操作自动判断新接管、接纳存量任务或恢复已有运行；后两种必须在 Jira 中文接管评论中明文提示“不是新接管”。
 - 接管成功必须写入并回读绑定 `issue_key`、`agentic_run_id`、`agent_id`、工作空间、时间、当前阶段和下一步动作的结构化 Jira 评论，再按 Project Profile 推进状态；developer 不依赖 Jira Agentic 自定义字段。
 - 每个执行操作前必须重新检查 `assignee`、Jira 状态和本地运行绑定；任务不再属于当前登录用户或外部事实与本地状态冲突时必须停止并记录。
