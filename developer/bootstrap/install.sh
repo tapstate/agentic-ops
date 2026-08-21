@@ -7,6 +7,7 @@ REPO_URL="git@github.com:tapstate/agentic-ops.git"
 GITHUB_REPOSITORY="tapstate/agentic-ops"
 AUTHORIZATION_ARGS=()
 AUTHORIZATION_REQUESTED=0
+NEW_INSTALL=0
 
 usage() {
   cat <<'USAGE'
@@ -120,6 +121,7 @@ elif [ -e "$INSTALL_DIR/.agentic-ops-source" ] || [ -d "$INSTALL_DIR/maintainer"
     "不能把包含 maintainer 资产的源头仓库原地转换为 developer 安装" \
     "请使用独立的 AGENTIC_OPS_HOME 安装目录"
 elif [ ! -e "$INSTALL_DIR" ]; then
+  NEW_INSTALL=1
   git clone --filter=blob:none --no-checkout --branch "$BRANCH" --single-branch \
     "$REPO_URL" "$INSTALL_DIR"
   if ! git -C "$INSTALL_DIR" remote set-url origin "$REPO_URL"; then
@@ -161,6 +163,9 @@ fi
 
 agentic_sync_runtime "$INSTALL_DIR" "$uv_bin"
 agentic_write_refs "$INSTALL_DIR" "$previous_ref" "$current_ref"
+if [ "$NEW_INSTALL" -eq 1 ]; then
+  agentic_write_installation_metadata "$INSTALL_DIR"
+fi
 agentic_require_checkout_integrity "$INSTALL_DIR"
 agentic_configure_path "$INSTALL_DIR"
 

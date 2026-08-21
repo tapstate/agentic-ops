@@ -155,6 +155,25 @@ if grep -q 'test-token-secret' "$test_root/authorized-install.out" \
 fi
 
 test -x "$install_root/bin/ao-work"
+if stat -f '%Lp' "$install_root/.local/installation.json" >/dev/null 2>&1; then
+  test "$(stat -f '%Lp' "$install_root/.local/installation.json")" = "600"
+else
+  test "$(stat -c '%a' "$install_root/.local/installation.json")" = "600"
+fi
+"$install_root/bin/ao-work" version > "$test_root/install-version.out"
+"$test_python" - "$test_root/install-version.out" "$install_root" <<'PY'
+import json
+import sys
+
+payload = json.load(open(sys.argv[1]))
+assert payload["ok"] is True
+assert payload["workplane"] == "developer"
+from pathlib import Path
+assert payload["install_root"] == str(Path(sys.argv[2]).resolve())
+assert payload["installed_at"].endswith("Z")
+assert len(payload["git_head"]) in {40, 64}
+assert payload["git_short_sha"] == payload["git_head"][:12]
+PY
 test ! -e "$install_root/bin/ao-maint"
 test ! -e "$install_root/developer/.venv/bin/ao-maint"
 test ! -e "$install_root/maintainer"
@@ -548,6 +567,7 @@ PATH="$transport_git_dir:$PATH" \
   bash "$default_install_root/developer/bootstrap/update.sh" >/dev/null
 test "$(git -C "$default_install_root" rev-parse HEAD)" = "$update_ref"
 test "$(sed -n '1p' "$default_install_root/.local/previous-ref")" != "$update_ref"
+installation_metadata_before_rollback="$(cat "$default_install_root/.local/installation.json")"
 
 HOME="$test_home" \
 AGENTIC_OPS_HOME="$default_install_root" \
@@ -557,6 +577,7 @@ AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
 test "$(git -C "$default_install_root" rev-parse HEAD)" != "$update_ref"
 test -x "$default_install_root/bin/ao-work"
 test ! -e "$default_install_root/maintainer"
+test "$(cat "$default_install_root/.local/installation.json")" = "$installation_metadata_before_rollback"
 
 file_mode() {
   local path="$1"
@@ -610,7 +631,7 @@ for managed_relative in .local bin developer/.venv; do
   mv "$managed_backup" "$managed_path"
 done
 
-for ref_name in current-ref previous-ref pending-rollback-ref; do
+for ref_name in current-ref previous-ref pending-rollback-ref installation.json; do
   ref_path="$default_install_root/.local/$ref_name"
   ref_backup="$test_root/ref-backup-$ref_name"
   ref_sentinel="$test_root/ref-sentinel-$ref_name"
@@ -623,7 +644,8 @@ for ref_name in current-ref previous-ref pending-rollback-ref; do
   ln -s "$ref_sentinel" "$ref_path"
 
   assert_update_rejected \
-    "$default_install_root" "$ref_name-symlink" install_ref_path_invalid
+    "$default_install_root" "$ref_name-symlink" \
+    "$(if [ "$ref_name" = installation.json ]; then printf '%s' install_managed_path_invalid; else printf '%s' install_ref_path_invalid; fi)"
   test "$(cat "$ref_sentinel")" = "outside-ref-unchanged"
 
   rm "$ref_path"
