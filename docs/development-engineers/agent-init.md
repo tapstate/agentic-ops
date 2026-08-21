@@ -5,6 +5,8 @@
 ## 1. 安装并完成研发员授权
 
 默认安装目录是 `~/.agentic-ops`，内容为稳定 `main` 的 developer-only sparse managed clone，不包含 `maintainer/`。
+需要隔离安装时，在 `install.sh` 后显式传入 `--install-home <path>`；该参数优先于兼容保留的
+`AGENTIC_OPS_HOME` 环境变量。自定义安装不会修改 shell profile，需自行把 `<path>/bin` 加入当前会话的 `PATH`。
 
 首次 Bootstrap 下载和 clone 必须使用调用者机器上已经可访问仓库的 Git/`gh` 账户；此时安装专属授权尚不存在。授权完成后，`installation` 模式会为 managed clone 固化独立 SSH，后续更新不再依赖全局 SSH Agent。
 

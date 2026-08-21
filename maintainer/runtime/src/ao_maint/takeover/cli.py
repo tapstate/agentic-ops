@@ -16,6 +16,7 @@ from ao_maint.jira.config import (
     load_comment_template_schema,
     load_maintainer_jira_config,
     load_maintainer_workflow,
+    select_maintainer_workflow,
     plans_dir,
 )
 from ao_maint.jira.service import MaintainerJiraService, WritePlan
@@ -86,7 +87,9 @@ def _takeover(
 ) -> dict[str, Any]:
     issue = service.inspect_issue(issue_key)
     validate_issue_readback(issue_key, issue.key, issue.project_key)
-    stage = _workflow_stage(source_root, connection_id, issue.project_key, issue.status)
+    stage = _workflow_stage(
+        source_root, connection_id, issue.project_key, issue.issue_type, issue.status
+    )
     if stage == "completed":
         raise _blocked(
             "maintainer_takeover_completed",
@@ -274,7 +277,13 @@ def _execute_new_takeover(
     )
     readback = service.inspect_issue(issue.key)
     validate_issue_readback(issue.key, readback.key, readback.project_key)
-    if _workflow_stage(source_root, connection_id, issue.project_key, readback.status) != "implementation":
+    if _workflow_stage(
+        source_root,
+        connection_id,
+        issue.project_key,
+        issue.issue_type,
+        readback.status,
+    ) != "implementation":
         raise _blocked(
             "maintainer_takeover_readback_mismatch",
             "接管后 Jira 状态回读未进入实施阶段",
@@ -491,7 +500,7 @@ def _required_state(
     validate_issue_readback(issue_key, issue.key, issue.project_key)
     _require_same_owner_and_issue(state, identity, issue.issue_id)
     if _workflow_stage(
-        source_root, connection_id, issue.project_key, issue.status
+        source_root, connection_id, issue.project_key, issue.issue_type, issue.status
     ) != "implementation":
         raise _blocked(
             "maintainer_takeover_stage_changed",
@@ -563,11 +572,15 @@ def _require_same_binding(
 
 
 def _workflow_stage(
-    source_root: Path, connection_id: str, project_key: str, status: str
+    source_root: Path,
+    connection_id: str,
+    project_key: str,
+    issue_type: str,
+    status: str,
 ) -> str:
     workflow = load_maintainer_workflow(source_root, connection_id)
-    project = workflow.get("projects", {}).get(project_key, {})
-    statuses = project.get("statuses", {}) if isinstance(project, dict) else {}
+    selected = select_maintainer_workflow(workflow, project_key, issue_type)
+    statuses = selected.get("statuses", {}) if isinstance(selected, dict) else {}
     stage = statuses.get(status) if isinstance(statuses, dict) else None
     return str(stage or "")
 
