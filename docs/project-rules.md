@@ -253,12 +253,15 @@ AgenticOps 默认安装到：
 安装入口约定为：
 
 ```sh
-gh api -H 'Accept: application/vnd.github.raw' \
-  '/repos/tapstate/agentic-ops/contents/developer/bootstrap/install.sh?ref=main' \
-  | bash
+(
+  set -e
+  bootstrap="$(gh api -H 'Accept: application/vnd.github.raw' \
+    '/repos/tapstate/agentic-ops/contents/developer/bootstrap/install.sh?ref=main')"
+  printf '%s\n' "$bootstrap" | bash
+)
 ```
 
-安装前必须通过 `gh auth status` 确认 GitHub CLI 已登录并具备访问 `tapstate/agentic-ops` 私有仓库的权限；未登录时先执行 `gh auth login -h github.com -p ssh -s repo`。GitHub API contents 路径必须加引号，避免 zsh 把 `?ref=main` 当作通配符。产品安装与更新固定使用受信 `tapstate/agentic-ops` 和稳定 `main`，不提供仓库或分支覆盖入口；遗留的身份覆盖环境变量只要非空就必须阻断。离线发布测试必须使用隔离 `PATH` 的 Git wrapper，只对 `fetch`、`push` 和非 `--get-url` 的 `ls-remote` 单进程注入 `-c url.<fixture>.insteadOf=<official>`；不得向仓库或 HOME 持久化 rewrite。产品脚本和 Runtime 始终看到并校验官方 origin，不得为测试保留第二套受信身份。
+安装前必须通过 `gh auth status` 确认 GitHub CLI 已登录并具备访问 `tapstate/agentic-ops` 私有仓库的权限；未登录时先执行 `gh auth login -h github.com -p ssh -s repo`。GitHub API contents 路径必须加引号，避免 zsh 把 `?ref=main` 当作通配符；必须先完整取得脚本并检查 `gh api` 成功，再交给 `bash`，禁止把 404 等错误响应直接管道执行。产品安装与更新固定使用受信 `tapstate/agentic-ops` 和稳定 `main`，不提供仓库或分支覆盖入口；遗留的身份覆盖环境变量只要非空就必须阻断。离线发布测试必须使用隔离 `PATH` 的 Git wrapper，只对 `fetch`、`push` 和非 `--get-url` 的 `ls-remote` 单进程注入 `-c url.<fixture>.insteadOf=<official>`；不得向仓库或 HOME 持久化 rewrite。产品脚本和 Runtime 始终看到并校验官方 origin，不得为测试保留第二套受信身份。
 
 安装脚本必须支持 Linux 和 macOS，并且不得覆盖用户已有本地配置。它必须用 sparse checkout 把 developer 工作面更新到 `~/.agentic-ops`，用锁文件准备 Python 环境并生成 `bin/ao-work`；不得检出 maintainer 运行资产，也不构建项目自有平台二进制。
 

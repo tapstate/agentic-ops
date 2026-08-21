@@ -107,6 +107,39 @@ esac
 EOF
 chmod 0755 "$transport_git_dir/git"
 
+api_dir="$test_root/api-bin"
+mkdir -p "$api_dir"
+cat > "$api_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+request_path=""
+for argument in "$@"; do
+  case "$argument" in
+    /repos/*) request_path="$argument" ;;
+  esac
+done
+
+if [ "${AO_TEST_GH_FAIL:-}" = "1" ]; then
+  printf '{"message":"Not Found"}\n'
+  exit 1
+fi
+
+case "$request_path" in
+  */developer/bootstrap/install-verify-branch.sh\?ref=develop)
+    exec cat "${AO_TEST_VERIFY_SCRIPT:?}"
+    ;;
+  */developer/bootstrap/lib/common.sh\?ref=develop)
+    exec cat "${AO_TEST_COMMON_SH:?}"
+    ;;
+  *)
+    printf '{"message":"Not Found"}\n'
+    exit 1
+    ;;
+esac
+EOF
+chmod 0755 "$api_dir/gh"
+
 run_local_verify() {
   local label="$1"
   local expect_success="$2"
@@ -225,6 +258,74 @@ else
   exit 1
 fi
 grep -q '"operation":"capability_list"' "$test_root/remote-capability.out"
+
+# gh api 远程启动：先完整取得脚本，成功后才交给 bash；脚本再从同一
+# --source-branch 获取 common.sh，不能依赖本地源码目录。
+remote_api_home="$test_root/verify-remote-api"
+if env \
+  HOME="$test_home" \
+  AGENTIC_OPS_UV="$fake_uv" \
+  AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
+  AO_TEST_REAL_GIT="$real_git" \
+  AO_TEST_FIXTURE_REPOSITORY="$source_repo" \
+  AO_TEST_OFFICIAL_REPOSITORY="$official_repo_url" \
+  AO_TEST_VERIFY_SCRIPT="$verify_script" \
+  AO_TEST_COMMON_SH="$source_repo/developer/bootstrap/lib/common.sh" \
+  AO_TEST_PIPE_INSTALL_HOME="$remote_api_home" \
+  PATH="$api_dir:$transport_git_dir:$PATH" \
+  bash -c '
+    bootstrap="$(gh api -H "Accept: application/vnd.github.raw" \
+      "/repos/tapstate/agentic-ops/contents/developer/bootstrap/install-verify-branch.sh?ref=develop")" || exit $?
+    printf "%s\n" "$bootstrap" | bash -s -- \
+      --source-branch develop \
+      --install-home "$AO_TEST_PIPE_INSTALL_HOME" \
+      --json \
+      --keep
+  ' >"$test_root/remote-api.out" 2>"$test_root/remote-api.err"; then
+  :
+else
+  echo "gh api 远程验证安装应成功" >&2
+  cat "$test_root/remote-api.out" >&2
+  cat "$test_root/remote-api.err" >&2
+  exit 1
+fi
+
+grep -q '"ok":true' "$test_root/remote-api.out"
+test -x "$remote_api_home/bin/ao-work"
+test ! -e "$remote_api_home/maintainer"
+
+# 下载失败时不得把 GitHub 的错误响应送入 bash 执行。
+if env \
+  AO_TEST_GH_FAIL=1 \
+  AO_TEST_VERIFY_SCRIPT="$verify_script" \
+  AO_TEST_COMMON_SH="$source_repo/developer/bootstrap/lib/common.sh" \
+  PATH="$api_dir:$PATH" \
+  bash -c '
+    bootstrap="$(gh api -H "Accept: application/vnd.github.raw" \
+      "/repos/tapstate/agentic-ops/contents/developer/bootstrap/install-verify-branch.sh?ref=develop")" || exit $?
+    printf "%s\n" "$bootstrap" | bash -s -- --source-branch develop --json
+  ' >"$test_root/remote-api-not-found.out" 2>"$test_root/remote-api-not-found.err"; then
+  echo "gh api 404 应失败关闭" >&2
+  exit 1
+fi
+if grep -q 'command not found' "$test_root/remote-api-not-found.err"; then
+  echo "gh api 错误响应不得进入 bash" >&2
+  exit 1
+fi
+
+# 标准输入启动在任何 gh 调用前拒绝可能污染 API query 的分支参数。
+if env \
+  AO_TEST_VERIFY_SCRIPT="$verify_script" \
+  AO_TEST_COMMON_SH="$source_repo/developer/bootstrap/lib/common.sh" \
+  PATH="$api_dir:$PATH" \
+  bash -s -- --source-branch 'develop?unexpected=true' --json \
+    <"$verify_script" \
+    >"$test_root/remote-api-invalid-ref.out" \
+    2>"$test_root/remote-api-invalid-ref.err"; then
+  echo "非法来源分支应在加载公共库前失败" >&2
+  exit 1
+fi
+grep -q '"code":"source_branch_invalid"' "$test_root/remote-api-invalid-ref.out"
 
 run_local_verify test_remote_invalid_branch fail \
   env HOME="$test_home" \

@@ -286,5 +286,20 @@ grep -q 'verification_branch_unreachable' developer/runtime/src/ao_work/installa
   fail "Runtime 未实现验证安装的远端可达性门禁"
 grep -q 'verification-only' developer/bootstrap/install-verify-branch.sh ||
   fail "验证安装入口未写入 verification-only 标记"
+grep -Fq 'developer/bootstrap/lib/common.sh?ref=$bootstrap_source_branch' \
+  developer/bootstrap/install-verify-branch.sh ||
+  fail "验证安装入口不支持按来源分支远程加载公共库"
+grep -Fq 'bootstrap="$(gh api' docs/development-engineers/getting-started.md ||
+  fail "developer 安装文档未在执行前检查 gh api 下载结果"
+grep -Fq 'set -e' docs/development-engineers/getting-started.md ||
+  fail "developer 安装文档未在隔离 Shell 中传播下载或安装失败"
+grep -Fq 'contents/developer/bootstrap/install-verify-branch.sh?ref=develop' \
+  docs/development-engineers/agent-init.md ||
+  fail "研发员初始化文档缺少 develop 远程验证安装入口"
+if rg -n 'contents/scripts/install\.sh|AGENTIC_OPS_REPO_URL=.*bash' \
+  docs/development-engineers docs/project-rules.md \
+  docs/user-stories/development-engineer; then
+  fail "现役 developer 文档仍发布旧安装路径或身份覆盖调用"
+fi
 
 printf '{"ok":true,"operation":"test_resources","workplanes":["maintainer","developer"]}\n'

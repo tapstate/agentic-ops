@@ -9,22 +9,28 @@
 ### 触发方式
 
 ```sh
-gh api -H 'Accept: application/vnd.github.raw' \
-  '/repos/tapstate/agentic-ops/contents/developer/bootstrap/install.sh?ref=main' \
-  | bash
+(
+  set -e
+  bootstrap="$(gh api -H 'Accept: application/vnd.github.raw' \
+    '/repos/tapstate/agentic-ops/contents/developer/bootstrap/install.sh?ref=main')"
+  printf '%s\n' "$bootstrap" | bash
+)
 ```
 
-本地验证安装（方案B）：
+远程 `develop` 验证安装（无需预先 checkout 源码）：
 
 ```sh
-bash developer/bootstrap/install-verify-branch.sh \
-  --source-branch develop \
-  --json
+(
+  set -e
+  bootstrap="$(gh api -H 'Accept: application/vnd.github.raw' \
+    '/repos/tapstate/agentic-ops/contents/developer/bootstrap/install-verify-branch.sh?ref=develop')"
+  printf '%s\n' "$bootstrap" | bash -s -- --source-branch develop --json
+)
 ```
 
 验收补充：
 
-- 验证入口与生产入口严格分离：默认从官方远端按指定分支克隆，写入 `verification-only` 标记，产物是可运行的验证安装，可用其 `ao-work workspace init` 初始化研发员做端到端验证。
+- 验证入口与生产入口严格分离：远程 API 启动必须先确认脚本下载成功，再交给 `bash`，并按 `--source-branch` 从同一分支取得 Bootstrap 公共库；默认从官方远端按指定分支克隆，写入 `verification-only` 标记，产物是可运行的验证安装，可用其 `ao-work workspace init` 初始化研发员做端到端验证。
 - 验证模式禁止写入 `~/.agentic-ops`；`--keep` 仅用于保留排障目录。
 - 提供 `--source-worktree` 时降级为本地流程验证：只校验安装流程，origin 是本地路径，不可运行。
 - 验证入口显式支持 `--source-branch`、`--source-worktree`、`--install-home`、`--log`、`--json`、`--keep`。
@@ -37,7 +43,7 @@ bash developer/bootstrap/install-verify-branch.sh \
 
 ### 主流程
 
-1. 管道安装脚本通过已登录的 `gh` 读取 Bootstrap 公共库，再验证 GitHub 登录与仓库访问。
+1. 调用侧先通过已登录的 `gh` 完整下载脚本并确认成功，再交给 `bash`；404、未授权或路径错误响应不得进入 Shell。安装脚本随后读取 Bootstrap 公共库并验证 GitHub 登录与仓库访问。
 2. 首次安装时在 `~/.agentic-ops` 创建 managed clone，并启用 sparse checkout。
 3. sparse checkout 只检出 `developer/`、只读 `shared/` JSON 协议及运行所需根版本元数据。
 4. Bootstrap 安装或定位 `uv`，按 `.python-version` 与 `developer/uv.lock` 准备 developer 独立 `.venv`。

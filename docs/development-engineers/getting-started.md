@@ -21,12 +21,15 @@
 ```sh
 gh auth login -h github.com -p ssh -s repo
 
-gh api -H 'Accept: application/vnd.github.raw' \
-  '/repos/tapstate/agentic-ops/contents/developer/bootstrap/install.sh?ref=main' \
-  | bash
+(
+  set -e
+  bootstrap="$(gh api -H 'Accept: application/vnd.github.raw' \
+    '/repos/tapstate/agentic-ops/contents/developer/bootstrap/install.sh?ref=main')"
+  printf '%s\n' "$bootstrap" | bash
+)
 ```
 
-安装目标是 `~/.agentic-ops` 的 developer-only sparse managed clone。Bootstrap 与 `ao-work` 都会校验 origin 必须是 `tapstate/agentic-ops`，普通使用不能用环境变量改写受信仓库；正常文件树只包含 developer 生产资产、只读的 `shared/integration/` JSON 协议及运行所需的根版本元数据，不包含 `maintainer/`、`developer/tests/`、fixture 或 fake producer。
+必须先完整取得脚本，成功后才交给 `bash`；这样 404 等 GitHub 错误响应不会被当作 Shell 执行。安装目标是 `~/.agentic-ops` 的 developer-only sparse managed clone。Bootstrap 与 `ao-work` 都会校验 origin 必须是 `tapstate/agentic-ops`，普通使用不能用 `AGENTIC_OPS_REPO_URL` 等环境变量改写受信仓库；正常文件树只包含 developer 生产资产、只读的 `shared/integration/` JSON 协议及运行所需的根版本元数据，不包含 `maintainer/`、`developer/tests/`、fixture 或 fake producer。
 
 安装完成后可使用：
 
