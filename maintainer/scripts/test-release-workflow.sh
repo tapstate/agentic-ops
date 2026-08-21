@@ -57,6 +57,21 @@ esac
 EOF
 chmod 0755 "$fake_gh"
 
+# 远端读取失败与 develop 明确不存在必须分开处理；读取失败时不得建议创建分支。
+unreadable_remote="$test_root/unreadable-remote"
+git init "$unreadable_remote" >/dev/null
+git -C "$unreadable_remote" remote add origin "$test_root/does-not-exist.git"
+if (
+  . "$repo_root/maintainer/scripts/lib/development-workflow.sh"
+  workflow_check_develop "$unreadable_remote"
+); then
+  fail "无法读取 origin 时不得报告 develop 已存在"
+else
+  unreadable_status=$?
+fi
+test "$unreadable_status" -eq 2 ||
+  fail "无法读取 origin 时必须返回独立状态 2"
+
 fake_uv="$test_root/uv"
 cat > "$fake_uv" <<'EOF'
 #!/usr/bin/env bash

@@ -136,7 +136,8 @@ workflow_check_hooks() {
 
 workflow_check_develop() {
   workflow_repo_root="$1"
-  git -C "$workflow_repo_root" ls-remote --exit-code --heads origin develop >/dev/null 2>&1
+  workflow_develop_ref="$(git -C "$workflow_repo_root" ls-remote --heads origin refs/heads/develop 2>/dev/null)" || return 2
+  [ -n "$workflow_develop_ref" ]
 }
 
 workflow_gh_value() {
@@ -263,6 +264,7 @@ workflow_check_github_auth() {
 workflow_check_soft_gate() {
   workflow_repo_root="$1"
   workflow_repository="tapstate/agentic-ops"
+  workflow_develop_status=0
 
   if ! workflow_check_hooks "$workflow_repo_root"; then
     workflow_fail "workflow_soft_gate_required" \
@@ -270,7 +272,12 @@ workflow_check_soft_gate() {
       "请先用硬门禁配置流程安装 trusted launcher，或显式执行 workflow_install_trusted_hooks 后重试"
     return 1
   fi
-  if ! workflow_check_develop "$workflow_repo_root"; then
+  workflow_check_develop "$workflow_repo_root" || workflow_develop_status=$?
+  if [ "$workflow_develop_status" -eq 2 ]; then
+    workflow_fail "workflow_develop_read_failed" "无法读取远端 develop 分支状态" "请检查网络和 origin 后重新执行原命令；不得据此创建或覆盖 develop"
+    return 1
+  fi
+  if [ "$workflow_develop_status" -ne 0 ]; then
     workflow_fail "workflow_soft_gate_required" "软门禁要求远端 develop 分支存在" "请先创建并推送 develop 分支"
     return 1
   fi
@@ -296,6 +303,7 @@ workflow_check_or_configure() {
   workflow_mode="$1"
   workflow_repo_root="${2:-$(pwd)}"
   workflow_repository="tapstate/agentic-ops"
+  workflow_develop_status=0
 
   if [ "$workflow_mode" = "soft" ]; then
     workflow_check_soft_gate "$workflow_repo_root"
@@ -308,7 +316,12 @@ workflow_check_or_configure() {
     workflow_install_trusted_hooks "$workflow_repo_root" || return 1
   fi
 
-  if ! workflow_check_develop "$workflow_repo_root"; then
+  workflow_check_develop "$workflow_repo_root" || workflow_develop_status=$?
+  if [ "$workflow_develop_status" -eq 2 ]; then
+    workflow_fail "workflow_develop_read_failed" "无法读取远端 develop 分支状态" "请检查网络和 origin 后重新执行原命令；不得据此创建或覆盖 develop"
+    return 1
+  fi
+  if [ "$workflow_develop_status" -ne 0 ]; then
     workflow_confirm_change "$workflow_mode" "远端 develop 分支不存在" || return 1
     workflow_branch="$(git -C "$workflow_repo_root" branch --show-current)"
     if [ "$workflow_branch" != "develop" ]; then
