@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# 本测试会在 fixture 内运行独立发布验证；不得继承外层完整验证用于
+# 防递归的标记，否则 fixture 会错误跳过发布工作流固定验证。
+unset AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd "$script_dir/../.." && pwd -P)"
 test_root="$(mktemp -d)"
