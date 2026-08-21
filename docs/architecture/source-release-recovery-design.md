@@ -61,6 +61,7 @@ maintainer/scripts/release.sh recover --version vX.Y --merged-pr <number> --allo
 - `publish` 在无差异 PR 前返回 `release_candidate_already_in_main`，不调用 PR 创建；
 - `recover` 拒绝缺失/错误或未绑定当前发布状态的 PR、非 Merge commit、远端 Tag 冲突、未确认状态及过期/伪造确认绑定；
 - 固定完整验证失败必须输出精确检查项、子命令退出码和仍可读取的完整日志路径；重试提示必须要求重新执行原命令，不得把 `prepare` / `recover` 一律误导为 `publish`；
+- 远端 `develop` 明确不存在与远端读取失败必须使用不同错误码；网络或 origin 读取失败时只允许提示重试，不得误导用户创建或覆盖长期分支；
 - 恢复成功只重建本地错误 Tag 并推送正确的不可变远端 Tag，不修改 `main`、`develop` 或远端 Tag；
 - 每个最终确认输出完整确认包；缺少任一确认项或事实引用时，测试证明没有分支、PR、Tag 或审计副作用；
 - 保留既有四项固定完整验证与软门禁人工 Merge commit 约束。
