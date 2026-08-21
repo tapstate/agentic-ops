@@ -1,5 +1,5 @@
 operation: workspace_init
-version: 3
+version: 4
 workplane: developer
 allowed_states:
   - uninitialized
@@ -7,17 +7,11 @@ inputs:
   interactive:
     required: false
     default: true
-  agent_id:
-    required_in_non_interactive: true
-    pattern: "^[0-9A-Za-z_-]+$"
-    interactive_default: normalized_lowercase_hostname
   project_profile:
     required_in_non_interactive: true
-  jira_email:
-    required_with_token_stdin: true
-  jira_token:
-    source: hidden_prompt_or_standard_input
-    command_argument_forbidden: true
+  install_authorization:
+    source: current_developer_install
+    required: true
   source_root:
     required: false
     default: workspace_root/repos/project_profile
@@ -27,7 +21,7 @@ inputs:
     note: 池模式必配；未配置时阻断 source_pool_root_invalid（无兼容回退）。目录不存在时由 init 自动创建并写入容器 README（preflight 只读校验、不创建）。
 confirmation:
   required_fields:
-    - agent_id
+    - install_identity_ref
     - workspace_root
     - project_profile
     - jira_base_url
@@ -57,8 +51,6 @@ preflight:
     - jira_identity
     - jira_project_access
     - git_available
-    - workspace_env_is_not_symlink_or_git_tracked
-    - git_local_exclude_is_verified_before_secret_write
     - source_pool_root
     - source_pool_members_remote
     - source_repository
@@ -68,47 +60,36 @@ write_order:
   - protect_workspace_state_from_git
   - prepare_pool_members_or_source_checkout_and_revalidate_source_boundary
   - write_profile_overlay_and_managed_instructions
-  - write_workspace_credentials_if_supplied
   - update_non_authoritative_workspace_index
   - write_agent_json_completion_marker_last
 postcondition:
   - post_preflight_must_pass
-  - credentials_remain_workspace_scoped
-  - agent_json_schema_v3_binds_connection_id_site_root_site_identity_and_verified_account_id
+  - credentials_remain_installation_scoped
+  - agent_json_schema_v4_binds_install_identity_ref_and_project_facts
   - connection_or_profile_overlay_drift_blocks_before_credential_read_and_network_request
   - effective_profile_project_repository_and_source_root_equal_agent_json
   - ordinary_preflight_cannot_confirm_or_rebind_drift
   - raw_and_effective_fetch_and_push_urls_equal_exact_github_repository
   - source_checkout_must_not_be_agenticops_source_or_descendant
   - failed_source_checkout_revalidation_must_rollback_clone_and_completion_state
-  - shared_install_index_must_not_authorize_or_supply_credentials
+  - workspace_must_not_authorize_or_supply_credentials
   - pool_mode_source_root_must_equal_configured_pool_root
 failure:
   - interactive_terminal_required
   - missing_project_profile
-  - missing_agent_id
-  - agent_id_invalid
-  - agent_id_conflict
   - workspace_boundary_invalid
   - workspace_state_symlink_forbidden
   - workspace_managed_path_unsafe
   - workspace_index_path_unsafe
-  - workspace_env_symlink_forbidden
-  - workspace_env_tracked
-  - workspace_git_tracking_check_failed
-  - workspace_git_exclude_failed
   - workspace_not_writable
   - existing_config_confirmation_required
   - jira_credentials_missing
-  - authorization_email_invalid
-  - authorization_token_invalid
   - jira_authorization_failed
   - jira_workspace_mismatch
   - workspace_jira_identity_upgrade_required
   - jira_workspace_identity_drift
   - jira_workspace_account_drift
   - workspace_project_identity_drift
-  - existing_jira_account_confirmation_required
   - workspace_repository_mapping_missing
   - source_repository_access_failed
   - git_url_rewrite_forbidden

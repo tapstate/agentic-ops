@@ -24,6 +24,7 @@ from ao_work.config import (
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.jira.cli import read_bound_jira_attempt, read_bound_jira_plan
 from ao_work.jira.service import JiraService
+from ao_work.installation import load_install_identity
 from ao_work.managed_io import read_managed_text
 from ao_work.git_security import parse_github_repository_url
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
@@ -218,6 +219,7 @@ class TaskRunProtocol:
             self.workspace,
             context.connection,
             account_id=live_identity["account_id"],
+            install_root=self.install_root,
         )
         live_issue = jira_client.get_issue(issue_manifest["key"])
         if (
@@ -468,6 +470,7 @@ class TaskRunProtocol:
             self.workspace,
             context.connection,
             account_id=identity["account_id"],
+            install_root=self.install_root,
         )
         issue = client.get_issue(manifest["issue"]["key"])
         account_id = identity["account_id"]
@@ -649,6 +652,7 @@ class TaskRunProtocol:
             self.workspace,
             context.connection,
             account_id=account_id,
+            install_root=self.install_root,
         )
         if account_id != expected["account_id"]:
             raise blocked(
@@ -1764,7 +1768,11 @@ class TaskRunProtocol:
             connection_id,
             workspace_root=self.workspace.root,
         )
-        validate_workspace_jira_binding(self.workspace, jira_connection)
+        validate_workspace_jira_binding(
+            self.workspace,
+            jira_connection,
+            install_root=self.install_root,
+        )
         denied_environment_keys = {
             jira_connection.email_env,
             jira_connection.token_env,
@@ -1868,6 +1876,7 @@ class TaskRunProtocol:
             self.workspace,
             context.connection,
             account_id=live_identity["account_id"],
+            install_root=self.install_root,
         )
         live_issue = jira_client.get_issue(manifest["issue"]["key"])
         if (
@@ -3419,8 +3428,9 @@ class TaskRunProtocol:
                 "manifest repository.root 与 agent.json source_root 不一致",
                 "请以当前业务工作空间显式 source_root 重新确认 manifest",
             )
+        install_identity = load_install_identity(self.install_root)
         expected = {
-            ("agent", "agent_id"): config.get("agent_id"),
+            ("agent", "agent_id"): install_identity.get("agent_id"),
             ("agent", "project_profile"): config.get("project_profile"),
             ("issue", "project_key"): config.get("jira_project"),
             ("repository", "slug"): config.get("repository"),
@@ -3432,15 +3442,15 @@ class TaskRunProtocol:
                     f"manifest {section}.{field} 与 agent.json 不一致",
                     "请基于当前工作空间身份重新确认 manifest",
                 )
-        configured_execution_identity = config.get("execution_identity")
-        if configured_execution_identity is not None and (
+        configured_execution_identity = install_identity.get("execution_identity")
+        if (
             not isinstance(configured_execution_identity, dict)
             or manifest["execution_identity"] != configured_execution_identity
         ):
             raise blocked(
                 "manifest_execution_identity_mismatch",
-                "manifest execution_identity 与工作空间研发员身份不一致",
-                "请使用工作空间初始化时已确认的 Git/GitHub 执行身份重新生成 manifest",
+                "manifest execution_identity 与安装级研发员身份不一致",
+                "请使用 ao-work auth 已确认的 Git/GitHub 执行身份重新生成 manifest",
             )
         profile = load_project_profile(
             self.install_root,

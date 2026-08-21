@@ -37,20 +37,20 @@ ao-work --help
 
 没有 `agentic-cli` 兼容别名；看到旧命令说明正在阅读冻结迁移基线或使用旧版本。
 
-首次使用该安装时，先配置当前研发员唯一身份与 Jira 凭据：
+安装时未完成授权，或后续需要轮换时，使用当前安装的单一授权入口：
 
 ```sh
-printf '%s\n' "$JIRA_API_TOKEN" | ao-work install identity set \
+printf '%s\n' "$JIRA_API_TOKEN" | ao-work auth \
   --agent-id <agent-id> \
   --jira-email <jira-account-email> \
   --git-name <git-author-and-committer-name> \
   --git-email <git-author-and-committer-email> \
   --github-login <github-actor-login> \
-  --jira-token-stdin \
+  --token-stdin \
   --non-interactive
 ```
 
-使用 `ao-work install identity show` 回读脱敏身份。新工作空间必须从当前安装继承该身份并生成 schema v4 绑定；不得只把身份和凭据写入单个工作空间。
+交互配置直接运行 `ao-work auth`，使用 `ao-work auth --show` 回读脱敏身份。安装脚本也可以接收相同授权参数，但只负责调用 Runtime。新工作空间从当前安装继承身份与凭证并生成 schema v4 绑定。
 
 ## 3. 初始化业务项目工作空间
 
@@ -68,7 +68,7 @@ ao-work --workspace-root ~/agentic-ops-tapdata workspace init
 
 首次初始化确认：
 
-- `agent_id`：必须与当前安装身份一致，只能包含 `[0-9a-zA-Z_-]`。
+- `agent_id`：从当前安装读取，只能包含 `[0-9a-zA-Z_-]`。
 - Jira 项目空间 / Project Profile。
 - Jira 站点、从安装身份继承的研发员账户和授权状态。
 - 默认仓库和源码目录。
@@ -81,7 +81,8 @@ ao-work --workspace-root ~/agentic-ops-tapdata workspace init
 
 | 来源 | 自动提供的内容 | 需要人工动作 |
 | --- | --- | --- |
-| 业务工作空间 | 研发员、Project Profile、Jira 账户、源码仓库 | 首次配置与隐藏授权 |
+| developer 安装 | 研发员、Jira 账户、Git/GitHub 执行身份 | 首次配置或凭证轮换 |
+| 业务工作空间 | Project Profile、安装身份引用、源码仓库 | 首次配置或明确重绑 |
 | Project Profile | Jira 站点、Project、状态/字段映射、默认仓库和固定策略 | 只有项目配置变化时审查 |
 | Jira 卡片 | Issue ID、经办人、状态、标题、描述和已配置业务字段 | 卡片缺失或冲突时决策 |
 | Runtime | run ID、时间、内容摘要、证据路径和协议摘要 | 无 |
@@ -108,7 +109,7 @@ Runtime 会自动合并 Jira、Project Profile、工作空间与 run 快照，�
 
 初始化最后写入 `.agentic-ops/agent.json`、当前工作空间 `AGENTS.md` 和 `.agents/skills/`。该 AI 入口固定进入 developer 工作面；Codex 从标准仓库级 `.agents/skills/` 发现受管 developer Skill，规则正文直接写入 `AGENTS.md`，标准资产由 `ao-work` 从受信安装根解析。业务仓库不需要也不应创建不存在的 `developer/...` 相对路径。
 
-业务项目 AI 工作空间与源码仓库必须使用两个独立目录，不能相同，也不能互相嵌套。默认源码目录会创建在工作空间同级目录。工作空间位于某个 Git 仓库时，初始化会把该工作空间的 `.agentic-ops/` 写入该仓库的 `.git/info/exclude`；Jira token 等身份状态不得出现在 `git status` 中。生成的 `AGENTS.md` 和 `.agents/skills/` 是 AI 直接可发现的受管副本；`workspace preflight` 会检查 Skill 缺失、漂移、额外资产和 maintainer 污染。
+业务项目 AI 工作空间与源码仓库必须使用两个独立目录，不能相同，也不能互相嵌套。默认源码目录会创建在工作空间同级目录。工作空间位于某个 Git 仓库时，初始化会把该工作空间的 `.agentic-ops/` 写入该仓库的 `.git/info/exclude`；工作空间不保存 Jira token。生成的 `AGENTS.md` 和 `.agents/skills/` 是 AI 直接可发现的受管副本；`workspace preflight` 会检查 Skill 缺失、漂移、额外资产和 maintainer 污染。
 
 不要在下列位置初始化业务工作空间：
 
@@ -119,16 +120,15 @@ Runtime 会自动合并 Jira、Project Profile、工作空间与 run 快照，�
 
 ## 4. 授权与验证
 
-首次初始化可以直接完成授权，也可以随后运行：
+授权属于 developer 安装，不属于单个工作空间：
 
 ```sh
-ao-work auth jira show
-ao-work auth jira set
-ao-work auth jira verify
+ao-work auth
+ao-work auth --show
 ao-work capability list
 ```
 
-`set` 无参数时进入隐藏输入；token 不通过命令行参数传递。授权只保存在当前业务项目工作空间，`~/.agentic-ops` 和其它工作空间不继承。执行具体业务操作前运行 `ao-work capability show <operation>`；`capability_gap` 表示当前版本没有安全原子操作，需要按中文 `next_action` 转人工，不能尝试旧命令。
+`ao-work auth` 在终端进入引导；token 不通过命令行参数传递。授权保存在当前 developer 安装，同一安装下的业务工作空间继承同一身份和凭证；不同研发员必须使用隔离安装。Jira 身份与 Project 权限由 workspace/task Runtime 入口回读。执行具体业务操作前运行 `ao-work capability show <operation>`；`capability_gap` 表示当前版本没有安全原子操作，需要按中文 `next_action` 转人工，不能尝试旧命令。
 
 ## 5. 启动 AIAgent
 

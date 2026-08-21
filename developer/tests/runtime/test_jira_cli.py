@@ -11,6 +11,7 @@ from unittest import mock
 
 from ao_work.jira.adf import markdown_to_adf
 from ao_work.work_cli import main
+from install_auth_fixture import configure_install_authorization, v4_agent
 from test_jira_service import FakeTransport
 
 
@@ -90,20 +91,23 @@ repositories:
             "  repository: tapdata/tapdata\n",
             encoding="utf-8",
         )
+        configure_install_authorization(
+            install,
+            jira_email="owner@example.test",
+            token="secret-token",
+        )
         agent.write_text(
             json.dumps(
-                {
-                    "schema_version": 3,
-                    "workplane": "developer",
-                    "project_profile": "demo",
-                    "connection_id": "tap-cloud",
-                    "jira_base_url": "https://jira.example.test",
-                    "jira_site": "jira.example.test",
-                    "jira_account_id": "owner-1",
-                    "jira_project": "TAP",
-                    "source_root": str(source),
-                    "repository": "tapdata/tapdata",
-                }
+                v4_agent(
+                    install,
+                    project_profile="demo",
+                    connection_id="tap-cloud",
+                    jira_base_url="https://jira.example.test",
+                    jira_site="jira.example.test",
+                    jira_project="TAP",
+                    source_root=str(source),
+                    repository="tapdata/tapdata",
+                )
             ),
             encoding="utf-8",
         )
@@ -133,10 +137,6 @@ repositories:
             agentic_run_id,
         )
         self.assertEqual(0, initialized[0])
-        (workspace / ".agentic-ops" / ".env").write_text(
-            "TEST_JIRA_EMAIL=owner@example.test\nTEST_JIRA_TOKEN=secret-token\n",
-            encoding="utf-8",
-        )
         return common
 
     def test_cli_comment_plan_apply_readback_and_sync(self) -> None:
@@ -709,7 +709,7 @@ repositories:
 
     def test_plan_path_rejects_reserved_cross_task_cross_run_and_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            _, workspace = self.prepare(Path(temporary))
+            install, workspace = self.prepare(Path(temporary))
             common = self.initialize_task(workspace)
             content = workspace / "comment.md"
             content.write_text("验证计划路径严格绑定当前任务运行。", encoding="utf-8")
@@ -771,7 +771,8 @@ repositories:
                     encoding="utf-8"
                 ),
             )
-            self.assertIn("secret-token", (workspace / ".agentic-ops/.env").read_text())
+            self.assertFalse((workspace / ".agentic-ops/.env").exists())
+            self.assertIn("secret-token", (install / "user/.env").read_text())
             self.assertEqual("outside-unchanged\n", outside.read_text(encoding="utf-8"))
 
     def test_plan_never_overwrites_existing_file(self) -> None:

@@ -10,7 +10,7 @@
 
 公司员工指导员负责为研发员安装和升级能力、明确任务与授权、校对产出、执行人工门禁，并把反复出现的问题反馈为标准改进。维护 `tapstate/agentic-ops` 源头项目也是公司员工指导员的一项职责，其目标是指导和进化研发员，不是代替研发员执行日常业务任务。
 
-安装与身份必须分离：`~/.agentic-ops` 是 developer-only sparse managed clone，提供研发员运行能力与研发员级身份/凭证（`user/identity.yaml`、`user/.env`，D-048 阶段二起），不代表任何具体项目，也不包含项目维护能力。业务项目工作空间保存项目、Jira 站点、仓库、流程和任务上下文，并持安装目录身份引用（agent.json schema v4 `install_identity_ref`）防错装。一台电脑可以维护多个相互隔离的工作空间并代表多名研发员，不允许跨工作空间自动继承或拼接身份凭证。
+安装与项目必须分离：`~/.agentic-ops` 是 developer-only sparse managed clone，提供一名研发员的运行能力与安装级身份/凭证（`user/identity.yaml`、`user/.env`），不代表任何具体项目，也不包含项目维护能力。业务项目工作空间保存项目、Jira 站点、仓库、流程和任务上下文，并持安装目录身份引用（agent.json schema v4 `install_identity_ref`）防错装。同一安装下的多个项目工作空间继承同一研发员身份；多名研发员必须使用隔离安装，不允许跨安装或从工作空间拼接身份凭证。
 
 项目必须在结构、命令和 AI 入口上硬隔离两个工作面：`maintainer` 只维护 AgenticOps 源头，入口为 `ao-maint`；`developer` 只执行其它业务项目的研发任务，入口为 `ao-work`。根仓库 AI 入口固定进入 `maintainer`，业务项目工作空间 AI 入口固定进入 `developer`；不得依赖同一命令的 mode 参数、聊天上下文或 AI 自主判断切换工作面。
 
@@ -125,7 +125,7 @@ Skill + Python Runtime + Shell Bootstrap + Rule
 
 - Skill 负责选择标准流程、组织操作和在能力不足时触发 AI 判断或人工确认；每个 Skill 只属于一个工作面。
 - Python Runtime 负责结构化数据、本地状态、外部系统适配、门禁、证据、恢复和反馈；maintainer/developer Runtime 使用不同包和入口，不得互相导入。
-- Shell Bootstrap 只负责安装、更新、回滚、Python 环境准备和统一启动。
+- Shell Bootstrap 只负责安装、更新、回滚、Python 环境准备、统一启动，以及把可选安装授权输入转交 Python Runtime；不实现身份或凭证业务逻辑。
 - Rule 负责事实源、权限、语言、分支、授权和停止条件。
 - Python 源码和标准资产随稳定 `main` 更新后直接生效，不构建 AgenticOps 自有平台二进制。
 - Go 历史实现已退出现役结构，不维护 Go/Python 双轨，也不恢复 `agentic-cli` 兼容入口。旧版本只由版本分支、Tag 和 Git 历史保留；已提取的契约、安全门禁、失败码、fixture 和验收行为必须由 Python Runtime、标准资产和固定验收继续保护。

@@ -107,7 +107,7 @@ developer 工作面的 effective 配置来源顺序：
 
 Runtime 不在同一进程中区分 mode。`ao_maint` 与 `ao_work` 分别由目录、AI 入口、命令、Python 包、Git remote、仓库根和项目工作空间标记验证；不一致时返回 `workplane_mismatch`。聊天指令、环境变量和 `--mode` 不能改变工作面。
 
-Jira 配置分为研发员账户、Connection、Project Profile 和 Project AI Workspace。一个业务项目工作空间代表一名研发员并只维护一个 Jira 账户；`~/.agentic-ops` 共享安装没有人员身份，一台电脑可以维护多个隔离的研发员工作空间。项目工作空间通过 Project Profile 选择 Connection，旧工作空间中的显式 `connection_id` 只作一致性校验。任务身份仍包含 `connection_id`、`jira_issue_id`、`issue_key` 和 `project_key`；站点、Profile 或 Issue 事实不一致时返回 `jira_workspace_mismatch`。
+Jira 配置分为安装级研发员账户、Connection、Project Profile 和 Project AI Workspace。一个 developer 安装代表一名研发员并维护一个 Jira 账户；同一安装下可以维护多个相互隔离的业务项目工作空间，多名研发员使用隔离安装。项目工作空间通过 Project Profile 选择 Connection，显式 `connection_id` 只作一致性校验。任务身份仍包含 `connection_id`、`jira_issue_id`、`issue_key` 和 `project_key`；安装身份、站点、Profile 或 Issue 事实不一致时返回稳定阻断码。
 
 Jira 状态流转（`jira transition plan/apply/readback`，D-049）按 Project Profile `transitions` 映射执行 D-037 严格匹配：稳定 ID 优先、名称兜底需唯一且 from/to 匹配、禁止模糊匹配；目标状态必须来自 profile `statuses` 映射 ∩ Jira 可用列表，AIAgent 默认禁止推进 `completed` stage（无合入权）。映射失配时输出适配对照材料（当前状态 + Jira 可用 transitions + 已配置条目），适配只改 profile 配置、不改 Runtime 代码。
 
@@ -150,7 +150,7 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 ## 12. 授权入口
 
-业务外部系统授权统一通过 `ao-work auth` 管理。Jira 当前支持 `list`、`show`、`set`、`remove` 和 `verify`；常规 `show`、`set`、`verify` 不需要 Connection 或 scope 参数，用户不需要手工猜测环境变量名或编辑 `.env`。`ao-maint` 不读取业务工作空间凭证，也不提供该授权入口。
+业务 Jira 授权统一通过安装级 `ao-work auth` 管理；交互调用配置或更新完整身份与 token，`--show` 返回脱敏状态。该入口不选择 Connection 或 Project，也不单独探测 Jira；workspace/task Runtime 根据 Project Profile 完成真实身份和权限回读。用户不需要手工猜测环境变量名或编辑 `.env`。`ao-maint` 不读取 developer 安装凭证，也不提供该授权入口。
 
 授权入口只返回配置状态、脱敏身份和来源，不返回 token。凭证文件使用锁、原子替换和 `0600` 权限；真实 Jira 操作前必须验证 Connection、当前身份和项目工作空间绑定。详细操作见 [AgenticOps 授权管理](authorization.md)。
 
@@ -162,13 +162,13 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 ## 13. 业务项目工作空间初始化
 
-人用常规入口先由 `ao-work install identity set` 配置当前 developer 安装的研发员唯一身份与 Jira 凭据，再由 `ao-work workspace init` 绑定 Project Profile。`agent_id` 最终必须匹配 `^[0-9A-Za-z_-]+$`。站点、Project、状态/字段映射和默认仓库不按任务重复询问；任务事实来自 Jira，run/digest/time 由 Runtime 生成，用户只审查 AI 提议和高风险授权。
+人用常规入口先由 `ao-work auth` 配置当前 developer 安装的研发员唯一身份与 Jira 凭据，再由 `ao-work workspace init` 绑定 Project Profile。Bootstrap 可以接收相同授权参数，但只调用 Runtime。`agent_id` 最终必须匹配 `^[0-9A-Za-z_-]+$`。站点、Project、状态/字段映射和默认仓库不按任务重复询问；任务事实来自 Jira，run/digest/time 由 Runtime 生成，用户只审查 AI 提议和高风险授权。
 
 确认后 Runtime 先对候选配置执行无副作用预检，再准备源码和原子写入工作空间文件；`.agentic-ops/agent.json` 作为初始化完成标记最后写入。Jira 身份、目标 Project 访问、Git 远端访问或本机 `agent_id` 冲突任一检查失败时，不得进入任务执行。
 
 池模式（D-048）下，`source_pool_root` 为研发员级必配（`~/.agentic-ops/user/config.yaml` 或 `--source-pool-root`）；未配置时阻断 `source_pool_root_invalid`，无兼容回退。源码准备从「工作空间级单仓库克隆」改为「中央克隆池成员全集准备」：按 Project Profile `repositories.list` 逐仓库认领（校验 remotes 精确匹配、拒绝 URL 改写与 AgenticOps 源头仓库）或流式克隆；浅克隆自动 `git fetch --unshallow`；中断续传，已完成成员保留。任务执行源码在任务接管时以任务级子工作树集（`<pool_root>/<jira>/<from_branch>/<repo>`，`/` 规范化为 `-`）挂出，分支由 Profile `branches` 推导接口确定（主仓库=from_branch、override 命中优先、否则同名；缺省 `main`），per-worktree 身份写入 worktree config，同一任务同分支同仓库复用已有工作树。
 
-初始化生成的业务工作空间 `AGENTS.md` 固定进入 developer 工作面，不得引用根 `AGENTS.md` 或 `maintainer/`。developer 安装的 `user/identity.yaml` 与 `user/.env` 保存研发员身份和 Jira 凭据；`user/workspace-index.json` 只是可重建冲突索引。新工作空间使用 schema v4，只持 `install_identity_ref` 和项目绑定；工作空间 `.agentic-ops/.env` 仅供 schema v3 存量迁移，不再作为新初始化目标。
+初始化生成的业务工作空间 `AGENTS.md` 固定进入 developer 工作面，不得引用根 `AGENTS.md` 或 `maintainer/`。developer 安装的 `user/identity.yaml` 与 `user/.env` 保存研发员身份和 Jira 凭据；`user/workspace-index.json` 只是可重建冲突索引。新工作空间使用 schema v4，只持 `install_identity_ref` 和项目绑定；schema v3 与工作空间 `.agentic-ops/.env` 在凭证读取和联网前失败关闭，不提供隐式迁移。
 
 指定分支验证安装（`developer/bootstrap/install-verify-branch.sh` 远程模式）的 `ao-work` 复用同一套安装身份校验：origin 必须是 `tapstate/agentic-ops`、sparse 精确集与 shared/developer 分发白名单不变，仅把「HEAD 是 `origin/main` 祖先」放宽为「HEAD 可达于任一 `origin/*` 远端分支或 tag」；该放宽只在 `.agentic-ops/verification-only` 标记存在时生效。生产安装 `~/.agentic-ops` 仍固定 `main`，不接受分支覆盖。
 

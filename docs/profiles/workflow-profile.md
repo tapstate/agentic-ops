@@ -144,7 +144,7 @@ templates:
 - `Profile.workspace` 必须与 profile 文件名中的项目配置项一致，例如 `tapdata.yaml` 对应 `workspace: tapdata`。
 - `Profile.jira.project` 是该项目配置项绑定的 Jira project；快速开始初始化不要求研发工程师重复输入。
 - `Profile.jira.user` 在共享 profile 中只能使用默认占位值；`workspace init` 会使用研发工程师提供的 Jira 用户写入 `.agentic-ops/profile.local.yaml`。
-- `Profile.jira.base_url` 可以提供项目默认 Jira 地址；Jira Cloud 使用站点根地址，例如 `https://tapdata.atlassian.net`，不包含 `/jira`。真实账户只保存在当前业务项目工作空间的受保护凭证文件中；进程环境默认不作为凭证来源。外部脚本和 AIAgent 通过 `ao-work` 的受控配置与授权入口读取脱敏状态。
+- `Profile.jira.base_url` 可以提供项目默认 Jira 地址；Jira Cloud 使用站点根地址，例如 `https://tapdata.atlassian.net`，不包含 `/jira`。真实账户只保存在当前 developer 安装的受保护 `user/.env` 中；进程环境默认不作为凭证来源。外部脚本和 AIAgent 通过 `ao-work auth --show` 读取脱敏状态。
 - `Profile.local.*` 在共享 profile 中只能使用 `<project-ai-workspace>` 这类占位值；`workspace init` 会把本地路径写入 `.agentic-ops/profile.local.yaml`。源码目录默认是与工作空间同级的 `<project-ai-workspace>-code/<repository 短名>` 目录，目录不存在或为空时初始化会从 `github.repositories.default` 下载项目代码；目录已存在且非空时直接复用。`workspace init` 会在 `-code` 容器目录写入受管 `README.md` 说明文件（记录归属工作空间、agent_id、Project Profile 和仓库，管理块重新初始化时整体重写）；显式 `--source-root` 指定的目录不写入。一个源码目录只能绑定一个业务项目工作空间，多个工作空间不得共享同一源码目录。研发工程师可以通过 `--source-root` 显式确认其它目录。
 - 如果项目 AI 工作空间已有完整的 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 和 AgenticOps 管理的 `AGENTS.md` 配置块，`workspace init` 必须停止并要求研发工程师确认；确认覆盖时使用 `--confirm-existing-config`。只存在部分受管文件时视为上次初始化未完成，允许同项目初始化自动修复。
 - `workspace init` 必须先持久化已确认的 Jira 本机配置，再执行源码下载，最后写入 workspace overlay、`agent.json` 和 `AGENTS.md` 管理块。源码下载失败时不得丢失用户已输入的 Jira token，也不得新建表示初始化完成的 overlay。

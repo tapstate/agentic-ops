@@ -14,6 +14,7 @@ from ao_work.jira.client import JiraTransportError, TransportResponse
 from ao_work.output import RuntimeErrorResult
 from ao_work.task_state import TaskStore
 from ao_work.work_cli import main
+from install_auth_fixture import configure_install_authorization
 
 
 class TakeoverTransport:
@@ -187,29 +188,22 @@ class TaskTakeoverTest(unittest.TestCase):
             "  default: tapdata/tapdata\n",
             encoding="utf-8",
         )
+        install_identity_ref = configure_install_authorization(self.install)
         state = self.workspace / ".agentic-ops"
         (state / "profiles").mkdir(parents=True)
         (state / "agent.json").write_text(
             json.dumps(
                 {
-                    "schema_version": 3,
+                    "schema_version": 4,
                     "workplane": "developer",
-                    "agent_id": "harsen-mini-test-bot",
+                    "install_identity_ref": install_identity_ref,
                     "project_profile": "tapdata",
                     "jira_project": "TAP",
                     "connection_id": "tapdata-cloud",
                     "jira_base_url": "https://tapdata.atlassian.net",
                     "jira_site": "tapdata.atlassian.net",
-                    "jira_account_id": "jira-account-1",
                     "source_root": str(self.source.resolve()),
                     "repository": "tapdata/tapdata",
-                    "execution_identity": {
-                        "git_author_name": "Harsen Test Bot",
-                        "git_author_email": "harsen@example.test",
-                        "git_committer_name": "Harsen Test Bot",
-                        "git_committer_email": "harsen@example.test",
-                        "github_actor_login": "harsen-mini-test-bot",
-                    },
                 }
             ),
             encoding="utf-8",
@@ -545,7 +539,7 @@ class TaskTakeoverTest(unittest.TestCase):
         agent_path = self.workspace / ".agentic-ops" / "agent.json"
         agent = json.loads(agent_path.read_text(encoding="utf-8"))
         for field in ("agent_id", "jira_account_id", "execution_identity"):
-            agent.pop(field)
+            agent.pop(field, None)
         agent.update(
             {
                 "schema_version": 4,
@@ -569,11 +563,11 @@ class TaskTakeoverTest(unittest.TestCase):
         self.assertEqual(1, len(transport.comments))
         self.assertIsNone(transport.transition_executed)
 
-    def test_takeover_blocks_when_agent_id_missing(self) -> None:
+    def test_takeover_blocks_when_install_identity_missing(self) -> None:
         transport = TakeoverTransport(status="打开")
         code, payload, stderr = self.run_cli(transport, with_identity=False)
         self.assertEqual(2, code, (payload, stderr))
-        self.assertEqual("agent_identity_missing", payload["code"])
+        self.assertEqual("install_identity_missing", payload["code"])
 
     def test_takeover_blocks_missing_transition(self) -> None:
         transport = TakeoverTransport(

@@ -54,7 +54,7 @@ Skill 在创建工作空间或访问 Jira 前先执行：
 
 AgenticOps source/ref 只用于确认 `ao-maint` / `ao-work` 来自预期安装版本，是正式测试的安装前提，不是 task-to-PR manifest 字段，也不构成业务任务授权。
 
-当前尚未完成 Jira 授权，所以 maintainer 准备阶段必须停在后台 manifest 骨架和简化配置指引：不得读取业务工作空间、`.env`、进程凭据、`~/.agentic-ops` 或相邻文件；不得运行 `ao-work auth jira show`、`auth jira verify`、`probe-jira`、`probe-jira-write` 或其它外部 probe；不得访问 `TAP-12289` 或声称 Jira 身份、issue 内容与权限已验证。准备结果必须明确 `host_state_read=false`、`business_workspace_read=false` 和 `credentials_read=false`。
+当前尚未完成 Jira 授权，所以 maintainer 准备阶段必须停在后台 manifest 骨架和简化配置指引：不得读取业务工作空间、`.env`、进程凭据、`~/.agentic-ops` 或相邻文件；不得运行 `ao-work auth --show`、`probe-jira`、`probe-jira-write` 或其它外部 probe；不得访问 `TAP-12289` 或声称 Jira 身份、issue 内容与权限已验证。准备结果必须明确 `host_state_read=false`、`business_workspace_read=false` 和 `credentials_read=false`。
 
 maintainer Skill 在隔离工作空间中完成隐藏授权并明确允许读取当前任务后，developer 的任务入口只有一个 Jira key：
 

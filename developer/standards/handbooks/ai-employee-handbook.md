@@ -85,7 +85,7 @@ AI 员工应把自然语言转换为 AgenticOps 操作，而不是直接操作 J
 
 列出任务必须读取真实 Jira。当前 `list_tasks` 已由 `ao-work jira list` 实现；无编号接管也只读返回同一工作空间名下候选并等待研发工程师选择，不得自动挑选。fake adapter 只允许用于 AgenticOps 本地自动化回归，不能冒充真实候选。
 
-Project Profile 提供 Jira Connection、Project Key 和默认仓库映射；Jira Cloud `base_url` 必须是严格 HTTPS 站点根地址，例如 `https://tapdata.atlassian.net`，不能包含 userinfo、query、fragment 或非根路径。新工作空间初始化前先用同一安装的 `ao-work install identity set` 配置研发员唯一身份与 Jira 凭据；`workspace init` 生成 schema v4 `agent.json`，只固化项目绑定、源码规范路径和 `install_identity_ref`。后续 effective Profile/Connection overlay、安装身份指纹或登录账户不一致时，必须在发送写请求前阻断。普通 `workspace preflight` 没有重绑权限，只有指导员显式执行并确认 `workspace init` 才能重绑。schema v3 是迁移期旧格式，不得继续用于新工作空间；旧工作空间必须在配置安装身份后重新初始化，不得静默补值。Token 只允许隐藏输入或安全标准输入，保存在当前 developer 安装的 `user/.env`，不得写入 YAML、日志、事件或聊天。AIAgent 不直接解析或修改 Runtime 管理的配置文件。
+Project Profile 提供 Jira Connection、Project Key 和默认仓库映射；Jira Cloud `base_url` 必须是严格 HTTPS 站点根地址，例如 `https://tapdata.atlassian.net`，不能包含 userinfo、query、fragment 或非根路径。新工作空间初始化前先用同一安装的 `ao-work auth` 配置研发员唯一身份与 Jira 凭据；`workspace init` 生成 schema v4 `agent.json`，只固化项目绑定、源码规范路径和 `install_identity_ref`。后续 effective Profile/Connection overlay、安装身份指纹或登录账户不一致时，必须在发送写请求前阻断。普通 `workspace preflight` 没有重绑权限，只有指导员显式执行并确认 `workspace init` 才能重绑。schema v3 已停止作为运行时授权来源；旧工作空间必须先重新授权，再由指导员明确重新初始化，不得静默读取、复制或删除旧 `.env`。Token 只允许隐藏输入或安全标准输入，保存在当前 developer 安装的 `user/.env`，不得写入工作空间、YAML、日志、事件或聊天。AIAgent 不直接解析或修改 Runtime 管理的配置文件。
 
 `workspace preflight` 返回初始化不完整时，AIAgent 不得把 Profile 可解析视为初始化成功，也不得继续读取或接管任务。应要求公司员工指导员在业务项目工作空间重新运行 `ao-work workspace init`；相同候选配置允许修复半初始化状态，覆盖不同完整配置仍需明确确认。业务 Git remote 只接受精确 `github.com/<owner>/<repository>` 的 SCP、SSH 或 HTTPS 形式；raw/effective fetch/push 必须全部匹配，任何 `url.*.insteadOf` 或 `pushInsteadOf` 都会在 clone、`ls-remote` 或可信 probe 前阻断。池模式下，无权限（403/404/denied/认证失败等权限类错误）的源码仓库会在初始化预检与池成员准备阶段跳过并明确提示，结果 `skipped_repositories` 列出被跳过的仓库，其余仓库正常完成；网络类错误（超时/DNS/连接失败等）仍阻断初始化。
 
@@ -108,17 +108,11 @@ ao-work capability show <operation>
 ao-work capability list
 ao-work capability show jira_inspect
 
-ao-work install identity set
-ao-work install identity show
+ao-work auth
+ao-work auth --show
 ao-work workspace init
 ao-work workspace inspect
 ao-work workspace preflight
-
-ao-work auth jira list
-ao-work auth jira show
-ao-work auth jira set
-ao-work auth jira remove --field <email|token|all>
-ao-work auth jira verify
 
 ao-work jira list [--max-results <n>]
 ao-work jira inspect --issue-key TAP-123
@@ -146,19 +140,18 @@ ao-work jira transition readback --issue-key TAP-123 --idempotency-key <key> --p
 脚本或 CI 必须先给当前 developer 安装配置研发员唯一身份，再初始化业务项目工作空间。Token 只在安装身份步骤通过安全标准输入传入，不得放入命令行参数：
 
 ```sh
-printf '%s\n' "$JIRA_API_TOKEN" | ao-work install identity set \
+printf '%s\n' "$JIRA_API_TOKEN" | ao-work auth \
   --agent-id <agent-id> \
   --jira-email <jira-account-email> \
   --git-name <git-author-and-committer-name> \
   --git-email <git-author-and-committer-email> \
   --github-login <github-actor-login> \
-  --jira-token-stdin \
+  --token-stdin \
   --non-interactive
 
 ao-work workspace init \
   --non-interactive \
   --project tapdata \
-  --agent-id <agent-id> \
   --source-pool-root <pool-root> \
   --confirm
 ```
@@ -169,7 +162,6 @@ ao-work workspace init \
 ao-work --workspace-root /path/to/workspace workspace init \
   --non-interactive \
   --project tapdata \
-  --agent-id <agent-id> \
   --source-pool-root <pool-root> \
   --confirm
 ```
@@ -178,14 +170,12 @@ ao-work --workspace-root /path/to/workspace workspace init \
 
 - `--non-interactive` 与 `--confirm`：确认初始化摘要，缺一不可。
 - `--project <profile>`：Project Profile id（如 `tapdata`），来源 `developer/standards/projects/<profile>/profile.yaml`；Jira 站点、Project Key 与默认仓库没有 CLI 参数，全部取自该 Profile。
-- `--agent-id <id>`：只允许 `[0-9A-Za-z_-]`。
-- 安装身份必须已配置并包含 Jira 凭据；新工作空间从安装目录继承，不重复保存工作空间级凭据。
+- 安装身份必须已通过 `ao-work auth` 配置并包含 Jira 凭据；新工作空间从安装目录继承，不接收或保存工作空间级身份与凭据。
 - 池根必配：`--source-pool-root` 或 `~/.agentic-ops/user/config.yaml` 的 `source_pool_root` 二选一，否则 `source_pool_root_invalid` 阻断，无兼容回退。池根目录不存在时由 init 自动创建并写入容器 README（preflight 只读校验、不创建）。
 
 可选参数：
 
 - `--source-root`：缺省为池模式（源码语义 = 池根，任务工作树在接管时创建）；显式传入非池根路径则为普通源码模式。
-- `--git-name` / `--git-email` / `--github-login`：执行身份三参数，all-or-none；已用 `ao-work install identity set` 配置安装身份时可省略，从安装身份继承。
 - `--confirm-existing-config`：已有不同完整配置需覆盖时提供，否则 `existing_config_confirmation_required` 阻断。
 
 > 维护约定：本节示例与 `developer/skills/initialize-project-workspace/SKILL.md` 的非交互示例随 `workspace init` 参数变更同步修正，不得只改实现不改文档。

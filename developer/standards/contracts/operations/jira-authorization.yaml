@@ -1,24 +1,21 @@
 operation: jira_authorization
-version: 2
+version: 3
 workplane: developer
 actions:
-  - list
+  - configure
   - show
-  - set
-  - remove
-  - verify
 account:
-  cardinality: one_per_business_project_workspace
-  shared_install_has_identity: false
-  cross_workspace_credential_inheritance: false
+  cardinality: one_per_developer_install
+  shared_install_has_identity: true
+  cross_workspace_credential_inheritance: same_install_only
   precedence:
-    - workspace
+    - installation
   writable:
-    - workspace
-connection_resolution:
-  - project_profile
-  - sole_installed_connection
-  - explicit_advanced_override
+    - installation
+storage:
+  identity: user/identity.yaml
+  credentials: user/.env
+  workspace_reference: install_identity_ref
 security:
   - token_must_not_be_accepted_as_command_argument
   - token_must_not_be_returned_or_logged
@@ -26,21 +23,16 @@ security:
   - writes_must_be_locked_and_atomic
   - email_and_token_must_share_one_source
   - process_environment_must_not_be_read_implicitly
-  - verify_must_read_back_authenticated_identity
-  - all_http_redirects_must_be_rejected
-  - agentic_ops_state_directory_must_not_be_symlink
-  - workspace_env_must_not_be_symlink
-  - workspace_env_must_not_be_git_tracked
-  - git_local_exclude_must_be_verified_before_secret_write
+  - workspace_must_not_store_or_read_credentials
+  - workspace_init_must_verify_jira_identity_and_project_access
+  - schema_v3_workspace_must_fail_closed_before_credential_read
 failure:
+  - install_identity_missing
+  - install_identity_incomplete
+  - install_identity_invalid
   - authorization_email_invalid
   - authorization_token_empty
-  - authorization_no_change
+  - authorization_token_invalid
   - jira_credentials_missing
-  - jira_authorization_failed
-  - jira_connection_failed
-  - workspace_state_symlink_forbidden
-  - workspace_env_symlink_forbidden
-  - workspace_env_tracked
-  - workspace_git_tracking_check_failed
-  - workspace_git_exclude_failed
+  - install_user_dir_invalid
+  - install_identity_write_failed

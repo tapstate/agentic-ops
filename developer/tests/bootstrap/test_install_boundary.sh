@@ -12,6 +12,7 @@ source_repo="$test_root/source"
 test_home="$test_root/home"
 install_root="$test_root/installed-agentic-ops"
 default_install_root="$test_home/.agentic-ops"
+authorized_install_root="$test_root/authorized-agentic-ops"
 fake_uv="$test_root/fake-uv"
 poison_root="$test_root/poison"
 official_repo_url="git@github.com:tapstate/agentic-ops.git"
@@ -98,6 +99,45 @@ AO_TEST_FIXTURE_REPOSITORY="$source_repo" \
 AO_TEST_OFFICIAL_REPOSITORY="$official_repo_url" \
 PATH="$transport_git_dir:$PATH" \
   bash "$source_repo/developer/bootstrap/install.sh" >/dev/null
+
+printf '%s\n' 'test-token-secret' | \
+HOME="$test_home" \
+AGENTIC_OPS_HOME="$authorized_install_root" \
+AGENTIC_OPS_UV="$fake_uv" \
+AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
+AO_TEST_REAL_GIT="$real_git" \
+AO_TEST_FIXTURE_REPOSITORY="$source_repo" \
+AO_TEST_OFFICIAL_REPOSITORY="$official_repo_url" \
+PATH="$transport_git_dir:$PATH" \
+  bash "$source_repo/developer/bootstrap/install.sh" \
+    --agent-id install-auth-test \
+    --jira-email developer@example.test \
+    --git-name 'Install Auth Test' \
+    --git-email developer@example.test \
+    --github-login install-auth-test \
+    --token-stdin \
+    --non-interactive \
+    >"$test_root/authorized-install.out"
+
+grep -q '"authorization_status":"configured"' "$test_root/authorized-install.out"
+test -f "$authorized_install_root/user/identity.yaml"
+test -f "$authorized_install_root/user/.env"
+if stat -f '%Lp' "$authorized_install_root/user/identity.yaml" >/dev/null 2>&1; then
+  test "$(stat -f '%Lp' "$authorized_install_root/user/identity.yaml")" = "600"
+  test "$(stat -f '%Lp' "$authorized_install_root/user/.env")" = "600"
+else
+  test "$(stat -c '%a' "$authorized_install_root/user/identity.yaml")" = "600"
+  test "$(stat -c '%a' "$authorized_install_root/user/.env")" = "600"
+fi
+"$authorized_install_root/bin/ao-work" auth --show \
+  >"$test_root/authorized-install-show.out"
+grep -q '"authorization_scope":"installation"' "$test_root/authorized-install-show.out"
+grep -q '"agent_id":"install-auth-test"' "$test_root/authorized-install-show.out"
+if grep -q 'test-token-secret' "$test_root/authorized-install.out" \
+    "$test_root/authorized-install-show.out"; then
+  echo "安装与授权输出不得泄漏 Jira token" >&2
+  exit 1
+fi
 
 test -x "$install_root/bin/ao-work"
 test ! -e "$install_root/bin/ao-maint"

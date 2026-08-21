@@ -76,7 +76,7 @@ Jira 交互中的人可见内容必须使用中文，包括摘要、标题、描
 
 目标运行架构是 `Skill + Python Runtime + Shell Bootstrap + Rule`。维护工作面入口为 `./maintainer/bin/ao-maint`，研发工程师工作面入口为安装后的 `ao-work`。Python Runtime 承载契约、状态、API、门禁、证据、恢复和反馈；Shell Bootstrap 只负责认证安装引导、轻量环境检测、developer-only sparse managed clone 更新、`uv` 环境准备、启动和回滚。维护 AgenticOps 源头仓库时，`maintainer/scripts/release.sh`、`maintainer/scripts/hotfix.sh` 及 `maintainer/scripts/lib/` 可以作为项目级例外。AgenticOps 现役实现不包含 Go Runtime、项目自有平台二进制或 `agentic-cli` 兼容入口。
 
-`~/.agentic-ops` 是稳定 `main` 的 developer-only sparse managed clone，不代表研发员，也不是具体项目运行目录。具体项目运行目录是业务项目 AI 工作空间，例如 `tapstate` 或 `tapdata`；一个业务项目工作空间代表一名研发员并保存该研发员的 Jira 身份。
+`~/.agentic-ops` 是稳定 `main` 的 developer-only sparse managed clone，代表一名研发员的 developer 安装并保存安装级身份与凭证，但不是具体项目运行目录。具体项目运行目录是业务项目 AI 工作空间，例如 `tapstate` 或 `tapdata`；同一安装下的工作空间继承同一研发员身份，只保存项目绑定与任务状态。
 
 ## 测试与验证
 

@@ -24,7 +24,7 @@
 - 业务任务从已进入迭代、已指定研发工程师的 Jira 卡片开始。
 - 研发工程师手动触发任务接管，AIAgent 不能全自动接管任务。
 - `tapstate/agentic-ops` 是源码、规则、手册、契约、配置模板和通用文档的源头仓库。
-- `~/.agentic-ops` 是 developer-only sparse managed clone，不含 maintainer 运行资产，不代表研发员，也不是具体项目运行目录。
+- `~/.agentic-ops` 是 developer-only sparse managed clone，不含 maintainer 运行资产；它代表一名研发员的安装，但不是具体项目运行目录。
 - 具体项目 AI 工作空间才是运行目录，例如 `tapstate`、`tapdata`。
 - AI 员工在具体任务中产生的代码、日志、验证结果和任务上下文不能混入全局安装目录。
 - AIAgent 必须通过操作契约使用工具，不能直接猜测 Jira 字段、状态或工作流。

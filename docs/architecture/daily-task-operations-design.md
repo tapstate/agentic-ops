@@ -154,7 +154,7 @@ def _run_git(command, *, timeout=None):
 
 ### 3.5 T6：接管简化 + 无编号自动接管
 
-**3.5.1 agent-id 与授权自动绑定**：`ao-work takeover` 从安装目录身份（`~/.agentic-ops/user/identity.yaml`，D-048 阶段二）读取 `agent_id`；安装身份缺失时阻断并提示配置路径（`install identity set`）。带 KEY 的明确接管指令由 Runtime 在 run 确定后绑定稳定内部授权摘要，不要求用户传入引用。
+**3.5.1 agent-id 与授权自动绑定**：`ao-work takeover` 从安装目录身份（`~/.agentic-ops/user/identity.yaml`）读取 `agent_id`；安装身份缺失时阻断并提示 `ao-work auth`。带 KEY 的明确接管指令由 Runtime 在 run 确定后绑定稳定内部授权摘要，不要求用户传入引用。
 
 **3.5.2 无编号自动接管**：`ao-work takeover` 不带 issue_key 时：
 1. 调 list_tasks（T4）取名下未完成列表。

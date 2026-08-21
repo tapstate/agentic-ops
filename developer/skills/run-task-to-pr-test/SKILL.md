@@ -13,7 +13,7 @@ metadata:
 
 ## 授权前停止线
 
-未收到用户对当前业务项目工作空间的明确授权确认前，只输出预检授权清单和安全配置入口；不得读取 `.env`，不得运行 `ao-work auth jira show`、`ao-work auth jira verify` 或任何 Jira probe，也不得从本机、Shell 环境、其它工作空间或历史对话发现凭证。需要配置时，由用户在隐藏输入中执行 `ao-work auth jira set`；确认授权后才能按 manifest 继续真实 Jira 读取或写入。
+未收到用户对当前业务项目工作空间的明确授权确认前，只输出预检授权清单和安全配置入口；不得读取安装目录或旧工作空间 `.env`，不得运行 `ao-work auth --show` 或任何 Jira probe，也不得从本机、Shell 环境、其它安装、其它工作空间或历史对话发现凭证。需要配置时，由用户在隐藏输入中执行 `ao-work auth`；确认授权后才能按 manifest 继续真实 Jira 读取或写入。
 
 业务工作空间尚未初始化时，让用户在目标业务工作空间执行：
 
@@ -62,7 +62,7 @@ Runtime 按固定风险标志和证据确定级别，优先级为 L4、L3、L2�
 
 1. `record` 只导入 Skill、AI、人工或项目工具产生的非关键过程事件，并设置 `evidence_origin=imported`；不得设置 `actor=runtime`，不得导入 readback、verification 或 prohibition_check。
 2. 在任何 Jira/Git/GitHub 写入、提交或推送前，先切到 manifest 任务分支并确保工作树与索引干净，再执行 `ao-work task-run probe-prohibition-baseline --manifest <...>`。Runtime 使用 manifest 明确允许的三类只读权限，记录 Jira 非 Done 状态、完整远端 tag refs、GitHub release 记录、各保护分支 HEAD、本地 HEAD、可空远端任务分支 SHA和可空既有 open PR；若远端任务分支已存在，本地 HEAD 必须与其一致；若不存在，本地 HEAD 必须与远端目标分支一致。这样写前预置 commit 不能被后续微小提交伪装为本运行产出；基线失败或补录过晚必须停止并使用新的运行。
-3. 执行 `ao-work task-run probe-jira --manifest <...>`，由 Runtime 使用当前工作空间凭证实时 GET `myself`、issue 和评论，核对站点、Project、Issue ID、经办人、Profile 状态映射、非 Done 状态及当前 `agentic_run_id` 的受管接管评论。评论缺失时记录自动化缺口和 `formal_takeover_verified=false`，不虚构正式接管。
+3. 执行 `ao-work task-run probe-jira --manifest <...>`，由 Runtime 使用当前 developer 安装凭证实时 GET `myself`、issue 和评论，核对安装身份引用、站点、Project、Issue ID、经办人、Profile 状态映射、非 Done 状态及当前 `agentic_run_id` 的受管接管评论。评论缺失时记录自动化缺口和 `formal_takeover_verified=false`，不虚构正式接管。
 4. 使用 manifest 中既有 `agentic_run_id`，记录分析、计划、风险、验证和明确非范围。只有与 manifest 绑定且事件中引用相同授权的外部动作才执行写入。
 5. 在独立任务分支修改业务代码。持续记录 Skill、Runtime、项目工具、AI 和人工的边界；人工介入、失败、重试和每个质量问题必须使用对应事件类型，不得只藏在自然语言总结。
 6. 完成预期代码修改后，先按项目规则创建最终任务提交；此时还不推送。

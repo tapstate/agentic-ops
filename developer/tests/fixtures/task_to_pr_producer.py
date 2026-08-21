@@ -13,11 +13,17 @@ from types import SimpleNamespace
 from unittest import mock
 
 from ao_work.config import load_project_profile
+from ao_work.config.loader import _install_identity_ref
 from ao_work.config.model import JiraConnection
 from ao_work.jira.adf import markdown_to_adf
 from ao_work.jira.model import JiraComment, JiraIssue, JiraWorklog, plain_text
 from ao_work.jira.service import JiraService, WritePlan, build_write_attempt
 from ao_work.output import RuntimeErrorResult
+from ao_work.installation import (
+    load_install_identity,
+    save_install_credentials,
+    save_install_identity,
+)
 from ao_work.task_run.protocol import manifest_digest
 from ao_work.task_run.service import TaskRunProtocol
 from ao_work.workspace import resolve_developer_workspace
@@ -755,6 +761,29 @@ class DeveloperProducer:
             "  正在进行: implementation\n",
             encoding="utf-8",
         )
+        save_install_identity(
+            self.install,
+            {
+                "agent_id": AGENT_ID,
+                "jira_email": "developer@example.test",
+                "execution_identity": {
+                    "git_author_name": "Harsen Test",
+                    "git_author_email": "harsen.test@example.test",
+                    "git_committer_name": "Harsen Test",
+                    "git_committer_email": "harsen.test@example.test",
+                    "github_actor_login": "harsen-test",
+                },
+            },
+        )
+        save_install_credentials(
+            self.install,
+            "developer@example.test",
+            "test-only-redacted-token",
+        )
+        self.install_identity_ref = _install_identity_ref(
+            self.install,
+            load_install_identity(self.install),
+        )
 
     def _prepare_workspace(self) -> None:
         state = self.workspace / ".agentic-ops"
@@ -764,14 +793,13 @@ class DeveloperProducer:
         self._write_json(
             state / "agent.json",
             {
-                "schema_version": 3,
+                "schema_version": 4,
                 "workplane": "developer",
-                "agent_id": AGENT_ID,
+                "install_identity_ref": self.install_identity_ref,
                 "project_profile": "tapdata",
                 "connection_id": "test-jira",
                 "jira_base_url": "https://jira.example.test",
                 "jira_site": "jira.example.test",
-                "jira_account_id": ACCOUNT_ID,
                 "jira_project": "TAP",
                 "source_root": str(self.repository.resolve()),
                 "repository": "tapdata/tapdata",

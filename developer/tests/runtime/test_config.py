@@ -8,6 +8,8 @@ from pathlib import Path
 from unittest import mock
 
 from ao_work.config import load_jira_context, load_jira_connection, load_project_profile
+from ao_work.config.loader import _install_identity_ref
+from ao_work.installation import load_install_identity, save_install_credentials, save_install_identity
 from ao_work.output import RuntimeErrorResult
 from ao_work.workspace import resolve_developer_workspace
 
@@ -66,16 +68,30 @@ class ConfigTest(unittest.TestCase):
             "  repository: tapdata/tapdata\n",
             encoding="utf-8",
         )
+        identity = {
+            "agent_id": "developer-test",
+            "jira_email": "owner@example.test",
+            "execution_identity": {
+                "git_author_name": "Developer Test",
+                "git_author_email": "owner@example.test",
+                "git_committer_name": "Developer Test",
+                "git_committer_email": "owner@example.test",
+                "github_actor_login": "developer-test",
+            },
+        }
+        save_install_identity(install, identity)
         agent.write_text(
             json.dumps(
                 {
-                    "schema_version": 3,
+                    "schema_version": 4,
                     "workplane": "developer",
                     "project_profile": "demo",
                     "connection_id": "tap-cloud",
                     "jira_base_url": "https://base.example.test",
                     "jira_site": "base.example.test",
-                    "jira_account_id": "owner-1",
+                    "install_identity_ref": _install_identity_ref(
+                        install, load_install_identity(install)
+                    ),
                     "jira_project": "TAP",
                     "source_root": str(source),
                     "repository": "tapdata/tapdata",
@@ -88,9 +104,7 @@ class ConfigTest(unittest.TestCase):
     def test_loads_layered_connection_and_isolates_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             install, workspace_root = self.prepare(Path(temporary))
-            user_env = install / "user" / ".env"
-            user_env.parent.mkdir(parents=True)
-            user_env.write_text("TEST_JIRA_TOKEN=user-token\nTEST_JIRA_EMAIL=user@example.test\n", encoding="utf-8")
+            save_install_credentials(install, "owner@example.test", "user-token")
             workspace_env = workspace_root / ".agentic-ops" / ".env"
             workspace_env.write_text(
                 "TEST_JIRA_EMAIL=workspace@example.test\nTEST_JIRA_TOKEN=workspace-token\n",
@@ -110,8 +124,8 @@ class ConfigTest(unittest.TestCase):
                 workspace = resolve_developer_workspace(str(workspace_root))
                 context = load_jira_context(workspace, install)
             self.assertEqual("https://workspace.example.test", context.connection.base_url)
-            self.assertEqual("workspace@example.test", context.email)
-            self.assertEqual("workspace-token", context.token)
+            self.assertEqual("owner@example.test", context.email)
+            self.assertEqual("user-token", context.token)
             self.assertEqual(
                 {"email_configured": True, "token_configured": True},
                 context.credential_status(),
@@ -119,7 +133,7 @@ class ConfigTest(unittest.TestCase):
             self.assertEqual({"customfield_10001"}, context.profile.active_custom_field_ids())
 
     def test_managed_agent_overlays_and_env_reject_hardlinks(self) -> None:
-        for leaf in ("agent", "profile", "connection", "env"):
+        for leaf in ("agent", "profile", "connection"):
             with self.subTest(leaf=leaf), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 install, workspace_root = self.prepare(root)
@@ -132,13 +146,6 @@ class ConfigTest(unittest.TestCase):
                     managed = workspace_root / ".agentic-ops/connections/tap-cloud.local.yaml"
                     managed.parent.mkdir()
                     managed.write_text("timeout_seconds: 20\n", encoding="utf-8")
-                else:
-                    managed = workspace_root / ".agentic-ops/.env"
-                    managed.write_text(
-                        "TEST_JIRA_EMAIL=owner@example.test\n"
-                        "TEST_JIRA_TOKEN=secret-token\n",
-                        encoding="utf-8",
-                    )
                 original = managed.read_bytes()
                 external = root / f"external-{leaf}"
                 external.write_bytes(original)
@@ -160,12 +167,14 @@ class ConfigTest(unittest.TestCase):
             agent_path.write_text(
                 json.dumps(
                     {
-                        "schema_version": 3,
+                        "schema_version": 4,
                         "workplane": "developer",
                         "project_profile": "demo",
                         "jira_base_url": "https://base.example.test",
                         "jira_site": "base.example.test",
-                        "jira_account_id": "owner-1",
+                        "install_identity_ref": _install_identity_ref(
+                            install, load_install_identity(install)
+                        ),
                         "connection_id": "tap-cloud",
                         "jira_project": "TAP",
                         "source_root": str(Path(temporary) / "source"),
@@ -174,14 +183,10 @@ class ConfigTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            with mock.patch.dict(
-                os.environ,
-                {"TEST_JIRA_EMAIL": "owner@example.test", "TEST_JIRA_TOKEN": "token-value"},
-                clear=True,
-            ):
-                context = load_jira_context(
-                    resolve_developer_workspace(str(workspace_root)), install
-                )
+            save_install_credentials(install, "owner@example.test", "token-value")
+            context = load_jira_context(
+                resolve_developer_workspace(str(workspace_root)), install
+            )
             self.assertEqual("tap-cloud", context.connection.connection_id)
 
     def test_process_environment_is_not_implicitly_read(self) -> None:
@@ -192,6 +197,7 @@ class ConfigTest(unittest.TestCase):
                 "TEST_JIRA_EMAIL=workspace@example.test\nTEST_JIRA_TOKEN=workspace-token\n",
                 encoding="utf-8",
             )
+            save_install_credentials(install, "owner@example.test", "install-token")
             with mock.patch.dict(
                 os.environ,
                 {"TEST_JIRA_EMAIL": "process@example.test", "TEST_JIRA_TOKEN": "process-token"},
@@ -200,8 +206,8 @@ class ConfigTest(unittest.TestCase):
                 context = load_jira_context(
                     resolve_developer_workspace(str(workspace_root)), install
                 )
-            self.assertEqual("workspace@example.test", context.email)
-            self.assertEqual("workspace-token", context.token)
+            self.assertEqual("owner@example.test", context.email)
+            self.assertEqual("install-token", context.token)
 
     def test_blocks_connection_profile_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -328,7 +334,7 @@ class ConfigTest(unittest.TestCase):
             override.write_text("base_url: https://evil.example.test\n", encoding="utf-8")
             workspace = resolve_developer_workspace(str(workspace_root))
             with mock.patch(
-                "ao_work.config.loader.resolve_secret_pair_with_source"
+                "ao_work.installation.load_install_credentials"
             ) as credential_read:
                 with self.assertRaises(RuntimeErrorResult) as captured:
                     load_jira_context(workspace, install)
@@ -349,7 +355,7 @@ class ConfigTest(unittest.TestCase):
             )
             workspace = resolve_developer_workspace(str(workspace_root))
             with mock.patch(
-                "ao_work.config.loader.resolve_secret_pair_with_source"
+                "ao_work.installation.load_install_credentials"
             ) as credential_read:
                 with self.assertRaises(RuntimeErrorResult) as captured:
                     load_jira_context(workspace, install)
@@ -367,7 +373,7 @@ class ConfigTest(unittest.TestCase):
             overlay.symlink_to(external)
             workspace = resolve_developer_workspace(str(workspace_root))
             with mock.patch(
-                "ao_work.config.loader.resolve_secret_pair_with_source"
+                "ao_work.installation.load_install_credentials"
             ) as credential_read:
                 with self.assertRaises(RuntimeErrorResult) as captured:
                     load_jira_context(workspace, install)
@@ -382,7 +388,7 @@ class ConfigTest(unittest.TestCase):
             payload["schema_version"] = 2
             agent_path.write_text(json.dumps(payload), encoding="utf-8")
             with mock.patch(
-                "ao_work.config.loader.resolve_secret_pair_with_source"
+                "ao_work.installation.load_install_credentials"
             ) as credential_read:
                 with self.assertRaises(RuntimeErrorResult) as captured:
                     load_jira_context(

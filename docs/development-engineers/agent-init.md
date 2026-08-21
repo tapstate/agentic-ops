@@ -1,27 +1,43 @@
 # 初始化 AgenticOps 研发员
 
-本文是业务项目工作空间的人用初始化入口。它只面向 `developer` 工作面；维护 AgenticOps 源头项目请从根 `AGENTS.md` 和 `maintainer/AGENTS.md` 开始。
+本文是 `developer` 工作面的人用初始化入口。维护 AgenticOps 源头项目请使用根 `AGENTS.md`、`maintainer/AGENTS.md` 和 `ao-maint`。
 
-## 1. 安装共享 developer 运行环境
+## 1. 安装并完成研发员授权
 
-默认安装目录为 `~/.agentic-ops`。安装物是稳定 `main` 的 developer-only sparse managed clone，不代表研发员，也不包含 `maintainer/`。
+默认安装目录是 `~/.agentic-ops`，内容为稳定 `main` 的 developer-only sparse managed clone，不包含 `maintainer/`。
 
-从可信的 AgenticOps 源头检出执行：
+交互安装：
 
 ```sh
 bash developer/bootstrap/install.sh
 ```
 
-安装完成后把命令目录加入当前终端：
+安装未传授权参数时，有终端会直接进入 `ao-work auth` 引导；无终端会完成安装并输出授权待办。后续随时可以单独运行：
 
 ```sh
 export PATH="$HOME/.agentic-ops/bin:$PATH"
-ao-work --help
+ao-work auth
+ao-work auth --show
 ```
 
-## 1.1 指定分支验证安装（仅本地验证）
+自动化可以在安装时提供完整授权，Bootstrap 只转交给 Runtime：
 
-验证脚本用于本地功能验证，不参与生产发布流程。默认从官方远端 `tapstate/agentic-ops` 按 `--source-branch` 克隆（默认 `develop`），生成可运行的验证安装：
+```sh
+printf '%s\n' "$JIRA_API_TOKEN" | bash developer/bootstrap/install.sh \
+  --agent-id <agent-id> \
+  --jira-email <jira-account-email> \
+  --git-name <git-author-and-committer-name> \
+  --git-email <git-author-and-committer-email> \
+  --github-login <github-actor-login> \
+  --token-stdin \
+  --non-interactive
+```
+
+如果安装已经完成，使用相同参数调用 `ao-work auth` 即可独立配置或轮换。身份保存在安装目录 `user/identity.yaml`，凭证保存在 `user/.env`，权限均为 `0600`；token 不进入命令参数或输出。
+
+## 2. 指定分支验证安装
+
+本地验证使用：
 
 ```sh
 bash developer/bootstrap/install-verify-branch.sh \
@@ -29,84 +45,55 @@ bash developer/bootstrap/install-verify-branch.sh \
   --json
 ```
 
-默认写入独立验证目录（`~/test/agentic-ops-verify-<时间戳>`）；加 `--keep` 保留排障目录，`--log` 指定日志路径。该入口显式写入 `verification-only` 标记，拒绝写入 `~/.agentic-ops`，并在克隆前校验 `--source-branch` 已推送到官方远端。
+远程分支模式生成可运行的 verification-only developer 安装，也支持与正式安装相同的可选授权参数。`--source-worktree <path>` 只验证本地安装边界，产物不可运行，也不能配置授权或初始化工作空间。正式 `install.sh`、`update.sh`、`rollback.sh` 拒绝维护 verification-only 目录。
 
-远程模式的产物是可运行的验证安装：安装身份校验（origin、sparse 精确集、developer 分发白名单、shared 协议树）与生产一致，只把「HEAD 必须是 `origin/main` 祖先」放宽为「HEAD 可达于任一 `origin/*` 远端分支或 tag」。因此可以用它的 `ao-work workspace init` 初始化一名研发员做端到端验证。`install.sh`、`update.sh`、`rollback.sh` 仍拒绝把该验证目录当生产目录维护。
+## 3. 初始化业务项目工作空间
 
-提供 `--source-worktree <path>` 时降级为本地流程验证：从本地源码目录克隆，只校验 sparse checkout、developer 分发白名单、shared 协议树和 `uv` 运行时同步能否跑通；其 origin 是本地路径，不可运行，也不能初始化研发员。用于验证尚未推送的本地改动能否正确完成安装。
-
-没有 `agentic-cli` 兼容命令，也不需要 Go 或项目自有平台二进制。
-
-## 1.2 配置安装目录身份与凭证（新工作空间必需）
-
-D-048 阶段二起，新工作空间初始化前必须先把研发员身份与 Jira 凭证配置到安装目录（`<安装目录>/user/identity.yaml` 与 `user/.env`，0600）。`workspace init` 从安装目录继承执行身份与凭证，不再逐次接收 `--git-name/--git-email/--github-login` 与 `--jira-email/--token-stdin`：
-
-```sh
-printf '%s\n' "$JIRA_API_TOKEN" | ao-work install identity set \
-  --agent-id <agent-id> \
-  --jira-email <jira-account-email> \
-  --git-name <git-author-and-committer-name> \
-  --git-email <git-author-and-committer-email> \
-  --github-login <github-actor-login> \
-  --jira-token-stdin \
-  --non-interactive
-```
-
-`--jira-token-stdin` 把 token 一并写入安装目录凭证（等价于后续再执行 `ao-work install auth set`）。查看/清除：`ao-work install identity show|remove`、`ao-work install auth show|remove`。安装目录未配置身份时，`install auth set` 会阻断（`install_identity_missing`），必须先配身份。
-
-## 2. 初始化业务项目工作空间
-
-一个业务项目工作空间代表一名研发员，并只绑定该研发员的一个 Jira 账户。在独立工作空间根目录运行：
+在独立业务项目 AI 工作空间运行：
 
 ```sh
 ao-work workspace init
 ```
 
-`workspace init` 默认使用第 1 节稳定 `main` 安装的 `~/.agentic-ops/bin/ao-work`；如需验证未发布分支，用第 1.1 节远程模式的验证安装（`--source-worktree` 本地模式不可运行）。
-
-非交互初始化（脚本/CI）必须先完成第 1.2 节安装身份配置。`--workspace-root` 是 `ao-work` 顶层全局参数（默认当前目录 `.`），在目标工作空间目录内运行时省略：
+非交互模式：
 
 ```sh
-cd "$WS_DIR"   # 业务项目工作空间根目录
 ao-work workspace init \
   --non-interactive \
   --project tapdata \
-  --agent-id <agent-id> \
   --source-pool-root <pool-root> \
   --confirm
 ```
 
-必填项（非交互）：已配置且可回读的安装身份与凭据、`--non-interactive` 与 `--confirm`、`--project`（Project Profile id）、与安装身份一致的 `--agent-id`（只允许 `[0-9A-Za-z_-]`），以及池根（`--source-pool-root` 或安装目录 `user/config.yaml` 的 `source_pool_root` 二选一）。池根目录不存在时由 init 自动创建并写入容器 README（preflight 只读校验、不创建）。新工作空间必须生成 schema v4 `agent.json`；schema v3 只作为旧工作空间迁移输入，不得继续作为初始化结果。
+`workspace init` 只接收项目、源码与确认参数，不接收 `agent_id`、Jira email/token 或 Git/GitHub 身份。Runtime 从当前安装继承身份和凭证，展示脱敏账户、Project Profile、Jira 站点与 Project Key、源码池和仓库供确认。
 
-交互入口会让公司员工指导员确认：
+池根由 `--source-pool-root` 或安装目录 `user/config.yaml` 的 `source_pool_root` 提供。目录不存在时 init 创建并写入容器 README。`--workspace-root <路径>` 是 `ao-work` 顶层参数，必须放在 `workspace` 之前。
 
-- `agent_id`；默认取规范化后的纯小写主机名，只允许 `[0-9A-Za-z_-]`。
-- Project Profile、Jira 站点和 Project Key。
-- 从安装身份继承的脱敏 Jira email；token 不重复输入。
-- 默认代码仓库和源码目录。
-- 从安装身份继承的 Git author/committer 与 GitHub actor login，不读取全局身份。
+新工作空间固定生成 schema v4 `.agentic-ops/agent.json`，只保存项目事实与 `install_identity_ref`，不生成 `.agentic-ops/.env`。schema v3 旧工作空间会在读取旧凭证和联网前阻断；先运行 `ao-work auth`，再由指导员明确重新初始化。Runtime 不自动复制或删除旧凭证。
 
-Jira 站点、Project、状态/字段映射和默认仓库由 Project Profile 提供，不要求逐项输入。后续任务的 Issue ID、经办人、状态和描述来自授权后的 Jira 卡片；run ID、摘要和时间由 Runtime 生成。每个任务只需审查 AI 提议的计划、范围、验证与权限，并确认高风险动作。
+初始化会写入当前工作空间 `AGENTS.md` 和 `.agents/skills/` 普通文件副本。不得创建指向安装根的 symlink，也不得加载根项目维护规则。
 
-Runtime 会先执行工作空间边界、已有配置、身份冲突、授权、Jira Project 访问和 Git 访问等前置检查。任何检查失败都必须停止，不得手工伪造 `.agentic-ops/agent.json`。
-
-## 3. 开始任务前检查
+## 4. 开始任务前检查
 
 ```sh
+ao-work auth --show
 ao-work workspace preflight
-ao-work auth jira show
-ao-work auth jira verify
 ao-work capability list
 ```
 
-只有 `preflight` 与授权验证都成功后，才能读取或执行真实 Jira 任务。调用具体操作前继续执行 `ao-work capability show <operation>`；只有 `status=implemented` 且返回明确命令路径时才能调用，`capability_gap` 必须停止或转人工。Jira token 保存在安装目录 `user/.env`（第 1.2 节）或当前业务项目工作空间 `.agentic-ops/.env`（旧 schema 存量路径），两者由 init 阶段按 schema 选择其一；共享安装的其它业务工作空间和 maintainer 工作面不得继承。
+只有授权已配置且 workspace preflight 通过后，才能执行真实 Jira 任务。Jira 当前身份与 Project 权限由 workspace/task Runtime 入口回读。调用具体操作前执行 `ao-work capability show <operation>`；只有 `status=implemented` 且列出明确命令路径时才能调用。
 
-授权完成后，普通任务只传 Jira key，并以接管为首个任务动作：
+正式接管入口：
 
 ```sh
 ao-work takeover TAP-12289
 ```
 
-Runtime 从工作空间、Project Profile 和 Jira 自动生成或恢复本地运行上下文；用户只审查输出中的计划、范围、分支、验证和权限。该入口不写 Jira，也不表示正式接管已经完成。
+Runtime 自动判断新接管、接纳存量或恢复；非新接管必须在人可见输出和 Jira Comment 中明文留痕。接管后信息分析和方案分级正常连续推进，只在设计审查、代码审查或风险决策暂停。
 
-初始化生成的当前工作空间 `AGENTS.md` 直接承载 developer Rule，并把 developer Skill 复制到 Codex 标准发现目录 `.agents/skills/`。标准资产只通过 `ao-work` 从受信安装根解析；AI 不得把 `developer/...` 当作业务仓库相对路径，也不得读取根项目维护规则或切换工作面。`workspace preflight` 会阻断 Skill 缺失、漂移、额外资产或 maintainer 污染。
+## 5. 禁止事项
+
+- 不在 `~/.agentic-ops`、AgenticOps 源头仓库/worktree、业务源码仓库或另一个研发员的工作空间内初始化。
+- 不调用已删除的 `ao-work install identity|auth`、`ao-work auth jira` 或 `agentic-cli`。
+- 不手工修改 Runtime 管理的授权、`agent.json`、Profile overlay 或工作空间状态。
+- 不从进程环境、其它安装、其它工作空间、本机全局配置或历史聊天发现凭证。

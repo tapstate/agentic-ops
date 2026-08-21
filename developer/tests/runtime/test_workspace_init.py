@@ -16,7 +16,6 @@ from ao_work.output import RuntimeErrorResult
 from ao_work.workspace_init.service import (
     WorkspaceInitializer,
     build_execution_identity,
-    normalize_agent_id,
 )
 
 
@@ -151,7 +150,10 @@ class WorkspaceInitTest(unittest.TestCase):
         clone_source_marker: bool = False,
         remote_denied: dict[str, str] | None = None,
         clone_denied: dict[str, str] | None = None,
+        migrate_legacy_args: bool = True,
     ) -> tuple[int, dict[str, object], str, str]:
+        if migrate_legacy_args:
+            arguments = self._prepare_install_authorization(arguments, token)
         stdout = io.StringIO()
         stderr = io.StringIO()
         input_stream = stdin or io.StringIO(f"{token}\n")
@@ -245,10 +247,65 @@ class WorkspaceInitTest(unittest.TestCase):
         self.assertEqual(1, len(lines), stdout.getvalue())
         return exit_code, json.loads(lines[0]), stderr.getvalue(), stdout.getvalue()
 
+    def _prepare_install_authorization(
+        self,
+        arguments: tuple[str, ...],
+        token: str,
+    ) -> tuple[str, ...]:
+        """把旧测试夹具的初始化身份输入迁到安装目录；生产 CLI 不接受这些参数。"""
+        pair_flags = {
+            "--agent-id": "agent_id",
+            "--jira-email": "jira_email",
+            "--git-name": "git_name",
+            "--git-email": "git_email",
+            "--github-login": "github_login",
+        }
+        values: dict[str, str] = {}
+        output: list[str] = []
+        token_stdin = False
+        index = 0
+        while index < len(arguments):
+            argument = arguments[index]
+            if argument in pair_flags and index + 1 < len(arguments):
+                values[pair_flags[argument]] = arguments[index + 1]
+                index += 2
+                continue
+            if argument == "--token-stdin":
+                token_stdin = True
+                index += 1
+                continue
+            output.append(argument)
+            index += 1
+        if values or token_stdin:
+            from ao_work.installation import save_install_credentials, save_install_identity
+
+            agent_id = values.get("agent_id", "developer-test")
+            jira_email = values.get("jira_email", "developer@example.test")
+            git_name = values.get("git_name", agent_id)
+            git_email = values.get("git_email", jira_email)
+            github_login = values.get("github_login", agent_id.replace("_", "-"))
+            save_install_identity(
+                self.install_root,
+                {
+                    "agent_id": agent_id,
+                    "jira_email": jira_email,
+                    "execution_identity": {
+                        "git_author_name": git_name,
+                        "git_author_email": git_email,
+                        "git_committer_name": git_name,
+                        "git_committer_email": git_email,
+                        "github_actor_login": github_login,
+                    },
+                },
+            )
+            if token_stdin:
+                save_install_credentials(self.install_root, jira_email, token)
+        return tuple(output)
+
     def test_non_interactive_init_checks_auth_and_writes_workspace_atomically(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            install = self.prepare_install(root)
+            install = self.prepare_install(root, with_install_identity=True)
             workspace = root / "workspace"
             workspace.mkdir()
             common = (
@@ -283,24 +340,14 @@ class WorkspaceInitTest(unittest.TestCase):
             )
             self.assertEqual("developer", agent["workplane"])
             self.assertEqual("tapdata", agent["project_profile"])
-            self.assertEqual(3, agent["schema_version"])
+            self.assertEqual(4, agent["schema_version"])
             self.assertEqual("tap-cloud", agent["connection_id"])
-            self.assertEqual(
-                {
-                    "git_author_name": "Developer One",
-                    "git_author_email": "developer@example.test",
-                    "git_committer_name": "Developer One",
-                    "git_committer_email": "developer@example.test",
-                    "github_actor_login": "developer-one",
-                },
-                agent["execution_identity"],
-            )
+            self.assertNotIn("execution_identity", agent)
             self.assertEqual("https://jira.example.test", agent["jira_base_url"])
             self.assertEqual("jira.example.test", agent["jira_site"])
-            self.assertEqual("developer-1", agent["jira_account_id"])
+            self.assertNotIn("jira_account_id", agent)
             env_path = workspace / ".agentic-ops" / ".env"
-            self.assertEqual(0o600, env_path.stat().st_mode & 0o777)
-            self.assertIn("TEST_JIRA_TOKEN=token-secret-123", env_path.read_text())
+            self.assertFalse(env_path.exists())
             self.assertIn("ao-work workspace preflight", (workspace / "AGENTS.md").read_text())
             self.assertEqual(
                 {"configure-authorization", "initialize-project-workspace"},
@@ -341,12 +388,12 @@ class WorkspaceInitTest(unittest.TestCase):
                     encoding="utf-8"
                 )
             )
-            self.assertEqual(agent["execution_identity"], preserved["execution_identity"])
+            self.assertEqual(agent["install_identity_ref"], preserved["install_identity_ref"])
 
     def test_non_interactive_init_emits_stage_progress_on_stderr(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            install = self.prepare_install(root)
+            install = self.prepare_install(root, with_install_identity=True)
             workspace = root / "workspace"
             workspace.mkdir()
             exit_code, payload, stderr, _ = self.run_cli(
@@ -414,7 +461,7 @@ class WorkspaceInitTest(unittest.TestCase):
     def test_pool_mode_init_persists_source_pool_root_to_user_config(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            install = self.prepare_install(root)
+            install = self.prepare_install(root, with_install_identity=True)
             # 移除预置的 config.yaml，模拟全新安装（只有 install.sh 创建的空配置）。
             user_config = install / "user" / "config.yaml"
             user_config.write_text("", encoding="utf-8")
@@ -646,30 +693,21 @@ class WorkspaceInitTest(unittest.TestCase):
     def test_zero_parameter_interactive_entry_uses_hostname_default_and_confirms(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            install = self.prepare_install(root)
+            install = self.prepare_install(root, with_install_identity=True)
             workspace = root / "workspace"
             workspace.mkdir()
-            stdin = TTYStringIO(
-                "tapdata\n\ndeveloper@example.test\n\n\n\ny\n"
+            stdin = TTYStringIO("tapdata\ny\n")
+            exit_code, payload, stderr, _ = self.run_cli(
+                (
+                    "--workspace-root",
+                    str(workspace),
+                    "workspace",
+                    "init",
+                ),
+                stdin=stdin,
             )
-            with mock.patch(
-                "ao_work.workspace_init.cli.getpass.getpass",
-                return_value="token-secret-123",
-            ), mock.patch(
-                "ao_work.workspace_init.service.socket.gethostname",
-                return_value="Dev.MacBook.LOCAL",
-            ):
-                exit_code, payload, stderr, _ = self.run_cli(
-                    (
-                        "--workspace-root",
-                        str(workspace),
-                        "workspace",
-                        "init",
-                    ),
-                    stdin=stdin,
-                )
             self.assertEqual(0, exit_code)
-            self.assertEqual("dev-macbook-local", payload["agent_id"])
+            self.assertEqual("harsen-mini-test-bot", payload["agent_id"])
             self.assertIn("初始化摘要", stderr)
             self.assertIn("确认使用以上信息", stderr)
 
@@ -757,8 +795,29 @@ class WorkspaceInitTest(unittest.TestCase):
             self.assertEqual("authorization_email_invalid", result[1]["code"])
             self.assertFalse((workspace / ".agentic-ops" / "agent.json").exists())
 
-    def test_agent_id_normalization_contract(self) -> None:
-        self.assertEqual("dev-mac-local", normalize_agent_id("Dev.Mac LOCAL"))
+    def test_workspace_init_rejects_removed_identity_and_authorization_parameters(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.prepare_install(root, with_install_identity=True)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            result = self.run_cli(
+                (
+                    "--workspace-root",
+                    str(workspace),
+                    "workspace",
+                    "init",
+                    "--non-interactive",
+                    "--project",
+                    "tapdata",
+                    "--agent-id",
+                    "removed",
+                    "--confirm",
+                ),
+                migrate_legacy_args=False,
+            )
+            self.assertEqual(2, result[0])
+            self.assertEqual("invalid_arguments", result[1]["code"])
 
     def test_source_repository_cannot_be_used_as_business_source_root(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1043,7 +1102,7 @@ class WorkspaceInitTest(unittest.TestCase):
     def test_tracked_workspace_env_blocks_initialization_before_secret_update(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            install = self.prepare_install(root)
+            install = self.prepare_install(root, with_install_identity=True)
             workspace = root / "workspace"
             state_root = workspace / ".agentic-ops"
             state_root.mkdir(parents=True)
@@ -1066,7 +1125,7 @@ class WorkspaceInitTest(unittest.TestCase):
             with (
                 redirect_stdout(stdout),
                 redirect_stderr(stderr),
-                mock.patch("sys.stdin", io.StringIO("new-token-secret-123\n")),
+                mock.patch("sys.stdin", io.StringIO("")),
                 mock.patch(
                     "ao_work.workspace_init.service.UrllibJiraTransport",
                     return_value=WorkspaceInitTransport(),
@@ -1093,11 +1152,6 @@ class WorkspaceInitTest(unittest.TestCase):
                         "--non-interactive",
                         "--project",
                         "tapdata",
-                        "--agent-id",
-                        "developer-tracked-env",
-                        "--jira-email",
-                        "developer@example.test",
-                        "--token-stdin",
                         "--confirm",
                     )
                 )
@@ -1111,7 +1165,7 @@ class WorkspaceInitTest(unittest.TestCase):
     def test_generated_agents_embeds_developer_rules_and_credentials_stay_untracked(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            install = self.prepare_install(root)
+            install = self.prepare_install(root, with_install_identity=True)
             (install / "developer" / "AGENTS.md").write_text(
                 "# 研发工作入口\n\n不得加载 maintainer 工作面。\n",
                 encoding="utf-8",
@@ -1128,7 +1182,7 @@ class WorkspaceInitTest(unittest.TestCase):
 
             stdout = io.StringIO()
             stderr = io.StringIO()
-            stdin_stream = io.StringIO("token-secret-123\n")
+            stdin_stream = io.StringIO("")
             with (
                 redirect_stdout(stdout),
                 redirect_stderr(stderr),
@@ -1159,11 +1213,6 @@ class WorkspaceInitTest(unittest.TestCase):
                     "--non-interactive",
                     "--project",
                     "tapdata",
-                    "--agent-id",
-                    "developer-git-boundary",
-                    "--jira-email",
-                    "developer@example.test",
-                    "--token-stdin",
                     "--confirm",
                     )
                 )

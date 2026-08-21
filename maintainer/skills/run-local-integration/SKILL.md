@@ -56,7 +56,7 @@ AgenticOps source/ref 只用于确认已经从预期版本安装 `ao-maint` / `a
 3. 在用户尚未完成 Jira 授权前，只生成后台 manifest 骨架和简化配置指引：
 
 - 不读取业务工作空间、`.env`、进程凭据、`~/.agentic-ops` 或相邻文件；
-- 不运行 `ao-work auth jira show`、`auth jira verify`、`probe-jira`、`probe-jira-write` 或其它 Jira/Git/GitHub probe；
+- 不运行 `ao-work auth --show`、`probe-jira`、`probe-jira-write` 或其它 Jira/Git/GitHub probe；
 - 不访问 `TAP-12289`，不声称 Jira 身份、issue 内容或权限已经验证；
 - 输出必须保持 `host_state_read=false`、`business_workspace_read=false`、`credentials_read=false`。
 

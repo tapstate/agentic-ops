@@ -10,7 +10,6 @@ from ao_work.capabilities import configure_capability_parser, execute_capability
 from ao_work.cli_common import ArgumentParserError, HelpRequested, JsonArgumentParser
 from ao_work.jira.cli import configure_jira_parser, execute_jira
 from ao_work.installation import validate_install_root
-from ao_work.installation.cli import configure_install_parser, execute_install
 from ao_work.output import (
     EXIT_BLOCKED,
     RuntimeErrorResult,
@@ -90,7 +89,6 @@ def build_parser() -> argparse.ArgumentParser:
     report_write.add_argument("--content-file", required=True)
     configure_capability_parser(subparsers)
     configure_authorization_parser(subparsers)
-    configure_install_parser(subparsers)
     configure_jira_parser(subparsers)
     configure_task_run_parser(subparsers)
     return parser
@@ -112,9 +110,9 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
     if args.group == "capability":
         state = execute_capability(args, install_root)
         return success(operation_name(args), **state)
-    if args.group == "install":
-        state = execute_install(args, install_root)
-        return success(operation_name(args), workplane=DEVELOPER, **state)
+    if args.group == "auth":
+        state = execute_authorization(args, install_root)
+        return success("auth", workplane=DEVELOPER, **state)
     if args.group == "workspace" and args.command == "init":
         state = execute_workspace_init(args, args.workspace_root, install_root)
         return success("workspace_init", workplane=DEVELOPER, **state)
@@ -131,10 +129,6 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
     if args.group == "workspace" and args.command == "preflight":
         state = execute_workspace_preflight(workspace, install_root)
         return success(operation, workplane=workspace.workplane, **state)
-    if args.group == "auth":
-        state = execute_authorization(args, workspace, install_root)
-        return success(operation, workplane=workspace.workplane, **state)
-
     store = TaskStore(Path(workspace.root), lock_timeout=args.lock_timeout)
     if args.group == "takeover":
         state = execute_task_takeover(

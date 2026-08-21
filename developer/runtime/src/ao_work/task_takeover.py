@@ -141,6 +141,7 @@ def execute_task_takeover(
         return _run_takeover_saga(
             workspace,
             store,
+            install_root=install_root,
             context=context,
             client=client,
             service=service,
@@ -153,6 +154,7 @@ def execute_task_takeover(
         return _migrate_legacy_takeover_saga(
             workspace,
             store,
+            install_root=install_root,
             context=context,
             client=client,
             service=service,
@@ -245,6 +247,7 @@ def execute_task_takeover(
     return _run_takeover_saga(
         workspace,
         store,
+        install_root=install_root,
         context=context,
         client=client,
         service=service,
@@ -262,6 +265,7 @@ def _run_takeover_saga(
     workspace: Workspace,
     store: TaskStore,
     *,
+    install_root: Path,
     context: Any,
     client: JiraClient,
     service: JiraService,
@@ -309,6 +313,7 @@ def _run_takeover_saga(
         source_context = record_current_task_source_context(
             workspace,
             store,
+            install_root=install_root,
             context=context,
             account=account,
             issue=readback,
@@ -1091,6 +1096,7 @@ def _migrate_legacy_takeover_saga(
     workspace: Workspace,
     store: TaskStore,
     *,
+    install_root: Path,
     context: Any,
     client: JiraClient,
     service: JiraService,
@@ -1166,6 +1172,7 @@ def _migrate_legacy_takeover_saga(
     return _run_takeover_saga(
         workspace,
         store,
+        install_root=install_root,
         context=context,
         client=client,
         service=service,
@@ -1307,14 +1314,14 @@ def _default_agent_id(install_root: Path) -> str:
         raise _blocked(
             "agent_identity_missing",
             "安装目录缺少研发员身份，无法确定接管身份",
-            "请运行 ao-work install identity set 配置 agent_id",
+            "请运行 ao-work auth 配置安装级 agent_id",
         ) from error
     agent_id = str(identity.get("agent_id") or "").strip()
     if not agent_id:
         raise _blocked(
             "agent_identity_missing",
             "安装目录研发员身份缺少 agent_id，无法确定接管身份",
-            "请运行 ao-work install identity set 重新配置 agent_id",
+            "请运行 ao-work auth 重新配置安装级 agent_id",
         )
     return agent_id
 

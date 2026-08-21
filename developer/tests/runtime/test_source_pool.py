@@ -15,6 +15,7 @@ from ao_work.workspace import (
     validate_source_pool_root,
 )
 from ao_work.workspace_init.service import WorkspaceInitializer
+from install_auth_fixture import configure_install_authorization
 
 
 class SourcePoolPathTest(unittest.TestCase):
@@ -87,6 +88,7 @@ class SourcePoolRootRequiredTest(unittest.TestCase):
             root = Path(temporary)
             install = root / "install"
             install.mkdir()
+            configure_install_authorization(install, agent_id="agent-1")
             (install / "developer" / "standards" / "connections").mkdir(parents=True)
             (install / "developer" / "standards" / "connections" / "tap.yaml").write_text(
                 "connection_id: tap\nbase_url: https://jira.example.test\n"
@@ -115,6 +117,7 @@ class SourcePoolRootRequiredTest(unittest.TestCase):
             root = Path(temporary)
             install = root / "install"
             install.mkdir()
+            configure_install_authorization(install, agent_id="agent-1")
             (install / "developer" / "standards" / "connections").mkdir(parents=True)
             (install / "developer" / "standards" / "connections" / "tap.yaml").write_text(
                 "connection_id: tap\nbase_url: https://jira.example.test\n"
@@ -134,7 +137,7 @@ class SourcePoolRootRequiredTest(unittest.TestCase):
             )
             (install / "developer" / "AGENTS.md").write_text("# developer\n", encoding="utf-8")
             user_config = install / "user" / "config.yaml"
-            user_config.parent.mkdir(parents=True)
+            user_config.parent.mkdir(parents=True, exist_ok=True)
             pool = root / "source-pool" / "nested" / "pool"
             user_config.write_text(
                 f"source_pool_root: {pool}\n",
@@ -194,6 +197,7 @@ class SourcePoolMemberPrepareTest(unittest.TestCase):
             root = Path(temporary)
             install = root / "install"
             install.mkdir()
+            configure_install_authorization(install, agent_id="agent-1")
             (install / "developer" / "standards" / "connections").mkdir(parents=True)
             (install / "developer" / "standards" / "connections" / "tap.yaml").write_text(
                 "connection_id: tap\nbase_url: https://jira.example.test\n"
@@ -270,6 +274,7 @@ class SourcePoolMemberPrepareTest(unittest.TestCase):
             root = Path(temporary)
             install = root / "install"
             install.mkdir()
+            configure_install_authorization(install, agent_id="agent-1")
             (install / "developer" / "standards" / "connections").mkdir(parents=True)
             (install / "developer" / "standards" / "connections" / "tap.yaml").write_text(
                 "connection_id: tap\nbase_url: https://jira.example.test\n"

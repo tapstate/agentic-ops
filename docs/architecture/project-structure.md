@@ -16,8 +16,8 @@ AgenticOps 先按工作面隔离，再在工作面内按资产类型划分。只
 | 位置 | 工作面 | 可以保存 | 不得保存 |
 | --- | --- | --- | --- |
 | AgenticOps 源头仓库 / worktree | `maintainer` | 两个工作面的版本化源文件、设计、维护状态和发布能力 | 用户 token、真实业务任务状态 |
-| `~/.agentic-ops` | `developer` | developer-only sparse managed clone、锁定 Python 环境、安装状态 | `maintainer/` 资产、业务任务状态、研发员身份 |
-| 业务项目 AI 工作空间 | `developer` | 一名研发员的 Jira 账户、项目配置、任务状态、证据和反馈 | AgenticOps 维护规则、其它研发员身份和任务状态、业务源码 |
+| `~/.agentic-ops` | `developer` | developer-only sparse managed clone、锁定 Python 环境、安装状态、当前研发员身份与凭证 | `maintainer/` 资产、业务任务状态、其它研发员身份 |
+| 业务项目 AI 工作空间 | `developer` | 项目配置、安装身份引用、任务状态、证据和反馈 | AgenticOps 维护规则、身份凭证、其它项目任务状态、业务源码 |
 | 业务源码目录（`<工作空间>-code/`，与工作空间同级） | `developer` | 业务项目源代码 | AgenticOps 受管状态、凭证、工作空间身份 |
 
 ## 3. 仓库结构
@@ -88,9 +88,9 @@ AI 在 AgenticOps 源头仓库或其 worktree 启动时：
 
 ### 4.3 工作空间与源码目录拓扑
 
-业务项目 AI 工作空间是研发员身份容器（`.agentic-ops/`、`AGENTS.md` 管理块、`.agents/skills/`）；业务源码存放在与工作空间同级的 `<工作空间>-code/` 目录。`workspace init` 默认把 `repositories.default` 仓库克隆到 `<工作空间>-code/<仓库短名>`，并在 `-code` 容器目录写入受管 `README.md` 说明文件（记录归属工作空间、agent_id、Project Profile 和仓库；管理块由 `workspace init` 整体重写，权威映射仍以 `.agentic-ops` 受管配置为准）。显式 `--source-root` 指定的目录不生成 README，由使用者自行管理。
+业务项目 AI 工作空间是项目与任务容器（`.agentic-ops/`、`AGENTS.md` 管理块、`.agents/skills/`）；研发员身份与凭证属于 developer 安装。业务源码存放在中央源码池和任务级 worktree 中；`workspace init` 写入受管说明与项目映射，权威身份通过 schema v4 `install_identity_ref` 关联当前安装。
 
-四个实体在目录树上平级、互不嵌套：AgenticOps 源头仓库、`~/.agentic-ops` 安装目录、业务项目工作空间、业务源码目录。身份、凭证和任务状态严格限定在 `.agentic-ops/` 内；源码目录只放业务 git 仓库，不混入 AgenticOps 受管状态。一个源码目录只能绑定一个工作空间，多个工作空间不得共享同一源码目录（`workspace init` 对已注册占用返回 `source_root_conflict` 阻断）。
+四个实体在目录树上互不嵌套：AgenticOps 源头仓库、developer 安装目录、业务项目工作空间、业务源码池/任务 worktree。身份与凭证严格限定在安装 `user/`，项目和任务状态限定在工作空间 `.agentic-ops/`；源码目录只放业务 Git 仓库，不混入 AgenticOps 受管状态。
 
 ### 4.4 停止条件
 
@@ -149,7 +149,7 @@ Skill 负责选择流程、组织 Runtime 操作、解释结果，并在能力�
   .local/
 ```
 
-安装后的正常文件树不得出现 `maintainer/`。安装目录只交付能力，不保存研发员身份；Jira 凭证和项目绑定保存在各自业务项目工作空间。
+安装后的正常文件树不得出现 `maintainer/`。安装目录交付 developer 能力并保存当前研发员身份与 Jira 凭证；项目绑定保存在各自业务项目工作空间。
 `developer/tests/`、`fixtures/`、fake producer、测试缓存和其它非生产顶层资产不得进入该安装树；Bootstrap 与 Runtime 都验证精确 sparse 集合及可见生产树，发现污染立即阻断。
 
 该 sparse checkout 是面向人和 AI 的工作树、入口与默认可见性隔离，用于防止误入，不是 Git 内容权限边界。同一 managed clone 的 Git 对象仍可能包含源头提交树；developer Rule 禁止读取、恢复或扩大 sparse 范围中的 maintainer 路径。若未来要求内容级不可达或独立权限，必须以独立 developer 分发仓库或导出制品开专题实现，不能把当前方案描述为安全沙箱。
