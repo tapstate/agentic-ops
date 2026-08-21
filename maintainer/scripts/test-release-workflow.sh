@@ -981,6 +981,31 @@ export FAKE_RECOVERY_PR_HEAD="$recovery_candidate"
 export FAKE_RECOVERY_MERGE_COMMIT="$recovery_merge"
 export FAKE_RECOVERY_BASE_GH="$fake_gh"
 
+failing_pr_gh="$test_root/failing-pr-gh"
+cat > "$failing_pr_gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "pr" ] && [ "${2:-}" = "list" ]; then
+  printf 'simulated GitHub PR read failure\n' >&2
+  exit 23
+fi
+exec "${FAKE_RECOVERY_BASE_GH:?}" "$@"
+EOF
+chmod 0755 "$failing_pr_gh"
+
+if (
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$failing_pr_gh" \
+    maintainer/scripts/release.sh inspect --version v9.7 --allow-soft-gate
+) >"$test_root/recovery-pr-read-failed.out" 2>"$test_root/recovery-pr-read-failed.err"; then
+  fail "inspect 在 merged PR 查询失败时不得报告成功"
+fi
+grep -q 'release_pr_state_read_failed' "$test_root/recovery-pr-read-failed.err" ||
+  fail "inspect 未区分 merged PR 查询失败与 PR 缺失"
+if grep -q 'release_merged_pr_missing' "$test_root/recovery-pr-read-failed.out"; then
+  fail "inspect 把 merged PR 查询失败误报为 PR 缺失"
+fi
+
 (
   cd "$fixture"
   AGENTIC_OPS_GH_BIN="$recovery_gh" \
