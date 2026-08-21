@@ -916,4 +916,216 @@ grep -q 'release_confirmation_required' "$test_root/unconfirmed-hotfix.err" ||
 test -z "$(git --git-dir="$remote" show-ref --heads refs/heads/tester/AO-11/fix-main || true)" ||
   fail "最终确认前不得推送 Hotfix 分支"
 
+# 已提前合入 main 的候选必须由 inspect 自动解析真实 PR，并通过两阶段
+# recover 绑定完整确认包；确认前不得改变本地或远端 Tag。
+git -C "$fixture" switch develop >/dev/null
+recovery_candidate="$(git -C "$fixture" rev-parse HEAD)"
+git -C "$fixture" switch main >/dev/null
+git -C "$fixture" -c core.hooksPath=/dev/null merge --no-ff develop \
+  -m "merge recovery candidate" >/dev/null
+recovery_merge="$(git -C "$fixture" rev-parse HEAD)"
+git -C "$fixture" branch -f develop "$recovery_merge"
+git --git-dir="$remote" fetch "$fixture" \
+  "$recovery_merge:refs/heads/main" >/dev/null
+git --git-dir="$remote" update-ref refs/heads/develop "$recovery_merge"
+git -C "$fixture" switch develop >/dev/null
+git -C "$fixture" branch release/v9.7 "$recovery_merge"
+git --git-dir="$remote" update-ref refs/heads/release/v9.7 "$recovery_merge"
+git -C "$fixture" tag -a v9.7 "$recovery_merge" -m "wrong recovery tag"
+
+recovery_gh="$test_root/recovery-gh"
+cat > "$recovery_gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "pr" ] && { [ "${2:-}" = "list" ] || [ "${2:-}" = "view" ]; }; then
+  printf '%s\t%s\tMERGED\tmain\t%s\t%s\n' \
+    "${FAKE_RECOVERY_PR_NUMBER:?}" "${FAKE_RECOVERY_PR_URL:?}" \
+    "${FAKE_RECOVERY_PR_HEAD:?}" "${FAKE_RECOVERY_MERGE_COMMIT:?}"
+  exit 0
+fi
+exec "${FAKE_RECOVERY_BASE_GH:?}" "$@"
+EOF
+chmod 0755 "$recovery_gh"
+export FAKE_RECOVERY_PR_NUMBER=77
+export FAKE_RECOVERY_PR_URL=https://example.test/pull/77
+export FAKE_RECOVERY_PR_HEAD="$recovery_candidate"
+export FAKE_RECOVERY_MERGE_COMMIT="$recovery_merge"
+export FAKE_RECOVERY_BASE_GH="$fake_gh"
+
+(
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$recovery_gh" \
+    maintainer/scripts/release.sh inspect --version v9.7 --allow-soft-gate
+) >"$test_root/recovery-inspect.out"
+grep -q '"state":"release_local_tag_repair_required"' "$test_root/recovery-inspect.out" ||
+  fail "inspect 未识别提前合入和错误本地 Tag"
+grep -q '"pr_number":"77"' "$test_root/recovery-inspect.out" ||
+  fail "inspect 未输出自动解析的关联 PR"
+grep -q -- '--merged-pr 77' "$test_root/recovery-inspect.out" ||
+  fail "inspect 仍输出需要用户猜测的 PR 占位符"
+
+if (
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$recovery_gh" \
+  AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING=1 \
+  FAKE_VERIFY_LOG="$verify_log" \
+    maintainer/scripts/release.sh prepare --version v9.7 --allow-soft-gate
+) >"$test_root/already-main-prepare.out" 2>"$test_root/already-main-prepare.err"; then
+  fail "prepare 不得重新处理已经位于 main 的候选"
+fi
+grep -q 'release_candidate_already_in_main' "$test_root/already-main-prepare.err" ||
+  fail "prepare 未对已进入 main 的候选返回准确状态"
+grep -q '尚未执行当前动作所需的固定完整验证' "$test_root/already-main-prepare.err" ||
+  fail "prepare 在验证前错误宣称固定完整验证已通过"
+
+if (
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$recovery_gh" \
+  AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING=1 \
+  FAKE_VERIFY_LOG="$verify_log" \
+    maintainer/scripts/release.sh publish --version v9.7 \
+      --allow-soft-gate --confirm-release
+) >"$test_root/already-main-publish.out" 2>"$test_root/already-main-publish.err"; then
+  fail "publish 不得为已经位于 main 的候选创建无差异 PR"
+fi
+grep -q 'release_candidate_already_in_main' "$test_root/already-main-publish.err" ||
+  fail "publish 未在 GitHub PR 创建前返回准确状态"
+
+wrong_tag_ref="$(git -C "$fixture" rev-parse refs/tags/v9.7)"
+: > "$verify_log"
+if (
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$recovery_gh" \
+  AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING=1 \
+  FAKE_VERIFY_LOG="$verify_log" \
+    maintainer/scripts/release.sh recover --version v9.7 --merged-pr 77 --allow-soft-gate
+) >"$test_root/recovery-plan.out" 2>"$test_root/recovery-plan.err"; then
+  fail "recover 首次执行必须停在完整确认包"
+fi
+grep -q 'release_recovery_confirmation_required' "$test_root/recovery-plan.err" ||
+  { cat "$test_root/recovery-plan.err" >&2; fail "recover 未返回两阶段确认失败码"; }
+for item in '动作：' '目标：' '事实引用：' '验证：' '风险：' '不执行：' '后续门禁：'; do
+  grep -q "$item" "$test_root/recovery-plan.err" ||
+    fail "recover 确认包缺少：$item"
+done
+grep -q '远端 Tag=' "$test_root/recovery-plan.err" ||
+  fail "recover 确认包缺少远端 Tag 事实引用"
+test "$(git -C "$fixture" rev-parse refs/tags/v9.7)" = "$wrong_tag_ref" ||
+  fail "确认前 recover 修改了本地 Tag"
+test -z "$(git --git-dir="$remote" show-ref --tags v9.7 || true)" ||
+  fail "确认前 recover 推送了远端 Tag"
+
+recovery_digest="$(sed -n 's/.*--confirm-recovery \([0-9a-f][0-9a-f]*\).*/\1/p' "$test_root/recovery-plan.err" | tail -n 1)"
+test -n "$recovery_digest" || fail "recover 未输出绑定确认包的完整继续命令"
+if (
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$recovery_gh" \
+  AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING=1 \
+  FAKE_VERIFY_LOG="$verify_log" \
+    maintainer/scripts/release.sh recover --version v9.7 --merged-pr 77 \
+      --allow-soft-gate --confirm-release --confirm-recovery deadbeef
+) >"$test_root/recovery-stale.out" 2>"$test_root/recovery-stale.err"; then
+  fail "recover 不得接受未绑定当前确认包的确认值"
+fi
+grep -q 'release_recovery_confirmation_stale' "$test_root/recovery-stale.err" ||
+  fail "recover 未拒绝过期或伪造的确认绑定"
+test "$(git -C "$fixture" rev-parse refs/tags/v9.7)" = "$wrong_tag_ref" ||
+  fail "无效确认修改了本地 Tag"
+test -z "$(git --git-dir="$remote" show-ref --tags v9.7 || true)" ||
+  fail "无效确认推送了远端 Tag"
+(
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$recovery_gh" \
+  AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING=1 \
+  FAKE_VERIFY_LOG="$verify_log" \
+    maintainer/scripts/release.sh recover --version v9.7 --merged-pr 77 \
+      --allow-soft-gate --confirm-release --confirm-recovery "$recovery_digest"
+) >"$test_root/recovery-complete.out" 2>"$test_root/recovery-complete.err"
+test "$(git -C "$fixture" rev-list -n 1 v9.7)" = "$recovery_candidate" ||
+  fail "recover 未把本地 Tag 原子修复到 PR head"
+test "$(git --git-dir="$remote" rev-list -n 1 v9.7)" = "$recovery_candidate" ||
+  fail "recover 未推送正确的不可变远端 Tag"
+grep -q '"operation":"release_recover"' "$test_root/recovery-complete.out" ||
+  fail "recover 成功结果缺失"
+(
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$recovery_gh" \
+    maintainer/scripts/release.sh inspect --version v9.7 --allow-soft-gate
+) >"$test_root/recovery-completed-inspect.out"
+grep -q '"state":"release_completed"' "$test_root/recovery-completed-inspect.out" ||
+  fail "inspect 未识别已经完成的恢复发布"
+
+# 远端 Tag 已正确时，本地 Tag 漂移仍必须可诊断并幂等修复；不得改写远端 Tag。
+remote_tag_ref_before="$(git --git-dir="$remote" rev-parse refs/tags/v9.7)"
+git -C "$fixture" tag -f -a v9.7 "$recovery_merge" -m "drifted local recovery tag" >/dev/null
+(
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$recovery_gh" \
+    maintainer/scripts/release.sh inspect --version v9.7 --allow-soft-gate
+) >"$test_root/recovery-remote-tag-local-drift-inspect.out"
+grep -q '"state":"release_local_tag_repair_required"' \
+  "$test_root/recovery-remote-tag-local-drift-inspect.out" ||
+  fail "inspect 未识别远端 Tag 正确但本地 Tag 漂移"
+if (
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$recovery_gh" \
+  AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING=1 \
+  FAKE_VERIFY_LOG="$verify_log" \
+    maintainer/scripts/release.sh recover --version v9.7 --merged-pr 77 --allow-soft-gate
+) >"$test_root/recovery-idempotent-plan.out" 2>"$test_root/recovery-idempotent-plan.err"; then
+  fail "远端 Tag 已正确时 recover 仍必须先展示确认包"
+fi
+idempotent_digest="$(sed -n 's/.*--confirm-recovery \([0-9a-f][0-9a-f]*\).*/\1/p' "$test_root/recovery-idempotent-plan.err" | tail -n 1)"
+test -n "$idempotent_digest" || fail "幂等恢复未输出确认绑定"
+(
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$recovery_gh" \
+  AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING=1 \
+  FAKE_VERIFY_LOG="$verify_log" \
+    maintainer/scripts/release.sh recover --version v9.7 --merged-pr 77 \
+      --allow-soft-gate --confirm-release --confirm-recovery "$idempotent_digest"
+) >"$test_root/recovery-idempotent-complete.out" 2>"$test_root/recovery-idempotent-complete.err"
+test "$(git -C "$fixture" rev-list -n 1 v9.7)" = "$recovery_candidate" ||
+  fail "远端 Tag 已正确时 recover 未修复本地 Tag"
+test "$(git --git-dir="$remote" rev-parse refs/tags/v9.7)" = "$remote_tag_ref_before" ||
+  fail "幂等恢复改写了正确的远端 Tag"
+
+# 发布 PR 已创建但尚未人工合并时，inspect 必须返回等待态和同一发布继续命令。
+printf 'waiting release candidate\n' >> "$fixture/README.md"
+git -C "$fixture" add README.md
+git -C "$fixture" -c core.hooksPath=/dev/null commit -m "waiting release candidate" >/dev/null
+waiting_candidate="$(git -C "$fixture" rev-parse HEAD)"
+git --git-dir="$remote" fetch "$fixture" \
+  "$waiting_candidate:refs/heads/develop" \
+  "$waiting_candidate:refs/heads/release/v9.6" >/dev/null
+git -C "$fixture" branch release/v9.6 "$waiting_candidate"
+git -C "$fixture" tag -a v9.6 "$waiting_candidate" -m "waiting release tag"
+waiting_gh="$test_root/waiting-gh"
+cat > "$waiting_gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "pr" ] && [ "${2:-}" = "list" ]; then
+  printf '88\t%s\tOPEN\tmain\t%s\t\n' \
+    "${FAKE_WAITING_PR_URL:?}" "${FAKE_WAITING_PR_HEAD:?}"
+  exit 0
+fi
+exec "${FAKE_WAITING_BASE_GH:?}" "$@"
+EOF
+chmod 0755 "$waiting_gh"
+export FAKE_WAITING_PR_URL=https://example.test/pull/88
+export FAKE_WAITING_PR_HEAD="$waiting_candidate"
+export FAKE_WAITING_BASE_GH="$fake_gh"
+(
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$waiting_gh" \
+    maintainer/scripts/release.sh inspect --version v9.6 --allow-soft-gate
+) >"$test_root/release-waiting-inspect.out"
+grep -q '"state":"release_waiting_manual_merge"' "$test_root/release-waiting-inspect.out" ||
+  fail "inspect 未识别等待人工合并的发布 PR"
+grep -q '"pr_number":"88"' "$test_root/release-waiting-inspect.out" ||
+  fail "inspect 等待态缺少精确 PR 编号"
+grep -q 'release.sh publish --version v9.6 --allow-soft-gate' \
+  "$test_root/release-waiting-inspect.out" ||
+  fail "inspect 等待态未给出同一 publish 继续命令"
+
 printf '{"ok":true,"operation":"test_release_workflow","delivery":"python"}\n'
