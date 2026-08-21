@@ -169,6 +169,15 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
     if args.command == "inspect":
         issue = service.inspect_issue(args.issue_key)
         description = adf_to_markdown(issue.description)
+        raw_parent = issue.fields.get("parent", {})
+        parent = (
+            {
+                "issue_key": str(raw_parent.get("key", "")),
+                "jira_issue_id": str(raw_parent.get("id", "")),
+            }
+            if isinstance(raw_parent, dict) and raw_parent.get("key")
+            else None
+        )
         return {
             "connection_id": config.connection.connection_id,
             "issue": {
@@ -178,6 +187,7 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
                 "summary": issue.summary,
                 "status": issue.status,
                 "issue_type": issue.issue_type,
+                "parent": parent,
                 "assignee": issue.assignee,
                 "description": {
                     "format": "atlassian_adf",
@@ -322,6 +332,7 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
                     "summary": plan.payload.get("summary"),
                     "assignee": plan.payload.get("assignee"),
                     "parent": plan.payload.get("parent"),
+                    "parent_relation": plan.payload.get("parent_relation"),
                 }
             )
         return result

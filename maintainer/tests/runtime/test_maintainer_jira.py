@@ -32,6 +32,7 @@ class FakeTransport:
         self.next_issue_id = 1000
         self.create_meta_payload: dict[str, object] | None = None
         self.jql_handler: Any | None = None
+        self.create_failure: TransportResponse | None = None
 
     def request(
         self,
@@ -94,6 +95,8 @@ class FakeTransport:
         raise AssertionError(f"unexpected request: {method} {path}")
 
     def _create_issue(self, body: dict[str, object] | None) -> TransportResponse:
+        if self.create_failure is not None:
+            return self.create_failure
         fields = body.get("fields", {}) if isinstance(body, dict) else {}
         if not isinstance(fields, dict):
             raise AssertionError("create issue fields must be dict")
@@ -191,6 +194,15 @@ def _parent_issue(
             "description": None,
         },
     }
+
+
+def _subtask_issue(*, key: str = "AO-44", parent_key: str = "AO-43") -> dict[str, object]:
+    issue = _parent_issue(key=key, issue_id="41704")
+    fields = issue["fields"]
+    assert isinstance(fields, dict)
+    fields["issuetype"] = {"name": "子任务", "subtask": True}
+    fields["parent"] = {"id": "41703", "key": parent_key}
+    return issue
 
 
 def _adf_text(value: Any) -> str:
@@ -776,6 +788,91 @@ class MaintainerJiraServiceTest(unittest.TestCase):
         created_fields = transport.issues[-1]["fields"]
         assert isinstance(created_fields, dict)
         self.assertEqual({"key": "AO-43"}, created_fields["parent"])
+
+    def test_create_subtask_uplifts_subtask_reference_and_records_relation(self) -> None:
+        service, transport = self._create_service()
+        transport.create_meta_payload = _ao_subtask_createmeta_payload()
+        transport.issues.extend([_parent_issue(), _subtask_issue()])
+        plan = service.plan_create_issue(
+            "AO",
+            "idem-subtask-uplift",
+            maintainer_run_id="maint-test-1",
+            issuetype_name="任务",
+            summary="通过子任务创建关联任务",
+            description="验证父级自动提升。",
+            parent_key="AO-44",
+        )
+        self.assertEqual("子任务", plan.payload["issuetype_name"])
+        self.assertEqual("AO-43", plan.payload["parent"]["key"])
+        self.assertEqual(
+            {
+                "requested_parent_key": "AO-44",
+                "effective_parent_key": "AO-43",
+                "uplifted": True,
+                "reason": "requested_parent_is_subtask",
+            },
+            plan.payload["parent_relation"],
+        )
+        self.assertIn("关联任务：AO-44", plan.payload["description"])
+        result = service.apply_create_issue(plan, plan.plan_id)
+        created = next(
+            item for item in transport.issues if item.get("key") == result["external_id"]
+        )
+        fields = created["fields"]
+        assert isinstance(fields, dict)
+        self.assertEqual({"key": "AO-43"}, fields["parent"])
+        self.assertIn("关联任务：AO-44", _adf_text(fields["description"]))
+
+    def test_create_subtask_uplift_change_blocks_apply(self) -> None:
+        service, transport = self._create_service()
+        transport.create_meta_payload = _ao_subtask_createmeta_payload()
+        transport.issues.extend([_parent_issue(), _parent_issue(key="AO-45", issue_id="41705"), _subtask_issue()])
+        plan = service.plan_create_issue(
+            "AO",
+            "idem-subtask-uplift-change",
+            maintainer_run_id="maint-test-1",
+            issuetype_name="任务",
+            summary="父级提升变化时阻断建卡",
+            description="",
+            parent_key="AO-44",
+        )
+        changed = next(item for item in transport.issues if item.get("key") == "AO-44")
+        fields = changed["fields"]
+        assert isinstance(fields, dict)
+        fields["parent"] = {"id": "41705", "key": "AO-45"}
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.apply_create_issue(plan, plan.plan_id)
+        self.assertEqual("jira_create_parent_changed", captured.exception.code)
+
+    def test_create_issue_400_surfaces_sanitized_field_errors(self) -> None:
+        service, transport = self._create_service()
+        plan = service.plan_create_issue(
+            "AO",
+            "idem-c400",
+            maintainer_run_id="maint-test-1",
+            issuetype_name="任务",
+            summary="展示 Jira 字段错误",
+            description="",
+            extra_fields={"customfield_10353": "研发模式"},
+        )
+        transport.create_failure = TransportResponse(
+            400,
+            {
+                "errorMessages": ["请求无效"],
+                "errors": {"customfield_10353": "执行模式不能为空"},
+                "trace": "must not surface",
+            },
+        )
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.apply_create_issue(plan, plan.plan_id)
+        self.assertEqual("jira_write_rejected", captured.exception.code)
+        self.assertEqual(400, captured.exception.details["http_status"])
+        self.assertEqual(["请求无效"], captured.exception.details["error_messages"])
+        self.assertEqual(
+            {"customfield_10353": "执行模式不能为空"},
+            captured.exception.details["field_errors"],
+        )
+        self.assertNotIn("trace", captured.exception.details)
 
     def test_create_subtask_rejects_generic_parent_field(self) -> None:
         service, transport = self._create_service()

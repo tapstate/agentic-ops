@@ -49,9 +49,18 @@ class JiraTransport(Protocol):
 
 
 class JiraTransportError(Exception):
-    def __init__(self, message: str, *, response_received: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        response_received: bool = False,
+        http_status: int | None = None,
+        diagnostics: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.response_received = response_received
+        self.http_status = http_status
+        self.diagnostics = diagnostics or {}
 
 
 class _RejectRedirects(urllib.request.HTTPRedirectHandler):
@@ -232,6 +241,24 @@ class JiraClient:
 
         返回形如 {"issuetype_id": ..., "issuetype_name": ..., "required": {field_id: name}, "fields": {field_id: schema}}。
         """
+        for metadata in self.create_metas(project_key):
+            if metadata["issuetype_name"] == issuetype_name:
+                return metadata
+        raise RuntimeErrorResult(
+            code="jira_create_meta_missing",
+            message=(
+                f"Jira 项目 {project_key} 下未找到事务类型「{issuetype_name}」，"
+                "或 createmeta 查询结果不含该项目"
+            ),
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action=(
+                "请核对项目 Key 与事务类型名称，可用 ao-maint jira create plan 前先确认"
+            ),
+        )
+
+    def create_metas(self, project_key: str) -> list[dict[str, Any]]:
+        """查询项目全部可创建事务类型，供父子层级选择使用。"""
         payload = self._request(
             "GET",
             "/rest/api/3/issue/createmeta",
@@ -241,6 +268,7 @@ class JiraClient:
             },
         )
         projects = payload.get("projects", []) if isinstance(payload, dict) else []
+        result: list[dict[str, Any]] = []
         for project in projects:
             if not isinstance(project, dict):
                 continue
@@ -248,8 +276,6 @@ class JiraClient:
                 continue
             for issuetype in project.get("issuetypes", []):
                 if not isinstance(issuetype, dict):
-                    continue
-                if str(issuetype.get("name", "")) != issuetype_name:
                     continue
                 fields_raw = issuetype.get("fields", {})
                 if not isinstance(fields_raw, dict):
@@ -262,24 +288,16 @@ class JiraClient:
                     schemas[field_id] = spec
                     if spec.get("required"):
                         required[field_id] = str(spec.get("name", field_id))
-                return {
-                    "issuetype_id": str(issuetype.get("id", "")),
-                    "issuetype_name": str(issuetype.get("name", "")),
-                    "required": required,
-                    "fields": schemas,
-                }
-        raise RuntimeErrorResult(
-            code="jira_create_meta_missing",
-            message=(
-                f"Jira 项目 {project_key} 下未找到事务类型「{issuetype_name}」，"
-                "或 createmeta 查询结果不含该项目"
-            ),
-            status="blocked",
-            exit_code=EXIT_BLOCKED,
-            required_human_action=(
-                f"请核对项目 Key 与事务类型名称，可用 ao-maint jira create plan 前先确认"
-            ),
-        )
+                result.append(
+                    {
+                        "issuetype_id": str(issuetype.get("id", "")),
+                        "issuetype_name": str(issuetype.get("name", "")),
+                        "is_subtask": issuetype.get("subtask") is True,
+                        "required": required,
+                        "fields": schemas,
+                    }
+                )
+        return result
 
     def comments(self, issue_key: str) -> list[JiraComment]:
         items = self._paginated(
@@ -457,9 +475,46 @@ class JiraClient:
                 exit_code=EXIT_BLOCKED,
                 required_human_action="请检查凭证、token scope 和 Jira 项目权限",
             )
+        diagnostics = _safe_error_diagnostics(response.payload)
+        if method != "GET":
+            raise JiraTransportError(
+                f"HTTP {response.status}",
+                response_received=True,
+                http_status=response.status,
+                diagnostics=diagnostics,
+            )
         raise RuntimeErrorResult(
             code="jira_request_failed",
             message=f"Jira 请求失败（HTTP {response.status}）",
             retry_safe=method == "GET",
             required_human_action="请检查 Jira 服务状态；写入请求不要直接重试，先回读",
+            details=diagnostics or None,
         )
+
+
+def _safe_error_diagnostics(payload: Any) -> dict[str, Any]:
+    """只保留 Jira 标准错误字段，避免回显原始响应或敏感上下文。"""
+    if not isinstance(payload, dict):
+        return {}
+    messages = payload.get("errorMessages")
+    field_errors = payload.get("errors")
+    result: dict[str, Any] = {}
+    if isinstance(messages, list):
+        safe_messages = [
+            _safe_error_text(item) for item in messages if isinstance(item, str) and item.strip()
+        ]
+        if safe_messages:
+            result["error_messages"] = safe_messages[:10]
+    if isinstance(field_errors, dict):
+        safe_fields = {
+            str(key)[:128]: _safe_error_text(value)
+            for key, value in sorted(field_errors.items(), key=lambda item: str(item[0]))
+            if isinstance(key, str) and isinstance(value, str) and value.strip()
+        }
+        if safe_fields:
+            result["field_errors"] = dict(list(safe_fields.items())[:20])
+    return result
+
+
+def _safe_error_text(value: str) -> str:
+    return " ".join(value.split())[:512]
