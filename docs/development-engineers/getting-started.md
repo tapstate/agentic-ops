@@ -73,7 +73,10 @@ gh auth login -h github.com -p ssh -s repo
 ```sh
 source "$HOME/.zshrc"
 ao-work --help
+ao-work version
 ```
+
+`ao-work version` 是只读安装查询：返回 developer Runtime 发行版本、受管安装目录、首次安装时间、精确 Git HEAD/短 SHA，以及存在时的 Tag 描述。它不读取凭证、不要求业务工作空间，也不会检查更新、修改安装或变更 Git 状态；安装时间元数据缺失或无效时会失败关闭，不能通过文件时间戳猜测。
 
 没有 `agentic-cli` 兼容别名；看到旧命令说明正在阅读冻结迁移基线或使用旧版本。
 
