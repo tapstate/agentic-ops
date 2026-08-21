@@ -15,6 +15,7 @@ from ao_work.config import (
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.jira.model import plain_text
 from ao_work.jira.service import JiraService
+from ao_work.installation import load_install_identity
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_gate import record_task_start_context
 from ao_work.task_state import TaskIdentity, TaskStore
@@ -43,6 +44,7 @@ def execute_task_start(
         workspace,
         context.connection,
         account_id=account["account_id"],
+        install_root=install_root,
     )
     issue = JiraService(context.profile, client).inspect_issue(issue_key)
     if issue.assignee != account["account_id"]:
@@ -86,6 +88,7 @@ def execute_task_start(
     source_context = record_current_task_source_context(
         workspace,
         store,
+        install_root=install_root,
         context=context,
         account=account,
         issue=issue,
@@ -140,7 +143,8 @@ def execute_task_start(
         "intake_source": intake_source,
         "task_worktrees": task_worktrees,
         "configuration_sources": {
-            "workspace": ["agent_id", "project_profile", "Jira 账户", "源码仓库", "执行身份"],
+            "installation": ["agent_id", "Jira 账户", "执行身份"],
+            "workspace": ["project_profile", "源码仓库"],
             "project_profile": ["Jira 站点", "Project", "状态/字段映射", "默认仓库"],
             "jira_issue": ["Issue ID", "经办人", "状态", "标题", "描述", "任务类型"],
             "runtime": ["agentic_run_id", "issue_content_sha256"],
@@ -218,6 +222,7 @@ def record_current_task_source_context(
     workspace: Workspace,
     store: TaskStore,
     *,
+    install_root: Path,
     context: Any,
     account: dict[str, Any],
     issue: Any,
@@ -244,6 +249,12 @@ def record_current_task_source_context(
     ).hexdigest()
     assert workspace.config_path is not None
     agent_config = read_json(workspace.config_path)
+    install_identity = load_install_identity(install_root)
+    effective_config = {
+        **agent_config,
+        "agent_id": install_identity["agent_id"],
+        "execution_identity": install_identity["execution_identity"],
+    }
     issue_payload = {
         "id": issue.issue_id,
         "key": issue.key,
@@ -257,14 +268,14 @@ def record_current_task_source_context(
         "issue_content_sha256": issue_content_sha256,
     }
     workspace_defaults = {
-        "agent_id": agent_config.get("agent_id"),
+        "agent_id": effective_config.get("agent_id"),
         "project_profile": context.profile.profile_id,
         "connection_id": context.connection.connection_id,
         "jira_base_url": context.connection.base_url,
         "jira_account_id": account["account_id"],
         "repository": context.profile.default_repository,
-        "source_root": agent_config.get("source_root"),
-        "execution_identity": agent_config.get("execution_identity"),
+        "source_root": effective_config.get("source_root"),
+        "execution_identity": effective_config.get("execution_identity"),
     }
     intake_source = record_task_start_context(
         workspace,
@@ -278,7 +289,7 @@ def record_current_task_source_context(
     return {
         "issue": issue_payload,
         "workspace_defaults": workspace_defaults,
-        "agent_config": agent_config,
+        "agent_config": effective_config,
         "intake_source": intake_source,
     }
 

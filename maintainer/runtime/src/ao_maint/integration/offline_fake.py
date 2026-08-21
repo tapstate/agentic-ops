@@ -87,6 +87,7 @@ class OfflineFakeRunner:
             self._configure_isolated_git(distribution)
             self._deploy(distribution)
             self._configure_pool_root()
+            self._configure_authorization()
             self._initialize_workspace()
             self._initialize_fixture_task_state()
             self._write_task_reports()
@@ -451,22 +452,34 @@ class OfflineFakeRunner:
         config = user_dir / "config.yaml"
         config.write_text(f"source_pool_root: {pool_root}\n", encoding="utf-8")
 
+    def _configure_authorization(self) -> None:
+        self._ao_work(
+            "auth",
+            "--agent-id",
+            self.manifest.agent_id,
+            "--jira-email",
+            "offline-agent@example.invalid",
+            "--git-name",
+            "Offline Integration Agent",
+            "--git-email",
+            "offline-agent@example.invalid",
+            "--github-login",
+            self.manifest.agent_id.replace("_", "-"),
+            "--token-stdin",
+            "--non-interactive",
+            input_text="synthetic-offline-token\n",
+        )
+
     def _initialize_workspace(self) -> None:
         self._ao_work(
             "workspace",
             "init",
             "--project",
             self.manifest.project_profile,
-            "--agent-id",
-            self.manifest.agent_id,
             "--source-root",
             str(self.source_checkout),
-            "--jira-email",
-            "offline-agent@example.invalid",
-            "--token-stdin",
             "--non-interactive",
             "--confirm",
-            input_text="synthetic-offline-token\n",
         )
         self._process(
             "task_ref_checkout",

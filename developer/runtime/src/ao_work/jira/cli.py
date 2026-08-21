@@ -145,6 +145,7 @@ def execute_jira(
         workspace,
         context.connection,
         account_id=client.current_user(),
+        install_root=install_root,
     )
     service = JiraService(context.profile, client)
     if args.command == "inspect":

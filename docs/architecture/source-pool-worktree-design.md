@@ -20,9 +20,9 @@
 实现分两个阶段（对应两个 AO 任务）：
 
 - 阶段一（本期）：中央克隆池（池根必配）+ 任务级子工作树集 + 多仓库分支对应 + from_branch 路径规范化。
-- 阶段二（部署模型完善）：Jira 账户/凭证/Git 执行身份上移安装目录，工作空间瘦身为纯项目绑定；同步修订 D-046 与凭证安全模型，提供旧工作空间迁移。
+- 阶段二（已由 D-052 收口）：Jira 账户/凭证/Git 执行身份上移安装目录，工作空间瘦身为纯项目绑定；旧工作空间失败关闭，不提供自动凭证迁移。
 
-阶段一不依赖阶段二；两者的配置位置共用在 `~/.agentic-ops/user/`。
+两个阶段的研发员级配置统一位于 `~/.agentic-ops/user/`。
 
 ## 2. 现状与根因
 
@@ -31,7 +31,7 @@
 - `_check_source_root_conflict` 明确禁止两个工作空间共享同一源码目录（含父子嵌套），当前语义是「共享写树不受支持」。
 - `_validate_repository_remotes` 要求 raw/effective fetch/push URL 全部精确等于 `repositories.default` 且数量唯一；`_reject_git_url_rewrites` 拒绝 `url.*.insteadOf/pushInsteadOf` 改写。
 - Profile 只支持单仓库 `repositories.default`；`target_repo` 字段 `source: workspace_repo_mapping`，值恒等于 `default_repository`（`task_start.py`），`validate_workspace_project_binding` 要求 workspace.repository 与 default 一致。工作流配置文档（`workflow-profile.md`）有 `repositories.by_component / by_label` 的映射先例，但 Runtime 未实现。
-- 身份与凭证保存在业务项目工作空间（D-046）：`agent.json`（schema v3，含 `jira_account_id`、`execution_identity`）+ `.agentic-ops/.env`（Jira email/token）。
+- 实施前基线曾把身份与凭证保存在 schema v3 工作空间；该基线已由 D-052 取代。现役身份与凭证只保存在 developer 安装，工作空间固定 schema v4。
 - 根因：克隆按工作空间独立发生，大仓库全量下载重复执行；源码目录按工作空间而非按任务组织；多仓库分支组合与任务目标仓库没有确定性映射，靠单仓库 default 硬编码；研发员身份与项目绑定耦合在同一个工作空间文件里。
 
 ## 3. 方案
@@ -74,7 +74,7 @@
 1. 解析池根（3.2）；准备池成员全集：对 `repositories.list` 逐仓库执行——池成员不存在 → `git clone --progress`（复用 `_run_git_streaming`，AO-11 流式、逐仓库进度）；已存在 → 认领（adopt）：校验 remotes 精确匹配（复用 `_validate_repository_remotes`）、拒绝 URL 改写（复用 `_reject_git_url_rewrites`）、拒绝指向 AgenticOps 源头仓库。
 2. 认领时若池成员是浅克隆（现有 `~/github` 克隆是 depth 1）→ 自动流式 `git fetch --unshallow`；不允许以浅克隆作为池成员。
 3. 全集准备支持中断续传：`Ctrl+C` 中断时已完成的池成员保留（不删除、不污染），下次 init/任务接管自动补齐缺失成员；不写任何初始化完成标记。
-4. 不创建工作空间级源码目录；写 profile overlay、AGENTS.md、skill、凭证、agent.json（现状流程其余不变，`source_root` 写池根）。
+4. 不创建工作空间级源码目录或凭证；写 profile overlay、AGENTS.md、Skill 和 schema v4 agent.json（`source_root` 写池根）。
 5. 任务工作树集在任务接管时创建（3.4），由任务上下文（Jira key、目标仓库、修复分支）与分支推导接口（3.9）推导。
 
 ### 3.4 任务级子工作树集（核心）
@@ -112,7 +112,7 @@
 - AI 任务工作树身份由 per-worktree config 承载：`git config extensions.worktreeConfig true`，随后在 worktree 内 `git config --worktree user.name/email` 写入 `execution_identity` 的 Git 姓名与邮箱；池成员主 checkout 的用户身份不受影响。
 - 双保险：Runtime 执行 git 写操作时注入 `GIT_AUTHOR_NAME/GIT_AUTHOR_EMAIL/GIT_COMMITTER_NAME/GIT_COMMITTER_EMAIL`（复用 `execution_identity` 四字段）；提交后校验 author/committer 等于当前研发员身份，不一致即阻断。
 - 池成员 config 中的 `user.*` 视为用户个人配置（主 checkout 手动使用），AI 侧一律以 worktree config + 环境变量为准。
-- 阶段一：身份/凭证仍存工作空间（现状）；阶段二上移后，`execution_identity` 从安装目录读取（3.10）。
+- 现役：`execution_identity` 只从 developer 安装读取（D-052），工作空间不保存身份或凭证。
 
 ### 3.8 生命周期
 
@@ -205,14 +205,14 @@ branches:
 - init 流程：从安装目录读身份与凭证（不再交互收集 email/token/执行身份）；Jira 账户校验绑定安装目录身份 + 项目，`jira_workspace_mismatch` / drift 语义改为「工作空间与安装目录身份或项目不一致」。
 - 凭证安全：`~/.agentic-ops/user/` 加入 sparse managed clone 排除清单（不随更新覆盖）、权限 0600、读写路径校验（复用 `validate_managed_path` 思路）；凭证不入工作空间、不入池。
 - 多工作空间共享同一身份（同一研发员多项目），`agent_id` 冲突检查改为安装级唯一校验。
-- 迁移：旧工作空间 `.agentic-ops/.env` 与 `agent.json` 身份/凭证一次性迁移到安装目录（迁移命令，先备份、逐项确认、失败回滚）；迁移后旧字段视为失效并阻断（fail closed）。
+- 旧工作空间：schema v3 与 `.agentic-ops/.env` 在读取凭证和联网前失败关闭；人工先用 `ao-work auth` 重新配置安装授权，再明确重新初始化。Runtime 不自动复制或删除旧凭证（D-052）。
 - D-046 修订：「业务项目工作空间保存该研发员唯一的 Jira 账户」改为「安装目录保存研发员唯一的 Jira 账户与凭证，业务项目工作空间只绑定项目」；同步修订 decision-log 与项目目标文档相关表述。
 
 ## 4. 安全边界（不弱化项）
 
 - 任务工作树路径互斥：不同工作空间/任务不得使用同一 worktree 路径；AI 不得使用池成员主 checkout 路径作为任务工作树。
 - 池成员 remote 精确匹配、URL 改写拒绝、`source_checkout_must_not_be_agenticops_source_or_descendant` 全部保留并在池与 worktree 两侧执行。
-- 身份隔离按 3.7 执行，禁止跨工作空间/任务继承池 config 身份或凭证。
+- 身份隔离按 D-052 执行：同一 developer 安装下工作空间继承同一身份与凭证，禁止跨安装或从工作空间/任务状态拼接身份凭证。
 - 阶段二后凭证仅存 `~/.agentic-ops/user/`（0600、sparse 排除），工作空间与池均不得出现凭证；迁移失败不落半成品状态。
 - worktree add/克隆失败必须回滚（worktree remove / 删除新建的池目录），不写任何完成标记，复用 `source_checkout_failed` / `source_checkout_invalid` 语义与失败码。
 - 池根与池成员路径禁止为 `~/.agentic-ops`、AgenticOps 源头仓库或其子目录。
@@ -231,7 +231,7 @@ branches:
 - `pool_lock_timeout`：池成员锁超时。
 - `target_repository_unknown`：任务目标仓库不在 profile `repositories.list` 内。
 - `repository_short_name_collision`：池内仓库短名冲突（不同 owner 同名）。
-- 阶段二：`install_identity_missing`（安装目录缺少身份/凭证）、`install_identity_drift`（工作空间引用与安装目录身份不一致）、`credential_migration_failed`。
+- 安装授权：`install_identity_missing`（安装目录缺少身份/凭证）、`install_identity_drift`（工作空间引用与安装目录身份不一致）、`workspace_jira_identity_upgrade_required`（旧 schema 失败关闭）。
 
 ## 6. 组件变更
 
@@ -250,7 +250,7 @@ branches:
 
 - `developer/runtime/src/ao_work/installation.py`：`~/.agentic-ops/user/` 加入 sparse 排除清单、身份/凭证读写与权限校验。
 - `developer/runtime/src/ao_work/workspace_init/service.py` / `config/`：身份与凭证改从安装目录读取，agent.json schema v4。
-- 新增迁移命令：旧工作空间凭证/身份迁移到安装目录（备份、确认、回滚）。
+- 不新增自动迁移命令：旧工作空间失败关闭，人工重新授权并确认初始化；旧凭证清理由研发工程师决策。
 - `docs/decision-log.md`：修订 D-046；`docs/strategy/project-goals.md` 相关表述同步。
 
 ## 7. 测试与验证

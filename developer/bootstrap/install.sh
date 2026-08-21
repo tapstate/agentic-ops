@@ -5,6 +5,58 @@ INSTALL_DIR="${AGENTIC_OPS_HOME:-$HOME/.agentic-ops}"
 BRANCH="main"
 REPO_URL="git@github.com:tapstate/agentic-ops.git"
 GITHUB_REPOSITORY="tapstate/agentic-ops"
+AUTHORIZATION_ARGS=()
+AUTHORIZATION_REQUESTED=0
+
+usage() {
+  cat <<'USAGE'
+用法：
+  install.sh [授权参数]
+
+可选授权参数（安装完成后原样转交 ao-work auth）：
+  --agent-id <id>
+  --jira-email <email>
+  --git-name <name>
+  --git-email <email>
+  --github-login <login>
+  --token-stdin
+  --non-interactive
+
+不传授权参数时，有终端则进入授权引导；无终端则完成安装并输出 ao-work auth 下一步。
+USAGE
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --agent-id|--jira-email|--git-name|--git-email|--github-login)
+      if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+        printf 'AgenticOps：授权参数缺少取值：%s\n' "$1" >&2
+        exit 2
+      fi
+      AUTHORIZATION_ARGS+=("$1" "$2")
+      AUTHORIZATION_REQUESTED=1
+      shift 2
+      ;;
+    --token-stdin)
+      AUTHORIZATION_ARGS+=("$1")
+      AUTHORIZATION_REQUESTED=1
+      shift
+      ;;
+    --non-interactive)
+      AUTHORIZATION_ARGS+=("$1")
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'AgenticOps：不支持的安装参数：%s\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
 
 if [ -n "${AGENTIC_OPS_TEST_MODE:-}" ] || \
   [ -n "${AGENTIC_OPS_TEST_LAUNCHER:-}" ] || \
@@ -115,5 +167,24 @@ if [ ! -f "$user_dir/config.yaml" ]; then
   : > "$user_dir/config.yaml"
 fi
 
+authorization_status="pending"
+if [ "$AUTHORIZATION_REQUESTED" -eq 1 ]; then
+  if ! "$INSTALL_DIR/bin/ao-work" auth "${AUTHORIZATION_ARGS[@]}"; then
+    printf 'AgenticOps：developer 安装已完成，但安装级授权失败；请修正输入后单独运行 %s/bin/ao-work auth\n' "$INSTALL_DIR" >&2
+    exit 2
+  fi
+  authorization_status="configured"
+elif [ -t 0 ] && [ -t 1 ]; then
+  if ! "$INSTALL_DIR/bin/ao-work" auth; then
+    printf 'AgenticOps：developer 安装已完成，但安装级授权尚未完成；稍后可单独运行 %s/bin/ao-work auth\n' "$INSTALL_DIR" >&2
+    exit 2
+  fi
+  authorization_status="configured"
+else
+  printf 'AgenticOps：developer 安装已完成，当前无交互终端；请运行 %s/bin/ao-work auth 完成安装级授权\n' "$INSTALL_DIR" >&2
+fi
+
 agentic_bootstrap_json_success bootstrap_install \
-  install_dir "$INSTALL_DIR" current_ref "$current_ref" python "3.12"
+  install_dir "$INSTALL_DIR" current_ref "$current_ref" python "3.12" \
+  authorization_status "$authorization_status" \
+  authorization_next_action "$INSTALL_DIR/bin/ao-work auth"

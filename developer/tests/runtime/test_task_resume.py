@@ -14,6 +14,7 @@ from ao_work.output import RuntimeErrorResult
 from ao_work.task_resume import _agent_id_from_journal, _latest_resumable, _resolve_local_context
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.work_cli import main
+from install_auth_fixture import configure_install_authorization
 
 
 class ResumeTransport:
@@ -102,29 +103,22 @@ class TaskResumeTest(unittest.TestCase):
             "  default: tapdata/tapdata\n",
             encoding="utf-8",
         )
+        install_identity_ref = configure_install_authorization(self.install)
         state = self.workspace / ".agentic-ops"
         (state / "profiles").mkdir(parents=True)
         (state / "agent.json").write_text(
             json.dumps(
                 {
-                    "schema_version": 3,
+                    "schema_version": 4,
                     "workplane": "developer",
-                    "agent_id": "harsen-mini-test-bot",
+                    "install_identity_ref": install_identity_ref,
                     "project_profile": "tapdata",
                     "jira_project": "TAP",
                     "connection_id": "tapdata-cloud",
                     "jira_base_url": "https://tapdata.atlassian.net",
                     "jira_site": "tapdata.atlassian.net",
-                    "jira_account_id": "jira-account-1",
                     "source_root": str(self.source.resolve()),
                     "repository": "tapdata/tapdata",
-                    "execution_identity": {
-                        "git_author_name": "Harsen Test Bot",
-                        "git_author_email": "harsen@example.test",
-                        "git_committer_name": "Harsen Test Bot",
-                        "git_committer_email": "harsen@example.test",
-                        "github_actor_login": "harsen-mini-test-bot",
-                    },
                 }
             ),
             encoding="utf-8",

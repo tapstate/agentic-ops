@@ -11,7 +11,7 @@ metadata:
 
 ## 流程
 
-1. 授权检查：用 `ao-work auth jira show` 查看授权状态；未就绪时调用 `configure-authorization` Skill，完成后执行 `auth jira verify`。
+1. 授权检查：用 `ao-work auth --show` 查看安装授权状态；未就绪时调用 `configure-authorization` Skill。真实 Jira 身份与项目访问由后续 workspace/task Runtime 入口校验。
 2. 会话整理：把当前会话中的缺陷事实整理为中文 summary 与 description，必须覆盖：
    - 缺陷现象（发生了什么、用户看到什么）
    - 复现步骤 / 证据（触发路径、报错、日志位置，脱敏）

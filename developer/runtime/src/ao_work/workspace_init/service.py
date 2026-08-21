@@ -6,7 +6,6 @@ import os
 import re
 import select
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -27,12 +26,13 @@ from ao_work.config import (
     validate_workspace_jira_binding,
     validate_workspace_project_binding,
 )
-from ao_work.config.env import resolve_secret_pair_with_source, update_env_file
 from ao_work.installation import (
+    build_execution_identity,
     install_user_dir,
     load_install_credentials,
     load_install_identity,
-    save_install_credentials,
+    mask_email,
+    validate_agent_id,
 )
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.git_security import github_repository_url_matches
@@ -48,7 +48,7 @@ from ao_work.workspace import (
     validate_source_pool_root,
 )
 from ao_work.workspace_security import (
-    protect_workspace_env_from_git,
+    protect_workspace_state_from_git,
     read_workspace_root_file,
     validate_managed_path,
     validate_workspace_managed_path,
@@ -56,9 +56,7 @@ from ao_work.workspace_security import (
     validate_workspace_state_root,
 )
 
-AGENT_ID_PATTERN = re.compile(r"^[0-9A-Za-z_-]+$")
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
-GITHUB_LOGIN_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 MANAGED_START = "<!-- agentic-ops:workspace:start -->"
 MANAGED_END = "<!-- agentic-ops:workspace:end -->"
 MANAGED_CODE_START = "<!-- agentic-ops:workspace-code:start -->"
@@ -80,10 +78,9 @@ class WorkspaceCandidate:
     token: str | None
     credential_source: str
     execution_identity: dict[str, str] | None = None
-    persist_credentials: bool = False
     source_root_derived: bool = False
     pool_mode: bool = False
-    install_identity_ref: str | None = None
+    install_identity_ref: str = ""
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -107,72 +104,6 @@ class WorkspaceCandidate:
         }
 
 
-def normalize_agent_id(hostname: str | None = None) -> str:
-    raw = (hostname if hostname is not None else socket.gethostname()).strip().lower()
-    normalized = re.sub(r"[^0-9a-z_-]+", "-", raw).strip("-_")
-    if not normalized:
-        raise _blocked(
-            "agent_id_default_invalid",
-            "无法从当前主机名生成有效 agent_id",
-            "请在初始化时明确输入只包含 [0-9A-Za-z_-] 的 agent_id",
-        )
-    return normalized
-
-
-def validate_agent_id(agent_id: str) -> str:
-    value = agent_id.strip()
-    if not value or not AGENT_ID_PATTERN.fullmatch(value):
-        raise _blocked(
-            "agent_id_invalid",
-            "agent_id 只能包含字符 [0-9A-Za-z_-]",
-            "请修正 agent_id 后重新确认初始化摘要",
-        )
-    return value
-
-
-def mask_email(value: str | None) -> str | None:
-    if not value or "@" not in value:
-        return None
-    local, domain = value.split("@", 1)
-    visible = local[:2] if len(local) > 2 else local[:1]
-    return f"{visible}{'*' * max(len(local) - len(visible), 1)}@{domain}"
-
-
-def build_execution_identity(
-    git_name: str,
-    git_email: str,
-    github_actor_login: str,
-) -> dict[str, str]:
-    name = git_name.strip()
-    email = git_email.strip()
-    login = github_actor_login.strip()
-    if not name or "\x00" in name or len(name) > 256:
-        raise _blocked(
-            "execution_identity_invalid",
-            "Git author/committer name 无效",
-            "请在工作空间初始化时确认当前研发员的 Git 姓名",
-        )
-    if not EMAIL_PATTERN.fullmatch(email):
-        raise _blocked(
-            "execution_identity_invalid",
-            "Git author/committer email 格式无效",
-            "请在工作空间初始化时确认当前研发员的 Git email",
-        )
-    if not GITHUB_LOGIN_PATTERN.fullmatch(login):
-        raise _blocked(
-            "execution_identity_invalid",
-            "GitHub actor login 格式无效",
-            "请在工作空间初始化时确认当前研发员的 GitHub login",
-        )
-    return {
-        "git_author_name": name,
-        "git_author_email": email,
-        "git_committer_name": name,
-        "git_committer_email": email,
-        "github_actor_login": login,
-    }
-
-
 class WorkspaceInitializer:
     def __init__(self, root: Path, install_root: Path, *, git_timeout: float = 20.0) -> None:
         self.root = root.expanduser().resolve()
@@ -183,13 +114,10 @@ class WorkspaceInitializer:
     def prepare(
         self,
         profile_id: str,
-        agent_id: str,
+        agent_id: str | None = None,
         *,
         source_root: str | None = None,
         source_pool_root: str | None = None,
-        credentials: tuple[str, str] | None = None,
-        execution_identity: dict[str, str] | None = None,
-        persist_credentials: bool = False,
         allow_rebind: bool = False,
     ) -> WorkspaceCandidate:
         validate_workspace_state_root(self.root)
@@ -216,61 +144,30 @@ class WorkspaceInitializer:
                 f"Project Profile {profile.profile_id} 没有默认仓库映射",
                 "请先在 developer/standards/projects/<profile>/profile.yaml 配置 repositories.default",
             )
-        # 阶段二（D-048）：安装目录身份/凭证为优先源。已配置时不再交互收集；
-        # 未配置时保留存量路径（工作空间收集），不强制迁移。
-        install_identity: dict[str, Any] | None = None
-        try:
-            install_identity = load_install_identity(self.install_root)
-        except RuntimeErrorResult as error:
-            if error.code != "install_identity_missing":
-                raise
-        install_credentials = (
-            load_install_credentials(self.install_root)
-            if install_identity is not None
-            else None
-        )
-        if credentials is None and install_credentials is not None:
-            credentials = install_credentials
-        if execution_identity is None and install_identity is not None:
-            execution_identity = dict(install_identity["execution_identity"])
-        if credentials is None:
-            agent_path = self.root / ".agentic-ops" / "agent.json"
-            if agent_path.is_file():
-                existing = read_json(agent_path)
-                if existing.get("schema_version") == 3:
-                    try:
-                        validate_workspace_jira_binding(
-                            Workspace(self.root, "developer", agent_path),
-                            connection,
-                        )
-                        validate_workspace_project_binding(
-                            Workspace(self.root, "developer", agent_path),
-                            profile,
-                        )
-                    except RuntimeErrorResult as error:
-                        if error.code not in {
-                            "jira_workspace_identity_drift",
-                            "workspace_project_identity_drift",
-                        } or not allow_rebind:
-                            raise
-                        email, token, credential_source = None, None, "rebind_required"
-                    else:
-                        email, token, credential_source = resolve_secret_pair_with_source(
-                            connection.email_env,
-                            connection.token_env,
-                            self.root / ".agentic-ops" / ".env",
-                        )
-                else:
-                    email, token, credential_source = None, None, "upgrade_required"
-            else:
-                email, token, credential_source = resolve_secret_pair_with_source(
-                    connection.email_env,
-                    connection.token_env,
-                    self.root / ".agentic-ops" / ".env",
-                )
-        else:
-            email, token = (credentials[0].strip(), credentials[1].strip())
-            credential_source = "interactive_input" if persist_credentials else "standard_input"
+        install_identity = load_install_identity(self.install_root)
+        install_credentials = load_install_credentials(self.install_root)
+        if install_credentials is None:
+            raise _blocked(
+                "jira_credentials_missing",
+                "developer 安装尚未配置完整 Jira 凭据",
+                "请先运行 ao-work auth 完成安装级授权",
+            )
+        effective_agent_id = validate_agent_id(str(install_identity["agent_id"]))
+        if agent_id is not None and validate_agent_id(agent_id) != effective_agent_id:
+            raise _blocked(
+                "install_identity_drift",
+                "工作空间候选 agent_id 与当前安装身份不一致",
+                "请停止传入工作空间身份，并通过 ao-work auth 核对当前安装",
+            )
+        execution_identity = dict(install_identity["execution_identity"])
+        email, token = (install_credentials[0].strip(), install_credentials[1].strip())
+        if email != str(install_identity["jira_email"]).strip():
+            raise _blocked(
+                "install_identity_drift",
+                "安装身份中的 Jira email 与安装凭据不一致",
+                "请运行 ao-work auth 重新配置同一 Jira 账户",
+            )
+        credential_source = "installation"
         if email and not EMAIL_PATTERN.fullmatch(email):
             raise _blocked(
                 "authorization_email_invalid",
@@ -283,24 +180,11 @@ class WorkspaceInitializer:
                 "Jira token 长度明显不合理",
                 "请重新输入当前 Jira 账户的 API token",
             )
-        if execution_identity is None:
-            agent_path = self.root / ".agentic-ops" / "agent.json"
-            if agent_path.is_file():
-                existing_agent = read_json(agent_path)
-                existing_identity = existing_agent.get("execution_identity")
-                if isinstance(existing_identity, dict):
-                    rebuilt_identity = build_execution_identity(
-                        str(existing_identity.get("git_author_name", "")),
-                        str(existing_identity.get("git_author_email", "")),
-                        str(existing_identity.get("github_actor_login", "")),
-                    )
-                    if existing_identity != rebuilt_identity:
-                        raise _blocked(
-                            "execution_identity_invalid",
-                            "工作空间中已保存的执行身份字段不完整或不一致",
-                            "请重新运行交互初始化并确认 Git/GitHub 执行身份",
-                        )
-                    execution_identity = rebuilt_identity
+        execution_identity = build_execution_identity(
+            str(execution_identity.get("git_author_name", "")),
+            str(execution_identity.get("git_author_email", "")),
+            str(execution_identity.get("github_actor_login", "")),
+        )
         source_root_derived = not source_root
         # 池根必配：显式参数 > 研发员级配置 > 阻断（无兼容回退）。
         # init 场景 allow_missing=True：池根不存在时由 apply 自动创建（D-048 3.2）。
@@ -331,25 +215,23 @@ class WorkspaceInitializer:
             resolved_source = validate_business_source_root(self.root, pool_root)
             pool_mode = True
         # 安装目录身份指纹（阶段二）：agent.json v4 引用，防错装。
-        install_identity_ref: str | None = None
-        if install_identity is not None:
-            identity_fingerprint = hashlib.sha256(
-                json.dumps(
-                    {
-                        "agent_id": install_identity["agent_id"],
-                        "jira_email": install_identity["jira_email"],
-                        "execution_identity": install_identity["execution_identity"],
-                    },
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode("utf-8")
-            ).hexdigest()
-            install_identity_ref = f"install:{identity_fingerprint}"
+        identity_fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "agent_id": install_identity["agent_id"],
+                    "jira_email": install_identity["jira_email"],
+                    "execution_identity": install_identity["execution_identity"],
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        install_identity_ref = f"install:{identity_fingerprint}"
         return WorkspaceCandidate(
             root=self.root,
             install_root=self.install_root,
-            agent_id=validate_agent_id(agent_id),
+            agent_id=effective_agent_id,
             profile=profile,
             connection=connection,
             source_root=resolved_source,
@@ -359,7 +241,6 @@ class WorkspaceInitializer:
             token=token,
             credential_source=credential_source,
             execution_identity=execution_identity,
-            persist_credentials=persist_credentials,
             source_root_derived=source_root_derived,
             pool_mode=pool_mode,
             install_identity_ref=install_identity_ref,
@@ -428,7 +309,7 @@ class WorkspaceInitializer:
         lock_path = state_root / ".workspace-init.lock"
         try:
             with TaskLock(lock_path, timeout=5):
-                write_diagnostic("初始化步骤 1/5：校验并保护工作空间状态（防止凭证被 Git 跟踪）")
+                write_diagnostic("初始化步骤 1/5：校验并保护工作空间状态")
                 credential_protection = self._protect_workspace_state_from_git()
                 if candidate.pool_mode:
                     write_diagnostic(
@@ -489,72 +370,31 @@ class WorkspaceInitializer:
                     ),
                     self._managed_guide_content(candidate),
                 )
-                write_diagnostic("初始化步骤 4/5：安装研发 Skill 并写入授权凭证")
+                write_diagnostic("初始化步骤 4/5：安装研发 Skill")
                 self._install_workspace_skills(candidate)
-                if candidate.persist_credentials and candidate.email and candidate.token:
-                    if candidate.install_identity_ref is not None:
-                        # 阶段二：凭证写入安装目录 user/.env（不再入工作空间）。
-                        save_install_credentials(
-                            candidate.install_root,
-                            candidate.email,
-                            candidate.token,
-                        )
-                    else:
-                        update_env_file(
-                            state_root / ".env",
-                            {
-                                candidate.connection.email_env: candidate.email,
-                                candidate.connection.token_env: candidate.token,
-                            },
-                        )
                 write_diagnostic("初始化步骤 5/5：写入研发员身份与工作空间索引")
                 index_path = self._index_path()
                 previous_index = index_path.read_bytes() if index_path.is_file() else None
                 try:
                     self._write_workspace_index(candidate)
                     agent_path = state_root / "agent.json"
-                    if candidate.install_identity_ref is not None:
-                        # 阶段二：agent.json schema v4——身份/凭证在安装目录，
-                        # 工作空间只保留项目绑定 + 安装目录身份引用（防错装）。
-                        atomic_write_json(
-                            agent_path,
-                            {
-                                "schema_version": 4,
-                                "workplane": "developer",
-                                "project_profile": candidate.profile.profile_id,
-                                "jira_project": candidate.profile.project_key,
-                                "connection_id": candidate.connection.connection_id,
-                                "jira_base_url": candidate.connection.base_url,
-                                "jira_site": jira_site_identity(candidate.connection.base_url),
-                                "source_root": str(candidate.source_root),
-                                "repository": candidate.repository,
-                                "install_identity_ref": candidate.install_identity_ref,
-                                "initialized_at": datetime.now(timezone.utc).isoformat(),
-                            },
-                        )
-                    else:
-                        atomic_write_json(
-                            agent_path,
-                            {
-                                "schema_version": 3,
-                                "workplane": "developer",
-                                "agent_id": candidate.agent_id,
-                                "project_profile": candidate.profile.profile_id,
-                                "jira_project": candidate.profile.project_key,
-                                "connection_id": candidate.connection.connection_id,
-                                "jira_base_url": candidate.connection.base_url,
-                                "jira_site": jira_site_identity(candidate.connection.base_url),
-                                "jira_account_id": preflight["jira_identity"],
-                                "source_root": str(candidate.source_root),
-                                "repository": candidate.repository,
-                                **(
-                                    {"execution_identity": candidate.execution_identity}
-                                    if candidate.execution_identity is not None
-                                    else {}
-                                ),
-                                "initialized_at": datetime.now(timezone.utc).isoformat(),
-                            },
-                        )
+                    # agent.json schema v4：身份/凭证只在安装目录，工作空间只保留绑定。
+                    atomic_write_json(
+                        agent_path,
+                        {
+                            "schema_version": 4,
+                            "workplane": "developer",
+                            "project_profile": candidate.profile.profile_id,
+                            "jira_project": candidate.profile.project_key,
+                            "connection_id": candidate.connection.connection_id,
+                            "jira_base_url": candidate.connection.base_url,
+                            "jira_site": jira_site_identity(candidate.connection.base_url),
+                            "source_root": str(candidate.source_root),
+                            "repository": candidate.repository,
+                            "install_identity_ref": candidate.install_identity_ref,
+                            "initialized_at": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
                 except BaseException:
                     if previous_index is None:
                         index_path.unlink(missing_ok=True)
@@ -734,22 +574,22 @@ class WorkspaceInitializer:
             checks.append({"check": "existing_config", "status": "not_present"})
             return
         existing = read_json(path)
+        expected = {
+            "schema_version": 4,
+            "workplane": "developer",
+            "project_profile": candidate.profile.profile_id,
+            "jira_project": candidate.profile.project_key,
+            "source_root": str(candidate.source_root),
+            "repository": candidate.repository,
+            "connection_id": candidate.connection.connection_id,
+            "jira_base_url": candidate.connection.base_url,
+            "jira_site": jira_site_identity(candidate.connection.base_url),
+            "install_identity_ref": candidate.install_identity_ref,
+        }
         same = all(
             existing.get(key) == value
-            for key, value in {
-                "workplane": "developer",
-                "agent_id": candidate.agent_id,
-                "project_profile": candidate.profile.profile_id,
-                "jira_project": candidate.profile.project_key,
-                "source_root": str(candidate.source_root),
-                "repository": candidate.repository,
-                "connection_id": candidate.connection.connection_id,
-                "jira_base_url": candidate.connection.base_url,
-                "jira_site": jira_site_identity(candidate.connection.base_url),
-            }.items()
+            for key, value in expected.items()
         )
-        if candidate.execution_identity is not None:
-            same = same and existing.get("execution_identity") == candidate.execution_identity
         if not same and not confirmed:
             raise _blocked(
                 "existing_config_confirmation_required",
@@ -820,7 +660,7 @@ class WorkspaceInitializer:
                 status="blocked",
                 exit_code=EXIT_BLOCKED,
                 retry_safe=True,
-                required_human_action="请在交互初始化中完成 Jira 授权，或为非交互模式提供完整凭证对",
+                required_human_action="请先运行 ao-work auth 完成安装级授权",
             )
         checks.append({"check": "jira_credentials", "status": "passed"})
 
@@ -1024,9 +864,9 @@ class WorkspaceInitializer:
             f"- project_profile：{candidate.profile.profile_id}\n"
             f"- repository：{candidate.repository}\n"
             f"- 生成时间：{datetime.now(timezone.utc).isoformat()}\n\n"
-            "本目录存放业务项目源代码，由 ao-work workspace init 管理。身份、凭证和任务状态保存在\n"
-            f"工作空间 {candidate.root}/.agentic-ops/ 内；本文件只是配套说明，权威映射以 .agentic-ops\n"
-            "受管配置为准。请勿手改管理块；重新初始化工作空间时会重新生成。\n"
+            "本目录存放业务项目源代码，由 ao-work workspace init 管理。身份与凭证保存在当前\n"
+            f"developer 安装的 user/ 目录；项目和任务状态保存在 {candidate.root}/.agentic-ops/。\n"
+            "本文件只是配套说明，权威映射以受管配置为准。请勿手改管理块；重新初始化工作空间时会重新生成。\n"
             f"{MANAGED_CODE_END}\n"
         )
         atomic_write_text(container / "README.md", content)
@@ -1195,8 +1035,9 @@ class WorkspaceInitializer:
             f"- 生成时间：{datetime.now(timezone.utc).isoformat()}\n\n"
             "本目录存放业务项目源代码池，由 ao-work workspace init 管理。池成员按 "
             "<owner>/<repo> 组织；任务执行时在任务根 <JIRA-KEY>/<from_branch>/ 下用 "
-            "git worktree 挂出任务级子工作树。身份、凭证和任务状态保存在业务项目工作空间 "
-            ".agentic-ops/ 内；本文件只是配套说明，权威映射以受管配置为准。请勿手改管理块。\n"
+            "git worktree 挂出任务级子工作树。身份与凭证保存在当前 developer 安装的 user/ "
+            "目录，项目和任务状态保存在业务项目工作空间 .agentic-ops/；本文件只是配套说明，"
+            "权威映射以受管配置为准。请勿手改管理块。\n"
             f"{MANAGED_CODE_END}\n"
         )
         atomic_write_text(pool_root / "README.md", content)
@@ -1296,7 +1137,7 @@ class WorkspaceInitializer:
             source.mkdir(parents=True, exist_ok=True)
 
     def _protect_workspace_state_from_git(self) -> str:
-        return protect_workspace_env_from_git(
+        return protect_workspace_state_from_git(
             self.root,
             run_git=lambda arguments: self._run_git(arguments),
         )

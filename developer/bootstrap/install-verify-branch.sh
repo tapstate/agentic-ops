@@ -12,7 +12,7 @@ usage() {
   cat <<'USAGE'
 用法：
   install-verify-branch.sh [--source-worktree <path>] [--source-branch <branch>] \
-    [--install-home <path>] [--log <path>] [--json] [--keep]
+    [--install-home <path>] [--log <path>] [--json] [--keep] [授权参数]
 
 参数说明：
   --source-branch    安装来源分支（默认 develop）。默认从官方远端 tapstate/agentic-ops 克隆，
@@ -23,6 +23,13 @@ usage() {
   --log              日志文件（默认 <install-home>.log，与安装目录同级）
   --json             输出 machine-readable JSON
   --keep             失败时不清理，保留安装目录用于排障
+  --agent-id         安装级研发员标识；与其余授权参数一起转交 ao-work auth
+  --jira-email       安装级 Jira email
+  --git-name         Git author/committer name
+  --git-email        Git author/committer email
+  --github-login     GitHub login
+  --token-stdin      从安全标准输入读取 Jira API token
+  --non-interactive  非交互授权；不传授权信息时无终端安装输出待授权下一步
 USAGE
 }
 
@@ -56,10 +63,13 @@ write_json_success() {
   local operation="$1"
   local install_dir="$2"
   local log_path="$3"
-  printf '{"ok":true,"operation":"%s","status":"completed","install_dir":"%s","log":"%s","verification_mode":"true"}\n' \
+  local authorization_status="$4"
+  printf '{"ok":true,"operation":"%s","status":"completed","install_dir":"%s","log":"%s","verification_mode":"true","authorization_status":"%s","authorization_next_action":"%s/bin/ao-work auth"}\n' \
     "$(agentic_json_escape "$operation")" \
     "$(agentic_json_escape "$install_dir")" \
-    "$(agentic_json_escape "$log_path")"
+    "$(agentic_json_escape "$log_path")" \
+    "$(agentic_json_escape "$authorization_status")" \
+    "$(agentic_json_escape "$install_dir")"
 }
 
 log_info() {
@@ -89,6 +99,8 @@ SOURCE_WORKTREE=""
 SOURCE_BRANCH="develop"
 INSTALL_HOME="${HOME}/test/agentic-ops-verify-$(date +%Y%m%d%H%M%S)"
 LOG_PATH=""
+AUTHORIZATION_ARGS=()
+AUTHORIZATION_REQUESTED=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -126,6 +138,23 @@ while [ "$#" -gt 0 ]; do
       ;;
     --keep)
       KEEP_HOME=1
+      shift
+      ;;
+    --agent-id|--jira-email|--git-name|--git-email|--github-login)
+      if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+        fail_usage invalid_argument "授权参数缺少取值：$1" "请补齐参数"
+      fi
+      AUTHORIZATION_ARGS+=("$1" "$2")
+      AUTHORIZATION_REQUESTED=1
+      shift 2
+      ;;
+    --token-stdin)
+      AUTHORIZATION_ARGS+=("$1")
+      AUTHORIZATION_REQUESTED=1
+      shift
+      ;;
+    --non-interactive)
+      AUTHORIZATION_ARGS+=("$1")
       shift
       ;;
     -h|--help)
@@ -171,6 +200,12 @@ else
   fi
   SOURCE_SPEC="$REPO_URL"
   SOURCE_KIND="remote"
+fi
+
+if [ "$SOURCE_KIND" = "local" ] && [ "$AUTHORIZATION_REQUESTED" -eq 1 ]; then
+  fail_usage verification_authorization_unavailable \
+    "本地 source-worktree 验证安装不可运行，不能配置授权" \
+    "请使用远端验证安装，或安装后单独运行 ao-work auth"
 fi
 
 if [ -z "$LOG_PATH" ]; then
@@ -267,5 +302,26 @@ if [ ! -e "$INSTALL_HOME/.agentic-ops/verification-only" ]; then
   fail_usage verification_marker_missing "未写入 verification-only 标记" "请检查初始化流程"
 fi
 
-write_json_success "bootstrap_verify" "$INSTALL_HOME" "$LOG_PATH"
+authorization_status="pending"
+if [ "$SOURCE_KIND" = "remote" ]; then
+  if [ "$AUTHORIZATION_REQUESTED" -eq 1 ]; then
+    if ! "$INSTALL_HOME/bin/ao-work" auth "${AUTHORIZATION_ARGS[@]}"; then
+      fail_usage verification_authorization_failed \
+        "验证安装已完成，但安装级授权失败" \
+        "请修正输入后单独运行 $INSTALL_HOME/bin/ao-work auth"
+    fi
+    authorization_status="configured"
+  elif [ -t 0 ] && [ -t 1 ]; then
+    if ! "$INSTALL_HOME/bin/ao-work" auth; then
+      fail_usage verification_authorization_failed \
+        "验证安装已完成，但安装级授权尚未完成" \
+        "请稍后单独运行 $INSTALL_HOME/bin/ao-work auth"
+    fi
+    authorization_status="configured"
+  else
+    log_info "当前无交互终端；请运行 $INSTALL_HOME/bin/ao-work auth 完成安装级授权"
+  fi
+fi
+
+write_json_success "bootstrap_verify" "$INSTALL_HOME" "$LOG_PATH" "$authorization_status"
 exit 0

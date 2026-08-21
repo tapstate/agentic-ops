@@ -1,23 +1,21 @@
 from __future__ import annotations
 
 import argparse
-import getpass
 import json
 import sys
 from pathlib import Path
 from typing import Any
 
-from ao_work.config import list_project_profiles, resolve_source_pool_root
+from ao_work.config import (
+    list_project_profiles,
+    resolve_source_pool_root,
+    validate_workspace_jira_binding,
+    validate_workspace_project_binding,
+)
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, write_diagnostic
 from ao_work.task_state.io import read_json
 from ao_work.workspace import Workspace
-from ao_work.workspace_init.service import (
-    WorkspaceCandidate,
-    WorkspaceInitializer,
-    build_execution_identity,
-    mask_email,
-    normalize_agent_id,
-)
+from ao_work.workspace_init.service import WorkspaceCandidate, WorkspaceInitializer
 
 
 def configure_workspace_init_parser(
@@ -25,14 +23,8 @@ def configure_workspace_init_parser(
 ) -> None:
     init = workspace_commands.add_parser("init")
     init.add_argument("--project", dest="project_profile")
-    init.add_argument("--agent-id")
     init.add_argument("--source-root")
     init.add_argument("--source-pool-root")
-    init.add_argument("--jira-email")
-    init.add_argument("--git-name")
-    init.add_argument("--git-email")
-    init.add_argument("--github-login")
-    init.add_argument("--token-stdin", action="store_true")
     init.add_argument("--non-interactive", action="store_true")
     init.add_argument("--confirm", action="store_true")
     init.add_argument("--confirm-existing-config", action="store_true")
@@ -67,58 +59,16 @@ def execute_workspace_init(
         raise _blocked(
             "missing_project_profile",
             "非交互初始化缺少 --project",
-            "请明确提供 --project 和 --agent-id，并使用 --confirm",
+            "请明确提供 --project，并使用 --confirm",
         )
     assert profile_id is not None
 
-    agent_id = args.agent_id
-    if interactive:
-        agent_id = _prompt_required("agent_id", agent_id or normalize_agent_id())
-    elif not agent_id:
-        raise _blocked(
-            "missing_agent_id",
-            "非交互初始化缺少 --agent-id",
-            "请明确提供 --agent-id",
-        )
-    assert agent_id is not None
-
-    credentials = _stdin_credentials(args)
-    execution_identity = _argument_execution_identity(args)
     candidate = initializer.prepare(
         profile_id,
-        agent_id,
         source_root=args.source_root,
         source_pool_root=args.source_pool_root,
-        credentials=credentials,
-        execution_identity=execution_identity,
-        persist_credentials=credentials is not None,
         allow_rebind=True,
     )
-    if interactive and (not candidate.email or not candidate.token):
-        credentials = _prompt_credentials(candidate)
-        candidate = initializer.prepare(
-            profile_id,
-            agent_id,
-            source_root=args.source_root,
-            source_pool_root=args.source_pool_root,
-            credentials=credentials,
-            execution_identity=execution_identity,
-            persist_credentials=True,
-            allow_rebind=True,
-        )
-
-    if interactive:
-        execution_identity = _prompt_execution_identity(candidate)
-        candidate = initializer.prepare(
-            profile_id,
-            agent_id,
-            source_root=args.source_root,
-            source_pool_root=args.source_pool_root,
-            credentials=credentials,
-            execution_identity=execution_identity,
-            persist_credentials=True,
-            allow_rebind=True,
-        )
 
     confirmed = args.confirm
     if interactive:
@@ -128,7 +78,7 @@ def execute_workspace_init(
         raise _blocked(
             "workspace_init_confirmation_required",
             "工作空间初始化摘要尚未确认",
-            "请核对 agent_id、Jira 项目空间、授权账户和源码仓库后确认",
+            "请核对安装身份、Jira 项目空间和源码仓库后确认",
         )
 
     confirm_existing = args.confirm_existing_config
@@ -173,90 +123,29 @@ def execute_workspace_preflight(
         )
     agent = read_json(workspace.config_path)
     profile_id = _required_agent_value(agent, "project_profile")
-    agent_id = _required_agent_value(agent, "agent_id")
     source_root = _required_agent_value(agent, "source_root")
     initializer = WorkspaceInitializer(workspace.root, install_root)
     configured_pool_root = resolve_source_pool_root(install_root)
-    pool_root_value = str(configured_pool_root) if configured_pool_root is not None else None
+    pool_root_value = (
+        str(configured_pool_root) if configured_pool_root is not None else None
+    )
     candidate = initializer.prepare(
         profile_id,
-        agent_id,
         source_root=source_root,
         source_pool_root=pool_root_value,
     )
+    validate_workspace_jira_binding(
+        workspace,
+        candidate.connection,
+        install_root=install_root,
+    )
+    validate_workspace_project_binding(workspace, candidate.profile)
     result = initializer.preflight(
         candidate,
         confirm_existing_config=False,
         check_remote=True,
     )
     return {**candidate.summary(), **result}
-
-
-def _stdin_credentials(args: argparse.Namespace) -> tuple[str, str] | None:
-    if not args.token_stdin and args.jira_email is None:
-        return None
-    if not args.token_stdin or not args.jira_email:
-        raise _blocked(
-            "jira_credential_pair_required",
-            "非交互授权必须同时提供 --jira-email 和 --token-stdin",
-            "请从标准输入传入 token，并明确提供同一账户的 Jira email",
-        )
-    token = sys.stdin.readline().rstrip("\r\n")
-    if not token:
-        raise _blocked(
-            "authorization_token_empty",
-            "标准输入中的 Jira token 为空",
-            "请重新从安全标准输入传入 token",
-        )
-    return args.jira_email, token
-
-
-def _prompt_credentials(candidate: WorkspaceCandidate) -> tuple[str, str]:
-    email = _prompt_required("Jira email", candidate.email or "")
-    token = getpass.getpass("AgenticOps：Jira API token：", stream=sys.stderr).strip()
-    if not token:
-        raise _blocked(
-            "authorization_token_empty",
-            "Jira API token 不能为空",
-            "请重新运行初始化并输入当前 Jira 账户的 API token",
-        )
-    return email, token
-
-
-def _argument_execution_identity(args: argparse.Namespace) -> dict[str, str] | None:
-    values = (args.git_name, args.git_email, args.github_login)
-    if all(value is None for value in values):
-        return None
-    if any(value is None for value in values):
-        raise _blocked(
-            "execution_identity_incomplete",
-            "执行身份必须同时提供 --git-name、--git-email 和 --github-login",
-            "请补齐当前研发员的一次性执行身份，或全部省略并使用交互初始化",
-        )
-    return build_execution_identity(*values)
-
-
-def _prompt_execution_identity(candidate: WorkspaceCandidate) -> dict[str, str]:
-    existing: dict[str, Any] = {}
-    agent_path = candidate.root / ".agentic-ops" / "agent.json"
-    if agent_path.is_file():
-        payload = read_json(agent_path)
-        raw_existing = payload.get("execution_identity")
-        if isinstance(raw_existing, dict):
-            existing = raw_existing
-    git_name = _prompt_required(
-        "Git author/committer name",
-        str(existing.get("git_author_name") or candidate.agent_id),
-    )
-    git_email = _prompt_required(
-        "Git author/committer email",
-        str(existing.get("git_author_email") or candidate.email or ""),
-    )
-    github_login = _prompt_required(
-        "GitHub actor login",
-        str(existing.get("github_actor_login") or candidate.agent_id),
-    )
-    return build_execution_identity(git_name, git_email, github_login)
 
 
 def _default_profile(root: Path, profiles: list[str], explicit: str | None) -> str:
@@ -290,10 +179,8 @@ def _prompt_confirmation(label: str) -> bool:
 
 
 def _write_summary(candidate: WorkspaceCandidate) -> None:
-    summary = candidate.summary()
-    summary["jira_account"] = mask_email(candidate.email)
     sys.stderr.write("AgenticOps：初始化摘要\n")
-    sys.stderr.write(json.dumps(summary, ensure_ascii=False, indent=2) + "\n")
+    sys.stderr.write(json.dumps(candidate.summary(), ensure_ascii=False, indent=2) + "\n")
     sys.stderr.flush()
 
 

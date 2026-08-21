@@ -1,62 +1,85 @@
 # DE-002 初始化业务项目工作空间
 
 作为公司员工指导员，
-我希望通过一个入口确认研发员身份、Jira 项目空间和授权并初始化工作空间，
-以便交付一个身份隔离、事实源明确且通过前置检查的 AgenticOps 研发员。
+我希望 developer 安装先完成一次研发员授权，再用一个简洁入口初始化各业务项目工作空间，
+以便身份与凭证集中维护、项目配置相互隔离，并在真实任务开始前完成确定性校验。
 
 ### 触发方式
 
-常规终端入口不要求参数：
+首次安装时可把授权参数交给 Bootstrap；安装脚本只转交 Runtime，不自行处理授权：
 
 ```sh
-cd <business-project-workspace>
-ao-work workspace init
-```
-
-脚本或 CI 使用完整非交互输入；token 只能从标准输入传递：
-
-```sh
-printf '%s\n' "$JIRA_TOKEN" | ao-work workspace init \
-  --non-interactive \
-  --project tapdata \
+printf '%s\n' "$JIRA_TOKEN" | bash developer/bootstrap/install.sh \
   --agent-id developer-01 \
   --jira-email developer@example.com \
   --git-name 'Developer One' \
   --git-email developer@example.com \
   --github-login developer-one \
   --token-stdin \
+  --non-interactive
+```
+
+安装时未授权，或后续需要更新身份/凭证时，单独运行：
+
+```sh
+ao-work auth
+ao-work auth --show
+```
+
+自动化配置 token 只能走标准输入：
+
+```sh
+printf '%s\n' "$JIRA_TOKEN" | ao-work auth \
+  --agent-id developer-01 \
+  --jira-email developer@example.com \
+  --git-name 'Developer One' \
+  --git-email developer@example.com \
+  --github-login developer-one \
+  --token-stdin \
+  --non-interactive
+```
+
+授权完成后，在业务项目 AI 工作空间运行：
+
+```sh
+ao-work workspace init
+```
+
+非交互初始化只提供项目和源码配置：
+
+```sh
+ao-work workspace init \
+  --non-interactive \
+  --project tapdata \
+  --source-pool-root <pool-root> \
   --confirm
 ```
 
 ### 前置条件
 
-- AgenticOps Python Runtime 已安装。
-- 当前目录是独立业务项目工作空间，不是 `~/.agentic-ops` 或 AgenticOps 源头仓库。
-- `standards/projects/<profile>/profile.yaml` 与对应 Jira Connection 已安装。
-- 公司员工指导员可以确认当前研发员身份和 Jira 项目空间。
-- 本机具备 Jira、GitHub 和目标仓库的只读访问能力。
+- AgenticOps developer-only Runtime 已安装。
+- 当前安装已通过 `ao-work auth` 配置完整研发员身份和 Jira 凭证。
+- 当前目录是独立业务项目 AI 工作空间，不是安装目录或 AgenticOps 源头仓库。
+- Project Profile 与对应 Jira Connection 已安装。
+- 本机具备 Jira、GitHub 和目标仓库的必要访问能力。
 
 ### 主流程
 
-1. Runtime 枚举已安装 Project Profile；只有一个或当前目录名匹配时提供默认值，否则要求选择。
-2. Runtime 生成 `agent_id` 默认值：读取主机名、转为纯小写、把非法字符段替换为 `-`。用户必须确认或修改；最终值只能匹配 `^[0-9A-Za-z_-]+$`。
-3. Runtime 从 Project Profile 推导 Jira Connection、站点、Project Key、默认仓库和源码目录，不要求用户输入 `connection_id`。
-4. Runtime 读取当前工作空间授权；缺少完整凭证对时，在同一入口询问 Jira email 和隐藏 token，不跨工作空间继承凭证。
-5. Runtime 以本向导已确认的 `agent_id` 和 Jira email 提供 Git author/committer 与 GitHub login 可编辑默认值；不读取全局 Git/GitHub 身份。Runtime 展示工作空间根目录、研发员执行身份、Project Profile、Jira 站点、Project Key、脱敏账户、默认仓库和源码目录，由公司员工指导员统一确认。
-6. 确认后执行无副作用候选配置预检：
-   - 工作空间边界与可写性；
-   - 已有配置和覆盖确认；
-   - `agent_id` 格式及本机工作空间冲突；
-   - Project Profile、Connection 和仓库映射；
-   - Jira 凭证完整性、当前身份和 Project 访问；
-   - Git 命令、源码目录、远端仓库和只读访问权限。
-7. 所有阻断检查通过后准备源码目录，原子写入 Profile overlay、授权文件、`AGENTS.md` 管理块和非权威工作空间索引，最后写入 `.agentic-ops/agent.json` 作为初始化完成标记。
-8. Runtime 使用同一候选配置执行初始化后 preflight；通过后输出下一步动作。
-9. 后续任务不重复填写工作空间与 Project 字段。Runtime 从 Profile 和 Jira 卡片解析确定性事实，AI 只汇总计划、范围、分支和验证建议，由指导员审查授权。
+1. Bootstrap 安装或更新 developer-only managed clone；授权参数存在时只调用 `ao-work auth`，不存在时按终端能力引导或输出下一步。
+2. `ao-work auth` 原子写入安装目录 `user/identity.yaml` 和 `user/.env`，权限固定为 `0600`；token 不进入参数、日志或输出。
+3. `workspace init` 从当前安装读取 `agent_id`、Jira 账户、Git 执行身份和 GitHub login，不接收工作空间级身份或凭证参数。
+4. Runtime 从 Project Profile 推导 Jira Connection、站点、Project Key、仓库和状态映射，并展示安装身份、项目、源码池及脱敏账户供确认。
+5. 确认后执行无副作用预检：工作空间边界、受管路径、已有配置、安装身份指纹、Profile/Connection、Jira 身份与 Project 访问、源码池和仓库访问。
+6. 全部通过后准备源码资产，写入 Profile overlay、developer AI 入口、Skill 副本和可重建索引，最后写入 schema v4 `.agentic-ops/agent.json`。
+7. `agent.json` 只保存项目事实与 `install_identity_ref`；不保存 `agent_id`、Jira accountId、Git 执行身份或 token，不生成工作空间 `.agentic-ops/.env`。
+8. Runtime 执行初始化后 preflight；通过后才允许读取或操作真实 Jira 任务。
 
-### 工作空间身份索引
+### 旧工作空间处理
 
-`$AGENTIC_OPS_HOME/user/workspace-index.json` 只保存 `workspace_root`、`agent_id` 和 Project Profile，用于发现同一台电脑上的身份冲突。它是可重建索引，不保存凭证、不授予权限、不代表研发员，也不得用于跨工作空间自动加载身份。
+- schema v3 和工作空间 `.agentic-ops/.env` 不再是授权来源。
+- Runtime 必须在读取旧工作空间凭证和发送网络请求前返回 `workspace_jira_identity_upgrade_required`。
+- 人工先运行 `ao-work auth` 配置当前安装，再明确确认重新执行 `workspace init`。
+- Runtime 不自动复制、迁移或删除旧 `.env`；清理由研发工程师在完成凭证轮换和备份决策后处理。
 
 ### 输出
 
@@ -64,57 +87,53 @@ printf '%s\n' "$JIRA_TOKEN" | ao-work workspace init \
 {
   "ok": true,
   "operation": "workspace_init",
-  "workplane": "developer",
+  "schema_version": 4,
   "agent_id": "developer-01",
+  "install_identity_ref": "install:<sha256>",
   "project_profile": "tapdata",
-  "jira_base_url": "https://tapdata.atlassian.net",
   "jira_project": "TAP",
   "jira_account": "de*******@example.com",
-  "jira_identity": "<jira-account-id>",
   "repository": "tapdata/tapdata",
-  "source_checkout_status": "cloned",
   "preflight_status": "passed",
-  "post_preflight_status": "passed",
-  "agentic_next_action": "list_assigned_jira_tasks"
+  "post_preflight_status": "passed"
 }
 ```
 
 ### 失败处理
 
-- 非终端环境使用默认交互入口时返回 `interactive_terminal_required`。
-- `agent_id` 非法时返回 `agent_id_invalid`；已被其它有效业务工作空间使用时返回 `agent_id_conflict` 并显示冲突工作空间。
-- 已有不同完整配置且未确认时返回 `existing_config_confirmation_required`；半初始化状态允许相同候选配置修复。
-- 凭证不完整、认证失败或目标 Project 无权访问时保持未初始化状态，不写 `agent.json`。
-- Profile、Connection、Jira Project 或仓库映射不一致时阻断，不允许 AI 猜测替代值。
-- 源码远端不可访问或 clone 失败时返回稳定失败码；只有 `agent.json` 写入后才视为初始化完成。
+- 安装无授权参数且无终端时安装仍成功，返回 `authorization_status=pending` 和 `ao-work auth` 下一步。
+- `ao-work auth` 缺字段、token 为空/不合理或安装用户目录不安全时阻断，不产生部分授权结果。
+- `workspace init` 缺安装身份或凭证时返回 `install_identity_missing` 或 `jira_credentials_missing`，明确提示 `ao-work auth`。
+- schema v3 返回 `workspace_jira_identity_upgrade_required`，不回退读取工作空间 `.env`。
+- 安装身份指纹、Profile、Connection、Project 或仓库映射漂移时在外部请求前阻断。
+- 源码准备失败时不写初始化完成标记；只有 schema v4 `agent.json` 最后写入后才视为完成。
 
 ### 验收标准
 
-- `ao-work workspace init` 可以在终端以零必填参数开始引导。
-- 初始化摘要明确要求确认 `agent_id`、Jira 项目空间、授权账户和源码仓库。
-- 默认 `agent_id` 是规范化后的纯小写主机名，最终值只包含 `[0-9A-Za-z_-]`。
-- 同一 `agent_id` 不能绑定本机两个有效业务项目工作空间。
-- 一个业务项目工作空间只保存一组 Jira 账户，不从共享安装或其它工作空间继承凭证。
-- Git author/committer 与 GitHub actor login 作为研发员执行身份只在工作空间初始化时确认；后续任务复用，漂移时阻断。
-- Jira 身份和 Project 访问、GitHub 仓库访问均在写入初始化完成标记前验证。
-- 非交互模式必须明确身份、Profile 和确认；token 不出现在命令参数和输出中。
-- `.agentic-ops/agent.json` 最后写入，半状态不能通过任务接管前检查。
+- 用户只需记忆 `ao-work auth` 和 `ao-work workspace init` 两个入口。
+- `ao-work install identity|auth` 与 `ao-work auth jira` 均不可解析。
+- Bootstrap 可选传入授权信息；授权实现仅存在于 Python Runtime，可在安装后单独重复调用。
+- 有终端且未传授权信息时 Bootstrap 引导授权；无终端时安装成功并提供明确下一步。
+- 安装授权写入 `user/identity.yaml` 与 `user/.env`，均为 `0600`；任何输出都不包含 token。
+- `workspace init` 不接收身份、email、Git/GitHub 或 token 参数。
+- 新工作空间固定 schema v4，只保存 `install_identity_ref` 和项目配置，不创建 `.agentic-ops/.env`。
+- schema v3 在凭证读取和网络访问前失败关闭，不进行隐式迁移。
+- Jira 身份、Project 访问和仓库访问在初始化完成前验证。
 - 初始化结果包含前置检查和初始化后 preflight 结论。
-- 完整 task-to-PR manifest 不作为用户逐项配置表；每个任务只要求计划/范围/验证/权限与高风险动作审查。
 
 ### 保护行为
 
-- 业务项目工作空间不能位于 AgenticOps 安装目录或源头仓库中。
-- `agent_id` 冲突、Jira 授权失败、Project 访问失败或仓库访问失败时禁止初始化完成。
-- 工作空间索引不得保存凭证、代表研发员身份或用于授权。
-- token 只允许隐藏输入或安全标准输入，输出只显示脱敏账户。
-- Profile、Connection、Jira Project 和仓库映射不得由 AI 临场猜测。
+- Bootstrap 不能实现或复制 Python Runtime 的授权校验、存储和更新逻辑。
+- token 不得进入命令参数、输出、日志、工作空间、标准资产或 Git。
+- 工作空间缺安装授权、身份指纹漂移或 schema v3 时，必须在旧凭证读取和网络访问前停止。
+- Runtime 不自动复制、迁移或删除旧工作空间凭证，也不通过兼容命令恢复旧授权入口。
+- Profile、Connection、Jira Project、安装身份和仓库映射不得由 AI 临场猜测或用聊天上下文覆盖。
+- `agent.json` 必须最后写入；半初始化状态不能通过 preflight 或任务入口。
 
 ### 验收证据
 
-- 零参数交互初始化输出和确认摘要。
-- 非交互初始化、非法 `agent_id`、身份冲突和授权缺失测试。
-- Jira 当前身份与 Project 只读回读结果。
-- Git 远端只读检查与源码准备结果。
-- `.agentic-ops/agent.json`、Profile overlay、工作空间授权文件权限和 `AGENTS.md` 管理块。
-- `workspace preflight` 输出及敏感信息不泄漏检查。
+- Bootstrap 带授权参数、交互引导、无终端 pending 三类测试。
+- `ao-work auth` 交互、非交互、重复更新、脱敏查看和敏感信息不泄漏测试。
+- 旧多级命令和 `workspace init` 旧身份参数拒绝测试。
+- schema v4 初始化与 schema v3 失败关闭测试。
+- Jira 身份/Project 回读、源码准备、Skill/Rule 边界和固定完整验证结果。

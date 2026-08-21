@@ -58,6 +58,7 @@ def execute_task_resume(
         workspace,
         context.connection,
         account_id=account["account_id"],
+        install_root=install_root,
     )
 
     local = _resolve_local_context(store, issue_key=issue_key, agentic_run_id=agentic_run_id)

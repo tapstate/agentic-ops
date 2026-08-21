@@ -11,7 +11,7 @@ metadata:
 
 ## 能力顺序
 
-1. 用 `ao-work auth jira show` 查看授权状态；未就绪时调用 `configure-authorization` Skill，完成后执行 `auth jira verify`。
+1. 用 `ao-work auth --show` 查看安装授权状态；未就绪时调用 `configure-authorization` Skill。真实 Jira 身份与 Project 访问由 workspace/task Runtime 入口校验。
 2. 用 `ao-work jira inspect` 读取 Connection、Profile 和任务事实。
 3. 用 `ao-work report write --kind analysis|plan` 保存本地报告。
 4. 对 Comment、Description 或 Worklog 先执行 `plan`，检查 `action`、`plan_id`、内容摘要和 Runtime 返回的授权绑定字段。

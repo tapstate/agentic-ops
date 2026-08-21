@@ -177,14 +177,19 @@ class InstallIdentityBindingTest(unittest.TestCase):
             validate_workspace_jira_binding(workspace, self.connection)
         self.assertEqual("install_identity_missing", captured.exception.code)
 
-    def test_v3_binding_unchanged(self) -> None:
+    def test_v3_binding_is_rejected_before_workspace_credentials_are_used(self) -> None:
         workspace = self._workspace(self._agent(schema=3))
-        agent = validate_workspace_jira_binding(
-            workspace,
-            self.connection,
-            install_root=self.install,
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            validate_workspace_jira_binding(
+                workspace,
+                self.connection,
+                install_root=self.install,
+            )
+        self.assertEqual(
+            "workspace_jira_identity_upgrade_required",
+            captured.exception.code,
         )
-        self.assertEqual(3, agent["schema_version"])
+        self.assertIn("ao-work auth", captured.exception.required_human_action)
 
     def test_user_dir_symlink_blocked(self) -> None:
         import shutil
@@ -209,21 +214,17 @@ class InstallIdentityCliTest(unittest.TestCase):
         self.install.mkdir()
 
     def _run(self, arguments: tuple[str, ...], *, stdin: str = "") -> dict:
-        from ao_work.installation.cli import execute_install
+        from ao_work.authorization.cli import execute_authorization
         from ao_work.work_cli import build_parser
 
         parser = build_parser()
-        args = parser.parse_args(
-            ("--workspace-root", str(self.root / "workspace"), "install", *arguments)
-        )
+        args = parser.parse_args(("auth", *arguments))
         with mock.patch("sys.stdin", io.StringIO(stdin)):
-            return execute_install(args, self.install)
+            return execute_authorization(args, self.install)
 
     def test_set_and_show_identity_non_interactive(self) -> None:
         result = self._run(
             (
-                "identity",
-                "set",
                 "--agent-id",
                 "harsen-mini-test-bot",
                 "--git-name",
@@ -234,53 +235,36 @@ class InstallIdentityCliTest(unittest.TestCase):
                 "harsen-mini-test-bot",
                 "--jira-email",
                 "harsen@example.test",
-                "--jira-token-stdin",
+                "--token-stdin",
                 "--non-interactive",
             ),
             stdin="token-secret-123\n",
         )
         self.assertTrue(result["configured"])
-        shown = self._run(("identity", "show"))
+        shown = self._run(("--show",))
         self.assertTrue(shown["configured"])
         self.assertEqual("harsen-mini-test-bot", shown["agent_id"])
         self.assertTrue(shown["jira_credentials_configured"])
 
     def test_show_when_unconfigured(self) -> None:
-        shown = self._run(("identity", "show"))
+        shown = self._run(("--show",))
         self.assertFalse(shown["configured"])
 
-    def test_auth_set_requires_identity_first(self) -> None:
+    def test_non_interactive_auth_requires_complete_identity(self) -> None:
         with self.assertRaises(RuntimeErrorResult) as captured:
             self._run(
-                ("auth", "set", "--jira-email", "harsen@example.test", "--token-stdin", "--non-interactive"),
+                ("--jira-email", "harsen@example.test", "--token-stdin", "--non-interactive"),
                 stdin="token-secret-123\n",
             )
-        self.assertEqual("install_identity_missing", captured.exception.code)
+        self.assertEqual("install_identity_incomplete", captured.exception.code)
 
-    def test_remove_clears_identity(self) -> None:
-        self._run(
-            (
-                "identity",
-                "set",
-                "--agent-id",
-                "harsen-mini-test-bot",
-                "--git-name",
-                "Harsen Test Bot",
-                "--git-email",
-                "harsen@example.test",
-                "--github-login",
-                "harsen-mini-test-bot",
-                "--jira-email",
-                "harsen@example.test",
-                "--jira-token-stdin",
-                "--non-interactive",
-            ),
-            stdin="token-secret-123\n",
+    def test_show_cannot_be_combined_with_write_arguments(self) -> None:
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            self._run(("--show", "--agent-id", "invalid-combination"))
+        self.assertEqual(
+            "authorization_show_arguments_invalid",
+            captured.exception.code,
         )
-        removed = self._run(("identity", "remove"))
-        self.assertTrue(removed["removed"])
-        shown = self._run(("identity", "show"))
-        self.assertFalse(shown["configured"])
 
 
 if __name__ == "__main__":

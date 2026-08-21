@@ -229,7 +229,7 @@ AgenticOps 默认安装到：
 ~/.agentic-ops
 ```
 
-`~/.agentic-ops` 是稳定 `main` 的 developer-only sparse managed clone，不代表研发员，也不是具体项目或具体任务的运行目录；正常文件树不得包含 `maintainer/`。
+`~/.agentic-ops` 是稳定 `main` 的 developer-only sparse managed clone，代表一名研发员的 developer 安装并保存安装级身份与凭证，但不是具体项目或任务运行目录；正常文件树不得包含 `maintainer/`。
 
 `~/.agentic-ops` 可以保存：
 

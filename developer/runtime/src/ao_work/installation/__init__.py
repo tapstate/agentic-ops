@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import re
 import subprocess
 from typing import Any
 
 import yaml
 
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
+
+AGENT_ID_PATTERN = re.compile(r"^[0-9A-Za-z_-]+$")
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+GITHUB_LOGIN_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 
 DEFAULT_REPOSITORY = "tapstate/agentic-ops"
 IDENTITY_OVERRIDE_ENVS = (
@@ -84,6 +89,71 @@ def install_user_dir(install_root: Path) -> Path:
     return user_dir
 
 
+def validate_agent_id(agent_id: str) -> str:
+    value = agent_id.strip()
+    if not value or not AGENT_ID_PATTERN.fullmatch(value):
+        raise _blocked(
+            "agent_id_invalid",
+            "agent_id 只能包含字符 [0-9A-Za-z_-]",
+            "请修正 agent_id 后重新执行 ao-work auth",
+        )
+    return value
+
+
+def validate_jira_email(jira_email: str) -> str:
+    value = jira_email.strip()
+    if not EMAIL_PATTERN.fullmatch(value):
+        raise _blocked(
+            "authorization_email_invalid",
+            "Jira email 格式无效",
+            "请重新运行 ao-work auth 并输入当前 Jira 账户 email",
+        )
+    return value
+
+
+def build_execution_identity(
+    git_name: str,
+    git_email: str,
+    github_actor_login: str,
+) -> dict[str, str]:
+    name = git_name.strip()
+    email = git_email.strip()
+    login = github_actor_login.strip()
+    if not name or "\x00" in name or len(name) > 256:
+        raise _blocked(
+            "execution_identity_invalid",
+            "Git author/committer name 无效",
+            "请通过 ao-work auth 确认当前研发员的 Git 姓名",
+        )
+    if not EMAIL_PATTERN.fullmatch(email):
+        raise _blocked(
+            "execution_identity_invalid",
+            "Git author/committer email 格式无效",
+            "请通过 ao-work auth 确认当前研发员的 Git email",
+        )
+    if not GITHUB_LOGIN_PATTERN.fullmatch(login):
+        raise _blocked(
+            "execution_identity_invalid",
+            "GitHub actor login 格式无效",
+            "请通过 ao-work auth 确认当前研发员的 GitHub login",
+        )
+    return {
+        "git_author_name": name,
+        "git_author_email": email,
+        "git_committer_name": name,
+        "git_committer_email": email,
+        "github_actor_login": login,
+    }
+
+
+def mask_email(value: str | None) -> str | None:
+    if not value or "@" not in value:
+        return None
+    local, domain = value.split("@", 1)
+    visible = local[:2] if len(local) > 2 else local[:1]
+    return f"{visible}{'*' * max(len(local) - len(visible), 1)}@{domain}"
+
+
 def load_install_identity(install_root: Path) -> dict[str, Any]:
     """读取研发员级身份：~/.agentic-ops/user/identity.yaml。
 
@@ -95,7 +165,7 @@ def load_install_identity(install_root: Path) -> dict[str, Any]:
         raise _blocked(
             "install_identity_missing",
             "安装目录缺少研发员身份配置",
-            "请运行 ao-work install identity set 配置 agent_id、Git 执行身份与 Jira 账户",
+            "请运行 ao-work auth 配置 agent_id、Git 执行身份与 Jira 账户",
         )
     try:
         payload = yaml.safe_load(identity_path.read_text(encoding="utf-8")) or {}
@@ -112,7 +182,7 @@ def load_install_identity(install_root: Path) -> dict[str, Any]:
         raise _blocked(
             "install_identity_invalid",
             "研发员身份配置缺少 agent_id、execution_identity 或 jira_email",
-            "请运行 ao-work install identity set 重新配置",
+            "请运行 ao-work auth 重新配置",
         )
     required_execution = {
         "git_author_name",
@@ -125,7 +195,7 @@ def load_install_identity(install_root: Path) -> dict[str, Any]:
         raise _blocked(
             "install_identity_invalid",
             "研发员身份 execution_identity 缺少 Git 身份四字段或 github_actor_login",
-            "请运行 ao-work install identity set 重新配置",
+            "请运行 ao-work auth 重新配置",
         )
     return {
         "agent_id": agent_id,

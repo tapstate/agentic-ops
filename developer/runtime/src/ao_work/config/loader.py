@@ -10,7 +10,6 @@ from urllib.parse import urlsplit
 
 import yaml
 
-from ao_work.config.env import ENV_NAME_PATTERN, resolve_secret_pair_with_source
 from ao_work.managed_io import read_managed_json, read_managed_text
 from ao_work.config.model import (
     FIELD_STATES,
@@ -27,6 +26,7 @@ from ao_work.workspace import Workspace
 from ao_work.workspace_security import validate_workspace_managed_path
 
 CONFIG_ID_PATTERN = re.compile(r"^[0-9A-Za-z_-]+$")
+ENV_NAME_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 
 @dataclass(frozen=True)
@@ -52,7 +52,7 @@ class JiraContext:
             message=f"Jira 凭证未配置：{', '.join(missing)}",
             status="blocked",
             exit_code=EXIT_BLOCKED,
-            required_human_action="请执行 ao-work auth jira set 配置当前 AgenticOps 研发员账户",
+            required_human_action="请执行 ao-work auth 配置当前 developer 安装的研发员账户",
         )
 
 
@@ -101,21 +101,22 @@ def load_jira_context(workspace: Workspace, install_root: Path) -> JiraContext:
         install_root=install_root,
     )
     validate_workspace_project_binding(workspace, profile)
-    if agent.get("schema_version") == 4:
-        # 阶段二：凭证从安装目录读取。
-        from ao_work.installation import load_install_credentials
+    from ao_work.installation import load_install_credentials, load_install_identity
 
-        install_credentials = load_install_credentials(install_root)
-        if install_credentials is not None:
-            email, token = install_credentials
-        else:
-            email, token = None, None
+    install_identity = load_install_identity(install_root)
+    install_credentials = load_install_credentials(install_root)
+    if install_credentials is not None:
+        email, token = install_credentials
+        if email != str(install_identity["jira_email"]).strip():
+            raise RuntimeErrorResult(
+                code="install_identity_drift",
+                message="安装身份中的 Jira email 与安装凭据不一致",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请运行 ao-work auth 重新配置同一 Jira 账户",
+            )
     else:
-        email, token, _ = resolve_secret_pair_with_source(
-            connection.email_env,
-            connection.token_env,
-            workspace.root / ".agentic-ops" / ".env",
-        )
+        email, token = None, None
     return JiraContext(
         connection=connection,
         profile=profile,
@@ -410,13 +411,16 @@ def validate_workspace_jira_binding(
 ) -> dict[str, Any]:
     agent = _load_agent_config(workspace)
     schema_version = agent.get("schema_version")
-    if schema_version not in (3, 4):
+    if schema_version != 4:
         raise RuntimeErrorResult(
             code="workspace_jira_identity_upgrade_required",
-            message="工作空间尚未固化已验证 Jira 站点与账户身份",
+            message="旧工作空间授权格式已停用，当前工作空间必须升级到 schema v4",
             status="blocked",
             exit_code=EXIT_BLOCKED,
-            required_human_action="请重新执行 ao-work workspace init，通过 Jira 授权检查后升级工作空间",
+            required_human_action=(
+                "请先执行 ao-work auth 配置安装级授权，再显式执行 "
+                "ao-work workspace init --confirm-existing-config"
+            ),
         )
     expected = {
         "connection_id": connection.connection_id,
@@ -432,55 +436,33 @@ def validate_workspace_jira_binding(
                 exit_code=EXIT_BLOCKED,
                 required_human_action="请停止读取凭证和发送请求，核对 Connection/Profile overlay 漂移",
             )
-    if schema_version == 4:
-        # 阶段二：身份/凭证在安装目录。工作空间只持 install_identity_ref 指纹。
-        if install_root is None:
-            raise RuntimeErrorResult(
-                code="install_identity_missing",
-                message="schema v4 工作空间需要安装目录身份校验，但未提供 install_root",
-                status="blocked",
-                exit_code=EXIT_BLOCKED,
-                required_human_action="请通过 ao-work 正确入口操作该工作空间",
-            )
-        install_identity = _load_install_identity_for_binding(install_root)
-        expected_ref = agent.get("install_identity_ref")
-        if not isinstance(expected_ref, str) or not expected_ref.strip():
-            raise RuntimeErrorResult(
-                code="workspace_jira_identity_upgrade_required",
-                message="schema v4 工作空间缺少 install_identity_ref",
-                status="blocked",
-                exit_code=EXIT_BLOCKED,
-                required_human_action="请重新执行 ao-work workspace init 完成身份绑定",
-            )
-        current_ref = _install_identity_ref(install_root, install_identity)
-        if current_ref != expected_ref:
-            raise RuntimeErrorResult(
-                code="install_identity_drift",
-                message="工作空间引用的安装目录身份与当前安装目录身份不一致",
-                status="blocked",
-                exit_code=EXIT_BLOCKED,
-                required_human_action="请核对是否误用了其它研发员的安装目录或工作空间",
-            )
-        if account_id is not None:
-            # v4 的账户校验由调用方从安装目录身份读取后传入。
-            pass
-        return agent
-    configured_account = agent.get("jira_account_id")
-    if not isinstance(configured_account, str) or not configured_account.strip():
+    # 身份/凭证只在安装目录。工作空间只持 install_identity_ref 指纹。
+    if install_root is None:
+        raise RuntimeErrorResult(
+            code="install_identity_missing",
+            message="schema v4 工作空间需要安装目录身份校验，但未提供 install_root",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请通过 ao-work 正确入口操作该工作空间",
+        )
+    install_identity = _load_install_identity_for_binding(install_root)
+    expected_ref = agent.get("install_identity_ref")
+    if not isinstance(expected_ref, str) or not expected_ref.strip():
         raise RuntimeErrorResult(
             code="workspace_jira_identity_upgrade_required",
-            message="工作空间缺少已验证 Jira accountId",
+            message="schema v4 工作空间缺少 install_identity_ref",
             status="blocked",
             exit_code=EXIT_BLOCKED,
-            required_human_action="请重新执行 ao-work workspace init 完成账户验证",
+            required_human_action="请重新执行 ao-work workspace init 完成身份绑定",
         )
-    if account_id is not None and configured_account != account_id:
+    current_ref = _install_identity_ref(install_root, install_identity)
+    if current_ref != expected_ref:
         raise RuntimeErrorResult(
-            code="jira_workspace_account_drift",
-            message="Jira 当前登录 accountId 与工作空间固化账户不一致",
+            code="install_identity_drift",
+            message="工作空间引用的安装目录身份与当前安装目录身份不一致",
             status="blocked",
             exit_code=EXIT_BLOCKED,
-            required_human_action="请停止操作并重新授权该业务项目研发员账户",
+            required_human_action="请核对是否误用了其它研发员的安装目录或工作空间",
         )
     return agent
 

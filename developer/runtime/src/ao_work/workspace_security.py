@@ -326,26 +326,20 @@ def read_workspace_outbound_file(
             os.close(descriptor)
 
 
-def validate_workspace_env_path(workspace_root: Path) -> Path:
-    state_root = validate_workspace_state_root(workspace_root)
-    env_path = state_root / ".env"
-    if env_path.is_symlink():
-        raise _blocked(
-            "workspace_env_symlink_forbidden",
-            "业务项目工作空间的 .agentic-ops/.env 不能是符号链接",
-            "请移除符号链接后，通过 ao-work auth jira set 重新配置当前工作空间凭证",
-        )
-    return env_path
-
-
-def protect_workspace_env_from_git(
+def protect_workspace_state_from_git(
     workspace_root: Path,
     *,
     run_git: GitRunner | None = None,
 ) -> str:
-    """Fail closed for tracked credentials, then ensure local Git exclusion."""
+    """确保业务工作空间的整个 .agentic-ops 状态目录进入本地 Git exclude。"""
     root = workspace_root.expanduser().resolve()
-    env_path = validate_workspace_env_path(root)
+    legacy_env = root / ".agentic-ops" / ".env"
+    if legacy_env.is_symlink():
+        raise _blocked(
+            "workspace_env_symlink_forbidden",
+            "检测到旧工作空间授权文件是符号链接",
+            "请移除该符号链接；授权只允许通过 ao-work auth 写入 developer 安装目录",
+        )
     runner = run_git or _run_git
 
     top_level = runner(["-C", str(root), "rev-parse", "--show-toplevel"])
@@ -354,7 +348,7 @@ def protect_workspace_env_from_git(
             raise _blocked(
                 "workspace_git_boundary_invalid",
                 "当前目录位于 Git 元数据目录树中，但无法确认仓库顶层",
-                "请修复 Git 仓库权限或安全配置后重试；在确认前不得写入凭证",
+                "请修复 Git 仓库权限或安全配置后重试；在确认前不得写入工作空间状态",
             )
         return "hard_separation"
     try:
@@ -367,29 +361,30 @@ def protect_workspace_env_from_git(
             "请把业务项目 AI 工作空间移到独立目录后重试",
         ) from error
 
-    relative_env = relative_workspace / ".agentic-ops" / ".env"
-    tracked = runner(
-        [
-            "-C",
-            str(repository_root),
-            "ls-files",
-            "--error-unmatch",
-            "--",
-            relative_env.as_posix(),
-        ]
-    )
-    if tracked.returncode == 0:
-        raise _blocked(
-            "workspace_env_tracked",
-            "业务项目工作空间的 .agentic-ops/.env 已被 Git 跟踪，禁止写入凭证",
-            "请先从 Git 索引和历史中安全移除该文件，确认凭证未泄露并完成必要轮换后再重试",
+    if legacy_env.is_file():
+        relative_env = relative_workspace / ".agentic-ops" / ".env"
+        tracked = runner(
+            [
+                "-C",
+                str(repository_root),
+                "ls-files",
+                "--error-unmatch",
+                "--",
+                relative_env.as_posix(),
+            ]
         )
-    if tracked.returncode not in {1}:
-        raise _blocked(
-            "workspace_git_tracking_check_failed",
-            "无法确认 .agentic-ops/.env 是否已被 Git 跟踪",
-            "请检查 Git 仓库状态后重试；在确认前不得写入凭证",
-        )
+        if tracked.returncode == 0:
+            raise _blocked(
+                "workspace_env_tracked",
+                "检测到旧工作空间授权文件已被 Git 跟踪",
+                "请从 Git 索引和历史中安全移除、轮换凭据，再使用 ao-work auth 重新授权",
+            )
+        if tracked.returncode != 1:
+            raise _blocked(
+                "workspace_git_tracking_check_failed",
+                "无法确认旧工作空间授权文件的 Git 跟踪状态",
+                "请检查 Git 仓库状态；Runtime 不会读取或修改该文件",
+            )
 
     git_path = runner(["-C", str(root), "rev-parse", "--git-path", "info/exclude"])
     if git_path.returncode != 0 or not git_path.stdout.strip():
@@ -433,43 +428,14 @@ def protect_workspace_env_from_git(
             "--quiet",
             "--no-index",
             "--",
-            relative_env.as_posix(),
+            (state_path / "agent.json").as_posix(),
         ]
     )
     if ignored.returncode != 0:
         raise _blocked(
             "workspace_git_exclude_failed",
-            "Git 本地 exclude 未能保护 .agentic-ops/.env",
-            "请修复仓库本地 exclude，确认 git status 不会显示凭证路径后重试",
-        )
-    # Re-check the exact target after touching Git metadata, before the caller writes a secret.
-    if env_path.is_symlink():
-        raise _blocked(
-            "workspace_env_symlink_forbidden",
-            "业务项目工作空间的 .agentic-ops/.env 不能是符号链接",
-            "请移除符号链接后，通过 ao-work auth jira set 重新配置当前工作空间凭证",
-        )
-    tracked_after_protection = runner(
-        [
-            "-C",
-            str(repository_root),
-            "ls-files",
-            "--error-unmatch",
-            "--",
-            relative_env.as_posix(),
-        ]
-    )
-    if tracked_after_protection.returncode == 0:
-        raise _blocked(
-            "workspace_env_tracked",
-            "业务项目工作空间的 .agentic-ops/.env 已被 Git 跟踪，禁止写入凭证",
-            "请先从 Git 索引和历史中安全移除该文件，确认凭证未泄露并完成必要轮换后再重试",
-        )
-    if tracked_after_protection.returncode != 1:
-        raise _blocked(
-            "workspace_git_tracking_check_failed",
-            "无法在凭证写入前复核 .agentic-ops/.env 的 Git 跟踪状态",
-            "请检查 Git 仓库状态后重试；在确认前不得写入凭证",
+            "Git 本地 exclude 未能保护 .agentic-ops 状态目录",
+            "请修复仓库本地 exclude，确认 git status 不会显示工作空间状态后重试",
         )
     return "git_local_exclude"
 

@@ -19,7 +19,7 @@
 
 ```sh
 ao-work workspace preflight
-ao-work auth jira verify
+ao-work auth --show
 ao-work capability list
 ```
 
@@ -31,7 +31,7 @@ ao-work capability list
 
 ## 工作面边界
 
-- 一个业务项目工作空间代表一名研发员；一台电脑可以有多个互相隔离的研发员工作空间。
-- `~/.agentic-ops` 只是共享 developer 安装，不代表人员。
+- 一个 developer 安装代表一名研发员；同一安装下可以有多个相互隔离的业务项目工作空间。
+- `~/.agentic-ops` 不代表具体项目，但保存当前研发员的安装级身份与凭证；多名研发员必须使用隔离安装。
 - 工作面由 AI 入口和命令确定，不接受 `--mode`、`--workplane` 或环境变量切换。
 - 发现自己位于 AgenticOps 源头仓库时，`ao-work` 必须返回 `workplane_mismatch` 并停止。

@@ -1,47 +1,55 @@
 ---
 name: configure-authorization
-description: Safely inspect, set, modify, remove, and verify the single Jira account owned by an AgenticOps business-project workspace without exposing API tokens. Use when workspace Jira credentials are missing, invalid, or need rotation before a project task can run.
+description: Configure, update, or safely inspect the installation-scoped developer identity and Jira credential used by ao-work. Use when developer installation authorization is missing, invalid, rotated, or needs masked inspection before workspace initialization or task execution.
 metadata:
   workplane: developer
 ---
 
-# 配置授权
+# 配置安装授权
 
-使用 `ao-work auth jira` 管理授权，不要让用户手工编辑 `.env`，也不要在聊天、命令参数或报告中接收 token。
+只使用顶层 `ao-work auth` 管理当前 developer 安装的研发员身份、Git/GitHub 执行身份和 Jira 凭证。不要调用已删除的 `ao-work install identity|auth` 或 `ao-work auth jira`，不要手工编辑安装目录文件，也不要在聊天、命令参数、日志或报告中接收 token。
 
-一个业务项目 AgenticOps 工作空间是一名研发员，只维护一个 Jira 账户。developer 安装不保存研发员身份，不同工作空间不得自动继承或拼接凭证。本 Skill 只属于 `developer` 工作面。
+一个 developer 安装代表一名研发员；同一安装下的多个业务项目工作空间继承同一身份和凭证，但各自保存独立 Project Profile 与 `install_identity_ref`。本 Skill 只属于 `developer` 工作面。
 
 ## 操作流程
 
-1. 运行 `auth jira show` 查看研发员账户状态和来源。
-2. 交互式执行设置或修改：
+1. 只需查看状态时运行：
 
 ```sh
-ao-work auth jira set
+ao-work auth --show
 ```
 
-3. 运行 `auth jira verify` 验证当前项目站点、身份和 API 能力。
-4. 只有 `verified=true` 才继续真实 Jira 任务操作。
-5. Runtime 必须先核对工作空间固化的 Connection、Jira site root 和 accountId；绑定漂移时停止，不读取该 Connection 的凭证、不发送 Jira 请求，也不通过修改 `.env` 绕过重新初始化。
+输出只允许包含配置状态、`agent_id`、脱敏 email、Git 姓名和 GitHub login，不返回 token。
 
-Connection 从当前项目 Profile 推导；安装中只有一个 Connection 时自动选择。只有多个站点且当前工作空间尚未绑定时，才查看 `auth jira list` 并使用高级参数 `--connection-id`。
-
-## 非交互设置
-
-email 可以使用 `--email`；token 只能从标准输入传入：
+2. 首次配置或更新时，在终端运行：
 
 ```sh
-printf '%s\n' "$JIRA_TOKEN" | ao-work auth jira set \
-  --email <jira-email> \
-  --token-stdin
+ao-work auth
 ```
 
-不要把 token 直接写入命令行参数。不要在自动化日志中打印输入管道。
+Runtime 引导填写 `agent_id`、Jira email、Git author/committer 姓名与 email、GitHub login，并通过隐藏输入接收 Jira token。重复执行就是独立重新授权。
 
-## 修改与删除
+3. 自动化必须提供完整身份参数，token 只能经标准输入：
 
-- 重复执行 `set` 只更新明确提供的字段，保留其它授权字段。
-- 使用 `remove --field email|token|all` 删除当前工作空间研发员账户的指定字段。
-- 删除后再次执行 `show`，确认账户状态。
+```sh
+printf '%s\n' "$JIRA_TOKEN" | ao-work auth \
+  --agent-id <agent-id> \
+  --jira-email <jira-email> \
+  --git-name <git-name> \
+  --git-email <git-email> \
+  --github-login <github-login> \
+  --token-stdin \
+  --non-interactive
+```
 
-输出只允许包含布尔状态、脱敏 email、配置来源、Jira 用户标识和字段数量；不得包含 token、Authorization header 或原始认证响应。
+4. 授权配置本身不猜测 Project，也不以独立命令探测 Jira。`workspace init` 或任务入口使用当前 Project Profile 回读 Jira 身份和访问能力；只有这些校验通过才继续真实任务。
+
+## 阻断处理
+
+- `interactive_terminal_required`：切换到终端运行，或提供完整非交互参数。
+- `install_identity_incomplete` / `install_identity_invalid`：补齐或修正身份字段，不从主机名、全局 Git、其它安装、其它工作空间或历史聊天猜测。
+- `authorization_token_empty` / `authorization_token_invalid`：通过隐藏输入或标准输入重新提供 token。
+- `install_user_dir_invalid` / `install_identity_write_failed`：停止，修复当前安装 `user/` 的路径或权限，不改写到工作空间。
+- `workspace_jira_identity_upgrade_required`：先配置安装授权，再由指导员明确重新执行 `workspace init`；Runtime 不自动复制或删除旧工作空间 `.env`。
+
+安装授权写入当前安装的 `user/identity.yaml` 与 `user/.env`，权限必须为 `0600`。业务项目工作空间不得创建、读取或更新授权 `.env`。

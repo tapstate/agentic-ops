@@ -2,262 +2,209 @@ from __future__ import annotations
 
 import argparse
 import getpass
-import re
 import sys
 from pathlib import Path
 from typing import Any
 
-from ao_work.config import (
-    list_jira_connections,
-    load_jira_connection,
-    resolve_workspace_connection_id,
-    validate_workspace_jira_binding,
+from ao_work.installation import (
+    build_execution_identity,
+    install_user_dir,
+    load_install_credentials,
+    load_install_identity,
+    mask_email,
+    save_install_credentials,
+    save_install_identity,
+    validate_agent_id,
+    validate_jira_email,
 )
-from ao_work.config.env import (
-    read_env_file,
-    resolve_secret_pair_with_source,
-    update_workspace_env_file,
-)
-from ao_work.config.model import ProjectProfile
-from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_state.locking import TaskLock
-from ao_work.workspace import Workspace
-
-EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
-def configure_authorization_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
-    auth_parser = subparsers.add_parser("auth")
-    auth_systems = auth_parser.add_subparsers(dest="command", required=True)
-    jira_parser = auth_systems.add_parser("jira")
-    actions = jira_parser.add_subparsers(dest="action", required=True)
-
-    actions.add_parser("list")
-
-    show = actions.add_parser("show")
-    _connection_argument(show)
-
-    set_parser = actions.add_parser("set")
-    _connection_argument(set_parser)
-    set_parser.add_argument("--email")
-    set_parser.add_argument("--token-stdin", action="store_true")
-    set_parser.add_argument("--interactive", action="store_true")
-
-    remove = actions.add_parser("remove")
-    _connection_argument(remove)
-    remove.add_argument("--field", choices=("email", "token", "all"), required=True)
-
-    verify = actions.add_parser("verify")
-    _connection_argument(verify)
+def configure_authorization_parser(
+    subparsers: argparse._SubParsersAction[Any],
+) -> None:
+    auth = subparsers.add_parser("auth")
+    auth.add_argument("--show", action="store_true")
+    auth.add_argument("--agent-id")
+    auth.add_argument("--jira-email")
+    auth.add_argument("--git-name")
+    auth.add_argument("--git-email")
+    auth.add_argument("--github-login")
+    auth.add_argument("--token-stdin", action="store_true")
+    auth.add_argument("--non-interactive", action="store_true")
 
 
 def execute_authorization(
     args: argparse.Namespace,
-    workspace: Workspace,
     install_root: Path,
 ) -> dict[str, Any]:
-    if args.action == "list":
-        connections = list_jira_connections(install_root)
-        return {"connections": connections, "count": len(connections)}
+    install_user_dir(install_root)
+    if args.show:
+        if any(
+            (
+                args.agent_id,
+                args.jira_email,
+                args.git_name,
+                args.git_email,
+                args.github_login,
+                args.token_stdin,
+                args.non_interactive,
+            )
+        ):
+            raise _blocked(
+                "authorization_show_arguments_invalid",
+                "--show 不能与授权写入参数同时使用",
+                "请单独执行 ao-work auth --show",
+            )
+        return _show(install_root)
+    return _set(args, install_root)
 
-    connection_id = resolve_workspace_connection_id(
-        workspace,
-        install_root,
-        getattr(args, "connection_id", None),
-    )
-    connection = load_jira_connection(
-        install_root,
-        connection_id,
-        workspace_root=workspace.root,
-    )
-    validate_workspace_jira_binding(workspace, connection)
-    if args.action == "show":
-        return _show(connection, workspace)
-    if args.action == "set":
-        return _set(connection, workspace, args)
-    if args.action == "remove":
-        return _remove(connection, workspace, args.field)
-    if args.action == "verify":
-        status = _effective_status(connection, workspace)
-        email, token = _require_effective_credentials(status, connection)
-        client = JiraClient(
-            ProjectProfile(
-                profile_id="authorization-verification",
-                connection_id=connection.connection_id,
-                project_key="AUTH",
-                task_query="",
-            ),
-            UrllibJiraTransport(connection, email, token),
-        )
-        current_user = client.current_user()
-        validate_workspace_jira_binding(
-            workspace,
-            connection,
-            account_id=current_user,
-        )
-        fields = client.field_metadata()
+
+def _show(install_root: Path) -> dict[str, Any]:
+    try:
+        identity = load_install_identity(install_root)
+    except RuntimeErrorResult as error:
+        if error.code != "install_identity_missing":
+            raise
         return {
-            "connection_id": connection.connection_id,
-            "base_url": connection.base_url,
-            "verified": True,
-            "jira_user": current_user,
-            "field_count": len(fields),
-            "account_scope": "workspace",
-            "credential_source": status["credential_source"],
+            "configured": False,
+            "identity_configured": False,
+            "jira_credentials_configured": False,
+            "user_dir": str(install_user_dir(install_root)),
         }
-    raise RuntimeErrorResult(
-        code="authorization_action_unsupported",
-        message="不支持的授权操作",
-        status="blocked",
-        exit_code=EXIT_BLOCKED,
-        required_human_action="请使用 auth jira list、show、set、remove 或 verify",
-    )
-
-
-def _connection_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--connection-id", help=argparse.SUPPRESS)
-
-
-def _show(connection: Any, workspace: Workspace) -> dict[str, Any]:
-    status = _effective_status(connection, workspace)
+    credentials = load_install_credentials(install_root)
     return {
-        "connection_id": connection.connection_id,
-        "base_url": connection.base_url,
-        "account_scope": "workspace",
-        "email_configured": status["email"] is not None,
-        "token_configured": status["token"] is not None,
-        "credential_source": status["credential_source"],
-        "email_hint": _mask_email(status["email"]),
-        "ready": status["email"] is not None and status["token"] is not None,
+        "configured": credentials is not None,
+        "identity_configured": True,
+        "agent_id": identity["agent_id"],
+        "jira_email": mask_email(identity["jira_email"]),
+        "execution_identity": {
+            "git_author_name": identity["execution_identity"]["git_author_name"],
+            "git_author_email": mask_email(
+                identity["execution_identity"]["git_author_email"]
+            ),
+            "github_actor_login": identity["execution_identity"][
+                "github_actor_login"
+            ],
+        },
+        "jira_credentials_configured": credentials is not None,
+        "authorization_scope": "installation",
     }
 
 
-def _set(
-    connection: Any,
-    workspace: Workspace,
-    args: argparse.Namespace,
-) -> dict[str, Any]:
-    env_path = workspace.root / ".agentic-ops" / ".env"
-    current = read_env_file(env_path)
-    interactive = args.interactive or (
-        args.email is None and not args.token_stdin and sys.stdin.isatty()
+def _set(args: argparse.Namespace, install_root: Path) -> dict[str, Any]:
+    interactive = not args.non_interactive
+    if interactive and not sys.stdin.isatty():
+        raise _blocked(
+            "interactive_terminal_required",
+            "零参数授权配置需要终端输入",
+            "请直接在终端运行 ao-work auth，或提供完整非交互参数",
+        )
+
+    existing: dict[str, Any] = {}
+    try:
+        existing = load_install_identity(install_root)
+    except RuntimeErrorResult as error:
+        if error.code != "install_identity_missing":
+            raise
+
+    agent_id = args.agent_id or existing.get("agent_id") or ""
+    jira_email = args.jira_email or existing.get("jira_email") or ""
+    existing_execution = existing.get("execution_identity", {})
+    git_name = args.git_name or existing_execution.get("git_author_name") or ""
+    git_email = args.git_email or existing_execution.get("git_author_email") or ""
+    github_login = (
+        args.github_login or existing_execution.get("github_actor_login") or ""
     )
-    email = args.email
-    token: str | None = None
     if interactive:
-        current_email = current.get(connection.email_env, "")
-        sys.stderr.write(
-            f"AgenticOps：Jira email [{_mask_email(current_email) or '未设置'}]，留空表示保留： "
-        )
-        sys.stderr.flush()
-        entered_email = sys.stdin.readline().strip()
-        email = entered_email or None
-        entered_token = getpass.getpass(
-            "AgenticOps：Jira API token（留空表示保留）： ", stream=sys.stderr
-        )
-        token = entered_token or None
-    elif args.token_stdin:
-        token = sys.stdin.readline().rstrip("\r\n")
-        if not token:
-            raise _input_error("authorization_token_empty", "标准输入中的 Jira token 为空")
-
-    updates: dict[str, str | None] = {}
-    if email is not None:
-        normalized_email = email.strip()
-        if not EMAIL_PATTERN.fullmatch(normalized_email):
-            raise _input_error("authorization_email_invalid", "Jira email 格式无效")
-        updates[connection.email_env] = normalized_email
-    if token is not None:
-        if len(token.strip()) < 8:
-            raise _input_error("authorization_token_invalid", "Jira token 长度明显不合理")
-        updates[connection.token_env] = token.strip()
-    if not updates:
-        raise _input_error(
-            "authorization_no_change",
-            "没有提供需要设置或修改的授权字段",
+        agent_id = _prompt_required("agent_id（研发员标识，安装级唯一）", agent_id)
+        jira_email = _prompt_required("Jira email", jira_email)
+        git_name = _prompt_required("Git author/committer name", git_name)
+        git_email = _prompt_required("Git email", git_email)
+        github_login = _prompt_required("GitHub login", github_login)
+    if not all((agent_id, jira_email, git_name, git_email, github_login)):
+        raise _blocked(
+            "install_identity_incomplete",
+            "安装级授权缺少必填身份字段",
+            "请补齐 agent_id、Jira email、Git 身份与 GitHub login",
         )
 
-    with TaskLock(env_path.parent / ".authorization.lock", timeout=5):
-        credential_protection = update_workspace_env_file(workspace.root, updates)
-    status = _show(connection, workspace)
-    return {
-        **status,
-        "credential_protection": credential_protection,
-        "updated_fields": sorted(
-            "email" if name == connection.email_env else "token" for name in updates
-        ),
-        "next_action": "auth_jira_verify" if status["ready"] else "auth_jira_set",
-    }
-
-
-def _remove(
-    connection: Any,
-    workspace: Workspace,
-    field: str,
-) -> dict[str, Any]:
-    env_path = workspace.root / ".agentic-ops" / ".env"
-    updates: dict[str, str | None] = {}
-    if field in {"email", "all"}:
-        updates[connection.email_env] = None
-    if field in {"token", "all"}:
-        updates[connection.token_env] = None
-    with TaskLock(env_path.parent / ".authorization.lock", timeout=5):
-        credential_protection = update_workspace_env_file(workspace.root, updates)
-    status = _show(connection, workspace)
-    return {
-        **status,
-        "credential_protection": credential_protection,
-        "removed_fields": [field] if field != "all" else ["email", "token"],
-    }
-
-
-def _effective_status(connection: Any, workspace: Workspace) -> dict[str, Any]:
-    email, token, credential_source = resolve_secret_pair_with_source(
-        connection.email_env,
-        connection.token_env,
-        workspace.root / ".agentic-ops" / ".env",
+    normalized_agent_id = validate_agent_id(agent_id)
+    normalized_jira_email = validate_jira_email(jira_email)
+    execution_identity = build_execution_identity(
+        git_name,
+        git_email,
+        github_login,
     )
+    token: str | None = None
+    if args.token_stdin:
+        token = sys.stdin.readline().rstrip("\r\n")
+    elif interactive:
+        token = getpass.getpass(
+            "AgenticOps：Jira API token：",
+            stream=sys.stderr,
+        ).strip()
+    if not token:
+        raise _blocked(
+            "authorization_token_empty",
+            "Jira API token 不能为空",
+            "请重新运行 ao-work auth 并通过隐藏输入或安全标准输入提供 token",
+        )
+    if len(token.strip()) < 8:
+        raise _blocked(
+            "authorization_token_invalid",
+            "Jira token 长度明显不合理",
+            "请重新运行 ao-work auth 并输入当前 Jira 账户的 API token",
+        )
+
+    user_dir = install_user_dir(install_root)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    with TaskLock(user_dir / ".authorization.lock", timeout=5):
+        save_install_identity(
+            install_root,
+            {
+                "agent_id": normalized_agent_id,
+                "jira_email": normalized_jira_email,
+                "execution_identity": execution_identity,
+            },
+        )
+        save_install_credentials(install_root, normalized_jira_email, token.strip())
     return {
-        "email": email,
-        "token": token,
-        "credential_source": credential_source,
+        "configured": True,
+        "identity_configured": True,
+        "agent_id": normalized_agent_id,
+        "jira_email": mask_email(normalized_jira_email),
+        "execution_identity": {
+            "git_author_name": execution_identity["git_author_name"],
+            "git_author_email": mask_email(execution_identity["git_author_email"]),
+            "github_actor_login": execution_identity["github_actor_login"],
+        },
+        "jira_credentials_configured": True,
+        "authorization_scope": "installation",
     }
 
 
-def _require_effective_credentials(
-    status: dict[str, Any], connection: Any
-) -> tuple[str, str]:
-    missing = []
-    if not status["email"]:
-        missing.append(connection.email_env)
-    if not status["token"]:
-        missing.append(connection.token_env)
-    if missing:
-        raise RuntimeErrorResult(
-            code="jira_credentials_missing",
-            message=f"Jira 授权尚未配置完整：{', '.join(missing)}",
-            status="blocked",
-            exit_code=EXIT_BLOCKED,
-            required_human_action="请在当前工作空间执行 ao-work auth jira set",
+def _prompt_required(label: str, default: str = "") -> str:
+    if default:
+        value = input(f"AgenticOps：{label} [{default}]：").strip() or default
+    else:
+        value = input(f"AgenticOps：{label}：").strip()
+    if not value:
+        raise _blocked(
+            "install_identity_incomplete",
+            f"缺少 {label}",
+            "请重新运行 ao-work auth 并补齐必填字段",
         )
-    return str(status["email"]), str(status["token"])
+    return value
 
 
-def _mask_email(value: str | None) -> str | None:
-    if not value or "@" not in value:
-        return None
-    local, domain = value.split("@", 1)
-    visible = local[:2] if len(local) > 2 else local[:1]
-    return f"{visible}{'*' * max(len(local) - len(visible), 1)}@{domain}"
-
-
-def _input_error(code: str, message: str) -> RuntimeErrorResult:
+def _blocked(code: str, message: str, action: str) -> RuntimeErrorResult:
     return RuntimeErrorResult(
         code=code,
         message=message,
         status="blocked",
         exit_code=EXIT_BLOCKED,
         retry_safe=True,
-        required_human_action="请修正授权输入后重试",
+        required_human_action=action,
     )

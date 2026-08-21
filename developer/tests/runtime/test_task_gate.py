@@ -41,9 +41,9 @@ class TaskGateTest(unittest.TestCase):
         config_path.write_text(
             json.dumps(
                 {
-                    "schema_version": 3,
+                    "schema_version": 4,
                     "workplane": "developer",
-                    "agent_id": "harsen-mini-test-bot",
+                    "install_identity_ref": "install:" + "a" * 64,
                     "source_root": str(self.source_root),
                 }
             ),

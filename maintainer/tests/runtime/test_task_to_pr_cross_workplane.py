@@ -35,7 +35,7 @@ class DeveloperResultToMaintainerAcceptanceTest(unittest.TestCase):
             produced = self._produce(Path(temporary), "early-blocked")
             self.assertEqual("early-blocked", produced["case"])
             self.assertEqual(
-                "jira_workspace_account_drift", produced["probe_error_code"]
+                "jira_probe_account_mismatch", produced["probe_error_code"]
             )
             self.assertEqual("blocked", produced["producer_result_status"])
 

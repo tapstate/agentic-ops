@@ -7,19 +7,20 @@
 | 工作面 | 版本化配置 | 本地配置与状态 | 禁止读取 |
 | --- | --- | --- | --- |
 | maintainer | `maintainer/standards/`、`maintainer/rules/` | `maintainer/.local/` | 业务项目凭证、developer 任务状态 |
-| developer | `developer/standards/`、`developer/rules/` | 当前业务工作空间 `.agentic-ops/` | maintainer 规则、故事确认和发布配置 |
+| developer | `developer/standards/`、`developer/rules/` | 安装目录 `user/` 与当前业务工作空间 `.agentic-ops/` | maintainer 规则、故事确认和发布配置 |
 
 `shared/` 不保存授权、secret、项目 profile、工作流决策或可变配置。
 
 ## 2. developer 配置分类
 
-- 项目工作空间配置：`.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 和受管配置文件，保存一名研发员的项目绑定。
+- 安装授权配置：`user/identity.yaml` 与 `user/.env`，保存当前 developer 安装唯一研发员的身份和凭证。
+- 项目工作空间配置：`.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 和受管配置文件，只保存项目绑定与安装身份引用。
 - 项目标准资产：`developer/standards/projects/<project>/`，保存项目字段、流程、仓库和审查映射。
 - 公司标准资产：`developer/standards/company/`，保存跨项目硬规定。
 - Connection：`developer/standards/connections/` 保存非密钥站点和 API 能力定义。
-- secret：只保存到当前业务项目工作空间的受保护凭证文件或后续受控凭据存储。
+- secret：只保存到当前 developer 安装的受保护 `user/.env` 或后续受控凭据存储。
 
-一个业务项目工作空间代表一名研发员并只维护一个 Jira 账户。`~/.agentic-ops` 不保存研发员身份，多个工作空间不互相继承凭证。
+一个 developer 安装代表一名研发员并只维护一个 Jira 账户；同一安装下的业务项目工作空间继承该身份和凭证，但项目配置相互隔离。不同研发员必须使用隔离安装。
 
 ## 3. 来源优先级
 
@@ -44,15 +45,14 @@ developer effective 配置顺序：
 
 Jira 邮箱和 token 必须来自同一显式来源。token 不得进入 YAML、命令行参数、标准资产、日志、事件或提交内容。
 
-授权通过 `ao-work auth jira` 管理：
+授权通过安装级单入口管理：
 
 ```sh
-ao-work auth jira show
-ao-work auth jira set
-ao-work auth jira verify
+ao-work auth
+ao-work auth --show
 ```
 
-普通用户不传 `--connection-id`；Connection 由 Project Profile 推导。多个未绑定站点或迁移场景才允许受控高级选择。
+`ao-work auth` 不选择 Connection 或 Project；Connection 由业务工作空间的 Project Profile 推导，workspace/task Runtime 入口负责真实 Jira 身份和权限回读。
 
 ## 5. 统一读取入口
 
@@ -76,7 +76,7 @@ maintainer 功能只通过 `ao_maint` 读取源头仓库与 `maintainer/.local/`
 ## 7. 测试要求
 
 - maintainer/developer 配置模块无交叉导入。
-- 业务工作空间实际写入位置、权限和 schema 正确。
+- 安装授权与业务工作空间各自写入位置、权限和 schema 正确。
 - secret 不出现在 YAML、JSON 输出、stderr、日志、事件或提交中。
 - 不显式提供输入时不会读取本机环境或其它工作空间。
 - Connection、Profile、Project 与 Issue 不一致时返回 `jira_workspace_mismatch`。
