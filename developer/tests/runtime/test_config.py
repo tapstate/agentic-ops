@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from ao_work.config import load_jira_context, load_jira_connection, load_project_profile
-from ao_work.config.loader import _install_identity_ref
+from ao_work.config.loader import _install_identity_ref, install_entry_sha256
 from ao_work.installation import load_install_identity, save_install_credentials, save_install_identity
 from ao_work.output import RuntimeErrorResult
 from ao_work.workspace import resolve_developer_workspace
@@ -50,6 +50,10 @@ repositories:
 class ConfigTest(unittest.TestCase):
     def prepare(self, root: Path) -> tuple[Path, Path]:
         install = root / "install"
+        entry = install / "bin" / "ao-work"
+        entry.parent.mkdir(parents=True)
+        entry.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        entry.chmod(0o700)
         workspace = root / "workspace"
         connection = install / "developer" / "standards" / "connections" / "tap-cloud.yaml"
         profile = install / "developer" / "standards" / "projects" / "demo" / "profile.yaml"
@@ -83,7 +87,7 @@ class ConfigTest(unittest.TestCase):
         agent.write_text(
             json.dumps(
                 {
-                    "schema_version": 4,
+                    "schema_version": 5,
                     "workplane": "developer",
                     "project_profile": "demo",
                     "connection_id": "tap-cloud",
@@ -92,6 +96,8 @@ class ConfigTest(unittest.TestCase):
                     "install_identity_ref": _install_identity_ref(
                         install, load_install_identity(install)
                     ),
+                    "workspace_entry": ".agentic-ops/bin/ao-work",
+                    "install_entry_sha256": install_entry_sha256(install),
                     "jira_project": "TAP",
                     "source_root": str(source),
                     "repository": "tapdata/tapdata",
@@ -167,7 +173,7 @@ class ConfigTest(unittest.TestCase):
             agent_path.write_text(
                 json.dumps(
                     {
-                        "schema_version": 4,
+                        "schema_version": 5,
                         "workplane": "developer",
                         "project_profile": "demo",
                         "jira_base_url": "https://base.example.test",
@@ -175,6 +181,8 @@ class ConfigTest(unittest.TestCase):
                         "install_identity_ref": _install_identity_ref(
                             install, load_install_identity(install)
                         ),
+                        "workspace_entry": ".agentic-ops/bin/ao-work",
+                        "install_entry_sha256": install_entry_sha256(install),
                         "connection_id": "tap-cloud",
                         "jira_project": "TAP",
                         "source_root": str(Path(temporary) / "source"),

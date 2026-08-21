@@ -61,6 +61,10 @@ class WorkspaceInitTest(unittest.TestCase):
     def prepare_install(self, root: Path, *, with_install_identity: bool = False) -> Path:
         install = root / "install"
         self.install_root = install.resolve()
+        entry = install / "bin" / "ao-work"
+        entry.parent.mkdir(parents=True)
+        entry.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        entry.chmod(0o700)
         connection = install / "developer" / "standards" / "connections" / "tap-cloud.yaml"
         connection.parent.mkdir(parents=True)
         connection.write_text(
@@ -340,15 +344,18 @@ class WorkspaceInitTest(unittest.TestCase):
             )
             self.assertEqual("developer", agent["workplane"])
             self.assertEqual("tapdata", agent["project_profile"])
-            self.assertEqual(4, agent["schema_version"])
+            self.assertEqual(5, agent["schema_version"])
             self.assertEqual("tap-cloud", agent["connection_id"])
             self.assertNotIn("execution_identity", agent)
             self.assertEqual("https://jira.example.test", agent["jira_base_url"])
             self.assertEqual("jira.example.test", agent["jira_site"])
             self.assertNotIn("jira_account_id", agent)
+            self.assertEqual(".agentic-ops/bin/ao-work", agent["workspace_entry"])
+            self.assertTrue((workspace / agent["workspace_entry"]).is_file())
+            self.assertTrue((workspace / agent["workspace_entry"]).stat().st_mode & 0o100)
             env_path = workspace / ".agentic-ops" / ".env"
             self.assertFalse(env_path.exists())
-            self.assertIn("ao-work workspace preflight", (workspace / "AGENTS.md").read_text())
+            self.assertIn("./.agentic-ops/bin/ao-work workspace preflight", (workspace / "AGENTS.md").read_text())
             self.assertEqual(
                 {"configure-authorization", "initialize-project-workspace"},
                 {
@@ -1309,7 +1316,7 @@ class WorkspaceInitTest(unittest.TestCase):
             agent = json.loads(
                 (workspace / ".agentic-ops" / "agent.json").read_text(encoding="utf-8")
             )
-            self.assertEqual(4, agent["schema_version"])
+            self.assertEqual(5, agent["schema_version"])
             self.assertNotIn("jira_account_id", agent)
             self.assertNotIn("execution_identity", agent)
             self.assertTrue(str(agent["install_identity_ref"]).startswith("install:"))

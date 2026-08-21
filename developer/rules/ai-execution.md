@@ -1,6 +1,6 @@
 # AgenticOps `developer` 工作面规则
 
-- 只在独立业务项目 AI 工作空间执行，命令入口固定为 `ao-work`。
+- 只在独立业务项目 AI 工作空间执行，初始化后的命令入口固定为 `./.agentic-ops/bin/ao-work`；不得搜索 PATH 或其它安装目录。首次授权、初始化和恢复只能使用目标安装的绝对入口 `<install-root>/bin/ao-work`。
 - developer-only sparse checkout 是防误入边界。不得读取 `.git` 中的 maintainer 路径、执行 `git show <ref>:maintainer/...`、修改 sparse checkout 范围或恢复维护资产；需要内容级隔离时必须由维护者改用独立分发方案。
 - 只读取当前业务工作空间明确绑定的身份、授权、项目配置和任务状态。
 - 缺少当前工作面输入时停止，不得搜索或回退读取维护工作面、其它工作空间或本机历史配置。

@@ -88,7 +88,7 @@ AI 在 AgenticOps 源头仓库或其 worktree 启动时：
 
 ### 4.3 工作空间与源码目录拓扑
 
-业务项目 AI 工作空间是项目与任务容器（`.agentic-ops/`、`AGENTS.md` 管理块、`.agents/skills/`）；研发员身份与凭证属于 developer 安装。业务源码存放在中央源码池和任务级 worktree 中；`workspace init` 写入受管说明与项目映射，权威身份通过 schema v4 `install_identity_ref` 关联当前安装。
+业务项目 AI 工作空间是项目与任务容器（`.agentic-ops/`、`AGENTS.md` 管理块、`.agents/skills/`）；研发员身份与凭证属于 developer 安装。业务源码存放在中央源码池和任务级 worktree 中；`workspace init` 写入受管说明、项目映射和 `.agentic-ops/bin/ao-work` 本地入口，权威身份通过 schema v5 `install_identity_ref` 及安装入口摘要关联当前安装。
 
 四个实体在目录树上互不嵌套：AgenticOps 源头仓库、developer 安装目录、业务项目工作空间、业务源码池/任务 worktree。身份与凭证严格限定在安装 `user/`，项目和任务状态限定在工作空间 `.agentic-ops/`；源码目录只放业务 Git 仓库，不混入 AgenticOps 受管状态。
 

@@ -411,15 +411,15 @@ def validate_workspace_jira_binding(
 ) -> dict[str, Any]:
     agent = _load_agent_config(workspace)
     schema_version = agent.get("schema_version")
-    if schema_version != 4:
+    if schema_version != 5:
         raise RuntimeErrorResult(
             code="workspace_jira_identity_upgrade_required",
-            message="旧工作空间授权格式已停用，当前工作空间必须升级到 schema v4",
+            message="旧工作空间入口格式已停用，当前工作空间必须升级到 schema v5",
             status="blocked",
             exit_code=EXIT_BLOCKED,
             required_human_action=(
                 "请先执行 ao-work auth 配置安装级授权，再显式执行 "
-                "ao-work workspace init --confirm-existing-config"
+                "<安装目录>/bin/ao-work workspace init --confirm-existing-config"
             ),
         )
     expected = {
@@ -440,7 +440,7 @@ def validate_workspace_jira_binding(
     if install_root is None:
         raise RuntimeErrorResult(
             code="install_identity_missing",
-            message="schema v4 工作空间需要安装目录身份校验，但未提供 install_root",
+            message="schema v5 工作空间需要安装目录身份校验，但未提供 install_root",
             status="blocked",
             exit_code=EXIT_BLOCKED,
             required_human_action="请通过 ao-work 正确入口操作该工作空间",
@@ -450,7 +450,7 @@ def validate_workspace_jira_binding(
     if not isinstance(expected_ref, str) or not expected_ref.strip():
         raise RuntimeErrorResult(
             code="workspace_jira_identity_upgrade_required",
-            message="schema v4 工作空间缺少 install_identity_ref",
+            message="schema v5 工作空间缺少 install_identity_ref",
             status="blocked",
             exit_code=EXIT_BLOCKED,
             required_human_action="请重新执行 ao-work workspace init 完成身份绑定",
@@ -463,6 +463,42 @@ def validate_workspace_jira_binding(
             status="blocked",
             exit_code=EXIT_BLOCKED,
             required_human_action="请核对是否误用了其它研发员的安装目录或工作空间",
+        )
+    expected_entry = agent.get("workspace_entry")
+    if expected_entry != ".agentic-ops/bin/ao-work":
+        raise RuntimeErrorResult(
+            code="workspace_local_entry_missing",
+            message="工作空间缺少受管的本地 ao-work 入口绑定",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action=(
+                "请使用绑定安装的 <安装目录>/bin/ao-work workspace init "
+                "--confirm-existing-config 重新生成本地入口"
+            ),
+        )
+    expected_entry_hash = agent.get("install_entry_sha256")
+    if not isinstance(expected_entry_hash, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", expected_entry_hash
+    ):
+        raise RuntimeErrorResult(
+            code="workspace_local_entry_missing",
+            message="工作空间缺少安装入口完整性摘要",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action=(
+                "请使用绑定安装的 <安装目录>/bin/ao-work workspace init "
+                "--confirm-existing-config 重新生成本地入口"
+            ),
+        )
+    if install_entry_sha256(install_root) != expected_entry_hash:
+        raise RuntimeErrorResult(
+            code="install_entry_drift",
+            message="当前安装的 ao-work 入口与工作空间绑定摘要不一致",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action=(
+                "请停止使用当前入口；使用原绑定安装重新初始化，或核对安装更新后重新绑定"
+            ),
         )
     return agent
 
@@ -490,6 +526,31 @@ def _install_identity_ref(install_root: Path, identity: dict[str, Any]) -> str:
         ).encode("utf-8")
     ).hexdigest()
     return f"install:{fingerprint}"
+
+
+def install_entry_sha256(install_root: Path) -> str:
+    """返回 developer 安装入口的内容摘要，拒绝符号链接和异常文件。"""
+    import hashlib
+
+    entry = install_root.expanduser().resolve() / "bin" / "ao-work"
+    if entry.is_symlink() or not entry.is_file():
+        raise RuntimeErrorResult(
+            code="install_entry_missing",
+            message="developer 安装缺少安全的 bin/ao-work 入口",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请重新完成 developer 安装后再初始化或使用工作空间",
+        )
+    try:
+        return hashlib.sha256(entry.read_bytes()).hexdigest()
+    except OSError as error:
+        raise RuntimeErrorResult(
+            code="install_entry_missing",
+            message="无法读取 developer 安装的 bin/ao-work 入口",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            required_human_action="请修复或重新完成 developer 安装后再试",
+        ) from error
 
 
 def validate_workspace_project_binding(

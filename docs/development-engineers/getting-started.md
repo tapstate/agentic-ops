@@ -53,20 +53,20 @@ printf '%s\n' "$JIRA_API_TOKEN" | ao-work auth \
   --non-interactive
 ```
 
-交互配置直接运行 `ao-work auth`，使用 `ao-work auth --show` 回读脱敏身份。安装脚本也可以接收相同授权参数，但只负责调用 Runtime。新工作空间从当前安装继承身份与凭证并生成 schema v4 绑定。
+交互配置使用目标安装的 `<install-root>/bin/ao-work auth`，并以 `<install-root>/bin/ao-work auth --show` 回读脱敏身份。安装脚本也可以接收相同授权参数，但只负责调用 Runtime。新工作空间从当前安装继承身份与凭证并生成 schema v5 绑定与本地入口。
 
 ## 3. 初始化业务项目工作空间
 
 ```sh
 mkdir -p ~/agentic-ops-tapdata
 cd ~/agentic-ops-tapdata
-ao-work workspace init
+<install-root>/bin/ao-work workspace init
 ```
 
 从其它目录操作时显式指定工作空间：
 
 ```sh
-ao-work --workspace-root ~/agentic-ops-tapdata workspace init
+<install-root>/bin/ao-work --workspace-root ~/agentic-ops-tapdata workspace init
 ```
 
 首次初始化确认：
@@ -96,10 +96,10 @@ ao-work --workspace-root ~/agentic-ops-tapdata workspace init
 授权完成后，用户只需表达“接管任务”；当前 Runtime 原子入口为：
 
 ```sh
-ao-work takeover TAP-12289
+./.agentic-ops/bin/ao-work takeover TAP-12289
 ```
 
-Runtime 根据用户明确的接管指令和当前 run 在内部绑定稳定授权摘要，用户不查看或确认。Runtime 自动判断新接管、接纳存量或恢复，完成中文 Comment、必要的 Status transition 和本地状态回读；非新接管明文留痕。无编号执行 `ao-work takeover` 时只读列出候选，必须由研发工程师选择。
+Runtime 根据用户明确的接管指令和当前 run 在内部绑定稳定授权摘要，用户不查看或确认。Runtime 自动判断新接管、接纳存量或恢复，完成中文 Comment、必要的 Status transition 和本地状态回读；非新接管明文留痕。无编号执行 `./.agentic-ops/bin/ao-work takeover` 时只读列出候选，必须由研发工程师选择。
 
 AI 随后把分析写入工作空间普通 JSON，并依次调用：
 

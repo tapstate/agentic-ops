@@ -780,6 +780,10 @@ class DeveloperProducer:
             "developer@example.test",
             "test-only-redacted-token",
         )
+        entry = self.install / "bin" / "ao-work"
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        entry.chmod(0o700)
         self.install_identity_ref = _install_identity_ref(
             self.install,
             load_install_identity(self.install),
@@ -793,9 +797,13 @@ class DeveloperProducer:
         self._write_json(
             state / "agent.json",
             {
-                "schema_version": 4,
+                "schema_version": 5,
                 "workplane": "developer",
                 "install_identity_ref": self.install_identity_ref,
+                "workspace_entry": ".agentic-ops/bin/ao-work",
+                "install_entry_sha256": hashlib.sha256(
+                    b"#!/usr/bin/env bash\nexit 0\n"
+                ).hexdigest(),
                 "project_profile": "tapdata",
                 "connection_id": "test-jira",
                 "jira_base_url": "https://jira.example.test",
