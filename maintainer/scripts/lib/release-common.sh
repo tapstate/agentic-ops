@@ -410,6 +410,11 @@ release_run_full_verification() {
   local head="$2"
   local temp_root
   local worktree_path
+  local verification_log
+  local failure_meta
+  local failure_log=""
+  local failed_check="unknown"
+  local failed_status="1"
   local uv_bin="${AGENTIC_OPS_UV:-}"
   local verification_status=0
 
@@ -423,6 +428,9 @@ release_run_full_verification() {
 
   temp_root="$(mktemp -d)"
   worktree_path="$temp_root/worktree"
+  verification_log="$temp_root/full-verification.log"
+  failure_meta="$temp_root/failure.meta"
+  : > "$verification_log"
   if ! git -C "$repo_root" worktree add --detach "$worktree_path" "$head" >/dev/null 2>&1; then
     rm -rf "$temp_root"
     release_fail "release_worktree_failed" "verification" "无法创建发布验证 worktree" "请检查 Git worktree 状态后重试"
@@ -431,25 +439,63 @@ release_run_full_verification() {
 
   (
     cd "$worktree_path"
-    "$uv_bin" sync --locked --project maintainer --python 3.12 &&
-      "$uv_bin" sync --locked --project developer --python 3.12 &&
-      AGENTIC_OPS_MAINTAINER_TEST_PYTHON="$worktree_path/maintainer/.venv/bin/python" \
-        AGENTIC_OPS_DEVELOPER_TEST_PYTHON="$worktree_path/developer/.venv/bin/python" \
-        bash maintainer/scripts/test-python-runtime.sh &&
-      bash maintainer/scripts/test-resources.sh &&
-      AGENTIC_OPS_TEST_PYTHON="$worktree_path/developer/.venv/bin/python" \
-        bash developer/tests/bootstrap/test_install_boundary.sh &&
-      if [ "${AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING:-0}" != "1" ]; then
-        AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING=1 \
-          AGENTIC_OPS_UV="$uv_bin" \
-          bash maintainer/scripts/test-release-workflow.sh
+
+    run_verification_step() {
+      local check_id="$1"
+      local step_log="$temp_root/$check_id.log"
+      local step_status
+      shift
+      printf '[%s]\n' "$check_id" >> "$verification_log"
+      if "$@" >"$step_log" 2>&1; then
+        step_status=0
+      else
+        step_status=$?
       fi
+      cat "$step_log"
+      cat "$step_log" >> "$verification_log"
+      if [ "$step_status" -ne 0 ]; then
+        printf '%s\t%s\n' "$check_id" "$step_status" > "$failure_meta"
+        return "$step_status"
+      fi
+    }
+
+    run_verification_step maintainer_runtime_sync \
+      "$uv_bin" sync --locked --project maintainer --python 3.12 || exit $?
+    run_verification_step developer_runtime_sync \
+      "$uv_bin" sync --locked --project developer --python 3.12 || exit $?
+    run_verification_step python_runtime env \
+      AGENTIC_OPS_MAINTAINER_TEST_PYTHON="$worktree_path/maintainer/.venv/bin/python" \
+      AGENTIC_OPS_DEVELOPER_TEST_PYTHON="$worktree_path/developer/.venv/bin/python" \
+      bash maintainer/scripts/test-python-runtime.sh || exit $?
+    run_verification_step resource_contracts \
+      bash maintainer/scripts/test-resources.sh || exit $?
+    run_verification_step developer_install_boundary env \
+      AGENTIC_OPS_TEST_PYTHON="$worktree_path/developer/.venv/bin/python" \
+      bash developer/tests/bootstrap/test_install_boundary.sh || exit $?
+    if [ "${AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING:-0}" != "1" ]; then
+      run_verification_step release_workflow env \
+        AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING=1 \
+        AGENTIC_OPS_UV="$uv_bin" \
+        bash maintainer/scripts/test-release-workflow.sh || exit $?
+    fi
   ) || verification_status=$?
 
+  if [ "$verification_status" -ne 0 ]; then
+    if [ -f "$failure_meta" ]; then
+      IFS=$'\t' read -r failed_check failed_status < "$failure_meta"
+    else
+      failed_status="$verification_status"
+    fi
+    failure_log="$(mktemp "${TMPDIR:-/tmp}/agentic-ops-release-verification.XXXXXX")" || failure_log=""
+    if [ -n "$failure_log" ]; then
+      cp "$verification_log" "$failure_log" || failure_log=""
+    fi
+  fi
   git -C "$repo_root" worktree remove --force "$worktree_path" >/dev/null 2>&1 || true
   rm -rf "$temp_root"
   if [ "$verification_status" -ne 0 ]; then
-    release_fail "release_verification_failed" "verification" "固定完整发布验证失败" "请修复失败项并从 publish 重新执行，当前尚未产生远端写入"
+    printf '{"ok":false,"operation":"source_release","code":"release_verification_failed","current_stage":"verification","message":"固定完整发布验证失败：%s（退出码 %s）","failed_check":"%s","exit_code":%s,"log_file":"%s","required_human_action":"请查看 log_file，修复 %s 后重新执行原命令；当前尚未产生远端写入"}\n' \
+      "$failed_check" "$failed_status" "$failed_check" "$failed_status" "${failure_log:-unavailable}" "$failed_check" >&2
     return 1
   fi
   RELEASE_VERIFIED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -765,7 +811,10 @@ release_find_merged_pr() {
   local preferred_merge="$1" preferred_tag="$2" rows number url state base head merge
   rows="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list --repo tapstate/agentic-ops --base main \
     --state merged --limit 100 --json number,url,state,baseRefName,headRefOid,mergeCommit \
-    --jq '.[] | [.number,.url,.state,.baseRefName,.headRefOid,.mergeCommit.oid] | @tsv' 2>/dev/null)" || return 1
+    --jq '.[] | [.number,.url,.state,.baseRefName,.headRefOid,.mergeCommit.oid] | @tsv' 2>/dev/null)" || {
+    release_fail "release_pr_state_read_failed" "state_inspection" "无法读取已合并 PR 状态" "请检查 GitHub 权限和网络后重新执行 release.sh inspect；不得据此认定 PR 缺失"
+    return 2
+  }
   while IFS=$'\t' read -r number url state base head merge; do
     [ -n "$number" ] || continue
     if [ "$merge" = "$preferred_merge" ] || { [ -n "$preferred_tag" ] && [ "$head" = "$preferred_tag" ]; }; then
@@ -810,7 +859,7 @@ release_candidate_is_in_main() {
 release_inspect_state() {
   local repo_root="$1" version="$2"
   local release_branch="release/$version"
-  local develop_head main_head local_tag local_release remote_release release_head state next_command open_pr_status
+  local develop_head main_head local_tag local_release remote_release release_head state next_command open_pr_status merged_pr_status
 
   git -C "$repo_root" fetch origin main develop >/dev/null 2>&1 || {
     release_fail "release_state_fetch_failed" "state_inspection" "无法刷新发布状态所需远端引用" "请检查网络后重新执行 release.sh inspect"
@@ -832,9 +881,13 @@ release_inspect_state() {
     if [ "$RELEASE_REMOTE_TAG_ANNOTATED" != "true" ] || ! git -C "$repo_root" merge-base --is-ancestor "$RELEASE_REMOTE_TAG_COMMIT" origin/main; then
       state="release_remote_tag_conflict"; next_command=""
     elif [ "$local_tag" != "$RELEASE_REMOTE_TAG_COMMIT" ] || [ "$(git -C "$repo_root" cat-file -t "refs/tags/$version" 2>/dev/null || true)" != "tag" ]; then
-      if release_find_merged_pr "$release_head" "$RELEASE_REMOTE_TAG_COMMIT"; then
+      merged_pr_status=0
+      release_find_merged_pr "$release_head" "$RELEASE_REMOTE_TAG_COMMIT" || merged_pr_status=$?
+      if [ "$merged_pr_status" -eq 0 ]; then
         state="release_local_tag_repair_required"
         next_command="maintainer/scripts/release.sh recover --version $version --merged-pr $RELEASE_RECOVERY_PR_NUMBER --allow-soft-gate"
+      elif [ "$merged_pr_status" -eq 2 ]; then
+        return 1
       else
         state="release_merged_pr_missing"; next_command=""
       fi
@@ -842,13 +895,17 @@ release_inspect_state() {
       state="release_completed"; next_command=""
     fi
   elif git -C "$repo_root" merge-base --is-ancestor "$release_head" origin/main; then
-    if release_find_merged_pr "$release_head" "$local_tag"; then
+    merged_pr_status=0
+    release_find_merged_pr "$release_head" "$local_tag" || merged_pr_status=$?
+    if [ "$merged_pr_status" -eq 0 ]; then
       if [ "$local_tag" != "$RELEASE_RECOVERY_PR_HEAD" ]; then
         state="release_local_tag_repair_required"
       else
         state="release_candidate_already_in_main"
       fi
       next_command="maintainer/scripts/release.sh recover --version $version --merged-pr $RELEASE_RECOVERY_PR_NUMBER --allow-soft-gate"
+    elif [ "$merged_pr_status" -eq 2 ]; then
+      return 1
     else
       state="release_merged_pr_missing"; next_command=""
     fi
