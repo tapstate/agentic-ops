@@ -57,6 +57,21 @@ esac
 EOF
 chmod 0755 "$fake_gh"
 
+# 远端读取失败与 develop 明确不存在必须分开处理；读取失败时不得建议创建分支。
+unreadable_remote="$test_root/unreadable-remote"
+git init "$unreadable_remote" >/dev/null
+git -C "$unreadable_remote" remote add origin "$test_root/does-not-exist.git"
+if (
+  . "$repo_root/maintainer/scripts/lib/development-workflow.sh"
+  workflow_check_develop "$unreadable_remote"
+); then
+  fail "无法读取 origin 时不得报告 develop 已存在"
+else
+  unreadable_status=$?
+fi
+test "$unreadable_status" -eq 2 ||
+  fail "无法读取 origin 时必须返回独立状态 2"
+
 fake_uv="$test_root/uv"
 cat > "$fake_uv" <<'EOF'
 #!/usr/bin/env bash
@@ -150,6 +165,7 @@ cat > "$fixture/$verification" <<EOF
 set -euo pipefail
 printf '%s\n' '$verification_id' >> "\${FAKE_VERIFY_LOG:?}"
 if [ "\${FAKE_VERIFY_FAIL_ID:-}" = '$verification_id' ]; then
+  printf 'fixture verification failure: %s\n' '$verification_id' >&2
   exit 17
 fi
 EOF
@@ -640,6 +656,19 @@ grep -q 'release_verification_failed' "$test_root/failed-prepare.err" || {
   cat "$test_root/failed-prepare.err" >&2
   fail "release prepare 验证失败未返回稳定失败码"
 }
+grep -q '"failed_check":"resource_contracts"' "$test_root/failed-prepare.err" ||
+  fail "release prepare 验证失败未输出精确失败项"
+grep -q '"exit_code":17' "$test_root/failed-prepare.err" ||
+  fail "release prepare 验证失败未输出子命令退出码"
+grep -q '重新执行原命令' "$test_root/failed-prepare.err" ||
+  fail "release prepare 验证失败仍错误要求固定从 publish 重试"
+failed_verification_log="$(sed -n 's/.*"log_file":"\([^"]*\)".*/\1/p' "$test_root/failed-prepare.err" | tail -n 1)"
+test -n "$failed_verification_log" && test -f "$failed_verification_log" ||
+  fail "release prepare 验证失败未保留可读取日志"
+grep -q 'fixture verification failure: maintainer-scripts-test-resources.sh' \
+  "$failed_verification_log" ||
+  fail "release prepare 验证日志不包含具体子测试失败"
+rm -f "$failed_verification_log"
 test -z "$(git -C "$fixture" tag --list v9.6)" ||
   fail "release prepare 验证失败前不得创建版本 Tag"
 expected_failed_prepare="$(printf '%s\n' \
@@ -951,6 +980,31 @@ export FAKE_RECOVERY_PR_URL=https://example.test/pull/77
 export FAKE_RECOVERY_PR_HEAD="$recovery_candidate"
 export FAKE_RECOVERY_MERGE_COMMIT="$recovery_merge"
 export FAKE_RECOVERY_BASE_GH="$fake_gh"
+
+failing_pr_gh="$test_root/failing-pr-gh"
+cat > "$failing_pr_gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "pr" ] && [ "${2:-}" = "list" ]; then
+  printf 'simulated GitHub PR read failure\n' >&2
+  exit 23
+fi
+exec "${FAKE_RECOVERY_BASE_GH:?}" "$@"
+EOF
+chmod 0755 "$failing_pr_gh"
+
+if (
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$failing_pr_gh" \
+    maintainer/scripts/release.sh inspect --version v9.7 --allow-soft-gate
+) >"$test_root/recovery-pr-read-failed.out" 2>"$test_root/recovery-pr-read-failed.err"; then
+  fail "inspect 在 merged PR 查询失败时不得报告成功"
+fi
+grep -q 'release_pr_state_read_failed' "$test_root/recovery-pr-read-failed.err" ||
+  fail "inspect 未区分 merged PR 查询失败与 PR 缺失"
+if grep -q 'release_merged_pr_missing' "$test_root/recovery-pr-read-failed.out"; then
+  fail "inspect 把 merged PR 查询失败误报为 PR 缺失"
+fi
 
 (
   cd "$fixture"
