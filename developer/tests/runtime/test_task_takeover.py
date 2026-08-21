@@ -431,6 +431,60 @@ class TaskTakeoverTest(unittest.TestCase):
         code, payload, stderr = self.run_cli(transport)
         self.assertEqual(2, code, (payload, stderr))
         self.assertEqual("owner_mismatch", payload["code"])
+        self.assertEqual([], transport.comments)
+        self.assertIsNone(transport.transition_executed)
+        self.assertFalse((self.workspace / ".agentic-ops" / "tasks").exists())
+
+    def test_takeover_blocks_unassigned_issue_before_side_effects(self) -> None:
+        transport = TakeoverTransport(assignee="")
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("assignee_unassigned", payload["code"])
+        self.assertEqual("Jira /myself", payload["identity_source"])
+        self.assertEqual([], transport.comments)
+        self.assertIsNone(transport.transition_executed)
+        self.assertFalse((self.workspace / ".agentic-ops" / "tasks").exists())
+
+    def test_accept_existing_task_blocks_owner_mismatch_before_side_effects(self) -> None:
+        transport = TakeoverTransport(assignee="someone-else", status="正在进行")
+        code, payload, stderr = self.run_cli(transport)
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("owner_mismatch", payload["code"])
+        self.assertEqual([], transport.comments)
+        self.assertIsNone(transport.transition_executed)
+        self.assertFalse((self.workspace / ".agentic-ops" / "tasks").exists())
+
+    def test_resume_takeover_blocks_owner_change_without_new_side_effects(self) -> None:
+        transport = TakeoverTransport(status="正在进行")
+        first_code, first_payload, first_stderr = self.run_cli(transport)
+        self.assertEqual(0, first_code, (first_payload, first_stderr))
+        comment_count = len(transport.comments)
+        transition_count = transport.requests.count(
+            ("POST", "/rest/api/3/issue/TAP-12289/transitions")
+        )
+        task_state = self.workspace / ".agentic-ops" / "tasks" / "TAP-12289"
+        before = {
+            path.relative_to(task_state).as_posix(): path.read_text(encoding="utf-8")
+            for path in task_state.rglob("*")
+            if path.is_file()
+        }
+
+        transport.assignee = "someone-else"
+        code, payload, stderr = self.run_cli(transport)
+
+        self.assertEqual(2, code, (payload, stderr))
+        self.assertEqual("owner_mismatch", payload["code"])
+        self.assertEqual(comment_count, len(transport.comments))
+        self.assertEqual(
+            transition_count,
+            transport.requests.count(("POST", "/rest/api/3/issue/TAP-12289/transitions")),
+        )
+        after = {
+            path.relative_to(task_state).as_posix(): path.read_text(encoding="utf-8")
+            for path in task_state.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(before, after)
 
     def _candidate_issue(
         self,

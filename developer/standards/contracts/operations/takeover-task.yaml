@@ -1,6 +1,6 @@
 operation: takeover_task
 workplane: developer
-version: 5
+version: 6
 purpose: 研发工程师明确要求接管任务后，由 Runtime 自动完成新接管、接纳存量或恢复留痕。
 task_type: task_takeover
 allowed_stages:
@@ -130,6 +130,7 @@ post_takeover_analysis:
   missing_behavior: 自动从 Jira、Project Profile、源码和 Runtime 回读补全；事实冲突或必须由人取舍时进入风险决策。
 failure:
   codes:
+    - assignee_unassigned
     - owner_mismatch
     - assignee_changed
     - agent_identity_missing

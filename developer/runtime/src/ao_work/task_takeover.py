@@ -41,6 +41,28 @@ def _blocked(code: str, message: str, action: str, **details: Any) -> RuntimeErr
     )
 
 
+def _validate_takeover_assignee(issue: JiraIssue, current_account_id: str) -> None:
+    if not issue.assignee:
+        raise _blocked(
+            "assignee_unassigned",
+            "Jira 任务未设置经办人，无法接管",
+            "请先按 Jira 项目流程设置经办人，再由该研发员工作空间接管",
+            issue_key=issue.key,
+            current_account_id=current_account_id,
+            identity_source="Jira /myself",
+        )
+    if issue.assignee != current_account_id:
+        raise _blocked(
+            "owner_mismatch",
+            "当前工作空间 Jira 账户不是任务经办人，无法接管",
+            "请在 Jira 按项目流程调整经办人，或切换到正确研发员工作空间",
+            issue_key=issue.key,
+            current_account_id=current_account_id,
+            assignee_account_id=issue.assignee,
+            identity_source="Jira /myself",
+        )
+
+
 def execute_task_takeover(
     workspace: Workspace,
     install_root: Path,
@@ -87,12 +109,7 @@ def execute_task_takeover(
 
     agent_id = _default_agent_id(install_root)
     issue = service.inspect_issue(issue_key)
-    if issue.assignee != account["account_id"]:
-        raise _blocked(
-            "owner_mismatch",
-            "当前工作空间 Jira 账户不是任务经办人，无法接管",
-            "请在 Jira 按项目流程调整经办人，或切换到正确研发员工作空间",
-        )
+    _validate_takeover_assignee(issue, account["account_id"])
 
     existing_state = _existing_state(store, issue.key)
     if existing_state is None:
