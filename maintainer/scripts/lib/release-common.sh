@@ -1277,6 +1277,7 @@ release_sync_develop_to_main() {
   local remote_main
   local remote_develop
   local local_develop
+  local current_branch
 
   if ! git -C "$repo_root" fetch origin main develop >/dev/null 2>&1; then
     release_fail "release_develop_sync_fetch_failed" "develop_sync" "无法刷新 origin/main 或 origin/develop" "请检查网络和远端权限后重新执行 publish"
@@ -1285,6 +1286,7 @@ release_sync_develop_to_main() {
   remote_main="$(git -C "$repo_root" rev-parse refs/remotes/origin/main)"
   remote_develop="$(git -C "$repo_root" rev-parse refs/remotes/origin/develop 2>/dev/null || true)"
   local_develop="$(git -C "$repo_root" rev-parse develop)"
+  current_branch="$(git -C "$repo_root" branch --show-current)"
   if [ -z "$remote_develop" ]; then
     release_fail "release_develop_sync_missing" "develop_sync" "远端 develop 不存在，无法闭环发布分支" "请恢复受管的 develop 分支后重新执行 publish"
     return 1
@@ -1301,8 +1303,17 @@ release_sync_develop_to_main() {
     release_fail "release_develop_sync_local_diverged" "develop_sync" "本地 develop 已偏离 origin/main，不能自动快进" "请人工核查本地开发历史后重新执行 publish"
     return 1
   fi
+  if [ "$current_branch" != "develop" ] &&
+    git -C "$repo_root" worktree list --porcelain | grep -Fx 'branch refs/heads/develop' >/dev/null 2>&1; then
+    release_fail "release_develop_sync_worktree_busy" "develop_sync" "develop 已在其它 worktree 检出，无法安全完成本地闭环" "请关闭该 worktree 中的 develop 工作面后重新执行 publish"
+    return 1
+  fi
   if ! git -C "$repo_root" push origin "$remote_main:refs/heads/develop"; then
     release_fail "release_develop_sync_push_failed" "develop_sync" "无法将 develop 快进到已验证的 origin/main" "请检查 develop 保护规则和远端状态后重新执行 publish"
+    return 1
+  fi
+  if [ "$current_branch" != "develop" ] && ! git -C "$repo_root" switch develop >/dev/null; then
+    release_fail "release_develop_sync_switch_failed" "develop_sync" "远端 develop 已更新，但无法切回本地 develop" "请核查本地 worktree 状态；不要重复推送或改写远端历史"
     return 1
   fi
   if ! git -C "$repo_root" merge --ff-only "$remote_main" >/dev/null; then
@@ -1678,6 +1689,33 @@ release_require_main_base() {
   return 1
 }
 
+release_require_hotfix_develop_lineage() {
+  local repo_root="$1"
+  local hotfix_head
+  local remote_hotfix_head
+  local branch
+
+  if ! git -C "$repo_root" fetch origin main develop >/dev/null 2>&1; then
+    release_fail "hotfix_base_fetch_failed" "hotfix_base" "无法刷新 origin/main 或 origin/develop" "请检查网络和远端权限后重试"
+    return 1
+  fi
+  hotfix_head="$(git -C "$repo_root" rev-parse HEAD)"
+  if git -C "$repo_root" merge-base --is-ancestor refs/remotes/origin/develop "$hotfix_head" &&
+    git -C "$repo_root" merge-base --is-ancestor refs/remotes/origin/main refs/remotes/origin/develop; then
+    return 0
+  fi
+  if git -C "$repo_root" merge-base --is-ancestor "$hotfix_head" refs/remotes/origin/main &&
+    git -C "$repo_root" merge-base --is-ancestor refs/remotes/origin/develop refs/remotes/origin/main; then
+    branch="$(git -C "$repo_root" branch --show-current)"
+    remote_hotfix_head="$(git -C "$repo_root" ls-remote --heads origin "refs/heads/$branch" 2>/dev/null | awk '{print $1}')"
+    if [ "$remote_hotfix_head" = "$hotfix_head" ]; then
+      return 0
+    fi
+  fi
+  release_fail "hotfix_develop_lineage_changed" "hotfix_base" "Hotfix 未包含最新 origin/develop，或 main/develop 已不满足单向快进关系" "请停止发布；不要自动 merge、rebase 或 cherry-pick，先人工核查并重新固定修复 HEAD"
+  return 1
+}
+
 release_find_iteration_tag() {
   local repo_root="$1"
   local candidate
@@ -1735,7 +1773,7 @@ release_write_hotfix_audit() {
   local branch="$5"
   local protection_mode="${6:-hard}"
   local payload
-  payload="$(printf '{"operation":"hotfix_publish","status":"completed","jira_id":"%s","version":"%s","branch":"%s","head":"%s","verified_at":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","protection_mode":"%s","next_action":"sync_hotfix_to_develop"}' \
-    "$jira_id" "$version" "$branch" "$head" "$RELEASE_VERIFIED_AT" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "$protection_mode")"
+  payload="$(printf '{"operation":"hotfix_publish","status":"completed","jira_id":"%s","version":"%s","branch":"%s","head":"%s","verified_at":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","develop_commit":"%s","tag_action":"none","protection_mode":"%s","next_action":"hotfix_completed"}' \
+    "$jira_id" "$version" "$branch" "$head" "$RELEASE_VERIFIED_AT" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "${RELEASE_DEVELOP_COMMIT:-}" "$protection_mode")"
   release_write_audit_json "$repo_root" "hotfix-$jira_id-$head.json" "$payload"
 }

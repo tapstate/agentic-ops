@@ -11,10 +11,10 @@
 - `main` 是稳定主分支，也是 GitHub 默认分支和安装脚本读取的分支。
 - `develop` 是日常开发分支。正常发布必须以完成验证的 `develop` HEAD 为来源，通过拉取请求合入 `main`。
 - `release/vX.Y` 是软门禁模式从已验证 `develop` HEAD 创建的固定发布分支，用于避免等待人工合并期间 `develop` 的后续提交改变发布内容。
-- `<user>/<jira-id>/fix-main` 是紧急修复分支，只能从最新 `origin/main` 创建，只能通过拉取请求合回 `main`。
+- `<user>/<jira-id>/fix-main` 是无 Tag 紧急修复分支，只能从包含当前 `origin/main` 的最新 `origin/develop` 创建，只能通过拉取请求合回 `main`。
 - `main` 禁止直接提交、直接推送、强制推送和删除。
 - 所有合入 `main` 的拉取请求使用 Merge commit，不要求 GitHub CI 或代码审查批准。
-- Hotfix 合入 `main` 后，由研发工程师人工决定如何把修复同步回 `develop`；脚本只提示，不自动回同步。
+- Hotfix 合入 `main` 后，脚本只允许将 `develop` 快进到已验证的 `origin/main` 并切回 `develop`；无法快进时失败关闭。
 
 ## 3. 版本与 Tag
 
@@ -141,11 +141,11 @@ maintainer/scripts/hotfix.sh create --jira-id AO-123
 顺序：
 
 1. 要求当前仓库工作区干净。
-2. fetch `origin/main`。
+2. fetch `origin/main` 和 `origin/develop`，确认 `develop` 包含当前 `main`。
 3. 从 Git 配置读取用户名；无法读取时要求显式提供。
 4. 校验 Jira ID 格式和分支名安全性。
 5. 确认本地和远端不存在同名分支。
-6. 从最新 `origin/main` 创建 `<user>/<jira-id>/fix-main`。
+6. 从最新 `origin/develop` 创建 `<user>/<jira-id>/fix-main`，使修复和已有 develop 变更保持单向进入 `main`。
 
 ### 6.2 准备修复产物
 
@@ -158,7 +158,7 @@ maintainer/scripts/hotfix.sh prepare
 顺序：
 
 1. 校验当前分支符合 `<user>/<jira-id>/fix-main`。
-2. 校验分支以 `origin/main` 为基础且工作区干净。
+2. 校验分支包含最新 `origin/develop`、`develop` 包含当前 `main` 且工作区干净。
 3. 自动解析 `main` 历史中最近的二段式 `vX.Y`。
 4. 执行 maintainer/developer Runtime、工作面边界和 developer-only 安装验证。
 5. 输出固定修复 HEAD 和验证清单，停止在研发工程师审查和提交点。
@@ -190,8 +190,9 @@ maintainer/scripts/hotfix.sh publish --allow-soft-gate
 7. 硬门禁模式使用 Merge commit 启用 Auto-merge 并等待合并。
 8. 软门禁模式记录固定修复 HEAD，创建 PR 后返回状态码 `2`，等待研发工程师在 GitHub 页面选择 Merge commit 人工合并。
 9. 软门禁人工合并后重新执行同一条 `publish` 命令，再次完整验证固定修复 HEAD；HEAD 漂移或 Squash/Rebase 合并时停止发布。
-10. 验证 `origin/main` 包含固定修复 HEAD。
-11. 写入结构化审计并提示研发工程师人工把修复同步回 `develop`。
+10. 验证 `origin/main` 包含固定修复 HEAD，且 PR 使用保留该 HEAD 的 Merge commit。
+11. 将远端和本地 `develop` 快进到已验证的 `origin/main` 并切回 `develop`；快进不成立时失败关闭。
+12. 写入包含 `develop_commit` 和 `tag_action=none` 的结构化审计；不创建、移动或推送 Tag。
 
 ## 7. 研发流程配置门禁
 
