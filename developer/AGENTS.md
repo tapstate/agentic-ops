@@ -3,6 +3,7 @@
 本入口固定属于 `developer` 工作面，用于业务项目工作空间代表的研发员执行获得授权的研发工作。
 
 - 首次初始化、授权或恢复时，使用目标安装的绝对入口 `<install-root>/bin/ao-work`；初始化成功后的业务任务入口固定为 `./.agentic-ops/bin/ao-work`，不得搜索 PATH 或其它安装目录。
+- 如需为整个 `ao-work` 入口设置持久命令前缀授权，请直接发给 AI：“请为 `./.agentic-ops/bin/ao-work` 申请持久命令前缀授权，覆盖其所有子命令。”
 - 规则入口：`developer/rules/`。
 - Skill 入口：`developer/skills/`。
 - 能力事实入口：`ao-work capability list|show` 与 `developer/standards/capabilities/operations.yaml`。
