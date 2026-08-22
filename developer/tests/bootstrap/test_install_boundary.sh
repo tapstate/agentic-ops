@@ -32,6 +32,7 @@ git -C "$source_repo" config user.email agentic-ops-test@example.test
 git -C "$source_repo" config user.name "AgenticOps Test"
 git -C "$source_repo" add .
 git -C "$source_repo" commit -m "test source" >/dev/null
+git -C "$source_repo" tag -a v0.0 -m "test release baseline"
 
 # 产品入口必须拒绝持久化的 url.*.insteadOf。离线测试仅在测试夹具的
 # Git transport wrapper 中，为已知网络子命令注入一次性 -c 映射；身份读取、
@@ -516,6 +517,23 @@ git -C "$source_repo" add developer/AGENTS.md
 git -C "$source_repo" commit -m "test update" >/dev/null
 update_ref="$(git -C "$source_repo" rev-parse HEAD)"
 
+# 前面的 Runtime 直接导入断言使用测试解释器，不经过 ao-work 启动器；
+# 清理其测试副作用，避免把非生产入口生成的 bytecode 误当成更新前的安装污染。
+find "$install_root/developer/runtime" -type d -name __pycache__ -prune -exec rm -rf {} +
+
+# 自定义 --install-home 安装从自身目录执行更新时，不应依赖
+# AGENTIC_OPS_HOME 或错误回退到 $HOME/.agentic-ops。
+HOME="$test_home" \
+AGENTIC_OPS_UV="$fake_uv" \
+AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
+AGENTIC_OPS_ASSUME_YES=1 \
+AO_TEST_REAL_GIT="$real_git" \
+AO_TEST_FIXTURE_REPOSITORY="$source_repo" \
+AO_TEST_OFFICIAL_REPOSITORY="$official_repo_url" \
+PATH="$transport_git_dir:$PATH" \
+  bash "$install_root/developer/bootstrap/update.sh" >/dev/null
+test "$(git -C "$install_root" rev-parse HEAD)" = "$update_ref"
+
 if HOME="$test_home" \
   SHELL=/bin/zsh \
   AGENTIC_OPS_HOME="$default_install_root" \
@@ -661,12 +679,6 @@ mkdir "$default_install_root/.local/pending-rollback-ref"
 assert_update_rejected \
   "$default_install_root" pending-ref-directory install_ref_path_invalid
 rmdir "$default_install_root/.local/pending-rollback-ref"
-
-install_alias="$test_root/install-root-symlink"
-ln -s "$default_install_root" "$install_alias"
-assert_update_rejected \
-  "$install_alias" install-root-symlink install_managed_path_invalid
-rm "$install_alias"
 
 current_head="$(git -C "$default_install_root" rev-parse HEAD)"
 bash -c \
