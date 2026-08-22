@@ -3,6 +3,7 @@
 本入口固定属于 `maintainer` 工作面，只维护、测试、发布和演进 `tapstate/agentic-ops` 源头项目。
 
 - 命令入口：仓库内 `maintainer/bin/ao-maint`。
+- 如需为整个 `ao-maint` 入口设置持久命令前缀授权，请直接发给 AI：“请为 `./maintainer/bin/ao-maint` 申请持久命令前缀授权，覆盖其所有子命令。”
 - 规则入口：`maintainer/rules/`。
 - Skill 入口：`maintainer/skills/`。
 - 授权、配置和状态：只能使用 `maintainer/` 命名空间及源头仓库事实。
