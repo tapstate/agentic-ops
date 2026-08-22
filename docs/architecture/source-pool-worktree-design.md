@@ -71,7 +71,7 @@
 
 `workspace init` 的源码步骤：
 
-1. 解析池根（3.2）；准备池成员全集：对 `repositories.list` 逐仓库执行——池成员不存在 → `git clone --progress`（复用 `_run_git_streaming`，AO-11 流式、逐仓库进度）；已存在 → 认领（adopt）：校验 remotes 精确匹配（复用 `_validate_repository_remotes`）、拒绝 URL 改写（复用 `_reject_git_url_rewrites`）、拒绝指向 AgenticOps 源头仓库。
+1. 解析池根（3.2）；准备池成员全集：对 `repositories.list` 逐仓库执行——池成员不存在 → 必须执行 `git clone --progress`（复用 `_run_git_streaming`，AO-11 流式、逐仓库进度），不得因预检权限诊断静默跳过；已存在 → 认领（adopt）：校验 remotes 精确匹配（复用 `_validate_repository_remotes`）、拒绝 URL 改写（复用 `_reject_git_url_rewrites`）、拒绝指向 AgenticOps 源头仓库。若已存在 Git 仓库的 remote 身份不符合目标仓库，且工作区没有未提交修改，则清除该 checkout 后重新 clone；存在未提交修改时失败关闭，要求人工先保存修改。
 2. 认领时若池成员是浅克隆（现有 `~/github` 克隆是 depth 1）→ 自动流式 `git fetch --unshallow`；不允许以浅克隆作为池成员。
 3. 全集准备支持中断续传：`Ctrl+C` 中断时已完成的池成员保留（不删除、不污染），下次 init/任务接管自动补齐缺失成员；不写任何初始化完成标记。
 4. 不创建工作空间级源码目录或凭证；写 profile overlay、AGENTS.md、Skill 和 schema v4 agent.json（`source_root` 写池根）。
