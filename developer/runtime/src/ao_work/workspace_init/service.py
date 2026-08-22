@@ -110,7 +110,7 @@ class WorkspaceCandidate:
 
 
 class WorkspaceInitializer:
-    def __init__(self, root: Path, install_root: Path, *, git_timeout: float = 20.0) -> None:
+    def __init__(self, root: Path, install_root: Path, *, git_timeout: float = 60.0) -> None:
         self.root = root.expanduser().resolve()
         self.install_root = install_root.expanduser().resolve()
         self.git_timeout = git_timeout

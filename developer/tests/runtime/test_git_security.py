@@ -115,7 +115,7 @@ class GitSecurityTest(unittest.TestCase):
             initializer = WorkspaceInitializer(workspace, root / "install")
             with mock.patch(
                 "subprocess.run",
-                side_effect=subprocess.TimeoutExpired("git", 20.0),
+                side_effect=subprocess.TimeoutExpired("git", 60.0),
             ):
                 with self.assertRaises(RuntimeErrorResult) as captured:
                     initializer._run_git(
@@ -130,7 +130,7 @@ class GitSecurityTest(unittest.TestCase):
             error.details["git_command"],
         )
         self.assertGreaterEqual(error.details["elapsed_seconds"], 0)
-        self.assertEqual(20.0, error.details["git_timeout_seconds"])
+        self.assertEqual(60.0, error.details["git_timeout_seconds"])
 
     def test_security_git_timeout_reports_command_and_elapsed(self) -> None:
         with mock.patch(
