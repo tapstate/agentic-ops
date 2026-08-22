@@ -39,4 +39,5 @@ failure:
   - jira_create_unknown_field
   - jira_create_meta_changed
   - jira_create_duplicate
+  - jira_create_readback_mismatch
   - jira_authorization_reference_invalid
