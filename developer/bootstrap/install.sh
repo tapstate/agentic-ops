@@ -23,13 +23,10 @@ usage() {
   --git-name <name>
   --git-email <email>
   --github-login <login>
-  --execution-auth-mode <global|installation>
-  --confirm-replace-authorization <digest>
   --token-stdin
   --non-interactive
 
 不传授权参数时，有终端则进入授权引导；无终端则完成安装并输出 ao-work auth 下一步。
-首次 Bootstrap 下载和 clone 只能使用调用者已有的 Git/gh 启动账户；installation 授权完成后，后续更新使用 Runtime 固化的安装专属 SSH。
 USAGE
 }
 
@@ -44,7 +41,7 @@ while [ "$#" -gt 0 ]; do
       INSTALL_DIR="$2"
       shift 2
       ;;
-    --agent-id|--jira-email|--git-name|--git-email|--github-login|--execution-auth-mode|--confirm-replace-authorization)
+    --agent-id|--jira-email|--git-name|--git-email|--github-login)
       if [ "$#" -lt 2 ] || [ -z "$2" ]; then
         printf 'AgenticOps：授权参数缺少取值：%s\n' "$1" >&2
         exit 2
@@ -112,8 +109,6 @@ fi
 if ! command -v git >/dev/null 2>&1; then
   agentic_bootstrap_error "git_not_found" "未找到 Git，无法安装 AgenticOps" "请先安装 Git"
 fi
-
-printf 'AgenticOps：首次 Bootstrap 下载和 clone 使用调用者当前 Git/gh 启动账户；安装级授权尚未创建，不会静默替换机器已有授权\n' >&2
 
 expected_repository="$(agentic_expected_repository)"
 if ! agentic_repository_matches "$REPO_URL" "$expected_repository"; then
@@ -184,14 +179,7 @@ agentic_configure_path "$INSTALL_DIR"
 # 研发员级配置目录（D-048）：确保 user/ 与 config.yaml 存在；source_pool_root
 # 未配置时不强制引导（workspace init 会检测并阻断 source_pool_root_invalid）。
 user_dir="$INSTALL_DIR/user"
-if [ ! -e "$user_dir" ]; then
-  mkdir -m 0700 "$user_dir"
-elif [ ! -d "$user_dir" ] || [ -L "$user_dir" ]; then
-  agentic_bootstrap_error \
-    "install_user_dir_invalid" \
-    "安装用户目录不是安全普通目录：$user_dir" \
-    "请人工核对已有授权；Bootstrap 不会覆盖该路径"
-fi
+mkdir -p "$user_dir"
 if [ ! -f "$user_dir/config.yaml" ]; then
   : > "$user_dir/config.yaml"
 fi

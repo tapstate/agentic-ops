@@ -22,7 +22,6 @@ from ao_work.workspace import Workspace
 IDENTITY = {
     "agent_id": "harsen-mini-test-bot",
     "jira_email": "harsen@example.test",
-    "execution_authorization": {"mode": "global", "ssh_key_fingerprint": ""},
     "execution_identity": {
         "git_author_name": "Harsen Test Bot",
         "git_author_email": "harsen@example.test",
@@ -255,12 +254,7 @@ class InstallIdentityCliTest(unittest.TestCase):
 
         parser = build_parser()
         args = parser.parse_args(("auth", *arguments))
-        with (
-            mock.patch("sys.stdin", io.StringIO(stdin)),
-            mock.patch(
-                "ao_work.authorization.cli._validate_global_authorization"
-            ),
-        ):
+        with mock.patch("sys.stdin", io.StringIO(stdin)):
             return execute_authorization(args, self.install)
 
     def test_set_and_show_identity_non_interactive(self) -> None:
@@ -274,8 +268,6 @@ class InstallIdentityCliTest(unittest.TestCase):
                 "harsen@example.test",
                 "--github-login",
                 "harsen-mini-test-bot",
-                "--execution-auth-mode",
-                "global",
                 "--jira-email",
                 "harsen@example.test",
                 "--token-stdin",

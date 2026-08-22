@@ -168,26 +168,6 @@ class OfflineFakeRunner:
             encoding="utf-8",
         )
         fake_uv.chmod(0o700)
-        (self.home / ".gitconfig").write_text(
-            "[user]\n"
-            "\tname = Offline Integration Agent\n"
-            "\temail = offline-agent@example.invalid\n",
-            encoding="utf-8",
-        )
-        fake_gh = self.tool_bin / "gh"
-        github_login = self.manifest.agent_id.replace("_", "-")
-        fake_gh.write_text(
-            "#!/bin/sh\n"
-            "set -eu\n"
-            "if [ \"${1:-}\" = api ] && [ \"${2:-}\" = user ]; then\n"
-            f"  printf '%s\\n' {shlex.quote(github_login)}\n"
-            "  exit 0\n"
-            "fi\n"
-            "printf 'offline gh only supports api user\\n' >&2\n"
-            "exit 2\n",
-            encoding="utf-8",
-        )
-        fake_gh.chmod(0o700)
         self._record("isolation_prepared", inherited_environment=False)
 
     def _prepare_loopback_tls(self) -> None:
@@ -485,8 +465,6 @@ class OfflineFakeRunner:
             "offline-agent@example.invalid",
             "--github-login",
             self.manifest.agent_id.replace("_", "-"),
-            "--execution-auth-mode",
-            "global",
             "--token-stdin",
             "--non-interactive",
             input_text="synthetic-offline-token\n",

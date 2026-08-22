@@ -21,7 +21,6 @@ from ao_work.config import (
     validate_workspace_jira_binding,
     validate_workspace_project_binding,
 )
-from ao_work.authorization.execution import operational_environment
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.jira.cli import read_bound_jira_attempt, read_bound_jira_plan
 from ao_work.jira.service import JiraService
@@ -2995,8 +2994,8 @@ class TaskRunProtocol:
             timeout=60,
         )
 
+    @staticmethod
     def _run_command(
-        self,
         argv: list[str],
         *,
         cwd: Path,
@@ -3032,12 +3031,6 @@ class TaskRunProtocol:
                         )
                     )
                 }
-                if argv and argv[0] in {"git", "gh", "ssh"}:
-                    safe_environment = operational_environment(
-                        self.install_root,
-                        load_install_identity(self.install_root),
-                        base=safe_environment,
-                    )
             process = subprocess.Popen(
                 argv,
                 cwd=cwd,

@@ -29,7 +29,6 @@ def configure_install_authorization(
         {
             "agent_id": agent_id,
             "jira_email": jira_email,
-            "execution_authorization": {"mode": "global", "ssh_key_fingerprint": ""},
             "execution_identity": {
                 "git_author_name": "Harsen Test Bot",
                 "git_author_email": effective_git_email,
