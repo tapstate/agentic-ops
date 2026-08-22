@@ -97,8 +97,8 @@ bash maintainer/scripts/test-release-workflow.sh
 
 - GitHub 默认分支是 `main`，日常开发分支是 `develop`。
 - `main` 禁止直接提交和直接推送。版本化 `.githooks` 是 Hook 策略源，Git `core.hooksPath` 必须指向 common directory 中从已接受 `HEAD` 加载策略的 trusted launcher，不能直接执行 candidate 工作树 Hook。硬门禁模式还必须通过无 bypass 的 GitHub Repository Ruleset 要求 PR 合入、至少 1 个独立人工批准、最后推送者不能自批、dismiss stale approvals、解决全部 review threads，并禁止强推和删除；GitHub Free 私有仓库使用显式软门禁时，接受服务器端无法阻止其它入口直推和强制独立审批的剩余风险，但仍不得由本项目流程直接推送 `main` 或自动合并。
-- 正常发布使用 `maintainer/scripts/release.sh prepare --version vX.Y` 对固定 HEAD 完成完整验证，验证通过后才准备本地 annotated tag；再使用 `maintainer/scripts/release.sh publish --version vX.Y` 从 `develop` 创建或复用 PR。`main` 只通过 Merge commit 合入；软门禁模式必须显式增加 `--allow-soft-gate`。
-- Hotfix 使用 `maintainer/scripts/hotfix.sh create --jira-id <KEY>` 从最新 `origin/main` 创建 `<user>/<jira-id>/fix-main`，再用同一入口执行 `prepare` 和 `publish`。Hotfix `prepare` 也必须对固定 HEAD 执行完整验证；它不创建新 tag。完成后由研发工程师把修复同步回 `develop`。
+- 正常发布使用 `maintainer/scripts/release.sh prepare --version vX.Y` 对固定 HEAD 完成完整验证；软门禁验证通过后只创建或复用本地固定 `release/vX.Y`，不创建 Tag。再使用 `maintainer/scripts/release.sh publish --version vX.Y` 创建或复用到 `main` 的 PR；`main` 只通过 Merge commit 合入，脚本随后快进同步 `develop`，最后才推送指向实际 Merge commit 的 annotated tag。软门禁模式必须显式增加 `--allow-soft-gate`。
+- Hotfix 使用 `maintainer/scripts/hotfix.sh create --jira-id <KEY>` 从包含当前 `origin/main` 的最新 `origin/develop` 创建 `<user>/<jira-id>/fix-main`，再用同一入口执行 `prepare` 和 `publish`。Hotfix `prepare` 也必须对固定 HEAD 执行完整验证；它不创建、移动或推送 tag。合入 `main` 后脚本只允许把 `develop` 快进到已验证的 `origin/main` 并切回 `develop`，不能普通 merge、rebase 或 cherry-pick；快进不成立时失败关闭。
 - 发布脚本在执行前检查 trusted Hook launcher、远端 `develop` 和默认分支。硬门禁模式还检查 Auto-merge 和 `main` Ruleset，配置缺失时逐项引导确认，非交互配置必须显式传入 `--configure-workflow`；软门禁模式只放宽 Ruleset 和 Auto-merge，并强制检查 Merge commit 可用、固定发布 HEAD、人工合并、合并事实和二次完整验证。
 - `release` / `hotfix publish` 必须从刷新后的 `origin/main` 快照执行故事门禁，candidate Hook、launcher 或 Runtime 不得自证。`origin/main` 缺少新门禁，或候选修改 Hook、故事门禁、注册表、锁文件和发布脚本等信任根时，自动 publish 必须失败关闭，改走受保护 `main` 的独立人工审查 PR。
 - `publish` 只有在完整验证通过后才展示最终确认；非交互发布必须显式传入 `--confirm-release`。脚本必须等待 PR 实际合并并验证 `origin/main` 包含发布 HEAD，正常发布最后才允许推送不可变 tag。

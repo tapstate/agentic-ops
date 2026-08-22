@@ -31,6 +31,7 @@ from ao_work.workspace_init import (
     execute_workspace_init,
     execute_workspace_preflight,
 )
+from ao_work.version import inspect_version
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -91,6 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
     configure_authorization_parser(subparsers)
     configure_jira_parser(subparsers)
     configure_task_run_parser(subparsers)
+    subparsers.add_parser("version")
     return parser
 
 
@@ -113,6 +115,8 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
     if args.group == "auth":
         state = execute_authorization(args, install_root)
         return success("auth", workplane=DEVELOPER, **state)
+    if args.group == "version":
+        return success("version", workplane=DEVELOPER, **inspect_version(install_root))
     if args.group == "workspace" and args.command == "init":
         state = execute_workspace_init(args, args.workspace_root, install_root)
         return success("workspace_init", workplane=DEVELOPER, **state)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
 import re
 import select
@@ -17,6 +17,7 @@ from typing import Any
 
 import yaml
 
+from ao_work.authorization.execution import operational_environment
 from ao_work.config import (
     JiraConnection,
     ProjectProfile,
@@ -30,14 +31,15 @@ from ao_work.config import (
 )
 from ao_work.installation import (
     build_execution_identity,
+    install_identity_ref as build_install_identity_ref,
     install_user_dir,
     load_install_credentials,
     load_install_identity,
     mask_email,
     validate_agent_id,
 )
-from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.git_security import github_repository_url_matches
+from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.managed_io import read_managed_text
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, write_diagnostic
 from ao_work.task_state.io import atomic_write_json, atomic_write_text, read_json
@@ -81,6 +83,7 @@ class WorkspaceCandidate:
     token: str | None
     credential_source: str
     execution_identity: dict[str, str] | None = None
+    execution_authorization: dict[str, str] | None = None
     source_root_derived: bool = False
     pool_mode: bool = False
     install_identity_ref: str = ""
@@ -105,6 +108,7 @@ class WorkspaceCandidate:
                 else None
             ),
             "execution_identity": self.execution_identity,
+            "execution_authorization": self.execution_authorization,
             "workspace_entry": str(WORKSPACE_ENTRY),
         }
 
@@ -219,20 +223,8 @@ class WorkspaceInitializer:
             # 池模式：source_root 语义改为池根（任务工作树在接管时创建）。
             resolved_source = validate_business_source_root(self.root, pool_root)
             pool_mode = True
-        # 安装目录身份指纹（阶段二）：agent.json v4 引用，防错装。
-        identity_fingerprint = hashlib.sha256(
-            json.dumps(
-                {
-                    "agent_id": install_identity["agent_id"],
-                    "jira_email": install_identity["jira_email"],
-                    "execution_identity": install_identity["execution_identity"],
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
-        install_identity_ref = f"install:{identity_fingerprint}"
+        # 安装目录身份指纹（阶段二）：agent.json v5 引用，防错装。
+        install_identity_ref = build_install_identity_ref(install_identity)
         entry_sha256 = install_entry_sha256(self.install_root)
         return WorkspaceCandidate(
             root=self.root,
@@ -247,6 +239,9 @@ class WorkspaceInitializer:
             token=token,
             credential_source=credential_source,
             execution_identity=execution_identity,
+            execution_authorization=dict(
+                install_identity["execution_authorization"]
+            ),
             source_root_derived=source_root_derived,
             pool_mode=pool_mode,
             install_identity_ref=install_identity_ref,
@@ -1221,6 +1216,7 @@ class WorkspaceInitializer:
                 text=True,
                 check=False,
                 timeout=effective_timeout,
+                env=self._git_environment(),
             )
         except (OSError, subprocess.TimeoutExpired) as error:
             command = " ".join(["git", *arguments])
@@ -1254,6 +1250,7 @@ class WorkspaceInitializer:
             ["git", *arguments],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env=self._git_environment(),
         )
         stdout_chunks: list[bytes] = []
         stderr_chunks: list[bytes] = []
@@ -1322,6 +1319,17 @@ class WorkspaceInitializer:
             b"".join(stdout_chunks).decode("utf-8", errors="replace"),
             b"".join(stderr_chunks).decode("utf-8", errors="replace"),
         )
+
+    def _git_environment(self) -> dict[str, str]:
+        try:
+            identity = load_install_identity(self.install_root)
+        except RuntimeErrorResult as error:
+            if error.code != "install_identity_missing":
+                raise
+            # 私有 runner 的本地单元测试可以在身份建立前执行；公开 workspace
+            # 入口会在调用任何远端 Git 操作前先要求完整安装身份。
+            return dict(os.environ)
+        return operational_environment(self.install_root, identity)
 
     @staticmethod
     def _close_streams(process: subprocess.Popen[bytes]) -> None:

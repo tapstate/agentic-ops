@@ -11,10 +11,10 @@
 - `main` 是稳定主分支，也是 GitHub 默认分支和安装脚本读取的分支。
 - `develop` 是日常开发分支。正常发布必须以完成验证的 `develop` HEAD 为来源，通过拉取请求合入 `main`。
 - `release/vX.Y` 是软门禁模式从已验证 `develop` HEAD 创建的固定发布分支，用于避免等待人工合并期间 `develop` 的后续提交改变发布内容。
-- `<user>/<jira-id>/fix-main` 是紧急修复分支，只能从最新 `origin/main` 创建，只能通过拉取请求合回 `main`。
+- `<user>/<jira-id>/fix-main` 是无 Tag 紧急修复分支，只能从包含当前 `origin/main` 的最新 `origin/develop` 创建，只能通过拉取请求合回 `main`。
 - `main` 禁止直接提交、直接推送、强制推送和删除。
 - 所有合入 `main` 的拉取请求使用 Merge commit，不要求 GitHub CI 或代码审查批准。
-- Hotfix 合入 `main` 后，由研发工程师人工决定如何把修复同步回 `develop`；脚本只提示，不自动回同步。
+- Hotfix 合入 `main` 后，脚本只允许将 `develop` 快进到已验证的 `origin/main` 并切回 `develop`；无法快进时失败关闭。
 
 ## 3. 版本与 Tag
 
@@ -26,9 +26,8 @@
 
 - Git tag 只允许二段式 `vX.Y`，例如 `v0.3`。
 - `vX.Y` 是该版本线的编译基线，只创建一次，不代表该版本线中的每次交付。
-- 正常发布通过 `release.sh prepare --version vX.Y` 创建本地 annotated tag。
-- `prepare` 后的构建和必要修正继续以该 tag 为基线，通过 `COMMIT_NUM` 和 commit 标识形成具体编译版本。
-- 本地 tag 只有在对应代码已通过拉取请求合入 `main` 后才推送到远端。
+- `prepare` 固定发布候选；软门禁模式创建或核验本地 `release/vX.Y` 分支必须指向该已验证 HEAD。
+- annotated `vX.Y` tag 只在发布 PR 合入 `main` 后创建，并指向经过核验的 Merge commit。
 - 远端 tag 不移动、不覆盖、不删除、不强制推送。
 - Hotfix 复用 `main` 历史中最近的 `vX.Y`，不创建或移动 tag。
 
@@ -86,12 +85,12 @@ maintainer/scripts/release.sh prepare --version v0.3
 4. 要求当前分支为 `develop`、工作区干净且本地没有落后或分叉。
 5. 校验版本参数符合 `^v[0-9]+\.[0-9]+$`。
 6. 在临时 worktree 对固定 HEAD 执行四项完整验证，覆盖 Python 锁文件、两个工作面边界、developer Skill / Rule / 标准资产、Shell Bootstrap、developer-only sparse 安装、`ao-work`、更新和回滚。
-7. 验证全部通过后，校验远端不存在同名 tag；同名本地 tag 只有在指向当前版本线基线时才允许复用。
-8. 在当前 HEAD 创建 annotated tag，暂不推送。
-9. 记录固定 HEAD、验证时间和验证清单。
+7. 验证本地和远端均不存在同名 tag；正常发布不复用合入前的 tag。
+8. 软门禁模式创建或核验本地 `release/vX.Y` 指向固定 HEAD，暂不推送。
+9. 记录固定 HEAD、固定发布分支、验证时间和验证清单。
 10. 输出待发布提交与验证清单，停止在研发工程师审查和提交点。
 
-`prepare` 不暂存、不提交、不推送代码。验证失败时不得创建新 tag；修复后以同一版本重新执行。已有且合法的同名本地 tag 只在后续验证再次通过后复用。
+`prepare` 不暂存、不提交、不推送代码。验证失败时不得创建发布分支或 tag；修复后以同一版本重新执行。
 
 ### 5.2 发布版本
 
@@ -112,18 +111,20 @@ maintainer/scripts/release.sh publish --version v0.3 --allow-soft-gate
 1. 重复执行仓库和研发流程门禁。
 2. 要求当前分支为 `develop`、工作区干净且全部变更已提交。
 3. fetch 远端；本地 `develop` 可以领先 `origin/develop`，但不得落后或分叉。
-4. 校验本地 tag 存在且是当前 HEAD 的祖先；远端同名 tag 只允许在其目标与本地完全一致的恢复执行场景中复用。
-5. 在临时 Git worktree 中执行完整验证。
+4. 校验本地和远端都没有 `vX.Y`；软门禁模式只允许使用 `prepare` 固定的发布分支，不能由执行时的 `develop` HEAD 替换候选。
+5. 以刷新后的 `origin/main` 与固定候选的 merge-base 作为故事门禁范围基线，并在临时 Git worktree 中执行完整验证。
 6. 展示版本、目标仓库、源分支、目标分支、待推送提交和验证结果。
 7. 交互取得最终人工确认；非交互环境必须显式传入 `--confirm-release`。
 8. 推送 `develop`。
 9. 硬门禁模式创建或复用唯一的开放 `develop → main` 拉取请求，使用 Merge commit 启用 Auto-merge 并等待合并。
 10. 软门禁模式从固定发布 HEAD 创建或复用 `release/vX.Y`，推送后创建或复用 `release/vX.Y → main` 拉取请求。
-11. 软门禁首次执行在创建 PR 后返回状态码 `2`，输出 PR 地址和原继续命令，等待研发工程师在 GitHub 页面选择 Merge commit 人工合并。
-12. 软门禁人工合并后重新执行同一条 `publish` 命令；脚本使用固定发布分支恢复上下文，再次执行完整验证。
-13. fetch `origin/main`，确认 PR 已合并、合并结果保留固定发布 HEAD 的提交历史且该 HEAD 已包含在 `origin/main`；Squash 或 Rebase 合并必须停止 Tag 发布。
-14. 确认本地 tag 目标已包含在 `origin/main` 后推送 tag。
-15. 写入结构化发布审计并输出发布结果。
+11. 软门禁首次执行在创建 PR 后每 5 秒查询一次状态，最多等待 30 分钟；研发工程师仍须在 GitHub 页面选择 Merge commit 人工合并，脚本检测到合并后在同一进程继续。
+12. 若需要非阻塞地保留人工续跑，传入 `--no-wait-for-merge`；脚本写入等待审计并返回状态码 `2`，人工合并后重新执行同一条 `publish` 命令。
+13. 自动续跑或人工续跑都必须再次执行完整验证；脚本使用固定发布分支恢复上下文，验证固定 HEAD 未漂移。
+14. fetch `origin/main`，确认 PR 已合并、合并结果保留固定发布 HEAD 的提交历史且该 HEAD 已包含在 `origin/main`；Squash 或 Rebase 合并必须停止 Tag 发布。
+15. 确认 PR 使用保留固定候选的 Merge commit 后，将 `develop` 快进到已验证的 `origin/main`；若远端或本地 `develop` 不能快进，立即失败，不得普通 merge、rebase 或改写历史。
+16. 在该 Merge commit 创建 annotated `vX.Y` tag 并推送。
+17. 写入结构化发布审计并输出发布结果，其中包含已同步的 `develop` 提交。
 
 `release/vX.Y` 不自动删除。本地或远端已存在同名分支时，只有其目标与第一次验证的固定发布 HEAD 完全一致才允许恢复执行。
 
@@ -140,11 +141,11 @@ maintainer/scripts/hotfix.sh create --jira-id AO-123
 顺序：
 
 1. 要求当前仓库工作区干净。
-2. fetch `origin/main`。
+2. fetch `origin/main` 和 `origin/develop`，确认 `develop` 包含当前 `main`。
 3. 从 Git 配置读取用户名；无法读取时要求显式提供。
 4. 校验 Jira ID 格式和分支名安全性。
 5. 确认本地和远端不存在同名分支。
-6. 从最新 `origin/main` 创建 `<user>/<jira-id>/fix-main`。
+6. 从最新 `origin/develop` 创建 `<user>/<jira-id>/fix-main`，使修复和已有 develop 变更保持单向进入 `main`。
 
 ### 6.2 准备修复产物
 
@@ -157,7 +158,7 @@ maintainer/scripts/hotfix.sh prepare
 顺序：
 
 1. 校验当前分支符合 `<user>/<jira-id>/fix-main`。
-2. 校验分支以 `origin/main` 为基础且工作区干净。
+2. 校验分支包含最新 `origin/develop`、`develop` 包含当前 `main` 且工作区干净。
 3. 自动解析 `main` 历史中最近的二段式 `vX.Y`。
 4. 执行 maintainer/developer Runtime、工作面边界和 developer-only 安装验证。
 5. 输出固定修复 HEAD 和验证清单，停止在研发工程师审查和提交点。
@@ -189,8 +190,9 @@ maintainer/scripts/hotfix.sh publish --allow-soft-gate
 7. 硬门禁模式使用 Merge commit 启用 Auto-merge 并等待合并。
 8. 软门禁模式记录固定修复 HEAD，创建 PR 后返回状态码 `2`，等待研发工程师在 GitHub 页面选择 Merge commit 人工合并。
 9. 软门禁人工合并后重新执行同一条 `publish` 命令，再次完整验证固定修复 HEAD；HEAD 漂移或 Squash/Rebase 合并时停止发布。
-10. 验证 `origin/main` 包含固定修复 HEAD。
-11. 写入结构化审计并提示研发工程师人工把修复同步回 `develop`。
+10. 验证 `origin/main` 包含固定修复 HEAD，且 PR 使用保留该 HEAD 的 Merge commit。
+11. 将远端和本地 `develop` 快进到已验证的 `origin/main` 并切回 `develop`；快进不成立时失败关闭。
+12. 写入包含 `develop_commit` 和 `tag_action=none` 的结构化审计；不创建、移动或推送 Tag。
 
 ## 7. 研发流程配置门禁
 
@@ -229,7 +231,7 @@ GitHub Free 私有仓库无法配置本设计要求的 `main` Ruleset 与 Auto-m
 
 软门禁只放宽 Ruleset 和 Auto-merge，不允许直接推送 `main`。由于服务器端无法阻止其他账号直推，命令输出、PR 描述、等待记录和完成审计都必须标记 `protection_mode=soft` 并显示风险说明。
 
-软门禁首次 `publish` 创建 PR 后以专用状态码 `2` 表示 `waiting_for_manual_merge`。该状态不是发布成功；调用方必须在人工 Merge commit 后重新执行完全相同的 `publish` 命令。第二次执行不得复用首次测试结论，必须重新验证固定发布 HEAD。
+软门禁默认在首次 `publish` 创建 PR 后每 5 秒查询一次状态，最多等待 30 分钟；人工完成 Merge commit 后，当前进程自动再次验证固定发布 HEAD 并继续发布。`--no-wait-for-merge` 保留非阻塞人工续跑能力：它以专用状态码 `2` 表示 `waiting_for_manual_merge`，人工合并后重新执行相同的 `publish` 命令。自动或人工续跑都不得复用首次测试结论。
 
 ## 8. 完整验证
 
@@ -244,7 +246,7 @@ bash maintainer/scripts/test-release-workflow.sh
 
 其中 `test-python-runtime.sh` 统一运行 maintainer/developer Runtime 回归，`test-resources.sh` 验证工作面、Skill、Rule、标准资产和旧分发残留，`test_install_boundary.sh` 验证 developer-only sparse 安装、更新与回滚，`test-release-workflow.sh` 验证发布和 Hotfix 门禁。验证命令不可由普通参数替换或跳过。任一命令失败时，`prepare` 不得创建新 tag，`publish` 不得执行推送、创建拉取请求、Auto-merge 或 tag 推送。软门禁恢复执行时，即使 PR 已人工合并，也必须在 Tag 或完成审计前重新执行全部验证。
 
-`publish` 在完整验证前刷新官方 `origin/main`，分别创建 baseline 和固定 candidate worktree，只执行 baseline 的锁文件、launcher 和 Runtime 来检查 candidate 范围。`origin/main` 缺少新门禁时返回 `release_story_gate_baseline_upgrade_required`；Hook、故事门禁、注册表、锁文件或发布脚本等信任根发生净变更时返回 `release_story_gate_trust_root_changed`。两种情况都不能自动创建或合并 PR，必须先通过受保护 `main` 的独立人工审查 PR 安装或升级信任根。
+`publish` 在完整验证前刷新官方 `origin/main`，分别创建 baseline 和固定 candidate worktree，只执行 baseline 的锁文件、launcher 和 Runtime 来检查从二者 merge-base 开始的 candidate 范围。`origin/main` 缺少新门禁时返回 `release_story_gate_baseline_upgrade_required`；Hook、故事门禁、注册表、锁文件或发布脚本等信任根发生净变更时返回 `release_story_gate_trust_root_changed`。两种情况都不能自动创建或合并 PR，必须先通过受保护 `main` 的独立人工审查 PR 安装或升级信任根。
 
 本地 trusted launcher 用于隔离 candidate Hook 和防止误操作，但拥有本机 Git 控制权的人仍能修改 Git 配置或使用 `--no-verify`。因此它不单独构成硬安全边界；无 bypass、强制独立人工批准且最后推送者不能自批的 `main` Ruleset 是服务器信任根，`origin/main` 基线负责确定性复检。
 

@@ -24,8 +24,9 @@ maintainer/scripts/release.sh publish --version vX.Y
 2. `prepare` 验证 Python 锁文件、developer Skill / Rule / 标准资产、Shell Bootstrap 和工作面隔离。
 3. 在临时目录按 DE-001 执行 developer-only sparse 安装。
 4. 验证 `ao-work` 可运行、`maintainer/` 不在安装文件树、无兼容别名和跨包导入。
-5. `publish` 在最终确认后创建或复用目标为 `main` 的 PR，等待合并事实。
-6. 脚本确认 `origin/main` 包含固定发布 HEAD 后记录发布审计并完成 Tag 动作。
+5. 软门禁的 `prepare` 先固定本地 `release/vX.Y`；`publish` 在最终确认后推送该分支并创建或复用目标为 `main` 的 PR，等待合并事实。
+6. 脚本确认 `origin/main` 包含固定发布 HEAD 且 PR 使用 Merge commit 后，先将 `develop` 快进到已验证的 `origin/main`，再在该 Merge commit 创建 Tag、记录发布审计；快进不成立时必须失败关闭。
+7. Hotfix 从包含当前 `main` 的 `develop` 固定修复线，合入后自动快进远端和本地 `develop` 并切回；其审计必须声明 `tag_action=none`，不得执行任何 Tag 写操作。
 
 ### 验收标准
 

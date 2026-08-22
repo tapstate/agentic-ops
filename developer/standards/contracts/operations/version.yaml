@@ -1,0 +1,48 @@
+operation: version
+workplane: developer
+version: 1
+purpose: 只读返回当前 developer-only managed clone 的 Runtime 与 Git 版本事实。
+task_type: installation_inspection
+allowed_stages:
+  - installation_ready
+  - blocked
+required_inputs: []
+input: {}
+preconditions:
+  - developer_managed_clone_must_pass_install_identity_validation
+  - installation_metadata_must_be_runtime_managed_and_verifiable
+output:
+  runtime_version:
+    type: string
+  install_root:
+    type: string
+  installed_at:
+    type: string
+  git_head:
+    type: string
+  git_short_sha:
+    type: string
+  git_describe:
+    type: [string, 'null']
+  git_tag:
+    type: [string, 'null']
+failure:
+  codes:
+    - install_root_source_rejected
+    - install_metadata_missing
+    - install_metadata_invalid
+    - install_version_metadata_invalid
+    - install_git_metadata_invalid
+side_effects:
+  - must_not_read_credentials
+  - must_not_modify_installation
+  - must_not_modify_git
+  - must_not_write_github
+  - must_not_write_jira
+human_gate:
+  required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: installation_ready
+redo_from_stage: installation_ready
