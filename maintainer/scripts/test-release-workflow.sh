@@ -947,12 +947,20 @@ test -z "$(git --git-dir="$remote" show-ref --tags v9.9 || true)" ||
 
 if (
   cd "$fixture"
-  maintainer/scripts/hotfix.sh publish --jira-id ao-11
+  maintainer/scripts/hotfix.sh ao-11
 ) >"$test_root/invalid-hotfix.out" 2>"$test_root/invalid-hotfix.err"; then
   fail "Hotfix 必须拒绝非法 Jira 编号"
 fi
 grep -q 'invalid_jira_id' "$test_root/invalid-hotfix.err" ||
   fail "Hotfix 未返回 Jira 编号失败码"
+if (
+  cd "$fixture"
+  maintainer/scripts/hotfix.sh publish --jira-id AO-11
+) >"$test_root/legacy-hotfix-args.out" 2>"$test_root/legacy-hotfix-args.err"; then
+  fail "Hotfix 必须拒绝旧 publish --jira-id 参数"
+fi
+grep -q 'invalid_hotfix_arguments' "$test_root/legacy-hotfix-args.err" ||
+  fail "Hotfix 旧参数未返回稳定失败码"
 
 # Hotfix 使用独立仓库验证 develop 到 main 的直合，不创建修复分支、PR、Tag，
 # 也不调用 gh 或 Jira。必要 Git 一致性检查通过后直接原子更新两个远端分支。
@@ -986,7 +994,7 @@ export AGENTIC_OPS_TEST_FIXTURE_REMOTE="$hotfix_remote"
 printf 'dirty\n' >> "$hotfix_fixture/README.md"
 if (
   cd "$hotfix_fixture"
-  maintainer/scripts/hotfix.sh publish --jira-id AO-74
+  maintainer/scripts/hotfix.sh AO-74
 ) >"$test_root/hotfix-dirty.out" 2>"$test_root/hotfix-dirty.err"; then
   fail "Hotfix 必须拒绝脏工作区"
 fi
@@ -994,33 +1002,11 @@ grep -q 'dirty_worktree' "$test_root/hotfix-dirty.err" ||
   fail "Hotfix 脏工作区未返回稳定失败码"
 git -C "$hotfix_fixture" restore README.md
 
+# 用户可从其它干净分支直接调用；脚本必须自行切换 develop、完成合并和同步。
 git -C "$hotfix_fixture" switch main >/dev/null
-if (
-  cd "$hotfix_fixture"
-  maintainer/scripts/hotfix.sh publish --jira-id AO-74
-) >"$test_root/hotfix-wrong-branch.out" 2>"$test_root/hotfix-wrong-branch.err"; then
-  fail "Hotfix 必须拒绝从非 develop 分支执行"
-fi
-grep -q 'hotfix_requires_develop' "$test_root/hotfix-wrong-branch.err" ||
-  fail "Hotfix 非 develop 分支未返回稳定失败码"
-git -C "$hotfix_fixture" switch develop >/dev/null
-
-printf 'local only\n' >> "$hotfix_fixture/README.md"
-git -C "$hotfix_fixture" add README.md
-git -C "$hotfix_fixture" commit -m "local only hotfix candidate" >/dev/null
-if (
-  cd "$hotfix_fixture"
-  maintainer/scripts/hotfix.sh publish --jira-id AO-74
-) >"$test_root/hotfix-unsynced.out" 2>"$test_root/hotfix-unsynced.err"; then
-  fail "Hotfix 必须拒绝未同步的本地 develop"
-fi
-grep -q 'hotfix_develop_not_synced' "$test_root/hotfix-unsynced.err" ||
-  fail "Hotfix 未同步 develop 未返回稳定失败码"
-git -C "$hotfix_fixture" reset --hard "$hotfix_candidate" >/dev/null
-
 (
   cd "$hotfix_fixture"
-  maintainer/scripts/hotfix.sh publish --jira-id AO-74
+  maintainer/scripts/hotfix.sh AO-74
 ) >"$test_root/hotfix-publish.out"
 grep -q '"operation":"hotfix_publish"' "$test_root/hotfix-publish.out" ||
   fail "Hotfix 未完成 develop 到 main 的直合"
@@ -1033,6 +1019,8 @@ hotfix_merge="$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)"
   fail "Hotfix 未原子同步远端 main 与 develop"
 [ "$(git -C "$hotfix_fixture" rev-parse develop)" = "$hotfix_merge" ] ||
   fail "Hotfix 未同步本地 develop"
+[ "$(git -C "$hotfix_fixture" branch --show-current)" = "develop" ] ||
+  fail "Hotfix 未自动切换到 develop"
 [ "$(git -C "$hotfix_fixture" rev-parse "$hotfix_merge^2")" = "$hotfix_candidate" ] ||
   fail "Hotfix Merge commit 的第二父提交不是固定 develop 候选"
 git -C "$hotfix_fixture" log -1 --format=%B "$hotfix_merge" |
@@ -1042,10 +1030,46 @@ test -z "$(git -C "$hotfix_fixture" branch --list '*fix-main*')" ||
 test -z "$(git -C "$hotfix_fixture" tag --list)" ||
   fail "Hotfix 不得创建或移动 Tag"
 
+# 本地 develop 领先远端时，脚本必须把本地已提交变更直接纳入同一次原子
+# main/develop 更新，不要求用户先单独 push。
+printf 'local only\n' >> "$hotfix_fixture/README.md"
+git -C "$hotfix_fixture" add README.md
+git -C "$hotfix_fixture" commit -m "local only hotfix candidate" >/dev/null
+local_hotfix_candidate="$(git -C "$hotfix_fixture" rev-parse HEAD)"
+(
+  cd "$hotfix_fixture"
+  maintainer/scripts/hotfix.sh AO-75
+) >"$test_root/hotfix-local-ahead.out"
+hotfix_merge="$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)"
+[ "$hotfix_merge" = "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/develop)" ] ||
+  fail "Hotfix 未原子推送本地领先的 develop"
+[ "$(git --git-dir="$hotfix_remote" rev-parse "$hotfix_merge^2")" = "$local_hotfix_candidate" ] ||
+  fail "Hotfix Merge commit 未包含本地 develop 已提交变更"
+
+# 本地 develop 落后远端时，脚本必须先自动快进，再把远端新提交合入 main；
+# 用户不需要提前执行 pull。
+printf 'remote only\n' >> "$hotfix_fixture/README.md"
+git -C "$hotfix_fixture" add README.md
+git -C "$hotfix_fixture" commit -m "remote only hotfix candidate" >/dev/null
+remote_hotfix_candidate="$(git -C "$hotfix_fixture" rev-parse HEAD)"
+git -C "$hotfix_fixture" -c core.hooksPath=/dev/null push origin develop >/dev/null
+git -C "$hotfix_fixture" reset --hard "$hotfix_merge" >/dev/null
+(
+  cd "$hotfix_fixture"
+  maintainer/scripts/hotfix.sh AO-77
+) >"$test_root/hotfix-local-behind.out"
+hotfix_merge="$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)"
+[ "$hotfix_merge" = "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/develop)" ] ||
+  fail "Hotfix 未在本地落后时原子同步 main/develop"
+[ "$(git --git-dir="$hotfix_remote" rev-parse "$hotfix_merge^2")" = "$remote_hotfix_candidate" ] ||
+  fail "Hotfix 未自动快进并包含远端 develop 新提交"
+[ "$(git -C "$hotfix_fixture" rev-parse develop)" = "$hotfix_merge" ] ||
+  fail "Hotfix 未在本地落后场景同步本地 develop"
+
 # 已同步状态再次执行必须幂等返回，不创建新的 Merge commit。
 (
   cd "$hotfix_fixture"
-  maintainer/scripts/hotfix.sh publish --jira-id AO-74
+  maintainer/scripts/hotfix.sh AO-77
 ) >"$test_root/hotfix-idempotent.out"
 grep -q '"changed":false' "$test_root/hotfix-idempotent.out" ||
   fail "Hotfix 重复执行未按已同步状态幂等完成"
@@ -1062,7 +1086,7 @@ AGENTIC_OPS_SPECIAL_PUSH=hotfix git -C "$hotfix_fixture" push origin main >/dev/
 git -C "$hotfix_fixture" switch develop >/dev/null
 (
   cd "$hotfix_fixture"
-  maintainer/scripts/hotfix.sh publish --jira-id AO-74
+  maintainer/scripts/hotfix.sh AO-76
 ) >"$test_root/hotfix-diverged.out"
 diverged_merge="$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)"
 [ "$diverged_merge" = "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/develop)" ] ||
@@ -1075,6 +1099,32 @@ git --git-dir="$hotfix_remote" cat-file -e "$diverged_merge:MAIN-ONLY.md" ||
   fail "Hotfix 分叉合并丢失 main 独有内容"
 git --git-dir="$hotfix_remote" cat-file -e "$diverged_merge:README.md" ||
   fail "Hotfix 分叉合并丢失 develop 内容"
+
+# 本地与远端 develop 各自独立前进时属于真实分叉，脚本必须停止且不改写
+# 任一远端引用。
+printf 'local divergence\n' > "$hotfix_fixture/LOCAL-DIVERGENCE.md"
+git -C "$hotfix_fixture" add LOCAL-DIVERGENCE.md
+git -C "$hotfix_fixture" commit -m "local develop divergence" >/dev/null
+local_diverged_candidate="$(git -C "$hotfix_fixture" rev-parse HEAD)"
+git -C "$hotfix_fixture" reset --hard "$diverged_merge" >/dev/null
+printf 'remote divergence\n' > "$hotfix_fixture/REMOTE-DIVERGENCE.md"
+git -C "$hotfix_fixture" add REMOTE-DIVERGENCE.md
+git -C "$hotfix_fixture" commit -m "remote develop divergence" >/dev/null
+remote_diverged_candidate="$(git -C "$hotfix_fixture" rev-parse HEAD)"
+git -C "$hotfix_fixture" -c core.hooksPath=/dev/null push origin develop >/dev/null
+git -C "$hotfix_fixture" reset --hard "$local_diverged_candidate" >/dev/null
+if (
+  cd "$hotfix_fixture"
+  maintainer/scripts/hotfix.sh AO-78
+) >"$test_root/hotfix-develop-diverged.out" 2>"$test_root/hotfix-develop-diverged.err"; then
+  fail "Hotfix 必须拒绝本地与远端 develop 真实分叉"
+fi
+grep -q 'hotfix_develop_diverged' "$test_root/hotfix-develop-diverged.err" ||
+  fail "Hotfix develop 分叉未返回稳定失败码"
+[ "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)" = "$diverged_merge" ] ||
+  fail "Hotfix develop 分叉失败错误改写了 main"
+[ "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/develop)" = "$remote_diverged_candidate" ] ||
+  fail "Hotfix develop 分叉失败错误改写了 develop"
 export AGENTIC_OPS_TEST_FIXTURE_REMOTE="$remote"
 
 # 已提前合入 main 的候选必须由 inspect 自动解析真实 PR，并通过两阶段
