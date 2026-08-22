@@ -69,7 +69,8 @@
 - `prepare` 对固定 HEAD 完成四项完整验证，验证失败不创建新 tag，也不生成项目自有平台二进制或 checksum。
 - publish 由刷新后的 `origin/main` 基线 Runtime 检查固定 candidate；信任根变更已停止自动发布并转人工审查 PR。
 - 最终确认展示的 HEAD、提交列表、版本基线和合并方向正确。
-- 软门禁普通发布使用固定 `release/vX.Y`；首次 `publish` 返回状态码 `2` 后未自动合并、未推送 Tag，人工合并后使用原命令恢复并完成第二次完整验证。
+- 软门禁普通发布使用固定 `release/vX.Y`；首次 `publish` 创建 PR 后每 5 秒查询状态、最多等待 30 分钟，人工 Merge commit 后自动完成第二次完整验证且不自动合并。`--no-wait-for-merge` 返回状态码 `2`，保留人工续跑能力。
+- 正常发布在推送 Tag 前将 `develop` 快进到已验证的 `origin/main`；快进不成立时停止，不以普通 merge、rebase 或历史改写规避。
 - PR 实际以 Merge commit 合入，`origin/main` 包含待发布 HEAD。
 - 正常发布的远端 tag 在合并验证后创建且不可变；Hotfix 没有 tag 写操作。
 - `.local/release-runs/` 逐级拒绝符号链接、特殊文件和物理越界，原子写入普通 JSON；审计记录正确的 `protection_mode` 和等待/完成状态，且不包含凭证或原始敏感日志。
