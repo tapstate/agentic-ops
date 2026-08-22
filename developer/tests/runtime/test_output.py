@@ -17,10 +17,10 @@ class OutputTest(unittest.TestCase):
         self.assertEqual("ok", result["value"])
         self.assertEqual(
             {
-                "executor": "ao_work",
-                "action": "verify_workspace_preflight",
-                "required_inputs": [],
-                "allowed_operations": ["workspace_preflight"],
+                "executor": "ai",
+                "action": "takeover_explicit_jira_task",
+                "required_inputs": ["issue_key"],
+                "allowed_operations": ["takeover"],
                 "requires_authorization": False,
                 "stop_workflow": False,
                 "ownership_effect": "none",

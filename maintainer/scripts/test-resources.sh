@@ -302,6 +302,12 @@ grep -Fq 'set -e' docs/development-engineers/getting-started.md ||
 grep -Fq 'contents/developer/bootstrap/install-verify-branch.sh?ref=develop' \
   docs/development-engineers/agent-init.md ||
   fail "研发员初始化文档缺少 develop 远程验证安装入口"
+if rg -n -U \
+  '<install-root>/bin/ao-work auth --show\n\./\.agentic-ops/bin/ao-work workspace preflight|\
+只有授权已配置且 (workspace )?preflight 通过后，才能(执行|操作)真实 Jira 任务' \
+  docs/development-engineers; then
+  fail "正式研发员文档仍将 workspace preflight 作为接管前置步骤"
+fi
 if rg -n 'contents/scripts/install\.sh|AGENTIC_OPS_REPO_URL=.*bash' \
   docs/development-engineers docs/project-rules.md \
   docs/user-stories/development-engineer; then

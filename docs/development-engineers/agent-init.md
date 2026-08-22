@@ -88,15 +88,14 @@ bash developer/bootstrap/install-verify-branch.sh \
 初始化会写入当前工作空间 `AGENTS.md` 和 `.agents/skills/` 普通文件副本。不得创建指向安装根的 symlink，也不得加载根项目维护规则。
 Agent 后续从工作空间执行 `./.agentic-ops/bin/ao-work version`，其中 `python_executable` 与 `python_venv` 必须指向绑定安装的 `developer/.venv`；Agent 启动时已有的系统 Python、业务 venv 或其它 `VIRTUAL_ENV` 会被安装入口覆盖。
 
-## 4. 开始任务前检查
+## 4. 开始任务
 
 ```sh
 <install-root>/bin/ao-work auth --show
-./.agentic-ops/bin/ao-work workspace preflight
 ./.agentic-ops/bin/ao-work capability list
 ```
 
-只有授权已配置且 workspace preflight 通过后，才能执行真实 Jira 任务。Jira 当前身份与 Project 权限由 workspace/task Runtime 入口回读。调用具体操作前执行 `./.agentic-ops/bin/ao-work capability show <operation>`；只有 `status=implemented` 且列出明确命令路径时才能调用。
+`workspace preflight` 仅用于诊断或修复工作空间，不是接管任务的前置步骤。Jira 当前身份与 Project 权限由 workspace/task Runtime 入口回读；接管时 Runtime 会重新校验工作空间、安装身份和 Jira 事实。调用具体操作前执行 `./.agentic-ops/bin/ao-work capability show <operation>`；只有 `status=implemented` 且列出明确命令路径时才能调用。
 
 正式接管入口：
 
