@@ -1,13 +1,13 @@
 ---
-name: defect-feedback
-description: Use when the user reports "反馈 AO 缺陷" or asks to log a defect against the AgenticOps product in Jira; organize the current session into a Chinese defect summary and create an "Agentic 缺陷" issue via ao-work jira create with user confirmation.
+name: ao-issue-feedback
+description: Use when the user invokes "AO问题反馈" to report a problem with the AgenticOps product; organize the current session into a Chinese defect summary and create an "Agentic 缺陷" issue via ao-work jira create with user confirmation.
 metadata:
   workplane: developer
 ---
 
-# 反馈 AO 缺陷
+# AO问题反馈
 
-本 Skill 只在 `developer` 工作面使用。用户表达「反馈 AO 缺陷 / 报一个 AO 的 bug / 记录这个 Agentic 缺陷」时触发。
+本 Skill 只在 `developer` 工作面使用。用户使用「AO问题反馈」说明 AgenticOps 产品问题时触发。
 
 ## 流程
 
