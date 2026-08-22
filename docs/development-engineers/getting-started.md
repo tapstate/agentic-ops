@@ -215,16 +215,21 @@ cd ~/agentic-ops-tapdata
 
 这些自然语言需求不代表对应自动化都已实现。AI 必须先查询能力目录；任务释放、部分 PR / CI 协作、分支对齐和完成审计等仍可能返回 `capability_gap`，应由研发工程师按目录指引处理。正式接管必须使用统一 takeover，不能用内部 `task init` 或 `task start` 冒充；developer 不提供 Agentic Custom Field 写入。
 
-## 6. 问题反馈与快速改进
+## 6. AO问题反馈与快速改进
 
-任务处理中出现无法自动完成、人工干预过多或输出质量不足时：
+当发现的是 **AgenticOps 本身** 的问题（例如命令无法安全完成、需要过多人工干预或输出质量不足），统一使用“AO问题反馈”。它不同于业务项目的 Bug：不会在当前业务 Jira 项目建卡，而是在 AO 项目创建 `Agentic 缺陷`。
 
-1. 先由研发工程师校对，确保当前业务任务正确完成。
-2. 让 AI 形成脱敏的问题总结、期望行为、建议沉淀位置和回归方法。
-3. 人工确认改进方案。
-4. 在独立 AgenticOps worktree 中切换到 maintainer 工作面完成改进并创建 `develop` PR。
+先校对并确保当前业务任务得到正确处置，然后在已初始化的业务项目工作空间中向 AI 发送：
 
-业务工作空间不得直接修改 `~/.agentic-ops` 或调用 `ao-maint`。工作面切换必须通过独立目录和独立 AI 入口完成。
+```text
+AO问题反馈：<现象、复现步骤或脱敏报错，以及期望行为>
+```
+
+AI 会整理中文摘要与描述，至少包含现象、复现步骤或证据、影响和期望行为。研发工程师核对并明确确认建卡内容后，AI 才会使用受控的 `ao-work jira create plan -> apply -> readback` 流程，在 Jira AO 项目创建 `Agentic 缺陷`；创建结果会回显真实 issue key。
+
+不要直接调用 Jira REST API，也不要在描述中包含 token、密钥、客户数据或未经脱敏的日志。授权、字段或建卡结果不明确时，应停止在 Runtime 给出的处理动作上，不要重复 `apply`。
+
+建卡后的改进仍需人工确认方案，并在独立 AgenticOps worktree 中进入 maintainer 工作面完成改进并创建 `develop` PR。业务工作空间不得直接修改 `~/.agentic-ops` 或调用 `ao-maint`；工作面切换必须通过独立目录和独立 AI 入口完成。
 
 ## 7. 更新与回滚
 

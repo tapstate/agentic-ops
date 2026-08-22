@@ -66,7 +66,13 @@ class FakeTransport:
                 if not isinstance(fields, dict):
                     return TransportResponse(400, {"errorMessages": ["invalid fields"]})
                 self.next_issue_id += 1
-                key = f"TAP-{self.next_issue_id}"
+                project = fields.get("project", {})
+                project_key = (
+                    str(project.get("key", "")).strip()
+                    if isinstance(project, dict)
+                    else ""
+                ) or "TAP"
+                key = f"{project_key}-{self.next_issue_id}"
                 item: dict[str, Any] = {"id": str(self.next_issue_id), "key": key, "fields": dict(fields)}
                 self.created_issues.append(item)
                 return TransportResponse(201, {"id": str(self.next_issue_id), "key": key})
@@ -517,6 +523,13 @@ class JiraServiceTest(unittest.TestCase):
         result = service.apply_create_issue(plan2, plan2.plan_id)
         self.assertEqual(False, result["created"])
         self.assertEqual(1, len(transport.created_issues))
+        search_fields = [
+            query["fields"].split(",")
+            for request, query in zip(transport.requests, transport.queries)
+            if request == ("GET", "/rest/api/3/search/jql")
+        ]
+        self.assertTrue(search_fields)
+        self.assertIn("issuetype", search_fields[-1])
 
     def test_create_issue_requires_chinese_summary(self) -> None:
         service, _transport = self._create_service_with_meta()
