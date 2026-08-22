@@ -159,15 +159,17 @@ class OfflineFakeRunner:
             "  if [ \"$1\" = \"--project\" ]; then project=$2; shift 2; else shift; fi\n"
             "done\n"
             "test -n \"$project\"\n"
-            "mkdir -p \"$project/.venv/bin\"\n"
-            "cat > \"$project/.venv/bin/python\" <<'PYTHON_WRAPPER'\n"
-            "#!/bin/sh\n"
-            f"exec {python} \"$@\"\n"
-            "PYTHON_WRAPPER\n"
-            "chmod 700 \"$project/.venv/bin/python\"\n",
+            f"{python} -m venv --clear --system-site-packages \"$project/.venv\"\n"
+            "venv_site=$(\"$project/.venv/bin/python\" -c "
+            "'import site; print(site.getsitepackages()[0])')\n"
+            f"{python} -c 'import site; print(\"\\n\".join(site.getsitepackages()))' "
+            "> \"$venv_site/agentic-ops-test-dependencies.pth\"\n",
             encoding="utf-8",
         )
         fake_uv.chmod(0o700)
+        fake_gh = self.tool_bin / "gh"
+        fake_gh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake_gh.chmod(0o700)
         self._record("isolation_prepared", inherited_environment=False)
 
     def _prepare_loopback_tls(self) -> None:

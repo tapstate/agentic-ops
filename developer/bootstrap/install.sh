@@ -17,6 +17,10 @@ usage() {
 安装参数：
   --install-home <path>  安装目录（默认 ~/.agentic-ops；优先于 AGENTIC_OPS_HOME）
 
+安装前置：
+  必须已安装 git、gh、uv；缺少任意程序时会一次列出全部缺失项并停止安装。
+  AGENTIC_OPS_UV 指向可信可执行文件时可替代 PATH 中的 uv。
+
 可选授权参数（安装完成后原样转交 ao-work auth）：
   --agent-id <id>
   --jira-email <email>
@@ -82,6 +86,28 @@ if [ -n "${AGENTIC_OPS_TEST_MODE:-}" ] || \
   exit 1
 fi
 
+missing_dependencies=()
+if ! command -v git >/dev/null 2>&1; then
+  missing_dependencies+=(git)
+fi
+if ! command -v gh >/dev/null 2>&1; then
+  missing_dependencies+=(gh)
+fi
+if { [ -z "${AGENTIC_OPS_UV:-}" ] || [ ! -x "$AGENTIC_OPS_UV" ]; } && \
+  ! command -v uv >/dev/null 2>&1; then
+  missing_dependencies+=(uv)
+fi
+if [ "${#missing_dependencies[@]}" -gt 0 ]; then
+  missing_csv="$(IFS=,; printf '%s' "${missing_dependencies[*]}")"
+  missing_display="${missing_csv//,/, }"
+  printf 'AgenticOps：缺少 developer 安装依赖：%s；安装尚未开始。\n' \
+    "$missing_display" >&2
+  printf '{"ok":false,"operation":"bootstrap","status":"failed","code":"install_dependencies_missing","retry_safe":true,"missing_dependencies":"%s","message":"缺少 developer 安装依赖","required_human_action":"请先安装全部缺失程序后重新执行 developer 安装"}\n' \
+    "$missing_csv"
+  exit 1
+fi
+unset missing_dependencies missing_csv missing_display
+
 SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
   SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -104,10 +130,6 @@ fi
 
 if [ -e "$INSTALL_DIR" ]; then
   agentic_reject_verification_mode "$INSTALL_DIR"
-fi
-
-if ! command -v git >/dev/null 2>&1; then
-  agentic_bootstrap_error "git_not_found" "未找到 Git，无法安装 AgenticOps" "请先安装 Git"
 fi
 
 expected_repository="$(agentic_expected_repository)"
@@ -203,5 +225,6 @@ fi
 
 agentic_bootstrap_json_success bootstrap_install \
   install_dir "$INSTALL_DIR" current_ref "$current_ref" python "3.12" \
+  python_venv "$INSTALL_DIR/developer/.venv" \
   authorization_status "$authorization_status" \
   authorization_next_action "$INSTALL_DIR/bin/ao-work auth"
