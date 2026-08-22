@@ -80,7 +80,7 @@ maintainer/scripts/release.sh publish --version v0.3 --allow-soft-gate --confirm
 
 普通发布会在 `prepare` 时从已验证的 `develop` HEAD 创建固定本地 `release/vX.Y` 分支。首次 `publish` 推送该固定分支并创建 PR 后，每 5 秒查询一次 PR 状态，最多等待 30 分钟；研发工程师仍必须在 GitHub 页面选择 Merge commit 人工合并，检测到合并后脚本自动重新验证固定 HEAD，将 `develop` 快进到已验证的 `main`，并在实际 Merge commit 创建和推送 Tag。快进条件不成立时失败关闭，不会普通 merge、rebase 或改写 `develop` 历史。若需要立即返回，可加 `--no-wait-for-merge`；该模式返回状态码 `2`，人工合并后重新执行同一条 `publish` 命令。发布分支保留，不自动删除。
 
-Hotfix 使用相同的 `--allow-soft-gate`、状态码 `2`、人工 Merge commit 和二次验证规则，但复用最近的 `vX.Y`，不创建或移动 Tag。软门禁不能从服务器端阻止其他账号直接推送 `main`，因此命令输出、PR 和审计中的 `protection_mode=soft` 风险提示不得忽略。
+Hotfix 从包含当前 `main` 的最新 `develop` 创建修复分支，使用相同的 `--allow-soft-gate`、状态码 `2`、人工 Merge commit 和二次验证规则；合入后自动把远端和本地 `develop` 快进到 `main` 并切回 `develop`。它复用最近的 `vX.Y`，不创建、移动或推送 Tag；快进不成立时失败关闭。软门禁不能从服务器端阻止其他账号直接推送 `main`，因此命令输出、PR 和审计中的 `protection_mode=soft` 风险提示不得忽略。
 
 ## 不要混用的资料
 

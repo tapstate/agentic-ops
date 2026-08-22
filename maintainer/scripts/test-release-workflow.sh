@@ -945,20 +945,42 @@ git -C "$fixture" tag -a v9.8 -m 'hotfix baseline'
 AGENTIC_OPS_SPECIAL_PUSH=release \
   git -C "$fixture" push origin refs/tags/v9.8 >/dev/null
 git -C "$fixture" switch develop >/dev/null
+
+# Hotfix 的单向基线需要 develop 包含 main。使用独立仓库验证，避免改变后续
+# recovery fixture 刻意保留的 main/develop 分叉状态。
+hotfix_remote="$test_root/hotfix-remote.git"
+hotfix_fixture="$test_root/hotfix-repo"
+git init --bare "$hotfix_remote" >/dev/null
+git clone --branch main "$fixture" "$hotfix_fixture" >/dev/null 2>&1
+git -C "$hotfix_fixture" config user.email agentic-ops-test@example.test
+git -C "$hotfix_fixture" config user.name "AgenticOps Test"
+git -C "$hotfix_fixture" remote set-url origin "$hotfix_remote"
+git -C "$hotfix_fixture" push -u origin main >/dev/null
+git -C "$hotfix_fixture" push origin refs/tags/v9.8 >/dev/null
+git -C "$hotfix_fixture" switch -c develop main >/dev/null
+git -C "$hotfix_fixture" push -u origin develop >/dev/null
+git -C "$hotfix_fixture" remote set-url origin "$AGENTIC_OPS_TEST_OFFICIAL_URL"
+export AGENTIC_OPS_TEST_FIXTURE_REMOTE="$hotfix_remote"
 (
-  cd "$fixture"
+  . "$hotfix_fixture/maintainer/scripts/lib/development-workflow.sh"
+  workflow_install_trusted_hooks "$hotfix_fixture"
+)
+(
+  cd "$hotfix_fixture"
   AGENTIC_OPS_GH_BIN="$fake_gh" \
     maintainer/scripts/hotfix.sh create --jira-id AO-11 --user tester
 ) >"$test_root/hotfix-create.out"
 grep -q '"operation":"hotfix_create"' "$test_root/hotfix-create.out" ||
-  fail "Hotfix 未从 origin/main 创建标准分支"
-test "$(git -C "$fixture" branch --show-current)" = "tester/AO-11/fix-main" ||
+  fail "Hotfix 未从 origin/develop 创建标准分支"
+grep -q '"base":"origin/develop"' "$test_root/hotfix-create.out" ||
+  fail "Hotfix create 未记录单向 develop 基线"
+test "$(git -C "$hotfix_fixture" branch --show-current)" = "tester/AO-11/fix-main" ||
   fail "Hotfix 分支命名不符合规则"
-hotfix_tag_count="$(git -C "$fixture" tag --list | wc -l | tr -d ' ')"
+hotfix_tag_count="$(git -C "$hotfix_fixture" tag --list | wc -l | tr -d ' ')"
 hotfix_prepare_verify_log="$test_root/hotfix-prepare-verify.log"
 : > "$hotfix_prepare_verify_log"
 (
-  cd "$fixture"
+  cd "$hotfix_fixture"
   AGENTIC_OPS_GH_BIN="$fake_gh" \
   FAKE_VERIFY_LOG="$hotfix_prepare_verify_log" \
     maintainer/scripts/hotfix.sh prepare
@@ -967,11 +989,11 @@ grep -q '"tag_action":"reuse_only"' "$test_root/hotfix-prepare.out" ||
   fail "Hotfix prepare 必须复用版本基线"
 [ "$(cat "$hotfix_prepare_verify_log")" = "$expected_prepare" ] ||
   fail "Hotfix prepare 未执行固定完整验证或顺序错误"
-test "$(git -C "$fixture" tag --list | wc -l | tr -d ' ')" = "$hotfix_tag_count" ||
+test "$(git -C "$hotfix_fixture" tag --list | wc -l | tr -d ' ')" = "$hotfix_tag_count" ||
   fail "Hotfix prepare 不得创建新 Tag"
 
 if (
-  cd "$fixture"
+  cd "$hotfix_fixture"
   AGENTIC_OPS_GH_BIN="$fake_gh" \
   AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING=1 \
   FAKE_VERIFY_LOG="$verify_log" \
@@ -981,8 +1003,9 @@ if (
 fi
 grep -q 'release_confirmation_required' "$test_root/unconfirmed-hotfix.err" ||
   fail "Hotfix publish 未返回最终确认失败码"
-test -z "$(git --git-dir="$remote" show-ref --heads refs/heads/tester/AO-11/fix-main || true)" ||
+test -z "$(git --git-dir="$hotfix_remote" show-ref --heads refs/heads/tester/AO-11/fix-main || true)" ||
   fail "最终确认前不得推送 Hotfix 分支"
+export AGENTIC_OPS_TEST_FIXTURE_REMOTE="$remote"
 
 # 已提前合入 main 的候选必须由 inspect 自动解析真实 PR，并通过两阶段
 # recover 绑定完整确认包；确认前不得改变本地或远端 Tag。
@@ -1354,13 +1377,45 @@ test "$(git -C "$sync_fixture" rev-parse develop)" = "$sync_merge" ||
   fail "发布完成后本地 develop 未快进到 main"
 test "$(git --git-dir="$sync_remote" rev-parse refs/heads/develop)" = "$sync_merge" ||
   fail "发布完成后远端 develop 未快进到 main"
+
+# Hotfix 从 develop 固定修复线；合入 main 后，同一函数必须从修复分支
+# 自动切回 develop 并完成本地、远端快进，全程没有 Tag 写操作。
+git -C "$sync_fixture" switch -c tester/AO-12/fix-main >/dev/null
+printf 'hotfix\n' >> "$sync_fixture/README.md"
+git -C "$sync_fixture" add README.md
+git -C "$sync_fixture" commit -m "sync hotfix" >/dev/null
+sync_hotfix_head="$(git -C "$sync_fixture" rev-parse HEAD)"
+git -C "$sync_fixture" push -u origin tester/AO-12/fix-main >/dev/null
+(
+  . "$repo_root/maintainer/scripts/lib/release-common.sh"
+  release_require_hotfix_develop_lineage "$sync_fixture"
+)
+git -C "$sync_fixture" switch main >/dev/null
+git -C "$sync_fixture" merge --no-ff tester/AO-12/fix-main -m "sync hotfix merge" >/dev/null
+sync_hotfix_merge="$(git -C "$sync_fixture" rev-parse HEAD)"
+git -C "$sync_fixture" push origin main >/dev/null
+git -C "$sync_fixture" switch tester/AO-12/fix-main >/dev/null
+(
+  . "$repo_root/maintainer/scripts/lib/release-common.sh"
+  release_require_hotfix_develop_lineage "$sync_fixture"
+  release_sync_develop_to_main "$sync_fixture" "$sync_hotfix_merge"
+)
+test "$(git -C "$sync_fixture" branch --show-current)" = "develop" ||
+  fail "Hotfix 闭环后未自动切回 develop"
+test "$(git -C "$sync_fixture" rev-parse develop)" = "$sync_hotfix_merge" ||
+  fail "Hotfix 完成后本地 develop 未快进到 main"
+test "$(git --git-dir="$sync_remote" rev-parse refs/heads/develop)" = "$sync_hotfix_merge" ||
+  fail "Hotfix 完成后远端 develop 未快进到 main"
+test "$(git --git-dir="$sync_remote" rev-parse refs/heads/tester/AO-12/fix-main)" = "$sync_hotfix_head" ||
+  fail "Hotfix 闭环错误改写了固定修复分支"
+
 printf 'new development during release\n' >> "$sync_fixture/README.md"
 git -C "$sync_fixture" add README.md
 git -C "$sync_fixture" commit -m "sync diverged develop" >/dev/null
 git -C "$sync_fixture" push origin develop >/dev/null
 if (
   . "$repo_root/maintainer/scripts/lib/release-common.sh"
-  release_sync_develop_to_main "$sync_fixture" "$sync_merge"
+  release_sync_develop_to_main "$sync_fixture" "$sync_hotfix_merge"
 ) > "$test_root/develop-sync-diverged.out" 2> "$test_root/develop-sync-diverged.err"; then
   fail "develop 分叉时不得自动同步或改写历史"
 fi

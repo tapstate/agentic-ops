@@ -206,7 +206,7 @@ maintainer/scripts/hotfix.sh prepare
 maintainer/scripts/hotfix.sh publish
 ```
 
-修复分支必须从最新 `origin/main` 创建，格式为 `<user>/<jira-id>/fix-main`。Hotfix 复用 `main` 最近的二段式版本基线，沿用既有 `STATE-vX.Y.COMMIT_INDEX-COMMIT` 构造，不创建、移动或推送新 tag；合入 `main` 后必须提示研发工程师人工同步 `develop`。
+修复分支必须从包含当前 `origin/main` 的最新 `origin/develop` 创建，格式为 `<user>/<jira-id>/fix-main`。Hotfix 将固定的 develop 修复线通过 Merge commit 单向合入 `main`，复用 `main` 最近的二段式版本基线，沿用既有 `STATE-vX.Y.COMMIT_INDEX-COMMIT` 构造，不创建、移动或推送 tag；合入后脚本必须把远端和本地 `develop` 快进到已验证的 `origin/main` 并切回 `develop`，快进不成立时失败关闭，禁止普通 merge、rebase 或 cherry-pick。
 
 两个 `prepare` 和两个 `publish` 入口都必须在临时 worktree 中固定执行以下完整验证：
 

@@ -64,8 +64,12 @@ case "$command_name" in
     release_require_command git || exit 1
     release_require_repo "$repo_root" || exit 1
     release_require_clean "$repo_root" || exit 1
-    if ! git -C "$repo_root" fetch origin main >/dev/null 2>&1; then
-      release_fail "hotfix_main_fetch_failed" "hotfix_create" "无法刷新 origin/main" "请检查网络和远端权限后重试"
+    if ! git -C "$repo_root" fetch origin main develop >/dev/null 2>&1; then
+      release_fail "hotfix_base_fetch_failed" "hotfix_create" "无法刷新 origin/main 或 origin/develop" "请检查网络和远端权限后重试"
+      exit 1
+    fi
+    if ! git -C "$repo_root" merge-base --is-ancestor refs/remotes/origin/main refs/remotes/origin/develop; then
+      release_fail "hotfix_develop_not_based_on_main" "hotfix_create" "origin/develop 未包含当前 origin/main，不能启动单向 Hotfix" "请先恢复 main 到 develop 的快进基线；禁止普通 merge、rebase 或 cherry-pick"
       exit 1
     fi
     if [ -z "$requested_user" ]; then
@@ -78,11 +82,11 @@ case "$command_name" in
       release_fail "hotfix_branch_exists" "hotfix_create" "本地或远端已存在 $hotfix_branch" "请继续已有修复分支或使用新的 Jira 任务"
       exit 1
     fi
-    if ! git -C "$repo_root" switch -c "$hotfix_branch" refs/remotes/origin/main; then
-      release_fail "hotfix_branch_create_failed" "hotfix_create" "无法从最新 origin/main 创建修复分支" "请检查本地分支状态后重试"
+    if ! git -C "$repo_root" switch -c "$hotfix_branch" refs/remotes/origin/develop; then
+      release_fail "hotfix_branch_create_failed" "hotfix_create" "无法从最新 origin/develop 创建修复分支" "请检查本地分支状态后重试"
       exit 1
     fi
-    printf '{"ok":true,"operation":"hotfix_create","jira_id":"%s","branch":"%s","base":"origin/main","agentic_next_action":"implement_and_test_hotfix"}\n' \
+    printf '{"ok":true,"operation":"hotfix_create","jira_id":"%s","branch":"%s","base":"origin/develop","tag_action":"none","agentic_next_action":"implement_and_test_hotfix"}\n' \
       "$jira_id" "$hotfix_branch"
     ;;
   prepare)
@@ -95,6 +99,7 @@ case "$command_name" in
     workflow_mode="$(release_workflow_mode "$configure_workflow" "$allow_soft_gate")"
     workflow_check_or_configure "$workflow_mode" "$repo_root" >/dev/null || exit 1
     release_require_main_base "$repo_root" || exit 1
+    release_require_hotfix_develop_lineage "$repo_root" || exit 1
     hotfix_version="$(release_find_iteration_tag "$repo_root")" || exit 1
     hotfix_head="$(git -C "$repo_root" rev-parse HEAD)"
     release_run_full_verification "$repo_root" "$hotfix_head" || exit 1
@@ -114,6 +119,7 @@ case "$command_name" in
     workflow_mode="$(release_workflow_mode "$configure_workflow" "$allow_soft_gate")"
     workflow_check_or_configure "$workflow_mode" "$repo_root" >/dev/null || exit 1
     release_require_main_base "$repo_root" || exit 1
+    release_require_hotfix_develop_lineage "$repo_root" || exit 1
     release_require_synced_hotfix_branch "$repo_root" "$hotfix_branch" || exit 1
     hotfix_version="$(release_find_iteration_tag "$repo_root")" || exit 1
     hotfix_head="$(git -C "$repo_root" rev-parse HEAD)"
@@ -145,12 +151,11 @@ case "$command_name" in
       release_wait_for_merge "$release_repository" || exit 1
     fi
     release_verify_remote_contains "$repo_root" "$hotfix_head" || exit 1
-    if [ "$allow_soft_gate" = "true" ]; then
-      release_verify_merge_commit "$repo_root" "$hotfix_head" "$RELEASE_MERGE_COMMIT" || exit 1
-    fi
+    release_verify_merge_commit "$repo_root" "$hotfix_head" "$RELEASE_MERGE_COMMIT" || exit 1
+    release_sync_develop_to_main "$repo_root" "$RELEASE_MERGE_COMMIT" || exit 1
     release_write_hotfix_audit "$repo_root" "$HOTFIX_JIRA_ID" "$hotfix_version" "$hotfix_head" "$hotfix_branch" "$protection_mode" || exit 1
-    printf '{"ok":true,"operation":"hotfix_publish","jira_id":"%s","version":"%s","branch":"%s","head":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","protection_mode":"%s","audit_file":"%s","agentic_next_action":"sync_hotfix_to_develop"}\n' \
-      "$HOTFIX_JIRA_ID" "$hotfix_version" "$hotfix_branch" "$hotfix_head" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "$protection_mode" "$RELEASE_AUDIT_FILE"
+    printf '{"ok":true,"operation":"hotfix_publish","jira_id":"%s","version":"%s","branch":"%s","head":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","develop_commit":"%s","tag_action":"none","protection_mode":"%s","audit_file":"%s","agentic_next_action":"hotfix_completed"}\n' \
+      "$HOTFIX_JIRA_ID" "$hotfix_version" "$hotfix_branch" "$hotfix_head" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "$RELEASE_DEVELOP_COMMIT" "$protection_mode" "$RELEASE_AUDIT_FILE"
     ;;
   *)
     release_fail "invalid_hotfix_command" "argument_parsing" "不支持的 Hotfix 子命令 $command_name" "请使用 create、prepare 或 publish"
