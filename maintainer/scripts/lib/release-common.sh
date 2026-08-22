@@ -556,7 +556,7 @@ release_verify_story_gate() {
       rm -rf -- "$temp_root"
       release_fail "release_story_gate_baseline_upgrade_required" "story_gate" \
         "origin/main 尚未安装可独立执行的新故事门禁基线" \
-        "请先通过受保护 main 的人工审查 PR 完成一次基线升级；基线进入 main 后，再用 release/hotfix publish 发布后续变更"
+        "请先通过受保护 main 的人工审查 PR 完成一次基线升级；基线进入 main 后，再用 release publish 发布后续变更"
       return 1
     fi
   done
@@ -1595,185 +1595,20 @@ release_write_waiting_audit() {
   local version="$3"
   local head="$4"
   local branch="$5"
-  local jira_id="${6:-}"
   local audit_name
   local payload
 
-  if [ "$operation" = "hotfix_publish" ]; then
-    audit_name="hotfix-$jira_id-$head.json"
-    RELEASE_CONTINUE_COMMAND="maintainer/scripts/hotfix.sh publish --allow-soft-gate --confirm-release"
-  else
-    audit_name="release-$version-$head.json"
-    RELEASE_CONTINUE_COMMAND="maintainer/scripts/release.sh publish --version $version --allow-soft-gate --confirm-release"
-  fi
-  if [ "$operation" = "hotfix_publish" ]; then
-    payload="$(printf '{"operation":"%s","status":"waiting_for_manual_merge","jira_id":"%s","version":"%s","branch":"%s","head":"%s","verified_at":"%s","pr_number":%s,"pr_url":"%s","protection_mode":"soft","continue_command":"%s"}' \
-      "$operation" "$jira_id" "$version" "$branch" "$head" "$RELEASE_VERIFIED_AT" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_CONTINUE_COMMAND")"
-  else
-    payload="$(printf '{"operation":"%s","status":"waiting_for_manual_merge","version":"%s","branch":"%s","head":"%s","verified_at":"%s","pr_number":%s,"pr_url":"%s","protection_mode":"soft","continue_command":"%s"}' \
-      "$operation" "$version" "$branch" "$head" "$RELEASE_VERIFIED_AT" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_CONTINUE_COMMAND")"
-  fi
+  audit_name="release-$version-$head.json"
+  RELEASE_CONTINUE_COMMAND="maintainer/scripts/release.sh publish --version $version --allow-soft-gate --confirm-release"
+  payload="$(printf '{"operation":"%s","status":"waiting_for_manual_merge","version":"%s","branch":"%s","head":"%s","verified_at":"%s","pr_number":%s,"pr_url":"%s","protection_mode":"soft","continue_command":"%s"}' \
+    "$operation" "$version" "$branch" "$head" "$RELEASE_VERIFIED_AT" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_CONTINUE_COMMAND")"
   release_write_audit_json "$repo_root" "$audit_name" "$payload"
 }
 
 release_validate_jira_id() {
   local jira_id="$1"
   if ! printf '%s\n' "$jira_id" | grep -Eq '^[A-Z][A-Z0-9]+-[1-9][0-9]*$'; then
-    release_fail "invalid_jira_id" "hotfix_branch" "Jira ID 格式无效" "请使用例如 AO-123 或 TAP-12371 的大写任务编号"
+    release_fail "invalid_jira_id" "hotfix_publish" "Jira ID 格式无效" "请使用例如 AO-123 或 TAP-12371 的大写任务编号"
     return 1
   fi
-}
-
-release_normalize_git_user() {
-  local raw_user="$1"
-  local normalized_user
-  normalized_user="$(printf '%s' "$raw_user" |
-    LC_ALL=C tr '[:upper:]' '[:lower:]' |
-    sed -E 's/[[:space:]_.]+/-/g; s/-+/-/g; s/^-//; s/-$//')"
-  if ! printf '%s\n' "$normalized_user" | grep -Eq '^[a-z0-9][a-z0-9-]*$'; then
-    release_fail "invalid_git_user" "hotfix_branch" "Git 用户名无法转换为安全分支片段" "请通过 --user 提供小写字母、数字和连字符组成的用户名"
-    return 1
-  fi
-  printf '%s\n' "$normalized_user"
-}
-
-release_parse_hotfix_branch() {
-  local branch="$1"
-  local user_part
-  local remainder
-  local jira_part
-
-  case "$branch" in
-    */*/fix-main)
-      user_part="${branch%%/*}"
-      remainder="${branch#*/}"
-      jira_part="${remainder%%/*}"
-      ;;
-    *)
-      release_fail "invalid_hotfix_branch" "hotfix_branch" "当前分支不符合 <user>/<jira-id>/fix-main" "请使用 maintainer/scripts/hotfix.sh create 创建修复分支"
-      return 1
-      ;;
-  esac
-  if [ "$branch" != "$user_part/$jira_part/fix-main" ] ||
-    ! printf '%s\n' "$user_part" | grep -Eq '^[a-z0-9][a-z0-9-]*$' ||
-    ! printf '%s\n' "$jira_part" | grep -Eq '^[A-Z][A-Z0-9]+-[1-9][0-9]*$'; then
-    release_fail "invalid_hotfix_branch" "hotfix_branch" "当前分支不符合 <user>/<jira-id>/fix-main" "请使用 maintainer/scripts/hotfix.sh create 创建修复分支"
-    return 1
-  fi
-  HOTFIX_USER="$user_part"
-  HOTFIX_JIRA_ID="$jira_part"
-  HOTFIX_BRANCH="$branch"
-}
-
-release_require_main_base() {
-  local repo_root="$1"
-  local branch
-  local local_head
-  local remote_branch_head
-  if ! git -C "$repo_root" fetch origin main >/dev/null 2>&1; then
-    release_fail "hotfix_main_fetch_failed" "hotfix_base" "无法刷新 origin/main" "请检查网络和远端权限后重试"
-    return 1
-  fi
-  if git -C "$repo_root" merge-base --is-ancestor refs/remotes/origin/main HEAD; then
-    return 0
-  fi
-  local_head="$(git -C "$repo_root" rev-parse HEAD)"
-  if git -C "$repo_root" merge-base --is-ancestor "$local_head" refs/remotes/origin/main; then
-    branch="$(git -C "$repo_root" branch --show-current)"
-    remote_branch_head="$(git -C "$repo_root" ls-remote --heads origin "refs/heads/$branch" 2>/dev/null | awk '{print $1}')"
-    if [ "$remote_branch_head" = "$local_head" ]; then
-      return 0
-    fi
-  fi
-  release_fail "hotfix_main_not_current" "hotfix_base" "修复分支未包含最新 origin/main，且不能证明该 HEAD 已合并" "请重新从最新 main 创建修复分支或人工处理基线"
-  return 1
-}
-
-release_require_hotfix_develop_lineage() {
-  local repo_root="$1"
-  local hotfix_head
-  local remote_hotfix_head
-  local branch
-
-  if ! git -C "$repo_root" fetch origin main develop >/dev/null 2>&1; then
-    release_fail "hotfix_base_fetch_failed" "hotfix_base" "无法刷新 origin/main 或 origin/develop" "请检查网络和远端权限后重试"
-    return 1
-  fi
-  hotfix_head="$(git -C "$repo_root" rev-parse HEAD)"
-  if git -C "$repo_root" merge-base --is-ancestor refs/remotes/origin/develop "$hotfix_head" &&
-    git -C "$repo_root" merge-base --is-ancestor refs/remotes/origin/main refs/remotes/origin/develop; then
-    return 0
-  fi
-  if git -C "$repo_root" merge-base --is-ancestor "$hotfix_head" refs/remotes/origin/main &&
-    git -C "$repo_root" merge-base --is-ancestor refs/remotes/origin/develop refs/remotes/origin/main; then
-    branch="$(git -C "$repo_root" branch --show-current)"
-    remote_hotfix_head="$(git -C "$repo_root" ls-remote --heads origin "refs/heads/$branch" 2>/dev/null | awk '{print $1}')"
-    if [ "$remote_hotfix_head" = "$hotfix_head" ]; then
-      return 0
-    fi
-  fi
-  release_fail "hotfix_develop_lineage_changed" "hotfix_base" "Hotfix 未包含最新 origin/develop，或 main/develop 已不满足单向快进关系" "请停止发布；不要自动 merge、rebase 或 cherry-pick，先人工核查并重新固定修复 HEAD"
-  return 1
-}
-
-release_find_iteration_tag() {
-  local repo_root="$1"
-  local candidate
-  if ! git -C "$repo_root" fetch origin main --tags >/dev/null 2>&1; then
-    release_fail "hotfix_main_fetch_failed" "version_baseline" "无法刷新 main 和远端 Tag" "请检查网络后重试"
-    return 1
-  fi
-  for candidate in $(git -C "$repo_root" tag --merged refs/remotes/origin/main --sort=-version:refname); do
-    if printf '%s\n' "$candidate" | grep -Eq '^v[0-9]+\.[0-9]+$' &&
-      [ "$(git -C "$repo_root" cat-file -t "refs/tags/$candidate" 2>/dev/null || true)" = "tag" ] &&
-      [ -n "$(git -C "$repo_root" ls-remote --tags --refs origin "refs/tags/$candidate" 2>/dev/null)" ]; then
-      HOTFIX_VERSION="$candidate"
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-  release_fail "iteration_tag_missing" "version_baseline" "origin/main 历史中没有可复用的 annotated vX.Y Tag" "请先完成一个正常版本发布"
-  return 1
-}
-
-release_require_synced_hotfix_branch() {
-  local repo_root="$1"
-  local branch="$2"
-  local remote_branch
-  local local_head
-  local remote_head
-
-  remote_branch="$(git -C "$repo_root" ls-remote --heads origin "refs/heads/$branch" 2>/dev/null | awk '{print $1}')"
-  if [ -z "$remote_branch" ]; then
-    return 0
-  fi
-  if ! git -C "$repo_root" fetch origin "$branch" >/dev/null 2>&1; then
-    release_fail "hotfix_branch_fetch_failed" "branch_sync" "无法刷新远端修复分支" "请检查网络后重试"
-    return 1
-  fi
-  local_head="$(git -C "$repo_root" rev-parse HEAD)"
-  remote_head="$(git -C "$repo_root" rev-parse "refs/remotes/origin/$branch")"
-  if [ "$local_head" = "$remote_head" ] ||
-    git -C "$repo_root" merge-base --is-ancestor "$remote_head" "$local_head"; then
-    return 0
-  fi
-  if git -C "$repo_root" merge-base --is-ancestor "$local_head" "$remote_head"; then
-    release_fail "hotfix_branch_behind_remote" "branch_sync" "本地修复分支落后于远端同名分支" "请人工同步远端变更后重新验证"
-    return 1
-  fi
-  release_fail "hotfix_branch_diverged" "branch_sync" "本地与远端修复分支已分叉" "请人工处理分叉，不要由发布脚本自动 merge 或 rebase"
-  return 1
-}
-
-release_write_hotfix_audit() {
-  local repo_root="$1"
-  local jira_id="$2"
-  local version="$3"
-  local head="$4"
-  local branch="$5"
-  local protection_mode="${6:-hard}"
-  local payload
-  payload="$(printf '{"operation":"hotfix_publish","status":"completed","jira_id":"%s","version":"%s","branch":"%s","head":"%s","verified_at":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","develop_commit":"%s","tag_action":"none","protection_mode":"%s","next_action":"hotfix_completed"}' \
-    "$jira_id" "$version" "$branch" "$head" "$RELEASE_VERIFIED_AT" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "${RELEASE_DEVELOP_COMMIT:-}" "$protection_mode")"
-  release_write_audit_json "$repo_root" "hotfix-$jira_id-$head.json" "$payload"
 }

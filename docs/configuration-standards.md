@@ -13,14 +13,14 @@
 
 ## 2. developer 配置分类
 
-- 安装授权配置：`user/identity.yaml` 与 `user/.env` 保存当前 developer 安装唯一研发员的身份和 Jira 凭证；`user/ssh/` 与 `user/gh/` 保存可选的安装级 Git SSH 和 GitHub CLI 隔离授权。
+- 安装授权配置：`user/identity.yaml` 与 `user/.env`，保存当前 developer 安装唯一研发员的身份和凭证。
 - 项目工作空间配置：`.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 和受管配置文件，只保存项目绑定与安装身份引用。
 - 项目标准资产：`developer/standards/projects/<project>/`，保存项目字段、流程、仓库和审查映射。
 - 公司标准资产：`developer/standards/company/`，保存跨项目硬规定。
 - Connection：`developer/standards/connections/` 保存非密钥站点和 API 能力定义。
 - secret：只保存到当前 developer 安装的受保护 `user/.env` 或后续受控凭据存储。
 
-一个 developer 安装代表一名研发员并只维护一个 Jira 账户；同一安装下的业务项目工作空间继承该身份和凭证，但项目配置相互隔离。不同研发员必须使用隔离安装。Git 提交身份、Git SSH 远端认证和 GitHub CLI 登录分别建模，不得用 `gh` 账户代替 SSH push actor 证据。
+一个 developer 安装代表一名研发员并只维护一个 Jira 账户；同一安装下的业务项目工作空间继承该身份和凭证，但项目配置相互隔离。不同研发员必须使用隔离安装。
 
 ## 3. 来源优先级
 
@@ -54,13 +54,6 @@ ao-work auth --show
 
 `ao-work auth` 不选择 Connection 或 Project；Connection 由业务工作空间的 Project Profile 推导，workspace/task Runtime 入口负责真实 Jira 身份和权限回读。
 
-Git/SSH/`gh` 执行授权必须显式选择：
-
-- `global`：只回读并复用机器已有配置，Runtime 不写全局 Git、SSH 或 `gh`。
-- `installation`：在安装 `user/` 内使用独立 SSH key/config/known_hosts 与 `GH_CONFIG_DIR`；SSH 通过 `ssh.github.com:443` 且不得回退全局 Agent。
-
-模式、执行身份和安装公钥指纹纳入 `install_identity_ref`。已有受管授权不同必须展示脱敏差异并使用绑定当前 `change_digest` 的精确确认；非受管路径、不同 `gh` 账户、既有私钥、自定义 `core.sshCommand` 和宽松权限不得静默覆盖。
-
 ## 5. 统一读取入口
 
 developer 功能必须通过 `ao_work` 配置模块读取 effective 配置，不由 Skill、Shell 或单个功能直接解析 YAML / `.env`。人和 AIAgent 通过 `ao-work` 的授权、工作空间和后续配置查询子命令查看脱敏状态。
@@ -75,7 +68,6 @@ maintainer 功能只通过 `ao_maint` 读取源头仓库与 `maintainer/.local/`
 - 是否包含 secret；secret 只能进入受保护本地凭证存储。
 - 默认值、Project Profile、Connection 和工作空间的职责是否清晰。
 - 初始化、帮助、操作契约、文档和测试是否同步。
-- 是否把提交身份、SSH 远端认证和 GitHub CLI 账户分别校验，且项目验证子进程未继承安装凭证。
 - 是否影响现有工作空间 schema、任务接管、证据回写或安装更新。
 - 是否会产生跨面读取、跨工作空间继承或环境隐式兜底。
 

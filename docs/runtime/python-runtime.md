@@ -109,8 +109,6 @@ Runtime 不在同一进程中区分 mode。`ao_maint` 与 `ao_work` 分别由目
 
 Jira 配置分为安装级研发员账户、Connection、Project Profile 和 Project AI Workspace。一个 developer 安装代表一名研发员并维护一个 Jira 账户；同一安装下可以维护多个相互隔离的业务项目工作空间，多名研发员使用隔离安装。项目工作空间通过 Project Profile 选择 Connection，显式 `connection_id` 只作一致性校验。任务身份仍包含 `connection_id`、`jira_issue_id`、`issue_key` 和 `project_key`；安装身份、站点、Profile 或 Issue 事实不一致时返回稳定阻断码。
 
-安装级执行授权把 Git commit author/committer、Git SSH 远端认证与 GitHub CLI `gh api user` 分别建模。`global` 模式只复用和校验机器现有授权，不执行全局写入；`installation` 模式使用安装 `user/ssh/`、隔离 `GH_CONFIG_DIR`、SSH-over-443、`IdentitiesOnly` 和禁用 Agent 回退。直接 Git/SSH/`gh` 原子能力使用所选受控环境，任意项目验证子进程仍使用无安装凭证环境。`gh` 回读不能单独证明 SSH push actor。
-
 Jira 状态流转（`jira transition plan/apply/readback`，D-049）按 Project Profile `transitions` 映射执行 D-037 严格匹配：稳定 ID 优先、名称兜底需唯一且 from/to 匹配、禁止模糊匹配；目标状态必须来自 profile `statuses` 映射 ∩ Jira 可用列表，AIAgent 默认禁止推进 `completed` stage（无合入权）。映射失配时输出适配对照材料（当前状态 + Jira 可用 transitions + 已配置条目），适配只改 profile 配置、不改 Runtime 代码。
 
 ## 8. Python 与依赖
@@ -130,7 +128,6 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 - 合并、发布和范围变化继续需要人工责任人确认。
 - Skill 和 AI 不得绕过 Runtime 已提供的受控操作直接调用底层写接口。
 - Superpowers 只提供可选分析、规划、调试和审查辅助；其目录不是任务状态或审计事实源，插件缺失不得影响主流程。
-- 授权 Runtime 在写入前检查既有安装身份、SSH/`gh` 路径和仓库本地 SSH 配置；受管差异要求精确摘要确认，非受管配置、既有私钥、不同 `gh` 账户和自定义 `core.sshCommand` 失败关闭。
 
 ## 10. Jira 字段与 Worklog
 
@@ -153,7 +150,7 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 ## 12. 授权入口
 
-业务 Jira 授权统一通过安装级 `ao-work auth` 管理；交互调用配置或更新完整身份与 token，`--show` 返回脱敏状态。入口还要求明确选择 `global` 或 `installation` 执行授权；安装级首次 GitHub 登录只允许官方交互设备流程。该入口不选择 Connection 或 Project，也不单独探测 Jira；workspace/task Runtime 根据 Project Profile 完成真实身份和权限回读。用户不需要手工猜测环境变量名或编辑 `.env`。`ao-maint` 不读取 developer 安装凭证，也不提供该授权入口。
+业务 Jira 授权统一通过安装级 `ao-work auth` 管理；交互调用配置或更新完整身份与 token，`--show` 返回脱敏状态。该入口不选择 Connection 或 Project，也不单独探测 Jira；workspace/task Runtime 根据 Project Profile 完成真实身份和权限回读。用户不需要手工猜测环境变量名或编辑 `.env`。`ao-maint` 不读取 developer 安装凭证，也不提供该授权入口。
 
 授权入口只返回配置状态、脱敏身份和来源，不返回 token。凭证文件使用锁、原子替换和 `0600` 权限；真实 Jira 操作前必须验证 Connection、当前身份和项目工作空间绑定。详细操作见 [AgenticOps 授权管理](authorization.md)。
 
@@ -171,7 +168,7 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 池模式（D-048）下，`source_pool_root` 为研发员级必配（`~/.agentic-ops/user/config.yaml` 或 `--source-pool-root`）；未配置时阻断 `source_pool_root_invalid`，无兼容回退。源码准备从「工作空间级单仓库克隆」改为「中央克隆池成员全集准备」：按 Project Profile `repositories.list` 逐仓库认领（校验 remotes 精确匹配、拒绝 URL 改写与 AgenticOps 源头仓库）或流式克隆；浅克隆自动 `git fetch --unshallow`；中断续传，已完成成员保留。任务执行源码在任务接管时以任务级子工作树集（`<pool_root>/<jira>/<from_branch>/<repo>`，`/` 规范化为 `-`）挂出，分支由 Profile `branches` 推导接口确定（主仓库=from_branch、override 命中优先、否则同名；缺省 `main`），per-worktree 身份写入 worktree config，同一任务同分支同仓库复用已有工作树。
 
-初始化生成的业务工作空间 `AGENTS.md` 固定进入 developer 工作面，不得引用根 `AGENTS.md` 或 `maintainer/`。developer 安装的 `user/identity.yaml` 与 `user/.env` 保存研发员身份和 Jira 凭据，安装级 SSH/`gh` 资产位于同一 `user/` 私有范围；`user/workspace-index.json` 只是可重建冲突索引。新工作空间使用 schema v5，只持 `install_identity_ref` 和项目绑定；schema v4 及更早版本与工作空间 `.agentic-ops/.env` 在凭证读取和联网前失败关闭，不提供隐式迁移。
+初始化生成的业务工作空间 `AGENTS.md` 固定进入 developer 工作面，不得引用根 `AGENTS.md` 或 `maintainer/`。developer 安装的 `user/identity.yaml` 与 `user/.env` 保存研发员身份和 Jira 凭据；`user/workspace-index.json` 只是可重建冲突索引。新工作空间使用 schema v4，只持 `install_identity_ref` 和项目绑定；schema v3 与工作空间 `.agentic-ops/.env` 在凭证读取和联网前失败关闭，不提供隐式迁移。
 
 指定分支验证安装（`developer/bootstrap/install-verify-branch.sh` 远程模式）的 `ao-work` 复用同一套安装身份校验：origin 必须是 `tapstate/agentic-ops`、sparse 精确集与 shared/developer 分发白名单不变，仅把「HEAD 是 `origin/main` 祖先」放宽为「HEAD 可达于任一 `origin/*` 远端分支或 tag」；该放宽只在 `.agentic-ops/verification-only` 标记存在时生效。生产安装 `~/.agentic-ops` 仍固定 `main`，不接受分支覆盖。
 

@@ -353,7 +353,7 @@ linux-amd64
 linux-arm64
 ```
 
-源头仓库以 `main` 为 GitHub 默认分支，以 `develop` 为日常开发分支。正常发布通过 `scripts/release.sh` 把完整验证后的代码以 PR 的 Merge commit 合入 `main`，并在合并事实验证后推送二段式 annotated tag：硬门禁模式使用 `develop -> main` PR、Ruleset 和 Auto-merge；GitHub Free 私有仓库必须显式启用软门禁，从已验证的 `develop` HEAD 创建固定 `release/vX.Y -> main` PR，等待人工 Merge commit 后以同一命令恢复并再次完整验证。软门禁接受服务器端无法阻止其它入口直推的剩余风险。紧急修复通过 `scripts/hotfix.sh` 从包含当前 `main` 的最新 `origin/develop` 创建标准 `fix-main` 分支，以 Merge commit 单向合入 `main`；合入后脚本把远端和本地 `develop` 快进到 `main` 并切回，且不创建、移动或推送 tag。详细规则见 [源码发布工作流设计](source-release-workflow-design.md)。
+源头仓库以 `main` 为 GitHub 默认分支，以 `develop` 为日常开发分支。正常发布通过 `scripts/release.sh` 把完整验证后的代码以 PR 的 Merge commit 合入 `main`，并在合并事实验证后推送二段式 annotated tag：硬门禁模式使用 `develop -> main` PR、Ruleset 和 Auto-merge；GitHub Free 私有仓库必须显式启用软门禁，从已验证的 `develop` HEAD 创建固定 `release/vX.Y -> main` PR，等待人工 Merge commit 后以同一命令恢复并再次完整验证。软门禁接受服务器端无法阻止其它入口直推的剩余风险。紧急修复通过 `scripts/hotfix.sh publish --jira-id <KEY>` 直接把已同步 `develop` 生成 Jira key 绑定的 Merge commit，并原子更新远端 `main/develop`；该流程不创建分支、PR、Tag，不调用 Jira/`gh`，也不追加人工门禁。详细规则见 [源码发布工作流设计](source-release-workflow-design.md)。
 
 安装 bootstrap 允许依赖 `bash`、`curl` 和系统解压工具。`agentic-cli` 运行时不得依赖 `jq` 或本地 Python 环境。
 
