@@ -32,8 +32,7 @@ ao-work capability show agent_init
 3. AIAgent 执行 `ao-work capability show agent_init`；若返回 `capability_gap`，按中文 `next_action` 停止，不得模拟目标输出。
 4. AIAgent 读取任务类型、阶段、下一步动作和停止规则。
 5. AIAgent 读取工作流配置摘要和操作契约列表。
-6. AIAgent 执行现役 `ao-work workspace preflight`。
-7. AIAgent 向研发工程师输出当前可用能力、阶段判断方式和限制。
+6. AIAgent 向研发工程师输出当前可用能力、阶段判断方式和限制。
 
 AIAgent 不得依赖研发工程师个人 Obsidian wiki、长期记忆或上一段聊天上下文完成初始化。初始化事实源必须来自当前项目 AI 工作空间和 `~/.agentic-ops/developer/` 中的已安装资产；不得加载 `maintainer/` 或根源头维护规则。
 
@@ -78,7 +77,6 @@ AIAgent 不得依赖研发工程师个人 Obsidian wiki、长期记忆或上一�
   "next_steps": [
     "read_guide_entry",
     "read_asset_entry",
-    "run_preflight",
     "list_tasks"
   ]
 }
@@ -88,7 +86,6 @@ AIAgent 不得依赖研发工程师个人 Obsidian wiki、长期记忆或上一�
 
 - 如果 AIAgent 无法读取手册，停止并提示安装或路径问题。
 - 如果 `ao-work` 不可用，提示重新安装或修复 PATH。
-- 如果 `workspace preflight` 失败，AIAgent 不能开始接管任务。
 - 如果 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml`、`AGENTS.md` 管理块或 `source_root` 缺失，`agent init` 返回 `workspace_initialization_incomplete`，AIAgent 必须引导研发工程师重新运行 `workspace init`。
 
 ### 验收标准
@@ -104,7 +101,6 @@ AIAgent 不得依赖研发工程师个人 Obsidian wiki、长期记忆或上一�
 - AIAgent 必须读取全局指引、本地 AI 资产入口、AI 员工手册、操作契约和工作流配置摘要后才能接管任务。
 - AIAgent 必须说明人工确认点，包括推送、创建拉取请求、合并、范围变更等。
 - AIAgent 不能直接面对 Jira 字段、状态或 `transition` 做临场猜测。
-- `workspace preflight` 失败时，AIAgent 不能开始接管任务。
 
 ### 审核问题
 
@@ -116,7 +112,6 @@ AIAgent 不得依赖研发工程师个人 Obsidian wiki、长期记忆或上一�
 ### 验收证据
 
 - `ao-work capability show agent_init` 输出的当前状态；能力实现后再补目标命令输出。
-- `ao-work workspace preflight` 输出。
 - AIAgent 对能力、阶段判断和人工确认点的说明。
 - developer AI 入口和操作契约读取记录。
 
