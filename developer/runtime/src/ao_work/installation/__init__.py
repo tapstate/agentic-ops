@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 from typing import Any
 
 import yaml
@@ -291,6 +292,7 @@ def validate_install_root() -> Path:
             f"AgenticOps developer 安装缺少 managed clone 身份：{root}",
             "请通过 developer/bootstrap/install.sh 重新安装，不得使用仿造目录",
         )
+    _validate_runtime_python_environment(root)
     for required in (
         root / "developer" / "AGENTS.md",
         root / "developer" / "rules" / "ai-execution.md",
@@ -358,6 +360,48 @@ def validate_install_root() -> Path:
     else:
         _validate_checkout_integrity(root)
     return root
+
+
+def _validate_runtime_python_environment(root: Path) -> None:
+    expected_venv = root / "developer" / ".venv"
+    expected_bin = expected_venv / "bin"
+    expected_python = expected_bin / "python"
+    virtual_env = os.environ.get("VIRTUAL_ENV", "")
+    path_entries = os.environ.get("PATH", "").split(os.pathsep)
+
+    try:
+        prefix_matches = Path(sys.prefix).resolve() == expected_venv.resolve()
+        executable_matches = (
+            Path(sys.executable).parent.resolve() == expected_bin.resolve()
+        )
+        virtual_env_matches = (
+            bool(virtual_env)
+            and Path(virtual_env).expanduser().resolve() == expected_venv.resolve()
+        )
+        path_matches = (
+            bool(path_entries[0])
+            and Path(path_entries[0]).expanduser().resolve() == expected_bin.resolve()
+        )
+    except OSError:
+        prefix_matches = False
+        executable_matches = False
+        virtual_env_matches = False
+        path_matches = False
+    if (
+        expected_venv.is_symlink()
+        or not expected_venv.is_dir()
+        or not expected_python.exists()
+        or not os.access(expected_python, os.X_OK)
+        or not prefix_matches
+        or not executable_matches
+        or not virtual_env_matches
+        or not path_matches
+    ):
+        raise _blocked(
+            "runtime_python_environment_mismatch",
+            "ao-work 未使用当前 developer 安装的 Python venv",
+            f"请通过 {root}/bin/ao-work 启动；仍失败时重新执行 developer 安装",
+        )
 
 
 def _reject_identity_overrides() -> None:

@@ -8,13 +8,16 @@ else
   INSTALL_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 fi
 PYTHON_BIN="$INSTALL_DIR/developer/.venv/bin/python"
+VENV_ROOT="$INSTALL_DIR/developer/.venv"
 
 if [ ! -x "$PYTHON_BIN" ]; then
   printf 'AgenticOps：研发工作 Runtime 尚未安装，请执行 developer/bootstrap/install.sh\n' >&2
   exit 1
 fi
 
-unset PYTHONPATH
+unset PYTHONHOME PYTHONPATH
+export VIRTUAL_ENV="$VENV_ROOT"
+export PATH="$VENV_ROOT/bin${PATH:+:$PATH}"
 export PYTHONPATH="$INSTALL_DIR/developer/runtime/src"
 export PYTHONDONTWRITEBYTECODE=1
 exec "$PYTHON_BIN" -m ao_work "$@"

@@ -8,6 +8,7 @@
 
 安装前确认：
 
+- 本机已安装 `git`、`gh`、`uv`；若使用隔离的可信 `uv`，可通过 `AGENTIC_OPS_UV` 指定。
 - 可访问 `tapstate/agentic-ops` 的 GitHub 账户和 `gh` 登录状态。
 - 业务项目工作空间目录，例如 `~/agentic-ops-tapdata`。
 - Jira 项目空间或 Project Profile，例如 `tapdata` / `TAP`。
@@ -89,7 +90,7 @@ INS_HOME="$HOME/.agentic-ops-custom"
 )
 ```
 
-两种方式都会校验 origin 必须是 `tapstate/agentic-ops`，普通使用不能用 `AGENTIC_OPS_REPO_URL` 等环境变量改写受信仓库；正常文件树只包含 developer 生产资产、只读的 `shared/integration/` JSON 协议及运行所需的根版本元数据，不包含 `maintainer/`、`developer/tests/`、fixture 或 fake producer。
+两种方式都会在安装写入前统一检查 `git`、`gh`、`uv`；缺少多项时一次列出全部缺失程序并停止。随后校验 origin 必须是 `tapstate/agentic-ops`，普通使用不能用 `AGENTIC_OPS_REPO_URL` 等环境变量改写受信仓库；正常文件树只包含 developer 生产资产、只读的 `shared/integration/` JSON 协议及运行所需的根版本元数据，不包含 `maintainer/`、`developer/tests/`、fixture 或 fake producer。
 
 安装完成后可使用：
 
@@ -99,7 +100,7 @@ ao-work --help
 ao-work version
 ```
 
-`ao-work version` 是只读安装查询：`version` 使用 `<current_branch>-<tag>-<commit_count>-g<last_commit_hash>` 格式，例如 `main-v0.6-25-g1b23a60`。它同时返回 developer Runtime 发行版本、受管安装目录、首次安装时间、精确 Git HEAD/短 SHA 与拆分后的 Git 描述字段。它不读取凭证、不要求业务工作空间，也不会检查更新、修改安装或变更 Git 状态；安装时间元数据缺失或无效、当前 HEAD 无法由 Tag 描述时会失败关闭，不能通过文件时间戳或猜测版本补齐。
+`ao-work version` 是只读安装查询：`version` 使用 `<current_branch>-<tag>-<commit_count>-g<last_commit_hash>` 格式，例如 `main-v0.6-25-g1b23a60`。它同时返回 developer Runtime 发行版本、受管安装目录、首次安装时间、实际 `python_executable`、`python_venv`、精确 Git HEAD/短 SHA 与拆分后的 Git 描述字段。它不读取凭证、不要求业务工作空间，也不会检查更新、修改安装或变更 Git 状态；安装时间元数据缺失或无效、当前 HEAD 无法由 Tag 描述时会失败关闭，不能通过文件时间戳或猜测版本补齐。
 
 没有 `agentic-cli` 兼容别名；看到旧命令说明正在阅读冻结迁移基线或使用旧版本。
 
