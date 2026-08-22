@@ -1035,8 +1035,8 @@ test -z "$(git -C "$hotfix_fixture" tag --list)" ||
 grep -q '"changed":false' "$test_root/hotfix-idempotent.out" ||
   fail "Hotfix 重复执行未按已同步状态幂等完成"
 
-# main 独立前进后已不再是 develop 的祖先，Hotfix 必须停止且保持两条远端
-# 引用不变，不能通过 rebase、强推或普通 merge 掩盖分叉。
+# main 独立前进后，Hotfix 仍应生成保留双方内容的双父 Merge commit，并原子
+# 同步 main/develop；不能丢失 main 独有提交或只采用 develop 的 tree。
 git -C "$hotfix_fixture" branch -f main "$hotfix_merge"
 git -C "$hotfix_fixture" switch main >/dev/null
 printf 'independent main\n' > "$hotfix_fixture/MAIN-ONLY.md"
@@ -1045,18 +1045,21 @@ git -C "$hotfix_fixture" commit -m "independent main after hotfix" >/dev/null
 diverged_main="$(git -C "$hotfix_fixture" rev-parse HEAD)"
 AGENTIC_OPS_SPECIAL_PUSH=hotfix git -C "$hotfix_fixture" push origin main >/dev/null
 git -C "$hotfix_fixture" switch develop >/dev/null
-if (
+(
   cd "$hotfix_fixture"
   maintainer/scripts/hotfix.sh publish --jira-id AO-74
-) >"$test_root/hotfix-diverged.out" 2>"$test_root/hotfix-diverged.err"; then
-  fail "Hotfix 必须拒绝 main/develop 分叉"
-fi
-grep -q 'hotfix_develop_not_based_on_main' "$test_root/hotfix-diverged.err" ||
-  fail "Hotfix 分叉未返回稳定失败码"
-[ "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)" = "$diverged_main" ] ||
-  fail "Hotfix 分叉失败错误改写了 main"
-[ "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/develop)" = "$hotfix_merge" ] ||
-  fail "Hotfix 分叉失败错误改写了 develop"
+) >"$test_root/hotfix-diverged.out"
+diverged_merge="$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)"
+[ "$diverged_merge" = "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/develop)" ] ||
+  fail "Hotfix 未原子同步已分叉的 main/develop"
+[ "$(git --git-dir="$hotfix_remote" rev-parse "$diverged_merge^1")" = "$diverged_main" ] ||
+  fail "Hotfix 分叉合并的第一父提交不是固定 main"
+[ "$(git --git-dir="$hotfix_remote" rev-parse "$diverged_merge^2")" = "$hotfix_merge" ] ||
+  fail "Hotfix 分叉合并的第二父提交不是固定 develop"
+git --git-dir="$hotfix_remote" cat-file -e "$diverged_merge:MAIN-ONLY.md" ||
+  fail "Hotfix 分叉合并丢失 main 独有内容"
+git --git-dir="$hotfix_remote" cat-file -e "$diverged_merge:README.md" ||
+  fail "Hotfix 分叉合并丢失 develop 内容"
 export AGENTIC_OPS_TEST_FIXTURE_REMOTE="$remote"
 
 # 已提前合入 main 的候选必须由 inspect 自动解析真实 PR，并通过两阶段

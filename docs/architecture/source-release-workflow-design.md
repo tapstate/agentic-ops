@@ -144,7 +144,7 @@ maintainer/scripts/hotfix.sh publish --jira-id AO-123
 2. 要求当前分支为 `develop` 且工作区干净。
 3. 刷新 `origin/main` 与 `origin/develop`，要求本地 `develop` 与远端完全一致。
 4. 若两条远端分支已相同，幂等返回 `changed=false`。
-5. 要求 `origin/main` 是 `origin/develop` 的祖先；分叉时停止，不执行 merge、rebase、cherry-pick 或强推。
+5. 固定 `origin/main` 与 `origin/develop`，用 Git 自动计算合并 tree；存在内容冲突时停止，不执行交互式冲突处理、rebase、cherry-pick 或强推。
 6. 以 `origin/develop` 的 tree、`origin/main` 第一父提交和 `origin/develop` 第二父提交构造 Merge commit；标题与正文均写入 Jira key。
 7. 使用单次 atomic push 把该提交同时更新到远端 `main` 和 `develop`，不允许部分更新。
 8. 快进本地 `develop` 并刷新远端引用，回读确认三者指向同一 Merge commit。
