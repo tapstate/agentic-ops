@@ -196,7 +196,7 @@ maintainer/scripts/release.sh prepare --version vX.Y
 maintainer/scripts/release.sh publish --version vX.Y
 ```
 
-`prepare` 先固定 HEAD，并完整验证 Python、两个工作面、Skill、Rule、标准资产、developer-only Bootstrap 和安装边界；全部通过后才创建或复用本地 annotated `vX.Y` tag，失败时不得留下新 tag。它不构建项目自有平台二进制，不暂存、不提交、不推送。研发工程师审查后，`publish` 必须再次执行完整本地验证并取得最终确认。硬门禁模式推送 `develop`，创建或复用 `develop -> main` PR，启用 Merge Auto-merge；软门禁模式必须显式传入 `--allow-soft-gate`，从已验证 HEAD 创建固定 `release/vX.Y -> main` PR，等待研发工程师人工 Merge commit 后以同一命令恢复并再次完整验证。两种模式都必须验证 `origin/main` 包含固定发布 HEAD，最后才推送不可变 tag。
+`prepare` 先固定 HEAD，并完整验证 Python、两个工作面、Skill、Rule、标准资产、developer-only Bootstrap 和安装边界；软门禁模式在验证通过后创建或复用本地固定 `release/vX.Y` 分支，但绝不创建 Tag。它不构建项目自有平台二进制，不暂存、不提交、不推送。研发工程师审查后，`publish` 必须再次执行完整本地验证并取得最终确认。硬门禁模式推送 `develop`，创建或复用 `develop -> main` PR，启用 Merge Auto-merge；软门禁模式只允许使用 prepare 固定的 `release/vX.Y -> main` PR，并在创建后每 5 秒轮询状态，最多等待 30 分钟。研发工程师仍在 GitHub 执行 Merge commit，检测到合并后脚本自动再次完整验证；传入 `--no-wait-for-merge` 时保留返回状态码 `2`、人工合并后以同一命令续跑的方式。两种模式都必须验证 `origin/main` 包含固定发布 HEAD；确认实际 Merge commit 后，脚本必须先将 `develop` 快进到已验证的 `origin/main`，快进不成立即失败关闭，最后才创建且推送指向该 Merge commit 的不可变 tag。
 
 紧急修复必须使用统一入口：
 
