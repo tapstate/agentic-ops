@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -186,16 +187,19 @@ class StoryGateService:
         results = []
         for check_id in impact.acceptance_checks:
             started = time.monotonic()
-            completed = subprocess.run(
-                _check_command(self.root, check_id),
-                cwd=self.root,
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                timeout=300,
-                env=_check_environment(self.root),
-            )
-            output = completed.stdout.decode("utf-8", errors="replace")[-4000:]
+            with tempfile.TemporaryFile() as output_file:
+                completed = subprocess.run(
+                    _check_command(self.root, check_id),
+                    cwd=self.root,
+                    check=False,
+                    stdout=output_file,
+                    stderr=subprocess.STDOUT,
+                    timeout=300,
+                    env=_check_environment(self.root),
+                )
+                output_file.seek(0, os.SEEK_END)
+                output_file.seek(max(0, output_file.tell() - 4000))
+                output = output_file.read().decode("utf-8", errors="replace")
             check = {
                 "check_id": check_id,
                 "passed": completed.returncode == 0,
