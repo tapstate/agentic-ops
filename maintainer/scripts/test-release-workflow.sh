@@ -85,12 +85,13 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 [ -n "$project" ]
-mkdir -p "$project/.venv/bin"
-cat > "$project/.venv/bin/python" <<'PYTHON'
-#!/usr/bin/env bash
-exec "${AGENTIC_OPS_TEST_REAL_PYTHON:?}" "$@"
-PYTHON
-chmod 0755 "$project/.venv/bin/python"
+"${AGENTIC_OPS_TEST_REAL_PYTHON:?}" -m venv --clear --system-site-packages \
+  "$project/.venv"
+venv_site="$("$project/.venv/bin/python" -c \
+  'import site; print(site.getsitepackages()[0])')"
+"${AGENTIC_OPS_TEST_REAL_PYTHON:?}" -c \
+  'import site; print("\n".join(site.getsitepackages()))' \
+  > "$venv_site/agentic-ops-test-dependencies.pth"
 printf '%s\n' "$project" >> "${FAKE_UV_LOG:?}"
 EOF
 chmod 0755 "$fake_uv"

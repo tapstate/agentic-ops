@@ -4,6 +4,7 @@ import json
 import re
 import stat
 import subprocess
+import sys
 import tomllib
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,8 @@ def inspect_version(install_root: Path) -> dict[str, object]:
         "version": f"{branch}-{git_describe}",
         "runtime_version": _runtime_version(install_root),
         "install_root": str(install_root),
+        "python_executable": sys.executable,
+        "python_venv": sys.prefix,
         "installed_at": _installed_at(install_root),
         "git_head": head,
         "git_short_sha": _run_git(install_root, "rev-parse", "--short=12", "HEAD"),

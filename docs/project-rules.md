@@ -418,7 +418,7 @@ CLI 必须遵守：
 - 外部写操作必须遵守 `plan -> apply -> readback`，结果不明确时阻断，不得猜测成功。
 - Linux 和 macOS 必须通过仓库锁定的同一 Python 主链路运行，不构建 AgenticOps 自有平台二进制。
 
-Bootstrap 允许依赖 `bash`、`curl`、Git 和 `uv`。Python 版本由 `.python-version` 固定，依赖分别由 `maintainer/pyproject.toml`、`developer/pyproject.toml` 和各自 `uv.lock` 锁定；运行时不得依赖业务项目自己的 Python 环境。
+Bootstrap 允许依赖 `bash`、`curl`、Git、GitHub CLI (`gh`) 和 `uv`。developer 生产安装必须在安装写入前统一检查 `git`、`gh`、`uv`，缺失时一次列出全部缺失项并停止。Python 版本由 `.python-version` 固定，依赖分别由 `maintainer/pyproject.toml`、`developer/pyproject.toml` 和各自 `uv.lock` 锁定；运行时不得依赖业务项目自己的 Python 环境。
 
 `ao-work` 的前置检查必须验证 GitHub、Jira 授权、工作流配置、当前业务仓库和 developer 工作面；`ao-maint` 必须验证 AgenticOps 源头仓库、maintainer AI 入口和维护规则。两者不得通过 mode 参数互换。
 

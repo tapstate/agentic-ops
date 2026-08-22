@@ -14,9 +14,23 @@ from ao_work.output import RuntimeErrorResult
 class InstallationIdentityTest(unittest.TestCase):
     @staticmethod
     def _validate(install: Path) -> Path:
-        with mock.patch(
-            "ao_work.installation.default_install_root",
-            return_value=install.resolve(),
+        venv = install.resolve() / "developer" / ".venv"
+        python = venv / "bin" / "python"
+        with (
+            mock.patch(
+                "ao_work.installation.default_install_root",
+                return_value=install.resolve(),
+            ),
+            mock.patch("ao_work.installation.sys.prefix", str(venv)),
+            mock.patch("ao_work.installation.sys.executable", str(python)),
+            mock.patch.dict(
+                os.environ,
+                {
+                    "VIRTUAL_ENV": str(venv),
+                    "PATH": f"{venv / 'bin'}{os.pathsep}/usr/bin:/bin",
+                },
+                clear=False,
+            ),
         ):
             return validate_install_root()
 
@@ -98,6 +112,10 @@ class InstallationIdentityTest(unittest.TestCase):
             check=True,
             capture_output=True,
         )
+        python = install / "developer" / ".venv" / "bin" / "python"
+        python.parent.mkdir(parents=True)
+        python.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+        python.chmod(0o700)
         (install / ".local").mkdir()
         self._record_head(install)
         return install
@@ -126,6 +144,26 @@ class InstallationIdentityTest(unittest.TestCase):
                 self.assertEqual(install.resolve(), self._validate(install))
             self.assertFalse((install / "shared" / "README.md").exists())
             self.assertTrue((install / "shared" / "integration" / "README.md").is_file())
+
+    def test_runtime_python_must_match_installation_venv(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            install = self._prepare(Path(temporary))
+            with (
+                mock.patch(
+                    "ao_work.installation.default_install_root",
+                    return_value=install.resolve(),
+                ),
+                mock.patch.dict(
+                    os.environ,
+                    {"VIRTUAL_ENV": "/tmp/other-venv", "PATH": "/usr/bin:/bin"},
+                    clear=True,
+                ),
+                self.assertRaises(RuntimeErrorResult) as captured,
+            ):
+                validate_install_root()
+            self.assertEqual(
+                "runtime_python_environment_mismatch", captured.exception.code
+            )
 
     def test_broader_shared_sparse_checkout_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
