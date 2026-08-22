@@ -7,48 +7,18 @@ repo_root="$(cd "$script_dir/../.." && pwd -P)"
 # shellcheck source=maintainer/scripts/lib/release-common.sh
 . "$script_dir/lib/release-common.sh"
 
-command_name="${1:-}"
-if [ "$command_name" != "publish" ]; then
-  release_fail "invalid_hotfix_command" "argument_parsing" \
-    "Hotfix 只支持 publish" \
-    "请使用 maintainer/scripts/hotfix.sh publish --jira-id AO-123"
+if [ "$#" -ne 1 ]; then
+  release_fail "invalid_hotfix_arguments" "argument_parsing" \
+    "Hotfix 只接受一个 Jira 编号" \
+    "请使用 maintainer/scripts/hotfix.sh AO-123"
   exit 1
 fi
-shift
-
-jira_id=""
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --jira-id)
-      if [ "$#" -lt 2 ]; then
-        release_fail "invalid_jira_id" "argument_parsing" \
-          "--jira-id 缺少值" "请提供例如 --jira-id AO-123"
-        exit 1
-      fi
-      jira_id="$2"
-      shift 2
-      ;;
-    *)
-      release_fail "invalid_hotfix_argument" "argument_parsing" \
-        "不支持的参数 $1" \
-        "Hotfix 只接受 publish --jira-id <KEY>"
-      exit 1
-      ;;
-  esac
-done
+jira_id="$1"
 
 release_validate_jira_id "$jira_id" || exit 1
 release_require_command git || exit 1
 release_require_repo "$repo_root" || exit 1
 release_require_clean "$repo_root" || exit 1
-
-current_branch="$(git -C "$repo_root" branch --show-current)"
-if [ "$current_branch" != "develop" ]; then
-  release_fail "hotfix_requires_develop" "hotfix_publish" \
-    "Hotfix 必须从 develop 执行" \
-    "请切换到 develop，并确保工作区干净后重试"
-  exit 1
-fi
 
 if ! git -C "$repo_root" fetch origin main develop >/dev/null 2>&1; then
   release_fail "hotfix_base_fetch_failed" "hotfix_publish" \
@@ -57,32 +27,59 @@ if ! git -C "$repo_root" fetch origin main develop >/dev/null 2>&1; then
   exit 1
 fi
 
-local_develop="$(git -C "$repo_root" rev-parse refs/heads/develop)"
 remote_develop="$(git -C "$repo_root" rev-parse refs/remotes/origin/develop)"
 remote_main="$(git -C "$repo_root" rev-parse refs/remotes/origin/main)"
 
-if [ "$local_develop" != "$remote_develop" ]; then
-  release_fail "hotfix_develop_not_synced" "hotfix_publish" \
-    "本地 develop 与 origin/develop 不一致" \
-    "请先同步 develop；Hotfix 不会猜测、改写或遗漏尚未推送的提交"
-  exit 1
+if git -C "$repo_root" show-ref --verify --quiet refs/heads/develop; then
+  if [ "$(git -C "$repo_root" branch --show-current)" != "develop" ] &&
+    ! git -C "$repo_root" switch develop >/dev/null; then
+    release_fail "hotfix_develop_switch_failed" "hotfix_prepare" \
+      "无法自动切换到本地 develop" \
+      "请检查 worktree 分支占用状态后重试"
+    exit 1
+  fi
+else
+  if ! git -C "$repo_root" switch --create develop --track origin/develop >/dev/null; then
+    release_fail "hotfix_develop_create_failed" "hotfix_prepare" \
+      "无法从 origin/develop 创建本地 develop" \
+      "请检查本地分支和 worktree 状态后重试"
+    exit 1
+  fi
 fi
 
-if [ "$remote_main" = "$remote_develop" ]; then
+local_develop="$(git -C "$repo_root" rev-parse refs/heads/develop)"
+if git -C "$repo_root" merge-base --is-ancestor "$local_develop" "$remote_develop"; then
+  if [ "$local_develop" != "$remote_develop" ] &&
+    ! git -C "$repo_root" merge --ff-only "$remote_develop" >/dev/null; then
+    release_fail "hotfix_develop_fast_forward_failed" "hotfix_prepare" \
+      "无法把本地 develop 快进到 origin/develop" \
+      "请检查本地 Git 状态后重试；Hotfix 不执行 rebase 或历史改写"
+    exit 1
+  fi
+elif ! git -C "$repo_root" merge-base --is-ancestor "$remote_develop" "$local_develop"; then
+  release_fail "hotfix_develop_diverged" "hotfix_prepare" \
+    "本地 develop 与 origin/develop 已分叉" \
+    "请人工处理真实分叉；Hotfix 不执行 rebase、cherry-pick 或强推"
+  exit 1
+fi
+develop_candidate="$(git -C "$repo_root" rev-parse refs/heads/develop)"
+
+if [ "$remote_main" = "$develop_candidate" ] &&
+  [ "$remote_develop" = "$develop_candidate" ]; then
   printf '{"ok":true,"operation":"hotfix_publish","status":"completed","jira_id":"%s","merge_commit":"%s","main_commit":"%s","develop_commit":"%s","changed":false,"branch_created":false,"jira_interaction":false,"gate":"none","agentic_next_action":"hotfix_completed"}\n' \
     "$jira_id" "$remote_main" "$remote_main" "$remote_develop"
   exit 0
 fi
 
 merge_subject="Hotfix: $jira_id 合并 develop 到 main"
-merge_body="将 origin/develop 的已提交变更直接合入 main。\n\nJira: $jira_id\n流程: direct-develop-to-main\nJira 交互: none"
+merge_body="将 develop 的已提交变更直接合入 main。\n\nJira: $jira_id\n流程: direct-develop-to-main\nJira 交互: none"
 merge_tree_output=""
 if ! merge_tree_output="$(
-  git -C "$repo_root" merge-tree --write-tree "$remote_main" "$remote_develop"
+  git -C "$repo_root" merge-tree --write-tree "$remote_main" "$develop_candidate"
 )"; then
   release_fail "hotfix_merge_conflict" "hotfix_publish" \
-    "origin/main 与 origin/develop 无法自动合并" \
-    "请先在 develop 解决冲突并推送；Hotfix 不执行交互式冲突处理、rebase、cherry-pick 或强推"
+    "origin/main 与 develop 无法自动合并" \
+    "请先在 develop 解决冲突并提交；Hotfix 不执行交互式冲突处理、rebase、cherry-pick 或强推"
   exit 1
 fi
 merge_tree="$(printf '%s\n' "$merge_tree_output" | sed -n '1p')"
@@ -96,7 +93,7 @@ merge_commit="$(
   printf '%s\n\n%b\n' "$merge_subject" "$merge_body" |
     git -C "$repo_root" commit-tree "$merge_tree" \
       -p "$remote_main" \
-      -p "$remote_develop"
+      -p "$develop_candidate"
 )"
 
 if ! AGENTIC_OPS_SPECIAL_PUSH=hotfix \
@@ -109,10 +106,10 @@ if ! AGENTIC_OPS_SPECIAL_PUSH=hotfix \
   exit 1
 fi
 
-if ! git -C "$repo_root" update-ref refs/heads/develop "$merge_commit" "$local_develop"; then
+if ! git -C "$repo_root" merge --ff-only "$merge_commit" >/dev/null; then
   release_fail "hotfix_local_develop_sync_failed" "hotfix_publish" \
     "远端已完成合并，但本地 develop 未能快进" \
-    "请执行 git fetch origin develop 后快进本地 develop；不要重复推送"
+    "请执行 git fetch origin develop 后快进本地 develop；不要重复执行 Hotfix"
   exit 1
 fi
 

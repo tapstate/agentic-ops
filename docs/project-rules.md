@@ -201,10 +201,10 @@ maintainer/scripts/release.sh publish --version vX.Y
 紧急修复必须使用统一入口：
 
 ```sh
-maintainer/scripts/hotfix.sh publish --jira-id <KEY>
+maintainer/scripts/hotfix.sh <KEY>
 ```
 
-Hotfix 只能从干净且与 `origin/develop` 精确同步的本地 `develop` 执行。Jira key 为必填 Git 审计标识，脚本不读取、不修改、不评论 Jira，也不调用 `gh`。脚本不创建修复分支、PR 或 Tag，不执行完整发布验证，不等待额外人工确认；调用命令本身就是本次快速修复授权。脚本以固定的 `origin/main` 和 `origin/develop` 自动计算合并 tree，以两者为父提交生成带 Jira key 的 Merge commit，原子推送到远端 `main` 和 `develop`，再同步本地 `develop` 并回读。自动合并冲突、未同步、脏工作区或原子推送失败时关闭，禁止交互式冲突处理、rebase、cherry-pick、强推或部分更新。
+Hotfix 可从任意干净分支执行。Jira key 为唯一位置参数和必填 Git 审计标识，脚本不读取、不修改、不评论 Jira，也不调用 `gh`。脚本自行刷新远端、切换或创建本地 `develop`、快进落后的本地分支，并允许把本地已提交且以 `origin/develop` 为祖先的领先提交直接纳入候选；真实分叉时停止。脚本不创建修复分支、PR 或 Tag，不执行完整发布验证，不等待额外人工确认；调用命令本身就是本次快速修复授权。脚本以固定的 `origin/main` 和本地 `develop` 候选自动计算合并 tree，以两者为父提交生成带 Jira key 的 Merge commit，原子推送到远端 `main` 和 `develop`，再同步本地 `develop` 并回读。自动合并冲突、脏工作区或原子推送失败时关闭，禁止交互式冲突处理、rebase、cherry-pick、强推或部分更新。
 
 正常发布的 `prepare` 和 `publish` 必须在临时 worktree 中固定执行以下完整验证；Hotfix 不在执行期运行这些发布验证，但 Hotfix 实现本身必须由 `test-release-workflow.sh` 回归覆盖：
 
