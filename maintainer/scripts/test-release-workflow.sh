@@ -258,6 +258,11 @@ if printf 'refs/heads/develop %s refs/heads/main %s\n' "$pre_push_head" "$pre_pu
 fi
 grep -q 'direct push to main is prohibited' "$test_root/pre-push-main.err" ||
   fail "pre-push 拒绝 main 时没有稳定提示"
+if ! printf 'refs/heads/develop %s refs/heads/main %s\n' "$pre_push_head" "$pre_push_main" |
+  (cd "$fixture" && AGENTIC_OPS_SPECIAL_PUSH=hotfix .githooks/pre-push origin "$remote") \
+    >"$test_root/pre-push-hotfix-main.out" 2>"$test_root/pre-push-hotfix-main.err"; then
+  fail "Hotfix 专用执行标识必须允许原子直推 main"
+fi
 if ! printf 'refs/heads/develop %s refs/heads/develop %s\n' "$pre_push_head" "$pre_push_head" |
   (cd "$fixture" && .githooks/pre-push origin "$remote") \
     >"$test_root/pre-push-develop.out" 2>"$test_root/pre-push-develop.err"; then
@@ -436,7 +441,7 @@ rm -f "$fixture/maintainer/.local"
 [ -z "$(git -C "$fixture" status --porcelain)" ] ||
   fail "release 本地状态链接负测结束后 fixture 应保持干净"
 
-# 三类发布审计都必须共用同一安全写边界。这里直接调用真实 writer：祖先
+# 两类正常发布审计都必须共用同一安全写边界。这里直接调用真实 writer：祖先
 # symlink 不得把 release-runs 或 JSON 写进仓库外 sentinel；中间目录位置被
 # FIFO 占用时也必须先失败，不能继续创建叶子或报告审计完成。
 invoke_audit_writer() {
@@ -459,11 +464,6 @@ invoke_audit_writer() {
           "$audit_root" release_publish v9.9 \
           1111111111111111111111111111111111111111 release/v9.9
         ;;
-      hotfix_completed)
-        release_write_hotfix_audit \
-          "$audit_root" AO-11 v9.8 \
-          1111111111111111111111111111111111111111 tester/AO-11/fix-main hard
-        ;;
       *)
         exit 99
         ;;
@@ -471,7 +471,7 @@ invoke_audit_writer() {
   )
 }
 
-for audit_kind in release_completed release_waiting hotfix_completed; do
+for audit_kind in release_completed release_waiting; do
   audit_symlink_root="$test_root/audit-$audit_kind-symlink"
   audit_external_sentinel="$test_root/audit-$audit_kind-external"
   mkdir -p "$audit_symlink_root" "$audit_external_sentinel"
@@ -932,79 +932,131 @@ test -z "$(git --git-dir="$remote" show-ref --tags v9.9 || true)" ||
 
 if (
   cd "$fixture"
-  AGENTIC_OPS_GH_BIN="$fake_gh" \
-    maintainer/scripts/hotfix.sh create --jira-id ao-11 --user tester
+  maintainer/scripts/hotfix.sh publish --jira-id ao-11
 ) >"$test_root/invalid-hotfix.out" 2>"$test_root/invalid-hotfix.err"; then
   fail "Hotfix 必须拒绝非法 Jira 编号"
 fi
 grep -q 'invalid_jira_id' "$test_root/invalid-hotfix.err" ||
   fail "Hotfix 未返回 Jira 编号失败码"
 
-git -C "$fixture" switch main >/dev/null
-git -C "$fixture" tag -a v9.8 -m 'hotfix baseline'
-AGENTIC_OPS_SPECIAL_PUSH=release \
-  git -C "$fixture" push origin refs/tags/v9.8 >/dev/null
-git -C "$fixture" switch develop >/dev/null
-
-# Hotfix 的单向基线需要 develop 包含 main。使用独立仓库验证，避免改变后续
-# recovery fixture 刻意保留的 main/develop 分叉状态。
+# Hotfix 使用独立仓库验证 develop 到 main 的直合，不创建修复分支、PR、Tag，
+# 也不调用 gh 或 Jira。必要 Git 一致性检查通过后直接原子更新两个远端分支。
 hotfix_remote="$test_root/hotfix-remote.git"
 hotfix_fixture="$test_root/hotfix-repo"
 git init --bare "$hotfix_remote" >/dev/null
-git clone --branch main "$fixture" "$hotfix_fixture" >/dev/null 2>&1
+git clone "$hotfix_remote" "$hotfix_fixture" >/dev/null 2>&1
 git -C "$hotfix_fixture" config user.email agentic-ops-test@example.test
 git -C "$hotfix_fixture" config user.name "AgenticOps Test"
-git -C "$hotfix_fixture" remote set-url origin "$hotfix_remote"
+mkdir -p "$hotfix_fixture/.githooks" "$hotfix_fixture/maintainer/scripts/lib"
+cp "$repo_root/.githooks/pre-push" "$hotfix_fixture/.githooks/pre-push"
+cp "$repo_root/maintainer/scripts/hotfix.sh" "$hotfix_fixture/maintainer/scripts/hotfix.sh"
+cp "$repo_root/maintainer/scripts/lib/release-common.sh" \
+  "$hotfix_fixture/maintainer/scripts/lib/release-common.sh"
+printf 'maintainer\n' > "$hotfix_fixture/.agentic-ops-source"
+printf 'hotfix baseline\n' > "$hotfix_fixture/README.md"
+chmod 0755 "$hotfix_fixture/.githooks/pre-push" "$hotfix_fixture/maintainer/scripts/hotfix.sh"
+git -C "$hotfix_fixture" add .
+git -C "$hotfix_fixture" commit -m "hotfix baseline" >/dev/null
+git -C "$hotfix_fixture" branch -M main
 git -C "$hotfix_fixture" push -u origin main >/dev/null
-git -C "$hotfix_fixture" push origin refs/tags/v9.8 >/dev/null
 git -C "$hotfix_fixture" switch -c develop main >/dev/null
+printf 'urgent fix\n' >> "$hotfix_fixture/README.md"
+git -C "$hotfix_fixture" add README.md
+git -C "$hotfix_fixture" commit -m "urgent fix" >/dev/null
+hotfix_candidate="$(git -C "$hotfix_fixture" rev-parse HEAD)"
 git -C "$hotfix_fixture" push -u origin develop >/dev/null
 git -C "$hotfix_fixture" remote set-url origin "$AGENTIC_OPS_TEST_OFFICIAL_URL"
 export AGENTIC_OPS_TEST_FIXTURE_REMOTE="$hotfix_remote"
-(
-  . "$hotfix_fixture/maintainer/scripts/lib/development-workflow.sh"
-  workflow_install_trusted_hooks "$hotfix_fixture"
-)
-(
-  cd "$hotfix_fixture"
-  AGENTIC_OPS_GH_BIN="$fake_gh" \
-    maintainer/scripts/hotfix.sh create --jira-id AO-11 --user tester
-) >"$test_root/hotfix-create.out"
-grep -q '"operation":"hotfix_create"' "$test_root/hotfix-create.out" ||
-  fail "Hotfix 未从 origin/develop 创建标准分支"
-grep -q '"base":"origin/develop"' "$test_root/hotfix-create.out" ||
-  fail "Hotfix create 未记录单向 develop 基线"
-test "$(git -C "$hotfix_fixture" branch --show-current)" = "tester/AO-11/fix-main" ||
-  fail "Hotfix 分支命名不符合规则"
-hotfix_tag_count="$(git -C "$hotfix_fixture" tag --list | wc -l | tr -d ' ')"
-hotfix_prepare_verify_log="$test_root/hotfix-prepare-verify.log"
-: > "$hotfix_prepare_verify_log"
-(
-  cd "$hotfix_fixture"
-  AGENTIC_OPS_GH_BIN="$fake_gh" \
-  FAKE_VERIFY_LOG="$hotfix_prepare_verify_log" \
-    maintainer/scripts/hotfix.sh prepare
-) >"$test_root/hotfix-prepare.out"
-grep -q '"tag_action":"reuse_only"' "$test_root/hotfix-prepare.out" ||
-  fail "Hotfix prepare 必须复用版本基线"
-[ "$(cat "$hotfix_prepare_verify_log")" = "$expected_prepare" ] ||
-  fail "Hotfix prepare 未执行固定完整验证或顺序错误"
-test "$(git -C "$hotfix_fixture" tag --list | wc -l | tr -d ' ')" = "$hotfix_tag_count" ||
-  fail "Hotfix prepare 不得创建新 Tag"
 
+printf 'dirty\n' >> "$hotfix_fixture/README.md"
 if (
   cd "$hotfix_fixture"
-  AGENTIC_OPS_GH_BIN="$fake_gh" \
-  AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING=1 \
-  FAKE_VERIFY_LOG="$verify_log" \
-    maintainer/scripts/hotfix.sh publish
-) >"$test_root/unconfirmed-hotfix.out" 2>"$test_root/unconfirmed-hotfix.err"; then
-  fail "Hotfix publish 缺少最终确认时必须阻断"
+  maintainer/scripts/hotfix.sh publish --jira-id AO-74
+) >"$test_root/hotfix-dirty.out" 2>"$test_root/hotfix-dirty.err"; then
+  fail "Hotfix 必须拒绝脏工作区"
 fi
-grep -q 'release_confirmation_required' "$test_root/unconfirmed-hotfix.err" ||
-  fail "Hotfix publish 未返回最终确认失败码"
-test -z "$(git --git-dir="$hotfix_remote" show-ref --heads refs/heads/tester/AO-11/fix-main || true)" ||
-  fail "最终确认前不得推送 Hotfix 分支"
+grep -q 'dirty_worktree' "$test_root/hotfix-dirty.err" ||
+  fail "Hotfix 脏工作区未返回稳定失败码"
+git -C "$hotfix_fixture" restore README.md
+
+git -C "$hotfix_fixture" switch main >/dev/null
+if (
+  cd "$hotfix_fixture"
+  maintainer/scripts/hotfix.sh publish --jira-id AO-74
+) >"$test_root/hotfix-wrong-branch.out" 2>"$test_root/hotfix-wrong-branch.err"; then
+  fail "Hotfix 必须拒绝从非 develop 分支执行"
+fi
+grep -q 'hotfix_requires_develop' "$test_root/hotfix-wrong-branch.err" ||
+  fail "Hotfix 非 develop 分支未返回稳定失败码"
+git -C "$hotfix_fixture" switch develop >/dev/null
+
+printf 'local only\n' >> "$hotfix_fixture/README.md"
+git -C "$hotfix_fixture" add README.md
+git -C "$hotfix_fixture" commit -m "local only hotfix candidate" >/dev/null
+if (
+  cd "$hotfix_fixture"
+  maintainer/scripts/hotfix.sh publish --jira-id AO-74
+) >"$test_root/hotfix-unsynced.out" 2>"$test_root/hotfix-unsynced.err"; then
+  fail "Hotfix 必须拒绝未同步的本地 develop"
+fi
+grep -q 'hotfix_develop_not_synced' "$test_root/hotfix-unsynced.err" ||
+  fail "Hotfix 未同步 develop 未返回稳定失败码"
+git -C "$hotfix_fixture" reset --hard "$hotfix_candidate" >/dev/null
+
+(
+  cd "$hotfix_fixture"
+  maintainer/scripts/hotfix.sh publish --jira-id AO-74
+) >"$test_root/hotfix-publish.out"
+grep -q '"operation":"hotfix_publish"' "$test_root/hotfix-publish.out" ||
+  fail "Hotfix 未完成 develop 到 main 的直合"
+grep -q '"jira_interaction":false' "$test_root/hotfix-publish.out" ||
+  fail "Hotfix 未声明不与 Jira 交互"
+grep -q '"branch_created":false' "$test_root/hotfix-publish.out" ||
+  fail "Hotfix 错误声明创建了分支"
+hotfix_merge="$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)"
+[ "$hotfix_merge" = "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/develop)" ] ||
+  fail "Hotfix 未原子同步远端 main 与 develop"
+[ "$(git -C "$hotfix_fixture" rev-parse develop)" = "$hotfix_merge" ] ||
+  fail "Hotfix 未同步本地 develop"
+[ "$(git -C "$hotfix_fixture" rev-parse "$hotfix_merge^2")" = "$hotfix_candidate" ] ||
+  fail "Hotfix Merge commit 的第二父提交不是固定 develop 候选"
+git -C "$hotfix_fixture" log -1 --format=%B "$hotfix_merge" |
+  grep -q 'AO-74' || fail "Hotfix Merge commit 未写入 Jira 编号"
+test -z "$(git -C "$hotfix_fixture" branch --list '*fix-main*')" ||
+  fail "Hotfix 不得创建修复分支"
+test -z "$(git -C "$hotfix_fixture" tag --list)" ||
+  fail "Hotfix 不得创建或移动 Tag"
+
+# 已同步状态再次执行必须幂等返回，不创建新的 Merge commit。
+(
+  cd "$hotfix_fixture"
+  maintainer/scripts/hotfix.sh publish --jira-id AO-74
+) >"$test_root/hotfix-idempotent.out"
+grep -q '"changed":false' "$test_root/hotfix-idempotent.out" ||
+  fail "Hotfix 重复执行未按已同步状态幂等完成"
+
+# main 独立前进后已不再是 develop 的祖先，Hotfix 必须停止且保持两条远端
+# 引用不变，不能通过 rebase、强推或普通 merge 掩盖分叉。
+git -C "$hotfix_fixture" branch -f main "$hotfix_merge"
+git -C "$hotfix_fixture" switch main >/dev/null
+printf 'independent main\n' > "$hotfix_fixture/MAIN-ONLY.md"
+git -C "$hotfix_fixture" add MAIN-ONLY.md
+git -C "$hotfix_fixture" commit -m "independent main after hotfix" >/dev/null
+diverged_main="$(git -C "$hotfix_fixture" rev-parse HEAD)"
+AGENTIC_OPS_SPECIAL_PUSH=hotfix git -C "$hotfix_fixture" push origin main >/dev/null
+git -C "$hotfix_fixture" switch develop >/dev/null
+if (
+  cd "$hotfix_fixture"
+  maintainer/scripts/hotfix.sh publish --jira-id AO-74
+) >"$test_root/hotfix-diverged.out" 2>"$test_root/hotfix-diverged.err"; then
+  fail "Hotfix 必须拒绝 main/develop 分叉"
+fi
+grep -q 'hotfix_develop_not_based_on_main' "$test_root/hotfix-diverged.err" ||
+  fail "Hotfix 分叉未返回稳定失败码"
+[ "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)" = "$diverged_main" ] ||
+  fail "Hotfix 分叉失败错误改写了 main"
+[ "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/develop)" = "$hotfix_merge" ] ||
+  fail "Hotfix 分叉失败错误改写了 develop"
 export AGENTIC_OPS_TEST_FIXTURE_REMOTE="$remote"
 
 # 已提前合入 main 的候选必须由 inspect 自动解析真实 PR，并通过两阶段
@@ -1378,44 +1430,13 @@ test "$(git -C "$sync_fixture" rev-parse develop)" = "$sync_merge" ||
 test "$(git --git-dir="$sync_remote" rev-parse refs/heads/develop)" = "$sync_merge" ||
   fail "发布完成后远端 develop 未快进到 main"
 
-# Hotfix 从 develop 固定修复线；合入 main 后，同一函数必须从修复分支
-# 自动切回 develop 并完成本地、远端快进，全程没有 Tag 写操作。
-git -C "$sync_fixture" switch -c tester/AO-12/fix-main >/dev/null
-printf 'hotfix\n' >> "$sync_fixture/README.md"
-git -C "$sync_fixture" add README.md
-git -C "$sync_fixture" commit -m "sync hotfix" >/dev/null
-sync_hotfix_head="$(git -C "$sync_fixture" rev-parse HEAD)"
-git -C "$sync_fixture" push -u origin tester/AO-12/fix-main >/dev/null
-(
-  . "$repo_root/maintainer/scripts/lib/release-common.sh"
-  release_require_hotfix_develop_lineage "$sync_fixture"
-)
-git -C "$sync_fixture" switch main >/dev/null
-git -C "$sync_fixture" merge --no-ff tester/AO-12/fix-main -m "sync hotfix merge" >/dev/null
-sync_hotfix_merge="$(git -C "$sync_fixture" rev-parse HEAD)"
-git -C "$sync_fixture" push origin main >/dev/null
-git -C "$sync_fixture" switch tester/AO-12/fix-main >/dev/null
-(
-  . "$repo_root/maintainer/scripts/lib/release-common.sh"
-  release_require_hotfix_develop_lineage "$sync_fixture"
-  release_sync_develop_to_main "$sync_fixture" "$sync_hotfix_merge"
-)
-test "$(git -C "$sync_fixture" branch --show-current)" = "develop" ||
-  fail "Hotfix 闭环后未自动切回 develop"
-test "$(git -C "$sync_fixture" rev-parse develop)" = "$sync_hotfix_merge" ||
-  fail "Hotfix 完成后本地 develop 未快进到 main"
-test "$(git --git-dir="$sync_remote" rev-parse refs/heads/develop)" = "$sync_hotfix_merge" ||
-  fail "Hotfix 完成后远端 develop 未快进到 main"
-test "$(git --git-dir="$sync_remote" rev-parse refs/heads/tester/AO-12/fix-main)" = "$sync_hotfix_head" ||
-  fail "Hotfix 闭环错误改写了固定修复分支"
-
 printf 'new development during release\n' >> "$sync_fixture/README.md"
 git -C "$sync_fixture" add README.md
 git -C "$sync_fixture" commit -m "sync diverged develop" >/dev/null
 git -C "$sync_fixture" push origin develop >/dev/null
 if (
   . "$repo_root/maintainer/scripts/lib/release-common.sh"
-  release_sync_develop_to_main "$sync_fixture" "$sync_hotfix_merge"
+  release_sync_develop_to_main "$sync_fixture" "$sync_merge"
 ) > "$test_root/develop-sync-diverged.out" 2> "$test_root/develop-sync-diverged.err"; then
   fail "develop 分叉时不得自动同步或改写历史"
 fi

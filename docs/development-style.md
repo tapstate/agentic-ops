@@ -54,8 +54,8 @@ AgenticOps 开发必须遵守：
 - 本地任务状态由 Runtime 使用 JSON / NDJSON、schema 版本、任务级锁和原子替换维护；人工配置和标准资产可以使用 YAML / Markdown。
 - Linux 和 macOS 必须通过同一锁定 Python 主链路运行，不构建项目自有平台二进制。
 - 发布流程必须支持从稳定 `main` 快速更新、失败回滚和原场景复验。
-- GitHub 默认分支是 `main`，日常开发使用 `develop`；流程禁止直提直推 `main`，只允许通过 PR 的 Merge commit 合入。硬门禁可用时由 Ruleset 强制；GitHub Free 私有仓库使用显式软门禁，并保留“无法从服务器端阻止其它入口直推”的风险提示。
-- 正常发布与 Hotfix 必须分别使用统一脚本入口，固定执行完整验证、最终确认、合并事实校验和审计。
+- GitHub 默认分支是 `main`，日常开发使用 `develop`；正常发布禁止直提直推 `main`，只允许通过 PR 的 Merge commit 合入。Hotfix 是唯一脚本化直推例外。
+- 正常发布使用统一脚本并固定执行完整验证、最终确认、合并事实校验和审计；Hotfix 只接受 Jira key，原子直合 `develop` 到 `main`，不创建分支/PR/Tag、不调用 Jira/`gh`、不追加门禁。
 
 ## 5. 测试方向
 
