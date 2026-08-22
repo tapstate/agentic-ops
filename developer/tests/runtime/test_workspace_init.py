@@ -487,7 +487,7 @@ class WorkspaceInitTest(unittest.TestCase):
             self.assertIn(str(explicit_pool), persisted)
             self.assertIn("source_pool_root", persisted)
 
-    def test_non_interactive_init_skips_permission_denied_pool_member(self) -> None:
+    def test_non_interactive_init_attempts_pool_member_after_permission_preflight_diagnostic(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             install = self.prepare_install(root)
@@ -500,7 +500,7 @@ class WorkspaceInitTest(unittest.TestCase):
                 )
             }
             exit_code, payload, stderr, _ = self.run_cli(
-                self._init_common_args(workspace, "skip-denied"),
+                self._init_common_args(workspace, "attempt-denied"),
                 remote_denied=denied,
             )
             self.assertEqual(0, exit_code, payload)
@@ -510,16 +510,13 @@ class WorkspaceInitTest(unittest.TestCase):
                 for check in cast(list[dict[str, str]], payload["preflight_checks"])
             }
             self.assertEqual("passed", checks["source_pool_members_remote"])
-            skipped = cast(list[dict[str, object]], payload["skipped_repositories"])
-            self.assertEqual(1, len(skipped))
-            self.assertEqual("tapdata/tapdata-web", skipped[0]["repository"])
-            self.assertIn("初始化预检：跳过无权限源码仓库 tapdata/tapdata-web", stderr)
-            self.assertIn("1 个源码仓库因无权限被跳过", stderr)
+            self.assertEqual([], payload["skipped_repositories"])
+            self.assertIn("初始化阶段仍会尝试准备该仓库", stderr)
             pool = root / "source-pool"
             self.assertTrue((pool / "tapdata" / "tapdata" / ".git").exists())
-            self.assertFalse((pool / "tapdata" / "tapdata-web").exists())
+            self.assertTrue((pool / "tapdata" / "tapdata-web" / ".git").exists())
 
-    def test_pool_mode_clone_permission_error_skips_and_continues(self) -> None:
+    def test_pool_mode_clone_permission_error_blocks_after_actual_attempt(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             install = self.prepare_install(root)
@@ -532,18 +529,89 @@ class WorkspaceInitTest(unittest.TestCase):
                 )
             }
             exit_code, payload, stderr, _ = self.run_cli(
-                self._init_common_args(workspace, "clone-skip"),
+                self._init_common_args(workspace, "clone-block"),
                 clone_denied=denied,
             )
-            self.assertEqual(0, exit_code, payload)
-            self.assertEqual("passed", payload["post_preflight_status"])
-            skipped = cast(list[dict[str, object]], payload["skipped_repositories"])
-            self.assertEqual(1, len(skipped))
-            self.assertEqual("tapdata/tapdata-web", skipped[0]["repository"])
-            self.assertIn("池成员准备：跳过无权限源码仓库 tapdata/tapdata-web", stderr)
+            self.assertEqual(2, exit_code, payload)
+            self.assertEqual("source_checkout_failed", payload["code"])
+            self.assertNotIn("跳过无权限源码仓库", stderr)
             pool = root / "source-pool"
             self.assertTrue((pool / "tapdata" / "tapdata" / ".git").exists())
             self.assertFalse((pool / "tapdata" / "tapdata-web").exists())
+
+    def test_pool_mode_replaces_clean_remote_mismatch_before_clone(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install = self.prepare_install(root, with_install_identity=True)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            initializer = WorkspaceInitializer(workspace, install)
+            candidate = initializer.prepare("tapdata")
+            member = root / "source-pool" / "tapdata" / "tapdata"
+            (member / ".git").mkdir(parents=True)
+            (member / "obsolete.txt").write_text("old checkout", encoding="utf-8")
+
+            def fake_git(
+                command: list[str], *, timeout: float | None = None
+            ) -> subprocess.CompletedProcess[str]:
+                if command[-2:] == ["status", "--porcelain"]:
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                if "--get-regexp" in command:
+                    return subprocess.CompletedProcess(command, 1, "", "")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            def fake_streaming(
+                command: list[str], *, stall_warn_interval: float = 30.0
+            ) -> subprocess.CompletedProcess[str]:
+                target = Path(command[-1])
+                (target / ".git").mkdir(parents=True, exist_ok=True)
+                (target / "fresh.txt").write_text("new checkout", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            mismatch = RuntimeErrorResult(
+                code="source_repository_mismatch",
+                message="mismatch",
+                status="blocked",
+                exit_code=2,
+                retry_safe=True,
+                required_human_action="retry",
+            )
+            with (
+                mock.patch.object(initializer, "_run_git", side_effect=fake_git),
+                mock.patch.object(
+                    initializer,
+                    "_run_git_streaming",
+                    side_effect=fake_streaming,
+                ),
+                mock.patch.object(
+                    initializer,
+                    "_validate_checked_out_source",
+                    side_effect=[mismatch, None, None],
+                ),
+            ):
+                status, skipped = initializer._prepare_pool_members(candidate)
+
+            self.assertEqual("adopted=0,cloned=2,total=2", status)
+            self.assertEqual([], skipped)
+            self.assertFalse((member / "obsolete.txt").exists())
+            self.assertEqual("new checkout", (member / "fresh.txt").read_text(encoding="utf-8"))
+
+    def test_remote_mismatch_cleanup_preserves_dirty_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "checkout"
+            (source / ".git").mkdir(parents=True)
+            changed_file = source / "changed.txt"
+            changed_file.write_text("keep me", encoding="utf-8")
+            initializer = WorkspaceInitializer(Path(temporary) / "workspace", Path(temporary) / "install")
+            with mock.patch.object(
+                initializer,
+                "_run_git",
+                return_value=subprocess.CompletedProcess([], 0, " M changed.txt\n", ""),
+            ), self.assertRaises(RuntimeErrorResult) as captured:
+                initializer._remove_nonconforming_checkout(source, "tapdata/tapdata")
+
+            self.assertEqual("source_repository_cleanup_dirty", captured.exception.code)
+            self.assertEqual("keep me", changed_file.read_text(encoding="utf-8"))
 
     def test_pool_mode_preflight_blocks_on_network_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
