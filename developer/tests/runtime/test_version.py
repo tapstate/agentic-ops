@@ -4,6 +4,7 @@ import json
 import os
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -55,6 +56,8 @@ class VersionTest(unittest.TestCase):
             result = inspect_version(install)
             self.assertEqual("1.2.4", result["runtime_version"])
             self.assertEqual(str(install), result["install_root"])
+            self.assertEqual(sys.executable, result["python_executable"])
+            self.assertEqual(sys.prefix, result["python_venv"])
             self.assertEqual("2026-08-22T00:00:00Z", result["installed_at"])
             self.assertEqual(head, result["git_head"])
             self.assertEqual(head[:12], result["git_short_sha"])

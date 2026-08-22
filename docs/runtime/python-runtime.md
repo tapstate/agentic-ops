@@ -20,7 +20,7 @@ ao-maint -> python -m ao_maint
 ao-work  -> ~/.agentic-ops/developer/.venv/bin/python -m ao_work
 ```
 
-两个解析器不提供 `--mode`，两个 Python 包不得互相导入。安装实现可以使用等价的 `uv run --locked`，但业务项目的 Python 环境不得影响 Runtime。
+两个解析器不提供 `--mode`，两个 Python 包不得互相导入。developer Bootstrap 用 `uv sync --locked` 创建安装内 venv；`ao-work` 启动器固定设置该 venv 的 `VIRTUAL_ENV`、把其 `bin` 放到 `PATH` 首位，并用其中的 Python 启动。Runtime 会复核 `sys.prefix`、`sys.executable`、`VIRTUAL_ENV` 和 `PATH` 首项；任一不属于当前安装 venv 时以 `runtime_python_environment_mismatch` 失败关闭。业务项目或系统 Python 不得影响 Runtime。
 
 ## 3. 组件边界
 
@@ -114,6 +114,7 @@ Jira 状态流转（`jira transition plan/apply/readback`，D-049）按 Project 
 ## 8. Python 与依赖
 
 - Python 3.12 由 `.python-version` 固定。
+- developer 安装在写入 managed clone 前统一检查 `git`、`gh`、`uv`，缺失时一次返回全部缺失项；不会自动安装系统程序。
 - 两个工作面的依赖分别由 `maintainer/pyproject.toml`、`developer/pyproject.toml` 声明，并由各自目录的 `uv.lock` 锁定；根目录不再提供混合 Python 项目。
 - 安装和 CI 使用 `uv sync --locked --project <workplane>`。
 - 单元测试、类型检查、格式检查和安全扫描命令写入对应工作面的 `pyproject.toml` 或固定脚本，发布流程不得临时替换。
@@ -140,6 +141,7 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 ## 11. 验收
 
 - 没有 Go 环境时 Runtime 可以安装和执行。
+- Agent 从业务工作空间本地入口调用 `ao-work version` 时，`python_executable` 与 `python_venv` 指向该工作空间绑定安装的 `developer/.venv`。
 - 同一输入产生稳定 JSON、退出码和失败码。
 - 状态写入中断不会留下被误认为成功的半文件。
 - Jira / GitHub 写入结果不明确时先回读，不重复副作用。
@@ -168,7 +170,7 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 池模式（D-048）下，`source_pool_root` 为研发员级必配（`~/.agentic-ops/user/config.yaml` 或 `--source-pool-root`）；未配置时阻断 `source_pool_root_invalid`，无兼容回退。源码准备从「工作空间级单仓库克隆」改为「中央克隆池成员全集准备」：按 Project Profile `repositories.list` 逐仓库认领（校验 remotes 精确匹配、拒绝 URL 改写与 AgenticOps 源头仓库）或流式克隆；浅克隆自动 `git fetch --unshallow`；中断续传，已完成成员保留。任务执行源码在任务接管时以任务级子工作树集（`<pool_root>/<jira>/<from_branch>/<repo>`，`/` 规范化为 `-`）挂出，分支由 Profile `branches` 推导接口确定（主仓库=from_branch、override 命中优先、否则同名；缺省 `main`），per-worktree 身份写入 worktree config，同一任务同分支同仓库复用已有工作树。
 
-初始化生成的业务工作空间 `AGENTS.md` 固定进入 developer 工作面，不得引用根 `AGENTS.md` 或 `maintainer/`。developer 安装的 `user/identity.yaml` 与 `user/.env` 保存研发员身份和 Jira 凭据；`user/workspace-index.json` 只是可重建冲突索引。新工作空间使用 schema v4，只持 `install_identity_ref` 和项目绑定；schema v3 与工作空间 `.agentic-ops/.env` 在凭证读取和联网前失败关闭，不提供隐式迁移。
+初始化生成的业务工作空间 `AGENTS.md` 固定进入 developer 工作面，不得引用根 `AGENTS.md` 或 `maintainer/`。developer 安装的 `user/identity.yaml` 与 `user/.env` 保存研发员身份和 Jira 凭据；`user/workspace-index.json` 只是可重建冲突索引。新工作空间使用 schema v5，只持 `install_identity_ref`、本地入口绑定和项目事实；schema v4 及更早格式与工作空间 `.agentic-ops/.env` 在凭证读取和联网前失败关闭，不扫描 PATH 或提供隐式迁移。
 
 指定分支验证安装（`developer/bootstrap/install-verify-branch.sh` 远程模式）的 `ao-work` 复用同一套安装身份校验：origin 必须是 `tapstate/agentic-ops`、sparse 精确集与 shared/developer 分发白名单不变，仅把「HEAD 是 `origin/main` 祖先」放宽为「HEAD 可达于任一 `origin/*` 远端分支或 tag」；该放宽只在 `.agentic-ops/verification-only` 标记存在时生效。生产安装 `~/.agentic-ops` 仍固定 `main`，不接受分支覆盖。
 

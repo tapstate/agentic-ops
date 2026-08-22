@@ -67,6 +67,11 @@ case "$subcommand" in
 esac
 EOF
 chmod 0755 "$transport_git_dir/git"
+cat > "$transport_git_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod 0755 "$transport_git_dir/gh"
 
 test_python="${AGENTIC_OPS_TEST_PYTHON:-$repo_root/developer/.venv/bin/python}"
 if [ ! -x "$test_python" ]; then
@@ -85,11 +90,26 @@ printf '%s\n' \
   '  shift' \
   'done' \
   'test -n "$project_root"' \
-  'mkdir -p "$project_root/.venv/bin"' \
-  'printf "#!/usr/bin/env bash\\nexec %q \\\"%s\\\"\\n" "$AGENTIC_OPS_TEST_REAL_PYTHON" '\''$@'\'' > "$project_root/.venv/bin/python"' \
-  'chmod 0755 "$project_root/.venv/bin/python"' \
+  '"$AGENTIC_OPS_TEST_REAL_PYTHON" -m venv --clear --system-site-packages "$project_root/.venv"' \
+  'venv_site="$("$project_root/.venv/bin/python" -c '\''import site; print(site.getsitepackages()[0])'\'')"' \
+  '"$AGENTIC_OPS_TEST_REAL_PYTHON" -c '\''import site; print("\\n".join(site.getsitepackages()))'\'' > "$venv_site/agentic-ops-test-dependencies.pth"' \
   > "$fake_uv"
 chmod 0755 "$fake_uv"
+
+missing_tools_path="$test_root/missing-tools"
+missing_tools_install="$test_root/missing-tools-install"
+mkdir -p "$missing_tools_path"
+if PATH="$missing_tools_path" AGENTIC_OPS_UV= \
+  /bin/bash "$source_repo/developer/bootstrap/install.sh" \
+    --install-home "$missing_tools_install" \
+    >"$test_root/missing-tools.out" 2>"$test_root/missing-tools.err"; then
+  echo "缺少安装依赖时必须在安装前失败" >&2
+  exit 1
+fi
+grep -q 'install_dependencies_missing' "$test_root/missing-tools.out"
+grep -q '"missing_dependencies":"git,gh,uv"' "$test_root/missing-tools.out"
+grep -q 'git, gh, uv' "$test_root/missing-tools.err"
+test ! -e "$missing_tools_install"
 
 if bash "$source_repo/developer/bootstrap/install.sh" --install-home \
     >"$test_root/missing-install-home.out" \
@@ -107,7 +127,10 @@ AO_TEST_FIXTURE_REPOSITORY="$source_repo" \
 AO_TEST_OFFICIAL_REPOSITORY="$official_repo_url" \
 PATH="$transport_git_dir:$PATH" \
   bash "$source_repo/developer/bootstrap/install.sh" \
-    --install-home "$install_root" >/dev/null
+    --install-home "$install_root" >"$test_root/install.out"
+
+grep -Fq "\"python_venv\":\"$install_root/developer/.venv\"" \
+  "$test_root/install.out"
 
 printf '%s\n' 'test-token-secret' | \
 HOME="$test_home" \
@@ -345,6 +368,7 @@ business_workspace="$test_root/business-workspace"
 mkdir -p "$business_workspace"
 git -C "$business_workspace" init -b main >/dev/null
 AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
+PYTHONDONTWRITEBYTECODE=1 \
 PYTHONPATH="$install_root/developer/runtime/src" \
   "$test_python" - "$install_root" "$business_workspace" <<'PY'
 from pathlib import Path
@@ -358,9 +382,11 @@ initializer = WorkspaceInitializer(workspace, install)
 
 
 class Candidate:
-    root = workspace
+    root = initializer.root
+    install_root = initializer.install_root
 
 initializer._install_workspace_skills(Candidate())
+initializer._write_workspace_entry(Candidate())
 PY
 test -f "$business_workspace/.agents/skills/configure-authorization/SKILL.md"
 test -f "$business_workspace/.agents/skills/initialize-project-workspace/SKILL.md"
@@ -380,6 +406,23 @@ if grep -RIl 'ao-work task takeover' \
   echo "新工作空间不得继承旧多级接管入口" >&2
   exit 1
 fi
+
+(
+  cd "$business_workspace"
+  PATH="/usr/bin:/bin" VIRTUAL_ENV="$test_root/wrong-venv" \
+    ./.agentic-ops/bin/ao-work version
+) > "$test_root/business-workspace-version.out"
+"$test_python" - "$test_root/business-workspace-version.out" "$install_root" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.load(open(sys.argv[1]))
+install = Path(sys.argv[2])
+assert payload["ok"] is True
+assert Path(payload["python_executable"]).resolve() == (install / "developer" / ".venv" / "bin" / "python").resolve()
+assert Path(payload["python_venv"]).resolve() == (install / "developer" / ".venv").resolve()
+PY
 
 fake_origin="$test_root/fake-origin"
 mkdir -p "$fake_origin"

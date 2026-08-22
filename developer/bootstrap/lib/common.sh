@@ -779,6 +779,7 @@ agentic_sync_runtime_for_verification() {
   if ! "$uv_bin" sync --locked --project "$install_dir/developer" --python 3.12; then
     return 1
   fi
+  agentic_require_runtime_venv "$install_dir"
   if [ ! -e "$install_dir/bin" ]; then
     mkdir -m 0755 "$install_dir/bin"
   fi
@@ -838,6 +839,7 @@ agentic_sync_runtime() {
   if ! "$uv_bin" sync --locked --project "$install_dir/developer" --python 3.12; then
     return 1
   fi
+  agentic_require_runtime_venv "$install_dir"
   agentic_require_managed_paths_safe "$install_dir"
   if [ ! -e "$install_dir/bin" ]; then
     mkdir -m 0755 "$install_dir/bin"
@@ -849,6 +851,33 @@ agentic_sync_runtime() {
   fi
   agentic_require_managed_paths_safe "$install_dir"
   "$install_dir/bin/ao-work" --help >/dev/null
+}
+
+agentic_require_runtime_venv() {
+  local install_dir="$1"
+  local venv_root="$install_dir/developer/.venv"
+  local python_bin="$venv_root/bin/python"
+  local python_prefix=""
+
+  if [ -L "$venv_root" ] || [ ! -d "$venv_root" ] || [ ! -x "$python_bin" ]; then
+    agentic_bootstrap_error \
+      "runtime_python_environment_invalid" \
+      "developer Python venv 未正确创建：$venv_root" \
+      "请检查 uv 与 Python 3.12 后重新执行 developer 安装"
+  fi
+  venv_root="$(CDPATH= cd -- "$venv_root" && pwd -P)"
+  python_bin="$venv_root/bin/python"
+  python_prefix="$({ "$python_bin" -c 'import sys; print(sys.prefix)' ; } 2>/dev/null)" || \
+    agentic_bootstrap_error \
+      "runtime_python_environment_invalid" \
+      "developer Python venv 解释器无法启动：$python_bin" \
+      "请检查 uv 与 Python 3.12 后重新执行 developer 安装"
+  if [ "$python_prefix" != "$venv_root" ]; then
+    agentic_bootstrap_error \
+      "runtime_python_environment_invalid" \
+      "developer Python 解释器不属于安装 venv：$python_prefix" \
+      "请移除异常 venv 后重新执行 developer 安装"
+  fi
 }
 
 agentic_write_refs() {
