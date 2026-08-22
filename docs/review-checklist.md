@@ -31,7 +31,7 @@
 - Git 和 GitHub 可以轻封装，但推送、创建拉取请求、合并和发布必须有人确认。
 - 工作日志可以生成改进建议，但不能未经人工确认自动改写 AgenticOps 源头规则。
 - GitHub 默认分支是 `main`，日常开发使用 `develop`；正常发布只通过 PR 的 Merge commit 合入，Hotfix 是 Jira key 绑定的脚本化直推例外。
-- 正常发布只使用 `maintainer/scripts/release.sh` 并固定执行完整验证与最终确认；Hotfix 只使用 `maintainer/scripts/hotfix.sh publish --jira-id <KEY>`，不运行发布验证、不追加确认且不与 Jira 交互。
+- 正常发布只使用 `maintainer/scripts/release.sh` 并固定执行完整验证与最终确认；Hotfix 只使用 `maintainer/scripts/hotfix.sh <KEY>`，由脚本自行完成分支切换与同步，不运行发布验证、不追加确认且不与 Jira 交互。
 - 根 AI 入口只进入 maintainer，业务项目 AI 入口只进入 developer；`ao-maint` / `ao-work`、Python 包、Skill、授权、配置和状态无交叉。
 - developer 安装不提供 `agentic-cli` 别名或 `--mode` 工作面切换。
 - 正常发布只推送二段式 annotated `vX.Y` tag；Hotfix 不读取版本基线，也不创建、移动或推送 tag。

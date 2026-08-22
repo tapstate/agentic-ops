@@ -44,7 +44,7 @@ AO 工作项因权限、外部事实、依赖、环境或能力缺口无法在�
 
 通过 `ao-maint` 向当前 Jira 工作项写入并回读中文阻断评论，至少说明阻断原因、已完成验证、转存位置与候选摘要、未完成项、当前 HEAD/分支、恢复入口及恢复前必须重查的外部事实。恢复时优先使用 `ao-maint takeover <AO-KEY>` 恢复原运行，并重新核对 Jira、转存候选、故事影响和验证证据；符合条件后再将候选合并回 `develop` 统一处理。只有验证失败、候选越界、含敏感信息、与外部事实冲突、妨碍更高优先级已授权工作，或用户明确要求放弃时，才允许按精确文件范围删除转存候选；不得使用 `reset --hard`、`checkout --` 或清理整个工作树。
 
-接管、评论与状态流转必须通过 `ao-maint` Runtime 执行。底层 Jira 写入仍执行 plan → apply → readback：人工门禁使用精确的 `user-confirmation:<KEY>:<plan_id>`，设计确认后的常规写入可使用 Runtime 回读有效的 `work-authorization:<KEY>:<RUN>:<DESIGN-DIGEST>`，并留下决策审计记录。工作项连续授权不覆盖 Jira 建卡和任务描述整体替换，也不覆盖 `main`、合并、正常发布、Git Tag、强推、历史改写、范围变化或风险决策。唯一例外是显式调用 `maintainer/scripts/hotfix.sh publish --jira-id <KEY>`：它不使用 Jira Runtime，不回写 Jira，只把 key 写入 Merge commit，并直接原子同步 `main` 与 `develop`。不得绕过 Runtime 直接调用 Connector、Jira REST API 或 Shell 网络请求；发现能力缺口时先补齐 Runtime 能力，再执行任务操作。
+接管、评论与状态流转必须通过 `ao-maint` Runtime 执行。底层 Jira 写入仍执行 plan → apply → readback：人工门禁使用精确的 `user-confirmation:<KEY>:<plan_id>`，设计确认后的常规写入可使用 Runtime 回读有效的 `work-authorization:<KEY>:<RUN>:<DESIGN-DIGEST>`，并留下决策审计记录。工作项连续授权不覆盖 Jira 建卡和任务描述整体替换，也不覆盖 `main`、合并、正常发布、Git Tag、强推、历史改写、范围变化或风险决策。唯一例外是显式调用 `maintainer/scripts/hotfix.sh <KEY>`：它自行切换和同步 `develop`，不使用 Jira Runtime，不回写 Jira，只把 key 写入 Merge commit，并直接原子同步 `main` 与 `develop`。不得绕过 Runtime 直接调用 Connector、Jira REST API 或 Shell 网络请求；发现能力缺口时先补齐 Runtime 能力，再执行任务操作。
 
 以下是 maintainer 工作面的固定暂停点：
 
