@@ -11,10 +11,10 @@
 - `main` 是稳定主分支，也是 GitHub 默认分支和安装脚本读取的分支。
 - `develop` 是日常开发分支。正常发布必须以完成验证的 `develop` HEAD 为来源，通过拉取请求合入 `main`。
 - `release/vX.Y` 是软门禁模式从已验证 `develop` HEAD 创建的固定发布分支，用于避免等待人工合并期间 `develop` 的后续提交改变发布内容。
-- `<user>/<jira-id>/fix-main` 是无 Tag 紧急修复分支，只能从包含当前 `origin/main` 的最新 `origin/develop` 创建，只能通过拉取请求合回 `main`。
-- `main` 禁止直接提交、直接推送、强制推送和删除。
+- Hotfix 不创建修复分支；它直接把已同步 `develop` 生成 Jira key 绑定的 Merge commit。
+- `main` 禁止直接提交和普通直接推送；Hotfix 脚本是唯一受控直推例外。强制推送和删除始终禁止。
 - 所有合入 `main` 的拉取请求使用 Merge commit，不要求 GitHub CI 或代码审查批准。
-- Hotfix 合入 `main` 后，脚本只允许将 `develop` 快进到已验证的 `origin/main` 并切回 `develop`；无法快进时失败关闭。
+- Hotfix 原子推送同一 Merge commit 到远端 `main` 与 `develop`，再同步本地 `develop`；任一远端引用不能更新时整体失败。
 
 ## 3. 版本与 Tag
 
@@ -29,7 +29,7 @@
 - `prepare` 固定发布候选；软门禁模式创建或核验本地 `release/vX.Y` 分支必须指向该已验证 HEAD。
 - annotated `vX.Y` tag 只在发布 PR 合入 `main` 后创建，并指向经过核验的 Merge commit。
 - 远端 tag 不移动、不覆盖、不删除、不强制推送。
-- Hotfix 复用 `main` 历史中最近的 `vX.Y`，不创建或移动 tag。
+- Hotfix 不读取版本基线，也不创建、移动或推送 tag；已有 `vX.Y` 继续作为 `main` 历史版本线事实。
 
 ## 4. 用户入口与组件边界
 
@@ -48,7 +48,7 @@ maintainer/scripts/lib/development-workflow.sh
 ```
 
 - `release.sh` 负责 `develop` 正常发布的 `prepare` 和 `publish`。
-- `hotfix.sh` 负责紧急修复的 `create`、`prepare` 和 `publish`。
+- `hotfix.sh` 只负责 `publish --jira-id <KEY>`，不创建分支、PR、Tag，不调用 Jira 或 `gh`，也不设置额外人工门禁。
 - `release-common.sh` 负责参数、仓库、版本、验证、确认、拉取请求、等待和审计公共逻辑。
 - `development-workflow.sh` 负责本地 Hooks、`develop` 和 GitHub `main` 保护的检查与幂等配置。
 - 源头仓库维护脚本可以编排 `git`、`gh` 和固定验证命令。该例外只适用于 AgenticOps 源头仓库维护，不允许把安装后 AIAgent 的 Jira、GitHub、Git、策略或证据业务逻辑迁回 Shell。
@@ -130,69 +130,26 @@ maintainer/scripts/release.sh publish --version v0.3 --allow-soft-gate
 
 ## 6. Hotfix 流程
 
-### 6.1 创建修复分支
+### 6.1 发布修复
 
 命令：
 
 ```bash
-maintainer/scripts/hotfix.sh create --jira-id AO-123
+maintainer/scripts/hotfix.sh publish --jira-id AO-123
 ```
 
 顺序：
 
-1. 要求当前仓库工作区干净。
-2. fetch `origin/main` 和 `origin/develop`，确认 `develop` 包含当前 `main`。
-3. 从 Git 配置读取用户名；无法读取时要求显式提供。
-4. 校验 Jira ID 格式和分支名安全性。
-5. 确认本地和远端不存在同名分支。
-6. 从最新 `origin/develop` 创建 `<user>/<jira-id>/fix-main`，使修复和已有 develop 变更保持单向进入 `main`。
+1. 校验 Jira key 格式；该 key 只用于 Git Merge commit，不触发 Jira 读取或写入。
+2. 要求当前分支为 `develop` 且工作区干净。
+3. 刷新 `origin/main` 与 `origin/develop`，要求本地 `develop` 与远端完全一致。
+4. 若两条远端分支已相同，幂等返回 `changed=false`。
+5. 要求 `origin/main` 是 `origin/develop` 的祖先；分叉时停止，不执行 merge、rebase、cherry-pick 或强推。
+6. 以 `origin/develop` 的 tree、`origin/main` 第一父提交和 `origin/develop` 第二父提交构造 Merge commit；标题与正文均写入 Jira key。
+7. 使用单次 atomic push 把该提交同时更新到远端 `main` 和 `develop`，不允许部分更新。
+8. 快进本地 `develop` 并刷新远端引用，回读确认三者指向同一 Merge commit。
 
-### 6.2 准备修复产物
-
-命令：
-
-```bash
-maintainer/scripts/hotfix.sh prepare
-```
-
-顺序：
-
-1. 校验当前分支符合 `<user>/<jira-id>/fix-main`。
-2. 校验分支包含最新 `origin/develop`、`develop` 包含当前 `main` 且工作区干净。
-3. 自动解析 `main` 历史中最近的二段式 `vX.Y`。
-4. 执行 maintainer/developer Runtime、工作面边界和 developer-only 安装验证。
-5. 输出固定修复 HEAD 和验证清单，停止在研发工程师审查和提交点。
-
-该命令不创建、移动或推送 tag，也不提交生成产物。
-
-### 6.3 发布修复
-
-命令：
-
-```bash
-maintainer/scripts/hotfix.sh publish
-```
-
-软门禁命令：
-
-```bash
-maintainer/scripts/hotfix.sh publish --allow-soft-gate
-```
-
-顺序：
-
-1. 校验修复分支、Jira ID、工作区和远端同步状态。
-2. 自动解析并校验版本线基线。
-3. 在临时 Git worktree 中执行完整验证。
-4. 展示修复范围、目标仓库、验证结果和最终人工确认。
-5. 推送修复分支。
-6. 创建或复用修复分支到 `main` 的开放拉取请求。
-7. 硬门禁模式使用 Merge commit 启用 Auto-merge 并等待合并。
-8. 软门禁模式记录固定修复 HEAD，创建 PR 后返回状态码 `2`，等待研发工程师在 GitHub 页面选择 Merge commit 人工合并。
-9. 软门禁人工合并后重新执行同一条 `publish` 命令，再次完整验证固定修复 HEAD；HEAD 漂移或 Squash/Rebase 合并时停止发布。
-10. 验证 `origin/main` 包含固定修复 HEAD，且 PR 使用保留该 HEAD 的 Merge commit。
-11. 将远端和本地 `develop` 快进到已验证的 `origin/main` 并切回 `develop`；快进不成立时失败关闭。
-12. 写入包含 `develop_commit` 和 `tag_action=none` 的结构化审计；不创建、移动或推送 Tag。
+该流程不创建分支、PR、Tag 或本地发布审计，不调用 `gh` 或 Jira，不运行完整发布验证，也不等待额外人工确认。显式执行命令本身就是本次快速修复授权。
 
 ## 7. 研发流程配置门禁
 
@@ -219,7 +176,7 @@ maintainer/scripts/hotfix.sh publish --allow-soft-gate
 
 ### 7.2 GitHub Free 软门禁
 
-GitHub Free 私有仓库无法配置本设计要求的 `main` Ruleset 与 Auto-merge。此时允许发布者在 `prepare` 和 `publish` 显式传入 `--allow-soft-gate`，普通发布和 Hotfix 使用相同模式。脚本不得自动探测并静默降级，也不得把软门禁保存为仓库默认值。
+GitHub Free 私有仓库无法配置本设计要求的 `main` Ruleset 与 Auto-merge。正常发布允许在 `prepare` 和 `publish` 显式传入 `--allow-soft-gate`；脚本不得自动探测并静默降级，也不得把软门禁保存为仓库默认值。Hotfix 不使用硬/软门禁模式。
 
 软门禁仍强制检查：
 
@@ -235,7 +192,7 @@ GitHub Free 私有仓库无法配置本设计要求的 `main` Ruleset 与 Auto-m
 
 ## 8. 完整验证
 
-`prepare` 与 `publish` 都在临时 Git worktree 中固定执行：
+正常发布的 `prepare` 与 `publish` 都在临时 Git worktree 中固定执行：
 
 ```bash
 bash maintainer/scripts/test-python-runtime.sh
@@ -244,7 +201,7 @@ bash developer/tests/bootstrap/test_install_boundary.sh
 bash maintainer/scripts/test-release-workflow.sh
 ```
 
-其中 `test-python-runtime.sh` 统一运行 maintainer/developer Runtime 回归，`test-resources.sh` 验证工作面、Skill、Rule、标准资产和旧分发残留，`test_install_boundary.sh` 验证 developer-only sparse 安装、更新与回滚，`test-release-workflow.sh` 验证发布和 Hotfix 门禁。验证命令不可由普通参数替换或跳过。任一命令失败时，`prepare` 不得创建新 tag，`publish` 不得执行推送、创建拉取请求、Auto-merge 或 tag 推送。软门禁恢复执行时，即使 PR 已人工合并，也必须在 Tag 或完成审计前重新执行全部验证。
+其中 `test-python-runtime.sh` 统一运行 maintainer/developer Runtime 回归，`test-resources.sh` 验证工作面、Skill、Rule、标准资产和旧分发残留，`test_install_boundary.sh` 验证 developer-only sparse 安装、更新与回滚，`test-release-workflow.sh` 验证正常发布门禁及 Hotfix 直合、原子性和幂等行为。正常发布验证命令不可由普通参数替换或跳过。Hotfix 执行期不运行这组完整验证。
 
 `publish` 在完整验证前刷新官方 `origin/main`，分别创建 baseline 和固定 candidate worktree，只执行 baseline 的锁文件、launcher 和 Runtime 来检查从二者 merge-base 开始的 candidate 范围。`origin/main` 缺少新门禁时返回 `release_story_gate_baseline_upgrade_required`；Hook、故事门禁、注册表、锁文件或发布脚本等信任根发生净变更时返回 `release_story_gate_trust_root_changed`。两种情况都不能自动创建或合并 PR，必须先通过受保护 `main` 的独立人工审查 PR 安装或升级信任根。
 
@@ -277,7 +234,7 @@ bash maintainer/scripts/test-release-workflow.sh
 脚本在 `.local/release-runs/` 写入结构化 JSON，至少包含：
 
 - 操作模式和阶段。
-- Jira ID（Hotfix）。
+- Jira ID（仅旧发布审计兼容；现役 Hotfix 不写本地发布审计）。
 - 版本基线。
 - PR 编号和地址。
 - Merge commit。
@@ -292,10 +249,10 @@ GitHub PR 和 Merge commit 是发布事实源，本地 JSON 是执行审计记�
 ## 11. 正式规则状态
 
 - 原临时开发限制已移除，不再作为当前执行规则。
-- 分支职责、质量门禁、版本、发布、Hotfix、人工确认和审计要求已迁入永久项目规则。
+- 分支职责、正常发布门禁、版本、Hotfix 直合和审计要求已迁入永久项目规则。
 - 真实 Git、GitHub 和 Jira 操作继续受永久策略和明确人工确认约束，不再一律禁止。
 - 发布检查清单、当前架构、版本设计、项目维护者故事、维护者上手和 README 索引必须与本流程保持一致。
-- `main` 直提规则已由 `develop` 日常开发和 PR-only 发布流程替代。
+- `main` 普通直推由 `develop` 日常开发和 PR-only 正常发布流程替代；Hotfix 是唯一脚本化例外。
 
 ## 12. 测试要求
 
@@ -310,13 +267,11 @@ maintainer/scripts/test-release-workflow.sh
 - `main` 提交和推送被 Hooks 阻止，`develop` 正常工作。
 - 缺失研发流程配置时的确认、拒绝、非交互失败和幂等修复。
 - 正常发布 `prepare` 和 `publish`。
-- Hotfix `create`、`prepare` 和 `publish`。
-- Jira ID 和修复分支命名校验。
-- tag 格式、冲突、祖先关系、远端不可覆盖和 Hotfix 不创建 tag。
+- Hotfix 单一 `publish --jira-id` 入口、Jira key 格式和 Merge commit 信息。
+- Hotfix 不创建分支、PR 或 Tag，不调用 Jira/`gh`，并原子同步 `main` 与 `develop`。
 - 拉取请求创建、复用、已合并恢复和等待超时。
 - `--allow-soft-gate` 显式启用、默认不降级和软门禁保留的基础检查。
 - 普通发布固定 `release/vX.Y` 分支、首次返回状态码 `2`、人工 Merge commit 后同命令恢复和二次完整验证。
-- Hotfix 软门禁等待、恢复、固定 HEAD 校验和不创建 tag。
 - 软门禁拒绝 PR HEAD 漂移、关闭未合并、Squash 和 Rebase 合并。
 - 任一验证失败时没有远端写入。
 - Merge commit 后 `origin/main` 包含关系验证。

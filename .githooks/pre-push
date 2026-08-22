@@ -16,7 +16,8 @@ if ! git diff --quiet HEAD -- \
 fi
 
 while read -r local_ref local_sha remote_ref remote_sha; do
-  if [ "$remote_ref" = "refs/heads/main" ]; then
+  if [ "$remote_ref" = "refs/heads/main" ] &&
+    [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" != "hotfix" ]; then
     echo "direct push to main is prohibited; use a pull request" >&2
     exit 1
   fi
@@ -39,7 +40,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       exit 1
       ;;
   esac
-  if [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" = "release" ]; then
+  if [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" = "release" ] ||
+    [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" = "hotfix" ]; then
     continue
   fi
 
