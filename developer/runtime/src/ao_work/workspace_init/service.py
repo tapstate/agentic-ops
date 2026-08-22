@@ -802,17 +802,11 @@ class WorkspaceInitializer:
                                 "stderr_tail": _stderr_tail(result.stderr),
                             },
                         )
-                    # 权限类错误：跳过该仓库并提示用户，其余仓库继续检查。
+                    # 权限错误只作为预检诊断：apply 阶段仍必须实际尝试初始化
+                    # 缺失池成员，不能把未初始化仓库静默跳过。
                     write_diagnostic(
-                        f"初始化预检：跳过无权限源码仓库 {repository}（{reason}）"
-                    )
-                    skipped.append(
-                        {
-                            "repository": repository,
-                            "url": url,
-                            "reason": reason,
-                            "stderr_tail": _stderr_tail(result.stderr),
-                        }
+                        f"初始化预检：源码仓库 {repository} 当前不可访问（{reason}）；"
+                        "初始化阶段仍会尝试准备该仓库"
                     )
             checks.append({"check": "source_pool_root", "status": "passed"})
             checks.append({"check": "source_pool_members_remote", "status": "passed"})
@@ -896,8 +890,13 @@ class WorkspaceInitializer:
     def _ensure_source_checkout(self, candidate: WorkspaceCandidate) -> str:
         source = validate_business_source_root(candidate.root, candidate.source_root)
         if source.is_dir() and any(source.iterdir()):
-            self._validate_checked_out_source(candidate)
-            return "reused"
+            try:
+                self._validate_checked_out_source(candidate)
+                return "reused"
+            except RuntimeErrorResult as error:
+                if error.code != "source_repository_mismatch":
+                    raise
+                self._remove_nonconforming_checkout(source, candidate.repository)
         restore_empty_directory = source.is_dir()
         source.parent.mkdir(parents=True, exist_ok=True)
         if source.is_dir():
@@ -986,8 +985,8 @@ class WorkspaceInitializer:
         - 已存在 → 认领（adopt）：校验 remotes 精确匹配、拒绝 URL 改写、
           拒绝指向 AgenticOps 源头仓库；浅克隆自动流式 unshallow。
         - 缺失 → 流式 clone；中断续传：已完成成员保留，下次补齐。
-        - 无权限仓库（预检已跳过或克隆时权限类失败）→ 跳过并提示用户，
-          其余仓库继续准备；返回 (状态摘要, 跳过清单)。
+        - 缺失成员必须实际执行 clone；预检权限错误只保留为诊断，clone 失败时阻断。
+        - 已存在但 remote 身份不匹配的 Git 仓库会在确认无未提交修改后清除并重建。
         - 池成员级并发锁：<pool_root>/.locks/<owner>/<repo>.lock。
         """
         assert candidate.pool_mode
@@ -1003,61 +1002,34 @@ class WorkspaceInitializer:
                 "Project Profile 没有配置 repositories.default 或 repositories.list",
                 "请先配置 profile 的默认仓库或仓库清单",
             )
-        preflight_skipped = {
-            entry["repository"]
-            for entry in (preflight or {}).get("skipped_repositories", [])
-            if isinstance(entry, dict) and entry.get("repository")
-        }
         prepared: list[str] = []
         skipped_members: list[dict[str, Any]] = []
         adopted = 0
         cloned = 0
         for repository in repositories:
-            if repository in preflight_skipped:
-                # 预检已确认无权限，直接跳过，不重复尝试克隆。
-                write_diagnostic(
-                    f"池成员准备：跳过无权限源码仓库 {repository}（预检已跳过）"
-                )
-                skipped_members.append(
-                    {
-                        "repository": repository,
-                        "url": _repository_url(repository),
-                        "reason": "无访问权限（预检阶段已跳过）",
-                    }
-                )
-                continue
             member_dir = pool_root / repository
             lock_path = pool_root / ".locks" / f"{repository.replace('/', '__')}.lock"
             with TaskLock(lock_path, timeout=10):
                 if member_dir.is_dir() and any(member_dir.iterdir()):
-                    self._validate_checked_out_source(candidate, source=member_dir, repository=repository)
-                    if self._is_shallow_clone(member_dir):
-                        self._unshallow_pool_member(member_dir, repository)
-                        adopted += 1
+                    try:
+                        self._validate_checked_out_source(
+                            candidate, source=member_dir, repository=repository
+                        )
+                    except RuntimeErrorResult as error:
+                        if error.code != "source_repository_mismatch":
+                            raise
+                        self._remove_nonconforming_checkout(member_dir, repository)
                     else:
+                        if self._is_shallow_clone(member_dir):
+                            self._unshallow_pool_member(member_dir, repository)
                         adopted += 1
-                    prepared.append(repository)
-                    continue
+                        prepared.append(repository)
+                        continue
                 self._reject_git_url_rewrites(None)
                 result = self._run_git_streaming(
                     ["clone", "--progress", _repository_url(repository), str(member_dir)]
                 )
                 if result.returncode != 0:
-                    reason = _classify_remote_permission_error(result.stderr)
-                    if reason is not None:
-                        # 权限类错误：跳过该仓库并提示用户，其余仓库继续准备。
-                        write_diagnostic(
-                            f"池成员准备：跳过无权限源码仓库 {repository}（{reason}）"
-                        )
-                        skipped_members.append(
-                            {
-                                "repository": repository,
-                                "url": _repository_url(repository),
-                                "reason": reason,
-                                "stderr_tail": _stderr_tail(result.stderr),
-                            }
-                        )
-                        continue
                     raise _blocked(
                         "source_checkout_failed",
                         f"池成员克隆失败：{repository}",
@@ -1069,6 +1041,26 @@ class WorkspaceInitializer:
                 prepared.append(repository)
         self._write_source_pool_readme(candidate, pool_root, tuple(prepared))
         return f"adopted={adopted},cloned={cloned},total={len(prepared)}", skipped_members
+
+    def _remove_nonconforming_checkout(self, source: Path, repository: str) -> None:
+        """清理 remote 身份不匹配、且没有未提交修改的 Git checkout 后重新初始化。"""
+        status = self._run_git(["-C", str(source), "status", "--porcelain"])
+        if status.returncode != 0:
+            raise _blocked(
+                "source_repository_cleanup_check_failed",
+                f"无法确认不匹配源码仓库的本地修改状态：{source}",
+                "请人工核对该仓库后重新运行 workspace init",
+            )
+        if status.stdout.strip():
+            raise _blocked(
+                "source_repository_cleanup_dirty",
+                f"源码仓库 remote 与 {repository} 不一致且存在未提交修改：{source}",
+                "请先提交、备份或移除本地修改，再重新运行 workspace init",
+            )
+        write_diagnostic(
+            f"初始化：清除 remote 身份不匹配的源码仓库 {source}，重新初始化为 {repository}"
+        )
+        self._rollback_source_checkout(source, restore_empty_directory=False)
 
     def _is_shallow_clone(self, source: Path) -> bool:
         result = self._run_git(["-C", str(source), "rev-parse", "--is-shallow-repository"])
