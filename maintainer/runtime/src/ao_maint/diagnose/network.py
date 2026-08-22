@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+import ipaddress
 import os
 import socket
 import subprocess
@@ -8,13 +9,23 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from ao_maint.jira.client import JiraClient
 from ao_maint.output import RuntimeErrorResult
 
-_PROXY_NAMES = ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY")
-_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+_PROXY_NAMES = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy")
+_SUPPORTED_PROXY_SCHEMES = {"http", "https", "socks5"}
+
+
+@dataclass(frozen=True)
+class _ProxyEndpoint:
+    source: str
+    scheme: str
+    host: str
+    port: int
+    has_userinfo: bool
 
 
 class NetworkDiagnoser:
@@ -38,10 +49,10 @@ class NetworkDiagnoser:
         return cls(jira_probe=client.current_user_details, targets={"jira": client.connection.base_url, "github": "https://api.github.com"})
 
     def diagnose(self) -> dict[str, Any]:
-        proxy = _proxy_config(self._environment)
+        proxy, endpoint = _proxy_config(self._environment)
         targets = {name: _proxy_effective(proxy, self._environment, url) for name, url in self._targets.items()}
         proxy["targets"] = targets
-        loopback = self._probe_loopback(proxy, targets)
+        loopback = self._probe_loopback(proxy, endpoint, targets)
         shared_route_blocked = loopback["status"] == "failed" and any(targets.values())
         jira = {"status": "not_run", "reason": "shared_route_blocked"} if shared_route_blocked and targets.get("jira") else _run_probe(self._jira_probe, "jira")
         github = {"status": "not_run", "reason": "shared_route_blocked"} if shared_route_blocked and targets.get("github") else _run_probe(self._github_probe, "github")
@@ -57,11 +68,13 @@ class NetworkDiagnoser:
             "agentic_next_action": _next_action(diagnosis["code"]),
         }
 
-    def _probe_loopback(self, proxy: dict[str, Any], targets: Mapping[str, bool]) -> dict[str, Any]:
-        if not proxy["configured"] or proxy["host_class"] != "loopback" or not any(targets.values()):
+    def _probe_loopback(
+        self, proxy: Mapping[str, Any], endpoint: _ProxyEndpoint | None, targets: Mapping[str, bool]
+    ) -> dict[str, Any]:
+        if endpoint is None or proxy["host_class"] != "loopback" or not any(targets.values()):
             return {"status": "skipped", "reason": "proxy_not_loopback"}
         try:
-            self._connector((str(proxy["host"]), int(proxy["port"])), 3.0)
+            self._connector((endpoint.host, endpoint.port), 3.0)
         except OSError as error:
             return {
                 "status": "failed",
@@ -71,27 +84,53 @@ class NetworkDiagnoser:
         return {"status": "passed", "reason": "connected"}
 
 
-def _proxy_config(environment: Mapping[str, str]) -> dict[str, Any]:
+def _proxy_config(environment: Mapping[str, str]) -> tuple[dict[str, Any], _ProxyEndpoint | None]:
     source = next((name for name in _PROXY_NAMES if environment.get(name)), "")
     raw = environment.get(source, "")
     if not source:
-        return {"configured": False, "source": None, "host": None, "host_class": None, "port": None, "scheme": None, "no_proxy_configured": bool(environment.get("NO_PROXY") or environment.get("no_proxy"))}
+        return (
+            {
+                "configured": False,
+                "configuration_invalid": False,
+                "source": None,
+                "host_class": None,
+                "port": None,
+                "scheme": None,
+                "has_userinfo": False,
+                "no_proxy_configured": bool(environment.get("NO_PROXY") or environment.get("no_proxy")),
+            },
+            None,
+        )
     parsed = urllib.parse.urlsplit(raw)
     host = (parsed.hostname or "").casefold()
     try:
-        port = parsed.port or _default_port(parsed.scheme)
+        port = parsed.port
     except ValueError:
         port = None
-    return {
-        "configured": bool(host and port),
+    scheme = parsed.scheme.casefold()
+    configured = bool(host and port and scheme in _SUPPORTED_PROXY_SCHEMES)
+    public = {
+        "configured": configured,
+        "configuration_invalid": not configured,
         "source": source,
-        "scheme": parsed.scheme or None,
-        "host": host or None,
-        "host_class": "loopback" if host in _LOOPBACK_HOSTS else "remote",
-        "port": port,
+        "scheme": scheme or None,
+        "host_class": _host_class(host) if host else None,
+        "port": port if configured else None,
         "has_userinfo": bool(parsed.username or parsed.password),
         "no_proxy_configured": bool(environment.get("NO_PROXY") or environment.get("no_proxy")),
     }
+    if not configured:
+        return public, None
+    return public, _ProxyEndpoint(source=source, scheme=scheme, host=host, port=port, has_userinfo=public["has_userinfo"])
+
+
+def _host_class(host: str) -> str:
+    if host == "localhost":
+        return "loopback"
+    try:
+        return "loopback" if ipaddress.ip_address(host).is_loopback else "remote"
+    except ValueError:
+        return "remote"
 
 
 def _proxy_effective(proxy: Mapping[str, Any], environment: Mapping[str, str], target: str) -> bool:
@@ -105,10 +144,6 @@ def _proxy_effective(proxy: Mapping[str, Any], environment: Mapping[str, str], t
 def _no_proxy_matches(host: str, item: str) -> bool:
     candidate = item.casefold().split(":", 1)[0]
     return candidate == "*" or host == candidate or (candidate.startswith(".") and host.endswith(candidate))
-
-
-def _default_port(scheme: str) -> int | None:
-    return {"http": 80, "https": 443, "socks5": 1080}.get(scheme.casefold())
 
 
 def _run_probe(probe: Callable[[], object], system: str) -> dict[str, Any]:
@@ -161,6 +196,8 @@ def _diagnosis(
 ) -> dict[str, str]:
     sandboxed = bool(environment.get("CODEX_SANDBOX") and environment.get("CODEX_SANDBOX_NETWORK_DISABLED"))
     effective_proxy = any(proxy.get("targets", {}).values())
+    if proxy["configuration_invalid"]:
+        return {"code": "network_proxy_configuration_invalid", "confidence": "high", "root_cause": "proxy_configuration", "evidence": "代理环境变量必须提供受支持协议、主机和显式端口"}
     if sandboxed and effective_proxy and proxy["host_class"] == "loopback" and loopback["reason"] == "operation_not_permitted":
         return {"code": "network_sandbox_loopback_blocked", "confidence": "high", "root_cause": "sandbox_loopback_policy", "evidence": "Codex 网络禁用标记与有效本机回环代理权限拒绝同时出现"}
     if proxy["configured"] and loopback["status"] == "failed":
@@ -171,6 +208,8 @@ def _diagnosis(
 
 
 def _next_action(code: str) -> dict[str, Any]:
+    if code == "network_proxy_configuration_invalid":
+        return {"executor": "human", "action": "configure_proxy_environment", "requires_authorization": False, "reason": "请在代理环境变量中显式设置受支持协议、主机和端口后重试"}
     if code == "network_sandbox_loopback_blocked":
         return {"executor": "human", "action": "rerun_outside_sandbox", "requires_authorization": True, "reason": "请在获准的非沙箱执行环境使用相同代理变量重试原 Runtime 命令"}
     if code == "network_proxy_unreachable":
