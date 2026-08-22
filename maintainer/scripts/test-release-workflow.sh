@@ -263,6 +263,21 @@ if ! printf 'refs/heads/develop %s refs/heads/main %s\n' "$pre_push_head" "$pre_
     >"$test_root/pre-push-hotfix-main.out" 2>"$test_root/pre-push-hotfix-main.err"; then
   fail "Hotfix 专用执行标识必须允许原子直推 main"
 fi
+if ! printf '%s %s refs/heads/main %s\n%s %s refs/heads/develop %s\n' \
+  "$pre_push_head" "$pre_push_head" "$pre_push_main" \
+  "$pre_push_head" "$pre_push_head" "$pre_push_head" |
+  (cd "$fixture" && AGENTIC_OPS_SPECIAL_PUSH=hotfix .githooks/pre-push origin "$remote") \
+    >"$test_root/pre-push-hotfix-sha.out" 2>"$test_root/pre-push-hotfix-sha.err"; then
+  fail "Hotfix 必须允许 commit-tree 生成的 SHA 原子更新 main/develop"
+fi
+if printf '%s %s refs/tags/hotfix-invalid %s\n' \
+  "$pre_push_head" "$pre_push_head" "$zero_sha" |
+  (cd "$fixture" && AGENTIC_OPS_SPECIAL_PUSH=hotfix .githooks/pre-push origin "$remote") \
+    >"$test_root/pre-push-hotfix-tag.out" 2>"$test_root/pre-push-hotfix-tag.err"; then
+  fail "Hotfix 专用执行标识不得写入 main/develop 之外的引用"
+fi
+grep -q 'hotfix_push_target_invalid' "$test_root/pre-push-hotfix-tag.err" ||
+  fail "Hotfix 非法目标未返回稳定失败码"
 if ! printf 'refs/heads/develop %s refs/heads/develop %s\n' "$pre_push_head" "$pre_push_head" |
   (cd "$fixture" && .githooks/pre-push origin "$remote") \
     >"$test_root/pre-push-develop.out" 2>"$test_root/pre-push-develop.err"; then
