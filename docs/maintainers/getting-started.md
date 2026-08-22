@@ -80,7 +80,7 @@ maintainer/scripts/release.sh publish --version v0.3 --allow-soft-gate --confirm
 
 普通发布会在 `prepare` 时从已验证的 `develop` HEAD 创建固定本地 `release/vX.Y` 分支。首次 `publish` 推送该固定分支并创建 PR 后，每 5 秒查询一次 PR 状态，最多等待 30 分钟；研发工程师仍必须在 GitHub 页面选择 Merge commit 人工合并，检测到合并后脚本自动重新验证固定 HEAD，将 `develop` 快进到已验证的 `main`，并在实际 Merge commit 创建和推送 Tag。快进条件不成立时失败关闭，不会普通 merge、rebase 或改写 `develop` 历史。若需要立即返回，可加 `--no-wait-for-merge`；该模式返回状态码 `2`，人工合并后重新执行同一条 `publish` 命令。发布分支保留，不自动删除。
 
-Hotfix 不创建分支、PR 或 Tag，不使用 `--allow-soft-gate`，也不调用 Jira/`gh` 或等待额外确认。脚本要求本地 `develop` 干净且与远端同步，校验 `origin/main` 是 `origin/develop` 的祖先，生成带 Jira key 的 Merge commit，并原子更新远端 `main/develop` 后同步本地 `develop`。分叉、未同步或 atomic push 失败时停止，不强推、不部分更新。
+Hotfix 不创建分支、PR 或 Tag，不使用 `--allow-soft-gate`，也不调用 Jira/`gh` 或等待额外确认。脚本要求本地 `develop` 干净且与远端同步，自动合并固定的 `origin/main` 与 `origin/develop`，生成带 Jira key 的双父 Merge commit，并原子更新远端 `main/develop` 后同步本地 `develop`。自动合并冲突、未同步或 atomic push 失败时停止，不进行交互式冲突处理、不强推、不部分更新。
 
 ## 不要混用的资料
 

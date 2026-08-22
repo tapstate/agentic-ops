@@ -74,19 +74,27 @@ if [ "$remote_main" = "$remote_develop" ]; then
   exit 0
 fi
 
-if ! git -C "$repo_root" merge-base --is-ancestor "$remote_main" "$remote_develop"; then
-  release_fail "hotfix_develop_not_based_on_main" "hotfix_publish" \
-    "origin/develop 未包含当前 origin/main，不能直接合并" \
-    "请先人工处理分支分叉；Hotfix 不执行 rebase、cherry-pick 或强推"
-  exit 1
-fi
-
 merge_subject="Hotfix: $jira_id 合并 develop 到 main"
 merge_body="将 origin/develop 的已提交变更直接合入 main。\n\nJira: $jira_id\n流程: direct-develop-to-main\nJira 交互: none"
-develop_tree="$(git -C "$repo_root" rev-parse "$remote_develop^{tree}")"
+merge_tree_output=""
+if ! merge_tree_output="$(
+  git -C "$repo_root" merge-tree --write-tree "$remote_main" "$remote_develop"
+)"; then
+  release_fail "hotfix_merge_conflict" "hotfix_publish" \
+    "origin/main 与 origin/develop 无法自动合并" \
+    "请先在 develop 解决冲突并推送；Hotfix 不执行交互式冲突处理、rebase、cherry-pick 或强推"
+  exit 1
+fi
+merge_tree="$(printf '%s\n' "$merge_tree_output" | sed -n '1p')"
+if ! git -C "$repo_root" cat-file -e "$merge_tree^{tree}" 2>/dev/null; then
+  release_fail "hotfix_merge_tree_invalid" "hotfix_publish" \
+    "无法生成 main 与 develop 的合并结果" \
+    "请检查 Git 版本和仓库对象完整性后重试"
+  exit 1
+fi
 merge_commit="$(
   printf '%s\n\n%b\n' "$merge_subject" "$merge_body" |
-    git -C "$repo_root" commit-tree "$develop_tree" \
+    git -C "$repo_root" commit-tree "$merge_tree" \
       -p "$remote_main" \
       -p "$remote_develop"
 )"
