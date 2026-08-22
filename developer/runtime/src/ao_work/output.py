@@ -31,15 +31,22 @@ _SUCCESS_NEXT_ACTIONS: dict[str, dict[str, Any]] = {
         "action": "follow_capability_contract",
         "allowed_operations": [],
     },
+    "auth": {
+        "actor": "ai",
+        "action": "initialize_or_inspect_workspace",
+        "allowed_operations": ["workspace_init", "workspace_inspect"],
+    },
     "workspace_init": {
-        "actor": "ao_work",
-        "action": "verify_workspace_preflight",
-        "allowed_operations": ["workspace_preflight"],
+        "actor": "ai",
+        "action": "takeover_explicit_jira_task",
+        "required_inputs": ["issue_key"],
+        "allowed_operations": ["takeover"],
     },
     "workspace_inspect": {
-        "actor": "ao_work",
-        "action": "verify_workspace_preflight",
-        "allowed_operations": ["workspace_preflight"],
+        "actor": "ai",
+        "action": "takeover_explicit_jira_task",
+        "required_inputs": ["issue_key"],
+        "allowed_operations": ["takeover"],
     },
     "workspace_preflight": {
         "actor": "ao_work",
@@ -69,9 +76,10 @@ _SUCCESS_NEXT_ACTIONS: dict[str, dict[str, Any]] = {
         "stop_workflow": True,
     },
     "auth_jira_verify": {
-        "actor": "ao_work",
-        "action": "verify_workspace_preflight",
-        "allowed_operations": ["workspace_preflight"],
+        "actor": "ai",
+        "action": "takeover_explicit_jira_task",
+        "required_inputs": ["issue_key"],
+        "allowed_operations": ["takeover"],
     },
     "task_start": {
         "actor": "ai",

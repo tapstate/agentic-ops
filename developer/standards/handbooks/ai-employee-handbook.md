@@ -87,7 +87,7 @@ AI 员工应把自然语言转换为 AgenticOps 操作，而不是直接操作 J
 
 Project Profile 提供 Jira Connection、Project Key 和默认仓库映射；Jira Cloud `base_url` 必须是严格 HTTPS 站点根地址，例如 `https://tapdata.atlassian.net`，不能包含 userinfo、query、fragment 或非根路径。新工作空间初始化前先用同一安装的 `ao-work auth` 配置研发员唯一身份与 Jira 凭据；`workspace init` 生成 schema v4 `agent.json`，只固化项目绑定、源码规范路径和 `install_identity_ref`。后续 effective Profile/Connection overlay、安装身份指纹或登录账户不一致时，必须在发送写请求前阻断。普通 `workspace preflight` 没有重绑权限，只有指导员显式执行并确认 `workspace init` 才能重绑。schema v3 已停止作为运行时授权来源；旧工作空间必须先重新授权，再由指导员明确重新初始化，不得静默读取、复制或删除旧 `.env`。Token 只允许隐藏输入或安全标准输入，保存在当前 developer 安装的 `user/.env`，不得写入工作空间、YAML、日志、事件或聊天。AIAgent 不直接解析或修改 Runtime 管理的配置文件。
 
-`workspace preflight` 返回初始化不完整时，AIAgent 不得把 Profile 可解析视为初始化成功，也不得继续读取或接管任务。应要求公司员工指导员在业务项目工作空间重新运行 `ao-work workspace init`；相同候选配置允许修复半初始化状态，覆盖不同完整配置仍需明确确认。业务 Git remote 只接受精确 `github.com/<owner>/<repository>` 的 SCP、SSH 或 HTTPS 形式；raw/effective fetch/push 必须全部匹配，任何 `url.*.insteadOf` 或 `pushInsteadOf` 都会在 clone、`ls-remote` 或可信 probe 前阻断。池模式下，无权限（403/404/denied/认证失败等权限类错误）的源码仓库会在初始化预检与池成员准备阶段跳过并明确提示，结果 `skipped_repositories` 列出被跳过的仓库，其余仓库正常完成；网络类错误（超时/DNS/连接失败等）仍阻断初始化。
+`workspace preflight` 返回初始化不完整时，AIAgent 不得把 Profile 可解析视为初始化成功，应引导公司员工指导员在业务项目工作空间重新运行 `ao-work workspace init`。它是诊断工具，不是接管任务的前置步骤；`ao-work takeover` 会自行重新校验工作空间、安装身份和 Jira 事实。相同候选配置允许修复半初始化状态，覆盖不同完整配置仍需明确确认。业务 Git remote 只接受精确 `github.com/<owner>/<repository>` 的 SCP、SSH 或 HTTPS 形式；raw/effective fetch/push 必须全部匹配，任何 `url.*.insteadOf` 或 `pushInsteadOf` 都会在 clone、`ls-remote` 或可信 probe 前阻断。池模式下，无权限（403/404/denied/认证失败等权限类错误）的源码仓库会在初始化预检与池成员准备阶段跳过并明确提示，结果 `skipped_repositories` 列出被跳过的仓库，其余仓库正常完成；网络类错误（超时/DNS/连接失败等）仍阻断初始化。
 
 ## 5. 操作使用方式
 

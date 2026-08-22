@@ -354,7 +354,9 @@ class WorkspaceInitTest(unittest.TestCase):
             self.assertTrue((workspace / agent["workspace_entry"]).stat().st_mode & 0o100)
             env_path = workspace / ".agentic-ops" / ".env"
             self.assertFalse(env_path.exists())
-            self.assertIn("./.agentic-ops/bin/ao-work workspace preflight", (workspace / "AGENTS.md").read_text())
+            generated_agents = (workspace / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertNotIn("执行任务前先调用 `./.agentic-ops/bin/ao-work workspace preflight`", generated_agents)
+            self.assertIn("不是接管任务的前置步骤", generated_agents)
             self.assertEqual(
                 {"configure-authorization", "initialize-project-workspace"},
                 {
