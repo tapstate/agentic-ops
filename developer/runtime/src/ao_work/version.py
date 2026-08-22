@@ -18,20 +18,11 @@ _INSTALLED_AT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 def inspect_version(install_root: Path) -> dict[str, object]:
     """Return only verified, non-sensitive facts about a developer installation."""
     head = _run_git(install_root, "rev-parse", "--verify", "HEAD")
-    tags = sorted(
-        tag
-        for tag in _run_git(
-            install_root, "tag", "--points-at", "HEAD", allow_empty=True
-        ).splitlines()
-        if tag
-    )
-    git_tag = tags[0] if tags else None
-    git_describe = (
-        _run_git(install_root, "describe", "--tags", "--exact-match", "HEAD")
-        if git_tag
-        else None
-    )
+    branch = _run_git(install_root, "symbolic-ref", "--quiet", "--short", "HEAD")
+    git_describe = _run_git(install_root, "describe", "--long", "HEAD")
+    git_tag, commit_count, describe_hash = _parse_git_describe(git_describe)
     return {
+        "version": f"{branch}-{git_describe}",
         "runtime_version": _runtime_version(install_root),
         "install_root": str(install_root),
         "installed_at": _installed_at(install_root),
@@ -39,7 +30,29 @@ def inspect_version(install_root: Path) -> dict[str, object]:
         "git_short_sha": _run_git(install_root, "rev-parse", "--short=12", "HEAD"),
         "git_describe": git_describe,
         "git_tag": git_tag,
+        "git_commit_count": commit_count,
+        "git_describe_hash": describe_hash,
     }
+
+
+def _parse_git_describe(git_describe: str) -> tuple[str, int, str]:
+    """Validate the stable `<tag>-<count>-g<hash>` shape from Git."""
+    try:
+        tag, raw_count, describe_hash = git_describe.rsplit("-", 2)
+        commit_count = int(raw_count)
+    except ValueError as error:
+        raise _blocked(
+            "install_git_metadata_invalid",
+            "受管安装的 Git 描述版本格式无效",
+            "请检查 Git Tag 与 developer 安装后重试",
+        ) from error
+    if not tag or commit_count < 0 or not re.fullmatch(r"g[0-9a-f]+", describe_hash):
+        raise _blocked(
+            "install_git_metadata_invalid",
+            "受管安装的 Git 描述版本格式无效",
+            "请检查 Git Tag 与 developer 安装后重试",
+        )
+    return tag, commit_count, describe_hash
 
 
 def _runtime_version(install_root: Path) -> str:
