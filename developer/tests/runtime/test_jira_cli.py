@@ -248,7 +248,7 @@ repositories:
                 authorization_reference, json.loads(decisions[0])["reference"]
             )
 
-    def test_cli_create_plan_apply_readback(self) -> None:
+    def test_cli_create_plan_apply_readback_for_project_outside_workspace_profile(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             install, workspace = self.prepare(Path(temporary))
             common = (
@@ -259,12 +259,12 @@ repositories:
             transport.create_meta_payload = {
                 "projects": [
                     {
-                        "key": "TAP",
-                        "name": "tapdata",
+                        "key": "AO",
+                        "name": "agentic-ops",
                         "issuetypes": [
                             {
                                 "id": "10100",
-                                "name": "任务",
+                                "name": "Agentic 缺陷",
                                 "subtask": False,
                                 "fields": {
                                     "summary": {"required": True, "name": "摘要"},
@@ -286,7 +286,7 @@ repositories:
             )
             desc = workspace / "desc.md"
             desc.write_text("为研发面新增 Jira 建卡能力。\n", encoding="utf-8")
-            plan_file = ".agentic-ops/tasks/TAP/runs/run-create/jira-plans/create.json"
+            plan_file = ".agentic-ops/tasks/AO/runs/run-create/jira-plans/create.json"
             with mock.patch(
                 "ao_work.jira.cli.UrllibJiraTransport", return_value=transport
             ):
@@ -296,9 +296,9 @@ repositories:
                     "create",
                     "plan",
                     "--project-key",
-                    "TAP",
+                    "AO",
                     "--issuetype",
-                    "任务",
+                    "Agentic 缺陷",
                     "--summary",
                     "新增建卡能力",
                     "--description-file",
@@ -311,6 +311,8 @@ repositories:
                     plan_file,
                 )
                 self.assertEqual(0, planned[0])
+                self.assertEqual("demo", planned[1]["profile_id"])
+                self.assertEqual("AO", planned[1]["project_key"])
                 plan_id = str(planned[1]["plan_id"])
                 authorization_reference = str(
                     planned[1]["authorization_user_confirmation_reference"]
@@ -347,6 +349,7 @@ repositories:
                 )
                 self.assertEqual(0, readback[0])
                 self.assertEqual(issue_key, str(readback[1]["external_id"]))
+                self.assertTrue(issue_key.startswith("AO-"))
                 self.assertTrue(applied[1]["created"])
 
     def test_apply_rejects_unbound_authorization_before_decision_or_jira_write(self) -> None:

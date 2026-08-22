@@ -351,7 +351,7 @@ class JiraService:
         except JiraTransportError as error:
             raise _unknown_write("Jira 任务", error, attempt) from error
         issue_key = created["key"]
-        readback = self.inspect_issue(issue_key)
+        readback = self._inspect_created_issue(plan, issue_key)
         _require_create_content(readback, plan)
         return _create_readback(
             plan,
@@ -368,7 +368,7 @@ class JiraService:
         attempt: WriteAttempt | None = None,
     ) -> dict[str, Any]:
         self.validate_apply(plan, plan.plan_id, "jira_create")
-        readback = self.inspect_issue(issue_key)
+        readback = self._inspect_created_issue(plan, issue_key)
         _require_create_content(readback, plan)
         created = _readback_creation_status(plan, attempt)
         return _create_readback(
@@ -389,7 +389,7 @@ class JiraService:
         )
         result = self.client.search_jql(
             jql,
-            fields=("summary", "description", "key", "project"),
+            fields=("summary", "description", "issuetype", "key", "project"),
         )
         matches: list[JiraIssue] = []
         for issue in result.issues:
@@ -1325,6 +1325,36 @@ class JiraService:
                 required_human_action="请核对任务类型；需要新增类型时先确认标准流程和 Profile",
             )
 
+    def _inspect_created_issue(self, plan: WritePlan, issue_key: str) -> JiraIssue:
+        """按建卡计划校验回读，不把创建目标误绑为当前工作空间项目。"""
+        issue = self.client.get_issue(issue_key)
+        expected_project = str(plan.payload["project_key"])
+        expected_issuetype = str(plan.payload["issuetype_name"])
+        if (
+            issue.project_key != expected_project
+            or not issue.key.startswith(f"{expected_project}-")
+            or issue.issue_type != expected_issuetype
+        ):
+            raise RuntimeErrorResult(
+                code="jira_create_readback_mismatch",
+                message="Jira 建卡回读与已确认计划的项目或事务类型不一致",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=False,
+                required_human_action=(
+                    "请核对 Jira 中已创建的任务；不要重复 apply，"
+                    "确认计划与实际任务一致后再处理"
+                ),
+                details={
+                    "expected_project_key": expected_project,
+                    "actual_project_key": issue.project_key,
+                    "expected_issuetype_name": expected_issuetype,
+                    "actual_issuetype_name": issue.issue_type,
+                    "issue_key": issue.key,
+                },
+            )
+        return issue
+
     def _validate_owner(self, issue: JiraIssue) -> None:
         current_user = self.client.current_user()
         if not issue.assignee or issue.assignee != current_user:
@@ -1511,11 +1541,14 @@ def _validate_extra_fields(
 def _require_create_content(item: Any, plan: WritePlan) -> None:
     marker = str(plan.payload["marker"])
     expected_summary = str(plan.payload["summary"])
+    expected_issuetype = str(plan.payload["issuetype_name"])
     description = item.description or item.fields.get("description")
     standalone = standalone_paragraph_lines(description)
     if marker not in standalone:
         raise _idempotency_conflict("Jira 任务")
     if item.summary != expected_summary:
+        raise _idempotency_conflict("Jira 任务")
+    if item.issue_type != expected_issuetype:
         raise _idempotency_conflict("Jira 任务")
 
 
