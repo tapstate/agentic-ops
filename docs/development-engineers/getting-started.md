@@ -99,7 +99,7 @@ ao-work --help
 ao-work version
 ```
 
-`ao-work version` 是只读安装查询：返回 developer Runtime 发行版本、受管安装目录、首次安装时间、精确 Git HEAD/短 SHA，以及存在时的 Tag 描述。它不读取凭证、不要求业务工作空间，也不会检查更新、修改安装或变更 Git 状态；安装时间元数据缺失或无效时会失败关闭，不能通过文件时间戳猜测。
+`ao-work version` 是只读安装查询：`version` 使用 `<current_branch>-<tag>-<commit_count>-g<last_commit_hash>` 格式，例如 `main-v0.6-25-g1b23a60`。它同时返回 developer Runtime 发行版本、受管安装目录、首次安装时间、精确 Git HEAD/短 SHA 与拆分后的 Git 描述字段。它不读取凭证、不要求业务工作空间，也不会检查更新、修改安装或变更 Git 状态；安装时间元数据缺失或无效、当前 HEAD 无法由 Tag 描述时会失败关闭，不能通过文件时间戳或猜测版本补齐。
 
 没有 `agentic-cli` 兼容别名；看到旧命令说明正在阅读冻结迁移基线或使用旧版本。
 

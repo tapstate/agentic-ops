@@ -4,6 +4,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -150,6 +151,19 @@ class StoryGateTest(unittest.TestCase):
             approved = service.approve("range", review["impact_id"], reference, base=base, head=head)
             self.assertTrue(approved["approved"])
             self.assertEqual(head, approved["authorization_record_id"])
+
+    def test_verify_collects_large_check_output_without_pipe_deadlock(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.prepare(root)
+            self.stage(root, "maintainer/runtime/example.py", "value = 1\n")
+            command = [sys.executable, "-c", "import sys; sys.stdout.write('x' * 131072)"]
+            with mock.patch("ao_maint.story_gate.service._check_command", return_value=command):
+                result = StoryGateService(root).verify("staged")
+            check = result["checks"][0]
+            self.assertTrue(check["passed"])
+            self.assertEqual(4000, len(check["output_tail"]))
+            self.assertEqual("x" * 4000, check["output_tail"])
 
     def test_story_document_change_requires_revision_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
