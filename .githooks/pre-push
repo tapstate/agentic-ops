@@ -24,6 +24,17 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   if [ "$local_sha" = "$zero_sha" ]; then
     continue
   fi
+  if [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" = "hotfix" ]; then
+    case "$remote_ref" in
+      refs/heads/main|refs/heads/develop)
+        continue
+        ;;
+      *)
+        echo "hotfix_push_target_invalid: hotfix may update only main and develop" >&2
+        exit 1
+        ;;
+    esac
+  fi
   case "$local_ref" in
     refs/heads/*)
       branch="${local_ref#refs/heads/}"
@@ -40,8 +51,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       exit 1
       ;;
   esac
-  if [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" = "release" ] ||
-    [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" = "hotfix" ]; then
+  if [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" = "release" ]; then
     continue
   fi
 
