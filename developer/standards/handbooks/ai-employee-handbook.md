@@ -85,7 +85,7 @@ AI 员工应把自然语言转换为 AgenticOps 操作，而不是直接操作 J
 
 列出任务必须读取真实 Jira。当前 `list_tasks` 已由 `ao-work jira list` 实现；无编号接管也只读返回同一工作空间名下候选并等待研发工程师选择，不得自动挑选。fake adapter 只允许用于 AgenticOps 本地自动化回归，不能冒充真实候选。
 
-Project Profile 提供 Jira Connection、Project Key 和默认仓库映射；Jira Cloud `base_url` 必须是严格 HTTPS 站点根地址，例如 `https://tapdata.atlassian.net`，不能包含 userinfo、query、fragment 或非根路径。新工作空间初始化前先用同一安装的 `ao-work auth` 配置研发员唯一身份与 Jira 凭据，并明确选择 `global` 或 `installation` 执行授权。Git commit 身份、Git SSH 远端认证与 `gh` API 账户必须分别校验；`gh` 登录不能称为 SSH push actor 证明。`global` 只复用机器已有授权且不得改写；`installation` 使用安装私钥、隔离 `GH_CONFIG_DIR` 和 SSH-over-443，禁止回退全局 Agent。`workspace init` 生成 schema v5 `agent.json`，只固化项目绑定、源码规范路径和 `install_identity_ref`。后续 effective Profile/Connection overlay、安装身份指纹或登录账户不一致时，必须在发送写请求前阻断。普通 `workspace preflight` 没有重绑权限，只有指导员显式执行并确认 `workspace init` 才能重绑。schema v4 及更早版本已停止作为运行时授权来源；旧工作空间必须先重新授权，再由指导员明确重新初始化，不得静默读取、复制或删除旧 `.env`。Token 只允许隐藏输入或安全标准输入，保存在当前 developer 安装的 `user/.env`，不得写入工作空间、YAML、日志、事件或聊天。AIAgent 不直接解析或修改 Runtime 管理的配置文件。
+Project Profile 提供 Jira Connection、Project Key 和默认仓库映射；Jira Cloud `base_url` 必须是严格 HTTPS 站点根地址，例如 `https://tapdata.atlassian.net`，不能包含 userinfo、query、fragment 或非根路径。新工作空间初始化前先用同一安装的 `ao-work auth` 配置研发员唯一身份与 Jira 凭据；`workspace init` 生成 schema v4 `agent.json`，只固化项目绑定、源码规范路径和 `install_identity_ref`。后续 effective Profile/Connection overlay、安装身份指纹或登录账户不一致时，必须在发送写请求前阻断。普通 `workspace preflight` 没有重绑权限，只有指导员显式执行并确认 `workspace init` 才能重绑。schema v3 已停止作为运行时授权来源；旧工作空间必须先重新授权，再由指导员明确重新初始化，不得静默读取、复制或删除旧 `.env`。Token 只允许隐藏输入或安全标准输入，保存在当前 developer 安装的 `user/.env`，不得写入工作空间、YAML、日志、事件或聊天。AIAgent 不直接解析或修改 Runtime 管理的配置文件。
 
 `workspace preflight` 返回初始化不完整时，AIAgent 不得把 Profile 可解析视为初始化成功，也不得继续读取或接管任务。应要求公司员工指导员在业务项目工作空间重新运行 `ao-work workspace init`；相同候选配置允许修复半初始化状态，覆盖不同完整配置仍需明确确认。业务 Git remote 只接受精确 `github.com/<owner>/<repository>` 的 SCP、SSH 或 HTTPS 形式；raw/effective fetch/push 必须全部匹配，任何 `url.*.insteadOf` 或 `pushInsteadOf` 都会在 clone、`ls-remote` 或可信 probe 前阻断。池模式下，无权限（403/404/denied/认证失败等权限类错误）的源码仓库会在初始化预检与池成员准备阶段跳过并明确提示，结果 `skipped_repositories` 列出被跳过的仓库，其余仓库正常完成；网络类错误（超时/DNS/连接失败等）仍阻断初始化。
 
@@ -146,7 +146,6 @@ printf '%s\n' "$JIRA_API_TOKEN" | ao-work auth \
   --git-name <git-author-and-committer-name> \
   --git-email <git-author-and-committer-email> \
   --github-login <github-actor-login> \
-  --execution-auth-mode global \
   --token-stdin \
   --non-interactive
 
@@ -169,7 +168,7 @@ ao-work --workspace-root /path/to/workspace workspace init \
 
 - `--non-interactive`：不读取终端输入；普通显式参数不需要额外确认。
 - `--project <profile>`：Project Profile id（如 `tapdata`），来源 `developer/standards/projects/<profile>/profile.yaml`；Jira 站点、Project Key 与默认仓库没有 CLI 参数，全部取自该 Profile。
-- 安装身份必须已通过 `ao-work auth` 配置并包含 Jira 凭据与显式执行授权模式；新工作空间从安装目录继承，不接收或保存工作空间级身份与凭据。`installation` 首次登录必须在交互终端完成 GitHub CLI 官方设备流程。
+- 安装身份必须已通过 `ao-work auth` 配置并包含 Jira 凭据；新工作空间从安装目录继承，不接收或保存工作空间级身份与凭据。
 - 池根必配：`--source-pool-root` 或 `~/.agentic-ops/user/config.yaml` 的 `source_pool_root` 二选一，否则 `source_pool_root_invalid` 阻断，无兼容回退。池根目录不存在时由 init 自动创建并写入容器 README（preflight 只读校验、不创建）。
 
 可选参数：
@@ -178,8 +177,6 @@ ao-work --workspace-root /path/to/workspace workspace init \
 - `--confirm-existing-config`：仅在已有不同完整配置将被覆盖时提供，否则 `existing_config_confirmation_required` 阻断。交互模式先显示字段差异并只询问一次；新建、半初始化修复和相同配置不确认。
 
 > 维护约定：本节示例与 `developer/skills/initialize-project-workspace/SKILL.md` 的非交互示例随 `workspace init` 参数变更同步修正，不得只改实现不改文档。
-
-已有授权不得静默覆盖。身份、模式或受管配置不同时，AIAgent 只能展示 Runtime 返回的脱敏差异和 `change_digest`，由研发工程师决定是否用 `--confirm-replace-authorization <change_digest>` 精确确认；不同安装 `gh` 账户、既有私钥、自定义 `core.sshCommand`、非受管路径和宽松权限必须转人工处理。普通 `--non-interactive` 或任意非空文本不能放行。业务构建、测试和其它验证命令不得继承安装 SSH/`gh` 凭证。
 
 `jira_inspect` 只输出基础 Jira Issue 事实和凭证配置状态，不读取评论、Custom Field 或旧 `inspect_task` 契约定义的富门禁事实，不判断项目准入，也不绑定 AIAgent。AIAgent 必须把该输出与项目标准资产结合分析。
 

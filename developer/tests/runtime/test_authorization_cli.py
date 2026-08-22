@@ -20,12 +20,7 @@ class InstallationAuthorizationCliTest(unittest.TestCase):
 
     def _run(self, arguments: tuple[str, ...], *, stdin: str = "") -> dict:
         args = build_parser().parse_args(("auth", *arguments))
-        with (
-            mock.patch("sys.stdin", io.StringIO(stdin)),
-            mock.patch(
-                "ao_work.authorization.cli._validate_global_authorization"
-            ),
-        ):
+        with mock.patch("sys.stdin", io.StringIO(stdin)):
             return execute_authorization(args, self.install)
 
     def test_non_interactive_authorization_is_install_scoped_and_masked(self) -> None:
@@ -41,8 +36,6 @@ class InstallationAuthorizationCliTest(unittest.TestCase):
                 "developer@example.test",
                 "--github-login",
                 "developer-one",
-                "--execution-auth-mode",
-                "global",
                 "--token-stdin",
                 "--non-interactive",
             ),
@@ -69,8 +62,6 @@ class InstallationAuthorizationCliTest(unittest.TestCase):
             "developer@example.test",
             "--github-login",
             "developer-one",
-            "--execution-auth-mode",
-            "global",
             "--token-stdin",
             "--non-interactive",
         )
@@ -99,8 +90,6 @@ class InstallationAuthorizationCliTest(unittest.TestCase):
                     "developer@example.test",
                     "--github-login",
                     "developer-one",
-                    "--execution-auth-mode",
-                    "global",
                     "--token-stdin",
                     "--non-interactive",
                 ),
@@ -128,8 +117,6 @@ class InstallationAuthorizationCliTest(unittest.TestCase):
                     "developer@example.test",
                     "--github-login",
                     "developer-one",
-                    "--execution-auth-mode",
-                    "global",
                     "--token-stdin",
                     "--non-interactive",
                 ),
@@ -137,59 +124,6 @@ class InstallationAuthorizationCliTest(unittest.TestCase):
             )
         self.assertEqual("authorization_email_invalid", captured.exception.code)
         self.assertFalse((self.install / "user" / "identity.yaml").exists())
-
-    def test_existing_identity_requires_digest_bound_confirmation(self) -> None:
-        common = (
-            "--agent-id", "developer-1",
-            "--jira-email", "developer@example.test",
-            "--git-name", "Developer One",
-            "--git-email", "developer@example.test",
-            "--github-login", "developer-one",
-            "--execution-auth-mode", "global",
-            "--token-stdin",
-            "--non-interactive",
-        )
-        self._run(common, stdin="token-secret-123\n")
-        identity_path = self.install / "user/identity.yaml"
-        before = identity_path.read_bytes()
-        changed = (
-            "--git-name", "Different Developer",
-            "--token-stdin", "--non-interactive",
-        )
-        with self.assertRaises(RuntimeErrorResult) as captured:
-            self._run(changed, stdin="token-secret-456\n")
-        self.assertEqual(
-            "existing_authorization_change_confirmation_required",
-            captured.exception.code,
-        )
-        self.assertEqual(before, identity_path.read_bytes())
-        digest = str(captured.exception.details["change_digest"])
-        result = self._run(
-            (*changed, "--confirm-replace-authorization", digest),
-            stdin="token-secret-456\n",
-        )
-        self.assertEqual("Different Developer", result["execution_identity"]["git_author_name"])
-
-    def test_installation_mode_non_interactive_does_not_create_partial_authorization(self) -> None:
-        with self.assertRaises(RuntimeErrorResult) as captured:
-            self._run(
-                (
-                    "--agent-id", "developer-1",
-                    "--jira-email", "developer@example.test",
-                    "--git-name", "Developer One",
-                    "--git-email", "developer@example.test",
-                    "--github-login", "developer-one",
-                    "--execution-auth-mode", "installation",
-                    "--token-stdin", "--non-interactive",
-                ),
-                stdin="token-secret-123\n",
-            )
-        self.assertEqual(
-            "installation_github_interactive_authorization_required",
-            captured.exception.code,
-        )
-        self.assertFalse((self.install / "user/identity.yaml").exists())
-        self.assertFalse((self.install / "user/ssh").exists())
 
 
 if __name__ == "__main__":

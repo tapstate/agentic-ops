@@ -766,7 +766,6 @@ class DeveloperProducer:
             {
                 "agent_id": AGENT_ID,
                 "jira_email": "developer@example.test",
-                "execution_authorization": {"mode": "global", "ssh_key_fingerprint": ""},
                 "execution_identity": {
                     "git_author_name": "Harsen Test",
                     "git_author_email": "harsen.test@example.test",

@@ -48,42 +48,12 @@ require_executable .githooks/pre-commit
 require_executable .githooks/pre-push
 require_file maintainer/standards/git/story-review-policy.yaml
 
-authorization_docs="
-docs/runtime/authorization.md
-docs/development-engineers/agent-init.md
-docs/development-engineers/getting-started.md
-docs/architecture/developer-install-authorization-design.md
-docs/configuration-standards.md
-docs/runtime/python-runtime.md
-docs/user-stories/development-engineer/de-001-install.md
-docs/user-stories/development-engineer/de-002-workspace-init.md
-developer/skills/configure-authorization/SKILL.md
-developer/standards/agent-guides.md
-developer/standards/handbooks/ai-employee-handbook.md
-developer/standards/contracts/operations/jira-authorization.yaml
-developer/standards/capabilities/operations.yaml
-"
-for authorization_doc in $authorization_docs; do
-  grep -q 'global' "$authorization_doc" ||
-    fail "授权资产缺少 global 模式：$authorization_doc"
-  grep -q 'installation' "$authorization_doc" ||
-    fail "授权资产缺少 installation 模式：$authorization_doc"
-  grep -Eq '不.*(覆盖|修改|改写)|fail.*closed|失败关闭|must_not|unmanaged' "$authorization_doc" ||
-    fail "授权资产缺少已有授权防覆盖说明：$authorization_doc"
-done
-grep -q 'ssh.github.com:443' docs/runtime/authorization.md ||
-  fail "授权文档未声明 SSH-over-443"
-grep -q 'SSH push actor' docs/runtime/authorization.md ||
-  fail "授权文档未区分 gh 账户与 SSH push actor 证据"
-grep -q '^| D-053 | developer Git/SSH/gh 授权按全局复用或安装隔离显式选择 |' docs/decision-log.md ||
-  fail "设计决策记录缺少 AO-66 developer 执行授权决策"
 grep -q '原子步骤成功不是会话终点' maintainer/rules/source-maintenance.md ||
   fail "maintainer Rule 缺少会话连续推进约束"
 grep -q '原子步骤成功不是会话终点' developer/rules/ai-execution.md ||
   fail "developer Rule 缺少会话连续推进约束"
 grep -q '^| D-054 | 原子步骤成功不是会话终点 |' docs/decision-log.md ||
   fail "设计决策记录缺少 AO-68 会话推进与停止语义"
-
 shared_entries="$(find shared -mindepth 1 -print | LC_ALL=C sort)"
 expected_shared_entries="$(printf '%s\n' \
   shared/README.md \

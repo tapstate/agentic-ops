@@ -75,7 +75,6 @@ class ConfigTest(unittest.TestCase):
         identity = {
             "agent_id": "developer-test",
             "jira_email": "owner@example.test",
-            "execution_authorization": {"mode": "global", "ssh_key_fingerprint": ""},
             "execution_identity": {
                 "git_author_name": "Developer Test",
                 "git_author_email": "owner@example.test",
