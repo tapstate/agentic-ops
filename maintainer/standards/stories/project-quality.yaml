@@ -107,6 +107,7 @@ stories:
     title: 诊断问题并选择修复载体
     document: docs/user-stories/project-maintainer/pm-004-problem-diagnosis.md
     protected_paths:
+      - maintainer/runtime/src/ao_maint/diagnose/**
       - developer/runtime/src/ao_work/**
       - developer/standards/runbooks/**
       - docs/runtime/problem-resolution-and-update.md

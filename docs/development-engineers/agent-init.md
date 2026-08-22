@@ -5,6 +5,10 @@
 ## 1. 安装并完成研发员授权
 
 默认安装目录是 `~/.agentic-ops`，内容为稳定 `main` 的 developer-only sparse managed clone，不包含 `maintainer/`。
+需要隔离安装时，在 `install.sh` 后显式传入 `--install-home <path>`；该参数优先于兼容保留的
+`AGENTIC_OPS_HOME` 环境变量。自定义安装不会修改 shell profile，需自行把 `<path>/bin` 加入当前会话的 `PATH`。
+
+首次 Bootstrap 下载和 clone 必须使用调用者机器上已经可访问仓库的 Git/`gh` 账户；此时安装专属授权尚不存在。授权完成后，`installation` 模式会为 managed clone 固化独立 SSH，后续更新不再依赖全局 SSH Agent。
 
 交互安装：
 
@@ -28,11 +32,14 @@ printf '%s\n' "$JIRA_API_TOKEN" | bash developer/bootstrap/install.sh \
   --git-name <git-author-and-committer-name> \
   --git-email <git-author-and-committer-email> \
   --github-login <github-actor-login> \
+  --execution-auth-mode global \
   --token-stdin \
   --non-interactive
 ```
 
-如果安装已经完成，使用目标安装的 `<install-root>/bin/ao-work auth` 即可独立配置或轮换。身份保存在安装目录 `user/identity.yaml`，凭证保存在 `user/.env`，权限均为 `0600`；token 不进入命令参数或输出。
+上述示例明确复用机器已有 Git/SSH/`gh` 授权，Runtime 只回读校验且不修改全局配置。需要安装隔离账户时，在终端运行 `<install-root>/bin/ao-work auth --execution-auth-mode installation`，按提示完成 GitHub CLI 官方设备登录和安装 SSH 公钥登记；首次安装级登录不支持非交互 token 注入。
+
+如果安装已经完成，使用目标安装的 `<install-root>/bin/ao-work auth` 即可独立配置或轮换。身份保存在安装目录 `user/identity.yaml`，Jira 凭证保存在 `user/.env`；安装级 SSH/`gh` 资产分别位于 `user/ssh/` 与 `user/gh/`。已有身份或受管配置不同会先返回脱敏 `change_digest`，只有 `--confirm-replace-authorization <change_digest>` 精确匹配才允许更新；既有私钥、不同 `gh` 账户、非受管配置和自定义 `core.sshCommand` 不会被普通授权命令覆盖。
 
 ## 2. 指定分支验证安装
 
@@ -80,7 +87,7 @@ bash developer/bootstrap/install-verify-branch.sh \
 
 池根由 `--source-pool-root` 或安装目录 `user/config.yaml` 的 `source_pool_root` 提供。目录不存在时 init 创建并写入容器 README。`--workspace-root <路径>` 是 `ao-work` 顶层参数，必须放在 `workspace` 之前。
 
-新工作空间固定生成 schema v5 `.agentic-ops/agent.json`，只保存项目事实、`install_identity_ref`、安装入口摘要和工作空间本地入口，不生成 `.agentic-ops/.env`。schema v4 及更早的工作空间会在联网前阻断；先使用目标安装运行 `ao-work auth`，再由指导员以 `<install-root>/bin/ao-work workspace init --confirm-existing-config` 明确重新初始化。Runtime 不自动复制或删除旧凭证，也不扫描 PATH。
+新工作空间固定生成 schema v5 `.agentic-ops/agent.json`，只保存项目事实、`install_identity_ref`、安装入口摘要和工作空间本地入口，不生成 `.agentic-ops/.env`。授权模式、执行身份或安装 SSH 公钥指纹变化会使既有绑定漂移。schema v4 及更早工作空间或身份漂移会在联网前阻断；先使用目标安装运行 `ao-work auth`，再由指导员以 `<install-root>/bin/ao-work workspace init --confirm-existing-config` 明确重新初始化。Runtime 不自动复制或删除旧凭证，也不扫描 PATH。
 
 初始化会写入当前工作空间 `AGENTS.md` 和 `.agents/skills/` 普通文件副本。不得创建指向安装根的 symlink，也不得加载根项目维护规则。
 
@@ -108,3 +115,4 @@ Runtime 自动判断新接管、接纳存量或恢复；非新接管必须在人
 - 不调用已删除的 `ao-work install identity|auth`、`ao-work auth jira` 或 `agentic-cli`。
 - 不手工修改 Runtime 管理的授权、`agent.json`、Profile overlay 或工作空间状态。
 - 不从进程环境、其它安装、其它工作空间、本机全局配置或历史聊天发现凭证。
+- 不把 `gh api user` 回读账户表述为 SSH push actor 证明，也不把安装 SSH/`gh` 凭证注入项目构建或测试命令。

@@ -66,6 +66,20 @@ case "$subcommand" in
 esac
 EOF
 chmod 0755 "$transport_git_dir/git"
+cat > "$transport_git_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "$#" -ge 4 ] && [ "$1" = "api" ] && [ "$2" = "user" ] && \
+  [ "$3" = "--jq" ] && [ "$4" = ".login" ]; then
+  printf '%s\n' 'install-auth-test'
+  exit 0
+fi
+printf 'unexpected fake gh invocation: %s\n' "$*" >&2
+exit 1
+EOF
+chmod 0755 "$transport_git_dir/gh"
+git config --file "$test_home/.gitconfig" user.name 'Install Auth Test'
+git config --file "$test_home/.gitconfig" user.email developer@example.test
 
 test_python="${AGENTIC_OPS_TEST_PYTHON:-$repo_root/developer/.venv/bin/python}"
 if [ ! -x "$test_python" ]; then
@@ -90,19 +104,15 @@ printf '%s\n' \
   > "$fake_uv"
 chmod 0755 "$fake_uv"
 
-HOME="$test_home" \
-AGENTIC_OPS_HOME="$install_root" \
-AGENTIC_OPS_UV="$fake_uv" \
-AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
-AO_TEST_REAL_GIT="$real_git" \
-AO_TEST_FIXTURE_REPOSITORY="$source_repo" \
-AO_TEST_OFFICIAL_REPOSITORY="$official_repo_url" \
-PATH="$transport_git_dir:$PATH" \
-  bash "$source_repo/developer/bootstrap/install.sh" >/dev/null
+if bash "$source_repo/developer/bootstrap/install.sh" --install-home \
+    >"$test_root/missing-install-home.out" \
+    2>"$test_root/missing-install-home.err"; then
+  echo "--install-home 缺少目录时必须拒绝执行" >&2
+  exit 1
+fi
+grep -q '安装参数缺少目录：--install-home' "$test_root/missing-install-home.err"
 
-printf '%s\n' 'test-token-secret' | \
 HOME="$test_home" \
-AGENTIC_OPS_HOME="$authorized_install_root" \
 AGENTIC_OPS_UV="$fake_uv" \
 AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
 AO_TEST_REAL_GIT="$real_git" \
@@ -110,11 +120,25 @@ AO_TEST_FIXTURE_REPOSITORY="$source_repo" \
 AO_TEST_OFFICIAL_REPOSITORY="$official_repo_url" \
 PATH="$transport_git_dir:$PATH" \
   bash "$source_repo/developer/bootstrap/install.sh" \
+    --install-home "$install_root" >/dev/null
+
+printf '%s\n' 'test-token-secret' | \
+HOME="$test_home" \
+AGENTIC_OPS_HOME="$test_root/environment-install-root" \
+AGENTIC_OPS_UV="$fake_uv" \
+AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
+AO_TEST_REAL_GIT="$real_git" \
+AO_TEST_FIXTURE_REPOSITORY="$source_repo" \
+AO_TEST_OFFICIAL_REPOSITORY="$official_repo_url" \
+PATH="$transport_git_dir:$PATH" \
+  bash "$source_repo/developer/bootstrap/install.sh" \
+    --install-home "$authorized_install_root" \
     --agent-id install-auth-test \
     --jira-email developer@example.test \
     --git-name 'Install Auth Test' \
     --git-email developer@example.test \
     --github-login install-auth-test \
+    --execution-auth-mode global \
     --token-stdin \
     --non-interactive \
     >"$test_root/authorized-install.out"
@@ -122,6 +146,7 @@ PATH="$transport_git_dir:$PATH" \
 grep -q '"authorization_status":"configured"' "$test_root/authorized-install.out"
 test -f "$authorized_install_root/user/identity.yaml"
 test -f "$authorized_install_root/user/.env"
+test ! -e "$test_root/environment-install-root"
 if stat -f '%Lp' "$authorized_install_root/user/identity.yaml" >/dev/null 2>&1; then
   test "$(stat -f '%Lp' "$authorized_install_root/user/identity.yaml")" = "600"
   test "$(stat -f '%Lp' "$authorized_install_root/user/.env")" = "600"
@@ -140,6 +165,25 @@ if grep -q 'test-token-secret' "$test_root/authorized-install.out" \
 fi
 
 test -x "$install_root/bin/ao-work"
+if stat -f '%Lp' "$install_root/.local/installation.json" >/dev/null 2>&1; then
+  test "$(stat -f '%Lp' "$install_root/.local/installation.json")" = "600"
+else
+  test "$(stat -c '%a' "$install_root/.local/installation.json")" = "600"
+fi
+"$install_root/bin/ao-work" version > "$test_root/install-version.out"
+"$test_python" - "$test_root/install-version.out" "$install_root" <<'PY'
+import json
+import sys
+
+payload = json.load(open(sys.argv[1]))
+assert payload["ok"] is True
+assert payload["workplane"] == "developer"
+from pathlib import Path
+assert payload["install_root"] == str(Path(sys.argv[2]).resolve())
+assert payload["installed_at"].endswith("Z")
+assert len(payload["git_head"]) in {40, 64}
+assert payload["git_short_sha"] == payload["git_head"][:12]
+PY
 test ! -e "$install_root/bin/ao-maint"
 test ! -e "$install_root/developer/.venv/bin/ao-maint"
 test ! -e "$install_root/maintainer"
@@ -533,6 +577,7 @@ PATH="$transport_git_dir:$PATH" \
   bash "$default_install_root/developer/bootstrap/update.sh" >/dev/null
 test "$(git -C "$default_install_root" rev-parse HEAD)" = "$update_ref"
 test "$(sed -n '1p' "$default_install_root/.local/previous-ref")" != "$update_ref"
+installation_metadata_before_rollback="$(cat "$default_install_root/.local/installation.json")"
 
 HOME="$test_home" \
 AGENTIC_OPS_HOME="$default_install_root" \
@@ -542,6 +587,7 @@ AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
 test "$(git -C "$default_install_root" rev-parse HEAD)" != "$update_ref"
 test -x "$default_install_root/bin/ao-work"
 test ! -e "$default_install_root/maintainer"
+test "$(cat "$default_install_root/.local/installation.json")" = "$installation_metadata_before_rollback"
 
 file_mode() {
   local path="$1"
@@ -595,7 +641,7 @@ for managed_relative in .local bin developer/.venv; do
   mv "$managed_backup" "$managed_path"
 done
 
-for ref_name in current-ref previous-ref pending-rollback-ref; do
+for ref_name in current-ref previous-ref pending-rollback-ref installation.json; do
   ref_path="$default_install_root/.local/$ref_name"
   ref_backup="$test_root/ref-backup-$ref_name"
   ref_sentinel="$test_root/ref-sentinel-$ref_name"
@@ -608,7 +654,8 @@ for ref_name in current-ref previous-ref pending-rollback-ref; do
   ln -s "$ref_sentinel" "$ref_path"
 
   assert_update_rejected \
-    "$default_install_root" "$ref_name-symlink" install_ref_path_invalid
+    "$default_install_root" "$ref_name-symlink" \
+    "$(if [ "$ref_name" = installation.json ]; then printf '%s' install_managed_path_invalid; else printf '%s' install_ref_path_invalid; fi)"
   test "$(cat "$ref_sentinel")" = "outside-ref-unchanged"
 
   rm "$ref_path"

@@ -10,7 +10,7 @@
 
 公司员工指导员负责为研发员安装和升级能力、明确任务与授权、校对产出、执行人工门禁，并把反复出现的问题反馈为标准改进。维护 `tapstate/agentic-ops` 源头项目也是公司员工指导员的一项职责，其目标是指导和进化研发员，不是代替研发员执行日常业务任务。
 
-安装与项目必须分离：`~/.agentic-ops` 是 developer-only sparse managed clone，提供一名研发员的运行能力与安装级身份/凭证（`user/identity.yaml`、`user/.env`），不代表任何具体项目，也不包含项目维护能力。业务项目工作空间保存项目、Jira 站点、仓库、流程和任务上下文，并持安装目录身份引用（agent.json schema v4 `install_identity_ref`）防错装。同一安装下的多个项目工作空间继承同一研发员身份；多名研发员必须使用隔离安装，不允许跨安装或从工作空间拼接身份凭证。
+安装与项目必须分离：`~/.agentic-ops` 是 developer-only sparse managed clone，提供一名研发员的运行能力与安装级身份/凭证（`user/identity.yaml`、`user/.env`，以及可选的安装隔离 SSH/`gh` 授权），不代表任何具体项目，也不包含项目维护能力。Git commit 身份、Git SSH 远端认证和 GitHub CLI 账户分别建模；授权必须显式选择只复用全局配置或使用安装隔离配置，任何模式都不能静默覆盖机器已有授权。业务项目工作空间保存项目、Jira 站点、仓库、流程和任务上下文，并持安装目录身份引用（agent.json schema v5 `install_identity_ref`）防错装。同一安装下的多个项目工作空间继承同一研发员身份；多名研发员必须使用隔离安装，不允许跨安装或从工作空间拼接身份凭证。
 
 项目必须在结构、命令和 AI 入口上硬隔离两个工作面：`maintainer` 只维护 AgenticOps 源头，入口为 `ao-maint`；`developer` 只执行其它业务项目的研发任务，入口为 `ao-work`。根仓库 AI 入口固定进入 `maintainer`，业务项目工作空间 AI 入口固定进入 `developer`；不得依赖同一命令的 mode 参数、聊天上下文或 AI 自主判断切换工作面。
 

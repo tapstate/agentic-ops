@@ -6,7 +6,19 @@
 我希望能按问题类型选择正确修复载体，
 以便避免把所有问题都升级为二进制修复或临时人工绕过。
 
-### 触发方式
+### 网络诊断入口
+
+当 Jira 或 GitHub 使用本机代理失败时，维护者可先执行只读诊断：
+
+```sh
+./maintainer/bin/ao-maint diagnose network
+```
+
+它只读取现有代理环境变量；代理地址与端口必须由环境变量显式提供，命令不会设置、保存或推断默认值。它只输出代理来源、协议、主机类别、端口、`NO_PROXY` 是否实际生效，以及 Jira/GitHub 的脱敏探测结果。它不输出原始代理主机、代理 URL、userinfo、凭证、原始 stderr 或远端响应，也不修改 Jira、Git、GitHub、代理或安装配置。
+
+只有有效目标确实经由 loopback 代理、TCP 返回 `EPERM`/`EACCES`，且运行环境声明 `CODEX_SANDBOX_NETWORK_DISABLED` 时，才返回 `network_sandbox_loopback_blocked`。共享代理路由已阻断时，Jira 与 GitHub 探测标为 `not_run/shared_route_blocked`，不得重复请求。该阻断返回 `ok=false`、`status=blocked` 与退出码 `2`；所有探测通过才返回成功。
+
+### 其它触发方式
 
 ```sh
 ao-work capability show feedback_bundle
@@ -53,6 +65,7 @@ ao-work capability show feedback_bundle
 
 - 问题能被归入明确修复载体。
 - 诊断输出不包含敏感原始内容。
+- 网络诊断能区分沙箱回环阻断、代理不可达、授权/服务失败与不确定失败，不能把任意连接失败归因为沙箱。
 - 修复路径能说明是否需要版本发布、资产热更新、补卡或人工决策。
 
 ### 保护行为

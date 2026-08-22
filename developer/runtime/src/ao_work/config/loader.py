@@ -510,22 +510,9 @@ def _load_install_identity_for_binding(install_root: Path) -> dict[str, Any]:
 
 
 def _install_identity_ref(install_root: Path, identity: dict[str, Any]) -> str:
-    import hashlib
-    import json as _json
+    from ao_work.installation import install_identity_ref
 
-    fingerprint = hashlib.sha256(
-        _json.dumps(
-            {
-                "agent_id": identity["agent_id"],
-                "jira_email": identity["jira_email"],
-                "execution_identity": identity["execution_identity"],
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
-    return f"install:{fingerprint}"
+    return install_identity_ref(identity)
 
 
 def install_entry_sha256(install_root: Path) -> str:

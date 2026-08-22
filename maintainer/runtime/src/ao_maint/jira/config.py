@@ -159,50 +159,80 @@ def load_maintainer_workflow(
             raise _invalid_workflow("projects 键必须是项目 Key")
         if not isinstance(spec, dict):
             raise _invalid_workflow(f"project {project_key} 映射必须是映射")
-        statuses = spec.get("statuses", {})
-        transitions = spec.get("transitions", {})
-        if not isinstance(statuses, dict):
-            raise _invalid_workflow(f"project {project_key} statuses 必须是映射")
-        if not isinstance(transitions, dict):
-            raise _invalid_workflow(f"project {project_key} transitions 必须是映射")
-        normalized_statuses: dict[str, str] = {}
-        for status_name, stage in statuses.items():
-            if not isinstance(stage, str) or not stage.strip():
+        normalized[str(project_key)] = _normalize_workflow_spec(
+            spec, f"project {project_key}"
+        )
+        issue_types = spec.get("issue_types", {})
+        if not isinstance(issue_types, dict):
+            raise _invalid_workflow(f"project {project_key} issue_types 必须是映射")
+        normalized_issue_types: dict[str, Any] = {}
+        for issue_type, issue_type_spec in issue_types.items():
+            if not isinstance(issue_type, str) or not issue_type.strip():
                 raise _invalid_workflow(
-                    f"project {project_key} 状态 {status_name!r} 的 stage 必须是字符串"
+                    f"project {project_key} issue_types 键必须是 Jira Issue Type 名称"
                 )
-            normalized_statuses[str(status_name)] = stage.strip()
-        normalized_transitions: dict[str, Any] = {}
-        for transition_key, entry in transitions.items():
-            if not isinstance(entry, dict):
+            if not isinstance(issue_type_spec, dict):
                 raise _invalid_workflow(
-                    f"project {project_key} transition {transition_key!r} 必须是映射"
+                    f"project {project_key} issue type {issue_type!r} 映射必须是映射"
                 )
-            name = str(entry.get("name", "")).strip()
-            if not name:
-                raise _invalid_workflow(
-                    f"project {project_key} transition {transition_key!r} 缺少 name"
-                )
-            transition_id = str(entry.get("id", "")).strip()
-            from_states = entry.get("from", [])
-            if not isinstance(from_states, list) or not all(
-                isinstance(item, str) for item in from_states
-            ):
-                raise _invalid_workflow(
-                    f"project {project_key} transition {transition_key!r} from 必须是字符串列表"
-                )
-            to_status = str(entry.get("to", "")).strip()
-            normalized_transitions[str(transition_key)] = {
-                "name": name,
-                "id": transition_id,
-                "from": [item.strip() for item in from_states if item.strip()],
-                "to": to_status,
-            }
-        normalized[str(project_key)] = {
-            "statuses": normalized_statuses,
-            "transitions": normalized_transitions,
-        }
+            normalized_issue_types[issue_type.strip()] = _normalize_workflow_spec(
+                issue_type_spec, f"project {project_key} issue type {issue_type!r}"
+            )
+        normalized[str(project_key)]["issue_types"] = normalized_issue_types
     return {"projects": normalized}
+
+
+def _normalize_workflow_spec(spec: dict[str, Any], label: str) -> dict[str, Any]:
+    statuses = spec.get("statuses", {})
+    transitions = spec.get("transitions", {})
+    if not isinstance(statuses, dict):
+        raise _invalid_workflow(f"{label} statuses 必须是映射")
+    if not isinstance(transitions, dict):
+        raise _invalid_workflow(f"{label} transitions 必须是映射")
+    normalized_statuses: dict[str, str] = {}
+    for status_name, stage in statuses.items():
+        if not isinstance(stage, str) or not stage.strip():
+            raise _invalid_workflow(f"{label} 状态 {status_name!r} 的 stage 必须是字符串")
+        normalized_statuses[str(status_name)] = stage.strip()
+    normalized_transitions: dict[str, Any] = {}
+    for transition_key, entry in transitions.items():
+        if not isinstance(entry, dict):
+            raise _invalid_workflow(f"{label} transition {transition_key!r} 必须是映射")
+        name = str(entry.get("name", "")).strip()
+        if not name:
+            raise _invalid_workflow(f"{label} transition {transition_key!r} 缺少 name")
+        transition_id = str(entry.get("id", "")).strip()
+        from_states = entry.get("from", [])
+        if not isinstance(from_states, list) or not all(
+            isinstance(item, str) for item in from_states
+        ):
+            raise _invalid_workflow(f"{label} transition {transition_key!r} from 必须是字符串列表")
+        to_status = str(entry.get("to", "")).strip()
+        normalized_transitions[str(transition_key)] = {
+            "name": name,
+            "id": transition_id,
+            "from": [item.strip() for item in from_states if item.strip()],
+            "to": to_status,
+        }
+    return {"statuses": normalized_statuses, "transitions": normalized_transitions}
+
+
+def select_maintainer_workflow(
+    workflow: dict[str, Any], project_key: str, issue_type: str
+) -> dict[str, Any]:
+    """按项目默认映射或精确 Issue Type 覆盖选择工作流。"""
+    project = workflow.get("projects", {}).get(project_key, {})
+    if not isinstance(project, dict):
+        return {}
+    issue_types = project.get("issue_types", {})
+    if isinstance(issue_types, dict):
+        typed = issue_types.get(issue_type)
+        if isinstance(typed, dict):
+            return typed
+    return {
+        "statuses": project.get("statuses", {}),
+        "transitions": project.get("transitions", {}),
+    }
 
 
 def load_maintainer_connection(

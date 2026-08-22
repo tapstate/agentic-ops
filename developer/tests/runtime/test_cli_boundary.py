@@ -20,7 +20,7 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
     def test_ao_work_exposes_only_developer_commands(self) -> None:
         parser = build_parser()
         commands = self._subcommands(parser)
-        for expected in ("workspace", "auth", "jira", "task", "task-run", "report", "capability"):
+        for expected in ("workspace", "auth", "jira", "task", "task-run", "report", "capability", "version"):
             self.assertIn(expected, commands)
         self.assertEqual(set(), commands & self.MAINTAINER_COMMANDS)
 
@@ -71,6 +71,7 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
     def test_every_operation_validates_default_install_identity(self) -> None:
         cases = (
             ["capability", "list"],
+            ["version"],
             ["workspace", "inspect"],
             ["task", "inspect", "--issue-key", "TAP-1"],
             ["report", "write", "--issue-key", "TAP-1", "--agentic-run-id", "run-1", "--kind", "analysis", "--content-file", "analysis.md"],

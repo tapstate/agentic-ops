@@ -33,5 +33,7 @@ ao-work capability list
 
 - 一个 developer 安装代表一名研发员；同一安装下可以有多个相互隔离的业务项目工作空间。
 - `~/.agentic-ops` 不代表具体项目，但保存当前研发员的安装级身份与凭证；多名研发员必须使用隔离安装。
+- 授权必须区分 Git commit 身份、Git SSH 远端认证与 GitHub CLI 账户。`global` 只复用且不改写机器授权；`installation` 使用安装目录私钥、隔离 `GH_CONFIG_DIR` 和 SSH-over-443，不回退全局 Agent。`gh` 登录不能表述为 SSH push actor 证明。
+- 已有身份或受管配置差异必须先展示脱敏摘要并精确确认；既有私钥、不同 `gh` 账户、自定义 `core.sshCommand`、非受管路径和宽松权限不得静默覆盖。项目验证子进程不得继承安装 SSH/`gh` 凭证。
 - 工作面由 AI 入口和命令确定，不接受 `--mode`、`--workplane` 或环境变量切换。
 - 发现自己位于 AgenticOps 源头仓库时，`ao-work` 必须返回 `workplane_mismatch` 并停止。

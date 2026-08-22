@@ -243,6 +243,9 @@ agentic_require_managed_paths_safe() {
   for ref_name in previous-ref current-ref pending-rollback-ref; do
     agentic_require_file_slot "$install_dir/.local/$ref_name" ".local/$ref_name" ref
   done
+  agentic_require_file_slot \
+    "$install_dir/.local/installation.json" \
+    ".local/installation.json"
 }
 
 agentic_validate_ref_value() {
@@ -304,6 +307,54 @@ agentic_remove_ref() {
   esac
   agentic_require_managed_paths_safe "$install_dir"
   rm -f "$install_dir/.local/$ref_name"
+}
+
+agentic_write_installation_metadata() {
+  local install_dir="$1"
+  local local_dir="$install_dir/.local"
+  local target="$local_dir/installation.json"
+  local temporary=""
+  local installed_at=""
+
+  agentic_require_managed_paths_safe "$install_dir"
+  if [ -e "$target" ]; then
+    agentic_bootstrap_error \
+      "install_metadata_exists" \
+      "AgenticOps 安装时间元数据已经存在，Bootstrap 不会覆盖它" \
+      "请停止当前安装并保留现有受管元数据"
+  fi
+  installed_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')" || \
+    agentic_bootstrap_error \
+      "install_metadata_time_unavailable" \
+      "无法读取 UTC 安装时间" \
+      "请检查系统时间后重新执行首次安装"
+  temporary="$(mktemp "$local_dir/.installation.json.tmp.XXXXXX")" || \
+    agentic_bootstrap_error \
+      "install_metadata_write_failed" \
+      "无法创建安装时间元数据" \
+      "请检查安装目录权限后重新执行首次安装"
+  chmod 0600 "$temporary" || {
+    rm -f "$temporary"
+    agentic_bootstrap_error \
+      "install_metadata_write_failed" \
+      "无法保护安装时间元数据权限" \
+      "请检查安装目录权限后重新执行首次安装"
+  }
+  if ! printf '{"schema_version":1,"installed_at":"%s"}\n' "$installed_at" > "$temporary"; then
+    rm -f "$temporary"
+    agentic_bootstrap_error \
+      "install_metadata_write_failed" \
+      "无法写入安装时间元数据" \
+      "请检查安装目录权限后重新执行首次安装"
+  fi
+  agentic_require_managed_paths_safe "$install_dir"
+  if ! mv "$temporary" "$target"; then
+    rm -f "$temporary"
+    agentic_bootstrap_error \
+      "install_metadata_write_failed" \
+      "无法完成安装时间元数据写入" \
+      "请检查安装目录权限后重新执行首次安装"
+  fi
 }
 
 agentic_validate_shared_source_tree() {
