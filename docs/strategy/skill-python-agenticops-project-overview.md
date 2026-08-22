@@ -239,7 +239,7 @@ fetch origin/main
 
 回滚到 `previous-ref`，按对应 `uv.lock` 重建环境，自检通过后才切换正式入口。更新和回滚不得修改 `user/`、项目工作空间、业务源码、Jira 或 GitHub 状态。精确安装版本以 `main` commit SHA 为事实，版本分支或 Tag 用于人读版本与历史恢复。
 
-普通改进通过任务分支 PR 合入 `develop`；稳定交付通过受控 `develop -> main` PR；Hotfix 从最新 `main` 建分支并通过 PR 回到 `main`，随后同步到 `develop`。`main` 禁止直接提交和推送，合并、发布和 Tag 继续单独人工确认。
+普通改进通过任务分支 PR 合入 `develop`；稳定交付通过受控 `develop -> main` PR。Hotfix 是显式例外：不创建分支或 PR，使用 Jira key 绑定的 Merge commit 原子同步远端 `main/develop`，也不与 Jira 交互。`main` 始终禁止直接提交，普通直推、强推和 Tag 写入仍禁止。
 
 ## 12. Go 与旧资料退出
 

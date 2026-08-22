@@ -113,7 +113,7 @@ git tag -a v0.1 -m "AgenticOps v0.1 version baseline"
 
 ### Hotfix 版本
 
-Hotfix 从包含当前 `origin/main` 的最新 `origin/develop` 创建修复分支，以 Merge commit 单向合入 `main`，合入后把远端和本地 `develop` 快进到 `main`。它复用 `main` 历史中最近的二段式 annotated tag；修复构建继续自动生成 `STATE-vX.Y.COMMIT_INDEX-COMMIT`，不创建补丁位，不创建、移动或推送 tag，也不修改 `STATE` 含义。合并提交导致的 `COMMIT_INDEX` 跳跃属于允许结果。
+Hotfix 不创建修复分支，也不读取版本基线。它从已同步的 `develop` 生成 Jira key 绑定的 Merge commit，并原子更新远端 `main` 与 `develop`；已有二段式 annotated tag 保持不变，不创建补丁位，不创建、移动或推送 tag，也不修改 `STATE` 含义。合并提交导致的 `COMMIT_INDEX` 跳跃属于允许结果。
 
 ### 可追溯性
 

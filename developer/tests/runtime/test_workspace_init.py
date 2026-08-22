@@ -106,7 +106,6 @@ class WorkspaceInitTest(unittest.TestCase):
                 {
                     "agent_id": "harsen-mini-test-bot",
                     "jira_email": "developer@example.test",
-                    "execution_authorization": {"mode": "global", "ssh_key_fingerprint": ""},
                     "execution_identity": {
                         "git_author_name": "Harsen Test Bot",
                         "git_author_email": "developer@example.test",
@@ -294,7 +293,6 @@ class WorkspaceInitTest(unittest.TestCase):
                 {
                     "agent_id": agent_id,
                     "jira_email": jira_email,
-                    "execution_authorization": {"mode": "global", "ssh_key_fingerprint": ""},
                     "execution_identity": {
                         "git_author_name": git_name,
                         "git_author_email": git_email,

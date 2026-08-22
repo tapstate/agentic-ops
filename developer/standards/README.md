@@ -79,7 +79,7 @@ ao-work task-run finalize --manifest <workspace-relative-manifest.json> --status
 - AIAgent 执行具体业务 Jira 任务时，以 AI 员工手册、操作契约、标准流程、工作流配置、项目级规范、策略、运行手册和模板为准。
 - AIAgent 收到“按当前业务项目工作空间 `AGENTS.md` 启用 AgenticOps。”时，应从当前工作空间 `AGENTS.md`、`.agentic-ops/agent.json` 和本入口初始化；不得引用 developer-only 安装中不存在的根文件，也不得要求读取研发工程师个人 wiki、个人长期记忆或上一段聊天上下文。
 - `ao-work workspace init` 会把受信 `developer/AGENTS.md` 与 `developer/rules/ai-execution.md` 的内容复制进业务工作空间 `AGENTS.md` 的受管区块。运行时 AI 以这个可自动发现的入口启动，再按本清单读取资产；不得只保留一个指向尚未加载绝对路径的引用。
-- AI 工作空间与业务源码仓库必须硬分离，不能相同或互相嵌套；源码目录创建或 clone 后必须再次阻断 AgenticOps 源头标记，`workspace inspect` 也不得接受该类源码目录。新工作空间从 developer 安装继承身份与 Jira 凭据，并按 `global` 或 `installation` 模式分别处理 Git SSH 和 GitHub CLI 授权；schema v5 `install_identity_ref` 绑定模式、执行身份与安装公钥指纹以防错装。schema v4 及更早版本与工作空间 `.agentic-ops/.env` 已停止作为运行时授权来源，必须先重新授权再明确重新初始化。所有受管目录与安装凭据文件均不得是符号链接或进入 Git 跟踪；工作空间位于其它 Git 仓库时，Runtime 必须先把 `.agentic-ops/` 写入该仓库本地 `.git/info/exclude` 并验证生效。
+- AI 工作空间与业务源码仓库必须硬分离，不能相同或互相嵌套；源码目录创建或 clone 后必须再次阻断 AgenticOps 源头标记，`workspace inspect` 也不得接受该类源码目录。新工作空间从 developer 安装的 `user/identity.yaml` 与 `user/.env` 继承身份和凭据，并用 schema v4 `install_identity_ref` 防错装；schema v3 与工作空间 `.agentic-ops/.env` 已停止作为运行时授权来源，必须先重新授权再明确重新初始化。所有受管目录与安装凭据文件均不得是符号链接或进入 Git 跟踪；工作空间位于其它 Git 仓库时，Runtime 必须先把 `.agentic-ops/` 写入该仓库本地 `.git/info/exclude` 并验证生效。
 - AIAgent 不得临场猜测 Jira 字段、状态流转或人工门禁。
 - AIAgent 不得从契约文件、历史文档或命令名称推断实现状态；能力目录是 developer Runtime 可调用性的唯一机器事实源。
 - 卡片不满足项目准入标准时，AIAgent 必须先读取项目准入资产和目标代码，形成结构化分析与补卡建议；按项目规定写回 Jira 后结束当前接管，不能用会话内推断绕过重新检查。
