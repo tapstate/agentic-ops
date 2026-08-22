@@ -48,7 +48,7 @@ maintainer/scripts/lib/development-workflow.sh
 ```
 
 - `release.sh` 负责 `develop` 正常发布的 `prepare` 和 `publish`。
-- `hotfix.sh` 只负责 `publish --jira-id <KEY>`，不创建分支、PR、Tag，不调用 Jira 或 `gh`，也不设置额外人工门禁。
+- `hotfix.sh` 只接受 Jira key 位置参数，自行完成分支切换、远端同步和原子合并；不创建分支、PR、Tag，不调用 Jira 或 `gh`，也不设置额外人工门禁。
 - `release-common.sh` 负责参数、仓库、版本、验证、确认、拉取请求、等待和审计公共逻辑。
 - `development-workflow.sh` 负责本地 Hooks、`develop` 和 GitHub `main` 保护的检查与幂等配置。
 - 源头仓库维护脚本可以编排 `git`、`gh` 和固定验证命令。该例外只适用于 AgenticOps 源头仓库维护，不允许把安装后 AIAgent 的 Jira、GitHub、Git、策略或证据业务逻辑迁回 Shell。
@@ -135,17 +135,17 @@ maintainer/scripts/release.sh publish --version v0.3 --allow-soft-gate
 命令：
 
 ```bash
-maintainer/scripts/hotfix.sh publish --jira-id AO-123
+maintainer/scripts/hotfix.sh AO-123
 ```
 
 顺序：
 
 1. 校验 Jira key 格式；该 key 只用于 Git Merge commit，不触发 Jira 读取或写入。
-2. 要求当前分支为 `develop` 且工作区干净。
-3. 刷新 `origin/main` 与 `origin/develop`，要求本地 `develop` 与远端完全一致。
-4. 若两条远端分支已相同，幂等返回 `changed=false`。
-5. 固定 `origin/main` 与 `origin/develop`，用 Git 自动计算合并 tree；存在内容冲突时停止，不执行交互式冲突处理、rebase、cherry-pick 或强推。
-6. 以 `origin/develop` 的 tree、`origin/main` 第一父提交和 `origin/develop` 第二父提交构造 Merge commit；标题与正文均写入 Jira key。
+2. 要求工作区干净；当前分支不限。
+3. 刷新 `origin/main` 与 `origin/develop`，自动切换到本地 `develop`；本地分支不存在时从远端创建，落后时自动快进，领先时直接把本地已提交变更作为候选，真实分叉时停止。
+4. 若 `origin/main`、`origin/develop` 与本地候选已经相同，幂等返回 `changed=false`。
+5. 固定 `origin/main` 与本地 `develop` 候选，用 Git 自动计算合并 tree；存在内容冲突时停止，不执行交互式冲突处理、rebase、cherry-pick 或强推。
+6. 以合并 tree、`origin/main` 第一父提交和本地 `develop` 候选第二父提交构造 Merge commit；标题与正文均写入 Jira key。
 7. 使用单次 atomic push 把该提交同时更新到远端 `main` 和 `develop`，不允许部分更新。
 8. 快进本地 `develop` 并刷新远端引用，回读确认三者指向同一 Merge commit。
 
@@ -267,7 +267,7 @@ maintainer/scripts/test-release-workflow.sh
 - `main` 提交和推送被 Hooks 阻止，`develop` 正常工作。
 - 缺失研发流程配置时的确认、拒绝、非交互失败和幂等修复。
 - 正常发布 `prepare` 和 `publish`。
-- Hotfix 单一 `publish --jira-id` 入口、Jira key 格式和 Merge commit 信息。
+- Hotfix 单一 Jira key 位置参数入口、自动分支切换与同步、Jira key 格式和 Merge commit 信息。
 - Hotfix 不创建分支、PR 或 Tag，不调用 Jira/`gh`，并原子同步 `main` 与 `develop`。
 - 拉取请求创建、复用、已合并恢复和等待超时。
 - `--allow-soft-gate` 显式启用、默认不降级和软门禁保留的基础检查。
