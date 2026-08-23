@@ -66,6 +66,11 @@ repositories:
       tapdata/tapdata-application: main
       tapdata/feishu_robot: master
       tapdata/t-layer3-test: develop
+      tapdata/docs: main
+      tapdata/docs-en: main
+      tapdata/mcp-tap-server: main
+      tapdata/solutions: main
+      tapdata/fhir-solution: main
     overrides: []
 
 fields:
