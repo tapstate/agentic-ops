@@ -354,6 +354,52 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
             self.assertTrue(entry.worktree_dir.is_dir())
             self.assertTrue(entry.created)
 
+    def test_prepare_refreshes_origin_and_uses_remote_commit_before_creating(self) -> None:
+        plan = self._plan()
+        calls: list[list[str]] = []
+
+        def git_with_remote_baseline(command, *, timeout=None):
+            calls.append(command)
+            if "rev-parse" in command and "refs/remotes/origin/feature/x^{commit}" in command:
+                return subprocess.CompletedProcess(command, 0, "remote-feature-commit\n", "")
+            return self._run_git(command, timeout=timeout)
+
+        prepare_task_worktrees(plan, run_git=git_with_remote_baseline)
+
+        for entry in plan.entries:
+            fetch_index = next(
+                index
+                for index, command in enumerate(calls)
+                if command[2:] == ["fetch", "--prune", "origin"]
+                and Path(command[1]).resolve() == (self.pool / entry.repository).resolve()
+            )
+            add_index = next(
+                index
+                for index, command in enumerate(calls)
+                if command[2:] == [
+                    "worktree",
+                    "add",
+                    "--detach",
+                    str(entry.worktree_dir),
+                    "remote-feature-commit",
+                ]
+            )
+            self.assertLess(fetch_index, add_index)
+
+    def test_prepare_cleans_empty_task_parents_when_fetch_fails(self) -> None:
+        plan = self._plan()
+
+        def fetch_failing_git(command, *, timeout=None):
+            if command[2:] == ["fetch", "--prune", "origin"]:
+                return subprocess.CompletedProcess(command, 1, "", "fatal: fetch failed\n")
+            return self._run_git(command, timeout=timeout)
+
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            prepare_task_worktrees(plan, run_git=fetch_failing_git)
+
+        self.assertEqual("source_pool_fetch_failed", captured.exception.code)
+        self.assertFalse((self.pool / "TAP-123").exists())
+
     def test_prepare_reuses_existing_worktree(self) -> None:
         plan = self._plan()
         first = prepare_task_worktrees(plan, run_git=self._run_git)
@@ -362,11 +408,32 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
         self.assertEqual(2, second.adopted)
         self.assertEqual(0, second.created)
 
+    def test_prepare_reuses_existing_worktree_when_only_origin_branch_exists(self) -> None:
+        plan = self._plan()
+        prepare_task_worktrees(plan, run_git=self._run_git)
+
+        def origin_only_git(command, *, timeout=None):
+            if "rev-parse" in command and command[-1] == "feature/x^{commit}":
+                return subprocess.CompletedProcess(command, 1, "", "unknown revision\n")
+            if (
+                "rev-parse" in command
+                and command[-1] == "refs/remotes/origin/feature/x^{commit}"
+            ):
+                return subprocess.CompletedProcess(command, 0, "HEAD\n", "")
+            return self._run_git(command, timeout=timeout)
+
+        prepared = prepare_task_worktrees(plan, run_git=origin_only_git)
+
+        self.assertEqual(2, prepared.adopted)
+        self.assertEqual(0, prepared.created)
+
     def test_prepare_rolls_back_on_failure(self) -> None:
         plan = self._plan()
         calls: list[list[str]] = []
 
         def failing_git(command, *, timeout=None):
+            if "rev-parse" in command and "refs/remotes/origin/feature/x^{commit}" in command:
+                return subprocess.CompletedProcess(command, 0, "remote-feature-commit\n", "")
             calls.append(command)
             if (
                 command[0] == "-C"
