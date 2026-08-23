@@ -144,6 +144,34 @@ class ResolveFromBranchTest(unittest.TestCase):
             )
         self.assertEqual("task_target_branch_invalid", captured.exception.code)
 
+    def test_product_alignment_target_rejects_checkout_shorthand(self) -> None:
+        completed = subprocess.CompletedProcess(
+            args=["git", "check-ref-format", "--branch", "@{-1}"],
+            returncode=0,
+            stdout="develop\n",
+            stderr="",
+        )
+        with mock.patch(
+            "ao_work.task_worktree._run_git",
+            return_value=completed,
+        ):
+            with self.assertRaises(RuntimeErrorResult) as captured:
+                resolve_product_alignment_branch(
+                    {"问题版本": "develop,@{-1},release-v3.8-web"},
+                    "tapdata/tapdata-enterprise",
+                )
+        self.assertEqual("task_target_branch_invalid", captured.exception.code)
+
+    def test_product_alignment_target_rejects_nul_before_subprocess(self) -> None:
+        with mock.patch("ao_work.task_worktree._run_git") as run_git:
+            with self.assertRaises(RuntimeErrorResult) as captured:
+                resolve_product_alignment_branch(
+                    {"问题版本": "develop,feature/bad\x00branch,release-v3.8-web"},
+                    "tapdata/tapdata-enterprise",
+                )
+        self.assertEqual("task_target_branch_invalid", captured.exception.code)
+        run_git.assert_not_called()
+
 
 class TapdataProfileBranchDerivationTest(unittest.TestCase):
     def test_develop_product_domain_only_mounts_product_repositories(self) -> None:

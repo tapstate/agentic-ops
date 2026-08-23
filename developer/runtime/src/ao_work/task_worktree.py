@@ -115,6 +115,13 @@ def resolve_product_alignment_branch(
 
 def _validate_git_branch_name(branch: str) -> None:
     """使用 Git 自身规则校验分支名，不施加工作树目录段字符限制。"""
+    if "\x00" in branch:
+        raise _blocked(
+            "task_target_branch_invalid",
+            "目标分支包含 Git 不允许的 NUL 字符",
+            "请修正 Jira 问题版本中的显式目标分支",
+            details={"branch": branch},
+        )
     try:
         result = _run_git(["check-ref-format", "--branch", branch], timeout=30)
     except (OSError, subprocess.TimeoutExpired) as error:
@@ -124,7 +131,8 @@ def _validate_git_branch_name(branch: str) -> None:
             "请确认 Git 可用后重试",
             details={"branch": branch, "error_type": type(error).__name__},
         ) from error
-    if result.returncode != 0:
+    # --branch 会把 @{-n} 展开为 checkout 历史分支；目标分支必须是稳定字面值。
+    if result.returncode != 0 or result.stdout.strip() != branch:
         raise _blocked(
             "task_target_branch_invalid",
             f"目标分支不是合法 Git 分支名：{branch}",
