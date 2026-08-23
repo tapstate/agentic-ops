@@ -13,7 +13,11 @@ from unittest import mock
 from ao_work.config import load_project_profile
 from ao_work.jira.adf import markdown_to_adf
 from ao_work.jira.client import TransportResponse
-from ao_work.task_start import _prepare_pool_task_worktrees, _profile_snapshot
+from ao_work.task_start import (
+    _prepare_pool_task_worktrees,
+    _profile_snapshot,
+    _resolve_non_pool_target_branch,
+)
 from ao_work.task_worktree import TaskWorktreePlan, WorktreePlanEntry
 from ao_work.work_cli import main
 from install_auth_fixture import configure_install_authorization, v5_agent
@@ -351,6 +355,36 @@ class ProjectProfileSnapshotTest(unittest.TestCase):
             / "install/developer/standards/projects/tapdata/scripts/tap_align_branches.py",
             alignment_script,
         )
+
+    def test_non_pool_checkout_resolves_required_target_branch(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        issue = SimpleNamespace(
+            description=markdown_to_adf(
+                "## 目标仓库\n\ntapdata/tapdata-common-lib\n\n"
+                "## 问题版本\n\ndevelop\n"
+            ),
+            assignee="jira-account-1",
+            summary="测试任务",
+            fields={},
+        )
+
+        target_branch = _resolve_non_pool_target_branch(
+            profile,
+            issue,
+            Path("/nonexistent/source"),
+            "tapdata/tapdata-common-lib",
+        )
+        snapshot = _profile_snapshot(
+            profile,
+            issue,
+            target_branch=target_branch,
+        )
+
+        self.assertEqual("main", target_branch)
+        resolved = snapshot["resolved_fields"]["target_branch"]
+        self.assertEqual("main", resolved["value"])
+        self.assertEqual("workspace_defaults.target_branch", resolved["reference"])
 
 
 if __name__ == "__main__":

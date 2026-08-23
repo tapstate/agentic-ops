@@ -12,6 +12,8 @@ from ao_work.config import load_project_profile
 from ao_work.output import RuntimeErrorResult
 from ao_work.task_worktree import (
     TaskWorktreePlan,
+    WorktreePlanEntry,
+    _apply_alignment_plan,
     _run_git,
     plan_task_worktrees,
     prepare_task_worktrees,
@@ -799,6 +801,49 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
         self.assertEqual("branch_alignment_failed", captured.exception.code)
         self.assertFalse(
             any("worktree" in command and "add" in command for command in calls)
+        )
+
+    def test_alignment_rejects_keep_current_from_detached_head(self) -> None:
+        script = self.pool / "tap_align_branches.py"
+        script.write_text("# test fixture\n", encoding="utf-8")
+        plan = TaskWorktreePlan(
+            issue_key="TAP-123",
+            from_branch="develop",
+            pool_root=self.pool,
+            entries=(
+                WorktreePlanEntry(
+                    repository="tapdata/tapdata-application",
+                    worktree_dir=(
+                        self.pool
+                        / ".worktree/TAP-123/develop/tapdata/tapdata-application"
+                    ),
+                    branch="main",
+                ),
+            ),
+            target_repository="tapdata/tapdata-application",
+            baseline_repository="tapdata/tapdata",
+            alignment_script=script,
+            alignment_spec="develop",
+        )
+        row = {
+            "repo": "tapdata-application",
+            "current": "HEAD",
+            "target": "KEEP_CURRENT",
+            "action": "blocked",
+            "reason": "detached HEAD cannot be kept as a branch",
+            "dirty": "clean",
+        }
+
+        def alignment(command, **kwargs):
+            return subprocess.CompletedProcess(command, 0, json.dumps([row]), "")
+
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            _apply_alignment_plan(plan, alignment)
+
+        self.assertEqual("branch_alignment_failed", captured.exception.code)
+        self.assertEqual(
+            "tapdata/tapdata-application",
+            captured.exception.details["repository"],
         )
 
 

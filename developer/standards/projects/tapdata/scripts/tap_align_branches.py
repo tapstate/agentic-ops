@@ -447,13 +447,19 @@ def plan_rows(
             continue
         if not (root / repo / ".git").exists():
             raise AlignError(f"repo not found or not a git repo: {root / repo}")
+        current = current_branch(repo, root)
+        detached = current == "HEAD"
         rows.append(
             {
                 "repo": repo,
-                "current": current_branch(repo, root),
+                "current": current,
                 "target": "KEEP_CURRENT",
-                "action": "keep",
-                "reason": "default not aligned",
+                "action": "blocked" if detached else "keep",
+                "reason": (
+                    "detached HEAD cannot be kept as a branch"
+                    if detached
+                    else "default not aligned"
+                ),
                 "dirty": dirty_state(repo, root),
             }
         )
