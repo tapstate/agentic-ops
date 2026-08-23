@@ -198,6 +198,27 @@ class TapdataProfileBranchDerivationTest(unittest.TestCase):
         self.assertEqual("tapdata/tapdata", plan.baseline_repository)
         self.assertEqual("tapdata/tapdata-common-lib", plan.target_repository)
 
+    def test_single_repository_domains_have_default_problem_versions(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        cases = (
+            ("tapdata/feishu_robot", "master"),
+            ("tapdata/t-layer3-test", "develop"),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            for repository, expected_branch in cases:
+                with self.subTest(repository=repository):
+                    plan = plan_task_worktrees(
+                        pool_root=Path(temporary),
+                        profile=profile,
+                        issue_key="TAP-123",
+                        description_sections={"目标仓库": repository},
+                    )
+                    self.assertEqual(expected_branch, plan.from_branch)
+                    self.assertEqual((repository,), tuple(entry.repository for entry in plan.entries))
+                    self.assertEqual(expected_branch, plan.entries[0].branch)
+
     def test_product_alignment_spec_is_separate_from_problem_version_path(self) -> None:
         repository_root = Path(__file__).resolve().parents[3]
         profile = load_project_profile(repository_root, "tapdata")
