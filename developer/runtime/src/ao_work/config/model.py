@@ -41,6 +41,7 @@ class BranchDerivation:
     default_branch: str = "main"
     default_rule: str = "same_name"
     dev_branches: tuple[tuple[str, str], ...] = ()
+    baseline_branches: tuple[tuple[str, str], ...] = ()
     overrides: tuple[RepositoryBranchRule, ...] = ()
 
 
@@ -144,6 +145,13 @@ class ProjectProfile:
         if derivation.default_rule == "same_name":
             return from_branch
         return None
+
+    def baseline_branch(self, repo: str) -> str | None:
+        """返回目标仓库的显式任务基线；配置了映射时不得猜测默认分支。"""
+        declared = dict(self.branch_derivation.baseline_branches)
+        if declared:
+            return declared.get(repo)
+        return self.branch_derivation.default_branch
 
 
 def require_mapping(value: Any, label: str) -> dict[str, Any]:
