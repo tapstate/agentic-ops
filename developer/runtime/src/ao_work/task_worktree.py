@@ -60,11 +60,11 @@ def resolve_from_branch(
     *,
     target_repository: str | None = None,
 ) -> str:
-    """解析任务 from_branch：描述「修复分支」section 优先，缺省 profile.branches 默认规则。
+    """解析任务问题版本：描述「问题版本」优先，兼容旧「修复分支」。
 
     返回原始 Git ref；仅在计算本地目录时规范化路径片段。
     """
-    declared = description_sections.get("修复分支", "").strip()
+    declared = description_sections.get("问题版本", "").strip() or description_sections.get("修复分支", "").strip()
     if declared:
         candidate = declared.splitlines()[0].strip()
     else:
@@ -74,7 +74,7 @@ def resolve_from_branch(
             raise _blocked(
                 "task_baseline_unresolved",
                 f"目标仓库未配置任务基线分支：{repository}",
-                "请在 Project Profile 显式声明该仓库的 baseline_branches，或在 Jira 描述声明修复分支",
+                "请在 Project Profile 显式声明该仓库的 baseline_branches，或在 Jira 描述声明问题版本",
                 details={"repository": repository},
             )
     normalize_worktree_from_branch(candidate)
@@ -88,10 +88,11 @@ def plan_task_worktrees(
     issue_key: str,
     description_sections: dict[str, str],
 ) -> TaskWorktreePlan:
-    """计算任务工作树集计划：目标仓库 + 分析挂载集 + 分支推导。
+    """计算任务工作树集计划：目标仓库所属领域 + 问题版本分支推导。
 
-    挂载集 = profile.mounts_for_analysis()（all/include/exclude 策略）。
-    每个仓库推导分支：derive_branch(repository, from_branch)。
+    已声明领域的 Profile 只挂载该领域仓库；无法归类时失败关闭。
+    未声明领域的旧 Profile 仅为兼容而使用 analysis_mount 回退。
+    每个仓库按该领域基线推导目标分支。
     返回计划而不创建；创建由 prepare_task_worktrees 执行。
     """
     pool = validate_source_pool_root(pool_root)
@@ -99,17 +100,32 @@ def plan_task_worktrees(
     from_branch = resolve_from_branch(
         profile, description_sections, target_repository=target_repository
     )
-    repositories = profile.mounts_for_analysis()
+    domain = profile.domain_for(target_repository)
+    if domain is None:
+        raise _blocked(
+            "task_domain_unresolved",
+            f"无法根据目标仓库判定任务领域：{target_repository}",
+            "请补充可映射的目标仓库或任务领域；系统不会创建全量工作树",
+            details={"target_repository": target_repository},
+        )
+    repositories = domain.repositories
     if target_repository not in repositories:
-        # 目标仓库必须在分析挂载集内（否则 AI 无源可改）。
+        # 防御性校验：领域配置必须包含触发该领域的目标仓库。
         raise _blocked(
             "target_repository_not_mounted",
-            f"目标仓库 {target_repository} 不在分析挂载集内",
-            "请调整 profile analysis_mount 配置，确保目标仓库被挂载",
+            f"目标仓库 {target_repository} 不在所属领域仓库集内",
+            "请调整 profile worktree_domains 配置，确保目标仓库被该领域覆盖",
         )
     entries: list[WorktreePlanEntry] = []
     for repository in repositories:
-        branch = profile.derive_branch(repository, from_branch)
+        branch = profile.derive_branch(repository, from_branch, primary_repository=domain.baseline_repository)
+        if not branch:
+            raise _blocked(
+                "branch_derivation_failed",
+                f"无法对齐领域仓库分支：{repository}",
+                "请补充该领域的问题版本分支映射",
+                details={"repository": repository, "problem_version": from_branch},
+            )
         worktree_dir = task_worktree_path(pool, issue_key, from_branch, repository)
         entries.append(
             WorktreePlanEntry(

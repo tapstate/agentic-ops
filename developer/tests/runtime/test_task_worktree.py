@@ -116,15 +116,16 @@ class ResolveFromBranchTest(unittest.TestCase):
 
 
 class TapdataProfileBranchDerivationTest(unittest.TestCase):
-    def test_develop_analysis_mount_maps_main_only_repositories_explicitly(self) -> None:
+    def test_develop_product_domain_only_mounts_product_repositories(self) -> None:
         repository_root = Path(__file__).resolve().parents[3]
         profile = load_project_profile(repository_root, "tapdata")
-        expected_main = {
-            "tapdata/docs",
-            "tapdata/docs-en",
-            "tapdata/mcp-tap-server",
-            "tapdata/solutions",
-            "tapdata/fhir-solution",
+        expected_repositories = {
+            "tapdata/tapdata",
+            "tapdata/tapdata-enterprise",
+            "tapdata/tapdata-web",
+            "tapdata/tapdata-license",
+            "tapdata/tapdata-common-lib",
+            "tapdata/tapdata-application",
         }
         with tempfile.TemporaryDirectory() as temporary:
             plan = plan_task_worktrees(
@@ -136,11 +137,9 @@ class TapdataProfileBranchDerivationTest(unittest.TestCase):
 
         by_repository = {entry.repository: entry.branch for entry in plan.entries}
         self.assertEqual("develop", plan.from_branch)
-        self.assertNotIn("tapdata/t-layer3-test", by_repository)
-        self.assertEqual(set(profile.repository_candidates()) - {"tapdata/t-layer3-test"}, set(by_repository))
-        self.assertEqual({repository: "main" for repository in expected_main}, {
-            repository: by_repository[repository] for repository in expected_main
-        })
+        self.assertEqual(expected_repositories, set(by_repository))
+        self.assertEqual("develop", by_repository["tapdata/tapdata"])
+        self.assertEqual("main", by_repository["tapdata/tapdata-common-lib"])
         self.assertTrue(set(dict(profile.branch_derivation.dev_branches)).issubset(profile.repository_candidates()))
 
     def test_declared_section_wins(self) -> None:
@@ -149,6 +148,49 @@ class TapdataProfileBranchDerivationTest(unittest.TestCase):
             "feature/x",
             resolve_from_branch(profile, {"修复分支": "feature/x\n"}),
         )
+
+    def test_problem_version_overrides_legacy_repair_branch(self) -> None:
+        profile = build_profile()
+        self.assertEqual(
+            "release-v3.8.0",
+            resolve_from_branch(
+                profile,
+                {"问题版本": "release-v3.8.0\n", "修复分支": "develop\n"},
+            ),
+        )
+
+    def test_tapdata_connector_domain_uses_connector_baseline(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        with tempfile.TemporaryDirectory() as temporary:
+            plan = plan_task_worktrees(
+                pool_root=Path(temporary),
+                profile=profile,
+                issue_key="TAP-123",
+                description_sections={
+                    "目标仓库": "tapdata/tapdata-connectors\n",
+                    "问题版本": "release-v3.8.0\n",
+                },
+            )
+        self.assertEqual("release-v3.8.0", plan.from_branch)
+        self.assertEqual(
+            {"tapdata/tapdata-connectors", "tapdata/tapdata-connectors-enterprise"},
+            {entry.repository for entry in plan.entries},
+        )
+        self.assertTrue(all("/.worktree/TAP-123/" in str(entry.worktree_dir) for entry in plan.entries))
+
+    def test_tapdata_unclassified_repository_blocks_without_full_mount(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            with tempfile.TemporaryDirectory() as temporary:
+                plan_task_worktrees(
+                    pool_root=Path(temporary),
+                    profile=profile,
+                    issue_key="TAP-123",
+                    description_sections={"目标仓库": "tapdata/docs\n", "问题版本": "develop\n"},
+                )
+        self.assertEqual("task_domain_unresolved", captured.exception.code)
 
     def test_default_branch_from_derivation(self) -> None:
         profile = build_profile(

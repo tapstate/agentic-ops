@@ -33,11 +33,28 @@ repositories:
     - tapdata/solutions
     - tapdata/fhir-solution
     - tapdata/hazelcast
-  analysis_mount:
-    mode: all
-    include: []
-    exclude:
-      - tapdata/t-layer3-test
+  # 任务工作树按领域创建；未映射仓库不做全量回退。
+  worktree_domains:
+    - id: product
+      baseline_repository: tapdata/tapdata
+      repositories:
+        - tapdata/tapdata
+        - tapdata/tapdata-enterprise
+        - tapdata/tapdata-web
+        - tapdata/tapdata-license
+        - tapdata/tapdata-common-lib
+        - tapdata/tapdata-application
+    - id: assistant
+      baseline_repository: tapdata/feishu_robot
+      repositories: [tapdata/feishu_robot]
+    - id: automation-test
+      baseline_repository: tapdata/t-layer3-test
+      repositories: [tapdata/t-layer3-test]
+    - id: connector
+      baseline_repository: tapdata/tapdata-connectors
+      repositories:
+        - tapdata/tapdata-connectors
+        - tapdata/tapdata-connectors-enterprise
   branches:
     derive_from: default
     default_branch: main
@@ -103,9 +120,9 @@ fields:
     source: workspace_repo_mapping
     state: active
     required: true
-  target_branch:
+  problem_version:
     source: jira_description_section
-    section: 修复分支
+    section: 问题版本
     state: active
     writable: true
   problem_summary:
