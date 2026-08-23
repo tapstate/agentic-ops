@@ -273,11 +273,14 @@ def _resolve_remote_baseline(
     remote_ref = f"refs/remotes/origin/{branch}^{{commit}}"
     result = git(["-C", str(member_dir), "rev-parse", "--verify", remote_ref], timeout=60)
     if result.returncode != 0:
+        details = {"repository": repository, "branch": branch}
+        if stderr_tail := _stderr_tail(result.stderr):
+            details["stderr_tail"] = stderr_tail
         raise _blocked(
             "branch_derivation_failed",
             f"池成员刷新后未找到任务基线分支：{repository} @ {branch}",
             "请确认 Project Profile 的分支推导及远端 origin 分支后重试",
-            details={"stderr_tail": _stderr_tail(result.stderr)},
+            details=details,
         )
     baseline = result.stdout.strip()
     if not baseline:
@@ -285,6 +288,7 @@ def _resolve_remote_baseline(
             "branch_derivation_failed",
             f"池成员刷新后无法解析任务基线分支：{repository} @ {branch}",
             "请确认 Project Profile 的分支推导及远端 origin 分支后重试",
+            details={"repository": repository, "branch": branch},
         )
     return baseline
 

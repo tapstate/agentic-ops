@@ -112,10 +112,15 @@ TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
 | `tapdata/tapdata-application` | `main` |
 | `tapdata/feishu_robot` | `master` |
 | `tapdata/t-layer3-test` | `develop` |
+| `tapdata/docs` | `main` |
+| `tapdata/docs-en` | `main` |
+| `tapdata/mcp-tap-server` | `main` |
+| `tapdata/solutions` | `main` |
+| `tapdata/fhir-solution` | `main` |
 
 - `dev_branches` 只在 `from_branch` 等于 `tapdata/tapdata` 声明的开发分支（`develop`）时生效；其它 `from_branch`（release 等）仍走 `same_name` 与 `overrides`。
 - 未在 `dev_branches` 声明的仓库在开发分支场景回退 `same_name`（与主仓同名）。
-- 推导结果仍受「同名分支不存在回退 `default_branch`」约束；`hazelcast` 为 fork，开发基准是 `release-v5.5.0`。
+- 推导结果必须在刷新后的 `origin` 中精确解析；同名或显式映射的远端分支不存在时以 `branch_derivation_failed` 失败关闭，不得静默回退 `default_branch`。`hazelcast` 为 fork，开发基准是 `release-v5.5.0`。
 
 ## 修改范围
 

@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from ao_work.config import load_project_profile
 from ao_work.output import RuntimeErrorResult
 from ao_work.task_worktree import (
     TaskWorktreePlan,
@@ -112,6 +113,35 @@ class ResolveFromBranchTest(unittest.TestCase):
         with self.assertRaises(RuntimeErrorResult) as captured:
             resolve_from_branch(profile, {}, target_repository="tapdata/tapdata-web")
         self.assertEqual("task_baseline_unresolved", captured.exception.code)
+
+
+class TapdataProfileBranchDerivationTest(unittest.TestCase):
+    def test_develop_analysis_mount_maps_main_only_repositories_explicitly(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        expected_main = {
+            "tapdata/docs",
+            "tapdata/docs-en",
+            "tapdata/mcp-tap-server",
+            "tapdata/solutions",
+            "tapdata/fhir-solution",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            plan = plan_task_worktrees(
+                pool_root=Path(temporary),
+                profile=profile,
+                issue_key="TAP-123",
+                description_sections={},
+            )
+
+        by_repository = {entry.repository: entry.branch for entry in plan.entries}
+        self.assertEqual("develop", plan.from_branch)
+        self.assertNotIn("tapdata/t-layer3-test", by_repository)
+        self.assertEqual(set(profile.repository_candidates()) - {"tapdata/t-layer3-test"}, set(by_repository))
+        self.assertEqual({repository: "main" for repository in expected_main}, {
+            repository: by_repository[repository] for repository in expected_main
+        })
+        self.assertTrue(set(dict(profile.branch_derivation.dev_branches)).issubset(profile.repository_candidates()))
 
     def test_declared_section_wins(self) -> None:
         profile = build_profile()
@@ -478,6 +508,37 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
             prepare_task_worktrees(plan, run_git=failing_git)
         self.assertEqual("worktree_add_failed", captured.exception.code)
         # 第一个仓库的 worktree 应被回滚（目录不存在）。
+        for entry in plan.entries:
+            self.assertFalse(entry.worktree_dir.exists())
+
+    def test_prepare_rolls_back_when_remote_baseline_is_missing(self) -> None:
+        plan = self._plan()
+
+        def remote_branch_missing_git(command, *, timeout=None):
+            if "rev-parse" in command and "refs/remotes/origin/feature/x^{commit}" in command:
+                if Path(command[1]).resolve() == (self.pool / "tapdata/tapdata-web").resolve():
+                    return subprocess.CompletedProcess(command, 1, "", "unknown revision\n")
+                return subprocess.CompletedProcess(command, 0, "remote-feature-commit\n", "")
+            if "worktree" in command and "list" in command:
+                first_worktree = plan.entries[0].worktree_dir
+                if first_worktree.exists():
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        f"worktree {first_worktree.resolve()}\nHEAD <hash>\n",
+                        "",
+                    )
+            return self._run_git(command, timeout=timeout)
+
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            prepare_task_worktrees(plan, run_git=remote_branch_missing_git)
+
+        self.assertEqual("branch_derivation_failed", captured.exception.code)
+        self.assertEqual(
+            {"repository": "tapdata/tapdata-web", "branch": "feature/x", "stderr_tail": "unknown revision\n"},
+            captured.exception.details,
+        )
+        self.assertFalse((self.pool / "TAP-123").exists())
         for entry in plan.entries:
             self.assertFalse(entry.worktree_dir.exists())
 
