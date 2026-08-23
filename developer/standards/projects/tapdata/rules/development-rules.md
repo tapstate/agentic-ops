@@ -24,8 +24,8 @@
 - Jira 字段名、状态名、`transition` 名称、`issue_key`、命令、配置字段、错误码、代码标识和日志关键字可以保留原始英文或缩写，但必须用中文解释结论、风险和下一步。
 - 调用任何 AgenticOps 操作前必须先执行 `ao-work capability show <operation>`。只有 `implemented` 且目录列出的现役命令可以调用；目标契约和本文中的流程要求不能替代实现状态。
 - 缺陷修复前，AIAgent 必须查询 `jira_inspect` 并执行 `ao-work jira inspect --issue-key <issue-key>` 读取基础 Jira 事实；当前命令不提供 Comment、Custom Field 或富门禁事实，缺失部分必须通过 Jira 界面或项目认可的只读工具补齐后再按项目准入资产判断。
-- 缺陷修复准入不通过时，AIAgent 必须一次性列出全部缺失或冲突信息，结合 Jira 卡片、候选仓库和目标分支代码形成“准入分析与补卡建议”；在当前工作项授权覆盖范围内按 `jira_comment` 的受控协议写入 Jira Comment，然后停止进入实现，等待缺失事实补齐。
-- 研发工程师确认补卡内容后，AIAgent 必须按 `jira_description` 的 `plan -> apply` 协议更新 Jira Description 中的问题分支、修复分支、问题现象、复现路径和验收标准，并按 `jira_comment` 协议追加补卡确认结果；完成后结束本次接管。
+- 缺陷修复准入不通过时，AIAgent 必须一次性列出全部缺失或冲突信息，结合 Jira 卡片、候选仓库和问题版本代码形成“准入分析与补卡建议”；在当前工作项授权覆盖范围内按 `jira_comment` 的受控协议写入 Jira Comment，然后停止进入实现，等待缺失事实补齐。
+- 研发工程师确认补卡内容后，AIAgent 必须按 `jira_description` 的 `plan -> apply` 协议更新 Jira Description 中的问题分支、问题版本、问题现象、复现路径和验收标准，并按 `jira_comment` 协议追加补卡确认结果；完成后结束本次接管。
 - 补卡后的下一次执行必须重新执行 `jira_inspect` 并补充读取 Jira Description 和 Comment 事实，重新判断准入与设计状态。不得在补卡写入后沿用旧判断；正式接管只允许顶层 `ao-work takeover <KEY>`，不能用内部 `task init` 冒充接管。
 
 ## 人机协作边界
@@ -40,7 +40,7 @@
 
 ## Jira 信息归属
 
-- Jira Description 只保存确认后的稳定任务契约：问题分支、修复分支、问题现象、复现路径和验收标准。
+- Jira Description 只保存确认后的稳定任务契约：问题分支、问题版本、问题现象、复现路径和验收标准。
 - Jira Comment 保存过程和决策轨迹：准入分析、补卡建议、确认结果、修复计划、计划变更、阻塞说明和最终证据。已有评论不得覆盖或改写。
 - Jira Custom Field 目标上通过 profile 逻辑字段映射保存问题分析、修复详情和测试计划；当前 `update_task_form` 是 `capability_gap`，不得自动写入，也不得在 AIAgent 中硬编码 `customfield_*`。
 - Jira Worklog 只记录真实投入时间，不保存门禁、计划、决策或证据。

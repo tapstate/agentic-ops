@@ -3,7 +3,7 @@ workplane: developer
 template: templates/admission/defect-fix-missing.md
 required_fields:
   - problem_branch
-  - target_branch
+  - problem_version
   - problem_summary
 optional_fields:
   - reproduction_path
@@ -14,11 +14,11 @@ guidance:
     location: Jira 描述 `问题分支` 章节或项目字段
     example: develop
     description: 说明缺陷在哪个分支可以复现或被发现。
-  target_branch:
-    label: 修复分支
-    location: Jira 描述 `修复分支` 章节或项目字段
+  problem_version:
+    label: 问题版本
+    location: Jira 描述 `问题版本` 章节或项目字段
     example: develop
-    description: 说明本次修复应在哪个分支完成并验证。
+    description: 说明问题所属主仓库版本；任务工作树按此版本对齐各领域仓库分支。
   problem_summary:
     label: 问题现象
     location: Jira 摘要、Jira 描述 `问题现象` 章节或项目字段
@@ -38,7 +38,7 @@ analysis_hints:
   problem_branch:
     source: jira_or_local_source_branch
     message: 可以结合 Jira 描述、当前本地源码分支和 TapData 分支对齐候选给出建议，但必须由研发工程师确认。
-  target_branch:
+  problem_version:
     source: jira_or_manually_verified_branch_candidates
     tool: branch-align
     script: scripts/tap_align_branches.py
@@ -51,7 +51,7 @@ admission_failure_flow:
   stop_takeover: true
   required_actions:
     - inspect_jira_facts
-    - inspect_target_branch_code
+    - inspect_problem_version_code
     - identify_all_missing_or_conflicting_information
     - prepare_admission_analysis_comment
     - request_development_engineer_confirmation
