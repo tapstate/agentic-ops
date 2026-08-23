@@ -25,6 +25,7 @@ from ao_work.task_worktree import (
     plan_task_worktrees,
     prepare_task_worktrees,
     resolve_from_branch,
+    resolve_product_alignment_branch,
     resolve_target_repository,
 )
 from ao_work.workspace import Workspace
@@ -299,6 +300,16 @@ def _prepare_pool_task_worktrees(
     sections = _description_sections(issue.description)
     target_repository = resolve_target_repository(profile, sections)
     domain = profile.domain_for(target_repository)
+    if domain is None and (
+        profile.worktree_domains
+        or "problem_version" in profile.fields
+        or "target_branch" in profile.fields
+    ):
+        raise _blocked(
+            "task_domain_unresolved",
+            f"无法根据目标仓库判定任务领域：{target_repository}",
+            "请补充可映射的目标仓库或任务领域；系统不会创建或绑定未知领域的工作树",
+        )
     pool_root = resolve_source_pool_root(install_root)
     if pool_root is None or source_root != pool_root:
         configured_repository = str(
@@ -373,17 +384,28 @@ def _resolve_non_pool_branch_context(
     domain = profile.domain_for(repository)
     problem_version = ""
     if domain is not None:
+        product_alignment = (
+            profile.profile_id == "tapdata"
+            and domain.baseline_repository == "tapdata/tapdata"
+        )
         problem_version = resolve_from_branch(
             profile,
             sections,
             target_repository=domain.baseline_repository,
+            allow_alignment_spec=product_alignment,
         )
         if "target_branch" in profile.fields:
-            target = profile.derive_branch(
-                repository,
-                problem_version,
-                primary_repository=domain.baseline_repository,
+            target = (
+                resolve_product_alignment_branch(sections, repository)
+                if product_alignment
+                else ""
             )
+            if not target:
+                target = profile.derive_branch(
+                    repository,
+                    problem_version,
+                    primary_repository=domain.baseline_repository,
+                )
             if target:
                 return problem_version, target
     if "target_branch" not in profile.fields:

@@ -94,6 +94,25 @@ def resolve_from_branch(
     return problem_version
 
 
+def resolve_product_alignment_branch(
+    description_sections: dict[str, str],
+    repository: str,
+) -> str:
+    """从产品域三段式规格提取目标仓库的显式分支；未显式指定时返回空串。"""
+    declared = _declared_branch_spec(description_sections)
+    if "," not in declared:
+        return ""
+    parts = declared.split(",")
+    explicit = {
+        "tapdata/tapdata": parts[0].strip() if parts else "",
+        "tapdata/tapdata-enterprise": parts[1].strip() if len(parts) > 1 else "",
+        "tapdata/tapdata-web": parts[2].strip() if len(parts) > 2 else "",
+    }.get(repository, "")
+    if explicit:
+        normalize_worktree_from_branch(explicit)
+    return explicit
+
+
 def _declared_branch_spec(description_sections: dict[str, str]) -> str:
     declared = description_sections.get("问题版本", "").strip() or description_sections.get(
         "修复分支",

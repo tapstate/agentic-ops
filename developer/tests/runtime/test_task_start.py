@@ -433,6 +433,63 @@ class ProjectProfileSnapshotTest(unittest.TestCase):
         self.assertEqual("task_source_repository_mismatch", raised.code)
         self.assertIn("独立源码目录绑定仓库 tapdata/tapdata", raised.message)
 
+    def test_non_pool_checkout_blocks_unclassified_repository(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        issue = SimpleNamespace(
+            key="TAP-123",
+            description=markdown_to_adf(
+                "## 目标仓库\n\ntapdata/docs\n\n"
+                "## 问题版本\n\nmain\n"
+            ),
+        )
+
+        with mock.patch(
+            "ao_work.task_start.resolve_source_pool_root",
+            return_value=None,
+        ):
+            try:
+                _prepare_pool_task_worktrees(
+                    install_root=repository_root,
+                    profile=profile,
+                    issue=issue,
+                    agent_config={
+                        "source_root": "/nonexistent/source",
+                        "repository": "tapdata/docs",
+                    },
+                )
+            except RuntimeErrorResult as error:
+                raised = error
+            else:
+                self.fail("未归类仓库的独立 checkout 应失败关闭")
+
+        self.assertEqual("task_domain_unresolved", raised.code)
+        self.assertIn("tapdata/docs", raised.message)
+
+    def test_non_pool_checkout_resolves_product_alignment_spec(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        issue = SimpleNamespace(
+            description=markdown_to_adf(
+                "## 目标仓库\n\ntapdata/tapdata-enterprise\n\n"
+                "## 问题版本\n\n"
+                "release-v3.8.0,release-v3.8-enterprise,release-v3.8-web\n"
+            ),
+            assignee="jira-account-1",
+            summary="测试任务",
+            fields={},
+        )
+
+        problem_version, target_branch = _resolve_non_pool_branch_context(
+            profile,
+            issue,
+            Path("/nonexistent/source"),
+            "tapdata/tapdata-enterprise",
+        )
+
+        self.assertEqual("release-v3.8.0", problem_version)
+        self.assertEqual("release-v3.8-enterprise", target_branch)
+
 
 if __name__ == "__main__":
     unittest.main()

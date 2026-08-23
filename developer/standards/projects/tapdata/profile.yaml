@@ -69,6 +69,8 @@ repositories:
       tapdata/tapdata-license: main
       tapdata/tapdata-common-lib: main
       tapdata/tapdata-application: main
+      tapdata/feishu_robot: master
+      tapdata/t-layer3-test: develop
     # 静态新功能开发映射；产品域任务工作树以 tap_align_branches.py plan 结果为准。
     dev_branches:
       tapdata/tapdata: develop
