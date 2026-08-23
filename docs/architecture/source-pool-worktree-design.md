@@ -164,6 +164,8 @@ repositories:
 branches:
   derive_from: default       # 主仓库（default 或显式 owner/repo），以它的分支为推导基准
   default_rule: same_name    # 默认规则：其它仓库使用与主仓库同名的分支
+  baseline_branches: {}      # 目标仓库的显式任务基线；声明后缺失即阻断
+  dev_branches: {}           # 主仓开发基线场景的仓库分支映射
   overrides: []              # 例外规则表，渐进补充；命中才生效
     # - from_branch: release-2.0
     #   repo: tapdata/tapdata-web
@@ -175,12 +177,13 @@ branches:
 
 推导逻辑（确定性，标准资产，不靠 AI 猜测）：
 
-1. 任务主分支 `<from_branch>` 确定（任务描述「修复分支」，缺失用 `branches.default_branch`）。
+1. 任务主分支 `<from_branch>` 确定（任务描述「修复分支」，缺失时目标仓库优先使用 `baseline_branches`，未声明映射才使用 `branches.default_branch`）。
 2. 对分析集每个仓库 R：
    - R 是主仓库（derive_from）→ 工作树分支 = `<from_branch>`。
    - 命中 `overrides`（from_branch + repo 都匹配）→ 工作树分支 = 规则声明的 `branch`。
+   - `<from_branch>` 等于主仓声明的开发分支且 R 命中 `dev_branches` → 工作树分支 = 显式声明的开发分支。
    - 否则默认规则 `same_name` → 工作树分支 = `<from_branch>` 同名分支。
-   - 同名分支在该仓库远端不存在 → 回退 `branches.default_branch`；仍不存在则阻断（`branch_derivation_failed`），提示维护者补 override 或确认分支。
+   - 刷新 `origin` 后必须精确解析上述推导的远端引用；分支不存在则阻断（`branch_derivation_failed`），输出仓库与推导分支，提示维护者补映射或确认分支。
 
 - 接口语义：默认「所有仓库同分支并行开发」（tapdata 常态），release 等需要特殊对应的场景用 `overrides` 逐条补充；不需要一次性维护完整矩阵。
 - 显式配置非法（derive_from 不在 list、override 引用未知仓库）→ init/任务接管前阻断（`branch_derivation_invalid`）。
@@ -223,7 +226,7 @@ branches:
 - `source_pool_member_shallow`：池成员是浅克隆（认领时禁止，未启用自动 unshallow 的场景）。
 - `source_pool_unshallow_failed`：自动 unshallow 失败（已回滚）。
 - `branch_derivation_invalid`：分支推导显式配置非法（derive_from 不在 list、override 引用未知仓库）。
-- `branch_derivation_failed`：分支推导结果在仓库远端不存在（同名/override/default_branch 均不可用）。
+- `branch_derivation_failed`：分支推导结果在刷新后的仓库远端不存在（输出精确仓库与推导分支）。
 - `worktree_add_failed`：任务工作树创建失败（已回滚）。
 - `worktree_path_invalid`：任务工作树路径非法（jira_id/from_branch/repo 或长度超限、路径穿越）。
 - `worktree_path_conflict`：任务工作树路径被占用或与主 checkout/其它任务冲突。
@@ -260,7 +263,7 @@ branches:
   - 池模式 init：池内全集合 clone + 容器 README；中断续传（已完成成员保留，缺失补齐）；不创建工作空间源码目录。
   - 认领已有池成员：remotes 精确匹配通过、URL 改写拒绝、浅克隆自动 unshallow、指向源头仓库拒绝。
   - 任务工作树集：路径推导 `<pool_root>/<jira>/<from_branch>/<repo>`、`feature/x` → `feature-x` 规范化、analysis_mount 策略（all/include/exclude）与按需挂载、非法分支/穿越路径阻断、同任务复用、per-worktree 身份生效、dirty 删除阻断。
-  - 分支推导：同名默认、overrides 命中、同名缺失回退 default_branch、推导失败阻断（`branch_derivation_failed`）、显式配置非法阻断（`branch_derivation_invalid`）。
+  - 分支推导：目标仓库显式基线、同名默认、overrides 与开发分支映射命中、远端分支缺失失败关闭（`branch_derivation_failed`）、显式配置非法阻断（`branch_derivation_invalid`）。
   - 多仓库：`target_repo` 描述解析、列表外仓库阻断、短名冲突阻断、缺省回退 default。
   - 回滚：克隆失败删除新建池目录、unshallow 失败不落半成品、worktree add 失败清理。
   - 并发：同池成员并发操作由池锁串行化（超时失败码）。
