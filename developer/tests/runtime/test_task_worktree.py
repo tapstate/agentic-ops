@@ -69,7 +69,7 @@ def build_profile(
         )
 
     return ProjectProfile(
-        profile_id="tapdata",
+        profile_id="demo",
         connection_id="tapdata-cloud",
         project_key="TAP",
         task_query="project = TAP",
@@ -207,6 +207,25 @@ class TapdataProfileBranchDerivationTest(unittest.TestCase):
                     issue_key="TAP-123",
                     description_sections={"目标仓库": "tapdata/docs\n", "问题版本": "develop\n"},
                 )
+        self.assertEqual("task_domain_unresolved", captured.exception.code)
+
+    def test_tapdata_empty_domain_overlay_blocks_without_full_mount(self) -> None:
+        from dataclasses import replace
+
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = replace(
+            load_project_profile(repository_root, "tapdata"),
+            worktree_domains=(),
+        )
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            with tempfile.TemporaryDirectory() as temporary:
+                plan_task_worktrees(
+                    pool_root=Path(temporary),
+                    profile=profile,
+                    issue_key="TAP-123",
+                    description_sections={"问题版本": "develop\n"},
+                )
+
         self.assertEqual("task_domain_unresolved", captured.exception.code)
 
     def test_default_branch_from_derivation(self) -> None:
@@ -701,6 +720,7 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
 
         self.assertEqual(1, len(alignment_calls))
         self.assertIn("--no-fetch", alignment_calls[0])
+        self.assertIn("--remote-only", alignment_calls[0])
         repositories = alignment_calls[0][
             alignment_calls[0].index("--repositories") + 1
         ]

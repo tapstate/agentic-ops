@@ -47,14 +47,19 @@ input:
     required: false
     default: false
   repositories:
-    type: array
+    type: string
     required: false
-    description: plan 可限定为任务领域内的仓库短名；不得因此扩展为全量挂载。
+    description: plan 可用逗号分隔的仓库短名限定为任务领域；不得因此扩展为全量挂载。
   json:
     type: boolean
     required: false
     default: false
     description: plan 以机器可读 JSON 输出，供 Runtime 在创建工作树前读取实际目标分支。
+  remote_only:
+    type: boolean
+    required: false
+    default: false
+    description: plan 仅使用刷新后的 remote refs；Runtime 创建任务工作树时必须启用，禁止回退陈旧本地分支。
 preconditions:
   - workspace_must_be_tapdata
   - work_root_must_not_escape_current_tapdata_workspace
@@ -89,13 +94,9 @@ output:
     type: boolean
   rows:
     type: array
+    description: plan --json 直接输出该计划行数组。
   rows_count:
     type: integer
-  output_format:
-    type: string
-    allowed_values:
-      - table
-      - json
   switched_rows:
     type: array
   switched_count:
