@@ -148,10 +148,11 @@ def prepare_task_worktrees(
     execution_identity: dict[str, str] | None = None,
     run_git: Any | None = None,
 ) -> TaskWorktreePlan:
-    """创建/复用任务工作树集：逐个仓库 git worktree add --detach。
+    """创建/复用任务工作树集：预检后逐个仓库 git worktree add --detach。
 
     - 已存在 → 校验路径与分支后复用（不重复创建）。
-    - 缺失 → 在池成员锁内刷新 origin、解析远端基线，再创建任务工作树。
+    - 旧布局存在 → 失败关闭，避免恢复任务忽略旧工作树中的未提交修改。
+    - 缺失 → 先在池成员锁内刷新 origin、解析全部远端基线；全部通过后才创建任务工作树。
     - 任一失败 → 已创建的工作树全部回滚（worktree remove --force），并清理本次留下的空父目录。
     - 池成员级并发锁：<pool_root>/.locks/<repo>.lock。
     """
@@ -160,6 +161,22 @@ def prepare_task_worktrees(
     adopted = 0
     created = 0
     try:
+        _reject_legacy_worktrees(plan)
+        baselines: dict[Path, str] = {}
+        for entry in plan.entries:
+            if entry.worktree_dir.is_dir():
+                continue
+            member_dir = plan.pool_root / entry.repository
+            lock_path = plan.pool_root / ".locks" / f"{entry.repository.replace('/', '__')}.lock"
+            with TaskLock(lock_path, timeout=10):
+                # 并发恢复可能已创建同一任务工作树；此时创建阶段会改为复用。
+                if entry.worktree_dir.is_dir():
+                    continue
+                _refresh_pool_member(git, member_dir, entry.repository)
+                baselines[entry.worktree_dir] = _resolve_remote_baseline(
+                    git, member_dir, entry.branch, entry.repository
+                )
+
         for entry in plan.entries:
             member_dir = plan.pool_root / entry.repository
             lock_path = plan.pool_root / ".locks" / f"{entry.repository.replace('/', '__')}.lock"
@@ -169,10 +186,7 @@ def prepare_task_worktrees(
                     adopted += 1
                     continue
                 entry.worktree_dir.parent.mkdir(parents=True, exist_ok=True)
-                _refresh_pool_member(git, member_dir, entry.repository)
-                baseline_ref = _resolve_remote_baseline(
-                    git, member_dir, entry.branch, entry.repository
-                )
+                baseline_ref = baselines[entry.worktree_dir]
                 result = git(
                     [
                         "-C",
@@ -223,6 +237,24 @@ def prepare_task_worktrees(
         adopted=adopted,
         created=created,
     )
+
+
+def _reject_legacy_worktrees(plan: TaskWorktreePlan) -> None:
+    """旧布局不得被静默忽略或覆盖，必须由人工决定迁移或清理。"""
+    for entry in plan.entries:
+        legacy = (
+            plan.pool_root
+            / plan.issue_key
+            / normalize_worktree_from_branch(plan.from_branch)
+            / repository_short_name(entry.repository)
+        )
+        if legacy.is_dir():
+            raise _blocked(
+                "worktree_legacy_layout_detected",
+                f"检测到旧布局任务工作树：{legacy}",
+                "请先人工确认旧工作树中的修改并迁移或清理；系统不会创建新的 .worktree 副本",
+                details={"legacy_worktree": str(legacy), "repository": entry.repository},
+            )
 
 
 def _validate_existing_worktree(
