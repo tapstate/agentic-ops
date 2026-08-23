@@ -85,7 +85,7 @@
 2. 先按目标仓库和版本化 Profile 判定领域；领域不明或冲突时不创建工作树。逐个领域仓库：
    - 按分支推导接口解析该仓库对应分支（3.9.2）。
    - 确保池成员存在（认领或 clone，同 3.3，带池锁）。
-   - 先刷新并验证该领域全部待创建仓库的分支对齐；任一仓库失败时不创建任何工作树。目标路径 `worktree_path = <pool_root>/.worktree/<jira_id>/<问题版本>/<repo>`（规范化见 3.5）。
+   - 先刷新并解析该领域全部仓库的远端提交；已有工作树也必须匹配同一批提交，任一仓库失败时不创建任何工作树。目标路径 `worktree_path = <pool_root>/.worktree/<jira_id>/<问题版本>/<repo>`（规范化见 3.5）。
    - 拿池成员锁 → `git worktree add --detach <worktree_path> <对应 ref>`；同一任务同分支同仓库已存在 worktree（resume/恢复）→ 校验路径与 ref 后复用，不重复创建。
    - 写入 per-worktree 身份（3.7）。
 3. 任务执行在任务根下各仓库工作树内进行；跨仓库搜索直接 `rg` 任务根目录即可覆盖全部分析集。
@@ -240,6 +240,7 @@ branches:
 - `branch_derivation_invalid`：分支推导显式配置非法（derive_from 不在 list、override 引用未知仓库）。
 - `branch_derivation_failed`：分支推导结果在刷新后的仓库远端不存在（输出精确仓库与推导分支）。
 - `worktree_add_failed`：任务工作树创建失败（已回滚）。
+- `worktree_legacy_layout_detected`：检测到该 Jira key 的旧布局任务根；保留原目录并失败关闭，由研发工程师人工确认迁移或清理。
 - `worktree_path_invalid`：任务工作树路径非法（jira_id/from_branch/repo 或长度超限、路径穿越）。
 - `worktree_path_conflict`：任务工作树路径被占用或与主 checkout/其它任务冲突。
 - `worktree_remove_failed`：任务工作树清理失败（含 dirty 阻断）。
