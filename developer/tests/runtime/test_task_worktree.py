@@ -196,6 +196,31 @@ class TapdataProfileBranchDerivationTest(unittest.TestCase):
         self.assertEqual("tapdata/tapdata", plan.baseline_repository)
         self.assertEqual("tapdata/tapdata-common-lib", plan.target_repository)
 
+    def test_product_alignment_spec_is_separate_from_problem_version_path(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        with tempfile.TemporaryDirectory() as temporary:
+            plan = plan_task_worktrees(
+                pool_root=Path(temporary),
+                profile=profile,
+                issue_key="TAP-123",
+                description_sections={
+                    "问题版本": (
+                        "release-v3.8.0,release-v3.8-enterprise,release-v3.8-web\n"
+                    ),
+                },
+                alignment_script=Path(temporary) / "tap_align_branches.py",
+            )
+
+        self.assertEqual("release-v3.8.0", plan.from_branch)
+        self.assertEqual(
+            "release-v3.8.0,release-v3.8-enterprise,release-v3.8-web",
+            plan.alignment_spec,
+        )
+        self.assertTrue(
+            all("/release-v3.8.0/" in str(entry.worktree_dir) for entry in plan.entries)
+        )
+
     def test_tapdata_unclassified_repository_blocks_without_full_mount(self) -> None:
         repository_root = Path(__file__).resolve().parents[3]
         profile = load_project_profile(repository_root, "tapdata")
@@ -676,7 +701,11 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
             pool_root=self.pool,
             profile=profile,
             issue_key="TAP-456",
-            description_sections={"问题版本": "release-v3.8.0\n"},
+            description_sections={
+                "问题版本": (
+                    "release-v3.8.0,release-v3.8-enterprise,release-v3.8-web\n"
+                ),
+            },
             alignment_script=script,
         )
         for entry in plan.entries:
@@ -721,6 +750,10 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
         self.assertEqual(1, len(alignment_calls))
         self.assertIn("--no-fetch", alignment_calls[0])
         self.assertIn("--remote-only", alignment_calls[0])
+        self.assertEqual(
+            "release-v3.8.0,release-v3.8-enterprise,release-v3.8-web",
+            alignment_calls[0][alignment_calls[0].index("plan") + 1],
+        )
         repositories = alignment_calls[0][
             alignment_calls[0].index("--repositories") + 1
         ]

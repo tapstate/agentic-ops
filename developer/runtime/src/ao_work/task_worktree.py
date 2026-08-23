@@ -33,6 +33,7 @@ class TaskWorktreePlan:
     target_repository: str = ""
     baseline_repository: str = ""
     alignment_script: Path | None = None
+    alignment_spec: str = ""
     adopted: int = 0
     created: int = 0
 
@@ -63,16 +64,21 @@ def resolve_from_branch(
     description_sections: dict[str, str],
     *,
     target_repository: str | None = None,
+    allow_alignment_spec: bool = False,
 ) -> str:
     """解析任务问题版本：描述「问题版本」优先，兼容旧「修复分支」。
 
-    返回原始 Git ref；仅在计算本地目录时规范化路径片段。
+    返回领域基线仓库的 Git ref。产品域允许问题版本首行携带
+    `<tapdata>,<enterprise>,<web>` 对齐规格，但路径只使用第一个 tapdata ref。
     """
-    declared = description_sections.get("问题版本", "").strip() or description_sections.get("修复分支", "").strip()
+    declared = _declared_branch_spec(description_sections)
     if declared:
-        candidate = declared.splitlines()[0].strip()
+        candidate = declared
     else:
-        repository = target_repository or resolve_target_repository(profile, description_sections)
+        repository = target_repository or resolve_target_repository(
+            profile,
+            description_sections,
+        )
         candidate = profile.baseline_branch(repository)
         if not candidate:
             raise _blocked(
@@ -81,8 +87,19 @@ def resolve_from_branch(
                 "请在 Project Profile 显式声明该仓库的 baseline_branches，或在 Jira 描述声明问题版本",
                 details={"repository": repository},
             )
-    normalize_worktree_from_branch(candidate)
-    return candidate.strip()
+    problem_version = (
+        candidate.split(",", 1)[0].strip() if allow_alignment_spec else candidate
+    )
+    normalize_worktree_from_branch(problem_version)
+    return problem_version
+
+
+def _declared_branch_spec(description_sections: dict[str, str]) -> str:
+    declared = description_sections.get("问题版本", "").strip() or description_sections.get(
+        "修复分支",
+        "",
+    ).strip()
+    return declared.splitlines()[0].strip() if declared else ""
 
 
 def plan_task_worktrees(
@@ -114,7 +131,9 @@ def plan_task_worktrees(
         profile,
         description_sections,
         target_repository=domain.baseline_repository,
+        allow_alignment_spec=alignment_script is not None,
     )
+    alignment_spec = _declared_branch_spec(description_sections) or from_branch
     repositories = domain.repositories
     if target_repository not in repositories:
         # 防御性校验：领域配置必须包含触发该领域的目标仓库。
@@ -149,6 +168,7 @@ def plan_task_worktrees(
         target_repository=target_repository,
         baseline_repository=domain.baseline_repository,
         alignment_script=alignment_script,
+        alignment_spec=alignment_spec,
     )
 
 
@@ -266,6 +286,7 @@ def prepare_task_worktrees(
         target_repository=plan.target_repository,
         baseline_repository=plan.baseline_repository,
         alignment_script=plan.alignment_script,
+        alignment_spec=plan.alignment_spec,
         adopted=adopted,
         created=created,
     )
@@ -302,7 +323,7 @@ def _apply_alignment_plan(
         "--root",
         str(plan.pool_root / owner),
         "plan",
-        plan.from_branch,
+        plan.alignment_spec or plan.from_branch,
         "--no-fetch",
         "--remote-only",
         "--repositories",

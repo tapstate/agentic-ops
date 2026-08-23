@@ -190,7 +190,7 @@ branches:
 
 1. 任务「问题版本」确定（任务描述「问题版本」，兼容读取旧「修复分支」；缺失时使用所属领域 `baseline_repository` 的 `baseline_branches`，未声明映射才使用 `branches.default_branch`）。
 2. 先以目标仓库选择唯一 `worktree_domain`，其 `baseline_repository` 是本次分支推导的主仓库；未命中领域即阻断，不做全量挂载。
-3. TapData 产品域先刷新领域内全部池成员，再运行 `tap_align_branches.py plan --no-fetch --remote-only --repositories ... --json`；只接受与当前领域仓库集合完全一致的计划，并以其中每行的 `target` 作为实际分支。remote-only 模式不得回退本地同名分支或本地 PluginKit 内容。
+3. 以基线仓库 `tapdata/tapdata` 识别 TapData 产品域，不依赖可变的领域 id。先刷新领域内全部池成员，再运行 `tap_align_branches.py plan --no-fetch --remote-only --repositories ... --json`；只接受与当前领域仓库集合完全一致的计划，并以其中每行的 `target` 作为实际分支。remote-only 模式不得回退本地同名分支或本地 PluginKit 内容。若使用 `<tapdata>,<enterprise>,<web>` 三段式对齐规格，工作树路径与有效问题版本使用第一段，完整规格只传给计划脚本。
 4. 其它领域对每个仓库 R 使用通用静态规则：
    - R 是领域基线仓库 → 工作树分支 = `<问题版本>`。
    - 命中 `overrides`（from_branch + repo 都匹配）→ 工作树分支 = 规则声明的 `branch`。

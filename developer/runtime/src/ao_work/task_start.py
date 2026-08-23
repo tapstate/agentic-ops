@@ -289,7 +289,7 @@ def _prepare_pool_task_worktrees(
     if (
         profile.profile_id == "tapdata"
         and domain is not None
-        and domain.domain_id == "product"
+        and domain.baseline_repository == "tapdata/tapdata"
     ):
         alignment_script = (
             install_root
@@ -373,11 +373,7 @@ def _profile_snapshot(
         elif mapping.source == "jira_description_section" and mapping.section:
             reference = f"issue.description_sections.{mapping.section}"
             value = sections.get(mapping.section)
-            if (
-                logical_name == "problem_version"
-                and not value
-                and task_worktrees is not None
-            ):
+            if logical_name == "problem_version" and task_worktrees is not None:
                 reference = "task_worktrees.problem_version"
                 value = task_worktrees.get("problem_version")
         resolved[logical_name] = {
