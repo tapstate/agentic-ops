@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,8 @@ from ao_work.task_state.io import read_json
 from ao_work.task_worktree import (
     plan_task_worktrees,
     prepare_task_worktrees,
+    resolve_from_branch,
+    resolve_product_alignment_branch,
     resolve_target_repository,
 )
 from ao_work.workspace import Workspace
@@ -239,6 +242,16 @@ def record_current_task_source_context(
         "description": description_text,
         "issue_content_sha256": issue_content_sha256,
     }
+    if task_worktrees is not None:
+        problem_version = str(task_worktrees.get("problem_version") or "")
+        target_branch = str(task_worktrees.get("target_branch") or "")
+    else:
+        problem_version, target_branch = _resolve_non_pool_branch_context(
+            context.profile,
+            issue,
+            bound_source_root,
+            bound_repository,
+        )
     workspace_defaults = {
         "agent_id": effective_config.get("agent_id"),
         "project_profile": context.profile.profile_id,
@@ -246,6 +259,8 @@ def record_current_task_source_context(
         "jira_base_url": context.connection.base_url,
         "jira_account_id": account["account_id"],
         "repository": bound_repository,
+        "problem_version": problem_version,
+        "target_branch": target_branch,
         "source_root": str(bound_source_root),
         "execution_identity": effective_config.get("execution_identity"),
     }
@@ -256,7 +271,14 @@ def record_current_task_source_context(
         agentic_run_id=agentic_run_id,
         issue=issue_payload,
         workspace_defaults=workspace_defaults,
-        project_profile=_profile_snapshot(context.profile, issue),
+        project_profile=_profile_snapshot(
+            context.profile,
+            issue,
+            task_worktrees=task_worktrees,
+            target_repository=bound_repository,
+            problem_version=problem_version,
+            target_branch=target_branch,
+        ),
     )
     return {
         "issue": issue_payload,
@@ -275,23 +297,72 @@ def _prepare_pool_task_worktrees(
     if not raw_source_root:
         raise _blocked("task_source_root_missing", "任务缺少业务源码目录", "请重新初始化工作空间后重试")
     source_root = Path(raw_source_root).expanduser().resolve()
-    pool_root = resolve_source_pool_root(install_root)
-    if pool_root is None or source_root != pool_root:
-        return None, source_root, profile.default_repository
     sections = _description_sections(issue.description)
     target_repository = resolve_target_repository(profile, sections)
+    domain = profile.domain_for(target_repository)
+    if domain is None and (
+        profile.worktree_domains
+        or "problem_version" in profile.fields
+        or "target_branch" in profile.fields
+    ):
+        raise _blocked(
+            "task_domain_unresolved",
+            f"无法根据目标仓库判定任务领域：{target_repository}",
+            "请补充可映射的目标仓库或任务领域；系统不会创建或绑定未知领域的工作树",
+            details={"target_repository": target_repository},
+        )
+    pool_root = resolve_source_pool_root(install_root)
+    if pool_root is None or source_root != pool_root:
+        configured_repository = str(
+            agent_config.get("repository") or profile.default_repository or ""
+        )
+        if configured_repository != target_repository:
+            raise _blocked(
+                "task_source_repository_mismatch",
+                f"独立源码目录绑定仓库 {configured_repository}，与任务目标仓库 {target_repository} 不一致",
+                "请改用目标仓库对应的独立业务工作空间，或初始化中央源码池后重试",
+            )
+        return None, source_root, target_repository
+    if domain is None:
+        raise _blocked(
+            "task_domain_unresolved",
+            f"无法根据目标仓库判定任务领域：{target_repository}",
+            "请补充可映射的目标仓库或任务领域；系统不会创建未知领域的任务工作树",
+            details={"target_repository": target_repository},
+        )
+    alignment_script = None
+    if (
+        profile.profile_id == "tapdata"
+        and domain is not None
+        and domain.baseline_repository == "tapdata/tapdata"
+    ):
+        alignment_script = (
+            install_root
+            / "developer"
+            / "standards"
+            / "projects"
+            / profile.profile_id
+            / "scripts"
+            / "tap_align_branches.py"
+        )
     plan = plan_task_worktrees(
         pool_root=pool_root,
         profile=profile,
         issue_key=issue.key,
         description_sections=sections,
+        alignment_script=alignment_script,
     )
-    prepared = prepare_task_worktrees(plan, execution_identity=agent_config.get("execution_identity"))
+    prepared = prepare_task_worktrees(
+        plan,
+        execution_identity=agent_config.get("execution_identity"),
+    )
     target = next(entry for entry in prepared.entries if entry.repository == target_repository)
     return (
         {
             "issue_key": prepared.issue_key,
             "repository": target.repository,
+            "problem_version": prepared.from_branch,
+            "target_branch": target.branch,
             "baseline_branch": prepared.from_branch,
             "expected_worktree": str(target.worktree_dir),
             "checked_path": str(target.worktree_dir),
@@ -304,7 +375,65 @@ def _prepare_pool_task_worktrees(
     )
 
 
-def _profile_snapshot(profile: Any, issue: Any) -> dict[str, Any]:
+def _resolve_non_pool_branch_context(
+    profile: Any,
+    issue: Any,
+    source_root: Path,
+    repository: str,
+) -> tuple[str, str]:
+    """为独立 checkout 解析有效问题版本和 PR 基线，最后回读当前分支。"""
+    sections = _description_sections(issue.description)
+    domain = profile.domain_for(repository)
+    problem_version = ""
+    if domain is not None:
+        product_alignment = (
+            profile.profile_id == "tapdata"
+            and domain.baseline_repository == "tapdata/tapdata"
+        )
+        problem_version = resolve_from_branch(
+            profile,
+            sections,
+            target_repository=domain.baseline_repository,
+            allow_alignment_spec=product_alignment,
+        )
+        if "target_branch" in profile.fields:
+            target = (
+                resolve_product_alignment_branch(sections, repository)
+                if product_alignment
+                else ""
+            )
+            if not target:
+                target = profile.derive_branch(
+                    repository,
+                    problem_version,
+                    primary_repository=domain.baseline_repository,
+                )
+            if target:
+                return problem_version, target
+    if "target_branch" not in profile.fields:
+        return problem_version, ""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(source_root), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return problem_version, ""
+    branch = result.stdout.strip() if result.returncode == 0 else ""
+    return problem_version, "" if branch == "HEAD" else branch
+
+
+def _profile_snapshot(
+    profile: Any,
+    issue: Any,
+    *,
+    task_worktrees: dict[str, Any] | None = None,
+    target_repository: str = "",
+    problem_version: str = "",
+    target_branch: str = "",
+) -> dict[str, Any]:
     fields: dict[str, Any] = {}
     resolved: dict[str, Any] = {}
     sections = _description_sections(issue.description)
@@ -321,8 +450,19 @@ def _profile_snapshot(profile: Any, issue: Any) -> dict[str, Any]:
         value: Any = None
         reference = ""
         if mapping.source == "workspace_repo_mapping":
-            value = profile.default_repository
+            value = (
+                task_worktrees.get("repository")
+                if task_worktrees is not None
+                else target_repository or profile.default_repository
+            )
             reference = "workspace_defaults.repository"
+        elif mapping.source == "task_worktree_mapping":
+            reference = f"task_worktrees.{logical_name}"
+            if task_worktrees is not None:
+                value = task_worktrees.get(logical_name)
+            elif logical_name == "target_branch":
+                reference = "workspace_defaults.target_branch"
+                value = target_branch
         elif mapping.source == "jira_field" and mapping.jira_field:
             reference = f"issue.fields.{mapping.jira_field}"
             if mapping.jira_field == "assignee":
@@ -334,6 +474,12 @@ def _profile_snapshot(profile: Any, issue: Any) -> dict[str, Any]:
         elif mapping.source == "jira_description_section" and mapping.section:
             reference = f"issue.description_sections.{mapping.section}"
             value = sections.get(mapping.section)
+            if logical_name == "problem_version" and task_worktrees is not None:
+                reference = "task_worktrees.problem_version"
+                value = task_worktrees.get("problem_version")
+            elif logical_name == "problem_version" and problem_version:
+                reference = "workspace_defaults.problem_version"
+                value = problem_version
         resolved[logical_name] = {
             **declaration,
             "reference": reference,
@@ -428,7 +574,13 @@ def _new_run_id(issue_key: str) -> str:
     return f"run-{issue_key}-{timestamp}-{secrets.token_hex(4)}"
 
 
-def _blocked(code: str, message: str, action: str) -> RuntimeErrorResult:
+def _blocked(
+    code: str,
+    message: str,
+    action: str,
+    *,
+    details: dict[str, Any] | None = None,
+) -> RuntimeErrorResult:
     return RuntimeErrorResult(
         code=code,
         message=message,
@@ -436,4 +588,5 @@ def _blocked(code: str, message: str, action: str) -> RuntimeErrorResult:
         exit_code=EXIT_BLOCKED,
         retry_safe=True,
         required_human_action=action,
+        details=details or {},
     )

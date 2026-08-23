@@ -100,7 +100,7 @@ class WorkspaceCandidate:
             "source_pool_root": str(self.source_pool_root) if self.source_pool_root else None,
             "repository_count": len(self.profile.repository_candidates()),
             "task_worktree_layout": (
-                "<pool_root>/<JIRA-KEY>/<from_branch>/<repo>"
+                "<pool_root>/.worktree/<JIRA-KEY>/<问题版本>/<repo>"
                 if self.source_pool_root is not None
                 else None
             ),
@@ -1093,7 +1093,7 @@ class WorkspaceInitializer:
             f"- 池成员数：{len(repositories)}\n"
             f"- 生成时间：{datetime.now(timezone.utc).isoformat()}\n\n"
             "本目录存放业务项目源代码池，由 ao-work workspace init 管理。池成员按 "
-            "<owner>/<repo> 组织；任务执行时在任务根 <JIRA-KEY>/<from_branch>/ 下用 "
+            "<owner>/<repo> 组织；任务执行时在任务根 .worktree/<JIRA-KEY>/<问题版本>/ 下用 "
             "git worktree 挂出任务级子工作树。身份与凭证保存在当前 developer 安装的 user/ "
             "目录，项目和任务状态保存在业务项目工作空间 .agentic-ops/；本文件只是配套说明，"
             "权威映射以受管配置为准。请勿手改管理块。\n"

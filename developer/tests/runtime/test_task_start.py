@@ -5,11 +5,21 @@ import json
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
+from ao_work.config import load_project_profile
 from ao_work.jira.adf import markdown_to_adf
 from ao_work.jira.client import TransportResponse
+from ao_work.output import RuntimeErrorResult
+from ao_work.task_start import (
+    _prepare_pool_task_worktrees,
+    _profile_snapshot,
+    _resolve_non_pool_branch_context,
+)
+from ao_work.task_worktree import TaskWorktreePlan, WorktreePlanEntry
 from ao_work.work_cli import main
 from install_auth_fixture import configure_install_authorization, v5_agent
 
@@ -222,6 +232,296 @@ class TaskStartTest(unittest.TestCase):
                 self.assertEqual(2, code)
                 self.assertEqual(expected, payload["code"])
                 self.assertFalse((self.workspace / ".agentic-ops/tasks/TAP-12289").exists())
+
+
+class ProjectProfileSnapshotTest(unittest.TestCase):
+    def test_problem_version_and_actual_target_branch_are_distinct(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        issue = SimpleNamespace(
+            description=markdown_to_adf("## 问题版本\n\ndevelop\n\n补充备注。\n"),
+            assignee="jira-account-1",
+            summary="测试任务",
+            fields={},
+        )
+
+        snapshot = _profile_snapshot(
+            profile,
+            issue,
+            task_worktrees={
+                "repository": "tapdata/tapdata-common-lib",
+                "problem_version": "develop",
+                "target_branch": "release-v1.2.6",
+            },
+        )
+
+        resolved = snapshot["resolved_fields"]
+        self.assertEqual("develop", resolved["problem_version"]["value"])
+        self.assertEqual(
+            "task_worktrees.problem_version",
+            resolved["problem_version"]["reference"],
+        )
+        self.assertEqual("release-v1.2.6", resolved["target_branch"]["value"])
+        self.assertEqual(
+            "task_worktrees.target_branch",
+            resolved["target_branch"]["reference"],
+        )
+        self.assertEqual(
+            "tapdata/tapdata-common-lib",
+            resolved["target_repo"]["value"],
+        )
+
+    def test_baseline_problem_version_fills_source_context_when_jira_omits_it(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        issue = SimpleNamespace(
+            description=markdown_to_adf("没有显式问题版本。"),
+            assignee="jira-account-1",
+            summary="测试任务",
+            fields={},
+        )
+
+        snapshot = _profile_snapshot(
+            profile,
+            issue,
+            task_worktrees={
+                "repository": "tapdata/tapdata-common-lib",
+                "problem_version": "develop",
+                "target_branch": "release-v1.2.6",
+            },
+        )
+
+        problem_version = snapshot["resolved_fields"]["problem_version"]
+        self.assertEqual("develop", problem_version["value"])
+        self.assertEqual("task_worktrees.problem_version", problem_version["reference"])
+        self.assertEqual("jira_description_section", problem_version["source"])
+        self.assertEqual("问题版本", problem_version["section"])
+
+    def test_renamed_product_domain_still_uses_alignment_script(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        loaded = load_project_profile(repository_root, "tapdata")
+        product = loaded.worktree_domains[0]
+        profile = replace(
+            loaded,
+            worktree_domains=(
+                replace(product, domain_id="renamed-product"),
+                *loaded.worktree_domains[1:],
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            pool = Path(temporary).resolve()
+            target_dir = pool / ".worktree/TAP-123/develop/tapdata/tapdata"
+            prepared = TaskWorktreePlan(
+                issue_key="TAP-123",
+                from_branch="develop",
+                pool_root=pool,
+                entries=(
+                    WorktreePlanEntry(
+                        repository="tapdata/tapdata",
+                        worktree_dir=target_dir,
+                        branch="develop",
+                    ),
+                ),
+                target_repository="tapdata/tapdata",
+                baseline_repository="tapdata/tapdata",
+            )
+            issue = SimpleNamespace(
+                key="TAP-123",
+                description=markdown_to_adf("## 问题版本\n\ndevelop\n"),
+            )
+            with (
+                mock.patch(
+                    "ao_work.task_start.resolve_source_pool_root",
+                    return_value=pool,
+                ),
+                mock.patch(
+                    "ao_work.task_start.plan_task_worktrees",
+                    return_value=prepared,
+                ) as planned,
+                mock.patch(
+                    "ao_work.task_start.prepare_task_worktrees",
+                    return_value=prepared,
+                ),
+            ):
+                _prepare_pool_task_worktrees(
+                    install_root=pool / "install",
+                    profile=profile,
+                    issue=issue,
+                    agent_config={"source_root": str(pool)},
+                )
+
+        alignment_script = planned.call_args.kwargs["alignment_script"]
+        self.assertEqual(
+            pool
+            / "install/developer/standards/projects/tapdata/scripts/tap_align_branches.py",
+            alignment_script,
+        )
+
+    def test_non_pool_checkout_resolves_repository_and_branch_context(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        issue = SimpleNamespace(
+            description=markdown_to_adf(
+                "## 目标仓库\n\ntapdata/tapdata-common-lib\n\n"
+                "## 问题版本\n\ndevelop\n"
+            ),
+            assignee="jira-account-1",
+            summary="测试任务",
+            fields={},
+        )
+
+        problem_version, target_branch = _resolve_non_pool_branch_context(
+            profile,
+            issue,
+            Path("/nonexistent/source"),
+            "tapdata/tapdata-common-lib",
+        )
+        snapshot = _profile_snapshot(
+            profile,
+            issue,
+            target_repository="tapdata/tapdata-common-lib",
+            problem_version=problem_version,
+            target_branch=target_branch,
+        )
+
+        self.assertEqual("develop", problem_version)
+        self.assertEqual("main", target_branch)
+        resolved = snapshot["resolved_fields"]
+        self.assertEqual("tapdata/tapdata-common-lib", resolved["target_repo"]["value"])
+        self.assertEqual("workspace_defaults.repository", resolved["target_repo"]["reference"])
+        self.assertEqual("develop", resolved["problem_version"]["value"])
+        self.assertEqual(
+            "workspace_defaults.problem_version",
+            resolved["problem_version"]["reference"],
+        )
+        self.assertEqual("main", resolved["target_branch"]["value"])
+        self.assertEqual(
+            "workspace_defaults.target_branch",
+            resolved["target_branch"]["reference"],
+        )
+
+    def test_non_pool_checkout_blocks_declared_repository_mismatch(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        issue = SimpleNamespace(
+            key="TAP-123",
+            description=markdown_to_adf(
+                "## 目标仓库\n\ntapdata/tapdata-common-lib\n\n"
+                "## 问题版本\n\ndevelop\n"
+            ),
+        )
+
+        with mock.patch(
+            "ao_work.task_start.resolve_source_pool_root",
+            return_value=None,
+        ):
+            try:
+                _prepare_pool_task_worktrees(
+                    install_root=repository_root,
+                    profile=profile,
+                    issue=issue,
+                    agent_config={
+                        "source_root": "/nonexistent/source",
+                        "repository": "tapdata/tapdata",
+                    },
+                )
+            except RuntimeErrorResult as error:
+                raised = error
+            else:
+                self.fail("仓库不一致的独立 checkout 应失败关闭")
+
+        self.assertEqual("task_source_repository_mismatch", raised.code)
+        self.assertIn("独立源码目录绑定仓库 tapdata/tapdata", raised.message)
+
+    def test_non_pool_checkout_blocks_unclassified_repository(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        issue = SimpleNamespace(
+            key="TAP-123",
+            description=markdown_to_adf(
+                "## 目标仓库\n\ntapdata/docs\n\n"
+                "## 问题版本\n\nmain\n"
+            ),
+        )
+
+        with mock.patch(
+            "ao_work.task_start.resolve_source_pool_root",
+            return_value=None,
+        ):
+            try:
+                _prepare_pool_task_worktrees(
+                    install_root=repository_root,
+                    profile=profile,
+                    issue=issue,
+                    agent_config={
+                        "source_root": "/nonexistent/source",
+                        "repository": "tapdata/docs",
+                    },
+                )
+            except RuntimeErrorResult as error:
+                raised = error
+            else:
+                self.fail("未归类仓库的独立 checkout 应失败关闭")
+
+        self.assertEqual("task_domain_unresolved", raised.code)
+        self.assertIn("tapdata/docs", raised.message)
+        self.assertEqual({"target_repository": "tapdata/docs"}, raised.details)
+
+    def test_pool_checkout_preserves_unclassified_repository_details(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        issue = SimpleNamespace(
+            key="TAP-123",
+            description=markdown_to_adf("## 目标仓库\n\ntapdata/docs\n"),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            pool = Path(temporary).resolve()
+            with mock.patch(
+                "ao_work.task_start.resolve_source_pool_root",
+                return_value=pool,
+            ):
+                try:
+                    _prepare_pool_task_worktrees(
+                        install_root=repository_root,
+                        profile=profile,
+                        issue=issue,
+                        agent_config={
+                            "source_root": str(pool),
+                            "repository": "tapdata/tapdata",
+                        },
+                    )
+                except RuntimeErrorResult as error:
+                    raised = error
+                else:
+                    self.fail("池模式未归类仓库应失败关闭")
+
+        self.assertEqual("task_domain_unresolved", raised.code)
+        self.assertEqual({"target_repository": "tapdata/docs"}, raised.details)
+
+    def test_non_pool_checkout_resolves_product_alignment_spec(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        issue = SimpleNamespace(
+            description=markdown_to_adf(
+                "## 目标仓库\n\ntapdata/tapdata-enterprise\n\n"
+                "## 问题版本\n\n"
+                "release-v3.8.0,release-v3.8-enterprise,release-v3.8-web\n"
+            ),
+            assignee="jira-account-1",
+            summary="测试任务",
+            fields={},
+        )
+
+        problem_version, target_branch = _resolve_non_pool_branch_context(
+            profile,
+            issue,
+            Path("/nonexistent/source"),
+            "tapdata/tapdata-enterprise",
+        )
+
+        self.assertEqual("release-v3.8.0", problem_version)
+        self.assertEqual("release-v3.8-enterprise", target_branch)
 
 
 if __name__ == "__main__":

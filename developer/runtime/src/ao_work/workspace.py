@@ -148,7 +148,7 @@ def task_worktree_path(
     from_branch: str,
     repository: str,
 ) -> Path:
-    """任务级子工作树路径：<pool_root>/<jira_id>/<from_branch>/<repo>。"""
+    """任务级子工作树路径：<pool_root>/.worktree/<jira_id>/<问题版本>/<repo>。"""
     pool = validate_source_pool_root(pool_root)
     if not JIRA_KEY_PATTERN.fullmatch(jira_key):
         raise _blocked(
@@ -158,7 +158,7 @@ def task_worktree_path(
         )
     normalized_branch = normalize_worktree_from_branch(from_branch)
     short_name = repository_short_name(repository)
-    path = pool / jira_key / normalized_branch / short_name
+    path = pool / ".worktree" / jira_key / normalized_branch / short_name
     if len(str(path)) > WORKTREE_PATH_MAX_LENGTH:
         raise _blocked(
             "worktree_path_invalid",
