@@ -386,7 +386,11 @@ def _apply_alignment_plan(
         target = str(row.get("target", "")).strip()
         if target == "KEEP_CURRENT":
             target = str(row.get("current", "")).strip()
-        if row.get("action") == "blocked" or not target or target == "UNRESOLVED":
+        if (
+            row.get("action") == "blocked"
+            or not target
+            or target in {"HEAD", "UNRESOLVED"}
+        ):
             raise _blocked(
                 "branch_alignment_failed",
                 f"无法对齐领域仓库分支：{entry.repository}",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from ao_work.task_state.io import read_json
 from ao_work.task_worktree import (
     plan_task_worktrees,
     prepare_task_worktrees,
+    resolve_from_branch,
     resolve_target_repository,
 )
 from ao_work.workspace import Workspace
@@ -239,6 +241,16 @@ def record_current_task_source_context(
         "description": description_text,
         "issue_content_sha256": issue_content_sha256,
     }
+    target_branch = (
+        str(task_worktrees.get("target_branch") or "")
+        if task_worktrees is not None
+        else _resolve_non_pool_target_branch(
+            context.profile,
+            issue,
+            bound_source_root,
+            bound_repository,
+        )
+    )
     workspace_defaults = {
         "agent_id": effective_config.get("agent_id"),
         "project_profile": context.profile.profile_id,
@@ -246,6 +258,7 @@ def record_current_task_source_context(
         "jira_base_url": context.connection.base_url,
         "jira_account_id": account["account_id"],
         "repository": bound_repository,
+        "target_branch": target_branch,
         "source_root": str(bound_source_root),
         "execution_identity": effective_config.get("execution_identity"),
     }
@@ -260,6 +273,7 @@ def record_current_task_source_context(
             context.profile,
             issue,
             task_worktrees=task_worktrees,
+            target_branch=target_branch,
         ),
     )
     return {
@@ -330,11 +344,49 @@ def _prepare_pool_task_worktrees(
     )
 
 
+def _resolve_non_pool_target_branch(
+    profile: Any,
+    issue: Any,
+    source_root: Path,
+    repository: str,
+) -> str:
+    """为独立 checkout 解析 PR 基线；优先项目规则，最后回读当前分支。"""
+    if "target_branch" not in profile.fields:
+        return ""
+    sections = _description_sections(issue.description)
+    domain = profile.domain_for(repository)
+    if domain is not None:
+        problem_version = resolve_from_branch(
+            profile,
+            sections,
+            target_repository=domain.baseline_repository,
+        )
+        target = profile.derive_branch(
+            repository,
+            problem_version,
+            primary_repository=domain.baseline_repository,
+        )
+        if target:
+            return target
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(source_root), "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    branch = result.stdout.strip() if result.returncode == 0 else ""
+    return "" if branch == "HEAD" else branch
+
+
 def _profile_snapshot(
     profile: Any,
     issue: Any,
     *,
     task_worktrees: dict[str, Any] | None = None,
+    target_branch: str = "",
 ) -> dict[str, Any]:
     fields: dict[str, Any] = {}
     resolved: dict[str, Any] = {}
@@ -362,6 +414,9 @@ def _profile_snapshot(
             reference = f"task_worktrees.{logical_name}"
             if task_worktrees is not None:
                 value = task_worktrees.get(logical_name)
+            elif logical_name == "target_branch":
+                reference = "workspace_defaults.target_branch"
+                value = target_branch
         elif mapping.source == "jira_field" and mapping.jira_field:
             reference = f"issue.fields.{mapping.jira_field}"
             if mapping.jira_field == "assignee":
