@@ -9,7 +9,6 @@ from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_state.locking import TaskLock
 from ao_work.workspace import (
     normalize_worktree_from_branch,
-    repository_short_name,
     task_worktree_path,
     validate_source_pool_root,
 )
@@ -164,25 +163,35 @@ def prepare_task_worktrees(
         _reject_legacy_worktrees(plan)
         baselines: dict[Path, str] = {}
         for entry in plan.entries:
-            if entry.worktree_dir.is_dir():
-                continue
             member_dir = plan.pool_root / entry.repository
             lock_path = plan.pool_root / ".locks" / f"{entry.repository.replace('/', '__')}.lock"
             with TaskLock(lock_path, timeout=10):
-                # 并发恢复可能已创建同一任务工作树；此时创建阶段会改为复用。
-                if entry.worktree_dir.is_dir():
-                    continue
                 _refresh_pool_member(git, member_dir, entry.repository)
-                baselines[entry.worktree_dir] = _resolve_remote_baseline(
+                baseline = _resolve_remote_baseline(
                     git, member_dir, entry.branch, entry.repository
                 )
+                baselines[entry.worktree_dir] = baseline
+                if entry.worktree_dir.is_dir():
+                    _validate_existing_worktree(
+                        git,
+                        entry.worktree_dir,
+                        baseline,
+                        entry.branch,
+                        entry.repository,
+                    )
 
         for entry in plan.entries:
             member_dir = plan.pool_root / entry.repository
             lock_path = plan.pool_root / ".locks" / f"{entry.repository.replace('/', '__')}.lock"
             with TaskLock(lock_path, timeout=10):
                 if entry.worktree_dir.is_dir():
-                    _validate_existing_worktree(git, entry.worktree_dir, member_dir, entry.branch, entry.repository)
+                    _validate_existing_worktree(
+                        git,
+                        entry.worktree_dir,
+                        baselines[entry.worktree_dir],
+                        entry.branch,
+                        entry.repository,
+                    )
                     adopted += 1
                     continue
                 entry.worktree_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -241,63 +250,38 @@ def prepare_task_worktrees(
 
 def _reject_legacy_worktrees(plan: TaskWorktreePlan) -> None:
     """旧布局不得被静默忽略或覆盖，必须由人工决定迁移或清理。"""
-    for entry in plan.entries:
-        legacy = (
-            plan.pool_root
-            / plan.issue_key
-            / normalize_worktree_from_branch(plan.from_branch)
-            / repository_short_name(entry.repository)
+    legacy_root = plan.pool_root / plan.issue_key
+    if legacy_root.exists() or legacy_root.is_symlink():
+        raise _blocked(
+            "worktree_legacy_layout_detected",
+            f"检测到旧布局任务根：{legacy_root}",
+            "请先人工确认该 Jira 任务根下全部工作树中的修改并迁移或清理；系统不会创建新的 .worktree 副本",
+            details={"legacy_task_root": str(legacy_root), "issue_key": plan.issue_key},
         )
-        if legacy.is_dir():
-            raise _blocked(
-                "worktree_legacy_layout_detected",
-                f"检测到旧布局任务工作树：{legacy}",
-                "请先人工确认旧工作树中的修改并迁移或清理；系统不会创建新的 .worktree 副本",
-                details={"legacy_worktree": str(legacy), "repository": entry.repository},
-            )
 
 
 def _validate_existing_worktree(
     git: Any,
     worktree_dir: Path,
-    member_dir: Path,
+    expected_commit: str,
     branch: str,
     repository: str,
 ) -> None:
     root = git(["-C", str(worktree_dir), "rev-parse", "--show-toplevel"], timeout=60)
     actual = git(["-C", str(worktree_dir), "rev-parse", "HEAD"], timeout=60)
-    baseline = _resolve_existing_baseline(git, member_dir, branch)
-    if root.returncode != 0 or actual.returncode != 0 or baseline.returncode != 0:
+    if root.returncode != 0 or actual.returncode != 0:
         raise _blocked(
             "worktree_invalid",
             f"任务工作树已存在但不是 Git 工作树：{worktree_dir}",
             "请检查并清理该目录后重试",
-            details={"stderr_tail": _stderr_tail(root.stderr or actual.stderr or baseline.stderr)},
+            details={"stderr_tail": _stderr_tail(root.stderr or actual.stderr)},
         )
-    if Path(root.stdout.strip()).resolve() != worktree_dir.resolve() or actual.stdout.strip() != baseline.stdout.strip():
+    if Path(root.stdout.strip()).resolve() != worktree_dir.resolve() or actual.stdout.strip() != expected_commit:
         raise _blocked(
             "worktree_baseline_mismatch",
             f"任务工作树 {repository} 不是当前基线 {branch} 的精确工作树",
             "请清理该任务工作树后重试，或核对目标仓库和基线分支",
         )
-
-
-def _resolve_existing_baseline(git: Any, member_dir: Path, branch: str) -> Any:
-    """复用已有工作树时优先本地基线，缺失则使用已记录的 origin 引用。"""
-    local = git(
-        ["-C", str(member_dir), "rev-parse", f"{branch}^{{commit}}"], timeout=60
-    )
-    if local.returncode == 0:
-        return local
-    return git(
-        [
-            "-C",
-            str(member_dir),
-            "rev-parse",
-            f"refs/remotes/origin/{branch}^{{commit}}",
-        ],
-        timeout=60,
-    )
 
 
 def _refresh_pool_member(git: Any, member_dir: Path, repository: str) -> None:

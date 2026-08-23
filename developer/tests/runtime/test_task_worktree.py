@@ -474,7 +474,7 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
 
     def test_prepare_blocks_legacy_worktree_without_creating_new_copy(self) -> None:
         plan = self._plan()
-        legacy = self.pool / "TAP-123" / "feature-x" / "tapdata"
+        legacy = self.pool / "TAP-123" / "develop" / "unrelated-repository"
         legacy.mkdir(parents=True)
         calls: list[list[str]] = []
 
@@ -487,6 +487,10 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
 
         self.assertEqual("worktree_legacy_layout_detected", captured.exception.code)
         self.assertTrue(legacy.is_dir())
+        self.assertEqual(
+            str((self.pool / "TAP-123").resolve()),
+            captured.exception.details["legacy_task_root"],
+        )
         self.assertFalse(any("worktree" in command and "add" in command for command in calls))
 
     def test_prepare_reuses_existing_worktree(self) -> None:
@@ -515,6 +519,28 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
 
         self.assertEqual(2, prepared.adopted)
         self.assertEqual(0, prepared.created)
+
+    def test_prepare_preflights_existing_worktree_against_refreshed_remote(self) -> None:
+        plan = self._plan()
+        existing = plan.entries[1].worktree_dir
+        existing.mkdir(parents=True)
+        (existing / ".git").write_text("gitdir: fake\n", encoding="utf-8")
+        calls: list[list[str]] = []
+
+        def stale_existing_git(command, *, timeout=None):
+            calls.append(command)
+            if "rev-parse" in command and "refs/remotes/origin/feature/x^{commit}" in command:
+                return subprocess.CompletedProcess(command, 0, "remote-feature-commit\n", "")
+            if command[1] == str(existing) and command[-1] == "HEAD":
+                return subprocess.CompletedProcess(command, 0, "stale-local-commit\n", "")
+            return self._run_git(command, timeout=timeout)
+
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            prepare_task_worktrees(plan, run_git=stale_existing_git)
+
+        self.assertEqual("worktree_baseline_mismatch", captured.exception.code)
+        self.assertFalse(any("worktree" in command and "add" in command for command in calls))
+        self.assertFalse(plan.entries[0].worktree_dir.exists())
 
     def test_prepare_rolls_back_on_failure(self) -> None:
         plan = self._plan()
