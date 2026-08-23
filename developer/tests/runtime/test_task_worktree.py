@@ -18,6 +18,7 @@ from ao_work.task_worktree import (
     plan_task_worktrees,
     prepare_task_worktrees,
     resolve_from_branch,
+    resolve_product_alignment_branch,
     resolve_target_repository,
 )
 from ao_work.workspace import task_worktree_path
@@ -115,6 +116,33 @@ class ResolveFromBranchTest(unittest.TestCase):
         with self.assertRaises(RuntimeErrorResult) as captured:
             resolve_from_branch(profile, {}, target_repository="tapdata/tapdata-web")
         self.assertEqual("task_baseline_unresolved", captured.exception.code)
+
+    def test_product_alignment_target_accepts_valid_git_ref_characters(self) -> None:
+        sections = {
+            "问题版本": "develop,feature/foo+bar,feature/user@ticket",
+        }
+        self.assertEqual(
+            "feature/foo+bar",
+            resolve_product_alignment_branch(
+                sections,
+                "tapdata/tapdata-enterprise",
+            ),
+        )
+        self.assertEqual(
+            "feature/user@ticket",
+            resolve_product_alignment_branch(
+                sections,
+                "tapdata/tapdata-web",
+            ),
+        )
+
+    def test_product_alignment_target_rejects_invalid_git_ref(self) -> None:
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            resolve_product_alignment_branch(
+                {"问题版本": "develop,feature//broken,release-v3.8-web"},
+                "tapdata/tapdata-enterprise",
+            )
+        self.assertEqual("task_target_branch_invalid", captured.exception.code)
 
 
 class TapdataProfileBranchDerivationTest(unittest.TestCase):

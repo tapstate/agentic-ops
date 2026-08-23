@@ -309,6 +309,7 @@ def _prepare_pool_task_worktrees(
             "task_domain_unresolved",
             f"无法根据目标仓库判定任务领域：{target_repository}",
             "请补充可映射的目标仓库或任务领域；系统不会创建或绑定未知领域的工作树",
+            details={"target_repository": target_repository},
         )
     pool_root = resolve_source_pool_root(install_root)
     if pool_root is None or source_root != pool_root:
@@ -327,6 +328,7 @@ def _prepare_pool_task_worktrees(
             "task_domain_unresolved",
             f"无法根据目标仓库判定任务领域：{target_repository}",
             "请补充可映射的目标仓库或任务领域；系统不会创建未知领域的任务工作树",
+            details={"target_repository": target_repository},
         )
     alignment_script = None
     if (
@@ -572,7 +574,13 @@ def _new_run_id(issue_key: str) -> str:
     return f"run-{issue_key}-{timestamp}-{secrets.token_hex(4)}"
 
 
-def _blocked(code: str, message: str, action: str) -> RuntimeErrorResult:
+def _blocked(
+    code: str,
+    message: str,
+    action: str,
+    *,
+    details: dict[str, Any] | None = None,
+) -> RuntimeErrorResult:
     return RuntimeErrorResult(
         code=code,
         message=message,
@@ -580,4 +588,5 @@ def _blocked(code: str, message: str, action: str) -> RuntimeErrorResult:
         exit_code=EXIT_BLOCKED,
         retry_safe=True,
         required_human_action=action,
+        details=details or {},
     )

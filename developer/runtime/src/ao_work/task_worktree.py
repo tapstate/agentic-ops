@@ -109,8 +109,28 @@ def resolve_product_alignment_branch(
         "tapdata/tapdata-web": parts[2].strip() if len(parts) > 2 else "",
     }.get(repository, "")
     if explicit:
-        normalize_worktree_from_branch(explicit)
+        _validate_git_branch_name(explicit)
     return explicit
+
+
+def _validate_git_branch_name(branch: str) -> None:
+    """使用 Git 自身规则校验分支名，不施加工作树目录段字符限制。"""
+    try:
+        result = _run_git(["check-ref-format", "--branch", branch], timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise _blocked(
+            "task_target_branch_validation_failed",
+            f"无法调用 Git 校验目标分支：{branch}",
+            "请确认 Git 可用后重试",
+            details={"branch": branch, "error_type": type(error).__name__},
+        ) from error
+    if result.returncode != 0:
+        raise _blocked(
+            "task_target_branch_invalid",
+            f"目标分支不是合法 Git 分支名：{branch}",
+            "请修正 Jira 问题版本中的显式目标分支",
+            details={"branch": branch},
+        )
 
 
 def _declared_branch_spec(description_sections: dict[str, str]) -> str:
