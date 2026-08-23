@@ -9,7 +9,7 @@
 用法：
   tap_align_branches.py [--root DIR] list [filter]
   tap_align_branches.py [--root DIR] status
-  tap_align_branches.py [--root DIR] plan <branch_spec> [--no-fetch]
+  tap_align_branches.py [--root DIR] plan <branch_spec> [--no-fetch] [--remote-only]
   tap_align_branches.py [--root DIR] apply <branch_spec> [--no-fetch]
 
   <branch_spec>：tapdata 分支（develop、main、release-vX.Y.Z、任务分支），
@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -132,8 +133,22 @@ def branch_list(repo: str, root: Path, remote: str) -> list[str]:
     return sorted(branches)
 
 
-def branch_exists(repo: str, branch: str, root: Path, remote: str) -> bool:
-    if _git_quiet(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}", root=root):
+def branch_exists(
+    repo: str,
+    branch: str,
+    root: Path,
+    remote: str,
+    *,
+    remote_only: bool = False,
+) -> bool:
+    if not remote_only and _git_quiet(
+        repo,
+        "show-ref",
+        "--verify",
+        "--quiet",
+        f"refs/heads/{branch}",
+        root=root,
+    ):
         return True
     return _git_quiet(
         repo, "show-ref", "--verify", "--quiet", f"refs/remotes/{remote}/{branch}", root=root
@@ -164,11 +179,17 @@ def is_standard_tap_branch(branch: str) -> bool:
 
 
 def branch_containing_marker(
-    repo: str, tap_branch: str, marker: str, root: Path, remote: str
+    repo: str,
+    tap_branch: str,
+    marker: str,
+    root: Path,
+    remote: str,
+    *,
+    remote_only: bool = False,
 ) -> str:
     if not marker:
         return ""
-    if branch_exists(repo, tap_branch, root, remote):
+    if branch_exists(repo, tap_branch, root, remote, remote_only=remote_only):
         return tap_branch
     for branch in branch_list(repo, root, remote):
         if marker in branch:
@@ -197,17 +218,36 @@ def first_release_ge(repo: str, target_release: str, root: Path, remote: str) ->
     return ""
 
 
-def _read_plugin_content(branch: str, root: Path, remote: str) -> str:
-    content = _git_try("tapdata", "show", f"{branch}:{PLUGIN_PATH}", root=root)
-    if content:
+def _read_plugin_content(
+    branch: str,
+    root: Path,
+    remote: str,
+    *,
+    remote_only: bool = False,
+) -> str:
+    # plan 前已 fetch，优先读取远端快照，避免本地主分支落后时推导出过期 PluginKit 版本。
+    content = _git_try("tapdata", "show", f"{remote}/{branch}:{PLUGIN_PATH}", root=root)
+    if content or remote_only:
         return content
-    return _git_try("tapdata", "show", f"{remote}/{branch}:{PLUGIN_PATH}", root=root)
+    return _git_try("tapdata", "show", f"{branch}:{PLUGIN_PATH}", root=root)
 
 
-def plugin_release_for(branch: str, root: Path, remote: str) -> str:
-    content = _read_plugin_content(branch, root, remote)
+def plugin_release_for(
+    branch: str,
+    root: Path,
+    remote: str,
+    *,
+    remote_only: bool = False,
+) -> str:
+    content = _read_plugin_content(
+        branch,
+        root,
+        remote,
+        remote_only=remote_only,
+    )
     if not content:
-        print(f"警告: 无法从 {branch} 读取 {PLUGIN_PATH}（本地或 {remote}/{branch}）", file=sys.stderr)
+        source = f"{remote}/{branch}" if remote_only else f"本地或 {remote}/{branch}"
+        print(f"警告: 无法从 {branch} 读取 {PLUGIN_PATH}（{source}）", file=sys.stderr)
         return ""
     for line in content.splitlines():
         if line.strip().startswith(PLUGIN_VERSION_KEY + "="):
@@ -231,16 +271,30 @@ def derive_target(
     root: Path,
     remote: str,
     plugin_cache: dict[str, str],
+    *,
+    remote_only: bool = False,
 ) -> tuple[str, str]:
     """返回 (target, reason)。target 为 UNRESOLVED 时表示阻塞。"""
 
     # 显式指定 enterprise/web 分支
     if repo == "tapdata-enterprise" and enterprise_branch:
-        if branch_exists(repo, enterprise_branch, root, remote):
+        if branch_exists(
+            repo,
+            enterprise_branch,
+            root,
+            remote,
+            remote_only=remote_only,
+        ):
             return enterprise_branch, "user specified tapdata-enterprise branch"
         return "UNRESOLVED", f"user specified branch {enterprise_branch} not found"
     if repo == "tapdata-web" and web_branch:
-        if branch_exists(repo, web_branch, root, remote):
+        if branch_exists(
+            repo,
+            web_branch,
+            root,
+            remote,
+            remote_only=remote_only,
+        ):
             return web_branch, "user specified tapdata-web branch"
         return "UNRESOLVED", f"user specified branch {web_branch} not found"
 
@@ -253,7 +307,15 @@ def derive_target(
         if repo == "tapdata-license":
             return "main", "develop uses license main"
         if repo == "tapdata-common-lib":
-            release = plugin_cache.setdefault("plugin", plugin_release_for(tap_branch, root, remote))
+            release = plugin_cache.setdefault(
+                "plugin",
+                plugin_release_for(
+                    tap_branch,
+                    root,
+                    remote,
+                    remote_only=remote_only,
+                ),
+            )
             if release:
                 target = first_release_ge(repo, release, root, remote)
                 if target:
@@ -267,22 +329,43 @@ def derive_target(
         return tap_branch, "user selected tapdata branch"
 
     # 1. TAP 标记匹配
-    marker_target = branch_containing_marker(repo, tap_branch, marker, root, remote)
+    marker_target = branch_containing_marker(
+        repo,
+        tap_branch,
+        marker,
+        root,
+        remote,
+        remote_only=remote_only,
+    )
     if marker_target:
         return marker_target, f"TAP marker {marker} matched branch"
 
     # 2. 非标准分支名 → 全名匹配
-    if not is_standard_tap_branch(tap_branch) and branch_exists(repo, tap_branch, root, remote):
+    if not is_standard_tap_branch(tap_branch) and branch_exists(
+        repo,
+        tap_branch,
+        root,
+        remote,
+        remote_only=remote_only,
+    ):
         return tap_branch, "non-standard tapdata branch uses same-name branch"
 
     # 3. 分仓推导
     if repo in ("tapdata-enterprise", "tapdata-web", "tapdata-enterprise-web"):
-        if branch_exists(repo, tap_branch, root, remote):
+        if branch_exists(repo, tap_branch, root, remote, remote_only=remote_only):
             return tap_branch, "same-name branch exists"
         return "UNRESOLVED", "same-name branch missing; specify manually or confirm fallback"
 
     if repo in ("tapdata-connectors", "tapdata-connectors-enterprise", "tapdata-common-lib"):
-        release = plugin_cache.setdefault("plugin", plugin_release_for(tap_branch, root, remote))
+        release = plugin_cache.setdefault(
+            "plugin",
+            plugin_release_for(
+                tap_branch,
+                root,
+                remote,
+                remote_only=remote_only,
+            ),
+        )
         if release:
             target = first_release_ge(repo, release, root, remote)
             if target:
@@ -309,19 +392,43 @@ def plan_rows(
     web_branch: str,
     root: Path,
     remote: str,
+    repositories: list[str] | None = None,
+    remote_only: bool = False,
 ) -> list[dict[str, str]]:
-    if not branch_exists("tapdata", tap_branch, root, remote):
-        raise AlignError(f"tapdata branch not found locally or in {remote}: {tap_branch}")
+    if not branch_exists(
+        "tapdata",
+        tap_branch,
+        root,
+        remote,
+        remote_only=remote_only,
+    ):
+        source = remote if remote_only else f"local or {remote}"
+        raise AlignError(f"tapdata branch not found in {source}: {tap_branch}")
 
     marker = tap_marker(tap_branch)
     plugin_cache: dict[str, str] = {}
     rows: list[dict[str, str]] = []
 
+    requested = set(repositories or (*CORE_REPOS, *KEEP_REPOS))
+    unknown = requested.difference((*CORE_REPOS, *KEEP_REPOS))
+    if unknown:
+        raise AlignError(f"unsupported repositories: {', '.join(sorted(unknown))}")
+
     for repo in CORE_REPOS:
+        if repo not in requested:
+            continue
         current = current_branch(repo, root)
         dirty = dirty_state(repo, root)
         target, reason = derive_target(
-            repo, tap_branch, marker, enterprise_branch, web_branch, root, remote, plugin_cache
+            repo,
+            tap_branch,
+            marker,
+            enterprise_branch,
+            web_branch,
+            root,
+            remote,
+            plugin_cache,
+            remote_only=remote_only,
         )
         action = "blocked" if target == "UNRESOLVED" else ("skip" if target == current else "switch")
         rows.append(
@@ -336,15 +443,23 @@ def plan_rows(
         )
 
     for repo in KEEP_REPOS:
-        if not (root / repo / ".git").exists():
+        if repo not in requested:
             continue
+        if not (root / repo / ".git").exists():
+            raise AlignError(f"repo not found or not a git repo: {root / repo}")
+        current = current_branch(repo, root)
+        detached = current == "HEAD"
         rows.append(
             {
                 "repo": repo,
-                "current": current_branch(repo, root),
+                "current": current,
                 "target": "KEEP_CURRENT",
-                "action": "keep",
-                "reason": "default not aligned",
+                "action": "blocked" if detached else "keep",
+                "reason": (
+                    "detached HEAD cannot be kept as a branch"
+                    if detached
+                    else "default not aligned"
+                ),
                 "dirty": dirty_state(repo, root),
             }
         )
@@ -461,15 +576,35 @@ def cmd_list(root: Path, remote: str, filter_text: str, no_fetch: bool) -> None:
     print(f"match_count={count}")
 
 
-def cmd_plan(root: Path, remote: str, branch_spec: str, no_fetch: bool) -> list[dict[str, str]]:
+def cmd_plan(
+    root: Path,
+    remote: str,
+    branch_spec: str,
+    no_fetch: bool,
+    repositories: list[str] | None = None,
+    json_output: bool = False,
+    remote_only: bool = False,
+) -> list[dict[str, str]]:
     tap_spec, ent_spec, web_spec = parse_branch_spec(branch_spec)
+    requested = set(repositories or CORE_REPOS)
     if not no_fetch and FETCH_BEFORE_PLAN:
         for repo in CORE_REPOS:
-            if (root / repo / ".git").exists():
-                print(f"fetch: {repo}")
+            if repo in requested and (root / repo / ".git").exists():
+                print(f"fetch: {repo}", file=sys.stderr if json_output else sys.stdout)
                 fetch_repo(repo, root, remote)
-    rows = plan_rows(tap_spec, ent_spec, web_spec, root, remote)
-    print_plan(rows)
+    rows = plan_rows(
+        tap_spec,
+        ent_spec,
+        web_spec,
+        root,
+        remote,
+        repositories=repositories,
+        remote_only=remote_only,
+    )
+    if json_output:
+        print(json.dumps(rows, ensure_ascii=False, separators=(",", ":")))
+    else:
+        print_plan(rows)
     return rows
 
 
@@ -516,6 +651,18 @@ def build_parser() -> argparse.ArgumentParser:
         p = sub.add_parser(name)
         p.add_argument("branch_spec", help="develop、main、release-vX.Y.Z、任务分支，或 <tapdata>,<enterprise>,<web>")
         p.add_argument("--no-fetch", action="store_true", help="跳过 fetch")
+        if name == "plan":
+            p.add_argument(
+                "--repositories",
+                default="",
+                help="仅输出逗号分隔的指定仓库；用于按任务领域生成计划",
+            )
+            p.add_argument("--json", action="store_true", help="以 JSON 输出计划行")
+            p.add_argument(
+                "--remote-only",
+                action="store_true",
+                help="仅以刷新后的远端 refs 生成计划，不回退本地同名分支",
+            )
 
     return parser
 
@@ -533,7 +680,18 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "status":
             print_status(root, args.remote)
         elif args.command == "plan":
-            cmd_plan(root, args.remote, args.branch_spec, args.no_fetch)
+            repositories = [
+                item.strip() for item in args.repositories.split(",") if item.strip()
+            ]
+            cmd_plan(
+                root,
+                args.remote,
+                args.branch_spec,
+                args.no_fetch,
+                repositories=repositories or None,
+                json_output=args.json,
+                remote_only=args.remote_only,
+            )
         elif args.command == "apply":
             cmd_apply(root, args.remote, args.branch_spec, args.no_fetch)
     except AlignError as exc:

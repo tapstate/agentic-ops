@@ -10,7 +10,7 @@
 - 业务任务执行时，从池用 `git worktree add` 挂出任务级子工作树集，路径格式：
 
 ```text
-<source_root>/<jira_id>/<from_branch>/<repo>
+<source_root>/.worktree/<jira_id>/<问题版本>/<repo>
 ```
 
 解决的核心问题：tapdata 项目约 17 个业务仓库（本机已克隆 12 个、合计约 12.3G，`t-layer3-test` 单仓 9.3G），慢网络下重复全量克隆不可接受；项目运行需要多仓库分支组合对应；任务分析需要跨多仓库搜索；工作空间与源码目录耦合过深，任务隔离不清晰。
@@ -48,7 +48,7 @@
     .git/                          ← 唯一对象库（全项目、全任务共享）
     <默认分支 checkout>            ← 用户可手动使用的主工作树
   .locks/<owner>/<repo>.lock       ← 池成员级并发锁（复用 TaskLock）
-  <JIRA-KEY>/<from_branch>/<repo>/ ← 任务级子工作树（git worktree），任务根 = <JIRA-KEY>/<from_branch>/
+  .worktree/<JIRA-KEY>/<问题版本>/<repo>/ ← 任务级子工作树（git worktree）
   README.md                        ← 池容器说明（受管标记）
 
 <workspace>/                       ← 业务项目工作空间（只存项目信息）
@@ -75,28 +75,29 @@
 2. 认领时若池成员是浅克隆（现有 `~/github` 克隆是 depth 1）→ 自动流式 `git fetch --unshallow`；不允许以浅克隆作为池成员。
 3. 全集准备支持中断续传：`Ctrl+C` 中断时已完成的池成员保留（不删除、不污染），下次 init/任务接管自动补齐缺失成员；不写任何初始化完成标记。
 4. 不创建工作空间级源码目录或凭证；写 profile overlay、AGENTS.md、Skill 和 schema v4 agent.json（`source_root` 写池根）。
-5. 任务工作树集在任务接管时创建（3.4），由任务上下文（Jira key、目标仓库、修复分支）与分支推导接口（3.9）推导。
+5. 任务工作树集在任务接管时创建（3.4），由任务上下文（Jira key、目标仓库、问题版本）与分支推导接口（3.9）推导。
 
 ### 3.4 任务级子工作树集（核心）
 
 任务接管（公开入口 `ao-work takeover`，内部来源准备 `task start`）时：
 
-1. 确定任务主分支 `<from_branch>`（任务描述「修复分支」字段；缺失时用 profile `branches.default_branch`）。
-2. 确定任务工作树集：按 `analysis_mount` 挂载策略（3.9.1，缺省全量 list）。逐个仓库：
+1. 确定任务「问题版本」（`main`、`develop`、`release-v*` 或客户分支；兼容读取旧「修复分支」）。
+2. 先按目标仓库和版本化 Profile 判定领域；领域不明或冲突时不创建工作树。逐个领域仓库：
    - 按分支推导接口解析该仓库对应分支（3.9.2）。
    - 确保池成员存在（认领或 clone，同 3.3，带池锁）。
-   - 目标路径 `worktree_path = <pool_root>/<jira_id>/<from_branch>/<repo>`（规范化见 3.5）。
+   - 先刷新并解析该领域全部仓库的远端提交；已有工作树也必须匹配同一批提交，任一仓库失败时不创建任何工作树。目标路径 `worktree_path = <pool_root>/.worktree/<jira_id>/<问题版本>/<repo>`（规范化见 3.5）。
    - 拿池成员锁 → `git worktree add --detach <worktree_path> <对应 ref>`；同一任务同分支同仓库已存在 worktree（resume/恢复）→ 校验路径与 ref 后复用，不重复创建。
    - 写入 per-worktree 身份（3.7）。
 3. 任务执行在任务根下各仓库工作树内进行；跨仓库搜索直接 `rg` 任务根目录即可覆盖全部分析集。
 4. 任务目标仓库（`target_repo`）解析：Jira 描述「目标仓库」section → 校验在 `repositories.list` 内；缺失回退 `default`。分析发现需要修改分析集内其它仓库时，由人工确认后固化扩展（跨仓库修改与 PR 集合跟踪见 3.9.4，本期为单主仓库 PR 流）。
+5. 恢复时检测到旧布局 `<pool_root>/<jira_id>/<问题版本>/<repo>` → 失败关闭，不迁移、不删除、不创建新副本；由研发工程师先确认旧工作树中的修改并人工迁移或清理。
 
 任务审计完成后，按清理策略 `git worktree remove` 任务根下各工作树（dirty 阻断，见 3.8）。
 
 ### 3.5 路径规范化与安全（已确认：`/` 替换为 `-`）
 
 - `<jira_id>`：来自 Jira issue key，仅 `[0-9A-Za-z-]` 安全字符（复用 Jira key 校验）。
-- `<from_branch>`：允许 git 合法分支名；含 `/` 时替换为 `-`（`feature/x` → `feature-x`），再通过 git 分支名校验 + 路径穿越防护（禁止 `.`/`..` 段、`@{}`、前导 `-`、空段、绝对路径）。替换保证目录层级固定为 4 层：`<source_root>/<jira>/<from_branch>/<repo>`。
+- `<问题版本>`：允许 git 合法分支名；含 `/` 时替换为 `-`（`feature/x` → `feature-x`），再通过 git 分支名校验 + 路径穿越防护（禁止 `.`/`..` 段、`@{}`、前导 `-`、空段、绝对路径）。替换保证目录层级固定为 5 层：`<source_root>/.worktree/<jira>/<问题版本>/<repo>`。
 - `<repo>`：`_repository_short_name` 既有校验（禁止 `/`、`\`、空值）；池内短名唯一性校验，同名不同 owner 阻断。
 - 路径总长度限制（如 ≤ 240 字符），超限阻断并提示。
 - worktree 路径互斥：不同任务/不同 from_branch 天然不同路径；同一任务同 from_branch 下不同仓库按 `<repo>` 区分；同一任务同仓库重复接管复用同一路径。
@@ -145,18 +146,28 @@ repositories:
     - tapdata/solutions
     - tapdata/fhir-solution
     # fork（Hazelcast/mongo）不默认纳入，任务明确要求时按需挂载
-  analysis_mount:            # 任务分析挂载策略（配置，可渐进调整）
-    mode: all                # all | include | exclude
-    include: []              # mode=include 时仅挂这些仓库
-    exclude: []              # mode=exclude 时排除这些仓库（如 t-layer3-test 9.3G 按需挂）
+  worktree_domains:          # 任务工作树领域；目标仓库必须恰好属于一个领域
+    - id: product
+      baseline_repository: tapdata/tapdata
+      repositories: [tapdata/tapdata, tapdata/tapdata-enterprise, tapdata/tapdata-web]
+    - id: assistant
+      baseline_repository: tapdata/feishu_robot
+      repositories: [tapdata/feishu_robot]
+    - id: automation-test
+      baseline_repository: tapdata/t-layer3-test
+      repositories: [tapdata/t-layer3-test]
+    - id: connector
+      baseline_repository: tapdata/tapdata-connectors
+      repositories: [tapdata/tapdata-connectors, tapdata/tapdata-connectors-enterprise]
 ```
 
 - `default`：任务目标仓库缺省值（兼容既有校验与索引）。
 - `list`：profile 允许的全部业务仓库（17 个，含文档类 `docs`/`docs-en`；fork 如 `Hazelcast`/`mongo` 不默认纳入，任务明确要求时按需挂载）；池成员全集与 target 校验范围。
-- `analysis_mount`：任务接管时挂载的分析工作树集策略。缺省 `mode: all`（全量 list），可通过 `exclude` 排除超大仓库、`include` 精确指定；不同任务关注不同维度（TM/FE/连接器/云版/CI/CD/自动化测试），由挂载策略按任务筛选；挂载策略是配置不是代码，维护者可随时调整，不需要一次性定全。按需挂载由 `ao-work` 命令在任务根下动态 add worktree 完成。
-- 最小可用配置只要求 `default` 与 `list`，`analysis_mount`、`branches` 缺省即可用，具体值后续逐步补充（先反馈后固化）。
+- `worktree_domains`：按目标仓库确定任务领域和挂载仓库集。每个仓库至多属于一个领域，领域基线仓必须属于该领域；TapData Profile 不允许以全量 `list` 回退。目标仓库未映射时以 `task_domain_unresolved` 阻断，并提示补齐仓库或领域，避免无关仓库被挂载。
+- `analysis_mount`：仅为尚未声明领域的旧 Profile 保留的兼容策略；TapData 不使用该回退。
+- 最小可用 Profile 可只声明 `default` 与 `list`，但生产 TapData Profile 必须声明 `worktree_domains`；`branches` 可随分支事实渐进补充。
 
-#### 3.9.2 分支对应关系（推导接口，不要求一次性给全）
+#### 3.9.2 分支对应关系（领域基线 + 项目对齐工具）
 
 分支对应关系做成「从主仓库分支推导其它仓库分支」的接口，而不是完整矩阵表：
 
@@ -177,15 +188,17 @@ branches:
 
 推导逻辑（确定性，标准资产，不靠 AI 猜测）：
 
-1. 任务主分支 `<from_branch>` 确定（任务描述「修复分支」，缺失时目标仓库优先使用 `baseline_branches`，未声明映射才使用 `branches.default_branch`）。
-2. 对分析集每个仓库 R：
-   - R 是主仓库（derive_from）→ 工作树分支 = `<from_branch>`。
+1. 任务「问题版本」确定（任务描述「问题版本」，兼容读取旧「修复分支」；缺失时使用所属领域 `baseline_repository` 的 `baseline_branches`，未声明映射才使用 `branches.default_branch`）。
+2. 先以目标仓库选择唯一 `worktree_domain`，其 `baseline_repository` 是本次分支推导的主仓库；未命中领域即阻断，不做全量挂载。
+3. 以基线仓库 `tapdata/tapdata` 识别 TapData 产品域，不依赖可变的领域 id。先刷新领域内全部池成员，再运行 `tap_align_branches.py plan --no-fetch --remote-only --repositories ... --json`；只接受与当前领域仓库集合完全一致的计划，并以其中每行的 `target` 作为实际分支。remote-only 模式不得回退本地同名分支或本地 PluginKit 内容。若使用 `<tapdata>,<enterprise>,<web>` 三段式对齐规格，工作树路径与有效问题版本使用第一段，完整规格只传给计划脚本。
+4. 其它领域对每个仓库 R 使用通用静态规则：
+   - R 是领域基线仓库 → 工作树分支 = `<问题版本>`。
    - 命中 `overrides`（from_branch + repo 都匹配）→ 工作树分支 = 规则声明的 `branch`。
-   - `<from_branch>` 等于主仓声明的开发分支且 R 命中 `dev_branches` → 工作树分支 = 显式声明的开发分支。
-   - 否则默认规则 `same_name` → 工作树分支 = `<from_branch>` 同名分支。
+   - `<问题版本>` 等于领域基线仓声明的开发分支且 R 命中 `dev_branches` → 工作树分支 = 显式声明的开发分支。
+   - 否则默认规则 `same_name` → 工作树分支 = `<问题版本>` 同名分支。
    - 刷新 `origin` 后必须精确解析上述推导的远端引用；分支不存在则阻断（`branch_derivation_failed`），输出仓库与推导分支，提示维护者补映射或确认分支。
 
-- 接口语义：默认「所有仓库同分支并行开发」（tapdata 常态），release 等需要特殊对应的场景用 `overrides` 逐条补充；不需要一次性维护完整矩阵。
+- 接口语义：产品域以项目对齐工具处理 PluginKit、license 与 release 的非同名关系；其它领域默认同名并行开发，例外用 `overrides` 逐条补充。
 - 显式配置非法（derive_from 不在 list、override 引用未知仓库）→ init/任务接管前阻断（`branch_derivation_invalid`）。
 - 未来可扩展其它 `default_rule`（如 `latest_origin`、按 tag 推导），本期实现 `same_name` + `overrides`。
 
@@ -228,6 +241,7 @@ branches:
 - `branch_derivation_invalid`：分支推导显式配置非法（derive_from 不在 list、override 引用未知仓库）。
 - `branch_derivation_failed`：分支推导结果在刷新后的仓库远端不存在（输出精确仓库与推导分支）。
 - `worktree_add_failed`：任务工作树创建失败（已回滚）。
+- `worktree_legacy_layout_detected`：检测到该 Jira key 的旧布局任务根；保留原目录并失败关闭，由研发工程师人工确认迁移或清理。
 - `worktree_path_invalid`：任务工作树路径非法（jira_id/from_branch/repo 或长度超限、路径穿越）。
 - `worktree_path_conflict`：任务工作树路径被占用或与主 checkout/其它任务冲突。
 - `worktree_remove_failed`：任务工作树清理失败（含 dirty 阻断）。
@@ -241,11 +255,11 @@ branches:
 ### 阶段一
 
 - `developer/runtime/src/ao_work/workspace_init/service.py`：池根必配解析、池成员全集认领/克隆（含浅克隆 unshallow、中断续传）、init 不创建源码目录（`source_root` 语义改为池根）、池成员锁、容器 README。
-- `developer/runtime/src/ao_work/task_start.py`（及任务接管/恢复路径）：任务工作树集创建/复用、per-worktree 身份写入、from_branch 规范化、分支推导接口（同名默认 + overrides）解析、`target_repo` 多仓库解析与校验、按需挂载命令。
+- `developer/runtime/src/ao_work/task_start.py`（及任务接管/恢复路径）：任务工作树集创建/复用、per-worktree 身份写入、问题版本规范化、产品域 remote-only 分支对齐、其它领域基线规则解析、`target_repo` 多仓库解析与校验，并把有效 `problem_version` 与实际 `target_branch` 分开写入来源上下文。
 - `developer/runtime/src/ao_work/workspace.py`：`validate_business_source_root` 增加池根/主 checkout 约束；工作树路径规范化与校验函数。
 - `developer/runtime/src/ao_work/workspace_init/cli.py`：`--source-pool-root` 参数；交互确认摘要展示池根、池成员全集与任务工作树路径规则。
-- `developer/runtime/src/ao_work/config/`：研发员级配置读取（`~/.agentic-ops/user/config.yaml` 的 `source_pool_root`）；ProjectProfile 增加 `repositories.list/analysis_mount`、`branches`（derive_from/default_rule/overrides）。
-- `developer/standards/projects/tapdata/profile.yaml`：`repositories` 扩展 list（17 个业务仓库，含文档类，fork 按需）与 `analysis_mount`（缺省 all，按任务维度 exclude/include）；`branches` 推导配置（derive_from: default，同名默认，overrides 渐进补充）；`target_repo` 字段 source 改为 `jira_description_section`（section: 目标仓库）。
+- `developer/runtime/src/ao_work/config/`：研发员级配置读取（`~/.agentic-ops/user/config.yaml` 的 `source_pool_root`）；ProjectProfile 增加 `repositories.list/worktree_domains`、`branches`（derive_from/default_rule/overrides）。
+- `developer/standards/projects/tapdata/profile.yaml`：`repositories` 扩展 list（17 个业务仓库，含文档类，fork 按需）与 `worktree_domains`（产品、小助手、自动化测试、连接器）；`branches` 推导配置（同名默认，overrides 渐进补充）；`problem_version` 保留 Jira Description 输入声明，`target_branch` 由任务工作树对齐结果提供。
 - `developer/standards/contracts/operations/workspace-init.yaml`：`source_pool_root` 必配输入、`source_root` 语义说明、postcondition 增加池成员/身份隔离断言、failure 增加新失败码。
 - `developer/bootstrap/install.sh` / 配置命令：安装/首次配置时引导写入 `source_pool_root`（必配）。
 
@@ -262,7 +276,7 @@ branches:
   - 池根缺失 → `source_pool_root_invalid` 阻断（无回退兼容路径）。
   - 池模式 init：池内全集合 clone + 容器 README；中断续传（已完成成员保留，缺失补齐）；不创建工作空间源码目录。
   - 认领已有池成员：remotes 精确匹配通过、URL 改写拒绝、浅克隆自动 unshallow、指向源头仓库拒绝。
-  - 任务工作树集：路径推导 `<pool_root>/<jira>/<from_branch>/<repo>`、`feature/x` → `feature-x` 规范化、analysis_mount 策略（all/include/exclude）与按需挂载、非法分支/穿越路径阻断、同任务复用、per-worktree 身份生效、dirty 删除阻断。
+  - 任务工作树集：路径推导 `<pool_root>/.worktree/<jira>/<问题版本>/<repo>`、`feature/x` → `feature-x` 规范化、按领域挂载、未归类仓库阻断、非法分支/穿越路径阻断、同任务复用、per-worktree 身份生效、dirty 删除阻断。
   - 分支推导：目标仓库显式基线、同名默认、overrides 与开发分支映射命中、远端分支缺失失败关闭（`branch_derivation_failed`）、显式配置非法阻断（`branch_derivation_invalid`）。
   - 多仓库：`target_repo` 描述解析、列表外仓库阻断、短名冲突阻断、缺省回退 default。
   - 回滚：克隆失败删除新建池目录、unshallow 失败不落半成品、worktree add 失败清理。
@@ -275,7 +289,7 @@ branches:
 
 - `docs/runtime/python-runtime.md`、`docs/architecture/project-structure.md` 补充中央克隆池、任务工作树集布局与部署模型。
 - `docs/development-engineers/getting-started.md`、`agent-init.md`、`de-002-workspace-init.md` 补充池必配、任务工作树、分支推导接口与多仓库说明；阶段二后补充身份上移说明。
-- `docs/profiles/workflow-profile.md`：`repositories` 扩展 list/analysis_mount、`branches` 推导接口的配置规则同步。
+- `docs/profiles/workflow-profile.md`：`repositories` 扩展 list/worktree_domains、`branches` 推导接口的配置规则同步。
 - `docs/decision-log.md`：登记 D-048（中央克隆池 + 任务级工作树 + 多仓库分支推导）；阶段二修订 D-046。
 - 新增/更新 developer 用户故事并注册故事，覆盖固定验收：池必配、池复用、身份隔离、任务工作树互斥与路径、分支推导映射、多仓库 target 解析、回滚、中断续传、阶段二身份迁移。
 
@@ -288,7 +302,7 @@ branches:
 5. 任务工作树挂载：`--detach` 于分支对应 ref，任务内再建业务分支。✅
 6. 身份/凭证上移安装目录：确定要做，实现按阶段二排期。✅
 7. from_branch 含 `/`：替换为 `-`（`feature/x` → `feature-x`）。✅
-8. 多仓库：profile `repositories.list/analysis_mount`（挂载策略配置）+ `branches` 推导接口（derive_from 主仓库 + 同名默认 + overrides 渐进补充）+ 任务「目标仓库」section 解析；跨仓库 PR 集合为后续增强。✅
-9. 任务工作树路径：`<source_root>/<jira_id>/<from_branch>/<repo>`；任务根 = `<jira_id>/<from_branch>/`，任务根下按仓库挂工作树。✅
-10. init 池成员准备：全集（list）逐仓库流式 clone，支持中断续传；任务接管挂载范围由 `analysis_mount` 策略决定。✅
-11. 分支对应关系与挂载策略均为配置/接口，缺省可用、渐进补充，不阻塞实现。✅（新增）
+8. 多仓库：profile `repositories.list/worktree_domains`（领域配置）+ 领域基线分支推导接口（同名默认 + overrides 渐进补充）+ 任务「目标仓库」与「问题版本」section 解析；目标仓库无法归类时阻断，跨仓库 PR 集合为后续增强。✅
+9. 任务工作树路径：`<source_root>/.worktree/<jira_id>/<问题版本>/<repo>`；任务根 = `.worktree/<jira_id>/<问题版本>/`，任务根下按仓库挂工作树。✅
+10. init 池成员准备：全集（list）逐仓库流式 clone，支持中断续传；任务接管仅挂载目标领域仓库。✅
+11. 分支对应关系与领域配置均为版本化 Profile 资产；TapData 领域缺失时失败关闭，旧 Profile 仅保留兼容回退。✅（新增）

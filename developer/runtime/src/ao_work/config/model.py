@@ -53,6 +53,13 @@ class AnalysisMount:
 
 
 @dataclass(frozen=True)
+class WorktreeDomain:
+    domain_id: str
+    baseline_repository: str
+    repositories: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ProjectProfile:
     profile_id: str
     connection_id: str
@@ -68,6 +75,7 @@ class ProjectProfile:
     repository_list: tuple[str, ...] = ()
     analysis_mount: AnalysisMount = field(default_factory=AnalysisMount)
     branch_derivation: BranchDerivation = field(default_factory=BranchDerivation)
+    worktree_domains: tuple[WorktreeDomain, ...] = ()
 
     def requested_jira_fields(self) -> list[str]:
         requested = {
@@ -115,7 +123,20 @@ class ProjectProfile:
             return tuple(repo for repo in candidates if repo in include)
         return tuple(repo for repo in candidates if repo not in excluded)
 
-    def derive_branch(self, repo: str, from_branch: str) -> str | None:
+    def domain_for(self, repository: str) -> WorktreeDomain | None:
+        matched = next((domain for domain in self.worktree_domains if repository in domain.repositories), None)
+        if matched is not None or self.worktree_domains:
+            return matched
+        # TapData 必须显式配置领域，overlay 清空领域时也不能触发全量回退。
+        if self.profile_id == "tapdata":
+            return None
+        # 兼容尚未声明领域的其它 Profile。
+        primary = self.branch_derivation.derive_from
+        if primary == "default":
+            primary = self.default_repository or repository
+        return WorktreeDomain("default", primary, self.mounts_for_analysis())
+
+    def derive_branch(self, repo: str, from_branch: str, *, primary_repository: str | None = None) -> str | None:
         """分支推导：主仓库/overrides/dev_branches/same_name；返回目标分支，None 表示无法推导。
 
         优先级（确定性）：
@@ -127,7 +148,7 @@ class ProjectProfile:
         4. default_rule=same_name → from_branch。
         """
         derivation = self.branch_derivation
-        primary = (
+        primary = primary_repository or (
             derivation.derive_from
             if derivation.derive_from != "default"
             else self.default_repository

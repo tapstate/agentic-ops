@@ -24,8 +24,8 @@
 - Jira 字段名、状态名、`transition` 名称、`issue_key`、命令、配置字段、错误码、代码标识和日志关键字可以保留原始英文或缩写，但必须用中文解释结论、风险和下一步。
 - 调用任何 AgenticOps 操作前必须先执行 `ao-work capability show <operation>`。只有 `implemented` 且目录列出的现役命令可以调用；目标契约和本文中的流程要求不能替代实现状态。
 - 缺陷修复前，AIAgent 必须查询 `jira_inspect` 并执行 `ao-work jira inspect --issue-key <issue-key>` 读取基础 Jira 事实；当前命令不提供 Comment、Custom Field 或富门禁事实，缺失部分必须通过 Jira 界面或项目认可的只读工具补齐后再按项目准入资产判断。
-- 缺陷修复准入不通过时，AIAgent 必须一次性列出全部缺失或冲突信息，结合 Jira 卡片、候选仓库和目标分支代码形成“准入分析与补卡建议”；在当前工作项授权覆盖范围内按 `jira_comment` 的受控协议写入 Jira Comment，然后停止进入实现，等待缺失事实补齐。
-- 研发工程师确认补卡内容后，AIAgent 必须按 `jira_description` 的 `plan -> apply` 协议更新 Jira Description 中的问题分支、修复分支、问题现象、复现路径和验收标准，并按 `jira_comment` 协议追加补卡确认结果；完成后结束本次接管。
+- 缺陷修复准入不通过时，AIAgent 必须一次性列出全部缺失或冲突信息，结合 Jira 卡片、候选仓库和问题版本代码形成“准入分析与补卡建议”；在当前工作项授权覆盖范围内按 `jira_comment` 的受控协议写入 Jira Comment，然后停止进入实现，等待缺失事实补齐。
+- 研发工程师确认补卡内容后，AIAgent 必须按 `jira_description` 的 `plan -> apply` 协议更新 Jira Description 中的问题分支、问题版本、问题现象、复现路径和验收标准，并按 `jira_comment` 协议追加补卡确认结果；完成后结束本次接管。
 - 补卡后的下一次执行必须重新执行 `jira_inspect` 并补充读取 Jira Description 和 Comment 事实，重新判断准入与设计状态。不得在补卡写入后沿用旧判断；正式接管只允许顶层 `ao-work takeover <KEY>`，不能用内部 `task init` 冒充接管。
 
 ## 人机协作边界
@@ -40,7 +40,7 @@
 
 ## Jira 信息归属
 
-- Jira Description 只保存确认后的稳定任务契约：问题分支、修复分支、问题现象、复现路径和验收标准。
+- Jira Description 只保存确认后的稳定任务契约：问题分支、问题版本、问题现象、复现路径和验收标准。
 - Jira Comment 保存过程和决策轨迹：准入分析、补卡建议、确认结果、修复计划、计划变更、阻塞说明和最终证据。已有评论不得覆盖或改写。
 - Jira Custom Field 目标上通过 profile 逻辑字段映射保存问题分析、修复详情和测试计划；当前 `update_task_form` 是 `capability_gap`，不得自动写入，也不得在 AIAgent 中硬编码 `customfield_*`。
 - Jira Worklog 只记录真实投入时间，不保存门禁、计划、决策或证据。
@@ -56,7 +56,7 @@ TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
 - 运维仓（`status` 可见但不联动，保持当前分支）：`tapdata-application`、`feishu_robot`。
 - 单独管理（不纳入分支联动）：`tapdata-cloud`、`t-layer3-test`、`docs`、`docs-en`、`mcp-tap-server`、`solutions`、`fhir-solution`、Hazelcast(fork)、mongo(fork)。
 
-新功能开发（`from_branch` 为 `tapdata` 主仓 `develop`）时，各仓库工作树分支按 `profile.yaml` 的 `branches.dev_branches` 映射推导，见「新功能开发分支」小节。
+新功能开发（问题版本为 `tapdata` 主仓 `develop`）时，产品域任务工作树必须先运行 `tap_align_branches.py plan`，以脚本结果作为各仓库实际目标分支；`profile.yaml` 的 `branches.dev_branches` 只作为不经过产品域任务工作树链路时的静态项目映射，不能覆盖 PluginKit 推导结果。
 
 ### 分支类型
 
@@ -86,7 +86,8 @@ TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
 - 不得直接提交到 `main`、`develop`、`master` 或 `release-*`；即使远程凭证允许，也不得直接推送到受保护分支；受保护分支必须走 PR 流程。
 - 多仓开发必须以 `tapdata` 主仓分支为输入对齐相关仓库，不得凭直觉把所有仓库切到同名分支。
 - 分支对齐通过项目脚本 `scripts/tap_align_branches.py` 执行（项目工具，非 ao-work 通用命令）：AIAgent 必须先以 `plan` 模式生成只读对齐清单，由研发工程师确认后再 `apply`；不得凭直觉切分支或声称 Runtime 已自动对齐。
-- `branch_spec` 可以是 `develop`、`main`、`release-vX.Y.Z`、任务分支，或 `<tapdata>,<enterprise>,<web>` 格式；enterprise/web 分支不明确时必须显式指定或停止。
+- Runtime 创建产品域任务工作树时只读取 `plan --remote-only --json`，并以 `--repositories` 限定当前领域；remote-only 模式禁止回退本地同名分支或本地 PluginKit 内容，且不执行 `apply`。
+- `branch_spec` 可以是 `develop`、`main`、`release-vX.Y.Z`、任务分支，或 `<tapdata>,<enterprise>,<web>` 格式；enterprise/web 分支不明确时必须显式指定或停止。Runtime 接收三段式规格时，任务路径中的「问题版本」只使用第一段 tapdata 基线分支，完整规格仅传给只读对齐计划。
 - `tapdata` 为 `main` 时：所有联动仓切到 `main`。
 - `tapdata` 为 `develop` 时：`tapdata-enterprise`、`tapdata-web`、`tapdata-connectors`、`tapdata-connectors-enterprise` 切 `develop`；`tapdata-common-lib` 无 `develop` 分支，按 pluginKit 推导 release（取不到回退 `main`）；`tapdata-license` 切 `main`。
 - `tapdata` 为其它分支时：先按 `TAP-xxxx` 标记匹配；非标准分支名（非 `main`/`develop`/`release-v*`）按全名匹配同名分支；仍未命中时，`tapdata-enterprise`/`tapdata-web` 用同名分支（缺失则 `UNRESOLVED` 阻塞，不猜测）；`tapdata-connectors`/`tapdata-connectors-enterprise`/`tapdata-common-lib` 按 pluginKit 推导 release（取不到回退 `main`）；`tapdata-license` 取版本号 ≥ 主仓分支的 release（取不到回退 `main`）。
@@ -94,9 +95,9 @@ TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
 - pluginKit 推导：读 `tapdata` 分支 `iengine/iengine-app/src/main/resources/pluginKit.properties` 的 `tapdata.api.verison`（源码拼写即 `verison`，按字面读，勿当 typo 改），去 `-SNAPSHOT` 得 `release-v<version>`，在各仓 `release-v*` 分支中取第一个版本 ≥ 该值的分支。
 - 人工对齐脏仓库时，只有研发工程师确认后才允许按计划临时 `stash push -u`、切换分支后 `stash pop`；若 stash 或 pop 失败必须停止，不能继续跨仓切换。
 
-### 新功能开发分支
+### 新功能开发静态分支映射
 
-新功能开发任务的 `from_branch` 为 `tapdata` 主仓 `develop` 时，各仓库工作树分支按 `profile.yaml` `branches.dev_branches` 映射推导（确定性，不靠 AI 猜测）：
+`profile.yaml` `branches.dev_branches` 保留下列静态项目映射（确定性，不靠 AI 猜测）。产品域任务工作树创建仍以前述 `tap_align_branches.py plan` 为事实源，尤其 `tapdata-common-lib` 必须按 PluginKit 推导，不能用本表的静态回退覆盖：
 
 | 仓库 | 新功能开发分支 |
 | --- | --- |
