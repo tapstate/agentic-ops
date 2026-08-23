@@ -470,7 +470,24 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
             prepare_task_worktrees(plan, run_git=fetch_failing_git)
 
         self.assertEqual("source_pool_fetch_failed", captured.exception.code)
-        self.assertFalse((self.pool / "TAP-123").exists())
+        self.assertFalse((self.pool / ".worktree").exists())
+
+    def test_prepare_blocks_legacy_worktree_without_creating_new_copy(self) -> None:
+        plan = self._plan()
+        legacy = self.pool / "TAP-123" / "feature-x" / "tapdata"
+        legacy.mkdir(parents=True)
+        calls: list[list[str]] = []
+
+        def recording_git(command, *, timeout=None):
+            calls.append(command)
+            return self._run_git(command, timeout=timeout)
+
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            prepare_task_worktrees(plan, run_git=recording_git)
+
+        self.assertEqual("worktree_legacy_layout_detected", captured.exception.code)
+        self.assertTrue(legacy.is_dir())
+        self.assertFalse(any("worktree" in command and "add" in command for command in calls))
 
     def test_prepare_reuses_existing_worktree(self) -> None:
         plan = self._plan()
@@ -553,10 +570,12 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
         for entry in plan.entries:
             self.assertFalse(entry.worktree_dir.exists())
 
-    def test_prepare_rolls_back_when_remote_baseline_is_missing(self) -> None:
+    def test_prepare_preflights_all_branches_before_creating_worktrees(self) -> None:
         plan = self._plan()
+        calls: list[list[str]] = []
 
         def remote_branch_missing_git(command, *, timeout=None):
+            calls.append(command)
             if "rev-parse" in command and "refs/remotes/origin/feature/x^{commit}" in command:
                 if Path(command[1]).resolve() == (self.pool / "tapdata/tapdata-web").resolve():
                     return subprocess.CompletedProcess(command, 1, "", "unknown revision\n")
@@ -580,6 +599,8 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
             {"repository": "tapdata/tapdata-web", "branch": "feature/x", "stderr_tail": "unknown revision\n"},
             captured.exception.details,
         )
+        self.assertFalse(any("worktree" in command and "add" in command for command in calls))
+        self.assertFalse((self.pool / ".worktree").exists())
         self.assertFalse((self.pool / "TAP-123").exists())
         for entry in plan.entries:
             self.assertFalse(entry.worktree_dir.exists())

@@ -85,11 +85,12 @@
 2. 先按目标仓库和版本化 Profile 判定领域；领域不明或冲突时不创建工作树。逐个领域仓库：
    - 按分支推导接口解析该仓库对应分支（3.9.2）。
    - 确保池成员存在（认领或 clone，同 3.3，带池锁）。
-   - 在创建前刷新并验证分支对齐；目标路径 `worktree_path = <pool_root>/.worktree/<jira_id>/<问题版本>/<repo>`（规范化见 3.5）。
+   - 先刷新并验证该领域全部待创建仓库的分支对齐；任一仓库失败时不创建任何工作树。目标路径 `worktree_path = <pool_root>/.worktree/<jira_id>/<问题版本>/<repo>`（规范化见 3.5）。
    - 拿池成员锁 → `git worktree add --detach <worktree_path> <对应 ref>`；同一任务同分支同仓库已存在 worktree（resume/恢复）→ 校验路径与 ref 后复用，不重复创建。
    - 写入 per-worktree 身份（3.7）。
 3. 任务执行在任务根下各仓库工作树内进行；跨仓库搜索直接 `rg` 任务根目录即可覆盖全部分析集。
 4. 任务目标仓库（`target_repo`）解析：Jira 描述「目标仓库」section → 校验在 `repositories.list` 内；缺失回退 `default`。分析发现需要修改分析集内其它仓库时，由人工确认后固化扩展（跨仓库修改与 PR 集合跟踪见 3.9.4，本期为单主仓库 PR 流）。
+5. 恢复时检测到旧布局 `<pool_root>/<jira_id>/<问题版本>/<repo>` → 失败关闭，不迁移、不删除、不创建新副本；由研发工程师先确认旧工作树中的修改并人工迁移或清理。
 
 任务审计完成后，按清理策略 `git worktree remove` 任务根下各工作树（dirty 阻断，见 3.8）。
 

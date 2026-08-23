@@ -32,7 +32,7 @@ AgenticOps 只定义公司和项目层面的原则、职责边界与关键门禁
 
 | 信息类型 | Jira 位置 | 原则 |
 | --- | --- | --- |
-| 稳定任务契约 | Description | 保存问题分支、修复分支、问题现象、复现路径、验收标准等确认后的当前事实。 |
+| 稳定任务契约 | Description | 保存问题分支、问题版本、问题现象、复现路径、验收标准等确认后的当前事实。 |
 | 分析与决策轨迹 | Comment | 保存准入分析、补卡建议、人工确认、修复计划、计划变更、阻塞说明和最终证据。 |
 | 结构化实施结论 | 不使用 Agentic Custom Field | 通过 Description、受管 Comment 与本地审计分别保存稳定事实、可见轨迹和恢复状态。 |
 | 实际耗时 | Worklog | 只记录真实投入时间，不承载门禁、决策或计划。 |
@@ -43,7 +43,7 @@ Description 表示当前有效任务契约，Comment 表示不可覆盖的决策
 
 1. 用户明确要求接管后，AIAgent 执行 `ao-work takeover <issue-key>`；Runtime 自动判断新接管、接纳存量或恢复，完成 Comment、必要 Status transition 和本地状态回读。
 2. AIAgent 查询 `jira_inspect` 并执行 `ao-work jira inspect --issue-key <issue-key>` 读取基础 Jira 事实，再通过 Jira 页面或项目认可的只读工具补齐 Description、Comment 和项目资产路径；不得读取或依赖 Agentic Custom Field。
-3. AIAgent 按 Tapdata 缺陷准入资产检查问题分支、修复分支、问题现象、复现路径和验收标准。
+3. AIAgent 按 Tapdata 缺陷准入资产检查问题分支、问题版本、问题现象、复现路径和验收标准。
 4. 若信息不足，AIAgent 读取候选仓库和目标分支代码，形成“准入分析与补卡建议”，在当前工作项授权范围内通过受控 Jira Comment 留痕，然后停止进入实现。
 5. 补卡完成后重新读取 Jira 事实并重新分析；保持同一接管 run，不创建第二条接管记录，也不沿用旧准入结论。
 
@@ -102,7 +102,7 @@ CLI 不负责：
 ```yaml
 sections:
   问题分支: develop
-  修复分支: develop
+  问题版本: develop
   问题现象: 任务启动后出现重复告警。
   复现路径: 创建任务并连续启动两次。
   验收标准: 相同任务只产生一次告警。
