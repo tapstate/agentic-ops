@@ -127,7 +127,10 @@ class ProjectProfile:
         matched = next((domain for domain in self.worktree_domains if repository in domain.repositories), None)
         if matched is not None or self.worktree_domains:
             return matched
-        # 兼容尚未声明领域的非 TapData Profile；TapData 必须显式配置领域，不能触发该回退。
+        # TapData 必须显式配置领域，overlay 清空领域时也不能触发全量回退。
+        if self.profile_id == "tapdata":
+            return None
+        # 兼容尚未声明领域的其它 Profile。
         primary = self.branch_derivation.derive_from
         if primary == "default":
             primary = self.default_repository or repository

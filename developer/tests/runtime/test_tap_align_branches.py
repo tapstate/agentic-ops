@@ -57,6 +57,7 @@ class TapAlignBranchesMachinePlanTest(unittest.TestCase):
                         "plan",
                         "release-v3.8.0",
                         "--no-fetch",
+                        "--remote-only",
                         "--repositories",
                         "tapdata,tapdata-common-lib",
                         "--json",
@@ -69,6 +70,41 @@ class TapAlignBranchesMachinePlanTest(unittest.TestCase):
             ["tapdata", "tapdata-common-lib"],
             planned.call_args.kwargs["repositories"],
         )
+        self.assertTrue(planned.call_args.kwargs["remote_only"])
+
+    def test_remote_only_plugin_read_never_falls_back_to_stale_local_branch(self) -> None:
+        with mock.patch.object(
+            tap_align_branches,
+            "_git_try",
+            side_effect=["", "tapdata.api.verison=1.0.0"],
+        ) as git_try:
+            content = tap_align_branches._read_plugin_content(
+                "develop",
+                Path("/tmp/tapdata"),
+                "origin",
+                remote_only=True,
+            )
+
+        self.assertEqual("", content)
+        self.assertEqual(1, git_try.call_count)
+
+    def test_remote_only_branch_probe_ignores_local_branch(self) -> None:
+        with mock.patch.object(
+            tap_align_branches,
+            "_git_quiet",
+            side_effect=[False],
+        ) as git_quiet:
+            exists = tap_align_branches.branch_exists(
+                "tapdata",
+                "develop",
+                Path("/tmp/tapdata"),
+                "origin",
+                remote_only=True,
+            )
+
+        self.assertFalse(exists)
+        self.assertEqual(1, git_quiet.call_count)
+        self.assertIn("refs/remotes/origin/develop", git_quiet.call_args.args)
 
     def test_unknown_requested_repository_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

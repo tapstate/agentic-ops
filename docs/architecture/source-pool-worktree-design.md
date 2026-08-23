@@ -167,7 +167,7 @@ repositories:
 - `analysis_mount`：仅为尚未声明领域的旧 Profile 保留的兼容策略；TapData 不使用该回退。
 - 最小可用 Profile 可只声明 `default` 与 `list`，但生产 TapData Profile 必须声明 `worktree_domains`；`branches` 可随分支事实渐进补充。
 
-#### 3.9.2 分支对应关系（推导接口，不要求一次性给全）
+#### 3.9.2 分支对应关系（领域基线 + 项目对齐工具）
 
 分支对应关系做成「从主仓库分支推导其它仓库分支」的接口，而不是完整矩阵表：
 
@@ -188,16 +188,17 @@ branches:
 
 推导逻辑（确定性，标准资产，不靠 AI 猜测）：
 
-1. 任务「问题版本」确定（任务描述「问题版本」，兼容读取旧「修复分支」；缺失时目标仓库优先使用 `baseline_branches`，未声明映射才使用 `branches.default_branch`）。
+1. 任务「问题版本」确定（任务描述「问题版本」，兼容读取旧「修复分支」；缺失时使用所属领域 `baseline_repository` 的 `baseline_branches`，未声明映射才使用 `branches.default_branch`）。
 2. 先以目标仓库选择唯一 `worktree_domain`，其 `baseline_repository` 是本次分支推导的主仓库；未命中领域即阻断，不做全量挂载。
-3. 对该领域每个仓库 R：
+3. TapData 产品域先刷新领域内全部池成员，再运行 `tap_align_branches.py plan --no-fetch --remote-only --repositories ... --json`；只接受与当前领域仓库集合完全一致的计划，并以其中每行的 `target` 作为实际分支。remote-only 模式不得回退本地同名分支或本地 PluginKit 内容。
+4. 其它领域对每个仓库 R 使用通用静态规则：
    - R 是领域基线仓库 → 工作树分支 = `<问题版本>`。
    - 命中 `overrides`（from_branch + repo 都匹配）→ 工作树分支 = 规则声明的 `branch`。
    - `<问题版本>` 等于领域基线仓声明的开发分支且 R 命中 `dev_branches` → 工作树分支 = 显式声明的开发分支。
    - 否则默认规则 `same_name` → 工作树分支 = `<问题版本>` 同名分支。
    - 刷新 `origin` 后必须精确解析上述推导的远端引用；分支不存在则阻断（`branch_derivation_failed`），输出仓库与推导分支，提示维护者补映射或确认分支。
 
-- 接口语义：默认「所有仓库同分支并行开发」（tapdata 常态），release 等需要特殊对应的场景用 `overrides` 逐条补充；不需要一次性维护完整矩阵。
+- 接口语义：产品域以项目对齐工具处理 PluginKit、license 与 release 的非同名关系；其它领域默认同名并行开发，例外用 `overrides` 逐条补充。
 - 显式配置非法（derive_from 不在 list、override 引用未知仓库）→ init/任务接管前阻断（`branch_derivation_invalid`）。
 - 未来可扩展其它 `default_rule`（如 `latest_origin`、按 tag 推导），本期实现 `same_name` + `overrides`。
 
@@ -254,11 +255,11 @@ branches:
 ### 阶段一
 
 - `developer/runtime/src/ao_work/workspace_init/service.py`：池根必配解析、池成员全集认领/克隆（含浅克隆 unshallow、中断续传）、init 不创建源码目录（`source_root` 语义改为池根）、池成员锁、容器 README。
-- `developer/runtime/src/ao_work/task_start.py`（及任务接管/恢复路径）：任务工作树集创建/复用、per-worktree 身份写入、问题版本规范化、领域基线分支推导接口（同名默认 + overrides）解析、`target_repo` 多仓库解析与校验。
+- `developer/runtime/src/ao_work/task_start.py`（及任务接管/恢复路径）：任务工作树集创建/复用、per-worktree 身份写入、问题版本规范化、产品域 remote-only 分支对齐、其它领域基线规则解析、`target_repo` 多仓库解析与校验，并把有效 `problem_version` 与实际 `target_branch` 分开写入来源上下文。
 - `developer/runtime/src/ao_work/workspace.py`：`validate_business_source_root` 增加池根/主 checkout 约束；工作树路径规范化与校验函数。
 - `developer/runtime/src/ao_work/workspace_init/cli.py`：`--source-pool-root` 参数；交互确认摘要展示池根、池成员全集与任务工作树路径规则。
 - `developer/runtime/src/ao_work/config/`：研发员级配置读取（`~/.agentic-ops/user/config.yaml` 的 `source_pool_root`）；ProjectProfile 增加 `repositories.list/worktree_domains`、`branches`（derive_from/default_rule/overrides）。
-- `developer/standards/projects/tapdata/profile.yaml`：`repositories` 扩展 list（17 个业务仓库，含文档类，fork 按需）与 `worktree_domains`（产品、小助手、自动化测试、连接器）；`branches` 推导配置（同名默认，overrides 渐进补充）；`target_repo` 和 `problem_version` 从 Jira Description 对应章节读取。
+- `developer/standards/projects/tapdata/profile.yaml`：`repositories` 扩展 list（17 个业务仓库，含文档类，fork 按需）与 `worktree_domains`（产品、小助手、自动化测试、连接器）；`branches` 推导配置（同名默认，overrides 渐进补充）；`problem_version` 保留 Jira Description 输入声明，`target_branch` 由任务工作树对齐结果提供。
 - `developer/standards/contracts/operations/workspace-init.yaml`：`source_pool_root` 必配输入、`source_root` 语义说明、postcondition 增加池成员/身份隔离断言、failure 增加新失败码。
 - `developer/bootstrap/install.sh` / 配置命令：安装/首次配置时引导写入 `source_pool_root`（必配）。
 

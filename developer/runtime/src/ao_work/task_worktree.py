@@ -304,6 +304,7 @@ def _apply_alignment_plan(
         "plan",
         plan.from_branch,
         "--no-fetch",
+        "--remote-only",
         "--repositories",
         ",".join(short_names),
         "--json",

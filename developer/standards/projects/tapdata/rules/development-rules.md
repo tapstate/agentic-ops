@@ -86,6 +86,7 @@ TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
 - 不得直接提交到 `main`、`develop`、`master` 或 `release-*`；即使远程凭证允许，也不得直接推送到受保护分支；受保护分支必须走 PR 流程。
 - 多仓开发必须以 `tapdata` 主仓分支为输入对齐相关仓库，不得凭直觉把所有仓库切到同名分支。
 - 分支对齐通过项目脚本 `scripts/tap_align_branches.py` 执行（项目工具，非 ao-work 通用命令）：AIAgent 必须先以 `plan` 模式生成只读对齐清单，由研发工程师确认后再 `apply`；不得凭直觉切分支或声称 Runtime 已自动对齐。
+- Runtime 创建产品域任务工作树时只读取 `plan --remote-only --json`，并以 `--repositories` 限定当前领域；remote-only 模式禁止回退本地同名分支或本地 PluginKit 内容，且不执行 `apply`。
 - `branch_spec` 可以是 `develop`、`main`、`release-vX.Y.Z`、任务分支，或 `<tapdata>,<enterprise>,<web>` 格式；enterprise/web 分支不明确时必须显式指定或停止。
 - `tapdata` 为 `main` 时：所有联动仓切到 `main`。
 - `tapdata` 为 `develop` 时：`tapdata-enterprise`、`tapdata-web`、`tapdata-connectors`、`tapdata-connectors-enterprise` 切 `develop`；`tapdata-common-lib` 无 `develop` 分支，按 pluginKit 推导 release（取不到回退 `main`）；`tapdata-license` 切 `main`。

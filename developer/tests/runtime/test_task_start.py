@@ -260,6 +260,32 @@ class ProjectProfileSnapshotTest(unittest.TestCase):
             resolved["target_repo"]["value"],
         )
 
+    def test_baseline_problem_version_fills_source_context_when_jira_omits_it(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        issue = SimpleNamespace(
+            description=markdown_to_adf("没有显式问题版本。"),
+            assignee="jira-account-1",
+            summary="测试任务",
+            fields={},
+        )
+
+        snapshot = _profile_snapshot(
+            profile,
+            issue,
+            task_worktrees={
+                "repository": "tapdata/tapdata-common-lib",
+                "problem_version": "develop",
+                "target_branch": "release-v1.2.6",
+            },
+        )
+
+        problem_version = snapshot["resolved_fields"]["problem_version"]
+        self.assertEqual("develop", problem_version["value"])
+        self.assertEqual("task_worktrees.problem_version", problem_version["reference"])
+        self.assertEqual("jira_description_section", problem_version["source"])
+        self.assertEqual("问题版本", problem_version["section"])
+
 
 if __name__ == "__main__":
     unittest.main()

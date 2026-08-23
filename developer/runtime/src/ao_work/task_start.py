@@ -373,6 +373,13 @@ def _profile_snapshot(
         elif mapping.source == "jira_description_section" and mapping.section:
             reference = f"issue.description_sections.{mapping.section}"
             value = sections.get(mapping.section)
+            if (
+                logical_name == "problem_version"
+                and not value
+                and task_worktrees is not None
+            ):
+                reference = "task_worktrees.problem_version"
+                value = task_worktrees.get("problem_version")
         resolved[logical_name] = {
             **declaration,
             "reference": reference,
