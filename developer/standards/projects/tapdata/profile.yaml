@@ -69,7 +69,7 @@ repositories:
       tapdata/tapdata-license: main
       tapdata/tapdata-common-lib: main
       tapdata/tapdata-application: main
-    # 各仓库新功能开发分支（from_branch = tapdata 的 develop 时生效）
+    # 静态新功能开发映射；产品域任务工作树以 tap_align_branches.py plan 结果为准。
     dev_branches:
       tapdata/tapdata: develop
       tapdata/tapdata-cloud: develop
@@ -125,6 +125,10 @@ fields:
     section: 问题版本
     state: active
     writable: true
+  target_branch:
+    source: task_worktree_mapping
+    state: active
+    required: true
   problem_summary:
     source: jira_description_section
     section: 问题现象

@@ -6,10 +6,13 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
+from ao_work.config import load_project_profile
 from ao_work.jira.adf import markdown_to_adf
 from ao_work.jira.client import TransportResponse
+from ao_work.task_start import _profile_snapshot
 from ao_work.work_cli import main
 from install_auth_fixture import configure_install_authorization, v5_agent
 
@@ -222,6 +225,40 @@ class TaskStartTest(unittest.TestCase):
                 self.assertEqual(2, code)
                 self.assertEqual(expected, payload["code"])
                 self.assertFalse((self.workspace / ".agentic-ops/tasks/TAP-12289").exists())
+
+
+class ProjectProfileSnapshotTest(unittest.TestCase):
+    def test_problem_version_and_actual_target_branch_are_distinct(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        issue = SimpleNamespace(
+            description=markdown_to_adf("## 问题版本\n\ndevelop\n"),
+            assignee="jira-account-1",
+            summary="测试任务",
+            fields={},
+        )
+
+        snapshot = _profile_snapshot(
+            profile,
+            issue,
+            task_worktrees={
+                "repository": "tapdata/tapdata-common-lib",
+                "problem_version": "develop",
+                "target_branch": "release-v1.2.6",
+            },
+        )
+
+        resolved = snapshot["resolved_fields"]
+        self.assertEqual("develop", resolved["problem_version"]["value"])
+        self.assertEqual("release-v1.2.6", resolved["target_branch"]["value"])
+        self.assertEqual(
+            "task_worktrees.target_branch",
+            resolved["target_branch"]["reference"],
+        )
+        self.assertEqual(
+            "tapdata/tapdata-common-lib",
+            resolved["target_repo"]["value"],
+        )
 
 
 if __name__ == "__main__":
