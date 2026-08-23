@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from typing import Any
 
+from ao_maint.output import write_json
 from ao_maint.story_gate.service import StoryGateService
 from ao_maint.workspace import Workspace
 
@@ -28,6 +30,7 @@ def configure_story_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
 
     verify = commands.add_parser("verify")
     _change_arguments(verify)
+    verify.add_argument("--progress", action="store_true", help="以 NDJSON 输出检查进度事件")
 
 
 def execute_story(args: argparse.Namespace, workspace: Workspace) -> dict[str, Any]:
@@ -51,6 +54,7 @@ def execute_story(args: argparse.Namespace, workspace: Workspace) -> dict[str, A
             args.change_source,
             base=args.base,
             head=args.head,
+            event_sink=write_json if args.progress else _write_progress,
         )
     raise ValueError(f"unsupported story command: {args.command}")
 
@@ -63,3 +67,13 @@ def _change_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--base")
     parser.add_argument("--head")
+
+
+def _write_progress(event: dict[str, Any]) -> None:
+    check_id = event.get("check_id", "验收")
+    if event.get("event") == "check_progress":
+        message = f"AgenticOps：验收 {check_id} 仍在执行（{event.get('elapsed_seconds')} 秒）"
+    else:
+        message = f"AgenticOps：验收事件 {event.get('event')}：{check_id}"
+    sys.stderr.write(message + "\n")
+    sys.stderr.flush()

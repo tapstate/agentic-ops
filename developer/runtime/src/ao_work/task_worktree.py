@@ -57,18 +57,28 @@ def resolve_target_repository(
 def resolve_from_branch(
     profile: Any,
     description_sections: dict[str, str],
+    *,
+    target_repository: str | None = None,
 ) -> str:
     """解析任务 from_branch：描述「修复分支」section 优先，缺省 profile.branches 默认规则。
 
-    返回规范化后的分支名（含 / 替换为 -），并做路径穿越校验。
+    返回原始 Git ref；仅在计算本地目录时规范化路径片段。
     """
     declared = description_sections.get("修复分支", "").strip()
     if declared:
         candidate = declared.splitlines()[0].strip()
     else:
-        derivation = profile.branch_derivation
-        candidate = derivation.default_branch if derivation.default_branch else "main"
-    return normalize_worktree_from_branch(candidate)
+        repository = target_repository or resolve_target_repository(profile, description_sections)
+        candidate = profile.baseline_branch(repository)
+        if not candidate:
+            raise _blocked(
+                "task_baseline_unresolved",
+                f"目标仓库未配置任务基线分支：{repository}",
+                "请在 Project Profile 显式声明该仓库的 baseline_branches，或在 Jira 描述声明修复分支",
+                details={"repository": repository},
+            )
+    normalize_worktree_from_branch(candidate)
+    return candidate.strip()
 
 
 def plan_task_worktrees(
@@ -85,8 +95,10 @@ def plan_task_worktrees(
     返回计划而不创建；创建由 prepare_task_worktrees 执行。
     """
     pool = validate_source_pool_root(pool_root)
-    from_branch = resolve_from_branch(profile, description_sections)
     target_repository = resolve_target_repository(profile, description_sections)
+    from_branch = resolve_from_branch(
+        profile, description_sections, target_repository=target_repository
+    )
     repositories = profile.mounts_for_analysis()
     if target_repository not in repositories:
         # 目标仓库必须在分析挂载集内（否则 AI 无源可改）。
@@ -137,7 +149,7 @@ def prepare_task_worktrees(
             lock_path = plan.pool_root / ".locks" / f"{entry.repository.replace('/', '__')}.lock"
             with TaskLock(lock_path, timeout=10):
                 if entry.worktree_dir.is_dir():
-                    _validate_existing_worktree(git, entry.worktree_dir, entry.branch, entry.repository)
+                    _validate_existing_worktree(git, entry.worktree_dir, member_dir, entry.branch, entry.repository)
                     adopted += 1
                     continue
                 entry.worktree_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -193,28 +205,25 @@ def prepare_task_worktrees(
 def _validate_existing_worktree(
     git: Any,
     worktree_dir: Path,
+    member_dir: Path,
     branch: str,
     repository: str,
 ) -> None:
-    result = git(
-        ["-C", str(worktree_dir), "rev-parse", "--abbrev-ref", "HEAD"],
-        timeout=60,
-    )
-    if result.returncode != 0:
+    root = git(["-C", str(worktree_dir), "rev-parse", "--show-toplevel"], timeout=60)
+    actual = git(["-C", str(worktree_dir), "rev-parse", "HEAD"], timeout=60)
+    baseline = git(["-C", str(member_dir), "rev-parse", branch], timeout=60)
+    if root.returncode != 0 or actual.returncode != 0 or baseline.returncode != 0:
         raise _blocked(
             "worktree_invalid",
             f"任务工作树已存在但不是 Git 工作树：{worktree_dir}",
             "请检查并清理该目录后重试",
-            details={"stderr_tail": _stderr_tail(result.stderr)},
+            details={"stderr_tail": _stderr_tail(root.stderr or actual.stderr or baseline.stderr)},
         )
-    current = result.stdout.strip()
-    # detached HEAD 的 --abbrev-ref HEAD 输出 "HEAD"；复用时校验必须匹配推导分支
-    # 或处于 detached 状态（worktree add --detach 的常态）。
-    if current not in {"HEAD", branch}:
+    if Path(root.stdout.strip()).resolve() != worktree_dir.resolve() or actual.stdout.strip() != baseline.stdout.strip():
         raise _blocked(
-            "worktree_branch_mismatch",
-            f"任务工作树 {repository} 已挂出到 {current}，与推导分支 {branch} 不一致",
-            "请清理该任务工作树后重试，或核对任务分支推导配置",
+            "worktree_baseline_mismatch",
+            f"任务工作树 {repository} 不是当前基线 {branch} 的精确工作树",
+            "请清理该任务工作树后重试，或核对目标仓库和基线分支",
         )
 
 

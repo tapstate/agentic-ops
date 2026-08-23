@@ -23,6 +23,7 @@ from ao_work.task_state.io import read_json
 from ao_work.task_worktree import (
     plan_task_worktrees,
     prepare_task_worktrees,
+    resolve_target_repository,
 )
 from ao_work.workspace import Workspace
 
@@ -98,42 +99,7 @@ def execute_task_start(
     issue_payload = source_context["issue"]
     workspace_defaults = source_context["workspace_defaults"]
     agent_config = source_context["agent_config"]
-    task_worktrees: dict[str, Any] | None = None
-    configured_pool_root = resolve_source_pool_root(install_root)
-    source_root_value = str(agent_config.get("source_root") or "")
-    if configured_pool_root is not None and source_root_value:
-        try:
-            pool_resolved = Path(source_root_value).expanduser().resolve()
-        except OSError:
-            pool_resolved = None
-        if pool_resolved == configured_pool_root:
-            sections = _description_sections(issue.description)
-            plan = plan_task_worktrees(
-                pool_root=configured_pool_root,
-                profile=context.profile,
-                issue_key=issue.key,
-                description_sections=sections,
-            )
-            prepared = prepare_task_worktrees(
-                plan,
-                execution_identity=agent_config.get("execution_identity"),
-            )
-            task_worktrees = {
-                "issue_key": prepared.issue_key,
-                "from_branch": prepared.from_branch,
-                "pool_root": str(prepared.pool_root),
-                "adopted": prepared.adopted,
-                "created": prepared.created,
-                "entries": [
-                    {
-                        "repository": entry.repository,
-                        "worktree_dir": str(entry.worktree_dir),
-                        "branch": entry.branch,
-                        "created": entry.created,
-                    }
-                    for entry in prepared.entries
-                ],
-            }
+    task_worktrees = source_context.get("task_worktrees")
     intake_source = source_context["intake_source"]
     return {
         "issue": issue_payload,
@@ -255,6 +221,12 @@ def record_current_task_source_context(
         "agent_id": install_identity["agent_id"],
         "execution_identity": install_identity["execution_identity"],
     }
+    task_worktrees, bound_source_root, bound_repository = _prepare_pool_task_worktrees(
+        install_root=install_root,
+        profile=context.profile,
+        issue=issue,
+        agent_config=effective_config,
+    )
     issue_payload = {
         "id": issue.issue_id,
         "key": issue.key,
@@ -273,8 +245,8 @@ def record_current_task_source_context(
         "connection_id": context.connection.connection_id,
         "jira_base_url": context.connection.base_url,
         "jira_account_id": account["account_id"],
-        "repository": context.profile.default_repository,
-        "source_root": effective_config.get("source_root"),
+        "repository": bound_repository,
+        "source_root": str(bound_source_root),
         "execution_identity": effective_config.get("execution_identity"),
     }
     intake_source = record_task_start_context(
@@ -291,7 +263,45 @@ def record_current_task_source_context(
         "workspace_defaults": workspace_defaults,
         "agent_config": effective_config,
         "intake_source": intake_source,
+        "task_worktrees": task_worktrees,
     }
+
+
+def _prepare_pool_task_worktrees(
+    *, install_root: Path, profile: Any, issue: Any, agent_config: dict[str, Any]
+) -> tuple[dict[str, Any] | None, Path, str]:
+    """池模式下先绑定精确任务工作树，禁止把池根交给 intake。"""
+    raw_source_root = str(agent_config.get("source_root") or "")
+    if not raw_source_root:
+        raise _blocked("task_source_root_missing", "任务缺少业务源码目录", "请重新初始化工作空间后重试")
+    source_root = Path(raw_source_root).expanduser().resolve()
+    pool_root = resolve_source_pool_root(install_root)
+    if pool_root is None or source_root != pool_root:
+        return None, source_root, profile.default_repository
+    sections = _description_sections(issue.description)
+    target_repository = resolve_target_repository(profile, sections)
+    plan = plan_task_worktrees(
+        pool_root=pool_root,
+        profile=profile,
+        issue_key=issue.key,
+        description_sections=sections,
+    )
+    prepared = prepare_task_worktrees(plan, execution_identity=agent_config.get("execution_identity"))
+    target = next(entry for entry in prepared.entries if entry.repository == target_repository)
+    return (
+        {
+            "issue_key": prepared.issue_key,
+            "repository": target.repository,
+            "baseline_branch": prepared.from_branch,
+            "expected_worktree": str(target.worktree_dir),
+            "checked_path": str(target.worktree_dir),
+            "pool_root": str(prepared.pool_root),
+            "adopted": prepared.adopted,
+            "created": prepared.created,
+        },
+        target.worktree_dir,
+        target.repository,
+    )
 
 
 def _profile_snapshot(profile: Any, issue: Any) -> dict[str, Any]:
