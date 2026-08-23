@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import subprocess
-from dataclasses import dataclass, field
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,9 @@ class TaskWorktreePlan:
     from_branch: str
     pool_root: Path
     entries: tuple[WorktreePlanEntry, ...]
+    target_repository: str = ""
+    baseline_repository: str = ""
+    alignment_script: Path | None = None
     adopted: int = 0
     created: int = 0
 
@@ -86,6 +91,7 @@ def plan_task_worktrees(
     profile: Any,
     issue_key: str,
     description_sections: dict[str, str],
+    alignment_script: Path | None = None,
 ) -> TaskWorktreePlan:
     """计算任务工作树集计划：目标仓库所属领域 + 问题版本分支推导。
 
@@ -96,9 +102,6 @@ def plan_task_worktrees(
     """
     pool = validate_source_pool_root(pool_root)
     target_repository = resolve_target_repository(profile, description_sections)
-    from_branch = resolve_from_branch(
-        profile, description_sections, target_repository=target_repository
-    )
     domain = profile.domain_for(target_repository)
     if domain is None:
         raise _blocked(
@@ -107,6 +110,11 @@ def plan_task_worktrees(
             "请补充可映射的目标仓库或任务领域；系统不会创建全量工作树",
             details={"target_repository": target_repository},
         )
+    from_branch = resolve_from_branch(
+        profile,
+        description_sections,
+        target_repository=domain.baseline_repository,
+    )
     repositories = domain.repositories
     if target_repository not in repositories:
         # 防御性校验：领域配置必须包含触发该领域的目标仓库。
@@ -138,6 +146,9 @@ def plan_task_worktrees(
         from_branch=from_branch,
         pool_root=pool,
         entries=tuple(entries),
+        target_repository=target_repository,
+        baseline_repository=domain.baseline_repository,
+        alignment_script=alignment_script,
     )
 
 
@@ -146,6 +157,7 @@ def prepare_task_worktrees(
     *,
     execution_identity: dict[str, str] | None = None,
     run_git: Any | None = None,
+    run_alignment: Any | None = None,
 ) -> TaskWorktreePlan:
     """创建/复用任务工作树集：预检后逐个仓库 git worktree add --detach。
 
@@ -156,7 +168,9 @@ def prepare_task_worktrees(
     - 池成员级并发锁：<pool_root>/.locks/<repo>.lock。
     """
     git = run_git or _run_git
+    alignment = run_alignment or subprocess.run
     created_dirs: list[Path] = []
+    entries = plan.entries
     adopted = 0
     created = 0
     try:
@@ -167,6 +181,12 @@ def prepare_task_worktrees(
             lock_path = plan.pool_root / ".locks" / f"{entry.repository.replace('/', '__')}.lock"
             with TaskLock(lock_path, timeout=10):
                 _refresh_pool_member(git, member_dir, entry.repository)
+
+        entries = _apply_alignment_plan(plan, alignment)
+        for entry in entries:
+            member_dir = plan.pool_root / entry.repository
+            lock_path = plan.pool_root / ".locks" / f"{entry.repository.replace('/', '__')}.lock"
+            with TaskLock(lock_path, timeout=10):
                 baseline = _resolve_remote_baseline(
                     git, member_dir, entry.branch, entry.repository
                 )
@@ -180,7 +200,7 @@ def prepare_task_worktrees(
                         entry.repository,
                     )
 
-        for entry in plan.entries:
+        for entry in entries:
             member_dir = plan.pool_root / entry.repository
             lock_path = plan.pool_root / ".locks" / f"{entry.repository.replace('/', '__')}.lock"
             with TaskLock(lock_path, timeout=10):
@@ -224,9 +244,9 @@ def prepare_task_worktrees(
                 git,
                 plan.pool_root,
                 worktree_dir,
-                tuple(entry.repository for entry in plan.entries),
+                tuple(entry.repository for entry in entries),
             )
-        for entry in plan.entries:
+        for entry in entries:
             if not entry.worktree_dir.exists():
                 _remove_empty_worktree_parents(entry.worktree_dir, plan.pool_root)
         raise
@@ -241,11 +261,128 @@ def prepare_task_worktrees(
                 branch=entry.branch,
                 created=entry.worktree_dir in created_dirs,
             )
-            for entry in plan.entries
+            for entry in entries
         ),
+        target_repository=plan.target_repository,
+        baseline_repository=plan.baseline_repository,
+        alignment_script=plan.alignment_script,
         adopted=adopted,
         created=created,
     )
+
+
+def _apply_alignment_plan(
+    plan: TaskWorktreePlan,
+    run_alignment: Any,
+) -> tuple[WorktreePlanEntry, ...]:
+    """用项目只读 plan 计算领域内各仓库的实际目标分支。"""
+    script = plan.alignment_script
+    if script is None:
+        return plan.entries
+    if not script.is_file():
+        raise _blocked(
+            "branch_alignment_tool_missing",
+            f"分支对齐脚本不存在：{script}",
+            "请修复当前 Project Profile 的标准资产安装后重试；系统不会按同名分支猜测",
+        )
+
+    owners = {entry.repository.split("/", 1)[0] for entry in plan.entries}
+    if len(owners) != 1:
+        raise _blocked(
+            "branch_alignment_failed",
+            "同一任务领域包含不同 owner，无法调用项目分支对齐脚本",
+            "请修正 worktree_domains，使项目对齐脚本只接收同一源码根下的仓库",
+            details={"repositories": [entry.repository for entry in plan.entries]},
+        )
+    owner = owners.pop()
+    short_names = [entry.repository.split("/", 1)[1] for entry in plan.entries]
+    command = [
+        sys.executable,
+        str(script),
+        "--root",
+        str(plan.pool_root / owner),
+        "plan",
+        plan.from_branch,
+        "--no-fetch",
+        "--repositories",
+        ",".join(short_names),
+        "--json",
+    ]
+    try:
+        result = run_alignment(command, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise _blocked(
+            "branch_alignment_failed",
+            f"问题版本分支对齐脚本执行失败：{plan.from_branch}",
+            "请检查项目标准资产与本机 Python 环境后重试；系统尚未创建任何工作树",
+            details={"error": str(exc)},
+        ) from exc
+    if result.returncode != 0:
+        raise _blocked(
+            "branch_alignment_failed",
+            f"问题版本分支对齐失败：{plan.from_branch}",
+            "请根据对齐脚本错误补充分支信息或修复仓库状态后重试；系统尚未创建任何工作树",
+            details={"stderr_tail": _stderr_tail(result.stderr)},
+        )
+    try:
+        payload = json.loads(result.stdout)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise _blocked(
+            "branch_alignment_failed",
+            "分支对齐脚本未返回有效 JSON 计划",
+            "请检查安装的项目标准资产版本后重试；系统尚未创建任何工作树",
+            details={"error": str(exc), "stderr_tail": _stderr_tail(result.stderr)},
+        ) from exc
+    if not isinstance(payload, list) or not all(isinstance(row, dict) for row in payload):
+        raise _blocked(
+            "branch_alignment_failed",
+            "分支对齐脚本返回的计划结构无效",
+            "请检查安装的项目标准资产版本后重试；系统尚未创建任何工作树",
+        )
+
+    rows = {str(row.get("repo", "")): row for row in payload}
+    expected_rows = set(short_names)
+    if len(rows) != len(payload) or set(rows) != expected_rows:
+        raise _blocked(
+            "branch_alignment_failed",
+            "分支对齐脚本返回的仓库集合与任务领域不一致",
+            "请检查领域配置与分支对齐脚本版本；系统不会扩大挂载范围",
+            details={
+                "expected_repositories": sorted(expected_rows),
+                "actual_repositories": sorted(rows),
+            },
+        )
+    aligned: list[WorktreePlanEntry] = []
+    for entry, short_name in zip(plan.entries, short_names, strict=True):
+        row = rows.get(short_name)
+        if row is None:
+            raise _blocked(
+                "branch_alignment_failed",
+                f"分支对齐计划缺少仓库：{entry.repository}",
+                "请检查领域配置与分支对齐脚本支持的仓库清单",
+            )
+        target = str(row.get("target", "")).strip()
+        if target == "KEEP_CURRENT":
+            target = str(row.get("current", "")).strip()
+        if row.get("action") == "blocked" or not target or target == "UNRESOLVED":
+            raise _blocked(
+                "branch_alignment_failed",
+                f"无法对齐领域仓库分支：{entry.repository}",
+                "请补充明确的关联仓库分支后重试；系统尚未创建任何工作树",
+                details={
+                    "repository": entry.repository,
+                    "problem_version": plan.from_branch,
+                    "reason": str(row.get("reason", "")),
+                },
+            )
+        aligned.append(
+            WorktreePlanEntry(
+                repository=entry.repository,
+                worktree_dir=entry.worktree_dir,
+                branch=target,
+            )
+        )
+    return tuple(aligned)
 
 
 def _reject_legacy_worktrees(plan: TaskWorktreePlan) -> None:

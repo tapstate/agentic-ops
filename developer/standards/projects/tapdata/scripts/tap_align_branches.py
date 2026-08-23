@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -198,10 +199,11 @@ def first_release_ge(repo: str, target_release: str, root: Path, remote: str) ->
 
 
 def _read_plugin_content(branch: str, root: Path, remote: str) -> str:
-    content = _git_try("tapdata", "show", f"{branch}:{PLUGIN_PATH}", root=root)
+    # plan 前已 fetch，优先读取远端快照，避免本地主分支落后时推导出过期 PluginKit 版本。
+    content = _git_try("tapdata", "show", f"{remote}/{branch}:{PLUGIN_PATH}", root=root)
     if content:
         return content
-    return _git_try("tapdata", "show", f"{remote}/{branch}:{PLUGIN_PATH}", root=root)
+    return _git_try("tapdata", "show", f"{branch}:{PLUGIN_PATH}", root=root)
 
 
 def plugin_release_for(branch: str, root: Path, remote: str) -> str:
@@ -309,6 +311,7 @@ def plan_rows(
     web_branch: str,
     root: Path,
     remote: str,
+    repositories: list[str] | None = None,
 ) -> list[dict[str, str]]:
     if not branch_exists("tapdata", tap_branch, root, remote):
         raise AlignError(f"tapdata branch not found locally or in {remote}: {tap_branch}")
@@ -317,7 +320,14 @@ def plan_rows(
     plugin_cache: dict[str, str] = {}
     rows: list[dict[str, str]] = []
 
+    requested = set(repositories or (*CORE_REPOS, *KEEP_REPOS))
+    unknown = requested.difference((*CORE_REPOS, *KEEP_REPOS))
+    if unknown:
+        raise AlignError(f"unsupported repositories: {', '.join(sorted(unknown))}")
+
     for repo in CORE_REPOS:
+        if repo not in requested:
+            continue
         current = current_branch(repo, root)
         dirty = dirty_state(repo, root)
         target, reason = derive_target(
@@ -336,8 +346,10 @@ def plan_rows(
         )
 
     for repo in KEEP_REPOS:
-        if not (root / repo / ".git").exists():
+        if repo not in requested:
             continue
+        if not (root / repo / ".git").exists():
+            raise AlignError(f"repo not found or not a git repo: {root / repo}")
         rows.append(
             {
                 "repo": repo,
@@ -461,15 +473,33 @@ def cmd_list(root: Path, remote: str, filter_text: str, no_fetch: bool) -> None:
     print(f"match_count={count}")
 
 
-def cmd_plan(root: Path, remote: str, branch_spec: str, no_fetch: bool) -> list[dict[str, str]]:
+def cmd_plan(
+    root: Path,
+    remote: str,
+    branch_spec: str,
+    no_fetch: bool,
+    repositories: list[str] | None = None,
+    json_output: bool = False,
+) -> list[dict[str, str]]:
     tap_spec, ent_spec, web_spec = parse_branch_spec(branch_spec)
+    requested = set(repositories or CORE_REPOS)
     if not no_fetch and FETCH_BEFORE_PLAN:
         for repo in CORE_REPOS:
-            if (root / repo / ".git").exists():
-                print(f"fetch: {repo}")
+            if repo in requested and (root / repo / ".git").exists():
+                print(f"fetch: {repo}", file=sys.stderr if json_output else sys.stdout)
                 fetch_repo(repo, root, remote)
-    rows = plan_rows(tap_spec, ent_spec, web_spec, root, remote)
-    print_plan(rows)
+    rows = plan_rows(
+        tap_spec,
+        ent_spec,
+        web_spec,
+        root,
+        remote,
+        repositories=repositories,
+    )
+    if json_output:
+        print(json.dumps(rows, ensure_ascii=False, separators=(",", ":")))
+    else:
+        print_plan(rows)
     return rows
 
 
@@ -516,6 +546,13 @@ def build_parser() -> argparse.ArgumentParser:
         p = sub.add_parser(name)
         p.add_argument("branch_spec", help="develop、main、release-vX.Y.Z、任务分支，或 <tapdata>,<enterprise>,<web>")
         p.add_argument("--no-fetch", action="store_true", help="跳过 fetch")
+        if name == "plan":
+            p.add_argument(
+                "--repositories",
+                default="",
+                help="仅输出逗号分隔的指定仓库；用于按任务领域生成计划",
+            )
+            p.add_argument("--json", action="store_true", help="以 JSON 输出计划行")
 
     return parser
 
@@ -533,7 +570,17 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "status":
             print_status(root, args.remote)
         elif args.command == "plan":
-            cmd_plan(root, args.remote, args.branch_spec, args.no_fetch)
+            repositories = [
+                item.strip() for item in args.repositories.split(",") if item.strip()
+            ]
+            cmd_plan(
+                root,
+                args.remote,
+                args.branch_spec,
+                args.no_fetch,
+                repositories=repositories or None,
+                json_output=args.json,
+            )
         elif args.command == "apply":
             cmd_apply(root, args.remote, args.branch_spec, args.no_fetch)
     except AlignError as exc:

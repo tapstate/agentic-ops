@@ -256,7 +256,11 @@ def record_current_task_source_context(
         agentic_run_id=agentic_run_id,
         issue=issue_payload,
         workspace_defaults=workspace_defaults,
-        project_profile=_profile_snapshot(context.profile, issue),
+        project_profile=_profile_snapshot(
+            context.profile,
+            issue,
+            task_worktrees=task_worktrees,
+        ),
     )
     return {
         "issue": issue_payload,
@@ -280,18 +284,40 @@ def _prepare_pool_task_worktrees(
         return None, source_root, profile.default_repository
     sections = _description_sections(issue.description)
     target_repository = resolve_target_repository(profile, sections)
+    domain = profile.domain_for(target_repository)
+    alignment_script = None
+    if (
+        profile.profile_id == "tapdata"
+        and domain is not None
+        and domain.domain_id == "product"
+    ):
+        alignment_script = (
+            install_root
+            / "developer"
+            / "standards"
+            / "projects"
+            / profile.profile_id
+            / "scripts"
+            / "tap_align_branches.py"
+        )
     plan = plan_task_worktrees(
         pool_root=pool_root,
         profile=profile,
         issue_key=issue.key,
         description_sections=sections,
+        alignment_script=alignment_script,
     )
-    prepared = prepare_task_worktrees(plan, execution_identity=agent_config.get("execution_identity"))
+    prepared = prepare_task_worktrees(
+        plan,
+        execution_identity=agent_config.get("execution_identity"),
+    )
     target = next(entry for entry in prepared.entries if entry.repository == target_repository)
     return (
         {
             "issue_key": prepared.issue_key,
             "repository": target.repository,
+            "problem_version": prepared.from_branch,
+            "target_branch": target.branch,
             "baseline_branch": prepared.from_branch,
             "expected_worktree": str(target.worktree_dir),
             "checked_path": str(target.worktree_dir),
@@ -304,7 +330,12 @@ def _prepare_pool_task_worktrees(
     )
 
 
-def _profile_snapshot(profile: Any, issue: Any) -> dict[str, Any]:
+def _profile_snapshot(
+    profile: Any,
+    issue: Any,
+    *,
+    task_worktrees: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     fields: dict[str, Any] = {}
     resolved: dict[str, Any] = {}
     sections = _description_sections(issue.description)
@@ -321,8 +352,16 @@ def _profile_snapshot(profile: Any, issue: Any) -> dict[str, Any]:
         value: Any = None
         reference = ""
         if mapping.source == "workspace_repo_mapping":
-            value = profile.default_repository
+            value = (
+                task_worktrees.get("repository")
+                if task_worktrees is not None
+                else profile.default_repository
+            )
             reference = "workspace_defaults.repository"
+        elif mapping.source == "task_worktree_mapping":
+            reference = f"task_worktrees.{logical_name}"
+            if task_worktrees is not None:
+                value = task_worktrees.get(logical_name)
         elif mapping.source == "jira_field" and mapping.jira_field:
             reference = f"issue.fields.{mapping.jira_field}"
             if mapping.jira_field == "assignee":

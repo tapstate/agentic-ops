@@ -179,6 +179,23 @@ class TapdataProfileBranchDerivationTest(unittest.TestCase):
         )
         self.assertTrue(all("/.worktree/TAP-123/" in str(entry.worktree_dir) for entry in plan.entries))
 
+    def test_product_target_uses_product_baseline_problem_version(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        with tempfile.TemporaryDirectory() as temporary:
+            plan = plan_task_worktrees(
+                pool_root=Path(temporary),
+                profile=profile,
+                issue_key="TAP-123",
+                description_sections={
+                    "目标仓库": "tapdata/tapdata-common-lib\n",
+                },
+            )
+
+        self.assertEqual("develop", plan.from_branch)
+        self.assertEqual("tapdata/tapdata", plan.baseline_repository)
+        self.assertEqual("tapdata/tapdata-common-lib", plan.target_repository)
+
     def test_tapdata_unclassified_repository_blocks_without_full_mount(self) -> None:
         repository_root = Path(__file__).resolve().parents[3]
         profile = load_project_profile(repository_root, "tapdata")
@@ -630,6 +647,106 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
         self.assertFalse((self.pool / "TAP-123").exists())
         for entry in plan.entries:
             self.assertFalse(entry.worktree_dir.exists())
+
+    def test_prepare_uses_project_alignment_plan_for_actual_product_branches(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        script = self.pool / "tap_align_branches.py"
+        script.write_text("# test fixture\n", encoding="utf-8")
+        plan = plan_task_worktrees(
+            pool_root=self.pool,
+            profile=profile,
+            issue_key="TAP-456",
+            description_sections={"问题版本": "release-v3.8.0\n"},
+            alignment_script=script,
+        )
+        for entry in plan.entries:
+            member = self.pool / entry.repository
+            member.mkdir(parents=True, exist_ok=True)
+            (member / ".git").mkdir(exist_ok=True)
+
+        rows = []
+        expected = {
+            "tapdata": "release-v3.8.0",
+            "tapdata-enterprise": "release-v3.8.0",
+            "tapdata-web": "release-v3.8.0",
+            "tapdata-license": "release-v3.8.0",
+            "tapdata-common-lib": "release-v1.2.6",
+            "tapdata-application": "main",
+        }
+        for repo, target in expected.items():
+            rows.append(
+                {
+                    "repo": repo,
+                    "current": "main",
+                    "target": (
+                        "KEEP_CURRENT" if repo == "tapdata-application" else target
+                    ),
+                    "action": "keep" if repo == "tapdata-application" else "switch",
+                    "reason": "test alignment",
+                    "dirty": "clean",
+                }
+            )
+        alignment_calls: list[list[str]] = []
+
+        def alignment(command, **kwargs):
+            alignment_calls.append(command)
+            return subprocess.CompletedProcess(command, 0, json.dumps(rows), "")
+
+        prepared = prepare_task_worktrees(
+            plan,
+            run_git=self._run_git,
+            run_alignment=alignment,
+        )
+
+        self.assertEqual(1, len(alignment_calls))
+        self.assertIn("--no-fetch", alignment_calls[0])
+        repositories = alignment_calls[0][
+            alignment_calls[0].index("--repositories") + 1
+        ]
+        self.assertEqual(set(expected), set(repositories.split(",")))
+        self.assertNotIn("tapdata-connectors", repositories)
+        self.assertEqual(
+            expected,
+            {
+                entry.repository.split("/", 1)[1]: entry.branch
+                for entry in prepared.entries
+            },
+        )
+
+    def test_prepare_alignment_failure_creates_no_worktree(self) -> None:
+        script = self.pool / "tap_align_branches.py"
+        script.write_text("# test fixture\n", encoding="utf-8")
+        original = self._plan()
+        plan = TaskWorktreePlan(
+            issue_key=original.issue_key,
+            from_branch=original.from_branch,
+            pool_root=original.pool_root,
+            entries=original.entries,
+            target_repository="tapdata/tapdata",
+            baseline_repository="tapdata/tapdata",
+            alignment_script=script,
+        )
+        calls: list[list[str]] = []
+
+        def recording_git(command, *, timeout=None):
+            calls.append(command)
+            return self._run_git(command, timeout=timeout)
+
+        def failed_alignment(command, **kwargs):
+            return subprocess.CompletedProcess(command, 1, "", "UNRESOLVED\n")
+
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            prepare_task_worktrees(
+                plan,
+                run_git=recording_git,
+                run_alignment=failed_alignment,
+            )
+
+        self.assertEqual("branch_alignment_failed", captured.exception.code)
+        self.assertFalse(
+            any("worktree" in command and "add" in command for command in calls)
+        )
 
 
 class RunGitRealSubprocessRegressionTest(unittest.TestCase):

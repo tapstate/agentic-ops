@@ -56,7 +56,7 @@ TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
 - 运维仓（`status` 可见但不联动，保持当前分支）：`tapdata-application`、`feishu_robot`。
 - 单独管理（不纳入分支联动）：`tapdata-cloud`、`t-layer3-test`、`docs`、`docs-en`、`mcp-tap-server`、`solutions`、`fhir-solution`、Hazelcast(fork)、mongo(fork)。
 
-新功能开发（`from_branch` 为 `tapdata` 主仓 `develop`）时，各仓库工作树分支按 `profile.yaml` 的 `branches.dev_branches` 映射推导，见「新功能开发分支」小节。
+新功能开发（问题版本为 `tapdata` 主仓 `develop`）时，产品域任务工作树必须先运行 `tap_align_branches.py plan`，以脚本结果作为各仓库实际目标分支；`profile.yaml` 的 `branches.dev_branches` 只作为不经过产品域任务工作树链路时的静态项目映射，不能覆盖 PluginKit 推导结果。
 
 ### 分支类型
 
@@ -94,9 +94,9 @@ TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
 - pluginKit 推导：读 `tapdata` 分支 `iengine/iengine-app/src/main/resources/pluginKit.properties` 的 `tapdata.api.verison`（源码拼写即 `verison`，按字面读，勿当 typo 改），去 `-SNAPSHOT` 得 `release-v<version>`，在各仓 `release-v*` 分支中取第一个版本 ≥ 该值的分支。
 - 人工对齐脏仓库时，只有研发工程师确认后才允许按计划临时 `stash push -u`、切换分支后 `stash pop`；若 stash 或 pop 失败必须停止，不能继续跨仓切换。
 
-### 新功能开发分支
+### 新功能开发静态分支映射
 
-新功能开发任务的 `from_branch` 为 `tapdata` 主仓 `develop` 时，各仓库工作树分支按 `profile.yaml` `branches.dev_branches` 映射推导（确定性，不靠 AI 猜测）：
+`profile.yaml` `branches.dev_branches` 保留下列静态项目映射（确定性，不靠 AI 猜测）。产品域任务工作树创建仍以前述 `tap_align_branches.py plan` 为事实源，尤其 `tapdata-common-lib` 必须按 PluginKit 推导，不能用本表的静态回退覆盖：
 
 | 仓库 | 新功能开发分支 |
 | --- | --- |
