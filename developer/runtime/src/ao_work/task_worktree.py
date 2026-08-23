@@ -135,8 +135,8 @@ def prepare_task_worktrees(
     """创建/复用任务工作树集：逐个仓库 git worktree add --detach。
 
     - 已存在 → 校验路径与分支后复用（不重复创建）。
-    - 缺失 → 在池成员上创建任务工作树，写入 per-worktree 身份。
-    - 任一失败 → 已创建的工作树全部回滚（worktree remove --force）。
+    - 缺失 → 在池成员锁内刷新 origin、解析远端基线，再创建任务工作树。
+    - 任一失败 → 已创建的工作树全部回滚（worktree remove --force），并清理本次留下的空父目录。
     - 池成员级并发锁：<pool_root>/.locks/<repo>.lock。
     """
     git = run_git or _run_git
@@ -153,6 +153,10 @@ def prepare_task_worktrees(
                     adopted += 1
                     continue
                 entry.worktree_dir.parent.mkdir(parents=True, exist_ok=True)
+                _refresh_pool_member(git, member_dir, entry.repository)
+                baseline_ref = _resolve_remote_baseline(
+                    git, member_dir, entry.branch, entry.repository
+                )
                 result = git(
                     [
                         "-C",
@@ -161,7 +165,7 @@ def prepare_task_worktrees(
                         "add",
                         "--detach",
                         str(entry.worktree_dir),
-                        entry.branch,
+                        baseline_ref,
                     ],
                     timeout=120,
                 )
@@ -183,6 +187,9 @@ def prepare_task_worktrees(
                 worktree_dir,
                 tuple(entry.repository for entry in plan.entries),
             )
+        for entry in plan.entries:
+            if not entry.worktree_dir.exists():
+                _remove_empty_worktree_parents(entry.worktree_dir, plan.pool_root)
         raise
     return TaskWorktreePlan(
         issue_key=plan.issue_key,
@@ -211,7 +218,7 @@ def _validate_existing_worktree(
 ) -> None:
     root = git(["-C", str(worktree_dir), "rev-parse", "--show-toplevel"], timeout=60)
     actual = git(["-C", str(worktree_dir), "rev-parse", "HEAD"], timeout=60)
-    baseline = git(["-C", str(member_dir), "rev-parse", branch], timeout=60)
+    baseline = _resolve_existing_baseline(git, member_dir, branch)
     if root.returncode != 0 or actual.returncode != 0 or baseline.returncode != 0:
         raise _blocked(
             "worktree_invalid",
@@ -225,6 +232,73 @@ def _validate_existing_worktree(
             f"任务工作树 {repository} 不是当前基线 {branch} 的精确工作树",
             "请清理该任务工作树后重试，或核对目标仓库和基线分支",
         )
+
+
+def _resolve_existing_baseline(git: Any, member_dir: Path, branch: str) -> Any:
+    """复用已有工作树时优先本地基线，缺失则使用已记录的 origin 引用。"""
+    local = git(
+        ["-C", str(member_dir), "rev-parse", f"{branch}^{{commit}}"], timeout=60
+    )
+    if local.returncode == 0:
+        return local
+    return git(
+        [
+            "-C",
+            str(member_dir),
+            "rev-parse",
+            f"refs/remotes/origin/{branch}^{{commit}}",
+        ],
+        timeout=60,
+    )
+
+
+def _refresh_pool_member(git: Any, member_dir: Path, repository: str) -> None:
+    """在池成员锁内刷新 origin，确保后续基线解析不是陈旧远端引用。"""
+    result = git(
+        ["-C", str(member_dir), "fetch", "--prune", "origin"], timeout=120
+    )
+    if result.returncode != 0:
+        raise _blocked(
+            "source_pool_fetch_failed",
+            f"刷新池成员远端分支失败：{repository}",
+            "请检查网络、远端访问权限和池成员 origin 后重试",
+            details={"stderr_tail": _stderr_tail(result.stderr)},
+        )
+
+
+def _resolve_remote_baseline(
+    git: Any, member_dir: Path, branch: str, repository: str
+) -> str:
+    """将任务分支解析为刷新后的 origin commit，避免依赖本地同名分支。"""
+    remote_ref = f"refs/remotes/origin/{branch}^{{commit}}"
+    result = git(["-C", str(member_dir), "rev-parse", "--verify", remote_ref], timeout=60)
+    if result.returncode != 0:
+        raise _blocked(
+            "branch_derivation_failed",
+            f"池成员刷新后未找到任务基线分支：{repository} @ {branch}",
+            "请确认 Project Profile 的分支推导及远端 origin 分支后重试",
+            details={"stderr_tail": _stderr_tail(result.stderr)},
+        )
+    baseline = result.stdout.strip()
+    if not baseline:
+        raise _blocked(
+            "branch_derivation_failed",
+            f"池成员刷新后无法解析任务基线分支：{repository} @ {branch}",
+            "请确认 Project Profile 的分支推导及远端 origin 分支后重试",
+        )
+    return baseline
+
+
+def _remove_empty_worktree_parents(worktree_dir: Path, pool_root: Path) -> None:
+    """仅移除本次失败留下的空任务目录，绝不越过池根。"""
+    current = worktree_dir.parent
+    pool = pool_root.resolve()
+    while current != pool and current.is_relative_to(pool):
+        try:
+            current.rmdir()
+        except OSError:
+            return
+        current = current.parent
 
 
 def _write_worktree_identity(
