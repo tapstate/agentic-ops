@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -12,7 +13,8 @@ from unittest import mock
 from ao_work.config import load_project_profile
 from ao_work.jira.adf import markdown_to_adf
 from ao_work.jira.client import TransportResponse
-from ao_work.task_start import _profile_snapshot
+from ao_work.task_start import _prepare_pool_task_worktrees, _profile_snapshot
+from ao_work.task_worktree import TaskWorktreePlan, WorktreePlanEntry
 from ao_work.work_cli import main
 from install_auth_fixture import configure_install_authorization, v5_agent
 
@@ -232,7 +234,7 @@ class ProjectProfileSnapshotTest(unittest.TestCase):
         repository_root = Path(__file__).resolve().parents[3]
         profile = load_project_profile(repository_root, "tapdata")
         issue = SimpleNamespace(
-            description=markdown_to_adf("## 问题版本\n\ndevelop\n"),
+            description=markdown_to_adf("## 问题版本\n\ndevelop\n\n补充备注。\n"),
             assignee="jira-account-1",
             summary="测试任务",
             fields={},
@@ -250,6 +252,10 @@ class ProjectProfileSnapshotTest(unittest.TestCase):
 
         resolved = snapshot["resolved_fields"]
         self.assertEqual("develop", resolved["problem_version"]["value"])
+        self.assertEqual(
+            "task_worktrees.problem_version",
+            resolved["problem_version"]["reference"],
+        )
         self.assertEqual("release-v1.2.6", resolved["target_branch"]["value"])
         self.assertEqual(
             "task_worktrees.target_branch",
@@ -285,6 +291,66 @@ class ProjectProfileSnapshotTest(unittest.TestCase):
         self.assertEqual("task_worktrees.problem_version", problem_version["reference"])
         self.assertEqual("jira_description_section", problem_version["source"])
         self.assertEqual("问题版本", problem_version["section"])
+
+    def test_renamed_product_domain_still_uses_alignment_script(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        loaded = load_project_profile(repository_root, "tapdata")
+        product = loaded.worktree_domains[0]
+        profile = replace(
+            loaded,
+            worktree_domains=(
+                replace(product, domain_id="renamed-product"),
+                *loaded.worktree_domains[1:],
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            pool = Path(temporary).resolve()
+            target_dir = pool / ".worktree/TAP-123/develop/tapdata/tapdata"
+            prepared = TaskWorktreePlan(
+                issue_key="TAP-123",
+                from_branch="develop",
+                pool_root=pool,
+                entries=(
+                    WorktreePlanEntry(
+                        repository="tapdata/tapdata",
+                        worktree_dir=target_dir,
+                        branch="develop",
+                    ),
+                ),
+                target_repository="tapdata/tapdata",
+                baseline_repository="tapdata/tapdata",
+            )
+            issue = SimpleNamespace(
+                key="TAP-123",
+                description=markdown_to_adf("## 问题版本\n\ndevelop\n"),
+            )
+            with (
+                mock.patch(
+                    "ao_work.task_start.resolve_source_pool_root",
+                    return_value=pool,
+                ),
+                mock.patch(
+                    "ao_work.task_start.plan_task_worktrees",
+                    return_value=prepared,
+                ) as planned,
+                mock.patch(
+                    "ao_work.task_start.prepare_task_worktrees",
+                    return_value=prepared,
+                ),
+            ):
+                _prepare_pool_task_worktrees(
+                    install_root=pool / "install",
+                    profile=profile,
+                    issue=issue,
+                    agent_config={"source_root": str(pool)},
+                )
+
+        alignment_script = planned.call_args.kwargs["alignment_script"]
+        self.assertEqual(
+            pool
+            / "install/developer/standards/projects/tapdata/scripts/tap_align_branches.py",
+            alignment_script,
+        )
 
 
 if __name__ == "__main__":
