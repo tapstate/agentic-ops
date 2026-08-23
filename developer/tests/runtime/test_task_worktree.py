@@ -26,6 +26,7 @@ def build_profile(
     repository_list: tuple[str, ...] = ("tapdata/tapdata", "tapdata/tapdata-web"),
     analysis_mount: dict | None = None,
     branch_derivation: dict | None = None,
+    baseline_branches: dict[str, str] | None = None,
 ) -> object:
     from ao_work.config.model import (
         AnalysisMount,
@@ -44,23 +45,25 @@ def build_profile(
         )
 
     def _derivation() -> BranchDerivation:
-        if not branch_derivation:
+        if not branch_derivation and not baseline_branches:
             return BranchDerivation()
+        config = branch_derivation or {}
         return BranchDerivation(
-            derive_from=branch_derivation.get("derive_from", "default"),
-            default_branch=branch_derivation.get("default_branch", "main"),
-            default_rule=branch_derivation.get("default_rule", "same_name"),
+            derive_from=config.get("derive_from", "default"),
+            default_branch=config.get("default_branch", "main"),
+            default_rule=config.get("default_rule", "same_name"),
             dev_branches=tuple(
                 (str(repo), str(branch))
-                for repo, branch in branch_derivation.get("dev_branches", {}).items()
+                for repo, branch in config.get("dev_branches", {}).items()
             ),
+            baseline_branches=tuple((str(repo), str(branch)) for repo, branch in (baseline_branches or {}).items()),
             overrides=tuple(
                 RepositoryBranchRule(
                     from_branch=item["from_branch"],
                     repo=item["repo"],
                     branch=item["branch"],
                 )
-                for item in branch_derivation.get("overrides", [])
+                for item in config.get("overrides", [])
             ),
         )
 
@@ -100,10 +103,20 @@ class ResolveTargetRepositoryTest(unittest.TestCase):
 
 
 class ResolveFromBranchTest(unittest.TestCase):
+    def test_explicit_baseline_mapping_is_used_for_target_repository(self) -> None:
+        profile = build_profile(baseline_branches={"tapdata/tapdata": "develop"})
+        self.assertEqual("develop", resolve_from_branch(profile, {}, target_repository="tapdata/tapdata"))
+
+    def test_missing_explicit_baseline_mapping_blocks(self) -> None:
+        profile = build_profile(baseline_branches={"tapdata/tapdata": "develop"})
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            resolve_from_branch(profile, {}, target_repository="tapdata/tapdata-web")
+        self.assertEqual("task_baseline_unresolved", captured.exception.code)
+
     def test_declared_section_wins(self) -> None:
         profile = build_profile()
         self.assertEqual(
-            "feature-x",
+            "feature/x",
             resolve_from_branch(profile, {"修复分支": "feature/x\n"}),
         )
 
@@ -138,14 +151,14 @@ class PlanTaskWorktreesTest(unittest.TestCase):
             issue_key="TAP-123",
             description_sections={"修复分支": "feature/x\n"},
         )
-        self.assertEqual("feature-x", plan.from_branch)
+        self.assertEqual("feature/x", plan.from_branch)
         self.assertEqual(2, len(plan.entries))
         by_repo = {entry.repository: entry for entry in plan.entries}
         self.assertIn("tapdata/tapdata", by_repo)
         self.assertIn("tapdata/tapdata-web", by_repo)
-        self.assertEqual("feature-x", by_repo["tapdata/tapdata"].branch)
+        self.assertEqual("feature/x", by_repo["tapdata/tapdata"].branch)
         self.assertEqual(
-            task_worktree_path(self.pool, "TAP-123", "feature-x", "tapdata/tapdata"),
+            task_worktree_path(self.pool, "TAP-123", "feature/x", "tapdata/tapdata"),
             by_repo["tapdata/tapdata"].worktree_dir,
         )
 
@@ -158,7 +171,7 @@ class PlanTaskWorktreesTest(unittest.TestCase):
                 "default_rule": "same_name",
                 "overrides": [
                     {
-                        "from_branch": "release-2.0",
+                        "from_branch": "release/2.0",
                         "repo": "tapdata/connectors",
                         "branch": "v2.0.x",
                     }
@@ -173,7 +186,7 @@ class PlanTaskWorktreesTest(unittest.TestCase):
         )
         by_repo = {entry.repository: entry for entry in plan.entries}
         self.assertEqual("v2.0.x", by_repo["tapdata/connectors"].branch)
-        self.assertEqual("release-2.0", by_repo["tapdata/tapdata"].branch)
+        self.assertEqual("release/2.0", by_repo["tapdata/tapdata"].branch)
 
     def test_plan_dev_branches_used_when_from_branch_is_primary_dev_branch(self) -> None:
         profile = build_profile(
@@ -319,6 +332,8 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, "", "")
         if "worktree" in command and "list" in command:
             return subprocess.CompletedProcess(command, 0, "", "")
+        if "--show-toplevel" in command:
+            return subprocess.CompletedProcess(command, 0, f"{command[1]}\n", "")
         if command[-1] == "HEAD" or "rev-parse" in command:
             return subprocess.CompletedProcess(command, 0, "HEAD\n", "")
         return subprocess.CompletedProcess(command, 0, "", "")

@@ -42,6 +42,16 @@ repositories:
     derive_from: default
     default_branch: main
     default_rule: same_name
+    # 任务工作树的基线必须按目标仓库显式解析，禁止从池成员当前分支或隐式 main 猜测。
+    baseline_branches:
+      tapdata/tapdata: develop
+      tapdata/tapdata-enterprise: develop
+      tapdata/tapdata-web: develop
+      tapdata/tapdata-connectors: develop
+      tapdata/tapdata-connectors-enterprise: develop
+      tapdata/tapdata-license: main
+      tapdata/tapdata-common-lib: main
+      tapdata/tapdata-application: main
     # 各仓库新功能开发分支（from_branch = tapdata 的 develop 时生效）
     dev_branches:
       tapdata/tapdata: develop
