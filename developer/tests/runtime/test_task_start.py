@@ -465,6 +465,39 @@ class ProjectProfileSnapshotTest(unittest.TestCase):
 
         self.assertEqual("task_domain_unresolved", raised.code)
         self.assertIn("tapdata/docs", raised.message)
+        self.assertEqual({"target_repository": "tapdata/docs"}, raised.details)
+
+    def test_pool_checkout_preserves_unclassified_repository_details(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+        issue = SimpleNamespace(
+            key="TAP-123",
+            description=markdown_to_adf("## 目标仓库\n\ntapdata/docs\n"),
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            pool = Path(temporary).resolve()
+            with mock.patch(
+                "ao_work.task_start.resolve_source_pool_root",
+                return_value=pool,
+            ):
+                try:
+                    _prepare_pool_task_worktrees(
+                        install_root=repository_root,
+                        profile=profile,
+                        issue=issue,
+                        agent_config={
+                            "source_root": str(pool),
+                            "repository": "tapdata/tapdata",
+                        },
+                    )
+                except RuntimeErrorResult as error:
+                    raised = error
+                else:
+                    self.fail("池模式未归类仓库应失败关闭")
+
+        self.assertEqual("task_domain_unresolved", raised.code)
+        self.assertEqual({"target_repository": "tapdata/docs"}, raised.details)
 
     def test_non_pool_checkout_resolves_product_alignment_spec(self) -> None:
         repository_root = Path(__file__).resolve().parents[3]
