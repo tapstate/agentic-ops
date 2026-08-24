@@ -20,7 +20,7 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
     def test_ao_work_exposes_only_developer_commands(self) -> None:
         parser = build_parser()
         commands = self._subcommands(parser)
-        for expected in ("workspace", "auth", "jira", "task", "task-run", "report", "capability"):
+        for expected in ("workspace", "auth", "jira", "task", "task-run", "report", "capability", "version"):
             self.assertIn(expected, commands)
         self.assertEqual(set(), commands & self.MAINTAINER_COMMANDS)
 
@@ -71,6 +71,7 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
     def test_every_operation_validates_default_install_identity(self) -> None:
         cases = (
             ["capability", "list"],
+            ["version"],
             ["workspace", "inspect"],
             ["task", "inspect", "--issue-key", "TAP-1"],
             ["report", "write", "--issue-key", "TAP-1", "--agentic-run-id", "run-1", "--kind", "analysis", "--content-file", "analysis.md"],
@@ -100,6 +101,35 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
 
     def test_install_root_is_not_a_public_option(self) -> None:
         self.assertNotIn("--install-root", self._all_option_strings(build_parser()))
+
+    def test_auth_routes_to_workspace_setup_without_preflight(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with (
+            mock.patch(
+                "ao_work.work_cli.validate_install_root",
+                return_value=Path("/synthetic-developer-install"),
+            ),
+            mock.patch(
+                "ao_work.work_cli.execute_authorization",
+                return_value={"configured": True},
+            ),
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            exit_code = main(["auth", "--show"])
+
+        self.assertEqual(0, exit_code, stderr.getvalue())
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual("auth", payload["operation"])
+        self.assertEqual(
+            "initialize_or_inspect_workspace",
+            payload["agentic_next_action"]["action"],
+        )
+        self.assertEqual(
+            ["workspace_init", "workspace_inspect"],
+            payload["agentic_next_action"]["allowed_operations"],
+        )
 
     def _subcommands(self, parser: argparse.ArgumentParser) -> set[str]:
         actions = [

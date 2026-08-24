@@ -20,6 +20,7 @@ version=""
 configure_workflow="false"
 confirm_release="false"
 allow_soft_gate="false"
+wait_for_merge="true"
 merged_pr=""
 confirm_recovery=""
 while [ "$#" -gt 0 ]; do
@@ -44,6 +45,10 @@ while [ "$#" -gt 0 ]; do
       allow_soft_gate="true"
       shift
       ;;
+    --no-wait-for-merge)
+      wait_for_merge="false"
+      shift
+      ;;
     --merged-pr)
       if [ "$#" -lt 2 ]; then
         release_fail "invalid_release_merged_pr" "argument_parsing" "--merged-pr 缺少 PR 编号" "请提供已合并 PR 的数字编号"
@@ -66,6 +71,11 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+
+if [ "$wait_for_merge" = "false" ] && { [ "$command_name" != "publish" ] || [ "$allow_soft_gate" != "true" ]; }; then
+  release_fail "invalid_release_wait_option" "argument_parsing" "--no-wait-for-merge 只适用于软门禁 publish" "请与 publish --allow-soft-gate 一起使用，或移除此参数"
+  exit 1
+fi
 
 case "$command_name" in
   inspect)
@@ -96,12 +106,17 @@ case "$command_name" in
       release_fail "release_candidate_already_in_main" "state_inspection" "当前 develop 候选已经包含在 origin/main，不应重新 prepare" "请运行 maintainer/scripts/release.sh inspect --version $version --allow-soft-gate 获取唯一下一命令"
       exit 1
     fi
-    release_run_full_verification "$repo_root" "$prepare_head" || exit 1
-    release_require_version_tag "$repo_root" "$version" || exit 1
     protection_mode="hard"
     if [ "$allow_soft_gate" = "true" ]; then protection_mode="soft"; fi
-    printf '{"ok":true,"operation":"release_prepare","version":"%s","head":"%s","verified_at":"%s","tag_scope":"local","protection_mode":"%s","delivery":"python_source_and_developer_assets","agentic_next_action":"review_release_scope"}\n' \
-      "$version" "$prepare_head" "$RELEASE_VERIFIED_AT" "$protection_mode"
+    release_run_full_verification "$repo_root" "$prepare_head" || exit 1
+    release_require_version_tag_available "$repo_root" "$version" || exit 1
+    release_branch=""
+    if [ "$allow_soft_gate" = "true" ]; then
+      release_branch="release/$version"
+      release_prepare_fixed_branch "$repo_root" "$release_branch" "$prepare_head" || exit 1
+    fi
+    printf '{"ok":true,"operation":"release_prepare","version":"%s","head":"%s","release_branch":"%s","verified_at":"%s","tag_scope":"main_merge_commit","protection_mode":"%s","delivery":"python_source_and_developer_assets","agentic_next_action":"review_release_scope"}\n' \
+      "$version" "$prepare_head" "$release_branch" "$RELEASE_VERIFIED_AT" "$protection_mode"
     ;;
   publish)
     release_validate_version "$version" || exit 1
@@ -113,19 +128,14 @@ case "$command_name" in
     workflow_mode="$(release_workflow_mode "$configure_workflow" "$allow_soft_gate")"
     workflow_check_or_configure "$workflow_mode" "$repo_root" >/dev/null || exit 1
     release_require_synced_branch "$repo_root" develop || exit 1
-    release_require_existing_version_tag "$repo_root" "$version" || exit 1
     protection_mode="hard"
     release_source_branch="develop"
     release_head="$(git -C "$repo_root" rev-parse HEAD)"
     if [ "$allow_soft_gate" = "true" ]; then
       protection_mode="soft"
       release_source_branch="release/$version"
-      release_resolve_fixed_branch "$repo_root" "$release_source_branch" "$release_head" || exit 1
+      release_resolve_prepared_fixed_branch "$repo_root" "$release_source_branch" || exit 1
       release_head="$RELEASE_FIXED_HEAD"
-      if ! git -C "$repo_root" merge-base --is-ancestor "$RELEASE_TAG_COMMIT" "$release_head"; then
-        release_fail "release_tag_conflict" "tag_validation" "本地 Tag $version 不是固定发布 HEAD 的祖先" "请人工核查版本基线与发布分支"
-        exit 1
-      fi
     fi
     candidate_in_main_status=0
     release_candidate_is_in_main "$repo_root" "$release_head" || candidate_in_main_status=$?
@@ -137,6 +147,7 @@ case "$command_name" in
       release_fail "release_candidate_already_in_main" "state_inspection" "固定发布候选已经包含在 origin/main，GitHub 无法创建无差异发布 PR" "请先运行 maintainer/scripts/release.sh inspect --version $version --allow-soft-gate；确认关联 PR 后运行 recover"
       exit 1
     fi
+    release_require_version_tag_available "$repo_root" "$version" || exit 1
     release_verify_story_gate "$repo_root" origin/main "$release_head" || exit 1
     release_run_full_verification "$repo_root" "$release_head" || exit 1
     release_confirm_publish "$repo_root" "$version" "$release_head" "$confirm_release" "$release_source_branch" main || exit 1
@@ -150,26 +161,29 @@ case "$command_name" in
     release_repository="tapstate/agentic-ops"
     release_find_or_create_pr "$release_repository" "$release_source_branch" main "$release_head" "$version" release "" "$protection_mode" || exit 1
     if [ "$allow_soft_gate" = "true" ]; then
-      manual_status=0
-      release_wait_for_manual_merge "$repo_root" "$release_repository" release_publish "$version" "$release_head" "$release_source_branch" || manual_status=$?
-      if [ "$manual_status" -eq 2 ]; then
-        exit 2
-      fi
-      if [ "$manual_status" -ne 0 ]; then
-        exit 1
+      if [ "$wait_for_merge" = "true" ]; then
+        release_wait_for_soft_merge "$release_repository" "$release_head" || exit 1
+      else
+        manual_status=0
+        release_wait_for_manual_merge "$repo_root" "$release_repository" release_publish "$version" "$release_head" "$release_source_branch" || manual_status=$?
+        if [ "$manual_status" -eq 2 ]; then
+          exit 2
+        fi
+        if [ "$manual_status" -ne 0 ]; then
+          exit 1
+        fi
       fi
     else
       release_enable_auto_merge "$release_repository" || exit 1
       release_wait_for_merge "$release_repository" || exit 1
     fi
     release_verify_remote_contains "$repo_root" "$release_head" || exit 1
-    if [ "$allow_soft_gate" = "true" ]; then
-      release_verify_merge_commit "$repo_root" "$release_head" "$RELEASE_MERGE_COMMIT" || exit 1
-    fi
-    release_push_tag_if_needed "$repo_root" "$version" || exit 1
+    release_verify_merge_commit "$repo_root" "$release_head" "$RELEASE_MERGE_COMMIT" || exit 1
+    release_sync_develop_to_main "$repo_root" "$RELEASE_MERGE_COMMIT" || exit 1
+    release_create_and_push_version_tag "$repo_root" "$version" "$RELEASE_MERGE_COMMIT" || exit 1
     release_write_audit "$repo_root" "$version" "$release_head" "$protection_mode" || exit 1
-    printf '{"ok":true,"operation":"release_publish","version":"%s","head":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","tag":"%s","protection_mode":"%s","audit_file":"%s","agentic_next_action":"release_completed"}\n' \
-      "$version" "$release_head" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "$version" "$protection_mode" "$RELEASE_AUDIT_FILE"
+    printf '{"ok":true,"operation":"release_publish","version":"%s","head":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","develop_commit":"%s","tag":"%s","protection_mode":"%s","audit_file":"%s","agentic_next_action":"release_completed"}\n' \
+      "$version" "$release_head" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "$RELEASE_DEVELOP_COMMIT" "$version" "$protection_mode" "$RELEASE_AUDIT_FILE"
     ;;
   recover)
     release_validate_version "$version" || exit 1

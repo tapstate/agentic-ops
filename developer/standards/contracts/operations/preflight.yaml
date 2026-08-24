@@ -18,8 +18,7 @@ input:
   check_github:
     type: boolean
     required: false
-preconditions:
-  - must_run_before_task_takeover
+preconditions: []
 output:
   workspace:
     type: string

@@ -354,7 +354,9 @@ class WorkspaceInitTest(unittest.TestCase):
             self.assertTrue((workspace / agent["workspace_entry"]).stat().st_mode & 0o100)
             env_path = workspace / ".agentic-ops" / ".env"
             self.assertFalse(env_path.exists())
-            self.assertIn("./.agentic-ops/bin/ao-work workspace preflight", (workspace / "AGENTS.md").read_text())
+            generated_agents = (workspace / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertNotIn("执行任务前先调用 `./.agentic-ops/bin/ao-work workspace preflight`", generated_agents)
+            self.assertIn("不是接管任务的前置步骤", generated_agents)
             self.assertEqual(
                 {"configure-authorization", "initialize-project-workspace"},
                 {
@@ -485,7 +487,7 @@ class WorkspaceInitTest(unittest.TestCase):
             self.assertIn(str(explicit_pool), persisted)
             self.assertIn("source_pool_root", persisted)
 
-    def test_non_interactive_init_skips_permission_denied_pool_member(self) -> None:
+    def test_non_interactive_init_attempts_pool_member_after_permission_preflight_diagnostic(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             install = self.prepare_install(root)
@@ -498,7 +500,7 @@ class WorkspaceInitTest(unittest.TestCase):
                 )
             }
             exit_code, payload, stderr, _ = self.run_cli(
-                self._init_common_args(workspace, "skip-denied"),
+                self._init_common_args(workspace, "attempt-denied"),
                 remote_denied=denied,
             )
             self.assertEqual(0, exit_code, payload)
@@ -508,16 +510,13 @@ class WorkspaceInitTest(unittest.TestCase):
                 for check in cast(list[dict[str, str]], payload["preflight_checks"])
             }
             self.assertEqual("passed", checks["source_pool_members_remote"])
-            skipped = cast(list[dict[str, object]], payload["skipped_repositories"])
-            self.assertEqual(1, len(skipped))
-            self.assertEqual("tapdata/tapdata-web", skipped[0]["repository"])
-            self.assertIn("初始化预检：跳过无权限源码仓库 tapdata/tapdata-web", stderr)
-            self.assertIn("1 个源码仓库因无权限被跳过", stderr)
+            self.assertEqual([], payload["skipped_repositories"])
+            self.assertIn("初始化阶段仍会尝试准备该仓库", stderr)
             pool = root / "source-pool"
             self.assertTrue((pool / "tapdata" / "tapdata" / ".git").exists())
-            self.assertFalse((pool / "tapdata" / "tapdata-web").exists())
+            self.assertTrue((pool / "tapdata" / "tapdata-web" / ".git").exists())
 
-    def test_pool_mode_clone_permission_error_skips_and_continues(self) -> None:
+    def test_pool_mode_clone_permission_error_blocks_after_actual_attempt(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             install = self.prepare_install(root)
@@ -530,18 +529,89 @@ class WorkspaceInitTest(unittest.TestCase):
                 )
             }
             exit_code, payload, stderr, _ = self.run_cli(
-                self._init_common_args(workspace, "clone-skip"),
+                self._init_common_args(workspace, "clone-block"),
                 clone_denied=denied,
             )
-            self.assertEqual(0, exit_code, payload)
-            self.assertEqual("passed", payload["post_preflight_status"])
-            skipped = cast(list[dict[str, object]], payload["skipped_repositories"])
-            self.assertEqual(1, len(skipped))
-            self.assertEqual("tapdata/tapdata-web", skipped[0]["repository"])
-            self.assertIn("池成员准备：跳过无权限源码仓库 tapdata/tapdata-web", stderr)
+            self.assertEqual(2, exit_code, payload)
+            self.assertEqual("source_checkout_failed", payload["code"])
+            self.assertNotIn("跳过无权限源码仓库", stderr)
             pool = root / "source-pool"
             self.assertTrue((pool / "tapdata" / "tapdata" / ".git").exists())
             self.assertFalse((pool / "tapdata" / "tapdata-web").exists())
+
+    def test_pool_mode_replaces_clean_remote_mismatch_before_clone(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install = self.prepare_install(root, with_install_identity=True)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            initializer = WorkspaceInitializer(workspace, install)
+            candidate = initializer.prepare("tapdata")
+            member = root / "source-pool" / "tapdata" / "tapdata"
+            (member / ".git").mkdir(parents=True)
+            (member / "obsolete.txt").write_text("old checkout", encoding="utf-8")
+
+            def fake_git(
+                command: list[str], *, timeout: float | None = None
+            ) -> subprocess.CompletedProcess[str]:
+                if command[-2:] == ["status", "--porcelain"]:
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                if "--get-regexp" in command:
+                    return subprocess.CompletedProcess(command, 1, "", "")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            def fake_streaming(
+                command: list[str], *, stall_warn_interval: float = 30.0
+            ) -> subprocess.CompletedProcess[str]:
+                target = Path(command[-1])
+                (target / ".git").mkdir(parents=True, exist_ok=True)
+                (target / "fresh.txt").write_text("new checkout", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            mismatch = RuntimeErrorResult(
+                code="source_repository_mismatch",
+                message="mismatch",
+                status="blocked",
+                exit_code=2,
+                retry_safe=True,
+                required_human_action="retry",
+            )
+            with (
+                mock.patch.object(initializer, "_run_git", side_effect=fake_git),
+                mock.patch.object(
+                    initializer,
+                    "_run_git_streaming",
+                    side_effect=fake_streaming,
+                ),
+                mock.patch.object(
+                    initializer,
+                    "_validate_checked_out_source",
+                    side_effect=[mismatch, None, None],
+                ),
+            ):
+                status, skipped = initializer._prepare_pool_members(candidate)
+
+            self.assertEqual("adopted=0,cloned=2,total=2", status)
+            self.assertEqual([], skipped)
+            self.assertFalse((member / "obsolete.txt").exists())
+            self.assertEqual("new checkout", (member / "fresh.txt").read_text(encoding="utf-8"))
+
+    def test_remote_mismatch_cleanup_preserves_dirty_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "checkout"
+            (source / ".git").mkdir(parents=True)
+            changed_file = source / "changed.txt"
+            changed_file.write_text("keep me", encoding="utf-8")
+            initializer = WorkspaceInitializer(Path(temporary) / "workspace", Path(temporary) / "install")
+            with mock.patch.object(
+                initializer,
+                "_run_git",
+                return_value=subprocess.CompletedProcess([], 0, " M changed.txt\n", ""),
+            ), self.assertRaises(RuntimeErrorResult) as captured:
+                initializer._remove_nonconforming_checkout(source, "tapdata/tapdata")
+
+            self.assertEqual("source_repository_cleanup_dirty", captured.exception.code)
+            self.assertEqual("keep me", changed_file.read_text(encoding="utf-8"))
 
     def test_pool_mode_preflight_blocks_on_network_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1284,7 +1354,7 @@ class WorkspaceInitTest(unittest.TestCase):
             self.assertIn("Codex", claude_guide)
             self.assertIn("developer", claude_guide)
             self.assertIn("preflight", claude_guide)
-            # Claude Code skill symlink 桥接：.claude/skills/<name> → ../.agents/skills/<name>
+            # Claude Code skill symlink 桥接：.claude/skills/<name> → ../../.agents/skills/<name>
             claude_skills = workspace / ".claude" / "skills"
             self.assertTrue(claude_skills.is_dir())
             bridged = [p for p in claude_skills.iterdir() if p.is_symlink()]
@@ -1299,6 +1369,89 @@ class WorkspaceInitTest(unittest.TestCase):
             ).stdout
             self.assertNotIn(".agentic-ops/", status)
             self.assertNotIn("token-secret-123", status)
+
+    def test_repeated_init_repairs_only_missing_claude_skill_bridge(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.prepare_install(root)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            common = (
+                "--workspace-root", str(workspace), "workspace", "init",
+                "--non-interactive", "--project", "tapdata",
+                "--agent-id", "developer-claude-bridge",
+                "--jira-email", "developer@example.test", "--token-stdin",
+            )
+            self.assertEqual(0, self.run_cli(common)[0])
+            bridge = workspace / ".claude" / "skills" / "configure-authorization"
+            expected_target = "../../.agents/skills/configure-authorization"
+            self.assertEqual(expected_target, str(bridge.readlink()))
+            bridge.unlink()
+
+            exit_code, payload, _, _ = self.run_cli(
+                ("--workspace-root", str(workspace), "workspace", "preflight")
+            )
+            self.assertEqual(2, exit_code)
+            self.assertEqual("workspace_ai_asset_missing", payload["code"])
+
+            exit_code, payload, _, _ = self.run_cli(common)
+            self.assertEqual(0, exit_code, payload)
+            self.assertTrue(bridge.is_symlink())
+            self.assertEqual(expected_target, str(bridge.readlink()))
+
+            exit_code, payload, _, _ = self.run_cli(
+                ("--workspace-root", str(workspace), "workspace", "preflight")
+            )
+            self.assertEqual(0, exit_code, payload)
+
+    def test_preflight_rejects_claude_skill_bridge_drift_and_extra_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.prepare_install(root)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            common = (
+                "--workspace-root", str(workspace), "workspace", "init",
+                "--non-interactive", "--project", "tapdata",
+                "--agent-id", "developer-claude-drift",
+                "--jira-email", "developer@example.test", "--token-stdin",
+            )
+            self.assertEqual(0, self.run_cli(common)[0])
+            bridge_root = workspace / ".claude" / "skills"
+            bridge = bridge_root / "configure-authorization"
+            outside = root / "outside-skill"
+            outside.mkdir()
+            sentinel = outside / "sentinel"
+            sentinel.write_text("unchanged\n", encoding="utf-8")
+            bridge.unlink()
+            bridge.symlink_to(outside, target_is_directory=True)
+
+            exit_code, payload, _, _ = self.run_cli(
+                ("--workspace-root", str(workspace), "workspace", "preflight")
+            )
+            self.assertEqual(2, exit_code)
+            self.assertEqual("workspace_ai_asset_drift", payload["code"])
+            self.assertEqual("unchanged\n", sentinel.read_text(encoding="utf-8"))
+
+            exit_code, payload, _, _ = self.run_cli(common)
+            self.assertEqual(2, exit_code)
+            self.assertEqual("workspace_ai_asset_drift", payload["code"])
+            self.assertEqual("unchanged\n", sentinel.read_text(encoding="utf-8"))
+
+            bridge.unlink()
+            bridge.symlink_to(
+                "../../.agents/skills/configure-authorization",
+                target_is_directory=True,
+            )
+            (bridge_root / "unexpected").symlink_to(
+                "../../.agents/skills/initialize-project-workspace",
+                target_is_directory=True,
+            )
+            exit_code, payload, _, _ = self.run_cli(
+                ("--workspace-root", str(workspace), "workspace", "preflight")
+            )
+            self.assertEqual(2, exit_code)
+            self.assertEqual("workspace_ai_asset_contaminated", payload["code"])
 
     def test_preflight_rejects_missing_or_maintainer_workspace_skill(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

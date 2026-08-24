@@ -30,11 +30,11 @@
 - AIAgent 必须通过操作契约使用工具，不能直接猜测 Jira 字段、状态或工作流。
 - Git 和 GitHub 可以轻封装，但推送、创建拉取请求、合并和发布必须有人确认。
 - 工作日志可以生成改进建议，但不能未经人工确认自动改写 AgenticOps 源头规则。
-- GitHub 默认分支是 `main`，日常开发使用 `develop`，`main` 只通过 PR 的 Merge commit 合入；硬门禁依赖 Ruleset，软门禁依赖显式人工控制且不得伪装成服务器端保护。
-- 正常发布只使用 `maintainer/scripts/release.sh`，Hotfix 只使用 `maintainer/scripts/hotfix.sh`；两个 `publish` 都必须固定执行完整验证并取得最终确认。
+- GitHub 默认分支是 `main`，日常开发使用 `develop`；正常发布只通过 PR 的 Merge commit 合入，Hotfix 是 Jira key 绑定的脚本化直推例外。
+- 正常发布只使用 `maintainer/scripts/release.sh` 并固定执行完整验证与最终确认；Hotfix 只使用 `maintainer/scripts/hotfix.sh <KEY>`，由脚本自行完成分支切换与同步，不运行发布验证、不追加确认且不与 Jira 交互。
 - 根 AI 入口只进入 maintainer，业务项目 AI 入口只进入 developer；`ao-maint` / `ao-work`、Python 包、Skill、授权、配置和状态无交叉。
 - developer 安装不提供 `agentic-cli` 别名或 `--mode` 工作面切换。
-- 正常发布只推送二段式 annotated `vX.Y` tag；Hotfix 复用最近版本基线且不产生新 tag。
+- 正常发布只推送二段式 annotated `vX.Y` tag；Hotfix 不读取版本基线，也不创建、移动或推送 tag。
 
 ## 3. 审阅时重点找的问题
 
@@ -69,7 +69,9 @@
 - `prepare` 对固定 HEAD 完成四项完整验证，验证失败不创建新 tag，也不生成项目自有平台二进制或 checksum。
 - publish 由刷新后的 `origin/main` 基线 Runtime 检查固定 candidate；信任根变更已停止自动发布并转人工审查 PR。
 - 最终确认展示的 HEAD、提交列表、版本基线和合并方向正确。
-- 软门禁普通发布使用固定 `release/vX.Y`；首次 `publish` 返回状态码 `2` 后未自动合并、未推送 Tag，人工合并后使用原命令恢复并完成第二次完整验证。
+- 软门禁普通发布使用固定 `release/vX.Y`；首次 `publish` 创建 PR 后每 5 秒查询状态、最多等待 30 分钟，人工 Merge commit 后自动完成第二次完整验证且不自动合并。`--no-wait-for-merge` 返回状态码 `2`，保留人工续跑能力。
+- 正常发布在推送 Tag 前将 `develop` 快进到已验证的 `origin/main`；快进不成立时停止，不以普通 merge、rebase 或历史改写规避。
+- Hotfix 从已同步的本地 `develop` 构造带 Jira key 的 Merge commit，原子更新远端 `main/develop` 后同步本地 `develop`；不创建分支、PR、Tag 或 Jira 写入。
 - PR 实际以 Merge commit 合入，`origin/main` 包含待发布 HEAD。
 - 正常发布的远端 tag 在合并验证后创建且不可变；Hotfix 没有 tag 写操作。
 - `.local/release-runs/` 逐级拒绝符号链接、特殊文件和物理越界，原子写入普通 JSON；审计记录正确的 `protection_mode` 和等待/完成状态，且不包含凭证或原始敏感日志。
@@ -81,6 +83,6 @@
 后续推进必须先对齐故事线，再保持 Jira 计划、文档、契约、测试和代码同步。阶段性状态、剩余工作和验收命令只维护在对应 Jira 工作项中。
 
 - 正常发布确认远端 tag 与发布记录一致。
-- Hotfix 明确提示并由研发工程师人工把修复同步回 `develop`。
-- 若能可靠确认 Jira 编号，推送成功后回写中文变更总结；回写失败只重试评论，不重复推送或发布。
+- Hotfix 完成后本地与远端 `develop`、远端 `main` 指向同一 Merge commit；分叉、未同步或 atomic push 失败时没有部分更新。
+- 普通推送若能可靠确认 Jira 编号，成功后回写中文变更总结；Hotfix 不回写 Jira，编号只保存在 Merge commit。
 - 保留 PR、Merge commit 和本地 JSON 审计作为发布证据。

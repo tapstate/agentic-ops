@@ -35,6 +35,8 @@
 <install-root>/bin/ao-work
 ```
 
+安装入口随后只用 `<install-root>/developer/.venv/bin/python` 启动 Runtime，并显式重置 `VIRTUAL_ENV` 与 `PATH` 的 venv 首项。工作空间本地启动器不激活业务项目 venv，也不继承 Agent 启动进程中可能存在的其它 Python 环境。
+
 `AGENTS.md` 和 `CLAUDE.md` 的受管内容明确将自然语言命令映射为：
 
 ```sh
@@ -128,12 +130,13 @@
 
 1. 从非默认 developer 安装初始化工作空间后，本地启动器固定指向该安装。
 2. 清空或不含安装目录的 `PATH` 时，`./.agentic-ops/bin/ao-work workspace preflight` 和 `takeover` 可按绑定安装运行。
-3. 同机两个安装各自初始化不同工作空间，入口不串用，身份引用不匹配时阻断。
-4. 启动器、`agent.json` 或路径被 symlink/hardlink/路径逃逸篡改时失败关闭。
-5. schema v4 工作空间不扫描 PATH，明确要求由目标安装执行迁移。
-6. 重复 `workspace init --confirm-existing-config` 保持幂等，只更新受管入口，不复制凭据。
-7. 工作空间 AGENTS.md、CLAUDE.md 和人读文档都使用 `./.agentic-ops/bin/ao-work`，不再要求全局 PATH。
-8. developer-only 稀疏安装、工作面隔离、安装身份绑定和 TAP-12289 接管回归均保持通过。
+3. 从业务工作空间执行 `./.agentic-ops/bin/ao-work version` 时，实际 `python_executable`、`python_venv` 与初始化绑定安装的 `developer/.venv` 一致，即使 Agent 启动环境预先设置了其它 `VIRTUAL_ENV`。
+4. 同机两个安装各自初始化不同工作空间，入口不串用，身份引用不匹配时阻断。
+5. 启动器、`agent.json` 或路径被 symlink/hardlink/路径逃逸篡改时失败关闭。
+6. schema v4 工作空间不扫描 PATH，明确要求由目标安装执行迁移。
+7. 重复 `workspace init --confirm-existing-config` 保持幂等，只更新受管入口，不复制凭据。
+8. 工作空间 AGENTS.md、CLAUDE.md 和人读文档都使用 `./.agentic-ops/bin/ao-work`，不再要求全局 PATH。
+9. developer-only 稀疏安装、工作面隔离、安装身份绑定和 TAP-12289 接管回归均保持通过。
 
 固定完整验证：
 

@@ -3,11 +3,12 @@
 本入口固定属于 `developer` 工作面，用于业务项目工作空间代表的研发员执行获得授权的研发工作。
 
 - 首次初始化、授权或恢复时，使用目标安装的绝对入口 `<install-root>/bin/ao-work`；初始化成功后的业务任务入口固定为 `./.agentic-ops/bin/ao-work`，不得搜索 PATH 或其它安装目录。
+- 如需为整个 `ao-work` 入口设置持久命令前缀授权，请直接发给 AI：“请为 `./.agentic-ops/bin/ao-work` 申请持久命令前缀授权，覆盖其所有子命令。”
 - 规则入口：`developer/rules/`。
 - Skill 入口：`developer/skills/`。
 - 能力事实入口：`ao-work capability list|show` 与 `developer/standards/capabilities/operations.yaml`。
 - 授权、配置和状态：只能使用当前业务项目工作空间 `.agentic-ops/` 及 developer 安装资产。
-- 源码（D-048 池模式）：业务源码在中央克隆池 `<source_pool_root>`（研发员级配置 `~/.agentic-ops/user/config.yaml`）；任务执行源码挂在 `<source_pool_root>/<JIRA-KEY>/<from_branch>/<repo>` 任务工作树集，分支由 Project Profile `branches` 推导，per-worktree 身份写入 worktree config。工作树内禁止直接 fetch，统一在池成员（`<source_pool_root>/<owner>/<repo>`）执行。
+- 源码（D-048 池模式）：业务源码在中央克隆池 `<source_pool_root>`（研发员级配置 `~/.agentic-ops/user/config.yaml`）；任务执行源码挂在 `<source_pool_root>/.worktree/<JIRA-KEY>/<问题版本>/<repo>` 任务工作树集。先按 Project Profile 判定任务领域并刷新该领域全部池成员；TapData 领域配置缺失时必须阻断，不能回退全量挂载。产品域必须调用项目分支对齐脚本的只读 remote-only `plan`，按其实际目标分支创建工作树，其它领域使用各自基线规则。`问题版本` 是领域基线仓库的输入分支，`target_branch` 是目标仓库经对齐后的实际分支，二者不得混用。per-worktree 身份写入 worktree config。工作树内禁止直接 fetch，统一在池成员（`<source_pool_root>/<owner>/<repo>`）执行；检测到旧布局工作树时必须停止并请求人工迁移或清理。
 
 禁止加载 `maintainer/AGENTS.md`、AgenticOps 源头设计红线、源头发布规则、维护授权或维护状态。业务任务发现能力不足时，只生成脱敏反馈并由人工交接给项目维护者，不得从业务工作面直接修改 AgenticOps 源头。
 

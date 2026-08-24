@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ao_maint.jira.adf import markdown_to_adf
+from ao_maint.jira.config import select_maintainer_workflow
 from ao_maint.jira.client import JiraClient, JiraTransportError
 from ao_maint.jira.model import (
     JiraIssue,
@@ -962,10 +963,8 @@ class MaintainerJiraService:
                 "目标必须且只能指定一个：--target-status / --target-transition / --transition-id",
             )
         issue = self.inspect_issue(issue_key)
-        project_workflow = (
-            workflow.get("projects", {}).get(issue.project_key, {})
-            if isinstance(workflow, dict)
-            else {}
+        project_workflow = select_maintainer_workflow(
+            workflow, issue.project_key, issue.issue_type
         )
         available = self.client.available_transitions(issue.key)
         matched = _match_transition(
@@ -992,6 +991,7 @@ class MaintainerJiraService:
                 details=_adaptation_material(
                     issue.key,
                     issue.project_key,
+                    issue.issue_type,
                     issue.status,
                     available,
                     project_workflow,
@@ -1003,6 +1003,7 @@ class MaintainerJiraService:
             _require_chinese(normalized_comment, "状态流转说明评论")
         payload = {
             "project_key": issue.project_key,
+            "issue_type": issue.issue_type,
             "from_status": issue.status,
             "target_status": matched_status,
             "transition_id": matched_id,
@@ -1032,6 +1033,7 @@ class MaintainerJiraService:
         transition_id = str(plan.payload["transition_id"])
         comment = str(plan.payload.get("comment", ""))
         issue = self.inspect_issue(plan.issue_key)
+        self._require_transition_issue_binding(plan, issue, remote_write_completed=False)
         if issue.status == target_status:
             return _transition_readback(plan, issue.status, created=False)
         if issue.status != from_status:
@@ -1048,6 +1050,7 @@ class MaintainerJiraService:
                 details=_adaptation_material(
                     plan.issue_key,
                     str(plan.payload.get("project_key", "")),
+                    str(plan.payload.get("issue_type", "")),
                     issue.status,
                     self.client.available_transitions(plan.issue_key),
                     {},
@@ -1065,6 +1068,7 @@ class MaintainerJiraService:
                 details=_adaptation_material(
                     plan.issue_key,
                     str(plan.payload.get("project_key", "")),
+                    str(plan.payload.get("issue_type", "")),
                     issue.status,
                     available,
                     {},
@@ -1079,6 +1083,7 @@ class MaintainerJiraService:
         except JiraTransportError as error:
             raise _unknown_write("Jira 状态流转", error) from error
         readback = self.inspect_issue(plan.issue_key)
+        self._require_transition_issue_binding(plan, readback, remote_write_completed=True)
         if readback.status != target_status:
             raise RuntimeErrorResult(
                 code="jira_transition_readback_mismatch",
@@ -1102,12 +1107,14 @@ class MaintainerJiraService:
         self._validate_apply_plan(plan, plan.plan_id, "jira_transition")
         self._validate_transition_plan(plan)
         issue = self.inspect_issue(plan.issue_key)
+        self._require_transition_issue_binding(plan, issue, remote_write_completed=False)
         matched = issue.status == str(plan.payload["target_status"])
         return _transition_readback(plan, issue.status, created=matched)
 
     def _validate_transition_plan(self, plan: WritePlan) -> None:
         expected = {
             "project_key",
+            "issue_type",
             "from_status",
             "target_status",
             "transition_id",
@@ -1119,6 +1126,7 @@ class MaintainerJiraService:
         if set(plan.payload) != expected:
             raise _input_error("jira_write_plan_invalid", "Jira 状态流转计划字段无效")
         project_key = plan.payload.get("project_key")
+        issue_type = plan.payload.get("issue_type")
         from_status = plan.payload.get("from_status")
         target_status = plan.payload.get("target_status")
         transition_id = plan.payload.get("transition_id")
@@ -1129,6 +1137,8 @@ class MaintainerJiraService:
         if (
             not isinstance(project_key, str)
             or not project_key.strip()
+            or not isinstance(issue_type, str)
+            or not issue_type.strip()
             or not isinstance(from_status, str)
             or not from_status.strip()
             or not isinstance(target_status, str)
@@ -1149,6 +1159,56 @@ class MaintainerJiraService:
             _require_chinese(comment, "状态流转说明评论")
         elif body_sha256:
             raise _input_error("jira_write_plan_invalid", "Jira 状态流转评论摘要无效")
+
+    @staticmethod
+    def _require_transition_issue_binding(
+        plan: WritePlan,
+        issue: JiraIssue,
+        *,
+        remote_write_completed: bool,
+    ) -> None:
+        planned_project_key = str(plan.payload["project_key"])
+        planned_issue_type = str(plan.payload["issue_type"])
+        if (
+            issue.project_key == planned_project_key
+            and issue.issue_type == planned_issue_type
+        ):
+            return
+        if remote_write_completed:
+            code = "jira_transition_readback_mismatch"
+            message = (
+                "状态流转后回读的 Jira 项目或任务类型与计划不一致；"
+                "远端写入结果不明确，禁止盲目重试"
+            )
+            required_human_action = (
+                "请人工核对 Jira 当前项目、任务类型和状态，不要重复执行流转"
+            )
+        else:
+            code = "jira_transition_mapping_gap"
+            message = (
+                "Jira 当前项目或任务类型与计划时不一致，工作流映射前置条件已变化；"
+                "禁止执行原计划，请重新 plan"
+            )
+            required_human_action = (
+                "请重新执行 plan，对齐 Jira 当前项目和任务类型后再 apply"
+            )
+        raise RuntimeErrorResult(
+            code=code,
+            message=message,
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            retry_safe=not remote_write_completed,
+            required_human_action=required_human_action,
+            details={
+                "issue_key": plan.issue_key,
+                "planned_project_key": planned_project_key,
+                "current_project_key": issue.project_key,
+                "planned_issue_type": planned_issue_type,
+                "current_issue_type": issue.issue_type,
+                "current_status": issue.status,
+                "remote_write_completed": remote_write_completed,
+            },
+        )
 
     def _validate_apply_plan(
         self, plan: WritePlan, expected_plan_id: str, operation: str
@@ -1949,6 +2009,7 @@ def _match_transition(
 def _adaptation_material(
     issue_key: str,
     project_key: str,
+    issue_type: str,
     current_status: str,
     available: list[dict[str, str]],
     mapping: dict[str, Any],
@@ -1957,6 +2018,7 @@ def _adaptation_material(
     return {
         "issue_key": issue_key,
         "project_key": project_key,
+        "issue_type": issue_type,
         "current_status": current_status,
         "available_transitions": available,
         "configured_transitions": (

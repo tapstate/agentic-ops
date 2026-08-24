@@ -24,7 +24,7 @@ maintainer/scripts/release.sh recover --version vX.Y --merged-pr <number> --allo
 - `release_candidate_ready`：按正常 `prepare` / `publish` 流程继续；
 - `release_waiting_manual_merge`：给出 PR URL 和同一 `publish` 继续命令；
 - `release_candidate_already_in_main`：候选已提前合入，给出 `recover` 命令；
-- `release_local_tag_repair_required`：本地同名 Tag 不指向已核验候选，必须在恢复最终确认中重建；
+- `release_local_tag_repair_required`：本地同名 Tag 不指向已核验的 main Merge commit，必须在恢复最终确认中重建；
 - `release_remote_tag_conflict`、`release_reference_drift`、`release_merged_pr_invalid`：停止，不自动删除或覆盖远端引用。
 
 ## 3. 受控恢复
@@ -34,12 +34,12 @@ maintainer/scripts/release.sh recover --version vX.Y --merged-pr <number> --allo
 1. PR 属于 `tapstate/agentic-ops`，目标分支为 `main`，状态为 `MERGED`，且存在 Merge commit；
 2. PR head 是 Merge commit 的祖先，Merge commit 仍位于刷新后的 `origin/main`；
 3. `develop`、本地/远端 `release/vX.Y` 与本地/远端 `vX.Y` 的状态和检查结果一致；
-4. 远端同名 Tag 不存在，或已精确指向同一候选；不删除、不覆盖远端 Tag；
+4. 远端同名 Tag 不存在，或已精确指向同一 main Merge commit；不删除、不覆盖远端 Tag；
 5. 在固定候选 worktree 执行完整发布验证。
 
 本例的原始基线缺少故事门禁，不能把事后 `origin/main` 检查伪装为当时的可信基线检查。因此 `recover` 必须把“候选已被基线升级 PR 提前合入”的风险和指定 PR 作为独立人工确认事实写入审计；它不能成为未来普通发布的快捷路径。
 
-验证通过后，首次 `recover` 只展示完整确认包和绑定当前 PR、head、Merge commit、main 与 Tag 状态的精确继续命令，不产生引用副作用。第二次执行必须同时提供该命令中的 `--confirm-release` 与 `--confirm-recovery <binding>`；事实变化或绑定不一致时重新检查。确认有效后，脚本通过 Git 原子引用更新把错误的**本地**同名 Tag 重建为已核验 PR head 的 annotated Tag，推送不可变 Tag 并写入恢复审计。远端 Tag 已正确存在时允许幂等补写审计；错误或轻量远端 Tag 一律阻断。无效 `release/vX.Y` 分支不自动删除，保留为可检查事实。
+验证通过后，首次 `recover` 只展示完整确认包和绑定当前 PR、head、Merge commit、main 与 Tag 状态的精确继续命令，不产生引用副作用。第二次执行必须同时提供该命令中的 `--confirm-release` 与 `--confirm-recovery <binding>`；事实变化或绑定不一致时重新检查。确认有效后，脚本通过 Git 原子引用更新把错误的**本地**同名 Tag 重建为已核验 main Merge commit 的 annotated Tag，推送不可变 Tag 并写入恢复审计。远端 Tag 已正确存在时允许幂等补写审计；错误或轻量远端 Tag 一律阻断。无效 `release/vX.Y` 分支不自动删除，保留为可检查事实。
 
 ## 4. 确认包契约
 

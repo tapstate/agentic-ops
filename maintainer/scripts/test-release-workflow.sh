@@ -85,12 +85,13 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 [ -n "$project" ]
-mkdir -p "$project/.venv/bin"
-cat > "$project/.venv/bin/python" <<'PYTHON'
-#!/usr/bin/env bash
-exec "${AGENTIC_OPS_TEST_REAL_PYTHON:?}" "$@"
-PYTHON
-chmod 0755 "$project/.venv/bin/python"
+"${AGENTIC_OPS_TEST_REAL_PYTHON:?}" -m venv --clear --system-site-packages \
+  "$project/.venv"
+venv_site="$("$project/.venv/bin/python" -c \
+  'import site; print(site.getsitepackages()[0])')"
+"${AGENTIC_OPS_TEST_REAL_PYTHON:?}" -c \
+  'import site; print("\n".join(site.getsitepackages()))' \
+  > "$venv_site/agentic-ops-test-dependencies.pth"
 printf '%s\n' "$project" >> "${FAKE_UV_LOG:?}"
 EOF
 chmod 0755 "$fake_uv"
@@ -226,6 +227,28 @@ git -C "$fixture" push -u origin develop >/dev/null
   workflow_check_hooks "$fixture"
 ) || fail "测试仓库未启用 Git common directory 可信 Hook launcher"
 
+# main 在候选准备之后前进时，发布故事门禁仍必须使用最新 main 的可信
+# Runtime，但只审查 main 与固定候选的 merge-base 之后的候选范围。
+release_story_range_base="$(git -C "$fixture" rev-parse origin/main)"
+git -C "$fixture" switch main >/dev/null
+printf 'independent main update\n' > "$fixture/MAIN-ONLY.md"
+git -C "$fixture" add MAIN-ONLY.md
+git -C "$fixture" -c core.hooksPath=/dev/null commit -m "independent main fixture update" >/dev/null
+git -C "$fixture" -c core.hooksPath=/dev/null push origin main >/dev/null
+git -C "$fixture" switch develop >/dev/null
+git -C "$fixture" fetch origin main >/dev/null
+release_story_head="$(git -C "$fixture" rev-parse HEAD)"
+: > "$story_gate_log"
+if ! (
+  . "$fixture/maintainer/scripts/lib/release-common.sh"
+  release_verify_story_gate "$fixture" origin/main "$release_story_head"
+) >"$test_root/diverged-story-gate.out" 2>"$test_root/diverged-story-gate.err"; then
+  cat "$test_root/diverged-story-gate.err" >&2
+  fail "main 前进后发布故事门禁必须接受固定候选的 merge-base 范围"
+fi
+grep -Eq "^--source-root .+/candidate story impact --change-source range --base $release_story_range_base --head $release_story_head$" \
+  "$story_gate_log" || fail "分叉发布候选未以 merge-base 作为故事门禁范围"
+
 pre_push_head="$(git -C "$fixture" rev-parse HEAD)"
 pre_push_main="$(git --git-dir="$remote" rev-parse refs/heads/main)"
 zero_sha="0000000000000000000000000000000000000000"
@@ -236,6 +259,26 @@ if printf 'refs/heads/develop %s refs/heads/main %s\n' "$pre_push_head" "$pre_pu
 fi
 grep -q 'direct push to main is prohibited' "$test_root/pre-push-main.err" ||
   fail "pre-push 拒绝 main 时没有稳定提示"
+if ! printf 'refs/heads/develop %s refs/heads/main %s\n' "$pre_push_head" "$pre_push_main" |
+  (cd "$fixture" && AGENTIC_OPS_SPECIAL_PUSH=hotfix .githooks/pre-push origin "$remote") \
+    >"$test_root/pre-push-hotfix-main.out" 2>"$test_root/pre-push-hotfix-main.err"; then
+  fail "Hotfix 专用执行标识必须允许原子直推 main"
+fi
+if ! printf '%s %s refs/heads/main %s\n%s %s refs/heads/develop %s\n' \
+  "$pre_push_head" "$pre_push_head" "$pre_push_main" \
+  "$pre_push_head" "$pre_push_head" "$pre_push_head" |
+  (cd "$fixture" && AGENTIC_OPS_SPECIAL_PUSH=hotfix .githooks/pre-push origin "$remote") \
+    >"$test_root/pre-push-hotfix-sha.out" 2>"$test_root/pre-push-hotfix-sha.err"; then
+  fail "Hotfix 必须允许 commit-tree 生成的 SHA 原子更新 main/develop"
+fi
+if printf '%s %s refs/tags/hotfix-invalid %s\n' \
+  "$pre_push_head" "$pre_push_head" "$zero_sha" |
+  (cd "$fixture" && AGENTIC_OPS_SPECIAL_PUSH=hotfix .githooks/pre-push origin "$remote") \
+    >"$test_root/pre-push-hotfix-tag.out" 2>"$test_root/pre-push-hotfix-tag.err"; then
+  fail "Hotfix 专用执行标识不得写入 main/develop 之外的引用"
+fi
+grep -q 'hotfix_push_target_invalid' "$test_root/pre-push-hotfix-tag.err" ||
+  fail "Hotfix 非法目标未返回稳定失败码"
 if ! printf 'refs/heads/develop %s refs/heads/develop %s\n' "$pre_push_head" "$pre_push_head" |
   (cd "$fixture" && .githooks/pre-push origin "$remote") \
     >"$test_root/pre-push-develop.out" 2>"$test_root/pre-push-develop.err"; then
@@ -414,7 +457,7 @@ rm -f "$fixture/maintainer/.local"
 [ -z "$(git -C "$fixture" status --porcelain)" ] ||
   fail "release 本地状态链接负测结束后 fixture 应保持干净"
 
-# 三类发布审计都必须共用同一安全写边界。这里直接调用真实 writer：祖先
+# 两类正常发布审计都必须共用同一安全写边界。这里直接调用真实 writer：祖先
 # symlink 不得把 release-runs 或 JSON 写进仓库外 sentinel；中间目录位置被
 # FIFO 占用时也必须先失败，不能继续创建叶子或报告审计完成。
 invoke_audit_writer() {
@@ -437,11 +480,6 @@ invoke_audit_writer() {
           "$audit_root" release_publish v9.9 \
           1111111111111111111111111111111111111111 release/v9.9
         ;;
-      hotfix_completed)
-        release_write_hotfix_audit \
-          "$audit_root" AO-11 v9.8 \
-          1111111111111111111111111111111111111111 tester/AO-11/fix-main hard
-        ;;
       *)
         exit 99
         ;;
@@ -449,7 +487,7 @@ invoke_audit_writer() {
   )
 }
 
-for audit_kind in release_completed release_waiting hotfix_completed; do
+for audit_kind in release_completed release_waiting; do
   audit_symlink_root="$test_root/audit-$audit_kind-symlink"
   audit_external_sentinel="$test_root/audit-$audit_kind-external"
   mkdir -p "$audit_symlink_root" "$audit_external_sentinel"
@@ -640,7 +678,7 @@ grep -q 'invalid_release_version' "$test_root/invalid.err" ||
 prepare_head="$(git -C "$fixture" rev-parse HEAD)"
 
 # prepare 必须先完成固定 HEAD 的完整验证。任一检查失败时既不能报告成功，
-# 也不能提前留下 annotated tag。
+# 也不能留下发布前 Tag。
 failed_prepare_verify_log="$test_root/failed-prepare-verify.log"
 : > "$failed_prepare_verify_log"
 if (
@@ -690,8 +728,8 @@ grep -q '"operation":"release_prepare"' "$test_root/prepare.out" ||
   fail "release prepare 未完成"
 grep -q '"delivery":"python_source_and_developer_assets"' "$test_root/prepare.out" ||
   fail "release prepare 未声明 Python 交付集合"
-[ "$(git -C "$fixture" rev-list -n 1 v9.9)" = "$prepare_head" ] ||
-  fail "release tag 未绑定 prepare HEAD"
+test -z "$(git -C "$fixture" tag --list v9.9)" ||
+  fail "release prepare 不得在 main Merge commit 前创建 Tag"
 expected_prepare="$(printf '%s\n' \
   maintainer-scripts-test-python-runtime.sh \
   maintainer-scripts-test-resources.sh \
@@ -705,6 +743,18 @@ expected_prepare="$(printf '%s\n' \
   fail "release prepare 不得生成构建产物"
 [ ! -e "$fixture/install-resources" ] ||
   fail "release prepare 不得生成旧平台安装资源"
+
+# 软门禁必须在 prepare 固定 release 分支；随后 develop 的提交不能替换该候选。
+(
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$fake_gh" \
+  FAKE_VERIFY_LOG="$prepare_verify_log" \
+    maintainer/scripts/release.sh prepare --version v9.5 --allow-soft-gate
+) >"$test_root/soft-prepare.out"
+[ "$(git -C "$fixture" rev-parse refs/heads/release/v9.5)" = "$prepare_head" ] ||
+  fail "软门禁 prepare 未固定 release 分支到已验证 HEAD"
+test -z "$(git -C "$fixture" tag --list v9.5)" ||
+  fail "软门禁 prepare 不得提前创建 Tag"
 
 # 模拟 prepare 后经审查提交的发布变更，使本地 develop 明确领先远端；
 # 后续即可通过远端引用判断最终确认前是否发生了 push。
@@ -724,6 +774,7 @@ git -C "$fixture" -c core.hooksPath=/dev/null commit \
 publish_head="$(git -C "$fixture" rev-parse HEAD)"
 remote_develop_before_publish="$(git --git-dir="$remote" rev-parse refs/heads/develop)"
 remote_main_before_publish="$(git --git-dir="$remote" rev-parse refs/heads/main)"
+story_gate_range_base="$(git -C "$fixture" merge-base "$remote_main_before_publish" "$publish_head")"
 [ "$publish_head" != "$remote_develop_before_publish" ] ||
   fail "确认门禁测试需要本地 develop 领先远端"
 
@@ -788,7 +839,7 @@ if (
 fi
 grep -q 'release_story_gate_blocked' "$test_root/blocked-story-gate.err" ||
   fail "release publish 未返回故事门禁稳定失败码"
-grep -Eq "^--source-root .+/candidate story impact --change-source range --base $remote_main_before_publish --head $publish_head$" \
+grep -Eq "^--source-root .+/candidate story impact --change-source range --base $story_gate_range_base --head $publish_head$" \
   "$story_gate_log" ||
   fail "release publish 未用 origin/main 基线 Runtime 校验固定 candidate 快照"
 [ ! -s "$verify_log" ] ||
@@ -831,7 +882,7 @@ grep -q 'release_story_gate_trust_root_changed' \
   cat "$test_root/trust-root-change.err" >&2
   fail "门禁信任根变更未返回独立人工审查失败码"
 }
-grep -Eq "^--source-root .+/candidate story impact --change-source range --base $remote_main_before_publish --head $trust_root_head$" \
+grep -Eq "^--source-root .+/candidate story impact --change-source range --base $story_gate_range_base --head $trust_root_head$" \
   "$story_gate_log" ||
   fail "信任根变更仍必须先由 origin/main 基线门禁检查"
 [ ! -s "$verify_log" ] ||
@@ -846,6 +897,10 @@ git -C "$fixture" -c core.hooksPath=/dev/null commit \
   -m "restore trusted hook source after manual-review test" >/dev/null
 publish_head="$(git -C "$fixture" rev-parse HEAD)"
 
+# 在软门禁下 publish 只能消费 prepare 固定的 release 分支，不能从执行时的
+# develop HEAD 临时创建候选。
+git -C "$fixture" branch release/v9.9 "$publish_head"
+
 : > "$verify_log"
 : > "$story_gate_log"
 if (
@@ -859,7 +914,7 @@ if (
 fi
 grep -q 'release_confirmation_required' "$test_root/unconfirmed-publish.err" ||
   fail "release publish 未返回最终确认失败码"
-grep -Eq "^--source-root .+/candidate story impact --change-source range --base $remote_main_before_publish --head $publish_head$" \
+grep -Eq "^--source-root .+/candidate story impact --change-source range --base $story_gate_range_base --head $publish_head$" \
   "$story_gate_log" ||
   fail "release publish 未在完整验证前执行可信基线故事门禁"
 [ "$(wc -l < "$story_gate_log" | tr -d ' ')" = "1" ] ||
@@ -893,57 +948,185 @@ test -z "$(git --git-dir="$remote" show-ref --tags v9.9 || true)" ||
 
 if (
   cd "$fixture"
-  AGENTIC_OPS_GH_BIN="$fake_gh" \
-    maintainer/scripts/hotfix.sh create --jira-id ao-11 --user tester
+  maintainer/scripts/hotfix.sh ao-11
 ) >"$test_root/invalid-hotfix.out" 2>"$test_root/invalid-hotfix.err"; then
   fail "Hotfix 必须拒绝非法 Jira 编号"
 fi
 grep -q 'invalid_jira_id' "$test_root/invalid-hotfix.err" ||
   fail "Hotfix 未返回 Jira 编号失败码"
-
-git -C "$fixture" switch main >/dev/null
-git -C "$fixture" tag -a v9.8 -m 'hotfix baseline'
-AGENTIC_OPS_SPECIAL_PUSH=release \
-  git -C "$fixture" push origin refs/tags/v9.8 >/dev/null
-git -C "$fixture" switch develop >/dev/null
-(
-  cd "$fixture"
-  AGENTIC_OPS_GH_BIN="$fake_gh" \
-    maintainer/scripts/hotfix.sh create --jira-id AO-11 --user tester
-) >"$test_root/hotfix-create.out"
-grep -q '"operation":"hotfix_create"' "$test_root/hotfix-create.out" ||
-  fail "Hotfix 未从 origin/main 创建标准分支"
-test "$(git -C "$fixture" branch --show-current)" = "tester/AO-11/fix-main" ||
-  fail "Hotfix 分支命名不符合规则"
-hotfix_tag_count="$(git -C "$fixture" tag --list | wc -l | tr -d ' ')"
-hotfix_prepare_verify_log="$test_root/hotfix-prepare-verify.log"
-: > "$hotfix_prepare_verify_log"
-(
-  cd "$fixture"
-  AGENTIC_OPS_GH_BIN="$fake_gh" \
-  FAKE_VERIFY_LOG="$hotfix_prepare_verify_log" \
-    maintainer/scripts/hotfix.sh prepare
-) >"$test_root/hotfix-prepare.out"
-grep -q '"tag_action":"reuse_only"' "$test_root/hotfix-prepare.out" ||
-  fail "Hotfix prepare 必须复用版本基线"
-[ "$(cat "$hotfix_prepare_verify_log")" = "$expected_prepare" ] ||
-  fail "Hotfix prepare 未执行固定完整验证或顺序错误"
-test "$(git -C "$fixture" tag --list | wc -l | tr -d ' ')" = "$hotfix_tag_count" ||
-  fail "Hotfix prepare 不得创建新 Tag"
-
 if (
   cd "$fixture"
-  AGENTIC_OPS_GH_BIN="$fake_gh" \
-  AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING=1 \
-  FAKE_VERIFY_LOG="$verify_log" \
-    maintainer/scripts/hotfix.sh publish
-) >"$test_root/unconfirmed-hotfix.out" 2>"$test_root/unconfirmed-hotfix.err"; then
-  fail "Hotfix publish 缺少最终确认时必须阻断"
+  maintainer/scripts/hotfix.sh publish --jira-id AO-11
+) >"$test_root/legacy-hotfix-args.out" 2>"$test_root/legacy-hotfix-args.err"; then
+  fail "Hotfix 必须拒绝旧 publish --jira-id 参数"
 fi
-grep -q 'release_confirmation_required' "$test_root/unconfirmed-hotfix.err" ||
-  fail "Hotfix publish 未返回最终确认失败码"
-test -z "$(git --git-dir="$remote" show-ref --heads refs/heads/tester/AO-11/fix-main || true)" ||
-  fail "最终确认前不得推送 Hotfix 分支"
+grep -q 'invalid_hotfix_arguments' "$test_root/legacy-hotfix-args.err" ||
+  fail "Hotfix 旧参数未返回稳定失败码"
+
+# Hotfix 使用独立仓库验证 develop 到 main 的直合，不创建修复分支、PR、Tag，
+# 也不调用 gh 或 Jira。必要 Git 一致性检查通过后直接原子更新两个远端分支。
+hotfix_remote="$test_root/hotfix-remote.git"
+hotfix_fixture="$test_root/hotfix-repo"
+git init --bare "$hotfix_remote" >/dev/null
+git clone "$hotfix_remote" "$hotfix_fixture" >/dev/null 2>&1
+git -C "$hotfix_fixture" config user.email agentic-ops-test@example.test
+git -C "$hotfix_fixture" config user.name "AgenticOps Test"
+mkdir -p "$hotfix_fixture/.githooks" "$hotfix_fixture/maintainer/scripts/lib"
+cp "$repo_root/.githooks/pre-push" "$hotfix_fixture/.githooks/pre-push"
+cp "$repo_root/maintainer/scripts/hotfix.sh" "$hotfix_fixture/maintainer/scripts/hotfix.sh"
+cp "$repo_root/maintainer/scripts/lib/release-common.sh" \
+  "$hotfix_fixture/maintainer/scripts/lib/release-common.sh"
+printf 'maintainer\n' > "$hotfix_fixture/.agentic-ops-source"
+printf 'hotfix baseline\n' > "$hotfix_fixture/README.md"
+chmod 0755 "$hotfix_fixture/.githooks/pre-push" "$hotfix_fixture/maintainer/scripts/hotfix.sh"
+git -C "$hotfix_fixture" add .
+git -C "$hotfix_fixture" commit -m "hotfix baseline" >/dev/null
+git -C "$hotfix_fixture" branch -M main
+git -C "$hotfix_fixture" push -u origin main >/dev/null
+git -C "$hotfix_fixture" switch -c develop main >/dev/null
+printf 'urgent fix\n' >> "$hotfix_fixture/README.md"
+git -C "$hotfix_fixture" add README.md
+git -C "$hotfix_fixture" commit -m "urgent fix" >/dev/null
+hotfix_candidate="$(git -C "$hotfix_fixture" rev-parse HEAD)"
+git -C "$hotfix_fixture" push -u origin develop >/dev/null
+git -C "$hotfix_fixture" remote set-url origin "$AGENTIC_OPS_TEST_OFFICIAL_URL"
+export AGENTIC_OPS_TEST_FIXTURE_REMOTE="$hotfix_remote"
+
+printf 'dirty\n' >> "$hotfix_fixture/README.md"
+if (
+  cd "$hotfix_fixture"
+  maintainer/scripts/hotfix.sh AO-74
+) >"$test_root/hotfix-dirty.out" 2>"$test_root/hotfix-dirty.err"; then
+  fail "Hotfix 必须拒绝脏工作区"
+fi
+grep -q 'dirty_worktree' "$test_root/hotfix-dirty.err" ||
+  fail "Hotfix 脏工作区未返回稳定失败码"
+git -C "$hotfix_fixture" restore README.md
+
+# 用户可从其它干净分支直接调用；脚本必须自行切换 develop、完成合并和同步。
+git -C "$hotfix_fixture" switch main >/dev/null
+(
+  cd "$hotfix_fixture"
+  maintainer/scripts/hotfix.sh AO-74
+) >"$test_root/hotfix-publish.out"
+grep -q '"operation":"hotfix_publish"' "$test_root/hotfix-publish.out" ||
+  fail "Hotfix 未完成 develop 到 main 的直合"
+grep -q '"jira_interaction":false' "$test_root/hotfix-publish.out" ||
+  fail "Hotfix 未声明不与 Jira 交互"
+grep -q '"branch_created":false' "$test_root/hotfix-publish.out" ||
+  fail "Hotfix 错误声明创建了分支"
+hotfix_merge="$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)"
+[ "$hotfix_merge" = "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/develop)" ] ||
+  fail "Hotfix 未原子同步远端 main 与 develop"
+[ "$(git -C "$hotfix_fixture" rev-parse develop)" = "$hotfix_merge" ] ||
+  fail "Hotfix 未同步本地 develop"
+[ "$(git -C "$hotfix_fixture" branch --show-current)" = "develop" ] ||
+  fail "Hotfix 未自动切换到 develop"
+[ "$(git -C "$hotfix_fixture" rev-parse "$hotfix_merge^2")" = "$hotfix_candidate" ] ||
+  fail "Hotfix Merge commit 的第二父提交不是固定 develop 候选"
+git -C "$hotfix_fixture" log -1 --format=%B "$hotfix_merge" |
+  grep -q 'AO-74' || fail "Hotfix Merge commit 未写入 Jira 编号"
+test -z "$(git -C "$hotfix_fixture" branch --list '*fix-main*')" ||
+  fail "Hotfix 不得创建修复分支"
+test -z "$(git -C "$hotfix_fixture" tag --list)" ||
+  fail "Hotfix 不得创建或移动 Tag"
+
+# 本地 develop 领先远端时，脚本必须把本地已提交变更直接纳入同一次原子
+# main/develop 更新，不要求用户先单独 push。
+printf 'local only\n' >> "$hotfix_fixture/README.md"
+git -C "$hotfix_fixture" add README.md
+git -C "$hotfix_fixture" commit -m "local only hotfix candidate" >/dev/null
+local_hotfix_candidate="$(git -C "$hotfix_fixture" rev-parse HEAD)"
+(
+  cd "$hotfix_fixture"
+  maintainer/scripts/hotfix.sh AO-75
+) >"$test_root/hotfix-local-ahead.out"
+hotfix_merge="$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)"
+[ "$hotfix_merge" = "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/develop)" ] ||
+  fail "Hotfix 未原子推送本地领先的 develop"
+[ "$(git --git-dir="$hotfix_remote" rev-parse "$hotfix_merge^2")" = "$local_hotfix_candidate" ] ||
+  fail "Hotfix Merge commit 未包含本地 develop 已提交变更"
+
+# 本地 develop 落后远端时，脚本必须先自动快进，再把远端新提交合入 main；
+# 用户不需要提前执行 pull。
+printf 'remote only\n' >> "$hotfix_fixture/README.md"
+git -C "$hotfix_fixture" add README.md
+git -C "$hotfix_fixture" commit -m "remote only hotfix candidate" >/dev/null
+remote_hotfix_candidate="$(git -C "$hotfix_fixture" rev-parse HEAD)"
+git -C "$hotfix_fixture" -c core.hooksPath=/dev/null push origin develop >/dev/null
+git -C "$hotfix_fixture" reset --hard "$hotfix_merge" >/dev/null
+(
+  cd "$hotfix_fixture"
+  maintainer/scripts/hotfix.sh AO-77
+) >"$test_root/hotfix-local-behind.out"
+hotfix_merge="$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)"
+[ "$hotfix_merge" = "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/develop)" ] ||
+  fail "Hotfix 未在本地落后时原子同步 main/develop"
+[ "$(git --git-dir="$hotfix_remote" rev-parse "$hotfix_merge^2")" = "$remote_hotfix_candidate" ] ||
+  fail "Hotfix 未自动快进并包含远端 develop 新提交"
+[ "$(git -C "$hotfix_fixture" rev-parse develop)" = "$hotfix_merge" ] ||
+  fail "Hotfix 未在本地落后场景同步本地 develop"
+
+# 已同步状态再次执行必须幂等返回，不创建新的 Merge commit。
+(
+  cd "$hotfix_fixture"
+  maintainer/scripts/hotfix.sh AO-77
+) >"$test_root/hotfix-idempotent.out"
+grep -q '"changed":false' "$test_root/hotfix-idempotent.out" ||
+  fail "Hotfix 重复执行未按已同步状态幂等完成"
+
+# main 独立前进后，Hotfix 仍应生成保留双方内容的双父 Merge commit，并原子
+# 同步 main/develop；不能丢失 main 独有提交或只采用 develop 的 tree。
+git -C "$hotfix_fixture" branch -f main "$hotfix_merge"
+git -C "$hotfix_fixture" switch main >/dev/null
+printf 'independent main\n' > "$hotfix_fixture/MAIN-ONLY.md"
+git -C "$hotfix_fixture" add MAIN-ONLY.md
+git -C "$hotfix_fixture" commit -m "independent main after hotfix" >/dev/null
+diverged_main="$(git -C "$hotfix_fixture" rev-parse HEAD)"
+AGENTIC_OPS_SPECIAL_PUSH=hotfix git -C "$hotfix_fixture" push origin main >/dev/null
+git -C "$hotfix_fixture" switch develop >/dev/null
+(
+  cd "$hotfix_fixture"
+  maintainer/scripts/hotfix.sh AO-76
+) >"$test_root/hotfix-diverged.out"
+diverged_merge="$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)"
+[ "$diverged_merge" = "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/develop)" ] ||
+  fail "Hotfix 未原子同步已分叉的 main/develop"
+[ "$(git --git-dir="$hotfix_remote" rev-parse "$diverged_merge^1")" = "$diverged_main" ] ||
+  fail "Hotfix 分叉合并的第一父提交不是固定 main"
+[ "$(git --git-dir="$hotfix_remote" rev-parse "$diverged_merge^2")" = "$hotfix_merge" ] ||
+  fail "Hotfix 分叉合并的第二父提交不是固定 develop"
+git --git-dir="$hotfix_remote" cat-file -e "$diverged_merge:MAIN-ONLY.md" ||
+  fail "Hotfix 分叉合并丢失 main 独有内容"
+git --git-dir="$hotfix_remote" cat-file -e "$diverged_merge:README.md" ||
+  fail "Hotfix 分叉合并丢失 develop 内容"
+
+# 本地与远端 develop 各自独立前进时属于真实分叉，脚本必须停止且不改写
+# 任一远端引用。
+printf 'local divergence\n' > "$hotfix_fixture/LOCAL-DIVERGENCE.md"
+git -C "$hotfix_fixture" add LOCAL-DIVERGENCE.md
+git -C "$hotfix_fixture" commit -m "local develop divergence" >/dev/null
+local_diverged_candidate="$(git -C "$hotfix_fixture" rev-parse HEAD)"
+git -C "$hotfix_fixture" reset --hard "$diverged_merge" >/dev/null
+printf 'remote divergence\n' > "$hotfix_fixture/REMOTE-DIVERGENCE.md"
+git -C "$hotfix_fixture" add REMOTE-DIVERGENCE.md
+git -C "$hotfix_fixture" commit -m "remote develop divergence" >/dev/null
+remote_diverged_candidate="$(git -C "$hotfix_fixture" rev-parse HEAD)"
+git -C "$hotfix_fixture" -c core.hooksPath=/dev/null push origin develop >/dev/null
+git -C "$hotfix_fixture" reset --hard "$local_diverged_candidate" >/dev/null
+if (
+  cd "$hotfix_fixture"
+  maintainer/scripts/hotfix.sh AO-78
+) >"$test_root/hotfix-develop-diverged.out" 2>"$test_root/hotfix-develop-diverged.err"; then
+  fail "Hotfix 必须拒绝本地与远端 develop 真实分叉"
+fi
+grep -q 'hotfix_develop_diverged' "$test_root/hotfix-develop-diverged.err" ||
+  fail "Hotfix develop 分叉未返回稳定失败码"
+[ "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/main)" = "$diverged_merge" ] ||
+  fail "Hotfix develop 分叉失败错误改写了 main"
+[ "$(git --git-dir="$hotfix_remote" rev-parse refs/heads/develop)" = "$remote_diverged_candidate" ] ||
+  fail "Hotfix develop 分叉失败错误改写了 develop"
+export AGENTIC_OPS_TEST_FIXTURE_REMOTE="$remote"
 
 # 已提前合入 main 的候选必须由 inspect 自动解析真实 PR，并通过两阶段
 # recover 绑定完整确认包；确认前不得改变本地或远端 Tag。
@@ -1095,12 +1278,34 @@ test -z "$(git --git-dir="$remote" show-ref --tags v9.7 || true)" ||
     maintainer/scripts/release.sh recover --version v9.7 --merged-pr 77 \
       --allow-soft-gate --confirm-release --confirm-recovery "$recovery_digest"
 ) >"$test_root/recovery-complete.out" 2>"$test_root/recovery-complete.err"
-test "$(git -C "$fixture" rev-list -n 1 v9.7)" = "$recovery_candidate" ||
-  fail "recover 未把本地 Tag 原子修复到 PR head"
-test "$(git --git-dir="$remote" rev-list -n 1 v9.7)" = "$recovery_candidate" ||
+test "$(git -C "$fixture" rev-list -n 1 v9.7)" = "$recovery_merge" ||
+  fail "recover 未把本地 Tag 原子修复到 main Merge commit"
+test "$(git --git-dir="$remote" rev-list -n 1 v9.7)" = "$recovery_merge" ||
   fail "recover 未推送正确的不可变远端 Tag"
 grep -q '"operation":"release_recover"' "$test_root/recovery-complete.out" ||
   fail "recover 成功结果缺失"
+
+# 正常发布与 recover 都必须把版本 Tag 放在已核验的 main Merge commit；
+# 任何预先指向候选 HEAD 的本地 Tag 都不能被脚本静默移动。
+(
+  . "$fixture/maintainer/scripts/lib/release-common.sh"
+  release_create_and_push_version_tag "$fixture" v9.4 "$recovery_merge"
+)
+test "$(git -C "$fixture" rev-list -n 1 v9.4)" = "$recovery_merge" ||
+  fail "正常发布未在 main Merge commit 创建本地 Tag"
+test "$(git --git-dir="$remote" rev-list -n 1 v9.4)" = "$recovery_merge" ||
+  fail "正常发布未推送指向 main Merge commit 的 Tag"
+git -C "$fixture" tag -a v9.3 "$recovery_candidate" -m "legacy pre-merge tag"
+if (
+  . "$fixture/maintainer/scripts/lib/release-common.sh"
+  release_create_and_push_version_tag "$fixture" v9.3 "$recovery_merge"
+) >"$test_root/local-tag-conflict.out" 2>"$test_root/local-tag-conflict.err"; then
+  fail "正常发布不得静默移动预先存在的本地 Tag"
+fi
+grep -q 'release_local_tag_conflict' "$test_root/local-tag-conflict.err" ||
+  fail "预先存在的本地 Tag 未返回稳定冲突码"
+test -z "$(git --git-dir="$remote" show-ref --tags v9.3 || true)" ||
+  fail "本地 Tag 冲突时不得推送远端 Tag"
 (
   cd "$fixture"
   AGENTIC_OPS_GH_BIN="$recovery_gh" \
@@ -1111,7 +1316,7 @@ grep -q '"state":"release_completed"' "$test_root/recovery-completed-inspect.out
 
 # 远端 Tag 已正确时，本地 Tag 漂移仍必须可诊断并幂等修复；不得改写远端 Tag。
 remote_tag_ref_before="$(git --git-dir="$remote" rev-parse refs/tags/v9.7)"
-git -C "$fixture" tag -f -a v9.7 "$recovery_merge" -m "drifted local recovery tag" >/dev/null
+git -C "$fixture" tag -f -a v9.7 "$recovery_candidate" -m "drifted local recovery tag" >/dev/null
 (
   cd "$fixture"
   AGENTIC_OPS_GH_BIN="$recovery_gh" \
@@ -1139,7 +1344,7 @@ test -n "$idempotent_digest" || fail "幂等恢复未输出确认绑定"
     maintainer/scripts/release.sh recover --version v9.7 --merged-pr 77 \
       --allow-soft-gate --confirm-release --confirm-recovery "$idempotent_digest"
 ) >"$test_root/recovery-idempotent-complete.out" 2>"$test_root/recovery-idempotent-complete.err"
-test "$(git -C "$fixture" rev-list -n 1 v9.7)" = "$recovery_candidate" ||
+test "$(git -C "$fixture" rev-list -n 1 v9.7)" = "$recovery_merge" ||
   fail "远端 Tag 已正确时 recover 未修复本地 Tag"
 test "$(git --git-dir="$remote" rev-parse refs/tags/v9.7)" = "$remote_tag_ref_before" ||
   fail "幂等恢复改写了正确的远端 Tag"
@@ -1181,5 +1386,130 @@ grep -q '"pr_number":"88"' "$test_root/release-waiting-inspect.out" ||
 grep -q 'release.sh publish --version v9.6 --allow-soft-gate' \
   "$test_root/release-waiting-inspect.out" ||
   fail "inspect 等待态未给出同一 publish 继续命令"
+
+# 软门禁普通发布创建 PR 后应每 5 秒轮询；Merge commit 仍必须由人工在
+# GitHub 完成，脚本只在观察到该事实后自动继续。替换 sleep 以避免测试等待。
+polling_gh="$test_root/polling-gh"
+polling_bin="$test_root/polling-bin"
+mkdir -p "$polling_bin"
+cat > "$polling_gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "${1:-}" = "pr" ] && [ "${2:-}" = "view" ]; then
+  if [[ "$*" == *'--json state,mergeCommit,url,number,headRefOid'* ]]; then
+    poll_count=0
+    if [ -f "${FAKE_POLL_COUNT_FILE:?}" ]; then
+      poll_count="$(cat "${FAKE_POLL_COUNT_FILE}")"
+    fi
+    poll_count=$((poll_count + 1))
+    printf '%s\n' "$poll_count" > "${FAKE_POLL_COUNT_FILE}"
+    if [ "$poll_count" -eq 1 ]; then
+      printf 'OPEN\t-\t%s\t91\t%s\n' "${FAKE_POLL_PR_URL:?}" "${FAKE_POLL_HEAD:?}"
+    else
+      printf 'MERGED\t%s\t%s\t91\t%s\n' "${FAKE_POLL_MERGE_COMMIT:?}" "${FAKE_POLL_PR_URL:?}" "${FAKE_POLL_HEAD:?}"
+    fi
+    exit 0
+  fi
+  if [[ "$*" == *'--json body'* ]]; then
+    printf '%s\n' "<!-- agentic-ops-fixed-head:${FAKE_POLL_HEAD:?} -->"
+    exit 0
+  fi
+fi
+printf 'unsupported polling gh command: %s\n' "$*" >&2
+exit 2
+EOF
+chmod 0755 "$polling_gh"
+cat > "$polling_bin/sleep" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "${1:-}" = "5" ] || exit 3
+printf '%s\n' "$1" >> "${FAKE_POLL_SLEEP_LOG:?}"
+EOF
+chmod 0755 "$polling_bin/sleep"
+poll_count_file="$test_root/poll-count"
+poll_sleep_log="$test_root/poll-sleep.log"
+polling_head="$waiting_candidate"
+polling_merge="$(git -C "$fixture" rev-parse HEAD)"
+export FAKE_POLL_COUNT_FILE="$poll_count_file"
+export FAKE_POLL_SLEEP_LOG="$poll_sleep_log"
+export FAKE_POLL_HEAD="$polling_head"
+export FAKE_POLL_MERGE_COMMIT="$polling_merge"
+export FAKE_POLL_PR_URL=https://example.test/pull/91
+(
+  PATH="$polling_bin:$PATH"
+  AGENTIC_OPS_GH_BIN="$polling_gh"
+  . "$repo_root/maintainer/scripts/lib/release-common.sh"
+  RELEASE_PR_URL="$FAKE_POLL_PR_URL"
+  release_wait_for_soft_merge tapstate/agentic-ops "$polling_head"
+  printf '%s\t%s\n' "$RELEASE_PR_STATE" "$RELEASE_MERGE_COMMIT"
+) > "$test_root/soft-polling.out"
+test "$(cat "$poll_count_file")" = "2" ||
+  fail "软门禁发布未持续查询 PR 直至人工合并"
+test "$(cat "$poll_sleep_log")" = "5" ||
+  fail "软门禁发布轮询间隔不是 5 秒"
+grep -q "^MERGED[[:space:]]$polling_merge$" "$test_root/soft-polling.out" ||
+  fail "软门禁发布未在检测到人工 Merge commit 后自动继续"
+
+# 非阻塞选项仍使用单次状态检查并返回等待态，供发布者稍后手动续跑。
+rm -f "$poll_count_file"
+manual_wait_status=0
+(
+  AGENTIC_OPS_GH_BIN="$polling_gh"
+  . "$repo_root/maintainer/scripts/lib/release-common.sh"
+  RELEASE_VERIFIED_AT="2026-08-22T00:00:00Z"
+  RELEASE_PR_URL="$FAKE_POLL_PR_URL"
+  release_wait_for_manual_merge "$fixture" tapstate/agentic-ops release_publish v9.6 "$polling_head" release/v9.6
+) > "$test_root/manual-wait.out" || manual_wait_status=$?
+test "$manual_wait_status" -eq 2 ||
+  fail "--no-wait-for-merge 未保留人工续跑等待态"
+grep -q '"status":"waiting_for_manual_merge"' "$test_root/manual-wait.out" ||
+  fail "人工续跑等待态缺少结构化输出"
+
+# 正常发布完成后必须由同一 publish 流程把 develop 快进到 main；若开发分支
+# 在等待期间产生新的未发布提交，则不得用普通 merge 或改写历史来掩盖分叉。
+sync_remote="$test_root/sync-remote.git"
+sync_fixture="$test_root/sync-repo"
+git init --bare "$sync_remote" >/dev/null
+git clone "$sync_remote" "$sync_fixture" >/dev/null 2>&1
+git -C "$sync_fixture" config user.email agentic-ops-test@example.test
+git -C "$sync_fixture" config user.name "AgenticOps Test"
+printf 'initial\n' > "$sync_fixture/README.md"
+git -C "$sync_fixture" add README.md
+git -C "$sync_fixture" commit -m "sync initial" >/dev/null
+git -C "$sync_fixture" branch -M main
+git -C "$sync_fixture" push -u origin main >/dev/null
+git -C "$sync_fixture" switch -c develop >/dev/null
+printf 'release candidate\n' >> "$sync_fixture/README.md"
+git -C "$sync_fixture" add README.md
+git -C "$sync_fixture" commit -m "sync release candidate" >/dev/null
+sync_candidate="$(git -C "$sync_fixture" rev-parse HEAD)"
+git -C "$sync_fixture" push -u origin develop >/dev/null
+git -C "$sync_fixture" switch main >/dev/null
+git -C "$sync_fixture" merge --no-ff develop -m "sync release merge" >/dev/null
+sync_merge="$(git -C "$sync_fixture" rev-parse HEAD)"
+git -C "$sync_fixture" push origin main >/dev/null
+git -C "$sync_fixture" switch develop >/dev/null
+(
+  . "$repo_root/maintainer/scripts/lib/release-common.sh"
+  release_sync_develop_to_main "$sync_fixture" "$sync_merge"
+)
+test "$(git -C "$sync_fixture" rev-parse develop)" = "$sync_merge" ||
+  fail "发布完成后本地 develop 未快进到 main"
+test "$(git --git-dir="$sync_remote" rev-parse refs/heads/develop)" = "$sync_merge" ||
+  fail "发布完成后远端 develop 未快进到 main"
+
+printf 'new development during release\n' >> "$sync_fixture/README.md"
+git -C "$sync_fixture" add README.md
+git -C "$sync_fixture" commit -m "sync diverged develop" >/dev/null
+git -C "$sync_fixture" push origin develop >/dev/null
+if (
+  . "$repo_root/maintainer/scripts/lib/release-common.sh"
+  release_sync_develop_to_main "$sync_fixture" "$sync_merge"
+) > "$test_root/develop-sync-diverged.out" 2> "$test_root/develop-sync-diverged.err"; then
+  fail "develop 分叉时不得自动同步或改写历史"
+fi
+grep -q 'release_develop_sync_not_fast_forward' "$test_root/develop-sync-diverged.err" ||
+  fail "develop 分叉时未返回快进保护错误"
 
 printf '{"ok":true,"operation":"test_release_workflow","delivery":"python"}\n'

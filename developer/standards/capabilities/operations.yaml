@@ -203,6 +203,16 @@ capabilities:
     summary: 只读返回当前 Project Profile 下 Jira Issue 的基础事实和凭证配置状态。
     next_action: 请把输出与项目标准资产结合分析；该能力不判断准入、不读取评论和自定义字段，也不写 Jira。
 
+  - id: version
+    source: contract
+    contract: contracts/operations/version.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [version]
+    summary: 只读返回 developer Runtime 发行版本、受管安装目录、首次安装时间、精确 Git HEAD 和可选 Tag 描述。
+    next_action: 请直接运行 ao-work version 查询当前安装事实；该命令不检查更新、不要求业务工作空间，也不会读取凭证或修改安装。
+
   - id: jira_worklog
     source: contract
     contract: contracts/operations/jira-worklog.yaml

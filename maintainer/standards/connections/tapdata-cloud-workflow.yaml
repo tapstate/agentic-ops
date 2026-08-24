@@ -5,6 +5,8 @@ connection_id: tapdata-cloud
 #
 # Jira 状态流程与表单属性易变：本文件是唯一需要维护者修改的适配点，
 # 变更 Jira 工作流后只改这里，不改 Runtime 代码。
+# - 项目默认 statuses / transitions 适用于未单独覆盖的 Issue Type；
+#   issue_types.<Jira Issue Type> 可声明专属状态与转换，优先于项目默认映射。
 # - statuses：Jira 状态名 -> 标准 stage（waiting_takeover / implementation / completed）
 # - transitions：transition key -> {name, id, from, to}
 #   id 优先（D-037：稳定 ID 优先校验来源/目标状态）；未配 id 时名称兜底
@@ -35,3 +37,20 @@ projects:
         id: "41"
         from: [正在进行, In Progress]
         to: 已完成
+    issue_types:
+      Agentic 缺陷:
+        statuses:
+          待接管: waiting_takeover
+          执行中: implementation
+          已完成: completed
+        transitions:
+          start_progress:
+            name: 接管任务
+            id: "2"
+            from: [待接管]
+            to: 执行中
+          complete:
+            name: 完成任务
+            id: "5"
+            from: [执行中]
+            to: 已完成

@@ -3,7 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 SOURCE_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd -P)"
-INSTALL_DIR="${AGENTIC_OPS_HOME:-$HOME/.agentic-ops}"
+# 更新入口只允许操作自身所属的 developer managed clone。这样自定义
+# --install-home 安装无需重新设置 AGENTIC_OPS_HOME，也不能被环境变量改指向其它安装。
+INSTALL_DIR="$SOURCE_ROOT"
 BRANCH="main"
 
 . "$SOURCE_ROOT/developer/bootstrap/lib/common.sh"

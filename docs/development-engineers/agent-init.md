@@ -5,6 +5,9 @@
 ## 1. 安装并完成研发员授权
 
 默认安装目录是 `~/.agentic-ops`，内容为稳定 `main` 的 developer-only sparse managed clone，不包含 `maintainer/`。
+安装前必须准备 `git`、`gh`、`uv`；生产安装会在任何写入前一次检查并列出全部缺失项。
+需要隔离安装时，在 `install.sh` 后显式传入 `--install-home <path>`；该参数优先于兼容保留的
+`AGENTIC_OPS_HOME` 环境变量。自定义安装不会修改 shell profile，需自行把 `<path>/bin` 加入当前会话的 `PATH`。
 
 交互安装：
 
@@ -83,16 +86,16 @@ bash developer/bootstrap/install-verify-branch.sh \
 新工作空间固定生成 schema v5 `.agentic-ops/agent.json`，只保存项目事实、`install_identity_ref`、安装入口摘要和工作空间本地入口，不生成 `.agentic-ops/.env`。schema v4 及更早的工作空间会在联网前阻断；先使用目标安装运行 `ao-work auth`，再由指导员以 `<install-root>/bin/ao-work workspace init --confirm-existing-config` 明确重新初始化。Runtime 不自动复制或删除旧凭证，也不扫描 PATH。
 
 初始化会写入当前工作空间 `AGENTS.md` 和 `.agents/skills/` 普通文件副本。不得创建指向安装根的 symlink，也不得加载根项目维护规则。
+Agent 后续从工作空间执行 `./.agentic-ops/bin/ao-work version`，其中 `python_executable` 与 `python_venv` 必须指向绑定安装的 `developer/.venv`；Agent 启动时已有的系统 Python、业务 venv 或其它 `VIRTUAL_ENV` 会被安装入口覆盖。
 
-## 4. 开始任务前检查
+## 4. 开始任务
 
 ```sh
 <install-root>/bin/ao-work auth --show
-./.agentic-ops/bin/ao-work workspace preflight
 ./.agentic-ops/bin/ao-work capability list
 ```
 
-只有授权已配置且 workspace preflight 通过后，才能执行真实 Jira 任务。Jira 当前身份与 Project 权限由 workspace/task Runtime 入口回读。调用具体操作前执行 `./.agentic-ops/bin/ao-work capability show <operation>`；只有 `status=implemented` 且列出明确命令路径时才能调用。
+`workspace preflight` 仅用于诊断或修复工作空间，不是接管任务的前置步骤。Jira 当前身份与 Project 权限由 workspace/task Runtime 入口回读；接管时 Runtime 会重新校验工作空间、安装身份和 Jira 事实。调用具体操作前执行 `./.agentic-ops/bin/ao-work capability show <operation>`；只有 `status=implemented` 且列出明确命令路径时才能调用。
 
 正式接管入口：
 

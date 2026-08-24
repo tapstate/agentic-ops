@@ -4,9 +4,11 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -173,7 +175,7 @@ class StoryGateService:
             ),
         }
 
-    def verify(self, source: str, *, base: str | None = None, head: str | None = None) -> dict[str, Any]:
+    def verify(self, source: str, *, base: str | None = None, head: str | None = None, event_sink: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
         registry, impact = self._calculate(source, base=base, head=head, read_pr_fact=False)
         report = _review_report(registry, impact)
         if not impact.has_impact or impact.unmapped_paths:
@@ -183,57 +185,74 @@ class StoryGateService:
                 "请先查阅审查报告并补齐故事映射",
                 self._result(registry, impact, report, _digest(report)),
             )
-        results = []
-        for check_id in impact.acceptance_checks:
-            started = time.monotonic()
-            completed = subprocess.run(
-                _check_command(self.root, check_id),
-                cwd=self.root,
-                check=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                timeout=300,
-                env=_check_environment(self.root),
-            )
-            output = completed.stdout.decode("utf-8", errors="replace")[-4000:]
-            check = {
-                "check_id": check_id,
-                "passed": completed.returncode == 0,
-                "exit_code": completed.returncode,
-                "duration_seconds": round(time.monotonic() - started, 3),
-                "output_tail": output,
-            }
-            results.append(check)
-            if completed.returncode != 0:
-                raise RuntimeErrorResult(
-                    code="maintenance_story_acceptance_failed",
-                    message=f"项目故事验收失败：{check_id}",
-                    status="blocked",
-                    exit_code=EXIT_BLOCKED,
-                    retry_safe=True,
-                    required_human_action="请修复失败后重新生成报告并运行固定验收",
-                    details={
-                        **self._result(registry, impact, report, _digest(report)),
-                        "acceptance_status": "failed",
-                        "checks": results,
-                    },
-                )
-        payload = {
-            "schema_version": AUTHORIZATION_RECORD_SCHEMA_VERSION,
-            **_impact_record_fields(impact),
-            "acceptance_status": "passed",
-            "checks": results,
-            "verified_at": _now(),
-        }
+        run_dir = self._run_dir(impact.impact_id)
+        _ensure_run_path_safe(self.root, run_dir / "output.log")
+        _ensure_run_path_safe(self.root, run_dir / "events.ndjson")
+        _ensure_record_path_safe(self.root, self._evidence_path(impact.impact_id))
+        run_dir.mkdir(parents=True, exist_ok=True)
+        output_path = run_dir / "output.log"
         evidence_path = self._evidence_path(impact.impact_id)
-        _ensure_record_path_safe(self.root, evidence_path)
-        with TaskLock(evidence_path.parent / ".lock", timeout=5):
-            atomic_write_json(evidence_path, payload)
-        return {
+        events_path = run_dir / "events.ndjson"
+        with TaskLock(run_dir / ".lock", timeout=5):
+            output_path.unlink(missing_ok=True)
+            events_path.unlink(missing_ok=True)
+            with events_path.open("a", encoding="utf-8") as events_file:
+                def emit(event: dict[str, Any]) -> None:
+                    payload = {"timestamp": _now(), "impact_id": impact.impact_id, **event}
+                    events_file.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+                    events_file.flush()
+                    if event_sink:
+                        event_sink(payload)
+
+                results = []
+                for check_id in impact.acceptance_checks:
+                    started = time.monotonic()
+                    emit({"event": "check_started", "check_id": check_id})
+                    with output_path.open("ab", buffering=0) as output_file:
+                        start_offset = output_file.tell()
+                        output_file.write(f"\n===== {check_id} started =====\n".encode())
+                        process = subprocess.Popen(_check_command(self.root, check_id), cwd=self.root, stdout=output_file, stderr=subprocess.STDOUT, env=_check_environment(self.root), start_new_session=True)
+                        last_progress = 0.0
+                        while process.poll() is None:
+                            elapsed = time.monotonic() - started
+                            if elapsed > 300:
+                                os.killpg(process.pid, signal.SIGKILL)
+                                process.wait()
+                                raise subprocess.TimeoutExpired(process.args, 300)
+                            if elapsed - last_progress >= 10:
+                                emit({"event": "check_progress", "check_id": check_id, "elapsed_seconds": round(elapsed, 3)})
+                                last_progress = elapsed
+                            time.sleep(0.1)
+                        output_file.write(f"===== {check_id} finished exit={process.returncode} =====\n".encode())
+                        end_offset = output_file.tell()
+                    check = {"check_id": check_id, "passed": process.returncode == 0, "exit_code": process.returncode, "duration_seconds": round(time.monotonic() - started, 3), "log_path": str(output_path.relative_to(self.root)), "log_start": start_offset, "log_end": end_offset, "log_sha256": _file_segment_sha256(output_path, start_offset, end_offset)}
+                    results.append(check)
+                    emit({"event": "check_finished", "check_id": check_id, "passed": check["passed"], "duration_seconds": check["duration_seconds"]})
+                    if not check["passed"]:
+                        payload = self._write_evidence_summary(evidence_path, impact, "failed", results)
+                        emit({"event": "verify_completed", "acceptance_status": "failed", "evidence_path": str(evidence_path)})
+                        raise RuntimeErrorResult(code="maintenance_story_acceptance_failed", message=f"项目故事验收失败：{check_id}", status="blocked", exit_code=EXIT_BLOCKED, retry_safe=True, required_human_action="请修复失败后重新生成报告并运行固定验收", details={**self._result(registry, impact, report, _digest(report), evidence=payload), "acceptance_status": "failed", "checks": results, "evidence_path": str(evidence_path)})
+                payload = self._write_evidence_summary(evidence_path, impact, "passed", results)
+                emit({"event": "verify_completed", "acceptance_status": "passed", "evidence_path": str(evidence_path)})
+        result = {
             **self._result(registry, impact, report, _digest(report), evidence=payload),
             "checks": results,
             "evidence_path": str(evidence_path),
         }
+        return result
+
+    def _write_evidence_summary(
+        self, evidence_path: Path, impact: StoryImpact, acceptance_status: str, checks: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        payload = {
+            "schema_version": AUTHORIZATION_RECORD_SCHEMA_VERSION,
+            **_impact_record_fields(impact),
+            "acceptance_status": acceptance_status,
+            "checks": checks,
+            "verified_at": _now(),
+        }
+        atomic_write_json(evidence_path, payload)
+        return payload
 
     def _calculate(
         self,
@@ -416,6 +435,9 @@ class StoryGateService:
 
     def _evidence_path(self, impact_id: str) -> Path:
         return self.root / "maintainer" / ".local" / "story-evidence" / f"{impact_id}.json"
+
+    def _run_dir(self, impact_id: str) -> Path:
+        return self.root / "maintainer" / ".local" / "story-runs" / impact_id
 
     def _blocked(
         self,
@@ -625,6 +647,21 @@ def _ensure_record_path_safe(root: Path, path: Path) -> None:
             raise _unsafe_local_state(f"故事状态祖先不是目录：{current.relative_to(root)}")
 
 
+def _ensure_run_path_safe(root: Path, path: Path) -> None:
+    expected_parent = root / "maintainer" / ".local" / "story-runs"
+    try:
+        path.relative_to(expected_parent)
+    except ValueError as error:
+        raise _unsafe_local_state("故事运行日志路径逃出 maintainer/.local") from error
+    current = root
+    for component in path.relative_to(root).parts:
+        current = current / component
+        if not current.exists() and not current.is_symlink():
+            continue
+        if current.is_symlink() or (current == path and not current.is_file()) or (current != path and not current.is_dir()):
+            raise _unsafe_local_state(f"故事运行日志路径不安全：{current.relative_to(root)}")
+
+
 def _unsafe_local_state(message: str) -> RuntimeErrorResult:
     return RuntimeErrorResult(
         code="story_gate_local_state_unsafe",
@@ -639,6 +676,20 @@ def _unsafe_local_state(message: str) -> RuntimeErrorResult:
 def _digest(payload: dict[str, Any]) -> str:
     material = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _file_segment_sha256(path: Path, start: int, end: int) -> str:
+    digest = hashlib.sha256()
+    remaining = end - start
+    with path.open("rb") as source:
+        source.seek(start)
+        while remaining:
+            chunk = source.read(min(1024 * 1024, remaining))
+            if not chunk:
+                raise ValueError("验收日志区间超出文件范围")
+            digest.update(chunk)
+            remaining -= len(chunk)
+    return digest.hexdigest()
 
 
 def _git(root: Path, *arguments: str) -> str:

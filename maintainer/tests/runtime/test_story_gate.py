@@ -4,6 +4,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -150,6 +151,39 @@ class StoryGateTest(unittest.TestCase):
             approved = service.approve("range", review["impact_id"], reference, base=base, head=head)
             self.assertTrue(approved["approved"])
             self.assertEqual(head, approved["authorization_record_id"])
+
+    def test_verify_collects_large_check_output_without_pipe_deadlock(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.prepare(root)
+            self.stage(root, "maintainer/runtime/example.py", "value = 1\n")
+            command = [sys.executable, "-c", "import sys; sys.stdout.write('x' * 131072)"]
+            with mock.patch("ao_maint.story_gate.service._check_command", return_value=command):
+                result = StoryGateService(root).verify("staged")
+            check = result["checks"][0]
+            self.assertTrue(check["passed"])
+            log = root / check["log_path"]
+            self.assertTrue(log.is_file())
+            self.assertGreater(check["log_end"], check["log_start"])
+            self.assertIn("x" * 1024, log.read_text(encoding="utf-8"))
+
+    def test_verify_persists_compact_events_and_single_output_log(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.prepare(root)
+            self.stage(root, "maintainer/runtime/example.py", "value = 1\n")
+            events: list[dict[str, object]] = []
+            with mock.patch("ao_maint.story_gate.service._check_command", return_value=["/usr/bin/true"]):
+                result = StoryGateService(root).verify("staged", event_sink=events.append)
+
+            evidence = Path(result["evidence_path"])
+            run_dir = root / result["checks"][0]["log_path"]
+            persisted_events = [json.loads(line) for line in (run_dir.parent / "events.ndjson").read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(["check_started", "check_finished", "verify_completed"], [event["event"] for event in events])
+            self.assertEqual([event["event"] for event in events], [event["event"] for event in persisted_events])
+            self.assertEqual(1, len({check["log_path"] for check in result["checks"]}))
+            self.assertIn("log_sha256", result["checks"][0])
+            self.assertNotIn("output_tail", json.dumps(json.loads(evidence.read_text(encoding="utf-8"))))
 
     def test_story_document_change_requires_revision_confirmation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -353,6 +387,27 @@ class StoryGateTest(unittest.TestCase):
             self.assertFalse(result["confirmation_required"])
             self.assertEqual("研发测试", result["review_report"]["impacted_stories"][0]["title"])
             self.assertIn("confirmation_items", result["review_report"])
+
+    def test_cli_progress_writes_events_before_final_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.prepare(root)
+            (root / "maintainer" / "AGENTS.md").write_text("# maintainer\n", encoding="utf-8")
+            stdout = io.StringIO()
+
+            def verify(_service: StoryGateService, _source: str, **kwargs: object) -> dict[str, object]:
+                sink = kwargs["event_sink"]
+                self.assertIsNotNone(sink)
+                sink({"event": "check_started", "impact_id": "impact-1"})
+                return {"impact_id": "impact-1", "acceptance_status": "passed"}
+
+            with mock.patch.object(StoryGateService, "verify", verify), redirect_stdout(stdout), redirect_stderr(io.StringIO()):
+                exit_code = main(["--source-root", str(root), "story", "verify", "--progress"])
+            lines = [json.loads(line) for line in stdout.getvalue().splitlines()]
+            self.assertEqual(0, exit_code)
+            self.assertEqual("check_started", lines[0]["event"])
+            self.assertTrue(lines[1]["ok"])
+            self.assertEqual("impact-1", lines[1]["impact_id"])
 
     def test_versioned_branch_policy_selects_review_channel_and_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
