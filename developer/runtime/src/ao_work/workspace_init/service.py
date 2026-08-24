@@ -259,6 +259,7 @@ class WorkspaceInitializer:
         *,
         confirm_existing_config: bool = False,
         check_remote: bool = True,
+        allow_missing_claude_bridges: bool = False,
     ) -> dict[str, Any]:
         validate_workspace_state_root(self.root)
         write_diagnostic("初始化预检 1/3：工作空间边界、安装资产与既有配置检查")
@@ -272,7 +273,11 @@ class WorkspaceInitializer:
         self._check_existing_config(candidate, checks, confirm_existing_config)
         existing_agent = candidate.root / ".agentic-ops" / "agent.json"
         if existing_agent.is_file() and read_json(existing_agent).get("schema_version") == 5:
-            self._check_workspace_ai_assets(candidate, checks)
+            self._check_workspace_ai_assets(
+                candidate,
+                checks,
+                allow_missing_claude_bridges=allow_missing_claude_bridges,
+            )
         self._check_agent_id_collision(candidate, checks)
         self._check_authorization(candidate, checks)
         write_diagnostic("初始化预检 2/3：Jira 授权与项目访问验证")
@@ -478,7 +483,11 @@ class WorkspaceInitializer:
         checks.append({"check": "developer_ai_assets", "status": "passed"})
 
     def _check_workspace_ai_assets(
-        self, candidate: WorkspaceCandidate, checks: list[dict[str, str]]
+        self,
+        candidate: WorkspaceCandidate,
+        checks: list[dict[str, str]],
+        *,
+        allow_missing_claude_bridges: bool = False,
     ) -> None:
         agents_path = validate_workspace_root_file(
             candidate.root,
@@ -572,6 +581,12 @@ class WorkspaceInitializer:
                 "业务工作空间 AI 入口包含非准入 Skill 或 maintainer 资产",
                 "请停止使用该工作空间，并由指导员核对后重新初始化",
             )
+        self._validate_claude_skill_bridges(
+            candidate,
+            skill_root,
+            skill_assets,
+            allow_missing=allow_missing_claude_bridges,
+        )
         self._check_workspace_entry(candidate)
         checks.append({"check": "workspace_ai_assets", "status": "passed"})
 
@@ -1510,41 +1525,17 @@ class WorkspaceInitializer:
         Codex 直接扫描 `.agents/skills/`；Claude Code 只读 `.claude/skills/`，
         这里用 symlink 让两个工具共享同一套 Skill 目录（Claude Code 官方认可
         symlink 形式的项目 Skill）。每个 `<name>` 桥接为 `.claude/skills/<name>`
-        → `../.agents/skills/<name>`（相对路径）。
+        → `../../.agents/skills/<name>`（相对路径）。
         """
-        claude_root = validate_managed_path(
-            candidate.root,
-            candidate.root / ".claude" / "skills",
-            code="workspace_ai_asset_unsafe",
-        )
-        if claude_root.is_symlink() or (claude_root.exists() and not claude_root.is_dir()):
-            raise _blocked(
-                "workspace_ai_asset_unsafe",
-                "业务工作空间 .claude/skills 必须是工作空间内的普通目录",
-                "请移除异常路径并重新运行 ao-work workspace init",
-            )
+        claude_root = self._claude_skill_root(candidate)
         claude_root.mkdir(parents=True, exist_ok=True)
-        for existing in claude_root.iterdir():
-            if existing.name not in expected and not existing.is_symlink():
-                raise _blocked(
-                    "workspace_ai_asset_contaminated",
-                    f"业务工作空间存在非准入 Claude Skill：{existing.name}",
-                    "请先人工核对并移除非准入 Skill，再重新初始化",
-                )
+        self._validate_claude_skill_bridges(
+            candidate, skill_root, expected, allow_missing=True
+        )
         for name in expected:
-            link = validate_managed_path(
-                candidate.root,
-                claude_root / name,
-                code="workspace_ai_asset_unsafe",
-            )
+            link = claude_root / name
             target = os.path.relpath(skill_root / name, claude_root)
             if link.is_symlink():
-                if os.readlink(link) != target:
-                    raise _blocked(
-                        "workspace_ai_asset_drift",
-                        f"业务工作空间 Claude Skill symlink 目标不一致：{name}",
-                        "请由指导员重新运行 ao-work workspace init 修复桥接",
-                    )
                 continue
             if link.exists():
                 raise _blocked(
@@ -1553,6 +1544,113 @@ class WorkspaceInitializer:
                     "请移除异常路径并重新运行 ao-work workspace init",
                 )
             link.symlink_to(target, target_is_directory=True)
+        self._validate_claude_skill_bridges(
+            candidate, skill_root, expected, allow_missing=False
+        )
+
+    def _claude_skill_root(self, candidate: WorkspaceCandidate) -> Path:
+        claude_parent = validate_managed_path(
+            candidate.root,
+            candidate.root / ".claude",
+            code="workspace_ai_asset_unsafe",
+        )
+        if claude_parent.exists() and not claude_parent.is_dir():
+            raise _blocked(
+                "workspace_ai_asset_unsafe",
+                "业务工作空间 .claude 必须是工作空间内的普通目录",
+                "请移除异常路径并重新运行 ao-work workspace init",
+            )
+        claude_root = validate_managed_path(
+            candidate.root,
+            claude_parent / "skills",
+            code="workspace_ai_asset_unsafe",
+        )
+        if claude_root.is_symlink() or (
+            claude_root.exists() and not claude_root.is_dir()
+        ):
+            raise _blocked(
+                "workspace_ai_asset_unsafe",
+                "业务工作空间 .claude/skills 必须是工作空间内的普通目录",
+                "请移除异常路径并重新运行 ao-work workspace init",
+            )
+        return claude_root
+
+    def _validate_claude_skill_bridges(
+        self,
+        candidate: WorkspaceCandidate,
+        skill_root: Path,
+        expected: dict[str, Path],
+        *,
+        allow_missing: bool,
+    ) -> None:
+        """验证 Claude 到受管 developer Skill 的精确单层桥接。"""
+        claude_root = self._claude_skill_root(candidate)
+        if not claude_root.exists():
+            if allow_missing:
+                return
+            raise _blocked(
+                "workspace_ai_asset_missing",
+                "业务工作空间缺少 Claude Skill 桥接目录",
+                "请由指导员重新运行 ao-work workspace init 修复 AI 入口",
+            )
+        for existing in claude_root.iterdir():
+            if existing.name not in expected:
+                raise _blocked(
+                    "workspace_ai_asset_contaminated",
+                    f"业务工作空间存在非准入 Claude Skill：{existing.name}",
+                    "请停止使用该工作空间，并由指导员核对后重新初始化",
+                )
+        for name in expected:
+            link = claude_root / name
+            target_dir = validate_managed_path(
+                candidate.root,
+                skill_root / name,
+                code="workspace_ai_asset_unsafe",
+            )
+            expected_target = os.path.relpath(target_dir, claude_root)
+            if not link.is_symlink():
+                if not link.exists() and allow_missing:
+                    continue
+                if not link.exists():
+                    raise _blocked(
+                        "workspace_ai_asset_missing",
+                        f"业务工作空间缺少 Claude Skill 桥接：{name}",
+                        "请由指导员重新运行 ao-work workspace init 修复 AI 入口",
+                    )
+                raise _blocked(
+                    "workspace_ai_asset_unsafe",
+                    f"业务工作空间 Claude Skill 路径类型不安全：{name}",
+                    "请移除异常路径并重新运行 ao-work workspace init",
+                )
+            try:
+                raw_target = os.readlink(link)
+            except OSError as error:
+                raise _blocked(
+                    "workspace_ai_asset_drift",
+                    f"业务工作空间 Claude Skill symlink 无法读取目标：{name}",
+                    "请由指导员重新运行 ao-work workspace init 修复桥接",
+                ) from error
+            if raw_target != expected_target:
+                raise _blocked(
+                    "workspace_ai_asset_drift",
+                    f"业务工作空间 Claude Skill symlink 目标不一致：{name}",
+                    "请由指导员重新运行 ao-work workspace init 修复桥接",
+                )
+            try:
+                resolved_target = link.resolve(strict=True)
+                expected_resolved_target = target_dir.resolve(strict=True)
+            except OSError as error:
+                raise _blocked(
+                    "workspace_ai_asset_drift",
+                    f"业务工作空间 Claude Skill symlink 无法安全解析：{name}",
+                    "请由指导员重新运行 ao-work workspace init 修复桥接",
+                ) from error
+            if resolved_target != expected_resolved_target:
+                raise _blocked(
+                    "workspace_ai_asset_drift",
+                    f"业务工作空间 Claude Skill symlink 目标不一致：{name}",
+                    "请由指导员重新运行 ao-work workspace init 修复桥接",
+                )
 
     def _index_path(self) -> Path:
         return validate_managed_path(
