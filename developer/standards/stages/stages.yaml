@@ -84,7 +84,7 @@ stages:
 
   - id: ci_validation
     name: PR CI 持续验证
-    description: 绑定最终 PR Head，持续观察必需检查；失败时在授权范围和三次预算内修复、验证、提交并重新观察
+    description: 绑定最终 PR Head/Base 并从 GitHub 自动判定是否需要 CI；需要时持续观察必需检查，失败时在授权范围和三次预算内修复、验证、提交并重新观察
     admission:
       - pr_created_or_updated
       - final_head_verified
@@ -92,6 +92,11 @@ stages:
     exit:
       next_stage: completed
     steps:
+      - id: detect_ci_requirement
+        name: 判定 CI 要求
+        description: 读取 GitHub PR Base 的 Workflow 树与 Blob；无 Workflow 时结束，适用 Workflow 存在时继续，未知时转人工
+        exit:
+          next_step: observe_required_checks
       - id: observe_required_checks
         name: 观察必需检查
         description: 按固定 15 秒间隔观察；5 分钟内未执行或执行后 10 分钟内未结束均转人工介入

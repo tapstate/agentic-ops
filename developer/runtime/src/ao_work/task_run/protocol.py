@@ -555,11 +555,19 @@ def validate_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
         invalid("pr_endpoint.repository_slug", "必须与 repository.slug 一致")
     if endpoint["target_branch"] != repository["target_branch"]:
         invalid("pr_endpoint.target_branch", "必须与 repository.target_branch 一致")
-    if endpoint["ci_policy"] not in {"require_passed", "allow_pending", "not_required"}:
+    if endpoint["ci_policy"] not in {
+        "require_passed",
+        "allow_pending",
+        "not_required",
+        "detect_from_github_pr",
+    }:
         invalid("pr_endpoint.ci_policy", "不是受支持的 CI 策略")
     if process_id == "development_change_v2":
-        if endpoint["ci_policy"] != "require_passed":
-            invalid("pr_endpoint.ci_policy", "development_change_v2 必须要求 CI passed")
+        if endpoint["ci_policy"] != "detect_from_github_pr":
+            invalid(
+                "pr_endpoint.ci_policy",
+                "development_change_v2 必须由 GitHub PR 自动判定是否需要 CI",
+            )
         validate_ci_config(endpoint["ci"])
 
     permissions = require_string_list(

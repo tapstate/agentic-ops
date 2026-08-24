@@ -17,8 +17,8 @@ capabilities:
     visibility: public
     commands:
       - [task-run, probe-ci]
-    summary: 对 development_change_v2 的当前 PR Head 读取 GitHub Actions，严格核对 Profile 必需检查、5 分钟启动与执行后 10 分钟完成截止时间及修复预算。
-    next_action: pending 时按返回间隔重试；failed 时获取唯一匹配 Artifact；passed 时结束本次 AIAgent 运行并停在 PR 审查。
+    summary: 对 development_change_v2 的当前 PR Head/Base 读取 GitHub Workflow 事实，自动判定是否需要 CI；需要时严格核对 Profile 必需检查、5 分钟启动与执行后 10 分钟完成截止时间及修复预算。
+    next_action: not_required 或 passed 时结束本次 AIAgent 运行；pending 时按返回间隔重试；failed 时获取唯一匹配 Artifact；判定未知时转人工。
 
   - id: fetch_ci_artifact
     source: contract
