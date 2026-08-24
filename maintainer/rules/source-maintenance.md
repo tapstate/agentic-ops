@@ -22,6 +22,8 @@ AgenticOps 只维护两类项目质量故事：
 
 Git 必须通过 common directory 中的 trusted launcher 从已接受 `HEAD` 加载版本化 Hook，再由 `HEAD` Runtime 检查隔离 index 快照。不得把工作树或 candidate 的 Hook、`ao-maint`、故事 Runtime、注册表或发布脚本作为自己的信任证明。发现未暂存门禁差异时立即停止。
 
+`main`、`develop` 与所有 `release/*` 是保留分支。维护者、AI、清理脚本和 Hotfix 都不得删除这些本地或远端引用；已合并分支清理只允许处理其它不被 worktree 占用的分支。可信 `reference-transaction` Hook 必须阻断本地删除，`pre-push` 必须阻断远端删除。当前 GitHub Free 私有仓库不支持服务器端 Ruleset 或分支保护，因此不得伪称本地 Hook 为不可绕过的安全边界；未来具备服务器规则能力时，再由正式工作流配置无 bypass 的远端删除禁令。
+
 正常发布 `publish` 只允许刷新后的 `origin/main` 基线 Runtime 检查固定 candidate。基线缺失时返回 `release_story_gate_baseline_upgrade_required`；候选修改 Hook、门禁 Runtime、注册表或发布脚本等信任根时返回 `release_story_gate_trust_root_changed`。两者都必须改走受保护 `main` 的独立人工审查 PR，不能由自动 publish 放行。Hotfix 不执行故事门禁；它只按 D-055 对已同步 `develop` 做 Jira key 绑定的原子直合。
 
 本地 Hook 是防误操作层，无法阻止本机控制者使用 `--no-verify` 或修改 Git 配置。硬门禁必须由无 bypass 的 `main` Ruleset 强制至少 1 个独立人工批准、最后推送者不能自批、dismiss stale approvals 和解决全部 review threads；即使 candidate 删除仓库内门禁调用也不能自动合并。`origin/main` 发布基线负责确定性复检；不得把单一本地 Hook 或仓库内脚本描述成不可绕过的信任根。
