@@ -117,7 +117,41 @@
           "items": {
             "$ref": "task-to-pr-event.schema.json#/$defs/external_action"
           }
+        },
+        "ci_completion": {
+          "oneOf": [
+            { "$ref": "#/$defs/ci_completion" },
+            { "type": "null" }
+          ]
         }
+      }
+    },
+    "ci_completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider", "head_sha", "attempt_id", "ci_status", "started_at",
+        "execution_started_at", "finished_at", "start_deadline_at", "completion_deadline_at", "required_checks", "workflow_runs",
+        "artifact", "report", "remediations", "remediation_attempts_used",
+        "remediation_attempts_remaining"
+      ],
+      "properties": {
+        "provider": { "const": "github-actions" },
+        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40,64}$" },
+        "attempt_id": { "type": "string", "pattern": "^[0-9a-f]{24}$" },
+        "ci_status": { "const": "passed" },
+        "started_at": { "type": "string", "format": "date-time" },
+        "execution_started_at": { "type": "string", "format": "date-time" },
+        "finished_at": { "type": "string", "format": "date-time" },
+        "start_deadline_at": { "type": "string", "format": "date-time" },
+        "completion_deadline_at": { "type": "string", "format": "date-time" },
+        "required_checks": { "type": "array", "minItems": 1, "items": { "type": "object" } },
+        "workflow_runs": { "type": "array", "items": { "type": "object" } },
+        "artifact": { "type": ["object", "null"] },
+        "report": { "type": ["object", "null"] },
+        "remediations": { "type": "array", "items": { "type": "object" } },
+        "remediation_attempts_used": { "type": "integer", "minimum": 0, "maximum": 3 },
+        "remediation_attempts_remaining": { "type": "integer", "minimum": 0, "maximum": 3 }
       }
     },
     "journal_envelope": {

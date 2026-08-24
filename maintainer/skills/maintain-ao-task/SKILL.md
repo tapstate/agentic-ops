@@ -26,6 +26,12 @@ ao-maint takeover <AO-KEY>
 - `mode=adopt`：向用户明文说明接纳存量任务，按输出摘要进入风险决策确认。
 - `mode=blocked` 或失败码：停止，不得跨状态或跨所有权继续。
 
+## 接收并修复 developer 问题
+
+AO 工作项来自「AO问题反馈」时，先按 `docs/runtime/ao-problem-feedback-reporting.md` 校验 `report_schema`、`repair_readiness`、事实来源、缺失事实和脱敏声明。`needs_information` 或关键证据不足时先给出最小补齐清单，不得直接修改设计或代码。
+
+developer Runtime、Skill、Rule、Profile、Runbook、Template、Bootstrap 或测试的问题仍属于 maintainer 源头维护任务。继续使用 maintainer 工作面并调用 `repair-developer-problem` Skill。只有 maintainer 可以在 AgenticOps 源头仓库修改对应 `developer/**` 资源；不得进入业务项目工作空间自修、调用其真实 `ao-work` 身份、继承业务凭证或直接修改 `~/.agentic-ops`。复现必须使用反馈中人工确认的脱敏 fixture 和黑盒入口，修复必须补充对应工作面的回归，并在发布后由 developer Bootstrap 更新、回到原业务场景复验。
+
 ## 设计审查与连续推进
 
 AI 完成源码与 Jira 事实分析后，把当前设计写入 maintainer 本地受管输入文件，并调用：

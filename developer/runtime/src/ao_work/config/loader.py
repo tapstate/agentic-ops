@@ -15,6 +15,7 @@ from ao_work.config.model import (
     FIELD_STATES,
     AnalysisMount,
     BranchDerivation,
+    CiProfile,
     FieldMapping,
     JiraConnection,
     ProjectProfile,
@@ -629,6 +630,14 @@ def _parse_profile(payload: dict[str, Any], expected_id: str) -> ProjectProfile:
     analysis_mount = _parse_analysis_mount(repositories, repository_list)
     branch_derivation = _parse_branch_derivation(repositories, repository_list)
     worktree_domains = _parse_worktree_domains(repositories, repository_list)
+    process_id = str(payload.get("process_id", "development_change_v1")).strip()
+    if process_id not in {"development_change_v1", "development_change_v2"}:
+        raise ValueError("process_id must be development_change_v1 or development_change_v2")
+    ci = _parse_ci_profile(payload.get("ci"))
+    if process_id == "development_change_v2" and ci is None:
+        raise ValueError("development_change_v2 requires ci configuration")
+    if process_id == "development_change_v1" and ci is not None:
+        raise ValueError("ci configuration requires process_id=development_change_v2")
     return ProjectProfile(
         profile_id=actual_id,
         connection_id=_required_text(payload, "connection_id", "project_profile_invalid"),
@@ -648,6 +657,112 @@ def _parse_profile(payload: dict[str, Any], expected_id: str) -> ProjectProfile:
         analysis_mount=analysis_mount,
         branch_derivation=branch_derivation,
         worktree_domains=worktree_domains,
+        process_id=process_id,
+        ci=ci,
+    )
+
+
+def _parse_ci_profile(value: Any) -> CiProfile | None:
+    if value is None:
+        return None
+    raw = require_mapping(value, "ci")
+    expected = {
+        "provider",
+        "start_timeout_seconds",
+        "completion_timeout_seconds",
+        "poll_interval_seconds",
+        "max_remediation_attempts",
+        "required_checks",
+        "workflows",
+        "artifact_name_patterns",
+        "report_parser",
+        "limits",
+        "completion",
+    }
+    if set(raw) != expected:
+        raise ValueError(
+            f"ci fields must be closed; missing={sorted(expected - set(raw))}, "
+            f"extra={sorted(set(raw) - expected)}"
+        )
+    if raw["provider"] != "github-actions":
+        raise ValueError("ci.provider must be github-actions")
+    if raw["report_parser"] != "maven-failsafe-v1":
+        raise ValueError("ci.report_parser must be maven-failsafe-v1")
+
+    def integer(name: str, minimum: int, maximum: int) -> int:
+        item = raw[name]
+        if isinstance(item, bool) or not isinstance(item, int) or not minimum <= item <= maximum:
+            raise ValueError(f"ci.{name} must be an integer in [{minimum}, {maximum}]")
+        return item
+
+    def strings(name: str) -> tuple[str, ...]:
+        item = raw[name]
+        if (
+            not isinstance(item, list)
+            or not item
+            or not all(isinstance(entry, str) and entry.strip() for entry in item)
+        ):
+            raise ValueError(f"ci.{name} must be a non-empty string list")
+        normalized = tuple(entry.strip() for entry in item)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError(f"ci.{name} contains duplicates")
+        return normalized
+
+    limits = require_mapping(raw["limits"], "ci.limits")
+    expected_limits = {
+        "max_archive_bytes",
+        "max_extracted_bytes",
+        "max_file_bytes",
+        "max_files",
+        "max_depth",
+    }
+    if set(limits) != expected_limits:
+        raise ValueError("ci.limits fields must be closed")
+    completion = require_mapping(raw["completion"], "ci.completion")
+    if set(completion) != {"finish_agent_run_on_pass", "transition_jira_done"}:
+        raise ValueError("ci.completion fields must be closed")
+    if completion["finish_agent_run_on_pass"] is not True:
+        raise ValueError("ci.completion.finish_agent_run_on_pass must be true")
+    if not isinstance(completion["transition_jira_done"], bool):
+        raise ValueError("ci.completion.transition_jira_done must be boolean")
+
+    def limit(name: str, minimum: int, maximum: int) -> int:
+        item = limits[name]
+        if isinstance(item, bool) or not isinstance(item, int) or not minimum <= item <= maximum:
+            raise ValueError(f"ci.limits.{name} must be in [{minimum}, {maximum}]")
+        return item
+
+    max_archive = limit("max_archive_bytes", 1_024, 524_288_000)
+    max_extracted = limit("max_extracted_bytes", 1_024, 1_073_741_824)
+    max_file = limit("max_file_bytes", 1_024, max_extracted)
+    if max_archive > max_extracted:
+        raise ValueError("ci.limits.max_archive_bytes cannot exceed max_extracted_bytes")
+    start_timeout_seconds = integer("start_timeout_seconds", 1, 3_600)
+    completion_timeout_seconds = integer("completion_timeout_seconds", 1, 3_600)
+    if start_timeout_seconds != 300:
+        raise ValueError("ci.start_timeout_seconds must equal 300")
+    if completion_timeout_seconds != 600:
+        raise ValueError("ci.completion_timeout_seconds must equal 600")
+    poll_interval_seconds = integer("poll_interval_seconds", 1, 300)
+    if poll_interval_seconds > min(start_timeout_seconds, completion_timeout_seconds):
+        raise ValueError("ci.poll_interval_seconds cannot exceed CI timeout values")
+    return CiProfile(
+        provider="github-actions",
+        start_timeout_seconds=start_timeout_seconds,
+        completion_timeout_seconds=completion_timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+        max_remediation_attempts=integer("max_remediation_attempts", 1, 3),
+        required_checks=strings("required_checks"),
+        workflows=strings("workflows"),
+        artifact_name_patterns=strings("artifact_name_patterns"),
+        report_parser="maven-failsafe-v1",
+        max_archive_bytes=max_archive,
+        max_extracted_bytes=max_extracted,
+        max_file_bytes=max_file,
+        max_files=limit("max_files", 1, 20_000),
+        max_depth=limit("max_depth", 1, 100),
+        finish_agent_run_on_pass=True,
+        transition_jira_done=completion["transition_jira_done"],
     )
 
 

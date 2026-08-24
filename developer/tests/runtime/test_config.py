@@ -138,6 +138,59 @@ class ConfigTest(unittest.TestCase):
             )
             self.assertEqual({"customfield_10001"}, context.profile.active_custom_field_ids())
 
+    def test_loads_closed_development_change_v2_ci_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            install, workspace_root = self.prepare(Path(temporary))
+            profile_path = install / "developer/standards/projects/demo/profile.yaml"
+            profile_path.write_text(
+                PROFILE
+                + "process_id: development_change_v2\n"
+                + "ci:\n"
+                + "  provider: github-actions\n"
+                + "  start_timeout_seconds: 300\n"
+                + "  completion_timeout_seconds: 600\n"
+                + "  poll_interval_seconds: 30\n"
+                + "  max_remediation_attempts: 2\n"
+                + "  required_checks: [integration-test]\n"
+                + "  workflows: [Integration Tests]\n"
+                + "  artifact_name_patterns: [failsafe-*]\n"
+                + "  report_parser: maven-failsafe-v1\n"
+                + "  limits:\n"
+                + "    max_archive_bytes: 1048576\n"
+                + "    max_extracted_bytes: 2097152\n"
+                + "    max_file_bytes: 1048576\n"
+                + "    max_files: 100\n"
+                + "    max_depth: 10\n"
+                + "  completion:\n"
+                + "    finish_agent_run_on_pass: true\n"
+                + "    transition_jira_done: false\n",
+                encoding="utf-8",
+            )
+            profile = load_project_profile(
+                install,
+                "demo",
+                workspace_root=workspace_root.resolve(),
+            )
+            self.assertEqual("development_change_v2", profile.process_id)
+            self.assertIsNotNone(profile.ci)
+            assert profile.ci is not None
+            self.assertEqual(("integration-test",), profile.ci.required_checks)
+            self.assertFalse(profile.ci.transition_jira_done)
+            profile_path.write_text(
+                profile_path.read_text(encoding="utf-8").replace(
+                    "start_timeout_seconds: 300",
+                    "start_timeout_seconds: 301",
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaises(RuntimeErrorResult) as captured:
+                load_project_profile(
+                    install,
+                    "demo",
+                    workspace_root=workspace_root.resolve(),
+                )
+            self.assertEqual("configuration_invalid", captured.exception.code)
+
     def test_managed_agent_overlays_and_env_reject_hardlinks(self) -> None:
         for leaf in ("agent", "profile", "connection"):
             with self.subTest(leaf=leaf), tempfile.TemporaryDirectory() as temporary:

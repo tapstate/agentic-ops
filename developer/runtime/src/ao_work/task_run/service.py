@@ -47,6 +47,7 @@ from ao_work.task_run.protocol import (
     verification_digest,
     IMPORTED_ACTIONS,
 )
+from ao_work.task_run.ci import CiRuntime
 from ao_work.task_state.io import append_ndjson, atomic_write_json, read_json, read_text
 from ao_work.task_state.locking import TaskLock
 from ao_work.workspace import Workspace
@@ -173,6 +174,41 @@ class TaskRunProtocol:
                 "event_sha256": envelope["event_sha256"],
                 "journal_path": str(paths["events"]),
             }
+
+    def probe_ci(self, manifest_value: str) -> dict[str, Any]:
+        manifest = self._load_open_manifest(manifest_value)
+        self._require_probe_permission(manifest, "github_ci_read", "probe-ci")
+        return self._ci_runtime().probe(manifest)
+
+    def fetch_ci_artifact(self, manifest_value: str) -> dict[str, Any]:
+        manifest = self._load_open_manifest(manifest_value)
+        self._require_probe_permission(
+            manifest, "github_artifact_read", "fetch-ci-artifact"
+        )
+        return self._ci_runtime().fetch_artifact(manifest)
+
+    def parse_ci_report(self, manifest_value: str) -> dict[str, Any]:
+        manifest = self._load_open_manifest(manifest_value)
+        return self._ci_runtime().parse_report(manifest)
+
+    def record_ci_remediation(
+        self,
+        manifest_value: str,
+        *,
+        failure_event_id: str,
+        commit_sha: str,
+        new_head_sha: str,
+        authorization_reference: str,
+    ) -> dict[str, Any]:
+        manifest = self._load_open_manifest(manifest_value)
+        return self._ci_runtime().record_remediation(
+            manifest,
+            failure_event_id=failure_event_id,
+            commit_sha=commit_sha,
+            new_head_sha=new_head_sha,
+            authorization_reference=authorization_reference,
+            completed_events=self._completed_events(manifest),
+        )
 
     def probe_prohibition_baseline(self, manifest_value: str) -> dict[str, Any]:
         manifest = self._load_open_manifest(manifest_value)
@@ -2069,6 +2105,16 @@ class TaskRunProtocol:
             )
         reject_sensitive_content(next_action)
         manifest = self._load_open_manifest(manifest_value)
+        if (
+            manifest.get("process_id", "development_change_v1") == "development_change_v2"
+            and status == "ready_for_pr_review"
+            and next_action != "none"
+        ):
+            raise blocked(
+                "ci_completion_next_action_invalid",
+                "development_change_v2 的 CI 通过终态必须使用 next_action=none",
+                "请不要重新引入 developer 内置代码审查或其它未授权动作",
+            )
         paths = self._paths(manifest)
         with TaskLock(paths["lock"], timeout=self.lock_timeout):
             if paths["result"].is_file():
@@ -2189,8 +2235,9 @@ class TaskRunProtocol:
         branch_event = self._latest(by_action["remote_branch_readback"])
         pr_event = self._latest(by_action["pr_readback"])
         verification_events = by_action["verification"]
+        ci_completion = None
         if status == "ready_for_pr_review":
-            self._validate_ready_facts(
+            ci_completion = self._validate_ready_facts(
                 manifest,
                 jira_event,
                 branch_event,
@@ -2236,6 +2283,7 @@ class TaskRunProtocol:
                 "external_actions": [
                     event["action_data"] for event in by_action["external_action"]
                 ],
+                **({"ci_completion": ci_completion} if ci_completion is not None else {}),
             },
             "timeline": envelopes,
             "human_interventions": self._envelopes_for(
@@ -2266,7 +2314,7 @@ class TaskRunProtocol:
         external_actions: list[dict[str, Any]],
         failure_events: list[dict[str, Any]],
         retry_events: list[dict[str, Any]],
-    ) -> None:
+    ) -> dict[str, Any] | None:
         if jira is None or branch is None or pr is None:
             self._incomplete("ready_for_pr_review 缺少 Jira、远端分支或真实 PR 回读")
         issue = manifest["issue"]
@@ -2391,6 +2439,11 @@ class TaskRunProtocol:
             or (ci_policy == "allow_pending" and pr_data["ci_status"] == "failed")
         ):
             self._incomplete("PR CI 事实不满足 manifest ci_policy")
+        ci_completion = None
+        if manifest.get("process_id", "development_change_v1") == "development_change_v2":
+            ci_completion = self._ci_runtime().validate_completion(
+                manifest, pr_data["head_sha"]
+            )
 
         expected = {
             item["id"]: verification_digest(item) for item in manifest["verification"]
@@ -2453,6 +2506,7 @@ class TaskRunProtocol:
                 "缺少真实 Jira 读取、Comment、Worklog、任务分支推送或 PR "
                 f"创建/更新动作记录：{missing}"
             )
+        return ci_completion
 
     def _validate_external_actions(
         self,
@@ -2952,6 +3006,18 @@ class TaskRunProtocol:
                 if envelope["event"]["status"] == "completed"
             ]
 
+    def _ci_runtime(self) -> CiRuntime:
+        return CiRuntime(
+            self.workspace,
+            lock_timeout=self.lock_timeout,
+            run_text=lambda argv, cwd, timeout: self._run_command(
+                argv, cwd=cwd, timeout=timeout
+            ),
+            run_bytes=lambda argv, cwd, timeout, maximum: self._run_binary_command(
+                argv, cwd=cwd, timeout=timeout, max_stdout_bytes=maximum
+            ),
+        )
+
     @staticmethod
     def _latest_action(events: list[dict[str, Any]], action: str) -> dict[str, Any] | None:
         matches = [event for event in events if event["action"] == action]
@@ -3089,6 +3155,76 @@ class TaskRunProtocol:
                 for stream in (process.stdout, process.stderr):
                     if not stream.closed:
                         stream.close()
+
+    @staticmethod
+    def _run_binary_command(
+        argv: list[str],
+        *,
+        cwd: Path,
+        timeout: int | float,
+        max_stdout_bytes: int,
+    ) -> subprocess.CompletedProcess[bytes]:
+        safe_environment = {
+            key: value
+            for key, value in os.environ.items()
+            if not any(
+                term in key.upper()
+                for term in ("TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "PRIVATE_KEY")
+            )
+        }
+        process = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            shell=False,
+            env=safe_environment,
+            start_new_session=True,
+        )
+        assert process.stdout is not None and process.stderr is not None
+        streams = {process.stdout: bytearray(), process.stderr: bytearray()}
+        limits = {process.stdout: max_stdout_bytes, process.stderr: 1_048_576}
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ)
+        selector.register(process.stderr, selectors.EVENT_READ)
+        deadline = time.monotonic() + float(timeout)
+        try:
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    TaskRunProtocol._terminate_process_group(process)
+                    raise subprocess.TimeoutExpired(argv, timeout)
+                for key, _ in selector.select(min(remaining, 0.1)):
+                    stream = key.fileobj
+                    chunk = os.read(stream.fileno(), 65_536)
+                    if not chunk:
+                        selector.unregister(stream)
+                        stream.close()
+                        continue
+                    if len(streams[stream]) + len(chunk) > limits[stream]:
+                        TaskRunProtocol._terminate_process_group(process)
+                        raise blocked(
+                            "command_output_too_large",
+                            "GitHub Artifact 或错误输出超过 Profile 安全上限",
+                            "请收紧 Workflow Artifact，不能绕过大小门禁",
+                        )
+                    streams[stream].extend(chunk)
+            return subprocess.CompletedProcess(
+                argv,
+                process.wait(),
+                bytes(streams[process.stdout]),
+                bytes(streams[process.stderr]),
+            )
+        except BaseException:
+            if process.poll() is None:
+                TaskRunProtocol._terminate_process_group(process)
+            raise
+        finally:
+            selector.close()
+            for stream in (process.stdout, process.stderr):
+                if not stream.closed:
+                    stream.close()
 
     @staticmethod
     def _verification_environment(repository_root: Path, isolated_home: Path) -> dict[str, str]:
@@ -3458,6 +3594,22 @@ class TaskRunProtocol:
             workspace_root=self.workspace.root,
         )
         validate_workspace_project_binding(self.workspace, profile)
+        manifest_process = manifest.get("process_id", "development_change_v1")
+        if manifest_process != profile.process_id:
+            raise blocked(
+                "process_profile_binding_mismatch",
+                "manifest process_id 与当前 Project Profile 不一致",
+                "请基于当前 Profile 重新生成并确认 manifest",
+            )
+        if manifest_process == "development_change_v2" and (
+            profile.ci is None
+            or manifest["pr_endpoint"].get("ci") != profile.ci.manifest_payload()
+        ):
+            raise blocked(
+                "ci_profile_binding_mismatch",
+                "manifest CI 配置与当前 Project Profile 不一致",
+                "请修复本地 Profile overlay 后重新生成并确认 manifest",
+            )
         self._validate_approved_plan_binding(manifest)
 
     def _validate_approved_plan_binding(self, manifest: Mapping[str, Any]) -> None:
