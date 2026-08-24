@@ -48,6 +48,8 @@ Git 必须通过 common directory 中的 trusted launcher 从已接受 `HEAD` �
 
 maintainer 面处理任何 Jira 任务（建卡、实现、修复、规则演进等）时，必须遵守以下处理流程：
 
+AgenticOps 源头仓库中的 `developer/**` 是 maintainer 管理的被维护资源，不是 developer 会话可自行修改的源头。developer 问题必须通过「AO问题反馈」按 `docs/runtime/ao-problem-feedback-reporting.md` 提交完整、脱敏事实，再由独立 maintainer 工作面修复。维护者可以修改源头 `developer/**`，但不得进入业务项目工作空间继承身份或状态，不得用真实业务凭证复现，也不得直接修改 `~/.agentic-ops`；复现使用人工确认的 fixture 与黑盒入口，发布后再由 developer Bootstrap 更新复验。
+
 `ao-maint` 的 Jira 任务边界固定为 AO 项目。CLI 必须在读取 maintainer 凭证、联网、写计划或写决策审计前校验 issue key、project key、父任务和计划文件；Service 必须对直接调用、摘要重新计算后的计划以及远端 Issue key/project 回读做第二层校验。任何非 AO 输入或回读统一返回 `maintainer_jira_project_scope_mismatch`。`jira auth` 仅管理 maintainer 凭证并输出 AO 允许范围，不执行全站字段探测，也不授予或暗示 TAP 等业务项目操作能力；业务项目只能在对应 developer 工作空间使用 `ao-work`。
 
 1. 用户要求“接管 `<AO-KEY>`”时只调用 `ao-maint takeover <AO-KEY>`；Runtime 自动判断新接管、恢复、接纳存量或阻断。

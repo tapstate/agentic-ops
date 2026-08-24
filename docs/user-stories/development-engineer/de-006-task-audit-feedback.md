@@ -39,6 +39,7 @@ ao-work capability show feedback_bundle
 6. AIAgent 基于任务审计记录和按需报告输出改进建议。
 7. 改进建议进入 `Observation -> Proposal -> Accepted Change` 流程。
 8. 未经人工确认，不自动修改 AgenticOps 源头规则。
+9. 用户触发“AO问题反馈”时，按 `ao_problem_feedback/v1` 输出来源、版本、上下文、实际/期望、最小复现、影响、外部事实、证据、人工介入、假设、修复载体、最小回归、验收、缺失事实和脱敏声明；逐项标记已提供、不适用或未获取。
 
 ### 输出
 
@@ -73,6 +74,7 @@ ao-work capability show feedback_bundle
 - 改进建议必须经过人工确认后才能进入 AgenticOps 源头仓库。
 - 真实任务推进到 PR 审查时，必须由 Runtime 采集 Jira、Git、GitHub 和验证事实；AI 手写的自报事件不能形成正式通过结论。
 - 结果必须逐项审查自动化缺口、人工摩擦、输出质量和不合理流程，并完整记录人工干预、等待、失败、重试及排序后的优化候选。
+- AO 问题只有来源与版本可追溯、实际/期望明确、具备复现或等价 fixture、最小回归、验收和脱敏声明时才能标记 `repair_readiness: ready`；否则必须标记 `needs_information` 并输出最小补齐动作。
 
 ### 保护行为
 
@@ -80,6 +82,7 @@ ao-work capability show feedback_bundle
 - `release-agent` 实现后必须记录终态 Comment 的回读结果和本地 run 收口状态。
 - 本地反馈报告不能替代 `.agentic-ops/tasks/<ISSUE-KEY>/` 中的任务审计记录；Jira 回写关键结论和稳定引用，审计服务属于后续可选扩展。
 - 反馈分析只能形成改进建议，不能自动修改 AgenticOps 源头规则。
+- developer 只上报问题，不在业务工作空间或稳定安装中自修；AgenticOps 源头 `developer/**` 只由 maintainer 工作面维护。
 - 审计记录和反馈报告不得包含 secrets 或敏感原始内容。
 - `task_run_audit` 的授权清单、Runtime 受信事实、hash-chain、禁止动作检查和复盘不得被普通自然语言总结替代。
 
@@ -103,4 +106,5 @@ ao-work capability show feedback_bundle
 - `docs/workflows/feedback-loop.md`
 - `docs/templates/evidence-templates.md`
 - `docs/runtime/problem-resolution-and-update.md`
+- `docs/runtime/ao-problem-feedback-reporting.md`
 - `docs/project-rules.md`
