@@ -37,14 +37,14 @@ IDENTITY = {
 
 
 class FakeTakeoverJira:
-    def __init__(self, status: str = "待办") -> None:
+    def __init__(self, status: str = "待办", issue_type: str = "子任务") -> None:
         self.issue = JiraIssue(
             issue_id="41711",
             key="AO-45",
             project_key="AO",
             summary="建立 maintainer Jira 工具路由防错门禁",
             status=status,
-            issue_type="子任务",
+            issue_type=issue_type,
             assignee="user-1",
             description=None,
             fields={},
@@ -98,7 +98,12 @@ class FakeTakeoverJira:
     def apply_transition(self, plan: WritePlan, _plan_id: str) -> dict[str, object]:
         self.actions.append("apply_transition")
         self.issue = JiraIssue(
-            **{**self.issue.__dict__, "status": "正在进行"}
+            **{
+                **self.issue.__dict__,
+                "status": "执行中"
+                if self.issue.issue_type == "Agentic 缺陷"
+                else "正在进行",
+            }
         )
         return {"current_status": "正在进行", "created": True}
 
@@ -185,6 +190,19 @@ class MaintainerTakeoverTest(unittest.TestCase):
                 ],
                 jira.actions,
             )
+
+    def test_new_takeover_uses_agentic_defect_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._prepare(root)
+            jira = FakeTakeoverJira("待接管", "Agentic 缺陷")
+            with mock.patch(
+                "ao_maint.takeover.cli.git_binding",
+                return_value=(str(root), "develop"),
+            ):
+                result = _takeover(root, jira, "AO-45", IDENTITY, "test")
+            self.assertEqual("new", result["mode"])
+            self.assertEqual("执行中", result["jira_status"])
 
     def test_resume_is_explicit_and_does_not_repeat_jira_writes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -408,6 +426,17 @@ projects:
         id: "31"
         from: [待办]
         to: 正在进行
+    issue_types:
+      Agentic 缺陷:
+        statuses:
+          待接管: waiting_takeover
+          执行中: implementation
+        transitions:
+          start_progress:
+            name: 接管任务
+            id: "2"
+            from: [待接管]
+            to: 执行中
 """,
             encoding="utf-8",
         )

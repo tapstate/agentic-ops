@@ -54,13 +54,13 @@ if [ "$1" = "sync" ]; then
     exit 1
   fi
 
-  mkdir -p "$project_dir/.venv/bin"
-  cat > "$project_dir/.venv/bin/python" <<PY
-#!/usr/bin/env bash
-set -euo pipefail
-exec "${AGENTIC_OPS_TEST_REAL_PYTHON}" "\$@"
-PY
-  chmod 0755 "$project_dir/.venv/bin/python"
+  "${AGENTIC_OPS_TEST_REAL_PYTHON}" -m venv --clear --system-site-packages \
+    "$project_dir/.venv"
+  venv_site="$("$project_dir/.venv/bin/python" -c \
+    'import site; print(site.getsitepackages()[0])')"
+  "${AGENTIC_OPS_TEST_REAL_PYTHON}" -c \
+    'import site; print("\n".join(site.getsitepackages()))' \
+    > "$venv_site/agentic-ops-test-dependencies.pth"
   exit 0
 fi
 

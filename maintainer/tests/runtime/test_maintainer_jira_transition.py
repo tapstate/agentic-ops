@@ -42,6 +42,28 @@ WORKFLOW = {
                     "to": "已完成",
                 },
             },
+            "issue_types": {
+                "Agentic 缺陷": {
+                    "statuses": {
+                        "待接管": "waiting_takeover",
+                        "执行中": "implementation",
+                    },
+                    "transitions": {
+                        "start_progress": {
+                            "name": "接管任务",
+                            "id": "2",
+                            "from": ["待接管"],
+                            "to": "执行中",
+                        },
+                        "complete": {
+                            "name": "完成任务",
+                            "id": "5",
+                            "from": ["执行中"],
+                            "to": "已完成",
+                        },
+                    },
+                },
+            },
         }
     }
 }
@@ -59,6 +81,22 @@ projects:
         id: "31"
         from: [待办]
         to: 正在进行
+    issue_types:
+      Agentic 缺陷:
+        statuses:
+          待接管: waiting_takeover
+          执行中: implementation
+        transitions:
+          start_progress:
+            name: 接管任务
+            id: "2"
+            from: [待接管]
+            to: 执行中
+          complete:
+            name: 完成任务
+            id: "5"
+            from: [执行中]
+            to: 已完成
 """
 
 
@@ -66,16 +104,20 @@ class FakeTransitionTransport:
     def __init__(
         self,
         initial_status: str = "待办",
+        issue_type: str = "任务",
         transitions: list[dict[str, str]] | None = None,
         post_result: str | None = None,
+        post_issue_type: str | None = None,
     ) -> None:
         self.requests: list[tuple[str, str]] = []
         self.issue_status = initial_status
+        self.issue_type = issue_type
         self.transitions = transitions or [
             {"id": "31", "name": "In Progress", "to": "正在进行"},
             {"id": "41", "name": "Done", "to": "已完成"},
         ]
         self.post_result = post_result
+        self.post_issue_type = post_issue_type
 
     def request(
         self,
@@ -115,6 +157,8 @@ class FakeTransitionTransport:
                     self.issue_status = self.post_result
                 elif target:
                     self.issue_status = target["to"]
+                if self.post_issue_type is not None:
+                    self.issue_type = self.post_issue_type
                 return TransportResponse(204, None)
         if path.startswith("/rest/api/3/issue/"):
             if method == "GET":
@@ -126,7 +170,7 @@ class FakeTransitionTransport:
                         "fields": {
                             "summary": "任务",
                             "status": {"name": self.issue_status},
-                            "issuetype": {"name": "任务"},
+                            "issuetype": {"name": self.issue_type},
                             "assignee": {"accountId": "user-1"},
                             "project": {"key": "AO"},
                             "description": None,
@@ -178,6 +222,43 @@ class MaintainerTransitionServiceTest(unittest.TestCase):
             target_status="正在进行",
         )
         self.assertEqual("31", plan.payload["transition_id"])
+
+    def test_plan_transition_uses_exact_issue_type_workflow(self) -> None:
+        service = _service(
+            FakeTransitionTransport(
+                initial_status="待接管",
+                issue_type="Agentic 缺陷",
+                transitions=[{"id": "2", "name": "接管任务", "to": "执行中"}],
+            )
+        )
+        plan = service.plan_transition(
+            "AO-1",
+            "k-agentic",
+            maintainer_run_id="maint-AO-1-abc123",
+            workflow=WORKFLOW,
+            target_transition="start_progress",
+        )
+        self.assertEqual("Agentic 缺陷", plan.payload["issue_type"])
+        self.assertEqual("2", plan.payload["transition_id"])
+        self.assertEqual("执行中", plan.payload["target_status"])
+
+    def test_plan_transition_uses_agentic_defect_complete_workflow(self) -> None:
+        service = _service(
+            FakeTransitionTransport(
+                initial_status="执行中",
+                issue_type="Agentic 缺陷",
+                transitions=[{"id": "5", "name": "完成任务", "to": "已完成"}],
+            )
+        )
+        plan = service.plan_transition(
+            "AO-1",
+            "k-agentic-complete",
+            maintainer_run_id="maint-AO-1-abc123",
+            workflow=WORKFLOW,
+            target_transition="complete",
+        )
+        self.assertEqual("5", plan.payload["transition_id"])
+        self.assertEqual("已完成", plan.payload["target_status"])
 
     def test_plan_transition_by_transition_id_without_mapping(self) -> None:
         service = _service(FakeTransitionTransport())
@@ -387,6 +468,58 @@ class MaintainerTransitionServiceTest(unittest.TestCase):
         self.assertEqual("jira_transition_mapping_gap", captured.exception.code)
         self.assertIn("available_transitions", captured.exception.details)
 
+    def test_apply_transition_issue_type_changed_blocks_before_idempotency(self) -> None:
+        transport = FakeTransitionTransport(
+            initial_status="待接管",
+            issue_type="Agentic 缺陷",
+            transitions=[{"id": "2", "name": "接管任务", "to": "执行中"}],
+        )
+        service = _service(transport)
+        plan = service.plan_transition(
+            "AO-1",
+            "k-agentic-type-change",
+            maintainer_run_id="maint-AO-1-abc123",
+            workflow=WORKFLOW,
+            target_transition="start_progress",
+        )
+        transport.issue_type = "任务"
+        transport.issue_status = "执行中"
+
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.apply_transition(plan, plan.plan_id)
+
+        self.assertEqual("jira_transition_mapping_gap", captured.exception.code)
+        self.assertEqual("Agentic 缺陷", captured.exception.details["planned_issue_type"])
+        self.assertEqual("任务", captured.exception.details["current_issue_type"])
+        posts = [
+            method
+            for method, path in transport.requests
+            if method == "POST" and path.endswith("/transitions")
+        ]
+        self.assertEqual([], posts)
+
+    def test_readback_transition_issue_type_changed_blocks(self) -> None:
+        transport = FakeTransitionTransport(
+            initial_status="待接管",
+            issue_type="Agentic 缺陷",
+            transitions=[{"id": "2", "name": "接管任务", "to": "执行中"}],
+        )
+        service = _service(transport)
+        plan = service.plan_transition(
+            "AO-1",
+            "k-agentic-readback-type-change",
+            maintainer_run_id="maint-AO-1-abc123",
+            workflow=WORKFLOW,
+            target_transition="start_progress",
+        )
+        transport.issue_type = "任务"
+        transport.issue_status = "执行中"
+
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.readback_transition(plan)
+
+        self.assertEqual("jira_transition_mapping_gap", captured.exception.code)
+
     def test_apply_transition_available_changed_blocks(self) -> None:
         transport = FakeTransitionTransport()
         service = _service(transport)
@@ -419,6 +552,30 @@ class MaintainerTransitionServiceTest(unittest.TestCase):
             service.apply_transition(plan, plan.plan_id)
         self.assertEqual("jira_transition_readback_mismatch", captured.exception.code)
         self.assertEqual("已完成", captured.exception.details["current_status"])
+
+    def test_apply_transition_issue_type_changed_after_write_blocks(self) -> None:
+        service = _service(
+            FakeTransitionTransport(
+                initial_status="待接管",
+                issue_type="Agentic 缺陷",
+                transitions=[{"id": "2", "name": "接管任务", "to": "执行中"}],
+                post_issue_type="任务",
+            )
+        )
+        plan = service.plan_transition(
+            "AO-1",
+            "k-agentic-post-type-change",
+            maintainer_run_id="maint-AO-1-abc123",
+            workflow=WORKFLOW,
+            target_transition="start_progress",
+        )
+
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.apply_transition(plan, plan.plan_id)
+
+        self.assertEqual("jira_transition_readback_mismatch", captured.exception.code)
+        self.assertFalse(captured.exception.retry_safe)
+        self.assertTrue(captured.exception.details["remote_write_completed"])
 
 
 class MaintainerTransitionConfigTest(unittest.TestCase):
@@ -461,6 +618,9 @@ class MaintainerTransitionConfigTest(unittest.TestCase):
             self.assertEqual("31", ao["transitions"]["start_progress"]["id"])
             self.assertEqual(["待办"], ao["transitions"]["start_progress"]["from"])
             self.assertEqual("waiting_takeover", ao["statuses"]["待办"])
+            agentic_defect = ao["issue_types"]["Agentic 缺陷"]
+            self.assertEqual("2", agentic_defect["transitions"]["start_progress"]["id"])
+            self.assertEqual("5", agentic_defect["transitions"]["complete"]["id"])
 
     def test_load_workflow_invalid_blocks(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

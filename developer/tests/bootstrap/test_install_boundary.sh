@@ -32,6 +32,7 @@ git -C "$source_repo" config user.email agentic-ops-test@example.test
 git -C "$source_repo" config user.name "AgenticOps Test"
 git -C "$source_repo" add .
 git -C "$source_repo" commit -m "test source" >/dev/null
+git -C "$source_repo" tag -a v0.0 -m "test release baseline"
 
 # 产品入口必须拒绝持久化的 url.*.insteadOf。离线测试仅在测试夹具的
 # Git transport wrapper 中，为已知网络子命令注入一次性 -c 映射；身份读取、
@@ -66,6 +67,11 @@ case "$subcommand" in
 esac
 EOF
 chmod 0755 "$transport_git_dir/git"
+cat > "$transport_git_dir/gh" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod 0755 "$transport_git_dir/gh"
 
 test_python="${AGENTIC_OPS_TEST_PYTHON:-$repo_root/developer/.venv/bin/python}"
 if [ ! -x "$test_python" ]; then
@@ -84,25 +90,36 @@ printf '%s\n' \
   '  shift' \
   'done' \
   'test -n "$project_root"' \
-  'mkdir -p "$project_root/.venv/bin"' \
-  'printf "#!/usr/bin/env bash\\nexec %q \\\"%s\\\"\\n" "$AGENTIC_OPS_TEST_REAL_PYTHON" '\''$@'\'' > "$project_root/.venv/bin/python"' \
-  'chmod 0755 "$project_root/.venv/bin/python"' \
+  '"$AGENTIC_OPS_TEST_REAL_PYTHON" -m venv --clear --system-site-packages "$project_root/.venv"' \
+  'venv_site="$("$project_root/.venv/bin/python" -c '\''import site; print(site.getsitepackages()[0])'\'')"' \
+  '"$AGENTIC_OPS_TEST_REAL_PYTHON" -c '\''import site; print("\\n".join(site.getsitepackages()))'\'' > "$venv_site/agentic-ops-test-dependencies.pth"' \
   > "$fake_uv"
 chmod 0755 "$fake_uv"
 
-HOME="$test_home" \
-AGENTIC_OPS_HOME="$install_root" \
-AGENTIC_OPS_UV="$fake_uv" \
-AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
-AO_TEST_REAL_GIT="$real_git" \
-AO_TEST_FIXTURE_REPOSITORY="$source_repo" \
-AO_TEST_OFFICIAL_REPOSITORY="$official_repo_url" \
-PATH="$transport_git_dir:$PATH" \
-  bash "$source_repo/developer/bootstrap/install.sh" >/dev/null
+missing_tools_path="$test_root/missing-tools"
+missing_tools_install="$test_root/missing-tools-install"
+mkdir -p "$missing_tools_path"
+if PATH="$missing_tools_path" AGENTIC_OPS_UV= \
+  /bin/bash "$source_repo/developer/bootstrap/install.sh" \
+    --install-home "$missing_tools_install" \
+    >"$test_root/missing-tools.out" 2>"$test_root/missing-tools.err"; then
+  echo "缺少安装依赖时必须在安装前失败" >&2
+  exit 1
+fi
+grep -q 'install_dependencies_missing' "$test_root/missing-tools.out"
+grep -q '"missing_dependencies":"git,gh,uv"' "$test_root/missing-tools.out"
+grep -q 'git, gh, uv' "$test_root/missing-tools.err"
+test ! -e "$missing_tools_install"
 
-printf '%s\n' 'test-token-secret' | \
+if bash "$source_repo/developer/bootstrap/install.sh" --install-home \
+    >"$test_root/missing-install-home.out" \
+    2>"$test_root/missing-install-home.err"; then
+  echo "--install-home 缺少目录时必须拒绝执行" >&2
+  exit 1
+fi
+grep -q '安装参数缺少目录：--install-home' "$test_root/missing-install-home.err"
+
 HOME="$test_home" \
-AGENTIC_OPS_HOME="$authorized_install_root" \
 AGENTIC_OPS_UV="$fake_uv" \
 AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
 AO_TEST_REAL_GIT="$real_git" \
@@ -110,6 +127,22 @@ AO_TEST_FIXTURE_REPOSITORY="$source_repo" \
 AO_TEST_OFFICIAL_REPOSITORY="$official_repo_url" \
 PATH="$transport_git_dir:$PATH" \
   bash "$source_repo/developer/bootstrap/install.sh" \
+    --install-home "$install_root" >"$test_root/install.out"
+
+grep -Fq "\"python_venv\":\"$install_root/developer/.venv\"" \
+  "$test_root/install.out"
+
+printf '%s\n' 'test-token-secret' | \
+HOME="$test_home" \
+AGENTIC_OPS_HOME="$test_root/environment-install-root" \
+AGENTIC_OPS_UV="$fake_uv" \
+AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
+AO_TEST_REAL_GIT="$real_git" \
+AO_TEST_FIXTURE_REPOSITORY="$source_repo" \
+AO_TEST_OFFICIAL_REPOSITORY="$official_repo_url" \
+PATH="$transport_git_dir:$PATH" \
+  bash "$source_repo/developer/bootstrap/install.sh" \
+    --install-home "$authorized_install_root" \
     --agent-id install-auth-test \
     --jira-email developer@example.test \
     --git-name 'Install Auth Test' \
@@ -122,6 +155,7 @@ PATH="$transport_git_dir:$PATH" \
 grep -q '"authorization_status":"configured"' "$test_root/authorized-install.out"
 test -f "$authorized_install_root/user/identity.yaml"
 test -f "$authorized_install_root/user/.env"
+test ! -e "$test_root/environment-install-root"
 if stat -f '%Lp' "$authorized_install_root/user/identity.yaml" >/dev/null 2>&1; then
   test "$(stat -f '%Lp' "$authorized_install_root/user/identity.yaml")" = "600"
   test "$(stat -f '%Lp' "$authorized_install_root/user/.env")" = "600"
@@ -140,6 +174,25 @@ if grep -q 'test-token-secret' "$test_root/authorized-install.out" \
 fi
 
 test -x "$install_root/bin/ao-work"
+if stat -f '%Lp' "$install_root/.local/installation.json" >/dev/null 2>&1; then
+  test "$(stat -f '%Lp' "$install_root/.local/installation.json")" = "600"
+else
+  test "$(stat -c '%a' "$install_root/.local/installation.json")" = "600"
+fi
+"$install_root/bin/ao-work" version > "$test_root/install-version.out"
+"$test_python" - "$test_root/install-version.out" "$install_root" <<'PY'
+import json
+import sys
+
+payload = json.load(open(sys.argv[1]))
+assert payload["ok"] is True
+assert payload["workplane"] == "developer"
+from pathlib import Path
+assert payload["install_root"] == str(Path(sys.argv[2]).resolve())
+assert payload["installed_at"].endswith("Z")
+assert len(payload["git_head"]) in {40, 64}
+assert payload["git_short_sha"] == payload["git_head"][:12]
+PY
 test ! -e "$install_root/bin/ao-maint"
 test ! -e "$install_root/developer/.venv/bin/ao-maint"
 test ! -e "$install_root/maintainer"
@@ -315,6 +368,7 @@ business_workspace="$test_root/business-workspace"
 mkdir -p "$business_workspace"
 git -C "$business_workspace" init -b main >/dev/null
 AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
+PYTHONDONTWRITEBYTECODE=1 \
 PYTHONPATH="$install_root/developer/runtime/src" \
   "$test_python" - "$install_root" "$business_workspace" <<'PY'
 from pathlib import Path
@@ -328,9 +382,11 @@ initializer = WorkspaceInitializer(workspace, install)
 
 
 class Candidate:
-    root = workspace
+    root = initializer.root
+    install_root = initializer.install_root
 
 initializer._install_workspace_skills(Candidate())
+initializer._write_workspace_entry(Candidate())
 PY
 test -f "$business_workspace/.agents/skills/configure-authorization/SKILL.md"
 test -f "$business_workspace/.agents/skills/initialize-project-workspace/SKILL.md"
@@ -350,6 +406,23 @@ if grep -RIl 'ao-work task takeover' \
   echo "新工作空间不得继承旧多级接管入口" >&2
   exit 1
 fi
+
+(
+  cd "$business_workspace"
+  PATH="/usr/bin:/bin" VIRTUAL_ENV="$test_root/wrong-venv" \
+    ./.agentic-ops/bin/ao-work version
+) > "$test_root/business-workspace-version.out"
+"$test_python" - "$test_root/business-workspace-version.out" "$install_root" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.load(open(sys.argv[1]))
+install = Path(sys.argv[2])
+assert payload["ok"] is True
+assert Path(payload["python_executable"]).resolve() == (install / "developer" / ".venv" / "bin" / "python").resolve()
+assert Path(payload["python_venv"]).resolve() == (install / "developer" / ".venv").resolve()
+PY
 
 fake_origin="$test_root/fake-origin"
 mkdir -p "$fake_origin"
@@ -487,6 +560,23 @@ git -C "$source_repo" add developer/AGENTS.md
 git -C "$source_repo" commit -m "test update" >/dev/null
 update_ref="$(git -C "$source_repo" rev-parse HEAD)"
 
+# 前面的 Runtime 直接导入断言使用测试解释器，不经过 ao-work 启动器；
+# 清理其测试副作用，避免把非生产入口生成的 bytecode 误当成更新前的安装污染。
+find "$install_root/developer/runtime" -type d -name __pycache__ -prune -exec rm -rf {} +
+
+# 自定义 --install-home 安装从自身目录执行更新时，不应依赖
+# AGENTIC_OPS_HOME 或错误回退到 $HOME/.agentic-ops。
+HOME="$test_home" \
+AGENTIC_OPS_UV="$fake_uv" \
+AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
+AGENTIC_OPS_ASSUME_YES=1 \
+AO_TEST_REAL_GIT="$real_git" \
+AO_TEST_FIXTURE_REPOSITORY="$source_repo" \
+AO_TEST_OFFICIAL_REPOSITORY="$official_repo_url" \
+PATH="$transport_git_dir:$PATH" \
+  bash "$install_root/developer/bootstrap/update.sh" >/dev/null
+test "$(git -C "$install_root" rev-parse HEAD)" = "$update_ref"
+
 if HOME="$test_home" \
   SHELL=/bin/zsh \
   AGENTIC_OPS_HOME="$default_install_root" \
@@ -533,6 +623,7 @@ PATH="$transport_git_dir:$PATH" \
   bash "$default_install_root/developer/bootstrap/update.sh" >/dev/null
 test "$(git -C "$default_install_root" rev-parse HEAD)" = "$update_ref"
 test "$(sed -n '1p' "$default_install_root/.local/previous-ref")" != "$update_ref"
+installation_metadata_before_rollback="$(cat "$default_install_root/.local/installation.json")"
 
 HOME="$test_home" \
 AGENTIC_OPS_HOME="$default_install_root" \
@@ -542,6 +633,7 @@ AGENTIC_OPS_TEST_REAL_PYTHON="$test_python" \
 test "$(git -C "$default_install_root" rev-parse HEAD)" != "$update_ref"
 test -x "$default_install_root/bin/ao-work"
 test ! -e "$default_install_root/maintainer"
+test "$(cat "$default_install_root/.local/installation.json")" = "$installation_metadata_before_rollback"
 
 file_mode() {
   local path="$1"
@@ -595,7 +687,7 @@ for managed_relative in .local bin developer/.venv; do
   mv "$managed_backup" "$managed_path"
 done
 
-for ref_name in current-ref previous-ref pending-rollback-ref; do
+for ref_name in current-ref previous-ref pending-rollback-ref installation.json; do
   ref_path="$default_install_root/.local/$ref_name"
   ref_backup="$test_root/ref-backup-$ref_name"
   ref_sentinel="$test_root/ref-sentinel-$ref_name"
@@ -608,7 +700,8 @@ for ref_name in current-ref previous-ref pending-rollback-ref; do
   ln -s "$ref_sentinel" "$ref_path"
 
   assert_update_rejected \
-    "$default_install_root" "$ref_name-symlink" install_ref_path_invalid
+    "$default_install_root" "$ref_name-symlink" \
+    "$(if [ "$ref_name" = installation.json ]; then printf '%s' install_managed_path_invalid; else printf '%s' install_ref_path_invalid; fi)"
   test "$(cat "$ref_sentinel")" = "outside-ref-unchanged"
 
   rm "$ref_path"
@@ -629,12 +722,6 @@ mkdir "$default_install_root/.local/pending-rollback-ref"
 assert_update_rejected \
   "$default_install_root" pending-ref-directory install_ref_path_invalid
 rmdir "$default_install_root/.local/pending-rollback-ref"
-
-install_alias="$test_root/install-root-symlink"
-ln -s "$default_install_root" "$install_alias"
-assert_update_rejected \
-  "$install_alias" install-root-symlink install_managed_path_invalid
-rm "$install_alias"
 
 current_head="$(git -C "$default_install_root" rev-parse HEAD)"
 bash -c \

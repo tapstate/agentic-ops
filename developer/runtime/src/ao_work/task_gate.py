@@ -762,7 +762,7 @@ class TaskGateService:
             raise _blocked(
                 "task_source_root_missing",
                 "任务来源快照缺少业务源码目录",
-                "请重新执行 workspace preflight 和 task start",
+                "请确认工作空间初始化完成后重新执行 task start",
             )
         return validate_business_source_root(self.root, Path(raw))
 

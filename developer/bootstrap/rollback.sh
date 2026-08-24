@@ -3,7 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 SOURCE_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd -P)"
-INSTALL_DIR="${AGENTIC_OPS_HOME:-$HOME/.agentic-ops}"
+# 回滚与更新使用同一安装根解析规则，避免自定义安装错误操作默认目录。
+INSTALL_DIR="$SOURCE_ROOT"
 
 . "$SOURCE_ROOT/developer/bootstrap/lib/common.sh"
 agentic_reject_verification_mode "$INSTALL_DIR"

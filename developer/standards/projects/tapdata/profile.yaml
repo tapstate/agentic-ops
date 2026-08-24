@@ -33,16 +33,45 @@ repositories:
     - tapdata/solutions
     - tapdata/fhir-solution
     - tapdata/hazelcast
-  analysis_mount:
-    mode: all
-    include: []
-    exclude:
-      - tapdata/t-layer3-test
+  # 任务工作树按领域创建；未映射仓库不做全量回退。
+  worktree_domains:
+    - id: product
+      baseline_repository: tapdata/tapdata
+      repositories:
+        - tapdata/tapdata
+        - tapdata/tapdata-enterprise
+        - tapdata/tapdata-web
+        - tapdata/tapdata-license
+        - tapdata/tapdata-common-lib
+        - tapdata/tapdata-application
+    - id: assistant
+      baseline_repository: tapdata/feishu_robot
+      repositories: [tapdata/feishu_robot]
+    - id: automation-test
+      baseline_repository: tapdata/t-layer3-test
+      repositories: [tapdata/t-layer3-test]
+    - id: connector
+      baseline_repository: tapdata/tapdata-connectors
+      repositories:
+        - tapdata/tapdata-connectors
+        - tapdata/tapdata-connectors-enterprise
   branches:
     derive_from: default
     default_branch: main
     default_rule: same_name
-    # 各仓库新功能开发分支（from_branch = tapdata 的 develop 时生效）
+    # 任务工作树的基线必须按目标仓库显式解析，禁止从池成员当前分支或隐式 main 猜测。
+    baseline_branches:
+      tapdata/tapdata: develop
+      tapdata/tapdata-enterprise: develop
+      tapdata/tapdata-web: develop
+      tapdata/tapdata-connectors: develop
+      tapdata/tapdata-connectors-enterprise: develop
+      tapdata/tapdata-license: main
+      tapdata/tapdata-common-lib: main
+      tapdata/tapdata-application: main
+      tapdata/feishu_robot: master
+      tapdata/t-layer3-test: develop
+    # 静态新功能开发映射；产品域任务工作树以 tap_align_branches.py plan 结果为准。
     dev_branches:
       tapdata/tapdata: develop
       tapdata/tapdata-cloud: develop
@@ -56,6 +85,11 @@ repositories:
       tapdata/tapdata-application: main
       tapdata/feishu_robot: master
       tapdata/t-layer3-test: develop
+      tapdata/docs: main
+      tapdata/docs-en: main
+      tapdata/mcp-tap-server: main
+      tapdata/solutions: main
+      tapdata/fhir-solution: main
     overrides: []
 
 fields:
@@ -88,11 +122,15 @@ fields:
     source: workspace_repo_mapping
     state: active
     required: true
-  target_branch:
+  problem_version:
     source: jira_description_section
-    section: 修复分支
+    section: 问题版本
     state: active
     writable: true
+  target_branch:
+    source: task_worktree_mapping
+    state: active
+    required: true
   problem_summary:
     source: jira_description_section
     section: 问题现象

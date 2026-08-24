@@ -119,8 +119,8 @@ ao-work
 
 - 初始锁定 Python 3.12，由 `.python-version` 声明。
 - 两个工作面分别用自己的 `pyproject.toml` 和 `uv.lock` 管理包与依赖；根目录不提供可同时安装两个 Runtime 的混合 Python 项目。
-- Shell Bootstrap 定位并要求可信的 `uv`，再按锁文件准备 Python 3.12 和 `~/.agentic-ops/developer/.venv`；当前不会自动下载 `uv`，用户必须先安装 `uv` 或显式提供 `AGENTIC_OPS_UV`。不要求用户预装 Go。
-- `./maintainer/bin/ao-maint` 只调用 `ao_maint`；安装后的 `bin/ao-work` 只调用 `ao_work`。
+- Shell Bootstrap 在安装写入前统一要求 `git`、`gh` 和可信的 `uv`，一次列出全部缺失项；再按锁文件准备 Python 3.12 和 `~/.agentic-ops/developer/.venv`。当前不会自动下载系统程序，`AGENTIC_OPS_UV` 可显式提供可信 `uv`。不要求用户预装 Go。
+- `./maintainer/bin/ao-maint` 只调用 `ao_maint`；安装后的 `bin/ao-work` 显式绑定安装 venv 的 `VIRTUAL_ENV`、`PATH` 和 Python，并只调用 `ao_work`。
 - 两个包、解析器、授权、配置和状态不得互相导入或隐式读取。
 - 不使用系统 Python、全局 `pip`、业务项目虚拟环境或业务项目依赖。
 - 更新使用 `uv sync --locked --project developer`；维护环境使用 `--project maintainer`，声明与对应锁文件不一致时阻断。
@@ -239,7 +239,7 @@ fetch origin/main
 
 回滚到 `previous-ref`，按对应 `uv.lock` 重建环境，自检通过后才切换正式入口。更新和回滚不得修改 `user/`、项目工作空间、业务源码、Jira 或 GitHub 状态。精确安装版本以 `main` commit SHA 为事实，版本分支或 Tag 用于人读版本与历史恢复。
 
-普通改进通过任务分支 PR 合入 `develop`；稳定交付通过受控 `develop -> main` PR；Hotfix 从最新 `main` 建分支并通过 PR 回到 `main`，随后同步到 `develop`。`main` 禁止直接提交和推送，合并、发布和 Tag 继续单独人工确认。
+普通改进通过任务分支 PR 合入 `develop`；稳定交付通过受控 `develop -> main` PR。Hotfix 是显式例外：不创建分支或 PR，使用 Jira key 绑定的 Merge commit 原子同步远端 `main/develop`，也不与 Jira 交互。`main` 始终禁止直接提交，普通直推、强推和 Tag 写入仍禁止。
 
 ## 12. Go 与旧资料退出
 

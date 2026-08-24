@@ -187,7 +187,7 @@ AgenticOps 配置项必须按 [配置规范](configuration-standards.md) 维护�
 
 ## 8. 源头仓库分支与发布规则
 
-`tapstate/agentic-ops` 的 GitHub 默认分支必须是 `main`，日常开发必须在 `develop` 进行。`main` 不允许直接提交或直接推送；版本化 `.githooks` 是策略源，Git 必须通过 common directory trusted launcher 加载已接受 `HEAD` 的 Hook，不能直接执行 candidate 工作树 Hook。合入方式只允许 PR 的 Merge commit。硬门禁模式还必须通过无 bypass 的 GitHub Repository Ruleset 禁止直接推送、强推和删除，并要求至少 1 个独立人工批准、最后推送者不能自批、dismiss stale approvals、解决全部 review threads；GitHub Free 私有仓库使用显式软门禁时，接受服务器端无法阻止其它入口直推和强制独立审批的剩余风险，但本项目流程不得因此绕过 PR 或自动合并。
+`tapstate/agentic-ops` 的 GitHub 默认分支必须是 `main`，日常开发必须在 `develop` 进行。`main` 不允许直接提交，正常发布不允许直接推送；版本化 `.githooks` 是策略源，Git 必须通过 common directory trusted launcher 加载已接受 `HEAD` 的 Hook，不能直接执行 candidate 工作树 Hook。正常发布只允许 PR 的 Merge commit。硬门禁模式还必须通过无 bypass 的 GitHub Repository Ruleset 禁止直接推送、强推和删除，并要求至少 1 个独立人工批准、最后推送者不能自批、dismiss stale approvals、解决全部 review threads；GitHub Free 私有仓库使用显式软门禁时，接受服务器端无法阻止其它入口直推和强制独立审批的剩余风险。Hotfix 是唯一脚本化直推例外，边界见下文。
 
 正常发布必须使用统一入口：
 
@@ -196,19 +196,17 @@ maintainer/scripts/release.sh prepare --version vX.Y
 maintainer/scripts/release.sh publish --version vX.Y
 ```
 
-`prepare` 先固定 HEAD，并完整验证 Python、两个工作面、Skill、Rule、标准资产、developer-only Bootstrap 和安装边界；全部通过后才创建或复用本地 annotated `vX.Y` tag，失败时不得留下新 tag。它不构建项目自有平台二进制，不暂存、不提交、不推送。研发工程师审查后，`publish` 必须再次执行完整本地验证并取得最终确认。硬门禁模式推送 `develop`，创建或复用 `develop -> main` PR，启用 Merge Auto-merge；软门禁模式必须显式传入 `--allow-soft-gate`，从已验证 HEAD 创建固定 `release/vX.Y -> main` PR，等待研发工程师人工 Merge commit 后以同一命令恢复并再次完整验证。两种模式都必须验证 `origin/main` 包含固定发布 HEAD，最后才推送不可变 tag。
+`prepare` 先固定 HEAD，并完整验证 Python、两个工作面、Skill、Rule、标准资产、developer-only Bootstrap 和安装边界；软门禁模式在验证通过后创建或复用本地固定 `release/vX.Y` 分支，但绝不创建 Tag。它不构建项目自有平台二进制，不暂存、不提交、不推送。研发工程师审查后，`publish` 必须再次执行完整本地验证并取得最终确认。硬门禁模式推送 `develop`，创建或复用 `develop -> main` PR，启用 Merge Auto-merge；软门禁模式只允许使用 prepare 固定的 `release/vX.Y -> main` PR，并在创建后每 5 秒轮询状态，最多等待 30 分钟。研发工程师仍在 GitHub 执行 Merge commit，检测到合并后脚本自动再次完整验证；传入 `--no-wait-for-merge` 时保留返回状态码 `2`、人工合并后以同一命令续跑的方式。两种模式都必须验证 `origin/main` 包含固定发布 HEAD；确认实际 Merge commit 后，脚本必须先将 `develop` 快进到已验证的 `origin/main`，快进不成立即失败关闭，最后才创建且推送指向该 Merge commit 的不可变 tag。
 
 紧急修复必须使用统一入口：
 
 ```sh
-maintainer/scripts/hotfix.sh create --jira-id <KEY>
-maintainer/scripts/hotfix.sh prepare
-maintainer/scripts/hotfix.sh publish
+maintainer/scripts/hotfix.sh <KEY>
 ```
 
-修复分支必须从最新 `origin/main` 创建，格式为 `<user>/<jira-id>/fix-main`。Hotfix 复用 `main` 最近的二段式版本基线，沿用既有 `STATE-vX.Y.COMMIT_INDEX-COMMIT` 构造，不创建、移动或推送新 tag；合入 `main` 后必须提示研发工程师人工同步 `develop`。
+Hotfix 可从任意干净分支执行。Jira key 为唯一位置参数和必填 Git 审计标识，脚本不读取、不修改、不评论 Jira，也不调用 `gh`。脚本自行刷新远端、切换或创建本地 `develop`、快进落后的本地分支，并允许把本地已提交且以 `origin/develop` 为祖先的领先提交直接纳入候选；真实分叉时停止。脚本不创建修复分支、PR 或 Tag，不执行完整发布验证，不等待额外人工确认；调用命令本身就是本次快速修复授权。脚本以固定的 `origin/main` 和本地 `develop` 候选自动计算合并 tree，以两者为父提交生成带 Jira key 的 Merge commit，原子推送到远端 `main` 和 `develop`，再同步本地 `develop` 并回读。自动合并冲突、脏工作区或原子推送失败时关闭，禁止交互式冲突处理、rebase、cherry-pick、强推或部分更新。
 
-两个 `prepare` 和两个 `publish` 入口都必须在临时 worktree 中固定执行以下完整验证：
+正常发布的 `prepare` 和 `publish` 必须在临时 worktree 中固定执行以下完整验证；Hotfix 不在执行期运行这些发布验证，但 Hotfix 实现本身必须由 `test-release-workflow.sh` 回归覆盖：
 
 ```sh
 bash maintainer/scripts/test-python-runtime.sh
@@ -217,7 +215,7 @@ bash developer/tests/bootstrap/test_install_boundary.sh
 bash maintainer/scripts/test-release-workflow.sh
 ```
 
-验证命令不得通过参数替换或跳过；验证失败和最终确认前不得产生远端写入。非交互发布必须显式传入 `--confirm-release`。
+正常发布验证命令不得通过参数替换或跳过；验证失败和最终确认前不得产生远端写入。非交互正常发布必须显式传入 `--confirm-release`。
 
 脚本必须在执行前检查 trusted Hook launcher、远端 `develop` 和 GitHub 默认分支。硬门禁模式还检查 Auto-merge 和 `main` Ruleset，发现缺失或漂移时应逐项展示并取得确认后幂等修复；非交互配置必须显式传入 `--configure-workflow`。软门禁只放宽 Ruleset 和 Auto-merge，仍强制检查 Merge commit 可用、固定发布或修复 HEAD、人工合并、合并事实和二次完整验证。publish 还必须用刷新后的 `origin/main` Runtime 检查固定 candidate；基线缺失或信任根发生净变更时，自动 publish 失败并改走受保护 `main` 的独立人工审查 PR。PR 和 Merge commit 是发布事实源，`.local/release-runs/` JSON 是本地执行审计。
 
@@ -420,7 +418,7 @@ CLI 必须遵守：
 - 外部写操作必须遵守 `plan -> apply -> readback`，结果不明确时阻断，不得猜测成功。
 - Linux 和 macOS 必须通过仓库锁定的同一 Python 主链路运行，不构建 AgenticOps 自有平台二进制。
 
-Bootstrap 允许依赖 `bash`、`curl`、Git 和 `uv`。Python 版本由 `.python-version` 固定，依赖分别由 `maintainer/pyproject.toml`、`developer/pyproject.toml` 和各自 `uv.lock` 锁定；运行时不得依赖业务项目自己的 Python 环境。
+Bootstrap 允许依赖 `bash`、`curl`、Git、GitHub CLI (`gh`) 和 `uv`。developer 生产安装必须在安装写入前统一检查 `git`、`gh`、`uv`，缺失时一次列出全部缺失项并停止。Python 版本由 `.python-version` 固定，依赖分别由 `maintainer/pyproject.toml`、`developer/pyproject.toml` 和各自 `uv.lock` 锁定；运行时不得依赖业务项目自己的 Python 环境。
 
 `ao-work` 的前置检查必须验证 GitHub、Jira 授权、工作流配置、当前业务仓库和 developer 工作面；`ao-maint` 必须验证 AgenticOps 源头仓库、maintainer AI 入口和维护规则。两者不得通过 mode 参数互换。
 
@@ -459,7 +457,7 @@ gh pr create
 gh pr edit
 ```
 
-推送、创建拉取请求、重新提交修复和合并都属于人工门禁，只有在研发工程师明确授权的范围内才能执行。研发工程师确认版本化设计或修复计划时，可以形成工作项级连续执行授权，覆盖同一 Jira 工作项内的实现、验证、提交、任务分支推送、必要 Jira 回写以及创建目标为 `develop` 的拉取请求；这些动作不再逐项暂停，但必须统一停在拉取请求审查。`master`、`main`、`develop`、`release/*` 及同类保护分支禁止自动推送；合并、发布和 Hotfix 必须取得独立确认并使用第 8 节脚本。
+推送、创建拉取请求、重新提交修复和合并都属于人工门禁，只有在研发工程师明确授权的范围内才能执行。研发工程师确认版本化设计或修复计划时，可以形成工作项级连续执行授权，覆盖同一 Jira 工作项内的实现、验证、提交、任务分支推送、必要 Jira 回写以及创建目标为 `develop` 的拉取请求；这些动作不再逐项暂停，但必须统一停在拉取请求审查。`master`、`main`、`develop`、`release/*` 及同类保护分支禁止普通自动推送；正常合并和发布必须取得独立确认。第 8 节 Hotfix 是唯一例外，显式命令调用即为授权，不追加确认。
 
 ## 16. 人工门禁规则
 
@@ -580,7 +578,7 @@ Jira 任务编号必须能从分支名、用户指令、Jira 卡片或任务上�
 
 非平凡提交必须包含 body，用中文说明问题、处理方式、验证结果和风险。提交信息不得包含完整 Jira 描述、敏感日志、凭证或未经脱敏的客户信息。
 
-AIAgent 只有在研发工程师明确要求“提交变更”或“提交代码”后才能执行 `git commit`，只有在明确要求推送或执行发布后才能 `git push`。不得直接提交或推送 `main`；日常开发使用 `develop`，正式发布与 Hotfix 使用第 8 节脚本。若能可靠确认 Jira 编号，推送成功后应将中文变更总结评论到对应 Jira 任务；评论失败时必须明确反馈“代码已推送但 Jira 回写未完成”，后续只重试评论，不重复推送。
+AIAgent 只有在研发工程师明确要求“提交变更”或“提交代码”后才能执行 `git commit`，只有在明确要求推送或执行发布后才能 `git push`。不得直接提交 `main`；日常开发使用 `develop`，正式发布与 Hotfix 使用第 8 节脚本。普通推送若能可靠确认 Jira 编号，应将中文变更总结评论到对应 Jira 任务；Hotfix 不与 Jira 交互，编号只保存在 Merge commit 中。
 
 当规则变化影响 AIAgent 行为时，必须同步更新：
 

@@ -100,7 +100,7 @@ class WorkspaceCandidate:
             "source_pool_root": str(self.source_pool_root) if self.source_pool_root else None,
             "repository_count": len(self.profile.repository_candidates()),
             "task_worktree_layout": (
-                "<pool_root>/<JIRA-KEY>/<from_branch>/<repo>"
+                "<pool_root>/.worktree/<JIRA-KEY>/<问题版本>/<repo>"
                 if self.source_pool_root is not None
                 else None
             ),
@@ -110,7 +110,7 @@ class WorkspaceCandidate:
 
 
 class WorkspaceInitializer:
-    def __init__(self, root: Path, install_root: Path, *, git_timeout: float = 20.0) -> None:
+    def __init__(self, root: Path, install_root: Path, *, git_timeout: float = 60.0) -> None:
         self.root = root.expanduser().resolve()
         self.install_root = install_root.expanduser().resolve()
         self.git_timeout = git_timeout
@@ -259,6 +259,7 @@ class WorkspaceInitializer:
         *,
         confirm_existing_config: bool = False,
         check_remote: bool = True,
+        allow_missing_claude_bridges: bool = False,
     ) -> dict[str, Any]:
         validate_workspace_state_root(self.root)
         write_diagnostic("初始化预检 1/3：工作空间边界、安装资产与既有配置检查")
@@ -272,7 +273,11 @@ class WorkspaceInitializer:
         self._check_existing_config(candidate, checks, confirm_existing_config)
         existing_agent = candidate.root / ".agentic-ops" / "agent.json"
         if existing_agent.is_file() and read_json(existing_agent).get("schema_version") == 5:
-            self._check_workspace_ai_assets(candidate, checks)
+            self._check_workspace_ai_assets(
+                candidate,
+                checks,
+                allow_missing_claude_bridges=allow_missing_claude_bridges,
+            )
         self._check_agent_id_collision(candidate, checks)
         self._check_authorization(candidate, checks)
         write_diagnostic("初始化预检 2/3：Jira 授权与项目访问验证")
@@ -478,7 +483,11 @@ class WorkspaceInitializer:
         checks.append({"check": "developer_ai_assets", "status": "passed"})
 
     def _check_workspace_ai_assets(
-        self, candidate: WorkspaceCandidate, checks: list[dict[str, str]]
+        self,
+        candidate: WorkspaceCandidate,
+        checks: list[dict[str, str]],
+        *,
+        allow_missing_claude_bridges: bool = False,
     ) -> None:
         agents_path = validate_workspace_root_file(
             candidate.root,
@@ -572,6 +581,12 @@ class WorkspaceInitializer:
                 "业务工作空间 AI 入口包含非准入 Skill 或 maintainer 资产",
                 "请停止使用该工作空间，并由指导员核对后重新初始化",
             )
+        self._validate_claude_skill_bridges(
+            candidate,
+            skill_root,
+            skill_assets,
+            allow_missing=allow_missing_claude_bridges,
+        )
         self._check_workspace_entry(candidate)
         checks.append({"check": "workspace_ai_assets", "status": "passed"})
 
@@ -802,17 +817,11 @@ class WorkspaceInitializer:
                                 "stderr_tail": _stderr_tail(result.stderr),
                             },
                         )
-                    # 权限类错误：跳过该仓库并提示用户，其余仓库继续检查。
+                    # 权限错误只作为预检诊断：apply 阶段仍必须实际尝试初始化
+                    # 缺失池成员，不能把未初始化仓库静默跳过。
                     write_diagnostic(
-                        f"初始化预检：跳过无权限源码仓库 {repository}（{reason}）"
-                    )
-                    skipped.append(
-                        {
-                            "repository": repository,
-                            "url": url,
-                            "reason": reason,
-                            "stderr_tail": _stderr_tail(result.stderr),
-                        }
+                        f"初始化预检：源码仓库 {repository} 当前不可访问（{reason}）；"
+                        "初始化阶段仍会尝试准备该仓库"
                     )
             checks.append({"check": "source_pool_root", "status": "passed"})
             checks.append({"check": "source_pool_members_remote", "status": "passed"})
@@ -896,8 +905,13 @@ class WorkspaceInitializer:
     def _ensure_source_checkout(self, candidate: WorkspaceCandidate) -> str:
         source = validate_business_source_root(candidate.root, candidate.source_root)
         if source.is_dir() and any(source.iterdir()):
-            self._validate_checked_out_source(candidate)
-            return "reused"
+            try:
+                self._validate_checked_out_source(candidate)
+                return "reused"
+            except RuntimeErrorResult as error:
+                if error.code != "source_repository_mismatch":
+                    raise
+                self._remove_nonconforming_checkout(source, candidate.repository)
         restore_empty_directory = source.is_dir()
         source.parent.mkdir(parents=True, exist_ok=True)
         if source.is_dir():
@@ -986,8 +1000,8 @@ class WorkspaceInitializer:
         - 已存在 → 认领（adopt）：校验 remotes 精确匹配、拒绝 URL 改写、
           拒绝指向 AgenticOps 源头仓库；浅克隆自动流式 unshallow。
         - 缺失 → 流式 clone；中断续传：已完成成员保留，下次补齐。
-        - 无权限仓库（预检已跳过或克隆时权限类失败）→ 跳过并提示用户，
-          其余仓库继续准备；返回 (状态摘要, 跳过清单)。
+        - 缺失成员必须实际执行 clone；预检权限错误只保留为诊断，clone 失败时阻断。
+        - 已存在但 remote 身份不匹配的 Git 仓库会在确认无未提交修改后清除并重建。
         - 池成员级并发锁：<pool_root>/.locks/<owner>/<repo>.lock。
         """
         assert candidate.pool_mode
@@ -1003,61 +1017,34 @@ class WorkspaceInitializer:
                 "Project Profile 没有配置 repositories.default 或 repositories.list",
                 "请先配置 profile 的默认仓库或仓库清单",
             )
-        preflight_skipped = {
-            entry["repository"]
-            for entry in (preflight or {}).get("skipped_repositories", [])
-            if isinstance(entry, dict) and entry.get("repository")
-        }
         prepared: list[str] = []
         skipped_members: list[dict[str, Any]] = []
         adopted = 0
         cloned = 0
         for repository in repositories:
-            if repository in preflight_skipped:
-                # 预检已确认无权限，直接跳过，不重复尝试克隆。
-                write_diagnostic(
-                    f"池成员准备：跳过无权限源码仓库 {repository}（预检已跳过）"
-                )
-                skipped_members.append(
-                    {
-                        "repository": repository,
-                        "url": _repository_url(repository),
-                        "reason": "无访问权限（预检阶段已跳过）",
-                    }
-                )
-                continue
             member_dir = pool_root / repository
             lock_path = pool_root / ".locks" / f"{repository.replace('/', '__')}.lock"
             with TaskLock(lock_path, timeout=10):
                 if member_dir.is_dir() and any(member_dir.iterdir()):
-                    self._validate_checked_out_source(candidate, source=member_dir, repository=repository)
-                    if self._is_shallow_clone(member_dir):
-                        self._unshallow_pool_member(member_dir, repository)
-                        adopted += 1
+                    try:
+                        self._validate_checked_out_source(
+                            candidate, source=member_dir, repository=repository
+                        )
+                    except RuntimeErrorResult as error:
+                        if error.code != "source_repository_mismatch":
+                            raise
+                        self._remove_nonconforming_checkout(member_dir, repository)
                     else:
+                        if self._is_shallow_clone(member_dir):
+                            self._unshallow_pool_member(member_dir, repository)
                         adopted += 1
-                    prepared.append(repository)
-                    continue
+                        prepared.append(repository)
+                        continue
                 self._reject_git_url_rewrites(None)
                 result = self._run_git_streaming(
                     ["clone", "--progress", _repository_url(repository), str(member_dir)]
                 )
                 if result.returncode != 0:
-                    reason = _classify_remote_permission_error(result.stderr)
-                    if reason is not None:
-                        # 权限类错误：跳过该仓库并提示用户，其余仓库继续准备。
-                        write_diagnostic(
-                            f"池成员准备：跳过无权限源码仓库 {repository}（{reason}）"
-                        )
-                        skipped_members.append(
-                            {
-                                "repository": repository,
-                                "url": _repository_url(repository),
-                                "reason": reason,
-                                "stderr_tail": _stderr_tail(result.stderr),
-                            }
-                        )
-                        continue
                     raise _blocked(
                         "source_checkout_failed",
                         f"池成员克隆失败：{repository}",
@@ -1069,6 +1056,26 @@ class WorkspaceInitializer:
                 prepared.append(repository)
         self._write_source_pool_readme(candidate, pool_root, tuple(prepared))
         return f"adopted={adopted},cloned={cloned},total={len(prepared)}", skipped_members
+
+    def _remove_nonconforming_checkout(self, source: Path, repository: str) -> None:
+        """清理 remote 身份不匹配、且没有未提交修改的 Git checkout 后重新初始化。"""
+        status = self._run_git(["-C", str(source), "status", "--porcelain"])
+        if status.returncode != 0:
+            raise _blocked(
+                "source_repository_cleanup_check_failed",
+                f"无法确认不匹配源码仓库的本地修改状态：{source}",
+                "请人工核对该仓库后重新运行 workspace init",
+            )
+        if status.stdout.strip():
+            raise _blocked(
+                "source_repository_cleanup_dirty",
+                f"源码仓库 remote 与 {repository} 不一致且存在未提交修改：{source}",
+                "请先提交、备份或移除本地修改，再重新运行 workspace init",
+            )
+        write_diagnostic(
+            f"初始化：清除 remote 身份不匹配的源码仓库 {source}，重新初始化为 {repository}"
+        )
+        self._rollback_source_checkout(source, restore_empty_directory=False)
 
     def _is_shallow_clone(self, source: Path) -> bool:
         result = self._run_git(["-C", str(source), "rev-parse", "--is-shallow-repository"])
@@ -1101,7 +1108,7 @@ class WorkspaceInitializer:
             f"- 池成员数：{len(repositories)}\n"
             f"- 生成时间：{datetime.now(timezone.utc).isoformat()}\n\n"
             "本目录存放业务项目源代码池，由 ao-work workspace init 管理。池成员按 "
-            "<owner>/<repo> 组织；任务执行时在任务根 <JIRA-KEY>/<from_branch>/ 下用 "
+            "<owner>/<repo> 组织；任务执行时在任务根 .worktree/<JIRA-KEY>/<问题版本>/ 下用 "
             "git worktree 挂出任务级子工作树。身份与凭证保存在当前 developer 安装的 user/ "
             "目录，项目和任务状态保存在业务项目工作空间 .agentic-ops/；本文件只是配套说明，"
             "权威映射以受管配置为准。请勿手改管理块。\n"
@@ -1351,7 +1358,7 @@ class WorkspaceInitializer:
             f"- 源码目录：`{candidate.source_root}`\n\n"
             "下面的 developer AI 规则已在初始化时从受信安装复制到本工作空间，AI 必须直接加载并执行；命令入口固定为 `./.agentic-ops/bin/ao-work`，不得调用裸 `ao-work`、搜索 PATH 或自行选择、切换工作面。\n"
             "Codex 可发现的 developer Skill 已作为受管副本安装到当前工作空间 `.agents/skills/`；需要流程能力时只从该目录选择 Skill。标准资产由 `ao-work` 从受信安装根解析，不能把 `developer/...` 当作业务仓库相对路径，也不得搜索或恢复 maintainer 资产。\n"
-            "执行任务前先调用 `./.agentic-ops/bin/ao-work workspace preflight`；任何阻断结果都不得绕过。\n\n"
+            "`workspace preflight` 只用于诊断或修复工作空间，不是接管任务的前置步骤；接管时由 Runtime 重新校验工作空间、安装身份和 Jira 事实。\n\n"
             "## developer AI 规则（受管副本）\n\n"
             f"{developer_rules}\n"
             f"{MANAGED_END}"
@@ -1383,7 +1390,7 @@ class WorkspaceInitializer:
             "1. 请先按 `AGENTS.md` 中的 developer AI 规则执行，本文件不替代它。\n"
             "2. 工作空间固定使用 `developer` 工作面，命令入口为 `./.agentic-ops/bin/ao-work`；"
             "不得加载或调用 `maintainer` 工作面的规则、Skill、授权、配置或入口。\n"
-            "3. 执行任务前先调用 `./.agentic-ops/bin/ao-work workspace preflight`；任何阻断结果都不得绕过。\n\n"
+            "3. `workspace preflight` 只用于诊断或修复工作空间，不是接管任务的前置步骤；接管时由 Runtime 重新校验工作空间、安装身份和 Jira 事实。\n\n"
             "## 与 Codex 的兼容说明\n\n"
             "- Codex 直接识别 `AGENTS.md` 并扫描 `.agents/skills/` 自动发现 Skill；"
             "Claude Code 通过 `.claude/skills/` 下的 symlink（由 init 创建）"
@@ -1518,41 +1525,17 @@ class WorkspaceInitializer:
         Codex 直接扫描 `.agents/skills/`；Claude Code 只读 `.claude/skills/`，
         这里用 symlink 让两个工具共享同一套 Skill 目录（Claude Code 官方认可
         symlink 形式的项目 Skill）。每个 `<name>` 桥接为 `.claude/skills/<name>`
-        → `../.agents/skills/<name>`（相对路径）。
+        → `../../.agents/skills/<name>`（相对路径）。
         """
-        claude_root = validate_managed_path(
-            candidate.root,
-            candidate.root / ".claude" / "skills",
-            code="workspace_ai_asset_unsafe",
-        )
-        if claude_root.is_symlink() or (claude_root.exists() and not claude_root.is_dir()):
-            raise _blocked(
-                "workspace_ai_asset_unsafe",
-                "业务工作空间 .claude/skills 必须是工作空间内的普通目录",
-                "请移除异常路径并重新运行 ao-work workspace init",
-            )
+        claude_root = self._claude_skill_root(candidate)
         claude_root.mkdir(parents=True, exist_ok=True)
-        for existing in claude_root.iterdir():
-            if existing.name not in expected and not existing.is_symlink():
-                raise _blocked(
-                    "workspace_ai_asset_contaminated",
-                    f"业务工作空间存在非准入 Claude Skill：{existing.name}",
-                    "请先人工核对并移除非准入 Skill，再重新初始化",
-                )
+        self._validate_claude_skill_bridges(
+            candidate, skill_root, expected, allow_missing=True
+        )
         for name in expected:
-            link = validate_managed_path(
-                candidate.root,
-                claude_root / name,
-                code="workspace_ai_asset_unsafe",
-            )
+            link = claude_root / name
             target = os.path.relpath(skill_root / name, claude_root)
             if link.is_symlink():
-                if os.readlink(link) != target:
-                    raise _blocked(
-                        "workspace_ai_asset_drift",
-                        f"业务工作空间 Claude Skill symlink 目标不一致：{name}",
-                        "请由指导员重新运行 ao-work workspace init 修复桥接",
-                    )
                 continue
             if link.exists():
                 raise _blocked(
@@ -1561,6 +1544,113 @@ class WorkspaceInitializer:
                     "请移除异常路径并重新运行 ao-work workspace init",
                 )
             link.symlink_to(target, target_is_directory=True)
+        self._validate_claude_skill_bridges(
+            candidate, skill_root, expected, allow_missing=False
+        )
+
+    def _claude_skill_root(self, candidate: WorkspaceCandidate) -> Path:
+        claude_parent = validate_managed_path(
+            candidate.root,
+            candidate.root / ".claude",
+            code="workspace_ai_asset_unsafe",
+        )
+        if claude_parent.exists() and not claude_parent.is_dir():
+            raise _blocked(
+                "workspace_ai_asset_unsafe",
+                "业务工作空间 .claude 必须是工作空间内的普通目录",
+                "请移除异常路径并重新运行 ao-work workspace init",
+            )
+        claude_root = validate_managed_path(
+            candidate.root,
+            claude_parent / "skills",
+            code="workspace_ai_asset_unsafe",
+        )
+        if claude_root.is_symlink() or (
+            claude_root.exists() and not claude_root.is_dir()
+        ):
+            raise _blocked(
+                "workspace_ai_asset_unsafe",
+                "业务工作空间 .claude/skills 必须是工作空间内的普通目录",
+                "请移除异常路径并重新运行 ao-work workspace init",
+            )
+        return claude_root
+
+    def _validate_claude_skill_bridges(
+        self,
+        candidate: WorkspaceCandidate,
+        skill_root: Path,
+        expected: dict[str, Path],
+        *,
+        allow_missing: bool,
+    ) -> None:
+        """验证 Claude 到受管 developer Skill 的精确单层桥接。"""
+        claude_root = self._claude_skill_root(candidate)
+        if not claude_root.exists():
+            if allow_missing:
+                return
+            raise _blocked(
+                "workspace_ai_asset_missing",
+                "业务工作空间缺少 Claude Skill 桥接目录",
+                "请由指导员重新运行 ao-work workspace init 修复 AI 入口",
+            )
+        for existing in claude_root.iterdir():
+            if existing.name not in expected:
+                raise _blocked(
+                    "workspace_ai_asset_contaminated",
+                    f"业务工作空间存在非准入 Claude Skill：{existing.name}",
+                    "请停止使用该工作空间，并由指导员核对后重新初始化",
+                )
+        for name in expected:
+            link = claude_root / name
+            target_dir = validate_managed_path(
+                candidate.root,
+                skill_root / name,
+                code="workspace_ai_asset_unsafe",
+            )
+            expected_target = os.path.relpath(target_dir, claude_root)
+            if not link.is_symlink():
+                if not link.exists() and allow_missing:
+                    continue
+                if not link.exists():
+                    raise _blocked(
+                        "workspace_ai_asset_missing",
+                        f"业务工作空间缺少 Claude Skill 桥接：{name}",
+                        "请由指导员重新运行 ao-work workspace init 修复 AI 入口",
+                    )
+                raise _blocked(
+                    "workspace_ai_asset_unsafe",
+                    f"业务工作空间 Claude Skill 路径类型不安全：{name}",
+                    "请移除异常路径并重新运行 ao-work workspace init",
+                )
+            try:
+                raw_target = os.readlink(link)
+            except OSError as error:
+                raise _blocked(
+                    "workspace_ai_asset_drift",
+                    f"业务工作空间 Claude Skill symlink 无法读取目标：{name}",
+                    "请由指导员重新运行 ao-work workspace init 修复桥接",
+                ) from error
+            if raw_target != expected_target:
+                raise _blocked(
+                    "workspace_ai_asset_drift",
+                    f"业务工作空间 Claude Skill symlink 目标不一致：{name}",
+                    "请由指导员重新运行 ao-work workspace init 修复桥接",
+                )
+            try:
+                resolved_target = link.resolve(strict=True)
+                expected_resolved_target = target_dir.resolve(strict=True)
+            except OSError as error:
+                raise _blocked(
+                    "workspace_ai_asset_drift",
+                    f"业务工作空间 Claude Skill symlink 无法安全解析：{name}",
+                    "请由指导员重新运行 ao-work workspace init 修复桥接",
+                ) from error
+            if resolved_target != expected_resolved_target:
+                raise _blocked(
+                    "workspace_ai_asset_drift",
+                    f"业务工作空间 Claude Skill symlink 目标不一致：{name}",
+                    "请由指导员重新运行 ao-work workspace init 修复桥接",
+                )
 
     def _index_path(self) -> Path:
         return validate_managed_path(

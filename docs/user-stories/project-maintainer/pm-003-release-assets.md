@@ -16,7 +16,7 @@ maintainer/scripts/release.sh publish --version vX.Y
 - 设计、契约、两个工作面、测试和文档已同步。
 - [DE-001](../development-engineer/de-001-install.md) 已纳入发版验收。
 - 发布内容不包含 secrets、tokens、private keys 或原始敏感日志。
-- `main` 只允许通过 PR 的 Merge commit 合入。
+- 正常发布只允许通过 PR 的 Merge commit 合入 `main`；Hotfix 是 Jira key 绑定的脚本化直合例外。
 
 ### 主流程
 
@@ -24,8 +24,9 @@ maintainer/scripts/release.sh publish --version vX.Y
 2. `prepare` 验证 Python 锁文件、developer Skill / Rule / 标准资产、Shell Bootstrap 和工作面隔离。
 3. 在临时目录按 DE-001 执行 developer-only sparse 安装。
 4. 验证 `ao-work` 可运行、`maintainer/` 不在安装文件树、无兼容别名和跨包导入。
-5. `publish` 在最终确认后创建或复用目标为 `main` 的 PR，等待合并事实。
-6. 脚本确认 `origin/main` 包含固定发布 HEAD 后记录发布审计并完成 Tag 动作。
+5. 软门禁的 `prepare` 先固定本地 `release/vX.Y`；`publish` 在最终确认后推送该分支并创建或复用目标为 `main` 的 PR，等待合并事实。
+6. 脚本确认 `origin/main` 包含固定发布 HEAD 且 PR 使用 Merge commit 后，先将 `develop` 快进到已验证的 `origin/main`，再在该 Merge commit 创建 Tag、记录发布审计；快进不成立时必须失败关闭。
+7. Hotfix 只接受一个 Jira key 位置参数；它从任意干净分支启动，自行刷新远端、切换或创建 `develop`、快进落后的本地分支，并把本地领先提交纳入候选；不创建分支、PR、Tag，不调用 Jira/`gh`，不追加人工门禁，最终把带 Jira key 的 Merge commit 原子推送到远端 `main/develop` 并同步本地 `develop`。
 
 ### 验收标准
 

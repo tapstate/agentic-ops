@@ -39,6 +39,7 @@ def failure(operation: str, error: RuntimeErrorResult) -> dict[str, Any]:
 
 def write_json(payload: dict[str, Any]) -> None:
     sys.stdout.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
 
 
 def write_diagnostic(message: str) -> None:

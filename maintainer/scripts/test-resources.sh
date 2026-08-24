@@ -48,6 +48,12 @@ require_executable .githooks/pre-commit
 require_executable .githooks/pre-push
 require_file maintainer/standards/git/story-review-policy.yaml
 
+grep -q '原子步骤成功不是会话终点' maintainer/rules/source-maintenance.md ||
+  fail "maintainer Rule 缺少会话连续推进约束"
+grep -q '原子步骤成功不是会话终点' developer/rules/ai-execution.md ||
+  fail "developer Rule 缺少会话连续推进约束"
+grep -q '^| D-054 | 原子步骤成功不是会话终点 |' docs/decision-log.md ||
+  fail "设计决策记录缺少 AO-68 会话推进与停止语义"
 shared_entries="$(find shared -mindepth 1 -print | LC_ALL=C sort)"
 expected_shared_entries="$(printf '%s\n' \
   shared/README.md \
@@ -296,6 +302,12 @@ grep -Fq 'set -e' docs/development-engineers/getting-started.md ||
 grep -Fq 'contents/developer/bootstrap/install-verify-branch.sh?ref=develop' \
   docs/development-engineers/agent-init.md ||
   fail "研发员初始化文档缺少 develop 远程验证安装入口"
+if rg -n -U \
+  '<install-root>/bin/ao-work auth --show\n\./\.agentic-ops/bin/ao-work workspace preflight|\
+只有授权已配置且 (workspace )?preflight 通过后，才能(执行|操作)真实 Jira 任务' \
+  docs/development-engineers; then
+  fail "正式研发员文档仍将 workspace preflight 作为接管前置步骤"
+fi
 if rg -n 'contents/scripts/install\.sh|AGENTIC_OPS_REPO_URL=.*bash' \
   docs/development-engineers docs/project-rules.md \
   docs/user-stories/development-engineer; then

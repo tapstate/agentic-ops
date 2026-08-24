@@ -7,11 +7,19 @@ REPO_URL="git@github.com:tapstate/agentic-ops.git"
 GITHUB_REPOSITORY="tapstate/agentic-ops"
 AUTHORIZATION_ARGS=()
 AUTHORIZATION_REQUESTED=0
+NEW_INSTALL=0
 
 usage() {
   cat <<'USAGE'
 用法：
-  install.sh [授权参数]
+  install.sh [--install-home <path>] [授权参数]
+
+安装参数：
+  --install-home <path>  安装目录（默认 ~/.agentic-ops；优先于 AGENTIC_OPS_HOME）
+
+安装前置：
+  必须已安装 git、gh、uv；缺少任意程序时会一次列出全部缺失项并停止安装。
+  AGENTIC_OPS_UV 指向可信可执行文件时可替代 PATH 中的 uv。
 
 可选授权参数（安装完成后原样转交 ao-work auth）：
   --agent-id <id>
@@ -28,6 +36,15 @@ USAGE
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --install-home)
+      if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+        printf 'AgenticOps：安装参数缺少目录：--install-home\n' >&2
+        usage >&2
+        exit 2
+      fi
+      INSTALL_DIR="$2"
+      shift 2
+      ;;
     --agent-id|--jira-email|--git-name|--git-email|--github-login)
       if [ "$#" -lt 2 ] || [ -z "$2" ]; then
         printf 'AgenticOps：授权参数缺少取值：%s\n' "$1" >&2
@@ -69,6 +86,28 @@ if [ -n "${AGENTIC_OPS_TEST_MODE:-}" ] || \
   exit 1
 fi
 
+missing_dependencies=()
+if ! command -v git >/dev/null 2>&1; then
+  missing_dependencies+=(git)
+fi
+if ! command -v gh >/dev/null 2>&1; then
+  missing_dependencies+=(gh)
+fi
+if { [ -z "${AGENTIC_OPS_UV:-}" ] || [ ! -x "$AGENTIC_OPS_UV" ]; } && \
+  ! command -v uv >/dev/null 2>&1; then
+  missing_dependencies+=(uv)
+fi
+if [ "${#missing_dependencies[@]}" -gt 0 ]; then
+  missing_csv="$(IFS=,; printf '%s' "${missing_dependencies[*]}")"
+  missing_display="${missing_csv//,/, }"
+  printf 'AgenticOps：缺少 developer 安装依赖：%s；安装尚未开始。\n' \
+    "$missing_display" >&2
+  printf '{"ok":false,"operation":"bootstrap","status":"failed","code":"install_dependencies_missing","retry_safe":true,"missing_dependencies":"%s","message":"缺少 developer 安装依赖","required_human_action":"请先安装全部缺失程序后重新执行 developer 安装"}\n' \
+    "$missing_csv"
+  exit 1
+fi
+unset missing_dependencies missing_csv missing_display
+
 SCRIPT_DIR=""
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
   SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -93,10 +132,6 @@ if [ -e "$INSTALL_DIR" ]; then
   agentic_reject_verification_mode "$INSTALL_DIR"
 fi
 
-if ! command -v git >/dev/null 2>&1; then
-  agentic_bootstrap_error "git_not_found" "未找到 Git，无法安装 AgenticOps" "请先安装 Git"
-fi
-
 expected_repository="$(agentic_expected_repository)"
 if ! agentic_repository_matches "$REPO_URL" "$expected_repository"; then
   agentic_bootstrap_error \
@@ -115,6 +150,7 @@ elif [ -e "$INSTALL_DIR/.agentic-ops-source" ] || [ -d "$INSTALL_DIR/maintainer"
     "不能把包含 maintainer 资产的源头仓库原地转换为 developer 安装" \
     "请使用独立的 AGENTIC_OPS_HOME 安装目录"
 elif [ ! -e "$INSTALL_DIR" ]; then
+  NEW_INSTALL=1
   git clone --filter=blob:none --no-checkout --branch "$BRANCH" --single-branch \
     "$REPO_URL" "$INSTALL_DIR"
   if ! git -C "$INSTALL_DIR" remote set-url origin "$REPO_URL"; then
@@ -156,6 +192,9 @@ fi
 
 agentic_sync_runtime "$INSTALL_DIR" "$uv_bin"
 agentic_write_refs "$INSTALL_DIR" "$previous_ref" "$current_ref"
+if [ "$NEW_INSTALL" -eq 1 ]; then
+  agentic_write_installation_metadata "$INSTALL_DIR"
+fi
 agentic_require_checkout_integrity "$INSTALL_DIR"
 agentic_configure_path "$INSTALL_DIR"
 
@@ -186,5 +225,6 @@ fi
 
 agentic_bootstrap_json_success bootstrap_install \
   install_dir "$INSTALL_DIR" current_ref "$current_ref" python "3.12" \
+  python_venv "$INSTALL_DIR/developer/.venv" \
   authorization_status "$authorization_status" \
   authorization_next_action "$INSTALL_DIR/bin/ao-work auth"

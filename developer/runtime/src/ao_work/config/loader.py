@@ -19,6 +19,7 @@ from ao_work.config.model import (
     JiraConnection,
     ProjectProfile,
     RepositoryBranchRule,
+    WorktreeDomain,
     require_mapping,
 )
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
@@ -627,6 +628,7 @@ def _parse_profile(payload: dict[str, Any], expected_id: str) -> ProjectProfile:
     repository_list = _parse_repository_list(repositories, default_repository)
     analysis_mount = _parse_analysis_mount(repositories, repository_list)
     branch_derivation = _parse_branch_derivation(repositories, repository_list)
+    worktree_domains = _parse_worktree_domains(repositories, repository_list)
     return ProjectProfile(
         profile_id=actual_id,
         connection_id=_required_text(payload, "connection_id", "project_profile_invalid"),
@@ -645,6 +647,7 @@ def _parse_profile(payload: dict[str, Any], expected_id: str) -> ProjectProfile:
         repository_list=repository_list,
         analysis_mount=analysis_mount,
         branch_derivation=branch_derivation,
+        worktree_domains=worktree_domains,
     )
 
 
@@ -723,6 +726,33 @@ def _parse_analysis_mount(
     return AnalysisMount(mode=mode, include=include, exclude=exclude)
 
 
+def _parse_worktree_domains(
+    repositories: dict[str, Any], repository_list: tuple[str, ...]
+) -> tuple[WorktreeDomain, ...]:
+    raw = repositories.get("worktree_domains", [])
+    if not isinstance(raw, list):
+        raise ValueError("repositories.worktree_domains must be a list")
+    domains: list[WorktreeDomain] = []
+    seen_repositories: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("repositories.worktree_domains entries must be mappings")
+        domain_id = _optional_text(item.get("id"))
+        baseline = _optional_text(item.get("baseline_repository"))
+        members = _repository_tuple(item.get("repositories"), "worktree_domains.repositories")
+        if not domain_id or not baseline or not members:
+            raise ValueError("worktree_domains entry requires id/baseline_repository/repositories")
+        if baseline not in members or baseline not in repository_list:
+            raise ValueError("worktree_domains baseline_repository must be a listed member")
+        if any(repo not in repository_list for repo in members):
+            raise ValueError("worktree_domains references unknown repository")
+        if seen_repositories.intersection(members):
+            raise ValueError("worktree_domains repositories must not overlap")
+        seen_repositories.update(members)
+        domains.append(WorktreeDomain(domain_id, baseline, members))
+    return tuple(domains)
+
+
 def _parse_branch_derivation(
     repositories: dict[str, Any], repository_list: tuple[str, ...]
 ) -> BranchDerivation:
@@ -774,11 +804,24 @@ def _parse_branch_derivation(
                     f"branches.dev_branches references unknown repository: {repo}"
                 )
             dev_branches.append((str(repo), branch_text))
+    baseline_branches_raw = raw.get("baseline_branches", {})
+    baseline_branches: list[tuple[str, str]] = []
+    if baseline_branches_raw:
+        if not isinstance(baseline_branches_raw, dict):
+            raise ValueError("branches.baseline_branches must be a mapping")
+        for repo, branch in baseline_branches_raw.items():
+            branch_text = _optional_text(branch)
+            if not branch_text:
+                raise ValueError(f"branches.baseline_branches entry requires a branch: {repo}")
+            if repository_list and repo not in repository_list:
+                raise ValueError(f"branches.baseline_branches references unknown repository: {repo}")
+            baseline_branches.append((str(repo), branch_text))
     return BranchDerivation(
         derive_from=derive_from,
         default_branch=default_branch,
         default_rule=default_rule,
         dev_branches=tuple(dev_branches),
+        baseline_branches=tuple(baseline_branches),
         overrides=tuple(overrides),
     )
 
