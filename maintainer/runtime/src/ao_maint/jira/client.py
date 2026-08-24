@@ -218,6 +218,14 @@ class JiraClient:
             body={"fields": {"description": description}},
         )
 
+    def update_summary(self, issue_key: str, summary: str) -> None:
+        """更新 Jira 任务标题；调用方负责计划约束与回读验证。"""
+        self._request(
+            "PUT",
+            f"/rest/api/3/issue/{urllib.parse.quote(issue_key, safe='')}",
+            body={"fields": {"summary": summary}},
+        )
+
     def search_issues(
         self, jql: str, fields: list[str] | None = None
     ) -> list[dict[str, Any]]:
