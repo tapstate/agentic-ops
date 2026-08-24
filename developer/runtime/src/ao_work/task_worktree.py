@@ -11,6 +11,7 @@ from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_state.locking import TaskLock
 from ao_work.workspace import (
     normalize_worktree_from_branch,
+    repository_short_name,
     task_worktree_path,
     validate_source_pool_root,
 )
@@ -36,6 +37,58 @@ class TaskWorktreePlan:
     alignment_spec: str = ""
     adopted: int = 0
     created: int = 0
+
+
+def analyze_task_worktree_plan(
+    plan: TaskWorktreePlan,
+    *,
+    run_git: Any | None = None,
+    run_alignment: Any | None = None,
+) -> tuple[TaskWorktreePlan, dict[str, str]]:
+    """只读分析逐仓分支建议并固定远端 SHA，不创建任务工作树。"""
+    git = run_git or _run_git
+    alignment = run_alignment or subprocess.run
+    repositories = {entry.repository for entry in plan.entries}
+    repositories.add(plan.baseline_repository)
+    for repository in sorted(repositories):
+        member_dir = plan.pool_root / repository
+        lock_path = (
+            plan.pool_root
+            / ".locks"
+            / f"{repository.replace('/', '__')}.lock"
+        )
+        with TaskLock(lock_path, timeout=10):
+            _refresh_pool_member(git, member_dir, repository)
+    entries = _apply_alignment_plan(plan, alignment)
+    baselines: dict[str, str] = {}
+    for entry in entries:
+        member_dir = plan.pool_root / entry.repository
+        baselines[entry.repository] = _resolve_remote_baseline(
+            git,
+            member_dir,
+            entry.branch,
+            entry.repository,
+        )
+    if plan.baseline_repository not in baselines:
+        baselines[plan.baseline_repository] = _resolve_remote_baseline(
+            git,
+            plan.pool_root / plan.baseline_repository,
+            plan.from_branch,
+            plan.baseline_repository,
+        )
+    return (
+        TaskWorktreePlan(
+            issue_key=plan.issue_key,
+            from_branch=plan.from_branch,
+            pool_root=plan.pool_root,
+            entries=entries,
+            target_repository=plan.target_repository,
+            baseline_repository=plan.baseline_repository,
+            alignment_script=plan.alignment_script,
+            alignment_spec=plan.alignment_spec,
+        ),
+        baselines,
+    )
 
 
 def resolve_target_repository(
@@ -174,10 +227,13 @@ def plan_task_worktrees(
             "请补充可映射的目标仓库或任务领域；系统不会创建全量工作树",
             details={"target_repository": target_repository},
         )
+    problem_version_repository = (
+        domain.problem_version_repository or domain.baseline_repository
+    )
     from_branch = resolve_from_branch(
         profile,
         description_sections,
-        target_repository=domain.baseline_repository,
+        target_repository=problem_version_repository,
         allow_alignment_spec=alignment_script is not None,
     )
     alignment_spec = _declared_branch_spec(description_sections) or from_branch
@@ -191,7 +247,11 @@ def plan_task_worktrees(
         )
     entries: list[WorktreePlanEntry] = []
     for repository in repositories:
-        branch = profile.derive_branch(repository, from_branch, primary_repository=domain.baseline_repository)
+        branch = profile.derive_branch(
+            repository,
+            from_branch,
+            primary_repository=problem_version_repository,
+        )
         if not branch:
             raise _blocked(
                 "branch_derivation_failed",
@@ -199,7 +259,7 @@ def plan_task_worktrees(
                 "请补充该领域的问题版本分支映射",
                 details={"repository": repository, "problem_version": from_branch},
             )
-        worktree_dir = task_worktree_path(pool, issue_key, from_branch, repository)
+        worktree_dir = task_worktree_path(pool, issue_key, branch, repository)
         entries.append(
             WorktreePlanEntry(
                 repository=repository,
@@ -213,7 +273,7 @@ def plan_task_worktrees(
         pool_root=pool,
         entries=tuple(entries),
         target_repository=target_repository,
-        baseline_repository=domain.baseline_repository,
+        baseline_repository=problem_version_repository,
         alignment_script=alignment_script,
         alignment_spec=alignment_spec,
     )
@@ -451,7 +511,12 @@ def _apply_alignment_plan(
         aligned.append(
             WorktreePlanEntry(
                 repository=entry.repository,
-                worktree_dir=entry.worktree_dir,
+                worktree_dir=task_worktree_path(
+                    plan.pool_root,
+                    plan.issue_key,
+                    target,
+                    entry.repository,
+                ),
                 branch=target,
             )
         )
@@ -468,6 +533,26 @@ def _reject_legacy_worktrees(plan: TaskWorktreePlan) -> None:
             "请先人工确认该 Jira 任务根下全部工作树中的修改并迁移或清理；系统不会创建新的 .worktree 副本",
             details={"legacy_task_root": str(legacy_root), "issue_key": plan.issue_key},
         )
+    normalized_branch = normalize_worktree_from_branch(plan.from_branch)
+    for entry in plan.entries:
+        previous_layout = (
+            plan.pool_root
+            / ".worktree"
+            / plan.issue_key
+            / normalized_branch
+            / repository_short_name(entry.repository)
+        )
+        if previous_layout.exists() or previous_layout.is_symlink():
+            raise _blocked(
+                "worktree_legacy_layout_detected",
+                f"检测到旧布局任务工作树：{previous_layout}",
+                "请先人工确认旧工作树中的修改并迁移或清理；系统不会自动移动或覆盖",
+                details={
+                    "legacy_worktree": str(previous_layout),
+                    "expected_worktree": str(entry.worktree_dir),
+                    "issue_key": plan.issue_key,
+                },
+            )
 
 
 def _validate_existing_worktree(

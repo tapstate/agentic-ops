@@ -24,8 +24,8 @@ preconditions:
   - workspace_agent_identity_must_be_available
   - local_run_and_managed_comment_must_not_conflict
   - source_root_must_be_configured_pool_or_exact_independent_checkout
-  - target_repository_must_resolve_to_profile_domain_in_pool_mode
-  - all_domain_pool_members_and_remote_branches_must_validate_before_worktree_creation
+  - source_pool_must_be_available_for_later_read_only_repository_analysis
+  - takeover_must_not_treat_default_repository_as_confirmed_scope
 selection_output:
   takeover_status:
     const: selection_required
@@ -98,11 +98,8 @@ output:
   recovery_action:
     type: string
   intake_source:
-    type: object
-    required_fields:
-      - context_digest
-      - source_context_path
-    note: 池模式只把目标仓库任务工作树绑定为 source_root；领域内其它工作树不作为顶层逐仓证据输出。
+    type: 'null'
+    note: 接管阶段不绑定默认仓库、不创建工作树且不建立来源快照；仓库分支关系确认并按需建树后再建立。
   jira_status_before:
     type: string
   jira_status_after:
@@ -125,9 +122,9 @@ output:
       - ownership_effect
       - retry_gate
 source_preparation_postconditions:
-  - pool_mode_source_root_must_equal_target_repository_worktree
-  - target_worktree_must_match_ref_resolved_after_remote_refresh
-  - per_worktree_git_identity_must_match_install_identity
+  - takeover_must_not_create_task_worktrees
+  - takeover_must_not_record_repository_source_context
+  - next_action_must_assess_repository_branch_mapping
   - legacy_task_worktree_layout_must_fail_closed_without_migration
   - current_output_does_not_claim_per_repository_alignment_evidence
 post_takeover_analysis:

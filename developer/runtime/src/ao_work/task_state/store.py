@@ -147,11 +147,18 @@ class TaskStore:
             task = read_json(task_dir / "task.json")
             progress = read_json(task_dir / "progress.json")
             sync = read_json(task_dir / "sync.json")
+            repository_scope_path = task_dir / "repository-scope.json"
+            repository_scope = (
+                read_json(repository_scope_path)
+                if repository_scope_path.is_file()
+                else None
+            )
             return {
                 "task": task,
                 "progress": progress,
                 "sync": sync,
                 "task_dir": str(task_dir),
+                "repository_scope": repository_scope,
                 "takeover_recovery": self._read_takeover_recovery_locked(
                     task_dir,
                     task,
@@ -159,6 +166,350 @@ class TaskStore:
                     sync,
                 ),
             }
+
+    def record_repository_proposal(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        proposal: dict[str, Any],
+    ) -> dict[str, Any]:
+        """保存仓库/分支分析建议；建议本身没有建树或编码权限。"""
+        self._validate_issue_key(issue_key)
+        self._validate_run_id(agentic_run_id)
+        with self._lock(issue_key):
+            task_dir = self._task_dir(issue_key)
+            self._require_complete_task_dir(task_dir)
+            task = read_json(task_dir / "task.json")
+            if task.get("agentic_run_id") != agentic_run_id:
+                raise RuntimeErrorResult(
+                    code="task_identity_mismatch",
+                    message="仓库分析运行编号与任务绑定不一致",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请使用任务当前绑定的 agentic_run_id",
+                )
+            path = task_dir / "repository-scope.json"
+            self._validate_managed_path(path)
+            existing = read_json(path) if path.is_file() else None
+            if isinstance(existing, dict) and isinstance(
+                existing.get("confirmed_repository_branch_map"), list
+            ):
+                if existing.get("proposed_repository_branch_map") == proposal.get(
+                    "proposed_repository_branch_map"
+                ):
+                    return {"created": False, "repository_scope": existing, "path": str(path)}
+                raise RuntimeErrorResult(
+                    code="repository_mapping_confirmation_required",
+                    message="仓库分支建议已变化，现有确认不能被分析结果覆盖",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请重新展示建议与现有确认的完整差异并由用户确认",
+                )
+            now = self._timestamp()
+            scope = {
+                "schema_version": 1,
+                "issue_key": issue_key,
+                "agentic_run_id": agentic_run_id,
+                "phase": "proposal_recorded",
+                "problem_version": proposal.get("problem_version"),
+                "problem_version_repository": proposal.get(
+                    "problem_version_repository"
+                ),
+                "problem_version_sha": proposal.get("problem_version_sha"),
+                "proposed_repository_branch_map": proposal.get(
+                    "proposed_repository_branch_map", []
+                ),
+                "confirmed_repository_branch_map": None,
+                "confirmed_change_repositories": [],
+                "mapping_differences": [],
+                "actual_change_repositories": [],
+                "updated_at": now,
+            }
+            atomic_write_json(path, scope)
+            append_ndjson(
+                task_dir / "journal.ndjson",
+                {
+                    **self._journal_event(
+                        task,
+                        "repository_branch_proposal_recorded",
+                        "completed",
+                        retry_safe=True,
+                    ),
+                    "evidence": {
+                        "problem_version": scope["problem_version"],
+                        "repositories": [
+                            item.get("repository")
+                            for item in scope["proposed_repository_branch_map"]
+                            if isinstance(item, dict)
+                        ],
+                    },
+                },
+            )
+            return {"created": True, "repository_scope": scope, "path": str(path)}
+
+    def confirm_repository_mapping(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        confirmed: list[dict[str, Any]],
+        differences: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """保存用户确认的最终仓库/分支关系；后续工作只能消费该列表。"""
+        self._validate_issue_key(issue_key)
+        self._validate_run_id(agentic_run_id)
+        with self._lock(issue_key):
+            task_dir = self._task_dir(issue_key)
+            self._require_complete_task_dir(task_dir)
+            task = read_json(task_dir / "task.json")
+            if task.get("agentic_run_id") != agentic_run_id:
+                raise RuntimeErrorResult(
+                    code="task_identity_mismatch",
+                    message="仓库确认运行编号与任务绑定不一致",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请使用任务当前绑定的 agentic_run_id",
+                )
+            path = task_dir / "repository-scope.json"
+            self._validate_managed_path(path)
+            require_safe_regular_file(path)
+            scope = read_json(path)
+            existing = scope.get("confirmed_repository_branch_map")
+            if existing is not None:
+                if existing == confirmed:
+                    return {"created": False, "repository_scope": scope, "path": str(path)}
+                if not isinstance(existing, list) or any(
+                    item.get("worktree_status") != "not_created"
+                    for item in existing
+                    if isinstance(item, dict)
+                ):
+                    raise RuntimeErrorResult(
+                        code="repository_mapping_changed_after_code_facts",
+                        message="已有工作树或代码事实后，仓库分支关系不能被直接替换",
+                        status="blocked",
+                        exit_code=EXIT_BLOCKED,
+                        required_human_action="请使旧设计确认失效并重新进入完整仓库范围风险审查",
+                    )
+            scope.update(
+                {
+                    "phase": "mapping_confirmed",
+                    "confirmed_repository_branch_map": confirmed,
+                    "confirmed_change_repositories": [
+                        item["repository"] for item in confirmed
+                    ],
+                    "mapping_differences": differences,
+                    "updated_at": self._timestamp(),
+                }
+            )
+            atomic_write_json(path, scope)
+            append_ndjson(
+                task_dir / "journal.ndjson",
+                {
+                    **self._journal_event(
+                        task,
+                        "repository_branch_mapping_confirmed",
+                        "completed",
+                        retry_safe=True,
+                    ),
+                    "evidence": {
+                        "repositories": [item["repository"] for item in confirmed],
+                        "differences": differences,
+                    },
+                },
+            )
+            return {"created": True, "repository_scope": scope, "path": str(path)}
+
+    def update_repository_worktree(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        repository: str,
+        updates: dict[str, Any],
+    ) -> dict[str, Any]:
+        """回写已确认仓库的按需工作树事实。"""
+        self._validate_issue_key(issue_key)
+        self._validate_run_id(agentic_run_id)
+        with self._lock(issue_key):
+            task_dir = self._task_dir(issue_key)
+            self._require_complete_task_dir(task_dir)
+            task = read_json(task_dir / "task.json")
+            if task.get("agentic_run_id") != agentic_run_id:
+                raise RuntimeErrorResult(
+                    code="task_identity_mismatch",
+                    message="工作树运行编号与任务绑定不一致",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请使用任务当前绑定的 agentic_run_id",
+                )
+            path = task_dir / "repository-scope.json"
+            self._validate_managed_path(path)
+            require_safe_regular_file(path)
+            scope = read_json(path)
+            rows = scope.get("confirmed_repository_branch_map")
+            if not isinstance(rows, list):
+                raise RuntimeErrorResult(
+                    code="repository_mapping_confirmation_required",
+                    message="任务尚无用户确认的仓库分支关系",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请先确认完整仓库分支关系表",
+                )
+            matched = False
+            updated_rows: list[dict[str, Any]] = []
+            for item in rows:
+                row = dict(item)
+                if row.get("repository") == repository:
+                    row.update(updates)
+                    matched = True
+                updated_rows.append(row)
+            if not matched:
+                raise RuntimeErrorResult(
+                    code="repository_outside_confirmed_mapping",
+                    message=f"仓库不在用户确认关系表中：{repository}",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请先按增量范围重新确认仓库分支关系",
+                )
+            scope["confirmed_repository_branch_map"] = updated_rows
+            if updated_rows and all(
+                row.get("worktree_status") in {"not_created", "cleaned"}
+                for row in updated_rows
+            ) and any(row.get("worktree_status") == "cleaned" for row in updated_rows):
+                scope["phase"] = "worktrees_cleaned"
+            else:
+                scope["phase"] = "worktrees_active"
+            scope["updated_at"] = self._timestamp()
+            atomic_write_json(path, scope)
+            append_ndjson(
+                task_dir / "journal.ndjson",
+                {
+                    **self._journal_event(
+                        task,
+                        "repository_worktree_updated",
+                        "completed",
+                        retry_safe=True,
+                    ),
+                    "evidence": {"repository": repository, **updates},
+                },
+            )
+            return {"repository_scope": scope, "path": str(path)}
+
+    def record_actual_change_repositories(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        repositories: list[dict[str, Any]],
+        *,
+        summary_plan_id: str | None = None,
+        summary_content_sha256: str | None = None,
+    ) -> dict[str, Any]:
+        """保存逐仓 Git 回读形成的实际变更集合及完成总结计划绑定。"""
+        self._validate_issue_key(issue_key)
+        self._validate_run_id(agentic_run_id)
+        with self._lock(issue_key):
+            task_dir = self._task_dir(issue_key)
+            self._require_complete_task_dir(task_dir)
+            task = read_json(task_dir / "task.json")
+            if task.get("agentic_run_id") != agentic_run_id:
+                raise RuntimeErrorResult(
+                    code="task_identity_mismatch",
+                    message="实际变更仓库运行编号与任务绑定不一致",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请使用任务当前绑定的 agentic_run_id",
+                )
+            path = task_dir / "repository-scope.json"
+            self._validate_managed_path(path)
+            require_safe_regular_file(path)
+            scope = read_json(path)
+            confirmed = scope.get("confirmed_repository_branch_map")
+            if not isinstance(confirmed, list):
+                raise RuntimeErrorResult(
+                    code="repository_mapping_confirmation_required",
+                    message="任务尚无用户确认的仓库分支关系",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请先确认完整仓库分支关系表",
+                )
+            allowed = {str(item.get("repository")) for item in confirmed}
+            actual = [str(item.get("repository")) for item in repositories]
+            if len(actual) != len(set(actual)) or not set(actual).issubset(allowed):
+                raise RuntimeErrorResult(
+                    code="actual_repositories_outside_confirmed_mapping",
+                    message="实际变更仓库集合重复或越出用户确认范围",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请停止提交完成总结并重新确认仓库范围",
+                )
+            scope["actual_change_repositories"] = repositories
+            if summary_plan_id is not None:
+                scope["completion_summary_plan_id"] = summary_plan_id
+            if summary_content_sha256 is not None:
+                scope["completion_summary_content_sha256"] = summary_content_sha256
+            scope["updated_at"] = self._timestamp()
+            atomic_write_json(path, scope)
+            event = self._journal_event(
+                task,
+                "actual_change_repositories_recorded",
+                "completed",
+                retry_safe=True,
+            )
+            event["evidence"] = {
+                "repositories": actual,
+                "summary_plan_id": summary_plan_id,
+                "summary_content_sha256": summary_content_sha256,
+            }
+            append_ndjson(task_dir / "journal.ndjson", event)
+            return {"repository_scope": scope, "path": str(path)}
+
+    def record_repository_summary_readback(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        *,
+        plan_id: str,
+        content_sha256: str,
+        external_id: str,
+    ) -> dict[str, Any]:
+        """把完成总结的 Jira 回读与实际变更仓库清单绑定。"""
+        self._validate_issue_key(issue_key)
+        self._validate_run_id(agentic_run_id)
+        with self._lock(issue_key):
+            task_dir = self._task_dir(issue_key)
+            self._require_complete_task_dir(task_dir)
+            task = read_json(task_dir / "task.json")
+            if task.get("agentic_run_id") != agentic_run_id:
+                raise RuntimeErrorResult(
+                    code="task_identity_mismatch",
+                    message="完成总结回读运行编号与任务绑定不一致",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请使用任务当前绑定的 agentic_run_id",
+                )
+            path = task_dir / "repository-scope.json"
+            self._validate_managed_path(path)
+            require_safe_regular_file(path)
+            scope = read_json(path)
+            if (
+                scope.get("completion_summary_plan_id") != plan_id
+                or scope.get("completion_summary_content_sha256") != content_sha256
+            ):
+                raise RuntimeErrorResult(
+                    code="repository_summary_readback_mismatch",
+                    message="Jira 评论回读与实际变更仓库总结计划不一致",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请核对完成总结计划与 Jira 回读，不要开始清理",
+                )
+            scope["completion_summary_readback"] = {
+                "plan_id": plan_id,
+                "content_sha256": content_sha256,
+                "external_id": external_id,
+                "readback_at": self._timestamp(),
+            }
+            scope["phase"] = "completion_evidence_readback"
+            scope["updated_at"] = self._timestamp()
+            atomic_write_json(path, scope)
+            return {"repository_scope": scope, "path": str(path)}
 
     def write_report(
         self,
@@ -773,7 +1124,7 @@ class TaskStore:
                 progress.update(
                     {
                         "stage": "takeover_started",
-                        "agentic_next_action": "assess_task_intake",
+                        "agentic_next_action": "assess_repository_branch_mapping",
                         "terminal": False,
                         "updated_at": self._timestamp(),
                         "content_version": int(progress.get("content_version", 0)) + 1,
@@ -807,9 +1158,9 @@ class TaskStore:
                     "takeover_status": "completed",
                     "human_notice": human_notice(operation["takeover_kind"], "completed"),
                     "agentic_next_action": takeover_next_action(
-                        "assess_task_intake",
+                        "assess_repository_branch_mapping",
                         executor="ai",
-                        reason="接管本地状态已最终收口，继续信息分析与设计流程",
+                        reason="接管本地状态已最终收口，先分析并由用户确认仓库分支关系",
                     ),
                     "failure_code": None,
                     "retry_safe": True,
@@ -823,7 +1174,7 @@ class TaskStore:
             progress.update(
                 {
                     "stage": "takeover_started",
-                    "agentic_next_action": "assess_task_intake",
+                    "agentic_next_action": "assess_repository_branch_mapping",
                     "terminal": False,
                     "updated_at": self._timestamp(),
                     "content_version": int(progress.get("content_version", 0)) + 1,
@@ -910,7 +1261,7 @@ class TaskStore:
                 progress.update(
                     {
                         "stage": "takeover_started",
-                        "agentic_next_action": "assess_task_intake",
+                        "agentic_next_action": "assess_repository_branch_mapping",
                         "terminal": False,
                         "updated_at": self._timestamp(),
                         "content_version": int(progress.get("content_version", 0)) + 1,
@@ -989,9 +1340,9 @@ class TaskStore:
                         str(evidence["takeover_kind"]), "completed"
                     ),
                     "agentic_next_action": takeover_next_action(
-                        "assess_task_intake",
+                        "assess_repository_branch_mapping",
                         executor="ai",
-                        reason="legacy 接管事实已验证并迁移，继续信息分析与设计流程",
+                        reason="legacy 接管事实已验证并迁移，先分析并由用户确认仓库分支关系",
                     ),
                     "failure_code": None,
                     "retry_safe": True,

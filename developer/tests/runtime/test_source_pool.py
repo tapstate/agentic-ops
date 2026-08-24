@@ -25,7 +25,7 @@ class SourcePoolPathTest(unittest.TestCase):
             pool.mkdir()
             path = task_worktree_path(pool, "TAP-123", "feature/x", "tapdata/tapdata")
             self.assertEqual(
-                (pool / ".worktree" / "TAP-123" / "feature-x" / "tapdata").resolve(), path
+                (pool / ".worktree" / "TAP-123" / "tapdata" / "feature-x").resolve(), path
             )
 
     def test_from_branch_slash_normalized(self) -> None:

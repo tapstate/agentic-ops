@@ -56,10 +56,11 @@ developer 不创建、映射、探测或读写 Agentic Jira Custom Field。
 4. Runtime 先写并回读结构化中文接管 Comment；非新接管同时在人可见输出与 Comment 中明文提示“不是新接管”。
 5. 如 Jira 尚未在目标执行状态，Runtime 执行严格映射的 transition 并回读 Status。
 6. Runtime 写入或复用本地 run，输出 `takeover_status=completed`、运行编号、Comment ID、Status 前后值和结构化下一动作。
-7. AIAgent 连续执行信息分析、带来源补全和方案分级，不设置准入摘要确认或通用方案摘要确认。
-8. 事实完整后展示可查阅的设计、范围、验证方式和逐项风险，进入设计审查。
-9. 设计确认后在授权范围内连续实现、验证和整理证据。
-10. 功能/修复/任务分支停在 PR 当前 Head 审查；`develop` 等其它允许分支停在未推送本地 commit 审查。
+7. 接管阶段不绑定默认仓库、不创建任务工作树，也不建立仓库来源快照；AIAgent 先从源码池主工作树的 Profile 基线做只读分析。
+8. Runtime 输出 `proposed_repository_branch_map`；AIAgent 展示问题版本、问题版本来源仓库、逐仓建议分支与固定 SHA，由研发工程师修正并确认完整 `confirmed_repository_branch_map`。
+9. 只有确认表中的仓库可在实际需要时按需创建任务子工作树；创建后重建精确来源上下文，再执行 intake、方案分级和设计审查。
+10. 设计确认后在授权范围内连续实现、验证和整理逐仓证据；完成评论必须汇报 `actual_change_repositories`。
+11. 功能/修复/任务分支停在 PR 当前 Head 审查；完成总结和 Jira 完成态回读后安全清理登记的任务子工作树。
 
 ## 模式语义
 
@@ -102,16 +103,13 @@ intent_persisted
   "external_result_certainty": "verified",
   "retry_safe": true,
   "recovery_action": "none",
-  "intake_source": {
-    "context_digest": "<sha256>",
-    "source_context_path": "<workspace-managed-path>"
-  },
+  "intake_source": null,
   "jira_status_before": "待办",
   "jira_status_after": "正在进行",
   "current_stage": "takeover_started",
   "agentic_next_action": {
     "executor": "ai",
-    "action": "analyze_task",
+    "action": "assess_repository_branch_mapping",
     "required_inputs": [],
     "allowed_operations": ["report_write"],
     "requires_authorization": false,
@@ -147,7 +145,8 @@ intent_persisted
 - 接管成功后 Jira Comment、必要 Status transition 和本地 run 均已回读或验证。
 - Comment 已写/Status 未写、外部结果不确定和 Jira 已完成/本地未完成均能输出确定的本地 phase、结果、`retry_safe` 与恢复动作，不误报成功。
 - legacy schema v1 只有在 Comment 作者/标记、运行编号、负责人和 Status 全部验证一致后才能迁移，失败不覆盖原状态。
-- 接管后信息分析自动推进，只在设计审查、代码审查和风险决策暂停。
+- 接管后先停在完整仓库分支关系人工确认；分析建议本身不得驱动建树或编码。
+- 接管成功时 `intake_source=null`，且源码池 `.worktree/<KEY>` 尚不存在；确认后按需建树才建立精确来源快照。
 - developer 接管不依赖 Agentic Jira Custom Field。
 - 未经设计授权不得修改代码；未经代码审查不得推送 `develop` 或继续受保护动作。
 
