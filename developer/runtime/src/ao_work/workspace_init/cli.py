@@ -78,6 +78,7 @@ def execute_workspace_init(
             candidate,
             confirm_existing_config=confirm_existing,
             check_remote=True,
+            allow_missing_claude_bridges=True,
         )
     except RuntimeErrorResult as error:
         if (
@@ -89,6 +90,7 @@ def execute_workspace_init(
                 candidate,
                 confirm_existing_config=True,
                 check_remote=True,
+                allow_missing_claude_bridges=True,
             )
         else:
             raise
