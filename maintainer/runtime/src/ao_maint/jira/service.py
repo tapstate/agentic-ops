@@ -659,6 +659,75 @@ class MaintainerJiraService:
             else "review_jira_description_readback",
         }
 
+    def plan_summary(
+        self,
+        issue_key: str,
+        idempotency_key: str,
+        summary: str,
+        *,
+        maintainer_run_id: str,
+    ) -> WritePlan:
+        issue = self.inspect_issue(issue_key)
+        _require_chinese(summary, "Jira 任务标题")
+        target = summary.strip()
+        return _build_plan(
+            "jira_summary",
+            issue.key,
+            maintainer_run_id,
+            idempotency_key,
+            {
+                "summary": target,
+                "expected_previous_summary_sha256": _text_sha256(issue.summary),
+                "target_summary_sha256": _text_sha256(target),
+            },
+            "summary" if issue.summary == target else "",
+        )
+
+    def apply_summary(self, plan: WritePlan, expected_plan_id: str) -> dict[str, Any]:
+        self._validate_apply_plan(plan, expected_plan_id, "jira_summary")
+        self._validate_summary_plan(plan)
+        issue = self.inspect_issue(plan.issue_key)
+        expected_previous = str(plan.payload["expected_previous_summary_sha256"])
+        target = str(plan.payload["summary"])
+        if _text_sha256(issue.summary) != expected_previous:
+            raise RuntimeErrorResult(
+                code="jira_summary_precondition_changed",
+                message="Jira 任务标题在计划确认后已发生变化",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=False,
+                required_human_action="请重新回读任务标题、生成新计划并重新确认",
+            )
+        if issue.summary == target:
+            return {"external_id": "summary", "created": False}
+        try:
+            self.client.update_summary(plan.issue_key, target)
+        except JiraTransportError as error:
+            raise _unknown_write("Jira 任务标题", error) from error
+        readback = self.inspect_issue(plan.issue_key)
+        if readback.summary != target:
+            raise RuntimeErrorResult(
+                code="jira_summary_readback_failed",
+                message="Jira 任务标题写入后回读不一致",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=False,
+                required_human_action="请人工核对任务标题，不要重复写入",
+            )
+        return {"external_id": "summary", "created": True}
+
+    def readback_summary(self, plan: WritePlan) -> dict[str, Any]:
+        self._validate_apply_plan(plan, plan.plan_id, "jira_summary")
+        self._validate_summary_plan(plan)
+        matched = self.inspect_issue(plan.issue_key).summary == str(plan.payload["summary"])
+        return {
+            "external_id": "summary",
+            "created": matched,
+            "agentic_next_action": "continue_from_verified_jira_summary"
+            if matched
+            else "review_jira_summary_readback",
+        }
+
     def plan_comment(
         self,
         issue_key: str,
@@ -1129,6 +1198,28 @@ class MaintainerJiraService:
             raise _input_error("jira_write_plan_invalid", "Jira 任务描述正文摘要不一致")
         if target != _description_semantic_sha256(markdown_to_adf(markdown)):
             raise _input_error("jira_write_plan_invalid", "Jira 任务描述目标摘要不一致")
+
+    def _validate_summary_plan(self, plan: WritePlan) -> None:
+        expected = {
+            "summary",
+            "expected_previous_summary_sha256",
+            "target_summary_sha256",
+        }
+        if set(plan.payload) != expected:
+            raise _input_error("jira_write_plan_invalid", "Jira 任务标题计划字段无效")
+        summary = plan.payload.get("summary")
+        expected_previous = plan.payload.get("expected_previous_summary_sha256")
+        target = plan.payload.get("target_summary_sha256")
+        if (
+            not isinstance(summary, str)
+            or not summary.strip()
+            or not _is_sha256(expected_previous)
+            or not _is_sha256(target)
+        ):
+            raise _input_error("jira_write_plan_invalid", "Jira 任务标题计划内容无效")
+        _require_chinese(summary, "Jira 任务标题")
+        if target != _text_sha256(summary):
+            raise _input_error("jira_write_plan_invalid", "Jira 任务标题目标摘要不一致")
 
     def _validate_comment_plan(self, plan: WritePlan) -> None:
         if set(plan.payload) != {"category", "content", "markdown", "body_sha256"}:
