@@ -4,6 +4,22 @@
   "title": "任务到 PR 审查授权清单",
   "type": "object",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "properties": { "process_id": { "const": "development_change_v2" } }, "required": ["process_id"] },
+      "then": {
+        "properties": {
+          "pr_endpoint": {
+            "required": ["ci"],
+            "properties": { "ci_policy": { "const": "require_passed" } }
+          }
+        }
+      },
+      "else": {
+        "properties": { "pr_endpoint": { "not": { "required": ["ci"] } } }
+      }
+    }
+  ],
   "required": [
     "schema_version",
     "protocol",
@@ -23,6 +39,10 @@
   "properties": {
     "schema_version": { "const": 1 },
     "protocol": { "const": "task_to_pr_review" },
+    "process_id": {
+      "enum": ["development_change_v1", "development_change_v2"],
+      "default": "development_change_v1"
+    },
     "workspace": { "$ref": "#/$defs/workspace" },
     "issue": { "$ref": "#/$defs/issue" },
     "jira": { "$ref": "#/$defs/jira" },
@@ -51,7 +71,9 @@
           "git_remote_read",
           "git_push_task_branch",
           "github_pr_create_or_update",
-          "github_pr_read"
+          "github_pr_read",
+          "github_ci_read",
+          "github_artifact_read"
         ]
       }
     },
@@ -305,6 +327,48 @@
         "ci_policy": {
           "enum": ["require_passed", "allow_pending", "not_required"],
           "default": "require_passed"
+        },
+        "ci": { "$ref": "#/$defs/ci" }
+      }
+    },
+    "ci": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider", "start_timeout_seconds", "completion_timeout_seconds", "poll_interval_seconds",
+        "max_remediation_attempts", "required_checks", "workflows",
+        "artifact_name_patterns", "report_parser", "limits", "completion"
+      ],
+      "properties": {
+        "provider": { "const": "github-actions" },
+        "start_timeout_seconds": { "const": 300 },
+        "completion_timeout_seconds": { "const": 600 },
+        "poll_interval_seconds": { "type": "integer", "minimum": 1, "maximum": 300 },
+        "max_remediation_attempts": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "required_checks": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/non_empty_string" } },
+        "workflows": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/non_empty_string" } },
+        "artifact_name_patterns": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/non_empty_string" } },
+        "report_parser": { "const": "maven-failsafe-v1" },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_archive_bytes", "max_extracted_bytes", "max_file_bytes", "max_files", "max_depth"],
+          "properties": {
+            "max_archive_bytes": { "type": "integer", "minimum": 1024, "maximum": 524288000 },
+            "max_extracted_bytes": { "type": "integer", "minimum": 1024, "maximum": 1073741824 },
+            "max_file_bytes": { "type": "integer", "minimum": 1024, "maximum": 1073741824 },
+            "max_files": { "type": "integer", "minimum": 1, "maximum": 20000 },
+            "max_depth": { "type": "integer", "minimum": 1, "maximum": 100 }
+          }
+        },
+        "completion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["finish_agent_run_on_pass", "transition_jira_done"],
+          "properties": {
+            "finish_agent_run_on_pass": { "const": true },
+            "transition_jira_done": { "type": "boolean" }
+          }
         }
       }
     },

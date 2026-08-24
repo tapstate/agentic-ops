@@ -13,11 +13,42 @@ capabilities:
   - id: check_ci_status
     source: contract
     contract: contracts/operations/check-ci-status.yaml
-    status: capability_gap
+    status: implemented
     visibility: public
-    commands: []
-    summary: 拉取请求 CI 状态检查目标契约，尚未迁移到 Python Runtime。
-    next_action: 请使用项目认可的 GitHub 或 CI 工具只读检查，并在任务完成后提交能力改进建议。
+    commands:
+      - [task-run, probe-ci]
+    summary: 对 development_change_v2 的当前 PR Head 读取 GitHub Actions，严格核对 Profile 必需检查、5 分钟启动与执行后 10 分钟完成截止时间及修复预算。
+    next_action: pending 时按返回间隔重试；failed 时获取唯一匹配 Artifact；passed 时结束本次 AIAgent 运行并停在 PR 审查。
+
+  - id: fetch_ci_artifact
+    source: contract
+    contract: contracts/operations/fetch-ci-artifact.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task-run, fetch-ci-artifact]
+    summary: 从当前失败 Workflow Run 下载唯一匹配的 GitHub Artifact，核对摘要和版本化大小上限，并安全展开为不可覆盖的受管证据。
+    next_action: 下载成功后执行 parse-ci-report；缺失、歧义、过期、越界、链接或路径穿越时停止。
+
+  - id: parse_ci_report
+    source: contract
+    contract: contracts/operations/parse-ci-report.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task-run, parse-ci-report]
+    summary: 把受管 Artifact 中 Maven Failsafe XML 解析成脱敏、可复现并绑定 Artifact 摘要的结构化失败报告。
+    next_action: 先把结构化报告分类；只有明确代码缺陷可进入修复，不支持的格式、统计冲突或其它原因必须人工介入。
+
+  - id: record_ci_remediation
+    source: contract
+    contract: contracts/operations/record-ci-remediation.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task-run, record-ci-remediation]
+    summary: 只把唯一分类为可重试代码缺陷的 CI 失败事件绑定到授权内修复提交、最终远端 Head 回读和有限修复预算，防止其它失败被自动修复。
+    next_action: 记录成功后对新 PR Head 重新执行 probe-ci；预算耗尽时停止并请求研发工程师决策。
 
   - id: conf_get
     source: contract
