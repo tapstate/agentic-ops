@@ -46,6 +46,7 @@ require_executable maintainer/scripts/test-python-runtime.sh
 require_executable maintainer/scripts/test-release-workflow.sh
 require_executable .githooks/pre-commit
 require_executable .githooks/pre-push
+require_executable .githooks/reference-transaction
 require_file maintainer/standards/git/story-review-policy.yaml
 
 grep -q '原子步骤成功不是会话终点' maintainer/rules/source-maintenance.md ||
@@ -90,6 +91,14 @@ grep -q 'AGENTIC_OPS_STORY_GATE_STAGE=pre_commit' .githooks/pre-commit ||
   fail "pre-commit 未把候选检查限定为固定验收门禁"
 grep -q 'AGENTIC_OPS_STORY_GATE_STAGE=pre_push' .githooks/pre-push ||
   fail "pre-push 未执行分支感知的后置代码审查门禁"
+grep -q 'branch_deletion_prohibited' .githooks/pre-push ||
+  fail "pre-push 未阻断保护分支删除"
+grep -q 'branch_deletion_prohibited' .githooks/reference-transaction ||
+  fail "reference-transaction 未阻断本地保护分支删除"
+grep -q '.githooks/reference-transaction' .githooks/pre-commit ||
+  fail "pre-commit 未把保护分支删除 Hook 纳入受信基线"
+grep -q '.githooks/reference-transaction' .githooks/pre-push ||
+  fail "pre-push 未拒绝未提交的保护分支删除 Hook 篡改"
 grep -q 'git diff --quiet HEAD' .githooks/pre-push ||
   fail "pre-push 未拒绝未提交的 Runtime 或分支策略篡改"
 grep -q 'maintainer/standards/git/story-review-policy.yaml' .githooks/pre-commit ||
@@ -100,6 +109,8 @@ grep -q 'head_commit:maintainer/runtime/src/ao_maint/story_gate/service.py' \
 grep -q 'AGENTIC_OPS_TRUSTED_HOOK_LAUNCHER_V1' \
   maintainer/scripts/lib/development-workflow.sh ||
   fail "研发流程未安装 Git common directory trusted Hook launcher"
+grep -q 'reference-transaction' maintainer/scripts/lib/development-workflow.sh ||
+  fail "研发流程未安装保护分支删除 Hook"
 grep -q 'required_approving_review_count": 1' \
   maintainer/scripts/lib/development-workflow.sh ||
   fail "main Ruleset 未要求至少一个独立人工批准"

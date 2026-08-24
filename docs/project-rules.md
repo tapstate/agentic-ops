@@ -187,7 +187,7 @@ AgenticOps 配置项必须按 [配置规范](configuration-standards.md) 维护�
 
 ## 8. 源头仓库分支与发布规则
 
-`tapstate/agentic-ops` 的 GitHub 默认分支必须是 `main`，日常开发必须在 `develop` 进行。`main` 不允许直接提交，正常发布不允许直接推送；版本化 `.githooks` 是策略源，Git 必须通过 common directory trusted launcher 加载已接受 `HEAD` 的 Hook，不能直接执行 candidate 工作树 Hook。正常发布只允许 PR 的 Merge commit。硬门禁模式还必须通过无 bypass 的 GitHub Repository Ruleset 禁止直接推送、强推和删除，并要求至少 1 个独立人工批准、最后推送者不能自批、dismiss stale approvals、解决全部 review threads；GitHub Free 私有仓库使用显式软门禁时，接受服务器端无法阻止其它入口直推和强制独立审批的剩余风险。Hotfix 是唯一脚本化直推例外，边界见下文。
+`tapstate/agentic-ops` 的 GitHub 默认分支必须是 `main`，日常开发必须在 `develop` 进行。`main`、`develop` 和任意 `release/*` 分支都是保留分支，禁止本地或远端删除；清理已合并分支时必须排除它们。版本化 `.githooks` 是策略源，Git 必须通过 common directory trusted launcher 加载已接受 `HEAD` 的 `reference-transaction`、`pre-commit` 与 `pre-push` Hook，不能直接执行 candidate 工作树 Hook：前者阻断本地删除，后者阻断向远端删除。当前 GitHub Free 私有仓库不支持服务器端 Ruleset 或分支保护，因此这两层是防误操作门禁，不应表述为不可绕过的服务器安全边界。正常发布只允许 PR 的 Merge commit；未来迁移至支持该能力的套餐时，硬门禁模式仍必须通过无 bypass 的 GitHub Repository Ruleset 对 `main` 禁止直接推送、强推和删除，并要求至少 1 个独立人工批准、最后推送者不能自批、dismiss stale approvals、解决全部 review threads。Hotfix 是唯一脚本化直推例外，但不能删除保留分支，边界见下文。
 
 正常发布必须使用统一入口：
 

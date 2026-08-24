@@ -147,6 +147,8 @@ mkdir -p \
   "$fixture/developer/tests/bootstrap"
 cp "$repo_root/.githooks/pre-commit" "$fixture/.githooks/pre-commit"
 cp "$repo_root/.githooks/pre-push" "$fixture/.githooks/pre-push"
+cp "$repo_root/.githooks/reference-transaction" \
+  "$fixture/.githooks/reference-transaction"
 cp "$repo_root/maintainer/scripts/release.sh" "$fixture/maintainer/scripts/release.sh"
 cp "$repo_root/maintainer/scripts/hotfix.sh" "$fixture/maintainer/scripts/hotfix.sh"
 cp "$repo_root/maintainer/scripts/lib/release-common.sh" \
@@ -204,6 +206,7 @@ EOF
 chmod 0755 \
   "$fixture/.githooks/pre-commit" \
   "$fixture/.githooks/pre-push" \
+  "$fixture/.githooks/reference-transaction" \
   "$fixture/maintainer/bin/ao-maint" \
   "$fixture/maintainer/scripts/release.sh" \
   "$fixture/maintainer/scripts/hotfix.sh" \
@@ -226,6 +229,26 @@ git -C "$fixture" push -u origin develop >/dev/null
   . "$fixture/maintainer/scripts/lib/development-workflow.sh"
   workflow_check_hooks "$fixture"
 ) || fail "测试仓库未启用 Git common directory 可信 Hook launcher"
+
+# 保留分支删除必须在本地引用事务阶段失败；普通临时分支仍可清理，避免
+# 把分支保留策略误扩展为禁止一切维护操作。
+git -C "$fixture" switch --create branch-cleanup-test >/dev/null
+git -C "$fixture" branch release/v0.0-retention
+for retained_branch in main develop release/v0.0-retention; do
+  retained_branch_label="$(printf '%s' "$retained_branch" | tr '/' '-')"
+  if git -C "$fixture" branch -D "$retained_branch" \
+    >"$test_root/local-delete-$retained_branch_label.out" \
+    2>"$test_root/local-delete-$retained_branch_label.err"; then
+    fail "本地 Hook 不得允许删除保留分支 $retained_branch"
+  fi
+  grep -q 'branch_deletion_prohibited' \
+    "$test_root/local-delete-$retained_branch_label.err" ||
+    fail "删除保留分支 $retained_branch 未返回稳定失败码"
+done
+git -C "$fixture" branch branch-cleanup-obsolete
+git -C "$fixture" branch -D branch-cleanup-obsolete >/dev/null ||
+  fail "本地 Hook 不得阻断普通已废弃分支清理"
+git -C "$fixture" switch develop >/dev/null
 
 # main 在候选准备之后前进时，发布故事门禁仍必须使用最新 main 的可信
 # Runtime，但只审查 main 与固定候选的 merge-base 之后的候选范围。
@@ -284,6 +307,16 @@ if ! printf 'refs/heads/develop %s refs/heads/develop %s\n' "$pre_push_head" "$p
     >"$test_root/pre-push-develop.out" 2>"$test_root/pre-push-develop.err"; then
   fail "pre-push 不得阻断 develop"
 fi
+
+for retained_remote_ref in refs/heads/main refs/heads/develop refs/heads/release/v0.0-retention; do
+  if printf '(delete) %s %s %s\n' "$zero_sha" "$retained_remote_ref" "$pre_push_head" |
+    (cd "$fixture" && AGENTIC_OPS_SPECIAL_PUSH=hotfix .githooks/pre-push origin "$remote") \
+      >"$test_root/pre-push-delete.out" 2>"$test_root/pre-push-delete.err"; then
+    fail "pre-push 不得允许删除保留远端分支 $retained_remote_ref"
+  fi
+  grep -q 'branch_deletion_prohibited' "$test_root/pre-push-delete.err" ||
+    fail "pre-push 删除保留远端分支未返回稳定失败码"
+done
 if printf 'refs/tags/v0.0-test %s refs/tags/v0.0-test %s\n' "$pre_push_head" "$zero_sha" |
   (cd "$fixture" && .githooks/pre-push origin "$remote") \
     >"$test_root/pre-push-tag.out" 2>"$test_root/pre-push-tag.err"; then
@@ -395,6 +428,8 @@ mkdir -p \
   "$hook_audit/maintainer/standards/stories"
 cp "$repo_root/.githooks/pre-commit" "$hook_audit/.githooks/pre-commit"
 cp "$repo_root/.githooks/pre-push" "$hook_audit/.githooks/pre-push"
+cp "$repo_root/.githooks/reference-transaction" \
+  "$hook_audit/.githooks/reference-transaction"
 printf 'maintainer\n' > "$hook_audit/.agentic-ops-source"
 printf '# audit fixture\n' > "$hook_audit/README.md"
 printf 'schema_version: 1\nstory_categories: [maintainer, developer]\nstories: []\n' \
@@ -408,6 +443,7 @@ EOF
 chmod 0755 \
   "$hook_audit/.githooks/pre-commit" \
   "$hook_audit/.githooks/pre-push" \
+  "$hook_audit/.githooks/reference-transaction" \
   "$hook_audit/maintainer/bin/ao-maint"
 git -C "$hook_audit" add .
 git -C "$hook_audit" commit -m "audit baseline rejects" >/dev/null
@@ -607,6 +643,7 @@ if (
 fi
 printf 'active\tbranch\ttrue\ttrue\t0\ttrue\ttrue\ttrue\ttrue\t1\tfalse\ttrue\ttrue\ttrue\n' \
   > "$ruleset_status"
+
 (
   . "$fixture/maintainer/scripts/lib/development-workflow.sh"
   AGENTIC_OPS_GH_BIN="$fake_gh"
