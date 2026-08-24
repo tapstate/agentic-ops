@@ -215,6 +215,39 @@ _SUCCESS_NEXT_ACTIONS: dict[str, dict[str, Any]] = {
             "task-run_probe-jira-write",
         ],
     },
+    "task-run_probe-ci": {
+        "actor": "ao_work",
+        "action": "continue_ci_state_machine",
+        "allowed_operations": [
+            "task-run_probe-ci",
+            "task-run_fetch-ci-artifact",
+            "jira_comment_plan",
+            "jira_worklog_plan",
+            "task-run_probe-jira-write",
+        ],
+    },
+    "task-run_fetch-ci-artifact": {
+        "actor": "ao_work",
+        "action": "parse_verified_ci_artifact",
+        "allowed_operations": ["task-run_parse-ci-report"],
+    },
+    "task-run_parse-ci-report": {
+        "actor": "ai",
+        "action": "classify_structured_ci_failure_before_remediation",
+        "allowed_operations": [
+            "task-run_record",
+            "task-run_verify",
+            "task-run_execute-git-commit",
+            "task-run_execute-git-push-task-branch",
+            "task-run_probe-git",
+            "task-run_record-ci-remediation",
+        ],
+    },
+    "task-run_record-ci-remediation": {
+        "actor": "ao_work",
+        "action": "observe_new_pr_head_ci",
+        "allowed_operations": ["task-run_probe-ci"],
+    },
     "task-run_probe-jira-write": {
         "actor": "ao_work",
         "action": "verify_prohibited_actions",

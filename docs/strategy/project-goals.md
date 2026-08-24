@@ -58,10 +58,12 @@ AgenticOps 先落地研发 Jira 任务链路。
 -> 研发员本地执行、验证和整理证据
 -> 回写任务证据
 -> 公司员工指导员确认高风险动作
--> 进入既有拉取请求、CI、审查和合入流程
+-> 按 Project Profile 进入既有拉取请求、CI、专业审查和合入流程
 -> 提交任务完成审计
 -> 形成反馈分析和改进建议
 ```
+
+developer 业务流程按 Profile 显式版本化：旧 `development_change_v1` 继续停在内置拉取请求审查节点；`development_change_v2` 取消 developer 标准流程内置代码审查，先绑定最终 GitHub PR 与 Base 提交自动判定是否存在适用的 CI Workflow；无需 CI 时以 GitHub 事实结束，需要 CI 时持续观察必需检查，并在最多三次授权内修复后通过即结束 AIAgent 运行。判定未知时必须人工介入，不能把未知降级为无需 CI。该模式不取消项目另行要求的 QA、安全、运维或流程审查，也不授权合并、Jira Done、发布、Tag 或保护分支写入。
 
 阶段目标的重点是闭环可靠，而不是扩大自动化范围。真实 Jira 写操作、Git 推送、GitHub 拉取请求创建、合并和正常发布都必须经过策略门禁和人工确认。AgenticOps 源头维护的快速 Hotfix 是显式例外：公司员工指导员只需调用 `maintainer/scripts/hotfix.sh <KEY>` 即构成本次授权，脚本自行完成分支切换、远端同步和原子合并，不再设置额外门禁或与 Jira 交互，只用 Git 一致性检查、自动合并冲突检测和 atomic push 防止部分推送与历史改写。
 

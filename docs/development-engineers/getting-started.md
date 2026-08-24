@@ -215,6 +215,8 @@ cd ~/agentic-ops-tapdata
 
 这些自然语言需求不代表对应自动化都已实现。AI 必须先查询能力目录；任务释放、部分 PR / CI 协作、分支对齐和完成审计等仍可能返回 `capability_gap`，应由研发工程师按目录指引处理。正式接管必须使用统一 takeover，不能用内部 `task init` 或 `task start` 冒充；developer 不提供 Agentic Custom Field 写入。
 
+接管完成后，Runtime 不会先按默认仓库创建工作树。标准顺序是：`task repositories assess` 形成只读建议；研发工程师审查并修正完整关系表；`task repositories confirm --confirm` 固化唯一工作依据；实际需要改某仓库时调用 `task worktrees prepare --repository <owner/repo>`。任务完成 evidence 评论必须列出 `actual_change_repositories`；评论与 Jira 完成态回读后，使用 `task worktrees cleanup` 安全清理子工作树。源码池主工作树只作分析源，不由任务流程修改或清理。
+
 ## 6. AO问题反馈与快速改进
 
 当发现的是 **AgenticOps 本身** 的问题（例如命令无法安全完成、需要过多人工干预或输出质量不足），统一使用“AO问题反馈”。它不同于业务项目的 Bug：不会在当前业务 Jira 项目建卡，而是在 AO 项目创建 `Agentic 缺陷`。

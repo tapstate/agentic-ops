@@ -97,3 +97,4 @@ AIAgent、Skill 和 Python Runtime 不作为第三类故事主角。`ao-maint` �
 - [DE-004：新任务接管](development-engineer/de-004-takeover-task.md)。
 - [DE-005：恢复接管任务](development-engineer/de-005-resume-takeover.md)。
 - [DE-006：任务完成审计与反馈分析](development-engineer/de-006-task-audit-feedback.md)。
+- [DE-008：PR CI 持续监控与失败自动修复](development-engineer/de-008-pr-ci-remediation.md)。

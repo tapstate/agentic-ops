@@ -203,6 +203,7 @@ if [ "$source_marker_head" = "maintainer" ] || \
   for required_path in \
     .githooks/pre-commit \
     .githooks/pre-push \
+    .githooks/reference-transaction \
     maintainer/bin/ao-maint \
     maintainer/standards/git/story-review-policy.yaml \
     maintainer/standards/stories/project-quality.yaml; do
@@ -227,6 +228,7 @@ if [ "$source_marker_head" = "maintainer" ] || \
   gate_runtime_paths=(
     .githooks/pre-commit
     .githooks/pre-push
+    .githooks/reference-transaction
     maintainer/bin/ao-maint
     maintainer/pyproject.toml
     maintainer/uv.lock

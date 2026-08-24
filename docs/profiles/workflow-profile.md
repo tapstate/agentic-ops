@@ -1,271 +1,160 @@
 # 工作流配置
 
-> 本文定义目标配置语义，不代表所有对应 Runtime 命令已经实现。现役可调用性只以 `ao-work capability list|show` 为准；`profile_resolve`、`update_task_form` 当前为 `capability_gap` 时必须停止或转人工。Jira 状态流转已实现为 `jira_transition` 能力（`ao-work jira transition plan|apply|readback`）。
+> 本文记录现役 `ProjectProfile` 的机器可解析结构和运行边界。公开命令是否可调用仍以 `ao-work capability list|show` 为准；本文出现字段不代表 Runtime 已提供对应写操作。
 
-## 1. 目的
+## 1. 作用与事实源
 
-工作流配置把 AgenticOps 的通用操作映射到具体项目流程。
-
-AgenticOps 核心绑定研发流程语义，不绑定某一套具体 Jira 工作流。
-
-## 2. 配置范围
-
-一个工作流配置以项目配置项命名，例如 `tapdata` 或 `tapstate`，源头位于 `developer/standards/projects/<project>/profile.yaml`。研发工程师初始化时只选择项目配置项；Jira project、代码仓库、本地路径、流程和策略映射由该 profile 定义。
-
-运行时 effective profile 按以下顺序解析：
+Project Profile 把通用 Runtime 绑定到具体业务项目，源头位于：
 
 ```text
-项目工作空间 overlay
-> ~/.agentic-ops/user/
-> developer/standards/projects/<project>/
-> developer/standards/company/
-> ao_work 固定兜底
+developer/standards/projects/<profile-id>/profile.yaml
 ```
 
-该顺序只用于配置和 profile 字段来源解析，不等同于规则冲突优先级。规则冲突必须按 `项目规则 > AIAgent 规则 > 公司规则 > 个人规则` 执行；个人层可以提供本机默认值，但不能覆盖更高优先级规则。
+Runtime 按以下顺序深度合并，后者覆盖前者：
 
-项目 AI 工作空间只保存 `.agentic-ops/profile.local.yaml` 这类本地 overlay，不复制完整全局项目 profile。`~/.agentic-ops` 的 developer-only 安装更新后，现有命令会按工作空间绑定的 Project Profile 读取最新项目包；独立 `profile_resolve` 操作仍是目标能力，当前目录标记为 gap 时不得构造命令。
+```text
+版本化项目 Profile
+< ~/.agentic-ops/user/projects/<profile-id>/profile.local.yaml
+< <workspace>/.agentic-ops/profiles/<profile-id>.local.yaml
+```
 
-一个工作流配置至少应描述：
+工作空间 `agent.json` 固化 `project_profile`、`connection_id`、`jira_project`、`source_root` 和绑定仓库。Runtime 每次加载 Profile 后都会回验这些绑定，不能靠 overlay 静默切换项目、Jira Connection 或源码身份。
 
-- 项目配置项名称。
-- Jira 空间和查询规则；初始化时写入当前 Jira 用户。
-- Jira Form Mapping，把 AgenticOps 标准字段映射到具体 Jira 字段、描述模板、评论模板或工作空间配置。
-- 任务分类映射，把 Jira 卡片类型、标签、组件、自定义字段或描述模板映射到 AgenticOps `task_class`。
-- 标准流程映射，把 `task_class` 映射到 Standard Process Registry 中的 `process_id`。
-- Jira 状态和 `transition` 映射。
-- 专业审查节点和对应角色映射。
-- Jira 空间到代码仓库的映射：一个 Jira 空间可以对应若干 GitHub 仓库，必须说明默认仓库和匹配规则；本地源码目录由工作空间初始化生成，可使用共享 profile 的占位默认值。
-- 允许的写操作。
-- 人工确认点。
-- 重试和重做规则。
-- 证据模板。
-- 事件日志位置。
+Jira 站点和环境变量名属于 `developer/standards/connections/<connection-id>.yaml`；研发员身份与真实凭证只保存在 developer 安装的 `user/identity.yaml` 和 `user/.env`，不得写入 Profile 或工作空间。
 
-## 3. 概念结构
+## 2. 现役结构
+
+下面只展示 Runtime 当前解析的字段：
 
 ```yaml
-workspace: tapstate
+schema_version: 1
+profile_id: tapdata
+connection_id: tapdata-cloud
 
 jira:
-  user: dev@example.com
-  project: TAP
-  task_query: "assignee = currentUser() AND status in (...)"
+  project_key: TAP
+  issue_types: [Story, 故事, Bug, 缺陷, Task, 任务]
+  task_query: project = TAP AND assignee = currentUser() AND statusCategory != Done
 
-jira_form_mapping:
-  fields:
-    owner:
-      source: jira_field
-      jira_field: assignee
-    acceptance_criteria:
-      source: jira_field
-      jira_field: customfield_acceptance
-      writable: true
-    target_repo:
-      source: jira_field
-      jira_field: customfield_target_repo
-    risk_level:
-      source: jira_field
-      jira_field: customfield_risk
+repositories:
+  default: tapdata/tapdata
+  list:
+    - tapdata/tapdata
+    - tapdata/tapdata-enterprise
 
-task_class_mapping:
-  issue_types:
-    Story: feature_change
-    Bug: bug_fix
-    Task: technical_task
-  labels:
-    investigation: investigation
-    agenticops-improvement: process_improvement
+  analysis_mount:
+    mode: all                 # all | include | exclude
+    include: []
+    exclude: []
 
-standard_process_mapping:
-  feature_change: development_change_v1
-  bug_fix: development_change_v1
-  technical_task: development_change_v1
-  investigation: investigation_v1
-  process_improvement: agenticops_improvement_v1
+  worktree_domains:
+    - id: product
+      baseline_repository: tapdata/tapdata
+      problem_version_repository: tapdata/tapdata
+      repositories:
+        - tapdata/tapdata
+        - tapdata/tapdata-enterprise
 
-github:
-  organization: tapstate
-  repositories:
-    default: tapstate/example-repo
-    by_component:
-      api: tapstate/tap-api
-      web: tapstate/tap-web
-    by_label:
-      cli: tapstate/agentic-ops
+  branches:
+    derive_from: default
+    default_branch: main
+    default_rule: same_name
+    baseline_branches:
+      tapdata/tapdata: develop
+      tapdata/tapdata-enterprise: develop
+    dev_branches:
+      tapdata/tapdata: develop
+      tapdata/tapdata-enterprise: develop
+    overrides:
+      - from_branch: release-v3.30
+        repo: tapdata/tapdata-enterprise
+        branch: release-v3.30
 
-local:
-  workspace_root: "<project-ai-workspace>"
-  source_root: "<project-ai-workspace>-code/<repository>"
-  tasks_dir: "<project-ai-workspace>/.agentic-ops/tasks"
-  runs_dir: "<project-ai-workspace>/.agentic-ops/tasks/<ISSUE-KEY>/runs"
-  run_logs_dir: "<project-ai-workspace>/.agentic-ops/tasks/<ISSUE-KEY>/runs/<agentic_run_id>"
-  feedback_dir: "<project-ai-workspace>/.agentic-ops/tasks/<ISSUE-KEY>/feedback"
-  audit_dir: "<project-ai-workspace>/.agentic-ops/tasks/<ISSUE-KEY>/audit"
-  handoff_dir: "<project-ai-workspace>/.agentic-ops/tasks/<ISSUE-KEY>/handoff"
+workspace:
+  source_root: /optional/independent/checkout
+  repository: tapdata/tapdata
 
-human_gates:
-  - push
-  - create_pr
-  - merge
-  - scope_change
+fields:
+  owner:
+    source: jira_field
+    jira_field: assignee
+    state: read_only
+    required: true
+  problem_version:
+    source: jira_description_section
+    section: 问题版本
+    state: active
+    writable: true
+  target_repo:
+    source: workspace_repo_mapping
+    state: active
+    required: true
+  target_branch:
+    source: task_worktree_mapping
+    state: active
+    required: true
 
-review_gates:
-  pr_review:
-    role: reviewer
-    decision_field: reviewer_decision
-    returned_next_action: fix_and_verify
-  qa_verification:
-    role: qa
-    decision_field: reviewer_decision
-    returned_next_action: redo_previous_stage
+statuses:
+  打开: waiting_takeover
+  正在进行: implementation
+  完成: completed
 
-retry_redo:
-  verification_failed:
-    retry: true
-    max_attempts: 3
-    redo_from_stage: null
-  scope_changed:
-    retry: false
-    redo_from_stage: takeover_gate
-
-templates:
-  takeover_success: templates/evidence/takeover-success.md
-  takeover_failed: templates/evidence/takeover-failed.md
-  blocked: templates/evidence/blocked.md
-  development_completed: templates/evidence/development-completed.md
-```
-
-## 4. 配置规则
-
-- 工作流配置可以绑定具体 Jira 工作流，但核心操作不能依赖某个固定 Jira 状态名。
-- 工作流配置必须适配 Task Form Standard；AIAgent 只消费标准字段，不直接消费 Jira 自定义字段。
-- `Profile` 必须适配 Standard Process Registry；AIAgent 先识别 `task_class`，再选择 `process_id`。
-- `Profile.workspace` 必须与 profile 文件名中的项目配置项一致，例如 `tapdata.yaml` 对应 `workspace: tapdata`。
-- `Profile.jira.project` 是该项目配置项绑定的 Jira project；快速开始初始化不要求研发工程师重复输入。
-- `Profile.jira.user` 在共享 profile 中只能使用默认占位值；`workspace init` 会使用研发工程师提供的 Jira 用户写入 `.agentic-ops/profile.local.yaml`。
-- `Profile.jira.base_url` 可以提供项目默认 Jira 地址；Jira Cloud 使用站点根地址，例如 `https://tapdata.atlassian.net`，不包含 `/jira`。真实账户只保存在当前 developer 安装的受保护 `user/.env` 中；进程环境默认不作为凭证来源。外部脚本和 AIAgent 通过 `ao-work auth --show` 读取脱敏状态。
-- `Profile.local.*` 在共享 profile 中只能使用 `<project-ai-workspace>` 这类占位值；`workspace init` 会把本地路径写入 `.agentic-ops/profile.local.yaml`。源码目录默认是与工作空间同级的 `<project-ai-workspace>-code/<repository 短名>` 目录，目录不存在或为空时初始化会从 `github.repositories.default` 下载项目代码；目录已存在且非空时直接复用。`workspace init` 会在 `-code` 容器目录写入受管 `README.md` 说明文件（记录归属工作空间、agent_id、Project Profile 和仓库，管理块重新初始化时整体重写）；显式 `--source-root` 指定的目录不写入。一个源码目录只能绑定一个业务项目工作空间，多个工作空间不得共享同一源码目录。研发工程师可以通过 `--source-root` 显式确认其它目录。
-- 如果项目 AI 工作空间已有完整的 `.agentic-ops/agent.json`、`.agentic-ops/profile.local.yaml` 和 AgenticOps 管理的 `AGENTS.md` 配置块，`workspace init` 必须停止并要求研发工程师确认；确认覆盖时使用 `--confirm-existing-config`。只存在部分受管文件时视为上次初始化未完成，允许同项目初始化自动修复。
-- `workspace init` 必须先持久化已确认的 Jira 本机配置，再执行源码下载，最后写入 workspace overlay、`agent.json` 和 `AGENTS.md` 管理块。源码下载失败时不得丢失用户已输入的 Jira token，也不得新建表示初始化完成的 overlay。
-- `Profile` 必须说明关键专业审查节点如何映射到标准字段、Jira 状态、拉取请求审查、CI 或人工确认。
-- `Profile` 必须说明失败后允许重试还是必须重做前序阶段。
-- `Profile` 必须能被 `ao-work` 前置检查校验。
-
-### 4.1 Jira 状态与 transition 映射（快速适配路径）
-
-Profile 的 `statuses` 与 `transitions` 节是 Jira 工作流适配的唯一配置点；Jira 状态流程易变，适配只改配置、不改 Runtime 代码：
-
-- `statuses`：Jira 状态名 -> 团队可见标准 stage（`waiting_takeover` / `implementation` / `completed`）。接管后的 `task_intake`、`solution_classification` 和 `design_review` 是本地内部阶段，不要求新增 Jira 状态。
-- `transitions`：transition key -> `{name, id, from, to}`。
-  - `id` 为 Jira 稳定 transition ID，配置后 D-037 优先按 ID 匹配并校验 `from`/`to`。
-  - 未配置 `id` 时按名称兜底，要求 Jira 可用列表中同名 transition 唯一且 `from`/`to` 匹配。
-  - `from` 为可发起该流转的 Jira 状态列表；`to` 为流转后目标状态名。
-  - 候选重复、目标不符、当前不可用或回读不一致一律阻断，禁止模糊匹配。
-- AIAgent 默认禁止把卡片推进到 `completed` stage 对应状态（无合入权）；完成态由研发工程师在 Jira 处理。
-- 匹配失败时 `jira transition plan` 输出适配对照材料（当前状态 + Jira 可用 transitions 完整列表 + 已配置条目），照抄补齐 `transitions` 节后重新 plan 即可。
-- 未配置的流转（例如 正在进行 -> Pull Request Submitted）按缺省可用、渐进补充原则，等真实工作流数据确认后逐条补齐。
-- `Profile` 不得包含 secrets、tokens 或 private keys。
-- `Profile` 中的 `repo` 映射必须能解释任务如何定位目标源码。
-- `Profile` 缺字段时，AIAgent 不能自行猜测，应请求研发工程师补充。
-- `Profile` 缺任务分类、流程映射、Jira 状态或 `transition` 时，AIAgent 必须输出 `gap` 并请求流程负责人决策。
-- `transition_mapping` 只表达标准推进动作到标准流程阶段的关系；真实 Jira 工作流的 `transition id` / `transition name` 必须放在 `jira_transition_mapping`，避免把标准流程语义和项目私有 Jira 配置混在一起。
-
-## 5. Jira Form Mapping
-
-Jira Form Mapping 负责解释标准字段如何从具体 Jira project 中取得。
-
-`writable: true` 是目标 `update_task_form` 能力的显式写入白名单。该能力当前仍是 `capability_gap`，不能自动写 Custom Field；即使未来实现，未声明该字段的映射也只能读取，`owner`、`assignee`、所有权字段、Description 章节和 Comment 映射不得通过它写入。
-
-概念结构：
-
-```yaml
-jira_form_mapping:
-  fields:
-    acceptance_criteria:
-      source: jira_field
-      jira_field: customfield_acceptance
-      writable: true
-      required_from_stage: iteration_ready
-    target_repo:
-      source: jira_field
-      jira_field: customfield_target_repo
-      fallback: workspace_repo_mapping
-      required_from_stage: design_review
-    verification_method:
-      source: jira_description_section
-      section: 验证方式
-      required_from_stage: design_review
-```
-
-## 6. Jira Transition Mapping
-
-Jira `transition` 映射负责把标准推进动作映射到具体 Jira 工作流的 `transition id` 或 `transition name`。目标裁决是 `id` 优先，缺少 `id` 时只允许按唯一 `name` 查找；当前 Runtime 尚未实现 transition 执行与解析，不得据此推断 `ao-work` 已能流转状态。
-
-概念结构：
-
-```yaml
-transition_mapping:
-  start_progress: implementation
-  complete: completed
-
-jira_transition_mapping:
+transitions:
   start_progress:
-    name: Start Progress
-  complete:
-    id: "31"
+    name: Implementation started
+    id: "91"
+    from: [打开]
+    to: 正在进行
 ```
 
-如果 Jira 工作流、字段或描述模板无法适配标准字段，工作流配置校验必须返回稳定缺口，例如 `missing_form_field`、`unmapped_jira_field`、`lifecycle_mapping_gap`、`transition_mapping_gap`、`jira_transition_mapping_gap` 或 `task_class_mapping_gap`。
+## 3. Jira 与字段映射
 
-## 7. 审查、重试和重做映射
+- `jira.project_key`、`issue_types` 和 `task_query` 限定候选任务及项目边界。
+- `fields` 只接受 `source`、`jira_field`、`section`、`state`、`writable`、`required`。`state` 只能是 `active`、`read_only`、`pending_validation`、`unsupported` 或 `deprecated`。
+- `writable: true` 是字段写入白名单元数据，不会自行产生写能力。若能力目录仍标为 `capability_gap`，AIAgent 必须停止，不能根据 Profile 拼装 Jira 写请求。
+- Jira `Assignee`、`Status` 和受管 Comment 是接管事实；`agentic_run_id`、内部阶段、幂等记录和证据保存在本地任务状态，不映射为业务 Jira Custom Field。
 
-工作流配置必须把专业审查节点映射为 AgenticOps 可理解的结果。
+现役 `target_repo` 有一个需要明确记录的特殊路径：Profile 仍声明 `source: workspace_repo_mapping`，但池模式在建立来源上下文前会直接读取 Jira 描述的“目标仓库”首行。值不在 `repositories.list` 时返回 `target_repository_unknown`；章节缺失时回退 `repositories.default`。Runtime 尚未根据其它 Jira 文本、源码命中或路径线索推断候选仓库，也不会检测多线索领域冲突。
 
-概念结构：
+## 4. 仓库池、领域和分支
 
-```yaml
-review_gates:
-  pr_review:
-    source: github_pr_review
-    role: reviewer
-    accepted_values:
-      - approved
-      - changes_requested
-      - blocked
-    output_fields:
-      reviewer_decision: changes_requested
-      reviewer_required_action: "按审查意见修复并重新验证"
+- `repositories.default` 和 `list` 均使用唯一的 `owner/repository`；声明 `list` 时，`default` 必须在列表内。
+- `workspace init` 在中央源码池准备 `repository_candidates()` 返回的全部成员；任务接管不挂载工作树，接管后的仓库建议分析和按需建树只刷新已有池成员，不补 clone。
+- `analysis_mount` 仅在没有显式领域的兼容 Profile 中计算分析集合。`include` 和 `exclude` 引用的仓库必须在 `list` 内。
+- `worktree_domains` 的成员不得重叠，`baseline_repository` 必须属于该领域；`problem_version_repository` 必须属于 `repositories.list`，缺失时兼容使用 `baseline_repository`。TapData TM、FE、connector 使用 `tapdata/tapdata` 作为问题版本来源，但 connector 仍保持独立候选领域。
+- `branches.baseline_branches` 给出未声明问题版本时目标仓库的显式基线；一旦配置该映射，缺少具体仓库条目时不能猜 `default_branch`。
+- 其它领域的分支推导顺序为：基线仓库使用问题版本；精确 `overrides`；当问题版本等于基线仓库开发分支时使用目标仓库 `dev_branches`；最后仅支持 `default_rule: same_name`。
+- TapData 产品域使用版本化 `tap_align_branches.py plan --no-fetch --remote-only` 计算领域内逐仓分支。Runtime 在创建任何工作树前解析全部远端提交，已有工作树也必须与同一批提交一致。
 
-retry_redo:
-  verification_failed:
-    retry: true
-    max_attempts: 3
-    agentic_next_action: fix_and_verify
-  missing_target_repo:
-    retry: false
-    redo_from_stage: takeover_gate
-    agentic_next_action: ask_owner
+池模式任务目录固定为：
+
+```text
+<source_pool_root>/.worktree/<JIRA-KEY>/<repo-short-name>/<normalized-from-branch>
 ```
 
-当审查节点、重试规则或重做边界无法映射时，工作流配置校验必须返回 `review_gate_mapping_gap` 或 `retry_redo_policy_gap`，并要求流程负责人决策。
+当前来源上下文只把目标仓库工作树设为 `source_root`，并输出目标仓库的 `problem_version`、`target_branch` 和路径；尚未把领域内逐仓分支、远端提交和对齐理由作为完整证据输出。
 
-## 7. developer 接管事实映射
+## 5. 状态与 transition
 
-developer Project Profile 只映射实际影响项目流程执行的 Jira 字段、状态和 transition。接管所需事实分工固定为：
+- `statuses` 把真实 Jira 状态名映射到 `waiting_takeover`、`implementation`、`completed` 等标准阶段。
+- `transitions` 是唯一的 Jira 流转配置点，结构为 `{name, id, from, to}`。
+- 配置 `id` 时优先按 ID 匹配，并严格校验起止状态；未配置时只允许唯一名称匹配。候选重复、当前不可用、目标不符或回读不一致都必须阻断。
+- 未配置的流程不得由 AIAgent 猜测；应先读取 Jira 可用 transitions，再通过版本化 Profile 增补。
+- AIAgent 默认无合入权，不能仅凭 `statuses` 配置把卡片推进完成态。
 
-- Jira `Assignee`：当前负责人，必须等于当前登录用户。
-- Jira `Status` 与 transition：团队可见阶段，必须由 profile 严格映射。
-- 受管 Jira Comment：接管、恢复、进度和终态轨迹，由 Runtime 写入并回读，不配置为 Custom Field。
-- 本地 task state：`agentic_run_id`、细粒度阶段、恢复点和幂等记录。
+## 6. 不属于现役 Profile 的概念
 
-因此业务项目不需要映射 `agentic_id`、`agentic_run_id`、心跳或完成证据等 Agentic Jira Custom Field。字段不是项目流程必需输入时不得为了 AgenticOps 增加映射。当前 Comment 模型不提供跨工作空间并发锁，真实并发需求后续专题设计。
+下列旧文档概念当前不由 `ProjectProfile` 解析，不能写入 YAML 后声称已经适配：
 
-## 8. 第一批默认配置
+- `jira.user`、`jira_form_mapping`、`task_class_mapping`、`standard_process_mapping`。
+- `github.repositories.by_component`、`github.repositories.by_label`。
+- `local.tasks_dir`、`human_gates`、`review_gates`、`retry_redo`、`templates`。
+- 分离的 `transition_mapping` 与 `jira_transition_mapping`。
 
-第一阶段建议优先设计：
+任务分类、流程选择、人工门禁、重试和证据模板分别由 Runtime、Operation Contract、策略和标准流程资产承载。若要把这些概念引入 Profile，必须先更新配置模型、校验、能力目录、测试和本文，不能只加示例字段。
 
-- `tapstate`
-- `tapdata`
+## 7. 验证边界
 
-这两个工作流配置可以共享操作契约，但拥有不同 Jira 空间、GitHub 仓库、本地源码和任务执行上下文。
+Profile 加载会校验标识、仓库格式与引用、领域重叠、分支映射和 transition 结构。配置错误统一按 Project Profile 配置失败关闭；部分设计中的细分失败码尚未实现。
+
+修改版本化 Profile 或本契约后至少运行资源契约和 Python Runtime 验收；涉及初始化、源码池或发布信任根时还必须运行项目规定的四项固定完整验证。

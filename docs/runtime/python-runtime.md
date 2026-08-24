@@ -168,9 +168,17 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 确认后 Runtime 先对候选配置执行无副作用预检，再准备源码和原子写入工作空间文件；`.agentic-ops/agent.json` 作为初始化完成标记最后写入。Jira 身份、目标 Project 访问、Git 远端访问或本机 `agent_id` 冲突任一检查失败时，不得进入任务执行。
 
-池模式（D-048）下，`source_pool_root` 为研发员级必配（`~/.agentic-ops/user/config.yaml` 或 `--source-pool-root`）；未配置时阻断 `source_pool_root_invalid`，无兼容回退。源码准备从「工作空间级单仓库克隆」改为「中央克隆池成员全集准备」：按 Project Profile `repositories.list` 逐仓库认领（校验 remotes 精确匹配、拒绝 URL 改写与 AgenticOps 源头仓库）或流式克隆；浅克隆自动 `git fetch --unshallow`；中断续传，已完成成员保留。任务执行源码在任务接管时以任务级子工作树集（`<pool_root>/.worktree/<jira>/<问题版本>/<repo>`，`/` 规范化为 `-`）挂出；先按目标仓库选择 Profile `worktree_domains` 领域，只刷新该领域全部池成员；TapData 缺少领域配置时阻断，不回退全量挂载。产品域随后调用项目 `tap_align_branches.py plan --no-fetch --remote-only --repositories ... --json`，仅以刷新后的远端 refs 用问题版本计算每个仓库的实际目标分支；产品域由基线仓库 `tapdata/tapdata` 识别，不依赖可变的领域 id。三段式 `<tapdata>,<enterprise>,<web>` 对齐规格只把第一段用于问题版本路径，完整规格传给计划脚本；`KEEP_CURRENT` 遇到 detached HEAD 必须阻断。其它领域使用各自基线规则。`问题版本` 始终记录 Runtime 实际使用的领域基线仓库分支，`target_branch` 记录目标仓库经计划选出的实际分支。创建任何工作树前必须解析领域内全部远端提交，已有工作树也必须精确匹配同一批远端提交；per-worktree 身份写入 worktree config。非池独立 checkout 模式仍受支持，但必须先证明工作空间绑定仓库与 Jira `目标仓库` 一致，再从项目领域基线规则分别写入有效 `problem_version` 和实际 `target_branch`，必要时回读当前非 detached 分支；仓库不一致时失败关闭。检测到 `<pool_root>/<jira>/` 旧布局任务根时失败关闭，由研发工程师人工确认迁移或清理。
+池模式（D-048/AO-92）下，`source_pool_root` 为研发员级必配；`workspace init` 按 Profile 清单准备保留主工作树的普通 clone。接管阶段不把默认仓库固化为任务仓库、不创建工作树，也不写仓库来源快照。接管后先从 Profile 远端固定 SHA 形成 `proposed_repository_branch_map`，研发工程师可增删仓库或修正逐仓 `from_branch`；只有显式确认的 `confirmed_repository_branch_map` 能驱动按需建树。任务工作树路径固定为 `<pool_root>/.worktree/<jira>/<repo>/<normalized-from-branch>`。TapData TM、FE、connector 的 `problem_version_repository` 均为 `tapdata/tapdata`，建议分支继续由 `tap_align_branches.py` remote-only 计划形成，但不得覆盖用户确认。按需建树时只刷新本次仓库、固定确认分支 SHA、创建任务分支并写 per-worktree 身份与精确来源上下文。完成 evidence 评论必须逐仓汇报 Git/验证/远端/PR 回读形成的 `actual_change_repositories`；评论和 Jira 完成态回读后，公开 cleanup 整体预检 dirty、Head、远端承接与精确路径，再非强制移除任务子工作树。源码池成员永不随任务清理。独立 checkout 模式仍受支持并继续严格校验仓库绑定。
+
+现役任务工作树能力仍有明确边界：领域只由 Jira 描述“目标仓库”首行精确选择，章节缺失即回退 `repositories.default`，不会结合其它 Jira 文本、源码命中或路径线索推断领域及识别线索冲突；`task_worktrees` 和来源快照只暴露目标仓库工作树及其 `problem_version`、`target_branch`、路径，没有输出领域内逐仓分支、远端提交和对齐理由。创建失败时 Runtime 会尽力执行 `git worktree remove --force` 回滚本次新建目录，但尚未验证 remove 结果或提供独立回滚失败码；文件或符号链接占用目标路径也尚未归一为结构化冲突。上述边界必须作为后续能力处理，不能由 AIAgent 根据设计文档模拟补齐。
 
 初始化生成的业务工作空间 `AGENTS.md` 固定进入 developer 工作面，不得引用根 `AGENTS.md` 或 `maintainer/`。developer 安装的 `user/identity.yaml` 与 `user/.env` 保存研发员身份和 Jira 凭据；`user/workspace-index.json` 只是可重建冲突索引。新工作空间使用 schema v5，只持 `install_identity_ref`、本地入口绑定和项目事实；schema v4 及更早格式与工作空间 `.agentic-ops/.env` 在凭证读取和联网前失败关闭，不扫描 PATH 或提供隐式迁移。
+
+初始化把准入 developer Skill 以普通文件副本写入工作空间 `.agents/skills/<name>/SKILL.md`，不会创建指向安装根的链接。为了让 Claude Code 与 Codex 发现同一套工作空间 Skill，Runtime 另外创建 `.claude/skills/<name> -> ../../.agents/skills/<name>` 相对 symlink 桥接；这是受管工作空间路径中唯一允许的 symlink 叶节点例外，不代表放宽通用路径策略。
+
+通用 `validate_managed_path` 继续拒绝受管根、父目录和普通受管路径中的任意 symlink。Claude bridge 只由专用校验处理，并同时要求：`.claude` 与 `.claude/skills` 是工作空间内普通目录；名称属于当前安装发布的准入 Skill 集；原始链接目标精确等于该名称对应的受管相对路径；解析后的真实目标精确等于同一工作空间 `.agents/skills/<name>` 普通目录。目标漂移、悬空或越界链接、非准入名称、额外文件或目录以及父路径 symlink 全部失败关闭，不读取或修改外部目标。
+
+`workspace init` 的写前预检只允许合法桥接缺失，以便首次初始化或重复初始化补建缺失项；它不得覆盖漂移、越界或污染链接。普通 `workspace preflight` 与初始化写入后的复检要求全部桥接完整且精确匹配。因此合法桥接可幂等复用，缺失桥接可受控修复，异常桥接始终阻断并要求指导员核对。
 
 指定分支验证安装（`developer/bootstrap/install-verify-branch.sh` 远程模式）的 `ao-work` 复用同一套安装身份校验：origin 必须是 `tapstate/agentic-ops`、sparse 精确集与 shared/developer 分发白名单不变，仅把「HEAD 是 `origin/main` 祖先」放宽为「HEAD 可达于任一 `origin/*` 远端分支或 tag」；该放宽只在 `.agentic-ops/verification-only` 标记存在时生效。生产安装 `~/.agentic-ops` 仍固定 `main`，不接受分支覆盖。
 

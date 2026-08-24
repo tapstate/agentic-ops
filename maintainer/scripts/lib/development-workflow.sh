@@ -64,7 +64,7 @@ workflow_install_trusted_hooks() {
   fi
   mkdir -p "$workflow_hook_dir" || return 1
   chmod 0700 "$workflow_hook_dir" || return 1
-  for workflow_hook_name in pre-commit pre-push; do
+  for workflow_hook_name in pre-commit pre-push reference-transaction; do
     workflow_hook_target="$workflow_hook_dir/$workflow_hook_name"
     workflow_hook_pending="$workflow_hook_dir/.$workflow_hook_name.pending.$$"
     workflow_write_trusted_hook_launcher \
@@ -128,10 +128,13 @@ workflow_check_hooks() {
     [ ! -L "$workflow_hooks_path" ] &&
     [ -x "$workflow_hooks_path/pre-commit" ] &&
     [ -x "$workflow_hooks_path/pre-push" ] &&
+    [ -x "$workflow_hooks_path/reference-transaction" ] &&
     grep -q 'AGENTIC_OPS_TRUSTED_HOOK_LAUNCHER_V1' \
       "$workflow_hooks_path/pre-commit" &&
     grep -q 'AGENTIC_OPS_TRUSTED_HOOK_LAUNCHER_V1' \
-      "$workflow_hooks_path/pre-push"
+      "$workflow_hooks_path/pre-push" &&
+    grep -q 'AGENTIC_OPS_TRUSTED_HOOK_LAUNCHER_V1' \
+      "$workflow_hooks_path/reference-transaction"
 }
 
 workflow_check_develop() {
@@ -359,7 +362,7 @@ workflow_check_or_configure() {
     ! workflow_check_develop "$workflow_repo_root" ||
     ! workflow_check_repository_settings "$workflow_repository" ||
     ! workflow_check_main_ruleset "$workflow_repository"; then
-    workflow_fail "workflow_configuration_verification_failed" "正式研发流程配置复检失败" "请检查 Hooks、develop、仓库设置和 ruleset"
+    workflow_fail "workflow_configuration_verification_failed" "正式研发流程配置复检失败" "请检查 Hooks、develop、仓库设置和 main Ruleset"
     return 1
   fi
 

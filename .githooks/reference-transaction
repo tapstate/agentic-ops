@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# reference-transaction 在实际引用写入前收到 old-value、new-value 和 ref。
+# 只在 prepared 阶段拒绝，确保 Git 可以原子回滚整个引用事务。
+if [ "${1:-}" != "prepared" ]; then
+  exit 0
+fi
+
+zero_sha="0000000000000000000000000000000000000000"
+while read -r old_sha new_sha ref_name; do
+  [ "$new_sha" = "$zero_sha" ] || continue
+  case "$ref_name" in
+    refs/heads/main|refs/heads/develop|refs/heads/release/*)
+      printf 'branch_deletion_prohibited: main、develop 和 release/* 分支不可删除\n' >&2
+      exit 1
+      ;;
+  esac
+done

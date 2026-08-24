@@ -37,6 +37,8 @@ ALLOWED_EXTERNAL_ACTIONS: Final = frozenset(
         "git_push_task_branch",
         "github_pr_create_or_update",
         "github_pr_read",
+        "github_ci_read",
+        "github_artifact_read",
     }
 )
 PROHIBITED_ACTIONS: Final = (
@@ -303,9 +305,7 @@ def parse_json_text(content: str) -> object:
 
 def validate_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
     value = dict(payload)
-    require_exact_keys(
-        value,
-        {
+    required_manifest_keys = {
             "schema_version",
             "protocol",
             "workspace",
@@ -320,10 +320,19 @@ def validate_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
             "pr_endpoint",
             "permitted_external_actions",
             "authorization",
-        },
-        "manifest",
-    )
+    }
+    allowed_manifest_keys = required_manifest_keys | {"process_id"}
+    if not required_manifest_keys <= set(value) or not set(value) <= allowed_manifest_keys:
+        invalid(
+            "manifest",
+            "字段不闭合；"
+            f"missing={sorted(required_manifest_keys - set(value))}, "
+            f"extra={sorted(set(value) - allowed_manifest_keys)}",
+        )
     require_protocol(value, "manifest")
+    process_id = value.get("process_id", "development_change_v1")
+    if process_id not in {"development_change_v1", "development_change_v2"}:
+        invalid("process_id", "必须是 development_change_v1 或 development_change_v2")
     workspace = require_mapping(value["workspace"], "workspace")
     require_exact_keys(workspace, {"root"}, "workspace")
     require_absolute_path(workspace["root"], "workspace.root")
@@ -531,11 +540,13 @@ def validate_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
             invalid(f"verification[{index}].timeout_seconds", "必须是 1..3600 秒整数")
 
     endpoint = require_mapping(value["pr_endpoint"], "pr_endpoint")
-    require_exact_keys(
-        endpoint,
-        {"provider", "repository_slug", "target_branch", "ci_policy"},
-        "pr_endpoint",
+    endpoint_keys = {"provider", "repository_slug", "target_branch", "ci_policy"}
+    expected_endpoint_keys = (
+        endpoint_keys | {"ci"}
+        if process_id == "development_change_v2"
+        else endpoint_keys
     )
+    require_exact_keys(endpoint, expected_endpoint_keys, "pr_endpoint")
     if endpoint["provider"] != "github":
         invalid("pr_endpoint.provider", "当前协议只接受 github")
     require_repository_slug(endpoint["repository_slug"], "pr_endpoint.repository_slug")
@@ -544,8 +555,20 @@ def validate_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
         invalid("pr_endpoint.repository_slug", "必须与 repository.slug 一致")
     if endpoint["target_branch"] != repository["target_branch"]:
         invalid("pr_endpoint.target_branch", "必须与 repository.target_branch 一致")
-    if endpoint["ci_policy"] not in {"require_passed", "allow_pending", "not_required"}:
+    if endpoint["ci_policy"] not in {
+        "require_passed",
+        "allow_pending",
+        "not_required",
+        "detect_from_github_pr",
+    }:
         invalid("pr_endpoint.ci_policy", "不是受支持的 CI 策略")
+    if process_id == "development_change_v2":
+        if endpoint["ci_policy"] != "detect_from_github_pr":
+            invalid(
+                "pr_endpoint.ci_policy",
+                "development_change_v2 必须由 GitHub PR 自动判定是否需要 CI",
+            )
+        validate_ci_config(endpoint["ci"])
 
     permissions = require_string_list(
         value["permitted_external_actions"],
@@ -554,6 +577,14 @@ def validate_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
     )
     if len(set(permissions)) != len(permissions) or not set(permissions) <= ALLOWED_EXTERNAL_ACTIONS:
         invalid("permitted_external_actions", "包含重复或未知的外部动作")
+    if process_id == "development_change_v2" and not {
+        "github_ci_read",
+        "github_artifact_read",
+    } <= set(permissions):
+        invalid(
+            "permitted_external_actions",
+            "development_change_v2 必须显式允许 github_ci_read 和 github_artifact_read",
+        )
 
     authorization = require_mapping(value["authorization"], "authorization")
     require_exact_keys(
@@ -591,6 +622,89 @@ def validate_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
         )
     reject_sensitive_content(value)
     return value
+
+
+def validate_ci_config(value: object) -> dict[str, Any]:
+    config = require_mapping(value, "pr_endpoint.ci")
+    require_exact_keys(
+        config,
+        {
+            "provider",
+            "start_timeout_seconds",
+            "completion_timeout_seconds",
+            "poll_interval_seconds",
+            "max_remediation_attempts",
+            "required_checks",
+            "workflows",
+            "artifact_name_patterns",
+            "report_parser",
+            "limits",
+            "completion",
+        },
+        "pr_endpoint.ci",
+    )
+    if config["provider"] != "github-actions":
+        invalid("pr_endpoint.ci.provider", "第一阶段只支持 github-actions")
+    if config["report_parser"] != "maven-failsafe-v1":
+        invalid("pr_endpoint.ci.report_parser", "第一阶段只支持 maven-failsafe-v1")
+
+    def integer(field: str, minimum: int, maximum: int) -> int:
+        item = config[field]
+        if isinstance(item, bool) or not isinstance(item, int) or not minimum <= item <= maximum:
+            invalid(f"pr_endpoint.ci.{field}", f"必须是 {minimum}..{maximum} 的整数")
+        return item
+
+    start_timeout = integer("start_timeout_seconds", 1, 3_600)
+    completion_timeout = integer("completion_timeout_seconds", 1, 3_600)
+    if start_timeout != 300:
+        invalid("pr_endpoint.ci.start_timeout_seconds", "必须固定为 300 秒")
+    if completion_timeout != 600:
+        invalid("pr_endpoint.ci.completion_timeout_seconds", "必须固定为 600 秒")
+    poll = integer("poll_interval_seconds", 1, 300)
+    if poll > min(start_timeout, completion_timeout):
+        invalid("pr_endpoint.ci.poll_interval_seconds", "不能超过两个 CI timeout")
+    integer("max_remediation_attempts", 1, 3)
+    for field in ("required_checks", "workflows", "artifact_name_patterns"):
+        items = require_string_list(config[field], f"pr_endpoint.ci.{field}", nonempty=True)
+        if len(items) != len(set(items)):
+            invalid(f"pr_endpoint.ci.{field}", "不能包含重复项")
+    limits = require_mapping(config["limits"], "pr_endpoint.ci.limits")
+    require_exact_keys(
+        limits,
+        {
+            "max_archive_bytes",
+            "max_extracted_bytes",
+            "max_file_bytes",
+            "max_files",
+            "max_depth",
+        },
+        "pr_endpoint.ci.limits",
+    )
+
+    def limit(field: str, minimum: int, maximum: int) -> int:
+        item = limits[field]
+        if isinstance(item, bool) or not isinstance(item, int) or not minimum <= item <= maximum:
+            invalid(f"pr_endpoint.ci.limits.{field}", f"必须是 {minimum}..{maximum} 的整数")
+        return item
+
+    archive = limit("max_archive_bytes", 1_024, 524_288_000)
+    extracted = limit("max_extracted_bytes", 1_024, 1_073_741_824)
+    per_file = limit("max_file_bytes", 1_024, 1_073_741_824)
+    limit("max_files", 1, 20_000)
+    limit("max_depth", 1, 100)
+    if archive > extracted or per_file > extracted:
+        invalid("pr_endpoint.ci.limits", "archive 和单文件上限不能超过展开总量上限")
+    completion = require_mapping(config["completion"], "pr_endpoint.ci.completion")
+    require_exact_keys(
+        completion,
+        {"finish_agent_run_on_pass", "transition_jira_done"},
+        "pr_endpoint.ci.completion",
+    )
+    if completion["finish_agent_run_on_pass"] is not True:
+        invalid("pr_endpoint.ci.completion.finish_agent_run_on_pass", "v2 必须在通过后结束运行")
+    if not isinstance(completion["transition_jira_done"], bool):
+        invalid("pr_endpoint.ci.completion.transition_jira_done", "必须是布尔值")
+    return config
 
 
 def validate_event(payload: Mapping[str, Any]) -> dict[str, Any]:
