@@ -172,6 +172,12 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 初始化生成的业务工作空间 `AGENTS.md` 固定进入 developer 工作面，不得引用根 `AGENTS.md` 或 `maintainer/`。developer 安装的 `user/identity.yaml` 与 `user/.env` 保存研发员身份和 Jira 凭据；`user/workspace-index.json` 只是可重建冲突索引。新工作空间使用 schema v5，只持 `install_identity_ref`、本地入口绑定和项目事实；schema v4 及更早格式与工作空间 `.agentic-ops/.env` 在凭证读取和联网前失败关闭，不扫描 PATH 或提供隐式迁移。
 
+初始化把准入 developer Skill 以普通文件副本写入工作空间 `.agents/skills/<name>/SKILL.md`，不会创建指向安装根的链接。为了让 Claude Code 与 Codex 发现同一套工作空间 Skill，Runtime 另外创建 `.claude/skills/<name> -> ../../.agents/skills/<name>` 相对 symlink 桥接；这是受管工作空间路径中唯一允许的 symlink 叶节点例外，不代表放宽通用路径策略。
+
+通用 `validate_managed_path` 继续拒绝受管根、父目录和普通受管路径中的任意 symlink。Claude bridge 只由专用校验处理，并同时要求：`.claude` 与 `.claude/skills` 是工作空间内普通目录；名称属于当前安装发布的准入 Skill 集；原始链接目标精确等于该名称对应的受管相对路径；解析后的真实目标精确等于同一工作空间 `.agents/skills/<name>` 普通目录。目标漂移、悬空或越界链接、非准入名称、额外文件或目录以及父路径 symlink 全部失败关闭，不读取或修改外部目标。
+
+`workspace init` 的写前预检只允许合法桥接缺失，以便首次初始化或重复初始化补建缺失项；它不得覆盖漂移、越界或污染链接。普通 `workspace preflight` 与初始化写入后的复检要求全部桥接完整且精确匹配。因此合法桥接可幂等复用，缺失桥接可受控修复，异常桥接始终阻断并要求指导员核对。
+
 指定分支验证安装（`developer/bootstrap/install-verify-branch.sh` 远程模式）的 `ao-work` 复用同一套安装身份校验：origin 必须是 `tapstate/agentic-ops`、sparse 精确集与 shared/developer 分发白名单不变，仅把「HEAD 是 `origin/main` 祖先」放宽为「HEAD 可达于任一 `origin/*` 远端分支或 tag」；该放宽只在 `.agentic-ops/verification-only` 标记存在时生效。生产安装 `~/.agentic-ops` 仍固定 `main`，不接受分支覆盖。
 
 ## 14. 项目故事质量门禁
