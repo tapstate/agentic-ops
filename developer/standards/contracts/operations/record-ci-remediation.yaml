@@ -1,0 +1,28 @@
+operation: record_ci_remediation
+workplane: developer
+version: 1
+purpose: 将结构化 CI 失败事件绑定到授权内修复提交、远端 Head 回读和有限预算。
+task_type: ci_remediation
+allowed_stages: [ci_validation]
+required_inputs: [manifest, failure_event_id, commit_sha, new_head_sha, authorization_reference]
+preconditions:
+  - current_failure_report_must_match_failure_event_id
+  - exactly_one_completed_failure_event_must_classify_ci_code_defect_as_retry_safe
+  - git_commit_and_push_must_have_runtime_readback
+  - remediation_budget_must_remain
+output:
+  recorded: {type: boolean}
+  remediation_attempts_used: {type: integer}
+  remediation_attempts_remaining: {type: integer}
+  agentic_next_action: {type: string}
+failure:
+  codes: [ci_remediation_authorization_mismatch, ci_remediation_sha_invalid, ci_remediation_event_conflict, ci_failure_event_mismatch, ci_failure_requires_human, ci_remediation_readback_missing, ci_remediation_readback_mismatch, ci_retry_exhausted]
+side_effects:
+  - write_only_current_task_run_ci_state
+  - must_not_modify_git_or_github
+human_gate:
+  required: false
+retry_policy:
+  retryable: false
+  max_attempts: 0
+  redo_from_stage: ci_validation

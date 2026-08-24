@@ -15,6 +15,8 @@
 
 `ao-maint` 不扫描业务工作空间、不读取业务凭证；`ao-work` 不修改 AgenticOps 源头、不执行故事放行或发布。
 
+`developer/**` 虽归属 developer 运行工作面，但它在 AgenticOps 源头仓库中是 maintainer 管理的被维护资源。developer 上报的问题必须在独立 maintainer worktree 修复；业务项目 developer 会话不得修改源头或稳定安装来完成自修。
+
 ## 3. 标准闭环
 
 ```text
