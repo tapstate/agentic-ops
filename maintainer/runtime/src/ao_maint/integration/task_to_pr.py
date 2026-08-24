@@ -539,11 +539,15 @@ def validate_manifest(
         "require_passed",
         "allow_pending",
         "not_required",
+        "detect_from_github_pr",
     }:
         _invalid("pr_endpoint.ci_policy", "不是受支持的 CI 策略")
     if process_id == "development_change_v2":
-        if endpoint["ci_policy"] != "require_passed":
-            _invalid("pr_endpoint.ci_policy", "development_change_v2 必须要求 CI passed")
+        if endpoint["ci_policy"] != "detect_from_github_pr":
+            _invalid(
+                "pr_endpoint.ci_policy",
+                "development_change_v2 必须由 GitHub PR 自动判定是否需要 CI",
+            )
         _validate_ci_config(endpoint["ci"])
 
     permissions = _require_unique_string_list(
@@ -1842,27 +1846,46 @@ def _validate_ci_completion(value: object) -> dict[str, Any]:
     _require_exact_keys(
         completion,
         {
-            "provider", "head_sha", "attempt_id", "ci_status", "started_at",
+            "provider", "head_sha", "attempt_id", "ci_status", "ci_requirement", "started_at",
             "execution_started_at", "finished_at", "start_deadline_at", "completion_deadline_at", "required_checks", "workflow_runs",
             "artifact", "report", "remediations", "remediation_attempts_used",
             "remediation_attempts_remaining",
         },
         "result.facts.ci_completion",
     )
-    if completion["provider"] != "github-actions" or completion["ci_status"] != "passed":
-        _invalid("result.facts.ci_completion", "必须是 github-actions 的 passed 终态")
+    if completion["provider"] != "github-actions" or completion["ci_status"] not in {
+        "passed",
+        "not_required",
+    }:
+        _invalid("result.facts.ci_completion", "必须是 GitHub PR 判定后的 passed 或 not_required 终态")
+    requirement = _validate_ci_requirement(completion["ci_requirement"])
+    if (
+        (completion["ci_status"] == "passed" and requirement["status"] != "required")
+        or (
+            completion["ci_status"] == "not_required"
+            and requirement["status"] != "not_required"
+        )
+    ):
+        _evidence_invalid("CI 终态与 GitHub PR 要求判定不一致")
     if not isinstance(completion["head_sha"], str) or not GIT_SHA_PATTERN.fullmatch(completion["head_sha"]):
         _invalid("result.facts.ci_completion.head_sha", "必须是 Git SHA")
     if re.fullmatch(r"[0-9a-f]{24}", _require_string(completion["attempt_id"], "result.facts.ci_completion.attempt_id")) is None:
         _invalid("result.facts.ci_completion.attempt_id", "必须是 24 位小写十六进制")
-    for field in (
-        "started_at", "execution_started_at", "finished_at",
-        "start_deadline_at", "completion_deadline_at",
-    ):
+    for field in ("started_at", "finished_at"):
         _require_timestamp(completion[field], f"result.facts.ci_completion.{field}")
+    timed_fields = ("execution_started_at", "start_deadline_at", "completion_deadline_at")
+    if completion["ci_status"] == "passed":
+        for field in timed_fields:
+            _require_timestamp(completion[field], f"result.facts.ci_completion.{field}")
+    elif any(completion[field] is not None for field in timed_fields):
+        _evidence_invalid("无需 CI 的完成证据不得包含执行或截止时间")
     checks = completion["required_checks"]
-    if not isinstance(checks, list) or not checks:
-        _invalid("result.facts.ci_completion.required_checks", "必须是非空数组")
+    if not isinstance(checks, list):
+        _invalid("result.facts.ci_completion.required_checks", "必须是数组")
+    if completion["ci_status"] == "passed" and not checks:
+        _invalid("result.facts.ci_completion.required_checks", "CI passed 必须包含非空必需检查")
+    if completion["ci_status"] == "not_required" and checks:
+        _evidence_invalid("无需 CI 的完成证据不得包含必需检查")
     names: list[str] = []
     for index, raw in enumerate(checks):
         item = _require_mapping(raw, f"result.facts.ci_completion.required_checks[{index}]")
@@ -1882,7 +1905,65 @@ def _validate_ci_completion(value: object) -> dict[str, Any]:
         item = completion[field]
         if isinstance(item, bool) or not isinstance(item, int) or not 0 <= item <= 3:
             _invalid(f"result.facts.ci_completion.{field}", "必须是 0..3 的整数")
+    if completion["ci_status"] == "not_required" and (
+        completion["workflow_runs"]
+        or completion["artifact"] is not None
+        or completion["report"] is not None
+        or completion["remediations"]
+        or completion["remediation_attempts_used"] != 0
+    ):
+        _evidence_invalid("无需 CI 的完成证据不得包含运行、报告或修复事实")
     return completion
+
+
+def _validate_ci_requirement(value: object) -> dict[str, Any]:
+    requirement = _require_mapping(value, "result.facts.ci_completion.ci_requirement")
+    _require_exact_keys(
+        requirement,
+        {"status", "source", "base_sha", "reason", "workflow_files"},
+        "result.facts.ci_completion.ci_requirement",
+    )
+    if requirement["status"] not in {"required", "not_required"}:
+        _invalid("result.facts.ci_completion.ci_requirement.status", "不是受支持的判定")
+    if requirement["source"] != "github_pr":
+        _invalid("result.facts.ci_completion.ci_requirement.source", "必须来自 GitHub PR")
+    if not isinstance(requirement["base_sha"], str) or not GIT_SHA_PATTERN.fullmatch(
+        requirement["base_sha"]
+    ):
+        _invalid("result.facts.ci_completion.ci_requirement.base_sha", "必须是 Git SHA")
+    reasons = {
+        "base_has_no_github_actions_workflows",
+        "configured_workflows_trigger_for_pr_head",
+        "configured_workflows_do_not_trigger_for_pr_head",
+    }
+    if requirement["reason"] not in reasons:
+        _invalid("result.facts.ci_completion.ci_requirement.reason", "不是受支持的判定依据")
+    workflows = requirement["workflow_files"]
+    if not isinstance(workflows, list):
+        _invalid("result.facts.ci_completion.ci_requirement.workflow_files", "必须是数组")
+    names: list[str] = []
+    for index, raw in enumerate(workflows):
+        label = f"result.facts.ci_completion.ci_requirement.workflow_files[{index}]"
+        item = _require_mapping(raw, label)
+        _require_exact_keys(
+            item,
+            {"path", "blob_sha", "name", "triggers", "head_trigger"},
+            label,
+        )
+        path = _require_string(item["path"], f"{label}.path")
+        if re.fullmatch(r"\.github/workflows/[^/]+\.ya?ml", path) is None:
+            _invalid(f"{label}.path", "必须是 GitHub Workflow 路径")
+        if not isinstance(item["blob_sha"], str) or not GIT_SHA_PATTERN.fullmatch(
+            item["blob_sha"]
+        ):
+            _invalid(f"{label}.blob_sha", "必须是 Git SHA")
+        names.append(_require_string(item["name"], f"{label}.name"))
+        _require_unique_string_list(item["triggers"], f"{label}.triggers", nonempty=True)
+        if not isinstance(item["head_trigger"], bool):
+            _invalid(f"{label}.head_trigger", "必须是布尔值")
+    if len(names) != len(set(names)):
+        _invalid("result.facts.ci_completion.ci_requirement.workflow_files", "Workflow 名必须唯一")
+    return requirement
 
 
 def _validate_envelope(
@@ -2841,10 +2922,11 @@ def _validate_result_outcome(
                 _evidence_invalid("development_change_v2 缺少 CI 完成证据")
             if ci_completion["head_sha"] != pr["head_sha"]:
                 _evidence_invalid("CI 完成证据未绑定最终 PR Head")
-            expected_checks = manifest["pr_endpoint"]["ci"]["required_checks"]
-            observed_checks = [item["name"] for item in ci_completion["required_checks"]]
-            if observed_checks != expected_checks:
-                _evidence_invalid("CI 完成证据未按 Profile 顺序完整覆盖必需检查")
+            if ci_completion["ci_status"] == "passed":
+                expected_checks = manifest["pr_endpoint"]["ci"]["required_checks"]
+                observed_checks = [item["name"] for item in ci_completion["required_checks"]]
+                if observed_checks != expected_checks:
+                    _evidence_invalid("CI 完成证据未按 Profile 顺序完整覆盖必需检查")
             maximum = manifest["pr_endpoint"]["ci"]["max_remediation_attempts"]
             if (
                 ci_completion["remediation_attempts_used"]

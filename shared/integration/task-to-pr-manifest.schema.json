@@ -11,7 +11,7 @@
         "properties": {
           "pr_endpoint": {
             "required": ["ci"],
-            "properties": { "ci_policy": { "const": "require_passed" } }
+            "properties": { "ci_policy": { "const": "detect_from_github_pr" } }
           }
         }
       },
@@ -325,7 +325,7 @@
         },
         "target_branch": { "$ref": "#/$defs/branch_name" },
         "ci_policy": {
-          "enum": ["require_passed", "allow_pending", "not_required"],
+          "enum": ["require_passed", "allow_pending", "not_required", "detect_from_github_pr"],
           "default": "require_passed"
         },
         "ci": { "$ref": "#/$defs/ci" }
