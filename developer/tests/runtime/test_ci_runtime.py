@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import io
 import json
 import subprocess
@@ -20,6 +21,8 @@ from ao_work.workspace import Workspace
 
 
 SHA = "a" * 40
+BASE_SHA = "b" * 40
+BLOB_SHA = "c" * 40
 LIMITS = {
     "max_archive_bytes": 1_048_576,
     "max_extracted_bytes": 2_097_152,
@@ -193,6 +196,7 @@ class CiObservationTest(unittest.TestCase):
             "headRefName": "codex/TAP-12620/fix",
             "headRefOid": head_sha,
             "baseRefName": "develop",
+            "baseRefOid": BASE_SHA,
             "statusCheckRollup": [
                 {
                     "name": "integration-test",
@@ -213,7 +217,24 @@ class CiObservationTest(unittest.TestCase):
                 "updatedAt": "2026-08-24T00:01:00Z",
             }
         ]
-        values = iter((self.completed(pr), self.completed(runs)))
+        workflow = "name: Integration Tests\non: [pull_request]\njobs: {}\n"
+        values = iter((
+            self.completed(pr),
+            self.completed({
+                "truncated": False,
+                "tree": [{
+                    "path": ".github/workflows/integration.yml",
+                    "type": "blob",
+                    "sha": BLOB_SHA,
+                }],
+            }),
+            self.completed({
+                "sha": BLOB_SHA,
+                "encoding": "base64",
+                "content": base64.b64encode(workflow.encode()).decode(),
+            }),
+            self.completed(runs),
+        ))
         return CiRuntime(
             self.workspace,
             lock_timeout=1,
@@ -245,7 +266,59 @@ class CiObservationTest(unittest.TestCase):
                 "headRefName": "codex/TAP-12620/fix",
                 "headRefOid": SHA,
                 "baseRefName": "develop",
+                "baseRefOid": BASE_SHA,
                 "statusCheckRollup": [],
+                }),
+                self.completed({"truncated": False, "tree": []}),
+            )
+        )
+        return CiRuntime(
+            self.workspace,
+            lock_timeout=1,
+            run_text=lambda _argv, _cwd, _timeout: next(responses),
+            run_bytes=lambda _argv, _cwd, _timeout, _maximum: subprocess.CompletedProcess([], 0, b"", b""),
+            now=lambda: now,
+        )
+
+    def configured_ci_runtime(
+        self,
+        now: datetime,
+        *,
+        workflow_name: str = "Integration Tests",
+        trigger: str = "pull_request",
+        conditional_trigger: bool = False,
+    ) -> CiRuntime:
+        workflow = (
+            f"name: {workflow_name}\non:\n  {trigger}:\n    paths: [src/**]\njobs: {{}}\n"
+            if conditional_trigger
+            else f"name: {workflow_name}\non: [{trigger}]\njobs: {{}}\n"
+        )
+        responses = iter(
+            (
+                self.completed({
+                    "number": 7,
+                    "url": "https://github.com/tapdata/tapdata/pull/7",
+                    "state": "OPEN",
+                    "isDraft": False,
+                    "mergedAt": None,
+                    "headRefName": "codex/TAP-12620/fix",
+                    "headRefOid": SHA,
+                    "baseRefName": "develop",
+                    "baseRefOid": BASE_SHA,
+                    "statusCheckRollup": [],
+                }),
+                self.completed({
+                    "truncated": False,
+                    "tree": [{
+                        "path": ".github/workflows/integration.yml",
+                        "type": "blob",
+                        "sha": BLOB_SHA,
+                    }],
+                }),
+                self.completed({
+                    "sha": BLOB_SHA,
+                    "encoding": "base64",
+                    "content": base64.b64encode(workflow.encode()).decode(),
                 }),
                 self.completed([]),
             )
@@ -258,16 +331,56 @@ class CiObservationTest(unittest.TestCase):
             now=lambda: now,
         )
 
-    def test_ci_must_start_within_five_minutes(self) -> None:
+    def test_github_pr_without_workflows_skips_ci(self) -> None:
         observed = self.no_ci_runtime(
+            datetime(2026, 8, 24, tzinfo=timezone.utc)
+        ).probe(self.manifest)
+        self.assertEqual("not_required", observed["ci_status"])
+        self.assertEqual("completed", observed["current_stage"])
+        self.assertEqual("base_has_no_github_actions_workflows", observed["ci_requirement"]["reason"])
+        evidence = self.no_ci_runtime(
+            datetime(2026, 8, 24, 0, 5, 1, tzinfo=timezone.utc)
+        ).validate_completion(self.manifest, SHA)
+        self.assertEqual("not_required", evidence["ci_status"])
+        self.assertIsNone(evidence["start_deadline_at"])
+
+    def test_configured_ci_must_start_within_five_minutes(self) -> None:
+        observed = self.configured_ci_runtime(
             datetime(2026, 8, 24, tzinfo=timezone.utc)
         ).probe(self.manifest)
         self.assertEqual("waiting_to_start", observed["ci_status"])
         with self.assertRaises(RuntimeErrorResult) as captured:
-            self.no_ci_runtime(
+            self.configured_ci_runtime(
                 datetime(2026, 8, 24, 0, 5, 1, tzinfo=timezone.utc)
             ).probe(self.manifest)
         self.assertEqual("ci_start_timeout", captured.exception.code)
+
+    def test_manual_only_workflow_does_not_require_ci(self) -> None:
+        observed = self.configured_ci_runtime(
+            datetime(2026, 8, 24, tzinfo=timezone.utc),
+            trigger="workflow_dispatch",
+        ).probe(self.manifest)
+        self.assertEqual("not_required", observed["ci_status"])
+        self.assertEqual(
+            "configured_workflows_do_not_trigger_for_pr_head",
+            observed["ci_requirement"]["reason"],
+        )
+
+    def test_workflow_mapping_drift_requires_human(self) -> None:
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            self.configured_ci_runtime(
+                datetime(2026, 8, 24, tzinfo=timezone.utc),
+                workflow_name="Other Workflow",
+            ).probe(self.manifest)
+        self.assertEqual("ci_requirement_unknown", captured.exception.code)
+
+    def test_conditional_workflow_trigger_requires_human(self) -> None:
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            self.configured_ci_runtime(
+                datetime(2026, 8, 24, tzinfo=timezone.utc),
+                conditional_trigger=True,
+            ).probe(self.manifest)
+        self.assertEqual("ci_requirement_unknown", captured.exception.code)
 
     def test_running_ci_must_finish_within_ten_minutes(self) -> None:
         first = self.runtime("", now=datetime(2026, 8, 24, tzinfo=timezone.utc))

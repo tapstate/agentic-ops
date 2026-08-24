@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import fnmatch
 import hashlib
 import io
@@ -17,13 +18,15 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
 from xml.etree import ElementTree
 
+import yaml
+
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_run.protocol import SHA_PATTERN, digest, reject_sensitive_content
 from ao_work.task_state.io import append_ndjson, atomic_write_json, atomic_write_text, read_json
 from ao_work.task_state.locking import TaskLock
 from ao_work.workspace import Workspace
 
-CI_PROTOCOL = "ci_validation_v1"
+CI_PROTOCOL = "ci_validation_v2"
 TextRunner = Callable[[list[str], Path, int | float], subprocess.CompletedProcess[str]]
 BytesRunner = Callable[[list[str], Path, int | float, int], subprocess.CompletedProcess[bytes]]
 Now = Callable[[], datetime]
@@ -48,6 +51,7 @@ _REDACTIONS = (
 )
 _RETRYABLE_CODES = {
     "ci_observation_failed",
+    "ci_requirement_observation_failed",
     "ci_artifact_read_failed",
     "ci_artifact_download_failed",
 }
@@ -94,7 +98,7 @@ class CiRuntime:
                 "--repo",
                 repository["slug"],
                 "--json",
-                "number,url,state,isDraft,mergedAt,headRefName,headRefOid,baseRefName,statusCheckRollup",
+                "number,url,state,isDraft,mergedAt,headRefName,headRefOid,baseRefName,baseRefOid,statusCheckRollup",
             ],
             root,
             60,
@@ -107,6 +111,7 @@ class CiRuntime:
             )
         payload = self._json(pr_result.stdout, "GitHub PR/CI")
         head_sha = payload.get("headRefOid")
+        base_sha = payload.get("baseRefOid")
         if (
             payload.get("state") != "OPEN"
             or payload.get("isDraft") is True
@@ -115,6 +120,8 @@ class CiRuntime:
             or payload.get("baseRefName") != repository["target_branch"]
             or not isinstance(head_sha, str)
             or not SHA_PATTERN.fullmatch(head_sha)
+            or not isinstance(base_sha, str)
+            or not SHA_PATTERN.fullmatch(base_sha)
         ):
             raise blocked(
                 "ci_pr_binding_mismatch",
@@ -124,7 +131,14 @@ class CiRuntime:
         checks, missing_checks = self._required_checks(
             payload.get("statusCheckRollup"), config
         )
-        workflow_runs = self._workflow_runs(manifest, config, head_sha, root)
+        requirement = self._github_pr_ci_requirement(
+            manifest, config, base_sha, root
+        )
+        workflow_runs = (
+            self._workflow_runs(manifest, config, head_sha, root)
+            if requirement["status"] == "required"
+            else []
+        )
         execution_observed = bool(checks or workflow_runs)
         now = self._utc_now()
         paths = self._paths(manifest)
@@ -153,11 +167,14 @@ class CiRuntime:
                     "started_at": started.isoformat(),
                     "start_deadline_at": (
                         started + timedelta(seconds=config["start_timeout_seconds"])
-                    ).isoformat(),
+                    ).isoformat()
+                    if requirement["status"] == "required"
+                    else None,
                     "execution_started_at": None,
                     "completion_deadline_at": None,
                     "last_observed_at": now.isoformat(),
                     "ci_status": "waiting_to_start",
+                    "ci_requirement": requirement,
                     "required_checks": [],
                     "missing_required_checks": list(config["required_checks"]),
                     "workflow_runs": workflow_runs,
@@ -166,13 +183,25 @@ class CiRuntime:
                     "report": None,
                 }
                 attempts[head_sha] = attempt
-            if attempt["execution_started_at"] is None and execution_observed:
+            elif attempt.get("ci_requirement") != requirement:
+                raise blocked(
+                    "ci_requirement_changed",
+                    "同一 PR Base 与 Head 的 GitHub CI 要求事实发生变化",
+                    "请停止自动化并人工核对 PR、Base 提交与 Workflow 配置",
+                )
+            if (
+                requirement["status"] == "required"
+                and attempt["execution_started_at"] is None
+                and execution_observed
+            ):
                 attempt["execution_started_at"] = now.isoformat()
                 attempt["completion_deadline_at"] = (
                     now + timedelta(seconds=config["completion_timeout_seconds"])
                 ).isoformat()
             execution_started = attempt["execution_started_at"] is not None
-            if not execution_started:
+            if requirement["status"] == "not_required":
+                ci_status = "not_required"
+            elif not execution_started:
                 ci_status = "waiting_to_start"
             elif missing_checks:
                 ci_status = "pending"
@@ -208,6 +237,7 @@ class CiRuntime:
             self._write_observation(paths, state, attempt, now)
             if (
                 ci_status == "waiting_to_start"
+                and attempt["start_deadline_at"] is not None
                 and now >= self._timestamp(attempt["start_deadline_at"])
             ):
                 raise blocked(
@@ -230,10 +260,16 @@ class CiRuntime:
                 "pending": "probe_ci",
                 "failed": "fetch_ci_artifact",
                 "passed": "none",
+                "not_required": "none",
             }[ci_status]
             return {
-                "current_stage": "completed" if ci_status == "passed" else "ci_validation",
+                "current_stage": (
+                    "completed"
+                    if ci_status in {"passed", "not_required"}
+                    else "ci_validation"
+                ),
                 "ci_status": ci_status,
+                "ci_requirement": requirement,
                 "head_sha": head_sha,
                 "pr_number": payload["number"],
                 "pr_url": payload["url"],
@@ -560,24 +596,38 @@ class CiRuntime:
         state = self._state(self._paths(manifest), manifest)
         attempt = self._current_attempt(state)
         checks = attempt.get("required_checks")
+        requirement = attempt.get("ci_requirement")
+        ci_status = attempt.get("ci_status")
+        passed = (
+            ci_status == "passed"
+            and isinstance(checks, list)
+            and bool(checks)
+            and all(item.get("conclusion") == "SUCCESS" for item in checks)
+            and isinstance(requirement, dict)
+            and requirement.get("status") == "required"
+        )
+        not_required = (
+            ci_status == "not_required"
+            and checks == []
+            and isinstance(requirement, dict)
+            and requirement.get("status") == "not_required"
+        )
         if (
             state.get("current_head_sha") != expected_head_sha
             or attempt.get("head_sha") != expected_head_sha
-            or attempt.get("ci_status") != "passed"
-            or not isinstance(checks, list)
-            or not checks
-            or any(item.get("conclusion") != "SUCCESS" for item in checks)
+            or not (passed or not_required)
         ):
             raise blocked(
                 "ci_completion_not_verified",
-                "development_change_v2 尚无绑定最终 PR Head 的严格 CI 通过证据",
-                "请对最终 Head 执行 task-run probe-ci，只有全部必需检查 SUCCESS 才能结束运行",
+                "development_change_v2 尚无绑定最终 PR Head 的 CI 要求判定或严格通过证据",
+                "请对最终 Head 执行 task-run probe-ci；无需 CI 必须由 GitHub PR/Base Workflow 事实证明，需要 CI 时必须全部必需检查 SUCCESS",
             )
         return {
             "provider": "github-actions",
             "head_sha": expected_head_sha,
             "attempt_id": attempt["attempt_id"],
-            "ci_status": "passed",
+            "ci_status": ci_status,
+            "ci_requirement": requirement,
             "started_at": attempt["started_at"],
             "execution_started_at": attempt["execution_started_at"],
             "finished_at": attempt["last_observed_at"],
@@ -644,7 +694,7 @@ class CiRuntime:
         if paths["state"].exists():
             return self._state(paths, manifest)
         state = {
-            "schema_version": 1,
+            "schema_version": 2,
             "protocol": CI_PROTOCOL,
             "issue_key": manifest["issue"]["key"],
             "agentic_run_id": manifest["agent"]["agentic_run_id"],
@@ -666,7 +716,7 @@ class CiRuntime:
             )
         state = read_json(paths["state"])
         if (
-            state.get("schema_version") != 1
+            state.get("schema_version") != 2
             or state.get("protocol") != CI_PROTOCOL
             or state.get("issue_key") != manifest["issue"]["key"]
             or state.get("agentic_run_id") != manifest["agent"]["agentic_run_id"]
@@ -711,6 +761,7 @@ class CiRuntime:
                 "attempt_id": attempt["attempt_id"],
                 "head_sha": attempt["head_sha"],
                 "ci_status": attempt["ci_status"],
+                "ci_requirement": attempt["ci_requirement"],
                 "required_checks": attempt["required_checks"],
                 "workflow_run_ids": [run["database_id"] for run in attempt["workflow_runs"]],
             },
@@ -780,6 +831,191 @@ class CiRuntime:
                 }
             )
         return sorted(selected, key=lambda item: item["database_id"])
+
+    def _github_pr_ci_requirement(
+        self,
+        manifest: Mapping[str, Any],
+        config: Mapping[str, Any],
+        base_sha: str,
+        root: Path,
+    ) -> dict[str, Any]:
+        repository = manifest["repository"]
+        tree_result = self.run_text(
+            [
+                "gh",
+                "api",
+                f"repos/{repository['slug']}/git/trees/{base_sha}?recursive=1",
+            ],
+            root,
+            60,
+        )
+        if tree_result.returncode != 0:
+            raise blocked(
+                "ci_requirement_observation_failed",
+                "无法从 GitHub 读取 PR Base 提交的 Workflow 树",
+                "请检查 GitHub 授权和服务状态；CI 要求未知时不得跳过验证",
+            )
+        tree_payload = self._json(tree_result.stdout, "GitHub PR Base Workflow 树")
+        if tree_payload.get("truncated") is True or not isinstance(tree_payload.get("tree"), list):
+            raise blocked(
+                "ci_requirement_unknown",
+                "GitHub PR Base Workflow 树不完整",
+                "请人工核对 PR Base 上的 GitHub Actions Workflow，不能把未知状态当作无需 CI",
+            )
+        workflow_blobs: list[tuple[str, str]] = []
+        for item in tree_payload["tree"]:
+            if not isinstance(item, dict):
+                continue
+            path = item.get("path")
+            blob_sha = item.get("sha")
+            if not isinstance(path, str) or re.fullmatch(
+                r"\.github/workflows/[^/]+\.ya?ml", path
+            ) is None:
+                continue
+            if (
+                item.get("type") != "blob"
+                or not isinstance(blob_sha, str)
+                or SHA_PATTERN.fullmatch(blob_sha) is None
+            ):
+                raise blocked(
+                    "ci_requirement_unknown",
+                    f"GitHub Workflow 树节点无效：{path}",
+                    "请停止自动判定并人工核对 GitHub 返回事实",
+                )
+            workflow_blobs.append((path, blob_sha))
+        workflow_blobs.sort()
+        if not workflow_blobs:
+            return {
+                "status": "not_required",
+                "source": "github_pr",
+                "base_sha": base_sha,
+                "reason": "base_has_no_github_actions_workflows",
+                "workflow_files": [],
+            }
+        if len(workflow_blobs) > 100:
+            raise blocked(
+                "ci_requirement_unknown",
+                "PR Base 的 Workflow 文件数量超过自动判定上限",
+                "请人工核对 CI 要求并由维护者评估是否调整版本化上限",
+            )
+        workflow_files = [
+            self._github_workflow_blob(repository["slug"], path, blob_sha, root)
+            for path, blob_sha in workflow_blobs
+        ]
+        expected = set(config["workflows"])
+        matched = [item for item in workflow_files if item["name"] in expected]
+        matched_names = {item["name"] for item in matched}
+        if matched_names != expected or len(matched) != len(expected):
+            raise blocked(
+                "ci_requirement_unknown",
+                "GitHub PR Base 的 Workflow 与已确认 CI 配置不能精确匹配",
+                "请更新 Project Profile/manifest 或人工确认项目 CI 规则；不得静默跳过",
+            )
+        if any(item["conditional_head_trigger"] for item in matched):
+            raise blocked(
+                "ci_requirement_unknown",
+                "已配置 Workflow 的 PR/Head 触发器包含条件，当前版本不能等价执行 GitHub 过滤语义",
+                "请人工核对 PR changed files、目标分支与 Workflow paths/branches 条件",
+            )
+        applicable = [item for item in matched if item["head_trigger"]]
+        if applicable and len(applicable) != len(matched):
+            raise blocked(
+                "ci_requirement_unknown",
+                "已配置 Workflow 对当前 PR Head 的触发语义不一致",
+                "请拆分或收紧 CI Workflow 配置后重新确认",
+            )
+        public_matched = [
+            {key: value for key, value in item.items() if key != "conditional_head_trigger"}
+            for item in matched
+        ]
+        return {
+            "status": "required" if applicable else "not_required",
+            "source": "github_pr",
+            "base_sha": base_sha,
+            "reason": (
+                "configured_workflows_trigger_for_pr_head"
+                if applicable
+                else "configured_workflows_do_not_trigger_for_pr_head"
+            ),
+            "workflow_files": public_matched,
+        }
+
+    def _github_workflow_blob(
+        self, repository_slug: str, path: str, blob_sha: str, root: Path
+    ) -> dict[str, Any]:
+        result = self.run_text(
+            ["gh", "api", f"repos/{repository_slug}/git/blobs/{blob_sha}"],
+            root,
+            60,
+        )
+        if result.returncode != 0:
+            raise blocked(
+                "ci_requirement_observation_failed",
+                f"无法从 GitHub 读取 PR Base Workflow：{path}",
+                "请检查 GitHub 授权和服务状态；CI 要求未知时不得跳过验证",
+            )
+        payload = self._json(result.stdout, f"GitHub Workflow {path}")
+        if payload.get("sha") != blob_sha or payload.get("encoding") != "base64":
+            raise blocked(
+                "ci_requirement_unknown",
+                f"GitHub Workflow 内容未绑定预期 Blob：{path}",
+                "请停止自动判定并人工核对 GitHub 返回事实",
+            )
+        encoded = payload.get("content")
+        if not isinstance(encoded, str) or len(encoded) > 1_400_000:
+            raise blocked(
+                "ci_requirement_unknown",
+                f"GitHub Workflow 缺少内容或超过 1 MiB 判定上限：{path}",
+                "请停止自动判定并人工核对 GitHub 返回事实",
+            )
+        try:
+            content = base64.b64decode("".join(encoded.split()), validate=True)
+            text = content.decode("utf-8")
+            document = yaml.load(text, Loader=yaml.BaseLoader)
+        except (ValueError, UnicodeDecodeError, yaml.YAMLError) as error:
+            raise blocked(
+                "ci_requirement_unknown",
+                f"GitHub Workflow 不是可判定的 UTF-8 YAML：{path}",
+                "请修复 Workflow 格式或人工确认 CI 要求",
+            ) from error
+        if not isinstance(document, dict):
+            raise blocked(
+                "ci_requirement_unknown",
+                f"GitHub Workflow 顶层不是对象：{path}",
+                "请修复 Workflow 格式或人工确认 CI 要求",
+            )
+        name = document.get("name")
+        trigger = document.get("on")
+        if not isinstance(name, str) or not name.strip():
+            name = Path(path).name
+        events: set[str] = set()
+        conditional_head_trigger = False
+        if isinstance(trigger, str):
+            events.add(trigger)
+        elif isinstance(trigger, list):
+            events.update(item for item in trigger if isinstance(item, str))
+        elif isinstance(trigger, dict):
+            events.update(str(item) for item in trigger)
+            conditional_head_trigger = any(
+                event in {"pull_request", "push"}
+                and settings not in (None, "", {})
+                for event, settings in trigger.items()
+            )
+        else:
+            raise blocked(
+                "ci_requirement_unknown",
+                f"GitHub Workflow 缺少可判定的 on 触发器：{path}",
+                "请修复 Workflow 触发配置或人工确认 CI 要求",
+            )
+        normalized_events = sorted(item.strip() for item in events if item.strip())
+        return {
+            "path": path,
+            "blob_sha": blob_sha,
+            "name": name.strip(),
+            "triggers": normalized_events,
+            "head_trigger": bool({"pull_request", "push"}.intersection(normalized_events)),
+            "conditional_head_trigger": conditional_head_trigger,
+        }
 
     @staticmethod
     def _required_checks(

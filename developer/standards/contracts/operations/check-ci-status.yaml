@@ -1,7 +1,7 @@
 operation: check_ci_status
 workplane: developer
-version: 2
-purpose: 对当前 PR Head 严格核对 Project Profile 声明的 GitHub Actions 必需检查，并维护固定截止时间与有限修复预算。
+version: 3
+purpose: 先依据 GitHub PR Base 的 Workflow 事实自动判定是否需要 CI；需要时严格核对 Project Profile 声明的必需检查，并维护固定截止时间与有限修复预算。
 task_type: ci_check
 allowed_stages:
   - ci_validation
@@ -16,6 +16,8 @@ preconditions:
   - manifest_ci_must_equal_current_project_profile
   - github_ci_read_must_be_explicitly_authorized
 output:
+  ci_requirement:
+    type: object
   ci_status:
     type: string
   head_sha:
@@ -29,7 +31,7 @@ output:
   attempt_id:
     type: string
   start_deadline_at:
-    type: string
+    type: [string, "null"]
   execution_started_at:
     type: [string, "null"]
   completion_deadline_at:
@@ -49,6 +51,9 @@ failure:
     - ci_process_not_enabled
     - ci_profile_binding_mismatch
     - ci_pr_binding_mismatch
+    - ci_requirement_observation_failed
+    - ci_requirement_unknown
+    - ci_requirement_changed
     - ci_required_check_missing
     - ci_required_check_duplicate
     - ci_status_unknown

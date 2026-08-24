@@ -335,12 +335,14 @@ stories:
       - developer/standards/capabilities/operations.yaml
       - developer/standards/stages/stages.yaml
       - shared/integration/task-to-pr-manifest.schema.json
+      - shared/integration/task-to-pr-result.schema.json
       - maintainer/runtime/src/ao_maint/integration/task_to_pr.py
+      - maintainer/tests/runtime/test_ci_completion_contract.py
     acceptance_checks:
       - python_runtime
       - resource_contracts
       - story_registry
     evidence_requirements:
-      - 最终 PR Head、必需检查严格 SUCCESS、固定截止时间和恢复状态证据
+      - 最终 PR Head/Base、GitHub Workflow 自动判定、必需检查严格 SUCCESS、固定截止时间和恢复状态证据
       - Artifact 安全、Failsafe 脱敏解析、三次修复预算和幂等测试
       - v1 兼容、v2 取消内置代码审查及禁止合并/Jira Done/发布的边界证据

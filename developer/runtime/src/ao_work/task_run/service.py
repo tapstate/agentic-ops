@@ -2112,7 +2112,7 @@ class TaskRunProtocol:
         ):
             raise blocked(
                 "ci_completion_next_action_invalid",
-                "development_change_v2 的 CI 通过终态必须使用 next_action=none",
+                "development_change_v2 的 CI 通过或明确无需 CI 终态必须使用 next_action=none",
                 "请不要重新引入 developer 内置代码审查或其它未授权动作",
             )
         paths = self._paths(manifest)
