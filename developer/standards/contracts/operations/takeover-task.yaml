@@ -1,6 +1,6 @@
 operation: takeover_task
 workplane: developer
-version: 6
+version: 7
 purpose: 研发工程师明确要求接管任务后，由 Runtime 自动完成新接管、接纳存量或恢复留痕。
 task_type: task_takeover
 allowed_stages:
@@ -23,6 +23,9 @@ preconditions:
   - jira_status_and_transition_must_be_strictly_mapped
   - workspace_agent_identity_must_be_available
   - local_run_and_managed_comment_must_not_conflict
+  - source_root_must_be_configured_pool_or_exact_independent_checkout
+  - target_repository_must_resolve_to_profile_domain_in_pool_mode
+  - all_domain_pool_members_and_remote_branches_must_validate_before_worktree_creation
 selection_output:
   takeover_status:
     const: selection_required
@@ -99,6 +102,7 @@ output:
     required_fields:
       - context_digest
       - source_context_path
+    note: 池模式只把目标仓库任务工作树绑定为 source_root；领域内其它工作树不作为顶层逐仓证据输出。
   jira_status_before:
     type: string
   jira_status_after:
@@ -120,6 +124,12 @@ output:
       - stop_workflow
       - ownership_effect
       - retry_gate
+source_preparation_postconditions:
+  - pool_mode_source_root_must_equal_target_repository_worktree
+  - target_worktree_must_match_ref_resolved_after_remote_refresh
+  - per_worktree_git_identity_must_match_install_identity
+  - legacy_task_worktree_layout_must_fail_closed_without_migration
+  - current_output_does_not_claim_per_repository_alignment_evidence
 post_takeover_analysis:
   required_before_implementation:
     - task_class
@@ -158,12 +168,36 @@ failure:
     - takeover_state_identity_mismatch
     - missing_permission
     - workflow_transition_not_allowed
+    - task_source_root_missing
+    - task_source_repository_mismatch
+    - target_repository_unknown
+    - task_domain_unresolved
+    - target_repository_not_mounted
+    - task_baseline_unresolved
+    - task_target_branch_invalid
+    - task_target_branch_validation_failed
+    - branch_derivation_failed
+    - branch_alignment_tool_missing
+    - branch_alignment_failed
+    - source_pool_fetch_failed
+    - worktree_legacy_layout_detected
+    - worktree_invalid
+    - worktree_baseline_mismatch
+    - worktree_add_failed
+    - worktree_path_invalid
+    - task_lock_path_invalid
+    - task_lock_timeout
 side_effects:
   - may_write_jira_comment
   - may_transition_jira_status
   - may_create_or_reuse_takeover_record
   - may_write_local_event
   - may_write_local_source_context
+  - may_fetch_existing_domain_pool_members
+  - may_create_or_reuse_task_worktrees
+  - may_write_per_worktree_git_identity
+  - may_attempt_best_effort_removal_of_worktrees_created_by_failed_attempt
+  - must_not_clone_missing_pool_member_during_takeover
   - must_not_modify_code
   - must_not_create_pr
 human_gate:
