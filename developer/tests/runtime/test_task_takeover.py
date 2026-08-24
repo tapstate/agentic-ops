@@ -364,14 +364,18 @@ class TaskTakeoverTest(unittest.TestCase):
         self.assertEqual("正在进行", payload["jira_status_target"])
         self.assertTrue(payload["state_consistent"])
         self.assertTrue(payload["agentic_takeover_at"])
-        self.assertRegex(
-            payload["intake_source"]["context_digest"], r"^[0-9a-f]{64}$"
-        )
-        self.assertTrue(
-            Path(payload["intake_source"]["source_context_path"]).is_file()
+        self.assertIsNone(payload["intake_source"])
+        self.assertFalse(
+            (
+                Path(self.workspace)
+                / ".agentic-ops/tasks/TAP-12289/runs"
+                / payload["agentic_run_id"]
+                / "intake/source-context.json"
+            ).exists()
         )
         self.assertEqual(
-            "assess_task_intake", payload["agentic_next_action"]["action"]
+            "assess_repository_branch_mapping",
+            payload["agentic_next_action"]["action"],
         )
         self.assertFalse(
             payload["agentic_next_action"]["requires_authorization"]
@@ -856,7 +860,7 @@ class TaskTakeoverTest(unittest.TestCase):
     def test_jira_success_local_failure_recovers_without_external_rewrite(self) -> None:
         transport = TakeoverTransport()
         with mock.patch(
-            "ao_work.task_takeover.record_current_task_source_context",
+            "ao_work.task_takeover.TaskStore.finalize_takeover",
             side_effect=OSError("simulated local source failure"),
         ):
             code, payload, stderr = self.run_cli(transport)
@@ -890,7 +894,7 @@ class TaskTakeoverTest(unittest.TestCase):
             required_human_action="检查本地状态",
         )
         with mock.patch(
-            "ao_work.task_takeover.record_current_task_source_context",
+            "ao_work.task_takeover.TaskStore.finalize_takeover",
             side_effect=local_error,
         ):
             code, payload, stderr = self.run_cli(transport)

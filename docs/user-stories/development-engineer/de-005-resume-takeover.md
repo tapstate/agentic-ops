@@ -22,13 +22,13 @@ ao-work task resume --issue-key TAP-123
 
 - 已存在接管记录，或存在已经持久化但尚未最终收口的接管意图。
 - `agentic_run_id` 对应的 `issue`、`workspace`、`agent_id`、`task_class`、`process_id` 和任务阶段可验证。
-- 当前 Jira 卡片和项目 profile 能确定负责人、状态和目标仓库。
+- 当前 Jira 卡片和项目 profile 能确定负责人、状态；仓库范围以本地建议表/用户确认表恢复，不从默认仓库重新猜测。
 
 ### 主流程
 
 1. AIAgent 调用 `ao-work task resume` 进行只读恢复诊断。
 2. CLI 通过 `read_takeover_recovery` 联合读取 `sync.json.takeover_operation`、`progress.json` 和同一 `agentic_run_id` 的事件，恢复接管基准、写入阶段和最近业务阶段。
-3. CLI 读取当前 Jira 卡片和当前用户，复核 `Assignee`、状态映射和目标仓库。
+3. CLI 读取当前 Jira 卡片和当前用户，复核 `Assignee`、状态映射，并读取 `repository-scope.json` 中的建议表、确认表、工作树和清理阶段。
 4. CLI 使用操作契约校验操作阶段，并把 Jira 状态映射为 Standard Process Registry 阶段进行校验。
 5. CLI 返回原任务阶段、接管恢复快照和下一步动作，不推进业务阶段；部分完成状态按 `intent_persisted`、`comment_verified`、`status_verified` 或待恢复的本地收口继续。
 6. AIAgent 说明恢复点并连续执行信息分析；只有事实冲突进入风险决策。
@@ -67,7 +67,7 @@ ao-work task resume --issue-key TAP-123
 - `agentic_run_id` 不存在、workspace 不匹配或本地事件不可信时，只返回本地错误，不生成 Jira 评论材料。
 - 当前 `workspace` 与 `agentic_run_id` 不匹配时，拒绝恢复。
 - Jira `Assignee` 已变化时停止恢复；本地运行归属不一致时也不得静默复用。
-- 当前目标仓库与接管时不一致时，停止恢复，不允许同一个 `agentic_run_id` 静默切换仓库。
+- 问题版本或仓库分支确认关系与持久化事实不一致时停止恢复；不能回退默认仓库或分析建议静默改绑。
 - 操作阶段、任务分类、标准流程或 Jira 状态映射不一致时，停止并请求维护对应标准资产。
 - 上次失败原因属于人工确认点时，AIAgent 不能自动继续。
 - 可信任务级阻塞生成 `jira_feedback_file`。允许当前 AIAgent 写入时，经研发工程师确认后按 `jira_comment` 的 plan、apply、readback 协议写入；失去任务所有权时只把材料交给研发工程师或当前负责人。旧 `add_task_comment` 为 `capability_gap`，不得调用。
@@ -75,7 +75,7 @@ ao-work task resume --issue-key TAP-123
 ### 验收标准
 
 - 恢复任务不会创建新的 `agentic_run_id`。
-- 恢复前必须校验 `workspace`、`issue`、负责人、目标仓库、操作阶段和标准流程阶段。
+- 恢复前必须校验 `workspace`、`issue`、负责人、仓库分支确认/工作树阶段、操作阶段和标准流程阶段。
 - AIAgent 能说明从哪个操作阶段、哪个标准流程阶段恢复。
 - 恢复过程继续写入同一个 run 的事件日志。
 - `resume-takeover` 本身不写 Jira。

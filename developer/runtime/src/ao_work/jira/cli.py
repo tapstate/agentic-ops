@@ -22,6 +22,10 @@ from ao_work.jira.service import (
 )
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_state import TaskStore
+from ao_work.task_repository_scope import (
+    collect_actual_change_repositories,
+    validate_repository_summary_content,
+)
 from ao_work.workspace import Workspace
 from ao_work.workspace_security import (
     read_workspace_outbound_file,
@@ -335,6 +339,17 @@ def execute_jira(
                 args.content_file,
                 label="Jira 评论内容文件",
             )
+            actual_repositories: list[dict[str, Any]] | None = None
+            if args.category == "evidence" and store.inspect(args.issue_key).get(
+                "repository_scope"
+            ):
+                actual_repositories = collect_actual_change_repositories(
+                    workspace,
+                    store,
+                    args.issue_key,
+                    agentic_run_id,
+                )
+                validate_repository_summary_content(content, actual_repositories)
             plan = service.plan_comment(
                 args.issue_key,
                 args.idempotency_key,
@@ -343,6 +358,14 @@ def execute_jira(
                 agentic_run_id=agentic_run_id,
                 comment_template_schema=load_comment_template_schema(install_root),
             )
+            if actual_repositories is not None:
+                store.record_actual_change_repositories(
+                    args.issue_key,
+                    agentic_run_id,
+                    actual_repositories,
+                    summary_plan_id=plan.plan_id,
+                    summary_content_sha256=plan.content_sha256,
+                )
         elif args.command == "transition":
             comment = None
             if args.comment_content_file:
@@ -494,6 +517,11 @@ def execute_jira(
             content_sha256=plan.content_sha256,
             evidence=_sync_evidence(result),
         )
+        _record_repository_summary_readback_if_applicable(
+            store,
+            plan,
+            str(result["external_id"]),
+        )
         return {
             "connection_id": context.connection.connection_id,
             "profile_id": context.profile.profile_id,
@@ -578,7 +606,31 @@ def execute_jira(
         content_sha256=plan.content_sha256,
         evidence=_sync_evidence(result),
     )
+    _record_repository_summary_readback_if_applicable(
+        store,
+        plan,
+        str(result["external_id"]),
+    )
     return {**result, "readback": record}
+
+
+def _record_repository_summary_readback_if_applicable(
+    store: TaskStore,
+    plan: WritePlan,
+    external_id: str,
+) -> None:
+    if plan.operation != "jira_comment" or plan.payload.get("category") != "evidence":
+        return
+    scope = store.inspect(plan.issue_key).get("repository_scope")
+    if not isinstance(scope, dict) or scope.get("completion_summary_plan_id") != plan.plan_id:
+        return
+    store.record_repository_summary_readback(
+        plan.issue_key,
+        plan.agentic_run_id,
+        plan_id=plan.plan_id,
+        content_sha256=plan.content_sha256,
+        external_id=external_id,
+    )
 
 
 def _read_plan(path: Path) -> WritePlan:

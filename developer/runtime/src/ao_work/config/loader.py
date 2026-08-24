@@ -748,8 +748,22 @@ def _parse_worktree_domains(
             raise ValueError("worktree_domains references unknown repository")
         if seen_repositories.intersection(members):
             raise ValueError("worktree_domains repositories must not overlap")
+        problem_version_repository = _optional_text(
+            item.get("problem_version_repository")
+        ) or baseline
+        if problem_version_repository not in repository_list:
+            raise ValueError(
+                "worktree_domains problem_version_repository must be a listed repository"
+            )
         seen_repositories.update(members)
-        domains.append(WorktreeDomain(domain_id, baseline, members))
+        domains.append(
+            WorktreeDomain(
+                domain_id,
+                baseline,
+                members,
+                problem_version_repository,
+            )
+        )
     return tuple(domains)
 
 

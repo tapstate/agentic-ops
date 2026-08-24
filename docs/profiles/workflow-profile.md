@@ -50,6 +50,7 @@ repositories:
   worktree_domains:
     - id: product
       baseline_repository: tapdata/tapdata
+      problem_version_repository: tapdata/tapdata
       repositories:
         - tapdata/tapdata
         - tapdata/tapdata-enterprise
@@ -118,9 +119,9 @@ transitions:
 ## 4. 仓库池、领域和分支
 
 - `repositories.default` 和 `list` 均使用唯一的 `owner/repository`；声明 `list` 时，`default` 必须在列表内。
-- `workspace init` 在中央源码池准备 `repository_candidates()` 返回的全部成员；任务接管只刷新、验证并挂载已有池成员，不补 clone。
+- `workspace init` 在中央源码池准备 `repository_candidates()` 返回的全部成员；任务接管不挂载工作树，接管后的仓库建议分析和按需建树只刷新已有池成员，不补 clone。
 - `analysis_mount` 仅在没有显式领域的兼容 Profile 中计算分析集合。`include` 和 `exclude` 引用的仓库必须在 `list` 内。
-- `worktree_domains` 的成员不得重叠，`baseline_repository` 必须同时属于该领域和 `repositories.list`。TapData 必须显式声明领域；目标仓库未映射时失败关闭，不回退全量仓库。
+- `worktree_domains` 的成员不得重叠，`baseline_repository` 必须属于该领域；`problem_version_repository` 必须属于 `repositories.list`，缺失时兼容使用 `baseline_repository`。TapData TM、FE、connector 使用 `tapdata/tapdata` 作为问题版本来源，但 connector 仍保持独立候选领域。
 - `branches.baseline_branches` 给出未声明问题版本时目标仓库的显式基线；一旦配置该映射，缺少具体仓库条目时不能猜 `default_branch`。
 - 其它领域的分支推导顺序为：基线仓库使用问题版本；精确 `overrides`；当问题版本等于基线仓库开发分支时使用目标仓库 `dev_branches`；最后仅支持 `default_rule: same_name`。
 - TapData 产品域使用版本化 `tap_align_branches.py plan --no-fetch --remote-only` 计算领域内逐仓分支。Runtime 在创建任何工作树前解析全部远端提交，已有工作树也必须与同一批提交一致。
@@ -128,7 +129,7 @@ transitions:
 池模式任务目录固定为：
 
 ```text
-<source_pool_root>/.worktree/<JIRA-KEY>/<问题版本>/<repo-short-name>
+<source_pool_root>/.worktree/<JIRA-KEY>/<repo-short-name>/<normalized-from-branch>
 ```
 
 当前来源上下文只把目标仓库工作树设为 `source_root`，并输出目标仓库的 `problem_version`、`target_branch` 和路径；尚未把领域内逐仓分支、远端提交和对齐理由作为完整证据输出。

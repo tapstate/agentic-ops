@@ -1,0 +1,18 @@
+operation: task_worktree_prepare
+version: 1
+workplane: developer
+inputs:
+  issue_key:
+    required: true
+  repository:
+    required: true
+preconditions:
+  - repository_must_be_in_confirmed_repository_branch_map
+  - confirmed_origin_branch_must_resolve_to_fixed_sha
+side_effects:
+  - create_or_reuse_one_detached_git_worktree
+  - create_confirmed_task_branch
+  - record_exact_source_context
+postconditions:
+  - source_pool_primary_worktree_is_unchanged
+  - worktree_path_matches_jira_repository_branch_layout

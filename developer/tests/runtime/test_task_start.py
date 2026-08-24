@@ -297,7 +297,7 @@ class ProjectProfileSnapshotTest(unittest.TestCase):
         self.assertEqual("jira_description_section", problem_version["source"])
         self.assertEqual("问题版本", problem_version["section"])
 
-    def test_renamed_product_domain_still_uses_alignment_script(self) -> None:
+    def test_pool_takeover_only_binds_analysis_root_without_creating_worktrees(self) -> None:
         repository_root = Path(__file__).resolve().parents[3]
         loaded = load_project_profile(repository_root, "tapdata")
         product = loaded.worktree_domains[0]
@@ -310,52 +310,24 @@ class ProjectProfileSnapshotTest(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temporary:
             pool = Path(temporary).resolve()
-            target_dir = pool / ".worktree/TAP-123/develop/tapdata/tapdata"
-            prepared = TaskWorktreePlan(
-                issue_key="TAP-123",
-                from_branch="develop",
-                pool_root=pool,
-                entries=(
-                    WorktreePlanEntry(
-                        repository="tapdata/tapdata",
-                        worktree_dir=target_dir,
-                        branch="develop",
-                    ),
-                ),
-                target_repository="tapdata/tapdata",
-                baseline_repository="tapdata/tapdata",
-            )
             issue = SimpleNamespace(
                 key="TAP-123",
                 description=markdown_to_adf("## 问题版本\n\ndevelop\n"),
             )
-            with (
-                mock.patch(
-                    "ao_work.task_start.resolve_source_pool_root",
-                    return_value=pool,
-                ),
-                mock.patch(
-                    "ao_work.task_start.plan_task_worktrees",
-                    return_value=prepared,
-                ) as planned,
-                mock.patch(
-                    "ao_work.task_start.prepare_task_worktrees",
-                    return_value=prepared,
-                ),
+            with mock.patch(
+                "ao_work.task_start.resolve_source_pool_root",
+                return_value=pool,
             ):
-                _prepare_pool_task_worktrees(
+                worktrees, source_root, repository = _prepare_pool_task_worktrees(
                     install_root=pool / "install",
                     profile=profile,
                     issue=issue,
                     agent_config={"source_root": str(pool)},
                 )
-
-        alignment_script = planned.call_args.kwargs["alignment_script"]
-        self.assertEqual(
-            pool
-            / "install/developer/standards/projects/tapdata/scripts/tap_align_branches.py",
-            alignment_script,
-        )
+            self.assertIsNone(worktrees)
+            self.assertEqual(pool, source_root)
+            self.assertEqual("tapdata/tapdata", repository)
+            self.assertFalse((pool / ".worktree").exists())
 
     def test_non_pool_checkout_resolves_repository_and_branch_context(self) -> None:
         repository_root = Path(__file__).resolve().parents[3]

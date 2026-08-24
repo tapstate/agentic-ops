@@ -15,6 +15,7 @@ from ao_work.task_worktree import (
     WorktreePlanEntry,
     _apply_alignment_plan,
     _run_git,
+    analyze_task_worktree_plan,
     plan_task_worktrees,
     prepare_task_worktrees,
     resolve_from_branch,
@@ -85,6 +86,38 @@ def build_profile(
 
 
 class ResolveTargetRepositoryTest(unittest.TestCase):
+    def test_analysis_fixes_remote_sha_without_creating_worktrees(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            pool = Path(temporary)
+            member = pool / "tapdata/tapdata"
+            member.mkdir(parents=True)
+            worktree = task_worktree_path(
+                pool,
+                "TAP-123",
+                "develop",
+                "tapdata/tapdata",
+            )
+            plan = TaskWorktreePlan(
+                issue_key="TAP-123",
+                from_branch="develop",
+                pool_root=pool,
+                entries=(
+                    WorktreePlanEntry("tapdata/tapdata", worktree, "develop"),
+                ),
+                target_repository="tapdata/tapdata",
+                baseline_repository="tapdata/tapdata",
+            )
+
+            def git(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+                if "fetch" in command:
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                return subprocess.CompletedProcess(command, 0, "a" * 40 + "\n", "")
+
+            analyzed, baselines = analyze_task_worktree_plan(plan, run_git=git)
+            self.assertEqual(plan.entries, analyzed.entries)
+            self.assertEqual({"tapdata/tapdata": "a" * 40}, baselines)
+            self.assertFalse((pool / ".worktree").exists())
+
     def test_default_repository_when_no_declared_section(self) -> None:
         profile = build_profile()
         self.assertEqual(
@@ -217,7 +250,7 @@ class TapdataProfileBranchDerivationTest(unittest.TestCase):
             ),
         )
 
-    def test_tapdata_connector_domain_uses_connector_baseline(self) -> None:
+    def test_tapdata_connector_domain_uses_tapdata_problem_version_source(self) -> None:
         repository_root = Path(__file__).resolve().parents[3]
         profile = load_project_profile(repository_root, "tapdata")
         with tempfile.TemporaryDirectory() as temporary:
@@ -231,6 +264,7 @@ class TapdataProfileBranchDerivationTest(unittest.TestCase):
                 },
             )
         self.assertEqual("release-v3.8.0", plan.from_branch)
+        self.assertEqual("tapdata/tapdata", plan.baseline_repository)
         self.assertEqual(
             {"tapdata/tapdata-connectors", "tapdata/tapdata-connectors-enterprise"},
             {entry.repository for entry in plan.entries},
@@ -297,7 +331,7 @@ class TapdataProfileBranchDerivationTest(unittest.TestCase):
             plan.alignment_spec,
         )
         self.assertTrue(
-            all("/release-v3.8.0/" in str(entry.worktree_dir) for entry in plan.entries)
+            all(str(entry.worktree_dir).endswith("/release-v3.8.0") for entry in plan.entries)
         )
 
     def test_tapdata_unclassified_repository_blocks_without_full_mount(self) -> None:
@@ -892,7 +926,7 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
                     repository="tapdata/tapdata-application",
                     worktree_dir=(
                         self.pool
-                        / ".worktree/TAP-123/develop/tapdata/tapdata-application"
+                        / ".worktree/TAP-123/tapdata-application/main"
                     ),
                     branch="main",
                 ),

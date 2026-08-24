@@ -102,6 +102,9 @@ def execute_task_resume(
     next_action: object = str(progress.get("agentic_next_action") or "")
     if operation_resumable:
         next_action = recovery_operation["agentic_next_action"]
+    repository_scope = local.get("repository_scope")
+    if not operation_resumable:
+        next_action = _repository_resume_action(repository_scope, next_action)
     return {
         "workspace": str(workspace.root),
         "issue_key": task["issue_key"],
@@ -114,9 +117,24 @@ def execute_task_resume(
         "previous_stage": current_stage,
         "current_stage": current_stage,
         "takeover_recovery": takeover_recovery,
+        "repository_scope": repository_scope,
         "agentic_next_action": next_action,
         "credential_status": context.credential_status(),
     }
+
+
+def _repository_resume_action(scope: object, fallback: object) -> object:
+    if not isinstance(scope, dict):
+        return fallback
+    phase = str(scope.get("phase") or "")
+    actions = {
+        "proposal_recorded": "review_and_confirm_repository_branch_mapping",
+        "mapping_confirmed": "prepare_confirmed_repository_worktree_when_needed",
+        "worktrees_active": "resume_work_in_confirmed_repository_worktrees",
+        "completion_evidence_readback": "cleanup_completed_task_worktrees",
+        "worktrees_cleaned": "none",
+    }
+    return actions.get(phase, fallback)
 
 
 def _resolve_local_context(
@@ -229,6 +247,7 @@ def _iter_task_states(store: TaskStore) -> list[dict[str, Any]]:
                     "task": task,
                     "progress": progress,
                     "takeover_recovery": state.get("takeover_recovery"),
+                    "repository_scope": state.get("repository_scope"),
                 }
             )
     return results

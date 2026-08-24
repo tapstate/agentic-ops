@@ -1,0 +1,22 @@
+operation: repository_branch_confirm
+version: 1
+workplane: developer
+inputs:
+  issue_key:
+    required: true
+  mapping_file:
+    source: workspace_relative_safe_json
+    required: true
+  confirm:
+    required_for_write: true
+preconditions:
+  - proposal_must_exist
+  - every_repository_must_be_in_profile_and_one_domain
+  - every_confirmed_branch_must_resolve_on_origin
+side_effects:
+  preview:
+    - none
+  confirm:
+    - write_local_confirmed_repository_branch_map
+    - must_not_create_worktrees
+next_action: prepare_confirmed_repository_worktree_when_needed

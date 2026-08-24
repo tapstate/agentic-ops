@@ -57,6 +57,7 @@ class WorktreeDomain:
     domain_id: str
     baseline_repository: str
     repositories: tuple[str, ...]
+    problem_version_repository: str = ""
 
 
 @dataclass(frozen=True)
@@ -134,7 +135,12 @@ class ProjectProfile:
         primary = self.branch_derivation.derive_from
         if primary == "default":
             primary = self.default_repository or repository
-        return WorktreeDomain("default", primary, self.mounts_for_analysis())
+        return WorktreeDomain(
+            "default",
+            primary,
+            self.mounts_for_analysis(),
+            primary,
+        )
 
     def derive_branch(self, repo: str, from_branch: str, *, primary_repository: str | None = None) -> str | None:
         """分支推导：主仓库/overrides/dev_branches/same_name；返回目标分支，None 表示无法推导。
