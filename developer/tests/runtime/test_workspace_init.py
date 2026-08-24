@@ -1354,7 +1354,7 @@ class WorkspaceInitTest(unittest.TestCase):
             self.assertIn("Codex", claude_guide)
             self.assertIn("developer", claude_guide)
             self.assertIn("preflight", claude_guide)
-            # Claude Code skill symlink 桥接：.claude/skills/<name> → ../.agents/skills/<name>
+            # Claude Code skill symlink 桥接：.claude/skills/<name> → ../../.agents/skills/<name>
             claude_skills = workspace / ".claude" / "skills"
             self.assertTrue(claude_skills.is_dir())
             bridged = [p for p in claude_skills.iterdir() if p.is_symlink()]
@@ -1369,6 +1369,89 @@ class WorkspaceInitTest(unittest.TestCase):
             ).stdout
             self.assertNotIn(".agentic-ops/", status)
             self.assertNotIn("token-secret-123", status)
+
+    def test_repeated_init_repairs_only_missing_claude_skill_bridge(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.prepare_install(root)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            common = (
+                "--workspace-root", str(workspace), "workspace", "init",
+                "--non-interactive", "--project", "tapdata",
+                "--agent-id", "developer-claude-bridge",
+                "--jira-email", "developer@example.test", "--token-stdin",
+            )
+            self.assertEqual(0, self.run_cli(common)[0])
+            bridge = workspace / ".claude" / "skills" / "configure-authorization"
+            expected_target = "../../.agents/skills/configure-authorization"
+            self.assertEqual(expected_target, str(bridge.readlink()))
+            bridge.unlink()
+
+            exit_code, payload, _, _ = self.run_cli(
+                ("--workspace-root", str(workspace), "workspace", "preflight")
+            )
+            self.assertEqual(2, exit_code)
+            self.assertEqual("workspace_ai_asset_missing", payload["code"])
+
+            exit_code, payload, _, _ = self.run_cli(common)
+            self.assertEqual(0, exit_code, payload)
+            self.assertTrue(bridge.is_symlink())
+            self.assertEqual(expected_target, str(bridge.readlink()))
+
+            exit_code, payload, _, _ = self.run_cli(
+                ("--workspace-root", str(workspace), "workspace", "preflight")
+            )
+            self.assertEqual(0, exit_code, payload)
+
+    def test_preflight_rejects_claude_skill_bridge_drift_and_extra_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.prepare_install(root)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            common = (
+                "--workspace-root", str(workspace), "workspace", "init",
+                "--non-interactive", "--project", "tapdata",
+                "--agent-id", "developer-claude-drift",
+                "--jira-email", "developer@example.test", "--token-stdin",
+            )
+            self.assertEqual(0, self.run_cli(common)[0])
+            bridge_root = workspace / ".claude" / "skills"
+            bridge = bridge_root / "configure-authorization"
+            outside = root / "outside-skill"
+            outside.mkdir()
+            sentinel = outside / "sentinel"
+            sentinel.write_text("unchanged\n", encoding="utf-8")
+            bridge.unlink()
+            bridge.symlink_to(outside, target_is_directory=True)
+
+            exit_code, payload, _, _ = self.run_cli(
+                ("--workspace-root", str(workspace), "workspace", "preflight")
+            )
+            self.assertEqual(2, exit_code)
+            self.assertEqual("workspace_ai_asset_drift", payload["code"])
+            self.assertEqual("unchanged\n", sentinel.read_text(encoding="utf-8"))
+
+            exit_code, payload, _, _ = self.run_cli(common)
+            self.assertEqual(2, exit_code)
+            self.assertEqual("workspace_ai_asset_drift", payload["code"])
+            self.assertEqual("unchanged\n", sentinel.read_text(encoding="utf-8"))
+
+            bridge.unlink()
+            bridge.symlink_to(
+                "../../.agents/skills/configure-authorization",
+                target_is_directory=True,
+            )
+            (bridge_root / "unexpected").symlink_to(
+                "../../.agents/skills/initialize-project-workspace",
+                target_is_directory=True,
+            )
+            exit_code, payload, _, _ = self.run_cli(
+                ("--workspace-root", str(workspace), "workspace", "preflight")
+            )
+            self.assertEqual(2, exit_code)
+            self.assertEqual("workspace_ai_asset_contaminated", payload["code"])
 
     def test_preflight_rejects_missing_or_maintainer_workspace_skill(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
