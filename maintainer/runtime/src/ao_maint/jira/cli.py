@@ -95,6 +95,9 @@ def configure_jira_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
     description_parser = jira_commands.add_parser("description")
     _configure_write_actions(description_parser, "description")
 
+    summary_parser = jira_commands.add_parser("summary")
+    _configure_write_actions(summary_parser, "summary")
+
     worklog_parser = jira_commands.add_parser("worklog")
     _configure_write_actions(worklog_parser, "worklog")
 
@@ -116,6 +119,8 @@ def _configure_write_actions(
         plan.add_argument("--content-file", required=True)
     elif kind == "description":
         plan.add_argument("--content-file", required=True)
+    elif kind == "summary":
+        plan.add_argument("--summary", required=True)
     elif kind == "transition":
         target = plan.add_mutually_exclusive_group(required=True)
         target.add_argument("--target-status")
@@ -245,6 +250,13 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
                 content,
                 maintainer_run_id=run_id,
             )
+        elif args.command == "summary":
+            plan = service.plan_summary(
+                args.issue_key,
+                args.idempotency_key,
+                args.summary,
+                maintainer_run_id=run_id,
+            )
         elif args.command == "transition":
             workflow = load_maintainer_workflow(
                 source_root, config.connection.connection_id
@@ -369,6 +381,8 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
             result = service.apply_comment(plan, args.confirm_plan_id)
         elif args.command == "description":
             result = service.apply_description(plan, args.confirm_plan_id)
+        elif args.command == "summary":
+            result = service.apply_summary(plan, args.confirm_plan_id)
         elif args.command == "transition":
             result = service.apply_transition(plan, args.confirm_plan_id)
         elif args.command == "create":
@@ -420,6 +434,8 @@ def execute_jira(args: argparse.Namespace, source_root: Path) -> dict[str, Any]:
         result = service.readback_comment(plan)
     elif args.command == "description":
         result = service.readback_description(plan)
+    elif args.command == "summary":
+        result = service.readback_summary(plan)
     elif args.command == "transition":
         result = service.readback_transition(plan)
     elif args.command == "create":

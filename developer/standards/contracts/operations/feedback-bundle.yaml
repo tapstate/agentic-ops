@@ -1,7 +1,7 @@
 operation: feedback_bundle
 workplane: developer
-version: 1
-purpose: 为指定 `agentic_run_id` 生成脱敏诊断包，供维护者定位失败、阻塞和环境问题；它可以补充任务审计，但不能替代 Jira、审计服务或目标仓库上的任务级审计提交。
+version: 2
+purpose: 为指定 `agentic_run_id` 生成符合 ao_problem_feedback/v1 的完整脱敏修复输入，供 maintainer 定位、复现、修复和回归 developer 问题；它不能替代任务级审计提交。
 task_type: diagnosis
 allowed_stages:
   - failed
@@ -25,7 +25,7 @@ input:
     required: false
 preconditions:
   - workspace_feedback_log_must_exist
-  - secrets_must_be_redacted_when_requested
+  - secrets_must_always_be_redacted
 output:
   workspace:
     type: string
@@ -35,6 +35,32 @@ output:
     type: string
   redacted:
     type: boolean
+  report_schema:
+    type: string
+    const: ao_problem_feedback/v1
+  repair_readiness:
+    type: string
+    enum: [ready, needs_information]
+  information_groups:
+    type: object
+    required:
+      - source_binding
+      - version_and_environment
+      - problem_context
+      - actual_behavior
+      - expected_behavior
+      - minimal_reproduction
+      - impact_scope
+      - external_facts
+      - evidence_inventory
+      - human_intervention
+      - initial_assessment
+      - minimal_regression
+      - acceptance_criteria
+      - missing_facts
+      - redaction_declaration
+    item_state: [provided, not_applicable, unavailable]
+    unavailable_requires: [reason, fact_source, minimal_action, blocks_repair]
   agentic_next_action:
     type: string
 failure:
@@ -43,6 +69,8 @@ failure:
     - workspace_root_failed
     - event_read_failed
     - bundle_write_failed
+    - sensitive_content_detected
+    - repair_information_incomplete
 side_effects:
   - may_write_local_diagnostic_bundle
   - must_not_write_jira

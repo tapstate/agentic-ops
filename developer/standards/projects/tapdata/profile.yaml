@@ -37,6 +37,7 @@ repositories:
   worktree_domains:
     - id: product
       baseline_repository: tapdata/tapdata
+      problem_version_repository: tapdata/tapdata
       repositories:
         - tapdata/tapdata
         - tapdata/tapdata-enterprise
@@ -46,12 +47,15 @@ repositories:
         - tapdata/tapdata-application
     - id: assistant
       baseline_repository: tapdata/feishu_robot
+      problem_version_repository: tapdata/feishu_robot
       repositories: [tapdata/feishu_robot]
     - id: automation-test
       baseline_repository: tapdata/t-layer3-test
+      problem_version_repository: tapdata/t-layer3-test
       repositories: [tapdata/t-layer3-test]
     - id: connector
       baseline_repository: tapdata/tapdata-connectors
+      problem_version_repository: tapdata/tapdata
       repositories:
         - tapdata/tapdata-connectors
         - tapdata/tapdata-connectors-enterprise

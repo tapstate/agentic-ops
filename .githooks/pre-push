@@ -6,6 +6,7 @@ zero_sha="0000000000000000000000000000000000000000"
 
 if ! git diff --quiet HEAD -- \
   .githooks/pre-push \
+  .githooks/reference-transaction \
   maintainer/bin/ao-maint \
   maintainer/pyproject.toml \
   maintainer/uv.lock \
@@ -16,6 +17,14 @@ if ! git diff --quiet HEAD -- \
 fi
 
 while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$local_sha" = "$zero_sha" ]; then
+    case "$remote_ref" in
+      refs/heads/main|refs/heads/develop|refs/heads/release/*)
+        echo "branch_deletion_prohibited: main、develop 和 release/* 分支不可删除" >&2
+        exit 1
+        ;;
+    esac
+  fi
   if [ "$remote_ref" = "refs/heads/main" ] &&
     [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" != "hotfix" ]; then
     echo "direct push to main is prohibited; use a pull request" >&2

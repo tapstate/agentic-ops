@@ -1,0 +1,77 @@
+process_id: development_change_v2
+workplane: developer
+stage_registry: developer/standards/stages/stages.yaml
+task_classes:
+  - feature_change
+  - bug_fix
+  - technical_task
+entry_stage: waiting_takeover
+compatibility:
+  replaces: null
+  migration: explicit_profile_only
+  legacy_process: development_change_v1
+ownership:
+  source: business_workspace_agent_identity
+  continuity: same_owner_until_ci_completion
+  step_executor_does_not_change_owner: true
+  transfer:
+    status: capability_gap
+    decision_authority: human_only
+    current_action: stop_and_request_human_decision
+stages:
+  - id: waiting_takeover
+    responsible_role: development_engineer
+    runtime_operations: [takeover_task]
+    output_fields: [agentic_run_id, takeover_status, current_stage, agentic_next_action]
+    review_gate: null
+  - id: task_intake
+    responsible_role: ai_agent
+    runtime_operations: [task_intake_assess]
+    output_fields: [intake_facts, unresolved_information, assumptions, impacts, intake_digest]
+    review_gate: null
+  - id: solution_classification
+    responsible_role: ai_agent
+    runtime_operations: [solution_gate]
+    output_fields: [proposed_solution, solution_level, classification_evidence, solution_digest]
+    routing:
+      L1: design_review
+      L2: risk_decision
+      L3: revise_design_and_reassess
+      L4: stop_and_escalate
+    review_gate: null
+  - id: design_review
+    responsible_role: development_engineer
+    input_fields: [proposed_solution, scope, verification_method, ci_policy, residual_risks]
+    output_fields: [design_review_decision, execution_authorization, authorization_reference]
+    review_gate: development_engineer_design_review
+  - id: implementation
+    responsible_role: ai_agent
+    required_before_code_change: [task_taken_over, design_review_approved]
+    output_fields: [implementation_summary, verification_result, pr_reference, final_head_sha]
+    review_gate: null
+  - id: ci_validation
+    responsible_role: ai_agent
+    runtime_operations: [check_ci_status, fetch_ci_artifact, parse_ci_report, record_ci_remediation]
+    required_policy:
+      ci_policy: detect_from_github_pr
+      requirement_source: github_pr_base_workflows
+      no_workflow_files: not_required
+      unknown_requirement: human_intervention
+      start_timeout_seconds: 300
+      completion_timeout_seconds: 600
+      poll_interval_seconds: 15
+      max_remediation_attempts: 3
+      required_check_success: SUCCESS
+      unknown_status: fail_closed
+      remediation_failure_classification: ci_code_defect_only
+      all_other_failures: human_intervention
+    success_output: [completed, ci_passed_or_not_required, completion_evidence, agentic_next_action_none]
+    failure_routing: risk_decision_or_blocked
+    review_gate: null
+  - id: completed
+    responsible_role: ai_agent
+    required_writeback: [implementation_summary, verification_result, ci_completion_evidence, residual_risk]
+    prohibited_actions: [code_review, merge_pr, jira_done, release, create_tag, push_protected_branch]
+    completion_cleanup:
+      write_terminal_comment: true
+      close_local_run: true

@@ -1,44 +1,46 @@
 operation: check_ci_status
 workplane: developer
-version: 1
-purpose: 通过 GitHub CLI 读取拉取请求 CI 检查状态。
+version: 3
+purpose: 先依据 GitHub PR Base 的 Workflow 事实自动判定是否需要 CI；需要时严格核对 Project Profile 声明的必需检查，并维护固定截止时间与有限修复预算。
 task_type: ci_check
 allowed_stages:
-  - pr_created
-  - ci_running
-  - changes_requested
+  - ci_validation
 required_inputs:
-  - workspace
-  - repo
-  - pr
+  - manifest
 input:
-  workspace:
-    type: string
-    required: true
-  repo:
-    type: string
-    required: true
-  pr:
+  manifest:
     type: string
     required: true
 preconditions:
-  - github_cli_must_be_available
-  - github_auth_must_be_valid
-  - pr_checks_must_be_readable
+  - process_id_must_be_development_change_v2
+  - manifest_ci_must_equal_current_project_profile
+  - github_ci_read_must_be_explicitly_authorized
 output:
-  workspace:
+  ci_requirement:
+    type: object
+  ci_status:
     type: string
-  repo:
+  head_sha:
     type: string
-  pr:
-    type: string
-  status:
-    type: string
-  checks:
+  required_checks:
     type: array
-  failing_checks:
+  missing_required_checks:
     type: array
-  failing_checks_count:
+  workflow_runs:
+    type: array
+  attempt_id:
+    type: string
+  start_deadline_at:
+    type: [string, "null"]
+  execution_started_at:
+    type: [string, "null"]
+  completion_deadline_at:
+    type: [string, "null"]
+  poll_interval_seconds:
+    type: integer
+  remediation_attempts_used:
+    type: integer
+  remediation_attempts_remaining:
     type: integer
   current_stage:
     type: string
@@ -46,8 +48,18 @@ output:
     type: string
 failure:
   codes:
-    - missing_pr_reference
-    - github_ci_read_failed
+    - ci_process_not_enabled
+    - ci_profile_binding_mismatch
+    - ci_pr_binding_mismatch
+    - ci_requirement_observation_failed
+    - ci_requirement_unknown
+    - ci_requirement_changed
+    - ci_required_check_missing
+    - ci_required_check_duplicate
+    - ci_status_unknown
+    - ci_start_timeout
+    - ci_completion_timeout
+    - ci_retry_exhausted
 side_effects:
   - must_not_write_github
   - must_not_modify_git
@@ -55,6 +67,6 @@ human_gate:
   required: false
 retry_policy:
   retryable: true
-  max_attempts: 1
+  max_attempts: until_fixed_deadline
   redo_from_stage: ci_running
 redo_from_stage: ci_running

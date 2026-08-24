@@ -53,7 +53,7 @@ AI 员工必须遵守：
 - 不得把一次任务中的临场判断直接当成新脚本或新操作；必须先记录经验、失败模式和建议，进入周期性复盘。
 - 当某类交互逻辑重复出现且输入输出稳定时，AIAgent 可以建议把它固化为原子化操作、运行手册、工作流配置、策略或模板。
 - 执行过程必须持续记录 `agent_id`、`agentic_run_id`、`task_type`、`task_class`、`process_id`、`current_stage`、`agentic_next_action`、关键输入、关键输出和阻塞原因。
-- AI 处理阶段（task_intake / solution_classification / implementation）进入时必须在任务状态 `stage_timeline` 追加 `{stage_id, begin, end: null}`，准出时闭合对应 `end`；人工环节（waiting_takeover / pr_review / completed）不进入时间线。
+- AI 处理阶段（task_intake / solution_classification / implementation / ci_validation）进入时必须在任务状态 `stage_timeline` 追加 `{stage_id, begin, end: null}`，准出时闭合对应 `end`；人工环节（waiting_takeover / v1 的 pr_review / completed）不进入时间线。
 - 同一 AI 处理阶段在 `stage_timeline` 中出现达到重试门禁上限（默认 2 次）时，`advance_stage` 会阻断并返回 `stage_loop_requires_human`；AIAgent 必须停止自动推进，向研发工程师展示目标阶段、出现次数与时间线全貌，等待人工决策（确认继续 / 调整方案 / 修改流程），不得绕过门禁自行继续。
 - 重试只能在当前输入和前序表单仍有效时进行；如果任务范围、项目准入信息、审查结论或风险边界变化，必须按 `redo_from_stage` 重做受影响阶段。
 - 完成后必须回写变更摘要、测试结果、残留风险、完成证据和下一步。
@@ -186,7 +186,7 @@ Jira Comment、Description 和 Worklog 都要求先初始化一致的本地任�
 
 Jira Description 保存确认后的稳定任务契约；Jira Comment 保存接管、恢复、分析、计划、决策、阻塞、证据和终止轨迹；developer 不把 Agentic 运行信息映射到 Jira Custom Field；Worklog 只记录真实投入时间和中文标题总结。`included-work-file` 必须逐项提供中文 `description` 与正整数 `seconds`，总和等于 `time-spent-seconds`；至少一个 `--excluded-waiting-category` 明确列出排除的等待类别。不得用 Worklog 承载计划或人工确认，也不得覆盖已有 Comment 改写历史。
 
-`list_tasks`、`takeover_task` 和 `resume_takeover` 已由能力目录声明为 `implemented`；`release_agent`、PR / CI、分支对齐、反馈包和完成证据聚合仍可能是 `capability_gap`，执行前必须逐项查询能力目录。developer 不提供 Agentic Custom Field 写入能力。
+`list_tasks`、`takeover_task`、`resume_takeover` 和 v2 CI 原子能力已由能力目录声明为 `implemented`；`release_agent`、分支对齐、反馈包和其它完成证据聚合仍可能是 `capability_gap`，执行前必须逐项查询能力目录。developer 不提供 Agentic Custom Field 写入能力。
 
 AI 员工不应直接依赖 Jira 字段名、Jira 状态名或 Jira `transition` 名称做判断。Jira 字段名、状态名、`transition` 名称和 `issue_key` 可以按原始值引用；面向研发工程师的 Jira 文本和 AIAgent 自然语言交互必须使用中文。
 
@@ -242,9 +242,9 @@ AI 员工完成设计或修复计划后，如果尚未取得工作项级连续�
 等待研发工程师确认计划并授予工作项级连续执行授权。
 ```
 
-授权生效后，AI 员工应连续推进到任务分支推送和目标为 `develop` 的拉取请求创建或更新完成，回读 Git、GitHub、CI 和 Jira 事实，输出包含固定 Head SHA、变更摘要、验证结果、CI 事实、Jira 回写引用和残留风险的拉取请求审查包，再暂停等待审查。授权失效、保护分支推送、合并、发布或范围变化必须重新进入人工确认。
+授权生效后，AI 员工应连续推进到任务分支推送和目标为 `develop` 的拉取请求创建或更新完成。`development_change_v1` 回读事实并输出拉取请求审查包后暂停；显式启用 `development_change_v2` 时继续进入 `ci_validation`，先绑定 GitHub PR Head/Base 并从 Base Workflow 事实自动判定是否需要 CI。无需 CI 时生成完成证据；需要时按当前 Head 的 5 分钟 CI 启动截止时间、执行后 10 分钟完成截止时间和 15 秒间隔观察必需检查。只有明确分类为业务代码缺陷时，才在最多三次授权内修复预算中完成全量本地复验、提交、推送与新 Head 回读；其它失败、判定未知或任一超时必须人工介入且不得自动修复。CI 通过或明确无需 CI 后关闭本地运行，不进入 developer 内置代码审查。授权失效、报告不可信、保护分支推送、合并、发布或范围变化必须进入风险决策。
 
-AI 员工不得把“代码已修改”视为“任务已完成”。任务完成仍需要研发工程师、CI、拉取请求审查和后续验收流程。
+AI 员工不得把“代码已修改”视为“任务已完成”。v1 仍需要拉取请求审查；v2 只有最终 Head/Base 的 GitHub CI 要求判定闭合，且 `required` 时全部必需检查严格为 `SUCCESS`、`not_required` 时没有伪造检查或运行事实，才表示本次 AIAgent 开发运行完成。两者都不代表 PR 已合并、Jira 已 Done，也不能替代项目明确要求的后续专业验收。
 
 当一个标准流程进入完成、阻塞或交接节点时，AI 员工必须把任务级审计记录写入项目 AI 工作空间的 `.agentic-ops/tasks/<ISSUE-KEY>/` 目录。Issue Key、run id、决策、幂等键和外部引用必须通过 Runtime 的安全标识校验；`agent.json`、profiles、connections、tasks、runs、audit、feedback、handoff、locks、任务目录、报告目录及 workspace-index 的现存祖先和叶子均不得是符号链接，不能用相对跳转或手工路径读写工作空间外。Jira 卡片回写任务级关键结论、状态和稳定引用；后续如果团队配置审计服务，再提交同一份脱敏摘要。本地 `feedback bundle` 和 `feedback report` 只服务诊断与后续分析，不能替代本地任务审计记录。
 

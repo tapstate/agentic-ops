@@ -17,6 +17,7 @@
 | DE-005 | 恢复接管任务 | 恢复使用同一 `agentic_run_id`，不重新开始或混淆执行记录 | [de-005-resume-takeover.md](development-engineer/de-005-resume-takeover.md) |
 | DE-006 | 任务完成审计与反馈分析 | 提交任务级审计，不把反馈报告当作主链路事实源 | [de-006-task-audit-feedback.md](development-engineer/de-006-task-audit-feedback.md) |
 | DE-007 | 指定分支验证安装 | 非 `main` 分支验证安装可运行，生产安装仍固定 `main` 且标记只放宽 `main` 祖先 | [de-007-verification-install.md](development-engineer/de-007-verification-install.md) |
+| DE-008 | PR CI 持续监控与失败自动修复 | v2 Profile 在最终 Head 上形成有界、可恢复、失败关闭的 CI 修复闭环 | [de-008-pr-ci-remediation.md](development-engineer/de-008-pr-ci-remediation.md) |
 
 ## 3. 审核方式
 

@@ -22,8 +22,6 @@ from ao_work.task_gate import record_task_start_context
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.task_state.io import read_json
 from ao_work.task_worktree import (
-    plan_task_worktrees,
-    prepare_task_worktrees,
     resolve_from_branch,
     resolve_product_alignment_branch,
     resolve_target_repository,
@@ -197,6 +195,10 @@ def record_current_task_source_context(
     issue: Any,
     agentic_run_id: str,
     mapped_status: str,
+    confirmed_repository: str | None = None,
+    confirmed_worktree: Path | None = None,
+    confirmed_from_branch: str = "",
+    confirmed_task_branch: str = "",
 ) -> dict[str, Any]:
     description_text = plain_text(issue.description).strip()
     issue_content_sha256 = hashlib.sha256(
@@ -224,12 +226,29 @@ def record_current_task_source_context(
         "agent_id": install_identity["agent_id"],
         "execution_identity": install_identity["execution_identity"],
     }
-    task_worktrees, bound_source_root, bound_repository = _prepare_pool_task_worktrees(
-        install_root=install_root,
-        profile=context.profile,
-        issue=issue,
-        agent_config=effective_config,
-    )
+    if confirmed_repository is not None and confirmed_worktree is not None:
+        pool_root = resolve_source_pool_root(install_root)
+        task_worktrees = {
+            "issue_key": issue.key,
+            "repository": confirmed_repository,
+            "problem_version": confirmed_from_branch,
+            "target_branch": confirmed_task_branch,
+            "baseline_branch": confirmed_from_branch,
+            "expected_worktree": str(confirmed_worktree),
+            "checked_path": str(confirmed_worktree),
+            "pool_root": str(pool_root) if pool_root is not None else "",
+            "adopted": 0,
+            "created": 1,
+        }
+        bound_source_root = confirmed_worktree
+        bound_repository = confirmed_repository
+    else:
+        task_worktrees, bound_source_root, bound_repository = _prepare_pool_task_worktrees(
+            install_root=install_root,
+            profile=context.profile,
+            issue=issue,
+            agent_config=effective_config,
+        )
     issue_payload = {
         "id": issue.issue_id,
         "key": issue.key,
@@ -292,7 +311,7 @@ def record_current_task_source_context(
 def _prepare_pool_task_worktrees(
     *, install_root: Path, profile: Any, issue: Any, agent_config: dict[str, Any]
 ) -> tuple[dict[str, Any] | None, Path, str]:
-    """池模式下先绑定精确任务工作树，禁止把池根交给 intake。"""
+    """接管阶段只绑定源码池分析根；用户确认关系前不创建任务工作树。"""
     raw_source_root = str(agent_config.get("source_root") or "")
     if not raw_source_root:
         raise _blocked("task_source_root_missing", "任务缺少业务源码目录", "请重新初始化工作空间后重试")
@@ -330,49 +349,7 @@ def _prepare_pool_task_worktrees(
             "请补充可映射的目标仓库或任务领域；系统不会创建未知领域的任务工作树",
             details={"target_repository": target_repository},
         )
-    alignment_script = None
-    if (
-        profile.profile_id == "tapdata"
-        and domain is not None
-        and domain.baseline_repository == "tapdata/tapdata"
-    ):
-        alignment_script = (
-            install_root
-            / "developer"
-            / "standards"
-            / "projects"
-            / profile.profile_id
-            / "scripts"
-            / "tap_align_branches.py"
-        )
-    plan = plan_task_worktrees(
-        pool_root=pool_root,
-        profile=profile,
-        issue_key=issue.key,
-        description_sections=sections,
-        alignment_script=alignment_script,
-    )
-    prepared = prepare_task_worktrees(
-        plan,
-        execution_identity=agent_config.get("execution_identity"),
-    )
-    target = next(entry for entry in prepared.entries if entry.repository == target_repository)
-    return (
-        {
-            "issue_key": prepared.issue_key,
-            "repository": target.repository,
-            "problem_version": prepared.from_branch,
-            "target_branch": target.branch,
-            "baseline_branch": prepared.from_branch,
-            "expected_worktree": str(target.worktree_dir),
-            "checked_path": str(target.worktree_dir),
-            "pool_root": str(prepared.pool_root),
-            "adopted": prepared.adopted,
-            "created": prepared.created,
-        },
-        target.worktree_dir,
-        target.repository,
-    )
+    return None, source_root, target_repository
 
 
 def _resolve_non_pool_branch_context(

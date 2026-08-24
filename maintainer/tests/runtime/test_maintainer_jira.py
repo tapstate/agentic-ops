@@ -83,6 +83,8 @@ class FakeTransport:
                 fields = body.get("fields", {}) if isinstance(body, dict) else {}
                 if isinstance(fields, dict) and "description" in fields:
                     self.issue["fields"]["description"] = fields["description"]  # type: ignore[index]
+                if isinstance(fields, dict) and "summary" in fields:
+                    self.issue["fields"]["summary"] = fields["summary"]  # type: ignore[index]
             return TransportResponse(204, None)
         if path.startswith("/rest/api/3/issue/"):
             issue_key = path.removeprefix("/rest/api/3/issue/").split("?")[0]
@@ -501,6 +503,34 @@ class MaintainerJiraServiceTest(unittest.TestCase):
                 maintainer_run_id="maint-test-1",
             )
         self.assertEqual("chinese_content_required", captured.exception.code)
+
+    def test_plan_summary_roundtrip_and_drift_protection(self) -> None:
+        service, transport, _client = self._service()
+        plan = service.plan_summary(
+            "AO-11",
+            "idem-summary-1",
+            "【回退】原任务标题",
+            maintainer_run_id="maint-test-1",
+        )
+        self.assertEqual("create_or_update", plan.action)
+        result = service.apply_summary(plan, plan.plan_id)
+        self.assertTrue(result["created"])
+        self.assertEqual("summary", result["external_id"])
+        self.assertTrue(service.readback_summary(plan)["created"])
+
+        plan2 = service.plan_summary(
+            "AO-11",
+            "idem-summary-drift",
+            "【回退】另一个标题",
+            maintainer_run_id="maint-test-1",
+        )
+        assert transport.issue is not None
+        fields = transport.issue["fields"]
+        assert isinstance(fields, dict)
+        fields["summary"] = "其他人更新的标题"
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            service.apply_summary(plan2, plan2.plan_id)
+        self.assertEqual("jira_summary_precondition_changed", captured.exception.code)
 
     def test_plan_comment_roundtrip(self) -> None:
         service, transport, _client = self._service()

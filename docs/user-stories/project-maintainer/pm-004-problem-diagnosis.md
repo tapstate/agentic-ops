@@ -42,6 +42,7 @@ ao-work capability show feedback_bundle
 5. Jira 卡片属性缺失进入补卡模板和阻断说明。
 6. 关键步骤门禁调整进入 policy 更新。
 7. 发布或安装问题进入 update、release 或 rollback 流程。
+8. developer 问题由 maintainer 在 AgenticOps 源头仓库修改对应 `developer/**` 资源，并通过隔离 fixture 或黑盒入口验证；不得进入业务项目工作空间自修。
 
 ### 输出
 
@@ -67,6 +68,7 @@ ao-work capability show feedback_bundle
 - 诊断输出不包含敏感原始内容。
 - 网络诊断能区分沙箱回环阻断、代理不可达、授权/服务失败与不确定失败，不能把任意连接失败归因为沙箱。
 - 修复路径能说明是否需要版本发布、资产热更新、补卡或人工决策。
+- maintainer 能修复 developer Runtime、Skill、Rule、Profile、Runbook、Template、Bootstrap 和测试问题，同时保持业务身份、凭证、状态与源头维护环境隔离。
 
 ### 保护行为
 

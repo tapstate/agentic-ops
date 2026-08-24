@@ -21,7 +21,6 @@ from ao_work.jira.model import JiraComment, JiraIssue
 from ao_work.jira.service import JiraService
 from ao_work.jira.transition import match_transition
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, write_diagnostic
-from ao_work.task_start import record_current_task_source_context
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.task_state.takeover import (
     normalized_comment_content_sha256,
@@ -327,16 +326,6 @@ def _run_takeover_saga(
             operation=operation,
         )
     try:
-        source_context = record_current_task_source_context(
-            workspace,
-            store,
-            install_root=install_root,
-            context=context,
-            account=account,
-            issue=readback,
-            agentic_run_id=str(operation["agentic_run_id"]),
-            mapped_status=mapped_status,
-        )
         finalized = store.finalize_takeover(
             str(operation["issue_key"]),
             str(operation["agentic_run_id"]),
@@ -382,7 +371,7 @@ def _run_takeover_saga(
         readback=readback,
         transition_applied=transition_applied,
         task_state_created=task_state_created,
-        intake_source=source_context["intake_source"],
+        intake_source=None,
         state_consistent=bool(recovery["state_consistent"]),
         local_state_created=bool(finalized.get("created")),
     )
@@ -700,7 +689,7 @@ def _completed_takeover_result(
     readback: JiraIssue,
     transition_applied: bool,
     task_state_created: bool,
-    intake_source: dict[str, Any],
+    intake_source: dict[str, Any] | None,
     state_consistent: bool,
     local_state_created: bool,
 ) -> dict[str, Any]:
@@ -1313,7 +1302,7 @@ def _takeover_comment(
         f"- 操作时间: `{takeover_at}`",
         f"- Jira 状态: `{current_status}` → `{target_status}`",
         "- 当前阶段: `takeover_started`",
-        "- 下一步动作: `assess_task_intake`",
+        "- 下一步动作: `assess_repository_branch_mapping`",
     ]
     if extra and extra.strip():
         lines.extend(["- 补充说明:", extra.strip()])

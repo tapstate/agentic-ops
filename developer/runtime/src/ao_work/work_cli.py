@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -23,6 +24,12 @@ from ao_work.task_gate import execute_task_gate
 from ao_work.task_start import execute_task_start
 from ao_work.task_takeover import execute_task_takeover
 from ao_work.task_resume import execute_task_resume
+from ao_work.task_repository_scope import (
+    execute_repository_assess,
+    execute_repository_confirm,
+    execute_worktree_cleanup,
+    execute_worktree_prepare,
+)
 from ao_work.task_run import configure_task_run_parser, execute_task_run
 from ao_work.workspace import DEVELOPER, resolve_developer_workspace
 from ao_work.workspace_security import read_workspace_outbound_file
@@ -52,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     task_commands = task_parser.add_subparsers(
         dest="command",
         required=True,
-        metavar="{start,intake,solution,init,resume,inspect}",
+        metavar="{start,intake,solution,init,resume,inspect,repositories,worktrees}",
     )
     task_start = task_commands.add_parser("start")
     task_start.add_argument("issue_key")
@@ -80,6 +87,21 @@ def build_parser() -> argparse.ArgumentParser:
     resume_target.add_argument("--agentic-run-id")
     task_inspect = task_commands.add_parser("inspect")
     task_inspect.add_argument("--issue-key", required=True)
+    task_repositories = task_commands.add_parser("repositories")
+    repository_actions = task_repositories.add_subparsers(dest="action", required=True)
+    repository_assess = repository_actions.add_parser("assess")
+    repository_assess.add_argument("--issue-key", required=True)
+    repository_confirm = repository_actions.add_parser("confirm")
+    repository_confirm.add_argument("--issue-key", required=True)
+    repository_confirm.add_argument("--mapping-file", required=True)
+    repository_confirm.add_argument("--confirm", action="store_true")
+    task_worktrees = task_commands.add_parser("worktrees")
+    worktree_actions = task_worktrees.add_subparsers(dest="action", required=True)
+    worktree_prepare = worktree_actions.add_parser("prepare")
+    worktree_prepare.add_argument("--issue-key", required=True)
+    worktree_prepare.add_argument("--repository", required=True)
+    worktree_cleanup = worktree_actions.add_parser("cleanup")
+    worktree_cleanup.add_argument("--issue-key", required=True)
 
     report_parser = subparsers.add_parser("report")
     report_commands = report_parser.add_subparsers(dest="command", required=True)
@@ -157,6 +179,64 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             store,
             issue_key=args.issue_key,
             agentic_run_id=args.agentic_run_id,
+        )
+        return success(operation, workplane=workspace.workplane, **state)
+    if args.group == "task" and args.command == "repositories" and args.action == "assess":
+        state = execute_repository_assess(
+            workspace,
+            install_root,
+            store,
+            args.issue_key,
+        )
+        return success(operation, workplane=workspace.workplane, **state)
+    if args.group == "task" and args.command == "repositories" and args.action == "confirm":
+        content = read_workspace_outbound_file(
+            workspace.root,
+            args.mapping_file,
+            label="仓库分支确认文件",
+        )
+        try:
+            mapping = json.loads(content)
+        except json.JSONDecodeError as error:
+            raise RuntimeErrorResult(
+                code="repository_mapping_invalid",
+                message=f"仓库分支确认文件不是有效 JSON：{error}",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请修正确认文件后重试",
+            ) from error
+        if not isinstance(mapping, dict):
+            raise RuntimeErrorResult(
+                code="repository_mapping_invalid",
+                message="仓库分支确认文件必须是 JSON 对象",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请修正确认文件后重试",
+            )
+        state = execute_repository_confirm(
+            workspace,
+            install_root,
+            store,
+            args.issue_key,
+            mapping,
+            confirm=args.confirm,
+        )
+        return success(operation, workplane=workspace.workplane, **state)
+    if args.group == "task" and args.command == "worktrees" and args.action == "prepare":
+        state = execute_worktree_prepare(
+            workspace,
+            install_root,
+            store,
+            args.issue_key,
+            args.repository,
+        )
+        return success(operation, workplane=workspace.workplane, **state)
+    if args.group == "task" and args.command == "worktrees" and args.action == "cleanup":
+        state = execute_worktree_cleanup(
+            workspace,
+            install_root,
+            store,
+            args.issue_key,
         )
         return success(operation, workplane=workspace.workplane, **state)
     if args.group == "task" and args.command in {"intake", "solution"}:

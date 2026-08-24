@@ -60,6 +60,15 @@ def configure_task_run_parser(subparsers: argparse._SubParsersAction[Any]) -> No
     verify_parser = commands.add_parser("verify")
     verify_parser.add_argument("--manifest", required=True)
     verify_parser.add_argument("--verification-id", required=True)
+    for name in ("probe-ci", "fetch-ci-artifact", "parse-ci-report"):
+        ci_parser = commands.add_parser(name)
+        ci_parser.add_argument("--manifest", required=True)
+    remediation_parser = commands.add_parser("record-ci-remediation")
+    remediation_parser.add_argument("--manifest", required=True)
+    remediation_parser.add_argument("--failure-event-id", required=True)
+    remediation_parser.add_argument("--commit-sha", required=True)
+    remediation_parser.add_argument("--new-head-sha", required=True)
+    remediation_parser.add_argument("--authorization-reference", required=True)
     finalize_parser = commands.add_parser("finalize")
     finalize_parser.add_argument("--manifest", required=True)
     finalize_parser.add_argument(
@@ -95,6 +104,20 @@ def execute_task_run(
         return protocol.probe_pr(args.manifest, args.bind_action)
     if args.command == "verify":
         return protocol.verify(args.manifest, args.verification_id)
+    if args.command == "probe-ci":
+        return protocol.probe_ci(args.manifest)
+    if args.command == "fetch-ci-artifact":
+        return protocol.fetch_ci_artifact(args.manifest)
+    if args.command == "parse-ci-report":
+        return protocol.parse_ci_report(args.manifest)
+    if args.command == "record-ci-remediation":
+        return protocol.record_ci_remediation(
+            args.manifest,
+            failure_event_id=args.failure_event_id,
+            commit_sha=args.commit_sha,
+            new_head_sha=args.new_head_sha,
+            authorization_reference=args.authorization_reference,
+        )
     if args.command == "probe-prohibitions":
         return protocol.probe_prohibitions(args.manifest)
     if args.command == "record-unverified-prohibitions":

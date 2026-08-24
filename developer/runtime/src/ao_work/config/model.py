@@ -57,6 +57,51 @@ class WorktreeDomain:
     domain_id: str
     baseline_repository: str
     repositories: tuple[str, ...]
+    problem_version_repository: str = ""
+
+
+@dataclass(frozen=True)
+class CiProfile:
+    provider: str
+    start_timeout_seconds: int
+    completion_timeout_seconds: int
+    poll_interval_seconds: int
+    max_remediation_attempts: int
+    required_checks: tuple[str, ...]
+    workflows: tuple[str, ...]
+    artifact_name_patterns: tuple[str, ...]
+    report_parser: str
+    max_archive_bytes: int = 52_428_800
+    max_extracted_bytes: int = 209_715_200
+    max_file_bytes: int = 20_971_520
+    max_files: int = 2_000
+    max_depth: int = 20
+    finish_agent_run_on_pass: bool = True
+    transition_jira_done: bool = False
+
+    def manifest_payload(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "start_timeout_seconds": self.start_timeout_seconds,
+            "completion_timeout_seconds": self.completion_timeout_seconds,
+            "poll_interval_seconds": self.poll_interval_seconds,
+            "max_remediation_attempts": self.max_remediation_attempts,
+            "required_checks": list(self.required_checks),
+            "workflows": list(self.workflows),
+            "artifact_name_patterns": list(self.artifact_name_patterns),
+            "report_parser": self.report_parser,
+            "limits": {
+                "max_archive_bytes": self.max_archive_bytes,
+                "max_extracted_bytes": self.max_extracted_bytes,
+                "max_file_bytes": self.max_file_bytes,
+                "max_files": self.max_files,
+                "max_depth": self.max_depth,
+            },
+            "completion": {
+                "finish_agent_run_on_pass": self.finish_agent_run_on_pass,
+                "transition_jira_done": self.transition_jira_done,
+            },
+        }
 
 
 @dataclass(frozen=True)
@@ -76,6 +121,8 @@ class ProjectProfile:
     analysis_mount: AnalysisMount = field(default_factory=AnalysisMount)
     branch_derivation: BranchDerivation = field(default_factory=BranchDerivation)
     worktree_domains: tuple[WorktreeDomain, ...] = ()
+    process_id: str = "development_change_v1"
+    ci: CiProfile | None = None
 
     def requested_jira_fields(self) -> list[str]:
         requested = {
@@ -134,7 +181,12 @@ class ProjectProfile:
         primary = self.branch_derivation.derive_from
         if primary == "default":
             primary = self.default_repository or repository
-        return WorktreeDomain("default", primary, self.mounts_for_analysis())
+        return WorktreeDomain(
+            "default",
+            primary,
+            self.mounts_for_analysis(),
+            primary,
+        )
 
     def derive_branch(self, repo: str, from_branch: str, *, primary_repository: str | None = None) -> str | None:
         """分支推导：主仓库/overrides/dev_branches/same_name；返回目标分支，None 表示无法推导。

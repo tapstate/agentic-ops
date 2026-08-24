@@ -1,0 +1,32 @@
+operation: fetch_ci_artifact
+workplane: developer
+version: 1
+purpose: 下载当前失败 Workflow Run 唯一匹配的 GitHub Artifact，并安全保存为受管证据。
+task_type: ci_check
+allowed_stages: [ci_validation]
+required_inputs: [manifest]
+preconditions:
+  - current_attempt_must_be_failed
+  - github_artifact_read_must_be_explicitly_authorized
+output:
+  id: {type: integer}
+  name: {type: string}
+  workflow_run_id: {type: integer}
+  sha256: {type: string}
+  size_bytes: {type: integer}
+  files: {type: array}
+  archive_path: {type: string}
+  extracted_path: {type: string}
+  downloaded: {type: boolean}
+  agentic_next_action: {type: string}
+failure:
+  codes: [ci_artifact_not_ready, ci_artifact_read_failed, ci_artifact_download_failed, ci_artifact_missing, ci_artifact_ambiguous, ci_artifact_unsafe, ci_artifact_limit_exceeded, ci_artifact_digest_mismatch, ci_artifact_state_conflict]
+side_effects:
+  - write_only_to_current_task_run_ci_evidence
+  - must_not_modify_business_source
+human_gate:
+  required: false
+retry_policy:
+  retryable: true
+  max_attempts: 1
+  redo_from_stage: ci_validation

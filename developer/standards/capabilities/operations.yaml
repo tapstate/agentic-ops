@@ -13,11 +13,42 @@ capabilities:
   - id: check_ci_status
     source: contract
     contract: contracts/operations/check-ci-status.yaml
-    status: capability_gap
+    status: implemented
     visibility: public
-    commands: []
-    summary: 拉取请求 CI 状态检查目标契约，尚未迁移到 Python Runtime。
-    next_action: 请使用项目认可的 GitHub 或 CI 工具只读检查，并在任务完成后提交能力改进建议。
+    commands:
+      - [task-run, probe-ci]
+    summary: 对 development_change_v2 的当前 PR Head/Base 读取 GitHub Workflow 事实，自动判定是否需要 CI；需要时严格核对 Profile 必需检查、5 分钟启动与执行后 10 分钟完成截止时间及修复预算。
+    next_action: not_required 或 passed 时结束本次 AIAgent 运行；pending 时按返回间隔重试；failed 时获取唯一匹配 Artifact；判定未知时转人工。
+
+  - id: fetch_ci_artifact
+    source: contract
+    contract: contracts/operations/fetch-ci-artifact.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task-run, fetch-ci-artifact]
+    summary: 从当前失败 Workflow Run 下载唯一匹配的 GitHub Artifact，核对摘要和版本化大小上限，并安全展开为不可覆盖的受管证据。
+    next_action: 下载成功后执行 parse-ci-report；缺失、歧义、过期、越界、链接或路径穿越时停止。
+
+  - id: parse_ci_report
+    source: contract
+    contract: contracts/operations/parse-ci-report.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task-run, parse-ci-report]
+    summary: 把受管 Artifact 中 Maven Failsafe XML 解析成脱敏、可复现并绑定 Artifact 摘要的结构化失败报告。
+    next_action: 先把结构化报告分类；只有明确代码缺陷可进入修复，不支持的格式、统计冲突或其它原因必须人工介入。
+
+  - id: record_ci_remediation
+    source: contract
+    contract: contracts/operations/record-ci-remediation.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task-run, record-ci-remediation]
+    summary: 只把唯一分类为可重试代码缺陷的 CI 失败事件绑定到授权内修复提交、最终远端 Head 回读和有限修复预算，防止其它失败被自动修复。
+    next_action: 记录成功后对新 PR Head 重新执行 probe-ci；预算耗尽时停止并请求研发工程师决策。
 
   - id: conf_get
     source: contract
@@ -356,6 +387,46 @@ capabilities:
     summary: Runtime 内部写入当前任务 analysis 或 plan 本地报告，不是 Jira 回写或完成证据。
     next_action: 仅由经过版本化 Skill 的任务流程调用；不得把本地报告视为 Jira 事实。
 
+  - id: repository_branch_assess
+    source: contract
+    contract: contracts/operations/repository-branch-assess.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task, repositories, assess]
+    summary: 只读刷新源码池远端并生成逐仓分支建议与固定 SHA；建议不具有建树或编码权限。
+    next_action: 向研发工程师展示完整建议、问题版本和差异，再进入仓库分支关系确认。
+
+  - id: repository_branch_confirm
+    source: contract
+    contract: contracts/operations/repository-branch-confirm.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task, repositories, confirm]
+    summary: 校验研发工程师修正后的完整仓库分支关系；只有显式 confirm 才持久化，且确认时不创建工作树。
+    next_action: 后续仅在实际需要修改某仓库时，从确认表按需准备对应工作树。
+
+  - id: task_worktree_prepare
+    source: contract
+    contract: contracts/operations/task-worktree-prepare.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task, worktrees, prepare]
+    summary: 只从用户确认关系表为一个仓库创建或精确复用任务子工作树，并绑定任务分支与来源上下文。
+    next_action: 在返回的精确任务工作树中完成该仓库的编码与验证；新增仓库须重新确认范围。
+
+  - id: task_worktree_cleanup
+    source: contract
+    contract: contracts/operations/task-worktree-cleanup.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task, worktrees, cleanup]
+    summary: Jira 完成总结与完成状态回读后，整体预检并非强制清理任务登记的精确子工作树，永不删除源码池成员。
+    next_action: 任一 dirty、Head 漂移或远端未承接均停止；满足门禁后一次清理全部登记工作树。
+
   - id: resume_takeover
     source: contract
     contract: contracts/operations/resume-takeover.yaml
@@ -374,7 +445,7 @@ capabilities:
     commands:
       - [takeover]
     summary: Jira 任务单命令接管能力：不带 issue_key 时只读列出候选；带 issue_key 时由 Runtime 绑定明确的接管指令，校验经办人和状态映射，自动判断新接管、接纳存量或恢复，并通过同一 Saga 完成 Comment、Status 与本地状态回读。不读写 Agentic 自定义字段。
-    next_action: 无编号时展示候选并由研发工程师选择；带编号时直接执行 ao-work takeover <KEY>。非新接管必须明文提示并留痕，不得要求用户确认内部摘要或授权标识。
+    next_action: 无编号时展示候选并由研发工程师选择；带编号时直接执行 ao-work takeover <KEY>。接管完成后先分析并确认完整仓库分支关系，确认前不得创建工作树或建立仓库来源快照。
 
   - id: task_start
     source: runtime
@@ -384,7 +455,7 @@ capabilities:
     commands:
       - [task, start]
     summary: 兼容旧运行的内部来源上下文准备原子能力；用户任务入口固定为 takeover，不应直接选择 task start。
-    next_action: 仅在 Runtime 兼容恢复明确要求时使用；正常流程由 takeover 直接建立来源快照并进入信息分析。
+    next_action: 仅在独立 checkout 兼容恢复明确要求时使用；池模式正常流程由 takeover 进入仓库分析/确认，再按需建树并建立精确来源快照。
 
   - id: task_intake_assess
     source: contract
@@ -393,7 +464,7 @@ capabilities:
     visibility: public
     commands:
       - [task, intake, assess]
-    summary: 接管后基于 Jira、Profile、工作空间和 Runtime 快照校验缺项、证据化补全、源码基线和稳定摘要；普通准入分析不设置用户确认门禁。
+    summary: 仓库分支关系确认并按需建立精确工作树来源后，基于 Jira、Profile、工作空间和 Runtime 快照校验缺项、证据化补全、源码基线和稳定摘要。
     next_action: 信息完整时直接形成并分级方案；缺项按允许次数补充证据，事实冲突或重试耗尽进入风险决策。
 
   - id: solution_gate

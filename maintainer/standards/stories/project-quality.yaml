@@ -319,3 +319,30 @@ stories:
     evidence_requirements:
       - 远程模式可运行验证安装与本地模式流程验证结果
       - 无标记非 main 阻断与 verification_branch_unreachable 门禁结果
+
+  - story_id: DE-008
+    category: developer
+    title: PR CI 持续监控与失败自动修复
+    document: docs/user-stories/development-engineer/de-008-pr-ci-remediation.md
+    protected_paths:
+      - developer/runtime/src/ao_work/task_run/**
+      - developer/runtime/src/ao_work/config/**
+      - developer/tests/runtime/test_ci_runtime.py
+      - developer/tests/fixtures/ci/**
+      - developer/skills/run-task-to-pr-test/**
+      - developer/standards/contracts/operations/*ci*.yaml
+      - developer/standards/contracts/processes/development-change-v2.yaml
+      - developer/standards/capabilities/operations.yaml
+      - developer/standards/stages/stages.yaml
+      - shared/integration/task-to-pr-manifest.schema.json
+      - shared/integration/task-to-pr-result.schema.json
+      - maintainer/runtime/src/ao_maint/integration/task_to_pr.py
+      - maintainer/tests/runtime/test_ci_completion_contract.py
+    acceptance_checks:
+      - python_runtime
+      - resource_contracts
+      - story_registry
+    evidence_requirements:
+      - 最终 PR Head/Base、GitHub Workflow 自动判定、必需检查严格 SUCCESS、固定截止时间和恢复状态证据
+      - Artifact 安全、Failsafe 脱敏解析、三次修复预算和幂等测试
+      - v1 兼容、v2 取消内置代码审查及禁止合并/Jira Done/发布的边界证据
