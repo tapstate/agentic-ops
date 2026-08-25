@@ -243,7 +243,7 @@ class TapdataProfileBranchDerivationTest(unittest.TestCase):
         self.assertEqual("develop", plan.from_branch)
         self.assertEqual(expected_repositories, set(by_repository))
         self.assertEqual("develop", by_repository["tapdata/tapdata"])
-        self.assertEqual("main", by_repository["tapdata/tapdata-common-lib"])
+        self.assertEqual("develop", by_repository["tapdata/tapdata-common-lib"])
         self.assertTrue(set(dict(profile.branch_derivation.dev_branches)).issubset(profile.repository_candidates()))
 
     def test_declared_section_wins(self) -> None:
