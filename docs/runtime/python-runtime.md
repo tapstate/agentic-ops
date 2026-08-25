@@ -172,6 +172,8 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 任务领域建议当前以 Jira 描述“目标仓库”首行和 Profile 默认仓库为主要线索；无法唯一判断时必须由用户确认 `product`、`assistant` 或 `taptest`，不得以分析不准为由阻断。创建失败时 Runtime 会尽力回滚本次新建目录；回滚结果不可信、已有代码事实、文件或符号链接占用目标路径时仍需结构化人工处理，不能覆盖现有代码。
 
+所有 CLI 成功、失败和恢复结果通过统一输出层规范化 `agentic_next_action`。该结构除原有执行者、动作、输入、授权、停止和重试门禁外，固定包含能力或决策编号、命令 argv/可读命令、已绑定参数、输入资料来源和原因。唯一现役操作会提供 `ao-work` 命令；多操作分支、人工决策和能力缺口明确标注为无需命令，并保留候选操作和所需人工资料，避免把不完整信息伪装成可执行命令。
+
 初始化生成的业务工作空间 `AGENTS.md` 固定进入 developer 工作面，不得引用根 `AGENTS.md` 或 `maintainer/`。developer 安装的 `user/identity.yaml` 与 `user/.env` 保存研发员身份和 Jira 凭据；`user/workspace-index.json` 只是可重建冲突索引。新工作空间使用 schema v5，只持 `install_identity_ref`、本地入口绑定和项目事实；schema v4 及更早格式与工作空间 `.agentic-ops/.env` 在凭证读取和联网前失败关闭，不扫描 PATH 或提供隐式迁移。
 
 初始化把准入 developer Skill 以普通文件副本写入工作空间 `.agents/skills/<name>/SKILL.md`，不会创建指向安装根的链接。为了让 Claude Code 与 Codex 发现同一套工作空间 Skill，Runtime 另外创建 `.claude/skills/<name> -> ../../.agents/skills/<name>` 相对 symlink 桥接；这是受管工作空间路径中唯一允许的 symlink 叶节点例外，不代表放宽通用路径策略。
