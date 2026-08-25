@@ -61,6 +61,37 @@ def _blocked(code: str, message: str, action: str, **details: Any) -> RuntimeErr
     )
 
 
+def _repository_next_action(
+    *,
+    executor: str,
+    action: str,
+    required_inputs: tuple[str, ...] = (),
+    allowed_operations: tuple[str, ...] = (),
+    requires_authorization: bool,
+    stop_workflow: bool,
+    reason: str,
+) -> dict[str, Any]:
+    """构造符合 Runtime 固定控制字段契约的仓库流程下一动作。"""
+    return {
+        "executor": executor,
+        "action": action,
+        "required_inputs": list(required_inputs),
+        "allowed_operations": list(allowed_operations),
+        "requires_authorization": requires_authorization,
+        "stop_workflow": stop_workflow,
+        "ownership_effect": "none",
+        "reason": reason,
+        "retry_gate": {
+            "allowed": False,
+            "max_additional_attempts": 0,
+            "same_input_allowed": False,
+            "requires_state_readback": False,
+            "requires_recorded_retry_event": False,
+            "on_exhausted": "not_applicable",
+        },
+    }
+
+
 def execute_repository_assess(
     workspace: Workspace,
     install_root: Path,
@@ -181,12 +212,15 @@ def execute_repository_assess(
             ],
         },
         "repository_scope_path": recorded["path"],
-        "agentic_next_action": {
-            "action": "review_and_confirm_repository_branch_mapping",
-            "allowed_operations": ["task_repositories_confirm"],
-            "requires_authorization": True,
-            "stop_workflow": True,
-        },
+        "agentic_next_action": _repository_next_action(
+            executor="human",
+            action="review_and_confirm_repository_branch_mapping",
+            required_inputs=("confirmation_template",),
+            allowed_operations=("task_repositories_confirm",),
+            requires_authorization=True,
+            stop_workflow=True,
+            reason="仓库分支建议尚未确认，必须先审阅完整关系表。",
+        ),
     }
 
 
@@ -401,11 +435,15 @@ def execute_repository_confirm(
             **preview,
             "confirmation_required": True,
             "side_effects": [],
-            "agentic_next_action": {
-                "action": "confirm_repository_branch_mapping",
-                "requires_authorization": True,
-                "stop_workflow": True,
-            },
+            "agentic_next_action": _repository_next_action(
+                executor="human",
+                action="confirm_repository_branch_mapping",
+                required_inputs=("repository_branch_map",),
+                allowed_operations=("task_repositories_confirm",),
+                requires_authorization=True,
+                stop_workflow=True,
+                reason="请确认完整仓库分支关系表后再创建工作树。",
+            ),
         }
     result = store.confirm_repository_mapping(
         issue_key,
@@ -418,12 +456,15 @@ def execute_repository_confirm(
         "confirmation_required": False,
         "mapping_status": "confirmed",
         "repository_scope_path": result["path"],
-        "agentic_next_action": {
-            "action": "prepare_confirmed_repository_worktree_when_needed",
-            "allowed_operations": ["task_worktrees_prepare"],
-            "requires_authorization": False,
-            "stop_workflow": False,
-        },
+        "agentic_next_action": _repository_next_action(
+            executor="ai",
+            action="prepare_confirmed_repository_worktree_when_needed",
+            required_inputs=("repository",),
+            allowed_operations=("task_worktrees_prepare",),
+            requires_authorization=False,
+            stop_workflow=False,
+            reason="仅在已确认关系表范围内按需准备目标仓库工作树。",
+        ),
     }
 
 
@@ -566,12 +607,15 @@ def execute_worktree_prepare(
         "worktree_baseline_sha": head.stdout.strip(),
         "created": created,
         "intake_source": source_context["intake_source"],
-        "agentic_next_action": {
-            "action": "assess_task_intake",
-            "allowed_operations": ["task_intake_assess"],
-            "requires_authorization": False,
-            "stop_workflow": False,
-        },
+        "agentic_next_action": _repository_next_action(
+            executor="ai",
+            action="assess_task_intake",
+            required_inputs=("issue_key", "agentic_run_id", "intake_input_file"),
+            allowed_operations=("task_intake_assess",),
+            requires_authorization=False,
+            stop_workflow=False,
+            reason="已从确认关系表创建工作树，继续进行任务信息分析。",
+        ),
     }
 
 
