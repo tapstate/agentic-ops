@@ -625,13 +625,89 @@ class WorkspaceInitTest(unittest.TestCase):
                     "Failed to connect to github.com port 443: Operation timed out\n"
                 )
             }
-            exit_code, payload, _, _ = self.run_cli(
-                self._init_common_args(workspace, "network-block"),
-                remote_denied=denied,
-            )
+            with mock.patch("ao_work.workspace_init.service.time.sleep") as sleep:
+                exit_code, payload, _, _ = self.run_cli(
+                    self._init_common_args(workspace, "network-block"),
+                    remote_denied=denied,
+                )
             self.assertEqual(2, exit_code)
             self.assertEqual("source_repository_access_failed", payload["code"])
+            self.assertEqual(3, payload["remote_access_attempts"])
+            self.assertEqual(2, sleep.call_count)
             self.assertNotIn("skipped_repositories", payload)
+
+    def test_remote_access_retries_transient_ssh_close_then_recovers(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            initializer = WorkspaceInitializer(
+                Path(temporary), Path(temporary) / "install"
+            )
+            transient = subprocess.CompletedProcess(
+                [],
+                128,
+                "",
+                "Connection closed by UNKNOWN port 65535\n"
+                "fatal: Could not read from remote repository.\n",
+            )
+            recovered = subprocess.CompletedProcess([], 0, "HEAD\n", "")
+            with (
+                mock.patch.object(
+                    initializer, "_run_git", side_effect=[transient, recovered]
+                ) as run_git,
+                mock.patch("ao_work.workspace_init.service.time.sleep") as sleep,
+            ):
+                initializer._require_remote_access(
+                    "git@github.com:tapdata/tapdata-common-lib.git"
+                )
+
+            self.assertEqual(2, run_git.call_count)
+            sleep.assert_called_once_with(1.0)
+
+    def test_remote_access_retries_git_check_timeout_then_recovers(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            initializer = WorkspaceInitializer(
+                Path(temporary), Path(temporary) / "install"
+            )
+            timeout = RuntimeErrorResult(
+                code="git_check_failed",
+                message="Git 前置检查失败",
+                retry_safe=True,
+                details={"git_timeout_seconds": 60.0},
+            )
+            recovered = subprocess.CompletedProcess([], 0, "HEAD\n", "")
+            with (
+                mock.patch.object(
+                    initializer, "_run_git", side_effect=[timeout, recovered]
+                ) as run_git,
+                mock.patch("ao_work.workspace_init.service.time.sleep") as sleep,
+            ):
+                initializer._require_remote_access(
+                    "git@github.com:tapdata/tapdata-common-lib.git"
+                )
+
+            self.assertEqual(2, run_git.call_count)
+            sleep.assert_called_once_with(1.0)
+
+    def test_remote_access_does_not_retry_permission_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            initializer = WorkspaceInitializer(
+                Path(temporary), Path(temporary) / "install"
+            )
+            denied = subprocess.CompletedProcess(
+                [], 128, "", "git@github.com: Permission denied (publickey).\n"
+            )
+            with (
+                mock.patch.object(initializer, "_run_git", return_value=denied) as run_git,
+                mock.patch("ao_work.workspace_init.service.time.sleep") as sleep,
+                self.assertRaises(RuntimeErrorResult) as captured,
+            ):
+                initializer._require_remote_access(
+                    "git@github.com:tapdata/tapdata-common-lib.git"
+                )
+
+            self.assertEqual("source_repository_access_failed", captured.exception.code)
+            self.assertEqual(1, captured.exception.details["remote_access_attempts"])
+            run_git.assert_called_once()
+            sleep.assert_not_called()
 
     def test_explicit_source_root_reused_without_readme(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
