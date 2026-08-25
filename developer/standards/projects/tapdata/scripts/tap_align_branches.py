@@ -276,6 +276,18 @@ def derive_target(
 ) -> tuple[str, str]:
     """返回 (target, reason)。target 为 UNRESOLVED 时表示阻塞。"""
 
+    common_lib_target = plugin_cache.get("common_lib_target", "")
+    common_lib_reason = plugin_cache.get("common_lib_reason", "")
+    if repo == "tapdata-common-lib" and common_lib_target:
+        return common_lib_target, common_lib_reason
+    if repo in ("tapdata-connectors", "tapdata-connectors-enterprise") and common_lib_target:
+        if branch_exists(repo, common_lib_target, root, remote, remote_only=remote_only):
+            return common_lib_target, f"matches tapdata-common-lib: {common_lib_target}"
+        return (
+            "UNRESOLVED",
+            f"tapdata-common-lib target {common_lib_target} not found in {repo}",
+        )
+
     # 显式指定 enterprise/web 分支
     if repo == "tapdata-enterprise" and enterprise_branch:
         if branch_exists(
@@ -413,6 +425,24 @@ def plan_rows(
     unknown = requested.difference((*CORE_REPOS, *KEEP_REPOS))
     if unknown:
         raise AlignError(f"unsupported repositories: {', '.join(sorted(unknown))}")
+
+    # connector 必须与 common-lib 使用同一目标分支。即使本轮只请求 connector，
+    # 也先从 common-lib 的 PluginKit 推导结果建立唯一基线；缺少该分支时由
+    # derive_target 返回 UNRESOLVED，不能再按 connector 自身候选分支静默降级。
+    if requested.intersection({"tapdata-connectors", "tapdata-connectors-enterprise"}):
+        common_lib_target, common_lib_reason = derive_target(
+            "tapdata-common-lib",
+            tap_branch,
+            marker,
+            enterprise_branch,
+            web_branch,
+            root,
+            remote,
+            plugin_cache,
+            remote_only=remote_only,
+        )
+        plugin_cache["common_lib_target"] = common_lib_target
+        plugin_cache["common_lib_reason"] = common_lib_reason
 
     for repo in CORE_REPOS:
         if repo not in requested:

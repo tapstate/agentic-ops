@@ -363,10 +363,7 @@ def _resolve_non_pool_branch_context(
     domain = profile.domain_for(repository)
     problem_version = ""
     if domain is not None:
-        product_alignment = (
-            profile.profile_id == "tapdata"
-            and domain.baseline_repository == "tapdata/tapdata"
-        )
+        product_alignment = domain.baseline_repository == "tapdata/tapdata"
         problem_version = resolve_from_branch(
             profile,
             sections,

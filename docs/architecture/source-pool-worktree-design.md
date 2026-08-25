@@ -144,22 +144,18 @@ repositories:
   worktree_domains:          # 任务工作树领域；目标仓库必须恰好属于一个领域
     - id: product
       baseline_repository: tapdata/tapdata
-      repositories: [tapdata/tapdata, tapdata/tapdata-enterprise, tapdata/tapdata-web]
+      repositories: [tapdata/tapdata, tapdata/tapdata-enterprise, tapdata/tapdata-web, tapdata/tapdata-connectors, tapdata/tapdata-connectors-enterprise]
     - id: assistant
       baseline_repository: tapdata/feishu_robot
       repositories: [tapdata/feishu_robot]
     - id: automation-test
       baseline_repository: tapdata/t-layer3-test
       repositories: [tapdata/t-layer3-test]
-    - id: connector
-      baseline_repository: tapdata/tapdata-connectors
-      problem_version_repository: tapdata/tapdata
-      repositories: [tapdata/tapdata-connectors, tapdata/tapdata-connectors-enterprise]
 ```
 
 - `default`：任务目标仓库缺省值（兼容既有校验与索引）。
 - `list`：profile 允许的全部业务仓库（17 个，含文档类 `docs`/`docs-en`；fork 如 `Hazelcast`/`mongo` 不默认纳入，任务明确要求时按需挂载）；池成员全集与 target 校验范围。
-- `worktree_domains`：按候选仓库确定分析领域。`baseline_repository` 表示领域自身基线；`problem_version_repository` 单独表示问题版本来源。TapData TM、FE、connector 的问题版本来源统一是 `tapdata/tapdata`，但 connector 候选领域仍保持独立。领域只决定分析建议范围，不授权预建工作树。
+- `worktree_domains`：按候选仓库确定分析领域。`baseline_repository` 表示领域自身基线；`problem_version_repository` 单独表示问题版本来源。TapData TM、FE、connector 的问题版本来源统一是 `tapdata/tapdata`，connector 归入 `product` 候选领域。领域只决定分析建议范围，不授权预建工作树。
 - `analysis_mount`：仅为尚未声明领域的旧 Profile 保留的兼容策略；TapData 不使用该回退。
 - 最小可用 Profile 可只声明 `default` 与 `list`，但生产 TapData Profile 必须声明 `worktree_domains`；`branches` 可随分支事实渐进补充。
 
@@ -260,7 +256,7 @@ branches:
 - `developer/runtime/src/ao_work/workspace.py`：`validate_business_source_root` 增加池根/主 checkout 约束；工作树路径规范化与校验函数。
 - `developer/runtime/src/ao_work/workspace_init/cli.py`：`--source-pool-root` 参数；交互确认摘要展示池根、池成员全集与任务工作树路径规则。
 - `developer/runtime/src/ao_work/config/`：研发员级配置读取（`~/.agentic-ops/user/config.yaml` 的 `source_pool_root`）；ProjectProfile 增加 `repositories.list/worktree_domains`、`branches`（derive_from/default_rule/overrides）。
-- `developer/standards/projects/tapdata/profile.yaml`：`repositories` 扩展 list（17 个业务仓库，含文档类，fork 按需）与 `worktree_domains`（产品、小助手、自动化测试、连接器）；`branches` 推导配置（同名默认，overrides 渐进补充）；`problem_version` 保留 Jira Description 输入声明，`target_branch` 由任务工作树对齐结果提供。
+- `developer/standards/projects/tapdata/profile.yaml`：`repositories` 扩展 list（17 个业务仓库，含文档类，fork 按需）与 `worktree_domains`（产品、小助手、自动化测试；connector 归入产品）；`branches` 推导配置（同名默认，overrides 渐进补充）；`problem_version` 保留 Jira Description 输入声明，`target_branch` 由任务工作树对齐结果提供。
 - `developer/standards/contracts/operations/workspace-init.yaml`：`source_pool_root` 必配输入、`source_root` 语义说明、postcondition 增加池成员/身份隔离断言、failure 增加新失败码。
 - `developer/bootstrap/install.sh` / 配置命令：安装/首次配置时引导写入 `source_pool_root`（必配）。
 
