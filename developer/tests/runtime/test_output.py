@@ -54,6 +54,25 @@ class OutputTest(unittest.TestCase):
         self.assertEqual(["issue_key"], next_action["required_inputs"])
         self.assertEqual(["takeover"], next_action["allowed_operations"])
 
+    def test_ci_timeout_routes_to_analysis_and_user_decision(self) -> None:
+        next_action = success(
+            "task-run_probe-ci",
+            ci_status="completion_timeout",
+            pr_url="https://github.com/example/repo/pull/1",
+            required_checks=[],
+            workflow_runs=[],
+        )["agentic_next_action"]
+        self.assertEqual("ai", next_action["executor"])
+        self.assertEqual("analyze_ci_timeout_and_request_user_decision", next_action["action"])
+        self.assertTrue(next_action["requires_authorization"])
+        self.assertTrue(next_action["stop_workflow"])
+
+    def test_ci_report_routes_to_explicit_remediation_decision(self) -> None:
+        next_action = success("task-run_parse-ci-report")["agentic_next_action"]
+        self.assertEqual("analyze_ci_failure_and_request_user_decision", next_action["action"])
+        self.assertEqual(["task-run_authorize-ci-remediation"], next_action["allowed_operations"])
+        self.assertTrue(next_action["requires_authorization"])
+
     def test_jira_inspect_does_not_route_to_internal_task_start(self) -> None:
         next_action = success("jira_inspect")["agentic_next_action"]
 

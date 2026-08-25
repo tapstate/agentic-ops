@@ -18,7 +18,7 @@ capabilities:
     commands:
       - [task-run, probe-ci]
     summary: 对 development_change_v2 的当前 PR Head/Base 读取 GitHub Workflow 事实，自动判定是否需要 CI；需要时严格核对 Profile 必需检查、5 分钟启动与执行后 10 分钟完成截止时间及修复预算。
-    next_action: not_required 或 passed 时结束本次 AIAgent 运行；pending 时按返回间隔重试；failed 时获取唯一匹配 Artifact；判定未知时转人工。
+    next_action: not_required 或 passed 时结束本次 AIAgent 运行；pending 时按返回间隔重试；失败时采集 Artifact 与 Runner 日志；超时时输出 PR/Workflow 事实并进入用户决策，不静默无限等待。
 
   - id: fetch_ci_artifact
     source: contract
@@ -37,8 +37,28 @@ capabilities:
     visibility: public
     commands:
       - [task-run, parse-ci-report]
-    summary: 把受管 Artifact 中 Maven Failsafe XML 解析成脱敏、可复现并绑定 Artifact 摘要的结构化失败报告。
-    next_action: 先把结构化报告分类；只有明确代码缺陷可进入修复，不支持的格式、统计冲突或其它原因必须人工介入。
+    summary: 把受管 Artifact 中 Maven Failsafe XML 与 Runner 日志事实组合为脱敏、可复现并绑定 Artifact 摘要的结构化失败决策包。
+    next_action: 先向用户给出证据、归因和选项；只有用户明确决定修复且代码缺陷结论清晰时才能进入修复。
+
+  - id: fetch_ci_runner_log
+    source: contract
+    contract: contracts/operations/fetch-ci-runner-log.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task-run, fetch-ci-runner-log]
+    summary: 只读采集当前唯一失败 Workflow Run 的脱敏 `--log-failed` 摘要；超时或日志不可读时保留真实不可用原因。
+    next_action: 失败时与 Artifact 报告共同形成决策包；超时时分析当前 PR、检查和 Workflow 事实后请求用户决定是否继续等待或转人工。
+
+  - id: authorize_ci_remediation
+    source: contract
+    contract: contracts/operations/authorize-ci-remediation.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task-run, authorize-ci-remediation]
+    summary: 将用户对当前失败证据作出的“修复”决定绑定到 Artifact、Runner 日志、失败事件和既有工作项授权。
+    next_action: 决策记录后才能在既定范围内修复、验证、提交推送并回到 PR CI 观察。
 
   - id: record_ci_remediation
     source: contract
@@ -47,7 +67,7 @@ capabilities:
     visibility: public
     commands:
       - [task-run, record-ci-remediation]
-    summary: 只把唯一分类为可重试代码缺陷的 CI 失败事件绑定到授权内修复提交、最终远端 Head 回读和有限修复预算，防止其它失败被自动修复。
+    summary: 只把用户明确决定修复且唯一分类为可重试代码缺陷的 CI 失败事件绑定到授权内修复提交、最终远端 Head 回读和有限修复预算，防止其它失败被自动修复。
     next_action: 记录成功后对新 PR Head 重新执行 probe-ci；预算耗尽时停止并请求研发工程师决策。
 
   - id: conf_get
@@ -464,8 +484,18 @@ capabilities:
     visibility: public
     commands:
       - [task, intake, assess]
-    summary: 仓库分支关系确认并按需建立精确工作树来源后，基于 Jira、Profile、工作空间和 Runtime 快照校验缺项、证据化补全、源码基线和稳定摘要。
+    summary: 仓库分支关系确认并按需建立精确工作树来源后，基于 Jira Description 的脱敏任务目标/必要事实、补充评论线索、Profile、工作空间和 Runtime 快照校验缺项、证据化补全、源码基线和稳定摘要。
     next_action: 信息完整时直接形成并分级方案；缺项按允许次数补充证据，事实冲突或重试耗尽进入风险决策。
+
+  - id: read_task_facts
+    source: contract
+    contract: contracts/operations/read-task-facts.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task, facts]
+    summary: 只读提取已接管 Jira 任务 Description 的脱敏目标、问题版本、异常摘要、验收线索，以及评论中的补充线索和候选仓库/分支；绝不输出评论全文或把线索当作确认映射。
+    next_action: 接管后或任务分析前可执行 task facts --issue-key <KEY>；读取失败、内容不支持或所有权不一致时按稳定失败码处理，不要以聊天上下文补全。
 
   - id: solution_gate
     source: contract

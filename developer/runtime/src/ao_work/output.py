@@ -221,6 +221,7 @@ _SUCCESS_NEXT_ACTIONS: dict[str, dict[str, Any]] = {
         "allowed_operations": [
             "task-run_probe-ci",
             "task-run_fetch-ci-artifact",
+            "task-run_fetch-ci-runner-log",
             "jira_comment_plan",
             "jira_worklog_plan",
             "task-run_probe-jira-write",
@@ -228,12 +229,24 @@ _SUCCESS_NEXT_ACTIONS: dict[str, dict[str, Any]] = {
     },
     "task-run_fetch-ci-artifact": {
         "actor": "ao_work",
-        "action": "parse_verified_ci_artifact",
+        "action": "collect_runner_log_for_ci_failure",
+        "allowed_operations": ["task-run_fetch-ci-runner-log"],
+    },
+    "task-run_fetch-ci-runner-log": {
+        "actor": "ao_work",
+        "action": "parse_combined_ci_evidence",
         "allowed_operations": ["task-run_parse-ci-report"],
     },
     "task-run_parse-ci-report": {
         "actor": "ai",
-        "action": "classify_structured_ci_failure_before_remediation",
+        "action": "analyze_ci_failure_and_request_user_decision",
+        "allowed_operations": ["task-run_authorize-ci-remediation"],
+        "requires_authorization": True,
+        "stop_workflow": True,
+    },
+    "task-run_authorize-ci-remediation": {
+        "actor": "ai",
+        "action": "repair_confirmed_ci_code_and_return_to_pr",
         "allowed_operations": [
             "task-run_record",
             "task-run_verify",
@@ -401,6 +414,23 @@ def _success_next_action(
                     "on_exhausted": "escalate_to_human",
                 },
             }
+    if operation == "task-run_probe-ci" and payload.get("ci_status") in {
+        "start_timeout",
+        "completion_timeout",
+    }:
+        configured = {
+            "actor": "ai",
+            "action": "analyze_ci_timeout_and_request_user_decision",
+            "required_inputs": [
+                "ci_status",
+                "pr_url",
+                "required_checks",
+                "workflow_runs",
+            ],
+            "allowed_operations": [],
+            "requires_authorization": True,
+            "stop_workflow": True,
+        }
     executor = configured.get("actor")
     if executor not in NEXT_ACTION_ACTORS:
         raise ValueError(f"unsupported next action executor: {executor}")

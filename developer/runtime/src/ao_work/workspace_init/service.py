@@ -65,6 +65,10 @@ MANAGED_CODE_START = "<!-- agentic-ops:workspace-code:start -->"
 MANAGED_CODE_END = "<!-- agentic-ops:workspace-code:end -->"
 WORKSPACE_SKILLS_ROOT = Path(".agents") / "skills"
 WORKSPACE_ENTRY = Path(".agentic-ops") / "bin" / "ao-work"
+# `ls-remote` 是只读预检。短暂的 VPN/SSH/DNS 波动不应让一次工作空间初始化
+# 立即失败；重试仍必须是有限的，且绝不能扩大到 clone 或其它写操作。
+REMOTE_ACCESS_MAX_ATTEMPTS = 3
+REMOTE_ACCESS_RETRY_DELAYS = (1.0, 2.0)
 
 
 @dataclass(frozen=True)
@@ -802,7 +806,7 @@ class WorkspaceInitializer:
                         f"初始化预检：检查源码仓库 {repository}（{index}/{total}）"
                     )
                     url = _repository_url(repository)
-                    result = self._run_git(["ls-remote", url, "HEAD"])
+                    result, attempts = self._read_remote_head(url, repository=repository)
                     if result.returncode == 0:
                         continue
                     reason = _classify_remote_permission_error(result.stderr)
@@ -815,6 +819,7 @@ class WorkspaceInitializer:
                             details={
                                 "repository": repository,
                                 "stderr_tail": _stderr_tail(result.stderr),
+                                "remote_access_attempts": attempts,
                             },
                         )
                     # 权限错误只作为预检诊断：apply 阶段仍必须实际尝试初始化
@@ -894,13 +899,73 @@ class WorkspaceInitializer:
         checks.append({"check": "source_root_conflict", "status": "passed"})
 
     def _require_remote_access(self, remote: str) -> None:
-        result = self._run_git(["ls-remote", remote, "HEAD"])
+        result, attempts = self._read_remote_head(remote)
         if result.returncode != 0:
             raise _blocked(
                 "source_repository_access_failed",
                 "无法只读访问 Project Profile 配置的源码仓库",
                 "请检查 GitHub 登录、SSH key、网络和仓库权限后重试",
+                details={
+                    "stderr_tail": _stderr_tail(result.stderr),
+                    "remote_access_attempts": attempts,
+                },
             )
+
+    def _read_remote_head(
+        self, remote: str, *, repository: str | None = None
+    ) -> tuple[subprocess.CompletedProcess[str], int]:
+        """有限重试只读 ``git ls-remote`` 的明确瞬态失败。
+
+        权限/仓库身份错误和未知失败保留一次失败语义，避免把配置错误隐藏成
+        长时间等待。`clone` 不经此方法，继续遵循流式进度、无超时的独立策略。
+        """
+        subject = repository or remote
+        for attempt in range(1, REMOTE_ACCESS_MAX_ATTEMPTS + 1):
+            try:
+                result = self._run_git(["ls-remote", remote, "HEAD"])
+            except RuntimeErrorResult as error:
+                # `_run_git` 仅会把 OSError/TimeoutExpired 包装为该错误；在
+                # git 已通过前置存在性检查的路径中，它可视为本次远端检查的
+                # 瞬态失败，仍受同一有限次数约束。
+                if error.code != "git_check_failed":
+                    raise
+                if attempt == REMOTE_ACCESS_MAX_ATTEMPTS:
+                    raise _blocked(
+                        "source_repository_access_failed",
+                        f"无法只读访问源码仓库 {subject}",
+                        "请检查 GitHub 登录、SSH key、网络和仓库权限后重试",
+                        details={
+                            "remote_access_attempts": attempt,
+                            "last_error_code": error.code,
+                            **error.details,
+                        },
+                    ) from error
+                self._wait_for_remote_access_retry(
+                    subject, attempt, "Git 前置检查超时或系统错误"
+                )
+                continue
+
+            if result.returncode == 0:
+                return result, attempt
+
+            # 明确的权限/仓库身份错误不重试；未知错误也不猜测为网络故障。
+            if _classify_remote_permission_error(result.stderr) is not None:
+                return result, attempt
+            reason = _classify_remote_transient_error(result.stderr)
+            if reason is None or attempt == REMOTE_ACCESS_MAX_ATTEMPTS:
+                return result, attempt
+            self._wait_for_remote_access_retry(subject, attempt, reason)
+
+        raise AssertionError("远端检查重试次数配置无效")
+
+    @staticmethod
+    def _wait_for_remote_access_retry(subject: str, attempt: int, reason: str) -> None:
+        delay = REMOTE_ACCESS_RETRY_DELAYS[attempt - 1]
+        write_diagnostic(
+            f"初始化预检：源码仓库 {subject} 远端检查第 {attempt}/{REMOTE_ACCESS_MAX_ATTEMPTS} 次失败"
+            f"（{reason}），将在 {delay:.0f}s 后重试"
+        )
+        time.sleep(delay)
 
     def _ensure_source_checkout(self, candidate: WorkspaceCandidate) -> str:
         source = validate_business_source_root(candidate.root, candidate.source_root)
@@ -1716,6 +1781,22 @@ _PERMISSION_DENIED_MARKERS: tuple[tuple[str, str], ...] = (
     ("404", "HTTP 404（仓库不存在或无权限）"),
 )
 
+_TRANSIENT_REMOTE_ERROR_MARKERS: tuple[tuple[str, str], ...] = (
+    ("operation timed out", "连接超时"),
+    ("connection timed out", "连接超时"),
+    ("could not resolve hostname", "DNS 解析失败"),
+    ("temporary failure in name resolution", "DNS 临时失败"),
+    ("network is unreachable", "网络不可达"),
+    ("connection refused", "连接被拒绝"),
+    ("connection reset", "连接被重置"),
+    ("connection closed", "连接被关闭"),
+    ("remote end hung up unexpectedly", "远端意外断开"),
+    ("unexpected disconnect", "远端意外断开"),
+    ("broken pipe", "连接中断"),
+    ("kex_exchange_identification", "SSH 握手中断"),
+    ("ssh_exchange_identification", "SSH 握手中断"),
+)
+
 
 def _classify_remote_permission_error(stderr: str) -> str | None:
     """判断 git 远端访问失败的 stderr 是否属于权限/认证类错误。
@@ -1729,6 +1810,17 @@ def _classify_remote_permission_error(stderr: str) -> str | None:
         return None
     lowered = stderr.lower()
     for marker, reason in _PERMISSION_DENIED_MARKERS:
+        if marker in lowered:
+            return reason
+    return None
+
+
+def _classify_remote_transient_error(stderr: str) -> str | None:
+    """识别允许对只读远端预检做有限重试的传输层失败。"""
+    if not stderr:
+        return None
+    lowered = stderr.lower()
+    for marker, reason in _TRANSIENT_REMOTE_ERROR_MARKERS:
         if marker in lowered:
             return reason
     return None

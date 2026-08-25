@@ -73,8 +73,9 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
             mock.patch.object(
                 task_repository_scope,
                 "_live_context",
-                return_value=(context, object(), issue),
+                return_value=(context, object(), issue, object()),
             ),
+            mock.patch.object(task_repository_scope, "collect_task_facts", return_value={}),
             mock.patch.object(
                 task_repository_scope,
                 "resolve_source_pool_root",
@@ -216,7 +217,7 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
             mock.patch.object(
                 task_repository_scope,
                 "_live_context",
-                return_value=(context, object(), object()),
+                return_value=(context, object(), object(), object()),
             ),
             mock.patch.object(
                 task_repository_scope, "resolve_source_pool_root", return_value=Path("/pool")
@@ -320,8 +321,9 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
             mock.patch.object(
                 task_repository_scope,
                 "_live_context",
-                return_value=(context, object(), issue),
+                return_value=(context, object(), issue, object()),
             ),
+            mock.patch.object(task_repository_scope, "collect_task_facts", return_value={}),
             mock.patch.object(
                 task_repository_scope, "resolve_source_pool_root", return_value=pool
             ),
