@@ -52,6 +52,8 @@ ao-work capability show <operation>
 真实任务到 PR 测试使用以下本地审计入口：
 
 ```sh
+ao-work task-run prepare --issue-key <ISSUE-KEY>
+ao-work task-run authorize --issue-key <ISSUE-KEY> --confirmed-by <当前会话确认人> --confirm
 ao-work task-run open --manifest <workspace-relative-manifest.json>
 ao-work task-run record --manifest <workspace-relative-manifest.json> --event <workspace-relative-event.json>
 ao-work task-run probe-prohibition-baseline --manifest <workspace-relative-manifest.json>
@@ -64,6 +66,8 @@ ao-work task-run probe-prohibitions --manifest <workspace-relative-manifest.json
 ao-work task-run record-unverified-prohibitions --manifest <workspace-relative-manifest.json>
 ao-work task-run finalize --manifest <workspace-relative-manifest.json> --status <ready_for_pr_review|blocked|failed> --next-action <明确下一步>
 ```
+
+`prepare` 从当前 L1 solution、仓库确认表和唯一 prepared 任务工作树生成完整设计与连续执行授权包；用户只确认方案、范围、最终验证命令、允许/禁止动作和风险。确认后 `authorize` 由 Runtime 生成批准计划、路径和 canonical digest，Skill 直接使用返回的 `manifest_path` 执行 `open`，不再要求用户复制 run、文件路径或摘要。
 
 正式 manifest 还必须显式绑定两组不可推断的事实：`task_binding` 记录 canonical Jira issue 内容摘要、`inputs/` 下批准计划文件和该文件原始 UTF-8 SHA-256；`execution_identity` 复用工作空间初始化时已确认并写入 `agent.json` 的 Git author/committer 姓名邮箱及 GitHub actor login。Runtime 不得用操作系统用户名、主机名、全局 Git 配置或当前登录临场补齐这些字段；manifest 与工作空间身份漂移时必须阻断。
 

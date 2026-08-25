@@ -1,0 +1,53 @@
+operation: task_run_manifest
+version: 1
+workplane: developer
+actions:
+  - prepare
+  - authorize
+inputs:
+  prepare:
+    - issue_key
+  authorize:
+    - issue_key
+    - confirmed_by
+    - confirm
+facts:
+  - current_l1_solution
+  - execution_plan
+  - confirmed_repository_branch_map
+  - unique_prepared_worktree
+  - install_execution_identity
+  - project_profile
+prepare:
+  side_effects:
+    - write_local_managed_draft
+    - write_local_gate_audit
+    - must_not_write_external_system
+  output:
+    - confirmation_package
+    - confirmation_required
+authorize:
+  preconditions:
+    - current_confirmation_package_was_confirmed
+    - stable_facts_unchanged
+    - canonical_manifest_prevalidation_passed
+  output:
+    - approved_plan_path
+    - manifest_path
+    - authorization_reference
+    - manifest_sha256
+    - agentic_next_action
+human_gate:
+  required:
+    - solution_scope_verification_permissions_and_risks
+  forbidden:
+    - run_id
+    - managed_path
+    - approved_plan_sha256
+    - manifest_sha256
+failure:
+  - task_run_execution_plan_missing
+  - task_run_repository_worktree_missing
+  - task_run_multi_repository_unsupported
+  - task_run_manifest_draft_stale
+  - task_run_prepared_worktree_start_changed

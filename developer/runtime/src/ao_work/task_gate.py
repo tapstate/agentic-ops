@@ -312,7 +312,11 @@ class TaskGateService:
         }
         path = self._gate_path(issue_key, agentic_run_id, "solution.json")
         self._write(path, payload)
-        next_action = self._solution_next_action(level, solution_digest)
+        next_action = self._solution_next_action(
+            level,
+            solution_digest,
+            has_execution_plan="execution_plan" in normalized,
+        )
         self.store.record_gate_transition(
             issue_key,
             agentic_run_id,
@@ -478,7 +482,12 @@ class TaskGateService:
             "classification_evidence",
             "residual_risks",
         }
-        _require_exact_keys(payload, expected, "方案分级输入")
+        optional = {"execution_plan"}
+        if not expected <= set(payload) or not set(payload) <= expected | optional:
+            raise _invalid(
+                "solution_input_invalid",
+                "方案分级输入字段不完整或包含未知字段",
+            )
         if payload["schema_version"] != SCHEMA_VERSION:
             raise _invalid("solution_schema_version", "schema_version 必须为 1")
         intake_digest = _text(payload["intake_digest"], "intake_digest")
@@ -539,13 +548,107 @@ class TaskGateService:
         residual_risks = _string_list(
             payload["residual_risks"], "residual_risks"
         )
-        return {
+        normalized = {
             "intake_digest": intake_digest,
             "proposed_solution": proposed_solution,
             "scope": {"included": included, "excluded": excluded},
             "risk_flags": {name: bool(flags[name]) for name in RISK_FLAGS},
             "classification_evidence": normalized_evidence,
             "residual_risks": residual_risks,
+        }
+        if "execution_plan" in payload:
+            normalized["execution_plan"] = self._normalize_execution_plan(
+                payload["execution_plan"]
+            )
+        return normalized
+
+    def _normalize_execution_plan(self, value: Any) -> dict[str, Any]:
+        # 延迟导入，避免 task_run 包入口与 task_start/task_gate 的模块初始化环。
+        from ao_work.task_run.protocol import normalize_verification_command
+
+        if not isinstance(value, dict):
+            raise _invalid("solution_execution_plan_invalid", "execution_plan 必须是对象")
+        _require_exact_keys(
+            value,
+            {"change_repository", "verification", "review_summary"},
+            "execution_plan",
+        )
+        repository = _text(value["change_repository"], "execution_plan.change_repository")
+        if repository.count("/") != 1 or len(repository) > 256:
+            raise _invalid(
+                "solution_execution_plan_invalid",
+                "change_repository 必须是 owner/repository",
+            )
+        review_summary = _chinese_text(
+            value["review_summary"],
+            "execution_plan.review_summary",
+            maximum=16384,
+        )
+        raw_verification = value["verification"]
+        if not isinstance(raw_verification, list) or not raw_verification:
+            raise _invalid(
+                "solution_execution_plan_invalid",
+                "execution_plan.verification 必须是非空数组",
+            )
+        if len(raw_verification) > 32:
+            raise _invalid(
+                "solution_execution_plan_invalid",
+                "execution_plan.verification 最多包含 32 项",
+            )
+        seen: set[str] = set()
+        verification: list[dict[str, Any]] = []
+        normalization_changes: list[dict[str, Any]] = []
+        for index, raw in enumerate(raw_verification):
+            label = f"execution_plan.verification[{index}]"
+            if not isinstance(raw, dict):
+                raise _invalid("solution_execution_plan_invalid", f"{label} 必须是对象")
+            _require_exact_keys(
+                raw,
+                {"id", "command", "working_directory", "timeout_seconds"},
+                label,
+            )
+            verification_id = _text(raw["id"], f"{label}.id")
+            if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]{0,127}", verification_id):
+                raise _invalid("solution_execution_plan_invalid", f"{label}.id 无效")
+            if verification_id in seen:
+                raise _invalid("solution_execution_plan_invalid", "验证 id 不能重复")
+            seen.add(verification_id)
+            working_directory = _text(
+                raw["working_directory"], f"{label}.working_directory"
+            )
+            timeout = raw["timeout_seconds"]
+            if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 3600:
+                raise _invalid(
+                    "solution_execution_plan_invalid",
+                    f"{label}.timeout_seconds 必须是 1..3600 秒整数",
+                )
+            normalized = normalize_verification_command(
+                raw["command"],
+                working_directory,
+                label=label,
+            )
+            verification.append(
+                {
+                    "id": verification_id,
+                    "command": normalized["command"],
+                    "working_directory": working_directory,
+                    "timeout_seconds": timeout,
+                }
+            )
+            if normalized["changes"]:
+                normalization_changes.append(
+                    {
+                        "verification_id": verification_id,
+                        "original_command": normalized["original_command"],
+                        "normalized_command": normalized["command"],
+                        "changes": normalized["changes"],
+                    }
+                )
+        return {
+            "change_repository": repository,
+            "verification": verification,
+            "review_summary": review_summary,
+            "normalization_changes": normalization_changes,
         }
 
     def _profile_required_values(
@@ -621,9 +724,30 @@ class TaskGateService:
         return "L1"
 
     def _solution_next_action(
-        self, level: str, solution_digest: str
+        self,
+        level: str,
+        solution_digest: str,
+        *,
+        has_execution_plan: bool,
     ) -> dict[str, Any]:
         if level == "L1":
+            if has_execution_plan:
+                return _next_action(
+                    executor="ai",
+                    action="prepare_task_run_manifest",
+                    required_inputs=[
+                        "solution_digest",
+                        "proposed_solution",
+                        "scope",
+                        "execution_plan",
+                        "residual_risks",
+                    ],
+                    allowed_operations=["task_run_prepare"],
+                    requires_authorization=False,
+                    reason=(
+                        "事实、方案与执行计划已完整，由 Runtime 生成一次性设计和连续执行授权确认包"
+                    ),
+                )
             return _next_action(
                 executor="human",
                 action="review_task_design",
@@ -631,7 +755,7 @@ class TaskGateService:
                 allowed_operations=[],
                 requires_authorization=True,
                 stop_workflow=True,
-                reason="事实和方案已完整，当前固定暂停点是设计审查",
+                reason="旧版方案缺少执行计划，保留设计审查但不能生成 task-run 执行包",
             )
         if level == "L2":
             return _next_action(
