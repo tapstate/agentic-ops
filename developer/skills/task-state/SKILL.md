@@ -30,7 +30,7 @@ ao-work \
 
 ## 读取
 
-需要恢复或确认本地事实时调用：
+需要恢复或确认任务事实时调用：
 
 ```sh
 ao-work \
@@ -38,5 +38,7 @@ ao-work \
   task inspect \
   --issue-key <ISSUE-KEY>
 ```
+
+该命令同时返回本地持久任务状态与受控 Jira `task_facts`：其中包含脱敏的 Description 任务目标/必要执行线索、评论补充线索和候选仓库/分支提案。它不会输出或持久化原始 Description 或评论正文；读取失败时必须按稳定失败码停止，不得用聊天上下文补全。
 
 不得直接修改 Runtime 管理的 JSON / NDJSON，不得用 `.superpowers/` 内容替代任务状态。

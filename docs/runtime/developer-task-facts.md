@@ -2,6 +2,8 @@
 
 `ao-work task facts --issue-key <KEY>` 在当前 developer 工作空间中只读 Jira Description 与评论，输出设计和准入所需的脱敏结构化事实。
 
+`ao-work task inspect --issue-key <KEY>` 也会在本地任务状态之外返回同一份 `task_facts`；它是恢复任务时读取受控 Description 详情的标准入口。
+
 - Description 优先提供任务目标、问题版本、异常摘要和验收线索；未使用标准标题时仅使用受限的概览文本补足任务目标。
 - 评论仅提供补充线索，并保留评论 ID、作者、创建时间和来源；它不能替代 Jira 字段、Description 的正式映射或仓库/分支人工确认。
 - 仓库/分支始终以 `proposal_only` 输出，仍须经过既有 `task repositories assess` 与确认流程。

@@ -21,7 +21,7 @@ from ao_work.output import (
 )
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.task_gate import execute_task_gate
-from ao_work.task_facts import execute_task_facts
+from ao_work.task_facts import execute_task_facts, execute_task_inspect
 from ao_work.task_start import execute_task_start
 from ao_work.task_takeover import execute_task_takeover
 from ao_work.task_resume import execute_task_resume
@@ -292,7 +292,12 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         )
         return success(operation, workplane=workspace.workplane, **state)
     if args.group == "task" and args.command == "inspect":
-        state = store.inspect(args.issue_key)
+        state = execute_task_inspect(
+            workspace,
+            install_root,
+            store,
+            args.issue_key,
+        )
         return success(operation, workplane=workspace.workplane, **state)
     raise RuntimeErrorResult(
         code="capability_gap",

@@ -1,11 +1,14 @@
 operation: inspect_task
 workplane: developer
-version: 1
-purpose: 只读检查 Jira 任务事实、通用门禁事实和项目资产引用，供 AIAgent 按标准资产判断下一步。
+version: 2
+purpose: 只读检查本地任务状态与 Jira 任务的受控详情，供 AIAgent 按标准资产判断下一步。
 task_type: task_inspection
 allowed_stages:
   - waiting_takeover
   - takeover_gate
+  - takeover_started
+  - implementation
+  - blocked
 required_inputs:
   - issue_key
   - workspace
@@ -17,30 +20,23 @@ input:
     type: string
     required: true
 preconditions:
-  - jira_issue_must_be_readable
+  - local_task_must_exist
+  - jira_issue_and_comments_must_be_readable
+  - current_user_must_match_assignee
+  - local_task_identity_must_match_jira_issue
 output:
-  workspace:
-    type: string
-  issue_key:
-    type: string
-  issue:
+  task:
     type: object
-  current_jira_user:
-    type: string
-  target_repo:
-    type: string
-  form_values:
+  task_facts:
     type: object
-  comments:
-    type: array
-  gate_facts:
-    type: object
-  asset_refs:
-    type: object
-  recommended_next_action:
-    type: string
-    enum:
-      - inspect_by_agent
+    required_fields:
+      - description
+      - comments
+      - repository_branch_hints
+    rules:
+      - description_and_comment_bodies_must_be_redacted_and_structured
+      - raw_description_and_comment_bodies_must_not_be_output_or_persisted
+      - repository_branch_hints_are_proposal_only
 failure:
   codes:
     - missing_issue_key
@@ -48,11 +44,18 @@ failure:
     - jira_issue_read_failed
     - issue_not_found
     - jira_current_user_failed
+    - jira_task_description_unsupported
+    - jira_task_comment_read_failed
+    - jira_task_comment_unsupported
+    - assignee_mismatch
+    - task_identity_mismatch
+    - jira_workspace_mismatch
 side_effects:
+  - read_jira_issue_description
+  - read_jira_issue_comments
   - must_not_write_jira
-  - must_not_create_takeover_record
-  - must_not_modify_code
-  - must_not_create_pr
+  - must_not_write_local_task_state
+  - must_not_modify_business_source
 human_gate:
   required: false
 retry_policy:

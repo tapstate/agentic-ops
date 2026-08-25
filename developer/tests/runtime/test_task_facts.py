@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import unittest
+from unittest import mock
 
 from ao_work.config.model import FieldMapping, ProjectProfile
 from ao_work.jira.adf import markdown_to_adf
 from ao_work.jira.model import JiraComment, JiraIssue
 from ao_work.jira.task_facts import read_task_facts
 from ao_work.output import RuntimeErrorResult
+from ao_work.task_facts import execute_task_inspect
 
 
 def _issue(description: dict[str, object] | None) -> JiraIssue:
@@ -104,3 +106,30 @@ class TaskFactsTest(unittest.TestCase):
                 _profile(),
             )
         self.assertEqual("jira_task_comment_unsupported", captured.exception.code)
+
+    def test_task_inspect_keeps_local_state_and_returns_task_facts(self) -> None:
+        store = mock.Mock()
+        store.inspect.return_value = {
+            "task": {"issue_key": "TAP-99", "agentic_run_id": "run-99"}
+        }
+        facts = {
+            "schema_version": 1,
+            "description": {"facts": [{"field": "task_goal", "value": "读取 Description"}]},
+            "comments": {"facts": []},
+            "repository_branch_hints": [],
+        }
+        with mock.patch(
+            "ao_work.task_facts.execute_task_facts",
+            return_value={"task_facts": facts, "side_effects": []},
+        ) as task_facts:
+            result = execute_task_inspect(
+                mock.Mock(),
+                mock.Mock(),
+                store,
+                "TAP-99",
+            )
+
+        self.assertEqual("TAP-99", result["task"]["issue_key"])
+        self.assertEqual(facts, result["task_facts"])
+        self.assertEqual([], result["side_effects"])
+        task_facts.assert_called_once()
