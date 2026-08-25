@@ -23,6 +23,8 @@ class WorktreePlanEntry:
     worktree_dir: Path
     branch: str
     created: bool = False
+    expected_sha: str = ""
+    force_recreate: bool = False
 
 
 @dataclass(frozen=True)
@@ -209,6 +211,7 @@ def plan_task_worktrees(
     issue_key: str,
     description_sections: dict[str, str],
     alignment_script: Path | None = None,
+    task_domain: str | None = None,
 ) -> TaskWorktreePlan:
     """计算任务工作树集计划：目标仓库所属领域 + 问题版本分支推导。
 
@@ -219,14 +222,20 @@ def plan_task_worktrees(
     """
     pool = validate_source_pool_root(pool_root)
     target_repository = resolve_target_repository(profile, description_sections)
-    domain = profile.domain_for(target_repository)
+    domain = (
+        profile.domain_by_id(task_domain)
+        if task_domain is not None
+        else profile.domain_for(target_repository)
+    )
     if domain is None:
         raise _blocked(
             "task_domain_unresolved",
-            f"无法根据目标仓库判定任务领域：{target_repository}",
-            "请补充可映射的目标仓库或任务领域；系统不会创建全量工作树",
-            details={"target_repository": target_repository},
+            f"无法解析任务领域：{task_domain or target_repository}",
+            "请确认 product、assistant 或 taptest 领域后重新分析",
+            details={"target_repository": target_repository, "task_domain": task_domain},
         )
+    if task_domain is not None:
+        target_repository = domain.baseline_repository
     problem_version_repository = (
         domain.problem_version_repository or domain.baseline_repository
     )
@@ -317,6 +326,17 @@ def prepare_task_worktrees(
                 baseline = _resolve_remote_baseline(
                     git, member_dir, entry.branch, entry.repository
                 )
+                if entry.expected_sha and baseline != entry.expected_sha:
+                    raise _blocked(
+                        "confirmed_branch_baseline_changed",
+                        f"确认后远端分支已前移：{entry.repository}",
+                        "请重新分析领域分支和固定 SHA 后再创建工作树",
+                        details={
+                            "repository": entry.repository,
+                            "expected_sha": entry.expected_sha,
+                            "actual_sha": baseline,
+                        },
+                    )
                 baselines[entry.worktree_dir] = baseline
                 if entry.worktree_dir.is_dir():
                     _validate_existing_worktree(
@@ -343,16 +363,23 @@ def prepare_task_worktrees(
                     continue
                 entry.worktree_dir.parent.mkdir(parents=True, exist_ok=True)
                 baseline_ref = baselines[entry.worktree_dir]
-                result = git(
+                add_arguments = [
+                    "-C",
+                    str(member_dir),
+                    "worktree",
+                    "add",
+                ]
+                if entry.force_recreate:
+                    add_arguments.append("--force")
+                add_arguments.extend(
                     [
-                        "-C",
-                        str(member_dir),
-                        "worktree",
-                        "add",
                         "--detach",
                         str(entry.worktree_dir),
                         baseline_ref,
-                    ],
+                    ]
+                )
+                result = git(
+                    add_arguments,
                     timeout=120,
                 )
                 if result.returncode != 0:
@@ -387,6 +414,8 @@ def prepare_task_worktrees(
                 worktree_dir=entry.worktree_dir,
                 branch=entry.branch,
                 created=entry.worktree_dir in created_dirs,
+                expected_sha=entry.expected_sha,
+                force_recreate=entry.force_recreate,
             )
             for entry in entries
         ),
@@ -518,6 +547,8 @@ def _apply_alignment_plan(
                     entry.repository,
                 ),
                 branch=target,
+                expected_sha=entry.expected_sha,
+                force_recreate=entry.force_recreate,
             )
         )
     return tuple(aligned)

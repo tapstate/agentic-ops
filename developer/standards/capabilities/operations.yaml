@@ -394,8 +394,8 @@ capabilities:
     visibility: public
     commands:
       - [task, repositories, assess]
-    summary: 只读刷新源码池远端并生成逐仓分支建议与固定 SHA；建议不具有建树或编码权限。
-    next_action: 向研发工程师展示完整建议、问题版本和差异，再进入仓库分支关系确认。
+    summary: 从任务建议或按用户指定的 product、assistant、taptest 领域，只读生成领域逐仓分支与固定 SHA；建议不具有建树或编码权限。
+    next_action: 向研发工程师展示任务领域、问题版本和 Runtime 推导结果，再确认任务领域。
 
   - id: repository_branch_confirm
     source: contract
@@ -404,8 +404,8 @@ capabilities:
     visibility: public
     commands:
       - [task, repositories, confirm]
-    summary: 校验研发工程师修正后的完整仓库分支关系；只有显式 confirm 才持久化，且确认时不创建工作树。
-    next_action: 后续仅在实际需要修改某仓库时，从确认表按需准备对应工作树。
+    summary: 确认任务领域并校验 Runtime 自动推导的完整仓库分支结果；只有显式 confirm 才持久化，且确认时不创建工作树。
+    next_action: 按确认领域一次准备完整分析工作树集合。
 
   - id: task_worktree_prepare
     source: contract
@@ -414,8 +414,8 @@ capabilities:
     visibility: public
     commands:
       - [task, worktrees, prepare]
-    summary: 只从用户确认关系表为一个仓库创建或精确复用任务子工作树，并绑定任务分支与来源上下文。
-    next_action: 在返回的精确任务工作树中完成该仓库的编码与验证；新增仓库须重新确认范围。
+    summary: 按用户确认领域创建或精确复用完整任务子工作树集合，并绑定逐仓任务分支与来源上下文。
+    next_action: 在返回的领域工作树集合中完成源码分析和设计，由 L1 执行计划选择一个或多个实际变更仓库。
 
   - id: task_worktree_cleanup
     source: contract
@@ -445,7 +445,7 @@ capabilities:
     commands:
       - [takeover]
     summary: Jira 任务单命令接管能力：不带 issue_key 时只读列出候选；带 issue_key 时由 Runtime 绑定明确的接管指令，校验经办人和状态映射，自动判断新接管、接纳存量或恢复，并通过同一 Saga 完成 Comment、Status 与本地状态回读。不读写 Agentic 自定义字段。
-    next_action: 无编号时展示候选并由研发工程师选择；带编号时直接执行 ao-work takeover <KEY>。接管完成后先分析并确认完整仓库分支关系，确认前不得创建工作树或建立仓库来源快照。
+    next_action: 无编号时展示候选并由研发工程师选择；带编号时直接执行 ao-work takeover <KEY>。接管完成后先分析并确认任务领域，确认前不得创建工作树或建立仓库来源快照。
 
   - id: task_start
     source: runtime
@@ -534,8 +534,8 @@ capabilities:
     commands:
       - [task-run, prepare]
       - [task-run, authorize]
-    summary: 从当前 L1 方案、唯一 prepared 工作树、Project Profile 和安装身份生成一次性设计/连续授权确认包；确认业务语义后固化 canonical manifest。
-    next_action: prepare 后一次展示完整业务确认包；用户确认后 authorize，并使用返回的 manifest_path 自动 open，不得要求用户处理 run、路径或摘要。
+    summary: 从当前 L1 方案选定的一个或多个变更仓库工作树、领域 prepared 集合、Project Profile 和安装身份生成一次性设计/连续授权确认包；确认完整任务语义后逐仓固化 shared schema v1 canonical manifest。
+    next_action: prepare 后一次展示完整任务确认包；用户确认后 authorize，并使用单仓 manifest_path 或多仓 deliveries 逐仓自动 open，不得要求用户处理 run、路径或摘要。
 
   - id: update_task_description_sections
     source: contract

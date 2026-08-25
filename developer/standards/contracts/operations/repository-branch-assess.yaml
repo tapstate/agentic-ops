@@ -4,6 +4,9 @@ workplane: developer
 inputs:
   issue_key:
     required: true
+  task_domain:
+    required: false
+    allowed: [product, assistant, taptest]
 preconditions:
   - task_must_already_be_taken_over
   - source_pool_members_must_refresh_and_resolve_remote_refs
@@ -12,7 +15,9 @@ side_effects:
   - must_not_create_worktrees
   - must_not_modify_business_source
 output:
+  - task_domain
+  - repository_scope_revision
   - proposed_repository_branch_map
   - problem_version_repository
   - fixed_analysis_sha_per_repository
-next_action: review_and_confirm_repository_branch_mapping
+next_action: review_and_confirm_task_domain

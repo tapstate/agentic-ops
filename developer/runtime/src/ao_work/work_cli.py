@@ -91,6 +91,9 @@ def build_parser() -> argparse.ArgumentParser:
     repository_actions = task_repositories.add_subparsers(dest="action", required=True)
     repository_assess = repository_actions.add_parser("assess")
     repository_assess.add_argument("--issue-key", required=True)
+    repository_assess.add_argument(
+        "--task-domain", choices=("product", "assistant", "taptest")
+    )
     repository_confirm = repository_actions.add_parser("confirm")
     repository_confirm.add_argument("--issue-key", required=True)
     repository_confirm.add_argument("--mapping-file", required=True)
@@ -99,7 +102,6 @@ def build_parser() -> argparse.ArgumentParser:
     worktree_actions = task_worktrees.add_subparsers(dest="action", required=True)
     worktree_prepare = worktree_actions.add_parser("prepare")
     worktree_prepare.add_argument("--issue-key", required=True)
-    worktree_prepare.add_argument("--repository", required=True)
     worktree_cleanup = worktree_actions.add_parser("cleanup")
     worktree_cleanup.add_argument("--issue-key", required=True)
 
@@ -187,6 +189,7 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             install_root,
             store,
             args.issue_key,
+            task_domain=args.task_domain,
         )
         return success(operation, workplane=workspace.workplane, **state)
     if args.group == "task" and args.command == "repositories" and args.action == "confirm":
@@ -228,7 +231,6 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             install_root,
             store,
             args.issue_key,
-            args.repository,
         )
         return success(operation, workplane=workspace.workplane, **state)
     if args.group == "task" and args.command == "worktrees" and args.action == "cleanup":

@@ -56,6 +56,12 @@ from ao_work.workspace import Workspace
 MAX_COMMAND_OUTPUT_BYTES = 4_194_304
 
 
+def repository_delivery_directory(repository: str) -> str:
+    readable = repository.replace("/", "--")[:96]
+    suffix = hashlib.sha256(repository.encode("utf-8")).hexdigest()[:12]
+    return f"{readable}-{suffix}"
+
+
 def is_current_managed_takeover_comment(
     comment: Any,
     *,
@@ -3667,13 +3673,17 @@ class TaskRunProtocol:
         prepared = [
             row
             for row in rows
-            if isinstance(row, dict) and row.get("worktree_status") == "prepared"
+            if (
+                isinstance(row, dict)
+                and row.get("worktree_status") == "prepared"
+                and row.get("repository") == manifest["repository"]["slug"]
+            )
         ]
         if len(prepared) != 1:
             raise blocked(
-                "task_run_prepared_repository_ambiguous",
-                "task-run 必须绑定唯一已准备的任务工作树",
-                "请准备唯一实际变更仓库；多仓任务不能降级为默认仓库",
+                "task_run_prepared_repository_missing",
+                "manifest 选定的变更仓库没有唯一已准备工作树",
+                "请按 L1 设计选定仓库重新生成执行包",
             )
         row = prepared[0]
         expected = {
@@ -3813,9 +3823,34 @@ class TaskRunProtocol:
             / str(manifest["agent"]["agentic_run_id"])
             / "task-to-pr"
         )
+        approved_file = Path(str(manifest["task_binding"]["approved_plan_file"]))
+        approved_parts = approved_file.parts
+        if "repositories" in approved_parts:
+            index = approved_parts.index("repositories")
+            if index + 1 >= len(approved_parts):
+                raise blocked(
+                    "task_run_delivery_path_invalid",
+                    "逐仓执行计划缺少交付单元目录",
+                    "请重新生成受管 task-run manifest",
+                )
+            delivery_directory = approved_parts[index + 1]
+            repository_directory = repository_delivery_directory(
+                str(manifest["repository"]["slug"])
+            )
+            if delivery_directory != repository_directory:
+                raise blocked(
+                    "task_run_delivery_path_invalid",
+                    "逐仓执行计划目录与 manifest 仓库身份不一致",
+                    "请重新生成受管 task-run manifest",
+                )
+            root = root / delivery_directory
         paths = {
             "root": root,
-            "lock": root.parent / ".task-to-pr.lock",
+            "lock": (
+                root.parent.parent / ".task-to-pr.lock"
+                if root.parent.name == "task-to-pr"
+                else root.parent / ".task-to-pr.lock"
+            ),
             "manifest": root / "manifest.json",
             "events": root / "events.ndjson",
             "state": root / "state.json",

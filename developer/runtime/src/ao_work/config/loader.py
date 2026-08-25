@@ -848,6 +848,7 @@ def _parse_worktree_domains(
     if not isinstance(raw, list):
         raise ValueError("repositories.worktree_domains must be a list")
     domains: list[WorktreeDomain] = []
+    seen_domain_ids: set[str] = set()
     seen_repositories: set[str] = set()
     for item in raw:
         if not isinstance(item, dict):
@@ -857,6 +858,10 @@ def _parse_worktree_domains(
         members = _repository_tuple(item.get("repositories"), "worktree_domains.repositories")
         if not domain_id or not baseline or not members:
             raise ValueError("worktree_domains entry requires id/baseline_repository/repositories")
+        if domain_id in seen_domain_ids:
+            raise ValueError("worktree_domains ids must be unique")
+        if domain_id == "automation-test":
+            raise ValueError("worktree_domains id automation-test has been renamed to taptest")
         if baseline not in members or baseline not in repository_list:
             raise ValueError("worktree_domains baseline_repository must be a listed member")
         if any(repo not in repository_list for repo in members):
@@ -866,11 +871,12 @@ def _parse_worktree_domains(
         problem_version_repository = _optional_text(
             item.get("problem_version_repository")
         ) or baseline
-        if problem_version_repository not in repository_list:
+        if problem_version_repository not in members:
             raise ValueError(
-                "worktree_domains problem_version_repository must be a listed repository"
+                "worktree_domains problem_version_repository must be a domain member"
             )
         seen_repositories.update(members)
+        seen_domain_ids.add(domain_id)
         domains.append(
             WorktreeDomain(
                 domain_id,

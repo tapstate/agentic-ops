@@ -11,6 +11,7 @@ inputs:
     required_for_write: true
 preconditions:
   - proposal_must_exist
+  - task_domain_must_match_current_analysis
   - every_repository_must_be_in_profile_and_one_domain
   - every_confirmed_branch_must_resolve_on_origin
 side_effects:
@@ -19,4 +20,4 @@ side_effects:
   confirm:
     - write_local_confirmed_repository_branch_map
     - must_not_create_worktrees
-next_action: prepare_confirmed_repository_worktree_when_needed
+next_action: prepare_confirmed_domain_worktrees

@@ -43,11 +43,11 @@ AO-92 的复现中，研发工程师已确认实际代码位于 `tapdata/tapdata
 
 分析前在池成员锁内执行受控 `fetch origin`，然后把 `origin/<分析基线>` 解析为固定 commit SHA。仓库范围分析只读取该固定 Git 对象或只读快照；输出每个候选仓库的 slug、分析 ref、SHA、命中路径/符号和不确定性。无法刷新或解析时标记证据不足，不能把缓存 HEAD 描述为当前事实。
 
-Jira 明确声明“目标仓库”时，它是优先候选，但仍需验证在 `repositories.list` 且属于唯一领域；未声明时 `repositories.default` 只作为候选建议。两种情况在仓库范围确认前均不创建任务工作树、不写来源快照，也不进入实现。
+Jira 明确声明“目标仓库”时，它用于建议任务领域；未声明时 `repositories.default` 只作为领域建议线索。建议不准或无法唯一确定时，由研发工程师确认 `product`、`assistant` 或 `taptest`。领域确认前不创建任务工作树、不写来源快照，也不进入实现。
 
 ## 4. 仓库范围确认与重新绑定
 
-公开操作使用可重复的 `--repository` 表达一个或多个变更仓库：
+公开操作先分析并确认任务领域：
 
 ```sh
 ao-work task repositories assess --issue-key TAP-12620
@@ -58,44 +58,44 @@ ao-work task repositories confirm \
   --confirm
 ```
 
-`assess` 只读输出候选、固定分析基线及源码证据，产物名为 `proposed_repository_branch_map`。它只是分析建议，不是后续工作的最终依据。AIAgent 必须把完整建议表展示给用户；用户可以增加/移除仓库或修改任一仓库的 `from_branch`。
+`assess` 只读输出建议领域、固定分析基线及源码证据，产物名为 `proposed_repository_branch_map`。它只是领域内自动推导结果，不具有建树权限。AIAgent 展示任务领域、问题版本和逐仓推导结果；用户确认领域，建议不准时使用 `--task-domain product|assistant|taptest` 重新分析。
 
-`assess` 同时输出可保存到工作空间普通 JSON 文件的 `confirmation_template`，其中完整绑定 `issue_key`、`agentic_run_id`、问题版本、问题版本来源仓库、固定 SHA 和 `repository_branch_map`。研发工程师在该模板上修正；不得把 `.agentic-ops/` 受管状态文件直接作为 `--mapping-file` 输入。
+`assess` 同时输出可保存到工作空间普通 JSON 文件的 `confirmation_template`，绑定 `issue_key`、`agentic_run_id`、`task_domain`、问题版本、问题版本来源仓库和固定 SHA；逐仓表由 Runtime 自动生成。不得把 `.agentic-ops/` 受管状态文件直接作为 `--mapping-file` 输入。
 
-`confirm` 读取工作空间受管输入中的完整关系表。没有 `--confirm` 时只展示“分析建议 → 用户修正结果”的逐项差异、将失效的来源/gate 和计划工作树；带 `--confirm` 才把用户确认结果保存为 `confirmed_repository_branch_map`。确认动作不预建任务工作树；具体仓库真正开始工作时，再从确认表按需创建对应子工作树。
+`confirm` 读取工作空间普通输入中的领域确认。没有 `--confirm` 时只展示任务领域、自动推导的逐仓分支和计划工作树；带 `--confirm` 才保存领域及 `confirmed_repository_branch_map`。确认动作不建树；随后 `task worktrees prepare` 一次创建完整领域工作树集合。
 
 每个 repository 必须：
 
 - 使用唯一 `owner/repository` 格式；
 - 位于当前 Project Profile `repositories.list`；
 - 属于唯一 `worktree_domain`；
-- 用户确认的 `from_branch` 是合法 Git 分支名，并能在刷新后的对应 repository `origin` 中唯一解析；它可以不同于分析建议，但必须记录修正前值、修正后值和人工确认事实；
+- Runtime 推导的 `from_branch` 是合法 Git 分支名，并能在刷新后的对应 repository `origin` 中唯一解析；
 - 与当前 Jira、Assignee、安装身份和任务运行事实一致。
 
-初次确认、替换错误仓库和增加跨仓库变更范围使用同一操作。形成任何代码事实前允许用新确认替换范围；已有修改、commit、push 或 PR 后，不得移除已有仓库，也不得静默改绑。新增仓库必须单独展示增量范围与风险并重新确认；仓库删除或替换进入风险决策。
+确认领域外的新增仓库或多仓实际修改属于范围扩大，必须重新进入设计与风险审查；已有修改、commit、push 或 PR 后不得静默改绑领域或分支。
 
 仓库范围确认复用同一 `agentic_run_id`，不重写接管 Comment/Status，也不新建第二个任务运行。
 
-仓库分析后、创建任何任务子工作树前，Runtime 必须形成可供设计审查的建议表和用户确认表。设计确认对象至少包含：
+领域分析后、创建任何任务子工作树前，Runtime 必须形成可供确认的领域建议。确认对象至少包含：
 
 - 问题版本原始规格、问题版本来源仓库、解析后的问题版本分支及其固定 SHA；
-- 确认的变更仓库有序列表；
-- 每个仓库的分析建议分支、用户确认的 `from_branch`、两者差异、固定 baseline SHA、计划任务分支和计划工作树路径；
+- 确认的任务领域及其仓库有序列表；
+- 每个仓库的自动推导分支、固定 baseline SHA、计划任务分支和计划工作树路径；
 - 无法解析、需要显式分支或存在多候选的仓库及人工动作。
 
-问题版本或任一用户确认的逐仓分支关系变化都会改变设计事实并使旧设计确认失效；必须重新展示完整确认表并进入设计审查，不能把分析建议、仓库名或内部摘要当成人工确认。设计同时展示分析时的 remote SHA 作为代码证据，但人工确认主体是问题版本和 `confirmed_repository_branch_map`；开始工作前仅 remote Head 前移且关系未变时，Runtime 更新工作树基线 SHA、重建来源上下文并重跑 intake/solution。若新代码事实改变设计、范围或风险，再重新进入设计审查。
+任务领域、问题版本或 Runtime 推导的逐仓分支关系变化会使旧确认失效；必须重新展示领域和完整推导结果。人工确认主体是任务领域；remote SHA 作为代码证据。开始工作前 remote Head 前移时重新分析，不能静默更新已确认基线。
 
 ## 5. 任务子工作树与编码规则
 
-分析阶段可以按 Profile 和项目对齐工具生成分支关系建议，但 Runtime 不得直接按建议创建工作树。用户确认或修正完整关系表后，实际开始某个或某组仓库工作时，只选择 `confirmed_repository_branch_map` 中的对应条目执行：
+分析阶段按 Profile 和项目对齐工具生成领域分支关系，但 Runtime 不得直接按建议创建工作树。用户确认领域后，对 `confirmed_repository_branch_map` 全部条目执行：
 
 1. 解析任务“问题版本”。Profile 为工作树领域显式声明 `problem_version_repository`；缺失时兼容使用该领域 `baseline_repository`。问题版本未在 Jira 声明时读取问题版本来源仓库的 `baseline_branches`，只有 Profile 完全未声明映射时才回退 `default_branch`。
 2. 使用 TapData 产品仓库的任务（包括仅切换 Jira 项目的 TapState）将 TM、FE、connector 仓库统一归入 `product` 领域并声明 `problem_version_repository: tapdata/tapdata`，以 `tapdata/tapdata` 的问题版本作为对齐输入，使用版本化 `tap_align_branches.py plan --no-fetch --remote-only --repositories <candidate repos> --json` 生成逐仓建议分支。两个 connector 独立按同一问题版本推导各自远端分支；PluginKit 或分支无法解析时阻断，不以 common-lib 或 `main` 静默替代。领域仍用于候选范围和归属校验，不再兼任问题版本来源。其它项目或非 TapData 产品领域按各自 Profile 的 problem version repository、overrides、dev_branches、same_name 顺序生成建议。
-3. 用户可以修正建议分支；Runtime 只校验确认分支的格式、仓库范围和远端存在性，不得以“与建议不一致”为由覆盖用户结果。开始工作时刷新本次所需仓库的 origin，并在创建任何工作树前解析、记录这些仓库确认分支的远端基线 SHA；任一失败则不创建。
-4. 使用 `git worktree add --detach <path> <fixed-sha>` 仅创建或精确复用本次所需仓库的子工作树，写入 per-worktree Git identity。
+3. Runtime 校验推导分支的格式、领域范围和远端存在性。开始工作时回读全部确认分支的固定 SHA；任一失败则不创建。
+4. 使用 `git worktree add --detach <path> <fixed-sha>` 创建或精确复用完整领域子工作树集合，写入 per-worktree Git identity。
 5. 在子工作树内按项目分支规则创建任务分支；完成分支与身份回读后才允许代码修改。
 
-源码分析阶段没有被确认进入变更范围的仓库不得创建任务工作树。分析后发现需要新增仓库时，返回仓库范围增量确认，不得直接在源码池或其它任务工作树修改。
+源码分析只使用确认领域的任务工作树集合。L1 执行计划可以用 `change_repository` 选择一个实际异常仓库，也可以用 `change_repositories` 选择多个仓库并逐仓绑定范围和验证；发现需要修改领域外仓库时返回范围扩大设计审查。多仓不是能力缺口，但仓库集合变化会使原设计确认失效。
 
 任务子工作树路径固定为：
 
@@ -118,7 +118,7 @@ analysis_recorded
 -> worktrees_cleaned
 ```
 
-稳定意图同时保存 `proposed_repository_branch_map`、`confirmed_repository_branch_map`、两者差异、问题版本、Profile 摘要和人工确认事实。重复调用只能从原阶段恢复；确认映射、输入集合或外部事实漂移时失败关闭。
+稳定意图同时保存单调递增的 `content_version`、`task_domain`、`proposed_repository_branch_map`、`confirmed_repository_branch_map`、问题版本、Profile 摘要和人工确认事实。来源快照绑定当前 `content_version`；重复调用只能从原阶段恢复，确认领域、输入集合或外部事实漂移时失败关闭。
 
 本地任务状态必须分别持久化建议表和确认表，而不是只保存一个 `target_repo`。`confirmed_repository_branch_map` 每项至少包含：
 
@@ -134,11 +134,11 @@ analysis_recorded
 - `worktree_path`；
 - `worktree_status`（`not_created`、`prepared`、`cleaned` 或 `blocked`）。
 
-完成设计确认时所有条目都应保持 `not_created`。实际需要在某仓库工作时，Runtime 只从 `confirmed_repository_branch_map` 读取该仓库和 `from_branch`，重新回读远端 SHA 后创建或复用对应子工作树，并把 `worktree_baseline_sha` 与来源上下文写回任务状态；不得回退分析建议、临场重新推导或在确认表外创建工作树。
+完成领域确认时所有条目都应保持 `not_created`。Runtime 重新回读远端 SHA 后创建或复用完整领域子工作树集合，并把逐仓 `worktree_baseline_sha` 与多仓来源上下文写回任务状态；不得在确认领域外创建工作树。
 
 任务状态分别记录：
 
-- `confirmed_change_repositories`：人工确认后允许创建工作树和编码的仓库集合；
+- `confirmed_change_repositories`：确认领域内允许创建分析工作树的仓库集合；实际编码范围以后续 L1 设计为准；
 - `actual_change_repositories`：由 Git/PR 回读证明实际产生变更的最终仓库集合。
 
 每个最终仓库证据至少包含：
@@ -212,7 +212,7 @@ ao-work task worktrees cleanup --issue-key TAP-12620
 1. 源码池分析只读取刷新后的固定 ref/SHA，不修改池成员主 checkout。
 2. Jira 未声明仓库时默认仓库仅作为候选；仓库范围确认前不创建工作树、不写来源快照。
 3. 分析只生成 `proposed_repository_branch_map`，任何路径都不得直接把它用于建树、编码或授权。
-4. 用户可以增加/移除仓库或逐仓修改 `from_branch`；Runtime 展示完整差异并验证远端存在后，将明确确认的结果保存为 `confirmed_repository_branch_map`。
+4. 用户只确认 `product`、`assistant` 或 `taptest` 领域；建议不准时指定领域重新分析，Runtime 验证自动推导分支与远端 SHA 后保存 `confirmed_repository_branch_map`。
 5. 单仓与多仓设计审查必须同时展示问题版本、建议表、用户修正差异和完整确认表；确认时不创建任何子工作树。
 6. 实际开始某仓库工作时只从确认表创建对应工作树；目标领域其它仓库仅作源码池分析，不预建工作树。
 7. 新工作树路径严格为 `<source-pool-root>/.worktree/<jira-key>/<repo-short-name>/<normalized-from-branch>`；斜杠分支规范化、短名冲突、路径穿越和旧布局均有失败关闭测试。

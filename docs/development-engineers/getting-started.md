@@ -197,7 +197,7 @@ cd ~/agentic-ops-tapdata
 
 授权属于 developer 安装，不属于单个工作空间。`ao-work auth` 在终端进入引导；token 不通过命令行参数传递。同一安装下的业务工作空间继承同一身份和凭证，不同研发员必须使用隔离安装。`workspace preflight` 仅用于诊断或修复工作空间，不是接管任务的前置步骤；接管时 Runtime 会重新校验工作空间、安装身份和 Jira 事实。
 
-调用具体操作前运行 `./.agentic-ops/bin/ao-work capability show <operation>`；只有 `status=implemented` 且列出明确命令路径时才能调用。`capability_gap` 表示当前版本没有安全原子操作，应按中文 `next_action` 转人工，不能尝试旧命令。
+调用具体操作前运行 `./.agentic-ops/bin/ao-work capability show <operation>`；只有 `status=implemented` 且列出明确命令路径时才能调用。`capability_gap` 表示当前版本没有安全原子操作，应停止调用该 AO 命令并按中文 `next_action` 处理，不能尝试旧命令；若它会阻断业务开发，则进入 `agenticops_continuity_decision`，由人工决定是否在限定范围内改用项目认可工具继续。
 
 ## 5. 启动 AIAgent
 
@@ -215,7 +215,7 @@ cd ~/agentic-ops-tapdata
 
 这些自然语言需求不代表对应自动化都已实现。AI 必须先查询能力目录；任务释放、部分 PR / CI 协作、分支对齐和完成审计等仍可能返回 `capability_gap`，应由研发工程师按目录指引处理。正式接管必须使用统一 takeover，不能用内部 `task init` 或 `task start` 冒充；developer 不提供 Agentic Custom Field 写入。
 
-接管完成后，Runtime 不会先按默认仓库创建工作树。标准顺序是：`task repositories assess` 形成只读建议；研发工程师审查并修正完整关系表；`task repositories confirm --confirm` 固化唯一工作依据；实际需要改某仓库时调用 `task worktrees prepare --repository <owner/repo>`。任务完成 evidence 评论必须列出 `actual_change_repositories`；评论与 Jira 完成态回读后，使用 `task worktrees cleanup` 安全清理子工作树。源码池主工作树只作分析源，不由任务流程修改或清理。
+接管完成后，Runtime 不会先按默认仓库创建工作树。标准顺序是：`task repositories assess` 从任务建议 `product`、`assistant` 或 `taptest` 领域；建议不准时用 `--task-domain` 重新分析；研发工程师只确认领域，`task repositories confirm --confirm` 固化领域和 Runtime 自动推导的逐仓分支；随后调用 `task worktrees prepare --issue-key <KEY>` 一次创建完整领域工作树集合。AI 在该集合中分析，并由 L1 执行计划选择一个或多个实际变更仓库；同领域其它工作树不会因为未修改而阻断交付。完整任务只进行一次设计与连续授权确认，Runtime 随后逐仓生成独立 manifest、提交、验证和 PR。任务完成 evidence 评论必须列出 `actual_change_repositories`；评论与 Jira 完成态回读后，使用 `task worktrees cleanup` 安全清理子工作树。源码池主工作树只作分析源，不由任务流程修改或清理。
 
 ## 6. AO问题反馈与快速改进
 

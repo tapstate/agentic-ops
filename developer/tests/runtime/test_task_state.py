@@ -48,8 +48,12 @@ class TaskStateTest(unittest.TestCase):
                 repository_root: Path,
                 head_sha: str,
                 pr_url: str,
+                *,
+                repository_scoped: bool = False,
             ) -> None:
                 task_run = runs / run_id / "task-to-pr"
+                if repository_scoped:
+                    task_run = task_run / repository.replace("/", "--")
                 task_run.mkdir(parents=True)
                 atomic_write_json(
                     task_run / "manifest.json",
@@ -95,6 +99,7 @@ class TaskStateTest(unittest.TestCase):
                 worktree,
                 "b" * 40,
                 "https://github.com/tapdata/tapdata-connectors/pull/2",
+                repository_scoped=True,
             )
 
             facts = _task_run_repository_facts(
