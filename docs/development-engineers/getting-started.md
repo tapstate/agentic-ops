@@ -175,7 +175,7 @@ cd ~/agentic-ops-tapdata
 | Project Profile | Jira 站点、Project、状态/字段映射、默认仓库和固定策略 | 只有项目配置变化时审查 |
 | Jira 卡片 | Issue ID、经办人、状态、标题、描述和已配置业务字段 | 卡片缺失或冲突时决策 |
 
-完整 task-to-PR manifest 是后台机器审计合同，不是用户配置表。普通任务只需给出 Jira key；AI 汇总待审查计划后，研发工程师只确认计划、范围、验证与高风险操作。
+完整 task-to-PR manifest 是后台机器审计合同，不是用户配置表。普通任务只需给出 Jira key；Runtime 根据当前 L1 方案和唯一任务工作树生成执行包，研发工程师只一次确认计划、范围、最终验证命令、外部动作与风险。确认后 Runtime 自动生成路径、计划摘要和 manifest 摘要并打开审计运行。
 
 初始化成功后会写入 schema v5 `.agentic-ops/agent.json`、当前工作空间 `AGENTS.md` 和 `.agents/skills/`。工作空间只保存项目事实、安装身份引用和本地 `ao-work` 入口，不保存 Jira token，也不生成 `.agentic-ops/.env`。`AGENTS.md` 和 `.agents/skills/` 是 AI 可直接发现的受管副本；`workspace preflight` 会检查缺失、漂移、额外资产和 maintainer 污染。
 
@@ -227,7 +227,7 @@ cd ~/agentic-ops-tapdata
 AO问题反馈：<现象、复现步骤或脱敏报错，以及期望行为>
 ```
 
-AI 会整理中文摘要与描述，至少包含现象、复现步骤或证据、影响和期望行为。研发工程师核对并明确确认建卡内容后，AI 才会使用受控的 `ao-work jira create plan -> apply -> readback` 流程，在 Jira AO 项目创建 `Agentic 缺陷`；创建结果会回显真实 issue key。
+AI 会先整理来源会话标识、可访问或导出的会话日志、按时序排列的用户消息与 Runtime 原始错误事实，再给出原因总结、影响和期望行为。无法取得逐字日志时必须明确标记为可核验重建记录。研发工程师核对事实、日志和完整建卡内容并确认一次后，AI 连续使用受控的 `ao-work jira create plan -> apply -> readback` 流程，在 Jira AO 项目创建 `Agentic 缺陷`；不会再要求确认 plan id、run id 或受管路径，创建结果会回显真实 issue key。
 
 不要直接调用 Jira REST API，也不要在描述中包含 token、密钥、客户数据或未经脱敏的日志。授权、字段或建卡结果不明确时，应停止在 Runtime 给出的处理动作上，不要重复 `apply`。
 

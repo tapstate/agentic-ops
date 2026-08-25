@@ -523,8 +523,19 @@ capabilities:
       - [task-run, probe-prohibitions]
       - [task-run, record-unverified-prohibitions]
       - [task-run, finalize]
-    summary: 按 shared 版本化协议打开 manifest、导入非关键过程事件，并由 Runtime 确定性采集写入前禁止动作基线、Jira、Jira Comment/Worklog 专用写后回读、Git、PR、CI、验证和最终禁止动作事实，生成 hash-chain 脱敏结果包。
-    next_action: 先确认完整 manifest，并在任何外部写前执行 prohibition baseline；ready 必须有 Comment 和结构化 Worklog 的真实回读，复盘四类各有 finding 或带理由与证据的 no_finding，最后显式 finalize。
+    summary: 按 shared 版本化协议打开 manifest，并采集禁止动作基线、Jira、Git、PR、CI、验证和最终禁止动作事实，生成 hash-chain 脱敏结果包。
+    next_action: 使用 task_run_manifest 生成并授权 manifest 后 open；任何外部写前执行 prohibition baseline，最后显式 finalize。
+
+  - id: task_run_manifest
+    source: contract
+    contract: contracts/operations/task-run-manifest.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task-run, prepare]
+      - [task-run, authorize]
+    summary: 从当前 L1 方案、唯一 prepared 工作树、Project Profile 和安装身份生成一次性设计/连续授权确认包；确认业务语义后固化 canonical manifest。
+    next_action: prepare 后一次展示完整业务确认包；用户确认后 authorize，并使用返回的 manifest_path 自动 open，不得要求用户处理 run、路径或摘要。
 
   - id: update_task_description_sections
     source: contract
