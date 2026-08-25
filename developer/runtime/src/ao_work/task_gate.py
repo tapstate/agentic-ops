@@ -21,6 +21,12 @@ from ao_work.workspace_security import (
 SCHEMA_VERSION = 1
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 CHINESE_PATTERN = re.compile(r"[\u3400-\u9fff]")
+INPUT_CONTRACT_RECOVERY = {
+    "executor": "ai",
+    "action": "rebuild_contract_input_and_retry_once",
+    "user_input_required": False,
+    "rule": "由 AI 按当前任务准入或方案门禁合同重建输入；不要向用户索要内部 JSON 字段。",
+}
 ALLOWED_EVIDENCE_SOURCES = frozenset(
     {"jira_issue", "project_profile", "business_source_code", "runtime_readback"}
 )
@@ -153,6 +159,7 @@ class TaskGateService:
         self._require_task(issue_key, agentic_run_id)
         source = self._source_context(issue_key, agentic_run_id)
         source_revision = self._source_revision(source)
+        source_revision_digest = _digest(source_revision)
         raw = _load_json_input(self.root, input_file, "任务准入输入")
         normalized = self._normalize_intake_input(raw, source)
 
@@ -198,7 +205,7 @@ class TaskGateService:
             previous,
             intake_digest=intake_digest,
             source_context_digest=str(source["context_digest"]),
-            head_sha=source_revision["head_sha"],
+            source_revision_digest=source_revision_digest,
             ready=ready,
         )
         payload = {
@@ -236,7 +243,7 @@ class TaskGateService:
                         "issue_key": issue_key,
                         "agentic_run_id": agentic_run_id,
                         "source_context_digest": source["context_digest"],
-                        "head_sha": source_revision["head_sha"],
+                        "source_revision_digest": source_revision_digest,
                     }
                 ),
             )
@@ -263,7 +270,8 @@ class TaskGateService:
             evidence={
                 "intake_digest": intake_digest,
                 "source_context_digest": str(source["context_digest"]),
-                "head_sha": source_revision["head_sha"],
+                "head_sha": self._revision_head(source_revision),
+                "source_revision_digest": source_revision_digest,
                 "retry_count": retry_count,
             },
         )
@@ -294,16 +302,35 @@ class TaskGateService:
                 "请使用当前 intake_digest 重新形成方案",
             )
         level = self._solution_level(normalized["risk_flags"])
+        execution = normalized.get("execution_plan")
+        repositories = (
+            self._execution_repositories(execution)
+            if isinstance(execution, dict)
+            else []
+        )
+        repository_heads = {
+            repository: self._revision_head(
+                intake["source_revision"], repository=repository
+            )
+            for repository in repositories
+        }
+        solution_head_sha = (
+            repository_heads[repositories[0]]
+            if repositories
+            else self._revision_head(intake["source_revision"])
+        )
         stable = {
             "schema_version": SCHEMA_VERSION,
             "issue_key": issue_key,
             "agentic_run_id": agentic_run_id,
             "intake_digest": intake["intake_digest"],
             "source_context_digest": intake["source_context_digest"],
-            "head_sha": intake["source_revision"]["head_sha"],
+            "head_sha": solution_head_sha,
             **normalized,
             "solution_level": level,
         }
+        if repository_heads:
+            stable["repository_heads"] = repository_heads
         solution_digest = _digest(stable)
         payload = {
             **stable,
@@ -328,7 +355,7 @@ class TaskGateService:
                 "intake_digest": str(intake["intake_digest"]),
                 "solution_digest": solution_digest,
                 "solution_level": level,
-                "head_sha": str(intake["source_revision"]["head_sha"]),
+                "head_sha": solution_head_sha,
             },
         )
         return {
@@ -428,9 +455,11 @@ class TaskGateService:
                     raw.get("evidence_sha256"), "auto_fill.evidence_sha256"
                 )
                 self._require_digest("evidence_sha256", evidence_sha256)
-                source_root = self._source_root(source)
+                source_root, source_reference = self._source_evidence_target(
+                    source, reference
+                )
                 content = read_workspace_outbound_file(
-                    source_root, reference, label="业务源码证据文件"
+                    source_root, source_reference, label="业务源码证据文件"
                 )
                 actual = hashlib.sha256(content.encode("utf-8")).hexdigest()
                 if actual != evidence_sha256:
@@ -557,9 +586,11 @@ class TaskGateService:
             "residual_risks": residual_risks,
         }
         if "execution_plan" in payload:
-            normalized["execution_plan"] = self._normalize_execution_plan(
+            execution = self._normalize_execution_plan(
                 payload["execution_plan"]
             )
+            self._validate_execution_scope(normalized["scope"], execution)
+            normalized["execution_plan"] = execution
         return normalized
 
     def _normalize_execution_plan(self, value: Any) -> dict[str, Any]:
@@ -568,17 +599,37 @@ class TaskGateService:
 
         if not isinstance(value, dict):
             raise _invalid("solution_execution_plan_invalid", "execution_plan 必须是对象")
-        _require_exact_keys(
-            value,
-            {"change_repository", "verification", "review_summary"},
-            "execution_plan",
-        )
-        repository = _text(value["change_repository"], "execution_plan.change_repository")
-        if repository.count("/") != 1 or len(repository) > 256:
+        legacy_keys = {"change_repository", "verification", "review_summary"}
+        multi_keys = {"change_repositories", "verification", "review_summary"}
+        if set(value) == legacy_keys:
+            multi = False
+            repositories = [
+                _text(value["change_repository"], "execution_plan.change_repository")
+            ]
+        elif set(value) == multi_keys:
+            multi = True
+            repositories = _string_list(
+                value["change_repositories"],
+                "execution_plan.change_repositories",
+                nonempty=True,
+                require_chinese=False,
+            )
+            if len(repositories) > 32 or len(repositories) != len(set(repositories)):
+                raise _invalid(
+                    "solution_execution_plan_invalid",
+                    "change_repositories 必须是最多 32 个且不重复的仓库数组",
+                )
+        else:
             raise _invalid(
                 "solution_execution_plan_invalid",
-                "change_repository 必须是 owner/repository",
+                "execution_plan 必须使用单仓 change_repository 或多仓 change_repositories 合同",
             )
+        for repository in repositories:
+            if repository.count("/") != 1 or len(repository) > 256:
+                raise _invalid(
+                    "solution_execution_plan_invalid",
+                    "变更仓库必须是 owner/repository",
+                )
         review_summary = _chinese_text(
             value["review_summary"],
             "execution_plan.review_summary",
@@ -602,11 +653,20 @@ class TaskGateService:
             label = f"execution_plan.verification[{index}]"
             if not isinstance(raw, dict):
                 raise _invalid("solution_execution_plan_invalid", f"{label} 必须是对象")
-            _require_exact_keys(
-                raw,
-                {"id", "command", "working_directory", "timeout_seconds"},
-                label,
+            expected = {"id", "command", "working_directory", "timeout_seconds"}
+            if multi:
+                expected.add("repository")
+            _require_exact_keys(raw, expected, label)
+            verification_repository = (
+                _text(raw["repository"], f"{label}.repository")
+                if multi
+                else repositories[0]
             )
+            if verification_repository not in repositories:
+                raise _invalid(
+                    "solution_execution_plan_invalid",
+                    f"{label}.repository 不在 change_repositories 中",
+                )
             verification_id = _text(raw["id"], f"{label}.id")
             if not re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]{0,127}", verification_id):
                 raise _invalid("solution_execution_plan_invalid", f"{label}.id 无效")
@@ -627,29 +687,80 @@ class TaskGateService:
                 working_directory,
                 label=label,
             )
-            verification.append(
-                {
-                    "id": verification_id,
-                    "command": normalized["command"],
-                    "working_directory": working_directory,
-                    "timeout_seconds": timeout,
-                }
-            )
+            verification_item = {
+                "id": verification_id,
+                "command": normalized["command"],
+                "working_directory": working_directory,
+                "timeout_seconds": timeout,
+            }
+            if multi:
+                verification_item["repository"] = verification_repository
+            verification.append(verification_item)
             if normalized["changes"]:
-                normalization_changes.append(
-                    {
-                        "verification_id": verification_id,
-                        "original_command": normalized["original_command"],
-                        "normalized_command": normalized["command"],
-                        "changes": normalized["changes"],
-                    }
-                )
-        return {
-            "change_repository": repository,
+                change = {
+                    "verification_id": verification_id,
+                    "original_command": normalized["original_command"],
+                    "normalized_command": normalized["command"],
+                    "changes": normalized["changes"],
+                }
+                if multi:
+                    change["repository"] = verification_repository
+                normalization_changes.append(change)
+        missing_verification = sorted(
+            set(repositories)
+            - {
+                str(item.get("repository") or repositories[0])
+                for item in verification
+            }
+        )
+        if missing_verification:
+            raise _invalid(
+                "solution_execution_plan_invalid",
+                "每个变更仓库必须至少声明一项验证："
+                + ", ".join(missing_verification),
+            )
+        result = {
             "verification": verification,
             "review_summary": review_summary,
             "normalization_changes": normalization_changes,
         }
+        result[
+            "change_repositories" if multi else "change_repository"
+        ] = repositories if multi else repositories[0]
+        return result
+
+    def _validate_execution_scope(
+        self, scope: Mapping[str, Any], execution: Mapping[str, Any]
+    ) -> None:
+        repositories = self._execution_repositories(execution)
+        if "change_repositories" not in execution:
+            return
+        selected = set(repositories)
+        included_by_repository: set[str] = set()
+        for field in ("included", "excluded"):
+            for reference in scope[field]:
+                repository, separator, relative = str(reference).partition("::")
+                if not separator or repository not in selected or not relative:
+                    raise _invalid(
+                        "solution_scope_invalid",
+                        "多仓方案 scope 必须使用 owner/repository::relative/path，且仓库属于 change_repositories",
+                    )
+                if field == "included":
+                    included_by_repository.add(repository)
+        missing = sorted(selected - included_by_repository)
+        if missing:
+            raise _invalid(
+                "solution_scope_invalid",
+                "每个变更仓库必须至少包含一条 scope.included：" + ", ".join(missing),
+            )
+
+    @staticmethod
+    def _execution_repositories(execution: Mapping[str, Any]) -> list[str]:
+        raw = execution.get("change_repositories")
+        if isinstance(raw, list):
+            return [str(item) for item in raw]
+        repository = str(execution.get("change_repository") or "")
+        return [repository] if repository else []
 
     def _profile_required_values(
         self,
@@ -827,8 +938,9 @@ class TaskGateService:
             if not isinstance(item, dict) or item.get("source") != "business_source_code":
                 continue
             content = read_workspace_outbound_file(
-                self._source_root(source),
-                str(item.get("reference", "")),
+                *self._source_evidence_target(
+                    source, str(item.get("reference", ""))
+                ),
                 label="业务源码证据文件",
             )
             actual = hashlib.sha256(content.encode("utf-8")).hexdigest()
@@ -839,8 +951,42 @@ class TaskGateService:
                     "请重新分析准入信息并确认新摘要",
                 )
 
-    def _source_revision(self, source: Mapping[str, Any]) -> dict[str, str]:
-        root = self._source_root(source)
+    def _source_revision(self, source: Mapping[str, Any]) -> dict[str, Any]:
+        roots = self._source_roots(source)
+        if roots:
+            defaults = source.get("workspace_defaults")
+            assert isinstance(defaults, dict)
+            scope_revision = defaults.get("repository_scope_revision")
+            if (
+                isinstance(scope_revision, bool)
+                or not isinstance(scope_revision, int)
+                or scope_revision < 1
+            ):
+                raise _invalid(
+                    "task_source_context_invalid",
+                    "多仓来源快照缺少有效 repository_scope_revision",
+                )
+            repositories: list[dict[str, str]] = []
+            for repository, root, expected_head, expected_branch in roots:
+                revision = self._git_source_revision(root)
+                current_branch = _run_git(root, "symbolic-ref", "--short", "HEAD")
+                if (
+                    revision["head_sha"] != expected_head
+                    or current_branch != expected_branch
+                ):
+                    raise _blocked(
+                        "task_source_context_changed",
+                        f"领域工作树已偏离建树来源快照：{repository}",
+                        "请核对领域工作树并重新执行 worktrees prepare，不能沿用旧来源上下文",
+                    )
+                repositories.append({"repository": repository, **revision})
+            return {
+                "repository_scope_revision": scope_revision,
+                "repositories": repositories,
+            }
+        return self._git_source_revision(self._source_root(source))
+
+    def _git_source_revision(self, root: Path) -> dict[str, str]:
         top = _run_git(root, "rev-parse", "--show-toplevel")
         try:
             top_root = Path(top).expanduser().resolve()
@@ -877,6 +1023,68 @@ class TaskGateService:
             )
         return {"repository_root": str(root), "head_sha": head_sha, "worktree": "clean"}
 
+    def _source_roots(
+        self, source: Mapping[str, Any]
+    ) -> list[tuple[str, Path, str, str]]:
+        defaults = source.get("workspace_defaults")
+        if not isinstance(defaults, dict):
+            raise _invalid("task_source_context_invalid", "工作空间默认快照无效")
+        raw = defaults.get("source_roots")
+        if raw is None or raw == [] or raw == ():
+            return []
+        if not isinstance(raw, list):
+            raise _invalid("task_source_context_invalid", "领域源码根快照必须是数组")
+        roots: list[tuple[str, Path, str, str]] = []
+        seen: set[str] = set()
+        for item in raw:
+            if not isinstance(item, dict):
+                raise _invalid("task_source_context_invalid", "领域源码根条目无效")
+            repository = str(item.get("repository") or "").strip()
+            raw_root = str(item.get("source_root") or "").strip()
+            expected_head = str(item.get("head_sha") or "").strip()
+            expected_branch = str(item.get("task_branch") or "").strip()
+            if (
+                not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
+                or repository in seen
+                or not raw_root
+                or not re.fullmatch(r"[0-9a-f]{40}", expected_head)
+                or not expected_branch
+            ):
+                raise _invalid("task_source_context_invalid", "领域源码根身份无效或重复")
+            roots.append(
+                (
+                    repository,
+                    validate_business_source_root(self.root, Path(raw_root)),
+                    expected_head,
+                    expected_branch,
+                )
+            )
+            seen.add(repository)
+        return roots
+
+    def _source_evidence_target(
+        self, source: Mapping[str, Any], reference: str
+    ) -> tuple[Path, str]:
+        roots = self._source_roots(source)
+        if not roots:
+            return self._source_root(source), reference
+        repository, separator, relative = reference.partition("::")
+        if not separator or not repository or not relative:
+            raise _invalid(
+                "intake_evidence_reference_invalid",
+                "多仓源码证据必须使用 owner/repository::relative/path 引用",
+            )
+        root_by_repository = {
+            repository: root for repository, root, _, _ in roots
+        }
+        root = root_by_repository.get(repository)
+        if root is None:
+            raise _invalid(
+                "intake_evidence_reference_invalid",
+                f"源码证据仓库不在确认领域：{repository}",
+            )
+        return root, relative
+
     def _source_root(self, source: Mapping[str, Any]) -> Path:
         defaults = source.get("workspace_defaults")
         if not isinstance(defaults, dict):
@@ -896,7 +1104,7 @@ class TaskGateService:
         *,
         intake_digest: str,
         source_context_digest: str,
-        head_sha: str,
+        source_revision_digest: str,
         ready: bool,
     ) -> int:
         if ready or not previous:
@@ -905,7 +1113,7 @@ class TaskGateService:
             return int(previous.get("retry_count", 0))
         same_cycle = (
             previous.get("source_context_digest") == source_context_digest
-            and previous.get("source_revision", {}).get("head_sha") == head_sha
+            and _digest(previous.get("source_revision")) == source_revision_digest
         )
         if not same_cycle or previous.get("ready_for_solution") is True:
             return 0
@@ -917,6 +1125,31 @@ class TaskGateService:
                 "请人工补充 Jira 或项目事实；事实基线变化后再启动新的准入分析",
             )
         return count
+
+    def _revision_head(
+        self, revision: Mapping[str, Any], *, repository: str = ""
+    ) -> str:
+        repositories = revision.get("repositories")
+        if isinstance(repositories, list):
+            if not repository:
+                first = next(
+                    (item for item in repositories if isinstance(item, dict)), None
+                )
+                return str(first.get("head_sha") or "") if first else ""
+            candidates = [
+                item
+                for item in repositories
+                if isinstance(item, dict)
+                and item.get("repository") == repository
+            ]
+            if len(candidates) != 1:
+                raise _blocked(
+                    "solution_change_repository_outside_source_context",
+                    f"方案变更仓库不在确认领域来源中：{repository}",
+                    "请从确认领域工作树中选择变更仓库并重新分级",
+                )
+            return str(candidates[0].get("head_sha") or "")
+        return str(revision.get("head_sha") or "")
 
     def _require_task(self, issue_key: str, agentic_run_id: str) -> dict[str, Any]:
         state = self.store.inspect(issue_key)
@@ -1210,13 +1443,22 @@ def _timestamp() -> str:
 
 
 def _invalid(code: str, message: str) -> RuntimeErrorResult:
+    input_contract_error = code != "task_source_context_invalid"
     return RuntimeErrorResult(
         code=code,
         message=message,
         status="blocked",
         exit_code=EXIT_BLOCKED,
-        retry_safe=False,
-        required_human_action="请按任务准入或方案门禁合同修正输入，不要绕过 Runtime",
+        retry_safe=input_contract_error,
+        required_human_action=(
+            "请由 AI 按任务准入或方案门禁合同重建输入并重试一次；"
+            "不要向用户索要内部 JSON 字段"
+            if input_contract_error
+            else "任务来源快照无效；请停止并由人工修复 Runtime、工作空间或 Profile 状态"
+        ),
+        details={"input_recovery": INPUT_CONTRACT_RECOVERY}
+        if input_contract_error
+        else {},
     )
 
 

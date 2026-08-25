@@ -20,6 +20,22 @@ CONTRACTS_ROOT = REPO_ROOT / "developer" / "standards" / "contracts" / "operatio
 
 
 class CapabilityCatalogTest(unittest.TestCase):
+    def test_business_continuity_rule_is_present_in_distributed_assets(self) -> None:
+        required_assets = (
+            REPO_ROOT / "developer" / "AGENTS.md",
+            REPO_ROOT / "developer" / "rules" / "ai-execution.md",
+            REPO_ROOT
+            / "developer"
+            / "standards"
+            / "handbooks"
+            / "ai-employee-handbook.md",
+        )
+        for path in required_assets:
+            with self.subTest(path=path):
+                content = path.read_text(encoding="utf-8")
+                self.assertIn("agenticops_continuity_decision", content)
+                self.assertIn("不得", content)
+
     def test_every_operation_contract_has_exactly_one_catalog_entry(self) -> None:
         catalog = CapabilityCatalog.load(REPO_ROOT)
         contract_entries = [

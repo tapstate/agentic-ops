@@ -29,7 +29,7 @@ ao-work capability show <operation>
 
 `ao-work` 在读取能力目录或执行任何命令前，只从当前实际加载的 `ao_work` 模块位置反推 developer managed clone，并校验其 Git、origin、sparse checkout、ref 和受管资产完整性。CLI 不提供 `--install-root`，也不从环境变量选择另一安装目录；自定义安装位置由该位置中的已安装 wrapper 和模块自然自定位。
 
-只有目录返回 `status=implemented` 且列出当前命令路径时，才能继续调用。`status=capability_gap`、目录中不存在该操作、目录校验失败或只有 Operation Contract 时必须停止自动化，并按目录中的中文 `next_action` 处理。Operation Contract 保存目标输入、输出、门禁和副作用边界，不是实现状态事实源。
+只有目录返回 `status=implemented` 且列出当前命令路径时，才能继续调用。`status=capability_gap`、目录中不存在该操作、目录校验失败或只有 Operation Contract 时必须停止调用该 AO 自动化，并按目录中的中文 `next_action` 处理；这不等同于直接终止业务开发。若 AO 自身问题会阻断业务任务，必须进入 `agenticops_continuity_decision` 由人工决定有限继续路径。Operation Contract 保存目标输入、输出、门禁和副作用边界，不是实现状态事实源。
 
 每个 `ao-work` 子命令都是一个原子步骤控制入口。stdout 的唯一 JSON 对象固定包含 `ok`、`operation`、`status` 和结构化 `agentic_next_action`；下一步对象固定给出 `executor`、稳定 `action`、`required_inputs`、`allowed_operations`、`requires_authorization`、`stop_workflow`、`ownership_effect` 与 `retry_gate`。`executor` 只表示当前动作由 Runtime、当前 AI、人、reviewer 或项目工具执行，不是任务转派；当前版本 `ownership_effect` 只允许 `none`。Runtime 必须根据当前操作的实际结果选择下一动作；AI 只能从当前结果的事实/证据字段取齐 required inputs，并调用 allowed operations 中已实现的操作。失败只在 `retry_gate.allowed=true` 时可以按同一 `retry_key` 再试一次，且必须先回读状态、改变输入并记录 retry 事件；相同输入循环、未允许重试或重试耗尽都要停止转人工。自然语言说明只帮助人理解，不能替代这些机器字段或成为放行依据。
 
@@ -67,7 +67,7 @@ ao-work task-run record-unverified-prohibitions --manifest <workspace-relative-m
 ao-work task-run finalize --manifest <workspace-relative-manifest.json> --status <ready_for_pr_review|blocked|failed> --next-action <明确下一步>
 ```
 
-`prepare` 从当前 L1 solution、仓库确认表和唯一 prepared 任务工作树生成完整设计与连续执行授权包；用户只确认方案、范围、最终验证命令、允许/禁止动作和风险。确认后 `authorize` 由 Runtime 生成批准计划、路径和 canonical digest，Skill 直接使用返回的 `manifest_path` 执行 `open`，不再要求用户复制 run、文件路径或摘要。
+`prepare` 从当前 L1 solution、确认领域和执行计划选定的 prepared 任务工作树生成完整设计与连续执行授权包；同领域其它 prepared 工作树只用于分析，不会阻断交付。任务可选择一个或多个实际变更仓库，用户只对完整任务确认一次方案、逐仓范围、最终验证命令、允许/禁止动作和风险。确认后 `authorize` 为每个仓库生成一份 shared schema v1 canonical manifest 和独立 task-run 状态；单仓继续返回兼容 `manifest_path`，多仓通过 `deliveries` 返回逐仓路径，Skill 自动逐仓执行 `open`，不再要求用户复制 run、文件路径或摘要。
 
 正式 manifest 还必须显式绑定两组不可推断的事实：`task_binding` 记录 canonical Jira issue 内容摘要、`inputs/` 下批准计划文件和该文件原始 UTF-8 SHA-256；`execution_identity` 复用工作空间初始化时已确认并写入 `agent.json` 的 Git author/committer 姓名邮箱及 GitHub actor login。Runtime 不得用操作系统用户名、主机名、全局 Git 配置或当前登录临场补齐这些字段；manifest 与工作空间身份漂移时必须阻断。
 

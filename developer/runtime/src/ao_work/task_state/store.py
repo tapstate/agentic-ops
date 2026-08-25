@@ -194,8 +194,10 @@ class TaskStore:
             if isinstance(existing, dict) and isinstance(
                 existing.get("confirmed_repository_branch_map"), list
             ):
-                if existing.get("proposed_repository_branch_map") == proposal.get(
-                    "proposed_repository_branch_map"
+                if (
+                    existing.get("task_domain") == proposal.get("task_domain")
+                    and existing.get("proposed_repository_branch_map")
+                    == proposal.get("proposed_repository_branch_map")
                 ):
                     return {"created": False, "repository_scope": existing, "path": str(path)}
                 raise RuntimeErrorResult(
@@ -208,6 +210,7 @@ class TaskStore:
             now = self._timestamp()
             scope = {
                 "schema_version": 1,
+                "content_version": 1,
                 "issue_key": issue_key,
                 "agentic_run_id": agentic_run_id,
                 "phase": "proposal_recorded",
@@ -216,6 +219,8 @@ class TaskStore:
                     "problem_version_repository"
                 ),
                 "problem_version_sha": proposal.get("problem_version_sha"),
+                "task_domain": proposal.get("task_domain"),
+                "task_domain_source": proposal.get("task_domain_source"),
                 "proposed_repository_branch_map": proposal.get(
                     "proposed_repository_branch_map", []
                 ),
@@ -292,6 +297,7 @@ class TaskStore:
             scope.update(
                 {
                     "phase": "mapping_confirmed",
+                    "task_domain_source": "user_confirmed",
                     "confirmed_repository_branch_map": confirmed,
                     "confirmed_change_repositories": [
                         item["repository"] for item in confirmed
@@ -300,6 +306,7 @@ class TaskStore:
                     "updated_at": self._timestamp(),
                 }
             )
+            scope["content_version"] = int(scope.get("content_version") or 0) + 1
             atomic_write_json(path, scope)
             append_ndjson(
                 task_dir / "journal.ndjson",
@@ -311,6 +318,7 @@ class TaskStore:
                         retry_safe=True,
                     ),
                     "evidence": {
+                        "task_domain": scope.get("task_domain"),
                         "repositories": [item["repository"] for item in confirmed],
                         "differences": differences,
                     },
@@ -351,7 +359,7 @@ class TaskStore:
                     message="任务尚无用户确认的仓库分支关系",
                     status="blocked",
                     exit_code=EXIT_BLOCKED,
-                    required_human_action="请先确认完整仓库分支关系表",
+                    required_human_action="请先确认任务领域及 Runtime 推导的仓库分支计划",
                 )
             matched = False
             updated_rows: list[dict[str, Any]] = []
@@ -378,6 +386,7 @@ class TaskStore:
             else:
                 scope["phase"] = "worktrees_active"
             scope["updated_at"] = self._timestamp()
+            scope["content_version"] = int(scope.get("content_version") or 0) + 1
             atomic_write_json(path, scope)
             append_ndjson(
                 task_dir / "journal.ndjson",
@@ -428,7 +437,7 @@ class TaskStore:
                     message="任务尚无用户确认的仓库分支关系",
                     status="blocked",
                     exit_code=EXIT_BLOCKED,
-                    required_human_action="请先确认完整仓库分支关系表",
+                    required_human_action="请先确认任务领域及 Runtime 推导的仓库分支计划",
                 )
             allowed = {str(item.get("repository")) for item in confirmed}
             actual = [str(item.get("repository")) for item in repositories]
@@ -446,6 +455,7 @@ class TaskStore:
             if summary_content_sha256 is not None:
                 scope["completion_summary_content_sha256"] = summary_content_sha256
             scope["updated_at"] = self._timestamp()
+            scope["content_version"] = int(scope.get("content_version") or 0) + 1
             atomic_write_json(path, scope)
             event = self._journal_event(
                 task,
@@ -508,6 +518,7 @@ class TaskStore:
             }
             scope["phase"] = "completion_evidence_readback"
             scope["updated_at"] = self._timestamp()
+            scope["content_version"] = int(scope.get("content_version") or 0) + 1
             atomic_write_json(path, scope)
             return {"repository_scope": scope, "path": str(path)}
 

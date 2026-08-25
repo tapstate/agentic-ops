@@ -1,5 +1,5 @@
 operation: task_run_manifest
-version: 1
+version: 2
 workplane: developer
 actions:
   - prepare
@@ -15,7 +15,7 @@ facts:
   - current_l1_solution
   - execution_plan
   - confirmed_repository_branch_map
-  - unique_prepared_worktree
+  - execution_plan_selected_prepared_worktrees
   - install_execution_identity
   - project_profile
 prepare:
@@ -25,6 +25,7 @@ prepare:
     - must_not_write_external_system
   output:
     - confirmation_package
+    - repository_delivery_units
     - confirmation_required
 authorize:
   preconditions:
@@ -32,11 +33,19 @@ authorize:
     - stable_facts_unchanged
     - canonical_manifest_prevalidation_passed
   output:
-    - approved_plan_path
-    - manifest_path
+    - repository_delivery_manifests
     - authorization_reference
-    - manifest_sha256
     - agentic_next_action
+  compatibility:
+    single_repository:
+      - approved_plan_path
+      - manifest_path
+      - manifest_sha256
+delivery_model:
+  task: one_or_more_repositories
+  confirmation: one_for_complete_task
+  manifest: one_per_repository_using_shared_schema_v1
+  protocol_state: isolated_per_repository
 human_gate:
   required:
     - solution_scope_verification_permissions_and_risks
@@ -48,6 +57,5 @@ human_gate:
 failure:
   - task_run_execution_plan_missing
   - task_run_repository_worktree_missing
-  - task_run_multi_repository_unsupported
   - task_run_manifest_draft_stale
   - task_run_prepared_worktree_start_changed

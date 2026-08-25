@@ -74,6 +74,8 @@ Jira 交互中的人可见内容必须使用中文，包括摘要、标题、描
 
 ## 运行时方向
 
+AgenticOps 软件本身的缺陷、能力缺口、内部状态异常或配套工具故障不得直接阻塞业务开发。安全恢复失败且继续开发与 AgenticOps 控制功能冲突时，必须进入结构化人工决策，展示故障证据、已确认业务事实、有限继续方案、精确授权与验证边界、损失的自动化审计能力和剩余风险；不得由 AI 静默绕过或伪造成功。业务事实不可信、权限不足，以及合并、发布、Tag、保护分支写入、强推、历史改写和结果不明确的外部写入重试不因此自动放行。项目维护开发中的功能若与本规则冲突，必须请求人工决策。
+
 目标运行架构是 `Skill + Python Runtime + Shell Bootstrap + Rule`。维护工作面入口为 `./maintainer/bin/ao-maint`，研发工程师工作面入口为安装后的 `ao-work`。Python Runtime 承载契约、状态、API、门禁、证据、恢复和反馈；Shell Bootstrap 只负责认证安装引导、轻量环境检测、developer-only sparse managed clone 更新、`uv` 环境准备、启动和回滚。维护 AgenticOps 源头仓库时，`maintainer/scripts/release.sh`、`maintainer/scripts/hotfix.sh` 及 `maintainer/scripts/lib/` 可以作为项目级例外。AgenticOps 现役实现不包含 Go Runtime、项目自有平台二进制或 `agentic-cli` 兼容入口。
 
 `~/.agentic-ops` 是稳定 `main` 的 developer-only sparse managed clone，代表一名研发员的 developer 安装并保存安装级身份与凭证，但不是具体项目运行目录。具体项目运行目录是业务项目 AI 工作空间，例如 `tapstate` 或 `tapdata`；同一安装下的工作空间继承同一研发员身份，只保存项目绑定与任务状态。

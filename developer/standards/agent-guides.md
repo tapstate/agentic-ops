@@ -22,7 +22,7 @@ ao-work auth --show
 ao-work capability list
 ```
 
-随后按任务类型加载对应 Skill。`workspace preflight` 仅在需要诊断或修复工作空间时执行，不是接管任务的前置步骤；接管 Runtime 会重新校验工作空间、安装身份和 Jira 事实。每次调用前用 `ao-work capability show <operation>` 确认 `status=implemented` 和目录声明的命令路径；`capability_gap` 必须按中文 `next_action` 停止或转人工。Operation Contract 只是目标行为边界，不代表命令已经实现。
+随后按任务类型加载对应 Skill。`workspace preflight` 仅在需要诊断或修复工作空间时执行，不是接管任务的前置步骤；接管 Runtime 会重新校验工作空间、安装身份和 Jira 事实。每次调用前用 `ao-work capability show <operation>` 确认 `status=implemented` 和目录声明的命令路径；`capability_gap` 不得调用旧命令。若 AgenticOps 自身缺口会阻断业务开发，进入 `agenticops_continuity_decision`，由人工决定等待修复、限定使用项目认可工具继续或转人工执行。Operation Contract 只是目标行为边界，不代表命令已经实现。
 
 任务状态的 `ao-work task` 与本地报告的 `ao-work report` 是内部 Runtime 接口，只能由版本化 Skill 编排，不能向用户描述为任务接管、Jira 回写或完成审计。Jira Comment 和 Worklog 通过 `ao-work jira` 的 `plan -> apply -> readback` 协议处理；Description 使用 `plan -> apply`，写后回读由 apply 内部完成。
 

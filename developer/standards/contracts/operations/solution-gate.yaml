@@ -1,5 +1,5 @@
 operation: solution_gate
-version: 3
+version: 4
 workplane: developer
 actions:
   - classify
@@ -16,9 +16,13 @@ inputs:
 execution_plan:
   required_for_task_run_prepare: true
   fields:
-    - change_repository
+    - exactly_one_of_change_repository_or_change_repositories
     - verification
     - review_summary
+  multi_repository:
+    scope_reference: owner/repository::relative/path
+    verification_repository_binding: required
+    every_repository_has_included_scope_and_verification: required
   normalization:
     maven: add_batch_and_offline_before_validation
   human_gate:

@@ -7,7 +7,7 @@ metadata:
 
 # 执行真实任务到 PR 测试
 
-只在 `developer` 工作面使用。manifest 必须由当前 developer Runtime 从 L1 solution、唯一 prepared 工作树、Project Profile 和安装身份生成；不得要求用户或 AI 手写 schema、路径或摘要。授权引用必须精确为 `user-confirmation:<ISSUE>:<agentic_run_id>:<approved_plan_sha256>`；任意非空文本、旧运行或旧计划摘要均无效。`authorization.confirmed_by`、确认时间和授权引用是当前会话及协议包内声明；在没有独立 Jira author readback 等外部证据时，只能称“manifest 声明的用户确认”，不能称为 maintainer 已独立验证的人工批准。协议唯一事实源是安装根目录 `shared/integration/task-to-pr-*.schema.json`；不要加载 maintainer 规则、维护状态或 AgenticOps 源码。
+只在 `developer` 工作面使用。任务可以包含一个或多个实际变更仓库：L1 solution 使用兼容单仓字段 `change_repository`，或使用多仓字段 `change_repositories`。Runtime 对完整任务只请求一次设计与连续执行授权，再按仓库生成独立 manifest；每份 manifest 继续遵循 shared schema v1 的单仓合同，并拥有独立提交、验证、推送、PR 和 task-run 状态。同领域其它 prepared 工作树只用于分析，不会因为未修改而阻断。不得要求用户或 AI 手写 schema、路径或摘要。授权引用必须精确为 `user-confirmation:<ISSUE>:<agentic_run_id>:<approved_plan_sha256>`；任意非空文本、旧运行或旧计划摘要均无效。`authorization.confirmed_by`、确认时间和授权引用是当前会话及协议包内声明；在没有独立 Jira author readback 等外部证据时，只能称“manifest 声明的用户确认”，不能称为 maintainer 已独立验证的人工批准。协议唯一事实源是安装根目录 `shared/integration/task-to-pr-*.schema.json`；不要加载 maintainer 规则、维护状态或 AgenticOps 源码。
 
 `ao-work task-run` 同时提供本地审计协议和确定性可信采集入口。外部写动作仍由本 Skill 协调现役 Runtime、项目认可工具、AI 或人工完成；但 Jira、Git、PR、CI、验证和禁止动作事实只能由 Runtime probe 生成，不能用 `record` 导入。
 
@@ -41,23 +41,43 @@ ao-work takeover <ISSUE-KEY>
 ao-work task intake assess --issue-key <KEY> --agentic-run-id <RUN> --input-file <相对JSON>
 ```
 
+输入顶层必须且只能包含以下字段；四个集合字段都必须是数组，即使当前为空也写 `[]`：
+
+```json
+{
+  "schema_version": 1,
+  "auto_filled_values": [],
+  "unresolved_information": [],
+  "assumptions": [
+    {"statement": "本次只处理任务卡片和已验证源码证据", "impact": "范围变化时重新分析"}
+  ],
+  "impacts": [
+    {"area": "业务模块", "description": "基于已知事实进行初步方案分析", "risk": "low"}
+  ]
+}
+```
+
+`auto_filled_values` 中每个源码证据必须包含 `field`、`value`、`source=business_source_code`、`reference`、`evidence_sha256` 与中文 `rationale`；单仓来源使用仓库内相对路径，多仓领域来源必须使用 `owner/repository::relative/path`，由 Runtime 绑定到对应已确认工作树。Profile 已解析的必填字段由 Runtime 自动补齐，不要伪造。完整异常堆栈、MySQL 版本、权限和 binlog 配置尚未取得时，写入 `unresolved_information` 并标记 `required=false`，不得因此否定已有源码证据的初步分析。
+
+若 Runtime 返回 `retry_safe=true` 的输入合同错误，AI 必须遵循 `agentic_next_action` 回读状态、重建上述 JSON 并只重试一次；这不是用户门禁，不得要求用户填写 JSON、内部摘要或尚非必填的诊断信息。只有事实冲突、Profile 必填字段缺失、来源/源码变化，或 Runtime 明确给出不可重试/重试耗尽时，才请求人工处理。
+
 Runtime 自动合并接管后保存的 Jira、Project Profile、工作空间与运行快照，校验 Profile 必填字段、源码证据摘要、干净 HEAD、缺项、假设和影响，输出完整准入事实及 `intake_digest`。Jira/Profile/Runtime 来源必须与快照值精确匹配；源码推断必须引用工作空间绑定源码中的普通文件及其 SHA-256，并明确仍需人工判断语义。必要信息仍缺失时，只能按同一 `retry_key` 用改变后的证据重试一次；耗尽后停止。事实完整时不设置准入确认门禁，AI 直接形成方案 JSON，并调用：
 
 ```sh
 ao-work task solution classify --issue-key <KEY> --agentic-run-id <RUN> --input-file <相对JSON>
 ```
 
-方案 JSON 必须包含 `execution_plan`：唯一 `change_repository`、验证 argv/工作目录/超时和中文 `review_summary`。Runtime 对 Maven argv 确定性补齐 batch/offline 后再使用 task-run 同一白名单校验，并保存规范化差异。Runtime 按固定风险标志和证据确定级别，优先级为 L4、L3、L2、L1：带完整执行计划的 L1 由 AI 直接执行 `task-run prepare`，只在完整设计与连续授权包生成后进入一次人工审查；L2 展示完整方案和逐项风险并进入风险决策；L3 由 AI 先修改设计再重新分析；L4 停止并解决事实、权限或能力缺口。不得增加准入摘要确认、通用方案摘要确认或内部 digest 确认。Jira/Profile 快照、源码 HEAD、源码证据、范围、风险或方案变化后，旧分析和设计审查失效。
+方案 JSON 必须包含 `execution_plan`：单仓使用 `change_repository`；多仓使用 `change_repositories`，并把 scope 写成 `owner/repository::relative/path`、为每项验证声明 `repository`。每个变更仓库都必须有包含范围和至少一项验证。两种合同都包含验证 argv/工作目录/超时和中文 `review_summary`。Runtime 对 Maven argv 确定性补齐 batch/offline 后再使用 task-run 同一白名单校验，并保存规范化差异。Runtime 按固定风险标志和证据确定级别，优先级为 L4、L3、L2、L1：带完整执行计划的 L1 由 AI 直接执行 `task-run prepare`，只在完整设计与连续授权包生成后进入一次人工审查；L2 展示完整方案和逐项风险并进入风险决策；L3 由 AI 先修改设计再重新分析；L4 中业务事实、权限或高风险冲突继续停止处理；仅由 AgenticOps 自身缺陷或能力缺口造成时，按 `agenticops_continuity_decision` 展示有限继续方案并由人工决定，不得静默绕过或伪造成功。不得增加准入摘要确认、通用方案摘要确认或内部 digest 确认。Jira/Profile 快照、任一仓库 HEAD、源码证据、范围、风险或方案变化后，旧分析和设计审查失效。
 
 之后每个 `ao-work` 环节只执行当次 JSON 中结构化 `agentic_next_action` 指定的动作。`executor` 只是当前步骤执行者，不是任务转派；`task_ownership.task_owner` 从接管到 PR 审查保持同一研发员，所有现役下一动作的 `ownership_effect` 必须为 `none`。未知 executor/action、required inputs 不齐、下一操作不在 `allowed_operations` 或 `stop_workflow=true` 时停止。只在 `retry_gate.allowed=true` 时允许同一 `retry_key` 再试一次；重试前必须回读状态、改变输入并记录 retry 事件，耗尽后转人工。如需转派，只能停止并由人决定；当前 `task_transfer` 为 `capability_gap`，AI、Runtime、reviewer 和项目工具都不得改变负责人。
 
 ## 生成与确认执行包
 
-1. 运行 `ao-work capability list|show`。已实现操作才调用 `ao-work`；能力缺口按中文 `next_action` 转用项目认可工具或请求人工，禁止虚构旧命令。
-2. 对当前 L1 任务执行 `ao-work task-run prepare --issue-key <KEY>`。Runtime 从统一接管输出、仓库确认、唯一 prepared 工作树、方案、安装身份和 Profile 生成完整 `confirmation_package`，并预校验最终验证 argv。缺少 `execution_plan` 时由 AI 补齐方案并重新分级；不得要求用户手写 manifest。
-3. 一次展示 `confirmation_package` 中的方案、唯一仓库及 HEAD、范围、最终验证 argv、允许/禁止外部动作和残留风险。用户确认该完整业务语义后，即同时确认设计和工作项级连续执行授权；不得让用户确认 draft id、run id、文件路径、计划 SHA 或 manifest SHA。
-4. 确认后执行 `ao-work task-run authorize --issue-key <KEY> --confirmed-by <当前会话声明确认人> --confirm`。Runtime 重新回读所有绑定事实、生成批准计划和 canonical manifest，并使用 open 同一合同预校验；内部参数规范化或摘要计算不得转成用户决策。
-5. 使用 authorize 输出的 `manifest_path` 自动执行 `ao-work task-run open --manifest <manifest_path>`，不再请求第二次确认。open 失败时只在目标、范围、风险、授权或外部事实变化时回到用户；内部载体错误必须由 Runtime/AI 修正或作为 AO 能力缺陷反馈。
+1. 运行 `ao-work capability list|show`。已实现操作才调用 `ao-work`；能力缺口禁止虚构旧命令。若缺口会阻断业务开发，按 `agenticops_continuity_decision` 向人工展示边界和风险，获得限定授权后才可转用项目认可工具，同时记录 AO 故障和降级执行证据。
+2. 对当前 L1 任务执行 `ao-work task-run prepare --issue-key <KEY>`。Runtime 从统一接管输出、确认领域、执行计划选定的全部 prepared 工作树、方案、安装身份和 Profile 生成完整 `confirmation_package`，并逐仓预校验最终验证 argv。同领域未进入执行计划的分析工作树不参与交付判定。缺少 `execution_plan` 时由 AI 补齐方案并重新分级；不得要求用户手写 manifest。
+3. 一次展示 `confirmation_package` 中的方案、全部交付仓库及 HEAD、逐仓范围、最终验证 argv、允许/禁止外部动作和残留风险。用户确认该完整业务语义后，即同时确认设计和工作项级连续执行授权；不得把每个仓库拆成重复人工确认，也不得让用户确认 draft id、run id、文件路径、计划 SHA 或 manifest SHA。
+4. 确认后执行 `ao-work task-run authorize --issue-key <KEY> --confirmed-by <当前会话声明确认人> --confirm`。Runtime 重新回读所有绑定事实，逐仓生成 shared schema v1 canonical manifest，并使用 open 同一合同预校验；内部参数规范化或摘要计算不得转成用户决策。
+5. 单仓兼容输出使用 `manifest_path`；多仓使用 `deliveries[*].manifest_path`。AI 必须逐仓自动执行 `ao-work task-run open --manifest <manifest_path>`，后续也逐仓完成提交、验证、推送和 PR，最后由任务状态聚合实际变更仓库；不再请求第二次确认。open 失败时只在目标、范围、风险、授权或外部事实变化时回到用户；内部载体错误优先由 Runtime/AI 修正并作为 AO 能力缺陷反馈，不能修复且会阻断业务开发时进入 `agenticops_continuity_decision`，不得把 AO 内部错误冒充业务阻断。
 
 ## 推进到 PR 审查
 

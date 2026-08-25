@@ -75,7 +75,7 @@
 2. 认领时若池成员是浅克隆（现有 `~/github` 克隆是 depth 1）→ 自动流式 `git fetch --unshallow`；不允许以浅克隆作为池成员。
 3. 全集准备支持中断续传：`Ctrl+C` 中断时已完成的池成员保留（不删除、不污染），下次 init/任务接管自动补齐缺失成员；不写任何初始化完成标记。
 4. 不创建工作空间级源码目录或凭证；写 profile overlay、AGENTS.md、Skill 和 schema v5 agent.json（`source_root` 写池根）。
-5. `workspace init` 和任务接管均不创建任务工作树；接管后先分析并由研发工程师确认完整逐仓分支关系，实际开始某仓库工作时才按需创建（3.4）。
+5. `workspace init` 和任务接管均不创建任务工作树；接管后先分析并由研发工程师确认任务领域，再创建完整领域工作树集合（3.4）。
 
 ### 3.4 任务级子工作树集（核心）
 
@@ -83,8 +83,8 @@
 
 1. 接管只建立 Jira 与本地 run，不绑定 `repositories.default`、不创建工作树、不写仓库来源快照。
 2. AIAgent 以源码池成员主工作树的 Profile 默认基线作为只读分析源；Runtime 刷新并固定 remote SHA，输出 `proposed_repository_branch_map`。建议没有建树或编码权限。
-3. 研发工程师审查问题版本、问题版本来源仓库和完整逐仓建议，可增加/移除仓库或修正任一 `from_branch`；显式确认后保存 `confirmed_repository_branch_map`。
-4. 实际需要修改某仓库时，Runtime 只从确认表读取仓库、`from_branch` 和任务分支，刷新该仓库 origin，固定 SHA，执行 `git worktree add --detach`，随后创建任务分支并写入 per-worktree 身份与精确来源上下文。确认领域的其它仓库不预建。
+3. Runtime 从任务建议 `product`、`assistant` 或 `taptest` 领域，并展示问题版本、问题版本来源仓库和自动推导的完整逐仓结果。研发工程师只确认领域；建议错误时指定领域重新分析。确认后保存领域及 `confirmed_repository_branch_map`。
+4. Runtime 从确认表读取完整领域仓库、`from_branch` 和任务分支，回读全部固定 SHA，执行 `git worktree add --detach`，随后创建逐仓任务分支并写入 per-worktree 身份与多仓来源上下文。L1 设计再选择一个或多个实际变更仓库；完整任务一次确认后逐仓进入独立交付。
 5. 恢复时检测到旧布局 `<pool_root>/<jira_id>/<问题版本>/<repo>` 或上一版 `.worktree/<jira>/<问题版本>/<repo>` 均失败关闭，不自动迁移、覆盖或删除。
 
 任务审计完成后，按清理策略 `git worktree remove` 任务根下各工作树（dirty 阻断，见 3.8）。
@@ -148,7 +148,7 @@ repositories:
     - id: assistant
       baseline_repository: tapdata/feishu_robot
       repositories: [tapdata/feishu_robot]
-    - id: automation-test
+    - id: taptest
       baseline_repository: tapdata/t-layer3-test
       repositories: [tapdata/t-layer3-test]
 ```
@@ -201,7 +201,7 @@ branches:
 
 #### 3.9.4 跨仓库修改与完成证据
 
-- 用户确认表可以包含多个仓库；Runtime 只为本次实际需要的确认仓库按需创建工作树。
+- 用户确认任务领域；Runtime 为该领域创建完整分析工作树集合，L1 设计选择实际异常仓库集合。任务级只进行一次设计确认，仓库级分别提交、验证、推送和创建 PR。
 - 本地状态分开保存人工确认的 `confirmed_change_repositories` 与 Git/远端/PR 回读形成的 `actual_change_repositories`。实际集合越出确认范围立即阻断。
 - Jira evidence 评论的完成内容必须逐仓汇报实际变更仓库，并在已输出表单字段中包含 `actual_change_repositories`；评论 plan/apply/readback 和 Jira 完成态回读后才允许清理。
 
