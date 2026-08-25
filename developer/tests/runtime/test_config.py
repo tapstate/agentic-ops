@@ -67,14 +67,8 @@ class ConfigTest(unittest.TestCase):
         self.assertIsNotNone(connector_domain)
         self.assertEqual("product", connector_domain.domain_id)
         dev_branches = dict(profile.branch_derivation.dev_branches)
-        self.assertEqual(
-            dev_branches["tapdata/tapdata-common-lib"],
-            dev_branches["tapdata/tapdata-connectors"],
-        )
-        self.assertEqual(
-            dev_branches["tapdata/tapdata-common-lib"],
-            dev_branches["tapdata/tapdata-connectors-enterprise"],
-        )
+        self.assertEqual("develop", dev_branches["tapdata/tapdata-connectors"])
+        self.assertEqual("develop", dev_branches["tapdata/tapdata-connectors-enterprise"])
 
     def prepare(self, root: Path) -> tuple[Path, Path]:
         install = root / "install"

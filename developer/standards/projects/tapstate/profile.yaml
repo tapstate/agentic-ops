@@ -64,8 +64,8 @@ repositories:
       tapdata/tapdata: develop
       tapdata/tapdata-enterprise: develop
       tapdata/tapdata-web: develop
-      tapdata/tapdata-connectors: main
-      tapdata/tapdata-connectors-enterprise: main
+      tapdata/tapdata-connectors: develop
+      tapdata/tapdata-connectors-enterprise: develop
       tapdata/tapdata-license: main
       tapdata/tapdata-common-lib: main
       tapdata/tapdata-application: main
@@ -75,8 +75,8 @@ repositories:
       tapdata/tapdata: develop
       tapdata/tapdata-cloud: develop
       tapdata/tapdata-common-lib: main
-      tapdata/tapdata-connectors: main
-      tapdata/tapdata-connectors-enterprise: main
+      tapdata/tapdata-connectors: develop
+      tapdata/tapdata-connectors-enterprise: develop
       tapdata/tapdata-enterprise: develop
       tapdata/tapdata-license: main
       tapdata/tapdata-web: develop
