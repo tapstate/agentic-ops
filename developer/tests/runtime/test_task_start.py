@@ -473,7 +473,7 @@ class ProjectProfileSnapshotTest(unittest.TestCase):
 
     def test_non_pool_checkout_resolves_product_alignment_spec(self) -> None:
         repository_root = Path(__file__).resolve().parents[3]
-        profile = load_project_profile(repository_root, "tapdata")
+        profile = load_project_profile(repository_root, "tapstate")
         issue = SimpleNamespace(
             description=markdown_to_adf(
                 "## 目标仓库\n\ntapdata/tapdata-enterprise\n\n"

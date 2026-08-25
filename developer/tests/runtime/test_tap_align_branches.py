@@ -119,6 +119,76 @@ class TapAlignBranchesMachinePlanTest(unittest.TestCase):
                         repositories=["not-supported"],
                     )
 
+    def test_connectors_must_match_common_lib_branch(self) -> None:
+        with (
+            mock.patch.object(tap_align_branches, "branch_exists", return_value=True),
+            mock.patch.object(tap_align_branches, "current_branch", return_value="main"),
+            mock.patch.object(tap_align_branches, "dirty_state", return_value="clean"),
+            mock.patch.object(
+                tap_align_branches,
+                "plugin_release_for",
+                return_value="release-v1.2.6",
+            ),
+            mock.patch.object(
+                tap_align_branches,
+                "first_release_ge",
+                return_value="release-v1.2.6",
+            ) as first_release,
+        ):
+            rows = tap_align_branches.plan_rows(
+                "develop",
+                "",
+                "",
+                Path("/tmp/tapdata"),
+                "origin",
+                repositories=[
+                    "tapdata-common-lib",
+                    "tapdata-connectors",
+                    "tapdata-connectors-enterprise",
+                ],
+                remote_only=True,
+            )
+
+        targets = {row["repo"]: row["target"] for row in rows}
+        self.assertEqual("release-v1.2.6", targets["tapdata-common-lib"])
+        self.assertEqual("release-v1.2.6", targets["tapdata-connectors"])
+        self.assertEqual("release-v1.2.6", targets["tapdata-connectors-enterprise"])
+        self.assertEqual(1, first_release.call_count)
+
+    def test_connector_blocks_when_common_lib_branch_is_missing(self) -> None:
+        def branch_exists(repo, branch, *_args, **_kwargs):
+            return repo == "tapdata" and branch == "develop"
+
+        with (
+            mock.patch.object(
+                tap_align_branches, "branch_exists", side_effect=branch_exists
+            ),
+            mock.patch.object(tap_align_branches, "current_branch", return_value="main"),
+            mock.patch.object(tap_align_branches, "dirty_state", return_value="clean"),
+            mock.patch.object(
+                tap_align_branches,
+                "plugin_release_for",
+                return_value="release-v1.2.6",
+            ),
+            mock.patch.object(
+                tap_align_branches,
+                "first_release_ge",
+                return_value="release-v1.2.6",
+            ),
+        ):
+            rows = tap_align_branches.plan_rows(
+                "develop",
+                "",
+                "",
+                Path("/tmp/tapdata"),
+                "origin",
+                repositories=["tapdata-connectors"],
+                remote_only=True,
+            )
+
+        self.assertEqual("UNRESOLVED", rows[0]["target"])
+        self.assertEqual("blocked", rows[0]["action"])
+
 
 if __name__ == "__main__":
     unittest.main()

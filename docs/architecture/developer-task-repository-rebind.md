@@ -90,7 +90,7 @@ ao-work task repositories confirm \
 分析阶段可以按 Profile 和项目对齐工具生成分支关系建议，但 Runtime 不得直接按建议创建工作树。用户确认或修正完整关系表后，实际开始某个或某组仓库工作时，只选择 `confirmed_repository_branch_map` 中的对应条目执行：
 
 1. 解析任务“问题版本”。Profile 为工作树领域显式声明 `problem_version_repository`；缺失时兼容使用该领域 `baseline_repository`。问题版本未在 Jira 声明时读取问题版本来源仓库的 `baseline_branches`，只有 Profile 完全未声明映射时才回退 `default_branch`。
-2. TapData 产品任务的 TM、FE、connector 仓库统一声明 `problem_version_repository: tapdata/tapdata`，以 `tapdata/tapdata` 的问题版本作为对齐输入，使用版本化 `tap_align_branches.py plan --no-fetch --remote-only --repositories <candidate repos> --json` 生成逐仓建议分支。领域仍用于候选范围和归属校验，不再兼任问题版本来源。其它项目或非 TapData 产品领域按各自 Profile 的 problem version repository、overrides、dev_branches、same_name 顺序生成建议。
+2. 使用 TapData 产品仓库的任务（包括仅切换 Jira 项目的 TapState）将 TM、FE、connector 仓库统一归入 `product` 领域并声明 `problem_version_repository: tapdata/tapdata`，以 `tapdata/tapdata` 的问题版本作为对齐输入，使用版本化 `tap_align_branches.py plan --no-fetch --remote-only --repositories <candidate repos> --json` 生成逐仓建议分支。connector 必须复用 common-lib 的目标分支，缺少该分支即阻断。领域仍用于候选范围和归属校验，不再兼任问题版本来源。其它项目或非 TapData 产品领域按各自 Profile 的 problem version repository、overrides、dev_branches、same_name 顺序生成建议。
 3. 用户可以修正建议分支；Runtime 只校验确认分支的格式、仓库范围和远端存在性，不得以“与建议不一致”为由覆盖用户结果。开始工作时刷新本次所需仓库的 origin，并在创建任何工作树前解析、记录这些仓库确认分支的远端基线 SHA；任一失败则不创建。
 4. 使用 `git worktree add --detach <path> <fixed-sha>` 仅创建或精确复用本次所需仓库的子工作树，写入 per-worktree Git identity。
 5. 在子工作树内按项目分支规则创建任务分支；完成分支与身份回读后才允许代码修改。
@@ -199,7 +199,7 @@ ao-work task worktrees cleanup --issue-key TAP-12620
 - `developer/runtime/src/ao_work/work_cli.py`：注册 repositories assess/confirm 与 worktrees cleanup。
 - `developer/runtime/src/ao_work/task_repository_scope.py`：生成建议关系表、读取用户修正、输出逐项差异、确认完整关系表并维护可恢复状态机。
 - `developer/runtime/src/ao_work/task_worktree.py`：只按 `confirmed_repository_branch_map` 准备工作树；将路径改为 Jira/仓库短名/from-branch，并新增严格、非强制、可回读的生命周期清理原子操作。
-- `developer/runtime/src/ao_work/config/` 与 TapData Profile：为领域增加显式 `problem_version_repository`，将 TM、FE、connector 的问题版本来源统一绑定到 `tapdata/tapdata`，同时保留领域范围隔离。
+- `developer/runtime/src/ao_work/config/` 与 TapData Profile：为领域增加显式 `problem_version_repository`，将 TM、FE、connector 的问题版本来源统一绑定到 `tapdata/tapdata`，并将 connector 纳入产品领域。
 - `developer/runtime/src/ao_work/task_start.py`：接管只记录任务/Jira 基础上下文；仓库范围确认后记录分析上下文，按需创建工作树时再记录精确逐仓 source context。
 - `developer/runtime/src/ao_work/task_state/`：保存 confirmed/actual repository 集合、范围阶段、失效证据和清理状态。
 - `developer/runtime/src/ao_work/task_gate.py`、`task_resume.py`：仓库未确认、范围变化或清理未收口时返回唯一合法下一动作。
@@ -238,7 +238,7 @@ bash maintainer/scripts/test-release-workflow.sh
 - **仓库或分支误判**：分析建议没有执行权限；只有用户可修正并明确确认的完整关系表允许驱动建树和编码。
 - **跨仓库审计不完整**：confirmed 与 actual 两个集合分离；最终列表只接受 Git/PR 回读证据。
 - **分析源漂移**：所有分析和工作树基线绑定刷新后的 remote SHA，不依赖池成员当前 checkout。
-- **领域与版本来源混淆**：Profile 分开保存候选领域与 `problem_version_repository`；TapData connector 虽保持独立候选领域，但问题版本来源仍是 `tapdata/tapdata`。
+- **领域与版本来源混淆**：Profile 分开保存候选领域与 `problem_version_repository`；TapData connector 归入产品候选领域，问题版本来源仍是 `tapdata/tapdata`。
 - **清理丢失成果**：默认非强制删除，dirty、未承接提交或事实漂移整体阻断。
 - **公共模板边界**：不修改跨工作面 Jira 评论公共必填键；任务专用仓库表单通过 `actual_change_repositories` 输出并由 developer Runtime 校验。
 
