@@ -21,6 +21,7 @@ inputs:
       - impacts
 source_priority:
   - jira_issue
+  - jira_comment
   - project_profile
   - business_source_code
   - runtime_readback
@@ -31,6 +32,7 @@ gates:
   - trusted_source_values_match_exact_runtime_snapshot
   - business_source_evidence_file_digest_matches
   - required_profile_fields_are_resolved
+  - task_facts_are_redacted_and_current
   - source_context_head_or_evidence_change_invalidates_analysis
 next_action:
   complete: prepare_and_classify_solution

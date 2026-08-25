@@ -16,9 +16,11 @@ from ao_work.config import (
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.jira.model import plain_text
 from ao_work.jira.service import JiraService
+from ao_work.jira.task_facts import description_sections_from_facts
 from ao_work.installation import load_install_identity
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_gate import record_task_start_context
+from ao_work.task_facts import collect_task_facts
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.task_state.io import read_json
 from ao_work.task_worktree import (
@@ -87,6 +89,7 @@ def execute_task_start(
         agentic_run_id = str(existing["agentic_run_id"])
         task_state_created = False
 
+    task_facts = collect_task_facts(client, issue, context.profile)
     source_context = record_current_task_source_context(
         workspace,
         store,
@@ -96,6 +99,7 @@ def execute_task_start(
         issue=issue,
         agentic_run_id=agentic_run_id,
         mapped_status=mapped_status,
+        task_facts=task_facts,
     )
     issue_payload = source_context["issue"]
     workspace_defaults = source_context["workspace_defaults"]
@@ -203,8 +207,8 @@ def record_current_task_source_context(
     task_domain: str = "",
     problem_version_repository: str = "",
     repository_scope_revision: int = 0,
+    task_facts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    description_text = plain_text(issue.description).strip()
     issue_content_sha256 = hashlib.sha256(
         json.dumps(
             {
@@ -291,7 +295,7 @@ def record_current_task_source_context(
         "mapped_status": mapped_status,
         "issue_type": issue.issue_type,
         "assignee_account_id": issue.assignee,
-        "description": description_text,
+        "task_facts": dict(task_facts or {}),
         "issue_content_sha256": issue_content_sha256,
     }
     status_payload = issue.fields.get("status", {})
@@ -357,6 +361,7 @@ def record_current_task_source_context(
             target_repository=bound_repository,
             problem_version=problem_version,
             target_branch=target_branch,
+            description_sections=description_sections_from_facts(task_facts or {}),
         ),
     )
     return {
@@ -467,10 +472,15 @@ def _profile_snapshot(
     target_repository: str = "",
     problem_version: str = "",
     target_branch: str = "",
+    description_sections: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     fields: dict[str, Any] = {}
     resolved: dict[str, Any] = {}
-    sections = _description_sections(issue.description)
+    sections = (
+        dict(description_sections)
+        if description_sections is not None
+        else _description_sections(issue.description)
+    )
     for logical_name, mapping in sorted(profile.fields.items()):
         declaration = {
             "source": mapping.source,

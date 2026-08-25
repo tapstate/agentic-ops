@@ -21,6 +21,7 @@ from ao_work.output import (
 )
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.task_gate import execute_task_gate
+from ao_work.task_facts import execute_task_facts
 from ao_work.task_start import execute_task_start
 from ao_work.task_takeover import execute_task_takeover
 from ao_work.task_resume import execute_task_resume
@@ -59,10 +60,12 @@ def build_parser() -> argparse.ArgumentParser:
     task_commands = task_parser.add_subparsers(
         dest="command",
         required=True,
-        metavar="{start,intake,solution,init,resume,inspect,repositories,worktrees}",
+        metavar="{start,facts,intake,solution,init,resume,inspect,repositories,worktrees}",
     )
     task_start = task_commands.add_parser("start")
     task_start.add_argument("issue_key")
+    task_facts = task_commands.add_parser("facts")
+    task_facts.add_argument("--issue-key", required=True)
     task_intake = task_commands.add_parser("intake")
     task_intake_actions = task_intake.add_subparsers(dest="action", required=True)
     task_intake_assess = task_intake_actions.add_parser("assess")
@@ -168,6 +171,14 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         return success("takeover", workplane=workspace.workplane, **state)
     if args.group == "task" and args.command == "start":
         state = execute_task_start(
+            workspace,
+            install_root,
+            store,
+            args.issue_key,
+        )
+        return success(operation, workplane=workspace.workplane, **state)
+    if args.group == "task" and args.command == "facts":
+        state = execute_task_facts(
             workspace,
             install_root,
             store,
