@@ -184,6 +184,13 @@ def profile() -> ProjectProfile:
                 state="active",
                 writable=True,
             ),
+            "repository_branches": FieldMapping(
+                logical_name="repository_branches",
+                source="jira_description_section",
+                section="仓库分支",
+                state="active",
+                writable=True,
+            ),
         },
     )
 
@@ -781,6 +788,34 @@ class JiraServiceTest(unittest.TestCase):
             agentic_run_id="run-1",
         )
         self.assertEqual("no_op", repeated.action)
+
+    def test_description_binds_repository_reassess_domain_to_branch_section(self) -> None:
+        plan = self.service.plan_description(
+            "TAP-123",
+            "run-description-repository-recovery",
+            {"仓库分支": "tapdata/tapdata-common-lib: release-v3.8.0"},
+            agentic_run_id="run-1",
+            repository_assess_task_domain="assistant",
+        )
+
+        self.assertEqual(
+            "assistant", plan.payload["repository_assess_task_domain"]
+        )
+
+    def test_description_rejects_repository_reassess_domain_without_branch_section(self) -> None:
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            self.service.plan_description(
+                "TAP-123",
+                "run-description-invalid-repository-recovery",
+                {"问题分析": "补充分支信息。"},
+                agentic_run_id="run-1",
+                repository_assess_task_domain="assistant",
+            )
+
+        self.assertEqual(
+            "jira_description_repository_recovery_invalid",
+            captured.exception.code,
+        )
 
     def test_description_rejects_unknown_read_only_and_normalized_alias_sections(self) -> None:
         self.transport.description = markdown_to_adf(

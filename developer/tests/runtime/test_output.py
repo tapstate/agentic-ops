@@ -152,6 +152,36 @@ class OutputTest(unittest.TestCase):
         self.assertEqual("abc", result["impact_id"])
         self.assertEqual(["PM-007"], result["impacted_story_ids"])
 
+    def test_failure_uses_operation_specific_next_action_when_provided(self) -> None:
+        result = failure(
+            "task_repositories_assess",
+            RuntimeErrorResult(
+                code="branch_alignment_failed",
+                message="无法对齐",
+                status="blocked",
+                exit_code=2,
+                required_human_action="请确认分支",
+                agentic_next_action={
+                    "executor": "human",
+                    "action": "confirm_repository_branch_override",
+                    "required_inputs": ["issue_key", "task_domain"],
+                    "allowed_operations": ["jira_description_plan"],
+                    "requires_authorization": True,
+                    "stop_workflow": True,
+                    "ownership_effect": "none",
+                },
+            ),
+        )
+
+        self.assertEqual(
+            "confirm_repository_branch_override",
+            result["agentic_next_action"]["action"],
+        )
+        self.assertEqual(
+            ["jira_description_plan"],
+            result["agentic_next_action"]["allowed_operations"],
+        )
+
     def test_writer_outputs_exactly_one_json_object(self) -> None:
         stream = io.StringIO()
         with redirect_stdout(stream):

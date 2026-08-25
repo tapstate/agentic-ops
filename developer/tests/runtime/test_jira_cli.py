@@ -7,15 +7,120 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from ao_work.jira.adf import markdown_to_adf
+from ao_work.jira.cli import _repository_branch_reassess_next_action
 from ao_work.work_cli import main
 from install_auth_fixture import configure_install_authorization, v4_agent
 from test_jira_service import FakeTransport
 
 
 class JiraCliTest(unittest.TestCase):
+    def test_description_branch_override_readback_reassesses_repository_scope(self) -> None:
+        next_action = _repository_branch_reassess_next_action(
+            SimpleNamespace(
+                operation="jira_description",
+                payload={
+                    "sections": {
+                        "仓库分支": "tapdata/tapdata-common-lib: release-v3.8.0"
+                    },
+                    "repository_assess_task_domain": "assistant",
+                },
+            )
+        )
+
+        self.assertIsNotNone(next_action)
+        self.assertEqual(
+            "reassess_repository_branches_from_verified_override",
+            next_action["action"],
+        )
+        self.assertEqual(
+            ["task_repositories_assess"], next_action["allowed_operations"]
+        )
+        self.assertIn("task_domain", next_action["required_inputs"])
+
+    def test_description_branch_override_without_bound_domain_does_not_reassess(self) -> None:
+        next_action = _repository_branch_reassess_next_action(
+            SimpleNamespace(
+                operation="jira_description",
+                payload={"sections": {"仓库分支": "tapdata/tapdata: develop"}},
+            )
+        )
+
+        self.assertIsNone(next_action)
+
+    def test_description_branch_recovery_preserves_domain_through_apply_readback(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _, workspace = self.prepare(Path(temporary))
+            common = self.initialize_task(workspace)
+            env_file = workspace / ".agentic-ops" / ".env"
+            env_file.write_text(
+                "TEST_JIRA_EMAIL=owner@example.test\nTEST_JIRA_TOKEN=secret-token\n",
+                encoding="utf-8",
+            )
+            sections_file = workspace / "repository-branch.yaml"
+            sections_file.write_text(
+                "仓库分支: |\n"
+                "  tapdata/tapdata-common-lib: release-v3.8.0\n",
+                encoding="utf-8",
+            )
+            plan_file = (
+                ".agentic-ops/tasks/TAP-123/runs/run-1/jira-plans/"
+                "repository-branch-plan.json"
+            )
+            transport = FakeTransport()
+
+            with mock.patch(
+                "ao_work.jira.cli.UrllibJiraTransport", return_value=transport
+            ):
+                planned = self.run_cli(
+                    *common,
+                    "jira",
+                    "description",
+                    "plan",
+                    "--issue-key",
+                    "TAP-123",
+                    "--idempotency-key",
+                    "repository-branch-recovery",
+                    "--sections-file",
+                    "repository-branch.yaml",
+                    "--repository-assess-task-domain",
+                    "assistant",
+                    "--plan-file",
+                    plan_file,
+                )
+                self.assertEqual(0, planned[0], planned)
+                self.assertEqual("assistant", planned[1]["task_domain"])
+                plan_id = str(planned[1]["plan_id"])
+                authorization_reference = str(
+                    planned[1]["authorization_user_confirmation_reference"]
+                )
+                applied = self.run_cli(
+                    *common,
+                    "jira",
+                    "description",
+                    "apply",
+                    "--plan-file",
+                    plan_file,
+                    "--confirm-plan-id",
+                    plan_id,
+                    "--authorization-reference",
+                    authorization_reference,
+                )
+
+            self.assertEqual(0, applied[0], applied)
+            self.assertEqual("assistant", applied[1]["task_domain"])
+            self.assertEqual(
+                "reassess_repository_branches_from_verified_override",
+                applied[1]["agentic_next_action"]["action"],
+            )
+            self.assertEqual(
+                ["issue_key", "task_domain", "readback"],
+                applied[1]["agentic_next_action"]["required_inputs"],
+            )
+
     def run_cli(self, *arguments: str) -> tuple[int, dict[str, object], str]:
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -66,6 +171,11 @@ fields:
   problem_analysis:
     source: jira_description_section
     section: 问题分析
+    state: active
+    writable: true
+  repository_branches:
+    source: jira_description_section
+    section: 仓库分支
     state: active
     writable: true
   raw_defect_log:

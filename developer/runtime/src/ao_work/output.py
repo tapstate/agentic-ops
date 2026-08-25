@@ -294,6 +294,7 @@ class RuntimeErrorResult(Exception):
     retry_safe: bool = False
     required_human_action: str = "请联系 AgenticOps 维护者处理"
     details: Mapping[str, Any] = field(default_factory=dict)
+    agentic_next_action: Mapping[str, Any] | None = None
 
 
 def success(operation: str, **payload: Any) -> dict[str, Any]:
@@ -327,7 +328,9 @@ def failure(operation: str, error: RuntimeErrorResult) -> dict[str, Any]:
     retry_key = hashlib.sha256(
         f"{operation}:{error.code}:{error.status}".encode("utf-8")
     ).hexdigest()
-    if error.retry_safe:
+    if error.agentic_next_action is not None:
+        result["agentic_next_action"] = _normalize_next_action(error.agentic_next_action)
+    elif error.retry_safe:
         result["agentic_next_action"] = {
             "executor": "ai",
             "action": "inspect_state_and_retry_once",

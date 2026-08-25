@@ -93,6 +93,52 @@ def _repository_next_action(
     }
 
 
+def _repository_branch_override_next_action() -> dict[str, Any]:
+    """把无法自动推导的逐仓分支收口为明确的人工作业门禁。"""
+    return _repository_next_action(
+        executor="human",
+        action="confirm_repository_branch_override",
+        required_inputs=(
+            "issue_key",
+            "task_domain",
+            "repository",
+            "problem_version",
+            "reason",
+            "repository_branch_override_template",
+        ),
+        allowed_operations=("jira_description_plan",),
+        requires_authorization=True,
+        stop_workflow=True,
+        reason=(
+            "请确认 repository_branch_override_template 中缺失的关联仓库分支。确认后，"
+            "AI 使用 jira description plan 更新“仓库分支”章节，并通过 "
+            "--repository-assess-task-domain 绑定本结果中的 task_domain；完成计划授权、"
+            "apply 和写后回读后，再按返回动作重新执行 task_repositories_assess。"
+        ),
+    )
+
+
+def _with_repository_branch_recovery(
+    error: RuntimeErrorResult, task_domain: str
+) -> RuntimeErrorResult:
+    """只为缺少明确逐仓分支的失败补充可执行恢复上下文。"""
+    if (
+        error.code != "branch_alignment_failed"
+        or "repository_branch_override_template" not in error.details
+    ):
+        return error
+    return RuntimeErrorResult(
+        code=error.code,
+        message=error.message,
+        status=error.status,
+        exit_code=error.exit_code,
+        retry_safe=False,
+        required_human_action=error.required_human_action,
+        details={**error.details, "task_domain": task_domain},
+        agentic_next_action=_repository_branch_override_next_action(),
+    )
+
+
 def _jira_branch_overrides(
     sections: dict[str, str], allowed_repositories: set[str]
 ) -> dict[str, str]:
@@ -182,8 +228,15 @@ def execute_repository_assess(
         description_sections=sections,
         alignment_script=alignment_script,
         task_domain=domain.domain_id,
+        branch_overrides=jira_overrides,
     )
-    analyzed, baselines = analyze_task_worktree_plan(plan)
+    try:
+        analyzed, baselines = analyze_task_worktree_plan(plan)
+    except RuntimeErrorResult as error:
+        recovered = _with_repository_branch_recovery(error, domain.domain_id)
+        if recovered is error:
+            raise
+        raise recovered from error
     identity = load_install_identity(install_root)
     github_actor = str(
         identity.get("execution_identity", {}).get("github_actor_login") or ""
