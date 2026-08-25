@@ -71,7 +71,7 @@ hard_rules:
   - tapdata_application_and_feishu_robot_must_keep_current_branch_by_default
   - keep_current_must_block_when_checkout_is_detached_head
   - tapdata_license_must_use_main_when_tapdata_branch_is_develop
-  - common_lib_must_be_inferred_from_tapdata_pluginKit_version
+  - common_lib_must_use_develop_when_tapdata_branch_is_develop
   - connectors_must_be_resolved_independently_from_the_same_tapdata_version
   - unresolved_connector_plugin_version_or_release_branch_must_block
   - unresolved_enterprise_or_web_branch_must_block_apply

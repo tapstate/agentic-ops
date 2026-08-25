@@ -115,6 +115,10 @@ def _configure_write_actions(
         plan.add_argument("--exclude-waiting", action="store_true")
     else:
         plan.add_argument("--sections-file", required=True)
+        plan.add_argument(
+            "--repository-assess-task-domain",
+            choices=("product", "assistant", "taptest"),
+        )
 
     apply = actions.add_parser("apply")
     apply.add_argument("--plan-file", required=True)
@@ -428,6 +432,7 @@ def execute_jira(
                 args.idempotency_key,
                 sections,
                 agentic_run_id=agentic_run_id,
+                repository_assess_task_domain=args.repository_assess_task_domain,
             )
         service.validate_no_credentials(plan, email, token)
         _require_plan_task_binding(plan, task)
@@ -454,6 +459,10 @@ def execute_jira(
                     "with_comment": bool(plan.payload.get("comment")),
                 }
             )
+        if args.command == "description" and plan.payload.get(
+            "repository_assess_task_domain"
+        ):
+            result["task_domain"] = plan.payload["repository_assess_task_domain"]
         return result
 
     if args.action == "apply":
@@ -533,7 +542,7 @@ def execute_jira(
             plan,
             str(result["external_id"]),
         )
-        return {
+        payload = {
             "connection_id": context.connection.connection_id,
             "profile_id": context.profile.profile_id,
             "issue_key": plan.issue_key,
@@ -547,6 +556,11 @@ def execute_jira(
             **result,
             "readback": record,
         }
+        next_action = _repository_branch_reassess_next_action(plan)
+        if next_action is not None:
+            payload["task_domain"] = plan.payload["repository_assess_task_domain"]
+            payload["agentic_next_action"] = next_action
+        return payload
 
     if args.command == "comment":
         plan_path, path_issue_key, path_run_id, plan = _read_plan_candidate(
@@ -814,6 +828,39 @@ def _parse_extra_fields(values: list[str]) -> dict[str, Any]:
             )
         result[key.strip()] = parsed
     return result
+
+
+def _repository_branch_reassess_next_action(plan: WritePlan) -> dict[str, Any] | None:
+    """仅在已回读仓库分支覆盖后恢复对应的只读评估链路。"""
+    if plan.operation != "jira_description":
+        return None
+    sections = plan.payload.get("sections")
+    if not isinstance(sections, dict) or "仓库分支" not in sections:
+        return None
+    task_domain = plan.payload.get("repository_assess_task_domain")
+    if task_domain not in {"product", "assistant", "taptest"}:
+        return None
+    return {
+        "executor": "ai",
+        "action": "reassess_repository_branches_from_verified_override",
+        "required_inputs": ["issue_key", "task_domain", "readback"],
+        "allowed_operations": ["task_repositories_assess"],
+        "requires_authorization": False,
+        "stop_workflow": False,
+        "ownership_effect": "none",
+        "reason": (
+            "Jira Description 的“仓库分支”章节已写后回读；使用结果中的 task_domain "
+            "作为 --task-domain 重新执行仓库分支评估。"
+        ),
+        "retry_gate": {
+            "allowed": False,
+            "max_additional_attempts": 0,
+            "same_input_allowed": False,
+            "requires_state_readback": True,
+            "requires_recorded_retry_event": False,
+            "on_exhausted": "not_applicable",
+        },
+    }
 
 
 def _read_sections(content: str) -> dict[str, str]:

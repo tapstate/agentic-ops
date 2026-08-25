@@ -302,26 +302,11 @@ def derive_target(
     if tap_branch == "main":
         return "main", "main explicit alignment rule"
 
-    # develop → 除 license/common-lib 外全部 develop
+    # develop → license 使用 main，其它联动仓使用 develop
     if tap_branch == "develop":
         if repo == "tapdata-license":
             return "main", "develop uses license main"
-        if repo == "tapdata-common-lib":
-            release = plugin_cache.setdefault(
-                "plugin",
-                plugin_release_for(
-                    tap_branch,
-                    root,
-                    remote,
-                    remote_only=remote_only,
-                ),
-            )
-            if release:
-                target = first_release_ge(repo, release, root, remote)
-                if target:
-                    return target, f"develop common-lib pluginKit {release} inferred"
-            return "UNRESOLVED", "develop common-lib PluginKit 版本或对应 release 分支无法解析"
-        # tapdata / enterprise / web / enterprise-web / connectors / connectors-enterprise
+        # tapdata / enterprise / web / enterprise-web / connectors / connectors-enterprise / common-lib
         return "develop", "develop explicit alignment rule"
 
     # 其它分支

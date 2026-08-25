@@ -449,6 +449,28 @@ class JiraService:
                     "invalid_description_section",
                     "Description 受管章节结构无效",
                 )
+            expected_payload_fields = {"sections", "description"}
+            repository_assess_task_domain = plan.payload.get(
+                "repository_assess_task_domain"
+            )
+            if repository_assess_task_domain is not None:
+                expected_payload_fields.add("repository_assess_task_domain")
+            if set(plan.payload) != expected_payload_fields or not isinstance(
+                plan.payload.get("description"), dict
+            ):
+                raise _input_error(
+                    "jira_write_plan_invalid",
+                    "Jira Description 计划字段无效",
+                )
+            if repository_assess_task_domain is not None and (
+                repository_assess_task_domain
+                not in {"product", "assistant", "taptest"}
+                or "仓库分支" not in sections
+            ):
+                raise _input_error(
+                    "jira_description_repository_recovery_invalid",
+                    "仓库评估领域上下文与“仓库分支”章节不匹配",
+                )
             self._validate_description_sections(sections)
         elif operation == "jira_transition":
             self._validate_transition_plan(plan)
@@ -1134,6 +1156,7 @@ class JiraService:
         sections: dict[str, str],
         *,
         agentic_run_id: str,
+        repository_assess_task_domain: str | None = None,
     ) -> WritePlan:
         issue = self.inspect_issue(issue_key)
         self._validate_owner(issue)
@@ -1142,18 +1165,32 @@ class JiraService:
         self._validate_description_sections(sections)
         for title, content in sections.items():
             _require_chinese(title, "Description 章节标题")
-            _require_chinese(content, f"Description 章节 {title}")
+            if title != "仓库分支":
+                _require_chinese(content, f"Description 章节 {title}")
+        if repository_assess_task_domain is not None:
+            if (
+                repository_assess_task_domain
+                not in {"product", "assistant", "taptest"}
+                or "仓库分支" not in sections
+            ):
+                raise _input_error(
+                    "jira_description_repository_recovery_invalid",
+                    "仓库评估领域上下文只能绑定到“仓库分支”章节，且必须是受支持的任务领域",
+                )
         merged = merge_description_sections(issue.description, sections)
         unchanged = all(
             extract_description_section(issue.description, title) == content.strip()
             for title, content in sections.items()
         )
+        payload: dict[str, Any] = {"sections": sections, "description": merged}
+        if repository_assess_task_domain is not None:
+            payload["repository_assess_task_domain"] = repository_assess_task_domain
         return _build_plan(
             "jira_description",
             issue.key,
             agentic_run_id,
             idempotency_key,
-            {"sections": sections, "description": merged},
+            payload,
             "description" if unchanged else "",
         )
 

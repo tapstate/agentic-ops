@@ -74,6 +74,23 @@ def execute_task_facts(
     }
 
 
+def execute_task_inspect(
+    workspace: Workspace,
+    install_root: Path,
+    store: TaskStore,
+    issue_key: str,
+) -> dict[str, Any]:
+    """读取本地任务状态及受控 Jira 任务详情，不输出原始正文。"""
+
+    local_state = store.inspect(issue_key)
+    facts_state = execute_task_facts(workspace, install_root, store, issue_key)
+    return {
+        **local_state,
+        "task_facts": facts_state["task_facts"],
+        "side_effects": facts_state["side_effects"],
+    }
+
+
 def _blocked(code: str, message: str, action: str, **details: Any) -> RuntimeErrorResult:
     return RuntimeErrorResult(
         code=code,
