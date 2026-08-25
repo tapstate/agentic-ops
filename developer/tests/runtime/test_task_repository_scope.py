@@ -7,10 +7,41 @@ from unittest import mock
 
 from ao_work.output import success
 from ao_work import task_repository_scope
-from ao_work.task_repository_scope import _repository_next_action
+from ao_work.task_repository_scope import _jira_branch_overrides, _repository_next_action
 
 
 class RepositoryScopeNextActionTest(unittest.TestCase):
+    def test_jira_branch_overrides_accept_known_repositories(self) -> None:
+        overrides = _jira_branch_overrides(
+            {
+                "仓库分支": (
+                    "tapdata/tapdata-connectors: develop\n"
+                    "tapdata/tapdata-connectors-enterprise: release-v2.0.8"
+                )
+            },
+            {
+                "tapdata/tapdata-connectors",
+                "tapdata/tapdata-connectors-enterprise",
+            },
+        )
+
+        self.assertEqual(
+            {
+                "tapdata/tapdata-connectors": "develop",
+                "tapdata/tapdata-connectors-enterprise": "release-v2.0.8",
+            },
+            overrides,
+        )
+
+    def test_jira_branch_overrides_reject_unknown_repository(self) -> None:
+        with self.assertRaises(Exception) as captured:
+            _jira_branch_overrides(
+                {"仓库分支": "tapdata/unknown: develop"},
+                {"tapdata/tapdata-connectors"},
+            )
+
+        self.assertEqual("jira_repository_branch_invalid", captured.exception.code)
+
     def test_assess_output_has_fixed_control_fields(self) -> None:
         profile = mock.Mock()
         profile.domain_for.return_value = SimpleNamespace(
@@ -18,6 +49,7 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
             baseline_repository="tapdata/tapdata",
         )
         profile.baseline_branch.return_value = "develop"
+        profile.repository_candidates.return_value = ("tapdata/tapdata",)
         context = SimpleNamespace(profile=profile)
         issue = SimpleNamespace(description="")
         analyzed = SimpleNamespace(
