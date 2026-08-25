@@ -61,7 +61,7 @@ input:
     default: false
     description: plan 仅使用刷新后的 remote refs；Runtime 创建任务工作树时必须启用，禁止回退陈旧本地分支。
 preconditions:
-  - workspace_must_be_tapdata
+  - workspace_must_use_tapdata_repository_profile
   - work_root_must_not_escape_current_tapdata_workspace
   - tapdata_repo_must_exist
   - tapdata_branch_must_exist_local_or_remote
@@ -71,9 +71,8 @@ hard_rules:
   - tapdata_application_and_feishu_robot_must_keep_current_branch_by_default
   - keep_current_must_block_when_checkout_is_detached_head
   - tapdata_license_must_use_main_when_tapdata_branch_is_develop
-  - connectors_must_use_develop_when_tapdata_branch_is_develop
   - common_lib_must_be_inferred_from_tapdata_pluginKit_version
-  - connectors_must_be_inferred_from_tapdata_pluginKit_version_when_tapdata_branch_is_not_main_or_develop
+  - connectors_must_match_common_lib_branch_or_block
   - unresolved_enterprise_or_web_branch_must_block_apply
   - command_must_not_push_git
   - command_must_not_write_jira

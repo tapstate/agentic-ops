@@ -220,6 +220,7 @@ require_file developer/standards/contracts/operations/jira-comment.yaml
 require_file developer/standards/contracts/operations/jira-description.yaml
 require_file developer/standards/contracts/operations/jira-worklog.yaml
 require_file developer/standards/projects/tapdata/profile.yaml
+require_file developer/standards/projects/tapstate/profile.yaml
 require_file developer/standards/runbooks/jira-write-recovery.md
 require_file maintainer/standards/experiments/ao/profile.yaml
 
