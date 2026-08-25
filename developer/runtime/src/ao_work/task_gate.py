@@ -21,6 +21,12 @@ from ao_work.workspace_security import (
 SCHEMA_VERSION = 1
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 CHINESE_PATTERN = re.compile(r"[\u3400-\u9fff]")
+INPUT_CONTRACT_RECOVERY = {
+    "executor": "ai",
+    "action": "rebuild_contract_input_and_retry_once",
+    "user_input_required": False,
+    "rule": "由 AI 按当前任务准入或方案门禁合同重建输入；不要向用户索要内部 JSON 字段。",
+}
 ALLOWED_EVIDENCE_SOURCES = frozenset(
     {"jira_issue", "project_profile", "business_source_code", "runtime_readback"}
 )
@@ -1210,13 +1216,22 @@ def _timestamp() -> str:
 
 
 def _invalid(code: str, message: str) -> RuntimeErrorResult:
+    input_contract_error = code != "task_source_context_invalid"
     return RuntimeErrorResult(
         code=code,
         message=message,
         status="blocked",
         exit_code=EXIT_BLOCKED,
-        retry_safe=False,
-        required_human_action="请按任务准入或方案门禁合同修正输入，不要绕过 Runtime",
+        retry_safe=input_contract_error,
+        required_human_action=(
+            "请由 AI 按任务准入或方案门禁合同重建输入并重试一次；"
+            "不要向用户索要内部 JSON 字段"
+            if input_contract_error
+            else "任务来源快照无效；请停止并由人工修复 Runtime、工作空间或 Profile 状态"
+        ),
+        details={"input_recovery": INPUT_CONTRACT_RECOVERY}
+        if input_contract_error
+        else {},
     )
 
 

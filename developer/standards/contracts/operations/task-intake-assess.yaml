@@ -14,6 +14,11 @@ inputs:
       - unresolved_information
       - assumptions
       - impacts
+    array_fields:
+      - auto_filled_values
+      - unresolved_information
+      - assumptions
+      - impacts
 source_priority:
   - jira_issue
   - project_profile
@@ -39,6 +44,11 @@ retry:
   same_input_allowed: false
   requires_state_readback: true
   recorded_in_task_journal: true
+input_contract_recovery:
+  retry_safe: true
+  executor: ai
+  user_input_required: false
+  rule: AI 重建合同输入后重试一次；不得把内部 JSON 结构错误升级为用户信息门禁。
 side_effects:
   - write_local_task_gate_state
   - write_local_progress_and_journal
