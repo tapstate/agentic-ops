@@ -11,6 +11,7 @@ class JiraComment:
     author: str = ""
     created: str = ""
     standalone_lines: frozenset[str] = field(default_factory=frozenset)
+    body_supported: bool = True
 
 
 @dataclass(frozen=True)

@@ -464,8 +464,18 @@ capabilities:
     visibility: public
     commands:
       - [task, intake, assess]
-    summary: 仓库分支关系确认并按需建立精确工作树来源后，基于 Jira、Profile、工作空间和 Runtime 快照校验缺项、证据化补全、源码基线和稳定摘要。
+    summary: 仓库分支关系确认并按需建立精确工作树来源后，基于 Jira Description 的脱敏任务目标/必要事实、补充评论线索、Profile、工作空间和 Runtime 快照校验缺项、证据化补全、源码基线和稳定摘要。
     next_action: 信息完整时直接形成并分级方案；缺项按允许次数补充证据，事实冲突或重试耗尽进入风险决策。
+
+  - id: read_task_facts
+    source: contract
+    contract: contracts/operations/read-task-facts.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task, facts]
+    summary: 只读提取已接管 Jira 任务 Description 的脱敏目标、问题版本、异常摘要、验收线索，以及评论中的补充线索和候选仓库/分支；绝不输出评论全文或把线索当作确认映射。
+    next_action: 接管后或任务分析前可执行 task facts --issue-key <KEY>；读取失败、内容不支持或所有权不一致时按稳定失败码处理，不要以聊天上下文补全。
 
   - id: solution_gate
     source: contract

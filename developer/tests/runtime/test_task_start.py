@@ -60,6 +60,8 @@ class TaskStartTransport:
                     },
                 },
             )
+        if path == "/rest/api/3/issue/TAP-12289/comment":
+            return TransportResponse(200, {"comments": []})
         return TransportResponse(404, None)
 
 
@@ -165,7 +167,9 @@ class TaskStartTest(unittest.TestCase):
         self.assertTrue(payload["task_state_created"])
         self.assertTrue(str(payload["agentic_run_id"]).startswith("run-TAP-12289-"))
         self.assertEqual(3, len(payload["review_required"]))
-        self.assertIn("从 Jira 自动读取", payload["issue"]["description"])
+        self.assertNotIn("description", payload["issue"])
+        description_facts = payload["issue"]["task_facts"]["description"]["facts"]
+        self.assertEqual("从 Jira 自动读取任务信息。", description_facts[0]["value"])
         self.assertEqual("ai", payload["agentic_next_action"]["executor"])
         self.assertEqual(
             "harsen-mini-test-bot", payload["task_ownership"]["task_owner"]
