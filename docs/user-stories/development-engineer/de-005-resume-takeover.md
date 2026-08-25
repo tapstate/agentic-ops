@@ -28,7 +28,7 @@ ao-work task resume --issue-key TAP-123
 
 1. AIAgent 调用 `ao-work task resume` 进行只读恢复诊断。
 2. CLI 通过 `read_takeover_recovery` 联合读取 `sync.json.takeover_operation`、`progress.json` 和同一 `agentic_run_id` 的事件，恢复接管基准、写入阶段和最近业务阶段。
-3. CLI 读取当前 Jira 卡片和当前用户，复核 `Assignee`、状态映射，并读取 `repository-scope.json` 中的建议表、确认表、工作树和清理阶段。
+3. CLI 读取当前 Jira 卡片和当前用户，复核 `Assignee`、状态映射，并读取 `proposals/repository-scope.json` 中的建议表、确认表、工作树和清理阶段；旧任务仅读取原 `repository-scope.json` 位置。
 4. CLI 使用操作契约校验操作阶段，并把 Jira 状态映射为 Standard Process Registry 阶段进行校验。
 5. CLI 返回原任务阶段、接管恢复快照和下一步动作，不推进业务阶段；部分完成状态按 `intent_persisted`、`comment_verified`、`status_verified` 或待恢复的本地收口继续。
 6. AIAgent 说明恢复点并连续执行信息分析；只有事实冲突进入风险决策。

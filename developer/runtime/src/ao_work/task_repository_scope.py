@@ -66,8 +66,11 @@ def _repository_next_action(
     *,
     executor: str,
     action: str,
+    operation_id: str,
+    command_argv: tuple[str, ...],
+    bound_arguments: dict[str, str],
     required_inputs: tuple[str, ...] = (),
-    allowed_operations: tuple[str, ...] = (),
+    input_artifacts: tuple[dict[str, str], ...] = (),
     requires_authorization: bool,
     stop_workflow: bool,
     reason: str,
@@ -76,8 +79,13 @@ def _repository_next_action(
     return {
         "executor": executor,
         "action": action,
+        "operation_id": operation_id,
+        "command_argv": list(command_argv),
+        "command_line": f"ao-work {' '.join(command_argv)}",
+        "bound_arguments": bound_arguments,
         "required_inputs": list(required_inputs),
-        "allowed_operations": list(allowed_operations),
+        "input_artifacts": list(input_artifacts),
+        "allowed_operations": [operation_id],
         "requires_authorization": requires_authorization,
         "stop_workflow": stop_workflow,
         "ownership_effect": "none",
@@ -93,11 +101,14 @@ def _repository_next_action(
     }
 
 
-def _repository_branch_override_next_action() -> dict[str, Any]:
+def _repository_branch_override_next_action(issue_key: str) -> dict[str, Any]:
     """把无法自动推导的逐仓分支收口为明确的人工作业门禁。"""
     return _repository_next_action(
         executor="human",
         action="confirm_repository_branch_override",
+        operation_id="jira_description",
+        command_argv=("jira", "description", "plan", "--issue-key", issue_key),
+        bound_arguments={"issue_key": issue_key},
         required_inputs=(
             "issue_key",
             "task_domain",
@@ -106,7 +117,6 @@ def _repository_branch_override_next_action() -> dict[str, Any]:
             "reason",
             "repository_branch_override_template",
         ),
-        allowed_operations=("jira_description_plan",),
         requires_authorization=True,
         stop_workflow=True,
         reason=(
@@ -119,7 +129,7 @@ def _repository_branch_override_next_action() -> dict[str, Any]:
 
 
 def _with_repository_branch_recovery(
-    error: RuntimeErrorResult, task_domain: str
+    error: RuntimeErrorResult, issue_key: str, task_domain: str
 ) -> RuntimeErrorResult:
     """只为缺少明确逐仓分支的失败补充可执行恢复上下文。"""
     if (
@@ -135,7 +145,7 @@ def _with_repository_branch_recovery(
         retry_safe=False,
         required_human_action=error.required_human_action,
         details={**error.details, "task_domain": task_domain},
-        agentic_next_action=_repository_branch_override_next_action(),
+        agentic_next_action=_repository_branch_override_next_action(issue_key),
     )
 
 
@@ -233,7 +243,7 @@ def execute_repository_assess(
     try:
         analyzed, baselines = analyze_task_worktree_plan(plan)
     except RuntimeErrorResult as error:
-        recovered = _with_repository_branch_recovery(error, domain.domain_id)
+        recovered = _with_repository_branch_recovery(error, issue_key, domain.domain_id)
         if recovered is error:
             raise
         raise recovered from error
@@ -339,8 +349,25 @@ def execute_repository_assess(
         "agentic_next_action": _repository_next_action(
             executor="human",
             action="review_and_confirm_task_domain",
+            operation_id="repository_branch_confirm",
+            command_argv=(
+                "task",
+                "repositories",
+                "confirm",
+                "--issue-key",
+                issue_key,
+                "--task-domain",
+                domain.domain_id,
+                "--confirm",
+            ),
+            bound_arguments={"issue_key": issue_key, "task_domain": domain.domain_id},
             required_inputs=("confirmation_template",),
-            allowed_operations=("task_repositories_confirm",),
+            input_artifacts=(
+                {
+                    "kind": "confirmation_template",
+                    "source": "result.confirmation_template",
+                },
+            ),
             requires_authorization=True,
             stop_workflow=True,
             reason="请确认任务领域；逐仓分支表由 Runtime 自动推导并作为审计事实。",
@@ -590,8 +617,19 @@ def execute_repository_confirm(
             "agentic_next_action": _repository_next_action(
                 executor="human",
                 action="confirm_task_domain",
+                operation_id="repository_branch_confirm",
+                command_argv=(
+                    "task",
+                    "repositories",
+                    "confirm",
+                    "--issue-key",
+                    issue_key,
+                    "--task-domain",
+                    confirmed_domain,
+                    "--confirm",
+                ),
+                bound_arguments={"issue_key": issue_key, "task_domain": confirmed_domain},
                 required_inputs=("task_domain",),
-                allowed_operations=("task_repositories_confirm",),
                 requires_authorization=True,
                 stop_workflow=True,
                 reason="请确认任务领域；逐仓分支关系由 Runtime 自动对齐。",
@@ -608,11 +646,14 @@ def execute_repository_confirm(
         "confirmation_required": False,
         "mapping_status": "confirmed",
         "repository_scope_path": result["path"],
+        "confirmation_path": result["confirmation_path"],
         "agentic_next_action": _repository_next_action(
             executor="ai",
             action="prepare_confirmed_domain_worktrees",
+            operation_id="task_worktree_prepare",
+            command_argv=("task", "worktrees", "prepare", "--issue-key", issue_key),
+            bound_arguments={"issue_key": issue_key},
             required_inputs=(),
-            allowed_operations=("task_worktrees_prepare",),
             requires_authorization=False,
             stop_workflow=False,
             reason="按已确认领域一次准备完整分析工作树集合。",
@@ -878,8 +919,23 @@ def execute_worktree_prepare(
         "agentic_next_action": _repository_next_action(
             executor="ai",
             action="assess_task_intake",
+            operation_id="task_intake_assess",
+            command_argv=(
+                "task",
+                "intake",
+                "assess",
+                "--issue-key",
+                issue_key,
+                "--agentic-run-id",
+                agentic_run_id,
+                "--input-file",
+                "<intake-input-file>",
+            ),
+            bound_arguments={"issue_key": issue_key, "agentic_run_id": agentic_run_id},
             required_inputs=("issue_key", "agentic_run_id", "intake_input_file"),
-            allowed_operations=("task_intake_assess",),
+            input_artifacts=(
+                {"kind": "intake_input_file", "source": "AI 读取确认工作树后生成"},
+            ),
             requires_authorization=False,
             stop_workflow=False,
             reason="已创建并回读确认领域的完整工作树集合，继续进行源码分析和设计。",
