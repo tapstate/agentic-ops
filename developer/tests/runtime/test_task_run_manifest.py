@@ -221,6 +221,9 @@ class TaskRunManifestTest(unittest.TestCase):
         prepared = self.service.prepare(ISSUE_KEY)
         self.assertTrue(prepared["confirmation_required"])
         self.assertEqual(
+            "none", prepared["agentic_next_action"]["ownership_effect"]
+        )
+        self.assertEqual(
             REPOSITORY,
             prepared["confirmation_package"]["repository"]["slug"],
         )

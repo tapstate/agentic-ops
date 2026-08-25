@@ -90,7 +90,7 @@ ao-work task repositories confirm \
 分析阶段可以按 Profile 和项目对齐工具生成分支关系建议，但 Runtime 不得直接按建议创建工作树。用户确认或修正完整关系表后，实际开始某个或某组仓库工作时，只选择 `confirmed_repository_branch_map` 中的对应条目执行：
 
 1. 解析任务“问题版本”。Profile 为工作树领域显式声明 `problem_version_repository`；缺失时兼容使用该领域 `baseline_repository`。问题版本未在 Jira 声明时读取问题版本来源仓库的 `baseline_branches`，只有 Profile 完全未声明映射时才回退 `default_branch`。
-2. 使用 TapData 产品仓库的任务（包括仅切换 Jira 项目的 TapState）将 TM、FE、connector 仓库统一归入 `product` 领域并声明 `problem_version_repository: tapdata/tapdata`，以 `tapdata/tapdata` 的问题版本作为对齐输入，使用版本化 `tap_align_branches.py plan --no-fetch --remote-only --repositories <candidate repos> --json` 生成逐仓建议分支。connector 必须复用 common-lib 的目标分支，缺少该分支即阻断。领域仍用于候选范围和归属校验，不再兼任问题版本来源。其它项目或非 TapData 产品领域按各自 Profile 的 problem version repository、overrides、dev_branches、same_name 顺序生成建议。
+2. 使用 TapData 产品仓库的任务（包括仅切换 Jira 项目的 TapState）将 TM、FE、connector 仓库统一归入 `product` 领域并声明 `problem_version_repository: tapdata/tapdata`，以 `tapdata/tapdata` 的问题版本作为对齐输入，使用版本化 `tap_align_branches.py plan --no-fetch --remote-only --repositories <candidate repos> --json` 生成逐仓建议分支。两个 connector 独立按同一问题版本推导各自远端分支；PluginKit 或分支无法解析时阻断，不以 common-lib 或 `main` 静默替代。领域仍用于候选范围和归属校验，不再兼任问题版本来源。其它项目或非 TapData 产品领域按各自 Profile 的 problem version repository、overrides、dev_branches、same_name 顺序生成建议。
 3. 用户可以修正建议分支；Runtime 只校验确认分支的格式、仓库范围和远端存在性，不得以“与建议不一致”为由覆盖用户结果。开始工作时刷新本次所需仓库的 origin，并在创建任何工作树前解析、记录这些仓库确认分支的远端基线 SHA；任一失败则不创建。
 4. 使用 `git worktree add --detach <path> <fixed-sha>` 仅创建或精确复用本次所需仓库的子工作树，写入 per-worktree Git identity。
 5. 在子工作树内按项目分支规则创建任务分支；完成分支与身份回读后才允许代码修改。

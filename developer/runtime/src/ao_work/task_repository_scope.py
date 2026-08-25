@@ -92,6 +92,45 @@ def _repository_next_action(
     }
 
 
+def _jira_branch_overrides(
+    sections: dict[str, str], allowed_repositories: set[str]
+) -> dict[str, str]:
+    """读取 Jira 稳定章节中的逐仓分支覆盖，并在建树前校验其语义。"""
+    content = sections.get("仓库分支", "").strip()
+    if not content:
+        return {}
+    overrides: dict[str, str] = {}
+    for line in content.splitlines():
+        candidate = line.strip().lstrip("-* ").strip()
+        if not candidate:
+            continue
+        repository, separator, branch = candidate.partition(":")
+        repository = repository.strip()
+        branch = branch.strip()
+        if not separator or not repository or not branch:
+            raise _blocked(
+                "jira_repository_branch_invalid",
+                f"仓库分支章节格式无效：{line}",
+                "请按“owner/repository: branch”逐行补充分支情况",
+            )
+        if repository not in allowed_repositories:
+            raise _blocked(
+                "jira_repository_branch_invalid",
+                f"仓库分支章节包含 Profile 外仓库：{repository}",
+                "请修正仓库名，或先由人工确认扩展任务范围",
+            )
+        _validate_git_branch_name(branch)
+        previous = overrides.get(repository)
+        if previous is not None and previous != branch:
+            raise _blocked(
+                "jira_repository_branch_conflict",
+                f"仓库分支章节对 {repository} 给出了冲突分支：{previous} 与 {branch}",
+                "请只保留该仓库的一条明确分支记录",
+            )
+        overrides[repository] = branch
+    return overrides
+
+
 def execute_repository_assess(
     workspace: Workspace,
     install_root: Path,
@@ -110,6 +149,9 @@ def execute_repository_assess(
             "请先配置 source_pool_root 并重新运行 workspace init",
         )
     sections = _description_sections(issue.description)
+    jira_overrides = _jira_branch_overrides(
+        sections, set(context.profile.repository_candidates())
+    )
     target_repository = resolve_target_repository(context.profile, sections)
     domain = context.profile.domain_for(target_repository)
     if domain is None:
@@ -144,6 +186,16 @@ def execute_repository_assess(
         )
     rows: list[dict[str, Any]] = []
     for entry in analyzed.entries:
+        proposed_branch = jira_overrides.get(entry.repository, entry.branch)
+        if (
+            entry.repository == analyzed.baseline_repository
+            and proposed_branch != analyzed.from_branch
+        ):
+            raise _blocked(
+                "jira_problem_version_branch_conflict",
+                "问题版本来源仓库的 Jira 分支覆盖与问题版本不一致",
+                "请修改问题版本，或删除该仓库的分支覆盖后重新分析",
+            )
         analysis_branch = context.profile.baseline_branch(entry.repository)
         if not analysis_branch:
             raise _blocked(
@@ -157,27 +209,37 @@ def execute_repository_assess(
             analysis_branch,
             entry.repository,
         )
-        task_branch = _task_branch(github_actor, issue_key, entry.branch)
+        proposed_branch_sha = _resolve_remote_baseline(
+            subprocess_git,
+            analyzed.pool_root / entry.repository,
+            proposed_branch,
+            entry.repository,
+        )
         rows.append(
             {
                 "repository": entry.repository,
                 "problem_version_repository": analyzed.baseline_repository,
                 "problem_version": analyzed.from_branch,
-                "derivation_rule": "tap_align_branches" if alignment_script else "profile",
+                "derivation_rule": (
+                    "jira_description"
+                    if entry.repository in jira_overrides
+                    else "tap_align_branches" if alignment_script else "profile"
+                ),
                 "analysis_branch": analysis_branch,
                 "analysis_baseline_sha": analysis_sha,
-                "proposed_from_branch": entry.branch,
-                "proposed_branch_sha": baselines[entry.repository],
-                "task_branch": task_branch,
+                "proposed_from_branch": proposed_branch,
+                "proposed_branch_sha": proposed_branch_sha,
+                "task_branch": _task_branch(github_actor, issue_key, proposed_branch),
                 "worktree_path": str(
                     task_worktree_path(
                         analyzed.pool_root,
                         issue_key,
-                        entry.branch,
+                        proposed_branch,
                         entry.repository,
                     )
                 ),
                 "worktree_status": "not_created",
+                "jira_branch_override": entry.repository in jira_overrides,
             }
         )
     proposal = {

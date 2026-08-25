@@ -1629,7 +1629,7 @@ class TaskStore:
             and latest_event.get("phase_after") == operation["phase"]
             and latest_event.get("result") == operation["result"]
         )
-        progress_finalized = progress.get("stage") == "takeover_started"
+        progress_started = progress.get("stage") == "takeover_started"
         event_finalized = bool(
             latest_event
             and latest_event.get("operation")
@@ -1639,8 +1639,10 @@ class TaskStore:
         state_consistent = True
         effective = operation
         if operation["phase"] == "local_finalized":
-            state_consistent = progress_finalized and event_finalized
-        elif progress_finalized:
+            # 接管完成后业务阶段可以继续推进到准入、方案或执行门禁；这些
+            # 后续阶段不应反向否定已经持久化且有完成事件的接管事实。
+            state_consistent = event_finalized
+        elif progress_started:
             state_consistent = False
         if not event_matches_snapshot:
             state_consistent = False

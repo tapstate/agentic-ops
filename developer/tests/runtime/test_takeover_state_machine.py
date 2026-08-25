@@ -101,6 +101,32 @@ class TakeoverStateMachineTest(unittest.TestCase):
         self.assertTrue(recovery["state_consistent"])
         self.assertTrue(Path(recovery["state_file"]).is_file())
 
+    def test_completed_takeover_remains_consistent_after_later_gate(self) -> None:
+        intent = self.persist()
+        operation_id = intent["operation"]["operation_id"]
+        self.verify_comment(operation_id)
+        self.verify_status(operation_id)
+        self.store.finalize_takeover(
+            IDENTITY.issue_key,
+            IDENTITY.agentic_run_id,
+            operation_id,
+        )
+        self.store.record_gate_transition(
+            IDENTITY.issue_key,
+            IDENTITY.agentic_run_id,
+            stage="task_run_manifest_review",
+            next_action="review_task_run_authorization",
+            operation="task_run_prepare",
+            status="completed",
+            evidence={"draft_digest": HASH_A},
+        )
+
+        recovery = self.store.read_takeover_recovery(IDENTITY.issue_key)
+
+        self.assertTrue(recovery["state_consistent"])
+        self.assertEqual("local_finalized", recovery["operation"]["phase"])
+        self.assertEqual("completed", recovery["operation"]["result"])
+
     def test_three_takeover_kinds_validate_and_non_new_is_explicit(self) -> None:
         for kind in (
             "new_takeover",
