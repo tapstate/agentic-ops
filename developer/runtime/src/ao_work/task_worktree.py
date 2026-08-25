@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_state.locking import TaskLock
@@ -37,6 +37,7 @@ class TaskWorktreePlan:
     baseline_repository: str = ""
     alignment_script: Path | None = None
     alignment_spec: str = ""
+    branch_overrides: Mapping[str, str] = field(default_factory=dict)
     adopted: int = 0
     created: int = 0
 
@@ -88,6 +89,7 @@ def analyze_task_worktree_plan(
             baseline_repository=plan.baseline_repository,
             alignment_script=plan.alignment_script,
             alignment_spec=plan.alignment_spec,
+            branch_overrides=plan.branch_overrides,
         ),
         baselines,
     )
@@ -212,6 +214,7 @@ def plan_task_worktrees(
     description_sections: dict[str, str],
     alignment_script: Path | None = None,
     task_domain: str | None = None,
+    branch_overrides: Mapping[str, str] | None = None,
 ) -> TaskWorktreePlan:
     """计算任务工作树集计划：目标仓库所属领域 + 问题版本分支推导。
 
@@ -254,9 +257,18 @@ def plan_task_worktrees(
             f"目标仓库 {target_repository} 不在所属领域仓库集内",
             "请调整 profile worktree_domains 配置，确保目标仓库被该领域覆盖",
         )
+    overrides = dict(branch_overrides or {})
+    unknown_overrides = sorted(set(overrides) - set(repositories))
+    if unknown_overrides:
+        raise _blocked(
+            "repository_branch_override_out_of_domain",
+            "仓库分支覆盖包含当前任务领域外的仓库",
+            "请只为当前确认领域内的仓库补充分支，或先重新确认任务领域",
+            details={"repositories": unknown_overrides},
+        )
     entries: list[WorktreePlanEntry] = []
     for repository in repositories:
-        branch = profile.derive_branch(
+        branch = overrides.get(repository) or profile.derive_branch(
             repository,
             from_branch,
             primary_repository=problem_version_repository,
@@ -285,6 +297,7 @@ def plan_task_worktrees(
         baseline_repository=problem_version_repository,
         alignment_script=alignment_script,
         alignment_spec=alignment_spec,
+        branch_overrides=overrides,
     )
 
 
@@ -423,6 +436,7 @@ def prepare_task_worktrees(
         baseline_repository=plan.baseline_repository,
         alignment_script=plan.alignment_script,
         alignment_spec=plan.alignment_spec,
+        branch_overrides=plan.branch_overrides,
         adopted=adopted,
         created=created,
     )
@@ -443,7 +457,14 @@ def _apply_alignment_plan(
             "请修复当前 Project Profile 的标准资产安装后重试；系统不会按同名分支猜测",
         )
 
-    owners = {entry.repository.split("/", 1)[0] for entry in plan.entries}
+    overridden_repositories = set(plan.branch_overrides)
+    automatic_entries = tuple(
+        entry for entry in plan.entries if entry.repository not in overridden_repositories
+    )
+    if not automatic_entries:
+        return plan.entries
+
+    owners = {entry.repository.split("/", 1)[0] for entry in automatic_entries}
     if len(owners) != 1:
         raise _blocked(
             "branch_alignment_failed",
@@ -452,7 +473,7 @@ def _apply_alignment_plan(
             details={"repositories": [entry.repository for entry in plan.entries]},
         )
     owner = owners.pop()
-    short_names = [entry.repository.split("/", 1)[1] for entry in plan.entries]
+    short_names = [entry.repository.split("/", 1)[1] for entry in automatic_entries]
     command = [
         sys.executable,
         str(script),
@@ -510,8 +531,12 @@ def _apply_alignment_plan(
                 "actual_repositories": sorted(rows),
             },
         )
-    aligned: list[WorktreePlanEntry] = []
-    for entry, short_name in zip(plan.entries, short_names, strict=True):
+    aligned: dict[str, WorktreePlanEntry] = {
+        entry.repository: entry
+        for entry in plan.entries
+        if entry.repository in overridden_repositories
+    }
+    for entry, short_name in zip(automatic_entries, short_names, strict=True):
         row = rows.get(short_name)
         if row is None:
             raise _blocked(
@@ -531,27 +556,30 @@ def _apply_alignment_plan(
                 "branch_alignment_failed",
                 f"无法对齐领域仓库分支：{entry.repository}",
                 "请补充明确的关联仓库分支后重试；系统尚未创建任何工作树",
+                retry_safe=False,
                 details={
+                    "issue_key": plan.issue_key,
                     "repository": entry.repository,
                     "problem_version": plan.from_branch,
                     "reason": str(row.get("reason", "")),
+                    "repository_branch_override_template": (
+                        f"{entry.repository}: <confirmed-branch>"
+                    ),
                 },
             )
-        aligned.append(
-            WorktreePlanEntry(
-                repository=entry.repository,
-                worktree_dir=task_worktree_path(
-                    plan.pool_root,
-                    plan.issue_key,
-                    target,
-                    entry.repository,
-                ),
-                branch=target,
-                expected_sha=entry.expected_sha,
-                force_recreate=entry.force_recreate,
-            )
+        aligned[entry.repository] = WorktreePlanEntry(
+            repository=entry.repository,
+            worktree_dir=task_worktree_path(
+                plan.pool_root,
+                plan.issue_key,
+                target,
+                entry.repository,
+            ),
+            branch=target,
+            expected_sha=entry.expected_sha,
+            force_recreate=entry.force_recreate,
         )
-    return tuple(aligned)
+    return tuple(aligned[entry.repository] for entry in plan.entries)
 
 
 def _reject_legacy_worktrees(plan: TaskWorktreePlan) -> None:
@@ -720,7 +748,12 @@ def _stderr_tail(stderr: str | None, limit: int = 400) -> str:
 
 
 def _blocked(
-    code: str, message: str, action: str, *, details: dict[str, Any] | None = None
+    code: str,
+    message: str,
+    action: str,
+    *,
+    details: dict[str, Any] | None = None,
+    retry_safe: bool = True,
 ) -> RuntimeErrorResult:
     kwargs: dict[str, Any] = {}
     if details is not None:
@@ -730,7 +763,7 @@ def _blocked(
         message=message,
         status="blocked",
         exit_code=EXIT_BLOCKED,
-        retry_safe=True,
+        retry_safe=retry_safe,
         required_human_action=action,
         **kwargs,
     )

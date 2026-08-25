@@ -102,6 +102,11 @@ fields:
     section: 问题分支
     state: active
     writable: true
+  repository_branches:
+    source: jira_description_section
+    section: 仓库分支
+    state: active
+    writable: true
   acceptance_criteria:
     source: jira_description_section
     section: 验收标准

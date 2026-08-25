@@ -7,11 +7,88 @@ from types import SimpleNamespace
 from unittest import mock
 
 from ao_work.output import success
+from ao_work.output import RuntimeErrorResult
 from ao_work import task_repository_scope
 from ao_work.task_repository_scope import _jira_branch_overrides, _repository_next_action
 
 
 class RepositoryScopeNextActionTest(unittest.TestCase):
+    def test_unresolved_branch_stops_for_human_with_domain_bound_recovery(self) -> None:
+        profile = mock.Mock()
+        domain = SimpleNamespace(
+            domain_id="assistant",
+            problem_version_repository="tapdata/tapdata",
+            baseline_repository="tapdata/tapdata",
+        )
+        profile.domain_by_id.return_value = domain
+        profile.repository_candidates.return_value = (
+            "tapdata/tapdata",
+            "tapdata/tapdata-common-lib",
+        )
+        context = SimpleNamespace(profile=profile)
+        store = mock.Mock()
+        store.inspect.return_value = {"task": {"agentic_run_id": "run-TAP-123"}}
+        alignment_error = RuntimeErrorResult(
+            code="branch_alignment_failed",
+            message="无法对齐领域仓库分支：tapdata/tapdata-common-lib",
+            status="blocked",
+            exit_code=2,
+            retry_safe=False,
+            required_human_action="请补充明确的关联仓库分支后重试",
+            details={
+                "issue_key": "TAP-123",
+                "repository": "tapdata/tapdata-common-lib",
+                "problem_version": "develop",
+                "reason": "对应 release 分支无法解析",
+                "repository_branch_override_template": (
+                    "tapdata/tapdata-common-lib: <confirmed-branch>"
+                ),
+            },
+        )
+
+        with (
+            mock.patch.object(
+                task_repository_scope,
+                "_live_context",
+                return_value=(context, object(), SimpleNamespace(description=""), object()),
+            ),
+            mock.patch.object(task_repository_scope, "collect_task_facts", return_value={}),
+            mock.patch.object(
+                task_repository_scope, "resolve_source_pool_root", return_value=Path("/pool")
+            ),
+            mock.patch.object(
+                task_repository_scope,
+                "resolve_target_repository",
+                return_value="tapdata/tapdata",
+            ),
+            mock.patch.object(task_repository_scope, "plan_task_worktrees", return_value=object()),
+            mock.patch.object(
+                task_repository_scope,
+                "analyze_task_worktree_plan",
+                side_effect=alignment_error,
+            ),
+        ):
+            with self.assertRaises(RuntimeErrorResult) as captured:
+                task_repository_scope.execute_repository_assess(
+                    SimpleNamespace(),
+                    Path("/install"),
+                    store,
+                    "TAP-123",
+                    task_domain="assistant",
+                )
+
+        error = captured.exception
+        self.assertEqual("assistant", error.details["task_domain"])
+        self.assertFalse(error.retry_safe)
+        next_action = error.agentic_next_action
+        self.assertEqual("human", next_action["executor"])
+        self.assertEqual("confirm_repository_branch_override", next_action["action"])
+        self.assertEqual(["jira_description_plan"], next_action["allowed_operations"])
+        self.assertNotIn("jira_inspect", next_action["allowed_operations"])
+        self.assertIn("task_domain", next_action["required_inputs"])
+        self.assertTrue(next_action["requires_authorization"])
+        self.assertTrue(next_action["stop_workflow"])
+
     def test_jira_branch_overrides_accept_known_repositories(self) -> None:
         overrides = _jira_branch_overrides(
             {
@@ -90,7 +167,7 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
                 task_repository_scope,
                 "plan_task_worktrees",
                 return_value=object(),
-            ),
+            ) as plan_task_worktrees,
             mock.patch.object(
                 task_repository_scope,
                 "analyze_task_worktree_plan",
@@ -117,6 +194,7 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
             )
 
         rendered = success("task_repositories_assess", **result)
+        self.assertEqual({}, plan_task_worktrees.call_args.kwargs["branch_overrides"])
         next_action = rendered["agentic_next_action"]
         self.assertEqual("human", next_action["executor"])
         self.assertEqual(
