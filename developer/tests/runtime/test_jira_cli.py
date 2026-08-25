@@ -286,7 +286,7 @@ repositories:
             )
             desc = workspace / "desc.md"
             desc.write_text("为研发面新增 Jira 建卡能力。\n", encoding="utf-8")
-            plan_file = ".agentic-ops/tasks/AO/runs/run-create/jira-plans/create.json"
+            plan_file = "create.json"
             with mock.patch(
                 "ao_work.jira.cli.UrllibJiraTransport", return_value=transport
             ):
@@ -305,14 +305,21 @@ repositories:
                     "desc.md",
                     "--idempotency-key",
                     "idem-create",
-                    "--run-id",
-                    "run-create",
                     "--plan-file",
                     plan_file,
                 )
                 self.assertEqual(0, planned[0])
                 self.assertEqual("demo", planned[1]["profile_id"])
                 self.assertEqual("AO", planned[1]["project_key"])
+                self.assertRegex(
+                    str(planned[1]["agentic_run_id"]),
+                    r"^run-\d{14}-[0-9a-f]{8}$",
+                )
+                plan_file = str(planned[1]["plan_file"])
+                self.assertIn(
+                    f"/tasks/AO/runs/{planned[1]['agentic_run_id']}/jira-plans/create.json",
+                    plan_file,
+                )
                 plan_id = str(planned[1]["plan_id"])
                 authorization_reference = str(
                     planned[1]["authorization_user_confirmation_reference"]
@@ -351,6 +358,38 @@ repositories:
                 self.assertEqual(issue_key, str(readback[1]["external_id"]))
                 self.assertTrue(issue_key.startswith("AO-"))
                 self.assertTrue(applied[1]["created"])
+
+    def test_create_full_path_without_run_returns_executable_correction(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            _, workspace = self.prepare(Path(temporary))
+            result = self.run_cli(
+                "--workspace-root",
+                str(workspace),
+                "jira",
+                "create",
+                "plan",
+                "--project-key",
+                "AO",
+                "--issuetype",
+                "Agentic 缺陷",
+                "--summary",
+                "修复反馈建卡路径",
+                "--idempotency-key",
+                "idem-explicit-path",
+                "--plan-file",
+                ".agentic-ops/tasks/AO/runs/run-old/jira-plans/defect-create.json",
+            )
+
+            self.assertEqual(2, result[0])
+            self.assertEqual(
+                "jira_create_explicit_path_requires_run",
+                result[1]["code"],
+            )
+            self.assertTrue(result[1]["retry_safe"])
+            self.assertEqual(
+                "defect-create.json",
+                result[1]["recommended_plan_file"],
+            )
 
     def test_apply_rejects_unbound_authorization_before_decision_or_jira_write(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

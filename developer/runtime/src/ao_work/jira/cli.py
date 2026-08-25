@@ -139,6 +139,14 @@ def execute_jira(
     install_root: Path,
     store: TaskStore,
 ) -> dict[str, Any]:
+    create_agentic_run_id: str | None = None
+    if args.command == "create" and args.action == "plan":
+        create_agentic_run_id = args.run_id or _generate_run_id()
+        _validate_jira_create_plan_reference(
+            args.plan_file,
+            create_agentic_run_id,
+            generated_run=args.run_id is None,
+        )
     context = load_jira_context(workspace, install_root)
     email, token = context.require_credentials()
     client = JiraClient(
@@ -202,13 +210,15 @@ def execute_jira(
     if args.command == "create":
         # 建卡没有既有 issue key，不走任务接管绑定；agentic_run_id 显式提供或生成
         if args.action == "plan":
-            agentic_run_id = args.run_id or _generate_run_id()
-            plan_path = _jira_plan_file(
+            if create_agentic_run_id is None:
+                raise AssertionError("create plan run id must be prepared")
+            agentic_run_id = create_agentic_run_id
+            plan_path = _jira_create_plan_file(
                 workspace.root,
                 args.plan_file,
                 args.project_key.upper(),
                 agentic_run_id,
-                must_exist=False,
+                generated_run=args.run_id is None,
             )
             description = ""
             if args.description_file:
@@ -235,6 +245,7 @@ def execute_jira(
                 "connection_id": context.connection.connection_id,
                 "profile_id": context.profile.profile_id,
                 "issue_key": plan.issue_key,
+                "agentic_run_id": agentic_run_id,
                 "plan_id": plan.plan_id,
                 "action": plan.action,
                 "content_sha256": plan.content_sha256,
@@ -941,6 +952,86 @@ def _jira_plan_file(
                 required_human_action="请移除异常路径并核对任务状态完整性",
             ) from error
     return candidate
+
+
+def _jira_create_plan_file(
+    root: Path,
+    value: str,
+    project_key: str,
+    agentic_run_id: str,
+    *,
+    generated_run: bool,
+) -> Path:
+    """在 Runtime 确定 run 后解析 create plan 的安全文件名。"""
+
+    supplied = _validate_jira_create_plan_reference(
+        value,
+        agentic_run_id,
+        generated_run=generated_run,
+    )
+    if (
+        not supplied.is_absolute()
+        and len(supplied.parts) == 1
+        and PLAN_FILE_PATTERN.fullmatch(supplied.name)
+    ):
+        managed = (
+            validate_workspace_state_root(root)
+            / "tasks"
+            / project_key
+            / "runs"
+            / agentic_run_id
+            / "jira-plans"
+            / supplied.name
+        )
+        return _jira_plan_file(
+            root,
+            str(managed),
+            project_key,
+            agentic_run_id,
+            must_exist=False,
+        )
+    return _jira_plan_file(
+        root,
+        value,
+        project_key,
+        agentic_run_id,
+        must_exist=False,
+    )
+
+
+def _validate_jira_create_plan_reference(
+    value: str,
+    agentic_run_id: str,
+    *,
+    generated_run: bool,
+) -> Path:
+    """在外部 Jira 访问前校验建卡计划引用并返回可执行纠错。"""
+
+    supplied = Path(value)
+    if (
+        generated_run
+        and (
+            supplied.is_absolute()
+            or len(supplied.parts) != 1
+            or PLAN_FILE_PATTERN.fullmatch(supplied.name) is None
+        )
+    ):
+        raise RuntimeErrorResult(
+            code="jira_create_explicit_path_requires_run",
+            message="Jira 建卡计划使用完整受管路径时必须显式绑定同一 agentic_run_id",
+            status="blocked",
+            exit_code=EXIT_BLOCKED,
+            retry_safe=True,
+            required_human_action=(
+                f"请把 --plan-file 改为安全单层文件名 {supplied.name!r}；"
+                "如必须使用完整路径，则同时传入与路径一致的 --run-id"
+            ),
+            details={
+                "generated_agentic_run_id": agentic_run_id,
+                "recommended_plan_file": supplied.name,
+            },
+        )
+    return supplied
 
 
 def _jira_attempt_file(plan_path: Path) -> Path:

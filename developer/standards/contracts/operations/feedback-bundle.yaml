@@ -1,6 +1,6 @@
 operation: feedback_bundle
 workplane: developer
-version: 2
+version: 3
 purpose: 为指定 `agentic_run_id` 生成符合 ao_problem_feedback/v1 的完整脱敏修复输入，供 maintainer 定位、复现、修复和回归 developer 问题；它不能替代任务级审计提交。
 task_type: diagnosis
 allowed_stages:
@@ -45,6 +45,8 @@ output:
     type: object
     required:
       - source_binding
+      - source_conversation
+      - chronological_session_log
       - version_and_environment
       - problem_context
       - actual_behavior
@@ -61,6 +63,15 @@ output:
       - redaction_declaration
     item_state: [provided, not_applicable, unavailable]
     unavailable_requires: [reason, fact_source, minimal_action, blocks_repair]
+  ordering:
+    facts_before_summary: true
+    source_conversation_before_initial_assessment: true
+    chronological_session_log_before_initial_assessment: true
+  session_log:
+    requires_conversation_identifier: true
+    exact_export_preferred: true
+    reconstructed_log_must_be_labeled: verifiable_reconstruction
+    summary_must_not_replace_log: true
   agentic_next_action:
     type: string
 failure:

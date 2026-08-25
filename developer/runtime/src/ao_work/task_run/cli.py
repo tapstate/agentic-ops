@@ -5,12 +5,19 @@ from pathlib import Path
 from typing import Any
 
 from ao_work.task_run.service import TaskRunProtocol
+from ao_work.task_state import TaskStore
 from ao_work.workspace import Workspace
 
 
 def configure_task_run_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
     parser = subparsers.add_parser("task-run")
     commands = parser.add_subparsers(dest="command", required=True)
+    prepare_parser = commands.add_parser("prepare")
+    prepare_parser.add_argument("--issue-key", required=True)
+    authorize_parser = commands.add_parser("authorize")
+    authorize_parser.add_argument("--issue-key", required=True)
+    authorize_parser.add_argument("--confirmed-by", required=True)
+    authorize_parser.add_argument("--confirm", action="store_true")
     open_parser = commands.add_parser("open")
     open_parser.add_argument("--manifest", required=True)
     record_parser = commands.add_parser("record")
@@ -83,8 +90,25 @@ def execute_task_run(
     args: argparse.Namespace,
     workspace: Workspace,
     install_root: Path,
+    store: TaskStore,
     lock_timeout: float,
 ) -> dict[str, Any]:
+    if args.command in {"prepare", "authorize"}:
+        from ao_work.task_run.manifest import TaskRunManifestService
+
+        service = TaskRunManifestService(
+            workspace,
+            install_root,
+            store,
+            lock_timeout=lock_timeout,
+        )
+        if args.command == "prepare":
+            return service.prepare(args.issue_key)
+        return service.authorize(
+            args.issue_key,
+            confirmed_by=args.confirmed_by,
+            confirm=args.confirm,
+        )
     protocol = TaskRunProtocol(
         workspace,
         install_root=install_root,
