@@ -56,7 +56,7 @@ TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
 - 运维仓（`status` 可见但不联动，保持当前分支）：`tapdata-application`、`feishu_robot`。
 - 单独管理（不纳入分支联动）：`tapdata-cloud`、`t-layer3-test`、`docs`、`docs-en`、`mcp-tap-server`、`solutions`、`fhir-solution`、Hazelcast(fork)、mongo(fork)。
 
-新功能开发（问题版本为 `tapdata` 主仓 `develop`）时，产品域任务工作树必须先运行 `tap_align_branches.py plan`，以脚本结果作为各仓库实际目标分支；`profile.yaml` 的 `branches.dev_branches` 只作为不经过产品域任务工作树链路时的静态项目映射，不能覆盖 PluginKit 推导结果。
+新功能开发（问题版本为 `tapdata` 主仓 `develop`）时，产品域任务工作树必须先运行 `tap_align_branches.py plan`，以脚本结果作为各仓库实际目标分支；`profile.yaml` 的 `branches.dev_branches` 只作为不经过产品域任务工作树链路时的静态项目映射。
 
 ### 分支类型
 
@@ -89,7 +89,7 @@ TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
 - Runtime 创建产品域任务工作树时只读取 `plan --remote-only --json`，并以 `--repositories` 限定当前领域；remote-only 模式禁止回退本地同名分支或本地 PluginKit 内容，且不执行 `apply`。
 - `branch_spec` 可以是 `develop`、`main`、`release-vX.Y.Z`、任务分支，或 `<tapdata>,<enterprise>,<web>` 格式；enterprise/web 分支不明确时必须显式指定或停止。Runtime 接收三段式规格时，任务路径中的「问题版本」只使用第一段 tapdata 基线分支，完整规格仅传给只读对齐计划。
 - `tapdata` 为 `main` 时：所有联动仓切到 `main`。
-- `tapdata` 为 `develop` 时：`tapdata-enterprise`、`tapdata-web`、`tapdata-connectors`、`tapdata-connectors-enterprise` 切 `develop`；`tapdata-common-lib` 无 `develop` 分支，按 PluginKit 推导 release，无法读取时 `UNRESOLVED`；`tapdata-license` 切 `main`。
+- `tapdata` 为 `develop` 时：除 `tapdata-license` 切 `main` 外，其它联动仓（含 `tapdata-common-lib`）均切 `develop`。
 - `tapdata` 为其它分支时：先按 `TAP-xxxx` 标记匹配；非标准分支名（非 `main`/`develop`/`release-v*`）按全名匹配同名分支；仍未命中时，`tapdata-enterprise`/`tapdata-web` 用同名分支（缺失则 `UNRESOLVED` 阻塞，不猜测）；`tapdata-common-lib`、两个 connector 分别按同一 TapData 版本的 PluginKit 推导各自仓库的 release 分支，任一仓库无法读取版本或找不到对应分支即 `UNRESOLVED`；`tapdata-license` 取版本号 ≥ 主仓分支的 release（取不到回退 `main`）。
 - `tapdata-application`、`feishu_robot` 默认保持当前分支，不参与自动对齐。
 - pluginKit 推导：读 `tapdata` 分支 `iengine/iengine-app/src/main/resources/pluginKit.properties` 的 `tapdata.api.verison`（源码拼写即 `verison`，按字面读，勿当 typo 改），去 `-SNAPSHOT` 得 `release-v<version>`，在各仓 `release-v*` 分支中取第一个版本 ≥ 该值的分支。
@@ -97,13 +97,13 @@ TapData 多仓按分支联动关系分三类，对齐分支时据此判定：
 
 ### 新功能开发静态分支映射
 
-`profile.yaml` `branches.dev_branches` 保留下列静态项目映射（确定性，不靠 AI 猜测）。产品域任务工作树创建仍以前述 `tap_align_branches.py plan` 为事实源，尤其 `tapdata-common-lib` 必须按 PluginKit 推导，不能用本表的静态回退覆盖：
+`profile.yaml` `branches.dev_branches` 保留下列静态项目映射（确定性，不靠 AI 猜测）。产品域任务工作树创建仍以前述 `tap_align_branches.py plan` 为事实源：
 
 | 仓库 | 新功能开发分支 |
 | --- | --- |
 | `tapdata/tapdata` | `develop` |
 | `tapdata/tapdata-cloud` | `develop` |
-| `tapdata/tapdata-common-lib` | `main` |
+| `tapdata/tapdata-common-lib` | `develop` |
 | `tapdata/tapdata-connectors` | `develop` 时为 `develop`；release 时按自身远端的 PluginKit release 分支推导 |
 | `tapdata/tapdata-connectors-enterprise` | `develop` 时为 `develop`；release 时按自身远端的 PluginKit release 分支推导 |
 | `tapdata/tapdata-enterprise` | `develop` |
