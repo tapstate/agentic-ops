@@ -48,6 +48,34 @@ repositories:
 
 
 class ConfigTest(unittest.TestCase):
+    def test_tapstate_profile_reuses_tapdata_workflow_with_own_jira_project(self) -> None:
+        root = Path(__file__).resolve().parents[3]
+
+        profile = load_project_profile(root, "tapstate")
+
+        self.assertEqual("tapdata-cloud", profile.connection_id)
+        self.assertEqual("TAPSTATE", profile.project_key)
+        self.assertEqual(
+            "project = TAPSTATE AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC",
+            profile.task_query,
+        )
+        self.assertEqual("tapdata/tapdata", profile.default_repository)
+        self.assertEqual("waiting_takeover", profile.status_mapping["打开"])
+        self.assertEqual("91", profile.transition_mapping["start_progress"]["id"])
+        self.assertEqual("正在进行", profile.transition_mapping["start_progress"]["to"])
+        connector_domain = profile.domain_for("tapdata/tapdata-connectors")
+        self.assertIsNotNone(connector_domain)
+        self.assertEqual("product", connector_domain.domain_id)
+        dev_branches = dict(profile.branch_derivation.dev_branches)
+        self.assertEqual(
+            dev_branches["tapdata/tapdata-common-lib"],
+            dev_branches["tapdata/tapdata-connectors"],
+        )
+        self.assertEqual(
+            dev_branches["tapdata/tapdata-common-lib"],
+            dev_branches["tapdata/tapdata-connectors-enterprise"],
+        )
+
     def prepare(self, root: Path) -> tuple[Path, Path]:
         install = root / "install"
         entry = install / "bin" / "ao-work"

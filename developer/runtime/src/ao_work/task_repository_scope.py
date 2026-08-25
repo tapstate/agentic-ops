@@ -32,6 +32,23 @@ from ao_work.task_worktree import (
 from ao_work.workspace import Workspace, task_worktree_path
 
 
+def _alignment_script_for(
+    install_root: Path, problem_version_repository: str
+) -> Path | None:
+    """按产品仓库身份选择版本化对齐工具，而非按 Jira Profile 名称选择。"""
+    if problem_version_repository != "tapdata/tapdata":
+        return None
+    return (
+        install_root
+        / "developer"
+        / "standards"
+        / "projects"
+        / "tapdata"
+        / "scripts"
+        / "tap_align_branches.py"
+    )
+
+
 def _blocked(code: str, message: str, action: str, **details: Any) -> RuntimeErrorResult:
     return RuntimeErrorResult(
         code=code,
@@ -70,23 +87,12 @@ def execute_repository_assess(
             f"无法根据候选仓库判定任务领域：{target_repository}",
             "请修正 Project Profile 领域配置或在确认关系表中明确仓库",
         )
-    alignment_script = None
     problem_version_repository = (
         domain.problem_version_repository or domain.baseline_repository
     )
-    if (
-        context.profile.profile_id == "tapdata"
-        and problem_version_repository == "tapdata/tapdata"
-    ):
-        alignment_script = (
-            install_root
-            / "developer"
-            / "standards"
-            / "projects"
-            / context.profile.profile_id
-            / "scripts"
-            / "tap_align_branches.py"
-        )
+    alignment_script = _alignment_script_for(
+        install_root, problem_version_repository
+    )
     plan = plan_task_worktrees(
         pool_root=pool_root,
         profile=context.profile,

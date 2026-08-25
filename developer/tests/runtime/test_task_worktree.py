@@ -22,6 +22,7 @@ from ao_work.task_worktree import (
     resolve_product_alignment_branch,
     resolve_target_repository,
 )
+from ao_work.task_repository_scope import _alignment_script_for
 from ao_work.workspace import task_worktree_path
 
 
@@ -207,6 +208,16 @@ class ResolveFromBranchTest(unittest.TestCase):
 
 
 class TapdataProfileBranchDerivationTest(unittest.TestCase):
+    def test_tapstate_product_domain_uses_tapdata_alignment_tool(self) -> None:
+        install_root = Path("/opt/agentic-ops")
+
+        self.assertEqual(
+            install_root
+            / "developer/standards/projects/tapdata/scripts/tap_align_branches.py",
+            _alignment_script_for(install_root, "tapdata/tapdata"),
+        )
+        self.assertIsNone(_alignment_script_for(install_root, "tapdata/feishu_robot"))
+
     def test_develop_product_domain_only_mounts_product_repositories(self) -> None:
         repository_root = Path(__file__).resolve().parents[3]
         profile = load_project_profile(repository_root, "tapdata")
@@ -217,6 +228,8 @@ class TapdataProfileBranchDerivationTest(unittest.TestCase):
             "tapdata/tapdata-license",
             "tapdata/tapdata-common-lib",
             "tapdata/tapdata-application",
+            "tapdata/tapdata-connectors",
+            "tapdata/tapdata-connectors-enterprise",
         }
         with tempfile.TemporaryDirectory() as temporary:
             plan = plan_task_worktrees(
@@ -250,7 +263,7 @@ class TapdataProfileBranchDerivationTest(unittest.TestCase):
             ),
         )
 
-    def test_tapdata_connector_domain_uses_tapdata_problem_version_source(self) -> None:
+    def test_tapdata_connector_is_planned_with_product_domain(self) -> None:
         repository_root = Path(__file__).resolve().parents[3]
         profile = load_project_profile(repository_root, "tapdata")
         with tempfile.TemporaryDirectory() as temporary:
@@ -266,7 +279,16 @@ class TapdataProfileBranchDerivationTest(unittest.TestCase):
         self.assertEqual("release-v3.8.0", plan.from_branch)
         self.assertEqual("tapdata/tapdata", plan.baseline_repository)
         self.assertEqual(
-            {"tapdata/tapdata-connectors", "tapdata/tapdata-connectors-enterprise"},
+            {
+                "tapdata/tapdata",
+                "tapdata/tapdata-enterprise",
+                "tapdata/tapdata-web",
+                "tapdata/tapdata-license",
+                "tapdata/tapdata-common-lib",
+                "tapdata/tapdata-application",
+                "tapdata/tapdata-connectors",
+                "tapdata/tapdata-connectors-enterprise",
+            },
             {entry.repository for entry in plan.entries},
         )
         self.assertTrue(all("/.worktree/TAP-123/" in str(entry.worktree_dir) for entry in plan.entries))
@@ -834,6 +856,8 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
             "tapdata-license": "release-v3.8.0",
             "tapdata-common-lib": "release-v1.2.6",
             "tapdata-application": "main",
+            "tapdata-connectors": "release-v1.2.6",
+            "tapdata-connectors-enterprise": "release-v1.2.6",
         }
         for repo, target in expected.items():
             rows.append(
@@ -871,7 +895,6 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
             alignment_calls[0].index("--repositories") + 1
         ]
         self.assertEqual(set(expected), set(repositories.split(",")))
-        self.assertNotIn("tapdata-connectors", repositories)
         self.assertEqual(
             expected,
             {
