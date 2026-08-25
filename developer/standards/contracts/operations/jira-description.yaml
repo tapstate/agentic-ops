@@ -1,5 +1,5 @@
 operation: jira_description
-version: 3
+version: 4
 workplane: developer
 protocol:
   - plan
@@ -12,6 +12,14 @@ preconditions:
   - outbound_content_is_safe_regular_file_and_contains_no_detected_credentials
   - authorization_reference_strictly_binds_issue_run_and_plan
   - jira_comment_authorization_must_be_read_back_with_current_marker
+inputs:
+  repository_assess_task_domain:
+    required: false
+    allowed_values:
+      - product
+      - assistant
+      - taptest
+    constraint: only_with_repository_branch_section
 authorization:
   user_confirmation: "user-confirmation:<ISSUE-KEY>:<agentic-run-id>:<plan-id>"
   jira_comment: "jira-comment:<ISSUE-KEY>:<positive-comment-id>:<plan-id>"
@@ -32,6 +40,7 @@ unknown_result:
   next_action: manual_jira_inspection
 notes:
   - apply 内部执行写后回读；当前 CLI 不提供独立 description readback 子命令。
+  - 恢复仓库分支评估时，plan 必须绑定原评估的 repository_assess_task_domain；apply 回读成功后只能使用同一 task_domain 重新评估。
 failure:
   - jira_authorization_reference_invalid
   - jira_authorization_reference_not_found

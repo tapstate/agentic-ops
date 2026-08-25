@@ -361,7 +361,7 @@ class ProjectProfileSnapshotTest(unittest.TestCase):
         )
 
         self.assertEqual("develop", problem_version)
-        self.assertEqual("main", target_branch)
+        self.assertEqual("develop", target_branch)
         resolved = snapshot["resolved_fields"]
         self.assertEqual("tapdata/tapdata-common-lib", resolved["target_repo"]["value"])
         self.assertEqual("workspace_defaults.repository", resolved["target_repo"]["reference"])
@@ -370,7 +370,7 @@ class ProjectProfileSnapshotTest(unittest.TestCase):
             "workspace_defaults.problem_version",
             resolved["problem_version"]["reference"],
         )
-        self.assertEqual("main", resolved["target_branch"]["value"])
+        self.assertEqual("develop", resolved["target_branch"]["value"])
         self.assertEqual(
             "workspace_defaults.target_branch",
             resolved["target_branch"]["reference"],

@@ -67,7 +67,7 @@ repositories:
       tapdata/tapdata-connectors: develop
       tapdata/tapdata-connectors-enterprise: develop
       tapdata/tapdata-license: main
-      tapdata/tapdata-common-lib: main
+      tapdata/tapdata-common-lib: develop
       tapdata/tapdata-application: main
       tapdata/feishu_robot: master
       tapdata/t-layer3-test: develop
@@ -75,7 +75,7 @@ repositories:
     dev_branches:
       tapdata/tapdata: develop
       tapdata/tapdata-cloud: develop
-      tapdata/tapdata-common-lib: main
+      tapdata/tapdata-common-lib: develop
       tapdata/tapdata-connectors: develop
       tapdata/tapdata-connectors-enterprise: develop
       tapdata/tapdata-enterprise: develop
@@ -101,6 +101,11 @@ fields:
   problem_branch:
     source: jira_description_section
     section: 问题分支
+    state: active
+    writable: true
+  repository_branches:
+    source: jira_description_section
+    section: 仓库分支
     state: active
     writable: true
   acceptance_criteria:

@@ -25,7 +25,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(1, len(lines), stdout.getvalue())
         return exit_code, json.loads(lines[0]), stderr.getvalue()
 
-    def test_project_task_init_and_inspect(self) -> None:
+    def test_project_task_init_and_inspect_returns_controlled_jira_facts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             config = root / ".agentic-ops" / "agent.json"
@@ -49,11 +49,28 @@ class CliTest(unittest.TestCase):
             )
             self.assertEqual(0, exit_code)
             self.assertEqual(True, initialized["created"])
-            exit_code, inspected, _ = self.run_cli(
-                *common, "task", "inspect", "--issue-key", "TAP-123"
-            )
+            with mock.patch(
+                "ao_work.work_cli.execute_task_inspect",
+                return_value={
+                    "task": {"issue_key": "TAP-123"},
+                    "task_facts": {
+                        "description": {"facts": [{"field": "task_goal", "value": "受控目标"}]},
+                        "comments": {"facts": []},
+                        "repository_branch_hints": [],
+                    },
+                    "side_effects": [],
+                },
+            ) as task_inspect:
+                exit_code, inspected, _ = self.run_cli(
+                    *common, "task", "inspect", "--issue-key", "TAP-123"
+                )
             self.assertEqual(0, exit_code)
             self.assertEqual("TAP-123", inspected["task"]["issue_key"])
+            self.assertEqual(
+                "受控目标",
+                inspected["task_facts"]["description"]["facts"][0]["value"],
+            )
+            task_inspect.assert_called_once()
 
     def test_source_repo_blocks_work_operation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

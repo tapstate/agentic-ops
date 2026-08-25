@@ -243,7 +243,7 @@ class TapdataProfileBranchDerivationTest(unittest.TestCase):
         self.assertEqual("develop", plan.from_branch)
         self.assertEqual(expected_repositories, set(by_repository))
         self.assertEqual("develop", by_repository["tapdata/tapdata"])
-        self.assertEqual("main", by_repository["tapdata/tapdata-common-lib"])
+        self.assertEqual("develop", by_repository["tapdata/tapdata-common-lib"])
         self.assertTrue(set(dict(profile.branch_derivation.dev_branches)).issubset(profile.repository_candidates()))
 
     def test_declared_section_wins(self) -> None:
@@ -998,6 +998,37 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
             "tapdata/tapdata-application",
             captured.exception.details["repository"],
         )
+        self.assertFalse(captured.exception.retry_safe)
+        self.assertIsNone(captured.exception.agentic_next_action)
+        self.assertEqual(
+            "tapdata/tapdata-application: <confirmed-branch>",
+            captured.exception.details["repository_branch_override_template"],
+        )
+
+    def test_explicit_branch_override_skips_unresolvable_alignment(self) -> None:
+        script = self.pool / "tap_align_branches.py"
+        script.write_text("# test fixture\n", encoding="utf-8")
+        entry = WorktreePlanEntry(
+            repository="tapdata/tapdata-common-lib",
+            worktree_dir=self.pool / ".worktree/TAP-123/tapdata-common-lib/release-v3.8.0",
+            branch="release-v3.8.0",
+        )
+        plan = TaskWorktreePlan(
+            issue_key="TAP-123",
+            from_branch="develop",
+            pool_root=self.pool,
+            entries=(entry,),
+            target_repository="tapdata/tapdata",
+            baseline_repository="tapdata/tapdata",
+            alignment_script=script,
+            alignment_spec="develop",
+            branch_overrides={"tapdata/tapdata-common-lib": "release-v3.8.0"},
+        )
+
+        def unexpected_alignment(*_args, **_kwargs):
+            self.fail("明确 Jira 覆盖不应调用自动对齐脚本")
+
+        self.assertEqual((entry,), _apply_alignment_plan(plan, unexpected_alignment))
 
 
 class RunGitRealSubprocessRegressionTest(unittest.TestCase):

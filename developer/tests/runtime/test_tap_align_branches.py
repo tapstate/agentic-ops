@@ -119,16 +119,11 @@ class TapAlignBranchesMachinePlanTest(unittest.TestCase):
                         repositories=["not-supported"],
                     )
 
-    def test_develop_connectors_do_not_follow_common_lib_branch(self) -> None:
+    def test_develop_repositories_align_to_develop_without_pluginkit_lookup(self) -> None:
         with (
             mock.patch.object(tap_align_branches, "branch_exists", return_value=True),
             mock.patch.object(tap_align_branches, "current_branch", return_value="main"),
             mock.patch.object(tap_align_branches, "dirty_state", return_value="clean"),
-            mock.patch.object(
-                tap_align_branches,
-                "plugin_release_for",
-                return_value="release-v1.2.6",
-            ),
             mock.patch.object(
                 tap_align_branches,
                 "first_release_ge",
@@ -147,13 +142,13 @@ class TapAlignBranchesMachinePlanTest(unittest.TestCase):
                     "tapdata-connectors-enterprise",
                 ],
                 remote_only=True,
-            )
+        )
 
         targets = {row["repo"]: row["target"] for row in rows}
-        self.assertEqual("release-v1.2.6", targets["tapdata-common-lib"])
+        self.assertEqual("develop", targets["tapdata-common-lib"])
         self.assertEqual("develop", targets["tapdata-connectors"])
         self.assertEqual("develop", targets["tapdata-connectors-enterprise"])
-        self.assertEqual(1, first_release.call_count)
+        first_release.assert_not_called()
 
     def test_release_connectors_resolve_independently(self) -> None:
         def first_release(repo, *_args, **_kwargs):
