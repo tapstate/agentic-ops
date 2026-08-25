@@ -1,5 +1,5 @@
 operation: solution_gate
-version: 2
+version: 3
 workplane: developer
 actions:
   - classify
@@ -11,10 +11,22 @@ inputs:
     - risk_flags
     - classification_evidence
     - residual_risks
+  optional:
+    - execution_plan
+execution_plan:
+  required_for_task_run_prepare: true
+  fields:
+    - change_repository
+    - verification
+    - review_summary
+  normalization:
+    maven: add_batch_and_offline_before_validation
+  human_gate:
+    internal_digest_or_path_confirmation: forbidden
 levels:
   L1:
     condition: no_fixed_risk_flag_enabled
-    action: design_review
+    action: prepare_combined_design_and_execution_authorization
   L2:
     flags:
       - user_choice_required

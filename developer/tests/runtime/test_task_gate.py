@@ -281,6 +281,48 @@ class TaskGateTest(unittest.TestCase):
             )
         self.assertEqual("task_intake_source_changed", captured.exception.code)
 
+    def test_execution_plan_normalizes_maven_without_new_user_gate(self) -> None:
+        intake_digest = self._assessed_intake()
+        path = self._write_solution("solution-execution.json", intake_digest, None)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["execution_plan"] = {
+            "change_repository": "tapdata/tapdata",
+            "verification": [
+                {
+                    "id": "mysql-unit",
+                    "command": [
+                        "mvn",
+                        "-pl",
+                        "connectors/mysql-connector",
+                        "-am",
+                        "-Dtest=MysqlConnectorTest",
+                        "test",
+                    ],
+                    "working_directory": ".",
+                    "timeout_seconds": 600,
+                }
+            ],
+            "review_summary": "仅修改已确认源码和测试，并执行 MySQL 单元测试。",
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+        result = self.service.classify_solution(
+            issue_key=ISSUE_KEY,
+            agentic_run_id=RUN_ID,
+            input_file=str(path.relative_to(self.workspace_root)),
+        )
+
+        execution = result["solution"]["execution_plan"]
+        command = execution["verification"][0]["command"]
+        self.assertIn("--batch-mode", command)
+        self.assertIn("--offline", command)
+        self.assertEqual(1, len(execution["normalization_changes"]))
+        self.assertEqual(
+            "prepare_task_run_manifest",
+            result["agentic_next_action"]["action"],
+        )
+        self.assertFalse(result["agentic_next_action"]["requires_authorization"])
+
     def _assessed_intake(self) -> str:
         path = self._write_intake("confirmed-intake.json")
         assessed = self.service.assess_intake(

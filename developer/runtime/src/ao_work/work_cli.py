@@ -250,6 +250,7 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             args,
             workspace,
             install_root,
+            store,
             args.lock_timeout,
         )
         return success(operation, workplane=workspace.workplane, **state)

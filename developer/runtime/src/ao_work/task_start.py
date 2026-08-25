@@ -261,6 +261,17 @@ def record_current_task_source_context(
         "description": description_text,
         "issue_content_sha256": issue_content_sha256,
     }
+    status_payload = issue.fields.get("status", {})
+    category_payload = (
+        status_payload.get("statusCategory", {})
+        if isinstance(status_payload, dict)
+        else {}
+    )
+    status_category = str(
+        category_payload.get("key") or category_payload.get("name") or ""
+    ).strip()
+    if status_category:
+        issue_payload["status_category"] = status_category
     if task_worktrees is not None:
         problem_version = str(task_worktrees.get("problem_version") or "")
         target_branch = str(task_worktrees.get("target_branch") or "")

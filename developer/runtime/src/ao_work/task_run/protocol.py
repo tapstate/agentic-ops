@@ -1542,6 +1542,49 @@ def require_string_list(value: object, label: str, *, nonempty: bool = False) ->
     return result
 
 
+def normalize_verification_command(
+    command: object,
+    working_directory: object,
+    *,
+    label: str = "verification",
+) -> dict[str, Any]:
+    """Normalize deterministic safety flags before the user reviews final argv.
+
+    Only Maven batch/offline flags are synthesized. All other safety semantics remain
+    fail-closed in ``validate_verification_command``.
+    """
+
+    original = require_string_list(command, f"{label}.command", nonempty=True)
+    normalized = list(original)
+    executable = normalized[0].replace("\\", "/").casefold()
+    executable_name = executable.rsplit("/", 1)[-1]
+    if executable_name.endswith(".exe"):
+        executable_name = executable_name[:-4]
+    is_maven = executable_name == "mvn" or executable == "./mvnw"
+    changes: list[dict[str, str]] = []
+    if is_maven:
+        lowered = {argument.casefold() for argument in normalized[1:]}
+        inserted: list[str] = []
+        if not {"-b", "--batch-mode"}.intersection(lowered):
+            inserted.append("--batch-mode")
+        if not {"-o", "--offline"}.intersection(lowered):
+            inserted.append("--offline")
+        if inserted:
+            normalized[1:1] = inserted
+            changes.append(
+                {
+                    "kind": "maven_safety_flags_added",
+                    "description": "Maven 验证补齐 batch/offline 安全参数",
+                }
+            )
+    validate_verification_command(normalized, working_directory, label=label)
+    return {
+        "command": normalized,
+        "original_command": original,
+        "changes": changes,
+    }
+
+
 def validate_verification_command(
     command: object,
     working_directory: object,

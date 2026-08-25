@@ -50,6 +50,7 @@ from ao_work.task_run.protocol import (
 from ao_work.task_run.ci import CiRuntime
 from ao_work.task_state.io import append_ndjson, atomic_write_json, read_json, read_text
 from ao_work.task_state.locking import TaskLock
+from ao_work.task_state import TaskStore
 from ao_work.workspace import Workspace
 
 MAX_COMMAND_OUTPUT_BYTES = 4_194_304
@@ -82,7 +83,7 @@ class TaskRunProtocol:
     def open(self, manifest_value: str) -> dict[str, Any]:
         manifest_path = self._input_file(manifest_value, "manifest")
         manifest = validate_manifest(load_json_object(manifest_path, "manifest"))
-        self._validate_workspace_binding(manifest)
+        prepared = self._validate_workspace_binding(manifest)
         paths = self._paths(manifest)
         with TaskLock(paths["lock"], timeout=self.lock_timeout):
             if paths["result"].exists():
@@ -101,6 +102,8 @@ class TaskRunProtocol:
                         "请使用新的 agentic_run_id 重新确认完整 manifest",
                     )
                 return self._open_result(paths, manifest, created=False)
+            if prepared is not None:
+                self._validate_prepared_worktree_initial_state(manifest, prepared)
             paths["root"].mkdir(parents=True, exist_ok=False)
             atomic_write_json(paths["manifest"], manifest)
             atomic_write_json(
@@ -113,6 +116,20 @@ class TaskRunProtocol:
                 },
             )
             return self._open_result(paths, manifest, created=True)
+
+    def prevalidate_manifest(
+        self,
+        manifest: Mapping[str, Any],
+        *,
+        require_initial_head: bool,
+    ) -> dict[str, Any]:
+        """使用与 open 相同的合同预校验 Runtime 生成的 manifest。"""
+
+        validated = validate_manifest(manifest)
+        prepared = self._validate_workspace_binding(validated)
+        if require_initial_head and prepared is not None:
+            self._validate_prepared_worktree_initial_state(validated, prepared)
+        return validated
 
     def record(self, manifest_value: str, event_value: str) -> dict[str, Any]:
         manifest = self._load_open_manifest(manifest_value)
@@ -3533,7 +3550,9 @@ class TaskRunProtocol:
             )
         return stored
 
-    def _validate_workspace_binding(self, manifest: Mapping[str, Any]) -> None:
+    def _validate_workspace_binding(
+        self, manifest: Mapping[str, Any]
+    ) -> Mapping[str, Any] | None:
         try:
             config = read_json(self.workspace.config_path)
         except (OSError, ValueError) as error:
@@ -3549,28 +3568,34 @@ class TaskRunProtocol:
                 "manifest workspace.root 不是当前 developer 工作空间规范路径",
                 "请使用 resolve_developer_workspace 返回的绝对 root 重新确认 manifest",
             )
-        source = config.get("source_root")
-        if not isinstance(source, str) or not source.strip():
-            raise blocked(
-                "workspace_source_root_missing",
-                "agent.json 缺少 source_root",
-                "请重新初始化 developer 业务项目工作空间",
-            )
-        resolved_source = Path(source).expanduser().resolve()
         repository_root = Path(str(manifest["repository"]["root"])).resolve()
-        if repository_root != resolved_source or str(repository_root) != manifest["repository"]["root"]:
-            raise blocked(
-                "manifest_repository_mismatch",
-                "manifest repository.root 与 agent.json source_root 不一致",
-                "请以当前业务工作空间显式 source_root 重新确认 manifest",
-            )
+        prepared = self._prepared_repository_binding(manifest)
+        if prepared is None:
+            source = config.get("source_root")
+            if not isinstance(source, str) or not source.strip():
+                raise blocked(
+                    "workspace_source_root_missing",
+                    "agent.json 缺少 source_root",
+                    "请重新初始化 developer 业务项目工作空间",
+                )
+            resolved_source = Path(source).expanduser().resolve()
+            if (
+                repository_root != resolved_source
+                or str(repository_root) != manifest["repository"]["root"]
+            ):
+                raise blocked(
+                    "manifest_repository_mismatch",
+                    "manifest repository.root 与 agent.json source_root 不一致",
+                    "请以当前业务工作空间显式 source_root 重新确认 manifest",
+                )
         install_identity = load_install_identity(self.install_root)
         expected = {
             ("agent", "agent_id"): install_identity.get("agent_id"),
             ("agent", "project_profile"): config.get("project_profile"),
             ("issue", "project_key"): config.get("jira_project"),
-            ("repository", "slug"): config.get("repository"),
         }
+        if prepared is None:
+            expected[("repository", "slug")] = config.get("repository")
         for (section, field), configured in expected.items():
             if manifest[section][field] != configured:
                 raise blocked(
@@ -3611,6 +3636,103 @@ class TaskRunProtocol:
                 "请修复本地 Profile overlay 后重新生成并确认 manifest",
             )
         self._validate_approved_plan_binding(manifest)
+        return prepared
+
+    def _prepared_repository_binding(
+        self, manifest: Mapping[str, Any]
+    ) -> Mapping[str, Any] | None:
+        try:
+            state = TaskStore(
+                self.workspace.root, lock_timeout=self.lock_timeout
+            ).inspect(str(manifest["issue"]["key"]))
+        except RuntimeErrorResult as error:
+            if error.code == "task_state_not_found":
+                return None
+            raise
+        task = state["task"]
+        if task.get("agentic_run_id") != manifest["agent"]["agentic_run_id"]:
+            raise blocked(
+                "manifest_task_run_mismatch",
+                "manifest agentic_run_id 与当前任务运行不一致",
+                "请基于当前任务运行重新生成执行包",
+            )
+        scope = state.get("repository_scope")
+        rows = (
+            scope.get("confirmed_repository_branch_map")
+            if isinstance(scope, dict)
+            else None
+        )
+        if rows is None:
+            return None
+        prepared = [
+            row
+            for row in rows
+            if isinstance(row, dict) and row.get("worktree_status") == "prepared"
+        ]
+        if len(prepared) != 1:
+            raise blocked(
+                "task_run_prepared_repository_ambiguous",
+                "task-run 必须绑定唯一已准备的任务工作树",
+                "请准备唯一实际变更仓库；多仓任务不能降级为默认仓库",
+            )
+        row = prepared[0]
+        expected = {
+            "root": str(
+                Path(str(row.get("worktree_path") or "")).expanduser().resolve()
+            ),
+            "slug": row.get("repository"),
+            "base_branch": row.get("from_branch"),
+            "target_branch": row.get("from_branch"),
+            "task_branch": row.get("task_branch"),
+        }
+        for field, value in expected.items():
+            if manifest["repository"][field] != value:
+                raise blocked(
+                    "manifest_prepared_repository_mismatch",
+                    f"manifest repository.{field} 与任务确认工作树不一致",
+                    "请使用 task-run prepare 从当前仓库确认事实重新生成执行包",
+                )
+        return row
+
+    def _validate_prepared_worktree_initial_state(
+        self,
+        manifest: Mapping[str, Any],
+        prepared: Mapping[str, Any],
+    ) -> None:
+        root = Path(str(manifest["repository"]["root"])).resolve()
+
+        def git(*arguments: str) -> str:
+            completed = subprocess.run(
+                ["git", "-C", str(root), *arguments],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if completed.returncode != 0:
+                raise blocked(
+                    "task_run_prepared_worktree_invalid",
+                    f"无法回读任务工作树 Git 事实：{' '.join(arguments)}",
+                    "请修复任务工作树后重新生成执行包",
+                )
+            return completed.stdout.strip()
+
+        top_level = Path(git("rev-parse", "--show-toplevel")).resolve()
+        branch = git("symbolic-ref", "--quiet", "--short", "HEAD")
+        head = git("rev-parse", "HEAD")
+        status = git("status", "--porcelain=v1", "--untracked-files=all")
+        if top_level != root or branch != manifest["repository"]["task_branch"]:
+            raise blocked(
+                "task_run_prepared_worktree_binding_changed",
+                "任务工作树根目录或分支已偏离确认事实",
+                "请恢复任务工作树或重新生成并审查执行包",
+            )
+        if head != prepared.get("worktree_baseline_sha") or status:
+            raise blocked(
+                "task_run_prepared_worktree_start_changed",
+                "task-run open 前任务工作树 HEAD 已变化或不干净",
+                "请在实现前重新生成执行包；已有变更需先进入范围与风险审查",
+            )
 
     def _validate_approved_plan_binding(self, manifest: Mapping[str, Any]) -> None:
         task_binding = manifest["task_binding"]
