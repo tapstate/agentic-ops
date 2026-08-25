@@ -15,25 +15,17 @@ class OutputTest(unittest.TestCase):
         self.assertEqual("completed", result["status"])
         self.assertEqual(True, result["retry_safe"])
         self.assertEqual("ok", result["value"])
+        next_action = result["agentic_next_action"]
+        self.assertEqual("ai", next_action["executor"])
+        self.assertEqual("takeover_explicit_jira_task", next_action["action"])
+        self.assertEqual("takeover", next_action["operation_id"])
+        self.assertEqual(["takeover", "<issue-key>"], next_action["command_argv"])
+        self.assertEqual("ao-work takeover <issue-key>", next_action["command_line"])
+        self.assertEqual(["issue_key"], next_action["required_inputs"])
+        self.assertEqual(["takeover"], next_action["allowed_operations"])
         self.assertEqual(
-            {
-                "executor": "ai",
-                "action": "takeover_explicit_jira_task",
-                "required_inputs": ["issue_key"],
-                "allowed_operations": ["takeover"],
-                "requires_authorization": False,
-                "stop_workflow": False,
-                "ownership_effect": "none",
-                "retry_gate": {
-                    "allowed": False,
-                    "max_additional_attempts": 0,
-                    "same_input_allowed": False,
-                    "requires_state_readback": False,
-                    "requires_recorded_retry_event": False,
-                    "on_exhausted": "not_applicable",
-                },
-            },
-            result["agentic_next_action"],
+            [{"kind": "issue_key", "source": "user_input.issue_key"}],
+            next_action["input_artifacts"],
         )
 
     def test_success_promotes_legacy_next_action_to_reason(self) -> None:
@@ -93,30 +85,13 @@ class OutputTest(unittest.TestCase):
         )
         self.assertEqual("test_blocked", result["code"])
         self.assertEqual("请检查测试输入", result["required_human_action"])
-        self.assertEqual(
-            {
-                "executor": "human",
-                "action": "resolve_runtime_blocker",
-                "required_inputs": [],
-                "allowed_operations": [],
-                "requires_authorization": True,
-                "stop_workflow": True,
-                "ownership_effect": "none",
-                "reason": "请检查测试输入",
-                "retry_gate": {
-                    "allowed": False,
-                    "retry_key": result["agentic_next_action"]["retry_gate"][
-                        "retry_key"
-                    ],
-                    "max_additional_attempts": 0,
-                    "same_input_allowed": False,
-                    "requires_state_readback": True,
-                    "requires_recorded_retry_event": False,
-                    "on_exhausted": "escalate_to_human",
-                },
-            },
-            result["agentic_next_action"],
-        )
+        next_action = result["agentic_next_action"]
+        self.assertEqual("human", next_action["executor"])
+        self.assertEqual("resolve_runtime_blocker", next_action["action"])
+        self.assertEqual("human_decision", next_action["operation_id"])
+        self.assertEqual([], next_action["command_argv"])
+        self.assertEqual("请检查测试输入", next_action["reason"])
+        self.assertEqual("escalate_to_human", next_action["retry_gate"]["on_exhausted"])
 
     def test_retry_safe_failure_allows_one_changed_input_retry(self) -> None:
         result = failure(
@@ -181,6 +156,34 @@ class OutputTest(unittest.TestCase):
             ["jira_description_plan"],
             result["agentic_next_action"]["allowed_operations"],
         )
+        self.assertEqual(
+            ["jira", "description", "plan"],
+            result["agentic_next_action"]["command_argv"],
+        )
+
+    def test_every_success_and_failure_next_action_has_actionable_envelope(self) -> None:
+        cases = (
+            success("task_start", issue_key="TAP-123", agentic_run_id="run-123"),
+            success("task-run_probe-ci", ci_status="completion_timeout"),
+            failure(
+                "workspace_preflight",
+                RuntimeErrorResult(
+                    code="temporary", message="暂时失败", retry_safe=True
+                ),
+            ),
+        )
+        for result in cases:
+            with self.subTest(operation=result["operation"]):
+                next_action = result["agentic_next_action"]
+                for field in (
+                    "operation_id",
+                    "command_argv",
+                    "command_line",
+                    "bound_arguments",
+                    "input_artifacts",
+                    "reason",
+                ):
+                    self.assertIn(field, next_action)
 
     def test_writer_outputs_exactly_one_json_object(self) -> None:
         stream = io.StringIO()
