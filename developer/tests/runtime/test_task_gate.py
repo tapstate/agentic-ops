@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ao_work.output import RuntimeErrorResult
+from ao_work.output import RuntimeErrorResult, failure
 from ao_work.task_gate import TaskGateService
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.workspace import Workspace
@@ -139,6 +139,45 @@ class TaskGateTest(unittest.TestCase):
         )
         self.assertTrue(assessed["intake"]["known_facts"])
         self.assertTrue(assessed["intake_digest"])
+
+    def test_intake_contract_error_is_ai_retryable_without_consuming_retry(self) -> None:
+        invalid = self._intake_payload()
+        invalid["auto_filled_values"] = {}
+        path = self._write_json("invalid-auto-filled.json", invalid)
+
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            self.service.assess_intake(
+                issue_key=ISSUE_KEY,
+                agentic_run_id=RUN_ID,
+                input_file=str(path.relative_to(self.workspace_root)),
+            )
+
+        error = captured.exception
+        self.assertEqual("intake_auto_fill_invalid", error.code)
+        self.assertTrue(error.retry_safe)
+        self.assertEqual(
+            "rebuild_contract_input_and_retry_once",
+            error.details["input_recovery"]["action"],
+        )
+        rendered = failure("task_intake_assess", error)
+        self.assertEqual("ai", rendered["agentic_next_action"]["executor"])
+        self.assertFalse(
+            rendered["agentic_next_action"]["requires_authorization"]
+        )
+
+        assessed = self.service.assess_intake(
+            issue_key=ISSUE_KEY,
+            agentic_run_id=RUN_ID,
+            input_file=str(self._write_intake("recovered.json").relative_to(self.workspace_root)),
+        )
+        self.assertEqual(0, assessed["intake"]["retry_count"])
+
+    def test_invalid_source_context_remains_human_blocker(self) -> None:
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            self.service._profile_required_values({"project_profile": None}, {})
+
+        self.assertEqual("task_source_context_invalid", captured.exception.code)
+        self.assertFalse(captured.exception.retry_safe)
 
     def test_intake_rejects_forged_trusted_value_and_changed_source_evidence(self) -> None:
         forged = self._intake_payload()

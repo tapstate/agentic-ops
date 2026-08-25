@@ -41,6 +41,26 @@ ao-work takeover <ISSUE-KEY>
 ao-work task intake assess --issue-key <KEY> --agentic-run-id <RUN> --input-file <相对JSON>
 ```
 
+输入顶层必须且只能包含以下字段；四个集合字段都必须是数组，即使当前为空也写 `[]`：
+
+```json
+{
+  "schema_version": 1,
+  "auto_filled_values": [],
+  "unresolved_information": [],
+  "assumptions": [
+    {"statement": "本次只处理任务卡片和已验证源码证据", "impact": "范围变化时重新分析"}
+  ],
+  "impacts": [
+    {"area": "业务模块", "description": "基于已知事实进行初步方案分析", "risk": "low"}
+  ]
+}
+```
+
+`auto_filled_values` 中每个源码证据必须包含 `field`、`value`、`source=business_source_code`、`reference`、`evidence_sha256` 与中文 `rationale`；Profile 已解析的必填字段由 Runtime 自动补齐，不要伪造。完整异常堆栈、MySQL 版本、权限和 binlog 配置尚未取得时，写入 `unresolved_information` 并标记 `required=false`，不得因此否定已有源码证据的初步分析。
+
+若 Runtime 返回 `retry_safe=true` 的输入合同错误，AI 必须遵循 `agentic_next_action` 回读状态、重建上述 JSON 并只重试一次；这不是用户门禁，不得要求用户填写 JSON、内部摘要或尚非必填的诊断信息。只有事实冲突、Profile 必填字段缺失、来源/源码变化，或 Runtime 明确给出不可重试/重试耗尽时，才请求人工处理。
+
 Runtime 自动合并接管后保存的 Jira、Project Profile、工作空间与运行快照，校验 Profile 必填字段、源码证据摘要、干净 HEAD、缺项、假设和影响，输出完整准入事实及 `intake_digest`。Jira/Profile/Runtime 来源必须与快照值精确匹配；源码推断必须引用工作空间绑定源码中的普通文件及其 SHA-256，并明确仍需人工判断语义。必要信息仍缺失时，只能按同一 `retry_key` 用改变后的证据重试一次；耗尽后停止。事实完整时不设置准入确认门禁，AI 直接形成方案 JSON，并调用：
 
 ```sh
