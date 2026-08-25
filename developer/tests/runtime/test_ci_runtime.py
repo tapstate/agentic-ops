@@ -13,6 +13,7 @@ from pathlib import Path
 from ao_work.output import RuntimeErrorResult
 from ao_work.task_run.ci import (
     CiRuntime,
+    _redact_runner_log,
     extract_archive,
     parse_maven_failsafe,
     verify_extracted_artifact,
@@ -135,6 +136,14 @@ class MavenFailsafeParserTest(unittest.TestCase):
                 with self.assertRaises(RuntimeErrorResult) as captured:
                     parse_maven_failsafe(root, "b" * 64)
                 self.assertEqual("ci_report_parse_failed", captured.exception.code)
+
+    def test_runner_log_excerpt_is_redacted_and_bounded(self) -> None:
+        excerpt, truncated = _redact_runner_log(
+            "step token=super-secret-value\npassword: hidden-value\n" + "x" * 70_000
+        )
+        self.assertNotIn("super-secret-value", excerpt)
+        self.assertNotIn("hidden-value", excerpt)
+        self.assertTrue(truncated)
 
 
 class CiObservationTest(unittest.TestCase):
@@ -349,11 +358,13 @@ class CiObservationTest(unittest.TestCase):
             datetime(2026, 8, 24, tzinfo=timezone.utc)
         ).probe(self.manifest)
         self.assertEqual("waiting_to_start", observed["ci_status"])
-        with self.assertRaises(RuntimeErrorResult) as captured:
-            self.configured_ci_runtime(
-                datetime(2026, 8, 24, 0, 5, 1, tzinfo=timezone.utc)
-            ).probe(self.manifest)
-        self.assertEqual("ci_start_timeout", captured.exception.code)
+        timed_out = self.configured_ci_runtime(
+            datetime(2026, 8, 24, 0, 5, 1, tzinfo=timezone.utc)
+        ).probe(self.manifest)
+        self.assertEqual("start_timeout", timed_out["ci_status"])
+        self.assertEqual("ci_decision", timed_out["current_stage"])
+        self.assertTrue(timed_out["decision_required"])
+        self.assertEqual("analyze_ci_timeout", timed_out["agentic_next_action"])
 
     def test_manual_only_workflow_does_not_require_ci(self) -> None:
         observed = self.configured_ci_runtime(
@@ -386,9 +397,20 @@ class CiObservationTest(unittest.TestCase):
         first = self.runtime("", now=datetime(2026, 8, 24, tzinfo=timezone.utc))
         self.assertEqual("pending", first.probe(self.manifest)["ci_status"])
         resumed = self.runtime("", now=datetime(2026, 8, 24, 0, 10, 1, tzinfo=timezone.utc))
-        with self.assertRaises(RuntimeErrorResult) as captured:
-            resumed.probe(self.manifest)
-        self.assertEqual("ci_completion_timeout", captured.exception.code)
+        timed_out = resumed.probe(self.manifest)
+        self.assertEqual("completion_timeout", timed_out["ci_status"])
+        self.assertEqual("ci_decision", timed_out["current_stage"])
+
+    def test_failed_runner_log_is_redacted_and_required_before_report_parse(self) -> None:
+        runtime = self.runtime("FAILURE")
+        runtime.probe(self.manifest)
+        runtime.run_text = lambda _argv, _cwd, _timeout: subprocess.CompletedProcess(
+            [], 0, "job token=runner-secret\nAssertionError: expected true", ""
+        )
+        runner_log = runtime.fetch_runner_log(self.manifest)
+        self.assertTrue(runner_log["available"])
+        self.assertNotIn("runner-secret", runner_log["excerpt"])
+        self.assertEqual("parse_ci_report", runner_log["agentic_next_action"])
 
     def test_unattributed_new_head_is_external_change(self) -> None:
         self.runtime("SUCCESS").probe(self.manifest)
@@ -405,6 +427,19 @@ class CiObservationTest(unittest.TestCase):
         )
         state = json.loads(state_path.read_text(encoding="utf-8"))
         state["attempts"][SHA]["failure_event_id"] = "ci-failure-explicit"
+        state["attempts"][SHA]["runner_log"] = {
+            "available": True,
+            "reason": "ok",
+            "workflow_run_id": 101,
+            "size_bytes": 10,
+            "sha256": "d" * 64,
+            "excerpt": "AssertionError",
+            "truncated": False,
+        }
+        state["attempts"][SHA]["report"] = {
+            "report_sha256": "e" * 64,
+            "artifact_sha256": "f" * 64,
+        }
         state_path.write_text(json.dumps(state), encoding="utf-8")
         readback = {
             "event_id": "git-readback",
@@ -425,6 +460,24 @@ class CiObservationTest(unittest.TestCase):
                 "retry_safe": False,
             },
         }
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            runtime.record_remediation(
+                self.manifest,
+                failure_event_id="ci-failure-explicit",
+                commit_sha="b" * 40,
+                new_head_sha="b" * 40,
+                authorization_reference="AO-76-confirmed-design",
+                completed_events=[non_code, readback],
+            )
+        self.assertEqual("ci_remediation_decision_missing", captured.exception.code)
+
+        authorized = runtime.authorize_remediation(
+            self.manifest,
+            failure_event_id="ci-failure-explicit",
+            confirmed_by="developer",
+        )
+        self.assertTrue(authorized["authorized"])
+
         with self.assertRaises(RuntimeErrorResult) as captured:
             runtime.record_remediation(
                 self.manifest,

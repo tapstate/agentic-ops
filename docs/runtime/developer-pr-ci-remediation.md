@@ -38,7 +38,13 @@ manifest 必须携带相同 `process_id` 和 CI 配置，并显式允许 `github
 ```sh
 ao-work task-run probe-ci --manifest <相对路径>
 ao-work task-run fetch-ci-artifact --manifest <相对路径>
+ao-work task-run fetch-ci-runner-log --manifest <相对路径>
 ao-work task-run parse-ci-report --manifest <相对路径>
+ao-work task-run authorize-ci-remediation \
+  --manifest <相对路径> \
+  --failure-event-id <ID> \
+  --confirmed-by <当前确认人> \
+  --confirm
 ao-work task-run record-ci-remediation \
   --manifest <相对路径> \
   --failure-event-id <ID> \
@@ -49,7 +55,9 @@ ao-work task-run record-ci-remediation \
 
 Skill 只消费结构化返回值并按 `agentic_next_action` 编排。它不直接调用 `gh`、不自行解压、不解析 Runtime 状态文件，也不重置截止时间或修复预算。
 
-只有 GitHub PR 判定为 `required` 才建立两个不可重置的独立门限：首次观察起 5 分钟内必须看到 CI 测试执行；观察到执行后 10 分钟内必须结束。任一门限超时都返回人工介入。测试成功即结束本次运行；测试失败必须先分类，只有唯一记录为 `ci_code_defect` 且 `retry_safe=true` 的代码缺陷事件可以进入受限自动修复。依赖、环境、Runner、Workflow、配置、报告不可信及未知失败均由人工介入，不能消耗修复预算。
+只有 GitHub PR 判定为 `required` 才建立两个不可重置的独立门限：首次观察起 5 分钟内必须看到 CI 测试执行；观察到执行后 10 分钟内必须结束。任一门限超时时，Runtime 返回 `start_timeout` 或 `completion_timeout` 以及当前 PR/检查/Workflow 事实，Skill 必须主动生成用户决策包；它不自动重跑、无限等待或重置门限。
+
+测试失败时，Skill 必须先采集唯一绑定的 Artifact 与 Runner `--log-failed` 脱敏片段，再调用解析器生成统一决策材料。用户报告必须区分可证实根因、仅相关线索和缺失证据，并给出修复、转人工或等待外部恢复等下一步选项。只有用户明确选择“修复当前失败”后，才执行 `authorize-ci-remediation --confirm`。此决策将绑定失败事件、Artifact 摘要、Runner 日志摘要和原工作项授权；随后仍须满足 `ci_code_defect`、范围、验证、受控提交/推送和远端 Head 回读条件，才能记录 remediation 并重新观察 PR。依赖、环境、Runner、Workflow、配置、报告不可信及未知失败均不能进入修复预算。
 
 ## 状态与安全
 
