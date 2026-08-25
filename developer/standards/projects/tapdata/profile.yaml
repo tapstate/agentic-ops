@@ -51,7 +51,7 @@ repositories:
       baseline_repository: tapdata/feishu_robot
       problem_version_repository: tapdata/feishu_robot
       repositories: [tapdata/feishu_robot]
-    - id: automation-test
+    - id: taptest
       baseline_repository: tapdata/t-layer3-test
       problem_version_repository: tapdata/t-layer3-test
       repositories: [tapdata/t-layer3-test]

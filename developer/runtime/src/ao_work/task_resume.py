@@ -128,8 +128,8 @@ def _repository_resume_action(scope: object, fallback: object) -> object:
         return fallback
     phase = str(scope.get("phase") or "")
     actions = {
-        "proposal_recorded": "review_and_confirm_repository_branch_mapping",
-        "mapping_confirmed": "prepare_confirmed_repository_worktree_when_needed",
+        "proposal_recorded": "review_and_confirm_task_domain",
+        "mapping_confirmed": "prepare_confirmed_domain_worktrees",
         "worktrees_active": "resume_work_in_confirmed_repository_worktrees",
         "completion_evidence_readback": "cleanup_completed_task_worktrees",
         "worktrees_cleaned": "none",

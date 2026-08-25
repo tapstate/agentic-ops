@@ -38,7 +38,7 @@ ao-work  -> ~/.agentic-ops/developer/.venv/bin/python -m ao_work
 - stderr 输出中文诊断，不包含 token 和原始敏感响应。
 - 成功退出码为 `0`。
 - 已知业务阻断退出码为 `2`。
-- 能力缺口退出码为 `3`，输出 `code=capability_gap`，允许 Skill 进入 AI 判断和反馈流程。
+- 能力缺口退出码为 `3`，输出 `code=capability_gap`，允许 Skill 进入 AI 判断、反馈和必要的 `agenticops_continuity_decision`，但不代表原子能力已实现。
 - 运行或外部系统失败退出码为 `1`。
 
 通用结果至少包含：
@@ -59,7 +59,7 @@ ao-work  -> ~/.agentic-ops/developer/.venv/bin/python -m ao_work
 
 - `completed`：操作完成且需要的回读已验证。
 - `blocked`：标准门禁明确要求停止。
-- `capability_gap`：现有 Runtime 没有稳定处理能力，需要 AI 分析并形成反馈。
+- `capability_gap`：现有 Runtime 没有稳定处理能力，需要 AI 分析并形成反馈；若它会阻断业务开发，进入人工连续性风险决策，而不是伪造 Runtime 成功或直接终止业务任务。
 - `failed`：运行时、配置、文件或外部服务失败。
 
 ## 5. 外部写入协议
@@ -145,7 +145,7 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 - 同一输入产生稳定 JSON、退出码和失败码。
 - 状态写入中断不会留下被误认为成功的半文件。
 - Jira / GitHub 写入结果不明确时先回读，不重复副作用。
-- `capability_gap` 能被 Skill 识别，并生成任务级反馈而非静默继续。
+- `capability_gap` 能被 Skill 识别，并生成任务级反馈；若会阻断业务开发，还能形成包含故障证据、继续选项、授权边界和剩余风险的 `agenticops_continuity_decision`，未经人工授权不得改走项目原生写入流程。
 - Python 源码或标准资产更新后不需要构建项目自有平台二进制。
 - 两个工作面不会交叉加载规则、授权、配置或状态，多 Jira Connection 的任务身份和凭证保持隔离。
 - Worklog 可以解释每段真实耗时所包含的处理，并能安全回读避免重复登记。
@@ -168,9 +168,9 @@ Python Runtime 提供正常路径的门禁和审计，但不是唯一硬安全�
 
 确认后 Runtime 先对候选配置执行无副作用预检，再准备源码和原子写入工作空间文件；`.agentic-ops/agent.json` 作为初始化完成标记最后写入。Jira 身份、目标 Project 访问、Git 远端访问或本机 `agent_id` 冲突任一检查失败时，不得进入任务执行。
 
-池模式（D-048/AO-92）下，`source_pool_root` 为研发员级必配；`workspace init` 按 Profile 清单准备保留主工作树的普通 clone。接管阶段不把默认仓库固化为任务仓库、不创建工作树，也不写仓库来源快照。接管后先从 Profile 远端固定 SHA 形成 `proposed_repository_branch_map`，研发工程师可增删仓库或修正逐仓 `from_branch`；只有显式确认的 `confirmed_repository_branch_map` 能驱动按需建树。任务工作树路径固定为 `<pool_root>/.worktree/<jira>/<repo>/<normalized-from-branch>`。TapData TM、FE、connector 的 `problem_version_repository` 均为 `tapdata/tapdata`，建议分支继续由 `tap_align_branches.py` remote-only 计划形成，但不得覆盖用户确认。按需建树时只刷新本次仓库、固定确认分支 SHA、创建任务分支并写 per-worktree 身份与精确来源上下文。完成 evidence 评论必须逐仓汇报 Git/验证/远端/PR 回读形成的 `actual_change_repositories`；评论和 Jira 完成态回读后，公开 cleanup 整体预检 dirty、Head、远端承接与精确路径，再非强制移除任务子工作树。源码池成员永不随任务清理。独立 checkout 模式仍受支持并继续严格校验仓库绑定。
+池模式（D-048/AO-92）下，`source_pool_root` 为研发员级必配；`workspace init` 按 Profile 清单准备保留主工作树的普通 clone。接管阶段不把默认仓库固化为任务仓库、不创建工作树，也不写仓库来源快照。接管后从任务事实建议 `product`、`assistant` 或 `taptest` 领域，研发工程师只确认领域；建议错误时可指定领域重新分析。Runtime 从 Profile 远端固定 SHA 形成该领域的 `proposed_repository_branch_map`，确认后固化为 `confirmed_repository_branch_map` 并创建完整领域工作树集合。任务工作树路径固定为 `<pool_root>/.worktree/<jira>/<repo>/<normalized-from-branch>`。product 领域的 `problem_version_repository` 为 `tapdata/tapdata`，逐仓分支由 `tap_align_branches.py` remote-only 计划形成。建树时固定确认分支 SHA、创建逐仓任务分支并写多仓来源上下文；该快照绑定 `repository-scope.json` 内容版本和每个工作树 HEAD，多仓源码证据使用 `owner/repository::relative/path` 定位。L1 执行计划可从该集合选择一个或多个实际变更仓库：单仓保留 `change_repository`，多仓使用 `change_repositories` 并逐仓绑定 scope、验证和 HEAD；同领域其它 prepared 工作树只用于分析。完整任务只确认一次，Runtime 仍按仓库生成 shared schema v1 manifest 和独立 task-run 状态。完成 evidence 评论必须逐仓汇报 Git/验证/远端/PR 回读形成的 `actual_change_repositories`；评论和 Jira 完成态回读后，公开 cleanup 整体预检 dirty、Head、远端承接与精确路径，再非强制移除任务子工作树。源码池成员永不随任务清理。独立 checkout 模式仍受支持并继续严格校验仓库绑定。
 
-现役任务工作树能力仍有明确边界：领域只由 Jira 描述“目标仓库”首行精确选择，章节缺失即回退 `repositories.default`，不会结合其它 Jira 文本、源码命中或路径线索推断领域及识别线索冲突；`task_worktrees` 和来源快照只暴露目标仓库工作树及其 `problem_version`、`target_branch`、路径，没有输出领域内逐仓分支、远端提交和对齐理由。创建失败时 Runtime 会尽力执行 `git worktree remove --force` 回滚本次新建目录，但尚未验证 remove 结果或提供独立回滚失败码；文件或符号链接占用目标路径也尚未归一为结构化冲突。上述边界必须作为后续能力处理，不能由 AIAgent 根据设计文档模拟补齐。
+任务领域建议当前以 Jira 描述“目标仓库”首行和 Profile 默认仓库为主要线索；无法唯一判断时必须由用户确认 `product`、`assistant` 或 `taptest`，不得以分析不准为由阻断。创建失败时 Runtime 会尽力回滚本次新建目录；回滚结果不可信、已有代码事实、文件或符号链接占用目标路径时仍需结构化人工处理，不能覆盖现有代码。
 
 初始化生成的业务工作空间 `AGENTS.md` 固定进入 developer 工作面，不得引用根 `AGENTS.md` 或 `maintainer/`。developer 安装的 `user/identity.yaml` 与 `user/.env` 保存研发员身份和 Jira 凭据；`user/workspace-index.json` 只是可重建冲突索引。新工作空间使用 schema v5，只持 `install_identity_ref`、本地入口绑定和项目事实；schema v4 及更早格式与工作空间 `.agentic-ops/.env` 在凭证读取和联网前失败关闭，不扫描 PATH 或提供隐式迁移。
 

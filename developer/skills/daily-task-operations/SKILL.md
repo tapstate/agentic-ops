@@ -86,6 +86,6 @@ ao-work task resume [--issue-key <KEY> | --agentic-run-id <RUN>]
 - 信息分析、带来源补全和方案分级正常连续推进；固定暂停点是设计审查、代码审查和风险决策。
 - developer 不读取、写入或清理 Agentic Jira Custom Field；运行信息由 Jira Comment 和本地 task state 承载。
 - 无编号接管只列候选，不擅自选择任务；正式接管必须带 key，并由 AIAgent 在内部绑定用户接管指令。
-- 能力目录是「能否调用」的唯一事实源：先 `capability list`，`capability_gap` 停止并按 `next_action` 处理。
+- 能力目录是「能否调用 AO 原子能力」的唯一事实源：先 `capability list`，`capability_gap` 不得调用旧命令；若缺口会阻断业务开发，进入 `agenticops_continuity_decision`，由人工决定等待修复、在限定范围内使用项目认可工具继续或转人工执行。
 - 本 Skill 不替代 `run-task-to-pr-test`（完整任务链路）与 `jira-task-collaboration`（评论/工作日志/描述回写）；需要时按对应 Skill 编排。
 - 不读取 `.env`、凭证或隐藏文件；不在业务工作空间修改 AgenticOps 源头。

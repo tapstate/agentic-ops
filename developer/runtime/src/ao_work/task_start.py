@@ -199,6 +199,10 @@ def record_current_task_source_context(
     confirmed_worktree: Path | None = None,
     confirmed_from_branch: str = "",
     confirmed_task_branch: str = "",
+    confirmed_worktrees: list[dict[str, Any]] | None = None,
+    task_domain: str = "",
+    problem_version_repository: str = "",
+    repository_scope_revision: int = 0,
 ) -> dict[str, Any]:
     description_text = plain_text(issue.description).strip()
     issue_content_sha256 = hashlib.sha256(
@@ -226,7 +230,36 @@ def record_current_task_source_context(
         "agent_id": install_identity["agent_id"],
         "execution_identity": install_identity["execution_identity"],
     }
-    if confirmed_repository is not None and confirmed_worktree is not None:
+    if confirmed_worktrees:
+        entries = [dict(item) for item in confirmed_worktrees]
+        primary = next(
+            (
+                item
+                for item in entries
+                if item.get("repository") == problem_version_repository
+            ),
+            entries[0],
+        )
+        bound_source_root = Path(str(primary["worktree_path"])).resolve()
+        bound_repository = str(primary["repository"])
+        pool_root = resolve_source_pool_root(install_root)
+        task_worktrees = {
+            "issue_key": issue.key,
+            "task_domain": task_domain,
+            "repository": bound_repository,
+            "problem_version_repository": problem_version_repository,
+            "repository_scope_revision": repository_scope_revision,
+            "problem_version": str(primary.get("from_branch") or ""),
+            "target_branch": str(primary.get("task_branch") or ""),
+            "baseline_branch": str(primary.get("from_branch") or ""),
+            "expected_worktree": str(bound_source_root),
+            "checked_path": str(bound_source_root),
+            "pool_root": str(pool_root) if pool_root is not None else "",
+            "entries": entries,
+            "adopted": sum(not bool(item.get("created")) for item in entries),
+            "created": sum(bool(item.get("created")) for item in entries),
+        }
+    elif confirmed_repository is not None and confirmed_worktree is not None:
         pool_root = resolve_source_pool_root(install_root)
         task_worktrees = {
             "issue_key": issue.key,
@@ -292,6 +325,22 @@ def record_current_task_source_context(
         "problem_version": problem_version,
         "target_branch": target_branch,
         "source_root": str(bound_source_root),
+        "repository_scope_revision": repository_scope_revision,
+        "source_roots": (
+            [
+                {
+                    "repository": item.get("repository"),
+                    "source_root": item.get("worktree_path"),
+                    "from_branch": item.get("from_branch"),
+                    "task_branch": item.get("task_branch"),
+                    "head_sha": item.get("worktree_baseline_sha"),
+                }
+                for item in task_worktrees.get("entries", [])
+            ]
+            if isinstance(task_worktrees, dict)
+            and isinstance(task_worktrees.get("entries"), list)
+            else []
+        ),
         "execution_identity": effective_config.get("execution_identity"),
     }
     intake_source = record_task_start_context(

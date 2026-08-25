@@ -188,6 +188,13 @@ class ProjectProfile:
             primary,
         )
 
+    def domain_by_id(self, domain_id: str) -> WorktreeDomain | None:
+        """按公开领域标识解析唯一工作树领域。"""
+        return next(
+            (domain for domain in self.worktree_domains if domain.domain_id == domain_id),
+            None,
+        )
+
     def derive_branch(self, repo: str, from_branch: str, *, primary_repository: str | None = None) -> str | None:
         """分支推导：主仓库/overrides/dev_branches/same_name；返回目标分支，None 表示无法推导。
 

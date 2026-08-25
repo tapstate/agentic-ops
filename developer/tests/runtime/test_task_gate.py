@@ -362,6 +362,137 @@ class TaskGateTest(unittest.TestCase):
         )
         self.assertFalse(result["agentic_next_action"]["requires_authorization"])
 
+    def test_multi_repository_source_binds_evidence_and_solution_head(self) -> None:
+        connector_root = self.workspace_root.parent / "connector-source"
+        connector_root.mkdir()
+        self._git_at(connector_root, "init", "-b", "develop")
+        self._git_at(connector_root, "config", "user.name", "Harsen Test Bot")
+        self._git_at(
+            connector_root, "config", "user.email", "harsen@example.test"
+        )
+        connector_evidence = "# Connector\n\nMySQL 修复位于连接器仓库。\n"
+        (connector_root / "CONNECTOR.md").write_text(
+            connector_evidence, encoding="utf-8"
+        )
+        self._git_at(connector_root, "add", "CONNECTOR.md")
+        self._git_at(connector_root, "commit", "-m", "初始化连接器仓库")
+
+        source_path = Path(str(self.context["source_context_path"]))
+        source = json.loads(source_path.read_text(encoding="utf-8"))
+        workspace_defaults = dict(source["workspace_defaults"])
+        workspace_defaults["repository_scope_revision"] = 7
+        workspace_defaults["source_roots"] = [
+            {
+                "repository": "tapdata/tapdata",
+                "source_root": str(self.source_root),
+                "head_sha": self._git("rev-parse", "HEAD"),
+                "task_branch": "main",
+            },
+            {
+                "repository": "tapdata/tapdata-connectors",
+                "source_root": str(connector_root),
+                "head_sha": self._git_at(connector_root, "rev-parse", "HEAD"),
+                "task_branch": "develop",
+            },
+        ]
+        self.service.record_source_context(
+            issue_key=ISSUE_KEY,
+            agentic_run_id=RUN_ID,
+            issue=source["issue"],
+            workspace_defaults=workspace_defaults,
+            project_profile=source["project_profile"],
+        )
+
+        payload = self._intake_payload()
+        payload["auto_filled_values"][0] = {
+            "field": "change_repository",
+            "value": "tapdata/tapdata-connectors",
+            "source": "business_source_code",
+            "reference": "tapdata/tapdata-connectors::CONNECTOR.md",
+            "evidence_sha256": hashlib.sha256(
+                connector_evidence.encode("utf-8")
+            ).hexdigest(),
+            "rationale": "连接器源码证据明确指出 MySQL 修复所在仓库",
+        }
+        assessed = self.service.assess_intake(
+            issue_key=ISSUE_KEY,
+            agentic_run_id=RUN_ID,
+            input_file=str(
+                self._write_json("multi-source-intake.json", payload).relative_to(
+                    self.workspace_root
+                )
+            ),
+        )
+        revision = assessed["intake"]["source_revision"]
+        self.assertEqual(7, revision["repository_scope_revision"])
+        self.assertEqual(
+            ["tapdata/tapdata", "tapdata/tapdata-connectors"],
+            [item["repository"] for item in revision["repositories"]],
+        )
+
+        solution_path = self._write_solution(
+            "multi-source-solution.json", str(assessed["intake_digest"]), None
+        )
+        solution = json.loads(solution_path.read_text(encoding="utf-8"))
+        solution["scope"] = {
+            "included": [
+                "tapdata/tapdata-connectors::connectors/mysql-connector/**",
+                "tapdata/tapdata::build/version.properties",
+            ],
+            "excluded": ["tapdata/tapdata::dist/**"],
+        }
+        solution["execution_plan"] = {
+            "change_repositories": [
+                "tapdata/tapdata-connectors",
+                "tapdata/tapdata",
+            ],
+            "verification": [
+                {
+                    "id": "connector-unit",
+                    "repository": "tapdata/tapdata-connectors",
+                    "command": ["mvn", "-Dtest=MysqlConnectorTest", "test"],
+                    "working_directory": ".",
+                    "timeout_seconds": 600,
+                },
+                {
+                    "id": "product-build",
+                    "repository": "tapdata/tapdata",
+                    "command": ["mvn", "test"],
+                    "working_directory": ".",
+                    "timeout_seconds": 900,
+                }
+            ],
+            "review_summary": "分别修改连接器和产品版本文件，并逐仓验证后推进到代码审查。",
+        }
+        solution_path.write_text(
+            json.dumps(solution, ensure_ascii=False), encoding="utf-8"
+        )
+        classified = self.service.classify_solution(
+            issue_key=ISSUE_KEY,
+            agentic_run_id=RUN_ID,
+            input_file=str(solution_path.relative_to(self.workspace_root)),
+        )
+        self.assertEqual(
+            self._git_at(connector_root, "rev-parse", "HEAD"),
+            classified["solution"]["head_sha"],
+        )
+        self.assertEqual(
+            {
+                "tapdata/tapdata-connectors": self._git_at(
+                    connector_root, "rev-parse", "HEAD"
+                ),
+                "tapdata/tapdata": self._git("rev-parse", "HEAD"),
+            },
+            classified["solution"]["repository_heads"],
+        )
+
+        current_source = json.loads(source_path.read_text(encoding="utf-8"))
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            self.service._source_evidence_target(current_source, "CONNECTOR.md")
+        self.assertEqual(
+            "intake_evidence_reference_invalid", captured.exception.code
+        )
+
     def _assessed_intake(self) -> str:
         path = self._write_intake("confirmed-intake.json")
         assessed = self.service.assess_intake(
@@ -454,8 +585,11 @@ class TaskGateTest(unittest.TestCase):
         return path
 
     def _git(self, *arguments: str) -> str:
+        return self._git_at(self.source_root, *arguments)
+
+    def _git_at(self, root: Path, *arguments: str) -> str:
         completed = subprocess.run(
-            ["git", "-C", str(self.source_root), *arguments],
+            ["git", "-C", str(root), *arguments],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

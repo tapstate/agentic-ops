@@ -69,6 +69,10 @@ class ConfigTest(unittest.TestCase):
         dev_branches = dict(profile.branch_derivation.dev_branches)
         self.assertEqual("develop", dev_branches["tapdata/tapdata-connectors"])
         self.assertEqual("develop", dev_branches["tapdata/tapdata-connectors-enterprise"])
+        self.assertIsNone(profile.domain_by_id("automation-test"))
+        taptest = profile.domain_by_id("taptest")
+        self.assertIsNotNone(taptest)
+        self.assertEqual(("tapdata/t-layer3-test",), taptest.repositories)
 
     def prepare(self, root: Path) -> tuple[Path, Path]:
         install = root / "install"
