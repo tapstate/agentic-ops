@@ -115,7 +115,12 @@ output:
     required_fields:
       - executor
       - action
+      - operation_id
+      - command_argv
+      - command_line
+      - bound_arguments
       - required_inputs
+      - input_artifacts
       - allowed_operations
       - requires_authorization
       - stop_workflow

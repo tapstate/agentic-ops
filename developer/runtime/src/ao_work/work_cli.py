@@ -99,7 +99,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     repository_confirm = repository_actions.add_parser("confirm")
     repository_confirm.add_argument("--issue-key", required=True)
-    repository_confirm.add_argument("--mapping-file", required=True)
+    repository_confirm.add_argument(
+        "--task-domain", required=True, choices=("product", "assistant", "taptest")
+    )
     repository_confirm.add_argument("--confirm", action="store_true")
     task_worktrees = task_commands.add_parser("worktrees")
     worktree_actions = task_worktrees.add_subparsers(dest="action", required=True)
@@ -204,29 +206,23 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
         )
         return success(operation, workplane=workspace.workplane, **state)
     if args.group == "task" and args.command == "repositories" and args.action == "confirm":
-        content = read_workspace_outbound_file(
-            workspace.root,
-            args.mapping_file,
-            label="仓库分支确认文件",
-        )
-        try:
-            mapping = json.loads(content)
-        except json.JSONDecodeError as error:
+        scope = store.inspect(args.issue_key).get("repository_scope")
+        if not isinstance(scope, dict):
             raise RuntimeErrorResult(
-                code="repository_mapping_invalid",
-                message=f"仓库分支确认文件不是有效 JSON：{error}",
+                code="repository_proposal_missing",
+                message="任务尚无仓库分支分析建议",
                 status="blocked",
                 exit_code=EXIT_BLOCKED,
-                required_human_action="请修正确认文件后重试",
-            ) from error
-        if not isinstance(mapping, dict):
-            raise RuntimeErrorResult(
-                code="repository_mapping_invalid",
-                message="仓库分支确认文件必须是 JSON 对象",
-                status="blocked",
-                exit_code=EXIT_BLOCKED,
-                required_human_action="请修正确认文件后重试",
+                required_human_action="请先执行 ao-work task repositories assess",
             )
+        mapping = {
+            "issue_key": args.issue_key,
+            "agentic_run_id": scope.get("agentic_run_id"),
+            "task_domain": args.task_domain,
+            "problem_version": scope.get("problem_version"),
+            "problem_version_repository": scope.get("problem_version_repository"),
+            "problem_version_sha": scope.get("problem_version_sha"),
+        }
         state = execute_repository_confirm(
             workspace,
             install_root,

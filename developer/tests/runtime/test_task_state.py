@@ -283,6 +283,14 @@ class TaskStateTest(unittest.TestCase):
                 ],
             )
             self.assertEqual("mapping_confirmed", result["repository_scope"]["phase"])
+            task_dir = Path(temporary) / ".agentic-ops" / "tasks" / IDENTITY.issue_key
+            self.assertEqual(
+                (task_dir / "proposals" / "repository-scope.json").resolve(),
+                Path(result["path"]),
+            )
+            confirmation = read_json(Path(result["confirmation_path"]))
+            self.assertEqual(IDENTITY.issue_key, confirmation["issue_key"])
+            self.assertEqual(confirmed, confirmation["confirmed_repository_branch_map"])
             updated = store.update_repository_worktree(
                 IDENTITY.issue_key,
                 IDENTITY.agentic_run_id,
@@ -347,6 +355,8 @@ class TaskStateTest(unittest.TestCase):
             task_dir = root / ".agentic-ops" / "tasks" / IDENTITY.issue_key
             for name in ("task.json", "progress.json", "sync.json", "decisions.ndjson", "journal.ndjson"):
                 self.assertTrue((task_dir / name).is_file(), name)
+            for name in ("proposals", "confirmations"):
+                self.assertTrue((task_dir / name).is_dir(), name)
             journal = (task_dir / "journal.ndjson").read_text(encoding="utf-8").splitlines()
             self.assertEqual(1, len(journal))
             self.assertEqual("task_init", json.loads(journal[0])["operation"])

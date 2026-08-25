@@ -120,7 +120,7 @@ ao-work takeover TAP-123
 ao-work takeover   # 无编号：只读列出候选供研发工程师选择
 ao-work task resume [--issue-key TAP-123 | --agentic-run-id <run-id>]
 ao-work task repositories assess --issue-key TAP-123 [--task-domain product|assistant|taptest]
-ao-work task repositories confirm --issue-key TAP-123 --mapping-file <相对JSON> --confirm
+ao-work task repositories confirm --issue-key TAP-123 --task-domain <product|assistant|taptest> --confirm
 ao-work task worktrees prepare --issue-key TAP-123
 ao-work jira comment plan --issue-key TAP-123 --idempotency-key <key> --category <category> --content-file <path> --plan-file .agentic-ops/tasks/TAP-123/runs/<agentic_run_id>/jira-plans/<name>.json
 ao-work jira comment apply --plan-file <managed-path> --confirm-plan-id <plan-id> --authorization-reference <reference>

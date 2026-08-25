@@ -83,7 +83,12 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
         next_action = error.agentic_next_action
         self.assertEqual("human", next_action["executor"])
         self.assertEqual("confirm_repository_branch_override", next_action["action"])
-        self.assertEqual(["jira_description_plan"], next_action["allowed_operations"])
+        self.assertEqual(["jira_description"], next_action["allowed_operations"])
+        self.assertEqual(
+            ["jira", "description", "plan", "--issue-key", "TAP-123"],
+            next_action["command_argv"],
+        )
+        self.assertEqual({"issue_key": "TAP-123"}, next_action["bound_arguments"])
         self.assertNotIn("jira_inspect", next_action["allowed_operations"])
         self.assertIn("task_domain", next_action["required_inputs"])
         self.assertTrue(next_action["requires_authorization"])
@@ -202,7 +207,20 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
         )
         self.assertEqual(["confirmation_template"], next_action["required_inputs"])
         self.assertEqual(
-            ["task_repositories_confirm"], next_action["allowed_operations"]
+            ["repository_branch_confirm"], next_action["allowed_operations"]
+        )
+        self.assertEqual(
+            [
+                "task",
+                "repositories",
+                "confirm",
+                "--issue-key",
+                "TAPSTATE-87",
+                "--task-domain",
+                "product",
+                "--confirm",
+            ],
+            next_action["command_argv"],
         )
         self.assertTrue(next_action["requires_authorization"])
         self.assertTrue(next_action["stop_workflow"])
@@ -213,8 +231,10 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
             _repository_next_action(
                 executor="human",
                 action="review_and_confirm_task_domain",
+                operation_id="repository_branch_confirm",
+                command_argv=("task", "repositories", "confirm"),
+                bound_arguments={},
                 required_inputs=("confirmation_template",),
-                allowed_operations=("task_repositories_confirm",),
                 requires_authorization=True,
                 stop_workflow=True,
                 reason="请确认关系表。",
@@ -222,8 +242,10 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
             _repository_next_action(
                 executor="human",
                 action="confirm_task_domain",
+                operation_id="repository_branch_confirm",
+                command_argv=("task", "repositories", "confirm"),
+                bound_arguments={},
                 required_inputs=("task_domain",),
-                allowed_operations=("task_repositories_confirm",),
                 requires_authorization=True,
                 stop_workflow=True,
                 reason="请确认完整关系表。",
@@ -231,8 +253,10 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
             _repository_next_action(
                 executor="ai",
                 action="prepare_confirmed_domain_worktrees",
+                operation_id="task_worktree_prepare",
+                command_argv=("task", "worktrees", "prepare"),
+                bound_arguments={},
                 required_inputs=(),
-                allowed_operations=("task_worktrees_prepare",),
                 requires_authorization=False,
                 stop_workflow=False,
                 reason="按需创建工作树。",
@@ -240,8 +264,10 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
             _repository_next_action(
                 executor="ai",
                 action="assess_task_intake",
+                operation_id="task_intake_assess",
+                command_argv=("task", "intake", "assess"),
+                bound_arguments={},
                 required_inputs=("issue_key", "agentic_run_id", "intake_input_file"),
-                allowed_operations=("task_intake_assess",),
                 requires_authorization=False,
                 stop_workflow=False,
                 reason="继续信息分析。",
@@ -281,7 +307,10 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
                 "proposed_repository_branch_map": [proposal_row],
             },
         }
-        store.confirm_repository_mapping.return_value = {"path": "/state/scope.json"}
+        store.confirm_repository_mapping.return_value = {
+            "path": "/state/proposals/repository-scope.json",
+            "confirmation_path": "/state/confirmations/repository-branch.json",
+        }
         mapping = {
             "issue_key": "TAPSTATE-87",
             "agentic_run_id": "run-TAPSTATE-87",
@@ -334,6 +363,9 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
                 )
 
         confirmed = store.confirm_repository_mapping.call_args.args[2]
+        self.assertEqual(
+            "/state/confirmations/repository-branch.json", result["confirmation_path"]
+        )
         self.assertEqual(
             "repository_mapping_override_unsupported", captured.exception.code
         )

@@ -9,8 +9,9 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from ao_work.work_cli import build_parser, main
+from ao_work.cli_common import ArgumentParserError
 from ao_work.output import RuntimeErrorResult
+from ao_work.work_cli import build_parser, main
 
 
 class DeveloperCliBoundaryTest(unittest.TestCase):
@@ -101,6 +102,35 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
 
     def test_install_root_is_not_a_public_option(self) -> None:
         self.assertNotIn("--install-root", self._all_option_strings(build_parser()))
+
+    def test_repository_confirmation_uses_explicit_domain_not_external_mapping_file(self) -> None:
+        parser = build_parser()
+        arguments = parser.parse_args(
+            (
+                "task",
+                "repositories",
+                "confirm",
+                "--issue-key",
+                "TAPSTATE-87",
+                "--task-domain",
+                "product",
+                "--confirm",
+            )
+        )
+        self.assertEqual("product", arguments.task_domain)
+        self.assertTrue(arguments.confirm)
+        with self.assertRaises(ArgumentParserError):
+            parser.parse_args(
+                (
+                    "task",
+                    "repositories",
+                    "confirm",
+                    "--issue-key",
+                    "TAPSTATE-87",
+                    "--mapping-file",
+                    "mapping.json",
+                )
+            )
 
     def test_auth_routes_to_workspace_setup_without_preflight(self) -> None:
         stdout = io.StringIO()
