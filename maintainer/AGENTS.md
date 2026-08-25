@@ -12,6 +12,8 @@
 
 工作面由本入口确定。AI 不得自行判断、推断或通过命令参数切换工作面。
 
+AgenticOps 自身问题不得直接阻塞业务开发。维护实现若与业务连续性规则、既有安全边界或审计控制冲突，必须形成结构化人工决策，说明故障证据、继续方案、授权范围、审计损失和剩余风险；不得让 maintainer 会话进入业务工作空间代替开发，也不得以维护修复为由长期挂起可由人工限定授权继续的业务任务。
+
 处理 AO Jira 工作项时，用户操作统一理解为“接管 `<AO-KEY>`”，公开命令固定为 `ao-maint takeover <AO-KEY>`。Runtime 自动区分新接管、恢复、接纳存量和阻断；恢复或接纳存量必须向用户明文说明并留下审计。不得用 Atlassian Connector、直接 REST API 或 Shell 网络请求绕过 maintainer Runtime。
 
 `ao-maint` 的全部 Jira 任务操作固定只允许 AO 项目，包括 inspect、takeover、建卡、评论、Description、Worklog 和状态流转。非 AO 的 issue key、project key、父任务、计划文件或远端回读必须在读取凭证、网络请求、计划落盘或决策审计前以 `maintainer_jira_project_scope_mismatch` 阻断；Service 还必须独立重复校验，不能只依赖 CLI。`jira auth` 只管理 maintainer 本地凭证并明示 `allowed_project_keys=["AO"]`，不能扩大为 TAP 等业务项目权限；业务项目任务必须在对应 developer 工作空间使用 `ao-work`。

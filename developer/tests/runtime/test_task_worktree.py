@@ -331,6 +331,25 @@ class TapdataProfileBranchDerivationTest(unittest.TestCase):
                     self.assertEqual((repository,), tuple(entry.repository for entry in plan.entries))
                     self.assertEqual(expected_branch, plan.entries[0].branch)
 
+    def test_confirmed_task_domain_overrides_inaccurate_repository_suggestion(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
+        profile = load_project_profile(repository_root, "tapdata")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            plan = plan_task_worktrees(
+                pool_root=Path(temporary),
+                profile=profile,
+                issue_key="TAP-123",
+                description_sections={},
+                task_domain="taptest",
+            )
+
+        self.assertEqual("tapdata/t-layer3-test", plan.target_repository)
+        self.assertEqual(
+            ("tapdata/t-layer3-test",),
+            tuple(entry.repository for entry in plan.entries),
+        )
+
     def test_product_alignment_spec_is_separate_from_problem_version_path(self) -> None:
         repository_root = Path(__file__).resolve().parents[3]
         profile = load_project_profile(repository_root, "tapdata")

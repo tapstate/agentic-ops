@@ -98,7 +98,7 @@ ao-work capability list
 ao-work capability show <operation>
 ```
 
-目录的 `status` 只能是 `implemented` 或 `capability_gap`。只有 `implemented` 且 `commands` 明确列出的路径可以调用；`capability_gap`、未收录操作、目录无效或只有 Operation Contract 时必须停止，并执行中文 `next_action`。目录中的 `visibility=internal` 操作只允许版本化 Skill 编排，不得让 AI 把 `task init` 说成 Jira 接管，也不得把 `report write` 说成 Jira 回写或任务完成。
+目录的 `status` 只能是 `implemented` 或 `capability_gap`。只有 `implemented` 且 `commands` 明确列出的路径可以调用；`capability_gap`、未收录操作、目录无效或只有 Operation Contract 时不得调用或模拟对应 AO 命令。若 AO 自身问题会阻断业务开发，必须进入 `agenticops_continuity_decision`，展示故障证据、有限继续方案、授权边界、审计损失和风险，由人工决定等待修复、限定使用项目认可工具继续或转人工执行。目录中的 `visibility=internal` 操作只允许版本化 Skill 编排，不得让 AI 把 `task init` 说成 Jira 接管，也不得把 `report write` 说成 Jira 回写或任务完成。
 
 所有能力命令共用同一安装身份门禁：Runtime 从正在执行的 `ao_work` 模块位置自定位 developer managed clone，不能通过 CLI 参数或环境变量切换安装根。自定义安装目录必须从其自身 `bin/ao-work` 启动；不得把另一目录伪装成能力、Profile 或共享协议来源。
 
@@ -119,6 +119,9 @@ ao-work jira inspect --issue-key TAP-123
 ao-work takeover TAP-123
 ao-work takeover   # 无编号：只读列出候选供研发工程师选择
 ao-work task resume [--issue-key TAP-123 | --agentic-run-id <run-id>]
+ao-work task repositories assess --issue-key TAP-123 [--task-domain product|assistant|taptest]
+ao-work task repositories confirm --issue-key TAP-123 --mapping-file <相对JSON> --confirm
+ao-work task worktrees prepare --issue-key TAP-123
 ao-work jira comment plan --issue-key TAP-123 --idempotency-key <key> --category <category> --content-file <path> --plan-file .agentic-ops/tasks/TAP-123/runs/<agentic_run_id>/jira-plans/<name>.json
 ao-work jira comment apply --plan-file <managed-path> --confirm-plan-id <plan-id> --authorization-reference <reference>
 ao-work jira comment readback --issue-key TAP-123 --idempotency-key <key> --plan-file <managed-path> --confirm-plan-id <plan-id>
@@ -173,7 +176,7 @@ ao-work --workspace-root /path/to/workspace workspace init \
 
 可选参数：
 
-- `--source-root`：缺省为池模式（源码语义 = 池根，任务工作树在接管时创建）；显式传入非池根路径则为普通源码模式。
+- `--source-root`：缺省为池模式（源码语义 = 池根，任务工作树在接管后的领域确认阶段创建）；显式传入非池根路径则为普通源码模式。
 - `--confirm-existing-config`：仅在已有不同完整配置将被覆盖时提供，否则 `existing_config_confirmation_required` 阻断。交互模式先显示字段差异并只询问一次；新建、半初始化修复和相同配置不确认。
 
 > 维护约定：本节示例与 `developer/skills/initialize-project-workspace/SKILL.md` 的非交互示例随 `workspace init` 参数变更同步修正，不得只改实现不改文档。

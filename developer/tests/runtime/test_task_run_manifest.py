@@ -8,7 +8,7 @@ from pathlib import Path
 
 from ao_work.task_run.manifest import TaskRunManifestService
 from ao_work.task_run.protocol import digest
-from ao_work.task_run.service import TaskRunProtocol
+from ao_work.task_run.service import TaskRunProtocol, repository_delivery_directory
 from ao_work.output import RuntimeErrorResult
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.task_state.io import read_json
@@ -23,6 +23,15 @@ TASK_BRANCH = "harsen-mini-test-bot/TAP-12289/develop"
 
 
 class TaskRunManifestTest(unittest.TestCase):
+    def test_repository_delivery_directory_is_collision_resistant_and_bounded(self) -> None:
+        first = repository_delivery_directory("owner/repo--part")
+        second = repository_delivery_directory("owner--repo/part")
+        self.assertNotEqual(first, second)
+        self.assertLessEqual(
+            len(repository_delivery_directory(f"{'o' * 120}/{'r' * 120}")),
+            109,
+        )
+
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -33,6 +42,8 @@ class TaskRunManifestTest(unittest.TestCase):
         self.default_source.mkdir()
         self.worktree = root / "task-worktree"
         self.worktree.mkdir()
+        self.analysis_worktree = root / "analysis-worktree"
+        self.analysis_worktree.mkdir()
         self.install = root / "install"
         configure_install_authorization(
             self.install,
@@ -46,6 +57,21 @@ class TaskRunManifestTest(unittest.TestCase):
         self._git("commit", "-m", "初始化 connector")
         self._git("checkout", "-b", TASK_BRANCH)
         self.head = self._git("rev-parse", "HEAD")
+        self._git_at(self.analysis_worktree, "init", "-b", "develop")
+        self._git_at(self.analysis_worktree, "config", "user.name", "Harsen Test Bot")
+        self._git_at(
+            self.analysis_worktree,
+            "config",
+            "user.email",
+            "harsen-test-bot@example.com",
+        )
+        (self.analysis_worktree / "README.md").write_text(
+            "# product analysis\n", encoding="utf-8"
+        )
+        self._git_at(self.analysis_worktree, "add", "README.md")
+        self._git_at(self.analysis_worktree, "commit", "-m", "初始化分析仓库")
+        self._git_at(self.analysis_worktree, "checkout", "-b", "agent/TAP-12289/develop")
+        self.analysis_head = self._git_at(self.analysis_worktree, "rev-parse", "HEAD")
 
         profile = self.install / "developer/standards/projects/tapdata/profile.yaml"
         profile.parent.mkdir(parents=True)
@@ -111,6 +137,14 @@ class TaskRunManifestTest(unittest.TestCase):
             "worktree_path": str(self.worktree.resolve()),
             "worktree_status": "not_created",
         }
+        analysis_row = {
+            "repository": "tapdata/tapdata",
+            "from_branch": "develop",
+            "confirmed_branch_sha": self.analysis_head,
+            "task_branch": "agent/TAP-12289/develop",
+            "worktree_path": str(self.analysis_worktree.resolve()),
+            "worktree_status": "not_created",
+        }
         self.store.record_repository_proposal(
             ISSUE_KEY,
             RUN_ID,
@@ -118,10 +152,12 @@ class TaskRunManifestTest(unittest.TestCase):
                 "problem_version": "develop",
                 "problem_version_repository": REPOSITORY,
                 "problem_version_sha": self.head,
-                "proposed_repository_branch_map": [row],
+                "proposed_repository_branch_map": [row, analysis_row],
             },
         )
-        self.store.confirm_repository_mapping(ISSUE_KEY, RUN_ID, [row], [])
+        self.store.confirm_repository_mapping(
+            ISSUE_KEY, RUN_ID, [row, analysis_row], []
+        )
         self.store.update_repository_worktree(
             ISSUE_KEY,
             RUN_ID,
@@ -130,6 +166,16 @@ class TaskRunManifestTest(unittest.TestCase):
                 "worktree_status": "prepared",
                 "worktree_path": str(self.worktree.resolve()),
                 "worktree_baseline_sha": self.head,
+            },
+        )
+        self.store.update_repository_worktree(
+            ISSUE_KEY,
+            RUN_ID,
+            "tapdata/tapdata",
+            {
+                "worktree_status": "prepared",
+                "worktree_path": str(self.analysis_worktree.resolve()),
+                "worktree_baseline_sha": self.analysis_head,
             },
         )
         run_root = state / "tasks" / ISSUE_KEY / "runs" / RUN_ID / "gates"
@@ -288,9 +334,115 @@ class TaskRunManifestTest(unittest.TestCase):
         output_root = self.workspace_root / "inputs" / "agentic-ops" / ISSUE_KEY / RUN_ID
         self.assertFalse(output_root.exists())
 
+    def test_multi_repository_plan_creates_isolated_delivery_manifests(self) -> None:
+        run_root = (
+            self.workspace_root
+            / ".agentic-ops"
+            / "tasks"
+            / ISSUE_KEY
+            / "runs"
+            / RUN_ID
+            / "gates"
+        )
+        source_path = run_root / "source-context.json"
+        source = read_json(source_path)
+        source.pop("context_digest")
+        source.pop("observed_at")
+        source["workspace_defaults"]["source_roots"] = [
+            {
+                "repository": REPOSITORY,
+                "source_root": str(self.worktree.resolve()),
+                "head_sha": self.head,
+                "task_branch": TASK_BRANCH,
+            },
+            {
+                "repository": "tapdata/tapdata",
+                "source_root": str(self.analysis_worktree.resolve()),
+                "head_sha": self.analysis_head,
+                "task_branch": "agent/TAP-12289/develop",
+            },
+        ]
+        source["context_digest"] = digest(source)
+        source["observed_at"] = "2026-08-25T00:00:00+00:00"
+        source_path.write_text(
+            json.dumps(source, ensure_ascii=False), encoding="utf-8"
+        )
+
+        solution_path = run_root / "solution.json"
+        solution = read_json(solution_path)
+        solution.pop("solution_digest")
+        solution.pop("classified_at")
+        solution["source_context_digest"] = source["context_digest"]
+        solution["repository_heads"] = {
+            REPOSITORY: self.head,
+            "tapdata/tapdata": self.analysis_head,
+        }
+        solution["scope"] = {
+            "included": [
+                f"{REPOSITORY}::connectors/mysql-connector/src/main/java/**",
+                "tapdata/tapdata::build/version.properties",
+            ],
+            "excluded": [f"{REPOSITORY}::connectors/postgres-connector/**"],
+        }
+        solution["execution_plan"] = {
+            "change_repositories": [REPOSITORY, "tapdata/tapdata"],
+            "verification": [
+                {
+                    "id": "mysql-unit",
+                    "repository": REPOSITORY,
+                    "command": ["mvn", "--batch-mode", "--offline", "test"],
+                    "working_directory": ".",
+                    "timeout_seconds": 600,
+                },
+                {
+                    "id": "product-build",
+                    "repository": "tapdata/tapdata",
+                    "command": ["mvn", "--batch-mode", "--offline", "verify"],
+                    "working_directory": ".",
+                    "timeout_seconds": 900,
+                },
+            ],
+            "review_summary": "逐仓修改和验证，并分别推进到代码审查。",
+            "normalization_changes": [],
+        }
+        solution["solution_digest"] = digest(solution)
+        solution["classified_at"] = "2026-08-25T00:01:00+00:00"
+        solution_path.write_text(
+            json.dumps(solution, ensure_ascii=False), encoding="utf-8"
+        )
+
+        prepared = self.service.prepare(ISSUE_KEY)
+        self.assertEqual(2, len(prepared["confirmation_package"]["deliveries"]))
+        authorized = self.service.authorize(
+            ISSUE_KEY,
+            confirmed_by="研发工程师",
+            confirm=True,
+        )
+        self.assertEqual("task_run_open_each", authorized["agentic_next_action"])
+        self.assertEqual(2, len(authorized["deliveries"]))
+
+        protocol = TaskRunProtocol(
+            self.workspace,
+            install_root=self.install,
+            lock_timeout=1.0,
+        )
+        protocol_roots: set[str] = set()
+        for delivery in authorized["deliveries"]:
+            manifest = read_json(self.workspace_root / delivery["manifest_path"])
+            self.assertEqual(delivery["repository"], manifest["repository"]["slug"])
+            self.assertNotIn("repository", manifest["verification"][0])
+            self.assertNotIn("::", manifest["scope"]["included"][0])
+            opened = protocol.open(delivery["manifest_path"])
+            protocol_roots.add(opened["protocol_root"])
+        self.assertEqual(2, len(protocol_roots))
+
     def _git(self, *arguments: str) -> str:
+        return self._git_at(self.worktree, *arguments)
+
+    @staticmethod
+    def _git_at(root: Path, *arguments: str) -> str:
         completed = subprocess.run(
-            ["git", "-C", str(self.worktree), *arguments],
+            ["git", "-C", str(root), *arguments],
             capture_output=True,
             text=True,
             check=True,
