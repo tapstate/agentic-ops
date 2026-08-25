@@ -92,6 +92,7 @@ class TaskRunManifestService:
                 "allowed_operations": ["task_run_authorize"],
                 "requires_authorization": True,
                 "stop_workflow": True,
+                "ownership_effect": "none",
                 "reason": "请一次审查完整设计与连续执行授权；无需确认内部摘要或文件路径",
             },
         }

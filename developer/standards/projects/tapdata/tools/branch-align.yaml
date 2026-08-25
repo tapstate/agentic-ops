@@ -72,7 +72,8 @@ hard_rules:
   - keep_current_must_block_when_checkout_is_detached_head
   - tapdata_license_must_use_main_when_tapdata_branch_is_develop
   - common_lib_must_be_inferred_from_tapdata_pluginKit_version
-  - connectors_must_match_common_lib_branch_or_block
+  - connectors_must_be_resolved_independently_from_the_same_tapdata_version
+  - unresolved_connector_plugin_version_or_release_branch_must_block
   - unresolved_enterprise_or_web_branch_must_block_apply
   - command_must_not_push_git
   - command_must_not_write_jira
