@@ -74,6 +74,14 @@ class JiraTransportError(Exception):
         self.response_received = response_received
 
 
+def _supported_comment_body(value: Any) -> bool:
+    return isinstance(value, str) or (
+        isinstance(value, dict)
+        and value.get("type") == "doc"
+        and isinstance(value.get("content"), list)
+    )
+
+
 class _RejectRedirects(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> None:
         return None
@@ -299,6 +307,7 @@ class JiraClient:
                 author=user_identifier(item.get("author")),
                 created=str(item.get("created", "")),
                 standalone_lines=standalone_paragraph_lines(item.get("body")),
+                body_supported=_supported_comment_body(item.get("body")),
             )
             for item in items
             if isinstance(item, dict)
@@ -324,6 +333,7 @@ class JiraClient:
             author=user_identifier(payload.get("author")),
             created=str(payload.get("created", "")),
             standalone_lines=standalone_paragraph_lines(payload.get("body")),
+            body_supported=_supported_comment_body(payload.get("body")),
         )
 
     def add_comment(self, issue_key: str, markdown: str) -> str:

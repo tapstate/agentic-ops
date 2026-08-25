@@ -15,6 +15,7 @@ from ao_work.jira.service import JiraService
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_start import _description_sections, record_current_task_source_context
 from ao_work.task_state import TaskStore
+from ao_work.task_facts import collect_task_facts
 from ao_work.task_state.io import read_json
 from ao_work.task_state.locking import TaskLock
 from ao_work.task_worktree import (
@@ -140,7 +141,8 @@ def execute_repository_assess(
     task_domain: str | None = None,
 ) -> dict[str, Any]:
     """生成仓库/分支分析建议；建议没有建树或编码权限。"""
-    context, account, issue = _live_context(workspace, install_root, issue_key)
+    context, account, issue, client = _live_context(workspace, install_root, issue_key)
+    task_facts = collect_task_facts(client, issue, context.profile)
     task = store.inspect(issue_key)["task"]
     agentic_run_id = str(task["agentic_run_id"])
     pool_root = resolve_source_pool_root(install_root)
@@ -280,6 +282,7 @@ def execute_repository_assess(
         "repository_scope_revision": (
             recorded.get("repository_scope", {}).get("content_version", 0)
         ),
+        "task_facts": task_facts,
         "agentic_next_action": _repository_next_action(
             executor="human",
             action="review_and_confirm_task_domain",
@@ -302,7 +305,7 @@ def execute_repository_confirm(
     confirm: bool,
 ) -> dict[str, Any]:
     """验证用户修正后的完整关系表；只有 --confirm 才持久化。"""
-    context, _, _ = _live_context(workspace, install_root, issue_key)
+    context, _, _, _ = _live_context(workspace, install_root, issue_key)
     state = store.inspect(issue_key)
     task = state["task"]
     scope = state.get("repository_scope")
@@ -571,7 +574,8 @@ def execute_worktree_prepare(
     issue_key: str,
 ) -> dict[str, Any]:
     """按确认领域创建、回读并绑定完整工作树集合。"""
-    context, account, issue = _live_context(workspace, install_root, issue_key)
+    context, account, issue, client = _live_context(workspace, install_root, issue_key)
+    task_facts = collect_task_facts(client, issue, context.profile)
     state = store.inspect(issue_key)
     task = state["task"]
     scope = state.get("repository_scope")
@@ -807,6 +811,7 @@ def execute_worktree_prepare(
         repository_scope_revision=int(
             refreshed_scope.get("content_version") or 0
         ),
+        task_facts=task_facts,
     )
     return {
         "issue_key": issue_key,
@@ -961,7 +966,7 @@ def execute_worktree_cleanup(
     issue_key: str,
 ) -> dict[str, Any]:
     """完成态后整体预检并非强制移除精确登记的任务工作树。"""
-    context, _, issue = _live_context(workspace, install_root, issue_key)
+    context, _, issue, _ = _live_context(workspace, install_root, issue_key)
     if context.profile.status_mapping.get(issue.status) != "completed":
         raise _blocked(
             "worktree_cleanup_status_forbidden",
@@ -1236,7 +1241,7 @@ def _live_context(
     workspace: Workspace,
     install_root: Path,
     issue_key: str,
-) -> tuple[Any, dict[str, Any], Any]:
+) -> tuple[Any, dict[str, Any], Any, JiraClient]:
     context = load_jira_context(workspace, install_root)
     email, token = context.require_credentials()
     client = JiraClient(
@@ -1257,7 +1262,7 @@ def _live_context(
             "当前工作空间 Jira 账户不是任务经办人",
             "请先按 Jira 项目流程核对任务所有权",
         )
-    return context, account, issue
+    return context, account, issue, client
 
 
 def _task_branch(actor: str, issue_key: str, from_branch: str) -> str:

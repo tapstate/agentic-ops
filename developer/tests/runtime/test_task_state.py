@@ -181,6 +181,7 @@ class TaskStateTest(unittest.TestCase):
                         SimpleNamespace(profile=SimpleNamespace(status_mapping={"Done": "completed"})),
                         {},
                         SimpleNamespace(status="Done"),
+                        object(),
                     ),
                 ),
                 mock.patch(

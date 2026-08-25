@@ -26,7 +26,8 @@ from ao_work.task_state.io import append_ndjson, atomic_write_json, atomic_write
 from ao_work.task_state.locking import TaskLock
 from ao_work.workspace import Workspace
 
-CI_PROTOCOL = "ci_validation_v2"
+CI_PROTOCOL = "ci_validation_v3"
+RUNNER_LOG_EXCERPT_BYTES = 65_536
 TextRunner = Callable[[list[str], Path, int | float], subprocess.CompletedProcess[str]]
 BytesRunner = Callable[[list[str], Path, int | float, int], subprocess.CompletedProcess[bytes]]
 Now = Callable[[], datetime]
@@ -207,6 +208,18 @@ class CiRuntime:
                 ci_status = "pending"
             else:
                 ci_status = self._aggregate(checks)
+            if (
+                ci_status == "waiting_to_start"
+                and attempt["start_deadline_at"] is not None
+                and now >= self._timestamp(attempt["start_deadline_at"])
+            ):
+                ci_status = "start_timeout"
+            if (
+                ci_status == "pending"
+                and attempt["completion_deadline_at"] is not None
+                and now >= self._timestamp(attempt["completion_deadline_at"])
+            ):
+                ci_status = "completion_timeout"
             attempt["last_observed_at"] = now.isoformat()
             attempt["ci_status"] = ci_status
             attempt["required_checks"] = checks
@@ -235,30 +248,12 @@ class CiRuntime:
                         "请进入风险决策并由研发工程师决定人工处理或拆分任务",
                     )
             self._write_observation(paths, state, attempt, now)
-            if (
-                ci_status == "waiting_to_start"
-                and attempt["start_deadline_at"] is not None
-                and now >= self._timestamp(attempt["start_deadline_at"])
-            ):
-                raise blocked(
-                    "ci_start_timeout",
-                    "当前 Head 在 5 分钟内没有观察到 CI 测试执行",
-                    "请由研发工程师人工核对 PR、Workflow 触发条件和 Runner",
-                )
-            if (
-                ci_status == "pending"
-                and attempt["completion_deadline_at"] is not None
-                and now >= self._timestamp(attempt["completion_deadline_at"])
-            ):
-                raise blocked(
-                    "ci_completion_timeout",
-                    "CI 测试已执行，但在 10 分钟内没有结束",
-                    "请由研发工程师人工核对 Workflow Run、队列和 Runner",
-                )
             next_action = {
                 "waiting_to_start": "probe_ci",
                 "pending": "probe_ci",
                 "failed": "fetch_ci_artifact",
+                "start_timeout": "analyze_ci_timeout",
+                "completion_timeout": "analyze_ci_timeout",
                 "passed": "none",
                 "not_required": "none",
             }[ci_status]
@@ -266,6 +261,8 @@ class CiRuntime:
                 "current_stage": (
                     "completed"
                     if ci_status in {"passed", "not_required"}
+                    else "ci_decision"
+                    if ci_status in {"start_timeout", "completion_timeout"}
                     else "ci_validation"
                 ),
                 "ci_status": ci_status,
@@ -286,7 +283,93 @@ class CiRuntime:
                 "remediation_attempts_remaining": (
                     config["max_remediation_attempts"] - state["remediation_attempts_used"]
                 ),
+                "decision_required": ci_status
+                in {"start_timeout", "completion_timeout"},
                 "agentic_next_action": next_action,
+            }
+
+    def fetch_runner_log(self, manifest: Mapping[str, Any]) -> dict[str, Any]:
+        """采集唯一失败 Run 的脱敏失败日志；超时则返回已知的不可用原因。"""
+
+        paths = self._paths(manifest)
+        repository = manifest["repository"]
+        root = Path(repository["root"])
+        with TaskLock(paths["lock"], timeout=self.lock_timeout):
+            state = self._state(paths, manifest)
+            attempt = self._current_attempt(state)
+            existing = attempt.get("runner_log")
+            if isinstance(existing, dict):
+                return {
+                    **existing,
+                    "downloaded": False,
+                    "agentic_next_action": self._runner_log_next_action(attempt),
+                }
+            if attempt["ci_status"] in {"start_timeout", "completion_timeout"}:
+                runner_log = {
+                    "available": False,
+                    "reason": (
+                        "workflow_run_not_observed"
+                        if attempt["ci_status"] == "start_timeout"
+                        else "workflow_run_not_completed"
+                    ),
+                    "workflow_run_id": attempt.get("workflow_run_id"),
+                    "size_bytes": 0,
+                    "sha256": None,
+                    "excerpt": "",
+                    "truncated": False,
+                }
+            elif attempt["ci_status"] != "failed" or not isinstance(
+                attempt.get("workflow_run_id"), int
+            ):
+                raise blocked(
+                    "ci_runner_log_not_ready",
+                    "当前 CI Attempt 没有可唯一绑定的失败 Workflow Run",
+                    "请先对当前 Head 执行 task-run probe-ci",
+                )
+            else:
+                run_id = attempt["workflow_run_id"]
+                result = self.run_text(
+                    [
+                        "gh",
+                        "run",
+                        "view",
+                        str(run_id),
+                        "--repo",
+                        repository["slug"],
+                        "--log-failed",
+                    ],
+                    root,
+                    120,
+                )
+                if result.returncode != 0:
+                    runner_log = {
+                        "available": False,
+                        "reason": "github_runner_log_read_failed",
+                        "workflow_run_id": run_id,
+                        "size_bytes": 0,
+                        "sha256": None,
+                        "excerpt": "",
+                        "truncated": False,
+                    }
+                else:
+                    raw = result.stdout
+                    excerpt, truncated = _redact_runner_log(raw)
+                    runner_log = {
+                        "available": bool(raw.strip()),
+                        "reason": "ok" if raw.strip() else "github_runner_log_empty",
+                        "workflow_run_id": run_id,
+                        "size_bytes": len(raw.encode("utf-8")),
+                        "sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+                        "excerpt": excerpt,
+                        "truncated": truncated,
+                    }
+            reject_sensitive_content(runner_log)
+            attempt["runner_log"] = runner_log
+            atomic_write_json(paths["state"], state)
+            return {
+                **runner_log,
+                "downloaded": True,
+                "agentic_next_action": self._runner_log_next_action(attempt),
             }
 
     def fetch_artifact(self, manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -350,7 +433,11 @@ class CiRuntime:
             artifact_id = metadata["id"]
             existing = attempt.get("artifact")
             if isinstance(existing, dict) and existing.get("id") == artifact_id:
-                return {**existing, "downloaded": False, "agentic_next_action": "parse_ci_report"}
+                return {
+                    **existing,
+                    "downloaded": False,
+                    "agentic_next_action": "fetch_ci_runner_log",
+                }
             result = self.run_bytes(
                 ["gh", "api", f"repos/{repository['slug']}/actions/artifacts/{artifact_id}/zip"],
                 root,
@@ -416,7 +503,11 @@ class CiRuntime:
             attempt["artifact"] = artifact
             atomic_write_json(paths["state"], state)
             atomic_write_json(attempt_dir / "metadata.json", artifact)
-            return {**artifact, "downloaded": True, "agentic_next_action": "parse_ci_report"}
+            return {
+                **artifact,
+                "downloaded": True,
+                "agentic_next_action": "fetch_ci_runner_log",
+            }
 
     def parse_report(self, manifest: Mapping[str, Any]) -> dict[str, Any]:
         config = self._config(manifest)
@@ -432,6 +523,12 @@ class CiRuntime:
                     "请先执行 task-run fetch-ci-artifact",
                 )
             existing = attempt.get("report")
+            if not isinstance(attempt.get("runner_log"), dict):
+                raise blocked(
+                    "ci_runner_log_not_ready",
+                    "失败报告解析前必须先采集当前 Workflow Run 的 Runner 日志事实",
+                    "请执行 task-run fetch-ci-runner-log；日志不可读时也会保留不可用原因",
+                )
             expected_extracted = paths["attempts"] / attempt["attempt_id"] / "extracted"
             expected_relative = str(expected_extracted.relative_to(self.workspace.root))
             if artifact.get("extracted_path") != expected_relative:
@@ -469,8 +566,9 @@ class CiRuntime:
                     )
                 return {
                     **existing,
+                    "runner_log": attempt["runner_log"],
                     "parsed": False,
-                    "agentic_next_action": "classify_ci_failure",
+                    "agentic_next_action": "present_ci_failure_decision",
                 }
             attempt["failure_event_id"] = failure_event_id
             attempt["report"] = report
@@ -478,7 +576,76 @@ class CiRuntime:
             atomic_write_json(attempt_dir / "normalized-report.json", report)
             atomic_write_text(attempt_dir / "summary.md", report_summary(report))
             atomic_write_json(paths["state"], state)
-            return {**report, "parsed": True, "agentic_next_action": "classify_ci_failure"}
+            return {
+                **report,
+                "runner_log": attempt["runner_log"],
+                "parsed": True,
+                "agentic_next_action": "present_ci_failure_decision",
+            }
+
+    def authorize_remediation(
+        self,
+        manifest: Mapping[str, Any],
+        *,
+        failure_event_id: str,
+        confirmed_by: str,
+    ) -> dict[str, Any]:
+        """记录用户针对当前失败证据作出的“修复”决定，不执行代码或外部写入。"""
+
+        if not confirmed_by.strip() or len(confirmed_by) > 128:
+            raise blocked(
+                "ci_remediation_confirmation_invalid",
+                "CI 修复决策缺少有效确认人",
+                "请由当前研发工程师明确确认是否修复当前失败",
+            )
+        paths = self._paths(manifest)
+        with TaskLock(paths["lock"], timeout=self.lock_timeout):
+            state = self._state(paths, manifest)
+            attempt = self._current_attempt(state)
+            report = attempt.get("report")
+            runner_log = attempt.get("runner_log")
+            if (
+                attempt["ci_status"] != "failed"
+                or not isinstance(report, dict)
+                or not isinstance(runner_log, dict)
+                or attempt.get("failure_event_id") != failure_event_id
+            ):
+                raise blocked(
+                    "ci_remediation_decision_not_ready",
+                    "当前失败尚未形成绑定 Artifact 报告和 Runner 日志的决策包",
+                    "请依次完成失败 Artifact、Runner 日志和结构化报告采集",
+                )
+            decisions = state["remediation_decisions"]
+            candidate = {
+                "failure_event_id": failure_event_id,
+                "decision": "repair",
+                "confirmed_by": confirmed_by.strip(),
+                "confirmed_at": self._utc_now().isoformat(),
+                "authorization_reference": manifest["authorization"]["reference"],
+                "report_sha256": report["report_sha256"],
+                "artifact_sha256": report["artifact_sha256"],
+                "runner_log_sha256": runner_log.get("sha256"),
+            }
+            existing = decisions.get(failure_event_id)
+            if isinstance(existing, dict):
+                if {
+                    key: existing.get(key)
+                    for key in candidate
+                    if key != "confirmed_at"
+                } != {
+                    key: candidate.get(key)
+                    for key in candidate
+                    if key != "confirmed_at"
+                }:
+                    raise blocked(
+                        "ci_remediation_decision_conflict",
+                        "同一 CI 失败已经绑定不同的用户修复决策",
+                        "请保留现有决策；证据或范围变化时必须重新生成 CI Attempt",
+                    )
+                return {**existing, "authorized": False, "agentic_next_action": "repair_ci_code"}
+            decisions[failure_event_id] = candidate
+            atomic_write_json(paths["state"], state)
+            return {**candidate, "authorized": True, "agentic_next_action": "repair_ci_code"}
 
     def record_remediation(
         self,
@@ -534,6 +701,18 @@ class CiRuntime:
                     "ci_retry_exhausted",
                     "CI 修复预算已耗尽",
                     "请进入风险决策并由研发工程师决定后续处理",
+                )
+            decision = state["remediation_decisions"].get(failure_event_id)
+            if (
+                not isinstance(decision, dict)
+                or decision.get("decision") != "repair"
+                or decision.get("authorization_reference")
+                != manifest["authorization"]["reference"]
+            ):
+                raise blocked(
+                    "ci_remediation_decision_missing",
+                    "当前 CI 失败尚无用户确认的修复决策",
+                    "请先基于 Artifact 和 Runner 日志向用户给出决策包；仅在用户明确决定修复后记录修复授权",
                 )
             classifications = [
                 (index, event)
@@ -694,7 +873,7 @@ class CiRuntime:
         if paths["state"].exists():
             return self._state(paths, manifest)
         state = {
-            "schema_version": 2,
+            "schema_version": 3,
             "protocol": CI_PROTOCOL,
             "issue_key": manifest["issue"]["key"],
             "agentic_run_id": manifest["agent"]["agentic_run_id"],
@@ -703,6 +882,7 @@ class CiRuntime:
             "attempts": {},
             "remediation_attempts_used": 0,
             "remediations": {},
+            "remediation_decisions": {},
         }
         atomic_write_json(paths["state"], state)
         return state
@@ -716,13 +896,14 @@ class CiRuntime:
             )
         state = read_json(paths["state"])
         if (
-            state.get("schema_version") != 2
+            state.get("schema_version") != 3
             or state.get("protocol") != CI_PROTOCOL
             or state.get("issue_key") != manifest["issue"]["key"]
             or state.get("agentic_run_id") != manifest["agent"]["agentic_run_id"]
             or state.get("config_sha256") != digest(self._config(manifest))
             or not isinstance(state.get("attempts"), dict)
             or not isinstance(state.get("remediations"), dict)
+            or not isinstance(state.get("remediation_decisions"), dict)
             or isinstance(state.get("remediation_attempts_used"), bool)
             or not isinstance(state.get("remediation_attempts_used"), int)
         ):
@@ -765,6 +946,14 @@ class CiRuntime:
                 "required_checks": attempt["required_checks"],
                 "workflow_run_ids": [run["database_id"] for run in attempt["workflow_runs"]],
             },
+        )
+
+    @staticmethod
+    def _runner_log_next_action(attempt: Mapping[str, Any]) -> str:
+        return (
+            "parse_ci_report"
+            if attempt.get("ci_status") == "failed"
+            else "analyze_ci_timeout"
         )
 
     def _workflow_runs(
@@ -1507,6 +1696,30 @@ def _redact(value: str) -> str:
     for pattern in _REDACTIONS:
         text = pattern.sub("[REDACTED]", text)
     return text or "empty"
+
+
+def _redact_runner_log(value: str) -> tuple[str, bool]:
+    """保留可诊断的失败日志片段，但绝不保存原始 Runner 输出。"""
+
+    remaining = RUNNER_LOG_EXCERPT_BYTES
+    lines: list[str] = []
+    truncated = False
+    for raw_line in value.replace("\x00", " ").splitlines():
+        line = raw_line.rstrip()
+        for pattern in _REDACTIONS:
+            line = pattern.sub("[REDACTED]", line)
+        encoded = line.encode("utf-8", errors="replace")
+        separator = 1 if lines else 0
+        if len(encoded) + separator > remaining:
+            truncated = True
+            break
+        lines.append(line)
+        remaining -= len(encoded) + separator
+    if not truncated and len("\n".join(lines).encode("utf-8")) < len(
+        value.replace("\x00", " ").encode("utf-8")
+    ):
+        truncated = True
+    return "\n".join(lines), truncated
 
 
 def _unsafe_archive(detail: str) -> Exception:
