@@ -210,6 +210,13 @@ class TaskRunProtocol:
         )
         return self._ci_runtime().fetch_artifact(manifest)
 
+    def fetch_ci_runner_log(self, manifest_value: str) -> dict[str, Any]:
+        manifest = self._load_open_manifest(manifest_value)
+        self._require_probe_permission(
+            manifest, "github_ci_read", "fetch-ci-runner-log"
+        )
+        return self._ci_runtime().fetch_runner_log(manifest)
+
     def parse_ci_report(self, manifest_value: str) -> dict[str, Any]:
         manifest = self._load_open_manifest(manifest_value)
         return self._ci_runtime().parse_report(manifest)
@@ -231,6 +238,27 @@ class TaskRunProtocol:
             new_head_sha=new_head_sha,
             authorization_reference=authorization_reference,
             completed_events=self._completed_events(manifest),
+        )
+
+    def authorize_ci_remediation(
+        self,
+        manifest_value: str,
+        *,
+        failure_event_id: str,
+        confirmed_by: str,
+        confirm: bool,
+    ) -> dict[str, Any]:
+        if not confirm:
+            raise blocked(
+                "ci_remediation_confirmation_required",
+                "记录 CI 修复决策必须显式传入 --confirm",
+                "请在用户明确决定修复当前失败后重新执行，并保留当前 Artifact 与 Runner 日志绑定",
+            )
+        manifest = self._load_open_manifest(manifest_value)
+        return self._ci_runtime().authorize_remediation(
+            manifest,
+            failure_event_id=failure_event_id,
+            confirmed_by=confirmed_by,
         )
 
     def probe_prohibition_baseline(self, manifest_value: str) -> dict[str, Any]:

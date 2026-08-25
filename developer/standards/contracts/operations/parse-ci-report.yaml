@@ -1,22 +1,24 @@
 operation: parse_ci_report
 workplane: developer
-version: 1
-purpose: 把 Maven Failsafe Artifact 解析为脱敏、结构化且摘要绑定的失败报告。
+version: 2
+purpose: 把 Maven Failsafe Artifact 与已采集的 Runner 失败日志组合为脱敏、结构化且摘要绑定的失败决策证据。
 task_type: ci_check
 allowed_stages: [ci_validation]
 required_inputs: [manifest]
 preconditions:
   - artifact_must_be_runtime_verified
   - extracted_artifact_must_still_match_recorded_file_digests
+  - runner_log_fact_must_be_collected_before_decision
 output:
   failure_event_id: {type: string}
   failed_tests: {type: array}
   report_sha256: {type: string}
+  runner_log: {type: object}
   requires_failure_classification: {type: boolean}
   parsed: {type: boolean}
   agentic_next_action: {type: string}
 failure:
-  codes: [ci_artifact_not_ready, ci_artifact_unsafe, ci_artifact_digest_mismatch, ci_artifact_state_conflict, ci_report_unsupported, ci_report_parse_failed]
+  codes: [ci_artifact_not_ready, ci_runner_log_not_ready, ci_artifact_unsafe, ci_artifact_digest_mismatch, ci_artifact_state_conflict, ci_report_unsupported, ci_report_parse_failed]
 side_effects:
   - write_only_normalized_report_and_summary
   - must_not_modify_business_source

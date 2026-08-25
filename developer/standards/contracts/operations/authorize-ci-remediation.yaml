@@ -1,0 +1,30 @@
+operation: authorize_ci_remediation
+workplane: developer
+version: 1
+purpose: 记录用户基于当前 Artifact 与 Runner 日志决策包作出的修复决定；该操作本身不修改业务代码、不提交、不推送。
+task_type: ci_remediation
+allowed_stages: [ci_decision]
+required_inputs: [manifest, failure_event_id, confirmed_by, confirm]
+preconditions:
+  - current_attempt_must_be_failed
+  - artifact_report_and_runner_log_must_bind_failure_event
+  - user_must_explicitly_decide_repair
+output:
+  failure_event_id: {type: string}
+  decision: {const: repair}
+  confirmed_by: {type: string}
+  confirmed_at: {type: string}
+  authorized: {type: boolean}
+  agentic_next_action: {const: repair_ci_code}
+failure:
+  codes: [ci_remediation_confirmation_required, ci_remediation_confirmation_invalid, ci_remediation_decision_not_ready, ci_remediation_decision_conflict]
+side_effects:
+  - write_only_current_task_run_ci_state
+  - must_not_modify_git_or_github
+human_gate:
+  required: true
+  decision: repair_current_ci_failure
+retry_policy:
+  retryable: false
+  max_attempts: 0
+  redo_from_stage: ci_decision
