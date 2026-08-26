@@ -115,6 +115,34 @@ class RepositoryConfirmationStore:
             self._write(issue_key, confirmation_id, record)
             return self.reference(record)
 
+    def inspect(
+        self,
+        issue_key: str,
+        confirmation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """返回只读审计摘要；公开 API 绝不返回或接收受管文件路径。"""
+        with self._lock(issue_key):
+            if confirmation_id is not None:
+                record = self._read(issue_key, confirmation_id)
+                if record.get("issue_key") != issue_key:
+                    raise _blocked("repository_confirmation_identity_mismatch", "确认 ID 不属于当前任务")
+                return {"confirmation": self.audit_summary(record)}
+
+            directory = self._path(issue_key, f"rc_{'0' * 32}").parent
+            self._validate_directory(directory)
+            if not directory.exists():
+                return {"confirmation_records": [], "record_count": 0}
+            records: list[dict[str, Any]] = []
+            for candidate in directory.iterdir():
+                if not candidate.is_file() or not CONFIRMATION_ID_PATTERN.fullmatch(candidate.stem) or candidate.suffix != ".json":
+                    continue
+                record = self._read(issue_key, candidate.stem)
+                if record.get("issue_key") != issue_key:
+                    raise _blocked("repository_confirmation_identity_mismatch", "确认记录不属于当前任务")
+                records.append(self.audit_summary(record))
+            records.sort(key=lambda item: (str(item["created_at"]), str(item["confirmation_id"])), reverse=True)
+            return {"confirmation_records": records, "record_count": len(records)}
+
     @staticmethod
     def reference(record: Mapping[str, Any]) -> dict[str, Any]:
         return {
@@ -124,6 +152,22 @@ class RepositoryConfirmationStore:
             "repository_scope_revision": record["repository_scope_revision"],
             "proposal_digest": record["proposal_digest"],
             "status": record["status"],
+        }
+
+    @staticmethod
+    def audit_summary(record: Mapping[str, Any]) -> dict[str, Any]:
+        status = str(record["status"])
+        return {
+            "confirmation_id": record["confirmation_id"],
+            "issue_key": record["issue_key"],
+            "agentic_run_id": record["agentic_run_id"],
+            "repository_scope_revision": record["repository_scope_revision"],
+            "proposal_digest": record["proposal_digest"],
+            "task_domain": record["task_domain"],
+            "status": status,
+            "created_at": record["created_at"],
+            "consumed_at": record["consumed_at"],
+            "description": _audit_description(record, status),
         }
 
     def _read(self, issue_key: str, confirmation_id: str) -> dict[str, Any]:
@@ -156,6 +200,11 @@ class RepositoryConfirmationStore:
         validate_workspace_managed_path(self.workspace_root, path)
         require_safe_regular_file(path, allow_missing=allow_missing)
 
+    def _validate_directory(self, directory: Path) -> None:
+        validate_workspace_managed_path(self.workspace_root, directory)
+        if directory.exists() and not directory.is_dir():
+            raise _blocked("repository_confirmation_invalid", "确认记录目录无效")
+
     def _lock(self, issue_key: str) -> TaskLock:
         return TaskLock(self.workspace_root / ".agentic-ops" / "tasks" / issue_key / ".repository-confirmations.lock", timeout=self.lock_timeout)
 
@@ -178,6 +227,14 @@ def _scope_binding(scope: Mapping[str, Any]) -> tuple[int, str]:
     }
     encoded = json.dumps(proposal, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return revision, hashlib.sha256(encoded).hexdigest()
+
+
+def _audit_description(record: Mapping[str, Any], status: str) -> str:
+    domain = record.get("task_domain") or "尚未确认领域"
+    return (
+        f"仓库领域确认记录：状态为 {status}，任务领域为 {domain}，"
+        f"范围版本为 {record['repository_scope_revision']}。"
+    )
 
 
 def _blocked(code: str, message: str) -> RuntimeErrorResult:

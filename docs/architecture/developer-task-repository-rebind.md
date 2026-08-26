@@ -65,6 +65,17 @@ ao-work task repositories confirm \
 
 `confirm` 只接收 `confirmation_id` 与人工确认的 `task_domain`。没有 `--confirm` 时只展示任务领域、自动推导的逐仓分支和计划工作树；带 `--confirm` 时 Runtime 先原子写入、按 ID 回读并消费确认工件，再保存领域及 `confirmed_repository_branch_map`。确认动作不建树；随后 `task worktrees prepare` 一次创建完整领域工作树集合。多份确认工件可并存；任务、运行、范围版本或建议摘要变化时旧 ID 失效。同一 ID 同领域重复提交幂等，不同领域失败关闭。
 
+人工对账只使用 Runtime 的只读渠道，不读取或编辑受管文件：
+
+```sh
+ao-work task repositories confirmations inspect --issue-key TAP-12620
+ao-work task repositories confirmations inspect \
+  --issue-key TAP-12620 \
+  --confirmation-id rc_<确认 ID>
+```
+
+不传 `--confirmation-id` 时返回当前任务的确认 ID 列表及中文描述；传入 ID 时返回该条记录的完整审计摘要，包括状态、任务运行、范围版本、建议摘要、领域和创建/消费时间。Runtime 不返回受管路径，保证目录迁移不影响人工对账命令。
+
 旧 `--mapping-file` 仅在兼容期接受工作空间普通 JSON 文件，并明确提示迁移；它绝不放宽 `.agentic-ops/`、`.git`、隐藏文件或凭证文件的通用读取限制。
 
 每个 repository 必须：

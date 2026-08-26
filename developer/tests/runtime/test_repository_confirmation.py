@@ -71,6 +71,36 @@ class RepositoryConfirmationStoreTest(unittest.TestCase):
 
         self.assertEqual("repository_confirmation_already_consumed", captured.exception.code)
 
+    def test_inspect_lists_auditable_records_and_reads_one_by_id(self) -> None:
+        first = self.store.create("TAP-123", "run-TAP-123", self.scope)
+        second = self.store.create("TAP-123", "run-older", self.scope)
+        self.store.consume(
+            "TAP-123", "run-TAP-123", first["confirmation_id"], self.scope, "product"
+        )
+
+        listed = self.store.inspect("TAP-123")
+
+        self.assertEqual(2, listed["record_count"])
+        self.assertEqual(
+            {first["confirmation_id"], second["confirmation_id"]},
+            {item["confirmation_id"] for item in listed["confirmation_records"]},
+        )
+        first_summary = next(
+            item
+            for item in listed["confirmation_records"]
+            if item["confirmation_id"] == first["confirmation_id"]
+        )
+        self.assertEqual("consumed", first_summary["status"])
+        self.assertEqual("product", first_summary["task_domain"])
+        self.assertIn("状态为 consumed", first_summary["description"])
+        self.assertNotIn("path", first_summary)
+
+        inspected = self.store.inspect("TAP-123", second["confirmation_id"])
+
+        self.assertEqual(second["confirmation_id"], inspected["confirmation"]["confirmation_id"])
+        self.assertEqual("recorded", inspected["confirmation"]["status"])
+        self.assertEqual("run-older", inspected["confirmation"]["agentic_run_id"])
+
 
 if __name__ == "__main__":
     unittest.main()

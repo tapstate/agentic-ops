@@ -122,6 +122,22 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
         self.assertEqual("product", parsed.task_domain)
         self.assertIsNone(parsed.mapping_file)
 
+    def test_repository_confirmation_inspect_lists_or_reads_by_id(self) -> None:
+        parser = build_parser()
+
+        listed = parser.parse_args(
+            ["task", "repositories", "confirmations", "inspect", "--issue-key", "TAP-123"]
+        )
+        inspected = parser.parse_args(
+            [
+                "task", "repositories", "confirmations", "inspect", "--issue-key", "TAP-123",
+                "--confirmation-id", "rc_" + "b" * 32,
+            ]
+        )
+
+        self.assertIsNone(listed.confirmation_id)
+        self.assertEqual("rc_" + "b" * 32, inspected.confirmation_id)
+
     def test_auth_routes_to_workspace_setup_without_preflight(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()
