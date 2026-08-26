@@ -215,7 +215,7 @@ cd ~/agentic-ops-tapdata
 
 这些自然语言需求不代表对应自动化都已实现。AI 必须先查询能力目录；任务释放、部分 PR / CI 协作、分支对齐和完成审计等仍可能返回 `capability_gap`，应由研发工程师按目录指引处理。正式接管必须使用统一 takeover，不能用内部 `task init` 或 `task start` 冒充；developer 不提供 Agentic Custom Field 写入。
 
-接管完成后，Runtime 不会先按默认仓库创建工作树。标准顺序是：`task repositories assess` 从任务建议 `product`、`assistant` 或 `taptest` 领域；建议不准时用 `--task-domain` 重新分析；研发工程师只确认领域，`task repositories confirm --confirm` 固化领域和 Runtime 自动推导的逐仓分支；随后调用 `task worktrees prepare --issue-key <KEY>` 一次创建完整领域工作树集合。AI 在该集合中分析，并由 L1 执行计划选择一个或多个实际变更仓库；同领域其它工作树不会因为未修改而阻断交付。完整任务只进行一次设计与连续授权确认，Runtime 随后逐仓生成独立 manifest、提交、验证和 PR。任务完成 evidence 评论必须列出 `actual_change_repositories`；评论与 Jira 完成态回读后，使用 `task worktrees cleanup` 安全清理子工作树。源码池主工作树只作分析源，不由任务流程修改或清理。
+接管完成后，Runtime 不会先按默认仓库创建工作树。标准顺序是：`task repositories assess` 从任务建议 `product`、`assistant` 或 `taptest` 领域；建议不准时用 `--task-domain` 重新分析；研发工程师只确认领域，使用 `task repositories confirm --task-domain <领域> --confirm` 固化领域和 Runtime 自动推导的逐仓分支。建议与确认资料分别受控保存于 `.agentic-ops/tasks/<KEY>/proposals/` 和 `confirmations/`，不再从外部 mapping 文件读取；随后调用 `task worktrees prepare --issue-key <KEY>` 一次创建完整领域工作树集合。AI 在该集合中分析，并由 L1 执行计划选择一个或多个实际变更仓库；同领域其它工作树不会因为未修改而阻断交付。完整任务只进行一次设计与连续授权确认，Runtime 随后逐仓生成独立 manifest、提交、验证和 PR。任务完成 evidence 评论必须列出 `actual_change_repositories`；评论与 Jira 完成态回读后，使用 `task worktrees cleanup` 安全清理子工作树。源码池主工作树只作分析源，不由任务流程修改或清理。
 
 ## 6. AO问题反馈与快速改进
 

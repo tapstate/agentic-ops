@@ -137,15 +137,47 @@ def human_notice(takeover_kind: str, result: str) -> str:
 def takeover_next_action(
     action: str,
     *,
+    issue_key: str | None = None,
     executor: str = "ao_work",
     stop_workflow: bool = False,
     requires_authorization: bool = False,
     reason: str,
 ) -> dict[str, Any]:
+    if not issue_key:
+        raise ValueError("接管下一步必须绑定 issue_key")
+    if action == "assess_repository_branch_mapping":
+        command_argv = [
+            "task",
+            "repositories",
+            "assess",
+            "--issue-key",
+            issue_key,
+        ]
+        return {
+            "executor": executor,
+            "action": action,
+            "operation_id": "repository_branch_assess",
+            "command_argv": command_argv,
+            "command_line": f"ao-work {' '.join(command_argv)}",
+            "bound_arguments": {"issue_key": issue_key},
+            "required_inputs": [],
+            "input_artifacts": [],
+            "allowed_operations": ["repository_branch_assess"],
+            "requires_authorization": requires_authorization,
+            "stop_workflow": stop_workflow,
+            "ownership_effect": "none",
+            "reason": reason,
+        }
+    command_argv = ["takeover", issue_key]
     return {
         "executor": executor,
         "action": action,
+        "operation_id": "takeover_task",
+        "command_argv": command_argv,
+        "command_line": f"ao-work {' '.join(command_argv)}",
+        "bound_arguments": {"issue_key": issue_key},
         "required_inputs": [],
+        "input_artifacts": [],
         "allowed_operations": ["takeover_task"] if not stop_workflow else [],
         "requires_authorization": requires_authorization,
         "stop_workflow": stop_workflow,

@@ -107,6 +107,8 @@ class TaskStore:
             try:
                 (staging_dir / "reports").mkdir()
                 (staging_dir / "feedback").mkdir()
+                (staging_dir / "proposals").mkdir()
+                (staging_dir / "confirmations").mkdir()
                 (staging_dir / "runs" / identity.agentic_run_id / "evidence").mkdir(parents=True)
                 atomic_write_json(staging_dir / "task.json", task)
                 atomic_write_json(staging_dir / "progress.json", progress)
@@ -147,7 +149,7 @@ class TaskStore:
             task = read_json(task_dir / "task.json")
             progress = read_json(task_dir / "progress.json")
             sync = read_json(task_dir / "sync.json")
-            repository_scope_path = task_dir / "repository-scope.json"
+            repository_scope_path = self._repository_scope_path(task_dir)
             repository_scope = (
                 read_json(repository_scope_path)
                 if repository_scope_path.is_file()
@@ -188,7 +190,7 @@ class TaskStore:
                     exit_code=EXIT_BLOCKED,
                     required_human_action="请使用任务当前绑定的 agentic_run_id",
                 )
-            path = task_dir / "repository-scope.json"
+            path = self._repository_scope_path(task_dir)
             self._validate_managed_path(path)
             existing = read_json(path) if path.is_file() else None
             if isinstance(existing, dict) and isinstance(
@@ -274,7 +276,7 @@ class TaskStore:
                     exit_code=EXIT_BLOCKED,
                     required_human_action="请使用任务当前绑定的 agentic_run_id",
                 )
-            path = task_dir / "repository-scope.json"
+            path = self._repository_scope_path(task_dir)
             self._validate_managed_path(path)
             require_safe_regular_file(path)
             scope = read_json(path)
@@ -308,6 +310,21 @@ class TaskStore:
             )
             scope["content_version"] = int(scope.get("content_version") or 0) + 1
             atomic_write_json(path, scope)
+            confirmation_path = task_dir / "confirmations" / "repository-branch.json"
+            self._validate_managed_path(confirmation_path)
+            atomic_write_json(
+                confirmation_path,
+                {
+                    "schema_version": 1,
+                    "issue_key": issue_key,
+                    "agentic_run_id": agentic_run_id,
+                    "task_domain": scope.get("task_domain"),
+                    "repository_scope_content_version": scope["content_version"],
+                    "confirmed_repository_branch_map": confirmed,
+                    "mapping_differences": differences,
+                    "confirmed_at": scope["updated_at"],
+                },
+            )
             append_ndjson(
                 task_dir / "journal.ndjson",
                 {
@@ -324,7 +341,12 @@ class TaskStore:
                     },
                 },
             )
-            return {"created": True, "repository_scope": scope, "path": str(path)}
+            return {
+                "created": True,
+                "repository_scope": scope,
+                "path": str(path),
+                "confirmation_path": str(confirmation_path),
+            }
 
     def update_repository_worktree(
         self,
@@ -348,7 +370,7 @@ class TaskStore:
                     exit_code=EXIT_BLOCKED,
                     required_human_action="请使用任务当前绑定的 agentic_run_id",
                 )
-            path = task_dir / "repository-scope.json"
+            path = self._repository_scope_path(task_dir)
             self._validate_managed_path(path)
             require_safe_regular_file(path)
             scope = read_json(path)
@@ -426,7 +448,7 @@ class TaskStore:
                     exit_code=EXIT_BLOCKED,
                     required_human_action="请使用任务当前绑定的 agentic_run_id",
                 )
-            path = task_dir / "repository-scope.json"
+            path = self._repository_scope_path(task_dir)
             self._validate_managed_path(path)
             require_safe_regular_file(path)
             scope = read_json(path)
@@ -495,7 +517,7 @@ class TaskStore:
                     exit_code=EXIT_BLOCKED,
                     required_human_action="请使用任务当前绑定的 agentic_run_id",
                 )
-            path = task_dir / "repository-scope.json"
+            path = self._repository_scope_path(task_dir)
             self._validate_managed_path(path)
             require_safe_regular_file(path)
             scope = read_json(path)
@@ -859,6 +881,7 @@ class TaskStore:
             "human_notice": human_notice(takeover_kind, "in_progress"),
             "agentic_next_action": takeover_next_action(
                 "ensure_takeover_comment",
+                issue_key=issue_key,
                 reason="稳定接管意图已落盘，继续确保受管 Comment 存在并回读",
             ),
             "failure_code": None,
@@ -979,6 +1002,7 @@ class TaskStore:
                     "human_notice": human_notice(operation["takeover_kind"], "in_progress"),
                     "agentic_next_action": takeover_next_action(
                         "verify_takeover_status",
+                        issue_key=issue_key,
                         reason="受管 Comment 已回读验证，继续执行或回读目标 Status",
                     ),
                     "failure_code": None,
@@ -1054,6 +1078,7 @@ class TaskStore:
                     "human_notice": human_notice(operation["takeover_kind"], "in_progress"),
                     "agentic_next_action": takeover_next_action(
                         "finalize_takeover_locally",
+                        issue_key=issue_key,
                         reason="Jira Comment 和 Status 已回读验证，继续完成本地收口",
                     ),
                     "failure_code": None,
@@ -1170,6 +1195,7 @@ class TaskStore:
                     "human_notice": human_notice(operation["takeover_kind"], "completed"),
                     "agentic_next_action": takeover_next_action(
                         "assess_repository_branch_mapping",
+                        issue_key=issue_key,
                         executor="ai",
                         reason="接管本地状态已最终收口，先分析并由用户确认仓库分支关系",
                     ),
@@ -1352,6 +1378,7 @@ class TaskStore:
                     ),
                     "agentic_next_action": takeover_next_action(
                         "assess_repository_branch_mapping",
+                        issue_key=issue_key,
                         executor="ai",
                         reason="legacy 接管事实已验证并迁移，先分析并由用户确认仓库分支关系",
                     ),
@@ -1408,6 +1435,7 @@ class TaskStore:
                     "human_notice": human_notice(operation["takeover_kind"], result),
                     "agentic_next_action": takeover_next_action(
                         recovery_action,
+                        issue_key=issue_key,
                         executor="human" if result == "blocked" else "ao_work",
                         stop_workflow=True,
                         requires_authorization=True,
@@ -1673,6 +1701,7 @@ class TaskStore:
                     ),
                     "agentic_next_action": takeover_next_action(
                         "recover_local_takeover_state",
+                        issue_key=str(operation["issue_key"]),
                         stop_workflow=True,
                         requires_authorization=True,
                         reason="接管快照、业务阶段和事件未完成交叉收口，需要先恢复本地状态",
@@ -1794,6 +1823,14 @@ class TaskStore:
         task_dir = self.state_root / "tasks" / issue_key
         self._validate_managed_path(task_dir)
         return task_dir
+
+    def _repository_scope_path(self, task_dir: Path) -> Path:
+        """新任务把分析建议放入 proposals，旧任务仅读取原位置。"""
+        proposal_path = task_dir / "proposals" / "repository-scope.json"
+        legacy_path = task_dir / "repository-scope.json"
+        path = proposal_path if proposal_path.exists() or not legacy_path.exists() else legacy_path
+        self._validate_managed_path(path)
+        return path
 
     def _validate_issue_key(self, issue_key: str) -> None:
         if not isinstance(issue_key, str) or not ISSUE_KEY_PATTERN.fullmatch(issue_key):

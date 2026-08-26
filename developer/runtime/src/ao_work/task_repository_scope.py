@@ -14,7 +14,7 @@ from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.jira.service import JiraService
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_start import _description_sections, record_current_task_source_context
-from ao_work.task_state import TaskStore
+from ao_work.task_state import RepositoryConfirmationStore, TaskStore
 from ao_work.task_facts import collect_task_facts
 from ao_work.task_state.io import read_json
 from ao_work.task_state.locking import TaskLock
@@ -318,32 +318,44 @@ def execute_repository_assess(
         agentic_run_id,
         proposal,
     )
+    recorded_scope = recorded["repository_scope"]
+    if isinstance(recorded_scope.get("confirmed_repository_branch_map"), list):
+        return {
+            "issue_key": issue_key,
+            "agentic_run_id": agentic_run_id,
+            **proposal,
+            "proposal_authority": "already_confirmed",
+            "repository_scope_revision": recorded_scope.get("content_version", 0),
+            "task_facts": task_facts,
+            "agentic_next_action": _repository_next_action(
+                executor="ai",
+                action="prepare_confirmed_domain_worktrees",
+                allowed_operations=("task_worktrees_prepare",),
+                requires_authorization=False,
+                stop_workflow=False,
+                reason="当前仓库领域已确认，继续准备已确认领域工作树。",
+            ),
+        }
     return {
         "issue_key": issue_key,
         "agentic_run_id": agentic_run_id,
         **proposal,
         "proposal_authority": "analysis_only_not_confirmed",
-        "confirmation_template": {
-            "issue_key": issue_key,
-            "agentic_run_id": agentic_run_id,
-            "task_domain": domain.domain_id,
-            "problem_version": analyzed.from_branch,
-            "problem_version_repository": analyzed.baseline_repository,
-            "problem_version_sha": baselines[analyzed.baseline_repository],
-        },
-        "repository_scope_path": recorded["path"],
+        "confirmation_ref": RepositoryConfirmationStore(workspace.root).create(
+            issue_key, agentic_run_id, recorded_scope
+        ),
         "repository_scope_revision": (
-            recorded.get("repository_scope", {}).get("content_version", 0)
+            recorded_scope.get("content_version", 0)
         ),
         "task_facts": task_facts,
         "agentic_next_action": _repository_next_action(
             executor="human",
             action="review_and_confirm_task_domain",
-            required_inputs=("confirmation_template",),
+            required_inputs=("confirmation_id", "task_domain"),
             allowed_operations=("task_repositories_confirm",),
             requires_authorization=True,
             stop_workflow=True,
-            reason="请确认任务领域；逐仓分支表由 Runtime 自动推导并作为审计事实。",
+            reason="请使用 confirmation_id 确认任务领域；逐仓分支由 Runtime 自动推导并作为审计事实。",
         ),
     }
 
@@ -353,7 +365,8 @@ def execute_repository_confirm(
     install_root: Path,
     store: TaskStore,
     issue_key: str,
-    mapping: dict[str, Any],
+    confirmation_id: str,
+    task_domain: str,
     *,
     confirm: bool,
 ) -> dict[str, Any]:
@@ -369,41 +382,17 @@ def execute_repository_confirm(
             "请先执行 ao-work task repositories assess",
         )
     agentic_run_id = str(task["agentic_run_id"])
-    if mapping.get("issue_key") not in {None, issue_key}:
-        raise _blocked(
-            "repository_mapping_identity_mismatch",
-            "确认文件的 issue_key 与当前任务不一致",
-            "请使用当前任务生成并核对的完整关系表",
-        )
-    if mapping.get("agentic_run_id") not in {None, agentic_run_id}:
-        raise _blocked(
-            "repository_mapping_identity_mismatch",
-            "确认文件的 agentic_run_id 与当前任务不一致",
-            "请使用当前任务生成并核对的完整关系表",
-        )
-    problem_version = str(mapping.get("problem_version") or "").strip()
-    if problem_version != str(scope.get("problem_version") or ""):
-        raise _blocked(
-            "problem_version_changed",
-            "用户确认文件的问题版本与当前分析不一致",
-            "请重新分析并展示问题版本与完整逐仓分支关系",
-        )
-    confirmed_domain = str(mapping.get("task_domain") or "").strip()
+    confirmation_store = RepositoryConfirmationStore(workspace.root)
+    confirmed_domain = task_domain.strip()
+    confirmation = confirmation_store.validate(
+        issue_key, agentic_run_id, confirmation_id, scope, confirmed_domain
+    )
+    problem_version = str(scope.get("problem_version") or "").strip()
     if confirmed_domain != str(scope.get("task_domain") or ""):
         raise _blocked(
             "task_domain_changed",
             "确认领域与当前分析建议不一致",
             "请用 --task-domain 重新执行 assess，再确认新的领域工作树计划",
-        )
-    if (
-        mapping.get("problem_version_repository")
-        != scope.get("problem_version_repository")
-        or mapping.get("problem_version_sha") != scope.get("problem_version_sha")
-    ):
-        raise _blocked(
-            "problem_version_source_changed",
-            "用户确认文件的问题版本来源仓库或固定 SHA 与分析不一致",
-            "请使用 assess 输出的完整 confirmation_template 进行确认",
         )
     derived_rows = [
         {
@@ -414,13 +403,6 @@ def execute_repository_confirm(
         for row in scope.get("proposed_repository_branch_map", [])
         if isinstance(row, dict)
     ]
-    supplied_rows = mapping.get("repository_branch_map")
-    if supplied_rows is not None and supplied_rows != derived_rows:
-        raise _blocked(
-            "repository_mapping_override_unsupported",
-            "领域确认文件不得修改 Runtime 自动推导的逐仓分支",
-            "请只确认 task_domain；建议领域不准时用 --task-domain 重新分析",
-        )
     raw_rows = derived_rows
     if not isinstance(raw_rows, list) or not raw_rows:
         raise _blocked(
@@ -587,6 +569,7 @@ def execute_repository_confirm(
             **preview,
             "confirmation_required": True,
             "side_effects": [],
+            "confirmation_ref": confirmation_store.reference(confirmation),
             "agentic_next_action": _repository_next_action(
                 executor="human",
                 action="confirm_task_domain",
@@ -607,7 +590,9 @@ def execute_repository_confirm(
         **preview,
         "confirmation_required": False,
         "mapping_status": "confirmed",
-        "repository_scope_path": result["path"],
+        "confirmation_ref": confirmation_store.consume(
+            issue_key, agentic_run_id, confirmation_id, scope, confirmed_domain
+        ),
         "agentic_next_action": _repository_next_action(
             executor="ai",
             action="prepare_confirmed_domain_worktrees",

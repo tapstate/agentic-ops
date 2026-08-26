@@ -4,9 +4,9 @@ workplane: developer
 inputs:
   issue_key:
     required: true
-  mapping_file:
-    source: workspace_relative_safe_json
+  task_domain:
     required: true
+    allowed: [product, assistant, taptest]
   confirm:
     required_for_write: true
 preconditions:
@@ -19,5 +19,6 @@ side_effects:
     - none
   confirm:
     - write_local_confirmed_repository_branch_map
+    - write_local_confirmation_record
     - must_not_create_worktrees
 next_action: prepare_confirmed_domain_worktrees
