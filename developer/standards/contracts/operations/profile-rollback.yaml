@@ -24,7 +24,7 @@ output:
     type: string
   restored_from:
     type: string
-  agentic_next_action:
+  next_step:
     type: string
 failure:
   codes:

@@ -35,7 +35,7 @@ authorize:
   output:
     - repository_delivery_manifests
     - authorization_reference
-    - agentic_next_action
+    - next_step
   compatibility:
     single_repository:
       - approved_plan_path

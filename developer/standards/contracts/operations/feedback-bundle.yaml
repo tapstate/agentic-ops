@@ -72,7 +72,7 @@ output:
     exact_export_preferred: true
     reconstructed_log_must_be_labeled: verifiable_reconstruction
     summary_must_not_replace_log: true
-  agentic_next_action:
+  next_step:
     type: string
 failure:
   codes:

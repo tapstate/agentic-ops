@@ -66,7 +66,7 @@ admission_failure_flow:
       readback: [jira, comment, readback]
     required_human_gate: apply 必须绑定 plan_id 的明确授权；结果不明确时只能 readback。
   after_comment:
-    agentic_next_action: stop_current_takeover
+    next_step: stop_current_takeover
     message: 写入准入分析与补卡建议后必须结束本次接管，不得在同一次执行中自动绑定任务。
 admission_confirmation_flow:
   required_actions:

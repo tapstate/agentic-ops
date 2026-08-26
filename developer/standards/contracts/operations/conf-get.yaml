@@ -34,7 +34,7 @@ output:
   secret:
     type: boolean
     required: false
-  agentic_next_action:
+  next_step:
     type: string
     required: true
 failure:

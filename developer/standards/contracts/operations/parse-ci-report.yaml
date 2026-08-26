@@ -16,7 +16,7 @@ output:
   runner_log: {type: object}
   requires_failure_classification: {type: boolean}
   parsed: {type: boolean}
-  agentic_next_action: {type: string}
+  next_step: {type: string}
 failure:
   codes: [ci_artifact_not_ready, ci_runner_log_not_ready, ci_artifact_unsafe, ci_artifact_digest_mismatch, ci_artifact_state_conflict, ci_report_unsupported, ci_report_parse_failed]
 side_effects:

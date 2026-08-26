@@ -110,7 +110,7 @@ output:
     type: string
     enum:
       - takeover_started
-  agentic_next_action:
+  next_step:
     type: object
     required_fields:
       - executor
