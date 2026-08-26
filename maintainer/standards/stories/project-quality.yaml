@@ -31,6 +31,7 @@ stories:
       - docs/decision-log.md
       - docs/development-style.md
       - docs/maintainers/getting-started.md
+      - docs/processes/human-decision-handling-guide.md
       - docs/user-stories/**
       - shared/**
     acceptance_checks:
