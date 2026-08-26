@@ -4,6 +4,7 @@ import json
 import hashlib
 import re
 import sys
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -32,7 +33,7 @@ _SUCCESS_NEXT_STEPS: dict[str, dict[str, Any]] = {
         "allowed_operations": ["capability_show"],
     },
     "capability_show": {
-        "actor": "ai",
+        "actor": "human",
         "action": "follow_capability_contract",
         "allowed_operations": [],
     },
@@ -308,14 +309,38 @@ class RuntimeErrorResult(Exception):
     next_step: Mapping[str, Any] | None = None
 
 
+_SUCCESS_RESERVED_FIELDS = frozenset(
+    {"schema_version", "ok", "operation", "result", "next_step"}
+)
+_FAILURE_RESERVED_FIELDS = _SUCCESS_RESERVED_FIELDS | frozenset(
+    {"code", "message", "required_human_action"}
+)
+
+
+def _reject_reserved_payload_fields(payload: Mapping[str, Any], *, failure: bool) -> None:
+    reserved = _FAILURE_RESERVED_FIELDS if failure else _SUCCESS_RESERVED_FIELDS
+    collisions = sorted(reserved & set(payload))
+    if collisions:
+        raise ValueError(
+            "StepResult 业务 payload 不得覆盖保留字段：" + ", ".join(collisions)
+        )
+
+
 def success(operation: str, **payload: Any) -> dict[str, Any]:
     provided_next_step = payload.pop("next_step", None)
+    _reject_reserved_payload_fields(payload, failure=False)
+    retry_safe = payload.pop("retry_safe", True)
+    if not isinstance(retry_safe, bool):
+        raise ValueError("StepResult.retry_safe 必须是布尔值")
+    operation_status = payload.pop("status", None)
+    if operation_status is not None:
+        payload["operation_status"] = operation_status
     result: dict[str, Any] = {
         "schema_version": "step-result/v2",
         "ok": True,
         "operation": operation,
         "status": "completed",
-        "retry_safe": True,
+        "retry_safe": retry_safe,
     }
     result.update(payload)
     result["result"] = _result_section(operation, result, payload)
@@ -329,18 +354,26 @@ def success(operation: str, **payload: Any) -> dict[str, Any]:
 
 
 def failure(operation: str, error: RuntimeErrorResult) -> dict[str, Any]:
+    details = dict(error.details)
+    _reject_reserved_payload_fields(details, failure=True)
+    details_retry_safe = details.pop("retry_safe", error.retry_safe)
+    if not isinstance(details_retry_safe, bool):
+        raise ValueError("StepResult.retry_safe 必须是布尔值")
+    operation_status = details.pop("status", None)
+    if operation_status is not None:
+        details["operation_status"] = operation_status
     result: dict[str, Any] = {
         "schema_version": "step-result/v2",
         "ok": False,
         "operation": operation,
         "status": error.status,
         "code": error.code,
-        "retry_safe": error.retry_safe,
+        "retry_safe": details_retry_safe,
         "message": error.message,
         "required_human_action": error.required_human_action,
     }
-    result.update(error.details)
-    result["result"] = _result_section(operation, result, error.details)
+    result.update(details)
+    result["result"] = _result_section(operation, result, details)
     retry_key = hashlib.sha256(
         f"{operation}:{error.code}:{error.status}".encode("utf-8")
     ).hexdigest()
@@ -406,6 +439,8 @@ def _success_next_step(
     provided_next_step: object,
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
+    if provided_next_step is not None and not isinstance(provided_next_step, Mapping):
+        raise ValueError("next_step 必须是结构化 Step，不能使用字符串动作")
     if isinstance(provided_next_step, Mapping):
         return _normalize_next_step(
             provided_next_step, operation=operation, payload=payload
@@ -414,9 +449,11 @@ def _success_next_step(
         _SUCCESS_NEXT_STEPS.get(
             operation,
             {
-                "actor": "ai",
-                "action": "inspect_operation_result",
+                "actor": "human",
+                "action": "review_operation_result",
                 "allowed_operations": [],
+                "requires_authorization": True,
+                "stop_workflow": True,
             },
         )
     )
@@ -464,6 +501,17 @@ def _success_next_step(
             "requires_authorization": True,
             "stop_workflow": True,
         }
+    if operation == "task-run_probe-ci" and payload.get("ci_status") in {
+        "passed",
+        "not_required",
+    }:
+        configured = {
+            "actor": "stop",
+            "action": "ci_completed",
+            "allowed_operations": [],
+            "stop_workflow": True,
+            "kind": "none",
+        }
     executor = configured.get("actor")
     if executor not in NEXT_STEP_EXECUTORS:
         raise ValueError(f"unsupported next step executor: {executor}")
@@ -491,13 +539,11 @@ def _success_next_step(
             )
         ),
     }
-    if isinstance(provided_next_step, str) and provided_next_step.strip():
-        next_step["reason"] = provided_next_step.strip()
     return _normalize_next_step(next_step, operation=operation, payload=payload)
 
 
 @dataclass(frozen=True)
-class Step:
+class Step(ABC):
     """步骤结果中唯一的、可判别的下一步骤。
 
     所有 Runtime 入口都通过此类生成 `next_step`，不能再手工拼装对外 JSON。
@@ -508,7 +554,7 @@ class Step:
     mode: str
     executor: str
     action: str
-    call: Mapping[str, Any]
+    call: Mapping[str, Any] | None
     _data: Mapping[str, Any]
 
     @property
@@ -525,6 +571,10 @@ class Step:
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self._data)
+
+    @abstractmethod
+    def _validate_variant(self) -> None:
+        """校验具体步骤类型特有的不变量。"""
 
     @classmethod
     def from_mapping(
@@ -562,7 +612,7 @@ class Step:
         operation_id = normalized.get("operation_id")
         if not isinstance(operation_id, str) or not operation_id.strip():
             allowed = normalized["allowed_operations"]
-            operation_id = allowed[0] if len(allowed) == 1 else "human_decision"
+            operation_id = allowed[0] if allowed else "human_decision"
         command_argv = normalized.get("command_argv")
         if not isinstance(command_argv, list) or not all(
             isinstance(item, str) and item for item in command_argv
@@ -635,7 +685,7 @@ class Step:
             raise ValueError("next_step.mode 不受支持")
         if mode == "auto" and normalized["requires_authorization"]:
             raise ValueError("需要授权的 next_step 不得使用 auto")
-        call = {
+        call: Mapping[str, Any] | None = {
             "operation": operation_id,
             "argv": command_argv,
             "cwd": normalized.get("cwd", "workspace"),
@@ -650,21 +700,110 @@ class Step:
             ]
         if kind == "decision":
             _add_decision_fields(normalized)
+        if kind == "decision" and mode == "timed_auto":
+            transitions = normalized.get("transitions")
+            timed_data = normalized.get("timed")
+            if isinstance(transitions, Mapping):
+                normalized["transitions"] = {
+                    str(choice_id): Step.from_mapping(
+                        transition,
+                        operation=(
+                            "timed_transition_"
+                            f"{timed_data.get('decision_id', 'unknown') if isinstance(timed_data, Mapping) else 'unknown'}"
+                            f"_{choice_id}"
+                        ),
+                        payload={},
+                    ).to_dict()
+                    for choice_id, transition in transitions.items()
+                    if isinstance(transition, Mapping)
+                }
         if kind == "wait":
             wait_for = normalized.get("wait_for")
             if not isinstance(wait_for, str) or not wait_for.strip():
                 raise ValueError("wait 类型 next_step 必须提供 wait_for")
-        if mode == "timed_auto":
-            _validate_timed_auto(normalized)
-        return cls(
+        if kind == "none":
+            normalized.update(
+                {
+                    "executor": "stop",
+                    "mode": "manual",
+                    "stop_workflow": True,
+                    "allowed_operations": [],
+                    "operation_id": "none",
+                    "command_argv": [],
+                    "command_line": "无需命令；当前步骤为终态",
+                    "call": None,
+                }
+            )
+            call = None
+        step_type: type[Step]
+        if kind == "action":
+            step_type = ActionStep
+        elif kind == "decision" and mode == "timed_auto":
+            step_type = TimedDecisionStep
+        elif kind == "decision":
+            step_type = DecisionStep
+        elif kind == "input":
+            step_type = InputStep
+        elif kind == "wait":
+            step_type = WaitStep
+        else:
+            step_type = TerminalStep
+        step = step_type(
             kind=kind,
             scope=scope,
             mode=mode,
-            executor=str(executor),
+            executor=str(normalized["executor"]),
             action=str(normalized["action"]),
             call=call,
             _data=normalized,
         )
+        step._validate_variant()
+        return step
+
+
+@dataclass(frozen=True)
+class ActionStep(Step):
+    def _validate_variant(self) -> None:
+        if self.mode != "auto" or not isinstance(self.call, Mapping):
+            raise ValueError("ActionStep 必须使用 auto 并提供可执行 call")
+        operation = self.call.get("operation")
+        if operation not in self._data["allowed_operations"]:
+            raise ValueError("ActionStep.call.operation 必须在 allowed_operations 中")
+
+
+@dataclass(frozen=True)
+class DecisionStep(Step):
+    def _validate_variant(self) -> None:
+        if self.mode != "manual":
+            raise ValueError("DecisionStep 必须使用 manual")
+        _add_decision_fields(dict(self._data))
+
+
+@dataclass(frozen=True)
+class TimedDecisionStep(Step):
+    def _validate_variant(self) -> None:
+        _validate_timed_auto(self._data)
+
+
+@dataclass(frozen=True)
+class InputStep(Step):
+    def _validate_variant(self) -> None:
+        if self.mode != "manual" or not self._data.get("inputs"):
+            raise ValueError("InputStep 必须使用 manual 并声明 inputs")
+
+
+@dataclass(frozen=True)
+class WaitStep(Step):
+    def _validate_variant(self) -> None:
+        if not isinstance(self._data.get("wait_for"), str):
+            raise ValueError("WaitStep 必须声明 wait_for")
+
+
+@dataclass(frozen=True)
+class TerminalStep(Step):
+    def _validate_variant(self) -> None:
+        if self.executor != "stop" or self.mode != "manual" or self.call is not None:
+            raise ValueError("TerminalStep 必须由 stop 以 manual 终止，且没有 call")
 
 
 def _normalize_next_step(
@@ -739,6 +878,22 @@ def _validate_timed_auto(step: Mapping[str, Any]) -> None:
         choice.get("id") for choice in choices if isinstance(choice, Mapping)
     }:
         raise ValueError("timed_auto.next_step.default_choice 必须引用已有决策选项")
+    transitions = step.get("transitions")
+    if not isinstance(transitions, Mapping):
+        raise ValueError("timed_auto.next_step 必须声明每个选项的后续 ActionStep")
+    choice_ids = {choice.get("id") for choice in choices if isinstance(choice, Mapping)}
+    if set(transitions) != choice_ids:
+        raise ValueError("timed_auto.next_step.transitions 必须覆盖且仅覆盖全部决策选项")
+    for choice_id, transition in transitions.items():
+        if not isinstance(transition, Mapping):
+            raise ValueError(f"timed_auto.next_step.transitions.{choice_id} 无效")
+        target = Step.from_mapping(
+            transition,
+            operation=f"timed_transition_{timed['decision_id']}_{choice_id}",
+            payload={},
+        )
+        if not target.can_auto_execute:
+            raise ValueError("timed_auto 选项只能转换到 auto ActionStep")
 
 
 def _result_section(

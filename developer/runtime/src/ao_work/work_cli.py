@@ -171,7 +171,11 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             process_id=args.process_id,
             current_step_id=args.current_step,
         )
-        return success("workflow_query", workplane=DEVELOPER, **state)
+        return success(
+            "workflow_query",
+            workplane=DEVELOPER,
+            workflow_query=state,
+        )
 
     workspace = resolve_developer_workspace(args.workspace_root)
     operation = operation_name(args)

@@ -10,7 +10,7 @@ from ao_work.jira.adf import markdown_to_adf
 from ao_work.jira.model import plain_text
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, normalize_next_step
 
-TAKEOVER_SCHEMA_VERSION = 2
+TAKEOVER_SCHEMA_VERSION = 3
 TAKEOVER_KINDS = frozenset(
     {"new_takeover", "accept_existing_task", "resume_takeover"}
 )
@@ -189,6 +189,19 @@ def takeover_next_step(
 def validate_takeover_operation(payload: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, Mapping):
         raise _schema_invalid("接管状态必须是对象")
+    # StepResult v2 replaces the legacy `agentic_next_action` state field with
+    # the structured `next_step`.  This is a deliberate incompatible state
+    # transition: an old operation may not be resumed under a new policy.
+    # Check it before the v3 field-set validation so v2 callers receive the
+    # stable recovery disposition instead of a misleading generic schema error.
+    if payload.get("schema_version") != TAKEOVER_SCHEMA_VERSION:
+        raise takeover_error(
+            "task_state_upgrade_required",
+            "本地接管状态使用了已淘汰的 Step schema，不能由当前 Runtime 恢复",
+            "请保留当前任务目录用于审计；重新接管任务以生成 schema_version=3 的状态",
+            expected_schema_version=TAKEOVER_SCHEMA_VERSION,
+            actual_schema_version=payload.get("schema_version"),
+        )
     missing = sorted(_REQUIRED_OPERATION_FIELDS - set(payload))
     extra = sorted(
         set(payload) - _REQUIRED_OPERATION_FIELDS - _OPTIONAL_OPERATION_FIELDS
@@ -200,8 +213,6 @@ def validate_takeover_operation(payload: Mapping[str, Any]) -> dict[str, Any]:
             extra_fields=extra,
         )
     value = deepcopy(dict(payload))
-    if value["schema_version"] != TAKEOVER_SCHEMA_VERSION:
-        raise _schema_invalid("接管状态 schema_version 必须为 2")
     if not isinstance(value["operation_id"], str) or not OPERATION_ID.fullmatch(
         value["operation_id"]
     ):

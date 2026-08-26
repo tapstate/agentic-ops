@@ -43,6 +43,15 @@ class OutputTest(unittest.TestCase):
         self.assertEqual(1, sum(choice["recommended"] for choice in next_step["choices"]))
         self.assertEqual("record_only", next_step["submit"]["effect"])
 
+    def test_ci_terminal_statuses_return_terminal_step(self) -> None:
+        for status in ("passed", "not_required"):
+            with self.subTest(status=status):
+                next_step = success("task-run_probe-ci", ci_status=status)["next_step"]
+                self.assertEqual("none", next_step["kind"])
+                self.assertEqual("stop", next_step["executor"])
+                self.assertTrue(next_step["stop_workflow"])
+                self.assertIsNone(next_step["call"])
+
     def test_timed_auto_requires_runtime_resolution_facts(self) -> None:
         result = success(
             "test",
@@ -63,6 +72,19 @@ class OutputTest(unittest.TestCase):
                     "cancel_if": "fact_binding_changed",
                     "fact_bind": "run:run-123",
                     "policy": "policy:timed-confirmation-v1",
+                },
+                "transitions": {
+                    "continue": {
+                        "executor": "ao_work",
+                        "action": "inspect_confirmed_task",
+                        "required_inputs": [],
+                        "allowed_operations": ["task_inspect"],
+                        "requires_authorization": False,
+                        "stop_workflow": False,
+                        "ownership_effect": "none",
+                        "kind": "action",
+                        "mode": "auto",
+                    }
                 },
             },
         )
@@ -135,16 +157,12 @@ class OutputTest(unittest.TestCase):
         self.assertEqual("workflow-query/v1", query["schema_version"])
         self.assertNotIn("call", query["steps"][0])
 
-    def test_success_promotes_legacy_next_action_to_reason(self) -> None:
-        result = success(
-            "task_start",
-            next_step="请先审查 AI 提议的实施计划",
-        )
-        next_action = result["next_step"]
-        self.assertEqual("ai", next_action["executor"])
-        self.assertEqual("assess_task_intake", next_action["action"])
-        self.assertEqual(False, next_action["requires_authorization"])
-        self.assertEqual("请先审查 AI 提议的实施计划", next_action["reason"])
+    def test_success_rejects_legacy_string_next_step(self) -> None:
+        with self.assertRaisesRegex(ValueError, "必须是结构化 Step"):
+            success(
+                "task_start",
+                next_step="请先审查 AI 提议的实施计划",
+            )
 
     def test_workspace_preflight_routes_to_top_level_takeover(self) -> None:
         next_action = success("workspace_preflight")["next_step"]

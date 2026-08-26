@@ -209,6 +209,7 @@ test -f "$install_root/shared/integration/README.md"
 test -f "$install_root/shared/integration/task-to-pr-manifest.schema.json"
 test -f "$install_root/shared/integration/task-to-pr-event.schema.json"
 test -f "$install_root/shared/integration/task-to-pr-result.schema.json"
+test -f "$install_root/shared/standards/step-result-v2.schema.json"
 test "$(git -C "$install_root" config --get remote.origin.url)" = "$official_repo_url"
 if find "$install_root" -path '*/ao_maint' -print -quit | grep . >/dev/null; then
   echo "developer 安装不得包含 ao_maint Python 包" >&2
@@ -245,7 +246,8 @@ expected_shared_distribution="$(printf '%s\n' \
   integration/task-to-pr-manifest.schema.json \
   integration/task-to-pr-result.schema.json \
   standards \
-  standards/jira-comment-template.schema.json)"
+  standards/jira-comment-template.schema.json \
+  standards/step-result-v2.schema.json)"
 if [ "$shared_distribution" != "$expected_shared_distribution" ]; then
   echo "developer 安装的 shared 可见树超出固定协议白名单" >&2
   exit 1

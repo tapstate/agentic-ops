@@ -97,7 +97,7 @@ class TaskStore:
             progress = {
                 **common,
                 "stage": "initialized",
-                "next_step": "analyze_task",
+                "next_action": "analyze_task",
                 "terminal": False,
             }
             sync = {**common, "external_writes": {}, "last_readback_at": None}
@@ -641,7 +641,7 @@ class TaskStore:
         agentic_run_id: str,
         next_step: dict[str, Any],
     ) -> dict[str, Any]:
-        """持久化 timed_auto 决策；登记本身绝不执行后续业务动作。"""
+        """持久化 timed_auto 决策及其已批准的 ActionStep 转换。"""
         self._validate_issue_key(issue_key)
         self._validate_run_id(agentic_run_id)
         normalized = normalize_next_step(
@@ -673,6 +673,7 @@ class TaskStore:
             }
             if existing is not None:
                 if all(existing.get(field) == value for field, value in intent.items()):
+                    self._repair_timed_step_journal(task_dir, path, existing)
                     return {"created": False, "timed_step": existing}
                 raise RuntimeErrorResult(
                     code="timed_step_conflict",
@@ -682,7 +683,7 @@ class TaskStore:
                     required_human_action="请新建决策编号，或先人工核对并取消已有定时决策",
                 )
             record = {
-                "schema_version": "timed-step/v1",
+                "schema_version": "timed-step/v2",
                 "issue_key": issue_key,
                 **intent,
                 "state": "pending",
@@ -690,10 +691,16 @@ class TaskStore:
                 "updated_at": self._timestamp(),
                 "content_version": 1,
             }
-            atomic_write_json(path, record)
             event = self._journal_event(task, "timed_step_schedule", "completed", retry_safe=True)
-            event.update({"decision_id": decision_id, "deadline": record["deadline"], "policy": timed["policy"]})
-            append_ndjson(task_dir / "journal.ndjson", event)
+            event.update({
+                "event_id": self._timed_step_event_id(decision_id, 1),
+                "decision_id": decision_id,
+                "deadline": record["deadline"],
+                "policy": timed["policy"],
+            })
+            record["journal_event"] = event
+            atomic_write_json(path, record)
+            self._repair_timed_step_journal(task_dir, path, record)
             return {"created": True, "timed_step": record}
 
     def resolve_timed_step(
@@ -726,20 +733,26 @@ class TaskStore:
             record = read_json(path)
             self._validate_timed_step_record(record, issue_key, agentic_run_id, decision_id)
             if record["state"] != "pending":
+                self._repair_timed_step_journal(task_dir, path, record)
                 return {"resolved": True, "timed_step": record}
             if record["fact_bind"] != current_fact_bind:
                 record.update(
                     {
                         "state": "cancelled",
-                        "resolution": {"reason": "fact_binding_changed", "effect": "record_only"},
+                        "resolution": {"reason": "fact_binding_changed", "effect": "cancelled"},
                         "updated_at": self._timestamp(),
                         "content_version": int(record["content_version"]) + 1,
                     }
                 )
-                atomic_write_json(path, record)
                 event = self._journal_event(task, "timed_step_cancel", "completed", retry_safe=True)
-                event.update({"decision_id": decision_id, "reason": "fact_binding_changed"})
-                append_ndjson(task_dir / "journal.ndjson", event)
+                event.update({
+                    "event_id": self._timed_step_event_id(decision_id, record["content_version"]),
+                    "decision_id": decision_id,
+                    "reason": "fact_binding_changed",
+                })
+                record["journal_event"] = event
+                atomic_write_json(path, record)
+                self._repair_timed_step_journal(task_dir, path, record)
                 return {"resolved": True, "timed_step": record}
             if self._now().astimezone(timezone.utc) < _parse_timed_deadline(record["deadline"]):
                 return {"resolved": False, "timed_step": record}
@@ -749,16 +762,23 @@ class TaskStore:
                     "resolution": {
                         "choice": record["default_choice"],
                         "reason": "deadline_reached",
-                        "effect": "record_only",
+                        "effect": "auto_transition_ready",
+                        "next_step": record["next_step"]["transitions"][record["default_choice"]],
                     },
                     "updated_at": self._timestamp(),
                     "content_version": int(record["content_version"]) + 1,
                 }
             )
-            atomic_write_json(path, record)
             event = self._journal_event(task, "timed_step_resolve", "completed", retry_safe=True)
-            event.update({"decision_id": decision_id, "choice": record["default_choice"]})
-            append_ndjson(task_dir / "journal.ndjson", event)
+            event.update({
+                "event_id": self._timed_step_event_id(decision_id, record["content_version"]),
+                "decision_id": decision_id,
+                "choice": record["default_choice"],
+                "next_step_operation": record["resolution"]["next_step"]["operation_id"],
+            })
+            record["journal_event"] = event
+            atomic_write_json(path, record)
+            self._repair_timed_step_journal(task_dir, path, record)
             return {"resolved": True, "timed_step": record}
 
     def cancel_timed_step(
@@ -791,19 +811,25 @@ class TaskStore:
             record = read_json(path)
             self._validate_timed_step_record(record, issue_key, agentic_run_id, decision_id)
             if record["state"] != "pending":
+                self._repair_timed_step_journal(task_dir, path, record)
                 return {"cancelled": record["state"] == "cancelled", "timed_step": record}
             record.update(
                 {
                     "state": "cancelled",
-                    "resolution": {"reason": reason, "effect": "record_only"},
+                    "resolution": {"reason": reason, "effect": "cancelled"},
                     "updated_at": self._timestamp(),
                     "content_version": int(record["content_version"]) + 1,
                 }
             )
-            atomic_write_json(path, record)
             event = self._journal_event(task, "timed_step_cancel", "completed", retry_safe=True)
-            event.update({"decision_id": decision_id, "reason": reason})
-            append_ndjson(task_dir / "journal.ndjson", event)
+            event.update({
+                "event_id": self._timed_step_event_id(decision_id, record["content_version"]),
+                "decision_id": decision_id,
+                "reason": reason,
+            })
+            record["journal_event"] = event
+            atomic_write_json(path, record)
+            self._repair_timed_step_journal(task_dir, path, record)
             return {"cancelled": True, "timed_step": record}
 
     def record_gate_transition(
@@ -844,7 +870,7 @@ class TaskStore:
             progress.update(
                 {
                     "stage": stage,
-                    "next_step": next_action,
+                    "next_action": next_action,
                     "terminal": False,
                     "updated_at": self._timestamp(),
                     "content_version": int(progress.get("content_version", 0)) + 1,
@@ -1332,7 +1358,7 @@ class TaskStore:
                 progress.update(
                     {
                         "stage": "takeover_started",
-                        "next_step": "assess_repository_branch_mapping",
+                        "next_action": "assess_repository_branch_mapping",
                         "terminal": False,
                         "updated_at": self._timestamp(),
                         "content_version": int(progress.get("content_version", 0)) + 1,
@@ -1383,7 +1409,7 @@ class TaskStore:
             progress.update(
                 {
                     "stage": "takeover_started",
-                    "next_step": "assess_repository_branch_mapping",
+                    "next_action": "assess_repository_branch_mapping",
                     "terminal": False,
                     "updated_at": self._timestamp(),
                     "content_version": int(progress.get("content_version", 0)) + 1,
@@ -1470,7 +1496,7 @@ class TaskStore:
                 progress.update(
                     {
                         "stage": "takeover_started",
-                        "next_step": "assess_repository_branch_mapping",
+                        "next_action": "assess_repository_branch_mapping",
                         "terminal": False,
                         "updated_at": self._timestamp(),
                         "content_version": int(progress.get("content_version", 0)) + 1,
@@ -2009,6 +2035,52 @@ class TaskStore:
         self._validate_managed_path(path)
         return path
 
+    @staticmethod
+    def _timed_step_event_id(decision_id: str, content_version: int) -> str:
+        return f"timed-step:{decision_id}:{content_version}"
+
+    def _repair_timed_step_journal(
+        self, task_dir: Path, path: Path, record: dict[str, Any]
+    ) -> None:
+        """补写已持久化 timed 状态对应的审计事件。
+
+        状态文件先落盘能够避免超时解析重复执行；若紧随其后的 journal
+        追加失败，下一次相同操作会用固定 event_id 补写，绝不再次变更状态。
+        """
+        event = record.get("journal_event")
+        if not isinstance(event, dict) or not isinstance(event.get("event_id"), str):
+            raise RuntimeErrorResult(
+                code="timed_step_state_invalid",
+                message="定时决策状态缺少可恢复的审计事件",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=False,
+                required_human_action="请按任务状态恢复流程核对定时决策记录，不要覆盖原文件",
+            )
+        journal_path = task_dir / "journal.ndjson"
+        self._validate_managed_path(journal_path)
+        require_safe_regular_file(journal_path)
+        event_id = event["event_id"]
+        journal = read_text(journal_path)
+        present = False
+        for line in journal.splitlines():
+            try:
+                candidate = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise RuntimeErrorResult(
+                    code="task_state_incomplete",
+                    message="任务审计日志不是有效 JSON，不能继续补写定时决策事件",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    retry_safe=False,
+                    required_human_action="请按恢复流程核对 journal 和外部事实，不要覆盖现有目录",
+                ) from error
+            if isinstance(candidate, dict) and candidate.get("event_id") == event_id:
+                present = True
+                break
+        if not present:
+            append_ndjson(journal_path, event)
+
     def _require_task_identity(
         self, task: dict[str, Any], agentic_run_id: str, subject: str
     ) -> None:
@@ -2041,6 +2113,7 @@ class TaskStore:
             "next_step",
             "state",
             "content_version",
+            "journal_event",
         }
         if required - set(record):
             raise RuntimeErrorResult(
@@ -2052,7 +2125,7 @@ class TaskStore:
                 required_human_action="请按任务状态恢复流程核对定时决策记录，不要覆盖原文件",
             )
         if (
-            record["schema_version"] != "timed-step/v1"
+            record["schema_version"] != "timed-step/v2"
             or record["issue_key"] != issue_key
             or record["agentic_run_id"] != agentic_run_id
             or record["decision_id"] != decision_id
@@ -2068,6 +2141,11 @@ class TaskStore:
             )
         try:
             _parse_timed_deadline(str(record["deadline"]))
+            normalize_next_step(
+                record["next_step"],
+                operation="timed_step_state",
+                payload={"issue_key": issue_key, "agentic_run_id": agentic_run_id},
+            )
         except ValueError as error:
             raise RuntimeErrorResult(
                 code="timed_step_state_invalid",

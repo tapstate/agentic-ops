@@ -515,6 +515,19 @@ class TaskStateTest(unittest.TestCase):
                     "fact_bind": "run:run-20260813-001",
                     "policy": "policy:timed-confirmation-v1",
                 },
+                "transitions": {
+                    "continue": {
+                        "executor": "ao_work",
+                        "action": "inspect_confirmed_task",
+                        "required_inputs": [],
+                        "allowed_operations": ["task_inspect"],
+                        "requires_authorization": False,
+                        "stop_workflow": False,
+                        "ownership_effect": "none",
+                        "kind": "action",
+                        "mode": "auto",
+                    }
+                },
             }
 
             created = store.schedule_timed_step(
@@ -550,7 +563,11 @@ class TaskStateTest(unittest.TestCase):
             self.assertTrue(resolved["resolved"])
             self.assertEqual("resolved", resolved["timed_step"]["state"])
             self.assertEqual("continue", resolved["timed_step"]["resolution"]["choice"])
-            self.assertEqual("record_only", resolved["timed_step"]["resolution"]["effect"])
+            self.assertEqual("auto_transition_ready", resolved["timed_step"]["resolution"]["effect"])
+            self.assertEqual(
+                "task_inspect",
+                resolved["timed_step"]["resolution"]["next_step"]["operation_id"],
+            )
             self.assertEqual(resolved["timed_step"], repeated_resolution["timed_step"])
 
     def test_timed_step_cancels_when_fact_binding_changes(self) -> None:
@@ -578,6 +595,19 @@ class TaskStateTest(unittest.TestCase):
                         "cancel_if": "fact_binding_changed",
                         "fact_bind": "run:old",
                         "policy": "policy:timed-confirmation-v1",
+                    },
+                    "transitions": {
+                        "continue": {
+                            "executor": "ao_work",
+                            "action": "inspect_confirmed_task",
+                            "required_inputs": [],
+                            "allowed_operations": ["task_inspect"],
+                            "requires_authorization": False,
+                            "stop_workflow": False,
+                            "ownership_effect": "none",
+                            "kind": "action",
+                            "mode": "auto",
+                        }
                     },
                 },
             )
@@ -610,7 +640,7 @@ class TaskStateTest(unittest.TestCase):
             )
             self.assertEqual(
                 "review_task_design",
-                recorded["progress"]["next_step"],
+                recorded["progress"]["next_action"],
             )
             self.assertEqual("task_solution_classify", recorded["event"]["operation"])
             self.assertEqual("a" * 64, recorded["event"]["evidence"]["intake_digest"])

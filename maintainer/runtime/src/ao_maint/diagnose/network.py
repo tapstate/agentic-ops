@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ao_maint.jira.client import JiraClient
-from ao_maint.output import RuntimeErrorResult
+from ao_maint.output import RuntimeErrorResult, manual_decision_step
 
 _PROXY_NAMES = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy")
 _SUPPORTED_PROXY_SCHEMES = {"http", "https", "socks5"}
@@ -65,7 +65,10 @@ class NetworkDiagnoser:
                 "github": github,
             },
             "diagnosis": diagnosis,
-            "agentic_next_action": _next_action(diagnosis["code"]),
+            "next_step": manual_decision_step(
+                str(_next_action(diagnosis["code"])["action"]),
+                str(_next_action(diagnosis["code"])["reason"]),
+            ),
         }
 
     def _probe_loopback(

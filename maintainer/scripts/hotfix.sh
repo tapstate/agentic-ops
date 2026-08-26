@@ -66,7 +66,7 @@ develop_candidate="$(git -C "$repo_root" rev-parse refs/heads/develop)"
 
 if [ "$remote_main" = "$develop_candidate" ] &&
   [ "$remote_develop" = "$develop_candidate" ]; then
-  printf '{"ok":true,"operation":"hotfix_publish","status":"completed","jira_id":"%s","merge_commit":"%s","main_commit":"%s","develop_commit":"%s","changed":false,"branch_created":false,"jira_interaction":false,"gate":"none","agentic_next_action":"hotfix_completed"}\n' \
+  printf '{"schema_version":"step-result/v2","ok":true,"operation":"hotfix_publish","status":"completed","retry_safe":true,"result":{"status":"succeeded","summary":"Hotfix 已完成","facts":{},"evidence":[],"effects":[],"remaining":[]},"next_step":{"kind":"none","scope":"flow","mode":"manual","executor":"stop","action":"hotfix_completed","call":null},"jira_id":"%s","merge_commit":"%s","main_commit":"%s","develop_commit":"%s","changed":false,"branch_created":false,"jira_interaction":false,"gate":"none"}\n' \
     "$jira_id" "$remote_main" "$remote_main" "$remote_develop"
   exit 0
 fi
@@ -122,5 +122,5 @@ if ! git -C "$repo_root" fetch origin main develop >/dev/null 2>&1 ||
   exit 1
 fi
 
-printf '{"ok":true,"operation":"hotfix_publish","status":"completed","jira_id":"%s","merge_commit":"%s","main_commit":"%s","develop_commit":"%s","changed":true,"branch_created":false,"jira_interaction":false,"gate":"none","merge_subject":"%s","agentic_next_action":"hotfix_completed"}\n' \
+printf '{"schema_version":"step-result/v2","ok":true,"operation":"hotfix_publish","status":"completed","retry_safe":true,"result":{"status":"succeeded","summary":"Hotfix 已完成","facts":{},"evidence":[],"effects":[],"remaining":[]},"next_step":{"kind":"none","scope":"flow","mode":"manual","executor":"stop","action":"hotfix_completed","call":null},"jira_id":"%s","merge_commit":"%s","main_commit":"%s","develop_commit":"%s","changed":true,"branch_created":false,"jira_interaction":false,"gate":"none","merge_subject":"%s"}\n' \
   "$jira_id" "$merge_commit" "$merge_commit" "$merge_commit" "$merge_subject"

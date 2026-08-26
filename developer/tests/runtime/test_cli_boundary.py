@@ -103,6 +103,33 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
     def test_install_root_is_not_a_public_option(self) -> None:
         self.assertNotIn("--install-root", self._all_option_strings(build_parser()))
 
+    def test_workflow_query_keeps_step_result_envelope_version(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        query = {
+            "schema_version": "workflow-query/v1",
+            "workflow_id": "development_change_v2",
+            "current_step_id": "implementation",
+            "executable": False,
+            "steps": [{"id": "implementation", "label": "implementation", "kind": "action"}],
+        }
+        with (
+            mock.patch(
+                "ao_work.work_cli.validate_install_root",
+                return_value=Path("/synthetic-developer-install"),
+            ),
+            mock.patch("ao_work.work_cli.execute_workflow_query", return_value=query),
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            exit_code = main(
+                ["workflow", "query", "--process-id", "development_change_v2", "--current-step", "implementation"]
+            )
+        self.assertEqual(0, exit_code, stderr.getvalue())
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual("step-result/v2", payload["schema_version"])
+        self.assertEqual("workflow-query/v1", payload["workflow_query"]["schema_version"])
+
     def test_repository_confirmation_uses_id_and_domain_not_a_managed_path(self) -> None:
         parsed = build_parser().parse_args(
             [
