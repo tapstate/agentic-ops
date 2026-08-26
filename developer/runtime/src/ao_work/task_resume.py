@@ -99,9 +99,9 @@ def execute_task_resume(
         )
 
     agentic_run_id = str(task["agentic_run_id"])
-    next_action: object = _legacy_resume_action(progress.get("agentic_next_action"))
+    next_action: object = _legacy_resume_action(progress.get("next_step"))
     if operation_resumable:
-        next_action = recovery_operation["agentic_next_action"]
+        next_action = recovery_operation["next_step"]
     repository_scope = local.get("repository_scope")
     if not operation_resumable:
         next_action = _repository_resume_action(repository_scope, next_action)
@@ -118,7 +118,7 @@ def execute_task_resume(
         "current_stage": current_stage,
         "takeover_recovery": takeover_recovery,
         "repository_scope": repository_scope,
-        "agentic_next_action": next_action,
+        "next_step": next_action,
         "credential_status": context.credential_status(),
     }
 

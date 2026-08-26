@@ -285,7 +285,7 @@ class CiRuntime:
                 ),
                 "decision_required": ci_status
                 in {"start_timeout", "completion_timeout"},
-                "agentic_next_action": next_action,
+                "next_step": next_action,
             }
 
     def fetch_runner_log(self, manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -302,7 +302,7 @@ class CiRuntime:
                 return {
                     **existing,
                     "downloaded": False,
-                    "agentic_next_action": self._runner_log_next_action(attempt),
+                    "next_step": self._runner_log_next_action(attempt),
                 }
             if attempt["ci_status"] in {"start_timeout", "completion_timeout"}:
                 runner_log = {
@@ -369,7 +369,7 @@ class CiRuntime:
             return {
                 **runner_log,
                 "downloaded": True,
-                "agentic_next_action": self._runner_log_next_action(attempt),
+                "next_step": self._runner_log_next_action(attempt),
             }
 
     def fetch_artifact(self, manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -436,7 +436,7 @@ class CiRuntime:
                 return {
                     **existing,
                     "downloaded": False,
-                    "agentic_next_action": "fetch_ci_runner_log",
+                    "next_step": "fetch_ci_runner_log",
                 }
             result = self.run_bytes(
                 ["gh", "api", f"repos/{repository['slug']}/actions/artifacts/{artifact_id}/zip"],
@@ -506,7 +506,7 @@ class CiRuntime:
             return {
                 **artifact,
                 "downloaded": True,
-                "agentic_next_action": "fetch_ci_runner_log",
+                "next_step": "fetch_ci_runner_log",
             }
 
     def parse_report(self, manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -568,7 +568,7 @@ class CiRuntime:
                     **existing,
                     "runner_log": attempt["runner_log"],
                     "parsed": False,
-                    "agentic_next_action": "present_ci_failure_decision",
+                    "next_step": "present_ci_failure_decision",
                 }
             attempt["failure_event_id"] = failure_event_id
             attempt["report"] = report
@@ -580,7 +580,7 @@ class CiRuntime:
                 **report,
                 "runner_log": attempt["runner_log"],
                 "parsed": True,
-                "agentic_next_action": "present_ci_failure_decision",
+                "next_step": "present_ci_failure_decision",
             }
 
     def authorize_remediation(
@@ -642,10 +642,10 @@ class CiRuntime:
                         "同一 CI 失败已经绑定不同的用户修复决策",
                         "请保留现有决策；证据或范围变化时必须重新生成 CI Attempt",
                     )
-                return {**existing, "authorized": False, "agentic_next_action": "repair_ci_code"}
+                return {**existing, "authorized": False, "next_step": "repair_ci_code"}
             decisions[failure_event_id] = candidate
             atomic_write_json(paths["state"], state)
-            return {**candidate, "authorized": True, "agentic_next_action": "repair_ci_code"}
+            return {**candidate, "authorized": True, "next_step": "repair_ci_code"}
 
     def record_remediation(
         self,
@@ -1364,7 +1364,7 @@ class CiRuntime:
             "recorded": recorded,
             "remediation_attempts_used": used,
             "remediation_attempts_remaining": config["max_remediation_attempts"] - used,
-            "agentic_next_action": "probe_ci",
+            "next_step": "probe_ci",
         }
 
 

@@ -721,7 +721,7 @@ def _completed_takeover_result(
         "state_consistent": state_consistent,
         "local_state_created": local_state_created,
         "intake_source": intake_source,
-        "agentic_next_action": operation["agentic_next_action"],
+        "next_step": operation["next_step"],
     }
 
 
@@ -1379,7 +1379,7 @@ def _takeover_candidates(context: Any, client: JiraClient, account_id: str) -> d
         "credential_status": context.credential_status(),
         "human_notice": "未执行接管：请从候选列表选择目标任务后运行 ao-work takeover <KEY>。",
         "note": "未提供 issue_key；请从候选列表确认目标任务后，带 issue_key 重新执行 takeover",
-        "agentic_next_action": {
+        "next_step": {
             "executor": "human",
             "action": "select_takeover_candidate",
             "required_inputs": ["issue_key"],

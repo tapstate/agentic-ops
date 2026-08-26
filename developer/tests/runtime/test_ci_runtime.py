@@ -364,7 +364,7 @@ class CiObservationTest(unittest.TestCase):
         self.assertEqual("start_timeout", timed_out["ci_status"])
         self.assertEqual("ci_decision", timed_out["current_stage"])
         self.assertTrue(timed_out["decision_required"])
-        self.assertEqual("analyze_ci_timeout", timed_out["agentic_next_action"])
+        self.assertEqual("analyze_ci_timeout", timed_out["next_step"])
 
     def test_manual_only_workflow_does_not_require_ci(self) -> None:
         observed = self.configured_ci_runtime(
@@ -410,7 +410,7 @@ class CiObservationTest(unittest.TestCase):
         runner_log = runtime.fetch_runner_log(self.manifest)
         self.assertTrue(runner_log["available"])
         self.assertNotIn("runner-secret", runner_log["excerpt"])
-        self.assertEqual("parse_ci_report", runner_log["agentic_next_action"])
+        self.assertEqual("parse_ci_report", runner_log["next_step"])
 
     def test_unattributed_new_head_is_external_change(self) -> None:
         self.runtime("SUCCESS").probe(self.manifest)

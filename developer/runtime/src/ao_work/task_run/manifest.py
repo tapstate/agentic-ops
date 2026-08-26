@@ -78,7 +78,7 @@ class TaskRunManifestService:
             "confirmation_required": True,
             "confirmation_package": bundle["confirmation_package"],
             "side_effects": [],
-            "agentic_next_action": {
+            "next_step": {
                 "executor": "human",
                 "action": "review_task_run_authorization",
                 "required_inputs": [
@@ -587,7 +587,7 @@ class TaskRunManifestService:
             "deliveries": deliveries,
             "manifest_paths": [item["manifest_path"] for item in deliveries],
             "authorization_reference": manifests[0]["authorization"]["reference"],
-            "agentic_next_action": (
+            "next_step": (
                 "task_run_open" if len(manifests) == 1 else "task_run_open_each"
             ),
         }

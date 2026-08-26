@@ -78,7 +78,7 @@ class TakeoverStateMachineTest(unittest.TestCase):
     def test_full_lifecycle_separates_phase_from_business_stage(self) -> None:
         intent = self.persist()
         operation_id = intent["operation"]["operation_id"]
-        intent_next_action = intent["operation"]["agentic_next_action"]
+        intent_next_action = intent["operation"]["next_step"]
         self.assertEqual("takeover_task", intent_next_action["operation_id"])
         self.assertEqual(["takeover", "TAP-123"], intent_next_action["command_argv"])
         self.assertEqual(
@@ -93,7 +93,7 @@ class TakeoverStateMachineTest(unittest.TestCase):
         self.assertEqual("comment_verified", comment["operation"]["phase"])
         self.assertEqual(
             ["takeover", "TAP-123"],
-            comment["operation"]["agentic_next_action"]["command_argv"],
+            comment["operation"]["next_step"]["command_argv"],
         )
         self.assertEqual("initialized", self.read(progress_path)["stage"])
 
@@ -101,7 +101,7 @@ class TakeoverStateMachineTest(unittest.TestCase):
         self.assertEqual("status_verified", status["operation"]["phase"])
         self.assertEqual(
             ["takeover", "TAP-123"],
-            status["operation"]["agentic_next_action"]["command_argv"],
+            status["operation"]["next_step"]["command_argv"],
         )
         self.assertEqual("initialized", self.read(progress_path)["stage"])
 
@@ -117,7 +117,7 @@ class TakeoverStateMachineTest(unittest.TestCase):
         self.assertTrue(recovery["state_consistent"])
         self.assertTrue(Path(recovery["state_file"]).is_file())
 
-        next_action = completed["operation"]["agentic_next_action"]
+        next_action = completed["operation"]["next_step"]
         self.assertEqual("repository_branch_assess", next_action["operation_id"])
         self.assertEqual(
             ["task", "repositories", "assess", "--issue-key", "TAP-123"],
@@ -337,7 +337,7 @@ class TakeoverStateMachineTest(unittest.TestCase):
         operation = validate_takeover_operation(result["operation"])
         self.assertEqual("blocked", operation["result"])
         self.assertIn("不是新接管", operation["human_notice"])
-        self.assertTrue(operation["agentic_next_action"]["stop_workflow"])
+        self.assertTrue(operation["next_step"]["stop_workflow"])
         self.assertEqual("initialized", self.read(self.task_dir / "progress.json")["stage"])
 
     def test_local_finalize_interruption_is_detected_and_recovered(self) -> None:
@@ -478,7 +478,7 @@ class TakeoverStateMachineTest(unittest.TestCase):
         progress_path = self.task_dir / "progress.json"
         progress = self.read(progress_path)
         progress["stage"] = "takeover_started"
-        progress["agentic_next_action"] = "assess_task_intake"
+        progress["next_step"] = "assess_task_intake"
         progress_path.write_text(json.dumps(progress), encoding="utf-8")
         event = {
             "schema_version": "1",

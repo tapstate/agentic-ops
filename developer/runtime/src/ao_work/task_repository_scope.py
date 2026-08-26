@@ -135,7 +135,7 @@ def _with_repository_branch_recovery(
         retry_safe=False,
         required_human_action=error.required_human_action,
         details={**error.details, "task_domain": task_domain},
-        agentic_next_action=_repository_branch_override_next_action(),
+        next_step=_repository_branch_override_next_action(),
     )
 
 
@@ -327,7 +327,7 @@ def execute_repository_assess(
             "proposal_authority": "already_confirmed",
             "repository_scope_revision": recorded_scope.get("content_version", 0),
             "task_facts": task_facts,
-            "agentic_next_action": _repository_next_action(
+            "next_step": _repository_next_action(
                 executor="ai",
                 action="prepare_confirmed_domain_worktrees",
                 allowed_operations=("task_worktrees_prepare",),
@@ -348,7 +348,7 @@ def execute_repository_assess(
             recorded_scope.get("content_version", 0)
         ),
         "task_facts": task_facts,
-        "agentic_next_action": _repository_next_action(
+        "next_step": _repository_next_action(
             executor="human",
             action="review_and_confirm_task_domain",
             required_inputs=("confirmation_id", "task_domain"),
@@ -570,7 +570,7 @@ def execute_repository_confirm(
             "confirmation_required": True,
             "side_effects": [],
             "confirmation_ref": confirmation_store.reference(confirmation),
-            "agentic_next_action": _repository_next_action(
+            "next_step": _repository_next_action(
                 executor="human",
                 action="confirm_task_domain",
                 required_inputs=("task_domain",),
@@ -593,7 +593,7 @@ def execute_repository_confirm(
         "confirmation_ref": confirmation_store.consume(
             issue_key, agentic_run_id, confirmation_id, scope, confirmed_domain
         ),
-        "agentic_next_action": _repository_next_action(
+        "next_step": _repository_next_action(
             executor="ai",
             action="prepare_confirmed_domain_worktrees",
             required_inputs=(),
@@ -860,7 +860,7 @@ def execute_worktree_prepare(
         "created_repositories": created_repositories,
         "created": bool(created_repositories),
         "intake_source": source_context["intake_source"],
-        "agentic_next_action": _repository_next_action(
+        "next_step": _repository_next_action(
             executor="ai",
             action="assess_task_intake",
             required_inputs=("issue_key", "agentic_run_id", "intake_input_file"),

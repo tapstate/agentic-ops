@@ -267,7 +267,7 @@ class TaskRunManifestTest(unittest.TestCase):
         prepared = self.service.prepare(ISSUE_KEY)
         self.assertTrue(prepared["confirmation_required"])
         self.assertEqual(
-            "none", prepared["agentic_next_action"]["ownership_effect"]
+            "none", prepared["next_step"]["ownership_effect"]
         )
         self.assertEqual(
             REPOSITORY,
@@ -418,7 +418,7 @@ class TaskRunManifestTest(unittest.TestCase):
             confirmed_by="研发工程师",
             confirm=True,
         )
-        self.assertEqual("task_run_open_each", authorized["agentic_next_action"])
+        self.assertEqual("task_run_open_each", authorized["next_step"])
         self.assertEqual(2, len(authorized["deliveries"]))
 
         protocol = TaskRunProtocol(

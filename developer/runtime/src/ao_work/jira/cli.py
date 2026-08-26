@@ -559,7 +559,7 @@ def execute_jira(
         next_action = _repository_branch_reassess_next_action(plan)
         if next_action is not None:
             payload["task_domain"] = plan.payload["repository_assess_task_domain"]
-            payload["agentic_next_action"] = next_action
+            payload["next_step"] = next_action
         return payload
 
     if args.command == "comment":

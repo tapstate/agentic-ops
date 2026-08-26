@@ -999,7 +999,7 @@ class PrepareTaskWorktreesTest(unittest.TestCase):
             captured.exception.details["repository"],
         )
         self.assertFalse(captured.exception.retry_safe)
-        self.assertIsNone(captured.exception.agentic_next_action)
+        self.assertIsNone(captured.exception.next_step)
         self.assertEqual(
             "tapdata/tapdata-application: <confirmed-branch>",
             captured.exception.details["repository_branch_override_template"],

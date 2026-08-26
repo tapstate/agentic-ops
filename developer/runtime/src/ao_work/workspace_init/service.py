@@ -447,7 +447,7 @@ class WorkspaceInitializer:
             "credential_protection": credential_protection,
             "preflight_status": "passed",
             "preflight_checks": preflight["checks"],
-            "agentic_next_action": "inspect_explicit_jira_task",
+            "next_step": "inspect_explicit_jira_task",
         }
 
     def _check_workspace_boundary(self, checks: list[dict[str, str]]) -> None:
