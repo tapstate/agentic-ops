@@ -270,7 +270,18 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
                 result = success(
                     "task_repositories_assess", agentic_next_action=next_action
                 )
-                self.assertEqual(next_action, result["agentic_next_action"])
+                normalized = result["agentic_next_action"]
+                for field, value in next_action.items():
+                    self.assertEqual(value, normalized[field])
+                for field in (
+                    "operation_id",
+                    "command_argv",
+                    "command_line",
+                    "bound_arguments",
+                    "input_artifacts",
+                    "reason",
+                ):
+                    self.assertIn(field, normalized)
 
     def test_domain_confirmation_uses_runtime_derived_repository_map(self) -> None:
         repository = "tapdata/tapdata-connectors"

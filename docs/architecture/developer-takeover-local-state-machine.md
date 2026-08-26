@@ -56,8 +56,15 @@
   "takeover_status": "in_progress",
   "human_notice": "正在执行新接管。",
   "agentic_next_action": {
-    "executor": "runtime",
-    "action": "ensure_takeover_comment"
+    "executor": "ao_work",
+    "action": "ensure_takeover_comment",
+    "operation_id": "takeover_task",
+    "command_argv": ["takeover", "TAP-123"],
+    "command_line": "ao-work takeover TAP-123",
+    "bound_arguments": {"issue_key": "TAP-123"},
+    "required_inputs": [],
+    "input_artifacts": [],
+    "allowed_operations": ["takeover_task"]
   },
   "failure_code": null,
   "retry_safe": true,
