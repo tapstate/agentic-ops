@@ -427,6 +427,16 @@ capabilities:
     summary: 确认任务领域并校验 Runtime 自动推导的完整仓库分支结果；只有显式 confirm 才持久化，且确认时不创建工作树。
     next_action: 按确认领域一次准备完整分析工作树集合。
 
+  - id: repository_confirmation_inspect
+    source: runtime
+    contract:
+    status: implemented
+    visibility: public
+    commands:
+      - [task, repositories, confirmations, inspect]
+    summary: 只读列出当前任务的仓库领域确认 ID 与中文描述，或按 ID 返回确认记录的审计摘要；不暴露受管路径，也不产生写入。
+    next_action: 需要核对某次领域确认时，先不传确认 ID 列表查询；需要查看一条完整审计摘要时再传入对应 confirmation_id。
+
   - id: task_worktree_prepare
     source: contract
     contract: contracts/operations/task-worktree-prepare.yaml

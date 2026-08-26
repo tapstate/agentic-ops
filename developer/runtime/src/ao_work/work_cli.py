@@ -106,6 +106,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--task-domain", choices=("product", "assistant", "taptest")
     )
     repository_confirm.add_argument("--confirm", action="store_true")
+    repository_confirmations = repository_actions.add_parser("confirmations")
+    repository_confirmation_actions = repository_confirmations.add_subparsers(
+        dest="confirmation_action", required=True
+    )
+    repository_confirmation_inspect = repository_confirmation_actions.add_parser("inspect")
+    repository_confirmation_inspect.add_argument("--issue-key", required=True)
+    repository_confirmation_inspect.add_argument("--confirmation-id")
     task_worktrees = task_commands.add_parser("worktrees")
     worktree_actions = task_worktrees.add_subparsers(dest="action", required=True)
     worktree_prepare = worktree_actions.add_parser("prepare")
@@ -206,6 +213,16 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             store,
             args.issue_key,
             task_domain=args.task_domain,
+        )
+        return success(operation, workplane=workspace.workplane, **state)
+    if (
+        args.group == "task"
+        and args.command == "repositories"
+        and args.action == "confirmations"
+        and args.confirmation_action == "inspect"
+    ):
+        state = RepositoryConfirmationStore(workspace.root).inspect(
+            args.issue_key, args.confirmation_id
         )
         return success(operation, workplane=workspace.workplane, **state)
     if args.group == "task" and args.command == "repositories" and args.action == "confirm":
