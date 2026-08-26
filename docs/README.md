@@ -43,6 +43,7 @@
 - [项目维护者故事](user-stories/project-maintainer-stories.md)
 - [研发工程师故事](user-stories/development-engineer-stories.md)
 - [标准流程注册处](processes/standard-process-registry.md)
+- [人工决策项处理规范指引](processes/human-decision-handling-guide.md)
 - [反馈闭环](workflows/feedback-loop.md)
 - [端到端演示](examples/end-to-end-demo.md)
 - [v0.3 AO 真实试运行结果（冻结历史证据）](examples/v0.3-ao-pilot-result.md)
