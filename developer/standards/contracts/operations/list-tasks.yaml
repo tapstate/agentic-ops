@@ -21,7 +21,7 @@ output:
     type: string
   tasks:
     type: array
-  agentic_next_action:
+  next_step:
     type: string
 failure:
   codes:

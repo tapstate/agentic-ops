@@ -46,7 +46,7 @@ output:
     type: boolean
   current_stage:
     type: string
-  agentic_next_action:
+  next_step:
     type: string
 failure:
   codes:

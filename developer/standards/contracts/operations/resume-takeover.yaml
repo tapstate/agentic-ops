@@ -47,7 +47,7 @@ output:
     type: string
   standard_process_stage:
     type: string
-  agentic_next_action:
+  next_step:
     type: object
   takeover_recovery:
     type: object

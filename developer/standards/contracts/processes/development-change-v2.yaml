@@ -22,7 +22,7 @@ stages:
   - id: waiting_takeover
     responsible_role: development_engineer
     runtime_operations: [takeover_task]
-    output_fields: [agentic_run_id, takeover_status, current_stage, agentic_next_action]
+    output_fields: [agentic_run_id, takeover_status, current_stage, next_step]
     review_gate: null
   - id: task_intake
     responsible_role: ai_agent
@@ -68,7 +68,7 @@ stages:
       failure_evidence: artifact_and_runner_log
       remediation_requires_user_decision: true
       all_other_failures: human_intervention
-    success_output: [completed, ci_passed_or_not_required, completion_evidence, agentic_next_action_none]
+    success_output: [completed, ci_passed_or_not_required, completion_evidence, next_step_none]
     failure_routing: risk_decision_or_blocked
     review_gate: null
   - id: completed

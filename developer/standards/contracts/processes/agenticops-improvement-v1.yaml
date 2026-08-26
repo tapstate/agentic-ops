@@ -58,7 +58,7 @@ stages:
       - code_review_reference
     output_fields:
       - review_decision
-      - agentic_next_action
+      - next_step
     review_gate: development_engineer_code_review
   - id: completed
     responsible_role: development_engineer
