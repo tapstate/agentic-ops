@@ -99,7 +99,7 @@ def execute_task_resume(
         )
 
     agentic_run_id = str(task["agentic_run_id"])
-    next_action: object = str(progress.get("agentic_next_action") or "")
+    next_action: object = _legacy_resume_action(progress.get("agentic_next_action"))
     if operation_resumable:
         next_action = recovery_operation["agentic_next_action"]
     repository_scope = local.get("repository_scope")
@@ -123,16 +123,73 @@ def execute_task_resume(
     }
 
 
+def _legacy_resume_action(value: object) -> dict[str, object]:
+    legacy_action = str(value or "未记录")
+    return {
+        "executor": "ai",
+        "action": "resume_task_from_recorded_state",
+        "required_inputs": [],
+        "allowed_operations": [],
+        "requires_authorization": False,
+        "stop_workflow": False,
+        "ownership_effect": "none",
+        "reason": (
+            "恢复旧任务记录；Runtime 未保存可执行下一步时先检查当前任务状态"
+            f"（旧动作：{legacy_action}）"
+        ),
+    }
+
+
 def _repository_resume_action(scope: object, fallback: object) -> object:
     if not isinstance(scope, dict):
         return fallback
     phase = str(scope.get("phase") or "")
     actions = {
-        "proposal_recorded": "review_and_confirm_task_domain",
-        "mapping_confirmed": "prepare_confirmed_domain_worktrees",
-        "worktrees_active": "resume_work_in_confirmed_repository_worktrees",
-        "completion_evidence_readback": "cleanup_completed_task_worktrees",
-        "worktrees_cleaned": "none",
+        "proposal_recorded": {
+            "executor": "human",
+            "action": "review_and_confirm_task_domain",
+            "required_inputs": ["task_domain"],
+            "allowed_operations": ["repository_branch_confirm"],
+            "requires_authorization": True,
+            "stop_workflow": True,
+            "ownership_effect": "none",
+        },
+        "mapping_confirmed": {
+            "executor": "ai",
+            "action": "prepare_confirmed_domain_worktrees",
+            "required_inputs": [],
+            "allowed_operations": ["task_worktree_prepare"],
+            "requires_authorization": False,
+            "stop_workflow": False,
+            "ownership_effect": "none",
+        },
+        "worktrees_active": {
+            "executor": "ai",
+            "action": "resume_work_in_confirmed_repository_worktrees",
+            "required_inputs": ["intake_input_file"],
+            "allowed_operations": ["task_intake_assess"],
+            "requires_authorization": False,
+            "stop_workflow": False,
+            "ownership_effect": "none",
+        },
+        "completion_evidence_readback": {
+            "executor": "ai",
+            "action": "cleanup_completed_task_worktrees",
+            "required_inputs": [],
+            "allowed_operations": ["task_worktree_cleanup"],
+            "requires_authorization": False,
+            "stop_workflow": False,
+            "ownership_effect": "none",
+        },
+        "worktrees_cleaned": {
+            "executor": "stop",
+            "action": "task_worktrees_already_cleaned",
+            "required_inputs": [],
+            "allowed_operations": [],
+            "requires_authorization": False,
+            "stop_workflow": True,
+            "ownership_effect": "none",
+        },
     }
     return actions.get(phase, fallback)
 

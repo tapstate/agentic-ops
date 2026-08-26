@@ -78,15 +78,31 @@ class TakeoverStateMachineTest(unittest.TestCase):
     def test_full_lifecycle_separates_phase_from_business_stage(self) -> None:
         intent = self.persist()
         operation_id = intent["operation"]["operation_id"]
+        intent_next_action = intent["operation"]["agentic_next_action"]
+        self.assertEqual("takeover_task", intent_next_action["operation_id"])
+        self.assertEqual(["takeover", "TAP-123"], intent_next_action["command_argv"])
+        self.assertEqual(
+            "ao-work takeover TAP-123", intent_next_action["command_line"]
+        )
+        self.assertEqual({"issue_key": "TAP-123"}, intent_next_action["bound_arguments"])
+        self.assertEqual([], intent_next_action["input_artifacts"])
         progress_path = self.task_dir / "progress.json"
         self.assertEqual("initialized", self.read(progress_path)["stage"])
 
         comment = self.verify_comment(operation_id)
         self.assertEqual("comment_verified", comment["operation"]["phase"])
+        self.assertEqual(
+            ["takeover", "TAP-123"],
+            comment["operation"]["agentic_next_action"]["command_argv"],
+        )
         self.assertEqual("initialized", self.read(progress_path)["stage"])
 
         status = self.verify_status(operation_id)
         self.assertEqual("status_verified", status["operation"]["phase"])
+        self.assertEqual(
+            ["takeover", "TAP-123"],
+            status["operation"]["agentic_next_action"]["command_argv"],
+        )
         self.assertEqual("initialized", self.read(progress_path)["stage"])
 
         completed = self.store.finalize_takeover(
@@ -100,6 +116,19 @@ class TakeoverStateMachineTest(unittest.TestCase):
         recovery = self.store.read_takeover_recovery(IDENTITY.issue_key)
         self.assertTrue(recovery["state_consistent"])
         self.assertTrue(Path(recovery["state_file"]).is_file())
+
+        next_action = completed["operation"]["agentic_next_action"]
+        self.assertEqual("repository_branch_assess", next_action["operation_id"])
+        self.assertEqual(
+            ["task", "repositories", "assess", "--issue-key", "TAP-123"],
+            next_action["command_argv"],
+        )
+        self.assertEqual(
+            "ao-work task repositories assess --issue-key TAP-123",
+            next_action["command_line"],
+        )
+        self.assertEqual({"issue_key": "TAP-123"}, next_action["bound_arguments"])
+        self.assertEqual(["repository_branch_assess"], next_action["allowed_operations"])
 
     def test_completed_takeover_remains_consistent_after_later_gate(self) -> None:
         intent = self.persist()

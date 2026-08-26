@@ -329,9 +329,13 @@ def failure(operation: str, error: RuntimeErrorResult) -> dict[str, Any]:
         f"{operation}:{error.code}:{error.status}".encode("utf-8")
     ).hexdigest()
     if error.agentic_next_action is not None:
-        result["agentic_next_action"] = _normalize_next_action(error.agentic_next_action)
+        result["agentic_next_action"] = _normalize_next_action(
+            error.agentic_next_action,
+            operation=operation,
+            payload=result,
+        )
     elif error.retry_safe:
-        result["agentic_next_action"] = {
+        result["agentic_next_action"] = _normalize_next_action({
             "executor": "ai",
             "action": "inspect_state_and_retry_once",
             "required_inputs": ["code", "message", "required_human_action"],
@@ -349,9 +353,9 @@ def failure(operation: str, error: RuntimeErrorResult) -> dict[str, Any]:
                 "requires_recorded_retry_event": True,
                 "on_exhausted": "escalate_to_human",
             },
-        }
+        }, operation=operation, payload=result)
     else:
-        result["agentic_next_action"] = {
+        result["agentic_next_action"] = _normalize_next_action({
             "executor": "human",
             "action": "resolve_runtime_blocker",
             "required_inputs": [],
@@ -369,7 +373,7 @@ def failure(operation: str, error: RuntimeErrorResult) -> dict[str, Any]:
                 "requires_recorded_retry_event": False,
                 "on_exhausted": "escalate_to_human",
             },
-        }
+        }, operation=operation, payload=result)
     return result
 
 
@@ -379,7 +383,9 @@ def _success_next_action(
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
     if isinstance(legacy_next_action, Mapping):
-        return _normalize_next_action(legacy_next_action)
+        return _normalize_next_action(
+            legacy_next_action, operation=operation, payload=payload
+        )
     configured = dict(
         _SUCCESS_NEXT_ACTIONS.get(
             operation,
@@ -463,10 +469,12 @@ def _success_next_action(
     }
     if isinstance(legacy_next_action, str) and legacy_next_action.strip():
         next_action["reason"] = legacy_next_action.strip()
-    return next_action
+    return _normalize_next_action(next_action, operation=operation, payload=payload)
 
 
-def _normalize_next_action(value: Mapping[str, Any]) -> dict[str, Any]:
+def _normalize_next_action(
+    value: Mapping[str, Any], *, operation: str, payload: Mapping[str, Any]
+) -> dict[str, Any]:
     required = {
         "executor",
         "action",
@@ -492,6 +500,42 @@ def _normalize_next_action(value: Mapping[str, Any]) -> dict[str, Any]:
     ):
         raise ValueError("agentic_next_action 列表字段无效")
     normalized = dict(value)
+    operation_id = normalized.get("operation_id")
+    if not isinstance(operation_id, str) or not operation_id.strip():
+        allowed = normalized["allowed_operations"]
+        operation_id = allowed[0] if len(allowed) == 1 else "human_decision"
+    command_argv = normalized.get("command_argv")
+    if not isinstance(command_argv, list) or not all(
+        isinstance(item, str) and item for item in command_argv
+    ):
+        command_argv = _command_argv(str(operation_id), payload)
+    input_artifacts = normalized.get("input_artifacts")
+    if not isinstance(input_artifacts, list):
+        input_artifacts = _input_artifacts(normalized["required_inputs"], payload)
+    command_line = normalized.get("command_line")
+    if not isinstance(command_line, str) or not command_line.strip():
+        command_line = (
+            f"ao-work {' '.join(command_argv)}"
+            if command_argv
+            else "无需命令；请按 required_inputs 完成人工确认或选择"
+        )
+    bound_arguments = normalized.get("bound_arguments")
+    if not isinstance(bound_arguments, dict):
+        bound_arguments = {
+            key: str(payload[key])
+            for key in ("issue_key", "agentic_run_id")
+            if payload.get(key) is not None
+        }
+    normalized.update(
+        {
+            "operation_id": operation_id,
+            "command_argv": command_argv,
+            "command_line": command_line,
+            "bound_arguments": bound_arguments,
+            "input_artifacts": input_artifacts,
+            "reason": str(normalized.get("reason") or normalized["action"]),
+        }
+    )
     normalized.setdefault(
         "retry_gate",
         {
@@ -504,6 +548,69 @@ def _normalize_next_action(value: Mapping[str, Any]) -> dict[str, Any]:
         },
     )
     return normalized
+
+
+def _command_argv(operation_id: str, payload: Mapping[str, Any]) -> list[str]:
+    """只从已版本化的命令命名规则生成下一步入口，未知或需人工选择时不猜测。"""
+    aliases = {
+        "takeover_task": ("takeover",),
+        "takeover": ("takeover",),
+        "repository_branch_assess": ("task", "repositories", "assess"),
+        "repository_branch_confirm": ("task", "repositories", "confirm"),
+        "task_repositories_confirm": ("task", "repositories", "confirm"),
+        "task_worktree_prepare": ("task", "worktrees", "prepare"),
+        "task_worktrees_prepare": ("task", "worktrees", "prepare"),
+        "task_worktree_cleanup": ("task", "worktrees", "cleanup"),
+        "task_intake_assess": ("task", "intake", "assess"),
+        "task_solution_classify": ("task", "solution", "classify"),
+        "task_run_manifest": ("task-run", "prepare"),
+        "task_run_authorize": ("task-run", "authorize"),
+        "task_start": ("task", "start"),
+        "task_state_inspect": ("task", "inspect"),
+        "resume_takeover": ("task", "resume"),
+        "read_task_facts": ("task", "facts"),
+        "workspace_init": ("workspace", "init"),
+        "workspace_inspect": ("workspace", "inspect"),
+        "workspace_preflight": ("workspace", "preflight"),
+        "capability_show": ("capability", "show"),
+        "report_write": ("report", "write"),
+    }
+    path = aliases.get(operation_id)
+    if path is None and operation_id.startswith("task-run_"):
+        path = ("task-run", operation_id.removeprefix("task-run_").replace("_", "-"))
+    if path is None and operation_id.startswith("jira_"):
+        parts = operation_id.split("_")
+        path = tuple(["jira", *parts[1:]])
+    if path is None:
+        return []
+    argv = list(path)
+    issue_key = payload.get("issue_key")
+    if path == ("takeover",):
+        argv.append(str(issue_key) if issue_key else "<issue-key>")
+    elif path[:1] == ("task",) and path[1:] in {
+        ("repositories", "assess"),
+        ("repositories", "confirm"),
+        ("worktrees", "prepare"),
+        ("worktrees", "cleanup"),
+        ("intake", "assess"),
+        ("solution", "classify"),
+        ("facts",),
+        ("inspect",),
+    }:
+        argv.extend(("--issue-key", str(issue_key) if issue_key else "<issue-key>"))
+    elif path == ("task-run", "prepare"):
+        argv.extend(("--issue-key", str(issue_key) if issue_key else "<issue-key>"))
+    return argv
+
+
+def _input_artifacts(required_inputs: list[str], payload: Mapping[str, Any]) -> list[dict[str, str]]:
+    return [
+        {
+            "kind": item,
+            "source": f"result.{item}" if item in payload else f"user_input.{item}",
+        }
+        for item in required_inputs
+    ]
 
 
 def write_json(result: Mapping[str, Any]) -> None:

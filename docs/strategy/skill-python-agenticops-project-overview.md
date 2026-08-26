@@ -144,6 +144,8 @@ ao-work
     review.md
     completion.md
   feedback/observation.md
+  proposals/repository-scope.json
+  confirmations/repository-branch.json
   runs/<agentic_run_id>/
     summary.json
     evidence/
