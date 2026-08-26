@@ -144,7 +144,18 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
         )
         store = mock.Mock()
         store.inspect.return_value = {"task": {"agentic_run_id": "run-TAPSTATE-87"}}
-        store.record_repository_proposal.return_value = {"path": "/state/scope.json"}
+        store.record_repository_proposal.return_value = {
+            "repository_scope": {
+                "content_version": 1,
+                "issue_key": "TAPSTATE-87",
+                "agentic_run_id": "run-TAPSTATE-87",
+                "task_domain": "product",
+                "problem_version": "develop",
+                "problem_version_repository": "tapdata/tapdata",
+                "problem_version_sha": "a" * 40,
+                "proposed_repository_branch_map": [],
+            }
+        }
 
         with (
             mock.patch.object(
@@ -188,9 +199,14 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
                 "task_worktree_path",
                 return_value=Path("/pool/.worktree/TAPSTATE-87/tapdata"),
             ),
+            mock.patch.object(task_repository_scope, "RepositoryConfirmationStore") as confirmations,
         ):
+            confirmations.return_value.create.return_value = {
+                "confirmation_id": "rc_" + "a" * 32,
+                "status": "recorded",
+            }
             result = task_repository_scope.execute_repository_assess(
-                SimpleNamespace(), Path("/install"), store, "TAPSTATE-87"
+                SimpleNamespace(root=Path("/workspace")), Path("/install"), store, "TAPSTATE-87"
             )
 
         rendered = success("task_repositories_assess", **result)
@@ -200,7 +216,8 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
         self.assertEqual(
             "review_and_confirm_task_domain", next_action["action"]
         )
-        self.assertEqual(["confirmation_template"], next_action["required_inputs"])
+        self.assertEqual(["confirmation_id", "task_domain"], next_action["required_inputs"])
+        self.assertEqual("rc_" + "a" * 32, result["confirmation_ref"]["confirmation_id"])
         self.assertEqual(
             ["task_repositories_confirm"], next_action["allowed_operations"]
         )
@@ -213,7 +230,7 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
             _repository_next_action(
                 executor="human",
                 action="review_and_confirm_task_domain",
-                required_inputs=("confirmation_template",),
+                required_inputs=("confirmation_id", "task_domain"),
                 allowed_operations=("task_repositories_confirm",),
                 requires_authorization=True,
                 stop_workflow=True,
@@ -279,17 +296,11 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
                 "problem_version_repository": repository,
                 "problem_version_sha": sha,
                 "proposed_repository_branch_map": [proposal_row],
+                "content_version": 1,
             },
         }
         store.confirm_repository_mapping.return_value = {"path": "/state/scope.json"}
-        mapping = {
-            "issue_key": "TAPSTATE-87",
-            "agentic_run_id": "run-TAPSTATE-87",
-            "task_domain": "product",
-            "problem_version": "develop",
-            "problem_version_repository": repository,
-            "problem_version_sha": sha,
-        }
+        confirmation_id = "rc_" + "a" * 32
 
         with (
             mock.patch.object(
@@ -314,28 +325,34 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
                 "task_worktree_path",
                 return_value=Path("/pool/.worktree/TAPSTATE-87/connectors/develop"),
             ),
+            mock.patch.object(task_repository_scope, "RepositoryConfirmationStore") as confirmations,
         ):
+            confirmations.return_value.validate.return_value = {"status": "recorded"}
+            confirmations.return_value.reference.return_value = {"confirmation_id": confirmation_id}
+            confirmations.return_value.consume.return_value = {"confirmation_id": confirmation_id, "status": "consumed"}
             result = task_repository_scope.execute_repository_confirm(
-                SimpleNamespace(),
+                SimpleNamespace(root=Path("/workspace")),
                 Path("/install"),
                 store,
                 "TAPSTATE-87",
-                mapping,
+                confirmation_id,
+                "product",
                 confirm=True,
             )
             with self.assertRaises(Exception) as captured:
                 task_repository_scope.execute_repository_confirm(
-                    SimpleNamespace(),
+                    SimpleNamespace(root=Path("/workspace")),
                     Path("/install"),
                     store,
                     "TAPSTATE-87",
-                    {**mapping, "repository_branch_map": []},
+                    confirmation_id,
+                    "assistant",
                     confirm=True,
                 )
 
         confirmed = store.confirm_repository_mapping.call_args.args[2]
         self.assertEqual(
-            "repository_mapping_override_unsupported", captured.exception.code
+            "task_domain_changed", captured.exception.code
         )
         self.assertEqual("product", result["task_domain"])
         self.assertEqual(repository, confirmed[0]["repository"])

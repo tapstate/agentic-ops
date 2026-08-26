@@ -54,15 +54,18 @@ ao-work task repositories assess --issue-key TAP-12620
 
 ao-work task repositories confirm \
   --issue-key TAP-12620 \
-  --mapping-file TAP-12620-repository-branches.json \
+  --confirmation-id rc_<assess 返回的确认 ID> \
+  --task-domain product \
   --confirm
 ```
 
 `assess` 只读输出建议领域、固定分析基线及源码证据，产物名为 `proposed_repository_branch_map`。它只是领域内自动推导结果，不具有建树权限。AIAgent 展示任务领域、问题版本和逐仓推导结果；用户确认领域，建议不准时使用 `--task-domain product|assistant|taptest` 重新分析。
 
-`assess` 同时输出可保存到工作空间普通 JSON 文件的 `confirmation_template`，绑定 `issue_key`、`agentic_run_id`、`task_domain`、问题版本、问题版本来源仓库和固定 SHA；逐仓表由 Runtime 自动生成。不得把 `.agentic-ops/` 受管状态文件直接作为 `--mapping-file` 输入。
+`assess` 为每次建议生成 `confirmation_ref`。其中 `confirmation_id` 绑定 `issue_key`、`agentic_run_id`、仓库范围内容版本和建议摘要；确认工件由 Runtime 在受管目录中统一存取，调用方不得拼接、读取或编辑其路径。逐仓表仍由 Runtime 自动生成。
 
-`confirm` 读取工作空间普通输入中的领域确认。没有 `--confirm` 时只展示任务领域、自动推导的逐仓分支和计划工作树；带 `--confirm` 才保存领域及 `confirmed_repository_branch_map`。确认动作不建树；随后 `task worktrees prepare` 一次创建完整领域工作树集合。
+`confirm` 只接收 `confirmation_id` 与人工确认的 `task_domain`。没有 `--confirm` 时只展示任务领域、自动推导的逐仓分支和计划工作树；带 `--confirm` 时 Runtime 先原子写入、按 ID 回读并消费确认工件，再保存领域及 `confirmed_repository_branch_map`。确认动作不建树；随后 `task worktrees prepare` 一次创建完整领域工作树集合。多份确认工件可并存；任务、运行、范围版本或建议摘要变化时旧 ID 失效。同一 ID 同领域重复提交幂等，不同领域失败关闭。
+
+旧 `--mapping-file` 仅在兼容期接受工作空间普通 JSON 文件，并明确提示迁移；它绝不放宽 `.agentic-ops/`、`.git`、隐藏文件或凭证文件的通用读取限制。
 
 每个 repository 必须：
 

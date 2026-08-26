@@ -102,6 +102,26 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
     def test_install_root_is_not_a_public_option(self) -> None:
         self.assertNotIn("--install-root", self._all_option_strings(build_parser()))
 
+    def test_repository_confirmation_uses_id_and_domain_not_a_managed_path(self) -> None:
+        parsed = build_parser().parse_args(
+            [
+                "task",
+                "repositories",
+                "confirm",
+                "--issue-key",
+                "TAP-123",
+                "--confirmation-id",
+                "rc_" + "a" * 32,
+                "--task-domain",
+                "product",
+                "--confirm",
+            ]
+        )
+
+        self.assertEqual("rc_" + "a" * 32, parsed.confirmation_id)
+        self.assertEqual("product", parsed.task_domain)
+        self.assertIsNone(parsed.mapping_file)
+
     def test_auth_routes_to_workspace_setup_without_preflight(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()
