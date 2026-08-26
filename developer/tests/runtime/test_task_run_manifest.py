@@ -418,7 +418,9 @@ class TaskRunManifestTest(unittest.TestCase):
             confirmed_by="研发工程师",
             confirm=True,
         )
-        self.assertEqual("task_run_open_each", authorized["next_step"])
+        self.assertEqual("task_run_open_each", authorized["next_step"]["action"])
+        self.assertEqual("action", authorized["next_step"]["kind"])
+        self.assertEqual("ai", authorized["next_step"]["executor"])
         self.assertEqual(2, len(authorized["deliveries"]))
 
         protocol = TaskRunProtocol(
