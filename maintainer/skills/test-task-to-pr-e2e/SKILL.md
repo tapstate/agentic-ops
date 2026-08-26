@@ -13,7 +13,7 @@ metadata:
 
 - 未收到本次真实测试授权前，不读取 `~/.agentic-ops`、业务工作空间、凭据、Jira、GitHub 或其它本机身份。
 - 先查询 `ao-work capability list|show`。`workspace_init`、正式 `takeover_task`、信息分析、方案分级、任务审计、Jira Comment/Worklog、Git 提交、任务分支推送和 GitHub PR 创建必须都有 `implemented` 原子能力；任一项为 `capability_gap` 时停止，不让 AI 直接运行等价命令绕过。内部 `task_start` 不是用户入口，也不能作为接管前置步骤。
-- 每次 `ao-work` 调用只根据 JSON 的 `ok`、`status`、证据字段和结构化 `agentic_next_action` 推进。`executor` 只表示当前步骤执行者，不改变 `task_ownership.task_owner`；现役 `ownership_effect` 只能为 `none`。未知 executor/action、未列入 `allowed_operations` 的下一操作、缺失 required inputs 或要求 `stop_workflow=true` 时停止。只在 `retry_gate.allowed=true` 时允许按同一 `retry_key` 重试一次；必须先回读状态、改变输入并记录 retry 事件，耗尽后转人工，绝不自动循环。
+- 每次 `ao-work` 调用只根据 JSON 的 `ok`、`status`、证据字段和结构化 `next_step` 推进。`executor` 只表示当前步骤执行者，不改变 `task_ownership.task_owner`；现役 `ownership_effect` 只能为 `none`。未知 executor/action、未列入 `allowed_operations` 的下一操作、缺失 required inputs 或要求 `stop_workflow=true` 时停止。只在 `retry_gate.allowed=true` 时允许按同一 `retry_key` 重试一次；必须先回读状态、改变输入并记录 retry 事件，耗尽后转人工，绝不自动循环。
 - 测试终点固定为真实 PR 等待审查；禁止 merge、Jira Done、release、tag、保护分支直推、强推和历史改写。
 
 ## 执行
@@ -44,7 +44,7 @@ ao-maint integration preflight-task-to-pr-e2e <ISSUE-KEY>
    - L3：触及架构、公共合同、安全边界、数据迁移或已确认设计，由 AI 先修改设计并重新分析，之后仍进入设计审查。
    - L4：事实冲突、必要信息无法补齐、权限或能力不足，停止并转人工。
    不调用已经删除的 intake/solution 通用确认命令。Jira/Profile 快照、源码 HEAD、证据、范围、风险或方案变化后旧结论失效，必须重新分析和分级。
-6. 设计或风险决策确认后，developer AI 加载工作空间 `AGENTS.md` 和 `$run-task-to-pr-test`，逐步消费 `agentic_next_action`。开放式代码理解、方案设计和实现由 AI 完成；Jira、Git、GitHub、验证、证据和门禁由 Runtime 判定。
+6. 设计或风险决策确认后，developer AI 加载工作空间 `AGENTS.md` 和 `$run-task-to-pr-test`，逐步消费 `next_step`。开放式代码理解、方案设计和实现由 AI 完成；Jira、Git、GitHub、验证、证据和门禁由 Runtime 判定。
 7. 每个原子步骤完成后，根据实际结果执行返回的唯一下一动作，直到 `stop_workflow=true`、L4、重试耗尽或到达 PR 审查。方案、范围、外部事实或批准摘要变化后，重新执行信息分析和方案分级，不沿用旧结论。
    从正式接管到 PR 审查保持配置指定的同一 `task_owner`。reviewer、人工确认、Runtime 或项目工具参与步骤不构成转派。如需转派，记录 `task_transfer` 能力缺口并停止，由人决定；本 Skill 不预设转派方案。
 8. developer AI 完成代码与验证后，启动独立 reviewer AI，以只读方式检查 Jira 验收条件、已确认准入摘要、分级方案、diff 和验证证据。reviewer 只能给出 `approve`、`request_changes` 或 `blocked`；不能修改代码、创建 PR 或代替用户批准高风险动作。`request_changes` 交回原 developer AI 修复、重新分析受影响信息并重新验证。

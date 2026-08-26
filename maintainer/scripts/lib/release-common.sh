@@ -1159,7 +1159,7 @@ release_wait_for_manual_merge() {
       ;;
     OPEN)
       release_write_waiting_audit "$repo_root" "$operation" "$version" "$head" "$branch" "$jira_id" || return 1
-      printf '{"ok":false,"operation":"%s","status":"waiting_for_manual_merge","version":"%s","head":"%s","branch":"%s","pr_number":%s,"pr_url":"%s","protection_mode":"soft","audit_file":"%s","continue_command":"%s","agentic_next_action":"merge_pr_with_merge_commit_then_rerun"}\n' \
+      printf '{"schema_version":"step-result/v2","ok":false,"operation":"%s","status":"waiting_for_manual_merge","retry_safe":true,"result":{"status":"blocked","summary":"等待人工使用 Merge commit 合并 PR","facts":{},"evidence":[],"effects":[],"remaining":[]},"next_step":{"kind":"decision","scope":"flow","mode":"manual","executor":"human","action":"merge_pr_with_merge_commit_then_rerun","question":"请使用 Merge commit 合并 PR 后重新运行继续命令","choices":[{"id":"merge","label":"合并 PR 并继续","recommended":true}],"submit":{"operation":"submit_decision","effect":"record_only"},"call":{"operation":"submit_decision","argv":[]}},"version":"%s","head":"%s","branch":"%s","pr_number":%s,"pr_url":"%s","protection_mode":"soft","audit_file":"%s","continue_command":"%s"}\n' \
         "$operation" "$version" "$head" "$branch" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_AUDIT_FILE" "$RELEASE_CONTINUE_COMMAND"
       return 2
       ;;

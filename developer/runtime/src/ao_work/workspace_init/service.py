@@ -447,7 +447,17 @@ class WorkspaceInitializer:
             "credential_protection": credential_protection,
             "preflight_status": "passed",
             "preflight_checks": preflight["checks"],
-            "next_step": "inspect_explicit_jira_task",
+            "next_step": {
+                "executor": "ai",
+                "action": "inspect_explicit_jira_task",
+                "required_inputs": ["issue_key"],
+                "allowed_operations": ["task_inspect"],
+                "requires_authorization": False,
+                "stop_workflow": False,
+                "ownership_effect": "none",
+                "kind": "input",
+                "mode": "manual",
+            },
         }
 
     def _check_workspace_boundary(self, checks: list[dict[str, str]]) -> None:

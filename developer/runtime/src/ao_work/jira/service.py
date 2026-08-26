@@ -1778,7 +1778,17 @@ def _transition_readback(
         "current_status": current_status,
         "target_status": str(plan.payload["target_status"]),
         "status_matched": current_status == str(plan.payload["target_status"]),
-        "next_step": "continue_from_verified_jira_transition",
+        "next_step": {
+            "executor": "human",
+            "action": "continue_from_verified_jira_transition",
+            "required_inputs": [],
+            "allowed_operations": [],
+            "requires_authorization": False,
+            "stop_workflow": False,
+            "ownership_effect": "none",
+            "kind": "decision",
+            "mode": "manual",
+        },
     }
 
 

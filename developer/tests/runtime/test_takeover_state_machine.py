@@ -130,6 +130,19 @@ class TakeoverStateMachineTest(unittest.TestCase):
         self.assertEqual({"issue_key": "TAP-123"}, next_action["bound_arguments"])
         self.assertEqual(["repository_branch_assess"], next_action["allowed_operations"])
 
+    def test_legacy_takeover_state_requires_explicit_upgrade(self) -> None:
+        legacy = self.persist()["operation"]
+        legacy["schema_version"] = 2
+        legacy.pop("next_step")
+        legacy["agentic_next_action"] = "takeover_task"
+
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            validate_takeover_operation(legacy)
+
+        self.assertEqual("task_state_upgrade_required", captured.exception.code)
+        self.assertEqual(3, captured.exception.details["expected_schema_version"])
+        self.assertEqual(2, captured.exception.details["actual_schema_version"])
+
     def test_completed_takeover_remains_consistent_after_later_gate(self) -> None:
         intent = self.persist()
         operation_id = intent["operation"]["operation_id"]

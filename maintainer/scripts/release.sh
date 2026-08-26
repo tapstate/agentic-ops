@@ -115,7 +115,7 @@ case "$command_name" in
       release_branch="release/$version"
       release_prepare_fixed_branch "$repo_root" "$release_branch" "$prepare_head" || exit 1
     fi
-    printf '{"ok":true,"operation":"release_prepare","version":"%s","head":"%s","release_branch":"%s","verified_at":"%s","tag_scope":"main_merge_commit","protection_mode":"%s","delivery":"python_source_and_developer_assets","agentic_next_action":"review_release_scope"}\n' \
+    printf '{"schema_version":"step-result/v2","ok":true,"operation":"release_prepare","status":"completed","retry_safe":true,"result":{"status":"succeeded","summary":"发布准备已完成，等待人工审阅范围","facts":{},"evidence":[],"effects":[],"remaining":[]},"next_step":{"kind":"decision","scope":"flow","mode":"manual","executor":"reviewer","action":"review_release_scope","question":"请审阅发布范围后再继续发布","choices":[{"id":"review","label":"审阅发布范围","recommended":true}],"submit":{"operation":"submit_decision","effect":"record_only"},"call":{"operation":"submit_decision","argv":[]}},"version":"%s","head":"%s","release_branch":"%s","verified_at":"%s","tag_scope":"main_merge_commit","protection_mode":"%s","delivery":"python_source_and_developer_assets"}\n' \
       "$version" "$prepare_head" "$release_branch" "$RELEASE_VERIFIED_AT" "$protection_mode"
     ;;
   publish)
@@ -182,7 +182,7 @@ case "$command_name" in
     release_sync_develop_to_main "$repo_root" "$RELEASE_MERGE_COMMIT" || exit 1
     release_create_and_push_version_tag "$repo_root" "$version" "$RELEASE_MERGE_COMMIT" || exit 1
     release_write_audit "$repo_root" "$version" "$release_head" "$protection_mode" || exit 1
-    printf '{"ok":true,"operation":"release_publish","version":"%s","head":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","develop_commit":"%s","tag":"%s","protection_mode":"%s","audit_file":"%s","agentic_next_action":"release_completed"}\n' \
+    printf '{"schema_version":"step-result/v2","ok":true,"operation":"release_publish","status":"completed","retry_safe":true,"result":{"status":"succeeded","summary":"发布已完成","facts":{},"evidence":[],"effects":[],"remaining":[]},"next_step":{"kind":"none","scope":"flow","mode":"manual","executor":"stop","action":"release_completed","call":null},"version":"%s","head":"%s","pr_number":%s,"pr_url":"%s","merge_commit":"%s","develop_commit":"%s","tag":"%s","protection_mode":"%s","audit_file":"%s"}\n' \
       "$version" "$release_head" "$RELEASE_PR_NUMBER" "$RELEASE_PR_URL" "$RELEASE_MERGE_COMMIT" "$RELEASE_DEVELOP_COMMIT" "$version" "$protection_mode" "$RELEASE_AUDIT_FILE"
     ;;
   recover)

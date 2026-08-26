@@ -99,7 +99,7 @@ def execute_task_resume(
         )
 
     agentic_run_id = str(task["agentic_run_id"])
-    next_action: object = _legacy_resume_action(progress.get("next_step"))
+    next_action: object = _legacy_resume_action(progress.get("next_action"))
     if operation_resumable:
         next_action = recovery_operation["next_step"]
     repository_scope = local.get("repository_scope")
@@ -126,7 +126,7 @@ def execute_task_resume(
 def _legacy_resume_action(value: object) -> dict[str, object]:
     legacy_action = str(value or "未记录")
     return {
-        "executor": "ai",
+        "executor": "human",
         "action": "resume_task_from_recorded_state",
         "required_inputs": [],
         "allowed_operations": [],
