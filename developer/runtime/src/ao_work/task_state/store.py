@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
+from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, normalize_next_step
 from ao_work.task_state.io import (
     append_ndjson,
     atomic_write_json,
@@ -30,7 +30,7 @@ from ao_work.task_state.takeover import (
     require_phase_transition,
     stable_takeover_operation_id,
     takeover_error,
-    takeover_next_action,
+    takeover_next_step,
     validate_takeover_event,
     validate_takeover_operation,
 )
@@ -97,7 +97,7 @@ class TaskStore:
             progress = {
                 **common,
                 "stage": "initialized",
-                "agentic_next_action": "analyze_task",
+                "next_step": "analyze_task",
                 "terminal": False,
             }
             sync = {**common, "external_writes": {}, "last_readback_at": None}
@@ -109,6 +109,7 @@ class TaskStore:
                 (staging_dir / "feedback").mkdir()
                 (staging_dir / "proposals").mkdir()
                 (staging_dir / "confirmations").mkdir()
+                (staging_dir / "timed-steps").mkdir()
                 (staging_dir / "runs" / identity.agentic_run_id / "evidence").mkdir(parents=True)
                 atomic_write_json(staging_dir / "task.json", task)
                 atomic_write_json(staging_dir / "progress.json", progress)
@@ -634,6 +635,177 @@ class TaskStore:
             )
             return True
 
+    def schedule_timed_step(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        next_step: dict[str, Any],
+    ) -> dict[str, Any]:
+        """持久化 timed_auto 决策；登记本身绝不执行后续业务动作。"""
+        self._validate_issue_key(issue_key)
+        self._validate_run_id(agentic_run_id)
+        normalized = normalize_next_step(
+            next_step,
+            operation="timed_step_schedule",
+            payload={"issue_key": issue_key, "agentic_run_id": agentic_run_id},
+        )
+        if normalized["mode"] != "timed_auto":
+            raise _invalid_input("next_step.mode", str(normalized["mode"]))
+        timed = normalized["timed"]
+        deadline = _parse_timed_deadline(str(timed["deadline"]))
+        decision_id = str(timed["decision_id"])
+        with self._lock(issue_key):
+            task_dir = self._task_dir(issue_key)
+            self._require_complete_task_dir(task_dir)
+            task = read_json(task_dir / "task.json")
+            self._require_task_identity(task, agentic_run_id, "定时决策")
+            path = self._timed_step_path(task_dir, decision_id)
+            existing = read_json(path) if path.is_file() else None
+            intent = {
+                "agentic_run_id": agentic_run_id,
+                "decision_id": decision_id,
+                "deadline": _format_timestamp(deadline),
+                "default_choice": timed["default_choice"],
+                "cancel_if": timed["cancel_if"],
+                "fact_bind": timed["fact_bind"],
+                "policy": timed["policy"],
+                "next_step": normalized,
+            }
+            if existing is not None:
+                if all(existing.get(field) == value for field, value in intent.items()):
+                    return {"created": False, "timed_step": existing}
+                raise RuntimeErrorResult(
+                    code="timed_step_conflict",
+                    message="相同定时决策编号对应了不同的解析意图",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    required_human_action="请新建决策编号，或先人工核对并取消已有定时决策",
+                )
+            record = {
+                "schema_version": "timed-step/v1",
+                "issue_key": issue_key,
+                **intent,
+                "state": "pending",
+                "created_at": self._timestamp(),
+                "updated_at": self._timestamp(),
+                "content_version": 1,
+            }
+            atomic_write_json(path, record)
+            event = self._journal_event(task, "timed_step_schedule", "completed", retry_safe=True)
+            event.update({"decision_id": decision_id, "deadline": record["deadline"], "policy": timed["policy"]})
+            append_ndjson(task_dir / "journal.ndjson", event)
+            return {"created": True, "timed_step": record}
+
+    def resolve_timed_step(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        decision_id: str,
+        current_fact_bind: str,
+    ) -> dict[str, Any]:
+        """在任务锁内依据可信时钟和事实绑定解析到期决策，结果仅记录。"""
+        self._validate_issue_key(issue_key)
+        self._validate_run_id(agentic_run_id)
+        self._validate_component("decision_id", decision_id)
+        self._validate_text("current_fact_bind", current_fact_bind)
+        with self._lock(issue_key):
+            task_dir = self._task_dir(issue_key)
+            self._require_complete_task_dir(task_dir)
+            task = read_json(task_dir / "task.json")
+            self._require_task_identity(task, agentic_run_id, "定时决策")
+            path = self._timed_step_path(task_dir, decision_id)
+            if not path.is_file():
+                raise RuntimeErrorResult(
+                    code="timed_step_not_found",
+                    message="未找到指定的定时决策",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    retry_safe=True,
+                    required_human_action="请先读取当前任务状态，确认决策编号和任务绑定",
+                )
+            record = read_json(path)
+            self._validate_timed_step_record(record, issue_key, agentic_run_id, decision_id)
+            if record["state"] != "pending":
+                return {"resolved": True, "timed_step": record}
+            if record["fact_bind"] != current_fact_bind:
+                record.update(
+                    {
+                        "state": "cancelled",
+                        "resolution": {"reason": "fact_binding_changed", "effect": "record_only"},
+                        "updated_at": self._timestamp(),
+                        "content_version": int(record["content_version"]) + 1,
+                    }
+                )
+                atomic_write_json(path, record)
+                event = self._journal_event(task, "timed_step_cancel", "completed", retry_safe=True)
+                event.update({"decision_id": decision_id, "reason": "fact_binding_changed"})
+                append_ndjson(task_dir / "journal.ndjson", event)
+                return {"resolved": True, "timed_step": record}
+            if self._now().astimezone(timezone.utc) < _parse_timed_deadline(record["deadline"]):
+                return {"resolved": False, "timed_step": record}
+            record.update(
+                {
+                    "state": "resolved",
+                    "resolution": {
+                        "choice": record["default_choice"],
+                        "reason": "deadline_reached",
+                        "effect": "record_only",
+                    },
+                    "updated_at": self._timestamp(),
+                    "content_version": int(record["content_version"]) + 1,
+                }
+            )
+            atomic_write_json(path, record)
+            event = self._journal_event(task, "timed_step_resolve", "completed", retry_safe=True)
+            event.update({"decision_id": decision_id, "choice": record["default_choice"]})
+            append_ndjson(task_dir / "journal.ndjson", event)
+            return {"resolved": True, "timed_step": record}
+
+    def cancel_timed_step(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        decision_id: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        """供人工或上游策略明确撤销尚未解析的定时决策。"""
+        self._validate_issue_key(issue_key)
+        self._validate_run_id(agentic_run_id)
+        self._validate_component("decision_id", decision_id)
+        self._validate_text("reason", reason)
+        with self._lock(issue_key):
+            task_dir = self._task_dir(issue_key)
+            self._require_complete_task_dir(task_dir)
+            task = read_json(task_dir / "task.json")
+            self._require_task_identity(task, agentic_run_id, "定时决策")
+            path = self._timed_step_path(task_dir, decision_id)
+            if not path.is_file():
+                raise RuntimeErrorResult(
+                    code="timed_step_not_found",
+                    message="未找到指定的定时决策",
+                    status="blocked",
+                    exit_code=EXIT_BLOCKED,
+                    retry_safe=True,
+                    required_human_action="请先读取当前任务状态，确认决策编号和任务绑定",
+                )
+            record = read_json(path)
+            self._validate_timed_step_record(record, issue_key, agentic_run_id, decision_id)
+            if record["state"] != "pending":
+                return {"cancelled": record["state"] == "cancelled", "timed_step": record}
+            record.update(
+                {
+                    "state": "cancelled",
+                    "resolution": {"reason": reason, "effect": "record_only"},
+                    "updated_at": self._timestamp(),
+                    "content_version": int(record["content_version"]) + 1,
+                }
+            )
+            atomic_write_json(path, record)
+            event = self._journal_event(task, "timed_step_cancel", "completed", retry_safe=True)
+            event.update({"decision_id": decision_id, "reason": reason})
+            append_ndjson(task_dir / "journal.ndjson", event)
+            return {"cancelled": True, "timed_step": record}
+
     def record_gate_transition(
         self,
         issue_key: str,
@@ -672,7 +844,7 @@ class TaskStore:
             progress.update(
                 {
                     "stage": stage,
-                    "agentic_next_action": next_action,
+                    "next_step": next_action,
                     "terminal": False,
                     "updated_at": self._timestamp(),
                     "content_version": int(progress.get("content_version", 0)) + 1,
@@ -879,7 +1051,7 @@ class TaskStore:
             "external_result_certainty": "not_attempted",
             "takeover_status": "in_progress",
             "human_notice": human_notice(takeover_kind, "in_progress"),
-            "agentic_next_action": takeover_next_action(
+            "next_step": takeover_next_step(
                 "ensure_takeover_comment",
                 issue_key=issue_key,
                 reason="稳定接管意图已落盘，继续确保受管 Comment 存在并回读",
@@ -1000,7 +1172,7 @@ class TaskStore:
                     "external_result_certainty": "verified",
                     "takeover_status": "in_progress",
                     "human_notice": human_notice(operation["takeover_kind"], "in_progress"),
-                    "agentic_next_action": takeover_next_action(
+                    "next_step": takeover_next_step(
                         "verify_takeover_status",
                         issue_key=issue_key,
                         reason="受管 Comment 已回读验证，继续执行或回读目标 Status",
@@ -1076,7 +1248,7 @@ class TaskStore:
                     "external_result_certainty": "verified",
                     "takeover_status": "in_progress",
                     "human_notice": human_notice(operation["takeover_kind"], "in_progress"),
-                    "agentic_next_action": takeover_next_action(
+                    "next_step": takeover_next_step(
                         "finalize_takeover_locally",
                         issue_key=issue_key,
                         reason="Jira Comment 和 Status 已回读验证，继续完成本地收口",
@@ -1160,7 +1332,7 @@ class TaskStore:
                 progress.update(
                     {
                         "stage": "takeover_started",
-                        "agentic_next_action": "assess_repository_branch_mapping",
+                        "next_step": "assess_repository_branch_mapping",
                         "terminal": False,
                         "updated_at": self._timestamp(),
                         "content_version": int(progress.get("content_version", 0)) + 1,
@@ -1193,7 +1365,7 @@ class TaskStore:
                     "external_result_certainty": "verified",
                     "takeover_status": "completed",
                     "human_notice": human_notice(operation["takeover_kind"], "completed"),
-                    "agentic_next_action": takeover_next_action(
+                    "next_step": takeover_next_step(
                         "assess_repository_branch_mapping",
                         issue_key=issue_key,
                         executor="ai",
@@ -1211,7 +1383,7 @@ class TaskStore:
             progress.update(
                 {
                     "stage": "takeover_started",
-                    "agentic_next_action": "assess_repository_branch_mapping",
+                    "next_step": "assess_repository_branch_mapping",
                     "terminal": False,
                     "updated_at": self._timestamp(),
                     "content_version": int(progress.get("content_version", 0)) + 1,
@@ -1298,7 +1470,7 @@ class TaskStore:
                 progress.update(
                     {
                         "stage": "takeover_started",
-                        "agentic_next_action": "assess_repository_branch_mapping",
+                        "next_step": "assess_repository_branch_mapping",
                         "terminal": False,
                         "updated_at": self._timestamp(),
                         "content_version": int(progress.get("content_version", 0)) + 1,
@@ -1376,7 +1548,7 @@ class TaskStore:
                     "human_notice": human_notice(
                         str(evidence["takeover_kind"]), "completed"
                     ),
-                    "agentic_next_action": takeover_next_action(
+                    "next_step": takeover_next_step(
                         "assess_repository_branch_mapping",
                         issue_key=issue_key,
                         executor="ai",
@@ -1433,7 +1605,7 @@ class TaskStore:
                     "external_result_certainty": certainty,
                     "takeover_status": result,
                     "human_notice": human_notice(operation["takeover_kind"], result),
-                    "agentic_next_action": takeover_next_action(
+                    "next_step": takeover_next_step(
                         recovery_action,
                         issue_key=issue_key,
                         executor="human" if result == "blocked" else "ao_work",
@@ -1699,7 +1871,7 @@ class TaskStore:
                     "human_notice": human_notice(
                         effective["takeover_kind"], "uncertain"
                     ),
-                    "agentic_next_action": takeover_next_action(
+                    "next_step": takeover_next_step(
                         "recover_local_takeover_state",
                         issue_key=str(operation["issue_key"]),
                         stop_workflow=True,
@@ -1832,6 +2004,80 @@ class TaskStore:
         self._validate_managed_path(path)
         return path
 
+    def _timed_step_path(self, task_dir: Path, decision_id: str) -> Path:
+        path = task_dir / "timed-steps" / f"{decision_id}.json"
+        self._validate_managed_path(path)
+        return path
+
+    def _require_task_identity(
+        self, task: dict[str, Any], agentic_run_id: str, subject: str
+    ) -> None:
+        if task.get("agentic_run_id") != agentic_run_id:
+            raise RuntimeErrorResult(
+                code="task_identity_mismatch",
+                message=f"{subject}运行编号与任务绑定不一致",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                required_human_action="请使用任务当前绑定的 agentic_run_id",
+            )
+
+    def _validate_timed_step_record(
+        self,
+        record: dict[str, Any],
+        issue_key: str,
+        agentic_run_id: str,
+        decision_id: str,
+    ) -> None:
+        required = {
+            "schema_version",
+            "issue_key",
+            "agentic_run_id",
+            "decision_id",
+            "deadline",
+            "default_choice",
+            "cancel_if",
+            "fact_bind",
+            "policy",
+            "next_step",
+            "state",
+            "content_version",
+        }
+        if required - set(record):
+            raise RuntimeErrorResult(
+                code="timed_step_state_invalid",
+                message="定时决策状态缺少必要字段",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=False,
+                required_human_action="请按任务状态恢复流程核对定时决策记录，不要覆盖原文件",
+            )
+        if (
+            record["schema_version"] != "timed-step/v1"
+            or record["issue_key"] != issue_key
+            or record["agentic_run_id"] != agentic_run_id
+            or record["decision_id"] != decision_id
+            or record["state"] not in {"pending", "resolved", "cancelled"}
+        ):
+            raise RuntimeErrorResult(
+                code="timed_step_state_invalid",
+                message="定时决策状态与当前任务绑定不一致或不受支持",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=False,
+                required_human_action="请按任务状态恢复流程核对定时决策记录，不要覆盖原文件",
+            )
+        try:
+            _parse_timed_deadline(str(record["deadline"]))
+        except ValueError as error:
+            raise RuntimeErrorResult(
+                code="timed_step_state_invalid",
+                message="定时决策状态的 deadline 无效",
+                status="blocked",
+                exit_code=EXIT_BLOCKED,
+                retry_safe=False,
+                required_human_action="请按任务状态恢复流程核对定时决策记录，不要覆盖原文件",
+            ) from error
+
     def _validate_issue_key(self, issue_key: str) -> None:
         if not isinstance(issue_key, str) or not ISSUE_KEY_PATTERN.fullmatch(issue_key):
             raise _invalid_input("issue_key", str(issue_key))
@@ -1931,6 +2177,20 @@ def _invalid_input(field: str, value: str) -> RuntimeErrorResult:
         exit_code=EXIT_BLOCKED,
         required_human_action="请修正任务身份后重试",
     )
+
+
+def _parse_timed_deadline(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("invalid timed deadline") from error
+    if parsed.tzinfo is None:
+        raise ValueError("timed deadline must include timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def _format_timestamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _fsync_directory(path: Path) -> None:

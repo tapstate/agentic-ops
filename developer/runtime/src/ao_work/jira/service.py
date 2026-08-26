@@ -1778,7 +1778,7 @@ def _transition_readback(
         "current_status": current_status,
         "target_status": str(plan.payload["target_status"]),
         "status_matched": current_status == str(plan.payload["target_status"]),
-        "agentic_next_action": "continue_from_verified_jira_transition",
+        "next_step": "continue_from_verified_jira_transition",
     }
 
 

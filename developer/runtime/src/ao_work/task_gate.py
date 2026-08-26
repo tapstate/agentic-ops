@@ -281,7 +281,7 @@ class TaskGateService:
             "intake_path": str(path),
             "ready_for_solution": ready,
             "required_missing_fields": required_missing,
-            "agentic_next_action": next_action,
+            "next_step": next_action,
         }
 
     def classify_solution(
@@ -363,7 +363,7 @@ class TaskGateService:
             "solution_digest": solution_digest,
             "solution_level": level,
             "solution_path": str(path),
-            "agentic_next_action": next_action,
+            "next_step": next_action,
         }
 
     def _normalize_intake_input(

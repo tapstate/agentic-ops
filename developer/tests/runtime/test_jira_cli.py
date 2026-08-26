@@ -114,11 +114,11 @@ class JiraCliTest(unittest.TestCase):
             self.assertEqual("assistant", applied[1]["task_domain"])
             self.assertEqual(
                 "reassess_repository_branches_from_verified_override",
-                applied[1]["agentic_next_action"]["action"],
+                applied[1]["next_step"]["action"],
             )
             self.assertEqual(
                 ["issue_key", "task_domain", "readback"],
-                applied[1]["agentic_next_action"]["required_inputs"],
+                applied[1]["next_step"]["required_inputs"],
             )
 
     def run_cli(self, *arguments: str) -> tuple[int, dict[str, object], str]:

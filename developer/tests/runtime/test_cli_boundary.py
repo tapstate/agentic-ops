@@ -20,7 +20,7 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
     def test_ao_work_exposes_only_developer_commands(self) -> None:
         parser = build_parser()
         commands = self._subcommands(parser)
-        for expected in ("workspace", "auth", "jira", "task", "task-run", "report", "capability", "version"):
+        for expected in ("workspace", "workflow", "auth", "jira", "task", "task-run", "report", "capability", "version"):
             self.assertIn(expected, commands)
         self.assertEqual(set(), commands & self.MAINTAINER_COMMANDS)
 
@@ -73,6 +73,7 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
             ["capability", "list"],
             ["version"],
             ["workspace", "inspect"],
+            ["workflow", "query", "--process-id", "development_change_v2", "--current-step", "implementation"],
             ["task", "inspect", "--issue-key", "TAP-1"],
             ["report", "write", "--issue-key", "TAP-1", "--agentic-run-id", "run-1", "--kind", "analysis", "--content-file", "analysis.md"],
         )
@@ -160,11 +161,11 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
         self.assertEqual("auth", payload["operation"])
         self.assertEqual(
             "initialize_or_inspect_workspace",
-            payload["agentic_next_action"]["action"],
+            payload["next_step"]["action"],
         )
         self.assertEqual(
             ["workspace_init", "workspace_inspect"],
-            payload["agentic_next_action"]["allowed_operations"],
+            payload["next_step"]["allowed_operations"],
         )
 
     def _subcommands(self, parser: argparse.ArgumentParser) -> set[str]:

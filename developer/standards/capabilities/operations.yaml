@@ -625,6 +625,16 @@ capabilities:
     summary: 从当前 ao_work 模块自定位并验证 developer 安装身份后，复用当前工作空间初始化候选执行授权、Jira Project 和源码访问前置检查。
     next_action: 任一检查失败都必须按结构化失败码停止，不得把 Profile 可解析视为预检通过。
 
+  - id: workflow_query
+    source: runtime
+    contract:
+    status: implemented
+    visibility: public
+    commands:
+      - [workflow, query]
+    summary: 读取已安装的版本化流程标准，并以不可执行的 WorkflowQuery 返回当前节点及全流程导航。
+    next_action: WorkflowQuery 只用于展示与定位；必须消费步骤执行结果中的唯一 next_step 才能决定实际执行。
+
   - id: write_evidence
     source: contract
     contract: contracts/operations/write-evidence.yaml

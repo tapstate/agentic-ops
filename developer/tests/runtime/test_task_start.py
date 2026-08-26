@@ -170,7 +170,7 @@ class TaskStartTest(unittest.TestCase):
         self.assertNotIn("description", payload["issue"])
         description_facts = payload["issue"]["task_facts"]["description"]["facts"]
         self.assertEqual("从 Jira 自动读取任务信息。", description_facts[0]["value"])
-        self.assertEqual("ai", payload["agentic_next_action"]["executor"])
+        self.assertEqual("ai", payload["next_step"]["executor"])
         self.assertEqual(
             "harsen-mini-test-bot", payload["task_ownership"]["task_owner"]
         )
@@ -181,10 +181,10 @@ class TaskStartTest(unittest.TestCase):
         self.assertEqual(
             "capability_gap", payload["task_ownership"]["transfer_capability"]
         )
-        self.assertEqual("none", payload["agentic_next_action"]["ownership_effect"])
+        self.assertEqual("none", payload["next_step"]["ownership_effect"])
         self.assertEqual(
             "assess_task_intake",
-            payload["agentic_next_action"]["action"],
+            payload["next_step"]["action"],
         )
         self.assertEqual(
             [
@@ -192,12 +192,12 @@ class TaskStartTest(unittest.TestCase):
                 "agentic_run_id",
                 "intake_input_file",
             ],
-            payload["agentic_next_action"]["required_inputs"],
+            payload["next_step"]["required_inputs"],
         )
-        self.assertFalse(payload["agentic_next_action"]["requires_authorization"])
+        self.assertFalse(payload["next_step"]["requires_authorization"])
         self.assertEqual(
             ["task_intake_assess"],
-            payload["agentic_next_action"]["allowed_operations"],
+            payload["next_step"]["allowed_operations"],
         )
         self.assertRegex(payload["intake_source"]["context_digest"], r"^[0-9a-f]{64}$")
         self.assertTrue(Path(payload["intake_source"]["source_context_path"]).is_file())

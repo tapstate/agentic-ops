@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 from ao_work.jira.adf import markdown_to_adf
 from ao_work.jira.model import plain_text
-from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
+from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, normalize_next_step
 
 TAKEOVER_SCHEMA_VERSION = 2
 TAKEOVER_KINDS = frozenset(
@@ -61,7 +61,7 @@ _REQUIRED_OPERATION_FIELDS = frozenset(
         "external_result_certainty",
         "takeover_status",
         "human_notice",
-        "agentic_next_action",
+        "next_step",
         "failure_code",
         "retry_safe",
         "recovery_action",
@@ -134,7 +134,7 @@ def human_notice(takeover_kind: str, result: str) -> str:
     return by_result[result]
 
 
-def takeover_next_action(
+def takeover_next_step(
     action: str,
     *,
     issue_key: str | None = None,
@@ -153,7 +153,7 @@ def takeover_next_action(
             "--issue-key",
             issue_key,
         ]
-        return {
+        return normalize_next_step({
             "executor": executor,
             "action": action,
             "operation_id": "repository_branch_assess",
@@ -167,9 +167,9 @@ def takeover_next_action(
             "stop_workflow": stop_workflow,
             "ownership_effect": "none",
             "reason": reason,
-        }
+        }, operation="takeover", payload={"issue_key": issue_key})
     command_argv = ["takeover", issue_key]
-    return {
+    return normalize_next_step({
         "executor": executor,
         "action": action,
         "operation_id": "takeover_task",
@@ -183,7 +183,7 @@ def takeover_next_action(
         "stop_workflow": stop_workflow,
         "ownership_effect": "none",
         "reason": reason,
-    }
+    }, operation="takeover", payload={"issue_key": issue_key})
 
 
 def validate_takeover_operation(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -258,7 +258,7 @@ def validate_takeover_operation(payload: Mapping[str, Any]) -> dict[str, Any]:
         _require_text(value[field], field)
     if value["failure_code"] is not None:
         _require_text(value["failure_code"], "failure_code")
-    _validate_next_action(value["agentic_next_action"])
+    _validate_next_step(value["next_step"])
     _validate_operation_combination(value)
     json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
     return value
@@ -426,9 +426,9 @@ def _validate_event_transition(value: Mapping[str, Any]) -> None:
             raise _schema_invalid("takeover_recovered 不得回退写入阶段")
 
 
-def _validate_next_action(value: Any) -> None:
+def _validate_next_step(value: Any) -> None:
     if not isinstance(value, Mapping):
-        raise _schema_invalid("agentic_next_action 必须是对象")
+        raise _schema_invalid("next_step 必须是对象")
     required = {
         "executor",
         "action",
@@ -438,19 +438,31 @@ def _validate_next_action(value: Any) -> None:
         "stop_workflow",
         "ownership_effect",
         "reason",
+        "kind",
+        "scope",
+        "mode",
+        "call",
     }
     if required - set(value):
-        raise _schema_invalid("agentic_next_action 字段不完整")
+        raise _schema_invalid("next_step 字段不完整")
     for field in ("executor", "action", "ownership_effect", "reason"):
-        _require_text(value[field], f"agentic_next_action.{field}")
+        _require_text(value[field], f"next_step.{field}")
     for field in ("required_inputs", "allowed_operations"):
         if not isinstance(value[field], list) or not all(
             isinstance(item, str) and item for item in value[field]
         ):
-            raise _schema_invalid(f"agentic_next_action.{field} 必须是字符串列表")
+            raise _schema_invalid(f"next_step.{field} 必须是字符串列表")
     for field in ("requires_authorization", "stop_workflow"):
         if not isinstance(value[field], bool):
-            raise _schema_invalid(f"agentic_next_action.{field} 必须是布尔值")
+            raise _schema_invalid(f"next_step.{field} 必须是布尔值")
+    if value["kind"] not in {"action", "decision", "input", "wait", "none"}:
+        raise _schema_invalid("next_step.kind 不受支持")
+    if value["scope"] not in {"local", "flow"}:
+        raise _schema_invalid("next_step.scope 不受支持")
+    if value["mode"] not in {"auto", "timed_auto", "manual"}:
+        raise _schema_invalid("next_step.mode 不受支持")
+    if not isinstance(value["call"], Mapping):
+        raise _schema_invalid("next_step.call 必须是对象")
 
 
 def _require_text(value: Any, field: str, *, max_length: int = 4096) -> None:

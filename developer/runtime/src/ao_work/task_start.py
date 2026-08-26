@@ -172,7 +172,7 @@ def execute_task_start(
             "transfer_capability": "capability_gap",
             "transfer_decision_authority": "human_only",
         },
-        "agentic_next_action": {
+        "next_step": {
             "executor": "ai",
             "action": "assess_task_intake",
             "required_inputs": [

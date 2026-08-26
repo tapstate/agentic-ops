@@ -165,7 +165,7 @@ human_gate:
 
 `decision` 必须带 `question` 与非空 `choices`；每个选项包含 `id`、`label`、`description`、`impact`、`risk`，且只有一个 `recommended=true`。提交选择只记录决策，不直接执行下游业务动作。
 
-`timed_auto` 必须带受 Runtime 持久化并原子解析的 `timed`：`deadline`、`default_choice`、`cancel_if`、`fact_bind` 和 `policy`。UI 只能展示、提交取消或读取最终状态，不能以本地计时推断用户已经确认。
+`timed_auto` 必须带受 Runtime 持久化并原子解析的 `timed`：唯一 `decision_id`、`deadline`、`default_choice`、`cancel_if`、`fact_bind` 和 `policy`。当前仅支持 `cancel_if=fact_binding_changed`；Runtime 在同一任务锁内比对受信任时钟与 `fact_bind`，到期只记录 `default_choice`，绑定变化则取消。两种解析都不直接执行下游业务动作。UI 只能展示、提交取消或读取最终状态，不能以本地计时推断用户已经确认。
 
 顺序执行闭环只能暴露当前唯一 `next_step`。完整流程必须通过独立只读 `WorkflowQuery` 获取；查询结果不可执行，也不构成授权。
 
