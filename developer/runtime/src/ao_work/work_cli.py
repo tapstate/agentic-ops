@@ -30,6 +30,7 @@ from ao_work.task_repository_scope import (
     execute_repository_confirm,
     execute_worktree_cleanup,
     execute_worktree_prepare,
+    execute_worktree_recover,
 )
 from ao_work.task_run import configure_task_run_parser, execute_task_run
 from ao_work.workspace import DEVELOPER, resolve_developer_workspace
@@ -119,6 +120,10 @@ def build_parser() -> argparse.ArgumentParser:
     worktree_prepare.add_argument("--issue-key", required=True)
     worktree_cleanup = worktree_actions.add_parser("cleanup")
     worktree_cleanup.add_argument("--issue-key", required=True)
+    worktree_recover = worktree_actions.add_parser("recover")
+    worktree_recover.add_argument("--issue-key", required=True)
+    worktree_recover.add_argument("--cleanup-digest")
+    worktree_recover.add_argument("--confirm", action="store_true")
 
     report_parser = subparsers.add_parser("report")
     report_commands = report_parser.add_subparsers(dest="command", required=True)
@@ -302,6 +307,16 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
             install_root,
             store,
             args.issue_key,
+        )
+        return success(operation, workplane=workspace.workplane, **state)
+    if args.group == "task" and args.command == "worktrees" and args.action == "recover":
+        state = execute_worktree_recover(
+            workspace,
+            install_root,
+            store,
+            args.issue_key,
+            cleanup_digest=args.cleanup_digest,
+            confirm=args.confirm,
         )
         return success(operation, workplane=workspace.workplane, **state)
     if args.group == "task" and args.command in {"intake", "solution"}:
