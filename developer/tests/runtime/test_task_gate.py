@@ -77,7 +77,18 @@ class TaskGateTest(unittest.TestCase):
                 "mapped_status": "implementation",
                 "issue_type": "任务",
                 "assignee_account_id": "jira-account-1",
-                "description": "根据任务卡片和源码补齐准入信息。",
+                "task_facts": {
+                    "description": {
+                        "status": "available",
+                        "facts": [],
+                        "sections": {
+                            "__overview__": "根据任务卡片和源码补齐准入信息。",
+                            "仓库分支": "tapdata/tapdata@develop",
+                        },
+                    },
+                    "comments": {"status": "available", "comment_count": 0, "facts": []},
+                    "repository_branch_hints": [],
+                },
                 "issue_content_sha256": "a" * 64,
             },
             workspace_defaults={
@@ -171,6 +182,69 @@ class TaskGateTest(unittest.TestCase):
             input_file=str(self._write_intake("recovered.json").relative_to(self.workspace_root)),
         )
         self.assertEqual(0, assessed["intake"]["retry_count"])
+
+    def test_intake_accepts_runtime_catalog_evidence_id(self) -> None:
+        catalog = self.context["trusted_reference_catalog"]
+        evidence = next(
+            item
+            for item in catalog
+            if item["value"] == "tapdata/tapdata@develop"
+        )
+        payload = self._intake_payload()
+        payload["auto_filled_values"] = [
+            {
+                "field": "repository_branch",
+                "evidence_id": evidence["evidence_id"],
+                "rationale": "Jira 脱敏仓库分支章节明确给出该值",
+            }
+        ]
+        path = self._write_json("catalog-evidence.json", payload)
+
+        assessed = self.service.assess_intake(
+            issue_key=ISSUE_KEY,
+            agentic_run_id=RUN_ID,
+            input_file=str(path.relative_to(self.workspace_root)),
+        )
+
+        selected = next(
+            item
+            for item in assessed["intake"]["auto_filled_values"]
+            if item["field"] == "repository_branch"
+        )
+        self.assertEqual("jira_issue", selected["source"])
+        self.assertEqual(
+            "issue.task_facts.description.sections.仓库分支",
+            selected["reference"],
+        )
+        self.assertEqual("tapdata/tapdata@develop", selected["value"])
+
+    def test_unknown_evidence_id_returns_current_catalog_without_retry(self) -> None:
+        payload = self._intake_payload()
+        payload["auto_filled_values"] = [
+            {
+                "field": "repository_branch",
+                "evidence_id": "evidence-not-in-current-snapshot",
+                "rationale": "测试无效证据 ID 的修复指引",
+            }
+        ]
+        path = self._write_json("unknown-evidence.json", payload)
+
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            self.service.assess_intake(
+                issue_key=ISSUE_KEY,
+                agentic_run_id=RUN_ID,
+                input_file=str(path.relative_to(self.workspace_root)),
+            )
+
+        error = captured.exception
+        self.assertEqual("intake_evidence_id_invalid", error.code)
+        self.assertTrue(error.retry_safe)
+        self.assertTrue(error.details["available_evidence"])
+        self.assertEqual(
+            self.context["context_digest"], error.details["source_context_digest"]
+        )
+        intake_path = self.service._gate_path(ISSUE_KEY, RUN_ID, "intake.json")
+        self.assertFalse(intake_path.exists())
 
     def test_invalid_source_context_remains_human_blocker(self) -> None:
         with self.assertRaises(RuntimeErrorResult) as captured:
