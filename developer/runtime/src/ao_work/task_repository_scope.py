@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -67,13 +69,14 @@ def _repository_next_action(
     executor: str,
     action: str,
     required_inputs: tuple[str, ...] = (),
+    input_artifacts: tuple[dict[str, str], ...] = (),
     allowed_operations: tuple[str, ...] = (),
     requires_authorization: bool,
     stop_workflow: bool,
     reason: str,
 ) -> dict[str, Any]:
     """构造符合 Runtime 固定控制字段契约的仓库流程下一动作。"""
-    return {
+    result: dict[str, Any] = {
         "executor": executor,
         "action": action,
         "required_inputs": list(required_inputs),
@@ -91,6 +94,9 @@ def _repository_next_action(
             "on_exhausted": "not_applicable",
         },
     }
+    if input_artifacts:
+        result["input_artifacts"] = list(input_artifacts)
+    return result
 
 
 def _repository_branch_override_next_action() -> dict[str, Any]:
@@ -723,14 +729,38 @@ def execute_worktree_prepare(
         baseline_repository=str(scope.get("problem_version_repository") or ""),
     )
     identity = load_install_identity(install_root)
-    prepared = (
-        prepare_task_worktrees(
-            plan,
-            execution_identity=dict(identity["execution_identity"]),
+    try:
+        prepared = (
+            prepare_task_worktrees(
+                plan,
+                execution_identity=dict(identity["execution_identity"]),
+            )
+            if pending
+            else plan
         )
-        if pending
-        else plan
-    )
+    except RuntimeErrorResult as error:
+        if error.code == "worktree_baseline_mismatch":
+            cleanup_plan = _stale_worktree_cleanup_plan(
+                pool_root, issue_key, str(task["agentic_run_id"]), scope, selected
+            )
+            if cleanup_plan["candidates"]:
+                error.details = {
+                    **dict(error.details),
+                    "stale_worktree_cleanup": cleanup_plan,
+                }
+                error.required_human_action = (
+                    "请审阅受控遗留工作树清理计划；仅在每项均可安全清理时确认执行"
+                )
+                error.next_step = _repository_next_action(
+                    executor="human",
+                    action="review_stale_worktree_cleanup",
+                    required_inputs=("stale_worktree_cleanup",),
+                    allowed_operations=("task_worktree_recover",),
+                    requires_authorization=True,
+                    stop_workflow=True,
+                    reason="现有工作树与本次确认基线不一致，必须先逐项审阅并确认清理。",
+                )
+        raise
     agentic_run_id = str(task["agentic_run_id"])
     created_repositories: list[str] = []
     newly_ready: list[dict[str, Any]] = []
@@ -863,7 +893,23 @@ def execute_worktree_prepare(
         "next_step": _repository_next_action(
             executor="ai",
             action="assess_task_intake",
-            required_inputs=("issue_key", "agentic_run_id", "intake_input_file"),
+            required_inputs=(
+                "issue_key",
+                "agentic_run_id",
+                "source_context_path",
+                "trusted_reference_catalog",
+                "intake_input_file",
+            ),
+            input_artifacts=(
+                {
+                    "kind": "source_context_path",
+                    "source": "result.intake_source.source_context_path",
+                },
+                {
+                    "kind": "trusted_reference_catalog",
+                    "source": "result.intake_source.trusted_reference_catalog",
+                },
+            ),
             allowed_operations=("task_intake_assess",),
             requires_authorization=False,
             stop_workflow=False,
@@ -1152,6 +1198,305 @@ def execute_worktree_cleanup(
         "cleaned": cleaned,
         "already_clean": False,
         "source_pool_preserved": True,
+    }
+
+
+def execute_worktree_recover(
+    workspace: Workspace,
+    install_root: Path,
+    store: TaskStore,
+    issue_key: str,
+    *,
+    cleanup_digest: str | None,
+    confirm: bool,
+) -> dict[str, Any]:
+    """受控清理与当前确认基线冲突的遗留工作树，再重试 prepare。
+
+    未确认时只输出精确候选及摘要。确认时重新读取全部 Git 事实，任何
+    路径、分支、可达性或工作区状态漂移都会在删除前失败关闭。
+    """
+    state = store.inspect(issue_key)
+    task = state["task"]
+    scope = state.get("repository_scope")
+    rows = scope.get("confirmed_repository_branch_map") if isinstance(scope, dict) else None
+    if not isinstance(rows, list):
+        raise _blocked(
+            "repository_mapping_confirmation_required",
+            "任务尚无用户确认的领域仓库计划",
+            "请先确认任务领域，Runtime 不会清理未知路径",
+        )
+    selected = [dict(row) for row in rows if isinstance(row, dict)]
+    pool_root = resolve_source_pool_root(install_root)
+    if pool_root is None:
+        raise _blocked("source_pool_root_invalid", "中央源码池未配置", "请恢复原源码池配置")
+    agentic_run_id = str(task["agentic_run_id"])
+    cleanup_plan = _stale_worktree_cleanup_plan(
+        pool_root, issue_key, agentic_run_id, scope, selected
+    )
+    candidates = cleanup_plan["candidates"]
+    if not candidates:
+        raise _blocked(
+            "stale_worktree_cleanup_not_required",
+            "当前确认工作树没有需要清理的基线冲突",
+            "请重新执行 task worktrees prepare，或核对当前阻断码",
+        )
+    if not cleanup_plan["eligible"]:
+        raise _blocked(
+            "stale_worktree_cleanup_not_eligible",
+            "遗留工作树不满足受控清理条件",
+            "请保留所有候选并人工处理不安全项；Runtime 不会强制删除",
+            stale_worktree_cleanup=cleanup_plan,
+        )
+    if not confirm:
+        return {
+            "issue_key": issue_key,
+            "cleanup_plan": cleanup_plan,
+            "confirmation_required": True,
+            "next_step": _repository_next_action(
+                executor="human",
+                action="confirm_stale_worktree_cleanup",
+                required_inputs=("cleanup_digest",),
+                allowed_operations=("task_worktree_recover",),
+                requires_authorization=True,
+                stop_workflow=True,
+                reason="请逐项确认所有候选工作树和本地分支均可清理。",
+            ),
+        }
+    if cleanup_digest != cleanup_plan["cleanup_digest"]:
+        raise _blocked(
+            "stale_worktree_cleanup_confirmation_stale",
+            "确认摘要与当前遗留工作树清理计划不一致",
+            "请重新审阅当前候选，不能沿用旧确认",
+            stale_worktree_cleanup=cleanup_plan,
+        )
+
+    cleanup_lock = pool_root / ".locks" / f"{issue_key}.stale-worktree-cleanup.lock"
+    cleaned: list[dict[str, str]] = []
+    with TaskLock(cleanup_lock, timeout=10):
+        current_plan = _stale_worktree_cleanup_plan(
+            pool_root, issue_key, agentic_run_id, scope, selected
+        )
+        if current_plan != cleanup_plan:
+            raise _blocked(
+                "stale_worktree_cleanup_confirmation_stale",
+                "清理前 Git 状态已变化",
+                "请重新审阅当前候选，不能沿用旧确认",
+                stale_worktree_cleanup=current_plan,
+            )
+        for candidate in candidates:
+            member = Path(candidate["pool_member"])
+            worktree_dir = Path(candidate["worktree_path"])
+            removal = subprocess_git(
+                ["-C", str(member), "worktree", "remove", str(worktree_dir)], timeout=60
+            )
+            if removal.returncode != 0:
+                raise _blocked(
+                    "stale_worktree_cleanup_failed",
+                    f"遗留工作树清理失败：{candidate['repository']}",
+                    "请保留剩余候选并按清理回读结果人工处理",
+                    cleaned=cleaned,
+                    stderr_tail=removal.stderr[-400:],
+                )
+            if worktree_dir.exists() or worktree_dir.is_symlink():
+                raise _blocked(
+                    "stale_worktree_cleanup_readback_failed",
+                    f"清理后遗留工作树路径仍存在：{candidate['repository']}",
+                    "请停止后续清理并人工核对 Git worktree 状态",
+                    cleaned=cleaned,
+                )
+            branch_delete = subprocess_git(
+                [
+                    "-C",
+                    str(member),
+                    "update-ref",
+                    "-d",
+                    f"refs/heads/{candidate['task_branch']}",
+                    candidate["branch_head_sha"],
+                ],
+                timeout=60,
+            )
+            if branch_delete.returncode != 0:
+                raise _blocked(
+                    "stale_worktree_branch_cleanup_failed",
+                    f"遗留任务分支清理失败：{candidate['repository']}",
+                    "工作树已移除，但请人工核对并处理保留的本地分支",
+                    cleaned=cleaned,
+                    stderr_tail=branch_delete.stderr[-400:],
+                )
+            branch_check = subprocess_git(
+                [
+                    "-C",
+                    str(member),
+                    "rev-parse",
+                    "--verify",
+                    f"refs/heads/{candidate['task_branch']}",
+                ],
+                timeout=60,
+            )
+            if branch_check.returncode == 0:
+                raise _blocked(
+                    "stale_worktree_cleanup_readback_failed",
+                    f"清理后本地任务分支仍存在：{candidate['repository']}",
+                    "请停止后续清理并人工核对 Git refs",
+                    cleaned=cleaned,
+                )
+            cleaned.append(
+                {
+                    "repository": str(candidate["repository"]),
+                    "worktree_path": str(candidate["worktree_path"]),
+                    "branch": str(candidate["task_branch"]),
+                }
+            )
+            for parent in (worktree_dir.parent, pool_root / ".worktree" / issue_key):
+                try:
+                    parent.rmdir()
+                except OSError:
+                    pass
+
+    store.append_decision(
+        issue_key,
+        agentic_run_id,
+        "stale_worktree_cleanup",
+        f"已按人工确认清理 {len(cleaned)} 个遗留工作树并删除对应无独有提交的本地任务分支。",
+        f"user-confirmation:{issue_key}:{agentic_run_id}:stale-worktree-cleanup:{cleanup_plan['cleanup_digest']}",
+    )
+    prepared = execute_worktree_prepare(workspace, install_root, store, issue_key)
+    return {
+        "issue_key": issue_key,
+        "cleanup": cleaned,
+        "cleanup_digest": cleanup_plan["cleanup_digest"],
+        "source_pool_primary_worktree_unchanged": True,
+        "prepare": prepared,
+        "next_step": prepared["next_step"],
+    }
+
+
+def _stale_worktree_cleanup_plan(
+    pool_root: Path,
+    issue_key: str,
+    agentic_run_id: str,
+    scope: Any,
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not isinstance(scope, dict):
+        raise _blocked(
+            "repository_mapping_confirmation_required",
+            "任务仓库确认状态无效",
+            "请重新确认仓库领域，Runtime 不会清理未知路径",
+        )
+    actual_repositories = {
+        str(item.get("repository"))
+        for item in scope.get("actual_change_repositories", [])
+        if isinstance(item, dict)
+    }
+    candidates: list[dict[str, Any]] = []
+    for row in sorted(rows, key=lambda item: str(item.get("repository") or "")):
+        repository = str(row.get("repository") or "")
+        from_branch = str(row.get("from_branch") or "")
+        task_branch = str(row.get("task_branch") or "")
+        baseline_sha = str(row.get("confirmed_branch_sha") or "")
+        if not repository or not from_branch or not task_branch or not baseline_sha:
+            raise _blocked(
+                "stale_worktree_cleanup_plan_invalid",
+                "当前确认映射缺少仓库、基线或任务分支",
+                "请重新确认仓库领域，Runtime 不会猜测清理范围",
+            )
+        _validate_git_branch_name(task_branch)
+        worktree_dir = task_worktree_path(pool_root, issue_key, from_branch, repository).resolve()
+        if not worktree_dir.exists() and not worktree_dir.is_symlink():
+            continue
+        member = (pool_root / repository).resolve()
+        candidate: dict[str, Any] = {
+            "repository": repository,
+            "worktree_path": str(worktree_dir),
+            "pool_member": str(member),
+            "task_branch": task_branch,
+            "confirmed_baseline_sha": baseline_sha,
+            "eligible": False,
+            "blocking_reasons": [],
+        }
+        reasons: list[str] = candidate["blocking_reasons"]
+        if worktree_dir.is_symlink() or not worktree_dir.is_dir():
+            reasons.append("worktree_path_not_safe_directory")
+        if not member.is_dir() or member.is_symlink():
+            reasons.append("source_pool_member_invalid")
+        if repository in actual_repositories or any(
+            row.get(field)
+            for field in ("validation_results", "pr_url", "pr_head_sha", "remote_sha")
+        ):
+            reasons.append("current_task_has_code_facts")
+        if not reasons:
+            top = _git_text(worktree_dir, ["rev-parse", "--show-toplevel"], "worktree_readback_failed")
+            head = _git_text(worktree_dir, ["rev-parse", "HEAD"], "worktree_readback_failed")
+            status = _git_lines(
+                worktree_dir,
+                ["status", "--porcelain=v1", "--untracked-files=all"],
+                "worktree_status_failed",
+            )
+            branch = _git_text(
+                worktree_dir, ["symbolic-ref", "--short", "HEAD"], "worktree_branch_mismatch"
+            )
+            if head == baseline_sha:
+                continue
+            candidate.update({"head_sha": head, "worktree_branch": branch, "clean": not status})
+            if Path(top).resolve() != worktree_dir:
+                reasons.append("worktree_root_mismatch")
+            if status:
+                reasons.append("worktree_not_clean")
+            if branch != task_branch:
+                reasons.append("task_branch_mismatch")
+            branch_head = subprocess_git(
+                ["-C", str(member), "rev-parse", "--verify", f"refs/heads/{task_branch}"],
+                timeout=60,
+            )
+            if branch_head.returncode != 0 or not branch_head.stdout.strip():
+                reasons.append("local_task_branch_missing")
+            else:
+                candidate["branch_head_sha"] = branch_head.stdout.strip()
+                unique = subprocess_git(
+                    [
+                        "-C",
+                        str(member),
+                        "rev-list",
+                        "--count",
+                        f"{baseline_sha}..{branch_head.stdout.strip()}",
+                    ],
+                    timeout=60,
+                )
+                if unique.returncode != 0 or unique.stdout.strip() != "0":
+                    reasons.append("task_branch_has_unique_commits")
+            listed = subprocess_git(
+                ["-C", str(member), "worktree", "list", "--porcelain"], timeout=60
+            )
+            listed_paths: list[str] = []
+            branch_paths: list[str] = []
+            current_path = ""
+            if listed.returncode == 0:
+                for line in listed.stdout.splitlines():
+                    if line.startswith("worktree "):
+                        current_path = line.removeprefix("worktree ").strip()
+                        listed_paths.append(current_path)
+                    elif line == f"branch refs/heads/{task_branch}" and current_path:
+                        branch_paths.append(current_path)
+            if str(worktree_dir) not in listed_paths:
+                reasons.append("worktree_not_registered_by_pool_member")
+            if any(path != str(worktree_dir) for path in branch_paths):
+                reasons.append("task_branch_checked_out_elsewhere")
+        candidate["eligible"] = not reasons
+        candidates.append(candidate)
+    stable = {
+        "issue_key": issue_key,
+        "agentic_run_id": agentic_run_id,
+        "repository_scope_revision": scope.get("content_version"),
+        "candidates": candidates,
+    }
+    cleanup_digest = hashlib.sha256(
+        json.dumps(stable, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {
+        **stable,
+        "cleanup_digest": cleanup_digest,
+        "eligible": bool(candidates) and all(item["eligible"] for item in candidates),
     }
 
 

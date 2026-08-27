@@ -178,7 +178,19 @@ def execute_task_start(
             "required_inputs": [
                 "issue_key",
                 "agentic_run_id",
+                "source_context_path",
+                "trusted_reference_catalog",
                 "intake_input_file",
+            ],
+            "input_artifacts": [
+                {
+                    "kind": "source_context_path",
+                    "source": "result.intake_source.source_context_path",
+                },
+                {
+                    "kind": "trusted_reference_catalog",
+                    "source": "result.intake_source.trusted_reference_catalog",
+                },
             ],
             "allowed_operations": ["task_intake_assess"],
             "requires_authorization": False,
@@ -516,7 +528,7 @@ def _profile_snapshot(
             else:
                 value = _plain_field_value(issue.fields.get(mapping.jira_field))
         elif mapping.source == "jira_description_section" and mapping.section:
-            reference = f"issue.description_sections.{mapping.section}"
+            reference = f"issue.task_facts.description.sections.{mapping.section}"
             value = sections.get(mapping.section)
             if logical_name == "problem_version" and task_worktrees is not None:
                 reference = "task_worktrees.problem_version"

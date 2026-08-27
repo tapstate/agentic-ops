@@ -1003,6 +1003,7 @@ def _command_argv(operation_id: str, payload: Mapping[str, Any]) -> list[str]:
         "task_worktree_prepare": ("task", "worktrees", "prepare"),
         "task_worktrees_prepare": ("task", "worktrees", "prepare"),
         "task_worktree_cleanup": ("task", "worktrees", "cleanup"),
+        "task_worktree_recover": ("task", "worktrees", "recover"),
         "task_intake_assess": ("task", "intake", "assess"),
         "task_solution_classify": ("task", "solution", "classify"),
         "task_run_manifest": ("task-run", "prepare"),

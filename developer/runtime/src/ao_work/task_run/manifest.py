@@ -254,10 +254,15 @@ class TaskRunManifestService:
         source_stable = dict(source)
         source_digest = str(source_stable.pop("context_digest", ""))
         source_stable.pop("observed_at", None)
+        source_digest_matches = digest(source_stable) == source_digest
+        if not source_digest_matches and "trusted_reference_catalog" in source_stable:
+            legacy_source_stable = dict(source_stable)
+            legacy_source_stable.pop("trusted_reference_catalog")
+            source_digest_matches = digest(legacy_source_stable) == source_digest
         if (
             source.get("issue_key") != issue_key
             or source.get("agentic_run_id") != run_id
-            or digest(source_stable) != source_digest
+            or not source_digest_matches
         ):
             raise _blocked(
                 "task_run_source_context_digest_mismatch",
