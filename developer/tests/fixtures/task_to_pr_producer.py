@@ -270,6 +270,7 @@ class DeveloperProducer:
         original_git_result = protocol._git_result
         original_run_command = protocol._run_command
         verification_attempt = 0
+        prohibition_baseline_complete = False
 
         def fake_git_result(
             root: Path, *arguments: str
@@ -293,10 +294,29 @@ class DeveloperProducer:
                 return subprocess.CompletedProcess(arguments, 0, output, "")
             return original_git_result(root, *arguments)
 
+        def fake_remote_git(root: Path, *arguments: str) -> str:
+            if arguments[:2] == ("ls-remote", "--tags"):
+                return ""
+            if arguments[:2] == ("ls-remote", "--heads"):
+                refs = {
+                    "refs/heads/main": base_sha,
+                    "refs/heads/develop": base_sha,
+                }
+                if remote_task_sha is not None:
+                    refs[
+                        f"refs/heads/{self.manifest['repository']['task_branch']}"  # type: ignore[index]
+                    ] = remote_task_sha
+                return "".join(
+                    f"{refs[reference]}\t{reference}\n"
+                    for reference in arguments[3:]
+                    if reference in refs
+                )
+            raise AssertionError(f"未模拟的远端 Git 调用：{arguments}")
+
         def fake_run_command(
             argv: list[str], **kwargs: object
         ) -> subprocess.CompletedProcess[str]:
-            nonlocal verification_attempt
+            nonlocal prohibition_baseline_complete, verification_attempt
             verification_command = self.manifest["verification"][0]["command"]  # type: ignore[index]
             if argv == verification_command:
                 verification_attempt += 1
@@ -307,8 +327,18 @@ class DeveloperProducer:
                     "首次验证失败" if verification_attempt == 1 else "",
                 )
             if argv[:3] == ["gh", "release", "list"]:
+                if (
+                    not prohibition_baseline_complete
+                    and kwargs.get("timeout") != 300
+                ):
+                    raise AssertionError("禁止动作基线的 GitHub 读取必须等待 300 秒")
                 return subprocess.CompletedProcess(argv, 0, "[]", "")
             if argv[:3] == ["gh", "pr", "list"]:
+                if (
+                    not prohibition_baseline_complete
+                    and kwargs.get("timeout") != 300
+                ):
+                    raise AssertionError("禁止动作基线的 GitHub 读取必须等待 300 秒")
                 return subprocess.CompletedProcess(
                     argv,
                     0,
@@ -355,11 +385,13 @@ class DeveloperProducer:
             mock.patch.object(
                 protocol, "_git_result", side_effect=fake_git_result
             ),
+            mock.patch.object(protocol, "_remote_git", side_effect=fake_remote_git),
             mock.patch.object(
                 protocol, "_run_command", side_effect=fake_run_command
             ),
         ):
             protocol.probe_prohibition_baseline(self.manifest_relative)
+            prohibition_baseline_complete = True
             jira_readback = protocol.probe_jira(self.manifest_relative)
             self._apply_and_probe_jira_writes(
                 protocol,

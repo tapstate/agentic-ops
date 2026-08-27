@@ -28,6 +28,7 @@ from ao_work.task_run.protocol import (
     verification_digest,
 )
 from ao_work.task_run.service import (
+    PROHIBITION_BASELINE_COMMAND_TIMEOUT_SECONDS,
     TaskRunProtocol,
     is_current_managed_takeover_comment,
 )
@@ -1541,6 +1542,49 @@ class TrustedTaskRunTest(unittest.TestCase):
         TaskRunProtocol._validate_baseline_start("b" * 40, None, "b" * 40)
         TaskRunProtocol._validate_baseline_start(
             "d" * 40, "d" * 40, "b" * 40
+        )
+
+    def test_prohibition_baseline_external_commands_allow_five_minutes(self) -> None:
+        protocol = TaskRunProtocol(
+            SimpleNamespace(
+                root=self.workspace.resolve(),
+                config_path=self.workspace / ".agentic-ops/agent.json",
+            ),
+            install_root=self.install,
+            lock_timeout=1,
+        )
+        observed: list[tuple[list[str], object]] = []
+
+        def fake_run(
+            argv: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            observed.append((argv, kwargs.get("timeout")))
+            return subprocess.CompletedProcess(argv, 0, "[]", "")
+
+        with mock.patch.object(protocol, "_run_command", side_effect=fake_run):
+            self.assertEqual(
+                "[]",
+                protocol._remote_git(self.source, "ls-remote", "--tags", "origin"),
+            )
+            self.assertEqual(
+                [],
+                protocol._github_json_array(
+                    self.source,
+                    ["gh", "release", "list"],
+                    "读取失败",
+                    timeout=PROHIBITION_BASELINE_COMMAND_TIMEOUT_SECONDS,
+                ),
+            )
+
+        self.assertEqual(
+            [
+                (
+                    ["git", "-C", str(self.source), "ls-remote", "--tags", "origin"],
+                    300,
+                ),
+                (["gh", "release", "list"], 300),
+            ],
+            observed,
         )
 
     def test_pr_action_binding_fails_closed_when_baseline_already_had_open_pr(self) -> None:

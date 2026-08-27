@@ -54,6 +54,7 @@ from ao_work.task_state import TaskStore
 from ao_work.workspace import Workspace
 
 MAX_COMMAND_OUTPUT_BYTES = 4_194_304
+PROHIBITION_BASELINE_COMMAND_TIMEOUT_SECONDS = 300
 
 
 def repository_delivery_directory(repository: str) -> str:
@@ -369,10 +370,10 @@ class TaskRunProtocol:
         local_head_sha = self._git(root, "rev-parse", "HEAD").strip()
         self._git(root, "cat-file", "-e", f"{local_head_sha}^{{commit}}")
         tag_refs = self._parse_remote_refs(
-            self._git(root, "ls-remote", "--tags", remote), "refs/tags/"
+            self._remote_git(root, "ls-remote", "--tags", remote), "refs/tags/"
         )
         task_branch_refs = self._remote_heads(
-            self._git(
+            self._remote_git(
                 root,
                 "ls-remote",
                 "--heads",
@@ -382,7 +383,7 @@ class TaskRunProtocol:
         )
         task_branch_remote_sha = task_branch_refs.get(repository["task_branch"])
         protected_refs = self._remote_heads(
-            self._git(
+            self._remote_git(
                 root,
                 "ls-remote",
                 "--heads",
@@ -424,6 +425,7 @@ class TaskRunProtocol:
                 "tagName,publishedAt",
             ],
             "禁止动作基线无法读取 GitHub releases",
+            timeout=PROHIBITION_BASELINE_COMMAND_TIMEOUT_SECONDS,
         )
         release_records = sorted(
             [
@@ -458,6 +460,7 @@ class TaskRunProtocol:
                 "number,url,state,isDraft,mergedAt,headRefName,headRefOid,baseRefName",
             ],
             "禁止动作基线无法读取任务分支 open PR",
+            timeout=PROHIBITION_BASELINE_COMMAND_TIMEOUT_SECONDS,
         )
         if len(task_prs) > 1:
             raise blocked(
@@ -3111,6 +3114,20 @@ class TaskRunProtocol:
             timeout=60,
         )
 
+    def _remote_git(self, root: Path, *arguments: str) -> str:
+        result = self._run_command(
+            ["git", "-C", str(root), *arguments],
+            cwd=root,
+            timeout=PROHIBITION_BASELINE_COMMAND_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0:
+            raise blocked(
+                "git_probe_failed",
+                f"Git 只读检查失败：git {' '.join(arguments[:2])}",
+                "请修复业务仓库或远端访问后重新 probe",
+            )
+        return result.stdout
+
     @staticmethod
     def _run_command(
         argv: list[str],
@@ -3461,9 +3478,14 @@ class TaskRunProtocol:
         return heads
 
     def _github_json_array(
-        self, root: Path, argv: list[str], failure_message: str
+        self,
+        root: Path,
+        argv: list[str],
+        failure_message: str,
+        *,
+        timeout: int = 60,
     ) -> list[dict[str, Any]]:
-        result = self._run_command(argv, cwd=root, timeout=60)
+        result = self._run_command(argv, cwd=root, timeout=timeout)
         if result.returncode != 0:
             raise blocked(
                 "github_prohibition_probe_failed",
