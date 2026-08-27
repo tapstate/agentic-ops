@@ -526,6 +526,22 @@ capabilities:
       - [task, solution, classify]
     summary: 将方案严格绑定当前准入摘要和源码 HEAD，根据固定风险标志与证据确定 L1 至 L4；不提供通用方案摘要确认门禁。
     next_action: L1 进入设计审查；L2 进入逐项风险决策；L3 由 AI 修订设计并重新评估；L4 停止并解决事实、权限或能力缺口。
+    input_schema:
+      contract_version: solution_gate/v4
+      schema_version: 1
+      required: [intake_digest, proposed_solution, scope, risk_flags, classification_evidence, residual_risks]
+      optional: [execution_plan]
+      execution_plan:
+        exactly_one_of: [change_repository, change_repositories]
+        required: [verification, review_summary]
+      minimal_example:
+        schema_version: 1
+        intake_digest: <current-intake-digest>
+        proposed_solution: 中文方案说明
+        scope: {included: [owner/repository::path], excluded: []}
+        risk_flags: {user_choice_required: false, external_side_effect: false, nontrivial_risk: false, architecture_change: false, public_contract_change: false, security_boundary_change: false, data_migration: false, confirmed_design_change: false, fact_conflict: false, permission_gap: false, capability_gap: false}
+        classification_evidence: {}
+        residual_risks: []
 
   - id: task_transfer
     source: runtime

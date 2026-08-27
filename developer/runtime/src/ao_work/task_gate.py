@@ -19,6 +19,7 @@ from ao_work.workspace_security import (
 
 
 SCHEMA_VERSION = 1
+SOLUTION_GATE_CONTRACT_VERSION = "solution_gate/v4"
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 CHINESE_PATTERN = re.compile(r"[\u3400-\u9fff]")
 INPUT_CONTRACT_RECOVERY = {
@@ -297,7 +298,26 @@ class TaskGateService:
         intake = self._current_intake(issue_key, agentic_run_id)
         self._verify_current_source(intake, issue_key, agentic_run_id)
         raw = _load_json_input(self.root, input_file, "方案分级输入")
-        normalized = self._normalize_solution_input(raw)
+        validation_errors = _solution_shape_errors(raw)
+        if validation_errors:
+            self._record_solution_validation_failure(
+                issue_key, agentic_run_id, "solution_input_invalid", validation_errors
+            )
+            raise _solution_validation_error(
+                "solution_input_invalid", "方案分级输入不符合 Schema", validation_errors
+            )
+        try:
+            normalized = self._normalize_solution_input(raw)
+        except RuntimeErrorResult as error:
+            if not error.code.startswith("solution_"):
+                raise
+            validation_errors = _solution_runtime_errors(error, raw)
+            self._record_solution_validation_failure(
+                issue_key, agentic_run_id, error.code, validation_errors
+            )
+            raise _solution_validation_error(
+                error.code, error.message, validation_errors, details=error.details
+            ) from error
         if normalized["intake_digest"] != intake["intake_digest"]:
             raise _blocked(
                 "solution_intake_digest_mismatch",
@@ -368,6 +388,33 @@ class TaskGateService:
             "solution_path": str(path),
             "agentic_next_action": next_action,
         }
+
+    def _record_solution_validation_failure(
+        self,
+        issue_key: str,
+        agentic_run_id: str,
+        code: str,
+        validation_errors: list[dict[str, Any]],
+    ) -> None:
+        errors_digest = _digest(
+            {
+                "contract_version": SOLUTION_GATE_CONTRACT_VERSION,
+                "validation_errors": validation_errors,
+            }
+        )
+        self.store.record_gate_transition(
+            issue_key,
+            agentic_run_id,
+            stage="solution_classification",
+            next_action="rebuild_contract_input_and_retry_once",
+            operation="task_solution_classify",
+            status="blocked",
+            code=code,
+            evidence={
+                "contract_version": SOLUTION_GATE_CONTRACT_VERSION,
+                "validation_errors_sha256": errors_digest,
+            },
+        )
 
     def _normalize_intake_input(
         self, payload: dict[str, Any], source: Mapping[str, Any]
@@ -1542,6 +1589,120 @@ def _run_git(root: Path, *arguments: str) -> str:
 
 def _timestamp() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _solution_shape_errors(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return [_validation_error("", "object", payload)]
+    errors: list[dict[str, Any]] = []
+    required = {
+        "schema_version": "integer enum [1]",
+        "intake_digest": "string (SHA-256)",
+        "proposed_solution": "non-empty Chinese string",
+        "scope": "object {included: string[], excluded: string[]}",
+        "risk_flags": "object containing every fixed risk flag as boolean",
+        "classification_evidence": "object of risk flag to non-empty string[]",
+        "residual_risks": "string[]",
+    }
+    optional = {"execution_plan"}
+    for field, expected in required.items():
+        if field not in payload:
+            errors.append(_validation_error(f"/{field}", expected, None))
+    for field in sorted(set(payload) - set(required) - optional):
+        errors.append(_validation_error(f"/{field}", "no additional property", payload[field]))
+    if "schema_version" in payload and (
+        isinstance(payload["schema_version"], bool)
+        or not isinstance(payload["schema_version"], int)
+        or payload["schema_version"] != SCHEMA_VERSION
+    ):
+        errors.append(_validation_error("/schema_version", "integer enum [1]", payload["schema_version"]))
+    for field, expected_type in (
+        ("intake_digest", str),
+        ("proposed_solution", str),
+        ("residual_risks", list),
+    ):
+        if field in payload and not isinstance(payload[field], expected_type):
+            errors.append(_validation_error(f"/{field}", expected_type.__name__, payload[field]))
+    for field in ("scope", "risk_flags", "classification_evidence", "execution_plan"):
+        if field in payload and not isinstance(payload[field], dict):
+            errors.append(_validation_error(f"/{field}", "object", payload[field]))
+    if isinstance(payload.get("scope"), dict):
+        scope = payload["scope"]
+        for field in ("included", "excluded"):
+            if field not in scope:
+                errors.append(_validation_error(f"/scope/{field}", "string[]", None))
+            elif not isinstance(scope[field], list):
+                errors.append(_validation_error(f"/scope/{field}", "string[]", scope[field]))
+        for field in sorted(set(scope) - {"included", "excluded"}):
+            errors.append(_validation_error(f"/scope/{field}", "no additional property", scope[field]))
+    if isinstance(payload.get("execution_plan"), dict):
+        execution = payload["execution_plan"]
+        allowed = (
+            {"change_repository", "verification", "review_summary"}
+            if "change_repository" in execution
+            else {"change_repositories", "verification", "review_summary"}
+        )
+        for field in sorted(allowed - set(execution)):
+            errors.append(_validation_error(f"/execution_plan/{field}", "required field", None))
+        for field in sorted(set(execution) - allowed):
+            errors.append(_validation_error(f"/execution_plan/{field}", "no additional property", execution[field]))
+    return errors
+
+
+def _validation_error(pointer: str, expected: str, actual: Any) -> dict[str, Any]:
+    return {
+        "json_pointer": pointer,
+        "expected": expected,
+        "actual_value_summary": _value_summary(actual),
+        "contract_version": SOLUTION_GATE_CONTRACT_VERSION,
+    }
+
+
+def _value_summary(value: Any) -> dict[str, Any]:
+    if value is None:
+        return {"type": "null"}
+    if isinstance(value, str):
+        return {"type": "string", "length": len(value)}
+    if isinstance(value, bool):
+        return {"type": "boolean", "value": value}
+    if isinstance(value, (int, float)):
+        return {"type": type(value).__name__, "value": value}
+    if isinstance(value, list):
+        return {"type": "array", "length": len(value)}
+    if isinstance(value, dict):
+        return {"type": "object", "keys": sorted(str(key) for key in value)[:32]}
+    return {"type": type(value).__name__}
+
+
+def _solution_runtime_errors(error: RuntimeErrorResult, payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    pointer = {
+        "solution_schema_version": "/schema_version",
+        "solution_scope_invalid": "/scope",
+        "solution_scope_conflict": "/scope",
+        "solution_risk_flags_invalid": "/risk_flags",
+        "solution_classification_evidence_invalid": "/classification_evidence",
+        "solution_classification_evidence_missing": "/classification_evidence",
+        "solution_execution_plan_invalid": "/execution_plan",
+    }.get(error.code, "")
+    actual = payload if not pointer else payload.get(pointer.removeprefix("/"))
+    return [_validation_error(pointer, error.message, actual)]
+
+
+def _solution_validation_error(
+    code: str,
+    message: str,
+    validation_errors: list[dict[str, Any]],
+    *,
+    details: Mapping[str, Any] | None = None,
+) -> RuntimeErrorResult:
+    error_details = dict(details or {})
+    error_details.update(
+        {
+            "contract_version": SOLUTION_GATE_CONTRACT_VERSION,
+            "validation_errors": validation_errors,
+        }
+    )
+    return _invalid(code, message, details=error_details)
 
 
 def _invalid(
