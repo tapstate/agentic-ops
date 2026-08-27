@@ -136,12 +136,12 @@ class TaskGateService:
                 ),
             },
         }
-        context_digest = _digest(stable)
         trusted_reference_catalog, _ = self._trusted_reference_catalog(stable)
+        stable["trusted_reference_catalog"] = trusted_reference_catalog
+        context_digest = _digest(stable)
         payload = {
             **stable,
             "context_digest": context_digest,
-            "trusted_reference_catalog": trusted_reference_catalog,
             "observed_at": _timestamp(),
         }
         path = self._gate_path(issue_key, agentic_run_id, "source-context.json")
