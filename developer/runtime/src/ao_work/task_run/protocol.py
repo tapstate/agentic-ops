@@ -767,6 +767,60 @@ def validate_event(payload: Mapping[str, Any]) -> dict[str, Any]:
     return value
 
 
+def expand_inline_step_event(
+    payload: Mapping[str, Any],
+    *,
+    agentic_run_id: str,
+    authorization_reference: object,
+    recorded_at: str,
+) -> dict[str, Any]:
+    """把 CLI 的简化步骤事件展开为 canonical 审计事件。"""
+
+    value = dict(payload)
+    required = {"event_type", "actor", "evidence_origin", "summary"}
+    allowed = required | {"duration_seconds"}
+    if not required <= set(value) or not set(value) <= allowed:
+        invalid(
+            "inline_event",
+            "字段不闭合；"
+            f"missing={sorted(required - set(value))}, "
+            f"extra={sorted(set(value) - allowed)}",
+        )
+    event_type = require_string(value["event_type"], "inline_event.event_type")
+    status = ""
+    step_id = ""
+    for candidate in ("started", "completed", "blocked"):
+        suffix = f"_{candidate}"
+        if event_type.endswith(suffix):
+            status = candidate
+            step_id = event_type.removesuffix(suffix)
+            break
+    if not status or not step_id:
+        invalid(
+            "inline_event.event_type",
+            "必须使用 <step_id>_started、<step_id>_completed 或 <step_id>_blocked",
+        )
+    event_id = f"inline-{digest(value)[:32]}"
+    return validate_event(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "protocol": PROTOCOL,
+            "event_id": event_id,
+            "agentic_run_id": agentic_run_id,
+            "step_id": step_id,
+            "recorded_at": recorded_at,
+            "status": status,
+            "actor": value["actor"],
+            "action": "step",
+            "duration_seconds": value.get("duration_seconds", 0),
+            "summary": value["summary"],
+            "authorization_reference": authorization_reference,
+            "action_data": {},
+            "evidence_origin": value["evidence_origin"],
+        }
+    )
+
+
 def validate_action_data(action: str, data: Mapping[str, Any]) -> None:
     if action == "step":
         require_exact_keys(data, set(), "action_data")

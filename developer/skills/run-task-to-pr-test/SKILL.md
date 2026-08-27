@@ -85,7 +85,7 @@ ao-work task solution classify --issue-key <KEY> --agentic-run-id <RUN> --input-
 
 ## 推进到 PR 审查
 
-1. `record` 只导入 Skill、AI、人工或项目工具产生的非关键过程事件，并设置 `evidence_origin=imported`；不得设置 `actor=runtime`，不得导入 readback、verification 或 prohibition_check。
+1. `record` 只导入 Skill、AI、人工或项目工具产生的非关键过程事件，并设置 `evidence_origin=imported`；不得设置 `actor=runtime`，不得导入 readback、verification 或 prohibition_check。普通步骤闭环直接使用 `--event '{"event_type":"<step_id>_started|completed|blocked","actor":"ai","evidence_origin":"imported","summary":"<中文摘要>"}'`，Runtime 从 manifest 补齐运行编号、授权引用和 canonical 字段；复杂过程事件才使用 AI 或项目工具生成的工作空间相对完整事件文件，不要求用户手写协议文件。
 2. 在任何 Jira/Git/GitHub 写入、提交或推送前，先切到 manifest 任务分支并确保工作树与索引干净，再执行 `ao-work task-run probe-prohibition-baseline --manifest <...>`。Runtime 使用 manifest 明确允许的三类只读权限，记录 Jira 非 Done 状态、完整远端 tag refs、GitHub release 记录、各保护分支 HEAD、本地 HEAD、可空远端任务分支 SHA和可空既有 open PR；若远端任务分支已存在，本地 HEAD 必须与其一致；若不存在，本地 HEAD 必须与远端目标分支一致。这样写前预置 commit 不能被后续微小提交伪装为本运行产出；基线失败或补录过晚必须停止并使用新的运行。
 3. 执行 `ao-work task-run probe-jira --manifest <...>`，由 Runtime 使用当前 developer 安装凭证实时 GET `myself`、issue 和评论，核对安装身份引用、站点、Project、Issue ID、经办人、Profile 状态映射、非 Done 状态及当前 `agentic_run_id` 的受管接管评论。评论缺失时记录自动化缺口和 `formal_takeover_verified=false`，不虚构正式接管。
 4. 使用 manifest 中既有 `agentic_run_id`，记录分析、计划、风险、验证和明确非范围。只有与 manifest 绑定且事件中引用相同授权的外部动作才执行写入。

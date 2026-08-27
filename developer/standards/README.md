@@ -55,7 +55,8 @@ ao-work capability show <operation>
 ao-work task-run prepare --issue-key <ISSUE-KEY>
 ao-work task-run authorize --issue-key <ISSUE-KEY> --confirmed-by <当前会话确认人> --confirm
 ao-work task-run open --manifest <workspace-relative-manifest.json>
-ao-work task-run record --manifest <workspace-relative-manifest.json> --event <workspace-relative-event.json>
+ao-work task-run record --manifest <workspace-relative-manifest.json> --event '<inline-step-event-json>'
+# 复杂过程事件也可使用：--event <workspace-relative-full-event.json>
 ao-work task-run probe-prohibition-baseline --manifest <workspace-relative-manifest.json>
 ao-work task-run probe-jira --manifest <workspace-relative-manifest.json>
 ao-work task-run probe-jira-write --manifest <workspace-relative-manifest.json> --plan-file <managed-plan.json> --confirm-plan-id <plan-id>
@@ -66,6 +67,13 @@ ao-work task-run probe-prohibitions --manifest <workspace-relative-manifest.json
 ao-work task-run record-unverified-prohibitions --manifest <workspace-relative-manifest.json>
 ao-work task-run finalize --manifest <workspace-relative-manifest.json> --status <ready_for_pr_review|blocked|failed> --next-action <明确下一步>
 ```
+
+普通步骤事件优先使用简化内联 JSON。`event_type` 固定为
+`<step_id>_started`、`<step_id>_completed` 或 `<step_id>_blocked`，并提供
+`actor`、`evidence_origin=imported` 和中文 `summary`；可选提供
+`duration_seconds`。Runtime 从当前 manifest 补齐 `agentic_run_id`、授权引用、
+记录时间和 canonical 协议字段。复杂过程事件继续使用工作空间内的完整事件文件；
+Jira、Git、PR、验证和禁止动作等可信事实仍只能由对应 Runtime probe 生成。
 
 `prepare` 从当前 L1 solution、确认领域和执行计划选定的 prepared 任务工作树生成完整设计与连续执行授权包；同领域其它 prepared 工作树只用于分析，不会阻断交付。任务可选择一个或多个实际变更仓库，用户只对完整任务确认一次方案、逐仓范围、最终验证命令、允许/禁止动作和风险。确认后 `authorize` 为每个仓库生成一份 shared schema v1 canonical manifest 和独立 task-run 状态；单仓继续返回兼容 `manifest_path`，多仓通过 `deliveries` 返回逐仓路径，Skill 自动逐仓执行 `open`，不再要求用户复制 run、文件路径或摘要。
 
