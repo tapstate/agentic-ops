@@ -35,6 +35,8 @@ ao-work takeover <ISSUE-KEY>
 
 接管成功后，Runtime 已提供或复用 `agentic_run_id`。随后由 AI 连续完成任务分类、流程、仓库、范围和验证方式分析；事实缺失时优先从 Jira、Project Profile、源码和 Runtime 回读补全，只有事实冲突、必须由人取舍或写入结果不明确时进入风险决策。
 
+若 `task worktrees prepare` 返回 `stale_worktree_cleanup`，不得手工执行 `git worktree remove`、修改 `.agentic-ops` 或覆盖原工作树。先调用 `ao-work task worktrees recover --issue-key <KEY>` 获取逐仓只读 `cleanup_plan`；仅当用户逐项确认路径、干净状态、无独有提交和不含当前任务代码事实后，使用该计划的 `cleanup_digest` 执行 `ao-work task worktrees recover --issue-key <KEY> --cleanup-digest <DIGEST> --confirm`。Runtime 会在删除精确工作树与对应本地分支后自动重试 prepare；任一候选不合格或摘要变化时停止并人工处理。
+
 确认领域工作树准备完成后，Runtime 返回的 `intake_source.trusted_reference_catalog` 是唯一的 Jira/Profile/Runtime 自动补全目录。AI 必须先读取该目录；只能选择其中的 `evidence_id`，不得猜测 `reference` 路径、快照值或摘要。目录没有可用事实时，将该字段写入 `unresolved_information`，不得把 Description 数组下标、旧 `issue.description_sections.*` 示例或聊天上下文伪造成证据。
 
 先由 AI 把语义分析写成工作空间普通 JSON 输入；用户不填写该文件。调用：

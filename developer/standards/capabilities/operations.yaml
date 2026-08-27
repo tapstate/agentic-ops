@@ -457,6 +457,16 @@ capabilities:
     summary: Jira 完成总结与完成状态回读后，整体预检并非强制清理任务登记的精确子工作树，永不删除源码池成员。
     next_action: 任一 dirty、Head 漂移或远端未承接均停止；满足门禁后一次清理全部登记工作树。
 
+  - id: task_worktree_recover
+    source: contract
+    contract: contracts/operations/task-worktree-recover.yaml
+    status: implemented
+    visibility: public
+    commands:
+      - [task, worktrees, recover]
+    summary: 对与当前确认基线冲突的遗留任务工作树生成只读清理计划；用户逐项确认当前摘要后，Runtime 仅清理干净且无独有提交的候选，并自动重试工作树准备。
+    next_action: 先审阅 cleanup_plan 的每个候选；仅全部符合条件时，以返回的 cleanup_digest 和 --confirm 执行受控恢复。
+
   - id: resume_takeover
     source: contract
     contract: contracts/operations/resume-takeover.yaml
