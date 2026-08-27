@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from ao_work.output import RuntimeErrorResult, failure
-from ao_work.task_gate import TaskGateService
+from ao_work.task_gate import TaskGateService, _digest
 from ao_work.task_state import TaskIdentity, TaskStore
 from ao_work.workspace import Workspace
 
@@ -130,6 +130,16 @@ class TaskGateTest(unittest.TestCase):
             },
         )
         (self.workspace_root / "inputs").mkdir()
+
+    def test_source_context_digest_binds_trusted_reference_catalog(self) -> None:
+        source_path = Path(self.context["source_context_path"])
+        source = json.loads(source_path.read_text(encoding="utf-8"))
+        source_stable = dict(source)
+        source_stable.pop("context_digest")
+        source_stable.pop("observed_at")
+
+        self.assertTrue(source["trusted_reference_catalog"])
+        self.assertEqual(source["context_digest"], _digest(source_stable))
 
     def test_intake_assess_continues_without_separate_confirmation(self) -> None:
         path = self._write_intake("intake.json")

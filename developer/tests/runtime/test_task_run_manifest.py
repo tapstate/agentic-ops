@@ -203,6 +203,14 @@ class TaskRunManifestTest(unittest.TestCase):
                         "agentic_run_id": RUN_ID,
                         "issue_content_sha256": "b" * 64,
                     },
+                    "trusted_reference_catalog": [
+                        {
+                            "evidence_id": "evidence-source-context",
+                            "source": "jira_issue",
+                            "value": "修复 MySQL 批读 SQL 并补充回归测试。",
+                            "evidence_sha256": "c" * 64,
+                        }
+                    ],
                 }
         source_context["context_digest"] = digest(source_context)
         source_context["observed_at"] = "2026-08-25T00:00:00+00:00"
@@ -333,6 +341,43 @@ class TaskRunManifestTest(unittest.TestCase):
         self.assertEqual("task_run_solution_digest_mismatch", captured.exception.code)
         output_root = self.workspace_root / "inputs" / "agentic-ops" / ISSUE_KEY / RUN_ID
         self.assertFalse(output_root.exists())
+
+    def test_prepare_accepts_legacy_pre_catalog_source_context_digest(self) -> None:
+        run_root = (
+            self.workspace_root
+            / ".agentic-ops"
+            / "tasks"
+            / ISSUE_KEY
+            / "runs"
+            / RUN_ID
+            / "gates"
+        )
+        source_path = run_root / "source-context.json"
+        source = read_json(source_path)
+        source.pop("context_digest")
+        source.pop("observed_at")
+        legacy_source = dict(source)
+        legacy_source.pop("trusted_reference_catalog")
+        source["context_digest"] = digest(legacy_source)
+        source["observed_at"] = "2026-08-25T00:00:00+00:00"
+        source_path.write_text(
+            json.dumps(source, ensure_ascii=False), encoding="utf-8"
+        )
+
+        solution_path = run_root / "solution.json"
+        solution = read_json(solution_path)
+        solution.pop("solution_digest")
+        solution.pop("classified_at")
+        solution["source_context_digest"] = source["context_digest"]
+        solution["solution_digest"] = digest(solution)
+        solution["classified_at"] = "2026-08-25T00:01:00+00:00"
+        solution_path.write_text(
+            json.dumps(solution, ensure_ascii=False), encoding="utf-8"
+        )
+
+        prepared = self.service.prepare(ISSUE_KEY)
+
+        self.assertTrue(prepared["confirmation_required"])
 
     def test_multi_repository_plan_creates_isolated_delivery_manifests(self) -> None:
         run_root = (
