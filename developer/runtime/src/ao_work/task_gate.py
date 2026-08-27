@@ -137,9 +137,11 @@ class TaskGateService:
             },
         }
         context_digest = _digest(stable)
+        trusted_reference_catalog, _ = self._trusted_reference_catalog(stable)
         payload = {
             **stable,
             "context_digest": context_digest,
+            "trusted_reference_catalog": trusted_reference_catalog,
             "observed_at": _timestamp(),
         }
         path = self._gate_path(issue_key, agentic_run_id, "source-context.json")
@@ -147,6 +149,7 @@ class TaskGateService:
         return {
             "context_digest": context_digest,
             "source_context_path": str(path),
+            "trusted_reference_catalog": trusted_reference_catalog,
         }
 
     def assess_intake(
@@ -433,24 +436,45 @@ class TaskGateService:
                 raise _invalid(
                     "intake_auto_fill_invalid", "每个自动补全项必须是对象"
                 )
-            expected = {"field", "value", "source", "reference", "rationale"}
-            optional = {"evidence_sha256"}
-            if not set(raw) <= expected | optional or not expected <= set(raw):
-                raise _invalid(
-                    "intake_auto_fill_invalid", "自动补全项字段不完整或包含未知字段"
-                )
-            field = _text(raw["field"], "auto_fill.field")
-            source_name = _text(raw["source"], "auto_fill.source")
-            if source_name not in ALLOWED_EVIDENCE_SOURCES:
-                raise _invalid(
-                    "intake_evidence_source_invalid",
-                    f"不支持的自动补全来源：{source_name}",
-                )
-            reference = _text(raw["reference"], "auto_fill.reference")
-            rationale = _chinese_text(raw["rationale"], "auto_fill.rationale")
-            item_value = _json_value(raw["value"], "auto_fill.value")
-            evidence_sha256: str
+            if "evidence_id" in raw:
+                expected = {"field", "evidence_id", "rationale"}
+                if set(raw) != expected:
+                    raise _invalid(
+                        "intake_auto_fill_invalid",
+                        "evidence_id 自动补全项必须精确包含 field、evidence_id、rationale",
+                    )
+                field = _text(raw["field"], "auto_fill.field")
+                rationale = _chinese_text(raw["rationale"], "auto_fill.rationale")
+                evidence = self._resolve_evidence_id(source, raw["evidence_id"])
+                source_name = str(evidence["source"])
+                reference = str(evidence["reference"])
+                item_value = _json_value(evidence["value"], "auto_fill.value")
+                evidence_sha256 = str(evidence["evidence_sha256"])
+            else:
+                expected = {"field", "value", "source", "reference", "rationale"}
+                optional = {"evidence_sha256"}
+                if not set(raw) <= expected | optional or not expected <= set(raw):
+                    raise _invalid(
+                        "intake_auto_fill_invalid", "自动补全项字段不完整或包含未知字段"
+                    )
+                field = _text(raw["field"], "auto_fill.field")
+                source_name = _text(raw["source"], "auto_fill.source")
+                if source_name not in ALLOWED_EVIDENCE_SOURCES:
+                    raise _invalid(
+                        "intake_evidence_source_invalid",
+                        f"不支持的自动补全来源：{source_name}",
+                    )
+                reference = _text(raw["reference"], "auto_fill.reference")
+                rationale = _chinese_text(raw["rationale"], "auto_fill.rationale")
+                item_value = _json_value(raw["value"], "auto_fill.value")
+                evidence_sha256 = ""
+
             if source_name == "business_source_code":
+                if "evidence_id" in raw:
+                    raise _invalid(
+                        "intake_evidence_id_invalid",
+                        "业务源码证据必须使用包含 SHA-256 的源码引用，不能使用 evidence_id",
+                    )
                 evidence_sha256 = _text(
                     raw.get("evidence_sha256"), "auto_fill.evidence_sha256"
                 )
@@ -474,16 +498,17 @@ class TaskGateService:
                         "intake_auto_fill_invalid",
                         "Jira、Profile 和 Runtime 来源的摘要由 Runtime 计算，不能手工提供",
                     )
-                verified = _resolve_reference(
-                    source, source_name, reference
-                )
-                if verified != item_value:
-                    raise _blocked(
-                        "intake_verified_value_mismatch",
-                        f"自动补全值与受信来源不一致：{field}",
-                        "请使用 Runtime 回读的准确值，或改用业务源码证据并接受人工语义审查",
+                if "evidence_id" not in raw:
+                    verified = _resolve_reference(
+                        source, source_name, reference
                     )
-                evidence_sha256 = _digest({"value": verified})
+                    if verified != item_value:
+                        raise _blocked(
+                            "intake_verified_value_mismatch",
+                            f"自动补全值与受信来源不一致：{field}",
+                            "请使用 Runtime 回读的准确值，或改用业务源码证据并接受人工语义审查",
+                        )
+                    evidence_sha256 = _digest({"value": verified})
             normalized.append(
                 {
                     "field": field,
@@ -823,6 +848,83 @@ class TaskGateService:
                     }
                 )
         return sorted(facts, key=lambda item: (str(item["source"]), str(item["reference"])))
+
+    def _trusted_reference_catalog(
+        self, source: Mapping[str, Any]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """生成 AI 可选的脱敏证据目录及 Runtime 内部解析索引。
+
+        目录只暴露当前解析器可精确到达的标量值。数组不能以猜测的
+        ``facts.0`` 形式暴露，直到存在稳定、版本化的数组寻址合同。
+        """
+        catalog: list[dict[str, Any]] = []
+        index: list[dict[str, Any]] = []
+        for source_name, root in (
+            ("jira_issue", "issue"),
+            ("project_profile", "project_profile"),
+            ("runtime_readback", "runtime_readback"),
+        ):
+            for reference, item in _flatten(source.get(root), root):
+                if isinstance(item, (dict, list)):
+                    continue
+                evidence_id = _evidence_id(source_name, reference)
+                value = _json_value(item, reference)
+                evidence_sha256 = _digest({"value": value})
+                catalog.append(
+                    {
+                        "evidence_id": evidence_id,
+                        "source": source_name,
+                        "value": value,
+                        "evidence_sha256": evidence_sha256,
+                    }
+                )
+                index.append(
+                    {
+                        "evidence_id": evidence_id,
+                        "source": source_name,
+                        "reference": reference,
+                        "value": value,
+                        "evidence_sha256": evidence_sha256,
+                    }
+                )
+        return (
+            sorted(catalog, key=lambda item: str(item["evidence_id"])),
+            sorted(index, key=lambda item: str(item["evidence_id"])),
+        )
+
+    def _resolve_evidence_id(
+        self, source: Mapping[str, Any], raw_evidence_id: Any
+    ) -> dict[str, Any]:
+        evidence_id = _text(raw_evidence_id, "auto_fill.evidence_id")
+        catalog = source.get("trusted_reference_catalog")
+        expected_catalog, index = self._trusted_reference_catalog(source)
+        if not isinstance(catalog, list) or catalog != expected_catalog:
+            raise _invalid(
+                "task_source_context_invalid",
+                "任务来源快照中的受信证据目录无效，请重新准备确认领域工作树",
+            )
+        matched = [
+            item
+            for item in index
+            if isinstance(item, dict) and item.get("evidence_id") == evidence_id
+        ]
+        if len(matched) != 1:
+            raise _invalid(
+                "intake_evidence_id_invalid",
+                f"受信证据目录中不存在 evidence_id：{evidence_id}",
+                details={
+                    "submitted_evidence_id": evidence_id,
+                    "available_evidence": catalog,
+                    "source_context_digest": source.get("context_digest"),
+                },
+            )
+        item = matched[0]
+        expected = {"evidence_id", "source", "reference", "value", "evidence_sha256"}
+        if set(item) != expected or item.get("source") not in ALLOWED_EVIDENCE_SOURCES:
+            raise _invalid(
+                "task_source_context_invalid", "任务来源快照中的受信证据索引无效"
+            )
+        return item
 
     def _solution_level(self, flags: Mapping[str, bool]) -> str:
         enabled = {name for name, value in flags.items() if value}
@@ -1442,8 +1544,17 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _invalid(code: str, message: str) -> RuntimeErrorResult:
+def _invalid(
+    code: str, message: str, *, details: Mapping[str, Any] | None = None
+) -> RuntimeErrorResult:
     input_contract_error = code != "task_source_context_invalid"
+    error_details: dict[str, Any] = (
+        {"input_recovery": INPUT_CONTRACT_RECOVERY}
+        if input_contract_error
+        else {}
+    )
+    if details:
+        error_details.update(details)
     return RuntimeErrorResult(
         code=code,
         message=message,
@@ -1456,10 +1567,14 @@ def _invalid(code: str, message: str) -> RuntimeErrorResult:
             if input_contract_error
             else "任务来源快照无效；请停止并由人工修复 Runtime、工作空间或 Profile 状态"
         ),
-        details={"input_recovery": INPUT_CONTRACT_RECOVERY}
-        if input_contract_error
-        else {},
+        details=error_details,
     )
+
+
+def _evidence_id(source_name: str, reference: str) -> str:
+    """对外稳定、对当前快照可绑定的证据选择标识。"""
+    digest = hashlib.sha256(f"{source_name}:{reference}".encode("utf-8")).hexdigest()
+    return f"evidence-{digest[:24]}"
 
 
 def _blocked(code: str, message: str, action: str) -> RuntimeErrorResult:
