@@ -35,6 +35,8 @@ ao-work takeover <ISSUE-KEY>
 
 接管成功后，Runtime 已提供或复用 `agentic_run_id`。随后由 AI 连续完成任务分类、流程、仓库、范围和验证方式分析；事实缺失时优先从 Jira、Project Profile、源码和 Runtime 回读补全，只有事实冲突、必须由人取舍或写入结果不明确时进入风险决策。
 
+确认领域工作树准备完成后，Runtime 返回的 `intake_source.trusted_reference_catalog` 是唯一的 Jira/Profile/Runtime 自动补全目录。AI 必须先读取该目录；只能选择其中的 `evidence_id`，不得猜测 `reference` 路径、快照值或摘要。目录没有可用事实时，将该字段写入 `unresolved_information`，不得把 Description 数组下标、旧 `issue.description_sections.*` 示例或聊天上下文伪造成证据。
+
 先由 AI 把语义分析写成工作空间普通 JSON 输入；用户不填写该文件。调用：
 
 ```sh
@@ -57,7 +59,7 @@ ao-work task intake assess --issue-key <KEY> --agentic-run-id <RUN> --input-file
 }
 ```
 
-`auto_filled_values` 中每个源码证据必须包含 `field`、`value`、`source=business_source_code`、`reference`、`evidence_sha256` 与中文 `rationale`；单仓来源使用仓库内相对路径，多仓领域来源必须使用 `owner/repository::relative/path`，由 Runtime 绑定到对应已确认工作树。Profile 已解析的必填字段由 Runtime 自动补齐，不要伪造。完整异常堆栈、MySQL 版本、权限和 binlog 配置尚未取得时，写入 `unresolved_information` 并标记 `required=false`，不得因此否定已有源码证据的初步分析。
+`auto_filled_values` 的 Jira、Profile 或 Runtime 事实使用 `{"field":"...","evidence_id":"<trusted_reference_catalog 中的 ID>","rationale":"中文理由"}`；Runtime 自动填入精确 `source`、`reference`、`value` 和摘要。业务源码证据仍必须包含 `field`、`value`、`source=business_source_code`、`reference`、`evidence_sha256` 与中文 `rationale`；单仓来源使用仓库内相对路径，多仓领域来源必须使用 `owner/repository::relative/path`，由 Runtime 绑定到对应已确认工作树。Profile 已解析的必填字段由 Runtime 自动补齐，不要伪造。完整异常堆栈、MySQL 版本、权限和 binlog 配置尚未取得时，写入 `unresolved_information` 并标记 `required=false`，不得因此否定已有源码证据的初步分析。
 
 若 Runtime 返回 `retry_safe=true` 的输入合同错误，AI 必须遵循 `agentic_next_action` 回读状态、重建上述 JSON 并只重试一次；这不是用户门禁，不得要求用户填写 JSON、内部摘要或尚非必填的诊断信息。只有事实冲突、Profile 必填字段缺失、来源/源码变化，或 Runtime 明确给出不可重试/重试耗尽时，才请求人工处理。
 
