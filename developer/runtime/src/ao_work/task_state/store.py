@@ -644,6 +644,7 @@ class TaskStore:
         operation: str,
         status: str,
         evidence: dict[str, Any],
+        code: str | None = None,
     ) -> dict[str, Any]:
         self._validate_issue_key(issue_key)
         self._validate_run_id(agentic_run_id)
@@ -654,6 +655,8 @@ class TaskStore:
             ("status", status),
         ):
             self._validate_component(field, value)
+        if code is not None:
+            self._validate_component("code", code)
         normalized_evidence = self._validate_readback_evidence(evidence)
         with self._lock(issue_key):
             task_dir = self._task_dir(issue_key)
@@ -685,6 +688,7 @@ class TaskStore:
                 status,
                 retry_safe=status != "completed",
             )
+            event["code"] = code
             event["evidence"] = normalized_evidence
             append_ndjson(task_dir / "journal.ndjson", event)
             return {"progress": progress, "event": event}

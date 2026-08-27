@@ -388,6 +388,42 @@ class TaskGateTest(unittest.TestCase):
         self.assertFalse(results["L3"]["agentic_next_action"]["stop_workflow"])
         self.assertTrue(results["L4"]["agentic_next_action"]["stop_workflow"])
 
+    def test_solution_schema_failure_is_locatable_and_written_to_journal(self) -> None:
+        self._assessed_intake()
+        path = self._write_json(
+            "tapstate-90-solution.json",
+            {
+                "schema_version": 1,
+                "intake_digest": "9" * 64,
+                "execution_plan": {
+                    "change_repository": "tapdata/tapdata-connectors",
+                    "scope": {"included": [], "excluded": []},
+                    "verifications": [],
+                    "review_summary": "修复批量读取 SQL。",
+                },
+            },
+        )
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            self.service.classify_solution(
+                issue_key=ISSUE_KEY,
+                agentic_run_id=RUN_ID,
+                input_file=str(path.relative_to(self.workspace_root)),
+            )
+        self.assertEqual("solution_input_invalid", captured.exception.code)
+        errors = captured.exception.details["validation_errors"]
+        self.assertEqual("solution_gate/v4", errors[0]["contract_version"])
+        self.assertIn(
+            "/proposed_solution", {item["json_pointer"] for item in errors}
+        )
+        self.assertIn(
+            "/execution_plan/verification", {item["json_pointer"] for item in errors}
+        )
+        journal = self.workspace_root / ".agentic-ops/tasks" / ISSUE_KEY / "journal.ndjson"
+        event = json.loads(journal.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual("task_solution_classify", event["operation"])
+        self.assertEqual("solution_input_invalid", event["code"])
+        self.assertEqual("solution_gate/v4", event["evidence"]["contract_version"])
+
     def test_new_source_head_invalidates_current_intake(self) -> None:
         intake_digest = self._assessed_intake()
         (self.source_root / "README.md").write_text(
