@@ -1,0 +1,37 @@
+operation: task_worktree_recover
+version: 1
+workplane: developer
+inputs:
+  issue_key:
+    required: true
+  cleanup_digest:
+    required_when: confirm=true
+  confirm:
+    required: true
+workflow:
+  - no_confirm_returns_read_only_cleanup_plan
+  - user_reviews_each_candidate_and_confirms_current_cleanup_digest
+  - confirmed_cleanup_rechecks_all_git_facts_before_first_remove
+  - runtime_retries_task_worktree_prepare_after_cleanup
+preconditions:
+  - candidate_path_must_be_exact_current_confirmed_worktree_path
+  - candidate_must_be_clean_regular_git_worktree
+  - candidate_task_branch_must_have_no_commits_unique_from_confirmed_baseline
+  - candidate_must_not_have_current_task_code_facts
+  - source_pool_primary_worktree_must_never_be_a_candidate
+side_effects:
+  - remove_only_confirmed_eligible_worktrees_without_force
+  - delete_only_exact_preflighted_local_task_branches
+  - record_user_confirmation_and_cleanup_decision
+  - retry_confirmed_task_worktree_prepare
+failure_atomicity:
+  - every_candidate_is_revalidated_before_first_remove
+  - no_cleanup_on_stale_digest_or_uneligible_candidate
+  - partial_cleanup_is_recorded_and_remaining_candidates_are_preserved
+failure_codes:
+  - stale_worktree_cleanup_not_required
+  - stale_worktree_cleanup_not_eligible
+  - stale_worktree_cleanup_confirmation_stale
+  - stale_worktree_cleanup_failed
+  - stale_worktree_branch_cleanup_failed
+  - stale_worktree_cleanup_readback_failed

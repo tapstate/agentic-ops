@@ -1,5 +1,5 @@
 operation: task_intake_assess
-version: 2
+version: 3
 workplane: developer
 actions:
   - assess
@@ -19,9 +19,16 @@ inputs:
       - unresolved_information
       - assumptions
       - impacts
+    auto_filled_values:
+      preferred_form:
+        required_fields: [field, evidence_id, rationale]
+        rule: evidence_id 必须来自当前 source-context.json 的 trusted_reference_catalog；Runtime 负责解析受信路径、值与摘要，AI 不得猜测或填写它们。
+      legacy_form:
+        required_fields: [field, value, source, reference, rationale]
+        optional_fields: [evidence_sha256]
+        rule: 仅兼容已生成的旧运行输入；新 UI/Skill 不得生成此形式。
 source_priority:
   - jira_issue
-  - jira_comment
   - project_profile
   - business_source_code
   - runtime_readback

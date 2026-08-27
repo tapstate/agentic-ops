@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import unittest
 import tempfile
+import subprocess
+import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -9,7 +10,12 @@ from unittest import mock
 from ao_work.output import success
 from ao_work.output import RuntimeErrorResult
 from ao_work import task_repository_scope
-from ao_work.task_repository_scope import _jira_branch_overrides, _repository_next_action
+from ao_work.task_repository_scope import (
+    _jira_branch_overrides,
+    _repository_next_action,
+    _stale_worktree_cleanup_plan,
+)
+from ao_work.workspace import task_worktree_path
 
 
 class RepositoryScopeNextActionTest(unittest.TestCase):
@@ -473,3 +479,138 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
             2,
             len(record_context.call_args.kwargs["confirmed_worktrees"]),
         )
+
+
+class StaleWorktreeRecoveryTest(unittest.TestCase):
+    def test_plan_only_allows_clean_branch_without_unique_commits(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            pool = Path(temporary) / "pool"
+            member = pool / "tapdata/tapdata-connectors"
+            member.mkdir(parents=True)
+            self._git(member, "init", "-b", "develop")
+            self._git(member, "config", "user.name", "Harsen Test Bot")
+            self._git(member, "config", "user.email", "harsen@example.test")
+            (member / "README.md").write_text("old\n", encoding="utf-8")
+            self._git(member, "add", "README.md")
+            self._git(member, "commit", "-m", "old baseline")
+            old_head = self._git(member, "rev-parse", "HEAD")
+            (member / "README.md").write_text("new\n", encoding="utf-8")
+            self._git(member, "commit", "-am", "new baseline")
+            confirmed_head = self._git(member, "rev-parse", "HEAD")
+            issue_key = "TAPSTATE-90"
+            repository = "tapdata/tapdata-connectors"
+            task_branch = "HarsenLin/TAPSTATE-90/develop"
+            worktree = task_worktree_path(pool, issue_key, "develop", repository)
+            worktree.parent.mkdir(parents=True)
+            self._git(
+                member,
+                "worktree",
+                "add",
+                "-b",
+                task_branch,
+                str(worktree),
+                old_head,
+            )
+            row = {
+                "repository": repository,
+                "from_branch": "develop",
+                "confirmed_branch_sha": confirmed_head,
+                "task_branch": task_branch,
+                "worktree_status": "not_created",
+            }
+            scope = {
+                "content_version": 3,
+                "actual_change_repositories": [],
+            }
+
+            plan = _stale_worktree_cleanup_plan(
+                pool, issue_key, "run-TAPSTATE-90", scope, [row]
+            )
+
+            self.assertTrue(plan["eligible"])
+            self.assertEqual(1, len(plan["candidates"]))
+            candidate = plan["candidates"][0]
+            self.assertTrue(candidate["eligible"])
+            self.assertEqual(old_head, candidate["head_sha"])
+            self.assertEqual([], candidate["blocking_reasons"])
+
+    def test_confirmed_recovery_removes_exact_candidates_then_retries_prepare(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            pool = Path(temporary) / "pool"
+            member = pool / "tapdata/tapdata-connectors"
+            member.mkdir(parents=True)
+            (pool / ".locks").mkdir()
+            self._git(member, "init", "-b", "develop")
+            self._git(member, "config", "user.name", "Harsen Test Bot")
+            self._git(member, "config", "user.email", "harsen@example.test")
+            (member / "README.md").write_text("old\n", encoding="utf-8")
+            self._git(member, "add", "README.md")
+            self._git(member, "commit", "-m", "old baseline")
+            old_head = self._git(member, "rev-parse", "HEAD")
+            (member / "README.md").write_text("new\n", encoding="utf-8")
+            self._git(member, "commit", "-am", "new baseline")
+            confirmed_head = self._git(member, "rev-parse", "HEAD")
+            issue_key = "TAPSTATE-90"
+            repository = "tapdata/tapdata-connectors"
+            task_branch = "HarsenLin/TAPSTATE-90/develop"
+            worktree = task_worktree_path(pool, issue_key, "develop", repository)
+            worktree.parent.mkdir(parents=True)
+            self._git(member, "worktree", "add", "-b", task_branch, str(worktree), old_head)
+            row = {
+                "repository": repository,
+                "from_branch": "develop",
+                "confirmed_branch_sha": confirmed_head,
+                "task_branch": task_branch,
+                "worktree_status": "not_created",
+            }
+            scope = {
+                "content_version": 3,
+                "confirmed_repository_branch_map": [row],
+                "actual_change_repositories": [],
+            }
+            store = mock.Mock()
+            store.inspect.return_value = {
+                "task": {"agentic_run_id": "run-TAPSTATE-90"},
+                "repository_scope": scope,
+            }
+            with (
+                mock.patch.object(task_repository_scope, "resolve_source_pool_root", return_value=pool),
+                mock.patch.object(
+                    task_repository_scope,
+                    "execute_worktree_prepare",
+                    return_value={"next_step": {"action": "assess_task_intake"}},
+                ) as prepare,
+            ):
+                preview = task_repository_scope.execute_worktree_recover(
+                    SimpleNamespace(), Path("/install"), store, issue_key,
+                    cleanup_digest=None, confirm=False,
+                )
+                result = task_repository_scope.execute_worktree_recover(
+                    SimpleNamespace(), Path("/install"), store, issue_key,
+                    cleanup_digest=preview["cleanup_plan"]["cleanup_digest"], confirm=True,
+                )
+
+            self.assertTrue(preview["confirmation_required"])
+            self.assertEqual([repository], [item["repository"] for item in result["cleanup"]])
+            self.assertFalse(worktree.exists())
+            self.assertNotEqual(
+                0,
+                subprocess.run(
+                    ["git", "-C", str(member), "rev-parse", "--verify", f"refs/heads/{task_branch}"],
+                    capture_output=True,
+                    text=True,
+                ).returncode,
+            )
+            store.append_decision.assert_called_once()
+            prepare.assert_called_once()
+            self.assertEqual("assess_task_intake", result["next_step"]["action"])
+
+    @staticmethod
+    def _git(root: Path, *arguments: str) -> str:
+        completed = subprocess.run(
+            ["git", "-C", str(root), *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return completed.stdout.strip()
