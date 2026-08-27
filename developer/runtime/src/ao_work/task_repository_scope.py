@@ -67,13 +67,14 @@ def _repository_next_action(
     executor: str,
     action: str,
     required_inputs: tuple[str, ...] = (),
+    input_artifacts: tuple[dict[str, str], ...] = (),
     allowed_operations: tuple[str, ...] = (),
     requires_authorization: bool,
     stop_workflow: bool,
     reason: str,
 ) -> dict[str, Any]:
     """构造符合 Runtime 固定控制字段契约的仓库流程下一动作。"""
-    return {
+    result: dict[str, Any] = {
         "executor": executor,
         "action": action,
         "required_inputs": list(required_inputs),
@@ -91,6 +92,9 @@ def _repository_next_action(
             "on_exhausted": "not_applicable",
         },
     }
+    if input_artifacts:
+        result["input_artifacts"] = list(input_artifacts)
+    return result
 
 
 def _repository_branch_override_next_action() -> dict[str, Any]:
@@ -863,7 +867,23 @@ def execute_worktree_prepare(
         "agentic_next_action": _repository_next_action(
             executor="ai",
             action="assess_task_intake",
-            required_inputs=("issue_key", "agentic_run_id", "intake_input_file"),
+            required_inputs=(
+                "issue_key",
+                "agentic_run_id",
+                "source_context_path",
+                "trusted_reference_catalog",
+                "intake_input_file",
+            ),
+            input_artifacts=(
+                {
+                    "kind": "source_context_path",
+                    "source": "result.intake_source.source_context_path",
+                },
+                {
+                    "kind": "trusted_reference_catalog",
+                    "source": "result.intake_source.trusted_reference_catalog",
+                },
+            ),
             allowed_operations=("task_intake_assess",),
             requires_authorization=False,
             stop_workflow=False,

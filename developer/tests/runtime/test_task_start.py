@@ -190,6 +190,8 @@ class TaskStartTest(unittest.TestCase):
             [
                 "issue_key",
                 "agentic_run_id",
+                "source_context_path",
+                "trusted_reference_catalog",
                 "intake_input_file",
             ],
             payload["agentic_next_action"]["required_inputs"],
@@ -201,6 +203,20 @@ class TaskStartTest(unittest.TestCase):
         )
         self.assertRegex(payload["intake_source"]["context_digest"], r"^[0-9a-f]{64}$")
         self.assertTrue(Path(payload["intake_source"]["source_context_path"]).is_file())
+        self.assertTrue(payload["intake_source"]["trusted_reference_catalog"])
+        self.assertEqual(
+            [
+                {
+                    "kind": "source_context_path",
+                    "source": "result.intake_source.source_context_path",
+                },
+                {
+                    "kind": "trusted_reference_catalog",
+                    "source": "result.intake_source.trusted_reference_catalog",
+                },
+            ],
+            payload["agentic_next_action"]["input_artifacts"],
+        )
         self.assertEqual(
             "prepare_and_classify_solution",
             payload["intake_gate"]["required_sequence"][-1],
