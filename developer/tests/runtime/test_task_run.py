@@ -373,6 +373,101 @@ class TrustedTaskRunTest(unittest.TestCase):
             validate_manifest(invalid)
         self.assertEqual("protocol_schema_invalid", getattr(captured.exception, "code", None))
 
+    def test_record_accepts_compact_inline_step_events(self) -> None:
+        self._open()
+        started = json.dumps(
+            {
+                "event_type": "implementation_started",
+                "actor": "ai",
+                "evidence_origin": "imported",
+                "summary": "在已批准范围内开始实现",
+            },
+            ensure_ascii=False,
+        )
+        code, payload, stderr = self._cli(
+            "task-run",
+            "record",
+            "--manifest",
+            "inputs/manifest.json",
+            "--event",
+            started,
+        )
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertTrue(payload["recorded"])
+        self.assertEqual("implementation", payload["step_id"])
+        self.assertEqual("started", payload["event_status"])
+
+        journal = [
+            json.loads(line)
+            for line in Path(str(payload["journal_path"])).read_text(encoding="utf-8").splitlines()
+        ]
+        event = journal[0]["event"]
+        self.assertEqual("step", event["action"])
+        self.assertEqual({}, event["action_data"])
+        self.assertEqual("run-TAP-12289-001", event["agentic_run_id"])
+        self.assertEqual(
+            self.manifest["authorization"]["reference"],  # type: ignore[index]
+            event["authorization_reference"],
+        )
+
+        code, duplicate, stderr = self._cli(
+            "task-run",
+            "record",
+            "--manifest",
+            "inputs/manifest.json",
+            "--event",
+            started,
+        )
+        self.assertEqual(0, code, (duplicate, stderr))
+        self.assertFalse(duplicate["recorded"])
+        self.assertEqual(payload["event_id"], duplicate["event_id"])
+        self.assertEqual(1, duplicate["sequence"])
+
+        completed = json.dumps(
+            {
+                "event_type": "implementation_completed",
+                "actor": "ai",
+                "evidence_origin": "imported",
+                "summary": "已完成批准范围内的实现",
+                "duration_seconds": 8,
+            },
+            ensure_ascii=False,
+        )
+        code, terminal, stderr = self._cli(
+            "task-run",
+            "record",
+            "--manifest",
+            "inputs/manifest.json",
+            "--event",
+            completed,
+        )
+        self.assertEqual(0, code, (terminal, stderr))
+        self.assertEqual("implementation", terminal["step_id"])
+        self.assertEqual("completed", terminal["event_status"])
+        self.assertEqual(2, terminal["sequence"])
+
+    def test_record_rejects_invalid_compact_inline_step_event(self) -> None:
+        self._open()
+        event = json.dumps(
+            {
+                "event_type": "implementation",
+                "actor": "ai",
+                "evidence_origin": "imported",
+                "summary": "缺少步骤状态后缀",
+            },
+            ensure_ascii=False,
+        )
+        code, payload, _ = self._cli(
+            "task-run",
+            "record",
+            "--manifest",
+            "inputs/manifest.json",
+            "--event",
+            event,
+        )
+        self.assertEqual(2, code)
+        self.assertEqual("protocol_schema_invalid", payload["code"])
+
     def test_record_cannot_import_trusted_facts_or_impersonate_runtime(self) -> None:
         self._open()
         verification = self._event(

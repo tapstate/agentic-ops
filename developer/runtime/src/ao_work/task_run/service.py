@@ -35,6 +35,7 @@ from ao_work.task_run.protocol import (
     SCHEMA_VERSION,
     blocked,
     digest,
+    expand_inline_step_event,
     event_envelope,
     load_json_object,
     manifest_digest,
@@ -54,6 +55,7 @@ from ao_work.task_state import TaskStore
 from ao_work.workspace import Workspace
 
 MAX_COMMAND_OUTPUT_BYTES = 4_194_304
+MAX_INLINE_EVENT_BYTES = 16_384
 PROHIBITION_BASELINE_COMMAND_TIMEOUT_SECONDS = 300
 
 
@@ -140,8 +142,7 @@ class TaskRunProtocol:
 
     def record(self, manifest_value: str, event_value: str) -> dict[str, Any]:
         manifest = self._load_open_manifest(manifest_value)
-        event_path = self._input_file(event_value, "event")
-        event = validate_event(load_json_object(event_path, "event"))
+        event, compact_inline = self._load_record_event(event_value, manifest)
         if event["evidence_origin"] != "imported" or event["actor"] == "runtime":
             raise blocked(
                 "trusted_event_import_forbidden",
@@ -174,7 +175,11 @@ class TaskRunProtocol:
                 recorded = envelope["event"]
                 if recorded["event_id"] != event["event_id"]:
                     continue
-                if digest(recorded) != digest(event):
+                comparable_event = event
+                if compact_inline:
+                    comparable_event = dict(event)
+                    comparable_event["recorded_at"] = recorded["recorded_at"]
+                if digest(recorded) != digest(comparable_event):
                     raise blocked(
                         "event_id_conflict",
                         f"event_id {event['event_id']} 已绑定不同内容",
@@ -183,6 +188,8 @@ class TaskRunProtocol:
                 return {
                     "recorded": False,
                     "event_id": event["event_id"],
+                    "step_id": event["step_id"],
+                    "event_status": event["status"],
                     "sequence": envelope["sequence"],
                     "event_sha256": envelope["event_sha256"],
                     "journal_path": str(paths["events"]),
@@ -194,10 +201,53 @@ class TaskRunProtocol:
             return {
                 "recorded": True,
                 "event_id": event["event_id"],
+                "step_id": event["step_id"],
+                "event_status": event["status"],
                 "sequence": envelope["sequence"],
                 "event_sha256": envelope["event_sha256"],
                 "journal_path": str(paths["events"]),
             }
+
+    def _load_record_event(
+        self,
+        event_value: str,
+        manifest: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], bool]:
+        inline = event_value.lstrip()
+        if not inline.startswith("{"):
+            event_path = self._input_file(event_value, "event")
+            return validate_event(load_json_object(event_path, "event")), False
+        if len(event_value.encode("utf-8")) > MAX_INLINE_EVENT_BYTES:
+            raise blocked(
+                "inline_event_too_large",
+                f"内联 event 超过 {MAX_INLINE_EVENT_BYTES} 字节上限",
+                "请缩短步骤摘要，或改用工作空间内的完整事件 JSON 文件",
+            )
+        try:
+            payload = parse_json_text(event_value)
+        except (json.JSONDecodeError, ValueError) as error:
+            raise blocked(
+                "protocol_json_invalid",
+                f"内联 event 不是可读取的 JSON：{error}",
+                "请修复 --event 的 JSON 内容后重试",
+            ) from error
+        if not isinstance(payload, dict):
+            raise blocked(
+                "protocol_json_invalid",
+                "内联 event 必须是 JSON 对象",
+                "请为 --event 传入 JSON 对象或工作空间相对文件路径",
+            )
+        if "event_type" not in payload:
+            return validate_event(payload), False
+        return (
+            expand_inline_step_event(
+                payload,
+                agentic_run_id=str(manifest["agent"]["agentic_run_id"]),
+                authorization_reference=manifest["authorization"]["reference"],
+                recorded_at=self._now(),
+            ),
+            True,
+        )
 
     def probe_ci(self, manifest_value: str) -> dict[str, Any]:
         manifest = self._load_open_manifest(manifest_value)
