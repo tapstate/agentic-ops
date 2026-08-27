@@ -14,6 +14,7 @@ release_fail() {
 # 跟随 source/candidate 快照中的祖先链接；逐级检查文件类型并校验物理路径
 # containment 后，才允许把普通 JSON 复制进固定 candidate。
 RELEASE_STORY_STATE_ERROR=""
+RELEASE_TRUST_ROOT_CHANGED="false"
 
 release_story_require_plain_directory_chain() {
   local root="$1"
@@ -455,6 +456,7 @@ release_verify_story_gate() {
   local repo_root="$1"
   local base="$2"
   local head="$3"
+  local allow_independent_review="${4:-false}"
   local trusted_base_commit
   local range_base_commit
   local head_commit
@@ -471,6 +473,8 @@ release_verify_story_gate() {
   local record
   local trust_root_changes=""
   local story_branch
+
+  RELEASE_TRUST_ROOT_CHANGED="false"
 
   if [ "$base" != "origin/main" ]; then
     release_fail "release_story_gate_baseline_invalid" "story_gate" \
@@ -667,6 +671,10 @@ release_verify_story_gate() {
     return 1
   fi
   if [ "$gate_status" -eq 126 ]; then
+    if [ "$allow_independent_review" = "true" ]; then
+      RELEASE_TRUST_ROOT_CHANGED="true"
+      return 0
+    fi
     release_fail "release_story_gate_trust_root_changed" "story_gate" \
       "固定发布范围修改了 Hook、故事门禁或发布信任根，禁止自动发布" \
       "请通过受保护 main 的独立人工审查 PR 合入该信任根变更；合入后由新的 origin/main 基线验证后续发布"
@@ -680,6 +688,28 @@ release_verify_story_gate() {
   fi
 }
 
+release_submit_trust_root_review() {
+  local repo_root="$1"
+  local repository="$2"
+  local version="$3"
+  local branch="$4"
+  local head="$5"
+  local protection_mode="$6"
+  local confirmed="$7"
+
+  release_verify_story_gate "$repo_root" origin/main "$head" true || return 1
+  if [ "$RELEASE_TRUST_ROOT_CHANGED" != "true" ]; then
+    release_fail "release_independent_review_not_required" "story_gate" \
+      "固定发布范围未修改发布信任根，应使用 publish 走常规发布流程" \
+      "请执行 release.sh publish，不要用独立审查提交通道"
+    return 1
+  fi
+  release_run_full_verification "$repo_root" "$head" || return 1
+  release_confirm_publish "$repo_root" "$version" "$head" "$confirmed" "$branch" main "提交独立审查 PR" || return 1
+  release_push_fixed_branch "$repo_root" "$branch" "$head" || return 1
+  release_find_or_create_pr "$repository" "$branch" main "$head" "$version" release "" "$protection_mode" || return 1
+}
+
 release_confirm_publish() {
   local repo_root="$1"
   local version="$2"
@@ -687,9 +717,10 @@ release_confirm_publish() {
   local confirmed="$4"
   local source_branch="${5:-develop}"
   local target_branch="${6:-main}"
+  local action_label="${7:-发布}"
   local answer
 
-  printf '即将发布 AgenticOps %s\n' "$version" >&2
+  printf '即将%s AgenticOps %s\n' "$action_label" "$version" >&2
   printf '仓库：%s\n' "tapstate/agentic-ops" >&2
   printf '发布 HEAD：%s\n' "$head" >&2
   printf '合并方向：%s -> %s\n' "$source_branch" "$target_branch" >&2

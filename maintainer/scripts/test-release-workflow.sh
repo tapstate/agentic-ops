@@ -925,6 +925,72 @@ grep -Eq "^--source-root .+/candidate story impact --change-source range --base 
 [ ! -s "$verify_log" ] ||
   fail "信任根变更被拒绝后不得进入候选完整验证"
 
+# 信任根候选不能自动发布，但在最终确认后必须能通过专用通道只提交固定
+# release 分支和独立审查 PR；该通道不得写入 main、Tag 或等待合并后的动作。
+review_gh="$test_root/review-gh"
+cat > "$review_gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = "auth" ] && [ "${2:-}" = "status" ]; then
+  exit 0
+fi
+if [ "${1:-}" = "api" ]; then
+  case "$*" in
+    *".default_branch"*) printf 'main\n' ;;
+    *".allow_merge_commit"*) printf 'true\n' ;;
+    *) printf '42\n' ;;
+  esac
+  exit 0
+fi
+if [ "${1:-}" = "pr" ] && [ "${2:-}" = "list" ]; then
+  exit 0
+fi
+if [ "${1:-}" = "pr" ] && [ "${2:-}" = "create" ]; then
+  printf 'https://example.test/tapstate/agentic-ops/pull/73\n'
+  exit 0
+fi
+if [ "${1:-}" = "pr" ] && [ "${2:-}" = "view" ]; then
+  printf '73\n'
+  exit 0
+fi
+printf 'unsupported review gh command: %s\n' "$*" >&2
+exit 2
+EOF
+chmod 0755 "$review_gh"
+git -C "$fixture" branch release/v9.8 "$trust_root_head"
+AGENTIC_OPS_SPECIAL_PUSH=release git -C "$fixture" push origin develop >/dev/null
+remote_develop_before_submit="$(git --git-dir="$remote" rev-parse refs/heads/develop)"
+: > "$verify_log"
+: > "$story_gate_log"
+(
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$review_gh" \
+  AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING=1 \
+  FAKE_VERIFY_LOG="$verify_log" \
+    maintainer/scripts/release.sh submit-for-review --version v9.8 --allow-soft-gate --confirm-release
+) >"$test_root/submit-for-review.out"
+grep -q '"operation":"release_submit_for_review"' "$test_root/submit-for-review.out" ||
+  fail "信任根候选未输出独立审查 PR 提交结果"
+grep -q 'https://example.test/tapstate/agentic-ops/pull/73' "$test_root/submit-for-review.out" ||
+  fail "独立审查 PR 结果缺少可访问地址"
+[ "$(git --git-dir="$remote" rev-parse refs/heads/release/v9.8)" = "$trust_root_head" ] ||
+  fail "独立审查通道未推送固定 release 分支"
+[ "$(git --git-dir="$remote" rev-parse refs/heads/develop)" = "$remote_develop_before_submit" ] ||
+  fail "独立审查通道不得再次修改 develop"
+[ "$(git --git-dir="$remote" rev-parse refs/heads/main)" = "$remote_main_before_publish" ] ||
+  fail "独立审查通道不得直接修改 main"
+test -z "$(git --git-dir="$remote" show-ref --tags v9.8 || true)" ||
+  fail "独立审查通道不得创建版本 Tag"
+expected_submit_verification="$(printf '%s\n' \
+  maintainer-scripts-test-python-runtime.sh \
+  maintainer-scripts-test-resources.sh \
+  developer-tests-bootstrap-test_install_boundary.sh)"
+[ "$(cat "$verify_log")" = "$expected_submit_verification" ] ||
+  fail "独立审查通道未在推送前执行固定完整验证"
+# 后续发布断言继续使用独立审查完成后的 develop 基线，确保它们验证的是
+# submit-for-review 本身没有额外写入 develop。
+remote_develop_before_publish="$remote_develop_before_submit"
+
 git -C "$fixture" show \
   "$remote_main_before_publish:.githooks/pre-push" \
   > "$fixture/.githooks/pre-push"
