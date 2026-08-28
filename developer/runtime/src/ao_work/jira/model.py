@@ -33,6 +33,10 @@ class JiraIssue:
     issue_type: str
     assignee: str
     description: dict[str, Any] | None
+    # Jira 的状态显示名可被本地化或管理员重命名；ID 才是同一站点内的
+    # 稳定身份。保留名称是为了人读输出和受控的旧 Profile 兼容。
+    status_id: str = ""
+    status_category: str = ""
     fields: dict[str, Any] = field(default_factory=dict)
     priority: str = ""
     updated: str = ""

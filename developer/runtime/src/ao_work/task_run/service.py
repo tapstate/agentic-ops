@@ -22,6 +22,7 @@ from ao_work.config import (
     validate_workspace_project_binding,
 )
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
+from ao_work.jira.status import resolve_status
 from ao_work.jira.cli import read_bound_jira_attempt, read_bound_jira_plan
 from ao_work.jira.service import JiraService
 from ao_work.installation import load_install_identity
@@ -372,7 +373,10 @@ class TaskRunProtocol:
                 "请停止执行并核对 manifest 与工作空间身份",
             )
         if (
-            self._jira_issue_content_digest(live_issue)
+            self._jira_issue_content_digest(
+                live_issue,
+                include_status_id="status_id_mapping" in jira_manifest,
+            )
             != manifest["task_binding"]["issue_content_sha256"]
         ):
             raise blocked(
@@ -595,7 +599,10 @@ class TaskRunProtocol:
                 "当前工作空间 Jira base_url 与 manifest 不一致",
                 "请停止执行并重新确认绑定当前工作空间身份的 manifest",
             )
-        if context.profile.status_mapping != expected["status_mapping"]:
+        if (
+            context.profile.status_id_mapping != expected.get("status_id_mapping", {})
+            or context.profile.status_mapping != expected["status_mapping"]
+        ):
             raise blocked(
                 "jira_probe_profile_changed",
                 "Project Profile 状态映射与 manifest 已确认版本不一致",
@@ -632,7 +639,10 @@ class TaskRunProtocol:
                 "Jira 实时回读项目与 manifest 不一致",
                 "请停止执行并核对 Project Profile",
             )
-        issue_content_sha256 = self._jira_issue_content_digest(issue)
+        issue_content_sha256 = self._jira_issue_content_digest(
+            issue,
+            include_status_id="status_id_mapping" in expected,
+        )
         if issue_content_sha256 != manifest["task_binding"]["issue_content_sha256"]:
             raise blocked(
                 "jira_issue_content_changed",
@@ -656,8 +666,13 @@ class TaskRunProtocol:
                 f"Jira 状态分类 {category or '<empty>'} 不允许继续 task→PR",
                 "请停止自动化；Done 或未授权状态必须由研发工程师核对",
             )
-        mapped_status = expected["status_mapping"].get(issue.status)
-        if not mapped_status or mapped_status == "completed":
+        status_resolution = resolve_status(
+            issue.status_id,
+            issue.status,
+            status_id_mapping=expected.get("status_id_mapping", {}),
+            status_mapping=expected["status_mapping"],
+        )
+        if status_resolution is None or status_resolution.stage == "completed":
             raise blocked(
                 "jira_probe_status_unmapped",
                 f"Jira 状态 {issue.status or '<empty>'} 未安全映射或已完成",
@@ -692,11 +707,12 @@ class TaskRunProtocol:
                 "issue_id": issue.issue_id,
                 "project_key": issue.project_key,
                 "status": issue.status,
+                "status_id": issue.status_id,
                 "assignee": issue.assignee,
                 "account_id": account_id,
                 "assignee_account_id": issue.assignee,
                 "status_category": category,
-                "mapped_status": mapped_status,
+                "mapped_status": status_resolution.stage,
                 "takeover_comment_id": takeover_comment_id,
                 "formal_takeover_verified": formal_takeover_verified,
                 "issue_content_sha256": issue_content_sha256,
@@ -2442,8 +2458,15 @@ class TaskRunProtocol:
             or jira_data["account_id"] != jira_data["assignee_account_id"]
             or jira_data["status_category"] not in expected_jira["allowed_status_categories"]
             or jira_data["status_category"].casefold() == "done"
-            or jira_data["mapped_status"]
-            != expected_jira["status_mapping"].get(jira_data["status"])
+            or (
+                (resolution := resolve_status(
+                    str(jira_data.get("status_id") or ""),
+                    jira_data["status"],
+                    status_id_mapping=expected_jira.get("status_id_mapping", {}),
+                    status_mapping=expected_jira["status_mapping"],
+                )) is None
+                or jira_data["mapped_status"] != resolution.stage
+            )
         ):
             self._incomplete("Jira 账户、负责人、状态分类或 Profile 映射与 manifest 不一致")
         task_binding = manifest["task_binding"]
@@ -3864,19 +3887,22 @@ class TaskRunProtocol:
             )
 
     @staticmethod
-    def _jira_issue_content_digest(issue: Any) -> str:
-        return digest(
-            {
-                "issue_id": issue.issue_id,
-                "key": issue.key,
-                "project_key": issue.project_key,
-                "summary": issue.summary,
-                "status": issue.status,
-                "issue_type": issue.issue_type,
-                "assignee_account_id": issue.assignee,
-                "description": issue.description,
-            }
-        )
+    def _jira_issue_content_digest(
+        issue: Any, *, include_status_id: bool = True
+    ) -> str:
+        payload = {
+            "issue_id": issue.issue_id,
+            "key": issue.key,
+            "project_key": issue.project_key,
+            "summary": issue.summary,
+            "status": issue.status,
+            "issue_type": issue.issue_type,
+            "assignee_account_id": issue.assignee,
+            "description": issue.description,
+        }
+        if include_status_id:
+            payload["status_id"] = issue.status_id
+        return digest(payload)
 
     def _input_file(self, value: str, label: str) -> Path:
         supplied = Path(value)

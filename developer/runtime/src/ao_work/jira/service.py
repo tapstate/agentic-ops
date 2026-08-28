@@ -670,12 +670,17 @@ class JiraService:
         self._validate_owner(issue)
         mapping = {
             "transitions": self.profile.transition_mapping,
+            "status_ids": self.profile.status_id_mapping,
             "statuses": self.profile.status_mapping,
         }
         # 安全边界前置拦截：目标状态若映射到 completed stage，不依赖 transition
         # 条目是否存在（D-049：AIAgent 无合入权，默认禁止推进完成态）
         if target_status is not None:
-            completed = completed_stage_for(self.profile.status_mapping, target_status)
+            completed = completed_stage_for(
+                self.profile.status_mapping,
+                target_status,
+                status_id_mapping=self.profile.status_id_mapping,
+            )
             if completed is not None:
                 raise RuntimeErrorResult(
                     code="jira_transition_completed_forbidden",
@@ -700,6 +705,7 @@ class JiraService:
             issue.status,
             available,
             mapping,
+            current_status_id=issue.status_id,
             target_status=target_status,
             target_key=target_transition,
         )
@@ -725,7 +731,20 @@ class JiraService:
                 ),
             )
         matched_id, matched_name, matched_status = matched
-        completed = completed_stage_for(self.profile.status_mapping, matched_status)
+        matched_status_id = next(
+            (
+                str(item.get("to_status_id", ""))
+                for item in available
+                if item["id"] == matched_id
+            ),
+            "",
+        )
+        completed = completed_stage_for(
+            self.profile.status_mapping,
+            matched_status,
+            status_id_mapping=self.profile.status_id_mapping,
+            target_status_id=matched_status_id,
+        )
         if completed is not None:
             raise RuntimeErrorResult(
                 code="jira_transition_completed_forbidden",
@@ -751,7 +770,9 @@ class JiraService:
         payload = {
             "project_key": issue.project_key,
             "from_status": issue.status,
+            "from_status_id": issue.status_id,
             "target_status": matched_status,
+            "target_status_id": matched_status_id,
             "transition_id": matched_id,
             "transition_name": matched_name,
             "comment": normalized_comment,
@@ -774,14 +795,22 @@ class JiraService:
     def apply_transition(self, plan: WritePlan, expected_plan_id: str) -> dict[str, Any]:
         self.validate_apply(plan, expected_plan_id, "jira_transition")
         target_status = str(plan.payload["target_status"])
+        target_status_id = str(plan.payload.get("target_status_id", ""))
         from_status = str(plan.payload["from_status"])
+        from_status_id = str(plan.payload.get("from_status_id", ""))
         transition_id = str(plan.payload["transition_id"])
         comment = str(plan.payload.get("comment", ""))
         issue = self.inspect_issue(plan.issue_key)
         self._validate_owner(issue)
-        if issue.status == target_status:
-            return _transition_readback(plan, issue.status, created=False)
-        if issue.status != from_status:
+        if (target_status_id and issue.status_id == target_status_id) or (
+            not target_status_id and issue.status == target_status
+        ):
+            return _transition_readback(
+                plan, issue.status, issue.status_id, created=False
+            )
+        if (from_status_id and issue.status_id != from_status_id) or (
+            not from_status_id and issue.status != from_status
+        ):
             raise RuntimeErrorResult(
                 code="jira_transition_mapping_gap",
                 message=(
@@ -799,6 +828,7 @@ class JiraService:
                     self.client.available_transitions(plan.issue_key),
                     {
                         "transitions": self.profile.transition_mapping,
+                        "status_ids": self.profile.status_id_mapping,
                         "statuses": self.profile.status_mapping,
                     },
                 ),
@@ -819,6 +849,7 @@ class JiraService:
                     available,
                     {
                         "transitions": self.profile.transition_mapping,
+                        "status_ids": self.profile.status_id_mapping,
                         "statuses": self.profile.status_mapping,
                     },
                 ),
@@ -839,7 +870,9 @@ class JiraService:
                 required_human_action="请先回读 Jira 实际状态，结果确认后再继续",
             ) from error
         readback = self.inspect_issue(plan.issue_key)
-        if readback.status != target_status:
+        if (target_status_id and readback.status_id != target_status_id) or (
+            not target_status_id and readback.status != target_status
+        ):
             raise RuntimeErrorResult(
                 code="jira_transition_readback_mismatch",
                 message=(
@@ -856,13 +889,20 @@ class JiraService:
                     "target_status": target_status,
                 },
             )
-        return _transition_readback(plan, readback.status, created=True)
+        return _transition_readback(
+            plan, readback.status, readback.status_id, created=True
+        )
 
     def readback_transition(self, plan: WritePlan) -> dict[str, Any]:
         self.validate_apply(plan, plan.plan_id, "jira_transition")
         issue = self.inspect_issue(plan.issue_key)
-        matched = issue.status == str(plan.payload["target_status"])
-        return _transition_readback(plan, issue.status, created=matched)
+        target_status_id = str(plan.payload.get("target_status_id", ""))
+        matched = (
+            issue.status_id == target_status_id
+            if target_status_id
+            else issue.status == str(plan.payload["target_status"])
+        )
+        return _transition_readback(plan, issue.status, issue.status_id, created=matched)
 
     def _validate_create_plan(self, plan: WritePlan) -> None:
         expected = {
@@ -969,7 +1009,9 @@ class JiraService:
         expected = {
             "project_key",
             "from_status",
+            "from_status_id",
             "target_status",
+            "target_status_id",
             "transition_id",
             "transition_name",
             "comment",
@@ -980,7 +1022,9 @@ class JiraService:
             raise _input_error("jira_write_plan_invalid", "Jira 状态流转计划字段无效")
         project_key = plan.payload.get("project_key")
         from_status = plan.payload.get("from_status")
+        from_status_id = plan.payload.get("from_status_id")
         target_status = plan.payload.get("target_status")
+        target_status_id = plan.payload.get("target_status_id")
         transition_id = plan.payload.get("transition_id")
         transition_name = plan.payload.get("transition_name")
         comment = plan.payload.get("comment")
@@ -991,8 +1035,10 @@ class JiraService:
             or not project_key.strip()
             or not isinstance(from_status, str)
             or not from_status.strip()
+            or not isinstance(from_status_id, str)
             or not isinstance(target_status, str)
             or not target_status.strip()
+            or not isinstance(target_status_id, str)
             or not isinstance(transition_id, str)
             or not transition_id.isdigit()
             or not isinstance(transition_name, str)
@@ -1765,8 +1811,14 @@ def _worklog_readback(
 
 
 def _transition_readback(
-    plan: WritePlan, current_status: str, *, created: bool
+    plan: WritePlan, current_status: str, current_status_id: str, *, created: bool
 ) -> dict[str, Any]:
+    target_status_id = str(plan.payload.get("target_status_id", ""))
+    status_matched = (
+        current_status_id == target_status_id
+        if target_status_id
+        else current_status == str(plan.payload["target_status"])
+    )
     return {
         "issue_key": plan.issue_key,
         "agentic_run_id": plan.agentic_run_id,
@@ -1776,8 +1828,10 @@ def _transition_readback(
         "external_id": str(plan.payload["transition_id"]),
         "created": created,
         "current_status": current_status,
+        "current_status_id": current_status_id,
         "target_status": str(plan.payload["target_status"]),
-        "status_matched": current_status == str(plan.payload["target_status"]),
+        "target_status_id": target_status_id,
+        "status_matched": status_matched,
         "next_step": {
             "executor": "human",
             "action": "continue_from_verified_jira_transition",

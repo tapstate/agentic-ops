@@ -254,6 +254,16 @@ capabilities:
     summary: 只读返回当前 Project Profile 下 Jira Issue 的基础事实和凭证配置状态。
     next_action: 请把输出与项目标准资产结合分析；该能力不判断准入、不读取评论和自定义字段，也不写 Jira。
 
+  - id: jira_workflow_inspect
+    source: runtime
+    contract:
+    status: implemented
+    visibility: public
+    commands:
+      - [jira, workflow, inspect]
+    summary: 无需已有任务 run，只读返回当前 Issue 的 Jira status ID、显示名、分类、可用 transition 及其与 Project Profile 的匹配结果。
+    next_action: 映射失配时依据输出补齐受控 Profile；该能力不写 Jira、不创建本地任务状态，也不猜测状态语义。
+
   - id: version
     source: contract
     contract: contracts/operations/version.yaml

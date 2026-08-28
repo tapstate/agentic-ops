@@ -325,15 +325,13 @@ def validate_manifest(
         _invalid("issue.project_key", "必须与 issue.key 的项目部分一致")
 
     jira = _require_mapping(value["jira"], "jira")
+    jira_keys = {
+        "base_url", "account_id", "assignee_account_id", "status_mapping",
+        "allowed_status_categories",
+    }
     _require_exact_keys(
         jira,
-        {
-            "base_url",
-            "account_id",
-            "assignee_account_id",
-            "status_mapping",
-            "allowed_status_categories",
-        },
+        jira_keys | ({"status_id_mapping"} if "status_id_mapping" in jira else set()),
         "jira",
     )
     _require_url(jira["base_url"], "jira.base_url")
@@ -341,9 +339,15 @@ def validate_manifest(
     _require_string(
         jira["assignee_account_id"], "jira.assignee_account_id", maximum=2048
     )
+    status_id_mapping = _require_mapping(
+        jira.get("status_id_mapping", {}), "jira.status_id_mapping"
+    )
     status_mapping = _require_mapping(jira["status_mapping"], "jira.status_mapping")
-    if not status_mapping:
-        _invalid("jira.status_mapping", "必须明确绑定 Project Profile 状态映射")
+    if not status_mapping and not status_id_mapping:
+        _invalid("jira", "必须明确绑定 Project Profile 状态 ID 或名称映射")
+    for status_id, internal_status in status_id_mapping.items():
+        _require_id(status_id, "jira.status_id_mapping key")
+        _require_id(internal_status, f"jira.status_id_mapping.{status_id}")
     for status_name, internal_status in status_mapping.items():
         _require_string(status_name, "jira.status_mapping key")
         _require_id(internal_status, f"jira.status_mapping.{status_name}")
@@ -1000,27 +1004,15 @@ def _validate_action_data(action: str, data: Mapping[str, Any]) -> None:
             _require_id(data["readback_event_id"], "event.action_data.readback_event_id")
         return
     if action == "jira_readback":
+        jira_readback_keys = {
+            "provider", "issue_key", "issue_id", "project_key", "url", "status",
+            "assignee", "account_id", "assignee_account_id", "status_category",
+            "mapped_status", "takeover_comment_id", "formal_takeover_verified",
+            "issue_content_sha256", "approved_plan_sha256", "observed_at", "reference",
+        }
         _require_exact_keys(
             data,
-            {
-                "provider",
-                "issue_key",
-                "issue_id",
-                "project_key",
-                "url",
-                "status",
-                "assignee",
-                "account_id",
-                "assignee_account_id",
-                "status_category",
-                "mapped_status",
-                "takeover_comment_id",
-                "formal_takeover_verified",
-                "issue_content_sha256",
-                "approved_plan_sha256",
-                "observed_at",
-                "reference",
-            },
+            jira_readback_keys | ({"status_id"} if "status_id" in data else set()),
             "event.action_data",
         )
         if data["provider"] != "jira":
@@ -1030,6 +1022,8 @@ def _validate_action_data(action: str, data: Mapping[str, Any]) -> None:
         _require_string(data["project_key"], "event.action_data.project_key")
         _require_url(data["url"], "event.action_data.url")
         _require_string(data["status"], "event.action_data.status")
+        if data.get("status_id"):
+            _require_id(data["status_id"], "event.action_data.status_id")
         if data["assignee"] is not None:
             _require_string(data["assignee"], "event.action_data.assignee")
         _require_string(data["account_id"], "event.action_data.account_id")
@@ -2325,6 +2319,21 @@ def _validate_prohibition_baseline(
                 )
 
 
+def _resolved_jira_stage(jira_mapping: Mapping[str, Any], data: Mapping[str, Any]) -> str:
+    """跨工作面复算 Jira 阶段：新协议先按 ID，旧协议按名称别名。"""
+    status_id = str(data.get("status_id") or "")
+    id_mapping = jira_mapping.get("status_id_mapping", {})
+    if status_id and isinstance(id_mapping, Mapping):
+        stage = id_mapping.get(status_id)
+        if isinstance(stage, str) and stage:
+            return stage
+    aliases = jira_mapping.get("status_mapping", {})
+    if isinstance(aliases, Mapping):
+        stage = aliases.get(data.get("status"))
+        return stage if isinstance(stage, str) else ""
+    return ""
+
+
 def _validate_fact_bindings(
     manifest: Mapping[str, Any],
     facts: Mapping[str, Any],
@@ -2363,8 +2372,7 @@ def _validate_fact_bindings(
             or jira["status_category"]
             not in expected_jira["allowed_status_categories"]
             or jira["status_category"].casefold() == "done"
-            or jira["mapped_status"]
-            != expected_jira["status_mapping"].get(jira["status"])
+            or jira["mapped_status"] != _resolved_jira_stage(expected_jira, jira)
             or jira["mapped_status"] == "completed"
         ):
             _evidence_invalid("Jira 账户、负责人、状态分类或 Profile 映射不一致")
@@ -2516,8 +2524,7 @@ def _validate_all_readback_bindings(
             or data["status_category"]
             not in jira_manifest["allowed_status_categories"]
             or data["status_category"].casefold() == "done"
-            or data["mapped_status"]
-            != jira_manifest["status_mapping"].get(data["status"])
+            or data["mapped_status"] != _resolved_jira_stage(jira_manifest, data)
             or data["mapped_status"] == "completed"
         ):
             _evidence_invalid(

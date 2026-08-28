@@ -8,6 +8,7 @@ from ao_work.config.model import JiraConnection, ProjectProfile
 from ao_work.jira.cli import configure_jira_parser
 from ao_work.jira.client import JiraClient, TransportResponse
 from ao_work.jira.service import JiraService, WritePlan
+from ao_work.jira.transition import match_transition
 from ao_work.output import RuntimeErrorResult
 
 CONNECTION = JiraConnection(
@@ -132,6 +133,32 @@ def _parse_cli(*args: str) -> argparse.Namespace:
 
 
 class JiraTransitionServiceTest(unittest.TestCase):
+    def test_d037_status_ids_override_renamed_display_names(self) -> None:
+        matched = match_transition(
+            "管理员改过的名称",
+            [
+                {
+                    "id": "91",
+                    "name": "Implementation started",
+                    "to": "执行中",
+                    "to_status_id": "10012",
+                }
+            ],
+            {
+                "transitions": {
+                    "start_progress": {
+                        "name": "Implementation started",
+                        "id": "91",
+                        "from_status_ids": ["10011"],
+                        "to_status_id": "10012",
+                    }
+                }
+            },
+            current_status_id="10011",
+            target_key="start_progress",
+        )
+        self.assertEqual(("91", "Implementation started", "执行中"), matched)
+
     def test_plan_transition_by_target_transition_key(self) -> None:
         service = _service(FakeTransitionTransport())
         plan = service.plan_transition(

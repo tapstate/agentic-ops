@@ -20,6 +20,7 @@ from ao_work.jira.service import (
     WritePlan,
     build_write_attempt,
 )
+from ao_work.jira.status import resolve_issue_status
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_state import TaskStore
 from ao_work.task_repository_scope import (
@@ -42,6 +43,11 @@ def configure_jira_parser(subparsers: argparse._SubParsersAction[Any]) -> None:
 
     inspect_parser = jira_commands.add_parser("inspect")
     inspect_parser.add_argument("--issue-key", required=True)
+
+    workflow_parser = jira_commands.add_parser("workflow")
+    workflow_actions = workflow_parser.add_subparsers(dest="action", required=True)
+    workflow_inspect = workflow_actions.add_parser("inspect")
+    workflow_inspect.add_argument("--issue-key", required=True)
 
     list_parser = jira_commands.add_parser("list")
     list_parser.add_argument("--max-results", type=int, default=10)
@@ -175,10 +181,42 @@ def execute_jira(
                 "project_key": issue.project_key,
                 "summary": issue.summary,
                 "status": issue.status,
+                "status_id": issue.status_id,
+                "status_category": issue.status_category,
                 "issue_type": issue.issue_type,
                 "assignee": issue.assignee,
             },
             "credential_status": context.credential_status(),
+        }
+
+    if args.command == "workflow" and args.action == "inspect":
+        issue = service.inspect_issue(args.issue_key)
+        resolution = resolve_issue_status(context.profile, issue)
+        return {
+            "connection_id": context.connection.connection_id,
+            "profile_id": context.profile.profile_id,
+            "read_only": True,
+            "issue": {
+                "jira_issue_id": issue.issue_id,
+                "issue_key": issue.key,
+                "project_key": issue.project_key,
+                "issue_type": issue.issue_type,
+                "status": {
+                    "id": issue.status_id,
+                    "name": issue.status,
+                    "category": issue.status_category,
+                },
+            },
+            "status_resolution": resolution.to_dict() if resolution else None,
+            "available_transitions": client.available_transitions(issue.key),
+            "configured_status_ids": dict(context.profile.status_id_mapping),
+            "configured_status_aliases": dict(context.profile.status_mapping),
+            "configured_transitions": dict(context.profile.transition_mapping),
+            "adaptation_required": resolution is None,
+            "guidance": (
+                "状态 ID 优先匹配；未命中时仅允许使用 Profile 中显式登记的名称别名。"
+                "请依据本次只读结果补齐 Profile，不要猜测状态或 transition。"
+            ),
         }
 
     if args.command == "list":
