@@ -967,7 +967,7 @@ release_recover_merged_candidate() {
       release_fail "release_local_tag_repair_failed" "tag_repair" "无法准备新的本地 annotated Tag" "本地旧 Tag 未改变；请检查 Git 身份后重试"
       return 1
     }
-    old_ref="$(git -C "$repo_root" rev-parse "refs/tags/$version" 2>/dev/null || true)"
+    old_ref="$(git -C "$repo_root" rev-parse --verify "refs/tags/$version" 2>/dev/null || true)"
     zero_ref="0000000000000000000000000000000000000000"
     git -C "$repo_root" update-ref "refs/tags/$version" "$tag_object" "${old_ref:-$zero_ref}" || {
       release_fail "release_local_tag_repair_failed" "tag_repair" "本地 Tag 原子替换失败" "旧 Tag 保持不变；重新检查状态后重试"
