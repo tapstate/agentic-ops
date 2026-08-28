@@ -1252,13 +1252,13 @@ git -C "$fixture" switch main >/dev/null
 git -C "$fixture" -c core.hooksPath=/dev/null merge --no-ff develop \
   -m "merge recovery candidate" >/dev/null
 recovery_merge="$(git -C "$fixture" rev-parse HEAD)"
-git -C "$fixture" branch -f develop "$recovery_merge"
+git -C "$fixture" branch -f develop "$recovery_candidate"
 git --git-dir="$remote" fetch "$fixture" \
   "$recovery_merge:refs/heads/main" >/dev/null
-git --git-dir="$remote" update-ref refs/heads/develop "$recovery_merge"
+git --git-dir="$remote" update-ref refs/heads/develop "$recovery_candidate"
 git -C "$fixture" switch develop >/dev/null
-git -C "$fixture" branch release/v9.7 "$recovery_merge"
-git --git-dir="$remote" update-ref refs/heads/release/v9.7 "$recovery_merge"
+git -C "$fixture" branch release/v9.7 "$recovery_candidate"
+git --git-dir="$remote" update-ref refs/heads/release/v9.7 "$recovery_candidate"
 git -C "$fixture" tag -a v9.7 "$recovery_merge" -m "wrong recovery tag"
 
 recovery_gh="$test_root/recovery-gh"
