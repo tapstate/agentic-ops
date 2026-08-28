@@ -151,6 +151,8 @@ cp "$repo_root/.githooks/reference-transaction" \
   "$fixture/.githooks/reference-transaction"
 cp "$repo_root/maintainer/scripts/release.sh" "$fixture/maintainer/scripts/release.sh"
 cp "$repo_root/maintainer/scripts/hotfix.sh" "$fixture/maintainer/scripts/hotfix.sh"
+cp "$repo_root/maintainer/scripts/history-rewrite.sh" \
+  "$fixture/maintainer/scripts/history-rewrite.sh"
 cp "$repo_root/maintainer/scripts/lib/release-common.sh" \
   "$fixture/maintainer/scripts/lib/release-common.sh"
 cp "$repo_root/maintainer/scripts/lib/development-workflow.sh" \
@@ -210,6 +212,7 @@ chmod 0755 \
   "$fixture/maintainer/bin/ao-maint" \
   "$fixture/maintainer/scripts/release.sh" \
   "$fixture/maintainer/scripts/hotfix.sh" \
+  "$fixture/maintainer/scripts/history-rewrite.sh" \
   "$fixture/maintainer/scripts/lib/release-common.sh" \
   "$fixture/maintainer/scripts/lib/development-workflow.sh"
 git -C "$fixture" add .
@@ -330,6 +333,107 @@ if printf 'refs/heads/develop %s refs/heads/unrelated %s\n' "$pre_push_head" "$z
 fi
 grep -q 'history_rewrite_push_target_invalid' "$test_root/pre-push-history-rewrite-invalid.err" ||
   fail "history rewrite 非法引用未返回稳定失败码"
+
+# 历史改写必须把保留分支、annotated Tag 和删除引用放入同一原子推送，
+# 并为每个远端引用绑定精确旧 SHA；任一引用漂移都必须在推送前失败关闭。
+history_remote="$test_root/history-remote.git"
+history_fixture="$test_root/history-repo"
+git init --bare "$history_remote" >/dev/null
+git clone "$fixture" "$history_fixture" >/dev/null 2>&1
+git -C "$history_fixture" config user.email agentic-ops-test@example.test
+git -C "$history_fixture" config user.name "AgenticOps Test"
+git -C "$history_fixture" remote set-url origin "$history_remote"
+history_source_main="$(git -C "$history_fixture" rev-parse origin/main)"
+history_source_develop="$(git -C "$history_fixture" rev-parse develop)"
+git -C "$history_fixture" -c core.hooksPath=/dev/null push origin \
+  "$history_source_main:refs/heads/main" \
+  "$history_source_develop:refs/heads/develop" >/dev/null
+git --git-dir="$history_remote" update-ref refs/heads/release/v0.7 "$history_source_develop"
+git --git-dir="$history_remote" update-ref refs/heads/release/v0.6 "$history_source_main"
+git -C "$history_fixture" tag -a v0.7 "$history_source_main" -m "old v0.7"
+git -C "$history_fixture" tag -a v0.6 "$history_source_main" -m "old v0.6"
+git -C "$history_fixture" -c core.hooksPath=/dev/null push origin \
+  refs/tags/v0.7 refs/tags/v0.6 >/dev/null
+history_source_root="$(git -C "$history_fixture" rev-list --max-parents=0 "$history_source_main")"
+history_tree="$(git -C "$history_fixture" rev-parse "$history_source_develop^{tree}")"
+history_candidate_root="$(printf 'python refactor root\n' | git -C "$history_fixture" commit-tree "$history_tree")"
+history_candidate_release="$(printf 'release candidate\n' | git -C "$history_fixture" commit-tree "$history_tree" -p "$history_candidate_root")"
+history_candidate_merge="$(printf 'release merge\n' | git -C "$history_fixture" commit-tree "$history_tree" -p "$history_candidate_release")"
+history_candidate_main="$(printf 'post release fix\n' | git -C "$history_fixture" commit-tree "$history_tree" -p "$history_candidate_merge")"
+history_candidate_tag="$(printf 'object %s\ntype commit\ntag v0.7\ntagger %s\n\nAgenticOps v0.7 release merge\n' \
+  "$history_candidate_merge" "$(git -C "$history_fixture" var GIT_COMMITTER_IDENT)" | \
+  git -C "$history_fixture" mktag)"
+history_expected_release="$(git --git-dir="$history_remote" rev-parse refs/heads/release/v0.7)"
+history_expected_old_release="$(git --git-dir="$history_remote" rev-parse refs/heads/release/v0.6)"
+history_expected_tag="$(git --git-dir="$history_remote" rev-parse refs/tags/v0.7)"
+history_expected_old_tag="$(git --git-dir="$history_remote" rev-parse refs/tags/v0.6)"
+history_manifest="$test_root/history-manifest.json"
+python3 - "$history_manifest" <<EOF
+import json, sys
+json.dump({
+    "jira_key": "AO-105",
+    "source_root_commit": "$history_source_root",
+    "candidate_root_commit": "$history_candidate_root",
+    "expected_main": "$history_source_main",
+    "expected_develop": "$history_source_develop",
+    "candidate_commit": "$history_candidate_main",
+    "ref_updates": [
+        {"ref": "refs/heads/main", "expected": "$history_source_main", "target": "$history_candidate_main"},
+        {"ref": "refs/heads/develop", "expected": "$history_source_develop", "target": "$history_candidate_main"},
+        {"ref": "refs/heads/release/v0.7", "expected": "$history_expected_release", "target": "$history_candidate_release"},
+        {"ref": "refs/tags/v0.7", "expected": "$history_expected_tag", "target": "$history_candidate_tag"},
+        {"ref": "refs/heads/release/v0.6", "expected": "$history_expected_old_release", "target": None},
+        {"ref": "refs/tags/v0.6", "expected": "$history_expected_old_tag", "target": None},
+    ],
+}, open(sys.argv[1], "w", encoding="utf-8"))
+EOF
+git -C "$history_fixture" config core.hooksPath .githooks
+"$history_fixture/maintainer/scripts/history-rewrite.sh" "$history_manifest" \
+  >"$test_root/history-rewrite.out" 2>"$test_root/history-rewrite.err" || {
+  cat "$test_root/history-rewrite.err" >&2
+  fail "受控历史改写未完成原子引用更新"
+}
+test "$(git --git-dir="$history_remote" rev-parse refs/heads/main)" = "$history_candidate_main" ||
+  fail "历史改写未更新 main"
+test "$(git --git-dir="$history_remote" rev-parse refs/heads/develop)" = "$history_candidate_main" ||
+  fail "历史改写未更新 develop"
+test "$(git --git-dir="$history_remote" rev-parse refs/heads/release/v0.7)" = "$history_candidate_release" ||
+  fail "历史改写未保留改写后的 release/v0.7"
+test "$(git --git-dir="$history_remote" rev-parse refs/tags/v0.7)" = "$history_candidate_tag" ||
+  fail "历史改写未保留改写后的 annotated v0.7 Tag"
+test -z "$(git --git-dir="$history_remote" show-ref refs/heads/release/v0.6 || true)" ||
+  fail "历史改写未删除旧 release 分支"
+test -z "$(git --git-dir="$history_remote" show-ref refs/tags/v0.6 || true)" ||
+  fail "历史改写未删除旧版本 Tag"
+
+history_stale_manifest="$test_root/history-stale-manifest.json"
+python3 - "$history_manifest" "$history_stale_manifest" <<'EOF'
+import json, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+data["source_root_commit"] = data["candidate_root_commit"]
+data["expected_main"] = data["candidate_commit"]
+data["expected_develop"] = data["candidate_commit"]
+for update in data["ref_updates"]:
+    if update["ref"] in {"refs/heads/main", "refs/heads/develop"}:
+        update["expected"] = data["candidate_commit"]
+    elif update["ref"] == "refs/heads/release/v0.7":
+        update["expected"] = "1111111111111111111111111111111111111111"
+    else:
+        update["target"] = None
+data["ref_updates"] = [u for u in data["ref_updates"] if u["ref"] in {
+    "refs/heads/main", "refs/heads/develop", "refs/heads/release/v0.7"
+}]
+json.dump(data, open(sys.argv[2], "w", encoding="utf-8"))
+EOF
+if "$history_fixture/maintainer/scripts/history-rewrite.sh" "$history_stale_manifest" \
+  >"$test_root/history-stale.out" 2>"$test_root/history-stale.err"; then
+  fail "历史改写不得接受已漂移的保留引用"
+fi
+grep -q 'history_rewrite_ref_changed:refs/heads/release/v0.7' \
+  "$test_root/history-stale.err" || fail "历史改写引用漂移未返回精确失败码"
+test "$(git --git-dir="$history_remote" rev-parse refs/heads/main)" = "$history_candidate_main" ||
+  fail "引用漂移失败错误改写了 main"
+
 if printf 'refs/tags/v0.0-test %s refs/tags/v0.0-test %s\n' "$pre_push_head" "$zero_sha" |
   (cd "$fixture" && .githooks/pre-push origin "$remote") \
     >"$test_root/pre-push-tag.out" 2>"$test_root/pre-push-tag.err"; then
