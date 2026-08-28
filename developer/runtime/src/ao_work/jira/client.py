@@ -202,6 +202,8 @@ class JiraClient:
         raw_fields = payload.get("fields", {}) if isinstance(payload, dict) else {}
         project = raw_fields.get("project", {})
         project_key = project.get("key", "") if isinstance(project, dict) else issue_key.partition("-")[0]
+        raw_status = raw_fields.get("status")
+        status_category = raw_status.get("statusCategory", {}) if isinstance(raw_status, dict) else {}
         return JiraIssue(
             issue_id=str(payload.get("id", "")),
             key=str(payload.get("key", issue_key)),
@@ -211,6 +213,8 @@ class JiraClient:
             issue_type=object_name(raw_fields.get("issuetype")),
             assignee=user_identifier(raw_fields.get("assignee")),
             description=raw_fields.get("description") if isinstance(raw_fields.get("description"), dict) else None,
+            status_id=str(raw_status.get("id", "")).strip() if isinstance(raw_status, dict) else "",
+            status_category=object_name(status_category),
             fields=raw_fields,
             priority=object_name(raw_fields.get("priority")),
             updated=str(raw_fields.get("updated", "")),
@@ -277,6 +281,8 @@ class JiraClient:
             project_key = (
                 project.get("key", "") if isinstance(project, dict) else ""
             ) or str(item.get("key", "")).partition("-")[0]
+            raw_status = raw_fields.get("status")
+            status_category = raw_status.get("statusCategory", {}) if isinstance(raw_status, dict) else {}
             issues.append(
                 JiraIssue(
                     issue_id=str(item.get("id", "")),
@@ -287,6 +293,8 @@ class JiraClient:
                     issue_type=object_name(raw_fields.get("issuetype")),
                     assignee=user_identifier(raw_fields.get("assignee")),
                     description=None,
+                    status_id=str(raw_status.get("id", "")).strip() if isinstance(raw_status, dict) else "",
+                    status_category=object_name(status_category),
                     fields=raw_fields,
                     priority=object_name(raw_fields.get("priority")),
                     updated=str(raw_fields.get("updated", "")),
@@ -380,9 +388,22 @@ class JiraClient:
                 continue
             transition_id = str(item.get("id", "")).strip()
             name = str(item.get("name", "")).strip()
-            to_status = object_name(item.get("to"))
+            to = item.get("to")
+            to_status = object_name(to)
+            to_status_id = str(to.get("id", "")).strip() if isinstance(to, dict) else ""
+            to_category = (
+                object_name(to.get("statusCategory")) if isinstance(to, dict) else ""
+            )
             if transition_id and name:
-                result.append({"id": transition_id, "name": name, "to": to_status})
+                result.append(
+                    {
+                        "id": transition_id,
+                        "name": name,
+                        "to": to_status,
+                        "to_status_id": to_status_id,
+                        "to_status_category": to_category,
+                    }
+                )
         return result
 
     def execute_transition(

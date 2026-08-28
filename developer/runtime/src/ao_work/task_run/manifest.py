@@ -467,6 +467,7 @@ class TaskRunManifestService:
                     "assignee_account_id": str(
                         issue.get("assignee_account_id") or ""
                     ),
+                    "status_id_mapping": dict(profile.status_id_mapping),
                     "status_mapping": dict(profile.status_mapping),
                     "allowed_status_categories": [status_category],
                 },

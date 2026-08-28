@@ -1167,6 +1167,38 @@ repositories:
             # 一页默认 10 个任务。
             self.assertEqual("10", transport.queries[-1]["maxResults"])
 
+    def test_cli_workflow_inspect_resolves_status_by_id_without_task_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            install, workspace = self.prepare(Path(temporary))
+            profile = install / "developer/standards/projects/demo/profile.yaml"
+            profile.write_text(
+                profile.read_text(encoding="utf-8").replace(
+                    "statuses: {}\ntransitions: {}",
+                    "status_ids:\n  '10011': waiting_takeover\n"
+                    "statuses:\n  正在进行: completed\n"
+                    "transitions: {}",
+                ),
+                encoding="utf-8",
+            )
+            transport = FakeTransport()
+            with mock.patch(
+                "ao_work.jira.cli.UrllibJiraTransport", return_value=transport
+            ):
+                exit_code, result, _ = self.run_cli(
+                    "--workspace-root", str(workspace),
+                    "jira", "workflow", "inspect", "--issue-key", "TAP-123",
+                )
+            self.assertEqual(0, exit_code)
+            self.assertEqual("jira_workflow_inspect", result["operation"])
+            self.assertTrue(result["read_only"])
+            self.assertFalse(result["adaptation_required"])
+            status = result["issue"]["status"]  # type: ignore[index]
+            self.assertEqual("10011", status["id"])  # type: ignore[index]
+            resolution = result["status_resolution"]  # type: ignore[index]
+            self.assertEqual("waiting_takeover", resolution["stage"])  # type: ignore[index]
+            self.assertEqual("status_id", resolution["source"])  # type: ignore[index]
+            self.assertFalse((workspace / ".agentic-ops/tasks").exists())
+
     def test_cli_jira_list_falls_back_to_default_jql_when_task_query_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             install, workspace = self.prepare(Path(temporary))

@@ -19,6 +19,7 @@ from ao_work.jira.client import (
 )
 from ao_work.jira.model import JiraComment, JiraIssue
 from ao_work.jira.service import JiraService
+from ao_work.jira.status import resolve_issue_status
 from ao_work.jira.transition import match_transition
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, write_diagnostic
 from ao_work.task_state import TaskIdentity, TaskStore
@@ -181,8 +182,8 @@ def execute_task_takeover(
             legacy_state=recovery.get("legacy_state"),
         )
 
-    mapped_status = context.profile.status_mapping.get(issue.status)
-    if not mapped_status:
+    status_resolution = resolve_issue_status(context.profile, issue)
+    if status_resolution is None:
         raise _blocked(
             "jira_status_mapping_missing",
             f"Project Profile 未映射 Jira 状态：{issue.status}",
@@ -317,8 +318,8 @@ def _run_takeover_saga(
         account_id=expected_author,
         operation=operation,
     )
-    mapped_status = context.profile.status_mapping.get(readback.status)
-    if not mapped_status:
+    status_resolution = resolve_issue_status(context.profile, readback)
+    if status_resolution is None:
         raise _takeover_error(
             "takeover_recovery_evidence_mismatch",
             f"Project Profile 未映射接管后 Jira 状态：{readback.status}",
@@ -734,13 +735,14 @@ def _preflight_transition(
     if issue.status == target_status:
         return [], None
     transitions = client.available_transitions(issue.key)
-    target_key = _transition_key_for(profile, issue.status)
+    target_key = _transition_key_for(profile, issue.status, issue.status_id)
     matched = None
     if target_key:
         matched = match_transition(
             issue.status,
             transitions,
             {"transitions": profile.transition_mapping},
+            current_status_id=issue.status_id,
             target_key=target_key,
         )
     if matched is None:
@@ -1188,11 +1190,14 @@ def _migrate_legacy_takeover_saga(
     )
 
 
-def _transition_key_for(profile: Any, current_status: str) -> str | None:
+def _transition_key_for(
+    profile: Any, current_status: str, current_status_id: str = ""
+) -> str | None:
     """从 Project Profile transition_mapping 推导当前状态 → implementation 的 transition key。
 
     transition_mapping 形如 {transition_key: {"name": ..., "id": ..., "from": [...], "to": ...}}。
-    优先取 from 包含当前状态的条目 key；否则回退到 key 为 start_progress / start / begin 的条目。
+    优先取 from_status_ids 包含当前 ID 的条目，再兼容 from 显式包含当前名称；
+    否则回退到 key 为 start_progress / start / begin 的条目。
     key 交给共享 D-037 匹配器（match_transition）做严格匹配。
     """
     raw = getattr(profile, "transition_mapping", None) or {}
@@ -1200,9 +1205,19 @@ def _transition_key_for(profile: Any, current_status: str) -> str | None:
     for key, spec in raw.items():
         if not isinstance(spec, dict):
             continue
-        from_states = spec.get("from")
-        candidates.append((key, {"name": str(spec.get("name") or "").strip(), "from": from_states}))
+        candidates.append(
+            (
+                key,
+                {
+                    "name": str(spec.get("name") or "").strip(),
+                    "from": spec.get("from"),
+                    "from_status_ids": spec.get("from_status_ids", []),
+                },
+            )
+        )
     for key, spec in candidates:
+        if current_status_id and current_status_id in spec["from_status_ids"]:
+            return key
         from_states = spec["from"]
         if isinstance(from_states, (list, tuple)) and current_status in from_states:
             return key

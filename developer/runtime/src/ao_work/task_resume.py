@@ -10,6 +10,7 @@ from ao_work.config import (
 )
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.jira.service import JiraService
+from ao_work.jira.status import resolve_issue_status
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_state import TaskStore
 from ao_work.workspace import Workspace
@@ -78,13 +79,14 @@ def execute_task_resume(
 
     agent_id = str(task.get("agent_id") or "").strip()
 
-    mapped_status = context.profile.status_mapping.get(issue.status)
-    if not mapped_status:
+    status_resolution = resolve_issue_status(context.profile, issue)
+    if status_resolution is None:
         raise _blocked(
             "jira_status_mapping_missing",
             f"Project Profile 未映射 Jira 状态：{issue.status}",
             "请先在项目 Profile 中确认状态映射，不要让 AI 临场猜测",
         )
+    mapped_status = status_resolution.stage
 
     current_stage = str(progress.get("stage") or "").strip()
     recovery_operation = takeover_recovery.get("operation")

@@ -28,6 +28,17 @@ class FakeTransport:
         self.queries: list[dict[str, str]] = []
         self.search_issues: list[dict[str, Any]] = []
         self.search_total: int | None = None
+        self.transitions: list[dict[str, Any]] = [
+            {
+                "id": "91",
+                "name": "Implementation started",
+                "to": {
+                    "id": "10012",
+                    "name": "正在进行",
+                    "statusCategory": {"name": "In Progress"},
+                },
+            }
+        ]
         self.created_issues: list[dict[str, Any]] = []
         self.create_meta_payload: dict[str, Any] | None = None
         self.next_issue_id = 10000
@@ -118,6 +129,8 @@ class FakeTransport:
             }
             self.worklogs.append(worklog)
             return TransportResponse(201, worklog)
+        if path.endswith("/transitions") and method == "GET":
+            return TransportResponse(200, {"transitions": self.transitions})
         if "/rest/api/3/issue/" in path and method == "PUT":
             self.description = body["fields"]["description"]
             return TransportResponse(204, None)
@@ -134,7 +147,11 @@ class FakeTransport:
                     "fields": {
                         "project": {"key": "TAP"},
                         "summary": "修复任务",
-                        "status": {"name": "正在进行"},
+                        "status": {
+                            "id": "10011",
+                            "name": "正在进行",
+                            "statusCategory": {"name": "In Progress"},
+                        },
                         "issuetype": {"name": "任务"},
                         "assignee": {"accountId": "owner-1"},
                         "description": self.description,

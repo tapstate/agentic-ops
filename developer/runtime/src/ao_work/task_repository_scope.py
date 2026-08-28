@@ -14,6 +14,7 @@ from ao_work.config import (
 from ao_work.installation import load_install_identity
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.jira.service import JiraService
+from ao_work.jira.status import resolve_issue_status
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_start import _description_sections, record_current_task_source_context
 from ao_work.task_state import RepositoryConfirmationStore, TaskStore
@@ -863,7 +864,8 @@ def execute_worktree_prepare(
         str(row["repository"]): row for row in (*ready, *newly_ready)
     }
     all_ready = [ready_by_repository[str(row["repository"])] for row in selected]
-    mapped_status = context.profile.status_mapping.get(issue.status) or ""
+    resolution = resolve_issue_status(context.profile, issue)
+    mapped_status = resolution.stage if resolution is not None else ""
     source_context = record_current_task_source_context(
         workspace,
         store,
@@ -1051,7 +1053,8 @@ def execute_worktree_cleanup(
 ) -> dict[str, Any]:
     """完成态后整体预检并非强制移除精确登记的任务工作树。"""
     context, _, issue, _ = _live_context(workspace, install_root, issue_key)
-    if context.profile.status_mapping.get(issue.status) != "completed":
+    resolution = resolve_issue_status(context.profile, issue)
+    if resolution is None or resolution.stage != "completed":
         raise _blocked(
             "worktree_cleanup_status_forbidden",
             f"Jira 任务尚未进入完成态：{issue.status}",

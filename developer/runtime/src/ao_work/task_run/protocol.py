@@ -421,23 +421,32 @@ def validate_manifest(payload: Mapping[str, Any]) -> dict[str, Any]:
         )
 
     jira = require_mapping(value["jira"], "jira")
+    jira_keys = {
+        "base_url",
+        "account_id",
+        "assignee_account_id",
+        "status_mapping",
+        "allowed_status_categories",
+    }
+    # v1 既有 manifest 没有状态 ID 快照；保持其可验证性，并让新 manifest
+    # 显式携带 status_id_mapping。两种形态以严格白名单闭合。
     require_exact_keys(
         jira,
-        {
-            "base_url",
-            "account_id",
-            "assignee_account_id",
-            "status_mapping",
-            "allowed_status_categories",
-        },
+        jira_keys | ({"status_id_mapping"} if "status_id_mapping" in jira else set()),
         "jira",
     )
     require_url(jira["base_url"], "jira.base_url", hosts=None)
     require_string(jira["account_id"], "jira.account_id")
     require_string(jira["assignee_account_id"], "jira.assignee_account_id")
+    status_id_mapping = require_mapping(
+        jira.get("status_id_mapping", {}), "jira.status_id_mapping"
+    )
+    for status_id, internal_status in status_id_mapping.items():
+        require_id(status_id, "jira.status_id_mapping key")
+        require_id(internal_status, f"jira.status_id_mapping.{status_id}")
     status_mapping = require_mapping(jira["status_mapping"], "jira.status_mapping")
-    if not status_mapping:
-        invalid("jira.status_mapping", "必须明确绑定 Project Profile 状态映射")
+    if not status_mapping and not status_id_mapping:
+        invalid("jira", "必须明确绑定 Project Profile 状态 ID 或名称映射")
     for status_name, internal_status in status_mapping.items():
         require_string(status_name, "jira.status_mapping key")
         require_id(internal_status, f"jira.status_mapping.{status_name}")
@@ -838,27 +847,16 @@ def validate_action_data(action: str, data: Mapping[str, Any]) -> None:
             require_id(data["readback_event_id"], "action_data.readback_event_id")
         return
     if action == "jira_readback":
+        jira_readback_keys = {
+            "provider", "reference", "url", "issue_key", "issue_id", "project_key",
+            "status", "assignee", "account_id", "assignee_account_id",
+            "status_category", "mapped_status", "takeover_comment_id",
+            "formal_takeover_verified", "issue_content_sha256",
+            "approved_plan_sha256", "observed_at",
+        }
         require_exact_keys(
             data,
-            {
-                "provider",
-                "reference",
-                "url",
-                "issue_key",
-                "issue_id",
-                "project_key",
-                "status",
-                "assignee",
-                "account_id",
-                "assignee_account_id",
-                "status_category",
-                "mapped_status",
-                "takeover_comment_id",
-                "formal_takeover_verified",
-                "issue_content_sha256",
-                "approved_plan_sha256",
-                "observed_at",
-            },
+            jira_readback_keys | ({"status_id"} if "status_id" in data else set()),
             "action_data",
         )
         if data["provider"] != "jira":
@@ -869,6 +867,8 @@ def validate_action_data(action: str, data: Mapping[str, Any]) -> None:
         require_id(data["issue_id"], "action_data.issue_id")
         require_string(data["project_key"], "action_data.project_key")
         require_string(data["status"], "action_data.status")
+        if data.get("status_id"):
+            require_id(data["status_id"], "action_data.status_id")
         if data["assignee"] is not None:
             require_string(data["assignee"], "action_data.assignee")
         require_string(data["account_id"], "action_data.account_id")
