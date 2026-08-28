@@ -17,7 +17,7 @@ if ! git diff --quiet HEAD -- \
 fi
 
 while read -r local_ref local_sha remote_ref remote_sha; do
-  if [ "$local_sha" = "$zero_sha" ]; then
+  if [ "$local_sha" = "$zero_sha" ] && [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" != "history-rewrite" ]; then
     case "$remote_ref" in
       refs/heads/main|refs/heads/develop|refs/heads/release/*)
         echo "branch_deletion_prohibited: main、develop 和 release/* 分支不可删除" >&2
@@ -26,7 +26,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     esac
   fi
   if [ "$remote_ref" = "refs/heads/main" ] &&
-    [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" != "hotfix" ]; then
+    [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" != "hotfix" ] &&
+    [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" != "history-rewrite" ]; then
     echo "direct push to main is prohibited; use a pull request" >&2
     exit 1
   fi
@@ -43,6 +44,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         exit 1
         ;;
     esac
+  fi
+  if [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" = "history-rewrite" ]; then
+    case "$remote_ref" in refs/heads/main|refs/heads/develop|refs/heads/release/*|refs/tags/v*) continue;; *) echo "history_rewrite_push_target_invalid" >&2; exit 1;; esac
   fi
   case "$local_ref" in
     refs/heads/*)

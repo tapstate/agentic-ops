@@ -317,6 +317,19 @@ for retained_remote_ref in refs/heads/main refs/heads/develop refs/heads/release
   grep -q 'branch_deletion_prohibited' "$test_root/pre-push-delete.err" ||
     fail "pre-push 删除保留远端分支未返回稳定失败码"
 done
+if ! printf 'refs/heads/develop %s refs/heads/main %s\n(delete) %s refs/heads/release/v0.0-retention %s\n' \
+  "$pre_push_head" "$pre_push_main" "$zero_sha" "$pre_push_head" |
+  (cd "$fixture" && AGENTIC_OPS_SPECIAL_PUSH=history-rewrite .githooks/pre-push origin "$remote") \
+    >"$test_root/pre-push-history-rewrite.out" 2>"$test_root/pre-push-history-rewrite.err"; then
+  fail "history rewrite 专用上下文必须只允许受控的 main/develop 更新与 release 删除"
+fi
+if printf 'refs/heads/develop %s refs/heads/unrelated %s\n' "$pre_push_head" "$zero_sha" |
+  (cd "$fixture" && AGENTIC_OPS_SPECIAL_PUSH=history-rewrite .githooks/pre-push origin "$remote") \
+    >"$test_root/pre-push-history-rewrite-invalid.out" 2>"$test_root/pre-push-history-rewrite-invalid.err"; then
+  fail "history rewrite 专用上下文不得允许未声明引用"
+fi
+grep -q 'history_rewrite_push_target_invalid' "$test_root/pre-push-history-rewrite-invalid.err" ||
+  fail "history rewrite 非法引用未返回稳定失败码"
 if printf 'refs/tags/v0.0-test %s refs/tags/v0.0-test %s\n' "$pre_push_head" "$zero_sha" |
   (cd "$fixture" && .githooks/pre-push origin "$remote") \
     >"$test_root/pre-push-tag.out" 2>"$test_root/pre-push-tag.err"; then
