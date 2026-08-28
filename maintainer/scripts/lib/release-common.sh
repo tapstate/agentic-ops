@@ -795,7 +795,7 @@ release_read_merged_pr() {
 }
 
 release_find_merged_pr() {
-  local preferred_merge="$1" preferred_tag="$2" rows number url state base head merge
+  local preferred_head="$1" preferred_merge="$2" rows number url state base head merge
   rows="$("${AGENTIC_OPS_GH_BIN:-gh}" pr list --repo tapstate/agentic-ops --base main \
     --state merged --limit 100 --json number,url,state,baseRefName,headRefOid,mergeCommit \
     --jq '.[] | [.number,.url,.state,.baseRefName,.headRefOid,.mergeCommit.oid] | @tsv' 2>/dev/null)" || {
@@ -804,7 +804,7 @@ release_find_merged_pr() {
   }
   while IFS=$'\t' read -r number url state base head merge; do
     [ -n "$number" ] || continue
-    if [ "$merge" = "$preferred_merge" ] || { [ -n "$preferred_tag" ] && [ "$head" = "$preferred_tag" ]; }; then
+    if [ "$head" = "$preferred_head" ] || { [ -n "$preferred_merge" ] && [ "$merge" = "$preferred_merge" ]; }; then
       RELEASE_RECOVERY_PR_NUMBER="$number"
       RELEASE_RECOVERY_PR_URL="$url"
       RELEASE_RECOVERY_PR_STATE="$state"
@@ -939,7 +939,7 @@ release_recover_merged_candidate() {
     release_fail "release_merged_pr_invalid" "recovery_validation" "PR head、Merge commit 与当前 origin/main 的包含关系不成立" "请停止恢复并人工核查 main 历史"
     return 1
   fi
-  if [ "$merge_commit" != "$develop_head" ] && [ "$merge_commit" != "$local_release" ] && [ "$merge_commit" != "$remote_release" ]; then
+  if [ "$candidate" != "$develop_head" ] && [ "$candidate" != "$local_release" ] && [ "$candidate" != "$remote_release" ]; then
     release_fail "release_merged_pr_unbound" "recovery_validation" "指定 PR 未绑定当前 develop 或 release/$version 状态" "请使用 release.sh inspect 输出的精确 PR 编号"
     return 1
   fi
