@@ -1401,6 +1401,37 @@ test "$(git --git-dir="$remote" rev-list -n 1 v9.7)" = "$recovery_merge" ||
 grep -q '"operation":"release_recover"' "$test_root/recovery-complete.out" ||
   fail "recover 成功结果缺失"
 
+# 本地和远端 Tag 都不存在时，真实 recover 必须走原子创建；第一阶段确认前仍不得写入。
+git -C "$fixture" tag -d v9.7 >/dev/null
+git --git-dir="$remote" update-ref -d refs/tags/v9.7
+if (
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$recovery_gh" \
+  AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING=1 \
+  FAKE_VERIFY_LOG="$verify_log" \
+    maintainer/scripts/release.sh recover --version v9.7 --merged-pr 77 --allow-soft-gate
+) >"$test_root/recovery-missing-tag-plan.out" 2>"$test_root/recovery-missing-tag-plan.err"; then
+  fail "Tag 缺失时 recover 首次执行仍必须停在完整确认包"
+fi
+missing_tag_digest="$(sed -n 's/.*--confirm-recovery \([0-9a-f][0-9a-f]*\).*/\1/p' "$test_root/recovery-missing-tag-plan.err" | tail -n 1)"
+test -n "$missing_tag_digest" || fail "Tag 缺失恢复未输出确认绑定"
+test -z "$(git -C "$fixture" show-ref --tags v9.7 || true)" ||
+  fail "Tag 缺失恢复在确认前创建了本地 Tag"
+test -z "$(git --git-dir="$remote" show-ref --tags v9.7 || true)" ||
+  fail "Tag 缺失恢复在确认前创建了远端 Tag"
+(
+  cd "$fixture"
+  AGENTIC_OPS_GH_BIN="$recovery_gh" \
+  AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING=1 \
+  FAKE_VERIFY_LOG="$verify_log" \
+    maintainer/scripts/release.sh recover --version v9.7 --merged-pr 77 \
+      --allow-soft-gate --confirm-release --confirm-recovery "$missing_tag_digest"
+) >"$test_root/recovery-missing-tag-complete.out" 2>"$test_root/recovery-missing-tag-complete.err"
+test "$(git -C "$fixture" rev-list -n 1 v9.7)" = "$recovery_merge" ||
+  fail "Tag 缺失恢复未创建指向 main Merge commit 的本地 Tag"
+test "$(git --git-dir="$remote" rev-list -n 1 v9.7)" = "$recovery_merge" ||
+  fail "Tag 缺失恢复未创建指向 main Merge commit 的远端 Tag"
+
 # 正常发布与 recover 都必须把版本 Tag 放在已核验的 main Merge commit；
 # 任何预先指向候选 HEAD 的本地 Tag 都不能被脚本静默移动。
 (
