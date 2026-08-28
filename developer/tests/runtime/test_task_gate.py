@@ -151,9 +151,9 @@ class TaskGateTest(unittest.TestCase):
         self.assertTrue(assessed["ready_for_solution"])
         self.assertEqual(
             "prepare_and_classify_solution",
-            assessed["agentic_next_action"]["action"],
+            assessed["next_step"]["action"],
         )
-        self.assertFalse(assessed["agentic_next_action"]["requires_authorization"])
+        self.assertFalse(assessed["next_step"]["requires_authorization"])
         self.assertEqual(
             {"owner", "target_repo", "target_branch"},
             {item["field"] for item in assessed["intake"]["auto_filled_values"]},
@@ -181,9 +181,9 @@ class TaskGateTest(unittest.TestCase):
             error.details["input_recovery"]["action"],
         )
         rendered = failure("task_intake_assess", error)
-        self.assertEqual("ai", rendered["agentic_next_action"]["executor"])
+        self.assertEqual("ai", rendered["next_step"]["executor"])
         self.assertFalse(
-            rendered["agentic_next_action"]["requires_authorization"]
+            rendered["next_step"]["requires_authorization"]
         )
 
         assessed = self.service.assess_intake(
@@ -310,7 +310,7 @@ class TaskGateTest(unittest.TestCase):
             input_file=str(first_path.relative_to(self.workspace_root)),
         )
         self.assertFalse(first["ready_for_solution"])
-        self.assertTrue(first["agentic_next_action"]["retry_gate"]["allowed"])
+        self.assertTrue(first["next_step"]["retry_gate"]["allowed"])
         self.assertEqual(0, first["intake"]["retry_count"])
 
         repeated = self.service.assess_intake(
@@ -328,7 +328,7 @@ class TaskGateTest(unittest.TestCase):
             input_file=str(second_path.relative_to(self.workspace_root)),
         )
         self.assertEqual(1, second["intake"]["retry_count"])
-        self.assertTrue(second["agentic_next_action"]["stop_workflow"])
+        self.assertTrue(second["next_step"]["stop_workflow"])
 
         payload["unresolved_information"][0]["reason"] = "再次尝试仍无法补齐验收标准"
         third_path = self._write_json("missing-3.json", payload)
@@ -375,18 +375,54 @@ class TaskGateTest(unittest.TestCase):
                 results[level] = result
         self.assertEqual(
             "review_task_design",
-            results["L1"]["agentic_next_action"]["action"],
+            results["L1"]["next_step"]["action"],
         )
         self.assertEqual(
             "decide_solution_risk",
-            results["L2"]["agentic_next_action"]["action"],
+            results["L2"]["next_step"]["action"],
         )
         self.assertEqual(
             "revise_design_and_reassess",
-            results["L3"]["agentic_next_action"]["action"],
+            results["L3"]["next_step"]["action"],
         )
-        self.assertFalse(results["L3"]["agentic_next_action"]["stop_workflow"])
-        self.assertTrue(results["L4"]["agentic_next_action"]["stop_workflow"])
+        self.assertFalse(results["L3"]["next_step"]["stop_workflow"])
+        self.assertTrue(results["L4"]["next_step"]["stop_workflow"])
+
+    def test_solution_schema_failure_is_locatable_and_written_to_journal(self) -> None:
+        self._assessed_intake()
+        path = self._write_json(
+            "tapstate-90-solution.json",
+            {
+                "schema_version": 1,
+                "intake_digest": "9" * 64,
+                "execution_plan": {
+                    "change_repository": "tapdata/tapdata-connectors",
+                    "scope": {"included": [], "excluded": []},
+                    "verifications": [],
+                    "review_summary": "修复批量读取 SQL。",
+                },
+            },
+        )
+        with self.assertRaises(RuntimeErrorResult) as captured:
+            self.service.classify_solution(
+                issue_key=ISSUE_KEY,
+                agentic_run_id=RUN_ID,
+                input_file=str(path.relative_to(self.workspace_root)),
+            )
+        self.assertEqual("solution_input_invalid", captured.exception.code)
+        errors = captured.exception.details["validation_errors"]
+        self.assertEqual("solution_gate/v4", errors[0]["contract_version"])
+        self.assertIn(
+            "/proposed_solution", {item["json_pointer"] for item in errors}
+        )
+        self.assertIn(
+            "/execution_plan/verification", {item["json_pointer"] for item in errors}
+        )
+        journal = self.workspace_root / ".agentic-ops/tasks" / ISSUE_KEY / "journal.ndjson"
+        event = json.loads(journal.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual("task_solution_classify", event["operation"])
+        self.assertEqual("solution_input_invalid", event["code"])
+        self.assertEqual("solution_gate/v4", event["evidence"]["contract_version"])
 
     def test_new_source_head_invalidates_current_intake(self) -> None:
         intake_digest = self._assessed_intake()
@@ -442,9 +478,9 @@ class TaskGateTest(unittest.TestCase):
         self.assertEqual(1, len(execution["normalization_changes"]))
         self.assertEqual(
             "prepare_task_run_manifest",
-            result["agentic_next_action"]["action"],
+            result["next_step"]["action"],
         )
-        self.assertFalse(result["agentic_next_action"]["requires_authorization"])
+        self.assertFalse(result["next_step"]["requires_authorization"])
 
     def test_multi_repository_source_binds_evidence_and_solution_head(self) -> None:
         connector_root = self.workspace_root.parent / "connector-source"

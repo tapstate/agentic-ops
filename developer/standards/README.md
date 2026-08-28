@@ -31,7 +31,7 @@ ao-work capability show <operation>
 
 只有目录返回 `status=implemented` 且列出当前命令路径时，才能继续调用。`status=capability_gap`、目录中不存在该操作、目录校验失败或只有 Operation Contract 时必须停止调用该 AO 自动化，并按目录中的中文 `next_action` 处理；这不等同于直接终止业务开发。若 AO 自身问题会阻断业务任务，必须进入 `agenticops_continuity_decision` 由人工决定有限继续路径。Operation Contract 保存目标输入、输出、门禁和副作用边界，不是实现状态事实源。
 
-每个 `ao-work` 子命令都是一个原子步骤控制入口。stdout 的唯一 JSON 对象固定包含 `ok`、`operation`、`status` 和结构化 `agentic_next_action`；下一步对象固定给出 `executor`、稳定 `action`、`required_inputs`、`allowed_operations`、`requires_authorization`、`stop_workflow`、`ownership_effect` 与 `retry_gate`。`executor` 只表示当前动作由 Runtime、当前 AI、人、reviewer 或项目工具执行，不是任务转派；当前版本 `ownership_effect` 只允许 `none`。Runtime 必须根据当前操作的实际结果选择下一动作；AI 只能从当前结果的事实/证据字段取齐 required inputs，并调用 allowed operations 中已实现的操作。失败只在 `retry_gate.allowed=true` 时可以按同一 `retry_key` 再试一次，且必须先回读状态、改变输入并记录 retry 事件；相同输入循环、未允许重试或重试耗尽都要停止转人工。自然语言说明只帮助人理解，不能替代这些机器字段或成为放行依据。
+每个 `ao-work` 子命令都是一个原子步骤控制入口。stdout 的唯一 JSON 对象固定包含 `ok`、`operation`、`status`、先行的 `result` 和结构化 `next_step`；`result` 固定说明已发生的事实、证据、副作用和剩余项，不能作为下一步授权。所有 `next_step` 均由 Runtime 的 `Step` 类生成，固定给出 `kind`、`scope`、`mode`、`call`，以及兼容当前执行器所需的 `executor`、稳定 `action`、`required_inputs`、`allowed_operations`、`requires_authorization`、`stop_workflow`、`ownership_effect` 与 `retry_gate`。`executor` 只表示当前动作由 Runtime、当前 AI、人、reviewer 或项目工具执行，不是任务转派；当前版本 `ownership_effect` 只允许 `none`。Runtime 必须根据当前操作的实际结果选择唯一下一动作；AI 只能从当前结果的事实/证据字段取齐 required inputs，并调用 `call` 中已声明、且 `allowed_operations` 中已实现的操作。失败只在 `retry_gate.allowed=true` 时可以按同一 `retry_key` 再试一次，且必须先回读状态、改变输入并记录 retry 事件；相同输入循环、未允许重试或重试耗尽都要停止转人工。自然语言说明只帮助人理解，不能替代这些机器字段或成为放行依据。
 
 任务负责人与步骤执行者必须分开。统一接管输出绑定的 `task_ownership.task_owner` 是当前工作空间代表的研发员，默认从接管到 PR 审查保持不变。Runtime、人工确认、reviewer 和项目工具参与单个步骤都不改变负责人。`task_transfer` 仍是 `capability_gap`；出现转派需求时必须停止并由人决定，身份变更、原授权失效、交接证据和 Jira 所有权变更后续通过独立专题设计，当前不预设放行行为。
 
@@ -55,7 +55,8 @@ ao-work capability show <operation>
 ao-work task-run prepare --issue-key <ISSUE-KEY>
 ao-work task-run authorize --issue-key <ISSUE-KEY> --confirmed-by <当前会话确认人> --confirm
 ao-work task-run open --manifest <workspace-relative-manifest.json>
-ao-work task-run record --manifest <workspace-relative-manifest.json> --event <workspace-relative-event.json>
+ao-work task-run record --manifest <workspace-relative-manifest.json> --event '<inline-step-event-json>'
+# 复杂过程事件也可使用：--event <workspace-relative-full-event.json>
 ao-work task-run probe-prohibition-baseline --manifest <workspace-relative-manifest.json>
 ao-work task-run probe-jira --manifest <workspace-relative-manifest.json>
 ao-work task-run probe-jira-write --manifest <workspace-relative-manifest.json> --plan-file <managed-plan.json> --confirm-plan-id <plan-id>
@@ -66,6 +67,13 @@ ao-work task-run probe-prohibitions --manifest <workspace-relative-manifest.json
 ao-work task-run record-unverified-prohibitions --manifest <workspace-relative-manifest.json>
 ao-work task-run finalize --manifest <workspace-relative-manifest.json> --status <ready_for_pr_review|blocked|failed> --next-action <明确下一步>
 ```
+
+普通步骤事件优先使用简化内联 JSON。`event_type` 固定为
+`<step_id>_started`、`<step_id>_completed` 或 `<step_id>_blocked`，并提供
+`actor`、`evidence_origin=imported` 和中文 `summary`；可选提供
+`duration_seconds`。Runtime 从当前 manifest 补齐 `agentic_run_id`、授权引用、
+记录时间和 canonical 协议字段。复杂过程事件继续使用工作空间内的完整事件文件；
+Jira、Git、PR、验证和禁止动作等可信事实仍只能由对应 Runtime probe 生成。
 
 `prepare` 从当前 L1 solution、确认领域和执行计划选定的 prepared 任务工作树生成完整设计与连续执行授权包；同领域其它 prepared 工作树只用于分析，不会阻断交付。任务可选择一个或多个实际变更仓库，用户只对完整任务确认一次方案、逐仓范围、最终验证命令、允许/禁止动作和风险。确认后 `authorize` 为每个仓库生成一份 shared schema v1 canonical manifest 和独立 task-run 状态；单仓继续返回兼容 `manifest_path`，多仓通过 `deliveries` 返回逐仓路径，Skill 自动逐仓执行 `open`，不再要求用户复制 run、文件路径或摘要。
 

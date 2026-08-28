@@ -249,6 +249,7 @@ class WorkplaneBoundaryTest(unittest.TestCase):
             "integration/task-to-pr-manifest.schema.json",
             "integration/task-to-pr-result.schema.json",
             "standards/jira-comment-template.schema.json",
+            "standards/step-result-v2.schema.json",
         }
         entries = list(shared.rglob("*"))
         self.assertFalse(

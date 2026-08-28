@@ -206,7 +206,7 @@ class TaskResumeTest(unittest.TestCase):
         self.assertEqual("takeover_started", result["current_stage"])
         self.assertEqual(
             "resume_task_from_recorded_state",
-            result["agentic_next_action"]["action"],  # type: ignore[index]
+            result["next_step"]["action"],  # type: ignore[index]
         )
         self.assertNotIn(("GET", "/rest/api/3/field"), transport.requests)
 
@@ -293,7 +293,7 @@ class TaskResumeTest(unittest.TestCase):
         )
         self.assertEqual(
             "ensure_takeover_comment",
-            result["agentic_next_action"]["action"],
+            result["next_step"]["action"],
         )
 
 
@@ -318,7 +318,7 @@ class TaskResumeUnitTest(unittest.TestCase):
             "agentic_run_id": "run-1",
             "project_key": "TAP",
         }
-        progress = {"stage": "takeover_started", "agentic_next_action": "run_development"}
+        progress = {"stage": "takeover_started", "next_step": "run_development"}
         journal = [
             json.dumps(
                 {
@@ -357,7 +357,7 @@ class TaskResumeUnitTest(unittest.TestCase):
                 encoding="utf-8",
             )
             (task_dir / "progress.json").write_text(
-                json.dumps({"stage": stage, "agentic_next_action": "x", "updated_at": updated}),
+                json.dumps({"stage": stage, "next_step": "x", "updated_at": updated}),
                 encoding="utf-8",
             )
             (task_dir / "journal.ndjson").write_text("", encoding="utf-8")

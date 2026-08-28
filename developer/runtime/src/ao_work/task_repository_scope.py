@@ -14,6 +14,7 @@ from ao_work.config import (
 from ao_work.installation import load_install_identity
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.jira.service import JiraService
+from ao_work.jira.status import resolve_issue_status
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_start import _description_sections, record_current_task_source_context
 from ao_work.task_state import RepositoryConfirmationStore, TaskStore
@@ -141,7 +142,7 @@ def _with_repository_branch_recovery(
         retry_safe=False,
         required_human_action=error.required_human_action,
         details={**error.details, "task_domain": task_domain},
-        agentic_next_action=_repository_branch_override_next_action(),
+        next_step=_repository_branch_override_next_action(),
     )
 
 
@@ -333,7 +334,7 @@ def execute_repository_assess(
             "proposal_authority": "already_confirmed",
             "repository_scope_revision": recorded_scope.get("content_version", 0),
             "task_facts": task_facts,
-            "agentic_next_action": _repository_next_action(
+            "next_step": _repository_next_action(
                 executor="ai",
                 action="prepare_confirmed_domain_worktrees",
                 allowed_operations=("task_worktrees_prepare",),
@@ -354,7 +355,7 @@ def execute_repository_assess(
             recorded_scope.get("content_version", 0)
         ),
         "task_facts": task_facts,
-        "agentic_next_action": _repository_next_action(
+        "next_step": _repository_next_action(
             executor="human",
             action="review_and_confirm_task_domain",
             required_inputs=("confirmation_id", "task_domain"),
@@ -576,7 +577,7 @@ def execute_repository_confirm(
             "confirmation_required": True,
             "side_effects": [],
             "confirmation_ref": confirmation_store.reference(confirmation),
-            "agentic_next_action": _repository_next_action(
+            "next_step": _repository_next_action(
                 executor="human",
                 action="confirm_task_domain",
                 required_inputs=("task_domain",),
@@ -599,7 +600,7 @@ def execute_repository_confirm(
         "confirmation_ref": confirmation_store.consume(
             issue_key, agentic_run_id, confirmation_id, scope, confirmed_domain
         ),
-        "agentic_next_action": _repository_next_action(
+        "next_step": _repository_next_action(
             executor="ai",
             action="prepare_confirmed_domain_worktrees",
             required_inputs=(),
@@ -751,7 +752,7 @@ def execute_worktree_prepare(
                 error.required_human_action = (
                     "请审阅受控遗留工作树清理计划；仅在每项均可安全清理时确认执行"
                 )
-                error.agentic_next_action = _repository_next_action(
+                error.next_step = _repository_next_action(
                     executor="human",
                     action="review_stale_worktree_cleanup",
                     required_inputs=("stale_worktree_cleanup",),
@@ -863,7 +864,8 @@ def execute_worktree_prepare(
         str(row["repository"]): row for row in (*ready, *newly_ready)
     }
     all_ready = [ready_by_repository[str(row["repository"])] for row in selected]
-    mapped_status = context.profile.status_mapping.get(issue.status) or ""
+    resolution = resolve_issue_status(context.profile, issue)
+    mapped_status = resolution.stage if resolution is not None else ""
     source_context = record_current_task_source_context(
         workspace,
         store,
@@ -890,7 +892,7 @@ def execute_worktree_prepare(
         "created_repositories": created_repositories,
         "created": bool(created_repositories),
         "intake_source": source_context["intake_source"],
-        "agentic_next_action": _repository_next_action(
+        "next_step": _repository_next_action(
             executor="ai",
             action="assess_task_intake",
             required_inputs=(
@@ -1051,7 +1053,8 @@ def execute_worktree_cleanup(
 ) -> dict[str, Any]:
     """完成态后整体预检并非强制移除精确登记的任务工作树。"""
     context, _, issue, _ = _live_context(workspace, install_root, issue_key)
-    if context.profile.status_mapping.get(issue.status) != "completed":
+    resolution = resolve_issue_status(context.profile, issue)
+    if resolution is None or resolution.stage != "completed":
         raise _blocked(
             "worktree_cleanup_status_forbidden",
             f"Jira 任务尚未进入完成态：{issue.status}",
@@ -1252,7 +1255,7 @@ def execute_worktree_recover(
             "issue_key": issue_key,
             "cleanup_plan": cleanup_plan,
             "confirmation_required": True,
-            "agentic_next_action": _repository_next_action(
+            "next_step": _repository_next_action(
                 executor="human",
                 action="confirm_stale_worktree_cleanup",
                 required_inputs=("cleanup_digest",),
@@ -1367,7 +1370,7 @@ def execute_worktree_recover(
         "cleanup_digest": cleanup_plan["cleanup_digest"],
         "source_pool_primary_worktree_unchanged": True,
         "prepare": prepared,
-        "agentic_next_action": prepared["agentic_next_action"],
+        "next_step": prepared["next_step"],
     }
 
 

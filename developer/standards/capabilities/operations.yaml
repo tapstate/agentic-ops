@@ -254,6 +254,16 @@ capabilities:
     summary: 只读返回当前 Project Profile 下 Jira Issue 的基础事实和凭证配置状态。
     next_action: 请把输出与项目标准资产结合分析；该能力不判断准入、不读取评论和自定义字段，也不写 Jira。
 
+  - id: jira_workflow_inspect
+    source: runtime
+    contract:
+    status: implemented
+    visibility: public
+    commands:
+      - [jira, workflow, inspect]
+    summary: 无需已有任务 run，只读返回当前 Issue 的 Jira status ID、显示名、分类、可用 transition 及其与 Project Profile 的匹配结果。
+    next_action: 映射失配时依据输出补齐受控 Profile；该能力不写 Jira、不创建本地任务状态，也不猜测状态语义。
+
   - id: version
     source: contract
     contract: contracts/operations/version.yaml
@@ -526,6 +536,22 @@ capabilities:
       - [task, solution, classify]
     summary: 将方案严格绑定当前准入摘要和源码 HEAD，根据固定风险标志与证据确定 L1 至 L4；不提供通用方案摘要确认门禁。
     next_action: L1 进入设计审查；L2 进入逐项风险决策；L3 由 AI 修订设计并重新评估；L4 停止并解决事实、权限或能力缺口。
+    input_schema:
+      contract_version: solution_gate/v4
+      schema_version: 1
+      required: [intake_digest, proposed_solution, scope, risk_flags, classification_evidence, residual_risks]
+      optional: [execution_plan]
+      execution_plan:
+        exactly_one_of: [change_repository, change_repositories]
+        required: [verification, review_summary]
+      minimal_example:
+        schema_version: 1
+        intake_digest: <current-intake-digest>
+        proposed_solution: 中文方案说明
+        scope: {included: [owner/repository::path], excluded: []}
+        risk_flags: {user_choice_required: false, external_side_effect: false, nontrivial_risk: false, architecture_change: false, public_contract_change: false, security_boundary_change: false, data_migration: false, confirmed_design_change: false, fact_conflict: false, permission_gap: false, capability_gap: false}
+        classification_evidence: {}
+        residual_risks: []
 
   - id: task_transfer
     source: runtime
@@ -634,6 +660,16 @@ capabilities:
       - [workspace, preflight]
     summary: 从当前 ao_work 模块自定位并验证 developer 安装身份后，复用当前工作空间初始化候选执行授权、Jira Project 和源码访问前置检查。
     next_action: 任一检查失败都必须按结构化失败码停止，不得把 Profile 可解析视为预检通过。
+
+  - id: workflow_query
+    source: runtime
+    contract:
+    status: implemented
+    visibility: public
+    commands:
+      - [workflow, query]
+    summary: 读取已安装的版本化流程标准，并以不可执行的 WorkflowQuery 返回当前节点及全流程导航。
+    next_action: WorkflowQuery 只用于展示与定位；必须消费步骤执行结果中的唯一 next_step 才能决定实际执行。
 
   - id: write_evidence
     source: contract

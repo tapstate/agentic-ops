@@ -28,6 +28,7 @@ from ao_work.task_run.protocol import (
     verification_digest,
 )
 from ao_work.task_run.service import (
+    PROHIBITION_BASELINE_COMMAND_TIMEOUT_SECONDS,
     TaskRunProtocol,
     is_current_managed_takeover_comment,
 )
@@ -118,6 +119,7 @@ class TrustedTaskRunTest(unittest.TestCase):
                     "key": issue.key,
                     "project_key": issue.project_key,
                     "status": issue.status,
+                    "status_id": issue.status_id,
                     "summary": issue.summary,
                 },
                 ensure_ascii=False,
@@ -134,6 +136,7 @@ class TrustedTaskRunTest(unittest.TestCase):
                 "base_url": "https://tapdata.atlassian.net",
                 "account_id": "jira-account-1",
                 "assignee_account_id": "jira-account-1",
+                "status_id_mapping": {},
                 "status_mapping": {"正在进行": "implementation"},
                 "allowed_status_categories": ["In Progress"],
             },
@@ -371,6 +374,101 @@ class TrustedTaskRunTest(unittest.TestCase):
         with self.assertRaises(Exception) as captured:
             validate_manifest(invalid)
         self.assertEqual("protocol_schema_invalid", getattr(captured.exception, "code", None))
+
+    def test_record_accepts_compact_inline_step_events(self) -> None:
+        self._open()
+        started = json.dumps(
+            {
+                "event_type": "implementation_started",
+                "actor": "ai",
+                "evidence_origin": "imported",
+                "summary": "在已批准范围内开始实现",
+            },
+            ensure_ascii=False,
+        )
+        code, payload, stderr = self._cli(
+            "task-run",
+            "record",
+            "--manifest",
+            "inputs/manifest.json",
+            "--event",
+            started,
+        )
+        self.assertEqual(0, code, (payload, stderr))
+        self.assertTrue(payload["recorded"])
+        self.assertEqual("implementation", payload["step_id"])
+        self.assertEqual("started", payload["event_status"])
+
+        journal = [
+            json.loads(line)
+            for line in Path(str(payload["journal_path"])).read_text(encoding="utf-8").splitlines()
+        ]
+        event = journal[0]["event"]
+        self.assertEqual("step", event["action"])
+        self.assertEqual({}, event["action_data"])
+        self.assertEqual("run-TAP-12289-001", event["agentic_run_id"])
+        self.assertEqual(
+            self.manifest["authorization"]["reference"],  # type: ignore[index]
+            event["authorization_reference"],
+        )
+
+        code, duplicate, stderr = self._cli(
+            "task-run",
+            "record",
+            "--manifest",
+            "inputs/manifest.json",
+            "--event",
+            started,
+        )
+        self.assertEqual(0, code, (duplicate, stderr))
+        self.assertFalse(duplicate["recorded"])
+        self.assertEqual(payload["event_id"], duplicate["event_id"])
+        self.assertEqual(1, duplicate["sequence"])
+
+        completed = json.dumps(
+            {
+                "event_type": "implementation_completed",
+                "actor": "ai",
+                "evidence_origin": "imported",
+                "summary": "已完成批准范围内的实现",
+                "duration_seconds": 8,
+            },
+            ensure_ascii=False,
+        )
+        code, terminal, stderr = self._cli(
+            "task-run",
+            "record",
+            "--manifest",
+            "inputs/manifest.json",
+            "--event",
+            completed,
+        )
+        self.assertEqual(0, code, (terminal, stderr))
+        self.assertEqual("implementation", terminal["step_id"])
+        self.assertEqual("completed", terminal["event_status"])
+        self.assertEqual(2, terminal["sequence"])
+
+    def test_record_rejects_invalid_compact_inline_step_event(self) -> None:
+        self._open()
+        event = json.dumps(
+            {
+                "event_type": "implementation",
+                "actor": "ai",
+                "evidence_origin": "imported",
+                "summary": "缺少步骤状态后缀",
+            },
+            ensure_ascii=False,
+        )
+        code, payload, _ = self._cli(
+            "task-run",
+            "record",
+            "--manifest",
+            "inputs/manifest.json",
+            "--event",
+            event,
+        )
+        self.assertEqual(2, code)
+        self.assertEqual("protocol_schema_invalid", payload["code"])
 
     def test_record_cannot_import_trusted_facts_or_impersonate_runtime(self) -> None:
         self._open()
@@ -1021,6 +1119,7 @@ class TrustedTaskRunTest(unittest.TestCase):
                 "status_category": "In Progress",
                 "mapped_status": "implementation",
                 "status": "正在进行",
+                "status_id": "",
                 "issue_content_sha256": self.manifest["task_binding"][
                     "issue_content_sha256"
                 ],
@@ -1543,6 +1642,49 @@ class TrustedTaskRunTest(unittest.TestCase):
             "d" * 40, "d" * 40, "b" * 40
         )
 
+    def test_prohibition_baseline_external_commands_allow_five_minutes(self) -> None:
+        protocol = TaskRunProtocol(
+            SimpleNamespace(
+                root=self.workspace.resolve(),
+                config_path=self.workspace / ".agentic-ops/agent.json",
+            ),
+            install_root=self.install,
+            lock_timeout=1,
+        )
+        observed: list[tuple[list[str], object]] = []
+
+        def fake_run(
+            argv: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            observed.append((argv, kwargs.get("timeout")))
+            return subprocess.CompletedProcess(argv, 0, "[]", "")
+
+        with mock.patch.object(protocol, "_run_command", side_effect=fake_run):
+            self.assertEqual(
+                "[]",
+                protocol._remote_git(self.source, "ls-remote", "--tags", "origin"),
+            )
+            self.assertEqual(
+                [],
+                protocol._github_json_array(
+                    self.source,
+                    ["gh", "release", "list"],
+                    "读取失败",
+                    timeout=PROHIBITION_BASELINE_COMMAND_TIMEOUT_SECONDS,
+                ),
+            )
+
+        self.assertEqual(
+            [
+                (
+                    ["git", "-C", str(self.source), "ls-remote", "--tags", "origin"],
+                    300,
+                ),
+                (["gh", "release", "list"], 300),
+            ],
+            observed,
+        )
+
     def test_pr_action_binding_fails_closed_when_baseline_already_had_open_pr(self) -> None:
         self._open()
         protocol = TaskRunProtocol(
@@ -1712,6 +1854,7 @@ class GitCommitExecutionTest(unittest.TestCase):
                     "key": issue.key,
                     "project_key": issue.project_key,
                     "status": issue.status,
+                    "status_id": issue.status_id,
                     "summary": issue.summary,
                 },
                 ensure_ascii=False,
@@ -1728,6 +1871,7 @@ class GitCommitExecutionTest(unittest.TestCase):
                 "base_url": "https://tapdata.atlassian.net",
                 "account_id": "jira-account-1",
                 "assignee_account_id": "jira-account-1",
+                "status_id_mapping": {},
                 "status_mapping": {"正在进行": "implementation"},
                 "allowed_status_categories": ["In Progress"],
             },

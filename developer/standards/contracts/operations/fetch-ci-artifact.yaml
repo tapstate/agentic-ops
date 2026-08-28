@@ -18,7 +18,7 @@ output:
   archive_path: {type: string}
   extracted_path: {type: string}
   downloaded: {type: boolean}
-  agentic_next_action: {type: string}
+  next_step: {type: string}
 failure:
   codes: [ci_artifact_not_ready, ci_artifact_read_failed, ci_artifact_download_failed, ci_artifact_missing, ci_artifact_ambiguous, ci_artifact_unsafe, ci_artifact_limit_exceeded, ci_artifact_digest_mismatch, ci_artifact_state_conflict]
 side_effects:

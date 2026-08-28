@@ -51,6 +51,7 @@ class InstallationIdentityTest(unittest.TestCase):
             install / "shared" / "integration" / "task-to-pr-event.schema.json",
             install / "shared" / "integration" / "task-to-pr-result.schema.json",
             install / "shared" / "standards" / "jira-comment-template.schema.json",
+            install / "shared" / "standards" / "step-result-v2.schema.json",
             install / ".python-version",
         ):
             path.parent.mkdir(parents=True, exist_ok=True)

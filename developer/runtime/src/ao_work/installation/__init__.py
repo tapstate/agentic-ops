@@ -31,6 +31,7 @@ SHARED_SOURCE_ASSETS = {
     "shared/integration/task-to-pr-manifest.schema.json": ("100644", "blob"),
     "shared/integration/task-to-pr-result.schema.json": ("100644", "blob"),
     "shared/standards/jira-comment-template.schema.json": ("100644", "blob"),
+    "shared/standards/step-result-v2.schema.json": ("100644", "blob"),
 }
 SHARED_DISTRIBUTION_ASSETS = {
     "integration/README.md",
@@ -38,6 +39,7 @@ SHARED_DISTRIBUTION_ASSETS = {
     "integration/task-to-pr-manifest.schema.json",
     "integration/task-to-pr-result.schema.json",
     "standards/jira-comment-template.schema.json",
+    "standards/step-result-v2.schema.json",
 }
 DEVELOPER_SPARSE_PATHS = {
     ".python-version",
@@ -301,6 +303,7 @@ def validate_install_root() -> Path:
         root / "shared" / "integration" / "task-to-pr-manifest.schema.json",
         root / "shared" / "integration" / "task-to-pr-event.schema.json",
         root / "shared" / "integration" / "task-to-pr-result.schema.json",
+        root / "shared" / "standards" / "step-result-v2.schema.json",
     ):
         if required.is_symlink() or not required.is_file():
             raise _blocked(
@@ -489,6 +492,7 @@ def _validate_checkout_integrity(root: Path) -> None:
         "shared/integration/task-to-pr-manifest.schema.json",
         "shared/integration/task-to-pr-event.schema.json",
         "shared/integration/task-to-pr-result.schema.json",
+        "shared/standards/step-result-v2.schema.json",
     ):
         _run_git(root, "cat-file", "-e", f"HEAD:{asset}")
 
@@ -539,6 +543,7 @@ def _validate_verification_checkout_integrity(root: Path) -> None:
         "shared/integration/task-to-pr-manifest.schema.json",
         "shared/integration/task-to-pr-event.schema.json",
         "shared/integration/task-to-pr-result.schema.json",
+        "shared/standards/step-result-v2.schema.json",
     ):
         _run_git(root, "cat-file", "-e", f"HEAD:{asset}")
 

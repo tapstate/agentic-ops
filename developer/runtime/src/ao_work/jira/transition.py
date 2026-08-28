@@ -9,7 +9,15 @@ from typing import Any
 COMPLETED_STAGE = "completed"
 
 
-def from_ok(spec: dict[str, Any], current_status: str) -> bool:
+def from_ok(
+    spec: dict[str, Any], current_status: str, current_status_id: str = ""
+) -> bool:
+    from_status_ids = spec.get("from_status_ids")
+    if isinstance(from_status_ids, list) and from_status_ids:
+        # 已达目标状态仍是幂等 no_op；ID 约束不能把这一安全路径退化掉。
+        return current_status_id in from_status_ids or current_status_id == str(
+            spec.get("to_status_id", "")
+        ).strip()
     from_states = spec.get("from")
     if not isinstance(from_states, list) or not from_states:
         return True
@@ -19,7 +27,10 @@ def from_ok(spec: dict[str, Any], current_status: str) -> bool:
     return current_status in from_states
 
 
-def to_ok(spec: dict[str, Any], to_status: str) -> bool:
+def to_ok(spec: dict[str, Any], to_status: str, to_status_id: str = "") -> bool:
+    expected_id = str(spec.get("to_status_id", "")).strip()
+    if expected_id:
+        return to_status_id == expected_id
     expected = str(spec.get("to", "")).strip()
     if not expected:
         return True
@@ -31,6 +42,7 @@ def match_transition(
     available: list[dict[str, str]],
     mapping: dict[str, Any],
     *,
+    current_status_id: str = "",
     target_status: str | None = None,
     target_key: str | None = None,
 ) -> tuple[str, str, str] | None:
@@ -64,7 +76,9 @@ def match_transition(
             if not found:
                 continue
             item = found[0]
-            if from_ok(spec, current_status) and to_ok(spec, item["to"]):
+            if from_ok(spec, current_status, current_status_id) and to_ok(
+                spec, item["to"], str(item.get("to_status_id", ""))
+            ):
                 resolved.append((item["id"], item["name"], item["to"]))
             else:
                 return None
@@ -72,8 +86,8 @@ def match_transition(
             same = [item for item in available if item["name"] == spec_name]
             if (
                 len(same) == 1
-                and from_ok(spec, current_status)
-                and to_ok(spec, same[0]["to"])
+                and from_ok(spec, current_status, current_status_id)
+                and to_ok(spec, same[0]["to"], str(same[0].get("to_status_id", "")))
             ):
                 resolved.append((same[0]["id"], same[0]["name"], same[0]["to"]))
     unique = set(resolved)
@@ -83,9 +97,17 @@ def match_transition(
 
 
 def completed_stage_for(
-    status_mapping: dict[str, str], target_status: str
+    status_mapping: dict[str, str],
+    target_status: str,
+    *,
+    status_id_mapping: dict[str, str] | None = None,
+    target_status_id: str = "",
 ) -> str | None:
     """目标状态若映射到 completed stage，返回 stage 名；否则 None。"""
+    if target_status_id and isinstance(status_id_mapping, dict):
+        stage = status_id_mapping.get(target_status_id, "")
+        if stage == COMPLETED_STAGE:
+            return stage
     stage = status_mapping.get(target_status, "") if isinstance(status_mapping, dict) else ""
     if stage == COMPLETED_STAGE:
         return stage
@@ -110,6 +132,9 @@ def adaptation_material(
         ),
         "configured_statuses": (
             mapping.get("statuses", {}) if isinstance(mapping, dict) else {}
+        ),
+        "configured_status_ids": (
+            mapping.get("status_ids", {}) if isinstance(mapping, dict) else {}
         ),
         "guidance": (
             "请按对照材料在 developer/standards/projects/<project>/profile.yaml 的 "

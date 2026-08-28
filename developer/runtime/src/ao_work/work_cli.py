@@ -41,6 +41,7 @@ from ao_work.workspace_init import (
     execute_workspace_preflight,
 )
 from ao_work.version import inspect_version
+from ao_work.workflow_query import execute_workflow_query
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -132,6 +133,11 @@ def build_parser() -> argparse.ArgumentParser:
     report_write.add_argument("--agentic-run-id", required=True)
     report_write.add_argument("--kind", choices=("analysis", "plan"), required=True)
     report_write.add_argument("--content-file", required=True)
+    workflow_parser = subparsers.add_parser("workflow")
+    workflow_commands = workflow_parser.add_subparsers(dest="command", required=True)
+    workflow_query = workflow_commands.add_parser("query")
+    workflow_query.add_argument("--process-id", required=True)
+    workflow_query.add_argument("--current-step", required=True)
     configure_capability_parser(subparsers)
     configure_authorization_parser(subparsers)
     configure_jira_parser(subparsers)
@@ -164,6 +170,17 @@ def execute(args: argparse.Namespace) -> dict[str, object]:
     if args.group == "workspace" and args.command == "init":
         state = execute_workspace_init(args, args.workspace_root, install_root)
         return success("workspace_init", workplane=DEVELOPER, **state)
+    if args.group == "workflow" and args.command == "query":
+        state = execute_workflow_query(
+            install_root,
+            process_id=args.process_id,
+            current_step_id=args.current_step,
+        )
+        return success(
+            "workflow_query",
+            workplane=DEVELOPER,
+            workflow_query=state,
+        )
 
     workspace = resolve_developer_workspace(args.workspace_root)
     operation = operation_name(args)

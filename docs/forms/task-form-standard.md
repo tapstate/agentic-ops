@@ -15,7 +15,7 @@ Jira 是任务事实源，但不是 AgenticOps 表单标准的源头。AIAgent �
 - 支持任务从卡片创建到完成的全周期字段维护。
 - 支持不同生命周期阶段使用不同字段集合和不同必填规则。
 - 支持不同专业角色在对应节点写入审查结论。
-- 支持 AIAgent 基于表单数据判断 `agentic_next_action`，而不是只依赖聊天上下文。
+- 支持 AIAgent 基于表单数据判断 `next_step`，而不是只依赖聊天上下文。
 - 支持任务失败后的重试和重做判断。
 - 支持 AIAgent 在字段缺失、映射缺失或工作流不匹配时稳定阻断，而不是猜测。
 - 支持后续把标准字段、生命周期要求和 Jira 映射转换为机器可读契约。
@@ -59,7 +59,7 @@ AgenticOps 表单体系分为三层。
 | `task_class` | 标准任务分类，用于选择对应标准流程。 | AgenticOps、工作流配置 | 接管后分析、实现前 |
 | `process_id` | 标准流程编号。 | AgenticOps | 接管后分析、实现前 |
 | `current_stage` | 当前执行阶段。 | AgenticOps | 接管后 |
-| `agentic_next_action` | 下一步动作。 | AgenticOps | 接管后 |
+| `next_step` | 下一步动作。 | AgenticOps | 接管后 |
 | `implementation_summary` | 本地实现摘要。 | AIAgent | 开发完成 |
 | `verification_result` | 实际验证结果。 | AIAgent | 开发完成 |
 | `residual_risk` | 剩余风险和未验证部分。 | AIAgent | 开发完成 |
@@ -97,7 +97,7 @@ developer 工作面不创建或映射 `agentic_id` 等 Agentic Jira Custom Field
 | 进入迭代 | `scope_boundary`、`acceptance_criteria`、`owner`、`iteration`、`priority`、`risk_level` | 缺失时不能进入 AI 接管候选列表。 |
 | AI 接管 | `owner`、`agent_id`、Jira 状态/transition 映射、用户接管指令 | Runtime 只执行通用接管安全门禁；所有权、映射或身份冲突时阻断。 |
 | 信息分析与设计审查 | `agentic_run_id`、`agentic_takeover_at`、`takeover_kind`、`takeover_comment_id`、`target_repo`、`target_branch`、`verification_method`、`task_class`、`process_id` | 可验证事实自动补全；缺失或冲突时进入风险决策，未确认设计不得进入实现。 |
-| 本地开发 | `agentic_run_id`、`agent_id`、`task_type`、`task_class`、`process_id`、`current_stage`、`agentic_next_action`、有效设计授权 | 缺失时恢复接管、补全分析或重新进入设计审查。 |
+| 本地开发 | `agentic_run_id`、`agent_id`、`task_type`、`task_class`、`process_id`、`current_stage`、`next_step`、有效设计授权 | 缺失时恢复接管、补全分析或重新进入设计审查。 |
 | 开发完成 | `implementation_summary`、`verification_result`、`residual_risk` | 缺失时不能请求推送或创建拉取请求的确认。 |
 | 拉取请求审查 | `pr_link`、`ci_status`、`review_status`、`reviewer_decision` | 缺失时不能进入完成证据。 |
 | 完成 | `agentic_completion_evidence`、`follow_up_items`、`completed_at`、`terminal_comment_id` | 缺失时不能关闭 AI 执行记录；完成或交接结束后必须写入并回读终止评论。 |
@@ -109,7 +109,7 @@ developer 工作面不创建或映射 `agentic_id` 等 Agentic Jira Custom Field
 - 该阶段的标准动作是否已经执行。
 - 哪些表单字段证明动作已经执行。
 - 是否经过对应专业角色审查。
-- 当前结论允许进入哪个 `agentic_next_action`。
+- 当前结论允许进入哪个 `next_step`。
 - 失败时允许重试还是必须重做前序阶段。
 - 完成或交接结束后是否已经写入并回读终止评论、关闭本地运行。
 
@@ -119,7 +119,7 @@ developer 工作面不创建或映射 `agentic_id` 等 Agentic Jira Custom Field
 | --- | --- |
 | 表单字段完整且门禁通过 | 进入下一阶段。 |
 | 表单字段缺失 | 阻断当前阶段并输出补充动作。 |
-| 专业审查退回 | 根据审查结论设置 `agentic_next_action`，通常进入修复和验证。 |
+| 专业审查退回 | 根据审查结论设置 `next_step`，通常进入修复和验证。 |
 | 前序输入发生变化 | 设置 `redo_from_stage`，从受影响阶段重新生成表单。 |
 | 操作执行失败但输入仍有效 | 根据 `retry_policy` 在当前阶段重试。 |
 | 风险、权限或标准冲突 | 停止并请求人工确认。 |
@@ -260,7 +260,7 @@ Jira 对接不满足 AgenticOps 标准时，先适配，再决策。
 
 - 声明操作需要哪些标准字段。
 - 声明缺少标准字段时的稳定错误码。
-- 声明操作输出如何更新 `current_stage`、`agentic_next_action`、`retry_policy` 或 `redo_from_stage`。
+- 声明操作输出如何更新 `current_stage`、`next_step`、`retry_policy` 或 `redo_from_stage`。
 - 不声明具体 Jira 自定义字段。
 
 工作流配置：

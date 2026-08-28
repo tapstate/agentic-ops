@@ -10,7 +10,7 @@ from typing import Any, Mapping
 
 from ao_work.config import load_project_profile
 from ao_work.installation import load_install_identity
-from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
+from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult, normalize_next_step
 from ao_work.task_run.protocol import digest, manifest_digest, validate_manifest
 from ao_work.task_run.service import TaskRunProtocol, repository_delivery_directory
 from ao_work.task_state import TaskStore
@@ -78,7 +78,7 @@ class TaskRunManifestService:
             "confirmation_required": True,
             "confirmation_package": bundle["confirmation_package"],
             "side_effects": [],
-            "agentic_next_action": {
+            "next_step": {
                 "executor": "human",
                 "action": "review_task_run_authorization",
                 "required_inputs": [
@@ -467,6 +467,7 @@ class TaskRunManifestService:
                     "assignee_account_id": str(
                         issue.get("assignee_account_id") or ""
                     ),
+                    "status_id_mapping": dict(profile.status_id_mapping),
                     "status_mapping": dict(profile.status_mapping),
                     "allowed_status_categories": [status_category],
                 },
@@ -592,10 +593,22 @@ class TaskRunManifestService:
             "deliveries": deliveries,
             "manifest_paths": [item["manifest_path"] for item in deliveries],
             "authorization_reference": manifests[0]["authorization"]["reference"],
-            "agentic_next_action": (
-                "task_run_open" if len(manifests) == 1 else "task_run_open_each"
-            ),
         }
+        next_action = "task_run_open" if len(manifests) == 1 else "task_run_open_each"
+        result["next_step"] = normalize_next_step(
+            {
+                "executor": "ai",
+                "action": next_action,
+                "required_inputs": ["manifest_paths"],
+                "allowed_operations": [next_action],
+                "requires_authorization": False,
+                "stop_workflow": False,
+                "ownership_effect": "none",
+                "reason": "任务运行授权已生效，按逐仓 manifest 进入执行",
+            },
+            operation="task_run_authorize",
+            payload={**dict(bundle), "manifest_paths": [item["manifest_path"] for item in deliveries]},
+        )
         if len(deliveries) == 1:
             result.update(
                 {

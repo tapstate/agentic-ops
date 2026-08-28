@@ -6,7 +6,7 @@
 
 AIAgent 面向操作工作，不直接面对 Jira 字段、Jira 状态、Jira `transition` 或 Jira `comment` 模板。
 
-操作契约还必须说明每次操作如何读取或更新 Task Form Standard 中的标准字段。AIAgent 后续判断 `current_stage`、`agentic_next_action`、重试、重做和人工审查时，应以操作输出、表单数据和事件记录为准，而不是以聊天上下文为准。
+操作契约还必须说明每次操作如何读取或更新 Task Form Standard 中的标准字段。AIAgent 后续判断 `current_stage`、`next_step`、重试、重做和人工审查时，应以操作输出、表单数据和事件记录为准，而不是以聊天上下文为准。
 
 操作契约必须引用 Standard Process Registry 中的任务分类和流程阶段。统一接管操作是具体流程选择前的公共操作，只验证项目、负责人、状态映射、Agent 身份和恢复事实；接管后必须补齐 `task_class` 和 `process_id`，未补齐前不得进入实现。
 
@@ -115,7 +115,7 @@ output:
   current_stage:
     enum:
       - takeover_started
-  agentic_next_action:
+  next_step:
     type: object
   retry_policy:
     type: object
@@ -152,7 +152,24 @@ human_gate:
   authorization_basis: 用户明确表达“接管 <KEY>”即授权事实明确的常规接管；冲突和不确定结果进入风险决策。
 ```
 
-## 5. 错误模型
+## 5. StepResult v2 与 `next_step`
+
+所有 CLI 结果先返回 `result`，再返回唯一的 `next_step`。`result` 使用 `status`、`summary`、`facts`、`evidence`、`effects` 和 `remaining` 说明已经发生的事实；它不是后续操作的授权来源。
+
+`next_step` 是判别式对象，稳定字段为：
+
+- `kind`：`action`、`decision`、`input`、`wait` 或 `none`。
+- `scope`：`local` 仅用于使当前步骤结果可信的读回、幂等恢复和有界重试；`flow` 表示可信结果后的业务推进。边界不清时必须为 `flow`。
+- `mode`：`auto`、`timed_auto` 或 `manual`。需要人工授权、高风险写入、范围变化或外部结果不确定时不得为 `auto`。
+- `call`：固定操作、参数、工作目录、输入来源和事实绑定。AI 只能按此对象调用 Runtime，不能扩展为未声明的后续操作。
+
+`decision` 必须带 `question` 与非空 `choices`；每个选项包含 `id`、`label`、`description`、`impact`、`risk`，且只有一个 `recommended=true`。提交选择只记录决策，不直接执行下游业务动作。
+
+`timed_auto` 必须带受 Runtime 持久化并原子解析的 `timed`：唯一 `decision_id`、`deadline`、`default_choice`、`cancel_if`、`fact_bind` 和 `policy`。当前仅支持 `cancel_if=fact_binding_changed`；Runtime 在同一任务锁内比对受信任时钟与 `fact_bind`，到期只记录 `default_choice`，绑定变化则取消。两种解析都不直接执行下游业务动作。UI 只能展示、提交取消或读取最终状态，不能以本地计时推断用户已经确认。
+
+顺序执行闭环只能暴露当前唯一 `next_step`。完整流程必须通过独立只读 `WorkflowQuery` 获取；查询结果不可执行，也不构成授权。
+
+## 6. 错误模型
 
 错误必须稳定、可聚合、可反馈分析。
 
@@ -179,11 +196,11 @@ human_gate:
 - `required_human_action`
 - `task_type`
 - `current_stage`
-- `agentic_next_action`
+- `next_step`
 - `retryable`
 - `redo_from_stage`
 
-## 6. 副作用规则
+## 7. 副作用规则
 
 操作必须明确副作用：
 
@@ -200,7 +217,7 @@ human_gate:
 
 任何涉及向 `master`、`main`、`develop`、`release/*` 或其它保护分支推送、合并、发布、Git Tag、强推或历史改写的操作必须要求人工确认。工作项级连续执行授权可以覆盖任务分支的 `git commit`、推送和目标为 `develop` 的 `gh pr create` / `gh pr edit`，但完成后必须停在拉取请求审查节点。
 
-## 7. 工作项级连续执行授权
+## 8. 工作项级连续执行授权
 
 研发工程师确认版本化设计或修复计划时，可以同时授予工作项级连续执行授权。该授权绑定 `issue_key`、`agentic_run_id`、`agent_id`、已回读的 `takeover_comment_id`、目标仓库、工作分支、目标分支、计划版本、修改范围和验证方式，并通过 Jira 决策评论或项目配置的等价任务事实源提供稳定引用。
 

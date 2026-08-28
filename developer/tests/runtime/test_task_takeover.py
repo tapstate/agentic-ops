@@ -375,10 +375,10 @@ class TaskTakeoverTest(unittest.TestCase):
         )
         self.assertEqual(
             "assess_repository_branch_mapping",
-            payload["agentic_next_action"]["action"],
+            payload["next_step"]["action"],
         )
         self.assertFalse(
-            payload["agentic_next_action"]["requires_authorization"]
+            payload["next_step"]["requires_authorization"]
         )
         self.assertEqual(1, len(transport.comments))
         comment = plain_text(transport.comments[0]["body"])
@@ -541,9 +541,9 @@ class TaskTakeoverTest(unittest.TestCase):
         self.assertEqual("selection_required", payload["takeover_status"])
         self.assertEqual(
             "select_takeover_candidate",
-            payload["agentic_next_action"]["action"],
+            payload["next_step"]["action"],
         )
-        self.assertTrue(payload["agentic_next_action"]["stop_workflow"])
+        self.assertTrue(payload["next_step"]["stop_workflow"])
         self.assertEqual(3, payload["candidate_count"])
         candidates: list[dict[str, object]] = payload["candidates"]  # type: ignore[assignment]
         keys = [str(task["issue_key"]) for task in candidates]

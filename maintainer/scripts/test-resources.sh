@@ -25,6 +25,7 @@ require_file shared/integration/README.md
 require_file shared/integration/task-to-pr-event.schema.json
 require_file shared/integration/task-to-pr-manifest.schema.json
 require_file shared/integration/task-to-pr-result.schema.json
+require_file shared/standards/step-result-v2.schema.json
 require_file .agentic-ops-source
 require_file maintainer/pyproject.toml
 require_file developer/pyproject.toml
@@ -64,7 +65,8 @@ expected_shared_entries="$(printf '%s\n' \
   shared/integration/task-to-pr-manifest.schema.json \
   shared/integration/task-to-pr-result.schema.json \
   shared/standards \
-  shared/standards/jira-comment-template.schema.json)"
+  shared/standards/jira-comment-template.schema.json \
+  shared/standards/step-result-v2.schema.json)"
 if [ "$shared_entries" != "$expected_shared_entries" ]; then
   fail "shared 只能包含根准入说明、integration 准入说明、三个 task-to-pr JSON Schema 和 standards 评论模板"
 fi

@@ -110,6 +110,9 @@ class CapabilityCatalogTest(unittest.TestCase):
         self.assertEqual("implemented", shown["capability_status"])
         self.assertEqual(True, shown["callable"])
         self.assertEqual("implemented", shown["capability"]["status"])
+        solution = json.loads(self._run_cli("capability", "show", "solution_gate"))
+        self.assertEqual("solution_gate/v4", solution["capability"]["input_schema"]["contract_version"])
+        self.assertIn("minimal_example", solution["capability"]["input_schema"])
         self.assertEqual(
             [["jira", "comment", "plan"], ["jira", "comment", "apply"], ["jira", "comment", "readback"]],
             shown["capability"]["commands"],

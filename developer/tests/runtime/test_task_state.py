@@ -491,6 +491,139 @@ class TaskStateTest(unittest.TestCase):
                 sync["external_writes"]["jira_comment:run-1-analysis"]["status"],
             )
 
+    def test_timed_step_is_durable_and_resolves_once_after_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            now = datetime(2026, 8, 26, 3, 59, tzinfo=timezone.utc)
+            store = TaskStore(root, now=lambda: now)
+            store.initialize(IDENTITY)
+            next_step = {
+                "executor": "ao_work",
+                "action": "wait_for_confirmation_window",
+                "required_inputs": [],
+                "allowed_operations": ["task_inspect"],
+                "requires_authorization": False,
+                "stop_workflow": False,
+                "ownership_effect": "none",
+                "kind": "decision",
+                "mode": "timed_auto",
+                "timed": {
+                    "decision_id": "confirmation-window-1",
+                    "deadline": "2026-08-26T04:00:00Z",
+                    "default_choice": "continue",
+                    "cancel_if": "fact_binding_changed",
+                    "fact_bind": "run:run-20260813-001",
+                    "policy": "policy:timed-confirmation-v1",
+                },
+                "transitions": {
+                    "continue": {
+                        "executor": "ao_work",
+                        "action": "inspect_confirmed_task",
+                        "required_inputs": [],
+                        "allowed_operations": ["task_inspect"],
+                        "requires_authorization": False,
+                        "stop_workflow": False,
+                        "ownership_effect": "none",
+                        "kind": "action",
+                        "mode": "auto",
+                    }
+                },
+            }
+
+            created = store.schedule_timed_step(
+                IDENTITY.issue_key, IDENTITY.agentic_run_id, next_step
+            )
+            repeated = store.schedule_timed_step(
+                IDENTITY.issue_key, IDENTITY.agentic_run_id, next_step
+            )
+            waiting = store.resolve_timed_step(
+                IDENTITY.issue_key,
+                IDENTITY.agentic_run_id,
+                "confirmation-window-1",
+                "run:run-20260813-001",
+            )
+            self.assertTrue(created["created"])
+            self.assertFalse(repeated["created"])
+            self.assertFalse(waiting["resolved"])
+            self.assertEqual("pending", waiting["timed_step"]["state"])
+
+            now = datetime(2026, 8, 26, 4, 0, tzinfo=timezone.utc)
+            resolved = store.resolve_timed_step(
+                IDENTITY.issue_key,
+                IDENTITY.agentic_run_id,
+                "confirmation-window-1",
+                "run:run-20260813-001",
+            )
+            repeated_resolution = store.resolve_timed_step(
+                IDENTITY.issue_key,
+                IDENTITY.agentic_run_id,
+                "confirmation-window-1",
+                "run:run-20260813-001",
+            )
+            self.assertTrue(resolved["resolved"])
+            self.assertEqual("resolved", resolved["timed_step"]["state"])
+            self.assertEqual("continue", resolved["timed_step"]["resolution"]["choice"])
+            self.assertEqual("auto_transition_ready", resolved["timed_step"]["resolution"]["effect"])
+            self.assertEqual(
+                "task_inspect",
+                resolved["timed_step"]["resolution"]["next_step"]["operation_id"],
+            )
+            self.assertEqual(resolved["timed_step"], repeated_resolution["timed_step"])
+
+    def test_timed_step_cancels_when_fact_binding_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            store = TaskStore(root)
+            store.initialize(IDENTITY)
+            store.schedule_timed_step(
+                IDENTITY.issue_key,
+                IDENTITY.agentic_run_id,
+                {
+                    "executor": "ao_work",
+                    "action": "wait_for_confirmation_window",
+                    "required_inputs": [],
+                    "allowed_operations": ["task_inspect"],
+                    "requires_authorization": False,
+                    "stop_workflow": False,
+                    "ownership_effect": "none",
+                    "kind": "decision",
+                    "mode": "timed_auto",
+                    "timed": {
+                        "decision_id": "confirmation-window-2",
+                        "deadline": "2026-08-26T04:00:00Z",
+                        "default_choice": "continue",
+                        "cancel_if": "fact_binding_changed",
+                        "fact_bind": "run:old",
+                        "policy": "policy:timed-confirmation-v1",
+                    },
+                    "transitions": {
+                        "continue": {
+                            "executor": "ao_work",
+                            "action": "inspect_confirmed_task",
+                            "required_inputs": [],
+                            "allowed_operations": ["task_inspect"],
+                            "requires_authorization": False,
+                            "stop_workflow": False,
+                            "ownership_effect": "none",
+                            "kind": "action",
+                            "mode": "auto",
+                        }
+                    },
+                },
+            )
+
+            cancelled = store.resolve_timed_step(
+                IDENTITY.issue_key,
+                IDENTITY.agentic_run_id,
+                "confirmation-window-2",
+                "run:new",
+            )
+            self.assertTrue(cancelled["resolved"])
+            self.assertEqual("cancelled", cancelled["timed_step"]["state"])
+            self.assertEqual(
+                "fact_binding_changed", cancelled["timed_step"]["resolution"]["reason"]
+            )
+
     def test_gate_transition_updates_progress_and_appends_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -507,7 +640,7 @@ class TaskStateTest(unittest.TestCase):
             )
             self.assertEqual(
                 "review_task_design",
-                recorded["progress"]["agentic_next_action"],
+                recorded["progress"]["next_action"],
             )
             self.assertEqual("task_solution_classify", recorded["event"]["operation"])
             self.assertEqual("a" * 64, recorded["event"]["evidence"]["intake_digest"])

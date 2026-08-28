@@ -23,7 +23,7 @@ output:
     type: string
   issues:
     type: integer
-  agentic_next_action:
+  next_step:
     type: string
 failure:
   codes:

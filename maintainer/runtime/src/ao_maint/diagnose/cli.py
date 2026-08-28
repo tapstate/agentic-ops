@@ -29,7 +29,7 @@ def execute_diagnose(args: argparse.Namespace, source_root: Any) -> dict[str, An
             status="blocked",
             exit_code=EXIT_BLOCKED,
             retry_safe=True,
-            required_human_action=str(result["agentic_next_action"]["reason"]),
+            required_human_action=str(result["next_step"]["question"]),
             details=result,
         )
     return result

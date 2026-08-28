@@ -374,6 +374,7 @@ agentic_validate_shared_source_tree() {
   local manifest_schema=0
   local result_schema=0
   local comment_template=0
+  local step_result_schema=0
 
   if ! git -C "$install_dir" cat-file -e "$ref^{tree}" 2>/dev/null; then
     agentic_bootstrap_error \
@@ -414,6 +415,7 @@ agentic_validate_shared_source_tree() {
       shared/integration/task-to-pr-manifest.schema.json) manifest_schema=$((manifest_schema + 1)) ;;
       shared/integration/task-to-pr-result.schema.json) result_schema=$((result_schema + 1)) ;;
       shared/standards/jira-comment-template.schema.json) comment_template=$((comment_template + 1)) ;;
+      shared/standards/step-result-v2.schema.json) step_result_schema=$((step_result_schema + 1)) ;;
       *)
         agentic_bootstrap_error \
           "developer_shared_source_invalid" \
@@ -424,10 +426,11 @@ agentic_validate_shared_source_tree() {
     entry_count=$((entry_count + 1))
   done < <(git -C "$install_dir" ls-tree -r -z "$ref" -- shared 2>/dev/null)
 
-  if [ "$entry_count" != "6" ] || \
+  if [ "$entry_count" != "7" ] || \
     [ "$source_readme" != "1" ] || [ "$integration_readme" != "1" ] || \
     [ "$event_schema" != "1" ] || [ "$manifest_schema" != "1" ] || \
-    [ "$result_schema" != "1" ] || [ "$comment_template" != "1" ]; then
+    [ "$result_schema" != "1" ] || [ "$comment_template" != "1" ] || \
+    [ "$step_result_schema" != "1" ]; then
     agentic_bootstrap_error \
       "developer_shared_source_invalid" \
       "AgenticOps 提交中的 shared 资产不等于固定只读协议白名单" \
@@ -468,6 +471,7 @@ agentic_validate_shared_distribution() {
   local result_schema=0
   local standards_dir=0
   local comment_template=0
+  local step_result_schema=0
 
   if [ -L "$shared_dir" ] || [ ! -d "$shared_dir" ]; then
     agentic_bootstrap_error \
@@ -534,6 +538,13 @@ agentic_validate_shared_distribution() {
           "请停止使用该安装目录并重新安装"
         comment_template=$((comment_template + 1))
         ;;
+      standards/step-result-v2.schema.json)
+        agentic_shared_file_is_safe "$entry" || agentic_bootstrap_error \
+          "developer_shared_distribution_invalid" \
+          "AgenticOps developer 安装中的 shared JSON Schema 类型或权限不安全" \
+          "请停止使用该安装目录并重新安装"
+        step_result_schema=$((step_result_schema + 1))
+        ;;
       *)
         agentic_bootstrap_error \
           "developer_shared_distribution_invalid" \
@@ -544,10 +555,11 @@ agentic_validate_shared_distribution() {
     entry_count=$((entry_count + 1))
   done < <(find "$shared_dir" -mindepth 1 -print0 2>/dev/null)
 
-  if [ "$entry_count" != "7" ] || [ "$integration_dir" != "1" ] || \
+  if [ "$entry_count" != "8" ] || [ "$integration_dir" != "1" ] || \
     [ "$integration_readme" != "1" ] || [ "$event_schema" != "1" ] || \
     [ "$manifest_schema" != "1" ] || [ "$result_schema" != "1" ] || \
-    [ "$standards_dir" != "1" ] || [ "$comment_template" != "1" ]; then
+    [ "$standards_dir" != "1" ] || [ "$comment_template" != "1" ] || \
+    [ "$step_result_schema" != "1" ]; then
     agentic_bootstrap_error \
       "developer_shared_distribution_invalid" \
       "AgenticOps developer 安装的 shared 可见树不等于固定只读协议白名单" \
@@ -688,7 +700,8 @@ agentic_require_checkout_integrity() {
     shared/integration/README.md \
     shared/integration/task-to-pr-manifest.schema.json \
     shared/integration/task-to-pr-event.schema.json \
-    shared/integration/task-to-pr-result.schema.json; do
+    shared/integration/task-to-pr-result.schema.json \
+    shared/standards/step-result-v2.schema.json; do
     if ! git -C "$install_dir" cat-file -e "HEAD:$required_asset" 2>/dev/null; then
       agentic_bootstrap_error \
         "install_asset_integrity_invalid" \
@@ -830,7 +843,8 @@ agentic_sync_runtime() {
     [ ! -f "$install_dir/shared/integration/README.md" ] || \
     [ ! -f "$install_dir/shared/integration/task-to-pr-manifest.schema.json" ] || \
     [ ! -f "$install_dir/shared/integration/task-to-pr-event.schema.json" ] || \
-    [ ! -f "$install_dir/shared/integration/task-to-pr-result.schema.json" ]; then
+    [ ! -f "$install_dir/shared/integration/task-to-pr-result.schema.json" ] || \
+    [ ! -f "$install_dir/shared/standards/step-result-v2.schema.json" ]; then
     agentic_bootstrap_error \
       "developer_distribution_invalid" \
       "developer 安装缺少 AI 入口、Python Runtime 或 shared 集成协议" \
@@ -936,7 +950,8 @@ agentic_require_rollback_commit() {
     shared/integration/README.md \
     shared/integration/task-to-pr-manifest.schema.json \
     shared/integration/task-to-pr-event.schema.json \
-    shared/integration/task-to-pr-result.schema.json; do
+    shared/integration/task-to-pr-result.schema.json \
+    shared/standards/step-result-v2.schema.json; do
     if ! git -C "$install_dir" cat-file -e "$rollback_ref:$required_asset" 2>/dev/null; then
       agentic_bootstrap_error \
         "rollback_ref_invalid" \

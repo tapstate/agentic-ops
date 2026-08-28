@@ -20,7 +20,7 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
     def test_ao_work_exposes_only_developer_commands(self) -> None:
         parser = build_parser()
         commands = self._subcommands(parser)
-        for expected in ("workspace", "auth", "jira", "task", "task-run", "report", "capability", "version"):
+        for expected in ("workspace", "workflow", "auth", "jira", "task", "task-run", "report", "capability", "version"):
             self.assertIn(expected, commands)
         self.assertEqual(set(), commands & self.MAINTAINER_COMMANDS)
 
@@ -73,6 +73,7 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
             ["capability", "list"],
             ["version"],
             ["workspace", "inspect"],
+            ["workflow", "query", "--process-id", "development_change_v2", "--current-step", "implementation"],
             ["task", "inspect", "--issue-key", "TAP-1"],
             ["report", "write", "--issue-key", "TAP-1", "--agentic-run-id", "run-1", "--kind", "analysis", "--content-file", "analysis.md"],
         )
@@ -101,6 +102,33 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
 
     def test_install_root_is_not_a_public_option(self) -> None:
         self.assertNotIn("--install-root", self._all_option_strings(build_parser()))
+
+    def test_workflow_query_keeps_step_result_envelope_version(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        query = {
+            "schema_version": "workflow-query/v1",
+            "workflow_id": "development_change_v2",
+            "current_step_id": "implementation",
+            "executable": False,
+            "steps": [{"id": "implementation", "label": "implementation", "kind": "action"}],
+        }
+        with (
+            mock.patch(
+                "ao_work.work_cli.validate_install_root",
+                return_value=Path("/synthetic-developer-install"),
+            ),
+            mock.patch("ao_work.work_cli.execute_workflow_query", return_value=query),
+            redirect_stdout(stdout),
+            redirect_stderr(stderr),
+        ):
+            exit_code = main(
+                ["workflow", "query", "--process-id", "development_change_v2", "--current-step", "implementation"]
+            )
+        self.assertEqual(0, exit_code, stderr.getvalue())
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual("step-result/v2", payload["schema_version"])
+        self.assertEqual("workflow-query/v1", payload["workflow_query"]["schema_version"])
 
     def test_repository_confirmation_uses_id_and_domain_not_a_managed_path(self) -> None:
         parsed = build_parser().parse_args(
@@ -160,11 +188,11 @@ class DeveloperCliBoundaryTest(unittest.TestCase):
         self.assertEqual("auth", payload["operation"])
         self.assertEqual(
             "initialize_or_inspect_workspace",
-            payload["agentic_next_action"]["action"],
+            payload["next_step"]["action"],
         )
         self.assertEqual(
             ["workspace_init", "workspace_inspect"],
-            payload["agentic_next_action"]["allowed_operations"],
+            payload["next_step"]["allowed_operations"],
         )
 
     def _subcommands(self, parser: argparse.ArgumentParser) -> set[str]:

@@ -22,7 +22,11 @@ def configure_task_run_parser(subparsers: argparse._SubParsersAction[Any]) -> No
     open_parser.add_argument("--manifest", required=True)
     record_parser = commands.add_parser("record")
     record_parser.add_argument("--manifest", required=True)
-    record_parser.add_argument("--event", required=True)
+    record_parser.add_argument(
+        "--event",
+        required=True,
+        help="完整事件 JSON 的工作空间相对路径，或简化步骤事件的内联 JSON",
+    )
     for name in (
         "probe-prohibition-baseline",
         "probe-jira",

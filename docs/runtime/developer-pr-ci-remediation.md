@@ -53,7 +53,7 @@ ao-work task-run record-ci-remediation \
   --authorization-reference <当前manifest授权>
 ```
 
-Skill 只消费结构化返回值并按 `agentic_next_action` 编排。它不直接调用 `gh`、不自行解压、不解析 Runtime 状态文件，也不重置截止时间或修复预算。
+Skill 只消费结构化返回值并按 `next_step` 编排。它不直接调用 `gh`、不自行解压、不解析 Runtime 状态文件，也不重置截止时间或修复预算。
 
 只有 GitHub PR 判定为 `required` 才建立两个不可重置的独立门限：首次观察起 5 分钟内必须看到 CI 测试执行；观察到执行后 10 分钟内必须结束。任一门限超时时，Runtime 返回 `start_timeout` 或 `completion_timeout` 以及当前 PR/检查/Workflow 事实，Skill 必须主动生成用户决策包；它不自动重跑、无限等待或重置门限。
 
@@ -65,6 +65,6 @@ CI 状态位于 `.agentic-ops/tasks/<ISSUE>/runs/<agentic_run_id>/ci/`，绑定 
 
 Artifact 按内容识别 ZIP、TAR 或 TAR.GZ，逐项拒绝绝对路径、`..`、链接和特殊文件，并限制压缩包、展开总量、单文件、文件数和深度。解析器只读取普通单链接的 `failsafe-summary.xml`、`TEST-*.xml` 和 `.txt`，拒绝 DTD、实体、损坏 XML与统计冲突；`.txt` 只记录相对路径和摘要，不把原始日志写入 Jira。
 
-CI 通过或 GitHub PR 明确判定无需 CI，只结束本次 AIAgent 开发闭环：`current_stage=completed`、`ci_status=passed|not_required`、`agentic_next_action=none`。它不自动合并 PR、不把 Jira 置为 Done、不发布、不打 Tag，也不取消项目另行要求的专业门禁。
+CI 通过或 GitHub PR 明确判定无需 CI，只结束本次 AIAgent 开发闭环：`current_stage=completed`、`ci_status=passed|not_required`、`next_step=none`。它不自动合并 PR、不把 Jira 置为 Done、不发布、不打 Tag，也不取消项目另行要求的专业门禁。
 
 当前版本化 Failsafe Fixture 是脱敏合成样例，不冒充 AO-76 Jira 附件。附件正文受控读取能力补齐后，仍需增加真实格式一致性 E2E；在此之前不得声称 Jira 附件样例已完成验收。

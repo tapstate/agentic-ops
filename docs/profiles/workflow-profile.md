@@ -136,10 +136,10 @@ transitions:
 
 ## 5. 状态与 transition
 
-- `statuses` 把真实 Jira 状态名映射到 `waiting_takeover`、`implementation`、`completed` 等标准阶段。
-- `transitions` 是唯一的 Jira 流转配置点，结构为 `{name, id, from, to}`。
+- `status_ids` 把 Jira 稳定状态 ID 映射到 `waiting_takeover`、`implementation`、`completed` 等标准阶段；`statuses` 仅是显式声明的显示名兼容别名。Runtime 总是先匹配 ID，再匹配别名，绝不翻译、模糊或大小写猜测。
+- `transitions` 是唯一的 Jira 流转配置点，结构为 `{name, id, from, from_status_ids, to, to_status_id}`；`from_status_ids` / `to_status_id` 配置后优先于名称约束。
 - 配置 `id` 时优先按 ID 匹配，并严格校验起止状态；未配置时只允许唯一名称匹配。候选重复、当前不可用、目标不符或回读不一致都必须阻断。
-- 未配置的流程不得由 AIAgent 猜测；应先读取 Jira 可用 transitions，再通过版本化 Profile 增补。
+- 未配置的流程不得由 AIAgent 猜测；先使用 `ao-work jira workflow inspect --issue-key <KEY>` 读取无副作用的当前状态和可用 transitions，再通过版本化 Profile 增补。
 - AIAgent 默认无合入权，不能仅凭 `statuses` 配置把卡片推进完成态。
 
 ## 6. 不属于现役 Profile 的概念
