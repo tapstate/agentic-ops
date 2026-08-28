@@ -21,7 +21,7 @@ from ao_maint.jira.config import (
 )
 from ao_maint.jira.service import MaintainerJiraService, WritePlan
 from ao_maint.jira.scope import validate_issue_readback
-from ao_maint.output import EXIT_BLOCKED, RuntimeErrorResult
+from ao_maint.output import EXIT_BLOCKED, RuntimeErrorResult, manual_decision_step
 from ao_maint.takeover.state import (
     append_event,
     git_binding,
@@ -134,7 +134,7 @@ def _takeover(
                 mode="adopt",
                 takeover_status="waiting_confirmation",
                 human_notice="检测到待确认的存量任务接纳，尚未获得接纳确认。",
-                agentic_next_action=f"confirm_takeover:{state['design_digest']}",
+                next_action=f"confirm_takeover:{state['design_digest']}",
             )
         if pending_gate == "design_review" and state.get("design_digest"):
             return _result(
@@ -142,7 +142,7 @@ def _takeover(
                 mode="resume",
                 takeover_status="waiting_confirmation",
                 human_notice="已恢复任务，当前设计方案仍在等待审查确认。",
-                agentic_next_action=f"confirm_takeover:{state['design_digest']}",
+                next_action=f"confirm_takeover:{state['design_digest']}",
             )
         if (
             pending_gate == "precommit"
@@ -153,7 +153,7 @@ def _takeover(
                 mode="resume",
                 takeover_status="completed",
                 human_notice="检测到当前 maintainer 工作空间的已有运行，已恢复任务并留下审计记录。",
-                agentic_next_action="implement_until_precommit_gate",
+                next_action="implement_until_precommit_gate",
                 work_authorization=work_authorization_reference(state),
             )
         return _result(
@@ -161,7 +161,7 @@ def _takeover(
             mode="resume",
             takeover_status="completed",
             human_notice="检测到当前 maintainer 工作空间的已有运行，已恢复任务并留下审计记录。",
-            agentic_next_action="prepare_design_review",
+            next_action="prepare_design_review",
         )
     legacy_run = _legacy_run_id(source_root, issue_key)
     if stage == "implementation" and legacy_run:
@@ -188,7 +188,7 @@ def _takeover(
             mode="resume",
             takeover_status="completed",
             human_notice="检测到本工作空间此前已开始处理该任务，已恢复并补建本地接管状态。",
-            agentic_next_action="prepare_design_review",
+            next_action="prepare_design_review",
         )
     if stage == "implementation":
         run_id = _generate_run_id(issue_key)
@@ -214,7 +214,7 @@ def _takeover(
             mode="adopt",
             takeover_status="waiting_confirmation",
             human_notice="任务已在处理中但本工作空间没有可验证运行，需要确认接纳存量任务。",
-            agentic_next_action=f"confirm_takeover:{digest}",
+            next_action=f"confirm_takeover:{digest}",
         )
     state = _new_state(
         issue,
@@ -303,7 +303,7 @@ def _execute_new_takeover(
         mode="new",
         takeover_status="completed",
         human_notice="已完成新接管：开始评论、状态流转和写后回读均已验证。",
-        agentic_next_action="prepare_design_review",
+        next_action="prepare_design_review",
     )
 
 
@@ -336,7 +336,7 @@ def _record_design(
         mode=str(state["mode"]),
         takeover_status="waiting_confirmation",
         human_notice="设计方案已绑定当前任务运行，等待设计审查确认。",
-        agentic_next_action=f"confirm_takeover:{digest}",
+        next_action=f"confirm_takeover:{digest}",
     )
 
 
@@ -394,7 +394,7 @@ def _confirm_pending_gate(
             mode="adopt",
             takeover_status="completed",
             human_notice="已确认接纳存量任务并写入审计评论。",
-            agentic_next_action="prepare_design_review",
+            next_action="prepare_design_review",
         )
     if pending_gate != "design_review" or not state.get("design_digest"):
         raise _blocked(
@@ -451,7 +451,7 @@ def _confirm_pending_gate(
         mode=str(state["mode"]),
         takeover_status="completed",
         human_notice="设计审查已确认，工作项级连续执行授权已生效。",
-        agentic_next_action="implement_until_precommit_gate",
+        next_action="implement_until_precommit_gate",
         work_authorization=reference,
     )
 
@@ -699,7 +699,7 @@ def _result(
     mode: str,
     takeover_status: str,
     human_notice: str,
-    agentic_next_action: str,
+    next_action: str,
     work_authorization: str = "",
 ) -> dict[str, Any]:
     result = {
@@ -713,7 +713,7 @@ def _result(
         "authorization_status": state["authorization_status"],
         "pending_gate": state["pending_gate"],
         "design_digest": state["design_digest"],
-        "agentic_next_action": agentic_next_action,
+        "next_step": manual_decision_step(next_action),
     }
     if work_authorization:
         result["work_authorization"] = work_authorization

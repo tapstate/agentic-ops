@@ -4,8 +4,8 @@ workflow_fail() {
   workflow_code="$1"
   workflow_message="$2"
   workflow_action="$3"
-  printf '{"ok":false,"operation":"development_workflow","code":"%s","message":"%s","required_human_action":"%s"}\n' \
-    "$workflow_code" "$workflow_message" "$workflow_action" >&2
+  printf '{"schema_version":"step-result/v2","ok":false,"operation":"development_workflow","status":"blocked","retry_safe":false,"code":"%s","message":"%s","required_human_action":"%s","result":{"status":"blocked","summary":"%s","facts":{},"evidence":[],"effects":[],"remaining":[]},"next_step":{"kind":"decision","scope":"flow","mode":"manual","executor":"human","action":"resolve_development_workflow_blocker","question":"%s","choices":[{"id":"resolve","label":"处理阻断","recommended":true}],"submit":{"operation":"submit_decision","effect":"record_only"},"call":{"operation":"submit_decision","argv":[]}}}\n' \
+    "$workflow_code" "$workflow_message" "$workflow_action" "$workflow_message" "$workflow_action" >&2
   return 1
 }
 
@@ -298,7 +298,7 @@ workflow_check_soft_gate() {
   fi
 
   printf '警告：protection_mode=soft，GitHub Free 私有仓库无法从服务器端阻止 main 直接推送。\n' >&2
-  printf '{"ok":true,"operation":"development_workflow","repository":"%s","default_branch":"main","development_branch":"develop","protection_mode":"soft"}\n' \
+  printf '{"schema_version":"step-result/v2","ok":true,"operation":"development_workflow","status":"completed","retry_safe":true,"result":{"status":"succeeded","summary":"研发流程软门禁已验证","facts":{},"evidence":[],"effects":[],"remaining":[]},"next_step":{"kind":"none","scope":"flow","mode":"manual","executor":"stop","action":"development_workflow_verified","call":null},"repository":"%s","default_branch":"main","development_branch":"develop","protection_mode":"soft"}\n' \
     "$workflow_repository"
 }
 
@@ -366,6 +366,6 @@ workflow_check_or_configure() {
     return 1
   fi
 
-  printf '{"ok":true,"operation":"development_workflow","repository":"%s","default_branch":"main","development_branch":"develop"}\n' \
+  printf '{"schema_version":"step-result/v2","ok":true,"operation":"development_workflow","status":"completed","retry_safe":true,"result":{"status":"succeeded","summary":"研发流程已验证","facts":{},"evidence":[],"effects":[],"remaining":[]},"next_step":{"kind":"none","scope":"flow","mode":"manual","executor":"stop","action":"development_workflow_verified","call":null},"repository":"%s","default_branch":"main","development_branch":"develop"}\n' \
     "$workflow_repository"
 }

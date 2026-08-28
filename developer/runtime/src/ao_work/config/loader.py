@@ -645,9 +645,15 @@ def _parse_profile(payload: dict[str, Any], expected_id: str) -> ProjectProfile:
         task_query=str(jira.get("task_query", "")),
         issue_types=tuple(str(value) for value in jira.get("issue_types", [])),
         fields=parsed_fields,
+        status_id_mapping={
+            str(key).strip(): str(value).strip()
+            for key, value in require_mapping(payload.get("status_ids", {}), "status_ids").items()
+            if str(key).strip()
+        },
         status_mapping={
-            str(key): str(value)
+            str(key).strip(): str(value).strip()
             for key, value in require_mapping(payload.get("statuses", {}), "statuses").items()
+            if str(key).strip()
         },
         transition_mapping=transition_mapping,
         default_repository=default_repository,
@@ -806,12 +812,20 @@ def _parse_transition_mapping(value: Any) -> dict[str, dict[str, Any]]:
             isinstance(item, str) for item in from_states
         ):
             raise ValueError(f"transitions.{key}.from must be a string list")
+        from_status_ids = spec.get("from_status_ids", [])
+        if not isinstance(from_status_ids, list) or not all(
+            isinstance(item, str) and item.strip() for item in from_status_ids
+        ):
+            raise ValueError(f"transitions.{key}.from_status_ids must be a string list")
         to_status = _optional_text(spec.get("to"))
+        to_status_id = _optional_text(spec.get("to_status_id"))
         result[str(key)] = {
             "name": name,
             "id": transition_id or "",
             "from": [item.strip() for item in from_states if item.strip()],
+            "from_status_ids": [item.strip() for item in from_status_ids],
             "to": to_status or "",
+            "to_status_id": to_status_id or "",
         }
     return result
 

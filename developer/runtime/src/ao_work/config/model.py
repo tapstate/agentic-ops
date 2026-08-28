@@ -112,6 +112,8 @@ class ProjectProfile:
     task_query: str
     issue_types: tuple[str, ...] = ()
     fields: dict[str, FieldMapping] = field(default_factory=dict)
+    # Jira status ID -> AgenticOps 标准阶段。显示名映射仍保留为兼容别名。
+    status_id_mapping: dict[str, str] = field(default_factory=dict)
     status_mapping: dict[str, str] = field(default_factory=dict)
     transition_mapping: dict[str, dict[str, Any]] = field(default_factory=dict)
     default_repository: str | None = None

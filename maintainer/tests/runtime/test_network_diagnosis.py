@@ -30,7 +30,7 @@ class NetworkDiagnosisTest(unittest.TestCase):
 
         self.assertEqual("network_sandbox_loopback_blocked", result["diagnosis"]["code"])
         self.assertEqual("high", result["diagnosis"]["confidence"])
-        self.assertEqual("rerun_outside_sandbox", result["agentic_next_action"]["action"])
+        self.assertEqual("rerun_outside_sandbox", result["next_step"]["action"])
         self.assertNotIn("127.0.0.2", str(result))
         self.assertEqual(18443, result["checks"]["proxy"]["port"])
 

@@ -248,15 +248,7 @@ class CiRuntime:
                         "请进入风险决策并由研发工程师决定人工处理或拆分任务",
                     )
             self._write_observation(paths, state, attempt, now)
-            next_action = {
-                "waiting_to_start": "probe_ci",
-                "pending": "probe_ci",
-                "failed": "fetch_ci_artifact",
-                "start_timeout": "analyze_ci_timeout",
-                "completion_timeout": "analyze_ci_timeout",
-                "passed": "none",
-                "not_required": "none",
-            }[ci_status]
+            next_step = _ci_next_step(ci_status)
             return {
                 "current_stage": (
                     "completed"
@@ -285,7 +277,7 @@ class CiRuntime:
                 ),
                 "decision_required": ci_status
                 in {"start_timeout", "completion_timeout"},
-                "agentic_next_action": next_action,
+                "next_step": next_step,
             }
 
     def fetch_runner_log(self, manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -302,7 +294,7 @@ class CiRuntime:
                 return {
                     **existing,
                     "downloaded": False,
-                    "agentic_next_action": self._runner_log_next_action(attempt),
+                    "next_step": self._runner_log_next_action(attempt),
                 }
             if attempt["ci_status"] in {"start_timeout", "completion_timeout"}:
                 runner_log = {
@@ -369,7 +361,7 @@ class CiRuntime:
             return {
                 **runner_log,
                 "downloaded": True,
-                "agentic_next_action": self._runner_log_next_action(attempt),
+                "next_step": self._runner_log_next_action(attempt),
             }
 
     def fetch_artifact(self, manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -436,7 +428,7 @@ class CiRuntime:
                 return {
                     **existing,
                     "downloaded": False,
-                    "agentic_next_action": "fetch_ci_runner_log",
+                    "next_step": _ci_followup_step("fetch_ci_runner_log"),
                 }
             result = self.run_bytes(
                 ["gh", "api", f"repos/{repository['slug']}/actions/artifacts/{artifact_id}/zip"],
@@ -506,7 +498,7 @@ class CiRuntime:
             return {
                 **artifact,
                 "downloaded": True,
-                "agentic_next_action": "fetch_ci_runner_log",
+                "next_step": _ci_followup_step("fetch_ci_runner_log"),
             }
 
     def parse_report(self, manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -568,7 +560,7 @@ class CiRuntime:
                     **existing,
                     "runner_log": attempt["runner_log"],
                     "parsed": False,
-                    "agentic_next_action": "present_ci_failure_decision",
+                    "next_step": _ci_followup_step("present_ci_failure_decision"),
                 }
             attempt["failure_event_id"] = failure_event_id
             attempt["report"] = report
@@ -580,7 +572,7 @@ class CiRuntime:
                 **report,
                 "runner_log": attempt["runner_log"],
                 "parsed": True,
-                "agentic_next_action": "present_ci_failure_decision",
+                "next_step": _ci_followup_step("present_ci_failure_decision"),
             }
 
     def authorize_remediation(
@@ -642,10 +634,10 @@ class CiRuntime:
                         "同一 CI 失败已经绑定不同的用户修复决策",
                         "请保留现有决策；证据或范围变化时必须重新生成 CI Attempt",
                     )
-                return {**existing, "authorized": False, "agentic_next_action": "repair_ci_code"}
+                return {**existing, "authorized": False, "next_step": _ci_followup_step("repair_ci_code")}
             decisions[failure_event_id] = candidate
             atomic_write_json(paths["state"], state)
-            return {**candidate, "authorized": True, "agentic_next_action": "repair_ci_code"}
+            return {**candidate, "authorized": True, "next_step": _ci_followup_step("repair_ci_code")}
 
     def record_remediation(
         self,
@@ -949,8 +941,8 @@ class CiRuntime:
         )
 
     @staticmethod
-    def _runner_log_next_action(attempt: Mapping[str, Any]) -> str:
-        return (
+    def _runner_log_next_action(attempt: Mapping[str, Any]) -> dict[str, Any]:
+        return _ci_followup_step(
             "parse_ci_report"
             if attempt.get("ci_status") == "failed"
             else "analyze_ci_timeout"
@@ -1364,7 +1356,7 @@ class CiRuntime:
             "recorded": recorded,
             "remediation_attempts_used": used,
             "remediation_attempts_remaining": config["max_remediation_attempts"] - used,
-            "agentic_next_action": "probe_ci",
+            "next_step": _ci_followup_step("probe_ci"),
         }
 
 
@@ -1675,6 +1667,92 @@ def report_summary(report: Mapping[str, Any]) -> str:
             f"{item['exception']} — {item['message']}"
         )
     return "\n".join(lines)
+
+
+def _ci_next_step(ci_status: str) -> dict[str, Any]:
+    """CI 观测结果只返回当前唯一的结构化后继步骤。"""
+    common = {
+        "required_inputs": [],
+        "requires_authorization": False,
+        "stop_workflow": False,
+        "ownership_effect": "none",
+    }
+    if ci_status in {"passed", "not_required"}:
+        return {
+            **common,
+            "executor": "stop",
+            "action": "ci_completed",
+            "allowed_operations": [],
+            "kind": "none",
+        }
+    if ci_status in {"waiting_to_start", "pending"}:
+        return {
+            **common,
+            "executor": "ao_work",
+            "action": "probe_ci",
+            "allowed_operations": ["task-run_probe-ci"],
+            "kind": "action",
+            "mode": "auto",
+        }
+    if ci_status == "failed":
+        return {
+            **common,
+            "executor": "ao_work",
+            "action": "fetch_ci_artifact",
+            "allowed_operations": ["task-run_fetch-ci-artifact"],
+            "kind": "action",
+            "mode": "auto",
+        }
+    if ci_status in {"start_timeout", "completion_timeout"}:
+        return {
+            **common,
+            "executor": "human",
+            "action": "analyze_ci_timeout",
+            "allowed_operations": [],
+            "requires_authorization": True,
+            "stop_workflow": True,
+            "kind": "decision",
+            "mode": "manual",
+            "question": "CI 观察超时后是否继续等待或转人工处理？",
+            "choices": [
+                {
+                    "id": "manual_review",
+                    "label": "转人工处理",
+                    "description": "保留当前 CI 事实并由研发工程师决定后续处理。",
+                    "impact": "停止自动观察，避免在未知外部状态下循环。",
+                    "risk": "CI 仍可能在后台完成，需要人工再次读取事实。",
+                    "recommended": True,
+                }
+            ],
+        }
+    raise ValueError(f"unsupported ci status for next_step: {ci_status}")
+
+
+def _ci_followup_step(action: str) -> dict[str, Any]:
+    """CI 子操作的对外后继也必须是唯一结构化 Step。"""
+    automatic_operations = {
+        "fetch_ci_runner_log": "task-run_fetch-ci-runner-log",
+        "parse_ci_report": "task-run_parse-ci-report",
+        "probe_ci": "task-run_probe-ci",
+    }
+    operation = automatic_operations.get(action)
+    if operation is not None:
+        return {
+            "executor": "ao_work", "action": action, "required_inputs": [],
+            "allowed_operations": [operation], "requires_authorization": False,
+            "stop_workflow": False, "ownership_effect": "none",
+            "kind": "action", "mode": "auto",
+        }
+    if action in {"present_ci_failure_decision", "repair_ci_code", "analyze_ci_timeout"}:
+        return {
+            "executor": "human", "action": action, "required_inputs": [],
+            "allowed_operations": [], "requires_authorization": True,
+            "stop_workflow": False, "ownership_effect": "none",
+            "kind": "decision", "mode": "manual",
+            "question": "请基于当前 CI 证据确认后续处理方式",
+            "choices": [{"id": "continue", "label": "确认并继续", "description": action, "impact": "进入当前失败处理步骤", "risk": "需核对 CI 证据与已确认范围", "recommended": True}],
+        }
+    raise ValueError(f"unsupported CI follow-up action: {action}")
 
 
 def _safe_archive_path(name: str, max_depth: int) -> PurePosixPath:

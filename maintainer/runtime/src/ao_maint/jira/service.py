@@ -23,7 +23,7 @@ from ao_maint.jira.scope import (
     validate_maintainer_project_key,
     validate_write_plan_scope,
 )
-from ao_maint.output import EXIT_BLOCKED, RuntimeErrorResult
+from ao_maint.output import EXIT_BLOCKED, RuntimeErrorResult, manual_decision_step
 
 IDEMPOTENCY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -655,9 +655,9 @@ class MaintainerJiraService:
         return {
             "external_id": "description",
             "created": matched,
-            "agentic_next_action": "continue_from_verified_jira_description"
-            if matched
-            else "review_jira_description_readback",
+            "next_step": manual_decision_step(
+                "continue_from_verified_jira_description" if matched else "review_jira_description_readback"
+            ),
         }
 
     def plan_summary(
@@ -724,9 +724,9 @@ class MaintainerJiraService:
         return {
             "external_id": "summary",
             "created": matched,
-            "agentic_next_action": "continue_from_verified_jira_summary"
-            if matched
-            else "review_jira_summary_readback",
+            "next_step": manual_decision_step(
+                "continue_from_verified_jira_summary" if matched else "review_jira_summary_readback"
+            ),
         }
 
     def plan_comment(
@@ -1577,7 +1577,7 @@ def _create_readback(
         "created": created,
         "issue_key": issue_key,
         "plan_id": plan.plan_id,
-        "agentic_next_action": "continue_from_verified_jira_create",
+        "next_step": manual_decision_step("continue_from_verified_jira_create"),
     }
 
 
@@ -1667,7 +1667,7 @@ def _comment_readback(
         "created": created,
         "issue_key": plan.issue_key,
         "plan_id": plan.plan_id,
-        "agentic_next_action": "continue_from_verified_jira_comment",
+        "next_step": manual_decision_step("continue_from_verified_jira_comment"),
     }
 
 
@@ -1679,7 +1679,7 @@ def _worklog_readback(
         "created": created,
         "issue_key": plan.issue_key,
         "plan_id": plan.plan_id,
-        "agentic_next_action": "continue_from_verified_jira_worklog",
+        "next_step": manual_decision_step("continue_from_verified_jira_worklog"),
     }
 
 
@@ -2046,5 +2046,5 @@ def _transition_readback(
         "current_status": current_status,
         "target_status": str(plan.payload["target_status"]),
         "status_matched": current_status == str(plan.payload["target_status"]),
-        "agentic_next_action": "continue_from_verified_jira_transition",
+        "next_step": manual_decision_step("continue_from_verified_jira_transition"),
     }

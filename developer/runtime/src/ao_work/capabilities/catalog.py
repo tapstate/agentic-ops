@@ -4,7 +4,7 @@ import argparse
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import yaml
 
@@ -29,9 +29,10 @@ class Capability:
     commands: tuple[tuple[str, ...], ...]
     summary: str
     next_action: str
+    input_schema: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "id": self.capability_id,
             "source": self.source,
             "contract": self.contract,
@@ -42,6 +43,9 @@ class Capability:
             "summary": self.summary,
             "next_action": self.next_action,
         }
+        if self.input_schema is not None:
+            result["input_schema"] = self.input_schema
+        return result
 
 
 @dataclass(frozen=True)
@@ -158,6 +162,7 @@ def _parse_capability(payload: object) -> Capability:
         "commands",
         "summary",
         "next_action",
+        "input_schema",
     }
     unknown = sorted(set(payload) - allowed_keys)
     if unknown:
@@ -177,6 +182,9 @@ def _parse_capability(payload: object) -> Capability:
         raise _invalid_catalog(f"{capability_id} visibility 无效：{visibility}")
     summary = _required_text(payload, "summary")
     next_action = _required_text(payload, "next_action")
+    input_schema = payload.get("input_schema")
+    if input_schema is not None and not isinstance(input_schema, dict):
+        raise _invalid_catalog(f"{capability_id} input_schema 必须是对象")
 
     contract_value = payload.get("contract")
     contract = contract_value.strip() if isinstance(contract_value, str) else None
@@ -213,6 +221,7 @@ def _parse_capability(payload: object) -> Capability:
         commands=tuple(commands),
         summary=summary,
         next_action=next_action,
+        input_schema=input_schema,
     )
 
 

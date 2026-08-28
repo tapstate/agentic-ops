@@ -157,6 +157,7 @@ fields:
 
 statuses:
   打开: waiting_takeover
+  Open: waiting_takeover
   待办: waiting_takeover
   To Do: waiting_takeover
   On Hold: waiting_takeover
@@ -171,5 +172,5 @@ transitions:
   start_progress:
     name: Implementation started
     id: "91"
-    from: [打开]
+    from: [打开, Open]
     to: 正在进行

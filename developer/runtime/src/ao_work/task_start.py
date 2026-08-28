@@ -16,6 +16,7 @@ from ao_work.config import (
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.jira.model import plain_text
 from ao_work.jira.service import JiraService
+from ao_work.jira.status import resolve_issue_status
 from ao_work.jira.task_facts import description_sections_from_facts
 from ao_work.installation import load_install_identity
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
@@ -57,14 +58,14 @@ def execute_task_start(
             "当前业务工作空间 Jira 账户不是任务经办人",
             "请在 Jira 按项目流程调整经办人，或切换到正确研发员工作空间",
         )
-    mapped_status = context.profile.status_mapping.get(issue.status)
-    if not mapped_status:
+    status_resolution = resolve_issue_status(context.profile, issue)
+    if status_resolution is None:
         raise _blocked(
             "jira_status_mapping_missing",
             f"Project Profile 未映射 Jira 状态：{issue.status}",
             "请先在项目 Profile 中确认状态映射，不要让 AI 临场猜测",
         )
-    if mapped_status == "completed":
+    if status_resolution.stage == "completed":
         raise _blocked(
             "jira_task_already_completed",
             "Jira 任务已处于完成分类，不能启动新的研发运行",
@@ -98,7 +99,7 @@ def execute_task_start(
         account=account,
         issue=issue,
         agentic_run_id=agentic_run_id,
-        mapped_status=mapped_status,
+        mapped_status=status_resolution.stage,
         task_facts=task_facts,
     )
     issue_payload = source_context["issue"]
@@ -172,7 +173,7 @@ def execute_task_start(
             "transfer_capability": "capability_gap",
             "transfer_decision_authority": "human_only",
         },
-        "agentic_next_action": {
+        "next_step": {
             "executor": "ai",
             "action": "assess_task_intake",
             "required_inputs": [
@@ -229,6 +230,7 @@ def record_current_task_source_context(
                 "project_key": issue.project_key,
                 "summary": issue.summary,
                 "status": issue.status,
+                "status_id": issue.status_id,
                 "issue_type": issue.issue_type,
                 "assignee_account_id": issue.assignee,
                 "description": issue.description,
@@ -304,6 +306,7 @@ def record_current_task_source_context(
         "project_key": issue.project_key,
         "summary": issue.summary,
         "status": issue.status,
+        "status_id": issue.status_id,
         "mapped_status": mapped_status,
         "issue_type": issue.issue_type,
         "assignee_account_id": issue.assignee,

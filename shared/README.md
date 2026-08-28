@@ -13,3 +13,4 @@
 - `integration/task-to-pr-manifest.schema.json`：用户确认的任务到 PR 审查授权清单。
 - `integration/task-to-pr-event.schema.json`：逐步骤审计事件及外部回读事实。
 - `integration/task-to-pr-result.schema.json`：`ready_for_pr_review`、`blocked` 或 `failed` 的脱敏结果包。
+- `standards/step-result-v2.schema.json`：两个工作面公开 Runtime 输出的统一 `StepResult v2` 结构；只约束 JSON 形状，不授予任何动作能力。

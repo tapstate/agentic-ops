@@ -10,6 +10,7 @@ from ao_work.config import (
 )
 from ao_work.jira.client import JiraClient, UrllibJiraTransport
 from ao_work.jira.service import JiraService
+from ao_work.jira.status import resolve_issue_status
 from ao_work.output import EXIT_BLOCKED, RuntimeErrorResult
 from ao_work.task_state import TaskStore
 from ao_work.workspace import Workspace
@@ -78,13 +79,14 @@ def execute_task_resume(
 
     agent_id = str(task.get("agent_id") or "").strip()
 
-    mapped_status = context.profile.status_mapping.get(issue.status)
-    if not mapped_status:
+    status_resolution = resolve_issue_status(context.profile, issue)
+    if status_resolution is None:
         raise _blocked(
             "jira_status_mapping_missing",
             f"Project Profile 未映射 Jira 状态：{issue.status}",
             "请先在项目 Profile 中确认状态映射，不要让 AI 临场猜测",
         )
+    mapped_status = status_resolution.stage
 
     current_stage = str(progress.get("stage") or "").strip()
     recovery_operation = takeover_recovery.get("operation")
@@ -99,9 +101,9 @@ def execute_task_resume(
         )
 
     agentic_run_id = str(task["agentic_run_id"])
-    next_action: object = _legacy_resume_action(progress.get("agentic_next_action"))
+    next_action: object = _legacy_resume_action(progress.get("next_action"))
     if operation_resumable:
-        next_action = recovery_operation["agentic_next_action"]
+        next_action = recovery_operation["next_step"]
     repository_scope = local.get("repository_scope")
     if not operation_resumable:
         next_action = _repository_resume_action(repository_scope, next_action)
@@ -118,7 +120,7 @@ def execute_task_resume(
         "current_stage": current_stage,
         "takeover_recovery": takeover_recovery,
         "repository_scope": repository_scope,
-        "agentic_next_action": next_action,
+        "next_step": next_action,
         "credential_status": context.credential_status(),
     }
 
@@ -126,7 +128,7 @@ def execute_task_resume(
 def _legacy_resume_action(value: object) -> dict[str, object]:
     legacy_action = str(value or "未记录")
     return {
-        "executor": "ai",
+        "executor": "human",
         "action": "resume_task_from_recorded_state",
         "required_inputs": [],
         "allowed_operations": [],

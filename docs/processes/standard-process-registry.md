@@ -98,7 +98,7 @@ stages:
       - external_result_certainty
       - recovery_action
       - current_stage
-      - agentic_next_action
+      - next_step
     review_gate: null
   - id: task_intake
     responsible_role: ai_agent
@@ -177,7 +177,7 @@ stages:
 - `external_result_certainty`
 - `recovery_action`
 - `current_stage`
-- `agentic_next_action`
+- `next_step`
 
 接管后连续执行信息分析，补齐 `task_class`、`process_id`、目标仓库、分支和验证方式；这些事实缺失时阻止实现，不阻止建立接管轨迹。普通分析和方案分级不设置独立确认，正常进入设计审查；所有权或风险冲突进入风险决策。
 
@@ -249,7 +249,7 @@ stages:
 - `task_class`
 - `process_id`
 - `current_stage`
-- `agentic_next_action`
+- `next_step`
 - `status`
 - `code`
 - `message`

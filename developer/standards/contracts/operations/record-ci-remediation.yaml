@@ -15,7 +15,7 @@ output:
   recorded: {type: boolean}
   remediation_attempts_used: {type: integer}
   remediation_attempts_remaining: {type: integer}
-  agentic_next_action: {type: string}
+  next_step: {type: string}
 failure:
   codes: [ci_remediation_authorization_mismatch, ci_remediation_sha_invalid, ci_remediation_event_conflict, ci_failure_event_mismatch, ci_remediation_decision_missing, ci_failure_requires_human, ci_remediation_readback_missing, ci_remediation_readback_mismatch, ci_retry_exhausted]
 side_effects:

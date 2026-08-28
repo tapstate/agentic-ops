@@ -17,7 +17,7 @@ output:
   excerpt: {type: string}
   truncated: {type: boolean}
   downloaded: {type: boolean}
-  agentic_next_action: {type: string}
+  next_step: {type: string}
 failure:
   codes: [ci_runner_log_not_ready, command_output_too_large]
 side_effects:

@@ -17,6 +17,13 @@
 
 不得从其它工作空间、本机全局 `.env`、个人记忆或旧聊天中自动补齐凭证和项目事实。
 
+### 获取 Jira Cloud API token
+
+首次安装或轮换凭证前，由该研发员使用自己的 Atlassian 账户打开
+[API token 管理页](https://id.atlassian.com/manage-profile/security/api-tokens)，选择 **Create API token**，填写可识别用途的名称和有效期后创建并立即复制 token。当前 `ao-work` 使用 Jira Cloud 站点的 HTTP Basic 认证，因此应创建普通 API token，不能使用 **Create API token with scopes**；后者要求通过 `api.atlassian.com/ex/jira/<cloudId>` 调用。
+
+token 创建后只显示一次，应保存到密码管理器或当前终端的安全变量（例如 `JIRA_API_TOKEN`），随后按本文的安装或 `ao-work auth` 命令通过标准输入配置。不要把 token 写入业务工作空间、本机全局 `.env`、命令行参数、聊天记录或 Git；遗失或疑似泄漏时，先在同一页面撤销该 token，再重新创建并轮换。
+
 ## 2. 安装 developer 工作面
 
 提供两种安装方式；默认把稳定 `main` 的 developer-only managed clone 安装到 `~/.agentic-ops`，

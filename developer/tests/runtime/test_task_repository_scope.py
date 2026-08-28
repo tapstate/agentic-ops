@@ -86,7 +86,7 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
         error = captured.exception
         self.assertEqual("assistant", error.details["task_domain"])
         self.assertFalse(error.retry_safe)
-        next_action = error.agentic_next_action
+        next_action = error.next_step
         self.assertEqual("human", next_action["executor"])
         self.assertEqual("confirm_repository_branch_override", next_action["action"])
         self.assertEqual(["jira_description_plan"], next_action["allowed_operations"])
@@ -217,7 +217,7 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
 
         rendered = success("task_repositories_assess", **result)
         self.assertEqual({}, plan_task_worktrees.call_args.kwargs["branch_overrides"])
-        next_action = rendered["agentic_next_action"]
+        next_action = rendered["next_step"]
         self.assertEqual("human", next_action["executor"])
         self.assertEqual(
             "review_and_confirm_task_domain", next_action["action"]
@@ -274,9 +274,9 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
         for next_action in cases:
             with self.subTest(action=next_action["action"]):
                 result = success(
-                    "task_repositories_assess", agentic_next_action=next_action
+                    "task_repositories_assess", next_step=next_action
                 )
-                normalized = result["agentic_next_action"]
+                normalized = result["next_step"]
                 for field, value in next_action.items():
                     self.assertEqual(value, normalized[field])
                 for field in (
@@ -376,7 +376,7 @@ class RepositoryScopeNextActionTest(unittest.TestCase):
         self.assertEqual("develop", confirmed[0]["from_branch"])
         self.assertEqual(
             "prepare_confirmed_domain_worktrees",
-            result["agentic_next_action"]["action"],
+            result["next_step"]["action"],
         )
 
     def test_prepare_without_repository_creates_entire_confirmed_domain(self) -> None:
@@ -578,7 +578,7 @@ class StaleWorktreeRecoveryTest(unittest.TestCase):
                 mock.patch.object(
                     task_repository_scope,
                     "execute_worktree_prepare",
-                    return_value={"agentic_next_action": {"action": "assess_task_intake"}},
+                    return_value={"next_step": {"action": "assess_task_intake"}},
                 ) as prepare,
             ):
                 preview = task_repository_scope.execute_worktree_recover(
@@ -603,6 +603,7 @@ class StaleWorktreeRecoveryTest(unittest.TestCase):
             )
             store.append_decision.assert_called_once()
             prepare.assert_called_once()
+            self.assertEqual("assess_task_intake", result["next_step"]["action"])
 
     @staticmethod
     def _git(root: Path, *arguments: str) -> str:

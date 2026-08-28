@@ -218,7 +218,7 @@ class MaintainerTakeoverTest(unittest.TestCase):
                 result = _takeover(root, jira, "AO-45", IDENTITY, "test")
             self.assertEqual("resume", result["mode"])
             self.assertIn("恢复", result["human_notice"])
-            self.assertEqual("prepare_design_review", result["agentic_next_action"])
+            self.assertEqual("prepare_design_review", result["next_step"]["action"])
             self.assertEqual([], jira.actions)
 
     def test_resume_preserves_pending_adopt_confirmation(self) -> None:
@@ -240,7 +240,7 @@ class MaintainerTakeoverTest(unittest.TestCase):
             self.assertEqual("waiting_confirmation", result["takeover_status"])
             self.assertEqual(
                 "confirm_takeover:" + "c" * 64,
-                result["agentic_next_action"],
+                result["next_step"]["action"],
             )
             self.assertEqual([], jira.actions)
 
@@ -261,7 +261,7 @@ class MaintainerTakeoverTest(unittest.TestCase):
             ):
                 result = _takeover(root, jira, "AO-45", IDENTITY, "test")
             self.assertEqual(
-                "implement_until_precommit_gate", result["agentic_next_action"]
+                "implement_until_precommit_gate", result["next_step"]["action"]
             )
             self.assertEqual(
                 "work-authorization:AO-45:maint-AO-45-test:" + "b" * 64,
@@ -310,7 +310,7 @@ class MaintainerTakeoverTest(unittest.TestCase):
             self.assertEqual("waiting_confirmation", waiting["takeover_status"])
             self.assertEqual(
                 f"confirm_takeover:{planned['design_digest']}",
-                waiting["agentic_next_action"],
+                waiting["next_step"]["action"],
             )
             self.assertEqual("active", confirmed["authorization_status"])
             self.assertTrue(

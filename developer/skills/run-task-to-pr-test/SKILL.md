@@ -63,7 +63,7 @@ ao-work task intake assess --issue-key <KEY> --agentic-run-id <RUN> --input-file
 
 `auto_filled_values` 的 Jira、Profile 或 Runtime 事实使用 `{"field":"...","evidence_id":"<trusted_reference_catalog 中的 ID>","rationale":"中文理由"}`；Runtime 自动填入精确 `source`、`reference`、`value` 和摘要。业务源码证据仍必须包含 `field`、`value`、`source=business_source_code`、`reference`、`evidence_sha256` 与中文 `rationale`；单仓来源使用仓库内相对路径，多仓领域来源必须使用 `owner/repository::relative/path`，由 Runtime 绑定到对应已确认工作树。Profile 已解析的必填字段由 Runtime 自动补齐，不要伪造。完整异常堆栈、MySQL 版本、权限和 binlog 配置尚未取得时，写入 `unresolved_information` 并标记 `required=false`，不得因此否定已有源码证据的初步分析。
 
-若 Runtime 返回 `retry_safe=true` 的输入合同错误，AI 必须遵循 `agentic_next_action` 回读状态、重建上述 JSON 并只重试一次；这不是用户门禁，不得要求用户填写 JSON、内部摘要或尚非必填的诊断信息。只有事实冲突、Profile 必填字段缺失、来源/源码变化，或 Runtime 明确给出不可重试/重试耗尽时，才请求人工处理。
+若 Runtime 返回 `retry_safe=true` 的输入合同错误，AI 必须遵循 `next_step` 回读状态、重建上述 JSON 并只重试一次；这不是用户门禁，不得要求用户填写 JSON、内部摘要或尚非必填的诊断信息。只有事实冲突、Profile 必填字段缺失、来源/源码变化，或 Runtime 明确给出不可重试/重试耗尽时，才请求人工处理。
 
 Runtime 自动合并接管后保存的 Jira、Project Profile、工作空间与运行快照，校验 Profile 必填字段、源码证据摘要、干净 HEAD、缺项、假设和影响，输出完整准入事实及 `intake_digest`。Jira/Profile/Runtime 来源必须与快照值精确匹配；源码推断必须引用工作空间绑定源码中的普通文件及其 SHA-256，并明确仍需人工判断语义。必要信息仍缺失时，只能按同一 `retry_key` 用改变后的证据重试一次；耗尽后停止。事实完整时不设置准入确认门禁，AI 直接形成方案 JSON，并调用：
 
@@ -73,7 +73,7 @@ ao-work task solution classify --issue-key <KEY> --agentic-run-id <RUN> --input-
 
 方案 JSON 必须包含 `execution_plan`：单仓使用 `change_repository`；多仓使用 `change_repositories`，并把 scope 写成 `owner/repository::relative/path`、为每项验证声明 `repository`。每个变更仓库都必须有包含范围和至少一项验证。两种合同都包含验证 argv/工作目录/超时和中文 `review_summary`。Runtime 对 Maven argv 确定性补齐 batch/offline 后再使用 task-run 同一白名单校验，并保存规范化差异。Runtime 按固定风险标志和证据确定级别，优先级为 L4、L3、L2、L1：带完整执行计划的 L1 由 AI 直接执行 `task-run prepare`，只在完整设计与连续授权包生成后进入一次人工审查；L2 展示完整方案和逐项风险并进入风险决策；L3 由 AI 先修改设计再重新分析；L4 中业务事实、权限或高风险冲突继续停止处理；仅由 AgenticOps 自身缺陷或能力缺口造成时，按 `agenticops_continuity_decision` 展示有限继续方案并由人工决定，不得静默绕过或伪造成功。不得增加准入摘要确认、通用方案摘要确认或内部 digest 确认。Jira/Profile 快照、任一仓库 HEAD、源码证据、范围、风险或方案变化后，旧分析和设计审查失效。
 
-之后每个 `ao-work` 环节只执行当次 JSON 中结构化 `agentic_next_action` 指定的动作。`executor` 只是当前步骤执行者，不是任务转派；`task_ownership.task_owner` 从接管到 PR 审查保持同一研发员，所有现役下一动作的 `ownership_effect` 必须为 `none`。未知 executor/action、required inputs 不齐、下一操作不在 `allowed_operations` 或 `stop_workflow=true` 时停止。只在 `retry_gate.allowed=true` 时允许同一 `retry_key` 再试一次；重试前必须回读状态、改变输入并记录 retry 事件，耗尽后转人工。如需转派，只能停止并由人决定；当前 `task_transfer` 为 `capability_gap`，AI、Runtime、reviewer 和项目工具都不得改变负责人。
+之后每个 `ao-work` 环节只执行当次 JSON 中结构化 `next_step` 指定的动作。`executor` 只是当前步骤执行者，不是任务转派；`task_ownership.task_owner` 从接管到 PR 审查保持同一研发员，所有现役下一动作的 `ownership_effect` 必须为 `none`。未知 executor/action、required inputs 不齐、下一操作不在 `allowed_operations` 或 `stop_workflow=true` 时停止。只在 `retry_gate.allowed=true` 时允许同一 `retry_key` 再试一次；重试前必须回读状态、改变输入并记录 retry 事件，耗尽后转人工。如需转派，只能停止并由人决定；当前 `task_transfer` 为 `capability_gap`，AI、Runtime、reviewer 和项目工具都不得改变负责人。
 
 ## 生成与确认执行包
 
@@ -85,7 +85,7 @@ ao-work task solution classify --issue-key <KEY> --agentic-run-id <RUN> --input-
 
 ## 推进到 PR 审查
 
-1. `record` 只导入 Skill、AI、人工或项目工具产生的非关键过程事件，并设置 `evidence_origin=imported`；不得设置 `actor=runtime`，不得导入 readback、verification 或 prohibition_check。
+1. `record` 只导入 Skill、AI、人工或项目工具产生的非关键过程事件，并设置 `evidence_origin=imported`；不得设置 `actor=runtime`，不得导入 readback、verification 或 prohibition_check。普通步骤闭环直接使用 `--event '{"event_type":"<step_id>_started|completed|blocked","actor":"ai","evidence_origin":"imported","summary":"<中文摘要>"}'`，Runtime 从 manifest 补齐运行编号、授权引用和 canonical 字段；复杂过程事件才使用 AI 或项目工具生成的工作空间相对完整事件文件，不要求用户手写协议文件。
 2. 在任何 Jira/Git/GitHub 写入、提交或推送前，先切到 manifest 任务分支并确保工作树与索引干净，再执行 `ao-work task-run probe-prohibition-baseline --manifest <...>`。Runtime 使用 manifest 明确允许的三类只读权限，记录 Jira 非 Done 状态、完整远端 tag refs、GitHub release 记录、各保护分支 HEAD、本地 HEAD、可空远端任务分支 SHA和可空既有 open PR；若远端任务分支已存在，本地 HEAD 必须与其一致；若不存在，本地 HEAD 必须与远端目标分支一致。这样写前预置 commit 不能被后续微小提交伪装为本运行产出；基线失败或补录过晚必须停止并使用新的运行。
 3. 执行 `ao-work task-run probe-jira --manifest <...>`，由 Runtime 使用当前 developer 安装凭证实时 GET `myself`、issue 和评论，核对安装身份引用、站点、Project、Issue ID、经办人、Profile 状态映射、非 Done 状态及当前 `agentic_run_id` 的受管接管评论。评论缺失时记录自动化缺口和 `formal_takeover_verified=false`，不虚构正式接管。
 4. 使用 manifest 中既有 `agentic_run_id`，记录分析、计划、风险、验证和明确非范围。只有与 manifest 绑定且事件中引用相同授权的外部动作才执行写入。
@@ -101,7 +101,7 @@ ao-work task solution classify --issue-key <KEY> --agentic-run-id <RUN> --input-
     - `failed` 时先执行 `fetch-ci-artifact` 和 `fetch-ci-runner-log`。Runtime 只接受当前 Head 唯一失败 Workflow Run 和唯一匹配的未过期 Artifact，并在版本化大小、数量、深度及路径安全上限内落盘；Runner 日志只保留受限、脱敏的失败片段或真实不可用原因。随后执行 `parse-ci-report`，只能消费结构化脱敏报告与 Runner 日志事实，不能读取或执行原始报告脚本。
     - 解析后必须先向用户给出决策包：PR/Head 与失败 Workflow 绑定、Artifact 统计及失败指纹、Runner 日志证据或不可用原因、与本次范围的相关性、确定与不确定的归因、建议选项和各自影响。不能直接修复。只有用户明确决定修复当前失败，且 Runtime 记录 `authorize-ci-remediation --confirm` 后，才可将唯一失败事件记为 `failure`，固定使用 `code=ci_code_defect`、`retry_safe=true`。修复还必须位于已确认 `scope.included`、不命中 `scope.excluded`、不改变测试预期/Workflow/规则且无需多方取舍。修复后重新执行全部本地验证，使用受控 commit/push，执行 `probe-git` 回读新 Head，再以 `record-ci-remediation` 把失败事件、用户修复决策、修复提交、新 Head 和原授权绑定；之后观察新 Head 并再次推进到 PR 审查。
     - 依赖、环境、Runner、Workflow、配置、报告不可信或未知原因一律记录真实的非代码失败与人工介入并停止自动修复；不得调用 `record-ci-remediation`，也不消耗修复预算。初始代码缺陷失败后最多三次修复。Artifact 缺失/歧义/不安全、范围扩大、Head 外部变化、超时或预算耗尽时同样由人工介入，不能盲目 rerun、空提交或重置本地状态。
-    - `passed` 或 GitHub 证据明确为 `not_required` 时 Runtime 返回 `current_stage=completed`、`agentic_next_action=none`；生成完整完成证据并关闭本地 AIAgent run，但不得据此合并 PR、将 Jira 置为 Done、发布或修改保护分支。
+    - `passed` 或 GitHub 证据明确为 `not_required` 时 Runtime 返回 `current_stage=completed`、`next_step=none`；生成完整完成证据并关闭本地 AIAgent run，但不得据此合并 PR、将 Jira 置为 Done、发布或修改保护分支。
 11. 在 v1 PR 审查节点或 v2 CI 终态节点执行 `ao-work task-run probe-prohibitions --manifest <...>`。Runtime 将 tag/release/保护分支完整快照与写前基线比较，并核对保护分支是否包含任务 HEAD；不得 merge、将 Jira 置为 Done、release、创建 tag、直推保护分支或清理尚需审查的业务事实。
 
 外部写入使用 `plan -> apply -> readback` 或项目认可的等价门禁。结果不明确时只回读，不能盲目重试。
