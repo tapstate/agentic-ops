@@ -16,6 +16,15 @@ cd agentic-ops
 示例显式以 `develop` 作为维护基线；`setup` 会仅 fast-forward 同步该分支、安装本仓库维护
 依赖并接入受信 Git Hook。工作区有修改时会停止，不会覆盖修改。
 
+`setup` 用于首次初始化维护工作面。之后在 `develop` 更新当前源码目录：
+
+```sh
+./agenticops update
+```
+
+`update` 只执行 fast-forward，不自动切换分支、处理分叉、覆盖修改或推送本地提交。
+本地领先远端时会继续同步维护依赖和 Hook，并明确报告领先提交数。
+
 ## 2. 初始化项目工作空间
 
 维护源码目录与项目工作空间必须分开。以下示例在当前 `develop` 源码目录为 TapData 初始化
@@ -41,11 +50,16 @@ workspace="$HOME/agenticops-tapdata"
 ./agenticops repair --workspace <项目工作空间>
 ```
 
+已启动的 Agent 可能仍持有启动时加载的指引，源码更新后应重启 Agent。通过
+`agenticops start` 启动时会自动刷新接线。更新、回退和首次初始化由
+`.local/lifecycle.lock/` 串行执行；发布、Hotfix 或固定验收运行期间不要更新源码。
+
 源码目录产生的所有非 Git 状态统一进入：
 
 ```text
 .local/
-├── product.json              # source、仓库、develop 和当前提交
+├── product.json              # source、仓库、develop 和最近生命周期同步提交
+├── lifecycle.lock/           # 生命周期操作期间的临时互斥锁
 ├── venv/internal/            # 本仓库维护依赖
 ├── cache/                    # 缓存
 ├── story-gate/               # 故事审批、证据和运行记录

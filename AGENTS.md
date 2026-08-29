@@ -24,7 +24,7 @@ Policy 配置决策，少量 Workflow 工具只保存确定性状态，项目差
 - `internal/`：仅供本仓库使用的故事门禁和发布工具，不进入研发安装目录，也不是
   第二套产品 Runtime。
 - `docs/`：当前有效的人读目标、架构、安全、测试和故事合同。
-- 根 `agenticops`：中央 Product Root 薄入口，只负责安装生命周期、工作目录接线、
+- 根 `agenticops`：中央产品根目录薄入口，只负责安装生命周期、工作目录接线、
   诊断、修复和启动 Agent，不承载 Gate、Policy、Project 或 Workflow 逻辑。
 
 旧版 AgenticOps 只通过 `v0.7` 和 Git 历史查阅。不得恢复 `maintainer/`、
@@ -46,8 +46,8 @@ Policy 配置决策，少量 Workflow 工具只保存确定性状态，项目差
 - 当前仓库规则只约束 AgenticOps 本身，不得把 TapData、TapState 等业务仓库的
   分支、测试和目录约定反向写入本仓库规则。
 - AgenticOps 源码仓库、`~/.agentic-ops` 安装目录和各业务项目工作空间必须分开。
-- 源码仓库和安装目录使用相同 Product Root 结构和入口；各自的非 Git 本地状态统一
-  放入本 Product Root 的 `.local/`。项目工作空间配置与运行数据统一放入
+- 源码仓库和安装目录使用相同产品根目录结构和入口；各自的非 Git 本地状态统一
+  放入本产品根目录的 `.local/`。项目工作空间配置与运行数据统一放入
   `.agenticops/`，可再生平台接线由初始化清单管理，不得复制中央 Policy、Project
   Skill 或 Runtime。
 

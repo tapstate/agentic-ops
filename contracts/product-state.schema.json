@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agenticops.tapdata.net/contracts/product-state-v1.schema.json",
-  "title": "AgenticOps Product Root Local State v1",
+  "title": "AgenticOps 产品根目录本地状态 v1",
   "type": "object",
   "additionalProperties": false,
   "required": [

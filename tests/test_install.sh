@@ -56,6 +56,8 @@ printf '%s\n' \
   > "$setup_bin/uv"
 chmod +x "$setup_bin/uv"
 PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" setup >/dev/null
+"$maintainer_root/agenticops" --help | grep -F '维护：源码产品根目录' >/dev/null
+"$maintainer_root/agenticops" --help | grep -F '使用：安装产品根目录' >/dev/null
 test "$(git -C "$maintainer_root" branch --show-current)" = develop
 test -d "$maintainer_root/.local/venv/internal"
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field mode)" = source
@@ -73,6 +75,66 @@ if "$maintainer_root/agenticops" doctor --workspace "$source_workspace" >/dev/nu
 fi
 "$maintainer_root/agenticops" repair --workspace "$source_workspace" >/dev/null
 grep -F '"changed"' "$source_workspace/.test-agent/settings.json" >/dev/null
+git -C "$maintainer_root" checkout -q -- adapters/agents/test-agent/templates/settings.json
+
+git -C "$source_repo" switch -q develop
+printf 'source update\n' > "$source_repo/SOURCE-NEXT"
+git -C "$source_repo" add SOURCE-NEXT
+git -C "$source_repo" commit -qm "source next"
+source_update_output="$test_root/source-update-output"
+PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output"
+test -f "$maintainer_root/SOURCE-NEXT"
+grep -F '工作面=维护' "$source_update_output" >/dev/null
+test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field current_ref)" = \
+  "$(git -C "$maintainer_root" rev-parse HEAD)"
+
+git -C "$maintainer_root" config user.email agentic-ops-test@example.test
+git -C "$maintainer_root" config user.name "AgenticOps Test"
+printf 'local ahead\n' > "$maintainer_root/LOCAL-AHEAD"
+git -C "$maintainer_root" add LOCAL-AHEAD
+local_parent="$(git -C "$maintainer_root" rev-parse HEAD)"
+local_tree="$(git -C "$maintainer_root" write-tree)"
+local_commit="$(printf 'local ahead\n' | git -C "$maintainer_root" commit-tree "$local_tree" -p "$local_parent")"
+git -C "$maintainer_root" update-ref refs/heads/develop "$local_commit" "$local_parent"
+PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output"
+grep -F '维护分支本地领先 1 个提交；update 不会自动推送' "$source_update_output" >/dev/null
+mkdir "$maintainer_root/.local/lifecycle.lock"
+printf '%s\n' "$$" > "$maintainer_root/.local/lifecycle.lock/owner"
+printf 'test\n' > "$maintainer_root/.local/lifecycle.lock/operation"
+if PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update >/dev/null 2>&1; then
+  printf '维护工作面并发生命周期更新未被拒绝\n' >&2
+  exit 1
+fi
+rm -f "$maintainer_root/.local/lifecycle.lock/owner" \
+  "$maintainer_root/.local/lifecycle.lock/operation"
+rmdir "$maintainer_root/.local/lifecycle.lock"
+"$maintainer_root/agenticops" repair --workspace "$source_workspace" >/dev/null
+python3 - "$source_workspace/.agenticops/init.json" "$maintainer_root" <<'PY'
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+document = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+head = subprocess.check_output(
+    ["git", "-C", sys.argv[2], "rev-parse", "HEAD"], text=True
+).strip()
+assert document["product_ref"] == head
+PY
+
+git -C "$maintainer_root" switch -qc feature/update-boundary
+if PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update >/dev/null 2>&1; then
+  printf '维护工作面在非跟踪分支执行了 update\n' >&2
+  exit 1
+fi
+git -C "$maintainer_root" switch -q develop
+printf '\n# dirty\n' >> "$maintainer_root/agenticops"
+if PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update >/dev/null 2>&1; then
+  printf '维护工作面有未提交修改时执行了 update\n' >&2
+  exit 1
+fi
+git -C "$maintainer_root" checkout -q -- agenticops
+git -C "$source_repo" switch -q main
 
 bash "$repo_root/bootstrap/install.sh" \
   --install-home "$install_root" --repository "$source_repo" --branch main
@@ -84,11 +146,11 @@ test ! -e "$install_root/internal"
 test -f "$install_root/.local/product.json"
 test "$(python3 "$install_root/bootstrap/product_state.py" --product-root "$install_root" read --field tracking_branch)" = main
 if PATH="$setup_bin:$PATH" "$install_root/agenticops" setup >/dev/null 2>&1; then
-  printf '安装 Product Root 被错误切换为源码维护模式\n' >&2
+  printf '安装产品根目录被错误切换为源码维护模式\n' >&2
   exit 1
 fi
 if "$install_root/agenticops" init --workspace "$install_root" >/dev/null 2>&1; then
-  printf 'Product Root 被错误初始化为项目工作空间\n' >&2
+  printf '产品根目录被错误初始化为项目工作空间\n' >&2
   exit 1
 fi
 
@@ -187,8 +249,10 @@ python3 "$install_root/workflow/task.py" list --dir "$workspace" | grep -F 'TAP-
 printf 'next\n' > "$source_repo/NEXT"
 git -C "$source_repo" add NEXT
 git -C "$source_repo" commit -qm "next"
-AGENTIC_OPS_HOME="$install_root" bash "$install_root/bootstrap/update.sh" >/dev/null
+installed_update_output="$test_root/installed-update-output"
+"$install_root/agenticops" update > "$installed_update_output"
 test -f "$install_root/NEXT"
+grep -F '工作面=使用' "$installed_update_output" >/dev/null
 if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
   printf '产品更新后旧工作目录绑定未被识别为待刷新\n' >&2
   exit 1
@@ -197,7 +261,7 @@ fi
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
 test -f "$workspace/.agenticops/tasks/TAP-123/state.json"
 test -f "$workspace/.agenticops/tasks/TAP-999/state.json"
-AGENTIC_OPS_HOME="$install_root" bash "$install_root/bootstrap/rollback.sh" >/dev/null
+"$install_root/agenticops" rollback >/dev/null
 test ! -f "$install_root/NEXT"
 "$install_root/agenticops" repair --workspace "$workspace" >/dev/null
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null

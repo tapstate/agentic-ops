@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""为项目工作空间生成中央 Product Root 的薄接线。"""
+"""为项目工作空间生成中央产品根目录的薄接线。"""
 from __future__ import annotations
 
 import argparse
@@ -71,9 +71,10 @@ def product_ref(install_root):
     local_state = install_root / ".local" / "product.json"
     if local_state.is_file():
         document = load_product_state(install_root)
-        current_ref = document.get("current_ref")
-        if isinstance(current_ref, str) and current_ref:
-            return current_ref
+        if document.get("mode") == "installed":
+            current_ref = document.get("current_ref")
+            if isinstance(current_ref, str) and current_ref:
+                return current_ref
     try:
         result = subprocess.run(
             ["git", "-C", str(install_root), "rev-parse", "HEAD"],
@@ -231,7 +232,7 @@ def validate_workspace_document(install_root, document):
     if not isinstance(project, str) or not project:
         raise ValueError("工作空间配置缺少 project")
     if document.get("product_root") != str(install_root.resolve()):
-        raise ValueError("工作空间 Product Root 不一致，请执行 agenticops repair")
+        raise ValueError("工作空间产品根目录不一致，请执行 agenticops repair")
     if not isinstance(agents, list) or not agents:
         raise ValueError("工作空间配置 agents 无效")
     selected, manifests = select(install_root, agents)
@@ -244,7 +245,7 @@ def check_workspace(install_root, workspace, config, init):
     project, agents, manifests = validate_workspace_document(install_root, config)
     artifacts, _ = expected_artifacts(install_root, project, agents, manifests)
     if init.get("product_ref") != product_ref(install_root):
-        raise ValueError("Product Root 版本已变化，请执行 agenticops repair")
+        raise ValueError("产品根目录版本已变化，请执行 agenticops repair")
     recorded = owned_artifacts(init, None)
     expected_hashes = {path: content_hash(content) for path, content in artifacts.items()}
     if recorded != expected_hashes:

@@ -44,7 +44,7 @@ install_root="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys
 workspace="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$workspace")"
 case "$workspace" in
   "$install_root"|"$install_root"/*)
-    printf 'AgenticOps：项目工作空间不能是 Product Root 或其子目录：%s\n' "$workspace" >&2
+    printf 'AgenticOps：项目工作空间不能是产品根目录或其子目录：%s\n' "$workspace" >&2
     exit 2
     ;;
 esac

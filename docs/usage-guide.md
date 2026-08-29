@@ -84,7 +84,9 @@ gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --scopes r
 ```
 
 `doctor` 只读检查；`repair` 安全重建接线并迁移旧工作空间状态，不改任务语义。
-`update` 只 fast-forward 到已记录分支；`rollback` 回到最近一次更新前的提交。
+以上命令运行在安装产品根目录，即使用工作面。`update` 只 fast-forward 到安装时
+记录的分支；`rollback` 回到最近一次更新前的提交。使用工作面有本地修改、HEAD
+偏离安装记录或远端历史异常时会停止，不会覆盖现场。
 
 ## 5. 启动 Agent、查看并接管任务
 

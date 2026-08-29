@@ -9,7 +9,7 @@
 6. 验证 merge、release、Tag、强推和保护分支写入不会被任务授权覆盖。
 7. 完成各仓 PR/CI 记录，生成任务级证据并人工确认后回写 Jira。
 
-自动化基线（在产品根目录或源码目录执行）：
+自动化基线（在源码产品根目录或安装产品根目录执行）：
 
 ```sh
 bash internal/tests/test_runtime.sh

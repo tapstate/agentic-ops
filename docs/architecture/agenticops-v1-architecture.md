@@ -46,17 +46,26 @@ Agent Adapter → Tool Adapter → Standard Request
 依赖 Policy/Project/Workflow 或定义新操作语义。`tests/test_adapter_boundary.py` 对每个
 Agent 约束文件数、代码量、依赖和状态写入。
 
-## 4. 产品根目录（Product Root）与源码目录
+## 4. 产品根目录（Product Root）的两个工作面
 
-源码目录和稳定安装目录使用同一个 `agenticops` 入口；稳定安装目录是产品根目录：
+源码产品根目录和稳定安装产品根目录使用同一个 `agenticops` 入口，但生命周期操作必须区分工作面：
 
-- 源码目录由 `agenticops setup` 跟踪 `develop`；
-- 安装产品根目录在安装时记录目标分支，`update` 只跟随该分支；
+- 源码目录是维护工作面，首次由 `agenticops setup` 跟踪 `develop`，后续由 `update`
+  原地 fast-forward 并同步维护依赖和受信 Hook；
+- 安装产品根目录是使用工作面，`update` 只跟随安装时记录的分支；
+- 维护工作面允许本地领先并明确提示，但不自动推送；分支不符、工作区有修改或 Git
+  历史分叉时停止；使用工作面还要求 HEAD 与本地安装记录严格一致；
 - 两者所有非 Git 本地状态都进入 `.local/`；
-- `.local/product.json` 记录 `mode`、仓库、跟踪分支、当前和前一提交；
+- `.local/product.json` 记录 `mode`、仓库、跟踪分支及生命周期同步提交；维护工作面的
+  实际运行版本始终以 Git HEAD 为准；
 - 安装产品根目录不包含 `internal/`。
 
 `.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。
+生命周期操作使用 `.local/lifecycle.lock/` 防止同一产品根目录并发更新或回退。
+更新源码后，当前源码内核立即生效；已启动 Agent 需要重启，生成接线由下一次 `start`
+自动刷新，也可通过 `doctor` 和 `repair` 显式检查、修复。
+`rollback` 只属于使用工作面；维护工作面保留正常 Git 历史和发布治理，不由产品入口
+自动移动源码分支。
 
 ## 5. 薄项目工作空间
 

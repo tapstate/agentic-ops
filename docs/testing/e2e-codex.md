@@ -12,7 +12,7 @@
 Codex 适配层不得复制 `policies/operations.json` 或 TapData 规则；平台协议变化只修改
 `adapters/agents/codex/`。
 
-自动化基线（在产品根目录或源码目录执行）：
+自动化基线（在源码产品根目录或安装产品根目录执行）：
 
 ```sh
 bash internal/tests/test_runtime.sh

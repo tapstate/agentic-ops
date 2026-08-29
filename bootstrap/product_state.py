@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Product Root 的统一本地生命周期配置。"""
+"""产品根目录的统一本地生命周期配置。"""
 from __future__ import annotations
 
 import argparse
@@ -21,26 +21,26 @@ def validate(document):
         "current_ref", "previous_ref",
     }
     if set(document) != required or document.get("schema_version") != SCHEMA_VERSION:
-        raise ValueError("Product Root 本地配置结构无效")
+        raise ValueError("产品根目录本地配置结构无效")
     if document.get("mode") not in ("source", "installed"):
-        raise ValueError("Product Root mode 无效")
+        raise ValueError("产品根目录 mode 无效")
     for field in ("repository", "tracking_branch", "current_ref"):
         if not isinstance(document.get(field), str) or not document[field].strip():
-            raise ValueError("Product Root %s 无效" % field)
+            raise ValueError("产品根目录 %s 无效" % field)
     previous = document.get("previous_ref")
     if previous is not None and (not isinstance(previous, str) or not previous.strip()):
-        raise ValueError("Product Root previous_ref 无效")
+        raise ValueError("产品根目录 previous_ref 无效")
     return document
 
 
 def load(root):
     path = state_path(root)
     if not path.is_file():
-        raise ValueError("Product Root 尚未初始化本地配置，请先执行 agenticops setup 或 install")
+        raise ValueError("产品根目录尚未初始化本地配置，请先执行 agenticops setup 或 install")
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise ValueError("Product Root 本地配置无法读取：%s" % error) from error
+        raise ValueError("产品根目录本地配置无法读取：%s" % error) from error
     return validate(document)
 
 

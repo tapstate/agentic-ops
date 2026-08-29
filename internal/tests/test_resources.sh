@@ -41,7 +41,7 @@ for file in \
   adapters/runtime.py adapters/tools/classifier.py adapters/tools/mcp-operations.json \
   adapters/agents/claude/hook.py adapters/agents/claude/manifest.json \
   adapters/agents/codex/hook.py adapters/agents/codex/manifest.json \
-  bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh \
+  bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
   bootstrap/workspace-init.sh bootstrap/render.py bootstrap/agent_registry.py \
   bootstrap/product_state.py \
   tests/test_gate.py tests/test_contracts.py tests/test_adapter_boundary.py tests/test_workflow.py tests/test_install.sh \
@@ -53,7 +53,7 @@ done
 for file in \
     agenticops gate/runner.py adapters/agents/claude/hook.py adapters/agents/codex/hook.py \
   workflow/task.py workflow/authorization.py workflow/ci.py workflow/evidence.py \
-  bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh \
+  bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
   bootstrap/workspace-init.sh bootstrap/render.py bootstrap/agent_registry.py \
   bootstrap/product_state.py \
   tests/test_install.sh internal/acceptance.sh internal/bin/story-gate internal/release/release.sh \
@@ -65,6 +65,11 @@ done
 
 test "$(sed -n '1p' .agentic-ops-source)" = "source" ||
   fail ".agentic-ops-source 必须固定为 source"
+
+grep -F '工作面=维护' bootstrap/setup.sh >/dev/null ||
+  fail "setup 必须明确初始化维护工作面"
+grep -F 'face="$(lifecycle_work_face "$mode")"' bootstrap/update.sh >/dev/null ||
+  fail "update 必须根据产品根目录 mode 区分工作面"
 
 python3 -m json.tool policies/operations.json >/dev/null
 python3 -m json.tool policies/continuity.json >/dev/null
@@ -110,15 +115,15 @@ test ! -e go.mod || fail "旧 Go Runtime 仍在现役结构"
 test ! -d install-resources || fail "旧安装制品目录仍在现役结构"
 test ! -d docs/superpowers || fail "不得提交 docs/superpowers"
 grep -Fxq '.superpowers/' .gitignore || fail ".superpowers 未忽略"
-grep -Fxq '.local/' .gitignore || fail "Product Root .local 未统一忽略"
+grep -Fxq '.local/' .gitignore || fail "产品根目录 .local 未统一忽略"
 tracked_local_files="$(
   git ls-files .local | while IFS= read -r tracked_local_file; do
     test ! -e "$tracked_local_file" || printf '%s\n' "$tracked_local_file"
   done
 )"
 test -z "$tracked_local_files" || fail ".local 中存在受 Git 管理的运行态文件：$tracked_local_files"
-test ! -e internal/.local || fail "internal/.local 未迁移到 Product Root .local"
-test ! -e internal/.venv || fail "internal/.venv 未迁移到 Product Root .local"
+test ! -e internal/.local || fail "internal/.local 未迁移到产品根目录 .local"
+test ! -e internal/.venv || fail "internal/.venv 未迁移到产品根目录 .local"
 
 if rg -n 'ao-work|ao_maint|workplane:[[:space:]]*(maintainer|developer)' \
   contracts gate workflow policies projects adapters bootstrap tests >/dev/null; then

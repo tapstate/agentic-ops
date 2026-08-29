@@ -25,7 +25,7 @@ def discover(product_root):
     agent_root = root / "adapters" / "agents"
     manifests = {}
     if not agent_root.is_dir():
-        raise ValueError("Product Root 缺少 Agent Adapter 目录：%s" % agent_root)
+        raise ValueError("产品根目录缺少 Agent Adapter 目录：%s" % agent_root)
     for path in sorted(agent_root.glob("*/manifest.json")):
         try:
             document = json.loads(path.read_text(encoding="utf-8"))
@@ -85,7 +85,7 @@ def discover(product_root):
             raise ValueError("Agent 启动模式无效：%s" % agent_id)
         manifests[agent_id] = document
     if not manifests:
-        raise ValueError("Product Root 没有可用 Agent Adapter")
+        raise ValueError("产品根目录没有可用 Agent Adapter")
     return manifests
 
 
