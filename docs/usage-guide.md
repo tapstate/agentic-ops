@@ -4,9 +4,38 @@
 
 ## 1. 安装
 
-先完成 [远程一键引导安装](remote-one-click-installation.md)。该指引会安装受信 `main`
-分支到 `~/.agentic-ops`，并覆盖初始化、启动 Agent、查看 Jira 任务与接管主线；不要把
-产品源码仓库当作业务安装目录。
+本节用于业务使用者安装已发布的 AgenticOps，不用于维护产品源码。安装前准备 Git、
+GitHub CLI（`gh`）、Bash 和 Python 3.9+；`gh` 必须登录到有本仓库读取权限的 GitHub
+账号。Git SSH 的配置、验证和撤销见[Git SSH 授权指引](security/git-ssh-access.md)。
+
+先确认 `gh` 登录状态：
+
+```sh
+gh auth status -h github.com
+```
+
+未登录时完成网页登录；不要把 token 写入命令行或仓库：
+
+```sh
+gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --scopes repo
+```
+
+`gh auth status` 成功时无需重复登录。随后使用当前账号从私有仓库读取受信 `main` 分支的
+安装入口：
+
+```sh
+(
+  set -euo pipefail
+  bootstrap="$(gh api -H 'Accept: application/vnd.github.raw' \
+    '/repos/tapstate/agentic-ops/contents/bootstrap/install.sh?ref=main')"
+  printf '%s\n' "$bootstrap" | bash
+)
+```
+
+安装入口会将同一分支稀疏克隆到 `~/.agentic-ops`，并先检查依赖和目录冲突；下载、认证或
+克隆失败时不会继续安装。`gh api` 被拒绝时，核对当前账号的仓库访问权与 `repo` scope；
+`git clone` 被拒绝时，按 Git SSH 授权指引检查密钥与仓库授权。不要把产品源码仓库当作
+业务安装目录。
 
 ## 2. 初始化项目工作空间
 
