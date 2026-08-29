@@ -26,9 +26,9 @@ def _read_json(path):
 
 
 def project_from_workspace(workspace):
-    path = Path(workspace).resolve() / ".agenticops.json"
+    path = Path(workspace).resolve() / ".agenticops" / "workspace.json"
     if not path.is_file():
-        raise ValueError("工作空间缺少 .agenticops.json，请先执行 agenticops init")
+        raise ValueError("工作空间缺少 .agenticops/workspace.json，请先执行 agenticops init")
     binding = _read_json(path)
     project = binding.get("project")
     if not isinstance(project, str) or not project:

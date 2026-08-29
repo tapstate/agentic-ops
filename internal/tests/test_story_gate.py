@@ -56,7 +56,7 @@ default_target_branch: develop
 protected_branches: [main]
 commit_review_branches: [develop]
 pr_review_branches:
-  - pattern: '^codex/AO-[1-9][0-9]+([-/].+)?$'
+  - pattern: '^(?!(?:feature|fix)/)[^/]+/AO-[1-9][0-9]+([-/].+)?$'
     target_branch: develop
 special_branch_patterns:
   - pattern: '^release/.+$'

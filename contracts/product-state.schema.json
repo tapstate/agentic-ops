@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticops.tapdata.net/contracts/product-state-v1.schema.json",
+  "title": "AgenticOps Product Root Local State v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "mode", "repository", "tracking_branch", "current_ref", "previous_ref"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "mode": { "enum": ["source", "installed"] },
+    "repository": { "type": "string", "minLength": 1 },
+    "tracking_branch": { "type": "string", "minLength": 1 },
+    "current_ref": { "type": "string", "minLength": 1 },
+    "previous_ref": { "type": ["string", "null"] }
+  }
+}

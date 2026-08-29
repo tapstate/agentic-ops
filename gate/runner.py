@@ -130,7 +130,7 @@ def _audit(cwd, context, record):
             cwd, context=context, issue_key=context.get("issue_key")
         )
         if task_directory is None:
-            task_directory = engine.find_gate_root(cwd) / ".gate"
+            task_directory = engine.find_gate_root(cwd) / ".agenticops"
         task_directory.mkdir(parents=True, exist_ok=True)
         with open(task_directory / "events.jsonl", "a", encoding="utf-8") as stream:
             stream.write(json.dumps(record, ensure_ascii=False) + "\n")

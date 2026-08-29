@@ -56,7 +56,7 @@ if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) el
 fi
 
 if [ -e "$install_root" ]; then
-  printf 'AgenticOps：安装目录已存在：%s；请使用 update.sh 更新\n' "$install_root" >&2
+  printf 'AgenticOps：安装目录已存在：%s；请使用 agenticops update 更新\n' "$install_root" >&2
   exit 2
 fi
 
@@ -66,10 +66,12 @@ git -C "$install_root" sparse-checkout init --cone
 git -C "$install_root" sparse-checkout set adapters bootstrap contracts gate policies projects workflow
 git -C "$install_root" checkout "$branch"
 
-mkdir -p "$install_root/user"
-chmod 0700 "$install_root/user"
-printf '%s\n' "$(git -C "$install_root" rev-parse HEAD)" > "$install_root/user/current-ref"
-chmod 0600 "$install_root/user/current-ref"
+current_ref="$(git -C "$install_root" rev-parse HEAD)"
+python3 "$install_root/bootstrap/product_state.py" \
+  --product-root "$install_root" write \
+  --mode installed --repository "$repository" --branch "$branch" \
+  --current-ref "$current_ref"
 
 printf 'AgenticOps 安装完成：%s\n' "$install_root"
-printf '下一步：%s/agenticops init --workspace <项目工作空间> --project tapdata --agent both\n' "$install_root"
+printf '安装通道：%s（%s）\n' "$branch" "$current_ref"
+printf '下一步：%s/agenticops init --workspace <项目工作空间> --project tapdata\n' "$install_root"

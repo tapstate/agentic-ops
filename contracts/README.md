@@ -6,8 +6,9 @@
 - `gate-decision.schema.json`：Gate 返回给 Adapter 的三态标准判定。
 - `adapter-manifest.schema.json`：Agent 能力和生成产物声明。
 - `operation-catalog.json`：标准操作名称、类别、语义和是否可作为请求输入。
-- `workspace-binding.schema.json`：中央 Product Root、项目、Agent、版本和项目工作空间
-  派生接线的绑定契约。
+- `product-state.schema.json`：Product Root 本地模式、跟踪分支和版本状态。
+- `workspace.schema.json`：Product Root、项目和 Agent 集合的工作空间配置。
+- `workspace-init.schema.json`：生成接线的产品版本、文件清单和内容哈希。
 - `task-registry.schema.json`：项目工作空间内多个任务的统一注册与激活状态。
 - `task-state.schema.json`：每个 Jira 任务统一的阶段、事实、仓库和恢复状态。
 

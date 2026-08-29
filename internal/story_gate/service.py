@@ -431,13 +431,13 @@ class StoryGateService:
         return payload if payload.get("acceptance_status") == "passed" else None
 
     def _approval_path(self, impact_id: str) -> Path:
-        return self.root / "internal" / ".local" / "story-approvals" / f"{impact_id}.json"
+        return self.root / ".local" / "story-gate" / "approvals" / f"{impact_id}.json"
 
     def _evidence_path(self, impact_id: str) -> Path:
-        return self.root / "internal" / ".local" / "story-evidence" / f"{impact_id}.json"
+        return self.root / ".local" / "story-gate" / "evidence" / f"{impact_id}.json"
 
     def _run_dir(self, impact_id: str) -> Path:
-        return self.root / "internal" / ".local" / "story-runs" / impact_id
+        return self.root / ".local" / "story-gate" / "runs" / impact_id
 
     def _blocked(
         self,
@@ -626,11 +626,11 @@ def _read_record(path: Path, root: Path) -> dict[str, Any] | None:
 
 
 def _ensure_record_path_safe(root: Path, path: Path) -> None:
-    expected_parent = root / "internal" / ".local"
+    expected_parent = root / ".local" / "story-gate"
     try:
         path.relative_to(expected_parent)
     except ValueError as error:
-        raise _unsafe_local_state("故事状态路径逃出 internal/.local") from error
+        raise _unsafe_local_state("故事状态路径逃出 .local/story-gate") from error
     current = root
     for component in path.relative_to(root).parts:
         current = current / component
@@ -648,11 +648,11 @@ def _ensure_record_path_safe(root: Path, path: Path) -> None:
 
 
 def _ensure_run_path_safe(root: Path, path: Path) -> None:
-    expected_parent = root / "internal" / ".local" / "story-runs"
+    expected_parent = root / ".local" / "story-gate" / "runs"
     try:
         path.relative_to(expected_parent)
     except ValueError as error:
-        raise _unsafe_local_state("故事运行日志路径逃出 internal/.local") from error
+        raise _unsafe_local_state("故事运行日志路径逃出 .local/story-gate") from error
     current = root
     for component in path.relative_to(root).parts:
         current = current / component
@@ -726,7 +726,7 @@ def _check_command(root: Path, check_id: str) -> list[str]:
 
 def _check_environment(root: Path) -> dict[str, str]:
     environment = dict(os.environ)
-    environment["PYTHONPYCACHEPREFIX"] = environment.get("PYTHONPYCACHEPREFIX", ".local/pycache")
+    environment["PYTHONPYCACHEPREFIX"] = environment.get("PYTHONPYCACHEPREFIX", ".local/cache/pycache")
     internal_path = str(root)
     existing_path = environment.get("PYTHONPATH", "")
     environment["PYTHONPATH"] = f"{internal_path}{os.pathsep}{existing_path}" if existing_path else internal_path

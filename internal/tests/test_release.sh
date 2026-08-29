@@ -10,6 +10,7 @@ fail() { printf '发布流程验证失败：%s\n' "$1" >&2; exit 1; }
 for script in \
   .githooks/pre-commit .githooks/pre-push .githooks/reference-transaction \
   internal/bin/story-gate internal/release/release.sh internal/release/hotfix.sh \
+  internal/acceptance.sh \
   internal/release/history-rewrite.sh internal/release/lib/development-workflow.sh \
   internal/release/lib/release-common.sh; do
   bash -n "$repo_root/$script" || fail "$script Shell 语法无效"

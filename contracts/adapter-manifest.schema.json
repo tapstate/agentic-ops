@@ -4,7 +4,7 @@
   "title": "AgenticOps Agent Adapter Manifest v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "name", "adapter_version", "entrypoint", "capabilities", "artifacts"],
+  "required": ["schema_version", "name", "adapter_version", "entrypoint", "capabilities", "artifacts", "launch"],
   "properties": {
     "schema_version": { "const": 1 },
     "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
@@ -34,6 +34,16 @@
           "template": { "type": "string", "minLength": 1 },
           "target": { "type": "string", "minLength": 1 }
         }
+      }
+    },
+    "launch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "command", "message"],
+      "properties": {
+        "mode": { "enum": ["command", "manual"] },
+        "command": { "type": ["string", "null"] },
+        "message": { "type": "string" }
       }
     },
     "project_skill_target": { "type": ["string", "null"] }

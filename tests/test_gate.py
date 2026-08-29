@@ -96,8 +96,12 @@ def make_workspace(branch="feature/TAP-123", origin="git@github.com:acme/widget.
     ws = Path(tempfile.mkdtemp(prefix="aogate-ws-"))
     subprocess.run(["git", "init", "-q", "-b", branch], cwd=ws, check=True)
     subprocess.run(["git", "remote", "add", "origin", origin], cwd=ws, check=True)
-    (ws / ".agenticops.json").write_text(
-        json.dumps({"project": "tapdata"}), encoding="utf-8"
+    (ws / ".agenticops").mkdir()
+    (ws / ".agenticops" / "workspace.json").write_text(
+        json.dumps({
+            "schema_version": 1, "product_root": str(ROOT),
+            "project": "tapdata", "agents": ["claude", "codex"],
+        }), encoding="utf-8"
     )
     (ws / "README.md").write_text("poc\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=ws, check=True)
@@ -124,7 +128,7 @@ def grant(ws, **overrides):
     task_store.register(ws, issue, status="active")
     gate = task_store.task_directory(ws, issue)
     gate.mkdir(parents=True, exist_ok=True)
-    (gate / "task.json").write_text(
+    task_store.task_path(ws, issue).write_text(
         json.dumps({
             "issue_key": issue,
             "task_class": "defect_fix",

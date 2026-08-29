@@ -9,9 +9,18 @@
   },
   "artifacts": [
     {
+      "template": "adapters/agents/claude/templates/CLAUDE.md",
+      "target": "CLAUDE.md"
+    },
+    {
       "template": "adapters/agents/claude/templates/settings.json",
       "target": ".claude/settings.json"
     }
   ],
+  "launch": {
+    "mode": "command",
+    "command": "claude",
+    "message": "Claude 接线已生成。"
+  },
   "project_skill_target": null
 }

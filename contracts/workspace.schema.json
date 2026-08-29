@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticops.tapdata.net/contracts/workspace-v1.schema.json",
+  "title": "AgenticOps Project Workspace Configuration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "product_root", "project", "agents"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "product_root": { "type": "string", "minLength": 1 },
+    "project": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "agents": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+    }
+  }
+}

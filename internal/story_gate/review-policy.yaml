@@ -12,7 +12,7 @@ pr_review_branches:
     target_branch: main
   - pattern: '^(feature|fix)/AO-[1-9][0-9]+([-/].+)?$'
     target_branch: develop
-  - pattern: '^codex/AO-[1-9][0-9]+([-/].+)?$'
+  - pattern: '^(?!(?:feature|fix)/)[^/]+/AO-[1-9][0-9]+([-/].+)?$'
     target_branch: develop
   - pattern: '^[^/]+/AO-[1-9][0-9]+/(?!fix-main$).+$'
     target_branch: develop

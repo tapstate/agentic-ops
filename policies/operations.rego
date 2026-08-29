@@ -7,7 +7,7 @@ package agenticops
 #   "operation": "git_push",
 #   "context": {"branch": "...", "origin": "...", "push_target_branch": "...",
 #                "branch_relevant": true},
-#   "authorization": {...}  # .gate/tasks/<issue-key>/authorization.json，可为空对象
+#   "authorization": {...}  # .agenticops/tasks/<issue-key>/authorization.json，可为空对象
 # }
 # 输出 data.agenticops.result = {"decision": "...", "operation": "...", "reason": "..."}
 

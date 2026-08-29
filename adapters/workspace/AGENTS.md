@@ -5,9 +5,10 @@
 
 - Product Root：`__AGENTIC_OPS_HOME__/`
 - Product Project：`__AGENTIC_OPS_PROJECT__`
-- Workspace Binding：`.agenticops.json`
-- Task Registry：`.gate/tasks.json`
-- Task State：`.gate/tasks/<issue-key>/`
+- Initialization：`.agenticops/init.json`
+- Workspace Configuration：`.agenticops/workspace.json`
+- Task Registry：`.agenticops/tasks/index.json`
+- Task State：`.agenticops/tasks/<issue-key>/`
 
 一个工作空间只绑定一个产品项目，可以同时接管该项目下多个 Jira 任务；每个任务可
 组织多个 Git 仓库。开始或恢复任务前，
@@ -23,15 +24,16 @@
 python3 __AGENTIC_OPS_HOME__/workflow/task.py status --issue-key <JIRA-KEY> --dir <项目工作空间>
 ```
 
-`AGENTS.md`、`CLAUDE.md`、Hook 和 MCP 配置都是可重新生成的薄接线，不是规则事实
+`AGENTS.md`、各 Agent 入口、Hook 和 MCP 配置都是可重新生成的薄接线，不是规则事实
 源；项目规则和运行资产只在 Product Root 维护。
 
 ## 必须遵守的入口规则
 
-- Jira 是任务事实源，Git 是代码事实源，GitHub PR/CI 是审查事实源；`.gate/`
-  只保存本地执行、恢复和门禁事件，不替代外部事实源。
-- `.gate/tasks.json` 只统一注册任务及其 active/inactive/completed 状态；每个任务的
-  事实、授权、事件和 CI 证据只能写入自己的 `.gate/tasks/<issue-key>/`。
+- Jira 是任务事实源，Git 是代码事实源，GitHub PR/CI 是审查事实源；`.agenticops/`
+  只保存工作空间配置及本地执行、恢复和门禁事件，不替代外部事实源。
+- `.agenticops/tasks/index.json` 只统一注册任务及其 active/inactive/completed
+  状态；每个任务的事实、授权、事件和 CI 证据只能写入自己的
+  `.agenticops/tasks/<issue-key>/`。
 - 副作用操作由 Agent Adapter 转换为标准请求，再由 `gate/runner.py` 判定。收到
   `ask` 或 `deny`
   必须展示原因并停止该操作，不得改命令、改状态文件或换工具绕过。

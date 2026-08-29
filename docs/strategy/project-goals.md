@@ -5,7 +5,7 @@
 
 ## 1. 产品定位
 
-AgenticOps 是公司级 Agentic 研发基础设施，为 Claude、Codex 和后续 Agent 提供
+AgenticOps 是公司级 Agentic 研发基础设施，为不同 Agent 平台提供
 统一的流程规则、操作门禁、任务恢复和证据边界。它不替代 Agent 平台，也不替代
 Jira、Git、GitHub、CI 和人工审查。
 
@@ -18,7 +18,7 @@ v1.x 以 ao-gate-poc 的 Hook + 声明式 Policy 思想为基线，先让 TapDat
 稳定可用：
 
 - macOS、Linux 可快速安装，后续可运行在独立 Docker 实例。
-- Claude、Codex 共用 Gate、Policy、任务状态和项目规则，只保留薄平台适配。
+- 所有已接入 Agent 共用 Gate、Policy、任务状态和项目规则，只保留薄平台适配。
 - 一个工作空间绑定一个产品项目，可同时接管该项目下多个 Jira 任务；每个任务可以
   修改多个仓库，状态、授权、审计和 CI 证据按任务隔离并统一注册。
 - Jira 状态、表单、仓库分支、准入和验证方式按产品项目独立配置。
@@ -51,9 +51,10 @@ Standard Contract + Agent/Tool Adapter + Gate Core + Policy + Workflow + Project
 - **Internal** 只服务 AgenticOps 仓库自身的故事审查和发布，不是产品运行层。
 
 产品运行采用“中央 Product Root + 薄项目工作空间”：源码仓库和 `~/.agentic-ops`
-安装目录具有相同产品结构和薄入口；项目工作空间只保存产品项目绑定、Agent 原生
-接线和归一化 `.gate/` 多任务状态，不复制 Policy、Project Skill 或 Runtime。维护时源码仓库就是
-Product Root，发布使用时稳定安装目录就是 Product Root，两者不形成不同运行模式。
+安装目录具有相同产品结构和薄入口，非 Git 本地状态均归入各自 `.local/`；项目
+工作空间使用 `.agenticops/` 区分初始化信息、工作空间配置和按任务隔离的业务运行
+数据，不复制 Policy、Project Skill 或 Runtime。维护时源码仓库就是 Product Root，
+发布使用时稳定安装目录就是 Product Root，两者不形成不同运行模式。
 
 Hook、MCP、Skill 和工作目录配置是 Manifest 与模板生成的产物。Adapter 必须无状态，
 不得依赖 Workflow、Project 或 Policy，并通过固定代码预算和禁止依赖检查；不支持的
@@ -76,7 +77,7 @@ Hook、MCP、Skill 和工作目录配置是 Manifest 与模板生成的产物。
 - Jira 是任务、需求、负责人、状态、评论和任务证据事实源。
 - Git 是代码、分支、提交和本地验证事实源。
 - GitHub PR/CI 是审查、检查和合入记录事实源。
-- `.gate/` 只保存本地执行、恢复、授权和门禁事件。
+- `.agenticops/` 只保存工作空间绑定、初始化清单及本地执行、恢复、授权和门禁事件。
 
 Hook 是流程控制点，不是本机安全沙箱；凭证最小化、服务端保护、CI 和人工审查仍
 是最终安全边界。AgenticOps 故障不得静默绕过或伪造成功。

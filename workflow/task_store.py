@@ -28,20 +28,20 @@ def workspace_path(base):
     return Path(base).resolve()
 
 
-def gate_path(base):
-    return workspace_path(base) / ".gate"
+def state_path(base):
+    return workspace_path(base) / ".agenticops"
 
 
 def registry_path(base):
-    return gate_path(base) / "tasks.json"
+    return state_path(base) / "tasks" / "index.json"
 
 
 def task_directory(base, issue_key):
-    return gate_path(base) / "tasks" / validate_issue_key(issue_key)
+    return state_path(base) / "tasks" / validate_issue_key(issue_key)
 
 
 def task_path(base, issue_key):
-    return task_directory(base, issue_key) / "task.json"
+    return task_directory(base, issue_key) / "state.json"
 
 
 def authorization_path(base, issue_key):
@@ -64,9 +64,9 @@ def validate_issue_key(issue_key):
 
 
 def workspace_project(base):
-    path = workspace_path(base) / ".agenticops.json"
+    path = state_path(base) / "workspace.json"
     if not path.is_file():
-        raise ValueError("工作空间缺少 .agenticops.json，请先执行 agenticops init")
+        raise ValueError("工作空间缺少 .agenticops/workspace.json，请先执行 agenticops init")
     try:
         binding = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -82,6 +82,7 @@ def empty_registry(project):
 
 
 def load_registry(base, create=False):
+    migrate_legacy(base)
     path = registry_path(base)
     if not path.is_file():
         if create:
@@ -119,9 +120,9 @@ def _write_json_atomic(path, document):
 
 @contextmanager
 def registry_lock(base):
-    gate = gate_path(base)
-    gate.mkdir(parents=True, exist_ok=True)
-    with open(gate / "tasks.lock", "a+", encoding="utf-8") as stream:
+    root = state_path(base)
+    root.mkdir(parents=True, exist_ok=True)
+    with open(root / "tasks.lock", "a+", encoding="utf-8") as stream:
         fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
         try:
             yield
@@ -200,27 +201,96 @@ def resolve_active_issue(base, issue_key=None):
     return issue
 
 
+def _remove_empty_tree(path):
+    for directory in sorted(
+        (item for item in path.rglob("*") if item.is_dir()), reverse=True
+    ):
+        try:
+            directory.rmdir()
+        except OSError:
+            pass
+    try:
+        path.rmdir()
+    except OSError:
+        pass
+
+
 def migrate_legacy(base):
-    """把旧版单任务 .gate 文件原子移动到任务级目录；无旧状态时不操作。"""
-    gate = gate_path(base)
-    legacy_task = gate / "task.json"
+    """把开发期 `.gate` 状态一次性迁入 `.agenticops/tasks`。"""
+    legacy_root = workspace_path(base) / ".gate"
+    if not legacy_root.is_dir():
+        return None
+    new_registry = registry_path(base)
+    legacy_registry = legacy_root / "tasks.json"
+    if legacy_registry.is_file():
+        if new_registry.exists():
+            raise ValueError("新旧任务注册表同时存在，拒绝自动合并")
+        try:
+            registry = json.loads(legacy_registry.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("旧任务注册表无法迁移：%s" % error) from error
+        tasks = registry.get("tasks")
+        if not isinstance(tasks, dict):
+            raise ValueError("旧任务注册表 tasks 必须是对象")
+        migrations = []
+        for issue in sorted(tasks):
+            validate_issue_key(issue)
+            source = legacy_root / "tasks" / issue
+            destination = task_directory(base, issue)
+            if not source.is_dir() or not (source / "task.json").is_file():
+                raise ValueError("旧任务目录或 task.json 缺失：%s" % source)
+            if destination.exists():
+                raise ValueError("任务迁移目标已存在，拒绝覆盖：%s" % destination)
+            migrations.append((source, destination))
+        for source, destination in migrations:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(str(source), str(destination))
+            old_state = destination / "task.json"
+            os.replace(str(old_state), str(destination / "state.json"))
+        new_registry.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(str(legacy_registry), str(new_registry))
+        _remove_empty_tree(legacy_root)
+        return "multiple"
+
+    legacy_task = legacy_root / "task.json"
     if not legacy_task.is_file():
+        _remove_empty_tree(legacy_root)
         return None
     try:
         task = json.loads(legacy_task.read_text(encoding="utf-8"))
         issue = validate_issue_key(task.get("issue_key"))
     except (OSError, json.JSONDecodeError, ValueError) as error:
         raise ValueError("旧版任务状态无法迁移：%s" % error) from error
-    register(base, issue, status="active")
     destination = task_directory(base, issue)
+    if registry_path(base).exists():
+        raise ValueError("新旧任务注册表同时存在，拒绝自动合并")
+    if destination.exists():
+        raise ValueError("任务迁移目标已存在，拒绝覆盖：%s" % destination)
     destination.mkdir(parents=True, exist_ok=True)
-    legacy_files = [legacy_task, gate / "authorization.json", gate / "events.jsonl"]
-    legacy_files.extend(sorted(gate.glob("ci-*.json")))
+    legacy_files = [
+        legacy_task,
+        legacy_root / "authorization.json",
+        legacy_root / "events.jsonl",
+    ]
+    legacy_files.extend(sorted(legacy_root.glob("ci-*.json")))
+    pairs = []
     for source in legacy_files:
         if not source.exists():
             continue
-        target = destination / source.name
+        target_name = "state.json" if source.name == "task.json" else source.name
+        target = destination / target_name
         if target.exists():
             raise ValueError("旧版状态迁移目标已存在，拒绝覆盖：%s" % target)
+        pairs.append((source, target))
+    for source, target in pairs:
         os.replace(str(source), str(target))
+    registry = empty_registry(workspace_project(base))
+    timestamp = now()
+    registry["tasks"][issue] = {
+        "status": "active",
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+    save_registry(base, registry)
+    _remove_empty_tree(legacy_root)
     return issue

@@ -168,13 +168,13 @@ def main():
     except ValueError as error:
         print("错误：%s" % error, file=sys.stderr)
         return 2
-    gate = task_store.task_directory(args.dir, issue)
-    task = load_json(gate / "task.json")
-    auth = load_json(gate / "authorization.json")
-    events = load_events(gate / "events.jsonl")
+    task_dir = task_store.task_directory(args.dir, issue)
+    task = load_json(task_store.task_path(args.dir, issue))
+    auth = load_json(task_dir / "authorization.json")
+    events = load_events(task_dir / "events.jsonl")
     ci_states = []
-    if gate.is_dir():
-        for p in sorted(gate.glob("ci-*.json")):
+    if task_dir.is_dir():
+        for p in sorted(task_dir.glob("ci-*.json")):
             doc = load_json(p)
             if doc:
                 ci_states.append(doc)

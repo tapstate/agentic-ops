@@ -2,7 +2,7 @@
 """任务授权工具：按当前任务的多仓范围签发或撤销授权伞。
 
 签发即模拟"设计审查通过"这一人工节点：授权绑定任务、仓库、分支和计划版本，
-写入 `.gate/tasks/<issue-key>/authorization.json`。任何绑定不匹配时 Hook 会自动收回
+写入 `.agenticops/tasks/<issue-key>/authorization.json`。任何绑定不匹配时 Hook 会自动收回
 放行；停用一个任务不会删除其授权，但 Gate 只加载 active 任务。
 
 用法：

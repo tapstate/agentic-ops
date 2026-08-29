@@ -12,6 +12,7 @@ stories:
     protected_paths:
       - .agentic-ops-source
       - .gitignore
+      - .local/.gitkeep
       - .githooks/**
       - .github/**
       - AGENTS.md

@@ -93,15 +93,15 @@ release_story_validate_record_source() {
 
   release_story_require_plain_directory_chain "$root" "internal" \
     "发布故事状态源" || return 1
-  release_story_require_plain_directory_chain "$root" "internal/.local" \
+  release_story_require_plain_directory_chain "$root" ".local/story-gate" \
     "发布故事状态源" || return 1
-  for record_kind in story-approvals story-evidence; do
-    record_source="$root/internal/.local/$record_kind"
+  for record_kind in approvals evidence; do
+    record_source="$root/.local/story-gate/$record_kind"
     if [ ! -e "$record_source" ] && [ ! -L "$record_source" ]; then
       continue
     fi
     release_story_require_plain_directory_chain \
-      "$root" "internal/.local/$record_kind" \
+      "$root" ".local/story-gate/$record_kind" \
       "发布故事状态源" || return 1
     while IFS= read -r record; do
       [ -n "$record" ] || continue
@@ -125,22 +125,22 @@ release_story_validate_record_source() {
 release_story_prepare_record_target() {
   local root="$1"
   local record_kind="$2"
-  local target="$root/internal/.local/$record_kind"
+  local target="$root/.local/story-gate/$record_kind"
   local existing
 
   release_story_require_plain_directory_chain "$root" "internal" \
     "发布候选故事状态目标" || return 1
-  release_story_require_plain_directory_chain "$root" "internal/.local" \
+  release_story_require_plain_directory_chain "$root" ".local/story-gate" \
     "发布候选故事状态目标" || return 1
   release_story_require_plain_directory_chain \
-    "$root" "internal/.local/$record_kind" \
+    "$root" ".local/story-gate/$record_kind" \
     "发布候选故事状态目标" || return 1
   mkdir -p "$target" || {
     RELEASE_STORY_STATE_ERROR="无法创建发布候选故事状态目录"
     return 1
   }
   release_story_require_plain_directory_chain \
-    "$root" "internal/.local/$record_kind" \
+    "$root" ".local/story-gate/$record_kind" \
     "发布候选故事状态目标" || return 1
   while IFS= read -r existing; do
     [ -n "$existing" ] || continue
@@ -153,8 +153,8 @@ release_story_copy_record_kind() {
   local source_root="$1"
   local target_root="$2"
   local record_kind="$3"
-  local record_source="$source_root/internal/.local/$record_kind"
-  local record_target="$target_root/internal/.local/$record_kind"
+  local record_source="$source_root/.local/story-gate/$record_kind"
+  local record_target="$target_root/.local/story-gate/$record_kind"
   local record
   local record_name
   local pending
@@ -186,7 +186,7 @@ release_story_copy_record_kind() {
       return 1
     fi
     release_story_require_plain_directory_chain \
-      "$target_root" "internal/.local/$record_kind" \
+      "$target_root" ".local/story-gate/$record_kind" \
       "发布候选故事状态目标" || return 1
   done < <(release_story_list_directory_entries "$record_source")
 }
@@ -410,10 +410,12 @@ release_run_full_verification() {
       fi
     }
 
-    run_verification_step internal_runtime_sync \
+    run_verification_step internal_runtime_sync env \
+      UV_CACHE_DIR="$worktree_path/.local/cache/uv" \
+      UV_PROJECT_ENVIRONMENT="$worktree_path/.local/venv/internal" \
       "$uv_bin" sync --locked --project internal --python 3.12 || exit $?
     run_verification_step python_runtime env \
-      AGENTIC_OPS_INTERNAL_TEST_PYTHON="$worktree_path/internal/.venv/bin/python" \
+      AGENTIC_OPS_INTERNAL_TEST_PYTHON="$worktree_path/.local/venv/internal/bin/python" \
       AGENTIC_OPS_TEST_PYTHON="$(command -v python3)" \
       bash internal/tests/test_runtime.sh || exit $?
     run_verification_step resource_contracts \
@@ -516,7 +518,7 @@ release_verify_story_gate() {
   if ! release_story_validate_record_source "$repo_root"; then
     release_fail "release_story_gate_local_state_unsafe" "story_gate" \
       "$RELEASE_STORY_STATE_ERROR" \
-      "请移除 internal/.local 故事记录路径中的符号链接或特殊文件后重试"
+      "请移除 .local/story-gate 故事记录路径中的符号链接或特殊文件后重试"
     return 1
   fi
 
@@ -602,7 +604,7 @@ release_verify_story_gate() {
 
   # 本地记录不进入 Git。只复制普通 JSON 文件，由 origin/main Runtime 在
   # 固定 candidate 快照中重新验证 impact_id、人工确认和验收内容。
-  for record_kind in story-approvals story-evidence; do
+  for record_kind in approvals evidence; do
     if ! release_story_copy_record_kind \
       "$repo_root" "$candidate_snapshot" "$record_kind"; then
       git -C "$repo_root" worktree remove --force "$candidate_snapshot" >/dev/null 2>&1 || true
@@ -620,7 +622,9 @@ release_verify_story_gate() {
   fi
   if [ -z "$uv_bin" ] || [ ! -x "$uv_bin" ]; then
     gate_status=125
-  elif ! "$uv_bin" sync --locked --project "$baseline_snapshot/internal" \
+  elif ! UV_CACHE_DIR="$baseline_snapshot/.local/cache/uv" \
+    UV_PROJECT_ENVIRONMENT="$baseline_snapshot/.local/venv/internal" \
+    "$uv_bin" sync --locked --project "$baseline_snapshot/internal" \
     --python 3.12 >/dev/null 2>&1; then
     gate_status=125
   else
@@ -1542,7 +1546,7 @@ release_write_audit_json() {
   if [ -L "$repo_root" ] || [ ! -d "$repo_root" ]; then
     release_fail "release_audit_path_unsafe" "audit_write" \
       "发布审计信任根不是普通目录" \
-      "请移除 .local/release-runs 路径中的符号链接或特殊文件后重试"
+      "请移除 .local/release 路径中的符号链接或特殊文件后重试"
     return 1
   fi
   root_real="$(cd "$repo_root" 2>/dev/null && pwd -P)" || {
@@ -1559,7 +1563,7 @@ release_write_audit_json() {
   audit_file="$({
     cd "$repo_root" 2>/dev/null || exit 1
     [ "$(pwd -P)" = "$root_real" ] || exit 2
-    for component in .local release-runs; do
+    for component in .local release; do
       if [ -L "$component" ] || { [ -e "$component" ] && [ ! -d "$component" ]; }; then
         exit 3
       fi
@@ -1592,7 +1596,7 @@ release_write_audit_json() {
   })" || {
     release_fail "release_audit_path_unsafe" "audit_write" \
       "发布审计目录或叶子不是仓库内可安全原子替换的普通路径" \
-      "请移除 .local/release-runs 路径中的符号链接或特殊文件后重试"
+      "请移除 .local/release 路径中的符号链接或特殊文件后重试"
     return 1
   }
 

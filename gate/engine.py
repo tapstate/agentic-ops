@@ -37,25 +37,22 @@ def find_gate_root(cwd):
     """返回最近的项目工作空间根。"""
     current = Path(cwd).resolve()
     for candidate in [current] + list(current.parents):
-        if (candidate / ".agenticops.json").is_file() or (
-            candidate / ".gate" / "tasks.json"
-        ).is_file() or (candidate / ".gate" / "task.json").is_file():
+        if (candidate / ".agenticops" / "workspace.json").is_file() or (
+            candidate / ".agenticops" / "tasks" / "index.json"
+        ).is_file():
             return candidate
     return current
 
 
 def _active_task_directories(root):
-    gate = Path(root) / ".gate"
-    registry = _read_json(gate / "tasks.json")
+    state = Path(root) / ".agenticops"
+    registry = _read_json(state / "tasks" / "index.json")
     if isinstance(registry, dict) and isinstance(registry.get("tasks"), dict):
         return [
-            (issue, gate / "tasks" / issue)
+            (issue, state / "tasks" / issue)
             for issue, entry in sorted(registry["tasks"].items())
             if isinstance(entry, dict) and entry.get("status") == "active"
         ]
-    if (gate / "task.json").is_file():
-        task = _read_json(gate / "task.json") or {}
-        return [(task.get("issue_key", "legacy"), gate)]
     return []
 
 
@@ -83,7 +80,7 @@ def find_task_directory(cwd, context=None, issue_key=None):
     elif context and context.get("origin"):
         matches = []
         for _, path in candidates:
-            task = _read_json(path / "task.json")
+            task = _read_json(path / "state.json")
             if task and _repositories_match(task, context):
                 matches.append(path)
     else:

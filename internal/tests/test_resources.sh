@@ -28,20 +28,24 @@ for file in \
   docs/strategy/project-goals.md docs/architecture/agenticops-v1-architecture.md \
   contracts/gate-request.schema.json contracts/gate-decision.schema.json \
   contracts/adapter-manifest.schema.json contracts/operation-catalog.schema.json \
-  contracts/workspace-binding.schema.json contracts/task-registry.schema.json contracts/task-state.schema.json contracts/operation-catalog.json \
+  contracts/product-state.schema.json contracts/workspace.schema.json \
+  contracts/workspace-init.schema.json contracts/task-registry.schema.json \
+  contracts/task-state.schema.json contracts/operation-catalog.json \
   gate/engine.py gate/runner.py \
   policies/operations.json policies/continuity.json \
-  workflow/task.py workflow/authorization.py workflow/ci.py workflow/evidence.py \
+  workflow/task.py workflow/task_store.py workflow/project_rules.py \
+  workflow/authorization.py workflow/ci.py workflow/evidence.py \
   projects/tapdata/profile.json projects/tapdata/admission.json \
   projects/tapdata/skills/tapdata-task/SKILL.md \
-  adapters/workspace/AGENTS.md adapters/workspace/CLAUDE.md \
+  adapters/workspace/AGENTS.md adapters/agents/claude/templates/CLAUDE.md \
   adapters/runtime.py adapters/tools/classifier.py adapters/tools/mcp-operations.json \
   adapters/agents/claude/hook.py adapters/agents/claude/manifest.json \
   adapters/agents/codex/hook.py adapters/agents/codex/manifest.json \
-  bootstrap/install.sh bootstrap/update.sh bootstrap/rollback.sh \
-  bootstrap/workspace-init.sh bootstrap/render.py \
+  bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh \
+  bootstrap/workspace-init.sh bootstrap/render.py bootstrap/agent_registry.py \
+  bootstrap/product_state.py \
   tests/test_gate.py tests/test_contracts.py tests/test_adapter_boundary.py tests/test_workflow.py tests/test_install.sh \
-  internal/bin/story-gate internal/story_gate/stories.yaml \
+  internal/acceptance.sh internal/bin/story-gate internal/story_gate/stories.yaml \
   internal/story_gate/review-policy.yaml internal/release/release.sh; do
   require_file "$file"
 done
@@ -49,8 +53,10 @@ done
 for file in \
     agenticops gate/runner.py adapters/agents/claude/hook.py adapters/agents/codex/hook.py \
   workflow/task.py workflow/authorization.py workflow/ci.py workflow/evidence.py \
-  bootstrap/install.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/workspace-init.sh bootstrap/render.py \
-  tests/test_install.sh internal/bin/story-gate internal/release/release.sh \
+  bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh \
+  bootstrap/workspace-init.sh bootstrap/render.py bootstrap/agent_registry.py \
+  bootstrap/product_state.py \
+  tests/test_install.sh internal/acceptance.sh internal/bin/story-gate internal/release/release.sh \
   internal/release/hotfix.sh internal/tests/test_runtime.sh \
   internal/tests/test_resources.sh internal/tests/test_release.sh \
   .githooks/pre-commit .githooks/pre-push .githooks/reference-transaction; do
@@ -66,7 +72,9 @@ python3 -m json.tool contracts/gate-request.schema.json >/dev/null
 python3 -m json.tool contracts/gate-decision.schema.json >/dev/null
 python3 -m json.tool contracts/adapter-manifest.schema.json >/dev/null
 python3 -m json.tool contracts/operation-catalog.schema.json >/dev/null
-python3 -m json.tool contracts/workspace-binding.schema.json >/dev/null
+python3 -m json.tool contracts/product-state.schema.json >/dev/null
+python3 -m json.tool contracts/workspace.schema.json >/dev/null
+python3 -m json.tool contracts/workspace-init.schema.json >/dev/null
 python3 -m json.tool contracts/task-registry.schema.json >/dev/null
 python3 -m json.tool contracts/task-state.schema.json >/dev/null
 python3 -m json.tool contracts/operation-catalog.json >/dev/null
@@ -74,8 +82,9 @@ python3 -m json.tool projects/tapdata/profile.json >/dev/null
 python3 -m json.tool projects/tapdata/admission.json >/dev/null
 python3 -m json.tool adapters/tools/mcp-operations.json >/dev/null
 python3 -m json.tool adapters/tools/mcp.template.json >/dev/null
-python3 -m json.tool adapters/agents/claude/manifest.json >/dev/null
-python3 -m json.tool adapters/agents/codex/manifest.json >/dev/null
+for manifest in adapters/agents/*/manifest.json; do
+  python3 -m json.tool "$manifest" >/dev/null
+done
 
 grep -Fq 'sparse-checkout set adapters bootstrap contracts gate policies projects workflow' bootstrap/install.sh ||
   fail "安装脚本没有限制为产品目录"
@@ -84,7 +93,8 @@ grep -Fq '__AGENTIC_OPS_HOME__' adapters/workspace/AGENTS.md ||
 grep -Fq 'deny_with_guidance' adapters/agents/codex/manifest.json ||
   fail "Codex Adapter 未声明二态降级"
 grep -Fq 'repositories' policies/operations.json || fail "任务授权未绑定多仓库集合"
-grep -Fq '@AGENTS.md' adapters/workspace/CLAUDE.md || fail "Claude 入口未复用公共 Agent 规则"
+grep -Fq '@AGENTS.md' adapters/agents/claude/templates/CLAUDE.md ||
+  fail "Claude 入口未复用公共 Agent 规则"
 grep -Fq '"project_skill_target": null' adapters/agents/claude/manifest.json ||
   fail "Claude Adapter 仍会复制中央 Project Skill"
 
@@ -100,11 +110,31 @@ test ! -e go.mod || fail "旧 Go Runtime 仍在现役结构"
 test ! -d install-resources || fail "旧安装制品目录仍在现役结构"
 test ! -d docs/superpowers || fail "不得提交 docs/superpowers"
 grep -Fxq '.superpowers/' .gitignore || fail ".superpowers 未忽略"
+grep -Fxq '.local/' .gitignore || fail "Product Root .local 未统一忽略"
+tracked_local_files="$(
+  git ls-files .local | while IFS= read -r tracked_local_file; do
+    test ! -e "$tracked_local_file" || printf '%s\n' "$tracked_local_file"
+  done
+)"
+test -z "$tracked_local_files" || fail ".local 中存在受 Git 管理的运行态文件：$tracked_local_files"
+test ! -e internal/.local || fail "internal/.local 未迁移到 Product Root .local"
+test ! -e internal/.venv || fail "internal/.venv 未迁移到 Product Root .local"
 
 if rg -n 'ao-work|ao_maint|workplane:[[:space:]]*(maintainer|developer)' \
   contracts gate workflow policies projects adapters bootstrap tests >/dev/null; then
   fail "产品目录仍引用旧 Runtime 或工作面概念"
 fi
+
+if rg -n -- '--agent[[:space:]]+(both|claude\|codex)|choices=.*both' \
+  agenticops bootstrap contracts docs README.md >/dev/null; then
+  fail "公共安装或使用入口仍维护固定 Agent 枚举"
+fi
+
+PYTHONDONTWRITEBYTECODE=1 python3 bootstrap/agent_registry.py \
+  --product-root "$repo_root" list >/dev/null || fail "Agent Manifest 发现失败"
+
+internal/acceptance.sh --list | grep -Fxq 'full: runtime resources install release' ||
+  fail "自动验收脚本缺少固定 full 配置"
 
 PYTHONDONTWRITEBYTECODE=1 python3 tests/test_adapter_boundary.py >/dev/null ||
   fail "适配层重量门禁未通过"

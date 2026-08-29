@@ -6,8 +6,8 @@
 ### 验收标准
 
 - 阶段不可跳跃，准入缺项和缺少授权会阻断受影响步骤。
-- `.gate/tasks.json` 统一注册多个任务及 active/inactive/completed 状态，任务事实、
-  授权、事件和 CI 记录按 issue key 隔离。
+- `.agenticops/tasks/index.json` 统一注册多个任务及 active/inactive/completed
+  状态，任务事实、授权、事件和 CI 记录按 issue key 隔离。
 - 多个任务可同时 active；Workflow 显式绑定 issue key，Hook 按 Jira 任务号或仓库
   与工作分支唯一解析，歧义时失败关闭。
 - 一个授权绑定多个仓库，每仓独立校验 origin、分支、范围和验证方式。

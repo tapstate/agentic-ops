@@ -108,8 +108,21 @@ class ContractConformanceTest(unittest.TestCase):
         for path in sorted((ROOT / "adapters" / "agents").glob("*/manifest.json")):
             assert_schema(self, manifest_schema, load_json(path), str(path))
 
-    def test_real_workspace_binding_conforms_to_schema(self):
-        schema = load_json(ROOT / "contracts" / "workspace-binding.schema.json")
+    def test_source_product_state_conforms_to_schema(self):
+        schema = load_json(ROOT / "contracts" / "product-state.schema.json")
+        document = {
+            "schema_version": 1,
+            "mode": "source",
+            "repository": "git@example.test:tapstate/agentic-ops.git",
+            "tracking_branch": "develop",
+            "current_ref": "a" * 40,
+            "previous_ref": None,
+        }
+        assert_schema(self, schema, document)
+
+    def test_real_workspace_state_conforms_to_schema(self):
+        workspace_schema = load_json(ROOT / "contracts" / "workspace.schema.json")
+        init_schema = load_json(ROOT / "contracts" / "workspace-init.schema.json")
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary) / "workspace"
             subprocess.run(
@@ -122,8 +135,6 @@ class ContractConformanceTest(unittest.TestCase):
                     str(workspace),
                     "--project",
                     "tapdata",
-                    "--agent",
-                    "both",
                 ],
                 check=True,
                 capture_output=True,
@@ -131,8 +142,13 @@ class ContractConformanceTest(unittest.TestCase):
             )
             assert_schema(
                 self,
-                schema,
-                load_json(workspace / ".agenticops.json"),
+                workspace_schema,
+                load_json(workspace / ".agenticops" / "workspace.json"),
+            )
+            assert_schema(
+                self,
+                init_schema,
+                load_json(workspace / ".agenticops" / "init.json"),
             )
             subprocess.run(
                 [
@@ -154,13 +170,13 @@ class ContractConformanceTest(unittest.TestCase):
             assert_schema(
                 self,
                 registry_schema,
-                load_json(workspace / ".gate" / "tasks.json"),
+                load_json(workspace / ".agenticops" / "tasks" / "index.json"),
             )
             task_schema = load_json(ROOT / "contracts" / "task-state.schema.json")
             assert_schema(
                 self,
                 task_schema,
-                load_json(workspace / ".gate" / "tasks" / "TAP-123" / "task.json"),
+                load_json(workspace / ".agenticops" / "tasks" / "TAP-123" / "state.json"),
             )
 
     def test_gate_validator_and_schema_accept_the_same_request(self):

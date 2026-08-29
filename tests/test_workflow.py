@@ -48,8 +48,12 @@ def grant(ws, issue="TAP-123"):
 def main():
     ws = Path(tempfile.mkdtemp(prefix="aogate-wf-"))
     try:
-        (ws / ".agenticops.json").write_text(
-            json.dumps({"project": "tapdata"}), encoding="utf-8"
+        (ws / ".agenticops").mkdir()
+        (ws / ".agenticops" / "workspace.json").write_text(
+            json.dumps({
+                "schema_version": 1, "product_root": str(ROOT),
+                "project": "tapdata", "agents": ["claude", "codex"],
+            }), encoding="utf-8"
         )
         # ---- 任务状态机 -------------------------------------------------
         code, out = run_tool("task.py", "init", "--issue-key", "TAP-123", "--task-class", "defect_fix", cwd=ws)
@@ -267,8 +271,12 @@ def main():
         legacy = ws / "legacy-workspace"
         legacy_gate = legacy / ".gate"
         legacy_gate.mkdir(parents=True)
-        (legacy / ".agenticops.json").write_text(
-            json.dumps({"project": "tapdata"}), encoding="utf-8"
+        (legacy / ".agenticops").mkdir()
+        (legacy / ".agenticops" / "workspace.json").write_text(
+            json.dumps({
+                "schema_version": 1, "product_root": str(ROOT),
+                "project": "tapdata", "agents": ["claude"],
+            }), encoding="utf-8"
         )
         (legacy_gate / "task.json").write_text(
             json.dumps({
@@ -284,6 +292,45 @@ def main():
         check("旧 task.json 迁入任务目录", task_store.task_path(legacy, "TAP-777").is_file(), True)
         check("旧 events.jsonl 随任务迁移", task_store.events_path(legacy, "TAP-777").is_file(), True)
         check("迁移后不存在旧任务事实源", (legacy_gate / "task.json").exists(), False)
+
+        # ---- 开发期多任务状态兼容迁移 ----------------------------------
+        legacy_multi = ws / "legacy-multi-workspace"
+        old_tasks = legacy_multi / ".gate" / "tasks"
+        old_tasks.mkdir(parents=True)
+        (legacy_multi / ".agenticops").mkdir()
+        (legacy_multi / ".agenticops" / "workspace.json").write_text(
+            json.dumps({
+                "schema_version": 1, "product_root": str(ROOT),
+                "project": "tapdata", "agents": ["claude"],
+            }), encoding="utf-8"
+        )
+        (legacy_multi / ".gate" / "tasks.json").write_text(
+            json.dumps({
+                "schema_version": 1, "project": "tapdata",
+                "tasks": {
+                    "TAP-888": {
+                        "status": "active",
+                        "created_at": "2026-08-29T00:00:00+0800",
+                        "updated_at": "2026-08-29T00:00:00+0800",
+                    }
+                },
+            }), encoding="utf-8"
+        )
+        (old_tasks / "TAP-888").mkdir()
+        (old_tasks / "TAP-888" / "task.json").write_text(
+            json.dumps({
+                "issue_key": "TAP-888", "task_class": "technical_task",
+                "stage": "waiting_takeover", "facts": {}, "repositories": [],
+                "pending": None, "history": [],
+            }), encoding="utf-8"
+        )
+        code, out = run_tool(
+            "task.py", "status", "--issue-key", "TAP-888",
+            "--dir", str(legacy_multi), cwd=legacy_multi,
+        )
+        check("开发期多任务状态自动迁移", code, 0)
+        check("旧多任务注册表迁入 tasks/index.json",
+              task_store.registry_path(legacy_multi).is_file(), True)
     finally:
         shutil.rmtree(ws, ignore_errors=True)
 
