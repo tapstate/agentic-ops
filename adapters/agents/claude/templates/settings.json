@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"__AGENTIC_OPS_HOME__/adapters/agents/claude/hook.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

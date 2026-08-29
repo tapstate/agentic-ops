@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticops.tapdata.net/contracts/operation-catalog-v1.schema.json",
+  "title": "AgenticOps Standard Operation Catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "operations"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "category", "description", "requestable"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "category": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+          "description": { "type": "string", "minLength": 1 },
+          "requestable": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

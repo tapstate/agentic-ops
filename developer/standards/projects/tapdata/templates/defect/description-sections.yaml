@@ -1,9 +1,0 @@
-workplane: developer
-sections:
-  问题分支: <confirmed_problem_branch>
-  问题版本: <confirmed_problem_version>
-  仓库分支: |
-    <optional_repository_branch_overrides_each_as_owner_repository_colon_branch>
-  问题现象: <confirmed_problem_summary>
-  复现路径: <confirmed_reproduction_path_or_known_trigger>
-  验收标准: <confirmed_acceptance_criteria>

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "principle": "能力按需增强，未迁移的辅助能力不得默认阻塞整个研发流程",
+  "continue_paths": [
+    "agent_native_capability",
+    "configured_adapter",
+    "structured_human_handoff"
+  ],
+  "mandatory_stop_reasons": [
+    "facts_untrusted",
+    "permission_missing",
+    "risk_requires_human",
+    "external_write_result_unknown"
+  ],
+  "scope": "只暂停无法安全完成的当前副作用步骤，不阻塞无依赖的后续准备工作"
+}

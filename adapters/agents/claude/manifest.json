@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "name": "claude",
+  "adapter_version": 1,
+  "entrypoint": "adapters/agents/claude/hook.py",
+  "capabilities": {
+    "decisions": ["allow", "ask", "deny"],
+    "ask_fallback": "native"
+  },
+  "artifacts": [
+    {
+      "template": "adapters/agents/claude/templates/settings.json",
+      "target": ".claude/settings.json"
+    }
+  ],
+  "project_skill_target": null
+}

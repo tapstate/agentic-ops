@@ -1,0 +1,68 @@
+schema_version: 1
+
+story_categories:
+  - internal
+  - product
+
+stories:
+  - story_id: INT-001
+    category: internal
+    title: 审查并发布 AgenticOps
+    document: docs/user-stories/v1/int-001-release-governance.md
+    protected_paths:
+      - .agentic-ops-source
+      - .gitignore
+      - .githooks/**
+      - .github/**
+      - AGENTS.md
+      - README.md
+      - docs/**
+      - internal/**
+      - bin/**
+      - developer/**
+      - maintainer/**
+      - shared/**
+    acceptance_checks: [python_runtime, resource_contracts, release_workflow, story_registry]
+    evidence_requirements:
+      - 产品验证、故事映射和发布门禁结果
+      - main、develop 与版本 Tag 的发布后回读
+
+  - story_id: PROD-001
+    category: product
+    title: 安装并接入多种 Agent
+    document: docs/user-stories/v1/prod-001-install-and-connect-agent.md
+    protected_paths: [agenticops, adapters/**, bootstrap/**, contracts/**, tests/test_install.sh, tests/test_adapter_boundary.py, tests/test_contracts.py]
+    acceptance_checks: [python_runtime, resource_contracts]
+    evidence_requirements:
+      - macOS 与 Linux 的轻依赖安装边界
+      - 工作目录初始化、更新和回退结果
+
+  - story_id: PROD-002
+    category: product
+    title: 在副作用前执行统一门禁
+    document: docs/user-stories/v1/prod-002-policy-gate.md
+    protected_paths: [gate/**, policies/**, docs/security/**, tests/test_gate.py]
+    acceptance_checks: [python_runtime, resource_contracts]
+    evidence_requirements:
+      - allow、ask、deny 与未知外部写的判定结果
+      - 授权失效、保护分支和高风险操作边界
+
+  - story_id: PROD-003
+    category: product
+    title: 推进并恢复多仓库研发任务
+    document: docs/user-stories/v1/prod-003-multi-repository-task.md
+    protected_paths: [workflow/**, tests/test_workflow.py]
+    acceptance_checks: [python_runtime, resource_contracts]
+    evidence_requirements:
+      - 阶段、准入、授权、pending 和恢复结果
+      - 多仓库绑定、分仓 PR/CI 与任务级证据
+
+  - story_id: PROD-004
+    category: product
+    title: 低成本适配产品项目
+    document: docs/user-stories/v1/prod-004-adapt-project.md
+    protected_paths: [projects/**]
+    acceptance_checks: [python_runtime, resource_contracts]
+    evidence_requirements:
+      - 项目 Profile、准入规则和生成视图一致性
+      - 未登记项目事实的保守停止结果

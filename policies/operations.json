@@ -1,0 +1,55 @@
+{
+  "policy": "agenticops-default",
+  "version": 1,
+  "operations": {
+    "write_jira_comment": { "level": "free" },
+    "write_local_evidence": { "level": "free" },
+    "transition_jira_status": { "level": "gated" },
+    "write_jira_worklog": { "level": "gated" },
+    "edit_jira_issue": { "level": "gated" },
+    "git_commit": { "level": "gated" },
+    "git_push": { "level": "gated" },
+    "create_pr": { "level": "gated" },
+    "update_pr": { "level": "gated" },
+    "fix_pr_comments": { "level": "gated" },
+    "git_merge": { "level": "excluded" },
+    "pr_merge": { "level": "excluded" },
+    "git_rebase": { "level": "excluded" },
+    "git_clean": { "level": "excluded" },
+    "git_tag": { "level": "excluded" },
+    "release": { "level": "excluded" },
+    "scope_change": { "level": "excluded" },
+    "create_repository": { "level": "excluded" },
+    "protected_branch_push": { "level": "forbidden" },
+    "force_push": { "level": "forbidden" },
+    "history_rewrite": { "level": "forbidden" },
+    "unknown_external_write": { "level": "gated" }
+  },
+  "authorization_scopes": {
+    "task_execution": {
+      "required_bindings": [
+        "issue_key",
+        "agentic_run_id",
+        "agent_id",
+        "approved_plan_version",
+        "repositories"
+      ],
+      "repository_bindings": [
+        "repository",
+        "work_branch",
+        "base_branch",
+        "approved_scope",
+        "verification_method"
+      ],
+      "covered_operations": [
+        "git_commit",
+        "git_push",
+        "write_jira_comment",
+        "create_pr",
+        "update_pr",
+        "fix_pr_comments"
+      ]
+    }
+  },
+  "protected_branches": ["main", "master", "develop", "release/*"]
+}

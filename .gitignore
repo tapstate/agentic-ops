@@ -8,13 +8,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-bin/*
-!bin/.gitkeep
-
 .local/*
 !.local/.gitkeep
-maintainer/.local/
-developer/.local/
+internal/.local/
 
 .agentic-ops/
 user/

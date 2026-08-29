@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "name": "codex",
+  "adapter_version": 1,
+  "entrypoint": "adapters/agents/codex/hook.py",
+  "capabilities": {
+    "decisions": ["allow", "deny"],
+    "ask_fallback": "deny_with_guidance"
+  },
+  "artifacts": [
+    {
+      "template": "adapters/agents/codex/templates/hooks.example.json",
+      "target": ".codex/agenticops-hooks.example.json"
+    }
+  ],
+  "project_skill_target": null
+}

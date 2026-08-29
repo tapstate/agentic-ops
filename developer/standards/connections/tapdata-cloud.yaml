@@ -1,8 +1,0 @@
-schema_version: 1
-connection_id: tapdata-cloud
-base_url: https://tapdata.atlassian.net
-timeout_seconds: 20
-auth:
-  type: basic_api_token
-  email_env: TAPDATA_JIRA_EMAIL
-  token_env: TAPDATA_JIRA_API_TOKEN

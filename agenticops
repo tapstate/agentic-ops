@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_path="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$0")"
+product_root="$(CDPATH= cd -- "$(dirname -- "$script_path")" && pwd -P)"
+
+usage() {
+  cat <<'EOF'
+用法：
+  agenticops install [install 参数]
+  agenticops init [--workspace <目录>] [--project <项目>] [--agent claude|codex|both]
+  agenticops doctor [--workspace <目录>]
+  agenticops repair [--workspace <目录>]
+  agenticops codex [--workspace <目录>] [-- <Codex 参数>]
+  agenticops claude [--workspace <目录>] [-- <Claude 参数>]
+  agenticops update
+  agenticops rollback
+EOF
+}
+
+workspace="$(pwd -P)"
+parse_workspace() {
+  forwarded=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --workspace)
+        test "$#" -ge 2 || { usage >&2; exit 2; }
+        workspace="$2"
+        shift 2
+        ;;
+      --)
+        shift
+        forwarded+=("$@")
+        break
+        ;;
+      *)
+        forwarded+=("$1")
+        shift
+        ;;
+    esac
+  done
+}
+
+start_agent() {
+  agent_name="$1"
+  shift
+  parse_workspace "$@"
+  python3 "$product_root/bootstrap/render.py" \
+    --install-home "$product_root" --workspace "$workspace" --refresh
+  command -v "$agent_name" >/dev/null 2>&1 || {
+    printf 'AgenticOps：未找到 Agent 命令：%s\n' "$agent_name" >&2
+    exit 2
+  }
+  cd "$workspace"
+  exec "$agent_name" "${forwarded[@]}"
+}
+
+command_name="${1:-}"
+if [ -z "$command_name" ]; then
+  usage
+  exit 2
+fi
+shift
+
+case "$command_name" in
+  install)
+    exec bash "$product_root/bootstrap/install.sh" "$@"
+    ;;
+  init)
+    parse_workspace "$@"
+    exec env AGENTIC_OPS_HOME="$product_root" \
+      bash "$product_root/bootstrap/workspace-init.sh" \
+        --workspace "$workspace" "${forwarded[@]}"
+    ;;
+  doctor)
+    parse_workspace "$@"
+    test "${#forwarded[@]}" -eq 0 || { usage >&2; exit 2; }
+    exec python3 "$product_root/bootstrap/render.py" \
+      --install-home "$product_root" --workspace "$workspace" --check
+    ;;
+  repair)
+    parse_workspace "$@"
+    test "${#forwarded[@]}" -eq 0 || { usage >&2; exit 2; }
+    exec python3 "$product_root/bootstrap/render.py" \
+      --install-home "$product_root" --workspace "$workspace" --refresh
+    ;;
+  codex|claude)
+    start_agent "$command_name" "$@"
+    ;;
+  update)
+    test "$#" -eq 0 || { usage >&2; exit 2; }
+    test -f "$product_root/user/current-ref" || {
+      printf 'AgenticOps：源码 Product Root 不执行安装更新，请通过发布流程更新源码\n' >&2
+      exit 2
+    }
+    exec env AGENTIC_OPS_HOME="$product_root" bash "$product_root/bootstrap/update.sh"
+    ;;
+  rollback)
+    test "$#" -eq 0 || { usage >&2; exit 2; }
+    test -f "$product_root/user/current-ref" || {
+      printf 'AgenticOps：源码 Product Root 不执行安装回退，请使用 Git 和发布流程\n' >&2
+      exit 2
+    }
+    exec env AGENTIC_OPS_HOME="$product_root" bash "$product_root/bootstrap/rollback.sh"
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    printf 'AgenticOps：未知命令：%s\n' "$command_name" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

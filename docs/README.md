@@ -1,83 +1,14 @@
-# AgenticOps 文档
+# AgenticOps 文档入口
 
-本文是 `docs/` 目录索引，用于帮助人审阅 AgenticOps 的终态设计、规则和故事线。阶段性计划、进度、阻塞和验收由 Jira 管理；仓库不再建立第二份计划事实源。
+当前有效文档：
 
-`docs/` 面向项目维护者和研发工程师阅读。根仓库 AI 固定进入 maintainer，业务项目工作空间 AI 固定进入 developer；AIAgent 不通过本文档自行选择工作面。
-
-## 角色入口
-
-- [项目维护者上手](maintainers/getting-started.md)
-- [研发工程师上手](development-engineers/getting-started.md)
-- developer 工作面由 `ao-work workspace init` 初始化，并写入业务项目工作空间 `AGENTS.md`。
-
-## 核心文档
-
-- [发布检查清单](review-checklist.md)
-- [设计决策记录](decision-log.md)
 - [项目目标](strategy/project-goals.md)
-- [目标定位](strategy/positioning.md)
-- [长期定位](strategy/long-term-positioning.md)
-- [旧统一 CLI 项目全景（冻结迁移基线）](strategy/agenticops-project-overview.md)
-- [AgenticOps Skill 与 Python Runtime 驱动项目全景](strategy/skill-python-agenticops-project-overview.md)
-- [项目规则](project-rules.md)
-- [配置规范](configuration-standards.md)
-- [开发风格](development-style.md)
-- [AIAgent 工作规则](ai-working-rules.md)
+- [使用指引](usage-guide.md)
+- [v1 工程架构](architecture/agenticops-v1-architecture.md)
+- [权限与安全边界](security/permissions.md)
+- [Claude 端到端验证](testing/e2e-claude.md)
+- [Codex 端到端验证](testing/e2e-codex.md)
+- [v1 用户故事](user-stories/v1/)
 
-## 架构文档
-
-- [项目结构（现役）](architecture/project-structure.md)
-- [Go 统一 CLI 设计（冻结迁移基线）](architecture/agenticops-current-design.md)
-- [完整设计实现方案](architecture/full-design-implementation-design.md)
-- [Jira 门禁式缺陷修复流程](architecture/jira-gated-defect-workflow.md)
-- [源码发布流程](architecture/source-release-workflow-design.md)
-
-## 推进事实源
-
-- Jira `AO-11`：Skill + Python Runtime 重构的计划、进度和验收事实源。
-- 顶层 `plans/` 已删除；历史计划只通过 Git 历史查阅，不得恢复为第二份实施事实源。
-
-## 产品流程
-
-- [故事线总览](user-stories/agenticops-user-stories.md)
-- [项目维护者故事](user-stories/project-maintainer-stories.md)
-- [研发工程师故事](user-stories/development-engineer-stories.md)
-- [标准流程注册处](processes/standard-process-registry.md)
-- [人工决策项处理规范指引](processes/human-decision-handling-guide.md)
-- [反馈闭环](workflows/feedback-loop.md)
-- [端到端演示](examples/end-to-end-demo.md)
-- [v0.3 AO 真实试运行结果（冻结历史证据）](examples/v0.3-ao-pilot-result.md)
-
-## 契约与配置
-
-- [操作契约](contracts/operation-contract.md)
-- [配置规范](configuration-standards.md)
-- [AI 操作任务表单标准](forms/task-form-standard.md)
-- [工作流配置](profiles/workflow-profile.md)
-- [Python Runtime](runtime/python-runtime.md)
-- [Go CLI 运行时（冻结迁移基线）](runtime/cli-runtime.md)
-- [旧二进制版本号设计（冻结迁移基线）](runtime/versioning.md)
-- [问题修复与同步路径](runtime/problem-resolution-and-update.md)
-- [证据模板](templates/evidence-templates.md)
-
-## AI 入口
-
-- 根仓库：`../AGENTS.md` -> `../maintainer/AGENTS.md`。
-- 业务项目工作空间：由 `ao-work workspace init` 生成本地 `AGENTS.md` 并加载 developer 资产。
-
-## 规划规则
-
-涉及设计、优化、计划、架构调整、流程调整、标准资产调整或会影响项目演进方向的变更前，必须先读取 [项目目标](strategy/project-goals.md)。
-
-所有计划必须基于已确认的故事线和相对稳定的架构拆解，并写入对应 Jira。推荐顺序是：
-
-```text
-故事线
--> 架构边界
--> 大阶段
--> 中任务
--> 小步骤
--> 验证命令
-```
-
-Jira Description 记录可验证交付目标、实施拆解、范围、非目标和验收方式；Comment 记录进度、阻塞与验证结果。README 不承担阶段性成果记录职责。
+旧版 AgenticOps 的设计、合同和操作说明以 Git Tag `v0.7` 为准，不在 v1 现役
+文档树保留重复版本。具体工作项、进度、阻塞和验收由 Jira 管理。

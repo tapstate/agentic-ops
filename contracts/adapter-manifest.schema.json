@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticops.tapdata.net/contracts/adapter-manifest-v1.schema.json",
+  "title": "AgenticOps Agent Adapter Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "name", "adapter_version", "entrypoint", "capabilities", "artifacts"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "adapter_version": { "type": "integer", "minimum": 1 },
+    "entrypoint": { "type": "string", "minLength": 1 },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decisions", "ask_fallback"],
+      "properties": {
+        "decisions": {
+          "type": "array",
+          "items": { "enum": ["allow", "ask", "deny"] },
+          "minItems": 2,
+          "uniqueItems": true
+        },
+        "ask_fallback": { "enum": ["native", "deny_with_guidance"] }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["template", "target"],
+        "properties": {
+          "template": { "type": "string", "minLength": 1 },
+          "target": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "project_skill_target": { "type": ["string", "null"] }
+  }
+}

@@ -1,146 +1,112 @@
 # AgenticOps 仓库指令
 
-## 目标文档必读
+## 目标与必读文档
 
-涉及设计、优化、计划、架构调整、流程调整、标准资产调整或会影响项目演进方向的变更前，必须先读取 `docs/strategy/project-goals.md`。
+涉及设计、计划、架构、流程、策略或项目适配变更前，必须先读取
+`docs/strategy/project-goals.md`。项目方向以该文档为准；工作项、进度、阻塞和
+验收写入 Jira，不在仓库新增执行计划。
 
-普通小修、测试、构建和不影响方向的局部文档措辞调整，不因本条额外增加阅读要求。
+AgenticOps 是公司级 Agentic 研发基础设施。现役架构基于 ao-gate-poc 的思想：
+Agent 平台负责执行，Hook 在副作用前拦截，Adapter 转换为 AgenticOps 标准协议，
+Policy 配置决策，少量 Workflow 工具只保存确定性状态，项目差异单独配置。
 
-## 项目结构
+## 单一产品架构
 
-核心目录约定：
+- `contracts/`：Gate 请求、判定和 Adapter Manifest 的版本化标准契约。
+- `gate/`：平台无关门禁内核，只接受标准操作并执行上下文与策略判定。
+- `policies/`：公司级操作策略和流程连续性原则，不写项目特例。
+- `workflow/`：任务阶段、授权、CI 和证据等小型确定性工具。
+- `projects/<project>/`：项目 Profile、准入规则和 Runbook；项目之间不得混写。
+- `adapters/agents/`：Agent Hook 协议薄转换；`adapters/tools/`：MCP、CLI 工具映射。
+  两者都不得复制策略、状态机或项目规则。
+- `bootstrap/`：安装、更新、回退和工作目录接线，不实现业务流程。
+- `tests/`：产品主链路测试。
+- `internal/`：仅供本仓库使用的故事门禁和发布工具，不进入研发安装目录，也不是
+  第二套产品 Runtime。
+- `docs/`：当前有效的人读目标、架构、安全、测试和故事合同。
+- 根 `agenticops`：中央 Product Root 薄入口，只负责安装生命周期、工作目录接线、
+  诊断、修复和启动 Agent，不承载 Gate、Policy、Project 或 Workflow 逻辑。
 
-- `maintainer/`：项目维护工作面，保存 `ao-maint`、维护 Runtime、维护 Skill、源头规则、故事质量门禁、发布脚本和维护测试。
-- `developer/`：研发工程师工作面，保存 `ao-work`、业务 Runtime、业务 Skill、AI 执行规则、标准资产、Shell Bootstrap 和业务测试。
-- `shared/`：经过明确审查、两个工作面都可读取的极少量中立资料；不得把它作为绕过隔离的公共代码区。
-- `docs/`：人读文档，包括架构、规则、用户故事、流程和设计说明。
+旧版 AgenticOps 只通过 `v0.7` 和 Git 历史查阅。不得恢复 `maintainer/`、
+`developer/` 工作面、`ao-work`、`ao_work`、`ao-maint`、Go Runtime、
+`agentic-cli` 或兼容入口。
 
-旧 Go Runtime、平台二进制、`agentic-cli`、`install-resources/` 和根目录旧运行资产已从现役结构删除；历史实现只通过版本分支、Tag 和 Git 历史查阅，不得从历史路径恢复兼容入口。
+## 边界与规则归属
 
-项目工作空间下的 `.superpowers/` 只保存 Superpowers 等工具的本地执行状态、检查点、临时分析和缓存，不属于项目资料，不维护、不提交，也不能作为计划、任务状态或审计事实源。正式设计必须写入 `docs/` 的对应主题目录；实施计划、进度、阻塞和验收写入 Jira，不得创建新的仓库计划文件或提交 `docs/superpowers/`。
+- Jira 是任务事实源，Git 是代码事实源，GitHub PR/CI 是审查和检查事实源；
+  `.gate/` 只保存本地执行、恢复、授权和门禁事件。
+- 公司通用操作边界进入 `policies/`；项目 Jira、分支、准入和验证差异进入
+  `projects/<project>/`；平台协议差异进入 `adapters/`；确定性状态逻辑才进入
+  `workflow/`。
+- Hook、MCP 和 Skill 接线是 Manifest 与模板生成的产物，不是规则事实源。Gate
+  不得出现平台协议字段；Adapter 必须无状态，并通过 `tests/test_adapter_boundary.py`
+  的文件数、代码预算、禁止依赖和禁止状态写入检查。
+- 项目规则优先于 AIAgent 规则，AIAgent 规则优先于公司规则，个人偏好最低。
+- 当前仓库规则只约束 AgenticOps 本身，不得把 TapData、TapState 等业务仓库的
+  分支、测试和目录约定反向写入本仓库规则。
+- AgenticOps 源码仓库、`~/.agentic-ops` 安装目录和各业务项目工作空间必须分开。
+- 源码仓库和安装目录使用相同 Product Root 结构和入口；项目工作空间只保存项目
+  绑定、归一化多任务 `.gate/` 状态和可再生平台接线，不得复制中央 Policy、Project
+  Skill 或 Runtime。
 
-## 项目边界与工作区隔离
+## 流程连续性
 
-当前规则只适用于 `tapstate/agentic-ops` 项目本身。不得把其它项目的研发规范、分支策略、验证命令、目录约定或历史临时规则合并进 AgenticOps 当前项目规则。
+未迁移的辅助能力不能默认阻塞整个研发流程。优先使用 Agent 原生能力或已配置
+Adapter；没有安全自动路径时，只暂停当前副作用步骤并输出结构化人工接力，继续
+不依赖该步骤的准备工作。
 
-不同项目的 AI 工作空间必须分开维护。AgenticOps 源头仓库、全局安装目录 `~/.agentic-ops`、以及 `tapstate`、`tapdata` 等具体项目 AI 工作空间不能混用；只有明确标注为跨项目通用资产的规则，才可以沉淀到 AgenticOps 通用资料中。
+以下情况必须停止，不得因“流程要流畅”而放行：事实不可信、权限不足、风险要求
+人工决策、外部写入结果不明确，以及合并、发布、Tag、保护分支写入、强推和历史
+改写。不得静默改策略、改 `.gate/` 状态或换工具绕过门禁。
 
-## 工作面硬隔离
+## 语言、安全与文件
 
-AgenticOps 只有两个工作面：`maintainer` 和 `developer`。目录先按工作面划分，再在工作面内按 `runtime`、`skills`、`rules`、`standards`、`scripts`、`tests` 等资产类型划分。
-
-- 源头仓库必须包含内容为 `maintainer` 的 `.agentic-ops-source` 固定标记；不得用通用文档路径猜测源头身份。
-- 根仓库及 AgenticOps worktree 的 AI 入口固定为本文件，并继续加载 `maintainer/AGENTS.md`；不得自动加载 `developer/AGENTS.md`、业务 Skill、业务授权或业务项目配置。
-- 业务项目工作空间的 AI 入口固定由 `ao-work workspace init` 生成，只加载 `developer/AGENTS.md`、业务 Skill、业务 Rule、业务标准资产和该工作空间配置；不得加载根 `AGENTS.md`、`maintainer/`、项目目标、源头分支策略或发布流程。
-- 项目维护命令只有 `ao-maint`，研发任务命令只有 `ao-work`。不得提供 `agentic-cli` 兼容别名，也不得通过 `--mode`、环境变量或聊天指令在同一进程中切换工作面。
-- Python 包、Shell 入口、授权、配置、状态目录和测试必须分别归属一个工作面。两个 Runtime 不得互相导入；Skill 必须在标准 frontmatter 的 `metadata.workplane` 声明唯一工作面，不得声明多工作面。
-- `~/.agentic-ops` 只安装 `developer` 工作面，采用 developer-only sparse managed clone；正常文件树中不得出现 `maintainer/` 的 Runtime、Skill、Rule、脚本、授权或配置。
-- developer-only sparse managed clone 是防误入的工作树与入口隔离，不是 Git 内容权限边界；developer AI 不得通过 `.git`、`git show` 或修改 sparse 范围恢复 maintainer 资产。若要求内容级不可达，必须采用独立 developer 分发仓库或导出制品并专题验收。
-- 任何确需跨工作面复用的资料必须先证明不含角色权限、工作流决策或副作用能力，再显式进入 `shared/` 并补充隔离测试；默认不共享。
-- 当前工作面与命令、仓库、AI 入口或资源归属不一致时必须停止，不能由 AI 猜测、降级或跨面调用。
-
-## 规范类型边界
-
-当前项目维护规范只约束维护 `tapstate/agentic-ops` 源头仓库的维护者或项目维护代理，不等同于安装后 AIAgent 执行业务 Jira 任务的运行规范。
-
-安装后 AIAgent 的执行规范必须维护在 AI 员工手册、操作契约、工作流配置、运行资产、模板和对应运行文档中。不得把当前项目的提交规则、分支规则或仓库维护流程直接套用为 AIAgent 运行期执行规范；也不得把某个业务项目的 AIAgent 执行细则反向写成 AgenticOps 当前项目维护规则。
-
-## 规则类别与优先级
-
-规则写入前必须先区分类别，不得把个人规则、公司规则、项目规则和 AIAgent 规则混写。
-
-规则冲突时按以下优先级执行：
-
-```text
-项目规则 > AIAgent 规则 > 公司规则 > 个人规则
-```
-
-- 个人规则：只记录个人偏好、本机身份、个人 wiki 和本地工作流，维护在个人记忆库或本地 `~/.agentic-ops/user/`，不得写入公司或项目标准资产。
-- 公司规则：只记录 TapData 跨项目硬规定、事实源边界、人工门禁、保密和通用提交要求，维护在 `developer/standards/company/`。
-- 项目规则：只记录具体项目的语言、分支、提交、验证和工具例外，维护在对应项目仓库规则、项目 AI 工作空间或 `developer/standards/projects/<project>/`。
-- AIAgent 规则：只记录 AIAgent 执行时的停止条件、交互语言、门禁、证据、审计和工具调用要求，维护在 AI 员工手册、操作契约、策略、运行手册、模板或当前工作空间 `AGENTS.md`。
-
-项目规则覆盖公司规则或 AIAgent 规则时，必须能从项目规则文件或项目工作空间配置中看到明确来源；不得只依赖聊天上下文。
-
-## 语言与命名
-
-面向用户、研发工程师和审阅者的可见文档标题默认使用中文。产品名、角色名、工具名、命令、配置字段、协议字段、文件名、目录名和稳定编号可以保留英文或缩写。
-
-AIAgent 面向用户、研发工程师、流程负责人、审阅者或 Jira 参与者的自然语言交互必须使用中文。
-
-Jira 交互中的人可见内容必须使用中文，包括摘要、标题、描述、评论、工作日志、证据正文、阻塞说明、补卡说明和任务审计记录。Jira 字段名、状态名、transition 名称、issue key、命令、配置字段、协议字段、错误码、代码标识和日志关键字可以保留原始英文或缩写，但必须用中文解释结论、风险和需要人工处理的动作。
-
-目录名和文件名默认使用英文 ASCII lowercase-kebab-case。Markdown 正文以中文为主，首次出现关键术语时可中英并列。
-
-## 运行时方向
-
-AgenticOps 软件本身的缺陷、能力缺口、内部状态异常或配套工具故障不得直接阻塞业务开发。安全恢复失败且继续开发与 AgenticOps 控制功能冲突时，必须进入结构化人工决策，展示故障证据、已确认业务事实、有限继续方案、精确授权与验证边界、损失的自动化审计能力和剩余风险；不得由 AI 静默绕过或伪造成功。业务事实不可信、权限不足，以及合并、发布、Tag、保护分支写入、强推、历史改写和结果不明确的外部写入重试不因此自动放行。项目维护开发中的功能若与本规则冲突，必须请求人工决策。
-
-目标运行架构是 `Skill + Python Runtime + Shell Bootstrap + Rule`。维护工作面入口为 `./maintainer/bin/ao-maint`，研发工程师工作面入口为安装后的 `ao-work`。Python Runtime 承载契约、状态、API、门禁、证据、恢复和反馈；Shell Bootstrap 只负责认证安装引导、轻量环境检测、developer-only sparse managed clone 更新、`uv` 环境准备、启动和回滚。维护 AgenticOps 源头仓库时，`maintainer/scripts/release.sh`、`maintainer/scripts/hotfix.sh` 及 `maintainer/scripts/lib/` 可以作为项目级例外。AgenticOps 现役实现不包含 Go Runtime、项目自有平台二进制或 `agentic-cli` 兼容入口。
-
-`~/.agentic-ops` 是稳定 `main` 的 developer-only sparse managed clone，代表一名研发员的 developer 安装并保存安装级身份与凭证，但不是具体项目运行目录。具体项目运行目录是业务项目 AI 工作空间，例如 `tapstate` 或 `tapdata`；同一安装下的工作空间继承同一研发员身份，只保存项目绑定与任务状态。
+- 用户可见文档和 Jira 人可见内容使用中文；字段、命令、协议和代码标识可保留英文。
+- 目录和文件默认使用英文 ASCII lowercase-kebab-case。
+- 不提交 secrets、tokens、private keys、客户数据或原始敏感日志。
+- `.superpowers/` 只属于本机临时状态，不维护、不提交，也不是事实源。
+- Skill 只能指导 Agent 使用现役架构，不得承担可由 Policy 或 Runtime 强制的规则。
 
 ## 测试与验证
 
-引入运行代码后，必须在同一变更中补充可执行验证命令。现役固定完整验证为：
+运行代码变更必须补充可执行验证。现役固定验证为：
 
 ```sh
-bash maintainer/scripts/test-python-runtime.sh
-bash maintainer/scripts/test-resources.sh
-bash developer/tests/bootstrap/test_install_boundary.sh
-bash maintainer/scripts/test-release-workflow.sh
+bash internal/tests/test_runtime.sh
+bash internal/tests/test_resources.sh
+bash tests/test_install.sh
+bash internal/tests/test_release.sh
 ```
 
-这四项必须分别覆盖 maintainer/developer Runtime、命令解析、AI 入口、Skill 归属、授权与配置隔离、developer-only 安装、更新、回滚、E2E、正常发布门禁和 Hotfix 直合。固定正常发布验证以 `maintainer/scripts/release.sh` 的固化编排为准，不得替换或跳过；Hotfix 执行期不运行完整发布验证。
+四项分别覆盖 Gate/Workflow、资源边界、产品安装与工作目录接线、仓库发布治理。
+正常发布的固定验证由 `internal/release/release.sh` 编排，不得跳过。OPA 未安装时可
+跳过 Rego 一致性测试，但必须明确记录；产品 Python 运行时保持 Python 3.9+ 且无
+第三方依赖，`internal/` 的 PyYAML 依赖不得进入产品安装。
 
-所有 secrets、tokens、private keys 和原始敏感日志都不得提交。
+## 分支与发布
 
-## 分支与发布规则
+- 默认分支是 `main`，日常开发分支是 `develop`；`main` 禁止直接提交和普通直推。
+- 正常发布使用 `internal/release/release.sh prepare --version vX.Y`，再使用
+  `publish --version vX.Y`。软门禁模式显式增加 `--allow-soft-gate`。
+- `main` 只通过 Merge commit 合入；发布脚本回读合并事实、同步 `develop`，最后
+  才创建指向实际 Merge commit 的 annotated Tag。
+- Hotfix 只使用 `internal/release/hotfix.sh <JIRA-KEY>`。该调用是快速修复授权，
+  脚本只允许原子更新 `main` 和 `develop`；冲突、分叉或回读不明时失败关闭。
+- 候选修改 Hook、故事门禁、注册表、锁文件或发布脚本时，自动发布失败关闭，必须
+  通过受保护 `main` 的独立人工审查 PR 完成信任根升级。
+- 源码版本格式为 `<分支>-<标签>-<提交数>-<提交编号>`，由
+  `python3 internal/version.py` 输出；发布版本使用 `v1.x`。
 
-- GitHub 默认分支是 `main`，日常开发分支是 `develop`。
-- `main` 禁止直接提交，正常发布禁止直接推送。版本化 `.githooks` 是 Hook 策略源，Git `core.hooksPath` 必须指向 common directory 中从已接受 `HEAD` 加载策略的 trusted launcher，不能直接执行 candidate 工作树 Hook。正常发布的硬门禁模式还必须通过无 bypass 的 GitHub Repository Ruleset 要求 PR 合入、至少 1 个独立人工批准、最后推送者不能自批、dismiss stale approvals、解决全部 review threads，并禁止强推和删除；GitHub Free 私有仓库使用显式软门禁时，接受服务器端无法阻止其它入口直推和强制独立审批的剩余风险。唯一脚本化直推例外是下述 Jira key 绑定 Hotfix。
-- 正常发布使用 `maintainer/scripts/release.sh prepare --version vX.Y` 对固定 HEAD 完成完整验证；软门禁验证通过后只创建或复用本地固定 `release/vX.Y`，不创建 Tag。再使用 `maintainer/scripts/release.sh publish --version vX.Y` 创建或复用到 `main` 的 PR；`main` 只通过 Merge commit 合入，脚本随后快进同步 `develop`，最后才推送指向实际 Merge commit 的 annotated tag。软门禁模式必须显式增加 `--allow-soft-gate`。
-- Hotfix 只使用 `maintainer/scripts/hotfix.sh <KEY>`，例如 `maintainer/scripts/hotfix.sh AO-123`。它不创建分支、PR 或 Tag，不调用 Jira 或 `gh`，不执行完整发布验证，也不设置额外人工门禁；调用命令本身就是本次快速修复授权。脚本从任意干净分支启动，自行刷新远端、切换或创建本地 `develop`、快进落后的本地分支，并把本地已提交但尚未推送的 `develop` 变更纳入合并；随后以固定的 `origin/main` 和 `develop` 候选生成带 Jira key 的 Merge commit，原子推送同一提交到远端 `main` 和 `develop` 并回读。真实分叉、自动合并冲突或原子推送失败时关闭，不执行交互式冲突处理、rebase、cherry-pick、强推或部分更新。
-- 发布脚本在执行前检查 trusted Hook launcher、远端 `develop` 和默认分支。硬门禁模式还检查 Auto-merge 和 `main` Ruleset，配置缺失时逐项引导确认，非交互配置必须显式传入 `--configure-workflow`；软门禁模式只放宽 Ruleset 和 Auto-merge，并强制检查 Merge commit 可用、固定发布 HEAD、人工合并、合并事实和二次完整验证。
-- 正常发布 `publish` 必须从刷新后的 `origin/main` 快照执行故事门禁，candidate Hook、launcher 或 Runtime 不得自证。`origin/main` 缺少新门禁，或候选修改 Hook、故事门禁、注册表、锁文件和发布脚本等信任根时，自动 publish 必须失败关闭，改走受保护 `main` 的独立人工审查 PR。Hotfix 不执行故事门禁，风险由 D-055 的显式快速修复取舍承担。
-- `publish` 只有在完整验证通过后才展示最终确认；非交互发布必须显式传入 `--confirm-release`。脚本必须等待 PR 实际合并并验证 `origin/main` 包含发布 HEAD，正常发布最后才允许推送不可变 tag。
+## 提交与授权
 
-## 提交规则
+提交标题推荐：`<type>(<scope>): <Jira key> <中文主题>`。非平凡提交正文使用中文，
+说明变更、原因、验证和风险；一个提交只包含一个逻辑变更。
 
-本节属于 `tapstate/agentic-ops` 项目规则，只约束维护 AgenticOps 源头仓库。
+没有可确认的 Jira key 时不得提交。只有用户明确要求提交，或工作项级连续授权
+覆盖提交时，才可执行 `git commit`；推送同理。工作项级授权必须绑定 Jira 工作项、
+运行编号、仓库、工作分支、目标分支、修改范围和验证方式。所有权、范围、风险或
+必要验证变化时授权失效。合并、发布、Tag、直接修改 `main`、强推和历史改写始终
+需要新的明确授权。
 
-提交信息推荐格式：
-
-```text
-<type>(<scope>): <tag> <subject>
-```
-
-AgenticOps 是内部项目，提交标题和提交描述正文使用中文。
-
-`type`、`scope`、Jira key、命令和配置字段作为结构化标识可以保留英文。`tag` 指 Jira 任务编号，例如 `TAP-1234`。TapData 公司代码提交必须绑定 Jira 任务卡片，不得省略 `<tag>`。常用类型：`Feat`、`Fix`、`Docs`、`Style`、`Refactor`、`Test`、`Chore`。
-
-Jira 任务编号必须能从分支名、用户指令、Jira 卡片或任务上下文中确认；无法确认时必须停止并请求研发工程师补齐，不得创建无 Jira 绑定的代码提交。
-
-`scope` 使用英文模块名、包名或目录名；没有清晰模块时可以省略。`subject` 使用中文，简洁说明本次提交做了什么，末尾不加句号。
-
-commit body / description 使用中文，说明做了什么、解决什么问题、为什么这样做、验证结果和风险。非平凡提交必须包含 body。
-
-在 shell 中创建非平凡提交时使用以下模板：
-
-```bash
-git commit \
-  -m "<type>(<scope>): <tag> <subject>" \
-  -m "<body>"
-```
-
-Git 会在两个 `-m` 之间生成一个空行。`<body>` 可以包含真实换行，但不得使用字面量 `\n` 代替换行。
-
-每个提交只包含一个逻辑变更。不得在提交信息中粘贴完整 Jira 描述、敏感日志、凭证或未经脱敏的客户信息。
-
-AIAgent 只有在研发工程师明确要求“提交变更”或“提交代码”，或确认版本化设计或修复计划并授予工作项级连续执行授权后，才能执行 `git commit`。只有在明确要求推送、执行发布或有效工作项级连续执行授权覆盖推送时，才能执行 `git push`。
-
-工作项级连续执行授权必须绑定 Jira 工作项、`agentic_run_id`、目标仓库、工作分支、目标分支、修改范围和验证方式。授权范围内可以连续完成实现、验证、提交、任务分支推送、必要 Jira 回写以及创建或更新 PR，并统一停在 PR 审查；不再为每个已覆盖动作重复确认。所有权或绑定事实变化、范围或风险扩大、必要验证受阻、连续失败或外部写入结果不明确时，授权立即失效。合并、发布、Git Tag、直接修改 `main`、强推、历史改写和范围变化始终需要新的人工确认。
-
-故事影响只在 worktree / staged 阶段预警并运行固定验收，不得在形成代码审查事实前要求确认。功能、修复和任务分支推进到 PR，向用户提供 PR 地址与当前 Head，并在 PR 上逐项审查确认事项、变更点和风险；`develop` 等非任务分支推进到本地 commit 但不推送，向用户提供提交编号并在推送前逐项审查。`impact_id` 只用于 Runtime 内部绑定 Git 指纹，不能作为用户确认主题。PR Head 或本地 commit 变化后旧确认立即失效。
-
-日常变更只推送 `develop` 或符合规则的任务分支；正式发布和 Hotfix 必须使用对应脚本。正常发布仍经过最终确认；Hotfix 以必填 Jira key 和显式命令调用为授权，不再追加确认。除 Hotfix 外，若能可靠确认 Jira 编号，推送成功后应将中文变更总结评论到对应 Jira 任务；Hotfix 不与 Jira 交互，Jira key 只写入 Merge commit。
+故事候选先执行固定验收，再形成 commit 或 PR 供人工审查。`impact_id` 只用于内部
+绑定，不是用户确认对象；commit 或 PR Head 变化后旧确认立即失效。

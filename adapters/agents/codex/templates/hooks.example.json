@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "command": [
+          "python3",
+          "__AGENTIC_OPS_HOME__/adapters/agents/codex/hook.py"
+        ]
+      }
+    ]
+  }
+}

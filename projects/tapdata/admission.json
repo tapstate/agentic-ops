@@ -1,0 +1,226 @@
+{
+  "_meta": {
+    "source": "由 admission/*.md 散文清单提升为机读规格；md 现由本文件生成",
+    "generated_docs": "python3 workflow/project_rules.py render",
+    "ported_at": "2026-08-27"
+  },
+  "spec_version": 1,
+  "common_fact_keys": [
+    "target_repo", "work_branch", "base_branch", "pr_number",
+    "verification", "risk_level", "note"
+  ],
+  "task_classes": {
+    "defect_fix": {
+      "title": "缺陷修复",
+      "doc": "projects/tapdata/admission/defect-fix.md",
+      "required_facts": [
+        {
+          "key": "problem_branch",
+          "label": "问题分支",
+          "source": "Jira 描述「问题分支」章节",
+          "example": "develop",
+          "note": "缺陷在哪个分支可复现/被发现",
+          "agent_may_propose": true,
+          "human_confirmation_required": true,
+          "supplement": "请补充「问题分支」：该缺陷在哪个分支被发现或可复现（如 develop）。"
+        },
+        {
+          "key": "problem_version",
+          "label": "问题版本",
+          "source": "Jira 描述「问题版本」章节",
+          "example": "develop",
+          "note": "问题所属主仓库版本；各仓库基线分支按 profile.json baseline_branches 对齐",
+          "agent_may_propose": true,
+          "human_confirmation_required": true,
+          "supplement": "请补充「问题版本」：问题所属主仓库版本，需与 profile.json baseline_branches 对齐。"
+        },
+        {
+          "key": "problem_symptom",
+          "label": "问题现象",
+          "source": "Jira 摘要或描述「问题现象」章节",
+          "example": "TM 启动持续输出 ES health check refused 告警",
+          "note": "用户/日志/系统实际观察到的现象",
+          "agent_may_propose": true,
+          "human_confirmation_required": true,
+          "supplement": "请补充「问题现象」：用户或日志实际观察到的表现（含关键报错原文）。"
+        }
+      ],
+      "optional_facts": [
+        {
+          "key": "reproduce_path",
+          "label": "复现路径",
+          "source": "描述「复现路径」章节",
+          "note": "无法稳定复现时写明已知触发条件"
+        },
+        {
+          "key": "acceptance_criteria",
+          "label": "验收标准",
+          "source": "描述「验收标准」章节",
+          "note": "修复后怎样判断可以验收"
+        }
+      ]
+    },
+    "feature_change": {
+      "title": "新功能 / 需求变更",
+      "doc": "projects/tapdata/admission/feature-change.md",
+      "required_facts": [
+        {
+          "key": "acceptance_criteria",
+          "label": "验收标准",
+          "source": "Jira 描述「验收标准」章节",
+          "example": "关键用户场景完成验证，新增行为有自动化测试覆盖",
+          "note": "需求完成后怎样判断可验收",
+          "agent_may_propose": true,
+          "human_confirmation_required": true,
+          "supplement": "请补充「验收标准」：完成后按什么场景/指标判断可验收。"
+        },
+        {
+          "key": "target_repo",
+          "label": "目标仓库",
+          "source": "Jira 组件/标签/项目仓库映射",
+          "example": "tapdata/tapdata",
+          "note": "本次应修改或检查的仓库；必须能在 profile.json 中查到分支映射",
+          "agent_may_propose": true,
+          "human_confirmation_required": true,
+          "validate": "known_repository",
+          "supplement": "请补充「目标仓库」：本次改动落在哪个仓库（owner/repo）。"
+        },
+        {
+          "key": "verification_method",
+          "label": "验证方式",
+          "source": "Jira 验证方式字段（customfield_10049）",
+          "example": "执行对应模块单元测试和必要手工验证",
+          "note": "完成后必须执行的验证",
+          "agent_may_propose": true,
+          "human_confirmation_required": true,
+          "supplement": "请补充「验证方式」（customfield_10049）：完成后必须执行哪些测试或验证。"
+        },
+        {
+          "key": "risk_level",
+          "label": "风险等级",
+          "source": "Jira 风险字段或标签",
+          "example": "T3",
+          "note": "决定人工门禁与验证强度",
+          "agent_may_propose": false,
+          "human_confirmation_required": true,
+          "supplement": "请补充「风险等级」（如 T1/T2/T3）：决定人工门禁与验证强度。"
+        }
+      ],
+      "optional_facts": [
+        {
+          "key": "scope_boundary",
+          "label": "范围边界",
+          "source": "描述或沟通记录",
+          "note": "明确不做什么，避免范围蔓延"
+        }
+      ]
+    },
+    "technical_task": {
+      "title": "技术任务",
+      "doc": "projects/tapdata/admission/technical-task.md",
+      "required_facts": [
+        {
+          "key": "acceptance_criteria",
+          "label": "验收标准",
+          "source": "Jira 描述「验收标准」章节",
+          "example": "技术任务目标达成，相关命令或检查项通过",
+          "note": "完成后怎样判断可验收",
+          "agent_may_propose": true,
+          "human_confirmation_required": true,
+          "supplement": "请补充「验收标准」：完成后按什么命令或检查项判断达成。"
+        },
+        {
+          "key": "target_repo",
+          "label": "目标仓库",
+          "source": "Jira 组件/标签/项目仓库映射",
+          "example": "tapdata/tapdata",
+          "note": "本次应修改或检查的仓库；必须能在 profile.json 中查到分支映射",
+          "agent_may_propose": true,
+          "human_confirmation_required": true,
+          "validate": "known_repository",
+          "supplement": "请补充「目标仓库」：本次改动落在哪个仓库（owner/repo）。"
+        },
+        {
+          "key": "verification_method",
+          "label": "验证方式",
+          "source": "Jira 验证方式字段（customfield_10049）",
+          "example": "执行对应脚本、单元测试或检查命令",
+          "note": "完成后必须执行的验证",
+          "agent_may_propose": true,
+          "human_confirmation_required": true,
+          "supplement": "请补充「验证方式」（customfield_10049）：完成后必须执行哪些脚本或测试。"
+        },
+        {
+          "key": "risk_level",
+          "label": "风险等级",
+          "source": "Jira 风险字段或标签",
+          "example": "T3",
+          "note": "决定人工门禁与验证强度",
+          "agent_may_propose": false,
+          "human_confirmation_required": true,
+          "supplement": "请补充「风险等级」（如 T1/T2/T3）：决定人工门禁与验证强度。"
+        }
+      ],
+      "optional_facts": []
+    }
+  },
+  "on_missing": {
+    "action": "block",
+    "enforced_by": "workflow/task.py advance（离开 task_intake 时 exit 3）",
+    "steps": [
+      "一次列全所有缺失项，不要挤牙膏",
+      "把缺失项与 supplement 文案写成 Jira 评论发布（write_jira_comment 属 free）",
+      "python3 workflow/task.py block --reason \"...\" 并结束本轮，等研发工程师补卡"
+    ]
+  },
+  "pre_implementation_gate": {
+    "requires_authorization": true,
+    "authorization_scope": "task_execution",
+    "issued_by": "workflow/authorization.py grant（研发工程师执行，即设计确认的载体）",
+    "enforced_by": "workflow/task.py advance（进入 implementation 时校验授权存在且 issue_key 一致）",
+    "note": "授权签发前不得修改任何代码；方案实质变更需 task.py reset --stage design_review 重新确认"
+  },
+  "verification_rules": {
+    "required_fact": "verification",
+    "enforced_by": "workflow/task.py advance（离开 implementation 时 exit 3）",
+    "min_length": 8,
+    "forbidden_patterns": [
+      {
+        "pattern": "-DskipTests|-Dmaven\\.test\\.skip",
+        "reason": "跳过测试的构建不能作为验证结果；必须单独执行与变更范围匹配的测试"
+      },
+      {
+        "pattern": "^\\s*(未验证|无需验证|不需要验证|待补充|无|N/?A|TODO|skipped)\\s*$",
+        "flags": "i",
+        "reason": "验证结果必须是实际执行的命令及其退出结果，不能是占位词"
+      }
+    ]
+  },
+  "evidence_rules": {
+    "enforced_by": "workflow/evidence.py（命中时 exit 4，不输出证据）",
+    "forbidden_patterns": [
+      {
+        "pattern": "\\b(ghp|gho|ghs|ghu|github_pat)_[A-Za-z0-9_]{8,}",
+        "reason": "疑似 GitHub token"
+      },
+      {
+        "pattern": "(api[_-]?token|access[_-]?token|secret|password|passwd|sonar\\.login)\\s*[:=]\\s*[^\\s\"']+",
+        "flags": "i",
+        "reason": "疑似密钥/口令明文"
+      },
+      {
+        "pattern": "\\bBearer\\s+[A-Za-z0-9._-]{10,}",
+        "flags": "i",
+        "reason": "疑似 Bearer 凭据"
+      },
+      {
+        "pattern": "\\b\\w+://[^\\s/@]+:[^\\s/@]+@",
+        "reason": "疑似带账号口令的连接串"
+      },
+      {
+        "pattern": "/(Users|home)/[A-Za-z0-9._-]+/",
+        "reason": "研发工程师本机绝对路径不得写入证据"
+      }
+    ]
+  }
+}

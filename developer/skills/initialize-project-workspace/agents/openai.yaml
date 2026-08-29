@@ -1,4 +1,0 @@
-interface:
-  display_name: "初始化业务项目工作空间"
-  short_description: "确认研发员身份、Jira 项目空间与授权后安全初始化工作空间"
-  default_prompt: "使用 $initialize-project-workspace 初始化当前业务项目工作空间并完成前置检查。"
