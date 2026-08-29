@@ -26,7 +26,7 @@ Agent Adapter → Tool Adapter → Standard Request
 | Workflow | `workflow/` | 阶段、授权、CI、证据、恢复 |
 | Project | `projects/<project>/` | Jira、分支、准入、验证和 Runbook |
 | Adapter | `adapters/` | Agent/工具协议的无状态转换 |
-| Bootstrap | `bootstrap/` | Product Root 与工作空间生命周期 |
+| Bootstrap | `bootstrap/` | 源码目录、产品根目录（Product Root）与工作空间生命周期 |
 | Internal | `internal/` | AgenticOps 自身的审查和发布 |
 
 规则按变化原因归属：平台差异只能进入 Adapter，项目差异只能进入 Project，公司共性
@@ -46,15 +46,15 @@ Agent Adapter → Tool Adapter → Standard Request
 依赖 Policy/Project/Workflow 或定义新操作语义。`tests/test_adapter_boundary.py` 对每个
 Agent 约束文件数、代码量、依赖和状态写入。
 
-## 4. Product Root
+## 4. 产品根目录（Product Root）与源码目录
 
-源码仓库和稳定安装目录是同一种 Product Root，使用同一个 `agenticops` 入口：
+源码目录和稳定安装目录使用同一个 `agenticops` 入口；稳定安装目录是产品根目录：
 
-- 源码 Product Root 由 `agenticops setup` 跟踪 `develop`；
-- 安装 Product Root 在安装时记录目标分支，`update` 只跟随该分支；
+- 源码目录由 `agenticops setup` 跟踪 `develop`；
+- 安装产品根目录在安装时记录目标分支，`update` 只跟随该分支；
 - 两者所有非 Git 本地状态都进入 `.local/`；
 - `.local/product.json` 记录 `mode`、仓库、跟踪分支、当前和前一提交；
-- 安装 Product Root 不包含 `internal/`。
+- 安装产品根目录不包含 `internal/`。
 
 `.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。
 
@@ -65,7 +65,7 @@ Agent 约束文件数、代码量、依赖和状态写入。
 ```text
 .agenticops/
 ├── init.json                 # Product 版本和生成产物哈希
-├── workspace.json            # Product Root、Project、Agent 集合
+├── workspace.json            # 产品根目录、Project、Agent 集合
 └── tasks/
     ├── index.json            # active/inactive/completed 注册状态
     └── <issue-key>/
@@ -100,7 +100,7 @@ Hook 是流程控制点，不是安全沙箱。凭证最小权限、服务端保
 
 - 公共入口可发现任意合规 Agent Manifest，不存在固定平台枚举。
 - Gate 只接受标准协议，Adapter 重量门禁通过。
-- 源码和安装 Product Root 共用结构、入口和 `.local/` 约定。
+- 源码目录和安装产品根目录共用结构、入口和 `.local/` 约定。
 - 工作空间明确区分初始化、配置和按任务隔离的数据。
 - 多任务、多仓库上下文唯一，授权变化失败关闭。
 - 新项目适配不修改公共 Gate；产品安装不包含 `internal/`。

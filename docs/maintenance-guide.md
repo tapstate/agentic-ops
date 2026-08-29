@@ -1,22 +1,38 @@
 # AgenticOps 维护指引
 
+不熟悉本文术语时，先查看[术语表](glossary.md)。
+
 ## 1. 从零开始
 
 准备 Git、Python 3.9+ 和 uv：
 
 ```sh
-git clone git@github.com:tapstate/agentic-ops.git
+git clone --branch develop --single-branch git@github.com:tapstate/agentic-ops.git
 cd agentic-ops
 ./agenticops setup
 ```
 
-无需给 `git clone` 增加 `--branch develop --single-branch`。`setup` 会安全切换并
-跟踪 `develop`、仅 fast-forward 同步、安装本仓库维护依赖并接入受信 Git Hook。
-工作区有修改且需要切换分支时会停止，不会覆盖修改。
+克隆前先完成 [Git SSH 授权指引](security/git-ssh-access.md)，并确认账号有本仓库访问权。
+示例显式以 `develop` 作为维护基线；`setup` 会仅 fast-forward 同步该分支、安装本仓库维护
+依赖并接入受信 Git Hook。工作区有修改时会停止，不会覆盖修改。
 
-## 2. 维护与运行是一套代码
+## 2. 初始化项目工作空间
 
-源码根本身就是 Product Root；修改 `develop` 后，Gate、Policy、Workflow、Project
+维护源码目录与项目工作空间必须分开。以下示例在当前 `develop` 源码目录为 TapData 初始化
+工作空间，并立即检查接线：
+
+```sh
+workspace="$HOME/agenticops-tapdata"
+./agenticops init --workspace "$workspace" --project tapdata
+./agenticops doctor --workspace "$workspace"
+```
+
+`workspace` 不得是源码目录或其子目录。省略 `--agent` 会接入当前源码目录
+提供的全部 Agent；只接入部分 Agent 时重复传入 `--agent <Agent ID>`。
+
+## 3. 维护与运行是一套代码
+
+源码目录直接运行产品；修改 `develop` 后，Gate、Policy、Workflow、Project
 和 Adapter 立即从同一份源码运行，不需要复制到另一套安装目录。只有工作空间中的
 生成接线可能需要刷新：
 
@@ -25,7 +41,7 @@ cd agentic-ops
 ./agenticops repair --workspace <项目工作空间>
 ```
 
-源码根产生的所有非 Git 状态统一进入：
+源码目录产生的所有非 Git 状态统一进入：
 
 ```text
 .local/
@@ -38,7 +54,7 @@ cd agentic-ops
 
 `.local/` 不提交，也不是规则事实源。
 
-## 3. 变更归属
+## 4. 变更归属
 
 - 标准协议：`contracts/`
 - 公司通用门禁：`policies/`
@@ -52,7 +68,7 @@ cd agentic-ops
 修改公共入口建立平台枚举。新增产品项目只增加 `projects/<project>/`。工作项、进度
 和验收写入 Jira，不在仓库新增执行计划。
 
-## 4. 验证
+## 5. 验证
 
 运行代码变更必须执行：
 
@@ -71,7 +87,7 @@ internal/acceptance.sh --list
 日志和汇总写入 `.local/acceptance/<run-id>/`。OPA 未安装导致 Rego 一致性检查跳过时
 必须在交付中说明。不要使用 `--no-verify`。
 
-## 5. 发布与 Hotfix
+## 6. 发布与 Hotfix
 
 正常发布：
 

@@ -3,10 +3,13 @@
 当前有效文档：
 
 - [项目目标](strategy/project-goals.md)
+- [术语表](glossary.md)
 - [维护指引](maintenance-guide.md)
 - [使用指引](usage-guide.md)
+- [远程一键引导安装](remote-one-click-installation.md)
 - [v1 工程架构](architecture/agenticops-v1-architecture.md)
 - [权限与安全边界](security/permissions.md)
+- [Git SSH 授权指引](security/git-ssh-access.md)
 - [Claude 端到端验证](testing/e2e-claude.md)
 - [Codex 端到端验证](testing/e2e-codex.md)
 - [v1 用户故事](user-stories/v1/)

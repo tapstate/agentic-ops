@@ -50,11 +50,11 @@ Standard Contract + Agent/Tool Adapter + Gate Core + Policy + Workflow + Project
 - **Bootstrap** 只负责安装、更新、回退和工作目录接线。
 - **Internal** 只服务 AgenticOps 仓库自身的故事审查和发布，不是产品运行层。
 
-产品运行采用“中央 Product Root + 薄项目工作空间”：源码仓库和 `~/.agentic-ops`
+产品运行采用“中央产品根目录（Product Root）+ 薄项目工作空间”：源码目录和 `~/.agentic-ops`
 安装目录具有相同产品结构和薄入口，非 Git 本地状态均归入各自 `.local/`；项目
 工作空间使用 `.agenticops/` 区分初始化信息、工作空间配置和按任务隔离的业务运行
-数据，不复制 Policy、Project Skill 或 Runtime。维护时源码仓库就是 Product Root，
-发布使用时稳定安装目录就是 Product Root，两者不形成不同运行模式。
+数据，不复制 Policy、Project Skill 或 Runtime。维护时直接在源码目录运行；发布使用时
+稳定安装目录是产品根目录，两者不形成不同运行模式。
 
 Hook、MCP、Skill 和工作目录配置是 Manifest 与模板生成的产物。Adapter 必须无状态，
 不得依赖 Workflow、Project 或 Policy，并通过固定代码预算和禁止依赖检查；不支持的

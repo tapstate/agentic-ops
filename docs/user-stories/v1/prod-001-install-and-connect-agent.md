@@ -7,7 +7,7 @@
 ### 验收标准
 
 - macOS、Linux 使用 Git 和 Python 3.9+ 即可安装、更新和回退。
-- 中央 Product Root 保存唯一运行资产；源码根和安装根使用同一入口和产品结构。
+- 中央产品根目录（Product Root）保存唯一运行资产；源码目录和安装产品根目录使用同一入口和产品结构。
 - 工作空间使用 `.agenticops/` 区分初始化、配置和按任务隔离的运行数据，不复制
   Project Skill、Policy 或 Runtime。
 - 不同 Agent 原生事件转换为同一版本化标准请求和标准判定。

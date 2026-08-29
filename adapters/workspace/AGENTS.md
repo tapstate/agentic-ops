@@ -1,9 +1,9 @@
 <!-- 由 AgenticOps 生成；不要在项目工作空间直接维护。 -->
 # AgenticOps 项目工作空间入口
 
-本项目工作空间由中央 AgenticOps Product Root 管理：
+本项目工作空间由中央 AgenticOps 产品根目录（Product Root）管理：
 
-- Product Root：`__AGENTIC_OPS_HOME__/`
+- 产品根目录：`__AGENTIC_OPS_HOME__/`
 - Product Project：`__AGENTIC_OPS_PROJECT__`
 - Initialization：`.agenticops/init.json`
 - Workspace Configuration：`.agenticops/workspace.json`
@@ -12,7 +12,7 @@
 
 一个工作空间只绑定一个产品项目，可以同时接管该项目下多个 Jira 任务；每个任务可
 组织多个 Git 仓库。开始或恢复任务前，
-必须读取中央 Product Root 中当前项目的 Profile、准入规则和适用 Skill：
+必须读取中央产品根目录中当前项目的 Profile、准入规则和适用 Skill：
 
 - `__AGENTIC_OPS_HOME__/projects/__AGENTIC_OPS_PROJECT__/profile.json`
 - `__AGENTIC_OPS_HOME__/projects/__AGENTIC_OPS_PROJECT__/admission.json`
@@ -25,7 +25,7 @@ python3 __AGENTIC_OPS_HOME__/workflow/task.py status --issue-key <JIRA-KEY> --di
 ```
 
 `AGENTS.md`、各 Agent 入口、Hook 和 MCP 配置都是可重新生成的薄接线，不是规则事实
-源；项目规则和运行资产只在 Product Root 维护。
+源；项目规则和运行资产只在产品根目录维护。
 
 ## 必须遵守的入口规则
 
@@ -48,7 +48,7 @@ python3 __AGENTIC_OPS_HOME__/workflow/task.py status --issue-key <JIRA-KEY> --di
   只暂停对应副作用步骤并给出结构化人工接力。事实不可信、权限不足、高风险人工
   门禁和外部写结果不明确仍必须停止。
 
-- Agent 原生入口只负责加载中央规则；不得把 Product Root 的 Policy、Project 或 Skill
+- Agent 原生入口只负责加载中央规则；不得把产品根目录的 Policy、Project 或 Skill
   复制成工作目录事实源。
 - Hook 负责强制副作用门禁。即使自然语言入口未被正确理解，也不得绕过 Hook。
 - Hook 必须按 Jira 任务号或 `repository + work_branch` 唯一解析 active 任务；没有

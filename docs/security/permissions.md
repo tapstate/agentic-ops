@@ -22,7 +22,17 @@
 | Administration | ——不授予—— | | agent 永远不能改分支保护 |
 | Workflows | ——不授予—— | | 不能改 `.github/workflows` |
 
-### 2. 服务器侧强制（不可绕过的硬门禁）
+### 2. Git SSH（用于 clone / fetch / push）
+
+Git SSH 是 Git 传输的替代凭据方式，不是 AgenticOps 的任务授权，也不替代 GitHub
+MCP、`gh` 或浏览器 API 所需的 OAuth / PAT。无论使用 PAT 还是 SSH，Gate、Rulesets 和
+任务授权的判定保持不变。
+
+每位研发员、每台设备使用独立、带口令的密钥。私钥只留在设备，不得写入仓库、
+`.agenticops/`、Agent 配置、环境变量、聊天记录或 CI 变量。仓库角色和组织 SSO 仍由
+GitHub 服务端决定；具体配置、验证和撤销见 [Git SSH 授权指引](git-ssh-access.md)。
+
+### 3. 服务器侧强制（不可绕过的硬门禁）
 
 - **Rulesets / 分支保护**（`main`、`develop`、`release/*`）：
   - 禁止直接 push、禁止 force push、禁止删除
@@ -34,7 +44,7 @@
     此时 hook 的 `protected_branch_push -> deny` 是唯一防线，建议升级。
 - CODEOWNERS 指定关键路径必须人审。
 
-### 3. GitHub MCP Server（远程，免部署）
+### 4. GitHub MCP Server（远程，免部署）
 
 ```sh
 claude mcp add --transport http github https://api.githubcopilot.com/mcp/ \

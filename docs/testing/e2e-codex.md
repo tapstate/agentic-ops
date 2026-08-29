@@ -1,8 +1,8 @@
 # Codex 端到端验证
 
-1. 执行 `<Product Root>/agenticops init --workspace <项目工作空间> --project tapdata --agent codex`。
+1. 执行 `<产品根目录>/agenticops init --workspace <项目工作空间> --project tapdata --agent codex`。
 2. 按当前 Codex 版本支持的 Hook 配置加载生成的示例，再通过
-   `<Product Root>/agenticops start --agent codex --workspace <项目工作空间>` 启动
+   `<产品根目录>/agenticops start --agent codex --workspace <项目工作空间>` 启动
    Codex；二态能力和 `ask` 降级由
    `adapters/agents/codex/manifest.json` 声明。
 3. 执行与 Claude 相同的任务、多仓库、授权失效和证据场景。
@@ -12,7 +12,7 @@
 Codex 适配层不得复制 `policies/operations.json` 或 TapData 规则；平台协议变化只修改
 `adapters/agents/codex/`。
 
-自动化基线（在 Product Root 执行）：
+自动化基线（在产品根目录或源码目录执行）：
 
 ```sh
 bash internal/tests/test_runtime.sh
