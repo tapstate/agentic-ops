@@ -74,6 +74,22 @@ cd <项目工作空间>
 `repair --workspace <项目工作空间>`；不得手改 `.agenticops/workspace.json` 或用 `.env`
 覆盖绑定关系。
 
+产品根目录会在成功初始化、修复或启动后，维护一个仅供本机提示的已知工作空间索引。更新到
+新提交时只提示待刷新项，不会扫描或自动修改业务目录。可通过以下命令维护该索引和工作空间：
+
+```sh
+~/.agentic-ops/agenticops workspace list
+~/.agentic-ops/agenticops workspace repair --all
+~/.agentic-ops/agenticops workspace prune --all
+~/.agentic-ops/agenticops workspace detach --workspace <项目工作空间>
+~/.agentic-ops/agenticops workspace purge --workspace <项目工作空间>
+```
+
+`--all` 必须显式指定；批量操作会先列出目标并要求确认。`prune` 仅注销缺失、已改绑或
+无效的本机提示登记。`clean --generated-only` 只收敛可再生接线；`detach` 保留
+`.agenticops/tasks/`；`purge` 才会删除任务状态，且不支持批量执行。非交互环境默认拒绝
+这些确认操作；仅在已由调用方展示并确认目标列表的自动化场景中使用 `--yes`。
+
 ## 3. 工作空间数据
 
 ```text

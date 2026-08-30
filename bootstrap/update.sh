@@ -95,6 +95,10 @@ fi
 
 printf 'AgenticOps 更新完成：工作面=%s，branch=%s，%s -> %s，ahead=%s\n' \
   "$face" "$branch" "$current_ref" "$updated_ref" "$ahead"
+if [ "$updated_ref" != "$current_ref" ]; then
+  python3 "$product_root/bootstrap/workspace_registry.py" \
+    --product-root "$product_root" pending --product-ref "$updated_ref"
+fi
 if [ "$mode" = "source" ] && [ "$ahead" -gt 0 ]; then
   printf 'AgenticOps：维护分支本地领先 %s 个提交；update 不会自动推送\n' "$ahead"
 fi

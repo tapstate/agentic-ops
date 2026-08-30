@@ -106,6 +106,7 @@ source_update_output="$test_root/source-update-output"
 PATH="$setup_bin:$PATH" "$source_workspace/.agenticops/agenticops" update > "$source_update_output"
 test -f "$maintainer_root/SOURCE-NEXT"
 grep -F '工作面=维护' "$source_update_output" >/dev/null
+grep -F '已知工作空间待刷新' "$source_update_output" >/dev/null
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field current_ref)" = \
   "$(git -C "$maintainer_root" rev-parse HEAD)"
 
@@ -197,6 +198,7 @@ test -f "$workspace/.claude/settings.json"
 test -f "$workspace/.codex/agenticops-hooks.example.json"
 test -f "$workspace/.test-agent/settings.json"
 test ! -e "$workspace/.claude/skills"
+"$install_root/agenticops" workspace list | grep -F -- "$workspace" >/dev/null
 grep -F '@AGENTS.md' "$workspace/CLAUDE.md" >/dev/null
 grep -F 'Product Project：`tapdata`' "$workspace/AGENTS.md" >/dev/null
 grep -F "$install_root/workflow/task.py" "$workspace/AGENTS.md" >/dev/null
@@ -226,6 +228,8 @@ if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; t
 fi
 "$install_root/agenticops" repair --workspace "$workspace" >/dev/null
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
+"$install_root/agenticops" workspace clean --workspace "$workspace" --generated-only >/dev/null
+"$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
 
 printf 'drift\n' > "$workspace/.agenticops/agenticops"
 if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
@@ -249,6 +253,46 @@ if "$install_root/agenticops" start --agent test-agent --workspace "$subset_work
   printf '工作空间启动了未绑定的 Agent\n' >&2
   exit 1
 fi
+workspace_help="$test_root/workspace-help"
+if "$install_root/agenticops" workspace detach > "$workspace_help" 2>&1; then
+  printf '缺少工作空间目标的 detach 被错误接受\n' >&2
+  exit 1
+fi
+grep -F -- '--workspace WORKSPACE | --all' "$workspace_help" >/dev/null
+
+detached_workspace="$test_root/detached-workspace"
+"$install_root/agenticops" init --workspace "$detached_workspace" --agent codex >/dev/null
+python3 "$install_root/workflow/task.py" init \
+  --issue-key TAP-555 --task-class technical_task --dir "$detached_workspace" >/dev/null
+if "$install_root/agenticops" workspace detach --workspace "$detached_workspace" >/dev/null 2>&1; then
+  printf '非交互 detach 被错误接受\n' >&2
+  exit 1
+fi
+"$install_root/agenticops" workspace detach --workspace "$detached_workspace" --yes >/dev/null
+test ! -e "$detached_workspace/.agenticops/workspace.json"
+test ! -e "$detached_workspace/.agenticops/init.json"
+test ! -e "$detached_workspace/.agenticops/agenticops"
+test -f "$detached_workspace/.agenticops/tasks/TAP-555/state.json"
+if "$install_root/agenticops" workspace list | grep -F -- "$detached_workspace" >/dev/null; then
+  printf '解绑工作空间仍保留在提示索引\n' >&2
+  exit 1
+fi
+
+purge_workspace="$test_root/purge-workspace"
+"$install_root/agenticops" init --workspace "$purge_workspace" --agent codex >/dev/null
+python3 "$install_root/workflow/task.py" init \
+  --issue-key TAP-556 --task-class technical_task --dir "$purge_workspace" >/dev/null
+if "$install_root/agenticops" workspace purge --all --yes >/dev/null 2>&1; then
+  printf '批量 purge 被错误接受\n' >&2
+  exit 1
+fi
+"$install_root/agenticops" workspace purge --workspace "$purge_workspace" --yes >/dev/null
+test ! -e "$purge_workspace/.agenticops"
+
+missing_workspace="$test_root/missing-workspace"
+"$install_root/agenticops" init --workspace "$missing_workspace" --agent codex >/dev/null
+rm -rf "$missing_workspace"
+"$install_root/agenticops" workspace prune --all --yes | grep -F '已注销 1 个无法跟踪的工作空间。' >/dev/null
 
 fake_bin="$test_root/fake-bin"
 capture="$test_root/codex-capture"

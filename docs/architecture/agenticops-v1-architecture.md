@@ -60,7 +60,9 @@ Agent 约束文件数、代码量、依赖和状态写入。
   实际运行版本始终以 Git HEAD 为准；
 - 安装产品根目录不包含 `internal/`。
 
-`.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。
+`.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期
+配置外，它可保存由本 Product Root 成功初始化过的工作空间提示索引；该索引只用于更新后
+提示接线待刷新，不发现、不扫描、更不自动修改业务目录。
 生命周期操作使用 `.local/lifecycle.lock/` 防止同一产品根目录并发更新或回退。
 更新源码后，当前源码内核立即生效；已启动 Agent 需要重启，生成接线由下一次 `start`
 自动刷新，也可通过 `doctor` 和 `repair` 显式检查、修复。
@@ -87,6 +89,9 @@ Agent 约束文件数、代码量、依赖和状态写入。
 工作空间不复制 Policy、Project Skill 或 Runtime。根 `AGENTS.md`、Agent 配置和 MCP
 配置是可再生接线，文件归属及哈希记录在 `init.json`；`doctor` 检测漂移，`repair`
 安全重建。旧 `.agenticops.json` 和 `.gate/` 只作为一次性迁移输入，不再是事实源。
+工作空间维护命令先列出精确目标再确认：`repair` 和 `clean --generated-only` 只收敛可再生
+接线；`detach` 删除已校验归属的接线和绑定但保留任务状态；`purge` 才会删除任务状态，且
+必须逐个工作空间明确确认。无法访问的登记只报告，不能被更新自动注销。
 
 多个 active 任务存在歧义时，Workflow 要求显式 issue key。Gate 按 issue key 或
 `repository + work_branch` 唯一解析任务；零匹配、多匹配都不能借用其它任务授权。

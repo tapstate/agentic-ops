@@ -58,7 +58,7 @@ for file in \
   adapters/agents/codex/hook.py adapters/agents/codex/manifest.json \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
   bootstrap/workspace-init.sh bootstrap/render.py bootstrap/agent_registry.py \
-  bootstrap/product_state.py \
+  bootstrap/product_state.py bootstrap/workspace_registry.py \
   tests/test_gate.py tests/test_contracts.py tests/test_adapter_boundary.py tests/test_workflow.py tests/test_install.sh \
   internal/acceptance.sh internal/bin/story-gate internal/story_gate/stories.yaml \
   internal/story_gate/review-policy.yaml internal/release/release.sh \
@@ -72,7 +72,7 @@ for file in \
   workflow/task.py workflow/authorization.py workflow/ci.py workflow/evidence.py \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
   bootstrap/workspace-init.sh bootstrap/render.py bootstrap/agent_registry.py \
-  bootstrap/product_state.py \
+  bootstrap/product_state.py bootstrap/workspace_registry.py \
   tests/test_install.sh internal/acceptance.sh internal/bin/story-gate internal/release/release.sh \
   internal/release/hotfix.sh internal/tests/test_runtime.sh \
   internal/tests/test_resources.sh internal/tests/test_release.sh \
