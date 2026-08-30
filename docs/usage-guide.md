@@ -4,9 +4,15 @@
 
 ## 1. 安装
 
-本节用于业务使用者安装已发布的 AgenticOps，不用于维护产品源码。安装前准备 Git、
-GitHub CLI（`gh`）、Bash 和 Python 3.9+；`gh` 必须登录到有本仓库读取权限的 GitHub
-账号。Git SSH 的配置、验证和撤销见[Git SSH 授权指引](security/git-ssh-access.md)。
+本节用于业务使用者安装已发布的 AgenticOps，不用于维护产品源码。两种安装方式均从
+受信的 `main` 分支安装到 `~/.agentic-ops`，且都需要 Git、Bash 和 Python 3.9+；安装
+目录已存在时会拒绝覆盖，请改用 `agenticops update`。Git SSH 的配置、验证和撤销见
+[Git SSH 授权指引](security/git-ssh-access.md)。
+
+### 1.1 GitHub CLI 一键安装
+
+此方式使用 `gh` 从私有仓库读取安装入口，适合已登录 GitHub CLI 的用户。除通用依赖外，
+还需要 GitHub CLI（`gh`）登录到有本仓库读取权限的 GitHub 账号。
 
 先确认 `gh` 登录状态：
 
@@ -32,10 +38,48 @@ gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --scopes r
 )
 ```
 
-安装入口会将同一分支稀疏克隆到 `~/.agentic-ops`，并先检查依赖和目录冲突；下载、认证或
-克隆失败时不会继续安装。`gh api` 被拒绝时，核对当前账号的仓库访问权与 `repo` scope；
-`git clone` 被拒绝时，按 Git SSH 授权指引检查密钥与仓库授权。不要把产品源码仓库当作
-业务安装目录。
+`gh api` 被拒绝时，核对当前账号的仓库访问权与 `repo` scope。
+
+### 1.2 Git clone 安装
+
+此方式不依赖 `gh`；适合已配置 Git SSH、且 GitHub 账号具有 `tapstate/agentic-ops`
+读取权限的用户。先按 Git SSH 授权指引验证身份与仓库读取权限，再直接将受信分支稀疏
+克隆为正式产品根目录：
+
+```sh
+(
+  set -euo pipefail
+  ao_install_root="$HOME/.agentic-ops"
+  test ! -e "$ao_install_root" || {
+    printf '安装目录已存在：%s；请使用 agenticops update 更新\n' "$ao_install_root" >&2
+    exit 2
+  }
+
+  git clone --filter=blob:none --no-checkout --branch main --single-branch \
+    git@github.com:tapstate/agentic-ops.git \
+    "$ao_install_root"
+
+  git -C "$ao_install_root" sparse-checkout init --cone
+  git -C "$ao_install_root" sparse-checkout set \
+    adapters bootstrap contracts gate policies projects workflow
+  git -C "$ao_install_root" checkout main
+
+  ao_current_ref="$(git -C "$ao_install_root" rev-parse HEAD)"
+  python3 "$ao_install_root/bootstrap/product_state.py" \
+    --product-root "$ao_install_root" write \
+    --mode installed \
+    --repository git@github.com:tapstate/agentic-ops.git \
+    --branch main \
+    --current-ref "$ao_current_ref"
+)
+```
+
+这条路径不执行 `install.sh`：Git 直接写入正式安装目录，再显式写入“使用工作面”的
+产品状态，后续 `update` 与 `rollback` 才能按安装分支正常工作。`git clone` 被拒绝时，
+按 Git SSH 授权指引检查密钥、组织 SSO 与仓库授权。
+
+两种方式安装出的目录结构和产品状态相同；下载、认证或克隆失败时不会继续安装。不要把
+产品源码仓库当作业务安装目录。
 
 ## 2. 初始化项目工作空间
 
