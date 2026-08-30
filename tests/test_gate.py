@@ -62,6 +62,7 @@ def run_hook(tool_name, tool_input, cwd, env_extra=None):
 
 def run_codex(tool_name, tool_input, cwd):
     payload = {
+        "hook_event_name": "PreToolUse",
         "tool_name": tool_name,
         "tool_input": tool_input,
         "cwd": str(cwd),
@@ -74,10 +75,12 @@ def run_codex(tool_name, tool_input, cwd):
         timeout=30,
     )
     assert proc.returncode == 0, proc.stderr
+    if not proc.stdout.strip():
+        return "allow"
     out = json.loads(proc.stdout)
-    if out.get("passthrough"):
-        return "passthrough"
-    return out.get("original_decision") or out["decision"]
+    output = out.get("hookSpecificOutput")
+    assert output and output["hookEventName"] == "PreToolUse", out
+    return output["permissionDecision"]
 
 
 def run_standard(request):
@@ -265,7 +268,8 @@ def main():
         for tool, tool_input in parity_cases:
             claude = run_hook(tool, tool_input, ws)
             codex = run_codex(tool, tool_input, ws)
-            check("Claude/Codex 标准语义一致：%s" % tool.split("__")[-1], codex, claude)
+            expected = "deny" if claude in ("ask", "deny") else "allow"
+            check("Codex 二态结果符合标准语义：%s" % tool.split("__")[-1], codex, expected)
 
         # ---- 审计留痕 ---------------------------------------------------
         events = task_store.events_path(ws, "TAP-123").read_text(encoding="utf-8").strip().splitlines()

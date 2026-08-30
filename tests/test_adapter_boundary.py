@@ -20,6 +20,21 @@ def logical_lines(path):
     )
 
 
+def entrypoint_adapter_version(path):
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    values = [
+        node.value.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "ADAPTER_VERSION" for target in node.targets)
+        and isinstance(node.value, ast.Constant)
+        and type(node.value.value) is int
+    ]
+    if len(values) != 1:
+        raise AssertionError("%s 必须声明唯一的整数 ADAPTER_VERSION" % path)
+    return values[0]
+
+
 class AdapterBoundaryTest(unittest.TestCase):
     def test_each_agent_has_one_small_stateless_entrypoint(self):
         for agent_root in sorted(path for path in AGENT_ROOT.iterdir() if path.is_dir()):
@@ -44,7 +59,12 @@ class AdapterBoundaryTest(unittest.TestCase):
         for manifest_path in sorted(AGENT_ROOT.glob("*/manifest.json")):
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["schema_version"], 1)
-            self.assertEqual(manifest["adapter_version"], 1)
+            entrypoint = ROOT / manifest["entrypoint"]
+            self.assertEqual(
+                manifest["adapter_version"],
+                entrypoint_adapter_version(entrypoint),
+                "%s 与 %s 的 adapter_version 不一致" % (manifest_path, entrypoint),
+            )
             self.assertLessEqual(len(manifest["artifacts"]), 3)
             self.assertIn(manifest["capabilities"]["ask_fallback"], (
                 "native",

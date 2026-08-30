@@ -10,14 +10,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from adapters.runtime import decision_reason, evaluate_tool_call  # noqa: E402
 
-ADAPTER_VERSION = 1
+ADAPTER_VERSION = 2
+
+
+def deny(reason):
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        }
+    }
 
 
 def main():
     try:
         payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, TypeError):
-        print(json.dumps({"decision": "deny", "reason": "Codex Hook 输入不是有效 JSON"}, ensure_ascii=False))
+        print(json.dumps(deny("Codex Hook 输入不是有效 JSON"), ensure_ascii=False))
         return 0
 
     tool_name = str(payload.get("tool_name") or payload.get("tool") or "")
@@ -34,24 +44,15 @@ def main():
         str(payload.get("cwd") or os.getcwd()),
     )
     if decision is None:
-        print(json.dumps({"decision": "allow", "passthrough": True}))
         return 0
 
-    native_decision = "deny" if decision["decision"] == "ask" else decision["decision"]
+    if decision["decision"] == "allow":
+        return 0
+
     reason = decision_reason(decision)
     if decision["decision"] == "ask":
-        reason += "（当前 Codex Adapter 为二态模式：请签发授权或由人工执行。）"
-    print(
-        json.dumps(
-            {
-                "decision": native_decision,
-                "original_decision": decision["decision"],
-                "operation": decision["operation"],
-                "reason": reason,
-            },
-            ensure_ascii=False,
-        )
-    )
+        reason += "（Codex 当前 Hook 不支持 ask：请签发授权或由人工执行。）"
+    print(json.dumps(deny(reason), ensure_ascii=False))
     return 0
 
 

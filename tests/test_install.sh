@@ -195,7 +195,7 @@ test -f "$workspace/AGENTS.md"
 test -f "$workspace/CLAUDE.md"
 test -f "$workspace/.mcp.json"
 test -f "$workspace/.claude/settings.json"
-test -f "$workspace/.codex/agenticops-hooks.example.json"
+test -f "$workspace/.codex/hooks.json"
 test -f "$workspace/.test-agent/settings.json"
 test ! -e "$workspace/.claude/skills"
 "$install_root/agenticops" workspace list | grep -F -- "$workspace" >/dev/null
@@ -203,7 +203,7 @@ grep -F '@AGENTS.md' "$workspace/CLAUDE.md" >/dev/null
 grep -F 'Product Project：`tapdata`' "$workspace/AGENTS.md" >/dev/null
 grep -F "$install_root/workflow/task.py" "$workspace/AGENTS.md" >/dev/null
 grep -F "$install_root/adapters/agents/claude/hook.py" "$workspace/.claude/settings.json" >/dev/null
-grep -F "$install_root/adapters/agents/codex/hook.py" "$workspace/.codex/agenticops-hooks.example.json" >/dev/null
+grep -F "$install_root/adapters/agents/codex/hook.py" "$workspace/.codex/hooks.json" >/dev/null
 python3 - "$workspace/.agenticops/workspace.json" "$workspace/.agenticops/init.json" "$install_root" <<'PY'
 import json
 import sys
@@ -216,7 +216,18 @@ assert binding["product_root"] == str(Path(sys.argv[3]).resolve())
 assert binding["project"] == "tapdata"
 assert binding["agents"] == ["claude", "codex", "test-agent"]
 paths = {item["path"] for item in initialization["artifacts"]}
-assert {"AGENTS.md", ".agenticops/agenticops", "CLAUDE.md", ".claude/settings.json", ".codex/agenticops-hooks.example.json", ".test-agent/settings.json"} <= paths
+assert {"AGENTS.md", ".agenticops/agenticops", "CLAUDE.md", ".claude/settings.json", ".codex/hooks.json", ".test-agent/settings.json"} <= paths
+PY
+python3 - "$workspace/.codex/hooks.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+document = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+handler = document["hooks"]["PreToolUse"][0]["hooks"][0]
+assert handler["type"] == "command"
+assert handler["command"].startswith('python3 "')
+assert handler["timeout"] == 30
 PY
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
 "$workspace/.agenticops/agenticops" doctor >/dev/null
@@ -242,7 +253,7 @@ test -x "$workspace/.agenticops/agenticops"
 
 subset_workspace="$test_root/subset-workspace"
 "$install_root/agenticops" init --workspace "$subset_workspace" --agent codex >/dev/null
-test -f "$subset_workspace/.codex/agenticops-hooks.example.json"
+test -f "$subset_workspace/.codex/hooks.json"
 test ! -e "$subset_workspace/CLAUDE.md"
 test ! -e "$subset_workspace/.claude/settings.json"
 if "$install_root/agenticops" init --workspace "$test_root/unknown-workspace" --agent missing-agent >/dev/null 2>&1; then
