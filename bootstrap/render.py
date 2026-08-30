@@ -127,6 +127,9 @@ def common_artifacts(install_root, project):
         "AGENTS.md": rendered_content(
             install_root, project, "adapters/workspace/AGENTS.md"
         ),
+        ".agenticops/agenticops": rendered_content(
+            install_root, project, "adapters/workspace/agenticops"
+        ),
         ".mcp.json": rendered_content(
             install_root, project, "adapters/tools/mcp.template.json"
         ),
@@ -342,6 +345,8 @@ def main():
         destination = safe_path(workspace, target)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(content, encoding="utf-8")
+        if target == ".agenticops/agenticops":
+            os.chmod(destination, 0o700)
     write_json_atomic(
         state_path(workspace, WORKSPACE_NAME),
         workspace_document(install_root, project, agents),

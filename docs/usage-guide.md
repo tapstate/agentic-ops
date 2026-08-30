@@ -60,6 +60,20 @@ gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --scopes r
 没有 `both` 特殊值，也不限制 Agent 数量。一个工作空间绑定一个产品项目，可接管该
 项目下任意多个任务；一个任务可修改多个仓库。
 
+初始化后，工作空间会生成可再生的薄入口 `.agenticops/agenticops`。它每次读取同目录
+的 `workspace.json` 以定位并校验中央 Product Root，再在当前工作空间执行中央入口；
+不需要 `.env`，也不保存第二份路径配置：
+
+```sh
+cd <项目工作空间>
+./.agenticops/agenticops doctor
+./.agenticops/agenticops start --agent <Agent ID>
+```
+
+若薄入口缺失、不可执行或 `doctor` 提示接线漂移，使用已绑定的中央入口执行
+`repair --workspace <项目工作空间>`；不得手改 `.agenticops/workspace.json` 或用 `.env`
+覆盖绑定关系。
+
 ## 3. 工作空间数据
 
 ```text

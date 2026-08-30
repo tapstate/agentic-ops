@@ -87,6 +87,7 @@ source_workspace="$test_root/source-workspace"
 "$maintainer_root/agenticops" init --workspace "$source_workspace" \
   --project tapdata --agent test-agent >/dev/null
 "$maintainer_root/agenticops" doctor --workspace "$source_workspace" >/dev/null
+"$source_workspace/.agenticops/agenticops" doctor >/dev/null
 printf '{"enabled":"changed"}\n' \
   > "$maintainer_root/adapters/agents/test-agent/templates/settings.json"
 if "$maintainer_root/agenticops" doctor --workspace "$source_workspace" >/dev/null 2>&1; then
@@ -102,7 +103,7 @@ printf 'source update\n' > "$source_repo/SOURCE-NEXT"
 git -C "$source_repo" add SOURCE-NEXT
 git -C "$source_repo" commit -qm "source next"
 source_update_output="$test_root/source-update-output"
-PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output"
+PATH="$setup_bin:$PATH" "$source_workspace/.agenticops/agenticops" update > "$source_update_output"
 test -f "$maintainer_root/SOURCE-NEXT"
 grep -F '工作面=维护' "$source_update_output" >/dev/null
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field current_ref)" = \
@@ -188,6 +189,7 @@ test ! -e "$collision_workspace/.agenticops"
 
 test -f "$workspace/.agenticops/workspace.json"
 test -f "$workspace/.agenticops/init.json"
+test -x "$workspace/.agenticops/agenticops"
 test -f "$workspace/AGENTS.md"
 test -f "$workspace/CLAUDE.md"
 test -f "$workspace/.mcp.json"
@@ -212,9 +214,10 @@ assert binding["product_root"] == str(Path(sys.argv[3]).resolve())
 assert binding["project"] == "tapdata"
 assert binding["agents"] == ["claude", "codex", "test-agent"]
 paths = {item["path"] for item in initialization["artifacts"]}
-assert {"AGENTS.md", "CLAUDE.md", ".claude/settings.json", ".codex/agenticops-hooks.example.json", ".test-agent/settings.json"} <= paths
+assert {"AGENTS.md", ".agenticops/agenticops", "CLAUDE.md", ".claude/settings.json", ".codex/agenticops-hooks.example.json", ".test-agent/settings.json"} <= paths
 PY
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
+"$workspace/.agenticops/agenticops" doctor >/dev/null
 
 printf 'drift\n' > "$workspace/AGENTS.md"
 if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
@@ -223,6 +226,15 @@ if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; t
 fi
 "$install_root/agenticops" repair --workspace "$workspace" >/dev/null
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
+
+printf 'drift\n' > "$workspace/.agenticops/agenticops"
+if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
+  printf '工作空间入口漂移未被 doctor 发现\n' >&2
+  exit 1
+fi
+"$install_root/agenticops" repair --workspace "$workspace" >/dev/null
+test -x "$workspace/.agenticops/agenticops"
+"$workspace/.agenticops/agenticops" doctor >/dev/null
 
 subset_workspace="$test_root/subset-workspace"
 "$install_root/agenticops" init --workspace "$subset_workspace" --agent codex >/dev/null
@@ -254,6 +266,11 @@ AGENTIC_OPS_EXPECTED_WORKSPACE="$expected_workspace" \
 AGENTIC_OPS_CAPTURE="$capture" \
   "$install_root/agenticops" start --agent codex --workspace "$workspace" -- --model fake >/dev/null
 grep -Fx -- '--model fake' "$capture" >/dev/null
+PATH="$fake_bin:$PATH" \
+AGENTIC_OPS_EXPECTED_WORKSPACE="$expected_workspace" \
+AGENTIC_OPS_CAPTURE="$capture" \
+  "$workspace/.agenticops/agenticops" start --agent codex -- --model workspace-entry >/dev/null
+grep -Fx -- '--model workspace-entry' "$capture" >/dev/null
 test ! -e "$workspace/AGENTS.md.tmp"
 
 python3 "$install_root/workflow/task.py" init \
@@ -287,23 +304,23 @@ printf 'next\n' > "$source_repo/NEXT"
 git -C "$source_repo" add NEXT
 git -C "$source_repo" commit -qm "next"
 installed_update_output="$test_root/installed-update-output"
-"$install_root/agenticops" update > "$installed_update_output"
+"$workspace/.agenticops/agenticops" update > "$installed_update_output"
 test -f "$install_root/NEXT"
 grep -F '工作面=使用' "$installed_update_output" >/dev/null
 if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
   printf '产品更新后旧工作目录绑定未被识别为待刷新\n' >&2
   exit 1
 fi
-"$install_root/agenticops" repair --workspace "$workspace" >/dev/null
+"$workspace/.agenticops/agenticops" repair >/dev/null
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
 test -f "$workspace/.agenticops/tasks/TAP-123/state.json"
 test -f "$workspace/.agenticops/tasks/TAP-999/state.json"
 test "$(file_digest "$workspace/.agenticops/tasks/index.json")" = "$task_index_digest"
 test "$(file_digest "$workspace/.agenticops/tasks/TAP-123/state.json")" = "$task_123_digest"
 test "$(file_digest "$workspace/.agenticops/tasks/TAP-999/state.json")" = "$task_999_digest"
-"$install_root/agenticops" rollback >/dev/null
+"$workspace/.agenticops/agenticops" rollback >/dev/null
 test ! -f "$install_root/NEXT"
-"$install_root/agenticops" repair --workspace "$workspace" >/dev/null
+"$workspace/.agenticops/agenticops" repair >/dev/null
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
 test "$(file_digest "$workspace/.agenticops/tasks/index.json")" = "$task_index_digest"
 test "$(file_digest "$workspace/.agenticops/tasks/TAP-123/state.json")" = "$task_123_digest"

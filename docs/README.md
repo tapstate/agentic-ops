@@ -7,7 +7,7 @@
 | 主题 | 总纲与权威文档 | 适用内容 |
 |---|---|---|
 | 产品定位与架构 | [项目目标](strategy/project-goals.md)、[v1 工程架构](architecture/agenticops-v1-architecture.md)、[术语表](glossary.md) | 产品边界、分层、稳定术语和迁移准绳 |
-| 使用与维护 | [使用指引](usage-guide.md)、[维护指引](maintenance-guide.md) | 产品安装、项目工作空间初始化、日常运行和维护 |
+| 使用与维护 | [使用指引](usage-guide.md)、[维护指引](maintenance-guide.md) | 产品安装、项目工作空间初始化、由工作空间薄入口定位中央产品根目录，以及日常运行和维护 |
 | 安全与验证 | [权限与安全边界](security/permissions.md)、[Git SSH 授权指引](security/git-ssh-access.md)、[Claude 端到端验证](testing/e2e-claude.md)、[Codex 端到端验证](testing/e2e-codex.md) | 凭证与外部系统边界、访问诊断和端到端验收 |
 | 产品合同 | [v1 用户故事总纲](user-stories/v1/README.md) | 稳定的产品能力、保护行为和验收证据 |
 
