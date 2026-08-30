@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "allowed_root_entries": [
+    ".agentic-ops-source",
+    ".githooks",
+    ".gitignore",
+    ".python-version",
+    "AGENTS.md",
+    "README.md",
+    "adapters",
+    "agenticops",
+    "bootstrap",
+    "contracts",
+    "docs",
+    "gate",
+    "internal",
+    "policies",
+    "projects",
+    "tests",
+    "workflow"
+  ],
+  "ignored_root_entries": [
+    {
+      "path": ".hermes",
+      "gitignore_pattern": ".hermes/",
+      "kind": "tool"
+    },
+    {
+      "path": ".idea",
+      "gitignore_pattern": ".idea/",
+      "kind": "tool"
+    },
+    {
+      "path": ".local",
+      "gitignore_pattern": ".local/",
+      "kind": "product_state"
+    },
+    {
+      "path": ".superpowers",
+      "gitignore_pattern": ".superpowers/",
+      "kind": "tool"
+    }
+  ],
+  "forbidden_ignored_root_entries": [
+    {
+      "path": ".pytest_cache",
+      "gitignore_pattern": ".pytest_cache/"
+    },
+    {
+      "path": ".ruff_cache",
+      "gitignore_pattern": ".ruff_cache/"
+    },
+    {
+      "path": ".venv",
+      "gitignore_pattern": ".venv/"
+    },
+    {
+      "path": "__pycache__",
+      "gitignore_pattern": "__pycache__/"
+    },
+    {
+      "path": "dist",
+      "gitignore_pattern": "dist/"
+    }
+  ],
+  "other_gitignore_patterns": [
+    "*.py[cod]"
+  ]
+}

@@ -7,21 +7,36 @@ cd "$repo_root"
 fail() { printf '资源合同验证失败：%s\n' "$1" >&2; exit 1; }
 require_file() { test -f "$1" || fail "缺少文件 $1"; }
 require_executable() { test -x "$1" || fail "缺少可执行入口 $1"; }
+resource_contract="$repo_root/internal/resource-contract.json"
+resource_contract_tool="$repo_root/internal/resource_contract.py"
+
+require_file "$resource_contract"
+require_file "$resource_contract_tool"
+python3 "$resource_contract_tool" --contract "$resource_contract" \
+  validate --gitignore "$repo_root/.gitignore" >/dev/null ||
+  fail ".gitignore 与统一资源合同不匹配"
+PYTHONDONTWRITEBYTECODE=1 python3 "$repo_root/internal/tests/test_resource_contract.py" >/dev/null ||
+  fail "统一资源合同匹配回归未通过"
+allowed_root_entries="$(python3 "$resource_contract_tool" --contract "$resource_contract" allowed-root)"
+tool_root_entries="$(python3 "$resource_contract_tool" --contract "$resource_contract" tool-root)"
 
 # 根目录只保留现役产品层、源码维护设施和明确的本地状态入口。新增顶层内容必须先
 # 证明无法归入既有架构层，避免临时脚手架和第二套 Runtime 再次进入产品仓库。
 for path in .* *; do
   test -e "$path" || continue
-  case "$path" in
-    .|..|.git|.agentic-ops-source|.githooks|.gitignore|.local|.python-version|\
-    AGENTS.md|README.md|agenticops|adapters|bootstrap|contracts|docs|gate|internal|\
-    policies|projects|tests|workflow)
-      ;;
-    *)
-      fail "根目录存在未归属现役架构的内容：$path"
-      ;;
-  esac
+  case "$path" in .|..|.git) continue ;; esac
+  printf '%s\n' "$allowed_root_entries" | grep -Fxq -- "$path" ||
+    fail "根目录存在未归属现役架构的内容：$path"
 done
+
+while IFS= read -r tool_root; do
+  test -n "$tool_root" || continue
+  tracked_tool_files="$(git ls-files -- "$tool_root")"
+  test -z "$tracked_tool_files" ||
+    fail "本机工具目录不能被 Git 管理：$tracked_tool_files"
+done <<EOF
+$tool_root_entries
+EOF
 
 for file in \
   .agentic-ops-source AGENTS.md README.md agenticops \
@@ -46,7 +61,9 @@ for file in \
   bootstrap/product_state.py \
   tests/test_gate.py tests/test_contracts.py tests/test_adapter_boundary.py tests/test_workflow.py tests/test_install.sh \
   internal/acceptance.sh internal/bin/story-gate internal/story_gate/stories.yaml \
-  internal/story_gate/review-policy.yaml internal/release/release.sh; do
+  internal/story_gate/review-policy.yaml internal/release/release.sh \
+  internal/resource-contract.json internal/resource_contract.py \
+  internal/tests/test_resource_contract.py; do
   require_file "$file"
 done
 
@@ -114,8 +131,6 @@ test ! -e packages/agentic-cli || fail "旧 agentic-cli 仍在现役结构"
 test ! -e go.mod || fail "旧 Go Runtime 仍在现役结构"
 test ! -d install-resources || fail "旧安装制品目录仍在现役结构"
 test ! -d docs/superpowers || fail "不得提交 docs/superpowers"
-grep -Fxq '.superpowers/' .gitignore || fail ".superpowers 未忽略"
-grep -Fxq '.local/' .gitignore || fail "产品根目录 .local 未统一忽略"
 tracked_local_files="$(
   git ls-files .local | while IFS= read -r tracked_local_file; do
     test ! -e "$tracked_local_file" || printf '%s\n' "$tracked_local_file"

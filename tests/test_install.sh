@@ -5,13 +5,33 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 test_root="$(mktemp -d)"
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT
 
+# 代码验证绑定调用此脚本时的检出；安装 fixture 则允许使用任意受控分支，
+# 避免把发布主线当作唯一验证对象。
+tested_ref="$(git -C "$repo_root" rev-parse HEAD)"
+tested_branch="$(git -C "$repo_root" branch --show-current || true)"
+source_branch="develop"
+install_branch="${AGENTICOPS_TEST_INSTALL_BRANCH:-acceptance-under-test}"
+git check-ref-format --branch "$install_branch" >/dev/null
+test "$install_branch" != "$source_branch" || {
+  printf '安装 fixture 分支不能与源码维护分支相同：%s\n' "$install_branch" >&2
+  exit 2
+}
+
+file_digest() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    sha256sum "$1" | awk '{print $1}'
+  fi
+}
+
 source_repo="$test_root/source"
 install_root="$test_root/install"
 maintainer_root="$test_root/maintainer"
 workspace="$test_root/project-workspace"
 
 mkdir -p "$source_repo"
-git -C "$source_repo" init -q -b main
+git -C "$source_repo" init -q -b "$install_branch"
 git -C "$source_repo" config user.email agentic-ops-test@example.test
 git -C "$source_repo" config user.name "AgenticOps Test"
 for product_dir in adapters bootstrap contracts gate policies projects workflow; do
@@ -43,7 +63,7 @@ chmod +x "$source_repo/agenticops"
 git -C "$source_repo" add .agentic-ops-source .gitignore .githooks agenticops adapters bootstrap \
   contracts gate policies projects workflow internal
 git -C "$source_repo" commit -qm "initial"
-git -C "$source_repo" branch develop
+git -C "$source_repo" branch "$source_branch"
 
 git clone -q "$source_repo" "$maintainer_root"
 setup_bin="$test_root/setup-bin"
@@ -77,7 +97,7 @@ fi
 grep -F '"changed"' "$source_workspace/.test-agent/settings.json" >/dev/null
 git -C "$maintainer_root" checkout -q -- adapters/agents/test-agent/templates/settings.json
 
-git -C "$source_repo" switch -q develop
+git -C "$source_repo" switch -q "$source_branch"
 printf 'source update\n' > "$source_repo/SOURCE-NEXT"
 git -C "$source_repo" add SOURCE-NEXT
 git -C "$source_repo" commit -qm "source next"
@@ -134,17 +154,17 @@ if PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update >/dev/null 2>&1;
   exit 1
 fi
 git -C "$maintainer_root" checkout -q -- agenticops
-git -C "$source_repo" switch -q main
+git -C "$source_repo" switch -q "$install_branch"
 
 bash "$repo_root/bootstrap/install.sh" \
-  --install-home "$install_root" --repository "$source_repo" --branch main
+  --install-home "$install_root" --repository "$source_repo" --branch "$install_branch"
 
 test -f "$install_root/contracts/gate-request.schema.json"
 test -f "$install_root/gate/runner.py"
 test -x "$install_root/agenticops"
 test ! -e "$install_root/internal"
 test -f "$install_root/.local/product.json"
-test "$(python3 "$install_root/bootstrap/product_state.py" --product-root "$install_root" read --field tracking_branch)" = main
+test "$(python3 "$install_root/bootstrap/product_state.py" --product-root "$install_root" read --field tracking_branch)" = "$install_branch"
 if PATH="$setup_bin:$PATH" "$install_root/agenticops" setup >/dev/null 2>&1; then
   printf '安装产品根目录被错误切换为源码维护模式\n' >&2
   exit 1
@@ -245,6 +265,23 @@ test -f "$workspace/.agenticops/tasks/TAP-123/state.json"
 test -f "$workspace/.agenticops/tasks/TAP-999/state.json"
 python3 "$install_root/workflow/task.py" list --dir "$workspace" | grep -F 'TAP-123：active' >/dev/null
 python3 "$install_root/workflow/task.py" list --dir "$workspace" | grep -F 'TAP-999：active' >/dev/null
+task_index_digest="$(file_digest "$workspace/.agenticops/tasks/index.json")"
+task_123_digest="$(file_digest "$workspace/.agenticops/tasks/TAP-123/state.json")"
+task_999_digest="$(file_digest "$workspace/.agenticops/tasks/TAP-999/state.json")"
+
+legacy_workspace="$test_root/legacy-workspace"
+"$install_root/agenticops" init --workspace "$legacy_workspace" --agent codex >/dev/null
+mkdir -p "$legacy_workspace/.gate"
+printf '%s\n' \
+  '{"issue_key":"TAP-777","task_class":"technical_task","status":"active"}' \
+  > "$legacy_workspace/.gate/task.json"
+printf '%s\n' '{"scope":"legacy"}' > "$legacy_workspace/.gate/authorization.json"
+printf '%s\n' '{"event":"legacy"}' > "$legacy_workspace/.gate/events.jsonl"
+python3 "$install_root/workflow/task.py" list --dir "$legacy_workspace" | grep -F 'TAP-777：active' >/dev/null
+test -f "$legacy_workspace/.agenticops/tasks/TAP-777/state.json"
+test -f "$legacy_workspace/.agenticops/tasks/TAP-777/authorization.json"
+test -f "$legacy_workspace/.agenticops/tasks/TAP-777/events.jsonl"
+test ! -e "$legacy_workspace/.gate"
 
 printf 'next\n' > "$source_repo/NEXT"
 git -C "$source_repo" add NEXT
@@ -261,9 +298,16 @@ fi
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
 test -f "$workspace/.agenticops/tasks/TAP-123/state.json"
 test -f "$workspace/.agenticops/tasks/TAP-999/state.json"
+test "$(file_digest "$workspace/.agenticops/tasks/index.json")" = "$task_index_digest"
+test "$(file_digest "$workspace/.agenticops/tasks/TAP-123/state.json")" = "$task_123_digest"
+test "$(file_digest "$workspace/.agenticops/tasks/TAP-999/state.json")" = "$task_999_digest"
 "$install_root/agenticops" rollback >/dev/null
 test ! -f "$install_root/NEXT"
 "$install_root/agenticops" repair --workspace "$workspace" >/dev/null
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
+test "$(file_digest "$workspace/.agenticops/tasks/index.json")" = "$task_index_digest"
+test "$(file_digest "$workspace/.agenticops/tasks/TAP-123/state.json")" = "$task_123_digest"
+test "$(file_digest "$workspace/.agenticops/tasks/TAP-999/state.json")" = "$task_999_digest"
 
-printf 'AgenticOps 安装边界验证通过\n'
+printf 'AgenticOps 安装边界验证通过：被测分支=%s，被测提交=%s，安装 fixture 分支=%s\n' \
+  "${tested_branch:-detached HEAD}" "$tested_ref" "$install_branch"
