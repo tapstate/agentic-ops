@@ -964,7 +964,16 @@ release_recover_merged_candidate() {
   fi
   if [ "$local_tag" != "$merge_commit" ] || [ "$(git -C "$repo_root" cat-file -t "refs/tags/$version" 2>/dev/null || true)" != "tag" ]; then
     tagger="$(git -C "$repo_root" var GIT_COMMITTER_IDENT)"
-    tag_object="$(printf 'object %s\ntype commit\ntag %s\ntagger %s\n\nAgenticOps %s release merge\n' "$merge_commit" "$version" "$tagger" "$version" | git -C "$repo_root" mktag)" || {
+    tag_object="$(
+      printf '%s\n' \
+        "object $merge_commit" \
+        "type commit" \
+        "tag $version" \
+        "tagger $tagger" \
+        "" \
+        "AgenticOps $version release merge" |
+        git -C "$repo_root" mktag
+    )" || {
       release_fail "release_local_tag_repair_failed" "tag_repair" "无法准备新的本地 annotated Tag" "本地旧 Tag 未改变；请检查 Git 身份后重试"
       return 1
     }

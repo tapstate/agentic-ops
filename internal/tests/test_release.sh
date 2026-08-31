@@ -24,6 +24,20 @@ done
   if release_validate_jira_id ao-123 >/dev/null 2>&1; then exit 1; fi
 ) || fail "版本或 Jira 编号校验不符合合同"
 
+grep -Fq 'merge_body="$(' "$repo_root/internal/release/hotfix.sh" ||
+  fail "Hotfix 提交正文未用真实换行构造"
+grep -Fq "printf '%s\\n\\n%s\\n' \"\$merge_subject\" \"\$merge_body\"" \
+  "$repo_root/internal/release/hotfix.sh" ||
+  fail "Hotfix 未按真实换行写入提交信息"
+if grep -Fq '%b' "$repo_root/internal/release/hotfix.sh"; then
+  fail "Hotfix 不得依赖 %b 解释提交正文"
+fi
+grep -Fq 'tag_object="$(' "$repo_root/internal/release/lib/release-common.sh" ||
+  fail "恢复 Tag 对象未用真实换行构造"
+if grep -Fq "printf 'object %s\\ntype commit" "$repo_root/internal/release/lib/release-common.sh"; then
+  fail "恢复 Tag 对象不得使用转义格式串拼接"
+fi
+
 fixture="$test_root/repo"
 mkdir -p \
   "$fixture/.githooks" "$fixture/internal/bin" "$fixture/internal/story_gate" \

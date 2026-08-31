@@ -72,7 +72,14 @@ if [ "$remote_main" = "$develop_candidate" ] &&
 fi
 
 merge_subject="Hotfix: $jira_id 合并 develop 到 main"
-merge_body="将 develop 的已提交变更直接合入 main。\n\nJira: $jira_id\n流程: direct-develop-to-main\nJira 交互: none"
+merge_body="$(
+  printf '%s\n' \
+    "将 develop 的已提交变更直接合入 main。" \
+    "" \
+    "Jira: $jira_id" \
+    "流程: direct-develop-to-main" \
+    "Jira 交互: none"
+)"
 merge_tree_output=""
 if ! merge_tree_output="$(
   git -C "$repo_root" merge-tree --write-tree "$remote_main" "$develop_candidate"
@@ -90,7 +97,7 @@ if ! git -C "$repo_root" cat-file -e "$merge_tree^{tree}" 2>/dev/null; then
   exit 1
 fi
 merge_commit="$(
-  printf '%s\n\n%b\n' "$merge_subject" "$merge_body" |
+  printf '%s\n\n%s\n' "$merge_subject" "$merge_body" |
     git -C "$repo_root" commit-tree "$merge_tree" \
       -p "$remote_main" \
       -p "$develop_candidate"
