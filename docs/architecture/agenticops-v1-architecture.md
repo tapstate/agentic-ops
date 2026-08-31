@@ -27,6 +27,7 @@ Agent Adapter → Tool Adapter → Standard Request
 | Project | `projects/<project>/` | Jira、分支、准入、验证和 Runbook |
 | Adapter | `adapters/` | Agent/工具协议的无状态转换 |
 | Bootstrap | `bootstrap/` | 源码目录、产品根目录（Product Root）与工作空间生命周期 |
+| Maintenance Skill | `skills/` | 仅维护面使用的流程验证与协作指引；不属于任何业务项目，也不安装或接线到业务工作空间 |
 | Internal | `internal/` | AgenticOps 自身的审查和发布 |
 
 规则按变化原因归属：平台差异只能进入 Adapter，项目差异只能进入 Project，公司共性
@@ -59,7 +60,7 @@ Agent 约束文件数、代码量、依赖和状态写入。
 - `.local/product.json` 记录 `mode`、仓库、跟踪分支及生命周期同步提交；`.local/repository-pool.json`
   记录默认 Source Pool 根目录和仓库供给模式；维护工作面的
   实际运行版本始终以 Git HEAD 为准；
-- 安装产品根目录不包含 `internal/`。
+- 安装产品根目录不包含 `internal/` 或维护面 `skills/`。
 
 `.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期
 配置外，它可保存由本 Product Root 成功初始化过的工作空间提示索引；该索引只用于更新后

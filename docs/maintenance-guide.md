@@ -89,6 +89,7 @@ workspace="$HOME/agenticops-tapdata"
 - 项目差异：`projects/<project>/`
 - Agent/工具协议差异：`adapters/`
 - 安装与接线：`bootstrap/`
+- 维护面协作指引：`skills/`；它们只供维护 Agent 使用，不安装或接线到业务工作空间。
 
 新增 Agent 只增加 `adapters/agents/<id>/` 的 Manifest、薄 Hook、模板和测试；不要
 修改公共入口建立平台枚举。新增产品项目只增加 `projects/<project>/`。工作项、进度

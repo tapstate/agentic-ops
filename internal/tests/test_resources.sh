@@ -53,6 +53,7 @@ for file in \
   workflow/authorization.py workflow/ci.py workflow/evidence.py \
   projects/tapdata/profile.json projects/tapdata/repositories.json projects/tapdata/admission.json \
   projects/tapdata/skills/tapdata-task/SKILL.md \
+  skills/ao-test-takeover/SKILL.md \
   adapters/workspace/AGENTS.md adapters/workspace/agenticops adapters/agents/claude/templates/CLAUDE.md \
   adapters/runtime.py adapters/tools/classifier.py adapters/tools/mcp-operations.json \
   adapters/agents/claude/hook.py adapters/agents/claude/manifest.json \

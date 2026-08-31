@@ -23,6 +23,7 @@ stories:
       - developer/**
       - maintainer/**
       - shared/**
+      - skills/**
     acceptance_checks: [python_runtime, resource_contracts, release_workflow, story_registry]
     evidence_requirements:
       - 产品验证、故事映射和发布门禁结果

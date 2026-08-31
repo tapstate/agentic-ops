@@ -35,7 +35,7 @@ mkdir -p "$source_repo"
 git -C "$source_repo" init -q -b "$install_branch"
 git -C "$source_repo" config user.email agentic-ops-test@example.test
 git -C "$source_repo" config user.name "AgenticOps Test"
-for product_dir in adapters bootstrap contracts gate policies projects workflow; do
+for product_dir in adapters bootstrap contracts gate policies projects skills workflow; do
   cp -R "$repo_root/$product_dir" "$source_repo/$product_dir"
 done
 cp -R "$repo_root/internal" "$source_repo/internal"
@@ -62,7 +62,7 @@ printf '{"enabled":true}\n' > "$source_repo/adapters/agents/test-agent/templates
 cp "$repo_root/agenticops" "$source_repo/agenticops"
 chmod +x "$source_repo/agenticops"
 git -C "$source_repo" add .agentic-ops-source .gitignore .githooks agenticops adapters bootstrap \
-  contracts gate policies projects workflow internal
+  contracts gate policies projects skills workflow internal
 git -C "$source_repo" commit -qm "initial"
 git -C "$source_repo" branch "$source_branch"
 
@@ -166,6 +166,8 @@ bash "$repo_root/bootstrap/install.sh" \
 test -f "$install_root/contracts/gate-request.schema.json"
 test -f "$install_root/gate/runner.py"
 test -x "$install_root/agenticops"
+test -f "$maintainer_root/skills/ao-test-takeover/SKILL.md"
+test ! -e "$install_root/skills/ao-test-takeover"
 test ! -e "$install_root/internal"
 test -f "$install_root/.local/product.json"
 test -f "$install_root/.local/repository-pool.json"
@@ -204,6 +206,8 @@ test -f "$workspace/.codex/hooks.json"
 test -f "$workspace/.test-agent/settings.json"
 test -L "$workspace/.agents/skills/tapdata-task"
 test -L "$workspace/.claude/skills/tapdata-task"
+test ! -e "$workspace/.agents/skills/ao-test-takeover"
+test ! -e "$workspace/.claude/skills/ao-test-takeover"
 "$install_root/agenticops" workspace list | grep -F -- "$workspace" >/dev/null
 grep -F '@AGENTS.md' "$workspace/CLAUDE.md" >/dev/null
 grep -F 'Product Project：`tapdata`' "$workspace/AGENTS.md" >/dev/null
