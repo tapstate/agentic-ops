@@ -88,6 +88,11 @@ if [ "$mode" = "source" ]; then
   fi
   python3 "$state_tool" --product-root "$product_root" update-ref \
     --current-ref "$updated_ref"
+  if ! python3 "$product_root/bootstrap/skill_wiring.py" \
+    --product-root "$product_root" --refresh; then
+    printf 'AgenticOps：源码已更新到 %s，但维护 Skill 接线失败；修复后重新执行 update\n' "$updated_ref" >&2
+    exit 2
+  fi
 else
   python3 "$state_tool" --product-root "$product_root" update-ref \
     --current-ref "$updated_ref" --previous-ref "$current_ref"

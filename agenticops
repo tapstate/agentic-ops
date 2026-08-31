@@ -146,6 +146,11 @@ case "$command_name" in
   doctor)
     parse_workspace "$@"
     test "$forwarded_count" -eq 0 || { usage >&2; exit 2; }
+    workspace_resolved="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$workspace")"
+    if [ "$workspace_resolved" = "$product_root" ] && [ -f "$product_root/.agentic-ops-source" ]; then
+      exec python3 "$product_root/bootstrap/skill_wiring.py" \
+        --product-root "$product_root" --check
+    fi
     exec python3 "$product_root/bootstrap/render.py" \
       --install-home "$product_root" --workspace "$workspace" --check
     ;;

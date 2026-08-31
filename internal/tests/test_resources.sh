@@ -19,14 +19,41 @@ PYTHONDONTWRITEBYTECODE=1 python3 "$repo_root/internal/tests/test_resource_contr
   fail "统一资源合同匹配回归未通过"
 allowed_root_entries="$(python3 "$resource_contract_tool" --contract "$resource_contract" allowed-root)"
 tool_root_entries="$(python3 "$resource_contract_tool" --contract "$resource_contract" tool-root)"
+maintenance_skill_roots=""
+if test -f .local/maintenance-skill-wiring.json && \
+    python3 bootstrap/skill_wiring.py --product-root "$repo_root" --check >/dev/null 2>&1; then
+  maintenance_skill_roots="$(python3 - "$repo_root" <<'PY'
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(sys.argv[1]) / "bootstrap"))
+from agent_registry import discover
+
+roots = {
+    Path(target).parts[0]
+    for manifest in discover(sys.argv[1]).values()
+    for target in [manifest.get("skill_target")]
+    if target
+}
+print("\n".join(sorted(roots)))
+PY
+)"
+fi
 
 # 根目录只保留现役产品层、源码维护设施和明确的本地状态入口。新增顶层内容必须先
 # 证明无法归入既有架构层，避免临时脚手架和第二套 Runtime 再次进入产品仓库。
 for path in .* *; do
   test -e "$path" || continue
   case "$path" in .|..|.git) continue ;; esac
-  printf '%s\n' "$allowed_root_entries" | grep -Fxq -- "$path" ||
-    fail "根目录存在未归属现役架构的内容：$path"
+  if printf '%s\n' "$allowed_root_entries" | grep -Fxq -- "$path"; then
+    continue
+  fi
+  if printf '%s\n' "$maintenance_skill_roots" | grep -Fxq -- "$path"; then
+    test -z "$(git ls-files -- "$path")" ||
+      fail "维护 Skill 原生接线目录不得被 Git 管理：$path"
+    continue
+  fi
+  fail "根目录存在未归属现役架构的内容：$path"
 done
 
 while IFS= read -r tool_root; do
@@ -41,6 +68,7 @@ EOF
 for file in \
   .agentic-ops-source AGENTS.md README.md agenticops \
   docs/strategy/project-goals.md docs/architecture/agenticops-v1-architecture.md \
+  docs/skill-maintenance.md \
   contracts/gate-request.schema.json contracts/gate-decision.schema.json \
   contracts/adapter-manifest.schema.json contracts/operation-catalog.schema.json \
   contracts/product-state.schema.json contracts/workspace.schema.json \
@@ -53,7 +81,7 @@ for file in \
   workflow/authorization.py workflow/ci.py workflow/evidence.py \
   projects/tapdata/profile.json projects/tapdata/repositories.json projects/tapdata/admission.json \
   projects/tapdata/skills/tapdata-task/SKILL.md \
-  skills/ao-test-takeover/SKILL.md \
+  skills/ao-test-takeover/SKILL.md skills/ao-ws-init/SKILL.md \
   adapters/workspace/AGENTS.md adapters/workspace/agenticops adapters/agents/claude/templates/CLAUDE.md \
   adapters/runtime.py adapters/tools/classifier.py adapters/tools/git_push_syntax.py \
   adapters/tools/shell_classifier.py \
@@ -63,6 +91,7 @@ for file in \
   adapters/agents/codex/hook.py adapters/agents/codex/manifest.json \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
   bootstrap/workspace-init.sh bootstrap/render.py bootstrap/workspace_paths.py bootstrap/agent_registry.py \
+  bootstrap/skill_wiring.py \
   bootstrap/product_state.py bootstrap/repository_pool.py bootstrap/workspace_registry.py \
   workflow/repository_worktree.py \
   tests/test_gate.py tests/test_contracts.py tests/test_adapter_boundary.py tests/test_workflow.py tests/test_install.sh \
@@ -78,6 +107,7 @@ for file in \
   workflow/task.py workflow/authorization.py workflow/ci.py workflow/evidence.py \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
   bootstrap/workspace-init.sh bootstrap/render.py bootstrap/agent_registry.py \
+  bootstrap/skill_wiring.py \
   bootstrap/product_state.py bootstrap/repository_pool.py bootstrap/workspace_registry.py \
   workflow/repository_worktree.py \
   tests/test_install.sh internal/acceptance.sh internal/bin/story-gate internal/release/release.sh \
@@ -164,10 +194,20 @@ grep -Fq '登记完成后立即执行受控 `task.py repository prepare`' \
 grep -Fq 'repositories' policies/operations.json || fail "任务授权未绑定多仓库集合"
 grep -Fq '@AGENTS.md' adapters/agents/claude/templates/CLAUDE.md ||
   fail "Claude 入口未复用公共 Agent 规则"
-grep -Fq '"project_skill_target": ".claude/skills"' adapters/agents/claude/manifest.json ||
-  fail "Claude Adapter 未声明原生 Project Skill 发现目录"
-grep -Fq '"project_skill_target": ".agents/skills"' adapters/agents/codex/manifest.json ||
-  fail "Codex Adapter 未声明原生 Project Skill 发现目录"
+grep -Fq '"skill_target": ".claude/skills"' adapters/agents/claude/manifest.json ||
+  fail "Claude Adapter 未声明原生 Skill 发现目录"
+grep -Fq '"skill_target": ".agents/skills"' adapters/agents/codex/manifest.json ||
+  fail "Codex Adapter 未声明原生 Skill 发现目录"
+if rg -n '"project_skill_target"[[:space:]]*:' adapters tests >/dev/null; then
+  fail "Agent Skill 接线仍区分项目专用 Manifest 字段"
+fi
+if find skills projects/*/skills -type f -path '*/agents/*' -print -quit | grep -q .; then
+  fail "通用 Skill 源目录仍包含 Agent 专用 agents/ 配置"
+fi
+grep -Fq 'bootstrap/skill_wiring.py' bootstrap/setup.sh ||
+  fail "setup 未刷新源码维护面 Skill 接线"
+grep -Fq 'bootstrap/skill_wiring.py' bootstrap/update.sh ||
+  fail "update 未刷新源码维护面 Skill 接线"
 grep -Fq 'WorkspaceDirectory' bootstrap/render.py ||
   fail "Bootstrap 未以 workspace 目录 FD 锚定生成接线"
 grep -Fq 'os.O_NOFOLLOW' bootstrap/workspace_paths.py ||

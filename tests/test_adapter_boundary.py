@@ -101,6 +101,13 @@ class AdapterBoundaryTest(unittest.TestCase):
                 "native",
                 "deny_with_guidance",
             ))
+            self.assertNotIn("project_skill_target", manifest)
+            skill_target = manifest.get("skill_target")
+            if skill_target is not None:
+                self.assertIsInstance(skill_target, str)
+                self.assertTrue(skill_target)
+                self.assertFalse(Path(skill_target).is_absolute())
+                self.assertFalse(set(Path(skill_target).parts) & {"", ".", ".."})
 
     def test_adapters_do_not_depend_on_business_layers_or_write_state(self):
         forbidden_imports = {

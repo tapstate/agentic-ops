@@ -47,6 +47,6 @@
         "message": { "type": "string" }
       }
     },
-    "project_skill_target": { "type": ["string", "null"] }
+    "skill_target": { "type": ["string", "null"] }
   }
 }

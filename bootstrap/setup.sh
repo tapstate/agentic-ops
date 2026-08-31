@@ -98,6 +98,8 @@ test -z "$repository_pool" || pool_arguments+=(--root "$repository_pool")
 python3 "$product_root/bootstrap/repository_pool.py" --product-root "$product_root" \
   configure ${pool_arguments[@]+"${pool_arguments[@]}"} \
   --provisioning "$repository_provisioning" >/dev/null
+python3 "$product_root/bootstrap/skill_wiring.py" \
+  --product-root "$product_root" --refresh
 
 printf 'AgenticOps 初始化完成：工作面=维护，branch=%s，ref=%s\n' "$target_branch" "$current_ref"
 printf 'Source Pool：%s（%s）\n' \

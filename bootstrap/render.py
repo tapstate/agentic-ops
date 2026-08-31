@@ -16,6 +16,7 @@ from agent_registry import select
 from product_state import load as load_product_state
 from repository_pool import load as load_repository_pool
 from repository_pool import validate_root as validate_repository_pool_root
+from skill_wiring import validate_skill
 from workspace_paths import WorkspaceDirectory, workspace_artifact_path
 
 
@@ -178,8 +179,9 @@ def project_skill_sources(install_root, project):
         return []
     sources = []
     for candidate in sorted(root.iterdir()):
-        if not candidate.is_dir() or not (candidate / "SKILL.md").is_file():
+        if candidate.name.startswith("."):
             continue
+        validate_skill(candidate)
         source = candidate.resolve()
         try:
             source.relative_to(root.resolve())
@@ -212,7 +214,7 @@ def expected_artifacts(install_root, workspace, project, agents, manifests):
                 rendered_content(install_root, project, artifact["template"])
             )
             owners[target] = agent_id
-        skill_target = manifest.get("project_skill_target")
+        skill_target = manifest.get("skill_target")
         if skill_target:
             for source in project_skill_sources(install_root, project):
                 target = str(Path(skill_target) / source.name)
@@ -429,6 +431,8 @@ def update_git_exclude(workspace, artifacts):
     if result.returncode != 0:
         return
     exclude = Path(result.stdout.strip())
+    if not exclude.is_absolute():
+        exclude = workspace / exclude
     existing = set(exclude.read_text(encoding="utf-8").splitlines()) if exclude.is_file() else set()
     patterns = [STATE_DIRECTORY + "/"] + sorted(artifacts)
     missing = [pattern for pattern in patterns if pattern not in existing]

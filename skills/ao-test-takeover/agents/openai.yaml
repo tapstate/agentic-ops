@@ -1,7 +1,0 @@
-interface:
-  display_name: "AgenticOps 接管验证"
-  short_description: "受控验证 Jira 接管、准入与本地 Git 基线"
-  default_prompt: "使用 $ao-test-takeover 测试任务接管：Jira 项目 tapdata，Jira Key TAP-12289，测试目录 ~/test/agentic-ops-test，预设门禁回复无。"
-
-policy:
-  allow_implicit_invocation: true

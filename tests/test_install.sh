@@ -4,6 +4,9 @@ set -euo pipefail
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 test_root="$(mktemp -d)"
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT
+test_home="$test_root/home"
+mkdir -p "$test_home"
+export HOME="$test_home"
 
 # 代码验证绑定调用此脚本时的检出；安装 fixture 则允许使用任意受控分支，
 # 避免把发布主线当作唯一验证对象。
@@ -55,7 +58,7 @@ cat > "$source_repo/adapters/agents/test-agent/manifest.json" <<'JSON'
   "capabilities": {"decisions": ["allow", "deny"], "ask_fallback": "deny_with_guidance"},
   "artifacts": [{"template": "adapters/agents/test-agent/templates/settings.json", "target": ".test-agent/settings.json"}],
   "launch": {"mode": "command", "command": "test-agent-cli", "message": "测试 Agent 已接线。"},
-  "project_skill_target": null
+  "skill_target": null
 }
 JSON
 printf '{"enabled":true}\n' > "$source_repo/adapters/agents/test-agent/templates/settings.json"
@@ -84,6 +87,35 @@ test -d "$maintainer_root/.local/venv/internal"
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field mode)" = source
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field tracking_branch)" = develop
 test -x "$(git -C "$maintainer_root" config --get core.hooksPath)/pre-commit"
+test -f "$maintainer_root/.local/maintenance-skill-wiring.json"
+for agent_skill_root in .agents/skills .claude/skills; do
+  for maintenance_skill in ao-test-takeover ao-ws-init; do
+    skill_link="$maintainer_root/$agent_skill_root/$maintenance_skill"
+    test -L "$skill_link"
+    test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$skill_link")" = \
+      "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' \
+        "$maintainer_root/skills/$maintenance_skill")"
+  done
+done
+"$maintainer_root/agenticops" doctor --workspace "$maintainer_root" >/dev/null
+rm "$maintainer_root/.agents/skills/ao-ws-init"
+if "$maintainer_root/agenticops" doctor --workspace "$maintainer_root" >/dev/null 2>&1; then
+  printf '维护 Skill 链接漂移未被 doctor 发现\n' >&2
+  exit 1
+fi
+PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update >/dev/null
+test -L "$maintainer_root/.agents/skills/ao-ws-init"
+rm "$maintainer_root/.agents/skills/ao-ws-init"
+printf 'project owned\n' > "$maintainer_root/.agents/skills/ao-ws-init"
+if python3 "$maintainer_root/bootstrap/skill_wiring.py" \
+    --product-root "$maintainer_root" --refresh >/dev/null 2>&1; then
+  printf '维护 Skill 接线覆盖了已有普通文件\n' >&2
+  exit 1
+fi
+grep -Fx 'project owned' "$maintainer_root/.agents/skills/ao-ws-init" >/dev/null
+rm "$maintainer_root/.agents/skills/ao-ws-init"
+python3 "$maintainer_root/bootstrap/skill_wiring.py" \
+  --product-root "$maintainer_root" --refresh >/dev/null
 source_workspace="$test_root/source-workspace"
 "$maintainer_root/agenticops" init --workspace "$source_workspace" \
   --project tapdata --agent test-agent >/dev/null
@@ -101,7 +133,16 @@ git -C "$maintainer_root" checkout -q -- adapters/agents/test-agent/templates/se
 
 git -C "$source_repo" switch -q "$source_branch"
 printf 'source update\n' > "$source_repo/SOURCE-NEXT"
-git -C "$source_repo" add SOURCE-NEXT
+mkdir -p "$source_repo/skills/fixture-maintenance"
+printf '%s\n' \
+  '---' \
+  'name: fixture-maintenance' \
+  'description: 测试维护 Skill 生命周期接线。' \
+  '---' \
+  '' \
+  '# Fixture maintenance' \
+  > "$source_repo/skills/fixture-maintenance/SKILL.md"
+git -C "$source_repo" add SOURCE-NEXT skills/fixture-maintenance/SKILL.md
 git -C "$source_repo" commit -qm "source next"
 source_update_output="$test_root/source-update-output"
 PATH="$setup_bin:$PATH" "$source_workspace/.agenticops/agenticops" update > "$source_update_output"
@@ -110,6 +151,14 @@ grep -F '工作面=维护' "$source_update_output" >/dev/null
 grep -F '已知工作空间待刷新' "$source_update_output" >/dev/null
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field current_ref)" = \
   "$(git -C "$maintainer_root" rev-parse HEAD)"
+test -L "$maintainer_root/.agents/skills/fixture-maintenance"
+test -L "$maintainer_root/.claude/skills/fixture-maintenance"
+
+git -C "$source_repo" rm -qr skills/fixture-maintenance
+git -C "$source_repo" commit -qm "remove maintenance skill"
+PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output"
+test ! -e "$maintainer_root/.agents/skills/fixture-maintenance"
+test ! -e "$maintainer_root/.claude/skills/fixture-maintenance"
 
 git -C "$maintainer_root" config user.email agentic-ops-test@example.test
 git -C "$maintainer_root" config user.name "AgenticOps Test"
@@ -167,7 +216,12 @@ test -f "$install_root/contracts/gate-request.schema.json"
 test -f "$install_root/gate/runner.py"
 test -x "$install_root/agenticops"
 test -f "$maintainer_root/skills/ao-test-takeover/SKILL.md"
+test -f "$maintainer_root/skills/ao-ws-init/SKILL.md"
 test ! -e "$install_root/skills/ao-test-takeover"
+test ! -e "$install_root/skills/ao-ws-init"
+test ! -e "$install_root/.local/maintenance-skill-wiring.json"
+test ! -e "$install_root/.agents/skills/ao-test-takeover"
+test ! -e "$install_root/.claude/skills/ao-test-takeover"
 test ! -e "$install_root/internal"
 test -f "$install_root/.local/product.json"
 test -f "$install_root/.local/repository-pool.json"
@@ -354,6 +408,8 @@ test -L "$workspace/.agents/skills/tapdata-task"
 test -L "$workspace/.claude/skills/tapdata-task"
 test ! -e "$workspace/.agents/skills/ao-test-takeover"
 test ! -e "$workspace/.claude/skills/ao-test-takeover"
+test ! -e "$workspace/.agents/skills/ao-ws-init"
+test ! -e "$workspace/.claude/skills/ao-ws-init"
 "$install_root/agenticops" workspace list | grep -F -- "$workspace" >/dev/null
 grep -F '@AGENTS.md' "$workspace/CLAUDE.md" >/dev/null
 grep -F 'Product Project：`tapdata`' "$workspace/AGENTS.md" >/dev/null
@@ -433,6 +489,8 @@ assert artifacts[".agents/skills/tapdata-task"]["kind"] == "symlink"
 assert artifacts[".claude/skills/tapdata-task"]["kind"] == "symlink"
 assert ".agents/skills/ao-test-takeover" not in artifacts
 assert ".claude/skills/ao-test-takeover" not in artifacts
+assert ".agents/skills/ao-ws-init" not in artifacts
+assert ".claude/skills/ao-ws-init" not in artifacts
 PY
 python3 - "$workspace/.codex/hooks.json" <<'PY'
 import json
@@ -447,6 +505,9 @@ assert handler["timeout"] == 30
 PY
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
 "$workspace/.agenticops/agenticops" doctor >/dev/null
+test ! -e "$HOME/.codex/skills"
+test ! -e "$HOME/.agents/skills"
+test ! -e "$HOME/.claude/skills"
 
 rm "$workspace/.agents/skills/tapdata-task"
 if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
