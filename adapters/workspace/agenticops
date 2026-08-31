@@ -2,7 +2,8 @@
 # 由 AgenticOps 生成；从工作空间绑定解析中央入口，不保存第二份配置。
 set -euo pipefail
 
-workspace="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+entry_path="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$0")"
+workspace="$(CDPATH= cd -- "$(dirname -- "$entry_path")" && pwd -P)"
 binding="$workspace/.agenticops/workspace.json"
 product_root="$(python3 - "$binding" <<'PY'
 import json

@@ -17,6 +17,7 @@
     "dangerous_environment_names": [
       "ALL_PROXY", "BASH_ENV", "CURL_CA_BUNDLE", "ENV", "HOME", "HTTPS_PROXY",
       "HTTP_PROXY", "IFS", "NO_PROXY", "PATH", "PERL5LIB", "PYTHONHOME", "PYTHONPATH",
+      "RIPGREP_CONFIG_PATH",
       "RUBYLIB", "SSL_CERT_DIR", "SSL_CERT_FILE", "XDG_CONFIG_HOME", "all_proxy",
       "http_proxy", "https_proxy", "no_proxy"
     ],

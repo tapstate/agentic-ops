@@ -119,6 +119,10 @@ def main():
         # ---- 任务状态机 -------------------------------------------------
         code, out = run_tool("task.py", "init", "--issue-key", "TAP-123", "--task-class", "defect_fix", cwd=ws)
         check("task init 成功", code, 0)
+        code, out = run_tool("task.py", "status", "--issue", "TAP-123", "--dir", str(ws), cwd=ws)
+        check("task CLI 拒绝 issue-key 缩写", code, 2)
+        code, out = run_tool("repository_worktree.py", "roots", "--issue-key", "TAP-123", "--di", str(ws), cwd=ws)
+        check("repository_worktree CLI 拒绝 dir 缩写", code, 2)
         first_run = json.loads(task_store.task_path(ws, "TAP-123").read_text(encoding="utf-8"))["run_id"]
         code, out = run_tool("task.py", "init", "--issue-key", "TAP-123", "--task-class", "defect_fix", cwd=ws)
         check("重复接管要求用户选择继续或清理", code, 3)

@@ -753,7 +753,12 @@ def cmd_purge(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    class StrictArgumentParser(argparse.ArgumentParser):
+        def __init__(self, *args, **kwargs):
+            kwargs["allow_abbrev"] = False
+            super().__init__(*args, **kwargs)
+
+    parser = StrictArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("init")

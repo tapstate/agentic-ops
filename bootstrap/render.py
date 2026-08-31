@@ -179,7 +179,7 @@ def common_artifacts(install_root, project):
         "AGENTS.md": rendered_content(
             install_root, project, "adapters/workspace/AGENTS.md"
         ),
-        ".agenticops/agenticops": rendered_content(
+        "agenticops": rendered_content(
             install_root, project, "adapters/workspace/agenticops"
         ),
         ".mcp.json": rendered_content(
@@ -561,7 +561,7 @@ def main():
                     tree.symlink(artifact["target"], target)
                 else:
                     tree.write_text_atomic(target, artifact["content"])
-                if target == ".agenticops/agenticops":
+                if target == "agenticops":
                     tree.chmod(target, 0o700)
             tree.write_json_atomic(Path(STATE_DIRECTORY) / WORKSPACE_NAME, workspace_config)
             tree.write_json_atomic(Path(STATE_DIRECTORY) / INIT_NAME, document)

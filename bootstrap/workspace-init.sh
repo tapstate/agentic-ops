@@ -89,4 +89,4 @@ python3 "$install_root/bootstrap/workspace_registry.py" \
   --product-root "$install_root" register --workspace "$workspace"
 
 printf 'AgenticOps 项目工作空间已初始化：%s（project=%s）\n' "$workspace" "$project"
-printf '统一入口：%s/agenticops doctor --workspace %s\n' "$install_root" "$workspace"
+printf '统一入口：cd %s && ./agenticops doctor\n' "$workspace"

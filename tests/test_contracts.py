@@ -265,6 +265,38 @@ class ContractConformanceTest(unittest.TestCase):
             classify_bash("workflow/task.py repository prepare --issue-key TAP-123"),
         )
         for command in (
+            "sed -n '1,200p' ./agenticops",
+            "sed -n '1,200p' agenticops",
+            "head -n 80 .agenticops/workspace.json",
+            "stat ./agenticops",
+        ):
+            self.assertEqual([], classify_bash(command), command)
+        self.assertIn(
+            "unknown_external_write",
+            classify_bash("find . -exec ./agenticops workspace purge ';'"),
+        )
+        self.assertIn(
+            "unknown_external_write",
+            classify_bash("sed -n 1p -i.bak ./agenticops"),
+        )
+        for command in (
+            "cat source > ./agenticops",
+            "sed -n 1p source > ./agenticops",
+            "cat ./agenticops | sh -s workspace purge --workspace /tmp/example --yes",
+            "sed -n 1p ./agenticops | sh -s workspace purge --workspace /tmp/example --yes",
+            "rg --pre './agenticops workspace purge --yes' pattern ./agenticops",
+            "head -n \"$(./agenticops workspace purge --yes)\" ./agenticops",
+            "cat \"$(./agenticops workspace purge --yes)\" ./agenticops",
+            "RIPGREP_CONFIG_PATH=/tmp/rg.conf rg pattern ./agenticops",
+            "./agenticops workspace purge --worksp /other --yes",
+        ):
+            self.assertIn("unknown_external_write", classify_bash(command), command)
+        operations, _, target = classify_tool_call(
+            "Bash", {"command": "./agenticops workspace purge --workspace /other --yes"}
+        )
+        self.assertEqual(["manage_repository_worktree"], operations)
+        self.assertEqual("/other", target["workspace"])
+        for command in (
             "python3 workflow/task.py repository prepare --issue-key TAP-123 --reuse-existing-branch",
             "python3 workflow/task.py repository cleanup --issue-key TAP-123",
             "python3 workflow/repository_worktree.py prepare --issue-key TAP-123",

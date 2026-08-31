@@ -6,13 +6,10 @@ import re
 from pathlib import Path
 
 from adapters.tools.git_push_syntax import parse_push
-from adapters.tools.shell_syntax import normalize_shell_call
+from adapters.tools.shell_syntax import DYNAMIC, normalize_shell_call
 
-CONFIG = json.loads(
-    (Path(__file__).resolve().parent / "mcp-operations.json").read_text(encoding="utf-8")
-)
-SHELL = CONFIG["shell"]
-UNKNOWN = "unknown_external_write"
+CONFIG = json.loads((Path(__file__).resolve().parent / "mcp-operations.json").read_text(encoding="utf-8"))
+SHELL, UNKNOWN = CONFIG["shell"], "unknown_external_write"
 GITHUB_OPS = {"create_pr", "update_pr", "fix_pr_comments", "pr_merge", "release", "create_repository"}
 GIT_HELP_FLAGS = {"-a", "--all", "--dry-run", "--no-verify", "-q", "--quiet", "-v", "--verbose"}
 GH_HELP_FLAGS = {"--draft", "--web", "--fill", "--fill-first", "--fill-verbose"}
@@ -26,21 +23,19 @@ GIT_KNOWN = set(SHELL["git_readonly_redirects"]) | set(SHELL["git_simple_operati
 
 
 def classify_bash_call(command):
-    operations = []
-    aliases = set()
+    operations, aliases = [], set()
     target_fields = ("issue_key", "workspace", "push_source_ref", "push_destination_ref",
-                     "push_target_branch", "repository")
-    targets = {key: [] for key in target_fields}
-    for command_tokens, reliable in normalize_shell_call(command, SHELL):
+                     "push_target_branch", "repository"); targets = {key: [] for key in target_fields}
+    for command_tokens, reliable in (calls := normalize_shell_call(command, SHELL)):
         controlled_alias = _controlled_alias_call(command_tokens, aliases)
         current, current_target = _dispatch(command_tokens) if reliable and command_tokens else ([], {})
-        if not reliable and (controlled_alias or _controlled_hint(command_tokens)) and UNKNOWN not in current:
+        if not reliable and (controlled_alias or _controlled_hint(command_tokens, len(calls) == 1, command)) \
+                and UNKNOWN not in current:
             current.append(UNKNOWN)
         operations.extend(current)
         for field, value in current_target.items():
             targets[field].append(value)
-    target = {"branch_relevant": True}
-    ambiguous = False
+    target, ambiguous = {"branch_relevant": True}, False
     for field, values in targets.items():
         unique = set(values)
         if values and all(values) and len(unique) == 1:
@@ -56,14 +51,27 @@ def classify_bash_call(command):
     return operations, target
 
 
-def _controlled_hint(tokens):
+def _controlled_hint(tokens, single_segment, command):
     markers = re.compile(r"(?:^|[^A-Za-z0-9_.-])(git|gh|agenticops)(?:$|[^A-Za-z0-9_.-])")
-    return any(
-        markers.search(str(token))
-        or str(token).replace("\\", "/").endswith(
-            ("/workflow/task.py", "/workflow/repository_worktree.py")
+    return not (
+        (executable := Path(str(tokens[0])).name if tokens else "") and single_segment
+        and not any(marker in command for marker in DYNAMIC)
+        and not any(str(token).lstrip("0123456789").startswith((">", "<")) for token in tokens[1:])
+        and (
+            executable in {"cat", "file", "grep", "head", "ls", "rg", "stat", "tail"}
+            and (executable != "rg" or not any(str(token) == "--pre" or str(token).startswith("--pre=")
+                                               for token in tokens[1:]))
+            or executable == "sed" and len(tokens) >= 4 and tokens[1] == "-n"
+            and re.fullmatch(r"\d+(?:,\d+)?p", tokens[2])
+            and all(str(token) and not str(token).startswith("-") for token in tokens[3:])
         )
-        for token in tokens
+    ) and (
+        executable in ("git", "gh", "agenticops")
+        or any(
+            markers.search(str(token)) or str(token).replace("\\", "/").endswith(
+                ("/workflow/task.py", "/workflow/repository_worktree.py")
+            ) for token in tokens
+        )
     )
 
 
@@ -71,11 +79,8 @@ def _controlled_alias_call(tokens, aliases):
     candidates = tokens[1:] if tokens and tokens[0] in ("export", "readonly") else tokens
     assignments = [re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", item, re.S) for item in candidates]
     if assignments and all(assignments):
-        controlled = {
-            assignment.group(1)
-            for assignment in assignments
-            if Path(assignment.group(2)).name in ("git", "gh", "agenticops")
-        }
+        controlled = {assignment.group(1) for assignment in assignments
+                      if Path(assignment.group(2)).name in ("git", "gh", "agenticops")}
         aliases.difference_update(assignment.group(1) for assignment in assignments)
         aliases.update(controlled)
         return False
@@ -93,7 +98,11 @@ def _dispatch(tokens):
     if executor and executor != "python":
         return [], {}
     if executable == "agenticops" and "workspace" in tokens and "purge" in tokens:
-        return ["manage_repository_worktree"], {}
+        return (["manage_repository_worktree", UNKNOWN], {}) if len(
+            workspaces := _argument_values(tokens, "--workspace")
+        ) > 1 or any(item.split("=", 1)[0] not in ("--all", "--yes", "--workspace")
+                     for item in tokens if item.startswith("-")) else (
+            ["manage_repository_worktree"], {"workspace": workspaces[0] if workspaces else ""})
     return _workflow(tokens)
 
 
@@ -113,8 +122,7 @@ def _executor_spec(executable):
 
 
 def _workflow(tokens):
-    executable = Path(tokens[0]).name
-    executor, _ = _executor_spec(executable)
+    executor = _executor_spec(executable := Path(tokens[0]).name)[0]
     python_call = executor == "python"
     index = 0
     if python_call:
@@ -125,11 +133,7 @@ def _workflow(tokens):
                 offset = 2 if item == "-m" else 1
                 module = tokens[index + 1] if item == "-m" and index + 1 < len(tokens) else item[2:]
                 script = SHELL["workflow_modules"].get(module)
-                return (
-                    _workflow_action(script, tokens[index + offset:])
-                    if script
-                    else ([], {})
-                )
+                return _workflow_action(script, tokens[index + offset:]) if script else ([], {})
             if item == "-c" or item.startswith("-c"):
                 return [], {}
             if item in PY_VALUE_OPTIONS:
@@ -191,12 +195,8 @@ def _workflow_action(script, arguments):
 
 
 def _argument_values(arguments, name):
-    values = [
-        arguments[index + 1]
-        for index, item in enumerate(arguments[:-1])
-        if item == name
-    ]
-    values += [item.split("=", 1)[1] for item in arguments if item.startswith(name + "=")]
+    values = [arguments[index + 1] for index, item in enumerate(arguments[:-1]) if item == name]
+    values.extend(item.split("=", 1)[1] for item in arguments if item.startswith(name + "="))
     return values
 
 

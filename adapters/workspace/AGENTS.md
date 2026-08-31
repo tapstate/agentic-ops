@@ -36,6 +36,11 @@ python3 __AGENTIC_OPS_HOME__/workflow/task.py status --issue-key <JIRA-KEY> --di
 
 - Jira 是任务事实源，Git 是代码事实源，GitHub PR/CI 是审查事实源；`.agenticops/`
   只保存工作空间配置及本地执行、恢复和门禁事件，不替代外部事实源。
+- 收到接管、继续、恢复或 reset 任务请求时，必须先读取当前项目 `.agents/skills/` 或
+  `.claude/skills/` 中匹配的 Project Skill，再读取历史 memory 或会话摘要。当前 Product
+  Root、Project Profile 和 Project Skill 是现役规则源；memory 只能作为历史线索，不得
+  用来推断现役命令。Skill 缺失、链接不可读或目标越界时停止任务副作用并提示从工作空间
+  根执行 `./agenticops repair`；不得从历史信息推断或恢复已经退役的入口。
 - `.agenticops/tasks/index.json` 只统一注册任务及其 active/inactive/completed
   状态；每个任务的事实、授权、事件和 CI 证据只能写入自己的
   `.agenticops/tasks/<issue-key>/`。
@@ -66,9 +71,11 @@ python3 __AGENTIC_OPS_HOME__/workflow/task.py status --issue-key <JIRA-KEY> --di
 - 合并、发布、Tag、强推、历史改写、保护分支写入始终不在任务授权范围内。
 - 业务代码修改、构建和测试只能在当前任务 worktree 中进行；Product Root、Source Pool
   根目录、仓库主工作树和其它任务 worktree 不能作为任务写入目标。
-- 执行实现任务时使用 `agenticops start --agent <id> --issue-key <JIRA-KEY>`；入口只把
+- 执行实现任务时从工作空间根使用 `./agenticops start <id> <JIRA-KEY>`；入口只把
   当前 issue/run 的执行目录作为 cwd，并只把当前任务已准备的 worktree 加入 Agent 动态
-  目录。不得用关闭沙箱替代目录接线。
+  目录。普通工作空间会话完成 prepare 后，应向研发工程师输出该精确命令并结束本轮，由
+  研发工程师启动任务模式；不得在当前 Agent 内嵌套启动另一个 Agent，也不得用关闭沙箱
+  替代目录接线。任务模式继续使用中央 Workflow，并显式绑定 workspace、issue 和 run。
 - 任务或工作空间清理必须先清理 linked worktree；脏 worktree 必须停止并保留现场。
 - 临时结束处理用 `deactivate`，恢复同一 run 用 `activate`；清理重做使用 cleanup 后
   精确绑定当前 `run_id` 的 `reset`。只有任务已 inactive、run 精确匹配且研发工程师明确

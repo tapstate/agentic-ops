@@ -7,7 +7,7 @@ metadata:
 
 # TapData 受控任务流程
 
-设项目工作空间为 `<project-workspace>`，任务号为 `<issue-key>`，中央产品根为工作空间 `AGENTS.md` 声明的 `<agenticops-root>`。工具目录为 `<agenticops-root>/workflow`。多个任务 active 时，所有任务命令必须带 `--issue-key <issue-key> --dir <project-workspace>`；不要在各仓库内创建独立状态。
+设项目工作空间为 `<project-workspace>`，任务号为 `<issue-key>`，中央产品根为工作空间 `AGENTS.md` 声明的 `<agenticops-root>`。工具目录为 `<agenticops-root>/workflow`。多个任务 active 时，所有任务命令必须带 `--issue-key <issue-key> --dir <project-workspace>`；不要在各仓库内创建独立状态。本 Skill、当前 Project Profile 和 Product Root 高于历史 memory；memory 只能提供历史线索，不得作为现役命令来源。
 
 ## 开始或恢复
 
@@ -23,6 +23,7 @@ metadata:
 - 缺项时一次列全、生成中文补卡评论并 `task.py block`。
 - 每个目标仓库登记仓库、工作分支、基线分支、范围和验证方式。
 - 登记完成后立即执行受控 `task.py repository prepare`；`auto-clone` 模式由该命令自动下载项目仓库，不要求预先签发 `task_execution` 授权。直接 clone、复用已有分支或非受控 worktree 操作不属于这条自动路径。
+- prepare 成功后，普通工作空间会话输出 `./agenticops start <agent-id> <issue-key>` 并结束本轮，由研发工程师启动任务模式；不得在当前 Agent 内嵌套启动另一个 Agent。任务模式仍位于同一工作空间内，并从同一 run 恢复。
 - 只有 prepare 写入的本地任务 worktree、`base_sha` 和目录摘要才是 Git 基线。远程 GitHub 读取只能写成“远程候选参考”，不能声称“已核实基线”，不能替代本地源码核验，也不能据此推进 `design_review` 或向 Jira 写入已确认方案。
 - 本地基线完成后分析代码并形成方案；研发工程师确认方案后用 `workflow/authorization.py grant` 签发任务授权。
 - 新增仓库或修改分支、范围、验证方式后必须重新确认和授权。

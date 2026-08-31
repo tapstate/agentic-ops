@@ -5,7 +5,7 @@
 | 主题 | 总纲与权威文档 | 适用内容 |
 |---|---|---|
 | 产品定位与架构 | [项目目标](strategy/project-goals.md)、[v1 工程架构](architecture/agenticops-v1-architecture.md)、[术语表](glossary.md) | 产品边界、分层、稳定术语、Hook 与 Agent 原生权限责任及迁移准绳 |
-| 使用与维护 | [使用指引](usage-guide.md)、[维护指引](maintenance-guide.md)、[Skill 维护规范](skill-maintenance.md) | 产品安装、Source Pool、项目工作空间初始化、受控仓库准备、任务 worktree、任务恢复与精确清理、Skill 分类与发现接线、证据标签、由工作空间薄入口启动 Agent，以及日常运行和维护 |
+| 使用与维护 | [使用指引](usage-guide.md)、[维护指引](maintenance-guide.md)、[Skill 维护规范](skill-maintenance.md) | 产品安装、Source Pool、项目工作空间根 `./agenticops` 薄入口、受控仓库准备、任务 worktree、任务恢复与精确清理、Skill 分类与发现接线、证据标签，以及日常运行和维护 |
 | 安全与验证 | [权限与安全边界](security/permissions.md)、[Git SSH 授权指引](security/git-ssh-access.md)、[Claude 端到端验证](testing/e2e-claude.md)、[Codex 端到端验证](testing/e2e-codex.md) | 凭证、Agent 文件系统授权、外部系统边界、访问诊断和端到端验收 |
 | 产品合同 | [v1 用户故事总纲](user-stories/v1/README.md) | 稳定的产品能力、保护行为和验收证据 |
 

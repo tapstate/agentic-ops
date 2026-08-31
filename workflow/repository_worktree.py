@@ -735,7 +735,12 @@ def execution_root(workspace, issue_key):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    class StrictArgumentParser(argparse.ArgumentParser):
+        def __init__(self, *args, **kwargs):
+            kwargs["allow_abbrev"] = False
+            super().__init__(*args, **kwargs)
+
+    parser = StrictArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser("prepare")
     prepare.add_argument("--issue-key", required=True)

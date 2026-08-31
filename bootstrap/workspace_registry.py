@@ -403,7 +403,12 @@ def command_pending(args, product_root):
 
 
 def parser():
-    result = argparse.ArgumentParser(description=__doc__)
+    class StrictArgumentParser(argparse.ArgumentParser):
+        def __init__(self, *args, **kwargs):
+            kwargs["allow_abbrev"] = False
+            super().__init__(*args, **kwargs)
+
+    result = StrictArgumentParser(description=__doc__)
     result.add_argument("--product-root", required=True)
     commands = result.add_subparsers(dest="command", required=True)
     commands.add_parser("register").add_argument("--workspace", required=True)

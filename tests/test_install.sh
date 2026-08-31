@@ -122,7 +122,7 @@ source_workspace="$test_root/source-workspace"
 "$maintainer_root/agenticops" init --workspace "$source_workspace" \
   --project tapdata --agent test-agent >/dev/null
 "$maintainer_root/agenticops" doctor --workspace "$source_workspace" >/dev/null
-"$source_workspace/.agenticops/agenticops" doctor >/dev/null
+"$source_workspace/agenticops" doctor >/dev/null
 printf '{"note":"changed","hooks":{"__AGENTIC_OPS_HOOK_NATIVE_EVENT__":[{"matcher":"__AGENTIC_OPS_HOOK_NATIVE_TOOL_MATCHER__","hooks":[{"type":"command","command":"python3 __AGENTIC_OPS_HOME__/adapters/agents/test-agent/hook.py","timeout":"__AGENTIC_OPS_HOOK_TIMEOUT_SECONDS__"}]}]}}\n' \
   > "$maintainer_root/adapters/agents/test-agent/templates/settings.json"
 if "$maintainer_root/agenticops" doctor --workspace "$source_workspace" >/dev/null 2>&1; then
@@ -147,7 +147,7 @@ printf '%s\n' \
 git -C "$source_repo" add SOURCE-NEXT skills/fixture-maintenance/SKILL.md
 git -C "$source_repo" commit -qm "source next"
 source_update_output="$test_root/source-update-output"
-PATH="$setup_bin:$PATH" "$source_workspace/.agenticops/agenticops" update > "$source_update_output"
+PATH="$setup_bin:$PATH" "$source_workspace/agenticops" update > "$source_update_output"
 test -f "$maintainer_root/SOURCE-NEXT"
 grep -F '工作面=维护' "$source_update_output" >/dev/null
 grep -F '已知工作空间待刷新' "$source_update_output" >/dev/null
@@ -399,7 +399,7 @@ PY
 
 test -f "$workspace/.agenticops/workspace.json"
 test -f "$workspace/.agenticops/init.json"
-test -x "$workspace/.agenticops/agenticops"
+test -x "$workspace/agenticops"
 test -f "$workspace/AGENTS.md"
 test -f "$workspace/CLAUDE.md"
 test -f "$workspace/.mcp.json"
@@ -415,12 +415,18 @@ test ! -e "$workspace/.claude/skills/ao-ws-init"
 "$install_root/agenticops" workspace list | grep -F -- "$workspace" >/dev/null
 grep -F '@AGENTS.md' "$workspace/CLAUDE.md" >/dev/null
 grep -F 'Product Project：`tapdata`' "$workspace/AGENTS.md" >/dev/null
-grep -F "$install_root/workflow/task.py" "$workspace/AGENTS.md" >/dev/null
+grep -F 'workflow/task.py status --issue-key <JIRA-KEY>' "$workspace/AGENTS.md" >/dev/null
+grep -F '必须先读取当前项目 `.agents/skills/`' "$workspace/AGENTS.md" >/dev/null
+grep -F 'memory 只能作为历史线索' "$workspace/AGENTS.md" >/dev/null
 grep -F '接管、继续或 reset 成功只是流程恢复点' "$workspace/AGENTS.md" >/dev/null
 grep -F '远程候选参考' "$workspace/AGENTS.md" >/dev/null
 grep -F '首次收到' "$workspace/AGENTS.md" >/dev/null
 grep -F '登记完成后立即执行受控 `task.py repository prepare`' \
   "$install_root/projects/tapdata/skills/tapdata-task/SKILL.md" >/dev/null
+if "$workspace/agenticops" --help | grep -F 'agenticops task' >/dev/null; then
+  printf '统一入口错误暴露了任务 Runtime\n' >&2
+  exit 1
+fi
 grep -F "$install_root/adapters/agents/claude/hook.py" "$workspace/.claude/settings.json" >/dev/null
 grep -F "$install_root/adapters/agents/codex/hook.py" "$workspace/.codex/hooks.json" >/dev/null
 python3 - "$workspace" "$install_root" <<'PY'
@@ -487,7 +493,7 @@ assert binding["repository_pool"]["source"] == "product-default"
 assert binding["repository_pool"]["root"] == str(Path(sys.argv[4]).resolve())
 assert initialization["schema_version"] == 2
 artifacts = {item["path"]: item for item in initialization["artifacts"]}
-assert {"AGENTS.md", ".agenticops/agenticops", "CLAUDE.md", ".claude/settings.json", ".codex/hooks.json", ".test-agent/settings.json", ".agents/skills/tapdata-task", ".claude/skills/tapdata-task"} <= set(artifacts)
+assert {"AGENTS.md", "agenticops", "CLAUDE.md", ".claude/settings.json", ".codex/hooks.json", ".test-agent/settings.json", ".agents/skills/tapdata-task", ".claude/skills/tapdata-task"} <= set(artifacts)
 assert artifacts[".agents/skills/tapdata-task"]["kind"] == "symlink"
 assert artifacts[".claude/skills/tapdata-task"]["kind"] == "symlink"
 assert ".agents/skills/ao-test-takeover" not in artifacts
@@ -522,7 +528,7 @@ assert document["hooks"]["PreToolUse"][0]["matcher"] == "Shell"
 assert handler["timeout"] == 15
 PY
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
-"$workspace/.agenticops/agenticops" doctor >/dev/null
+"$workspace/agenticops" doctor >/dev/null
 test ! -e "$HOME/.codex/skills"
 test ! -e "$HOME/.agents/skills"
 test ! -e "$HOME/.claude/skills"
@@ -545,14 +551,40 @@ fi
 "$install_root/agenticops" workspace clean --workspace "$workspace" --generated-only >/dev/null
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
 
-printf 'drift\n' > "$workspace/.agenticops/agenticops"
+printf 'drift\n' > "$workspace/agenticops"
 if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
   printf '工作空间入口漂移未被 doctor 发现\n' >&2
   exit 1
 fi
 "$install_root/agenticops" repair --workspace "$workspace" >/dev/null
-test -x "$workspace/.agenticops/agenticops"
-"$workspace/.agenticops/agenticops" doctor >/dev/null
+test -x "$workspace/agenticops"
+"$workspace/agenticops" doctor >/dev/null
+
+entry_migration_workspace="$test_root/entry-migration-workspace"
+"$install_root/agenticops" init --workspace "$entry_migration_workspace" --agent codex >/dev/null
+python3 - "$entry_migration_workspace" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+workspace = Path(sys.argv[1])
+old_entry = workspace / ".agenticops" / "agenticops"
+new_entry = workspace / "agenticops"
+new_entry.rename(old_entry)
+init_path = workspace / ".agenticops" / "init.json"
+document = json.loads(init_path.read_text(encoding="utf-8"))
+for artifact in document["artifacts"]:
+    if artifact["path"] == "agenticops":
+        artifact["path"] = ".agenticops/agenticops"
+        break
+else:
+    raise AssertionError("init.json 缺少工作空间入口")
+init_path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+"$install_root/agenticops" repair --workspace "$entry_migration_workspace" >/dev/null
+test ! -e "$entry_migration_workspace/.agenticops/agenticops"
+test -x "$entry_migration_workspace/agenticops"
+"$entry_migration_workspace/agenticops" doctor >/dev/null
 
 subset_workspace="$test_root/subset-workspace"
 "$install_root/agenticops" init --workspace "$subset_workspace" --agent codex >/dev/null
@@ -561,6 +593,14 @@ test -L "$subset_workspace/.agents/skills/tapdata-task"
 test ! -e "$subset_workspace/CLAUDE.md"
 test ! -e "$subset_workspace/.claude/settings.json"
 test ! -e "$subset_workspace/.claude/skills"
+collision_workspace="$test_root/root-entry-collision-workspace"
+mkdir -p "$collision_workspace"
+printf 'user owned\n' > "$collision_workspace/agenticops"
+if "$install_root/agenticops" init --workspace "$collision_workspace" --agent codex >/dev/null 2>&1; then
+  printf '工作空间根入口覆盖了已有用户文件\n' >&2
+  exit 1
+fi
+grep -Fx 'user owned' "$collision_workspace/agenticops" >/dev/null
 if "$install_root/agenticops" init --workspace "$test_root/unknown-workspace" --agent missing-agent >/dev/null 2>&1; then
   printf '未知 Agent 被错误接受\n' >&2
   exit 1
@@ -673,7 +713,7 @@ fi
 "$install_root/agenticops" workspace detach --workspace "$detached_workspace" --yes >/dev/null
 test ! -e "$detached_workspace/.agenticops/workspace.json"
 test ! -e "$detached_workspace/.agenticops/init.json"
-test ! -e "$detached_workspace/.agenticops/agenticops"
+test ! -e "$detached_workspace/agenticops"
 test ! -e "$detached_workspace/.agents"
 test -f "$detached_workspace/.agenticops/tasks/TAP-555/state.json"
 if "$install_root/agenticops" workspace list | grep -F -- "$detached_workspace" >/dev/null; then
@@ -719,6 +759,12 @@ PY
 "$install_root/agenticops" workspace purge \
   --workspace "$unbound_events_workspace" --yes >/dev/null
 test ! -e "$unbound_events_workspace/.agenticops"
+if "$install_root/agenticops" workspace purge \
+    --worksp "$workspace" --yes >/dev/null 2>&1; then
+  printf 'workspace purge 未拒绝 workspace 缩写\n' >&2
+  exit 1
+fi
+test -d "$workspace/.agenticops"
 
 # 仅受控的 events.jsonl 可被 purge；其它未知状态及 events.jsonl 的非常规文件
 # 形态仍必须失败关闭，且不得触及工作空间外的目标。
@@ -953,8 +999,16 @@ grep -Fx -- '--model fake' "$capture" >/dev/null
 PATH="$fake_bin:$PATH" \
 AGENTIC_OPS_EXPECTED_WORKSPACE="$expected_workspace" \
 AGENTIC_OPS_CAPTURE="$capture" \
-  "$workspace/.agenticops/agenticops" start --agent codex -- --model workspace-entry >/dev/null
+  "$workspace/agenticops" start codex -- --model workspace-entry >/dev/null
 grep -Fx -- '--model workspace-entry' "$capture" >/dev/null
+if "$workspace/agenticops" start codex --agent codex >/dev/null 2>&1; then
+  printf 'start 未拒绝重复 Agent ID\n' >&2
+  exit 1
+fi
+if "$workspace/agenticops" start codex TAP-123 --issue-key TAP-999 >/dev/null 2>&1; then
+  printf 'start 未拒绝重复 Jira Key\n' >&2
+  exit 1
+fi
 test ! -e "$workspace/AGENTS.md.tmp"
 
 python3 "$install_root/workflow/task.py" init \
@@ -988,23 +1042,23 @@ printf 'next\n' > "$source_repo/NEXT"
 git -C "$source_repo" add NEXT
 git -C "$source_repo" commit -qm "next"
 installed_update_output="$test_root/installed-update-output"
-"$workspace/.agenticops/agenticops" update > "$installed_update_output"
+"$workspace/agenticops" update > "$installed_update_output"
 test -f "$install_root/NEXT"
 grep -F '工作面=使用' "$installed_update_output" >/dev/null
 if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
   printf '产品更新后旧工作目录绑定未被识别为待刷新\n' >&2
   exit 1
 fi
-"$workspace/.agenticops/agenticops" repair >/dev/null
+"$workspace/agenticops" repair >/dev/null
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
 test -f "$workspace/.agenticops/tasks/TAP-123/state.json"
 test -f "$workspace/.agenticops/tasks/TAP-999/state.json"
 test "$(file_digest "$workspace/.agenticops/tasks/index.json")" = "$task_index_digest"
 test "$(file_digest "$workspace/.agenticops/tasks/TAP-123/state.json")" = "$task_123_digest"
 test "$(file_digest "$workspace/.agenticops/tasks/TAP-999/state.json")" = "$task_999_digest"
-"$workspace/.agenticops/agenticops" rollback >/dev/null
+"$workspace/agenticops" rollback >/dev/null
 test ! -f "$install_root/NEXT"
-"$workspace/.agenticops/agenticops" repair >/dev/null
+"$workspace/agenticops" repair >/dev/null
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
 test "$(file_digest "$workspace/.agenticops/tasks/index.json")" = "$task_index_digest"
 test "$(file_digest "$workspace/.agenticops/tasks/TAP-123/state.json")" = "$task_123_digest"
@@ -1047,9 +1101,9 @@ esac
 PATH="$fake_bin:$PATH" \
 AGENTIC_OPS_EXPECTED_WORKSPACE="$task_execution_root" \
 AGENTIC_OPS_CAPTURE="$capture" \
-  "$install_root/agenticops" start --agent codex --workspace "$workspace" \
-  --issue-key TAP-123 -- --model task-bound >/dev/null
+  "$workspace/agenticops" start codex TAP-123 -- --model task-bound >/dev/null
 grep -Fx -- "--add-dir $task_root --model task-bound" "$capture" >/dev/null
+test ! -e "$task_execution_root/agenticops"
 "$install_root/agenticops" workspace purge --workspace "$workspace" --yes >/dev/null
 test ! -e "$task_root"
 test ! -e "$workspace/.agenticops"

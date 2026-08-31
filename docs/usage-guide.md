@@ -127,12 +127,12 @@ Source Pool 是业务仓库的统一主工作树根目录：每个仓库位于 `
 
 没有 `both` 特殊值，也不限制 Agent 数量。一个工作空间绑定一个产品项目，可接管该项目下任意多个任务；一个任务可修改多个仓库。
 
-初始化后，工作空间会生成可再生的薄入口 `.agenticops/agenticops`。它每次读取同目录的 `workspace.json` 以定位并校验中央 Product Root，再在当前工作空间执行中央入口；不需要 `.env`，也不保存第二份路径配置：
+初始化后，工作空间根会生成可再生的薄入口 `agenticops`。它读取工作空间的 `.agenticops/workspace.json` 以定位并校验中央 Product Root，不需要 `.env`，不注入任务上下文，也不保存第二份路径配置：
 
 ```sh
 cd <项目工作空间>
-./.agenticops/agenticops doctor
-./.agenticops/agenticops start --agent <Agent ID>
+./agenticops doctor
+./agenticops start <Agent ID>
 ```
 
 若薄入口缺失、不可执行或 `doctor` 提示接线漂移，使用已绑定的中央入口执行 `repair --workspace <项目工作空间>`；不得手改 `.agenticops/workspace.json` 或用 `.env` 覆盖绑定关系。
@@ -176,10 +176,11 @@ cd <项目工作空间>
 
 ## 6. 启动 Agent、查看并接管任务
 
-普通只读接管/梳理从薄工作空间启动：
+普通只读接管/梳理从工作空间根的薄入口启动；当前工作空间由入口自动绑定，不传 `--workspace`：
 
 ```sh
-~/.agentic-ops/agenticops start --agent <Agent ID> --workspace <项目工作空间>
+cd <项目工作空间>
+./agenticops start <Agent ID>
 ```
 
 `start` 会先刷新接线，并把 `--` 后参数原样交给 Agent。在对话中先请求只读任务清单：
@@ -235,14 +236,13 @@ python3 ~/.agentic-ops/workflow/task.py repository prepare \
 
 任何 Hook 首次返回 `ask` 或 `deny` 时，Agent 都必须立即完整展示原因、要求的处理动作和当前停止点，并停止当前操作及依赖它的后续步骤。不得把阻断描述成“正常门禁”后继续，也不得改用 GitHub API、直接 Git 或其它工具绕过缺失的本地基线。
 
-worktree 准备完成并重新签发包含 `base_sha` 的授权后，用任务模式启动 Agent：
+worktree 准备完成后，普通工作空间会话不得嵌套启动另一个 Agent；它应输出下列精确命令并结束本轮，由研发工程师从同一工作空间根启动任务模式。方案确认后仍需重新签发包含 `base_sha` 的授权，才能进入实现：
 
 ```sh
-~/.agentic-ops/agenticops start --agent codex \
-  --workspace <项目工作空间> --issue-key TAP-123
+./agenticops start codex TAP-123
 ```
 
-启动入口仍来自薄工作空间，但任务模式以 TAP-123 当前 run 目录为 cwd；校验该 run 的每个 worktree 后作为 `--add-dir` 传给 Agent。没有动态目录能力、worktree 已清理、路径/分支漂移或仓库目录变化时失败关闭。
+启动入口仍来自薄工作空间，但任务模式以 TAP-123 当前 run 目录为 cwd；校验该 run 的每个 worktree 后作为 `--add-dir` 传给 Agent。任务执行根不生成额外入口；Project Skill 继续调用中央 Workflow，并显式绑定 workspace 和 issue。没有动态目录能力、worktree 已清理、路径/分支漂移或仓库目录变化时失败关闭。
 
 任务完成时阶段推进会清理洁净 worktree；也可显式执行：
 

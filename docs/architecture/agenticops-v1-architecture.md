@@ -72,7 +72,7 @@ Agent Adapter → Tool Adapter → Standard Request
         └── ci-<pr>.json
 ```
 
-工作空间不复制 Policy、Project Skill 或 Runtime。根 `AGENTS.md`、Agent 配置和 MCP 配置是可再生接线，文件归属及哈希记录在 `init.json`；`doctor` 检测漂移，`repair` 安全重建。Gate 能唯一解析任务时将事件写入对应任务目录；无法唯一解析任务时才写入根 `events.jsonl`，它是受控工作空间状态，随 `purge` 删除。旧 `.agenticops.json` 和 `.gate/` 只作为一次性迁移输入，不再是事实源。工作空间维护命令先列出精确目标再确认：`repair` 和 `clean --generated-only` 只收敛可再生接线；`detach` 删除已校验归属的接线和绑定但保留任务状态；`purge` 才会删除任务状态，且必须逐个工作空间明确确认。无法访问的登记只报告，不能被更新自动注销。
+工作空间不复制 Policy、Project Skill 或 Runtime。根 `agenticops`、`AGENTS.md`、Agent 配置和 MCP 配置是可再生接线，文件归属及哈希记录在 `init.json`；`doctor` 检测漂移，`repair` 安全重建。项目工作空间根的 `./agenticops` 只解析 workspace 绑定并转发到中央 Product Root，不注入任务上下文，也不承载任务状态机。Gate 能唯一解析任务时将事件写入对应任务目录；无法唯一解析任务时才写入根 `events.jsonl`，它是受控工作空间状态，随 `purge` 删除。旧 `.agenticops.json` 和 `.gate/` 只作为一次性迁移输入，不再是事实源。工作空间维护命令先列出精确目标再确认：`repair` 和 `clean --generated-only` 只收敛可再生接线；`detach` 删除已校验归属的接线和绑定但保留任务状态；`purge` 才会删除任务状态，且必须逐个工作空间明确确认。无法访问的登记只报告，不能被更新自动注销。
 
 多个 active 任务存在歧义时，Workflow 要求显式 issue key。Gate 按 issue key 或 `repository + work_branch` 唯一解析任务；零匹配、多匹配都不能借用其它任务授权。
 
@@ -97,7 +97,7 @@ Project Package 的 `repositories.json` 是仓库、origin、基线分支和域�
 
 一个任务可登记多个仓库，每仓绑定 repository、work branch、base branch、修改范围和验证方式。准备 worktree 后，授权还绑定 `run_id` 与 `base_sha`。授权绑定任务、Agent、方案和完整仓库集合；新增仓库或修改稳定绑定后旧授权失效。每仓独立记录提交、PR、CI 和验证，最后汇总成任务证据。
 
-Agent 仍由薄项目工作空间入口启动。`agenticops start --issue-key ...` 校验当前任务已准备的 worktree，以 `<workspace>/.agenticops/worktrees/<issue-key>/<run-id>` 作为任务模式 cwd，并逐个转换成 Agent Manifest 声明的动态目录参数；Codex 与 Claude 当前均使用 `--add-dir`。不得把 Source Pool 根目录、主工作树或其它任务执行目录加入可写范围。无法声明动态任务目录的平台失败关闭，并输出人工接力；不得降级为无沙箱启动。
+Agent 仍由薄项目工作空间入口启动。工作空间根使用 `./agenticops start <agent> <issue-key>`，入口校验当前任务已准备的 worktree，以 `<workspace>/.agenticops/worktrees/<issue-key>/<run-id>` 作为任务模式 cwd，并逐个转换成 Agent Manifest 声明的动态目录参数；Codex 与 Claude 当前均使用 `--add-dir`。任务命令继续调用中央 Workflow，并显式绑定 workspace 和 issue key。不得把 Source Pool 根目录、主工作树或其它任务执行目录加入可写范围。无法声明动态任务目录的平台失败关闭，并输出人工接力；不得降级为无沙箱启动。
 
 文件修改、构建和测试发生在任务 worktree。linked worktree 的 Git 元数据仍位于主仓库 `.git/worktrees/`，因此 `git add/commit/push` 同时受 Agent 平台审批和 Gate 控制；Source Pool 的 clone、fetch、worktree add/remove 由确定性 Workflow 执行。
 

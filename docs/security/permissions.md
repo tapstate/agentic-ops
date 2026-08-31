@@ -4,7 +4,7 @@
 
 ## Agent 文件系统权限
 
-Source Pool 位于项目工作空间之外，只保存统一维护的主工作树；任务 worktree 位于 `<workspace>/.agenticops/worktrees/<issue-key>/<run-id>/`。AgenticOps 不把 Source Pool 加入 Agent 可写范围，而是在 `agenticops start --issue-key <JIRA-KEY>` 时，从任务状态读取并校验当前 run 的 worktree，以该 run 目录作为 cwd，再逐个传给 Agent 的动态目录参数。
+Source Pool 位于项目工作空间之外，只保存统一维护的主工作树；任务 worktree 位于 `<workspace>/.agenticops/worktrees/<issue-key>/<run-id>/`。AgenticOps 不把 Source Pool 加入 Agent 可写范围，而是在工作空间根执行 `./agenticops start <agent> <JIRA-KEY>` 时，从任务状态读取并校验当前 run 的 worktree，以该 run 目录作为 cwd，再逐个传给 Agent 的动态目录参数。任务执行根不生成第二个产品入口，任务状态操作继续显式绑定 workspace 和 issue。
 
 - Codex 和 Claude Manifest 都声明 `--add-dir`；任务模式 cwd 是当前 issue/run 执行目录。
 - 只加入当前 issue、当前 run 的 worktree；其它任务、Source Pool 主工作树和池根目录不加入。
