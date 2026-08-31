@@ -43,10 +43,10 @@ stories:
     category: product
     title: 在副作用前执行统一门禁
     document: docs/user-stories/v1/prod-002-policy-gate.md
-    protected_paths: [gate/**, policies/**, docs/security/**, tests/test_gate.py]
+    protected_paths: [gate/**, policies/**, adapters/runtime.py, adapters/tools/**, docs/security/**, tests/test_gate.py, tests/test_contracts.py]
     acceptance_checks: [python_runtime, resource_contracts]
     evidence_requirements:
-      - allow、ask、deny 与未知外部写的判定结果
+      - MCP 完整身份、Shell 分段、动态别名、正向命中、受控操作歧义、未命中透传与 allow、ask、deny 的判定结果
       - 授权失效、保护分支和高风险操作边界
 
   - story_id: PROD-003

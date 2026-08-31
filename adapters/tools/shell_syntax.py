@@ -7,7 +7,6 @@ import re
 import shlex
 
 ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=.*", re.S)
-SEGMENT_SPLITTER = re.compile(r"(?<!\|)\|(?!\|)|&&|\|\||(?<!&)&(?!&)|;|\n")
 DYNAMIC = ("$(", "`", "<(", ">(")
 CONTROL_WORDS = {
     "!", "{", "}", "case", "do", "done", "elif", "else", "esac", "fi", "for",
@@ -21,20 +20,28 @@ UNSAFE_WRAPPERS = {
 
 def normalize_shell_call(command, config):
     """返回 `(tokens, reliable)`；无法静态归一化的片段标记为不可靠。"""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars="|&;\r\n")
+    lexer.whitespace = " \t"
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        tokens, parsed = list(lexer), True
+    except ValueError:
+        tokens, parsed = command.split(), False
     normalized = []
-    for raw_segment in SEGMENT_SPLITTER.split(command):
-        segment = raw_segment.strip()
-        if not segment:
+    command_tokens = []
+    for token in tokens + [";"]:
+        if token and all(character in "|&;\r\n" for character in token):
+            if command_tokens:
+                unwrapped_tokens, unwrapped = _unwrap_command(command_tokens, config)
+                if not unwrapped or not unwrapped_tokens and all(map(ASSIGNMENT.fullmatch, command_tokens)):
+                    unwrapped_tokens = command_tokens
+                segment = " ".join(command_tokens)
+                reliable = parsed and unwrapped and not _unsupported(segment, unwrapped_tokens)
+                normalized.append((unwrapped_tokens, reliable))
+            command_tokens = []
             continue
-        try:
-            tokens = shlex.split(segment)
-            parsed = True
-        except ValueError:
-            tokens = segment.split()
-            parsed = False
-        command_tokens, unwrapped = _unwrap_command(tokens, config)
-        reliable = parsed and unwrapped and not _unsupported(segment, command_tokens)
-        normalized.append((command_tokens, reliable))
+        command_tokens.append(token)
     return normalized
 
 

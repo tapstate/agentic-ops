@@ -64,6 +64,26 @@ git -C "$fixture" config user.name Test
 git -C "$fixture" add .
 git -C "$fixture" commit -qm baseline
 
+trust_base="$(git -C "$fixture" rev-parse HEAD)"
+mkdir -p "$fixture/adapters/agents/codex" "$fixture/adapters/tools"
+printf 'hook\n' > "$fixture/adapters/agents/codex/hook.py"
+printf 'runtime\n' > "$fixture/adapters/runtime.py"
+printf 'classifier\n' > "$fixture/adapters/tools/classifier.py"
+git -C "$fixture" add adapters
+git -C "$fixture" commit -qm adapter-trust-root
+trust_head="$(git -C "$fixture" rev-parse HEAD)"
+trust_changes="$(
+  . "$repo_root/internal/release/lib/release-common.sh"
+  release_story_gate_trust_root_changes "$fixture" "$trust_base" "$trust_head"
+)"
+for trust_path in \
+  adapters/agents/codex/hook.py \
+  adapters/runtime.py \
+  adapters/tools/classifier.py; do
+  printf '%s\n' "$trust_changes" | grep -Fxq "$trust_path" ||
+    fail "Agent Hook 分类策略未纳入发布信任根：$trust_path"
+done
+
 story_log="$test_root/story.log"
 printf 'change\n' > "$fixture/product.txt"
 git -C "$fixture" add product.txt

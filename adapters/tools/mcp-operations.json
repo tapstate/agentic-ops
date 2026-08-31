@@ -1,18 +1,5 @@
 {
   "schema_version": 1,
-  "readonly_prefixes": [
-    "get",
-    "list_",
-    "search",
-    "read_",
-    "lookup",
-    "fetch_",
-    "issue_read",
-    "pull_request_read"
-  ],
-  "readonly_tools": [
-    "atlassianuserinfo"
-  ],
   "repository_target_operations": [
     "create_pr",
     "update_pr",
@@ -45,23 +32,16 @@
     ],
     "code_executors": {
       "node": {
-        "names": ["node", "nodejs"], "versioned": true,
-        "info_flags": ["-h", "--help", "-v", "--version"]
+        "names": ["node", "nodejs"], "versioned": true
       },
       "perl": {
-        "names": ["perl"], "versioned": true,
-        "info_flags": ["-h", "--help", "-v", "-V", "--version"]
+        "names": ["perl"], "versioned": true
       },
       "python": {
-        "names": ["python"], "versioned": true,
-        "info_flags": [
-          "-h", "--help", "-V", "-VV", "--version", "--help-env",
-          "--help-xoptions", "--help-all"
-        ]
+        "names": ["python"], "versioned": true
       },
       "ruby": {
-        "names": ["ruby"], "versioned": true,
-        "info_flags": ["-h", "--help", "-v", "--version"]
+        "names": ["ruby"], "versioned": true
       }
     },
     "git_simple_operations": {
@@ -86,30 +66,34 @@
     }
   },
   "mappings": {
-    "create_pull_request": "create_pr",
-    "update_pull_request": "update_pr",
-    "update_pull_request_branch": "update_pr",
-    "merge_pull_request": "pr_merge",
-    "push_files": "git_push",
-    "create_or_update_file": "git_push",
-    "delete_file": "git_push",
-    "create_repository": "create_repository",
-    "fork_repository": "create_repository",
-    "add_reply_to_pull_request_comment": "fix_pr_comments",
-    "pull_request_review_write": "fix_pr_comments",
-    "add_comment_to_pending_review": "fix_pr_comments",
-    "transition_issue": "transition_jira_status",
-    "transitionjiraissue": "transition_jira_status",
-    "add_comment": "write_jira_comment",
-    "addcommenttojiraissue": "write_jira_comment",
-    "add_issue_comment": "write_jira_comment",
-    "edit_issue": "edit_jira_issue",
-    "editjiraissue": "edit_jira_issue",
-    "update_issue": "edit_jira_issue",
-    "issue_write": "edit_jira_issue",
-    "create_issue": "edit_jira_issue",
-    "createjiraissue": "edit_jira_issue",
-    "add_worklog": "write_jira_worklog",
-    "addworklogtojiraissue": "write_jira_worklog"
+    "github": {
+      "create_pull_request": "create_pr",
+      "update_pull_request": "update_pr",
+      "update_pull_request_branch": "update_pr",
+      "merge_pull_request": "pr_merge",
+      "push_files": "git_push",
+      "create_or_update_file": "git_push",
+      "delete_file": "git_push",
+      "create_repository": "create_repository",
+      "fork_repository": "create_repository",
+      "add_reply_to_pull_request_comment": "fix_pr_comments",
+      "pull_request_review_write": "fix_pr_comments",
+      "add_comment_to_pending_review": "fix_pr_comments"
+    },
+    "atlassian": {
+      "transition_issue": "transition_jira_status",
+      "transitionjiraissue": "transition_jira_status",
+      "add_comment": "write_jira_comment",
+      "addcommenttojiraissue": "write_jira_comment",
+      "add_issue_comment": "write_jira_comment",
+      "edit_issue": "edit_jira_issue",
+      "editjiraissue": "edit_jira_issue",
+      "update_issue": "edit_jira_issue",
+      "issue_write": "edit_jira_issue",
+      "create_issue": "edit_jira_issue",
+      "createjiraissue": "edit_jira_issue",
+      "add_worklog": "write_jira_worklog",
+      "addworklogtojiraissue": "write_jira_worklog"
+    }
   }
 }

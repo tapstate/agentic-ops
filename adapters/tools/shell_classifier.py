@@ -13,18 +13,12 @@ CONFIG = json.loads(
 )
 SHELL = CONFIG["shell"]
 UNKNOWN = "unknown_external_write"
-GITHUB_OPS = {
-    "create_pr", "update_pr", "fix_pr_comments", "pr_merge", "release", "create_repository",
-}
-GIT_HELP_FLAGS = {
-    "-a", "--all", "--dry-run", "--no-verify", "-q", "--quiet", "-v", "--verbose",
-}
+GITHUB_OPS = {"create_pr", "update_pr", "fix_pr_comments", "pr_merge", "release", "create_repository"}
+GIT_HELP_FLAGS = {"-a", "--all", "--dry-run", "--no-verify", "-q", "--quiet", "-v", "--verbose"}
 GH_HELP_FLAGS = {"--draft", "--web", "--fill", "--fill-first", "--fill-verbose"}
 PY_VALUE_OPTIONS = {"-W", "-X", "--check-hash-based-pycs"}
-PY_FLAGS = set(
-    "-b -B -d -E -h --help -i -I -O -OO -P -q -s -S -u -v -V --version -x "
-    "--help-env --help-xoptions --help-all".split()
-)
+PY_FLAGS = set("-b -B -d -E -h --help -i -I -O -OO -P -q -s -S -u -v -V --version -x "
+               "--help-env --help-xoptions --help-all".split())
 GIT_KNOWN = set(SHELL["git_readonly_redirects"]) | set(SHELL["git_simple_operations"]) | {
     "branch", "clone", "commit", "fetch", "filter-branch", "filter-repo", "pull", "push",
     "rebase", "replace", "reset", "tag", "worktree",
@@ -33,14 +27,14 @@ GIT_KNOWN = set(SHELL["git_readonly_redirects"]) | set(SHELL["git_simple_operati
 
 def classify_bash_call(command):
     operations = []
-    target_fields = (
-        "issue_key", "workspace", "push_source_ref", "push_destination_ref",
-        "push_target_branch", "repository",
-    )
+    aliases = set()
+    target_fields = ("issue_key", "workspace", "push_source_ref", "push_destination_ref",
+                     "push_target_branch", "repository")
     targets = {key: [] for key in target_fields}
     for command_tokens, reliable in normalize_shell_call(command, SHELL):
+        controlled_alias = _controlled_alias_call(command_tokens, aliases)
         current, current_target = _dispatch(command_tokens) if reliable and command_tokens else ([], {})
-        if not reliable and UNKNOWN not in current:
+        if not reliable and (controlled_alias or _controlled_hint(command_tokens)) and UNKNOWN not in current:
             current.append(UNKNOWN)
         operations.extend(current)
         for field, value in current_target.items():
@@ -62,18 +56,42 @@ def classify_bash_call(command):
     return operations, target
 
 
+def _controlled_hint(tokens):
+    markers = re.compile(r"(?:^|[^A-Za-z0-9_.-])(git|gh|agenticops)(?:$|[^A-Za-z0-9_.-])")
+    return any(
+        markers.search(str(token))
+        or str(token).replace("\\", "/").endswith(
+            ("/workflow/task.py", "/workflow/repository_worktree.py")
+        )
+        for token in tokens
+    )
+
+
+def _controlled_alias_call(tokens, aliases):
+    candidates = tokens[1:] if tokens and tokens[0] in ("export", "readonly") else tokens
+    assignments = [re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", item, re.S) for item in candidates]
+    if assignments and all(assignments):
+        controlled = {
+            assignment.group(1)
+            for assignment in assignments
+            if Path(assignment.group(2)).name in ("git", "gh", "agenticops")
+        }
+        aliases.difference_update(assignment.group(1) for assignment in assignments)
+        aliases.update(controlled)
+        return False
+    variable = re.fullmatch(r"\$(?:{(\w+)}|(\w+))", tokens[0]) if tokens else None
+    return bool(variable and (variable.group(1) or variable.group(2)) in aliases)
+
+
 def _dispatch(tokens):
     executable = Path(tokens[0]).name
     if executable == "git":
         return _git(tokens[1:])
     if executable == "gh":
         return _gh(tokens[1:])
-    executor, specification = _executor_spec(executable)
-    if executor:
-        if _information_only(tokens[1:], specification):
-            return [], {}
-        if executor != "python":
-            return [UNKNOWN], {}
+    executor, _ = _executor_spec(executable)
+    if executor and executor != "python":
+        return [], {}
     if executable == "agenticops" and "workspace" in tokens and "purge" in tokens:
         return ["manage_repository_worktree"], {}
     return _workflow(tokens)
@@ -94,12 +112,6 @@ def _executor_spec(executable):
     )
 
 
-def _information_only(arguments, specification):
-    return bool(arguments) and all(
-        item in specification["info_flags"] for item in arguments
-    )
-
-
 def _workflow(tokens):
     executable = Path(tokens[0]).name
     executor, _ = _executor_spec(executable)
@@ -116,10 +128,10 @@ def _workflow(tokens):
                 return (
                     _workflow_action(script, tokens[index + offset:])
                     if script
-                    else ([UNKNOWN], {})
+                    else ([], {})
                 )
             if item == "-c" or item.startswith("-c"):
-                return [UNKNOWN], {}
+                return [], {}
             if item in PY_VALUE_OPTIONS:
                 index += 2
                 continue
@@ -131,7 +143,7 @@ def _workflow(tokens):
                 continue
             break
     if index >= len(tokens):
-        return ([UNKNOWN], {}) if python_call else ([], {})
+        return [], {}
     normalized = tokens[index].replace("\\", "/")
     script = next(
         (
@@ -142,7 +154,7 @@ def _workflow(tokens):
         None,
     )
     if python_call and not script:
-        return [UNKNOWN], {}
+        return [], {}
     return _workflow_action(script, tokens[index + 1:])
 
 

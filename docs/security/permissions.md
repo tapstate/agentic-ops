@@ -91,6 +91,8 @@ OAuth 2.1 交互式授权，**权限自动等于登录账号的权限**——所
 | 服务器 | GitHub Rulesets、Jira permission scheme | merge / 保护分支 / 删除 |
 | Hook | 本仓库 Hook 门禁（Claude 使用 PreToolUse；Codex 使用其生成的 Hook 接线） | 剩余操作的授权伞 + 人工确认 + 审计 |
 
+Tool Adapter 只对完整身份明确匹配的 MCP 和可可靠解析的 Shell 操作生成 Gate 请求。任意解释器、未登记脚本和未映射工具由 Agent 原生权限流程继续判断，不代表 AgenticOps 已授权；不得通过关闭沙箱、全局放行或扩大凭证权限来消除原生确认。Codex `PreToolUse` 的当前判定格式与能力边界以官方 [Codex Hooks](https://developers.openai.com/codex/hooks) 文档为准。
+
 ## 参考来源
 
 - [github/github-mcp-server](https://github.com/github/github-mcp-server)（远程端点与 PAT 说明）

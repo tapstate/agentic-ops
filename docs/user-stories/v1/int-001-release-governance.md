@@ -11,6 +11,7 @@
 
 - `internal/` 不进入研发安装目录，也不被业务 Agent 加载。
 - 候选修改门禁实现时不能用未暂存代码替代受审查内容。
+- Agent Hook、共享 Adapter Runtime 或 Tool Adapter 分类策略变化时，自动发布失败关闭，只能通过受保护 `main` 的独立人工审查 PR 升级信任根。
 - 本次 v1 重构允许删除旧 `developer/`、`maintainer/` 和 `shared/` 资产；这些路径后续重新出现时仍进入内部治理并由资源合同拒绝。
 
 ### 验收证据

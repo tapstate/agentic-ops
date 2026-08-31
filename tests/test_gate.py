@@ -203,6 +203,19 @@ def main():
             "operations": ["future_external_write"],
         })
         check("未知标准操作转人工", unknown["decision"], "ask")
+        with tempfile.TemporaryDirectory(prefix="agenticops-product-root-") as temporary:
+            product_root = Path(temporary)
+            (product_root / ".agentic-ops-source").write_text("source\n", encoding="utf-8")
+            source_decision = run_standard({
+                "protocol_version": 1,
+                "event": "before_operation",
+                "source": {"agent": "test", "adapter": "test", "adapter_version": 1},
+                "cwd": str(product_root),
+                "operations": ["unknown_external_write"],
+            })
+            check("源码产品根目录门禁仍执行", source_decision["decision"], "ask")
+            check("源码产品根目录审计进入 .local", (product_root / ".local/gate/events.jsonl").is_file(), True)
+            check("源码产品根目录不生成工作空间状态", (product_root / ".agenticops").exists(), False)
 
         # ---- 未授权阶段 -------------------------------------------------
         check("只读 bash（git status）不受控", run_hook("Bash", {"command": "git status"}, ws), "passthrough")
@@ -212,7 +225,10 @@ def main():
         check("重定向上下文的未知 Git 子命令停止", run_hook("Bash", {"command": "git -C /other unknown-subcommand"}, ws), "ask")
         check("未知 Git alias 子命令停止", run_hook("Bash", {"command": "git ship feature/TAP-123"}, ws), "ask")
         check("变量展开的命令位停止", run_hook("Bash", {"command": "G=git; $G push origin feature/TAP-123"}, ws), "ask")
-        check("花括号变量展开的命令位停止", run_hook("Bash", {"command": "${G} push origin feature/TAP-123"}, ws), "ask")
+        check("带引号变量别名仍停止", run_hook("Bash", {"command": "G='git'; \"$G\" push origin feature/TAP-123"}, ws), "ask")
+        check("路径变量别名仍停止", run_hook("Bash", {"command": "P=/usr/bin/git; $P push origin feature/TAP-123"}, ws), "ask")
+        check("未解析的变量命令位交还 Agent 原生权限", run_hook("Bash", {"command": "${G} push origin feature/TAP-123"}, ws), "passthrough")
+        check("换行后的保护分支 push 不得漏检", run_hook("Bash", {"command": "git status\ngit push origin main"}, ws), "deny")
         check("后台分隔后的强推仍被识别", run_hook("Bash", {"command": "git status & git push -f origin feature/TAP-123"}, ws), "deny")
         check("Shell if 控制结构保守停止", run_hook("Bash", {"command": "if git status; then git push origin feature/TAP-123; fi"}, ws), "ask")
         check("sh -c 子 Shell 保守停止", run_hook("Bash", {"command": "sh -c 'git push origin feature/TAP-123'"}, ws), "ask")
@@ -313,18 +329,18 @@ def main():
         check("紧凑 python -m task purge 仍需人工确认", run_hook("Bash", {"command": "python3 -mworkflow.task purge --issue-key TAP-123 --yes"}, ws), "ask")
         check("python -m repository_worktree prepare 仍需人工确认", run_hook("Bash", {"command": "python3 -m workflow.repository_worktree prepare --issue-key TAP-123"}, ws), "ask")
         check("python -m task 受控 prepare 放行", run_hook("Bash", {"command": "python3 -m workflow.task repository prepare --issue-key tap-123"}, ws), "allow")
-        check("未知 Python 模块失败关闭", run_hook("Bash", {"command": "python3 -m workflow.other purge --issue-key TAP-123 --yes"}, ws), "ask")
-        check("Python -c 内联执行失败关闭", run_hook("Bash", {"command": "python3 -c 'print(1)'"}, ws), "ask")
-        check("Python stdin 执行失败关闭", run_hook("Bash", {"command": "python3 -"}, ws), "ask")
-        check("未登记 Python 脚本失败关闭", run_hook("Bash", {"command": "python3 unregistered.py"}, ws), "ask")
-        check("Perl 内联执行失败关闭", run_hook("Bash", {"command": "perl -we 'print 1'"}, ws), "ask")
-        check("Perl 脚本文件执行失败关闭", run_hook("Bash", {"command": "perl payload.pl"}, ws), "ask")
-        check("Ruby 内联执行失败关闭", run_hook("Bash", {"command": "ruby -e 'puts 1'"}, ws), "ask")
-        check("Ruby 脚本文件执行失败关闭", run_hook("Bash", {"command": "ruby payload.rb"}, ws), "ask")
-        check("Node 内联执行失败关闭", run_hook("Bash", {"command": "node --eval='console.log(1)'"}, ws), "ask")
-        check("Node 脚本文件执行失败关闭", run_hook("Bash", {"command": "node payload.js"}, ws), "ask")
-        check("nodejs 内联执行失败关闭", run_hook("Bash", {"command": "nodejs -e 'console.log(1)'"}, ws), "ask")
-        check("nodejs 脚本文件执行失败关闭", run_hook("Bash", {"command": "nodejs payload.js"}, ws), "ask")
+        check("未知 Python 模块交还 Agent 原生权限", run_hook("Bash", {"command": "python3 -m workflow.other purge --issue-key TAP-123 --yes"}, ws), "passthrough")
+        check("Python -c 内联执行交还 Agent 原生权限", run_hook("Bash", {"command": "python3 -c 'print(1)'"}, ws), "passthrough")
+        check("Python stdin 执行交还 Agent 原生权限", run_hook("Bash", {"command": "python3 -"}, ws), "passthrough")
+        check("未登记 Python 脚本交还 Agent 原生权限", run_hook("Bash", {"command": "python3 unregistered.py"}, ws), "passthrough")
+        check("Perl 内联执行交还 Agent 原生权限", run_hook("Bash", {"command": "perl -we 'print 1'"}, ws), "passthrough")
+        check("Perl 脚本文件交还 Agent 原生权限", run_hook("Bash", {"command": "perl payload.pl"}, ws), "passthrough")
+        check("Ruby 内联执行交还 Agent 原生权限", run_hook("Bash", {"command": "ruby -e 'puts 1'"}, ws), "passthrough")
+        check("Ruby 脚本文件交还 Agent 原生权限", run_hook("Bash", {"command": "ruby payload.rb"}, ws), "passthrough")
+        check("Node 内联执行交还 Agent 原生权限", run_hook("Bash", {"command": "node --eval='console.log(1)'"}, ws), "passthrough")
+        check("Node 脚本文件交还 Agent 原生权限", run_hook("Bash", {"command": "node payload.js"}, ws), "passthrough")
+        check("nodejs 内联执行交还 Agent 原生权限", run_hook("Bash", {"command": "nodejs -e 'console.log(1)'"}, ws), "passthrough")
+        check("nodejs 脚本文件交还 Agent 原生权限", run_hook("Bash", {"command": "nodejs payload.js"}, ws), "passthrough")
         check("Python 只读版本查询不受控", run_hook("Bash", {"command": "python3 --version"}, ws), "passthrough")
         check("nodejs 只读版本查询不受控", run_hook("Bash", {"command": "nodejs --version"}, ws), "passthrough")
         check("带值 Python 长选项后的 purge 仍需人工确认", run_hook("Bash", {"command": "python3 --check-hash-based-pycs always workflow/task.py purge --issue-key TAP-123 --yes"}, ws), "ask")
@@ -775,33 +791,41 @@ def main():
         subprocess.run([sys.executable, str(ROOT / "workflow" / "authorization.py"), "revoke", "--issue-key", "TAP-123", "--dir", str(ws)], check=True, capture_output=True)
         check("撤销授权后收回放行", run_hook("Bash", {"command": "git commit -m x"}, ws), "ask")
 
-        # ---- 未知外部写 -------------------------------------------------
-        check("未知 mcp 写操作需确认", run_hook("mcp__github__run_secret_scanning", {}, ws), "ask")
+        # ---- 正向命中与未命中透传 ---------------------------------------
+        check("未映射 mcp 交还 Agent 原生权限", run_hook("mcp__github__run_secret_scanning", {}, ws), "passthrough")
+        check("MCP 同名工具不跨服务误映射", run_hook("mcp__slack__add_comment", {}, ws), "passthrough")
+        check("MCP 合并工具不跨服务误映射", run_hook("mcp__custom__merge_pull_request", {}, ws), "passthrough")
         check("gh api POST 需确认", run_hook("Bash", {"command": "gh api -X POST /repos/a/b/issues -f title=x"}, ws), "ask")
         check("复合命令取最严格（status; push --force）", run_hook("Bash", {"command": "git status && git push -f origin feature/TAP-123"}, ws), "deny")
 
         unknown_command = "node takeover.js --issue-key TAP-12774 --token super-secret"
-        claude_unknown = run_hook_output("Bash", {"command": unknown_command}, ws)
-        claude_reason = claude_unknown["hookSpecificOutput"]["permissionDecisionReason"]
-        check("Claude 未识别操作保留原始命令", "node takeover.js --issue-key TAP-12774" in claude_reason, True)
-        check("Claude 未识别操作隐藏命令敏感值", "super-secret" in claude_reason, False)
-        check("Claude 未识别操作展示原因码", "判定：unknown_external_write" in claude_reason, True)
-        check("Claude 原生原因前缀使用原因码", claude_reason.startswith("[agenticops:unknown_external_write]"), True)
-        codex_unknown = run_codex_output("Bash", {"command": unknown_command}, ws)
-        codex_unknown_reason = codex_unknown["hookSpecificOutput"]["permissionDecisionReason"]
-        check("Codex 未识别操作降级为拒绝", codex_unknown["hookSpecificOutput"]["permissionDecision"], "deny")
-        check("Codex 未识别操作保留原始命令", "node takeover.js --issue-key TAP-12774" in codex_unknown_reason, True)
-        check("Codex 未识别操作给出 Shell 人工接力", "在自己的终端核对并执行上述命令" in codex_unknown_reason, True)
-        check("Codex 原生原因前缀使用原因码", "[agenticops:unknown_external_write]" in codex_unknown_reason, True)
-        codex_unknown_mcp = run_codex_output(
-            "mcp__github__run_secret_scanning", {"repository": "acme/widget"}, ws
+        check("Claude 普通未映射命令透传", run_hook("Bash", {"command": unknown_command}, ws), "passthrough")
+        check("Codex 普通未映射命令透传", run_codex("Bash", {"command": unknown_command}, ws), "allow")
+        inspection_command = (
+            "sed -n '1,240p' .agents/skills/tapdata-task/SKILL.md && "
+            "rg -n -i -C 2 'TAP-12289|takeover|接管' memory.md && "
+            "sed -n '1,260p' projects/tapdata/admission.json"
         )
-        codex_unknown_mcp_reason = codex_unknown_mcp["hookSpecificOutput"]["permissionDecisionReason"]
-        check("Codex 未识别 MCP 写操作给出 MCP 人工接力", "已登录的对应 MCP 服务" in codex_unknown_mcp_reason, True)
-        check("Codex 未识别 MCP 写操作不误称终端命令", "自己的终端" in codex_unknown_mcp_reason, False)
+        check("Claude 引号内管道符的只读检查透传", run_hook("Bash", {"command": inspection_command}, ws), "passthrough")
+        check("Codex 引号内管道符的只读检查透传", run_codex("Bash", {"command": inspection_command}, ws), "allow")
+        check(
+            "Codex 未映射 MCP 透传",
+            run_codex("mcp__github__run_secret_scanning", {"repository": "acme/widget"}, ws),
+            "allow",
+        )
+
+        ambiguous_command = "sh -c 'git push origin feature/TAP-123' --token super-secret"
+        claude_ambiguous = run_hook_output("Bash", {"command": ambiguous_command}, ws)
+        claude_reason = claude_ambiguous["hookSpecificOutput"]["permissionDecisionReason"]
+        check("Claude 受控操作歧义仍需确认", "判定：unknown_external_write" in claude_reason, True)
+        check("Claude 受控操作歧义隐藏敏感值", "super-secret" in claude_reason, False)
+        codex_ambiguous = run_codex_output("Bash", {"command": ambiguous_command}, ws)
+        codex_ambiguous_reason = codex_ambiguous["hookSpecificOutput"]["permissionDecisionReason"]
+        check("Codex 受控操作歧义降级为拒绝", codex_ambiguous["hookSpecificOutput"]["permissionDecision"], "deny")
+        check("Codex 受控操作歧义给出 Shell 人工接力", "在自己的终端核对并执行上述命令" in codex_ambiguous_reason, True)
 
         preview_command = (
-            "node takeover.js --token super-secret mysql -pmysql-secret "
+            "sh -c 'git push origin feature/TAP-123' --token super-secret mysql -pmysql-secret "
             "curl -u user:pass PRIVATE_KEY=private-value AUTHORIZATION=auth-secret\x1b[31m"
         )
         preview_reason = run_hook_output("Bash", {"command": preview_command}, ws)["hookSpecificOutput"]["permissionDecisionReason"]
@@ -823,8 +847,12 @@ def main():
             ("Bash", {"command": "git push origin feature/TAP-123"}),
             ("Bash", {"command": "git push origin main"}),
             ("Bash", {"command": "git merge develop"}),
+            ("Bash", {"command": unknown_command}),
             ("mcp__atlassian__transition_issue", {"issueKey": "TAP-123"}),
             ("mcp__atlassian__add_comment", {"issueKey": "TAP-123"}),
+            ("mcp__github__run_secret_scanning", {"repository": "acme/widget"}),
+            ("mcp__slack__add_comment", {}),
+            ("mcp__custom__merge_pull_request", {}),
         ]
         for tool, tool_input in parity_cases:
             claude = run_hook(tool, tool_input, ws)

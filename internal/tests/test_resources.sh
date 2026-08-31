@@ -175,7 +175,9 @@ versions = [
 assert versions == [manifest["adapter_version"]]
 
 mappings = json.loads(Path("adapters/tools/mcp-operations.json").read_text(encoding="utf-8"))
-assert "atlassianuserinfo" in mappings["readonly_tools"]
+assert "readonly_tools" not in mappings
+assert "readonly_prefixes" not in mappings
+assert set(mappings["mappings"]) == {"github", "atlassian"}
 
 profile = json.loads(Path("projects/tapdata/profile.json").read_text(encoding="utf-8"))
 assert profile["statuses"]["Analyzed"] == "waiting_takeover"

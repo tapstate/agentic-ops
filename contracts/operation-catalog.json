@@ -25,6 +25,6 @@
     { "name": "protected_branch_push", "category": "git", "description": "向保护分支推送", "requestable": false },
     { "name": "force_push", "category": "git", "description": "强制推送 Git 引用", "requestable": true },
     { "name": "history_rewrite", "category": "git", "description": "改写 Git 历史", "requestable": true },
-    { "name": "unknown_external_write", "category": "external", "description": "无法识别语义的外部写操作", "requestable": true }
+    { "name": "unknown_external_write", "category": "external", "description": "已识别为受控操作族但无法可靠映射的歧义操作", "requestable": true }
   ]
 }

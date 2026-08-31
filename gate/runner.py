@@ -153,7 +153,13 @@ def _audit(cwd, context, record):
             cwd, context=context, issue_key=context.get("issue_key")
         )
         if task_directory is None:
-            task_directory = engine.find_gate_root(cwd) / ".agenticops"
+            root = engine.find_gate_root(cwd)
+            workspace_state = root / ".agenticops"
+            product_state = root / ".local" / "product.json"
+            if (root / ".agentic-ops-source").is_file() or product_state.is_file():
+                task_directory = root / ".local" / "gate"
+            else:
+                task_directory = workspace_state
         task_directory.mkdir(parents=True, exist_ok=True)
         with open(task_directory / "events.jsonl", "a", encoding="utf-8") as stream:
             stream.write(json.dumps(record, ensure_ascii=False) + "\n")

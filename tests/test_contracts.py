@@ -242,7 +242,12 @@ class ContractConformanceTest(unittest.TestCase):
 
         mapping = load_json(ROOT / "adapters" / "tools" / "mcp-operations.json")
         requestable = {name for name, item in operations.items() if item["requestable"]}
-        self.assertTrue(set(mapping["mappings"].values()) <= requestable)
+        mapped_operations = {
+            operation
+            for service_mapping in mapping["mappings"].values()
+            for operation in service_mapping.values()
+        }
+        self.assertTrue(mapped_operations <= requestable)
         shell_operations = set(classify_bash(
             "git commit -m x && git push origin feature/x; gh pr merge 1"
         ))
@@ -294,19 +299,19 @@ class ContractConformanceTest(unittest.TestCase):
         )
         for module in ("workflow.other", "workflow.task.extra", "workflow.repository_worktree.extra"):
             self.assertEqual(
-                ["unknown_external_write"],
+                [],
                 classify_bash("python3 -m %s purge --issue-key TAP-123 --yes" % module),
             )
         self.assertEqual(
-            ["unknown_external_write"],
+            [],
             classify_bash("python3 --check-hash-based-pycs workflow/task.py purge --issue-key TAP-123 --yes"),
         )
         self.assertEqual(
-            ["unknown_external_write"],
+            [],
             classify_bash("python3 -c'print(1)' workflow/task.py purge --issue-key TAP-123 --yes"),
         )
         self.assertEqual(
-            ["unknown_external_write"],
+            [],
             classify_bash("python3 - workflow/task.py purge --issue-key TAP-123 --yes"),
         )
         for command in (
@@ -322,7 +327,7 @@ class ContractConformanceTest(unittest.TestCase):
             "nodejs payload.js",
             "python3 --version unregistered.py",
         ):
-            self.assertEqual(["unknown_external_write"], classify_bash(command), command)
+            self.assertEqual([], classify_bash(command), command)
         for command in (
             "python3 --version", "python3.11 -V", "perl -V", "ruby --version",
             "node -v", "nodejs --version",
@@ -377,11 +382,17 @@ class ContractConformanceTest(unittest.TestCase):
             "$(printf git) push origin feature/TAP-123",
             "env AO_MODE=test $(printf git) push origin feature/TAP-123",
             "G=git; $G push origin feature/TAP-123",
+            "G='git'; \"$G\" push origin feature/TAP-123",
+            'G="git"; ${G} push origin feature/TAP-123',
+            "P=/usr/bin/git; $P push origin feature/TAP-123",
+        ):
+            self.assertEqual(["unknown_external_write"], classify_bash(command), command)
+        for command in (
             "${G} push origin feature/TAP-123",
             "env AO_MODE=test command $G push origin feature/TAP-123",
             "printf '%s' '<(dynamic)'",
         ):
-            self.assertEqual(["unknown_external_write"], classify_bash(command), command)
+            self.assertEqual([], classify_bash(command), command)
         self.assertEqual([], classify_bash("G=git"))
         self.assertEqual([], classify_bash("command -v git"))
         self.assertEqual(
@@ -447,6 +458,43 @@ class ContractConformanceTest(unittest.TestCase):
         self.assertEqual(
             ["unknown_external_write"],
             classify_bash("git -C /other unknown-subcommand"),
+        )
+
+        for command in (
+            "sed -n '1,240p' file && rg -n -i -C 2 'TAP-12289|takeover|接管' memory.md",
+            "rg -n 'git|push|commit' docs",
+            "rg -n 'G=git; $G push' docs",
+            "mvn --batch-mode test",
+            "npm test",
+            "python3 unregistered.py",
+            "node takeover.js --issue-key TAP-12774",
+        ):
+            self.assertEqual([], classify_bash(command), command)
+
+        for tool_name in (
+            "mcp__github__run_secret_scanning",
+            "mcp__custom__mutate_unknown_resource",
+            "mcp__slack__add_comment",
+            "mcp__custom__merge_pull_request",
+        ):
+            self.assertEqual(([], tool_name, {}), classify_tool_call(tool_name, {}))
+        self.assertEqual(
+            ["write_jira_comment"],
+            classify_tool_call("mcp__atlassian__add_comment", {"issueKey": "TAP-123"})[0],
+        )
+        self.assertEqual(
+            ["pr_merge"],
+            classify_tool_call("mcp__github__merge_pull_request", {"repository": "acme/widget"})[0],
+        )
+
+        operations, _, newline_target = classify_tool_call(
+            "Bash", {"command": "git status\ngit push origin main"}
+        )
+        self.assertEqual(["git_push"], operations)
+        self.assertEqual("main", newline_target["push_target_branch"])
+        self.assertEqual(
+            ["force_push"],
+            classify_bash("git diff\r\ngit push --force origin feature/TAP-123"),
         )
 
         for command in (

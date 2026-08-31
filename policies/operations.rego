@@ -266,7 +266,7 @@ push_refspec_untrusted if {
 
 # ---- 判定 -----------------------------------------------------------------
 
-result := {"decision": "ask", "operation": input.operation, "reason": "未识别的外部写操作，不在操作契约内，需人工确认并补充 Tool Adapter 映射", "reason_code": "unknown_external_write", "required_action": "请研发工程师确认本次操作；Agent 在获得确认前停止该操作及其依赖步骤。"} if {
+result := {"decision": "ask", "operation": input.operation, "reason": "受控操作存在包装、目标或参数歧义，无法可靠生成标准请求", "reason_code": "unknown_external_write", "required_action": "请研发工程师核对并执行该操作；维护者应补充或修正 Tool Adapter 映射。"} if {
 	input.operation == "unknown_external_write"
 } else := {"decision": "ask", "operation": input.operation, "reason": "未知标准操作，需人工确认并补充操作契约", "reason_code": "unknown_operation", "required_action": "请研发工程师确认本次操作；维护者应补充标准操作契约后再重试。"} if {
 	level == "unlisted"

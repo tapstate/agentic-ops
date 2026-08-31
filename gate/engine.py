@@ -364,9 +364,9 @@ def evaluate(operation, context, auth, policy, now=None):
         return _result(
             ASK,
             operation,
-            "未识别的外部写操作，不在操作契约内，需人工确认并补充 Tool Adapter 映射",
+            "受控操作存在包装、目标或参数歧义，无法可靠生成标准请求",
             "unknown_external_write",
-            "请研发工程师确认本次操作；Agent 在获得确认前停止该操作及其依赖步骤。",
+            "请研发工程师核对并执行该操作；维护者应补充或修正 Tool Adapter 映射。",
         )
 
     metadata = operations.get(operation)

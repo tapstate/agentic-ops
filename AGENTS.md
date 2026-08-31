@@ -81,7 +81,7 @@ bash internal/tests/test_release.sh
 - 正常发布使用 `internal/release/release.sh prepare --version vX.Y`，再使用 `publish --version vX.Y`。软门禁模式显式增加 `--allow-soft-gate`。
 - `main` 只通过 Merge commit 合入；发布脚本回读合并事实、同步 `develop`，最后才创建指向实际 Merge commit 的 annotated Tag。
 - Hotfix 只使用 `internal/release/hotfix.sh <JIRA-KEY>`。该调用是快速修复授权，脚本只允许原子更新 `main` 和 `develop`；冲突、分叉或回读不明时失败关闭。
-- 候选修改 Hook、故事门禁、注册表、锁文件或发布脚本时，自动发布失败关闭，必须通过受保护 `main` 的独立人工审查 PR 完成信任根升级。
+- 候选修改 Agent Hook、共享 Adapter Runtime、Tool Adapter 分类策略、Git Hook、故事门禁、注册表、锁文件或发布脚本时，自动发布失败关闭，必须通过受保护 `main` 的独立人工审查 PR 完成信任根升级。
 - 源码版本格式为 `<分支>-<标签>-<提交数>-<提交编号>`，由 `python3 internal/version.py` 输出；发布版本使用 `v1.x`。
 
 ## 提交与授权

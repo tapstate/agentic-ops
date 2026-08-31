@@ -9,7 +9,6 @@ from adapters.tools.shell_classifier import classify_bash_call
 CONFIG = json.loads(
     (Path(__file__).resolve().parent / "mcp-operations.json").read_text(encoding="utf-8")
 )
-UNKNOWN = "unknown_external_write"
 
 
 def classify_tool_call(tool_name, tool_input):
@@ -19,14 +18,10 @@ def classify_tool_call(tool_name, tool_input):
         return operations, command, target
     if not tool_name.startswith("mcp__"):
         return [], tool_name, {}
-    short_name = tool_name.split("__")[-1].lower()
-    operation = CONFIG["mappings"].get(short_name)
-    readonly = short_name in CONFIG.get("readonly_tools", []) or operation is None and any(
-        short_name.startswith(prefix) for prefix in CONFIG["readonly_prefixes"]
-    )
-    if readonly:
+    _, service_name, short_name = tool_name.split("__", 2)
+    operation = CONFIG["mappings"].get(service_name.lower(), {}).get(short_name.lower())
+    if operation is None:
         return [], tool_name, {}
-    operation = operation or UNKNOWN
     target = {"branch_relevant": False}
     if operation in CONFIG["repository_target_operations"]:
         target.update(github_target(tool_input))

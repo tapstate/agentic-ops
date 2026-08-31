@@ -451,6 +451,29 @@ release_run_full_verification() {
   RELEASE_VERIFIED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 }
 
+release_story_gate_trust_root_changes() {
+  local repo_root="$1"
+  local base="$2"
+  local head="$3"
+
+  GIT_NO_REPLACE_OBJECTS=1 git -C "$repo_root" diff \
+    --name-only "$base" "$head" -- \
+    .githooks \
+    adapters/agents \
+    adapters/runtime.py \
+    adapters/tools \
+    internal/bin/story-gate \
+    internal/pyproject.toml \
+    internal/uv.lock \
+    internal/story_gate \
+    internal/release/release.sh \
+    internal/release/hotfix.sh \
+    internal/release/lib/release-common.sh \
+    internal/release/lib/development-workflow.sh \
+    internal/story_gate/review-policy.yaml \
+    internal/story_gate/stories.yaml
+}
+
 release_verify_story_gate() {
   local repo_root="$1"
   local base="$2"
@@ -642,21 +665,8 @@ release_verify_story_gate() {
   fi
 
   if [ "$gate_status" -eq 0 ]; then
-    trust_root_changes="$(
-      GIT_NO_REPLACE_OBJECTS=1 git -C "$repo_root" diff \
-        --name-only "$range_base_commit" "$head_commit" -- \
-        .githooks \
-        internal/bin/story-gate \
-        internal/pyproject.toml \
-        internal/uv.lock \
-        internal/story_gate \
-        internal/release/release.sh \
-        internal/release/hotfix.sh \
-        internal/release/lib/release-common.sh \
-        internal/release/lib/development-workflow.sh \
-        internal/story_gate/review-policy.yaml \
-        internal/story_gate/stories.yaml
-    )"
+    trust_root_changes="$(release_story_gate_trust_root_changes \
+      "$repo_root" "$range_base_commit" "$head_commit")"
     if [ -n "$trust_root_changes" ]; then
       gate_status=126
     fi

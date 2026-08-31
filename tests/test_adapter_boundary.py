@@ -136,6 +136,13 @@ class AdapterBoundaryTest(unittest.TestCase):
     def test_codex_native_hook_template_contract(self):
         self._assert_native_hook_template("codex", None)
 
+    def test_agents_share_the_same_tool_classification_bridge(self):
+        for agent in ("claude", "codex"):
+            content = (AGENT_ROOT / agent / "hook.py").read_text(encoding="utf-8")
+            self.assertIn("from adapters.runtime import", content)
+            self.assertIn("evaluate_tool_call", content)
+            self.assertNotIn("adapters.tools", content)
+
     def test_common_renderer_rejects_unconsumed_hook_marker(self):
         manifest = json.loads((AGENT_ROOT / "claude" / "manifest.json").read_text(encoding="utf-8"))
         with tempfile.TemporaryDirectory() as temporary:
