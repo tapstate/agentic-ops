@@ -37,6 +37,12 @@ def check(name, actual, expected):
 
 
 def run_hook(tool_name, tool_input, cwd, env_extra=None):
+    out = run_hook_output(tool_name, tool_input, cwd, env_extra)
+    hso = out.get("hookSpecificOutput")
+    return hso["permissionDecision"] if hso else "passthrough"
+
+
+def run_hook_output(tool_name, tool_input, cwd, env_extra=None):
     payload = {
         "hook_event_name": "PreToolUse",
         "tool_name": tool_name,
@@ -56,8 +62,7 @@ def run_hook(tool_name, tool_input, cwd, env_extra=None):
     )
     assert proc.returncode == 0, proc.stderr
     out = json.loads(proc.stdout)
-    hso = out.get("hookSpecificOutput")
-    return hso["permissionDecision"] if hso else "passthrough"
+    return out
 
 
 def run_codex(tool_name, tool_input, cwd):
@@ -775,6 +780,43 @@ def main():
         check("gh api POST 需确认", run_hook("Bash", {"command": "gh api -X POST /repos/a/b/issues -f title=x"}, ws), "ask")
         check("复合命令取最严格（status; push --force）", run_hook("Bash", {"command": "git status && git push -f origin feature/TAP-123"}, ws), "deny")
 
+        unknown_command = "node takeover.js --issue-key TAP-12774 --token super-secret"
+        claude_unknown = run_hook_output("Bash", {"command": unknown_command}, ws)
+        claude_reason = claude_unknown["hookSpecificOutput"]["permissionDecisionReason"]
+        check("Claude 未识别操作保留原始命令", "node takeover.js --issue-key TAP-12774" in claude_reason, True)
+        check("Claude 未识别操作隐藏命令敏感值", "super-secret" in claude_reason, False)
+        check("Claude 未识别操作展示原因码", "判定：unknown_external_write" in claude_reason, True)
+        check("Claude 原生原因前缀使用原因码", claude_reason.startswith("[agenticops:unknown_external_write]"), True)
+        codex_unknown = run_codex_output("Bash", {"command": unknown_command}, ws)
+        codex_unknown_reason = codex_unknown["hookSpecificOutput"]["permissionDecisionReason"]
+        check("Codex 未识别操作降级为拒绝", codex_unknown["hookSpecificOutput"]["permissionDecision"], "deny")
+        check("Codex 未识别操作保留原始命令", "node takeover.js --issue-key TAP-12774" in codex_unknown_reason, True)
+        check("Codex 未识别操作给出 Shell 人工接力", "在自己的终端核对并执行上述命令" in codex_unknown_reason, True)
+        check("Codex 原生原因前缀使用原因码", "[agenticops:unknown_external_write]" in codex_unknown_reason, True)
+        codex_unknown_mcp = run_codex_output(
+            "mcp__github__run_secret_scanning", {"repository": "acme/widget"}, ws
+        )
+        codex_unknown_mcp_reason = codex_unknown_mcp["hookSpecificOutput"]["permissionDecisionReason"]
+        check("Codex 未识别 MCP 写操作给出 MCP 人工接力", "已登录的对应 MCP 服务" in codex_unknown_mcp_reason, True)
+        check("Codex 未识别 MCP 写操作不误称终端命令", "自己的终端" in codex_unknown_mcp_reason, False)
+
+        preview_command = (
+            "node takeover.js --token super-secret mysql -pmysql-secret "
+            "curl -u user:pass PRIVATE_KEY=private-value AUTHORIZATION=auth-secret\x1b[31m"
+        )
+        preview_reason = run_hook_output("Bash", {"command": preview_command}, ws)["hookSpecificOutput"]["permissionDecisionReason"]
+        for secret in ("super-secret", "mysql-secret", "user:pass", "private-value", "auth-secret", "\x1b"):
+            check("命令摘要不泄露敏感值：%s" % secret.encode("unicode_escape").decode(), secret in preview_reason, False)
+        check("命令摘要不再误称原始命令", "原始命令" in preview_reason, False)
+
+        for agent, output in (
+            ("Claude", run_hook_output("Bash", "invalid-tool-input", ws)),
+            ("Codex", run_codex_output("Bash", "invalid-tool-input", ws)),
+        ):
+            failure = output["hookSpecificOutput"]
+            check("%s Hook 异常失败关闭" % agent, failure["permissionDecision"], "deny")
+            check("%s Hook 异常使用统一原因码" % agent, "[agenticops:adapter_failure]" in failure["permissionDecisionReason"], True)
+
         # ---- Agent Adapter 语义一致性 -----------------------------------
         parity_cases = [
             ("Bash", {"command": "git commit -m x"}),
@@ -794,7 +836,7 @@ def main():
         codex_reason = codex_block["hookSpecificOutput"]["permissionDecisionReason"]
         check("Codex ask 降级提示要求立即展示并停止", "必须立即向研发工程师展示" in codex_reason, True)
         check("Codex ask 降级提示不再重复旧兼容说明", "Hook 不支持 ask" in codex_reason, False)
-        check("Codex ask 降级提示包含单一处理方式", codex_reason.count("处理方式："), 1)
+        check("Codex ask 降级提示包含单一下一步", codex_reason.count("下一步："), 1)
         check("Codex ask 降级提示只包含一个原因前缀", codex_reason.count("[agenticops:"), 1)
         check("Codex 未覆盖操作要求人工执行而非聊天批准重试", "在自己的终端执行原命令" in codex_reason, True)
         check("Codex 未覆盖操作明确禁止 Agent 重试", "Agent 不得重试该命令" in codex_reason, True)

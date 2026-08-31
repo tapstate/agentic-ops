@@ -1,15 +1,43 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agenticops.tapdata.net/contracts/adapter-manifest-v1.schema.json",
-  "title": "AgenticOps Agent Adapter Manifest v1",
+  "$id": "https://agenticops.tapdata.net/contracts/adapter-manifest-v2.schema.json",
+  "title": "AgenticOps Agent Adapter Manifest v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "name", "adapter_version", "entrypoint", "capabilities", "artifacts", "launch"],
+  "required": ["schema_version", "name", "adapter_version", "entrypoint", "hook", "capabilities", "artifacts", "launch"],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "const": 2 },
     "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
     "adapter_version": { "type": "integer", "minimum": 1 },
     "entrypoint": { "type": "string", "minLength": 1 },
+    "hook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["standard_event", "tool_kinds", "timeout_seconds", "failure_mode", "native"],
+      "properties": {
+        "standard_event": { "const": "before_operation" },
+        "tool_kinds": {
+          "type": "array",
+          "items": { "enum": ["shell", "mcp"] },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 300 },
+        "failure_mode": { "const": "deny" },
+        "native": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event", "tool_matchers"],
+          "properties": {
+            "event": { "type": "string", "minLength": 1 },
+            "tool_matchers": {
+              "type": ["object", "null"],
+              "additionalProperties": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
     "capabilities": {
       "type": "object",
       "additionalProperties": false,

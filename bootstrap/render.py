@@ -26,6 +26,7 @@ STATE_DIRECTORY = ".agenticops"
 INIT_NAME = "init.json"
 WORKSPACE_NAME = "workspace.json"
 LEGACY_BINDING_NAME = ".agenticops.json"
+HOOK_TEMPLATE_MARKER = re.compile(r"__AGENTIC_OPS_HOOK_[A-Z0-9_]+__")
 
 
 def safe_path(root, relative):
@@ -59,18 +60,40 @@ def write_json_atomic(path, document):
     os.replace(str(temporary), str(path))
 
 
-def replacements(install_root, project):
-    return {
+def replacements(install_root, project, manifest=None):
+    values = {
         "__AGENTIC_OPS_HOME__": str(install_root.resolve()),
         "__AGENTIC_OPS_PROJECT__": project,
     }
+    if manifest is not None:
+        hook = manifest["hook"]
+        native = hook["native"]
+        tool_matchers = native["tool_matchers"]
+        native_matcher = (
+            None
+            if tool_matchers is None
+            else "|".join(tool_matchers[kind] for kind in hook["tool_kinds"])
+        )
+        values['"__AGENTIC_OPS_HOOK_TIMEOUT_SECONDS__"'] = str(
+            hook["timeout_seconds"]
+        )
+        values['"__AGENTIC_OPS_HOOK_NATIVE_EVENT__"'] = json.dumps(native["event"])
+        values['"__AGENTIC_OPS_HOOK_NATIVE_TOOL_MATCHER__"'] = json.dumps(native_matcher)
+    return values
 
 
-def rendered_content(install_root, project, template):
+def rendered_content(install_root, project, template, manifest=None):
     source = safe_path(install_root, template)
     content = source.read_text(encoding="utf-8")
-    for marker, value in replacements(install_root, project).items():
+    for marker, value in replacements(install_root, project, manifest).items():
         content = content.replace(marker, value)
+    if manifest:
+        unresolved = sorted(set(HOOK_TEMPLATE_MARKER.findall(content)))
+        if unresolved:
+            raise ValueError(
+                "Agent Hook 模板变量未被完整消费：%s：%s"
+                % (manifest["name"], ", ".join(unresolved))
+            )
     return content
 
 
@@ -210,9 +233,13 @@ def expected_artifacts(install_root, workspace, project, agents, manifests):
                     "Agent 接线目标冲突：%s 同时由 %s 和 %s 生成"
                     % (target, owners[target], agent_id)
                 )
-            artifacts[target] = file_artifact(
-                rendered_content(install_root, project, artifact["template"])
+            content = rendered_content(
+                install_root,
+                project,
+                artifact["template"],
+                manifest,
             )
+            artifacts[target] = file_artifact(content)
             owners[target] = agent_id
         skill_target = manifest.get("skill_target")
         if skill_target:

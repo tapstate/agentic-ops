@@ -10,15 +10,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from adapters.runtime import decision_reason, evaluate_tool_call  # noqa: E402
 
-ADAPTER_VERSION = 1
+ADAPTER_VERSION = 2
 
 
-def deny(reason):
+def deny(reason_code, reason):
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
-            "permissionDecisionReason": "[agenticops:adapter] %s" % reason,
+            "permissionDecisionReason": "[agenticops:%s] %s" % (reason_code, reason),
         }
     }
 
@@ -27,33 +27,40 @@ def main():
     try:
         payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, TypeError):
-        print(json.dumps(deny("Claude Hook 输入不是有效 JSON"), ensure_ascii=False))
+        print(json.dumps(deny("invalid_hook_input", "Claude Hook 输入不是有效 JSON"), ensure_ascii=False))
         return 0
-
-    decision = evaluate_tool_call(
-        "claude",
-        ADAPTER_VERSION,
-        str(payload.get("tool_name", "")),
-        payload.get("tool_input", {}) or {},
-        str(payload.get("cwd") or os.getcwd()),
-    )
-    if decision is None:
-        print(json.dumps({}))
-        return 0
-
-    print(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": decision["decision"],
-                    "permissionDecisionReason": "[agenticops:%s] %s"
-                    % (decision["operation"], decision_reason(decision)),
-                }
-            },
-            ensure_ascii=False,
+    try:
+        tool_name = str(payload.get("tool_name", ""))
+        tool_input = payload.get("tool_input", {}) or {}
+        decision = evaluate_tool_call(
+            "claude", ADAPTER_VERSION, tool_name, tool_input, str(payload.get("cwd") or os.getcwd())
         )
-    )
+        if decision is None:
+            print(json.dumps({}))
+            return 0
+        print(
+            json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": decision["decision"],
+                        "permissionDecisionReason": "[agenticops:%s] %s"
+                        % (
+                            decision["reason_code"],
+                            decision_reason(decision, tool_name, tool_input),
+                        ),
+                    }
+                },
+                ensure_ascii=False,
+            )
+        )
+    except Exception:
+        print(
+            json.dumps(
+                deny("adapter_failure", "AgenticOps Hook 执行异常，已拒绝本次操作；请检查本地 Adapter/Gate 配置。"),
+                ensure_ascii=False,
+            )
+        )
     return 0
 
 

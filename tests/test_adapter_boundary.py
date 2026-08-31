@@ -5,10 +5,15 @@ from __future__ import annotations
 import ast
 from collections import Counter
 import json
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "bootstrap"))
+from render import rendered_content  # noqa: E402
+
 ADAPTERS = ROOT / "adapters"
 AGENT_ROOT = ADAPTERS / "agents"
 TOOL_ROOT = ADAPTERS / "tools"
@@ -89,7 +94,7 @@ class AdapterBoundaryTest(unittest.TestCase):
     def test_agent_manifests_are_bounded_and_declarative(self):
         for manifest_path in sorted(AGENT_ROOT.glob("*/manifest.json")):
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            self.assertEqual(manifest["schema_version"], 1)
+            self.assertEqual(manifest["schema_version"], 2)
             entrypoint = ROOT / manifest["entrypoint"]
             self.assertEqual(
                 manifest["adapter_version"],
@@ -97,6 +102,22 @@ class AdapterBoundaryTest(unittest.TestCase):
                 "%s 与 %s 的 adapter_version 不一致" % (manifest_path, entrypoint),
             )
             self.assertLessEqual(len(manifest["artifacts"]), 3)
+            self.assertEqual(manifest["hook"]["standard_event"], "before_operation")
+            self.assertTrue(manifest["hook"]["tool_kinds"])
+            self.assertLessEqual(
+                set(manifest["hook"]["tool_kinds"]),
+                {"shell", "mcp"},
+            )
+            self.assertEqual(manifest["hook"]["failure_mode"], "deny")
+            self.assertGreaterEqual(manifest["hook"]["timeout_seconds"], 1)
+            self.assertLessEqual(manifest["hook"]["timeout_seconds"], 300)
+            native = manifest["hook"]["native"]
+            self.assertIsInstance(native["event"], str)
+            self.assertTrue(native["event"])
+            if native["tool_matchers"] is not None:
+                self.assertEqual(
+                    set(native["tool_matchers"]), set(manifest["hook"]["tool_kinds"])
+                )
             self.assertIn(manifest["capabilities"]["ask_fallback"], (
                 "native",
                 "deny_with_guidance",
@@ -108,6 +129,40 @@ class AdapterBoundaryTest(unittest.TestCase):
                 self.assertTrue(skill_target)
                 self.assertFalse(Path(skill_target).is_absolute())
                 self.assertFalse(set(Path(skill_target).parts) & {"", ".", ".."})
+
+    def test_claude_native_hook_template_contract(self):
+        self._assert_native_hook_template("claude", "Bash|mcp__.*")
+
+    def test_codex_native_hook_template_contract(self):
+        self._assert_native_hook_template("codex", None)
+
+    def test_common_renderer_rejects_unconsumed_hook_marker(self):
+        manifest = json.loads((AGENT_ROOT / "claude" / "manifest.json").read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "template.txt").write_text("__AGENTIC_OPS_HOOK_UNSUPPORTED__", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "模板变量未被完整消费"):
+                rendered_content(root, "tapdata", "template.txt", manifest)
+
+    def _assert_native_hook_template(self, agent, expected_matcher):
+        manifest_path = AGENT_ROOT / agent / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        template = next(
+            artifact["template"]
+            for artifact in manifest["artifacts"]
+            if "__AGENTIC_OPS_HOOK_NATIVE_EVENT__"
+            in (ROOT / artifact["template"]).read_text(encoding="utf-8")
+        )
+        document = json.loads(rendered_content(ROOT, "tapdata", template, manifest))
+        event = manifest["hook"]["native"]["event"]
+        entries = document["hooks"][event]
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].get("matcher"), expected_matcher)
+        handlers = entries[0]["hooks"]
+        self.assertEqual(len(handlers), 1)
+        self.assertEqual(handlers[0]["type"], "command")
+        self.assertIn(manifest["entrypoint"], handlers[0]["command"])
+        self.assertEqual(handlers[0]["timeout"], manifest["hook"]["timeout_seconds"])
 
     def test_adapters_do_not_depend_on_business_layers_or_write_state(self):
         forbidden_imports = {

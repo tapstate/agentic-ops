@@ -1,13 +1,13 @@
 {
   "description": "AgenticOps workspace gate wiring.",
   "hooks": {
-    "PreToolUse": [
+    "__AGENTIC_OPS_HOOK_NATIVE_EVENT__": [
       {
         "hooks": [
           {
             "type": "command",
             "command": "python3 \"__AGENTIC_OPS_HOME__/adapters/agents/codex/hook.py\"",
-            "timeout": 30,
+            "timeout": "__AGENTIC_OPS_HOOK_TIMEOUT_SECONDS__",
             "statusMessage": "Checking AgenticOps policy"
           }
         ]

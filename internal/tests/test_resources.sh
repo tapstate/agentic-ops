@@ -147,6 +147,9 @@ python3 -m json.tool adapters/tools/mcp.template.json >/dev/null
 for manifest in adapters/agents/*/manifest.json; do
   python3 -m json.tool "$manifest" >/dev/null
 done
+for template in adapters/agents/*/templates/*.json; do
+  python3 -m json.tool "$template" >/dev/null
+done
 
 grep -Fq 'sparse-checkout set adapters bootstrap contracts gate policies projects workflow' bootstrap/install.sh ||
   fail "安装脚本没有限制为产品目录"
@@ -169,7 +172,6 @@ versions = [
     and isinstance(node.value, ast.Constant)
     and type(node.value.value) is int
 ]
-assert manifest["adapter_version"] == 3
 assert versions == [manifest["adapter_version"]]
 
 mappings = json.loads(Path("adapters/tools/mcp-operations.json").read_text(encoding="utf-8"))

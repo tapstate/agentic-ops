@@ -1,8 +1,21 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "claude",
-  "adapter_version": 1,
+  "adapter_version": 2,
   "entrypoint": "adapters/agents/claude/hook.py",
+  "hook": {
+    "standard_event": "before_operation",
+    "tool_kinds": ["shell", "mcp"],
+    "timeout_seconds": 30,
+    "failure_mode": "deny",
+    "native": {
+      "event": "PreToolUse",
+      "tool_matchers": {
+        "shell": "Bash",
+        "mcp": "mcp__.*"
+      }
+    }
+  },
   "capabilities": {
     "decisions": ["allow", "ask", "deny"],
     "ask_fallback": "native",

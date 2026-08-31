@@ -1,12 +1,13 @@
 {
   "hooks": {
-    "PreToolUse": [
+    "__AGENTIC_OPS_HOOK_NATIVE_EVENT__": [
       {
-        "matcher": "Bash|mcp__.*",
+        "matcher": "__AGENTIC_OPS_HOOK_NATIVE_TOOL_MATCHER__",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"__AGENTIC_OPS_HOME__/adapters/agents/claude/hook.py\""
+            "command": "python3 \"__AGENTIC_OPS_HOME__/adapters/agents/claude/hook.py\"",
+            "timeout": "__AGENTIC_OPS_HOOK_TIMEOUT_SECONDS__"
           }
         ]
       }

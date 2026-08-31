@@ -32,7 +32,7 @@ def discover(product_root):
         except (OSError, json.JSONDecodeError) as error:
             raise ValueError("Agent Manifest 无法读取：%s：%s" % (path, error)) from error
         agent_id = document.get("name")
-        if document.get("schema_version") != 1:
+        if document.get("schema_version") != 2:
             raise ValueError("Agent Manifest schema_version 无效：%s" % path)
         if not isinstance(agent_id, str) or not AGENT_ID_PATTERN.fullmatch(agent_id):
             raise ValueError("Agent Manifest name 无效：%s" % path)
@@ -43,6 +43,43 @@ def discover(product_root):
         adapter_version = document.get("adapter_version")
         if type(adapter_version) is not int or adapter_version < 1:
             raise ValueError("Agent adapter_version 无效：%s" % agent_id)
+        hook = document.get("hook")
+        if not isinstance(hook, dict) or set(hook) != {
+            "standard_event", "tool_kinds", "timeout_seconds", "failure_mode", "native"
+        }:
+            raise ValueError("Agent Hook 合同无效：%s" % agent_id)
+        if hook.get("standard_event") != "before_operation":
+            raise ValueError("Agent Hook standard_event 无效：%s" % agent_id)
+        tool_kinds = hook.get("tool_kinds")
+        if (
+            not isinstance(tool_kinds, list)
+            or not tool_kinds
+            or not all(isinstance(item, str) for item in tool_kinds)
+            or len(set(tool_kinds)) != len(tool_kinds)
+            or not set(tool_kinds) <= {"shell", "mcp"}
+        ):
+            raise ValueError("Agent Hook tool_kinds 无效：%s" % agent_id)
+        timeout_seconds = hook.get("timeout_seconds")
+        if type(timeout_seconds) is not int or not 1 <= timeout_seconds <= 300:
+            raise ValueError("Agent Hook timeout_seconds 无效：%s" % agent_id)
+        if hook.get("failure_mode") != "deny":
+            raise ValueError("Agent Hook failure_mode 无效：%s" % agent_id)
+        native = hook.get("native")
+        if (
+            not isinstance(native, dict)
+            or set(native) != {"event", "tool_matchers"}
+            or not isinstance(native.get("event"), str)
+            or not native["event"]
+        ):
+            raise ValueError("Agent Hook native event 无效：%s" % agent_id)
+        tool_matchers = native.get("tool_matchers")
+        if tool_matchers is not None:
+            if (
+                not isinstance(tool_matchers, dict)
+                or set(tool_matchers) != set(tool_kinds)
+                or not all(isinstance(value, str) and value for value in tool_matchers.values())
+            ):
+                raise ValueError("Agent Hook native tool_matchers 无效：%s" % agent_id)
         capabilities = document.get("capabilities")
         if not isinstance(capabilities, dict):
             raise ValueError("Agent capabilities 无效：%s" % agent_id)

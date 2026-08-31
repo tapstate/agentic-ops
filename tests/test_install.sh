@@ -51,17 +51,19 @@ mkdir -p "$source_repo/adapters/agents/test-agent/templates"
 printf '%s\n' '#!/usr/bin/env python3' > "$source_repo/adapters/agents/test-agent/hook.py"
 cat > "$source_repo/adapters/agents/test-agent/manifest.json" <<'JSON'
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "test-agent",
   "adapter_version": 1,
   "entrypoint": "adapters/agents/test-agent/hook.py",
+  "hook": {"standard_event": "before_operation", "tool_kinds": ["shell"], "timeout_seconds": 15, "failure_mode": "deny", "native": {"event": "PreToolUse", "tool_matchers": {"shell": "Shell"}}},
   "capabilities": {"decisions": ["allow", "deny"], "ask_fallback": "deny_with_guidance"},
   "artifacts": [{"template": "adapters/agents/test-agent/templates/settings.json", "target": ".test-agent/settings.json"}],
   "launch": {"mode": "command", "command": "test-agent-cli", "message": "测试 Agent 已接线。"},
   "skill_target": null
 }
 JSON
-printf '{"enabled":true}\n' > "$source_repo/adapters/agents/test-agent/templates/settings.json"
+printf '{"hooks":{"__AGENTIC_OPS_HOOK_NATIVE_EVENT__":[{"matcher":"__AGENTIC_OPS_HOOK_NATIVE_TOOL_MATCHER__","hooks":[{"type":"command","command":"python3 __AGENTIC_OPS_HOME__/adapters/agents/test-agent/hook.py","timeout":"__AGENTIC_OPS_HOOK_TIMEOUT_SECONDS__"}]}]}}\n' \
+  > "$source_repo/adapters/agents/test-agent/templates/settings.json"
 cp "$repo_root/agenticops" "$source_repo/agenticops"
 chmod +x "$source_repo/agenticops"
 git -C "$source_repo" add .agentic-ops-source .gitignore .githooks agenticops adapters bootstrap \
@@ -121,7 +123,7 @@ source_workspace="$test_root/source-workspace"
   --project tapdata --agent test-agent >/dev/null
 "$maintainer_root/agenticops" doctor --workspace "$source_workspace" >/dev/null
 "$source_workspace/.agenticops/agenticops" doctor >/dev/null
-printf '{"enabled":"changed"}\n' \
+printf '{"note":"changed","hooks":{"__AGENTIC_OPS_HOOK_NATIVE_EVENT__":[{"matcher":"__AGENTIC_OPS_HOOK_NATIVE_TOOL_MATCHER__","hooks":[{"type":"command","command":"python3 __AGENTIC_OPS_HOME__/adapters/agents/test-agent/hook.py","timeout":"__AGENTIC_OPS_HOOK_TIMEOUT_SECONDS__"}]}]}}\n' \
   > "$maintainer_root/adapters/agents/test-agent/templates/settings.json"
 if "$maintainer_root/agenticops" doctor --workspace "$source_workspace" >/dev/null 2>&1; then
   printf '源码变更后工作空间漂移未被识别\n' >&2
@@ -452,7 +454,6 @@ versions = [
     and isinstance(node.value, ast.Constant)
     and type(node.value.value) is int
 ]
-assert manifest["adapter_version"] == 3
 assert versions == [manifest["adapter_version"]]
 
 mappings = json.loads((root / "adapters/tools/mcp-operations.json").read_text(encoding="utf-8"))
@@ -492,16 +493,31 @@ assert ".claude/skills/ao-test-takeover" not in artifacts
 assert ".agents/skills/ao-ws-init" not in artifacts
 assert ".claude/skills/ao-ws-init" not in artifacts
 PY
-python3 - "$workspace/.codex/hooks.json" <<'PY'
+python3 - "$workspace/.claude/settings.json" "$workspace/.codex/hooks.json" "$install_root" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+install_root = Path(sys.argv[3])
+for config_path, agent in ((Path(sys.argv[1]), "claude"), (Path(sys.argv[2]), "codex")):
+    document = json.loads(config_path.read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (install_root / "adapters" / "agents" / agent / "manifest.json").read_text(encoding="utf-8")
+    )
+    handler = document["hooks"]["PreToolUse"][0]["hooks"][0]
+    assert handler["type"] == "command"
+    assert handler["command"].startswith('python3 "')
+    assert handler["timeout"] == manifest["hook"]["timeout_seconds"]
+PY
+python3 - "$workspace/.test-agent/settings.json" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 document = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 handler = document["hooks"]["PreToolUse"][0]["hooks"][0]
-assert handler["type"] == "command"
-assert handler["command"].startswith('python3 "')
-assert handler["timeout"] == 30
+assert document["hooks"]["PreToolUse"][0]["matcher"] == "Shell"
+assert handler["timeout"] == 15
 PY
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
 "$workspace/.agenticops/agenticops" doctor >/dev/null
