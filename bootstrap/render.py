@@ -344,6 +344,12 @@ def assert_artifact_ownership(workspace, owned, artifacts, tree):
 
 
 def remove_stale_artifacts(workspace, owned, expected_targets, tree):
+    expected_parents = {
+        parent
+        for target in expected_targets
+        for parent in Path(target).parents
+        if parent.parts
+    }
     for target, recorded in owned.items():
         if target in expected_targets:
             continue
@@ -362,6 +368,8 @@ def remove_stale_artifacts(workspace, owned, expected_targets, tree):
         tree.unlink(target)
         parent = Path(target).parent
         while parent.parts:
+            if parent in expected_parents:
+                break
             if not tree.rmdir_cached(parent):
                 break
             parent = parent.parent

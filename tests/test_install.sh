@@ -581,6 +581,58 @@ assert binding["repository_pool"]["root"] == str(Path(sys.argv[2]).resolve())
 PY
 python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" \
   configure --root "$shared_repository_pool" >/dev/null
+
+# 旧版 Codex 接线移除后，刷新会在同一父目录生成 hooks.json；该父目录不能在两次
+# 操作之间被删除，否则安全 FD 缓存会将其视作替换并拒绝迁移。
+legacy_codex_workspace="$test_root/legacy-codex-workspace"
+mkdir -p "$legacy_codex_workspace/.agenticops" "$legacy_codex_workspace/.codex"
+printf 'legacy codex hook\n' > "$legacy_codex_workspace/.codex/agenticops-hooks.example.json"
+legacy_codex_hash="$(file_digest "$legacy_codex_workspace/.codex/agenticops-hooks.example.json")"
+python3 - "$legacy_codex_workspace" "$install_root" "$legacy_codex_hash" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+workspace = Path(sys.argv[1])
+install_root = Path(sys.argv[2]).resolve()
+digest = sys.argv[3]
+(workspace / ".agenticops" / "workspace.json").write_text(
+    json.dumps(
+        {
+            "schema_version": 1,
+            "product_root": str(install_root),
+            "project": "tapdata",
+            "agents": ["codex"],
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    + "\n",
+    encoding="utf-8",
+)
+(workspace / ".agenticops" / "init.json").write_text(
+    json.dumps(
+        {
+            "schema_version": 1,
+            "product_ref": "legacy",
+            "artifacts": [
+                {
+                    "path": ".codex/agenticops-hooks.example.json",
+                    "sha256": digest,
+                }
+            ],
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    + "\n",
+    encoding="utf-8",
+)
+PY
+"$install_root/agenticops" repair --workspace "$legacy_codex_workspace" >/dev/null
+test -f "$legacy_codex_workspace/.codex/hooks.json"
+"$install_root/agenticops" doctor --workspace "$legacy_codex_workspace" >/dev/null
+
 if "$install_root/agenticops" start --agent test-agent --workspace "$subset_workspace" >/dev/null 2>&1; then
   printf '工作空间启动了未绑定的 Agent\n' >&2
   exit 1
