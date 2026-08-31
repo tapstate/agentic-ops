@@ -3,7 +3,7 @@ name: ao-test-takeover
 description: Orchestrate a fresh AgenticOps workspace and one subagent to test a Jira task takeover through its real stopping point; use for flow validation and follow-up repair evidence, not business-code implementation.
 ---
 
-# AgenticOps 任务接管验证
+# AgenticOps 任务接管测试
 
 用于响应“测试 `<JIRA-KEY>` 任务接管能力”这类会话请求。该 Skill 只在 AgenticOps 维护面使用，不属于任何业务项目，也不得被业务工作空间链接或引用。主会话是控制面：从维护面的当前项目代码创建全新隔离工作空间，启动一个子代理，向用户转交真实人工决定，并汇总可复测证据。子代理是执行面：在该工作空间内推进接管，直到任务完成或无安全路径可继续。
 
