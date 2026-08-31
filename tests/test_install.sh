@@ -202,13 +202,28 @@ test -f "$workspace/.mcp.json"
 test -f "$workspace/.claude/settings.json"
 test -f "$workspace/.codex/hooks.json"
 test -f "$workspace/.test-agent/settings.json"
-test ! -e "$workspace/.claude/skills"
+test -L "$workspace/.agents/skills/tapdata-task"
+test -L "$workspace/.claude/skills/tapdata-task"
 "$install_root/agenticops" workspace list | grep -F -- "$workspace" >/dev/null
 grep -F '@AGENTS.md' "$workspace/CLAUDE.md" >/dev/null
 grep -F 'Product Project：`tapdata`' "$workspace/AGENTS.md" >/dev/null
 grep -F "$install_root/workflow/task.py" "$workspace/AGENTS.md" >/dev/null
 grep -F "$install_root/adapters/agents/claude/hook.py" "$workspace/.claude/settings.json" >/dev/null
 grep -F "$install_root/adapters/agents/codex/hook.py" "$workspace/.codex/hooks.json" >/dev/null
+python3 - "$workspace" "$install_root" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+workspace = Path(sys.argv[1])
+skill = Path(sys.argv[2]) / "projects/tapdata/skills/tapdata-task"
+for relative in (".agents/skills/tapdata-task", ".claude/skills/tapdata-task"):
+    link = workspace / relative
+    assert link.is_symlink()
+    assert not Path(os.readlink(link)).is_absolute()
+    assert link.resolve() == skill.resolve()
+    assert (link / "SKILL.md").is_file()
+PY
 python3 - "$workspace/.agenticops/workspace.json" "$workspace/.agenticops/init.json" "$install_root" "$shared_repository_pool" <<'PY'
 import json
 import sys
@@ -223,8 +238,11 @@ assert binding["project"] == "tapdata"
 assert binding["agents"] == ["claude", "codex", "test-agent"]
 assert binding["repository_pool"]["source"] == "product-default"
 assert binding["repository_pool"]["root"] == str(Path(sys.argv[4]).resolve())
-paths = {item["path"] for item in initialization["artifacts"]}
-assert {"AGENTS.md", ".agenticops/agenticops", "CLAUDE.md", ".claude/settings.json", ".codex/hooks.json", ".test-agent/settings.json"} <= paths
+assert initialization["schema_version"] == 2
+artifacts = {item["path"]: item for item in initialization["artifacts"]}
+assert {"AGENTS.md", ".agenticops/agenticops", "CLAUDE.md", ".claude/settings.json", ".codex/hooks.json", ".test-agent/settings.json", ".agents/skills/tapdata-task", ".claude/skills/tapdata-task"} <= set(artifacts)
+assert artifacts[".agents/skills/tapdata-task"]["kind"] == "symlink"
+assert artifacts[".claude/skills/tapdata-task"]["kind"] == "symlink"
 PY
 python3 - "$workspace/.codex/hooks.json" <<'PY'
 import json
@@ -239,6 +257,14 @@ assert handler["timeout"] == 30
 PY
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
 "$workspace/.agenticops/agenticops" doctor >/dev/null
+
+rm "$workspace/.agents/skills/tapdata-task"
+if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
+  printf '工作空间 Skill 链接漂移未被 doctor 发现\n' >&2
+  exit 1
+fi
+"$install_root/agenticops" repair --workspace "$workspace" >/dev/null
+test -L "$workspace/.agents/skills/tapdata-task"
 
 printf 'drift\n' > "$workspace/AGENTS.md"
 if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
@@ -262,8 +288,10 @@ test -x "$workspace/.agenticops/agenticops"
 subset_workspace="$test_root/subset-workspace"
 "$install_root/agenticops" init --workspace "$subset_workspace" --agent codex >/dev/null
 test -f "$subset_workspace/.codex/hooks.json"
+test -L "$subset_workspace/.agents/skills/tapdata-task"
 test ! -e "$subset_workspace/CLAUDE.md"
 test ! -e "$subset_workspace/.claude/settings.json"
+test ! -e "$subset_workspace/.claude/skills"
 if "$install_root/agenticops" init --workspace "$test_root/unknown-workspace" --agent missing-agent >/dev/null 2>&1; then
   printf '未知 Agent 被错误接受\n' >&2
   exit 1
@@ -325,6 +353,7 @@ fi
 test ! -e "$detached_workspace/.agenticops/workspace.json"
 test ! -e "$detached_workspace/.agenticops/init.json"
 test ! -e "$detached_workspace/.agenticops/agenticops"
+test ! -e "$detached_workspace/.agents"
 test -f "$detached_workspace/.agenticops/tasks/TAP-555/state.json"
 if "$install_root/agenticops" workspace list | grep -F -- "$detached_workspace" >/dev/null; then
   printf '解绑工作空间仍保留在提示索引\n' >&2

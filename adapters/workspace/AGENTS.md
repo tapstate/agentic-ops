@@ -19,6 +19,10 @@
 - `__AGENTIC_OPS_HOME__/projects/__AGENTIC_OPS_PROJECT__/admission.json`
 - `__AGENTIC_OPS_HOME__/projects/__AGENTIC_OPS_PROJECT__/skills/`
 
+已接入 Agent 的原生 Skill 目录会以符号链接接线到同一份中央项目 Skill：Codex 使用
+`.agents/skills/`，Claude Code 使用 `.claude/skills/`。不要修改这些工作空间链接或复制
+Skill；更新、检查和修复均由 Product Root 统一处理。
+
 多个任务同时 active 时，所有状态命令必须显式绑定任务号和项目工作空间：
 
 ```bash

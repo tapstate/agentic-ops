@@ -8,7 +8,8 @@
 - `operation-catalog.json`：标准操作名称、类别、语义和是否可作为请求输入。
 - `product-state.schema.json`：产品根目录（Product Root）的本地模式、跟踪分支和版本状态。
 - `workspace.schema.json`：产品根目录、项目和 Agent 集合的工作空间配置。
-- `workspace-init.schema.json`：生成接线的产品版本、文件清单和内容哈希。
+- `workspace-init.schema.json`：生成接线的产品版本、普通文件内容哈希，以及中央 Project
+  Skill 的受控符号链接清单。
 - `task-registry.schema.json`：项目工作空间内多个任务的统一注册与激活状态。
 - `task-state.schema.json`：每个 Jira 任务统一的阶段、事实、仓库和恢复状态。
 

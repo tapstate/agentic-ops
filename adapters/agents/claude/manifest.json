@@ -23,5 +23,5 @@
     "command": "claude",
     "message": "Claude 接线已生成。"
   },
-  "project_skill_target": null
+  "project_skill_target": ".claude/skills"
 }

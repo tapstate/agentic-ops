@@ -89,6 +89,15 @@ def discover(product_root):
             raise ValueError("手动启动 Agent 不得声明 command：%s" % agent_id)
         if mode not in ("command", "manual"):
             raise ValueError("Agent 启动模式无效：%s" % agent_id)
+        project_skill_target = document.get("project_skill_target")
+        if project_skill_target is not None:
+            if not isinstance(project_skill_target, str) or not project_skill_target:
+                raise ValueError("Agent 项目 Skill 目标无效：%s" % agent_id)
+            target_path = Path(project_skill_target)
+            if target_path.is_absolute() or any(
+                part in ("", ".", "..") for part in target_path.parts
+            ):
+                raise ValueError("Agent 项目 Skill 目标必须是受控相对路径：%s" % agent_id)
         manifests[agent_id] = document
     if not manifests:
         raise ValueError("产品根目录没有可用 Agent Adapter")

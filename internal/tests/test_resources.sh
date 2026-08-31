@@ -123,8 +123,12 @@ grep -Fq 'deny_with_guidance' adapters/agents/codex/manifest.json ||
 grep -Fq 'repositories' policies/operations.json || fail "任务授权未绑定多仓库集合"
 grep -Fq '@AGENTS.md' adapters/agents/claude/templates/CLAUDE.md ||
   fail "Claude 入口未复用公共 Agent 规则"
-grep -Fq '"project_skill_target": null' adapters/agents/claude/manifest.json ||
-  fail "Claude Adapter 仍会复制中央 Project Skill"
+grep -Fq '"project_skill_target": ".claude/skills"' adapters/agents/claude/manifest.json ||
+  fail "Claude Adapter 未声明原生 Project Skill 发现目录"
+grep -Fq '"project_skill_target": ".agents/skills"' adapters/agents/codex/manifest.json ||
+  fail "Codex Adapter 未声明原生 Project Skill 发现目录"
+grep -Fq 'symlink_to' bootstrap/render.py ||
+  fail "Bootstrap 未以受控符号链接接线中央 Project Skill"
 
 test ! -e gate/hook.py || fail "Gate 仍包含平台 Hook 入口"
 test ! -e adapters/claude || fail "仍包含旧 Claude Adapter 路径"

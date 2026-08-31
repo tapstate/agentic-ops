@@ -196,7 +196,10 @@ cd <项目工作空间>
 ```
 
 `init.json` 和 Agent 配置可重新生成；`workspace.json` 是工作空间配置；`tasks/` 是
-业务运行数据。Policy、Project Skill 和 Runtime 不复制到工作空间。
+业务运行数据。Policy、Project Skill 和 Runtime 不复制到工作空间。已接入的 Agent 仅在其
+原生发现目录生成受控符号链接：Codex 为 `.agents/skills/<skill-name>`，Claude Code 为
+`.claude/skills/<skill-name>`；两者都指向中央 Product Root 的同一项目 Skill。不要手改，
+如发现技能缺失或链接漂移，使用 `repair` 重建。
 
 ## 5. 检查、更新与回退
 

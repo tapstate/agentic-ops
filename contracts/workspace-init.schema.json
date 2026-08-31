@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agenticops.tapdata.net/contracts/workspace-init-v1.schema.json",
-  "title": "AgenticOps Project Workspace Initialization v1",
+  "$id": "https://agenticops.tapdata.net/contracts/workspace-init.schema.json",
+  "title": "AgenticOps Project Workspace Initialization",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "product_ref", "generated_at", "artifacts"],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "enum": [1, 2] },
     "product_ref": { "type": "string", "minLength": 1 },
     "generated_at": { "type": "string", "minLength": 1 },
     "artifacts": {
@@ -14,12 +14,37 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "additionalProperties": false,
-        "required": ["path", "sha256"],
-        "properties": {
-          "path": { "type": "string", "minLength": 1 },
-          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
-        }
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "sha256"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "kind", "sha256"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "kind": { "const": "file" },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "kind", "target"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "kind": { "const": "symlink" },
+              "target": { "type": "string", "minLength": 1 }
+            }
+          }
+        ]
       }
     }
   }

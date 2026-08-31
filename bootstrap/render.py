@@ -19,7 +19,7 @@ from repository_pool import validate_root as validate_repository_pool_root
 
 
 SCHEMA_VERSION = 2
-INIT_SCHEMA_VERSION = 1
+INIT_SCHEMA_VERSION = 2
 STATE_DIRECTORY = ".agenticops"
 INIT_NAME = "init.json"
 WORKSPACE_NAME = "workspace.json"
@@ -33,6 +33,17 @@ def safe_path(root, relative):
     except ValueError as error:
         raise ValueError("产物路径越界：%s" % relative) from error
     return candidate
+
+
+def workspace_artifact_path(workspace, relative):
+    relative_path = Path(relative)
+    if (
+        relative_path.is_absolute()
+        or not relative_path.parts
+        or any(part == ".." for part in relative_path.parts)
+    ):
+        raise ValueError("工作空间产物路径越界：%s" % relative)
+    return workspace / relative_path
 
 
 def state_path(workspace, name):
@@ -122,7 +133,7 @@ def load_init(workspace):
     if not path.is_file():
         return None
     document = read_json(path, "工作空间初始化信息")
-    if document.get("schema_version") != INIT_SCHEMA_VERSION:
+    if document.get("schema_version") not in (1, INIT_SCHEMA_VERSION):
         raise ValueError("不支持的工作空间初始化版本")
     return document
 
@@ -141,8 +152,36 @@ def common_artifacts(install_root, project):
     }
 
 
-def expected_artifacts(install_root, project, agents, manifests):
-    artifacts = common_artifacts(install_root, project)
+def file_artifact(content):
+    return {"kind": "file", "content": content}
+
+
+def symlink_artifact(target):
+    return {"kind": "symlink", "target": target}
+
+
+def project_skill_sources(install_root, project):
+    root = install_root / "projects" / project / "skills"
+    if not root.is_dir():
+        return []
+    sources = []
+    for candidate in sorted(root.iterdir()):
+        if not candidate.is_dir() or not (candidate / "SKILL.md").is_file():
+            continue
+        source = candidate.resolve()
+        try:
+            source.relative_to(root.resolve())
+        except ValueError as error:
+            raise ValueError("项目 Skill 路径越界：%s" % candidate) from error
+        sources.append(source)
+    return sources
+
+
+def expected_artifacts(install_root, workspace, project, agents, manifests):
+    artifacts = {
+        target: file_artifact(content)
+        for target, content in common_artifacts(install_root, project).items()
+    }
     owners = {target: "workspace" for target in artifacts}
     messages = []
     for agent_id in agents:
@@ -157,10 +196,24 @@ def expected_artifacts(install_root, project, agents, manifests):
                     "Agent 接线目标冲突：%s 同时由 %s 和 %s 生成"
                     % (target, owners[target], agent_id)
                 )
-            artifacts[target] = rendered_content(
-                install_root, project, artifact["template"]
+            artifacts[target] = file_artifact(
+                rendered_content(install_root, project, artifact["template"])
             )
             owners[target] = agent_id
+        skill_target = manifest.get("project_skill_target")
+        if skill_target:
+            for source in project_skill_sources(install_root, project):
+                target = str(Path(skill_target) / source.name)
+                if target in artifacts:
+                    raise ValueError(
+                        "Agent 项目 Skill 接线目标冲突：%s 同时由 %s 和 %s 生成"
+                        % (target, owners[target], agent_id)
+                    )
+                destination = workspace_artifact_path(workspace, target)
+                artifacts[target] = symlink_artifact(
+                    os.path.relpath(str(source), str(destination.parent))
+                )
+                owners[target] = agent_id
     return artifacts, messages
 
 
@@ -211,56 +264,85 @@ def workspace_document(install_root, workspace, project, agents, existing, repos
 
 
 def init_document(install_root, artifacts):
+    recorded_artifacts = []
+    for target, artifact in sorted(artifacts.items()):
+        if artifact["kind"] == "file":
+            recorded_artifacts.append(
+                {"path": target, "kind": "file", "sha256": content_hash(artifact["content"])}
+            )
+        else:
+            recorded_artifacts.append(
+                {"path": target, "kind": "symlink", "target": artifact["target"]}
+            )
     return {
         "schema_version": INIT_SCHEMA_VERSION,
         "product_ref": product_ref(install_root),
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "artifacts": [
-            {"path": target, "sha256": content_hash(content)}
-            for target, content in sorted(artifacts.items())
-        ],
+        "artifacts": recorded_artifacts,
     }
 
 
 def owned_artifacts(init, legacy):
     if init:
-        return {
-            item["path"]: item.get("sha256")
-            for item in init.get("artifacts", [])
-            if isinstance(item, dict) and isinstance(item.get("path"), str)
-        }
+        result = {}
+        for item in init.get("artifacts", []):
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+                continue
+            kind = item.get("kind", "file")
+            if kind == "file" and isinstance(item.get("sha256"), str):
+                result[item["path"]] = {"kind": "file", "sha256": item["sha256"]}
+            elif kind == "symlink" and isinstance(item.get("target"), str):
+                result[item["path"]] = {"kind": "symlink", "target": item["target"]}
+        return result
     if legacy:
-        return {item: None for item in legacy.get("generated_artifacts", [])}
+        return {
+            item: {"kind": "file", "sha256": None}
+            for item in legacy.get("generated_artifacts", [])
+        }
     return {}
+
+
+def artifact_record(artifact):
+    if artifact["kind"] == "file":
+        return {"kind": "file", "sha256": content_hash(artifact["content"])}
+    return {"kind": "symlink", "target": artifact["target"]}
 
 
 def assert_artifact_ownership(workspace, owned, artifacts):
     for target, expected in artifacts.items():
-        path = safe_path(workspace, target)
+        path = workspace_artifact_path(workspace, target)
         if not path.exists() and not path.is_symlink():
             continue
         if target in owned:
+            continue
+        if expected["kind"] == "symlink":
+            if not path.is_symlink() or os.readlink(path) != expected["target"]:
+                raise ValueError("工作空间已有非 AgenticOps 文件，拒绝覆盖：%s" % path)
             continue
         try:
             content = path.read_text(encoding="utf-8")
         except OSError as error:
             raise ValueError("工作空间同名文件无法读取：%s：%s" % (path, error)) from error
-        if content != expected:
+        if path.is_symlink() or content != expected["content"]:
             raise ValueError("工作空间已有非 AgenticOps 文件，拒绝覆盖：%s" % path)
 
 
 def remove_stale_artifacts(workspace, owned, expected_targets):
-    for target, expected_hash in owned.items():
+    for target, recorded in owned.items():
         if target in expected_targets:
             continue
-        path = safe_path(workspace, target)
+        path = workspace_artifact_path(workspace, target)
         if not path.exists() and not path.is_symlink():
             continue
-        if not path.is_file() or path.is_symlink():
-            raise ValueError("旧接线不是普通文件，拒绝删除：%s" % path)
-        content = path.read_text(encoding="utf-8")
-        if expected_hash and content_hash(content) != expected_hash:
-            raise ValueError("旧接线已被修改，拒绝删除：%s" % path)
+        if recorded["kind"] == "symlink":
+            if not path.is_symlink() or os.readlink(path) != recorded["target"]:
+                raise ValueError("旧 Skill 接线已被修改或异常，拒绝删除：%s" % path)
+        else:
+            if not path.is_file() or path.is_symlink():
+                raise ValueError("旧接线不是普通文件，拒绝删除：%s" % path)
+            content = path.read_text(encoding="utf-8")
+            if recorded["sha256"] and content_hash(content) != recorded["sha256"]:
+                raise ValueError("旧接线已被修改，拒绝删除：%s" % path)
         path.unlink()
         parent = path.parent
         while parent != workspace:
@@ -301,17 +383,25 @@ def check_workspace(install_root, workspace, config, init):
     if init is None:
         raise ValueError("工作空间缺少 init.json，请执行 agenticops repair")
     project, agents, manifests = validate_workspace_document(install_root, config)
-    artifacts, _ = expected_artifacts(install_root, project, agents, manifests)
+    artifacts, _ = expected_artifacts(install_root, workspace, project, agents, manifests)
     if init.get("product_ref") != product_ref(install_root):
         raise ValueError("产品根目录版本已变化，请执行 agenticops repair")
     recorded = owned_artifacts(init, None)
-    expected_hashes = {path: content_hash(content) for path, content in artifacts.items()}
-    if recorded != expected_hashes:
+    expected_records = {path: artifact_record(artifact) for path, artifact in artifacts.items()}
+    if recorded != expected_records:
         raise ValueError("工作空间初始化清单漂移，请执行 agenticops repair")
     drift = []
     for target, expected in artifacts.items():
-        path = safe_path(workspace, target)
-        if not path.is_file() or path.read_text(encoding="utf-8") != expected:
+        path = workspace_artifact_path(workspace, target)
+        if expected["kind"] == "symlink":
+            valid = path.is_symlink() and os.readlink(path) == expected["target"]
+        else:
+            valid = (
+                path.is_file()
+                and not path.is_symlink()
+                and path.read_text(encoding="utf-8") == expected["content"]
+            )
+        if not valid:
             drift.append(target)
     if drift:
         raise ValueError("工作空间薄接线漂移：%s" % ", ".join(sorted(drift)))
@@ -397,7 +487,7 @@ def main():
             validate_workspace_document(install_root, config)
         agents, manifests = select(install_root, requested_agents)
         artifacts, messages = expected_artifacts(
-            install_root, project, agents, manifests
+            install_root, workspace, project, agents, manifests
         )
         document = init_document(install_root, artifacts)
         owned = owned_artifacts(init, legacy)
@@ -414,10 +504,18 @@ def main():
     except ValueError as error:
         parser.error(str(error))
 
-    for target, content in artifacts.items():
-        destination = safe_path(workspace, target)
+    for target, artifact in artifacts.items():
+        destination = workspace_artifact_path(workspace, target)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(content, encoding="utf-8")
+        if artifact["kind"] == "symlink":
+            if destination.exists() or destination.is_symlink():
+                if destination.is_symlink() or destination.is_file():
+                    destination.unlink()
+                else:
+                    parser.error("工作空间 Skill 接线位置是目录，拒绝覆盖：%s" % destination)
+            destination.symlink_to(artifact["target"])
+        else:
+            destination.write_text(artifact["content"], encoding="utf-8")
         if target == ".agenticops/agenticops":
             os.chmod(destination, 0o700)
     write_json_atomic(

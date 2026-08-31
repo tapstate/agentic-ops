@@ -19,5 +19,5 @@
     "command": "codex",
     "message": "已生成 Codex 项目级 Hook 接线；首次启动时请在 /hooks 审核并信任。"
   },
-  "project_skill_target": null
+  "project_skill_target": ".agents/skills"
 }

@@ -138,23 +138,32 @@ def refresh(product_root, workspace):
 def owned_artifacts(workspace):
     init_path = workspace / STATE_DIRECTORY / "init.json"
     document = load_json(init_path, "工作空间初始化清单")
-    if document.get("schema_version") != 1 or not isinstance(document.get("artifacts"), list):
+    if document.get("schema_version") not in (1, 2) or not isinstance(document.get("artifacts"), list):
         raise ValueError("工作空间初始化清单结构无效：%s" % init_path)
     artifacts = {}
     for item in document["artifacts"]:
         if not isinstance(item, dict):
             raise ValueError("工作空间初始化清单包含无效产物")
-        path, checksum = item.get("path"), item.get("sha256")
-        if not isinstance(path, str) or not isinstance(checksum, str):
+        path = item.get("path")
+        kind = item.get("kind", "file")
+        if not isinstance(path, str) or kind not in ("file", "symlink"):
             raise ValueError("工作空间初始化清单包含无效产物")
-        candidate = (workspace / path).resolve()
-        try:
-            candidate.relative_to(workspace.resolve())
-        except ValueError as error:
-            raise ValueError("工作空间初始化清单产物越界：%s" % path) from error
+        if kind == "file":
+            checksum = item.get("sha256")
+            if not isinstance(checksum, str):
+                raise ValueError("工作空间初始化清单包含无效产物")
+            record = {"kind": "file", "sha256": checksum}
+        else:
+            target = item.get("target")
+            if not isinstance(target, str) or not target or Path(target).is_absolute():
+                raise ValueError("工作空间初始化清单包含无效 Skill 接线")
+            record = {"kind": "symlink", "target": target}
+        relative = Path(path)
+        if relative.is_absolute() or not relative.parts or any(part == ".." for part in relative.parts):
+            raise ValueError("工作空间初始化清单产物越界：%s" % path)
         if path in artifacts:
             raise ValueError("工作空间初始化清单存在重复产物：%s" % path)
-        artifacts[path] = checksum
+        artifacts[path] = record
     return artifacts
 
 
@@ -162,11 +171,14 @@ def detach_preflight(product_root, workspace, purge=False):
     require_tracked(product_root, workspace)
     artifacts = owned_artifacts(workspace)
     deletable = []
-    for relative, expected_digest in artifacts.items():
+    for relative, recorded in artifacts.items():
         path = workspace / relative
         if not path.exists() and not path.is_symlink():
             continue
-        if not path.is_file() or path.is_symlink() or digest(path) != expected_digest:
+        if recorded["kind"] == "symlink":
+            if not path.is_symlink() or os.readlink(path) != recorded["target"]:
+                raise ValueError("生成 Skill 接线已被修改或异常，拒绝删除：%s" % path)
+        elif not path.is_file() or path.is_symlink() or digest(path) != recorded["sha256"]:
             raise ValueError("生成接线已被修改或异常，拒绝删除：%s" % path)
         deletable.append(path)
     state_root = workspace / STATE_DIRECTORY
