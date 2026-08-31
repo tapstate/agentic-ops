@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from adapters.runtime import decision_reason, evaluate_tool_call  # noqa: E402
 
-ADAPTER_VERSION = 2
+ADAPTER_VERSION = 3
 
 
 def deny(reason):
@@ -49,9 +49,12 @@ def main():
     if decision["decision"] == "allow":
         return 0
 
-    reason = decision_reason(decision)
+    reason = "[agenticops:%s] %s" % (
+        decision.get("reason_code") or decision["operation"],
+        decision_reason(decision),
+    )
     if decision["decision"] == "ask":
-        reason += "（Codex 当前 Hook 不支持 ask：请签发授权或由人工执行。）"
+        reason = "操作已暂停，Agent 必须立即向研发工程师展示本消息并停止依赖步骤。%s" % reason
     print(json.dumps(deny(reason), ensure_ascii=False))
     return 0
 

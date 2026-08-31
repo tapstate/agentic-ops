@@ -73,6 +73,12 @@ def _repositories_match(document, context):
 
 def find_task_directory(cwd, context=None, issue_key=None):
     """按 Jira 任务号或仓库+分支唯一解析 active 任务目录。"""
+    directory, _ = resolve_task_directory(cwd, context=context, issue_key=issue_key)
+    return directory
+
+
+def resolve_task_directory(cwd, context=None, issue_key=None):
+    """解析 active 任务，并返回可审计的解析状态。"""
     root = find_gate_root(cwd)
     candidates = _active_task_directories(root)
     if issue_key:
@@ -84,8 +90,12 @@ def find_task_directory(cwd, context=None, issue_key=None):
             if task and _repositories_match(task, context):
                 matches.append(path)
     else:
-        matches = [path for _, path in candidates] if len(candidates) == 1 else []
-    return matches[0] if len(matches) == 1 else None
+        matches = [path for _, path in candidates]
+    if len(matches) == 1:
+        return matches[0], "resolved"
+    if len(matches) > 1:
+        return None, "ambiguous_active_task"
+    return None, "no_active_task"
 
 
 def load_authorization_for_issue(cwd, issue_key):
@@ -119,6 +129,11 @@ def _git(cwd, *args):
         return ""
 
 
+def _git_lines(cwd, *args):
+    output = _git(cwd, *args)
+    return [line.strip() for line in output.splitlines() if line.strip()]
+
+
 def normalize_repo(url):
     """把 Git URL 归一为 owner/repository。"""
     if not url:
@@ -127,21 +142,131 @@ def normalize_repo(url):
     return match.group(1) if match else url.strip()
 
 
-def git_context(cwd):
-    return {
+def normalize_remote_endpoint(url):
+    """保留主机身份地归一 Git URL，用于比较 fetch/push 的真实目的地。"""
+    text = (url or "").strip().rstrip("/")
+    if not text:
+        return ""
+    if text.startswith("/"):
+        return str(Path(text).resolve())
+    if text.startswith("file://"):
+        return "file://" + str(Path(text[7:]).resolve())
+    scp = re.fullmatch(r"(?:[^@/:]+@)?([^/:]+):(.+)", text)
+    if scp:
+        host, path = scp.groups()
+        endpoint = "%s/%s" % (host.lower(), path.lstrip("/"))
+    else:
+        remote = re.fullmatch(
+            r"(?:ssh|https?|git)://(?:[^@/]+@)?([^/]+)/(.+)", text
+        )
+        if not remote:
+            return ""
+        host, path = remote.groups()
+        endpoint = "%s/%s" % (host.lower(), path.lstrip("/"))
+    return endpoint[:-4] if endpoint.endswith(".git") else endpoint
+
+
+def git_context(cwd, *, for_push=False):
+    context = {
         "branch": _git(cwd, "rev-parse", "--abbrev-ref", "HEAD"),
-        "origin": normalize_repo(_git(cwd, "remote", "get-url", "origin")),
     }
+    if not for_push:
+        context["origin"] = normalize_repo(
+            _git(cwd, "remote", "get-url", "origin")
+        )
+        return context
+
+    raw_urls = _git_lines(cwd, "config", "--get-all", "remote.origin.url")
+    fetch_urls = _git_lines(cwd, "remote", "get-url", "--all", "origin")
+    # Git push 优先使用 remote.<name>.pushurl；未配置时 get-url --push 会按
+    # Git 自身语义回退到 fetch URL。多 pushurl 会把一次命令扩散到多个目标，不能
+    # 用单个任务授权表示，因此必须失败关闭而不是挑选第一项。
+    push_urls = _git_lines(cwd, "remote", "get-url", "--all", "--push", "origin")
+    counts = (len(raw_urls), len(fetch_urls), len(push_urls))
+    if counts != (1, 1, 1):
+        context["origin"] = ""
+        context["repository_fact_error"] = (
+            "无法唯一确定 origin URL 信任链（raw=%d，fetch=%d，push=%d）"
+            % counts
+        )
+        return context
+
+    raw_endpoint = normalize_remote_endpoint(raw_urls[0])
+    fetch_endpoint = normalize_remote_endpoint(fetch_urls[0])
+    push_endpoint = normalize_remote_endpoint(push_urls[0])
+    context["raw_origin_endpoint"] = raw_endpoint
+    context["fetch_origin_endpoint"] = fetch_endpoint
+    context["push_origin_endpoint"] = push_endpoint
+    context["fetch_origin"] = normalize_repo(fetch_urls[0])
+    context["origin"] = normalize_repo(push_urls[0])
+    if not all((raw_endpoint, fetch_endpoint, push_endpoint, context["origin"])):
+        context["repository_fact_error"] = "origin URL 信任链包含无法识别的 endpoint"
+    elif len({raw_endpoint, fetch_endpoint, push_endpoint}) != 1:
+        context["repository_fact_error"] = (
+            "origin raw、fetch 与 push URL 指向不同 endpoint"
+        )
+    return context
+
+
+def _push_repository_binding_error(context, repositories):
+    """验证实际 origin 信任链与授权中唯一、已固化的 canonical endpoint。"""
+    current_repository = context.get("origin", "")
+    matches = [
+        item
+        for item in repositories
+        if isinstance(item, dict) and item.get("repository") == current_repository
+    ]
+    if len(matches) != 1:
+        return "Git 实际 push 仓库无法唯一匹配当前任务授权"
+    authorized_endpoint = matches[0].get("authorized_endpoint")
+    if not isinstance(authorized_endpoint, str) or not authorized_endpoint:
+        return "任务授权缺少唯一可信的 authorized_endpoint；请重新签发授权"
+    endpoints = (
+        context.get("raw_origin_endpoint"),
+        context.get("fetch_origin_endpoint"),
+        context.get("push_origin_endpoint"),
+        authorized_endpoint,
+    )
+    if not all(isinstance(endpoint, str) and endpoint for endpoint in endpoints):
+        return "push 的 raw、fetch、push 或 authorized endpoint 缺失"
+    if len(set(endpoints)) != 1:
+        return "push 的 raw、fetch、push 与 authorized endpoint 不一致"
+    return ""
 
 
 def _branch_protected(branch, patterns):
     return any(fnmatch.fnmatch(branch, pattern) for pattern in patterns)
 
 
+def _push_refspec_error(context, repositories):
+    if not context.get("push_refspec_required"):
+        return ""
+    matches = [
+        item
+        for item in repositories
+        if isinstance(item, dict) and item.get("repository") == context.get("origin")
+    ]
+    if len(matches) != 1 or not isinstance(matches[0].get("work_branch"), str):
+        return ""
+    work_branch = matches[0]["work_branch"]
+    if not work_branch:
+        return ""
+    destination = "refs/heads/" + work_branch
+    allowed_sources = {"HEAD", work_branch, destination}
+    if context.get("push_destination_ref") != destination:
+        return "push destination 必须严格等于授权分支 %s" % destination
+    if context.get("push_source_ref") not in allowed_sources:
+        return "push source 只能是 HEAD 或授权工作分支"
+    return ""
+
+
 def check_authorization(auth, context, policy, now=None):
     """校验任务授权与仓库、分支执行上下文的稳定绑定。"""
     scope = policy["authorization_scopes"]["task_execution"]
     reasons = []
+    repository_fact_error = context.get("repository_fact_error")
+    if isinstance(repository_fact_error, str) and repository_fact_error:
+        reasons.append(repository_fact_error)
     if not auth:
         return False, ["不存在可唯一匹配的 active 任务执行授权"]
     if auth.get("scope") != "task_execution":
@@ -151,6 +276,15 @@ def check_authorization(auth, context, policy, now=None):
     missing = [binding for binding in scope["required_bindings"] if not auth.get(binding)]
     if missing:
         reasons.append("授权缺少绑定字段：%s" % ", ".join(missing))
+    invalid_types = [
+        binding
+        for binding in scope["required_bindings"]
+        if binding != "repositories"
+        and auth.get(binding)
+        and not isinstance(auth.get(binding), str)
+    ]
+    if invalid_types:
+        reasons.append("授权绑定字段类型错误：%s" % ", ".join(invalid_types))
     now = now if now is not None else time.time()
     expires_at = auth.get("expires_at_epoch")
     if isinstance(expires_at, (int, float)) and now > expires_at:
@@ -179,6 +313,16 @@ def check_authorization(auth, context, policy, now=None):
             reasons.append(
                 "授权 repositories[%d] 缺少绑定字段：%s"
                 % (index, ", ".join(repository_missing))
+            )
+        repository_invalid = [
+            key
+            for key in required_repository_bindings
+            if repository.get(key) and not isinstance(repository.get(key), str)
+        ]
+        if repository_invalid:
+            reasons.append(
+                "授权 repositories[%d] 绑定字段类型错误：%s"
+                % (index, ", ".join(repository_invalid))
             )
         name = repository.get("repository")
         if name in seen_repositories:
@@ -221,37 +365,136 @@ def evaluate(operation, context, auth, policy, now=None):
             ASK,
             operation,
             "未识别的外部写操作，不在操作契约内，需人工确认并补充 Tool Adapter 映射",
+            "unknown_external_write",
+            "请研发工程师确认本次操作；Agent 在获得确认前停止该操作及其依赖步骤。",
         )
 
     metadata = operations.get(operation)
     if metadata is None:
-        return _result(ASK, operation, "未知标准操作，需人工确认并补充操作契约")
+        return _result(
+            ASK,
+            operation,
+            "未知标准操作，需人工确认并补充操作契约",
+            "unknown_operation",
+            "请研发工程师确认本次操作；维护者应补充标准操作契约后再重试。",
+        )
 
     level = metadata["level"]
     if level == "free":
-        return _result(ALLOW, operation, "自由操作，无需门禁")
+        return _result(ALLOW, operation, "自由操作，无需门禁", "operation_free")
     if level == "forbidden":
         return _result(
             DENY,
             operation,
             "禁止 Agent 执行的不可逆操作（%s）；如确有必要由人工在自己的终端执行"
             % operation,
+            "forbidden_operation",
+            "Agent 必须停止；如确有必要，请研发工程师在自己的终端执行。",
         )
 
     if operation == "git_push":
+        repository_fact_error = context.get("repository_fact_error")
+        authorized_repositories = (
+            auth.get("repositories", []) if isinstance(auth, dict) else []
+        )
+        authorization_loaded = context.get("authorization_state") in ("loaded", "invalid")
+        repository_binding_error = (
+            _push_repository_binding_error(context, authorized_repositories)
+            if authorization_loaded
+            else ""
+        )
+        if repository_fact_error or repository_binding_error:
+            return _result(
+                DENY,
+                "untrusted_push_repository",
+                repository_fact_error
+                or repository_binding_error,
+                "untrusted_push_repository",
+                "Agent 必须停止推送；请修复 origin URL 信任链或重新签发包含可信 endpoint 的授权后重试。",
+            )
+        refspec_error = _push_refspec_error(context, authorized_repositories)
+        if refspec_error:
+            return _result(
+                DENY,
+                "unauthorized_push_refspec",
+                refspec_error,
+                "unauthorized_push_refspec",
+                "Agent 必须停止推送；只允许从 HEAD 或授权工作分支推送到同名 heads ref。",
+            )
         branch = context.get("push_target_branch") or context.get("branch", "")
         if branch and _branch_protected(branch, policy.get("protected_branches", [])):
             return _result(
                 DENY,
                 "protected_branch_push",
                 "目标分支 %s 是保护分支，禁止 Agent 直接推送" % branch,
+                "protected_branch_push",
+                "Agent 必须停止直接推送；请通过受保护的审查与合入流程处理。",
             )
+
+    if level == "controlled":
+        issue_key = context.get("issue_key")
+        if not issue_key:
+            return _result(
+                ASK,
+                operation,
+                "受控仓库准备必须显式指定 Jira 任务号",
+                "issue_key_required",
+                "请使用 workflow/task.py repository prepare --issue-key <KEY> 重试。",
+            )
+        resolution = context.get("task_resolution")
+        if resolution != "resolved":
+            reason = (
+                "Jira 任务 %s 不是当前工作空间中的 active 任务" % issue_key
+                if resolution == "no_active_task"
+                else "当前执行上下文无法唯一解析 active 任务"
+            )
+            code = "no_active_task" if resolution == "no_active_task" else "ambiguous_active_task"
+            return _result(
+                ASK,
+                operation,
+                reason,
+                code,
+                "请先接管或恢复对应任务，再使用显式 --issue-key 重试；Agent 停止仓库准备及其依赖步骤。",
+            )
+        return _result(
+            ALLOW,
+            operation,
+            "active 任务 %s 的受控 Source Pool 与 linked worktree 准备可自动执行" % issue_key,
+            "controlled_prepare_allowed",
+        )
 
     if level == "excluded":
         return _result(
             ASK,
             operation,
             "高风险操作永不被任务授权覆盖，每次都需要人工单独确认",
+            "excluded_operation",
+            "请研发工程师在自己的终端执行原命令，完成后回复“继续”；Agent 不得重试该命令。",
+        )
+
+    resolution = context.get("task_resolution")
+    if resolution != "resolved":
+        reason = (
+            "当前操作无法匹配 active 任务"
+            if resolution == "no_active_task"
+            else "当前操作匹配到多个 active 任务"
+        )
+        code = "no_active_task" if resolution == "no_active_task" else "ambiguous_active_task"
+        return _result(
+            ASK,
+            operation,
+            reason,
+            code,
+            "请先接管任务或消除 active 任务歧义；Agent 在恢复前停止该操作及其依赖步骤。",
+        )
+
+    if context.get("authorization_state") == "missing":
+        return _result(
+            ASK,
+            operation,
+            "active 任务尚未签发 task_execution 授权",
+            "authorization_missing",
+            "请完成方案确认并签发 task_execution 授权；Agent 在授权前停止该操作及其依赖步骤。",
         )
 
     valid, reasons = check_authorization(auth, context, policy, now=now)
@@ -265,21 +508,48 @@ def evaluate(operation, context, auth, policy, now=None):
                 context.get("origin") or "由任务绑定",
                 auth.get("approved_plan_version"),
             ),
+            "task_authorization_covered",
         )
     if valid:
-        return _result(ASK, operation, "操作有效但不在任务授权覆盖清单内，需人工确认")
-    return _result(ASK, operation, "需要人工确认。授权检查：%s" % "；".join(reasons))
+        return _result(
+            ASK,
+            operation,
+            "操作不在 task_execution 授权覆盖清单内",
+            "operation_not_covered",
+            "请研发工程师在自己的终端执行原命令，完成后回复“继续”；Agent 不得重试该命令。",
+        )
+    return _result(
+        ASK,
+        operation,
+        "task_execution 授权无效：%s" % "；".join(reasons),
+        "authorization_invalid",
+        "请修复或重新签发有效授权；Agent 在授权恢复前停止该操作及其依赖步骤。",
+    )
 
 
 def evaluate_all(operations, context, auth, policy, now=None):
     """复合操作取最严格结果：deny > ask > allow。"""
     if not operations:
-        return _result(ASK, "invalid_gate_request", "标准请求没有提供操作")
+        return _result(
+            ASK,
+            "invalid_gate_request",
+            "标准请求没有提供操作",
+            "invalid_gate_request",
+            "请修复 Adapter 请求后重试。",
+        )
     results = [evaluate(operation, context, auth, policy, now=now) for operation in operations]
     order = {DENY: 2, ASK: 1, ALLOW: 0}
     results.sort(key=lambda result: order[result["decision"]], reverse=True)
     return results[0]
 
 
-def _result(decision, operation, reason):
-    return {"decision": decision, "operation": operation, "reason": reason}
+def _result(decision, operation, reason, reason_code, required_action=None):
+    result = {
+        "decision": decision,
+        "operation": operation,
+        "reason": reason,
+        "reason_code": reason_code,
+    }
+    if required_action:
+        result["required_action"] = required_action
+    return result

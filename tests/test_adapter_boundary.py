@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from collections import Counter
 import json
 import unittest
 from pathlib import Path
@@ -10,6 +11,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 ADAPTERS = ROOT / "adapters"
 AGENT_ROOT = ADAPTERS / "agents"
+TOOL_ROOT = ADAPTERS / "tools"
+TOOL_PYTHON_FILES = {
+    "classifier.py", "git_push_syntax.py", "shell_classifier.py", "shell_syntax.py",
+}
+TOOL_LOGICAL_LINE_BUDGET = 545
+TOOL_AST_STATEMENT_BUDGET = 400
+MAX_ADAPTER_LINE_LENGTH = 119
 
 
 def logical_lines(path):
@@ -53,7 +61,30 @@ class AdapterBoundaryTest(unittest.TestCase):
 
     def test_shared_adapter_code_has_explicit_budget(self):
         self.assertLessEqual(logical_lines(ADAPTERS / "runtime.py"), 80)
-        self.assertLessEqual(logical_lines(ADAPTERS / "tools" / "classifier.py"), 240)
+        self.assertLessEqual(logical_lines(TOOL_ROOT / "classifier.py"), 240)
+        self.assertLessEqual(logical_lines(TOOL_ROOT / "git_push_syntax.py"), 70)
+        self.assertLessEqual(logical_lines(TOOL_ROOT / "shell_classifier.py"), 310)
+        self.assertLessEqual(logical_lines(TOOL_ROOT / "shell_syntax.py"), 130)
+
+    def test_tool_adapters_have_file_total_and_readability_budgets(self):
+        python_files = sorted(TOOL_ROOT.glob("*.py"))
+        self.assertEqual({path.name for path in python_files}, TOOL_PYTHON_FILES)
+        self.assertLessEqual(
+            sum(logical_lines(path) for path in python_files),
+            TOOL_LOGICAL_LINE_BUDGET,
+        )
+        statement_total = 0
+        for path in python_files:
+            content = path.read_text(encoding="utf-8")
+            lines = content.splitlines()
+            self.assertLessEqual(max(map(len, lines), default=0), MAX_ADAPTER_LINE_LENGTH, str(path))
+            tree = ast.parse(content)
+            statements = [node for node in ast.walk(tree) if isinstance(node, ast.stmt)]
+            statement_total += len(statements)
+            statements_by_line = Counter(node.lineno for node in statements)
+            crowded = sorted(line for line, count in statements_by_line.items() if count > 1)
+            self.assertFalse(crowded, "%s 存在同一行多个语句：%s" % (path, crowded))
+        self.assertLessEqual(statement_total, TOOL_AST_STATEMENT_BUDGET)
 
     def test_agent_manifests_are_bounded_and_declarative(self):
         for manifest_path in sorted(AGENT_ROOT.glob("*/manifest.json")):

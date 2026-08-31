@@ -193,6 +193,152 @@ fi
 grep -Fx 'project owned' "$collision_workspace/AGENTS.md" >/dev/null
 test ! -e "$collision_workspace/.agenticops"
 
+# init 必须在任何写入前拒绝中间目录 symlink；只允许最终 Skill 节点按声明接线。
+symlink_outside="$test_root/symlink-outside"
+init_symlink_workspace="$test_root/init-symlink-workspace"
+mkdir -p "$symlink_outside/init" "$init_symlink_workspace/.agents"
+ln -s "$symlink_outside/init" "$init_symlink_workspace/.agents/skills"
+if "$install_root/agenticops" init --workspace "$init_symlink_workspace" \
+    --agent codex >/dev/null 2>&1; then
+  printf 'init 经由 Skill 父目录 symlink 写出了工作空间\n' >&2
+  exit 1
+fi
+test ! -e "$symlink_outside/init/tapdata-task"
+test ! -e "$init_symlink_workspace/AGENTS.md"
+test ! -e "$init_symlink_workspace/.agenticops"
+
+# repair 必须拒绝已有 Skill 父目录被替换成 symlink，不能在外部重建最终接线。
+repair_symlink_workspace="$test_root/repair-symlink-workspace"
+mkdir -p "$symlink_outside/repair"
+"$install_root/agenticops" init --workspace "$repair_symlink_workspace" \
+  --agent codex >/dev/null
+repair_skill_target="$(readlink "$repair_symlink_workspace/.agents/skills/tapdata-task")"
+for generated_skill in "$repair_symlink_workspace/.agents/skills/"*; do
+  rm "$generated_skill"
+done
+rmdir "$repair_symlink_workspace/.agents/skills"
+ln -s "$symlink_outside/repair" "$repair_symlink_workspace/.agents/skills"
+ln -s "$repair_skill_target" "$symlink_outside/repair/tapdata-task"
+if "$install_root/agenticops" repair --workspace "$repair_symlink_workspace" \
+    >/dev/null 2>&1; then
+  printf 'repair 接受了 Skill 父目录 symlink\n' >&2
+  exit 1
+fi
+test -L "$symlink_outside/repair/tapdata-task"
+test -f "$repair_symlink_workspace/.agenticops/workspace.json"
+
+# detach 预检同样必须逐级检查，不能删除 symlink 父目录外的同名最终接线。
+detach_symlink_workspace="$test_root/detach-symlink-workspace"
+mkdir -p "$symlink_outside/detach"
+"$install_root/agenticops" init --workspace "$detach_symlink_workspace" \
+  --agent codex >/dev/null
+detach_skill_target="$(readlink "$detach_symlink_workspace/.agents/skills/tapdata-task")"
+for generated_skill in "$detach_symlink_workspace/.agents/skills/"*; do
+  rm "$generated_skill"
+done
+rmdir "$detach_symlink_workspace/.agents/skills"
+ln -s "$symlink_outside/detach" "$detach_symlink_workspace/.agents/skills"
+ln -s "$detach_skill_target" "$symlink_outside/detach/tapdata-task"
+if "$install_root/agenticops" workspace detach \
+    --workspace "$detach_symlink_workspace" --yes >/dev/null 2>&1; then
+  printf 'detach 接受了 Skill 父目录 symlink\n' >&2
+  exit 1
+fi
+test -L "$symlink_outside/detach/tapdata-task"
+test -f "$detach_symlink_workspace/.agenticops/workspace.json"
+
+# 校验完成后父目录才被替换的确定性 TOCTOU 回归：init/repair/detach 的最终副作用
+# 必须仍锚定已打开的 workspace 目录 FD，且不得写删外部目录。
+race_outside="$test_root/race-outside"
+race_init_workspace="$test_root/race-init-workspace"
+race_repair_workspace="$test_root/race-repair-workspace"
+race_detach_workspace="$test_root/race-detach-workspace"
+mkdir -p "$race_outside/init" "$race_outside/repair" "$race_outside/detach" \
+  "$race_init_workspace/.agents/skills"
+"$install_root/agenticops" init --workspace "$race_repair_workspace" --agent codex >/dev/null
+"$install_root/agenticops" init --workspace "$race_detach_workspace" --agent codex >/dev/null
+printf 'outside sentinel\n' > "$race_outside/detach/tapdata-task"
+python3 - "$install_root" "$race_init_workspace" "$race_repair_workspace" \
+  "$race_detach_workspace" "$race_outside" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+install_root = Path(sys.argv[1])
+init_workspace = Path(sys.argv[2])
+repair_workspace = Path(sys.argv[3])
+detach_workspace = Path(sys.argv[4])
+outside = Path(sys.argv[5])
+sys.path.insert(0, str(install_root))
+sys.path.insert(0, str(install_root / "bootstrap"))
+
+import render
+from bootstrap import workspace_registry
+
+
+def render_race(workspace, destination, refresh):
+    original = render.remove_stale_artifacts
+
+    def swap_after_preflight(current, owned, targets, tree):
+        original(current, owned, targets, tree)
+        skills = workspace / ".agents" / "skills"
+        held = workspace / ".agents" / "skills-held"
+        skills.rename(held)
+        skills.symlink_to(destination, target_is_directory=True)
+
+    render.remove_stale_artifacts = swap_after_preflight
+    argv = [
+        "render.py", "--install-home", str(install_root), "--workspace", str(workspace),
+        "--agent", "codex",
+    ]
+    if refresh:
+        argv = [
+            "render.py", "--install-home", str(install_root), "--workspace", str(workspace),
+            "--refresh",
+        ]
+    previous = sys.argv
+    sys.argv = argv
+    try:
+        try:
+            render.main()
+        except SystemExit as error:
+            assert error.code == 2
+        else:
+            raise AssertionError("父目录替换后 render 未失败关闭")
+    finally:
+        sys.argv = previous
+        render.remove_stale_artifacts = original
+
+
+render_race(init_workspace, outside / "init", False)
+render_race(repair_workspace, outside / "repair", True)
+assert not (outside / "init" / "tapdata-task").exists()
+assert not (outside / "repair" / "tapdata-task").exists()
+
+original_preflight = workspace_registry.detach_preflight
+
+def swap_after_detach_preflight(product_root, workspace, purge=False, tree=None):
+    result = original_preflight(product_root, workspace, purge=purge, tree=tree)
+    skills = detach_workspace / ".agents" / "skills"
+    held = detach_workspace / ".agents" / "skills-held"
+    skills.rename(held)
+    skills.symlink_to(outside / "detach", target_is_directory=True)
+    return result
+
+workspace_registry.detach_preflight = swap_after_detach_preflight
+try:
+    try:
+        workspace_registry.detach(install_root, detach_workspace)
+    except ValueError as error:
+        assert "已被替换" in str(error)
+    else:
+        raise AssertionError("父目录替换后 detach 未失败关闭")
+finally:
+    workspace_registry.detach_preflight = original_preflight
+
+assert (outside / "detach" / "tapdata-task").read_text(encoding="utf-8") == "outside sentinel\n"
+PY
+
 "$install_root/agenticops" init --workspace "$workspace"
 
 test -f "$workspace/.agenticops/workspace.json"
@@ -212,6 +358,11 @@ test ! -e "$workspace/.claude/skills/ao-test-takeover"
 grep -F '@AGENTS.md' "$workspace/CLAUDE.md" >/dev/null
 grep -F 'Product Project：`tapdata`' "$workspace/AGENTS.md" >/dev/null
 grep -F "$install_root/workflow/task.py" "$workspace/AGENTS.md" >/dev/null
+grep -F '接管、继续或 reset 成功只是流程恢复点' "$workspace/AGENTS.md" >/dev/null
+grep -F '远程候选参考' "$workspace/AGENTS.md" >/dev/null
+grep -F '首次收到' "$workspace/AGENTS.md" >/dev/null
+grep -F '登记完成后立即执行受控 `task.py repository prepare`' \
+  "$install_root/projects/tapdata/skills/tapdata-task/SKILL.md" >/dev/null
 grep -F "$install_root/adapters/agents/claude/hook.py" "$workspace/.claude/settings.json" >/dev/null
 grep -F "$install_root/adapters/agents/codex/hook.py" "$workspace/.codex/hooks.json" >/dev/null
 python3 - "$workspace" "$install_root" <<'PY'
@@ -227,6 +378,39 @@ for relative in (".agents/skills/tapdata-task", ".claude/skills/tapdata-task"):
     assert not Path(os.readlink(link)).is_absolute()
     assert link.resolve() == skill.resolve()
     assert (link / "SKILL.md").is_file()
+PY
+python3 - "$install_root" <<'PY'
+import ast
+import json
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+manifest = json.loads((root / "adapters/agents/codex/manifest.json").read_text(encoding="utf-8"))
+tree = ast.parse((root / "adapters/agents/codex/hook.py").read_text(encoding="utf-8"))
+versions = [
+    node.value.value
+    for node in tree.body
+    if isinstance(node, ast.Assign)
+    and any(isinstance(target, ast.Name) and target.id == "ADAPTER_VERSION" for target in node.targets)
+    and isinstance(node.value, ast.Constant)
+    and type(node.value.value) is int
+]
+assert manifest["adapter_version"] == 3
+assert versions == [manifest["adapter_version"]]
+
+mappings = json.loads((root / "adapters/tools/mcp-operations.json").read_text(encoding="utf-8"))
+assert "atlassianuserinfo" in mappings["readonly_tools"]
+
+profile = json.loads((root / "projects/tapdata/profile.json").read_text(encoding="utf-8"))
+transition = profile["transitions"]["start_progress"]
+assert transition == {
+    "name": "Start Investigation",
+    "id": "421",
+    "from": ["Analyzed"],
+    "to": "In Progress",
+}
+assert profile["statuses"]["Analyzed"] == "waiting_takeover"
 PY
 python3 - "$workspace/.agenticops/workspace.json" "$workspace/.agenticops/init.json" "$install_root" "$shared_repository_pool" <<'PY'
 import json
@@ -247,6 +431,8 @@ artifacts = {item["path"]: item for item in initialization["artifacts"]}
 assert {"AGENTS.md", ".agenticops/agenticops", "CLAUDE.md", ".claude/settings.json", ".codex/hooks.json", ".test-agent/settings.json", ".agents/skills/tapdata-task", ".claude/skills/tapdata-task"} <= set(artifacts)
 assert artifacts[".agents/skills/tapdata-task"]["kind"] == "symlink"
 assert artifacts[".claude/skills/tapdata-task"]["kind"] == "symlink"
+assert ".agents/skills/ao-test-takeover" not in artifacts
+assert ".claude/skills/ao-test-takeover" not in artifacts
 PY
 python3 - "$workspace/.codex/hooks.json" <<'PY'
 import json
@@ -368,12 +554,176 @@ purge_workspace="$test_root/purge-workspace"
 "$install_root/agenticops" init --workspace "$purge_workspace" --agent codex >/dev/null
 python3 "$install_root/workflow/task.py" init \
   --issue-key TAP-556 --task-class technical_task --dir "$purge_workspace" >/dev/null
+python3 "$install_root/workflow/task.py" init \
+  --issue-key TAP-558 --task-class technical_task --dir "$purge_workspace" >/dev/null
 if "$install_root/agenticops" workspace purge --all --yes >/dev/null 2>&1; then
   printf '批量 purge 被错误接受\n' >&2
   exit 1
 fi
-"$install_root/agenticops" workspace purge --workspace "$purge_workspace" --yes >/dev/null
+# purge 从重新预检到最终删除必须只持有一次产品级 task-state 锁。已到达锁边界的并发
+# init 必须在 purge 事务内阻塞，释放后因 workspace binding 已删除而失败，不能重建状态。
+python3 - "$install_root" "$purge_workspace" <<'PY'
+import contextlib
+import multiprocessing
+import sys
+import time
+from pathlib import Path
+from types import SimpleNamespace
+
+install_root = Path(sys.argv[1])
+workspace = Path(sys.argv[2])
+marker = workspace.parent / "purge-init-lock-entered"
+sys.path.insert(0, str(install_root))
+
+from bootstrap import workspace_registry
+from workflow import repository_worktree, task as workflow_task, task_store
+
+
+def competing_init():
+    original_lock = task_store.task_run_lock
+
+    @contextlib.contextmanager
+    def marked_lock(base, issue_key):
+        marker.write_text("entered\n", encoding="utf-8")
+        with original_lock(base, issue_key):
+            yield
+
+    task_store.task_run_lock = marked_lock
+    arguments = SimpleNamespace(
+        issue_key="TAP-559", task_class="technical_task", dir=str(workspace), force=False
+    )
+    with open("/dev/null", "w", encoding="utf-8") as sink:
+        with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+            result = workflow_task.cmd_init(arguments)
+            raise SystemExit(result)
+
+
+context = multiprocessing.get_context("fork")
+process = context.Process(target=competing_init)
+original_cleanup = repository_worktree._cleanup_task_locked
+cleanup_calls = []
+
+
+def cleanup_with_competitor(current, issue, *, delete_branches=False):
+    cleanup_calls.append(issue)
+    if not process.is_alive() and process.exitcode is None:
+        process.start()
+        deadline = time.monotonic() + 5
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert marker.exists(), "并发 init 未到达 task-state 锁边界"
+        time.sleep(0.1)
+        assert process.is_alive(), "并发 init 未被 workspace purge 的 task-state 锁阻塞"
+        assert not task_store.task_path(workspace, "TAP-559").exists()
+    return original_cleanup(current, issue, delete_branches=delete_branches)
+
+
+repository_worktree._cleanup_task_locked = cleanup_with_competitor
+try:
+    workspace_registry.detach(install_root, workspace, purge=True)
+finally:
+    repository_worktree._cleanup_task_locked = original_cleanup
+
+process.join(5)
+assert not process.is_alive(), "purge 完成后并发 init 未退出"
+assert process.exitcode == 2, "binding 删除后并发 init 未失败关闭：%s" % process.exitcode
+assert cleanup_calls == ["TAP-556", "TAP-558"], cleanup_calls
+assert not (workspace / ".agenticops").exists(), "并发 init 在 purge 后重建了任务状态"
+PY
 test ! -e "$purge_workspace/.agenticops"
+
+# registry 最终回读完成后若整个 .agenticops 被换成外部 symlink，递归删除必须通过
+# 已打开的 workspace/.agenticops FD 发现替换并停止，不能遍历外部 tasks。
+purge_race_workspace="$test_root/purge-race-workspace"
+purge_race_outside="$test_root/purge-race-outside"
+mkdir -p "$purge_race_outside/tasks"
+printf 'outside tasks sentinel\n' > "$purge_race_outside/tasks/sentinel"
+"$install_root/agenticops" init --workspace "$purge_race_workspace" --agent codex >/dev/null
+python3 "$install_root/workflow/task.py" init \
+  --issue-key TAP-560 --task-class technical_task --dir "$purge_race_workspace" >/dev/null
+python3 - "$install_root" "$purge_race_workspace" "$purge_race_outside" <<'PY'
+import sys
+from pathlib import Path
+
+install_root = Path(sys.argv[1])
+workspace = Path(sys.argv[2])
+outside = Path(sys.argv[3])
+sys.path.insert(0, str(install_root))
+
+from bootstrap import workspace_registry
+from workflow import task_store
+
+original_load_registry = task_store.load_registry
+calls = 0
+
+
+def replace_after_final_registry_check(base, create=False):
+    global calls
+    document = original_load_registry(base, create=create)
+    calls += 1
+    # 第一次是 purge 任务集合，第二次是 cleanup 的 issue 解析，第三次才是
+    # registry 锁内的最终回读；返回第三次结果后立即替换整个状态根。
+    if calls == 3:
+        state = workspace / ".agenticops"
+        state.rename(workspace / ".agenticops-held")
+        state.symlink_to(outside, target_is_directory=True)
+    return document
+
+
+task_store.load_registry = replace_after_final_registry_check
+try:
+    try:
+        workspace_registry.detach(install_root, workspace, purge=True)
+    except ValueError as error:
+        assert "父目录已被替换" in str(error)
+    else:
+        raise AssertionError(".agenticops 最终检查后被替换时 purge 未失败关闭")
+finally:
+    task_store.load_registry = original_load_registry
+
+assert calls == 3, calls
+assert (outside / "tasks" / "sentinel").read_text(encoding="utf-8") == \
+    "outside tasks sentinel\n"
+assert (workspace / ".agenticops-held" / "tasks" / "TAP-560" / "state.json").is_file()
+(workspace / ".agenticops").unlink()
+(workspace / ".agenticops-held").rename(workspace / ".agenticops")
+workspace_registry.detach(install_root, workspace, purge=True)
+assert not (workspace / ".agenticops").exists()
+PY
+
+task_purge_workspace="$test_root/task-purge-workspace"
+"$install_root/agenticops" init --workspace "$task_purge_workspace" --agent codex >/dev/null
+python3 "$install_root/workflow/task.py" init \
+  --issue-key TAP-557 --task-class technical_task --dir "$task_purge_workspace" >/dev/null
+task_purge_run="$(python3 - "$task_purge_workspace/.agenticops/tasks/TAP-557/state.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+print(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["run_id"])
+PY
+)"
+python3 "$install_root/workflow/task.py" deactivate \
+  --issue-key TAP-557 --dir "$task_purge_workspace" >/dev/null
+if python3 "$install_root/workflow/task.py" purge --issue-key TAP-557 \
+  --expected-run-id "$task_purge_run" --dir "$task_purge_workspace" >/dev/null 2>&1; then
+  printf '任务 purge 缺少 --yes 时被错误接受\n' >&2
+  exit 1
+fi
+if python3 "$install_root/workflow/task.py" purge --issue-key TAP-557 \
+  --expected-run-id run-stale --yes --dir "$task_purge_workspace" >/dev/null 2>&1; then
+  printf '任务 purge 接受了过期 run_id\n' >&2
+  exit 1
+fi
+python3 "$install_root/workflow/task.py" purge --issue-key TAP-557 \
+  --expected-run-id "$task_purge_run" --yes --dir "$task_purge_workspace" >/dev/null
+test ! -e "$task_purge_workspace/.agenticops/tasks/TAP-557"
+if python3 "$install_root/workflow/task.py" list --dir "$task_purge_workspace" | \
+    grep -F 'TAP-557' >/dev/null; then
+  printf '已 purge 的任务仍存在于任务注册表\n' >&2
+  exit 1
+fi
+python3 "$install_root/workflow/task.py" --help | grep -F 'purge' >/dev/null
 
 missing_workspace="$test_root/missing-workspace"
 "$install_root/agenticops" init --workspace "$missing_workspace" --agent codex >/dev/null
@@ -473,6 +823,8 @@ PY
 pool_main="$shared_repository_pool/tapdata/tapdata"
 mkdir -p "$(dirname "$pool_main")"
 git clone -q "$source_repo" "$pool_main"
+python3 "$install_root/workflow/task.py" advance --issue-key TAP-123 \
+  --note '安装验收：已完成接管并进入准入阶段' --dir "$workspace" >/dev/null
 python3 "$install_root/workflow/task.py" repository add --issue-key TAP-123 \
   --repo tapdata/tapdata --work-branch feature/TAP-123-source-pool \
   --base-branch "$install_branch" --scope 'Source Pool 启动接线' \
@@ -497,6 +849,38 @@ grep -Fx -- "--add-dir $task_root --model task-bound" "$capture" >/dev/null
 "$install_root/agenticops" workspace purge --workspace "$workspace" --yes >/dev/null
 test ! -e "$task_root"
 test ! -e "$workspace/.agenticops"
+
+# auto-clone 必须通过受控 repository prepare 供给 Source Pool 并固化本地 Git 基线。
+auto_clone_pool="$test_root/auto-clone-pool"
+auto_clone_workspace="$test_root/auto-clone-workspace"
+python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" \
+  configure --root "$auto_clone_pool" --provisioning auto-clone >/dev/null
+"$install_root/agenticops" init --workspace "$auto_clone_workspace" --agent codex >/dev/null
+python3 "$install_root/workflow/task.py" init \
+  --issue-key TAP-124 --task-class technical_task --dir "$auto_clone_workspace" >/dev/null
+python3 "$install_root/workflow/task.py" advance --issue-key TAP-124 \
+  --note '安装验收：进入准入阶段后自动准备仓库' --dir "$auto_clone_workspace" >/dev/null
+python3 "$install_root/workflow/task.py" repository add --issue-key TAP-124 \
+  --repo tapdata/tapdata --work-branch feature/TAP-124-auto-clone \
+  --base-branch "$install_branch" --scope 'auto-clone 受控准备' \
+  --verification 'bash tests/test_install.sh' --dir "$auto_clone_workspace" >/dev/null
+python3 "$install_root/workflow/task.py" repository prepare --issue-key TAP-124 \
+  --dir "$auto_clone_workspace" >/dev/null
+test -d "$auto_clone_pool/tapdata/tapdata/.git"
+python3 - "$auto_clone_workspace/.agenticops/tasks/TAP-124/state.json" "$source_repo" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+task = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+repository = task["repositories"][0]
+assert repository["base_sha"]
+assert repository["authorized_endpoint"] == str(Path(sys.argv[2]).resolve())
+assert repository["worktree"]["status"] == "prepared"
+assert Path(repository["worktree"]["path"]).is_dir()
+PY
+"$install_root/agenticops" workspace purge --workspace "$auto_clone_workspace" --yes >/dev/null
+test ! -e "$auto_clone_workspace/.agenticops"
 
 printf 'AgenticOps 安装边界验证通过：被测分支=%s，被测提交=%s，安装 fixture 分支=%s\n' \
   "${tested_branch:-detached HEAD}" "$tested_ref" "$install_branch"

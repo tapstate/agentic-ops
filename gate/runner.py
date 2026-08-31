@@ -56,13 +56,19 @@ def validate_request(request):
     target = request.get("target", {})
     if not isinstance(target, dict):
         return "target 必须是对象"
-    target_fields = {"repository", "issue_key", "branch", "push_target_branch", "branch_relevant"}
+    target_fields = {
+        "repository", "workspace", "issue_key", "branch", "push_source_ref",
+        "push_destination_ref", "push_target_branch", "branch_relevant",
+    }
     target_unexpected = sorted(set(target) - target_fields)
     if target_unexpected:
         return "target 包含未声明字段：%s" % ", ".join(target_unexpected)
     if any(
         key in target and not isinstance(target[key], str)
-        for key in ("repository", "issue_key", "branch", "push_target_branch")
+        for key in (
+            "repository", "workspace", "issue_key", "branch", "push_source_ref",
+            "push_destination_ref", "push_target_branch",
+        )
     ):
         return "target 仓库和分支字段必须是字符串"
     if "branch_relevant" in target and not isinstance(target["branch_relevant"], bool):
@@ -80,16 +86,33 @@ def load_operation_catalog(path=None):
 
 
 def _context(request):
-    context = engine.git_context(request["cwd"])
+    for_push = "git_push" in request["operations"]
+    context = engine.git_context(request["cwd"], for_push=for_push)
+    context["push_refspec_required"] = (
+        for_push and "unknown_external_write" not in request["operations"]
+    )
     target = request.get("target", {})
     if target.get("repository"):
-        context["origin"] = engine.normalize_repo(target["repository"])
+        requested_repository = engine.normalize_repo(target["repository"])
+        if for_push:
+            if context.get("origin") and context["origin"] != requested_repository:
+                context["repository_fact_error"] = (
+                    "标准请求仓库与 Git 实际 push URL 不一致"
+                )
+        else:
+            context["origin"] = requested_repository
+    if target.get("workspace"):
+        workspace = Path(target["workspace"])
+        if not workspace.is_absolute():
+            workspace = Path(request["cwd"]) / workspace
+        context["workspace"] = str(workspace.resolve())
     if target.get("issue_key"):
         context["issue_key"] = target["issue_key"]
     if target.get("branch"):
         context["branch"] = target["branch"]
-    if target.get("push_target_branch"):
-        context["push_target_branch"] = target["push_target_branch"]
+    for field in ("push_source_ref", "push_destination_ref", "push_target_branch"):
+        if target.get(field):
+            context[field] = target[field]
     context["branch_relevant"] = target.get("branch_relevant", True)
     return context
 
@@ -149,6 +172,8 @@ def evaluate_request(request, policy_path=None):
             "operation": "invalid_gate_request",
             "operations": ["invalid_gate_request"],
             "reason": validation_error,
+            "reason_code": "invalid_gate_request",
+            "required_action": "请修复标准 Gate 请求后重试。",
             "warnings": [],
         }
 
@@ -158,9 +183,28 @@ def evaluate_request(request, policy_path=None):
     policy = engine.load_policy(policy_path)
     catalog = load_operation_catalog()
     context = _context(request)
-    authorization, authorization_path = engine.find_authorization(
-        request["cwd"], context=context, issue_key=context.get("issue_key")
+    gate_cwd = context.get("workspace") or request["cwd"]
+    resolution_context = context
+    if "git_push" in request["operations"] and context.get("fetch_origin"):
+        resolution_context = dict(context)
+        resolution_context["origin"] = context["fetch_origin"]
+    task_directory, task_resolution = engine.resolve_task_directory(
+        gate_cwd, context=resolution_context, issue_key=context.get("issue_key")
     )
+    context["task_resolution"] = task_resolution
+    authorization = None
+    authorization_path = None
+    if task_directory is not None:
+        path = task_directory / "authorization.json"
+        authorization_path = str(path)
+        if path.is_file():
+            authorization = engine._read_json(path)
+            context["authorization_state"] = (
+                "loaded" if isinstance(authorization, dict) else "invalid"
+            )
+        else:
+            context["authorization_state"] = "missing"
+    audit_cwd = gate_cwd if task_directory is not None else request["cwd"]
     warnings = []
 
     policy_operations = set(policy["operations"])
@@ -173,6 +217,8 @@ def evaluate_request(request, policy_path=None):
             "operation": "contract_policy_drift",
             "reason": "操作契约与 Policy 漂移：Policy 缺少=%s；Contract 缺少=%s"
             % (missing_policy, missing_contract),
+            "reason_code": "contract_policy_drift",
+            "required_action": "请维护者修复操作契约与 Policy 漂移后重试。",
         }
     elif any(operation not in catalog for operation in request["operations"]):
         unknown = sorted(operation for operation in request["operations"] if operation not in catalog)
@@ -180,6 +226,8 @@ def evaluate_request(request, policy_path=None):
             "decision": engine.ASK,
             "operation": unknown[0],
             "reason": "未知标准操作，需人工确认并登记操作词表：%s" % ", ".join(unknown),
+            "reason_code": "unknown_operation",
+            "required_action": "请研发工程师确认本次操作；维护者应登记操作词表后再重试。",
         }
     elif any(not catalog[operation]["requestable"] for operation in request["operations"]):
         derived = sorted(
@@ -189,6 +237,16 @@ def evaluate_request(request, policy_path=None):
             "decision": engine.DENY,
             "operation": "invalid_standard_operation",
             "reason": "派生操作不能作为 Adapter 请求输入：%s" % ", ".join(derived),
+            "reason_code": "invalid_standard_operation",
+            "required_action": "请修复 Adapter 映射，只请求可请求的标准操作。",
+        }
+    elif request["operations"].count("prepare_task_repository") > 1:
+        result = {
+            "decision": engine.ASK,
+            "operation": "prepare_task_repository",
+            "reason": "一个 Gate 请求包含多个受控仓库准备目标，无法唯一绑定工作空间",
+            "reason_code": "ambiguous_workflow_target",
+            "required_action": "请将每个任务工作空间的 repository prepare 拆成独立命令后重试。",
         }
     elif os.environ.get("AO_GATE_USE_OPA") == "1" and len(request["operations"]) == 1:
         try:
@@ -211,10 +269,13 @@ def evaluate_request(request, policy_path=None):
         "operation": result["operation"],
         "operations": request["operations"],
         "reason": result["reason"],
+        "reason_code": result["reason_code"],
         "warnings": warnings,
     }
+    if result.get("required_action"):
+        response["required_action"] = result["required_action"]
     audit_error = _audit(
-        request["cwd"],
+        audit_cwd,
         context,
         {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -224,6 +285,8 @@ def evaluate_request(request, policy_path=None):
             "operations": request["operations"],
             "decision": response["decision"],
             "reason": response["reason"],
+            "reason_code": response["reason_code"],
+            "required_action": response.get("required_action"),
             "warnings": warnings,
             "authorization_file": authorization_path,
         },

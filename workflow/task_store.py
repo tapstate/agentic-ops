@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -131,8 +132,9 @@ def registry_lock(base):
 
 
 @contextmanager
-def task_run_lock(base, issue_key):
-    validate_issue_key(issue_key)
+def task_state_lock(base):
+    """持有 Product Root 级任务状态锁，并在获得锁后重新核验工作空间绑定。"""
+    base = workspace_path(base)
     binding_path = state_path(base) / "workspace.json"
     try:
         binding = json.loads(binding_path.read_text(encoding="utf-8"))
@@ -147,9 +149,23 @@ def task_run_lock(base, issue_key):
     with open(root / "task-state.lock", "a+", encoding="utf-8") as stream:
         fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
         try:
+            try:
+                current = json.loads(binding_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as error:
+                raise ValueError("获得任务状态锁后工作空间绑定无法读取：%s" % error) from error
+            current_root = current.get("product_root")
+            if not isinstance(current_root, str) or Path(current_root).resolve() != Path(product_root).resolve():
+                raise ValueError("获得任务状态锁后工作空间绑定已变化，拒绝继续")
             yield
         finally:
             fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def task_run_lock(base, issue_key):
+    validate_issue_key(issue_key)
+    with task_state_lock(base):
+        yield
 
 
 def save_registry(base, registry):
@@ -186,6 +202,66 @@ def set_status(base, issue_key, status):
         registry["tasks"][issue]["status"] = status
         registry["tasks"][issue]["updated_at"] = now()
         save_registry(base, registry)
+
+
+def task_status(base, issue_key):
+    issue = validate_issue_key(issue_key)
+    registry = load_registry(base, create=False)
+    if registry is None or issue not in registry["tasks"]:
+        raise ValueError("任务未注册：%s" % issue)
+    return registry["tasks"][issue]["status"]
+
+
+def purge_inactive(base, issue_key, expected_run_id):
+    """删除一个已停用且已完成 worktree 清理的任务状态。"""
+    issue = validate_issue_key(issue_key)
+    with registry_lock(base):
+        registry = load_registry(base, create=False)
+        if registry is None or issue not in registry["tasks"]:
+            raise ValueError("任务未注册：%s" % issue)
+        entry = dict(registry["tasks"][issue])
+        if entry.get("status") != "inactive":
+            raise ValueError("purge 只允许 inactive 任务：%s（当前 %s）" % (issue, entry.get("status")))
+        directory = task_directory(base, issue)
+        state = task_path(base, issue)
+        if not directory.is_dir() or not state.is_file():
+            raise ValueError("任务目录或状态缺失，拒绝 purge：%s" % directory)
+        try:
+            task = json.loads(state.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("任务状态无法读取，拒绝 purge：%s" % error) from error
+        if task.get("run_id") != expected_run_id:
+            raise ValueError(
+                "purge 绑定的 run 已失效（当前 %s，传入 %s）；请重新检查任务状态"
+                % (task.get("run_id"), expected_run_id)
+            )
+        prepared = [
+            item.get("repository")
+            for item in task.get("repositories", [])
+            if (item.get("worktree") or {}).get("status") == "prepared"
+        ]
+        if prepared:
+            raise ValueError("purge 前仍有 prepared worktree：%s" % "、".join(prepared))
+
+        staged = directory.with_name(".purging-%s-%s" % (issue, os.getpid()))
+        if staged.exists():
+            raise ValueError("检测到未完成的 purge 暂存目录：%s" % staged)
+        os.replace(str(directory), str(staged))
+        del registry["tasks"][issue]
+        try:
+            save_registry(base, registry)
+        except Exception:
+            os.replace(str(staged), str(directory))
+            raise
+        try:
+            shutil.rmtree(staged)
+        except Exception as error:
+            # 尽力恢复注册与目录；恢复失败时保留显式异常，绝不报告 purge 成功。
+            registry["tasks"][issue] = entry
+            save_registry(base, registry)
+            if staged.exists() and not directory.exists():
+                os.replace(str(staged), str(directory))
+            raise ValueError("任务目录删除失败，已恢复注册：%s" % error) from error
 
 
 def registered_issues(base, statuses=None):

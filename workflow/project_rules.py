@@ -20,6 +20,32 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def canonical_repository_endpoint(value):
+    """把 Project catalog origin 规范化为保留 host 身份的稳定 endpoint。"""
+    text = (value or "").strip().rstrip("/")
+    if not text:
+        return ""
+    if text.startswith("/"):
+        return str(Path(text).resolve())
+    if text.startswith("file://"):
+        return "file://" + str(Path(text[7:]).resolve())
+    scp = re.fullmatch(r"(?:[^@/:]+@)?([^/:]+):(.+)", text)
+    if scp:
+        host, path = scp.groups()
+        endpoint = "%s/%s" % (host.lower(), path.lstrip("/"))
+    else:
+        remote = re.fullmatch(
+            r"(?:ssh|https?|git)://(?:[^@/]+@)?([^/]+)/(.+)", text
+        )
+        if not remote:
+            return ""
+        host, path = remote.groups()
+        endpoint = "%s/%s" % (host.lower(), path.lstrip("/"))
+    return endpoint[:-4] if endpoint.endswith(".git") else endpoint
+
+
 def _read_json(path):
     with open(path, "r", encoding="utf-8") as fh:
         return json.load(fh)

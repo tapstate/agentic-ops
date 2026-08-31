@@ -28,7 +28,11 @@ def evaluate_tool_call(agent, adapter_version, tool_name, tool_input, cwd):
 
 
 def decision_reason(decision):
+    parts = [decision["reason"]]
+    required_action = decision.get("required_action")
+    if required_action:
+        parts.append("处理方式：%s" % required_action)
     warnings = decision.get("warnings") or []
     if warnings:
-        return "%s；%s" % (decision["reason"], "；".join(warnings))
-    return decision["reason"]
+        parts.extend(warnings)
+    return "；".join(parts)

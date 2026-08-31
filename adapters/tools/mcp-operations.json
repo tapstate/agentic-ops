@@ -10,6 +10,9 @@
     "issue_read",
     "pull_request_read"
   ],
+  "readonly_tools": [
+    "atlassianuserinfo"
+  ],
   "repository_target_operations": [
     "create_pr",
     "update_pr",
@@ -23,6 +26,65 @@
     "write_jira_worklog",
     "edit_jira_issue"
   ],
+  "shell": {
+    "dangerous_environment_names": [
+      "ALL_PROXY", "BASH_ENV", "CURL_CA_BUNDLE", "ENV", "HOME", "HTTPS_PROXY",
+      "HTTP_PROXY", "IFS", "NO_PROXY", "PATH", "PERL5LIB", "PYTHONHOME", "PYTHONPATH",
+      "RUBYLIB", "SSL_CERT_DIR", "SSL_CERT_FILE", "XDG_CONFIG_HOME", "all_proxy",
+      "http_proxy", "https_proxy", "no_proxy"
+    ],
+    "dangerous_environment_prefixes": ["DYLD_", "GIT_", "LD_", "SSH_"],
+    "git_readonly_redirects": ["status", "rev-parse", "diff", "log", "show"],
+    "git_push_allowed_flags": [
+      "--dry-run", "--force", "--force-with-lease", "--ipv4", "--ipv6",
+      "--porcelain", "--progress", "--quiet", "--set-upstream", "--verbose"
+    ],
+    "git_push_allowed_short_flags": "fuvqn46",
+    "git_push_unsafe_value_options": [
+      "-o", "--exec", "--push-option", "--receive-pack", "--repo", "--server-option"
+    ],
+    "code_executors": {
+      "node": {
+        "names": ["node", "nodejs"], "versioned": true,
+        "info_flags": ["-h", "--help", "-v", "--version"]
+      },
+      "perl": {
+        "names": ["perl"], "versioned": true,
+        "info_flags": ["-h", "--help", "-v", "-V", "--version"]
+      },
+      "python": {
+        "names": ["python"], "versioned": true,
+        "info_flags": [
+          "-h", "--help", "-V", "-VV", "--version", "--help-env",
+          "--help-xoptions", "--help-all"
+        ]
+      },
+      "ruby": {
+        "names": ["ruby"], "versioned": true,
+        "info_flags": ["-h", "--help", "-v", "--version"]
+      }
+    },
+    "git_simple_operations": {
+      "clean": "git_clean",
+      "merge": "git_merge",
+      "rebase": "git_rebase"
+    },
+    "gh_pr_operations": {
+      "close": "update_pr",
+      "comment": "fix_pr_comments",
+      "create": "create_pr",
+      "edit": "update_pr",
+      "merge": "pr_merge",
+      "ready": "update_pr",
+      "reopen": "update_pr",
+      "review": "fix_pr_comments",
+      "update-branch": "update_pr"
+    },
+    "workflow_modules": {
+      "workflow.repository_worktree": "repository_worktree.py",
+      "workflow.task": "task.py"
+    }
+  },
   "mappings": {
     "create_pull_request": "create_pr",
     "update_pull_request": "update_pr",

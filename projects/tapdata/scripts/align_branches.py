@@ -22,7 +22,7 @@ from pathlib import Path
 
 
 RELEASE_RE = re.compile(r"^release-v\d+(?:\.\d+){2,}$")
-TAP_RE = re.compile(r"TAP-\d+")
+TAP_RE = re.compile(r"(?<![A-Za-z0-9])TAP-\d+(?![A-Za-z0-9])")
 
 
 class AlignmentError(ValueError):
@@ -179,10 +179,13 @@ def plugin_release(branch, pool_root, rules):
     return None, "%s 未包含 %s" % (path, key)
 
 
-def marker_branch(origin, marker):
+def marker_branches(origin, marker):
     if not marker:
-        return None
-    return next((branch for branch in remote_branches(origin) if marker in branch), None)
+        return []
+    token = re.compile(
+        r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % re.escape(marker)
+    )
+    return [branch for branch in remote_branches(origin) if token.search(branch)]
 
 
 def derived_target(repository, product_branch, repositories, rules, pool_root, overrides, plugin_cache):
@@ -204,9 +207,22 @@ def derived_target(repository, product_branch, repositories, rules, pool_root, o
     origin = repositories[repository].get("origin")
     marker = TAP_RE.search(product_branch)
     if marker:
-        matched = marker_branch(origin, marker.group(0))
-        if matched:
-            return matched, "tap_marker", "按 %s 标记匹配" % marker.group(0)
+        matches = marker_branches(origin, marker.group(0))
+        if len(matches) == 1:
+            return matches[0], "tap_marker", "按完整 %s 标记唯一匹配" % marker.group(0)
+        if not matches:
+            return (
+                None,
+                "unresolved",
+                "未找到完整 Jira 标记 %s 的远程分支；需要显式 override"
+                % marker.group(0),
+            )
+        return (
+            None,
+            "unresolved",
+            "完整 Jira 标记 %s 匹配多个远程分支：%s；需要显式 override"
+            % (marker.group(0), "、".join(sorted(matches))),
+        )
     if not RELEASE_RE.fullmatch(product_branch):
         status, _ = remote_branch_status(origin, product_branch)
         if status == "exists":

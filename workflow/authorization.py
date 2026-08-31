@@ -21,12 +21,13 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from workflow import task_store  # noqa: E402
+from workflow import project_rules, task_store  # noqa: E402
 
 
 def repository_bindings(repositories):
     keys = (
         "repository",
+        "authorized_endpoint",
         "work_branch",
         "base_branch",
         "approved_scope",
@@ -60,6 +61,28 @@ def cmd_grant(args):
     if not isinstance(repositories, list) or not repositories:
         print("错误：授权前至少确认一个任务仓库", file=sys.stderr)
         return 2
+    try:
+        catalog = project_rules.load_repository_catalog(workspace=args.dir)
+    except ValueError as error:
+        print("错误：无法核验授权仓库 endpoint：%s" % error, file=sys.stderr)
+        return 2
+    for item in repositories:
+        if not isinstance(item, dict):
+            print("错误：任务仓库绑定不是对象", file=sys.stderr)
+            return 2
+        repository = item.get("repository")
+        entry = catalog.get("repositories", {}).get(repository)
+        expected_endpoint = project_rules.canonical_repository_endpoint(
+            entry.get("origin") if isinstance(entry, dict) else None
+        )
+        if not expected_endpoint or item.get("authorized_endpoint") != expected_endpoint:
+            print(
+                "错误：任务仓库 %s 缺少当前 Project catalog 的可信 authorized_endpoint；"
+                "请先执行受控 repository prepare 迁移，或清理后重新登记仓库"
+                % repository,
+                file=sys.stderr,
+            )
+            return 2
     path = task_store.authorization_path(args.dir, issue)
     path.parent.mkdir(parents=True, exist_ok=True)
     record = {

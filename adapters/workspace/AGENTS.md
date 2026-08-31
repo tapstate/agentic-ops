@@ -39,12 +39,23 @@ python3 __AGENTIC_OPS_HOME__/workflow/task.py status --issue-key <JIRA-KEY> --di
 - `.agenticops/tasks/index.json` 只统一注册任务及其 active/inactive/completed
   状态；每个任务的事实、授权、事件和 CI 证据只能写入自己的
   `.agenticops/tasks/<issue-key>/`。
-- 副作用操作由 Agent Adapter 转换为标准请求，再由 `gate/runner.py` 判定。收到
-  `ask` 或 `deny`
-  必须展示原因并停止该操作，不得改命令、改状态文件或换工具绕过。
-- 进入实现前，先为每个目标仓库登记仓库、工作分支、基线分支、范围和验证方式，
-  执行 `workflow/task.py repository prepare` 创建当前 run 的 linked worktree并固化
-  `base_sha`，再由研发工程师签发一次任务授权。新增仓库、重新准备或修改范围会使原授权失效。
+- 副作用操作由 Agent Adapter 转换为标准请求，再由 `gate/runner.py` 判定。首次收到
+  `ask` 或 `deny` 时必须立即向研发工程师完整展示原因、处理动作和当前停止点，并停止
+  当前操作及所有依赖它的后续步骤；不得把阻断当作正常结果继续，不得改命令、改状态
+  文件或换工具绕过。
+- 接管、继续或 reset 成功只是流程恢复点，不是默认停点。选择现有 run 或 reset 是人工
+  决策；选择完成后应继续核验 Jira、补齐准入、登记仓库并准备本地基线，直到遇到方案
+  确认、风险授权、事实不可信或其它真实人工决策点。
+- `task_intake` 中先为每个目标仓库登记仓库、工作分支、基线分支、范围和验证方式，再
+  执行受控 `workflow/task.py repository prepare`。该操作按已登记的 active 任务自动
+  准备 Source Pool（`auto-clone` 模式会自动下载）和当前 run 的 linked worktree，固化
+  `base_sha`，不要求预先签发 `task_execution` 授权；直接 Git clone、复用已有分支和
+  非受控 worktree 操作仍由 Gate 单独判定。
+- 只有 `repository prepare` 产出的本地任务 worktree、`base_sha` 和目录摘要才是任务的
+  Git 基线。GitHub API、网页或其它远程只读源码只能标记为“远程候选参考”，不能写成
+  “已核实基线”，也不能据此推进 `design_review`。本地基线完成后才能分析代码、形成
+  方案；研发工程师确认方案后再签发一次任务授权。新增仓库、重新准备或修改范围会使
+  原授权失效。
 - 同一任务可以修改多个仓库；多个 active 任务使用同一仓库时必须使用不同工作分支。
   每个仓库分别保存提交、PR、CI 与验证事实，任务级
   证据汇总这些结果。
@@ -59,6 +70,10 @@ python3 __AGENTIC_OPS_HOME__/workflow/task.py status --issue-key <JIRA-KEY> --di
   当前 issue/run 的执行目录作为 cwd，并只把当前任务已准备的 worktree 加入 Agent 动态
   目录。不得用关闭沙箱替代目录接线。
 - 任务或工作空间清理必须先清理 linked worktree；脏 worktree 必须停止并保留现场。
+- 临时结束处理用 `deactivate`，恢复同一 run 用 `activate`；清理重做使用 cleanup 后
+  精确绑定当前 `run_id` 的 `reset`。只有任务已 inactive、run 精确匹配且研发工程师明确
+  确认时，才可执行任务级 `purge` 删除该任务的本地状态；它不修改 Jira，脏 worktree
+  必须停止，未合并分支必须保留并报告。
 - 未迁移的辅助能力不阻塞整个流程：优先使用 Agent 原生能力；没有安全自动路径时，
   只暂停对应副作用步骤并给出结构化人工接力。事实不可信、权限不足、高风险人工
   门禁和外部写结果不明确仍必须停止。

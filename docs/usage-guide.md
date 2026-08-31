@@ -181,8 +181,10 @@ cd <项目工作空间>
 `--all` 必须显式指定；批量操作会先列出目标并要求确认。`prune` 仅注销缺失、已改绑或
 无效的本机提示登记。`clean --generated-only` 只收敛可再生接线；`detach` 保留
 `.agenticops/tasks/`，因此存在已准备 worktree 时会要求先清理，避免解绑后留下孤儿；
-`purge` 会联动清理洁净 worktree 后删除任务状态，且不支持批量执行。非交互环境默认拒绝
-这些确认操作；仅在已由调用方展示并确认目标列表的自动化场景中使用 `--yes`。
+这里的 `workspace purge` 会联动清理全部洁净 worktree 后删除整个工作空间的任务状态，
+且不支持批量执行。只结束或清理一个任务时应使用第 6 节的任务生命周期命令，不能用
+工作空间级 purge 扩大删除范围。非交互环境默认拒绝这些确认操作；仅在已由调用方展示
+并确认目标列表的自动化场景中使用 `--yes`。
 
 ## 4. 工作空间数据
 
@@ -240,7 +242,7 @@ python3 ~/.agentic-ops/workflow/task.py status --issue-key TAP-123 --dir <项目
 接管时向 Agent 发送：
 
 ```text
-接管 TAP-123。先读取 Jira 事实、项目准入规则和相关代码；列全缺失项、目标仓库、工作分支、验证方式和风险。未经我的方案确认，不要进入实现或执行外部写操作。
+接管 TAP-123。先读取 Jira 事实和项目准入规则，列全缺失项、目标仓库、工作分支、验证方式和风险；登记仓库后执行受控 prepare，在本地任务 worktree 核验代码并形成方案。未经我的方案确认，不要进入实现或执行其它外部写操作。
 ```
 
 Agent 提交方案后，按实际信息补全并发送：
@@ -256,7 +258,12 @@ Agent 应回显任务阶段、实际变更仓库、验证结果、提交、PR �
 存在歧义时必须显式绑定 issue key。Agent 必须按项目准入要求登记每个仓库的工作分支、
 基线、范围和验证方式；研发工程师确认方案并签发任务授权后，才能进入实现。
 
-进入设计评审后，先登记仓库并准备任务 worktree。Project Package 的
+接管、activate 或 reset 成功只是恢复流程，不是默认停点。已经存在的任务应先让研发
+工程师选择继续现有 run 或清理后 reset；选择完成后，Agent 应继续核验 Jira、补齐准入、
+登记仓库、准备本地基线和分析源码，直到方案确认、风险授权、事实不可信或其它真实人工
+决策点。
+
+准入和仓库信息齐备后、进入设计评审前，先登记仓库并准备任务 worktree。Project Package 的
 `projects/<project>/repositories.json` 是仓库目录；池内仓库必须位于
 `<pool>/<owner>/<repo>`，用户自行下载的仓库也必须通过 origin、Git 根目录、
 基线分支和洁净度校验：
@@ -271,11 +278,26 @@ python3 ~/.agentic-ops/workflow/task.py repository prepare \
   --issue-key TAP-123 --dir <项目工作空间>
 ```
 
-`prepare` 会要求主工作树在基线分支且洁净，执行 `fetch --prune` 和 fast-forward，
-再在 `<workspace>/.agenticops/worktrees/<issue-key>/<run-id>/<owner>/<repo>` 创建 linked
-worktree，并把
-`base_sha` 与仓库目录摘要写入任务状态。缺少池配置、仓库未接入、origin 不符、fetch
-失败、主工作树脏或分叉都会停止；不会移动、覆盖或删除用户仓库。
+`prepare` 是绑定 active 任务、仓库登记和当前 run 的受控 Workflow 操作，不要求提前签发
+`task_execution` 授权。`auto-clone` 模式会按仓库目录自动 clone；随后要求主工作树在
+基线分支且洁净，执行 `fetch --prune` 和 fast-forward，再在
+`<workspace>/.agenticops/worktrees/<issue-key>/<run-id>/<owner>/<repo>` 创建 linked
+worktree，并把 `base_sha` 与仓库目录摘要写入任务状态。直接执行 Git clone、复用已有任务
+分支或非受控 worktree 操作不属于这条自动放行路径，仍须单独判定。缺少池配置、仓库未
+接入、origin 不符、fetch 失败、主工作树脏或分叉都会停止；不会移动、覆盖或删除用户仓库。
+
+任务源码证据按以下标签表达，避免把远程浏览误作受控基线：
+
+- `远程候选参考`：GitHub API、网页或其它远程只读内容，只能帮助定位候选文件和假设；
+  不能写成“已核实基线”，不能替代本地验证，也不能据此推进 `design_review`。
+- `本地 Git 基线`：prepare 生成的任务 worktree、`base_sha` 和目录摘要；只有这一层可以
+  支撑本地源码分析和设计方案。
+- `本地验证`、`PR/CI`、`发布`：分别记录实际命令与结果、GitHub 审查检查、正式发布事实；
+  低层证据不能冒充更高层验收。
+
+任何 Hook 首次返回 `ask` 或 `deny` 时，Agent 都必须立即完整展示原因、要求的处理动作和
+当前停止点，并停止当前操作及依赖它的后续步骤。不得把阻断描述成“正常门禁”后继续，也
+不得改用 GitHub API、直接 Git 或其它工具绕过缺失的本地基线。
 
 worktree 准备完成并重新签发包含 `base_sha` 的授权后，用任务模式启动 Agent：
 
@@ -306,6 +328,30 @@ worktree 清理，脏 worktree 会阻断整个 purge。
 再显式执行 `reset --expected-run-id <当前-run-id>`。同一任务的主 Agent、subagent 和
 恢复会话共享任务状态中的同一个 `run_id`，不得按会话自行生成；过期或并发 reset 会停止，
 不会覆盖后来创建的 run。
+
+暂时停止本地处理而保留完整现场时使用 `deactivate`，以后用 `activate` 恢复同一 run：
+
+```sh
+python3 ~/.agentic-ops/workflow/task.py deactivate \
+  --issue-key TAP-123 --dir <项目工作空间>
+python3 ~/.agentic-ops/workflow/task.py activate \
+  --issue-key TAP-123 --dir <项目工作空间>
+```
+
+只有明确不再需要该任务的本地状态时，才执行任务级 purge。它要求任务已经 inactive、
+精确匹配当前 `run_id` 并显式确认；执行前统一预检所有 worktree，任一处脏都会整体停止。
+成功后清理 worktree、租约、任务注册项和 `.agenticops/tasks/<issue-key>`；已安全合并的
+本地任务分支可用 `git branch -d` 回收，未合并分支必须保留并在结果中报告。该操作不修改
+Jira，但会删除本地任务事件和授权现场：
+
+```sh
+python3 ~/.agentic-ops/workflow/task.py purge \
+  --issue-key TAP-123 --expected-run-id <当前-run-id> --yes \
+  --dir <项目工作空间>
+```
+
+purge 后没有可直接 activate 的本地 run；确需再次处理时，应从 Jira 事实重新接管并生成
+新 run。不要用 `workspace purge` 代替单任务清理，也不要手删 `.agenticops/tasks/`。
 
 Jira、Git、GitHub PR/CI 仍是事实源。合并、发布、Tag、保护分支写入、强推和历史改写
 不被普通任务授权覆盖；事实、权限或外部写入结果不明确时必须停止，不能手改

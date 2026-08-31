@@ -2,7 +2,7 @@
   "_meta": {
     "source": "AgenticOps TapData 项目适配配置",
     "ported_at": "2026-08-27",
-    "note": "transitions 为 tapdata Jira 真实工作流实测（2026-08-18）；未配流转按需补充"
+    "note": "transitions 为 tapdata Jira 真实工作流实测；start_progress 于 2026-08-31 按 TAP-12289 实时核验更新，未配流转按需补充"
   },
   "profile_id": "tapdata",
   "jira": {
@@ -27,7 +27,7 @@
     "完成": "completed", "Done": "completed"
   },
   "transitions": {
-    "start_progress": { "name": "Implementation started", "id": "91", "from": ["打开"], "to": "正在进行" },
+    "start_progress": { "name": "Start Investigation", "id": "421", "from": ["Analyzed"], "to": "In Progress" },
     "pr_approved": { "name": "PR Approved", "id": "291", "from": ["Pull Request Submitted"], "to": "Merged", "agent_forbidden": true }
   }
 }

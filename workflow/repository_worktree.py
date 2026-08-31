@@ -183,18 +183,7 @@ def task_execution_root(workspace, task):
 
 
 def _normalize_origin(value):
-    text = (value or "").strip()
-    if text.startswith("/"):
-        return str(Path(text).resolve())
-    if text.startswith("file://"):
-        return "file://" + str(Path(text[7:]).resolve())
-    if text.startswith("git@github.com:"):
-        text = "github.com/" + text.split(":", 1)[1]
-    elif text.startswith("ssh://git@github.com/"):
-        text = "github.com/" + text.split("github.com/", 1)[1]
-    elif text.startswith("https://github.com/"):
-        text = "github.com/" + text.split("github.com/", 1)[1]
-    return text[:-4] if text.endswith(".git") else text
+    return project_rules.canonical_repository_endpoint(value)
 
 
 def _catalog(workspace):
@@ -204,6 +193,69 @@ def _catalog(workspace):
 def _catalog_digest(workspace):
     path = project_rules.repository_catalog_path(workspace=workspace)
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _validate_origin_chain(repository_path, repository, expected_origin):
+    raw_result = _run(
+        [
+            "git", "-C", str(repository_path), "config", "--get-all",
+            "remote.origin.url",
+        ],
+        check=False,
+    )
+    raw_urls = [
+        line.strip() for line in raw_result.stdout.splitlines() if line.strip()
+    ] if raw_result.returncode == 0 else []
+    if len(raw_urls) != 1:
+        raise ValueError(
+            "仓库 raw remote.origin.url 不唯一：%s（数量 %d）"
+            % (repository, len(raw_urls))
+        )
+    push_result = _run(
+        [
+            "git", "-C", str(repository_path), "remote", "get-url",
+            "--all", "--push", "origin",
+        ],
+        check=False,
+    )
+    push_urls = [
+        line.strip() for line in push_result.stdout.splitlines() if line.strip()
+    ] if push_result.returncode == 0 else []
+    if len(push_urls) != 1:
+        raise ValueError(
+            "仓库 origin 实际 push URL 不唯一：%s（数量 %d）；"
+            "请只保留一个与项目仓库目录一致的 push URL"
+            % (repository, len(push_urls))
+        )
+    fetch_result = _run(
+        [
+            "git", "-C", str(repository_path), "remote", "get-url", "--all", "origin",
+        ],
+        check=False,
+    )
+    fetch_urls = [
+        line.strip() for line in fetch_result.stdout.splitlines() if line.strip()
+    ] if fetch_result.returncode == 0 else []
+    if len(fetch_urls) != 1:
+        raise ValueError(
+            "仓库 origin fetch URL 不唯一：%s（数量 %d）"
+            % (repository, len(fetch_urls))
+        )
+    raw_endpoint = _normalize_origin(raw_urls[0])
+    fetch_endpoint = _normalize_origin(fetch_urls[0])
+    push_endpoint = _normalize_origin(push_urls[0])
+    expected_endpoint = _normalize_origin(expected_origin)
+    if not all((raw_endpoint, fetch_endpoint, push_endpoint, expected_endpoint)):
+        raise ValueError("仓库 origin URL 信任链包含无法识别的 endpoint：%s" % repository)
+    if raw_endpoint != expected_endpoint:
+        raise ValueError(
+            "仓库 raw remote.origin.url 与项目仓库目录不匹配：%s" % repository
+        )
+    if len({raw_endpoint, fetch_endpoint, push_endpoint}) != 1:
+        raise ValueError(
+            "仓库 origin 实际 push URL 与项目仓库目录不匹配：%s；"
+            "raw/fetch/push endpoint 信任链不一致" % repository
+        )
 
 
 def ensure_main(workspace, product_root, pool_root, repository, entry):
@@ -227,14 +279,7 @@ def ensure_main(workspace, product_root, pool_root, repository, entry):
     top = _run(["git", "-C", str(main), "rev-parse", "--show-toplevel"]).stdout.strip()
     if Path(top).resolve() != main.resolve():
         raise ValueError("仓库 main 不是 Git 主工作树根目录：%s" % main)
-    actual_origin = _run(
-        ["git", "-C", str(main), "config", "--get", "remote.origin.url"]
-    ).stdout.strip()
-    if _normalize_origin(actual_origin) != _normalize_origin(entry.get("origin")):
-        raise ValueError(
-            "仓库 origin 不匹配：%s（实际 %s，期望 %s）"
-            % (repository, actual_origin, entry.get("origin"))
-        )
+    _validate_origin_chain(main, repository, entry.get("origin"))
     dirty = _run(["git", "-C", str(main), "status", "--porcelain"]).stdout.strip()
     if dirty:
         raise ValueError("Source Pool 主工作树存在未提交变更，拒绝同步：%s" % main)
@@ -251,6 +296,21 @@ def _prepare_repository(workspace, task, item, *, reuse_existing_branch=False):
         raise ValueError(
             "任务基线分支与最新项目仓库目录不一致：%s（任务 %s，目录 %s）"
             % (item["repository"], item.get("base_branch"), entry.get("baseline_branch"))
+        )
+    catalog_endpoint = _normalize_origin(entry.get("origin"))
+    if not catalog_endpoint:
+        raise ValueError(
+            "项目仓库目录 origin 无法形成可信 endpoint：%s" % item["repository"]
+        )
+    bound_endpoint = item.get("authorized_endpoint")
+    if bound_endpoint is None:
+        # v1 兼容迁移：旧任务只在持有 task/run 锁的受控 prepare 中，从当前可信
+        # Project catalog 固化 endpoint；已有 authorization 不自动补写，push 仍需重签。
+        item["authorized_endpoint"] = catalog_endpoint
+    elif not isinstance(bound_endpoint, str) or bound_endpoint != catalog_endpoint:
+        raise ValueError(
+            "任务授权 endpoint 与项目仓库目录不一致：%s；请清理后重新登记仓库"
+            % item["repository"]
         )
     main = ensure_main(
         workspace, product_root, pool_root, item["repository"], entry
@@ -277,8 +337,40 @@ def _prepare_repository(workspace, task, item, *, reuse_existing_branch=False):
         ).stdout.strip()
         if branch != item["work_branch"]:
             raise ValueError("任务 worktree 分支漂移：%s" % path)
-        item["base_sha"] = base_sha
-        item["catalog_digest"] = _catalog_digest(workspace)
+        frozen_base = item.get("base_sha") or ""
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", frozen_base):
+            raise ValueError(
+                "任务仓库缺少有效冻结 base_sha：%s；请清理后重新准备"
+                % item["repository"]
+            )
+        frozen_catalog = item.get("catalog_digest") or ""
+        current_catalog = _catalog_digest(workspace)
+        if not re.fullmatch(r"[0-9a-f]{64}", frozen_catalog):
+            raise ValueError(
+                "任务仓库缺少有效冻结 catalog_digest：%s；请清理后重新准备"
+                % item["repository"]
+            )
+        if frozen_catalog != current_catalog:
+            raise ValueError(
+                "项目仓库目录已变化，任务 worktree 绑定失效：%s；请清理后重新准备"
+                % item["repository"]
+            )
+        if _run(
+            ["git", "-C", str(path), "cat-file", "-e", "%s^{commit}" % frozen_base],
+            check=False,
+        ).returncode != 0:
+            raise ValueError(
+                "任务仓库冻结 base_sha 不是本地 Git commit：%s；请清理后重新准备"
+                % item["repository"]
+            )
+        if _run(
+            ["git", "-C", str(path), "merge-base", "--is-ancestor", frozen_base, "HEAD"],
+            check=False,
+        ).returncode != 0:
+            raise ValueError(
+                "任务仓库 HEAD 不基于已冻结 base_sha：%s；请清理后重新准备"
+                % item["repository"]
+            )
         return path, False
     if path.exists():
         raise ValueError("任务 worktree 目标已存在但未被任务状态持有：%s" % path)
@@ -310,9 +402,19 @@ def _prepare_repository(workspace, task, item, *, reuse_existing_branch=False):
     return path, True
 
 
-def prepare_task(workspace, issue_key, *, reuse_existing_branch=False):
-    workspace = Path(workspace).resolve()
+def _prepare_task_locked(workspace, issue_key, *, reuse_existing_branch=False):
     task = load_task(workspace, issue_key)
+    status = task_store.task_status(workspace, task["issue_key"])
+    if status != "active":
+        raise ValueError(
+            "repository prepare 只允许 active 任务：%s（当前 %s）"
+            % (task["issue_key"], status)
+        )
+    if task.get("stage") not in ("task_intake", "design_review"):
+        raise ValueError(
+            "repository prepare 只允许在 task_intake 执行；design_review 仅用于 reset 后恢复受控基线："
+            "%s 当前阶段 %s" % (task["issue_key"], task.get("stage"))
+        )
     if not task.get("repositories"):
         raise ValueError("任务没有登记源码仓库；请先执行 task.py repository add")
     binding, product_root, pool_root = workspace_binding(workspace)
@@ -368,18 +470,109 @@ def prepare_task(workspace, issue_key, *, reuse_existing_branch=False):
     return [Path(item["worktree"]["path"]) for item in task["repositories"]]
 
 
+def prepare_task(workspace, issue_key, *, reuse_existing_branch=False):
+    workspace = Path(workspace).resolve()
+    issue = task_store.resolve_issue(workspace, issue_key)
+    # 所有任务状态读取、worktree/租约变更和最终状态写回均属于同一 run；锁顺序固定为
+    # task_run_lock -> _pool_lock，与 reset/deactivate/purge 串行，避免旧 run 回写。
+    with task_store.task_run_lock(workspace, issue):
+        return _prepare_task_locked(
+            workspace, issue, reuse_existing_branch=reuse_existing_branch
+        )
+
+
+def _resolve_git_path(repository, value):
+    path = Path(value)
+    if not path.is_absolute():
+        path = Path(repository).resolve() / path
+    return path.resolve()
+
+
 def preflight_cleanup(workspace, task):
+    """验证 worktree 的确定性身份与当前 task/run 所有权，不信任 state.path。"""
+    workspace = Path(workspace).resolve()
+    binding, product_root, pool_root = workspace_binding(workspace)
+    catalog = _catalog(workspace)
+    leases = _load_leases(product_root)
     checks = []
     for item in task.get("repositories", []):
         worktree = item.get("worktree")
         if not worktree or worktree.get("status") != "prepared":
             continue
-        path = Path(worktree["path"]).resolve()
-        if path.exists():
-            dirty = _run(["git", "-C", str(path), "status", "--porcelain"]).stdout.strip()
-            if dirty:
-                raise ValueError("任务 worktree 存在未提交变更，拒绝清理：%s" % path)
-        checks.append((item, path))
+        expected = task_worktree_path(workspace, task, item["repository"])
+        recorded = Path(worktree.get("path", "")).resolve()
+        if recorded != expected:
+            raise ValueError(
+                "任务 worktree 状态路径不匹配，拒绝清理：%s（记录 %s，期望 %s）"
+                % (item["repository"], recorded, expected)
+            )
+        if not expected.is_dir():
+            raise ValueError("任务 worktree 不存在，拒绝清理：%s" % expected)
+        entry = catalog.get("repositories", {}).get(item["repository"])
+        if entry is None:
+            raise ValueError("项目仓库目录未登记，拒绝清理：%s" % item["repository"])
+        main = repository_path(pool_root, item["repository"])
+        if not main.is_dir():
+            raise ValueError("Source Pool 主工作树不存在，拒绝清理：%s" % main)
+        main_top = Path(
+            _run(["git", "-C", str(main), "rev-parse", "--show-toplevel"]).stdout.strip()
+        ).resolve()
+        if main_top != main:
+            raise ValueError("Source Pool 主工作树 Git root 不匹配，拒绝清理：%s" % main)
+        actual_top = Path(
+            _run(["git", "-C", str(expected), "rev-parse", "--show-toplevel"]).stdout.strip()
+        ).resolve()
+        if actual_top != expected:
+            raise ValueError("任务 worktree Git root 不匹配，拒绝清理：%s" % expected)
+        common_dir = _resolve_git_path(
+            expected,
+            _run(["git", "-C", str(expected), "rev-parse", "--git-common-dir"]).stdout.strip(),
+        )
+        expected_common_dir = (main / ".git").resolve()
+        if common_dir != expected_common_dir:
+            raise ValueError(
+                "任务 worktree Git common dir 不属于 Source Pool 主工作树，拒绝清理：%s"
+                % expected
+            )
+        actual_origin = _run(
+            ["git", "-C", str(expected), "config", "--get", "remote.origin.url"]
+        ).stdout.strip()
+        if _normalize_origin(actual_origin) != _normalize_origin(entry.get("origin")):
+            raise ValueError(
+                "任务 worktree origin 不匹配，拒绝清理：%s（实际 %s，期望 %s）"
+                % (item["repository"], actual_origin, entry.get("origin"))
+            )
+        _validate_origin_chain(expected, item["repository"], entry.get("origin"))
+        branch = _run(
+            ["git", "-C", str(expected), "branch", "--show-current"]
+        ).stdout.strip()
+        if branch != item.get("work_branch"):
+            raise ValueError(
+                "任务 worktree 分支不匹配，拒绝清理：%s（实际 %s，期望 %s）"
+                % (expected, branch or "detached", item.get("work_branch"))
+            )
+        identity = _lease_identity(binding, task, item)
+        path_leases = [
+            lease
+            for lease in leases
+            if Path(lease.get("path", "")).resolve() == expected
+        ]
+        if len(path_leases) != 1 or not _same_lease(path_leases[0], identity):
+            raise ValueError(
+                "任务 worktree 缺少当前 task/run 的精确租约，拒绝清理：%s" % expected
+            )
+        dirty = _run(["git", "-C", str(expected), "status", "--porcelain"]).stdout.strip()
+        if dirty:
+            raise ValueError("任务 worktree 存在未提交变更，拒绝清理：%s" % expected)
+        checks.append(
+            {
+                "item": item,
+                "path": expected,
+                "main": main,
+                "identity": identity,
+                "branch_owned": worktree.get("branch_reused") is False,
+            }
+        )
     return checks
 
 
@@ -398,41 +591,89 @@ def _prune_empty_worktree_parents(workspace, path):
         pass
 
 
-def cleanup_task(workspace, issue_key, *, delete_branches=False):
+def _cleanup_task_locked(workspace, issue_key, *, delete_branches=False):
     workspace = Path(workspace).resolve()
     task = load_task(workspace, issue_key)
     binding, product_root, pool_root = workspace_binding(workspace)
     with _pool_lock(product_root):
         checks = preflight_cleanup(workspace, task)
-        identities = []
-        for item, path in checks:
-            identities.append(_lease_identity(binding, task, item))
-            main = repository_path(pool_root, item["repository"])
-            if path.exists():
-                _run(["git", "-C", str(main), "worktree", "remove", str(path)])
+        identities = [check["identity"] for check in checks]
+        owned = {check["item"]["repository"]: check for check in checks}
+        for check in checks:
+            item = check["item"]
+            path = check["path"]
+            main = check["main"]
+            _run(["git", "-C", str(main), "worktree", "remove", str(path)])
             _prune_empty_worktree_parents(workspace, path)
             _run(["git", "-C", str(main), "worktree", "prune"])
-            cleanup = "retained"
-            if delete_branches:
-                result = _run(
-                    ["git", "-C", str(main), "branch", "-d", item["work_branch"]], check=False
-                )
-                cleanup = "deleted" if result.returncode == 0 else "retained-not-merged"
             item["worktree"] = {
                 "path": str(path),
                 "status": "removed",
                 "removed_at": now(),
-                "branch_cleanup": cleanup,
+                "branch_cleanup": "retained",
             }
+        branch_reports = []
+        if delete_branches:
+            for item in task.get("repositories", []):
+                main = repository_path(pool_root, item["repository"])
+                proof = owned.get(item["repository"])
+                cleanup = "retained-unowned"
+                if proof and not proof["branch_owned"]:
+                    cleanup = "retained-reused"
+                exists = _run(
+                    [
+                        "git", "-C", str(main), "show-ref", "--verify", "--quiet",
+                        "refs/heads/%s" % item["work_branch"],
+                    ],
+                    check=False,
+                ).returncode == 0
+                if proof and proof["branch_owned"] and not exists:
+                    cleanup = "absent"
+                elif proof and proof["branch_owned"]:
+                    result = _run(
+                        ["git", "-C", str(main), "branch", "-d", item["work_branch"]],
+                        check=False,
+                    )
+                    cleanup = "deleted" if result.returncode == 0 else "retained-not-merged"
+                if proof:
+                    item["worktree"]["branch_cleanup"] = cleanup
+                branch_reports.append(
+                    {
+                        "repository": item["repository"],
+                        "branch": item["work_branch"],
+                        "status": cleanup,
+                    }
+                )
         leases = [
             lease for lease in _load_leases(product_root)
             if not any(_same_lease(lease, identity) for identity in identities)
-            and Path(lease.get("path", "")).exists()
         ]
         _write_leases(product_root, leases)
         task["history"].append({"ts": now(), "event": "worktrees_cleanup", "run_id": task["run_id"]})
         _write_task(workspace, task)
-    return checks
+    return {"removed": checks, "branches": branch_reports}
+
+
+def cleanup_task(workspace, issue_key, *, delete_branches=False):
+    workspace = Path(workspace).resolve()
+    issue = task_store.resolve_issue(workspace, issue_key)
+    with task_store.task_run_lock(workspace, issue):
+        return _cleanup_task_locked(
+            workspace, issue, delete_branches=delete_branches
+        )
+
+
+def remaining_task_leases(workspace, task):
+    """返回仍绑定当前 task/run 的中央 worktree 租约。"""
+    binding, product_root, pool_root = workspace_binding(workspace)
+    return [
+        lease
+        for lease in _load_leases(product_root)
+        if lease.get("pool_root") == str(pool_root)
+        and lease.get("workspace_id") == binding["workspace_id"]
+        and lease.get("issue_key") == task["issue_key"]
+        and lease.get("run_id") == task["run_id"]
+    ]
 
 
 def task_roots(workspace, issue_key):
@@ -445,6 +686,10 @@ def task_roots(workspace, issue_key):
         worktree = item.get("worktree")
         if not worktree or worktree.get("status") != "prepared":
             raise ValueError("任务仓库尚未准备 worktree：%s" % item["repository"])
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", item.get("base_sha") or ""):
+            raise ValueError("任务仓库缺少有效 base_sha：%s" % item["repository"])
+        if not re.fullmatch(r"[0-9a-f]{64}", item.get("catalog_digest") or ""):
+            raise ValueError("任务仓库缺少有效 catalog_digest：%s" % item["repository"])
         if item.get("catalog_digest") != _catalog_digest(workspace):
             raise ValueError(
                 "项目仓库目录已变化，任务 worktree 绑定失效：%s；请清理后重新准备"
@@ -462,6 +707,17 @@ def task_roots(workspace, issue_key):
         branch = _run(["git", "-C", str(path), "branch", "--show-current"]).stdout.strip()
         if branch != item["work_branch"]:
             raise ValueError("任务 worktree 分支漂移：%s" % path)
+        base_exists = _run(
+            ["git", "-C", str(path), "cat-file", "-e", "%s^{commit}" % item["base_sha"]],
+            check=False,
+        ).returncode == 0
+        if not base_exists:
+            raise ValueError("任务仓库 base_sha 不是本地 Git commit：%s" % item["repository"])
+        if _run(
+            ["git", "-C", str(path), "merge-base", "--is-ancestor", item["base_sha"], "HEAD"],
+            check=False,
+        ).returncode != 0:
+            raise ValueError("任务仓库 HEAD 不基于已固化 base_sha：%s" % item["repository"])
         roots.append(path)
     if not roots:
         raise ValueError("任务没有可执行的 worktree")
@@ -502,8 +758,13 @@ def main():
             for path in paths:
                 print(path)
         elif args.command == "cleanup":
-            checks = cleanup_task(args.dir, args.issue_key, delete_branches=args.delete_branches)
-            print("已清理 %s 个任务 worktree。" % len(checks))
+            result = cleanup_task(args.dir, args.issue_key, delete_branches=args.delete_branches)
+            print("已清理 %s 个任务 worktree。" % len(result["removed"]))
+            for branch in result["branches"]:
+                print(
+                    "分支处理：%s:%s -> %s"
+                    % (branch["repository"], branch["branch"], branch["status"])
+                )
         elif args.command == "roots":
             for path in task_roots(args.dir, args.issue_key):
                 print(path)

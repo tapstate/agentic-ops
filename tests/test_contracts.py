@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 import sys
 
 sys.path.insert(0, str(ROOT))
-from adapters.tools.classifier import classify_bash  # noqa: E402
+from adapters.tools.classifier import classify_bash, classify_tool_call  # noqa: E402
 from gate.runner import evaluate_request, validate_request  # noqa: E402
 
 
@@ -197,6 +197,14 @@ class ContractConformanceTest(unittest.TestCase):
                 load_json(workspace / ".agenticops" / "tasks" / "TAP-123" / "state.json"),
             )
 
+    def test_task_endpoint_is_optional_v1_compatibility_field(self):
+        schema = load_json(ROOT / "contracts" / "task-state.schema.json")
+        repository = schema["properties"]["repositories"]["items"]
+        self.assertIn("authorized_endpoint", repository["properties"])
+        self.assertNotIn("authorized_endpoint", repository["required"])
+        endpoint = repository["properties"]["authorized_endpoint"]
+        self.assertEqual(endpoint, {"type": "string", "minLength": 1})
+
     def test_gate_validator_and_schema_accept_the_same_request(self):
         schema = load_json(ROOT / "contracts" / "gate-request.schema.json")
         with tempfile.TemporaryDirectory() as temporary:
@@ -210,6 +218,15 @@ class ContractConformanceTest(unittest.TestCase):
             extra = dict(request)
             extra["platform_private"] = True
             self.assertIsNotNone(validate_request(extra))
+            push_request = dict(request)
+            push_request["operations"] = ["git_push"]
+            push_request["target"] = {
+                "push_source_ref": "HEAD",
+                "push_destination_ref": "refs/heads/feature/TAP-123",
+                "push_target_branch": "feature/TAP-123",
+            }
+            assert_schema(self, schema, push_request)
+            self.assertIsNone(validate_request(push_request))
 
     def test_gate_response_conforms_to_decision_schema(self):
         schema = load_json(ROOT / "contracts" / "gate-decision.schema.json")
@@ -230,6 +247,376 @@ class ContractConformanceTest(unittest.TestCase):
             "git commit -m x && git push origin feature/x; gh pr merge 1"
         ))
         self.assertTrue(shell_operations <= requestable)
+
+    def test_repository_tool_classification_preserves_control_boundary(self):
+        self.assertEqual(
+            ["prepare_task_repository"],
+            classify_bash(
+                "python3 workflow/task.py repository prepare --issue-key TAP-123"
+            ),
+        )
+        self.assertEqual(
+            ["prepare_task_repository"],
+            classify_bash("workflow/task.py repository prepare --issue-key TAP-123"),
+        )
+        for command in (
+            "python3 workflow/task.py repository prepare --issue-key TAP-123 --reuse-existing-branch",
+            "python3 workflow/task.py repository cleanup --issue-key TAP-123",
+            "python3 workflow/repository_worktree.py prepare --issue-key TAP-123",
+            "workflow/repository_worktree.py prepare --issue-key TAP-123",
+            "git clone git@example.test:a/b.git",
+            "git fetch origin develop",
+            "git worktree add /tmp/x",
+        ):
+            self.assertEqual(["manage_repository_worktree"], classify_bash(command), command)
+        for command in (
+            "python3 workflow/task.py repository prepare --help",
+            "python3 workflow/repository_worktree.py roots --issue-key TAP-123",
+            "python3 workflow/repository_worktree.py execution-root --issue-key TAP-123",
+        ):
+            self.assertEqual([], classify_bash(command), command)
+        for command in (
+            "python3 workflow/task.py purge --issue-key TAP-123 --yes",
+            "workflow/task.py purge --issue-key TAP-123 --yes",
+            "python3 -m workflow.task purge --issue-key TAP-123 --yes",
+            "python3 -mworkflow.task purge --issue-key TAP-123 --yes",
+            "python3 --check-hash-based-pycs always workflow/task.py purge --issue-key TAP-123 --yes",
+            "python3 --check-hash-based-pycs=always workflow/task.py purge --issue-key TAP-123 --yes",
+        ):
+            self.assertEqual(["delete_task_state"], classify_bash(command), command)
+        self.assertEqual(
+            ["manage_repository_worktree"],
+            classify_bash("python3 -m workflow.repository_worktree prepare --issue-key TAP-123"),
+        )
+        self.assertEqual(
+            ["prepare_task_repository"],
+            classify_bash("python3 -B -m workflow.task repository prepare --issue-key TAP-123"),
+        )
+        for module in ("workflow.other", "workflow.task.extra", "workflow.repository_worktree.extra"):
+            self.assertEqual(
+                ["unknown_external_write"],
+                classify_bash("python3 -m %s purge --issue-key TAP-123 --yes" % module),
+            )
+        self.assertEqual(
+            ["unknown_external_write"],
+            classify_bash("python3 --check-hash-based-pycs workflow/task.py purge --issue-key TAP-123 --yes"),
+        )
+        self.assertEqual(
+            ["unknown_external_write"],
+            classify_bash("python3 -c'print(1)' workflow/task.py purge --issue-key TAP-123 --yes"),
+        )
+        self.assertEqual(
+            ["unknown_external_write"],
+            classify_bash("python3 - workflow/task.py purge --issue-key TAP-123 --yes"),
+        )
+        for command in (
+            "python3",
+            "python3 unregistered.py",
+            "perl -we 'print 1'",
+            "perl payload.pl",
+            "ruby -e 'puts 1'",
+            "ruby payload.rb",
+            "node --eval='console.log(1)'",
+            "node payload.js",
+            "nodejs -e 'console.log(1)'",
+            "nodejs payload.js",
+            "python3 --version unregistered.py",
+        ):
+            self.assertEqual(["unknown_external_write"], classify_bash(command), command)
+        for command in (
+            "python3 --version", "python3.11 -V", "perl -V", "ruby --version",
+            "node -v", "nodejs --version",
+        ):
+            self.assertEqual([], classify_bash(command), command)
+        self.assertEqual(
+            ["delete_task_state"],
+            classify_bash("python3 -X dev -W ignore -B workflow/task.py purge --issue-key TAP-123 --yes"),
+        )
+        self.assertEqual(["git_commit"], classify_bash("git commit -m --help"))
+        self.assertEqual(["create_pr"], classify_bash("gh pr create --title --help"))
+        self.assertEqual([], classify_bash("git commit -a --help"))
+        self.assertEqual([], classify_bash("gh pr create --draft --help"))
+
+        for command in (
+            "git push --force-with-lease=refs/heads/feature/TAP-123 origin feature/TAP-123",
+            "git push -fu origin feature/TAP-123",
+            "git push -uvf origin feature/TAP-123",
+            "git push -f4 --dry-run origin feature/TAP-123",
+            "git push -f6 --dry-run origin feature/TAP-123",
+        ):
+            self.assertEqual(["force_push"], classify_bash(command), command)
+        self.assertEqual(
+            ["git_push"],
+            classify_bash("git push -uv origin feature/TAP-123"),
+        )
+
+        for command in (
+            "AO_MODE=test git push origin feature/TAP-123",
+            "env AO_MODE=test git push origin feature/TAP-123",
+            "env -u TERM AO_MODE=test command -p git push origin feature/TAP-123",
+            "command -- git push origin feature/TAP-123",
+        ):
+            operations, _, wrapped_target = classify_tool_call(
+                "Bash", {"command": command}
+            )
+            self.assertEqual(["git_push"], operations, command)
+            self.assertEqual(
+                "feature/TAP-123", wrapped_target["push_target_branch"], command
+            )
+            self.assertEqual("feature/TAP-123", wrapped_target["push_source_ref"], command)
+            self.assertEqual(
+                "refs/heads/feature/TAP-123",
+                wrapped_target["push_destination_ref"],
+                command,
+            )
+        for command in (
+            "env -S 'git push origin feature/TAP-123'",
+            "env --unknown git push origin feature/TAP-123",
+            "command --unknown git push origin feature/TAP-123",
+            "AO_MODE='$(touch /tmp/x)' git push origin feature/TAP-123",
+            "$(printf git) push origin feature/TAP-123",
+            "env AO_MODE=test $(printf git) push origin feature/TAP-123",
+            "G=git; $G push origin feature/TAP-123",
+            "${G} push origin feature/TAP-123",
+            "env AO_MODE=test command $G push origin feature/TAP-123",
+            "printf '%s' '<(dynamic)'",
+        ):
+            self.assertEqual(["unknown_external_write"], classify_bash(command), command)
+        self.assertEqual([], classify_bash("G=git"))
+        self.assertEqual([], classify_bash("command -v git"))
+        self.assertEqual(
+            ["force_push"],
+            classify_bash("git status & git push --force origin feature/TAP-123"),
+        )
+        for command in (
+            "if git status; then git push origin feature/TAP-123; fi",
+            "(git push origin feature/TAP-123)",
+            "sh -c 'git push origin feature/TAP-123'",
+            "bash -c 'git push origin feature/TAP-123'",
+            "zsh -c 'git push origin feature/TAP-123'",
+            "sudo git push origin feature/TAP-123",
+            "custom-wrapper git push origin feature/TAP-123",
+            "custom-wrapper 'git push origin feature/TAP-123'",
+        ):
+            self.assertIn("unknown_external_write", classify_bash(command), command)
+
+        for command in (
+            "PATH=/custom/bin git push origin feature/TAP-123",
+            "env GIT_EXEC_PATH=/custom/git git push origin feature/TAP-123",
+            "GIT_SSH=/custom/ssh git push origin feature/TAP-123",
+            "env GIT_SSH_COMMAND='ssh -F custom' git push origin feature/TAP-123",
+            "GIT_PROXY_COMMAND=proxy git push origin feature/TAP-123",
+            "HOME=/other/home git push origin feature/TAP-123",
+            "HTTPS_PROXY=http://other-proxy git push origin feature/TAP-123",
+            "env -i git push origin feature/TAP-123",
+            "env -u PATH git push origin feature/TAP-123",
+            "env --unset=GIT_SSH git push origin feature/TAP-123",
+        ):
+            self.assertEqual(["unknown_external_write"], classify_bash(command), command)
+
+        for command in (
+            "git -C /other push origin feature/TAP-123",
+            "git --git-dir=/other/repo.git push origin feature/TAP-123",
+            "git --work-tree=/other/tree push origin feature/TAP-123",
+            "git --namespace=other push origin feature/TAP-123",
+        ):
+            operations, _, redirected_target = classify_tool_call(
+                "Bash", {"command": command}
+            )
+            self.assertEqual(
+                ["git_push", "unknown_external_write"], operations, command
+            )
+            self.assertEqual(
+                "feature/TAP-123",
+                redirected_target["push_target_branch"],
+                command,
+            )
+        for command in (
+            "env -C /other git push origin feature/TAP-123",
+            "env --chdir=/other git push origin feature/TAP-123",
+        ):
+            self.assertEqual(["unknown_external_write"], classify_bash(command), command)
+        for command in (
+            "git -C /other status --short",
+            "git -C /other rev-parse HEAD",
+            "git --git-dir=/other/repo.git diff HEAD",
+            "git --work-tree=/other/tree --git-dir=/other/repo.git log -1",
+            "git --git-dir /other/repo.git show HEAD",
+        ):
+            self.assertEqual([], classify_bash(command), command)
+        self.assertEqual(
+            ["unknown_external_write"],
+            classify_bash("git -C /other unknown-subcommand"),
+        )
+
+        for command in (
+            "git push",
+            "git push origin",
+            "git push origin HEAD",
+            "env AO_MODE=test git push origin",
+        ):
+            operations, _, implicit_target = classify_tool_call(
+                "Bash", {"command": command}
+            )
+            self.assertEqual(
+                ["git_push", "unknown_external_write"], operations, command
+            )
+            self.assertNotIn("push_target_branch", implicit_target, command)
+        operations, _, explicit_target = classify_tool_call(
+            "Bash", {"command": "git push origin HEAD:feature/TAP-123"}
+        )
+        self.assertEqual(["git_push"], operations)
+        self.assertEqual("feature/TAP-123", explicit_target["push_target_branch"])
+        self.assertEqual("HEAD", explicit_target["push_source_ref"])
+        self.assertEqual(
+            "refs/heads/feature/TAP-123",
+            explicit_target["push_destination_ref"],
+        )
+        refspec_cases = {
+            "git push origin feature/TAP-123": (
+                "feature/TAP-123", "refs/heads/feature/TAP-123",
+            ),
+            "git push origin refs/heads/feature/TAP-123": (
+                "refs/heads/feature/TAP-123", "refs/heads/feature/TAP-123",
+            ),
+            "git push origin evil:feature/TAP-123": (
+                "evil", "refs/heads/feature/TAP-123",
+            ),
+            "git push origin HEAD:refs/tags/v1": ("HEAD", "refs/tags/v1"),
+        }
+        for command, expected in refspec_cases.items():
+            operations, _, refspec_target = classify_tool_call(
+                "Bash", {"command": command}
+            )
+            self.assertEqual(["git_push"], operations, command)
+            self.assertEqual(expected[0], refspec_target["push_source_ref"], command)
+            self.assertEqual(expected[1], refspec_target["push_destination_ref"], command)
+        for command in (
+            "git push upstream feature/TAP-123",
+            "git push git@github.com:acme/widget.git feature/TAP-123",
+            "git push /tmp/widget.git feature/TAP-123",
+            "git push --repo=origin feature/TAP-123",
+            "git push --receive-pack=custom origin feature/TAP-123",
+            "git push --push-option=ci.skip origin feature/TAP-123",
+            "git push --no-verify origin feature/TAP-123",
+            "git -c color.ui=false push origin feature/TAP-123",
+            "git --config-env=remote.origin.pushurl=PUSH_URL push origin feature/TAP-123",
+            "git --exec-path=/custom/git push origin feature/TAP-123",
+            "git -c remote.origin.pushurl=git@evil.test:acme/widget.git push origin feature/TAP-123",
+        ):
+            operations, _, unsafe_remote_target = classify_tool_call(
+                "Bash", {"command": command}
+            )
+            self.assertIn("unknown_external_write", operations, command)
+        for command in (
+            "git push --delete origin feature/TAP-123",
+            "git push -d origin feature/TAP-123",
+            "git push --prune origin feature/TAP-123",
+            "git push origin :feature/TAP-123",
+            "git push --follow-tags origin feature/TAP-123",
+            "git push --tags origin feature/TAP-123",
+            "git push --all origin feature/TAP-123",
+            "git push --mirror origin feature/TAP-123",
+            "git push --atomic origin feature/TAP-123",
+            "git push origin 'refs/heads/*:refs/heads/*'",
+        ):
+            operations, _, unsafe_push_target = classify_tool_call(
+                "Bash", {"command": command}
+            )
+            self.assertEqual(
+                ["git_push", "unknown_external_write"], operations, command
+            )
+            self.assertNotIn("push_target_branch", unsafe_push_target, command)
+        self.assertEqual(
+            ["git_push"],
+            classify_bash(
+                "git push --dry-run --porcelain origin feature/TAP-123"
+            ),
+        )
+        for command in (
+            "git ship feature/TAP-123",
+            "git -c alias.ship='push origin main' ship feature/TAP-123",
+        ):
+            self.assertEqual(["unknown_external_write"], classify_bash(command), command)
+        self.assertEqual([], classify_bash("git -c color.ui=false status --short"))
+        self.assertEqual(
+            [],
+            classify_bash("git --config-env=color.ui=COLOR_SETTING status --short"),
+        )
+
+        operations, _, target = classify_tool_call(
+            "Bash",
+            {"command": "workflow/task.py repository prepare --issue-key tap-123 --dir ../target"},
+        )
+        self.assertEqual(["prepare_task_repository"], operations)
+        self.assertEqual("TAP-123", target["issue_key"])
+        self.assertEqual("../target", target["workspace"])
+        for command in (
+            "workflow/task.py repository prepare --issue-key TAP-123 --issue-key TAP-123",
+            "workflow/task.py repository prepare --issue-key=TAP-123 --issue-key TAP-124",
+            "workflow/task.py repository prepare --dir ws-a --issue-key TAP-123 --dir=ws-b",
+            "workflow/task.py repository prepare --dir=ws-a --dir ws-a --issue-key=TAP-123",
+        ):
+            operations, _, duplicate_target = classify_tool_call(
+                "Bash", {"command": command}
+            )
+            self.assertEqual(
+                ["prepare_task_repository", "unknown_external_write"],
+                operations,
+                command,
+            )
+            self.assertNotIn("issue_key", duplicate_target, command)
+            self.assertNotIn("workspace", duplicate_target, command)
+        operations, _, target = classify_tool_call(
+            "Bash",
+            {"command": "git commit -m x && echo --issue-key TAP-999 --dir /tmp/other"},
+        )
+        self.assertEqual(["git_commit"], operations)
+        self.assertNotIn("issue_key", target)
+        self.assertNotIn("workspace", target)
+        self.assertEqual(
+            ["prepare_task_repository"],
+            classify_bash("python3 -B workflow/task.py repository prepare --issue-key TAP-123"),
+        )
+        operations, _, target = classify_tool_call(
+            "Bash",
+            {"command": "workflow/task.py status --issue-key TAP-999 --dir wsA && workflow/task.py repository prepare --issue-key tap-123 --dir wsB"},
+        )
+        self.assertEqual(["prepare_task_repository"], operations)
+        self.assertEqual("TAP-123", target["issue_key"])
+        self.assertEqual("wsB", target["workspace"])
+        operations, _, target = classify_tool_call(
+            "Bash",
+            {"command": "workflow/task.py purge --issue-key TAP-123 --dir wsA --yes && workflow/task.py repository prepare --issue-key TAP-124 --dir wsB"},
+        )
+        self.assertIn("unknown_external_write", operations)
+        self.assertNotIn("issue_key", target)
+        self.assertNotIn("workspace", target)
+        operations, _, target = classify_tool_call(
+            "Bash", {"command": "git push origin feature/TAP-123 && git push origin main"},
+        )
+        self.assertEqual(["git_push", "git_push", "unknown_external_write"], operations)
+        self.assertNotIn("push_target_branch", target)
+        operations, _, target = classify_tool_call(
+            "Bash", {"command": "git push origin feature/TAP-123 && git push origin feature/TAP-123"},
+        )
+        self.assertEqual(["git_push", "git_push"], operations)
+        self.assertEqual("feature/TAP-123", target["push_target_branch"])
+        operations, _, target = classify_tool_call(
+            "Bash", {"command": "git push origin feature/TAP-123 feature/TAP-124"},
+        )
+        self.assertIn("unknown_external_write", operations)
+        self.assertNotIn("push_target_branch", target)
+        operations, _, target = classify_tool_call(
+            "Bash", {"command": "gh pr create -R acme/widget && gh pr edit 1 -R acme/other"},
+        )
+        self.assertIn("unknown_external_write", operations)
+        self.assertNotIn("repository", target)
+        operations, _, target = classify_tool_call(
+            "Bash", {"command": "gh pr create -R acme/widget && gh pr edit 1 --repo acme/widget"},
+        )
+        self.assertEqual(["create_pr", "update_pr"], operations)
+        self.assertEqual("acme/widget", target["repository"])
 
     def test_contract_policy_drift_fails_closed(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -55,11 +55,14 @@ for file in \
   projects/tapdata/skills/tapdata-task/SKILL.md \
   skills/ao-test-takeover/SKILL.md \
   adapters/workspace/AGENTS.md adapters/workspace/agenticops adapters/agents/claude/templates/CLAUDE.md \
-  adapters/runtime.py adapters/tools/classifier.py adapters/tools/mcp-operations.json \
+  adapters/runtime.py adapters/tools/classifier.py adapters/tools/git_push_syntax.py \
+  adapters/tools/shell_classifier.py \
+  adapters/tools/shell_syntax.py \
+  adapters/tools/mcp-operations.json \
   adapters/agents/claude/hook.py adapters/agents/claude/manifest.json \
   adapters/agents/codex/hook.py adapters/agents/codex/manifest.json \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
-  bootstrap/workspace-init.sh bootstrap/render.py bootstrap/agent_registry.py \
+  bootstrap/workspace-init.sh bootstrap/render.py bootstrap/workspace_paths.py bootstrap/agent_registry.py \
   bootstrap/product_state.py bootstrap/repository_pool.py bootstrap/workspace_registry.py \
   workflow/repository_worktree.py \
   tests/test_gate.py tests/test_contracts.py tests/test_adapter_boundary.py tests/test_workflow.py tests/test_install.sh \
@@ -121,6 +124,43 @@ grep -Fq '__AGENTIC_OPS_HOME__' adapters/workspace/AGENTS.md ||
   fail "工作目录入口缺少安装路径占位符"
 grep -Fq 'deny_with_guidance' adapters/agents/codex/manifest.json ||
   fail "Codex Adapter 未声明二态降级"
+python3 - <<'PY' || fail "Project、MCP 与 Codex 资源版本不一致"
+import ast
+import json
+from pathlib import Path
+
+manifest = json.loads(Path("adapters/agents/codex/manifest.json").read_text(encoding="utf-8"))
+tree = ast.parse(Path("adapters/agents/codex/hook.py").read_text(encoding="utf-8"))
+versions = [
+    node.value.value
+    for node in tree.body
+    if isinstance(node, ast.Assign)
+    and any(isinstance(target, ast.Name) and target.id == "ADAPTER_VERSION" for target in node.targets)
+    and isinstance(node.value, ast.Constant)
+    and type(node.value.value) is int
+]
+assert manifest["adapter_version"] == 3
+assert versions == [manifest["adapter_version"]]
+
+mappings = json.loads(Path("adapters/tools/mcp-operations.json").read_text(encoding="utf-8"))
+assert "atlassianuserinfo" in mappings["readonly_tools"]
+
+profile = json.loads(Path("projects/tapdata/profile.json").read_text(encoding="utf-8"))
+assert profile["statuses"]["Analyzed"] == "waiting_takeover"
+assert profile["transitions"]["start_progress"] == {
+    "name": "Start Investigation",
+    "id": "421",
+    "from": ["Analyzed"],
+    "to": "In Progress",
+}
+PY
+grep -Fq '接管、继续或 reset 成功只是流程恢复点' adapters/workspace/AGENTS.md ||
+  fail "工作空间入口未声明接管后的连续推进"
+grep -Fq '远程候选参考' adapters/workspace/AGENTS.md ||
+  fail "工作空间入口未声明远程源码证据边界"
+grep -Fq '登记完成后立即执行受控 `task.py repository prepare`' \
+  projects/tapdata/skills/tapdata-task/SKILL.md ||
+  fail "TapData Skill 未声明受控仓库准备"
 grep -Fq 'repositories' policies/operations.json || fail "任务授权未绑定多仓库集合"
 grep -Fq '@AGENTS.md' adapters/agents/claude/templates/CLAUDE.md ||
   fail "Claude 入口未复用公共 Agent 规则"
@@ -128,8 +168,25 @@ grep -Fq '"project_skill_target": ".claude/skills"' adapters/agents/claude/manif
   fail "Claude Adapter 未声明原生 Project Skill 发现目录"
 grep -Fq '"project_skill_target": ".agents/skills"' adapters/agents/codex/manifest.json ||
   fail "Codex Adapter 未声明原生 Project Skill 发现目录"
-grep -Fq 'symlink_to' bootstrap/render.py ||
-  fail "Bootstrap 未以受控符号链接接线中央 Project Skill"
+grep -Fq 'WorkspaceDirectory' bootstrap/render.py ||
+  fail "Bootstrap 未以 workspace 目录 FD 锚定生成接线"
+grep -Fq 'os.O_NOFOLLOW' bootstrap/workspace_paths.py ||
+  fail "Bootstrap 未拒绝跟随工作空间产物父目录符号链接"
+grep -Fq 'os.symlink(target, leaf, dir_fd=parent_fd)' bootstrap/workspace_paths.py ||
+  fail "Bootstrap 未相对已验证父目录 FD 接线中央 Project Skill"
+grep -Fq 'src_dir_fd=parent_fd, dst_dir_fd=parent_fd' bootstrap/workspace_paths.py ||
+  fail "Bootstrap 原子替换未锚定已验证父目录 FD"
+grep -Fq 'os.unlink(leaf, dir_fd=parent_fd)' bootstrap/workspace_paths.py ||
+  fail "Bootstrap 删除未锚定已验证父目录 FD"
+grep -Fq '_assert_entry_unchanged(relative)' bootstrap/workspace_paths.py ||
+  fail "Bootstrap 未复核最终产物在校验后是否被替换"
+grep -Fq 'for child in os.listdir(directory_fd)' bootstrap/workspace_paths.py ||
+  fail "Bootstrap purge 未基于已打开目录 FD 递归枚举状态树"
+grep -Fq 'self._remove_tree_at(directory_fd, child' bootstrap/workspace_paths.py ||
+  fail "Bootstrap purge 递归删除未保持子目录 FD 锚定"
+if grep -Eq 'shutil\.rmtree|Path\([^)]*\)\.rmdir' bootstrap/workspace_registry.py; then
+  fail "Bootstrap workspace purge 仍将绝对路径交给递归删除副作用"
+fi
 
 test ! -e gate/hook.py || fail "Gate 仍包含平台 Hook 入口"
 test ! -e adapters/claude || fail "仍包含旧 Claude Adapter 路径"

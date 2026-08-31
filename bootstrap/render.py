@@ -16,6 +16,7 @@ from agent_registry import select
 from product_state import load as load_product_state
 from repository_pool import load as load_repository_pool
 from repository_pool import validate_root as validate_repository_pool_root
+from workspace_paths import WorkspaceDirectory, workspace_artifact_path
 
 
 SCHEMA_VERSION = 2
@@ -35,19 +36,8 @@ def safe_path(root, relative):
     return candidate
 
 
-def workspace_artifact_path(workspace, relative):
-    relative_path = Path(relative)
-    if (
-        relative_path.is_absolute()
-        or not relative_path.parts
-        or any(part == ".." for part in relative_path.parts)
-    ):
-        raise ValueError("工作空间产物路径越界：%s" % relative)
-    return workspace / relative_path
-
-
 def state_path(workspace, name):
-    return workspace / STATE_DIRECTORY / name
+    return workspace_artifact_path(workspace, Path(STATE_DIRECTORY) / name)
 
 
 def read_json(path, label):
@@ -109,30 +99,52 @@ def content_hash(content):
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def load_workspace(workspace):
-    path = state_path(workspace, WORKSPACE_NAME)
-    if path.is_file():
-        document = read_json(path, "工作空间配置")
-        if document.get("schema_version") not in (1, SCHEMA_VERSION):
-            raise ValueError("不支持的工作空间配置版本")
-        return document, None
-    legacy = workspace / LEGACY_BINDING_NAME
-    if legacy.is_file():
-        document = read_json(legacy, "旧工作空间绑定")
+def load_workspace(workspace, tree=None):
+    if tree is None:
+        path = state_path(workspace, WORKSPACE_NAME)
+        if path.is_file():
+            document = read_json(path, "工作空间配置")
+        else:
+            legacy = workspace_artifact_path(workspace, LEGACY_BINDING_NAME)
+            if not legacy.is_file():
+                return None, None
+            document = read_json(legacy, "旧工作空间绑定")
+            return {
+                "schema_version": 1,
+                "product_root": document.get("product_root"),
+                "project": document.get("project"),
+                "agents": document.get("agents"),
+            }, document
+    elif tree.is_file(Path(STATE_DIRECTORY) / WORKSPACE_NAME):
+        document = tree.read_json(Path(STATE_DIRECTORY) / WORKSPACE_NAME, "工作空间配置")
+    elif tree.is_file(LEGACY_BINDING_NAME):
+        document = tree.read_json(LEGACY_BINDING_NAME, "旧工作空间绑定")
         return {
             "schema_version": 1,
             "product_root": document.get("product_root"),
             "project": document.get("project"),
             "agents": document.get("agents"),
         }, document
+    else:
+        return None, None
+    if document is not None:
+        if document.get("schema_version") not in (1, SCHEMA_VERSION):
+            raise ValueError("不支持的工作空间配置版本")
+        return document, None
     return None, None
 
 
-def load_init(workspace):
-    path = state_path(workspace, INIT_NAME)
-    if not path.is_file():
+def load_init(workspace, tree=None):
+    relative = Path(STATE_DIRECTORY) / INIT_NAME
+    if tree is None:
+        path = state_path(workspace, INIT_NAME)
+        if not path.is_file():
+            return None
+        document = read_json(path, "工作空间初始化信息")
+    elif not tree.is_file(relative):
         return None
-    document = read_json(path, "工作空间初始化信息")
+    else:
+        document = tree.read_json(relative, "工作空间初始化信息")
     if document.get("schema_version") not in (1, INIT_SCHEMA_VERSION):
         raise ValueError("不支持的工作空间初始化版本")
     return document
@@ -209,7 +221,9 @@ def expected_artifacts(install_root, workspace, project, agents, manifests):
                         "Agent 项目 Skill 接线目标冲突：%s 同时由 %s 和 %s 生成"
                         % (target, owners[target], agent_id)
                     )
-                destination = workspace_artifact_path(workspace, target)
+                destination = workspace_artifact_path(
+                    workspace, target, allow_final_symlink=True
+                )
                 artifacts[target] = symlink_artifact(
                     os.path.relpath(str(source), str(destination.parent))
                 )
@@ -308,47 +322,45 @@ def artifact_record(artifact):
     return {"kind": "symlink", "target": artifact["target"]}
 
 
-def assert_artifact_ownership(workspace, owned, artifacts):
+def assert_artifact_ownership(workspace, owned, artifacts, tree):
     for target, expected in artifacts.items():
-        path = workspace_artifact_path(workspace, target)
-        if not path.exists() and not path.is_symlink():
+        path = tree.path(target)
+        if not tree.exists(target):
             continue
         if target in owned:
             continue
         if expected["kind"] == "symlink":
-            if not path.is_symlink() or os.readlink(path) != expected["target"]:
+            if not tree.is_symlink(target) or tree.readlink(target) != expected["target"]:
                 raise ValueError("工作空间已有非 AgenticOps 文件，拒绝覆盖：%s" % path)
             continue
         try:
-            content = path.read_text(encoding="utf-8")
-        except OSError as error:
+            content = tree.read_text(target)
+        except ValueError as error:
             raise ValueError("工作空间同名文件无法读取：%s：%s" % (path, error)) from error
-        if path.is_symlink() or content != expected["content"]:
+        if tree.is_symlink(target) or content != expected["content"]:
             raise ValueError("工作空间已有非 AgenticOps 文件，拒绝覆盖：%s" % path)
 
 
-def remove_stale_artifacts(workspace, owned, expected_targets):
+def remove_stale_artifacts(workspace, owned, expected_targets, tree):
     for target, recorded in owned.items():
         if target in expected_targets:
             continue
-        path = workspace_artifact_path(workspace, target)
-        if not path.exists() and not path.is_symlink():
+        path = tree.path(target)
+        if not tree.exists(target):
             continue
         if recorded["kind"] == "symlink":
-            if not path.is_symlink() or os.readlink(path) != recorded["target"]:
+            if not tree.is_symlink(target) or tree.readlink(target) != recorded["target"]:
                 raise ValueError("旧 Skill 接线已被修改或异常，拒绝删除：%s" % path)
         else:
-            if not path.is_file() or path.is_symlink():
+            if not tree.is_file(target) or tree.is_symlink(target):
                 raise ValueError("旧接线不是普通文件，拒绝删除：%s" % path)
-            content = path.read_text(encoding="utf-8")
+            content = tree.read_text(target)
             if recorded["sha256"] and content_hash(content) != recorded["sha256"]:
                 raise ValueError("旧接线已被修改，拒绝删除：%s" % path)
-        path.unlink()
-        parent = path.parent
-        while parent != workspace:
-            try:
-                parent.rmdir()
-            except OSError:
+        tree.unlink(target)
+        parent = Path(target).parent
+        while parent.parts:
+            if not tree.rmdir_cached(parent):
                 break
             parent = parent.parent
 
@@ -379,7 +391,7 @@ def validate_workspace_document(install_root, document):
     return project, selected, manifests
 
 
-def check_workspace(install_root, workspace, config, init):
+def check_workspace(install_root, workspace, config, init, tree):
     if init is None:
         raise ValueError("工作空间缺少 init.json，请执行 agenticops repair")
     project, agents, manifests = validate_workspace_document(install_root, config)
@@ -392,14 +404,14 @@ def check_workspace(install_root, workspace, config, init):
         raise ValueError("工作空间初始化清单漂移，请执行 agenticops repair")
     drift = []
     for target, expected in artifacts.items():
-        path = workspace_artifact_path(workspace, target)
+        path = tree.path(target)
         if expected["kind"] == "symlink":
-            valid = path.is_symlink() and os.readlink(path) == expected["target"]
+            valid = tree.is_symlink(target) and tree.readlink(target) == expected["target"]
         else:
             valid = (
-                path.is_file()
-                and not path.is_symlink()
-                and path.read_text(encoding="utf-8") == expected["content"]
+                tree.is_file(target)
+                and not tree.is_symlink(target)
+                and tree.read_text(target) == expected["content"]
             )
         if not valid:
             drift.append(target)
@@ -441,91 +453,84 @@ def main():
 
     install_root = Path(arguments.install_home).resolve()
     workspace = Path(arguments.workspace).resolve()
-    config, legacy = load_workspace(workspace)
-    legacy_workspace_schema = bool(config and config.get("schema_version") == 1)
-    try:
-        config = migrate_workspace_document(install_root, workspace, config)
-    except ValueError as error:
-        parser.error(str(error))
-    init = load_init(workspace)
-    if arguments.refresh or arguments.check:
-        if config is None:
-            parser.error("工作空间尚未初始化，请先执行 agenticops init")
-        project = config["project"]
-        requested_agents = config["agents"]
-    else:
-        project = arguments.project or "tapdata"
-        requested_agents = arguments.agent
-
-    project_root = install_root / "projects" / project
-    if not project_root.is_dir():
-        parser.error("未安装项目适配：%s" % project)
     workspace.mkdir(parents=True, exist_ok=True)
-
-    if arguments.check:
-        if legacy_workspace_schema:
-            parser.error("工作空间配置需要迁移 Source Pool 绑定，请执行 agenticops repair")
-        try:
-            checked_project, checked_agents = check_workspace(
-                install_root, workspace, config, init
-            )
-        except ValueError as error:
-            parser.error(str(error))
-        print(
-            "AgenticOps 工作空间检查通过：%s（project=%s，agents=%s，ref=%s）"
-            % (
-                workspace,
-                checked_project,
-                ",".join(checked_agents),
-                init["product_ref"],
-            )
-        )
-        return 0
-
     try:
-        if config is not None:
-            validate_workspace_document(install_root, config)
-        agents, manifests = select(install_root, requested_agents)
-        artifacts, messages = expected_artifacts(
-            install_root, workspace, project, agents, manifests
-        )
-        document = init_document(install_root, artifacts)
-        owned = owned_artifacts(init, legacy)
-        assert_artifact_ownership(workspace, owned, artifacts)
-        remove_stale_artifacts(workspace, owned, set(artifacts))
-        workspace_config = workspace_document(
-            install_root,
-            workspace,
-            project,
-            agents,
-            config,
-            arguments.repository_pool,
-        )
+        with WorkspaceDirectory(workspace) as tree:
+            config, legacy = load_workspace(workspace, tree)
+            legacy_workspace_schema = bool(config and config.get("schema_version") == 1)
+            config = migrate_workspace_document(install_root, workspace, config)
+            init = load_init(workspace, tree)
+            if arguments.refresh or arguments.check:
+                if config is None:
+                    parser.error("工作空间尚未初始化，请先执行 agenticops init")
+                project = config["project"]
+                requested_agents = config["agents"]
+            else:
+                project = arguments.project or "tapdata"
+                requested_agents = arguments.agent
+
+            project_root = install_root / "projects" / project
+            if not project_root.is_dir():
+                parser.error("未安装项目适配：%s" % project)
+
+            if arguments.check:
+                if legacy_workspace_schema:
+                    parser.error("工作空间配置需要迁移 Source Pool 绑定，请执行 agenticops repair")
+                checked_project, checked_agents = check_workspace(
+                    install_root, workspace, config, init, tree
+                )
+                print(
+                    "AgenticOps 工作空间检查通过：%s（project=%s，agents=%s，ref=%s）"
+                    % (
+                        workspace,
+                        checked_project,
+                        ",".join(checked_agents),
+                        init["product_ref"],
+                    )
+                )
+                return 0
+
+            if config is not None:
+                validate_workspace_document(install_root, config)
+            agents, manifests = select(install_root, requested_agents)
+            artifacts, messages = expected_artifacts(
+                install_root, workspace, project, agents, manifests
+            )
+            document = init_document(install_root, artifacts)
+            owned = owned_artifacts(init, legacy)
+            assert_artifact_ownership(workspace, owned, artifacts, tree)
+            remove_stale_artifacts(workspace, owned, set(artifacts), tree)
+            workspace_config = workspace_document(
+                install_root,
+                workspace,
+                project,
+                agents,
+                config,
+                arguments.repository_pool,
+            )
+
+            for target, artifact in artifacts.items():
+                destination = tree.path(target)
+                if artifact["kind"] == "symlink":
+                    if tree.exists(target):
+                        if tree.is_symlink(target) or tree.is_file(target):
+                            tree.unlink(target)
+                        else:
+                            parser.error(
+                                "工作空间 Skill 接线位置是目录，拒绝覆盖：%s" % destination
+                            )
+                    tree.symlink(artifact["target"], target)
+                else:
+                    tree.write_text_atomic(target, artifact["content"])
+                if target == ".agenticops/agenticops":
+                    tree.chmod(target, 0o700)
+            tree.write_json_atomic(Path(STATE_DIRECTORY) / WORKSPACE_NAME, workspace_config)
+            tree.write_json_atomic(Path(STATE_DIRECTORY) / INIT_NAME, document)
+            if tree.is_file(LEGACY_BINDING_NAME):
+                tree.unlink(LEGACY_BINDING_NAME)
     except ValueError as error:
         parser.error(str(error))
 
-    for target, artifact in artifacts.items():
-        destination = workspace_artifact_path(workspace, target)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if artifact["kind"] == "symlink":
-            if destination.exists() or destination.is_symlink():
-                if destination.is_symlink() or destination.is_file():
-                    destination.unlink()
-                else:
-                    parser.error("工作空间 Skill 接线位置是目录，拒绝覆盖：%s" % destination)
-            destination.symlink_to(artifact["target"])
-        else:
-            destination.write_text(artifact["content"], encoding="utf-8")
-        if target == ".agenticops/agenticops":
-            os.chmod(destination, 0o700)
-    write_json_atomic(
-        state_path(workspace, WORKSPACE_NAME),
-        workspace_config,
-    )
-    write_json_atomic(state_path(workspace, INIT_NAME), document)
-    legacy_path = workspace / LEGACY_BINDING_NAME
-    if legacy_path.is_file():
-        legacy_path.unlink()
     update_git_exclude(workspace, artifacts)
     print(
         "AgenticOps 工作空间接线已刷新：%s（project=%s，agents=%s，ref=%s）"

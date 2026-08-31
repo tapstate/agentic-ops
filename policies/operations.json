@@ -16,7 +16,9 @@
     "pr_merge": { "level": "excluded" },
     "git_rebase": { "level": "excluded" },
     "git_clean": { "level": "excluded" },
-    "manage_repository_worktree": { "level": "gated" },
+    "prepare_task_repository": { "level": "controlled" },
+    "manage_repository_worktree": { "level": "excluded" },
+    "delete_task_state": { "level": "excluded" },
     "git_tag": { "level": "excluded" },
     "release": { "level": "excluded" },
     "scope_change": { "level": "excluded" },
@@ -43,6 +45,7 @@
         "approved_scope",
         "verification_method"
       ],
+      "push_repository_bindings": ["authorized_endpoint"],
       "covered_operations": [
         "git_commit",
         "git_push",

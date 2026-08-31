@@ -30,6 +30,89 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
 
         self.assertEqual(["harsen/TAP-123/develop", "release-v3.8.0"], branches)
 
+    def test_tap_marker_uses_complete_token_and_zero_match_is_unresolved(self):
+        repositories = {
+            "tapdata/tapdata": {"origin": "product-origin"},
+            "tapdata/tapdata-enterprise": {"origin": "enterprise-origin"},
+        }
+        rules = {
+            "product_repository": "tapdata/tapdata",
+            "license_repository": "tapdata/tapdata-license",
+            "keep_current_repositories": [],
+            "independent_repositories": [],
+            "same_name_repositories": ["tapdata/tapdata-enterprise"],
+            "plugin_release_repositories": [],
+        }
+        with mock.patch.object(
+            align,
+            "remote_branches",
+            return_value=["feature/TAP-1234-prefix-collision"],
+        ):
+            matches = align.marker_branches("enterprise-origin", "TAP-123")
+            target, resolution, reason = align.derived_target(
+                "tapdata/tapdata-enterprise",
+                "feature/TAP-123-fix",
+                repositories,
+                rules,
+                None,
+                {},
+                {},
+            )
+
+        self.assertEqual([], matches)
+        self.assertIsNone(target)
+        self.assertEqual("unresolved", resolution)
+        self.assertIn("完整 Jira 标记 TAP-123", reason)
+        self.assertIn("显式 override", reason)
+
+    def test_duplicate_tap_marker_requires_explicit_override(self):
+        repository = "tapdata/tapdata-enterprise"
+        repositories = {
+            "tapdata/tapdata": {"origin": "product-origin"},
+            repository: {"origin": "enterprise-origin"},
+        }
+        rules = {
+            "product_repository": "tapdata/tapdata",
+            "license_repository": "tapdata/tapdata-license",
+            "keep_current_repositories": [],
+            "independent_repositories": [],
+            "same_name_repositories": [repository],
+            "plugin_release_repositories": [],
+        }
+        branches = [
+            "alice/TAP-123/fix",
+            "bob/TAP-123/fix",
+            "bob/TAP-1234/prefix-collision",
+        ]
+        with mock.patch.object(align, "remote_branches", return_value=branches):
+            target, resolution, reason = align.derived_target(
+                repository,
+                "feature/TAP-123-fix",
+                repositories,
+                rules,
+                None,
+                {},
+                {},
+            )
+
+        self.assertIsNone(target)
+        self.assertEqual("unresolved", resolution)
+        self.assertIn("匹配多个远程分支", reason)
+        self.assertNotIn("TAP-1234", reason)
+        self.assertIn("显式 override", reason)
+
+        explicit, explicit_resolution, _ = align.derived_target(
+            repository,
+            "feature/TAP-123-fix",
+            repositories,
+            rules,
+            None,
+            {repository: "reviewed/TAP-123/fix"},
+            {},
+        )
+        self.assertEqual("reviewed/TAP-123/fix", explicit)
+        self.assertEqual("explicit", explicit_resolution)
+
     def test_current_matrix_covers_catalog_and_reports_remote_status(self):
         config, repositories = align.load_configuration(ROOT)
         with mock.patch.object(align, "remote_branch_status", return_value=("exists", "sha-current")):
