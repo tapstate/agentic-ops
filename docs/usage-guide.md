@@ -61,6 +61,10 @@ printf '%s\n' "$bootstrap" | bash -s -- --repository-pool <Source-Pool-目录>
 (
   set -euo pipefail
   ao_install_root="$HOME/.agentic-ops"
+  # 复用已有外部池时改为该池的绝对路径。
+  ao_repository_pool="$HOME/.agentic-ops-repos"
+  # 默认不自动下载业务仓库；仅在项目映射和下载范围已确认后改为 auto-clone。
+  ao_repository_provisioning="manual"
   test ! -e "$ao_install_root" || {
     printf '安装目录已存在：%s；请使用 agenticops update 更新\n' "$ao_install_root" >&2
     exit 2
@@ -83,7 +87,8 @@ printf '%s\n' "$bootstrap" | bash -s -- --repository-pool <Source-Pool-目录>
     --branch main \
     --current-ref "$ao_current_ref"
   python3 "$ao_install_root/bootstrap/repository_pool.py" \
-    --product-root "$ao_install_root" configure --provisioning manual
+    --product-root "$ao_install_root" configure \
+    --root "$ao_repository_pool" --provisioning "$ao_repository_provisioning"
 )
 ```
 
@@ -94,7 +99,31 @@ printf '%s\n' "$bootstrap" | bash -s -- --repository-pool <Source-Pool-目录>
 两种方式安装出的目录结构和产品状态相同；下载、认证或克隆失败时不会继续安装。不要把
 产品源码仓库当作业务安装目录。
 
-## 2. 初始化项目工作空间
+## 2. 选择并配置 Source Pool
+
+Source Pool 是业务仓库的统一主工作树根目录：每个仓库位于
+`<Source-Pool>/<owner>/<repo>`，任务实际修改的 linked worktree 则位于各自工作空间的
+`.agenticops/worktrees/`。它不是 Product Root 的子目录，也不会被 Agent 整体加入可写范围。
+
+安装时未指定池会创建默认池；仅在需要复用已有、干净的业务仓库主工作树或需要为不同环境
+隔离仓库缓存时，才显式指定该参数。GitHub CLI 安装在第 1.1 节的 `bash -s --` 后传入
+`--repository-pool`；Git clone 安装在第 1.2 节修改 `ao_repository_pool`。池目录必须可读、
+可写、可进入，且不能与 Product Root 或项目工作空间互相嵌套。
+
+默认使用 `manual` 供给模式：先由用户按 `<owner>/<repo>` 布局下载并校验业务仓库，任务
+准备只会使用已接入的仓库。`auto-clone` 会在任务准备时自动 clone 项目仓库；只有项目仓库
+映射、Git SSH 权限和自动下载范围均已确认时才使用：
+
+在 GitHub CLI 安装方式中附加 `--repository-provisioning auto-clone`；Git clone 安装方式中把
+`ao_repository_provisioning` 改为 `auto-clone`。除这两处外，不要在工作空间或任务执行时临时
+改变供给模式。
+
+工作空间首次初始化时默认继承 Product Root 的池；如该工作空间必须使用独立池，在首次初始化
+显式传入 `--repository-pool`。实际路径与来源会固化在 `.agenticops/workspace.json`；之后改变
+Product Root 默认池不会静默重绑已有工作空间，也不得手改该文件。迁移前必须先清理任务
+worktree，再重新初始化或使用后续受控迁移能力。
+
+## 3. 初始化项目工作空间
 
 先查看产品根目录（Product Root）当前提供的 Agent：
 
@@ -114,16 +143,12 @@ printf '%s\n' "$bootstrap" | bash -s -- --repository-pool <Source-Pool-目录>
 ~/.agentic-ops/agenticops init --workspace <项目工作空间> --project tapdata --agent <Agent-ID-1> --agent <Agent-ID-2>
 ```
 
-工作空间默认继承 Product Root 的 Source Pool，并把实际根目录固化在
-`.agenticops/workspace.json`。需要独立池时只在首次初始化显式覆盖：
+工作空间默认继承 Product Root 的 Source Pool。需要独立池时只在首次初始化显式覆盖：
 
 ```sh
 ~/.agentic-ops/agenticops init --workspace <项目工作空间> --project tapdata \
   --repository-pool <独立-Source-Pool-目录>
 ```
-
-已有工作空间不会因为 Product Root 默认池变化而静默重绑；确需迁移必须先清理任务
-worktree，再重新初始化或通过后续受控迁移能力处理，不能手改 `workspace.json`。
 
 没有 `both` 特殊值，也不限制 Agent 数量。一个工作空间绑定一个产品项目，可接管该
 项目下任意多个任务；一个任务可修改多个仓库。
@@ -159,7 +184,7 @@ cd <项目工作空间>
 `purge` 会联动清理洁净 worktree 后删除任务状态，且不支持批量执行。非交互环境默认拒绝
 这些确认操作；仅在已由调用方展示并确认目标列表的自动化场景中使用 `--yes`。
 
-## 3. 工作空间数据
+## 4. 工作空间数据
 
 ```text
 .agenticops/
@@ -173,7 +198,7 @@ cd <项目工作空间>
 `init.json` 和 Agent 配置可重新生成；`workspace.json` 是工作空间配置；`tasks/` 是
 业务运行数据。Policy、Project Skill 和 Runtime 不复制到工作空间。
 
-## 4. 检查、更新与回退
+## 5. 检查、更新与回退
 
 ```sh
 ~/.agentic-ops/agenticops doctor --workspace <项目工作空间>
@@ -187,7 +212,7 @@ cd <项目工作空间>
 记录的分支；`rollback` 回到最近一次更新前的提交。使用工作面有本地修改、HEAD
 偏离安装记录或远端历史异常时会停止，不会覆盖现场。
 
-## 5. 启动 Agent、查看并接管任务
+## 6. 启动 Agent、查看并接管任务
 
 普通只读接管/梳理从薄工作空间启动：
 
