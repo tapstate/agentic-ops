@@ -1,0 +1,7 @@
+interface:
+  display_name: "AgenticOps 工作空间"
+  short_description: "受控创建、更新或清理项目工作空间"
+  default_prompt: "使用 $ao-ws-init 创建或更新 AgenticOps 工作空间，并先回读 Product Root、Source Pool、工作目录和项目。"
+
+policy:
+  allow_implicit_invocation: true
