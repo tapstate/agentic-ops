@@ -21,8 +21,7 @@
   },
   "repositories": {"catalog": "repositories.json"},
   "statuses": {
-    "打开": "waiting_takeover", "待办": "waiting_takeover", "To Do": "waiting_takeover",
-    "On Hold": "waiting_takeover",
+    "Analyzed": "waiting_takeover",
     "正在进行": "implementation", "In Progress": "implementation",
     "Pull Request Submitted": "implementation", "Tests Passed": "implementation",
     "完成": "completed", "Done": "completed"
