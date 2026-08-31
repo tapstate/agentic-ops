@@ -663,6 +663,79 @@ if "$install_root/agenticops" workspace list | grep -F -- "$detached_workspace" 
   exit 1
 fi
 
+# 无法唯一归属 active 任务的 Gate 判定写入工作空间级 events.jsonl；purge 必须
+# 将这个受控审计文件与任务状态一并删除，而非把它误判为未知文件。
+unbound_events_workspace="$test_root/unbound-events-workspace"
+"$install_root/agenticops" init --workspace "$unbound_events_workspace" --agent codex >/dev/null
+python3 - "$install_root" "$unbound_events_workspace" <<'PY'
+import sys
+from pathlib import Path
+
+install_root = Path(sys.argv[1])
+workspace = Path(sys.argv[2])
+sys.path.insert(0, str(install_root))
+
+from gate import runner
+
+result = runner.evaluate_request(
+    {
+        "protocol_version": 1,
+        "event": "before_operation",
+        "source": {
+            "agent": "test-agent",
+            "adapter": "test-adapter",
+            "adapter_version": 1,
+            "tool_kind": "shell",
+            "tool_name": "test",
+        },
+        "cwd": str(workspace),
+        "operations": ["unknown_external_write"],
+        "target": {},
+        "note": "测试无任务归属审计事件",
+    }
+)
+assert result["decision"] == "ask", result
+events = workspace / ".agenticops" / "events.jsonl"
+assert events.is_file(), events
+PY
+"$install_root/agenticops" workspace purge \
+  --workspace "$unbound_events_workspace" --yes >/dev/null
+test ! -e "$unbound_events_workspace/.agenticops"
+
+# 仅受控的 events.jsonl 可被 purge；其它未知状态及 events.jsonl 的非常规文件
+# 形态仍必须失败关闭，且不得触及工作空间外的目标。
+unknown_state_workspace="$test_root/unknown-state-workspace"
+"$install_root/agenticops" init --workspace "$unknown_state_workspace" --agent codex >/dev/null
+printf 'unknown\n' > "$unknown_state_workspace/.agenticops/unknown-state"
+if "$install_root/agenticops" workspace purge \
+    --workspace "$unknown_state_workspace" --yes >/dev/null 2>&1; then
+  printf '未知工作空间状态被错误清理\n' >&2
+  exit 1
+fi
+test -f "$unknown_state_workspace/.agenticops/unknown-state"
+
+event_outside="$test_root/event-outside"
+printf 'outside sentinel\n' > "$event_outside"
+event_symlink_workspace="$test_root/event-symlink-workspace"
+"$install_root/agenticops" init --workspace "$event_symlink_workspace" --agent codex >/dev/null
+ln -s "$event_outside" "$event_symlink_workspace/.agenticops/events.jsonl"
+if "$install_root/agenticops" workspace purge \
+    --workspace "$event_symlink_workspace" --yes >/dev/null 2>&1; then
+  printf '符号链接 Gate 审计事件被错误清理\n' >&2
+  exit 1
+fi
+grep -Fx 'outside sentinel' "$event_outside" >/dev/null
+
+event_directory_workspace="$test_root/event-directory-workspace"
+"$install_root/agenticops" init --workspace "$event_directory_workspace" --agent codex >/dev/null
+mkdir "$event_directory_workspace/.agenticops/events.jsonl"
+if "$install_root/agenticops" workspace purge \
+    --workspace "$event_directory_workspace" --yes >/dev/null 2>&1; then
+  printf '目录 Gate 审计事件被错误清理\n' >&2
+  exit 1
+fi
+test -d "$event_directory_workspace/.agenticops/events.jsonl"
+
 purge_workspace="$test_root/purge-workspace"
 "$install_root/agenticops" init --workspace "$purge_workspace" --agent codex >/dev/null
 python3 "$install_root/workflow/task.py" init \

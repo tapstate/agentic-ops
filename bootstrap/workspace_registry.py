@@ -18,6 +18,7 @@ from bootstrap.workspace_paths import WorkspaceDirectory, workspace_artifact_pat
 SCHEMA_VERSION = 1
 STATE_DIRECTORY = ".agenticops"
 REGISTRY_NAME = "workspaces.json"
+WORKSPACE_GATE_EVENTS = Path("events.jsonl")
 
 
 def registry_path(product_root):
@@ -230,7 +231,14 @@ def detach_preflight(product_root, workspace, purge=False, tree=None):
             for path in deletable
             if Path(path).parts and Path(path).parts[0] == STATE_DIRECTORY
         }
-        allowed.update({Path("workspace.json"), Path("init.json"), Path("tasks.lock")})
+        allowed.update(
+            {
+                Path("workspace.json"),
+                Path("init.json"),
+                Path("tasks.lock"),
+                WORKSPACE_GATE_EVENTS,
+            }
+        )
         for root in prepared_roots:
             current = root
             while current != state_root and state_root in current.parents:
@@ -244,6 +252,11 @@ def detach_preflight(product_root, workspace, purge=False, tree=None):
                 continue
             if any(path == root or root in path.parents for root in prepared_roots):
                 continue
+            if relative == WORKSPACE_GATE_EVENTS and (
+                not tree.is_file(Path(STATE_DIRECTORY) / relative)
+                or tree.is_symlink(Path(STATE_DIRECTORY) / relative)
+            ):
+                raise ValueError("工作空间 Gate 审计事件不是普通文件，拒绝清理：%s" % path)
             if relative not in allowed:
                 raise ValueError("工作空间状态包含未知文件，拒绝清理：%s" % path)
     return deletable, task_count
@@ -292,6 +305,7 @@ def detach(product_root, workspace, purge=False):
                         raise ValueError("purge 期间任务注册表发生变化，拒绝删除")
                     tree.remove_tree(Path(STATE_DIRECTORY) / "tasks", missing_ok=True)
                 tree.unlink(Path(STATE_DIRECTORY) / "tasks.lock", missing_ok=True)
+                tree.unlink(Path(STATE_DIRECTORY) / WORKSPACE_GATE_EVENTS, missing_ok=True)
 
             for relative in (
                 Path(STATE_DIRECTORY) / "init.json",
