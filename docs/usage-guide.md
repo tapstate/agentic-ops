@@ -155,12 +155,13 @@ cd <项目工作空间>
 .agenticops/
 ├── init.json                 # 初始化版本与生成产物哈希
 ├── workspace.json            # 产品根目录、workspace ID、项目、Agent、Source Pool 绑定
+├── events.jsonl              # 无法唯一归属到任务的 Gate 审计事件
 └── tasks/
     ├── index.json            # 任务注册与激活状态
     └── <JIRA-KEY>/           # 该任务的状态、授权、事件和 CI
 ```
 
-`init.json` 和 Agent 配置可重新生成；`workspace.json` 是工作空间配置；`tasks/` 是业务运行数据。Policy、Project Skill 和 Runtime 不复制到工作空间。已接入的 Agent 仅在其原生发现目录生成受控符号链接：Codex 为 `.agents/skills/<skill-name>`，Claude Code 为 `.claude/skills/<skill-name>`；两者都指向中央 Product Root 的同一项目 Skill。不要手改，如发现技能缺失或链接漂移，使用 `repair` 重建。
+`init.json` 和 Agent 配置可重新生成；`workspace.json` 是工作空间配置；`tasks/` 是业务运行数据。Gate 能唯一解析任务时将事件写入对应任务目录；无法唯一解析任务时才写入根 `events.jsonl`，它属于工作空间状态并随 `workspace purge` 删除。Policy、Project Skill 和 Runtime 不复制到工作空间。已接入的 Agent 仅在其原生发现目录生成受控符号链接：Codex 为 `.agents/skills/<skill-name>`，Claude Code 为 `.claude/skills/<skill-name>`；两者都指向中央 Product Root 的同一项目 Skill。不要手改，如发现技能缺失或链接漂移，使用 `repair` 重建。
 
 ## 5. 检查、更新与回退
 

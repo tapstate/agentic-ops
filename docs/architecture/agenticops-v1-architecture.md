@@ -62,6 +62,7 @@ Agent Adapter → Tool Adapter → Standard Request
 .agenticops/
 ├── init.json                 # Product 版本和生成产物哈希
 ├── workspace.json            # 产品根目录、workspace ID、Project、Agent 与 Source Pool 绑定
+├── events.jsonl              # 无法唯一归属到任务的 Gate 审计事件
 └── tasks/
     ├── index.json            # active/inactive/completed 注册状态
     └── <issue-key>/
@@ -71,7 +72,7 @@ Agent Adapter → Tool Adapter → Standard Request
         └── ci-<pr>.json
 ```
 
-工作空间不复制 Policy、Project Skill 或 Runtime。根 `AGENTS.md`、Agent 配置和 MCP 配置是可再生接线，文件归属及哈希记录在 `init.json`；`doctor` 检测漂移，`repair` 安全重建。旧 `.agenticops.json` 和 `.gate/` 只作为一次性迁移输入，不再是事实源。工作空间维护命令先列出精确目标再确认：`repair` 和 `clean --generated-only` 只收敛可再生接线；`detach` 删除已校验归属的接线和绑定但保留任务状态；`purge` 才会删除任务状态，且必须逐个工作空间明确确认。无法访问的登记只报告，不能被更新自动注销。
+工作空间不复制 Policy、Project Skill 或 Runtime。根 `AGENTS.md`、Agent 配置和 MCP 配置是可再生接线，文件归属及哈希记录在 `init.json`；`doctor` 检测漂移，`repair` 安全重建。Gate 能唯一解析任务时将事件写入对应任务目录；无法唯一解析任务时才写入根 `events.jsonl`，它是受控工作空间状态，随 `purge` 删除。旧 `.agenticops.json` 和 `.gate/` 只作为一次性迁移输入，不再是事实源。工作空间维护命令先列出精确目标再确认：`repair` 和 `clean --generated-only` 只收敛可再生接线；`detach` 删除已校验归属的接线和绑定但保留任务状态；`purge` 才会删除任务状态，且必须逐个工作空间明确确认。无法访问的登记只报告，不能被更新自动注销。
 
 多个 active 任务存在歧义时，Workflow 要求显式 issue key。Gate 按 issue key 或 `repository + work_branch` 唯一解析任务；零匹配、多匹配都不能借用其它任务授权。
 
