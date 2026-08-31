@@ -1,8 +1,6 @@
 # PROD-002 在副作用前执行统一门禁
 
-Agent 在调用 Git、GitHub、Jira 等副作用操作前，Adapter 先生成标准操作请求，
-统一门禁根据操作、任务授权、
-仓库和分支返回 `allow`、`ask` 或 `deny`。
+Agent 在调用 Git、GitHub、Jira 等副作用操作前，Adapter 先生成标准操作请求，统一门禁根据操作、任务授权、仓库和分支返回 `allow`、`ask` 或 `deny`。
 
 ### 验收标准
 

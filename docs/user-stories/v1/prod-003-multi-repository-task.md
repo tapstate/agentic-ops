@@ -1,19 +1,14 @@
 # PROD-003 推进并恢复多仓库研发任务
 
-一个项目工作空间可以同时接管该项目下多个 Jira 任务，每个任务可以绑定多个 Git
-仓库；Agent 中断后从各自阶段和 pending 原因恢复，并汇总各仓 PR、CI 与验证证据。
+一个项目工作空间可以同时接管该项目下多个 Jira 任务，每个任务可以绑定多个 Git 仓库；Agent 中断后从各自阶段和 pending 原因恢复，并汇总各仓 PR、CI 与验证证据。
 
 ### 验收标准
 
 - 阶段不可跳跃，准入缺项和缺少授权会阻断受影响步骤。
-- `.agenticops/tasks/index.json` 统一注册多个任务及 active/inactive/completed
-  状态，任务事实、授权、事件和 CI 记录按 issue key 隔离。
-- 多个任务可同时 active；Workflow 显式绑定 issue key，Hook 按 Jira 任务号或仓库
-  与工作分支唯一解析，歧义时失败关闭。
+- `.agenticops/tasks/index.json` 统一注册多个任务及 active/inactive/completed 状态，任务事实、授权、事件和 CI 记录按 issue key 隔离。
+- 多个任务可同时 active；Workflow 显式绑定 issue key，Hook 按 Jira 任务号或仓库与工作分支唯一解析，歧义时失败关闭。
 - 一个授权绑定多个仓库，每仓独立校验 origin、分支、范围和验证方式。
-- 多个工作空间共享 `<pool>/<owner>/<repo>` 主工作树；任务修改只落在
-  `<workspace>/.agenticops/worktrees/<issue-key>/<run-id>/<owner>/<repo>`，准备前同步远端
-  并固化 `base_sha`。
+- 多个工作空间共享 `<pool>/<owner>/<repo>` 主工作树；任务修改只落在 `<workspace>/.agenticops/worktrees/<issue-key>/<run-id>/<owner>/<repo>`，准备前同步远端并固化 `base_sha`。
 - 同 run 恢复幂等；reset 创建新 run。清理拒绝脏 worktree，并与工作空间 purge 联动。
 
 ### 保护行为

@@ -1,12 +1,8 @@
 # AgenticOps
 
-AgenticOps 是公司级 Agentic 研发基础设施，为 Codex、Claude 及后续 Agent 提供统一的
-研发规则、操作门禁、任务恢复和证据边界。Agent 仍是执行主体；AgenticOps 负责把平台
-事件转换为标准操作，并在副作用发生前给出允许、人工确认或拒绝的判定。
+AgenticOps 是公司级 Agentic 研发基础设施，为 Codex、Claude 及后续 Agent 提供统一的研发规则、操作门禁、任务恢复和证据边界。Agent 仍是执行主体；AgenticOps 负责把平台事件转换为标准操作，并在副作用发生前给出允许、人工确认或拒绝的判定。
 
-它不替代 Jira、Git、GitHub、CI 或人工审查：Jira 是任务事实源，Git 是代码事实源，
-GitHub PR/CI 是审查与检查事实源。项目工作空间只保存初始化信息，以及按任务隔离的
-本地运行、授权、恢复和门禁事件。
+它不替代 Jira、Git、GitHub、CI 或人工审查：Jira 是任务事实源，Git 是代码事实源，GitHub PR/CI 是审查与检查事实源。项目工作空间只保存初始化信息，以及按任务隔离的本地运行、授权、恢复和门禁事件。
 
 ## 解决的问题
 
@@ -54,10 +50,6 @@ Agent / Tool Adapter → 标准请求 → Gate Core + Policy → 标准判定
 
 ## 文档与合同
 
-[文档总纲](docs/README.md) 是现役人读文档的结构入口，按主题导航产品定位、架构、
-使用维护、安全验证和产品合同。v1 的稳定能力、保护行为与验收证据集中在
-[v1 用户故事总纲](docs/user-stories/v1/README.md)；具体工作项、进度、阻塞和验收
-始终在 Jira 管理，不在仓库维护平行执行计划。
+[文档总纲](docs/README.md) 是现役人读文档的结构入口，按主题导航产品定位、架构、使用维护、安全验证和产品合同。v1 的稳定能力、保护行为与验收证据集中在 [v1 用户故事总纲](docs/user-stories/v1/README.md)；具体工作项、进度、阻塞和验收始终在 Jira 管理，不在仓库维护平行执行计划。
 
-旧版 AgenticOps 的设计、合同和操作说明固定在 Git Tag `v0.7`；现役 v1.x 架构在
-`develop` 分支演进。
+旧版 AgenticOps 的设计、合同和操作说明固定在 Git Tag `v0.7`；现役 v1.x 架构在 `develop` 分支演进。

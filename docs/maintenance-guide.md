@@ -14,17 +14,9 @@ cd agentic-ops
   --repository-provisioning manual
 ```
 
-克隆前先完成 [Git SSH 授权指引](security/git-ssh-access.md)，并确认账号有本仓库访问权。
-示例显式以 `develop` 作为维护基线；`setup` 会仅 fast-forward 同步该分支、安装本仓库维护
-依赖并接入受信 Git Hook。工作区有修改时会停止，不会覆盖修改。`--repository-pool` 配置
-开发产品根目录的默认业务仓库主工作树位置；未传时默认是 `${product_root}-repos`。该目录
-不能与 Product Root 或项目工作空间互相嵌套，且必须可读、可写、可进入。
+克隆前先完成 [Git SSH 授权指引](security/git-ssh-access.md)，并确认账号有本仓库访问权。示例显式以 `develop` 作为维护基线；`setup` 会仅 fast-forward 同步该分支、安装本仓库维护依赖并接入受信 Git Hook。工作区有修改时会停止，不会覆盖修改。`--repository-pool` 配置开发产品根目录的默认业务仓库主工作树位置；未传时默认是 `${product_root}-repos`。该目录不能与 Product Root 或项目工作空间互相嵌套，且必须可读、可写、可进入。
 
-推荐初始值是 `manual`：业务仓库须由用户按 `<pool>/<owner>/<repo>` 下载并保持主工作树
-洁净，任务工作流只从这里创建 linked worktree。只有项目仓库映射、Git SSH 权限和自动下载
-范围均已确认后，才改用 `--repository-provisioning auto-clone`。配置保存于
-`.local/repository-pool.json`；它是本机运行配置，不提交。已有项目工作空间会固化当时的池
-绑定，修改开发面默认值不会静默迁移它们。
+推荐初始值是 `manual`：业务仓库须由用户按 `<pool>/<owner>/<repo>` 下载并保持主工作树洁净，任务工作流只从这里创建 linked worktree。只有项目仓库映射、Git SSH 权限和自动下载范围均已确认后，才改用 `--repository-provisioning auto-clone`。配置保存于 `.local/repository-pool.json`；它是本机运行配置，不提交。已有项目工作空间会固化当时的池绑定，修改开发面默认值不会静默迁移它们。
 
 `setup` 用于首次初始化维护工作面。之后在 `develop` 更新当前源码目录：
 
@@ -32,13 +24,11 @@ cd agentic-ops
 ./agenticops update
 ```
 
-`update` 只执行 fast-forward，不自动切换分支、处理分叉、覆盖修改或推送本地提交。
-本地领先远端时会继续同步维护依赖和 Hook，并明确报告领先提交数。
+`update` 只执行 fast-forward，不自动切换分支、处理分叉、覆盖修改或推送本地提交。本地领先远端时会继续同步维护依赖和 Hook，并明确报告领先提交数。
 
 ## 2. 初始化项目工作空间
 
-维护源码目录与项目工作空间必须分开。以下示例在当前 `develop` 源码目录为 TapData 初始化
-工作空间，并立即检查接线：
+维护源码目录与项目工作空间必须分开。以下示例在当前 `develop` 源码目录为 TapData 初始化工作空间，并立即检查接线：
 
 ```sh
 workspace="$HOME/agenticops-tapdata"
@@ -46,23 +36,18 @@ workspace="$HOME/agenticops-tapdata"
 ./agenticops doctor --workspace "$workspace"
 ```
 
-`workspace` 不得是源码目录或其子目录。省略 `--agent` 会接入当前源码目录
-提供的全部 Agent；只接入部分 Agent 时重复传入 `--agent <Agent ID>`。
+`workspace` 不得是源码目录或其子目录。省略 `--agent` 会接入当前源码目录提供的全部 Agent；只接入部分 Agent 时重复传入 `--agent <Agent ID>`。
 
 ## 3. 维护与运行是一套代码
 
-源码目录直接运行产品；修改 `develop` 后，Gate、Policy、Workflow、Project
-和 Adapter 立即从同一份源码运行，不需要复制到另一套安装目录。只有工作空间中的
-生成接线可能需要刷新：
+源码目录直接运行产品；修改 `develop` 后，Gate、Policy、Workflow、Project 和 Adapter 立即从同一份源码运行，不需要复制到另一套安装目录。只有工作空间中的生成接线可能需要刷新：
 
 ```sh
 ./agenticops doctor --workspace <项目工作空间>
 ./agenticops repair --workspace <项目工作空间>
 ```
 
-已启动的 Agent 可能仍持有启动时加载的指引，源码更新后应重启 Agent。通过
-`agenticops start` 启动时会自动刷新接线。更新、回退和首次初始化由
-`.local/lifecycle.lock/` 串行执行；发布、Hotfix 或固定验收运行期间不要更新源码。
+已启动的 Agent 可能仍持有启动时加载的指引，源码更新后应重启 Agent。通过 `agenticops start` 启动时会自动刷新接线。更新、回退和首次初始化由 `.local/lifecycle.lock/` 串行执行；发布、Hotfix 或固定验收运行期间不要更新源码。
 
 源码目录产生的所有非 Git 状态统一进入：
 
@@ -91,9 +76,7 @@ workspace="$HOME/agenticops-tapdata"
 - 安装与接线：`bootstrap/`
 - 维护面协作指引：`skills/`；它们只供维护 Agent 使用，不安装或接线到业务工作空间。Skill 的分类、事实源、发现接线和迁移要求见 [Skill 维护规范](skill-maintenance.md)。
 
-新增 Agent 只增加 `adapters/agents/<id>/` 的 Manifest、薄 Hook、模板和测试；不要
-修改公共入口建立平台枚举。新增产品项目只增加 `projects/<project>/`。工作项、进度
-和验收写入 Jira，不在仓库新增执行计划。
+新增 Agent 只增加 `adapters/agents/<id>/` 的 Manifest、薄 Hook、模板和测试；不要修改公共入口建立平台枚举。新增产品项目只增加 `projects/<project>/`。工作项、进度和验收写入 Jira，不在仓库新增执行计划。
 
 ## 5. 验证
 
@@ -111,8 +94,7 @@ internal/acceptance.sh runtime install
 internal/acceptance.sh --list
 ```
 
-日志和汇总写入 `.local/acceptance/<run-id>/`。OPA 未安装导致 Rego 一致性检查跳过时
-必须在交付中说明。不要使用 `--no-verify`。
+日志和汇总写入 `.local/acceptance/<run-id>/`。OPA 未安装导致 Rego 一致性检查跳过时必须在交付中说明。不要使用 `--no-verify`。
 
 ## 6. 发布与 Hotfix
 
@@ -129,8 +111,6 @@ internal/release/release.sh publish --version vX.Y --confirm-release
 internal/release/hotfix.sh <JIRA-KEY>
 ```
 
-它原子更新 `main` 与 `develop`；冲突、分叉或回读不明时停止。源码版本由
-`python3 internal/version.py` 输出为 `<分支>-<标签>-<提交数>-<提交编号>`。
+它原子更新 `main` 与 `develop`；冲突、分叉或回读不明时停止。源码版本由 `python3 internal/version.py` 输出为 `<分支>-<标签>-<提交数>-<提交编号>`。
 
-详细边界见[项目目标](strategy/project-goals.md)和
-[v1 架构](architecture/agenticops-v1-architecture.md)。
+详细边界见[项目目标](strategy/project-goals.md)和 [v1 架构](architecture/agenticops-v1-architecture.md)。

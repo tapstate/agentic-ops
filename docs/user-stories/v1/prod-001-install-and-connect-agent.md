@@ -1,22 +1,16 @@
 # PROD-001 安装并接入多种 Agent
 
-研发工程师安装指定分支的产品资产，并通过 Manifest 为一个产品项目工作空间接入
-任意一个或多个已安装 Agent；工作空间可同时接管项目下多个任务，每个任务可以组织
-多个代码仓库。
+研发工程师安装指定分支的产品资产，并通过 Manifest 为一个产品项目工作空间接入任意一个或多个已安装 Agent；工作空间可同时接管项目下多个任务，每个任务可以组织多个代码仓库。
 
 ### 验收标准
 
 - macOS、Linux 使用 Git 和 Python 3.9+ 即可安装、更新和回退。
 - 中央产品根目录（Product Root）保存唯一运行资产；源码目录和安装产品根目录使用同一入口和产品结构。
-- 安装默认把 Source Pool 配置为 `${product_root}-repos`，也可显式指定外部目录；实体仓库
-  不嵌入 Product Root，已有工作空间不随产品默认值静默重绑。
-- 工作空间使用 `.agenticops/` 区分初始化、配置和按任务隔离的运行数据，不复制
-  Project Skill、Policy 或 Runtime。
+- 安装默认把 Source Pool 配置为 `${product_root}-repos`，也可显式指定外部目录；实体仓库不嵌入 Product Root，已有工作空间不随产品默认值静默重绑。
+- 工作空间使用 `.agenticops/` 区分初始化、配置和按任务隔离的运行数据，不复制 Project Skill、Policy 或 Runtime。
 - 不同 Agent 原生事件转换为同一版本化标准请求和标准判定。
-- 任务启动以当前 issue/run 目录为 cwd，只向支持动态目录的 Agent 增加当前任务 worktree，
-  不开放整个 Source Pool 或其它任务目录。
-- `agenticops doctor` 发现产品版本和薄接线漂移，`agenticops repair` 重建派生接线，
-  不修改任务状态和授权；同名非产品文件必须拒绝覆盖或删除。
+- 任务启动以当前 issue/run 目录为 cwd，只向支持动态目录的 Agent 增加当前任务 worktree，不开放整个 Source Pool 或其它任务目录。
+- `agenticops doctor` 发现产品版本和薄接线漂移，`agenticops repair` 重建派生接线，不修改任务状态和授权；同名非产品文件必须拒绝覆盖或删除。
 
 ### 保护行为
 

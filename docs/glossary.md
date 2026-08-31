@@ -20,5 +20,4 @@
 | Hook | Agent 或工具在副作用前调用的拦截点。它执行 Gate 判定，但不是安全沙箱。 |
 | Bootstrap | 安装、更新、回退和工作空间接线能力，位于 `bootstrap/`；不承载任务流程或规则。 |
 
-术语之间的分层和调用关系见 [v1 工程架构](architecture/agenticops-v1-architecture.md)；
-具体的权限边界见 [权限与安全边界](security/permissions.md)。
+术语之间的分层和调用关系见 [v1 工程架构](architecture/agenticops-v1-architecture.md)；具体的权限边界见 [权限与安全边界](security/permissions.md)。
