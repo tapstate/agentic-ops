@@ -4,9 +4,11 @@ set -euo pipefail
 install_root="${AGENTIC_OPS_HOME:-$HOME/.agentic-ops}"
 repository="git@github.com:tapstate/agentic-ops.git"
 branch="main"
+repository_pool=""
+repository_provisioning="manual"
 
 usage() {
-  printf '用法：install.sh [--install-home <目录>] [--repository <Git URL>] [--branch <分支>]\n'
+  printf '用法：install.sh [--install-home <目录>] [--repository <Git URL>] [--branch <分支>] [--repository-pool <目录>] [--repository-provisioning manual|auto-clone]\n'
 }
 
 while [ "$#" -gt 0 ]; do
@@ -24,6 +26,16 @@ while [ "$#" -gt 0 ]; do
     --branch)
       test "$#" -ge 2 || { usage >&2; exit 2; }
       branch="$2"
+      shift 2
+      ;;
+    --repository-pool)
+      test "$#" -ge 2 || { usage >&2; exit 2; }
+      repository_pool="$2"
+      shift 2
+      ;;
+    --repository-provisioning)
+      test "$#" -ge 2 || { usage >&2; exit 2; }
+      repository_provisioning="$2"
       shift 2
       ;;
     -h|--help)
@@ -71,7 +83,15 @@ python3 "$install_root/bootstrap/product_state.py" \
   --product-root "$install_root" write \
   --mode installed --repository "$repository" --branch "$branch" \
   --current-ref "$current_ref"
+pool_arguments=()
+test -z "$repository_pool" || pool_arguments+=(--root "$repository_pool")
+python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" \
+  configure ${pool_arguments[@]+"${pool_arguments[@]}"} \
+  --provisioning "$repository_provisioning" >/dev/null
 
 printf 'AgenticOps 安装完成：工作面=使用，root=%s\n' "$install_root"
 printf '安装通道：%s（%s）\n' "$branch" "$current_ref"
+printf 'Source Pool：%s（%s）\n' \
+  "$(python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" read --field root)" \
+  "$repository_provisioning"
 printf '下一步：%s/agenticops init --workspace <项目工作空间> --project tapdata\n' "$install_root"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -48,16 +49,85 @@ def grant(ws, issue="TAP-123"):
 def main():
     ws = Path(tempfile.mkdtemp(prefix="aogate-wf-"))
     try:
+        remote_root = ws / "remotes"
+        pool_root = ws / "source-pool"
+        product_root = ws / "product-root"
+        remote_root.mkdir()
+        pool_root.mkdir()
+        shutil.copytree(ROOT / "projects", product_root / "projects")
+        os.environ["GIT_CONFIG_COUNT"] = "1"
+        os.environ["GIT_CONFIG_KEY_0"] = "url.file://%s/.insteadOf" % remote_root
+        os.environ["GIT_CONFIG_VALUE_0"] = "git@github.com:tapdata/"
+        for name in ("tapdata", "tapdata-common-lib"):
+            seed = ws / ("seed-" + name)
+            subprocess.run(["git", "init", "-q", "-b", "develop", str(seed)], check=True)
+            subprocess.run(["git", "-C", str(seed), "config", "user.email", "test@example.test"], check=True)
+            subprocess.run(["git", "-C", str(seed), "config", "user.name", "Test"], check=True)
+            (seed / "README.md").write_text(name + "\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(seed), "add", "README.md"], check=True)
+            subprocess.run(["git", "-C", str(seed), "commit", "-qm", "initial"], check=True)
+            subprocess.run(
+                ["git", "clone", "-q", "--bare", str(seed), str(remote_root / (name + ".git"))],
+                check=True,
+            )
+            main_worktree = pool_root / "tapdata" / name
+            main_worktree.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                ["git", "clone", "-q", "git@github.com:tapdata/%s.git" % name, str(main_worktree)],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(main_worktree), "remote", "set-url", "origin", "git@github.com:tapdata/%s.git" % name],
+                check=True,
+            )
+        stale_seed = ws / "seed-tapdata"
+        (stale_seed / "REMOTE-NEXT").write_text("next\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(stale_seed), "add", "REMOTE-NEXT"], check=True)
+        subprocess.run(["git", "-C", str(stale_seed), "commit", "-qm", "remote next"], check=True)
+        subprocess.run(
+            ["git", "-C", str(stale_seed), "push", "-q", str(remote_root / "tapdata.git"), "develop"],
+            check=True,
+        )
+        expected_tapdata_base = subprocess.check_output(
+            ["git", "-C", str(stale_seed), "rev-parse", "HEAD"], text=True
+        ).strip()
         (ws / ".agenticops").mkdir()
         (ws / ".agenticops" / "workspace.json").write_text(
             json.dumps({
-                "schema_version": 1, "product_root": str(ROOT),
+                "schema_version": 2, "product_root": str(product_root),
+                "workspace_id": "1" * 32,
                 "project": "tapdata", "agents": ["claude", "codex"],
+                "repository_pool": {"root": str(pool_root), "source": "workspace-override"},
             }), encoding="utf-8"
         )
         # ---- 任务状态机 -------------------------------------------------
         code, out = run_tool("task.py", "init", "--issue-key", "TAP-123", "--task-class", "defect_fix", cwd=ws)
         check("task init 成功", code, 0)
+        first_run = json.loads(task_store.task_path(ws, "TAP-123").read_text(encoding="utf-8"))["run_id"]
+        code, out = run_tool("task.py", "init", "--issue-key", "TAP-123", "--task-class", "defect_fix", cwd=ws)
+        check("重复接管要求用户选择继续或清理", code, 3)
+        check("重复接管提示当前 run 与两种处理方式", first_run in out and "继续现有 run" in out and "清理重做" in out, True)
+        check(
+            "重复接管不会生成新 run_id",
+            json.loads(task_store.task_path(ws, "TAP-123").read_text(encoding="utf-8"))["run_id"],
+            first_run,
+        )
+        concurrent_ws = ws / "concurrent-workspace"
+        (concurrent_ws / ".agenticops").mkdir(parents=True)
+        shutil.copy2(ws / ".agenticops" / "workspace.json", concurrent_ws / ".agenticops" / "workspace.json")
+        concurrent_command = [
+            sys.executable, str(ROOT / "workflow" / "task.py"), "init",
+            "--issue-key", "TAP-555", "--task-class", "technical_task",
+            "--dir", str(concurrent_ws),
+        ]
+        processes = [
+            subprocess.Popen(concurrent_command, cwd=concurrent_ws, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            for _ in range(2)
+        ]
+        results = [process.communicate() + (process.returncode,) for process in processes]
+        check("并发接管只有一个调用创建 run", sorted(item[2] for item in results), [0, 3])
+        concurrent_task = json.loads(task_store.task_path(concurrent_ws, "TAP-555").read_text(encoding="utf-8"))
+        check("并发接管只持久化一个 Workflow run", len([item for item in concurrent_task["history"] if item["event"] == "init"]), 1)
         code, out = run_tool("task.py", "init", "--issue-key", "TAP-999", "--task-class", "defect_fix", cwd=ws)
         check("同一项目空间可激活第二个任务", code, 0)
         code, out = run_tool("task.py", "init", "--issue-key", "AO-1", "--task-class", "defect_fix", cwd=ws)
@@ -101,7 +171,7 @@ def main():
         code, out = run_tool("task.py", "advance", "--note", "准入齐备", cwd=ws)
         check("准入齐备后 advance 到 design_review", code, 0)
         code, out = run_tool(
-            "task.py", "reset", "--stage", "implementation",
+            "task.py", "reset", "--expected-run-id", first_run, "--stage", "implementation",
             "--note", "试图用 reset 跳过设计评审", cwd=ws,
         )
         check("reset 禁止向后续阶段跳转", code, 2)
@@ -141,6 +211,60 @@ def main():
         code, out = run_tool("task.py", "advance", "--note", "错误任务的授权", cwd=ws)
         check("错误授权未生成，仍拒绝进入实现", code, 3)
 
+        code, out = run_tool("task.py", "repository", "prepare", cwd=ws)
+        check("任务仓库创建隔离 worktree 并固化基线", code, 0)
+        if code != 0:
+            print(out)
+            return 1
+        prepared_task = json.loads(task_store.task_path(ws, "TAP-123").read_text(encoding="utf-8"))
+        check(
+            "两个任务 worktree 均位于当前 run 的工作空间目录",
+            all(
+                Path(item["worktree"]["path"]).is_relative_to(
+                    (ws / ".agenticops" / "worktrees" / "TAP-123" / prepared_task["run_id"]).resolve()
+                )
+                for item in prepared_task["repositories"]
+            ),
+            True,
+        )
+        check(
+            "准备后固化 base_sha",
+            all(len(item["base_sha"]) == 40 for item in prepared_task["repositories"]),
+            True,
+        )
+        synced_tapdata_head = subprocess.check_output(
+            ["git", "-C", str(pool_root / "tapdata" / "tapdata"), "rev-parse", "HEAD"],
+            text=True,
+        ).strip()
+        check("准备前 fetch 并 fast-forward 过期主工作树", synced_tapdata_head, expected_tapdata_base)
+        leases = json.loads(
+            (product_root / ".local" / "repository-worktrees.json").read_text(encoding="utf-8")
+        )["leases"]
+        check("Product Root 统一记录双仓 worktree 租约", len(leases), 2)
+        ws2 = ws / "second-workspace"
+        (ws2 / ".agenticops").mkdir(parents=True)
+        (ws2 / ".agenticops" / "workspace.json").write_text(
+            json.dumps({
+                "schema_version": 2,
+                "product_root": str(product_root),
+                "workspace_id": "2" * 32,
+                "project": "tapdata",
+                "agents": ["codex"],
+                "repository_pool": {"root": str(pool_root), "source": "product-default"},
+            }),
+            encoding="utf-8",
+        )
+        run_tool("task.py", "init", "--issue-key", "TAP-321", "--task-class", "technical_task", "--dir", str(ws2), cwd=ws2)
+        run_tool(
+            "task.py", "repository", "add", "--issue-key", "TAP-321",
+            "--repo", "tapdata/tapdata", "--work-branch", "feature/x",
+            "--scope", "并发冲突测试", "--verification", "mvn test", "--dir", str(ws2), cwd=ws2,
+        )
+        code, out = run_tool(
+            "task.py", "repository", "prepare", "--issue-key", "TAP-321", "--dir", str(ws2), cwd=ws2
+        )
+        check("第二工作空间相同仓库分支被中央租约阻断", code, 2)
+        check("租约冲突返回持有者信息", "worktree 租约冲突" in out, True)
         grant(ws, issue="TAP-123")
         code, out = run_tool("task.py", "advance", "--note", "设计已确认+授权签发", cwd=ws)
         check("正确授权后进入 implementation", code, 0)
@@ -167,9 +291,39 @@ def main():
         run_tool("task.py", "record", "--key", "verification", "--value", "mvn -pl iengine -am test 通过，exit=0", cwd=ws)
         code, out = run_tool("task.py", "advance", "--note", "验证通过", cwd=ws)
         check("合规验证后进入 pr_review", code, 0)
-        run_tool("task.py", "reset", "--stage", "implementation", "--note", "回到实现阶段继续测试", cwd=ws)
+        code, out = run_tool("task.py", "repository", "cleanup", cwd=ws)
+        check("任务清理同步移除 worktree", code, 0)
+        remaining_leases = json.loads(
+            (product_root / ".local" / "repository-worktrees.json").read_text(encoding="utf-8")
+        )["leases"]
+        check("任务清理同步释放中央租约", remaining_leases, [])
+        old_run = json.loads(task_store.task_path(ws, "TAP-123").read_text(encoding="utf-8"))["run_id"]
+        run_tool(
+            "task.py", "reset", "--expected-run-id", old_run,
+            "--stage", "implementation", "--note", "回到实现阶段继续测试", cwd=ws,
+        )
         code, out = run_tool("authorization.py", "show", "--issue-key", "TAP-123", "--dir", str(ws), cwd=ws)
         check("任务 reset 后旧授权被撤销", '"status": "revoked"' in out, True)
+        reset_task = json.loads(task_store.task_path(ws, "TAP-123").read_text(encoding="utf-8"))
+        check("任务重做生成新 run_id", reset_task["run_id"] != old_run, True)
+        code, out = run_tool(
+            "task.py", "reset", "--expected-run-id", old_run,
+            "--stage", "implementation", "--note", "过期 subagent 重复 reset", cwd=ws,
+        )
+        check("过期 subagent 不能再次生成 run", code, 3)
+        check(
+            "过期 reset 后当前 run_id 保持不变",
+            json.loads(task_store.task_path(ws, "TAP-123").read_text(encoding="utf-8"))["run_id"],
+            reset_task["run_id"],
+        )
+        code, out = run_tool("task.py", "repository", "prepare", cwd=ws)
+        check("残留本地任务分支不会被静默复用", code, 2)
+        check("残留分支错误给出显式复用指引", "--reuse-existing-branch" in out, True)
+        code, out = run_tool(
+            "task.py", "repository", "prepare", "--reuse-existing-branch", cwd=ws
+        )
+        check("用户显式确认后可复用残留任务分支", code, 0)
+        run_tool("task.py", "repository", "cleanup", cwd=ws)
 
         # ---- 分支解析：查表，禁止猜测 ------------------------------------
         code, out = run_tool("task.py", "branch", "--repo", "tapdata/tapdata-license", cwd=ws)
@@ -259,11 +413,15 @@ def main():
 
         # ---- profile 完整性 --------------------------------------------
         profile = json.loads((ROOT / "projects" / "tapdata" / "profile.json").read_text(encoding="utf-8"))
-        check("profile 基线分支含 common-lib=develop", profile["repositories"]["baseline_branches"]["tapdata/tapdata-common-lib"], "develop")
+        repositories = json.loads((ROOT / "projects" / "tapdata" / "repositories.json").read_text(encoding="utf-8"))
+        check("仓库目录基线分支含 common-lib=develop", repositories["repositories"]["tapdata/tapdata-common-lib"]["baseline_branch"], "develop")
         check("profile transition 291 标记禁止", profile["transitions"]["pr_approved"]["agent_forbidden"], True)
         check("admission 三张表就位", sorted(p.name for p in (ROOT / "projects/tapdata/admission").glob("*.md")), ["defect-fix.md", "feature-change.md", "technical-task.md"])
         check("runbook 两份就位", len(list((ROOT / "projects/tapdata/runbooks").glob("*.md"))), 2)
-        check("profile 分支解析规则已结构化", profile["repositories"]["branch_resolution"]["forbidden_sources"][0], "current_branch")
+        check("profile 只引用统一仓库目录", profile["repositories"]["catalog"], "repositories.json")
+        check("仓库目录不重复维护顶层 domains", "domains" in repositories, False)
+        check("仓库使用 domains 数组标签", repositories["repositories"]["tapdata/tapdata"]["domains"], ["product"])
+        check("仓库目录分支解析规则已结构化", repositories["branch_resolution"]["forbidden_sources"][0], "current_branch")
         admission = json.loads((ROOT / "projects/tapdata/admission.json").read_text(encoding="utf-8"))
         check("admission 覆盖三类任务", sorted(admission["task_classes"]), ["defect_fix", "feature_change", "technical_task"])
 
@@ -332,6 +490,8 @@ def main():
         check("旧多任务注册表迁入 tasks/index.json",
               task_store.registry_path(legacy_multi).is_file(), True)
     finally:
+        for key in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+            os.environ.pop(key, None)
         shutil.rmtree(ws, ignore_errors=True)
 
     print("\n结果：%d 通过，%d 失败" % (PASS, FAIL))

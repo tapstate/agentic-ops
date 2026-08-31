@@ -5,7 +5,8 @@
   "entrypoint": "adapters/agents/claude/hook.py",
   "capabilities": {
     "decisions": ["allow", "ask", "deny"],
-    "ask_fallback": "native"
+    "ask_fallback": "native",
+    "task_directory_argument": "--add-dir"
   },
   "artifacts": [
     {

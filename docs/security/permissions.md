@@ -3,6 +3,24 @@
 原则：**权限系统里做不到的事，就不需要规则去"禁止"。** 门禁 hook 是第二道防线；
 第一道防线是凭证本身的最小化。
 
+## Agent 文件系统权限
+
+Source Pool 位于项目工作空间之外，只保存统一维护的主工作树；任务 worktree 位于
+`<workspace>/.agenticops/worktrees/<issue-key>/<run-id>/`。AgenticOps 不把 Source Pool
+加入 Agent 可写范围，而是在 `agenticops start --issue-key <JIRA-KEY>` 时，从任务状态
+读取并校验当前 run 的 worktree，以该 run 目录作为 cwd，再逐个传给 Agent 的动态目录参数。
+
+- Codex 和 Claude Manifest 都声明 `--add-dir`；任务模式 cwd 是当前 issue/run 执行目录。
+- 只加入当前 issue、当前 run 的 worktree；其它任务、Source Pool 主工作树和池根目录不加入。
+- 未准备、已清理、路径越界、分支漂移或仓库目录摘要变化时，启动失败关闭。
+- 不支持动态多目录的平台不能执行该任务；不得改用 `danger-full-access` 或关闭沙箱。
+- linked worktree 的 `.git` 指向主仓库 Git 元数据。平台仍可能要求批准 Git 元数据写入；
+  Gate 也继续独立判断 commit、push、PR 等副作用。目录授权不是任务授权的替代品。
+
+Source Pool 的 clone、fetch 和 worktree 创建/删除应通过确定性 Workflow 或用户从受控终端
+执行。Git 公共元数据仍位于 Source Pool 主工作树的 `.git/worktrees/`；若平台阻止相关写入，
+应请求精确目录/命令审批，不能把整个池永久加入全局可写根目录。
+
 ## GitHub
 
 ### 1. Agent 专用 Fine-grained PAT（推荐每个研发员一枚）

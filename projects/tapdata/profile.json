@@ -19,65 +19,7 @@
       "verification_method": "customfield_10049"
     }
   },
-  "repositories": {
-    "default": "tapdata/tapdata",
-    "worktree_domains": {
-      "product": {
-        "baseline_repository": "tapdata/tapdata",
-        "repositories": [
-          "tapdata/tapdata", "tapdata/tapdata-enterprise", "tapdata/tapdata-web",
-          "tapdata/tapdata-license", "tapdata/tapdata-common-lib",
-          "tapdata/tapdata-application", "tapdata/tapdata-connectors",
-          "tapdata/tapdata-connectors-enterprise"
-        ]
-      },
-      "assistant": {
-        "baseline_repository": "tapdata/feishu_robot",
-        "repositories": ["tapdata/feishu_robot"]
-      },
-      "taptest": {
-        "baseline_repository": "tapdata/t-layer3-test",
-        "repositories": ["tapdata/t-layer3-test"]
-      }
-    },
-    "baseline_branches": {
-      "tapdata/tapdata": "develop",
-      "tapdata/tapdata-enterprise": "develop",
-      "tapdata/tapdata-web": "develop",
-      "tapdata/tapdata-connectors": "develop",
-      "tapdata/tapdata-connectors-enterprise": "develop",
-      "tapdata/tapdata-license": "main",
-      "tapdata/tapdata-common-lib": "develop",
-      "tapdata/tapdata-application": "main",
-      "tapdata/feishu_robot": "master",
-      "tapdata/t-layer3-test": "develop"
-    },
-    "dev_branches": {
-      "tapdata/tapdata": "develop",
-      "tapdata/tapdata-cloud": "develop",
-      "tapdata/tapdata-common-lib": "develop",
-      "tapdata/tapdata-connectors": "develop",
-      "tapdata/tapdata-connectors-enterprise": "develop",
-      "tapdata/tapdata-enterprise": "develop",
-      "tapdata/tapdata-license": "main",
-      "tapdata/tapdata-web": "develop",
-      "tapdata/hazelcast": "release-v5.5.0",
-      "tapdata/tapdata-application": "main",
-      "tapdata/feishu_robot": "master",
-      "tapdata/t-layer3-test": "develop",
-      "tapdata/docs": "main",
-      "tapdata/docs-en": "main",
-      "tapdata/mcp-tap-server": "main",
-      "tapdata/solutions": "main",
-      "tapdata/fhir-solution": "main"
-    },
-    "branch_resolution": {
-      "rule": "任务基线必须按目标仓库从 baseline_branches 显式解析；禁止从当前分支或隐式 main 猜测",
-      "resolver": "python3 workflow/task.py branch --repo <owner/repo>",
-      "forbidden_sources": ["current_branch", "implicit_main", "runbook_example"],
-      "on_unknown_repository": "解析器 exit 2 并停止；先在本文件补齐分支映射，不得推测"
-    }
-  },
+  "repositories": {"catalog": "repositories.json"},
   "statuses": {
     "打开": "waiting_takeover", "待办": "waiting_takeover", "To Do": "waiting_takeover",
     "On Hold": "waiting_takeover",

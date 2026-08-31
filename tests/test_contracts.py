@@ -107,6 +107,21 @@ class ContractConformanceTest(unittest.TestCase):
         manifest_schema = load_json(ROOT / "contracts" / "adapter-manifest.schema.json")
         for path in sorted((ROOT / "adapters" / "agents").glob("*/manifest.json")):
             assert_schema(self, manifest_schema, load_json(path), str(path))
+        repository_catalog_schema = load_json(ROOT / "contracts" / "repository-catalog.schema.json")
+        assert_schema(
+            self,
+            repository_catalog_schema,
+            load_json(ROOT / "projects" / "tapdata" / "repositories.json"),
+        )
+
+    def test_repository_pool_configuration_conforms_to_schema(self):
+        schema = load_json(ROOT / "contracts" / "repository-pool.schema.json")
+        document = {
+            "schema_version": 1,
+            "root": "/opt/agentic-ops-repos",
+            "provisioning": "manual",
+        }
+        assert_schema(self, schema, document)
 
     def test_source_product_state_conforms_to_schema(self):
         schema = load_json(ROOT / "contracts" / "product-state.schema.json")
@@ -125,6 +140,7 @@ class ContractConformanceTest(unittest.TestCase):
         init_schema = load_json(ROOT / "contracts" / "workspace-init.schema.json")
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary) / "workspace"
+            repository_pool = Path(temporary) / "repository-pool"
             subprocess.run(
                 [
                     sys.executable,
@@ -135,6 +151,8 @@ class ContractConformanceTest(unittest.TestCase):
                     str(workspace),
                     "--project",
                     "tapdata",
+                    "--repository-pool",
+                    str(repository_pool),
                 ],
                 check=True,
                 capture_output=True,

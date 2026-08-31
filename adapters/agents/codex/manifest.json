@@ -5,7 +5,8 @@
   "entrypoint": "adapters/agents/codex/hook.py",
   "capabilities": {
     "decisions": ["allow", "deny"],
-    "ask_fallback": "deny_with_guidance"
+    "ask_fallback": "deny_with_guidance",
+    "task_directory_argument": "--add-dir"
   },
   "artifacts": [
     {

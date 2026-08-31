@@ -24,7 +24,8 @@
   python3 workflow/task.py advance --issue-key TAP-123 --note "准入三项必填齐备，见 Jira 评论"
   python3 workflow/task.py block --issue-key TAP-123 --reason "缺问题版本，已写补卡评论"
   python3 workflow/task.py status --issue-key TAP-123
-  python3 workflow/task.py reset --issue-key TAP-123 --stage design_review --note "计划实质变更，重新确认"
+  python3 workflow/task.py reset --issue-key TAP-123 --expected-run-id <当前-run-id> \
+    --stage design_review --note "计划实质变更，重新确认"
 """
 from __future__ import annotations
 
@@ -33,11 +34,12 @@ import json
 import os
 import sys
 import time
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from gate import engine  # noqa: E402
-from workflow import project_rules, task_store  # noqa: E402
+from workflow import project_rules, repository_worktree, task_store  # noqa: E402
 
 STAGES = [
     "waiting_takeover",
@@ -140,44 +142,56 @@ def cmd_init(args):
     if args.task_class not in task_classes:
         print("错误：task-class 必须是 %s 之一" % "/".join(task_classes), file=sys.stderr)
         return 2
-    existing_path = task_store.task_path(args.dir, issue)
-    existing = None
-    if existing_path.is_file():
-        existing = json.loads(existing_path.read_text(encoding="utf-8"))
-    if existing and not args.force:
-        if existing.get("stage") == "completed":
+    with task_store.task_run_lock(args.dir, issue):
+        existing_path = task_store.task_path(args.dir, issue)
+        existing = None
+        if existing_path.is_file():
+            existing = json.loads(existing_path.read_text(encoding="utf-8"))
+        if existing and not args.force:
+            if existing.get("stage") == "completed":
+                print(
+                    "错误：任务已完成，不能通过 init 重新激活；确需重开请先确认并使用 reset",
+                    file=sys.stderr,
+                )
+                return 2
+            prepared = [
+                item.get("repository")
+                for item in existing.get("repositories", [])
+                if (item.get("worktree") or {}).get("status") == "prepared"
+            ]
             print(
-                "错误：任务已完成，不能通过 init 重新激活；确需重开请使用 reset 并重新授权",
+                "任务已被接管：%s（阶段 %s，run=%s）"
+                % (existing.get("issue_key"), existing.get("stage"), existing.get("run_id")),
+                file=sys.stderr,
+            )
+            if prepared:
+                print("当前 run 已有 worktree：%s" % "、".join(prepared), file=sys.stderr)
+            print(
+                "请选择：继续现有 run 请执行 task.py activate --issue-key %s；"
+                "清理重做请先执行 repository cleanup，再显式执行 reset "
+                "--expected-run-id %s。未做选择，状态未改变。"
+                % (issue, existing.get("run_id")),
+                file=sys.stderr,
+            )
+            return 3
+        if existing and args.force:
+            print(
+                "错误：禁止覆盖已有任务状态；请先清理当前 run，再使用 reset 保留历史并重新授权",
                 file=sys.stderr,
             )
             return 2
-        conflicts = activation_conflicts(args.dir, existing)
-        if conflicts:
-            print("错误：任务无法激活：%s" % "；".join(conflicts), file=sys.stderr)
-            return 2
-        print(
-            "任务已存在：%s（阶段 %s）；已保持原状态并标记为 active"
-            % (existing.get("issue_key"), existing.get("stage"))
-        )
+        task = {
+            "issue_key": issue,
+            "run_id": "run-" + uuid.uuid4().hex[:12],
+            "task_class": args.task_class,
+            "stage": STAGES[0],
+            "facts": {},
+            "repositories": [],
+            "pending": None,
+            "history": [{"ts": now(), "event": "init", "stage": STAGES[0]}],
+        }
+        save(args.dir, task)
         task_store.register(args.dir, issue, status="active")
-        return 0
-    if existing and args.force:
-        print(
-            "错误：禁止覆盖已有任务状态；请使用 reset 保留历史并重新授权",
-            file=sys.stderr,
-        )
-        return 2
-    task = {
-        "issue_key": issue,
-        "task_class": args.task_class,
-        "stage": STAGES[0],
-        "facts": {},
-        "repositories": [],
-        "pending": None,
-        "history": [{"ts": now(), "event": "init", "stage": STAGES[0]}],
-    }
-    save(args.dir, task)
-    task_store.register(args.dir, issue, status="active")
     print("任务已初始化并激活：%s（%s），阶段 %s" % (issue, args.task_class, STAGES[0]))
     _print_next(task)
     return 0
@@ -244,6 +258,9 @@ def cmd_repository_add(args):
         "base_branch": base_branch,
         "approved_scope": args.scope,
         "verification_method": args.verification,
+        "base_sha": None,
+        "catalog_digest": None,
+        "worktree": None,
         "pull_request": None,
         "ci": None,
     }
@@ -270,6 +287,7 @@ def repository_bindings(repositories):
         "base_branch",
         "approved_scope",
         "verification_method",
+        "base_sha",
     )
     return [{key: item.get(key) for key in keys} for item in repositories]
 
@@ -295,6 +313,34 @@ def cmd_repository_record(args):
     )
     save(args.dir, task)
     print("已记录仓库结果：%s" % args.repo)
+    return 0
+
+
+def cmd_repository_prepare(args):
+    try:
+        paths = repository_worktree.prepare_task(
+            args.dir,
+            args.issue_key,
+            reuse_existing_branch=args.reuse_existing_branch,
+        )
+    except ValueError as error:
+        print("错误：%s" % error, file=sys.stderr)
+        return 2
+    print("已准备任务 worktree：")
+    for path in paths:
+        print("  - %s" % path)
+    return 0
+
+
+def cmd_repository_cleanup(args):
+    try:
+        checks = repository_worktree.cleanup_task(
+            args.dir, args.issue_key, delete_branches=args.delete_branches
+        )
+    except ValueError as error:
+        print("错误：%s" % error, file=sys.stderr)
+        return 2
+    print("已清理 %s 个任务 worktree。" % len(checks))
     return 0
 
 
@@ -340,6 +386,16 @@ def _check_advance(task, target, base, spec):
             )
         elif auth.get("repositories") != repository_bindings(task.get("repositories", [])):
             problems.append("授权仓库集合与当前任务仓库集合不一致")
+    if target == "completed":
+        prepared = [
+            item.get("repository")
+            for item in task.get("repositories", [])
+            if (item.get("worktree") or {}).get("status") == "prepared"
+        ]
+        if prepared:
+            problems.append(
+                "任务完成前必须先执行 repository cleanup：%s" % "、".join(prepared)
+            )
     return problems
 
 
@@ -378,11 +434,18 @@ def cmd_block(args):
     return 0
 
 
-def cmd_reset(args):
+def _cmd_reset_locked(args):
     task = load(args.dir, args.issue_key)
     if task is None:
         print("错误：没有任务状态", file=sys.stderr)
         return 2
+    if task.get("run_id") != args.expected_run_id:
+        print(
+            "错误：reset 绑定的 run 已失效（当前 %s，传入 %s）；请重新检查任务状态"
+            % (task.get("run_id"), args.expected_run_id),
+            file=sys.stderr,
+        )
+        return 3
     if args.stage not in STAGES or args.stage == "completed":
         print("错误：未知阶段 %s" % args.stage, file=sys.stderr)
         return 2
@@ -395,16 +458,47 @@ def cmd_reset(args):
             file=sys.stderr,
         )
         return 2
+    prepared = [
+        item.get("repository")
+        for item in task.get("repositories", [])
+        if (item.get("worktree") or {}).get("status") == "prepared"
+    ]
+    if prepared:
+        print(
+            "错误：reset 前必须先清理当前 run 的 worktree：%s"
+            % "、".join(prepared),
+            file=sys.stderr,
+        )
+        return 2
     revoke_authorization(args.dir, task["issue_key"], "task_reset")
     task["history"].append(
         {"ts": now(), "event": "reset", "from": task["stage"], "to": args.stage, "note": args.note}
     )
     task["stage"] = args.stage
+    task["run_id"] = "run-" + uuid.uuid4().hex[:12]
+    for item in task.get("repositories", []):
+        item["base_sha"] = None
+        item["catalog_digest"] = None
+        item["worktree"] = None
     task["pending"] = None
     save(args.dir, task)
     task_store.set_status(args.dir, task["issue_key"], "active")
-    print("已重置到阶段：%s（%s）；旧授权已撤销，进入实现前必须重新授权" % (args.stage, args.note))
+    print(
+        "已重置到阶段：%s（%s），新 run=%s；旧授权已撤销，进入实现前必须重新授权"
+        % (args.stage, args.note, task["run_id"])
+    )
     return 0
+
+
+def cmd_reset(args):
+    try:
+        issue = task_store.resolve_issue(args.dir, args.issue_key)
+    except ValueError as error:
+        print("错误：%s" % error, file=sys.stderr)
+        return 2
+    args.issue_key = issue
+    with task_store.task_run_lock(args.dir, issue):
+        return _cmd_reset_locked(args)
 
 
 NEXT_GUIDE = {
@@ -606,6 +700,16 @@ def main():
     record.add_argument("--ci")
     record.add_argument("--dir", default=".")
     record.set_defaults(func=cmd_repository_record)
+    prepare = repository_sub.add_parser("prepare")
+    prepare.add_argument("--issue-key")
+    prepare.add_argument("--reuse-existing-branch", action="store_true")
+    prepare.add_argument("--dir", default=".")
+    prepare.set_defaults(func=cmd_repository_prepare)
+    cleanup = repository_sub.add_parser("cleanup")
+    cleanup.add_argument("--issue-key")
+    cleanup.add_argument("--delete-branches", action="store_true")
+    cleanup.add_argument("--dir", default=".")
+    cleanup.set_defaults(func=cmd_repository_cleanup)
 
     p = sub.add_parser("advance")
     p.add_argument("--issue-key")
@@ -621,6 +725,7 @@ def main():
 
     p = sub.add_parser("reset")
     p.add_argument("--issue-key")
+    p.add_argument("--expected-run-id", required=True)
     p.add_argument("--stage", required=True)
     p.add_argument("--note", required=True)
     p.add_argument("--dir", default=".")

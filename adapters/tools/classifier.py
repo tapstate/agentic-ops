@@ -66,6 +66,16 @@ def _classify_tokens(tokens):
         return _classify_git(tokens[1:])
     if executable == "gh":
         return _classify_gh(tokens[1:])
+    if executable.startswith("python"):
+        arguments = [os.path.basename(item) for item in tokens[1:]]
+        if "repository_worktree.py" in arguments:
+            return ["manage_repository_worktree"]
+        if "task.py" in arguments and "repository" in tokens and any(
+            action in tokens for action in ("prepare", "cleanup")
+        ):
+            return ["manage_repository_worktree"]
+    if executable == "agenticops" and "workspace" in tokens and "purge" in tokens:
+        return ["manage_repository_worktree"]
     return []
 
 
@@ -101,6 +111,10 @@ def _classify_git(arguments):
         return ["git_rebase"]
     if subcommand == "clean":
         return ["git_clean"]
+    if subcommand in ("clone", "fetch", "pull", "worktree"):
+        return ["manage_repository_worktree"]
+    if subcommand == "branch" and any(item in ("-d", "-D", "--delete") for item in rest):
+        return ["manage_repository_worktree"]
     if subcommand == "tag":
         return [] if not rest or all(item.startswith("-l") or item == "--list" for item in rest) else ["git_tag"]
     if subcommand in ("filter-branch", "filter-repo", "replace"):

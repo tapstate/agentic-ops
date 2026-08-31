@@ -6,15 +6,20 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
+import uuid
 from pathlib import Path
 
 from agent_registry import select
 from product_state import load as load_product_state
+from repository_pool import load as load_repository_pool
+from repository_pool import validate_root as validate_repository_pool_root
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+INIT_SCHEMA_VERSION = 1
 STATE_DIRECTORY = ".agenticops"
 INIT_NAME = "init.json"
 WORKSPACE_NAME = "workspace.json"
@@ -97,14 +102,14 @@ def load_workspace(workspace):
     path = state_path(workspace, WORKSPACE_NAME)
     if path.is_file():
         document = read_json(path, "工作空间配置")
-        if document.get("schema_version") != SCHEMA_VERSION:
+        if document.get("schema_version") not in (1, SCHEMA_VERSION):
             raise ValueError("不支持的工作空间配置版本")
         return document, None
     legacy = workspace / LEGACY_BINDING_NAME
     if legacy.is_file():
         document = read_json(legacy, "旧工作空间绑定")
         return {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": 1,
             "product_root": document.get("product_root"),
             "project": document.get("project"),
             "agents": document.get("agents"),
@@ -117,7 +122,7 @@ def load_init(workspace):
     if not path.is_file():
         return None
     document = read_json(path, "工作空间初始化信息")
-    if document.get("schema_version") != SCHEMA_VERSION:
+    if document.get("schema_version") != INIT_SCHEMA_VERSION:
         raise ValueError("不支持的工作空间初始化版本")
     return document
 
@@ -159,18 +164,55 @@ def expected_artifacts(install_root, project, agents, manifests):
     return artifacts, messages
 
 
-def workspace_document(install_root, project, agents):
+def default_repository_pool(install_root):
+    return load_repository_pool(install_root)["root"]
+
+
+def migrate_workspace_document(install_root, workspace, document):
+    if document is None:
+        return None
+    migrated = dict(document)
+    if migrated.get("schema_version") == 1:
+        migrated.update(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "workspace_id": uuid.uuid4().hex,
+                "repository_pool": {
+                    "root": default_repository_pool(install_root),
+                    "source": "product-default-migration",
+                },
+            }
+        )
+    return migrated
+
+
+def workspace_document(install_root, workspace, project, agents, existing, repository_pool):
+    if existing:
+        workspace_id = existing["workspace_id"]
+        pool = existing["repository_pool"]
+    else:
+        selected = repository_pool or default_repository_pool(install_root)
+        pool = {
+            "root": str(validate_repository_pool_root(install_root, selected, create=True)),
+            "source": "workspace-override" if repository_pool else "product-default",
+        }
+        workspace_id = uuid.uuid4().hex
+    pool_root = Path(pool["root"]).resolve()
+    if workspace == pool_root or pool_root in workspace.parents or workspace in pool_root.parents:
+        raise ValueError("项目工作空间与 Source Pool 不能互相嵌套：%s" % workspace)
     return {
         "schema_version": SCHEMA_VERSION,
         "product_root": str(install_root.resolve()),
+        "workspace_id": workspace_id,
         "project": project,
         "agents": agents,
+        "repository_pool": pool,
     }
 
 
 def init_document(install_root, artifacts):
     return {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": INIT_SCHEMA_VERSION,
         "product_ref": product_ref(install_root),
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "artifacts": [
@@ -238,6 +280,19 @@ def validate_workspace_document(install_root, document):
         raise ValueError("工作空间产品根目录不一致，请执行 agenticops repair")
     if not isinstance(agents, list) or not agents:
         raise ValueError("工作空间配置 agents 无效")
+    workspace_id = document.get("workspace_id")
+    if not isinstance(workspace_id, str) or not re.fullmatch(r"[a-f0-9]{32}", workspace_id):
+        raise ValueError("工作空间配置缺少 workspace_id")
+    pool = document.get("repository_pool")
+    if not isinstance(pool, dict) or not isinstance(pool.get("root"), str):
+        raise ValueError("工作空间配置缺少 repository_pool.root")
+    if pool.get("source") not in (
+        "product-default", "workspace-override", "product-default-migration"
+    ):
+        raise ValueError("工作空间 repository_pool.source 无效")
+    pool_root = validate_repository_pool_root(install_root, pool["root"], create=False)
+    if not pool_root.is_dir():
+        raise ValueError("工作空间绑定的 Source Pool 不存在：%s" % pool_root)
     selected, manifests = select(install_root, agents)
     return project, selected, manifests
 
@@ -288,6 +343,7 @@ def main():
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--agent", action="append")
     parser.add_argument("--project")
+    parser.add_argument("--repository-pool")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--refresh", action="store_true")
     mode.add_argument("--check", action="store_true")
@@ -296,6 +352,11 @@ def main():
     install_root = Path(arguments.install_home).resolve()
     workspace = Path(arguments.workspace).resolve()
     config, legacy = load_workspace(workspace)
+    legacy_workspace_schema = bool(config and config.get("schema_version") == 1)
+    try:
+        config = migrate_workspace_document(install_root, workspace, config)
+    except ValueError as error:
+        parser.error(str(error))
     init = load_init(workspace)
     if arguments.refresh or arguments.check:
         if config is None:
@@ -312,6 +373,8 @@ def main():
     workspace.mkdir(parents=True, exist_ok=True)
 
     if arguments.check:
+        if legacy_workspace_schema:
+            parser.error("工作空间配置需要迁移 Source Pool 绑定，请执行 agenticops repair")
         try:
             checked_project, checked_agents = check_workspace(
                 install_root, workspace, config, init
@@ -330,6 +393,8 @@ def main():
         return 0
 
     try:
+        if config is not None:
+            validate_workspace_document(install_root, config)
         agents, manifests = select(install_root, requested_agents)
         artifacts, messages = expected_artifacts(
             install_root, project, agents, manifests
@@ -338,6 +403,14 @@ def main():
         owned = owned_artifacts(init, legacy)
         assert_artifact_ownership(workspace, owned, artifacts)
         remove_stale_artifacts(workspace, owned, set(artifacts))
+        workspace_config = workspace_document(
+            install_root,
+            workspace,
+            project,
+            agents,
+            config,
+            arguments.repository_pool,
+        )
     except ValueError as error:
         parser.error(str(error))
 
@@ -349,7 +422,7 @@ def main():
             os.chmod(destination, 0o700)
     write_json_atomic(
         state_path(workspace, WORKSPACE_NAME),
-        workspace_document(install_root, project, agents),
+        workspace_config,
     )
     write_json_atomic(state_path(workspace, INIT_NAME), document)
     legacy_path = workspace / LEGACY_BINDING_NAME

@@ -21,7 +21,8 @@
           "minItems": 2,
           "uniqueItems": true
         },
-        "ask_fallback": { "enum": ["native", "deny_with_guidance"] }
+        "ask_fallback": { "enum": ["native", "deny_with_guidance"] },
+        "task_directory_argument": { "type": "string", "pattern": "^--[a-z][a-z-]*$" }
       }
     },
     "artifacts": {

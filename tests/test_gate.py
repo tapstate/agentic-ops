@@ -121,6 +121,7 @@ def grant(ws, **overrides):
         "repository": overrides.get("target_repo", "acme/widget"),
         "work_branch": overrides.get("work_branch", "feature/TAP-123"),
         "base_branch": "develop",
+        "base_sha": "1" * 40,
         "approved_scope": "v1 测试范围",
         "verification_method": "python3 tests/test_gate.py",
         "pull_request": None,
@@ -134,6 +135,7 @@ def grant(ws, **overrides):
     task_store.task_path(ws, issue).write_text(
         json.dumps({
             "issue_key": issue,
+            "run_id": "run-" + ("1" if issue == "TAP-123" else "9") * 12,
             "task_class": "defect_fix",
             "stage": "design_review",
             "facts": {},
@@ -176,6 +178,16 @@ def main():
         check("无授权时 git commit 需确认", run_hook("Bash", {"command": "git commit -m 'x'"}, ws), "ask")
         check("无授权时 git push 需确认", run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws), "ask")
         check("无授权时 Jira transition 需确认", run_hook("mcp__atlassian__transition_issue", {"issueKey": "TAP-123"}, ws), "ask")
+        check(
+            "Agent 执行 Source Pool worktree 准备需人工确认",
+            run_hook(
+                "Bash",
+                {"command": "python3 workflow/task.py repository prepare --issue-key TAP-123"},
+                ws,
+            ),
+            "ask",
+        )
+        check("直接 git worktree add 需人工确认", run_hook("Bash", {"command": "git worktree add /tmp/x"}, ws), "ask")
 
         # ---- 签发授权后 -------------------------------------------------
         grant(ws)
@@ -192,6 +204,11 @@ def main():
             "ask",
         )
         check("授权后 gh pr create 放行", run_hook("Bash", {"command": "gh pr create --title t --body b"}, ws), "allow")
+        check(
+            "普通任务授权不覆盖 Source Pool 管理",
+            run_hook("Bash", {"command": "git fetch origin develop"}, ws),
+            "ask",
+        )
 
         # ---- 同一项目空间多个 active 任务按仓库+分支解析 -----------------
         grant(ws, issue_key="TAP-999", work_branch="feature/TAP-999")
@@ -236,6 +253,7 @@ def main():
             "repository": "acme/service-api",
             "work_branch": "feature/TAP-123-api",
             "base_branch": "develop",
+            "base_sha": "2" * 40,
             "approved_scope": "API 配套修改",
             "verification_method": "python3 -m unittest",
             "pull_request": None,

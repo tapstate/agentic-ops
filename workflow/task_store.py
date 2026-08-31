@@ -130,6 +130,28 @@ def registry_lock(base):
             fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
+@contextmanager
+def task_run_lock(base, issue_key):
+    validate_issue_key(issue_key)
+    binding_path = state_path(base) / "workspace.json"
+    try:
+        binding = json.loads(binding_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("工作空间绑定无法读取：%s" % error) from error
+    product_root = binding.get("product_root")
+    if not isinstance(product_root, str) or not product_root:
+        raise ValueError("工作空间绑定缺少 product_root")
+    root = Path(product_root).resolve() / ".local"
+    root.mkdir(parents=True, exist_ok=True)
+    os.chmod(root, 0o700)
+    with open(root / "task-state.lock", "a+", encoding="utf-8") as stream:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
 def save_registry(base, registry):
     _write_json_atomic(registry_path(base), registry)
 

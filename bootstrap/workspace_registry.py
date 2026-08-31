@@ -11,6 +11,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from workflow import repository_worktree, task_store  # noqa: E402
+
 
 SCHEMA_VERSION = 1
 STATE_DIRECTORY = ".agenticops"
@@ -85,7 +88,7 @@ def binding_status(product_root, workspace):
         document = load_json(binding, "工作空间绑定")
     except ValueError:
         return "unreadable", "工作空间绑定不可读取"
-    if document.get("schema_version") != 1:
+    if document.get("schema_version") not in (1, 2):
         return "invalid", "工作空间绑定版本不支持"
     if document.get("product_root") != str(product_root.resolve()):
         return "rebound", "已绑定到其它 Product Root"
@@ -167,19 +170,46 @@ def detach_preflight(product_root, workspace, purge=False):
             raise ValueError("生成接线已被修改或异常，拒绝删除：%s" % path)
         deletable.append(path)
     state_root = workspace / STATE_DIRECTORY
+    task_root = state_root / "tasks"
+    task_count = sum(1 for path in task_root.iterdir() if path.is_dir()) if task_root.is_dir() else 0
+    prepared_roots = []
+    if task_root.is_dir():
+        for task_path in sorted(task_root.glob("*/state.json")):
+            task = load_json(task_path, "任务状态")
+            prepared = [
+                item.get("repository")
+                for item in task.get("repositories", [])
+                if isinstance(item, dict)
+                and (item.get("worktree") or {}).get("status") == "prepared"
+            ]
+            if prepared and not purge:
+                raise ValueError(
+                    "工作空间仍有已准备的任务 worktree，detach 前必须先清理：%s"
+                    % "、".join(prepared)
+                )
+            if prepared:
+                prepared_roots.extend(
+                    repository_worktree.task_roots(workspace, task.get("issue_key"))
+                )
+                repository_worktree.preflight_cleanup(workspace, task)
     if purge:
         allowed = {path.relative_to(state_root) for path in deletable if state_root in path.parents}
         allowed.update({Path("workspace.json"), Path("init.json"), Path("tasks.lock")})
+        for root in prepared_roots:
+            current = root
+            while current != state_root and state_root in current.parents:
+                allowed.add(current.relative_to(state_root))
+                current = current.parent
         for path in state_root.rglob("*"):
             relative = path.relative_to(state_root)
             if relative.parts and relative.parts[0] == "tasks":
                 if path.is_symlink():
                     raise ValueError("任务状态包含符号链接，拒绝清理：%s" % path)
                 continue
+            if any(path == root or root in path.parents for root in prepared_roots):
+                continue
             if relative not in allowed:
                 raise ValueError("工作空间状态包含未知文件，拒绝清理：%s" % path)
-    task_root = state_root / "tasks"
-    task_count = sum(1 for path in task_root.iterdir() if path.is_dir()) if task_root.is_dir() else 0
     return deletable, task_count
 
 
@@ -195,9 +225,22 @@ def remove_empty_parents(workspace, paths):
 
 def detach(product_root, workspace, purge=False):
     deletable, _ = detach_preflight(product_root, workspace, purge=purge)
+    state_root = workspace / STATE_DIRECTORY
+    if purge:
+        registry = task_store.load_registry(workspace, create=False)
+        for issue in sorted((registry or {}).get("tasks", {})):
+            task_path = task_store.task_path(workspace, issue)
+            if not task_path.is_file():
+                continue
+            task = load_json(task_path, "任务状态")
+            if any(
+                (item.get("worktree") or {}).get("status") == "prepared"
+                for item in task.get("repositories", [])
+                if isinstance(item, dict)
+            ):
+                repository_worktree.cleanup_task(workspace, issue)
     for path in deletable:
         path.unlink()
-    state_root = workspace / STATE_DIRECTORY
     for path in (state_root / "init.json", state_root / "workspace.json"):
         if path.exists():
             path.unlink()

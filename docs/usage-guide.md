@@ -38,6 +38,17 @@ gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --scopes r
 )
 ```
 
+默认 Source Pool 为 `~/.agentic-ops-repos`（即 `${product_root}-repos`）。如需复用已有
+外部池，可把最后一行改为：
+
+```sh
+printf '%s\n' "$bootstrap" | bash -s -- --repository-pool <Source-Pool-目录>
+```
+
+默认 `manual` 模式不会自动下载业务仓库；明确需要自动供给时再增加
+`--repository-provisioning auto-clone`。两种模式都会先校验池根目录不能位于 Product Root
+内，且路径必须是可读写目录。
+
 `gh api` 被拒绝时，核对当前账号的仓库访问权与 `repo` scope。
 
 ### 1.2 Git clone 安装
@@ -71,6 +82,8 @@ gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --scopes r
     --repository git@github.com:tapstate/agentic-ops.git \
     --branch main \
     --current-ref "$ao_current_ref"
+  python3 "$ao_install_root/bootstrap/repository_pool.py" \
+    --product-root "$ao_install_root" configure --provisioning manual
 )
 ```
 
@@ -100,6 +113,17 @@ gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --scopes r
 ```sh
 ~/.agentic-ops/agenticops init --workspace <项目工作空间> --project tapdata --agent <Agent-ID-1> --agent <Agent-ID-2>
 ```
+
+工作空间默认继承 Product Root 的 Source Pool，并把实际根目录固化在
+`.agenticops/workspace.json`。需要独立池时只在首次初始化显式覆盖：
+
+```sh
+~/.agentic-ops/agenticops init --workspace <项目工作空间> --project tapdata \
+  --repository-pool <独立-Source-Pool-目录>
+```
+
+已有工作空间不会因为 Product Root 默认池变化而静默重绑；确需迁移必须先清理任务
+worktree，再重新初始化或通过后续受控迁移能力处理，不能手改 `workspace.json`。
 
 没有 `both` 特殊值，也不限制 Agent 数量。一个工作空间绑定一个产品项目，可接管该
 项目下任意多个任务；一个任务可修改多个仓库。
@@ -131,7 +155,8 @@ cd <项目工作空间>
 
 `--all` 必须显式指定；批量操作会先列出目标并要求确认。`prune` 仅注销缺失、已改绑或
 无效的本机提示登记。`clean --generated-only` 只收敛可再生接线；`detach` 保留
-`.agenticops/tasks/`；`purge` 才会删除任务状态，且不支持批量执行。非交互环境默认拒绝
+`.agenticops/tasks/`，因此存在已准备 worktree 时会要求先清理，避免解绑后留下孤儿；
+`purge` 会联动清理洁净 worktree 后删除任务状态，且不支持批量执行。非交互环境默认拒绝
 这些确认操作；仅在已由调用方展示并确认目标列表的自动化场景中使用 `--yes`。
 
 ## 3. 工作空间数据
@@ -139,7 +164,7 @@ cd <项目工作空间>
 ```text
 .agenticops/
 ├── init.json                 # 初始化版本与生成产物哈希
-├── workspace.json            # 产品根目录、项目、Agent 集合
+├── workspace.json            # 产品根目录、workspace ID、项目、Agent、Source Pool 绑定
 └── tasks/
     ├── index.json            # 任务注册与激活状态
     └── <JIRA-KEY>/           # 该任务的状态、授权、事件和 CI
@@ -164,7 +189,7 @@ cd <项目工作空间>
 
 ## 5. 启动 Agent、查看并接管任务
 
-启动已绑定的 Agent：
+普通只读接管/梳理从薄工作空间启动：
 
 ```sh
 ~/.agentic-ops/agenticops start --agent <Agent ID> --workspace <项目工作空间>
@@ -202,6 +227,57 @@ Agent 应回显任务阶段、实际变更仓库、验证结果、提交、PR �
 任务类型为 `defect_fix`、`feature_change`、`technical_task`。多个任务可同时 `active`；
 存在歧义时必须显式绑定 issue key。Agent 必须按项目准入要求登记每个仓库的工作分支、
 基线、范围和验证方式；研发工程师确认方案并签发任务授权后，才能进入实现。
+
+进入设计评审后，先登记仓库并准备任务 worktree。Project Package 的
+`projects/<project>/repositories.json` 是仓库目录；池内仓库必须位于
+`<pool>/<owner>/<repo>`，用户自行下载的仓库也必须通过 origin、Git 根目录、
+基线分支和洁净度校验：
+
+```sh
+python3 ~/.agentic-ops/workflow/task.py repository add \
+  --issue-key TAP-123 --repo tapdata/tapdata \
+  --work-branch feature/TAP-123 --scope '<变更范围>' \
+  --verification '<验证命令>' --dir <项目工作空间>
+
+python3 ~/.agentic-ops/workflow/task.py repository prepare \
+  --issue-key TAP-123 --dir <项目工作空间>
+```
+
+`prepare` 会要求主工作树在基线分支且洁净，执行 `fetch --prune` 和 fast-forward，
+再在 `<workspace>/.agenticops/worktrees/<issue-key>/<run-id>/<owner>/<repo>` 创建 linked
+worktree，并把
+`base_sha` 与仓库目录摘要写入任务状态。缺少池配置、仓库未接入、origin 不符、fetch
+失败、主工作树脏或分叉都会停止；不会移动、覆盖或删除用户仓库。
+
+worktree 准备完成并重新签发包含 `base_sha` 的授权后，用任务模式启动 Agent：
+
+```sh
+~/.agentic-ops/agenticops start --agent codex \
+  --workspace <项目工作空间> --issue-key TAP-123
+```
+
+启动入口仍来自薄工作空间，但任务模式以 TAP-123 当前 run 目录为 cwd；校验该 run 的每个
+worktree 后作为 `--add-dir` 传给 Agent。没有动态目录能力、worktree 已清理、路径/分支漂移
+或仓库目录变化时失败关闭。
+
+任务完成时阶段推进会清理洁净 worktree；也可显式执行：
+
+```sh
+python3 ~/.agentic-ops/workflow/task.py repository cleanup \
+  --issue-key TAP-123 --dir <项目工作空间>
+```
+
+默认保留本地任务分支，便于恢复和审计。只有明确希望回收且分支已安全合并时增加
+`--delete-branches`；底层只执行 `git branch -d`，不会强删。任务 reset 生成新 `run_id`；
+如果保留了同名分支，默认准备会阻断，需改用新分支，或在确认旧分支正是要继续的现场后
+显式传入 `--reuse-existing-branch`。`workspace purge` 会先执行同样的洁净度检查和
+worktree 清理，脏 worktree 会阻断整个 purge。
+
+任务已被接管时，再次执行 `task.py init` 不会自动激活、覆盖或生成新 run，而是停止并展示
+当前阶段与 `run_id`：继续时显式执行 `task.py activate`；重做时先执行 `repository cleanup`，
+再显式执行 `reset --expected-run-id <当前-run-id>`。同一任务的主 Agent、subagent 和
+恢复会话共享任务状态中的同一个 `run_id`，不得按会话自行生成；过期或并发 reset 会停止，
+不会覆盖后来创建的 run。
 
 Jira、Git、GitHub PR/CI 仍是事实源。合并、发布、Tag、保护分支写入、强推和历史改写
 不被普通任务授权覆盖；事实、权限或外部写入结果不明确时必须停止，不能手改

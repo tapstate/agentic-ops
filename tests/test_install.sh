@@ -29,6 +29,7 @@ source_repo="$test_root/source"
 install_root="$test_root/install"
 maintainer_root="$test_root/maintainer"
 workspace="$test_root/project-workspace"
+shared_repository_pool="$test_root/shared-repository-pool"
 
 mkdir -p "$source_repo"
 git -C "$source_repo" init -q -b "$install_branch"
@@ -159,13 +160,17 @@ git -C "$maintainer_root" checkout -q -- agenticops
 git -C "$source_repo" switch -q "$install_branch"
 
 bash "$repo_root/bootstrap/install.sh" \
-  --install-home "$install_root" --repository "$source_repo" --branch "$install_branch"
+  --install-home "$install_root" --repository "$source_repo" --branch "$install_branch" \
+  --repository-pool "$shared_repository_pool"
 
 test -f "$install_root/contracts/gate-request.schema.json"
 test -f "$install_root/gate/runner.py"
 test -x "$install_root/agenticops"
 test ! -e "$install_root/internal"
 test -f "$install_root/.local/product.json"
+test -f "$install_root/.local/repository-pool.json"
+test "$(python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" read --field root)" = \
+  "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$shared_repository_pool")"
 test "$(python3 "$install_root/bootstrap/product_state.py" --product-root "$install_root" read --field tracking_branch)" = "$install_branch"
 if PATH="$setup_bin:$PATH" "$install_root/agenticops" setup >/dev/null 2>&1; then
   printf '安装产品根目录被错误切换为源码维护模式\n' >&2
@@ -204,17 +209,20 @@ grep -F 'Product Project：`tapdata`' "$workspace/AGENTS.md" >/dev/null
 grep -F "$install_root/workflow/task.py" "$workspace/AGENTS.md" >/dev/null
 grep -F "$install_root/adapters/agents/claude/hook.py" "$workspace/.claude/settings.json" >/dev/null
 grep -F "$install_root/adapters/agents/codex/hook.py" "$workspace/.codex/hooks.json" >/dev/null
-python3 - "$workspace/.agenticops/workspace.json" "$workspace/.agenticops/init.json" "$install_root" <<'PY'
+python3 - "$workspace/.agenticops/workspace.json" "$workspace/.agenticops/init.json" "$install_root" "$shared_repository_pool" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 binding = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 initialization = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-assert binding["schema_version"] == 1
+assert binding["schema_version"] == 2
 assert binding["product_root"] == str(Path(sys.argv[3]).resolve())
+assert len(binding["workspace_id"]) == 32
 assert binding["project"] == "tapdata"
 assert binding["agents"] == ["claude", "codex", "test-agent"]
+assert binding["repository_pool"]["source"] == "product-default"
+assert binding["repository_pool"]["root"] == str(Path(sys.argv[4]).resolve())
 paths = {item["path"] for item in initialization["artifacts"]}
 assert {"AGENTS.md", ".agenticops/agenticops", "CLAUDE.md", ".claude/settings.json", ".codex/hooks.json", ".test-agent/settings.json"} <= paths
 PY
@@ -260,6 +268,40 @@ if "$install_root/agenticops" init --workspace "$test_root/unknown-workspace" --
   printf '未知 Agent 被错误接受\n' >&2
   exit 1
 fi
+override_workspace="$test_root/override-workspace"
+override_pool="$test_root/override-pool"
+"$install_root/agenticops" init --workspace "$override_workspace" --agent codex \
+  --repository-pool "$override_pool" >/dev/null
+python3 - "$override_workspace/.agenticops/workspace.json" "$override_pool" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+binding = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert binding["repository_pool"]["root"] == str(Path(sys.argv[2]).resolve())
+assert binding["repository_pool"]["source"] == "workspace-override"
+PY
+rmdir "$override_pool"
+if "$install_root/agenticops" doctor --workspace "$override_workspace" >/dev/null 2>&1; then
+  printf 'Source Pool 缺失时 doctor 未失败关闭\n' >&2
+  exit 1
+fi
+frozen_workspace="$test_root/frozen-workspace"
+"$install_root/agenticops" init --workspace "$frozen_workspace" --agent codex >/dev/null
+new_default_pool="$test_root/new-default-pool"
+python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" \
+  configure --root "$new_default_pool" >/dev/null
+"$install_root/agenticops" repair --workspace "$frozen_workspace" >/dev/null
+python3 - "$frozen_workspace/.agenticops/workspace.json" "$shared_repository_pool" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+binding = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert binding["repository_pool"]["root"] == str(Path(sys.argv[2]).resolve())
+PY
+python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" \
+  configure --root "$shared_repository_pool" >/dev/null
 if "$install_root/agenticops" start --agent test-agent --workspace "$subset_workspace" >/dev/null 2>&1; then
   printf '工作空间启动了未绑定的 Agent\n' >&2
   exit 1
@@ -380,6 +422,48 @@ test ! -f "$install_root/NEXT"
 test "$(file_digest "$workspace/.agenticops/tasks/index.json")" = "$task_index_digest"
 test "$(file_digest "$workspace/.agenticops/tasks/TAP-123/state.json")" = "$task_123_digest"
 test "$(file_digest "$workspace/.agenticops/tasks/TAP-999/state.json")" = "$task_999_digest"
+
+# 任务启动只追加当前任务已准备的 worktree；purge 同步移除 worktree。
+python3 - "$install_root/projects/tapdata/repositories.json" "$source_repo" "$install_branch" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+document = json.loads(path.read_text(encoding="utf-8"))
+entry = document["repositories"]["tapdata/tapdata"]
+entry["origin"] = str(Path(sys.argv[2]).resolve())
+entry["baseline_branch"] = sys.argv[3]
+entry["dev_branch"] = sys.argv[3]
+path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+pool_main="$shared_repository_pool/tapdata/tapdata"
+mkdir -p "$(dirname "$pool_main")"
+git clone -q "$source_repo" "$pool_main"
+python3 "$install_root/workflow/task.py" repository add --issue-key TAP-123 \
+  --repo tapdata/tapdata --work-branch feature/TAP-123-source-pool \
+  --base-branch "$install_branch" --scope 'Source Pool 启动接线' \
+  --verification 'bash tests/test_install.sh' --dir "$workspace" >/dev/null
+python3 "$install_root/workflow/task.py" repository prepare --issue-key TAP-123 \
+  --dir "$workspace" >/dev/null
+task_root="$(python3 "$install_root/workflow/repository_worktree.py" roots \
+  --issue-key TAP-123 --dir "$workspace")"
+task_execution_root="$(python3 "$install_root/workflow/repository_worktree.py" execution-root \
+  --issue-key TAP-123 --dir "$workspace")"
+resolved_workspace="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$workspace")"
+case "$task_root" in
+  "$resolved_workspace"/.agenticops/worktrees/TAP-123/*/tapdata/tapdata) ;;
+  *) printf '任务 worktree 路径不符合工作空间布局：%s\n' "$task_root" >&2; exit 1 ;;
+esac
+PATH="$fake_bin:$PATH" \
+AGENTIC_OPS_EXPECTED_WORKSPACE="$task_execution_root" \
+AGENTIC_OPS_CAPTURE="$capture" \
+  "$install_root/agenticops" start --agent codex --workspace "$workspace" \
+  --issue-key TAP-123 -- --model task-bound >/dev/null
+grep -Fx -- "--add-dir $task_root --model task-bound" "$capture" >/dev/null
+"$install_root/agenticops" workspace purge --workspace "$workspace" --yes >/dev/null
+test ! -e "$task_root"
+test ! -e "$workspace/.agenticops"
 
 printf 'AgenticOps 安装边界验证通过：被测分支=%s，被测提交=%s，安装 fixture 分支=%s\n' \
   "${tested_branch:-detached HEAD}" "$tested_ref" "$install_branch"

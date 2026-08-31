@@ -57,6 +57,12 @@ def discover(product_root):
             raise ValueError("Agent decisions 无效：%s" % agent_id)
         if capabilities.get("ask_fallback") not in ("native", "deny_with_guidance"):
             raise ValueError("Agent ask_fallback 无效：%s" % agent_id)
+        task_directory_argument = capabilities.get("task_directory_argument")
+        if task_directory_argument is not None and (
+            not isinstance(task_directory_argument, str)
+            or not task_directory_argument.startswith("--")
+        ):
+            raise ValueError("Agent task_directory_argument 无效：%s" % agent_id)
         entrypoint = document.get("entrypoint")
         if not isinstance(entrypoint, str) or not _safe_path(root, entrypoint).is_file():
             raise ValueError("Agent Adapter 入口不存在：%s" % agent_id)
@@ -114,6 +120,9 @@ def main():
     resolve = sub.add_parser("resolve-launch")
     resolve.add_argument("agent")
     resolve.add_argument("--workspace")
+    task_directory = sub.add_parser("resolve-task-directory-argument")
+    task_directory.add_argument("agent")
+    task_directory.add_argument("--workspace", required=True)
     args = parser.parse_args()
     try:
         manifests = discover(args.product_root)
@@ -134,6 +143,21 @@ def main():
                 raise ValueError("工作空间配置无法读取：%s" % error) from error
             if args.agent not in config.get("agents", []):
                 raise ValueError("工作空间未绑定 Agent：%s；请重新执行 agenticops init" % args.agent)
+        if args.command == "resolve-task-directory-argument":
+            config_path = Path(args.workspace).resolve() / ".agenticops" / "workspace.json"
+            try:
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as error:
+                raise ValueError("工作空间配置无法读取：%s" % error) from error
+            if args.agent not in config.get("agents", []):
+                raise ValueError("工作空间未绑定 Agent：%s" % args.agent)
+            argument = manifests[args.agent]["capabilities"].get("task_directory_argument")
+            if not argument:
+                raise ValueError(
+                    "Agent %s 未声明动态任务目录能力；不能安全启动外部 worktree" % args.agent
+                )
+            print(argument)
+            return 0
         launch = manifests[args.agent].get("launch", {})
         if launch.get("mode") != "command" or not launch.get("command"):
             raise ValueError(launch.get("message") or "该 Agent 不支持本地命令启动")

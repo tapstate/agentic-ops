@@ -15,6 +15,7 @@
     { "name": "pr_merge", "category": "github", "description": "合并 Pull Request", "requestable": true },
     { "name": "git_rebase", "category": "git", "description": "执行 Git rebase", "requestable": true },
     { "name": "git_clean", "category": "git", "description": "清理 Git 工作树文件", "requestable": true },
+    { "name": "manage_repository_worktree", "category": "git", "description": "同步 Source Pool 或创建、清理任务 worktree", "requestable": true },
     { "name": "git_tag", "category": "git", "description": "创建或修改 Git Tag", "requestable": true },
     { "name": "release", "category": "release", "description": "创建或修改发布", "requestable": true },
     { "name": "scope_change", "category": "authorization", "description": "改变任务授权范围", "requestable": true },

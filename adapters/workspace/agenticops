@@ -14,7 +14,7 @@ try:
     document = json.loads(path.read_text(encoding="utf-8"))
 except (OSError, json.JSONDecodeError) as error:
     raise SystemExit("AgenticOps：工作空间绑定无法读取：%s" % error)
-if document.get("schema_version") != 1:
+if document.get("schema_version") not in (1, 2):
     raise SystemExit("AgenticOps：工作空间绑定版本不支持，请执行 agenticops repair")
 root = document.get("product_root")
 if not isinstance(root, str) or not root:

@@ -36,6 +36,18 @@ def project_from_workspace(workspace):
     return project
 
 
+def product_root_from_workspace(workspace):
+    path = Path(workspace).resolve() / ".agenticops" / "workspace.json"
+    binding = _read_json(path)
+    root = binding.get("product_root")
+    if not isinstance(root, str) or not root:
+        raise ValueError("工作空间绑定缺少 product_root")
+    product = Path(root).resolve()
+    if not product.is_dir():
+        raise ValueError("工作空间绑定的 Product Root 不存在：%s" % product)
+    return product
+
+
 def project_root(root=ROOT, project="tapdata"):
     path = Path(root) / "projects" / project
     if not path.is_dir():
@@ -45,12 +57,56 @@ def project_root(root=ROOT, project="tapdata"):
 
 def load_admission(root=ROOT, project="tapdata", workspace=None):
     selected = project_from_workspace(workspace) if workspace is not None else project
-    return _read_json(project_root(root, selected) / "admission.json")
+    selected_root = product_root_from_workspace(workspace) if workspace is not None else root
+    return _read_json(project_root(selected_root, selected) / "admission.json")
 
 
 def load_profile(root=ROOT, project="tapdata", workspace=None):
     selected = project_from_workspace(workspace) if workspace is not None else project
-    return _read_json(project_root(root, selected) / "profile.json")
+    selected_root = product_root_from_workspace(workspace) if workspace is not None else root
+    profile = _read_json(project_root(selected_root, selected) / "profile.json")
+    reference = profile.get("repositories", {}).get("catalog")
+    if not isinstance(reference, str) or not reference:
+        raise ValueError("项目 Profile 缺少 repositories.catalog")
+    catalog_path = (project_root(selected_root, selected) / reference).resolve()
+    try:
+        catalog_path.relative_to(project_root(selected_root, selected).resolve())
+    except ValueError as error:
+        raise ValueError("项目仓库目录路径越界：%s" % reference) from error
+    catalog = _read_json(catalog_path)
+    if catalog.get("schema_version") != 1 or not isinstance(catalog.get("repositories"), dict):
+        raise ValueError("项目仓库目录结构无效：%s" % catalog_path)
+    for repository, entry in catalog["repositories"].items():
+        parts = repository.split("/") if isinstance(repository, str) else []
+        if len(parts) != 2 or any(part in ("", ".", "..") for part in parts):
+            raise ValueError("项目仓库目录存在无效 owner/repo：%s" % repository)
+        if not isinstance(entry, dict) or not all(
+            isinstance(entry.get(key), str) and entry.get(key)
+            for key in ("origin", "baseline_branch", "dev_branch")
+        ):
+            raise ValueError("项目仓库目录条目不完整：%s" % repository)
+    profile["repositories"] = catalog
+    return profile
+
+
+def load_repository_catalog(root=ROOT, project="tapdata", workspace=None):
+    return load_profile(root=root, project=project, workspace=workspace)["repositories"]
+
+
+def repository_catalog_path(root=ROOT, project="tapdata", workspace=None):
+    selected = project_from_workspace(workspace) if workspace is not None else project
+    selected_root = product_root_from_workspace(workspace) if workspace is not None else root
+    base = project_root(selected_root, selected).resolve()
+    profile = _read_json(base / "profile.json")
+    reference = profile.get("repositories", {}).get("catalog")
+    if not isinstance(reference, str) or not reference:
+        raise ValueError("项目 Profile 缺少 repositories.catalog")
+    path = (base / reference).resolve()
+    try:
+        path.relative_to(base)
+    except ValueError as error:
+        raise ValueError("项目仓库目录路径越界：%s" % reference) from error
+    return path
 
 
 def validate_project_issue(profile, issue_key):
@@ -124,14 +180,18 @@ def scan_sensitive(spec, text):
 def resolve_branches(profile, repo):
     """按 profile.json 查表解析仓库分支；查不到就报错，绝不猜测。"""
     repos = profile.get("repositories", {})
-    baseline = repos.get("baseline_branches", {}).get(repo)
-    dev = repos.get("dev_branches", {}).get(repo)
-    if baseline is None and dev is None:
+    entry = repos.get("repositories", {}).get(repo)
+    if entry is None:
         raise LookupError(
-            "profile.json 未登记仓库 %s 的分支映射；禁止从当前分支或隐式 main 猜测，"
-            "请先在当前项目 profile.json 补齐后重试" % repo
+            "repositories.json 未登记仓库 %s；禁止从当前分支或隐式 main 猜测，"
+            "请先在当前 Project Package 补齐后重试" % repo
         )
-    return {"repository": repo, "baseline_branch": baseline, "dev_branch": dev}
+    return {
+        "repository": repo,
+        "origin": entry.get("origin"),
+        "baseline_branch": entry.get("baseline_branch"),
+        "dev_branch": entry.get("dev_branch"),
+    }
 
 
 # ---- 人读视图生成 ---------------------------------------------------------

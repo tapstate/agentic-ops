@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticops.tapdata.net/contracts/repository-catalog-v1.schema.json",
+  "title": "AgenticOps Project Repository Catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "default", "layout", "repositories", "branch_resolution"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "default": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["main_worktree", "task_worktree"],
+      "properties": {
+        "main_worktree": {"const": "<pool>/<owner>/<repo>"},
+        "task_worktree": {"const": "<workspace>/.agenticops/worktrees/<issue-key>/<run-id>/<owner>/<repo>"}
+      }
+    },
+    "repositories": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["origin", "baseline_branch", "dev_branch", "domains"],
+        "properties": {
+          "origin": {"type": "string", "minLength": 1},
+          "baseline_branch": {"type": "string", "minLength": 1},
+          "dev_branch": {"type": "string", "minLength": 1},
+          "domains": {
+            "type": "array",
+            "items": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "branch_resolution": {
+      "type": "object",
+      "required": ["rule", "resolver", "forbidden_sources", "on_unknown_repository"]
+    }
+  }
+}

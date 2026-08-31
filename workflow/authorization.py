@@ -31,6 +31,7 @@ def repository_bindings(repositories):
         "base_branch",
         "approved_scope",
         "verification_method",
+        "base_sha",
     )
     return [{key: item.get(key) for key in keys} for item in repositories]
 
@@ -65,7 +66,7 @@ def cmd_grant(args):
         "scope": "task_execution",
         "status": "active",
         "issue_key": issue,
-        "agentic_run_id": "run-" + uuid.uuid4().hex[:12],
+        "agentic_run_id": task.get("run_id") or "run-" + uuid.uuid4().hex[:12],
         "agent_id": args.agent_id,
         "approved_plan_version": args.plan_version,
         "repositories": repository_bindings(repositories),

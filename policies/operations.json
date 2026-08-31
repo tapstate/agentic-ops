@@ -16,6 +16,7 @@
     "pr_merge": { "level": "excluded" },
     "git_rebase": { "level": "excluded" },
     "git_clean": { "level": "excluded" },
+    "manage_repository_worktree": { "level": "gated" },
     "git_tag": { "level": "excluded" },
     "release": { "level": "excluded" },
     "scope_change": { "level": "excluded" },
@@ -38,6 +39,7 @@
         "repository",
         "work_branch",
         "base_branch",
+        "base_sha",
         "approved_scope",
         "verification_method"
       ],

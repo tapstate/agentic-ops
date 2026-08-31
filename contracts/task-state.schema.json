@@ -5,10 +5,11 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "issue_key", "task_class", "stage", "facts", "repositories", "pending", "history"
+    "issue_key", "run_id", "task_class", "stage", "facts", "repositories", "pending", "history"
   ],
   "properties": {
     "issue_key": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$" },
+    "run_id": { "type": "string", "pattern": "^run-[a-f0-9]{12}$" },
     "task_class": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
     "stage": {
       "enum": [
@@ -24,7 +25,7 @@
         "additionalProperties": false,
         "required": [
           "repository", "work_branch", "base_branch", "approved_scope",
-          "verification_method", "pull_request", "ci"
+          "verification_method", "base_sha", "worktree", "pull_request", "ci"
         ],
         "properties": {
           "repository": { "type": "string", "minLength": 1 },
@@ -32,6 +33,21 @@
           "base_branch": { "type": "string", "minLength": 1 },
           "approved_scope": { "type": "string", "minLength": 1 },
           "verification_method": { "type": "string", "minLength": 1 },
+          "base_sha": { "type": ["string", "null"], "pattern": "^[a-f0-9]{40,64}$" },
+          "catalog_digest": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "worktree": {
+            "type": ["object", "null"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1 },
+              "status": { "enum": ["prepared", "removed"] },
+              "branch_reused": { "type": "boolean" },
+              "prepared_at": { "type": "string" },
+              "removed_at": { "type": "string" },
+              "branch_cleanup": { "type": "string" }
+            },
+            "required": ["path", "status"],
+            "additionalProperties": false
+          },
           "pull_request": { "type": ["string", "null"] },
           "ci": { "type": ["string", "null"] }
         }
