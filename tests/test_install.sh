@@ -1114,7 +1114,8 @@ python3 "$install_root/workflow/task.py" repository add --issue-key TAP-123 \
 test ! -e "$task_root"
 test ! -e "$workspace/.agenticops"
 
-# auto-clone 必须通过受控 repository prepare 供给 Source Pool 并固化本地 Git 基线。
+# 安装产物必须能完成“初始化 -> 任务授权 -> 精确任务清理”闭环；auto-clone 同时验证
+# 受控 repository prepare 供给 Source Pool 并固化本地 Git 基线。
 auto_clone_pool="$test_root/auto-clone-pool"
 auto_clone_workspace="$test_root/auto-clone-workspace"
 python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" \
@@ -1131,6 +1132,8 @@ python3 "$install_root/workflow/task.py" repository add --issue-key TAP-124 \
 python3 "$install_root/workflow/task.py" repository prepare --issue-key TAP-124 \
   --dir "$auto_clone_workspace" >/dev/null
 test -d "$auto_clone_pool/tapdata/tapdata/.git"
+auto_clone_task_root="$(python3 "$install_root/workflow/repository_worktree.py" roots \
+  --issue-key TAP-124 --dir "$auto_clone_workspace")"
 python3 - "$auto_clone_workspace/.agenticops/tasks/TAP-124/state.json" "$source_repo" <<'PY'
 import json
 import sys
@@ -1143,6 +1146,58 @@ assert repository["authorized_endpoint"] == str(Path(sys.argv[2]).resolve())
 assert repository["worktree"]["status"] == "prepared"
 assert Path(repository["worktree"]["path"]).is_dir()
 PY
+for fact in \
+  'acceptance_criteria=安装产物可以签发授权并精确回收任务状态' \
+  'target_repo=tapdata/tapdata' \
+  'verification_method=bash tests/test_install.sh' \
+  'risk_level=T3'; do
+  key="${fact%%=*}"
+  value="${fact#*=}"
+  python3 "$install_root/workflow/task.py" record --issue-key TAP-124 \
+    --key "$key" --value "$value" --dir "$auto_clone_workspace" >/dev/null
+done
+python3 "$install_root/workflow/task.py" advance --issue-key TAP-124 \
+  --note '安装验收：准入与受控基线已确认，进入设计评审' \
+  --dir "$auto_clone_workspace" >/dev/null
+python3 "$install_root/workflow/authorization.py" grant --issue-key TAP-124 \
+  --agent-id install-acceptance --plan-version install-test-v1 \
+  --dir "$auto_clone_workspace" >/dev/null
+auto_clone_run="$(python3 - "$auto_clone_workspace/.agenticops/tasks/TAP-124/state.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+print(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["run_id"])
+PY
+)"
+python3 - "$auto_clone_workspace/.agenticops/tasks/TAP-124/state.json" \
+  "$auto_clone_workspace/.agenticops/tasks/TAP-124/authorization.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+task = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+authorization = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+assert task["stage"] == "design_review"
+assert authorization["scope"] == "task_execution"
+assert authorization["status"] == "active"
+assert authorization["issue_key"] == task["issue_key"] == "TAP-124"
+assert authorization["agentic_run_id"] == task["run_id"]
+assert authorization["agent_id"] == "install-acceptance"
+assert authorization["repositories"][0]["base_sha"] == task["repositories"][0]["base_sha"]
+PY
+python3 "$install_root/workflow/task.py" deactivate --issue-key TAP-124 \
+  --dir "$auto_clone_workspace" >/dev/null
+python3 "$install_root/workflow/task.py" purge --issue-key TAP-124 \
+  --expected-run-id "$auto_clone_run" --yes --dir "$auto_clone_workspace" >/dev/null
+test ! -e "$auto_clone_task_root"
+test ! -e "$auto_clone_workspace/.agenticops/tasks/TAP-124"
+if python3 "$install_root/workflow/task.py" list --dir "$auto_clone_workspace" | \
+    grep -F 'TAP-124' >/dev/null; then
+  printf '任务 purge 后仍保留在任务注册表：TAP-124\n' >&2
+  exit 1
+fi
+test -d "$auto_clone_pool/tapdata/tapdata/.git"
 "$install_root/agenticops" workspace purge --workspace "$auto_clone_workspace" --yes >/dev/null
 test ! -e "$auto_clone_workspace/.agenticops"
 
