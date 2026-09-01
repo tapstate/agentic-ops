@@ -83,6 +83,7 @@ Agent 会先读取 Jira 和项目准入规则，登记仓库并准备本地任�
 - [Git SSH 安装](usage/git-ssh-install.md)：默认安装命令的独立说明。
 - [gh 一键安装](usage/gh-one-click-install.md)：无法使用 Git SSH 时的备用安装方式。
 - [自定义 Source Pool](usage/custom-source-pool.md)：复用现有业务仓库或改为手动供给。
+- [任务授权指引](usage/task-authorization.md)：用脚本从空任务列表接管 Jira 任务，再完成准入、基线和实施授权。
 - [更新与回退](usage/update-and-rollback.md)：更新安装、修复工作空间接线或回退一次更新。
 - [常见问题](usage/faq.md)：安装失败、Hook、任务恢复和本地清理。
 

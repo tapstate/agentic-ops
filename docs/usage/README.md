@@ -7,6 +7,7 @@
 | 默认安装 | [Git SSH 安装](git-ssh-install.md) | 已配置 SSH，按受信 `main` 安装使用工作面 |
 | 无法使用 Git SSH | [gh 一键安装](gh-one-click-install.md) | 通过 GitHub CLI 登录并安装 |
 | 改变业务仓库来源 | [自定义 Source Pool](custom-source-pool.md) | 要复用已有仓库、隔离缓存或改为手动供给 |
+| 脚本接管与授权 | [任务授权指引](task-authorization.md) | 从空任务列表加载 Jira 任务，完成准入、受控基线、方案确认与实施授权 |
 | 日常维护安装 | [更新与回退](update-and-rollback.md) | 安装已存在、更新失败、接线漂移或需要回退 |
 | 排障与恢复 | [常见问题](faq.md) | 安装、启动、Hook 或已接管任务出现问题 |
 
