@@ -4,7 +4,7 @@ set -euo pipefail
 product_root="${AGENTIC_OPS_HOME:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)}"
 target_branch="develop"
 repository_pool=""
-repository_provisioning="manual"
+repository_provisioning="auto-clone"
 
 usage() {
   printf '用法：setup.sh [--repository-pool <目录>] [--repository-provisioning manual|auto-clone]\n'

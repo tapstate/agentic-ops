@@ -1,280 +1,89 @@
-# AgenticOps 使用指引
+# AgenticOps 首次使用指引
 
-不熟悉本文术语时，先查看[术语表](glossary.md)。
+这篇只带你完成一条默认路径：安装 AgenticOps、创建工作空间并接管第一个 Jira 任务。默认值已由产品配置；除示例中的工作空间路径和任务号外，不需要先理解或填写其它选项。
+
+开始前准备：Git、Python 3.9+，并确保 Git SSH 已获得 `tapstate/agentic-ops` 的读取权限。不熟悉术语时查看[术语表](glossary.md)。
 
 ## 1. 安装
 
-本节用于业务使用者安装已发布的 AgenticOps，不用于维护产品源码。两种安装方式均从受信的 `main` 分支安装到 `~/.agentic-ops`，且都需要 Git、Bash 和 Python 3.9+；安装目录已存在时会拒绝覆盖，请改用 `agenticops update`。Git SSH 的配置、验证和撤销见 [Git SSH 授权指引](security/git-ssh-access.md)。
-
-### 1.1 GitHub CLI 一键安装
-
-此方式使用 `gh` 从私有仓库读取安装入口，适合已登录 GitHub CLI 的用户。除通用依赖外，还需要 GitHub CLI（`gh`）登录到有本仓库读取权限的 GitHub 账号。
-
-先确认 `gh` 登录状态：
-
-```sh
-gh auth status -h github.com
-```
-
-未登录时完成网页登录；不要把 token 写入命令行或仓库：
-
-```sh
-gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --scopes repo
-```
-
-`gh auth status` 成功时无需重复登录。随后使用当前账号从私有仓库读取受信 `main` 分支的安装入口：
+按[Git SSH 授权指引](security/git-ssh-access.md)确认访问权限后，执行以下命令。它使用默认安装位置、发布分支、Source Pool 和仓库供给方式：
 
 ```sh
 (
   set -euo pipefail
-  bootstrap="$(gh api -H 'Accept: application/vnd.github.raw' \
-    '/repos/tapstate/agentic-ops/contents/bootstrap/install.sh?ref=main')"
-  printf '%s\n' "$bootstrap" | bash
-)
-```
 
-默认 Source Pool 为 `~/.agentic-ops-repos`（即 `${product_root}-repos`）。如需复用已有外部池，可把最后一行改为：
-
-```sh
-printf '%s\n' "$bootstrap" | bash -s -- --repository-pool <Source-Pool-目录>
-```
-
-默认 `manual` 模式不会自动下载业务仓库；明确需要自动供给时再增加 `--repository-provisioning auto-clone`。两种模式都会先校验池根目录不能位于 Product Root 内，且路径必须是可读写目录。
-
-`gh api` 被拒绝时，核对当前账号的仓库访问权与 `repo` scope。
-
-### 1.2 Git clone 安装
-
-此方式不依赖 `gh`；适合已配置 Git SSH、且 GitHub 账号具有 `tapstate/agentic-ops` 读取权限的用户。先按 Git SSH 授权指引验证身份与仓库读取权限，再直接将受信分支稀疏克隆为正式产品根目录：
-
-```sh
-(
-  set -euo pipefail
-  ao_install_root="$HOME/.agentic-ops"
-  # 复用已有外部池时改为该池的绝对路径。
-  ao_repository_pool="$HOME/.agentic-ops-repos"
-  # 默认不自动下载业务仓库；仅在项目映射和下载范围已确认后改为 auto-clone。
-  ao_repository_provisioning="manual"
-  test ! -e "$ao_install_root" || {
-    printf '安装目录已存在：%s；请使用 agenticops update 更新\n' "$ao_install_root" >&2
+  ao_home="$HOME/.agentic-ops"
+  test ! -e "$ao_home" || {
+    printf '安装目录已存在：%s；请使用 agenticops update 更新\n' "$ao_home" >&2
     exit 2
   }
 
-  git clone --filter=blob:none --no-checkout --branch main --single-branch \
-    git@github.com:tapstate/agentic-ops.git \
-    "$ao_install_root"
+  git clone --filter=blob:none --no-checkout \
+    --branch main --single-branch \
+    git@github.com:tapstate/agentic-ops.git "$ao_home"
 
-  git -C "$ao_install_root" sparse-checkout init --cone
-  git -C "$ao_install_root" sparse-checkout set \
+  git -C "$ao_home" sparse-checkout init --cone
+  git -C "$ao_home" sparse-checkout set \
     adapters bootstrap contracts gate policies projects workflow
-  git -C "$ao_install_root" checkout main
+  git -C "$ao_home" checkout main
 
-  ao_current_ref="$(git -C "$ao_install_root" rev-parse HEAD)"
-  python3 "$ao_install_root/bootstrap/product_state.py" \
-    --product-root "$ao_install_root" write \
+  ao_ref="$(git -C "$ao_home" rev-parse HEAD)"
+  python3 "$ao_home/bootstrap/product_state.py" \
+    --product-root "$ao_home" write \
     --mode installed \
     --repository git@github.com:tapstate/agentic-ops.git \
     --branch main \
-    --current-ref "$ao_current_ref"
-  python3 "$ao_install_root/bootstrap/repository_pool.py" \
-    --product-root "$ao_install_root" configure \
-    --root "$ao_repository_pool" --provisioning "$ao_repository_provisioning"
+    --current-ref "$ao_ref"
+
+  python3 "$ao_home/bootstrap/repository_pool.py" \
+    --product-root "$ao_home" configure
 )
 ```
 
-这条路径不执行 `install.sh`：Git 直接写入正式安装目录，再显式写入“使用工作面”的产品状态，后续 `update` 与 `rollback` 才能按安装分支正常工作。`git clone` 被拒绝时，按 Git SSH 授权指引检查密钥、组织 SSO 与仓库授权。
+成功后，产品安装在 `~/.agentic-ops`。默认 Source Pool 是 `~/.agentic-ops-repos`，使用 `auto-clone` 供给模式；无需把这些默认值写进命令。接管任务时，Agent 会按项目仓库目录受控下载缺失的业务仓库。
 
-两种方式安装出的目录结构和产品状态相同；下载、认证或克隆失败时不会继续安装。不要把产品源码仓库当作业务安装目录。
+## 2. 创建项目工作空间
 
-## 2. 选择并配置 Source Pool
-
-Source Pool 是业务仓库的统一主工作树根目录：每个仓库位于 `<Source-Pool>/<owner>/<repo>`，任务实际修改的 linked worktree 则位于各自工作空间的 `.agenticops/worktrees/`。它不是 Product Root 的子目录，也不会被 Agent 整体加入可写范围。
-
-安装时未指定池会创建默认池；仅在需要复用已有、干净的业务仓库主工作树或需要为不同环境隔离仓库缓存时，才显式指定该参数。GitHub CLI 安装在第 1.1 节的 `bash -s --` 后传入 `--repository-pool`；Git clone 安装在第 1.2 节修改 `ao_repository_pool`。池目录必须可读、可写、可进入，且不能与 Product Root 或项目工作空间互相嵌套。
-
-默认使用 `manual` 供给模式：先由用户按 `<owner>/<repo>` 布局下载并校验业务仓库，任务准备只会使用已接入的仓库。`auto-clone` 会在任务准备时自动 clone 项目仓库；只有项目仓库映射、Git SSH 权限和自动下载范围均已确认时才使用：
-
-在 GitHub CLI 安装方式中附加 `--repository-provisioning auto-clone`；Git clone 安装方式中把 `ao_repository_provisioning` 改为 `auto-clone`。除这两处外，不要在工作空间或任务执行时临时改变供给模式。
-
-工作空间首次初始化时默认继承 Product Root 的池；如该工作空间必须使用独立池，在首次初始化显式传入 `--repository-pool`。实际路径与来源会固化在 `.agenticops/workspace.json`；之后改变 Product Root 默认池不会静默重绑已有工作空间，也不得手改该文件。迁移前必须先清理任务 worktree，再重新初始化或使用后续受控迁移能力。
-
-## 3. 初始化项目工作空间
-
-先查看产品根目录（Product Root）当前提供的 Agent：
+工作空间放在业务代码之外。以下示例为默认项目创建 `~/agenticops-tapdata`；只需要把路径换成你的实际位置：
 
 ```sh
-~/.agentic-ops/agenticops agents
+~/.agentic-ops/agenticops init \
+  --workspace "$HOME/agenticops-tapdata"
 ```
 
-接入全部 Agent：
+不传 `--agent` 时会接入全部可用 Agent，不传 `--repository-pool` 时会继承安装时的默认池。接着检查接线：
 
 ```sh
-~/.agentic-ops/agenticops init --workspace <项目工作空间> --project tapdata
+~/.agentic-ops/agenticops doctor --workspace "$HOME/agenticops-tapdata"
 ```
 
-只接入部分 Agent 时重复传入：
+## 3. 启动 Agent
+
+进入工作空间并启动你要使用的 Agent。使用 Codex：
 
 ```sh
-~/.agentic-ops/agenticops init --workspace <项目工作空间> --project tapdata --agent <Agent-ID-1> --agent <Agent-ID-2>
+cd "$HOME/agenticops-tapdata"
+./agenticops start codex
 ```
 
-工作空间默认继承 Product Root 的 Source Pool。需要独立池时只在首次初始化显式覆盖：
+首次启动 Codex 时，按 `/hooks` 的提示审核并信任本项目生成的 Hook。使用 Claude Code 时，将最后一行替换为 `./agenticops start claude`。
 
-```sh
-~/.agentic-ops/agenticops init --workspace <项目工作空间> --project tapdata \
-  --repository-pool <独立-Source-Pool-目录>
-```
+## 4. 接管第一个任务
 
-没有 `both` 特殊值，也不限制 Agent 数量。一个工作空间绑定一个产品项目，可接管该项目下任意多个任务；一个任务可修改多个仓库。
-
-初始化后，工作空间根会生成可再生的薄入口 `agenticops`。它读取工作空间的 `.agenticops/workspace.json` 以定位并校验中央 Product Root，不需要 `.env`，不注入任务上下文，也不保存第二份路径配置：
-
-```sh
-cd <项目工作空间>
-./agenticops doctor
-./agenticops start <Agent ID>
-```
-
-若薄入口缺失、不可执行或 `doctor` 提示接线漂移，使用已绑定的中央入口执行 `repair --workspace <项目工作空间>`；不得手改 `.agenticops/workspace.json` 或用 `.env` 覆盖绑定关系。
-
-产品根目录会在成功初始化、修复或启动后，维护一个仅供本机提示的已知工作空间索引。更新到新提交时只提示待刷新项，不会扫描或自动修改业务目录。可通过以下命令维护该索引和工作空间：
-
-```sh
-~/.agentic-ops/agenticops workspace list
-~/.agentic-ops/agenticops workspace repair --all
-~/.agentic-ops/agenticops workspace prune --all
-~/.agentic-ops/agenticops workspace detach --workspace <项目工作空间>
-~/.agentic-ops/agenticops workspace purge --workspace <项目工作空间>
-```
-
-`--all` 必须显式指定；批量操作会先列出目标并要求确认。`prune` 仅注销缺失、已改绑或无效的本机提示登记。`clean --generated-only` 只收敛可再生接线；`detach` 保留 `.agenticops/tasks/`，因此存在已准备 worktree 时会要求先清理，避免解绑后留下孤儿；这里的 `workspace purge` 会联动清理全部洁净 worktree 后删除整个工作空间的任务状态，且不支持批量执行。只结束或清理一个任务时应使用第 6 节的任务生命周期命令，不能用工作空间级 purge 扩大删除范围。非交互环境默认拒绝这些确认操作；仅在已由调用方展示并确认目标列表的自动化场景中使用 `--yes`。
-
-## 4. 工作空间数据
+在同一 Agent 会话中直接发送下面这句话，把 `TAP-123` 换成实际 Jira 任务号：
 
 ```text
-.agenticops/
-├── init.json                 # 初始化版本与生成产物哈希
-├── workspace.json            # 产品根目录、workspace ID、项目、Agent、Source Pool 绑定
-├── events.jsonl              # 无法唯一归属到任务的 Gate 审计事件
-└── tasks/
-    ├── index.json            # 任务注册与激活状态
-    └── <JIRA-KEY>/           # 该任务的状态、授权、事件和 CI
+接管 TAP-123。
 ```
 
-`init.json` 和 Agent 配置可重新生成；`workspace.json` 是工作空间配置；`tasks/` 是业务运行数据。Gate 能唯一解析任务时将事件写入对应任务目录；无法唯一解析任务时才写入根 `events.jsonl`，它属于工作空间状态并随 `workspace purge` 删除。Policy、Project Skill 和 Runtime 不复制到工作空间。已接入的 Agent 仅在其原生发现目录生成受控符号链接：Codex 为 `.agents/skills/<skill-name>`，Claude Code 为 `.claude/skills/<skill-name>`；两者都指向中央 Product Root 的同一项目 Skill。不要手改，如发现技能缺失或链接漂移，使用 `repair` 重建。
+Agent 会先读取 Jira 和项目准入规则，登记仓库并准备本地任务 worktree，然后给出方案。方案、风险和实现授权需要你确认；事实、权限或门禁不明确时，它会停下并说明下一步。接管不是自动提交、推送或合并：这些副作用仍受明确授权和 Gate 约束。
 
-## 5. 检查、更新与回退
+## 接下来可能需要
 
-```sh
-~/.agentic-ops/agenticops doctor --workspace <项目工作空间>
-~/.agentic-ops/agenticops repair --workspace <项目工作空间>
-~/.agentic-ops/agenticops update
-~/.agentic-ops/agenticops rollback
-```
+- [Git SSH 安装](usage/git-ssh-install.md)：默认安装命令的独立说明。
+- [gh 一键安装](usage/gh-one-click-install.md)：无法使用 Git SSH 时的备用安装方式。
+- [自定义 Source Pool](usage/custom-source-pool.md)：复用现有业务仓库或改为手动供给。
+- [更新与回退](usage/update-and-rollback.md)：更新安装、修复工作空间接线或回退一次更新。
+- [常见问题](usage/faq.md)：安装失败、Hook、任务恢复和本地清理。
 
-`doctor` 只读检查；`repair` 安全重建接线并迁移旧工作空间状态，不改任务语义。以上命令运行在安装产品根目录，即使用工作面。`update` 只 fast-forward 到安装时记录的分支；`rollback` 回到最近一次更新前的提交。使用工作面有本地修改、HEAD 偏离安装记录或远端历史异常时会停止，不会覆盖现场。
-
-## 6. 启动 Agent、查看并接管任务
-
-普通只读接管/梳理从工作空间根的薄入口启动；当前工作空间由入口自动绑定，不传 `--workspace`：
-
-```sh
-cd <项目工作空间>
-./agenticops start <Agent ID>
-```
-
-`start` 会先刷新接线，并把 `--` 后参数原样交给 Agent。在对话中先请求只读任务清单：
-
-```text
-列出当前工作空间已登记或可恢复的任务；再只读查询 Jira 中我可以接管的任务。不要执行写操作。
-```
-
-本地注册表只保存已接管任务；Jira 仍是待接管任务的事实源。若 Agent 没有可用 Jira 原生连接，应明确报告，而不是编造任务清单。
-
-```sh
-python3 ~/.agentic-ops/workflow/task.py list --dir <项目工作空间>
-python3 ~/.agentic-ops/workflow/task.py status --issue-key TAP-123 --dir <项目工作空间>
-```
-
-接管时向 Agent 发送：
-
-```text
-接管 TAP-123。先读取 Jira 事实和项目准入规则，列全缺失项、目标仓库、工作分支、验证方式和风险；登记仓库后执行受控 prepare，在本地任务 worktree 核验代码并形成方案。未经我的方案确认，不要进入实现或执行其它外部写操作。
-```
-
-Agent 提交方案后，按实际信息补全并发送：
-
-```text
-确认 TAP-123 的方案。授权仓库：<owner/repo>；工作分支：<branch>；基线：<branch>；变更范围：<范围>；验证：<命令或方法>。仅在此范围内实现、测试、提交、推送和创建/更新 PR；范围、风险或验证变化时停止并重新确认。
-```
-
-Agent 应回显任务阶段、实际变更仓库、验证结果、提交、PR 和 CI；证据回写 Jira 前必须展示内容供确认。
-
-任务类型为 `defect_fix`、`feature_change`、`technical_task`。多个任务可同时 `active`；存在歧义时必须显式绑定 issue key。Agent 必须按项目准入要求登记每个仓库的工作分支、基线、范围和验证方式；研发工程师确认方案并签发任务授权后，才能进入实现。
-
-接管、activate 或 reset 成功只是恢复流程，不是默认停点。已经存在的任务应先让研发工程师选择继续现有 run 或清理后 reset；选择完成后，Agent 应继续核验 Jira、补齐准入、登记仓库、准备本地基线和分析源码，直到方案确认、风险授权、事实不可信或其它真实人工决策点。
-
-准入和仓库信息齐备后、进入设计评审前，先登记仓库并准备任务 worktree。Project Package 的 `projects/<project>/repositories.json` 是仓库目录；池内仓库必须位于 `<pool>/<owner>/<repo>`，用户自行下载的仓库也必须通过 origin、Git 根目录、基线分支和洁净度校验：
-
-```sh
-python3 ~/.agentic-ops/workflow/task.py repository add \
-  --issue-key TAP-123 --repo tapdata/tapdata \
-  --work-branch feature/TAP-123 --scope '<变更范围>' \
-  --verification '<验证命令>' --dir <项目工作空间>
-
-python3 ~/.agentic-ops/workflow/task.py repository prepare \
-  --issue-key TAP-123 --dir <项目工作空间>
-```
-
-`prepare` 是绑定 active 任务、仓库登记和当前 run 的受控 Workflow 操作，不要求提前签发 `task_execution` 授权。`auto-clone` 模式会按仓库目录自动 clone；随后要求主工作树在基线分支且洁净，执行 `fetch --prune` 和 fast-forward，再在 `<workspace>/.agenticops/worktrees/<issue-key>/<run-id>/<owner>/<repo>` 创建 linked worktree，并把 `base_sha` 与仓库目录摘要写入任务状态。直接执行 Git clone、复用已有任务分支或非受控 worktree 操作不属于这条自动放行路径，仍须单独判定。缺少池配置、仓库未接入、origin 不符、fetch 失败、主工作树脏或分叉都会停止；不会移动、覆盖或删除用户仓库。
-
-任务源码证据按以下标签表达，避免把远程浏览误作受控基线：
-
-- `远程候选参考`：GitHub API、网页或其它远程只读内容，只能帮助定位候选文件和假设；不能写成“已核实基线”，不能替代本地验证，也不能据此推进 `design_review`。
-- `本地 Git 基线`：prepare 生成的任务 worktree、`base_sha` 和目录摘要；只有这一层可以支撑本地源码分析和设计方案。
-- `本地验证`、`PR/CI`、`发布`：分别记录实际命令与结果、GitHub 审查检查、正式发布事实；低层证据不能冒充更高层验收。
-
-任何 Hook 首次返回 `ask` 或 `deny` 时，Agent 都必须立即完整展示原因、要求的处理动作和当前停止点，并停止当前操作及依赖它的后续步骤。不得把阻断描述成“正常门禁”后继续，也不得改用 GitHub API、直接 Git 或其它工具绕过缺失的本地基线。对 `unknown_external_write`，Agent 不得拆分、改写或换工具重试；Tool Adapter 实际更新后，研发工程师可明确要求原样重放一次，由新 Hook 重新判定，再次拒绝则停止。
-
-worktree 准备完成后，当前工作空间会话继续处理，不启动嵌套 Agent，也不切换工作空间。先读取只读任务执行上下文，再只在其中列出的 worktree 分析、修改和验证；方案确认后仍需重新签发包含 `base_sha` 的授权，才能进入实现：
-
-```sh
-python3 ~/.agentic-ops/workflow/task.py repository context \
-  --issue-key TAP-123 --json --dir <项目工作空间>
-```
-
-该命令校验当前 run 的 worktree、分支、租约、`base_sha` 和仓库目录摘要，并输出绝对路径。工作空间是 Agent 原生文件系统边界，不是 task/run 级硬隔离；Project Skill 与 Workflow 命令始终显式绑定 workspace 和 issue，Source Pool 仍不加入 Agent 可写范围。
-
-任务完成时阶段推进会清理洁净 worktree；也可显式执行：
-
-```sh
-python3 ~/.agentic-ops/workflow/task.py repository cleanup \
-  --issue-key TAP-123 --dir <项目工作空间>
-```
-
-默认保留本地任务分支，便于恢复和审计。只有明确希望回收且分支已安全合并时增加 `--delete-branches`；底层只执行 `git branch -d`，不会强删。任务 reset 生成新 `run_id`；如果保留了同名分支，默认准备会阻断，需改用新分支，或在确认旧分支正是要继续的现场后显式传入 `--reuse-existing-branch`。`workspace purge` 会先执行同样的洁净度检查和 worktree 清理，脏 worktree 会阻断整个 purge。
-
-任务已被接管时，再次执行 `task.py init` 不会自动激活、覆盖或生成新 run，而是停止并展示当前阶段与 `run_id`：继续时显式执行 `task.py activate`；重做时先执行 `repository cleanup`，再显式执行 `reset --expected-run-id <当前-run-id>`。同一任务的主 Agent、subagent 和恢复会话共享任务状态中的同一个 `run_id`，不得按会话自行生成；过期或并发 reset 会停止，不会覆盖后来创建的 run。
-
-暂时停止本地处理而保留完整现场时使用 `deactivate`，以后用 `activate` 恢复同一 run：
-
-```sh
-python3 ~/.agentic-ops/workflow/task.py deactivate \
-  --issue-key TAP-123 --dir <项目工作空间>
-python3 ~/.agentic-ops/workflow/task.py activate \
-  --issue-key TAP-123 --dir <项目工作空间>
-```
-
-只有明确不再需要该任务的本地状态时，才执行任务级 purge。它要求任务已经 inactive、精确匹配当前 `run_id` 并显式确认；执行前统一预检所有 worktree，任一处脏都会整体停止。成功后清理 worktree、租约、任务注册项和 `.agenticops/tasks/<issue-key>`；已安全合并的本地任务分支可用 `git branch -d` 回收，未合并分支必须保留并在结果中报告。该操作不修改 Jira，但会删除本地任务事件和授权现场：
-
-```sh
-python3 ~/.agentic-ops/workflow/task.py purge \
-  --issue-key TAP-123 --expected-run-id <当前-run-id> --yes \
-  --dir <项目工作空间>
-```
-
-purge 后没有可直接 activate 的本地 run；确需再次处理时，应从 Jira 事实重新接管并生成新 run。不要用 `workspace purge` 代替单任务清理，也不要手删 `.agenticops/tasks/`。
-
-Jira、Git、GitHub PR/CI 仍是事实源。合并、发布、Tag、保护分支写入、强推和历史改写不被普通任务授权覆盖；事实、权限或外部写入结果不明确时必须停止，不能手改 `.agenticops/` 或换工具绕过门禁。
-
-平台接线细节见 [Claude 验证](testing/e2e-claude.md)和 [Codex 验证](testing/e2e-codex.md)；权限边界见[安全说明](security/permissions.md)。
+维护 AgenticOps 源码本身，请改看[维护指引](maintenance-guide.md)，不要把源码仓库当作业务使用工作空间。

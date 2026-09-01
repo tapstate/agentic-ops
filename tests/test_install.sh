@@ -88,6 +88,7 @@ test "$(git -C "$maintainer_root" branch --show-current)" = develop
 test -d "$maintainer_root/.local/venv/internal"
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field mode)" = source
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field tracking_branch)" = develop
+test "$(python3 "$maintainer_root/bootstrap/repository_pool.py" --product-root "$maintainer_root" read --field provisioning)" = "auto-clone"
 test -x "$(git -C "$maintainer_root" config --get core.hooksPath)/pre-commit"
 test -f "$maintainer_root/.local/maintenance-skill-wiring.json"
 for agent_skill_root in .agents/skills .claude/skills; do
@@ -229,6 +230,7 @@ test -f "$install_root/.local/product.json"
 test -f "$install_root/.local/repository-pool.json"
 test "$(python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" read --field root)" = \
   "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$shared_repository_pool")"
+test "$(python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" read --field provisioning)" = "auto-clone"
 test "$(python3 "$install_root/bootstrap/product_state.py" --product-root "$install_root" read --field tracking_branch)" = "$install_branch"
 if PATH="$setup_bin:$PATH" "$install_root/agenticops" setup >/dev/null 2>&1; then
   printf '安装产品根目录被错误切换为源码维护模式\n' >&2
@@ -1132,7 +1134,8 @@ test ! -e "$workspace/.agenticops"
 auto_clone_pool="$test_root/auto-clone-pool"
 auto_clone_workspace="$test_root/auto-clone-workspace"
 python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" \
-  configure --root "$auto_clone_pool" --provisioning auto-clone >/dev/null
+  configure --root "$auto_clone_pool" >/dev/null
+test "$(python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" read --field provisioning)" = "auto-clone"
 "$install_root/agenticops" init --workspace "$auto_clone_workspace" --agent codex >/dev/null
 python3 "$install_root/workflow/task.py" init \
   --issue-key TAP-124 --task-class technical_task --dir "$auto_clone_workspace" >/dev/null

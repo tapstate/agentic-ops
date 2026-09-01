@@ -60,7 +60,7 @@ def load(product_root, required=True):
     return document
 
 
-def write(product_root, root=None, provisioning="manual"):
+def write(product_root, root=None, provisioning="auto-clone"):
     product = Path(product_root).resolve()
     selected = validate_root(product, root or default_root(product), create=True)
     if provisioning not in ("manual", "auto-clone"):
@@ -88,7 +88,7 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     configure = commands.add_parser("configure")
     configure.add_argument("--root")
-    configure.add_argument("--provisioning", choices=("manual", "auto-clone"), default="manual")
+    configure.add_argument("--provisioning", choices=("manual", "auto-clone"), default="auto-clone")
     read = commands.add_parser("read")
     read.add_argument("--field", choices=("root", "provisioning"))
     args = parser.parse_args()

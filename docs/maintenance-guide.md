@@ -9,14 +9,12 @@
 ```sh
 git clone --branch develop --single-branch git@github.com:tapstate/agentic-ops.git
 cd agentic-ops
-./agenticops setup \
-  --repository-pool "$HOME/agenticops-repos" \
-  --repository-provisioning manual
+./agenticops setup
 ```
 
-克隆前先完成 [Git SSH 授权指引](security/git-ssh-access.md)，并确认账号有本仓库访问权。示例显式以 `develop` 作为维护基线；`setup` 会仅 fast-forward 同步该分支、安装本仓库维护依赖并接入受信 Git Hook。工作区有修改时会停止，不会覆盖修改。`--repository-pool` 配置开发产品根目录的默认业务仓库主工作树位置；未传时默认是 `${product_root}-repos`。该目录不能与 Product Root 或项目工作空间互相嵌套，且必须可读、可写、可进入。
+克隆前先完成 [Git SSH 授权指引](security/git-ssh-access.md)，并确认账号有本仓库访问权。示例显式以 `develop` 作为维护基线；`setup` 会仅 fast-forward 同步该分支、安装本仓库维护依赖并接入受信 Git Hook。工作区有修改时会停止，不会覆盖修改。默认 Source Pool 是 `${product_root}-repos`，供给模式为 `auto-clone`；该目录不能与 Product Root 或项目工作空间互相嵌套，且必须可读、可写、可进入。
 
-推荐初始值是 `manual`：业务仓库须由用户按 `<pool>/<owner>/<repo>` 下载并保持主工作树洁净，任务工作流只从这里创建 linked worktree。只有项目仓库映射、Git SSH 权限和自动下载范围均已确认后，才改用 `--repository-provisioning auto-clone`。配置保存于 `.local/repository-pool.json`；它是本机运行配置，不提交。已有项目工作空间会固化当时的池绑定，修改开发面默认值不会静默迁移它们。
+默认 `auto-clone` 会在项目仓库映射和 Git SSH 权限允许时，由受控 `repository prepare` 下载缺失仓库。需要禁止自动下载时，显式使用 `--repository-provisioning manual`，并按 `<pool>/<owner>/<repo>` 预先准备洁净主工作树。配置保存于 `.local/repository-pool.json`；它是本机运行配置，不提交。已有项目工作空间会固化当时的池绑定，修改开发面默认值不会静默迁移它们。
 
 `setup` 用于首次初始化维护工作面。之后在 `develop` 更新当前源码目录：
 
