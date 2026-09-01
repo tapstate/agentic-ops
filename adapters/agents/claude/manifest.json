@@ -1,0 +1,39 @@
+{
+  "schema_version": 2,
+  "name": "claude",
+  "adapter_version": 4,
+  "entrypoint": "adapters/agents/claude/hook.py",
+  "hook": {
+    "standard_event": "before_operation",
+    "tool_kinds": ["shell", "mcp"],
+    "timeout_seconds": 30,
+    "failure_mode": "deny",
+    "native": {
+      "event": "PreToolUse",
+      "tool_matchers": {
+        "shell": "Bash",
+        "mcp": "mcp__.*"
+      }
+    }
+  },
+  "capabilities": {
+    "decisions": ["allow", "ask", "deny"],
+    "ask_fallback": "native"
+  },
+  "artifacts": [
+    {
+      "template": "adapters/agents/claude/templates/CLAUDE.md",
+      "target": "CLAUDE.md"
+    },
+    {
+      "template": "adapters/agents/claude/templates/settings.json",
+      "target": ".claude/settings.json"
+    }
+  ],
+  "launch": {
+    "mode": "command",
+    "command": "claude",
+    "message": "Claude 接线已生成。"
+  },
+  "skill_target": ".claude/skills"
+}

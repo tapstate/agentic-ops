@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticops.tapdata.net/contracts/gate-decision-v1.schema.json",
+  "title": "AgenticOps Gate Decision v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_version", "decision", "operation", "operations", "reason", "reason_code"],
+  "properties": {
+    "protocol_version": { "const": 1 },
+    "decision": { "enum": ["allow", "ask", "deny"] },
+    "operation": { "type": "string", "minLength": 1 },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "reason": { "type": "string", "minLength": 1 },
+    "reason_code": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "required_action": { "type": "string", "minLength": 1 },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

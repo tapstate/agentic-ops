@@ -1,4 +1,0 @@
-interface:
-  display_name: "执行真实任务到 PR 测试"
-  short_description: "用真实 Jira 与业务仓库推进任务到 PR 审查并复盘"
-  default_prompt: "使用 $run-task-to-pr-test 按已确认清单将一个真实 Jira 任务推进到 PR 审查并生成复盘。"

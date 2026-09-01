@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "operations": [
+    { "name": "write_jira_comment", "category": "jira", "description": "写入 Jira 评论", "requestable": true },
+    { "name": "write_local_evidence", "category": "local", "description": "写入任务本地证据", "requestable": true },
+    { "name": "transition_jira_status", "category": "jira", "description": "转换 Jira 状态", "requestable": true },
+    { "name": "write_jira_worklog", "category": "jira", "description": "写入 Jira 工作日志", "requestable": true },
+    { "name": "edit_jira_issue", "category": "jira", "description": "编辑 Jira 任务字段", "requestable": true },
+    { "name": "git_commit", "category": "git", "description": "创建 Git 提交", "requestable": true },
+    { "name": "git_push", "category": "git", "description": "推送 Git 引用", "requestable": true },
+    { "name": "create_pr", "category": "github", "description": "创建 Pull Request", "requestable": true },
+    { "name": "update_pr", "category": "github", "description": "更新 Pull Request", "requestable": true },
+    { "name": "fix_pr_comments", "category": "github", "description": "处理 Pull Request 审查意见", "requestable": true },
+    { "name": "git_merge", "category": "git", "description": "执行 Git 合并", "requestable": true },
+    { "name": "pr_merge", "category": "github", "description": "合并 Pull Request", "requestable": true },
+    { "name": "git_rebase", "category": "git", "description": "执行 Git rebase", "requestable": true },
+    { "name": "git_clean", "category": "git", "description": "清理 Git 工作树文件", "requestable": true },
+    { "name": "prepare_task_repository", "category": "workflow", "description": "按 active 任务登记信息准备 Source Pool 与 linked worktree", "requestable": true },
+    { "name": "manage_repository_worktree", "category": "git", "description": "同步 Source Pool 或创建、清理任务 worktree", "requestable": true },
+    { "name": "delete_task_state", "category": "workflow", "description": "删除已停用任务的本地状态与审计现场", "requestable": true },
+    { "name": "git_tag", "category": "git", "description": "创建或修改 Git Tag", "requestable": true },
+    { "name": "release", "category": "release", "description": "创建或修改发布", "requestable": true },
+    { "name": "scope_change", "category": "authorization", "description": "改变任务授权范围", "requestable": true },
+    { "name": "create_repository", "category": "github", "description": "创建、派生或删除代码仓库", "requestable": true },
+    { "name": "protected_branch_push", "category": "git", "description": "向保护分支推送", "requestable": false },
+    { "name": "force_push", "category": "git", "description": "强制推送 Git 引用", "requestable": true },
+    { "name": "history_rewrite", "category": "git", "description": "改写 Git 历史", "requestable": true },
+    { "name": "unknown_external_write", "category": "external", "description": "已识别为受控操作族但无法可靠映射的歧义操作", "requestable": true }
+  ]
+}

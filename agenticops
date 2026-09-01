@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_path="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$0")"
+product_root="$(CDPATH= cd -- "$(dirname -- "$script_path")" && pwd -P)"
+
+usage() {
+  cat <<'EOF'
+用法：
+  agenticops install [install 参数]
+  agenticops setup [--repository-pool <目录>] [--repository-provisioning manual|auto-clone]
+  agenticops agents
+  agenticops init [--workspace <目录>] [--project <项目>] [--agent <Agent ID>]... [--repository-pool <目录>]
+  agenticops doctor [--workspace <目录>]
+  agenticops repair [--workspace <目录>]
+  agenticops workspace <list|prune|repair|clean|detach|purge> [参数]
+  agenticops start <Agent ID> [-- <Agent 参数>]
+  agenticops start --agent <Agent ID> [--workspace <目录>] [-- <Agent 参数>]
+  agenticops update
+  agenticops rollback
+
+工作面：
+  维护：源码产品根目录，setup 初始化，update 更新已记录的 develop
+  使用：安装产品根目录，update/rollback 跟随安装时记录的分支
+EOF
+}
+
+workspace="$(pwd -P)"
+parse_workspace() {
+  forwarded=()
+  forwarded_count=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --workspace)
+        test "$#" -ge 2 || { usage >&2; exit 2; }
+        workspace="$2"
+        shift 2
+        ;;
+      --)
+        shift
+        forwarded+=("$@")
+        forwarded_count=$((forwarded_count + $#))
+        break
+        ;;
+      *)
+        forwarded+=("$1")
+        forwarded_count=$((forwarded_count + 1))
+        shift
+        ;;
+    esac
+  done
+}
+
+start_agent() {
+  agent_name=""
+  agent_bound=0
+  forwarded=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --workspace)
+        test "$#" -ge 2 || { usage >&2; exit 2; }
+        workspace="$2"
+        shift 2
+        ;;
+      --agent)
+        test "$#" -ge 2 || { usage >&2; exit 2; }
+        test "$agent_bound" -eq 0 || { printf 'AgenticOps：start 重复指定 Agent ID\n' >&2; exit 2; }
+        agent_name="$2"
+        agent_bound=1
+        shift 2
+        ;;
+      --)
+        shift
+        forwarded+=("$@")
+        break
+        ;;
+      -*)
+        printf 'AgenticOps：未知 start 参数：%s\n' "$1" >&2
+        usage >&2
+        exit 2
+        ;;
+      *)
+        if [ "$agent_bound" -eq 0 ]; then
+          agent_name="$1"
+          agent_bound=1
+        else
+          printf 'AgenticOps：start 位置参数过多：%s\n' "$1" >&2
+          usage >&2
+          exit 2
+        fi
+        shift
+        ;;
+    esac
+  done
+  test -n "$agent_name" || { printf 'AgenticOps：start 缺少 Agent ID\n' >&2; exit 2; }
+  python3 "$product_root/bootstrap/render.py" \
+    --install-home "$product_root" --workspace "$workspace" --refresh
+  python3 "$product_root/bootstrap/workspace_registry.py" \
+    --product-root "$product_root" register --workspace "$workspace"
+  python3 - "$product_root" "$workspace" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from workflow import task_store
+task_store.migrate_legacy(sys.argv[2])
+PY
+  agent_command="$(python3 "$product_root/bootstrap/agent_registry.py" \
+    --product-root "$product_root" resolve-launch "$agent_name" --workspace "$workspace")"
+  command -v "$agent_command" >/dev/null 2>&1 || {
+    printf 'AgenticOps：未找到 Agent 命令：%s\n' "$agent_command" >&2
+    exit 2
+  }
+  cd "$workspace"
+  exec "$agent_command" ${forwarded[@]+"${forwarded[@]}"}
+}
+
+command_name="${1:-}"
+if [ -z "$command_name" ]; then
+  usage
+  exit 2
+fi
+shift
+
+case "$command_name" in
+  install)
+    exec bash "$product_root/bootstrap/install.sh" "$@"
+    ;;
+  setup)
+    exec env AGENTIC_OPS_HOME="$product_root" bash "$product_root/bootstrap/setup.sh" "$@"
+    ;;
+  agents)
+    test "$#" -eq 0 || { usage >&2; exit 2; }
+    exec python3 "$product_root/bootstrap/agent_registry.py" --product-root "$product_root" list
+    ;;
+  init)
+    parse_workspace "$@"
+    exec env AGENTIC_OPS_HOME="$product_root" \
+      bash "$product_root/bootstrap/workspace-init.sh" \
+        --workspace "$workspace" ${forwarded[@]+"${forwarded[@]}"}
+    ;;
+  doctor)
+    parse_workspace "$@"
+    test "$forwarded_count" -eq 0 || { usage >&2; exit 2; }
+    workspace_resolved="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$workspace")"
+    if [ "$workspace_resolved" = "$product_root" ] && [ -f "$product_root/.agentic-ops-source" ]; then
+      exec python3 "$product_root/bootstrap/skill_wiring.py" \
+        --product-root "$product_root" --check
+    fi
+    exec python3 "$product_root/bootstrap/render.py" \
+      --install-home "$product_root" --workspace "$workspace" --check
+    ;;
+  repair)
+    parse_workspace "$@"
+    test "$forwarded_count" -eq 0 || { usage >&2; exit 2; }
+    python3 "$product_root/bootstrap/render.py" \
+      --install-home "$product_root" --workspace "$workspace" --refresh
+    python3 "$product_root/bootstrap/workspace_registry.py" \
+      --product-root "$product_root" register --workspace "$workspace"
+    exec python3 - "$product_root" "$workspace" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from workflow import task_store
+task_store.migrate_legacy(sys.argv[2])
+print("AgenticOps 工作空间修复完成：%s" % sys.argv[2])
+PY
+    ;;
+  workspace)
+    exec python3 "$product_root/bootstrap/workspace_registry.py" \
+      --product-root "$product_root" "$@"
+    ;;
+  start)
+    start_agent "$@"
+    ;;
+  update)
+    test "$#" -eq 0 || { usage >&2; exit 2; }
+    exec env AGENTIC_OPS_HOME="$product_root" bash "$product_root/bootstrap/update.sh"
+    ;;
+  rollback)
+    test "$#" -eq 0 || { usage >&2; exit 2; }
+    mode="$(python3 "$product_root/bootstrap/product_state.py" --product-root "$product_root" read --field mode 2>/dev/null || true)"
+    test "$mode" = "installed" || {
+      printf 'AgenticOps：维护工作面不执行 rollback，请使用 Git 流程\n' >&2
+      exit 2
+    }
+    exec env AGENTIC_OPS_HOME="$product_root" bash "$product_root/bootstrap/rollback.sh"
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    printf 'AgenticOps：未知命令：%s\n' "$command_name" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

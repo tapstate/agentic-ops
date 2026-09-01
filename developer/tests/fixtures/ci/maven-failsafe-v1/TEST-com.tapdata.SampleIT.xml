@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.tapdata.SampleIT" tests="1" failures="1" errors="0" skipped="0">
-  <testcase classname="com.tapdata.SampleIT" name="replicatesRecord">
-    <failure type="java.lang.AssertionError" message="expected:&lt;1&gt; but was:&lt;0&gt;">synthetic stack trace</failure>
-  </testcase>
-</testsuite>

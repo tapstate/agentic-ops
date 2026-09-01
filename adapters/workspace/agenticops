@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# 由 AgenticOps 生成；从工作空间绑定解析中央入口，不保存第二份配置。
+set -euo pipefail
+
+entry_path="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$0")"
+workspace="$(CDPATH= cd -- "$(dirname -- "$entry_path")" && pwd -P)"
+binding="$workspace/.agenticops/workspace.json"
+product_root="$(python3 - "$binding" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    document = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError) as error:
+    raise SystemExit("AgenticOps：工作空间绑定无法读取：%s" % error)
+if document.get("schema_version") not in (1, 2):
+    raise SystemExit("AgenticOps：工作空间绑定版本不支持，请执行 agenticops repair")
+root = document.get("product_root")
+if not isinstance(root, str) or not root:
+    raise SystemExit("AgenticOps：工作空间绑定缺少 product_root，请执行 agenticops repair")
+print(Path(root).resolve())
+PY
+)"
+
+test -x "$product_root/agenticops" || {
+  printf 'AgenticOps：工作空间绑定的产品入口不可用：%s/agenticops；请恢复产品根目录后执行 repair\n' \
+    "$product_root" >&2
+  exit 2
+}
+case "$product_root" in
+  "$workspace"|"$workspace"/*)
+    printf 'AgenticOps：产品根目录不能位于项目工作空间内：%s\n' "$product_root" >&2
+    exit 2
+    ;;
+esac
+
+cd "$workspace"
+exec "$product_root/agenticops" "$@"

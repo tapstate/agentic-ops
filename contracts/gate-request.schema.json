@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticops.tapdata.net/contracts/gate-request-v1.schema.json",
+  "title": "AgenticOps Gate Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_version", "event", "source", "cwd", "operations"],
+  "properties": {
+    "protocol_version": { "const": 1 },
+    "event": { "const": "before_operation" },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "adapter", "adapter_version"],
+      "properties": {
+        "agent": { "type": "string", "minLength": 1 },
+        "adapter": { "type": "string", "minLength": 1 },
+        "adapter_version": { "type": "integer", "minimum": 1 },
+        "tool_kind": { "type": "string" },
+        "tool_name": { "type": "string" }
+      }
+    },
+    "cwd": { "type": "string", "minLength": 1 },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": { "type": "string" },
+        "git_cwd": { "type": "string", "minLength": 1 },
+        "workspace": { "type": "string", "minLength": 1 },
+        "issue_key": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$" },
+        "branch": { "type": "string" },
+        "push_source_ref": { "type": "string", "minLength": 1 },
+        "push_destination_ref": { "type": "string", "minLength": 1 },
+        "push_target_branch": { "type": "string" },
+        "branch_relevant": { "type": "boolean" }
+      }
+    },
+    "note": { "type": "string" }
+  }
+}

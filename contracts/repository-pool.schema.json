@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticops.tapdata.net/contracts/repository-pool-v1.schema.json",
+  "title": "AgenticOps Product Repository Pool Configuration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "root", "provisioning"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "root": {"type": "string", "minLength": 1},
+    "provisioning": {"enum": ["manual", "auto-clone"]}
+  }
+}

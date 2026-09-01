@@ -1,4 +1,0 @@
-interface:
-  display_name: "验收全链路集成测试"
-  short_description: "准备跨工作面测试协议并只读验收结果包"
-  default_prompt: "使用 $run-local-integration 为指定 Jira 任务准备全链路测试协议或验收结果包。"

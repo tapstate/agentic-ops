@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "_meta": {
+    "source": "TapData 项目适配：受控仓库目录的已确认当前开发线",
+    "maintained_by": "TapData 发布或分支负责人",
+    "rule": "版本键必须是经确认的产品版本或产品线；未登记版本不得从分支名称、当前 checkout 或隐式 main 推测。"
+  },
+  "repository_catalog": "repositories.json",
+  "resolution": {
+    "match": "exact_version_key_or_derived_product_branch",
+    "on_unknown_version": "未命中显式矩阵时，只允许按 derivation 解析 main、develop、release-vX.Y.Z 或已存在的主仓任务分支；主仓分支不存在或无法核验时停止",
+    "remote_validation": "对每个已解析分支执行只读 git ls-remote --heads；网络、权限或远程错误标记为未核验，不得标记为不存在"
+  },
+  "derivation": {
+    "product_repository": "tapdata/tapdata",
+    "plugin_version_source": {
+      "path": "iengine/iengine-app/src/main/resources/pluginKit.properties",
+      "key": "tapdata.api.verison"
+    },
+    "linked_repositories": [
+      "tapdata/tapdata",
+      "tapdata/tapdata-enterprise",
+      "tapdata/tapdata-web",
+      "tapdata/tapdata-connectors",
+      "tapdata/tapdata-connectors-enterprise",
+      "tapdata/tapdata-license",
+      "tapdata/tapdata-common-lib"
+    ],
+    "same_name_repositories": [
+      "tapdata/tapdata-enterprise",
+      "tapdata/tapdata-web"
+    ],
+    "plugin_release_repositories": [
+      "tapdata/tapdata-common-lib",
+      "tapdata/tapdata-connectors",
+      "tapdata/tapdata-connectors-enterprise"
+    ],
+    "license_repository": "tapdata/tapdata-license",
+    "keep_current_repositories": [
+      "tapdata/tapdata-application",
+      "tapdata/feishu_robot"
+    ],
+    "independent_repositories": [
+      "tapdata/tapdata-cloud",
+      "tapdata/hazelcast",
+      "tapdata/t-layer3-test",
+      "tapdata/docs",
+      "tapdata/docs-en",
+      "tapdata/mcp-tap-server",
+      "tapdata/solutions",
+      "tapdata/fhir-solution"
+    ],
+    "rule": "main 时全部 linked 仓使用 main；develop 时 license 使用 main、其余 linked 仓使用 develop；release 或任务分支按同名、TAP 标记、PluginKit release 和 license 回退规则解析。keep_current 与 independent 不参与版本分支对齐。"
+  },
+  "versions": {
+    "current": {
+      "label": "当前 TapData 开发线",
+      "source": "由 repositories.json 的 baseline_branch 于 2026-08-31 汇总；不是已发布语义版本的替代品",
+      "branches": {
+        "tapdata/tapdata": "develop",
+        "tapdata/tapdata-cloud": "develop",
+        "tapdata/tapdata-common-lib": "develop",
+        "tapdata/tapdata-connectors": "develop",
+        "tapdata/tapdata-connectors-enterprise": "develop",
+        "tapdata/tapdata-enterprise": "develop",
+        "tapdata/tapdata-license": "main",
+        "tapdata/tapdata-web": "develop",
+        "tapdata/hazelcast": "release-v5.5.0",
+        "tapdata/tapdata-application": "main",
+        "tapdata/feishu_robot": "master",
+        "tapdata/t-layer3-test": "develop",
+        "tapdata/docs": "main",
+        "tapdata/docs-en": "main",
+        "tapdata/mcp-tap-server": "main",
+        "tapdata/solutions": "main",
+        "tapdata/fhir-solution": "main"
+      }
+    }
+  }
+}

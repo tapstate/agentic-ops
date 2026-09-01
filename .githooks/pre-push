@@ -4,15 +4,10 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 zero_sha="0000000000000000000000000000000000000000"
 
-if ! git diff --quiet HEAD -- \
-  .githooks/pre-push \
-  .githooks/reference-transaction \
-  maintainer/bin/ao-maint \
-  maintainer/pyproject.toml \
-  maintainer/uv.lock \
-  maintainer/runtime/src/ao_maint \
-  maintainer/standards/git/story-review-policy.yaml; then
-  echo "story gate implementation has uncommitted changes; pre-push cannot trust the worktree runtime" >&2
+if ! git diff --quiet -- \
+  .githooks internal/bin/story-gate internal/pyproject.toml internal/uv.lock \
+  internal/story_gate; then
+  echo "story gate implementation has uncommitted changes" >&2
   exit 1
 fi
 
@@ -31,31 +26,27 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     echo "direct push to main is prohibited; use a pull request" >&2
     exit 1
   fi
-  if [ "$local_sha" = "$zero_sha" ]; then
-    continue
-  fi
-  if [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" = "hotfix" ]; then
-    case "$remote_ref" in
-      refs/heads/main|refs/heads/develop)
-        continue
-        ;;
-      *)
-        echo "hotfix_push_target_invalid: hotfix may update only main and develop" >&2
-        exit 1
-        ;;
-    esac
-  fi
-  if [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" = "history-rewrite" ]; then
-    case "$remote_ref" in refs/heads/main|refs/heads/develop|refs/heads/release/*|refs/tags/v*) continue;; *) echo "history_rewrite_push_target_invalid" >&2; exit 1;; esac
-  fi
-  case "$local_ref" in
-    refs/heads/*)
-      branch="${local_ref#refs/heads/}"
+  if [ "$local_sha" = "$zero_sha" ]; then continue; fi
+
+  case "${AGENTIC_OPS_SPECIAL_PUSH:-}" in
+    hotfix)
+      case "$remote_ref" in refs/heads/main|refs/heads/develop) continue;; esac
+      echo "hotfix_push_target_invalid" >&2
+      exit 1
       ;;
+    history-rewrite)
+      case "$remote_ref" in refs/heads/main|refs/heads/develop|refs/heads/release/*|refs/tags/v*) continue;; esac
+      echo "history_rewrite_push_target_invalid" >&2
+      exit 1
+      ;;
+    release)
+      continue
+      ;;
+  esac
+
+  case "$local_ref" in
+    refs/heads/*) branch="${local_ref#refs/heads/}" ;;
     refs/tags/*)
-      if [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" = "release" ]; then
-        continue
-      fi
       echo "story_review_channel_protected: tags require the versioned release workflow" >&2
       exit 1
       ;;
@@ -64,14 +55,10 @@ while read -r local_ref local_sha remote_ref remote_sha; do
       exit 1
       ;;
   esac
-  if [ "${AGENTIC_OPS_SPECIAL_PUSH:-}" = "release" ]; then
-    continue
-  fi
 
   AGENTIC_OPS_STORY_BRANCH="$branch" \
     AGENTIC_OPS_STORY_GATE_STAGE=pre_push \
-    "$repo_root/maintainer/bin/ao-maint" \
-      story impact \
-      --change-source range \
-      --head "$local_sha"
+    PYTHONDONTWRITEBYTECODE=1 \
+    "$repo_root/internal/bin/story-gate" \
+      impact --change-source range --head "$local_sha"
 done
