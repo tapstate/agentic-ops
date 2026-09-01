@@ -295,6 +295,8 @@ result := {"decision": "ask", "operation": input.operation, "reason": "受控操
 	level == "controlled"
 	input.context.issue_key
 	input.context.task_resolution == "resolved"
+} else := {"decision": "ask", "operation": input.operation, "reason": "项目仓库预下载会批量写入 Source Pool，必须由研发工程师逐次确认", "reason_code": "project_repository_prefetch_confirmation_required", "required_action": "请研发工程师确认本次预下载；确认后可在目标工作空间原样执行 agenticops workspace prefetch --yes。"} if {
+	level == "confirmation"
 } else := {"decision": "ask", "operation": input.operation, "reason": "高风险操作永不被任务授权覆盖，每次都需要人工单独确认", "reason_code": "excluded_operation", "required_action": "请研发工程师在自己的终端执行原命令，完成后回复“继续”；Agent 不得重试该命令。"} if {
 	level == "excluded"
 } else := {"decision": "ask", "operation": input.operation, "reason": "当前操作无法匹配 active 任务", "reason_code": "no_active_task", "required_action": "请先接管任务或消除 active 任务歧义；Agent 在恢复前停止该操作及其依赖步骤。"} if {

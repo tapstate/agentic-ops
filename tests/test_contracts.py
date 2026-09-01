@@ -332,6 +332,15 @@ class ContractConformanceTest(unittest.TestCase):
         )
         self.assertEqual(["manage_repository_worktree"], operations)
         self.assertEqual("/other", target["workspace"])
+        operations, _, target = classify_tool_call(
+            "Bash", {"command": "./agenticops workspace prefetch --workspace /other --yes"}
+        )
+        self.assertEqual(["prefetch_project_repositories"], operations)
+        self.assertEqual("/other", target["workspace"])
+        self.assertEqual(
+            ["prefetch_project_repositories"],
+            classify_bash("./agenticops workspace prefetch --yes"),
+        )
         for command in (
             "python3 workflow/task.py repository prepare --issue-key TAP-123 --reuse-existing-branch",
             "python3 workflow/task.py repository cleanup --issue-key TAP-123",
@@ -342,6 +351,10 @@ class ContractConformanceTest(unittest.TestCase):
             "git worktree add /tmp/x",
         ):
             self.assertEqual(["manage_repository_worktree"], classify_bash(command), command)
+        self.assertEqual(
+            ["prefetch_project_repositories"],
+            classify_bash("python3 workflow/repository_worktree.py prefetch --dir /workspace"),
+        )
         for command in (
             "python3 workflow/task.py repository prepare --help",
             "python3 workflow/task.py repository context --issue-key TAP-123 --json",

@@ -84,12 +84,19 @@ def _dispatch(tokens):
     executor, _ = _executor_spec(executable)
     if executor and executor != "python":
         return [], {}
-    if executable == "agenticops" and "workspace" in tokens and "purge" in tokens:
-        return (["manage_repository_worktree", UNKNOWN], {}) if len(
+    if executable == "agenticops" and "workspace" in tokens and any(
+        action in tokens for action in ("purge", "prefetch")
+    ):
+        return (
+            ["prefetch_project_repositories" if "prefetch" in tokens else "manage_repository_worktree", UNKNOWN],
+            {},
+        ) if len(
             workspaces := _argument_values(tokens, "--workspace")
         ) > 1 or any(item.split("=", 1)[0] not in ("--all", "--yes", "--workspace")
                      for item in tokens if item.startswith("-")) else (
-            ["manage_repository_worktree"], {"workspace": workspaces[0] if workspaces else ""})
+            ["prefetch_project_repositories" if "prefetch" in tokens else "manage_repository_worktree"],
+            {"workspace": workspaces[0] if workspaces else ""},
+        )
     return _workflow(tokens)
 
 
@@ -140,8 +147,11 @@ def _workflow_action(script, arguments):
     if not script or any(item in ("-h", "--help") for item in arguments):
         return [], {}
     if script == "repository_worktree.py":
-        operation = "manage_repository_worktree" if any(action in arguments
-                                                          for action in ("prepare", "cleanup")) else None
+        operation = (
+            "prefetch_project_repositories" if "prefetch" in arguments else
+            "manage_repository_worktree" if any(action in arguments
+                                                 for action in ("prepare", "cleanup")) else None
+        )
     elif "purge" in arguments:
         operation = "delete_task_state"
     elif "repository" in arguments and "prepare" in arguments:

@@ -352,6 +352,17 @@ def main():
         check("直接 git clone 需人工确认", run_hook("Bash", {"command": "git clone git@example.test:a/b.git"}, ws), "ask")
         check("直接 git fetch 需人工确认", run_hook("Bash", {"command": "git fetch origin develop"}, ws), "ask")
         check("直接 repository_worktree prepare 需人工确认", run_hook("Bash", {"command": "workflow/repository_worktree.py prepare --issue-key TAP-123"}, ws), "ask")
+        prefetch = run_standard({
+            "protocol_version": 1,
+            "event": "before_operation",
+            "source": {"agent": "test", "adapter": "test", "adapter_version": 1},
+            "cwd": str(ws),
+            "operations": ["prefetch_project_repositories"],
+        })
+        check("项目仓库预下载需人工确认", prefetch["decision"], "ask")
+        check("项目仓库预下载不依赖 Jira 任务", prefetch["reason_code"], "project_repository_prefetch_confirmation_required")
+        check("项目仓库预下载确认后可执行", "确认后可在目标工作空间原样执行" in prefetch["required_action"], True)
+        check("项目仓库预下载 Hook 仍需确认", run_hook("Bash", {"command": "./agenticops workspace prefetch --yes"}, ws), "ask")
         check("直接 task purge 需人工确认", run_hook("Bash", {"command": "workflow/task.py purge --issue-key TAP-123 --yes"}, ws), "ask")
         check("python task purge 需人工确认", run_hook("Bash", {"command": "python3 workflow/task.py purge --issue-key TAP-123 --yes"}, ws), "ask")
         check("python -m task purge 仍需人工确认", run_hook("Bash", {"command": "python3 -m workflow.task purge --issue-key TAP-123 --yes"}, ws), "ask")

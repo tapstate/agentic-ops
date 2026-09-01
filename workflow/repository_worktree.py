@@ -57,6 +57,10 @@ def _progress(message):
     print("repository prepare：%s" % message, flush=True)
 
 
+def _prefetch_progress(message):
+    print("repository prefetch：%s" % message, flush=True)
+
+
 def _run(arguments, *, check=True):
     result = subprocess.run(arguments, capture_output=True, text=True, timeout=120)
     if check and result.returncode != 0:
@@ -70,23 +74,23 @@ def _is_retryable_clone_failure(detail):
     return any(marker in normalized for marker in RETRYABLE_CLONE_FAILURES)
 
 
-def _remove_failed_clone(main):
+def _remove_failed_clone(main, *, progress=_progress):
     """只清理本次受控 clone 产生的目标，令下一次尝试回到 clone 前状态。"""
     if not main.exists():
         return
     if main.is_symlink() or not main.is_dir():
         raise ValueError("失败 clone 残留不是可安全清理的目录：%s" % main)
-    _progress("清理本次 clone 的残留目录：%s" % main)
+    progress("清理本次 clone 的残留目录：%s" % main)
     shutil.rmtree(main)
 
 
-def _clone_main(repository, entry, main):
+def _clone_main(repository, entry, main, *, progress=_progress):
     command = [
         "git", "clone", "--branch", entry["baseline_branch"],
         "--single-branch", entry["origin"], str(main),
     ]
     for attempt in range(1, CLONE_MAX_ATTEMPTS + 1):
-        _progress(
+        progress(
             "仓库 %s：克隆基线分支 %s（第 %d/%d 次）"
             % (repository, entry["baseline_branch"], attempt, CLONE_MAX_ATTEMPTS)
         )
@@ -100,11 +104,11 @@ def _clone_main(repository, entry, main):
             succeeded = False
             retryable = True
         if succeeded:
-            _progress("仓库 %s：克隆完成" % repository)
+            progress("仓库 %s：克隆完成" % repository)
             return
-        _remove_failed_clone(main)
+        _remove_failed_clone(main, progress=progress)
         if attempt < CLONE_MAX_ATTEMPTS and retryable:
-            _progress(
+            progress(
                 "仓库 %s：网络错误，第 %d/%d 次克隆失败；%d 秒后重试"
                 % (repository, attempt, CLONE_MAX_ATTEMPTS, CLONE_RETRY_DELAY_SECONDS)
             )
@@ -338,6 +342,28 @@ def _validate_origin_chain(repository_path, repository, expected_origin):
         )
 
 
+def _validate_main(main, repository, entry, *, progress=_progress):
+    if not main.is_dir():
+        raise ValueError("Source Pool 仓库不是目录：%s" % main)
+    progress("仓库 %s：校验 Source Pool 主工作树与 origin 信任链" % repository)
+    top = _run(["git", "-C", str(main), "rev-parse", "--show-toplevel"]).stdout.strip()
+    if Path(top).resolve() != main.resolve():
+        raise ValueError("Source Pool 主工作树不是 Git 根目录：%s" % main)
+    _validate_origin_chain(main, repository, entry.get("origin"))
+    dirty = _run(["git", "-C", str(main), "status", "--porcelain"]).stdout.strip()
+    if dirty:
+        raise ValueError("Source Pool 主工作树存在未提交变更，拒绝同步：%s" % main)
+
+
+def _validate_main_baseline(main, repository, entry):
+    branch = _run(["git", "-C", str(main), "branch", "--show-current"]).stdout.strip()
+    if branch != entry["baseline_branch"]:
+        raise ValueError(
+            "Source Pool 主工作树分支不是项目基线：%s（当前 %s，期望 %s）"
+            % (repository, branch or "detached", entry["baseline_branch"])
+        )
+
+
 def ensure_main(workspace, product_root, pool_root, repository, entry):
     main = repository_path(pool_root, repository)
     if not main.exists():
@@ -350,17 +376,45 @@ def ensure_main(workspace, product_root, pool_root, repository, entry):
         main.parent.mkdir(parents=True, exist_ok=True)
         _progress("仓库 %s：Source Pool 未命中，按 auto-clone 准备主工作树" % repository)
         _clone_main(repository, entry, main)
-    if not main.is_dir():
-        raise ValueError("仓库 main 不是目录：%s" % main)
-    _progress("仓库 %s：校验 Source Pool 主工作树与 origin 信任链" % repository)
-    top = _run(["git", "-C", str(main), "rev-parse", "--show-toplevel"]).stdout.strip()
-    if Path(top).resolve() != main.resolve():
-        raise ValueError("仓库 main 不是 Git 主工作树根目录：%s" % main)
-    _validate_origin_chain(main, repository, entry.get("origin"))
-    dirty = _run(["git", "-C", str(main), "status", "--porcelain"]).stdout.strip()
-    if dirty:
-        raise ValueError("Source Pool 主工作树存在未提交变更，拒绝同步：%s" % main)
+    _validate_main(main, repository, entry)
     return main
+
+
+def prefetch_project_repositories(workspace):
+    """按当前工作空间 Project catalog 预热 Source Pool，不创建任务状态或 worktree。"""
+    workspace = Path(workspace).resolve()
+    _, product_root, pool_root = workspace_binding(workspace)
+    catalog = _catalog(workspace)
+    repositories = catalog.get("repositories", {})
+    if not repositories:
+        raise ValueError("当前项目仓库目录为空，拒绝预下载")
+    selected = []
+    for repository in sorted(repositories):
+        entry = repositories[repository]
+        if not _normalize_origin(entry.get("origin")):
+            raise ValueError("项目仓库目录 origin 无法形成可信 endpoint：%s" % repository)
+        selected.append((repository, entry, repository_path(pool_root, repository)))
+
+    reports = []
+    with _pool_lock(product_root):
+        for repository, entry, main in selected:
+            if main.exists():
+                _prefetch_progress("仓库 %s：Source Pool 已存在，复核后跳过下载" % repository)
+                _validate_main(main, repository, entry, progress=_prefetch_progress)
+                _validate_main_baseline(main, repository, entry)
+                reports.append({"repository": repository, "path": str(main), "status": "existing"})
+                continue
+            main.parent.mkdir(parents=True, exist_ok=True)
+            _prefetch_progress("仓库 %s：按项目目录预下载基线分支" % repository)
+            _clone_main(repository, entry, main, progress=_prefetch_progress)
+            try:
+                _validate_main(main, repository, entry, progress=_prefetch_progress)
+                _validate_main_baseline(main, repository, entry)
+            except Exception:
+                _remove_failed_clone(main, progress=_prefetch_progress)
+                raise
+            reports.append({"repository": repository, "path": str(main), "status": "cloned"})
+    return reports
 
 
 def _prepare_repository(workspace, task, item, *, reuse_existing_branch=False):
@@ -830,6 +884,8 @@ def main():
 
     parser = StrictArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    prefetch = commands.add_parser("prefetch")
+    prefetch.add_argument("--dir", default=".")
     prepare = commands.add_parser("prepare")
     prepare.add_argument("--issue-key", required=True)
     prepare.add_argument("--reuse-existing-branch", action="store_true")
@@ -846,7 +902,12 @@ def main():
     execution.add_argument("--dir", default=".")
     args = parser.parse_args()
     try:
-        if args.command == "prepare":
+        if args.command == "prefetch":
+            reports = prefetch_project_repositories(args.dir)
+            print("已完成 %d 个项目仓库的 Source Pool 预下载。" % len(reports))
+            for report in reports:
+                print("%s：%s（%s）" % (report["repository"], report["status"], report["path"]))
+        elif args.command == "prepare":
             paths = prepare_task(args.dir, args.issue_key, reuse_existing_branch=args.reuse_existing_branch)
             for path in paths:
                 print(path)
