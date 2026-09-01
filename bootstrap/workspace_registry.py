@@ -221,10 +221,11 @@ def detach_preflight(product_root, workspace, purge=False, tree=None):
                     % "、".join(prepared)
                 )
             if prepared:
-                prepared_roots.extend(
-                    repository_worktree.task_roots(workspace, task.get("issue_key"))
-                )
-                repository_worktree.preflight_cleanup(workspace, task)
+                # 清理只需要验证并处理已准备的仓库。task_roots() 用于执行上下文，
+                # 会要求任务的每个仓库都已准备；多仓任务在先准备一部分后新增仓库时，
+                # 该条件不成立，但不应阻止 purge 回收已有的洁净 worktree。
+                checks = repository_worktree.preflight_cleanup(workspace, task)
+                prepared_roots.extend(check["path"] for check in checks)
     if purge:
         allowed = {
             Path(path).relative_to(STATE_DIRECTORY)

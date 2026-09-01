@@ -1104,6 +1104,12 @@ AGENTIC_OPS_CAPTURE="$capture" \
   "$workspace/agenticops" start codex TAP-123 -- --model task-bound >/dev/null
 grep -Fx -- "--add-dir $task_root --model task-bound" "$capture" >/dev/null
 test ! -e "$task_execution_root/agenticops"
+# 已准备部分仓库后仍可登记后续仓库；此时 workspace purge 只应校验并回收
+# 已准备的 worktree，不能把执行上下文“全仓已准备”的条件误用于清理预检。
+python3 "$install_root/workflow/task.py" repository add --issue-key TAP-123 \
+  --repo tapdata/tapdata-enterprise --work-branch feature/TAP-123-enterprise \
+  --base-branch "$install_branch" --scope '企业模块后续改动' \
+  --verification 'bash tests/test_install.sh' --dir "$workspace" >/dev/null
 "$install_root/agenticops" workspace purge --workspace "$workspace" --yes >/dev/null
 test ! -e "$task_root"
 test ! -e "$workspace/.agenticops"
