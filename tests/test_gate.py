@@ -382,6 +382,14 @@ def main():
         )
         check("Claude 复合只读检索不误拦", run_hook("Bash", {"command": readonly_composition}, ws), "passthrough")
         check("Codex 复合只读检索不误拦", run_codex("Bash", {"command": readonly_composition}, ws), "allow")
+        glob_search = (
+            "git -C /tmp/task-worktree status --short --branch && "
+            "rg -n -i --glob '*.java' --glob '*.kt' --glob '*.xml' "
+            "--glob '*.yml' --glob '*.yaml' --glob '*.properties' "
+            "'elasticsearch|logwarehouse' ."
+        )
+        check("Claude 含点路径的复合只读检索不误拦", run_hook("Bash", {"command": glob_search}, ws), "passthrough")
+        check("Codex 含点路径的复合只读检索不误拦", run_codex("Bash", {"command": glob_search}, ws), "allow")
         check("只读检查工作空间根入口不误拦", run_hook("Bash", {"command": "sed -n '1,200p' ./agenticops"}, ws), "passthrough")
         check("sed 原地修改工作空间入口停止", run_hook("Bash", {"command": "sed -n 1p -i.bak ./agenticops"}, ws), "ask")
         check("重定向覆盖工作空间入口停止", run_hook("Bash", {"command": "cat source > ./agenticops"}, ws), "ask")

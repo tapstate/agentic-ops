@@ -278,6 +278,15 @@ class ContractConformanceTest(unittest.TestCase):
         )
         self.assertEqual([], classify_bash(readonly_composition))
         self.assertEqual([], classify_bash("rg '(jira|task)' memory.md && rg task workflow/task.py"))
+        self.assertEqual(
+            [],
+            classify_bash(
+                "git -C /tmp/task-worktree status --short --branch && "
+                "rg -n -i --glob '*.java' --glob '*.kt' --glob '*.xml' "
+                "--glob '*.yml' --glob '*.yaml' --glob '*.properties' "
+                "'elasticsearch|logwarehouse' ."
+            ),
+        )
         self.assertIn(
             "unknown_external_write",
             classify_bash("find . -exec ./agenticops workspace purge ';'"),

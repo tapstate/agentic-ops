@@ -137,7 +137,7 @@ def _unsupported(segment, tokens):
     control = executable in CONTROL_WORDS or executable.endswith("()")
     wrapper = executable in UNSAFE_WRAPPERS
     unknown_wrapper = not _controlled_token(tokens[0]) and any(
-        _controlled_token(token) or os.path.basename(token) in UNSAFE_WRAPPERS
+        _controlled_token(token) or token != "." and os.path.basename(token) in UNSAFE_WRAPPERS
         for token in tokens[1:]
     )
     dynamic = any(marker in segment for marker in DYNAMIC) or "$" in tokens[0]
