@@ -57,7 +57,7 @@ def validate_request(request):
     if not isinstance(target, dict):
         return "target 必须是对象"
     target_fields = {
-        "repository", "workspace", "issue_key", "branch", "push_source_ref",
+        "repository", "git_cwd", "workspace", "issue_key", "branch", "push_source_ref",
         "push_destination_ref", "push_target_branch", "branch_relevant",
     }
     target_unexpected = sorted(set(target) - target_fields)
@@ -66,7 +66,7 @@ def validate_request(request):
     if any(
         key in target and not isinstance(target[key], str)
         for key in (
-            "repository", "workspace", "issue_key", "branch", "push_source_ref",
+            "repository", "git_cwd", "workspace", "issue_key", "branch", "push_source_ref",
             "push_destination_ref", "push_target_branch",
         )
     ):
@@ -87,11 +87,32 @@ def load_operation_catalog(path=None):
 
 def _context(request):
     for_push = "git_push" in request["operations"]
-    context = engine.git_context(request["cwd"], for_push=for_push)
+    target = request.get("target", {})
+    git_cwd = request["cwd"]
+    git_cwd_error = ""
+    if target.get("git_cwd"):
+        candidate = Path(target["git_cwd"])
+        if not candidate.is_absolute():
+            candidate = Path(request["cwd"]) / candidate
+        candidate = candidate.resolve()
+        workspace = engine.find_gate_root(request["cwd"])
+        try:
+            candidate.relative_to(workspace)
+        except ValueError:
+            git_cwd_error = "git -C 目录不在当前项目工作空间内"
+        else:
+            if not candidate.is_dir():
+                git_cwd_error = "git -C 目录不存在或不是目录"
+            else:
+                git_cwd = str(candidate)
+    context = engine.git_context(git_cwd, for_push=for_push)
+    if target.get("git_cwd"):
+        context["git_cwd"] = git_cwd
+    if git_cwd_error:
+        context["repository_fact_error"] = git_cwd_error
     context["push_refspec_required"] = (
         for_push and "unknown_external_write" not in request["operations"]
     )
-    target = request.get("target", {})
     if target.get("repository"):
         requested_repository = engine.normalize_repo(target["repository"])
         if for_push:
@@ -188,6 +209,7 @@ def evaluate_request(request, policy_path=None):
     )
     policy = engine.load_policy(policy_path)
     catalog = load_operation_catalog()
+    target = request.get("target", {})
     context = _context(request)
     gate_cwd = context.get("workspace") or request["cwd"]
     resolution_context = context
@@ -198,6 +220,13 @@ def evaluate_request(request, policy_path=None):
         gate_cwd, context=resolution_context, issue_key=context.get("issue_key")
     )
     context["task_resolution"] = task_resolution
+    if (
+        target.get("git_cwd")
+        and task_directory is not None
+        and not context.get("repository_fact_error")
+        and not engine.task_worktree_matches(task_directory, context["git_cwd"], context)
+    ):
+        context["repository_fact_error"] = "git -C 目录不是当前任务已准备的 worktree"
     authorization = None
     authorization_path = None
     if task_directory is not None:

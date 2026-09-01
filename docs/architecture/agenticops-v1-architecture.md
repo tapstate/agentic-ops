@@ -93,13 +93,13 @@ Project Package 的 `repositories.json` 是仓库、origin、基线分支和域�
 
 `run_id` 是 Workflow 创建并持久化的任务执行身份，不是 Agent 会话身份。主 Agent、subagent 和恢复会话都必须读取同一个任务状态，不能各自生成 `run_id`。再次 init 已存在任务时保持状态不变并失败关闭，提示用户选择继续现有 run，或先清理 worktree 后显式 reset；只有后者创建新 run，并撤销旧授权。init/reset 按任务互斥；reset 必须携带 `--expected-run-id <当前值>`，并发或过期调用因 compare-and-swap 校验失败关闭。
 
-## 7. 多仓库、授权与 Agent 执行目录
+## 7. 多仓库、授权与当前工作空间会话
 
 一个任务可登记多个仓库，每仓绑定 repository、work branch、base branch、修改范围和验证方式。准备 worktree 后，授权还绑定 `run_id` 与 `base_sha`。授权绑定任务、Agent、方案和完整仓库集合；新增仓库或修改稳定绑定后旧授权失效。每仓独立记录提交、PR、CI 和验证，最后汇总成任务证据。
 
-Agent 仍由薄项目工作空间入口启动。工作空间根使用 `./agenticops start <agent> <issue-key>`，入口校验当前任务已准备的 worktree，以 `<workspace>/.agenticops/worktrees/<issue-key>/<run-id>` 作为任务模式 cwd，并逐个转换成 Agent Manifest 声明的动态目录参数；Codex 与 Claude 当前均使用 `--add-dir`。任务命令继续调用中央 Workflow，并显式绑定 workspace 和 issue key。不得把 Source Pool 根目录、主工作树或其它任务执行目录加入可写范围。无法声明动态任务目录的平台失败关闭，并输出人工接力；不得降级为无沙箱启动。
+Agent 由薄项目工作空间入口使用 `./agenticops start <agent>` 启动，当前会话始终以项目工作空间为 cwd。任务 worktree 位于该工作空间内，因此不再为每个 task/run 重启 Agent 或追加动态目录参数。`workflow/task.py repository context --issue-key <issue-key> --json` 复用 worktree 校验，返回当前 run 的仓库、路径、分支和 `base_sha`；Agent 从同一会话在这些已校验路径中分析、修改、构建和测试。任务命令继续显式绑定 workspace 和 issue key，不建立会话级“当前任务”状态。Source Pool 位于工作空间外，仍不得加入 Agent 可写范围。
 
-文件修改、构建和测试发生在任务 worktree。linked worktree 的 Git 元数据仍位于主仓库 `.git/worktrees/`，因此 `git add/commit/push` 同时受 Agent 平台审批和 Gate 控制；Source Pool 的 clone、fetch、worktree add/remove 由确定性 Workflow 执行。
+文件修改、构建和测试发生在任务上下文返回的 worktree。工作空间是 Agent 原生文件系统边界；多个任务之间的边界由显式 issue key、run、分支、授权、Gate 和最终 Git 范围验证共同保证，而不是由第二个 Agent 会话伪造。linked worktree 的 Git 元数据仍位于主仓库 `.git/worktrees/`，因此 `git add/commit/push` 同时受 Agent 平台审批和 Gate 控制；Source Pool 的 clone、fetch、worktree add/remove 由确定性 Workflow 执行。
 
 ## 8. 连续性与安全
 

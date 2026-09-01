@@ -14,8 +14,8 @@ usage() {
   agenticops doctor [--workspace <目录>]
   agenticops repair [--workspace <目录>]
   agenticops workspace <list|prune|repair|clean|detach|purge> [参数]
-  agenticops start <Agent ID> [Jira Key] [-- <Agent 参数>]
-  agenticops start --agent <Agent ID> [--workspace <目录>] [--issue-key <Jira Key>] [-- <Agent 参数>]
+  agenticops start <Agent ID> [-- <Agent 参数>]
+  agenticops start --agent <Agent ID> [--workspace <目录>] [-- <Agent 参数>]
   agenticops update
   agenticops rollback
 
@@ -53,9 +53,7 @@ parse_workspace() {
 
 start_agent() {
   agent_name=""
-  issue_key=""
   agent_bound=0
-  issue_bound=0
   forwarded=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -69,13 +67,6 @@ start_agent() {
         test "$agent_bound" -eq 0 || { printf 'AgenticOps：start 重复指定 Agent ID\n' >&2; exit 2; }
         agent_name="$2"
         agent_bound=1
-        shift 2
-        ;;
-      --issue-key)
-        test "$#" -ge 2 || { usage >&2; exit 2; }
-        test "$issue_bound" -eq 0 || { printf 'AgenticOps：start 重复指定 Jira Key\n' >&2; exit 2; }
-        issue_key="$2"
-        issue_bound=1
         shift 2
         ;;
       --)
@@ -92,9 +83,6 @@ start_agent() {
         if [ "$agent_bound" -eq 0 ]; then
           agent_name="$1"
           agent_bound=1
-        elif [ "$issue_bound" -eq 0 ]; then
-          issue_key="$1"
-          issue_bound=1
         else
           printf 'AgenticOps：start 位置参数过多：%s\n' "$1" >&2
           usage >&2
@@ -121,23 +109,8 @@ PY
     printf 'AgenticOps：未找到 Agent 命令：%s\n' "$agent_command" >&2
     exit 2
   }
-  task_arguments=()
-  execution_directory="$workspace"
-  if [ -n "$issue_key" ]; then
-    directory_argument="$(python3 "$product_root/bootstrap/agent_registry.py" \
-      --product-root "$product_root" resolve-task-directory-argument "$agent_name" \
-      --workspace "$workspace")"
-    task_roots_output="$(python3 "$product_root/workflow/repository_worktree.py" roots \
-      --issue-key "$issue_key" --dir "$workspace")"
-    execution_directory="$(python3 "$product_root/workflow/repository_worktree.py" execution-root \
-      --issue-key "$issue_key" --dir "$workspace")"
-    while IFS= read -r task_root; do
-      test -n "$task_root" || continue
-      task_arguments+=("$directory_argument" "$task_root")
-    done <<< "$task_roots_output"
-  fi
-  cd "$execution_directory"
-  exec "$agent_command" ${task_arguments[@]+"${task_arguments[@]}"} ${forwarded[@]+"${forwarded[@]}"}
+  cd "$workspace"
+  exec "$agent_command" ${forwarded[@]+"${forwarded[@]}"}
 }
 
 command_name="${1:-}"

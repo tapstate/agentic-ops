@@ -23,7 +23,7 @@ metadata:
 - 缺项时一次列全、生成中文补卡评论并 `task.py block`。
 - 每个目标仓库登记仓库、工作分支、基线分支、范围和验证方式。
 - 登记完成后立即执行受控 `task.py repository prepare`；`auto-clone` 模式由该命令自动下载项目仓库，不要求预先签发 `task_execution` 授权。直接 clone、复用已有分支或非受控 worktree 操作不属于这条自动路径。
-- prepare 成功后，普通工作空间会话输出 `./agenticops start <agent-id> <issue-key>` 并结束本轮，由研发工程师启动任务模式；不得在当前 Agent 内嵌套启动另一个 Agent。任务模式仍位于同一工作空间内，并从同一 run 恢复。
+- prepare 成功后，在当前工作空间会话执行 `task.py repository context --issue-key <issue-key> --json --dir <project-workspace>`，核对当前 run 的 worktree、分支和 `base_sha` 后直接继续源码分析。当前会话的 Git 副作用使用 `git -C <返回的 worktree> ...`，Gate 会核对路径、仓库和工作分支均属于当前 active 任务；不得启动嵌套 Agent、切换工作空间或创建会话级“当前任务”状态。
 - 只有 prepare 写入的本地任务 worktree、`base_sha` 和目录摘要才是 Git 基线。远程 GitHub 读取只能写成“远程候选参考”，不能声称“已核实基线”，不能替代本地源码核验，也不能据此推进 `design_review` 或向 Jira 写入已确认方案。
 - 本地基线完成后分析代码并形成方案；研发工程师确认方案后用 `workflow/authorization.py grant` 签发任务授权。
 - 新增仓库或修改分支、范围、验证方式后必须重新确认和授权。

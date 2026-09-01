@@ -190,6 +190,31 @@ def grant(ws, **overrides):
     )
 
 
+def make_git_repository(path):
+    path.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", "-b", "feature/TAP-123"], cwd=path, check=True)
+    subprocess.run(["git", "remote", "add", "origin", "git@github.com:acme/widget.git"], cwd=path, check=True)
+    (path / "README.md").write_text("task worktree\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"],
+        cwd=path,
+        check=True,
+    )
+    return path
+
+
+def prepare_task_worktree(ws, issue_key="TAP-123"):
+    state_path = task_store.task_path(ws, issue_key)
+    task = json.loads(state_path.read_text(encoding="utf-8"))
+    worktree = make_git_repository(
+        ws / ".agenticops" / "worktrees" / issue_key / task["run_id"] / "acme" / "widget"
+    )
+    task["repositories"][0]["worktree"] = {"status": "prepared", "path": str(worktree)}
+    state_path.write_text(json.dumps(task), encoding="utf-8")
+    return worktree
+
+
 def main():
     ws = make_workspace()
     try:
@@ -349,6 +374,7 @@ def main():
         check("git 真实 help 不受控", run_hook("Bash", {"command": "git commit -a --help"}, ws), "passthrough")
         check("gh 真实 help 不受控", run_hook("Bash", {"command": "gh pr create --draft --help"}, ws), "passthrough")
         check("task repository --help 不误拦", run_hook("Bash", {"command": "python3 workflow/task.py repository prepare --help"}, ws), "passthrough")
+        check("repository context 不误拦", run_hook("Bash", {"command": "python3 workflow/task.py repository context --issue-key TAP-123 --json"}, ws), "passthrough")
         check("只读检查工作空间根入口不误拦", run_hook("Bash", {"command": "sed -n '1,200p' ./agenticops"}, ws), "passthrough")
         check("sed 原地修改工作空间入口停止", run_hook("Bash", {"command": "sed -n 1p -i.bak ./agenticops"}, ws), "ask")
         check("重定向覆盖工作空间入口停止", run_hook("Bash", {"command": "cat source > ./agenticops"}, ws), "ask")
@@ -472,6 +498,25 @@ def main():
 
         # ---- 签发授权后 -------------------------------------------------
         grant(ws)
+        task_worktree = prepare_task_worktree(ws)
+        check(
+            "当前会话通过已绑定 git -C worktree commit 放行",
+            run_hook("Bash", {"command": "git -C %s commit -m x" % task_worktree}, ws),
+            "allow",
+        )
+        check(
+            "当前会话通过已绑定 git -C worktree push 放行",
+            run_hook(
+                "Bash", {"command": "git -C %s push origin feature/TAP-123" % task_worktree}, ws
+            ),
+            "allow",
+        )
+        other_worktree = make_git_repository(ws / "other-worktree")
+        check(
+            "同仓同分支的其它 git -C 路径不得借用授权",
+            run_hook("Bash", {"command": "git -C %s commit -m x" % other_worktree}, ws),
+            "ask",
+        )
         check("授权后 git commit 放行", run_hook("Bash", {"command": "git commit -m 'x'"}, ws), "allow")
         check("未配置独立 pushurl 时按 fetch URL 放行", run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws), "allow")
         rewrite_key = "url.git@evil.test:acme/widget.git.insteadOf"
@@ -698,7 +743,7 @@ def main():
         check("无法可靠剥离 env 时停止", run_hook("Bash", {"command": "env -S 'git push origin feature/TAP-123'"}, ws), "ask")
         check("动态命令替换不得拼出未分类命令", run_hook("Bash", {"command": "$(printf git) push origin feature/TAP-123"}, ws), "ask")
         check("env 后动态命令替换仍停止", run_hook("Bash", {"command": "env AO_MODE=test $(printf git) push origin feature/TAP-123"}, ws), "ask")
-        check("git -C 不得借用原 cwd 授权", run_hook("Bash", {"command": "git -C /other push origin feature/TAP-123"}, ws), "ask")
+        check("工作空间外 git -C push 失败关闭", run_hook("Bash", {"command": "git -C /other push origin feature/TAP-123"}, ws), "deny")
         check("git --git-dir 不得借用原仓库授权", run_hook("Bash", {"command": "git --git-dir=/other/repo.git push origin feature/TAP-123"}, ws), "ask")
         check("git --work-tree 不得借用原工作树授权", run_hook("Bash", {"command": "git --work-tree=/other/tree push origin feature/TAP-123"}, ws), "ask")
         check("env -C 不得借用原 cwd 授权", run_hook("Bash", {"command": "env -C /other git push origin feature/TAP-123"}, ws), "ask")

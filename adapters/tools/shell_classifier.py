@@ -24,7 +24,7 @@ GIT_KNOWN = set(SHELL["git_readonly_redirects"]) | set(SHELL["git_simple_operati
 
 def classify_bash_call(command):
     operations, aliases = [], set()
-    target_fields = ("issue_key", "workspace", "push_source_ref", "push_destination_ref",
+    target_fields = ("issue_key", "workspace", "git_cwd", "push_source_ref", "push_destination_ref",
                      "push_target_branch", "repository"); targets = {key: [] for key in target_fields}
     for command_tokens, reliable in (calls := normalize_shell_call(command, SHELL)):
         controlled_alias = _controlled_alias_call(command_tokens, aliases)
@@ -214,6 +214,8 @@ def _git_subcommand(arguments):
 
 
 def _git(arguments):
+    git_cwds = [arguments[index + 1] for index, item in enumerate(arguments[:-1]) if item == "-C"]
+    git_cwd = git_cwds[0] if len(git_cwds) == 1 else ""
     subcommand, rest = _git_subcommand(arguments)
     help_call = any(
         item in ("-h", "--help")
@@ -242,20 +244,13 @@ def _git(arguments):
     elif subcommand == "branch" and any(item in ("-d", "-D", "--delete") for item in rest):
         operations = ["manage_repository_worktree"]
     elif subcommand == "tag":
-        operations = (
-            []
-            if not rest or all(item.startswith("-l") or item == "--list" for item in rest)
-            else ["git_tag"]
-        )
-    elif subcommand in ("filter-branch", "filter-repo", "replace") or (
-        subcommand == "reset" and "--hard" in rest
-    ):
+        operations = ([] if not rest or all(item.startswith("-l") or item == "--list" for item in rest)
+                      else ["git_tag"])
+    elif subcommand in ("filter-branch", "filter-repo", "replace") or (subcommand == "reset" and "--hard" in rest):
         operations = ["history_rewrite"]
     else:
         operations = []
-    readonly = subcommand in SHELL["git_readonly_redirects"] or (
-        subcommand == "tag" and not operations
-    )
+    readonly = subcommand in SHELL["git_readonly_redirects"] or (subcommand == "tag" and not operations)
     if subcommand and subcommand not in GIT_KNOWN and UNKNOWN not in operations:
         operations.append(UNKNOWN)
     elif subcommand and not operations and not readonly and not help_call:
@@ -276,11 +271,12 @@ def _git(arguments):
         or item.startswith("-C") and item != "-C"
         for item in arguments
     )
-    if redirected and subcommand not in SHELL["git_readonly_redirects"] and UNKNOWN not in operations:
+    if redirected and not git_cwd and subcommand not in SHELL["git_readonly_redirects"] and UNKNOWN not in operations:
         operations.append(UNKNOWN)
-    target = {}
+    target = {"git_cwd": git_cwd} if git_cwd else {}
     if subcommand == "push":
-        target, push_safe = parse_push(rest, SHELL)
+        push_target, push_safe = parse_push(rest, SHELL)
+        target.update(push_target)
         if not push_safe and UNKNOWN not in operations:
             operations.append(UNKNOWN)
     return operations, target
@@ -307,24 +303,15 @@ def _gh(arguments):
     else:
         joined = " ".join(arguments)
         writes_api = re.search(r"(-X|--method)\s+(POST|PUT|PATCH|DELETE)", joined, re.I)
-        operation = (
-            UNKNOWN
-            if group == "api" and (writes_api or "-f " in joined or "--field" in joined)
-            else None
-        )
+        operation = (UNKNOWN if group == "api" and (writes_api or "-f " in joined or "--field" in joined)
+                     else None)
     if not operation:
         return [], {}
-    repositories = [
-        arguments[index + 1]
-        for index, item in enumerate(arguments[:-1])
-        if item in ("-R", "--repo")
-    ]
+    repositories = [arguments[index + 1] for index, item in enumerate(arguments[:-1]) if item in ("-R", "--repo")]
     repositories += [item.split("=", 1)[1] for item in arguments if item.startswith("--repo=")]
     repositories += [item[2:] for item in arguments if item.startswith("-R") and item != "-R"]
-    repository = None
-    if repositories and repositories[0] and len(set(repositories)) == 1:
-        repository = repositories[0]
-    elif not repositories:
+    repository = repositories[0] if repositories and repositories[0] and len(set(repositories)) == 1 else None
+    if not repositories:
         repository = ""
     target = {"repository": repository} if operation in GITHUB_OPS else {}
     return [operation], target

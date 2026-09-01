@@ -115,6 +115,31 @@ def find_authorization(cwd, context=None, issue_key=None):
     return (_read_json(path), str(path)) if path.is_file() else (None, str(path))
 
 
+def task_worktree_matches(task_directory, git_cwd, context):
+    """确认显式 Git 工作目录就是已解析任务的当前绑定 worktree。"""
+    task = _read_json(Path(task_directory) / "state.json")
+    if not isinstance(task, dict):
+        return False
+    try:
+        candidate = Path(git_cwd).resolve()
+    except OSError:
+        return False
+    for item in task.get("repositories", []):
+        if not isinstance(item, dict):
+            continue
+        worktree = item.get("worktree")
+        if (
+            item.get("repository") == context.get("origin")
+            and item.get("work_branch") == context.get("branch")
+            and isinstance(worktree, dict)
+            and worktree.get("status") == "prepared"
+            and isinstance(worktree.get("path"), str)
+            and Path(worktree["path"]).resolve() == candidate
+        ):
+            return True
+    return False
+
+
 def _git(cwd, *args):
     try:
         result = subprocess.run(

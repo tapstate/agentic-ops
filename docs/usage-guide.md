@@ -236,13 +236,14 @@ python3 ~/.agentic-ops/workflow/task.py repository prepare \
 
 任何 Hook 首次返回 `ask` 或 `deny` 时，Agent 都必须立即完整展示原因、要求的处理动作和当前停止点，并停止当前操作及依赖它的后续步骤。不得把阻断描述成“正常门禁”后继续，也不得改用 GitHub API、直接 Git 或其它工具绕过缺失的本地基线。
 
-worktree 准备完成后，普通工作空间会话不得嵌套启动另一个 Agent；它应输出下列精确命令并结束本轮，由研发工程师从同一工作空间根启动任务模式。方案确认后仍需重新签发包含 `base_sha` 的授权，才能进入实现：
+worktree 准备完成后，当前工作空间会话继续处理，不启动嵌套 Agent，也不切换工作空间。先读取只读任务执行上下文，再只在其中列出的 worktree 分析、修改和验证；方案确认后仍需重新签发包含 `base_sha` 的授权，才能进入实现：
 
 ```sh
-./agenticops start codex TAP-123
+python3 ~/.agentic-ops/workflow/task.py repository context \
+  --issue-key TAP-123 --json --dir <项目工作空间>
 ```
 
-启动入口仍来自薄工作空间，但任务模式以 TAP-123 当前 run 目录为 cwd；校验该 run 的每个 worktree 后作为 `--add-dir` 传给 Agent。任务执行根不生成额外入口；Project Skill 继续调用中央 Workflow，并显式绑定 workspace 和 issue。没有动态目录能力、worktree 已清理、路径/分支漂移或仓库目录变化时失败关闭。
+该命令校验当前 run 的 worktree、分支、租约、`base_sha` 和仓库目录摘要，并输出绝对路径。工作空间是 Agent 原生文件系统边界，不是 task/run 级硬隔离；Project Skill 与 Workflow 命令始终显式绑定 workspace 和 issue，Source Pool 仍不加入 Agent 可写范围。
 
 任务完成时阶段推进会清理洁净 worktree；也可显式执行：
 

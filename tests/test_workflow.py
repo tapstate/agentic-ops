@@ -547,6 +547,17 @@ def main():
             },
             expected_endpoints,
         )
+        code, out = run_tool(
+            "task.py", "repository", "context", "--issue-key", "TAP-123", "--json", cwd=ws
+        )
+        check("当前会话可读取已校验任务上下文", code, 0)
+        context = json.loads(out) if code == 0 else {}
+        check("任务上下文保持当前 issue/run", (context.get("issue_key"), context.get("run_id")), ("TAP-123", prepared_task["run_id"]))
+        check(
+            "任务上下文只返回当前任务 worktree",
+            [item.get("worktree") for item in context.get("repositories", [])],
+            [item["worktree"]["path"] for item in prepared_task["repositories"]],
+        )
         synced_tapdata_head = subprocess.check_output(
             ["git", "-C", str(pool_root / "tapdata" / "tapdata"), "rev-parse", "HEAD"],
             text=True,

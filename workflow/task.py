@@ -20,6 +20,7 @@
   python3 workflow/task.py list [--dir .]
   python3 workflow/task.py checklist --issue-key TAP-123 [--json]
   python3 workflow/task.py branch --repo tapdata/tapdata      # 查表解析分支，禁止猜测
+  python3 workflow/task.py repository context --issue-key TAP-123 --json
   python3 workflow/task.py record --issue-key TAP-123 --key problem_branch --value develop
   python3 workflow/task.py advance --issue-key TAP-123 --note "准入三项必填齐备，见 Jira 评论"
   python3 workflow/task.py block --issue-key TAP-123 --reason "缺问题版本，已写补卡评论"
@@ -292,6 +293,46 @@ def cmd_repository_add(args):
 def cmd_repository_list(args):
     task = require(args.dir, args.issue_key)
     print(json.dumps(task.get("repositories", []), ensure_ascii=False, indent=2))
+    return 0
+
+
+def repository_context(base, task):
+    """返回当前会话继续处理任务所需的、已校验的只读上下文。"""
+    roots = repository_worktree.task_roots(base, task["issue_key"])
+    repositories = []
+    for item, root in zip(task.get("repositories", []), roots):
+        repositories.append(
+            {
+                "repository": item["repository"],
+                "worktree": str(root),
+                "work_branch": item["work_branch"],
+                "base_branch": item["base_branch"],
+                "base_sha": item["base_sha"],
+                "approved_scope": item["approved_scope"],
+                "verification_method": item["verification_method"],
+            }
+        )
+    return {
+        "issue_key": task["issue_key"],
+        "run_id": task["run_id"],
+        "workspace": str(Path(base).resolve()),
+        "repositories": repositories,
+    }
+
+
+def cmd_repository_context(args):
+    try:
+        task = require(args.dir, args.issue_key)
+        context = repository_context(args.dir, task)
+    except ValueError as error:
+        print("错误：%s" % error, file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(context, ensure_ascii=False, indent=2))
+        return 0
+    print("任务执行上下文：%s（run=%s）" % (context["issue_key"], context["run_id"]))
+    for item in context["repositories"]:
+        print("  - %s：%s（%s）" % (item["repository"], item["worktree"], item["work_branch"]))
     return 0
 
 
@@ -803,6 +844,11 @@ def main():
     listing.add_argument("--issue-key")
     listing.add_argument("--dir", default=".")
     listing.set_defaults(func=cmd_repository_list)
+    context = repository_sub.add_parser("context")
+    context.add_argument("--issue-key")
+    context.add_argument("--json", action="store_true")
+    context.add_argument("--dir", default=".")
+    context.set_defaults(func=cmd_repository_context)
     record = repository_sub.add_parser("record-result")
     record.add_argument("--issue-key")
     record.add_argument("--repo", required=True)

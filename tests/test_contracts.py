@@ -308,6 +308,7 @@ class ContractConformanceTest(unittest.TestCase):
             self.assertEqual(["manage_repository_worktree"], classify_bash(command), command)
         for command in (
             "python3 workflow/task.py repository prepare --help",
+            "python3 workflow/task.py repository context --issue-key TAP-123 --json",
             "python3 workflow/repository_worktree.py roots --issue-key TAP-123",
             "python3 workflow/repository_worktree.py execution-root --issue-key TAP-123",
         ):
@@ -457,8 +458,13 @@ class ContractConformanceTest(unittest.TestCase):
         ):
             self.assertEqual(["unknown_external_write"], classify_bash(command), command)
 
+        operations, _, redirected_target = classify_tool_call(
+            "Bash", {"command": "git -C /other push origin feature/TAP-123"}
+        )
+        self.assertEqual(["git_push"], operations)
+        self.assertEqual("/other", redirected_target["git_cwd"])
+        self.assertEqual("feature/TAP-123", redirected_target["push_target_branch"])
         for command in (
-            "git -C /other push origin feature/TAP-123",
             "git --git-dir=/other/repo.git push origin feature/TAP-123",
             "git --work-tree=/other/tree push origin feature/TAP-123",
             "git --namespace=other push origin feature/TAP-123",

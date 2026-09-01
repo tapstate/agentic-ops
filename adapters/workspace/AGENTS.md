@@ -71,11 +71,7 @@ python3 __AGENTIC_OPS_HOME__/workflow/task.py status --issue-key <JIRA-KEY> --di
 - 合并、发布、Tag、强推、历史改写、保护分支写入始终不在任务授权范围内。
 - 业务代码修改、构建和测试只能在当前任务 worktree 中进行；Product Root、Source Pool
   根目录、仓库主工作树和其它任务 worktree 不能作为任务写入目标。
-- 执行实现任务时从工作空间根使用 `./agenticops start <id> <JIRA-KEY>`；入口只把
-  当前 issue/run 的执行目录作为 cwd，并只把当前任务已准备的 worktree 加入 Agent 动态
-  目录。普通工作空间会话完成 prepare 后，应向研发工程师输出该精确命令并结束本轮，由
-  研发工程师启动任务模式；不得在当前 Agent 内嵌套启动另一个 Agent，也不得用关闭沙箱
-  替代目录接线。任务模式继续使用中央 Workflow，并显式绑定 workspace、issue 和 run。
+- Agent 从工作空间根使用 `./agenticops start <id>` 启动，并在同一会话完成任务。prepare 后必须执行 `python3 __AGENTIC_OPS_HOME__/workflow/task.py repository context --issue-key <JIRA-KEY> --json --dir <项目工作空间>`，只在返回的当前 issue/run worktree 中分析、修改、构建和测试。当前会话的 Git 副作用必须使用 `git -C <返回的 worktree> ...`；Gate 只接受当前任务已准备的精确路径。不得启动嵌套 Agent、切换工作空间或创建会话级“当前任务”状态。任务状态操作继续显式绑定 workspace、issue 和 run。
 - 任务或工作空间清理必须先清理 linked worktree；脏 worktree 必须停止并保留现场。
 - 临时结束处理用 `deactivate`，恢复同一 run 用 `activate`；清理重做使用 cleanup 后
   精确绑定当前 `run_id` 的 `reset`。只有任务已 inactive、run 精确匹配且研发工程师明确

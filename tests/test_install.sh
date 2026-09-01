@@ -413,9 +413,11 @@ test ! -e "$workspace/.claude/skills/ao-test-takeover"
 test ! -e "$workspace/.agents/skills/ao-ws-init"
 test ! -e "$workspace/.claude/skills/ao-ws-init"
 "$install_root/agenticops" workspace list | grep -F -- "$workspace" >/dev/null
+install_root_physical="$(cd "$install_root" && pwd -P)"
 grep -F '@AGENTS.md' "$workspace/CLAUDE.md" >/dev/null
 grep -F 'Product Project：`tapdata`' "$workspace/AGENTS.md" >/dev/null
-grep -F 'workflow/task.py status --issue-key <JIRA-KEY>' "$workspace/AGENTS.md" >/dev/null
+grep -F 'python3 '"$install_root_physical"'/workflow/task.py status --issue-key <JIRA-KEY>' "$workspace/AGENTS.md" >/dev/null
+grep -F 'python3 '"$install_root_physical"'/workflow/task.py repository context --issue-key <JIRA-KEY>' "$workspace/AGENTS.md" >/dev/null
 grep -F '必须先读取当前项目 `.agents/skills/`' "$workspace/AGENTS.md" >/dev/null
 grep -F 'memory 只能作为历史线索' "$workspace/AGENTS.md" >/dev/null
 grep -F '接管、继续或 reset 成功只是流程恢复点' "$workspace/AGENTS.md" >/dev/null
@@ -1005,8 +1007,8 @@ if "$workspace/agenticops" start codex --agent codex >/dev/null 2>&1; then
   printf 'start 未拒绝重复 Agent ID\n' >&2
   exit 1
 fi
-if "$workspace/agenticops" start codex TAP-123 --issue-key TAP-999 >/dev/null 2>&1; then
-  printf 'start 未拒绝重复 Jira Key\n' >&2
+if "$workspace/agenticops" start codex TAP-123 >/dev/null 2>&1; then
+  printf 'start 未拒绝已移除的 Jira Key 位置参数\n' >&2
   exit 1
 fi
 test ! -e "$workspace/AGENTS.md.tmp"
@@ -1064,7 +1066,7 @@ test "$(file_digest "$workspace/.agenticops/tasks/index.json")" = "$task_index_d
 test "$(file_digest "$workspace/.agenticops/tasks/TAP-123/state.json")" = "$task_123_digest"
 test "$(file_digest "$workspace/.agenticops/tasks/TAP-999/state.json")" = "$task_999_digest"
 
-# 任务启动只追加当前任务已准备的 worktree；purge 同步移除 worktree。
+# 当前工作空间会话读取已校验任务上下文；purge 同步移除 worktree。
 python3 - "$install_root/projects/tapdata/repositories.json" "$source_repo" "$install_branch" <<'PY'
 import json
 import sys
@@ -1091,19 +1093,30 @@ python3 "$install_root/workflow/task.py" repository prepare --issue-key TAP-123 
   --dir "$workspace" >/dev/null
 task_root="$(python3 "$install_root/workflow/repository_worktree.py" roots \
   --issue-key TAP-123 --dir "$workspace")"
-task_execution_root="$(python3 "$install_root/workflow/repository_worktree.py" execution-root \
-  --issue-key TAP-123 --dir "$workspace")"
 resolved_workspace="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$workspace")"
 case "$task_root" in
   "$resolved_workspace"/.agenticops/worktrees/TAP-123/*/tapdata/tapdata) ;;
   *) printf '任务 worktree 路径不符合工作空间布局：%s\n' "$task_root" >&2; exit 1 ;;
 esac
 PATH="$fake_bin:$PATH" \
-AGENTIC_OPS_EXPECTED_WORKSPACE="$task_execution_root" \
+AGENTIC_OPS_EXPECTED_WORKSPACE="$expected_workspace" \
 AGENTIC_OPS_CAPTURE="$capture" \
-  "$workspace/agenticops" start codex TAP-123 -- --model task-bound >/dev/null
-grep -Fx -- "--add-dir $task_root --model task-bound" "$capture" >/dev/null
-test ! -e "$task_execution_root/agenticops"
+  "$workspace/agenticops" start codex -- --model workspace-after-prepare >/dev/null
+grep -Fx -- '--model workspace-after-prepare' "$capture" >/dev/null
+task_context="$test_root/task-context.json"
+python3 "$install_root/workflow/task.py" repository context --issue-key TAP-123 \
+  --json --dir "$workspace" > "$task_context"
+python3 - "$task_context" "$task_root" "$workspace" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+context = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert context["issue_key"] == "TAP-123"
+assert Path(context["workspace"]).resolve() == Path(sys.argv[3]).resolve()
+assert [item["worktree"] for item in context["repositories"]] == [sys.argv[2]]
+assert context["repositories"][0]["base_sha"]
+PY
 # 已准备部分仓库后仍可登记后续仓库；此时 workspace purge 只应校验并回收
 # 已准备的 worktree，不能把执行上下文“全仓已准备”的条件误用于清理预检。
 python3 "$install_root/workflow/task.py" repository add --issue-key TAP-123 \
