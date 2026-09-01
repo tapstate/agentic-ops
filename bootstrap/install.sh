@@ -5,7 +5,7 @@ install_root="${AGENTIC_OPS_HOME:-$HOME/.agentic-ops}"
 repository="git@github.com:tapstate/agentic-ops.git"
 branch="main"
 repository_pool=""
-repository_provisioning="manual"
+repository_provisioning="auto-clone"
 
 usage() {
   printf '用法：install.sh [--install-home <目录>] [--repository <Git URL>] [--branch <分支>] [--repository-pool <目录>] [--repository-provisioning manual|auto-clone]\n'
