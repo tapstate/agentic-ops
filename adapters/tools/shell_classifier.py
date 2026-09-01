@@ -20,11 +20,18 @@ def classify_bash_call(command):
     operations = []
     target_fields = ("issue_key", "workspace", "git_cwd", "push_source_ref", "push_destination_ref",
                      "push_target_branch", "repository"); targets = {key: [] for key in target_fields}
+    native_shell_context = False
     for command_tokens, reliable in normalize_shell_call(command, SHELL):
+        if _changes_controlled_execution_context(command_tokens, reliable):
+            native_shell_context = True
+            continue
         current, current_target = _dispatch(command_tokens) if reliable and command_tokens else ([], {})
+        if native_shell_context and current:
+            return [], {"branch_relevant": True}
         operations.extend(current)
-        for field, value in current_target.items():
-            targets[field].append(value)
+        if current:
+            for field, value in current_target.items():
+                targets[field].append(value)
     target, ambiguous = {"branch_relevant": True}, False
     for field, values in targets.items():
         unique = set(values)
@@ -39,6 +46,33 @@ def classify_bash_call(command):
     if ambiguous and UNKNOWN not in operations:
         operations.append(UNKNOWN)
     return operations, target
+
+
+def _changes_controlled_execution_context(tokens, reliable):
+    """识别会使后续受控命令无法按 Hook cwd 可靠解释的 Shell 前置片段。"""
+    if not tokens:
+        return False
+    if not reliable:
+        return True
+    executable = Path(tokens[0]).name
+    if executable in ("cd", "pushd", "popd"):
+        return True
+    if executable in ("export", "readonly", "typeset", "declare"):
+        return any(_dangerous_assignment(item) for item in tokens[1:])
+    if executable in ("alias", "unalias", "hash"):
+        return any(Path(item.split("=", 1)[0]).name in {"git", "gh", "agenticops"}
+                   for item in tokens[1:] if not item.startswith("-"))
+    return False
+
+
+def _dangerous_assignment(item):
+    match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=.*", item, re.S)
+    if not match:
+        return False
+    name = match.group(1)
+    return name in SHELL["dangerous_environment_names"] or any(
+        name.startswith(prefix) for prefix in SHELL["dangerous_environment_prefixes"]
+    )
 
 
 def _dispatch(tokens):

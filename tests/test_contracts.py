@@ -278,6 +278,12 @@ class ContractConformanceTest(unittest.TestCase):
         )
         self.assertEqual([], classify_bash(readonly_composition))
         self.assertEqual([], classify_bash("rg '(jira|task)' memory.md && rg task workflow/task.py"))
+        multi_repository_readonly = (
+            "git -C /tmp/task-worktree-a status --short --branch && "
+            "git -C /tmp/task-worktree-b status --short --branch && "
+            "rg -n -i 'elasticsearch|logwarehouse' /tmp/task-worktree-a /tmp/task-worktree-b"
+        )
+        self.assertEqual([], classify_bash(multi_repository_readonly))
         self.assertEqual(
             [],
             classify_bash(
@@ -287,6 +293,11 @@ class ContractConformanceTest(unittest.TestCase):
                 "'elasticsearch|logwarehouse' ."
             ),
         )
+        for command in (
+            "cd /tmp/task-worktree && git push origin feature/TAP-123",
+            "export GIT_DIR=/tmp/task-worktree/.git && git push origin feature/TAP-123",
+        ):
+            self.assertEqual([], classify_bash(command), command)
         for command in (
             "find . -exec ./agenticops workspace purge ';'",
             "sed -n 1p -i.bak ./agenticops",
@@ -550,6 +561,10 @@ class ContractConformanceTest(unittest.TestCase):
         self.assertEqual(
             ["pr_merge"],
             classify_tool_call("mcp__github__merge_pull_request", {"repository": "acme/widget"})[0],
+        )
+        self.assertEqual(
+            ["create_pr", "unknown_external_write"],
+            classify_tool_call("mcp__github__create_pull_request", {"title": "t"})[0],
         )
 
         operations, _, newline_target = classify_tool_call(

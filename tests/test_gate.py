@@ -394,6 +394,19 @@ def main():
         )
         check("Claude 含点路径的复合只读检索不误拦", run_hook("Bash", {"command": glob_search}, ws), "passthrough")
         check("Codex 含点路径的复合只读检索不误拦", run_codex("Bash", {"command": glob_search}, ws), "allow")
+        multi_repository_readonly = (
+            "git -C /tmp/task-worktree-a status --short --branch && "
+            "git -C /tmp/task-worktree-b status --short --branch && "
+            "rg -n -i 'elasticsearch|logwarehouse' /tmp/task-worktree-a /tmp/task-worktree-b"
+        )
+        check("Claude 双 worktree 只读核验不误拦", run_hook("Bash", {"command": multi_repository_readonly}, ws), "passthrough")
+        check("Codex 双 worktree 只读核验不误拦", run_codex("Bash", {"command": multi_repository_readonly}, ws), "allow")
+        for name, command in (
+            ("cd", "cd /tmp/task-worktree && git push origin feature/TAP-123"),
+            ("GIT_DIR", "export GIT_DIR=/tmp/task-worktree/.git && git push origin feature/TAP-123"),
+        ):
+            check("Claude %s 前置上下文交还原生权限" % name, run_hook("Bash", {"command": command}, ws), "passthrough")
+            check("Codex %s 前置上下文交还原生权限" % name, run_codex("Bash", {"command": command}, ws), "allow")
         check("只读检查工作空间根入口不误拦", run_hook("Bash", {"command": "sed -n '1,200p' ./agenticops"}, ws), "passthrough")
         check("本地 sed 修改交还 Agent 原生权限", run_hook("Bash", {"command": "sed -n 1p -i.bak ./agenticops"}, ws), "passthrough")
         check("本地重定向交还 Agent 原生权限", run_hook("Bash", {"command": "cat source > ./agenticops"}, ws), "passthrough")
@@ -770,7 +783,8 @@ def main():
         check("Git 传输环境覆盖交还 Agent 原生权限", run_hook("Bash", {"command": "GIT_SSH_COMMAND='ssh -F custom' git push origin feature/TAP-123"}, ws), "passthrough")
         check("env 清空环境交还 Agent 原生权限", run_hook("Bash", {"command": "env -i git push origin feature/TAP-123"}, ws), "passthrough")
         check("env 取消 PATH 交还 Agent 原生权限", run_hook("Bash", {"command": "env -u PATH git push origin feature/TAP-123"}, ws), "passthrough")
-        check("授权后 MCP 建 PR 放行", run_hook("mcp__github__create_pull_request", {"title": "t"}, ws), "allow")
+        check("缺少仓库目标的 MCP 建 PR 停止", run_hook("mcp__github__create_pull_request", {"title": "t"}, ws), "ask")
+        check("授权后显式仓库 MCP 建 PR 放行", run_hook("mcp__github__create_pull_request", {"repository": "acme/widget", "title": "t"}, ws), "allow")
         check(
             "MCP 显式指定未授权仓库时收回放行",
             run_hook(
