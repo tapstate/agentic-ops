@@ -10,12 +10,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from unittest import mock
 from pathlib import Path
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from workflow import ci, evidence, task as workflow_task  # noqa: E402
+from workflow import ci, evidence, repository_worktree, task as workflow_task  # noqa: E402
 from workflow import task_store  # noqa: E402
 
 PASS = 0
@@ -52,6 +53,74 @@ def grant(ws, issue="TAP-123"):
 def main():
     ws = Path(tempfile.mkdtemp(prefix="aogate-wf-"))
     try:
+        retry_clone_path = ws / "retry-clone"
+        clone_attempts = []
+
+        def retrying_clone(arguments, *, check=True):
+            clone_attempts.append(arguments)
+            if len(clone_attempts) == 1:
+                retry_clone_path.mkdir()
+                return SimpleNamespace(
+                    returncode=128,
+                    stdout="",
+                    stderr="fatal: Could not resolve host: example.test",
+                )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with contextlib.redirect_stdout(io.StringIO()) as output, mock.patch.object(
+            repository_worktree, "_run", side_effect=retrying_clone
+        ), mock.patch.object(repository_worktree.time, "sleep") as sleep:
+            repository_worktree._clone_main(
+                "tapdata/retry", {"baseline_branch": "develop", "origin": "unused"}, retry_clone_path
+            )
+        check("网络 clone 失败后重试", len(clone_attempts), 2)
+        check("网络 clone 重试前清理残留目录", retry_clone_path.exists(), False)
+        check("网络 clone 按固定间隔重试", sleep.call_args.args, (2,))
+        check("网络 clone 输出重试步骤日志", "第 1/3 次克隆失败" in output.getvalue(), True)
+
+        timeout_clone_path = ws / "timeout-clone"
+        timeout_attempts = []
+
+        def timeout_then_success(arguments, *, check=True):
+            timeout_attempts.append(arguments)
+            if len(timeout_attempts) == 1:
+                timeout_clone_path.mkdir()
+                raise subprocess.TimeoutExpired(arguments, 120)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with contextlib.redirect_stdout(io.StringIO()) as output, mock.patch.object(
+            repository_worktree, "_run", side_effect=timeout_then_success
+        ), mock.patch.object(repository_worktree.time, "sleep") as sleep:
+            repository_worktree._clone_main(
+                "tapdata/timeout", {"baseline_branch": "develop", "origin": "unused"}, timeout_clone_path
+            )
+        check("clone 超时后重试", len(timeout_attempts), 2)
+        check("clone 超时重试前清理残留目录", timeout_clone_path.exists(), False)
+        check("clone 超时按固定间隔重试", sleep.call_args.args, (2,))
+        check("clone 超时输出重试步骤日志", "第 1/3 次克隆失败" in output.getvalue(), True)
+
+        non_network_clone_path = ws / "non-network-clone"
+        non_network_attempts = []
+
+        def rejected_clone(arguments, *, check=True):
+            non_network_attempts.append(arguments)
+            non_network_clone_path.mkdir()
+            return SimpleNamespace(returncode=128, stdout="", stderr="fatal: Authentication failed")
+
+        try:
+            with contextlib.redirect_stdout(io.StringIO()), mock.patch.object(
+                repository_worktree, "_run", side_effect=rejected_clone
+            ):
+                repository_worktree._clone_main(
+                    "tapdata/rejected",
+                    {"baseline_branch": "develop", "origin": "unused"},
+                    non_network_clone_path,
+                )
+        except ValueError:
+            pass
+        check("非网络 clone 错误不重试", len(non_network_attempts), 1)
+        check("非网络 clone 失败也清理残留目录", non_network_clone_path.exists(), False)
+
         remote_root = ws / "remotes"
         pool_root = ws / "source-pool"
         product_root = ws / "product-root"

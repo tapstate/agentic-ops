@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -22,10 +23,38 @@ from workflow import project_rules, task_store  # noqa: E402
 
 REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 LEASE_SCHEMA_VERSION = 1
+CLONE_MAX_ATTEMPTS = 3
+CLONE_RETRY_DELAY_SECONDS = 2
+RETRYABLE_CLONE_FAILURES = (
+    "connection timed out",
+    "connection reset",
+    "connection refused",
+    "could not resolve host",
+    "could not resolve hostname",
+    "temporary failure in name resolution",
+    "network is unreachable",
+    "failed to connect",
+    "the remote end hung up unexpectedly",
+    "unexpected disconnect",
+    "rpc failed",
+    "http/2 stream",
+    "curl 5",
+    "curl 6",
+    "curl 7",
+    "curl 28",
+    "curl 35",
+    " 502",
+    " 503",
+    " 504",
+)
 
 
 def now():
     return time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
+def _progress(message):
+    print("repository prepare：%s" % message, flush=True)
 
 
 def _run(arguments, *, check=True):
@@ -34,6 +63,57 @@ def _run(arguments, *, check=True):
         detail = (result.stderr or result.stdout).strip()
         raise ValueError("命令失败（%s）：%s" % (" ".join(arguments[:4]), detail))
     return result
+
+
+def _is_retryable_clone_failure(detail):
+    normalized = detail.lower()
+    return any(marker in normalized for marker in RETRYABLE_CLONE_FAILURES)
+
+
+def _remove_failed_clone(main):
+    """只清理本次受控 clone 产生的目标，令下一次尝试回到 clone 前状态。"""
+    if not main.exists():
+        return
+    if main.is_symlink() or not main.is_dir():
+        raise ValueError("失败 clone 残留不是可安全清理的目录：%s" % main)
+    _progress("清理本次 clone 的残留目录：%s" % main)
+    shutil.rmtree(main)
+
+
+def _clone_main(repository, entry, main):
+    command = [
+        "git", "clone", "--branch", entry["baseline_branch"],
+        "--single-branch", entry["origin"], str(main),
+    ]
+    for attempt in range(1, CLONE_MAX_ATTEMPTS + 1):
+        _progress(
+            "仓库 %s：克隆基线分支 %s（第 %d/%d 次）"
+            % (repository, entry["baseline_branch"], attempt, CLONE_MAX_ATTEMPTS)
+        )
+        try:
+            result = _run(command, check=False)
+            detail = (result.stderr or result.stdout).strip()
+            succeeded = result.returncode == 0
+            retryable = _is_retryable_clone_failure(detail)
+        except subprocess.TimeoutExpired:
+            detail = "git clone 超时（120 秒）"
+            succeeded = False
+            retryable = True
+        if succeeded:
+            _progress("仓库 %s：克隆完成" % repository)
+            return
+        _remove_failed_clone(main)
+        if attempt < CLONE_MAX_ATTEMPTS and retryable:
+            _progress(
+                "仓库 %s：网络错误，第 %d/%d 次克隆失败；%d 秒后重试"
+                % (repository, attempt, CLONE_MAX_ATTEMPTS, CLONE_RETRY_DELAY_SECONDS)
+            )
+            time.sleep(CLONE_RETRY_DELAY_SECONDS)
+            continue
+        raise ValueError(
+            "克隆 Source Pool 仓库失败：%s（已尝试 %d/%d 次）：%s"
+            % (repository, attempt, CLONE_MAX_ATTEMPTS, detail or "git clone 未返回诊断")
+        )
 
 
 def _read_json(path, label):
@@ -268,14 +348,11 @@ def ensure_main(workspace, product_root, pool_root, repository, entry):
                 "或将 provisioning 配置为 auto-clone" % (repository, main)
             )
         main.parent.mkdir(parents=True, exist_ok=True)
-        _run(
-            [
-                "git", "clone", "--branch", entry["baseline_branch"],
-                "--single-branch", entry["origin"], str(main),
-            ]
-        )
+        _progress("仓库 %s：Source Pool 未命中，按 auto-clone 准备主工作树" % repository)
+        _clone_main(repository, entry, main)
     if not main.is_dir():
         raise ValueError("仓库 main 不是目录：%s" % main)
+    _progress("仓库 %s：校验 Source Pool 主工作树与 origin 信任链" % repository)
     top = _run(["git", "-C", str(main), "rev-parse", "--show-toplevel"]).stdout.strip()
     if Path(top).resolve() != main.resolve():
         raise ValueError("仓库 main 不是 Git 主工作树根目录：%s" % main)
@@ -288,6 +365,7 @@ def ensure_main(workspace, product_root, pool_root, repository, entry):
 
 def _prepare_repository(workspace, task, item, *, reuse_existing_branch=False):
     binding, product_root, pool_root = workspace_binding(workspace)
+    _progress("仓库 %s：校验项目目录与任务授权" % item["repository"])
     catalog = _catalog(workspace)
     entry = catalog.get("repositories", {}).get(item["repository"])
     if entry is None:
@@ -323,8 +401,10 @@ def _prepare_repository(workspace, task, item, *, reuse_existing_branch=False):
             "Source Pool 主工作树分支不是任务基线：%s（当前 %s，期望 %s）"
             % (main, current_branch or "detached", item["base_branch"])
         )
+    _progress("仓库 %s：拉取基线分支 %s" % (item["repository"], item["base_branch"]))
     _run(["git", "-C", str(main), "fetch", "--prune", "origin", item["base_branch"]])
     base_ref = "refs/remotes/origin/%s" % item["base_branch"]
+    _progress("仓库 %s：快进同步本地主工作树" % item["repository"])
     _run(["git", "-C", str(main), "merge", "--ff-only", base_ref])
     base_sha = _run(["git", "-C", str(main), "rev-parse", "--verify", base_ref]).stdout.strip()
     path = task_worktree_path(workspace, task, item["repository"])
@@ -371,6 +451,7 @@ def _prepare_repository(workspace, task, item, *, reuse_existing_branch=False):
                 "任务仓库 HEAD 不基于已冻结 base_sha：%s；请清理后重新准备"
                 % item["repository"]
             )
+        _progress("仓库 %s：复核既有任务 worktree 完成" % item["repository"])
         return path, False
     if path.exists():
         raise ValueError("任务 worktree 目标已存在但未被任务状态持有：%s" % path)
@@ -385,6 +466,7 @@ def _prepare_repository(workspace, task, item, *, reuse_existing_branch=False):
             % item["work_branch"]
         )
     path.parent.mkdir(parents=True, exist_ok=True)
+    _progress("仓库 %s：创建任务 worktree %s" % (item["repository"], path))
     if branch_exists:
         _run(["git", "-C", str(main), "worktree", "add", str(path), item["work_branch"]])
     else:
@@ -417,6 +499,10 @@ def _prepare_task_locked(workspace, issue_key, *, reuse_existing_branch=False):
         )
     if not task.get("repositories"):
         raise ValueError("任务没有登记源码仓库；请先执行 task.py repository add")
+    _progress(
+        "任务 %s：开始准备 %d 个已登记仓库"
+        % (task["issue_key"], len(task["repositories"]))
+    )
     binding, product_root, pool_root = workspace_binding(workspace)
     created = []
     with _pool_lock(product_root):
@@ -462,11 +548,13 @@ def _prepare_task_locked(workspace, issue_key, *, reuse_existing_branch=False):
             task["history"].append({"ts": now(), "event": "worktrees_prepare", "run_id": task["run_id"]})
             _write_task(workspace, task)
         except Exception:
+            _progress("任务 %s：准备失败，回滚本次新增 worktree" % task["issue_key"])
             for item, path in reversed(created):
                 main = repository_path(pool_root, item["repository"])
                 _run(["git", "-C", str(main), "worktree", "remove", str(path)], check=False)
                 _prune_empty_worktree_parents(workspace, path)
             raise
+    _progress("任务 %s：所有仓库 worktree 已准备完成" % task["issue_key"])
     return [Path(item["worktree"]["path"]) for item in task["repositories"]]
 
 
