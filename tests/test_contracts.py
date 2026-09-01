@@ -287,15 +287,9 @@ class ContractConformanceTest(unittest.TestCase):
                 "'elasticsearch|logwarehouse' ."
             ),
         )
-        self.assertIn(
-            "unknown_external_write",
-            classify_bash("find . -exec ./agenticops workspace purge ';'"),
-        )
-        self.assertIn(
-            "unknown_external_write",
-            classify_bash("sed -n 1p -i.bak ./agenticops"),
-        )
         for command in (
+            "find . -exec ./agenticops workspace purge ';'",
+            "sed -n 1p -i.bak ./agenticops",
             "cat source > ./agenticops",
             "sed -n 1p source > ./agenticops",
             "cat ./agenticops | sh -s workspace purge --workspace /tmp/example --yes",
@@ -308,9 +302,12 @@ class ContractConformanceTest(unittest.TestCase):
             "rg pattern ./agenticops > output && rg task .agenticops",
             "rg pattern ./agenticops>output && rg task .agenticops",
             "(rg task workflow/task.py) && rg pattern .agenticops",
-            "./agenticops workspace purge --worksp /other --yes",
         ):
-            self.assertIn("unknown_external_write", classify_bash(command), command)
+            self.assertEqual([], classify_bash(command), command)
+        self.assertIn(
+            "unknown_external_write",
+            classify_bash("./agenticops workspace purge --worksp /other --yes"),
+        )
         self.assertEqual(
             ["git_push"],
             classify_bash("rg task .agenticops && git push origin feature/TAP-123"),
@@ -447,7 +444,7 @@ class ContractConformanceTest(unittest.TestCase):
             'G="git"; ${G} push origin feature/TAP-123',
             "P=/usr/bin/git; $P push origin feature/TAP-123",
         ):
-            self.assertEqual(["unknown_external_write"], classify_bash(command), command)
+            self.assertEqual([], classify_bash(command), command)
         for command in (
             "${G} push origin feature/TAP-123",
             "env AO_MODE=test command $G push origin feature/TAP-123",
@@ -470,7 +467,7 @@ class ContractConformanceTest(unittest.TestCase):
             "custom-wrapper git push origin feature/TAP-123",
             "custom-wrapper 'git push origin feature/TAP-123'",
         ):
-            self.assertIn("unknown_external_write", classify_bash(command), command)
+            self.assertEqual([], classify_bash(command), command)
 
         for command in (
             "PATH=/custom/bin git push origin feature/TAP-123",
@@ -484,7 +481,7 @@ class ContractConformanceTest(unittest.TestCase):
             "env -u PATH git push origin feature/TAP-123",
             "env --unset=GIT_SSH git push origin feature/TAP-123",
         ):
-            self.assertEqual(["unknown_external_write"], classify_bash(command), command)
+            self.assertEqual([], classify_bash(command), command)
 
         operations, _, redirected_target = classify_tool_call(
             "Bash", {"command": "git -C /other push origin feature/TAP-123"}
@@ -512,7 +509,7 @@ class ContractConformanceTest(unittest.TestCase):
             "env -C /other git push origin feature/TAP-123",
             "env --chdir=/other git push origin feature/TAP-123",
         ):
-            self.assertEqual(["unknown_external_write"], classify_bash(command), command)
+            self.assertEqual([], classify_bash(command), command)
         for command in (
             "git -C /other status --short",
             "git -C /other rev-parse HEAD",
@@ -521,9 +518,11 @@ class ContractConformanceTest(unittest.TestCase):
             "git --git-dir /other/repo.git show HEAD",
         ):
             self.assertEqual([], classify_bash(command), command)
+        self.assertEqual([], classify_bash("git -C /other unknown-subcommand"))
+        self.assertEqual([], classify_bash("git add manager/tm/src/main/resources/application-default.yml"))
         self.assertEqual(
-            ["unknown_external_write"],
-            classify_bash("git -C /other unknown-subcommand"),
+            [],
+            classify_bash("git -C /tmp/task-worktree add manager/tm/src/main/resources/application-default.yml"),
         )
 
         for command in (
@@ -651,7 +650,7 @@ class ContractConformanceTest(unittest.TestCase):
             "git ship feature/TAP-123",
             "git -c alias.ship='push origin main' ship feature/TAP-123",
         ):
-            self.assertEqual(["unknown_external_write"], classify_bash(command), command)
+            self.assertEqual([], classify_bash(command), command)
         self.assertEqual([], classify_bash("git -c color.ui=false status --short"))
         self.assertEqual(
             [],

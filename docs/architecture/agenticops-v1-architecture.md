@@ -99,13 +99,13 @@ Project Package 的 `repositories.json` 是仓库、origin、基线分支和域�
 
 Agent 由薄项目工作空间入口使用 `./agenticops start <agent>` 启动，当前会话始终以项目工作空间为 cwd。任务 worktree 位于该工作空间内，因此不再为每个 task/run 重启 Agent 或追加动态目录参数。`workflow/task.py repository context --issue-key <issue-key> --json` 复用 worktree 校验，返回当前 run 的仓库、路径、分支和 `base_sha`；Agent 从同一会话在这些已校验路径中分析、修改、构建和测试。任务命令继续显式绑定 workspace 和 issue key，不建立会话级“当前任务”状态。Source Pool 位于工作空间外，仍不得加入 Agent 可写范围。
 
-文件修改、构建和测试发生在任务上下文返回的 worktree。工作空间是 Agent 原生文件系统边界；多个任务之间的边界由显式 issue key、run、分支、授权、Gate 和最终 Git 范围验证共同保证，而不是由第二个 Agent 会话伪造。linked worktree 的 Git 元数据仍位于主仓库 `.git/worktrees/`，因此 `git add/commit/push` 同时受 Agent 平台审批和 Gate 控制；Source Pool 的 clone、fetch、worktree add/remove 由确定性 Workflow 执行。
+文件修改、构建和测试发生在任务上下文返回的 worktree。工作空间是 Agent 原生文件系统边界；多个任务之间的边界由显式 issue key、run、分支、授权、Gate 和最终 Git 范围验证共同保证，而不是由第二个 Agent 会话伪造。linked worktree 的 `git add` 与其它本地开发操作交给 Agent 平台审批；`git commit/push` 等明确协作事实才同时受 Gate 控制。Source Pool 的 clone、fetch、worktree add/remove 由确定性 Workflow 执行。
 
 ## 8. 连续性与安全
 
 未迁移的辅助能力优先由 Agent 原生能力完成；没有安全自动路径时，只暂停当前副作用并输出人工接力。事实不可信、权限不足、高风险操作或外部写入结果不明必须停止。
 
-Tool Adapter 采用正向命中：MCP 以服务标识和工具名的完整身份映射，Shell 只识别直接命令、已支持包装及同一调用内可证明指向受控命令的动态别名；只有明确映射到标准操作的工具调用才生成 Gate 请求。明确属于受控操作族但因包装、目标或参数歧义而无法可靠生成标准请求时失败关闭；任意解释器、未登记脚本和未映射工具不等于 AgenticOps 授权，Hook 不输出判定并交还 Agent 平台原生权限流程。Agent Adapter、Tool Adapter 或 Gate 自身异常仍失败关闭。Claude 与 Codex 共用同一 Tool Adapter 分类语义，只保留各自原生 Hook 判定协议的薄转换差异。
+Tool Adapter 采用正向命中：MCP 以服务标识和工具名的完整身份映射，Shell 只识别直接且可标准化的协作/控制面命令；只有明确映射到标准操作的工具调用才生成 Gate 请求。本地开发操作、任意解释器、未登记脚本和未映射工具均交还 Agent 平台原生权限流程，不因 Adapter 无法解析而升级为 Gate 操作。已命中的协作/控制面操作若目标或参数歧义而无法可靠生成标准请求，才失败关闭。Agent Adapter、Tool Adapter 或 Gate 自身异常仍失败关闭。Claude 与 Codex 共用同一 Tool Adapter 分类语义，只保留各自原生 Hook 判定协议的薄转换差异。
 
 Hook 是流程控制点，不是安全沙箱。不得关闭 Agent 平台原生沙箱或把未命中透传配置成无条件外部写权限；凭证最小权限、服务端保护、CI 和人工审查仍是最终边界。合并、发布、Tag、保护分支写入、强推和历史改写不被普通任务授权覆盖。Agent Hook、共享 Adapter Runtime 和 Tool Adapter 分类策略属于发布信任根，修改后禁止自动发布，必须通过受保护 `main` 的独立人工审查 PR 完成升级。
 

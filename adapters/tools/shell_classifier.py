@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import json
 import re
-import shlex
 from pathlib import Path
 
 from adapters.tools.git_push_syntax import parse_push
-from adapters.tools.shell_syntax import DYNAMIC, normalize_shell_call
+from adapters.tools.shell_syntax import normalize_shell_call
 
 CONFIG = json.loads((Path(__file__).resolve().parent / "mcp-operations.json").read_text(encoding="utf-8"))
 SHELL, UNKNOWN = CONFIG["shell"], "unknown_external_write"
@@ -17,25 +16,12 @@ GH_HELP_FLAGS = {"--draft", "--web", "--fill", "--fill-first", "--fill-verbose"}
 PY_VALUE_OPTIONS = {"-W", "-X", "--check-hash-based-pycs"}
 PY_FLAGS = set("-b -B -d -E -h --help -i -I -O -OO -P -q -s -S -u -v -V --version -x "
                "--help-env --help-xoptions --help-all".split())
-GIT_KNOWN = set(SHELL["git_readonly_redirects"]) | set(SHELL["git_simple_operations"]) | {
-    "branch", "clone", "commit", "fetch", "filter-branch", "filter-repo", "pull", "push",
-    "rebase", "replace", "reset", "tag", "worktree",
-}
-
-
 def classify_bash_call(command):
-    operations, aliases = [], set()
+    operations = []
     target_fields = ("issue_key", "workspace", "git_cwd", "push_source_ref", "push_destination_ref",
                      "push_target_branch", "repository"); targets = {key: [] for key in target_fields}
-    for command_tokens, reliable in (calls := normalize_shell_call(command, SHELL)):
-        controlled_alias = _controlled_alias_call(command_tokens, aliases)
+    for command_tokens, reliable in normalize_shell_call(command, SHELL):
         current, current_target = _dispatch(command_tokens) if reliable and command_tokens else ([], {})
-        if (
-            not reliable and not _readonly_rg_composition(command)
-            and (controlled_alias or _controlled_hint(command_tokens, len(calls) == 1, command))
-            and UNKNOWN not in current
-        ):
-            current.append(UNKNOWN)
         operations.extend(current)
         for field, value in current_target.items():
             targets[field].append(value)
@@ -53,63 +39,6 @@ def classify_bash_call(command):
     if ambiguous and UNKNOWN not in operations:
         operations.append(UNKNOWN)
     return operations, target
-
-
-def _readonly_rg_composition(command):
-    try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars="|&;(){}<>\r\n")
-        lexer.whitespace, lexer.whitespace_split, lexer.commenters = " \t", True, ""
-        tokens = list(lexer)
-    except ValueError:
-        return False
-    # Shell 参数不能含 NUL；仅将独立的管道和 && token 转为分段符。
-    segments = [
-        segment.split("\0")
-        for segment in "\0".join(tokens).replace("\0|\0", "\1").replace("\0&&\0", "\1").split("\1")
-    ]
-    return len(segments) > 1 and all(
-        segment and segment[0] == "rg" and not any(
-            token in ("--pre", "(", ")", "{", "}", "<", ">") or token.startswith("--pre=")
-            or any(marker in token for marker in ("$", "*", "?", "`"))
-            or all(char in "|&;(){}<>" for char in token) for token in segment[1:]
-        ) for segment in segments
-    )
-
-
-def _controlled_hint(tokens, single_segment, command):
-    markers = re.compile(r"(?:^|[^A-Za-z0-9_.-])(git|gh|agenticops)(?:$|[^A-Za-z0-9_.-])")
-    return not (
-        (executable := Path(str(tokens[0])).name if tokens else "") and single_segment
-        and not any(marker in command for marker in DYNAMIC)
-        and not any(str(token).lstrip("0123456789").startswith((">", "<")) for token in tokens[1:])
-        and (
-            executable in {"cat", "file", "grep", "head", "ls", "rg", "stat", "tail"}
-            and (executable != "rg" or not any(str(token) == "--pre" or str(token).startswith("--pre=")
-                                               for token in tokens[1:]))
-            or executable == "sed" and len(tokens) >= 4 and tokens[1] == "-n"
-            and re.fullmatch(r"\d+(?:,\d+)?p", tokens[2])
-            and all(str(token) and not str(token).startswith("-") for token in tokens[3:])
-        )
-    ) and (
-        executable in ("git", "gh", "agenticops", "rg")
-        or any(
-            markers.search(str(token)) or str(token).replace("\\", "/").endswith(
-                ("workflow/task.py", "workflow/repository_worktree.py")
-            ) for token in tokens
-        )
-    )
-
-
-def _controlled_alias_call(tokens, aliases):
-    candidates = tokens[1:] if tokens and tokens[0] in ("export", "readonly") else tokens
-    assignments = [re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", item, re.S) for item in candidates]
-    if assignments and all(assignments):
-        aliases.difference_update(assignment.group(1) for assignment in assignments)
-        aliases.update(assignment.group(1) for assignment in assignments
-                       if Path(assignment.group(2)).name in ("git", "gh", "agenticops"))
-        return False
-    variable = re.fullmatch(r"\$(?:{(\w+)}|(\w+))", tokens[0]) if tokens else None
-    return bool(variable and (variable.group(1) or variable.group(2)) in aliases)
 
 
 def _dispatch(tokens):
@@ -258,11 +187,6 @@ def _git(arguments):
         operations = ["history_rewrite"]
     else:
         operations = []
-    readonly = subcommand in SHELL["git_readonly_redirects"] or (subcommand == "tag" and not operations)
-    if subcommand and subcommand not in GIT_KNOWN and UNKNOWN not in operations:
-        operations.append(UNKNOWN)
-    elif subcommand and not operations and not readonly and not help_call:
-        operations.append(UNKNOWN)
     execution_modified = any(
         item == "-c"
         or item.startswith("-c") and item != "-c"
