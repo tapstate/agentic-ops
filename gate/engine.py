@@ -489,6 +489,15 @@ def evaluate(operation, context, auth, policy, now=None):
             "controlled_prepare_allowed",
         )
 
+    if level == "confirmation":
+        return _result(
+            ASK,
+            operation,
+            "项目仓库预下载会批量写入 Source Pool，必须由研发工程师逐次确认",
+            "project_repository_prefetch_confirmation_required",
+            "请研发工程师确认本次预下载；确认后可在目标工作空间原样执行 agenticops workspace prefetch --yes。",
+        )
+
     if level == "excluded":
         return _result(
             ASK,

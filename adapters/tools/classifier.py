@@ -4,11 +4,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from adapters.tools.shell_classifier import classify_bash_call
+from adapters.tools.shell_classifier import UNKNOWN, classify_bash_call
 
 CONFIG = json.loads(
     (Path(__file__).resolve().parent / "mcp-operations.json").read_text(encoding="utf-8")
 )
+MCP_REPOSITORY_BOUND_OPERATIONS = {"create_pr", "update_pr", "fix_pr_comments", "git_push"}
 
 
 def classify_tool_call(tool_name, tool_input):
@@ -27,7 +28,10 @@ def classify_tool_call(tool_name, tool_input):
         target.update(github_target(tool_input))
     if operation in CONFIG.get("jira_target_operations", []):
         target.update(jira_target(tool_input))
-    return [operation], tool_name, target
+    operations = [operation]
+    if operation in MCP_REPOSITORY_BOUND_OPERATIONS and not target.get("repository"):
+        operations.append(UNKNOWN)
+    return operations, tool_name, target
 
 
 def classify_bash(command):

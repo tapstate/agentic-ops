@@ -278,6 +278,12 @@ class ContractConformanceTest(unittest.TestCase):
         )
         self.assertEqual([], classify_bash(readonly_composition))
         self.assertEqual([], classify_bash("rg '(jira|task)' memory.md && rg task workflow/task.py"))
+        multi_repository_readonly = (
+            "git -C /tmp/task-worktree-a status --short --branch && "
+            "git -C /tmp/task-worktree-b status --short --branch && "
+            "rg -n -i 'elasticsearch|logwarehouse' /tmp/task-worktree-a /tmp/task-worktree-b"
+        )
+        self.assertEqual([], classify_bash(multi_repository_readonly))
         self.assertEqual(
             [],
             classify_bash(
@@ -287,6 +293,11 @@ class ContractConformanceTest(unittest.TestCase):
                 "'elasticsearch|logwarehouse' ."
             ),
         )
+        for command in (
+            "cd /tmp/task-worktree && git push origin feature/TAP-123",
+            "export GIT_DIR=/tmp/task-worktree/.git && git push origin feature/TAP-123",
+        ):
+            self.assertEqual([], classify_bash(command), command)
         for command in (
             "find . -exec ./agenticops workspace purge ';'",
             "sed -n 1p -i.bak ./agenticops",
@@ -321,6 +332,15 @@ class ContractConformanceTest(unittest.TestCase):
         )
         self.assertEqual(["manage_repository_worktree"], operations)
         self.assertEqual("/other", target["workspace"])
+        operations, _, target = classify_tool_call(
+            "Bash", {"command": "./agenticops workspace prefetch --workspace /other --yes"}
+        )
+        self.assertEqual(["prefetch_project_repositories"], operations)
+        self.assertEqual("/other", target["workspace"])
+        self.assertEqual(
+            ["prefetch_project_repositories"],
+            classify_bash("./agenticops workspace prefetch --yes"),
+        )
         for command in (
             "python3 workflow/task.py repository prepare --issue-key TAP-123 --reuse-existing-branch",
             "python3 workflow/task.py repository cleanup --issue-key TAP-123",
@@ -331,6 +351,10 @@ class ContractConformanceTest(unittest.TestCase):
             "git worktree add /tmp/x",
         ):
             self.assertEqual(["manage_repository_worktree"], classify_bash(command), command)
+        self.assertEqual(
+            ["prefetch_project_repositories"],
+            classify_bash("python3 workflow/repository_worktree.py prefetch --dir /workspace"),
+        )
         for command in (
             "python3 workflow/task.py repository prepare --help",
             "python3 workflow/task.py repository context --issue-key TAP-123 --json",
@@ -550,6 +574,10 @@ class ContractConformanceTest(unittest.TestCase):
         self.assertEqual(
             ["pr_merge"],
             classify_tool_call("mcp__github__merge_pull_request", {"repository": "acme/widget"})[0],
+        )
+        self.assertEqual(
+            ["create_pr", "unknown_external_write"],
+            classify_tool_call("mcp__github__create_pull_request", {"title": "t"})[0],
         )
 
         operations, _, newline_target = classify_tool_call(

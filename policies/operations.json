@@ -17,6 +17,7 @@
     "git_rebase": { "level": "excluded" },
     "git_clean": { "level": "excluded" },
     "prepare_task_repository": { "level": "controlled" },
+    "prefetch_project_repositories": { "level": "confirmation" },
     "manage_repository_worktree": { "level": "excluded" },
     "delete_task_state": { "level": "excluded" },
     "git_tag": { "level": "excluded" },

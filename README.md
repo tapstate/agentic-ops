@@ -47,6 +47,8 @@ Agent / Tool Adapter → 标准请求 → Gate Core + Policy → 标准判定
 在业务项目工作空间使用已发布的产品，初始化 Agent 并处理 Jira 任务。
 
 - [使用指引](docs/usage-guide.md)
+- [Agent引导安装指引](docs/usage/agent-guided-install.md)：从空工作空间启动 Agent，由它完成产品安装与项目初始化。
+- [任务授权指引](docs/usage/task-authorization.md)：脚本接管 Jira 任务并签发实施授权。
 
 ## 文档与合同
 

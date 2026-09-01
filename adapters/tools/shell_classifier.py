@@ -20,11 +20,18 @@ def classify_bash_call(command):
     operations = []
     target_fields = ("issue_key", "workspace", "git_cwd", "push_source_ref", "push_destination_ref",
                      "push_target_branch", "repository"); targets = {key: [] for key in target_fields}
+    native_shell_context = False
     for command_tokens, reliable in normalize_shell_call(command, SHELL):
+        if _changes_controlled_execution_context(command_tokens, reliable):
+            native_shell_context = True
+            continue
         current, current_target = _dispatch(command_tokens) if reliable and command_tokens else ([], {})
+        if native_shell_context and current:
+            return [], {"branch_relevant": True}
         operations.extend(current)
-        for field, value in current_target.items():
-            targets[field].append(value)
+        if current:
+            for field, value in current_target.items():
+                targets[field].append(value)
     target, ambiguous = {"branch_relevant": True}, False
     for field, values in targets.items():
         unique = set(values)
@@ -41,6 +48,33 @@ def classify_bash_call(command):
     return operations, target
 
 
+def _changes_controlled_execution_context(tokens, reliable):
+    """识别会使后续受控命令无法按 Hook cwd 可靠解释的 Shell 前置片段。"""
+    if not tokens:
+        return False
+    if not reliable:
+        return True
+    executable = Path(tokens[0]).name
+    if executable in ("cd", "pushd", "popd"):
+        return True
+    if executable in ("export", "readonly", "typeset", "declare"):
+        return any(_dangerous_assignment(item) for item in tokens[1:])
+    if executable in ("alias", "unalias", "hash"):
+        return any(Path(item.split("=", 1)[0]).name in {"git", "gh", "agenticops"}
+                   for item in tokens[1:] if not item.startswith("-"))
+    return False
+
+
+def _dangerous_assignment(item):
+    match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)=.*", item, re.S)
+    if not match:
+        return False
+    name = match.group(1)
+    return name in SHELL["dangerous_environment_names"] or any(
+        name.startswith(prefix) for prefix in SHELL["dangerous_environment_prefixes"]
+    )
+
+
 def _dispatch(tokens):
     executable = Path(tokens[0]).name
     if executable == "git":
@@ -50,12 +84,19 @@ def _dispatch(tokens):
     executor, _ = _executor_spec(executable)
     if executor and executor != "python":
         return [], {}
-    if executable == "agenticops" and "workspace" in tokens and "purge" in tokens:
-        return (["manage_repository_worktree", UNKNOWN], {}) if len(
+    if executable == "agenticops" and "workspace" in tokens and any(
+        action in tokens for action in ("purge", "prefetch")
+    ):
+        return (
+            ["prefetch_project_repositories" if "prefetch" in tokens else "manage_repository_worktree", UNKNOWN],
+            {},
+        ) if len(
             workspaces := _argument_values(tokens, "--workspace")
         ) > 1 or any(item.split("=", 1)[0] not in ("--all", "--yes", "--workspace")
                      for item in tokens if item.startswith("-")) else (
-            ["manage_repository_worktree"], {"workspace": workspaces[0] if workspaces else ""})
+            ["prefetch_project_repositories" if "prefetch" in tokens else "manage_repository_worktree"],
+            {"workspace": workspaces[0] if workspaces else ""},
+        )
     return _workflow(tokens)
 
 
@@ -106,8 +147,11 @@ def _workflow_action(script, arguments):
     if not script or any(item in ("-h", "--help") for item in arguments):
         return [], {}
     if script == "repository_worktree.py":
-        operation = "manage_repository_worktree" if any(action in arguments
-                                                          for action in ("prepare", "cleanup")) else None
+        operation = (
+            "prefetch_project_repositories" if "prefetch" in arguments else
+            "manage_repository_worktree" if any(action in arguments
+                                                 for action in ("prepare", "cleanup")) else None
+        )
     elif "purge" in arguments:
         operation = "delete_task_state"
     elif "repository" in arguments and "prepare" in arguments:

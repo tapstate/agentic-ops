@@ -42,6 +42,18 @@ def run_tool(tool, *args, cwd):
     return proc.returncode, proc.stdout + proc.stderr
 
 
+def run_workspace_tool(product_root, *args, cwd):
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "bootstrap" / "workspace_registry.py"),
+         "--product-root", str(product_root), *args],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        timeout=30,
+    )
+    return proc.returncode, proc.stdout + proc.stderr
+
+
 def grant(ws, issue="TAP-123"):
     return run_tool(
         "authorization.py", "grant", "--issue-key", issue, "--agent-id", "dev-bot-1",
@@ -161,8 +173,13 @@ def main():
             catalog_document["repositories"]["tapdata/" + name]["origin"] = str(
                 remote_root / (name + ".git")
             )
+        prefetch_catalog = json.loads(json.dumps(catalog_document))
+        prefetch_catalog["repositories"] = {
+            "tapdata/" + name: prefetch_catalog["repositories"]["tapdata/" + name]
+            for name in ("tapdata", "tapdata-common-lib")
+        }
         catalog_path.write_text(
-            json.dumps(catalog_document, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(prefetch_catalog, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
         stale_seed = ws / "seed-tapdata"
@@ -179,11 +196,24 @@ def main():
         (ws / ".agenticops").mkdir()
         (ws / ".agenticops" / "workspace.json").write_text(
             json.dumps({
-                "schema_version": 2, "product_root": str(product_root),
+                "schema_version": 2, "product_root": str(product_root.resolve()),
                 "workspace_id": "1" * 32,
                 "project": "tapdata", "agents": ["claude", "codex"],
                 "repository_pool": {"root": str(pool_root), "source": "workspace-override"},
             }), encoding="utf-8"
+        )
+        code, out = run_workspace_tool(
+            product_root, "prefetch", "--yes", cwd=ws
+        )
+        check("workspace prefetch 按项目目录预下载", code, 0)
+        check("workspace prefetch 复核已有主工作树", "已存在并通过复核 1 个" in out, True)
+        check("workspace prefetch 下载缺失主工作树", (pool_root / "tapdata" / "tapdata-common-lib" / ".git").is_dir(), True)
+        check("workspace prefetch 不创建任务状态", (ws / ".agenticops" / "tasks").exists(), False)
+        check("workspace prefetch 不创建任务 worktree", (ws / ".agenticops" / "worktrees").exists(), False)
+        shutil.rmtree(pool_root / "tapdata" / "tapdata-common-lib")
+        catalog_path.write_text(
+            json.dumps(catalog_document, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
         )
         # ---- 任务状态机 -------------------------------------------------
         code, out = run_tool("task.py", "init", "--issue-key", "TAP-123", "--task-class", "defect_fix", cwd=ws)

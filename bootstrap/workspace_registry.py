@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from workflow import repository_worktree, task_store  # noqa: E402
+from workflow import project_rules, repository_worktree, task_store  # noqa: E402
 from bootstrap.workspace_paths import WorkspaceDirectory, workspace_artifact_path  # noqa: E402
 
 
@@ -381,6 +381,29 @@ def command_detach(args, product_root, purge=False):
     print("已%s %s 个工作空间。" % ("彻底清理" if purge else "解绑", len(targets)))
 
 
+def command_prefetch(args, product_root):
+    targets = [Path(item) for item in load_registry(product_root)] if args.all else [
+        Path(args.workspace or ".").resolve()
+    ]
+    details = {}
+    for workspace in targets:
+        require_tracked(product_root, workspace)
+        project = project_rules.project_from_workspace(workspace)
+        catalog = project_rules.load_repository_catalog(workspace=workspace)
+        repositories = catalog.get("repositories", {})
+        if not repositories:
+            raise ValueError("项目仓库目录为空，拒绝预下载：%s" % workspace)
+        details[str(workspace)] = "%s 项目，按目录预下载 %d 个仓库" % (project, len(repositories))
+    show_targets("prefetch", targets, details)
+    confirm(args)
+    cloned = existing = 0
+    for workspace in targets:
+        reports = repository_worktree.prefetch_project_repositories(workspace)
+        cloned += sum(item["status"] == "cloned" for item in reports)
+        existing += sum(item["status"] == "existing" for item in reports)
+    print("预下载完成：新下载 %d 个，已存在并通过复核 %d 个。" % (cloned, existing))
+
+
 def command_pending(args, product_root):
     pending = []
     for item in load_registry(product_root):
@@ -421,6 +444,11 @@ def parser():
         target.add_argument("--workspace")
         target.add_argument("--all", action="store_true")
         command.add_argument("--yes", action="store_true", help="非交互环境确认已展示的目标列表")
+    prefetch = commands.add_parser("prefetch")
+    target = prefetch.add_mutually_exclusive_group()
+    target.add_argument("--workspace")
+    target.add_argument("--all", action="store_true")
+    prefetch.add_argument("--yes", action="store_true", help="非交互环境确认已展示的目标列表")
     clean = commands.add_parser("clean")
     target = clean.add_mutually_exclusive_group(required=True)
     target.add_argument("--workspace")
@@ -450,6 +478,8 @@ def main():
             command_detach(args, product_root)
         elif args.command == "purge":
             command_detach(args, product_root, purge=True)
+        elif args.command == "prefetch":
+            command_prefetch(args, product_root)
         return 0
     except (ValueError, subprocess.CalledProcessError) as error:
         print("AgenticOps：%s" % error, file=sys.stderr)
