@@ -187,6 +187,20 @@ assert profile["transitions"]["start_progress"] == {
     "from": ["Analyzed"],
     "to": "In Progress",
 }
+assert profile["workflows_by_issue_type"] == [{
+    "issue_type": {"id": "10008", "name": "任务"},
+    "statuses": [
+        {"id": "10029", "name": "待办", "stage": "waiting_takeover"},
+        {"id": "3", "name": "正在进行", "stage": "implementation"},
+    ],
+    "transitions": {
+        "start_progress": {
+            "name": "Work started", "id": "61",
+            "from": {"id": "10029", "name": "待办"},
+            "to": {"id": "3", "name": "正在进行"},
+        }
+    },
+}]
 PY
 grep -Fq '接管、继续或 reset 成功只是流程恢复点' adapters/workspace/AGENTS.md ||
   fail "工作空间入口未声明接管后的连续推进"

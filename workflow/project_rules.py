@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""项目规则机读入口：准入清单、验证规则、证据敏感词、分支解析。
+"""项目规则机读入口：准入清单、验证规则、证据敏感词、分支与 Jira 工作流解析。
 
 设计原则：**规则要么可执行，要么不是规则。**
 `projects/<project>/admission.json` 是准入与验证规则的唯一事实源，
@@ -10,6 +10,7 @@
   python3 workflow/project_rules.py render            # 由 admission.json 重新生成三张清单 md
   python3 workflow/project_rules.py render --check    # 只校验 md 与 json 是否漂移（漂移 exit 1）
   python3 workflow/project_rules.py branch --repo tapdata/tapdata   # 查表解析分支，查不到 exit 2
+  python3 workflow/project_rules.py workflow --issue-type-id 10008 --issue-type-name 任务 --json
 """
 from __future__ import annotations
 
@@ -142,6 +143,49 @@ def validate_project_issue(profile, issue_key):
         raise ValueError("项目 Profile 缺少 jira.project_key")
     if actual != expected:
         raise ValueError("任务 %s 不属于当前项目（期望 %s-*）" % (issue_key, expected))
+
+
+def resolve_issue_type_workflow(profile, issue_type_id=None, issue_type_name=None):
+    """按 Jira 事务类型精确选择工作流；没有唯一映射时失败关闭。"""
+    issue_type_id = str(issue_type_id or "").strip()
+    issue_type_name = str(issue_type_name or "").strip()
+    if not issue_type_id and not issue_type_name:
+        raise ValueError("必须提供 Jira 事务类型 ID 或名称")
+    workflows = profile.get("workflows_by_issue_type")
+    if not isinstance(workflows, list):
+        raise ValueError("项目 Profile 缺少 workflows_by_issue_type")
+    matches = []
+    for workflow in workflows:
+        if not isinstance(workflow, dict):
+            continue
+        issue_type = workflow.get("issue_type")
+        if not isinstance(issue_type, dict):
+            continue
+        configured_id = str(issue_type.get("id") or "").strip()
+        configured_name = str(issue_type.get("name") or "").strip()
+        if not configured_id or not configured_name:
+            continue
+        if issue_type_id and issue_type_id != configured_id:
+            continue
+        if issue_type_name and issue_type_name != configured_name:
+            continue
+        matches.append(workflow)
+    if len(matches) != 1:
+        supplied = "ID=%s，名称=%s" % (issue_type_id or "未提供", issue_type_name or "未提供")
+        if not matches:
+            raise LookupError("事务类型没有工作流映射：%s" % supplied)
+        raise ValueError("事务类型工作流映射不唯一：%s" % supplied)
+    workflow = matches[0]
+    statuses = workflow.get("statuses")
+    transitions = workflow.get("transitions")
+    if not isinstance(statuses, list) or not isinstance(transitions, dict):
+        raise ValueError("事务类型工作流结构无效")
+    for status in statuses:
+        if not isinstance(status, dict) or not all(
+            isinstance(status.get(key), str) and status[key] for key in ("id", "name", "stage")
+        ):
+            raise ValueError("事务类型工作流状态结构无效")
+    return workflow
 
 
 def class_spec(spec, task_class):
@@ -342,6 +386,28 @@ def cmd_branch(args):
     return 0
 
 
+def cmd_workflow(args):
+    try:
+        workflow = resolve_issue_type_workflow(
+            load_profile(args.root, project=args.project),
+            issue_type_id=args.issue_type_id,
+            issue_type_name=args.issue_type_name,
+        )
+    except (LookupError, ValueError) as exc:
+        print("错误：%s" % exc, file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(workflow, ensure_ascii=False))
+    else:
+        issue_type = workflow["issue_type"]
+        print("事务类型：%s（%s）" % (issue_type["name"], issue_type["id"]))
+        print("状态：%s" % "；".join(
+            "%s（%s）→ %s" % (item["name"], item["id"], item["stage"])
+            for item in workflow["statuses"]
+        ))
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -358,6 +424,14 @@ def main():
     p.add_argument("--root", default=str(ROOT))
     p.add_argument("--project", default="tapdata")
     p.set_defaults(func=cmd_branch)
+
+    p = sub.add_parser("workflow", help="按 Jira 事务类型精确解析工作流（未知类型失败关闭）")
+    p.add_argument("--issue-type-id")
+    p.add_argument("--issue-type-name")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--root", default=str(ROOT))
+    p.add_argument("--project", default="tapdata")
+    p.set_defaults(func=cmd_workflow)
 
     args = parser.parse_args()
     return args.func(args)

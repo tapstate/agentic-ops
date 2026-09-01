@@ -480,6 +480,21 @@ assert transition == {
     "to": "In Progress",
 }
 assert profile["statuses"]["Analyzed"] == "waiting_takeover"
+task_workflow = profile["workflows_by_issue_type"]
+assert task_workflow == [{
+    "issue_type": {"id": "10008", "name": "任务"},
+    "statuses": [
+        {"id": "10029", "name": "待办", "stage": "waiting_takeover"},
+        {"id": "3", "name": "正在进行", "stage": "implementation"},
+    ],
+    "transitions": {
+        "start_progress": {
+            "name": "Work started", "id": "61",
+            "from": {"id": "10029", "name": "待办"},
+            "to": {"id": "3", "name": "正在进行"},
+        }
+    },
+}]
 PY
 python3 - "$workspace/.agenticops/workspace.json" "$workspace/.agenticops/init.json" "$install_root" "$shared_repository_pool" <<'PY'
 import json
