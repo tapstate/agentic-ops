@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "name": "claude",
-  "adapter_version": 3,
+  "adapter_version": 4,
   "entrypoint": "adapters/agents/claude/hook.py",
   "hook": {
     "standard_event": "before_operation",

@@ -271,6 +271,13 @@ class ContractConformanceTest(unittest.TestCase):
             "stat ./agenticops",
         ):
             self.assertEqual([], classify_bash(command), command)
+        readonly_composition = (
+            "rg --files .agenticops %s | rg '(jira|adapter|gate|runner|task)' && "
+            "rg -n -C 3 'jira|runner|gate|def advance|def cmd_advance' %s %s .agenticops"
+            % (ROOT / "workflow", ROOT / "workflow" / "task.py", ROOT / "workflow" / "task_store.py")
+        )
+        self.assertEqual([], classify_bash(readonly_composition))
+        self.assertEqual([], classify_bash("rg '(jira|task)' memory.md && rg task workflow/task.py"))
         self.assertIn(
             "unknown_external_write",
             classify_bash("find . -exec ./agenticops workspace purge ';'"),
@@ -288,9 +295,21 @@ class ContractConformanceTest(unittest.TestCase):
             "head -n \"$(./agenticops workspace purge --yes)\" ./agenticops",
             "cat \"$(./agenticops workspace purge --yes)\" ./agenticops",
             "RIPGREP_CONFIG_PATH=/tmp/rg.conf rg pattern ./agenticops",
+            "rg --pre tool pattern ./agenticops | rg task",
+            "rg pattern ./agenticops > output && rg task .agenticops",
+            "rg pattern ./agenticops>output && rg task .agenticops",
+            "(rg task workflow/task.py) && rg pattern .agenticops",
             "./agenticops workspace purge --worksp /other --yes",
         ):
             self.assertIn("unknown_external_write", classify_bash(command), command)
+        self.assertEqual(
+            ["git_push"],
+            classify_bash("rg task .agenticops && git push origin feature/TAP-123"),
+        )
+        self.assertEqual(
+            ["prepare_task_repository"],
+            classify_bash("rg task .agenticops && workflow/task.py repository prepare --issue-key TAP-123"),
+        )
         operations, _, target = classify_tool_call(
             "Bash", {"command": "./agenticops workspace purge --workspace /other --yes"}
         )

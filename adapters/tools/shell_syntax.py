@@ -20,7 +20,7 @@ UNSAFE_WRAPPERS = {
 
 def normalize_shell_call(command, config):
     """返回 `(tokens, reliable)`；无法静态归一化的片段标记为不可靠。"""
-    lexer = shlex.shlex(command, posix=True, punctuation_chars="|&;\r\n")
+    lexer = shlex.shlex(command, posix=True, punctuation_chars="|&;()<>\r\n")
     lexer.whitespace = " \t"
     lexer.whitespace_split = True
     lexer.commenters = ""
@@ -133,7 +133,7 @@ def _unsupported(segment, tokens):
     if not tokens:
         return False
     executable = os.path.basename(tokens[0])
-    grouped = segment.startswith(("(", "{")) or segment.endswith((")", "}"))
+    grouped = any(token in ("(", ")") for token in tokens) or segment.startswith("{") or segment.endswith("}")
     control = executable in CONTROL_WORDS or executable.endswith("()")
     wrapper = executable in UNSAFE_WRAPPERS
     unknown_wrapper = not _controlled_token(tokens[0]) and any(
@@ -141,4 +141,6 @@ def _unsupported(segment, tokens):
         for token in tokens[1:]
     )
     dynamic = any(marker in segment for marker in DYNAMIC) or "$" in tokens[0]
-    return grouped or control or wrapper or unknown_wrapper or dynamic
+    return grouped or control or wrapper or unknown_wrapper or dynamic or any(
+        token in ("<", ">") for token in tokens
+    ) or executable == "rg" and any(token == "--pre" or token.startswith("--pre=") for token in tokens[1:])

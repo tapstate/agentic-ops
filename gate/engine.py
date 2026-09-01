@@ -391,7 +391,8 @@ def evaluate(operation, context, auth, policy, now=None):
             operation,
             "受控操作存在包装、目标或参数歧义，无法可靠生成标准请求",
             "unknown_external_write",
-            "请研发工程师核对并执行该操作；维护者应补充或修正 Tool Adapter 映射。",
+            "请研发工程师核对并执行原命令；Agent 不得拆分、改写或换工具重试。"
+            "Tool Adapter 更新后，研发工程师可明确要求原样重放一次；再次拒绝则停止。",
         )
 
     metadata = operations.get(operation)

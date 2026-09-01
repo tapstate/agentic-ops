@@ -375,6 +375,13 @@ def main():
         check("gh 真实 help 不受控", run_hook("Bash", {"command": "gh pr create --draft --help"}, ws), "passthrough")
         check("task repository --help 不误拦", run_hook("Bash", {"command": "python3 workflow/task.py repository prepare --help"}, ws), "passthrough")
         check("repository context 不误拦", run_hook("Bash", {"command": "python3 workflow/task.py repository context --issue-key TAP-123 --json"}, ws), "passthrough")
+        readonly_composition = (
+            "rg --files .agenticops %s | rg '(jira|adapter|gate|runner|task)' && "
+            "rg -n -C 3 'jira|runner|gate|def advance|def cmd_advance' %s %s .agenticops"
+            % (ROOT / "workflow", ROOT / "workflow" / "task.py", ROOT / "workflow" / "task_store.py")
+        )
+        check("Claude 复合只读检索不误拦", run_hook("Bash", {"command": readonly_composition}, ws), "passthrough")
+        check("Codex 复合只读检索不误拦", run_codex("Bash", {"command": readonly_composition}, ws), "allow")
         check("只读检查工作空间根入口不误拦", run_hook("Bash", {"command": "sed -n '1,200p' ./agenticops"}, ws), "passthrough")
         check("sed 原地修改工作空间入口停止", run_hook("Bash", {"command": "sed -n 1p -i.bak ./agenticops"}, ws), "ask")
         check("重定向覆盖工作空间入口停止", run_hook("Bash", {"command": "cat source > ./agenticops"}, ws), "ask")
@@ -930,6 +937,21 @@ def main():
 
         # ---- OPA 一致性 -------------------------------------------------
         if shutil.which("opa"):
+            unknown_request = {
+                "protocol_version": 1,
+                "event": "before_operation",
+                "source": {"agent": "test", "adapter": "test", "adapter_version": 1},
+                "cwd": str(ws),
+                "operations": ["unknown_external_write"],
+                "target": {"branch_relevant": False},
+            }
+            py_unknown = run_standard(unknown_request)
+            opa_unknown = run_standard(unknown_request, env_extra={"AO_GATE_USE_OPA": "1"})
+            check(
+                "OPA 受控歧义完整响应一致",
+                tuple(opa_unknown.get(field) for field in ("decision", "operation", "reason", "reason_code", "required_action")),
+                tuple(py_unknown.get(field) for field in ("decision", "operation", "reason", "reason_code", "required_action")),
+            )
             grant(ws)
             subprocess.run(
                 ["git", "config", "--unset-all", "remote.origin.pushurl"],

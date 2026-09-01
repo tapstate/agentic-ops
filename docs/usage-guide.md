@@ -234,7 +234,7 @@ python3 ~/.agentic-ops/workflow/task.py repository prepare \
 - `本地 Git 基线`：prepare 生成的任务 worktree、`base_sha` 和目录摘要；只有这一层可以支撑本地源码分析和设计方案。
 - `本地验证`、`PR/CI`、`发布`：分别记录实际命令与结果、GitHub 审查检查、正式发布事实；低层证据不能冒充更高层验收。
 
-任何 Hook 首次返回 `ask` 或 `deny` 时，Agent 都必须立即完整展示原因、要求的处理动作和当前停止点，并停止当前操作及依赖它的后续步骤。不得把阻断描述成“正常门禁”后继续，也不得改用 GitHub API、直接 Git 或其它工具绕过缺失的本地基线。
+任何 Hook 首次返回 `ask` 或 `deny` 时，Agent 都必须立即完整展示原因、要求的处理动作和当前停止点，并停止当前操作及依赖它的后续步骤。不得把阻断描述成“正常门禁”后继续，也不得改用 GitHub API、直接 Git 或其它工具绕过缺失的本地基线。对 `unknown_external_write`，Agent 不得拆分、改写或换工具重试；Tool Adapter 实际更新后，研发工程师可明确要求原样重放一次，由新 Hook 重新判定，再次拒绝则停止。
 
 worktree 准备完成后，当前工作空间会话继续处理，不启动嵌套 Agent，也不切换工作空间。先读取只读任务执行上下文，再只在其中列出的 worktree 分析、修改和验证；方案确认后仍需重新签发包含 `base_sha` 的授权，才能进入实现：
 

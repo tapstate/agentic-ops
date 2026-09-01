@@ -77,12 +77,12 @@ def decision_reason(decision, tool_name=None, tool_input=None, codex_manual_unkn
         if tool_name.startswith("mcp__"):
             required_action = (
                 "请研发工程师在已登录的对应 MCP 服务中，按上述工具和目标参数完成该写入；"
-                "回读外部结果后回复“继续”。Agent 不得重试。维护者还需补充 Tool Adapter 映射。"
+                "回读外部结果后回复“继续”。Agent 不得改写参数或换工具重试；Adapter 更新后可明确原样重放一次，再次拒绝则停止。"
             )
         else:
             required_action = (
                 "请研发工程师在自己的终端核对并执行上述命令；回读结果后回复“继续”。"
-                "Agent 不得重试。维护者还需补充 Tool Adapter 映射。"
+                "Agent 不得拆分、改写或换工具重试。Tool Adapter 更新后，研发工程师可明确要求原样重放一次；再次拒绝则停止。"
             )
     if required_action:
         parts.append("下一步：%s" % required_action)
