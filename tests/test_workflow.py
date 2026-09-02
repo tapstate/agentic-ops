@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from workflow import ci, evidence, repository_worktree, task as workflow_task  # noqa: E402
+from workflow import ci, evidence, project_rules, repository_worktree, task as workflow_task  # noqa: E402
 from workflow import task_store  # noqa: E402
 
 PASS = 0
@@ -1060,6 +1060,30 @@ def main():
             status for status, stage in profile["statuses"].items() if stage == "waiting_takeover"
         )
         check("TapData 仅 Analyzed 映射 waiting_takeover", waiting_takeover_statuses, ["Analyzed"])
+        task_workflow = project_rules.resolve_issue_type_workflow(
+            profile, issue_type_id="10008", issue_type_name="任务"
+        )
+        check("TapData 任务类型按稳定 ID 解析工作流", task_workflow["issue_type"]["id"], "10008")
+        check("TapData 任务待办映射接管等待", task_workflow["statuses"][0], {
+            "id": "10029", "name": "待办", "stage": "waiting_takeover"
+        })
+        check("TapData 任务开始流转精确映射", task_workflow["transitions"]["start_progress"], {
+            "name": "Work started",
+            "id": "61",
+            "from": {"id": "10029", "name": "待办"},
+            "to": {"id": "3", "name": "正在进行"},
+        })
+        code, out = run_tool(
+            "project_rules.py", "workflow", "--issue-type-id", "10008", "--issue-type-name", "任务", "--json", cwd=ROOT
+        )
+        check("工作流 CLI 输出任务类型映射", code, 0)
+        check("工作流 CLI 输出可机读", json.loads(out)["transitions"]["start_progress"]["id"], "61")
+        code, out = run_tool("project_rules.py", "workflow", "--issue-type-id", "99999", cwd=ROOT)
+        check("未知 Jira 事务类型失败关闭", code, 2)
+        code, out = run_tool(
+            "project_rules.py", "workflow", "--issue-type-id", "10008", "--issue-type-name", "Bug", cwd=ROOT
+        )
+        check("不一致的 Jira 事务类型 ID/名称失败关闭", code, 2)
         check("profile transition 291 标记禁止", profile["transitions"]["pr_approved"]["agent_forbidden"], True)
         check("admission 三张表就位", sorted(p.name for p in (ROOT / "projects/tapdata/admission").glob("*.md")), ["defect-fix.md", "feature-change.md", "technical-task.md"])
         check("runbook 两份就位", len(list((ROOT / "projects/tapdata/runbooks").glob("*.md"))), 2)

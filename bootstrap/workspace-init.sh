@@ -90,3 +90,4 @@ python3 "$install_root/bootstrap/workspace_registry.py" \
 
 printf 'AgenticOps 项目工作空间已初始化：%s（project=%s）\n' "$workspace" "$project"
 printf '统一入口：cd %s && ./agenticops doctor\n' "$workspace"
+printf '必需插件：首次使用 Jira 事实时，Agent 会检查 atlassian；缺失时只暂停依赖步骤并引导你在当前 Agent 客户端安装和登录。GitHub 工具由 Agent 按任务自行选择。\n'

@@ -2,7 +2,7 @@
   "_meta": {
     "source": "AgenticOps TapData 项目适配配置",
     "ported_at": "2026-08-27",
-    "note": "transitions 为 tapdata Jira 真实工作流实测；start_progress 于 2026-08-31 按 TAP-12289 实时核验更新，未配流转按需补充"
+    "note": "通用 transitions 与按事务类型 workflows_by_issue_type 均以 TapData Jira 实时读取为准；TAP-12289 于 2026-08-31 核验，任务类型映射于 2026-09-01 由 TAP-12773 核验。状态与流转优先使用稳定 ID，未映射的状态或流转不得猜测。"
   },
   "profile_id": "tapdata",
   "jira": {
@@ -29,5 +29,22 @@
   "transitions": {
     "start_progress": { "name": "Start Investigation", "id": "421", "from": ["Analyzed"], "to": "In Progress" },
     "pr_approved": { "name": "PR Approved", "id": "291", "from": ["Pull Request Submitted"], "to": "Merged", "agent_forbidden": true }
-  }
+  },
+  "workflows_by_issue_type": [
+    {
+      "issue_type": { "id": "10008", "name": "任务" },
+      "statuses": [
+        { "id": "10029", "name": "待办", "stage": "waiting_takeover" },
+        { "id": "3", "name": "正在进行", "stage": "implementation" }
+      ],
+      "transitions": {
+        "start_progress": {
+          "name": "Work started",
+          "id": "61",
+          "from": { "id": "10029", "name": "待办" },
+          "to": { "id": "3", "name": "正在进行" }
+        }
+      }
+    }
+  ]
 }

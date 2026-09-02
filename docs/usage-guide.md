@@ -2,7 +2,7 @@
 
 这篇只带你完成一条默认路径：安装 AgenticOps、创建工作空间并接管第一个 Jira 任务。默认值已由产品配置；除示例中的工作空间路径和任务号外，不需要先理解或填写其它选项。
 
-开始前准备：Git、Python 3.9+，并确保 Git SSH 已获得 `tapstate/agentic-ops` 的读取权限。不熟悉术语时查看[术语表](glossary.md)。
+开始前准备：Git、Python 3.9+，并确保 Git SSH 已获得 `tapstate/agentic-ops` 的读取权限。Jira/Atlassian 插件在首次实际使用时按[必需 MCP 配置](usage/mcp-setup.md)引导安装和登录，不是首次启动的前置条件；GitHub 工具由 Agent 按任务自行选择。不熟悉术语时查看[术语表](glossary.md)。
 
 ## 1. 安装
 
@@ -66,7 +66,7 @@ cd "$HOME/agenticops-tapdata"
 ./agenticops start codex
 ```
 
-首次启动 Codex 时，按 `/hooks` 的提示审核并信任本项目生成的 Hook。使用 Claude Code 时，将最后一行替换为 `./agenticops start claude`。
+首次启动 Codex 时，按 `/hooks` 的提示审核并信任本项目生成的 Hook。首次使用 Jira 事实时，Agent 会检查必需插件并在缺失时引导安装和登录；GitHub 工具由 Agent 按任务自行选择。Claude Code 会读取工作空间生成的 `.mcp.json`；使用 Claude Code 时，将最后一行替换为 `./agenticops start claude`。
 
 ## 4. 接管第一个任务
 

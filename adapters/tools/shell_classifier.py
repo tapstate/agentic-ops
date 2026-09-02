@@ -27,6 +27,7 @@ def classify_bash_call(command):
             continue
         current, current_target = _dispatch(command_tokens) if reliable and command_tokens else ([], {})
         if native_shell_context and current:
+            # 宽门禁不猜测命令内上下文切换后的受控操作，交还 Agent 原生权限。
             return [], {"branch_relevant": True}
         operations.extend(current)
         if current:
