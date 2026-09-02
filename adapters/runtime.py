@@ -15,12 +15,12 @@ SENSITIVE_COMMAND_OPTION = re.compile(
 )
 SENSITIVE_COMPACT_OPTION = re.compile(r"(?i)(\s-(?:u|p))([^\s;]+)")
 AUTHORIZATION_HEADER = re.compile(r"(?i)(authorization:\s*(?:bearer\s+)?)([^\s'\";]+)")
-
-
 def evaluate_tool_call(agent, adapter_version, tool_name, tool_input, cwd):
     operations, note, target = classify_tool_call(tool_name, tool_input or {})
     if not operations:
         return None
+    if tool_input.get("_agenticops_git_cwd") and not target.get("git_cwd") and target.get("branch_relevant", True):
+        target["git_cwd"] = tool_input["_agenticops_git_cwd"]
     request = {
         "protocol_version": 1,
         "event": "before_operation",
@@ -40,9 +40,7 @@ def evaluate_tool_call(agent, adapter_version, tool_name, tool_input, cwd):
 
 
 def _command_preview(command):
-    preview = "".join(
-        " " if ord(character) < 32 or ord(character) == 127 else character for character in str(command)
-    )
+    preview = "".join(" " if ord(character) < 32 or ord(character) == 127 else character for character in str(command))
     preview = " ".join(preview.split()) or "（空命令）"
     preview = SENSITIVE_COMMAND_VALUE.sub(r"\1<已隐藏>", preview)
     preview = SENSITIVE_COMMAND_OPTION.sub(r"\1<已隐藏>", preview)

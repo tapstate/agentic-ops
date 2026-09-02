@@ -8,6 +8,7 @@ Source Pool 位于项目工作空间之外，只保存统一维护的主工作�
 
 - `repository context --issue-key <issue-key> --json` 在源码分析、实现或恢复前校验当前 run 的租约、规范路径、分支、`base_sha` 和目录摘要；失败时停止任务依赖步骤。
 - 当前会话执行 `git commit`、`git push` 等 Git 副作用时，使用 `git -C <repository context 返回的 worktree> ...`。Tool Adapter 把该路径作为标准 Git 上下文；Gate 仅接受工作空间内、与当前 active 任务的 repository、work branch 和 prepared worktree 同时匹配的精确路径。
+- 对直接可识别的创建、更新或评论 PR 等分支相关 GitHub 写操作，如需由 AgenticOps 关联任务并验证分支，Bash 调用应将 `workdir` 设为 `repository context` 返回的 task worktree，即使命令已传入 `--repo`。Codex Adapter 将该单次执行目录映射为标准 Git 上下文，Gate 再验证它精确匹配当前 task/run 的 prepared worktree；缺少 `workdir` 时，已识别命令以 `branch_context_required` 停止，不从 PR 正文或重新接管推断任务。命令内 `cd ... &&`、`GIT_DIR` 等无法可靠标准化上下文的形式属于宽门禁未命中路径，交由 Codex 原生权限处理，AgenticOps 不据此推断任务或分支。
 - 当前会话能够访问工作空间内的其它 task worktree，因此 task/run 级边界由显式 issue key、授权绑定、Gate、工作分支和 Git 交付范围共同保证；不得把工作空间级沙箱误述为 task/run 级硬隔离。
 - linked worktree 的 `.git` 指向主仓库 Git 元数据。平台仍可能要求批准 Git 元数据写入；Gate 也继续独立判断 commit、push、PR 等副作用。目录授权不是任务授权的替代品。
 

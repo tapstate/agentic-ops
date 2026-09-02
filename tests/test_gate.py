@@ -65,25 +65,29 @@ def run_hook_output(tool_name, tool_input, cwd, env_extra=None):
     return out
 
 
-def run_codex(tool_name, tool_input, cwd):
-    out = run_codex_output(tool_name, tool_input, cwd)
+def run_codex(tool_name, tool_input, cwd, env_extra=None):
+    out = run_codex_output(tool_name, tool_input, cwd, env_extra)
     if out is None:
         return "allow"
     return out["hookSpecificOutput"]["permissionDecision"]
 
 
-def run_codex_output(tool_name, tool_input, cwd):
+def run_codex_output(tool_name, tool_input, cwd, env_extra=None):
     payload = {
         "hook_event_name": "PreToolUse",
         "tool_name": tool_name,
         "tool_input": tool_input,
         "cwd": str(cwd),
     }
+    env = dict(os.environ)
+    if env_extra:
+        env.update(env_extra)
     proc = subprocess.run(
         [sys.executable, str(CODEX_HOOK)],
         input=json.dumps(payload),
         capture_output=True,
         text=True,
+        env=env,
         timeout=30,
     )
     assert proc.returncode == 0, proc.stderr
@@ -111,10 +115,11 @@ def run_standard(request, env_extra=None):
     return json.loads(proc.stdout)
 
 
-def make_workspace(branch="feature/TAP-123", origin="git@github.com:acme/widget.git"):
+def make_workspace(branch="feature/TAP-123", origin="git@github.com:acme/widget.git", initialize_git=True):
     ws = Path(tempfile.mkdtemp(prefix="aogate-ws-"))
-    subprocess.run(["git", "init", "-q", "-b", branch], cwd=ws, check=True)
-    subprocess.run(["git", "remote", "add", "origin", origin], cwd=ws, check=True)
+    if initialize_git:
+        subprocess.run(["git", "init", "-q", "-b", branch], cwd=ws, check=True)
+        subprocess.run(["git", "remote", "add", "origin", origin], cwd=ws, check=True)
     (ws / ".agenticops").mkdir()
     product_root = ws / ".agenticops" / "test-product-root"
     shutil.copytree(ROOT / "projects", product_root / "projects")
@@ -135,12 +140,13 @@ def make_workspace(branch="feature/TAP-123", origin="git@github.com:acme/widget.
         }), encoding="utf-8"
     )
     (ws / "README.md").write_text("poc\n", encoding="utf-8")
-    subprocess.run(["git", "add", "."], cwd=ws, check=True)
-    subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"],
-        cwd=ws,
-        check=True,
-    )
+    if initialize_git:
+        subprocess.run(["git", "add", "."], cwd=ws, check=True)
+        subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"],
+            cwd=ws,
+            check=True,
+        )
     return ws
 
 
@@ -415,9 +421,10 @@ def main():
         for name, command in (
             ("cd", "cd /tmp/task-worktree && git push origin feature/TAP-123"),
             ("GIT_DIR", "export GIT_DIR=/tmp/task-worktree/.git && git push origin feature/TAP-123"),
+            ("cd 后 gh PR", "cd /tmp/task-worktree && gh pr edit 1 --repo acme/widget --title t"),
         ):
-            check("Claude %s 前置上下文交还原生权限" % name, run_hook("Bash", {"command": command}, ws), "passthrough")
-            check("Codex %s 前置上下文交还原生权限" % name, run_codex("Bash", {"command": command}, ws), "allow")
+            check("宽门禁：Claude %s 前置上下文交还原生权限" % name, run_hook("Bash", {"command": command}, ws), "passthrough")
+            check("宽门禁：Codex %s 前置上下文交还原生权限" % name, run_codex("Bash", {"command": command}, ws), "allow")
         check("只读检查工作空间根入口不误拦", run_hook("Bash", {"command": "sed -n '1,200p' ./agenticops"}, ws), "passthrough")
         check("本地 sed 修改交还 Agent 原生权限", run_hook("Bash", {"command": "sed -n 1p -i.bak ./agenticops"}, ws), "passthrough")
         check("本地重定向交还 Agent 原生权限", run_hook("Bash", {"command": "cat source > ./agenticops"}, ws), "passthrough")
@@ -808,6 +815,80 @@ def main():
         check("授权后 gh pr create 放行", run_hook("Bash", {"command": "gh pr create --title t --body b"}, ws), "allow")
         check("复合 gh PR 不得跨仓库共用 target", run_hook("Bash", {"command": "gh pr create -R acme/widget --title t --body b && gh pr edit 1 -R acme/other --title t"}, ws), "ask")
         check("复合同仓库 gh PR 正常合并", run_hook("Bash", {"command": "gh pr create -R acme/widget --title t --body b && gh pr edit 1 --repo acme/widget --title t"}, ws), "allow")
+
+        # ---- GitHub 写操作需要 task worktree 的分支上下文 ----------------
+        branchless_ws = make_workspace(initialize_git=False)
+        try:
+            grant(branchless_ws)
+            branchless_worktree = prepare_task_worktree(branchless_ws)
+            grant(branchless_ws, issue_key="TAP-999", work_branch="feature/TAP-999")
+            command = "gh pr edit 1 --repo acme/widget --title t"
+            branchless_edit = run_codex_output(
+                "exec_command",
+                {"cmd": command},
+                branchless_ws,
+            )
+            check(
+                "同仓多 active 任务但工作空间根缺分支时停止",
+                branchless_edit["hookSpecificOutput"]["permissionDecision"],
+                "deny",
+            )
+            check(
+                "缺分支上下文使用独立原因码",
+                "[agenticops:branch_context_required]"
+                in branchless_edit["hookSpecificOutput"]["permissionDecisionReason"],
+                True,
+            )
+            check(
+                "缺分支上下文提示 task worktree",
+                "工具工作目录设为该路径"
+                in branchless_edit["hookSpecificOutput"]["permissionDecisionReason"],
+                True,
+            )
+            check(
+                "Codex 单次 workdir 传入后更新 PR 通过",
+                run_codex_output(
+                    "exec_command",
+                    {"cmd": command, "workdir": str(branchless_worktree)},
+                    branchless_ws,
+                ),
+                None,
+            )
+            unbound_worktree = make_git_repository(branchless_ws / "unbound-worktree")
+            check(
+                "任意同仓同分支 workdir 不得借用授权",
+                run_codex(
+                    "exec_command",
+                    {"cmd": command, "workdir": str(unbound_worktree)},
+                    branchless_ws,
+                ),
+                "deny",
+            )
+            if shutil.which("opa"):
+                opa_branchless_edit = run_codex_output(
+                    "exec_command",
+                    {"cmd": command},
+                    branchless_ws,
+                    env_extra={"AO_GATE_USE_OPA": "1"},
+                )
+                check(
+                    "缺分支上下文的 OPA 完整响应一致",
+                    opa_branchless_edit["hookSpecificOutput"],
+                    branchless_edit["hookSpecificOutput"],
+                )
+                check(
+                    "单次 workdir 的 OPA 放行一致",
+                    run_codex_output(
+                        "exec_command",
+                        {"cmd": command, "workdir": str(branchless_worktree)},
+                        branchless_ws,
+                        env_extra={"AO_GATE_USE_OPA": "1"},
+                    ),
+                    None,
+                )
+        finally:
+            shutil.rmtree(branchless_ws)
+
         check(
             "普通任务授权不覆盖 Source Pool 管理",
             run_hook("Bash", {"command": "git fetch origin develop"}, ws),

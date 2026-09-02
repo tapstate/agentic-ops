@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from adapters.runtime import decision_reason, evaluate_tool_call  # noqa: E402
 
-ADAPTER_VERSION = 6
+ADAPTER_VERSION = 7
 
 
 def deny(reason_code, reason):
@@ -34,9 +34,16 @@ def main():
         tool_input = payload.get("tool_input") or payload.get("arguments") or {}
         if tool_name in ("exec_command", "shell", "shell_command"):
             tool_name = "Bash"
-            tool_input = {"command": tool_input.get("command") or tool_input.get("cmd") or ""}
+            tool_input = {
+                "command": tool_input.get("command") or tool_input.get("cmd") or "",
+                "_agenticops_git_cwd": tool_input.get("workdir"),
+            }
         decision = evaluate_tool_call(
-            "codex", ADAPTER_VERSION, tool_name, tool_input, str(payload.get("cwd") or os.getcwd())
+            "codex",
+            ADAPTER_VERSION,
+            tool_name,
+            tool_input,
+            str(payload.get("cwd") or os.getcwd()),
         )
         if decision is None or decision["decision"] == "allow":
             return 0

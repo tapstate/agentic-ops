@@ -85,10 +85,20 @@ def resolve_task_directory(cwd, context=None, issue_key=None):
         matches = [path for issue, path in candidates if issue == issue_key]
     elif context and context.get("origin"):
         matches = []
+        branch_context_required = False
         for _, path in candidates:
             task = _read_json(path / "state.json")
             if task and _repositories_match(task, context):
                 matches.append(path)
+            elif (
+                task
+                and context.get("branch_relevant", True)
+                and not context.get("branch")
+                and _repositories_match(task, dict(context, branch_relevant=False))
+            ):
+                branch_context_required = True
+        if not matches and branch_context_required:
+            return None, "branch_context_required"
     else:
         matches = [path for _, path in candidates]
     if len(matches) == 1:
@@ -509,18 +519,27 @@ def evaluate(operation, context, auth, policy, now=None):
 
     resolution = context.get("task_resolution")
     if resolution != "resolved":
-        reason = (
-            "当前操作无法匹配 active 任务"
-            if resolution == "no_active_task"
-            else "当前操作匹配到多个 active 任务"
-        )
-        code = "no_active_task" if resolution == "no_active_task" else "ambiguous_active_task"
+        if resolution == "branch_context_required":
+            reason = "当前操作已匹配 active 任务仓库，但无法确定 Git 工作分支"
+            code = "branch_context_required"
+            required_action = (
+                "请先使用 repository context --issue-key <KEY> --json 获取对应任务 worktree，"
+                "并将工具工作目录设为该路径后原样重试；不得用 PR 正文或重新接管推断任务。"
+            )
+        elif resolution == "no_active_task":
+            reason = "当前操作无法匹配 active 任务"
+            code = "no_active_task"
+            required_action = "请先接管任务或消除 active 任务歧义；Agent 在恢复前停止该操作及其依赖步骤。"
+        else:
+            reason = "当前操作匹配到多个 active 任务"
+            code = "ambiguous_active_task"
+            required_action = "请先接管任务或消除 active 任务歧义；Agent 在恢复前停止该操作及其依赖步骤。"
         return _result(
             ASK,
             operation,
             reason,
             code,
-            "请先接管任务或消除 active 任务歧义；Agent 在恢复前停止该操作及其依赖步骤。",
+            required_action,
         )
 
     if context.get("authorization_state") == "missing":
