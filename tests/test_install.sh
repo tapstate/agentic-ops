@@ -433,6 +433,16 @@ if "$workspace/agenticops" --help | grep -F 'agenticops task' >/dev/null; then
 fi
 grep -F "$install_root/adapters/agents/claude/hook.py" "$workspace/.claude/settings.json" >/dev/null
 grep -F "$install_root/adapters/agents/codex/hook.py" "$workspace/.codex/hooks.json" >/dev/null
+python3 - "$workspace/.mcp.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+servers = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["mcpServers"]
+assert servers == {
+    "atlassian": {"type": "http", "url": "https://mcp.atlassian.com/v1/mcp/authv2"},
+}
+PY
 python3 - "$workspace" "$install_root" <<'PY'
 import os
 import sys
@@ -512,7 +522,7 @@ assert binding["repository_pool"]["source"] == "product-default"
 assert binding["repository_pool"]["root"] == str(Path(sys.argv[4]).resolve())
 assert initialization["schema_version"] == 2
 artifacts = {item["path"]: item for item in initialization["artifacts"]}
-assert {"AGENTS.md", "agenticops", "CLAUDE.md", ".claude/settings.json", ".codex/hooks.json", ".test-agent/settings.json", ".agents/skills/tapdata-task", ".claude/skills/tapdata-task"} <= set(artifacts)
+assert {"AGENTS.md", "agenticops", ".mcp.json", "CLAUDE.md", ".claude/settings.json", ".codex/hooks.json", ".test-agent/settings.json", ".agents/skills/tapdata-task", ".claude/skills/tapdata-task"} <= set(artifacts)
 assert artifacts[".agents/skills/tapdata-task"]["kind"] == "symlink"
 assert artifacts[".claude/skills/tapdata-task"]["kind"] == "symlink"
 assert ".agents/skills/ao-test-takeover" not in artifacts
@@ -1007,6 +1017,13 @@ printf '%s\n' \
   '#!/usr/bin/env bash' \
   'set -eu' \
   'test "$(pwd -P)" = "$AGENTIC_OPS_EXPECTED_WORKSPACE"' \
+  'if [ "${1:-}" = mcp ] && [ "${2:-}" = get ]; then' \
+  '  case "$3" in' \
+  "    atlassian) printf '%s\\n' '{\"enabled\":true,\"transport\":{\"type\":\"streamable_http\",\"url\":\"https://mcp.atlassian.com/v1/mcp/authv2\"}}' ;;" \
+  "    github) printf '%s\\n' '{\"enabled\":true,\"transport\":{\"type\":\"streamable_http\",\"url\":\"https://api.githubcopilot.com/mcp/\"}}' ;;" \
+  '  esac' \
+  '  exit 0' \
+  'fi' \
   'printf "%s\n" "$*" > "$AGENTIC_OPS_CAPTURE"' \
   > "$fake_bin/codex"
 chmod +x "$fake_bin/codex"

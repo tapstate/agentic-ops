@@ -86,7 +86,7 @@ for file in \
   adapters/runtime.py adapters/tools/classifier.py adapters/tools/git_push_syntax.py \
   adapters/tools/shell_classifier.py \
   adapters/tools/shell_syntax.py \
-  adapters/tools/mcp-operations.json \
+  adapters/tools/mcp-operations.json adapters/tools/mcp-requirements.json adapters/tools/mcp.template.json \
   adapters/agents/claude/hook.py adapters/agents/claude/manifest.json \
   adapters/agents/codex/hook.py adapters/agents/codex/manifest.json \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
@@ -143,6 +143,7 @@ python3 -m json.tool projects/tapdata/profile.json >/dev/null
 python3 -m json.tool projects/tapdata/repositories.json >/dev/null
 python3 -m json.tool projects/tapdata/admission.json >/dev/null
 python3 -m json.tool adapters/tools/mcp-operations.json >/dev/null
+python3 -m json.tool adapters/tools/mcp-requirements.json >/dev/null
 python3 -m json.tool adapters/tools/mcp.template.json >/dev/null
 for manifest in adapters/agents/*/manifest.json; do
   python3 -m json.tool "$manifest" >/dev/null
@@ -175,9 +176,22 @@ versions = [
 assert versions == [manifest["adapter_version"]]
 
 mappings = json.loads(Path("adapters/tools/mcp-operations.json").read_text(encoding="utf-8"))
+requirements = json.loads(Path("adapters/tools/mcp-requirements.json").read_text(encoding="utf-8"))
+template = json.loads(Path("adapters/tools/mcp.template.json").read_text(encoding="utf-8"))
 assert "readonly_tools" not in mappings
 assert "readonly_prefixes" not in mappings
 assert set(mappings["mappings"]) == {"github", "atlassian"}
+assert set(requirements["required_servers"]) == {"atlassian"}
+assert set(requirements["required_servers"]) < set(mappings["mappings"])
+assert set(template["mcpServers"]) == set(requirements["required_servers"])
+for name, requirement in requirements["required_servers"].items():
+    assert template["mcpServers"][name] == {"type": "http", "url": requirement["url"]}
+
+workspace_entry = Path("adapters/workspace/AGENTS.md").read_text(encoding="utf-8")
+assert 'mcp-requirements.json' in workspace_entry
+assert '首次需要 Jira 事实时检查 `atlassian`' in workspace_entry
+assert '不得伪造工具结果' in workspace_entry
+assert 'GitHub MCP、`gh` 和其它 GitHub 工具不由 AgenticOps 绑定' in workspace_entry
 
 profile = json.loads(Path("projects/tapdata/profile.json").read_text(encoding="utf-8"))
 assert profile["statuses"]["Analyzed"] == "waiting_takeover"

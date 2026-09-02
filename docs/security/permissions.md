@@ -59,6 +59,8 @@ claude mcp add --transport http github https://api.githubcopilot.com/mcp/ \
 
 MCP 的能力上限 = PAT 的权限，因此上表同时约束 MCP 工具。
 
+GitHub MCP 与其它 GitHub 工具不由 AgenticOps 配置或绑定；Agent 根据当前任务、可用工具和用户授权自行选择。AgenticOps 不向用户配置写入 PAT、OAuth client 或 token。
+
 ## Jira（Atlassian Cloud）
 
 ### 1. 账号与项目权限（第一道防线）
@@ -82,6 +84,8 @@ claude mcp add --transport http atlassian https://mcp.atlassian.com/v1/mcp/authv
 ```
 
 OAuth 2.1 交互式授权，**权限自动等于登录账号的权限**——所以第 1 步的账号最小化就是 MCP 的权限边界。写操作（transition / comment / edit）再由本仓库的 hook 门禁二次拦截。
+
+Codex 的 `atlassian` MCP 也使用同一远程端点和 OAuth，具体命令见[必需 MCP 配置](../usage/mcp-setup.md)。
 
 ## AgenticOps v1 的三层防线小结
 

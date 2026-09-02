@@ -32,6 +32,17 @@ python3 __AGENTIC_OPS_HOME__/workflow/task.py status --issue-key <JIRA-KEY> --di
 `AGENTS.md`、各 Agent 入口、Hook 和 MCP 配置都是可重新生成的薄接线，不是规则事实
 源；项目规则和运行资产只在产品根目录维护。
 
+## 必需插件的按需配置
+
+当前项目的必需外部插件清单位于 `__AGENTIC_OPS_HOME__/adapters/tools/mcp-requirements.json`：
+`atlassian` 提供 Jira 任务、准入和状态事实，是项目所需的 MCP 插件，但不是启动前置条件。
+GitHub MCP、`gh` 和其它 GitHub 工具不由 AgenticOps 绑定；Agent 依据当前任务、可用工具和
+用户授权自行选择。
+
+- 首次需要 Jira 事实时检查 `atlassian` 是否可调用。
+- `atlassian` 不可用、未安装、未启用或未登录时，停止 Jira 事实依赖的步骤，明确告诉研发工程师所需插件、用途和当前客户端的安装/登录入口；不得伪造工具结果、改用未受控 token/PAT，或自行修改全局 Agent 配置。
+- 在用户完成安装和认证后，重新读取 Jira 事实并从当前停止点继续。与该插件无关的本地准备工作可以继续。
+
 ## 必须遵守的入口规则
 
 - Jira 是任务事实源，Git 是代码事实源，GitHub PR/CI 是审查事实源；`.agenticops/`

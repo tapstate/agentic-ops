@@ -5,6 +5,7 @@
 | 场景 | 文档 | 何时使用 |
 |---|---|---|
 | 默认安装 | [Git SSH 安装](git-ssh-install.md) | 已配置 SSH，按受信 `main` 安装使用工作面 |
+| 配置必需 MCP | [必需 MCP 配置](mcp-setup.md) | 首次使用 Jira 事实时，连接 Jira/Atlassian |
 | 让 AI Agent 安装 | [Agent引导安装指引](agent-guided-install.md) | 从空目录启动 Agent，由它依据现役安装文档安装并初始化项目工作空间 |
 | 无法使用 Git SSH | [gh 一键安装](gh-one-click-install.md) | 通过 GitHub CLI 登录并安装 |
 | 改变业务仓库来源或预热缓存 | [自定义 Source Pool](custom-source-pool.md) | 要复用已有仓库、隔离缓存、预下载项目目录中的仓库或改为手动供给 |
