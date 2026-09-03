@@ -6,8 +6,13 @@
   },
   "spec_version": 1,
   "common_fact_keys": [
-    "target_repo", "work_branch", "base_branch", "pr_number",
-    "verification", "risk_level", "note"
+    "target_repo",
+    "work_branch",
+    "base_branch",
+    "pr_number",
+    "verification",
+    "risk_level",
+    "note"
   ],
   "task_classes": {
     "defect_fix": {
@@ -58,7 +63,17 @@
           "source": "描述「验收标准」章节",
           "note": "修复后怎样判断可以验收"
         }
-      ]
+      ],
+      "quality_mode": "recorded_decision",
+      "on_missing": {
+        "action": "report",
+        "enforced_by": "workflow/task.py checklist 与 quality.py 检查点确认",
+        "steps": [
+          "一次列全缺失事实与已有 Test Coverage，继续不依赖缺项的源码分析。",
+          "在质量检查点报告缺口并请用户决定补充或带风险继续，保留来源和理由。",
+          "事实不可信、仓库基线不明或权限不足时停止对应步骤，不以质量处置替代安全授权。"
+        ]
+      }
     },
     "feature_change": {
       "title": "新功能 / 需求变更",

@@ -396,12 +396,20 @@ def command_prefetch(args, product_root):
         details[str(workspace)] = "%s 项目，按目录预下载 %d 个仓库" % (project, len(repositories))
     show_targets("prefetch", targets, details)
     confirm(args)
-    cloned = existing = 0
+    cloned = existing = failed = 0
+    failures = []
     for workspace in targets:
         reports = repository_worktree.prefetch_project_repositories(workspace)
         cloned += sum(item["status"] == "cloned" for item in reports)
         existing += sum(item["status"] == "existing" for item in reports)
-    print("预下载完成：新下载 %d 个，已存在并通过复核 %d 个。" % (cloned, existing))
+        failed_reports = [item for item in reports if item["status"] == "failed"]
+        failed += len(failed_reports)
+        failures.extend(failed_reports)
+    print("预下载完成：新下载 %d 个，已存在并通过复核 %d 个，失败 %d 个。" % (cloned, existing, failed))
+    for item in failures:
+        print("预下载失败：%s：%s" % (item["repository"], item["error"]))
+    if failures:
+        raise ValueError("部分仓库预下载失败；已继续完成其余仓库，请根据上方明细处理")
 
 
 def command_pending(args, product_root):

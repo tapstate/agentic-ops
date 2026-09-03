@@ -17,7 +17,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workflow import ci, evidence, project_rules, repository_worktree, task as workflow_task  # noqa: E402
-from workflow import task_store  # noqa: E402
+from workflow import task_store, quality  # noqa: E402
 
 PASS = 0
 FAIL = 0
@@ -62,13 +62,27 @@ def grant(ws, issue="TAP-123"):
     )
 
 
+def confirm_fixture_checkpoint(ws, checkpoint):
+    """测试夹具中的明确人工不适用处置，不写 Jira，不伪造测试通过。"""
+    task_doc = json.loads(task_store.task_path(ws, "TAP-123").read_text())
+    rules = quality.config(ws)
+    state = quality.load(ws, task_doc)
+    view = quality.report(state, rules, quality.context(ws, task_doc))
+    return quality.apply(ws, "TAP-123", task_doc["run_id"], state["revision"], {
+        "action": "checkpoint", "payload": {"checkpoint": checkpoint,
+        "digest": view["checkpoints"][checkpoint]["digest"], "decision": {
+        "outcome": "not_applicable", "reason": "此夹具验证任务基础能力，质量场景由 test_quality 覆盖",
+        "proof": {"actor": "fixture-user", "source": "user_message", "reference": "fixture:decision",
+                  "at": "2026-09-03T10:00:00+08:00"}}}})
+
+
 def main():
     ws = Path(tempfile.mkdtemp(prefix="aogate-wf-"))
     try:
         retry_clone_path = ws / "retry-clone"
         clone_attempts = []
 
-        def retrying_clone(arguments, *, check=True):
+        def retrying_clone(arguments, *, check=True, timeout=120, progress=None):
             clone_attempts.append(arguments)
             if len(clone_attempts) == 1:
                 retry_clone_path.mkdir()
@@ -93,28 +107,25 @@ def main():
         timeout_clone_path = ws / "timeout-clone"
         timeout_attempts = []
 
-        def timeout_then_success(arguments, *, check=True):
-            timeout_attempts.append(arguments)
-            if len(timeout_attempts) == 1:
-                timeout_clone_path.mkdir()
-                raise subprocess.TimeoutExpired(arguments, 120)
+        def completed_clone(arguments, *, check=True, timeout=120, progress=None):
+            timeout_attempts.append((arguments, timeout, progress))
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         with contextlib.redirect_stdout(io.StringIO()) as output, mock.patch.object(
-            repository_worktree, "_run", side_effect=timeout_then_success
-        ), mock.patch.object(repository_worktree.time, "sleep") as sleep:
+            repository_worktree, "_run", side_effect=completed_clone
+        ):
             repository_worktree._clone_main(
-                "tapdata/timeout", {"baseline_branch": "develop", "origin": "unused"}, timeout_clone_path
+                "tapdata/no-timeout", {"baseline_branch": "develop", "origin": "unused"}, timeout_clone_path
             )
-        check("clone 超时后重试", len(timeout_attempts), 2)
-        check("clone 超时重试前清理残留目录", timeout_clone_path.exists(), False)
-        check("clone 超时按固定间隔重试", sleep.call_args.args, (2,))
-        check("clone 超时输出重试步骤日志", "第 1/3 次克隆失败" in output.getvalue(), True)
+        check("clone 下载不设置超时", timeout_attempts[0][1], None)
+        check("clone 下载传递步骤日志函数", timeout_attempts[0][2] is repository_worktree._progress, True)
+        check("clone 强制输出下载进度", "--progress" in timeout_attempts[0][0], True)
+        check("clone 下载步骤日志带时间", output.getvalue().startswith("["), True)
 
         non_network_clone_path = ws / "non-network-clone"
         non_network_attempts = []
 
-        def rejected_clone(arguments, *, check=True):
+        def rejected_clone(arguments, *, check=True, timeout=120, progress=None):
             non_network_attempts.append(arguments)
             non_network_clone_path.mkdir()
             return SimpleNamespace(returncode=128, stdout="", stderr="fatal: Authentication failed")
@@ -207,9 +218,22 @@ def main():
         )
         check("workspace prefetch 按项目目录预下载", code, 0)
         check("workspace prefetch 复核已有主工作树", "已存在并通过复核 1 个" in out, True)
+        check("workspace prefetch 步骤日志带时间", "repository prefetch" in out and "[" in out, True)
+        check("workspace prefetch Git 日志不包装为内部日志", "git clone：" in out, False)
         check("workspace prefetch 下载缺失主工作树", (pool_root / "tapdata" / "tapdata-common-lib" / ".git").is_dir(), True)
         check("workspace prefetch 不创建任务状态", (ws / ".agenticops" / "tasks").exists(), False)
         check("workspace prefetch 不创建任务 worktree", (ws / ".agenticops" / "worktrees").exists(), False)
+        failing_catalog = json.loads(json.dumps(prefetch_catalog))
+        failing_catalog["repositories"]["tapdata/tapdata"]["origin"] = str(ws / "missing-tapdata.git")
+        catalog_path.write_text(
+            json.dumps(failing_catalog, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        shutil.rmtree(pool_root / "tapdata" / "tapdata-common-lib")
+        code, out = run_workspace_tool(product_root, "prefetch", "--yes", cwd=ws)
+        check("workspace prefetch 单仓失败后仍继续", code, 2)
+        check("workspace prefetch 单仓失败仍下载后续仓库", (pool_root / "tapdata" / "tapdata-common-lib" / ".git").is_dir(), True)
+        check("workspace prefetch 输出单仓失败明细", "预下载失败：tapdata/tapdata" in out, True)
         shutil.rmtree(pool_root / "tapdata" / "tapdata-common-lib")
         catalog_path.write_text(
             json.dumps(catalog_document, ensure_ascii=False, indent=2) + "\n",
@@ -309,7 +333,7 @@ def main():
         code, out = run_tool("task.py", "record", "--key", "problem_version", "--value", "  ", cwd=ws)
         check("record 拒绝空值", code, 2)
         code, out = run_tool("task.py", "advance", "--note", "准入未齐就想推进", cwd=ws)
-        check("准入缺项禁止离开 task_intake", code, 3)
+        check("仓库尚未登记时仍禁止离开 task_intake", code, 3)
         check("缺项提示列出缺失项", "问题版本" in out and "问题现象" in out, True)
         check("缺项提示给出补卡建议", "请补充「问题现象」" in out, True)
         code, out = run_tool("task.py", "checklist", "--json", cwd=ws)
@@ -702,6 +726,8 @@ def main():
             },
             expected_endpoints,
         )
+        confirm_fixture_checkpoint(ws, "q1-intake")
+        confirm_fixture_checkpoint(ws, "q2-plan")
         code, out = run_tool("task.py", "advance", "--note", "设计已确认+授权签发", cwd=ws)
         check("正确授权后进入 implementation", code, 0)
         run_tool("task.py", "activate", "--issue-key", "TAP-999", cwd=ws)
@@ -717,16 +743,17 @@ def main():
 
         # ---- 验证结论规则 ------------------------------------------------
         code, out = run_tool("task.py", "advance", "--note", "没记验证就想开 PR", cwd=ws)
-        check("未记 verification 禁止离开 implementation", code, 3)
+        check("未完成质量检查点禁止离开 implementation", code, 3)
         run_tool("task.py", "record", "--key", "verification", "--value", "mvn -pl iengine test -DskipTests 打包成功", cwd=ws)
         code, out = run_tool("task.py", "advance", "--note", "拿 skipTests 冒充验证", cwd=ws)
-        check("-DskipTests 不被接受为验证结果", code, 3)
+        check("skipTests 文本不能替代质量处置", code, 3)
         run_tool("task.py", "record", "--key", "verification", "--value", "未验证", cwd=ws)
         code, out = run_tool("task.py", "advance", "--note", "占位词冒充验证", cwd=ws)
-        check("占位词不被接受为验证结果", code, 3)
+        check("占位词不能替代质量处置", code, 3)
         run_tool("task.py", "record", "--key", "verification", "--value", "mvn -pl iengine -am test 通过，exit=0", cwd=ws)
-        code, out = run_tool("task.py", "advance", "--note", "验证通过", cwd=ws)
-        check("合规验证后进入 pr_review", code, 0)
+        confirm_fixture_checkpoint(ws, "q3-draft")
+        code, out = run_tool("task.py", "advance", "--note", "用户已处置首轮验证检查点", cwd=ws)
+        check("质量检查点确认处置后进入 pr_review", code, 0)
         code, out = run_tool("task.py", "repository", "cleanup", cwd=ws)
         check("任务清理同步移除 worktree", code, 0)
         remaining_leases = json.loads(
@@ -986,12 +1013,12 @@ def main():
             "pending",
         )
         check(
-            "CI 全绿 -> success",
+            "CI 含跳过 -> skipped",
             ci.classify([
                 {"name": "build", "status": "COMPLETED", "conclusion": "SUCCESS"},
                 {"name": "lint", "status": "COMPLETED", "conclusion": "SKIPPED"},
             ])[0],
-            "success",
+            "skipped",
         )
         verdict, failing = ci.classify([
             {"name": "build", "status": "COMPLETED", "conclusion": "SUCCESS"},
@@ -1001,11 +1028,11 @@ def main():
 
         check("预算初始 3 次", ci.budget_left({"fix_attempts": 0}), 3)
         check("预算用尽为 0", ci.budget_left({"fix_attempts": 5}), 0)
-        code, out = run_tool("ci.py", "record-fix", "--pr", "42", "--dir", str(ws), cwd=ws)
+        code, out = run_tool("ci.py", "record-fix", "--repo", "tapdata/tapdata", "--pr", "42", "--dir", str(ws), cwd=ws)
         check("record-fix 第 1 次", code, 0)
         for _ in range(2):
-            run_tool("ci.py", "record-fix", "--pr", "42", "--dir", str(ws), cwd=ws)
-        code, out = run_tool("ci.py", "record-fix", "--pr", "42", "--dir", str(ws), cwd=ws)
+            run_tool("ci.py", "record-fix", "--repo", "tapdata/tapdata", "--pr", "42", "--dir", str(ws), cwd=ws)
+        code, out = run_tool("ci.py", "record-fix", "--repo", "tapdata/tapdata", "--pr", "42", "--dir", str(ws), cwd=ws)
         check("第 4 次 record-fix 拒绝转人工", code, 3)
 
         # ---- 证据生成 ---------------------------------------------------
@@ -1024,17 +1051,17 @@ def main():
         check("evidence 生成成功", code, 0)
         for needle, label in [
             ("TAP-123", "含任务号"),
-            ("放行 1 / 人工确认 1 / 拒绝 1", "含门禁统计"),
+            ("放行 1 / 请求确认 1 / 拒绝 1", "含门禁统计"),
             ("被拒绝的操作", "列出 deny 项"),
             ("mvn test 全部通过", "含验证结果"),
-            ("修复 3 次", "含 CI 修复次数"),
+            ("修复记账 3 次", "含 CI 修复次数"),
             ("边界声明", "含边界声明"),
         ]:
             check("evidence %s" % label, needle in out, True)
 
         # ---- 证据敏感内容与验证规则 --------------------------------------
         code, out = run_tool("evidence.py", "--dir", str(ws), "--verification", "mvn package -DskipTests", cwd=ws)
-        check("证据拒绝 skipTests 验证", code, 4)
+        check("缺陷证据保留 skipTests 事实但不代替用例验收", code, 0)
         run_tool("task.py", "record", "--key", "note", "--value", "日志在 /Users/someone/logs/tm.log", cwd=ws)
         code, out = run_tool("evidence.py", "--dir", str(ws), "--verification", "mvn -pl x test 通过 exit=0", cwd=ws)
         check("证据拒绝本机绝对路径", code, 4)

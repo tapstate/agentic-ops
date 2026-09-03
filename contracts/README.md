@@ -11,6 +11,7 @@
 - `workspace-init.schema.json`：生成接线的产品版本、普通文件内容哈希，以及中央 Project Skill 的受控符号链接清单。
 - `task-registry.schema.json`：项目工作空间内多个任务的统一注册与激活状态。
 - `task-state.schema.json`：每个 Jira 任务统一的阶段、事实、仓库和恢复状态。
+- `quality-action.schema.json`、`quality-state.schema.json`：任务 run 内质量检查、用户处置及外部证据回写的输入和恢复记录；不扩展任务状态机，也不代表外部系统事实已被认证。
 
 ## 兼容规则
 

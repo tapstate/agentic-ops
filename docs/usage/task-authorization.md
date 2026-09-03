@@ -89,6 +89,8 @@ python3 "$agenticops_root/workflow/task.py" advance \
 
 此时阶段应为 `design_review`。在这里根据已准备的 worktree 形成并人工确认方案；未确认前不得签发授权或修改代码。
 
+TapData 缺陷使用 `recorded_decision` 质量模式：普通缺项先披露并继续无依赖的分析，进入实施前必须使用 [质量检查与证据](quality-checkpoints.md)的工具记录 Q1、Q2 用户处置，包括已有 Test Coverage、修复前后用例及用户选定的验证方式。下文的授权命令不代替这些质量确认；基线不可靠或权限不足仍停止对应步骤。
+
 ## 4. 签发实施授权
 
 研发工程师确认方案后，明确记录方案版本、实际 Agent 身份和授权有效期：

@@ -303,7 +303,8 @@ def render_admission_markdown(spec, task_class, project="tapdata"):
     L.append("python3 workflow/task.py record --issue-key <JIRA-KEY> --key <fact key> --value <值>")
     L.append("```")
     L.append("")
-    L.append("## 必填项（缺一不可，`task.py advance` 硬拦）")
+    flexible = cls.get("quality_mode") == "recorded_decision"
+    L.append("## 核对项（缺项披露，在质量检查点记录处置）" if flexible else "## 必填项（缺一不可，`task.py advance` 硬拦）")
     L.append("")
     L.extend(_fact_rows(cls.get("required_facts", []), with_example=True))
     L.append("")
@@ -320,7 +321,7 @@ def render_admission_markdown(spec, task_class, project="tapdata"):
         L.append("")
         L.extend(_fact_rows(optional, with_example=False))
         L.append("")
-    on_missing = spec.get("on_missing", {})
+    on_missing = cls.get("on_missing", spec.get("on_missing", {}))
     L.append("## 准入失败流程（强制点：%s）" % on_missing.get("enforced_by", ""))
     L.append("")
     for i, step in enumerate(on_missing.get("steps", []), start=1):
@@ -334,6 +335,11 @@ def render_admission_markdown(spec, task_class, project="tapdata"):
     vr = spec.get("verification_rules", {})
     L.append("## 验证结论规则（强制点：%s）" % vr.get("enforced_by", ""))
     L.append("")
+    if flexible:
+        L.append("由 `workflow/quality.py` 核对用例、实际执行及用户处置；用户可选择补测、不适用、延期或接受风险。原始结果不改写，不要求全绿。文本 verification 仅为记录，不代替用例验收。")
+        L.append("仓库基线、实施授权及外部 Jira Validator 仍独立生效。详见 [质量检查与证据](../../../docs/usage/quality-checkpoints.md)。")
+        L.append("")
+        return "\n".join(L)
     L.append("离开 implementation 前必须 `record --key %s`，且不得命中：" % vr.get("required_fact"))
     L.append("")
     for rule in vr.get("forbidden_patterns", []):

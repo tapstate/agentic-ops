@@ -1056,6 +1056,16 @@ test -f "$workspace/.agenticops/tasks/TAP-123/state.json"
 test -f "$workspace/.agenticops/tasks/TAP-999/state.json"
 python3 "$install_root/workflow/task.py" list --dir "$workspace" | grep -F 'TAP-123：active' >/dev/null
 python3 "$install_root/workflow/task.py" list --dir "$workspace" | grep -F 'TAP-999：active' >/dev/null
+python3 "$install_root/workflow/quality.py" status --issue-key TAP-123 --dir "$workspace" > "$test_root/quality-status.json"
+python3 - "$test_root/quality-status.json" <<'PY'
+import json
+import sys
+status = json.load(open(sys.argv[1], encoding="utf-8"))
+assert status["issue_key"] == "TAP-123"
+assert status["revision"] == 0
+assert "integration" in status["methods"]
+assert not status["checkpoints"]["q2-plan"]["reviewed"]
+PY
 task_index_digest="$(file_digest "$workspace/.agenticops/tasks/index.json")"
 task_123_digest="$(file_digest "$workspace/.agenticops/tasks/TAP-123/state.json")"
 task_999_digest="$(file_digest "$workspace/.agenticops/tasks/TAP-999/state.json")"
