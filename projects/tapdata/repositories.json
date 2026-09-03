@@ -7,7 +7,6 @@
   },
   "repositories": {
     "tapdata/tapdata": {"origin": "git@github.com:tapdata/tapdata.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["product"]},
-    "tapdata/tapdata-cloud": {"origin": "git@github.com:tapdata/tapdata-cloud.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": []},
     "tapdata/tapdata-common-lib": {"origin": "git@github.com:tapdata/tapdata-common-lib.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["product"]},
     "tapdata/tapdata-connectors": {"origin": "git@github.com:tapdata/tapdata-connectors.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["product"]},
     "tapdata/tapdata-connectors-enterprise": {"origin": "git@github.com:tapdata/tapdata-connectors-enterprise.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["product"]},
@@ -16,13 +15,9 @@
     "tapdata/tapdata-web": {"origin": "git@github.com:tapdata/tapdata-web.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["product"]},
     "tapdata/hazelcast": {"origin": "git@github.com:tapdata/hazelcast.git", "baseline_branch": "release-v5.5.0", "dev_branch": "release-v5.5.0", "domains": []},
     "tapdata/tapdata-application": {"origin": "git@github.com:tapdata/tapdata-application.git", "baseline_branch": "main", "dev_branch": "main", "domains": ["product"]},
-    "tapdata/feishu_robot": {"origin": "git@github.com:tapdata/feishu_robot.git", "baseline_branch": "master", "dev_branch": "master", "domains": ["assistant"]},
     "tapdata/t-layer3-test": {"origin": "git@github.com:tapdata/t-layer3-test.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["taptest"]},
     "tapdata/docs": {"origin": "git@github.com:tapdata/docs.git", "baseline_branch": "main", "dev_branch": "main", "domains": []},
-    "tapdata/docs-en": {"origin": "git@github.com:tapdata/docs-en.git", "baseline_branch": "main", "dev_branch": "main", "domains": []},
-    "tapdata/mcp-tap-server": {"origin": "git@github.com:tapdata/mcp-tap-server.git", "baseline_branch": "main", "dev_branch": "main", "domains": []},
-    "tapdata/solutions": {"origin": "git@github.com:tapdata/solutions.git", "baseline_branch": "main", "dev_branch": "main", "domains": []},
-    "tapdata/fhir-solution": {"origin": "git@github.com:tapdata/fhir-solution.git", "baseline_branch": "main", "dev_branch": "main", "domains": []}
+    "tapdata/docs-en": {"origin": "git@github.com:tapdata/docs-en.git", "baseline_branch": "main", "dev_branch": "main", "domains": []}
   },
   "branch_resolution": {
     "rule": "任务基线必须按目标仓库从 repositories 显式解析；禁止从当前分支或隐式 main 猜测",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TapData Source Pool 分支解析的无网络合同测试。"""
+"""TapData 模块根目录分支解析的无网络合同测试。"""
 from __future__ import annotations
 
 import importlib.util
@@ -26,14 +26,14 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             workspace = Path(temporary) / "workspace"
             binding = workspace / ".agenticops" / "workspace.json"
             binding.parent.mkdir(parents=True)
-            binding.write_text(json.dumps({"repository_pool": {"root": "/pool/tapdata"}}), encoding="utf-8")
-            root, source = align.resolve_source_pool(None, workspace / "nested")
+            binding.write_text(json.dumps({"repository_pool": {"root": "/pool"}}), encoding="utf-8")
+            root, source = align.resolve_tapdata_root(None, workspace / "nested")
 
         self.assertEqual(Path("/pool/tapdata"), root)
         self.assertIn("workspace.json", source)
 
     def test_execution_directory_is_only_fallback_not_user_home(self):
-        root, source = align.resolve_source_pool(None, "/work/current")
+        root, source = align.resolve_tapdata_root(None, "/work/current")
         self.assertEqual(Path("/work/current"), root)
         self.assertEqual("cwd", source)
 
@@ -43,10 +43,14 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             align.normalize_argv(["release-v4.21.0", "--json"]),
         )
 
-    def test_main_repository_is_validated_before_other_pool_repositories(self):
+    def test_explicit_tapdata_root_contains_module_repositories_directly(self):
+        self.assertEqual(Path("/tapdata-root/tapdata"), align.module_repository("/tapdata-root", "tapdata/tapdata"))
+        self.assertEqual(Path("/tapdata-root/tapdata-web"), align.module_repository("/tapdata-root", "tapdata/tapdata-web"))
+
+    def test_main_repository_is_validated_before_other_module_repositories(self):
         repositories = {"tapdata/docs": {}, "tapdata/tapdata": {}}
         with tempfile.TemporaryDirectory() as temporary:
-            with self.assertRaisesRegex(align.AlignmentError, "缺少 TapData 主仓.*tapdata/tapdata"):
+            with self.assertRaisesRegex(align.AlignmentError, "TapData 模块根目录缺少主仓.*tapdata/tapdata"):
                 align.refresh_branch_cache(temporary, repositories, "tapdata/tapdata")
 
     def test_plugin_release_uses_loaded_local_refs(self):

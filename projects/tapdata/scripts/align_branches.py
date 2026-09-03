@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""只读解析 TapData Source Pool 中的多仓分支关系。
+"""不改工作树地解析 TapData 模块根目录中的多仓分支关系。
 
-``--version`` 始终表示 ``tapdata/tapdata`` 的分支名。脚本会刷新 Source Pool
-中每个仓库的 ``origin/*`` 引用并仅使用本地引用解析关系；它绝不 checkout、切换、
-合并或修改任何工作树。
+``--version`` 始终表示 ``tapdata/tapdata`` 的分支名。脚本会刷新 TapData 模块根目录
+中每个仓库的 ``origin/*`` 远端跟踪引用，再使用这些引用解析关系；它绝不 checkout、
+切换、合并或修改任何工作树。
 
 用法：
   python3 projects/tapdata/scripts/align_branches.py show --version release-v4.21.0
-  python3 projects/tapdata/scripts/align_branches.py show --source-pool <pool> --version fix-xxx
+  python3 projects/tapdata/scripts/align_branches.py show --tapdata-root <tapdata-root> --version fix-xxx
 """
 from __future__ import annotations
 
@@ -115,13 +115,15 @@ def git_output(arguments, cwd):
     return result.stdout.strip()
 
 
-def pool_repository(pool_root, repository):
+def module_repository(tapdata_root, repository):
     owner, name = repository.split("/", 1)
-    return Path(pool_root).resolve() / owner / name
+    if owner != "tapdata":
+        raise AlignmentError("TapData 仓库目录必须使用 tapdata owner：%s" % repository)
+    return Path(tapdata_root).resolve() / name
 
 
-def workspace_pool_root(start):
-    """返回离执行路径最近的工作空间绑定的 Source Pool。"""
+def workspace_tapdata_root(start):
+    """返回离执行路径最近的工作空间绑定所对应的 TapData 模块根目录。"""
     current = Path(start).resolve()
     for directory in (current, *current.parents):
         binding = directory / ".agenticops" / "workspace.json"
@@ -132,29 +134,29 @@ def workspace_pool_root(start):
         root = pool.get("root") if isinstance(pool, dict) else None
         if not isinstance(root, str) or not root:
             raise AlignmentError("工作空间配置缺少 repository_pool.root：%s" % binding)
-        return Path(root).expanduser().resolve(), binding
+        return Path(root).expanduser().resolve() / "tapdata", binding
     return None, None
 
 
-def resolve_source_pool(explicit, execution_directory):
+def resolve_tapdata_root(explicit, execution_directory):
     if explicit:
         return Path(explicit).expanduser().resolve(), "explicit"
-    bound_root, binding = workspace_pool_root(execution_directory)
+    bound_root, binding = workspace_tapdata_root(execution_directory)
     if bound_root is not None:
         return bound_root, "workspace:%s" % binding
     return Path(execution_directory).resolve(), "cwd"
 
 
-def refresh_branch_cache(pool_root, repositories, product_repository):
+def refresh_branch_cache(tapdata_root, repositories, product_repository):
     """刷新完整 ``origin/*`` 缓存；先验证主仓，绝不 checkout。"""
-    product_path = pool_repository(pool_root, product_repository)
+    product_path = module_repository(tapdata_root, product_repository)
     if not (product_path / ".git").exists():
-        raise AlignmentError("Source Pool 缺少 TapData 主仓：%s（期望 %s）" % (product_repository, product_path))
+        raise AlignmentError("TapData 模块根目录缺少主仓：%s（期望 %s）" % (product_repository, product_path))
     paths = {}
     for repository in sorted(repositories):
-        path = pool_repository(pool_root, repository)
+        path = module_repository(tapdata_root, repository)
         if not path.is_dir() or not (path / ".git").exists():
-            raise AlignmentError("Source Pool 缺少仓库：%s（期望 %s）" % (repository, path))
+            raise AlignmentError("TapData 模块根目录缺少仓库：%s（期望 %s）" % (repository, path))
         top = git_output(["git", "rev-parse", "--show-toplevel"], path)
         if Path(top).resolve() != path.resolve():
             raise AlignmentError("Source Pool 仓库不是 Git 根目录：%s" % path)
@@ -279,25 +281,25 @@ def normalize_argv(argv):
 
 def main(argv=None, execution_directory=None):
     argv = normalize_argv(list(sys.argv[1:] if argv is None else argv))
-    parser = argparse.ArgumentParser(description="只读解析 TapData Source Pool 的多仓分支关系")
+    parser = argparse.ArgumentParser(description="只读解析 TapData 模块根目录的多仓分支关系")
     parser.add_argument("--product-root", default=Path(__file__).resolve().parents[3])
     sub = parser.add_subparsers(dest="command", required=True)
     show = sub.add_parser("show", help="刷新全部 origin ref 并显示分支关系")
     show.add_argument("--version", required=True, help="tapdata/tapdata 的目标分支名")
-    show.add_argument("--source-pool", help="Source Pool 根目录；默认读取最近工作空间绑定，其次当前执行目录")
+    show.add_argument("--tapdata-root", help="包含全部 TapData 模块仓库的根目录；默认由最近工作空间的 Source Pool 解析为 <pool>/tapdata，其次当前执行目录")
     show.add_argument("--json", action="store_true", help="输出机器可读 JSON")
     args = parser.parse_args(argv)
     try:
         config, repositories = load_configuration(args.product_root)
-        pool_root, source = resolve_source_pool(args.source_pool, execution_directory or Path.cwd())
-        paths = refresh_branch_cache(pool_root, repositories, config["derivation"]["product_repository"])
+        tapdata_root, source = resolve_tapdata_root(args.tapdata_root, execution_directory or Path.cwd())
+        paths = refresh_branch_cache(tapdata_root, repositories, config["derivation"]["product_repository"])
         rows = build_plan(args.version, config, repositories, paths)
-        document = {"tapdata_branch": args.version, "source_pool": str(pool_root), "source_pool_resolution": source, "checked_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "rows": rows}
+        document = {"tapdata_branch": args.version, "tapdata_root": str(tapdata_root), "tapdata_root_resolution": source, "checked_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "rows": rows}
         if args.json:
             print(json.dumps(document, ensure_ascii=False))
         else:
-            print("source_pool\t%s" % pool_root)
-            print("source_pool_resolution\t%s" % source)
+            print("tapdata_root\t%s" % tapdata_root)
+            print("tapdata_root_resolution\t%s" % source)
             print_table(rows)
         return 0
     except AlignmentError as error:
