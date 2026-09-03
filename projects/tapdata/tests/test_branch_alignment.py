@@ -30,7 +30,7 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
 
         self.assertEqual(["harsen/TAP-123/develop", "release-v3.8.0"], branches)
 
-    def test_tap_marker_uses_complete_token_and_zero_match_is_unresolved(self):
+    def test_task_branch_prefers_exact_same_name_over_jira_marker_guessing(self):
         repositories = {
             "tapdata/tapdata": {"origin": "product-origin"},
             "tapdata/tapdata-enterprise": {"origin": "enterprise-origin"},
@@ -43,12 +43,7 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             "same_name_repositories": ["tapdata/tapdata-enterprise"],
             "plugin_release_repositories": [],
         }
-        with mock.patch.object(
-            align,
-            "remote_branches",
-            return_value=["feature/TAP-1234-prefix-collision"],
-        ):
-            matches = align.marker_branches("enterprise-origin", "TAP-123")
+        with mock.patch.object(align, "remote_branch_status", return_value=("exists", "sha")):
             target, resolution, reason = align.derived_target(
                 "tapdata/tapdata-enterprise",
                 "feature/TAP-123-fix",
@@ -59,13 +54,11 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
                 {},
             )
 
-        self.assertEqual([], matches)
-        self.assertIsNone(target)
-        self.assertEqual("unresolved", resolution)
-        self.assertIn("完整 Jira 标记 TAP-123", reason)
-        self.assertIn("显式 override", reason)
+        self.assertEqual("feature/TAP-123-fix", target)
+        self.assertEqual("same_name", resolution)
+        self.assertIn("完全同名", reason)
 
-    def test_duplicate_tap_marker_requires_explicit_override(self):
+    def test_task_branch_does_not_use_ambiguous_tap_marker_fallback(self):
         repository = "tapdata/tapdata-enterprise"
         repositories = {
             "tapdata/tapdata": {"origin": "product-origin"},
@@ -79,12 +72,7 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             "same_name_repositories": [repository],
             "plugin_release_repositories": [],
         }
-        branches = [
-            "alice/TAP-123/fix",
-            "bob/TAP-123/fix",
-            "bob/TAP-1234/prefix-collision",
-        ]
-        with mock.patch.object(align, "remote_branches", return_value=branches):
+        with mock.patch.object(align, "remote_branch_status", return_value=("missing", "")):
             target, resolution, reason = align.derived_target(
                 repository,
                 "feature/TAP-123-fix",
@@ -97,9 +85,7 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
 
         self.assertIsNone(target)
         self.assertEqual("unresolved", resolution)
-        self.assertIn("匹配多个远程分支", reason)
-        self.assertNotIn("TAP-1234", reason)
-        self.assertIn("显式 override", reason)
+        self.assertIn("完全同名", reason)
 
         explicit, explicit_resolution, _ = align.derived_target(
             repository,
@@ -188,6 +174,43 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
         self.assertIsNone(connector["target_branch"])
         self.assertEqual("unresolved", connector["resolution"])
         self.assertEqual("unresolved", connector["remote_status"])
+
+    def test_environment_branch_falls_back_after_exact_same_name_lookup(self):
+        rules = {
+            "product_repository": "tapdata/tapdata",
+            "license_repository": "tapdata/tapdata-license",
+            "keep_current_repositories": ["tapdata/tapdata-application"],
+            "independent_repositories": ["tapdata/t-layer3-test", "tapdata/docs"],
+            "same_name_repositories": [],
+            "plugin_release_repositories": ["tapdata/tapdata-common-lib"],
+            "environment_fallback_branches": {
+                "tapdata/tapdata-application": "main",
+                "tapdata/t-layer3-test": "develop",
+            },
+        }
+        refs = {
+            "tapdata/tapdata": {"fix-xxx": "a"},
+            "tapdata/tapdata-common-lib": {"fix-xxx": "b"},
+            "tapdata/tapdata-application": {"main": "c"},
+            "tapdata/t-layer3-test": {"develop": "d"},
+            "tapdata/docs": {"main": "e"},
+        }
+        same = align.environment_target(
+            "tapdata/tapdata-common-lib", "fix-xxx", rules, refs, Path("/tmp/product"), {}
+        )
+        application = align.environment_target(
+            "tapdata/tapdata-application", "fix-xxx", rules, refs, Path("/tmp/product"), {}
+        )
+        tests = align.environment_target(
+            "tapdata/t-layer3-test", "fix-xxx", rules, refs, Path("/tmp/product"), {}
+        )
+        unchanged = align.environment_target(
+            "tapdata/docs", "fix-xxx", rules, refs, Path("/tmp/product"), {}
+        )
+        self.assertEqual(("fix-xxx", "same_name"), same[:2])
+        self.assertEqual(("main", "fallback"), application[:2])
+        self.assertEqual(("develop", "fallback"), tests[:2])
+        self.assertEqual((None, "unchanged"), unchanged[:2])
 
 
 if __name__ == "__main__":

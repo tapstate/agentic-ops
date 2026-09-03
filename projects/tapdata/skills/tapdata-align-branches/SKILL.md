@@ -1,44 +1,44 @@
 ---
 name: tapdata-align-branches
-description: 按 TapData 已确认的产品版本或产品线，汇总全部受控仓库的目标分支并只读核验远程存在性；用于版本排查、联调准备和发布前分支事实确认。
+description: 解析 TapData 主仓分支对应的完整多仓分支关系，并安全同步用户 IDEA 开发环境；用于任务提交推送后的本地部署和调试。
 metadata:
   product: agenticops
 ---
 
 # TapData 仓库分支对齐
 
-用于回答“某个 TapData 产品版本（或产品线）在所有受控仓库应使用什么分支，且这些分支目前是否可从远程读取”。这是只读事实汇总，不创建、切换、合并、推送或删除分支。
+用于将已经推送的 TapData 任务分支组成用户可部署、可在 IDEA 调试的多仓环境。`--version` 始终是 `tapdata/tapdata` 的分支名；不得由 Jira 文本、当前 checkout 或隐式 `main` 猜测关系。
 
-输入必须明确给出版本键，例如 `current`、已登记的发布版本或发布产品线；也要说明是“全部仓库”还是某个 `domains` 子集。版本键不是当前 Git checkout，也不能由 Jira 文本、分支名称或隐式 `main` 猜出。
+需要按当前任务验证时，先读取 `task.py repository context --issue-key <issue-key> --json`。对每个任务仓库，比较任务 worktree 的 `HEAD` 和远端工作分支 SHA；远端没有该 SHA 时，报告尚未推送，停止用户环境切换。
 
-## 事实源与解析
+## 分析与应用
 
-运行现役项目脚本，而非手工拼凑分支规则：
+脚本先对本地仓库 fetch 全部 `origin/*` 分支引用，再在本地 ref 列表解析关系；这避免逐个候选查询远端，并确保 PluginKit 读取的是主仓指定分支。
+
+Source Pool 使用 owner/repo 布局，只能用于分析：
 
 ```sh
 python3 <agenticops-root>/projects/tapdata/scripts/align_branches.py \
-  plan <product-branch-or-version-key> --json
+  show --source-pool <pool-root> --version <tapdata-branch> --json
 ```
 
-脚本读取 `version-branch-alignments.json` 与 `repositories.json`，输出全部受控仓库的目标分支、推导原因和远程状态。`current` 使用已确认的静态开发线矩阵；`main`、`develop`、`release-vX.Y.Z` 和任务分支迁移自 v0.7 的项目规则：enterprise/web 同名或显式覆盖，公共库和 connector 从主仓 `origin/<branch>` 的 PluginKit 版本各自推导 release 分支，无法解析即输出 `unresolved`，不猜测。
-
-release 或任务分支需要读取主仓的受控 Source Pool 时，额外传入 `--source-pool <pool-root>`；脚本只读 `origin/<branch>`，不会 fetch 或改动 Source Pool。缺少 Pool 时只有依赖 PluginKit 的仓库为 `unresolved`，其它仓库仍照实输出。新增经确认的发布版本可写入 `versions` 精确矩阵；矩阵必须覆盖全部仓库。
-
-## 只读核验与报告
-
-对每个已解析出的目标分支，脚本使用 catalog 中的 origin 执行：
+用户 IDEA 环境使用平铺仓库布局（`<home>/tapdata`、`<home>/tapdata-web` 等），可以分析或应用：
 
 ```sh
-git ls-remote --exit-code --heads <origin> refs/heads/<target-branch>
+python3 <agenticops-root>/projects/tapdata/scripts/align_branches.py \
+  show --home <idea-home> --version <tapdata-branch> --json
+
+python3 <agenticops-root>/projects/tapdata/scripts/align_branches.py \
+  apply --home <idea-home> --version <tapdata-branch>
 ```
 
-逐仓库记录退出结果：`0` 为“远程存在”；`2` 为“远程未见该 ref”；其它退出结果为“未核验”，并保留简短错误摘要（如网络或权限问题）。只有 `0` 才能声称分支已由远程核验；不要把“未核验”写成“缺失”。`keep_current` 与 `independent` 仓库会明确标为不参与产品版本对齐，而不是伪造一个目标分支。
+`apply` 先检查全部仓库干净，再确认全部分支均可解析及存在，最后只允许 checkout 和快进到 `origin/<branch>`。它不 reset、不覆盖本地改动、不在 Source Pool checkout。未参与对齐的仓库会标记 `unchanged`，不会被切换。
 
-输出一张矩阵，至少包含：版本键、仓库、domains、目标分支、远程状态、核验时间、证据（ref/SHA 或错误类别）。结论需区分：
+## 分支规则
 
-- 对齐：矩阵完整且所有目标分支远程存在；
-- 待处理：某些目标分支远程未见；
-- 未完成核验：矩阵完整但存在网络、权限或远程错误；
-- 无法解析：版本映射未登记或矩阵不完整。
+- `main`、`develop`、`release-v*` 使用项目已确认规则。
+- 普通分支先在每个参与仓库查找**完全同名**的远端分支；不再按 Jira 号模糊匹配。
+- 同名分支不存在时，公共库和 connector 从 tapdata 指定分支读取 PluginKit，选择不低于该版本的首个 release 分支。
+- `tapdata-application` 固定使用 `main`；`t-layer3-test` 没有同名分支时使用 `develop`；其它独立仓库保持 `unchanged`。
 
-报告是当前一次读取的证据，不授权 checkout、fetch、branch、merge、push、PR 或发布。若后续任务要修改仓库，仍须通过 TapData 任务 Skill 登记仓库、准备受控 worktree 并取得对应授权。
+输出必须区分目标分支、目标 SHA、当前分支、当前 SHA、解析理由与动作。分析或切换开发环境不授权提交、推送、PR、合并或发布。

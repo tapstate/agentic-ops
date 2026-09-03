@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""TapData 多仓版本分支只读解析器。
+"""TapData 多仓分支关系解析与用户开发环境同步工具。
 
 `versions.<key>` 是已确认的显式版本矩阵；其它主仓分支按
 version-branch-alignments.json 的项目规则推导。脚本只读取 Git 远程和可选的
-Source Pool，绝不 checkout、fetch、创建 worktree 或修改仓库。
+Source Pool 或用户开发环境中的全部远端分支 ref，再解析完整关系。Source Pool
+只作为分支缓存，绝不 checkout；只有显式指定 ``--home`` 的用户环境可以 apply。
 
 用法：
-  python3 projects/tapdata/scripts/align_branches.py plan current --json
-  python3 projects/tapdata/scripts/align_branches.py plan release-v3.8.0 \
-      --source-pool <pool> --json
+  python3 projects/tapdata/scripts/align_branches.py show --source-pool <pool> --version fix-xxx
+  python3 projects/tapdata/scripts/align_branches.py apply --home <idea-home> --version fix-xxx
 """
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ from pathlib import Path
 
 
 RELEASE_RE = re.compile(r"^release-v\d+(?:\.\d+){2,}$")
-TAP_RE = re.compile(r"(?<![A-Za-z0-9])TAP-\d+(?![A-Za-z0-9])")
 
 
 class AlignmentError(ValueError):
@@ -98,6 +97,12 @@ def validate_configuration(config, repositories):
         values = rules.get(name)
         if not isinstance(values, list) or not set(values) <= linked:
             raise AlignmentError("derivation.%s 必须是 linked_repositories 的子集" % name)
+    fallbacks = rules.get("environment_fallback_branches", {})
+    if not isinstance(fallbacks, dict) or not all(
+        repository in known and isinstance(branch, str) and branch
+        for repository, branch in fallbacks.items()
+    ):
+        raise AlignmentError("derivation.environment_fallback_branches 必须是已登记仓库到非空分支的映射")
 
 
 def command(arguments, cwd=None):
@@ -205,30 +210,12 @@ def derived_target(repository, product_branch, repositories, rules, pool_root, o
     if explicit:
         return explicit, "explicit", "调用方显式指定"
     origin = repositories[repository].get("origin")
-    marker = TAP_RE.search(product_branch)
-    if marker:
-        matches = marker_branches(origin, marker.group(0))
-        if len(matches) == 1:
-            return matches[0], "tap_marker", "按完整 %s 标记唯一匹配" % marker.group(0)
-        if not matches:
-            return (
-                None,
-                "unresolved",
-                "未找到完整 Jira 标记 %s 的远程分支；需要显式 override"
-                % marker.group(0),
-            )
-        return (
-            None,
-            "unresolved",
-            "完整 Jira 标记 %s 匹配多个远程分支：%s；需要显式 override"
-            % (marker.group(0), "、".join(sorted(matches))),
-        )
     if not RELEASE_RE.fullmatch(product_branch):
         status, _ = remote_branch_status(origin, product_branch)
         if status == "exists":
-            return product_branch, "same_name", "非标准分支同名匹配"
+            return product_branch, "same_name", "非标准分支完全同名匹配"
     if repository in rules["same_name_repositories"]:
-        return product_branch, "same_name", "enterprise/web 需要同名远程分支"
+        return None, "unresolved", "未找到完全同名远程分支"
     if repository in rules["plugin_release_repositories"]:
         if "release" not in plugin_cache:
             plugin_cache["release"] = plugin_release(product_branch, pool_root, rules)
@@ -301,10 +288,171 @@ def print_table(rows):
         ))
 
 
+def repository_home(root, repository, source_pool):
+    owner, name = repository.split("/", 1)
+    return Path(root).resolve() / owner / name if source_pool else Path(root).resolve() / name
+
+
+def git_output(arguments, cwd):
+    try:
+        result = command(arguments, cwd=cwd)
+    except subprocess.TimeoutExpired as error:
+        raise AlignmentError("Git 命令超时：%s" % " ".join(arguments[:3])) from error
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip().splitlines()
+        raise AlignmentError(detail[-1] if detail else "Git 命令失败：%s" % " ".join(arguments[:3]))
+    return result.stdout.strip()
+
+
+def refresh_branch_cache(root, repositories, source_pool):
+    """更新所有仓库的 origin/* ref；不会 checkout 或改写工作文件。"""
+    paths = {}
+    for repository in sorted(repositories):
+        path = repository_home(root, repository, source_pool)
+        if not path.is_dir():
+            raise AlignmentError("环境缺少仓库：%s（期望 %s）" % (repository, path))
+        top = git_output(["git", "rev-parse", "--show-toplevel"], path)
+        if Path(top).resolve() != path.resolve():
+            raise AlignmentError("环境仓库不是 Git 根目录：%s" % path)
+        git_output(
+            ["git", "fetch", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"], path
+        )
+        paths[repository] = path
+    return paths
+
+
+def local_remote_refs(path):
+    output = git_output(
+        ["git", "for-each-ref", "--format=%(refname:strip=3) %(objectname)", "refs/remotes/origin"], path
+    )
+    refs = {}
+    for line in output.splitlines():
+        branch, _, sha = line.partition(" ")
+        if branch and sha:
+            refs[branch] = sha
+    return refs
+
+
+def plugin_release_from_checkout(product_path, branch, rules):
+    plugin = rules.get("plugin_version_source", {})
+    path, key = plugin.get("path"), plugin.get("key")
+    if not isinstance(path, str) or not isinstance(key, str):
+        return None, "PluginKit 配置不完整"
+    try:
+        content = git_output(["git", "show", "origin/%s:%s" % (branch, path)], product_path)
+    except AlignmentError as error:
+        return None, "无法从 tapdata 的 origin/%s 读取 PluginKit：%s" % (branch, error)
+    for line in content.splitlines():
+        if line.strip().startswith(key + "="):
+            version = line.split("=", 1)[1].strip().removesuffix("-SNAPSHOT")
+            return "release-v" + version, "tapdata 的 PluginKit %s" % version
+    return None, "%s 未包含 %s" % (path, key)
+
+
+def environment_target(repository, version, rules, refs, product_path, plugin_cache):
+    fixed = rules.get("environment_fallback_branches", {})
+    if repository == rules["product_repository"]:
+        return version, "product_branch", "tapdata 输入分支"
+    if repository in rules["keep_current_repositories"] and repository not in fixed:
+        return None, "unchanged", "该仓库不参与环境分支切换"
+    if repository in rules["independent_repositories"] and repository not in fixed:
+        return None, "unchanged", "该仓库独立管理，不参与环境分支切换"
+    if version == "main":
+        return "main", "main_rule", "main 环境规则"
+    if version == "develop":
+        if repository == rules["license_repository"]:
+            return "main", "develop_rule", "develop 时 license 固定 main"
+        return "develop", "develop_rule", "develop 环境规则"
+    if RELEASE_RE.fullmatch(version):
+        if repository in rules["same_name_repositories"]:
+            return version, "release_same_name", "release 使用同名分支"
+    # 普通任务分支必须先精确同名匹配；不再按 Jira 号进行模糊推导。
+    if version in refs[repository]:
+        return version, "same_name", "远端分支完全同名匹配"
+    if repository in fixed:
+        return fixed[repository], "fallback", "未找到同名分支，使用项目固定回退"
+    if repository in rules["plugin_release_repositories"]:
+        if "plugin" not in plugin_cache:
+            plugin_cache["plugin"] = plugin_release_from_checkout(product_path, version, rules)
+        minimum, evidence = plugin_cache["plugin"]
+        if not minimum:
+            return None, "unresolved", evidence
+        releases = sorted(
+            (branch for branch in refs[repository] if RELEASE_RE.fullmatch(branch)), key=version_key
+        )
+        target = next((branch for branch in releases if version_key(branch) >= version_key(minimum)), None)
+        if target:
+            return target, "plugin_release", "%s，取首个不低于 %s 的分支" % (evidence, minimum)
+        return None, "unresolved", "未找到不低于 %s 的 release 分支" % minimum
+    if repository == rules["license_repository"]:
+        return "main", "license_fallback", "未找到同名分支，license 回退 main"
+    return None, "unresolved", "未找到同名分支且没有可用回退规则"
+
+
+def build_environment_plan(version, config, repositories, paths):
+    rules = config["derivation"]
+    refs = {repository: local_remote_refs(path) for repository, path in paths.items()}
+    if version not in refs[rules["product_repository"]]:
+        raise AlignmentError("tapdata 远端不存在指定分支：%s" % version)
+    rows, cache = [], {}
+    for repository in sorted(repositories):
+        target, resolution, reason = environment_target(
+            repository, version, rules, refs, paths[rules["product_repository"]], cache
+        )
+        current_branch = git_output(["git", "branch", "--show-current"], paths[repository])
+        current_sha = git_output(["git", "rev-parse", "HEAD"], paths[repository])
+        row = {
+            "repository": repository, "target_branch": target, "resolution": resolution,
+            "reason": reason, "current_branch": current_branch or None, "current_sha": current_sha,
+            "target_sha": refs[repository].get(target) if target else None,
+            "action": "switch" if target else "unchanged",
+        }
+        rows.append(row)
+    return rows
+
+
+def clean_environment(paths):
+    problems = []
+    for repository, path in sorted(paths.items()):
+        status = git_output(["git", "status", "--porcelain"], path)
+        if status:
+            problems.append("%s 存在未提交变更" % repository)
+    if problems:
+        raise AlignmentError("用户开发环境不干净，拒绝切换：%s" % "；".join(problems))
+
+
+def apply_environment(rows, paths):
+    clean_environment(paths)
+    unresolved = [row["repository"] for row in rows if row["resolution"] == "unresolved"]
+    if unresolved:
+        raise AlignmentError("分支关系无法解析，拒绝部分切换：%s" % "、".join(unresolved))
+    missing = [row["repository"] for row in rows if row["action"] == "switch" and not row["target_sha"]]
+    if missing:
+        raise AlignmentError("目标远端分支不存在，拒绝切换：%s" % "、".join(missing))
+    for row in rows:
+        if row["action"] != "switch":
+            continue
+        path, branch = paths[row["repository"]], row["target_branch"]
+        # 只允许快进，绝不 reset 或覆盖用户改动。
+        exists = command(["git", "show-ref", "--verify", "--quiet", "refs/heads/%s" % branch], cwd=path).returncode == 0
+        if exists:
+            git_output(["git", "switch", branch], path)
+            git_output(["git", "merge", "--ff-only", "origin/%s" % branch], path)
+        else:
+            git_output(["git", "switch", "--track", "-c", branch, "origin/%s" % branch], path)
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="TapData 多仓版本分支只读解析器")
+    parser = argparse.ArgumentParser(description="TapData 多仓分支关系解析与用户开发环境同步工具")
     parser.add_argument("--product-root", default=Path(__file__).resolve().parents[3])
     sub = parser.add_subparsers(dest="command", required=True)
+    for name, help_text in (("show", "刷新全部 origin 分支 ref 并显示分支关系"), ("apply", "安全切换用户开发环境到分支关系")):
+        command_parser = sub.add_parser(name, help=help_text)
+        target = command_parser.add_mutually_exclusive_group(required=True)
+        target.add_argument("--source-pool", help="Source Pool 根目录；仅 show 可用，不会 checkout")
+        target.add_argument("--home", help="用户 IDEA 开发环境根目录；apply 只允许此模式")
+        command_parser.add_argument("--version", required=True, help="tapdata/tapdata 的目标分支名")
+        command_parser.add_argument("--json", action="store_true", help="输出机器可读 JSON")
     plan = sub.add_parser("plan", help="按版本键或主仓分支生成全仓对齐矩阵")
     plan.add_argument("product_branch", help="current、main、develop、release-vX.Y.Z 或任务分支")
     plan.add_argument("--source-pool", help="仅在 release/任务分支推导 PluginKit 时读取主仓 origin ref")
@@ -314,6 +462,31 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         config, repositories = load_configuration(args.product_root)
+        if args.command in ("show", "apply"):
+            if args.command == "apply" and not args.home:
+                raise AlignmentError("apply 只允许指定用户开发环境 --home；Source Pool 不允许 checkout")
+            root = args.home or args.source_pool
+            paths = refresh_branch_cache(root, repositories, source_pool=bool(args.source_pool))
+            rows = build_environment_plan(args.version, config, repositories, paths)
+            if args.command == "apply":
+                apply_environment(rows, paths)
+            document = {
+                "tapdata_branch": args.version,
+                "root": str(Path(root).resolve()),
+                "mode": "home" if args.home else "source_pool",
+                "checked_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "rows": rows,
+            }
+            if args.json:
+                print(json.dumps(document, ensure_ascii=False))
+            else:
+                print("repository\ttarget_branch\tresolution\taction\tcurrent_branch\ttarget_sha")
+                for row in rows:
+                    print("%s\t%s\t%s\t%s\t%s\t%s" % (
+                        row["repository"], row["target_branch"] or "-", row["resolution"],
+                        row["action"], row["current_branch"] or "detached", row["target_sha"] or "-",
+                    ))
+            return 0
         overrides = {
             key: value for key, value in {
                 "tapdata/tapdata-enterprise": args.enterprise_branch,

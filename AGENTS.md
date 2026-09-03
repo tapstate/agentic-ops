@@ -73,7 +73,7 @@ bash tests/test_install.sh
 bash internal/tests/test_release.sh
 ```
 
-四项分别覆盖 Gate/Workflow、资源边界、产品安装与工作目录接线、仓库发布治理。正常发布的固定验证由 `internal/release/release.sh` 编排，不得跳过。OPA 未安装时可跳过 Rego 一致性测试，但必须明确记录；产品 Python 运行时保持 Python 3.9+ 且无第三方依赖，`internal/` 的 PyYAML 依赖不得进入产品安装。
+四项分别覆盖 Gate/Workflow、资源边界、产品安装与工作目录接线、仓库发布治理。正常发布的固定验证由 `internal/release/release.sh` 编排，不得跳过。OPA 未安装时可跳过 Rego 一致性测试，但必须明确记录；产品 Python 运行时保持 Python 3.9+ 且无第三方依赖，`internal/` 的 PyYAML 依赖不得进入产品安装。新增或升级任何 Python 第三方组件（运行时、维护工具、测试或锁文件）前，必须先向用户说明组件、用途、版本范围、许可与供应链影响，并取得明确决策；不得因实现方便而自行引入、安装或替换依赖。
 
 ## 分支与发布
 
