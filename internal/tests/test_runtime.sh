@@ -17,6 +17,7 @@ PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_contracts.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_adapter_boundary.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_workflow.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_quality.py"
+PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_issue_versions.py"
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$repo_root" \
   "$internal_python" -m unittest discover \
     -s "$repo_root/internal/tests" -p 'test_story_gate.py' -v

@@ -41,7 +41,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from gate import engine  # noqa: E402
-from workflow import project_rules, quality, repository_worktree, task_store  # noqa: E402
+from workflow import issue_versions, project_rules, quality, repository_worktree, task_store  # noqa: E402
 
 STAGES = [
     "waiting_takeover",
@@ -205,6 +205,8 @@ def cmd_init(args):
 
 def cmd_record(args):
     task = require(args.dir, args.issue_key)
+    if args.key == issue_versions.FACT or (args.key == "problem_version" and issue_versions.rules(args.dir, task)):
+        raise ValueError("影响版本只能由 task.py issue-versions 从 Jira fields.versions 导入，不允许 record 或 --force 覆盖")
     spec = admission(args.dir)
     valid = project_rules.known_fact_keys(spec, task["task_class"])
     if args.key not in valid and not args.force:
@@ -222,6 +224,40 @@ def cmd_record(args):
     task["history"].append({"ts": now(), "event": "record", "key": args.key, "value": args.value})
     save(args.dir, task)
     print("已记录：%s = %s" % (args.key, args.value))
+    return 0
+
+
+def cmd_issue_versions(args):
+    with task_store.task_run_lock(args.dir, args.issue_key):
+        task = require(args.dir, args.issue_key)
+        if task["run_id"] != args.expected_run_id:
+            raise ValueError("任务 run 已变化，拒绝旧的影响版本规划")
+        prepared = any(r.get("base_sha") for r in task.get("repositories", []))
+        if task["stage"] not in ("waiting_takeover", "task_intake", "design_review") or (
+                prepared and task.get("facts", {}).get(issue_versions.FACT)):
+            raise ValueError("已固化版本规划或已进入实现；先受控 cleanup/reset，再调整修复线并重新授权")
+        try:
+            payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise ValueError("无法读取影响版本输入文件：%s" % error) from error
+        plan = issue_versions.resolve(args.dir, task, payload)
+        if prepared:
+            candidate = dict(task, facts=dict(task["facts"], **{issue_versions.FACT: plan}))
+            problems = issue_versions.problems(args.dir, candidate)
+            spec = issue_versions.rules(args.dir, task)
+            for repo in task["repositories"]:
+                if repo["repository"] == spec["product_repository"] and repo.get("base_sha") != plan["refs"][plan["primary_branch"]]:
+                    problems.append("已准备主仓与本次核验 SHA 不一致")
+            if problems:
+                raise ValueError("；".join(problems) + "；先 cleanup/reset 再准备正确基线")
+        if project_rules.scan_sensitive(admission(args.dir), json.dumps(plan, ensure_ascii=False)):
+            raise ValueError("影响版本输入含敏感内容，脱敏后再提交")
+        task["facts"][issue_versions.FACT] = plan
+        task["facts"]["problem_version"] = "、".join(v["name"] for v in plan["versions"])
+        task["history"].append({"ts": now(), "event": "issue_versions", "primary_branch": plan["primary_branch"]})
+        revoke_authorization(args.dir, task["issue_key"], "issue_versions_changed")
+        save(args.dir, task)
+    print(json.dumps(plan, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -255,6 +291,16 @@ def cmd_repository_add(args):
             )
             return 2
     base_branch = args.base_branch or branches.get("baseline_branch")
+    version_rules = issue_versions.rules(args.dir, task)
+    version_plan = task.get("facts", {}).get(issue_versions.FACT)
+    if version_rules and isinstance(version_plan, dict):
+        primary = version_plan["primary_branch"]
+        if args.repo == version_rules["product_repository"]:
+            if args.base_branch and args.base_branch != primary:
+                raise ValueError("主仓只能使用本次唯一修复线：%s" % primary)
+            base_branch = primary
+        elif primary != version_rules["preferred_branch"] and not args.base_branch:
+            raise ValueError("非优先修复线的模块仓库必须先做产品分支对齐，再显式传 --base-branch；不得默认回退 develop")
     if not base_branch:
         print("错误：仓库 %s 没有可验证的基线分支" % args.repo, file=sys.stderr)
         return 2
@@ -410,6 +456,8 @@ def cmd_repository_cleanup(args):
 def _check_advance(task, target, base, spec):
     """返回阻止推进的原因列表。"""
     problems = []
+    if target in ("design_review", "implementation"):
+        problems.extend(issue_versions.problems(base, task))
     flexible = project_rules.class_spec(spec, task["task_class"]).get("quality_mode") == "recorded_decision"
     if target == "design_review":
         missing = project_rules.missing_required(spec, task["task_class"], task.get("facts"))
@@ -605,7 +653,7 @@ NEXT_GUIDE = {
     "waiting_takeover": "核对负责人/状态映射后 advance 进入 task_intake，并继续准入；接管成功不是人工决策点",
     "task_intake": "checklist/record 完成准入 -> repository add 登记仓库 -> repository prepare（按配置 auto-clone）固化本地基线 -> 只在任务 worktree 中分析；基线齐备后 advance",
     "design_review": "基于任务 worktree 形成方案并写入 Jira -> 等研发工程师确认这一真实人工决策 -> workflow/authorization.py grant -> advance",
-    "implementation": "在授权范围内实现+测试；完成后 record --key verification（命令+退出结果）再 advance",
+    "implementation": "在授权范围内实现+测试，持续处理 Q3、提交/推送和 Draft PR；next/status 找出真实阻塞，不把原子步骤成功当停点",
     "pr_review": "创建/更新 PR，展示变更、验证结果和风险，研发工程师在 PR 上审查后 advance",
     "ci_validation": "用 workflow/ci.py watch 观察 PR 返回检查，核对目标用例、审查和交付事实；完成用户处置后 advance",
     "completed": "用 workflow/evidence.py 生成证据总结，经确认后作为 Jira 评论回写",
@@ -615,6 +663,30 @@ NEXT_GUIDE = {
 def _print_next(task):
     print("下一步：%s" % NEXT_GUIDE.get(task["stage"], ""))
     print("项目启用 recorded_decision 时，使用 quality.py status/apply 核对用例和用户处置；文本 verification 不代表通过。")
+
+
+def cmd_next(args):
+    """只给确定性门禁和具体接力，不代替 Agent 或自动制造授权。"""
+    import contextlib
+    import io
+    task = require(args.dir, args.issue_key)
+    index = STAGES.index(task["stage"])
+    target = STAGES[index + 1] if index + 1 < len(STAGES) else None
+    diagnostic = io.StringIO()
+    with contextlib.redirect_stdout(diagnostic):
+        blockers = _check_advance(task, target, args.dir, admission(args.dir)) if target else []
+    rules = quality.config(args.dir)
+    current = quality.report(quality.load(args.dir, task), rules, quality.context(args.dir, task)) if quality.enabled(task, rules) else {}
+    points = rules.get("stage_checkpoints", {}).get(target, []) if current else []
+    print(json.dumps({"issue_key": task["issue_key"], "run_id": task["run_id"], "stage": task["stage"],
+                      "next_stage": target, "advance_ready": bool(target and not blockers),
+                      "blockers": blockers, "diagnostics": diagnostic.getvalue().splitlines(),
+                      "pending": task.get("pending"), "guidance": NEXT_GUIDE[task["stage"]],
+                      "checkpoints": {p: current["checkpoints"][p] for p in points},
+                      "publications": current.get("publications", {}),
+                      "continuity": "在现有授权内连续完成可执行步骤；只为缺少事实、必要人工决定、权限不足或外部写结果不明暂停。"},
+                     ensure_ascii=False, indent=2))
+    return 0
 
 
 def cmd_checklist(args):
@@ -831,6 +903,18 @@ def main():
     p.add_argument("--force", action="store_true", help="允许记录清单外的自定义 fact key")
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_record)
+
+    p = sub.add_parser("issue-versions")
+    p.add_argument("--issue-key", required=True)
+    p.add_argument("--expected-run-id", required=True)
+    p.add_argument("--input", required=True)
+    p.add_argument("--dir", default=".")
+    p.set_defaults(func=cmd_issue_versions)
+
+    p = sub.add_parser("next")
+    p.add_argument("--issue-key", required=True)
+    p.add_argument("--dir", default=".")
+    p.set_defaults(func=cmd_next)
 
     p = sub.add_parser("checklist")
     p.add_argument("--issue-key")

@@ -21,6 +21,9 @@ from pathlib import Path
 
 
 RELEASE_RE = re.compile(r"^release-v\d+(?:\.\d+){2,}$")
+AUTO_REFRESH_MAX_AGE_SECONDS = 300
+FETCH_TIMEOUT_SECONDS = 30
+FETCH_PROGRESS_INTERVAL_SECONDS = 10
 
 
 class AlignmentError(ValueError):
@@ -83,8 +86,15 @@ def validate_configuration(config, repositories):
         if not isinstance(values, list) or not all(isinstance(item, str) for item in values):
             raise AlignmentError("derivation.%s 必须是仓库数组" % name)
         listed.update(values)
+    fixed_branches = rules.get("fixed_branches")
+    if not isinstance(fixed_branches, dict) or not fixed_branches or not all(
+        repository in known and isinstance(branch, str) and branch
+        for repository, branch in fixed_branches.items()
+    ):
+        raise AlignmentError("derivation.fixed_branches 必须是已登记仓库到非空分支的映射")
+    listed.update(fixed_branches)
     if listed != known:
-        raise AlignmentError("derivation 三类仓库必须覆盖且只覆盖仓库目录")
+        raise AlignmentError("derivation 仓库分类必须覆盖且只覆盖仓库目录")
     if any(rules.get(name) not in known for name in ("product_repository", "license_repository")):
         raise AlignmentError("derivation 的主仓或 license 仓库未在目录登记")
     linked = set(rules["linked_repositories"])
@@ -113,6 +123,62 @@ def git_output(arguments, cwd):
         detail = (result.stderr or result.stdout).strip().splitlines()
         raise AlignmentError(detail[-1] if detail else "Git 命令失败：%s" % " ".join(arguments[:3]))
     return result.stdout.strip()
+
+
+def progress(message):
+    print("[tapdata-align] %s" % message, file=sys.stderr, flush=True)
+
+
+def iso_timestamp(epoch):
+    return time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(epoch))
+
+
+def fetch_head_metadata(path):
+    """返回本地 FETCH_HEAD 的时间；缺失时绝不猜测远端刷新时间。"""
+    try:
+        fetch_head = Path(git_output(["git", "rev-parse", "--git-path", "FETCH_HEAD"], path))
+        if not fetch_head.is_absolute():
+            fetch_head = Path(path) / fetch_head
+        modified = fetch_head.stat().st_mtime
+    except (AlignmentError, OSError):
+        return {"last_refresh_at": None, "last_refresh_epoch": None, "evidence": "FETCH_HEAD_missing_or_unreadable"}
+    return {"last_refresh_at": iso_timestamp(modified), "last_refresh_epoch": modified, "evidence": "FETCH_HEAD_mtime"}
+
+
+def refresh_required(mode, metadata, now):
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+    refreshed = metadata["last_refresh_epoch"]
+    return refreshed is None or now - refreshed > AUTO_REFRESH_MAX_AGE_SECONDS
+
+
+def fetch_origin(path, repository):
+    arguments = ["git", "fetch", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"]
+    try:
+        process = subprocess.Popen(arguments, cwd=path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except OSError as error:
+        raise AlignmentError("无法启动 Git fetch：%s" % error) from error
+    started = time.monotonic()
+    while True:
+        elapsed = time.monotonic() - started
+        remaining = FETCH_TIMEOUT_SECONDS - elapsed
+        if remaining <= 0:
+            process.kill()
+            _, stderr = process.communicate()
+            detail = stderr.strip().splitlines()
+            suffix = "：%s" % detail[-1] if detail else ""
+            raise AlignmentError("Git fetch 超时（%ss）：%s%s" % (FETCH_TIMEOUT_SECONDS, repository, suffix))
+        try:
+            stdout, stderr = process.communicate(timeout=min(FETCH_PROGRESS_INTERVAL_SECONDS, remaining))
+            break
+        except subprocess.TimeoutExpired:
+            progress("远端刷新仍在进行：%s（已 %.0fs）" % (repository, time.monotonic() - started))
+    if process.returncode != 0:
+        detail = (stderr or stdout).strip().splitlines()
+        raise AlignmentError(detail[-1] if detail else "Git fetch 失败：%s" % repository)
+    return time.monotonic() - started
 
 
 def module_repository(tapdata_root, repository):
@@ -147,22 +213,44 @@ def resolve_tapdata_root(explicit, execution_directory):
     return Path(execution_directory).resolve(), "cwd"
 
 
-def refresh_branch_cache(tapdata_root, repositories, product_repository):
-    """刷新完整 ``origin/*`` 缓存；先验证主仓，绝不 checkout。"""
+def refresh_branch_cache(tapdata_root, repositories, product_repository, refresh_mode):
+    """按刷新策略更新 ``origin/*``，并保留每仓库的本地 refs 新鲜度事实。"""
     product_path = module_repository(tapdata_root, product_repository)
     if not (product_path / ".git").exists():
         raise AlignmentError("TapData 模块根目录缺少主仓：%s（期望 %s）" % (product_repository, product_path))
     paths = {}
-    for repository in sorted(repositories):
+    names = sorted(repositories)
+    for index, repository in enumerate(names, start=1):
+        progress("检查本地仓库 %s/%s：%s" % (index, len(names), repository))
         path = module_repository(tapdata_root, repository)
         if not path.is_dir() or not (path / ".git").exists():
             raise AlignmentError("TapData 模块根目录缺少仓库：%s（期望 %s）" % (repository, path))
         top = git_output(["git", "rev-parse", "--show-toplevel"], path)
         if Path(top).resolve() != path.resolve():
-            raise AlignmentError("Source Pool 仓库不是 Git 根目录：%s" % path)
-        git_output(["git", "fetch", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"], path)
+            raise AlignmentError("TapData 模块根目录中的仓库不是 Git 根目录：%s" % path)
         paths[repository] = path
-    return paths
+    refresh_started = time.monotonic()
+    states = {}
+    for index, repository in enumerate(names, start=1):
+        path = paths[repository]
+        metadata = fetch_head_metadata(path)
+        fetched = refresh_required(refresh_mode, metadata, time.time())
+        duration = 0.0
+        if fetched:
+            progress("刷新远端引用 %s/%s：%s" % (index, len(names), repository))
+            duration = fetch_origin(path, repository)
+            metadata = fetch_head_metadata(path)
+            freshness = "refreshed_during_run"
+        else:
+            freshness = "cached_local_refs"
+            progress("复用本地引用 %s/%s：%s（最后刷新：%s）" % (index, len(names), repository, metadata["last_refresh_at"] or "未知"))
+        states[repository] = {
+            "freshness": freshness,
+            "last_refresh_at": metadata["last_refresh_at"],
+            "last_refresh_evidence": metadata["evidence"],
+            "fetch_duration_seconds": round(duration, 3),
+        }
+    return paths, states, time.monotonic() - refresh_started
 
 
 def local_remote_refs(path):
@@ -206,6 +294,9 @@ def plugin_release(product_path, branch, rules):
 def derived_target(repository, version, rules, refs, product_path, plugin_cache):
     if repository == rules["product_repository"]:
         return version, "product_branch", "tapdata 输入分支"
+    fixed_branches = rules.get("fixed_branches", {})
+    if repository in fixed_branches:
+        return fixed_branches[repository], "fixed", "%s 固定使用 %s" % (repository, fixed_branches[repository])
     fallbacks = rules["display_fallback_branches"]
     if repository == "tapdata/tapdata-application":
         return fallbacks[repository], "fixed", "tapdata-application 固定使用 main"
@@ -242,7 +333,7 @@ def derived_target(repository, version, rules, refs, product_path, plugin_cache)
     return None, "unresolved", "没有该仓库的分支推导规则"
 
 
-def build_plan(version, config, repositories, paths):
+def build_plan(version, config, repositories, paths, ref_states=None):
     rules = config["derivation"]
     refs = {repository: local_remote_refs(path) for repository, path in paths.items()}
     product_repository = rules["product_repository"]
@@ -257,6 +348,8 @@ def build_plan(version, config, repositories, paths):
         else:
             target, resolution, reason = derived_target(repository, version, rules, refs, paths[product_repository], cache)
         row = {"repository": repository, "domains": repositories[repository].get("domains", []), "target_branch": target, "resolution": resolution, "reason": reason}
+        if ref_states is not None:
+            row["refs"] = ref_states[repository]
         if target is None:
             row.update({"target_status": "unresolved" if resolution == "unresolved" else "unchanged", "target_sha": None})
         else:
@@ -267,9 +360,10 @@ def build_plan(version, config, repositories, paths):
 
 
 def print_table(rows):
-    print("repository\ttarget_branch\ttarget_sha\tresolution\ttarget_status\treason")
+    print("repository\ttarget_branch\ttarget_sha\tresolution\ttarget_status\trefs_freshness\trefs_last_refresh_at\treason")
     for row in rows:
-        print("%s\t%s\t%s\t%s\t%s\t%s" % (row["repository"], row["target_branch"] or "-", row["target_sha"] or "-", row["resolution"], row["target_status"], row["reason"]))
+        refs = row.get("refs", {})
+        print("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (row["repository"], row["target_branch"] or "-", row["target_sha"] or "-", row["resolution"], row["target_status"], refs.get("freshness", "-"), refs.get("last_refresh_at") or "unknown", row["reason"]))
 
 
 def normalize_argv(argv):
@@ -284,22 +378,40 @@ def main(argv=None, execution_directory=None):
     parser = argparse.ArgumentParser(description="只读解析 TapData 模块根目录的多仓分支关系")
     parser.add_argument("--product-root", default=Path(__file__).resolve().parents[3])
     sub = parser.add_subparsers(dest="command", required=True)
-    show = sub.add_parser("show", help="刷新全部 origin ref 并显示分支关系")
+    show = sub.add_parser("show", help="按刷新策略解析 origin ref 并显示分支关系")
     show.add_argument("--version", required=True, help="tapdata/tapdata 的目标分支名")
     show.add_argument("--tapdata-root", help="包含全部 TapData 模块仓库的根目录；默认由最近工作空间的 Source Pool 解析为 <pool>/tapdata，其次当前执行目录")
+    show.add_argument("--refresh", choices=("always", "auto", "never"), default="auto", help="always 每次刷新；auto 在本地 refs 缺失或超过 5 分钟时刷新；never 只解析现有 origin/*")
     show.add_argument("--json", action="store_true", help="输出机器可读 JSON")
     args = parser.parse_args(argv)
     try:
+        total_started = time.monotonic()
         config, repositories = load_configuration(args.product_root)
         tapdata_root, source = resolve_tapdata_root(args.tapdata_root, execution_directory or Path.cwd())
-        paths = refresh_branch_cache(tapdata_root, repositories, config["derivation"]["product_repository"])
-        rows = build_plan(args.version, config, repositories, paths)
-        document = {"tapdata_branch": args.version, "tapdata_root": str(tapdata_root), "tapdata_root_resolution": source, "checked_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "rows": rows}
+        progress("开始解析：refresh=%s，TapData 根目录=%s" % (args.refresh, tapdata_root))
+        paths, ref_states, fetch_seconds = refresh_branch_cache(tapdata_root, repositories, config["derivation"]["product_repository"], args.refresh)
+        progress("开始本地 origin/* 解析")
+        resolution_started = time.monotonic()
+        rows = build_plan(args.version, config, repositories, paths, ref_states)
+        resolution_seconds = time.monotonic() - resolution_started
+        total_seconds = time.monotonic() - total_started
+        document = {
+            "tapdata_branch": args.version,
+            "tapdata_root": str(tapdata_root),
+            "tapdata_root_resolution": source,
+            "refresh": {"mode": args.refresh, "auto_max_age_seconds": AUTO_REFRESH_MAX_AGE_SECONDS},
+            "timing_seconds": {"fetch": round(fetch_seconds, 3), "local_resolution": round(resolution_seconds, 3), "total": round(total_seconds, 3)},
+            "checked_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "rows": rows,
+        }
+        progress("解析完成：fetch=%.3fs，本地解析=%.3fs，总计=%.3fs" % (fetch_seconds, resolution_seconds, total_seconds))
         if args.json:
             print(json.dumps(document, ensure_ascii=False))
         else:
             print("tapdata_root\t%s" % tapdata_root)
             print("tapdata_root_resolution\t%s" % source)
+            print("refresh_mode\t%s" % args.refresh)
+            print("timing_seconds\tfetch=%.3f\tlocal_resolution=%.3f\ttotal=%.3f" % (fetch_seconds, resolution_seconds, total_seconds))
             print_table(rows)
         return 0
     except AlignmentError as error:

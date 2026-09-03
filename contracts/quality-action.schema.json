@@ -123,6 +123,11 @@
           "minLength": 1,
           "pattern": "\\S"
         },
+        "steps": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
         "expected_result": {
           "enum": [
             "PASS",
@@ -469,6 +474,11 @@
         "payload": {
           "type": "object",
           "properties": {
+            "checkpoint": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
             "id": {
               "type": "string",
               "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
