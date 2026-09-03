@@ -1,5 +1,5 @@
 ---
-name: ao-align-branchs
+name: tapdata-align-branches
 description: 按 TapData 已确认的产品版本或产品线，汇总全部受控仓库的目标分支并只读核验远程存在性；用于版本排查、联调准备和发布前分支事实确认。
 metadata:
   product: agenticops
