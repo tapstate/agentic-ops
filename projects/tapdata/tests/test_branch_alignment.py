@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""TapData 项目分支对齐脚本的无网络合同测试。"""
+"""TapData Source Pool 分支解析的无网络合同测试。"""
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -19,198 +21,86 @@ SPEC.loader.exec_module(align)
 
 
 class TapDataBranchAlignmentTest(unittest.TestCase):
-    def test_remote_branch_listing_preserves_slashes_for_tap_marker_matching(self):
-        completed = __import__("subprocess").CompletedProcess(
-            ["git"], 0,
-            stdout="a1 refs/heads/harsen/TAP-123/develop\nb2 refs/heads/release-v3.8.0\n",
-            stderr="",
+    def test_workspace_binding_is_default_before_execution_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary) / "workspace"
+            binding = workspace / ".agenticops" / "workspace.json"
+            binding.parent.mkdir(parents=True)
+            binding.write_text(json.dumps({"repository_pool": {"root": "/pool/tapdata"}}), encoding="utf-8")
+            root, source = align.resolve_source_pool(None, workspace / "nested")
+
+        self.assertEqual(Path("/pool/tapdata"), root)
+        self.assertIn("workspace.json", source)
+
+    def test_execution_directory_is_only_fallback_not_user_home(self):
+        root, source = align.resolve_source_pool(None, "/work/current")
+        self.assertEqual(Path("/work/current"), root)
+        self.assertEqual("cwd", source)
+
+    def test_short_command_maps_first_argument_to_tapdata_version(self):
+        self.assertEqual(
+            ["show", "--version", "release-v4.21.0", "--json"],
+            align.normalize_argv(["release-v4.21.0", "--json"]),
         )
-        with mock.patch.object(align, "command", return_value=completed):
-            branches = align.remote_branches("test-origin")
 
-        self.assertEqual(["harsen/TAP-123/develop", "release-v3.8.0"], branches)
+    def test_main_repository_is_validated_before_other_pool_repositories(self):
+        repositories = {"tapdata/docs": {}, "tapdata/tapdata": {}}
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(align.AlignmentError, "缺少 TapData 主仓.*tapdata/tapdata"):
+                align.refresh_branch_cache(temporary, repositories, "tapdata/tapdata")
 
-    def test_task_branch_prefers_exact_same_name_over_jira_marker_guessing(self):
-        repositories = {
-            "tapdata/tapdata": {"origin": "product-origin"},
-            "tapdata/tapdata-enterprise": {"origin": "enterprise-origin"},
-        }
+    def test_plugin_release_uses_loaded_local_refs(self):
         rules = {
             "product_repository": "tapdata/tapdata",
             "license_repository": "tapdata/tapdata-license",
             "keep_current_repositories": [],
             "independent_repositories": [],
-            "same_name_repositories": ["tapdata/tapdata-enterprise"],
-            "plugin_release_repositories": [],
-        }
-        with mock.patch.object(align, "remote_branch_status", return_value=("exists", "sha")):
-            target, resolution, reason = align.derived_target(
-                "tapdata/tapdata-enterprise",
-                "feature/TAP-123-fix",
-                repositories,
-                rules,
-                None,
-                {},
-                {},
-            )
-
-        self.assertEqual("feature/TAP-123-fix", target)
-        self.assertEqual("same_name", resolution)
-        self.assertIn("完全同名", reason)
-
-    def test_task_branch_does_not_use_ambiguous_tap_marker_fallback(self):
-        repository = "tapdata/tapdata-enterprise"
-        repositories = {
-            "tapdata/tapdata": {"origin": "product-origin"},
-            repository: {"origin": "enterprise-origin"},
-        }
-        rules = {
-            "product_repository": "tapdata/tapdata",
-            "license_repository": "tapdata/tapdata-license",
-            "keep_current_repositories": [],
-            "independent_repositories": [],
-            "same_name_repositories": [repository],
-            "plugin_release_repositories": [],
-        }
-        with mock.patch.object(align, "remote_branch_status", return_value=("missing", "")):
-            target, resolution, reason = align.derived_target(
-                repository,
-                "feature/TAP-123-fix",
-                repositories,
-                rules,
-                None,
-                {},
-                {},
-            )
-
-        self.assertIsNone(target)
-        self.assertEqual("unresolved", resolution)
-        self.assertIn("完全同名", reason)
-
-        explicit, explicit_resolution, _ = align.derived_target(
-            repository,
-            "feature/TAP-123-fix",
-            repositories,
-            rules,
-            None,
-            {repository: "reviewed/TAP-123/fix"},
-            {},
-        )
-        self.assertEqual("reviewed/TAP-123/fix", explicit)
-        self.assertEqual("explicit", explicit_resolution)
-
-    def test_current_matrix_covers_catalog_and_reports_remote_status(self):
-        config, repositories = align.load_configuration(ROOT)
-        with mock.patch.object(align, "remote_branch_status", return_value=("exists", "sha-current")):
-            rows = align.build_plan("current", config, repositories)
-
-        self.assertEqual(set(repositories), {row["repository"] for row in rows})
-        self.assertTrue(all(row["resolution"] == "exact_profile" for row in rows))
-        self.assertTrue(all(row["remote_status"] == "exists" for row in rows))
-        targets = {row["repository"]: row["target_branch"] for row in rows}
-        self.assertEqual("main", targets["tapdata/tapdata-license"])
-        self.assertEqual("release-v5.5.0", targets["tapdata/hazelcast"])
-
-    def test_release_derives_each_plugin_repository_independently(self):
-        repositories = {
-            "tapdata/tapdata": {"origin": "tapdata-origin", "domains": ["product"]},
-            "tapdata/tapdata-common-lib": {"origin": "common-origin", "domains": ["product"]},
-            "tapdata/tapdata-connectors": {"origin": "connectors-origin", "domains": ["product"]},
-            "tapdata/tapdata-connectors-enterprise": {"origin": "enterprise-connectors-origin", "domains": ["product"]},
-        }
-        rules = {
-            "product_repository": "tapdata/tapdata",
-            "linked_repositories": list(repositories),
-            "same_name_repositories": [],
-            "plugin_release_repositories": [
-                "tapdata/tapdata-common-lib",
-                "tapdata/tapdata-connectors",
-                "tapdata/tapdata-connectors-enterprise",
-            ],
-            "license_repository": "tapdata/tapdata-license",
-            "keep_current_repositories": [],
-            "independent_repositories": [],
-        }
-        config = {"versions": {}, "derivation": rules}
-
-        def release_for(origin, _minimum):
-            return {
-                "common-origin": "release-v1.2.6",
-                "connectors-origin": "release-v2.0.8",
-                "enterprise-connectors-origin": "release-v2.0.9",
-            }[origin]
-
-        with (
-            mock.patch.object(align, "remote_branch_status", return_value=("exists", "sha")),
-            mock.patch.object(align, "plugin_release", return_value=("release-v1.2.6", "PluginKit 1.2.6")),
-            mock.patch.object(align, "first_release_ge", side_effect=release_for),
-        ):
-            rows = align.build_plan("release-v4.19.0", config, repositories, "/pool")
-
-        targets = {row["repository"]: row["target_branch"] for row in rows}
-        self.assertEqual("release-v1.2.6", targets["tapdata/tapdata-common-lib"])
-        self.assertEqual("release-v2.0.8", targets["tapdata/tapdata-connectors"])
-        self.assertEqual("release-v2.0.9", targets["tapdata/tapdata-connectors-enterprise"])
-
-    def test_missing_source_pool_fails_closed_only_for_plugin_derived_repository(self):
-        repositories = {
-            "tapdata/tapdata": {"origin": "tapdata-origin", "domains": ["product"]},
-            "tapdata/tapdata-connectors": {"origin": "connectors-origin", "domains": ["product"]},
-        }
-        rules = {
-            "product_repository": "tapdata/tapdata",
-            "linked_repositories": list(repositories),
             "same_name_repositories": [],
             "plugin_release_repositories": ["tapdata/tapdata-connectors"],
-            "license_repository": "tapdata/tapdata-license",
-            "keep_current_repositories": [],
-            "independent_repositories": [],
+            "display_fallback_branches": {},
         }
-        config = {"versions": {}, "derivation": rules}
-        with mock.patch.object(align, "remote_branch_status", return_value=("exists", "sha")):
-            rows = align.build_plan("release-v4.19.0", config, repositories)
+        refs = {
+            "tapdata/tapdata": {"release-v4.21.0": "product-sha"},
+            "tapdata/tapdata-connectors": {"release-v1.2.5": "old", "release-v1.2.6": "new"},
+        }
+        with mock.patch.object(align, "plugin_release", return_value=("release-v1.2.6", "PluginKit 1.2.6")):
+            target, resolution, _ = align.derived_target(
+                "tapdata/tapdata-connectors", "release-v4.21.0", rules, refs, Path("/pool/tapdata/tapdata"), {}
+            )
 
-        connector = next(row for row in rows if row["repository"] == "tapdata/tapdata-connectors")
-        self.assertIsNone(connector["target_branch"])
-        self.assertEqual("unresolved", connector["resolution"])
-        self.assertEqual("unresolved", connector["remote_status"])
+        self.assertEqual("release-v1.2.6", target)
+        self.assertEqual("plugin_release", resolution)
 
-    def test_environment_branch_falls_back_after_exact_same_name_lookup(self):
+    def test_display_fallbacks_and_unchanged_repositories(self):
         rules = {
             "product_repository": "tapdata/tapdata",
             "license_repository": "tapdata/tapdata-license",
             "keep_current_repositories": ["tapdata/tapdata-application"],
             "independent_repositories": ["tapdata/t-layer3-test", "tapdata/docs"],
             "same_name_repositories": [],
-            "plugin_release_repositories": ["tapdata/tapdata-common-lib"],
-            "environment_fallback_branches": {
-                "tapdata/tapdata-application": "main",
-                "tapdata/t-layer3-test": "develop",
-            },
+            "plugin_release_repositories": [],
+            "display_fallback_branches": {"tapdata/tapdata-application": "main", "tapdata/t-layer3-test": "develop"},
         }
-        refs = {
-            "tapdata/tapdata": {"fix-xxx": "a"},
-            "tapdata/tapdata-common-lib": {"fix-xxx": "b"},
-            "tapdata/tapdata-application": {"main": "c"},
-            "tapdata/t-layer3-test": {"develop": "d"},
-            "tapdata/docs": {"main": "e"},
-        }
-        same = align.environment_target(
-            "tapdata/tapdata-common-lib", "fix-xxx", rules, refs, Path("/tmp/product"), {}
-        )
-        application = align.environment_target(
-            "tapdata/tapdata-application", "fix-xxx", rules, refs, Path("/tmp/product"), {}
-        )
-        tests = align.environment_target(
-            "tapdata/t-layer3-test", "fix-xxx", rules, refs, Path("/tmp/product"), {}
-        )
-        unchanged = align.environment_target(
-            "tapdata/docs", "fix-xxx", rules, refs, Path("/tmp/product"), {}
-        )
-        self.assertEqual(("fix-xxx", "same_name"), same[:2])
-        self.assertEqual(("main", "fallback"), application[:2])
+        refs = {"tapdata/tapdata-application": {"main": "a"}, "tapdata/t-layer3-test": {"develop": "b"}, "tapdata/docs": {"main": "c"}}
+        application = align.derived_target("tapdata/tapdata-application", "fix-xxx", rules, refs, Path("/pool/tapdata/tapdata"), {})
+        tests = align.derived_target("tapdata/t-layer3-test", "fix-xxx", rules, refs, Path("/pool/tapdata/tapdata"), {})
+        unchanged = align.derived_target("tapdata/docs", "fix-xxx", rules, refs, Path("/pool/tapdata/tapdata"), {})
+
+        self.assertEqual(("main", "fixed"), application[:2])
         self.assertEqual(("develop", "fallback"), tests[:2])
         self.assertEqual((None, "unchanged"), unchanged[:2])
+
+    def test_current_matrix_is_verified_against_local_refs(self):
+        config, repositories = align.load_configuration(ROOT)
+        paths = {repository: Path("/pool") for repository in repositories}
+        refs = {repository: {config["versions"]["current"]["branches"][repository]: "sha-%s" % index} for index, repository in enumerate(repositories)}
+        with mock.patch.object(align, "local_remote_refs", side_effect=lambda path: refs[next(name for name, item in paths.items() if item == path)]):
+            # 使用不同 Path 对象避免上面按值相等的映射歧义。
+            paths = {repository: Path("/pool/%s" % index) for index, repository in enumerate(repositories)}
+            rows = align.build_plan("current", config, repositories, paths)
+
+        self.assertEqual(set(repositories), {row["repository"] for row in rows})
+        self.assertTrue(all(row["target_status"] == "exists" for row in rows))
 
 
 if __name__ == "__main__":
