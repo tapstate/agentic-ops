@@ -69,17 +69,17 @@ def _run(arguments, *, check=True, timeout=120, progress=None):
         progress("开始执行：%s" % " ".join(arguments[:4]))
         process = subprocess.Popen(
             arguments,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
+            stderr=subprocess.PIPE,
         )
-        output = []
-        assert process.stdout is not None
-        for line in process.stdout:
-            output.append(line)
-            progress("git clone：%s" % line.rstrip())
-        result = subprocess.CompletedProcess(arguments, process.wait(), "".join(output), "")
+        output = bytearray()
+        assert process.stderr is not None
+        for chunk in iter(lambda: process.stderr.read1(8192), b""):
+            output.extend(chunk)
+            sys.stderr.buffer.write(chunk)
+            sys.stderr.buffer.flush()
+        result = subprocess.CompletedProcess(
+            arguments, process.wait(), "", output.decode(errors="replace")
+        )
     if check and result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
         raise ValueError("命令失败（%s）：%s" % (" ".join(arguments[:4]), detail))

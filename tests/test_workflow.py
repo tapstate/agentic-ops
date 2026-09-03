@@ -219,6 +219,7 @@ def main():
         check("workspace prefetch 按项目目录预下载", code, 0)
         check("workspace prefetch 复核已有主工作树", "已存在并通过复核 1 个" in out, True)
         check("workspace prefetch 步骤日志带时间", "repository prefetch" in out and "[" in out, True)
+        check("workspace prefetch Git 日志不包装为内部日志", "git clone：" in out, False)
         check("workspace prefetch 下载缺失主工作树", (pool_root / "tapdata" / "tapdata-common-lib" / ".git").is_dir(), True)
         check("workspace prefetch 不创建任务状态", (ws / ".agenticops" / "tasks").exists(), False)
         check("workspace prefetch 不创建任务 worktree", (ws / ".agenticops" / "worktrees").exists(), False)
