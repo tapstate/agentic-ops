@@ -82,7 +82,7 @@ def main():
         retry_clone_path = ws / "retry-clone"
         clone_attempts = []
 
-        def retrying_clone(arguments, *, check=True):
+        def retrying_clone(arguments, *, check=True, timeout=120, progress=None):
             clone_attempts.append(arguments)
             if len(clone_attempts) == 1:
                 retry_clone_path.mkdir()
@@ -107,28 +107,25 @@ def main():
         timeout_clone_path = ws / "timeout-clone"
         timeout_attempts = []
 
-        def timeout_then_success(arguments, *, check=True):
-            timeout_attempts.append(arguments)
-            if len(timeout_attempts) == 1:
-                timeout_clone_path.mkdir()
-                raise subprocess.TimeoutExpired(arguments, 120)
+        def completed_clone(arguments, *, check=True, timeout=120, progress=None):
+            timeout_attempts.append((arguments, timeout, progress))
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         with contextlib.redirect_stdout(io.StringIO()) as output, mock.patch.object(
-            repository_worktree, "_run", side_effect=timeout_then_success
-        ), mock.patch.object(repository_worktree.time, "sleep") as sleep:
+            repository_worktree, "_run", side_effect=completed_clone
+        ):
             repository_worktree._clone_main(
-                "tapdata/timeout", {"baseline_branch": "develop", "origin": "unused"}, timeout_clone_path
+                "tapdata/no-timeout", {"baseline_branch": "develop", "origin": "unused"}, timeout_clone_path
             )
-        check("clone 超时后重试", len(timeout_attempts), 2)
-        check("clone 超时重试前清理残留目录", timeout_clone_path.exists(), False)
-        check("clone 超时按固定间隔重试", sleep.call_args.args, (2,))
-        check("clone 超时输出重试步骤日志", "第 1/3 次克隆失败" in output.getvalue(), True)
+        check("clone 下载不设置超时", timeout_attempts[0][1], None)
+        check("clone 下载传递步骤日志函数", timeout_attempts[0][2] is repository_worktree._progress, True)
+        check("clone 强制输出下载进度", "--progress" in timeout_attempts[0][0], True)
+        check("clone 下载步骤日志带时间", output.getvalue().startswith("["), True)
 
         non_network_clone_path = ws / "non-network-clone"
         non_network_attempts = []
 
-        def rejected_clone(arguments, *, check=True):
+        def rejected_clone(arguments, *, check=True, timeout=120, progress=None):
             non_network_attempts.append(arguments)
             non_network_clone_path.mkdir()
             return SimpleNamespace(returncode=128, stdout="", stderr="fatal: Authentication failed")
@@ -221,9 +218,21 @@ def main():
         )
         check("workspace prefetch 按项目目录预下载", code, 0)
         check("workspace prefetch 复核已有主工作树", "已存在并通过复核 1 个" in out, True)
+        check("workspace prefetch 步骤日志带时间", "repository prefetch" in out and "[" in out, True)
         check("workspace prefetch 下载缺失主工作树", (pool_root / "tapdata" / "tapdata-common-lib" / ".git").is_dir(), True)
         check("workspace prefetch 不创建任务状态", (ws / ".agenticops" / "tasks").exists(), False)
         check("workspace prefetch 不创建任务 worktree", (ws / ".agenticops" / "worktrees").exists(), False)
+        failing_catalog = json.loads(json.dumps(prefetch_catalog))
+        failing_catalog["repositories"]["tapdata/tapdata"]["origin"] = str(ws / "missing-tapdata.git")
+        catalog_path.write_text(
+            json.dumps(failing_catalog, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        shutil.rmtree(pool_root / "tapdata" / "tapdata-common-lib")
+        code, out = run_workspace_tool(product_root, "prefetch", "--yes", cwd=ws)
+        check("workspace prefetch 单仓失败后仍继续", code, 2)
+        check("workspace prefetch 单仓失败仍下载后续仓库", (pool_root / "tapdata" / "tapdata-common-lib" / ".git").is_dir(), True)
+        check("workspace prefetch 输出单仓失败明细", "预下载失败：tapdata/tapdata" in out, True)
         shutil.rmtree(pool_root / "tapdata" / "tapdata-common-lib")
         catalog_path.write_text(
             json.dumps(catalog_document, ensure_ascii=False, indent=2) + "\n",

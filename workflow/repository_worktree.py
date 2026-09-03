@@ -54,15 +54,32 @@ def now():
 
 
 def _progress(message):
-    print("repository prepare：%s" % message, flush=True)
+    print("[%s] repository prepare：%s" % (now(), message), flush=True)
 
 
 def _prefetch_progress(message):
-    print("repository prefetch：%s" % message, flush=True)
+    print("[%s] repository prefetch：%s" % (now(), message), flush=True)
 
 
-def _run(arguments, *, check=True):
-    result = subprocess.run(arguments, capture_output=True, text=True, timeout=120)
+def _run(arguments, *, check=True, timeout=120, progress=None):
+    """执行命令；需要展示下载日志时不施加运行时限。"""
+    if progress is None:
+        result = subprocess.run(arguments, capture_output=True, text=True, timeout=timeout)
+    else:
+        progress("开始执行：%s" % " ".join(arguments[:4]))
+        process = subprocess.Popen(
+            arguments,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        output = []
+        assert process.stdout is not None
+        for line in process.stdout:
+            output.append(line)
+            progress("git clone：%s" % line.rstrip())
+        result = subprocess.CompletedProcess(arguments, process.wait(), "".join(output), "")
     if check and result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
         raise ValueError("命令失败（%s）：%s" % (" ".join(arguments[:4]), detail))
@@ -87,22 +104,18 @@ def _remove_failed_clone(main, *, progress=_progress):
 def _clone_main(repository, entry, main, *, progress=_progress):
     command = [
         "git", "clone", "--branch", entry["baseline_branch"],
-        "--single-branch", entry["origin"], str(main),
+        "--single-branch", "--progress", entry["origin"], str(main),
     ]
     for attempt in range(1, CLONE_MAX_ATTEMPTS + 1):
         progress(
             "仓库 %s：克隆基线分支 %s（第 %d/%d 次）"
             % (repository, entry["baseline_branch"], attempt, CLONE_MAX_ATTEMPTS)
         )
-        try:
-            result = _run(command, check=False)
-            detail = (result.stderr or result.stdout).strip()
-            succeeded = result.returncode == 0
-            retryable = _is_retryable_clone_failure(detail)
-        except subprocess.TimeoutExpired:
-            detail = "git clone 超时（120 秒）"
-            succeeded = False
-            retryable = True
+        # clone 可能因仓库体积或网络限速耗时较长；不得在下载过程中设置超时。
+        result = _run(command, check=False, timeout=None, progress=progress)
+        detail = (result.stderr or result.stdout).strip()
+        succeeded = result.returncode == 0
+        retryable = _is_retryable_clone_failure(detail)
         if succeeded:
             progress("仓库 %s：克隆完成" % repository)
             return
@@ -389,30 +402,39 @@ def prefetch_project_repositories(workspace):
     if not repositories:
         raise ValueError("当前项目仓库目录为空，拒绝预下载")
     selected = []
+    reports = []
     for repository in sorted(repositories):
         entry = repositories[repository]
         if not _normalize_origin(entry.get("origin")):
-            raise ValueError("项目仓库目录 origin 无法形成可信 endpoint：%s" % repository)
+            detail = "项目仓库目录 origin 无法形成可信 endpoint"
+            _prefetch_progress("仓库 %s：预下载失败，跳过并继续下一个：%s" % (repository, detail))
+            reports.append({"repository": repository, "status": "failed", "error": detail})
+            continue
         selected.append((repository, entry, repository_path(pool_root, repository)))
 
-    reports = []
     with _pool_lock(product_root):
         for repository, entry, main in selected:
-            if main.exists():
-                _prefetch_progress("仓库 %s：Source Pool 已存在，复核后跳过下载" % repository)
-                _validate_main(main, repository, entry, progress=_prefetch_progress)
-                _validate_main_baseline(main, repository, entry)
-                reports.append({"repository": repository, "path": str(main), "status": "existing"})
-                continue
-            main.parent.mkdir(parents=True, exist_ok=True)
-            _prefetch_progress("仓库 %s：按项目目录预下载基线分支" % repository)
-            _clone_main(repository, entry, main, progress=_prefetch_progress)
+            clone_started = False
             try:
+                if main.exists():
+                    _prefetch_progress("仓库 %s：Source Pool 已存在，复核后跳过下载" % repository)
+                    _validate_main(main, repository, entry, progress=_prefetch_progress)
+                    _validate_main_baseline(main, repository, entry)
+                    reports.append({"repository": repository, "path": str(main), "status": "existing"})
+                    continue
+                main.parent.mkdir(parents=True, exist_ok=True)
+                _prefetch_progress("仓库 %s：按项目目录预下载基线分支" % repository)
+                clone_started = True
+                _clone_main(repository, entry, main, progress=_prefetch_progress)
                 _validate_main(main, repository, entry, progress=_prefetch_progress)
                 _validate_main_baseline(main, repository, entry)
-            except Exception:
-                _remove_failed_clone(main, progress=_prefetch_progress)
-                raise
+            except Exception as error:
+                if clone_started:
+                    _remove_failed_clone(main, progress=_prefetch_progress)
+                detail = str(error)
+                _prefetch_progress("仓库 %s：预下载失败，跳过并继续下一个：%s" % (repository, detail))
+                reports.append({"repository": repository, "path": str(main), "status": "failed", "error": detail})
+                continue
             reports.append({"repository": repository, "path": str(main), "status": "cloned"})
     return reports
 
