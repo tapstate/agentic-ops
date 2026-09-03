@@ -1,0 +1,62 @@
+{
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "issue_key": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "command": {
+            "$ref": "quality-action.schema.json"
+          },
+          "rules": {
+            "type": "object"
+          },
+          "context": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "at",
+          "command",
+          "rules",
+          "context"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "issue_key",
+    "run_id",
+    "revision",
+    "events"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticops.tapdata.net/contracts/quality-state-v1.schema.json",
+  "title": "任务 run 内质量操作日志 v1"
+}

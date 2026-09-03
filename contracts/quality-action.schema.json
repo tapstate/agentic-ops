@@ -1,0 +1,670 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticops.tapdata.net/contracts/quality-action-v1.schema.json",
+  "title": "质量记录操作 v1",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/item"
+    },
+    {
+      "$ref": "#/$defs/select"
+    },
+    {
+      "$ref": "#/$defs/execute"
+    },
+    {
+      "$ref": "#/$defs/decide"
+    },
+    {
+      "$ref": "#/$defs/checkpoint"
+    },
+    {
+      "$ref": "#/$defs/draft"
+    },
+    {
+      "$ref": "#/$defs/confirm"
+    },
+    {
+      "$ref": "#/$defs/prepare_write"
+    },
+    {
+      "$ref": "#/$defs/receipt"
+    },
+    {
+      "$ref": "#/$defs/readback"
+    }
+  ],
+  "$defs": {
+    "proof": {
+      "type": "object",
+      "properties": {
+        "actor": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "source": {
+          "enum": [
+            "user_message",
+            "jira_comment",
+            "review"
+          ]
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "at": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "actor",
+        "source",
+        "reference",
+        "at"
+      ],
+      "additionalProperties": false
+    },
+    "plan": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
+        },
+        "checkpoint": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "timing": {
+          "enum": [
+            "before_fix",
+            "after_fix"
+          ]
+        },
+        "case_ref": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "case_version": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "case_status": {
+          "enum": [
+            "existing",
+            "proposed"
+          ]
+        },
+        "method": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "target_revision": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "criterion": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "expected_result": {
+          "enum": [
+            "PASS",
+            "FAIL"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "id",
+        "checkpoint",
+        "timing",
+        "case_ref",
+        "case_version",
+        "case_status",
+        "method",
+        "repository",
+        "target_revision",
+        "criterion",
+        "expected_result",
+        "scope"
+      ],
+      "additionalProperties": false
+    },
+    "execution": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
+        },
+        "case_ref": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "case_version": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "method": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "target_revision": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "origin": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "environment": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "observed_at": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "raw_result": {
+          "enum": [
+            "PASS",
+            "FAIL",
+            "SKIPPED",
+            "NOT_RUN",
+            "UNKNOWN"
+          ]
+        },
+        "failure_kind": {
+          "enum": [
+            "none",
+            "assertion",
+            "environment",
+            "unknown"
+          ]
+        },
+        "observation": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "id",
+        "case_ref",
+        "case_version",
+        "method",
+        "repository",
+        "target_revision",
+        "origin",
+        "source_ref",
+        "environment",
+        "observed_at",
+        "raw_result",
+        "failure_kind",
+        "observation"
+      ],
+      "additionalProperties": false
+    },
+    "decision": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "enum": [
+            "accept",
+            "rework",
+            "not_applicable",
+            "defer",
+            "accept_risk"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "proof": {
+          "$ref": "#/$defs/proof"
+        },
+        "evidence_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "follow_up": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "deadline": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "outcome",
+        "reason",
+        "proof"
+      ],
+      "additionalProperties": false
+    },
+    "item": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "item"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "plan": {
+              "$ref": "#/$defs/plan"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          },
+          "required": [
+            "plan",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "select": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "select"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "item_id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
+            },
+            "digest": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "proof": {
+              "$ref": "#/$defs/proof"
+            }
+          },
+          "required": [
+            "item_id",
+            "digest",
+            "proof"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "execute": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "execute"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "item_id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
+            },
+            "execution": {
+              "$ref": "#/$defs/execution"
+            }
+          },
+          "required": [
+            "item_id",
+            "execution"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "decide": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "decide"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "item_id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
+            },
+            "digest": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "decision": {
+              "$ref": "#/$defs/decision"
+            }
+          },
+          "required": [
+            "item_id",
+            "digest",
+            "decision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "checkpoint": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "checkpoint"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "checkpoint": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "digest": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "decision": {
+              "$ref": "#/$defs/decision"
+            }
+          },
+          "required": [
+            "checkpoint",
+            "digest",
+            "decision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "draft": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "draft"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
+            },
+            "body": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          },
+          "required": [
+            "id",
+            "body"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "confirm": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "confirm"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
+            },
+            "digest": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "proof": {
+              "$ref": "#/$defs/proof"
+            }
+          },
+          "required": [
+            "id",
+            "digest",
+            "proof"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "prepare_write": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "prepare_write"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
+            },
+            "digest": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          },
+          "required": [
+            "id",
+            "digest"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "receipt": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "receipt"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
+            },
+            "operation_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "result": {
+              "enum": [
+                "created",
+                "unknown"
+              ]
+            },
+            "comment_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          },
+          "required": [
+            "id",
+            "operation_id",
+            "result"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "readback": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "readback"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,79}$"
+            },
+            "operation_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "site": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "issue_key": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "comment_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "body": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "source_ref": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          },
+          "required": [
+            "id",
+            "operation_id",
+            "site",
+            "issue_key",
+            "comment_id",
+            "body",
+            "source_ref"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "payload"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

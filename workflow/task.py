@@ -8,11 +8,11 @@
 硬约束（全部由本工具执行，不依赖 agent 自觉）：
   - 只能推进到相邻的下一阶段（不可跳跃、不可回退；重做用 reset）。
   - 离开 task_intake 必须集齐当前 Project admission.json 中该任务类型的
-    全部必填 fact；缺项时 exit 3 并打印缺失项与补卡建议文案。
+    必填 fact；recorded_decision 类型改为披露缺项并在质量检查点记录处置。
   - 进入 implementation 必须存在有效的 task_execution 授权（workflow/authorization.py 签发），
     且授权 issue_key 与任务一致。
   - 离开 implementation 必须记录 verification，且不得命中 admission.json
-    verification_rules 的禁止模式（如 -DskipTests、"未验证"占位词）。
+    verification_rules 的禁止模式；recorded_decision 类型由 quality.py 的用户处置替代文本门禁。
   - 每次推进必须 --note 说明推进依据（人工节点的确认内容）。
 
 用法：
@@ -41,7 +41,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from gate import engine  # noqa: E402
-from workflow import project_rules, repository_worktree, task_store  # noqa: E402
+from workflow import project_rules, quality, repository_worktree, task_store  # noqa: E402
 
 STAGES = [
     "waiting_takeover",
@@ -410,9 +410,14 @@ def cmd_repository_cleanup(args):
 def _check_advance(task, target, base, spec):
     """返回阻止推进的原因列表。"""
     problems = []
+    flexible = project_rules.class_spec(spec, task["task_class"]).get("quality_mode") == "recorded_decision"
     if target == "design_review":
         missing = project_rules.missing_required(spec, task["task_class"], task.get("facts"))
-        if missing:
+        if missing and flexible:
+            print("质量待核对：%s；继续不依赖缺项的分析，在检查点记录用户处置。" % "、".join(f["label"] for f in missing))
+            for f in missing:
+                print(f["supplement"])
+        if missing and not flexible:
             problems.append(
                 "准入必填项缺失 %d 项：%s"
                 % (len(missing), "、".join("%s(%s)" % (f["label"], f["key"]) for f in missing))
@@ -449,7 +454,7 @@ def _check_advance(task, target, base, spec):
                     repository_worktree.task_roots(base, task["issue_key"])
                 except ValueError as error:
                     problems.append("受控本地 Git 基线无效：%s" % error)
-    if target == "pr_review":
+    if target == "pr_review" and not flexible:
         verification = (task.get("facts") or {}).get("verification")
         for reason in project_rules.check_verification(spec, verification):
             problems.append("验证结论不合规：%s" % reason)
@@ -483,10 +488,17 @@ def _check_advance(task, target, base, spec):
             problems.append(
                 "任务完成前必须先执行 repository cleanup：%s" % "、".join(prepared)
             )
+    problems.extend(quality.advance_problems(base, task, target))
     return problems
 
 
 def cmd_advance(args):
+    issue = task_store.resolve_active_issue(args.dir, args.issue_key)
+    with task_store.task_run_lock(args.dir, issue):
+        return _cmd_advance_locked(args)
+
+
+def _cmd_advance_locked(args):
     task = require(args.dir, args.issue_key)
     idx = STAGES.index(task["stage"])
     if idx + 1 >= len(STAGES):
@@ -595,13 +607,14 @@ NEXT_GUIDE = {
     "design_review": "基于任务 worktree 形成方案并写入 Jira -> 等研发工程师确认这一真实人工决策 -> workflow/authorization.py grant -> advance",
     "implementation": "在授权范围内实现+测试；完成后 record --key verification（命令+退出结果）再 advance",
     "pr_review": "创建/更新 PR，展示变更、验证结果和风险，研发工程师在 PR 上审查后 advance",
-    "ci_validation": "用 workflow/ci.py watch 观察必需检查；通过后 advance",
+    "ci_validation": "用 workflow/ci.py watch 观察 PR 返回检查，核对目标用例、审查和交付事实；完成用户处置后 advance",
     "completed": "用 workflow/evidence.py 生成证据总结，经确认后作为 Jira 评论回写",
 }
 
 
 def _print_next(task):
     print("下一步：%s" % NEXT_GUIDE.get(task["stage"], ""))
+    print("项目启用 recorded_decision 时，使用 quality.py status/apply 核对用例和用户处置；文本 verification 不代表通过。")
 
 
 def cmd_checklist(args):
@@ -626,11 +639,13 @@ def cmd_checklist(args):
             "recorded": facts,
             "missing": [f["key"] for f in project_rules.missing_required(spec, task_class, facts)],
             "verification_rules": spec.get("verification_rules", {}),
+            "quality_mode": cls.get("quality_mode", "text_required"),
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
     print("准入清单：%s（%s）" % (cls["title"], task_class))
-    print("必填项（缺一不可，advance 硬拦）：")
+    flexible = cls.get("quality_mode") == "recorded_decision"
+    print("核对项（缺项须披露并在质量检查点处置）：" if flexible else "必填项（缺一不可，advance 硬拦）：")
     for f in cls.get("required_facts", []):
         got = facts.get(f["key"])
         mark = "✓" if got else "✗"
@@ -645,7 +660,7 @@ def cmd_checklist(args):
         for f in optional:
             print("  - %s（--key %s）%s" % (f["label"], f["key"], f.get("note", "")))
     missing = project_rules.missing_required(spec, task_class, facts)
-    print("结论：%s" % ("缺 %d 项，不得离开 task_intake" % len(missing) if missing else "必填项齐备"))
+    print("结论：%s" % (("缺 %d 项，须披露并处置" if flexible else "缺 %d 项，不得离开 task_intake") % len(missing) if missing else "必填项齐备"))
     return 0
 
 
