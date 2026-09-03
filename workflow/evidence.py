@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 """AgenticOps 证据总结：汇总任务状态、门禁审计和 CI 记录。
 
-输出到 stdout（markdown）。回写方式：由 agent 通过 Atlassian MCP 的 add_comment
-发布（write_jira_comment 属 free 操作，门禁直接放行）；发布前必须把全文展示给
-研发工程师过目——证据本身是评论，但"宣布任务完成"的 Jira transition 仍是 gated。
-
-硬约束（执行 projects/tapdata/admission.json 的规则，不依赖 agent 自觉）：
-  - 证据全文过敏感内容扫描（token/口令/连接串/本机绝对路径）；命中即 exit 4，
-    不输出任何证据正文——先把事实里的敏感内容改掉再重跑。
-  - --verification 文本受 verification_rules 约束（禁 -DskipTests、禁占位词）。
-  - 证据包含准入必填项覆盖情况，缺项直接显式列出，不允许静默省略。
+输出到 stdout（markdown）。检查项事实与用户处置分别呈现，不把本地记录当作
+外部认证。启用质量检查时由 quality.py draft/confirm/prepare_write/receipt/readback
+管理回写恢复；外部发送仍由 Agent 原生工具执行。Jira 状态不由本工具改变。
 
 用法：
   python3 workflow/evidence.py --issue-key TAP-123 [--dir .] [--verification "实际执行的验证命令及结果"]
@@ -23,7 +17,7 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from workflow import project_rules, task_store  # noqa: E402
+from workflow import ci, project_rules, quality, task_store  # noqa: E402
 
 
 def load_json(path):
@@ -41,8 +35,8 @@ def load_events(path):
             if line:
                 try:
                     events.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
+                except json.JSONDecodeError as error:
+                    raise ValueError("门禁事件损坏，保留现场，不能静默省略") from error
     return events
 
 
@@ -65,10 +59,10 @@ def _admission_coverage(task, spec):
     return lines
 
 
-def build_summary(task, auth, events, ci_states, spec, verification=None):
+def build_summary(task, auth, events, ci_states, spec, verification=None, quality_report=None):
     lines = []
     issue = (task or {}).get("issue_key", "（未初始化任务）")
-    lines.append("h3. AI 执行证据总结：%s" % issue)
+    lines.append("### AI 执行证据总结：%s" % issue)
     lines.append("")
 
     if task:
@@ -82,7 +76,7 @@ def build_summary(task, auth, events, ci_states, spec, verification=None):
                 lines.append("- %s 阻塞：%s" % (h.get("ts"), h.get("reason")))
         if task.get("facts"):
             lines.append("")
-            lines.append("*已确认事实*：")
+            lines.append("*已记录事实（不代表用户确认）*：")
             for k, v in task["facts"].items():
                 lines.append("- %s：%s" % (k, v))
         lines.extend(_admission_coverage(task, spec))
@@ -131,12 +125,12 @@ def build_summary(task, auth, events, ci_states, spec, verification=None):
     if events:
         decisions = Counter(e.get("decision") for e in events)
         lines.append(
-            "*门禁审计*：共 %d 次判定（放行 %d / 人工确认 %d / 拒绝 %d）"
+            "*门禁审计（任务累计记录）*：共 %d 次判定（放行 %d / 请求确认 %d / 拒绝 %d）"
             % (len(events), decisions.get("allow", 0), decisions.get("ask", 0), decisions.get("deny", 0))
         )
         denied = [e for e in events if e.get("decision") == "deny"]
         if denied:
-            lines.append("*被拒绝的操作*（agent 未执行）：")
+            lines.append("*被拒绝的操作*（记录门禁判定，不证明操作未曾执行）：")
             for e in denied:
                 lines.append("- %s：%s" % (e.get("operations"), e.get("note", "")[:120]))
         lines.append("")
@@ -145,12 +139,45 @@ def build_summary(task, auth, events, ci_states, spec, verification=None):
         attempts = st.get("fix_attempts", 0)
         last = st.get("history", [])[-1] if st.get("history") else {}
         lines.append(
-            "*CI（PR #%s）*：最终判定 %s，自动修复 %d 次" % (st.get("pr"), last.get("verdict", "无记录"), attempts)
+            "*CI（PR #%s）*：最近记录 %s，修复记账 %d 次" % (st.get("pr"), last.get("verdict", "无记录"), attempts)
         )
     if ci_states:
         lines.append("")
 
-    lines.append("*边界声明*：合并、发布、Jira 完成态流转均未由 AI 执行，等待人工节点处理。")
+    if quality_report:
+        lines.append("*质量检查（run %s，revision %s）*：" % (quality_report["run_id"], quality_report["revision"]))
+        for key, item in quality_report["items"].items():
+            plan = item["plan"]
+            decision = (item.get("decision") or {}).get("decision", {})
+            lines.append("- %s：%s / %s / %s；用户处置 %s（%s）；理由：%s" % (
+                key, plan["case_ref"], plan["method"], plan["timing"], decision.get("outcome", "待决定"),
+                "有效" if item["decision_valid"] else "未确认或已失效", decision.get("reason", "未记录")))
+            lines.append("  - 用例版本 %s；目标代码 %s；范围 %s；预期 %s（%s）；方案%s选择" % (
+                plan["case_version"], plan["target_revision"], plan["scope"], plan["criterion"],
+                plan["expected_result"], "已" if item["selected"] else "尚未有效"))
+            for execution in item["executions"]:
+                lines.append("  - 执行 %s：原始 %s，来源 %s，版本 %s，证据 %s；环境 %s；观察 %s（%s）" % (
+                    execution["id"], execution["raw_result"], execution["origin"],
+                    execution["target_revision"], execution["source_ref"], execution["environment"],
+                    execution["observation"], execution["observed_at"]))
+            if decision.get("proof"):
+                p = decision["proof"]
+                lines.append("  - 决定者 %s；来源 %s / %s（%s）；选择执行 %s" % (
+                    p["actor"], p["source"], p["reference"], p["at"], decision.get("evidence_id", "无")))
+            if decision.get("owner"):
+                lines.append("  - 责任人 %s；后续 %s；期限 %s" % (
+                    decision["owner"], decision.get("follow_up", "未记录"), decision.get("deadline", "未设置")))
+        for cp, view in quality_report["checkpoints"].items():
+            lines.append("- 检查点 %s：%s；未到期 %s" % (
+                cp, "已记录处置" if view["reviewed"] else "待核对", ", ".join(view["not_due"]) or "无"))
+            decision = (view.get("decision") or {}).get("decision", {})
+            if decision:
+                p = decision["proof"]
+                lines.append("  - %s：%s；决定者 %s；来源 %s（%s）；责任人 %s；后续 %s；期限 %s" % (
+                    decision["outcome"], decision["reason"], p["actor"], p["reference"], p["at"],
+                    decision.get("owner", "不适用"), decision.get("follow_up", "不适用"), decision.get("deadline", "未设置")))
+        lines.append("")
+    lines.append("*边界声明*：以上是本地执行记录及导入证据；合并、发布和 Jira 状态以外部回读为准。用户接受风险不等于测试通过。")
     return "\n".join(lines)
 
 
@@ -168,34 +195,34 @@ def main():
     except ValueError as error:
         print("错误：%s" % error, file=sys.stderr)
         return 2
-    task_dir = task_store.task_directory(args.dir, issue)
-    task = load_json(task_store.task_path(args.dir, issue))
-    auth = load_json(task_dir / "authorization.json")
-    events = load_events(task_dir / "events.jsonl")
-    ci_states = []
-    if task_dir.is_dir():
-        for p in sorted(task_dir.glob("ci-*.json")):
-            doc = load_json(p)
-            if doc:
-                ci_states.append(doc)
-
-    spec = project_rules.load_admission(workspace=args.dir)
-    if args.verification is not None:
-        problems = project_rules.check_verification(spec, args.verification)
-        if problems:
-            for reason in problems:
-                print("拒绝生成证据：验证结论不合规——%s" % reason, file=sys.stderr)
-            return 4
-
-    summary = build_summary(
-        task, auth, events, ci_states, spec, verification=args.verification
-    )
+    try:
+        task_dir = task_store.task_directory(args.dir, issue)
+        task = load_json(task_store.task_path(args.dir, issue))
+        auth = load_json(task_dir / "authorization.json")
+        events = load_events(task_dir / "events.jsonl")
+        ci_states = ci.current_states(args.dir, task)
+        spec = project_rules.load_admission(workspace=args.dir)
+        flexible = project_rules.class_spec(spec, task["task_class"]).get("quality_mode") == "recorded_decision"
+        if args.verification is not None and not flexible:
+            problems = project_rules.check_verification(spec, args.verification)
+            if problems:
+                raise ValueError("验证结论不合规：" + "；".join(problems))
+        rules = quality.config(args.dir)
+        if flexible and not quality.enabled(task, rules):
+            raise ValueError("当前任务启用了质量处置，但缺少匹配的质量配置")
+        quality_report = (quality.report(quality.load(args.dir, task), rules, quality.context(args.dir, task))
+                          if quality.enabled(task, rules) else None)
+        summary = build_summary(task, auth, events, ci_states, spec,
+                                verification=args.verification, quality_report=quality_report)
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        print("拒绝生成证据：%s" % error, file=sys.stderr)
+        return 4
     hits = project_rules.scan_sensitive(spec, summary)
     if hits:
         print("拒绝生成证据：命中敏感内容规则（当前 Project admission.json evidence_rules）",
               file=sys.stderr)
         for lineno, line, reason in hits:
-            print("  第 %d 行 %s：%s" % (lineno, reason, line[:120]), file=sys.stderr)
+            print("  第 %d 行：%s（正文已隐藏）" % (lineno, reason), file=sys.stderr)
         print("请先修正任务事实/验证文本中的敏感内容再重跑；不要手工删改本工具输出。",
               file=sys.stderr)
         return 4

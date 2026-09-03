@@ -17,7 +17,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workflow import ci, evidence, project_rules, repository_worktree, task as workflow_task  # noqa: E402
-from workflow import task_store  # noqa: E402
+from workflow import task_store, quality  # noqa: E402
 
 PASS = 0
 FAIL = 0
@@ -60,6 +60,20 @@ def grant(ws, issue="TAP-123"):
         "--plan-version", "v1", "--dir", str(ws),
         cwd=ws,
     )
+
+
+def confirm_fixture_checkpoint(ws, checkpoint):
+    """测试夹具中的明确人工不适用处置，不写 Jira，不伪造测试通过。"""
+    task_doc = json.loads(task_store.task_path(ws, "TAP-123").read_text())
+    rules = quality.config(ws)
+    state = quality.load(ws, task_doc)
+    view = quality.report(state, rules, quality.context(ws, task_doc))
+    return quality.apply(ws, "TAP-123", task_doc["run_id"], state["revision"], {
+        "action": "checkpoint", "payload": {"checkpoint": checkpoint,
+        "digest": view["checkpoints"][checkpoint]["digest"], "decision": {
+        "outcome": "not_applicable", "reason": "此夹具验证任务基础能力，质量场景由 test_quality 覆盖",
+        "proof": {"actor": "fixture-user", "source": "user_message", "reference": "fixture:decision",
+                  "at": "2026-09-03T10:00:00+08:00"}}}})
 
 
 def main():
@@ -309,7 +323,7 @@ def main():
         code, out = run_tool("task.py", "record", "--key", "problem_version", "--value", "  ", cwd=ws)
         check("record 拒绝空值", code, 2)
         code, out = run_tool("task.py", "advance", "--note", "准入未齐就想推进", cwd=ws)
-        check("准入缺项禁止离开 task_intake", code, 3)
+        check("仓库尚未登记时仍禁止离开 task_intake", code, 3)
         check("缺项提示列出缺失项", "问题版本" in out and "问题现象" in out, True)
         check("缺项提示给出补卡建议", "请补充「问题现象」" in out, True)
         code, out = run_tool("task.py", "checklist", "--json", cwd=ws)
@@ -702,6 +716,8 @@ def main():
             },
             expected_endpoints,
         )
+        confirm_fixture_checkpoint(ws, "q1-intake")
+        confirm_fixture_checkpoint(ws, "q2-plan")
         code, out = run_tool("task.py", "advance", "--note", "设计已确认+授权签发", cwd=ws)
         check("正确授权后进入 implementation", code, 0)
         run_tool("task.py", "activate", "--issue-key", "TAP-999", cwd=ws)
@@ -717,16 +733,17 @@ def main():
 
         # ---- 验证结论规则 ------------------------------------------------
         code, out = run_tool("task.py", "advance", "--note", "没记验证就想开 PR", cwd=ws)
-        check("未记 verification 禁止离开 implementation", code, 3)
+        check("未完成质量检查点禁止离开 implementation", code, 3)
         run_tool("task.py", "record", "--key", "verification", "--value", "mvn -pl iengine test -DskipTests 打包成功", cwd=ws)
         code, out = run_tool("task.py", "advance", "--note", "拿 skipTests 冒充验证", cwd=ws)
-        check("-DskipTests 不被接受为验证结果", code, 3)
+        check("skipTests 文本不能替代质量处置", code, 3)
         run_tool("task.py", "record", "--key", "verification", "--value", "未验证", cwd=ws)
         code, out = run_tool("task.py", "advance", "--note", "占位词冒充验证", cwd=ws)
-        check("占位词不被接受为验证结果", code, 3)
+        check("占位词不能替代质量处置", code, 3)
         run_tool("task.py", "record", "--key", "verification", "--value", "mvn -pl iengine -am test 通过，exit=0", cwd=ws)
-        code, out = run_tool("task.py", "advance", "--note", "验证通过", cwd=ws)
-        check("合规验证后进入 pr_review", code, 0)
+        confirm_fixture_checkpoint(ws, "q3-draft")
+        code, out = run_tool("task.py", "advance", "--note", "用户已处置首轮验证检查点", cwd=ws)
+        check("质量检查点确认处置后进入 pr_review", code, 0)
         code, out = run_tool("task.py", "repository", "cleanup", cwd=ws)
         check("任务清理同步移除 worktree", code, 0)
         remaining_leases = json.loads(
@@ -986,12 +1003,12 @@ def main():
             "pending",
         )
         check(
-            "CI 全绿 -> success",
+            "CI 含跳过 -> skipped",
             ci.classify([
                 {"name": "build", "status": "COMPLETED", "conclusion": "SUCCESS"},
                 {"name": "lint", "status": "COMPLETED", "conclusion": "SKIPPED"},
             ])[0],
-            "success",
+            "skipped",
         )
         verdict, failing = ci.classify([
             {"name": "build", "status": "COMPLETED", "conclusion": "SUCCESS"},
@@ -1001,11 +1018,11 @@ def main():
 
         check("预算初始 3 次", ci.budget_left({"fix_attempts": 0}), 3)
         check("预算用尽为 0", ci.budget_left({"fix_attempts": 5}), 0)
-        code, out = run_tool("ci.py", "record-fix", "--pr", "42", "--dir", str(ws), cwd=ws)
+        code, out = run_tool("ci.py", "record-fix", "--repo", "tapdata/tapdata", "--pr", "42", "--dir", str(ws), cwd=ws)
         check("record-fix 第 1 次", code, 0)
         for _ in range(2):
-            run_tool("ci.py", "record-fix", "--pr", "42", "--dir", str(ws), cwd=ws)
-        code, out = run_tool("ci.py", "record-fix", "--pr", "42", "--dir", str(ws), cwd=ws)
+            run_tool("ci.py", "record-fix", "--repo", "tapdata/tapdata", "--pr", "42", "--dir", str(ws), cwd=ws)
+        code, out = run_tool("ci.py", "record-fix", "--repo", "tapdata/tapdata", "--pr", "42", "--dir", str(ws), cwd=ws)
         check("第 4 次 record-fix 拒绝转人工", code, 3)
 
         # ---- 证据生成 ---------------------------------------------------
@@ -1024,17 +1041,17 @@ def main():
         check("evidence 生成成功", code, 0)
         for needle, label in [
             ("TAP-123", "含任务号"),
-            ("放行 1 / 人工确认 1 / 拒绝 1", "含门禁统计"),
+            ("放行 1 / 请求确认 1 / 拒绝 1", "含门禁统计"),
             ("被拒绝的操作", "列出 deny 项"),
             ("mvn test 全部通过", "含验证结果"),
-            ("修复 3 次", "含 CI 修复次数"),
+            ("修复记账 3 次", "含 CI 修复次数"),
             ("边界声明", "含边界声明"),
         ]:
             check("evidence %s" % label, needle in out, True)
 
         # ---- 证据敏感内容与验证规则 --------------------------------------
         code, out = run_tool("evidence.py", "--dir", str(ws), "--verification", "mvn package -DskipTests", cwd=ws)
-        check("证据拒绝 skipTests 验证", code, 4)
+        check("缺陷证据保留 skipTests 事实但不代替用例验收", code, 0)
         run_tool("task.py", "record", "--key", "note", "--value", "日志在 /Users/someone/logs/tm.log", cwd=ws)
         code, out = run_tool("evidence.py", "--dir", str(ws), "--verification", "mvn -pl x test 通过 exit=0", cwd=ws)
         check("证据拒绝本机绝对路径", code, 4)

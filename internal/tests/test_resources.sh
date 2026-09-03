@@ -79,6 +79,9 @@ for file in \
   policies/operations.json policies/continuity.json \
   workflow/task.py workflow/task_store.py workflow/project_rules.py \
   workflow/authorization.py workflow/ci.py workflow/evidence.py \
+  workflow/quality.py workflow/quality_contract.py workflow/quality_write.py \
+  contracts/quality-action.schema.json contracts/quality-state.schema.json \
+  projects/tapdata/quality.json docs/usage/quality-checkpoints.md tests/test_quality.py \
   projects/tapdata/profile.json projects/tapdata/repositories.json projects/tapdata/admission.json \
   projects/tapdata/skills/tapdata-task/SKILL.md \
   skills/ao-test-takeover/SKILL.md skills/ao-ws-init/SKILL.md \

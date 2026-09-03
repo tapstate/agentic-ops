@@ -11,7 +11,7 @@ python3 workflow/task.py checklist --task-class defect_fix --json   # 机读
 python3 workflow/task.py record --issue-key <JIRA-KEY> --key <fact key> --value <值>
 ```
 
-## 必填项（缺一不可，`task.py advance` 硬拦）
+## 核对项（缺项披露，在质量检查点记录处置）
 
 | 项 | fact key | 到哪里找 | 示例 | 说明 |
 |---|---|---|---|---|
@@ -28,11 +28,11 @@ python3 workflow/task.py record --issue-key <JIRA-KEY> --key <fact key> --value 
 | 复现路径 | `reproduce_path` | 描述「复现路径」章节 | 无法稳定复现时写明已知触发条件 |
 | 验收标准 | `acceptance_criteria` | 描述「验收标准」章节 | 修复后怎样判断可以验收 |
 
-## 准入失败流程（强制点：workflow/task.py advance（离开 task_intake 时 exit 3））
+## 准入失败流程（强制点：workflow/task.py checklist 与 quality.py 检查点确认）
 
-1. 一次列全所有缺失项，不要挤牙膏
-2. 把缺失项与 supplement 文案写成 Jira 评论发布（write_jira_comment 属 free）
-3. python3 workflow/task.py block --reason "..." 并结束本轮，等研发工程师补卡
+1. 一次列全缺失事实与已有 Test Coverage，继续不依赖缺项的源码分析。
+2. 在质量检查点报告缺口并请用户决定补充或带风险继续，保留来源和理由。
+3. 事实不可信、仓库基线不明或权限不足时停止对应步骤，不以质量处置替代安全授权。
 
 ## 修复前门禁（强制点：workflow/task.py advance（进入 implementation 时校验授权存在且 issue_key 一致））
 
@@ -40,7 +40,5 @@ python3 workflow/task.py record --issue-key <JIRA-KEY> --key <fact key> --value 
 
 ## 验证结论规则（强制点：workflow/task.py advance（离开 implementation 时 exit 3））
 
-离开 implementation 前必须 `record --key verification`，且不得命中：
-
-- `-DskipTests|-Dmaven\.test\.skip` —— 跳过测试的构建不能作为验证结果；必须单独执行与变更范围匹配的测试
-- `^\s*(未验证|无需验证|不需要验证|待补充|无|N/?A|TODO|skipped)\s*$` —— 验证结果必须是实际执行的命令及其退出结果，不能是占位词
+由 `workflow/quality.py` 核对用例、实际执行及用户处置；用户可选择补测、不适用、延期或接受风险。原始结果不改写，不要求全绿。文本 verification 仅为记录，不代替用例验收。
+仓库基线、实施授权及外部 Jira Validator 仍独立生效。详见 [质量检查与证据](../../../docs/usage/quality-checkpoints.md)。

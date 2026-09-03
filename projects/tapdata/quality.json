@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "task_classes": [
+    "defect_fix"
+  ],
+  "checkpoints": [
+    {
+      "id": "q1-intake",
+      "title": "接管与用例盘点",
+      "timing": "before_fix"
+    },
+    {
+      "id": "q2-plan",
+      "title": "方案及验收方式确认",
+      "timing": "before_fix"
+    },
+    {
+      "id": "q3-draft",
+      "title": "首轮验证与 Draft PR",
+      "timing": "after_fix"
+    },
+    {
+      "id": "q4-acceptance",
+      "title": "关联用例验收",
+      "timing": "after_fix"
+    },
+    {
+      "id": "q5-review",
+      "title": "审查及 CI 事实",
+      "timing": "after_fix"
+    },
+    {
+      "id": "q6-delivery",
+      "title": "交付证据核对",
+      "timing": "after_fix"
+    }
+  ],
+  "stage_checkpoints": {
+    "implementation": [
+      "q1-intake",
+      "q2-plan"
+    ],
+    "pr_review": [
+      "q3-draft"
+    ],
+    "ci_validation": [
+      "q4-acceptance"
+    ],
+    "completed": [
+      "q5-review",
+      "q6-delivery"
+    ]
+  },
+  "selection_checkpoint": "q2-plan",
+  "methods": {
+    "taptest": {
+      "origins": [
+        "taptest"
+      ],
+      "guidance": "t-layer3-test 的 write-xray-test 生成 Xray 用例，write-test-script 实现脚本；调用者核对技能可用性，以实际 Test Execution 和报告关联单用例。"
+    },
+    "integration": {
+      "origins": [
+        "local_maven",
+        "ci"
+      ],
+      "guidance": "用例与产品模块同工程；先核对代码、POM、Failsafe、路径过滤和实际报告。已有覆盖由 CI 触发，新用例在所属工程开发。Maven 本地与 CI 是执行来源。"
+    },
+    "manual": {
+      "origins": [
+        "manual"
+      ],
+      "guidance": "关联真实手工用例、执行人、环境、步骤/预期、观察结果及附件；不把无法自动化等同免测。"
+    },
+    "other": {
+      "origins": [
+        "external"
+      ],
+      "guidance": "用户明确批准的其它验证方式，单项单用例，记录方法细节及可回查证据。"
+    }
+  },
+  "knowledge": [
+    {
+      "name": "公司知识库",
+      "url": "https://github.com/tapstate/wiki",
+      "git": "git@github.com:tapstate/wiki.git"
+    },
+    {
+      "name": "集成测试规范索引",
+      "url": "https://github.com/tapstate/wiki/tree/main/06_研发流程/集成测试用例规范",
+      "note": "07_集成测试可作实现线索，执行事实以目标分支代码/POM/报告为准。"
+    }
+  ],
+  "jira": {
+    "automatic_transitions": false,
+    "note": "按 Jira 实际 Validator 核对 Test Coverage；附件与线上规则不一致时先报告冲突。Tests Passed、PR Submitted、合入、发布、Done 是不同外部事实，不由本地检查点代替。"
+  },
+  "draft_pr": "首次有意义变更且第一轮针对性验证后建议 Draft PR；验证受阻时披露结果并按首个有意义提交/一个工作日要求处理。正式提审依 Jira 标准流程。",
+  "standards": [
+    "TapData-研发与发布流程规范-v1.4（2026-09-02）",
+    "TapData-T3工单处理流程规范-v1.5（2026-09-02）"
+  ]
+}
