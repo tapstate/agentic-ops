@@ -49,6 +49,16 @@ class JiraStatusTests(unittest.TestCase):
         done = jira_status.complete(self.base, "TAP-123", "takeover", "unknown", readback, "")
         self.assertEqual(done["outcome"], "succeeded")
 
+    def test_takeover_accepts_configured_chinese_target_status(self):
+        snapshot = self.snapshot()
+        snapshot["transitions"][0]["to"]["name"] = "正在进行"
+        ready = jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)
+        self.assertEqual(ready["outcome"], "ready")
+        self.assertEqual(ready["target_statuses"], ["In Progress", "正在进行"])
+        readback = self.snapshot(status="正在进行")
+        done = jira_status.complete(self.base, "TAP-123", "takeover", "unknown", readback, "")
+        self.assertEqual(done["outcome"], "succeeded")
+
     def test_mismatch_and_missing_fields_skip_without_retry(self):
         result = jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot(status="Open"))
         self.assertEqual(result["reason"], "jira_status_mismatch")

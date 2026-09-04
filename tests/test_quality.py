@@ -326,6 +326,16 @@ class QualityTests(unittest.TestCase):
         view = self.apply("readback", dict(readback, body=record["body"]))
         self.assertEqual(view["publications"]["summary"]["status"], "verified")
 
+    def test_prepare_write_ignores_quality_action_input_files(self):
+        self.apply("draft", {"id": "q1-intake-jira", "body": "检查点评论"})
+        record = self.view()["publications"]["q1-intake-jira"]
+        self.apply("confirm", {"id": "q1-intake-jira", "digest": record["digest"], "proof": proof()})
+        command = {"action": "prepare_write", "payload": {"id": "q1-intake-jira", "digest": record["digest"]}}
+        (task_store.task_directory(self.base, "TAP-123") / "quality-prepare-q1.json").write_text(
+            json.dumps(command), encoding="utf-8")
+        view = self.apply("prepare_write", command["payload"])
+        self.assertEqual(view["publications"]["q1-intake-jira"]["status"], "intent")
+
     def test_changed_draft_and_facts_require_new_confirmation(self):
         self.apply("draft", {"id": "summary", "body": "正文一"})
         d = self.view()["publications"]["summary"]["digest"]

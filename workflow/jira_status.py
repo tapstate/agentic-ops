@@ -104,10 +104,17 @@ def transition_for(snapshot, rule):
         target = transition.get("to") or {}
         if configured_id and str(transition.get("id") or "") != configured_id:
             continue
-        if target.get("name") != rule["to"]:
+        if not status_matches(rule, target.get("name"), "to"):
             continue
         return transition
     return None
+
+
+def status_matches(rule, status, direction):
+    configured = rule.get(direction, [])
+    names = set(configured if isinstance(configured, list) else [configured])
+    names.update(rule.get(direction + "_aliases", []))
+    return status in names
 
 
 def missing_fields(fields, transition):
@@ -173,15 +180,16 @@ def prepare(base, issue_key, trigger, snapshot):
         return dict(state["attempts"][trigger], repeated=True)
     issue, fields, status = issue_from(snapshot, issue_key)
     record = {"trigger": trigger, "at": now(), "source_ref": snapshot["source_ref"],
-              "from_status": status["name"], "target_status": rule["to"]}
+              "from_status": status["name"], "target_status": rule["to"],
+              "target_statuses": sorted({rule["to"], *rule.get("to_aliases", [])})}
     record["field_plan"] = guidance_for(rule.get("field_requirements", []), rules, task)
     if task["stage"] not in rule.get("local_stages", []):
         record.update(outcome="skipped", reason="local_stage_mismatch",
                       guidance=[{"guidance": "当前本地阶段为 %s，本节点只允许在 %s 尝试。" %
                                              (task["stage"], "、".join(rule.get("local_stages", [])))}])
-    elif status["name"] == rule["to"]:
+    elif status_matches(rule, status["name"], "to"):
         record.update(outcome="satisfied", reason="target_already_reached", guidance=[])
-    elif status["name"] not in rule.get("from", []):
+    elif not status_matches(rule, status["name"], "from"):
         record.update(outcome="skipped", reason="jira_status_mismatch",
                       guidance=[{"guidance": "Jira 当前状态为 %s，不能由本节点自动流转到 %s；PR Ready 时人工处理。" %
                                              (status["name"], rule["to"])}])
@@ -231,7 +239,7 @@ def complete(base, issue_key, trigger, outcome, snapshot, message):
     if not record or record.get("outcome") != "ready":
         raise ValueError("本节点没有待完成的 Jira 状态转换意图")
     _, _, status = issue_from(snapshot, issue_key)
-    reached = status["name"] == record["target_status"]
+    reached = status["name"] in record.get("target_statuses", [record["target_status"]])
     record["completed_at"] = now()
     record["readback_ref"] = snapshot["source_ref"]
     record["readback_status"] = status["name"]
