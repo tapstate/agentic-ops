@@ -152,6 +152,49 @@ def jira_status_intent(task_directory, transition_id):
     return "matched"
 
 
+def jira_watermark_intent(task_directory, issue_key, field_id, digest):
+    """核对当前 run 是否准备了同一接管水印字段载荷；不解释项目规则。"""
+    task = _read_json(Path(task_directory) / "state.json")
+    if (not isinstance(task, dict) or str(task.get("issue_key") or "").upper() != str(issue_key or "").upper() or
+            not field_id or not digest):
+        return "missing"
+    matched = False
+    for path in sorted(Path(task_directory).glob("jira-watermark-*.json")):
+        state = _read_json(path)
+        record = state.get("watermark") if isinstance(state, dict) else None
+        if (state.get("run_id") == task.get("run_id") and isinstance(record, dict) and
+                record.get("outcome") == "ready" and record.get("issue_key") == task.get("issue_key") and
+                isinstance(record.get("version"), str) and record["version"] and
+                isinstance(record.get("issue_type_id"), str) and record["issue_type_id"] and
+                isinstance(record.get("source_ref"), str) and record["source_ref"] and
+                record.get("logical_key") == "agenticops_version" and
+                record.get("write_mode") == "overwrite" and record.get("field_id") == field_id and
+                record.get("payload_digest") == digest and
+                record.get("native_request") == {
+                    "issue_key": task.get("issue_key"), "fields": {field_id: record["version"]}
+                }):
+            matched = True
+            break
+    if not matched:
+        return "missing"
+    events = Path(task_directory) / "events.jsonl"
+    try:
+        lines = events.read_text(encoding="utf-8").splitlines() if events.is_file() else []
+    except OSError:
+        return "missing"
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (event.get("reason_code") == "jira_watermark_intent_covered" and
+                event.get("agentic_run_id") == task.get("run_id") and
+                event.get("jira_watermark_field") == field_id and
+                event.get("jira_watermark_digest") == digest):
+            return "consumed"
+    return "matched"
+
+
 def find_authorization(cwd, context=None, issue_key=None):
     """从项目工作空间的 active 任务中唯一解析当前操作授权。"""
     directory = find_task_directory(cwd, context=context, issue_key=issue_key)
@@ -470,6 +513,14 @@ def evaluate(operation, context, auth, policy, now=None):
             operation,
             "当前 task/run 已准备同一 Jira 状态同步意图，只允许本节点尝试一次并写后回读",
             "jira_status_intent_covered",
+        )
+
+    if operation == "edit_jira_issue" and context.get("jira_watermark_intent") == "matched":
+        return _result(
+            ALLOW,
+            operation,
+            "当前 task/run 已准备同一 Jira 接管版本水印，只允许本节点写入一次并回读",
+            "jira_watermark_intent_covered",
         )
 
     if operation == "git_push":

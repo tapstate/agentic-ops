@@ -58,7 +58,8 @@ def validate_request(request):
         return "target 必须是对象"
     target_fields = {
         "repository", "git_cwd", "workspace", "issue_key", "branch", "push_source_ref",
-        "push_destination_ref", "push_target_branch", "jira_transition_id", "branch_relevant",
+        "push_destination_ref", "push_target_branch", "jira_transition_id", "jira_watermark_field",
+        "jira_watermark_digest", "branch_relevant",
     }
     target_unexpected = sorted(set(target) - target_fields)
     if target_unexpected:
@@ -67,7 +68,8 @@ def validate_request(request):
         key in target and not isinstance(target[key], str)
         for key in (
             "repository", "git_cwd", "workspace", "issue_key", "branch", "push_source_ref",
-            "push_destination_ref", "push_target_branch", "jira_transition_id",
+            "push_destination_ref", "push_target_branch", "jira_transition_id", "jira_watermark_field",
+            "jira_watermark_digest",
         )
     ):
         return "target 仓库和分支字段必须是字符串"
@@ -131,6 +133,9 @@ def _context(request):
         context["issue_key"] = target["issue_key"]
     if target.get("jira_transition_id"):
         context["jira_transition_id"] = target["jira_transition_id"]
+    for field in ("jira_watermark_field", "jira_watermark_digest"):
+        if target.get(field):
+            context[field] = target[field]
     if target.get("branch"):
         context["branch"] = target["branch"]
     for field in ("push_source_ref", "push_destination_ref", "push_target_branch"):
@@ -248,6 +253,11 @@ def evaluate_request(request, policy_path=None):
             context["jira_status_intent"] = engine.jira_status_intent(
                 task_directory, context.get("jira_transition_id")
             )
+        if "edit_jira_issue" in request["operations"]:
+            context["jira_watermark_intent"] = engine.jira_watermark_intent(
+                task_directory, context.get("issue_key"), context.get("jira_watermark_field"),
+                context.get("jira_watermark_digest")
+            )
     audit_cwd = gate_cwd if task_directory is not None else request["cwd"]
     warnings = []
 
@@ -335,15 +345,23 @@ def evaluate_request(request, policy_path=None):
             "authorization_file": authorization_path,
             "agentic_run_id": context.get("agentic_run_id"),
             "jira_transition_id": context.get("jira_transition_id"),
+            "jira_watermark_field": context.get("jira_watermark_field"),
+            "jira_watermark_digest": context.get("jira_watermark_digest"),
         },
     )
     if audit_error:
-        if response["reason_code"] == "jira_status_intent_covered":
+        if response["reason_code"] in ("jira_status_intent_covered", "jira_watermark_intent_covered"):
             response.update(
                 decision=engine.DENY,
-                reason="Jira 状态同步意图无法写入单次消费审计，拒绝外部调用",
-                reason_code="jira_status_intent_audit_failed",
-                required_action="保留当前状态并转人工处理；Agent 不得重试该 Jira 转换。",
+                reason=("Jira 状态同步意图无法写入单次消费审计，拒绝外部调用"
+                        if response["reason_code"] == "jira_status_intent_covered"
+                        else "Jira 接管水印意图无法写入单次消费审计，拒绝外部调用"),
+                reason_code=("jira_status_intent_audit_failed"
+                             if response["reason_code"] == "jira_status_intent_covered"
+                             else "jira_watermark_intent_audit_failed"),
+                required_action=("保留当前状态并转人工处理；Agent 不得重试该 Jira 转换。"
+                                 if response["reason_code"] == "jira_status_intent_covered"
+                                 else "保留当前状态并回读 Jira；Agent 不得重试该字段写入。"),
             )
         else:
             response["warnings"].append(audit_error)

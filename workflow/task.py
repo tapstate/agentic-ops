@@ -41,7 +41,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from gate import engine  # noqa: E402
-from workflow import issue_versions, project_rules, quality, repository_worktree, task_store  # noqa: E402
+from workflow import issue_versions, jira_watermark, project_rules, quality, repository_worktree, task_store  # noqa: E402
 
 STAGES = [
     "waiting_takeover",
@@ -456,6 +456,8 @@ def cmd_repository_cleanup(args):
 def _check_advance(task, target, base, spec):
     """返回阻止推进的原因列表。"""
     problems = []
+    if target == "task_intake":
+        problems.extend(jira_watermark.takeover_problems(base, task))
     if target in ("design_review", "implementation"):
         problems.extend(issue_versions.problems(base, task))
     flexible = project_rules.class_spec(spec, task["task_class"]).get("quality_mode") == "recorded_decision"
@@ -650,7 +652,7 @@ def cmd_reset(args):
 
 
 NEXT_GUIDE = {
-    "waiting_takeover": "核对负责人/状态映射后 advance 进入 task_intake；随后用 jira_status.py 在 takeover 节点同步尝试一次 In Progress",
+    "waiting_takeover": "读取 Jira 快照后用 jira_watermark.py prepare 准备精确水印；原生写入并回读 verified 后 advance 进入 task_intake",
     "task_intake": "先完成 takeover 状态同步尝试；再 checklist/record 完成准入 -> repository add -> repository prepare 固化本地基线 -> 源码分析 -> advance",
     "design_review": "基于任务 worktree 形成方案并写入 Jira -> 等研发工程师确认这一真实人工决策 -> workflow/authorization.py grant -> advance",
     "implementation": "在授权范围内实现+测试；全部 Q2 已选修复后检查项在最终 SHA 符合预期时自动记录并回写 Q3，再提交/推送和创建 Draft PR；next/status 找出真实阻塞，不把原子步骤成功当停点",

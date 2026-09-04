@@ -576,6 +576,26 @@ class ContractConformanceTest(unittest.TestCase):
         )
         self.assertEqual(["transition_jira_status"], jira_operations)
         self.assertEqual("421", jira_target["jira_transition_id"])
+        jira_operations, _, jira_target = classify_tool_call(
+            "mcp__atlassian__edit_issue",
+            {"issueKey": "TAP-123", "fields": {"customfield_10421": "develop-v1.0-31-deb9c105"}},
+        )
+        self.assertEqual(["edit_jira_issue"], jira_operations)
+        self.assertEqual("customfield_10421", jira_target["jira_watermark_field"])
+        self.assertRegex(jira_target["jira_watermark_digest"], r"^[a-f0-9]{64}$")
+        self.assertNotIn(
+            "jira_watermark_field",
+            classify_tool_call("mcp__atlassian__edit_issue", {
+                "issueKey": "TAP-123", "fields": {"customfield_10421": "a", "summary": "b"},
+            })[2],
+        )
+        self.assertNotIn(
+            "jira_watermark_field",
+            classify_tool_call("mcp__atlassian__edit_issue", {
+                "issueKey": "TAP-123", "fields": {"customfield_10421": "a"},
+                "update": {"summary": [{"set": "not allowed"}]},
+            })[2],
+        )
         self.assertEqual(
             ["pr_merge"],
             classify_tool_call("mcp__github__merge_pull_request", {"repository": "acme/widget"})[0],

@@ -15,8 +15,9 @@ metadata:
 2. 已注册任务用 `status --issue-key <issue-key>` 从当前阶段恢复，不重复已完成步骤。
 3. 新任务先读取 Jira 事实。仅当状态精确为 `Analyzed` 且经办人为当前 Jira 用户时，才执行 `task.py init --issue-key TAP-xxx --task-class <defect_fix|feature_change|technical_task> --dir <project-workspace>`；任一条件不符或事实无法核验时拒绝接管，不得初始化本地任务状态。初始化不会停用其它 active 任务。
 4. 已存在任务必须让研发工程师选择继续现有 run，或清理后用当前 `--expected-run-id` reset；选择完成后继续流程，不把接管、activate 或 reset 的原子成功当作停点。
-5. 核对负责人和状态映射后进入 `task_intake`。立即从 Jira 原生工具读取当前 issue、当前用户和可用 transitions，按质量文档执行 `jira_status.py prepare --trigger takeover`；返回 `ready` 时只用其精确 transition ID 尝试一次 `In Progress` 并回读后 `complete`，其它结果记录并继续。状态同步失败不是本地门禁。
-6. 持续完成准入、仓库登记、本地基线准备和源码分析，直到方案确认、风险授权、事实不可信或其它真实人工决策点。
+5. 进入 `task_intake` 前，先用 Jira 原生工具读取当前 issue 并保存带 `source_ref` 的快照，执行 `jira_watermark.py prepare --issue-key <issue-key> --input <snapshot.json> --dir <project-workspace>`。若返回 `ready`，只按其 `native_request` 用明确的 Jira 编辑工具覆盖一个 `customfield_<ID>`；随后重新读取当前 issue，并执行 `complete --outcome unknown --input <readback.json>`。只有返回 `verified` 才可 advance；Jira 结果不明确时停止写入，可用新的只读快照再次 complete，禁止重发字段写入。
+6. 进入 `task_intake` 后，立即从 Jira 原生工具读取当前 issue、当前用户和可用 transitions，按质量文档执行 `jira_status.py prepare --trigger takeover`；返回 `ready` 时只用其精确 transition ID 尝试一次 `In Progress` 并回读后 `complete`，其它结果记录并继续。状态同步失败不是本地门禁。
+7. 持续完成准入、仓库登记、本地基线准备和源码分析，直到方案确认、风险授权、事实不可信或其它真实人工决策点。
 
 ## 准入、设计和多仓库
 
