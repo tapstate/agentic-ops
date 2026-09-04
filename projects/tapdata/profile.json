@@ -9,7 +9,12 @@
     "site": "https://tapdata.atlassian.net",
     "project_key": "TAP",
     "issue_types": ["Story", "故事", "Bug", "缺陷", "Task", "任务"],
-    "task_query": "project = TAP AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC",
+    "task_query": "project = TAP AND assignee = currentUser() AND status = Analyzed ORDER BY updated DESC",
+    "takeover": {
+      "required_status": "Analyzed",
+      "required_assignee": "currentUser()",
+      "on_mismatch": "deny"
+    },
     "description_sections": [
       "问题分支", "问题版本", "问题现象", "复现路径", "验收标准", "仓库分支"
     ],

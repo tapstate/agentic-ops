@@ -41,20 +41,17 @@
       "tapdata/t-layer3-test": "develop"
     },
     "keep_current_repositories": [
-      "tapdata/tapdata-application",
-      "tapdata/feishu_robot"
+      "tapdata/tapdata-application"
     ],
+    "fixed_branches": {
+      "tapdata/hazelcast": "release-v5.5.0"
+    },
     "independent_repositories": [
-      "tapdata/tapdata-cloud",
-      "tapdata/hazelcast",
       "tapdata/t-layer3-test",
       "tapdata/docs",
-      "tapdata/docs-en",
-      "tapdata/mcp-tap-server",
-      "tapdata/solutions",
-      "tapdata/fhir-solution"
+      "tapdata/docs-en"
     ],
-    "rule": "main 时全部 linked 仓使用 main；develop 时 license 使用 main、其余 linked 仓使用 develop；release 或任务分支先精确匹配同名分支，缺失时按 PluginKit release、固定回退或 license 回退解析。tapdata-application 固定 main；t-layer3-test 没有同名分支时回退 develop；其它 keep_current 与 independent 仓库在 Source Pool 分析中标记 unchanged。"
+    "rule": "main 时全部 linked 仓使用 main；develop 时 license 使用 main、其余 linked 仓使用 develop；release 或任务分支先精确匹配同名分支，缺失时按 PluginKit release、固定分支、固定回退或 license 回退解析。tapdata-application 固定 main；hazelcast 固定参与并使用 release-v5.5.0；t-layer3-test 没有同名分支时回退 develop；其它 keep_current 与 independent 仓库在 TapData 模块根目录分析中标记 unchanged。"
   },
   "versions": {
     "current": {
@@ -62,7 +59,6 @@
       "source": "由 repositories.json 的 baseline_branch 于 2026-08-31 汇总；不是已发布语义版本的替代品",
       "branches": {
         "tapdata/tapdata": "develop",
-        "tapdata/tapdata-cloud": "develop",
         "tapdata/tapdata-common-lib": "develop",
         "tapdata/tapdata-connectors": "develop",
         "tapdata/tapdata-connectors-enterprise": "develop",
@@ -71,13 +67,9 @@
         "tapdata/tapdata-web": "develop",
         "tapdata/hazelcast": "release-v5.5.0",
         "tapdata/tapdata-application": "main",
-        "tapdata/feishu_robot": "master",
         "tapdata/t-layer3-test": "develop",
         "tapdata/docs": "main",
-        "tapdata/docs-en": "main",
-        "tapdata/mcp-tap-server": "main",
-        "tapdata/solutions": "main",
-        "tapdata/fhir-solution": "main"
+        "tapdata/docs-en": "main"
       }
     }
   }

@@ -68,12 +68,25 @@ def confirm_fixture_checkpoint(ws, checkpoint):
     rules = quality.config(ws)
     state = quality.load(ws, task_doc)
     view = quality.report(state, rules, quality.context(ws, task_doc))
-    return quality.apply(ws, "TAP-123", task_doc["run_id"], state["revision"], {
+    view = quality.apply(ws, "TAP-123", task_doc["run_id"], state["revision"], {
         "action": "checkpoint", "payload": {"checkpoint": checkpoint,
         "digest": view["checkpoints"][checkpoint]["digest"], "decision": {
         "outcome": "not_applicable", "reason": "此夹具验证任务基础能力，质量场景由 test_quality 覆盖",
         "proof": {"actor": "fixture-user", "source": "user_message", "reference": "fixture:decision",
                   "at": "2026-09-03T10:00:00+08:00"}}}})
+    def apply(action, payload):
+        nonlocal view
+        view = quality.apply(ws, "TAP-123", task_doc["run_id"], view["revision"], {"action": action, "payload": payload})
+    apply("draft", {"id": checkpoint, "checkpoint": checkpoint, "body": view["checkpoints"][checkpoint]["publication_body"]})
+    record = view["publications"][checkpoint]
+    apply("confirm", {"id": checkpoint, "digest": record["digest"],
+                      "proof": {"actor": "fixture-user", "source": "user_message", "reference": "fixture:publish",
+                                "at": "2026-09-03T10:00:00+08:00"}})
+    apply("prepare_write", {"id": checkpoint, "digest": record["digest"]})
+    record = view["publications"][checkpoint]
+    apply("readback", {"id": checkpoint, "operation_id": record["operation_id"], "site": record["site"],
+                       "issue_key": "TAP-123", "comment_id": checkpoint, "body": record["body"], "source_ref": "fixture:jira/" + checkpoint})
+    return view
 
 
 def main():
@@ -338,7 +351,14 @@ def main():
         check("缺项提示给出补卡建议", "请补充「问题现象」" in out, True)
         code, out = run_tool("task.py", "checklist", "--json", cwd=ws)
         check("checklist --json 输出缺失项", sorted(json.loads(out)["missing"]), ["problem_symptom", "problem_version"])
-        run_tool("task.py", "record", "--key", "problem_version", "--value", "develop", cwd=ws)
+        version_input = ws / "issue-versions.json"
+        version_input.write_text(json.dumps({"issue": {"key": "TAP-123", "fields": {"versions": [{"id": "1", "name": "develop"}]}},
+                                            "source_ref": "fixture:jira/TAP-123", "develop": {"status": "present",
+                                            "revision": expected_tapdata_base, "source_ref": "fixture:analysis"}}))
+        code, out = run_tool("task.py", "issue-versions", "--issue-key", "TAP-123", "--expected-run-id", first_run,
+                             "--input", str(version_input), cwd=ws)
+        check("影响版本从 Jira 结构导入并核验优先修复线", code, 0)
+        run_tool("task.py", "record", "--key", "fix_plan", "--value", "夹具方案：仅验证工作流生命周期，无业务变更", cwd=ws)
         run_tool("task.py", "record", "--key", "problem_symptom", "--value", "TM 启动持续输出 ES health check refused", cwd=ws)
         code, out = run_tool("task.py", "advance", "--note", "准入齐备但还没有本地基线", cwd=ws)
         check("没有登记仓库禁止离开 task_intake", code, 3)
@@ -756,6 +776,10 @@ def main():
         check("质量检查点确认处置后进入 pr_review", code, 0)
         code, out = run_tool("task.py", "repository", "cleanup", cwd=ws)
         check("任务清理同步移除 worktree", code, 0)
+        cleaned = json.loads(task_store.task_path(ws, "TAP-123").read_text())
+        check("受控清理保留各仓最终提交以维持验收绑定",
+              [r["worktree"].get("final_revision") for r in cleaned["repositories"]],
+              [r["base_sha"] for r in prepared_task["repositories"]])
         remaining_leases = json.loads(
             (product_root / ".local" / "repository-worktrees.json").read_text(encoding="utf-8")
         )["leases"]

@@ -16,15 +16,16 @@ python3 workflow/task.py record --issue-key <JIRA-KEY> --key <fact key> --value 
 | 项 | fact key | 到哪里找 | 示例 | 说明 |
 |---|---|---|---|---|
 | 问题分支 | `problem_branch` | Jira 描述「问题分支」章节 | develop | 缺陷在哪个分支可复现/被发现 |
-| 问题版本 | `problem_version` | Jira 描述「问题版本」章节 | develop | 问题所属主仓库版本；各仓库基线分支按 profile.json baseline_branches 对齐 |
+| 问题版本 | `problem_version` | Jira 影响版本 fields.versions（多选） | 4.18.0、4.21.0 | 保留全部影响版本；主仓找不到对应分支则拒绝。先核验 develop 是否有同一缺陷，有则优先修复 develop，影响版本由研发合并修复；否则只选择一个影响版本修复，其余人工合并。由 task.py issue-versions 导入，不手填分支替代版本。 |
 | 问题现象 | `problem_symptom` | Jira 摘要或描述「问题现象」章节 | TM 启动持续输出 ES health check refused 告警 | 用户/日志/系统实际观察到的现象 |
 
-以下项 agent 可结合卡片/日志/源码给出**建议值**，但必须由研发工程师确认后再 record，不得替确认：问题分支、问题版本、问题现象。
+以下项 agent 可结合卡片/日志/源码给出**建议值**，但必须由研发工程师确认后再 record，不得替确认：问题分支、问题现象。
 
 ## 可选项（有则记录）
 
 | 项 | fact key | 到哪里找 | 说明 |
 |---|---|---|---|
+| 修复方案 | `fix_plan` | 本地源码分析及研发确认 | 根因、修改范围、修复方式、风险及回滚；在 Q2 确认前记录，并随检查点回写 Jira |
 | 复现路径 | `reproduce_path` | 描述「复现路径」章节 | 无法稳定复现时写明已知触发条件 |
 | 验收标准 | `acceptance_criteria` | 描述「验收标准」章节 | 修复后怎样判断可以验收 |
 

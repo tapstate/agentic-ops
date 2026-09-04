@@ -3,9 +3,34 @@ from workflow import quality, task_store
 import json
 
 
-def snapshot(model, rules, ctx):
+def snapshot(model, rules, ctx, checkpoint=None):
+    if checkpoint:
+        view = quality.checkpoint_view(model, checkpoint, rules, ctx)
+        return quality.digest([view["digest"], view["decision"], view["reviewed"]])
     return quality.digest({"items": model["items"], "checkpoints": model["checkpoints"],
                            "context": ctx, "rules": rules})
+
+
+def checkpoint_body(model, checkpoint, rules, ctx):
+    view = quality.checkpoint_view(model, checkpoint, rules, ctx)
+    if not view["reviewed"]:
+        raise ValueError("检查点尚未有效确认，不能生成已确认评论")
+    fact_keys = list(rules.get("intake_fact_keys", ctx["facts"]))
+    if checkpoint != rules["checkpoints"][0]["id"]:
+        fact_keys += rules.get("plan_fact_keys", [])
+    facts = {k: v for k, v in ctx["facts"].items() if k in fact_keys}
+    lines = ["%s / %s：%s" % (ctx["issue_key"], ctx["run_id"], view["handoff"]["title"]),
+             "任务事实：" + json.dumps(facts, ensure_ascii=False, sort_keys=True),
+             "检查点处置：" + json.dumps(view["decision"]["decision"], ensure_ascii=False, sort_keys=True)]
+    for key, item in model["items"].items():
+        if key in view["due"]:
+            content = {"plan": item["plan"], "executions": item["executions"], "decision": item["decision"]}
+        elif checkpoint != rules["checkpoints"][0]["id"]:
+            content = {"plan": quality.selection_plan(item["plan"], rules), "尚未到验收点": True}
+        else:
+            continue
+        lines.append("检查项 %s：%s" % (key, json.dumps(content, ensure_ascii=False, sort_keys=True)))
+    return "\n\n".join(lines)
 
 
 def reduce(model, command, rules, ctx):
@@ -16,15 +41,20 @@ def reduce(model, command, rules, ctx):
         previous = records.get(key)
         if previous and previous["status"] in ("intent", "unknown", "created", "verified"):
             raise ValueError("该草稿已准备发送或已发送，保留现场；不得覆盖")
-        records[key] = {"body": p["body"], "status": "draft", "snapshot": snapshot(model, rules, ctx),
+        cp = p.get("checkpoint")
+        if cp and p["body"] != checkpoint_body(model, cp, rules, ctx):
+            raise ValueError("检查点评论必须使用 status 返回的完整 publication_body，不能省略已确认方案或风险")
+        records[key] = {"body": p["body"], "status": "draft", "snapshot": snapshot(model, rules, ctx, cp),
                         "site": rules["jira"]["site"], "issue_key": ctx["issue_key"]}
+        if cp:
+            records[key]["checkpoint"] = cp
         records[key]["digest"] = quality.digest(records[key])
         return
     record = records.get(key)
     if not record:
         raise ValueError("草稿不存在")
     if action in ("confirm", "prepare_write"):
-        if p["digest"] != record["digest"] or record["snapshot"] != snapshot(model, rules, ctx):
+        if p["digest"] != record["digest"] or record["snapshot"] != snapshot(model, rules, ctx, record.get("checkpoint")):
             raise ValueError("草稿正文或质量事实已变化，需要重新生成并确认")
         if action == "confirm":
             if record["status"] not in ("draft", "confirmed"):

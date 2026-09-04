@@ -1,5 +1,10 @@
 {
   "schema_version": 1,
+  "contract_revision": 2,
+  "commit_evidence_checkpoint": "q4-acceptance",
+  "intake_fact_keys": ["problem_branch", "problem_version", "problem_symptom", "reproduce_path", "acceptance_criteria", "issue_version_plan"],
+  "plan_fact_keys": ["fix_plan"],
+  "require_checkpoint_publication": true,
   "task_classes": [
     "defect_fix"
   ],

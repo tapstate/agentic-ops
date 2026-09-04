@@ -767,12 +767,14 @@ def _cleanup_task_locked(workspace, issue_key, *, delete_branches=False):
             item = check["item"]
             path = check["path"]
             main = check["main"]
+            final_revision = _run(["git", "-C", str(path), "rev-parse", "HEAD"]).stdout.strip()
             _run(["git", "-C", str(main), "worktree", "remove", str(path)])
             _prune_empty_worktree_parents(workspace, path)
             _run(["git", "-C", str(main), "worktree", "prune"])
             item["worktree"] = {
                 "path": str(path),
                 "status": "removed",
+                "final_revision": final_revision,
                 "removed_at": now(),
                 "branch_cleanup": "retained",
             }

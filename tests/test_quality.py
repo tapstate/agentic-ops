@@ -42,7 +42,7 @@ class QualityTests(unittest.TestCase):
         (self.base / ".agenticops").mkdir()
         (self.base / ".agenticops/workspace.json").write_text(json.dumps({"project": "tapdata", "product_root": str(product)}))
         self.task = {"issue_key": "TAP-123", "run_id": "run-0123456789ab", "task_class": "defect_fix",
-                     "stage": "implementation", "facts": {}, "repositories": [
+                     "stage": "implementation", "facts": {"fix_plan": "修正目标断言的实现并回归，风险限定在夹具"}, "repositories": [
                          {"repository": "tapdata/tapdata", "approved_scope": "bug-fix"},
                          {"repository": "tapdata/tapdata-manager", "approved_scope": "bug-fix"}],
                      "pending": None, "history": []}
@@ -63,7 +63,8 @@ class QualityTests(unittest.TestCase):
         plan = {"id": key, "checkpoint": "q2-plan" if before else "q4-acceptance",
                 "timing": "before_fix" if before else "after_fix", "case_ref": "case:" + key,
                 "case_version": "test-v1", "case_status": "existing", "method": method,
-                "repository": repo, "target_revision": "sha-v1", "criterion": "目标行为符合预期",
+                "repository": repo, "target_revision": "a" * 40, "criterion": "目标行为符合预期",
+                "steps": "启动测试服务，执行目标操作，检查日志和返回结果",
                 "expected_result": "FAIL" if before else "PASS", "scope": "目标故障路径"}
         self.apply("item", {"plan": plan, "reason": "已有覆盖，建议复用"})
         return plan
@@ -165,7 +166,7 @@ class QualityTests(unittest.TestCase):
 
     def test_stale_target_and_method_evidence_rejected(self):
         self.plan(); self.select()
-        for key, value in (("target_revision", "old-sha"), ("case_version", "old-test"), ("case_ref", "another-case"), ("repository", "tapdata/tapdata-manager")):
+        for key, value in (("target_revision", "b" * 40), ("case_version", "old-test"), ("case_ref", "another-case"), ("repository", "tapdata/tapdata-manager")):
             self.execute(execution_id="wrong-" + key.replace("_", "-"), **{key: value})
             with self.assertRaises(ValueError):
                 self.decide(evidence_id="wrong-" + key.replace("_", "-"))
@@ -202,6 +203,107 @@ class QualityTests(unittest.TestCase):
         d = self.view()["publications"]["summary"]["digest"]
         self.apply("confirm", {"id": "summary", "digest": d, "proof": proof()})
         return self.apply("prepare_write", {"id": "summary", "digest": d})["publications"]["summary"]
+
+    def publish_checkpoint(self, cp):
+        self.apply("draft", {"id": cp, "checkpoint": cp, "body": self.view()["checkpoints"][cp]["publication_body"]})
+        record = self.view()["publications"][cp]
+        self.apply("confirm", {"id": cp, "digest": record["digest"], "proof": proof()})
+        record = self.apply("prepare_write", {"id": cp, "digest": record["digest"]})["publications"][cp]
+        self.apply("receipt", {"id": cp, "operation_id": record["operation_id"], "result": "created", "comment_id": cp})
+        return self.apply("readback", {"id": cp, "operation_id": record["operation_id"], "site": record["site"],
+                         "issue_key": "TAP-123", "comment_id": cp, "body": record["body"], "source_ref": "fixture:jira/" + cp})
+
+    def test_plan_confirmation_survives_code_and_execution_but_not_plan_change(self):
+        self.checkpoint("q1-intake", outcome="not_applicable")
+        plan = self.plan()
+        plan["target_revision"] = "pending"
+        self.apply("item", {"plan": plan, "reason": "尚未编码"})
+        self.select(); self.checkpoint("q2-plan")
+        self.publish_checkpoint("q2-plan")
+        before = self.view()["checkpoints"]["q2-plan"]["digest"]
+        plan["target_revision"] = "a" * 40
+        self.apply("item", {"plan": plan, "reason": "绑定实际提交"})
+        self.assertTrue(self.view()["items"]["case-a"]["selected"])
+        self.execute(); self.decide(); self.checkpoint("q4-acceptance")
+        self.task["facts"]["verification"] = "完成首轮测试"; self.save_task()
+        ci_state = ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata")
+        ci_state["history"].append({"head": "a" * 40, "verdict": "success"})
+        ci.save_state(self.base, "TAP-123", "1", ci_state)
+        view = self.view()
+        self.assertTrue(view["checkpoints"]["q1-intake"]["reviewed"])
+        self.assertTrue(view["checkpoints"]["q2-plan"]["published"])
+        self.assertEqual(view["checkpoints"]["q2-plan"]["digest"], before)
+        self.assertFalse(view["checkpoints"]["q4-acceptance"]["reviewed"])
+        self.apply("item", {"plan": dict(plan, steps="改变验证步骤"), "reason": "调整方案"})
+        self.assertFalse(self.view()["checkpoints"]["q2-plan"]["reviewed"])
+        self.assertFalse(self.view()["checkpoints"]["q2-plan"]["published"])
+
+    def test_precise_manual_evidence_and_actionable_handoff(self):
+        plan = self.plan(method="manual"); self.select()
+        for revision in ("develop", "fix/TAP-123", "a3561f47", "pending", "a" * 40 + ":worktree:" + "b" * 64):
+            with self.assertRaisesRegex(ValueError, "完整提交 SHA"):
+                self.execute(origin="manual", target_revision=revision)
+        self.assertEqual(self.view()["items"]["case-a"]["executions"], [])
+        handoff = self.view()["checkpoints"]["q4-acceptance"]["handoff"]
+        self.assertEqual(handoff["verify"][0]["steps"], plan["steps"])
+        self.assertEqual(handoff["verify"][0]["target_revision"], "a" * 40)
+        self.assertIn("精确提交 SHA", handoff["return"])
+        self.execute(origin="manual"); self.decide()
+        self.apply("item", {"plan": dict(plan, target_revision="b" * 40), "reason": "新提交"})
+        self.assertTrue(self.view()["items"]["case-a"]["selected"])
+        self.assertFalse(self.view()["items"]["case-a"]["decision_valid"])
+
+    def test_worktree_evidence_allowed_before_final_acceptance(self):
+        plan = self.plan()
+        plan.update(checkpoint="q3-draft", target_revision="a" * 40 + ":worktree:" + "b" * 64)
+        self.apply("item", {"plan": plan, "reason": "首轮工作区验证"})
+        self.select(); self.execute(); self.decide()
+        plan["checkpoint"] = "q4-acceptance"
+        self.apply("item", {"plan": plan, "reason": "改为最终验收"})
+        self.select()
+        with self.assertRaisesRegex(ValueError, "完整提交 SHA"):
+            self.decide()
+
+    def test_verified_clean_commit_survives_controlled_worktree_cleanup(self):
+        repo = self.base / "git-repo"; repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.test",
+                        "commit", "-qm", "fixture", "--allow-empty"], check=True)
+        sha = quality.git_revision(repo)
+        self.task["repositories"][0]["worktree"] = {"status": "prepared", "path": str(repo)}; self.save_task()
+        plan = self.plan()
+        self.apply("item", {"plan": dict(plan, target_revision=sha), "reason": "核验目标提交"})
+        self.select(); self.execute(); self.decide(); self.checkpoint("q4-acceptance")
+        self.publish_checkpoint("q4-acceptance")
+        self.task["repositories"][0]["worktree"] = {"status": "removed", "final_revision": sha}; self.save_task()
+        view = self.view()
+        self.assertTrue(view["checkpoints"]["q4-acceptance"]["reviewed"])
+        self.assertTrue(view["checkpoints"]["q4-acceptance"]["published"])
+        self.task["repositories"][0]["worktree"]["final_revision"] = "b" * 40; self.save_task()
+        self.assertFalse(self.view()["checkpoints"]["q4-acceptance"]["reviewed"])
+
+    def test_checkpoint_publication_is_mandatory_and_cannot_be_faked_by_generic_comment(self):
+        self.checkpoint("q3-draft", outcome="not_applicable")
+        self.assertTrue(any("Jira" in p for p in quality.advance_problems(self.base, self.task, "pr_review")))
+        self.publication()
+        self.assertFalse(self.view()["checkpoints"]["q3-draft"]["published"])
+        with self.assertRaisesRegex(ValueError, "完整 publication_body"):
+            self.apply("draft", {"id": "wrong", "checkpoint": "q3-draft", "body": "略"})
+        record = self.view()["publications"]["summary"]
+        self.apply("readback", {"id": "summary", "operation_id": record["operation_id"], "site": record["site"],
+                   "issue_key": "TAP-123", "comment_id": "1", "body": record["body"], "source_ref": "fixture:jira/1"})
+        self.publish_checkpoint("q3-draft")
+        self.assertEqual(quality.advance_problems(self.base, self.task, "pr_review"), [])
+
+    def test_old_event_rules_preserve_replay_without_reinterpreting_evidence(self):
+        rules = quality.config(self.base)
+        for key in ("contract_revision", "commit_evidence_checkpoint", "require_checkpoint_publication"):
+            rules.pop(key, None)
+        plan = self.plan()
+        plan["target_revision"] = "develop"
+        state = {"events": [{"command": {"action": "item", "payload": {"plan": plan, "reason": "旧记录"}},
+                              "rules": rules, "context": quality.context(self.base, self.task)}]}
+        self.assertEqual(quality.replay(state)["items"]["case-a"]["plan"]["target_revision"], "develop")
 
     def test_write_confirmation_unknown_receipt_and_readback(self):
         self.apply("draft", {"id": "summary", "body": "草稿"})
@@ -303,6 +405,7 @@ class QualityTests(unittest.TestCase):
         self.execute(result="FAIL", kind="assertion")
         self.decide(outcome="accept_risk", owner="owner", follow_up="补充回归")
         self.checkpoint("q4-acceptance")
+        self.publish_checkpoint("q4-acceptance")
         self.assertEqual(quality.advance_problems(self.base, self.task, "ci_validation"), [])
 
     def test_live_code_change_invalidates_after_but_not_reproduction(self):

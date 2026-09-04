@@ -44,6 +44,7 @@
               "branch_reused": { "type": "boolean" },
               "prepared_at": { "type": "string" },
               "removed_at": { "type": "string" },
+              "final_revision": { "type": "string", "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$" },
               "branch_cleanup": { "type": "string" }
             },
             "required": ["path", "status"],

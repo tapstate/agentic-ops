@@ -11,6 +11,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -103,6 +104,8 @@ def context(base, task):
         # cleanup removes a worktree after validation; the source revision remains in the item.
         if wt.get("status") == "prepared":
             entry["live_revision"] = git_revision(wt["path"])
+        elif wt.get("status") == "removed" and wt.get("final_revision"):
+            entry["live_revision"] = wt["final_revision"]
         repos[repo["repository"]] = entry
         entry["ci_digest"] = digest([s for s in ci_states if s["repository"] == repo["repository"]])
     return {"issue_key": task["issue_key"], "run_id": task["run_id"], "facts": task.get("facts", {}),
@@ -115,14 +118,33 @@ def plan_digest(item, rules, ctx):
     repo = dict(ctx["repositories"].get(item["plan"]["repository"], {}))
     repo.pop("live_revision", None)
     repo.pop("ci_digest", None)
-    return digest([item["plan"], item["plan_version"], rules, repo])
+    plan = selection_plan(item["plan"], rules)
+    return digest([plan, item["plan_version"], rules, repo])
+
+
+def selection_plan(plan, rules):
+    plan = dict(plan)
+    if rules.get("contract_revision", 1) >= 2 and plan["timing"] == "after_fix":
+        plan.pop("target_revision", None)
+    return plan
+
+
+def exact_commit(revision):
+    return bool(re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", revision))
+
+
+def exact_worktree(revision):
+    return bool(re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?:worktree:[0-9a-f]{64}", revision))
 
 
 def item_digest(item, rules, ctx):
     runtime_keys = ("live_revision", "ci_digest") if item["plan"]["timing"] == "after_fix" else ()
-    return digest([plan_digest(item, rules, ctx), item["executions"],
+    value = [plan_digest(item, rules, ctx), item["executions"],
                    {k: ctx["repositories"].get(item["plan"]["repository"], {}).get(k)
-                    for k in runtime_keys}])
+                    for k in runtime_keys}]
+    if rules.get("contract_revision", 1) >= 2:
+        value.append(item["plan"]["target_revision"])
+    return digest(value)
 
 
 def is_valid(record, expected):
@@ -152,11 +174,40 @@ def checkpoint_view(model, checkpoint, rules, ctx):
             problems.append("%s 用户要求补测/返工" % key)
     if index >= ids.index(rules["selection_checkpoint"]):
         problems += ["%s 方案待用户选择" % k for k, v in views.items() if not v["selected"]]
+        problems += ["修复方案事实 %s 尚未记录；请说明根因、范围、修复方式和风险" % k
+                     for k in rules.get("plan_fact_keys", []) if not ctx["facts"].get(k)]
     snapshot = {"checkpoint": checkpoint, "items": views, "due": list(due),
                 "not_due": [k for k in views if k not in due], "context": ctx, "rules": rules}
+    if rules.get("contract_revision", 1) >= 2:
+        scoped = copy.deepcopy(ctx)
+        fact_keys = rules["intake_fact_keys"] + (rules.get("plan_fact_keys", []) if index else [])
+        scoped["facts"] = {k: v for k, v in ctx["facts"].items() if k in fact_keys}
+        for repo in scoped["repositories"].values():
+            repo.pop("live_revision", None)
+            repo.pop("ci_digest", None)
+        # Intake never depends on future test plans. Plan review includes their selection,
+        # but not their future execution results, revisions, CI or acceptance decisions.
+        future = {} if index == 0 else {
+            k: {"plan_digest": v["plan_digest"], "selected": v["selected"]}
+            for k, v in views.items() if k not in due}
+        snapshot.update(context=scoped, items=dict(future, **due))
+        if index == 0:
+            snapshot["not_due"] = []
     result = {"digest": digest(snapshot), "due": list(due), "not_due": snapshot["not_due"],
               "problems": problems, "decision": model["checkpoints"].get(checkpoint)}
     result["reviewed"] = is_valid(result["decision"], result["digest"]) and not problems
+    point = rules["checkpoints"][index]
+    result["handoff"] = {
+        "title": point["title"],
+        "verify": [{"item_id": k, "case_ref": v["plan"]["case_ref"],
+                    "method": v["plan"]["method"], "repository": v["plan"]["repository"],
+                    "target_revision": v["plan"]["target_revision"],
+                    "steps": v["plan"].get("steps", "打开用例引用并按用例步骤执行；缺少步骤时先补齐"),
+                    "expected": v["plan"]["criterion"], "expected_result": v["plan"]["expected_result"],
+                    "decision_valid": v["decision_valid"]} for k, v in due.items()],
+        "request": "核对列出的用例、范围、预期与缺口；选择验收、补测/返工、不适用、延期或接受风险。",
+        "return": "执行人、环境、精确提交 SHA、步骤、实际结果及可回查日志/报告；未执行须说明原因。",
+    }
     return result
 
 
@@ -200,9 +251,16 @@ def reduce(model, command, rules, ctx):
             raise ValueError("先登记所属任务仓库")
         if plan["expected_result"] == "FAIL" and plan["timing"] != "before_fix":
             raise ValueError("预期失败仅用于修复前复现")
+        if rules.get("contract_revision", 1) >= 2:
+            if plan["method"] == "manual" and not plan.get("steps"):
+                raise ValueError("手工用例必须提供可操作 steps，不能只要求用户确认检查点")
+            revision = plan["target_revision"]
+            if not (exact_commit(revision) or exact_worktree(revision) or
+                    (revision == "pending" and plan["timing"] == "after_fix")):
+                raise ValueError("方案目标必须是精确代码；修复后尚未编码时用 pending，不能用分支名")
         item = model["items"].setdefault(plan["id"], {"plan": plan, "plan_version": 1,
                                                   "executions": [], "selection": None, "decision": None})
-        if item["plan"] != plan:
+        if selection_plan(item["plan"], rules) != selection_plan(plan, rules):
             item["plan_version"] += 1
         item["plan"] = plan
     elif action in ("select", "execute", "decide"):
@@ -223,6 +281,10 @@ def reduce(model, command, rules, ctx):
                 raise ValueError("执行编号已存在；重试须使用新编号，历史不可覆盖")
             if execution["raw_result"] != "FAIL" and execution["failure_kind"] != "none":
                 raise ValueError("非失败执行不能声明 failure_kind")
+            if rules.get("contract_revision", 1) >= 2:
+                revision = execution["target_revision"]
+                if not exact_commit(revision) and not (exact_worktree(revision) and execution["origin"] == "local_maven"):
+                    raise ValueError("执行证据必须绑定完整提交 SHA；仅本地自动验证可使用精确 worktree 指纹，不接受分支名或短 SHA")
             item["executions"].append(execution)
         else:
             if p["digest"] != item_digest(item, rules, ctx):
@@ -236,6 +298,10 @@ def reduce(model, command, rules, ctx):
             if decision["outcome"] == "accept":
                 selected = next((e for e in item["executions"] if e["id"] == decision.get("evidence_id")), None)
                 plan = item["plan"]
+                commit_point = rules.get("commit_evidence_checkpoint")
+                ids = [c["id"] for c in rules["checkpoints"]]
+                if commit_point and ids.index(plan["checkpoint"]) >= ids.index(commit_point) and not exact_commit(plan["target_revision"]):
+                    raise ValueError("最终验收必须绑定完整提交 SHA；工作区测试不能直接充当提交后的验收证据")
                 keys = ("case_ref", "case_version", "method", "repository", "target_revision")
                 applicable = [e for e in item["executions"] if all(e[k] == plan[k] for k in keys)]
                 if not selected or not applicable or selected != applicable[-1]:
@@ -272,13 +338,19 @@ def replay(state):
 
 def report(state, rules, ctx):
     model = replay(state)
-    from workflow.quality_write import snapshot
-    publications = {key: dict(record, snapshot_current=record["snapshot"] == snapshot(model, rules, ctx))
+    from workflow.quality_write import snapshot, checkpoint_body
+    publications = {key: dict(record, snapshot_current=record["snapshot"] == snapshot(model, rules, ctx, record.get("checkpoint")))
                     for key, record in model["publications"].items()}
+    checkpoints = {c["id"]: checkpoint_view(model, c["id"], rules, ctx) for c in rules["checkpoints"]}
+    for cp, view in checkpoints.items():
+        view["published"] = any(r.get("checkpoint") == cp and r["snapshot_current"] and r["status"] == "verified"
+                                for r in publications.values())
+        if view["reviewed"]:
+            view["publication_body"] = checkpoint_body(model, cp, rules, ctx)
     return {"issue_key": state["issue_key"], "run_id": state["run_id"], "revision": state["revision"],
             "context": ctx, "methods": rules["methods"],
             "items": {k: item_view(v, rules, ctx) for k, v in model["items"].items()},
-            "checkpoints": {c["id"]: checkpoint_view(model, c["id"], rules, ctx) for c in rules["checkpoints"]},
+            "checkpoints": checkpoints,
             "publications": publications,
             "boundary": "处置完成不等于测试全通过；本地确认来源由调用者提交，不能认证操作者身份。Jira 状态需外部回读。"}
 
@@ -358,7 +430,10 @@ def advance_problems(base, task, target):
     for cp in points:
         view = current["checkpoints"][cp]
         if not view["reviewed"] or view["decision"]["decision"]["outcome"] == "rework":
-            problems.append("质量检查点 %s 尚未确认处置；使用 quality.py status/apply（不要求全绿）" % cp)
+            problems.append("质量检查点 %s（%s）尚未确认处置：%s；%s 使用 quality.py status 的 handoff 展示具体用例、步骤、预期、版本和证据要求。"
+                            % (cp, view["handoff"]["title"], "；".join(view["problems"]), view["handoff"]["request"]))
+        if rules.get("require_checkpoint_publication") and view["reviewed"] and not view["published"]:
+            problems.append("检查点 %s 已确认但 Jira 评论尚未回读；按 publication_body 执行 draft/confirm/prepare_write、原生发送及 receipt/readback，已有授权无需重复询问。" % cp)
         checkpoint_decision = (view["decision"] or {}).get("decision", {})
         if checkpoint_decision.get("deadline") and datetime.fromisoformat(
                 checkpoint_decision["deadline"].replace("Z", "+00:00")) <= datetime.now(timezone.utc):
