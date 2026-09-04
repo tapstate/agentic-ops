@@ -16,7 +16,7 @@ python3 workflow/task.py record --issue-key <JIRA-KEY> --key <fact key> --value 
 | 项 | fact key | 到哪里找 | 示例 | 说明 |
 |---|---|---|---|---|
 | 问题分支 | `problem_branch` | Jira 描述「问题分支」章节 | develop | 缺陷在哪个分支可复现/被发现 |
-| 问题版本 | `problem_version` | Jira 影响版本 fields.versions（多选） | 4.18.0、4.21.0 | 保留全部影响版本；主仓找不到对应分支则拒绝。先核验 develop 是否有同一缺陷，有则优先修复 develop，影响版本由研发合并修复；否则只选择一个影响版本修复，其余人工合并。由 task.py issue-versions 导入，不手填分支替代版本。 |
+| 问题版本 | `problem_version` | Jira 影响版本 fields.versions（多选） | 4.18.0、4.21.0 | 保留全部影响版本；主仓找不到对应分支则拒绝。导入结果会逐项列出版本、对应主仓分支和远端 SHA，供用户引用并回写 Jira 分支确认；该引用不替代 repository prepare 固化的任务基线。先核验 develop 是否有同一缺陷，有则优先修复 develop，影响版本由研发合并修复；否则只选择一个影响版本修复，其余人工合并。由 task.py issue-versions 导入，不手填分支替代版本。 |
 | 问题现象 | `problem_symptom` | Jira 摘要或描述「问题现象」章节 | TM 启动持续输出 ES health check refused 告警 | 用户/日志/系统实际观察到的现象 |
 
 以下项 agent 可结合卡片/日志/源码给出**建议值**，但必须由研发工程师确认后再 record，不得替确认：问题分支、问题现象。

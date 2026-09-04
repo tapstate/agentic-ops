@@ -49,6 +49,40 @@ def remote_refs(origin, branches):
     return refs
 
 
+def branch_references(versions, preferred, develop, refs, jira_source_ref, product_repository):
+    """将所有已核验的版本分支整理为可供人工引用的稳定条目。
+
+    这些条目说明 Jira 影响版本与主仓远端分支的关系，供用户在 Jira
+    「仓库分支」等字段回写确认时引用。它们不是任务 worktree 基线；只有
+    repository prepare 写入的 base_sha 才会成为实施基线。
+    """
+    references = []
+    for version in versions:
+        branch = version["branch"]
+        references.append({
+            "kind": "affected_version",
+            "jira_version_id": version["id"],
+            "jira_version_name": version["name"],
+            "repository": product_repository,
+            "branch": branch,
+            "remote_ref": "refs/heads/" + branch,
+            "remote_sha": refs[branch],
+            "source_ref": jira_source_ref,
+            "usage": "可引用于 Jira 分支确认；尚未登记为任务实施基线",
+        })
+    references.append({
+        "kind": "preferred_branch_analysis",
+        "repository": product_repository,
+        "branch": preferred,
+        "remote_ref": "refs/heads/" + preferred,
+        "remote_sha": refs[preferred],
+        "defect_status": develop["status"],
+        "source_ref": develop["source_ref"],
+        "usage": "优先修复线的源码或复现核验引用；尚未登记为任务实施基线",
+    })
+    return references
+
+
 def resolve(base, task, payload):
     spec = rules(base, task)
     if not spec:
@@ -97,10 +131,15 @@ def resolve(base, task, payload):
         if not match:
             raise ValueError("优先分支不受影响：必须明确选择一个受影响版本，不能同时编码多条修复线")
         selected, primary = match["id"], match["branch"]
+    references = branch_references(
+        versions, preferred, develop, refs, payload["source_ref"], spec["product_repository"]
+    )
     return {"run_id": task["run_id"], "rules_digest": digest(spec),
             "source_ref": payload["source_ref"], "versions": versions,
             "develop": {k: develop[k] for k in ("status", "revision", "source_ref")},
             "selected_version_id": selected, "primary_branch": primary,
+            "branch_references": references,
+            "branch_reference_guidance": "完整列出 Jira 影响版本与主仓分支关系，供用户引用并回写分支确认；引用不等于任务基线，实施前仍须 repository add/prepare 固化 base_sha。",
             "manual_merge": [dict(v, action="研发人工合并修复并单独验证") for v in versions if v["branch"] != primary],
             "refs": {b: refs[b] for b in sorted(branches)},
             "refs_verified_at": datetime.now(timezone.utc).isoformat(),
