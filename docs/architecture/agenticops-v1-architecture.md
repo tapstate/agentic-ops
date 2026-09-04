@@ -97,6 +97,8 @@ Project Package 的 `repositories.json` 是仓库、origin、基线分支和域�
 
 一个任务可登记多个仓库，每仓绑定 repository、work branch、base branch、修改范围和验证方式。准备 worktree 后，授权还绑定 `run_id` 与 `base_sha`。授权绑定任务、Agent、方案和完整仓库集合；新增仓库或修改稳定绑定后旧授权失效。每仓独立记录提交、PR、CI 和验证，最后汇总成任务证据。
 
+项目可配置少量非阻断的 Jira 状态同步节点。Agent 在规定的本地阶段读取 Jira 实时状态、可用转换和必填字段，Workflow 只准备并记录当前 task/run/node 的一次精确转换意图；Tool Adapter 只提取转换 ID，Gate 仅允许与该意图完全匹配的第一次调用，并以放行审计消费该意图。外部调用失败、字段无法可靠补齐或状态不匹配都只形成可回查的人工接力，不推进本地阶段，也不阻止后续节点基于新事实独立尝试。PR Ready 由独立只读核对汇总关联测试任务、当前提交的 PR Checks 和到 Q4 为止的任务检查项；Jira 状态同步待办作为提示返回，不伪装成这三类验收事实。
+
 Agent 由薄项目工作空间入口使用 `./agenticops start <agent>` 启动，当前会话始终以项目工作空间为 cwd。任务 worktree 位于该工作空间内，因此不再为每个 task/run 重启 Agent 或追加动态目录参数。`workflow/task.py repository context --issue-key <issue-key> --json` 复用 worktree 校验，返回当前 run 的仓库、路径、分支和 `base_sha`；Agent 从同一会话在这些已校验路径中分析、修改、构建和测试。任务命令继续显式绑定 workspace 和 issue key，不建立会话级“当前任务”状态。Source Pool 位于工作空间外，仍不得加入 Agent 可写范围。
 
 文件修改、构建和测试发生在任务上下文返回的 worktree。工作空间是 Agent 原生文件系统边界；多个任务之间的边界由显式 issue key、run、分支、授权、Gate 和最终 Git 范围验证共同保证，而不是由第二个 Agent 会话伪造。linked worktree 的 `git add` 与其它本地开发操作交给 Agent 平台审批；`git commit/push` 等明确协作事实才同时受 Gate 控制。Source Pool 的 clone、fetch、worktree add/remove 由确定性 Workflow 执行。

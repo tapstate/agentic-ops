@@ -40,6 +40,71 @@ flowchart TD
 
 以上是现有 `task.py advance` 的强制检查点。Hook 继续执行既有操作授权和安全策略；本版不宣称拦截任意工具绕开 Workflow 的每一次质量相关操作。不要跳过 Workflow，也不要因本地处置而绕过服务端 Validator 或保护分支。
 
+## 非阻断 Jira 状态同步
+
+缺陷接管完成并进入 `task_intake` 后，Agent 立即读取当前 Jira issue、当前用户和可用 transitions，以 `takeover` 节点执行一次 `jira_status.py prepare`。当前状态已是 `In Progress` 时直接记录；当前状态为 `Analyzed`、Assignee 为当前用户且 Jira 返回配置的 transition 时，工具生成精确 transition 意图，Agent 当场调用原生 Jira 工具一次并用 `complete` 导入回读。状态不匹配、必填字段缺失、权限或外部调用失败只记录和提示，不回退本地阶段、不重试。
+
+Q4 有效确认并进入 `ci_validation` 后，以 `tests_passed` 节点执行相同步骤。Jira 已是 `Tests Passed` 时直接记录；只有当前状态为 `In Progress`、Q4 及其检查项均为 `accept/not_applicable` 且 Jira 返回目标 transition 时才生成意图。`Pull Request Submitted` 不自动执行。
+
+输入由 Agent 从 Jira 实时读取，至少包含任务、字段、当前用户、可用 transitions 和可回查来源：
+
+```json
+{
+  "source_ref": "可回查的 Jira 读取来源",
+  "current_user": {"accountId": "当前 Jira 用户 accountId"},
+  "issue": {"key": "TAP-123", "fields": {"status": {"id": "状态 ID", "name": "Analyzed"}, "assignee": {"accountId": "当前 Jira 用户 accountId"}}},
+  "transitions": [{"id": "421", "name": "Start Investigation", "to": {"id": "目标状态 ID", "name": "In Progress"}, "fields": {}}]
+}
+```
+
+```sh
+python3 "$agenticops_root/workflow/jira_status.py" prepare \
+  --issue-key "$task_key" --trigger takeover --input "$jira_snapshot" --dir "$project_workspace"
+
+python3 "$agenticops_root/workflow/jira_status.py" complete \
+  --issue-key "$task_key" --trigger takeover --outcome failed \
+  --input "$jira_readback" --message "Jira 原始错误摘要" --dir "$project_workspace"
+```
+
+`prepare.outcome=ready` 时只使用返回的 `transition_id` 调用一次原生 Jira transition；Hook 只对当前 task/run 的这条精确意图放行。调用超时或结果不明时先回读；已到目标状态由 `complete` 记为成功，否则按 `unknown` 记录，不盲目重放。同一 run 的同一节点再次 prepare 只返回原记录。
+
+转换 metadata 标记的必填字段为空时，`prepare` 不尝试写入，按 Project `field_mappings` 输出字段名、采集时机、本地来源是否已具备、可否自动填写和处理方式。根因、Module、Tester、测试设计结论、Xray 和测试例外等专业事实不能由 Agent 猜测；可从本地已确认方案和证据形成填写依据，但必须由责任人确认后在 Jira/Xray 补齐并回读。当前节点不重新尝试，最终在 PR Ready 输出人工待办。
+
+| Jira 目标状态 | Jira 属性或关系 | 本地任务映射 | 处理时机与边界 |
+|---|---|---|---|
+| `In Progress` | Assignee / Engineering DRI | 无可替代的本地事实 | 接管前核对当前 Jira 用户与 Assignee；不一致不改派，跳过转换 |
+| `Tests Passed` | Issue Classification、Root Cause Category | `facts.fix_plan` 仅提供已确认根因依据 | Q2 形成；Jira 枚举值由责任人选择，不从文本猜测 |
+| `Tests Passed` | Module | 任务 `repositories` 与问题归属证据 | 目标仓库确认时形成；映射不唯一时人工选择最终一级 Module |
+| `Tests Passed` | Issue Analysis | `facts.fix_plan`、Q2 已回读评论 | Q2 后补失效机制、触发条件、影响与证据，不生成未确认结论 |
+| `Tests Passed` | Fix Details | `facts.fix_plan`、实际提交、Q4 验证 | 实现与验收后补处理方式、结果、边界和限制；计划不能冒充完成事实 |
+| `Tests Passed` | Tester、Test can be automated | Q2 验收方案及实际责任人 | 由责任人确认；手工用例可选 `No`，但不等于免测 |
+| `Tests Passed` | Fix Version | `facts.issue_version_plan` 只提供版本与修复线依据 | Tests Passed 前选择实际交付版本；不得把分支名或影响版本猜成 Jira 选项 ID |
+| `Tests Passed` | Xray Test 关联 | Q1-Q4 检查项和 Jira 关联测试任务 | 正常路径至少关联一项正式测试任务并完成；本地检查项不能替代 Jira 关联 |
+| `Tests Passed` | Test Coverage Decision / Exception Details | 无默认本地自动值 | 仅在合规 T3 低风险例外获批后人工填写；否则不能借例外绕过测试 |
+
+转换面板实时返回的 required fields 是本次尝试的最终事实源；上表用于提前采集和解释，不覆盖 Jira Workflow。若本地来源已具备，Agent 引导责任人据此回填；若来源缺失、值需专业判断、选项 ID 无法可靠解析或写后回读不一致，就跳过本节点转换，保留具体字段和 Jira 原始错误的脱敏摘要，在 PR Ready 一次列全人工事项。
+
+## PR Ready 核对
+
+正式提审前，先为每个任务仓库记录 PR，并使用 `ci.py watch` 取得当前 PR Head 的最新 Checks。Agent 同时从 Jira 读取全部关联测试任务及其状态，输入 `pr_ready.py`：
+
+```json
+{
+  "source_ref": "可回查的 Jira 读取来源",
+  "issue": {"key": "TAP-123"},
+  "linked_test_tasks": [
+    {"key": "TAP-TEST-1", "status": {"name": "Done", "statusCategory": {"key": "done"}}}
+  ]
+}
+```
+
+```sh
+python3 "$agenticops_root/workflow/pr_ready.py" \
+  --issue-key "$task_key" --jira-input "$jira_test_tasks" --dir "$project_workspace"
+```
+
+工具只在以下三组均通过时返回 ready：关联测试任务非空且全部属于 Jira Done 状态类别；每个任务仓库都记录 PR，最新 Checks 为 `success` 且 Head 等于当前任务代码；Q1-Q4、其检查项和要求的 Jira 评论回读均有效，处置只允许 `accept/not_applicable`。没有测试任务、Checks 为空、跳过、未知、等待或失败、Head 漂移、`defer/accept_risk/rework` 都会列为待办。Jira 状态同步失败单独列入 `jira_status_todos`，不改变三类验收事实；Engineering DRI 处理待办后重新核对，并手工执行 `Pull Request Submitted`。
+
 ## 影响版本与优先修复线
 
 TapData 缺陷的“问题版本”对应 Jira `fields.versions`（影响版本，允许多选），不是描述字段，也不是 `fixVersions`。所有影响版本均保留：先检查 `develop` 是否存在同一缺陷；若存在，本次只在 `develop` 修复，其它影响版本由研发合并修复并分别验证。若 `develop` 不受影响，则选择一个影响版本编码，其余列为人工合并项；只有一个候选时自动选取，多候选需明确选择。主仓任一影响版本分支不存在则拒绝；网络或权限失败只是未核验，不能默认为分支不存在或缺陷不在 develop。
@@ -173,6 +238,6 @@ Q1 仅绑定准入事实和已到期项；Q2 绑定修复方案、稳定用例�
 
 reset 后新 run 不继承旧用例验收。旧 run 若有不明发送结果，会阻止新一次回写。可以用旧 `--expected-run-id`、旧 revision 执行 `receipt/readback` 核对旧发送，其它操作不能修改旧 run。已完成的本地任务仍可核对并回写本轮证据；不要通过删除本地记录清除不明外部结果。
 
-第一版不自动改变 Jira 状态。附件规定与线上 `Analyzed → In Progress` 的 Test Coverage 限制若不一致，应报告并核对实际 Validator；手工用例仍是用例，不能冒充缺陷免测。`Tests Passed`、`PR Submitted`、实际合并、发布、`Done` 分别以标准流程及外部事实确认。
+接管进入 `task_intake` 后尝试一次 `Analyzed → In Progress`，Q4 验收完成并进入 `ci_validation` 后尝试一次 `In Progress → Tests Passed`。每次都先读取 Jira 当前状态、可用转换和转换必填字段；状态不匹配、字段补不了、权限不足或外部调用失败时记录人工指引并继续本地主流程，不重试，也不影响后续节点按各自事实再尝试。附件规定与线上 Validator 若不一致，应报告并以实时 Workflow 为准；手工用例仍是用例，不能冒充缺陷免测。`Pull Request Submitted`、实际合并、发布和 `Done` 仍分别以标准流程及外部事实人工确认。
 
 本地 `accept_risk` 不等于公司的免测批准。T3 标准中的低风险例外仍需核对优先级、替代验证、责任和回滚措施，以及规定的模块负责人和审批人批准；P0/P1、数据安全、权限或高可用等要求不得据此自动豁免。发生冲突时先报告用户并确认后续处理，保留 Jira 的真实状态。

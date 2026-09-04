@@ -15,7 +15,8 @@ metadata:
 2. 已注册任务用 `status --issue-key <issue-key>` 从当前阶段恢复，不重复已完成步骤。
 3. 新任务先读取 Jira 事实。仅当状态精确为 `Analyzed` 且经办人为当前 Jira 用户时，才执行 `task.py init --issue-key TAP-xxx --task-class <defect_fix|feature_change|technical_task> --dir <project-workspace>`；任一条件不符或事实无法核验时拒绝接管，不得初始化本地任务状态。初始化不会停用其它 active 任务。
 4. 已存在任务必须让研发工程师选择继续现有 run，或清理后用当前 `--expected-run-id` reset；选择完成后继续流程，不把接管、activate 或 reset 的原子成功当作停点。
-5. 核对负责人和状态映射后进入 `task_intake`，持续完成准入、仓库登记、本地基线准备和源码分析，直到方案确认、风险授权、事实不可信或其它真实人工决策点。
+5. 核对负责人和状态映射后进入 `task_intake`。立即从 Jira 原生工具读取当前 issue、当前用户和可用 transitions，按质量文档执行 `jira_status.py prepare --trigger takeover`；返回 `ready` 时只用其精确 transition ID 尝试一次 `In Progress` 并回读后 `complete`，其它结果记录并继续。状态同步失败不是本地门禁。
+6. 持续完成准入、仓库登记、本地基线准备和源码分析，直到方案确认、风险授权、事实不可信或其它真实人工决策点。
 
 ## 准入、设计和多仓库
 
@@ -35,6 +36,7 @@ metadata:
 - 只有 prepare 写入的本地任务 worktree、`base_sha` 和目录摘要才是 Git 基线。远程 GitHub 读取只能写成“远程候选参考”，不能声称“已核实基线”，不能替代本地源码核验，也不能据此推进 `design_review` 或向 Jira 写入已确认方案。
 - 本地基线完成后分析代码并形成方案；研发工程师确认方案后用 `workflow/authorization.py grant` 签发任务授权。
 - 缺陷接管时读取现有 Test Coverage；在方案确定的同时建议验收用例、复用／新增、预期及验证方式，交由用户选择。使用 `quality.py status/apply` 完成 Q1、Q2 的记录与确认，然后进入 implementation。具体输入和恢复方法见 [质量检查与证据](../../../../docs/usage/quality-checkpoints.md)，项目标准见 `projects/tapdata/quality.json`。
+- 处理过程中按 Project `status_sync.field_mappings` 提前采集 Tests Passed 所需属性：Q2 固化分类和根因依据，仓库确认时形成 Module 依据，Q2/Q4 评论分别形成 Issue Analysis/Fix Details 依据，验收方案确认 Tester、自动化属性和 Xray 关联，版本规划只作为选择 Fix Version 的依据。需要责任人选择的枚举、人员、Module、Fix Version ID 和测试例外不得自动猜测；无法可靠补齐时留到状态同步节点跳过并在 PR Ready 提示。
 - Q2 前用 `task.py record --key fix_plan` 记录根因、范围、修复方式、风险与回滚。修复后用例尚未编码时把 `target_revision` 写为 `pending`；先确认稳定用例/方式，执行前用 `item` 绑定精确代码。只补充代码版本不会要求重新选择同一用例；改步骤、预期、范围或方式仍须重新确认。
 - 一个检查项对应一个用例和一种方式；同检查点可有不同方式的多项。修复前不可执行须说明原因，修复后项未到检查点不算失败。TapTest 使用目标工程实际提供的 `write-xray-test`、`write-test-script`；不可用时请用户选择其它方式。集成用例在产品模块工程，先核对代码和 CI；已有覆盖可复用，新覆盖需实现。AgenticOps 只建议、记录和核对。
 - 新增仓库或修改分支、范围、验证方式后必须重新确认和授权。
@@ -47,7 +49,9 @@ metadata:
 - 暂停时展示 `quality.py status` 或 `task.py next` 中该检查点的 `handoff`：说明为什么停、具体用例/步骤/预期、仓库与完整提交 SHA、谁来验证、需返回的日志/报告及可选处置。手工执行必须先给可操作 `steps`；只有日志但没有目标提交时不可猜 SHA 或把分支名导入执行证据。一次列全需要用户决定的项目；恢复后复用已确认事实，不重复问同一问题。
 - 首轮本地自动测试可绑定 `git_revision` 返回的工作区指纹；手工证据及最终验收只用完整提交 SHA。提交后重新核对/执行验证并使用实际产物 SHA，不能把提交前报告改写为提交后运行。缺证据可如实记录风险或延期，不能填充 PASS。
 - 有意义变更且完成第一轮针对性验证后建议 Draft PR；如验证受阻，按项目标准披露现状。Q3 记录首轮事实及处置，Q4 核对关联用例。用 `execute` 导入可回查报告，再展示原始结果、版本及风险，使用 `decide/checkpoint` 记录真实用户决定；用户可接受风险，不得把未执行、跳过、未知或失败改成通过。
-- CI 返回成功不能证明目标用例运行，须核对实际报告、目标提交和运行编号。Q5、Q6 核对审查及交付事实。本版不自动改变 Jira 状态；线上 Validator 与附件冲突需报告确认，禁止用本地质量处置绕过。
+- Q4 完成并进入 `ci_validation` 后，立即读取 Jira issue 与可用 transitions，执行 `jira_status.py prepare --trigger tests_passed`。Jira 已是 `Tests Passed` 直接记录；当前为 `In Progress` 且返回 `ready` 时同步尝试一次并写后回读；缺字段、状态不符或调用失败都跳过并继续，不在同一节点重试。
+- PR Ready 前必须更新每个任务仓库当前 PR Head 的 `ci.py watch` 记录，再读取 Jira 全部关联测试任务，运行 `pr_ready.py`。只有关联测试任务全部 Done、所有 PR Checks 明确成功且绑定当前 Head、Q1-Q4 及检查项全部 `accept/not_applicable` 时才可称为 PR Ready。状态同步遗留统一提示 Engineering DRI 人工处理；`Pull Request Submitted` 不由 Agent 自动执行。
+- CI 返回成功不能证明目标用例运行，须核对实际报告、目标提交和运行编号。Q5、Q6 核对审查及交付事实。接管和 Q4 节点只尝试 Project 明确配置的单次 Jira 状态同步；线上 Validator 与附件冲突需报告确认，禁止用本地质量处置绕过。
 - 合并、发布、Tag、rebase、强推和保护分支写入不被任务授权覆盖。
 - 用 `workflow/evidence.py --issue-key <issue-key> --dir <project-workspace>` 汇总结果；启用质量检查时用 `quality.py` 保存草稿、用户确认及发送意图，再调用原生 Jira 工具并回读核对。外部结果不明确时先核对，不盲目重发；具体恢复步骤见质量文档。
 - 每个检查点确认后立即回写 Jira，不等 Q6。使用该点的 `publication_body`，`draft` 同时指定 `checkpoint`，随后 `confirm → prepare_write → 原生发送 → receipt/readback`。方案/验收展示时一并说明确认内容将回写 Jira；已有授权或同一回复明确覆盖该内容回写时，引用真实来源完成账本，不额外逐条追问。不明外部写入先回读；只能暂停依赖该写入的步骤，并告诉用户哪些准备工作仍可继续。

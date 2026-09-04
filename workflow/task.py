@@ -650,12 +650,12 @@ def cmd_reset(args):
 
 
 NEXT_GUIDE = {
-    "waiting_takeover": "核对负责人/状态映射后 advance 进入 task_intake，并继续准入；接管成功不是人工决策点",
-    "task_intake": "checklist/record 完成准入 -> repository add 登记仓库 -> repository prepare（按配置 auto-clone）固化本地基线 -> 只在任务 worktree 中分析；基线齐备后 advance",
+    "waiting_takeover": "核对负责人/状态映射后 advance 进入 task_intake；随后用 jira_status.py 在 takeover 节点同步尝试一次 In Progress",
+    "task_intake": "先完成 takeover 状态同步尝试；再 checklist/record 完成准入 -> repository add -> repository prepare 固化本地基线 -> 源码分析 -> advance",
     "design_review": "基于任务 worktree 形成方案并写入 Jira -> 等研发工程师确认这一真实人工决策 -> workflow/authorization.py grant -> advance",
     "implementation": "在授权范围内实现+测试，持续处理 Q3、提交/推送和 Draft PR；next/status 找出真实阻塞，不把原子步骤成功当停点",
-    "pr_review": "创建/更新 PR，展示变更、验证结果和风险，研发工程师在 PR 上审查后 advance",
-    "ci_validation": "用 workflow/ci.py watch 观察 PR 返回检查，核对目标用例、审查和交付事实；完成用户处置后 advance",
+    "pr_review": "完成 Q4 关联用例验收后 advance；进入 ci_validation 后用 jira_status.py 在 tests_passed 节点同步尝试一次 Tests Passed",
+    "ci_validation": "完成 Tests Passed 同步尝试，用 workflow/ci.py watch 更新每个 PR Head 的 Checks，再用 pr_ready.py 核对测试任务、PR Checks 和 Q1-Q4",
     "completed": "用 workflow/evidence.py 生成证据总结，经确认后作为 Jira 评论回写",
 }
 

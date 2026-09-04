@@ -22,6 +22,127 @@
       "issue_analysis": "customfield_10092",
       "fix_details": "customfield_10093",
       "verification_method": "customfield_10049"
+    },
+    "status_sync": {
+      "schema_version": 1,
+      "task_classes": ["defect_fix"],
+      "attempts": {
+        "takeover": {
+          "local_stages": ["task_intake"],
+          "from": ["Analyzed"],
+          "to": "In Progress",
+          "transition_id": "421",
+          "transition_name": "Start Investigation",
+          "field_requirements": ["assignee"],
+          "require_current_assignee": true
+        },
+        "tests_passed": {
+          "local_stages": ["ci_validation"],
+          "from": ["In Progress", "正在进行"],
+          "to": "Tests Passed",
+          "transition_name": "Tests Pass",
+          "field_requirements": [
+            "issue_classification",
+            "root_cause_category",
+            "module",
+            "issue_analysis",
+            "fix_details",
+            "tester",
+            "test_can_be_automated",
+            "fix_versions",
+            "test_coverage_decision",
+            "test_coverage_exception_details"
+          ],
+          "require_quality_checkpoint": "q4-acceptance"
+        }
+      },
+      "field_mappings": {
+        "assignee": {
+          "aliases": ["assignee", "Assignee"],
+          "local_sources": [],
+          "collect_at": "接管前",
+          "auto_fill": false,
+          "guidance": "在 Jira 确认 Assignee 为实际 Engineering DRI；不能由 Agent 根据本地任务猜测或改派。"
+        },
+        "issue_classification": {
+          "aliases": ["Issue Classification"],
+          "local_sources": ["facts.fix_plan"],
+          "collect_at": "根因分析和 Q2 方案确认时",
+          "auto_fill": false,
+          "guidance": "根据确认后的缺陷性质选择 Jira 结构化分类；本地 fix_plan 只能提供依据，不能替代人工选择 Jira 选项。"
+        },
+        "root_cause_category": {
+          "aliases": ["Root Cause Category"],
+          "local_sources": ["facts.fix_plan"],
+          "collect_at": "根因分析和 Q2 方案确认时",
+          "auto_fill": false,
+          "guidance": "根据已确认根因选择非 Unknown 的 Jira 根因分类；不得由现象或仓库名猜测。"
+        },
+        "module": {
+          "aliases": ["Module", "components"],
+          "local_sources": ["repositories"],
+          "collect_at": "目标仓库与影响范围确认时",
+          "auto_fill": false,
+          "guidance": "根据已确认的问题归属和目标仓库选择最终一级 Module；仓库映射不唯一时请 Engineering DRI 人工选择。"
+        },
+        "issue_analysis": {
+          "aliases": ["customfield_10092", "Issue Analysis"],
+          "local_sources": ["facts.fix_plan"],
+          "collect_at": "Q2 方案确认并回写时",
+          "auto_fill": false,
+          "guidance": "从已确认 fix_plan 和根因证据整理失效机制、触发条件、影响与证据，先回填 Jira 并回读；禁止生成未确认结论。"
+        },
+        "fix_details": {
+          "aliases": ["customfield_10093", "Fix Details"],
+          "local_sources": ["facts.fix_plan", "repositories"],
+          "collect_at": "实现完成和 Q4 验收时",
+          "auto_fill": false,
+          "guidance": "依据实际提交、验证结果、适用边界和已知限制回填 Fix Details；计划不能冒充已完成事实。"
+        },
+        "tester": {
+          "aliases": ["Tester"],
+          "local_sources": [],
+          "collect_at": "验收方案确认时",
+          "auto_fill": false,
+          "guidance": "由 Engineering DRI/测试负责人确认实际 Tester；Agent 不根据执行日志用户名猜测。"
+        },
+        "test_can_be_automated": {
+          "aliases": ["Test can be automated"],
+          "local_sources": [],
+          "collect_at": "Q2 验收方案确认时",
+          "auto_fill": false,
+          "guidance": "根据已确认的用例方式选择 Jira 自动化属性；手工用例应明确为 No，但不能因此申请免测。"
+        },
+        "fix_versions": {
+          "aliases": ["fixVersions", "Fix Version/s", "Fix Version"],
+          "local_sources": ["facts.issue_version_plan"],
+          "collect_at": "修复线确定后、Tests Passed 前",
+          "auto_fill": false,
+          "guidance": "依据已核验的影响版本与交付计划选择实际 Fix Version；分支名和影响版本不能直接猜成 Jira Fix Version ID。"
+        },
+        "test_coverage_decision": {
+          "aliases": ["customfield_10416", "Test Coverage Decision"],
+          "local_sources": [],
+          "collect_at": "确实无法形成可执行用例且完成例外审批时",
+          "auto_fill": false,
+          "guidance": "正常关联 Xray Test 时不使用例外；只有满足 T3 低风险条件并经模块负责人和测试代表批准，才人工选择 Exception Approved - Low Risk。"
+        },
+        "test_coverage_exception_details": {
+          "aliases": ["customfield_10417", "Test Coverage Exception Details"],
+          "local_sources": [],
+          "collect_at": "Test Coverage 例外审批时",
+          "auto_fill": false,
+          "guidance": "仅在合规例外下填写无法覆盖原因、替代验证通过结论、残留风险、监控回滚及补测 Owner/期限；补不了则不得用例外绕过。"
+        }
+      },
+      "field_guidance": {
+        "assignee": "在 Jira 确认 Assignee 为实际 Engineering DRI。",
+        "fixVersions": "在 Jira 选择本次实际交付的 Fix Version；不能用本地分支名猜测。",
+        "customfield_10092": "根据已确认根因和证据补充 Issue Analysis。",
+        "customfield_10093": "根据实际修改、验证结果和已知限制补充 Fix Details。",
+        "issuetype": "核对任务类型和对应 Jira Workflow，不得跨工作流尝试转换。"
+      },
+      "on_unavailable": "skip_and_report_at_pr_ready"
     }
   },
   "repositories": {"catalog": "repositories.json"},

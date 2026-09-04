@@ -62,6 +62,10 @@ GitHub MCP、`gh` 和其它 GitHub 工具不由 AgenticOps 绑定；Agent 依据
 - 接管、继续或 reset 成功只是流程恢复点，不是默认停点。选择现有 run 或 reset 是人工
   决策；选择完成后应继续核验 Jira、补齐准入、登记仓库并准备本地基线，直到遇到方案
   确认、风险授权、事实不可信或其它真实人工决策点。
+- 当前 Project 启用 Jira 状态同步时，接管进入 `task_intake` 和 Q4 后各按 Skill 准备并
+  同步尝试一次精确 transition。已达目标直接记录；状态不符、缺字段或调用失败均跳过
+  该次状态同步并继续本地主流程。PR Ready 前必须核对关联测试任务、当前 PR Head 的
+  Checks 和任务检查项；`Pull Request Submitted` 仍由责任人处理。
 - `task_intake` 中先为每个目标仓库登记仓库、工作分支、基线分支、范围和验证方式，再
   执行受控 `workflow/task.py repository prepare`。该操作按已登记的 active 任务自动
   准备 Source Pool（`auto-clone` 模式会自动下载）和当前 run 的 linked worktree，固化

@@ -38,7 +38,7 @@ python3 "$agenticops_root/workflow/task.py" advance \
   --dir "$project_workspace"
 ```
 
-`init` 创建该 Jira 任务的本地 `run_id` 和 `waiting_takeover` 状态；第一条 `advance` 才进入 `task_intake`。它们只加载本地执行上下文，不授权修改代码、提交、推送、合并或 Jira 状态流转。
+`init` 创建该 Jira 任务的本地 `run_id` 和 `waiting_takeover` 状态；第一条 `advance` 才进入 `task_intake`。它们只加载本地执行上下文，不授权修改代码、提交、推送或合并。进入 `task_intake` 后，TapData 缺陷按项目规则准备一次精确的 `In Progress` 状态同步意图；该意图只覆盖当次 transition，失败只记录并继续本地主流程。
 
 若 `list` 已显示同一任务，不要再次 `init`。先用 `status --issue-key "$task_key"` 回读现有 `run_id` 和阶段；继续现有现场或按该 `run_id` 清理后 reset 是两个不同决定。若列表有其它 active 任务，后续每条命令都必须保留 `--issue-key "$task_key"`，不能借用其授权。
 
@@ -115,7 +115,7 @@ python3 "$agenticops_root/workflow/task.py" advance \
 
 ## 5. 授权边界与失效
 
-有效的 `task_execution` 可覆盖当前授权 worktree 的 `git commit`、向同名授权工作分支的 `git push`、授权仓库的 PR 创建或更新、PR 评论处理和 Jira 评论。它不覆盖合并、发布、Tag、保护分支写入、强推、历史改写、删除 worktree/任务状态、Jira 状态流转、工时记录或任务字段编辑。
+有效的 `task_execution` 可覆盖当前授权 worktree 的 `git commit`、向同名授权工作分支的 `git push`、授权仓库的 PR 创建或更新、PR 评论处理和 Jira 评论。它不覆盖合并、发布、Tag、保护分支写入、强推、历史改写、删除 worktree/任务状态、一般 Jira 状态流转、工时记录或任务字段编辑。例外是 Project Workflow 在接管或 Q4 后准备的单次精确 Jira transition 意图；Gate 只匹配当前 task/run 和 transition ID，首次放行审计后即拒绝再次消费，且必须写后回读。
 
 新增仓库、切换分支、改变 `base_sha`、修改范围或验证方式后，旧授权失效。使用带当前 `run_id` 的 `task.py reset --stage design_review` 回到审查阶段，重新准备必要基线并再次执行 `grant`；需要立即停止时执行 `authorization.py revoke`。不要删除 `.agenticops/` 目录来代替撤销或重置。
 

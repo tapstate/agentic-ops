@@ -280,6 +280,9 @@ result := {"decision": "ask", "operation": input.operation, "reason": "受控操
 	push_refspec_untrusted
 } else := {"decision": "deny", "operation": "protected_branch_push", "reason": sprintf("目标分支 %v 是保护分支，禁止 Agent 直接推送", [push_branch]), "reason_code": "protected_branch_push", "required_action": "Agent 必须停止直接推送；请通过受保护的审查与合入流程处理。"} if {
 	pushing_protected
+} else := {"decision": "allow", "operation": input.operation, "reason": "当前 task/run 已准备同一 Jira 状态同步意图，只允许本节点尝试一次并写后回读", "reason_code": "jira_status_intent_covered"} if {
+	input.operation == "transition_jira_status"
+	input.context.jira_status_intent == "matched"
 } else := {"decision": "ask", "operation": input.operation, "reason": "受控仓库准备必须显式指定 Jira 任务号", "reason_code": "issue_key_required", "required_action": "请使用 workflow/task.py repository prepare --issue-key <KEY> 重试。"} if {
 	level == "controlled"
 	not input.context.issue_key

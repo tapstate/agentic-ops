@@ -116,6 +116,42 @@ def load_authorization_for_issue(cwd, issue_key):
     return (_read_json(path), str(path)) if path.is_file() else (None, str(path))
 
 
+def jira_status_intent(task_directory, transition_id):
+    """核对当前 run 是否准备了同一 Jira transition；不解释项目规则。"""
+    task = _read_json(Path(task_directory) / "state.json")
+    if not isinstance(task, dict) or not transition_id:
+        return "missing"
+    matched = False
+    for path in sorted(Path(task_directory).glob("jira-status-*.json")):
+        state = _read_json(path)
+        if not isinstance(state, dict) or state.get("run_id") != task.get("run_id"):
+            continue
+        attempts = state.get("attempts")
+        if not isinstance(attempts, dict):
+            continue
+        if any(record.get("outcome") == "ready" and str(record.get("transition_id")) == str(transition_id)
+               for record in attempts.values() if isinstance(record, dict)):
+            matched = True
+            break
+    if not matched:
+        return "missing"
+    events = Path(task_directory) / "events.jsonl"
+    try:
+        lines = events.read_text(encoding="utf-8").splitlines() if events.is_file() else []
+    except OSError:
+        return "missing"
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (event.get("reason_code") == "jira_status_intent_covered"
+                and event.get("agentic_run_id") == task.get("run_id")
+                and str(event.get("jira_transition_id")) == str(transition_id)):
+            return "consumed"
+    return "matched"
+
+
 def find_authorization(cwd, context=None, issue_key=None):
     """从项目工作空间的 active 任务中唯一解析当前操作授权。"""
     directory = find_task_directory(cwd, context=context, issue_key=issue_key)
@@ -426,6 +462,14 @@ def evaluate(operation, context, auth, policy, now=None):
             % operation,
             "forbidden_operation",
             "Agent 必须停止；如确有必要，请研发工程师在自己的终端执行。",
+        )
+
+    if operation == "transition_jira_status" and context.get("jira_status_intent") == "matched":
+        return _result(
+            ALLOW,
+            operation,
+            "当前 task/run 已准备同一 Jira 状态同步意图，只允许本节点尝试一次并写后回读",
+            "jira_status_intent_covered",
         )
 
     if operation == "git_push":

@@ -80,8 +80,9 @@ for file in \
   workflow/task.py workflow/task_store.py workflow/project_rules.py \
   workflow/authorization.py workflow/ci.py workflow/evidence.py \
   workflow/quality.py workflow/quality_contract.py workflow/quality_write.py \
+  workflow/jira_status.py workflow/pr_ready.py \
   contracts/quality-action.schema.json contracts/quality-state.schema.json \
-  projects/tapdata/quality.json docs/usage/quality-checkpoints.md tests/test_quality.py \
+  projects/tapdata/quality.json docs/usage/quality-checkpoints.md tests/test_quality.py tests/test_jira_status.py \
   projects/tapdata/profile.json projects/tapdata/repositories.json projects/tapdata/admission.json \
   projects/tapdata/skills/tapdata-task/SKILL.md \
   skills/ao-test-takeover/SKILL.md skills/ao-ws-init/SKILL.md \
@@ -108,6 +109,7 @@ done
 for file in \
     agenticops gate/runner.py adapters/agents/claude/hook.py adapters/agents/codex/hook.py \
   workflow/task.py workflow/authorization.py workflow/ci.py workflow/evidence.py \
+  workflow/jira_status.py workflow/pr_ready.py \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
   bootstrap/workspace-init.sh bootstrap/render.py bootstrap/agent_registry.py \
   bootstrap/skill_wiring.py \
