@@ -9,7 +9,7 @@
   "resolution": {
     "match": "exact_version_key_or_derived_product_branch",
     "on_unknown_version": "未命中显式矩阵时，只允许按 derivation 解析 main、develop、release-vX.Y.Z 或已存在的主仓任务分支；主仓分支不存在或无法核验时停止",
-    "remote_validation": "对每个已解析分支执行只读 git ls-remote --heads；网络、权限或远程错误标记为未核验，不得标记为不存在"
+    "remote_validation": "对本地可用仓库按刷新策略执行 git fetch --prune 并解析 origin/*；本次成功刷新后才可断言目标分支不存在。网络、权限或远程错误标记为未核验，不得标记为不存在"
   },
   "derivation": {
     "product_repository": "tapdata/tapdata",

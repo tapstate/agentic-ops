@@ -23,6 +23,27 @@ SPEC.loader.exec_module(align)
 
 
 class TapDataBranchAlignmentTest(unittest.TestCase):
+    @staticmethod
+    def observation(repository, refs=None, selection="catalog_optional", local_status="available", verification="verified", fetch_status="refreshed"):
+        return {
+            "repository": repository,
+            "selection": selection,
+            "local": {"status": local_status, "path": "/pool/%s" % repository.rsplit("/", 1)[-1], "error": None},
+            "refs": {
+                "freshness": "refreshed_during_run" if verification == "verified" else "cached_local_refs",
+                "fetch_status": fetch_status,
+                "verification": verification,
+                "last_refresh_at": "2026-09-03T20:00:00+0800",
+                "last_refresh_evidence": "FETCH_HEAD_mtime",
+                "fetch_duration_seconds": 0.0,
+                "error_kind": None,
+                "error": None,
+                "prompt": None,
+            },
+            "_refs": refs or {},
+            "_path": Path("/pool/%s" % repository.rsplit("/", 1)[-1]) if local_status == "available" else None,
+        }
+
     def test_workspace_binding_is_default_before_execution_directory(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary) / "workspace"
@@ -55,6 +76,26 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             with self.assertRaisesRegex(align.AlignmentError, "TapData 模块根目录缺少主仓.*tapdata/tapdata"):
                 align.refresh_branch_cache(temporary, repositories, "tapdata/tapdata", "never")
 
+    def test_missing_main_repository_stops_before_any_remote_refresh(self):
+        repositories = {"tapdata/tapdata": {}, "tapdata/tapdata-enterprise": {}}
+        scope = align.resolve_scope(repositories, "tapdata/tapdata", [])
+        with tempfile.TemporaryDirectory() as temporary, \
+             mock.patch.object(align, "fetch_origin") as fetch:
+            observations, elapsed = align.inspect_repositories(temporary, repositories, scope, "always")
+
+        self.assertEqual("missing", observations["tapdata/tapdata"]["local"]["status"])
+        self.assertEqual(0.0, elapsed)
+        fetch.assert_not_called()
+
+    def test_scope_makes_only_main_and_explicit_repositories_strict(self):
+        repositories = {"tapdata/tapdata": {}, "tapdata/tapdata-enterprise": {}, "tapdata/tapdata-web": {}}
+        scope = align.resolve_scope(repositories, "tapdata/tapdata", ["tapdata/tapdata-enterprise", "tapdata/tapdata-enterprise"])
+
+        self.assertEqual(["tapdata/tapdata-enterprise"], scope["requested_repositories"])
+        self.assertEqual(["tapdata/tapdata", "tapdata/tapdata-enterprise"], scope["required_repositories"])
+        with self.assertRaisesRegex(align.AlignmentError, "未登记的目标仓库"):
+            align.resolve_scope(repositories, "tapdata/tapdata", ["tapdata/unknown"])
+
     def test_refresh_policy_distinguishes_always_auto_and_never(self):
         fresh = {"last_refresh_epoch": 995}
         stale = {"last_refresh_epoch": 600}
@@ -68,12 +109,17 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
 
     def test_json_includes_refresh_freshness_and_timing_while_progress_uses_stderr(self):
         config = {"derivation": {"product_repository": "tapdata/tapdata"}}
-        rows = [{"repository": "tapdata/tapdata", "refs": {"freshness": "cached_local_refs", "last_refresh_at": None}}]
+        rows = [{
+            "repository": "tapdata/tapdata", "selection": "required", "local": {"status": "available"},
+            "target_status": "cached_exists", "refs": {"freshness": "cached_local_refs", "last_refresh_at": None, "fetch_status": "not_requested"},
+        }]
         output, errors = io.StringIO(), io.StringIO()
+        observations = {"tapdata/tapdata": self.observation("tapdata/tapdata", {"main": "sha"}, selection="required")}
         with mock.patch.object(align, "load_configuration", return_value=(config, {"tapdata/tapdata": {}})), \
              mock.patch.object(align, "resolve_tapdata_root", return_value=(Path("/tapdata-root"), "explicit")), \
-             mock.patch.object(align, "refresh_branch_cache", return_value=({}, {}, 0.25)), \
+             mock.patch.object(align, "inspect_repositories", return_value=(observations, 0.25)), \
              mock.patch.object(align, "build_plan", return_value=rows), \
+             mock.patch.object(align, "report_outcome", return_value=("partial", [], {"cached_exists": 1})), \
              redirect_stdout(output), redirect_stderr(errors):
             code = align.main(["show", "--version", "main", "--refresh", "never", "--json"])
 
@@ -129,27 +175,88 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
         self.assertEqual(("develop", "fallback"), tests[:2])
         self.assertEqual((None, "unchanged"), unchanged[:2])
 
+    def test_unverified_refs_do_not_trigger_negative_fallback(self):
+        rules = {
+            "product_repository": "tapdata/tapdata",
+            "license_repository": "tapdata/tapdata-license",
+            "keep_current_repositories": [],
+            "independent_repositories": [],
+            "same_name_repositories": ["tapdata/tapdata-enterprise"],
+            "plugin_release_repositories": [],
+            "display_fallback_branches": {},
+        }
+        target, resolution, reason = align.derived_target(
+            "tapdata/tapdata-enterprise", "fix-xxx", rules,
+            {"tapdata/tapdata-enterprise": {}}, Path("/pool/tapdata"), {},
+            {"tapdata/tapdata-enterprise": "cached_unverified"},
+        )
+
+        self.assertIsNone(target)
+        self.assertEqual("unresolved", resolution)
+        self.assertIn("未核验", reason)
+
+    def test_fetch_error_category_and_prompt_distinguish_access_from_network(self):
+        self.assertEqual("ssh_auth_failed", align.classify_fetch_error("Permission denied (publickey)."))
+        self.assertEqual(
+            "ssh_auth_failed",
+            align.classify_fetch_error("git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository."),
+        )
+        self.assertEqual("repository_access_denied", align.classify_fetch_error("remote: Repository not found."))
+        self.assertEqual("network_unreachable", align.classify_fetch_error("fatal: Could not resolve host: github.com"))
+        self.assertEqual("fetch_timeout", align.classify_fetch_error("Git fetch 超时（30s）"))
+        self.assertIn("读取权限", align.fetch_prompt("tapdata/tapdata-enterprise", "repository_access_denied"))
+
     def test_current_matrix_is_verified_against_local_refs(self):
         config, repositories = align.load_configuration(ROOT)
-        paths = {repository: Path("/pool") for repository in repositories}
         refs = {repository: {config["versions"]["current"]["branches"][repository]: "sha-%s" % index} for index, repository in enumerate(repositories)}
-        with mock.patch.object(align, "local_remote_refs", side_effect=lambda path: refs[next(name for name, item in paths.items() if item == path)]):
-            # 使用不同 Path 对象避免上面按值相等的映射歧义。
-            paths = {repository: Path("/pool/%s" % index) for index, repository in enumerate(repositories)}
-            ref_states = {
-                repository: {
-                    "freshness": "cached_local_refs",
-                    "last_refresh_at": "2026-09-03T20:00:00+0800",
-                    "last_refresh_evidence": "FETCH_HEAD_mtime",
-                    "fetch_duration_seconds": 0.0,
-                }
-                for repository in repositories
-            }
-            rows = align.build_plan("current", config, repositories, paths, ref_states)
+        observations = {
+            repository: self.observation(
+                repository, refs[repository],
+                selection="required" if repository == "tapdata/tapdata" else "catalog_optional",
+            )
+            for repository in repositories
+        }
+        rows = align.build_plan("current", config, repositories, observations)
 
         self.assertEqual(set(repositories), {row["repository"] for row in rows})
-        self.assertTrue(all(row["target_status"] == "exists" for row in rows))
-        self.assertTrue(all(row["refs"]["freshness"] == "cached_local_refs" for row in rows))
+        self.assertTrue(all(row["target_status"] == "verified_exists" for row in rows))
+        self.assertTrue(all(row["refs"]["verification"] == "verified" for row in rows))
+
+    def test_optional_missing_repository_is_reported_without_blocking_main(self):
+        rows = [
+            dict(self.observation("tapdata/tapdata", {"develop": "main-sha"}, selection="required"), target_status="verified_exists"),
+            dict(self.observation("tapdata/tapdata-enterprise", local_status="missing"), target_status="not_covered"),
+        ]
+        scope = {"required_repositories": ["tapdata/tapdata"]}
+        outcome, blockers, summary = align.report_outcome(rows, scope, "auto")
+
+        self.assertEqual("partial", outcome)
+        self.assertEqual([], blockers)
+        self.assertEqual(1, summary["not_covered"])
+
+    def test_explicit_missing_repository_blocks_the_report(self):
+        rows = [
+            dict(self.observation("tapdata/tapdata", {"develop": "main-sha"}, selection="required"), target_status="verified_exists"),
+            dict(self.observation("tapdata/tapdata-enterprise", selection="required", local_status="missing"), target_status="unavailable"),
+        ]
+        scope = {"required_repositories": ["tapdata/tapdata", "tapdata/tapdata-enterprise"]}
+        outcome, blockers, _ = align.report_outcome(rows, scope, "auto")
+
+        self.assertEqual("blocked", outcome)
+        self.assertEqual("tapdata/tapdata-enterprise", blockers[0]["repository"])
+
+    def test_required_access_failure_exposes_actionable_blocker(self):
+        main = dict(self.observation("tapdata/tapdata", {"develop": "main-sha"}, selection="required"), target_status="cached_exists")
+        main["refs"].update({
+            "fetch_status": "failed",
+            "error_kind": "repository_access_denied",
+            "prompt": "tapdata/tapdata：当前身份可能没有该仓库的读取权限；请确认仓库访问授权与 origin 地址。",
+        })
+        outcome, blockers, _ = align.report_outcome([main], {"required_repositories": ["tapdata/tapdata"]}, "always")
+
+        self.assertEqual("blocked", outcome)
+        self.assertEqual("repository_access_denied", blockers[0]["error_kind"])
+        self.assertIn("读取权限", blockers[0]["message"])
 
 
 if __name__ == "__main__":
