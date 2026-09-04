@@ -133,9 +133,15 @@ def registry_lock(base):
 
 @contextmanager
 def task_state_lock(base):
-    """持有 Product Root 级任务状态锁，并在获得锁后重新核验工作空间绑定。"""
+    """持有工作空间状态目录锁，并在获得锁后重新核验工作空间绑定。
+
+    任务事实必须只写入项目工作空间。使用 ``.agenticops`` 目录自身作为锁对象，
+    可使普通任务写入不依赖 Product Root 的 ``.local``，同时让 purge 在删除状态
+    目录前与所有任务写入互斥。
+    """
     base = workspace_path(base)
-    binding_path = state_path(base) / "workspace.json"
+    state_root = state_path(base)
+    binding_path = state_root / "workspace.json"
     try:
         binding = json.loads(binding_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -143,12 +149,21 @@ def task_state_lock(base):
     product_root = binding.get("product_root")
     if not isinstance(product_root, str) or not product_root:
         raise ValueError("工作空间绑定缺少 product_root")
-    root = Path(product_root).resolve() / ".local"
-    root.mkdir(parents=True, exist_ok=True)
-    os.chmod(root, 0o700)
-    with open(root / "task-state.lock", "a+", encoding="utf-8") as stream:
-        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    try:
+        descriptor = os.open(str(state_root), flags)
+    except OSError as error:
+        raise ValueError("工作空间状态目录无法加锁：%s" % error) from error
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
         try:
+            opened = os.fstat(descriptor)
+            try:
+                current_directory = os.stat(state_root)
+            except OSError as error:
+                raise ValueError("获得任务状态锁后工作空间状态目录无法读取：%s" % error) from error
+            if (opened.st_dev, opened.st_ino) != (current_directory.st_dev, current_directory.st_ino):
+                raise ValueError("获得任务状态锁后工作空间状态目录已替换，拒绝继续")
             try:
                 current = json.loads(binding_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as error:
@@ -158,7 +173,9 @@ def task_state_lock(base):
                 raise ValueError("获得任务状态锁后工作空间绑定已变化，拒绝继续")
             yield
         finally:
-            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
 
 
 @contextmanager

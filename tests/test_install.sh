@@ -839,7 +839,7 @@ if "$install_root/agenticops" workspace purge --all --yes >/dev/null 2>&1; then
   printf '批量 purge 被错误接受\n' >&2
   exit 1
 fi
-# purge 从重新预检到最终删除必须只持有一次产品级 task-state 锁。已到达锁边界的并发
+# purge 从重新预检到最终删除必须只持有一次工作空间状态目录锁。已到达锁边界的并发
 # init 必须在 purge 事务内阻塞，释放后因 workspace binding 已删除而失败，不能重建状态。
 python3 - "$install_root" "$purge_workspace" <<'PY'
 import contextlib

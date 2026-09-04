@@ -38,6 +38,7 @@ class QualityTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
         product = self.base / "product"
+        self.product = product
         shutil.copytree(ROOT / "projects" / "tapdata", product / "projects" / "tapdata")
         (self.base / ".agenticops").mkdir()
         (self.base / ".agenticops/workspace.json").write_text(json.dumps({"project": "tapdata", "product_root": str(product)}))
@@ -103,6 +104,12 @@ class QualityTests(unittest.TestCase):
             self.apply("item", {"plan": invalid, "reason": "多方式不合法"})
         with self.assertRaises(ValueError):
             self.checkpoint("q4-acceptance")
+
+    def test_q1_state_write_does_not_require_product_root_local(self):
+        self.assertFalse((self.product / ".local").exists())
+        self.checkpoint("q1-intake", outcome="not_applicable")
+        self.assertTrue(quality.state_path(self.base, self.task).is_file())
+        self.assertFalse((self.product / ".local").exists())
 
     def test_before_fix_reproduction_preserves_fail(self):
         self.plan(before=True); self.select()

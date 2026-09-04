@@ -74,6 +74,8 @@ Agent Adapter → Tool Adapter → Standard Request
 
 工作空间不复制 Policy、Project Skill 或 Runtime。根 `agenticops`、`AGENTS.md`、Agent 配置和 MCP 配置是可再生接线，文件归属及哈希记录在 `init.json`；`doctor` 检测漂移，`repair` 安全重建。项目工作空间根的 `./agenticops` 只解析 workspace 绑定并转发到中央 Product Root，不注入任务上下文，也不承载任务状态机。Gate 能唯一解析任务时将事件写入对应任务目录；无法唯一解析任务时才写入根 `events.jsonl`，它是受控工作空间状态，随 `purge` 删除。旧 `.agenticops.json` 和 `.gate/` 只作为一次性迁移输入，不再是事实源。工作空间维护命令先列出精确目标再确认：`repair` 和 `clean --generated-only` 只收敛可再生接线；`detach` 删除已校验归属的接线和绑定但保留任务状态；`purge` 才会删除任务状态，且必须逐个工作空间明确确认。无法访问的登记只报告，不能被更新自动注销。
 
+普通任务状态变更以工作空间 `.agenticops` 目录自身为互斥对象；Q1 等质量检查点、授权、CI 和任务事件均不要求写入 Product Root。`purge` 在删除该目录前持有同一把锁并回读绑定，以避免并发任务在已删除的工作空间状态上继续写入。Product Root `.local/` 继续用于生命周期、本机工作空间索引及跨工作空间共享的 Source Pool/worktree 租约，不保存任务事实。
+
 多个 active 任务存在歧义时，Workflow 要求显式 issue key。Gate 按 issue key 或 `repository + work_branch` 唯一解析任务；零匹配、多匹配都不能借用其它任务授权。
 
 ## 6. Source Pool 与任务工作树
