@@ -48,6 +48,34 @@ class IssueVersionsTests(unittest.TestCase):
         self.assertEqual(result["refs"]["develop"], "a" * 40)
         self.assertTrue(result["refs_verified_at"])
 
+    def test_all_version_branch_relations_are_retained_for_user_reference(self):
+        result = self.resolve()
+
+        self.assertEqual(
+            [(item["jira_version_id"], item["jira_version_name"], item["branch"], item["remote_sha"])
+             for item in result["branch_references"] if item["kind"] == "affected_version"],
+            [("1", "4.18.0", "release-v4.18.0", "b" * 40),
+             ("2", "release-v4.21.0", "release-v4.21.0", "c" * 40)],
+        )
+        preferred = result["branch_references"][-1]
+        self.assertEqual("preferred_branch_analysis", preferred["kind"])
+        self.assertEqual("develop", preferred["branch"])
+        self.assertEqual("present", preferred["defect_status"])
+        self.assertIn("回写分支确认", result["branch_reference_guidance"])
+        self.assertIn("尚未登记为任务实施基线", result["branch_references"][0]["usage"])
+
+    def test_branch_references_use_the_project_product_repository(self):
+        references = issue_versions.branch_references(
+            [{"id": "1", "name": "1.0.0", "branch": "release-v1.0.0"}],
+            "develop",
+            {"status": "absent", "source_ref": "fixture:analysis"},
+            {"release-v1.0.0": "a" * 40, "develop": "b" * 40},
+            "fixture:jira/OTHER-1",
+            "other/product",
+        )
+
+        self.assertEqual(["other/product", "other/product"], [item["repository"] for item in references])
+
     def test_absent_develop_selects_exactly_one_and_never_repairs_both(self):
         self.payload["develop"]["status"] = "absent"
         with self.assertRaisesRegex(ValueError, "选择一个"):

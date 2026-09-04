@@ -140,7 +140,7 @@ TapData 缺陷的“问题版本”对应 Jira `fields.versions`（影响版本�
 }
 ```
 
-`develop.status` 只接受有证据的 `present/absent`，未知时继续核验，不能猜。`absent` 且有多个候选时增加 `selected_version_id`。规则来自 Project admission，主仓远端查询只读并记录 `refs_verified_at`，它代表当次核验时间，不是未来实时状态。准入/实施推进要求当前 run 的有效版本规划；`record --force` 也不能覆盖结构化版本事实。基线已固化后改修复线需 cleanup/reset 并重新确认授权。
+`develop.status` 只接受有证据的 `present/absent`，未知时继续核验，不能猜。`absent` 且有多个候选时增加 `selected_version_id`。输出的 `branch_references` 会逐项保留全部 Jira 影响版本、对应主仓分支、远端 SHA 和来源，并额外列出 `develop` 分析线；用户可将这些条目引用到 Jira 的分支确认中。它们是远端关系引用，不是“当前问题已归属该仓库”的断言，也不会自动成为任务基线；实施前仍由 `repository add` 和 `repository prepare` 固化实际 `base_sha`。规则来自 Project admission，主仓远端查询只读并记录 `refs_verified_at`，它代表当次核验时间，不是未来实时状态。准入/实施推进要求当前 run 的有效版本规划；`record --force` 也不能覆盖结构化版本事实。基线已固化后改修复线需 cleanup/reset 并重新确认授权。
 
 首次判断也可先准备 develop 工作树作只读调查，再导入初次规划；已准备基线与选定修复线、主仓核验 SHA 相符时不要求重开任务。需要切换修复线或修改已有规划时才使用受控清理与重置。
 
