@@ -16,7 +16,8 @@ from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from workflow import ci, evidence, project_rules, repository_worktree, task as workflow_task  # noqa: E402
+from bootstrap import product_version  # noqa: E402
+from workflow import ci, evidence, jira_watermark, project_rules, repository_worktree, task as workflow_task  # noqa: E402
 from workflow import task_store, quality  # noqa: E402
 
 PASS = 0
@@ -59,6 +60,25 @@ def grant(ws, issue="TAP-123"):
         "authorization.py", "grant", "--issue-key", issue, "--agent-id", "dev-bot-1",
         "--plan-version", "v1", "--dir", str(ws),
         cwd=ws,
+    )
+
+
+def verified_takeover_watermark(ws, issue="TAP-123"):
+    """阶段机夹具写入完整且与当前 Product Root 一致的回读记录。"""
+    task = json.loads(task_store.task_path(ws, issue).read_text(encoding="utf-8"))
+    version = product_version.describe(project_rules.product_root_from_workspace(ws))
+    field_id = "customfield_10421"
+    task_store._write_json_atomic(
+        jira_watermark.state_path(ws, task),
+        {"schema_version": 1, "issue_key": issue, "run_id": task["run_id"], "watermark": {
+            "at": "2026-09-04T00:00:00+0000", "source_ref": "fixture:jira/" + issue,
+            "issue_key": issue, "field_id": field_id, "field_name": "AgenticOps Version",
+            "logical_key": "agenticops_version", "issue_type_id": "10011", "version": version,
+            "write_mode": "overwrite", "payload_digest": jira_watermark.payload_digest(field_id, version),
+            "outcome": "verified", "reason": "fixture_read_back",
+            "completed_at": "2026-09-04T00:00:00+0000", "readback_ref": "fixture:jira/" + issue,
+            "readback_value": version,
+        }},
     )
 
 
@@ -277,6 +297,13 @@ def main():
             json.dumps(catalog_document, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+        (product_root / ".gitignore").write_text(".local/\n", encoding="utf-8")
+        subprocess.run(["git", "init", "-q", "-b", "develop"], cwd=product_root, check=True)
+        subprocess.run(["git", "add", "."], cwd=product_root, check=True)
+        subprocess.run(
+            ["git", "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "-qm", "fixture"],
+            cwd=product_root, check=True,
+        )
         # ---- 任务状态机 -------------------------------------------------
         code, out = run_tool("task.py", "init", "--issue-key", "TAP-123", "--task-class", "defect_fix", cwd=ws)
         check("task init 成功", code, 0)
@@ -362,6 +389,7 @@ def main():
         check("inactive 任务禁止继续变更状态", code, 2)
         code, out = run_tool("task.py", "record", "--key", "problem_branch", "--value", "develop", cwd=ws)
         check("record 事实", code, 0)
+        verified_takeover_watermark(ws)
         code, out = run_tool("task.py", "advance", "--note", "接管核对通过", cwd=ws)
         check("advance 到 task_intake", code, 0)
 
@@ -727,6 +755,7 @@ def main():
             encoding="utf-8",
         )
         run_tool("task.py", "init", "--issue-key", "TAP-321", "--task-class", "technical_task", "--dir", str(ws2), cwd=ws2)
+        verified_takeover_watermark(ws2, "TAP-321")
         run_tool(
             "task.py", "advance", "--issue-key", "TAP-321", "--note", "接管核对通过",
             "--dir", str(ws2), cwd=ws2,
@@ -879,6 +908,7 @@ def main():
             task_store.task_path(ws, "TAP-456").read_text(encoding="utf-8")
         )
         purge_run = purge_task["run_id"]
+        verified_takeover_watermark(ws, "TAP-456")
         run_tool(
             "task.py", "advance", "--issue-key", "TAP-456",
             "--note", "接管核对通过", cwd=ws,
@@ -1136,6 +1166,8 @@ def main():
             status for status, stage in profile["statuses"].items() if stage == "waiting_takeover"
         )
         check("TapData 仅 Analyzed 映射 waiting_takeover", waiting_takeover_statuses, ["Analyzed"])
+        check("TapData 接管水印只覆盖 Bug/Task/Story", sorted(profile["jira"]["takeover_watermark"]["issue_type_ids"]), ["10008", "10010", "10011"])
+        check("TapData 接管水印配置通过加载校验", project_rules.validate_takeover_watermark(profile)["field_id"], "customfield_10421")
         task_workflow = project_rules.resolve_issue_type_workflow(
             profile, issue_type_id="10008", issue_type_name="任务"
         )

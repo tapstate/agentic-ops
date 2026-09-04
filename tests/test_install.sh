@@ -88,6 +88,8 @@ test "$(git -C "$maintainer_root" branch --show-current)" = develop
 test -d "$maintainer_root/.local/venv/internal"
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field mode)" = source
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field tracking_branch)" = develop
+test "$(python3 "$maintainer_root/bootstrap/product_version.py" --product-root "$maintainer_root")" = \
+  "develop-untagged-1-$(git -C "$maintainer_root" rev-parse --short=8 HEAD)"
 test "$(python3 "$maintainer_root/bootstrap/repository_pool.py" --product-root "$maintainer_root" read --field provisioning)" = "auto-clone"
 test -x "$(git -C "$maintainer_root" config --get core.hooksPath)/pre-commit"
 test -f "$maintainer_root/.local/maintenance-skill-wiring.json"
@@ -232,6 +234,8 @@ test "$(python3 "$install_root/bootstrap/repository_pool.py" --product-root "$in
   "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$shared_repository_pool")"
 test "$(python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" read --field provisioning)" = "auto-clone"
 test "$(python3 "$install_root/bootstrap/product_state.py" --product-root "$install_root" read --field tracking_branch)" = "$install_branch"
+test "$(python3 "$install_root/bootstrap/product_version.py" --product-root "$install_root")" = \
+  "$install_branch-untagged-1-$(git -C "$install_root" rev-parse --short=8 HEAD)"
 if PATH="$setup_bin:$PATH" "$install_root/agenticops" setup >/dev/null 2>&1; then
   printf '安装产品根目录被错误切换为源码维护模式\n' >&2
   exit 1
@@ -1124,9 +1128,45 @@ entry["baseline_branch"] = sys.argv[3]
 entry["dev_branch"] = sys.argv[3]
 path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
+git -C "$install_root" add projects/tapdata/repositories.json
+git -C "$install_root" -c user.email=test@example.invalid -c user.name=Test \
+  commit -qm 'test: update source-pool fixture'
 pool_main="$shared_repository_pool/tapdata/tapdata"
 mkdir -p "$(dirname "$pool_main")"
 git clone -q "$source_repo" "$pool_main"
+python3 - "$workspace" TAP-123 "$install_root" <<'PY'
+import hashlib
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+workspace = Path(sys.argv[1])
+issue_key = sys.argv[2]
+product_root = Path(sys.argv[3])
+task_path = workspace / ".agenticops" / "tasks" / issue_key / "state.json"
+task = json.loads(task_path.read_text(encoding="utf-8"))
+suffix = hashlib.sha256(task["run_id"].encode("utf-8")).hexdigest()[:24]
+state_path = task_path.parent / ("jira-watermark-%s.json" % suffix)
+version = subprocess.check_output(
+    [sys.executable, str(product_root / "bootstrap" / "product_version.py"), "--product-root", str(product_root)],
+    text=True,
+).strip()
+state_path.write_text(json.dumps({
+    "schema_version": 1, "issue_key": issue_key, "run_id": task["run_id"],
+    "watermark": {
+        "at": "2026-09-04T00:00:00+0000", "source_ref": "fixture:jira/" + issue_key,
+        "issue_key": issue_key, "field_id": "customfield_10421", "field_name": "AgenticOps Version",
+        "logical_key": "agenticops_version", "issue_type_id": "10011", "version": version,
+        "write_mode": "overwrite", "payload_digest": hashlib.sha256(
+            json.dumps({"field_id": "customfield_10421", "value": version}, ensure_ascii=False,
+                       sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+        "outcome": "verified", "reason": "install_fixture_read_back",
+        "completed_at": "2026-09-04T00:00:00+0000", "readback_ref": "fixture:jira/" + issue_key,
+        "readback_value": version,
+    },
+}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
 python3 "$install_root/workflow/task.py" advance --issue-key TAP-123 \
   --note '安装验收：已完成接管并进入准入阶段' --dir "$workspace" >/dev/null
 python3 "$install_root/workflow/task.py" repository add --issue-key TAP-123 \
@@ -1181,6 +1221,39 @@ test "$(python3 "$install_root/bootstrap/repository_pool.py" --product-root "$in
 "$install_root/agenticops" init --workspace "$auto_clone_workspace" --agent codex >/dev/null
 python3 "$install_root/workflow/task.py" init \
   --issue-key TAP-124 --task-class technical_task --dir "$auto_clone_workspace" >/dev/null
+python3 - "$auto_clone_workspace" TAP-124 "$install_root" <<'PY'
+import hashlib
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+workspace = Path(sys.argv[1])
+issue_key = sys.argv[2]
+product_root = Path(sys.argv[3])
+task_path = workspace / ".agenticops" / "tasks" / issue_key / "state.json"
+task = json.loads(task_path.read_text(encoding="utf-8"))
+suffix = hashlib.sha256(task["run_id"].encode("utf-8")).hexdigest()[:24]
+state_path = task_path.parent / ("jira-watermark-%s.json" % suffix)
+version = subprocess.check_output(
+    [sys.executable, str(product_root / "bootstrap" / "product_version.py"), "--product-root", str(product_root)],
+    text=True,
+).strip()
+state_path.write_text(json.dumps({
+    "schema_version": 1, "issue_key": issue_key, "run_id": task["run_id"],
+    "watermark": {
+        "at": "2026-09-04T00:00:00+0000", "source_ref": "fixture:jira/" + issue_key,
+        "issue_key": issue_key, "field_id": "customfield_10421", "field_name": "AgenticOps Version",
+        "logical_key": "agenticops_version", "issue_type_id": "10011", "version": version,
+        "write_mode": "overwrite", "payload_digest": hashlib.sha256(
+            json.dumps({"field_id": "customfield_10421", "value": version}, ensure_ascii=False,
+                       sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+        "outcome": "verified", "reason": "install_fixture_read_back",
+        "completed_at": "2026-09-04T00:00:00+0000", "readback_ref": "fixture:jira/" + issue_key,
+        "readback_value": version,
+    },
+}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
 python3 "$install_root/workflow/task.py" advance --issue-key TAP-124 \
   --note '安装验收：进入准入阶段后自动准备仓库' --dir "$auto_clone_workspace" >/dev/null
 python3 "$install_root/workflow/task.py" repository add --issue-key TAP-124 \

@@ -88,10 +88,43 @@ def load_admission(root=ROOT, project="tapdata", workspace=None):
     return _read_json(project_root(selected_root, selected) / "admission.json")
 
 
+def validate_takeover_watermark(profile):
+    """每个现役 Jira Project Package 都必须声明接管版本水印。"""
+    jira = profile.get("jira")
+    value = jira.get("takeover_watermark") if isinstance(jira, dict) else None
+    if not isinstance(value, dict):
+        raise ValueError("项目 Profile 缺少 jira.takeover_watermark 必要配置")
+    required = {
+        "schema_version", "required", "logical_key", "field_id", "field_name",
+        "field_type", "issue_type_ids", "write_mode",
+    }
+    if set(value) != required or value.get("schema_version") != 1:
+        raise ValueError("jira.takeover_watermark 结构无效")
+    if value.get("required") is not True:
+        raise ValueError("jira.takeover_watermark 必须 required=true")
+    if value.get("logical_key") != "agenticops_version":
+        raise ValueError("jira.takeover_watermark.logical_key 必须为 agenticops_version")
+    if not isinstance(value.get("field_id"), str) or not re.fullmatch(r"customfield_[1-9][0-9]*", value["field_id"]):
+        raise ValueError("jira.takeover_watermark.field_id 必须是 Jira customfield_<数字>")
+    if not isinstance(value.get("field_name"), str) or not value["field_name"].strip():
+        raise ValueError("jira.takeover_watermark.field_name 无效")
+    if value.get("field_type") != "string":
+        raise ValueError("jira.takeover_watermark.field_type 必须为 string")
+    issue_types = value.get("issue_type_ids")
+    if (not isinstance(issue_types, list) or not issue_types or
+            any(not isinstance(item, str) or not re.fullmatch(r"[1-9][0-9]*", item) for item in issue_types) or
+            len(issue_types) != len(set(issue_types))):
+        raise ValueError("jira.takeover_watermark.issue_type_ids 必须是非空且不重复的 Jira 事务类型 ID")
+    if value.get("write_mode") != "overwrite":
+        raise ValueError("jira.takeover_watermark.write_mode 必须为 overwrite")
+    return value
+
+
 def load_profile(root=ROOT, project="tapdata", workspace=None):
     selected = project_from_workspace(workspace) if workspace is not None else project
     selected_root = product_root_from_workspace(workspace) if workspace is not None else root
     profile = _read_json(project_root(selected_root, selected) / "profile.json")
+    validate_takeover_watermark(profile)
     reference = profile.get("repositories", {}).get("catalog")
     if not isinstance(reference, str) or not reference:
         raise ValueError("项目 Profile 缺少 repositories.catalog")

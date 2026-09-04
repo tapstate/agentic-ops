@@ -21,7 +21,7 @@ CODEX_HOOK = ROOT / "adapters" / "agents" / "codex" / "hook.py"
 GATE_RUNNER = ROOT / "gate" / "runner.py"
 sys.path.insert(0, str(ROOT))
 from gate import engine  # noqa: E402
-from workflow import task_store  # noqa: E402
+from workflow import jira_watermark, task_store  # noqa: E402
 
 PASS = 0
 FAIL = 0
@@ -34,6 +34,21 @@ def check(name, actual, expected):
     FAIL += not ok
     mark = "PASS" if ok else "FAIL"
     print("[%s] %-58s -> %s (期望 %s)" % (mark, name, actual, expected))
+
+
+def ready_watermark(issue_key, run_id, value):
+    field_id = "customfield_10421"
+    return {
+        "schema_version": 1, "issue_key": issue_key, "run_id": run_id,
+        "watermark": {
+            "at": "2026-09-04T00:00:00+0000", "source_ref": "fixture:jira/" + issue_key,
+            "issue_key": issue_key, "field_id": field_id, "field_name": "AgenticOps Version",
+            "logical_key": "agenticops_version", "issue_type_id": "10011", "version": value,
+            "write_mode": "overwrite", "payload_digest": jira_watermark.payload_digest(field_id, value),
+            "outcome": "ready", "reason": "watermark_prepared",
+            "native_request": {"issue_key": issue_key, "fields": {field_id: value}},
+        },
+    }
 
 
 def run_hook(tool_name, tool_input, cwd, env_extra=None):
@@ -933,6 +948,71 @@ def main():
             "不同 Jira transition 不借用状态同步意图",
             run_hook("mcp__atlassian__transition_issue", {"issueKey": "TAP-123", "transitionId": "999"}, ws),
             "ask",
+        )
+        watermark_value = "develop-v1.0-99-1234abcd"
+        task_store._write_json_atomic(
+            task_store.task_directory(ws, "TAP-123") / "jira-watermark-fixture.json",
+            ready_watermark("TAP-123", "run-111111111111", watermark_value),
+        )
+        check(
+            "精确 Jira 接管水印意图自动放行",
+            run_hook("mcp__atlassian__edit_issue", {
+                "issueKey": "TAP-123", "fields": {"customfield_10421": watermark_value},
+            }, ws),
+            "allow",
+        )
+        check(
+            "同一 Jira 接管水印意图只能消费一次",
+            run_hook("mcp__atlassian__edit_issue", {
+                "issueKey": "TAP-123", "fields": {"customfield_10421": watermark_value},
+            }, ws),
+            "ask",
+        )
+        check(
+            "不同 Jira 水印值不借用字段写入意图",
+            run_hook("mcp__atlassian__edit_issue", {
+                "issueKey": "TAP-123", "fields": {"customfield_10421": "other-version"},
+            }, ws),
+            "ask",
+        )
+        task_store._write_json_atomic(
+            task_store.task_directory(ws, "TAP-123") / "jira-watermark-fixture.json",
+            ready_watermark("TAP-123", "run-111111111111", watermark_value),
+        )
+        check(
+            "水印意图不能夹带其它 Jira 更新",
+            run_hook("mcp__atlassian__edit_issue", {
+                "issueKey": "TAP-123", "fields": {"customfield_10421": watermark_value},
+                "update": {"summary": [{"set": "not allowed"}]},
+            }, ws),
+            "ask",
+        )
+        check(
+            "创建 Jira 任务不能借用已有水印意图",
+            run_hook("mcp__atlassian__create_issue", {
+                "issueKey": "TAP-123", "fields": {"customfield_10421": watermark_value},
+            }, ws),
+            "ask",
+        )
+        check(
+            "冲突 Jira 任务号不能借用水印意图",
+            run_hook("mcp__atlassian__edit_issue", {
+                "issueKey": "TAP-123", "issue_key": "TAP-999",
+                "fields": {"customfield_10421": watermark_value},
+            }, ws),
+            "ask",
+        )
+        opa_watermark_value = "develop-v1.0-100-1234abcd"
+        task_store._write_json_atomic(
+            task_store.task_directory(ws, "TAP-123") / "jira-watermark-fixture.json",
+            ready_watermark("TAP-123", "run-111111111111", opa_watermark_value),
+        )
+        check(
+            "OPA 精确 Jira 接管水印意图与 Python 一致",
+            run_hook("mcp__atlassian__edit_issue", {
+                "issueKey": "TAP-123", "fields": {"customfield_10421": opa_watermark_value},
+            }, ws, env_extra={"AO_GATE_USE_OPA": "1"}),
+            "allow",
         )
         not_covered = run_standard({
             "protocol_version": 1,

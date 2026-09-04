@@ -33,12 +33,23 @@ python3 "$agenticops_root/workflow/task.py" init \
   --issue-key "$task_key" --task-class "$task_class" \
   --dir "$project_workspace"
 
+# 用 Jira 原生工具读取当前任务并保存为 jira-before.json；该快照必须含 source_ref、
+# issue.key、issue.fields.issuetype 和 AgenticOps Version 字段。
+python3 "$agenticops_root/workflow/jira_watermark.py" prepare \
+  --issue-key "$task_key" --input jira-before.json --dir "$project_workspace"
+
+# 仅当 prepare 输出 outcome=ready 时，按 native_request 用 Jira 原生编辑工具覆盖一个字段；
+# 随后重新读取 Jira 保存为 jira-after.json。不得夹带其它字段，也不得重复发送。
+python3 "$agenticops_root/workflow/jira_watermark.py" complete \
+  --issue-key "$task_key" --outcome unknown --input jira-after.json --dir "$project_workspace"
+
+# 仅 complete 输出 outcome=verified 才可进入 task_intake。
 python3 "$agenticops_root/workflow/task.py" advance \
   --issue-key "$task_key" --note "已核对 Jira 任务归属、负责人、状态和任务类型" \
   --dir "$project_workspace"
 ```
 
-`init` 创建该 Jira 任务的本地 `run_id` 和 `waiting_takeover` 状态；第一条 `advance` 才进入 `task_intake`。它们只加载本地执行上下文，不授权修改代码、提交、推送或合并。进入 `task_intake` 后，TapData 缺陷按项目规则准备一次精确的 `In Progress` 状态同步意图；该意图只覆盖当次 transition，失败只记录并继续本地主流程。
+`init` 创建该 Jira 任务的本地 `run_id` 和 `waiting_takeover` 状态。第一条 `advance` 前必须完成 AgenticOps Version 的精确覆盖写入或确认 Jira 已是当前版本，并以 Jira 回读验证。外部写入结果不明确时保留同一 run，仅允许用新的只读快照再次 `complete`；不得重发字段写入。进入 `task_intake` 后，TapData 缺陷按项目规则准备一次精确的 `In Progress` 状态同步意图；该意图只覆盖当次 transition，失败只记录并继续本地主流程。
 
 若 `list` 已显示同一任务，不要再次 `init`。先用 `status --issue-key "$task_key"` 回读现有 `run_id` 和阶段；继续现有现场或按该 `run_id` 清理后 reset 是两个不同决定。若列表有其它 active 任务，后续每条命令都必须保留 `--issue-key "$task_key"`，不能借用其授权。
 

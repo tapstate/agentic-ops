@@ -9,7 +9,7 @@
   "resolution": {
     "match": "exact_version_key_or_derived_product_branch",
     "on_unknown_version": "未命中显式矩阵时，只允许按 derivation 解析 main、develop、release-vX.Y.Z 或已存在的主仓任务分支；主仓分支不存在或无法核验时停止",
-    "remote_validation": "对每个已解析分支执行只读 git ls-remote --heads；网络、权限或远程错误标记为未核验，不得标记为不存在"
+    "remote_validation": "对本地可用仓库按刷新策略执行 git fetch --prune 并解析 origin/*；本次成功刷新后才可断言目标分支不存在。网络、权限或远程错误标记为未核验，不得标记为不存在"
   },
   "derivation": {
     "product_repository": "tapdata/tapdata",
@@ -35,6 +35,39 @@
       "tapdata/tapdata-connectors",
       "tapdata/tapdata-connectors-enterprise"
     ],
+    "feature_branch": {
+      "same_name_repositories": [
+        "tapdata/tapdata-enterprise",
+        "tapdata/tapdata-web",
+        "tapdata/tapdata-common-lib",
+        "tapdata/tapdata-connectors",
+        "tapdata/tapdata-connectors-enterprise",
+        "tapdata/tapdata-license",
+        "tapdata/hazelcast",
+        "tapdata/tapdata-application",
+        "tapdata/t-layer3-test"
+      ],
+      "plugin_release_repositories": [
+        "tapdata/tapdata-common-lib",
+        "tapdata/tapdata-connectors",
+        "tapdata/tapdata-connectors-enterprise"
+      ],
+      "tag_fallback_repositories": [
+        "tapdata/tapdata-enterprise",
+        "tapdata/tapdata-web",
+        "tapdata/tapdata-license",
+        "tapdata/hazelcast",
+        "tapdata/tapdata-application",
+        "tapdata/t-layer3-test"
+      ],
+      "unchanged_repositories": [
+        "tapdata/docs",
+        "tapdata/docs-en"
+      ],
+      "plugin_release_policy": "exact",
+      "tag_selection": "first_parent_nearest",
+      "rule": "功能分支先在列出的仓库找完全同名 branch；common-lib/connectors/connectors-enterprise 无同名 branch 时只按 tapdata 该分支 PluginKit 的精确 release-vX.Y.Z 推导，目标不存在即停止；其它 tag_fallback 仓库使用 tapdata 功能分支 first-parent 最近的产品 Tag：X.Y.Z-dev 推导 develop，X.Y.Z 推导 release-vX.Y.Z。未列入的仓库不得隐式推导。"
+    },
     "license_repository": "tapdata/tapdata-license",
     "display_fallback_branches": {
       "tapdata/tapdata-application": "main",
@@ -51,7 +84,7 @@
       "tapdata/docs",
       "tapdata/docs-en"
     ],
-    "rule": "main 时全部 linked 仓使用 main；develop 时 license 使用 main、其余 linked 仓使用 develop；release 或任务分支先精确匹配同名分支，缺失时按 PluginKit release、固定分支、固定回退或 license 回退解析。tapdata-application 固定 main；hazelcast 固定参与并使用 release-v5.5.0；t-layer3-test 没有同名分支时回退 develop；其它 keep_current 与 independent 仓库在 TapData 模块根目录分析中标记 unchanged。"
+    "rule": "main 时全部 linked 仓使用 main；develop 时 license 使用 main、其余 linked 仓使用 develop；release-vX.Y.Z 使用标准 release 规则。功能分支仅按 feature_branch 显式规则推导，不能沿用固定分支或旧的任务分支回退。"
   },
   "versions": {
     "current": {

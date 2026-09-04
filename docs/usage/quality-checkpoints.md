@@ -43,7 +43,9 @@ flowchart TD
 
 ## 非阻断 Jira 状态同步
 
-缺陷接管完成并进入 `task_intake` 后，Agent 立即读取当前 Jira issue、当前用户和可用 transitions，以 `takeover` 节点执行一次 `jira_status.py prepare`。当前状态已是 `In Progress` 时直接记录；当前状态为 `Analyzed`、Assignee 为当前用户且 Jira 返回配置的 transition 时，工具生成精确 transition 意图，Agent 当场调用原生 Jira 工具一次并用 `complete` 导入回读。状态不匹配、必填字段缺失、权限或外部调用失败只记录和提示，不回退本地阶段、不重试。
+接管从 `waiting_takeover` 进入 `task_intake` 前，Agent 先读取当前 Jira issue，并以 `jira_watermark.py prepare` 从工作空间绑定的 Product Root 生成当前 `agenticops_version`。当 Jira 的项目配置字段已经等于该版本时直接回读验证；否则，Gate 只为当前 task/run 的同一字段和载荷摘要放行一次明确 Jira 编辑工具的覆盖写入，随后必须以 `complete` 导入回读。字段写入、权限或回读不明确时不得重发；保留同一 run，并可使用新的只读 Jira 快照再次 `complete`。Product Root 版本或工作项类型变化时不得确认旧水印成功，也不得推进接管。
+
+缺陷进入 `task_intake` 后，Agent 立即读取当前 Jira issue、当前用户和可用 transitions，以 `takeover` 节点执行一次 `jira_status.py prepare`。当前状态已是 `In Progress` 时直接记录；当前状态为 `Analyzed`、Assignee 为当前用户且 Jira 返回配置的 transition 时，工具生成精确 transition 意图，Agent 当场调用原生 Jira 工具一次并用 `complete` 导入回读。状态不匹配、必填字段缺失、权限或外部调用失败只记录和提示，不回退本地阶段、不重试。
 
 Q4 有效确认并进入 `ci_validation` 后，以 `tests_passed` 节点执行相同步骤。接管阶段不要求创建 Test；编码完成后由用户与 Agent 根据已确认的验收方案创建或复用 Test，并通过「已链接工作项」关联缺陷。只有当前状态为 `In Progress`、Q4 总体处置为 `accept`、全部受管 Test 均有当前完整提交 SHA 的 PASS 证据且用户逐项 `accept`、并且 Jira 返回目标 transition 时才生成意图。`Pull Request Submitted` 不自动执行。
 

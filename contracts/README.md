@@ -18,6 +18,7 @@
 - 协议使用整数 `protocol_version`，Manifest 和操作词表使用 `schema_version`。
 - 新增可选字段或标准操作可以保持当前版本，但必须补充一致性测试。
 - `gate-request-v1.target.jira_transition_id` 是 Jira 状态转换的可选精确目标；只有 Workflow 为当前 task/run/node 准备且仍待执行的同一转换，Gate 才可识别为项目限定的自动同步意图，不能泛化为 Jira 写入授权。
+- `gate-request-v1.target.jira_watermark_field` 与 `jira_watermark_digest` 共同标识一个接管版本水印字段载荷；仅当前 task/run 已准备、未消费的完全相同载荷可放行一次，不能泛化为 Jira 字段编辑授权。
 - `task-state-v1` 的仓库 `authorized_endpoint` 是向后兼容的可选字段；新登记仓库必须从 Project catalog 固化该字段，旧任务可在受控 `repository prepare` 时迁移。旧授权不会被静默补写：缺少该字段时非 push 操作继续按 v1 通用绑定校验，push 必须失败关闭并重新签发授权。
 - 删除字段、增加必填字段或改变既有字段和操作语义必须升级主版本。
 - 未知版本、缺失字段和契约与 Policy 漂移必须拒绝；未知操作必须转人工。

@@ -23,6 +23,16 @@
       "fix_details": "customfield_10093",
       "verification_method": "customfield_10049"
     },
+    "takeover_watermark": {
+      "schema_version": 1,
+      "required": true,
+      "logical_key": "agenticops_version",
+      "field_id": "customfield_10421",
+      "field_name": "AgenticOps Version",
+      "field_type": "string",
+      "issue_type_ids": ["10010", "10011", "10008"],
+      "write_mode": "overwrite"
+    },
     "status_sync": {
       "schema_version": 1,
       "task_classes": ["defect_fix"],
