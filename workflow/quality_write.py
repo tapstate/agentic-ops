@@ -23,11 +23,15 @@ def checkpoint_body(model, checkpoint, rules, ctx):
     if checkpoint != rules["checkpoints"][0]["id"]:
         fact_keys += rules.get("plan_fact_keys", [])
     facts = {k: v for k, v in ctx["facts"].items() if k in fact_keys}
+    disposition = (view["decision"] or {}).get("decision")
+    if view.get("mode") == "automatic":
+        disposition = {"outcome": "observed", "reason": (view["decision"] or {}).get("reason"),
+                       "basis": "已确认方案的全部修复后检查项在当前完整提交 SHA 上得到预期结果"}
     lines = ["%s / %s：%s" % (ctx["issue_key"], ctx["run_id"], view["handoff"]["title"]),
              "任务事实：" + json.dumps(facts, ensure_ascii=False, sort_keys=True),
-             "检查点处置：" + json.dumps(view["decision"]["decision"], ensure_ascii=False, sort_keys=True)]
+             "检查点处置：" + json.dumps(disposition, ensure_ascii=False, sort_keys=True)]
     for key, item in model["items"].items():
-        if key in view["due"]:
+        if key in view["due"] or (view.get("mode") == "automatic" and item["plan"]["timing"] == "after_fix"):
             content = {"plan": item["plan"], "executions": item["executions"], "decision": item["decision"]}
         elif checkpoint != rules["checkpoints"][0]["id"]:
             content = {"plan": quality.selection_plan(item["plan"], rules), "尚未到验收点": True}

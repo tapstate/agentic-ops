@@ -80,7 +80,7 @@ for file in \
   workflow/task.py workflow/task_store.py workflow/project_rules.py \
   workflow/authorization.py workflow/ci.py workflow/evidence.py \
   workflow/quality.py workflow/quality_contract.py workflow/quality_write.py \
-  workflow/jira_status.py workflow/pr_ready.py \
+  workflow/jira_status.py workflow/jira_tests.py workflow/pr_ready.py \
   contracts/quality-action.schema.json contracts/quality-state.schema.json \
   projects/tapdata/quality.json docs/usage/quality-checkpoints.md tests/test_quality.py tests/test_jira_status.py \
   projects/tapdata/profile.json projects/tapdata/repositories.json projects/tapdata/admission.json \

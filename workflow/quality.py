@@ -159,7 +159,50 @@ def item_view(item, rules, ctx):
             "decision_valid": decided, "decision": item["decision"], "executions": item["executions"]}
 
 
-def checkpoint_view(model, checkpoint, rules, ctx):
+def automatic_checkpoint_problems(model, checkpoint, rules, ctx):
+    """Q3 是已授权执行的事实记录，不把它伪装成第二次用户验收。"""
+    point = next(c for c in rules["checkpoints"] if c["id"] == checkpoint)
+    if point.get("confirmation") != "automatic":
+        return ["检查点 %s 不允许自动记录" % checkpoint]
+    views = {key: item_view(item, rules, ctx) for key, item in model["items"].items()}
+    after_fix = {key: view for key, view in views.items() if view["plan"]["timing"] == "after_fix"}
+    if not after_fix:
+        return ["首轮验证没有已定义的修复后检查项，不能自动推进"]
+    problems = []
+    for key, view in after_fix.items():
+        plan = view["plan"]
+        if not view["selected"]:
+            problems.append("%s 的验收方式尚未经 Q2 确认" % key)
+            continue
+        if not exact_commit(plan["target_revision"]):
+            problems.append("%s 尚未绑定最终完整提交 SHA" % key)
+            continue
+        keys = ("case_ref", "case_version", "method", "repository", "target_revision")
+        executions = [e for e in view["executions"] if all(e[k] == plan[k] for k in keys)]
+        if not executions:
+            problems.append("%s 尚无当前提交上的首轮执行证据" % key)
+        elif executions[-1]["raw_result"] != plan["expected_result"]:
+            problems.append("%s 的首轮结果为 %s，未满足预期 %s" %
+                            (key, executions[-1]["raw_result"], plan["expected_result"]))
+    return problems
+
+
+def automatic_checkpoint_digest(model, checkpoint, rules, ctx):
+    # ``checkpoint_view(..., checking_automatic=True)`` deliberately omits the
+    # automatic record's validity check so this digest has no recursion.
+    base = checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=True)["digest"]
+    after_fix = {key: item_digest(item, rules, ctx) for key, item in model["items"].items()
+                 if item["plan"]["timing"] == "after_fix"}
+    return digest({"checkpoint": checkpoint, "base": base, "after_fix": after_fix})
+
+
+def checkpoint_outcome(view):
+    if view.get("mode") == "automatic":
+        return "observed"
+    return ((view.get("decision") or {}).get("decision") or {}).get("outcome")
+
+
+def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
     ids = [c["id"] for c in rules["checkpoints"]]
     if checkpoint not in ids:
         raise ValueError("未知检查点")
@@ -193,10 +236,25 @@ def checkpoint_view(model, checkpoint, rules, ctx):
         snapshot.update(context=scoped, items=dict(future, **due))
         if index == 0:
             snapshot["not_due"] = []
+    record = model["checkpoints"].get(checkpoint)
+    configured_automatic = rules["checkpoints"][index].get("confirmation") == "automatic"
     result = {"digest": digest(snapshot), "due": list(due), "not_due": snapshot["not_due"],
-              "problems": problems, "decision": model["checkpoints"].get(checkpoint)}
-    result["reviewed"] = is_valid(result["decision"], result["digest"]) and not problems
+              "problems": problems, "decision": record, "mode": "automatic" if configured_automatic else "user"}
+    if configured_automatic and not checking_automatic:
+        result["automatic_digest"] = automatic_checkpoint_digest(model, checkpoint, rules, ctx)
+        result["problems"] += automatic_checkpoint_problems(model, checkpoint, rules, ctx)
+        result["reviewed"] = (record or {}).get("digest") == result["automatic_digest"] and not result["problems"]
+    else:
+        result["reviewed"] = is_valid(record, result["digest"]) and not problems
+    result["outcome"] = checkpoint_outcome(result)
     point = rules["checkpoints"][index]
+    handoff_request = "核对列出的用例、范围、预期与缺口；选择验收、补测/返工、不适用、延期或接受风险。"
+    handoff_return = "执行人、环境、精确提交 SHA、步骤、实际结果及可回查日志/报告；未执行须说明原因。"
+    if checkpoint == "q4-acceptance":
+        handoff_request = ("编码完成后，由用户与 Agent 在 Jira 创建或复用 Test，并通过「已链接工作项」关联缺陷；"
+                           "重新读取 Test Type、用例版本和链接。TapCE 当前不纳管，若无法形成受管用例请调整 Jira 或验收方案后重试。")
+        handoff_return = ("每个 Manual、TapTest、Unit Test 都需返回精确提交 SHA（当前完整 SHA）的 PASS 证据及用户逐项确认；"
+                          "需要本地环境时先提供可操作启动步骤、前置条件和失败日志要求。")
     result["handoff"] = {
         "title": point["title"],
         "verify": [{"item_id": k, "case_ref": v["plan"]["case_ref"],
@@ -205,8 +263,8 @@ def checkpoint_view(model, checkpoint, rules, ctx):
                     "steps": v["plan"].get("steps", "打开用例引用并按用例步骤执行；缺少步骤时先补齐"),
                     "expected": v["plan"]["criterion"], "expected_result": v["plan"]["expected_result"],
                     "decision_valid": v["decision_valid"]} for k, v in due.items()],
-        "request": "核对列出的用例、范围、预期与缺口；选择验收、补测/返工、不适用、延期或接受风险。",
-        "return": "执行人、环境、精确提交 SHA、步骤、实际结果及可回查日志/报告；未执行须说明原因。",
+        "request": handoff_request,
+        "return": handoff_return,
     }
     return result
 
@@ -315,6 +373,9 @@ def reduce(model, command, rules, ctx):
                     raise ValueError("环境失败或未知失败不能作为成功复现")
             item["decision"] = p
     elif action == "checkpoint":
+        point = next((c for c in rules["checkpoints"] if c["id"] == p["checkpoint"]), None)
+        if point and point.get("confirmation") == "automatic":
+            raise ValueError("该检查点由系统依据执行证据自动记录，不接受重复用户确认")
         report = checkpoint_view(model, p["checkpoint"], rules, ctx)
         if p["digest"] != report["digest"]:
             raise ValueError("检查点内容已变化，请重新展示确认")
@@ -324,6 +385,17 @@ def reduce(model, command, rules, ctx):
         if not model["items"] and p["checkpoint"] != rules["checkpoints"][0]["id"] and p["decision"]["outcome"] == "accept":
             raise ValueError("没有用例时不得宣称验收通过，需明确不适用或风险处置")
         model["checkpoints"][p["checkpoint"]] = p
+    elif action == "auto_checkpoint":
+        point = next((c for c in rules["checkpoints"] if c["id"] == p["checkpoint"]), None)
+        if not point or point.get("confirmation") != "automatic":
+            raise ValueError("当前检查点不允许自动记录")
+        expected = automatic_checkpoint_digest(model, p["checkpoint"], rules, ctx)
+        if p["digest"] != expected:
+            raise ValueError("首轮验证事实已变化，请重新读取执行证据")
+        problems = automatic_checkpoint_problems(model, p["checkpoint"], rules, ctx)
+        if problems:
+            raise ValueError("；".join(problems))
+        model["checkpoints"][p["checkpoint"]] = dict(p, mode="automatic")
     else:
         from workflow import quality_write
         quality_write.reduce(model, command, rules, ctx)
@@ -429,7 +501,7 @@ def advance_problems(base, task, target):
     problems = []
     for cp in points:
         view = current["checkpoints"][cp]
-        if not view["reviewed"] or view["decision"]["decision"]["outcome"] == "rework":
+        if not view["reviewed"] or checkpoint_outcome(view) == "rework":
             problems.append("质量检查点 %s（%s）尚未确认处置：%s；%s 使用 quality.py status 的 handoff 展示具体用例、步骤、预期、版本和证据要求。"
                             % (cp, view["handoff"]["title"], "；".join(view["problems"]), view["handoff"]["request"]))
         if rules.get("require_checkpoint_publication") and view["reviewed"] and not view["published"]:

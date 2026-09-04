@@ -11,7 +11,7 @@
   "checkpoints": [
     {
       "id": "q1-intake",
-      "title": "接管与用例盘点",
+      "title": "接管与 Jira 事实盘点",
       "timing": "before_fix"
     },
     {
@@ -22,7 +22,8 @@
     {
       "id": "q3-draft",
       "title": "首轮验证与 Draft PR",
-      "timing": "after_fix"
+      "timing": "after_fix",
+      "confirmation": "automatic"
     },
     {
       "id": "q4-acceptance",
@@ -71,6 +72,13 @@
       ],
       "guidance": "用例与产品模块同工程；先核对代码、POM、Failsafe、路径过滤和实际报告。已有覆盖由 CI 触发，新用例在所属工程开发。Maven 本地与 CI 是执行来源。"
     },
+    "unit": {
+      "origins": [
+        "local_maven",
+        "ci"
+      ],
+      "guidance": "Unit 用例由用户与 Agent 在代码工程实现或复用；核对单元测试及 CI 集成测试的实际报告，并把最终验收绑定到完整提交 SHA。"
+    },
     "manual": {
       "origins": [
         "manual"
@@ -99,18 +107,37 @@
   "jira": {
     "automatic_transition_attempts": ["takeover", "tests_passed"],
     "manual_transitions": ["pull_request_submitted", "merged", "done"],
-    "note": "接管成功和 Q4 验收完成后各同步尝试一次允许的 Jira 状态转换；失败只记录并继续本地主流程。正常测试用例从 Jira 已链接工作项核对；Test Coverage 仅用于 Jira 实际 Validator 的例外字段；Tests Passed、PR Submitted、合入、发布、Done 是不同外部事实。"
+    "note": "接管不要求预先创建 Test。编码完成后，用户与 Agent 按验收方案创建或复用 Test 并在 Jira「已链接工作项」关联；AgenticOps 只读取、引导、跟进和核对。Tests Passed 前必须重新读取关联 Test、Test Details 与用户确认；Test Coverage 仅用于 Jira 实际 Validator 的例外字段。"
   },
-  "pr_ready": {
-    "required_checkpoints": ["q1-intake", "q2-plan", "q3-draft", "q4-acceptance"],
-    "accepted_outcomes": ["accept", "not_applicable"],
-    "require_verified_publication": true,
-    "require_linked_test_tasks": true,
-    "require_user_confirmation_per_linked_test": true,
+  "tests_passed": {
     "linked_test_task": {
       "relations": ["tests"],
       "issue_types": ["Test"]
     },
+    "test_types": {
+      "Manual": {
+        "method": "manual",
+        "guidance": "由用户启动所需本地或测试环境，执行 Jira Test 步骤并提供执行人、环境、实际结果及可回查证据。"
+      },
+      "TapTest": {
+        "method": "taptest",
+        "guidance": "由 t-layer3-test 管理自动化实现和执行；导入对应 Test Execution 或测试报告。"
+      },
+      "Unit": {
+        "method": "unit",
+        "guidance": "由用户与 Agent 核对单元测试和 CI 集成测试；导入绑定完整提交 SHA 的实际报告。"
+      }
+    },
+    "ignored_test_types": {
+      "TapCE": "TapCE 当前不纳管，不计入通过也不自动视为通过；若因此无法满足验收或 Jira Validator，请用户调整 Jira 或验收方案后重新读取。"
+    }
+  },
+  "pr_ready": {
+    "required_checkpoints": ["q1-intake", "q2-plan", "q3-draft", "q4-acceptance"],
+    "accepted_outcomes": ["accept", "not_applicable", "observed"],
+    "require_verified_publication": true,
+    "require_linked_test_tasks": true,
+    "require_user_confirmation_per_linked_test": true,
     "require_all_pr_checks_success": true
   },
   "draft_pr": "首次有意义变更且第一轮针对性验证后建议 Draft PR；验证受阻时披露结果并按首个有意义提交/一个工作日要求处理。正式提审依 Jira 标准流程。",

@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from workflow import project_rules, quality, task_store  # noqa: E402
+from workflow import jira_tests, project_rules, quality, task_store  # noqa: E402
 
 
 def now():
@@ -81,8 +81,7 @@ def strict_checkpoint_ready(base, task, checkpoint):
     view = report["checkpoints"].get(checkpoint)
     if not view or not view["reviewed"]:
         return False, ["质量检查点 %s 尚未有效确认" % checkpoint]
-    decision = (view.get("decision") or {}).get("decision", {})
-    if decision.get("outcome") not in ("accept", "not_applicable"):
+    if quality.checkpoint_outcome(view) not in ("accept", "not_applicable"):
         return False, ["质量检查点 %s 不是通过或明确不适用" % checkpoint]
     problems = []
     for key in view["due"]:
@@ -91,6 +90,24 @@ def strict_checkpoint_ready(base, task, checkpoint):
         if not item.get("decision_valid") or item_decision.get("outcome") not in ("accept", "not_applicable"):
             problems.append("检查项 %s 未通过或未明确不适用" % key)
     return not problems, problems
+
+
+def tests_passed_ready(base, task, snapshot):
+    """Tests Passed 只核对 Jira 事实与 Q4 证据，不创建或编辑 Jira Test。"""
+    ready, problems = strict_checkpoint_ready(base, task, "q4-acceptance")
+    if not ready:
+        return False, "quality_not_verified", problems, []
+    quality_rules = quality.config(base)
+    report = quality.report(quality.load(base, task), quality_rules, quality.context(base, task))
+    checkpoint = report["checkpoints"]["q4-acceptance"]
+    outcome = ((checkpoint.get("decision") or {}).get("decision") or {}).get("outcome")
+    if outcome != "accept":
+        return False, "quality_not_verified", ["Q4 关联用例验收必须由用户确认通过，不能以不适用或风险处置进入 Tests Passed"], []
+    problems, tests, ignored = jira_tests.linked_tests(snapshot, task["issue_key"], quality_rules)
+    problems.extend(jira_tests.confirmation_problems(report, tests))
+    if problems:
+        return False, "linked_test_facts_not_ready", problems, ignored
+    return True, "", [], ignored
 
 
 def transition_for(snapshot, rule):
@@ -176,17 +193,45 @@ def prepare(base, issue_key, trigger, snapshot):
     if not isinstance(rule, dict):
         raise ValueError("未知 Jira 状态同步节点：%s" % trigger)
     state = load_state(base, task)
-    if trigger in state["attempts"]:
-        return dict(state["attempts"][trigger], repeated=True)
+    previous = state["attempts"].get(trigger)
+    retry_history = []
+    if previous:
+        retryable = (trigger == "tests_passed" and previous.get("outcome") == "skipped" and
+                     previous.get("reason") in ("quality_not_verified", "linked_test_facts_not_ready"))
+        if not retryable:
+            return dict(previous, repeated=True)
+        retry_history = list(previous.get("preflight_history", [])) + [{
+            "at": previous.get("at"), "outcome": previous.get("outcome"),
+            "reason": previous.get("reason"), "source_ref": previous.get("source_ref"),
+        }]
     issue, fields, status = issue_from(snapshot, issue_key)
     record = {"trigger": trigger, "at": now(), "source_ref": snapshot["source_ref"],
               "from_status": status["name"], "target_status": rule["to"],
               "target_statuses": sorted({rule["to"], *rule.get("to_aliases", [])})}
+    if retry_history:
+        record["preflight_history"] = retry_history
     record["field_plan"] = guidance_for(rule.get("field_requirements", []), rules, task)
     if task["stage"] not in rule.get("local_stages", []):
         record.update(outcome="skipped", reason="local_stage_mismatch",
                       guidance=[{"guidance": "当前本地阶段为 %s，本节点只允许在 %s 尝试。" %
                                              (task["stage"], "、".join(rule.get("local_stages", [])))}])
+    elif trigger == "tests_passed":
+        ready, reason, problems, ignored = tests_passed_ready(base, task, snapshot)
+        ignored_view = [{"key": test["key"], "test_type": test["test_type"],
+                         "guidance": test["guidance"]} for test in ignored]
+        if not ready:
+            record.update(outcome="skipped", reason=reason, ignored_tests=ignored_view,
+                          guidance=[{"guidance": problem} for problem in problems])
+        elif status_matches(rule, status["name"], "to"):
+            record.update(outcome="satisfied", reason="target_already_reached",
+                          ignored_tests=ignored_view, guidance=[])
+        elif not status_matches(rule, status["name"], "from"):
+            record.update(outcome="skipped", reason="jira_status_mismatch", ignored_tests=ignored_view,
+                          guidance=[{"guidance": "Jira 当前状态为 %s，不能由本节点自动流转到 %s；PR Ready 时人工处理。" %
+                                                     (status["name"], rule["to"])}])
+        else:
+            record = prepare_transition(record, snapshot, fields, rule, rules, task)
+            record["ignored_tests"] = ignored_view
     elif status_matches(rule, status["name"], "to"):
         record.update(outcome="satisfied", reason="target_already_reached", guidance=[])
     elif not status_matches(rule, status["name"], "from"):

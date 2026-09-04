@@ -653,7 +653,7 @@ NEXT_GUIDE = {
     "waiting_takeover": "核对负责人/状态映射后 advance 进入 task_intake；随后用 jira_status.py 在 takeover 节点同步尝试一次 In Progress",
     "task_intake": "先完成 takeover 状态同步尝试；再 checklist/record 完成准入 -> repository add -> repository prepare 固化本地基线 -> 源码分析 -> advance",
     "design_review": "基于任务 worktree 形成方案并写入 Jira -> 等研发工程师确认这一真实人工决策 -> workflow/authorization.py grant -> advance",
-    "implementation": "在授权范围内实现+测试，持续处理 Q3、提交/推送和 Draft PR；next/status 找出真实阻塞，不把原子步骤成功当停点",
+    "implementation": "在授权范围内实现+测试；全部 Q2 已选修复后检查项在最终 SHA 符合预期时自动记录并回写 Q3，再提交/推送和创建 Draft PR；next/status 找出真实阻塞，不把原子步骤成功当停点",
     "pr_review": "完成 Q4 关联用例验收后 advance；进入 ci_validation 后用 jira_status.py 在 tests_passed 节点同步尝试一次 Tests Passed",
     "ci_validation": "完成 Tests Passed 同步尝试，用 workflow/ci.py watch 更新每个 PR Head 的 Checks，再用 pr_ready.py 核对测试任务、PR Checks 和 Q1-Q4",
     "completed": "用 workflow/evidence.py 生成证据总结，经确认后作为 Jira 评论回写",

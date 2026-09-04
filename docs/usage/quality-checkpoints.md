@@ -8,14 +8,15 @@
 
 ```mermaid
 flowchart TD
-    A[接管 Jira：读取事实及已链接 Test 用例] --> Q1[Q1 盘点已有用例、缺失信息]
+    A[接管 Jira：读取任务事实] --> Q1[Q1 盘点 Jira 事实、缺失信息]
     Q1 --> B[受控仓库准备与源码分析]
     B --> Q2[Q2 修复方案和验收计划：用户选择用例与方式]
     Q2 --> J2[确认方案及检查点评论回写并回读]
     J2 --> AUTH[核对任务级实施授权]
     AUTH --> DEV[实施修复及选定的首轮验证]
-    DEV --> Q3[Q3 记录首轮事实与处置]
+    DEV --> Q3[Q3 自动记录首轮事实]
     Q3 --> PR[有意义变更：Draft PR]
+    PR --> CASES[用户与 Agent 创建/复用 Jira Test 并建立关联]
     PR --> Q4[Q4 验收关联用例：补充验证或用户处置风险]
     Q4 --> J4[验收处置评论回写并回读]
     J4 --> Q5[Q5 核对审查、CI、目标提交及合入事实]
@@ -29,22 +30,22 @@ flowchart TD
 
 | 检查点 | 核对内容 | 当前阶段强制点 |
 |---|---|---|
-| Q1 接管与盘点 | Jira 事实、已链接工作项中的 Test 用例、用例覆盖和缺口 | Q1、Q2 的用户处置在进入 `implementation` 前检查；缺普通信息可先分析，仓库基线与权限仍须可靠 |
-| Q2 方案与验收 | 根因、修复范围、复用或新增用例、每项预期和方式、修复前复现 | 进入 `implementation` 前核对全部方案已被选择；修复后项可尚未执行 |
-| Q3 首轮验证与 Draft PR | 第一轮结果、可审阅变更、未完成验证及风险 | 进入 `pr_review` 前；完整回归可以安排在 Q4 |
-| Q4 关联用例验收 | 当前代码、用例版本、选定执行、期望符合情况、风险处置 | 进入 `ci_validation` 前 |
+| Q1 接管与盘点 | Jira 任务事实和缺失信息；接管不要求预先存在 Test | Q1、Q2 的用户处置在进入 `implementation` 前检查；缺普通信息可先分析，仓库基线与权限仍须可靠 |
+| Q2 方案与验收 | 根因、修复范围、验收场景、每项预期和方式、修复前复现，以及合格 Q3 事实回写/推送/Draft PR 的授权 | 一次确认进入 `implementation`；Test 的定义和编写由用户与 Agent 处理 |
+| Q3 首轮验证与 Draft PR | Q2 已选的全部修复后检查项在最终完整 SHA 上的首轮结果、可审阅变更和风险 | 自动事实检查点，不再重复要求用户接受首轮验证；任一结果不符合预期、证据不完整或外部回读不明即停止 |
+| Q4 关联用例验收 | 编码后 Jira「已链接工作项」中的 Test、Test Type、用例版本、当前代码、执行证据和用户逐项确认 | 进入 `ci_validation` 前；只有全部受管用例 PASS 才可尝试 Tests Passed |
 | Q5 审查及 CI | PR 仓库与 Head、检查结果、目标用例是否运行、审查或合入的回读事实 | Q5、Q6 在本地 `completed` 前 |
 | Q6 交付证据 | 已完成和待完成事项、风险责任、Jira/发布事实及后续接力 | 本地完成仅代表本轮执行结束，不能据此声称 Jira Done 或已发布 |
 
 首个有意义提交并完成第一轮针对性验证后建议创建 Draft PR。若验证受阻，披露现状并按 TapData 标准中首个有意义提交／一个工作日要求处理；不等待全量验证全绿。正式提审与 Jira `PR Submitted` 仍遵循 `Tests Passed` 等外部条件。
 
-以上是现有 `task.py advance` 的强制检查点。Hook 继续执行既有操作授权和安全策略；本版不宣称拦截任意工具绕开 Workflow 的每一次质量相关操作。不要跳过 Workflow，也不要因本地处置而绕过服务端 Validator 或保护分支。
+以上是现有 `task.py advance` 的强制检查点。Q2 是方案、验收方式和后续自动动作的一次性确认；Q3 只在全部已确认的修复后检查项已有当前完整 SHA 的预期结果时使用 `auto_checkpoint` 记录事实并回写 Jira。它不等同于用户验收，也不能在失败、跳过、未知、计划变化或外部回读不明时推进。Hook 继续执行既有操作授权和安全策略；本版不宣称拦截任意工具绕开 Workflow 的每一次质量相关操作。不要跳过 Workflow，也不要因本地处置而绕过服务端 Validator 或保护分支。
 
 ## 非阻断 Jira 状态同步
 
 缺陷接管完成并进入 `task_intake` 后，Agent 立即读取当前 Jira issue、当前用户和可用 transitions，以 `takeover` 节点执行一次 `jira_status.py prepare`。当前状态已是 `In Progress` 时直接记录；当前状态为 `Analyzed`、Assignee 为当前用户且 Jira 返回配置的 transition 时，工具生成精确 transition 意图，Agent 当场调用原生 Jira 工具一次并用 `complete` 导入回读。状态不匹配、必填字段缺失、权限或外部调用失败只记录和提示，不回退本地阶段、不重试。
 
-Q4 有效确认并进入 `ci_validation` 后，以 `tests_passed` 节点执行相同步骤。Jira 已是 `Tests Passed` 时直接记录；只有当前状态为 `In Progress`、Q4 及其检查项均为 `accept/not_applicable` 且 Jira 返回目标 transition 时才生成意图。`Pull Request Submitted` 不自动执行。
+Q4 有效确认并进入 `ci_validation` 后，以 `tests_passed` 节点执行相同步骤。接管阶段不要求创建 Test；编码完成后由用户与 Agent 根据已确认的验收方案创建或复用 Test，并通过「已链接工作项」关联缺陷。只有当前状态为 `In Progress`、Q4 总体处置为 `accept`、全部受管 Test 均有当前完整提交 SHA 的 PASS 证据且用户逐项 `accept`、并且 Jira 返回目标 transition 时才生成意图。`Pull Request Submitted` 不自动执行。
 
 输入由 Agent 从 Jira 实时读取，至少包含任务、字段、当前用户、可用 transitions 和可回查来源：
 
@@ -52,10 +53,15 @@ Q4 有效确认并进入 `ci_validation` 后，以 `tests_passed` 节点执行�
 {
   "source_ref": "可回查的 Jira 读取来源",
   "current_user": {"accountId": "当前 Jira 用户 accountId"},
-  "issue": {"key": "TAP-123", "fields": {"status": {"id": "状态 ID", "name": "Analyzed"}, "assignee": {"accountId": "当前 Jira 用户 accountId"}}},
+  "issue": {"key": "TAP-123", "fields": {"status": {"id": "状态 ID", "name": "Analyzed"}, "assignee": {"accountId": "当前 Jira 用户 accountId"}, "issuelinks": []}},
+  "linked_test_details": [
+    {"key": "TAP-TEST-1", "test_type": "Manual", "case_version": "Jira updated 或 Xray 版本引用", "source_ref": "该 Test Details 的可回查 Jira 来源"}
+  ],
   "transitions": [{"id": "421", "name": "Start Investigation", "to": {"id": "目标状态 ID", "name": "In Progress"}, "fields": {}}]
 }
 ```
+
+`linked_test_details` 只在 Tests Passed 或 PR Ready 核对时必需：它是 Agent 从 Jira/Xray Test Details 读取的事实，不由 AgenticOps 推断或写入。无法读取时，工具会要求用户提供关联 Test key、Test Type、用例版本引用和 Jira 来源。`Manual`、`TapTest`、`Unit` 是当前受管类型；`TapCE` 显式忽略但不算通过。若只有 TapCE、类型不支持、关联缺失或 Jira Validator 仍要求 TapCE，用户调整 Jira 或验收方案后重新读取并重做预检；不得盲目重放已经发起的 Jira 状态转换。
 
 ```sh
 python3 "$agenticops_root/workflow/jira_status.py" prepare \
@@ -86,7 +92,7 @@ python3 "$agenticops_root/workflow/jira_status.py" complete \
 
 ## PR Ready 核对
 
-正式提审前，先为每个任务仓库记录 PR，并使用 `ci.py watch` 取得当前 PR Head 的最新 Checks。Agent 同时从 Jira 读取当前任务 `fields.issuelinks`：只接受 Project 配置的关系（TapData 缺陷侧为 `tests`）指向、且任务类型为 `Test` 的关联项，输入 `pr_ready.py`：
+正式提审前，先为每个任务仓库记录 PR，并使用 `ci.py watch` 取得当前 PR Head 的最新 Checks。Agent 同时从 Jira 读取当前任务 `fields.issuelinks` 与每个关联 Test 的 Test Details：只接受 Project 配置的关系（TapData 缺陷侧为 `tests`）指向、且任务类型为 `Test` 的关联项，输入 `pr_ready.py`：
 
 ```json
 {
@@ -104,7 +110,10 @@ python3 "$agenticops_root/workflow/jira_status.py" complete \
         }
       ]
     }
-  }
+  },
+  "linked_test_details": [
+    {"key": "TAP-TEST-1", "test_type": "Manual", "case_version": "Jira updated 或 Xray 版本引用", "source_ref": "该 Test Details 的可回查 Jira 来源"}
+  ]
 }
 ```
 
@@ -113,7 +122,7 @@ python3 "$agenticops_root/workflow/pr_ready.py" \
   --issue-key "$task_key" --jira-input "$jira_test_tasks" --dir "$project_workspace"
 ```
 
-工具只在以下三组均通过时返回 ready：从 Jira「已链接工作项」派生的 Test 任务非空，且每个 Test 都在 Q4 以同一 `case_ref` 建立检查项，并由用户基于该用例的 PASS 执行证据逐项作出 `accept` 确认；每个任务仓库都记录 PR，最新 Checks 为 `success` 且 Head 等于当前任务代码；Q1-Q4、其检查项和要求的 Jira 评论回读均有效。Jira Test 工作项本身不要求为 Done。没有符合关系和类型的 Test 任务、未逐项确认、Checks 为空、跳过、未知、等待或失败、Head 漂移、`defer/accept_risk/rework` 都会列为待办。`Test Coverage Decision / Exception Details` 只能记录合规例外，不能替代 Test 关联。Jira 状态同步失败单独列入 `jira_status_todos`，不改变三类验收事实；Engineering DRI 处理待办后重新核对，并手工执行 `Pull Request Submitted`。
+工具只在以下三组均通过时返回 ready：从 Jira「已链接工作项」派生的受管 Test 非空，每个 Test 的 Test Type 与用例版本可回读，且每个 Test 都在 Q4 以同一 `case_ref`、当前 Jira 用例版本和对应方式建立检查项，并由用户基于当前 SHA 的 PASS 执行证据逐项作出 `accept` 确认；每个任务仓库都记录 PR，最新 Checks 为 `success` 且 Head 等于当前任务代码；Q1-Q4、其检查项和要求的 Jira 评论回读均有效。Jira Test 工作项本身不要求为 Done。没有符合关系和类型的 Test、未逐项确认、Checks 为空、跳过、未知、等待或失败、Head 漂移、`defer/accept_risk/rework` 都会列为待办。`Test Coverage Decision / Exception Details` 只能记录合规例外，不能替代 Test 关联。Jira 状态同步失败单独列入 `jira_status_todos`，不改变三类验收事实；Engineering DRI 处理待办后重新核对，并手工执行 `Pull Request Submitted`。
 
 ## 影响版本与优先修复线
 
@@ -143,6 +152,7 @@ TapData 缺陷的“问题版本”对应 Jira `fields.versions`（影响版本�
 - `executions`：可有多次执行；每次保留唯一编号、用例与代码版本、环境、来源、报告引用、观察时间、观察内容和原始结果。重试用新编号，不覆盖历史。
 - `selection`：用户选择了该用例和方式的来源记录。先展示用例、预期、时机、成本与可行性，再记录用户选择；摘要哈希不是用户审批对象。
 - `decision`：用户针对当前证据的处置、理由和确认来源。通过需明确选择当前用例及代码最后一条适用执行；计划变更及新证据使相关旧确认失效。
+- `auto_checkpoint`：仅供 Project 标记为自动的检查点使用；它不接受伪造的用户确认，要求全部已选修复后项在当前完整提交 SHA 上有预期原始结果。TapData 的 Q3 据此记录首轮事实；Q4 仍需用户对关联 Test 的最终验收。
 
 Q2 前通过 `task.py record --key fix_plan --value "根因、范围、修复方式、风险及回滚"` 保存实际方案，使确认和 Jira 回写包含修复内容而不只是测试清单。手工用例必须提供可操作 `steps`。修复后计划可先填 `target_revision: pending`，执行前用 `item` 更新为精确代码；只更新该字段不使已选用例失效，但会使该项旧执行处置失效。步骤、用例、方式、预期或范围实质变化仍需重新选择。
 
@@ -167,7 +177,7 @@ Q2 前通过 `task.py record --key fix_plan --value "根因、范围、修复方
 | 验证方式 | 执行来源 | 关联方式 |
 |---|---|---|
 | `taptest` | `taptest` | 从 `t-layer3-test` 读取 `write-xray-test`、`write-test-script` 的实际能力；由原生 Agent 使用技能生成／实现，导入具体 Xray Test Execution、报告、版本与单用例结果 |
-| `integration` | `local_maven` 或 `ci` | 已有覆盖则复用，新用例在所属产品模块工程实现；核对实际 class/method、报告、产品提交、测试版本、CI run/attempt |
+| `unit` | `local_maven` 或 `ci` | 对应 Jira Test Type `Unit`；已有覆盖则复用，新覆盖由用户与 Agent 在所属产品模块工程实现；核对实际 class/method、报告、产品提交、测试版本、CI run/attempt |
 | `manual` | `manual` | 用户选定的真实手工用例、执行人、环境、步骤预期及观察结果，关联可回查附件／评论 |
 | `other` | `external` | 用户批准的其它方式；用例中明确方法细节，并导入其执行证据 |
 
@@ -220,6 +230,7 @@ python3 "$agenticops_root/workflow/quality.py" apply \
 | `execute` | `item_id`、`execution`；导入一次实际执行或未执行说明 |
 | `decide` | `item_id`、当前项 `digest`、`decision` |
 | `checkpoint` | `checkpoint`、当前检查点 `digest`、`decision` |
+| `auto_checkpoint` | 自动检查点、当前 `automatic_digest`、事实理由；不携带用户 proof |
 | `draft` | `id`、准确 `body`；检查点回写还需 `checkpoint`，正文必须是该点的 `publication_body` |
 | `confirm` | 草稿 `id/digest/proof`；确认完整正文及目标 Jira |
 | `prepare_write` | 草稿 `id/digest`；成功保存后返回 `operation_id` 与 `intent` |
@@ -230,9 +241,9 @@ python3 "$agenticops_root/workflow/quality.py" apply \
 
 ## 回写和恢复
 
-TapData 每个检查点确认后即回写 Jira；进入下一阶段前，该阶段要求的检查点必须存在匹配的 `verified` 评论。Q2 回写修复方案和选定的验收计划，Q4 回写精确版本下的验收事实及风险。普通自由正文评论不能替代检查点绑定回执。通过 `draft` 指定 `checkpoint` 时使用 `status` 返回的完整 `publication_body`，它由已确认快照生成，不能省略风险、缺口和人工合并版本。
+TapData 每个检查点确认或自动记录后即回写 Jira；进入下一阶段前，该阶段要求的检查点必须存在匹配的 `verified` 评论。Q2 回写修复方案、选定的验收计划及后续自动动作授权，Q3 回写自动核验到的首轮事实，Q4 回写精确版本下的最终验收事实及风险。普通自由正文评论不能替代检查点绑定回执。通过 `draft` 指定 `checkpoint` 时使用 `status` 返回的完整 `publication_body`，它由已确认或自动核验快照生成，不能省略风险、缺口和人工合并版本。
 
-方案或验收确认时一并告知用户将把确认内容回写 Jira。已有任务授权或同一真实回复明确覆盖这些内容及回写时，可引用该来源记录多项选择、处置和评论确认，不要求用户逐条回复。若内容、授权范围或风险发生实质变化，再请求缺少的决定；不能由 Agent 自行编造用户同意。每个步骤成功后继续已授权编码、验证、提交/推送、PR、CI 和回写，不把一次工具成功当作最终停点。合并、发布等独立授权边界不变。
+方案确认时一并告知用户将把 Q1/Q2、合格的 Q3 首轮事实和最终 Q4 内容回写 Jira。用户可在同一真实回复确认方案、验收方式、任务授权及合格 Q3 的自动回写/推送/Draft PR；该回复可被引用完成多项选择和评论确认，不要求逐条回复。Q4 仍须基于当前 SHA 的关联 Test 证据请求最终验收。若内容、授权范围或风险发生实质变化，再请求缺少的决定；不能由 Agent 自行编造用户同意。每个步骤成功后继续已授权编码、验证、提交/推送、PR、CI 和回写，不把一次工具成功当作最终停点。合并、发布等独立授权边界不变。
 
 确需停下时，必须解释当前检查点要核对什么，并把 `handoff` 转成用户可执行的说明：用例/步骤、预期、执行人、环境、仓库及完整 SHA，要求返回日志/报告与实际结果，列出可选处置和仍可继续的工作。缺少 SHA 的日志先补来源，不猜目标版本；恢复同一 run 时不重复问已有效确认的问题。
 
