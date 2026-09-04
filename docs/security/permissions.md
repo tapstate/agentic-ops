@@ -87,6 +87,8 @@ OAuth 2.1 交互式授权，**权限自动等于登录账号的权限**——所
 
 Codex 的 `atlassian` MCP 也使用同一远程端点和 OAuth，具体命令见[必需 MCP 配置](../usage/mcp-setup.md)。
 
+TapData 缺陷在接管和 Q4 验收节点可准备一次精确 Jira transition 意图。该意图绑定当前 active task/run、issue key 和 transition ID；Hook 只放行第一次完全匹配的原生 Jira 调用，放行审计落盘后即视为已消费，一般 Jira 状态流转仍需人工确认。意图不授权编辑字段、不覆盖 Jira Validator，也不允许 `Pull Request Submitted`、Merged 或 Done。外部写入后必须回读，失败或结果不明只记录并转人工，不阻断本地研发主流程。
+
 ## AgenticOps v1 的三层防线小结
 
 | 层 | 机制 | 挡什么 |

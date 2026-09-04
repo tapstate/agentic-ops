@@ -58,7 +58,7 @@ def validate_request(request):
         return "target 必须是对象"
     target_fields = {
         "repository", "git_cwd", "workspace", "issue_key", "branch", "push_source_ref",
-        "push_destination_ref", "push_target_branch", "branch_relevant",
+        "push_destination_ref", "push_target_branch", "jira_transition_id", "branch_relevant",
     }
     target_unexpected = sorted(set(target) - target_fields)
     if target_unexpected:
@@ -67,7 +67,7 @@ def validate_request(request):
         key in target and not isinstance(target[key], str)
         for key in (
             "repository", "git_cwd", "workspace", "issue_key", "branch", "push_source_ref",
-            "push_destination_ref", "push_target_branch",
+            "push_destination_ref", "push_target_branch", "jira_transition_id",
         )
     ):
         return "target 仓库和分支字段必须是字符串"
@@ -129,6 +129,8 @@ def _context(request):
         context["workspace"] = str(workspace.resolve())
     if target.get("issue_key"):
         context["issue_key"] = target["issue_key"]
+    if target.get("jira_transition_id"):
+        context["jira_transition_id"] = target["jira_transition_id"]
     if target.get("branch"):
         context["branch"] = target["branch"]
     for field in ("push_source_ref", "push_destination_ref", "push_target_branch"):
@@ -230,6 +232,9 @@ def evaluate_request(request, policy_path=None):
     authorization = None
     authorization_path = None
     if task_directory is not None:
+        task_state = engine._read_json(task_directory / "state.json")
+        if isinstance(task_state, dict):
+            context["agentic_run_id"] = task_state.get("run_id")
         path = task_directory / "authorization.json"
         authorization_path = str(path)
         if path.is_file():
@@ -239,6 +244,10 @@ def evaluate_request(request, policy_path=None):
             )
         else:
             context["authorization_state"] = "missing"
+        if "transition_jira_status" in request["operations"]:
+            context["jira_status_intent"] = engine.jira_status_intent(
+                task_directory, context.get("jira_transition_id")
+            )
     audit_cwd = gate_cwd if task_directory is not None else request["cwd"]
     warnings = []
 
@@ -324,10 +333,20 @@ def evaluate_request(request, policy_path=None):
             "required_action": response.get("required_action"),
             "warnings": warnings,
             "authorization_file": authorization_path,
+            "agentic_run_id": context.get("agentic_run_id"),
+            "jira_transition_id": context.get("jira_transition_id"),
         },
     )
     if audit_error:
-        response["warnings"].append(audit_error)
+        if response["reason_code"] == "jira_status_intent_covered":
+            response.update(
+                decision=engine.DENY,
+                reason="Jira 状态同步意图无法写入单次消费审计，拒绝外部调用",
+                reason_code="jira_status_intent_audit_failed",
+                required_action="保留当前状态并转人工处理；Agent 不得重试该 Jira 转换。",
+            )
+        else:
+            response["warnings"].append(audit_error)
     return response
 
 

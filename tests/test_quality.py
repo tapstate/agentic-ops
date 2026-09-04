@@ -38,6 +38,7 @@ class QualityTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
         product = self.base / "product"
+        self.product = product
         shutil.copytree(ROOT / "projects" / "tapdata", product / "projects" / "tapdata")
         (self.base / ".agenticops").mkdir()
         (self.base / ".agenticops/workspace.json").write_text(json.dumps({"project": "tapdata", "product_root": str(product)}))
@@ -92,6 +93,11 @@ class QualityTests(unittest.TestCase):
         return self.apply("checkpoint", {"checkpoint": cp, "digest": self.view()["checkpoints"][cp]["digest"],
                            "decision": dict(outcome=outcome, reason="检查点已完整核对", proof=proof(), **fields)})
 
+    def automatic_checkpoint(self, cp="q3-draft"):
+        return self.apply("auto_checkpoint", {"checkpoint": cp,
+                           "digest": self.view()["checkpoints"][cp]["automatic_digest"],
+                           "reason": "已确认方案的全部首轮执行证据均符合预期"})
+
     def test_multiple_items_single_method_and_phase(self):
         self.plan(); self.plan("case-b", "manual")
         self.select(); self.select("case-b")
@@ -103,6 +109,12 @@ class QualityTests(unittest.TestCase):
             self.apply("item", {"plan": invalid, "reason": "多方式不合法"})
         with self.assertRaises(ValueError):
             self.checkpoint("q4-acceptance")
+
+    def test_q1_state_write_does_not_require_product_root_local(self):
+        self.assertFalse((self.product / ".local").exists())
+        self.checkpoint("q1-intake", outcome="not_applicable")
+        self.assertTrue(quality.state_path(self.base, self.task).is_file())
+        self.assertFalse((self.product / ".local").exists())
 
     def test_before_fix_reproduction_preserves_fail(self):
         self.plan(before=True); self.select()
@@ -283,7 +295,7 @@ class QualityTests(unittest.TestCase):
         self.assertFalse(self.view()["checkpoints"]["q4-acceptance"]["reviewed"])
 
     def test_checkpoint_publication_is_mandatory_and_cannot_be_faked_by_generic_comment(self):
-        self.checkpoint("q3-draft", outcome="not_applicable")
+        self.plan(); self.select(); self.execute(); self.automatic_checkpoint()
         self.assertTrue(any("Jira" in p for p in quality.advance_problems(self.base, self.task, "pr_review")))
         self.publication()
         self.assertFalse(self.view()["checkpoints"]["q3-draft"]["published"])
@@ -318,6 +330,16 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(self.view()["publications"]["summary"]["status"], "unknown")
         view = self.apply("readback", dict(readback, body=record["body"]))
         self.assertEqual(view["publications"]["summary"]["status"], "verified")
+
+    def test_prepare_write_ignores_quality_action_input_files(self):
+        self.apply("draft", {"id": "q1-intake-jira", "body": "检查点评论"})
+        record = self.view()["publications"]["q1-intake-jira"]
+        self.apply("confirm", {"id": "q1-intake-jira", "digest": record["digest"], "proof": proof()})
+        command = {"action": "prepare_write", "payload": {"id": "q1-intake-jira", "digest": record["digest"]}}
+        (task_store.task_directory(self.base, "TAP-123") / "quality-prepare-q1.json").write_text(
+            json.dumps(command), encoding="utf-8")
+        view = self.apply("prepare_write", command["payload"])
+        self.assertEqual(view["publications"]["q1-intake-jira"]["status"], "intent")
 
     def test_changed_draft_and_facts_require_new_confirmation(self):
         self.apply("draft", {"id": "summary", "body": "正文一"})
@@ -388,11 +410,11 @@ class QualityTests(unittest.TestCase):
         self.checkpoint("q4-acceptance")
 
     def test_expired_checkpoint_and_missing_rules_fail_closed(self):
-        cp = "q3-draft"
+        cp = "q2-plan"
         decision = {"outcome": "defer", "reason": "仅用于过期检查", "owner": "tester", "follow_up": "重新验证",
                     "proof": dict(proof(), at="2020-01-01T00:00:00+00:00"), "deadline": "2020-01-02T00:00:00+00:00"}
         self.apply("checkpoint", {"checkpoint": cp, "digest": self.view()["checkpoints"][cp]["digest"], "decision": decision})
-        self.assertTrue(any("到期" in p for p in quality.advance_problems(self.base, self.task, "pr_review")))
+        self.assertTrue(any("到期" in p for p in quality.advance_problems(self.base, self.task, "implementation")))
         (self.base / "product/projects/tapdata/quality.json").unlink()
         with self.assertRaisesRegex(ValueError, "缺失"):
             quality.advance_problems(self.base, self.task, "pr_review")
@@ -407,6 +429,20 @@ class QualityTests(unittest.TestCase):
         self.checkpoint("q4-acceptance")
         self.publish_checkpoint("q4-acceptance")
         self.assertEqual(quality.advance_problems(self.base, self.task, "ci_validation"), [])
+
+    def test_q3_is_automatic_only_after_all_confirmed_after_fix_evidence_passes(self):
+        self.plan(); self.plan("case-b", "manual")
+        self.select(); self.select("case-b")
+        with self.assertRaisesRegex(ValueError, "首轮执行证据"):
+            self.automatic_checkpoint()
+        self.execute(); self.execute("case-b", origin="manual")
+        view = self.automatic_checkpoint()
+        checkpoint = view["checkpoints"]["q3-draft"]
+        self.assertTrue(checkpoint["reviewed"])
+        self.assertEqual(checkpoint["mode"], "automatic")
+        self.assertEqual(checkpoint["outcome"], "observed")
+        with self.assertRaisesRegex(ValueError, "自动记录"):
+            self.checkpoint("q3-draft")
 
     def test_live_code_change_invalidates_after_but_not_reproduction(self):
         repo = self.base / "git-repo"; repo.mkdir()

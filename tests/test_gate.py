@@ -910,6 +910,30 @@ def main():
         check("gh pr merge 始终需单独确认", run_hook("Bash", {"command": "gh pr merge 42 --squash"}, ws), "ask")
         check("gh release 始终需单独确认", run_hook("Bash", {"command": "gh release create v1.0"}, ws), "ask")
         check("Jira transition 不在伞内，需确认", run_hook("mcp__atlassian__transition_issue", {"issueKey": "TAP-123"}, ws), "ask")
+        status_intent = {
+            "schema_version": 1,
+            "issue_key": "TAP-123",
+            "run_id": "run-111111111111",
+            "attempts": {"takeover": {"outcome": "ready", "transition_id": "421"}},
+        }
+        task_store._write_json_atomic(
+            task_store.task_directory(ws, "TAP-123") / "jira-status-fixture.json", status_intent
+        )
+        check(
+            "精确 Jira 状态同步意图自动放行",
+            run_hook("mcp__atlassian__transition_issue", {"issueKey": "TAP-123", "transitionId": "421"}, ws),
+            "allow",
+        )
+        check(
+            "同一 Jira 状态同步意图只能消费一次",
+            run_hook("mcp__atlassian__transition_issue", {"issueKey": "TAP-123", "transitionId": "421"}, ws),
+            "ask",
+        )
+        check(
+            "不同 Jira transition 不借用状态同步意图",
+            run_hook("mcp__atlassian__transition_issue", {"issueKey": "TAP-123", "transitionId": "999"}, ws),
+            "ask",
+        )
         not_covered = run_standard({
             "protocol_version": 1,
             "event": "before_operation",

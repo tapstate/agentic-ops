@@ -1,6 +1,10 @@
 """Jira 评论写入的本地意图/回执/回读账本；外部调用由原生工具负责。"""
 from workflow import quality, task_store
 import json
+import re
+
+
+STATE_FILE = re.compile(r"quality-[0-9a-f]{24}\.json$")
 
 
 def snapshot(model, rules, ctx, checkpoint=None):
@@ -19,11 +23,15 @@ def checkpoint_body(model, checkpoint, rules, ctx):
     if checkpoint != rules["checkpoints"][0]["id"]:
         fact_keys += rules.get("plan_fact_keys", [])
     facts = {k: v for k, v in ctx["facts"].items() if k in fact_keys}
+    disposition = (view["decision"] or {}).get("decision")
+    if view.get("mode") == "automatic":
+        disposition = {"outcome": "observed", "reason": (view["decision"] or {}).get("reason"),
+                       "basis": "已确认方案的全部修复后检查项在当前完整提交 SHA 上得到预期结果"}
     lines = ["%s / %s：%s" % (ctx["issue_key"], ctx["run_id"], view["handoff"]["title"]),
              "任务事实：" + json.dumps(facts, ensure_ascii=False, sort_keys=True),
-             "检查点处置：" + json.dumps(view["decision"]["decision"], ensure_ascii=False, sort_keys=True)]
+             "检查点处置：" + json.dumps(disposition, ensure_ascii=False, sort_keys=True)]
     for key, item in model["items"].items():
-        if key in view["due"]:
+        if key in view["due"] or (view.get("mode") == "automatic" and item["plan"]["timing"] == "after_fix"):
             content = {"plan": item["plan"], "executions": item["executions"], "decision": item["decision"]}
         elif checkpoint != rules["checkpoints"][0]["id"]:
             content = {"plan": quality.selection_plan(item["plan"], rules), "尚未到验收点": True}
@@ -102,6 +110,10 @@ def reduce(model, command, rules, ctx):
 def check_unresolved_runs(base, task):
     """reset 不抹去旧 run 的不明外部写入，避免恢复后再发一次。"""
     for path in task_store.task_directory(base, task["issue_key"]).glob("quality-*.json"):
+        # 同一任务目录也保存 Agent 传给 quality.py 的输入文件，例如
+        # quality-prepare-q1.json。它们不是质量状态日志，不能按状态契约解析。
+        if not STATE_FILE.fullmatch(path.name):
+            continue
         if path == quality.state_path(base, task):
             continue
         state = json.loads(path.read_text(encoding="utf-8"))

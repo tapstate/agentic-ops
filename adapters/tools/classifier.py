@@ -58,8 +58,15 @@ def github_target(tool_input):
 
 
 def jira_target(tool_input):
-    keys = ("issueKey", "issue_key", "issueIdOrKey", "issue_key_or_id", "key")
-    value = next((tool_input.get(key) for key in keys if tool_input.get(key)), None)
-    if value:
-        return {"issue_key": str(value).upper(), "branch_relevant": False}
-    return {"branch_relevant": False}
+    value = next(
+        (tool_input.get(key) for key in
+         ("issueKey", "issue_key", "issueIdOrKey", "issue_key_or_id", "key") if tool_input.get(key)), None
+    )
+    transition = next(
+        (tool_input.get(key) for key in
+         ("transitionId", "transition_id", "transition", "statusId", "status_id") if tool_input.get(key)), None
+    )
+    transition_id = transition.get("id") if isinstance(transition, dict) else transition
+    return dict({"branch_relevant": False},
+                **({"issue_key": str(value).upper()} if value else {}),
+                **({"jira_transition_id": str(transition_id)} if transition_id else {}))

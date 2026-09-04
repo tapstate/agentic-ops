@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from adapters.runtime import decision_reason, evaluate_tool_call  # noqa: E402
 
-ADAPTER_VERSION = 4
+ADAPTER_VERSION = 5
 
 
 def deny(reason_code, reason):

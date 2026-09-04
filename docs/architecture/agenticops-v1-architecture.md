@@ -74,6 +74,8 @@ Agent Adapter → Tool Adapter → Standard Request
 
 工作空间不复制 Policy、Project Skill 或 Runtime。根 `agenticops`、`AGENTS.md`、Agent 配置和 MCP 配置是可再生接线，文件归属及哈希记录在 `init.json`；`doctor` 检测漂移，`repair` 安全重建。项目工作空间根的 `./agenticops` 只解析 workspace 绑定并转发到中央 Product Root，不注入任务上下文，也不承载任务状态机。Gate 能唯一解析任务时将事件写入对应任务目录；无法唯一解析任务时才写入根 `events.jsonl`，它是受控工作空间状态，随 `purge` 删除。旧 `.agenticops.json` 和 `.gate/` 只作为一次性迁移输入，不再是事实源。工作空间维护命令先列出精确目标再确认：`repair` 和 `clean --generated-only` 只收敛可再生接线；`detach` 删除已校验归属的接线和绑定但保留任务状态；`purge` 才会删除任务状态，且必须逐个工作空间明确确认。无法访问的登记只报告，不能被更新自动注销。
 
+普通任务状态变更以工作空间 `.agenticops` 目录自身为互斥对象；Q1 等质量检查点、授权、CI 和任务事件均不要求写入 Product Root。`purge` 在删除该目录前持有同一把锁并回读绑定，以避免并发任务在已删除的工作空间状态上继续写入。Product Root `.local/` 继续用于生命周期、本机工作空间索引及跨工作空间共享的 Source Pool/worktree 租约，不保存任务事实。
+
 多个 active 任务存在歧义时，Workflow 要求显式 issue key。Gate 按 issue key 或 `repository + work_branch` 唯一解析任务；零匹配、多匹配都不能借用其它任务授权。
 
 ## 6. Source Pool 与任务工作树
@@ -96,6 +98,8 @@ Project Package 的 `repositories.json` 是仓库、origin、基线分支和域�
 ## 7. 多仓库、授权与当前工作空间会话
 
 一个任务可登记多个仓库，每仓绑定 repository、work branch、base branch、修改范围和验证方式。准备 worktree 后，授权还绑定 `run_id` 与 `base_sha`。授权绑定任务、Agent、方案和完整仓库集合；新增仓库或修改稳定绑定后旧授权失效。每仓独立记录提交、PR、CI 和验证，最后汇总成任务证据。
+
+项目可配置少量非阻断的 Jira 状态同步节点。Agent 在规定的本地阶段读取 Jira 实时状态、可用转换和必填字段，Workflow 只准备并记录当前 task/run/node 的一次精确转换意图；Tool Adapter 只提取转换 ID，Gate 仅允许与该意图完全匹配的第一次调用，并以放行审计消费该意图。外部调用失败、字段无法可靠补齐或状态不匹配都只形成可回查的人工接力，不推进本地阶段，也不阻止后续节点基于新事实独立尝试。PR Ready 由独立只读核对汇总关联测试任务、当前提交的 PR Checks 和到 Q4 为止的任务检查项；Jira 状态同步待办作为提示返回，不伪装成这三类验收事实。
 
 Agent 由薄项目工作空间入口使用 `./agenticops start <agent>` 启动，当前会话始终以项目工作空间为 cwd。任务 worktree 位于该工作空间内，因此不再为每个 task/run 重启 Agent 或追加动态目录参数。`workflow/task.py repository context --issue-key <issue-key> --json` 复用 worktree 校验，返回当前 run 的仓库、路径、分支和 `base_sha`；Agent 从同一会话在这些已校验路径中分析、修改、构建和测试。任务命令继续显式绑定 workspace 和 issue key，不建立会话级“当前任务”状态。Source Pool 位于工作空间外，仍不得加入 Agent 可写范围。
 

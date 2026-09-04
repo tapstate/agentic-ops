@@ -19,6 +19,9 @@
       "$ref": "#/$defs/checkpoint"
     },
     {
+      "$ref": "#/$defs/auto_checkpoint"
+    },
+    {
       "$ref": "#/$defs/draft"
     },
     {
@@ -455,6 +458,45 @@
             "checkpoint",
             "digest",
             "decision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "auto_checkpoint": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "auto_checkpoint"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "checkpoint": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "digest": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          },
+          "required": [
+            "checkpoint",
+            "digest",
+            "reason"
           ],
           "additionalProperties": false
         }

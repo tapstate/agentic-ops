@@ -31,7 +31,7 @@ python3 workflow/task.py record --issue-key <JIRA-KEY> --key <fact key> --value 
 
 ## 准入失败流程（强制点：workflow/task.py checklist 与 quality.py 检查点确认）
 
-1. 一次列全缺失事实与已有 Test Coverage，继续不依赖缺项的源码分析。
+1. 一次列全缺失事实与 Jira「已链接工作项」中的 Test 用例，继续不依赖缺项的源码分析。
 2. 在质量检查点报告缺口并请用户决定补充或带风险继续，保留来源和理由。
 3. 事实不可信、仓库基线不明或权限不足时停止对应步骤，不以质量处置替代安全授权。
 

@@ -63,20 +63,45 @@ def grant(ws, issue="TAP-123"):
 
 
 def confirm_fixture_checkpoint(ws, checkpoint):
-    """测试夹具中的明确人工不适用处置，不写 Jira，不伪造测试通过。"""
+    """为阶段机夹具记录用户处置或可验证的自动 Q3 事实，不写 Jira。"""
     task_doc = json.loads(task_store.task_path(ws, "TAP-123").read_text())
     rules = quality.config(ws)
     state = quality.load(ws, task_doc)
     view = quality.report(state, rules, quality.context(ws, task_doc))
-    view = quality.apply(ws, "TAP-123", task_doc["run_id"], state["revision"], {
-        "action": "checkpoint", "payload": {"checkpoint": checkpoint,
-        "digest": view["checkpoints"][checkpoint]["digest"], "decision": {
-        "outcome": "not_applicable", "reason": "此夹具验证任务基础能力，质量场景由 test_quality 覆盖",
-        "proof": {"actor": "fixture-user", "source": "user_message", "reference": "fixture:decision",
-                  "at": "2026-09-03T10:00:00+08:00"}}}})
+
     def apply(action, payload):
         nonlocal view
         view = quality.apply(ws, "TAP-123", task_doc["run_id"], view["revision"], {"action": action, "payload": payload})
+
+    if checkpoint == "q2-plan":
+        repository = task_doc["repositories"][0]
+        plan = {"id": "fixture-after-fix", "checkpoint": "q4-acceptance", "timing": "after_fix",
+                "case_ref": "fixture:after-fix", "case_version": "fixture-v1", "case_status": "proposed",
+                "method": "integration", "repository": repository["repository"], "target_revision": repository["base_sha"],
+                "criterion": "固定验收夹具应通过", "steps": "执行固定验收夹具", "expected_result": "PASS",
+                "scope": "仅验证阶段机自动事实边界"}
+        apply("item", {"plan": plan, "reason": "Q2 一次性定义修复后检查项"})
+        apply("select", {"item_id": plan["id"], "digest": view["items"][plan["id"]]["plan_digest"],
+                         "proof": {"actor": "fixture-user", "source": "user_message", "reference": "fixture:plan",
+                                   "at": "2026-09-03T10:00:00+08:00"}})
+    if rules["checkpoints"][[p["id"] for p in rules["checkpoints"]].index(checkpoint)].get("confirmation") == "automatic":
+        for key, item in view["items"].items():
+            plan = item["plan"]
+            if plan["timing"] != "after_fix":
+                continue
+            apply("execute", {"item_id": key, "execution": {
+                "id": "fixture-" + key, "case_ref": plan["case_ref"], "case_version": plan["case_version"],
+                "method": plan["method"], "repository": plan["repository"], "target_revision": plan["target_revision"],
+                "origin": "local_maven", "source_ref": "fixture:automatic-q3/" + key,
+                "environment": "fixture", "observed_at": "2026-09-03T10:00:00+08:00", "raw_result": "PASS",
+                "failure_kind": "none", "observation": "固定验收夹具记录首轮预期结果"}})
+        apply("auto_checkpoint", {"checkpoint": checkpoint, "digest": view["checkpoints"][checkpoint]["automatic_digest"],
+                                  "reason": "夹具中的全部已选修复后检查项均有最终 SHA 的预期结果"})
+    else:
+        apply("checkpoint", {"checkpoint": checkpoint, "digest": view["checkpoints"][checkpoint]["digest"], "decision": {
+            "outcome": "not_applicable", "reason": "此夹具验证任务基础能力，质量场景由 test_quality 覆盖",
+            "proof": {"actor": "fixture-user", "source": "user_message", "reference": "fixture:decision",
+                      "at": "2026-09-03T10:00:00+08:00"}}})
     apply("draft", {"id": checkpoint, "checkpoint": checkpoint, "body": view["checkpoints"][checkpoint]["publication_body"]})
     record = view["publications"][checkpoint]
     apply("confirm", {"id": checkpoint, "digest": record["digest"],

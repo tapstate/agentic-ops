@@ -277,7 +277,7 @@ def detach(product_root, workspace, purge=False):
     lock = task_store.task_state_lock(workspace) if purge else _null_context()
     with lock:
         with WorkspaceDirectory(workspace) as tree:
-            # purge 必须在持有产品级 task-state 锁后重新预检；命令展示阶段的预检
+            # purge 必须在持有工作空间状态目录锁后重新预检；命令展示阶段的预检
             # 只用于人工确认，不能作为删除事务的证据。
             deletable, _ = detach_preflight(
                 product_root, workspace, purge=purge, tree=tree

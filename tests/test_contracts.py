@@ -571,6 +571,11 @@ class ContractConformanceTest(unittest.TestCase):
             ["write_jira_comment"],
             classify_tool_call("mcp__atlassian__add_comment", {"issueKey": "TAP-123"})[0],
         )
+        jira_operations, _, jira_target = classify_tool_call(
+            "mcp__atlassian__transition_issue", {"issueKey": "TAP-123", "transitionId": "421"}
+        )
+        self.assertEqual(["transition_jira_status"], jira_operations)
+        self.assertEqual("421", jira_target["jira_transition_id"])
         self.assertEqual(
             ["pr_merge"],
             classify_tool_call("mcp__github__merge_pull_request", {"repository": "acme/widget"})[0],
