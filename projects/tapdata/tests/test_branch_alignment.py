@@ -70,11 +70,21 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
         self.assertEqual(Path("/tapdata-root/tapdata"), align.module_repository("/tapdata-root", "tapdata/tapdata"))
         self.assertEqual(Path("/tapdata-root/tapdata-web"), align.module_repository("/tapdata-root", "tapdata/tapdata-web"))
 
+    def test_git_refs_cache_belongs_to_workspace_and_reads_bound_source_pool(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary) / "workspace"
+            binding = workspace / ".agenticops" / "workspace.json"
+            binding.parent.mkdir(parents=True)
+            binding.write_text(json.dumps({"repository_pool": {"root": "/pool"}}), encoding="utf-8")
+            cache, pool = align.git_refs_cache_file(workspace)
+        self.assertEqual((workspace / ".agenticops" / "git-ref-cache-v1.json").resolve(), cache)
+        self.assertEqual(Path("/pool"), pool)
+
     def test_main_repository_is_validated_before_other_module_repositories(self):
         repositories = {"tapdata/docs": {}, "tapdata/tapdata": {}}
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaisesRegex(align.AlignmentError, "TapData 模块根目录缺少主仓.*tapdata/tapdata"):
-                align.refresh_branch_cache(temporary, repositories, "tapdata/tapdata", "never")
+                align.refresh_branch_cache(temporary, repositories, "tapdata/tapdata", "auto")
 
     def test_missing_main_repository_stops_before_any_remote_refresh(self):
         repositories = {"tapdata/tapdata": {}, "tapdata/tapdata-enterprise": {}}
@@ -96,13 +106,12 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
         with self.assertRaisesRegex(align.AlignmentError, "未登记的目标仓库"):
             align.resolve_scope(repositories, "tapdata/tapdata", ["tapdata/unknown"])
 
-    def test_refresh_policy_distinguishes_always_auto_and_never(self):
+    def test_refresh_policy_distinguishes_always_and_auto(self):
         fresh = {"last_refresh_epoch": 995}
         stale = {"last_refresh_epoch": 600}
         missing = {"last_refresh_epoch": None}
 
         self.assertTrue(align.refresh_required("always", fresh, 1_000))
-        self.assertFalse(align.refresh_required("never", missing, 1_000))
         self.assertFalse(align.refresh_required("auto", fresh, 1_000))
         self.assertTrue(align.refresh_required("auto", stale, 1_000))
         self.assertTrue(align.refresh_required("auto", missing, 1_000))
@@ -117,15 +126,16 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
         observations = {"tapdata/tapdata": self.observation("tapdata/tapdata", {"main": "sha"}, selection="required")}
         with mock.patch.object(align, "load_configuration", return_value=(config, {"tapdata/tapdata": {}})), \
              mock.patch.object(align, "resolve_tapdata_root", return_value=(Path("/tapdata-root"), "explicit")), \
+             mock.patch.object(align, "git_refs_cache_file", return_value=(Path("/workspace/.agenticops/git-ref-cache-v1.json"), Path("/pool"))), \
              mock.patch.object(align, "inspect_repositories", return_value=(observations, 0.25)), \
              mock.patch.object(align, "build_plan", return_value=rows), \
              mock.patch.object(align, "report_outcome", return_value=("partial", [], {"cached_exists": 1})), \
              redirect_stdout(output), redirect_stderr(errors):
-            code = align.main(["show", "--version", "main", "--refresh", "never", "--json"])
+            code = align.main(["show", "--version", "main", "--json"])
 
         document = json.loads(output.getvalue())
         self.assertEqual(0, code)
-        self.assertEqual("never", document["refresh"]["mode"])
+        self.assertEqual("auto", document["refresh"]["mode"])
         self.assertEqual(0.25, document["timing_seconds"]["fetch"])
         self.assertEqual("cached_local_refs", document["rows"][0]["refs"]["freshness"])
         self.assertIn("开始解析", errors.getvalue())
@@ -194,6 +204,62 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
         self.assertIsNone(target)
         self.assertEqual("unresolved", resolution)
         self.assertIn("未核验", reason)
+
+    def test_feature_branch_prefers_same_name_then_exact_pluginkit_release(self):
+        rules = {
+            "product_repository": "tapdata/tapdata",
+            "feature_branch": {
+                "same_name_repositories": ["tapdata/tapdata-enterprise", "tapdata/tapdata-connectors"],
+                "plugin_release_repositories": ["tapdata/tapdata-connectors"],
+                "tag_fallback_repositories": [],
+                "unchanged_repositories": [],
+            },
+        }
+        refs = {
+            "tapdata/tapdata": {"feat_ha_dmp": "product-sha"},
+            "tapdata/tapdata-enterprise": {"feat_ha_dmp": "enterprise-sha"},
+            "tapdata/tapdata-connectors": {"release-v2.0.7": "connector-sha", "release-v2.0.8": "newer"},
+        }
+        same = align.derived_target("tapdata/tapdata-enterprise", "feat_ha_dmp", rules, refs, Path("/pool/tapdata"), {})
+        with mock.patch.object(align, "git_output", return_value="product-sha"), \
+             mock.patch.object(align, "plugin_release", return_value=("release-v2.0.7", "PluginKit 2.0.7")):
+            plugin = align.derived_target("tapdata/tapdata-connectors", "feat_ha_dmp", rules, refs, Path("/pool/tapdata"), {})
+            cached = align.derived_target(
+                "tapdata/tapdata-connectors", "feat_ha_dmp", rules, refs, Path("/pool/tapdata"), {},
+                {"tapdata/tapdata": "verified", "tapdata/tapdata-connectors": "cached"},
+            )
+
+        self.assertEqual(("feat_ha_dmp", "same_name"), same[:2])
+        self.assertEqual(("release-v2.0.7", "plugin_release"), plugin[:2])
+        self.assertEqual(("release-v2.0.7", "plugin_release"), cached[:2])
+        self.assertIn("精确匹配", plugin[2])
+
+    def test_feature_tag_requires_controlled_source_pool_refresh_when_local_graph_is_missing(self):
+        with mock.patch.object(align, "git_output", side_effect=align.AlignmentError("unknown revision")), \
+             mock.patch.object(align, "command") as command:
+            target, reason = align.feature_tag_branch(Path("/pool/tapdata"), "feat_ha_dmp", "product-sha")
+
+        self.assertIsNone(target)
+        self.assertIn("受控 Source Pool 刷新流程", reason)
+        command.assert_not_called()
+
+    def test_feature_tag_fallback_and_malformed_release_prefix_are_not_silent(self):
+        rules = {
+            "product_repository": "tapdata/tapdata",
+            "feature_branch": {
+                "same_name_repositories": ["tapdata/tapdata-license"],
+                "plugin_release_repositories": [],
+                "tag_fallback_repositories": ["tapdata/tapdata-license"],
+                "unchanged_repositories": [],
+            },
+        }
+        refs = {"tapdata/tapdata": {"feat_ha_dmp": "product-sha"}, "tapdata/tapdata-license": {"release-v4.22.0": "license-sha"}}
+        with mock.patch.object(align, "feature_tag_branch", return_value=("release-v4.22.0", "Tag 4.22.0")):
+            target = align.derived_target("tapdata/tapdata-license", "feat_ha_dmp", rules, refs, Path("/pool/tapdata"), {})
+
+        self.assertEqual(("release-v4.22.0", "tag_fallback"), target[:2])
+        with self.assertRaisesRegex(align.AlignmentError, "release-v 前缀"):
+            align.derived_target("tapdata/tapdata-license", "release-v4.22", rules, refs, Path("/pool/tapdata"), {})
 
     def test_fetch_error_category_and_prompt_distinguish_access_from_network(self):
         self.assertEqual("ssh_auth_failed", align.classify_fetch_error("Permission denied (publickey)."))

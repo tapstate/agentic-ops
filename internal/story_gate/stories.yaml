@@ -53,7 +53,7 @@ stories:
     category: product
     title: 推进并恢复多仓库研发任务
     document: docs/user-stories/v1/prod-003-multi-repository-task.md
-    protected_paths: [workflow/**, tests/test_workflow.py, tests/test_quality.py, tests/test_issue_versions.py, tests/test_jira_status.py]
+    protected_paths: [workflow/**, tests/test_workflow.py, tests/test_quality.py, tests/test_issue_versions.py, tests/test_jira_status.py, tests/test_git_refs.py]
     acceptance_checks: [python_runtime, resource_contracts]
     evidence_requirements:
       - 阶段、准入、授权、pending 和恢复结果
