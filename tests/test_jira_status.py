@@ -86,22 +86,97 @@ class JiraStatusTests(unittest.TestCase):
         self.task["stage"] = "ci_validation"
         task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
         input_path = self.base / "jira.json"
-        input_path.write_text(json.dumps({"source_ref": "fixture:jira", "issue": {"key": "TAP-123"},
-                                         "linked_test_tasks": [{"key": "TAP-T1", "status": {
-                                             "name": "Done", "statusCategory": {"key": "done"}}}]}))
+        def linked_test(status_name="Done", category="done"):
+            return {"source_ref": "fixture:jira", "issue": {"key": "TAP-123", "fields": {
+                "issuelinks": [{"type": {"outward": "tests"}, "outwardIssue": {
+                    "key": "TAP-T1", "fields": {"issuetype": {"name": "Test"}, "status": {
+                        "name": status_name, "statusCategory": {"key": category}}}}}]}}}
+        rules = {"pr_ready": {"require_linked_test_tasks": True,
+                                "linked_test_task": {"relations": ["tests"], "issue_types": ["Test"]}}}
+        input_path.write_text(json.dumps(linked_test()))
         with mock.patch.object(pr_ready, "quality_problems", return_value=[]), \
+                mock.patch.object(pr_ready, "linked_test_confirmation_problems", return_value=[]), \
                 mock.patch.object(pr_ready, "ci_problems", return_value=[]), \
-                mock.patch.object(pr_ready.quality, "config", return_value={"pr_ready": {}}):
+                mock.patch.object(pr_ready.quality, "config", return_value=rules):
             result = pr_ready.check(self.base, "TAP-123", input_path)
         self.assertTrue(result["ready"])
-        input_path.write_text(json.dumps({"source_ref": "fixture:jira", "issue": {"key": "TAP-123"},
-                                         "linked_test_tasks": [{"key": "TAP-T1", "status": {
-                                             "name": "In Progress", "statusCategory": {"key": "indeterminate"}}}]}))
+        input_path.write_text(json.dumps(linked_test("In Progress", "indeterminate")))
         with mock.patch.object(pr_ready, "quality_problems", return_value=[]), \
+                mock.patch.object(pr_ready, "linked_test_confirmation_problems", return_value=[]), \
                 mock.patch.object(pr_ready, "ci_problems", return_value=[]), \
-                mock.patch.object(pr_ready.quality, "config", return_value={"pr_ready": {}}):
+                mock.patch.object(pr_ready.quality, "config", return_value=rules):
             result = pr_ready.check(self.base, "TAP-123", input_path)
-        self.assertFalse(result["ready"])
+        self.assertTrue(result["ready"])
+
+    def test_pr_ready_derives_test_tasks_from_issue_links_and_checks_type(self):
+        rules = {"pr_ready": {"require_linked_test_tasks": True,
+                                "linked_test_task": {"relations": ["tests"], "issue_types": ["Test"]}}}
+
+        def problems(links):
+            path = self.base / "jira-links.json"
+            path.write_text(json.dumps({"source_ref": "fixture:jira", "issue": {
+                "key": "TAP-123", "fields": {"issuelinks": links}}}))
+            return pr_ready.jira_test_tasks(path, "TAP-123", rules)[0]
+
+        valid = {"type": {"outward": "tests"}, "outwardIssue": {"key": "TAP-12834", "fields": {
+            "issuetype": {"name": "Test"}, "status": {"name": "Done", "statusCategory": {"key": "done"}}}}}
+        self.assertEqual(problems([valid]), [])
+
+        wrong_relation = {"type": {"outward": "relates to"}, "outwardIssue": valid["outwardIssue"]}
+        self.assertTrue(any("未返回" in item for item in problems([wrong_relation])))
+
+        wrong_type = {"type": {"outward": "tests"}, "outwardIssue": {"key": "TAP-1", "fields": {
+            "issuetype": {"name": "Bug"}, "status": {"name": "Done", "statusCategory": {"key": "done"}}}}}
+        self.assertTrue(any("测试任务类型" in item for item in problems([wrong_type])))
+
+        unfinished = {"type": {"outward": "tests"}, "outwardIssue": {"key": "TAP-2", "fields": {
+            "issuetype": {"name": "Test"}, "status": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}}}}}
+        self.assertEqual(problems([unfinished]), [])
+
+    def test_pr_ready_rejects_legacy_derived_test_tasks_and_missing_link_metadata(self):
+        rules = {"pr_ready": {"require_linked_test_tasks": True,
+                                "linked_test_task": {"relations": ["tests"], "issue_types": ["Test"]}}}
+        path = self.base / "jira-links.json"
+        path.write_text(json.dumps({"source_ref": "fixture:jira", "issue": {"key": "TAP-123", "fields": {}},
+                                    "linked_test_tasks": [{"key": "TAP-12834"}]}))
+        with self.assertRaisesRegex(ValueError, "issuelinks"):
+            pr_ready.jira_test_tasks(path, "TAP-123", rules)
+
+        missing_status = {"type": {"outward": "tests"}, "outwardIssue": {
+            "key": "TAP-12834", "fields": {"issuetype": {"name": "Test"}}}}
+        path.write_text(json.dumps({"source_ref": "fixture:jira", "issue": {
+            "key": "TAP-123", "fields": {"issuelinks": [missing_status]}}}))
+        problems, _, tests = pr_ready.jira_test_tasks(path, "TAP-123", rules)
+        self.assertEqual(problems, [])
+        self.assertEqual(tests[0]["key"], "TAP-12834")
+
+        path.write_text(json.dumps({"source_ref": "fixture:jira", "issue": {
+            "key": "TAP-123", "fields": {"issuelinks": [], "customfield_10416": "Exception Approved - Low Risk"}}}))
+        problems, _, _ = pr_ready.jira_test_tasks(path, "TAP-123", rules)
+        self.assertTrue(any("未返回" in item for item in problems))
+
+        optional_rules = {"pr_ready": {"require_linked_test_tasks": False,
+                                         "linked_test_task": {"relations": ["tests"], "issue_types": ["Test"]}}}
+        self.assertEqual(pr_ready.jira_test_tasks(path, "TAP-123", optional_rules)[0], [])
+
+    def test_pr_ready_requires_user_acceptance_for_each_linked_test(self):
+        rules = {"pr_ready": {"require_user_confirmation_per_linked_test": True,
+                                "accepted_outcomes": ["accept", "not_applicable"]}}
+        task = dict(self.task)
+        linked = [{"key": "TAP-12834"}]
+        report = {"items": {"test-12834": {"plan": {"checkpoint": "q4-acceptance", "case_ref": "TAP-12834"},
+                                               "decision_valid": True,
+                                               "decision": {"decision": {"outcome": "accept"}}}}}
+        with mock.patch.object(pr_ready.quality, "load"), \
+                mock.patch.object(pr_ready.quality, "context"), \
+                mock.patch.object(pr_ready.quality, "report", return_value=report):
+            self.assertEqual(pr_ready.linked_test_confirmation_problems(self.base, task, rules, linked), [])
+        report["items"]["test-12834"]["decision"]["decision"]["outcome"] = "not_applicable"
+        with mock.patch.object(pr_ready.quality, "load"), \
+                mock.patch.object(pr_ready.quality, "context"), \
+                mock.patch.object(pr_ready.quality, "report", return_value=report):
+            self.assertTrue(any("确认测试成功" in item for item in
+                                pr_ready.linked_test_confirmation_problems(self.base, task, rules, linked)))
 
     def test_pr_checks_bind_success_to_current_head(self):
         repository = self.base / "repo"

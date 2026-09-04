@@ -11,25 +11,73 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from workflow import ci, jira_status, quality, task_store  # noqa: E402
 
 
-def jira_test_tasks(path, issue_key):
+def jira_test_tasks(path, issue_key, rules):
     document = jira_status.read_input(path)
     issue = document.get("issue") or {}
     if str(issue.get("key") or "").upper() != issue_key:
         raise ValueError("Jira 验收快照不是当前任务")
-    tasks = document.get("linked_test_tasks")
-    if not isinstance(tasks, list):
-        raise ValueError("Jira 验收快照缺少 linked_test_tasks")
+    fields = issue.get("fields")
+    if not isinstance(fields, dict):
+        raise ValueError("Jira 验收快照缺少 issue.fields")
+    links = fields.get("issuelinks")
+    if not isinstance(links, list):
+        raise ValueError("Jira 验收快照缺少 issue.fields.issuelinks")
+    policy = rules.get("pr_ready", {}).get("linked_test_task", {})
+    relations = set(policy.get("relations", []))
+    issue_types = set(policy.get("issue_types", []))
+    if not relations or not issue_types:
+        raise ValueError("当前 Project 未配置关联测试任务的关系和任务类型")
+
+    tasks = []
+    malformed = []
+    for link in links:
+        if not isinstance(link, dict) or not isinstance(link.get("type"), dict):
+            continue
+        for direction, relation_key, target_key in (("outward", "outward", "outwardIssue"),
+                                                     ("inward", "inward", "inwardIssue")):
+            relation = link["type"].get(relation_key)
+            if relation not in relations:
+                continue
+            target = link.get(target_key)
+            if not isinstance(target, dict):
+                malformed.append("关联测试任务链接缺少 %sIssue" % direction)
+                continue
+            if not target.get("key"):
+                malformed.append("关联测试任务链接缺少工作项 key")
+                continue
+            target_fields = target.get("fields")
+            issue_type = (target_fields or {}).get("issuetype") if isinstance(target_fields, dict) else None
+            if not isinstance(issue_type, dict) or issue_type.get("name") not in issue_types:
+                malformed.append("关联任务 %s 不是允许的测试任务类型（期望 %s）" %
+                                 (target.get("key") or "未知", "、".join(sorted(issue_types))))
+                continue
+            tasks.append(target)
+
     problems = []
-    if not tasks:
-        problems.append("Jira 未返回关联测试任务；需关联测试任务，或由用户明确处理不适用场景")
-    for item in tasks:
-        status = item.get("status") if isinstance(item, dict) else None
-        category = (status or {}).get("statusCategory") or {}
-        if not isinstance(item, dict) or not item.get("key") or not isinstance(status, dict):
-            problems.append("关联测试任务快照结构不完整")
-        elif str(category.get("key") or "").lower() != "done":
-            problems.append("测试任务 %s 尚未完成（%s）" % (item["key"], status.get("name") or "状态未知"))
-    return problems, document["source_ref"]
+    if malformed:
+        problems.extend(malformed)
+    if not tasks and rules["pr_ready"].get("require_linked_test_tasks"):
+        problems.append("Jira 未返回符合配置的关联测试任务；需在 Jira「已链接工作项」关联 Test 用例")
+    return problems, document["source_ref"], tasks
+
+
+def linked_test_confirmation_problems(base, task, rules, tests):
+    if not rules["pr_ready"].get("require_user_confirmation_per_linked_test"):
+        return []
+    report = quality.report(quality.load(base, task), rules, quality.context(base, task))
+    problems = []
+    for test in tests:
+        key = str(test["key"]).upper()
+        items = [item for item in report["items"].values()
+                 if item["plan"]["checkpoint"] == "q4-acceptance" and
+                 str(item["plan"]["case_ref"]).upper() == key]
+        if not items:
+            problems.append("关联 Test %s 尚未在 Q4 建立检查项并由用户确认" % key)
+        elif not any(item["decision_valid"] and
+                     ((item.get("decision") or {}).get("decision") or {}).get("outcome") == "accept"
+                     for item in items):
+            problems.append("关联 Test %s 尚未由用户基于执行证据确认测试成功" % key)
+    return problems
 
 
 def quality_problems(base, task, rules):
@@ -96,7 +144,8 @@ def check(base, issue_key, jira_input):
     rules = quality.config(base)
     if not rules or not isinstance(rules.get("pr_ready"), dict):
         raise ValueError("当前 Project 未配置 PR Ready 验收")
-    linked_problems, source_ref = jira_test_tasks(jira_input, issue_key)
+    linked_problems, source_ref, linked_tests = jira_test_tasks(jira_input, issue_key, rules)
+    linked_problems.extend(linked_test_confirmation_problems(base, task, rules, linked_tests))
     groups = {
         "linked_test_tasks": linked_problems,
         "pr_checks": ci_problems(base, task),

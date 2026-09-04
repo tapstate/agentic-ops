@@ -8,7 +8,7 @@
 
 ```mermaid
 flowchart TD
-    A[接管 Jira：读取事实及 Test Coverage] --> Q1[Q1 盘点已有用例、缺失信息]
+    A[接管 Jira：读取事实及已链接 Test 用例] --> Q1[Q1 盘点已有用例、缺失信息]
     Q1 --> B[受控仓库准备与源码分析]
     B --> Q2[Q2 修复方案和验收计划：用户选择用例与方式]
     Q2 --> J2[确认方案及检查点评论回写并回读]
@@ -29,7 +29,7 @@ flowchart TD
 
 | 检查点 | 核对内容 | 当前阶段强制点 |
 |---|---|---|
-| Q1 接管与盘点 | Jira 事实、已有 Test Coverage、用例覆盖和缺口 | Q1、Q2 的用户处置在进入 `implementation` 前检查；缺普通信息可先分析，仓库基线与权限仍须可靠 |
+| Q1 接管与盘点 | Jira 事实、已链接工作项中的 Test 用例、用例覆盖和缺口 | Q1、Q2 的用户处置在进入 `implementation` 前检查；缺普通信息可先分析，仓库基线与权限仍须可靠 |
 | Q2 方案与验收 | 根因、修复范围、复用或新增用例、每项预期和方式、修复前复现 | 进入 `implementation` 前核对全部方案已被选择；修复后项可尚未执行 |
 | Q3 首轮验证与 Draft PR | 第一轮结果、可审阅变更、未完成验证及风险 | 进入 `pr_review` 前；完整回归可以安排在 Q4 |
 | Q4 关联用例验收 | 当前代码、用例版本、选定执行、期望符合情况、风险处置 | 进入 `ci_validation` 前 |
@@ -79,22 +79,32 @@ python3 "$agenticops_root/workflow/jira_status.py" complete \
 | `Tests Passed` | Fix Details | `facts.fix_plan`、实际提交、Q4 验证 | 实现与验收后补处理方式、结果、边界和限制；计划不能冒充完成事实 |
 | `Tests Passed` | Tester、Test can be automated | Q2 验收方案及实际责任人 | 由责任人确认；手工用例可选 `No`，但不等于免测 |
 | `Tests Passed` | Fix Version | `facts.issue_version_plan` 只提供版本与修复线依据 | Tests Passed 前选择实际交付版本；不得把分支名或影响版本猜成 Jira 选项 ID |
-| `Tests Passed` | Xray Test 关联 | Q1-Q4 检查项和 Jira 关联测试任务 | 正常路径至少关联一项正式测试任务并完成；本地检查项不能替代 Jira 关联 |
+| `Tests Passed` | Xray Test 关联 | Q1-Q4 检查项和 Jira「已链接工作项」中的 Test 任务 | 正常路径至少关联一项正式 Test 任务；每项均需以 PASS 执行证据获得用户 `accept` 确认，本地检查项不能替代 Jira 关联 |
 | `Tests Passed` | Test Coverage Decision / Exception Details | 无默认本地自动值 | 仅在合规 T3 低风险例外获批后人工填写；否则不能借例外绕过测试 |
 
 转换面板实时返回的 required fields 是本次尝试的最终事实源；上表用于提前采集和解释，不覆盖 Jira Workflow。若本地来源已具备，Agent 引导责任人据此回填；若来源缺失、值需专业判断、选项 ID 无法可靠解析或写后回读不一致，就跳过本节点转换，保留具体字段和 Jira 原始错误的脱敏摘要，在 PR Ready 一次列全人工事项。
 
 ## PR Ready 核对
 
-正式提审前，先为每个任务仓库记录 PR，并使用 `ci.py watch` 取得当前 PR Head 的最新 Checks。Agent 同时从 Jira 读取全部关联测试任务及其状态，输入 `pr_ready.py`：
+正式提审前，先为每个任务仓库记录 PR，并使用 `ci.py watch` 取得当前 PR Head 的最新 Checks。Agent 同时从 Jira 读取当前任务 `fields.issuelinks`：只接受 Project 配置的关系（TapData 缺陷侧为 `tests`）指向、且任务类型为 `Test` 的关联项，输入 `pr_ready.py`：
 
 ```json
 {
   "source_ref": "可回查的 Jira 读取来源",
-  "issue": {"key": "TAP-123"},
-  "linked_test_tasks": [
-    {"key": "TAP-TEST-1", "status": {"name": "Done", "statusCategory": {"key": "done"}}}
-  ]
+  "issue": {
+    "key": "TAP-123",
+    "fields": {
+      "issuelinks": [
+        {
+          "type": {"outward": "tests"},
+          "outwardIssue": {
+            "key": "TAP-TEST-1",
+            "fields": {"issuetype": {"name": "Test"}}
+          }
+        }
+      ]
+    }
+  }
 }
 ```
 
@@ -103,7 +113,7 @@ python3 "$agenticops_root/workflow/pr_ready.py" \
   --issue-key "$task_key" --jira-input "$jira_test_tasks" --dir "$project_workspace"
 ```
 
-工具只在以下三组均通过时返回 ready：关联测试任务非空且全部属于 Jira Done 状态类别；每个任务仓库都记录 PR，最新 Checks 为 `success` 且 Head 等于当前任务代码；Q1-Q4、其检查项和要求的 Jira 评论回读均有效，处置只允许 `accept/not_applicable`。没有测试任务、Checks 为空、跳过、未知、等待或失败、Head 漂移、`defer/accept_risk/rework` 都会列为待办。Jira 状态同步失败单独列入 `jira_status_todos`，不改变三类验收事实；Engineering DRI 处理待办后重新核对，并手工执行 `Pull Request Submitted`。
+工具只在以下三组均通过时返回 ready：从 Jira「已链接工作项」派生的 Test 任务非空，且每个 Test 都在 Q4 以同一 `case_ref` 建立检查项，并由用户基于该用例的 PASS 执行证据逐项作出 `accept` 确认；每个任务仓库都记录 PR，最新 Checks 为 `success` 且 Head 等于当前任务代码；Q1-Q4、其检查项和要求的 Jira 评论回读均有效。Jira Test 工作项本身不要求为 Done。没有符合关系和类型的 Test 任务、未逐项确认、Checks 为空、跳过、未知、等待或失败、Head 漂移、`defer/accept_risk/rework` 都会列为待办。`Test Coverage Decision / Exception Details` 只能记录合规例外，不能替代 Test 关联。Jira 状态同步失败单独列入 `jira_status_todos`，不改变三类验收事实；Engineering DRI 处理待办后重新核对，并手工执行 `Pull Request Submitted`。
 
 ## 影响版本与优先修复线
 
