@@ -174,10 +174,16 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(cli(*arguments, "--confirmation-ref", "fixture:confirmed").returncode, 2)
 
     def test_missing_evidence_keeps_state_and_confirmation_unchanged(self):
+        self.state["stage"] = "implementation"
+        self.save()
         before = task_store.task_path(self.base, "TAP-123").read_bytes()
         self.assertEqual(task.cmd_advance(self.args()), 3)
         self.assertEqual(task_store.task_path(self.base, "TAP-123").read_bytes(), before)
         self.assertFalse(task_store.authorization_path(self.base, "TAP-123").exists())
+
+    def test_missing_watermark_does_not_block_local_intake(self):
+        self.assertEqual(task.cmd_advance(self.args()), 0)
+        self.assertEqual(self.read()["stage"], "task_intake")
 
     def test_duplicate_and_concurrent_advance_cannot_skip_stage(self):
         request = self.args()

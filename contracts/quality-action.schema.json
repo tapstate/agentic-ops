@@ -633,8 +633,13 @@
             "result": {
               "enum": [
                 "created",
-                "unknown"
+                "unknown",
+                "deferred"
               ]
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
             },
             "comment_id": {
               "type": "string",

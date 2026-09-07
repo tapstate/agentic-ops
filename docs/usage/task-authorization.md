@@ -54,7 +54,7 @@ python3 "$agenticops_root/workflow/task.py" advance --expected-run-id "$task_run
   --dir "$project_workspace"
 ```
 
-`init` 创建该 Jira 任务的本地 `run_id` 和 `waiting_takeover` 状态。第一条 `advance` 前必须完成 AgenticOps Version 的精确覆盖写入或确认 Jira 已是当前版本，并以 Jira 回读验证。外部写入结果不明确时保留同一 run，仅允许用新的只读快照再次 `complete`；不得重发字段写入。进入 `task_intake` 后，TapData 缺陷按项目规则准备一次精确的 `In Progress` 状态同步意图；该意图只覆盖当次 transition，失败只记录并继续本地主流程。
+`init` 创建当前 run 和 waiting_takeover 状态。先用 task.py snapshot 保存已读的 Jira 初始快照，再尽力同步 AgenticOps Version；水印失败或结果不明只列警告，不阻止 advance。未知写入保留同一 run，先回读原操作再决定恢复，不盲目重发。进入 task_intake 后，按项目规则准备 In Progress 同步；失败继续本地主流程。具体记录方式见[质量检查与证据](quality-checkpoints.md)。
 
 若 `list` 已显示同一任务，不要再次 `init`。先用 `status --issue-key "$task_key"` 回读现有 `run_id` 和阶段；继续现有现场或按该 `run_id` 清理后 reset 是两个不同决定。若列表有其它 active 任务，后续每条命令都必须保留 `--issue-key "$task_key"`，不能借用其授权。
 

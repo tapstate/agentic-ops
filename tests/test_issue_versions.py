@@ -33,87 +33,93 @@ class IssueVersionsTests(unittest.TestCase):
         self.payload = {"issue": {"key": "TAP-123", "fields": {"versions": [
             {"id": "1", "name": "4.18.0"}, {"id": "2", "name": "release-v4.21.0"}]}},
             "source_ref": "fixture:jira/TAP-123", "develop": {"status": "present", "revision": "a" * 40, "source_ref": "fixture:source-analysis"}}
+        self.payload["effective"] = {"execution_branch": "develop", "proof": {
+            "actor": "fixture-user", "source": "user_message", "reference": "fixture:confirmation",
+            "at": "2026-09-07T10:00:00+08:00"}}
         self.refs = {"develop": "a" * 40, "release-v4.18.0": "b" * 40, "release-v4.21.0": "c" * 40}
 
     def resolve(self, payload=None):
         with mock.patch.object(issue_versions, "remote_refs", return_value=self.refs):
             return issue_versions.resolve(self.base, self.task, payload or self.payload)
 
-    def test_develop_first_keeps_all_versions_and_manual_merge_list(self):
-        self.payload["selected_version_id"] = "2"
+    def test_arbitrary_version_names_do_not_require_version_branches(self):
+        self.payload["issue"]["fields"]["versions"] = [{"id": "1", "name": "v4.22"}]
+        self.refs = {"develop": "a" * 40}
         result = self.resolve()
+        self.assertEqual(result["versions"], [{"id": "1", "name": "v4.22"}])
         self.assertEqual(result["primary_branch"], "develop")
-        self.assertIsNone(result["selected_version_id"])
-        self.assertEqual([v["id"] for v in result["manual_merge"]], ["1", "2"])
-        self.assertEqual(result["refs"]["develop"], "a" * 40)
-        self.assertTrue(result["refs_verified_at"])
+        self.assertNotIn("manual_merge", result)
 
-    def test_all_version_branch_relations_are_retained_for_user_reference(self):
+    def test_local_correction_preserves_initial_observation_without_jira_id(self):
+        self.payload["effective"]["versions"] = [{"name": "4.22.0"}]
         result = self.resolve()
+        self.assertEqual(result["sync_status"], "pending")
+        self.assertEqual(result["observed"]["issue"], self.payload["issue"])
+        self.task["facts"][issue_versions.FACT] = result
+        newer = copy.deepcopy(self.payload)
+        newer["issue"]["fields"]["versions"] = [{"name": "externally changed"}]
+        self.assertEqual(self.resolve(newer)["observed"], result["observed"])
 
-        self.assertEqual(
-            [(item["jira_version_id"], item["jira_version_name"], item["branch"], item["remote_sha"])
-             for item in result["branch_references"] if item["kind"] == "affected_version"],
-            [("1", "4.18.0", "release-v4.18.0", "b" * 40),
-             ("2", "release-v4.21.0", "release-v4.21.0", "c" * 40)],
-        )
-        preferred = result["branch_references"][-1]
-        self.assertEqual("preferred_branch_analysis", preferred["kind"])
-        self.assertEqual("develop", preferred["branch"])
-        self.assertEqual("present", preferred["defect_status"])
-        self.assertIn("回写分支确认", result["branch_reference_guidance"])
-        self.assertIn("尚未登记为任务实施基线", result["branch_references"][0]["usage"])
-
-    def test_branch_references_use_the_project_product_repository(self):
-        references = issue_versions.branch_references(
-            [{"id": "1", "name": "1.0.0", "branch": "release-v1.0.0"}],
-            "develop",
-            {"status": "absent", "source_ref": "fixture:analysis"},
-            {"release-v1.0.0": "a" * 40, "develop": "b" * 40},
-            "fixture:jira/OTHER-1",
-            "other/product",
-        )
-
-        self.assertEqual(["other/product", "other/product"], [item["repository"] for item in references])
-
-    def test_absent_develop_selects_exactly_one_and_never_repairs_both(self):
+    def test_execution_branch_requires_confirmation_and_real_git_ref(self):
+        self.payload["effective"].pop("proof")
+        with self.assertRaises(ValueError):
+            self.resolve()
+        self.setUp_payload_proof()
         self.payload["develop"]["status"] = "absent"
-        with self.assertRaisesRegex(ValueError, "选择一个"):
+        self.payload["effective"]["execution_branch"] = "custom-fix-line"
+        with self.assertRaisesRegex(ValueError, "不存在"):
             self.resolve()
-        self.payload["selected_version_id"] = "2"
-        result = self.resolve()
-        self.assertEqual(result["primary_branch"], "release-v4.21.0")
-        self.assertEqual([v["id"] for v in result["manual_merge"]], ["1"])
-        self.payload["selected_version_id"] = "9"
-        with self.assertRaisesRegex(ValueError, "不属于"):
+        self.refs["custom-fix-line"] = "d" * 40
+        self.assertEqual(self.resolve()["primary_branch"], "custom-fix-line")
+
+    def setUp_payload_proof(self):
+        self.payload["effective"]["proof"] = {"actor": "fixture-user", "source": "user_message",
+            "reference": "fixture:confirmation", "at": "2026-09-07T10:00:00+08:00"}
+
+    def test_missing_versions_can_be_supplied_locally_but_unknown_evidence_cannot(self):
+        self.payload["issue"]["fields"]["versions"] = []
+        with self.assertRaises(ValueError):
             self.resolve()
-
-    def test_single_version_is_automatic_only_when_develop_is_absent(self):
-        self.payload["develop"]["status"] = "absent"
-        self.payload["issue"]["fields"]["versions"] = [{"id": "1", "name": "v4.18.0"}]
-        result = self.resolve()
-        self.assertEqual(result["selected_version_id"], "1")
-        self.assertEqual(result["manual_merge"], [])
-
-    def test_missing_any_version_rejects_even_when_develop_has_bug(self):
-        del self.refs["release-v4.21.0"]
-        with self.assertRaisesRegex(ValueError, "不存在.*release-v4.21.0"):
+        self.payload["effective"]["versions"] = [{"name": "confirmed-version"}]
+        self.assertEqual(self.resolve()["versions"], [{"name": "confirmed-version"}])
+        self.payload["develop"]["status"] = "unknown"
+        with self.assertRaises(ValueError):
             self.resolve()
-
-    def test_no_description_fixversions_unknown_or_stale_fallback(self):
-        for raw in ({"description": "问题版本 develop", "fixVersions": [{"id": "1", "name": "develop"}]},
-                    {"versions": []}, {"versions": [{"id": "1", "name": "latest"}]}):
-            payload = copy.deepcopy(self.payload); payload["issue"]["fields"] = raw
-            with self.assertRaises(ValueError): self.resolve(payload)
-        for develop in ({"status": "unknown", "source_ref": "fixture:x"},
-                        {"status": "absent", "revision": "a3561f47", "source_ref": "fixture:x"}):
-            payload = dict(self.payload, develop=develop)
-            with self.assertRaises(ValueError): self.resolve(payload)
 
     def test_network_failure_is_not_missing_branch(self):
         with mock.patch.object(issue_versions.subprocess, "run", return_value=SimpleNamespace(returncode=128)):
             with self.assertRaisesRegex(ValueError, "核验失败.*不能认定"):
                 issue_versions.remote_refs("fixture:remote", {"develop"})
+
+    def test_field_readback_clears_warning_without_changing_effective_facts(self):
+        from workflow import external_sync, quality
+        self.payload["effective"]["versions"] = [{"name": "4.22.0"}]
+        plan = self.resolve()
+        self.task["facts"] = {issue_versions.FACT: plan, "problem_version": "4.22.0"}
+        before = copy.deepcopy(self.task)
+        payload = {"fact_key": "problem_version", "expected_fact_digest": quality.digest("4.22.0"),
+                   "jira_field": "versions", "issue": {"key": "TAP-123", "fields": {"versions": [{"id": "9", "name": "4.22.0"}]}},
+                   "source_ref": "fixture:readback"}
+        external_sync.record_readback(self.base, self.task, payload)
+        self.assertEqual(self.task, before)
+        self.assertFalse(any(w["kind"] == "affected_versions" for w in external_sync.warnings(self.base, self.task)))
+        self.task["facts"]["problem_version"] = "4.23.0"
+        with self.assertRaisesRegex(ValueError, "摘要不匹配"):
+            external_sync.record_readback(self.base, self.task, payload)
+
+    def test_snapshot_is_immutable_and_wrong_run_cannot_replace_it(self):
+        path = self.base / "snapshot.json"
+        path.write_text(json.dumps(self.payload))
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"], input=str(path))
+        with contextlib.redirect_stdout(io.StringIO()):
+            task.cmd_snapshot(args)
+            before = task_store.task_path(self.base, "TAP-123").read_bytes()
+            path.write_text(json.dumps({"issue": {"key": "OTHER-1"}}))
+            task.cmd_snapshot(args)
+        self.assertEqual(task_store.task_path(self.base, "TAP-123").read_bytes(), before)
+        args.expected_run_id = "run-ffffffffffff"
+        with self.assertRaises(ValueError):
+            task.cmd_snapshot(args)
         with mock.patch.object(issue_versions.subprocess, "run", side_effect=subprocess.TimeoutExpired("git", 30)):
             with self.assertRaisesRegex(ValueError, "超时"):
                 issue_versions.remote_refs("fixture:remote", {"develop"})
@@ -156,8 +162,8 @@ class IssueVersionsTests(unittest.TestCase):
         args = SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"], input=str(path))
         with mock.patch.object(issue_versions, "remote_refs", return_value=self.refs), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(task.cmd_issue_versions(args), 0)
-        with self.assertRaisesRegex(ValueError, "cleanup/reset"):
-            task.cmd_issue_versions(args)
+        with mock.patch.object(issue_versions, "remote_refs", return_value=self.refs), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(task.cmd_issue_versions(args), 0)
 
     def test_next_is_read_only_and_reports_real_blockers(self):
         previous = task_store.task_path(self.base, "TAP-123").read_bytes()

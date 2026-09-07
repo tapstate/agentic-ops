@@ -19,6 +19,52 @@ def checkpoint_body(model, checkpoint, rules, ctx):
     view = quality.checkpoint_view(model, checkpoint, rules, ctx)
     if not view["reviewed"]:
         raise ValueError("检查点尚未有效确认，不能生成已确认评论")
+    if rules.get("comment_format") == "human-text-v1":
+        decision = (view.get("decision") or {}).get("decision", {})
+        facts = ctx["facts"]
+        lines = ["%s：%s" % (ctx["issue_key"], view["handoff"]["title"]),
+                 "处置：%s；%s" % (decision.get("outcome", "observed"), decision.get("reason", "已核验首轮执行事实"))]
+        if any(decision.get(key) for key in ("follow_up", "owner", "deadline")):
+            lines.append("检查点后续：%s；责任人：%s；期限：%s" % (
+                decision.get("follow_up", "待确认"), decision.get("owner", "待确认"), decision.get("deadline", "待确认")))
+        for key, label in (("problem_version", "本地问题版本"), ("problem_symptom", "问题现象"),
+                           ("problem_branch", "问题分支"), ("reproduce_path", "复现路径"),
+                           ("acceptance_criteria", "验收标准"), ("fix_plan", "修复方案")):
+            if key == "fix_plan" and checkpoint == rules["checkpoints"][0]["id"]:
+                continue
+            if facts.get(key):
+                lines.append("%s：%s" % (label, facts[key]))
+        plan = facts.get("issue_version_plan", {})
+        if plan.get("primary_branch"):
+            lines.append("实施分支：%s" % plan["primary_branch"])
+        if plan.get("sync_status") == "pending":
+            lines.append("本地确认版本与 Jira 初始值存在差异；字段是否已同步以最新回读为准。")
+        if plan.get("release_follow_up"):
+            lines.append("后续：%s" % plan["release_follow_up"])
+        for key, item in model["items"].items():
+            selected = item["plan"]
+            due = key in view["due"] or (view.get("mode") == "automatic" and selected["timing"] == "after_fix")
+            if not due and checkpoint == rules["checkpoints"][0]["id"]:
+                continue
+            disposition = ((item.get("decision") or {}).get("decision", {}) if due else {})
+            lines.append("验证 %s：%s；版本 %s；处置 %s；%s" % (
+                selected["case_ref"], selected["method"], selected["target_revision"],
+                disposition.get("outcome", "待验收"), disposition.get("reason", "")))
+            executions = []
+            if due:
+                evidence_id = disposition.get("evidence_id") if view.get("mode") != "automatic" else None
+                executions = [execution for execution in item["executions"]
+                              if (execution["id"] == evidence_id if evidence_id else
+                                  all(execution[field] == selected[field] for field in
+                                      ("case_ref", "case_version", "method", "repository", "target_revision")))]
+            for execution in executions[-1:]:
+                lines.append("结果：%s；版本：%s；证据：%s" % (
+                    execution["raw_result"], execution["target_revision"], execution["source_ref"]))
+            if disposition.get("follow_up"):
+                lines.append("后续：%s；责任人：%s；期限：%s" % (
+                    disposition["follow_up"], disposition.get("owner", "待确认"), disposition.get("deadline", "待确认")))
+        lines.append("记录：AO-" + quality.digest([ctx["issue_key"], ctx["run_id"], checkpoint, view["digest"]])[:20])
+        return "\n\n".join(lines)
     fact_keys = list(rules.get("intake_fact_keys", ctx["facts"]))
     if checkpoint != rules["checkpoints"][0]["id"]:
         fact_keys += rules.get("plan_fact_keys", [])
@@ -76,7 +122,7 @@ def reduce(model, command, rules, ctx):
             for other in records.values():
                 if other is record:
                     continue
-                if other["status"] in ("intent", "unknown", "created"):
+                if other["status"] in ("intent", "unknown", "created") and other["body"] == record["body"]:
                     raise ValueError("已有外部写入待核对，请先回读，不得并行重试")
                 if other["status"] == "verified" and other["body"] == record["body"]:
                     raise ValueError("相同正文已回读确认，不重复发送")
@@ -85,9 +131,11 @@ def reduce(model, command, rules, ctx):
     elif action in ("receipt", "readback"):
         if p["operation_id"] != record.get("operation_id"):
             raise ValueError("外部操作编号不匹配")
-        if record["status"] not in ("intent", "unknown", "created"):
+        if record["status"] not in ("intent", "unknown", "created", "deferred"):
             raise ValueError("操作未准备发送或已经回读完成")
         if action == "receipt":
+            if p["result"] == "deferred" and (not p.get("reason") or record["status"] != "intent"):
+                raise ValueError("deferred 只用于已知未写入的 intent，必须说明 reason；未知结果先回读")
             if record["status"] == "created":
                 raise ValueError("已有评论回执，下一步只能回读确认")
             if p["result"] == "created":
@@ -97,8 +145,10 @@ def reduce(model, command, rules, ctx):
             elif p.get("comment_id"):
                 raise ValueError("不明回执不得声称已知评论 ID")
             record["status"] = p["result"]
+            if p.get("reason"):
+                record["reason"] = p["reason"]
         else:
-            if any(p[k] != record[k] for k in ("site", "issue_key", "body")):
+            if any(p[k] != record[k] for k in ("site", "issue_key")) or canonical_text(p["body"]) != canonical_text(record["body"]):
                 raise ValueError("回读目标或正文不匹配，保持待核对，不得重发")
             if record.get("comment_id") and p["comment_id"] != record["comment_id"]:
                 raise ValueError("回读评论 ID 与回执不匹配")
@@ -107,7 +157,12 @@ def reduce(model, command, rules, ctx):
         raise ValueError("未知质量操作")
 
 
-def check_unresolved_runs(base, task):
+def canonical_text(body):
+    """仅规范化换行与行尾空白；不猜测 Markdown 转义、不忽略正文差异。"""
+    return "\n".join(line.rstrip() for line in body.replace("\r\n", "\n").split("\n")).strip()
+
+
+def check_unresolved_runs(base, task, body):
     """reset 不抹去旧 run 的不明外部写入，避免恢复后再发一次。"""
     for path in task_store.task_directory(base, task["issue_key"]).glob("quality-*.json"):
         # 同一任务目录也保存 Agent 传给 quality.py 的输入文件，例如
@@ -119,5 +174,5 @@ def check_unresolved_runs(base, task):
         state = json.loads(path.read_text(encoding="utf-8"))
         quality.quality_contract.validate(state, "quality-state.schema.json")
         old = quality.replay(state)
-        if any(r["status"] in ("intent", "unknown", "created") for r in old["publications"].values()):
+        if any(r["status"] in ("intent", "unknown", "created") and r["body"] == body for r in old["publications"].values()):
             raise ValueError("旧 run 仍有外部写入结果待核对；保留旧记录并人工核对 Jira，不能重新发送")

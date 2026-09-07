@@ -426,6 +426,9 @@ def main():
         check("checklist --json 输出缺失项", sorted(json.loads(out)["missing"]), ["problem_symptom", "problem_version"])
         version_input = ws / "issue-versions.json"
         version_input.write_text(json.dumps({"issue": {"key": "TAP-123", "fields": {"versions": [{"id": "1", "name": "develop"}]}},
+                                            "effective": {"execution_branch": "develop", "proof": {
+                                                "actor": "fixture-user", "source": "user_message", "reference": "fixture:version-confirmation",
+                                                "at": "2026-09-07T10:00:00+08:00"}},
                                             "source_ref": "fixture:jira/TAP-123", "develop": {"status": "present",
                                             "revision": expected_tapdata_base, "source_ref": "fixture:analysis"}}))
         code, out = run_tool("task.py", "issue-versions", "--issue-key", "TAP-123", "--expected-run-id", first_run,

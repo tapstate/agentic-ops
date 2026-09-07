@@ -456,7 +456,7 @@ def apply(base, issue, run_id, revision, command):
             ctx = context(base, task)
         if command["action"] == "prepare_write":
             from workflow.quality_write import check_unresolved_runs
-            check_unresolved_runs(base, task)
+            check_unresolved_runs(base, task, replay(state)["publications"][command["payload"]["id"]]["body"])
         model = replay(state)
         reduce(model, command, rules, ctx)
         event = {"at": datetime.now(timezone.utc).isoformat(), "command": copy.deepcopy(command),
@@ -504,8 +504,6 @@ def advance_problems(base, task, target):
         if not view["reviewed"] or checkpoint_outcome(view) == "rework":
             problems.append("质量检查点 %s（%s）尚未确认处置：%s；%s 使用 quality.py status 的 handoff 展示具体用例、步骤、预期、版本和证据要求。"
                             % (cp, view["handoff"]["title"], "；".join(view["problems"]), view["handoff"]["request"]))
-        if rules.get("require_checkpoint_publication") and view["reviewed"] and not view["published"]:
-            problems.append("检查点 %s 已确认但 Jira 评论尚未回读；按 publication_body 执行 draft/confirm/prepare_write、原生发送及 receipt/readback，已有授权无需重复询问。" % cp)
         checkpoint_decision = (view["decision"] or {}).get("decision", {})
         if checkpoint_decision.get("deadline") and datetime.fromisoformat(
                 checkpoint_decision["deadline"].replace("Z", "+00:00")) <= datetime.now(timezone.utc):

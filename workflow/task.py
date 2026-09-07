@@ -207,10 +207,36 @@ def cmd_init(args):
 
 
 @task_store.task_mutation
+def cmd_snapshot(args):
+    task = require(args.dir, args.issue_key)
+    if task["facts"].get("jira_snapshot"):
+        print("当前 run 已保存 Jira 初始快照，保留原记录。")
+        return 0
+    try:
+        payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError("无法读取初始快照：%s" % error) from error
+    if not isinstance(payload, dict):
+        raise ValueError("初始快照必须是对象")
+    issue = payload.get("issue", {})
+    if (not isinstance(issue, dict) or issue.get("key") != task["issue_key"]
+            or not isinstance(issue.get("fields"), dict)
+            or not isinstance(payload.get("source_ref"), str) or not payload["source_ref"].strip()):
+        raise ValueError("初始快照必须包含当前 issue.key、fields 和 source_ref")
+    if project_rules.scan_sensitive(admission(args.dir), json.dumps(payload, ensure_ascii=False)):
+        raise ValueError("初始快照含敏感内容，请先脱敏")
+    task["facts"]["jira_snapshot"] = payload
+    task["history"].append({"ts": now(), "event": "jira_snapshot", "source_ref": payload["source_ref"]})
+    save(args.dir, task)
+    print("已保存当前 run 的 Jira 初始快照。")
+    return 0
+
+
+@task_store.task_mutation
 def cmd_record(args):
     task = require(args.dir, args.issue_key)
-    if args.key == issue_versions.FACT or (args.key == "problem_version" and issue_versions.rules(args.dir, task)):
-        raise ValueError("影响版本只能由 task.py issue-versions 从 Jira fields.versions 导入，不允许 record 或 --force 覆盖")
+    if args.key in (issue_versions.FACT, "jira_snapshot", "agenticops_version") or (args.key == "problem_version" and issue_versions.rules(args.dir, task)):
+        raise ValueError("初始快照和版本规划不允许 record 或 --force 覆盖；用 issue-versions 提交有效版本及用户确认来源")
     spec = admission(args.dir)
     valid = project_rules.known_fact_keys(spec, task["task_class"])
     if args.key not in valid and not args.force:
@@ -237,8 +263,7 @@ def cmd_issue_versions(args):
         if task["run_id"] != args.expected_run_id:
             raise ValueError("任务 run 已变化，拒绝旧的影响版本规划")
         prepared = any(r.get("base_sha") for r in task.get("repositories", []))
-        if task["stage"] not in ("waiting_takeover", "task_intake", "design_review") or (
-                prepared and task.get("facts", {}).get(issue_versions.FACT)):
+        if task["stage"] not in ("waiting_takeover", "task_intake", "design_review"):
             raise ValueError("已固化版本规划或已进入实现；先受控 cleanup/reset，再调整修复线并重新授权")
         try:
             payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
@@ -257,6 +282,7 @@ def cmd_issue_versions(args):
         if project_rules.scan_sensitive(admission(args.dir), json.dumps(plan, ensure_ascii=False)):
             raise ValueError("影响版本输入含敏感内容，脱敏后再提交")
         task["facts"][issue_versions.FACT] = plan
+        task["facts"].setdefault("jira_snapshot", plan["observed"])
         task["facts"]["problem_version"] = "、".join(v["name"] for v in plan["versions"])
         task["history"].append({"ts": now(), "event": "issue_versions", "primary_branch": plan["primary_branch"]})
         revoke_authorization(args.dir, task["issue_key"], "issue_versions_changed")
@@ -464,8 +490,6 @@ def cmd_repository_cleanup(args):
 def _check_advance(task, target, base, spec):
     """返回阻止推进的原因列表。"""
     problems = []
-    if target == "task_intake":
-        problems.extend(jira_watermark.takeover_problems(base, task))
     if target in ("design_review", "implementation"):
         problems.extend(issue_versions.problems(base, task))
     flexible = project_rules.class_spec(spec, task["task_class"]).get("quality_mode") == "recorded_decision"
@@ -653,6 +677,9 @@ def _cmd_reset_locked(args):
     )
     task["stage"] = args.stage
     task["run_id"] = "run-" + uuid.uuid4().hex[:12]
+    for key in ("jira_snapshot", "agenticops_version"):
+        if key in task["facts"]:
+            task["history"].append({"ts": now(), "event": "archive_fact", "key": key, "value": task["facts"].pop(key)})
     for item in task.get("repositories", []):
         item["base_sha"] = None
         item["catalog_digest"] = None
@@ -680,10 +707,10 @@ def cmd_reset(args):
 
 
 NEXT_GUIDE = {
-    "waiting_takeover": "读取 Jira 快照后用 jira_watermark.py prepare 准备精确水印；原生写入并回读 verified 后 advance 进入 task_intake",
-    "task_intake": "先完成 takeover 状态同步尝试；再 checklist/record 完成准入 -> repository add -> repository prepare 固化本地基线 -> 源码分析 -> advance",
-    "design_review": "基于任务 worktree 形成方案并写入 Jira -> 等研发工程师确认这一真实人工决策 -> workflow/authorization.py grant -> advance",
-    "implementation": "在授权范围内实现+测试；全部 Q2 已选修复后检查项在最终 SHA 符合预期时自动记录并回写 Q3，再提交/推送和创建 Draft PR；next/status 找出真实阻塞，不把原子步骤成功当停点",
+    "waiting_takeover": "读取 Jira 初始快照并准备本地版本水印；尽力回写，失败记录警告后继续 advance 进入 task_intake",
+    "task_intake": "checklist/record 完成准入 -> repository add/prepare 固化本地基线 -> 源码分析 -> advance；takeover 状态同步失败记录警告并继续",
+    "design_review": "基于任务 worktree 形成方案 -> 研发工程师确认 -> workflow/authorization.py grant -> advance；Jira 尽力回写，失败不阻断",
+    "implementation": "在授权范围内实现和测试；Q2 已选修复后检查项在最终 SHA 符合预期时自动记录 Q3，继续已授权提交/推送和 Draft PR；Jira 同步失败列警告，PR 后统一总结",
     "pr_review": "完成 Q4 关联用例验收后 advance；进入 ci_validation 后用 jira_status.py 在 tests_passed 节点同步尝试一次 Tests Passed",
     "ci_validation": "完成 Tests Passed 同步尝试，用 workflow/ci.py watch 更新每个 PR Head 的 Checks，再用 pr_ready.py 核对测试任务、PR Checks 和 Q1-Q4",
     "completed": "用 workflow/evidence.py 生成证据总结，经确认后作为 Jira 评论回写",
@@ -704,6 +731,7 @@ def cmd_next(args):
     """只给确定性门禁和具体接力，不代替 Agent 或自动制造授权。"""
     import contextlib
     import io
+    from workflow import external_sync
     task = require(args.dir, args.issue_key)
     index = STAGES.index(task["stage"])
     target = STAGES[index + 1] if index + 1 < len(STAGES) else None
@@ -719,6 +747,7 @@ def cmd_next(args):
                       "pending": task.get("pending"), "guidance": NEXT_GUIDE[task["stage"]],
                       "checkpoints": {p: current["checkpoints"][p] for p in points},
                       "publications": current.get("publications", {}),
+                      "warnings": external_sync.warnings(args.dir, task, current),
                       "continuity": "在现有授权内连续完成可执行步骤；只为缺少事实、必要人工决定、权限不足或外部写结果不明暂停。"},
                      ensure_ascii=False, indent=2))
     return 0
@@ -948,6 +977,13 @@ def main():
     p.add_argument("--input", required=True)
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_issue_versions)
+
+    p = sub.add_parser("snapshot")
+    p.add_argument("--issue-key", required=True)
+    p.add_argument("--expected-run-id", required=True)
+    p.add_argument("--input", required=True)
+    p.add_argument("--dir", default=".")
+    p.set_defaults(func=cmd_snapshot)
 
     p = sub.add_parser("next")
     p.add_argument("--issue-key", required=True)

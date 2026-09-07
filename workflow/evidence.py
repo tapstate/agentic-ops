@@ -59,7 +59,7 @@ def _admission_coverage(task, spec):
     return lines
 
 
-def build_summary(task, auth, events, ci_states, spec, verification=None, quality_report=None):
+def build_summary(task, auth, events, ci_states, spec, verification=None, quality_report=None, sync_warnings=None):
     lines = []
     issue = (task or {}).get("issue_key", "（未初始化任务）")
     lines.append("### AI 执行证据总结：%s" % issue)
@@ -80,6 +80,14 @@ def build_summary(task, auth, events, ci_states, spec, verification=None, qualit
             lines.append("")
             lines.append("*已记录事实（不代表用户确认）*：")
             for k, v in task["facts"].items():
+                if k == "jira_snapshot":
+                    lines.append("- Jira 初始快照来源：%s（完整快照保存在本地）" % v.get("source_ref", "未记录"))
+                    continue
+                if k == "issue_version_plan":
+                    lines.append("- 本地版本：%s；实施分支：%s；后续：%s" % (
+                        "、".join(item["name"] for item in v.get("versions", [])),
+                        v.get("primary_branch", "待确认"), v.get("release_follow_up", "待确认")))
+                    continue
                 lines.append("- %s：%s" % (k, v))
         lines.extend(_admission_coverage(task, spec))
         lines.append("")
@@ -179,6 +187,12 @@ def build_summary(task, auth, events, ci_states, spec, verification=None, qualit
                     decision["outcome"], decision["reason"], p["actor"], p["reference"], p["at"],
                     decision.get("owner", "不适用"), decision.get("follow_up", "不适用"), decision.get("deadline", "未设置")))
         lines.append("")
+    lines.append("执行过程被跳过的处理与警告：")
+    for warning in sync_warnings or []:
+        lines.append("- %s [%s]：%s；%s（run %s）" % (
+            warning["kind"], warning["status"], warning["reason"], warning["recovery"], warning["run_id"]))
+    if not sync_warnings:
+        lines.append("- 无已记录的同步待办。")
     lines.append("*边界声明*：以上是本地执行记录及导入证据；合并、发布和 Jira 状态以外部回读为准。用户接受风险不等于测试通过。")
     return "\n".join(lines)
 
@@ -214,8 +228,10 @@ def main():
             raise ValueError("当前任务启用了质量处置，但缺少匹配的质量配置")
         quality_report = (quality.report(quality.load(args.dir, task), rules, quality.context(args.dir, task))
                           if quality.enabled(task, rules) else None)
+        from workflow import external_sync
         summary = build_summary(task, auth, events, ci_states, spec,
-                                verification=args.verification, quality_report=quality_report)
+                                verification=args.verification, quality_report=quality_report,
+                                sync_warnings=external_sync.warnings(args.dir, task, quality_report))
     except (ValueError, OSError, KeyError, TypeError) as error:
         print("拒绝生成证据：%s" % error, file=sys.stderr)
         return 4

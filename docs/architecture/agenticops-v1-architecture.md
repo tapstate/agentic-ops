@@ -96,6 +96,8 @@ Project Package 的 `repositories.json` 是仓库、origin、基线分支和域�
 
 ## 7. 多仓库、授权与当前工作空间会话
 
+本地执行采用当前 run 的用户确认事实，初始 Jira 快照保持原样。影响版本与实施分支独立记录；同步账本不进入质量 advance 的阻断条件。Workflow 的 external_sync 只读汇总评论、水印、版本差异及状态待办，供 next、PR Ready 和 evidence 输出警告；实际发送由 Agent 原生工具执行。同一未知操作先回读，不同检查点可独立同步，旧 run 的未决操作保留供恢复。
+
 一个任务可登记多个仓库，每仓绑定 repository、work branch、base branch、修改范围和验证方式。准备 worktree 后，授权还绑定 `run_id` 与 `base_sha`。方案确认记录绑定任务、Agent、方案和完整仓库集合，在实现和后续验收阶段重新检查 run、期限与仓库绑定；不代表每次外部工具调用均受 AgenticOps 核验。新增仓库或修改稳定绑定后旧授权失效。每仓独立记录提交、PR、CI 和验证，最后汇总成任务证据。
 
 项目可配置少量非阻断的 Jira 状态同步节点。Workflow 幂等准备当前 task/run/node 的同步信息，实际 Jira 调用由 Agent 原生工具完成，随后导入回读结果。取消 Hook 单次放行/消费的产品保证；不明结果先回读，可再次 complete 收敛，不能盲目重发。失败形成可回查人工接力，不自动推进本地阶段。PR Ready 由独立只读核对汇总关联测试任务、当前提交的 PR Checks 和到 Q4 为止的任务检查项；Jira 状态同步待办作为提示返回，不伪装成这三类验收事实。

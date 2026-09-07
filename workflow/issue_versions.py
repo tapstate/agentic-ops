@@ -21,15 +21,6 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
-def branch_for(name, spec):
-    if name in spec["literal_branches"]:
-        return name
-    match = re.fullmatch(spec["version_pattern"], name)
-    if not match:
-        raise ValueError("影响版本没有明确的主仓分支映射：%s；不得回退 develop" % name)
-    return spec["branch_template"].format(**match.groupdict())
-
-
 def remote_refs(origin, branches):
     """一次精确查询；连接失败与不存在分别报告，不修改任何工作树/ref。"""
     print("正在核验主仓远端分支：%s（最长 30 秒）" % "、".join(sorted(branches)), file=sys.stderr, flush=True)
@@ -49,100 +40,65 @@ def remote_refs(origin, branches):
     return refs
 
 
-def branch_references(versions, preferred, develop, refs, jira_source_ref, product_repository):
-    """将所有已核验的版本分支整理为可供人工引用的稳定条目。
-
-    这些条目说明 Jira 影响版本与主仓远端分支的关系，供用户在 Jira
-    「仓库分支」等字段回写确认时引用。它们不是任务 worktree 基线；只有
-    repository prepare 写入的 base_sha 才会成为实施基线。
-    """
-    references = []
-    for version in versions:
-        branch = version["branch"]
-        references.append({
-            "kind": "affected_version",
-            "jira_version_id": version["id"],
-            "jira_version_name": version["name"],
-            "repository": product_repository,
-            "branch": branch,
-            "remote_ref": "refs/heads/" + branch,
-            "remote_sha": refs[branch],
-            "source_ref": jira_source_ref,
-            "usage": "可引用于 Jira 分支确认；尚未登记为任务实施基线",
-        })
-    references.append({
-        "kind": "preferred_branch_analysis",
-        "repository": product_repository,
-        "branch": preferred,
-        "remote_ref": "refs/heads/" + preferred,
-        "remote_sha": refs[preferred],
-        "defect_status": develop["status"],
-        "source_ref": develop["source_ref"],
-        "usage": "优先修复线的源码或复现核验引用；尚未登记为任务实施基线",
-    })
-    return references
-
-
 def resolve(base, task, payload):
+    """导入初始观察与本次用户决定；版本名称不推导 Git 分支。"""
     spec = rules(base, task)
-    if not spec:
-        raise ValueError("当前任务类型未配置影响版本规则")
-    if not isinstance(payload, dict):
-        raise ValueError("影响版本输入必须是对象")
+    if not spec or not isinstance(payload, dict):
+        raise ValueError("当前任务缺少影响版本规则或输入对象")
     issue = payload.get("issue", {})
-    if not isinstance(issue, dict) or issue.get("key") != task["issue_key"] or not isinstance(payload.get("source_ref"), str) or not payload["source_ref"].strip():
-        raise ValueError("必须提供当前 Jira 任务回读及可回查 source_ref")
-    fields = issue.get("fields", {})
-    raw = fields.get(spec["field"]) if isinstance(fields, dict) else None
-    if not isinstance(raw, list) or not raw:
-        raise ValueError("Jira 影响版本为空或未读取；不得用描述、修复版本或 develop 猜测代替")
-    versions = []
-    for value in raw:
-        if not isinstance(value, dict) or not value.get("id") or not isinstance(value.get("name"), str):
-            raise ValueError("影响版本必须有 Jira id 和 name")
-        versions.append({"id": str(value["id"]), "name": value["name"],
-                         "branch": branch_for(value["name"], spec)})
-    if len({v["id"] for v in versions}) != len(versions):
-        raise ValueError("影响版本 ID 重复")
+    if (not isinstance(issue, dict) or issue.get("key") != task["issue_key"]
+            or not isinstance(issue.get("fields"), dict)
+            or not isinstance(payload.get("source_ref"), str) or not payload["source_ref"].strip()):
+        raise ValueError("必须提供当前 Jira 任务快照及 source_ref")
+    previous = task.get("facts", {}).get(FACT, {})
+    if previous.get("run_id") != task["run_id"]:
+        previous = {}
+    observed = previous.get("observed", task.get("facts", {}).get("jira_snapshot", {"issue": issue, "source_ref": payload["source_ref"]}))
+    raw = observed["issue"].get("fields", {}).get(spec["field"])
+    if raw is not None and not isinstance(raw, list):
+        raise ValueError("Jira 影响版本读取格式无效")
+    effective = payload.get("effective", {})
+    if not isinstance(effective, dict):
+        raise ValueError("effective 必须包含本地有效事实和确认来源")
+    versions = effective.get("versions", raw)
+    if not isinstance(versions, list) or not versions:
+        raise ValueError("影响版本缺失，需要用户确认本次采用的版本")
+    if any(not isinstance(v, dict) or not isinstance(v.get("name"), str) or not v["name"].strip() for v in versions):
+        raise ValueError("本地有效版本必须包含非空 name，无需 Jira ID")
+    if len({v["name"] for v in versions}) != len(versions):
+        raise ValueError("本地有效版本名称重复")
+    from workflow import quality
+    proof = effective.get("proof")
+    if (not isinstance(proof, dict) or any(not isinstance(proof.get(key), str) or not proof[key].strip()
+            for key in ("actor", "source", "reference", "at"))
+            or proof["source"] not in ("user_message", "jira_comment", "review")):
+        raise ValueError("需要真实用户确认来源：actor/source/reference/at")
+    quality.check_proof(proof)
+    branch = effective.get("execution_branch")
+    if not isinstance(branch, str) or not branch.strip():
+        raise ValueError("必须独立确认 execution_branch，不能由版本名推导")
     develop = payload.get("develop", {})
-    if not isinstance(develop, dict) or develop.get("status") not in ("present", "absent") or not isinstance(develop.get("source_ref"), str) or not develop["source_ref"].strip():
-        raise ValueError("先核验优先分支是否存在同一缺陷并给出源码/复现证据；unknown 不能作为 absent")
+    if (not isinstance(develop, dict) or develop.get("status") not in ("present", "absent")
+            or not isinstance(develop.get("source_ref"), str) or not develop["source_ref"].strip()):
+        raise ValueError("先核验优先分支是否存在同一缺陷，unknown 不能作为 absent")
     preferred = spec["preferred_branch"]
-    branches = {preferred, *[v["branch"] for v in versions]}
+    if develop["status"] == "present" and branch != preferred:
+        raise ValueError("优先分支存在同一缺陷，应在该分支修复")
     profile = project_rules.load_profile(workspace=base)
     origin = project_rules.resolve_branches(profile, spec["product_repository"])["origin"]
-    refs = remote_refs(origin, branches)
-    missing = sorted(branches - refs.keys())
-    if missing:
-        raise ValueError("主仓不存在对应分支，拒绝本次缺陷规划：%s" % "、".join(missing))
+    refs = remote_refs(origin, {preferred, branch})
+    if {preferred, branch} - refs.keys():
+        raise ValueError("实际选择的实施分支或优先分析分支不存在")
     if develop.get("revision") != refs[preferred]:
-        raise ValueError("优先分支核验必须绑定当前主仓完整 SHA；代码已变或证据不精确，请重新分析")
-    selected = payload.get("selected_version_id")
-    if selected is not None and str(selected) not in {v["id"] for v in versions}:
-        raise ValueError("选择的版本不属于 Jira 影响版本")
-    if develop["status"] == "present":
-        primary = preferred
-        selected = None
-    else:
-        candidates = [v for v in versions if v["branch"] != preferred]
-        if selected is None and len(candidates) == 1:
-            selected = candidates[0]["id"]
-        match = next((v for v in candidates if v["id"] == str(selected)), None)
-        if not match:
-            raise ValueError("优先分支不受影响：必须明确选择一个受影响版本，不能同时编码多条修复线")
-        selected, primary = match["id"], match["branch"]
-    references = branch_references(
-        versions, preferred, develop, refs, payload["source_ref"], spec["product_repository"]
-    )
+        raise ValueError("优先分支证据必须绑定当前完整 SHA")
+    observed_names = sorted(v["name"] for v in raw) if isinstance(raw, list) and all(isinstance(v, dict) and isinstance(v.get("name"), str) for v in raw) else None
     return {"run_id": task["run_id"], "rules_digest": digest(spec),
-            "source_ref": payload["source_ref"], "versions": versions,
-            "develop": {k: develop[k] for k in ("status", "revision", "source_ref")},
-            "selected_version_id": selected, "primary_branch": primary,
-            "branch_references": references,
-            "branch_reference_guidance": "完整列出 Jira 影响版本与主仓分支关系，供用户引用并回写分支确认；引用不等于任务基线，实施前仍须 repository add/prepare 固化 base_sha。",
-            "manual_merge": [dict(v, action="研发人工合并修复并单独验证") for v in versions if v["branch"] != primary],
-            "refs": {b: refs[b] for b in sorted(branches)},
-            "refs_verified_at": datetime.now(timezone.utc).isoformat(),
+            "observed": observed, "source_ref": observed["source_ref"],
+            "versions": versions, "confirmation": effective["proof"],
+            "primary_branch": branch, "develop": develop,
+            "release_follow_up": effective.get("release_follow_up", "其它影响版本的合并与验证待确认"),
+            "sync_status": "pending" if sorted(v["name"] for v in versions) != observed_names else "not_needed",
+            "refs": refs, "refs_verified_at": datetime.now(timezone.utc).isoformat(),
             "origin": origin}
 
 
