@@ -107,6 +107,16 @@ def discover(product_root):
                 raise ValueError("Agent 接线模板不存在：%s" % agent_id)
             if not isinstance(target, str) or not target:
                 raise ValueError("Agent 接线目标无效：%s" % agent_id)
+        retired = document.get("retired_artifacts", [])
+        if not isinstance(retired, list) or any(not isinstance(item, str) or not item for item in retired):
+            raise ValueError("Agent retired_artifacts 无效：%s" % agent_id)
+        if len(retired) != len(set(retired)):
+            raise ValueError("Agent retired_artifacts 重复：%s" % agent_id)
+        for target in retired:
+            if Path(target).is_absolute() or ".." in Path(target).parts:
+                raise ValueError("Agent 退役接线路径越界：%s" % target)
+            if target in {artifact["target"] for artifact in artifacts}:
+                raise ValueError("Agent 接线不能同时生成和退役：%s" % target)
         launch = document.get("launch")
         if not isinstance(launch, dict):
             raise ValueError("Agent Manifest 缺少 launch：%s" % agent_id)

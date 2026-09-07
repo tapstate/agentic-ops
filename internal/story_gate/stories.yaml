@@ -41,19 +41,19 @@ stories:
 
   - story_id: PROD-002
     category: product
-    title: 在副作用前执行统一门禁
+    title: 执行确定性流程检查点
     document: docs/user-stories/v1/prod-002-policy-gate.md
     protected_paths: [gate/**, policies/**, adapters/runtime.py, adapters/tools/**, docs/security/**, tests/test_gate.py, tests/test_contracts.py]
     acceptance_checks: [python_runtime, resource_contracts]
     evidence_requirements:
-      - MCP 完整身份、Shell 分段、动态别名、正向命中、受控操作歧义、未命中透传与 allow、ask、deny 的判定结果
-      - 授权失效、保护分支和高风险操作边界
+      - 流程检查点、旧 run 拒绝、重复推进与确认绑定校验结果
+      - 新工作空间无通用 Hook、旧接线显式迁移与原生工具边界
 
   - story_id: PROD-003
     category: product
     title: 推进并恢复多仓库研发任务
     document: docs/user-stories/v1/prod-003-multi-repository-task.md
-    protected_paths: [workflow/**, tests/test_workflow.py, tests/test_quality.py, tests/test_issue_versions.py, tests/test_jira_status.py, tests/test_jira_watermark.py, tests/test_git_refs.py]
+    protected_paths: [workflow/**, tests/test_workflow.py, tests/test_checkpoints.py, tests/test_quality.py, tests/test_issue_versions.py, tests/test_jira_status.py, tests/test_jira_watermark.py, tests/test_git_refs.py]
     acceptance_checks: [python_runtime, resource_contracts]
     evidence_requirements:
       - 阶段、准入、授权、pending 和恢复结果

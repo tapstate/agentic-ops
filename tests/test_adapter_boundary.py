@@ -155,11 +155,12 @@ class AdapterBoundaryTest(unittest.TestCase):
         manifest_path = AGENT_ROOT / agent / "manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         template = next(
-            artifact["template"]
-            for artifact in manifest["artifacts"]
+            str(path.relative_to(ROOT))
+            for path in sorted((AGENT_ROOT / agent / "templates").glob("*.json"))
             if "__AGENTIC_OPS_HOOK_NATIVE_EVENT__"
-            in (ROOT / artifact["template"]).read_text(encoding="utf-8")
+            in path.read_text(encoding="utf-8")
         )
+        self.assertNotIn(template, [artifact["template"] for artifact in manifest["artifacts"]])
         document = json.loads(rendered_content(ROOT, "tapdata", template, manifest))
         event = manifest["hook"]["native"]["event"]
         entries = document["hooks"][event]

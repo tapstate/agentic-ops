@@ -11,7 +11,9 @@ import os
 import re
 import shutil
 import time
+import threading
 from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 
 import fcntl
@@ -19,6 +21,7 @@ import fcntl
 
 REGISTRY_VERSION = 1
 ISSUE_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*$")
+_held_locks = threading.local()
 
 
 def now():
@@ -140,6 +143,14 @@ def task_state_lock(base):
     目录前与所有任务写入互斥。
     """
     base = workspace_path(base)
+    held = getattr(_held_locks, "workspaces", None)
+    if held is None:
+        held = _held_locks.workspaces = set()
+    # 仅同一进程、同一线程的嵌套 Workflow 调用复用锁；线程/进程间仍互斥。
+    lock_key = (os.getpid(), str(base))
+    if lock_key in held:
+        yield
+        return
     state_root = state_path(base)
     binding_path = state_root / "workspace.json"
     try:
@@ -171,7 +182,11 @@ def task_state_lock(base):
             current_root = current.get("product_root")
             if not isinstance(current_root, str) or Path(current_root).resolve() != Path(product_root).resolve():
                 raise ValueError("获得任务状态锁后工作空间绑定已变化，拒绝继续")
-            yield
+            held.add(lock_key)
+            try:
+                yield
+            finally:
+                held.remove(lock_key)
         finally:
             fcntl.flock(descriptor, fcntl.LOCK_UN)
     finally:
@@ -183,6 +198,31 @@ def task_run_lock(base, issue_key):
     validate_issue_key(issue_key)
     with task_state_lock(base):
         yield
+
+
+def check_expected_run(base, issue_key, expected_run_id):
+    """由持锁的变更入口调用；不得用执行时的新 run 自动补齐旧请求。"""
+    if not isinstance(expected_run_id, str) or not expected_run_id:
+        raise ValueError("状态变更需要 --expected-run-id；先读取当前任务状态")
+    try:
+        task = json.loads(task_path(base, issue_key).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("当前任务状态无法核验，拒绝写入：%s" % error) from error
+    if not isinstance(task, dict) or task.get("run_id") != expected_run_id:
+        raise ValueError("任务 run 已变化或状态无效，拒绝旧请求")
+    return task
+
+
+def task_mutation(function):
+    """任务 CLI 变更入口共享锁和 run 校验，不包含项目规则。"""
+    @wraps(function)
+    def locked(args):
+        issue = resolve_issue(args.dir, args.issue_key)
+        with task_run_lock(args.dir, issue):
+            check_expected_run(args.dir, issue, getattr(args, "expected_run_id", None))
+            args.issue_key = issue
+            return function(args)
+    return locked
 
 
 def save_registry(base, registry):

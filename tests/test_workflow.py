@@ -33,6 +33,26 @@ def check(name, actual, expected):
 
 
 def run_tool(tool, *args, cwd):
+    # 旧场景显式从夹具快照绑定请求；过期/缺失参数由 test_checkpoints 独立验证。
+    args = list(args)
+    command = args[0] if args else ""
+    mutation = (tool == "task.py" and (command in ("record", "advance", "block", "activate", "deactivate")
+                or command == "repository" and args[1] in ("add", "record-result", "prepare", "cleanup"))
+                or tool == "authorization.py" and command in ("grant", "revoke")
+                or tool == "ci.py" and command in ("watch", "record-fix")
+                or tool == "repository_worktree.py" and command in ("prepare", "cleanup"))
+    if mutation:
+        base = args[args.index("--dir") + 1] if "--dir" in args else cwd
+        issue = args[args.index("--issue-key") + 1] if "--issue-key" in args else None
+        try:
+            issue = task_store.resolve_issue(base, issue)
+            snapshot = json.loads(task_store.task_path(base, issue).read_text())
+        except (ValueError, OSError):
+            snapshot = {"run_id": "run-unresolved", "stage": "waiting_takeover"}
+        if "--expected-run-id" not in args:
+            args += ["--expected-run-id", snapshot["run_id"]]
+        if command == "advance" and "--expected-stage" not in args:
+            args += ["--expected-stage", snapshot["stage"]]
     proc = subprocess.run(
         [sys.executable, str(ROOT / "workflow" / tool), *args],
         capture_output=True,
@@ -406,6 +426,9 @@ def main():
         check("checklist --json 输出缺失项", sorted(json.loads(out)["missing"]), ["problem_symptom", "problem_version"])
         version_input = ws / "issue-versions.json"
         version_input.write_text(json.dumps({"issue": {"key": "TAP-123", "fields": {"versions": [{"id": "1", "name": "develop"}]}},
+                                            "effective": {"execution_branch": "develop", "proof": {
+                                                "actor": "fixture-user", "source": "user_message", "reference": "fixture:version-confirmation",
+                                                "at": "2026-09-07T10:00:00+08:00"}},
                                             "source_ref": "fixture:jira/TAP-123", "develop": {"status": "present",
                                             "revision": expected_tapdata_base, "source_ref": "fixture:analysis"}}))
         code, out = run_tool("task.py", "issue-versions", "--issue-key", "TAP-123", "--expected-run-id", first_run,
@@ -483,6 +506,7 @@ def main():
                 [
                     sys.executable, str(ROOT / "workflow" / "task.py"), "activate",
                     "--issue-key", "TAP-999", "--dir", str(ws),
+                    "--expected-run-id", json.loads(task_store.task_path(ws, "TAP-999").read_text())["run_id"],
                 ],
                 cwd=ws,
                 stdout=subprocess.PIPE,
@@ -513,6 +537,7 @@ def main():
                     sys.executable, str(ROOT / "workflow" / "task.py"),
                     "repository", "prepare", "--issue-key", "TAP-123",
                     "--dir", str(ws),
+                    "--expected-run-id", json.loads(task_store.task_path(ws, "TAP-123").read_text())["run_id"],
                 ],
                 cwd=ws,
                 stdout=subprocess.PIPE,
@@ -968,6 +993,7 @@ def main():
                 [
                     sys.executable, str(ROOT / "workflow" / "task.py"), "repository", "cleanup",
                     "--issue-key", "TAP-456", "--dir", str(ws),
+                    "--expected-run-id", json.loads(task_store.task_path(ws, "TAP-456").read_text())["run_id"],
                 ],
                 cwd=ws,
                 stdout=subprocess.PIPE,

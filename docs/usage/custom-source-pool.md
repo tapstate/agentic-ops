@@ -10,7 +10,7 @@ Source Pool 是业务仓库主工作树的统一根目录，目录结构为 `<po
 ./agenticops workspace prefetch --yes
 ```
 
-该命令在工作空间内默认使用当前目录；仅从其它位置操作时才传入 `--workspace <目录>`。它在展示并确认目标工作空间后，按当前项目的 `repositories.json` 逐个将缺失仓库克隆到已绑定的 Source Pool；已有仓库只核验 origin 信任链、洁净度和基线分支，不 fetch、重置或修改分支。它不创建 Jira 任务、本地任务状态、任务 worktree 或 `base_sha`，因此后续仍必须针对实际任务执行 `repository prepare`。单个仓库下载失败会清理该次失败残留并停止；此前已成功预热的仓库保留，重试时会复核后跳过。该操作在 Hook 中属于必须确认、但不依赖 Jira 任务或 task_execution 授权的门禁。
+该命令在工作空间内默认使用当前目录；仅从其它位置操作时才传入 `--workspace <目录>`。它在展示并确认目标工作空间后，按当前项目的 `repositories.json` 逐个将缺失仓库克隆到已绑定的 Source Pool；已有仓库只核验 origin 信任链、洁净度和基线分支，不 fetch、重置或修改分支。它不创建 Jira 任务、本地任务状态、任务 worktree 或 `base_sha`，因此后续仍必须针对实际任务执行 `repository prepare`。单个仓库下载失败会清理该次失败残留并停止；此前已成功预热的仓库保留，重试时会复核后跳过。该操作由明确的工作空间命令和原生权限执行，不依赖 Jira 任务或 task_execution 确认；它不再由通用 Hook 拦截。
 
 安装时可在[gh 一键安装](gh-one-click-install.md)的最后一行改为：
 

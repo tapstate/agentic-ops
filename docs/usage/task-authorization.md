@@ -4,6 +4,8 @@
 
 这些脚本不读取或修改 Jira 内容：Jira 仍是任务事实源。执行前，应通过已配置的 Jira 客户端读取任务号、任务类型、负责人、状态、准入事实和验收要求；不要把本地 `init` 当作 Jira 接管或状态流转的替代品。
 
+本地方案确认只在 Workflow 检查点核验，原生 Git/Jira/PR 操作不再由通用 Hook 拦截。所有状态写命令（record、仓库 add/prepare/cleanup/record-result、block、activate/deactivate、grant/revoke、Jira prepare/complete、CI watch/record-fix）必须携带 `--expected-run-id "$task_run"`；advance 另带 `--expected-stage <当前阶段>`。命令必须使用已核对的绑定；task_run 从 init/status 输出固定，reset 后重新读取，不能在失败重试时自动替换。
+
 ## 1. 前提与变量
 
 在已初始化的项目工作空间中执行。`agenticops_root` 是中央产品根目录，`project_workspace` 是业务项目工作空间；两者不能混用。以下以 TapData 缺陷 `TAP-123` 为例：
@@ -33,23 +35,26 @@ python3 "$agenticops_root/workflow/task.py" init \
   --issue-key "$task_key" --task-class "$task_class" \
   --dir "$project_workspace"
 
+# 将 init 输出的 run_id 固定到变量；恢复已有任务时先通过 status 核对。
+task_run='从 init 输出复制的 run_id'
+
 # 用 Jira 原生工具读取当前任务并保存为 jira-before.json；该快照必须含 source_ref、
 # issue.key、issue.fields.issuetype 和 AgenticOps Version 字段。
-python3 "$agenticops_root/workflow/jira_watermark.py" prepare \
+python3 "$agenticops_root/workflow/jira_watermark.py" prepare --expected-run-id "$task_run" \
   --issue-key "$task_key" --input jira-before.json --dir "$project_workspace"
 
 # 仅当 prepare 输出 outcome=ready 时，按 native_request 用 Jira 原生编辑工具覆盖一个字段；
 # 随后重新读取 Jira 保存为 jira-after.json。不得夹带其它字段，也不得重复发送。
-python3 "$agenticops_root/workflow/jira_watermark.py" complete \
+python3 "$agenticops_root/workflow/jira_watermark.py" complete --expected-run-id "$task_run" \
   --issue-key "$task_key" --outcome unknown --input jira-after.json --dir "$project_workspace"
 
 # 仅 complete 输出 outcome=verified 才可进入 task_intake。
-python3 "$agenticops_root/workflow/task.py" advance \
+python3 "$agenticops_root/workflow/task.py" advance --expected-run-id "$task_run" --expected-stage waiting_takeover \
   --issue-key "$task_key" --note "已核对 Jira 任务归属、负责人、状态和任务类型" \
   --dir "$project_workspace"
 ```
 
-`init` 创建该 Jira 任务的本地 `run_id` 和 `waiting_takeover` 状态。第一条 `advance` 前必须完成 AgenticOps Version 的精确覆盖写入或确认 Jira 已是当前版本，并以 Jira 回读验证。外部写入结果不明确时保留同一 run，仅允许用新的只读快照再次 `complete`；不得重发字段写入。进入 `task_intake` 后，TapData 缺陷按项目规则准备一次精确的 `In Progress` 状态同步意图；该意图只覆盖当次 transition，失败只记录并继续本地主流程。
+`init` 创建当前 run 和 waiting_takeover 状态。先用 task.py snapshot 保存已读的 Jira 初始快照，再尽力同步 AgenticOps Version；水印失败或结果不明只列警告，不阻止 advance。未知写入保留同一 run，先回读原操作再决定恢复，不盲目重发。进入 task_intake 后，按项目规则准备 In Progress 同步；失败继续本地主流程。具体记录方式见[质量检查与证据](quality-checkpoints.md)。
 
 若 `list` 已显示同一任务，不要再次 `init`。先用 `status --issue-key "$task_key"` 回读现有 `run_id` 和阶段；继续现有现场或按该 `run_id` 清理后 reset 是两个不同决定。若列表有其它 active 任务，后续每条命令都必须保留 `--issue-key "$task_key"`，不能借用其授权。
 
@@ -61,7 +66,7 @@ python3 "$agenticops_root/workflow/task.py" advance \
 python3 "$agenticops_root/workflow/task.py" checklist \
   --issue-key "$task_key" --json --dir "$project_workspace"
 
-python3 "$agenticops_root/workflow/task.py" record \
+python3 "$agenticops_root/workflow/task.py" record --expected-run-id "$task_run" \
   --issue-key "$task_key" --key problem_branch --value develop \
   --dir "$project_workspace"
 ```
@@ -74,14 +79,14 @@ python3 "$agenticops_root/workflow/task.py" record \
 python3 "$agenticops_root/workflow/task.py" branch \
   --repo tapdata/tapdata --dir "$project_workspace"
 
-python3 "$agenticops_root/workflow/task.py" repository add \
+python3 "$agenticops_root/workflow/task.py" repository add --expected-run-id "$task_run" \
   --issue-key "$task_key" --repo tapdata/tapdata \
   --base-branch develop --work-branch fix/TAP-123 \
   --scope "仅修复批读 SQL，不改数据库迁移或发布配置" \
   --verification "Maven mysql-connector 模块测试" \
   --dir "$project_workspace"
 
-python3 "$agenticops_root/workflow/task.py" repository prepare \
+python3 "$agenticops_root/workflow/task.py" repository prepare --expected-run-id "$task_run" \
   --issue-key "$task_key" --dir "$project_workspace"
 
 python3 "$agenticops_root/workflow/task.py" repository context \
@@ -93,7 +98,7 @@ python3 "$agenticops_root/workflow/task.py" repository context \
 准入事实、仓库登记和本地基线全部齐备后，进入方案审查：
 
 ```sh
-python3 "$agenticops_root/workflow/task.py" advance \
+python3 "$agenticops_root/workflow/task.py" advance --expected-run-id "$task_run" --expected-stage task_intake \
   --issue-key "$task_key" --note "准入事实、授权仓库和受控本地基线均已核验" \
   --dir "$project_workspace"
 ```
@@ -110,14 +115,14 @@ TapData 缺陷使用 `recorded_decision` 质量模式：普通缺项先披露并
 agent_id=codex
 plan_version=v1
 
-python3 "$agenticops_root/workflow/authorization.py" grant \
+python3 "$agenticops_root/workflow/authorization.py" grant --expected-run-id "$task_run" \
   --issue-key "$task_key" --agent-id "$agent_id" --plan-version "$plan_version" \
   --ttl-hours 8 --dir "$project_workspace"
 
 python3 "$agenticops_root/workflow/authorization.py" show \
   --issue-key "$task_key" --dir "$project_workspace"
 
-python3 "$agenticops_root/workflow/task.py" advance \
+python3 "$agenticops_root/workflow/task.py" advance --expected-run-id "$task_run" --expected-stage design_review \
   --issue-key "$task_key" --note "研发工程师确认方案 v1、仓库、分支、范围、验证和风险边界" \
   --dir "$project_workspace"
 ```
@@ -126,14 +131,28 @@ python3 "$agenticops_root/workflow/task.py" advance \
 
 ## 5. 授权边界与失效
 
-有效的 `task_execution` 可覆盖当前授权 worktree 的 `git commit`、向同名授权工作分支的 `git push`、授权仓库的 PR 创建或更新、PR 评论处理和 Jira 评论。它不覆盖合并、发布、Tag、保护分支写入、强推、历史改写、删除 worktree/任务状态、一般 Jira 状态流转、工时记录或任务字段编辑。例外是 Project Workflow 在接管或 Q4 后准备的单次精确 Jira transition 意图；Gate 只匹配当前 task/run 和 transition ID，首次放行审计后即拒绝再次消费，且必须写后回读。
+`task_execution` 记录方案确认并在进入实现、PR 审查、CI 验收和完成时核验 task/run、仓库集合、范围、基线、验证方式和有效期。Git/Jira/PR 操作依照用户授权由 Agent 原生工具执行，不宣称每次调用均经过 AgenticOps。合并、发布、Tag、保护分支写入、强推和历史改写仍需要独立明确授权。Jira 同步信息只用于准备与回读，不提供强制单次调用保证。
 
-新增仓库、切换分支、改变 `base_sha`、修改范围或验证方式后，旧授权失效。使用带当前 `run_id` 的 `task.py reset --stage design_review` 回到审查阶段，重新准备必要基线并再次执行 `grant`；需要立即停止时执行 `authorization.py revoke`。不要删除 `.agenticops/` 目录来代替撤销或重置。
+新增仓库、切换分支、改变 `base_sha`、修改范围或验证方式后，旧确认失效。新确认另绑定 fix_plan 摘要，方案正文改变也阻止后续推进；迁移前缺少摘要的旧确认保留原有绑定，不伪造其历史确认内容。使用带当前 `run_id` 的 `task.py reset --stage design_review` 回到审查阶段，重新准备必要基线并再次执行 `grant`；需要立即停止时执行 `authorization.py revoke`。不要删除 `.agenticops/` 目录来代替撤销或重置。
 
 完成实现后仍须记录实际验证命令和退出结果，并通过 PR 审查与 CI 验证。任务授权不是完成、合并或发布的证明。
+
+### 方案未变时显式续签
+
+审查或 CI 等待导致授权到期，不必仅因此 reset。先用 `authorization.py show` 查看原确认，并用 `show --digest` 取得原授权摘要；向用户展示当前 run、方案、仓库范围和新的有效期，取得明确决定及可回查来源后，使用此前固定的摘要执行：
+
+```sh
+python3 "$agenticops_root/workflow/authorization.py" renew \
+  --issue-key "$task_key" --expected-run-id "$task_run" \
+  --expected-authorization-digest "$confirmed_authorization_digest" \
+  --confirmed-by "$decision_maker" --confirmation-ref "$confirmation_source" \
+  --ttl-hours 8 --dir "$project_workspace"
+```
+
+`renew` 仅适用于 active 任务的 `design_review`、`implementation`、`pr_review` 和 `ci_validation`。它核对原授权的任务、run、方案摘要、完整仓库绑定及当前 Project endpoint，只延长有效期并追加确认记录，不修改阶段、基线、方案、Agent 或质量证据。原授权摘要已变化、授权已撤销、方案或绑定改变、缺少旧方案摘要时拒绝；这些情况不能通过自动换参数重试解决。方案改变仍须按原流程重新设计确认。成功后重复提交同一摘要也拒绝，不能利用重放延长授权。确认来源是可回查记录，不提供用户身份认证。
 
 ## 相关文档
 
 - [首次使用指引](../usage-guide.md)：安装与初始化项目工作空间。
-- [权限与安全边界](../security/permissions.md)：凭证、服务器保护与 Hook 的边界。
+- [权限与安全边界](../security/permissions.md)：凭证、服务器保护与 Workflow 检查点的边界。
 - [v1 工程架构](../architecture/agenticops-v1-architecture.md)：多任务、多仓库和任务 worktree 的模型。

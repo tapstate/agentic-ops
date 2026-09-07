@@ -1,6 +1,6 @@
 # Agent引导安装指引
 
-适合把安装和项目工作空间初始化交给 Codex、Claude Code 等 AI Agent 完成。你仍然负责确认目录、账号访问权限以及 Agent 提出的任何外部写入或高风险操作；AgenticOps 的 Hook 和 Gate 会继续约束后续任务副作用。
+适合把安装和项目工作空间初始化交给 Codex、Claude Code 等 AI Agent 完成。你仍然负责确认目录、账号访问权限以及 Agent 提出的任何外部写入或高风险操作；AgenticOps 的 Workflow 检查点会约束本地阶段推进，原生工具调用由平台与服务端权限处理。
 
 这条路径只安装使用工作面并初始化一个 TapData 项目工作空间，不接管 Jira 任务、不修改业务仓库，也不提交、推送或合并代码。
 
@@ -38,4 +38,4 @@ Agent 应回报以下可核验结果：
 - `./agenticops doctor` 已通过；
 - Source Pool 绑定为 `~/.agentic-ops-repos`。它只是受控业务仓库主工作树的根目录；后续任务实际在工作空间 `.agenticops/worktrees/` 下的 linked worktree 中执行。
 
-安装和初始化结束后，先结束这次从空目录启动的 Agent 会话，再从该工作空间重新启动 Agent：`./agenticops start codex` 或 `./agenticops start claude`。这样 Agent 才会在启动时加载刚生成的项目指引和 Hook；首次使用 Codex 时按 `/hooks` 提示审核并信任该 Hook。随后才按[首次使用指引](../usage-guide.md)接管具体 Jira 任务。
+安装和初始化结束后，先结束这次从空目录启动的 Agent 会话，再从该工作空间重新启动 Agent：`./agenticops start codex` 或 `./agenticops start claude`。这样 Agent 才会在启动时加载当前项目指引。新工作空间不生成通用 Hook；旧接线迁移按[常见问题](faq.md)显式处理。随后才按[首次使用指引](../usage-guide.md)接管具体 Jira 任务。

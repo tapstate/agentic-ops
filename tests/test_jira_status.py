@@ -106,7 +106,7 @@ class JiraStatusTests(unittest.TestCase):
                 "linked_test_details": [{"key": "TAP-T1", "test_type": "Manual", "case_version": "updated:1",
                                          "source_ref": "fixture:jira/TAP-T1"}],
             }
-        rules = {"tests_passed": {"linked_test_task": {"relations": ["tests"], "issue_types": ["Test"]},
+        rules = {"task_classes": [], "tests_passed": {"linked_test_task": {"relations": ["tests"], "issue_types": ["Test"]},
                                    "test_types": {"Manual": {"method": "manual"}}, "ignored_test_types": {}},
                  "pr_ready": {"require_linked_test_tasks": True}}
         input_path.write_text(json.dumps(linked_test()))

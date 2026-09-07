@@ -2,17 +2,16 @@
 
 ## 1. 核心决策
 
-Agent 是执行主体；AgenticOps 只提供标准、规则门禁和少量确定性状态。不同 Agent 和工具先转换成版本化标准操作，Gate 不理解平台字段。旧版实现固定在 `v0.7`，能力只在解决当前问题时按新分层重建。
+Agent 是执行主体；AgenticOps 只提供标准、规则门禁和少量确定性状态。确定性入口复用版本化标准和判定，Gate 不理解平台字段。旧版实现固定在 `v0.7`，能力只在解决当前问题时按新分层重建。
 
 ```text
-Agent 原生事件
-    │
-Agent Adapter → Tool Adapter → Standard Request
-    ↑                              │
-    └── Standard Decision ← Gate Core ← Policy
-                                  ↑
-                         Workflow / Project
+Agent 原生工具 → Git / Jira / GitHub / 构建与测试
+Agent → Workflow 状态变更入口 → 持锁校验 → 状态与证据
+                   ↑
+              Project / Policy / Gate 的标准判定
 ```
+
+使用者工作空间只保证流程检查点有效，不自动拦截原生工具。Gate 保留标准协议与可复用判定，旧 Agent Hook/Tool Adapter 协议资产未自动接线；它们的存在不代表产品承诺外部调用被拦截。
 
 ## 2. 分层
 
@@ -32,14 +31,14 @@ Agent Adapter → Tool Adapter → Standard Request
 
 ## 3. 通用 Agent 适配
 
-公共入口不维护 Agent 枚举。`bootstrap/agent_registry.py` 从 `adapters/agents/*/manifest.json` 发现 Agent。每个 Manifest 声明：
+公共入口不维护 Agent 枚举。`bootstrap/agent_registry.py` 从 `adapters/agents/*/manifest.json` 发现 Agent。每个 Manifest 声明生成接线与 `retired_artifacts`。退役列表只用于核验并迁移以前托管的文件，不按平台名称在 Bootstrap 写特例。当前内置 Agent 不生成通用 Hook，旧协议能力字段供显式标准判定与协议测试使用。每个 Manifest 声明：
 
 - Agent ID、入口和协议能力；
 - `ask` 不可用时的保守降级；
 - 要生成的工作空间接线；
 - 本地启动方式。
 
-新增 Agent 只增加一个目录、Manifest、薄 Hook、模板和测试。Adapter 不得保存状态、依赖 Policy/Project/Workflow 或定义新操作语义。`tests/test_adapter_boundary.py` 对每个 Agent 约束文件数、代码量、依赖和状态写入。
+新增 Agent 只增加一个目录、Manifest、必要的薄适配、模板和测试。Adapter 不得保存状态、依赖 Policy/Project/Workflow 或定义新操作语义。`tests/test_adapter_boundary.py` 对每个 Agent 约束文件数、代码量、依赖和状态写入。
 
 ## 4. 产品根目录（Product Root）的两个工作面
 
@@ -52,7 +51,7 @@ Agent Adapter → Tool Adapter → Standard Request
 - `.local/product.json` 记录 `mode`、仓库、跟踪分支及生命周期同步提交；`.local/repository-pool.json` 记录默认 Source Pool 根目录和仓库供给模式；`.local/gate/events.jsonl` 只记录直接在 Product Root 执行且无法归属任务的门禁事件，避免把维护状态误写成项目工作空间状态；维护工作面的实际运行版本始终以 Git HEAD 为准；
 - 安装产品根目录不包含 `internal/` 或维护面 `skills/`。
 
-`.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期配置外，它可保存由本 Product Root 成功初始化过的工作空间提示索引；该索引只用于更新后提示接线待刷新，不发现、不扫描、更不自动修改业务目录。生命周期操作使用 `.local/lifecycle.lock/` 防止同一产品根目录并发更新或回退。更新源码后，当前源码内核立即生效；已启动 Agent 需要重启，生成接线由下一次 `start` 自动刷新，也可通过 `doctor` 和 `repair` 显式检查、修复。`rollback` 只属于使用工作面；维护工作面保留正常 Git 历史和发布治理，不由产品入口自动移动源码分支。
+`.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期配置外，它可保存由本 Product Root 成功初始化过的工作空间提示索引；该索引只用于更新后提示接线待刷新，不发现、不扫描、更不自动修改业务目录。生命周期操作使用 `.local/lifecycle.lock/` 防止同一产品根目录并发更新或回退。更新源码后，当前源码内核立即生效；已启动 Agent 需要重启，普通生成接线由下一次 `start` 刷新，也可通过 `doctor` 和 `repair` 检查、修复。检测到托管 Hook 退役时，start 和普通 repair 保留现场并报告迁移范围；用户明确选择 `repair --accept-checkpoint-migration` 后，先校验全部旧 Hook 的归属哈希，再移除并刷新。此选择不是持久门禁开关，不会改写 task/run 或授权记录。`rollback` 只属于使用工作面；维护工作面保留正常 Git 历史和发布治理，不由产品入口自动移动源码分支。
 
 ## 5. 薄项目工作空间
 
@@ -72,11 +71,11 @@ Agent Adapter → Tool Adapter → Standard Request
         └── ci-<pr>.json
 ```
 
-工作空间不复制 Policy、Project Skill 或 Runtime。根 `agenticops`、`AGENTS.md`、Agent 配置和 MCP 配置是可再生接线，文件归属及哈希记录在 `init.json`；`doctor` 检测漂移，`repair` 安全重建。项目工作空间根的 `./agenticops` 只解析 workspace 绑定并转发到中央 Product Root，不注入任务上下文，也不承载任务状态机。Gate 能唯一解析任务时将事件写入对应任务目录；无法唯一解析任务时才写入根 `events.jsonl`，它是受控工作空间状态，随 `purge` 删除。旧 `.agenticops.json` 和 `.gate/` 只作为一次性迁移输入，不再是事实源。工作空间维护命令先列出精确目标再确认：`repair` 和 `clean --generated-only` 只收敛可再生接线；`detach` 删除已校验归属的接线和绑定但保留任务状态；`purge` 才会删除任务状态，且必须逐个工作空间明确确认。无法访问的登记只报告，不能被更新自动注销。
+工作空间不复制 Policy、Project Skill 或 Runtime。根 `agenticops`、`AGENTS.md`、Agent 配置和 MCP 配置是可再生接线，文件归属及哈希记录在 `init.json`；`doctor` 检测漂移，`repair` 安全重建。项目工作空间根的 `./agenticops` 只解析 workspace 绑定并转发到中央 Product Root，不注入任务上下文，也不承载任务状态机。Workflow 事件随任务保存；历史 Gate 事件保留用于追溯，根 `events.jsonl` 仍属于可清理的受控状态。旧 `.agenticops.json` 和 `.gate/` 只作为一次性迁移输入，不再是事实源。工作空间维护命令先列出精确目标再确认：`repair` 和 `clean --generated-only` 只收敛可再生接线；`detach` 删除已校验归属的接线和绑定但保留任务状态；`purge` 才会删除任务状态，且必须逐个工作空间明确确认。无法访问的登记只报告，不能被更新自动注销。
 
 普通任务状态变更以工作空间 `.agenticops` 目录自身为互斥对象；Q1 等质量检查点、授权、CI 和任务事件均不要求写入 Product Root。`purge` 在删除该目录前持有同一把锁并回读绑定，以避免并发任务在已删除的工作空间状态上继续写入。Product Root `.local/` 继续用于生命周期、本机工作空间索引及跨工作空间共享的 Source Pool/worktree 租约，不保存任务事实。
 
-多个 active 任务存在歧义时，Workflow 要求显式 issue key。Gate 按 issue key 或 `repository + work_branch` 唯一解析任务；零匹配、多匹配都不能借用其它任务授权。
+多个 active 任务存在歧义时，Workflow 要求显式 issue key。所有任务状态变更请求绑定当前 run，advance 另绑定预期阶段；在同一锁内读取最新状态并校验，拒绝旧 run、重复推进和借用其它任务确认。CI 与质量记录继续使用各自的 run/revision 校验；跨文件或 Git 副作用依靠可恢复记录处理，不宣称跨系统原子事务。
 
 ## 6. Source Pool 与任务工作树
 
@@ -97,19 +96,21 @@ Project Package 的 `repositories.json` 是仓库、origin、基线分支和域�
 
 ## 7. 多仓库、授权与当前工作空间会话
 
-一个任务可登记多个仓库，每仓绑定 repository、work branch、base branch、修改范围和验证方式。准备 worktree 后，授权还绑定 `run_id` 与 `base_sha`。授权绑定任务、Agent、方案和完整仓库集合；新增仓库或修改稳定绑定后旧授权失效。每仓独立记录提交、PR、CI 和验证，最后汇总成任务证据。
+本地执行采用当前 run 的用户确认事实，初始 Jira 快照保持原样。影响版本与实施分支独立记录；同步账本不进入质量 advance 的阻断条件。Workflow 的 external_sync 只读汇总评论、水印、版本差异及状态待办，供 next、PR Ready 和 evidence 输出警告；实际发送由 Agent 原生工具执行。同一未知操作先回读，不同检查点可独立同步，旧 run 的未决操作保留供恢复。
 
-项目可配置少量非阻断的 Jira 状态同步节点。Agent 在规定的本地阶段读取 Jira 实时状态、可用转换和必填字段，Workflow 只准备并记录当前 task/run/node 的一次精确转换意图；Tool Adapter 只提取转换 ID，Gate 仅允许与该意图完全匹配的第一次调用，并以放行审计消费该意图。外部调用失败、字段无法可靠补齐或状态不匹配都只形成可回查的人工接力，不推进本地阶段，也不阻止后续节点基于新事实独立尝试。PR Ready 由独立只读核对汇总关联测试任务、当前提交的 PR Checks 和到 Q4 为止的任务检查项；Jira 状态同步待办作为提示返回，不伪装成这三类验收事实。
+一个任务可登记多个仓库，每仓绑定 repository、work branch、base branch、修改范围和验证方式。准备 worktree 后，授权还绑定 `run_id` 与 `base_sha`。方案确认记录绑定任务、Agent、方案和完整仓库集合，在实现和后续验收阶段重新检查 run、期限与仓库绑定；不代表每次外部工具调用均受 AgenticOps 核验。新增仓库或修改稳定绑定后旧授权失效。每仓独立记录提交、PR、CI 和验证，最后汇总成任务证据。
+
+项目可配置少量非阻断的 Jira 状态同步节点。Workflow 幂等准备当前 task/run/node 的同步信息，实际 Jira 调用由 Agent 原生工具完成，随后导入回读结果。取消 Hook 单次放行/消费的产品保证；不明结果先回读，可再次 complete 收敛，不能盲目重发。失败形成可回查人工接力，不自动推进本地阶段。PR Ready 由独立只读核对汇总关联测试任务、当前提交的 PR Checks 和到 Q4 为止的任务检查项；Jira 状态同步待办作为提示返回，不伪装成这三类验收事实。
 
 Agent 由薄项目工作空间入口使用 `./agenticops start <agent>` 启动，当前会话始终以项目工作空间为 cwd。任务 worktree 位于该工作空间内，因此不再为每个 task/run 重启 Agent 或追加动态目录参数。`workflow/task.py repository context --issue-key <issue-key> --json` 复用 worktree 校验，返回当前 run 的仓库、路径、分支和 `base_sha`；Agent 从同一会话在这些已校验路径中分析、修改、构建和测试。任务命令继续显式绑定 workspace 和 issue key，不建立会话级“当前任务”状态。Source Pool 位于工作空间外，仍不得加入 Agent 可写范围。
 
-文件修改、构建和测试发生在任务上下文返回的 worktree。工作空间是 Agent 原生文件系统边界；多个任务之间的边界由显式 issue key、run、分支、授权、Gate 和最终 Git 范围验证共同保证，而不是由第二个 Agent 会话伪造。linked worktree 的 `git add` 与其它本地开发操作交给 Agent 平台审批；`git commit/push` 等明确协作事实才同时受 Gate 控制。Source Pool 的 clone、fetch、worktree add/remove 由确定性 Workflow 执行。
+文件修改、构建和测试发生在任务上下文返回的 worktree。工作空间是 Agent 原生文件系统边界；多个任务之间的边界由显式 issue key、run、分支、检查点确认和最终 Git 范围验证共同保证，而不是由第二个 Agent 会话伪造。linked worktree 的 `git add/commit/push` 与其它原生操作均交给 Agent 平台权限和外部服务端控制；Workflow 只在检查点核对结果。Source Pool 的 clone、fetch、worktree add/remove 由确定性 Workflow 执行。
 
 ## 8. 连续性与安全
 
 未迁移的辅助能力优先由 Agent 原生能力完成；没有安全自动路径时，只暂停当前副作用并输出人工接力。事实不可信、权限不足、高风险操作或外部写入结果不明必须停止。
 
-Tool Adapter 采用宽门禁的正向命中：MCP 以服务标识和工具名的完整身份映射，Shell 只识别直接且可标准化的协作/控制面命令；只有明确映射到标准操作的工具调用才生成 Gate 请求。本地开发操作、任意解释器、未登记脚本和未映射工具，以及命令内 `cd`、`GIT_DIR` 等使执行上下文无法可靠标准化的 Shell 形式，均交还 Agent 平台原生权限流程，不因 Adapter 无法解析而升级为 Gate 操作。已命中的协作/控制面操作若目标或参数歧义而无法可靠生成标准请求，才失败关闭。Agent Adapter、Tool Adapter 或 Gate 自身异常仍失败关闭。Claude 与 Codex 共用同一 Tool Adapter 分类语义，只保留各自原生 Hook 判定协议的薄转换差异。
+使用者运行不接线通用工具 Hook。确定性状态检查在 Workflow 的实际变更入口执行；外部操作不因有副作用而进入 Gate。显式调用 Gate 标准 API 的协议校验仍失败关闭，但不能据此宣称已限制所有原生调用。直接编辑状态文件不受支持，也不具备防篡改保证。
 
 Hook 是流程控制点，不是安全沙箱。不得关闭 Agent 平台原生沙箱或把未命中透传配置成无条件外部写权限；凭证最小权限、服务端保护、CI 和人工审查仍是最终边界。合并、发布、Tag、保护分支写入、强推和历史改写不被普通任务授权覆盖。Agent Hook、共享 Adapter Runtime 和 Tool Adapter 分类策略属于发布信任根，修改后禁止自动发布，必须通过受保护 `main` 的独立人工审查 PR 完成升级。
 
@@ -117,10 +118,10 @@ Hook 是流程控制点，不是安全沙箱。不得关闭 Agent 平台原生�
 
 - 公共入口可发现任意合规 Agent Manifest，不存在固定平台枚举。
 - Gate 只接受标准协议，Adapter 重量门禁通过。
-- MCP 只按完整工具身份映射；已映射标准操作进入统一 Gate，受控操作歧义失败关闭，未命中操作交还 Agent 原生权限；Claude 与 Codex 分类结果一致。
+- 新工作空间不生成通用工具 Hook；旧托管 Hook 只经显式迁移移除，任一目标漂移时保留现场。
 - 源码目录和安装产品根目录共用结构、入口和 `.local/` 约定。
 - 工作空间明确区分初始化、配置和按任务隔离的数据。
-- 多任务、多仓库上下文唯一，授权变化失败关闭。
+- 多任务、多仓库上下文唯一，方案确认绑定变化阻止检查点推进；重复请求不连跳阶段。
 - 多个工作空间共享 `owner/repo` 主工作树，任务只写工作空间内当前 run 的 worktree；启动权限不扩展到整个池。
 - 主工作树、origin、基线、目录摘要、`base_sha`、清理和重做行为均由可执行测试约束。
 - 新项目适配不修改公共 Gate；产品安装不包含 `internal/`。

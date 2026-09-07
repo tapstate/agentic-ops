@@ -1,16 +1,15 @@
 # Agent 最小权限配置
 
-原则：**权限系统里做不到的事，就不需要规则去"禁止"。** 门禁 hook 是第二道防线；第一道防线是凭证本身的最小化。
+原则：**权限系统里做不到的事，就不需要规则去"禁止"。** 使用者工作空间的流程检查在 Workflow 执行；原生工具调用依靠平台权限、凭证最小化和服务端保护。
 
 ## Agent 文件系统权限
 
 Source Pool 位于项目工作空间之外，只保存统一维护的主工作树；任务 worktree 位于 `<workspace>/.agenticops/worktrees/<issue-key>/<run-id>/`。Agent 从项目工作空间启动并在同一会话中继续任务，工作空间是 Agent 原生文件系统边界，Source Pool 不加入可写范围。任务状态操作继续显式绑定 workspace 和 issue。
 
 - `repository context --issue-key <issue-key> --json` 在源码分析、实现或恢复前校验当前 run 的租约、规范路径、分支、`base_sha` 和目录摘要；失败时停止任务依赖步骤。
-- 当前会话执行 `git commit`、`git push` 等 Git 副作用时，使用 `git -C <repository context 返回的 worktree> ...`。Tool Adapter 把该路径作为标准 Git 上下文；Gate 仅接受工作空间内、与当前 active 任务的 repository、work branch 和 prepared worktree 同时匹配的精确路径。
-- 对直接可识别的创建、更新或评论 PR 等分支相关 GitHub 写操作，如需由 AgenticOps 关联任务并验证分支，Bash 调用应将 `workdir` 设为 `repository context` 返回的 task worktree，即使命令已传入 `--repo`。Codex Adapter 将该单次执行目录映射为标准 Git 上下文，Gate 再验证它精确匹配当前 task/run 的 prepared worktree；缺少 `workdir` 时，已识别命令以 `branch_context_required` 停止，不从 PR 正文或重新接管推断任务。命令内 `cd ... &&`、`GIT_DIR` 等无法可靠标准化上下文的形式属于宽门禁未命中路径，交由 Codex 原生权限处理，AgenticOps 不据此推断任务或分支。
-- 当前会话能够访问工作空间内的其它 task worktree，因此 task/run 级边界由显式 issue key、授权绑定、Gate、工作分支和 Git 交付范围共同保证；不得把工作空间级沙箱误述为 task/run 级硬隔离。
-- linked worktree 的 `.git` 指向主仓库 Git 元数据。平台仍可能要求批准 Git 元数据写入；Gate 也继续独立判断 commit、push、PR 等副作用。目录授权不是任务授权的替代品。
+- 当前会话执行 Git/PR 工具前，用 `repository context` 核对任务 worktree，按用户授权操作；AgenticOps 不在这些原生调用前再次判定。
+- 同一工作空间的其它 task worktree 可被会话访问；任务边界依靠显式 issue/run、工作分支和检查点证据核验，不宣称 task/run 沙箱隔离。
+- linked worktree 的 `.git` 指向主仓库元数据；平台可能要求精确的元数据写权限。流程确认记录不替代平台权限。
 
 Source Pool 的 clone、fetch 和 worktree 创建/删除应通过确定性 Workflow 或用户从受控终端执行。Git 公共元数据仍位于 Source Pool 主工作树的 `.git/worktrees/`；若平台阻止相关写入，应请求精确目录/命令审批，不能把整个池永久加入全局可写根目录。
 
@@ -34,7 +33,7 @@ Source Pool 的 clone、fetch 和 worktree 创建/删除应通过确定性 Workf
 
 ### 2. Git SSH（用于 clone / fetch / push）
 
-Git SSH 是 Git 传输的替代凭据方式，不是 AgenticOps 的任务授权，也不替代 GitHub MCP、`gh` 或浏览器 API 所需的 OAuth / PAT。无论使用 PAT 还是 SSH，Gate、Rulesets 和任务授权的判定保持不变。
+Git SSH 是 Git 传输的替代凭据方式，不是 AgenticOps 的任务授权，也不替代 GitHub MCP、`gh` 或浏览器 API 所需的 OAuth / PAT。无论使用 PAT 还是 SSH，服务端权限和本地流程检查点的职责保持不变。
 
 每位研发员、每台设备使用独立、带口令的密钥。私钥只留在设备，不得写入仓库、`.agenticops/`、Agent 配置、环境变量、聊天记录或 CI 变量。仓库角色和组织 SSO 仍由 GitHub 服务端决定；具体配置、验证和撤销见 [Git SSH 授权指引](git-ssh-access.md)。
 
@@ -45,9 +44,7 @@ Git SSH 是 Git 传输的替代凭据方式，不是 AgenticOps 的任务授权�
   - 至少 1 个独立人工 review、最后 pusher 不能自批
   - required status checks
   - 无 bypass 名单（agent 的账号绝不在 bypass 里）
-  - 注意：私有仓库的 Rulesets 需要 **GitHub Team/Enterprise 档**；
-    Free 档私有仓库没有服务器侧保护（agentic-ops 已踩过这个坑），
-    此时 hook 的 `protected_branch_push -> deny` 是唯一防线，建议升级。
+  - 服务端保护能力需按实际仓库配置核验；未配置时不能宣称本地检查点提供等价保护。
 - CODEOWNERS 指定关键路径必须人审。
 
 ### 4. GitHub MCP Server（远程，免部署）
@@ -83,21 +80,21 @@ Atlassian 账号 API token 现已支持 scope。为 agent 签发时只选：
 claude mcp add --transport http atlassian https://mcp.atlassian.com/v1/mcp/authv2
 ```
 
-OAuth 2.1 交互式授权，**权限自动等于登录账号的权限**——所以第 1 步的账号最小化就是 MCP 的权限边界。写操作（transition / comment / edit）再由本仓库的 hook 门禁二次拦截。
+OAuth 2.1 交互式授权，**权限自动等于登录账号的权限**——所以第 1 步的账号最小化就是 MCP 的权限边界。写操作由 Agent 原生工具权限与 Jira 服务端校验处理。
 
 Codex 的 `atlassian` MCP 也使用同一远程端点和 OAuth，具体命令见[必需 MCP 配置](../usage/mcp-setup.md)。
 
-TapData 缺陷在接管和 Q4 验收节点可准备一次精确 Jira transition 意图。该意图绑定当前 active task/run、issue key 和 transition ID；Hook 只放行第一次完全匹配的原生 Jira 调用，放行审计落盘后即视为已消费，一般 Jira 状态流转仍需人工确认。意图不授权编辑字段、不覆盖 Jira Validator，也不允许 `Pull Request Submitted`、Merged 或 Done。外部写入后必须回读，失败或结果不明只记录并转人工，不阻断本地研发主流程。
+TapData 缺陷在接管和 Q4 验收节点可幂等准备 Jira 同步信息，绑定当前 task/run、issue 和 transition ID。Agent 原生调用后必须回读；结果不明先回读，不盲目重发。Workflow 不保证外部工具强制单次调用，也不替代 Jira Validator。同步失败记录并转人工，不阻断无依赖的本地准备。
 
-## AgenticOps v1 的三层防线小结
+## 权限与流程检查的职责
 
 | 层 | 机制 | 挡什么 |
 |---|---|---|
 | 凭证 | 最小权限 PAT / scoped token / 项目权限 | agent 根本做不到的事 |
 | 服务器 | GitHub Rulesets、Jira permission scheme | merge / 保护分支 / 删除 |
-| Hook | 本仓库 Hook 门禁（Claude 使用 PreToolUse；Codex 使用其生成的 Hook 接线） | 剩余操作的授权伞 + 人工确认 + 审计 |
+| Workflow | 在状态变更入口持锁校验当前 run、阶段、确认与证据 | 不满足条件不能推进流程；不阻断任意外部调用 |
 
-Tool Adapter 只对完整身份明确匹配的 MCP 和可可靠解析的 Shell 操作生成 Gate 请求。任意解释器、未登记脚本和未映射工具由 Agent 原生权限流程继续判断，不代表 AgenticOps 已授权；不得通过关闭沙箱、全局放行或扩大凭证权限来消除原生确认。Codex `PreToolUse` 的当前判定格式与能力边界以官方 [Codex Hooks](https://developers.openai.com/codex/hooks) 文档为准。
+新工作空间不生成通用 Agent Hook；已有工作空间迁移须明确接受外部调用不再受 AgenticOps 逐次检查。不得用关闭平台沙箱或扩大凭证权限消除原生确认。源码仓库 Git Hook 只负责 AgenticOps 自身提交与发布治理。
 
 ## 参考来源
 

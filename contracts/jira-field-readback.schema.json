@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Jira 字段同步回读；本地事实摘要绑定",
+  "type": "object",
+  "required": ["fact_key", "expected_fact_digest", "jira_field", "issue", "source_ref"],
+  "additionalProperties": false,
+  "properties": {
+    "fact_key": {"type": "string", "minLength": 1},
+    "expected_fact_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "jira_field": {"type": "string", "minLength": 1},
+    "source_ref": {"type": "string", "minLength": 1, "pattern": "\\S"},
+    "issue": {
+      "type": "object",
+      "required": ["key", "fields"],
+      "properties": {"key": {"type": "string", "minLength": 1}, "fields": {"type": "object"}}
+    }
+  }
+}

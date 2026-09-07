@@ -57,7 +57,7 @@ class JiraWatermarkTests(unittest.TestCase):
         self.assertEqual(record["payload_digest"], jira_watermark.payload_digest("customfield_10421", version))
         done = jira_watermark.complete(self.base, "TAP-123", "unknown", self.snapshot(version))
         self.assertEqual(done["outcome"], "verified")
-        self.assertEqual(jira_watermark.takeover_problems(self.base, self.task), [])
+        self.assertEqual(jira_watermark.takeover_warnings(self.base, self.task), [])
 
     def test_matching_readback_skips_external_write(self):
         version = product_version.describe(self.product)
@@ -70,7 +70,7 @@ class JiraWatermarkTests(unittest.TestCase):
         jira_watermark.prepare(self.base, "TAP-123", self.snapshot())
         result = jira_watermark.complete(self.base, "TAP-123", "unknown", self.snapshot("old-version"))
         self.assertEqual(result["outcome"], "unknown")
-        self.assertTrue(jira_watermark.takeover_problems(self.base, self.task))
+        self.assertTrue(jira_watermark.takeover_warnings(self.base, self.task))
         repeated = jira_watermark.prepare(self.base, "TAP-123", self.snapshot())
         self.assertTrue(repeated["repeated"])
         self.assertEqual(repeated["outcome"], "unknown")
@@ -115,7 +115,7 @@ class JiraWatermarkTests(unittest.TestCase):
              "watermark": {"outcome": "verified", "reason": "forged"}},
         )
         with self.assertRaisesRegex(ValueError, "缺少必要字段"):
-            jira_watermark.takeover_problems(self.base, self.task)
+            jira_watermark.takeover_warnings(self.base, self.task)
 
     def test_missing_project_watermark_configuration_fails_closed(self):
         profile_path = self.product / "projects" / "tapdata" / "profile.json"

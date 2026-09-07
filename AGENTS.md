@@ -4,7 +4,7 @@
 
 涉及设计、计划、架构、流程、策略或项目适配变更前，必须先读取 `docs/strategy/project-goals.md`。项目方向以该文档为准；工作项、进度、阻塞和验收写入 Jira，不在仓库新增执行计划。
 
-AgenticOps 是公司级 Agentic 研发基础设施。现役架构基于 ao-gate-poc 的思想：Agent 平台负责执行，Hook 在副作用前拦截，Adapter 转换为 AgenticOps 标准协议，Policy 配置决策，少量 Workflow 工具只保存确定性状态，项目差异单独配置。
+AgenticOps 是公司级 Agentic 研发基础设施。Agent 平台负责原生工具执行，Workflow 在本地流程进入、退出、恢复和完成时检查确定性条件；Policy 配置通用判定，项目差异单独配置。使用者工作空间不生成通用工具 Hook，旧 Hook 必须显式确认迁移；源码仓库自身的 Git Hook 独立保留。状态检查不承诺阻止任意外部动作，也不提供本地防篡改或身份认证。
 
 ## 单一产品架构
 

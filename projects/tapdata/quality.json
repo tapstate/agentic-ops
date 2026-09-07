@@ -4,7 +4,8 @@
   "commit_evidence_checkpoint": "q4-acceptance",
   "intake_fact_keys": ["problem_branch", "problem_version", "problem_symptom", "reproduce_path", "acceptance_criteria", "issue_version_plan"],
   "plan_fact_keys": ["fix_plan"],
-  "require_checkpoint_publication": true,
+  "publication_mode": "deferred-summary",
+  "comment_format": "human-text-v1",
   "task_classes": [
     "defect_fix"
   ],
@@ -135,7 +136,6 @@
   "pr_ready": {
     "required_checkpoints": ["q1-intake", "q2-plan", "q3-draft", "q4-acceptance"],
     "accepted_outcomes": ["accept", "not_applicable", "observed"],
-    "require_verified_publication": true,
     "require_linked_test_tasks": true,
     "require_user_confirmation_per_linked_test": true,
     "require_all_pr_checks_success": true

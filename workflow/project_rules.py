@@ -333,8 +333,10 @@ def render_admission_markdown(spec, task_class, project="tapdata"):
     L.append("```sh")
     L.append("python3 workflow/task.py checklist --task-class %s          # 人读" % task_class)
     L.append("python3 workflow/task.py checklist --task-class %s --json   # 机读" % task_class)
-    L.append("python3 workflow/task.py record --issue-key <JIRA-KEY> --key <fact key> --value <值>")
+    L.append("python3 workflow/task.py record --issue-key <JIRA-KEY> --expected-run-id <当前-run-id> --key <fact key> --value <值>")
     L.append("```")
+    L.append("")
+    L.append("下文仅说明步骤；状态变更调用须带 `--expected-run-id`，`advance` 还须带 `--expected-stage`，值来自此前读取的当前任务状态。")
     L.append("")
     flexible = cls.get("quality_mode") == "recorded_decision"
     L.append("## 核对项（缺项披露，在质量检查点记录处置）" if flexible else "## 必填项（缺一不可，`task.py advance` 硬拦）")

@@ -12,7 +12,7 @@ usage() {
   agenticops agents
   agenticops init [--workspace <目录>] [--project <项目>] [--agent <Agent ID>]... [--repository-pool <目录>]
   agenticops doctor [--workspace <目录>]
-  agenticops repair [--workspace <目录>]
+  agenticops repair [--workspace <目录>] [--accept-checkpoint-migration]
   agenticops workspace <list|prune|repair|clean|detach|purge|prefetch> [参数]
   agenticops start <Agent ID> [-- <Agent 参数>]
   agenticops start --agent <Agent ID> [--workspace <目录>] [-- <Agent 参数>]
@@ -150,9 +150,12 @@ case "$command_name" in
     ;;
   repair)
     parse_workspace "$@"
-    test "$forwarded_count" -eq 0 || { usage >&2; exit 2; }
-    python3 "$product_root/bootstrap/render.py" \
-      --install-home "$product_root" --workspace "$workspace" --refresh
+    repair_args=(--install-home "$product_root" --workspace "$workspace" --refresh)
+    if [ "$forwarded_count" -ne 0 ]; then
+      test "$forwarded_count" -eq 1 && test "${forwarded[0]}" = "--accept-checkpoint-migration" || { usage >&2; exit 2; }
+      repair_args+=(--accept-checkpoint-migration)
+    fi
+    python3 "$product_root/bootstrap/render.py" "${repair_args[@]}"
     python3 "$product_root/bootstrap/workspace_registry.py" \
       --product-root "$product_root" register --workspace "$workspace"
     exec python3 - "$product_root" "$workspace" <<'PY'

@@ -44,8 +44,6 @@ def quality_problems(base, task, rules):
             problems.append("任务检查点 %s 的处置为 %s，不满足 PR Ready" % (checkpoint, outcome or "缺失"))
         if checkpoint == rules["pr_ready"]["required_checkpoints"][-1] and outcome != "accept":
             problems.append("关联用例验收检查点必须由用户确认通过，不能以不适用或风险处置进入 PR Ready")
-        if rules["pr_ready"].get("require_verified_publication") and not view.get("published"):
-            problems.append("任务检查点 %s 尚未完成 Jira 评论回读" % checkpoint)
     final_checkpoint = rules["pr_ready"]["required_checkpoints"][-1]
     due = set(result["checkpoints"][final_checkpoint]["due"])
     for key in due:
@@ -92,6 +90,7 @@ def ci_problems(base, task):
 
 
 def check(base, issue_key, jira_input):
+    from workflow import external_sync
     task = json.loads(task_store.task_path(base, issue_key).read_text(encoding="utf-8"))
     rules = quality.config(base)
     if not rules or not isinstance(rules.get("pr_ready"), dict):
@@ -125,6 +124,7 @@ def check(base, issue_key, jira_input):
                                 "guidance": test["guidance"]} for test in ignored_tests],
             "checks": {key: {"passed": not value, "problems": value} for key, value in groups.items()},
             "jira_status_todos": status_todos,
+            "warnings": external_sync.warnings(base, task),
             "next": "三类验收通过；由 Engineering DRI 人工执行 Pull Request Submitted。" if not problems
                     else "处理上述验收问题后重新检查；Jira 状态同步问题不阻断本地修复，但需在正式提审前人工处理。"}
 

@@ -12,12 +12,12 @@
 | Agent Adapter | 把 Agent 平台事件转换为 AgenticOps 标准操作的无状态适配层。 |
 | Tool Adapter | 把 MCP、CLI 等工具操作映射为标准操作的无状态适配层。 |
 | 标准契约（Standard Contract） | `contracts/` 中版本化的请求、判定和 Manifest 协议，是 Adapter 与 Gate 的共同边界。 |
-| Gate | 副作用前的统一门禁：根据上下文和规则决定放行、请求确认或拒绝。 |
+| Gate | 标准判定内核，供确定性入口复用上下文与规则检查；使用者原生工具不再自动接入。 |
 | Policy | 公司级操作与连续性规则，位于 `policies/`；不写业务项目特例。 |
 | Workflow | 阶段、授权、CI、证据和恢复等确定性状态逻辑，位于 `workflow/`。 |
 | 任务 | 一个 Jira 工作项在本地的执行单元；可关联多个代码仓库，状态和证据按任务隔离。 |
 | 任务授权 | 对特定任务、仓库、工作分支、改动范围和验证方式的明确允许；范围变化后原授权失效。 |
-| Hook | Agent 或工具在副作用前调用的拦截点。它执行 Gate 判定，但不是安全沙箱。 |
+| Hook | 平台或 Git 的事件入口。使用者通用 Agent Hook 已退役；源码仓库 Git Hook 保留且独立于 Workflow。 |
 | Bootstrap | 安装、更新、回退和工作空间接线能力，位于 `bootstrap/`；不承载任务流程或规则。 |
 
 术语之间的分层和调用关系见 [v1 工程架构](architecture/agenticops-v1-architecture.md)；具体的权限边界见 [权限与安全边界](security/permissions.md)。

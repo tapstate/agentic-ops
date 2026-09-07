@@ -21,10 +21,7 @@
       "issue_versions": {
         "field": "versions",
         "product_repository": "tapdata/tapdata",
-        "preferred_branch": "develop",
-        "version_pattern": "^(?:release-)?v?(?P<version>[0-9]+\\.[0-9]+\\.[0-9]+)$",
-        "branch_template": "release-v{version}",
-        "literal_branches": ["develop", "main"]
+        "preferred_branch": "develop"
       },
       "required_facts": [
         {
@@ -42,10 +39,10 @@
           "label": "问题版本",
           "source": "Jira 影响版本 fields.versions（多选）",
           "example": "4.18.0、4.21.0",
-          "note": "保留全部影响版本；主仓找不到对应分支则拒绝。导入结果会逐项列出版本、对应主仓分支和远端 SHA，供用户引用并回写 Jira 分支确认；该引用不替代 repository prepare 固化的任务基线。先核验 develop 是否有同一缺陷，有则优先修复 develop，影响版本由研发合并修复；否则只选择一个影响版本修复，其余人工合并。由 task.py issue-versions 导入，不手填分支替代版本。",
+          "note": "保留 Jira 初始影响版本；用户通过 issue-versions 的 effective.versions/proof 确认本地正确版本，execution_branch 独立确认并核验实际 Git 分支。版本名称不映射分支；同步差异不阻止本地流程。",
           "agent_may_propose": false,
-          "human_confirmation_required": false,
-          "supplement": "请补充 Jira「影响版本」，并提供 develop 同一缺陷的源码/复现核验；不能用描述或猜测的 develop 替代。"
+          "human_confirmation_required": true,
+          "supplement": "请确认本次采用的问题版本、实施分支及源码或复现证据；Jira 字段可后续同步。"
         },
         {
           "key": "problem_symptom",

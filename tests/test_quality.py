@@ -294,9 +294,11 @@ class QualityTests(unittest.TestCase):
         self.task["repositories"][0]["worktree"]["final_revision"] = "b" * 40; self.save_task()
         self.assertFalse(self.view()["checkpoints"]["q4-acceptance"]["reviewed"])
 
-    def test_checkpoint_publication_is_mandatory_and_cannot_be_faked_by_generic_comment(self):
+    def test_checkpoint_publication_warns_without_blocking_and_preserves_binding(self):
         self.plan(); self.select(); self.execute(); self.automatic_checkpoint()
-        self.assertTrue(any("Jira" in p for p in quality.advance_problems(self.base, self.task, "pr_review")))
+        self.assertEqual(quality.advance_problems(self.base, self.task, "pr_review"), [])
+        from workflow import external_sync
+        self.assertTrue(any(w["kind"] == "checkpoint:q3-draft" for w in external_sync.warnings(self.base, self.task)))
         self.publication()
         self.assertFalse(self.view()["checkpoints"]["q3-draft"]["published"])
         with self.assertRaisesRegex(ValueError, "完整 publication_body"):
@@ -330,6 +332,99 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(self.view()["publications"]["summary"]["status"], "unknown")
         view = self.apply("readback", dict(readback, body=record["body"]))
         self.assertEqual(view["publications"]["summary"]["status"], "verified")
+
+    def test_unknown_comment_allows_different_publication_and_survives_summary(self):
+        original = self.publication()
+        self.apply("receipt", {"id": "summary", "operation_id": original["operation_id"], "result": "unknown"})
+        self.apply("draft", {"id": "next-stage", "body": "下一阶段的独立评论"})
+        record = self.view()["publications"]["next-stage"]
+        self.apply("confirm", {"id": "next-stage", "digest": record["digest"], "proof": proof()})
+        next_record = self.apply("prepare_write", {"id": "next-stage", "digest": record["digest"]})["publications"]["next-stage"]
+        self.apply("receipt", {"id": "next-stage", "operation_id": next_record["operation_id"], "result": "deferred", "reason": "服务明确拒绝，未写入"})
+        from workflow import external_sync
+        warnings = external_sync.warnings(self.base, self.task)
+        self.assertTrue(any(w["kind"] == "comment:summary" and w["status"] == "unknown" for w in warnings))
+        self.assertTrue(any(w["kind"] == "comment:next-stage" and w["status"] == "deferred" for w in warnings))
+        text = evidence.build_summary(self.task, None, [], [], task.admission(self.base), sync_warnings=warnings)
+        self.assertIn("执行过程被跳过的处理与警告", text)
+        self.assertIn("服务明确拒绝", text)
+        with self.assertRaises(ValueError):
+            self.apply("receipt", {"id": "summary", "operation_id": original["operation_id"], "result": "deferred", "reason": "猜测失败"})
+
+    def test_checkpoint_comment_uses_applicable_execution(self):
+        self.plan(); self.select()
+        self.execute(execution_id="current-pass")
+        self.execute(execution_id="historical-fail", result="FAIL", kind="assertion", target_revision="b" * 40)
+        self.decide(evidence_id="current-pass")
+        self.checkpoint("q4-acceptance")
+        self.automatic_checkpoint()
+        for checkpoint in ("q3-draft", "q4-acceptance"):
+            body = self.view()["checkpoints"][checkpoint]["publication_body"]
+            self.assertIn("结果：PASS；版本：" + "a" * 40, body)
+            self.assertIn("fixture:report/current-pass", body)
+            self.assertNotIn("historical-fail", body)
+            self.assertNotIn("结果：FAIL", body)
+        self.checkpoint("q2-plan")
+        self.assertNotIn("结果：", self.view()["checkpoints"]["q2-plan"]["publication_body"])
+
+    def test_checkpoint_comment_preserves_checkpoint_handoff(self):
+        deadline = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+        self.checkpoint("q1-intake", outcome="defer", owner="接力负责人", follow_up="补齐任务事实", deadline=deadline)
+        body = self.view()["checkpoints"]["q1-intake"]["publication_body"]
+        for value in ("接力负责人", "补齐任务事实", deadline):
+            self.assertIn(value, body)
+
+    def test_old_run_warnings_only_keep_unresolved_writes(self):
+        from workflow import external_sync
+        statuses = ("draft", "confirmed", "deferred", "intent", "unknown", "created")
+        for status in statuses:
+            self.apply("draft", {"id": status, "body": "状态夹具：" + status})
+            record = self.view()["publications"][status]
+            if status == "draft":
+                continue
+            self.apply("confirm", {"id": status, "digest": record["digest"], "proof": proof()})
+            if status == "confirmed":
+                continue
+            record = self.apply("prepare_write", {"id": status, "digest": record["digest"]})["publications"][status]
+            if status != "intent":
+                payload = {"id": status, "operation_id": record["operation_id"], "result": status}
+                if status == "created":
+                    payload["comment_id"] = "fixture-comment"
+                if status == "deferred":
+                    payload["reason"] = "明确未写入"
+                self.apply("receipt", payload)
+        current = [w for w in external_sync.warnings(self.base, self.task) if w["kind"].startswith("comment:")]
+        self.assertEqual({w["kind"] for w in current}, {"comment:" + s for s in statuses})
+        path = quality.state_path(self.base, self.task)
+        original = path.read_bytes()
+        old_run = self.task["run_id"]
+        self.task["run_id"] = "run-abcdef012345"
+        self.save_task()
+        self.apply("draft", {"id": "current", "body": "当前 run 草稿"})
+        warnings = [w for w in external_sync.warnings(self.base, self.task) if w["kind"].startswith("comment:")]
+        self.assertEqual({w["kind"] for w in warnings}, {"comment:current", "comment:intent", "comment:unknown", "comment:created"})
+        for warning in warnings:
+            if warning["run_id"] == old_run:
+                self.assertEqual(warning["status"], "unknown")
+                self.assertIn("禁止盲目重发", warning["recovery"])
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_checkpoint_comment_is_human_text_and_normalized_readback_checks_body(self):
+        self.plan(); self.select(); self.execute(); self.automatic_checkpoint()
+        body = self.view()["checkpoints"]["q3-draft"]["publication_body"]
+        self.assertIn("记录：AO-", body)
+        self.assertIn("验证 case:case-a", body)
+        self.assertNotIn('"executions":', body)
+        self.apply("draft", {"id": "human", "checkpoint": "q3-draft", "body": body})
+        record = self.view()["publications"]["human"]
+        self.apply("confirm", {"id": "human", "digest": record["digest"], "proof": proof()})
+        record = self.apply("prepare_write", {"id": "human", "digest": record["digest"]})["publications"]["human"]
+        payload = {"id": "human", "operation_id": record["operation_id"], "site": record["site"],
+                   "issue_key": "TAP-123", "comment_id": "10", "source_ref": "fixture:comment/10", "body": body + "错误内容"}
+        with self.assertRaises(ValueError):
+            self.apply("readback", payload)
+        payload["body"] = body.replace("\n", "\r\n")
+        self.assertEqual(self.apply("readback", payload)["publications"]["human"]["status"], "verified")
 
     def test_prepare_write_ignores_quality_action_input_files(self):
         self.apply("draft", {"id": "q1-intake-jira", "body": "检查点评论"})
@@ -391,7 +486,7 @@ class QualityTests(unittest.TestCase):
 
     def test_watch_records_unknown_as_handoff_and_preserves_raw_checks(self):
         args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr="8",
-                               interval=0, start_timeout=0, finish_timeout=0)
+                               interval=0, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
         checks = [{"name": "integration", "status": "COMPLETED", "conclusion": ""}]
         with mock.patch.object(ci, "fetch_rollup", return_value=(checks, "known-sha")):
             self.assertEqual(ci.cmd_watch(args), 3)

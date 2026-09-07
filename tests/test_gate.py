@@ -202,6 +202,7 @@ def grant(ws, **overrides):
         [
             sys.executable, str(ROOT / "workflow" / "authorization.py"), "grant",
             "--issue-key", issue,
+            "--expected-run-id", "run-" + ("1" if issue == "TAP-123" else "9") * 12,
             "--agent-id", "dev-bot-1",
             "--plan-version", "v1",
             "--dir", str(ws),
@@ -1069,7 +1070,7 @@ def main():
         check("授权仓库不匹配收回放行", run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws), "ask")
 
         grant(ws)
-        subprocess.run([sys.executable, str(ROOT / "workflow" / "authorization.py"), "revoke", "--issue-key", "TAP-123", "--dir", str(ws)], check=True, capture_output=True)
+        subprocess.run([sys.executable, str(ROOT / "workflow" / "authorization.py"), "revoke", "--issue-key", "TAP-123", "--expected-run-id", "run-" + "1" * 12, "--dir", str(ws)], check=True, capture_output=True)
         check("撤销授权后收回放行", run_hook("Bash", {"command": "git commit -m x"}, ws), "ask")
 
         # ---- 正向命中与未命中透传 ---------------------------------------
