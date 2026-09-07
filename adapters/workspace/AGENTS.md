@@ -55,10 +55,7 @@ GitHub MCP、`gh` 和其它 GitHub 工具不由 AgenticOps 绑定；Agent 依据
 - `.agenticops/tasks/index.json` 只统一注册任务及其 active/inactive/completed
   状态；每个任务的事实、授权、事件和 CI 证据只能写入自己的
   `.agenticops/tasks/<issue-key>/`。
-- 副作用操作由 Agent Adapter 转换为标准请求，再由 `gate/runner.py` 判定。首次收到
-  `ask` 或 `deny` 时必须立即向研发工程师完整展示原因、处理动作和当前停止点，并停止
-  当前操作及所有依赖它的后续步骤；不得把阻断当作正常结果继续，不得改命令、改状态
-  文件或换工具绕过。
+- Workflow 在本地状态变更处执行流程门禁。失败时展示原因和停止点，停止依赖步骤，不手改状态文件绕过。Git/Jira/PR、编辑、构建和测试由 Agent 原生权限处理。
 - 接管、继续或 reset 成功只是流程恢复点，不是默认停点。选择现有 run 或 reset 是人工
   决策；选择完成后应继续核验 Jira、补齐准入、登记仓库并准备本地基线，直到遇到方案
   确认、风险授权、事实不可信或其它真实人工决策点。
@@ -70,7 +67,7 @@ GitHub MCP、`gh` 和其它 GitHub 工具不由 AgenticOps 绑定；Agent 依据
   执行受控 `workflow/task.py repository prepare`。该操作按已登记的 active 任务自动
   准备 Source Pool（`auto-clone` 模式会自动下载）和当前 run 的 linked worktree，固化
   `base_sha`，不要求预先签发 `task_execution` 授权；直接 Git clone、复用已有分支和
-  非受控 worktree 操作仍由 Gate 单独判定。
+  非受控 worktree 操作交由平台原生权限处理，不能作为受控基线的替代。
 - 只有 `repository prepare` 产出的本地任务 worktree、`base_sha` 和目录摘要才是任务的
   Git 基线。GitHub API、网页或其它远程只读源码只能标记为“远程候选参考”，不能写成
   “已核实基线”，也不能据此推进 `design_review`。本地基线完成后才能分析代码、形成
@@ -86,7 +83,7 @@ GitHub MCP、`gh` 和其它 GitHub 工具不由 AgenticOps 绑定；Agent 依据
 - 合并、发布、Tag、强推、历史改写、保护分支写入始终不在任务授权范围内。
 - 业务代码修改、构建和测试只能在当前任务 worktree 中进行；Product Root、Source Pool
   根目录、仓库主工作树和其它任务 worktree 不能作为任务写入目标。
-- Agent 从工作空间根使用 `./agenticops start <id>` 启动，并在同一会话完成任务。prepare 后必须执行 `python3 __AGENTIC_OPS_HOME__/workflow/task.py repository context --issue-key <JIRA-KEY> --json --dir <项目工作空间>`，只在返回的当前 issue/run worktree 中分析、修改、构建和测试。当前会话的 Git 副作用必须使用 `git -C <返回的 worktree> ...`；Gate 只接受当前任务已准备的精确路径。不得启动嵌套 Agent、切换工作空间或创建会话级“当前任务”状态。任务状态操作继续显式绑定 workspace、issue 和 run。
+- Agent 从工作空间根使用 `./agenticops start <id>` 启动，并在同一会话完成任务。prepare 后必须执行 `python3 __AGENTIC_OPS_HOME__/workflow/task.py repository context --issue-key <JIRA-KEY> --json --dir <项目工作空间>`，只在返回的当前 issue/run worktree 中分析、修改、构建和测试。当前会话的 Git 副作用必须使用 `git -C <返回的 worktree> ...`；执行前按 repository context 核对当前任务已准备的精确路径。不得启动嵌套 Agent、切换工作空间或创建会话级“当前任务”状态。任务状态操作继续显式绑定 workspace、issue 和 run。
 - 任务或工作空间清理必须先清理 linked worktree；脏 worktree 必须停止并保留现场。
 - 临时结束处理用 `deactivate`，恢复同一 run 用 `activate`；清理重做使用 cleanup 后
   精确绑定当前 `run_id` 的 `reset`。只有任务已 inactive、run 精确匹配且研发工程师明确
@@ -98,6 +95,6 @@ GitHub MCP、`gh` 和其它 GitHub 工具不由 AgenticOps 绑定；Agent 依据
 
 - Agent 原生入口只负责加载中央规则；不得把产品根目录的 Policy、Project 或 Skill
   复制成工作目录事实源。
-- Hook 负责强制副作用门禁。即使自然语言入口未被正确理解，也不得绕过 Hook。
-- Hook 必须按 Jira 任务号或 `repository + work_branch` 唯一解析 active 任务；没有
-  匹配或匹配多个任务时不得借用其它任务授权。
+- 状态写命令必须绑定当前 `--expected-run-id`，advance 另带 `--expected-stage`；从 status/next 读取并固定，拒绝后先核对变化。
+- Workflow 校验准入、确认与证据，只保证不满足条件不能推进；方案确认不代表每次原生工具调用均被拦截。Jira 同步保留准备与回读，不保证强制单次调用。
+- 旧接线迁移提示必须交给使用者核对，显式执行 `./agenticops repair --accept-checkpoint-migration`；不手改配置清除提示。

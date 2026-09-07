@@ -13,7 +13,13 @@
 - `task-state.schema.json`：每个 Jira 任务统一的阶段、事实、仓库和恢复状态。
 - `quality-action.schema.json`、`quality-state.schema.json`：任务 run 内质量检查、用户处置及外部证据回写的输入和恢复记录；不扩展任务状态机，也不代表外部系统事实已被认证。
 
+Manifest v2 新增可选 `retired_artifacts`，声明需要显式迁移的已托管产物；不生成平台特例或可写门禁档位。当前内置 Agent 的 artifacts 不包含通用 Hook。Gate v1 协议资产仍可独立测试和显式调用，但不再接入使用者原生工具；以下旧 Gate 目标字段不代表当前 Jira 同步有强制单次调用保证。
+
+Workflow CLI 的状态写命令现要求 `--expected-run-id`，advance 另要求 `--expected-stage`；缺参数明确失败，不替调用者读取并填充。任务状态文件结构不变，旧 run/历史证据保留。方案确认新增 `enforcement=workflow_checkpoints` 标记，授权绑定在检查点重查；新增 approved_plan_digest 绑定 fix_plan，旧记录不回填。init.json 的 checkpoint_migration 保存迁移前产品引用、接受时间与退役路径，仅为操作记录，不是身份认证。
+
 ## 兼容规则
+
+`authorization.py renew` 使用 expected-run-id 与 expected-authorization-digest 双重绑定，只延长未撤销、方案摘要及仓库绑定不变的授权有效期；renewals 保存决定者、确认来源、前后有效期和原授权摘要。`show --digest` 只输出当前授权的规范化 SHA256。任务的 `completed` 阶段是验收提交点；同 run 的 `advance --expected-stage ci_validation` 重试可以收敛授权撤销及注册状态，成功收敛后重复调用不再写入。除该终态恢复外，过期阶段请求仍拒绝。
 
 - 协议使用整数 `protocol_version`，Manifest 和操作词表使用 `schema_version`。
 - 新增可选字段或标准操作可以保持当前版本，但必须补充一致性测试。

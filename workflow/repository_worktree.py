@@ -912,10 +912,12 @@ def main():
     prefetch.add_argument("--dir", default=".")
     prepare = commands.add_parser("prepare")
     prepare.add_argument("--issue-key", required=True)
+    prepare.add_argument("--expected-run-id", required=True)
     prepare.add_argument("--reuse-existing-branch", action="store_true")
     prepare.add_argument("--dir", default=".")
     cleanup = commands.add_parser("cleanup")
     cleanup.add_argument("--issue-key", required=True)
+    cleanup.add_argument("--expected-run-id", required=True)
     cleanup.add_argument("--delete-branches", action="store_true")
     cleanup.add_argument("--dir", default=".")
     roots = commands.add_parser("roots")
@@ -932,11 +934,15 @@ def main():
             for report in reports:
                 print("%s：%s（%s）" % (report["repository"], report["status"], report["path"]))
         elif args.command == "prepare":
-            paths = prepare_task(args.dir, args.issue_key, reuse_existing_branch=args.reuse_existing_branch)
+            with task_store.task_run_lock(args.dir, args.issue_key):
+                task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
+                paths = prepare_task(args.dir, args.issue_key, reuse_existing_branch=args.reuse_existing_branch)
             for path in paths:
                 print(path)
         elif args.command == "cleanup":
-            result = cleanup_task(args.dir, args.issue_key, delete_branches=args.delete_branches)
+            with task_store.task_run_lock(args.dir, args.issue_key):
+                task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
+                result = cleanup_task(args.dir, args.issue_key, delete_branches=args.delete_branches)
             print("已清理 %s 个任务 worktree。" % len(result["removed"]))
             for branch in result["branches"]:
                 print(

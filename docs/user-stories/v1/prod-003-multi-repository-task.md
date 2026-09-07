@@ -7,7 +7,7 @@
 - 阶段不可跳跃；准入按项目规则核对，缺少授权或可靠仓库基线会阻断受影响步骤。启用质量处置模式时，普通缺项先披露，推进检查点必须有用户处置记录，不要求所有测试全绿。
 - 检查点包含多个检查项，每项绑定一个用例和一种验证方式；修复前后项分阶段到期，原始执行结果、用户选择和风险处置独立保存，具体操作见[质量检查与证据](../../usage/quality-checkpoints.md)。
 - `.agenticops/tasks/index.json` 统一注册多个任务及 active/inactive/completed 状态，任务事实、授权、事件和 CI 记录按 issue key 隔离。
-- 多个任务可同时 active；Workflow 显式绑定 issue key，Hook 按 Jira 任务号或仓库与工作分支唯一解析，歧义时失败关闭。
+- 多个任务可同时 active；Workflow 状态变更显式绑定 issue/run，advance 另绑定预期阶段，歧义或旧请求失败关闭；不依赖通用工具 Hook。
 - 一个授权绑定多个仓库，每仓独立校验 origin、分支、范围和验证方式。
 - 多个工作空间共享 `<pool>/<owner>/<repo>` 主工作树；任务修改只落在 `<workspace>/.agenticops/worktrees/<issue-key>/<run-id>/<owner>/<repo>`，准备前同步远端并固化 `base_sha`。
 - 同 run 恢复幂等；reset 创建新 run。清理拒绝脏 worktree，并与工作空间 purge 联动。

@@ -402,6 +402,30 @@ def remove_stale_artifacts(workspace, owned, expected_targets, tree):
             parent = parent.parent
 
 
+def check_checkpoint_migration(owned, manifests, accepted, tree):
+    """撤除已托管控制前显式确认；先检查所有目标，避免部分撤除。"""
+    retired = sorted({target for manifest in manifests.values()
+                      for target in manifest.get("retired_artifacts", []) if target in owned})
+    if not retired:
+        return []
+    if not accepted:
+        raise ValueError(
+            "需要显式迁移流程检查点：将撤除已托管 Agent Hook %s；Git/Jira/PR 不再自动进入 Gate，"
+            "方案确认只在 Workflow 检查点核验，Jira 不再保证强制单次调用。"
+            "请核对后执行 agenticops repair --workspace <当前工作空间> --accept-checkpoint-migration；"
+            "当前接线与任务状态保留。" % ", ".join(retired))
+    for target in retired:
+        record = owned[target]
+        if not tree.exists(target):
+            continue
+        if record.get("kind") != "file" or not record.get("sha256"):
+            raise ValueError("退役 Hook 缺少可验证归属哈希，拒绝删除：%s" % target)
+        if (tree.is_symlink(target) or not tree.is_file(target)
+                or content_hash(tree.read_text(target)) != record["sha256"]):
+            raise ValueError("旧 Hook 已被修改，拒绝迁移：%s" % target)
+    return retired
+
+
 def validate_workspace_document(install_root, document):
     project = document.get("project")
     agents = document.get("agents")
@@ -485,10 +509,13 @@ def main():
     parser.add_argument("--agent", action="append")
     parser.add_argument("--project")
     parser.add_argument("--repository-pool")
+    parser.add_argument("--accept-checkpoint-migration", action="store_true")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--refresh", action="store_true")
     mode.add_argument("--check", action="store_true")
     arguments = parser.parse_args()
+    if arguments.accept_checkpoint_migration and not arguments.refresh:
+        parser.error("--accept-checkpoint-migration 只能用于显式 repair/refresh")
 
     install_root = Path(arguments.install_home).resolve()
     workspace = Path(arguments.workspace).resolve()
@@ -513,6 +540,8 @@ def main():
                 parser.error("未安装项目适配：%s" % project)
 
             if arguments.check:
+                _, all_manifests = select(install_root, None)
+                check_checkpoint_migration(owned_artifacts(init, legacy), all_manifests, False, tree)
                 if legacy_workspace_schema:
                     parser.error("工作空间配置需要迁移 Source Pool 绑定，请执行 agenticops repair")
                 checked_project, checked_agents = check_workspace(
@@ -537,6 +566,16 @@ def main():
             )
             document = init_document(install_root, artifacts)
             owned = owned_artifacts(init, legacy)
+            _, all_manifests = select(install_root, None)
+            migrated = check_checkpoint_migration(owned, all_manifests, arguments.accept_checkpoint_migration, tree)
+            if init and init.get("checkpoint_migration"):
+                document["checkpoint_migration"] = init["checkpoint_migration"]
+            if migrated:
+                document["checkpoint_migration"] = {
+                    "from_product_ref": (init or {}).get("product_ref", "legacy"),
+                    "accepted_at": document["generated_at"],
+                    "retired_artifacts": migrated,
+                }
             assert_artifact_ownership(workspace, owned, artifacts, tree)
             remove_stale_artifacts(workspace, owned, set(artifacts), tree)
             workspace_config = workspace_document(

@@ -6,6 +6,19 @@
   "additionalProperties": false,
   "required": ["schema_version", "product_ref", "generated_at", "artifacts"],
   "properties": {
+    "checkpoint_migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from_product_ref", "accepted_at", "retired_artifacts"],
+      "properties": {
+        "from_product_ref": { "type": "string", "minLength": 1 },
+        "accepted_at": { "type": "string", "minLength": 1 },
+        "retired_artifacts": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
     "schema_version": { "enum": [1, 2] },
     "product_ref": { "type": "string", "minLength": 1 },
     "generated_at": { "type": "string", "minLength": 1 },

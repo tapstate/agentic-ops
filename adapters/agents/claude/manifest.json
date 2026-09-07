@@ -24,16 +24,13 @@
     {
       "template": "adapters/agents/claude/templates/CLAUDE.md",
       "target": "CLAUDE.md"
-    },
-    {
-      "template": "adapters/agents/claude/templates/settings.json",
-      "target": ".claude/settings.json"
     }
   ],
+  "retired_artifacts": [".claude/settings.json"],
   "launch": {
     "mode": "command",
     "command": "claude",
-    "message": "Claude 接线已生成。"
+    "message": "Claude 指引已接线；本地流程检查由 Workflow 执行，无通用工具 Hook。"
   },
   "skill_target": ".claude/skills"
 }

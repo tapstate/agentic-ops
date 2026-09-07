@@ -39,11 +39,11 @@ flowchart TD
 
 首个有意义提交并完成第一轮针对性验证后建议创建 Draft PR。若验证受阻，披露现状并按 TapData 标准中首个有意义提交／一个工作日要求处理；不等待全量验证全绿。正式提审与 Jira `PR Submitted` 仍遵循 `Tests Passed` 等外部条件。
 
-以上是现有 `task.py advance` 的强制检查点。Q2 是方案、验收方式和后续自动动作的一次性确认；Q3 只在全部已确认的修复后检查项已有当前完整 SHA 的预期结果时使用 `auto_checkpoint` 记录事实并回写 Jira。它不等同于用户验收，也不能在失败、跳过、未知、计划变化或外部回读不明时推进。Hook 继续执行既有操作授权和安全策略；本版不宣称拦截任意工具绕开 Workflow 的每一次质量相关操作。不要跳过 Workflow，也不要因本地处置而绕过服务端 Validator 或保护分支。
+以上是现有 `task.py advance` 的强制检查点。Q2 是方案、验收方式和后续自动动作的一次性确认；Q3 只在全部已确认的修复后检查项已有当前完整 SHA 的预期结果时使用 `auto_checkpoint` 记录事实并回写 Jira。它不等同于用户验收，也不能在失败、跳过、未知、计划变化或外部回读不明时推进。原生工具由平台权限处理；Workflow 只保证不满足条件不能推进。advance 需要 expected-run-id 和 expected-stage；Jira prepare/complete 需要 expected-run-id，均从当前 task.py status 固定。不要跳过 Workflow，也不要因本地处置而绕过服务端 Validator 或保护分支。
 
 ## 非阻断 Jira 状态同步
 
-接管从 `waiting_takeover` 进入 `task_intake` 前，Agent 先读取当前 Jira issue，并以 `jira_watermark.py prepare` 从工作空间绑定的 Product Root 生成当前 `agenticops_version`。当 Jira 的项目配置字段已经等于该版本时直接回读验证；否则，Gate 只为当前 task/run 的同一字段和载荷摘要放行一次明确 Jira 编辑工具的覆盖写入，随后必须以 `complete` 导入回读。字段写入、权限或回读不明确时不得重发；保留同一 run，并可使用新的只读 Jira 快照再次 `complete`。Product Root 版本或工作项类型变化时不得确认旧水印成功，也不得推进接管。
+接管从 `waiting_takeover` 进入 `task_intake` 前，Agent 先读取当前 Jira issue，并以 `jira_watermark.py prepare` 从工作空间绑定的 Product Root 生成当前 `agenticops_version`。当 Jira 的项目配置字段已经等于该版本时直接回读验证；否则，Agent 按准备信息调用原生 Jira 编辑工具覆盖该字段，随后以 `complete` 导入回读；不保证通过 Hook 强制限制调用次数。字段写入、权限或回读不明确时不得重发；保留同一 run，并可使用新的只读 Jira 快照再次 `complete`。Product Root 版本或工作项类型变化时不得确认旧水印成功，也不得推进接管。
 
 缺陷进入 `task_intake` 后，Agent 立即读取当前 Jira issue、当前用户和可用 transitions，以 `takeover` 节点执行一次 `jira_status.py prepare`。当前状态已是 `In Progress` 时直接记录；当前状态为 `Analyzed`、Assignee 为当前用户且 Jira 返回配置的 transition 时，工具生成精确 transition 意图，Agent 当场调用原生 Jira 工具一次并用 `complete` 导入回读。状态不匹配、必填字段缺失、权限或外部调用失败只记录和提示，不回退本地阶段、不重试。
 
@@ -66,15 +66,15 @@ Q4 有效确认并进入 `ci_validation` 后，以 `tests_passed` 节点执行�
 `linked_test_details` 只在 Tests Passed 或 PR Ready 核对时必需：它是 Agent 从 Jira/Xray Test Details 读取的事实，不由 AgenticOps 推断或写入。无法读取时，工具会要求用户提供关联 Test key、Test Type、用例版本引用和 Jira 来源。`Manual`、`TapTest`、`Unit` 是当前受管类型；`TapCE` 显式忽略但不算通过。若只有 TapCE、类型不支持、关联缺失或 Jira Validator 仍要求 TapCE，用户调整 Jira 或验收方案后重新读取并重做预检；不得盲目重放已经发起的 Jira 状态转换。
 
 ```sh
-python3 "$agenticops_root/workflow/jira_status.py" prepare \
+python3 "$agenticops_root/workflow/jira_status.py" prepare --expected-run-id "$task_run" \
   --issue-key "$task_key" --trigger takeover --input "$jira_snapshot" --dir "$project_workspace"
 
-python3 "$agenticops_root/workflow/jira_status.py" complete \
+python3 "$agenticops_root/workflow/jira_status.py" complete --expected-run-id "$task_run" \
   --issue-key "$task_key" --trigger takeover --outcome failed \
   --input "$jira_readback" --message "Jira 原始错误摘要" --dir "$project_workspace"
 ```
 
-`prepare.outcome=ready` 时只使用返回的 `transition_id` 调用一次原生 Jira transition；Hook 只对当前 task/run 的这条精确意图放行。调用超时或结果不明时先回读；已到目标状态由 `complete` 记为成功，否则按 `unknown` 记录，不盲目重放。同一 run 的同一节点再次 prepare 只返回原记录。
+`prepare.outcome=ready` 时只使用返回的 `transition_id` 调用一次原生 Jira transition；这是 Agent 协作约定，Workflow 不拦截原生调用。调用超时或结果不明时先回读；已到目标状态由 `complete` 记为成功，否则按 `unknown` 记录，不盲目重放。同一 run 的同一节点再次 prepare 只返回原记录。
 
 转换 metadata 标记的必填字段为空时，`prepare` 不尝试写入，按 Project `field_mappings` 输出字段名、采集时机、本地来源是否已具备、可否自动填写和处理方式。根因、Module、Tester、测试设计结论、Xray 和测试例外等专业事实不能由 Agent 猜测；可从本地已确认方案和证据形成填写依据，但必须由责任人确认后在 Jira/Xray 补齐并回读。当前节点不重新尝试，最终在 PR Ready 输出人工待办。
 
@@ -239,7 +239,7 @@ python3 "$agenticops_root/workflow/quality.py" apply \
 | `receipt` | `id/operation_id/result`；`created` 必须有 `comment_id`，或记 `unknown` |
 | `readback` | `id/operation_id/site/issue_key/comment_id/body/source_ref`；匹配后才为 `verified` |
 
-`proof.source` 支持 `user_message/jira_comment/review`，必须包含决定者、来源引用和带时区时间。该记录提供审计出处，不提供用户身份认证或密码学签名。Hook 及服务器权限仍是各自的控制边界。
+`proof.source` 支持 `user_message/jira_comment/review`，必须包含决定者、来源引用和带时区时间。该记录提供审计出处，不提供用户身份认证或密码学签名。平台和服务器权限负责外部操作，Workflow 在检查点核验记录。
 
 ## 回写和恢复
 

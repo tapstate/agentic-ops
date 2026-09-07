@@ -10,8 +10,8 @@
 退出码：0=所有返回的检查明确成功（不证明目标用例运行）；2=有失败检查（可进入修复流程）；3=需人工介入；4=参数/环境错误。
 
 用法：
-  python3 workflow/ci.py watch --issue-key TAP-123 --repo owner/repo --pr 42 [--dir .]
-  python3 workflow/ci.py record-fix --issue-key TAP-123 --pr 42 [--dir .]
+  python3 workflow/ci.py watch --issue-key TAP-123 --expected-run-id <当前-run-id> --repo owner/repo --pr 42 [--dir .]
+  python3 workflow/ci.py record-fix --issue-key TAP-123 --expected-run-id <当前-run-id> --pr 42 [--dir .]
   python3 workflow/ci.py status --issue-key TAP-123 --pr 42 [--dir .]
 
 依赖 gh CLI（已登录）。判定逻辑与 gh 解耦，可单测（classify / budget_left）。
@@ -165,7 +165,10 @@ def fetch_rollup(repo, pr):
 
 def cmd_watch(args):
     issue = task_store.resolve_active_issue(args.dir, args.issue_key)
-    state = load_state(args.dir, issue, args.pr, getattr(args, "repo", None))
+    with task_store.task_run_lock(args.dir, issue):
+        task_store.resolve_active_issue(args.dir, issue)
+        task_store.check_expected_run(args.dir, issue, getattr(args, "expected_run_id", None))
+        state = load_state(args.dir, issue, args.pr, getattr(args, "repo", None))
     started = time.time()
     first_seen = None
     head = ""
@@ -232,6 +235,7 @@ def _log(state, args, verdict, head, failing, checks=None):
     )
 
 
+@task_store.task_mutation
 def cmd_record_fix(args):
     issue = task_store.resolve_active_issue(args.dir, args.issue_key)
     state = load_state(args.dir, issue, args.pr, getattr(args, "repo", None))
@@ -257,6 +261,7 @@ def main():
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("watch")
+    p.add_argument("--expected-run-id", required=True)
     p.add_argument("--repo", required=True)
     p.add_argument("--pr", required=True)
     p.add_argument("--interval", type=int, default=POLL_INTERVAL)
@@ -267,6 +272,7 @@ def main():
     p.set_defaults(func=cmd_watch)
 
     p = sub.add_parser("record-fix")
+    p.add_argument("--expected-run-id", required=True)
     p.add_argument("--repo")
     p.add_argument("--pr", required=True)
     p.add_argument("--dir", default=".")

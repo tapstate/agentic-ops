@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """准备和记录一次非阻断 Jira 状态同步；实际 Jira 读写由 Agent 原生工具执行。
 
-每个 task/run/trigger 只准备一次。prepare 接受实时 Jira issue 与可用 transitions 快照，
+每个 task/run/trigger 幂等准备。外部工具由 Agent 原生权限执行，不保证强制单次调用。
+prepare 接受实时 Jira issue 与可用 transitions 快照，
 返回 transition 意图或跳过原因；complete 导入写后回读。任何结果都不改变本地任务阶段。
 """
 from __future__ import annotations
@@ -281,7 +282,7 @@ def complete(base, issue_key, trigger, outcome, snapshot, message):
     task = json.loads(task_store.task_path(base, issue_key).read_text(encoding="utf-8"))
     state = load_state(base, task)
     record = state["attempts"].get(trigger)
-    if not record or record.get("outcome") != "ready":
+    if not record or record.get("outcome") not in ("ready", "unknown", "failed"):
         raise ValueError("本节点没有待完成的 Jira 状态转换意图")
     _, _, status = issue_from(snapshot, issue_key)
     reached = status["name"] in record.get("target_statuses", [record["target_status"]])
@@ -305,11 +306,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("prepare")
+    p.add_argument("--expected-run-id", required=True)
     p.add_argument("--issue-key", required=True)
     p.add_argument("--trigger", choices=("takeover", "tests_passed"), required=True)
     p.add_argument("--input", required=True)
     p.add_argument("--dir", default=".")
     p = sub.add_parser("complete")
+    p.add_argument("--expected-run-id", required=True)
     p.add_argument("--issue-key", required=True)
     p.add_argument("--trigger", choices=("takeover", "tests_passed"), required=True)
     p.add_argument("--outcome", choices=("failed", "unknown"), required=True)
@@ -324,7 +327,10 @@ def main():
         task_store.workspace_project(args.dir)
         issue = task_store.resolve_active_issue(args.dir, args.issue_key)
         with task_store.task_run_lock(args.dir, issue):
+            task_store.resolve_active_issue(args.dir, issue)
             task = json.loads(task_store.task_path(args.dir, issue).read_text(encoding="utf-8"))
+            if args.command != "status":
+                task_store.check_expected_run(args.dir, issue, args.expected_run_id)
             if args.command == "prepare":
                 result = prepare(args.dir, issue, args.trigger, read_input(args.input))
             elif args.command == "complete":

@@ -21,9 +21,10 @@
   python3 workflow/task.py checklist --issue-key TAP-123 [--json]
   python3 workflow/task.py branch --repo tapdata/tapdata      # 查表解析分支，禁止猜测
   python3 workflow/task.py repository context --issue-key TAP-123 --json
-  python3 workflow/task.py record --issue-key TAP-123 --key problem_branch --value develop
-  python3 workflow/task.py advance --issue-key TAP-123 --note "准入三项必填齐备，见 Jira 评论"
-  python3 workflow/task.py block --issue-key TAP-123 --reason "缺问题版本，已写补卡评论"
+  python3 workflow/task.py record --issue-key TAP-123 --expected-run-id <当前-run-id> --key problem_branch --value develop
+  python3 workflow/task.py advance --issue-key TAP-123 --expected-run-id <当前-run-id> \
+    --expected-stage task_intake --note "准入三项必填齐备，见 Jira 评论"
+  python3 workflow/task.py block --issue-key TAP-123 --expected-run-id <当前-run-id> --reason "缺问题版本，已写补卡评论"
   python3 workflow/task.py status --issue-key TAP-123
   python3 workflow/task.py reset --issue-key TAP-123 --expected-run-id <当前-run-id> \
     --stage design_review --note "计划实质变更，重新确认"
@@ -41,7 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from gate import engine  # noqa: E402
-from workflow import issue_versions, jira_watermark, project_rules, quality, repository_worktree, task_store  # noqa: E402
+from workflow import authorization, issue_versions, jira_watermark, project_rules, quality, repository_worktree, task_store  # noqa: E402
 
 STAGES = [
     "waiting_takeover",
@@ -93,6 +94,8 @@ def revoke_authorization(base, issue_key, reason):
     if not path.is_file():
         return
     auth = json.loads(path.read_text(encoding="utf-8"))
+    if auth.get("status") == "revoked" and auth.get("revoked_reason") == reason:
+        return
     auth["status"] = "revoked"
     auth["revoked_at"] = now()
     auth["revoked_reason"] = reason
@@ -203,6 +206,7 @@ def cmd_init(args):
     return 0
 
 
+@task_store.task_mutation
 def cmd_record(args):
     task = require(args.dir, args.issue_key)
     if args.key == issue_versions.FACT or (args.key == "problem_version" and issue_versions.rules(args.dir, task)):
@@ -261,6 +265,7 @@ def cmd_issue_versions(args):
     return 0
 
 
+@task_store.task_mutation
 def cmd_repository_add(args):
     task = require(args.dir, args.issue_key)
     current_profile = profile(args.dir)
@@ -396,6 +401,7 @@ def repository_bindings(repositories):
     return [{key: item.get(key) for key in keys} for item in repositories]
 
 
+@task_store.task_mutation
 def cmd_repository_record(args):
     task = require(args.dir, args.issue_key)
     item = next(
@@ -420,6 +426,7 @@ def cmd_repository_record(args):
     return 0
 
 
+@task_store.task_mutation
 def cmd_repository_prepare(args):
     try:
         paths = repository_worktree.prepare_task(
@@ -436,6 +443,7 @@ def cmd_repository_prepare(args):
     return 0
 
 
+@task_store.task_mutation
 def cmd_repository_cleanup(args):
     try:
         result = repository_worktree.cleanup_task(
@@ -513,21 +521,27 @@ def _check_advance(task, target, base, spec):
                 '先执行：task.py record --issue-key %s --key verification --value "<命令 + 退出结果>"'
                 % task["issue_key"]
             )
-    if target == "implementation":
+    if target in ("implementation", "pr_review", "ci_validation", "completed"):
         if not task.get("repositories"):
             problems.append("进入 implementation 前至少确认一个任务仓库")
         auth, _ = engine.load_authorization_for_issue(base, task["issue_key"])
-        context = {"branch_relevant": False}
+        context = {"branch_relevant": False, "issue_key": task["issue_key"]}
         policy = engine.load_policy()
         valid, reasons = engine.check_authorization(auth, context, policy)
         if not valid:
-            problems.append("进入 implementation 需要有效授权：%s" % "；".join(reasons))
+            problems.append("进入 %s 需要有效方案确认：%s" % (target, "；".join(reasons)))
+            if reasons == ["授权已过期"]:
+                problems.append("方案与绑定未变时，可经人工明确确认后使用 authorization.py show --digest / renew 续签当前 run；不得自动续签")
         elif auth.get("issue_key") != task["issue_key"]:
             problems.append(
                 "授权 issue_key（%s）与任务（%s）不一致" % (auth.get("issue_key"), task["issue_key"])
             )
         elif auth.get("repositories") != repository_bindings(task.get("repositories", [])):
             problems.append("授权仓库集合与当前任务仓库集合不一致")
+        elif auth.get("agentic_run_id") != task.get("run_id"):
+            problems.append("方案确认的 run 与当前任务不一致")
+        elif auth.get("approved_plan_digest") and auth["approved_plan_digest"] != authorization.plan_digest(task):
+            problems.append("fix_plan 已变化，需要重新确认方案")
     if target == "completed":
         prepared = [
             item.get("repository")
@@ -542,14 +556,23 @@ def _check_advance(task, target, base, spec):
     return problems
 
 
+@task_store.task_mutation
 def cmd_advance(args):
-    issue = task_store.resolve_active_issue(args.dir, args.issue_key)
+    issue = task_store.resolve_issue(args.dir, args.issue_key)
     with task_store.task_run_lock(args.dir, issue):
         return _cmd_advance_locked(args)
 
 
 def _cmd_advance_locked(args):
-    task = require(args.dir, args.issue_key)
+    task = load(args.dir, args.issue_key)
+    # completed 是已核验的提交点；中断重试只收敛派生状态，不重复推进或重做验收。
+    if task["stage"] == "completed" and args.expected_stage in ("ci_validation", "completed"):
+        _finish_completion(args.dir, task)
+        print("任务已完成，授权及注册状态已收敛。")
+        return 0
+    task_store.resolve_active_issue(args.dir, args.issue_key)
+    if task.get("stage") != getattr(args, "expected_stage", None):
+        raise ValueError("任务阶段已变化或缺少 --expected-stage（当前 %s）；拒绝重复推进" % task.get("stage"))
     idx = STAGES.index(task["stage"])
     if idx + 1 >= len(STAGES):
         print("任务已在最终阶段 completed")
@@ -560,19 +583,24 @@ def _cmd_advance_locked(args):
         for p in problems:
             print("阻止推进：%s" % p, file=sys.stderr)
         return 3
-    if target == "completed":
-        revoke_authorization(args.dir, task["issue_key"], "task_completed")
     task["stage"] = target
     task["pending"] = None
     task["history"].append({"ts": now(), "event": "advance", "stage": target, "note": args.note})
     save(args.dir, task)
     if target == "completed":
-        task_store.set_status(args.dir, task["issue_key"], "completed")
+        _finish_completion(args.dir, task)
     print("已推进到阶段：%s（依据：%s）" % (target, args.note))
     _print_next(task)
     return 0
 
 
+def _finish_completion(base, task):
+    revoke_authorization(base, task["issue_key"], "task_completed")
+    if task_store.task_status(base, task["issue_key"]) != "completed":
+        task_store.set_status(base, task["issue_key"], "completed")
+
+
+@task_store.task_mutation
 def cmd_block(args):
     task = require(args.dir, args.issue_key)
     task["pending"] = {"ts": now(), "stage": task["stage"], "reason": args.reason}
@@ -663,6 +691,11 @@ NEXT_GUIDE = {
 
 
 def _print_next(task):
+    if not task.get("run_id"):
+        print("旧状态缺少 run_id：可查看历史，不得直接发起流程写入；需人工确认恢复方案。")
+        return
+    print("请求绑定：--expected-run-id %s --expected-stage %s（expected-stage 仅用于 advance）"
+          % (task["run_id"], task["stage"]))
     print("下一步：%s" % NEXT_GUIDE.get(task["stage"], ""))
     print("项目启用 recorded_decision 时，使用 quality.py status/apply 核对用例和用户处置；文本 verification 不代表通过。")
 
@@ -760,6 +793,7 @@ def cmd_status(args):
         print("无任务状态。")
         return 0
     print("任务：%s（%s）" % (task["issue_key"], task["task_class"]))
+    print("run：%s" % (task.get("run_id") or "旧状态未记录"))
     print("注册状态：%s" % task_store.task_status(args.dir, task["issue_key"]))
     print("阶段：%s" % task["stage"])
     if task.get("pending"):
@@ -793,6 +827,7 @@ def cmd_list(args):
     return 0
 
 
+@task_store.task_mutation
 def cmd_activate(args):
     try:
         issue = task_store.validate_issue_key(args.issue_key)
@@ -813,6 +848,7 @@ def cmd_activate(args):
     return 0
 
 
+@task_store.task_mutation
 def cmd_deactivate(args):
     try:
         issue = task_store.validate_issue_key(args.issue_key)
@@ -824,7 +860,7 @@ def cmd_deactivate(args):
     except ValueError as error:
         print("错误：%s" % error, file=sys.stderr)
         return 2
-    print("任务已停用：%s（状态和授权仍保留，但 Gate 不再加载）" % task_store.validate_issue_key(args.issue_key))
+    print("任务已停用：%s（状态和方案确认仍保留，推进前需要恢复）" % task_store.validate_issue_key(args.issue_key))
     return 0
 
 
@@ -970,6 +1006,7 @@ def main():
 
     p = sub.add_parser("advance")
     p.add_argument("--issue-key")
+    p.add_argument("--expected-stage", required=True, choices=STAGES)
     p.add_argument("--note", required=True)
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_advance)
@@ -1014,6 +1051,10 @@ def main():
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_purge)
 
+    for command in ("record", "advance", "block", "activate", "deactivate"):
+        sub.choices[command].add_argument("--expected-run-id", required=True)
+    for command in ("add", "record-result", "prepare", "cleanup"):
+        repository_sub.choices[command].add_argument("--expected-run-id", required=True)
     args = parser.parse_args()
     try:
         task_store.workspace_project(args.dir)

@@ -64,6 +64,11 @@
         }
       }
     },
+    "retired_artifacts": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
     "launch": {
       "type": "object",
       "additionalProperties": false,

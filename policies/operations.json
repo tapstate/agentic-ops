@@ -31,6 +31,7 @@
   },
   "authorization_scopes": {
     "task_execution": {
+      "enforcement": "workflow_checkpoints",
       "required_bindings": [
         "issue_key",
         "agentic_run_id",

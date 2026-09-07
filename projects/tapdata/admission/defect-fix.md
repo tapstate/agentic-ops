@@ -8,8 +8,10 @@
 ```sh
 python3 workflow/task.py checklist --task-class defect_fix          # 人读
 python3 workflow/task.py checklist --task-class defect_fix --json   # 机读
-python3 workflow/task.py record --issue-key <JIRA-KEY> --key <fact key> --value <值>
+python3 workflow/task.py record --issue-key <JIRA-KEY> --expected-run-id <当前-run-id> --key <fact key> --value <值>
 ```
+
+下文仅说明步骤；状态变更调用须带 `--expected-run-id`，`advance` 还须带 `--expected-stage`，值来自此前读取的当前任务状态。
 
 ## 核对项（缺项披露，在质量检查点记录处置）
 

@@ -64,6 +64,8 @@ def build_summary(task, auth, events, ci_states, spec, verification=None, qualit
     issue = (task or {}).get("issue_key", "（未初始化任务）")
     lines.append("### AI 执行证据总结：%s" % issue)
     lines.append("")
+    lines.append("检查边界：Workflow 核验本地流程条件；原生 Git/Jira/PR 不逐次经过 AgenticOps。历史 Gate 审计不代表本次外部调用已被授权核验。")
+    lines.append("")
 
     if task:
         lines.append("*任务类型*：%s　*当前阶段*：%s" % (task.get("task_class"), task.get("stage")))

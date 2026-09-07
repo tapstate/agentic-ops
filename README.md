@@ -17,7 +17,7 @@ AgenticOps 是公司级 Agentic 研发基础设施，为 Codex、Claude 及后�
 Agent 原生事件
     │
     ▼
-Agent / Tool Adapter → 标准请求 → Gate Core + Policy → 标准判定
+Agent 原生工具执行；Workflow 检查点 → Project / Policy / Gate 判定 → 状态与证据
                                       │
                               Workflow / Project
 ```

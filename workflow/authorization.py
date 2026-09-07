@@ -2,26 +2,31 @@
 """任务授权工具：按当前任务的多仓范围签发或撤销授权伞。
 
 签发即模拟"设计审查通过"这一人工节点：授权绑定任务、仓库、分支和计划版本，
-写入 `.agenticops/tasks/<issue-key>/authorization.json`。任何绑定不匹配时 Hook 会自动收回
-放行；停用一个任务不会删除其授权，但 Gate 只加载 active 任务。
+写入 `.agenticops/tasks/<issue-key>/authorization.json`。Workflow 在实现和验收检查点
+重新核验确认绑定；它不代表 Git/Jira/PR 每次原生调用均经过 AgenticOps 授权。
 
 用法：
   python3 workflow/authorization.py grant --issue-key TAP-123 --agent-id dev-bot-1 \
-      --plan-version v1 [--ttl-hours 8] [--dir <workspace>]
-  python3 workflow/authorization.py revoke --issue-key TAP-123 [--dir <workspace>]
+      --expected-run-id <当前-run-id> --plan-version v1 [--ttl-hours 8] [--dir <workspace>]
+  python3 workflow/authorization.py revoke --issue-key TAP-123 --expected-run-id <当前-run-id> [--dir <workspace>]
   python3 workflow/authorization.py show   --issue-key TAP-123 [--dir <workspace>]
+  python3 workflow/authorization.py show --issue-key TAP-123 --digest [--dir <workspace>]
+  python3 workflow/authorization.py renew --issue-key TAP-123 --expected-run-id <当前-run-id> \
+      --expected-authorization-digest <确认前摘要> --confirmed-by <决定者> --confirmation-ref <确认来源> [--ttl-hours 8]
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import math
 import sys
 import time
-import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from workflow import project_rules, task_store  # noqa: E402
+from gate import engine  # noqa: E402
 
 
 def repository_bindings(repositories):
@@ -37,6 +42,71 @@ def repository_bindings(repositories):
     return [{key: item.get(key) for key in keys} for item in repositories]
 
 
+def plan_digest(task):
+    value = json.dumps(task.get("facts", {}).get("fix_plan"), ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def record_digest(record):
+    return hashlib.sha256(json.dumps(record, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def check_catalog_bindings(base, repositories):
+    catalog = project_rules.load_repository_catalog(workspace=base)
+    for item in repositories:
+        entry = catalog.get("repositories", {}).get(item["repository"])
+        endpoint = project_rules.canonical_repository_endpoint(entry.get("origin") if isinstance(entry, dict) else None)
+        if not endpoint or item.get("authorized_endpoint") != endpoint:
+            raise ValueError("授权仓库 endpoint 与当前 Project catalog 不一致：%s" % item["repository"])
+
+
+@task_store.task_mutation
+def cmd_renew(args):
+    issue = task_store.resolve_active_issue(args.dir, args.issue_key)
+    task = task_store.check_expected_run(args.dir, issue, args.expected_run_id)
+    if task.get("stage") not in ("design_review", "implementation", "pr_review", "ci_validation"):
+        raise ValueError("当前阶段不允许续签")
+    if not args.confirmed_by.strip() or not args.confirmation_ref.strip():
+        raise ValueError("续签需要明确决定者和可回查的人工确认来源")
+    if not math.isfinite(args.ttl_hours) or args.ttl_hours <= 0:
+        raise ValueError("续签 ttl-hours 必须为有限正数")
+    path = task_store.authorization_path(args.dir, issue)
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("原授权无法读取，拒绝续签") from error
+    if not isinstance(record, dict) or record_digest(record) != args.expected_authorization_digest:
+        raise ValueError("原授权已变化，重新核对并确认后续签")
+    expiry = record.get("expires_at_epoch")
+    if type(expiry) not in (int, float) or not math.isfinite(expiry):
+        raise ValueError("原授权有效期无效，拒绝续签")
+    # 只忽略已经到期这一项，其余既有授权约束继续核验。
+    valid, reasons = engine.check_authorization(record, {"issue_key": issue, "branch_relevant": False},
+                                                engine.load_policy(), now=expiry)
+    if not valid:
+        raise ValueError("原授权不能续签：%s" % "；".join(reasons))
+    if (record.get("agentic_run_id") != task["run_id"]
+            or record.get("repositories") != repository_bindings(task.get("repositories", []))
+            or record.get("approved_plan_digest") != plan_digest(task)):
+        raise ValueError("方案、run 或仓库绑定已变化（或旧授权缺少方案摘要），必须重新设计确认")
+    check_catalog_bindings(args.dir, record["repositories"])
+    renewed_expiry = time.time() + args.ttl_hours * 3600
+    if not math.isfinite(renewed_expiry) or renewed_expiry <= expiry:
+        raise ValueError("续签有效期必须晚于原有效期")
+    history = record.setdefault("renewals", [])
+    if not isinstance(history, list):
+        raise ValueError("原授权续签历史无效")
+    history.append({"confirmed_by": args.confirmed_by, "confirmation_ref": args.confirmation_ref,
+                    "renewed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "previous_expires_at_epoch": expiry, "expires_at_epoch": renewed_expiry,
+                    "previous_authorization_digest": args.expected_authorization_digest})
+    record["expires_at_epoch"] = renewed_expiry
+    task_store._write_json_atomic(path, record)
+    print("已续签当前 run 的原方案确认：%s" % path)
+    return 0
+
+
+@task_store.task_mutation
 def cmd_grant(args):
     issue = task_store.validate_issue_key(args.issue_key)
     if issue not in task_store.registered_issues(args.dir, statuses=("active",)):
@@ -89,20 +159,22 @@ def cmd_grant(args):
         "scope": "task_execution",
         "status": "active",
         "issue_key": issue,
-        "agentic_run_id": task.get("run_id") or "run-" + uuid.uuid4().hex[:12],
+        "agentic_run_id": task["run_id"],
+        "enforcement": "workflow_checkpoints",
         "agent_id": args.agent_id,
         "approved_plan_version": args.plan_version,
+        "approved_plan_digest": plan_digest(task),
         "repositories": repository_bindings(repositories),
         "granted_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "expires_at_epoch": time.time() + args.ttl_hours * 3600,
     }
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(record, fh, ensure_ascii=False, indent=2)
+    task_store._write_json_atomic(path, record)
     print("已签发授权：%s" % path)
     print(json.dumps(record, ensure_ascii=False, indent=2))
     return 0
 
 
+@task_store.task_mutation
 def cmd_revoke(args):
     issue = task_store.resolve_issue(args.dir, args.issue_key)
     path = task_store.authorization_path(args.dir, issue)
@@ -113,8 +185,7 @@ def cmd_revoke(args):
         record = json.load(fh)
     record["status"] = "revoked"
     record["revoked_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(record, fh, ensure_ascii=False, indent=2)
+    task_store._write_json_atomic(path, record)
     print("已撤销授权：%s" % path)
     return 0
 
@@ -125,7 +196,8 @@ def cmd_show(args):
     if not path.is_file():
         print("无授权文件：%s" % path)
         return 0
-    print(path.read_text(encoding="utf-8"))
+    content = path.read_text(encoding="utf-8")
+    print(record_digest(json.loads(content)) if getattr(args, "digest", False) else content)
     return 0
 
 
@@ -135,19 +207,32 @@ def main():
 
     p_grant = sub.add_parser("grant")
     p_grant.add_argument("--issue-key", required=True)
+    p_grant.add_argument("--expected-run-id", required=True)
     p_grant.add_argument("--agent-id", required=True)
     p_grant.add_argument("--plan-version", required=True)
     p_grant.add_argument("--ttl-hours", type=float, default=8)
     p_grant.add_argument("--dir", default=".")
     p_grant.set_defaults(func=cmd_grant)
 
+    p_renew = sub.add_parser("renew")
+    p_renew.add_argument("--issue-key", required=True)
+    p_renew.add_argument("--expected-run-id", required=True)
+    p_renew.add_argument("--expected-authorization-digest", required=True)
+    p_renew.add_argument("--confirmed-by", required=True)
+    p_renew.add_argument("--confirmation-ref", required=True)
+    p_renew.add_argument("--ttl-hours", type=float, default=8)
+    p_renew.add_argument("--dir", default=".")
+    p_renew.set_defaults(func=cmd_renew)
+
     p_revoke = sub.add_parser("revoke")
     p_revoke.add_argument("--issue-key")
+    p_revoke.add_argument("--expected-run-id", required=True)
     p_revoke.add_argument("--dir", default=".")
     p_revoke.set_defaults(func=cmd_revoke)
 
     p_show = sub.add_parser("show")
     p_show.add_argument("--issue-key")
+    p_show.add_argument("--digest", action="store_true")
     p_show.add_argument("--dir", default=".")
     p_show.set_defaults(func=cmd_show)
 

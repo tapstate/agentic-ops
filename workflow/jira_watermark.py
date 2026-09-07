@@ -223,10 +223,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     prepare_parser = sub.add_parser("prepare")
+    prepare_parser.add_argument("--expected-run-id", required=True)
     prepare_parser.add_argument("--issue-key", required=True)
     prepare_parser.add_argument("--input", required=True)
     prepare_parser.add_argument("--dir", default=".")
     complete_parser = sub.add_parser("complete")
+    complete_parser.add_argument("--expected-run-id", required=True)
     complete_parser.add_argument("--issue-key", required=True)
     complete_parser.add_argument("--outcome", choices=("failed", "unknown"), required=True)
     complete_parser.add_argument("--input", required=True)
@@ -240,7 +242,10 @@ def main():
         task_store.workspace_project(args.dir)
         issue_key = task_store.resolve_active_issue(args.dir, args.issue_key)
         with task_store.task_run_lock(args.dir, issue_key):
+            task_store.resolve_active_issue(args.dir, issue_key)
             task = json.loads(task_store.task_path(args.dir, issue_key).read_text(encoding="utf-8"))
+            if args.command != "status":
+                task_store.check_expected_run(args.dir, issue_key, args.expected_run_id)
             if args.command == "prepare":
                 result = prepare(args.dir, issue_key, read_input(args.input))
             elif args.command == "complete":

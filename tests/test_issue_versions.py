@@ -132,7 +132,8 @@ class IssueVersionsTests(unittest.TestCase):
         self.assertEqual(issue_versions.problems(self.base, current), [])
         for key in ("problem_version", issue_versions.FACT):
             with self.assertRaisesRegex(ValueError, "不允许 record"):
-                task.cmd_record(SimpleNamespace(dir=self.base, issue_key="TAP-123", key=key, value="develop", force=True))
+                task.cmd_record(SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"],
+                                                key=key, value="develop", force=True))
         args.expected_run_id = "run-ffffffffffff"
         with self.assertRaisesRegex(ValueError, "run 已变化"): task.cmd_issue_versions(args)
         current["run_id"] = args.expected_run_id

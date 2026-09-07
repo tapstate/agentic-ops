@@ -66,7 +66,7 @@ cd "$HOME/agenticops-tapdata"
 ./agenticops start codex
 ```
 
-首次启动 Codex 时，按 `/hooks` 的提示审核并信任本项目生成的 Hook。首次使用 Jira 事实时，Agent 会检查必需插件并在缺失时引导安装和登录；GitHub 工具由 Agent 按任务自行选择。Claude Code 会读取工作空间生成的 `.mcp.json`；使用 Claude Code 时，将最后一行替换为 `./agenticops start claude`。
+新工作空间不生成通用 Agent Hook；旧工作空间若提示迁移，按[常见问题](usage/faq.md)显式核对和迁移。首次使用 Jira 事实时，Agent 会检查必需插件并在缺失时引导安装和登录；GitHub 工具由 Agent 按任务自行选择。Claude Code 会读取工作空间生成的 `.mcp.json`；使用 Claude Code 时，将最后一行替换为 `./agenticops start claude`。
 
 ## 4. 接管第一个任务
 
@@ -76,7 +76,7 @@ cd "$HOME/agenticops-tapdata"
 接管 TAP-123。
 ```
 
-Agent 会先读取 Jira 和项目准入规则，登记仓库并准备本地任务 worktree，然后给出方案。方案、风险和实现授权需要你确认；事实、权限或门禁不明确时，它会停下并说明下一步。接管不是自动提交、推送或合并：这些副作用仍受明确授权和 Gate 约束。
+Agent 会先读取 Jira 和项目准入规则，登记仓库并准备本地任务 worktree，然后给出方案。方案、风险和实现授权需要你确认；事实、权限或门禁不明确时，它会停下并说明下一步。接管不是自动提交、推送或合并：这些操作仍需用户授权并受平台与服务端权限约束；Workflow 只在检查点核对确认和证据。
 
 ## 接下来可能需要
 

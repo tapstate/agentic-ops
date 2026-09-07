@@ -391,7 +391,7 @@ class QualityTests(unittest.TestCase):
 
     def test_watch_records_unknown_as_handoff_and_preserves_raw_checks(self):
         args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr="8",
-                               interval=0, start_timeout=0, finish_timeout=0)
+                               interval=0, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
         checks = [{"name": "integration", "status": "COMPLETED", "conclusion": ""}]
         with mock.patch.object(ci, "fetch_rollup", return_value=(checks, "known-sha")):
             self.assertEqual(ci.cmd_watch(args), 3)
