@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from workflow import project_rules, task_store  # noqa: E402
+from workflow import project_rules, quality, task_store  # noqa: E402
 from gate import engine  # noqa: E402
 
 
@@ -77,6 +77,9 @@ def cmd_renew(args):
         raise ValueError("原授权无法读取，拒绝续签") from error
     if not isinstance(record, dict) or record_digest(record) != args.expected_authorization_digest:
         raise ValueError("原授权已变化，重新核对并确认后续签")
+    q1_digest, q2_digest = record.get("approved_q1_digest"), record.get("approved_q2_digest")
+    if not isinstance(q1_digest, str) or not q1_digest or not isinstance(q2_digest, str) or not q2_digest:
+        raise ValueError("旧授权缺少有效 Q1/Q2 方案确认摘要；可在原有效期内继续，但续签前必须重新确认方案")
     expiry = record.get("expires_at_epoch")
     if type(expiry) not in (int, float) or not math.isfinite(expiry):
         raise ValueError("原授权有效期无效，拒绝续签")
@@ -87,7 +90,9 @@ def cmd_renew(args):
         raise ValueError("原授权不能续签：%s" % "；".join(reasons))
     if (record.get("agentic_run_id") != task["run_id"]
             or record.get("repositories") != repository_bindings(task.get("repositories", []))
-            or record.get("approved_plan_digest") != plan_digest(task)):
+            or record.get("approved_plan_digest") != plan_digest(task)
+            or q1_digest != quality.q1_digest(args.dir, task)
+            or q2_digest != quality.q2_digest(args.dir, task)):
         raise ValueError("方案、run 或仓库绑定已变化（或旧授权缺少方案摘要），必须重新设计确认")
     check_catalog_bindings(args.dir, record["repositories"])
     renewed_expiry = time.time() + args.ttl_hours * 3600
@@ -127,6 +132,12 @@ def cmd_grant(args):
     if task.get("stage") != "design_review":
         print("错误：只能在 design_review 阶段签发任务授权", file=sys.stderr)
         return 2
+    try:
+        approved_q1_digest = quality.q1_digest(args.dir, task)
+        approved_q2_digest = quality.q2_digest(args.dir, task)
+    except ValueError as error:
+        print("错误：签发授权前必须完成 Q1/Q2 且方案无缺口：%s" % error, file=sys.stderr)
+        return 2
     repositories = task.get("repositories")
     if not isinstance(repositories, list) or not repositories:
         print("错误：授权前至少确认一个任务仓库", file=sys.stderr)
@@ -164,6 +175,8 @@ def cmd_grant(args):
         "agent_id": args.agent_id,
         "approved_plan_version": args.plan_version,
         "approved_plan_digest": plan_digest(task),
+        "approved_q1_digest": approved_q1_digest,
+        "approved_q2_digest": approved_q2_digest,
         "repositories": repository_bindings(repositories),
         "granted_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "expires_at_epoch": time.time() + args.ttl_hours * 3600,

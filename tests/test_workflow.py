@@ -115,6 +115,16 @@ def confirm_fixture_checkpoint(ws, checkpoint):
 
     if checkpoint == "q2-plan":
         repository = task_doc["repositories"][0]
+        task_doc["facts"]["fix_plan"] = {
+            "format": "structured-v1",
+            "problem_statements": [{"id": "P1", "text": "固定夹具目标行为", "source_ref": "fixture:jira"}],
+            "evidence": [{"id": "F1", "source_ref": "fixture:source", "observation": "夹具源码与基线已核对"}],
+            "hypotheses": [{"id": "H1", "explains": ["P1"], "evidence_ids": ["F1"], "status": "confirmed", "falsifier": "针对性验证不再复现"}],
+            "blocking_inputs": [], "changes": [{"scope": "固定夹具范围", "hypothesis_ids": ["H1"]}],
+            "risks": ["仅夹具"], "rollback": "回退夹具变更",
+            "test_links": [{"item_id": "fixture-after-fix", "case_status": "proposed", "owner": "fixture-tester"}],
+        }
+        task_store._write_json_atomic(task_store.task_path(ws, "TAP-123"), task_doc)
         plan = {"id": "fixture-after-fix", "checkpoint": "q4-acceptance", "timing": "after_fix",
                 "case_ref": "fixture:after-fix", "case_version": "fixture-v1", "case_status": "proposed",
                 "method": "integration", "repository": repository["repository"], "target_revision": repository["base_sha"],
@@ -139,7 +149,7 @@ def confirm_fixture_checkpoint(ws, checkpoint):
                                   "reason": "夹具中的全部已选修复后检查项均有最终 SHA 的预期结果"})
     else:
         apply("checkpoint", {"checkpoint": checkpoint, "digest": view["checkpoints"][checkpoint]["digest"], "decision": {
-            "outcome": "not_applicable", "reason": "此夹具验证任务基础能力，质量场景由 test_quality 覆盖",
+            "outcome": "accept" if checkpoint == "q2-plan" else "not_applicable", "reason": "此夹具验证任务基础能力，质量场景由 test_quality 覆盖",
             "proof": {"actor": "fixture-user", "source": "user_message", "reference": "fixture:decision",
                       "at": "2026-09-03T10:00:00+08:00"}}})
     apply("draft", {"id": checkpoint, "checkpoint": checkpoint, "body": view["checkpoints"][checkpoint]["publication_body"]})
@@ -821,10 +831,18 @@ def main():
             encoding="utf-8",
         )
         code, out = grant(ws, issue="TAP-123")
-        check("可信 endpoint 可形成任务授权", code, 0)
+        check("Q1/Q2 未确认时拒绝签发授权", code, 2)
+        confirm_fixture_checkpoint(ws, "q2-plan")
+        code, out = grant(ws, issue="TAP-123")
+        check("仅 Q2 确认时拒绝签发授权", code, 2)
+        confirm_fixture_checkpoint(ws, "q1-intake")
+        code, out = grant(ws, issue="TAP-123")
+        check("Q1/Q2 确认后可形成任务授权", code, 0)
         issued_authorization = json.loads(
             task_store.authorization_path(ws, "TAP-123").read_text(encoding="utf-8")
         )
+        check("authorization 绑定 Q2 摘要", bool(issued_authorization.get("approved_q2_digest")), True)
+        check("authorization 绑定 Q1 摘要", bool(issued_authorization.get("approved_q1_digest")), True)
         check(
             "authorization 固化任务的 canonical endpoint",
             {
@@ -833,8 +851,6 @@ def main():
             },
             expected_endpoints,
         )
-        confirm_fixture_checkpoint(ws, "q1-intake")
-        confirm_fixture_checkpoint(ws, "q2-plan")
         code, out = run_tool("task.py", "advance", "--note", "设计已确认+授权签发", cwd=ws)
         check("正确授权后进入 implementation", code, 0)
         run_tool("task.py", "activate", "--issue-key", "TAP-999", cwd=ws)

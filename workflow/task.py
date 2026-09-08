@@ -249,13 +249,23 @@ def cmd_record(args):
             file=sys.stderr,
         )
         return 2
-    if not str(args.value).strip():
+    value = args.value
+    if getattr(args, "input", None):
+        if args.key != "fix_plan":
+            raise ValueError("--input 仅用于以 JSON 对象记录 fix_plan")
+        try:
+            value = json.loads(Path(args.input).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("无法读取 fix_plan JSON：%s" % error) from error
+        if not isinstance(value, dict):
+            raise ValueError("fix_plan JSON 必须是对象")
+    if not (isinstance(value, dict) or str(value).strip()):
         print("错误：%s 的值为空，空值等于没记录" % args.key, file=sys.stderr)
         return 2
-    task["facts"][args.key] = args.value
-    task["history"].append({"ts": now(), "event": "record", "key": args.key, "value": args.value})
+    task["facts"][args.key] = value
+    task["history"].append({"ts": now(), "event": "record", "key": args.key, "value": value})
     save(args.dir, task)
-    print("已记录：%s = %s" % (args.key, args.value))
+    print("已记录：%s = %s" % (args.key, json.dumps(value, ensure_ascii=False) if isinstance(value, dict) else value))
     return 0
 
 
@@ -635,6 +645,16 @@ def _check_advance(task, target, base, spec):
             problems.append("方案确认的 run 与当前任务不一致")
         elif auth.get("approved_plan_digest") and auth["approved_plan_digest"] != authorization.plan_digest(task):
             problems.append("fix_plan 已变化，需要重新确认方案")
+        elif "approved_q1_digest" in auth or "approved_q2_digest" in auth:
+            q1_digest, q2_digest = auth.get("approved_q1_digest"), auth.get("approved_q2_digest")
+            if not isinstance(q1_digest, str) or not q1_digest or not isinstance(q2_digest, str) or not q2_digest:
+                problems.append("授权中的 Q1/Q2 确认摘要无效，需要重新确认方案")
+            else:
+                try:
+                    if q1_digest != quality.q1_digest(base, task) or q2_digest != quality.q2_digest(base, task):
+                        problems.append("Q1/Q2 方案或验收项已变化，需要重新确认方案")
+                except ValueError as error:
+                    problems.append("Q1/Q2 方案确认无效：%s" % error)
     if target == "completed":
         prepared = [
             item.get("repository")
@@ -1054,7 +1074,9 @@ def main():
     p = sub.add_parser("record")
     p.add_argument("--issue-key")
     p.add_argument("--key", required=True)
-    p.add_argument("--value", required=True)
+    value = p.add_mutually_exclusive_group(required=True)
+    value.add_argument("--value")
+    value.add_argument("--input", help="fix_plan 的结构化 JSON 文件")
     p.add_argument("--force", action="store_true", help="允许记录清单外的自定义 fact key")
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_record)

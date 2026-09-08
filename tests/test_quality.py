@@ -43,7 +43,13 @@ class QualityTests(unittest.TestCase):
         (self.base / ".agenticops").mkdir()
         (self.base / ".agenticops/workspace.json").write_text(json.dumps({"project": "tapdata", "product_root": str(product)}))
         self.task = {"issue_key": "TAP-123", "run_id": "run-0123456789ab", "task_class": "defect_fix",
-                     "stage": "implementation", "facts": {"fix_plan": "修正目标断言的实现并回归，风险限定在夹具"}, "repositories": [
+                     "stage": "implementation", "facts": {"fix_plan": {
+                         "format": "structured-v1",
+                         "problem_statements": [{"id": "P1", "text": "夹具目标行为错误", "source_ref": "fixture:issue"}],
+                         "evidence": [{"id": "F1", "source_ref": "fixture:source", "observation": "夹具可稳定验证当前行为"}],
+                         "hypotheses": [{"id": "H1", "explains": ["P1"], "evidence_ids": ["F1"], "status": "confirmed", "falsifier": "针对性断言不再失败"}],
+                         "blocking_inputs": [], "changes": [{"scope": "夹具实现", "hypothesis_ids": ["H1"]}],
+                         "risks": ["仅夹具范围"], "rollback": "回退夹具改动", "test_links": []}}, "repositories": [
                          {"repository": "tapdata/tapdata", "approved_scope": "bug-fix"},
                          {"repository": "tapdata/tapdata-manager", "approved_scope": "bug-fix"}],
                      "pending": None, "history": []}
@@ -60,15 +66,44 @@ class QualityTests(unittest.TestCase):
         return quality.apply(self.base, "TAP-123", self.task["run_id"], self.view()["revision"],
                              {"action": action, "payload": payload})
 
-    def plan(self, key="case-a", method="integration", before=False, repo="tapdata/tapdata"):
+    def plan(self, key="case-a", method="integration", before=False, repo="tapdata/tapdata", case_status="existing"):
         plan = {"id": key, "checkpoint": "q2-plan" if before else "q4-acceptance",
                 "timing": "before_fix" if before else "after_fix", "case_ref": "case:" + key,
-                "case_version": "test-v1", "case_status": "existing", "method": method,
+                "case_version": "test-v1", "case_status": case_status, "method": method,
                 "repository": repo, "target_revision": "a" * 40, "criterion": "目标行为符合预期",
                 "steps": "启动测试服务，执行目标操作，检查日志和返回结果",
                 "expected_result": "FAIL" if before else "PASS", "scope": "目标故障路径"}
         self.apply("item", {"plan": plan, "reason": "已有覆盖，建议复用"})
+        if not before:
+            self.task["facts"]["fix_plan"]["test_links"] = [
+                {"item_id": item_key, "case_status": item["plan"]["case_status"],
+                 **({"source_ref": "fixture:jira/" + item["plan"]["case_ref"]}
+                    if item["plan"]["case_status"] == "existing" else {"owner": "fixture-tester"})}
+                for item_key, item in quality.replay(quality.load(self.base, self.task))["items"].items()
+                if item["plan"]["timing"] == "after_fix"
+            ]
+            self.save_task()
         return plan
+
+    def test_q2_blocks_missing_input_and_unproven_problem(self):
+        self.plan(); self.select()
+        self.task["facts"]["fix_plan"]["blocking_inputs"] = [{"request": "提供启动日志", "owner": "研发"}]
+        self.save_task()
+        with self.assertRaisesRegex(ValueError, "关键输入"):
+            self.checkpoint("q2-plan")
+        self.task["facts"]["fix_plan"]["blocking_inputs"] = []
+        self.task["facts"]["fix_plan"]["hypotheses"][0]["status"] = "hypothesis"
+        self.save_task()
+        with self.assertRaisesRegex(ValueError, "尚无已证实根因"):
+            self.checkpoint("q2-plan")
+
+    def test_proposed_test_key_does_not_invalidate_q2_selection(self):
+        self.plan(case_status="proposed"); self.select()
+        self.assertTrue(self.view()["items"]["case-a"]["selected"])
+        state = quality.load(self.base, self.task)
+        model = quality.replay(state)
+        model["items"]["case-a"]["plan"].update(case_ref="TAP-456", case_version="jira-v2")
+        self.assertTrue(quality.item_view(model["items"]["case-a"], quality.config(self.base), quality.context(self.base, self.task))["selected"])
 
     def select(self, key="case-a"):
         return self.apply("select", {"item_id": key, "digest": self.view()["items"][key]["plan_digest"], "proof": proof()})

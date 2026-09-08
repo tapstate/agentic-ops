@@ -43,7 +43,7 @@ flowchart TD
 | 检查点 | 核对内容 | 当前阶段强制点 |
 |---|---|---|
 | Q1 接管与盘点 | Jira 任务事实和缺失信息；接管不要求预先存在 Test | Q1、Q2 的用户处置在进入 `implementation` 前检查；缺普通信息可先分析，仓库基线与权限仍须可靠 |
-| Q2 方案与验收 | 根因、修复范围、验收场景、每项预期和方式、修复前复现，以及合格 Q3 事实回写/推送/Draft PR 的授权 | 一次确认进入 `implementation`；Test 的定义和编写由用户与 Agent 处理 |
+| Q2 方案与验收 | 已验证事实、根因假设、缺失输入、修复范围、验收场景、每项预期和方式，以及 Test 复用/创建关联意图 | 只有无关键缺口且用户确认后才可签发并进入 `implementation`；Test 的定义和编写由用户与 Agent 处理 |
 | Q3 首轮验证与 Draft PR | Q2 已选的全部修复后检查项在最终完整 SHA 上的首轮结果、可审阅变更和风险 | 自动事实检查点，不再重复要求用户接受首轮验证；任一结果不符合预期、证据不完整时停止相应验收；评论回读不明仅记警告 |
 | Q4 关联用例验收 | 编码后 Jira「已链接工作项」中的 Test、Test Type、用例版本、当前代码、执行证据和用户逐项确认 | 进入 `ci_validation` 前；只有全部受管用例 PASS 才可尝试 Tests Passed |
 | Q5 审查及 CI | PR 仓库与 Head、检查结果、目标用例是否运行、审查或合入的回读事实 | Q5、Q6 在本地 `completed` 前 |
@@ -51,7 +51,7 @@ flowchart TD
 
 首个有意义提交并完成第一轮针对性验证后建议创建 Draft PR。若验证受阻，披露现状并按 TapData 标准中首个有意义提交／一个工作日要求处理；不等待全量验证全绿。正式提审与 Jira `PR Submitted` 仍遵循 `Tests Passed` 等外部条件。
 
-以上是现有 `task.py advance` 的强制检查点。Q2 是方案、验收方式和后续自动动作的一次性确认；Q3 只在全部已确认的修复后检查项已有当前完整 SHA 的预期结果时使用 `auto_checkpoint` 记录事实并回写 Jira。它不等同于用户验收，也不能在失败、跳过、未知、计划变化时推进。原生工具由平台权限处理；Workflow 只保证不满足条件不能推进。advance 需要 expected-run-id 和 expected-stage；Jira prepare/complete 需要 expected-run-id，均从当前 task.py status 固定。不要跳过 Workflow，也不要因本地处置而绕过服务端 Validator 或保护分支。
+以上是现有 `task.py advance` 的强制检查点。Q2 的 `fix_plan` 必须以 `structured-v1` JSON 记录：每个问题现象及来源、可回查证据、可证伪假设、未取得的关键输入、修改范围、风险、回滚以及每个验收项的 Test 关联意图。缺输入时只输出一次性材料清单，不得签发授权或将假设称为根因。`case_status=existing` 表示复用已回读的 Test，必须保留 Jira 来源；`case_status=proposed` 表示确认创建并关联的意图，必须提供步骤、预期、方式和责任人。Q4 才回读真实关联、版本和执行结果；计划创建的 Test 在创建后补入真实 key/version 不会推翻 Q2 的创建意图。Q3 只在全部已确认的修复后检查项已有当前完整 SHA 的预期结果时使用 `auto_checkpoint` 记录事实并回写 Jira。它不等同于用户验收，也不能在失败、跳过、未知、计划变化时推进。原生工具由平台权限处理；Workflow 只保证不满足条件不能推进。advance 需要 expected-run-id 和 expected-stage；Jira prepare/complete 需要 expected-run-id，均从当前 task.py status 固定。不要跳过 Workflow，也不要因本地处置而绕过服务端 Validator 或保护分支。
 
 ## 非阻断 Jira 状态同步
 
