@@ -160,9 +160,11 @@ class IssueVersionsTests(unittest.TestCase):
         task.save(self.base, self.task)
         path = self.base / "input.json"; path.write_text(json.dumps(self.payload))
         args = SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"], input=str(path))
-        with mock.patch.object(issue_versions, "remote_refs", return_value=self.refs), contextlib.redirect_stdout(io.StringIO()):
+        with mock.patch.object(task.repository_worktree, "task_roots", return_value=[self.base]), \
+                mock.patch.object(issue_versions, "remote_refs", return_value=self.refs), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(task.cmd_issue_versions(args), 0)
-        with mock.patch.object(issue_versions, "remote_refs", return_value=self.refs), contextlib.redirect_stdout(io.StringIO()):
+        with mock.patch.object(task.repository_worktree, "task_roots", return_value=[self.base]), \
+                mock.patch.object(issue_versions, "remote_refs", return_value=self.refs), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(task.cmd_issue_versions(args), 0)
 
     def test_next_is_read_only_and_reports_real_blockers(self):

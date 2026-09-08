@@ -155,6 +155,7 @@ def confirm_fixture_checkpoint(ws, checkpoint):
 
 
 def main():
+    subprocess.run([sys.executable, str(ROOT / "tests/test_repository_recovery.py")], check=True)
     ws = Path(tempfile.mkdtemp(prefix="aogate-wf-"))
     try:
         retry_clone_path = ws / "retry-clone"
@@ -481,6 +482,13 @@ def main():
         )
         check("仅登记远程 SHA 不能进入 design_review", code, 3)
         check("设计基线门禁要求受控 worktree", "受控 worktree" in out, True)
+        # 恢复污染前的未准备夹具；后续 origin 校验不应依赖 prepare 覆盖伪造基线。
+        for item in remote_only["repositories"]:
+            item["base_sha"] = None
+            item["catalog_digest"] = None
+        task_store.task_path(ws, "TAP-123").write_text(
+            json.dumps(remote_only, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
 
         run_tool("task.py", "activate", "--issue-key", "TAP-999", cwd=ws)
         code, out = run_tool(
@@ -920,7 +928,10 @@ def main():
         check("残留本地任务分支不会被静默复用", code, 2)
         check("残留分支错误给出显式复用指引", "--reuse-existing-branch" in out, True)
         code, out = run_tool(
-            "task.py", "repository", "prepare", "--reuse-existing-branch", cwd=ws
+            "task.py", "repository", "prepare", "--reuse-existing-branch",
+            *[arg for item in prepared_task["repositories"]
+              for arg in ("--continuation-base", item["repository"] + "=" + item["base_sha"])],
+            cwd=ws,
         )
         check("用户显式确认后可复用残留任务分支", code, 0)
         code, out = run_tool(

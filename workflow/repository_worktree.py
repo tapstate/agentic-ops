@@ -439,7 +439,38 @@ def prefetch_project_repositories(workspace):
     return reports
 
 
-def _prepare_repository(workspace, task, item, *, reuse_existing_branch=False):
+def continuation_bases(values):
+    """显式续办比较基线；不从分支名或 merge-base 猜测历史起点。"""
+    result = {}
+    for value in values or []:
+        repository, separator, sha = value.partition("=")
+        if (not separator or not REPOSITORY_PATTERN.fullmatch(repository)
+                or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha)
+                or repository in result):
+            raise ValueError("续办基线必须唯一且使用 owner/repo=<完整 SHA>：%s" % value)
+        result[repository] = sha
+    return result
+
+
+def _require_ancestor(main, base, head, repository):
+    result = _run(
+        ["git", "-C", str(main), "merge-base", "--is-ancestor", base, head],
+        check=False,
+    )
+    if result.returncode not in (0, 1):
+        raise ValueError("无法核验仓库 %s 的祖先关系：base_sha=%s，head=%s，Git exit=%s"
+                         % (repository, base, head, result.returncode))
+    if result.returncode != 0:
+        raise ValueError(
+            "仓库 %s 的续办/准备基线不是 Head 的祖先：base_sha=%s，head=%s；"
+            "继续已有分支请核验原基线并传 --continuation-base；"
+            "新分支处理请先 cleanup/reset 后 repository update。Git exit=%s"
+            % (repository, base, head, result.returncode)
+        )
+
+
+def _prepare_repository(workspace, task, item, *, reuse_existing_branch=False,
+                        continuation_base=None, continuation_head=None):
     binding, product_root, pool_root = workspace_binding(workspace)
     _progress("仓库 %s：校验项目目录与任务授权" % item["repository"])
     catalog = _catalog(workspace)
@@ -483,6 +514,7 @@ def _prepare_repository(workspace, task, item, *, reuse_existing_branch=False):
     _progress("仓库 %s：快进同步本地主工作树" % item["repository"])
     _run(["git", "-C", str(main), "merge", "--ff-only", base_ref])
     base_sha = _run(["git", "-C", str(main), "rev-parse", "--verify", base_ref]).stdout.strip()
+    target_sha = base_sha
     path = task_worktree_path(workspace, task, item["repository"])
     existing = item.get("worktree")
     if existing and existing.get("status") == "prepared":
@@ -493,7 +525,13 @@ def _prepare_repository(workspace, task, item, *, reuse_existing_branch=False):
         ).stdout.strip()
         if branch != item["work_branch"]:
             raise ValueError("任务 worktree 分支漂移：%s" % path)
+        if continuation_head and _run([
+            "git", "-C", str(path), "rev-parse", "HEAD"
+        ]).stdout.strip() != continuation_head:
+            raise ValueError("本地工作分支与预期 PR Head 不一致；保留现场")
         frozen_base = item.get("base_sha") or ""
+        if continuation_base and continuation_base != frozen_base:
+            raise ValueError("已有 run 的冻结基线不可改变：%s" % item["repository"])
         if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", frozen_base):
             raise ValueError(
                 "任务仓库缺少有效冻结 base_sha：%s；请清理后重新准备"
@@ -541,26 +579,85 @@ def _prepare_repository(workspace, task, item, *, reuse_existing_branch=False):
             "本地任务分支已存在：%s；请换用新分支，或显式传入 --reuse-existing-branch"
             % item["work_branch"]
         )
+    remote_head = None
+    if not branch_exists and continuation_head:
+        # 仅获取已登记的同源分支；不按 SHA 猜来源，不覆盖任何本地分支。
+        _progress("仓库 %s：获取续办分支 %s" % (item["repository"], item["work_branch"]))
+        _run(["git", "-C", str(main), "fetch", "--no-tags", "origin",
+              "refs/heads/" + item["work_branch"]])
+        remote_head = _run(["git", "-C", str(main), "rev-parse", "FETCH_HEAD^{commit}"]).stdout.strip()
+        if remote_head != continuation_head:
+            raise ValueError("远端工作分支 Head 已变化：期望 %s，实际 %s；重新回读 PR 后决定"
+                             % (continuation_head, remote_head))
+    if continuation_base and not branch_exists and not remote_head:
+        raise ValueError("续办基线仅允许用于已存在的工作分支：%s" % item["work_branch"])
+    if item.get("base_sha") and not branch_exists and not remote_head:
+        raise ValueError("冻结基线的工作分支已缺失，不能创建新分支冒充续办；请核对现场后 cleanup/reset")
+    baseline_source = "target_branch"
+    branch_head = None
+    if branch_exists or remote_head:
+        branch_head = remote_head or _run([
+            "git", "-C", str(main), "rev-parse", "refs/heads/%s" % item["work_branch"]
+        ]).stdout.strip()
+        if continuation_head and branch_head != continuation_head:
+            raise ValueError("本地工作分支与预期 PR Head 不一致；保留现场")
+        # cleanup 后同一 run 仍有 base_sha 时，必须延续原基线。
+        frozen = item.get("base_sha")
+        if frozen and item.get("catalog_digest") != _catalog_digest(workspace):
+            raise ValueError("项目仓库目录已变化，冻结基线绑定失效；请 cleanup/reset")
+        if frozen and continuation_base and frozen != continuation_base:
+            raise ValueError("已有 run 的冻结基线不可改变：%s" % item["repository"])
+        if frozen or continuation_base:
+            base_sha = frozen or continuation_base
+            if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base_sha):
+                raise ValueError("续办基线不是完整 SHA：%s" % item["repository"])
+            _run(["git", "-C", str(main), "cat-file", "-e", "%s^{commit}" % base_sha])
+            baseline_source = "frozen" if frozen else "explicit_continuation"
+            if not frozen:
+                _require_ancestor(main, base_sha, target_sha, item["repository"])
+        _require_ancestor(main, base_sha, branch_head, item["repository"])
+    prepared_catalog = _catalog_digest(workspace)
     path.parent.mkdir(parents=True, exist_ok=True)
     _progress("仓库 %s：创建任务 worktree %s" % (item["repository"], path))
     if branch_exists:
         _run(["git", "-C", str(main), "worktree", "add", str(path), item["work_branch"]])
     else:
         _run(
-            ["git", "-C", str(main), "worktree", "add", "-b", item["work_branch"], str(path), base_sha]
+            ["git", "-C", str(main), "worktree", "add", "-b", item["work_branch"], str(path), branch_head or base_sha]
         )
+    try:
+        actual_head = _run(["git", "-C", str(path), "rev-parse", "HEAD"]).stdout.strip()
+        if actual_head != (branch_head or base_sha):
+            raise ValueError("创建期间工作分支 Head 变化：%s" % item["repository"])
+        _require_ancestor(path, base_sha, actual_head, item["repository"])
+    except Exception:
+        # 外层 created 尚未登记本次创建；这里负责清理，不能使用 --force 丢弃修改。
+        _run(["git", "-C", str(main), "worktree", "remove", str(path)])
+        if remote_head:
+            _run(["git", "-C", str(main), "update-ref", "-d",
+                  "refs/heads/" + item["work_branch"], remote_head])
+        _prune_empty_worktree_parents(workspace, path)
+        raise
     item["base_sha"] = base_sha
-    item["catalog_digest"] = _catalog_digest(workspace)
+    item["catalog_digest"] = prepared_catalog
     item["worktree"] = {
         "path": str(path),
         "status": "prepared",
-        "branch_reused": branch_exists,
+        "branch_reused": branch_exists or bool(remote_head),
         "prepared_at": now(),
     }
+    task["history"].append({
+        "ts": now(), "event": "repository_baseline", "run_id": task["run_id"],
+        "repository": item["repository"], "work_branch": item["work_branch"],
+        "base_branch": item["base_branch"], "base_sha": base_sha,
+        "head": actual_head, "source": baseline_source,
+        "remote_head": remote_head,
+    })
     return path, True
 
 
-def _prepare_task_locked(workspace, issue_key, *, reuse_existing_branch=False):
+def _prepare_task_locked(workspace, issue_key, *, reuse_existing_branch=False,
+                         continuation=None, continuation_heads=None):
     task = load_task(workspace, issue_key)
     status = task_store.task_status(workspace, task["issue_key"])
     if status != "active":
@@ -575,6 +672,12 @@ def _prepare_task_locked(workspace, issue_key, *, reuse_existing_branch=False):
         )
     if not task.get("repositories"):
         raise ValueError("任务没有登记源码仓库；请先执行 task.py repository add")
+    continuation = continuation or {}
+    continuation_heads = continuation_heads or {}
+    if (continuation or continuation_heads) and not reuse_existing_branch:
+        raise ValueError("--continuation-base/--continuation-head 必须与 --reuse-existing-branch 一起使用")
+    if (set(continuation) | set(continuation_heads)) - {item["repository"] for item in task["repositories"]}:
+        raise ValueError("续办基线包含未登记仓库")
     _progress(
         "任务 %s：开始准备 %d 个已登记仓库"
         % (task["issue_key"], len(task["repositories"]))
@@ -611,7 +714,9 @@ def _prepare_task_locked(workspace, issue_key, *, reuse_existing_branch=False):
         try:
             for item in task["repositories"]:
                 path, was_created = _prepare_repository(
-                    workspace, task, item, reuse_existing_branch=reuse_existing_branch
+                    workspace, task, item, reuse_existing_branch=reuse_existing_branch,
+                    continuation_base=continuation.get(item["repository"]),
+                    continuation_head=continuation_heads.get(item["repository"]),
                 )
                 if was_created:
                     created.append((item, path))
@@ -634,14 +739,16 @@ def _prepare_task_locked(workspace, issue_key, *, reuse_existing_branch=False):
     return [Path(item["worktree"]["path"]) for item in task["repositories"]]
 
 
-def prepare_task(workspace, issue_key, *, reuse_existing_branch=False):
+def prepare_task(workspace, issue_key, *, reuse_existing_branch=False, continuation=None,
+                 continuation_heads=None):
     workspace = Path(workspace).resolve()
     issue = task_store.resolve_issue(workspace, issue_key)
     # 所有任务状态读取、worktree/租约变更和最终状态写回均属于同一 run；锁顺序固定为
     # task_run_lock -> _pool_lock，与 reset/deactivate/purge 串行，避免旧 run 回写。
     with task_store.task_run_lock(workspace, issue):
         return _prepare_task_locked(
-            workspace, issue, reuse_existing_branch=reuse_existing_branch
+            workspace, issue, reuse_existing_branch=reuse_existing_branch,
+            continuation=continuation, continuation_heads=continuation_heads,
         )
 
 
@@ -914,6 +1021,8 @@ def main():
     prepare.add_argument("--issue-key", required=True)
     prepare.add_argument("--expected-run-id", required=True)
     prepare.add_argument("--reuse-existing-branch", action="store_true")
+    prepare.add_argument("--continuation-base", action="append", default=[])
+    prepare.add_argument("--continuation-head", action="append", default=[])
     prepare.add_argument("--dir", default=".")
     cleanup = commands.add_parser("cleanup")
     cleanup.add_argument("--issue-key", required=True)
@@ -936,7 +1045,9 @@ def main():
         elif args.command == "prepare":
             with task_store.task_run_lock(args.dir, args.issue_key):
                 task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
-                paths = prepare_task(args.dir, args.issue_key, reuse_existing_branch=args.reuse_existing_branch)
+                paths = prepare_task(args.dir, args.issue_key, reuse_existing_branch=args.reuse_existing_branch,
+                                     continuation=continuation_bases(args.continuation_base),
+                                     continuation_heads=continuation_bases(args.continuation_head))
             for path in paths:
                 print(path)
         elif args.command == "cleanup":
