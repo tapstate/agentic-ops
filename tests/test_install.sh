@@ -153,7 +153,7 @@ source_update_output="$test_root/source-update-output"
 PATH="$setup_bin:$PATH" "$source_workspace/agenticops" update > "$source_update_output"
 test -f "$maintainer_root/SOURCE-NEXT"
 grep -F '工作面=维护' "$source_update_output" >/dev/null
-grep -F '已知工作空间待刷新' "$source_update_output" >/dev/null
+grep -F '请执行 agenticops workspace repair --all' "$source_update_output" >/dev/null
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field current_ref)" = \
   "$(git -C "$maintainer_root" rev-parse HEAD)"
 test -L "$maintainer_root/.agents/skills/fixture-maintenance"
