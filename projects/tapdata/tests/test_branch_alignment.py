@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -23,6 +24,39 @@ SPEC.loader.exec_module(align)
 
 
 class TapDataBranchAlignmentTest(unittest.TestCase):
+    @staticmethod
+    def git(path, *arguments):
+        return subprocess.run(
+            ["git", "-C", str(path), *arguments], check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+    def make_remote_with_release(self, temporary):
+        source = Path(temporary) / "source"
+        remote = Path(temporary) / "remote.git"
+        local = Path(temporary) / "local"
+        source.mkdir()
+        self.git(source, "init", "-b", "main")
+        self.git(source, "config", "user.name", "TapData Test")
+        self.git(source, "config", "user.email", "tapdata-test@example.invalid")
+        (source / "README.md").write_text("main\n", encoding="utf-8")
+        self.git(source, "add", "README.md")
+        self.git(source, "commit", "-m", "main")
+        self.git(source, "switch", "-c", "release-v4.21.0")
+        plugin = source / "iengine" / "iengine-app" / "src" / "main" / "resources" / "pluginKit.properties"
+        plugin.parent.mkdir(parents=True)
+        plugin.write_text("tapdata.api.verison=1.2.6-SNAPSHOT\n", encoding="utf-8")
+        self.git(source, "add", str(plugin.relative_to(source)))
+        self.git(source, "commit", "-m", "release")
+        release_sha = self.git(source, "rev-parse", "HEAD")
+        self.git(source, "switch", "main")
+        subprocess.run(["git", "clone", "--bare", str(source), str(remote)], check=True, capture_output=True, text=True)
+        subprocess.run(
+            ["git", "clone", "--no-local", "--single-branch", "--branch", "main", str(remote), str(local)],
+            check=True, capture_output=True, text=True,
+        )
+        return local, remote, release_sha
+
     @staticmethod
     def observation(repository, refs=None, selection="catalog_optional", local_status="available", verification="verified", fetch_status="refreshed"):
         return {
@@ -65,6 +99,22 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             ["show", "--version", "release-v4.21.0", "--json"],
             align.normalize_argv(["release-v4.21.0", "--json"]),
         )
+        self.assertEqual(
+            ["apply", "--version", "release-v4.21.0", "--expected-plan-digest", "abc"],
+            align.normalize_argv(["apply", "--version", "release-v4.21.0", "--expected-plan-digest", "abc"]),
+        )
+
+    def test_apply_requires_explicit_tapdata_root(self):
+        errors = io.StringIO()
+        with redirect_stderr(errors):
+            code = align.main([
+                "apply", "--version", "release-v4.21.0",
+                "--expected-plan-digest", "a" * 64,
+                "--cache-file", "/tmp/tapdata-align-test-cache.json",
+            ])
+
+        self.assertEqual(2, code)
+        self.assertIn("apply 必须显式提供 --tapdata-root", errors.getvalue())
 
     def test_explicit_tapdata_root_contains_module_repositories_directly(self):
         self.assertEqual(Path("/tapdata-root/tapdata"), align.module_repository("/tapdata-root", "tapdata/tapdata"))
@@ -119,7 +169,8 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
     def test_json_includes_refresh_freshness_and_timing_while_progress_uses_stderr(self):
         config = {"derivation": {"product_repository": "tapdata/tapdata"}}
         rows = [{
-            "repository": "tapdata/tapdata", "selection": "required", "local": {"status": "available"},
+            "repository": "tapdata/tapdata", "selection": "required",
+            "local": {"status": "available", "path": "/tapdata-root/tapdata"},
             "target_status": "cached_exists", "refs": {"freshness": "cached_local_refs", "last_refresh_at": None, "fetch_status": "not_requested"},
         }]
         output, errors = io.StringIO(), io.StringIO()
@@ -162,6 +213,203 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
 
         self.assertEqual("release-v1.2.6", target)
         self.assertEqual("plugin_release", resolution)
+
+    def test_plugin_release_fetches_verified_remote_object_without_local_ref(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            local, _, release_sha = self.make_remote_with_release(temporary)
+            self.assertFalse(align.local_commit_available(local, release_sha))
+            self.assertNotEqual(
+                0,
+                subprocess.run(
+                    ["git", "-C", str(local), "show-ref", "--verify", "--quiet", "refs/remotes/origin/release-v4.21.0"]
+                ).returncode,
+            )
+            target, evidence = align.plugin_release(
+                local,
+                "release-v4.21.0",
+                release_sha,
+                {"plugin_version_source": {
+                    "path": "iengine/iengine-app/src/main/resources/pluginKit.properties",
+                    "key": "tapdata.api.verison",
+                }},
+            )
+
+        self.assertEqual("release-v1.2.6", target)
+        self.assertIn("verified_remote_object", evidence)
+
+    def test_apply_fetches_and_switches_only_after_preflight(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            local, _, release_sha = self.make_remote_with_release(temporary)
+            repository = "tapdata/tapdata"
+            row = {
+                "repository": repository,
+                "selection": "required",
+                "local": {"status": "available", "path": str(local), "error": None},
+                "resolution": "product_branch",
+                "reason": "tapdata 输入分支",
+                "target_branch": "release-v4.21.0",
+                "target_sha": release_sha,
+                "target_status": "verified_exists",
+                "current_branch": "main",
+                "current_sha": self.git(local, "rev-parse", "HEAD"),
+                "dirty": False,
+                "action": "switch",
+            }
+            scope = {"requested_repositories": [], "required_repositories": [repository]}
+
+            self.assertEqual([], align.prepare_apply([row], scope, {repository: local}))
+            result = align.apply_plan([row], scope, {repository: local})
+
+            self.assertEqual("complete", result["outcome"], result)
+            self.assertEqual("release-v4.21.0", self.git(local, "branch", "--show-current"))
+            self.assertEqual(release_sha, self.git(local, "rev-parse", "HEAD"))
+
+    def test_apply_rejects_worktree_changes_after_preflight(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            local, _, release_sha = self.make_remote_with_release(temporary)
+            repository = "tapdata/tapdata"
+            row = {
+                "repository": repository,
+                "selection": "required",
+                "local": {"status": "available", "path": str(local), "error": None},
+                "resolution": "product_branch",
+                "reason": "tapdata 输入分支",
+                "target_branch": "release-v4.21.0",
+                "target_sha": release_sha,
+                "target_status": "verified_exists",
+                "current_branch": "main",
+                "current_sha": self.git(local, "rev-parse", "HEAD"),
+                "dirty": False,
+                "action": "switch",
+            }
+            scope = {"requested_repositories": [], "required_repositories": [repository]}
+            paths = {repository: local}
+
+            self.assertEqual([], align.prepare_apply([row], scope, paths))
+            (local / "created-during-preflight.txt").write_text("preserve me\n", encoding="utf-8")
+
+            blockers = align.revalidate_apply_state([row], scope, paths)
+            result = align.apply_plan([row], scope, paths)
+
+            self.assertEqual("worktree_dirty", blockers[0]["kind"])
+            self.assertEqual("failed", result["outcome"], result)
+            self.assertEqual("worktree_dirty", result["failed"]["kind"])
+            self.assertEqual("main", self.git(local, "branch", "--show-current"))
+            self.assertTrue((local / "created-during-preflight.txt").exists())
+
+    def test_apply_preflight_rejects_local_target_branch_ahead_of_remote(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            local, _, release_sha = self.make_remote_with_release(temporary)
+            self.git(local, "config", "user.name", "TapData Test")
+            self.git(local, "config", "user.email", "tapdata-test@example.invalid")
+            self.git(local, "fetch", "origin", "+refs/heads/release-v4.21.0:refs/remotes/origin/release-v4.21.0")
+            self.git(local, "switch", "-c", "release-v4.21.0", "origin/release-v4.21.0")
+            (local / "local-only.txt").write_text("local\n", encoding="utf-8")
+            self.git(local, "add", "local-only.txt")
+            self.git(local, "commit", "-m", "local ahead")
+            self.git(local, "switch", "main")
+            repository = "tapdata/tapdata"
+            row = {
+                "repository": repository,
+                "selection": "required",
+                "local": {"status": "available", "path": str(local), "error": None},
+                "resolution": "product_branch",
+                "reason": "tapdata 输入分支",
+                "target_branch": "release-v4.21.0",
+                "target_sha": release_sha,
+                "target_status": "verified_exists",
+                "current_branch": "main",
+                "current_sha": self.git(local, "rev-parse", "HEAD"),
+                "dirty": False,
+                "action": "switch",
+            }
+            scope = {"requested_repositories": [], "required_repositories": [repository]}
+
+            blockers = align.prepare_apply([row], scope, {repository: local})
+
+        self.assertEqual("local_branch_not_fast_forwardable", blockers[0]["kind"])
+
+    def test_apply_assessment_rejects_dirty_or_unresolved_candidates(self):
+        rows = [{
+            "repository": "tapdata/tapdata",
+            "selection": "required",
+            "local": {"status": "available"},
+            "resolution": "unresolved",
+            "reason": "PluginKit 无法解析",
+            "target_branch": None,
+            "target_sha": None,
+            "target_status": "unresolved",
+            "current_branch": "main",
+            "current_sha": "a" * 40,
+            "dirty": True,
+            "action": "blocked",
+        }]
+        assessment = align.assess_apply(
+            rows,
+            {"requested_repositories": [], "required_repositories": ["tapdata/tapdata"]},
+            require_verified=True,
+        )
+
+        self.assertFalse(assessment["ready"])
+        self.assertEqual("target_unresolved", assessment["blockers"][0]["kind"])
+
+        rows[0].update({
+            "resolution": "product_branch",
+            "reason": "tapdata 输入分支",
+            "target_branch": "main",
+            "target_sha": "b" * 40,
+            "target_status": "verified_exists",
+            "action": "switch",
+        })
+        assessment = align.assess_apply(
+            rows,
+            {"requested_repositories": [], "required_repositories": ["tapdata/tapdata"]},
+            require_verified=True,
+        )
+        self.assertFalse(assessment["ready"])
+        self.assertEqual("worktree_dirty", assessment["blockers"][0]["kind"])
+
+    def test_plan_digest_binds_current_and_target_sha(self):
+        row = {
+            "repository": "tapdata/tapdata",
+            "selection": "required",
+            "local": {"status": "available", "path": "/env/a/tapdata"},
+            "resolution": "product_branch",
+            "current_branch": "main",
+            "current_sha": "a" * 40,
+            "dirty": False,
+            "target_branch": "release-v4.21.0",
+            "target_sha": "b" * 40,
+        }
+        scope = {"requested_repositories": [], "required_repositories": ["tapdata/tapdata"]}
+        original = align.plan_digest("release-v4.21.0", [row], scope, "/env/a")
+        row["target_sha"] = "c" * 40
+
+        self.assertNotEqual(original, align.plan_digest("release-v4.21.0", [row], scope, "/env/a"))
+
+    def test_plan_digest_binds_root_repository_path_and_scope(self):
+        row = {
+            "repository": "tapdata/tapdata",
+            "selection": "required",
+            "local": {"status": "available", "path": "/env/a/tapdata"},
+            "resolution": "product_branch",
+            "current_branch": "main",
+            "current_sha": "a" * 40,
+            "dirty": False,
+            "target_branch": "release-v4.21.0",
+            "target_sha": "b" * 40,
+        }
+        full_scope = {"requested_repositories": [], "required_repositories": ["tapdata/tapdata"]}
+        requested_scope = {
+            "requested_repositories": ["tapdata/tapdata"],
+            "required_repositories": ["tapdata/tapdata"],
+        }
+        original = align.plan_digest("release-v4.21.0", [row], full_scope, "/env/a")
+
+        self.assertNotEqual(original, align.plan_digest("release-v4.21.0", [row], full_scope, "/env/b"))
+        self.assertNotEqual(original, align.plan_digest("release-v4.21.0", [row], requested_scope, "/env/a"))
+        row["local"]["path"] = "/env/a/other-tapdata"
+        self.assertNotEqual(original, align.plan_digest("release-v4.21.0", [row], full_scope, "/env/a"))
 
     def test_fixed_fallback_and_unchanged_repositories(self):
         rules = {

@@ -431,7 +431,7 @@ def command_pending(args, product_root):
         if document.get("product_ref") != args.product_ref:
             pending.append(workspace)
     if pending:
-        print("AgenticOps：检测到 %s 个已知工作空间待刷新；请执行 workspace repair --all，或在使用时执行 start。" % len(pending))
+        print("AgenticOps：检测到 %s 个已知工作空间待刷新；请执行 agenticops workspace repair --all，或在使用时执行 start。" % len(pending))
 
 
 def parser():
