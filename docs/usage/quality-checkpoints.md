@@ -4,6 +4,18 @@
 
 本文说明稳定操作方式。项目标准来自 `projects/<project>/quality.json` 和 `admission.json`，输入及恢复契约来自 `contracts/quality-action.schema.json`、`quality-state.schema.json`。工作项与最终证据仍在 Jira；本地记录只是任务 run 的执行及恢复材料。[任务授权](task-authorization.md)和[安全边界](../security/permissions.md)独立生效。
 
+Agent 为 Jira/MCP 调用和质量动作准备的 JSON 输入、草稿、回执、回读或日志，先通过下列命令取得当前 run 的受控路径，不要直接写入 `.agenticops/` 根目录：
+
+```sh
+interaction_file="$(python3 <agenticops-root>/workflow/task.py interaction-path \
+  --issue-key "$task_key" --expected-run-id "$task_run" \
+  --name jira-snapshot.json --dir "$project_workspace")"
+```
+
+文件名使用 lowercase-kebab-case，可选扩展名为 `json`、`jsonl`、`log`、`md` 或 `txt`。路径位于 `.agenticops/tasks/<issue>/<run-id>/`；reset 后旧 run 材料保留用于恢复与追溯，任务级 purge 会随任务目录统一删除。不要用任务号前缀和根目录文件名模拟任务归属。
+
+旧版本已经散落在 `.agenticops/` 根目录的文件不会被在线迁移，也不会按文件名猜测 run 归属。遇到不兼容升级时，先在原版本完成或停用任务、清理 linked worktree 并显式 purge 本地任务状态；需要保留的旧材料由研发工程师移出状态目录归档，再重新执行升级。以上本地处理不修改 Jira。
+
 ## 流程与检查点
 
 ```mermaid

@@ -10,6 +10,7 @@
 - Workspace Configuration：`.agenticops/workspace.json`
 - Task Registry：`.agenticops/tasks/index.json`
 - Task State：`.agenticops/tasks/<issue-key>/`
+- Task Run Interactions：`.agenticops/tasks/<issue-key>/<run-id>/`
 
 一个工作空间只绑定一个产品项目，可以同时接管该项目下多个 Jira 任务；每个任务可
 组织多个 Git 仓库。开始或恢复任务前，
@@ -55,6 +56,12 @@ GitHub MCP、`gh` 和其它 GitHub 工具不由 AgenticOps 绑定；Agent 依据
 - `.agenticops/tasks/index.json` 只统一注册任务及其 active/inactive/completed
   状态；每个任务的事实、授权、事件和 CI 证据只能写入自己的
   `.agenticops/tasks/<issue-key>/`。
+- Agent 为 Jira/MCP/质量检查准备的输入、草稿、回执、回读和日志不得散落在
+  `.agenticops/` 根目录。先用 `workflow/task.py interaction-path --issue-key <JIRA-KEY>
+  --expected-run-id <run> --name <lowercase-kebab-case.ext> --dir <项目工作空间>` 获取路径，
+  再写入该路径；允许的扩展名为 `json`、`jsonl`、`log`、`md`、`txt`。reset 后旧 run
+  交互文件留在旧 run 目录供追溯，任务级 purge 会与整个任务目录一起删除。
+  历史版本散落在根目录的文件不在线迁移或猜测归属；遇到工作空间状态不兼容的升级时，先在原版本结束或停用任务、清理 linked worktree 并显式 purge 本地任务状态，再按升级提示处理需要归档的旧材料。以上本地清理不修改 Jira。
 - Workflow 在本地状态变更处执行流程门禁。失败时展示原因和停止点，停止依赖步骤，不手改状态文件绕过。Git/Jira/PR、编辑、构建和测试由 Agent 原生权限处理。
 - 接管、继续或 reset 成功只是流程恢复点，不是默认停点。选择现有 run 或 reset 是人工
   决策；选择完成后应继续核验 Jira、补齐准入、登记仓库并准备本地基线，直到遇到方案

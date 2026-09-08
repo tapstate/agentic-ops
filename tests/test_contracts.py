@@ -113,6 +113,14 @@ class ContractConformanceTest(unittest.TestCase):
             repository_catalog_schema,
             load_json(ROOT / "projects" / "tapdata" / "repositories.json"),
         )
+        compatibility_schema = load_json(
+            ROOT / "contracts" / "workspace-state-compatibility.schema.json"
+        )
+        assert_schema(
+            self,
+            compatibility_schema,
+            load_json(ROOT / "contracts" / "workspace-state-compatibility.json"),
+        )
 
     def test_repository_pool_configuration_conforms_to_schema(self):
         schema = load_json(ROOT / "contracts" / "repository-pool.schema.json")

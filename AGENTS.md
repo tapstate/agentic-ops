@@ -31,6 +31,7 @@ AgenticOps 是公司级 Agentic 研发基础设施。Agent 平台负责原生工
 - 当前仓库规则只约束 AgenticOps 本身，不得把 TapData、TapState 等业务仓库的分支、测试和目录约定反向写入本仓库规则。
 - AgenticOps 源码仓库、`~/.agentic-ops` 安装目录和各业务项目工作空间必须分开。
 - 源码仓库和安装目录使用相同产品根目录结构和入口；各自的非 Git 本地状态统一放入本产品根目录的 `.local/`。项目工作空间配置与运行数据统一放入 `.agenticops/`，可再生平台接线由初始化清单管理，不得复制中央 Policy、Project Skill 或 Runtime。
+- 工作空间持久化结构使用 `contracts/workspace-state-compatibility.json` 中单调递增的 `workspace_state_epoch` 管理兼容边界。修改 `.agenticops/` 路径、状态字段或读写语义时必须明确判断兼容性；不兼容变更必须提升 epoch，兼容变更必须保留旧状态回归验证。升级和回退只能在切换产品版本前比较目标支持范围；跨 epoch 时必须先引导用户结束或停用任务、清理 linked worktree 并显式 purge 本地任务状态，不得在线猜测或迁移旧任务数据。
 
 ## 流程连续性
 
@@ -74,6 +75,8 @@ bash internal/tests/test_release.sh
 ```
 
 四项分别覆盖 Gate/Workflow、资源边界、产品安装与工作目录接线、仓库发布治理。正常发布的固定验证由 `internal/release/release.sh` 编排，不得跳过。OPA 未安装时可跳过 Rego 一致性测试，但必须明确记录；产品 Python 运行时保持 Python 3.9+ 且无第三方依赖，`internal/` 的 PyYAML 依赖不得进入产品安装。新增或升级任何 Python 第三方组件（运行时、维护工具、测试或锁文件）前，必须先向用户说明组件、用途、版本范围、许可与供应链影响，并取得明确决策；不得因实现方便而自行引入、安装或替换依赖。
+
+升级协议必须先以兼容版本发布，再允许后续版本提升 `workspace_state_epoch`。兼容清单声明目标要求的 `minimum_updater_protocol_version`，Updater 自身能力由代码中的协议常量决定：过渡版本先提升能力但保持旧最低要求，后续不兼容版本才能提升最低要求。早于升级协议的安装不得宣称可以直接跨越不兼容版本；必须先升级到官方指定的过渡版本或重新安装。
 
 ## 分支与发布
 

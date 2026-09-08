@@ -33,7 +33,7 @@ stories:
     category: product
     title: 安装并接入多种 Agent
     document: docs/user-stories/v1/prod-001-install-and-connect-agent.md
-    protected_paths: [agenticops, adapters/**, bootstrap/**, contracts/**, tests/test_install.sh, tests/test_adapter_boundary.py, tests/test_contracts.py]
+    protected_paths: [agenticops, adapters/**, bootstrap/**, contracts/**, tests/test_install.sh, tests/test_adapter_boundary.py, tests/test_contracts.py, tests/test_workspace_compatibility.py]
     acceptance_checks: [python_runtime, resource_contracts]
     evidence_requirements:
       - macOS 与 Linux 的轻依赖安装边界

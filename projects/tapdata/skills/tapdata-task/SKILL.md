@@ -11,6 +11,10 @@ metadata:
 
 所有写入当前任务的命令必须携带 `--expected-run-id <run>`：包括 record、仓库 add/prepare/cleanup/record-result、block、activate/deactivate、授权 grant/revoke、Jira prepare/complete、CI watch/record-fix。执行 `advance` 另带 `--expected-stage <当前阶段>`；从 status 或 next 读取并固定这些值，拒绝后先核对变化，不自动替换参数重放。以下简写命令也必须补齐上述公共参数。
 
+Agent 为原生 Jira/MCP 调用和质量检查生成的输入、草稿、回执、回读或日志，必须先用 `task.py interaction-path --issue-key <issue-key> --expected-run-id <run> --name <lowercase-kebab-case.ext> --dir <project-workspace>` 获取当前 run 的受控路径，再写入返回位置；不得直接在 `.agenticops/` 根目录创建临时文件。允许 `json`、`jsonl`、`log`、`md`、`txt`。reset 保留旧 run 交互材料用于追溯，任务级 purge 会统一回收。
+
+历史版本散落在 `.agenticops/` 根目录的文件不在线迁移，也不猜测 run 归属。若升级提示工作空间状态不兼容，先在原版本完成或停用任务、清理 linked worktree，并显式 purge 本地任务状态；需要保留的旧材料由研发工程师先移出状态目录归档。以上本地清理不修改 Jira。
+
 方案确认由 Workflow 检查点重新核验；原生 Git/Jira/PR 调用不受通用 AgenticOps Hook 拦截。Jira 准备幂等，调用次数依赖 Agent 协作与平台权限；未知结果只回读，不宣称强制单次调用。
 
 ## 开始或恢复

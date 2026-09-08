@@ -72,12 +72,13 @@ for file in \
   contracts/gate-request.schema.json contracts/gate-decision.schema.json \
   contracts/adapter-manifest.schema.json contracts/operation-catalog.schema.json \
   contracts/product-state.schema.json contracts/workspace.schema.json \
+  contracts/workspace-state-compatibility.json contracts/workspace-state-compatibility.schema.json \
   contracts/repository-pool.schema.json contracts/repository-catalog.schema.json \
   contracts/workspace-init.schema.json contracts/task-registry.schema.json \
   contracts/task-state.schema.json contracts/operation-catalog.json \
   gate/engine.py gate/runner.py \
   policies/operations.json policies/continuity.json \
-  workflow/task.py workflow/task_store.py workflow/project_rules.py \
+  workflow/task.py workflow/task_store.py workflow/project_rules.py tests/test_workspace_compatibility.py \
   workflow/authorization.py workflow/ci.py workflow/evidence.py \
   workflow/quality.py workflow/quality_contract.py workflow/quality_write.py \
   workflow/jira_status.py workflow/jira_watermark.py workflow/jira_tests.py workflow/pr_ready.py \
@@ -96,7 +97,7 @@ for file in \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
   bootstrap/workspace-init.sh bootstrap/render.py bootstrap/workspace_paths.py bootstrap/agent_registry.py \
   bootstrap/skill_wiring.py \
-  bootstrap/product_state.py bootstrap/product_version.py bootstrap/repository_pool.py bootstrap/workspace_registry.py \
+  bootstrap/product_state.py bootstrap/product_version.py bootstrap/repository_pool.py bootstrap/workspace_registry.py bootstrap/workspace_compatibility.py \
   workflow/repository_worktree.py \
   tests/test_gate.py tests/test_contracts.py tests/test_adapter_boundary.py tests/test_workflow.py tests/test_install.sh \
   internal/acceptance.sh internal/bin/story-gate internal/story_gate/stories.yaml \
@@ -113,7 +114,7 @@ for file in \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
   bootstrap/workspace-init.sh bootstrap/render.py bootstrap/agent_registry.py \
   bootstrap/skill_wiring.py \
-  bootstrap/product_state.py bootstrap/product_version.py bootstrap/repository_pool.py bootstrap/workspace_registry.py \
+  bootstrap/product_state.py bootstrap/product_version.py bootstrap/repository_pool.py bootstrap/workspace_registry.py bootstrap/workspace_compatibility.py \
   workflow/repository_worktree.py \
   tests/test_install.sh internal/acceptance.sh internal/bin/story-gate internal/release/release.sh \
   internal/release/hotfix.sh internal/tests/test_runtime.sh \

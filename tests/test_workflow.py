@@ -864,6 +864,39 @@ def main():
         )["leases"]
         check("任务清理同步释放中央租约", remaining_leases, [])
         old_run = json.loads(task_store.task_path(ws, "TAP-123").read_text(encoding="utf-8"))["run_id"]
+        interaction_code, interaction_out = run_tool(
+            "task.py", "interaction-path", "--issue-key", "TAP-123",
+            "--expected-run-id", old_run, "--name", "q3-auto-readback.json", cwd=ws,
+        )
+        interaction_path = Path(interaction_out.strip())
+        check("当前 run 可分配受控交互文件路径", interaction_code, 0)
+        check(
+            "交互文件按 issue/run 隔离",
+            interaction_path,
+            task_store.task_directory(ws, "TAP-123") / old_run
+            / "q3-auto-readback.json",
+        )
+        interaction_path.write_text("{}\n", encoding="utf-8")
+        linked_run = task_store.task_directory(ws, "TAP-123") / "run-linked"
+        linked_outside = ws / "linked-interaction-outside"
+        linked_outside.mkdir()
+        linked_run.symlink_to(linked_outside, target_is_directory=True)
+        try:
+            task_store.interaction_path(
+                ws, "TAP-123", "run-linked", "receipt.json", create=True
+            )
+        except ValueError:
+            linked_rejected = True
+        else:
+            linked_rejected = False
+        check("交互目录拒绝通过 run 符号链接逃逸", linked_rejected, True)
+        check("run 符号链接外未生成交互文件", list(linked_outside.iterdir()), [])
+        linked_run.unlink()
+        invalid_code, _ = run_tool(
+            "task.py", "interaction-path", "--issue-key", "TAP-123",
+            "--expected-run-id", old_run, "--name", "../outside.json", cwd=ws,
+        )
+        check("交互文件名不能逃逸任务目录", invalid_code, 2)
         run_tool(
             "task.py", "reset", "--expected-run-id", old_run,
             "--stage", "design_review", "--note", "回到设计阶段恢复受控基线", cwd=ws,
@@ -872,6 +905,7 @@ def main():
         check("任务 reset 后旧授权被撤销", '"status": "revoked"' in out, True)
         reset_task = json.loads(task_store.task_path(ws, "TAP-123").read_text(encoding="utf-8"))
         check("任务重做生成新 run_id", reset_task["run_id"] != old_run, True)
+        check("reset 保留旧 run 交互材料供追溯", interaction_path.is_file(), True)
         code, out = run_tool(
             "task.py", "reset", "--expected-run-id", old_run,
             "--stage", "design_review", "--note", "过期 subagent 重复 reset", cwd=ws,
@@ -933,6 +967,10 @@ def main():
             task_store.task_path(ws, "TAP-456").read_text(encoding="utf-8")
         )
         purge_run = purge_task["run_id"]
+        purge_interaction = task_store.interaction_path(
+            ws, "TAP-456", purge_run, "jira-readback.json", create=True
+        )
+        purge_interaction.write_text("{}\n", encoding="utf-8")
         verified_takeover_watermark(ws, "TAP-456")
         run_tool(
             "task.py", "advance", "--issue-key", "TAP-456",
@@ -1075,6 +1113,7 @@ def main():
         check("inactive clean 任务可安全 purge", code, 0)
         check("purge 删除任务注册", "TAP-456" in task_store.registered_issues(ws), False)
         check("purge 删除任务目录", task_store.task_directory(ws, "TAP-456").exists(), False)
+        check("purge 同步删除任务的 run 交互材料", purge_interaction.exists(), False)
         check("purge 明确报告保留未合并分支", "保留无充分删除证明的本地分支" in out, True)
         branch_result = subprocess.run(
             [

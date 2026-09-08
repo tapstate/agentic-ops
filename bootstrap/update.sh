@@ -54,6 +54,9 @@ fi
 git -C "$product_root" fetch origin \
   "refs/heads/$branch:refs/remotes/origin/$branch"
 target_ref="$(git -C "$product_root" rev-parse "refs/remotes/origin/$branch")"
+python3 "$product_root/bootstrap/workspace_compatibility.py" \
+  --product-root "$product_root" check-upgrade \
+  --current-ref "$current_ref" --target-ref "$target_ref"
 counts="$(git -C "$product_root" rev-list --left-right --count "HEAD...$target_ref")"
 ahead="${counts%%[[:space:]]*}"
 behind="${counts##*[[:space:]]}"
