@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """流程检查点：重复请求、旧 run、并发写入与 Hook 迁移，不访问外部服务。"""
 import copy
+import contextlib
 import hashlib
+import io
 import json
 import subprocess
 import sys
@@ -33,6 +35,12 @@ class CheckpointTests(unittest.TestCase):
                       "stage": "waiting_takeover", "facts": {}, "repositories": [], "pending": None, "history": []}
         self.save()
         task_store.register(self.base, "TAP-123")
+        self.q1_digest = mock.patch.object(authorization.quality, "q1_digest", return_value="fixture-q1-digest")
+        self.q2_digest = mock.patch.object(authorization.quality, "q2_digest", return_value="fixture-q2-digest")
+        self.q1_digest.start()
+        self.q2_digest.start()
+        self.addCleanup(self.q1_digest.stop)
+        self.addCleanup(self.q2_digest.stop)
 
     def save(self):
         task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.state)
@@ -55,6 +63,7 @@ class CheckpointTests(unittest.TestCase):
         record = {"scope": "task_execution", "status": "active", "issue_key": "TAP-123",
                   "agentic_run_id": self.state["run_id"], "agent_id": "reviewer", "approved_plan_version": "v1",
                   "approved_plan_digest": authorization.plan_digest(self.state),
+                  "approved_q1_digest": "fixture-q1-digest", "approved_q2_digest": "fixture-q2-digest",
                   "repositories": authorization.repository_bindings(self.state["repositories"]),
                   "expires_at_epoch": time.time() + (-1 if expired else 3600)}
         self.auth_path = task_store.authorization_path(self.base, "TAP-123")
@@ -158,12 +167,28 @@ class CheckpointTests(unittest.TestCase):
             with self.assertRaises(OSError): authorization.cmd_renew(self.renewal(record))
         self.assertEqual(self.auth_path.read_bytes(), before)
 
+    def test_renewal_rejects_missing_null_or_changed_quality_confirmation(self):
+        for field, value in (("approved_q1_digest", None), ("approved_q2_digest", None),
+                             ("approved_q1_digest", "changed"), ("approved_q2_digest", "changed")):
+            with self.subTest(field=field, value=value):
+                record = self.confirmation(expired=True)
+                record[field] = value
+                task_store._write_json_atomic(self.auth_path, record)
+                with self.assertRaises(ValueError):
+                    authorization.cmd_renew(self.renewal(record))
+
     def test_renewal_cli_digest_and_explicit_confirmation(self):
         record = self.confirmation(expired=True)
         def cli(*arguments):
-            return subprocess.run([sys.executable, str(ROOT / "workflow/authorization.py"), *arguments,
-                                   "--issue-key", "TAP-123", "--dir", str(self.base)],
-                                  text=True, capture_output=True, timeout=10)
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with mock.patch.object(sys, "argv", ["authorization.py", *arguments,
+                                                    "--issue-key", "TAP-123", "--dir", str(self.base)]), \
+                    contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                try:
+                    code = authorization.main()
+                except SystemExit as error:
+                    code = error.code
+            return SimpleNamespace(returncode=code, stdout=stdout.getvalue(), stderr=stderr.getvalue())
         shown = cli("show", "--digest")
         self.assertEqual(shown.returncode, 0, shown.stderr)
         self.assertEqual(shown.stdout.strip(), authorization.record_digest(record))

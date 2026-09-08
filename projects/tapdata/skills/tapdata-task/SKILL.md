@@ -9,7 +9,7 @@ metadata:
 
 设项目工作空间为 `<project-workspace>`，任务号为 `<issue-key>`，中央产品根为工作空间 `AGENTS.md` 声明的 `<agenticops-root>`。工具目录为 `<agenticops-root>/workflow`。多个任务 active 时，所有任务命令必须带 `--issue-key <issue-key> --dir <project-workspace>`；不要在各仓库内创建独立状态。本 Skill、当前 Project Profile 和 Product Root 高于历史 memory；memory 只能提供历史线索，不得作为现役命令来源。
 
-所有写入当前任务的命令必须携带 `--expected-run-id <run>`：包括 record、仓库 add/prepare/cleanup/record-result、block、activate/deactivate、授权 grant/revoke、Jira prepare/complete、CI watch/record-fix。执行 `advance` 另带 `--expected-stage <当前阶段>`；从 status 或 next 读取并固定这些值，拒绝后先核对变化，不自动替换参数重放。以下简写命令也必须补齐上述公共参数。
+所有写入当前任务的命令必须携带 `--expected-run-id <run>`：包括 record、仓库 add/update/prepare/cleanup/record-result、block、activate/deactivate、授权 grant/revoke、Jira prepare/complete、CI watch/record-fix。执行 `advance` 另带 `--expected-stage <当前阶段>`；从 status 或 next 读取并固定这些值，拒绝后先核对变化，不自动替换参数重放。以下简写命令也必须补齐上述公共参数。
 
 Agent 为原生 Jira/MCP 调用和质量检查生成的输入、草稿、回执、回读或日志，必须先用 `task.py interaction-path --issue-key <issue-key> --expected-run-id <run> --name <lowercase-kebab-case.ext> --dir <project-workspace>` 获取当前 run 的受控路径，再写入返回位置；不得直接在 `.agenticops/` 根目录创建临时文件。允许 `json`、`jsonl`、`log`、`md`、`txt`。reset 保留旧 run 交互材料用于追溯，任务级 purge 会统一回收。
 
@@ -22,10 +22,16 @@ Agent 为原生 Jira/MCP 调用和质量检查生成的输入、草稿、回执�
 1. 运行 `python3 <agenticops-root>/workflow/task.py list --dir <project-workspace>`。
 2. 已注册任务用 `status --issue-key <issue-key>` 从当前阶段恢复，不重复已完成步骤。
 3. 新任务先读取 Jira 事实。仅当状态精确为 `Analyzed` 且经办人为当前 Jira 用户时，才执行 `task.py init --issue-key TAP-xxx --task-class <defect_fix|feature_change|technical_task> --dir <project-workspace>`；任一条件不符或事实无法核验时拒绝接管，不得初始化本地任务状态。初始化不会停用其它 active 任务。
-4. 已存在任务必须让研发工程师选择继续现有 run，或清理后用当前 `--expected-run-id` reset；选择完成后继续流程，不把接管、activate 或 reset 的原子成功当作停点。
+4. 发现已有任务、分支或 PR 时，方向不明才询问两项选择：① 继续已有分支/PR 完成当前任务；② 从当前目标分支新建分支重新处理同一 Jira 任务。用户已明确“继续这个 PR”或“新分支处理”时沿用该决定。先核对现役 CLI 能完成后续路径，再执行 cleanup/reset；不把接管、activate 或 reset 的原子成功当作停点。
 5. 复用任务开始的 Jira 快照，先执行 `task.py snapshot --issue-key <issue-key> --expected-run-id <run> --input <snapshot.json> --dir <project-workspace>` 固化初始事实，再用 `jira_watermark.py prepare` 保存产品版本并尽力原生回写及 complete 回读。同步失败不阻止 advance；结果不明只暂停重复写入，后续可用新快照 complete。
 6. 进入 `task_intake` 后，立即从 Jira 原生工具读取当前 issue、当前用户和可用 transitions，按质量文档执行 `jira_status.py prepare --trigger takeover`；返回 `ready` 时只用其精确 transition ID 尝试一次 `In Progress` 并回读后 `complete`，其它结果记录并继续。状态同步失败不是本地门禁。
 7. 持续完成准入、仓库登记、本地基线准备和源码分析，直到方案确认、风险授权、事实不可信或其它真实人工决策点。
+
+续办保留原 run、工作分支和冻结 base_sha，目标 develop 前进或 CI 失败不要求重置。只有旧 PR 而本地状态缺失时，按项目准入新建 run，核验 PR 与本地分支 Head，再按[任务授权指引：已有分支/PR 的两条处理路径](../../../../docs/usage/task-authorization.md#已有分支pr-的两条处理路径)使用 `prepare --reuse-existing-branch --continuation-base owner/repo=<完整 SHA>`；优先核验旧记录的基线，缺失时只把已验证共同祖先称作接管比较基线，不能将最新 develop 自动登记成旧分支起点。旧 CI 只归属其实际提交，新 run 仍需当前方案和验收绑定。
+
+仅有远端分支时，同时传入 `--continuation-head owner/repo=<刚回读的 PR Head>`，由 prepare 获取已登记 origin 的工作分支；Head 不匹配时回读，不覆盖已有本地分支或转用最新 develop。接管后仍可导入/修正同一修复线的版本规划：当前目标分支证据与冻结开发基线独立核验，不因为两者 SHA 不同而 reset。
+
+新分支路径先保留未提交修改，清理旧 worktree 和租约，再按当前 run reset 到 task_intake，通过 `repository update` 同步新工作分支、范围和验证方式，重新 prepare/context、方案确认与授权；无基线/现场的 task_intake 可直接更新登记。旧分支、提交和 PR 保留，通常不需要 purge，不自动关闭旧 PR。具体命令和拒绝条件遵循上述任务授权指引。
 
 ## 准入、设计和多仓库
 

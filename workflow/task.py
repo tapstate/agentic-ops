@@ -249,13 +249,23 @@ def cmd_record(args):
             file=sys.stderr,
         )
         return 2
-    if not str(args.value).strip():
+    value = args.value
+    if getattr(args, "input", None):
+        if args.key != "fix_plan":
+            raise ValueError("--input 仅用于以 JSON 对象记录 fix_plan")
+        try:
+            value = json.loads(Path(args.input).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("无法读取 fix_plan JSON：%s" % error) from error
+        if not isinstance(value, dict):
+            raise ValueError("fix_plan JSON 必须是对象")
+    if not (isinstance(value, dict) or str(value).strip()):
         print("错误：%s 的值为空，空值等于没记录" % args.key, file=sys.stderr)
         return 2
-    task["facts"][args.key] = args.value
-    task["history"].append({"ts": now(), "event": "record", "key": args.key, "value": args.value})
+    task["facts"][args.key] = value
+    task["history"].append({"ts": now(), "event": "record", "key": args.key, "value": value})
     save(args.dir, task)
-    print("已记录：%s = %s" % (args.key, args.value))
+    print("已记录：%s = %s" % (args.key, json.dumps(value, ensure_ascii=False) if isinstance(value, dict) else value))
     return 0
 
 
@@ -275,10 +285,12 @@ def cmd_issue_versions(args):
         if prepared:
             candidate = dict(task, facts=dict(task["facts"], **{issue_versions.FACT: plan}))
             problems = issue_versions.problems(args.dir, candidate)
-            spec = issue_versions.rules(args.dir, task)
-            for repo in task["repositories"]:
-                if repo["repository"] == spec["product_repository"] and repo.get("base_sha") != plan["refs"][plan["primary_branch"]]:
-                    problems.append("已准备主仓与本次核验 SHA 不一致")
+            # resolve 已核验当前目标分支证据；冻结基线独立按受控工作树验证，
+            # 不要求历史开发起点等于当前远端 Head，也不改写该起点。
+            try:
+                repository_worktree.task_roots(args.dir, task["issue_key"])
+            except ValueError as error:
+                problems.append("已准备开发基线无效：%s" % error)
             if problems:
                 raise ValueError("；".join(problems) + "；先 cleanup/reset 再准备正确基线")
         if project_rules.scan_sensitive(admission(args.dir), json.dumps(plan, ensure_ascii=False)):
@@ -375,6 +387,69 @@ def cmd_repository_list(args):
     return 0
 
 
+@task_store.task_mutation
+def cmd_repository_update(args):
+    task = require(args.dir, args.issue_key)
+    if task_store.task_status(args.dir, task["issue_key"]) != "active" or task["stage"] != "task_intake":
+        raise ValueError("repository update 只允许 active 任务的 task_intake；先检查 cleanup/reset 路径")
+    item = next((r for r in task.get("repositories", []) if r["repository"] == args.repo), None)
+    if item is None:
+        raise ValueError("仓库尚未登记：%s" % args.repo)
+    if any(item.get(key) for key in ("base_sha", "catalog_digest", "worktree")):
+        raise ValueError("仓库仍有基线或 worktree 记录；先 cleanup/reset，保留旧分支与 PR")
+    if not all(str(value).strip() for value in (args.scope, args.verification, args.reason)):
+        raise ValueError("更新必须提供非空范围、验证方式和原因")
+    if args.work_branch == item["work_branch"]:
+        raise ValueError("新分支处理必须使用不同的工作分支")
+    if project_rules.scan_sensitive(admission(args.dir), " ".join((args.scope, args.verification, args.reason))):
+        raise ValueError("仓库更新包含敏感内容，请脱敏后重试")
+    repository_worktree._run(["git", "check-ref-format", "--branch", args.work_branch])
+    binding, product_root, pool_root = repository_worktree.workspace_binding(args.dir)
+    # 与 prepare 相同的锁顺序；登记不创建或移动任何 Git 分支。
+    with repository_worktree._pool_lock(product_root):
+        for other_issue in task_store.registered_issues(args.dir, statuses=("active",)):
+            other = load(args.dir, other_issue)
+            if any(r.get("repository") == args.repo and r.get("work_branch") == args.work_branch
+                   for r in other.get("repositories", [])):
+                raise ValueError("工作分支已由激活任务占用：%s" % other_issue)
+        for lease in repository_worktree._load_leases(product_root):
+            if lease.get("pool_root") == str(pool_root) and lease.get("repository") == args.repo:
+                if (lease.get("branch") == args.work_branch or
+                        lease.get("workspace_id") == binding["workspace_id"] and
+                        lease.get("issue_key") == task["issue_key"]):
+                    raise ValueError("仓库仍有任务租约或新分支被占用；先核对清理结果")
+        if repository_worktree.task_worktree_path(args.dir, task, args.repo).exists():
+            raise ValueError("当前 run 仍有未登记的 worktree 路径，请先核对现场")
+        main = repository_worktree.repository_path(pool_root, args.repo)
+        entry = repository_worktree._catalog(args.dir)["repositories"][args.repo]
+        if item.get("authorized_endpoint") != project_rules.canonical_repository_endpoint(entry["origin"]):
+            raise ValueError("仓库 endpoint 与项目目录不一致")
+        if args.work_branch == item["base_branch"]:
+            raise ValueError("工作分支不能使用目标基线分支")
+        if main.is_dir():
+            repository_worktree._validate_origin_chain(main, args.repo, entry["origin"])
+            if repository_worktree._run([
+                "git", "-C", str(main), "show-ref", "--verify", "--quiet", "refs/heads/" + args.work_branch
+            ], check=False).returncode == 0:
+                raise ValueError("新工作分支本地已存在：%s" % args.work_branch)
+        remote = repository_worktree._run([
+            "git", "ls-remote", "--heads", entry["origin"], "refs/heads/" + args.work_branch
+        ])
+        if remote.stdout.strip():
+            raise ValueError("新工作分支远端已存在：%s" % args.work_branch)
+        before = dict(item)
+        revoke_authorization(args.dir, task["issue_key"], "repository_update")
+        item.update(work_branch=args.work_branch, approved_scope=args.scope,
+                    verification_method=args.verification, pull_request=None, ci=None)
+        task["history"].append({
+            "ts": now(), "event": "repository_update", "run_id": task["run_id"],
+            "repository": args.repo, "reason": args.reason, "before": before, "after": dict(item),
+        })
+        save(args.dir, task)
+    print("已更新仓库登记；旧分支/PR 保留，旧交付引用已归档，进入实现前重新确认方案并授权。")
+    return 0
+
+
 def repository_context(base, task):
     """返回当前会话继续处理任务所需的、已校验的只读上下文。"""
     roots = repository_worktree.task_roots(base, task["issue_key"])
@@ -461,6 +536,8 @@ def cmd_repository_prepare(args):
             args.dir,
             args.issue_key,
             reuse_existing_branch=args.reuse_existing_branch,
+            continuation=repository_worktree.continuation_bases(args.continuation_base),
+            continuation_heads=repository_worktree.continuation_bases(args.continuation_head),
         )
     except ValueError as error:
         print("错误：%s" % error, file=sys.stderr)
@@ -568,6 +645,16 @@ def _check_advance(task, target, base, spec):
             problems.append("方案确认的 run 与当前任务不一致")
         elif auth.get("approved_plan_digest") and auth["approved_plan_digest"] != authorization.plan_digest(task):
             problems.append("fix_plan 已变化，需要重新确认方案")
+        elif "approved_q1_digest" in auth or "approved_q2_digest" in auth:
+            q1_digest, q2_digest = auth.get("approved_q1_digest"), auth.get("approved_q2_digest")
+            if not isinstance(q1_digest, str) or not q1_digest or not isinstance(q2_digest, str) or not q2_digest:
+                problems.append("授权中的 Q1/Q2 确认摘要无效，需要重新确认方案")
+            else:
+                try:
+                    if q1_digest != quality.q1_digest(base, task) or q2_digest != quality.q2_digest(base, task):
+                        problems.append("Q1/Q2 方案或验收项已变化，需要重新确认方案")
+                except ValueError as error:
+                    problems.append("Q1/Q2 方案确认无效：%s" % error)
     if target == "completed":
         prepared = [
             item.get("repository")
@@ -683,6 +770,13 @@ def _cmd_reset_locked(args):
         if key in task["facts"]:
             task["history"].append({"ts": now(), "event": "archive_fact", "key": key, "value": task["facts"].pop(key)})
     for item in task.get("repositories", []):
+        if item.get("base_sha"):
+            task["history"].append({
+                "ts": now(), "event": "archive_repository_baseline",
+                "repository": item["repository"], "work_branch": item["work_branch"],
+                "base_branch": item["base_branch"], "base_sha": item["base_sha"],
+                "run_id": args.expected_run_id,
+            })
         item["base_sha"] = None
         item["catalog_digest"] = None
         item["worktree"] = None
@@ -980,7 +1074,9 @@ def main():
     p = sub.add_parser("record")
     p.add_argument("--issue-key")
     p.add_argument("--key", required=True)
-    p.add_argument("--value", required=True)
+    value = p.add_mutually_exclusive_group(required=True)
+    value.add_argument("--value")
+    value.add_argument("--input", help="fix_plan 的结构化 JSON 文件")
     p.add_argument("--force", action="store_true", help="允许记录清单外的自定义 fact key")
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_record)
@@ -1027,6 +1123,15 @@ def main():
     add.add_argument("--verification", required=True)
     add.add_argument("--dir", default=".")
     add.set_defaults(func=cmd_repository_add)
+    update = repository_sub.add_parser("update")
+    update.add_argument("--issue-key")
+    update.add_argument("--repo", required=True)
+    update.add_argument("--work-branch", required=True)
+    update.add_argument("--scope", required=True)
+    update.add_argument("--verification", required=True)
+    update.add_argument("--reason", required=True)
+    update.add_argument("--dir", default=".")
+    update.set_defaults(func=cmd_repository_update)
     listing = repository_sub.add_parser("list")
     listing.add_argument("--issue-key")
     listing.add_argument("--dir", default=".")
@@ -1046,6 +1151,8 @@ def main():
     prepare = repository_sub.add_parser("prepare")
     prepare.add_argument("--issue-key")
     prepare.add_argument("--reuse-existing-branch", action="store_true")
+    prepare.add_argument("--continuation-base", action="append", default=[])
+    prepare.add_argument("--continuation-head", action="append", default=[])
     prepare.add_argument("--dir", default=".")
     prepare.set_defaults(func=cmd_repository_prepare)
     cleanup = repository_sub.add_parser("cleanup")
@@ -1110,7 +1217,7 @@ def main():
 
     for command in ("record", "advance", "block", "activate", "deactivate"):
         sub.choices[command].add_argument("--expected-run-id", required=True)
-    for command in ("add", "record-result", "prepare", "cleanup"):
+    for command in ("add", "update", "record-result", "prepare", "cleanup"):
         repository_sub.choices[command].add_argument("--expected-run-id", required=True)
     args = parser.parse_args()
     try:

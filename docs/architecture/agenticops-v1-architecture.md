@@ -95,6 +95,12 @@ Project Package 的 `repositories.json` 是仓库、origin、基线分支和域�
 
 任务完成或显式清理会先检查 worktree 洁净度，再执行 `git worktree remove` 与 `prune`。本地任务分支默认保留；只有显式要求时才尝试 `git branch -d`，未合并分支不会被强删。同一 run 的恢复复用已有 worktree；reset 生成新 `run_id`。残留分支不会被静默复用，需要新分支或显式 `--reuse-existing-branch`。
 
+已有开发成果按两个选择恢复：继续已有分支/PR，或从当前目标分支创建新分支处理同一 Jira 任务。同一 run 保留冻结基线，目标分支前进不要求任务重置。新 run 接管旧分支时，可通过 `--continuation-base owner/repo=<完整 SHA>` 显式绑定已核验的历史比较基线，要求它同时是工作分支 Head 与当前目标分支的祖先；共同祖先只证明比较关系，不证明原始创建点。参数不允许改变已冻结基线，不自动改写 Git 历史或继承旧验收。prepare 在创建前后检查祖先关系，创建后失败负责清理本次 worktree。
+
+只有远端工作分支时，续办额外绑定 `--continuation-head owner/repo=<完整 SHA>`；Workflow 获取已登记 origin 上的精确分支并比较 Head，匹配后才创建本地分支/worktree，已有本地分支不被覆盖。版本规划查询的目标分支 SHA 与开发基线分别校验：前者证明当前调查对象，后者证明当前工作树的开发历史；目标分支正常前进不使冻结基线失效。
+
+新分支路径在清理旧执行现场并 reset 到 `task_intake` 后，通过 `repository update` 更新未准备的仓库登记；该入口检查 run、租约与分支占用，保留仓库身份和目标分支，撤销旧授权，把旧 PR/CI 引用归档到 history 后清空当前引用。旧分支、提交、PR 和历史验证材料保留，通常不需要 purge。命令与恢复步骤由[任务授权指引](../usage/task-authorization.md)维护。此扩展不改变已有状态字段和祖先校验语义，仅增加显式输入及 history 事件，保持 `workspace_state_epoch=1`；旧状态须通过回归验证，回退后已准备任务仍使用原有 base_sha 校验。
+
 `run_id` 是 Workflow 创建并持久化的任务执行身份，不是 Agent 会话身份。主 Agent、subagent 和恢复会话都必须读取同一个任务状态，不能各自生成 `run_id`。再次 init 已存在任务时保持状态不变并失败关闭，提示用户选择继续现有 run，或先清理 worktree 后显式 reset；只有后者创建新 run，并撤销旧授权。init/reset 按任务互斥；reset 必须携带 `--expected-run-id <当前值>`，并发或过期调用因 compare-and-swap 校验失败关闭。
 
 ## 7. 多仓库、授权与当前工作空间会话

@@ -4,7 +4,7 @@
 
 这些脚本不读取或修改 Jira 内容：Jira 仍是任务事实源。执行前，应通过已配置的 Jira 客户端读取任务号、任务类型、负责人、状态、准入事实和验收要求；不要把本地 `init` 当作 Jira 接管或状态流转的替代品。
 
-本地方案确认只在 Workflow 检查点核验，原生 Git/Jira/PR 操作不再由通用 Hook 拦截。所有状态写命令（record、仓库 add/prepare/cleanup/record-result、block、activate/deactivate、grant/revoke、Jira prepare/complete、CI watch/record-fix）必须携带 `--expected-run-id "$task_run"`；advance 另带 `--expected-stage <当前阶段>`。命令必须使用已核对的绑定；task_run 从 init/status 输出固定，reset 后重新读取，不能在失败重试时自动替换。
+本地方案确认只在 Workflow 检查点核验，原生 Git/Jira/PR 操作不再由通用 Hook 拦截。所有状态写命令（record、仓库 add/update/prepare/cleanup/record-result、block、activate/deactivate、grant/revoke、Jira prepare/complete、CI watch/record-fix）必须携带 `--expected-run-id "$task_run"`；advance 另带 `--expected-stage <当前阶段>`。命令必须使用已核对的绑定；task_run 从 init/status 输出固定，reset 后重新读取，不能在失败重试时自动替换。
 
 ## 1. 前提与变量
 
@@ -94,6 +94,39 @@ python3 "$agenticops_root/workflow/task.py" repository context \
 ```
 
 每个目标仓库都要单独执行 `repository add`，再一次执行 `repository prepare`。该受控命令负责下载或校验 Source Pool、创建任务 worktree，并固化 `base_sha`；不得以直接 `git clone`、Source Pool 主工作树或远端页面信息替代。`repository context` 返回的 worktree、分支和 `base_sha` 是后续分析与授权的唯一基线。
+
+### 已有分支/PR 的两条处理路径
+
+发现已有开发成果时，用户可选择“继续已有分支/PR，完成当前任务”或“从当前目标分支创建新分支，重新处理当前任务”。用户已明确说继续 PR 或新建分支时直接执行相应路径，不重复询问方向。先检查当前 CLI 能完成后续步骤，再清理或 reset。
+
+**继续已有分支/PR：**本地原 run 存在时，从原阶段恢复，使用 `repository context` 核对原基线；目标分支前进、CI 失败不要求 reset 或重开 PR。若只有旧分支/PR 而本地记录缺失，在项目准入后登记旧工作分支，核验本地分支 Head 与远端 PR Head 一致。从旧记录（包括 reset 的 `archive_repository_baseline` 事件）读取并验证原 SHA；原记录不可得时，Agent 可以用原生 Git 检查唯一共同祖先并明确将其记录为“本次接管比较基线”，不能声称找回原始创建点。祖先关系不明、多共同祖先、对象缺失或历史分叉无法解释时停止相关接管步骤。
+
+```sh
+# continuation_sha 为已核验比较基线，pr_head 为刚回读的 PR 完整 Head；逐仓绑定。
+python3 "$agenticops_root/workflow/task.py" repository prepare \
+  --issue-key "$task_key" --expected-run-id "$task_run" \
+  --reuse-existing-branch --continuation-base "tapdata/tapdata=$continuation_sha" \
+  --continuation-head "tapdata/tapdata=$pr_head" \
+  --dir "$project_workspace"
+```
+
+工具核对显式 SHA 是本地 commit，且属于工作分支和当前目标分支的共同历史，再固化 base_sha 和来源事件；不会自动 rebase、移动分支或复制旧 CI。已有冻结基线只能复用，不能用此参数替换。没有历史参数时仍按已有冻结基线或当前目标分支准备，关系不符在创建前拒绝。旧 PR Head 的 CI 可作为该提交的事实回读，但新 run 的质量确认和最终验证仍按当前 run/完整 SHA 建立。
+
+本地没有同名分支时，`--continuation-head` 是受控获取的必要输入：prepare 只从项目配置的 origin 获取已登记工作分支，先核对下载结果与预期 Head 完全一致，再从该提交创建本地分支/worktree。分支不存在、网络失败、Head 已变化均停止，不按同名猜测或覆盖；fork PR 不自动更换 origin，应先核对项目授权范围。已有本地分支时只核对其 Head，不覆盖其修改或提交。本地分支存在且继续原 run 时可省略该参数。
+
+版本规划仍核验当前目标分支的完整 SHA，开发基线则独立校验当前 run 的 worktree、目录摘要和 base_sha→Head 祖先关系。两者不要求 SHA 相等；因此可以在历史基线接管后导入或修正版本规划，而不重新准备基线。目标分支改变、当前版本证据过期或开发基线漂移仍拒绝。
+
+**新分支处理：**先保存未提交修改；脏 worktree 的 cleanup 会拒绝，不应强删。执行 `repository cleanup`（不带 `--delete-branches`）后，按旧 run 执行 `reset --stage task_intake`，回读新 run 并补齐其版本规划、快照和准入事实。若本来就没有基线或 worktree 且处于 task_intake，不必为更新登记额外 reset。
+
+```sh
+python3 "$agenticops_root/workflow/task.py" repository update \
+  --issue-key "$task_key" --expected-run-id "$task_run" \
+  --repo tapdata/tapdata --work-branch "fix/$task_key-retry" \
+  --scope "当前目标分支上的修复范围" --verification "新分支的验证方式" \
+  --reason "用户选择新分支处理，旧 PR 保留参考" --dir "$project_workspace"
+```
+
+update 只允许 active/task_intake、无冻结基线/worktree 记录和相关租约，检查新名称与本地、远端及任务绑定无冲突；远端不可达不能视作不存在。它保留仓库身份、endpoint 和目标分支，先撤销授权，再保存新登记和旧引用的审计记录；写入失败后回读，旧授权保持失效。旧分支与 PR 不变，是否关闭旧 PR 是另外的外部操作。随后正常 prepare/context、源码核验、方案确认与授权。通常不需要 purge；新分支上的修改必须重新验证。
 
 准入事实、仓库登记和本地基线全部齐备后，进入方案审查：
 

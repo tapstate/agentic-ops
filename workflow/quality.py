@@ -126,6 +126,11 @@ def selection_plan(plan, rules):
     plan = dict(plan)
     if rules.get("contract_revision", 1) >= 2 and plan["timing"] == "after_fix":
         plan.pop("target_revision", None)
+    # proposed 是 Q2 已确认的创建/关联意图；真实 Jira Test key/version 只能在
+    # Q4 创建后回读，不能让未来事实反向使 Q2 选择失效。
+    if rules.get("contract_revision", 1) >= 3 and plan["timing"] == "after_fix" and plan["case_status"] == "proposed":
+        plan.pop("case_ref", None)
+        plan.pop("case_version", None)
     return plan
 
 
@@ -202,6 +207,66 @@ def checkpoint_outcome(view):
     return ((view.get("decision") or {}).get("decision") or {}).get("outcome")
 
 
+def structured_plan_problems(model, rules, ctx):
+    """Q2 只接受能区分事实、假设、缺失输入与 Test 关联意图的方案。"""
+    if not rules.get("structured_fix_plan"):
+        return []
+    plan = ctx["facts"].get("fix_plan")
+    if not isinstance(plan, dict) or plan.get("format") != "structured-v1":
+        return ["fix_plan 必须是 format=structured-v1 的 JSON 对象；请区分问题、证据、假设、缺失输入、修改、风险、回滚和 Test 关联意图"]
+    problems = []
+    for key in ("problem_statements", "evidence", "hypotheses", "blocking_inputs", "changes", "risks", "test_links"):
+        if not isinstance(plan.get(key), list):
+            problems.append("fix_plan.%s 必须是数组" % key)
+    if not isinstance(plan.get("rollback"), str) or not plan["rollback"].strip():
+        problems.append("fix_plan.rollback 必须说明可执行回滚方式")
+    if problems:
+        return problems
+    statements = {item.get("id") for item in plan["problem_statements"]
+                  if isinstance(item, dict) and item.get("id") and item.get("text") and item.get("source_ref")}
+    if not statements:
+        problems.append("fix_plan.problem_statements 必须列出当前缺陷的每个问题现象及来源")
+    evidence = {item.get("id") for item in plan["evidence"]
+                if isinstance(item, dict) and item.get("id") and item.get("source_ref") and item.get("observation")}
+    if plan["blocking_inputs"]:
+        requests = [str(item.get("request") or "未说明索取材料") for item in plan["blocking_inputs"] if isinstance(item, dict)]
+        problems.append("方案仍缺关键输入：" + "；".join(requests or ["请说明缺失材料"] ))
+    confirmed, confirmed_ids = set(), set()
+    for item in plan["hypotheses"]:
+        if not isinstance(item, dict) or not item.get("id") or not isinstance(item.get("explains"), list) or not item.get("falsifier"):
+            problems.append("每个根因假设必须包含 id、explains 和 falsifier")
+            continue
+        if item.get("status") == "confirmed":
+            refs = item.get("evidence_ids")
+            if not isinstance(refs, list) or not refs or not set(refs) <= evidence:
+                problems.append("已确认根因 %s 缺少可回查证据" % item["id"])
+            else:
+                confirmed_ids.add(item["id"])
+                confirmed.update(item["explains"])
+    missing = statements - confirmed
+    if missing:
+        problems.append("以下问题现象尚无已证实根因或明确分流：%s" % "、".join(sorted(missing)))
+    for change in plan["changes"]:
+        ids = change.get("hypothesis_ids") if isinstance(change, dict) else None
+        if not isinstance(change, dict) or not change.get("scope") or not isinstance(ids, list) or not ids or not set(ids) <= confirmed_ids:
+            problems.append("每个实施修改必须有范围并引用至少一个已证实根因")
+    selected = {key: item_view(item, rules, ctx) for key, item in model["items"].items()}
+    links = {item.get("item_id"): item for item in plan["test_links"] if isinstance(item, dict) and item.get("item_id")}
+    for item_id, view in selected.items():
+        if view["plan"]["timing"] != "after_fix" or not view["selected"]:
+            continue
+        link = links.get(item_id)
+        if not link or link.get("case_status") != view["plan"]["case_status"]:
+            problems.append("验收项 %s 缺少与 case_status 一致的 Test 关联意图" % item_id)
+        elif link["case_status"] == "existing" and not link.get("source_ref"):
+            problems.append("验收项 %s 复用既有 Test 时必须提供 Jira 回读来源" % item_id)
+        elif link["case_status"] == "proposed" and not link.get("owner"):
+            problems.append("验收项 %s 计划创建 Test 时必须明确创建责任人" % item_id)
+        if view["plan"]["case_status"] == "proposed" and not view["plan"].get("steps"):
+            problems.append("计划创建的验收项 %s 必须提供可执行 steps" % item_id)
+    return problems
+
+
 def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
     ids = [c["id"] for c in rules["checkpoints"]]
     if checkpoint not in ids:
@@ -219,6 +284,8 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
         problems += ["%s 方案待用户选择" % k for k, v in views.items() if not v["selected"]]
         problems += ["修复方案事实 %s 尚未记录；请说明根因、范围、修复方式和风险" % k
                      for k in rules.get("plan_fact_keys", []) if not ctx["facts"].get(k)]
+        if checkpoint == rules["selection_checkpoint"]:
+            problems += structured_plan_problems(model, rules, ctx)
     snapshot = {"checkpoint": checkpoint, "items": views, "due": list(due),
                 "not_due": [k for k in views if k not in due], "context": ctx, "rules": rules}
     if rules.get("contract_revision", 1) >= 2:
@@ -267,6 +334,25 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
         "return": handoff_return,
     }
     return result
+
+
+def checkpoint_digest(base, task, checkpoint, required_outcome=None):
+    rules = config(base)
+    value = report(load(base, task), rules, context(base, task))
+    view = value["checkpoints"].get(checkpoint)
+    outcome = checkpoint_outcome(view or {})
+    if not view or not view["reviewed"] or outcome == "rework" or (
+            required_outcome is not None and outcome != required_outcome):
+        raise ValueError("%s 尚未有效确认" % checkpoint)
+    return view["digest"]
+
+
+def q1_digest(base, task):
+    return checkpoint_digest(base, task, "q1-intake")
+
+
+def q2_digest(base, task):
+    return checkpoint_digest(base, task, config(base)["selection_checkpoint"], required_outcome="accept")
 
 
 def check_proof(proof):

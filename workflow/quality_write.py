@@ -33,7 +33,20 @@ def checkpoint_body(model, checkpoint, rules, ctx):
             if key == "fix_plan" and checkpoint == rules["checkpoints"][0]["id"]:
                 continue
             if facts.get(key):
-                lines.append("%s：%s" % (label, facts[key]))
+                if key == "fix_plan" and isinstance(facts[key], dict) and facts[key].get("format") == "structured-v1":
+                    plan = facts[key]
+                    lines.append("修复方案：结构化方案 structured-v1")
+                    lines.extend("问题 %s：%s（来源：%s）" % (item.get("id", "?"), item.get("text", "待补充"), item.get("source_ref", "待补充"))
+                                 for item in plan.get("problem_statements", []) if isinstance(item, dict))
+                    lines.extend("根因假设 %s：覆盖 %s；状态 %s" % (item.get("id", "?"), "、".join(item.get("explains", [])), item.get("status", "待补充"))
+                                 for item in plan.get("hypotheses", []) if isinstance(item, dict))
+                    if plan.get("blocking_inputs"):
+                        lines.append("仍缺输入：" + "；".join(str(item.get("request", "待补充")) for item in plan["blocking_inputs"] if isinstance(item, dict)))
+                    lines.extend("Test 关联意图：验收项 %s，%s" % (item.get("item_id", "?"), item.get("case_status", "待补充"))
+                                 for item in plan.get("test_links", []) if isinstance(item, dict))
+                    lines.append("回滚：%s" % plan.get("rollback", "待补充"))
+                else:
+                    lines.append("%s：%s" % (label, facts[key]))
         plan = facts.get("issue_version_plan", {})
         if plan.get("primary_branch"):
             lines.append("实施分支：%s" % plan["primary_branch"])

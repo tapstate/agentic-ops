@@ -21,7 +21,7 @@ CODEX_HOOK = ROOT / "adapters" / "agents" / "codex" / "hook.py"
 GATE_RUNNER = ROOT / "gate" / "runner.py"
 sys.path.insert(0, str(ROOT))
 from gate import engine  # noqa: E402
-from workflow import jira_watermark, task_store  # noqa: E402
+from workflow import jira_watermark, quality, task_store  # noqa: E402
 
 PASS = 0
 FAIL = 0
@@ -185,24 +185,58 @@ def grant(ws, **overrides):
     task_store.register(ws, issue, status="active")
     gate = task_store.task_directory(ws, issue)
     gate.mkdir(parents=True, exist_ok=True)
+    run_id = "run-" + ("1" if issue == "TAP-123" else "9") * 12
+    facts = {
+        "fix_plan": {
+            "format": "structured-v1",
+            "problem_statements": [{"id": "P1", "text": "固定 Gate 场景的预期行为", "source_ref": "fixture:jira"}],
+            "evidence": [{"id": "F1", "source_ref": "fixture:source", "observation": "夹具源码与基线已核对"}],
+            "hypotheses": [{"id": "H1", "explains": ["P1"], "evidence_ids": ["F1"],
+                            "status": "confirmed", "falsifier": "针对性验证不再复现"}],
+            "blocking_inputs": [], "changes": [{"scope": "固定 Gate 夹具范围", "hypothesis_ids": ["H1"]}],
+            "risks": ["仅覆盖夹具"], "rollback": "回退夹具变更",
+            "test_links": [{"item_id": "fixture-after-fix", "case_status": "proposed", "owner": "fixture-tester"}],
+        },
+    }
     task_store.task_path(ws, issue).write_text(
         json.dumps({
             "issue_key": issue,
-            "run_id": "run-" + ("1" if issue == "TAP-123" else "9") * 12,
+            "run_id": run_id,
             "task_class": "defect_fix",
             "stage": "design_review",
-            "facts": {},
+            "facts": facts,
             "repositories": repositories,
             "pending": None,
             "history": [],
         }),
         encoding="utf-8",
     )
+    task = json.loads(task_store.task_path(ws, issue).read_text(encoding="utf-8"))
+    rules = quality.config(ws)
+    view = quality.report(quality.load(ws, task), rules, quality.context(ws, task))
+
+    def apply(action, payload):
+        nonlocal view
+        view = quality.apply(ws, issue, run_id, view["revision"], {"action": action, "payload": payload})
+
+    proof = {"actor": "fixture-user", "source": "user_message", "reference": "fixture:plan",
+             "at": "2026-09-03T10:00:00+08:00"}
+    apply("checkpoint", {"checkpoint": "q1-intake", "digest": view["checkpoints"]["q1-intake"]["digest"],
+                           "decision": {"outcome": "not_applicable", "reason": "Gate 夹具不覆盖接管质量场景", "proof": proof}})
+    plan = {"id": "fixture-after-fix", "checkpoint": "q4-acceptance", "timing": "after_fix",
+            "case_ref": "fixture:after-fix", "case_version": "fixture-v1", "case_status": "proposed",
+            "method": "integration", "repository": target_repo, "target_revision": "1" * 40,
+            "criterion": "固定 Gate 验收夹具应通过", "steps": "执行固定 Gate 验收夹具",
+            "expected_result": "PASS", "scope": "仅验证 Gate 基础能力"}
+    apply("item", {"plan": plan, "reason": "Q2 定义修复后验证意图"})
+    apply("select", {"item_id": plan["id"], "digest": view["items"][plan["id"]]["plan_digest"], "proof": proof})
+    apply("checkpoint", {"checkpoint": "q2-plan", "digest": view["checkpoints"]["q2-plan"]["digest"],
+                           "decision": {"outcome": "accept", "reason": "夹具已确认方案及 Test 关联意图", "proof": proof}})
     subprocess.run(
         [
             sys.executable, str(ROOT / "workflow" / "authorization.py"), "grant",
             "--issue-key", issue,
-            "--expected-run-id", "run-" + ("1" if issue == "TAP-123" else "9") * 12,
+            "--expected-run-id", run_id,
             "--agent-id", "dev-bot-1",
             "--plan-version", "v1",
             "--dir", str(ws),
