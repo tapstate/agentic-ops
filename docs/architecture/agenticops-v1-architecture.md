@@ -68,10 +68,13 @@ Agent → Workflow 状态变更入口 → 持锁校验 → 状态与证据
         ├── state.json        # 阶段、事实和多仓库集合
         ├── authorization.json
         ├── events.jsonl
-        └── ci-<pr>.json
+        ├── ci-<pr>.json
+        └── <run-id>/             # Agent 原生工具调用的输入、草稿、回执与回读
 ```
 
-工作空间不复制 Policy、Project Skill 或 Runtime。根 `agenticops`、`AGENTS.md`、Agent 配置和 MCP 配置是可再生接线，文件归属及哈希记录在 `init.json`；`doctor` 检测漂移，`repair` 安全重建。项目工作空间根的 `./agenticops` 只解析 workspace 绑定并转发到中央 Product Root，不注入任务上下文，也不承载任务状态机。Workflow 事件随任务保存；历史 Gate 事件保留用于追溯，根 `events.jsonl` 仍属于可清理的受控状态。旧 `.agenticops.json` 和 `.gate/` 只作为一次性迁移输入，不再是事实源。工作空间维护命令先列出精确目标再确认：`repair` 和 `clean --generated-only` 只收敛可再生接线；`detach` 删除已校验归属的接线和绑定但保留任务状态；`purge` 才会删除任务状态，且必须逐个工作空间明确确认。无法访问的登记只报告，不能被更新自动注销。
+工作空间不复制 Policy、Project Skill 或 Runtime。根 `agenticops`、`AGENTS.md`、Agent 配置和 MCP 配置是可再生接线，文件归属、哈希和 `workspace_state_epoch` 记录在 `init.json`；`doctor` 检测漂移，`repair` 安全重建。项目工作空间根的 `./agenticops` 只解析 workspace 绑定并转发到中央 Product Root，不注入任务上下文，也不承载任务状态机。Workflow 事件随任务保存；Agent 为原生工具交互生成的输入、草稿、回执、回读和日志直接放入任务下的 `<run-id>/`，不得散落在状态根目录；reset 保留旧 run 材料供追溯，任务级 purge 随任务目录统一回收。历史根级交互文件不在线迁移或猜测归属。历史 Gate 事件保留用于追溯，根 `events.jsonl` 仍属于可清理的受控状态。旧 `.agenticops.json` 和 `.gate/` 只作为一次性迁移输入，不再是事实源。工作空间维护命令先列出精确目标再确认：`repair` 和 `clean --generated-only` 只收敛可再生接线；`detach` 删除已校验归属的接线和绑定但保留任务状态；`purge` 才会删除任务状态，且必须逐个工作空间明确确认。无法访问的登记只报告，不能被更新自动注销。
+
+工作空间持久化兼容性由 `contracts/workspace-state-compatibility.json` 统一声明。兼容变更保持 `workspace_state_epoch` 不变；不兼容变更提升 epoch，且必须先以兼容版本发布对应的升级协议。`update` 和 `rollback` 在切换 Git 引用前读取目标清单并比较每个已登记工作空间；目标不支持当前 epoch 时，只有任务、linked worktree 和未识别旧状态均已清理的工作空间可以采用新代际，否则失败关闭并引导用户留在原版本处理。直接跨多个产品版本只比较单调递增的 epoch，不依赖逐个回放中间版本。
 
 普通任务状态变更以工作空间 `.agenticops` 目录自身为互斥对象；Q1 等质量检查点、授权、CI 和任务事件均不要求写入 Product Root。`purge` 在删除该目录前持有同一把锁并回读绑定，以避免并发任务在已删除的工作空间状态上继续写入。Product Root `.local/` 继续用于生命周期、本机工作空间索引及跨工作空间共享的 Source Pool/worktree 租约，不保存任务事实。
 

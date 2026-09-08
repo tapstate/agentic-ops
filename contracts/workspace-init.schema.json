@@ -21,6 +21,7 @@
     },
     "schema_version": { "enum": [1, 2] },
     "product_ref": { "type": "string", "minLength": 1 },
+    "workspace_state_epoch": { "type": "integer", "minimum": 1 },
     "generated_at": { "type": "string", "minLength": 1 },
     "artifacts": {
       "type": "array",

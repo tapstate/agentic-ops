@@ -1100,6 +1100,7 @@ python3 "$install_root/workflow/task.py" init \
 test -f "$workspace/.agenticops/tasks/index.json"
 test -f "$workspace/.agenticops/tasks/TAP-123/state.json"
 test -f "$workspace/.agenticops/tasks/TAP-999/state.json"
+test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["workspace_state_epoch"])' "$workspace/.agenticops/init.json")" = 1
 python3 "$install_root/workflow/task.py" list --dir "$workspace" | grep -F 'TAP-123：active' >/dev/null
 python3 "$install_root/workflow/task.py" list --dir "$workspace" | grep -F 'TAP-999：active' >/dev/null
 python3 "$install_root/workflow/quality.py" status --issue-key TAP-123 --dir "$workspace" > "$test_root/quality-status.json"
@@ -1155,6 +1156,28 @@ test ! -f "$install_root/NEXT"
 test "$(file_digest "$workspace/.agenticops/tasks/index.json")" = "$task_index_digest"
 test "$(file_digest "$workspace/.agenticops/tasks/TAP-123/state.json")" = "$task_123_digest"
 test "$(file_digest "$workspace/.agenticops/tasks/TAP-999/state.json")" = "$task_999_digest"
+
+python3 - "$source_repo/contracts/workspace-state-compatibility.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+document = json.loads(path.read_text(encoding="utf-8"))
+document["workspace_state_epoch"] = 2
+document["supported_workspace_state_epochs"] = [2]
+path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+git -C "$source_repo" add contracts/workspace-state-compatibility.json
+git -C "$source_repo" commit -qm "incompatible workspace state"
+installed_head_before_blocked_update="$(git -C "$install_root" rev-parse HEAD)"
+if "$workspace/agenticops" update > "$test_root/incompatible-update-output" 2>&1; then
+  printf '存在未清理任务时跨工作空间状态代际升级未被拒绝\n' >&2
+  exit 1
+fi
+grep -F '目标版本包含不兼容的工作空间状态变更' "$test_root/incompatible-update-output" >/dev/null
+grep -F '任务 TAP-123（status=active' "$test_root/incompatible-update-output" >/dev/null
+test "$(git -C "$install_root" rev-parse HEAD)" = "$installed_head_before_blocked_update"
 
 # 当前工作空间会话读取已校验任务上下文；purge 同步移除 worktree。
 python3 - "$install_root/projects/tapdata/repositories.json" "$source_repo" "$install_branch" <<'PY'

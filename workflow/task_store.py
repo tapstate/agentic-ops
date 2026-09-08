@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import time
 import threading
 from contextlib import contextmanager
@@ -21,6 +22,10 @@ import fcntl
 
 REGISTRY_VERSION = 1
 ISSUE_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*$")
+RUN_ID_PATTERN = re.compile(r"^run-[a-z0-9][a-z0-9-]*$")
+INTERACTION_NAME_PATTERN = re.compile(
+    r"^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.(?:json|jsonl|log|md|txt))?$"
+)
 _held_locks = threading.local()
 
 
@@ -42,6 +47,64 @@ def registry_path(base):
 
 def task_directory(base, issue_key):
     return state_path(base) / "tasks" / validate_issue_key(issue_key)
+
+
+def interaction_directory(base, issue_key, run_id):
+    """返回当前任务 run 的 Agent 交互文件目录，不创建目录。"""
+    issue = validate_issue_key(issue_key)
+    value = str(run_id or "").strip()
+    if not RUN_ID_PATTERN.fullmatch(value):
+        raise ValueError("任务 run_id 格式无效：%s" % run_id)
+    return task_directory(base, issue) / value
+
+
+def prepare_interaction_directory(base, issue_key, run_id, create=False, require=False):
+    """校验交互目录路径链不含符号链接，并按需创建 run 目录。"""
+    directory = interaction_directory(base, issue_key, run_id)
+    chain = [state_path(base), state_path(base) / "tasks", directory.parent]
+    for path in chain:
+        try:
+            info = path.lstat()
+        except FileNotFoundError as error:
+            raise ValueError("交互目录父路径缺失：%s" % path) from error
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise ValueError("交互目录父路径不是安全目录：%s" % path)
+    try:
+        info = directory.lstat()
+    except FileNotFoundError:
+        if not create:
+            if require:
+                raise ValueError("目标 run 没有已知交互目录：%s" % run_id)
+            return directory
+        try:
+            directory.mkdir(mode=0o700)
+            info = directory.lstat()
+        except OSError as error:
+            raise ValueError("无法创建交互目录：%s" % error) from error
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise ValueError("交互目录不是安全目录：%s" % directory)
+    return directory
+
+
+def interaction_path(base, issue_key, run_id, name, create=False):
+    """解析受控交互文件路径；文件名禁止目录、隐藏文件和非约定扩展名。"""
+    value = str(name or "").strip()
+    if not INTERACTION_NAME_PATTERN.fullmatch(value):
+        raise ValueError(
+            "交互文件名无效：%s；请使用 lowercase-kebab-case 和 json/jsonl/log/md/txt 扩展名"
+            % name
+        )
+    directory = prepare_interaction_directory(
+        base, issue_key, run_id, create=create, require=create
+    )
+    path = directory / value
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return path
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+        raise ValueError("交互文件路径不是普通文件：%s" % path)
+    return path
 
 
 def task_path(base, issue_key):
@@ -134,8 +197,68 @@ def registry_lock(base):
             fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
+def _active_product_lifecycle(product_root):
+    lock = Path(product_root).resolve() / ".local" / "lifecycle.lock"
+    if not lock.is_dir():
+        return None
+    try:
+        owner_text = (lock / "owner").read_text(encoding="utf-8").strip()
+        owner = int(owner_text)
+    except (OSError, ValueError):
+        return "unknown"
+    try:
+        os.kill(owner, 0)
+    except ProcessLookupError:
+        return None
+    except PermissionError:
+        pass
+    try:
+        operation = (lock / "operation").read_text(encoding="utf-8").strip()
+    except OSError:
+        operation = "unknown"
+    return operation or "unknown"
+
+
+def _require_workspace_epoch_supported(base, product_root):
+    """阻止新产品继续写入尚未 repair/adopt 的旧代际工作空间。"""
+    manifest_path = (
+        Path(product_root).resolve()
+        / "contracts"
+        / "workspace-state-compatibility.json"
+    )
+    init_path = state_path(base) / "init.json"
+    # 协议发布前的产品根和测试夹具没有清单；双方均进入协议后才执行代际门禁。
+    if not manifest_path.is_file() or not init_path.is_file():
+        return
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        init = json.loads(init_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("工作空间状态代际无法核验：%s" % error) from error
+    supported = manifest.get("supported_workspace_state_epochs")
+    legacy = manifest.get("legacy_workspace_state_epoch")
+    epoch = init.get("workspace_state_epoch", legacy)
+    if (
+        not isinstance(supported, list)
+        or not supported
+        or any(not isinstance(item, int) or item < 1 for item in supported)
+        or not isinstance(epoch, int)
+        or epoch < 1
+    ):
+        raise ValueError("工作空间状态兼容性清单或代际标记无效")
+    if epoch not in supported:
+        raise ValueError(
+            "工作空间状态代际 %s 与当前产品不兼容；请先执行 agenticops repair，"
+            "有残留任务时回退到原版本完成清理" % epoch
+        )
+
+
 @contextmanager
-def task_state_lock(base):
+def task_state_lock(
+    base,
+    allow_product_lifecycle=False,
+    allow_incompatible_workspace=False,
+):
     """持有工作空间状态目录锁，并在获得锁后重新核验工作空间绑定。
 
     任务事实必须只写入项目工作空间。使用 ``.agenticops`` 目录自身作为锁对象，
@@ -182,6 +305,14 @@ def task_state_lock(base):
             current_root = current.get("product_root")
             if not isinstance(current_root, str) or Path(current_root).resolve() != Path(product_root).resolve():
                 raise ValueError("获得任务状态锁后工作空间绑定已变化，拒绝继续")
+            lifecycle = _active_product_lifecycle(current_root)
+            if lifecycle and not allow_product_lifecycle:
+                raise ValueError(
+                    "Product Root 正在执行生命周期操作，任务状态暂不可变更：%s"
+                    % lifecycle
+                )
+            if not allow_incompatible_workspace:
+                _require_workspace_epoch_supported(base, current_root)
             held.add(lock_key)
             try:
                 yield

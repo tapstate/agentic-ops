@@ -26,6 +26,8 @@
     --expected-stage task_intake --note "准入三项必填齐备，见 Jira 评论"
   python3 workflow/task.py block --issue-key TAP-123 --expected-run-id <当前-run-id> --reason "缺问题版本，已写补卡评论"
   python3 workflow/task.py status --issue-key TAP-123
+  python3 workflow/task.py interaction-path --issue-key TAP-123 --expected-run-id <当前-run-id> \
+    --name jira-snapshot.json
   python3 workflow/task.py reset --issue-key TAP-123 --expected-run-id <当前-run-id> \
     --stage design_review --note "计划实质变更，重新确认"
   python3 workflow/task.py purge --issue-key TAP-123 --expected-run-id <当前-run-id> --yes
@@ -706,6 +708,18 @@ def cmd_reset(args):
         return _cmd_reset_locked(args)
 
 
+@task_store.task_mutation
+def cmd_interaction_path(args):
+    task = load(args.dir, args.issue_key)
+    if task is None:
+        raise ValueError("任务状态缺失：%s" % args.issue_key)
+    path = task_store.interaction_path(
+        args.dir, task["issue_key"], task["run_id"], args.name, create=True
+    )
+    print(path)
+    return 0
+
+
 NEXT_GUIDE = {
     "waiting_takeover": "读取 Jira 初始快照并准备本地版本水印；尽力回写，失败记录警告后继续 advance 进入 task_intake",
     "task_intake": "checklist/record 完成准入 -> repository add/prepare 固化本地基线 -> 源码分析 -> advance；takeover 状态同步失败记录警告并继续",
@@ -1065,6 +1079,13 @@ def main():
     p.add_argument("--issue-key")
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("interaction-path")
+    p.add_argument("--issue-key")
+    p.add_argument("--expected-run-id", required=True)
+    p.add_argument("--name", required=True)
+    p.add_argument("--dir", default=".")
+    p.set_defaults(func=cmd_interaction_path)
 
     p = sub.add_parser("list")
     p.add_argument("--dir", default=".")

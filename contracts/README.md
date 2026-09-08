@@ -20,6 +20,8 @@ Manifest v2 新增可选 `retired_artifacts`，声明需要显式迁移的已托
 
 Workflow CLI 的状态写命令现要求 `--expected-run-id`，advance 另要求 `--expected-stage`；缺参数明确失败，不替调用者读取并填充。任务状态文件结构不变，旧 run/历史证据保留。方案确认新增 `enforcement=workflow_checkpoints` 标记，授权绑定在检查点重查；新增 approved_plan_digest 绑定 fix_plan，旧记录不回填。init.json 的 checkpoint_migration 保存迁移前产品引用、接受时间与退役路径，仅为操作记录，不是身份认证。
 
+工作空间持久化兼容边界由 `workspace-state-compatibility.json` 声明，结构由同名 Schema 校验。`workspace_state_epoch` 单调递增：兼容修改保持不变，不兼容修改必须提升；`supported_workspace_state_epochs` 是目标产品可直接使用的状态代际；`minimum_updater_protocol_version` 是安装该目标版本所需的最低 Updater 能力。过渡版本先提升代码能力但保持旧最低要求，后续版本才提升最低要求。`workspace-init.schema.json` 允许新工作空间记录当前 epoch；缺少该字段的历史工作空间按清单中的 `legacy_workspace_state_epoch` 判断。当前不提供跨 epoch 在线数据迁移。
+
 ## 兼容规则
 
 `authorization.py renew` 使用 expected-run-id 与 expected-authorization-digest 双重绑定，只延长未撤销、方案摘要及仓库绑定不变的授权有效期；renewals 保存决定者、确认来源、前后有效期和原授权摘要。`show --digest` 只输出当前授权的规范化 SHA256。任务的 `completed` 阶段是验收提交点；同 run 的 `advance --expected-stage ci_validation` 重试可以收敛授权撤销及注册状态，成功收敛后重复调用不再写入。除该终态恢复外，过期阶段请求仍拒绝。

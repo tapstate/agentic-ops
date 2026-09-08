@@ -18,6 +18,11 @@ from repository_pool import load as load_repository_pool
 from repository_pool import validate_root as validate_repository_pool_root
 from skill_wiring import validate_skill
 from workspace_paths import WorkspaceDirectory, workspace_artifact_path
+from workspace_compatibility import (
+    load_manifest,
+    require_workspace_can_adopt,
+    workspace_epoch,
+)
 
 
 SCHEMA_VERSION = 2
@@ -306,7 +311,7 @@ def workspace_document(install_root, workspace, project, agents, existing, repos
     }
 
 
-def init_document(install_root, artifacts):
+def init_document(install_root, artifacts, workspace_state_epoch=None):
     recorded_artifacts = []
     for target, artifact in sorted(artifacts.items()):
         if artifact["kind"] == "file":
@@ -320,6 +325,11 @@ def init_document(install_root, artifacts):
     return {
         "schema_version": INIT_SCHEMA_VERSION,
         "product_ref": product_ref(install_root),
+        "workspace_state_epoch": (
+            workspace_state_epoch
+            if workspace_state_epoch is not None
+            else load_manifest(install_root)["workspace_state_epoch"]
+        ),
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "artifacts": recorded_artifacts,
     }
@@ -456,6 +466,9 @@ def check_workspace(install_root, workspace, config, init, tree):
     if init is None:
         raise ValueError("工作空间缺少 init.json，请执行 agenticops repair")
     project, agents, manifests = validate_workspace_document(install_root, config)
+    compatibility = load_manifest(install_root)
+    if workspace_epoch(workspace, compatibility) not in compatibility["supported_workspace_state_epochs"]:
+        raise ValueError("工作空间状态代际与当前产品不兼容；请先在原版本结束并清理任务，再重新初始化工作空间")
     artifacts, _ = expected_artifacts(install_root, workspace, project, agents, manifests)
     if init.get("product_ref") != product_ref(install_root):
         raise ValueError("产品根目录版本已变化，请执行 agenticops repair")
@@ -564,7 +577,14 @@ def main():
             artifacts, messages = expected_artifacts(
                 install_root, workspace, project, agents, manifests
             )
-            document = init_document(install_root, artifacts)
+            adopted_epoch = None
+            if init is not None:
+                adopted_epoch = require_workspace_can_adopt(install_root, workspace)
+            document = init_document(
+                install_root,
+                artifacts,
+                workspace_state_epoch=adopted_epoch,
+            )
             owned = owned_artifacts(init, legacy)
             _, all_manifests = select(install_root, None)
             migrated = check_checkpoint_migration(owned, all_manifests, arguments.accept_checkpoint_migration, tree)
