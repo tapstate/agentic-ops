@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
-"""不改工作树地解析 TapData 模块根目录中的多仓分支关系。
+"""解析 TapData 模块根目录中的多仓分支关系，并受控同步用户开发环境。
 
 ``--version`` 始终表示 ``tapdata/tapdata`` 的分支名。脚本会刷新 TapData 模块根目录
-中每个仓库的 raw remote refs 缓存，再使用这些引用解析关系；它绝不 checkout、切换、
-合并或修改任何工作树。默认优先读单仓库缓存；显式 ``--refresh`` 才强制逐仓查询远端。
+中每个仓库的 raw remote refs 缓存，再使用这些引用解析关系。``show`` 不修改工作树；
+``apply`` 仅在计划摘要匹配且全部预检通过后切换或快进显式指定的模块根目录。默认优先读
+单仓库缓存；显式 ``--refresh`` 才强制逐仓查询远端，``apply`` 始终重新查询远端。
 需要操作前的无缓存精确远端事实，请直接使用
 ``workflow/git_refs.py probe``，不要把本脚本的缓存结果当作最终基线。
 
 用法：
   python3 projects/tapdata/scripts/align_branches.py show --version release-v4.21.0
   python3 projects/tapdata/scripts/align_branches.py show --tapdata-root <tapdata-root> --version fix-xxx
+  python3 projects/tapdata/scripts/align_branches.py apply --tapdata-root <tapdata-root> \
+      --version fix-xxx --expected-plan-digest <digest>
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -487,19 +492,54 @@ def first_release_ge(refs, minimum):
     return None
 
 
-def plugin_release(product_path, branch, rules):
+def local_commit_available(product_path, sha):
+    if not sha:
+        return False
+    return command(["git", "cat-file", "-e", "%s^{commit}" % sha], cwd=product_path).returncode == 0
+
+
+def remote_file_at_head(product_path, branch, expected_sha, path):
+    """读取已核验远端 head 的文件，不改写调用方仓库的对象或 refs。"""
+    if not expected_sha:
+        raise AlignmentError("主仓远端引用缺少已核验 SHA")
+    if local_commit_available(product_path, expected_sha):
+        return git_output(["git", "show", "%s:%s" % (expected_sha, path)], product_path), "local_object"
+
+    origin = git_output(["git", "remote", "get-url", "origin"], product_path)
+    with tempfile.TemporaryDirectory(prefix="tapdata-align-object-") as temporary:
+        initialized = command(["git", "init", "--bare", "--quiet", temporary])
+        if initialized.returncode != 0:
+            raise AlignmentError("无法创建临时 Git 对象库")
+        fetched = command(
+            ["git", "fetch", "--quiet", "--no-tags", "--depth=1", origin, "refs/heads/%s" % branch],
+            cwd=temporary,
+        )
+        if fetched.returncode != 0:
+            detail = (fetched.stderr or fetched.stdout).strip()
+            kind = classify_fetch_error(detail)
+            raise AlignmentError("远端对象读取失败（%s）" % kind)
+        actual_sha = git_output(["git", "rev-parse", "FETCH_HEAD"], temporary)
+        if actual_sha != expected_sha:
+            raise AlignmentError(
+                "主仓远端分支在 refs 核验后发生变化：期望 %s，实际 %s" % (expected_sha, actual_sha)
+            )
+        content = git_output(["git", "show", "%s:%s" % (actual_sha, path)], temporary)
+        return content, "verified_remote_object"
+
+
+def plugin_release(product_path, branch, expected_sha, rules):
     plugin = rules.get("plugin_version_source", {})
     path, key = plugin.get("path"), plugin.get("key")
     if not isinstance(path, str) or not isinstance(key, str):
         return None, "PluginKit 配置不完整"
     try:
-        content = git_output(["git", "show", "origin/%s:%s" % (branch, path)], product_path)
+        content, source = remote_file_at_head(product_path, branch, expected_sha, path)
     except AlignmentError as error:
-        return None, "无法从 tapdata 的 origin/%s 读取 PluginKit：%s" % (branch, error)
+        return None, "无法从 tapdata 的已核验远端分支 %s 读取 PluginKit：%s" % (branch, error)
     for line in content.splitlines():
         if line.strip().startswith(key + "="):
             version = line.split("=", 1)[1].strip().removesuffix("-SNAPSHOT")
-            return "release-v" + version, "tapdata 的 PluginKit %s" % version
+            return "release-v" + version, "tapdata 的 PluginKit %s（%s）" % (version, source)
     return None, "%s 未包含 %s" % (path, key)
 
 
@@ -569,8 +609,7 @@ def derived_target(repository, version, rules, refs, product_path, plugin_cache,
                     plugin_cache["plugin_release"] = (None, "主仓本地目录不可用，无法读取 PluginKit")
                 else:
                     product_sha = refs.get(rules["product_repository"], {}).get(version)
-                    local_error = local_feature_branch_ready(product_path, version, product_sha)
-                    plugin_cache["plugin_release"] = (None, local_error) if local_error else plugin_release(product_path, version, rules)
+                    plugin_cache["plugin_release"] = plugin_release(product_path, version, product_sha, rules)
             target, evidence = plugin_cache["plugin_release"]
             if not target:
                 return None, "unresolved", evidence
@@ -617,7 +656,8 @@ def derived_target(repository, version, rules, refs, product_path, plugin_cache,
             if product_path is None:
                 plugin_cache["plugin_release"] = (None, "主仓本地目录不可用，无法读取 PluginKit")
             else:
-                plugin_cache["plugin_release"] = plugin_release(product_path, version, rules)
+                product_sha = refs.get(rules["product_repository"], {}).get(version)
+                plugin_cache["plugin_release"] = plugin_release(product_path, version, product_sha, rules)
         minimum, evidence = plugin_cache["plugin_release"]
         if not minimum:
             return None, "unresolved", evidence
@@ -651,7 +691,14 @@ def branch_status(target, resolution, observation):
     return ("verified_missing" if verification == "verified" else "absence_unverified"), None
 
 
-def build_plan(version, config, repositories, observations):
+def worktree_state(path):
+    branch = git_output(["git", "branch", "--show-current"], path) or None
+    sha = git_output(["git", "rev-parse", "HEAD"], path)
+    dirty = bool(git_output(["git", "status", "--porcelain"], path))
+    return {"current_branch": branch, "current_sha": sha, "dirty": dirty}
+
+
+def build_plan(version, config, repositories, observations, include_worktree_state=False):
     rules = config["derivation"]
     refs = {repository: item["_refs"] for repository, item in observations.items()}
     paths = {repository: item["_path"] for repository, item in observations.items()}
@@ -680,15 +727,242 @@ def build_plan(version, config, repositories, observations):
             "reason": reason,
             "refs": observation["refs"],
         }
+        if include_worktree_state and observation["_path"] is not None:
+            row.update(worktree_state(observation["_path"]))
+            if target is None:
+                row["action"] = "unchanged" if resolution == "unchanged" else "blocked"
+            elif status not in ("verified_exists", "cached_exists"):
+                row["action"] = "blocked"
+            elif row["current_branch"] == target and row["current_sha"] == sha:
+                row["action"] = "none"
+            else:
+                row["action"] = "switch"
+        elif include_worktree_state:
+            row.update({"current_branch": None, "current_sha": None, "dirty": None, "action": "not_covered"})
         rows.append(row)
     return rows
 
 
+def apply_candidates(rows, scope):
+    requested = set(scope.get("required_repositories", [])) if scope.get("requested_repositories") else None
+    return [
+        row for row in rows
+        if row["local"]["status"] == "available"
+        and row.get("resolution") != "unchanged"
+        and (requested is None or row["repository"] in requested)
+    ]
+
+
+def plan_digest(version, rows, scope, tapdata_root):
+    candidates = apply_candidates(rows, scope)
+    payload = {
+        "schema_version": 1,
+        "tapdata_branch": version,
+        "tapdata_root": str(Path(tapdata_root).resolve()),
+        "scope": {
+            "requested_repositories": sorted(scope.get("requested_repositories", [])),
+            "required_repositories": sorted(scope.get("required_repositories", [])),
+        },
+        "repositories": [{
+            "repository": row["repository"],
+            "repository_path": str(Path(row["local"]["path"]).resolve()),
+            "current_branch": row.get("current_branch"),
+            "current_sha": row.get("current_sha"),
+            "dirty": row.get("dirty"),
+            "target_branch": row.get("target_branch"),
+            "target_sha": row.get("target_sha"),
+        } for row in candidates],
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def assess_apply(rows, scope, require_verified=False):
+    candidates = apply_candidates(rows, scope)
+    blockers = []
+    for row in candidates:
+        repository = row["repository"]
+        if row.get("resolution") == "unresolved" or not row.get("target_branch") or not row.get("target_sha"):
+            blockers.append({"repository": repository, "kind": "target_unresolved", "message": row.get("reason")})
+            continue
+        accepted = ("verified_exists",) if require_verified else ("verified_exists", "cached_exists")
+        if row.get("target_status") not in accepted:
+            blockers.append({"repository": repository, "kind": "target_unverified", "message": row.get("target_status")})
+        if row.get("dirty"):
+            blockers.append({"repository": repository, "kind": "worktree_dirty", "message": "存在未提交变更"})
+        if not row.get("current_branch"):
+            blockers.append({"repository": repository, "kind": "detached_head", "message": "当前为 detached HEAD"})
+    return {
+        "ready": not blockers,
+        "candidate_repositories": [row["repository"] for row in candidates],
+        "blockers": blockers,
+    }
+
+
+def local_branch_sha(path, branch):
+    result = command(["git", "show-ref", "--verify", "--hash", "refs/heads/%s" % branch], cwd=path)
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def checked_out_elsewhere(path, branch):
+    output = git_output(["git", "worktree", "list", "--porcelain"], path)
+    current_worktree = None
+    for line in output.splitlines() + [""]:
+        if line.startswith("worktree "):
+            current_worktree = Path(line[len("worktree "):]).resolve()
+        elif line == "branch refs/heads/%s" % branch and current_worktree != Path(path).resolve():
+            return str(current_worktree)
+        elif not line:
+            current_worktree = None
+    return None
+
+
+def prepare_apply(rows, scope, paths):
+    """先获取并核验全部目标 ref；工作树切换开始前完成可判定预检。"""
+    blockers = []
+    candidates = [row for row in apply_candidates(rows, scope) if row.get("action") == "switch"]
+    for row in candidates:
+        repository, branch, expected_sha = row["repository"], row["target_branch"], row["target_sha"]
+        path = paths[repository]
+        if command(["git", "check-ref-format", "--branch", branch], cwd=path).returncode != 0:
+            blockers.append({"repository": repository, "kind": "invalid_target_branch", "message": branch})
+            continue
+        fetched = command(
+            ["git", "fetch", "--quiet", "--no-tags", "origin",
+             "+refs/heads/%s:refs/remotes/origin/%s" % (branch, branch)],
+            cwd=path,
+        )
+        if fetched.returncode != 0:
+            kind = classify_fetch_error((fetched.stderr or fetched.stdout).strip())
+            blockers.append({"repository": repository, "kind": "target_fetch_failed", "message": kind})
+            continue
+        actual_sha = git_output(["git", "rev-parse", "refs/remotes/origin/%s" % branch], path)
+        if actual_sha != expected_sha:
+            blockers.append({
+                "repository": repository,
+                "kind": "target_changed",
+                "message": "计划 SHA %s，当前远端 SHA %s" % (expected_sha, actual_sha),
+            })
+            continue
+        local_sha = local_branch_sha(path, branch)
+        if local_sha is not None:
+            ancestor = command(["git", "merge-base", "--is-ancestor", local_sha, expected_sha], cwd=path)
+            if ancestor.returncode != 0:
+                blockers.append({
+                    "repository": repository,
+                    "kind": "local_branch_not_fast_forwardable",
+                    "message": "本地 %s 含远端目标之外的提交或已经分叉" % branch,
+                })
+        other = checked_out_elsewhere(path, branch)
+        if other:
+            blockers.append({
+                "repository": repository,
+                "kind": "branch_checked_out_elsewhere",
+                "message": "目标分支已在其它 worktree 使用：%s" % other,
+            })
+    return blockers
+
+
+def compare_worktree_state(row, path):
+    try:
+        current = worktree_state(path)
+    except AlignmentError as error:
+        return None, {
+            "repository": row["repository"],
+            "kind": "worktree_state_unreadable",
+            "message": str(error),
+        }
+    if current["dirty"]:
+        return current, {
+            "repository": row["repository"],
+            "kind": "worktree_dirty",
+            "message": "远端预检期间出现未提交变更",
+        }
+    if current["current_branch"] != row.get("current_branch") or current["current_sha"] != row.get("current_sha"):
+        return current, {
+            "repository": row["repository"],
+            "kind": "worktree_state_changed",
+            "message": "计划状态为 %s@%s，当前状态为 %s@%s" % (
+                row.get("current_branch"), row.get("current_sha"),
+                current["current_branch"], current["current_sha"],
+            ),
+        }
+    return current, None
+
+
+def revalidate_apply_state(rows, scope, paths):
+    blockers = []
+    for row in apply_candidates(rows, scope):
+        _, blocker = compare_worktree_state(row, paths[row["repository"]])
+        if blocker:
+            blockers.append(blocker)
+    return blockers
+
+
+def apply_plan(rows, scope, paths):
+    candidates = [row for row in apply_candidates(rows, scope) if row.get("action") == "switch"]
+    applied = []
+    for index, row in enumerate(candidates):
+        repository, branch = row["repository"], row["target_branch"]
+        path = paths[repository]
+        before = {"branch": row.get("current_branch"), "sha": row.get("current_sha")}
+        current, state_blocker = compare_worktree_state(row, path)
+        if state_blocker:
+            return {
+                "outcome": "failed",
+                "applied": applied,
+                "failed": {
+                    "repository": repository,
+                    "error": state_blocker["message"],
+                    "kind": state_blocker["kind"],
+                    "current": current,
+                    "before": before,
+                },
+                "pending": [item["repository"] for item in candidates[index + 1:]],
+            }
+        try:
+            if local_branch_sha(path, branch) is None:
+                git_output(["git", "switch", "-c", branch, row["target_sha"]], path)
+                git_output(["git", "config", "branch.%s.remote" % branch, "origin"], path)
+                git_output(["git", "config", "branch.%s.merge" % branch, "refs/heads/%s" % branch], path)
+            else:
+                git_output(["git", "switch", "--", branch], path)
+                git_output(["git", "merge", "--ff-only", "origin/%s" % branch], path)
+            actual_branch = git_output(["git", "branch", "--show-current"], path) or None
+            actual_sha = git_output(["git", "rev-parse", "HEAD"], path)
+            if actual_branch != branch or actual_sha != row["target_sha"]:
+                raise AlignmentError("应用后状态与目标不一致")
+        except AlignmentError as error:
+            try:
+                current = worktree_state(path)
+            except AlignmentError:
+                current = {"current_branch": None, "current_sha": None, "dirty": None}
+            return {
+                "outcome": "failed",
+                "applied": applied,
+                "failed": {"repository": repository, "error": str(error), "current": current, "before": before},
+                "pending": [item["repository"] for item in candidates[index + 1:]],
+            }
+        applied.append({
+            "repository": repository,
+            "before": before,
+            "target_branch": branch,
+            "target_sha": row["target_sha"],
+        })
+    return {"outcome": "complete", "applied": applied, "failed": None, "pending": []}
+
+
 def print_table(rows):
-    print("repository\tselection\tlocal_status\ttarget_branch\ttarget_sha\tresolution\ttarget_status\trefs_verification\trefs_error_kind\tprompt\treason")
+    print("repository\tselection\tlocal_status\tcurrent_branch\tcurrent_sha\ttarget_branch\ttarget_sha\taction\tresolution\ttarget_status\trefs_verification\trefs_error_kind\tprompt\treason")
     for row in rows:
         refs = row.get("refs", {})
-        print("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (row["repository"], row["selection"], row["local"]["status"], row["target_branch"] or "-", row["target_sha"] or "-", row["resolution"], row["target_status"], refs.get("verification", "-"), refs.get("error_kind") or "-", refs.get("prompt") or "-", row["reason"]))
+        print("%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s" % (
+            row["repository"], row["selection"], row["local"]["status"],
+            row.get("current_branch") or "-", row.get("current_sha") or "-",
+            row["target_branch"] or "-", row["target_sha"] or "-", row.get("action", "-"),
+            row["resolution"], row["target_status"], refs.get("verification", "-"),
+            refs.get("error_kind") or "-", refs.get("prompt") or "-", row["reason"],
+        ))
 
 
 def report_outcome(rows, scope, refresh_mode):
@@ -723,29 +997,38 @@ def report_outcome(rows, scope, refresh_mode):
 
 def normalize_argv(argv):
     """保留技能短命令 ``tapdata-align-branches <version>`` 的语义。"""
-    if argv and argv[0] not in ("show", "-h", "--help") and not argv[0].startswith("-"):
+    if argv and argv[0] not in ("show", "apply", "-h", "--help") and not argv[0].startswith("-"):
         return ["show", "--version", argv[0], *argv[1:]]
     return argv
 
 
+def add_common_arguments(command_parser):
+    command_parser.add_argument("--version", required=True, help="tapdata/tapdata 的目标分支名")
+    command_parser.add_argument("--repository", action="append", default=[], help="限定本次处理仓库；可重复。主仓始终包含")
+    command_parser.add_argument("--tapdata-root", help="直接包含各 TapData 模块仓库的根目录")
+    command_parser.add_argument("--cache-file", help="Git refs 缓存文件；默认使用当前工作空间缓存")
+    command_parser.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+
+
 def main(argv=None, execution_directory=None):
     argv = normalize_argv(list(sys.argv[1:] if argv is None else argv))
-    parser = argparse.ArgumentParser(description="只读解析 TapData 模块根目录的多仓分支关系")
+    parser = argparse.ArgumentParser(description="解析并受控应用 TapData 模块根目录的多仓分支关系")
     parser.add_argument("--product-root", default=Path(__file__).resolve().parents[3])
     sub = parser.add_subparsers(dest="command", required=True)
     show = sub.add_parser("show", help="按缓存刷新策略解析 Git refs 并显示分支关系")
-    show.add_argument("--version", required=True, help="tapdata/tapdata 的目标分支名")
-    show.add_argument("--repository", action="append", default=[], help="本次严格核验的目标仓库；可重复。主仓始终严格核验")
-    show.add_argument("--tapdata-root", help="包含全部 TapData 模块仓库的根目录；默认由最近工作空间的 Source Pool 解析为 <pool>/tapdata，其次当前执行目录")
+    add_common_arguments(show)
     show.add_argument("--refresh", action="store_true", help="强制查询远端并更新缓存；默认首次或超过 5 分钟才刷新")
-    show.add_argument("--cache-file", help="缓存文件；默认使用当前工作空间 .agenticops/git-ref-cache-v1.json")
-    show.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+    apply = sub.add_parser("apply", help="按已确认计划安全同步用户开发环境")
+    add_common_arguments(apply)
+    apply.add_argument("--expected-plan-digest", required=True, help="show 输出的 plan_digest；防止确认后计划漂移")
     args = parser.parse_args(argv)
     try:
         total_started = time.monotonic()
         config, repositories = load_configuration(args.product_root)
+        if args.command == "apply" and not args.tapdata_root:
+            raise AlignmentError("apply 必须显式提供 --tapdata-root；不得从工作空间或当前目录猜测写入目标")
         tapdata_root, source = resolve_tapdata_root(args.tapdata_root, execution_directory or Path.cwd())
-        refresh_mode = "always" if args.refresh else "auto"
+        refresh_mode = "always" if args.command == "apply" or getattr(args, "refresh", False) else "auto"
         progress("开始解析：refresh=%s，TapData 根目录=%s" % (refresh_mode, tapdata_root))
         scope = resolve_scope(repositories, config["derivation"]["product_repository"], args.repository)
         cache_file, source_pool_root = git_refs_cache_file(execution_directory or Path.cwd(), args.cache_file)
@@ -755,11 +1038,14 @@ def main(argv=None, execution_directory=None):
         )
         progress("开始本地 origin/* 解析")
         resolution_started = time.monotonic()
-        rows = build_plan(args.version, config, repositories, observations)
+        rows = build_plan(args.version, config, repositories, observations, include_worktree_state=True)
         resolution_seconds = time.monotonic() - resolution_started
         total_seconds = time.monotonic() - total_started
         outcome, blockers, coverage_summary = report_outcome(rows, scope, refresh_mode)
+        digest = plan_digest(args.version, rows, scope, tapdata_root)
+        apply_assessment = assess_apply(rows, scope, require_verified=args.command == "apply")
         document = {
+            "command": args.command,
             "tapdata_branch": args.version,
             "tapdata_root": str(tapdata_root),
             "tapdata_root_resolution": source,
@@ -767,21 +1053,71 @@ def main(argv=None, execution_directory=None):
             "scope": scope,
             "blockers": blockers,
             "coverage_summary": coverage_summary,
+            "plan_digest": digest,
+            "apply": apply_assessment,
             "refresh": {"mode": refresh_mode, "auto_max_age_seconds": AUTO_REFRESH_MAX_AGE_SECONDS},
             "timing_seconds": {"fetch": round(fetch_seconds, 3), "local_resolution": round(resolution_seconds, 3), "total": round(total_seconds, 3)},
             "checked_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "rows": rows,
         }
-        progress("解析完成：outcome=%s，fetch=%.3fs，本地解析=%.3fs，总计=%.3fs" % (outcome, fetch_seconds, resolution_seconds, total_seconds))
+        exit_code = 2 if outcome == "blocked" else 0
+        if args.command == "apply":
+            if args.expected_plan_digest != digest:
+                document["apply_result"] = {
+                    "outcome": "blocked",
+                    "reason": "plan_digest_mismatch",
+                    "expected_plan_digest": args.expected_plan_digest,
+                    "actual_plan_digest": digest,
+                }
+                exit_code = 2
+            elif not apply_assessment["ready"]:
+                document["apply_result"] = {
+                    "outcome": "blocked",
+                    "reason": "apply_preconditions_failed",
+                    "blockers": apply_assessment["blockers"],
+                }
+                exit_code = 2
+            else:
+                paths = {
+                    repository: item["_path"] for repository, item in observations.items()
+                    if item["_path"] is not None
+                }
+                preflight_blockers = prepare_apply(rows, scope, paths)
+                if preflight_blockers:
+                    document["apply_result"] = {
+                        "outcome": "blocked",
+                        "reason": "apply_preflight_failed",
+                        "blockers": preflight_blockers,
+                    }
+                    exit_code = 2
+                else:
+                    state_blockers = revalidate_apply_state(rows, scope, paths)
+                    if state_blockers:
+                        document["apply_result"] = {
+                            "outcome": "blocked",
+                            "reason": "worktree_state_changed_after_preflight",
+                            "blockers": state_blockers,
+                        }
+                        exit_code = 2
+                    else:
+                        document["apply_result"] = apply_plan(rows, scope, paths)
+                        exit_code = 0 if document["apply_result"]["outcome"] == "complete" else 2
+            document["analysis_outcome"] = outcome
+            document["outcome"] = document["apply_result"]["outcome"]
+        progress("解析完成：outcome=%s，fetch=%.3fs，本地解析=%.3fs，总计=%.3fs" % (document["outcome"], fetch_seconds, resolution_seconds, total_seconds))
         if args.json:
             print(json.dumps(document, ensure_ascii=False))
         else:
             print("tapdata_root\t%s" % tapdata_root)
             print("tapdata_root_resolution\t%s" % source)
             print("refresh_mode\t%s" % refresh_mode)
+            print("plan_digest\t%s" % digest)
+            print("apply_ready\t%s" % ("yes" if apply_assessment["ready"] else "no"))
             print("timing_seconds\tfetch=%.3f\tlocal_resolution=%.3f\ttotal=%.3f" % (fetch_seconds, resolution_seconds, total_seconds))
             print_table(rows)
-        return 2 if outcome == "blocked" else 0
+            if args.command == "apply":
+                print("apply_result\t%s" % json.dumps(document["apply_result"], ensure_ascii=False, sort_keys=True))
+        return exit_code
     except AlignmentError as error:
         print("错误：%s" % error, file=sys.stderr)
         return 2
