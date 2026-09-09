@@ -51,6 +51,14 @@ flowchart TD
 
 首个有意义提交并完成第一轮针对性验证后建议创建 Draft PR。若验证受阻，披露现状并按 TapData 标准中首个有意义提交／一个工作日要求处理；不等待全量验证全绿。正式提审与 Jira `PR Submitted` 仍遵循 `Tests Passed` 等外部条件。
 
+## 非阻断修复策略
+
+规范化类型为 `defect_fix` 的任务在 Q1 只读显示当前修复策略，健康默认配置为“最小充分修复（默认，可在 Q2 前调整）”。默认路径不要求用户选择、确认、执行命令或填写 Jira 字段。Q2 前先读取 `task.py checklist --json` 或 `task.py next` 返回的 `repair_strategy`，用其中 `planning_guidance` 生成方案，并在现有 Q2 确认内容中说明策略如何影响修改范围；策略定义以 `policies/defect-repair-strategies.json` 为通用事实源，项目只可通过 `projects/<project>/planning.json` 覆盖默认选择。
+
+修复策略只是 advisory 调优：配置缺失或损坏、任务覆盖失效、Agent 未记录应用情况或方案偏离都只形成 warning，不进入 `quality.py` problems、`task.py advance` blockers、Gate 或 Authorization 必填绑定。公司目录无法读取时停用本次调优并继续原缺陷流程，不在代码中复制另一份策略正文。功能、技术及未知类型任务不解析、不展示也不保存修复策略。
+
+用户可在 Q2 确认前使用 `task.py repair-strategy list/show/set/clear` 查看或调整当前 run；`set/clear` 必须绑定 `--expected-run-id`。Q2 已确认后不能只改偏好而保留旧方案，需要让新策略作用于当前任务时，更新 `fix_plan` 并沿用现有重新规划、Q2 确认和授权流程。此时重新确认由实际方案变化触发，不是策略门禁。
+
 以上是现有 `task.py advance` 的强制检查点。Q2 的 `fix_plan` 必须以 `structured-v1` JSON 记录：每个问题现象及来源、可回查证据、可证伪假设、未取得的关键输入、修改范围、风险、回滚以及每个验收项的 Test 关联意图。缺输入时只输出一次性材料清单，不得签发授权或将假设称为根因。`case_status=existing` 表示复用已回读的 Test，必须保留 Jira 来源；`case_status=proposed` 表示确认创建并关联的意图，必须提供步骤、预期、方式和责任人。Q4 才回读真实关联、版本和执行结果；计划创建的 Test 在创建后补入真实 key/version 不会推翻 Q2 的创建意图。Q3 只在全部已确认的修复后检查项已有当前完整 SHA 的预期结果时使用 `auto_checkpoint` 记录事实并回写 Jira。它不等同于用户验收，也不能在失败、跳过、未知、计划变化时推进。原生工具由平台权限处理；Workflow 只保证不满足条件不能推进。advance 需要 expected-run-id 和 expected-stage；Jira prepare/complete 需要 expected-run-id，均从当前 task.py status 固定。不要跳过 Workflow，也不要因本地处置而绕过服务端 Validator 或保护分支。
 
 ## 非阻断 Jira 状态同步

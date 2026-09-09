@@ -19,7 +19,7 @@ Agent → Workflow 状态变更入口 → 持锁校验 → 状态与证据
 |---|---|---|
 | Contract | `contracts/` | 标准请求、判定、操作词表和 Manifest |
 | Gate | `gate/` | 上下文解析与统一判定 |
-| Policy | `policies/` | 公司级操作和连续性规则 |
+| Policy | `policies/` | 公司级操作、连续性规则及非阻断方案调优策略 |
 | Workflow | `workflow/` | 阶段、授权、CI、证据、恢复 |
 | Project | `projects/<project>/` | Jira、分支、准入、验证和 Runbook |
 | Adapter | `adapters/` | Agent/工具协议的无状态转换 |
@@ -28,6 +28,8 @@ Agent → Workflow 状态变更入口 → 持锁校验 → 状态与证据
 | Internal | `internal/` | AgenticOps 自身的审查和发布 |
 
 规则按变化原因归属：平台差异只能进入 Adapter，项目差异只能进入 Project，公司共性进入 Policy，只有必须确定执行的状态逻辑进入 Workflow。
+
+缺陷修复策略属于通用方案调优，不是 Gate 或质量门禁。通用目录位于 `policies/defect-repair-strategies.json`，项目可在 `projects/<project>/planning.json` 只覆盖默认选择；Workflow 容错解析后由 `task.py checklist/next` 向 Agent 提供 Q2 方案指导。它仅适用于规范化 `defect_fix`，配置不可用、Agent 未应用或方案偏离均只产生警告，不改变阶段推进、质量问题或授权判定。健康配置默认使用“最小充分修复”：完整消除已确认根因并保持架构稳定性、兼容性和容错性，同时限制无关扩散；它不等于追求最少代码行。
 
 ## 3. 通用 Agent 适配
 

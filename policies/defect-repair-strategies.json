@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "kind": "planning_tuning",
+  "enforcement": "advisory",
+  "task_class": "defect_fix",
+  "default": "minimal_sufficient",
+  "strategies": [
+    {
+      "id": "minimal_sufficient",
+      "label": "最小充分修复",
+      "description": "完整解决已确认根因，同时限制不必要的影响扩散。",
+      "guidance": [
+        "只纳入消除已确认根因所必需的修改",
+        "明确本次不处理的相邻问题",
+        "避免与本缺陷无关的重构",
+        "不得以缩小改动为由损害架构稳定性、兼容性或容错性"
+      ]
+    },
+    {
+      "id": "context_driven",
+      "label": "根据问题选择方案",
+      "description": "不施加最小化偏好，根据根因、架构稳定性和风险决定范围。",
+      "guidance": [
+        "根据根因确定必要修改范围",
+        "说明公共抽象、兼容性和容错影响",
+        "验证范围覆盖实际影响边界"
+      ]
+    }
+  ]
+}

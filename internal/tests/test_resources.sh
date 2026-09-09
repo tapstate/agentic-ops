@@ -77,8 +77,8 @@ for file in \
   contracts/workspace-init.schema.json contracts/task-registry.schema.json \
   contracts/task-state.schema.json contracts/operation-catalog.json \
   gate/engine.py gate/runner.py \
-  policies/operations.json policies/continuity.json \
-  workflow/task.py workflow/task_store.py workflow/project_rules.py tests/test_workspace_compatibility.py \
+  policies/operations.json policies/continuity.json policies/defect-repair-strategies.json \
+  workflow/task.py workflow/task_store.py workflow/project_rules.py workflow/repair_strategy.py tests/test_workspace_compatibility.py tests/test_repair_strategy.py \
   workflow/authorization.py workflow/ci.py workflow/evidence.py \
   workflow/quality.py workflow/quality_contract.py workflow/quality_write.py \
   workflow/jira_status.py workflow/jira_watermark.py workflow/jira_tests.py workflow/pr_ready.py \
@@ -133,6 +133,7 @@ grep -F 'face="$(lifecycle_work_face "$mode")"' bootstrap/update.sh >/dev/null |
 
 python3 -m json.tool policies/operations.json >/dev/null
 python3 -m json.tool policies/continuity.json >/dev/null
+python3 -m json.tool policies/defect-repair-strategies.json >/dev/null
 python3 -m json.tool contracts/gate-request.schema.json >/dev/null
 python3 -m json.tool contracts/gate-decision.schema.json >/dev/null
 python3 -m json.tool contracts/adapter-manifest.schema.json >/dev/null
