@@ -20,7 +20,8 @@ metadata:
 python3 <agenticops-root>/workflow/git_refs.py snapshot \
   --repository <git-root> --scope heads \
   --repository-id <owner>/<repo> \
-  --cache-file <workspace>/.agenticops/git-ref-cache-v1.json
+  --cache-file <workspace>/.agenticops/git-ref-cache-v2.json \
+  --cache-root <tapdata-root> --max-age 3600
 
 # 无缓存：直接查询当前远端，不读写缓存
 python3 <agenticops-root>/workflow/git_refs.py probe \
@@ -47,7 +48,7 @@ python3 <agenticops-root>/projects/tapdata/scripts/align_branches.py \
 
 `apply` 必须显式提供 `--tapdata-root`，不允许从工作空间绑定、当前目录或用户主目录猜测写入目标。计划摘要同时绑定规范化模块根目录、仓库路径、处理范围、当前状态和目标状态，不能跨另一套目录或范围复用。它始终重新核验远端 refs；任何绑定事实导致摘要变化时停止并要求重新查看、确认。指定 `--repository` 时只应用主仓和明确列出的仓库；未指定时应用本地已接入且参与分支关系的仓库。
 
-`--tapdata-root` 必须直接包含主仓 `<tapdata-root>/tapdata`；它不是通用 Source Pool，也不是 `tapdata/tapdata` 主仓目录。默认缓存写入当前工作空间的 `<workspace>/.agenticops/git-ref-cache-v1.json`，并以 `<owner>/<repo> + canonical origin + scope` 映射；不写入 Product Root 或 Source Pool。脱离工作空间运行时，必须显式传入 `--cache-file`。目录中其它已登记仓库可尚未接入。`--repository` 可重复，表示本次必须核验的任务目标仓库；主仓始终必需。省略它时输出完整目录诊断，但不把全部仓库变成前置条件。
+`--tapdata-root` 必须直接包含主仓 `<tapdata-root>/tapdata`；它不是通用 Source Pool，也不是 `tapdata/tapdata` 主仓目录。默认缓存写入当前工作空间的 `<workspace>/.agenticops/git-ref-cache-v2.json`，以规范化绝对 `<tapdata-root>` 分区，再按 `<owner>/<repo> + canonical origin + scope` 映射；不写入 Product Root 或 Source Pool。旧 `git-ref-cache-v1.json` 由用户自行处理，现役路径不读取、迁移或删除它。脱离工作空间运行时，必须显式传入 `--cache-file`。目录中其它已登记仓库可尚未接入。`--repository` 可重复，表示本次必须核验的任务目标仓库；主仓始终必需。省略它时输出完整目录诊断，但不把全部仓库变成前置条件。
 
 省略 `--tapdata-root` 时，脚本按以下顺序解析 TapData 模块根目录：
 
@@ -60,8 +61,8 @@ python3 <agenticops-root>/projects/tapdata/scripts/align_branches.py \
 
 ## 刷新策略与进度
 
-- `--refresh`：顺序强制查询本次推导依赖到的仓库，并更新对应单仓缓存。
-- 省略 `--refresh`（默认）：优先读取该仓缓存；首次加载或超过项目阈值时刷新。
+- `--refresh`：顺序强制查询本次推导依赖到的仓库，并更新对应单仓缓存。显式指定 `--repository` 时范围为主仓和指定仓库；未指定时处理完整目录。
+- 省略 `--refresh`（默认）：优先读取该仓缓存；首次加载或缓存超过 1 小时时刷新。`show --json` 是分支分析结果，不是严格离线缓存查看：缓存过期时仍会联网并更新 v2 缓存。
 
 JSON 顶层的 `outcome` 为 `complete`、`partial` 或 `blocked`，`scope` 说明本次严格范围，`blockers` 说明不能继续的必需事实。每行的 `target_status` 区分 `verified_exists`、`verified_missing`、`cached_exists`、`absence_unverified`、`not_covered` 与 `unresolved`；远端刷新失败绝不能输出 `verified_missing`。`rows[].refs.error_kind` 会区分 `repository_access_denied`、`ssh_auth_failed`、`network_unreachable`、`fetch_timeout` 与一般刷新失败，`prompt` 给出不含凭证的处理提示；普通表格也显示这两项。`timing_seconds` 分别记录 `fetch`、`local_resolution` 与 `total` 耗时。脚本会在 stderr 实时报告本地检查、每个仓库的刷新/复用和完成耗时；单个 `fetch` 仍在进行时每 10 秒报告一次心跳。
 

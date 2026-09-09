@@ -167,6 +167,8 @@ def root_state_blockers(workspace):
         "events.jsonl",
         "git-ref-cache-v1.json",
         "git-ref-cache-v1.json.lock",
+        "git-ref-cache-v2.json",
+        "git-ref-cache-v2.json.lock",
     }
     try:
         entries = sorted(state_root.iterdir())
