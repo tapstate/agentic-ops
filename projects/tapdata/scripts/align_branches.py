@@ -32,7 +32,7 @@ if str(ROOT) not in sys.path:
 from workflow import git_refs  # noqa: E402
 
 RELEASE_RE = re.compile(r"^release-v\d+(?:\.\d+){2,}$")
-AUTO_REFRESH_MAX_AGE_SECONDS = 300
+AUTO_REFRESH_MAX_AGE_SECONDS = 3600
 FETCH_TIMEOUT_SECONDS = 30
 FETCH_PROGRESS_INTERVAL_SECONDS = 10
 
@@ -287,7 +287,7 @@ def git_refs_cache_file(execution_directory, explicit=None):
     root = pool.get("root") if isinstance(pool, dict) else None
     if not isinstance(root, str) or not root:
         raise AlignmentError("工作空间配置缺少 repository_pool.root：%s" % binding)
-    return workspace / ".agenticops" / "git-ref-cache-v1.json", Path(root).expanduser().resolve()
+    return workspace / ".agenticops" / "git-ref-cache-v2.json", Path(root).expanduser().resolve()
 
 
 def local_repository_state(path):
@@ -369,13 +369,13 @@ def inspect_repositories(tapdata_root, repositories, scope, refresh_mode, cache_
                     snapshot = git_refs.snapshot(
                         observation["_path"], scopes=scopes, cache_file=cache_file, refresh=mode,
                         max_age_seconds=AUTO_REFRESH_MAX_AGE_SECONDS, repository_id=repository,
-                        source_pool_root=source_pool_root,
+                        source_pool_root=source_pool_root, cache_root=tapdata_root,
                     )
                 else:
                     snapshot = git_refs.read_snapshot(
                         observation["_path"], scopes=scopes, cache_file=cache_file,
                         max_age_seconds=AUTO_REFRESH_MAX_AGE_SECONDS, repository_id=repository,
-                        source_pool_root=source_pool_root,
+                        source_pool_root=source_pool_root, cache_root=tapdata_root,
                     )
                 cached = snapshot["scopes"]["heads"]
             except git_refs.GitRefsError as error:
@@ -1017,7 +1017,7 @@ def main(argv=None, execution_directory=None):
     sub = parser.add_subparsers(dest="command", required=True)
     show = sub.add_parser("show", help="按缓存刷新策略解析 Git refs 并显示分支关系")
     add_common_arguments(show)
-    show.add_argument("--refresh", action="store_true", help="强制查询远端并更新缓存；默认首次或超过 5 分钟才刷新")
+    show.add_argument("--refresh", action="store_true", help="强制查询远端并更新缓存；默认首次或超过 1 小时才刷新")
     apply = sub.add_parser("apply", help="按已确认计划安全同步用户开发环境")
     add_common_arguments(apply)
     apply.add_argument("--expected-plan-digest", required=True, help="show 输出的 plan_digest；防止确认后计划漂移")

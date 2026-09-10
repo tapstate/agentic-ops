@@ -86,16 +86,39 @@ def repository_identity(repository, remote, repository_id=None, source_pool_root
     return hashlib.sha256(encoded).hexdigest(), dict(identity, **metadata)
 
 
+def _empty_cache():
+    return {"schema_version": 2, "roots": {}}
+
+
 def _read_cache(path):
     if not path.is_file():
-        return {"schema_version": 1, "repositories": {}}
+        return _empty_cache()
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise GitRefsError("Git refs 缓存损坏：%s" % error) from error
-    if document.get("schema_version") != 1 or not isinstance(document.get("repositories"), dict):
-        raise GitRefsError("Git refs 缓存 schema 无效")
+    if document.get("schema_version") != 2 or not isinstance(document.get("roots"), dict):
+        raise GitRefsError("Git refs 缓存 schema 不兼容；请使用或重建 schema_version=2 的缓存文件")
     return document
+
+
+def _cache_root(value):
+    if value is None:
+        raise GitRefsError("使用文件缓存必须提供 cache_root")
+    return str(Path(value).expanduser().resolve())
+
+
+def _root_repositories(document, cache_root, create=False):
+    roots = document["roots"]
+    root = roots.get(cache_root)
+    if root is None:
+        if not create:
+            return {}
+        root = {"repositories": {}}
+        roots[cache_root] = root
+    if not isinstance(root, dict) or not isinstance(root.get("repositories"), dict):
+        raise GitRefsError("Git refs 缓存根目录分区无效")
+    return root["repositories"]
 
 
 def _write_cache(path, document):
@@ -208,24 +231,27 @@ def _cached_result(record, requested, moment, max_age_seconds):
 
 
 def read_snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
-                  max_age_seconds=300, now=None, repository_id=None, source_pool_root=None):
+                  max_age_seconds=300, now=None, repository_id=None, source_pool_root=None,
+                  cache_root=None):
     """严格只读地加载缓存；不会联网、加锁、创建目录或写回文件。"""
     if cache_file is None:
         raise GitRefsError("只读缓存必须提供 cache_file")
+    root = _cache_root(cache_root)
     requested = tuple(dict.fromkeys(scopes))
     if not requested or not set(requested) <= SCOPES:
         raise GitRefsError("scopes 只支持 heads/tags")
     moment = time.time() if now is None else now
     key, identity = repository_identity(repository, remote, repository_id, source_pool_root)
     document = _read_cache(Path(cache_file).resolve())
-    record = document["repositories"].get(key)
+    record = _root_repositories(document, root).get(key)
     if record is None or record.get("identity") != identity:
         record = {"identity": identity, "scopes": {}}
     return _cached_result(record, requested, moment, max_age_seconds)
 
 
 def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
-             refresh="auto", max_age_seconds=300, now=None, repository_id=None, source_pool_root=None):
+             refresh="auto", max_age_seconds=300, now=None, repository_id=None, source_pool_root=None,
+             cache_root=None):
     """返回单仓库 raw refs 快照；缓存只加速远端查询，不解释业务含义。"""
     if refresh not in ("auto", "always"):
         raise GitRefsError("refresh 必须是 auto/always")
@@ -238,12 +264,14 @@ def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
     key, identity = repository_identity(repository, remote, repository_id, source_pool_root)
     path = Path(repository).resolve()
     cache_path = Path(cache_file).resolve() if cache_file else None
+    root = _cache_root(cache_root) if cache_path else None
 
     def collect(document):
-        record = document["repositories"].setdefault(key, {"identity": identity, "scopes": {}, "last_attempt": None})
+        repositories = _root_repositories(document, root, create=True)
+        record = repositories.setdefault(key, {"identity": identity, "scopes": {}, "last_attempt": None})
         if record.get("identity") != identity:
             record = {"identity": identity, "scopes": {}, "last_attempt": None}
-            document["repositories"][key] = record
+            repositories[key] = record
         result = {"identity": identity, "scopes": {}, "network_used": False}
         for scope in requested:
             previous = record["scopes"].get(scope, {})
@@ -276,12 +304,13 @@ def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
         return result
 
     if cache_path is None:
-        document = {"schema_version": 1, "repositories": {}}
+        document = _empty_cache()
+        root = "__memory__"
         return collect(document)
     # TTL 内的自动命中是纯读操作：不创建锁、不改目录、不重写缓存。
     if refresh == "auto":
         document = _read_cache(cache_path)
-        existing = document["repositories"].get(key)
+        existing = _root_repositories(document, root).get(key)
         if existing is not None and existing.get("identity") == identity and all(
             _fresh(existing.get("scopes", {}).get(scope, {}), moment, max_age_seconds)
             for scope in requested
@@ -302,6 +331,7 @@ def main(argv=None):
     snapshot_parser.add_argument("--remote", default="origin")
     snapshot_parser.add_argument("--scope", action="append", choices=sorted(SCOPES), default=[])
     snapshot_parser.add_argument("--cache-file", required=True)
+    snapshot_parser.add_argument("--cache-root", required=True, help="当前缓存分区的规范化根目录")
     snapshot_parser.add_argument("--refresh", action="store_true", help="强制查询远端并更新缓存；默认按 TTL 自动刷新")
     snapshot_parser.add_argument("--repository-id", required=True, help="<owner>/<repo>，作为缓存仓库映射")
     snapshot_parser.add_argument("--source-pool", help="绑定当前缓存的 Source Pool 根目录")
@@ -314,7 +344,8 @@ def main(argv=None):
         if args.command == "snapshot":
             result = snapshot(args.repository, args.remote, args.scope or ("heads",), args.cache_file,
                               "always" if args.refresh else "auto", args.max_age,
-                              repository_id=args.repository_id, source_pool_root=args.source_pool)
+                              repository_id=args.repository_id, source_pool_root=args.source_pool,
+                              cache_root=args.cache_root)
         else:
             result = probe(args.origin, args.head)
     except GitRefsError as error:

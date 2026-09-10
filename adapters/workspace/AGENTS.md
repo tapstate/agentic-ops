@@ -63,6 +63,7 @@ GitHub MCP、`gh` 和其它 GitHub 工具不由 AgenticOps 绑定；Agent 依据
   交互文件留在旧 run 目录供追溯，任务级 purge 会与整个任务目录一起删除。
   历史版本散落在根目录的文件不在线迁移或猜测归属；遇到工作空间状态不兼容的升级时，先在原版本结束或停用任务、清理 linked worktree 并显式 purge 本地任务状态，再按升级提示处理需要归档的旧材料。以上本地清理不修改 Jira。
 - Workflow 在本地状态变更处执行流程门禁。失败时展示原因和停止点，停止依赖步骤，不手改状态文件绕过。Git/Jira/PR、编辑、构建和测试由 Agent 原生权限处理。
+- 规范化为 `defect_fix` 的任务在 Q1 使用 `workflow/task.py checklist --json` 或 `next` 读取 `repair_strategy`，默认只向用户显示当前策略而不增加确认；生成 Q2 方案时应用返回的 `planning_guidance`，并在现有方案中披露应用结果和偏差。修复策略只是 advisory 调优，配置不可用或偏离只报告 warning，不能作为 Workflow、Quality、Gate 或 Authorization 的阻断条件。
 - 接管、继续或 reset 成功只是流程恢复点，不是默认停点。选择现有 run 或 reset 是人工
   决策；选择完成后应继续核验 Jira、补齐准入、登记仓库并准备本地基线，直到遇到方案
   确认、风险授权、事实不可信或其它真实人工决策点。

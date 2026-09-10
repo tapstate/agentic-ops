@@ -26,9 +26,9 @@ class GitRefsTests(unittest.TestCase):
             cache = Path(temporary) / "cache.json"
             with mock.patch.object(git_refs, "repository_identity", side_effect=self.identity), \
                     mock.patch.object(git_refs, "_query", side_effect=[{"main": "a" * 40}, {"v1": {"object": "b" * 40}}]) as query:
-                first = git_refs.snapshot("/repo", scopes=("heads",), cache_file=cache, now=100)
-                cached = git_refs.snapshot("/repo", scopes=("heads",), cache_file=cache, now=101)
-                tags = git_refs.snapshot("/repo", scopes=("tags",), cache_file=cache, now=101)
+                first = git_refs.snapshot("/repo", scopes=("heads",), cache_file=cache, cache_root="/root", now=100)
+                cached = git_refs.snapshot("/repo", scopes=("heads",), cache_file=cache, cache_root="/root", now=101)
+                tags = git_refs.snapshot("/repo", scopes=("tags",), cache_file=cache, cache_root="/root", now=101)
             self.assertEqual("refreshed", first["scopes"]["heads"]["freshness"])
             self.assertEqual("cached", cached["scopes"]["heads"]["freshness"])
             self.assertEqual("refreshed", tags["scopes"]["tags"]["freshness"])
@@ -39,14 +39,14 @@ class GitRefsTests(unittest.TestCase):
             cache = Path(temporary) / "cache.json"
             with mock.patch.object(git_refs, "repository_identity", side_effect=self.identity), \
                     mock.patch.object(git_refs, "_query", return_value={"main": "a" * 40}):
-                git_refs.snapshot("/repo", cache_file=cache, now=100)
+                git_refs.snapshot("/repo", cache_file=cache, cache_root="/root", now=100)
             with mock.patch.object(git_refs, "repository_identity", side_effect=self.identity), \
                     mock.patch.object(git_refs, "_query", side_effect=git_refs.GitRefsError("network")):
-                result = git_refs.snapshot("/repo", cache_file=cache, now=500)
+                result = git_refs.snapshot("/repo", cache_file=cache, cache_root="/root", now=500)
             self.assertEqual("refresh_failed", result["scopes"]["heads"]["freshness"])
             self.assertEqual("a" * 40, result["scopes"]["heads"]["refs"]["main"])
             document = json.loads(cache.read_text(encoding="utf-8"))
-            self.assertEqual(100, document["repositories"]["key"]["scopes"]["heads"]["last_success_epoch"])
+            self.assertEqual(100, document["roots"]["/root"]["repositories"]["key"]["scopes"]["heads"]["last_success_epoch"])
 
     def test_repository_identity_change_does_not_reuse_cache(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -55,8 +55,8 @@ class GitRefsTests(unittest.TestCase):
                           ("b", {"repository_path": "/b", "git_common_dir": "/b/.git", "remote": "origin", "origin": "github/b"})]
             with mock.patch.object(git_refs, "repository_identity", side_effect=identities), \
                     mock.patch.object(git_refs, "_query", side_effect=[{"main": "a" * 40}, {"main": "b" * 40}]):
-                one = git_refs.snapshot("/a", cache_file=cache, now=100)
-                two = git_refs.snapshot("/b", cache_file=cache, now=101)
+                one = git_refs.snapshot("/a", cache_file=cache, cache_root="/root-a", now=100)
+                two = git_refs.snapshot("/b", cache_file=cache, cache_root="/root-a", now=101)
             self.assertNotEqual(one["scopes"]["heads"]["refs"], two["scopes"]["heads"]["refs"])
 
     def test_probe_is_uncached_and_returns_missing_as_none(self):
@@ -71,7 +71,7 @@ class GitRefsTests(unittest.TestCase):
             cache = Path(temporary) / "missing" / "cache.json"
             with mock.patch.object(git_refs, "repository_identity", side_effect=self.identity), \
                     mock.patch.object(git_refs, "_query") as query:
-                result = git_refs.read_snapshot("/repo", cache_file=cache, now=100, repository_id="owner/repo")
+                result = git_refs.read_snapshot("/repo", cache_file=cache, cache_root="/root", now=100, repository_id="owner/repo")
             self.assertEqual("stale", result["scopes"]["heads"]["freshness"])
             self.assertFalse(cache.exists())
             query.assert_not_called()
@@ -81,10 +81,10 @@ class GitRefsTests(unittest.TestCase):
             cache = Path(temporary) / "cache.json"
             with mock.patch.object(git_refs, "repository_identity", side_effect=self.identity), \
                     mock.patch.object(git_refs, "_query", return_value={"main": "a" * 40}):
-                git_refs.snapshot("/repo", cache_file=cache, now=100)
+                git_refs.snapshot("/repo", cache_file=cache, cache_root="/root", now=100)
             with mock.patch.object(git_refs, "repository_identity", side_effect=self.identity), \
                     mock.patch.object(git_refs, "_write_cache") as write:
-                result = git_refs.snapshot("/repo", cache_file=cache, now=101)
+                result = git_refs.snapshot("/repo", cache_file=cache, cache_root="/root", now=101)
             self.assertEqual("cached", result["scopes"]["heads"]["freshness"])
             write.assert_not_called()
 
@@ -94,9 +94,31 @@ class GitRefsTests(unittest.TestCase):
             with mock.patch.object(git_refs, "repository_identity", wraps=git_refs.repository_identity) as identity, \
                     mock.patch.object(git_refs, "_query", return_value={"main": "a" * 40}):
                 identity.side_effect = self.identity
-                git_refs.snapshot("/repo", cache_file=cache, repository_id="owner/repo", source_pool_root="/pool-a", now=100)
-                other = git_refs.read_snapshot("/repo", cache_file=cache, repository_id="owner/repo", source_pool_root="/pool-b", now=101)
+                git_refs.snapshot("/repo", cache_file=cache, cache_root="/root", repository_id="owner/repo", source_pool_root="/pool-a", now=100)
+                other = git_refs.read_snapshot("/repo", cache_file=cache, cache_root="/root", repository_id="owner/repo", source_pool_root="/pool-b", now=101)
             self.assertEqual("stale", other["scopes"]["heads"]["freshness"])
+
+    def test_roots_are_isolated_and_preserved(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / "cache.json"
+            with mock.patch.object(git_refs, "repository_identity", side_effect=self.identity), \
+                    mock.patch.object(git_refs, "_query", side_effect=[{"main": "a" * 40}, {"main": "b" * 40}]):
+                git_refs.snapshot("/repo-a", cache_file=cache, cache_root="/root-a", now=100)
+                git_refs.snapshot("/repo-b", cache_file=cache, cache_root="/root-b", now=101)
+            document = json.loads(cache.read_text(encoding="utf-8"))
+            self.assertEqual(2, document["schema_version"])
+            self.assertEqual("a" * 40, document["roots"]["/root-a"]["repositories"]["key"]["scopes"]["heads"]["refs"]["main"])
+            self.assertEqual("b" * 40, document["roots"]["/root-b"]["repositories"]["key"]["scopes"]["heads"]["refs"]["main"])
+
+    def test_v1_cache_is_rejected_without_overwrite(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / "git-ref-cache-v1.json"
+            legacy = {"schema_version": 1, "repositories": {"key": {}}}
+            cache.write_text(json.dumps(legacy), encoding="utf-8")
+            with mock.patch.object(git_refs, "repository_identity", side_effect=self.identity):
+                with self.assertRaisesRegex(git_refs.GitRefsError, "schema 不兼容"):
+                    git_refs.snapshot("/repo", cache_file=cache, cache_root="/root", now=100)
+            self.assertEqual(legacy, json.loads(cache.read_text(encoding="utf-8")))
 
     def test_cache_write_permission_error_is_normalized(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -219,6 +219,8 @@ bash "$repo_root/bootstrap/install.sh" \
 
 test -f "$install_root/contracts/gate-request.schema.json"
 test -f "$install_root/gate/runner.py"
+test -f "$install_root/policies/defect-repair-strategies.json"
+test -f "$install_root/workflow/repair_strategy.py"
 test -x "$install_root/agenticops"
 test -f "$maintainer_root/skills/ao-test-takeover/SKILL.md"
 test -f "$maintainer_root/skills/ao-ws-init/SKILL.md"
@@ -429,6 +431,7 @@ grep -F 'memory 只能作为历史线索' "$workspace/AGENTS.md" >/dev/null
 grep -F '接管、继续或 reset 成功只是流程恢复点' "$workspace/AGENTS.md" >/dev/null
 grep -F '远程候选参考' "$workspace/AGENTS.md" >/dev/null
 grep -F 'Workflow 在本地状态变更处执行流程门禁' "$workspace/AGENTS.md" >/dev/null
+grep -F '生成 Q2 方案时应用返回的 `planning_guidance`' "$workspace/AGENTS.md" >/dev/null
 grep -F '登记完成后立即执行受控 `task.py repository prepare`' \
   "$install_root/projects/tapdata/skills/tapdata-task/SKILL.md" >/dev/null
 if "$workspace/agenticops" --help | grep -F 'agenticops task' >/dev/null; then

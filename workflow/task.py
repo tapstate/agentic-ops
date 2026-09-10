@@ -44,7 +44,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from gate import engine  # noqa: E402
-from workflow import authorization, issue_versions, jira_watermark, project_rules, quality, repository_worktree, task_store  # noqa: E402
+from workflow import authorization, issue_versions, jira_watermark, project_rules, quality, repair_strategy, repository_worktree, task_store  # noqa: E402
 
 STAGES = [
     "waiting_takeover",
@@ -237,6 +237,8 @@ def cmd_snapshot(args):
 @task_store.task_mutation
 def cmd_record(args):
     task = require(args.dir, args.issue_key)
+    if args.key == repair_strategy.OVERRIDE_FACT:
+        raise ValueError("修复策略只允许通过 repair-strategy set/clear 修改")
     if args.key in (issue_versions.FACT, "jira_snapshot", "agenticops_version") or (args.key == "problem_version" and issue_versions.rules(args.dir, task)):
         raise ValueError("初始快照和版本规划不允许 record 或 --force 覆盖；用 issue-versions 提交有效版本及用户确认来源")
     spec = admission(args.dir)
@@ -266,6 +268,94 @@ def cmd_record(args):
     task["history"].append({"ts": now(), "event": "record", "key": args.key, "value": value})
     save(args.dir, task)
     print("已记录：%s = %s" % (args.key, json.dumps(value, ensure_ascii=False) if isinstance(value, dict) else value))
+    return 0
+
+
+def _strategy_payload(base, task):
+    return repair_strategy.resolve(base, task)
+
+
+def cmd_repair_strategy_list(args):
+    try:
+        catalog = repair_strategy.list_strategies(args.dir)
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+        print("修复策略配置不可用；原任务流程不受影响：%s" % error, file=sys.stderr)
+        return 2
+    print("缺陷修复策略：")
+    for item in catalog["strategies"]:
+        suffix = "（公司默认）" if item["id"] == catalog["default"] else ""
+        print("  - %s %s%s：%s" % (item["id"], item["label"], suffix, item["description"]))
+        for guidance in item["guidance"]:
+            print("      · %s" % guidance)
+    return 0
+
+
+def cmd_repair_strategy_show(args):
+    task = require(args.dir, args.issue_key)
+    value = _strategy_payload(args.dir, task)
+    print(json.dumps(value, ensure_ascii=False, indent=2) if args.json else _strategy_summary(value))
+    return 0
+
+
+def _strategy_summary(value):
+    if not value.get("applicable"):
+        return "修复策略：不适用"
+    if not value.get("available"):
+        return "修复策略：暂不可用（%s）" % "；".join(value.get("warnings", []))
+    effective = value["effective"]
+    suffix = "，可在 Q2 前调整" if effective["source"] != "user_override" else ""
+    source = {"company_default": "公司默认", "project_default": "项目默认",
+              "user_override": "当前任务设置"}.get(effective["source"], effective["source"])
+    text = "修复策略：%s（%s%s）" % (effective["label"], source, suffix)
+    if value.get("warnings"):
+        text += "\n策略提示：" + "；".join(value["warnings"])
+    return text
+
+
+@task_store.task_mutation
+def cmd_repair_strategy_set(args):
+    task = require(args.dir, args.issue_key)
+    if task.get("task_class") != repair_strategy.TASK_CLASS:
+        print("当前任务类型为 %s，缺陷修复策略不适用；任务状态未改变。" % task.get("task_class"))
+        return 0
+    mutable, reason = repair_strategy.can_change(args.dir, task)
+    if not mutable:
+        print("错误：%s" % reason, file=sys.stderr)
+        return 2
+    try:
+        catalog = repair_strategy.list_strategies(args.dir)
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+        print("错误：修复策略配置不可用，任务状态未改变：%s" % error, file=sys.stderr)
+        return 2
+    known = {item["id"] for item in catalog["strategies"]}
+    if args.id not in known:
+        print("错误：未知修复策略 %s；可选：%s。任务状态未改变。" % (args.id, "、".join(sorted(known))), file=sys.stderr)
+        return 2
+    value = {"id": args.id, "source": "user", "note": args.note or ""}
+    task["facts"][repair_strategy.OVERRIDE_FACT] = value
+    task["history"].append({"ts": now(), "event": "repair_strategy_set", "value": value})
+    save(args.dir, task)
+    print("已设置当前 run 的缺陷修复策略：%s" % args.id)
+    return 0
+
+
+@task_store.task_mutation
+def cmd_repair_strategy_clear(args):
+    task = require(args.dir, args.issue_key)
+    if task.get("task_class") != repair_strategy.TASK_CLASS:
+        print("当前任务类型为 %s，缺陷修复策略不适用；任务状态未改变。" % task.get("task_class"))
+        return 0
+    mutable, reason = repair_strategy.can_change(args.dir, task)
+    if not mutable:
+        print("错误：%s" % reason, file=sys.stderr)
+        return 2
+    if repair_strategy.OVERRIDE_FACT not in task["facts"]:
+        print("当前 run 没有任务级修复策略覆盖，状态未改变。")
+        return 0
+    del task["facts"][repair_strategy.OVERRIDE_FACT]
+    task["history"].append({"ts": now(), "event": "repair_strategy_clear"})
+    save(args.dir, task)
+    print("已清除当前 run 的修复策略覆盖。")
     return 0
 
 
@@ -766,7 +856,7 @@ def _cmd_reset_locked(args):
     )
     task["stage"] = args.stage
     task["run_id"] = "run-" + uuid.uuid4().hex[:12]
-    for key in ("jira_snapshot", "agenticops_version"):
+    for key in ("jira_snapshot", "agenticops_version", repair_strategy.OVERRIDE_FACT):
         if key in task["facts"]:
             task["history"].append({"ts": now(), "event": "archive_fact", "key": key, "value": task["facts"].pop(key)})
     for item in task.get("repositories", []):
@@ -849,15 +939,18 @@ def cmd_next(args):
     rules = quality.config(args.dir)
     current = quality.report(quality.load(args.dir, task), rules, quality.context(args.dir, task)) if quality.enabled(task, rules) else {}
     points = rules.get("stage_checkpoints", {}).get(target, []) if current else []
-    print(json.dumps({"issue_key": task["issue_key"], "run_id": task["run_id"], "stage": task["stage"],
+    payload = {"issue_key": task["issue_key"], "run_id": task["run_id"], "stage": task["stage"],
                       "next_stage": target, "advance_ready": bool(target and not blockers),
                       "blockers": blockers, "diagnostics": diagnostic.getvalue().splitlines(),
                       "pending": task.get("pending"), "guidance": NEXT_GUIDE[task["stage"]],
                       "checkpoints": {p: current["checkpoints"][p] for p in points},
                       "publications": current.get("publications", {}),
                       "warnings": external_sync.warnings(args.dir, task, current),
-                      "continuity": "在现有授权内连续完成可执行步骤；只为缺少事实、必要人工决定、权限不足或外部写结果不明暂停。"},
-                     ensure_ascii=False, indent=2))
+                      "continuity": "在现有授权内连续完成可执行步骤；只为缺少事实、必要人工决定、权限不足或外部写结果不明暂停。"}
+    strategy = _strategy_payload(args.dir, task)
+    if task.get("task_class") == repair_strategy.TASK_CLASS:
+        payload["repair_strategy"] = strategy
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -885,9 +978,13 @@ def cmd_checklist(args):
             "verification_rules": spec.get("verification_rules", {}),
             "quality_mode": cls.get("quality_mode", "text_required"),
         }
+        if task_class == repair_strategy.TASK_CLASS and task:
+            payload["repair_strategy"] = _strategy_payload(args.dir, task)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
     print("准入清单：%s（%s）" % (cls["title"], task_class))
+    if task_class == repair_strategy.TASK_CLASS and task:
+        print(_strategy_summary(_strategy_payload(args.dir, task)))
     flexible = cls.get("quality_mode") == "recorded_decision"
     print("核对项（缺项须披露并在质量检查点处置）：" if flexible else "必填项（缺一不可，advance 硬拦）：")
     for f in cls.get("required_facts", []):
@@ -1087,6 +1184,29 @@ def main():
     p.add_argument("--input", required=True)
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_issue_versions)
+
+    p = sub.add_parser("repair-strategy")
+    strategy_sub = p.add_subparsers(dest="repair_strategy_cmd", required=True)
+    listing = strategy_sub.add_parser("list")
+    listing.add_argument("--dir", default=".")
+    listing.set_defaults(func=cmd_repair_strategy_list)
+    showing = strategy_sub.add_parser("show")
+    showing.add_argument("--issue-key", required=True)
+    showing.add_argument("--json", action="store_true")
+    showing.add_argument("--dir", default=".")
+    showing.set_defaults(func=cmd_repair_strategy_show)
+    setting = strategy_sub.add_parser("set")
+    setting.add_argument("--issue-key", required=True)
+    setting.add_argument("--expected-run-id", required=True)
+    setting.add_argument("--id", required=True)
+    setting.add_argument("--note")
+    setting.add_argument("--dir", default=".")
+    setting.set_defaults(func=cmd_repair_strategy_set)
+    clearing = strategy_sub.add_parser("clear")
+    clearing.add_argument("--issue-key", required=True)
+    clearing.add_argument("--expected-run-id", required=True)
+    clearing.add_argument("--dir", default=".")
+    clearing.set_defaults(func=cmd_repair_strategy_clear)
 
     p = sub.add_parser("snapshot")
     p.add_argument("--issue-key", required=True)

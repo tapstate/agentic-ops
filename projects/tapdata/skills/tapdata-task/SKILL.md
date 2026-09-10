@@ -36,6 +36,7 @@ Agent 为原生 Jira/MCP 调用和质量检查生成的输入、草稿、回执�
 ## 准入、设计和多仓库
 
 - 用 `task.py checklist` 获取机读准入要求，不得凭聊天猜测。
+- `defect_fix` 在 Q1 从 `task.py checklist --json` 或 `task.py next` 读取通用 `repair_strategy`。默认只向用户显示一行当前策略，不增加确认；Q2 按 `planning_guidance` 生成方案并披露应用结果。用户要求调整时，在 Q2 确认前使用 `task.py repair-strategy set/clear` 并绑定当前 run；策略不可用、未应用或偏离只报告 warning，不能阻塞主流程或替代根因、范围、验证和授权检查。策略正文只来自中央 Policy，不复制到本 Skill。
 - 缺陷保留 Jira 初始版本；本地经用户确认的正确版本驱动当前 run。影响版本不映射分支，先核验 develop 的同一缺陷；否则独立确认真实实施分支。其它版本的后续合并与验证记录为待办。
 - 按质量文档用 task.py issue-versions 导入初始观察与 effective.versions、effective.execution_branch、effective.proof。无需等待 Jira 版本字段修正成功；仅核验实际实施分支及优先分析分支的 SHA，repository prepare 固化基线。设计阶段可在同一基线修正版本；改变实施线仍需 cleanup/reset 并重新授权。
 - 若首次判断缺陷必须先准备 develop 工作树，可以先做受控只读分析，再导入初次版本规划；工具核对已准备基线与修复线及主仓 SHA 一致。只有切换修复线或修改已固化规划才需 cleanup/reset，不为完成一次必要调查强制重开任务。

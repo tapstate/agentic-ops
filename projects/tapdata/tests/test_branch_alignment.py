@@ -127,7 +127,7 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             binding.parent.mkdir(parents=True)
             binding.write_text(json.dumps({"repository_pool": {"root": "/pool"}}), encoding="utf-8")
             cache, pool = align.git_refs_cache_file(workspace)
-        self.assertEqual((workspace / ".agenticops" / "git-ref-cache-v1.json").resolve(), cache)
+        self.assertEqual((workspace / ".agenticops" / "git-ref-cache-v2.json").resolve(), cache)
         self.assertEqual(Path("/pool"), pool)
 
     def test_main_repository_is_validated_before_other_module_repositories(self):
@@ -157,14 +157,14 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             align.resolve_scope(repositories, "tapdata/tapdata", ["tapdata/unknown"])
 
     def test_refresh_policy_distinguishes_always_and_auto(self):
-        fresh = {"last_refresh_epoch": 995}
-        stale = {"last_refresh_epoch": 600}
+        fresh = {"last_refresh_epoch": 6_400}
+        stale = {"last_refresh_epoch": 6_399}
         missing = {"last_refresh_epoch": None}
 
-        self.assertTrue(align.refresh_required("always", fresh, 1_000))
-        self.assertFalse(align.refresh_required("auto", fresh, 1_000))
-        self.assertTrue(align.refresh_required("auto", stale, 1_000))
-        self.assertTrue(align.refresh_required("auto", missing, 1_000))
+        self.assertTrue(align.refresh_required("always", fresh, 10_000))
+        self.assertFalse(align.refresh_required("auto", fresh, 10_000))
+        self.assertTrue(align.refresh_required("auto", stale, 10_000))
+        self.assertTrue(align.refresh_required("auto", missing, 10_000))
 
     def test_json_includes_refresh_freshness_and_timing_while_progress_uses_stderr(self):
         config = {"derivation": {"product_repository": "tapdata/tapdata"}}
@@ -177,7 +177,7 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
         observations = {"tapdata/tapdata": self.observation("tapdata/tapdata", {"main": "sha"}, selection="required")}
         with mock.patch.object(align, "load_configuration", return_value=(config, {"tapdata/tapdata": {}})), \
              mock.patch.object(align, "resolve_tapdata_root", return_value=(Path("/tapdata-root"), "explicit")), \
-             mock.patch.object(align, "git_refs_cache_file", return_value=(Path("/workspace/.agenticops/git-ref-cache-v1.json"), Path("/pool"))), \
+             mock.patch.object(align, "git_refs_cache_file", return_value=(Path("/workspace/.agenticops/git-ref-cache-v2.json"), Path("/pool"))), \
              mock.patch.object(align, "inspect_repositories", return_value=(observations, 0.25)), \
              mock.patch.object(align, "build_plan", return_value=rows), \
              mock.patch.object(align, "report_outcome", return_value=("partial", [], {"cached_exists": 1})), \
@@ -187,6 +187,7 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
         document = json.loads(output.getvalue())
         self.assertEqual(0, code)
         self.assertEqual("auto", document["refresh"]["mode"])
+        self.assertEqual(3600, document["refresh"]["auto_max_age_seconds"])
         self.assertEqual(0.25, document["timing_seconds"]["fetch"])
         self.assertEqual("cached_local_refs", document["rows"][0]["refs"]["freshness"])
         self.assertIn("开始解析", errors.getvalue())
