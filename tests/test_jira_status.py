@@ -179,6 +179,34 @@ class JiraStatusTests(unittest.TestCase):
 
         self.assertTrue(any("请用户" in item for item in problems))
 
+    def test_optional_linked_tests_only_allow_verified_absence(self):
+        rules = {"tests_passed": {"linked_test_task": {"relations": ["tests"], "issue_types": ["Test"]},
+                 "test_types": {"Manual": {"method": "manual"}}, "ignored_test_types": {}},
+                 "pr_ready": {"require_linked_test_tasks": False}}
+        doc = {"issue": {"key": "TAP-123", "fields": {"issuelinks": []}}}
+        self.assertEqual(jira_tests.linked_tests(doc, "TAP-123", rules), ([], [], []))
+        for value in (True, None, "false", 0):
+            with self.subTest(required=value):
+                rules["pr_ready"]["require_linked_test_tasks"] = value
+                self.assertTrue(jira_tests.linked_tests(doc, "TAP-123", rules)[0])
+        rules["pr_ready"]["require_linked_test_tasks"] = False
+        for links in (None, [{}], [{"type": {}}], [{"type": {"outward": "tests"}}]):
+            with self.subTest(links=links):
+                doc["issue"]["fields"]["issuelinks"] = links
+                self.assertTrue(jira_tests.linked_tests(doc, "TAP-123", rules)[0])
+
+        doc["issue"]["fields"]["issuelinks"] = [{"type": {"outward": "tests"},
+            "outwardIssue": {"key": "TAP-T1", "fields": {"issuetype": {"name": "Test"}}}}]
+        self.assertTrue(jira_tests.linked_tests(doc, "TAP-123", rules)[0])
+        doc["linked_test_details"] = [{"key": "TAP-T1", "test_type": "Manual", "case_version": "v1",
+                                       "source_ref": "fixture:jira/TAP-T1"}]
+        problems, tests, ignored = jira_tests.linked_tests(doc, "TAP-123", rules)
+        self.assertEqual(problems, [])
+        self.assertEqual([item["key"] for item in tests], ["TAP-T1"])
+        self.assertTrue(jira_tests.confirmation_problems({"items": {}}, tests))
+        doc["linked_test_details"][0]["test_type"] = "unknown"
+        self.assertTrue(jira_tests.linked_tests(doc, "TAP-123", rules)[0])
+
     def test_pr_ready_requires_user_acceptance_for_each_linked_test(self):
         rules = {"pr_ready": {"require_user_confirmation_per_linked_test": True,
                                 "accepted_outcomes": ["accept", "not_applicable"]}}

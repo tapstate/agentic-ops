@@ -6,6 +6,8 @@
 
 [质量检查与证据](quality-checkpoints.md)同时负责按任务类型选择项目质量配置、方案字段检查及旧授权兼容边界；它说明可复用控制的使用合同，不代表任一业务任务类型已通过真实接入验收。
 
+功能开发的项目合同由 `projects/tapdata/admission.json` 与 `quality-feature.json` 定义，[TapData 任务引导](../../projects/tapdata/skills/tapdata-task/SKILL.md)负责功能与缺陷的协作差异；[质量检查与证据](quality-checkpoints.md)说明共用工具和功能任务的人工 Jira 回读边界，不扩展需求任务规划。
+
 [任务授权指引](task-authorization.md)同时负责已有分支/PR 续办、远端分支的精确 Head 获取、历史基线与版本规划的独立核验及新分支重做：说明何时恢复原 run、何时 cleanup/reset、如何更新未准备的仓库登记；Git 成果与旧验证证据的边界以架构和质量文档为准。
 
 | 场景 | 文档 | 何时使用 |

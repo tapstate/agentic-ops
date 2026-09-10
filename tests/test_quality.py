@@ -192,9 +192,77 @@ class QualityTests(unittest.TestCase):
         import hashlib
         old = hashlib.sha256(json.dumps(self.task["facts"]["fix_plan"], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
         self.assertEqual(authorization.plan_digest(self.task, self.base), old)
+        path = self.product / "projects/tapdata/admission.json"
+        spec = json.loads(path.read_text())
+        spec["task_classes"]["feature_change"].pop("quality_profile", None)
+        path.write_text(json.dumps(spec))
         self.task["task_class"] = "feature_change"; self.save_task()
         with self.assertRaisesRegex(ValueError, "未配置"):
             quality.q1_digest(self.base, self.task)
+
+    def test_tapdata_feature_project_contract_and_manual_verification(self):
+        """AO-142：读取实际 Project 配置，不在测试中生成替代功能规则。"""
+        self.task.update(task_class="feature_change", stage="design_review", facts={
+            "acceptance_criteria": "正常和失败场景符合约定", "target_repo": "tapdata/tapdata",
+            "verification_method": "模块集成测试", "risk_level": "T3", "scope_boundary": "目标模块",
+            "implementation_plan": {"objective": "新增目标行为", "changes": ["修改目标模块"],
+                                    "acceptance": ["case-a 验证约定行为"], "risks": ["边界输入"],
+                                    "rollback": "回退目标改动"}})
+        self.task["repositories"] = self.task["repositories"][:1]
+        self.task["repositories"][0].update(authorized_endpoint="github.com/tapdata/tapdata",
+            base_branch="develop", work_branch="feature/TAP-123", base_sha="a" * 40,
+            verification_method="模块集成测试")
+        self.save_task()
+        rules = quality.config(self.base, self.task)
+        self.assertEqual(rules["plan_contract"]["fact_key"], "implementation_plan")
+        self.assertFalse(rules["structured_fix_plan"])
+        self.assertFalse(rules["pr_ready"]["require_linked_test_tasks"])
+        self.assertNotIn("feature_change", quality.project_rules.load_profile(workspace=self.base)
+                         ["jira"]["status_sync"]["task_classes"])
+        self.apply("item", {"plan": {"id": "case-a", "checkpoint": "q4-acceptance",
+            "timing": "after_fix", "case_ref": "src/test/FeatureTest.java#behavior", "case_version": "test-v1",
+            "case_status": "existing", "method": "integration", "repository": "tapdata/tapdata",
+            "target_revision": "a" * 40, "criterion": "约定行为", "steps": "执行目标模块测试",
+            "expected_result": "PASS", "scope": "目标模块"}, "reason": "功能验收对应工程用例"})
+        self.select(); self.checkpoint("q1-intake")
+        plan = self.task["facts"]["implementation_plan"]
+        rollback = plan.pop("rollback"); self.save_task()
+        with self.assertRaisesRegex(ValueError, "rollback"):
+            self.checkpoint("q2-plan")
+        plan["rollback"] = rollback; self.save_task(); self.checkpoint("q2-plan")
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"],
+                               agent_id="fixture", plan_version="v1", ttl_hours=8)
+        self.assertEqual(authorization.cmd_grant(args), 0)
+        self.assertEqual(task._check_advance(self.task, "implementation", self.base, task.admission(self.base)), [])
+        body = self.view()["checkpoints"]["q2-plan"]["publication_body"]
+        self.assertIn(json.dumps(plan, ensure_ascii=False, sort_keys=True), body)
+        self.assertNotIn("fix_plan", self.task["facts"])
+        self.execute(result="FAIL", kind="assertion")
+        with self.assertRaisesRegex(ValueError, "未满足预期"):
+            self.automatic_checkpoint()
+        self.execute(execution_id="run-2"); self.automatic_checkpoint()
+        self.decide(evidence_id="run-2"); self.checkpoint("q4-acceptance")
+        self.assertEqual(quality.advance_problems(self.base, self.task, "ci_validation"), [])
+        self.task["stage"] = "ci_validation"
+        self.task["repositories"][0].update(pull_request="1", worktree={"final_revision": "a" * 40})
+        self.save_task()
+        jira_input = self.base / "feature-jira.json"
+        jira_input.write_text(json.dumps({"source_ref": "fixture:jira/TAP-123",
+            "issue": {"key": "TAP-123", "fields": {"issuelinks": []}}}))
+        missing_ci = pr_ready.check(self.base, "TAP-123", jira_input)
+        self.assertTrue(missing_ci["checks"]["linked_test_tasks"]["passed"])
+        self.assertFalse(missing_ci["ready"])
+        self.assertFalse(missing_ci["checks"]["pr_checks"]["passed"])
+        checks = ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata")
+        checks["history"].append({"head": "a" * 40, "verdict": "success"})
+        ci.save_state(self.base, "TAP-123", "1", checks)
+        self.automatic_checkpoint(); self.decide(evidence_id="run-2"); self.checkpoint("q4-acceptance")
+        ready = pr_ready.check(self.base, "TAP-123", jira_input)
+        self.assertTrue(ready["ready"], ready)
+        self.assertTrue(ready["jira_status_todos"])
+        plan["changes"] = ["改变功能范围"]; self.save_task()
+        self.assertTrue(task._check_advance(self.task, "implementation", self.base, task.admission(self.base)))
+        self.assertFalse(pr_ready.check(self.base, "TAP-123", jira_input)["ready"])
 
     def apply(self, action, payload):
         return quality.apply(self.base, "TAP-123", self.task["run_id"], self.view()["revision"],
