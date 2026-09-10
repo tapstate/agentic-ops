@@ -27,9 +27,10 @@ def checkpoint_body(model, checkpoint, rules, ctx):
         if any(decision.get(key) for key in ("follow_up", "owner", "deadline")):
             lines.append("检查点后续：%s；责任人：%s；期限：%s" % (
                 decision.get("follow_up", "待确认"), decision.get("owner", "待确认"), decision.get("deadline", "待确认")))
-        for key, label in (("problem_version", "本地问题版本"), ("problem_symptom", "问题现象"),
+        legacy_fields = (("problem_version", "本地问题版本"), ("problem_symptom", "问题现象"),
                            ("problem_branch", "问题分支"), ("reproduce_path", "复现路径"),
-                           ("acceptance_criteria", "验收标准"), ("fix_plan", "修复方案")):
+                           ("acceptance_criteria", "验收标准"), ("fix_plan", "修复方案"))
+        for key, label in legacy_fields:
             if key == "fix_plan" and checkpoint == rules["checkpoints"][0]["id"]:
                 continue
             if facts.get(key):
@@ -47,6 +48,14 @@ def checkpoint_body(model, checkpoint, rules, ctx):
                     lines.append("回滚：%s" % plan.get("rollback", "待补充"))
                 else:
                     lines.append("%s：%s" % (label, facts[key]))
+        # 保留既有缺陷正文；项目新增的方案事实完整输出，不在 Q1 提前发布方案。
+        checkpoints = [point["id"] for point in rules["checkpoints"]]
+        if checkpoints.index(checkpoint) >= checkpoints.index(rules["selection_checkpoint"]):
+            rendered = {key for key, _ in legacy_fields}
+            for key in rules.get("plan_fact_keys", []):
+                if key not in rendered and key in facts:
+                    lines.append("方案事实 %s：%s" % (key, json.dumps(facts[key], ensure_ascii=False, sort_keys=True)))
+                    rendered.add(key)
         plan = facts.get("issue_version_plan", {})
         if plan.get("primary_branch"):
             lines.append("实施分支：%s" % plan["primary_branch"])

@@ -16,7 +16,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from workflow import ci, evidence, quality, quality_contract, task, task_store
+from workflow import authorization, ci, evidence, quality, quality_contract, task, task_store
 
 
 def proof():
@@ -60,7 +60,141 @@ class QualityTests(unittest.TestCase):
         task_store._write_json_atomic(task_store.task_path(self.base, self.task["issue_key"]), self.task)
 
     def view(self):
-        return quality.report(quality.load(self.base, self.task), quality.config(self.base), quality.context(self.base, self.task))
+        return quality.report(quality.load(self.base, self.task), quality.config(self.base, self.task), quality.context(self.base, self.task))
+
+    def feature_profile(self):
+        """仅在夹具配置功能；生产功能准入与 Jira 接入由 AO-142 交付。"""
+        self.plan()
+        project = self.product / "projects/tapdata"
+        admission_path = project / "admission.json"
+        admission = json.loads(admission_path.read_text())
+        feature = admission["task_classes"]["feature_change"]
+        feature["quality_profile"] = "quality-feature.json"
+        feature["optional_facts"].append({"key": "implementation_plan", "label": "实施方案"})
+        admission_path.write_text(json.dumps(admission))
+        rules = json.loads((project / "quality.json").read_text())
+        rules.update(task_classes=["feature_change"], structured_fix_plan=False,
+                     intake_fact_keys=["acceptance_criteria", "target_repo", "verification_method", "risk_level"],
+                     plan_fact_keys=["implementation_plan", "scope_boundary"],
+                     plan_contract={"fact_key": "implementation_plan", "required_fields": ["objective", "changes", "acceptance", "risks", "rollback"]})
+        self.profile_path = project / "quality-feature.json"
+        self.profile_path.write_text(json.dumps(rules))
+        self.task.update(task_class="feature_change", stage="design_review", facts={
+            "acceptance_criteria": "正常、边界和失败场景", "target_repo": "tapdata/tapdata",
+            "verification_method": "运行模块测试", "risk_level": "T3", "scope_boundary": "目标模块",
+            "implementation_plan": {"objective": "目标行为", "changes": ["新增行为"],
+                                    "acceptance": ["目标断言"], "risks": ["兼容性"], "rollback": "回退改动"}})
+        self.task["repositories"] = self.task["repositories"][:1]
+        for repo in self.task["repositories"]:
+            repo.update(authorized_endpoint="github.com/" + repo["repository"], base_branch="develop",
+                        work_branch="feature/TAP-123", base_sha="a" * 40, verification_method="模块测试",
+                        approved_scope="目标功能模块")
+        self.save_task()
+
+    def test_feature_confirmation_grant_advance_and_drift(self):
+        self.feature_profile()
+        self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"],
+                               agent_id="fixture", plan_version="v1", ttl_hours=8)
+        self.assertEqual(authorization.cmd_grant(args), 0)
+        record = json.loads(task_store.authorization_path(self.base, "TAP-123").read_text())
+        renewal = SimpleNamespace(**vars(args), expected_authorization_digest=authorization.record_digest(record),
+                                  confirmed_by="fixture", confirmation_ref="fixture:renew")
+        renewal.ttl_hours = 16
+        self.assertEqual(authorization.cmd_renew(renewal), 0)
+        spec = task.admission(self.base)
+        self.assertEqual(task._check_advance(self.task, "implementation", self.base, spec), [])
+        before = quality.q2_digest(self.base, self.task)
+        self.task["facts"]["note"] = "仅展示备注"; self.save_task()
+        self.assertEqual(quality.q2_digest(self.base, self.task), before)
+        self.task["facts"]["implementation_plan"]["changes"] = ["扩大行为"]
+        self.save_task()
+        self.assertTrue(task._check_advance(self.task, "implementation", self.base, spec))
+        with self.assertRaisesRegex(ValueError, "尚未有效确认"):
+            quality.q2_digest(self.base, self.task)
+
+    def test_feature_publication_contains_complete_plan_and_accepts_draft(self):
+        self.feature_profile(); self.select(); self.checkpoint("q1-intake")
+        q1 = self.view()["checkpoints"]["q1-intake"]["publication_body"]
+        self.assertNotIn("implementation_plan", q1)
+        self.checkpoint("q2-plan")
+        body = self.view()["checkpoints"]["q2-plan"]["publication_body"]
+        plan = self.task["facts"]["implementation_plan"]
+        self.assertIn(json.dumps(plan, ensure_ascii=False, sort_keys=True), body)
+        self.assertIn('方案事实 scope_boundary："目标模块"', body)
+        self.assertEqual(body.count("方案事实 implementation_plan："), 1)
+        self.apply("draft", {"id": "feature-plan", "checkpoint": "q2-plan", "body": body})
+        self.assertEqual(self.view()["publications"]["feature-plan"]["body"], body)
+        with self.assertRaisesRegex(ValueError, "完整 publication_body"):
+            self.apply("draft", {"id": "incomplete-plan", "checkpoint": "q2-plan",
+                                  "body": body.replace(json.dumps(plan, ensure_ascii=False, sort_keys=True), "省略方案")})
+
+    def test_feature_record_input_and_configuration_drift(self):
+        self.feature_profile()
+        source = self.base / "plan.json"
+        source.write_text(json.dumps(self.task["facts"]["implementation_plan"]))
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"],
+                               key="implementation_plan", input=str(source), value=None, force=False)
+        self.assertEqual(task.cmd_record(args), 0)
+        self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
+        rules = json.loads(self.profile_path.read_text())
+        rules["plan_contract"]["required_fields"].append("compatibility")
+        self.profile_path.write_text(json.dumps(rules))
+        with self.assertRaisesRegex(ValueError, "尚未有效确认"):
+            quality.q2_digest(self.base, self.task)
+
+    def test_feature_profile_invalid_path_and_json_are_diagnostic(self):
+        self.feature_profile()
+        path = self.product / "projects/tapdata/admission.json"
+        spec = json.loads(path.read_text())
+        for value in (None, "../quality.json", "", {}, "/tmp/quality.json"):
+            spec["task_classes"]["feature_change"]["quality_profile"] = value
+            path.write_text(json.dumps(spec))
+            with self.assertRaises(ValueError):
+                quality.config(self.base, self.task)
+        spec["task_classes"]["feature_change"]["quality_profile"] = "quality-feature.json"
+        path.write_text(json.dumps(spec))
+        for value in ("{", "null", "{}", '{"schema_version":1,"checkpoints":null}'):
+            self.profile_path.write_text(value)
+            with self.assertRaises(ValueError):
+                quality.config(self.base, self.task)
+
+    def test_feature_contract_and_intake_cannot_be_empty(self):
+        self.feature_profile(); self.select()
+        self.task["facts"]["implementation_plan"]["acceptance"] = []
+        self.save_task()
+        with self.assertRaisesRegex(ValueError, "acceptance"):
+            self.checkpoint("q2-plan")
+        self.task["facts"]["implementation_plan"]["acceptance"] = ["目标断言"]
+        self.task["facts"]["acceptance_criteria"] = ""
+        self.save_task()
+        self.assertTrue(quality.context(self.base, self.task)["missing_facts"])
+        self.assertTrue(task._check_advance(self.task, "design_review", self.base, task.admission(self.base)))
+
+    def test_task_profile_missing_mismatch_and_invalid_checks_fail_closed(self):
+        self.feature_profile()
+        original = self.profile_path.read_text()
+        self.profile_path.unlink()
+        with self.assertRaisesRegex(ValueError, "配置缺失"):
+            quality.advance_problems(self.base, self.task, "implementation")
+        for change in ({"task_classes": ["defect_fix"]}, {"plan_fact_keys": []},
+                       {"stage_checkpoints": {"implementation": []}}, {"plan_contract": {}},
+                       {"intake_fact_keys": ["target_repo"]}, {"plan_fact_keys": ["unknown_plan"]},
+                       {"stage_checkpoints": {"implementation": ["q1-intake", "q2-plan"]}},
+                       {"plan_contract": {"fact_key": "implementation_plan", "required_fields": []}}):
+            with self.subTest(change=change):
+                rules = json.loads(original); rules.update(change)
+                self.profile_path.write_text(json.dumps(rules))
+                with self.assertRaises(ValueError):
+                    quality.q1_digest(self.base, self.task)
+
+    def test_unmapped_feature_rejects_authorization_and_legacy_digest_unchanged(self):
+        import hashlib
+        old = hashlib.sha256(json.dumps(self.task["facts"]["fix_plan"], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        self.assertEqual(authorization.plan_digest(self.task, self.base), old)
+        self.task["task_class"] = "feature_change"; self.save_task()
+        with self.assertRaisesRegex(ValueError, "未配置"):
+            quality.q1_digest(self.base, self.task)
 
     def apply(self, action, payload):
         return quality.apply(self.base, "TAP-123", self.task["run_id"], self.view()["revision"],

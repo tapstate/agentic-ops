@@ -16,6 +16,16 @@ interaction_file="$(python3 <agenticops-root>/workflow/task.py interaction-path 
 
 旧版本已经散落在 `.agenticops/` 根目录的文件不会被在线迁移，也不会按文件名猜测 run 归属。遇到不兼容升级时，先在原版本完成或停用任务、清理 linked worktree 并显式 purge 本地任务状态；需要保留的旧材料由研发工程师移出状态目录归档，再重新执行升级。以上本地处理不修改 Jira。
 
+## 任务类型与质量配置
+
+任务类型可在 Project 的 `admission.json` 中声明 `quality_profile`，值为当前项目目录内的 JSON 文件名，例如 `quality-feature.json`。未声明时沿用 `quality.json`，保留现有缺陷规则及摘要算法。显式声明的文件缺失、配置无效或未启用当前任务类型时，相关质量检查拒绝推进，不回退到缺陷规则。质量配置选择统一用于授权、阶段、证据、PR Ready 及同步告警。
+
+专用配置复用现有质量合同，通过 `task_classes` 声明适用类型，通过 `intake_fact_keys` 和 `plan_fact_keys` 声明参与确认的事实。实施前必须包含人工决定的 `q1-intake` 与 `selection_checkpoint`。未使用既有 `structured_fix_plan` 检查时，必须以 `plan_contract` 声明方案对象的 `fact_key` 和非空 `required_fields` 列表；该事实同时列入 `plan_fact_keys` 并登记为准入配置中的已知事实。`task.py record --key <方案事实> --input <JSON文件>` 可以记录此对象。这里只检查必要内容存在和确认有效性，方案合理性及测试预期仍由 Agent 与研发核对。
+
+任务专用方案摘要绑定任务类型和配置指定的方案事实；授权签发、续签及推进使用同一选择。已确认的方案、验收或规则实质变化后，重新核对相关确认；未参与确认的展示备注不影响方案。没有启用质量检查的任务不能签发方案授权，不能通过空配置代替检查。增加配置支持不等于功能任务已完成 Jira 或真实测试接入。
+
+本次能力扩展不增加本地状态字段、路径或事件格式，`workspace_state_epoch` 保持 1。未启用专用配置的旧缺陷任务继续使用原规则及相同摘要；旧事件按记录的规则重放。给已有任务切换质量配置属于规则变化，旧确认不会自动迁移为新规则下的确认。专用配置须部署在支持此能力的产品版本；回退旧产品前结束或停用这些任务，不能将新能力下的任务当作已验证的旧版续办路径。
+
 ## 流程与检查点
 
 ```mermaid

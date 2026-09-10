@@ -289,7 +289,7 @@ class CheckpointTests(unittest.TestCase):
             self.assertTrue(any("run" in p for p in task._check_advance(self.state, "pr_review", self.base, spec)))
             auth["agentic_run_id"] = self.state["run_id"]
             self.state["facts"]["fix_plan"] = "changed"
-            self.assertTrue(any("fix_plan" in p for p in task._check_advance(self.state, "pr_review", self.base, spec)))
+            self.assertTrue(any("方案已变化" in p for p in task._check_advance(self.state, "pr_review", self.base, spec)))
 
     def test_unknown_jira_outcome_can_converge_by_readback_without_new_attempt(self):
         self.state.update(stage="task_intake")

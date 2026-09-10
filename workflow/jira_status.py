@@ -75,7 +75,7 @@ def issue_from(snapshot, issue_key):
 
 
 def strict_checkpoint_ready(base, task, checkpoint):
-    rules = quality.config(base)
+    rules = quality.config(base, task)
     if not quality.enabled(task, rules):
         return False, ["当前任务未启用质量检查"]
     report = quality.report(quality.load(base, task), rules, quality.context(base, task))
@@ -98,7 +98,7 @@ def tests_passed_ready(base, task, snapshot):
     ready, problems = strict_checkpoint_ready(base, task, "q4-acceptance")
     if not ready:
         return False, "quality_not_verified", problems, []
-    quality_rules = quality.config(base)
+    quality_rules = quality.config(base, task)
     report = quality.report(quality.load(base, task), quality_rules, quality.context(base, task))
     checkpoint = report["checkpoints"]["q4-acceptance"]
     outcome = ((checkpoint.get("decision") or {}).get("decision") or {}).get("outcome")

@@ -26,20 +26,92 @@ def digest(value):
                                     separators=(",", ":")).encode()).hexdigest()
 
 
-def config(base):
+def config(base, task=None):
     root = project_rules.product_root_from_workspace(base)
     project = project_rules.project_from_workspace(base)
-    path = project_rules.project_root(root, project) / "quality.json"
+    project_dir = project_rules.project_root(root, project)
+    profile = None
+    if task is not None:
+        spec = project_rules.load_admission(workspace=base)
+        cls = project_rules.class_spec(spec, task["task_class"])
+        profile = cls.get("quality_profile")
+        if "quality_profile" in cls and profile is None:
+            raise ValueError("quality_profile 不能声明为空")
+    if profile is not None and (not isinstance(profile, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*\.json", profile)):
+        raise ValueError("quality_profile 必须是当前 Project 内的 lowercase-kebab-case JSON 文件名")
+    path = project_dir / (profile or "quality.json")
+    if path.resolve().parent != project_dir.resolve():
+        raise ValueError("质量配置不能指向当前 Project 之外")
     if not path.exists():
+        if profile is not None:
+            raise ValueError("任务声明的质量配置缺失：%s" % profile)
         return None
-    result = json.loads(path.read_text(encoding="utf-8"))
-    if result.get("schema_version") != 1:
-        raise ValueError("不支持的质量配置版本")
-    ids = [c["id"] for c in result["checkpoints"]]
-    if not ids or len(ids) != len(set(ids)) or result["selection_checkpoint"] not in ids:
-        raise ValueError("质量检查点配置无效")
-    result["jira"]["site"] = project_rules.load_profile(workspace=base)["jira"]["site"]
+    try:
+        result = json.loads(path.read_text(encoding="utf-8"))
+        if result.get("schema_version") != 1:
+            raise ValueError("不支持的质量配置版本")
+        ids = [c["id"] for c in result["checkpoints"]]
+        if not ids or len(ids) != len(set(ids)) or result["selection_checkpoint"] not in ids:
+            raise ValueError("质量检查点配置无效")
+        if profile is not None:
+            validate_task_profile(result, task)
+            required = {f["key"] for f in cls.get("required_facts", [])}
+            if not required.issubset(result["intake_fact_keys"]):
+                raise ValueError("接管确认必须绑定准入要求的全部事实")
+            known = project_rules.known_fact_keys(spec, task["task_class"])
+            if any(k not in known for k in result["plan_fact_keys"]):
+                raise ValueError("方案事实必须先在 Project 准入配置中声明")
+        result["jira"]["site"] = project_rules.load_profile(workspace=base)["jira"]["site"]
+    except (OSError, KeyError, TypeError, AttributeError) as error:
+        raise ValueError("质量配置无法读取或结构无效：%s" % path.name) from error
     return result
+
+
+def validate_task_profile(rules, task):
+    """显式任务配置使用现有检查点合同；不引入表达式或任务编排。"""
+    classes = rules.get("task_classes")
+    if not isinstance(classes, list) or task["task_class"] not in classes:
+        raise ValueError("任务质量配置未启用当前任务类型")
+    points = {p["id"]: p for p in rules["checkpoints"]}
+    selected = rules["selection_checkpoint"]
+    before = rules.get("stage_checkpoints", {}).get("implementation", [])
+    if ("q1-intake" not in points or selected == "q1-intake"
+            or not {"q1-intake", selected}.issubset(before)):
+        raise ValueError("任务质量配置必须在实施前检查接管与方案确认")
+    for key in ("q1-intake", selected):
+        if points[key].get("confirmation", "user") != "user":
+            raise ValueError("接管与方案检查必须保留人工决定")
+    for keys in rules.get("stage_checkpoints", {}).values():
+        if not isinstance(keys, list) or any(k not in points for k in keys):
+            raise ValueError("阶段引用了无效质量检查点")
+    for stage in ("pr_review", "ci_validation", "completed"):
+        if not rules.get("stage_checkpoints", {}).get(stage):
+            raise ValueError("任务质量配置缺少 %s 的必要检查" % stage)
+    for name in ("intake_fact_keys", "plan_fact_keys"):
+        keys = rules.get(name)
+        if not isinstance(keys, list) or not keys or any(not isinstance(k, str) or not k for k in keys):
+            raise ValueError("任务质量配置缺少有效的 %s" % name)
+    contract = rules.get("plan_contract")
+    if contract is not None or not rules.get("structured_fix_plan"):
+        if (not isinstance(contract, dict) or set(contract) != {"fact_key", "required_fields"}
+                or contract.get("fact_key") not in rules["plan_fact_keys"]
+                or not isinstance(contract.get("required_fields"), list) or not contract["required_fields"]
+                or any(not isinstance(k, str) or not k for k in contract["required_fields"])):
+            raise ValueError("任务质量配置必须声明有效 plan_contract")
+
+
+def plan_problems(model, rules, ctx):
+    contract = rules.get("plan_contract")
+    problems = structured_plan_problems(model, rules, ctx)
+    if contract is not None:
+        plan = ctx["facts"].get(contract["fact_key"])
+        if not isinstance(plan, dict):
+            return problems + ["方案事实 %s 必须是 JSON 对象" % contract["fact_key"]]
+        for key in contract["required_fields"]:
+            value = plan.get(key)
+            if not isinstance(value, (str, list, dict)) or not value or (isinstance(value, str) and not value.strip()):
+                problems.append("方案 %s.%s 缺失或为空" % (contract["fact_key"], key))
+    return problems
 
 
 def enabled(task, rules):
@@ -282,10 +354,10 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
             problems.append("%s 用户要求补测/返工" % key)
     if index >= ids.index(rules["selection_checkpoint"]):
         problems += ["%s 方案待用户选择" % k for k, v in views.items() if not v["selected"]]
-        problems += ["修复方案事实 %s 尚未记录；请说明根因、范围、修复方式和风险" % k
+        problems += ["方案事实 %s 尚未记录；请补齐项目要求的方案内容" % k
                      for k in rules.get("plan_fact_keys", []) if not ctx["facts"].get(k)]
         if checkpoint == rules["selection_checkpoint"]:
-            problems += structured_plan_problems(model, rules, ctx)
+            problems += plan_problems(model, rules, ctx)
     snapshot = {"checkpoint": checkpoint, "items": views, "due": list(due),
                 "not_due": [k for k in views if k not in due], "context": ctx, "rules": rules}
     if rules.get("contract_revision", 1) >= 2:
@@ -337,7 +409,9 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
 
 
 def checkpoint_digest(base, task, checkpoint, required_outcome=None):
-    rules = config(base)
+    rules = config(base, task)
+    if not enabled(task, rules):
+        raise ValueError("当前任务类型未配置可用的质量确认，不能签发或复用方案授权")
     value = report(load(base, task), rules, context(base, task))
     view = value["checkpoints"].get(checkpoint)
     outcome = checkpoint_outcome(view or {})
@@ -352,7 +426,10 @@ def q1_digest(base, task):
 
 
 def q2_digest(base, task):
-    return checkpoint_digest(base, task, config(base)["selection_checkpoint"], required_outcome="accept")
+    rules = config(base, task)
+    if not enabled(task, rules):
+        raise ValueError("当前任务类型未配置可用的方案检查")
+    return checkpoint_digest(base, task, rules["selection_checkpoint"], required_outcome="accept")
 
 
 def check_proof(proof):
@@ -529,7 +606,7 @@ def apply(base, issue, run_id, revision, command):
                 raise ValueError("旧 run 无可恢复记录")
         if task["run_id"] != run_id:
             raise ValueError("任务 run 已变化，拒绝旧请求")
-        rules = config(base)
+        rules = config(base, task)
         if not enabled(task, rules):
             raise ValueError("当前任务类型未启用质量检查")
         state = load(base, task)
@@ -575,7 +652,7 @@ def apply(base, issue, run_id, revision, command):
 
 
 def advance_problems(base, task, target):
-    rules = config(base)
+    rules = config(base, task)
     if not rules and project_rules.class_spec(project_rules.load_admission(workspace=base), task["task_class"]).get("quality_mode") == "recorded_decision":
         raise ValueError("质量模式已启用但 quality.json 缺失，不能降级为无检查")
     if not enabled(task, rules):
@@ -620,7 +697,7 @@ def main():
                            json.loads(Path(args.input).read_text(encoding="utf-8")))
         else:
             task = json.loads(task_store.task_path(args.dir, issue).read_text(encoding="utf-8"))
-            rules = config(args.dir)
+            rules = config(args.dir, task)
             if not enabled(task, rules):
                 raise ValueError("当前任务未启用质量检查")
             result = report(load(args.dir, task), rules, context(args.dir, task))

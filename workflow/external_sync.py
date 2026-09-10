@@ -86,7 +86,7 @@ def warnings(base, task, report=None):
         add("affected_versions", "deferred", "本地确认版本：%s；Jira 初始值：%s" % (
             "、".join(v["name"] for v in plan["versions"]),
             plan.get("observed", {}).get("issue", {}).get("fields", {}).get("versions")), plan.get("source_ref", ""))
-    rules = quality.config(base)
+    rules = quality.config(base, task)
     if not quality.enabled(task, rules):
         return result
     report = report or quality.report(quality.load(base, task), rules, quality.context(base, task))

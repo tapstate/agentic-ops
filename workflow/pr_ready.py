@@ -92,7 +92,7 @@ def ci_problems(base, task):
 def check(base, issue_key, jira_input):
     from workflow import external_sync
     task = json.loads(task_store.task_path(base, issue_key).read_text(encoding="utf-8"))
-    rules = quality.config(base)
+    rules = quality.config(base, task)
     if not rules or not isinstance(rules.get("pr_ready"), dict):
         raise ValueError("当前 Project 未配置 PR Ready 验收")
     linked_problems, source_ref, linked_tests, ignored_tests = _jira_test_tasks(jira_input, issue_key, rules)

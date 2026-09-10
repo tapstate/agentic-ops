@@ -42,8 +42,16 @@ def repository_bindings(repositories):
     return [{key: item.get(key) for key in keys} for item in repositories]
 
 
-def plan_digest(task):
-    value = json.dumps(task.get("facts", {}).get("fix_plan"), ensure_ascii=False, sort_keys=True)
+def plan_digest(task, base=None):
+    plan = task.get("facts", {}).get("fix_plan")
+    if base is not None:
+        spec = project_rules.load_admission(workspace=base)
+        if project_rules.class_spec(spec, task["task_class"]).get("quality_profile") is not None:
+            rules = quality.config(base, task)
+            plan = {"task_class": task["task_class"], "facts": {
+                key: task.get("facts", {}).get(key) for key in rules["plan_fact_keys"]}}
+    # 未声明任务配置时保留旧摘要，旧缺陷授权及事件无需迁移。
+    value = json.dumps(plan, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
@@ -90,7 +98,7 @@ def cmd_renew(args):
         raise ValueError("原授权不能续签：%s" % "；".join(reasons))
     if (record.get("agentic_run_id") != task["run_id"]
             or record.get("repositories") != repository_bindings(task.get("repositories", []))
-            or record.get("approved_plan_digest") != plan_digest(task)
+            or record.get("approved_plan_digest") != plan_digest(task, args.dir)
             or q1_digest != quality.q1_digest(args.dir, task)
             or q2_digest != quality.q2_digest(args.dir, task)):
         raise ValueError("方案、run 或仓库绑定已变化（或旧授权缺少方案摘要），必须重新设计确认")
@@ -174,7 +182,7 @@ def cmd_grant(args):
         "enforcement": "workflow_checkpoints",
         "agent_id": args.agent_id,
         "approved_plan_version": args.plan_version,
-        "approved_plan_digest": plan_digest(task),
+        "approved_plan_digest": plan_digest(task, args.dir),
         "approved_q1_digest": approved_q1_digest,
         "approved_q2_digest": approved_q2_digest,
         "repositories": repository_bindings(repositories),

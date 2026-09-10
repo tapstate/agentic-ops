@@ -253,14 +253,16 @@ def cmd_record(args):
         return 2
     value = args.value
     if getattr(args, "input", None):
-        if args.key != "fix_plan":
-            raise ValueError("--input 仅用于以 JSON 对象记录 fix_plan")
+        rules = quality.config(args.dir, task)
+        plan_keys = rules.get("plan_fact_keys", []) if quality.enabled(task, rules) else []
+        if args.key != "fix_plan" and args.key not in plan_keys:
+            raise ValueError("--input 仅用于以 JSON 对象记录项目声明的方案事实")
         try:
             value = json.loads(Path(args.input).read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
-            raise ValueError("无法读取 fix_plan JSON：%s" % error) from error
+            raise ValueError("无法读取方案 JSON：%s" % error) from error
         if not isinstance(value, dict):
-            raise ValueError("fix_plan JSON 必须是对象")
+            raise ValueError("方案 JSON 必须是对象")
     if not (isinstance(value, dict) or str(value).strip()):
         print("错误：%s 的值为空，空值等于没记录" % args.key, file=sys.stderr)
         return 2
@@ -733,8 +735,8 @@ def _check_advance(task, target, base, spec):
             problems.append("授权仓库集合与当前任务仓库集合不一致")
         elif auth.get("agentic_run_id") != task.get("run_id"):
             problems.append("方案确认的 run 与当前任务不一致")
-        elif auth.get("approved_plan_digest") and auth["approved_plan_digest"] != authorization.plan_digest(task):
-            problems.append("fix_plan 已变化，需要重新确认方案")
+        elif auth.get("approved_plan_digest") and auth["approved_plan_digest"] != authorization.plan_digest(task, base):
+            problems.append("方案已变化，需要重新确认方案")
         elif "approved_q1_digest" in auth or "approved_q2_digest" in auth:
             q1_digest, q2_digest = auth.get("approved_q1_digest"), auth.get("approved_q2_digest")
             if not isinstance(q1_digest, str) or not q1_digest or not isinstance(q2_digest, str) or not q2_digest:
@@ -936,7 +938,7 @@ def cmd_next(args):
     diagnostic = io.StringIO()
     with contextlib.redirect_stdout(diagnostic):
         blockers = _check_advance(task, target, args.dir, admission(args.dir)) if target else []
-    rules = quality.config(args.dir)
+    rules = quality.config(args.dir, task)
     current = quality.report(quality.load(args.dir, task), rules, quality.context(args.dir, task)) if quality.enabled(task, rules) else {}
     points = rules.get("stage_checkpoints", {}).get(target, []) if current else []
     payload = {"issue_key": task["issue_key"], "run_id": task["run_id"], "stage": task["stage"],
@@ -1173,7 +1175,7 @@ def main():
     p.add_argument("--key", required=True)
     value = p.add_mutually_exclusive_group(required=True)
     value.add_argument("--value")
-    value.add_argument("--input", help="fix_plan 的结构化 JSON 文件")
+    value.add_argument("--input", help="项目声明的方案事实 JSON 对象文件")
     p.add_argument("--force", action="store_true", help="允许记录清单外的自定义 fact key")
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_record)

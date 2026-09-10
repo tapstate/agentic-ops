@@ -223,7 +223,7 @@ def main():
             problems = project_rules.check_verification(spec, args.verification)
             if problems:
                 raise ValueError("验证结论不合规：" + "；".join(problems))
-        rules = quality.config(args.dir)
+        rules = quality.config(args.dir, task)
         if flexible and not quality.enabled(task, rules):
             raise ValueError("当前任务启用了质量处置，但缺少匹配的质量配置")
         quality_report = (quality.report(quality.load(args.dir, task), rules, quality.context(args.dir, task))

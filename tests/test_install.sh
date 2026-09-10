@@ -1360,6 +1360,53 @@ done
 python3 "$install_root/workflow/task.py" advance --issue-key TAP-124 --expected-run-id "$auto_clone_run" --expected-stage task_intake \
   --note '安装验收：准入与受控基线已确认，进入设计评审' \
   --dir "$auto_clone_workspace" >/dev/null
+# 安装夹具显式配置任务质量合同，并通过真实入口确认；不得跳过 Q1/Q2 签发授权。
+python3 - "$install_root" "$auto_clone_workspace" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+product, workspace = map(Path, sys.argv[1:])
+sys.path.insert(0, str(product))
+from workflow import quality, task, task_store
+
+project = product / "projects/tapdata"
+admission_path = project / "admission.json"
+admission = json.loads(admission_path.read_text())
+cls = admission["task_classes"]["technical_task"]
+cls["quality_profile"] = "quality-install-test.json"
+cls["optional_facts"].append({"key": "implementation_plan", "label": "安装测试方案"})
+admission_path.write_text(json.dumps(admission))
+rules = json.loads((project / "quality.json").read_text())
+rules.update(task_classes=["technical_task"], structured_fix_plan=False,
+             intake_fact_keys=[f["key"] for f in cls["required_facts"]],
+             plan_fact_keys=["implementation_plan"],
+             plan_contract={"fact_key": "implementation_plan", "required_fields": ["objective", "verification"]})
+(project / "quality-install-test.json").write_text(json.dumps(rules))
+state = json.loads(task_store.task_path(workspace, "TAP-124").read_text())
+plan_file = workspace / "install-plan.json"
+plan_file.write_text(json.dumps({"objective": "验证安装产物授权与清理", "verification": "实际签发后核对并清理"}))
+assert task.cmd_record(SimpleNamespace(dir=workspace, issue_key="TAP-124", expected_run_id=state["run_id"],
+                                      key="implementation_plan", input=str(plan_file), value=None, force=False)) == 0
+state = json.loads(task_store.task_path(workspace, "TAP-124").read_text())
+def view():
+    return quality.report(quality.load(workspace, state), quality.config(workspace, state), quality.context(workspace, state))
+def apply(action, payload):
+    return quality.apply(workspace, "TAP-124", state["run_id"], view()["revision"], {"action": action, "payload": payload})
+proof = {"actor": "安装测试夹具", "source": "user_message", "reference": "fixture:install-confirmation",
+         "at": datetime.now(timezone.utc).isoformat()}
+apply("item", {"plan": {"id": "install-verification", "checkpoint": "q4-acceptance", "timing": "after_fix",
+      "case_ref": "fixture:install", "case_version": "v1", "case_status": "existing", "method": "manual",
+      "repository": "tapdata/tapdata", "target_revision": state["repositories"][0]["base_sha"],
+      "criterion": "授权绑定当前任务及基线", "steps": "检查授权并通过受控入口清理", "expected_result": "PASS",
+      "scope": "安装产物"}, "reason": "安装夹具验收"})
+apply("select", {"item_id": "install-verification", "digest": view()["items"]["install-verification"]["plan_digest"], "proof": proof})
+for checkpoint in ("q1-intake", "q2-plan"):
+    apply("checkpoint", {"checkpoint": checkpoint, "digest": view()["checkpoints"][checkpoint]["digest"],
+          "decision": {"outcome": "accept", "reason": "安装夹具的事实和验证方案已明确", "proof": proof}})
+PY
 python3 "$install_root/workflow/authorization.py" grant --issue-key TAP-124 --expected-run-id "$auto_clone_run" \
   --agent-id install-acceptance --plan-version install-test-v1 \
   --dir "$auto_clone_workspace" >/dev/null
