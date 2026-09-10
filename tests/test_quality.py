@@ -16,7 +16,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from workflow import authorization, ci, evidence, quality, quality_contract, task, task_store
+from workflow import authorization, ci, evidence, issue_versions, pr_ready, quality, quality_contract, task, task_store
 
 
 def proof():
@@ -230,6 +230,91 @@ class QualityTests(unittest.TestCase):
         self.save_task()
         with self.assertRaisesRegex(ValueError, "尚无已证实根因"):
             self.checkpoint("q2-plan")
+
+    def test_defect_confirmation_failure_retest_and_same_version_resume(self):
+        """AO-143：真实质量/授权入口衔接，不模拟检查通过或访问外部服务。"""
+        self.task["stage"] = "design_review"
+        self.task["repositories"] = self.task["repositories"][:1]
+        self.task["repositories"][0].update(
+            authorized_endpoint="github.com/tapdata/tapdata", base_branch="develop",
+            work_branch="fix/TAP-123", base_sha="a" * 40,
+            verification_method="夹具集成测试")
+        version_input = {"issue": {"key": "TAP-123", "fields": {"versions": [{"name": "fixture-version"}]}},
+                         "source_ref": "fixture:jira/TAP-123",
+                         "develop": {"status": "present", "revision": "a" * 40, "source_ref": "fixture:analysis"},
+                         "effective": {"execution_branch": "develop", "proof": proof()}}
+        # 仅替换远端读取；版本解析、检查点与授权判定均使用产品实现。
+        with mock.patch.object(issue_versions, "remote_refs", return_value={"develop": "a" * 40}):
+            self.task["facts"][issue_versions.FACT] = issue_versions.resolve(self.base, self.task, version_input)
+        self.save_task()
+        plan = self.plan(method="manual")
+        self.apply("item", {"plan": dict(plan, case_ref="TAP-T1"), "reason": "绑定夹具 Jira Test"})
+        self.select(); self.checkpoint("q1-intake")
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"],
+                               expected_stage="design_review", note="fixture:AO-143",
+                               agent_id="fixture", plan_version="v1", ttl_hours=8)
+        self.assertEqual(task.cmd_advance(args), 3)
+        self.checkpoint("q2-plan")
+        self.assertEqual(authorization.cmd_grant(args), 0)
+        self.assertEqual(task.cmd_advance(args), 0)
+        self.task = task.load(self.base, "TAP-123")
+        self.assertEqual(self.task["stage"], "implementation")
+        self.assertNotIn("implementation_plan", self.task["facts"])
+
+        # 新进程从磁盘恢复，而非沿用当前 Python 对象中的检查点状态。
+        resumed = subprocess.run(
+            [sys.executable, "-c", "import sys; from workflow import task, quality; "
+             "t=task.load(sys.argv[1], 'TAP-123'); "
+             "assert t['stage']=='implementation'; quality.q2_digest(sys.argv[1], t)", str(self.base)],
+            cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(resumed.returncode, 0, resumed.stdout + resumed.stderr)
+        args.expected_stage = "implementation"
+        self.execute(result="FAIL", kind="assertion", origin="manual")
+        with self.assertRaisesRegex(ValueError, "未满足预期 PASS"):
+            self.automatic_checkpoint()
+        self.assertEqual(task.cmd_advance(args), 3)
+        self.execute(execution_id="run-2", origin="manual")
+        self.automatic_checkpoint()
+        self.assertEqual(task.cmd_advance(args), 0)
+        self.task = task.load(self.base, "TAP-123")
+        args.expected_stage = "pr_review"
+        self.assertEqual(task.cmd_advance(args), 3)
+        self.decide(evidence_id="run-2"); self.checkpoint("q4-acceptance")
+        self.assertEqual(task.cmd_advance(args), 0)
+        recovered = task.load(self.base, "TAP-123")
+        self.assertEqual(recovered["stage"], "ci_validation")
+        self.assertEqual(recovered["run_id"], args.expected_run_id)
+        self.assertEqual(recovered["repositories"], self.task["repositories"])
+        self.assertEqual([x["raw_result"] for x in self.view()["items"]["case-a"]["executions"]],
+                         ["FAIL", "PASS"])
+        self.task = recovered
+        jira_input = self.base / "jira-tests.json"
+        jira_input.write_text(json.dumps({"source_ref": "fixture:jira",
+            "issue": {"key": "TAP-123", "fields": {"issuelinks": [
+                {"type": {"outward": "tests"}, "outwardIssue": {
+                    "key": "TAP-T1", "fields": {"issuetype": {"name": "Test"}}}}]}},
+            "linked_test_details": [{"key": "TAP-T1", "test_type": "Manual",
+                                     "case_version": "test-v1", "source_ref": "fixture:jira/TAP-T1"}]}))
+        self.assertFalse(pr_ready.check(self.base, "TAP-123", jira_input)["ready"])
+        self.task["repositories"][0].update(pull_request="1", worktree={"final_revision": "a" * 40})
+        self.save_task()
+        checks = ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata")
+        checks["history"].append({"head": "a" * 40, "verdict": "success"})
+        ci.save_state(self.base, "TAP-123", "1", checks)
+        self.assertFalse(pr_ready.check(self.base, "TAP-123", jira_input)["ready"])
+        self.automatic_checkpoint()
+        self.decide(evidence_id="run-2")
+        self.checkpoint("q4-acceptance")
+        ready = pr_ready.check(self.base, "TAP-123", jira_input)
+        self.assertTrue(ready["ready"], ready)
+        self.assertTrue(ready["jira_status_todos"])
+        before = task_store.task_path(self.base, "TAP-123").read_bytes()
+        self.assertTrue(pr_ready.check(self.base, "TAP-123", jira_input)["ready"])
+        self.assertEqual(task_store.task_path(self.base, "TAP-123").read_bytes(), before)
+        # 另一提交的绿色 CI 不能替代当前任务 Head 的验证。
+        checks["history"].append({"head": "b" * 40, "verdict": "success"})
+        ci.save_state(self.base, "TAP-123", "1", checks)
+        self.assertFalse(pr_ready.check(self.base, "TAP-123", jira_input)["ready"])
 
     def test_proposed_test_key_does_not_invalidate_q2_selection(self):
         self.plan(case_status="proposed"); self.select()
