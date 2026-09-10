@@ -886,5 +886,178 @@ class QualityTests(unittest.TestCase):
         with self.assertRaises(ValueError): evidence.load_events(events)
 
 
+class FeatureFlowTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(prefix="ao-feature-flow-")
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name).resolve()
+        self.ws, self.product = self.root / "workspace", self.root / "product"
+        self.seed, self.remote = self.root / "seed", self.root / "remote.git"
+        self.repo = "tapdata/tapdata"
+        shutil.copytree(ROOT / "projects", self.product / "projects")
+        shutil.copytree(ROOT / "contracts", self.product / "contracts")
+        self.git("init", "-q", "-b", "develop", str(self.seed))
+        (self.seed / "feature.py").write_text("def value():\n    return 0\n")
+        (self.seed / "verify.py").write_text("from feature import value\nassert value() == 1\n")
+        self.git("-C", str(self.seed), "add", ".")
+        self.git("-C", str(self.seed), "commit", "-qm", "fixture base")
+        self.git("clone", "-q", "--bare", str(self.seed), str(self.remote))
+        catalog = self.product / "projects/tapdata/repositories.json"
+        doc = json.loads(catalog.read_text())
+        doc["repositories"][self.repo]["origin"] = str(self.remote)
+        task_store._write_json_atomic(catalog, doc)
+        task_store._write_json_atomic(self.ws / ".agenticops/workspace.json", {
+            "schema_version": 2, "product_root": str(self.product), "project": "tapdata",
+            "workspace_id": "3" * 32, "agents": ["codex"],
+            "repository_pool": {"root": str(self.root / "pool"), "source": "workspace-override"}})
+        task_store._write_json_atomic(self.product / ".local/repository-pool.json", {
+            "schema_version": 1, "root": str(self.root / "pool"), "provisioning": "auto-clone"})
+        (self.root / "pool").mkdir()
+
+    def git(self, *args):
+        return subprocess.check_output(["git", "-c", "user.name=Fixture", "-c",
+            "user.email=fixture@example.test", *args], text=True).strip()
+
+    def read(self):
+        return task.load(self.ws, "TAP-123")
+
+    def cli(self, tool, *args, expected=0, mutation=True):
+        command = [sys.executable, str(ROOT / "workflow" / tool), *args,
+                   "--issue-key", "TAP-123", "--dir", str(self.ws)]
+        if mutation and args[0] != "init":
+            command += ["--expected-run-id", self.read()["run_id"]]
+        if args[0] == "advance":
+            command += ["--expected-stage", self.read()["stage"]]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+        return result.stdout
+
+    def view(self):
+        state = self.read()
+        return quality.report(quality.load(self.ws, state), quality.config(self.ws, state),
+                              quality.context(self.ws, state))
+
+    def apply(self, action, payload):
+        return quality.apply(self.ws, "TAP-123", self.read()["run_id"], self.view()["revision"],
+                             {"action": action, "payload": payload})
+
+    def proof(self):
+        return {"actor": "fixture-reviewer", "source": "user_message", "reference": "fixture:decision",
+                "at": datetime.now(timezone.utc).isoformat()}
+
+    def checkpoint(self, name):
+        view = self.view()["checkpoints"][name]
+        if name == "q3-draft":
+            return self.apply("auto_checkpoint", {"checkpoint": name, "digest": view["automatic_digest"],
+                                                   "reason": "实际临时仓库测试已通过"})
+        return self.apply("checkpoint", {"checkpoint": name, "digest": view["digest"],
+            "decision": {"outcome": "accept", "reason": "夹具审查确认", "proof": self.proof()}})
+
+    def execute(self, worktree, execution_id, expected):
+        # 测试产物放到当前 run；避免 Python 缓存改变受控工作树指纹。
+        result = subprocess.run([sys.executable, "-B", "verify.py"], cwd=worktree,
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, expected)
+        path = self.cli("task.py", "interaction-path", "--name", execution_id + ".log").strip()
+        Path(path).write_text(result.stdout + result.stderr + "\nexit=" + str(result.returncode))
+        self.cli("task.py", "record", "--key", "verification", "--value",
+                 "python -B verify.py exit=" + str(result.returncode) + "; fixture:run/" + Path(path).name)
+        plan = self.view()["items"]["behavior"]["plan"]
+        self.apply("execute", {"item_id": "behavior", "execution": {
+            **{k: plan[k] for k in ("case_ref", "case_version", "method", "repository", "target_revision")},
+            "id": execution_id, "origin": "local_maven", "source_ref": "fixture:run/" + Path(path).name,
+            "environment": "isolated-python-fixture", "observed_at": self.proof()["at"],
+            "raw_result": "PASS" if result.returncode == 0 else "FAIL",
+            "failure_kind": "none" if result.returncode == 0 else "assertion",
+            "observation": "python -B verify.py exit=" + str(result.returncode)}})
+
+    def test_cli_intake_failure_recovery_upstream_merge_and_pr_ready(self):
+        self.cli("task.py", "init", "--task-class", "feature_change")
+        run = self.read()["run_id"]
+        self.cli("task.py", "init", "--task-class", "feature_change", expected=3)
+        self.assertEqual(self.read()["run_id"], run)
+        initial = Path(self.cli("task.py", "interaction-path", "--name", "jira-intake.json").strip())
+        initial.write_text(json.dumps({"source_ref": "fixture:jira-intake", "issue": {
+            "key": "TAP-123", "fields": {"issuetype": {"id": "10010", "name": "Story"},
+                "status": {"name": "Analyzed"}, "assignee": {"accountId": "fixture-reviewer"}}}}))
+        self.cli("task.py", "snapshot", "--input", str(initial))
+        self.cli("task.py", "advance", "--note", "fixture:已读 Analyzed 与负责人")
+        self.cli("task.py", "advance", "--note", "缺项不能进入设计", expected=3)
+        self.cli("task.py", "repository", "add", "--repo", self.repo, "--work-branch", "feature/TAP-123",
+                 "--scope", "feature.py", "--verification", "python -B verify.py")
+        self.cli("task.py", "repository", "prepare")
+        repo = self.read()["repositories"][0]
+        worktree = Path(repo["worktree"]["path"])
+        frozen = repo["base_sha"]
+        for key, value in {"acceptance_criteria": "value 返回 1", "target_repo": self.repo,
+                           "verification_method": "python -B verify.py", "risk_level": "T3",
+                           "scope_boundary": "feature.py"}.items():
+            self.cli("task.py", "record", "--key", key, "--value", value)
+        self.cli("task.py", "advance", "--note", "基线与输入已确认")
+        plan_path = self.cli("task.py", "interaction-path", "--name", "implementation-plan.json").strip()
+        Path(plan_path).write_text(json.dumps({"objective": "value 返回 1", "changes": ["修改返回值"],
+            "acceptance": ["verify.py 断言返回值"], "risks": ["仅夹具"], "rollback": "回退 feature.py"}))
+        self.cli("task.py", "record", "--key", "implementation_plan", "--input", plan_path)
+        plan = {"id": "behavior", "checkpoint": "q4-acceptance", "timing": "after_fix",
+                "case_ref": "verify.py", "case_version": "v1", "case_status": "existing", "method": "unit",
+                "repository": self.repo, "target_revision": frozen, "criterion": "value 返回 1",
+                "steps": "python -B verify.py", "expected_result": "PASS", "scope": "feature.py"}
+        self.apply("item", {"plan": plan, "reason": "验收场景对应独立断言"})
+        self.apply("select", {"item_id": "behavior", "digest": self.view()["items"]["behavior"]["plan_digest"],
+                              "proof": self.proof()})
+        self.cli("task.py", "advance", "--note", "未确认方案", expected=3)
+        self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
+        self.cli("authorization.py", "grant", "--agent-id", "fixture", "--plan-version", "v1")
+        self.cli("task.py", "advance", "--note", "确认后开始开发")
+        self.execute(worktree, "before", 1)
+        self.cli("task.py", "advance", "--note", "失败不能推进", expected=3)
+        self.cli("task.py", "block", "--reason", "夹具断言失败，修复后重验")
+        self.cli("task.py", "status", mutation=False)
+        self.assertEqual(self.read()["run_id"], run)
+        (worktree / "feature.py").write_text("def value():\n    return 1\n")
+        self.git("-C", str(worktree), "add", "feature.py")
+        self.git("-C", str(worktree), "commit", "-qm", "fixture implementation")
+        # 在本地裸仓制造真实上游变化，再按授权合并到任务分支，原冻结基线不变。
+        (self.seed / "upstream.txt").write_text("upstream change\n")
+        self.git("-C", str(self.seed), "add", "upstream.txt")
+        self.git("-C", str(self.seed), "commit", "-qm", "fixture upstream")
+        self.git("-C", str(self.seed), "push", "-q", str(self.remote), "develop")
+        self.git("-C", str(worktree), "fetch", "-q", "origin", "develop")
+        self.git("-C", str(worktree), "merge", "--no-edit", "origin/develop")
+        head = self.git("-C", str(worktree), "rev-parse", "HEAD")
+        self.assertNotEqual(head, frozen)
+        self.assertEqual(self.read()["repositories"][0]["base_sha"], frozen)
+        self.apply("item", {"plan": dict(plan, target_revision=head), "reason": "绑定合并后实际代码"})
+        self.execute(worktree, "after", 0)
+        self.checkpoint("q3-draft")
+        self.cli("task.py", "advance", "--note", "首轮验证完成")
+        self.cli("task.py", "advance", "--note", "缺少人工验收", expected=3)
+        self.cli("task.py", "repository", "record-result", "--repo", self.repo, "--pr", "1")
+        args = SimpleNamespace(dir=self.ws, issue_key="TAP-123", expected_run_id=run,
+                               repo=self.repo, pr="1", start_timeout=1, finish_timeout=1, interval=1)
+        with mock.patch.object(ci, "fetch_rollup", return_value=([
+                {"name": "fixture-check", "status": "COMPLETED", "conclusion": "SUCCESS"}], head)):
+            self.assertEqual(ci.cmd_watch(args), 0)
+        self.checkpoint("q3-draft")
+        self.apply("decide", {"item_id": "behavior", "digest": self.view()["items"]["behavior"]["digest"],
+            "decision": {"outcome": "accept", "evidence_id": "after", "reason": "夹具人工验收",
+                         "proof": self.proof()}})
+        self.checkpoint("q4-acceptance")
+        self.cli("task.py", "advance", "--note", "验收已确认")
+        snapshot = Path(self.cli("task.py", "interaction-path", "--name", "jira-readback.json").strip())
+        snapshot.write_text(json.dumps({"source_ref": "fixture:jira-readback", "issue": {
+            "key": "TAP-123", "fields": {"issuetype": {"id": "10010", "name": "Story"},
+                "status": {"name": "Tests Passed"}, "issuelinks": []}}}))
+        result = pr_ready.check(self.ws, "TAP-123", snapshot)
+        self.assertTrue(result["ready"], result)
+        self.assertTrue(result["jira_status_todos"])
+        before = task_store.task_path(self.ws, "TAP-123").read_bytes()
+        self.assertTrue(pr_ready.check(self.ws, "TAP-123", snapshot)["ready"])
+        self.assertEqual(task_store.task_path(self.ws, "TAP-123").read_bytes(), before)
+        (worktree / "feature.py").write_text("def value():\n    return 2\n")
+        self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["ready"])
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
