@@ -5,8 +5,7 @@
   "intake_fact_keys": [
     "acceptance_criteria",
     "target_repo",
-    "verification_method",
-    "risk_level"
+    "verification_method"
   ],
   "plan_fact_keys": [
     "implementation_plan",

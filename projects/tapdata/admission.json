@@ -120,16 +120,6 @@
           "agent_may_propose": true,
           "human_confirmation_required": true,
           "supplement": "请确认本次必须执行的测试或验证；可由研发提供，不要求自动回填 Jira 字段。"
-        },
-        {
-          "key": "risk_level",
-          "label": "风险等级",
-          "source": "Jira 风险字段或标签",
-          "example": "T3",
-          "note": "决定人工门禁与验证强度",
-          "agent_may_propose": false,
-          "human_confirmation_required": true,
-          "supplement": "请补充「风险等级」（如 T1/T2/T3）：决定人工门禁与验证强度。"
         }
       ],
       "optional_facts": [

@@ -990,7 +990,7 @@ class FeatureFlowTests(unittest.TestCase):
         worktree = Path(repo["worktree"]["path"])
         frozen = repo["base_sha"]
         for key, value in {"acceptance_criteria": "value 返回 1", "target_repo": self.repo,
-                           "verification_method": "python -B verify.py", "risk_level": "T3",
+                           "verification_method": "python -B verify.py",
                            "scope_boundary": "feature.py"}.items():
             self.cli("task.py", "record", "--key", key, "--value", value)
         self.cli("task.py", "advance", "--note", "基线与输入已确认")

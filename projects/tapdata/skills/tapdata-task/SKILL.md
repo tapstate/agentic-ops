@@ -35,7 +35,7 @@ Agent 为原生 Jira/MCP 调用和质量检查生成的输入、草稿、回执�
 
 ## 准入、设计和多仓库
 
-`feature_change` 表示已有明确范围的功能开发，不接入需求任务。通过 `checklist` 读取验收标准、目标仓库、验证方式和风险；验证方式可由研发确认，不强制写入 Jira `customfield_10049`。使用项目 `quality-feature.json`，在 Q2 前用 `task.py record --key implementation_plan --input <方案.json>` 记录目标、实现变化、验收场景、风险和回滚，并记录 `scope_boundary`。每个验收场景要对应具体检查项、预期和执行方式；不填写假根因、问题版本或 `fix_plan`。下文版本规划、根因与修复线规则仅适用于 `defect_fix`。
+`feature_change` 表示已有明确范围的功能开发，不接入需求任务。通过 `checklist` 读取验收标准、目标仓库和验证方式；功能任务不要求独立风险等级，具体风险与回滚纳入实施方案统一确认；验证方式可由研发确认，不强制写入 Jira `customfield_10049`。使用项目 `quality-feature.json`，在 Q2 前用 `task.py record --key implementation_plan --input <方案.json>` 记录目标、实现变化、验收场景、风险和回滚，并记录 `scope_boundary`。每个验收场景要对应具体检查项、预期和执行方式；不填写假根因、问题版本或 `fix_plan`。下文版本规划、根因与修复线规则仅适用于 `defect_fix`。
 
 - 用 `task.py checklist` 获取机读准入要求，不得凭聊天猜测。
 - `defect_fix` 在 Q1 从 `task.py checklist --json` 或 `task.py next` 读取通用 `repair_strategy`。默认只向用户显示一行当前策略，不增加确认；Q2 按 `planning_guidance` 生成方案并披露应用结果。用户要求调整时，在 Q2 确认前使用 `task.py repair-strategy set/clear` 并绑定当前 run；策略不可用、未应用或偏离只报告 warning，不能阻塞主流程或替代根因、范围、验证和授权检查。策略正文只来自中央 Policy，不复制到本 Skill。
