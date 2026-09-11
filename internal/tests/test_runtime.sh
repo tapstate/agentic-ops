@@ -18,6 +18,7 @@ PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_adapter_bound
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_workflow.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_repair_strategy.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_failures.py"
+PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_git_refs.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_workspace_compatibility.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_checkpoints.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_quality.py"

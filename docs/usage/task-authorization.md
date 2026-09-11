@@ -189,3 +189,19 @@ python3 "$agenticops_root/workflow/authorization.py" renew \
 - [首次使用指引](../usage-guide.md)：安装与初始化项目工作空间。
 - [权限与安全边界](../security/permissions.md)：凭证、服务器保护与 Workflow 检查点的边界。
 - [v1 工程架构](../architecture/agenticops-v1-architecture.md)：多任务、多仓库和任务 worktree 的模型。
+
+## PR 前同步检出来源
+
+功能与缺陷使用相同操作：回读当前任务登记的仓库、work_branch、base_branch 和冻结 base_sha；保留任务独立提交，不能以最新来源替换原始基线。Agent 原生查询已登记 origin 的对应来源分支最新完整 SHA，并保存查询来源与时间；本地 remote-tracking ref 或历史缓存不能冒称最新远端事实。
+
+需要同步时，展示具体仓库、工作分支、来源分支及 SHA，确认本次 Merge 已被明确授权后才原生 fetch/merge。已取得覆盖这些对象的方案授权不重复询问；任务一般授权不能默认为包含 Merge。同一工作分支上的编辑、Merge 和最终验证串行执行。来源已包含时原生 Merge 可返回已是最新，仍记录本次核对的来源 SHA。
+
+合并完成后调用只读检查：
+
+```sh
+python3 <agenticops-root>/workflow/source_sync.py \
+  --repo <task-worktree> --work-branch <registered-work-branch> \
+  --base-revision <frozen-base-sha> --source-revision <just-queried-source-sha>
+```
+
+工具核对工作分支、干净状态及祖先关系；它不查询远端、不授予 Merge 权限、不更新冻结基线，也不证明行为正确。将输出与原生远端查询和 Merge 记录一并保存为当前 run 证据。来源不明、历史改写、文本冲突或结果不明时保留当前工作树，先解决或由研发决定从最新基线重建，不能自动丢弃工作或重置任务。PR 创建/更新前再检查来源是否前进；已前进则重复同步及受影响验证，不能仅复用旧包含关系。

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Git refs 单仓、单范围缓存的离线合同测试。"""
 import json
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -9,7 +10,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from workflow import git_refs
+from workflow import git_refs, source_sync
 
 
 class GitRefsTests(unittest.TestCase):
@@ -127,6 +128,66 @@ class GitRefsTests(unittest.TestCase):
             with self.assertRaisesRegex(git_refs.GitRefsError, "无法锁定 Git refs 缓存"):
                 with git_refs._cache_lock(blocked_parent / "cache.json"):
                     pass
+
+
+class SourceSyncTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.git("init", "-q", "-b", "develop")
+        self.git("config", "user.name", "Fixture")
+        self.git("config", "user.email", "fixture@example.invalid")
+        self.base = self.commit("base", "base")
+        self.git("checkout", "-qb", "feature")
+        self.task = self.commit("task", "task")
+        self.git("checkout", "develop")
+        self.source = self.commit("source", "source")
+        self.git("checkout", "feature")
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def git(self, *args):
+        return source_sync.git(self.root, *args)
+
+    def commit(self, path, content):
+        (self.root / path).write_text(content)
+        self.git("add", path)
+        self.git("commit", "-qm", "fixture")
+        return self.git("rev-parse", "HEAD")
+
+    def verify(self, **values):
+        return source_sync.verify(self.root, values.get("branch", "feature"), self.base,
+                                  values.get("source", self.source))
+
+    def test_unmerged_source_rejected_then_merge_preserves_task(self):
+        with self.assertRaisesRegex(ValueError, "尚未包含"):
+            self.verify()
+        self.git("merge", "--no-edit", "develop")
+        result = self.verify()
+        self.assertTrue(result["contains_source"])
+        self.assertTrue(source_sync.ancestor(self.root, self.task, result["task_revision"]))
+        self.assertEqual(self.base, result["base_revision"])
+
+    def test_dirty_wrong_branch_and_non_sha_rejected(self):
+        self.git("merge", "--no-edit", "develop")
+        with self.assertRaises(ValueError):
+            self.verify(branch="develop")
+        with self.assertRaises(ValueError):
+            self.verify(source="develop")
+        (self.root / "untracked").write_text("keep")
+        with self.assertRaisesRegex(ValueError, "未提交"):
+            self.verify()
+        self.assertEqual("keep", (self.root / "untracked").read_text())
+
+    def test_conflict_keeps_scene_and_does_not_report_synced(self):
+        self.commit("source", "different")
+        result = subprocess.run(["git", "-C", str(self.root), "merge", "--no-edit", "develop"],
+                                capture_output=True)
+        self.assertNotEqual(0, result.returncode)
+        with self.assertRaisesRegex(ValueError, "冲突"):
+            self.verify()
+        self.assertIn("<<<<<<<", (self.root / "source").read_text())
 
 
 if __name__ == "__main__":
