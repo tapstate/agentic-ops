@@ -53,6 +53,13 @@ def config(base, task=None):
         ids = [c["id"] for c in result["checkpoints"]]
         if not ids or len(ids) != len(set(ids)) or result["selection_checkpoint"] not in ids:
             raise ValueError("质量检查点配置无效")
+        from workflow import verification
+        requirements = result.get("verification_checkpoints", {})
+        if not isinstance(requirements, dict) or not set(requirements) <= set(ids):
+            raise ValueError("验证检查点配置无效")
+        for kinds in list(requirements.values()) + [result.get("pr_ready", {}).get("required_verification", [])]:
+            if not isinstance(kinds, list) or any(not isinstance(k, str) or k not in verification.KINDS for k in kinds):
+                raise ValueError("验证材料种类配置无效")
         if profile is not None:
             validate_task_profile(result, task)
             required = {f["key"] for f in cls.get("required_facts", [])}
@@ -166,7 +173,7 @@ def git_revision(path):
 
 
 def context(base, task):
-    from workflow import ci
+    from workflow import ci, failures
     ci_states = ci.current_states(base, task)
     repos = {}
     for repo in task.get("repositories", []):
@@ -181,6 +188,7 @@ def context(base, task):
         repos[repo["repository"]] = entry
         entry["ci_digest"] = digest([s for s in ci_states if s["repository"] == repo["repository"]])
     return {"issue_key": task["issue_key"], "run_id": task["run_id"], "facts": task.get("facts", {}),
+            "failures": failures.load(base, task)[1],
             "repositories": repos,
             "missing_facts": [f["key"] for f in project_rules.missing_required(
                 project_rules.load_admission(workspace=base), task["task_class"], task.get("facts", {}))]}
@@ -245,7 +253,8 @@ def automatic_checkpoint_problems(model, checkpoint, rules, ctx):
     after_fix = {key: view for key, view in views.items() if view["plan"]["timing"] == "after_fix"}
     if not after_fix:
         return ["首轮验证没有已定义的修复后检查项，不能自动推进"]
-    problems = []
+    from workflow import verification
+    problems = verification.problems(model, ctx, rules.get("verification_checkpoints", {}).get(checkpoint, []))
     for key, view in after_fix.items():
         plan = view["plan"]
         if not view["selected"]:
@@ -362,6 +371,7 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
                 "not_due": [k for k in views if k not in due], "context": ctx, "rules": rules}
     if rules.get("contract_revision", 1) >= 2:
         scoped = copy.deepcopy(ctx)
+        scoped.pop("failures", None)
         fact_keys = rules["intake_fact_keys"] + (rules.get("plan_fact_keys", []) if index else [])
         scoped["facts"] = {k: v for k, v in ctx["facts"].items() if k in fact_keys}
         for repo in scoped["repositories"].values():
@@ -375,6 +385,13 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
         snapshot.update(context=scoped, items=dict(future, **due))
         if index == 0:
             snapshot["not_due"] = []
+    from workflow import verification
+    requirements = rules.get("verification_checkpoints", {}).get(checkpoint, [])
+    problems.extend(verification.problems(model, ctx, requirements))
+    if requirements:
+        snapshot["verification"] = {repo: {kind: entries.get(kind) for kind in requirements}
+                                    for repo, entries in model.get("verification", {}).items()}
+        snapshot["failures"] = ctx.get("failures", {})
     record = model["checkpoints"].get(checkpoint)
     configured_automatic = rules["checkpoints"][index].get("confirmation") == "automatic"
     result = {"digest": digest(snapshot), "due": list(due), "not_due": snapshot["not_due"],
@@ -461,7 +478,10 @@ def check_decision(decision):
 def reduce(model, command, rules, ctx):
     """确定性归约；重放时使用当时规则和上下文，不重新解释旧决定。"""
     action, p = command["action"], command["payload"]
-    if action == "item":
+    if action == "verification":
+        from workflow import verification
+        verification.record(model, p, ctx)
+    elif action == "item":
         plan = p["plan"]
         points = {c["id"]: c for c in rules["checkpoints"]}
         if plan["checkpoint"] not in points or plan["timing"] != points[plan["checkpoint"]]["timing"]:
@@ -587,6 +607,7 @@ def report(state, rules, ctx):
             "items": {k: item_view(v, rules, ctx) for k, v in model["items"].items()},
             "checkpoints": checkpoints,
             "publications": publications,
+            "verification": model.get("verification", {}),
             "boundary": "处置完成不等于测试全通过；本地确认来源由调用者提交，不能认证操作者身份。Jira 状态需外部回读。"}
 
 
@@ -617,14 +638,35 @@ def apply(base, issue, run_id, revision, command):
             ctx = state["events"][-1]["context"]
         else:
             ctx = context(base, task)
+        if command["action"] == "verification" and command["payload"].get("kind") == "source_sync":
+            from workflow import source_sync
+            command = copy.deepcopy(command)
+            p = command["payload"]
+            repository = next((r for r in task["repositories"] if r["repository"] == p.get("repository")), None)
+            if not repository or (repository.get("worktree") or {}).get("status") != "prepared":
+                raise ValueError("来源同步必须核对当前任务已准备的工作树")
+            p["sync"] = source_sync.impact(repository["worktree"]["path"], repository["work_branch"],
+                                           repository["base_sha"], p.get("source_revision", ""),
+                                           p.get("before_merge_revision", ""))
         if command["action"] == "prepare_write":
             from workflow.quality_write import check_unresolved_runs
             check_unresolved_runs(base, task, replay(state)["publications"][command["payload"]["id"]]["body"])
         model = replay(state)
         reduce(model, command, rules, ctx)
+        if command["action"] == "verification":
+            from workflow import verification
+            verification.verify_artifacts(command["payload"])
         event = {"at": datetime.now(timezone.utc).isoformat(), "command": copy.deepcopy(command),
                  "rules": rules, "context": ctx}
-        text = json.dumps(event, ensure_ascii=False)
+        scanned = copy.deepcopy(event)
+        if command["action"] == "verification":
+            # 已核验的本地 Jar 路径是私有恢复元数据，不进入 Jira 摘要。
+            # 仅豁免这两个路径字段，其它用户材料继续按项目规则扫描。
+            for jar in scanned["command"]["payload"].get("jars", []):
+                for key in ("built_path", "consumed_path"):
+                    if key in jar:
+                        jar[key] = "<local-artifact>"
+        text = json.dumps(scanned, ensure_ascii=False)
         if project_rules.scan_sensitive(project_rules.load_admission(workspace=base), text):
             raise ValueError("质量输入含敏感内容，请脱敏后重新提交；未保存正文")
         state["events"].append(event)

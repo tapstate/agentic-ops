@@ -16,7 +16,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from workflow import authorization, ci, evidence, issue_versions, pr_ready, quality, quality_contract, task, task_store
+from workflow import authorization, ci, evidence, failures, issue_versions, pr_ready, quality, quality_contract, task, task_store
 
 
 def proof():
@@ -40,6 +40,12 @@ class QualityTests(unittest.TestCase):
         product = self.base / "product"
         self.product = product
         shutil.copytree(ROOT / "projects" / "tapdata", product / "projects" / "tapdata")
+        for name in ("quality.json", "quality-feature.json"):
+            path = product / "projects/tapdata" / name
+            rules = json.loads(path.read_text())
+            rules.pop("verification_checkpoints", None)
+            rules["pr_ready"].pop("required_verification", None)
+            path.write_text(json.dumps(rules))
         (self.base / ".agenticops").mkdir()
         (self.base / ".agenticops/workspace.json").write_text(json.dumps({"project": "tapdata", "product_root": str(product)}))
         self.task = {"issue_key": "TAP-123", "run_id": "run-0123456789ab", "task_class": "defect_fix",
@@ -789,8 +795,8 @@ class QualityTests(unittest.TestCase):
             self.assertEqual(ci.classify(checks)[0], expected)
         a = ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata")
         b = copy.deepcopy(a)
-        a["fix_attempts"] = 2; ci.save_state(self.base, "TAP-123", "1", a)
-        self.assertEqual(ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata-manager")["fix_attempts"], 0)
+        a["history"].append({"verdict": "failure"}); ci.save_state(self.base, "TAP-123", "1", a)
+        self.assertEqual(ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata-manager")["history"], [])
         with self.assertRaises(ValueError): ci.save_state(self.base, "TAP-123", "1", b)
         self.task["run_id"] = "run-fedcba987654"; self.save_task()
         self.assertEqual(ci.current_states(self.base, self.task), [])
@@ -970,6 +976,14 @@ class FeatureFlowTests(unittest.TestCase):
             "raw_result": "PASS" if result.returncode == 0 else "FAIL",
             "failure_kind": "none" if result.returncode == 0 else "assertion",
             "observation": "python -B verify.py exit=" + str(result.returncode)}})
+        if result.returncode == 0:
+            self.local_material = {"kind": "local", "repository": self.repo,
+                "target_revision": plan["target_revision"], "source_ref": "fixture:run/" + Path(path).name,
+                "analysis_ref": "fixture:confirmed-value-behavior", "case_review_ref": "fixture:verify.py-assertion",
+                "case_version": "v1", "dependency_analysis_ref": "fixture:no-jar-dependency",
+                "required_scope": ["feature.py:value"], "results": [{"scope": "feature.py:value", "result": "PASS",
+                    "report_ref": "fixture:run/" + Path(path).name, "tests": 1, "failures": 0, "errors": 0, "skipped": 0}]}
+            self.apply("verification", self.local_material)
 
     def test_cli_intake_failure_recovery_upstream_merge_and_pr_ready(self):
         self.cli("task.py", "init", "--task-class", "feature_change")
@@ -1010,6 +1024,11 @@ class FeatureFlowTests(unittest.TestCase):
         self.cli("authorization.py", "grant", "--agent-id", "fixture", "--plan-version", "v1")
         self.cli("task.py", "advance", "--note", "确认后开始开发")
         self.execute(worktree, "before", 1)
+        failure = failures.apply(self.ws, "TAP-123", run, 0, {"action": "observe", "repository": self.repo,
+            "check_id": "behavior", "label": "目标返回值断言失败", "attribution": "current_change",
+            "evidence": "fixture:before-assertion"})
+        problem = failure["problem_id"]
+        failures.apply(self.ws, "TAP-123", run, 1, {"action": "start", "problem_id": problem, "stage": "local"})
         self.cli("task.py", "advance", "--note", "失败不能推进", expected=3)
         self.cli("task.py", "block", "--reason", "夹具断言失败，修复后重验")
         self.cli("task.py", "status", mutation=False)
@@ -1017,6 +1036,7 @@ class FeatureFlowTests(unittest.TestCase):
         (worktree / "feature.py").write_text("def value():\n    return 1\n")
         self.git("-C", str(worktree), "add", "feature.py")
         self.git("-C", str(worktree), "commit", "-qm", "fixture implementation")
+        before_merge = self.git("-C", str(worktree), "rev-parse", "HEAD")
         # 在本地裸仓制造真实上游变化，再按授权合并到任务分支，原冻结基线不变。
         (self.seed / "upstream.txt").write_text("upstream change\n")
         self.git("-C", str(self.seed), "add", "upstream.txt")
@@ -1029,7 +1049,20 @@ class FeatureFlowTests(unittest.TestCase):
         self.assertEqual(self.read()["repositories"][0]["base_sha"], frozen)
         self.apply("item", {"plan": dict(plan, target_revision=head), "reason": "绑定合并后实际代码"})
         self.execute(worktree, "after", 0)
+        with self.assertRaisesRegex(ValueError, "source_sync"):
+            self.checkpoint("q3-draft")
+        self.apply("verification", {"kind": "source_sync", "repository": self.repo, "target_revision": head,
+            "source_ref": "fixture:bare-origin-fetch", "observed_at": self.proof()["at"], "source_branch": "develop",
+            "source_revision": self.git("-C", str(worktree), "rev-parse", "origin/develop"),
+            "before_merge_revision": before_merge, "impact_analysis_ref": "fixture:upstream-only-adds-text-file"})
+        with self.assertRaisesRegex(ValueError, "失败"):
+            self.checkpoint("q3-draft")
+        failures.apply(self.ws, "TAP-123", run, 2, {"action": "finish", "problem_id": problem,
+            "result": "PASS", "source_revision": head, "evidence": self.local_material["source_ref"]})
         self.checkpoint("q3-draft")
+        body = self.view()["checkpoints"]["q3-draft"]["publication_body"]
+        self.assertIn("范围 feature.py:value", body)
+        self.assertIn("用例数 1", body)
         self.cli("task.py", "advance", "--note", "首轮验证完成")
         self.cli("task.py", "advance", "--note", "缺少人工验收", expected=3)
         self.cli("task.py", "repository", "record-result", "--repo", self.repo, "--pr", "1")
@@ -1038,6 +1071,8 @@ class FeatureFlowTests(unittest.TestCase):
         with mock.patch.object(ci, "fetch_rollup", return_value=([
                 {"name": "fixture-check", "status": "COMPLETED", "conclusion": "SUCCESS"}], head)):
             self.assertEqual(ci.cmd_watch(args), 0)
+        self.apply("verification", dict(self.local_material, kind="ci", run_ref="fixture:ci-run-1",
+            checkout_ref="fixture:checkout-head", head_revision=head, attempt=1))
         self.checkpoint("q3-draft")
         self.apply("decide", {"item_id": "behavior", "digest": self.view()["items"]["behavior"]["digest"],
             "decision": {"outcome": "accept", "evidence_id": "after", "reason": "夹具人工验收",
@@ -1057,6 +1092,83 @@ class FeatureFlowTests(unittest.TestCase):
         (worktree / "feature.py").write_text("def value():\n    return 2\n")
         self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["ready"])
 
+
+
+class VerificationContractTests(unittest.TestCase):
+    def setUp(self):
+        from workflow import verification
+        self.v = verification
+        self.ctx = {"repositories": {"a/repo": {"live_revision": "a" * 40, "ci_digest": "run-1"}}, "failures": {}}
+        self.p = {"kind": "local", "repository": "a/repo", "target_revision": "a" * 40,
+            "source_ref": "fixture:report", "analysis_ref": "fixture:diff", "case_review_ref": "fixture:assertion",
+            "case_version": "case-v1", "dependency_analysis_ref": "fixture:no-jars",
+            "required_scope": ["module:behavior"], "results": [{"scope": "module:behavior", "result": "PASS",
+                "report_ref": "fixture:report", "tests": 1, "failures": 0, "errors": 0, "skipped": 0}]}
+
+    def test_missing_scopes_missing_reports_and_false_pass_rejected(self):
+        for change in ({"results": []}, {"required_scope": ["module:behavior", "upper:consumer"]}):
+            with self.assertRaises(ValueError):
+                self.v.record({}, dict(self.p, **change), self.ctx)
+        for change in ({"tests": 0}, {"skipped": 1}, {"failures": 1}, {"report_ref": ""}):
+            p = copy.deepcopy(self.p); p["results"][0].update(change)
+            with self.assertRaises(ValueError):
+                self.v.record({}, p, self.ctx)
+
+    def test_current_versions_and_ci_observation_bind_records(self):
+        model = {}
+        self.v.record(model, self.p, self.ctx)
+        self.assertEqual([], self.v.problems(model, self.ctx, ["local"]))
+        self.assertTrue(self.v.problems(model, self.ctx, ["ci"]))
+        ci_p = dict(self.p, kind="ci", head_revision="a" * 40, run_ref="fixture:run", checkout_ref="fixture:checkout", attempt=1)
+        self.v.record(model, ci_p, self.ctx)
+        self.ctx["repositories"]["a/repo"]["ci_digest"] = "rerun-2"
+        self.assertTrue(self.v.problems(model, self.ctx, ["ci"]))
+        self.assertEqual([], self.v.problems(model, self.ctx, ["local"]))
+        self.ctx["repositories"]["upper/repo"] = {"live_revision": "b" * 40}
+        self.assertTrue(self.v.problems(model, self.ctx, ["local"]))
+        with self.assertRaises(ValueError):
+            self.v.record({}, dict(ci_p, head_revision="b" * 40), self.ctx)
+
+    def test_accepting_gap_keeps_unknown_and_requires_exact_scope(self):
+        p = copy.deepcopy(self.p); p["results"][0]["result"] = "UNKNOWN"
+        model = {}; self.v.record(model, p, self.ctx)
+        self.assertTrue(self.v.problems(model, self.ctx, ["local"]))
+        decision = {"reason": "框架不支持", "uncovered": "other", "follow_up": "关联任务处理", "proof": proof()}
+        p["results"][0]["decision"] = decision
+        with self.assertRaises(ValueError):
+            self.v.record({}, p, self.ctx)
+        decision["uncovered"] = "module:behavior"
+        self.v.record(model, p, self.ctx)
+        self.assertEqual([], self.v.problems(model, self.ctx, ["local"]))
+        self.assertEqual("UNKNOWN", model["verification"]["a/repo"]["local"]["data"]["results"][0]["result"])
+
+    def test_pending_review_and_unresolved_failure_block(self):
+        p = {"kind": "review", "repository": "a/repo", "target_revision": "a" * 40,
+             "source_ref": "fixture:all-pages", "complete": True,
+             "items": [{"id": "thread-1", "source_ref": "fixture:thread", "reason": "待修复", "status": "pending"}]}
+        model = {}; self.v.record(model, p, self.ctx)
+        self.assertTrue(self.v.problems(model, self.ctx, ["review"]))
+        p["items"][0].update(status="fixed", verification_ref="fixture:retest")
+        self.v.record(model, p, self.ctx)
+        self.assertEqual([], self.v.problems(model, self.ctx, ["review"]))
+        self.ctx["failures"]["problem"] = {"status": "running", "attempts": 1}
+        self.assertTrue(self.v.problems(model, self.ctx, ["review"]))
+
+    def test_changed_jar_invalidates_without_breaking_history_replay(self):
+        with tempfile.TemporaryDirectory() as directory:
+            jar = Path(directory).resolve() / "library.jar"
+            jar.write_bytes(b"version-one")
+            digest = self.v.file_hash(jar)
+            p = dict(self.p, jars=[{"built_path": str(jar), "consumed_path": str(jar),
+                "built_sha256": digest, "consumed_sha256": digest, "loaded_from": "fixture:classpath"}])
+            model = {}; self.v.record(model, p, self.ctx); self.v.verify_artifacts(p)
+            self.assertEqual([], self.v.problems(model, self.ctx, ["local"]))
+            jar.write_bytes(b"version-two")
+            # 重放历史不读当下文件，仍可读取旧结果并提交重新验证。
+            self.v.record({}, p, self.ctx)
+            self.assertTrue(self.v.problems(model, self.ctx, ["local"]))
+            with self.assertRaises(ValueError):
+                self.v.verify_artifacts(p)
 
 
 if __name__ == "__main__":

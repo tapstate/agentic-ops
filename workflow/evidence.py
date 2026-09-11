@@ -146,15 +146,27 @@ def build_summary(task, auth, events, ci_states, spec, verification=None, qualit
         lines.append("")
 
     for st in ci_states:
-        attempts = st.get("fix_attempts", 0)
         last = st.get("history", [])[-1] if st.get("history") else {}
         lines.append(
-            "*CI（PR #%s）*：最近记录 %s，修复记账 %d 次" % (st.get("pr"), last.get("verdict", "无记录"), attempts)
+            "*CI（PR #%s）*：最近记录 %s" % (st.get("pr"), last.get("verdict", "无记录"))
         )
     if ci_states:
         lines.append("")
 
     if quality_report:
+        for repository, records in quality_report.get("verification", {}).items():
+            for kind, entry in records.items():
+                data = entry["data"]
+                lines.append("*验证材料 %s / %s*：代码 %s；来源 %s" %
+                             (repository, kind, data["target_revision"], data["source_ref"]))
+                for item in data.get("results", []):
+                    lines.append("- 范围 %s：%s；用例 %s，失败 %s，错误 %s，跳过 %s；报告 %s；缺口处置 %s" %
+                                 (item["scope"], item["result"], item.get("tests", "未知"), item.get("failures", "未知"),
+                                  item.get("errors", "未知"), item.get("skipped", "未知"), item["report_ref"], item.get("decision") or "无"))
+        for key, problem in quality_report["context"].get("failures", {}).items():
+            lines.append("*失败 %s*：%s；归因 %s；累计 %s/%s 轮；状态 %s；决定 %s" %
+                         (key, problem["label"], problem["attribution"], problem["attempts"], problem["limit"],
+                          problem["status"], problem["decisions"]))
         lines.append("*质量检查（run %s，revision %s）*：" % (quality_report["run_id"], quality_report["revision"]))
         for key, item in quality_report["items"].items():
             plan = item["plan"]

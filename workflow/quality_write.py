@@ -12,6 +12,7 @@ def snapshot(model, rules, ctx, checkpoint=None):
         view = quality.checkpoint_view(model, checkpoint, rules, ctx)
         return quality.digest([view["digest"], view["decision"], view["reviewed"]])
     return quality.digest({"items": model["items"], "checkpoints": model["checkpoints"],
+                           "verification": model.get("verification", {}),
                            "context": ctx, "rules": rules})
 
 
@@ -86,6 +87,18 @@ def checkpoint_body(model, checkpoint, rules, ctx):
                 lines.append("后续：%s；责任人：%s；期限：%s" % (
                     disposition["follow_up"], disposition.get("owner", "待确认"), disposition.get("deadline", "待确认")))
         lines.append("记录：AO-" + quality.digest([ctx["issue_key"], ctx["run_id"], checkpoint, view["digest"]])[:20])
+        for repo, entries in model.get("verification", {}).items():
+            for kind in rules.get("verification_checkpoints", {}).get(checkpoint, []):
+                if kind not in entries:
+                    continue
+                material = entries[kind]["data"]
+                lines.append("验证 %s / %s：代码 %s；来源 %s" %
+                             (repo, kind, material["target_revision"], material["source_ref"]))
+                for item in material.get("results", []):
+                    lines.append("范围 %s：%s；用例数 %s，失败 %s，错误 %s，跳过 %s；报告 %s；缺口处置 %s" %
+                                 (item["scope"], item["result"], item.get("tests", "未知"), item.get("failures", "未知"),
+                                  item.get("errors", "未知"), item.get("skipped", "未知"), item["report_ref"],
+                                  json.dumps(item.get("decision"), ensure_ascii=False) if item.get("decision") else "无"))
         return "\n\n".join(lines)
     fact_keys = list(rules.get("intake_fact_keys", ctx["facts"]))
     if checkpoint != rules["checkpoints"][0]["id"]:

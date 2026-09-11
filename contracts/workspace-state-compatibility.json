@@ -1,7 +1,9 @@
 {
   "schema_version": 1,
   "minimum_updater_protocol_version": 1,
-  "workspace_state_epoch": 1,
+  "workspace_state_epoch": 2,
   "legacy_workspace_state_epoch": 1,
-  "supported_workspace_state_epochs": [1]
+  "supported_workspace_state_epochs": [
+    2
+  ]
 }

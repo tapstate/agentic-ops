@@ -165,7 +165,12 @@
     ],
     "require_linked_test_tasks": false,
     "require_user_confirmation_per_linked_test": true,
-    "require_all_pr_checks_success": true
+    "require_all_pr_checks_success": true,
+    "required_verification": [
+      "local",
+      "source_sync",
+      "ci"
+    ]
   },
   "draft_pr": "在已授权范围内，先合并各仓最新检出来源分支并重验受影响内容，再推送或创建 PR；不将提交前报告改写为新 Head 的执行事实。",
   "standards": [
@@ -180,6 +185,28 @@
       "acceptance",
       "risks",
       "rollback"
+    ]
+  },
+  "verification_checkpoints": {
+    "q3-draft": [
+      "local",
+      "source_sync"
+    ],
+    "q4-acceptance": [
+      "local",
+      "source_sync"
+    ],
+    "q5-review": [
+      "local",
+      "source_sync",
+      "ci",
+      "review"
+    ],
+    "q6-delivery": [
+      "local",
+      "source_sync",
+      "ci",
+      "review"
     ]
   }
 }

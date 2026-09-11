@@ -96,6 +96,28 @@ class FailureTests(unittest.TestCase):
         _, problems = failures.load(self.base, self.task)
         self.assertEqual(1, problems[key]["attempts"])
 
+    def test_revalidation_keeps_budget_and_history(self):
+        key = self.observe()
+        self.apply(action="start", problem_id=key, stage="local")
+        self.finish(key, "PASS")
+        result = self.apply(action="revalidate", problem_id=key, result="PASS", source_revision="b" * 40,
+                            evidence="report:after-merge")
+        self.assertEqual(1, result["problems"][key]["attempts"])
+        self.assertEqual("a" * 40, result["problems"][key]["rounds"][0]["source_revision"])
+        self.assertEqual("b" * 40, result["problems"][key]["latest_result"]["source_revision"])
+
+    def test_manual_recovery_does_not_consume_automatic_budget(self):
+        key = self.observe(attribution="environment")
+        event = dict(action="manual_result", problem_id=key, result="PASS", source_revision="a" * 40,
+                     evidence="report:manual-retest", reason="研发已恢复环境并验证")
+        with self.assertRaises(ValueError):
+            self.apply(**event)
+        event["proof"] = dict(actor="研发", source="user_message", reference="message:manual-fixed",
+                              at="2026-09-11T16:00:00+08:00")
+        result = self.apply(**event)
+        self.assertEqual(0, result["problems"][key]["attempts"])
+        self.assertEqual("resolved", result["problems"][key]["status"])
+
     def test_stale_run_revision_and_unknown_repository_preserve_file(self):
         self.observe()
         before = failures.path(self.base, self.task).read_bytes()

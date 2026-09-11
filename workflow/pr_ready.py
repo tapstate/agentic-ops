@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from workflow import ci, jira_status, jira_tests, quality, task_store  # noqa: E402
+from workflow import ci, jira_status, jira_tests, quality, task_store, verification  # noqa: E402
 
 
 def _jira_test_tasks(path, issue_key, rules):
@@ -101,6 +101,8 @@ def check(base, issue_key, jira_input):
         "linked_test_tasks": linked_problems,
         "pr_checks": ci_problems(base, task),
         "task_checks": quality_problems(base, task, rules),
+        "verification": verification.problems(quality.replay(quality.load(base, task)), quality.context(base, task),
+                                               rules["pr_ready"].get("required_verification", [])),
     }
     if task.get("stage") != "ci_validation":
         groups["task_checks"].append("本地任务尚未到 ci_validation，不能进入 PR Ready 核对")

@@ -705,6 +705,7 @@ digest = sys.argv[3]
         {
             "schema_version": 1,
             "product_ref": "legacy",
+            "workspace_state_epoch": json.loads((install_root / "contracts/workspace-state-compatibility.json").read_text())["workspace_state_epoch"],
             "artifacts": [
                 {
                     "path": ".codex/agenticops-hooks.example.json",
@@ -1103,7 +1104,7 @@ python3 "$install_root/workflow/task.py" init \
 test -f "$workspace/.agenticops/tasks/index.json"
 test -f "$workspace/.agenticops/tasks/TAP-123/state.json"
 test -f "$workspace/.agenticops/tasks/TAP-999/state.json"
-test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["workspace_state_epoch"])' "$workspace/.agenticops/init.json")" = 1
+test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["workspace_state_epoch"])' "$workspace/.agenticops/init.json")" = "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["workspace_state_epoch"])' "$install_root/contracts/workspace-state-compatibility.json")"
 python3 "$install_root/workflow/task.py" list --dir "$workspace" | grep -F 'TAP-123：active' >/dev/null
 python3 "$install_root/workflow/task.py" list --dir "$workspace" | grep -F 'TAP-999：active' >/dev/null
 python3 "$install_root/workflow/quality.py" status --issue-key TAP-123 --dir "$workspace" > "$test_root/quality-status.json"
@@ -1167,8 +1168,8 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 document = json.loads(path.read_text(encoding="utf-8"))
-document["workspace_state_epoch"] = 2
-document["supported_workspace_state_epochs"] = [2]
+document["workspace_state_epoch"] += 1
+document["supported_workspace_state_epochs"] = [document["workspace_state_epoch"]]
 path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
 git -C "$source_repo" add contracts/workspace-state-compatibility.json

@@ -22,6 +22,16 @@ def problem_id(repository, check_id):
     return hashlib.sha256(json.dumps([repository, check_id]).encode()).hexdigest()[:24]
 
 
+def user_proof(event):
+    proof = event.get("proof") or {}
+    for field in ("actor", "source", "reference", "at"):
+        text(proof.get(field), "人工决定 " + field)
+    if proof["source"] != "user_message":
+        raise ValueError("需要研发明确决定的消息来源")
+    quality.check_proof(proof)
+    text(event.get("reason"), "决定原因")
+
+
 def reduce(problems, event):
     action = event.get("action")
     if action == "observe":
@@ -57,9 +67,15 @@ def reduce(problems, event):
         p["attempts"] += 1
         p["status"] = "running"
         p["rounds"].append({"number": p["attempts"], "stage": stage, "result": "pending"})
-    elif action == "finish":
-        if p["status"] != "running":
+    elif action in ("finish", "revalidate", "manual_result"):
+        if action == "finish" and p["status"] != "running":
             raise ValueError("没有进行中的修复轮次")
+        if action == "revalidate" and p["status"] != "resolved":
+            raise ValueError("仅已解决问题允许无修改重验")
+        if action == "manual_result":
+            if p["status"] != "unresolved":
+                raise ValueError("先保留进行中轮次的实际结果，再记录人工处理")
+            user_proof(event)
         result = event.get("result")
         if result not in ("PASS", "FAIL", "UNKNOWN", "NOT_RUN", "SKIPPED"):
             raise ValueError("修复结果无效")
@@ -67,18 +83,14 @@ def reduce(problems, event):
         if not (quality.exact_commit(revision) or quality.exact_worktree(revision)):
             raise ValueError("修复结果必须绑定精确代码版本")
         evidence = text(event.get("evidence"), "重验报告或未执行原因")
-        p["rounds"][-1].update(result=result, source_revision=revision, evidence=evidence)
+        if action == "finish":
+            p["rounds"][-1].update(result=result, source_revision=revision, evidence=evidence)
+        p["latest_result"] = dict(result=result, source_revision=revision, evidence=evidence)
         p["status"] = "resolved" if result == "PASS" else "unresolved"
     elif action == "decide":
         if p["status"] != "unresolved":
             raise ValueError("先记录当前结果，再对未解决问题决策")
-        proof = event.get("proof") or {}
-        for field in ("actor", "source", "reference", "at"):
-            text(proof.get(field), "人工决定 " + field)
-        if proof["source"] != "user_message":
-            raise ValueError("需要研发明确决定的消息来源")
-        quality.check_proof(proof)
-        text(event.get("reason"), "决定原因")
+        user_proof(event)
         decision = event.get("decision")
         if decision == "continue":
             additional = event.get("additional_rounds")
@@ -131,6 +143,9 @@ def apply(base, issue, run, revision, event):
                 r["repository"] for r in task.get("repositories", [])}:
             raise ValueError("失败仓库不属于当前任务")
         key = reduce(problems, event)
+        from workflow import project_rules
+        if project_rules.scan_sensitive(project_rules.load_admission(workspace=base), json.dumps(event, ensure_ascii=False)):
+            raise ValueError("失败记录含敏感内容，请脱敏")
         state["events"].append(event)
         state["revision"] += 1
         task_store._write_json_atomic(path(base, task), state)

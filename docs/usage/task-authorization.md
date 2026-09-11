@@ -4,7 +4,7 @@
 
 这些脚本不读取或修改 Jira 内容：Jira 仍是任务事实源。执行前，应通过已配置的 Jira 客户端读取任务号、任务类型、负责人、状态、准入事实和验收要求；不要把本地 `init` 当作 Jira 接管或状态流转的替代品。
 
-本地方案确认只在 Workflow 检查点核验，原生 Git/Jira/PR 操作不再由通用 Hook 拦截。所有状态写命令（record、仓库 add/update/prepare/cleanup/record-result、block、activate/deactivate、grant/revoke、Jira prepare/complete、CI watch/record-fix）必须携带 `--expected-run-id "$task_run"`；advance 另带 `--expected-stage <当前阶段>`。命令必须使用已核对的绑定；task_run 从 init/status 输出固定，reset 后重新读取，不能在失败重试时自动替换。
+本地方案确认只在 Workflow 检查点核验，原生 Git/Jira/PR 操作不再由通用 Hook 拦截。所有状态写命令（record、仓库 add/update/prepare/cleanup/record-result、block、activate/deactivate、grant/revoke、Jira prepare/complete、CI watch、失败 apply）必须携带 `--expected-run-id "$task_run"`；advance 另带 `--expected-stage <当前阶段>`。命令必须使用已核对的绑定；task_run 从 init/status 输出固定，reset 后重新读取，不能在失败重试时自动替换。
 
 ## 1. 前提与变量
 

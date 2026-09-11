@@ -9,7 +9,7 @@ metadata:
 
 设项目工作空间为 `<project-workspace>`，任务号为 `<issue-key>`，中央产品根为工作空间 `AGENTS.md` 声明的 `<agenticops-root>`。工具目录为 `<agenticops-root>/workflow`。多个任务 active 时，所有任务命令必须带 `--issue-key <issue-key> --dir <project-workspace>`；不要在各仓库内创建独立状态。本 Skill、当前 Project Profile 和 Product Root 高于历史 memory；memory 只能提供历史线索，不得作为现役命令来源。
 
-所有写入当前任务的命令必须携带 `--expected-run-id <run>`：包括 record、仓库 add/update/prepare/cleanup/record-result、block、activate/deactivate、授权 grant/revoke、Jira prepare/complete、CI watch/record-fix。执行 `advance` 另带 `--expected-stage <当前阶段>`；从 status 或 next 读取并固定这些值，拒绝后先核对变化，不自动替换参数重放。以下简写命令也必须补齐上述公共参数。
+所有写入当前任务的命令必须携带 `--expected-run-id <run>`：包括 record、仓库 add/update/prepare/cleanup/record-result、block、activate/deactivate、授权 grant/revoke、Jira prepare/complete、CI watch、失败 apply。执行 `advance` 另带 `--expected-stage <当前阶段>`；从 status 或 next 读取并固定这些值，拒绝后先核对变化，不自动替换参数重放。以下简写命令也必须补齐上述公共参数。
 
 Agent 为原生 Jira/MCP 调用和质量检查生成的输入、草稿、回执、回读或日志，必须先用 `task.py interaction-path --issue-key <issue-key> --expected-run-id <run> --name <lowercase-kebab-case.ext> --dir <project-workspace>` 获取当前 run 的受控路径，再写入返回位置；不得直接在 `.agenticops/` 根目录创建临时文件。允许 `json`、`jsonl`、`log`、`md`、`txt`。reset 保留旧 run 交互材料用于追溯，任务级 purge 会统一回收。
 
@@ -78,7 +78,7 @@ Tests Passed 前核对 Story Test Design Review Result（`customfield_10413`）�
 
 ## 实现、PR、CI 和完成
 
-- 每个仓库分别验证并记录提交、PR 和 CI，任务级证据统一汇总。
+- 每个仓库分别验证并记录提交、PR 和 CI，任务级证据统一汇总。按[共同验证材料](../../../../docs/usage/quality-checkpoints.md#共同验证材料)用现有 quality.py verification 动作记录本地测试、来源同步、CI 报告与审查材料；缺失或版本失效时先补齐，不直接改阶段。失败使用 failures.py 原 problem_id 记录 start/finish，替代旧 PR 独立预算入口。
 - CI 用例按[开发与质量核对](../../runbooks/build-test-and-local-run.md#ci-用例开发与质量核对)在当前业务任务中完成：确认预期驱动断言，优先证明旧代码目标断言失败、新代码通过，再执行模块全量验证；无法进行旧版对照时记录限制并验证受控反例。
 - 功能与缺陷均按[用例缺口判断](../../runbooks/build-test-and-local-run.md#用例缺口判断)由 Agent 结合最新差异、已确认验收、实际断言和框架判断 CI 用例复用、新增或修改，在当前任务内处理；不要求研发先列用例，不创建强制独立 CI 用例任务。覆盖报告缺失如实说明，框架不支持时由研发决定是否创建关联任务或其它处置，保留原因及未覆盖范围。断言不以实现结果反推；修改验收含义或超出授权时先交研发决策。
 - 功能 PR 创建或更新前，先核对每个任务仓库的检出来源 `base_branch`，读取其最新远端 SHA；在方案授权内将该分支合并到任务工作分支，保留原冻结基线记录。冲突不明时暂停。合并产生代码变化后重验受影响内容并更新提交、检查项与 CI 证据；未变化也须核对报告仍适用，不能把旧报告改写为新 Head。此操作不授权 PR 合入或写保护分支。

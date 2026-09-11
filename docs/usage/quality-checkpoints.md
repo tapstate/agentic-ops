@@ -1,5 +1,30 @@
 # 质量检查与证据
 
+## 共同验证材料
+
+使用现有 `quality.py apply --issue-key <key> --expected-run-id <run> --expected-revision <当前revision> --input <json> --dir <workspace>`，输入为 `{"action":"verification","payload":{...}}`。每个仓库分别提交材料，内部自动绑定当前任务各仓源码版本；不是新任务类型或执行引擎。写前先 `quality.py status`，source_sync 还会实际读取已准备的任务工作树并核对包含关系。原生报告的真实性、依赖清单和语义分析仍由 Agent 核对，工具不认证来源或判断断言含义。
+
+所有材料提供 kind、repository、target_revision（当前完整 SHA 或首轮本地 worktree 指纹）、source_ref。其余内容如下：
+
+| kind | 材料 |
+|---|---|
+| local | analysis_ref（变更/用例缺口判断）、case_review_ref、case_version、dependency_analysis_ref；required_scope 列出全部应测模块及场景，results 对每项给出 scope、result、report_ref |
+| ci | local 的相同范围及报告字段，加 run_ref、attempt 正整数、head_revision（本次 PR Head）、checkout_ref（实际测试源码及该 Head 的对应依据） |
+| source_sync | source_branch（登记的检出来源）、source_revision（刚回读的来源 SHA）、before_merge_revision、observed_at、impact_analysis_ref；sync 由工具实际生成，用户输入不能代替 Git 核对 |
+| review | complete=true 表示已完整分页回读；items 逐项记录 id、source_ref、reason、status（fixed/not_applicable/accepted_gap/pending），fixed 必须有 verification_ref；无意见使用空列表并保留回读来源 |
+
+results 中 result 使用 PASS/FAIL/UNKNOWN/NOT_RUN/SKIPPED。PASS 另需报告中的 tests、failures、errors、skipped 非负整数，tests 必须大于零，其余必须为零。非 PASS 保留原结果；若研发明确接受该项缺口，提供 decision，包含 reason、uncovered（精确等于该 scope）、follow_up、proof（actor/source=user_message/reference/at）。不能用一项决定覆盖其它范围。review 的 accepted_gap 也提供这组明确处置。
+
+跨仓 Jar 材料使用 jars 列表，每项包含 built_sha256、consumed_sha256（必须相同）和 loaded_from（实际加载证据）。local 另给 built_path、consumed_path 绝对路径，写入及检查点复核内容哈希；这两个路径仅保存为本地恢复元数据，不进入 Jira 摘要，其它材料仍按项目规则扫描。没有 Jar 时省略列表，但 dependency_analysis_ref 仍须说明分析依据。CI 使用运行内文件与加载证据，不冒充本地文件核验。报告引用、版本及统计从实际执行取得，不能为满足字段填造数字。
+
+TapData 功能和缺陷使用相同配置：Q3、Q4 要求 local/source_sync，Q5、Q6 再要求 ci/review；PR Ready 要求 local/source_sync/ci，同时保留现有 PR Checks 和人工验收规则。代码、用例所在仓或依赖仓变化，报告失效；CI 重新观察后需重新核对并登记 CI 材料。本地 Jar 变化也失效。遗漏范围、未处理失败或待处理审查意见阻止对应检查点，人工接受的缺口保留原结果。
+
+源码同步后已解决问题只需无修改重验时，`failures.py` 使用 revalidate，参数同 finish，不消耗修复轮数；失败则回到 unresolved，后续修改仍须 start 记账。每次重新验证都保留事件，不能改写历史。旧 `ci.py record-fix` 已移除，CI 观察不再维护另一套预算。
+
+研发已手工处理未解决问题时，使用 manual_result，提供 finish 的实际结果/版本/报告字段，并附 reason 和真实用户消息 proof；不消耗自动修复轮数。仍有 running 轮次时先 finish 保留当时实际结果，再记录人工处理。没有明确人工来源或实际验证，不能声明恢复成功。
+
+本次将 `workspace_state_epoch` 提升为 2，仅支持 epoch 2；旧任务/CI/质量材料不做在线兼容。切换前用旧产品完成或停用任务、清理 linked worktree，并经明确确认 purge 本地状态。没有升级协议 1 的安装须先经官方指定的兼容过渡版本或重新安装；不能宣称可从任意旧版本直接升级。发布、清理和业务验收仍分别授权。
+
 ## PR 审查返工
 
 Agent 原生回读当前 PR Head、审查结论、普通评论和行内审查线程，读取完整分页；只读 PR 总体状态或只看最新一条评论不算意见收集完整。每条必要意见保留原始链接/ID、审查所针对提交、处理结论（已修复/说明不采纳/待研发决定）、理由、对应修改和验证。过时线程仍核对问题是否在当前代码存在，不能仅因 outdated 或线程已关闭就判为已解决。

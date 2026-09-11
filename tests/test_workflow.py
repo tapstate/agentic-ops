@@ -239,6 +239,13 @@ def main():
         remote_root.mkdir()
         pool_root.mkdir()
         shutil.copytree(ROOT / "projects", product_root / "projects")
+        # 此夹具聚焦通用授权/仓库生命周期；完整验证合同由 FeatureFlowTests 覆盖。
+        for name in ("quality.json", "quality-feature.json"):
+            config_path = product_root / "projects/tapdata" / name
+            config = json.loads(config_path.read_text())
+            config.pop("verification_checkpoints", None)
+            config["pr_ready"].pop("required_verification", None)
+            config_path.write_text(json.dumps(config))
         (product_root / ".local").mkdir()
         (product_root / ".local" / "repository-pool.json").write_text(
             json.dumps({
@@ -1197,14 +1204,8 @@ def main():
         ])
         check("CI 有失败 -> failure+定位", (verdict, failing), ("failure", ["test"]))
 
-        check("预算初始 3 次", ci.budget_left({"fix_attempts": 0}), 3)
-        check("预算用尽为 0", ci.budget_left({"fix_attempts": 5}), 0)
         code, out = run_tool("ci.py", "record-fix", "--repo", "tapdata/tapdata", "--pr", "42", "--dir", str(ws), cwd=ws)
-        check("record-fix 第 1 次", code, 0)
-        for _ in range(2):
-            run_tool("ci.py", "record-fix", "--repo", "tapdata/tapdata", "--pr", "42", "--dir", str(ws), cwd=ws)
-        code, out = run_tool("ci.py", "record-fix", "--repo", "tapdata/tapdata", "--pr", "42", "--dir", str(ws), cwd=ws)
-        check("第 4 次 record-fix 拒绝转人工", code, 3)
+        check("旧 PR 独立预算入口已移除", code, 2)
 
         # ---- 证据生成 ---------------------------------------------------
         task_store.events_path(ws, "TAP-123").write_text(
@@ -1225,10 +1226,10 @@ def main():
             ("放行 1 / 请求确认 1 / 拒绝 1", "含门禁统计"),
             ("被拒绝的操作", "列出 deny 项"),
             ("mvn test 全部通过", "含验证结果"),
-            ("修复记账 3 次", "含 CI 修复次数"),
             ("边界声明", "含边界声明"),
         ]:
             check("evidence %s" % label, needle in out, True)
+        check("evidence 不再显示独立 PR 修复预算", "修复记账" in out, False)
 
         # ---- 证据敏感内容与验证规则 --------------------------------------
         code, out = run_tool("evidence.py", "--dir", str(ws), "--verification", "mvn package -DskipTests", cwd=ws)
