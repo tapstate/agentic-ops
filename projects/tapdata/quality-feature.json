@@ -114,15 +114,13 @@
     }
   ],
   "jira": {
-    "automatic_transition_attempts": [],
+    "automatic_transition_attempts": ["takeover", "tests_passed"],
     "manual_transitions": [
-      "takeover",
-      "tests_passed",
       "pull_request_submitted",
       "merged",
       "done"
     ],
-    "note": "功能任务由研发操作 Story 表单与状态，Agent 实时回读；不调用仅支持缺陷的 jira_status prepare/complete，不借用缺陷转换 ID。"
+    "note": "Story 按 profile.json 的 status_sync.by_task_class.feature_change 执行 takeover/tests_passed：Agent 使用 jira_status prepare，原生转换后回读并 complete；缺项交研发处理。PR 提审、合并及完成保持人工处理，不借用缺陷转换 ID。"
   },
   "tests_passed": {
     "linked_test_task": {
