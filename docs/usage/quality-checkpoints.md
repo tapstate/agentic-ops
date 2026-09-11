@@ -30,7 +30,7 @@ interaction_file="$(python3 <agenticops-root>/workflow/task.py interaction-path 
 
 TapData 功能开发使用 `quality-feature.json` 与 `implementation_plan`，Q2 绑定目标、实现变化、验收场景、风险、回滚及范围；不要求缺陷根因。CI 用例在功能任务内维护，不要求独立 Jira Test；实际关联的 Test 仍按当前用例版本与方式核对。Q4 必须有当前代码的验收证据，不能因为无独立测试任务而省略验证。下图中的修复方案和修复步骤，对功能分别对应实施方案与功能实现。
 
-功能 Jira 表单和转换由研发处理，Agent 按[项目任务引导](../../projects/tapdata/skills/tapdata-task/SKILL.md#功能任务的-jira-协作)原生回读并保存当前 run 的交互材料。`jira_status.py prepare/complete` 仍仅用于已启用状态同步的任务类型；PR Ready 的状态同步提示由研发结合最新回读核对，不手写状态账本。该模式支持人工协作，不代表自动同步或完整真实交付已验收。
+功能 Jira 协作遵循“先读事实、处理过程中补充、按阶段回填、流转后回读”，见[项目任务引导](../../projects/tapdata/skills/tapdata-task/SKILL.md#功能任务的-jira-协作)。Story 与缺陷复用 `jira_status.py prepare/complete`，项目 `status_sync.by_task_class` 分别配置流转和字段采集提示，避免套用缺陷规则。已知未发起转换的预检缺项可补齐后重检；已发起写入的 failed/unknown 先回读，不自动重放。现有状态格式不变，旧记录继续保留。配置支持不等于真实完整交付已验收。
 
 ```mermaid
 flowchart TD

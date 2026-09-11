@@ -48,6 +48,14 @@ def config(base, task):
         raise ValueError("当前 Project 未配置 Jira 状态同步")
     if task["task_class"] not in result.get("task_classes", []):
         raise ValueError("当前任务类型未启用 Jira 状态同步")
+    overrides = result.get("by_task_class", {})
+    if not isinstance(overrides, dict):
+        raise ValueError("Jira 状态同步 by_task_class 必须是对象")
+    if task["task_class"] in overrides:
+        override = overrides[task["task_class"]]
+        if not isinstance(override, dict) or not isinstance(override.get("attempts"), dict):
+            raise ValueError("Jira 任务类型状态同步配置无效")
+        result = dict(result, **override)
     return result
 
 
@@ -118,6 +126,8 @@ def transition_for(snapshot, rule):
     configured_id = str(rule.get("transition_id") or "")
     for transition in transitions:
         if not isinstance(transition, dict):
+            continue
+        if transition.get("isAvailable") is False:
             continue
         target = transition.get("to") or {}
         if configured_id and str(transition.get("id") or "") != configured_id:
@@ -193,12 +203,18 @@ def prepare(base, issue_key, trigger, snapshot):
     rule = rules.get("attempts", {}).get(trigger)
     if not isinstance(rule, dict):
         raise ValueError("未知 Jira 状态同步节点：%s" % trigger)
+    issue, fields, status = issue_from(snapshot, issue_key)
+    allowed_types = rules.get("issue_type_ids")
+    if allowed_types is not None and str((fields.get("issuetype") or {}).get("id", "")) not in allowed_types:
+        raise ValueError("Jira 工作类型与当前任务状态同步配置不匹配")
     state = load_state(base, task)
     previous = state["attempts"].get(trigger)
     retry_history = []
     if previous:
-        retryable = (trigger == "tests_passed" and previous.get("outcome") == "skipped" and
-                     previous.get("reason") in ("quality_not_verified", "linked_test_facts_not_ready"))
+        retryable = (previous.get("outcome") == "skipped" and
+                     previous.get("reason") in ("quality_not_verified", "linked_test_facts_not_ready",
+                                                "required_fields_missing", "transition_unavailable",
+                                                "local_stage_mismatch", "jira_status_mismatch", "assignee_mismatch"))
         if not retryable:
             return dict(previous, repeated=True)
         retry_history = list(previous.get("preflight_history", [])) + [{

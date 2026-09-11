@@ -24,7 +24,7 @@ Agent 为原生 Jira/MCP 调用和质量检查生成的输入、草稿、回执�
 3. 新任务先读取 Jira 事实。仅当状态精确为 `Analyzed` 且经办人为当前 Jira 用户时，才执行 `task.py init --issue-key TAP-xxx --task-class <defect_fix|feature_change|technical_task> --dir <project-workspace>`；任一条件不符或事实无法核验时拒绝接管，不得初始化本地任务状态。初始化不会停用其它 active 任务。
 4. 发现已有任务、分支或 PR 时，方向不明才询问两项选择：① 继续已有分支/PR 完成当前任务；② 从当前目标分支新建分支重新处理同一 Jira 任务。用户已明确“继续这个 PR”或“新分支处理”时沿用该决定。先核对现役 CLI 能完成后续路径，再执行 cleanup/reset；不把接管、activate 或 reset 的原子成功当作停点。
 5. 复用任务开始的 Jira 快照，先执行 `task.py snapshot --issue-key <issue-key> --expected-run-id <run> --input <snapshot.json> --dir <project-workspace>` 固化初始事实，再用 `jira_watermark.py prepare` 保存产品版本并尽力原生回写及 complete 回读。同步失败不阻止 advance；结果不明只暂停重复写入，后续可用新快照 complete。
-6. 进入 `task_intake` 后，立即从 Jira 原生工具读取当前 issue、当前用户和可用 transitions。仅对 Project `status_sync.task_classes` 已启用的类型，按质量文档执行 `jira_status.py prepare --trigger takeover`；返回 `ready` 时只用其精确 transition ID 尝试一次 `In Progress` 并回读后 `complete`，其它结果记录并继续。功能任务按下文人工 Jira 协作处理。状态同步失败不是本地门禁。
+6. 进入 `task_intake` 后，立即从 Jira 原生工具读取当前 issue、当前用户和可用 transitions。仅对 Project `status_sync.task_classes` 已启用的类型，按质量文档执行 `jira_status.py prepare --trigger takeover`；返回 `ready` 时只用其精确 transition ID 尝试一次 `In Progress` 并回读后 `complete`，其它结果记录并继续。功能任务按下文阶段性 Jira 协作处理。状态同步失败不是本地门禁。
 7. 持续完成准入、仓库登记、本地基线准备和源码分析，直到方案确认、风险授权、事实不可信或其它真实人工决策点。
 
 续办保留原 run、工作分支和冻结 base_sha，目标 develop 前进或 CI 失败不要求重置。只有旧 PR 而本地状态缺失时，按项目准入新建 run，核验 PR 与本地分支 Head，再按[任务授权指引：已有分支/PR 的两条处理路径](../../../../docs/usage/task-authorization.md#已有分支pr-的两条处理路径)使用 `prepare --reuse-existing-branch --continuation-base owner/repo=<完整 SHA>`；优先核验旧记录的基线，缺失时只把已验证共同祖先称作接管比较基线，不能将最新 develop 自动登记成旧分支起点。旧 CI 只归属其实际提交，新 run 仍需当前方案和验收绑定。
@@ -62,11 +62,19 @@ Agent 为原生 Jira/MCP 调用和质量检查生成的输入、草稿、回执�
 
 ## 功能任务的 Jira 协作
 
-功能新接管仍要求 Analyzed 且负责人正确；正在进行的任务只恢复已有 run，没有 run 时先明确交接方案，不自动退回 Jira 或放宽准入。研发在 Jira 操作 Story 表单和状态，Agent 通过原生工具读取当前 issue type、状态、相关字段及可用转换；不调用当前仅支持缺陷的 `jira_status.py prepare/complete`。
+功能开发仅接入 Story。新接管仍要求 Analyzed 且负责人正确；正在进行的任务只恢复已有 run，没有 run 时先明确交接方案，不自动退回 Jira 或放宽准入。
 
-Tests Passed 前核对 Story Test Design Review Result（`customfield_10413`）；PR 审查时核对 Customer Requirement Acceptance（`customfield_10414`）及 fixVersions，以实时表单为准，业务选项由研发决定，不根据测试 PASS 猜填。字段名中的 Requirement 不表示接入需求任务。每次人工操作后，通过 `interaction-path` 保存带 issue key、run、读取时间、来源、类型、状态和相关字段的原生回读材料，并在任务 `note` 引用。结果不明先回读；隐藏 Validator 按服务端返回交给研发处理。
+Agent 按以下顺序主动处理，不等待研发提醒状态流转：
 
-这些材料证明外部状态，不能替代 Q1-Q4 和代码验证。`pr_ready.py` 仍可能显示未写入状态同步账本的 `jira_status_todos`，由研发结合最新原生回读逐项核对；不手写账本消除提示，不将提示已核对冒充自动同步成功。Tests Passed 到 PR 提交的转换在实际到达时读取，不借用缺陷转换 ID。
+1. 接管时读取 issue type、状态、负责人、描述、关联工作项及可用转换和表单元数据。先利用已有信息，不为项目未定义的字段增加准入要求。
+2. 分析和开发过程中持续整理确认后的实施方案、实际提交、验证结果与待办。在已授权范围内，按实时可编辑字段回填有来源的信息并回读；保留原有描述，不能用计划冒充完成结果。审批结论、人员和交付版本缺少明确决策时集中交接，不猜填。
+3. 接管进入 task_intake 后执行 `jira_status.py prepare --trigger takeover`；Story 使用项目配置的 Development Started。`ready` 时原生执行返回的转换并回读，再 `complete`；`satisfied` 表示本次读取已达目标，不重复写入。恢复到 design_review/implementation 时补查该节点，不让 Jira 长期停在 Analyzed。
+4. Q4 确认并进入 ci_validation 后，重新读取当前状态、字段和 transitions，执行 `prepare --trigger tests_passed`。依据 `field_plan` 提前采集，依据实际缺项补充并原生回填、回读，再重新 prepare。只有 `ready` 才执行返回的转换；测试结果不代替人工 Q4 验收。
+5. 每次写入后回读核对字段或目标状态，使用 `interaction-path` 保存当前 issue/run、读取时间、来源和材料，并在 note 引用。已知未发起转换的预检缺项允许补齐后重检；已发起而 failed/unknown 的转换先回读，不能重新 prepare 盲目重放。隐藏 Validator 按服务端实际错误处理，元数据 required=false 不代表没有服务端校验。
+
+Tests Passed 前核对 Story Test Design Review Result（`customfield_10413`）；PR 审查时核对 Customer Requirement Acceptance（`customfield_10414`）及 fixVersions，以实时表单为准，审批选项由实际审批人决定，不根据测试 PASS 猜填。Tests Passed 到 PR 提交的转换在实际到达时读取并依现有人工提审规则交接；合并和发布仍需独立授权。
+
+这些材料证明外部状态，不能替代 Q1-Q4 和代码验证。同步失败只暂停对应写入，继续无依赖工作并在交接时列全 `jira_status_todos`；不手写账本消除提示。
 
 ## 实现、PR、CI 和完成
 

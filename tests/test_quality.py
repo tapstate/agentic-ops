@@ -217,7 +217,7 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(rules["plan_contract"]["fact_key"], "implementation_plan")
         self.assertFalse(rules["structured_fix_plan"])
         self.assertFalse(rules["pr_ready"]["require_linked_test_tasks"])
-        self.assertNotIn("feature_change", quality.project_rules.load_profile(workspace=self.base)
+        self.assertIn("feature_change", quality.project_rules.load_profile(workspace=self.base)
                          ["jira"]["status_sync"]["task_classes"])
         self.apply("item", {"plan": {"id": "case-a", "checkpoint": "q4-acceptance",
             "timing": "after_fix", "case_ref": "src/test/FeatureTest.java#behavior", "case_version": "test-v1",

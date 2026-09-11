@@ -35,7 +35,7 @@
     },
     "status_sync": {
       "schema_version": 1,
-      "task_classes": ["defect_fix"],
+      "task_classes": ["defect_fix", "feature_change"],
       "attempts": {
         "takeover": {
           "local_stages": ["task_intake"],
@@ -152,6 +152,87 @@
         "customfield_10092": "根据已确认根因和证据补充 Issue Analysis。",
         "customfield_10093": "根据实际修改、验证结果和已知限制补充 Fix Details。",
         "issuetype": "核对任务类型和对应 Jira Workflow，不得跨工作流尝试转换。"
+      },
+      "by_task_class": {
+        "feature_change": {
+          "issue_type_ids": [
+            "10010"
+          ],
+          "attempts": {
+            "takeover": {
+              "local_stages": [
+                "task_intake",
+                "design_review",
+                "implementation"
+              ],
+              "from": [
+                "Analyzed"
+              ],
+              "to": "In Progress",
+              "to_aliases": [
+                "正在进行"
+              ],
+              "transition_id": "51",
+              "transition_name": "Development Started",
+              "field_requirements": [
+                "assignee"
+              ],
+              "require_current_assignee": true
+            },
+            "tests_passed": {
+              "local_stages": [
+                "ci_validation"
+              ],
+              "from": [
+                "In Progress",
+                "正在进行"
+              ],
+              "to": "Tests Passed",
+              "transition_id": "71",
+              "transition_name": "Tests Pass",
+              "field_requirements": [
+                "story_test_review",
+                "fix_versions"
+              ],
+              "require_quality_checkpoint": "q4-acceptance"
+            }
+          },
+          "field_mappings": {
+            "story_test_review": {
+              "aliases": [
+                "customfield_10413",
+                "Story Test Design Review Result"
+              ],
+              "local_sources": [
+                "facts.implementation_plan"
+              ],
+              "collect_at": "Q2 后准备，Tests Passed 前核对",
+              "auto_fill": false,
+              "guidance": "读取当前 Jira 表单和已确认测试方案；审批结果由实际审批人确认，不能根据单测 PASS 猜填。"
+            },
+            "fix_versions": {
+              "aliases": [
+                "fixVersions"
+              ],
+              "local_sources": [],
+              "auto_fill": false,
+              "guidance": "根据已确认交付版本和实时 Jira 选项回填，不从分支推导。"
+            },
+            "assignee": {
+              "aliases": [
+                "assignee",
+                "Assignee"
+              ],
+              "local_sources": [],
+              "collect_at": "接管前",
+              "auto_fill": false,
+              "guidance": "在 Jira 确认 Assignee 为实际 Engineering DRI；不能由 Agent 根据本地任务猜测或改派。"
+            }
+          },
+          "field_guidance": {
+            "issuetype": "功能开发仅支持 Story；不得使用缺陷转换。"
+          }
+        }
       },
       "on_unavailable": "skip_and_report_at_pr_ready"
     }

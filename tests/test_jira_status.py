@@ -39,6 +39,58 @@ class JiraStatusTests(unittest.TestCase):
                                  "to": {"id": "20", "name": "In Progress"},
                                  "fields": {"fixVersions": {"required": required}}}]}
 
+    def feature_snapshot(self):
+        self.task["task_class"] = "feature_change"
+        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
+        snapshot = self.snapshot()
+        snapshot["issue"]["fields"]["issuetype"] = {"id": "10010"}
+        snapshot["transitions"].append(dict(snapshot["transitions"][0], id="51", name="Development Started"))
+        return snapshot
+
+    def test_story_selects_own_transition_and_reads_back(self):
+        snapshot = self.feature_snapshot()
+        prepared = jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)
+        self.assertEqual(prepared["transition_id"], "51")
+        snapshot["issue"]["fields"]["status"]["name"] = "正在进行"
+        self.assertEqual(jira_status.complete(self.base, "TAP-123", "takeover", "unknown", snapshot, "")["outcome"], "succeeded")
+        # Same-version persisted records still load; no repeated write after completion.
+        self.assertTrue(jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)["repeated"])
+
+    def test_story_rejects_wrong_issue_type_even_with_same_status(self):
+        snapshot = self.feature_snapshot()
+        snapshot["issue"]["fields"]["issuetype"]["id"] = "10008"
+        with self.assertRaisesRegex(ValueError, "工作类型"):
+            jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)
+
+    def test_preflight_missing_fields_can_be_filled_before_write(self):
+        snapshot = self.feature_snapshot()
+        snapshot["transitions"][1]["fields"] = {"fixVersions": {"required": True}}
+        self.assertEqual(jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)["reason"], "required_fields_missing")
+        snapshot["issue"]["fields"]["fixVersions"] = [{"id": "fixture-version"}]
+        result = jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)
+        self.assertEqual(result["outcome"], "ready")
+        self.assertEqual(len(result["preflight_history"]), 1)
+        jira_status.complete(self.base, "TAP-123", "takeover", "unknown", snapshot, "timeout")
+        self.assertEqual(jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)["outcome"], "unknown")
+
+    def test_story_tests_passed_requires_quality_and_own_fields(self):
+        snapshot = self.feature_snapshot()
+        self.task["stage"] = "ci_validation"
+        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
+        snapshot["issue"]["fields"]["status"]["name"] = "In Progress"
+        snapshot["transitions"] = [{"id": "71", "to": {"name": "Tests Passed"}, "fields": {}}]
+        with mock.patch.object(jira_status, "tests_passed_ready", return_value=(False, "quality_not_verified", ["Q4 pending"], [])):
+            self.assertEqual(jira_status.prepare(self.base, "TAP-123", "tests_passed", snapshot)["reason"], "quality_not_verified")
+        with mock.patch.object(jira_status, "tests_passed_ready", return_value=(True, "", [], [])):
+            result = jira_status.prepare(self.base, "TAP-123", "tests_passed", snapshot)
+        self.assertEqual(result["transition_id"], "71")
+        self.assertEqual({x["mapping"] for x in result["field_plan"]}, {"story_test_review", "fix_versions"})
+
+    def test_unavailable_transition_is_not_prepared(self):
+        snapshot = self.feature_snapshot()
+        snapshot["transitions"][1]["isAvailable"] = False
+        self.assertEqual(jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)["reason"], "transition_unavailable")
+
     def test_takeover_prepares_once_and_readback_completes(self):
         first = jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot())
         self.assertEqual(first["outcome"], "ready")
