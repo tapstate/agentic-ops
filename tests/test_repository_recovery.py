@@ -146,6 +146,50 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "worktree"):
             task.cmd_repository_update(self.args())
 
+    def test_jar_evidence_survives_real_cleanup_but_not_missing_or_changed_files(self):
+        from workflow import quality, verification
+        root = self.prepare()[0]
+        self.state = self.read()
+        self.state["task_class"] = "feature_change"
+        self.save()
+        exclude = self.main / ".git/info/exclude"
+        with exclude.open("a") as stream:
+            stream.write("\ntarget/\n")
+        jar = root / "target/library.jar"
+        jar.parent.mkdir()
+        jar.write_bytes(b"verified")
+        sha = verification.file_hash(jar)
+        material = {"kind": "local", "repository": self.repo, "target_revision": self.original,
+                    "source_ref": "fixture:report", "analysis_ref": "fixture:analysis",
+                    "case_review_ref": "fixture:review", "case_version": "1",
+                    "dependency_analysis_ref": "fixture:dependencies", "required_scope": ["module"],
+                    "results": [{"scope": "module", "result": "PASS", "report_ref": "fixture:report",
+                                 "tests": 1, "failures": 0, "errors": 0, "skipped": 0}],
+                    "jars": [{"built_path": str(jar), "consumed_path": str(jar),
+                              "built_sha256": sha, "consumed_sha256": sha, "loaded_from": "fixture:classpath"}]}
+        quality.apply(self.ws, "TAP-123", self.state["run_id"], 0,
+                      {"action": "verification", "payload": material})
+        model = quality.replay(quality.load(self.ws, self.state))
+        rules = quality.config(self.ws, self.state)
+        before = quality.checkpoint_view(model, "q6-delivery", rules, quality.context(self.ws, self.state))
+        rw.cleanup_task(self.ws, "TAP-123")
+        self.assertFalse(jar.exists())
+        ctx = quality.context(self.ws, self.read())
+        self.assertEqual([], verification.problems(model, ctx, ["local"]))
+        self.assertEqual(before["digest"], quality.checkpoint_view(model, "q6-delivery", rules, ctx)["digest"])
+        # 旧版 removed 记录缺少收尾凭据时不能自动放行。
+        old = self.read()
+        old["repositories"][0]["worktree"].pop("verified_artifacts")
+        self.assertTrue(verification.problems(model, quality.context(self.ws, old), ["local"]))
+        # 同一 run 恢复工作树后不能沿用清理时凭据。
+        self.prepare()
+        self.assertTrue(verification.problems(model, quality.context(self.ws, self.read()), ["local"]))
+        jar.parent.mkdir()
+        jar.write_bytes(b"changed")
+        rw.cleanup_task(self.ws, "TAP-123")
+        self.assertEqual({}, self.read()["repositories"][0]["worktree"]["verified_artifacts"])
+        self.assertTrue(verification.problems(model, quality.context(self.ws, self.read()), ["local"]))
+
     def test_post_creation_failure_removes_worktree_before_outer_rollback(self):
         real = rw._require_ancestor
 

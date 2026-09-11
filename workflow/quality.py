@@ -176,6 +176,7 @@ def context(base, task):
     from workflow import ci, failures
     ci_states = ci.current_states(base, task)
     repos = {}
+    cleanup_artifacts = {}
     for repo in task.get("repositories", []):
         entry = {k: repo.get(k) for k in ("repository", "base_branch", "work_branch", "base_sha",
                   "catalog_digest", "approved_scope", "verification_method")}
@@ -185,10 +186,12 @@ def context(base, task):
             entry["live_revision"] = git_revision(wt["path"])
         elif wt.get("status") == "removed" and wt.get("final_revision"):
             entry["live_revision"] = wt["final_revision"]
+            cleanup_artifacts.update(wt.get("verified_artifacts", {}))
         repos[repo["repository"]] = entry
         entry["ci_digest"] = digest([s for s in ci_states if s["repository"] == repo["repository"]])
     return {"issue_key": task["issue_key"], "run_id": task["run_id"], "facts": task.get("facts", {}),
             "failures": failures.load(base, task)[1],
+            "cleanup_artifacts": cleanup_artifacts,
             "repositories": repos,
             "missing_facts": [f["key"] for f in project_rules.missing_required(
                 project_rules.load_admission(workspace=base), task["task_class"], task.get("facts", {}))]}
@@ -372,6 +375,7 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
     if rules.get("contract_revision", 1) >= 2:
         scoped = copy.deepcopy(ctx)
         scoped.pop("failures", None)
+        scoped.pop("cleanup_artifacts", None)
         fact_keys = rules["intake_fact_keys"] + (rules.get("plan_fact_keys", []) if index else [])
         scoped["facts"] = {k: v for k, v in ctx["facts"].items() if k in fact_keys}
         for repo in scoped["repositories"].values():

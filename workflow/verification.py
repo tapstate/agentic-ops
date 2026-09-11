@@ -41,6 +41,32 @@ def verify_artifacts(p):
                     raise ValueError("本地 Jar 与验证记录不一致")
 
 
+def cleanup_artifacts(base, task, root):
+    """删除工作树前保留已核验的文件哈希；不把缺失或变化的文件固化为有效。"""
+    from workflow import quality
+    model = quality.replay(quality.load(base, task))
+    verified = {}
+    root = Path(root).resolve()
+    for entries in model.get("verification", {}).values():
+        for jar in entries.get("local", {}).get("data", {}).get("jars", []):
+            for side in ("built", "consumed"):
+                path = jar[side + "_path"]
+                try:
+                    if root in Path(path).resolve().parents and file_hash(path) == jar[side + "_sha256"]:
+                        verified[hashlib.sha256(path.encode()).hexdigest()] = jar[side + "_sha256"]
+                except OSError:
+                    pass
+    return verified
+
+
+def artifact_matches(path, expected, ctx):
+    # 仅受控 removed 工作树提供收尾凭据；恢复工作树后重新读取实际文件。
+    key = hashlib.sha256(path.encode()).hexdigest()
+    if key in ctx.get("cleanup_artifacts", {}):
+        return ctx["cleanup_artifacts"][key] == expected
+    return file_hash(path) == expected
+
+
 def gap(decision):
     from workflow import quality
     if not isinstance(decision, dict):
@@ -170,7 +196,7 @@ def problems(model, ctx, kinds):
             if kind == "local":
                 for jar in p.get("jars", []):
                     try:
-                        valid = all(file_hash(jar[side + "_path"]) == jar[side + "_sha256"] for side in ("built", "consumed"))
+                        valid = all(artifact_matches(jar[side + "_path"], jar[side + "_sha256"], ctx) for side in ("built", "consumed"))
                     except OSError:
                         valid = False
                     if not valid:

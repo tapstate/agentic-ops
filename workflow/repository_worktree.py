@@ -875,6 +875,8 @@ def _cleanup_task_locked(workspace, issue_key, *, delete_branches=False):
             path = check["path"]
             main = check["main"]
             final_revision = _run(["git", "-C", str(path), "rev-parse", "HEAD"]).stdout.strip()
+            from workflow import verification
+            verified_artifacts = verification.cleanup_artifacts(workspace, task, path)
             _run(["git", "-C", str(main), "worktree", "remove", str(path)])
             _prune_empty_worktree_parents(workspace, path)
             _run(["git", "-C", str(main), "worktree", "prune"])
@@ -882,6 +884,7 @@ def _cleanup_task_locked(workspace, issue_key, *, delete_branches=False):
                 "path": str(path),
                 "status": "removed",
                 "final_revision": final_revision,
+                "verified_artifacts": verified_artifacts,
                 "removed_at": now(),
                 "branch_cleanup": "retained",
             }
