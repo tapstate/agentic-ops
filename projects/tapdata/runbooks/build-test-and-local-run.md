@@ -63,6 +63,44 @@ Maven profile 必须从目标分支的 POM、构建脚本或 CI 获取。企业�
 
 最终报告明确应测、实测和未覆盖模块及原因；选中的 Java 模块内部全量执行集成测试。存在消费版本差异时，执行前证明上层模块使用本次变更构建的 Jar；仅坐标相近或本地已有同名 Jar 不足以证明。
 
+### 连接器选择执行与报告
+
+现有连接器 CI 入口调用 `tapdata/tapdata-it` 的共享 workflow，其自动目录筛选不代替上面的完整影响分析。Agent 将最终确定的本仓连接器模块逐个传入 `connector_tests.py plan`，不重新缩小到直接改动目录。跨仓分别生成清单。当前适配复用 `src/it/java` 和标准 `target/failsafe-reports`；其它布局列为能力缺口，不静默跳过。
+
+```sh
+python3 projects/tapdata/scripts/connector_tests.py plan \
+  --repo <connector-repository-root> \
+  --module connectors/mysql-connector \
+  --module connectors/mongodb-connector > <outside-repository>/plan.json
+```
+
+有已核实 profile 时重复提供 `--profile <name>`。清单绑定当前 Git Head、未提交 diff 和未跟踪文件；存放在仓库之外或已忽略的运行目录，避免记录本身改变源码快照。清单不是新的任务状态，也不授权任何外部操作。
+
+Agent 用原生工具按清单中的 `cwd` 和 `argv` 顺序执行：先 `install -pl <selected> -am` 准备依赖（跳过测试），成功后逐模块运行 `clean test-compile failsafe:integration-test failsafe:verify`，显式启用集成测试。不对测试命令使用 `-am`，避免把构建依赖误当必测范围；应测的上层模块必须已单独列入清单。不使用单类/方法过滤，不照搬 CI 中关闭 TLS 验证、全局代理或写 settings 的环境操作。
+
+执行前核对有效 POM、settings、环境参数中没有额外过滤用例、跳过测试或改变报告位置的配置。`clean` 会清除所选模块构建产物，需确认待保留的日志/证据已另存；依赖准备失败时不得继续使用缓存 Jar 冒充本轮准备完成。数据库、凭据和测试资源必须使用已授权环境；环境未就绪不等于测试通过。模块内能力不支持、框架缺失或非本次变更失败，按研发决定处理并记录。
+
+每个模块执行前后用 `time.time_ns()` 记录时间，保留原生命令输出与退出码。执行记录格式如下（时间和退出码必须取实际结果）：
+
+```json
+{
+  "plan_id": "<清单 plan_id>",
+  "modules": [
+    {"module": "connectors/mysql-connector", "started_ns": 0, "finished_ns": 0, "exit_code": 0}
+  ]
+}
+```
+
+```sh
+python3 projects/tapdata/scripts/connector_tests.py report \
+  --plan <outside-repository>/plan.json \
+  --execution <outside-repository>/execution.json
+```
+
+核验会拒绝变更后的源码快照或不同清单的结果；逐模块列出缺执行、缺报告、旧报告、零用例、跳过和失败。只有本轮用例报告计数完整且退出成功时才标记模块通过，未提供结果的模块保留在报告内。解析后的摘要不含测试日志正文或连接凭据。该结论不证明依赖 Jar 来源、断言质量或测试配置无过滤，Agent 仍须结合原生执行事实核对；这些整体证据由共同流程接入，不在本脚本复制流程门禁。
+
+### 依赖构建命令
+
 多仓任务按依赖方向执行：
 
 ```text
