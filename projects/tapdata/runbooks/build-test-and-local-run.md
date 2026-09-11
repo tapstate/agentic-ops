@@ -32,6 +32,37 @@ Maven profile 必须从目标分支的 POM、构建脚本或 CI 获取。企业�
 
 ## 构建顺序
 
+### Java 变更影响范围
+
+由 Agent 根据 Git 变更定位模块，核对直接及间接消费其 Jar 的模块（包含跨仓、test/provided/optional 依赖），再确定必测范围。目录聚合 `<modules>` 不等于 Jar 依赖。修改父 POM、BOM、profile 或构建配置时还需检查配置传播；动态加载、反射、脚本引用及缺失模型由 Agent 调查或保守扩大范围，不要求研发补依赖图。
+
+优先使用目标代码、JDK、settings 和 profile 下的 Maven `help:effective-pom`，不自行实现 Maven 继承与属性解析。对每个待分析模块用 `-N -f <module>/pom.xml help:effective-pom -Doutput=<absolute-output>` 采集单模块模型；显式 profile 使用目标分支已有配置。失败时保留解析缺口，不以空依赖继续。该 Maven 操作可能更新本地插件缓存，但不执行测试。
+
+多模块或跨仓闭包可使用 `python3 projects/tapdata/scripts/java_impact.py --input <inventory.json>`。输入由 Agent 根据刚采集的模型构造，不进入任务持久状态；每个模块记录模型文件 SHA-256、实际源码完整提交、相对 POM 路径和 profile。工作区有未提交修改时，在任务证据中另记 diff 及模型生成时间；这些字段是采集来源，不是脚本对 Git 实时状态的认证。代码或模型配置变化后须重新采集。
+
+```json
+{
+  "schema_version": 1,
+  "modules": [
+    {
+      "id": "repository:module",
+      "repository": "owner/repository",
+      "source_revision": "<完整 Git SHA>",
+      "pom": "module/pom.xml",
+      "profiles": [],
+      "effective_pom": "module-effective.xml",
+      "sha256": "<模型文件 SHA-256>"
+    }
+  ],
+  "changed_modules": ["repository:module"],
+  "unresolved": ["未取得的仓库或模型、待核实的动态引用"]
+}
+```
+
+脚本仅对输入模型计算反向消费闭包，分别输出测试候选、构建前置、依赖路径及版本差异；所有 scope 均保守纳入，版本不一致不删除边。Agent 必须核对输入清单覆盖真实消费仓库及适用 profile，将配置传播或动态加载影响补入最终范围。不能把脚本没有列出的模块直接判定为无影响，也不能把候选清单或成功打包作为测试执行证据。
+
+最终报告明确应测、实测和未覆盖模块及原因；选中的 Java 模块内部全量执行集成测试。存在消费版本差异时，执行前证明上层模块使用本次变更构建的 Jar；仅坐标相近或本地已有同名 Jar 不足以证明。
+
 多仓任务按依赖方向执行：
 
 ```text
