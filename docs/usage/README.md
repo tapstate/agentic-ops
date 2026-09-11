@@ -4,6 +4,8 @@
 
 本目录保存首次使用之外的稳定操作说明。[首次使用指引](../usage-guide.md)只覆盖默认路径；遇到不同环境或需要调整默认值时，再按下面的场景进入对应文档。
 
+[质量检查与证据](quality-checkpoints.md)也负责失败归因、跨本地/CI/审查的累计修复轮次，以及研发追加轮数或接受具体缺口后的恢复；失败工具只记录和检查条件，修复与重验仍使用原生工具。
+
 [质量检查与证据](quality-checkpoints.md)同时负责按任务类型选择项目质量配置、方案字段检查及旧授权兼容边界；它说明可复用控制的使用合同，不代表任一业务任务类型已通过真实接入验收。
 
 功能开发的项目合同由 `projects/tapdata/admission.json` 与 `quality-feature.json` 定义，[TapData 任务引导](../../projects/tapdata/skills/tapdata-task/SKILL.md)负责功能与缺陷的协作差异；[质量检查与证据](quality-checkpoints.md)说明共用工具和功能任务的人工 Jira 回读边界，不扩展需求任务规划。

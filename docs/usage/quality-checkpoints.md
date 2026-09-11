@@ -1,5 +1,22 @@
 # 质量检查与证据
 
+## 失败归因与有限修复
+
+Agent 用原生工具分析失败。只有证据指向当前变更才自行修复；已有失败、环境问题及归因不明由研发决定。使用 `workflow/failures.py status --issue-key <key> --dir <workspace>` 回读当前 run 的失败记录，随后以 `apply --expected-run-id <run> --revision <读取的 revision> --input <事件.json>` 记录操作（同样携带 issue-key、dir）。输入保存在当前 run 的受控交互路径。
+
+| action | 必需内容与含义 |
+|---|---|
+| observe | repository、稳定 check_id、label、attribution（current_change/preexisting/environment/unknown）、evidence；创建或更新问题，返回 problem_id |
+| start | problem_id、stage（local/ci/review）；修改前占用一轮，包含本轮分析、修改、重验 |
+| finish | problem_id、result（PASS/FAIL/UNKNOWN/NOT_RUN/SKIPPED）、source_revision、evidence；使用实际版本及报告，未执行如实说明 |
+| decide | problem_id、decision、reason、proof；continue 另给 additional_rounds 正整数，accept_gap 另给 uncovered 与 follow_up |
+
+`proof` 使用已有用户消息来源字段 actor、source=user_message、reference 和带时区 at，引用研发真实决定，不是身份认证。人工追加明确限定从当前累计次数起可再试几轮；接受缺口保留 accepted_gap，不写 PASS。环境问题由研发授权 Agent 处理时，也明确续修轮数。
+
+同一问题以首次关联的 repository/check_id 定位，label 改名不改变身份；本地、PR CI、审查和恢复共用累计三轮，不因成功后再次出现而清零。Agent 必须将相同根因的后续失败关联原检查项，不能通过新建 check_id 绕开次数；工具不猜测语义上是否为同一根因。源文件或用例改名时仍使用原 check_id。中断中的轮次先以真实结果（包括 UNKNOWN/NOT_RUN）finish，不重开不记账；事实或范围变化则重新 observe 并核对人工决定是否仍适用。
+
+记录按任务 run 隔离、带 revision 并持锁更新；重放保留归因、每轮来源及结果、决定和报告。新增失败文件不改写已有任务或 CI 文件；接入阶段检查点前，记录本身不代表流程已经强制检查全部失败，也不代替 PR Checks 或 Q4 验收。
+
 质量检查采用“必须核对、用户决定处置”的方式。Agent 提议验收用例及验证方式，用户选择；测试工具提供执行结果，用户决定是否验收、补测、不适用、延期或接受风险。接受风险不会把失败或未执行改为通过。
 
 本文说明稳定操作方式。项目标准来自 `projects/<project>/quality.json` 和 `admission.json`，输入及恢复契约来自 `contracts/quality-action.schema.json`、`quality-state.schema.json`。工作项与最终证据仍在 Jira；本地记录只是任务 run 的执行及恢复材料。[任务授权](task-authorization.md)和[安全边界](../security/permissions.md)独立生效。
