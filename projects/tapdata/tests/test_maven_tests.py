@@ -1,4 +1,4 @@
-"""连接器选择与真实 Failsafe 结果核验。"""
+"""Maven 模块选择、跨仓 Jar 与真实测试结果核验。"""
 import importlib.util
 import json
 import os
@@ -9,7 +9,7 @@ import tempfile
 import time
 import unittest
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts/connector_tests.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/maven_tests.py"
 SPEC = importlib.util.spec_from_file_location("connector_tests", SCRIPT)
 connector = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(connector)
@@ -114,6 +114,65 @@ class ConnectorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "清单已变化"):
             connector.report(plan, run)
 
+    def test_surefire_module_report_keeps_coverage_boundary(self):
+        module = self.root / "connectors/a"
+        (module / "src/test").mkdir()
+        (module / "src/it/java").rename(module / "src/test/java")
+        plan = connector.plan(self.root, ["connectors/a"], [], "surefire")
+        run = self.execution(plan)
+        (module / "target/failsafe-reports").rename(module / "target/surefire-reports")
+        result = connector.report(plan, run)
+        self.assertTrue(result["passed"])
+        self.assertEqual("surefire", result["framework"])
+        self.assertIn("不自动证明集成覆盖", result["boundary"])
+        self.assertIn("test", plan["commands"][-1]["argv"])
+
+    def test_jar_pair_rejects_stale_cache_and_later_replacement(self):
+        with tempfile.TemporaryDirectory() as d:
+            built, loaded = Path(d) / "built.jar", Path(d) / "loaded.jar"
+            built.write_bytes(b"new")
+            loaded.write_bytes(b"old")
+            with self.assertRaisesRegex(ValueError, "内容不同"):
+                connector.plan(self.root, ["connectors/a"], [], jar_pairs=[(built, loaded)])
+            loaded.write_bytes(b"new")
+            plan = connector.plan(self.root, ["connectors/a"], [], jar_pairs=[(built, loaded)])
+            run = self.execution(plan)
+            self.assertTrue(connector.report(plan, run)["passed"])
+            built.write_bytes(b"changed")
+            loaded.write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "Jar 已变化"):
+                connector.report(plan, run)
+
+    def test_dependency_source_change_invalidates_test(self):
+        with tempfile.TemporaryDirectory() as d:
+            dependency = Path(d).resolve()
+            for args in [("init", "-q"), ("config", "user.name", "Fixture"), ("config", "user.email", "fixture@example.invalid")]:
+                subprocess.run(["git", "-C", str(dependency), *args], check=True, capture_output=True)
+            file = dependency / "source.java"
+            file.write_text("old")
+            subprocess.run(["git", "-C", str(dependency), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(dependency), "commit", "-qm", "fixture"], check=True)
+            plan = connector.plan(self.root, ["connectors/a"], [], dependency_repos=[dependency])
+            run = self.execution(plan)
+            file.write_text("new")
+            with self.assertRaisesRegex(ValueError, "依赖源码已变化"):
+                connector.report(plan, run)
+
+    def test_single_directory_and_root_module_supported(self):
+        self.assertEqual(self.root, connector.module_path(self.root, "."))
+        (self.root / "single").mkdir()
+        (self.root / "single/pom.xml").write_text("<project/>")
+        self.assertEqual(self.root / "single", connector.module_path(self.root, "single"))
+
+    def test_old_transient_plan_rejected(self):
+        plan = self.plan()
+        plan["schema_version"] = 1
+        unsigned = dict(plan)
+        unsigned.pop("plan_id")
+        plan["plan_id"] = connector.digest(unsigned)
+        with self.assertRaisesRegex(ValueError, "清单已变化"):
+            connector.report(plan, {"plan_id": plan["plan_id"], "modules": []})
+
     def test_valid_report_and_cli(self):
         plan = self.plan()
         run = self.execution(plan)
@@ -147,6 +206,58 @@ class ConnectorTests(unittest.TestCase):
         self.assertTrue(report["passed"], report)
         self.assertEqual(2, report["modules"][0]["counts"]["tests"])
         self.assertFalse((self.root / "connectors/b/target").exists())
+
+    @unittest.skipUnless(os.environ.get("AO_JAR_MAVEN_TEST") == "1", "显式开启跨仓 Jar 真实执行")
+    def test_real_cross_repository_old_jar_fails_new_jar_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d).resolve()
+            producer, cache = base / "producer", base / "maven-cache"
+            producer.mkdir()
+            for args in [("init", "-q"), ("config", "user.name", "Fixture"), ("config", "user.email", "fixture@example.invalid")]:
+                subprocess.run(["git", "-C", str(producer), *args], check=True, capture_output=True)
+            (producer / ".gitignore").write_text("target/\n")
+            header = '<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><groupId>ao.jar.fixture</groupId><version>1</version>'
+            compiler = '<properties><maven.compiler.source>8</maven.compiler.source><maven.compiler.target>8</maven.compiler.target></properties>'
+            (producer / "pom.xml").write_text(header + '<artifactId>library</artifactId>' + compiler + '</project>')
+            java = producer / "src/main/java/sample/Library.java"
+            java.parent.mkdir(parents=True)
+            java.write_text('package sample; public class Library { public static String value() { return "old"; } }')
+            subprocess.run(["git", "-C", str(producer), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(producer), "commit", "-qm", "old library"], check=True)
+            (self.root / "pom.xml").write_text(header + '<artifactId>consumer-root</artifactId><packaging>pom</packaging><modules><module>connectors/a</module></modules>' + compiler + '</project>')
+            module = self.root / "connectors/a"
+            (module / "pom.xml").write_text(header + '<artifactId>consumer</artifactId>' + compiler + '<dependencies><dependency><groupId>ao.jar.fixture</groupId><artifactId>library</artifactId><version>1</version></dependency><dependency><groupId>junit</groupId><artifactId>junit</artifactId><version>4.13.2</version><scope>test</scope></dependency></dependencies><build><testSourceDirectory>src/it/java</testSourceDirectory><plugins><plugin><artifactId>maven-failsafe-plugin</artifactId><version>3.5.6</version></plugin></plugins></build></project>')
+            built = producer / "target/library-1.jar"
+            consumed = cache / "ao/jar/fixture/library/1/library-1.jar"
+            expected_path = json.dumps(str(consumed))
+            (module / "src/it/java/SampleIT.java").write_text('import org.junit.Test; import static org.junit.Assert.*; import sample.Library; public class SampleIT { @Test public void changedBehavior() { assertEquals("new", Library.value()); } @Test public void actualJarLocation() throws Exception { assertEquals(new java.io.File(%s).getCanonicalPath(), new java.io.File(Library.class.getProtectionDomain().getCodeSource().getLocation().toURI()).getCanonicalPath()); } }' % expected_path)
+
+            def execute(argv, cwd, success=True):
+                start = time.time_ns()
+                proc = subprocess.run(argv + ["-Dmaven.repo.local=" + str(cache)], cwd=cwd, capture_output=True, text=True, timeout=240)
+                end = time.time_ns()
+                if success:
+                    self.assertEqual(0, proc.returncode, proc.stdout[-5000:] + proc.stderr[-1000:])
+                return dict(module="connectors/a", exit_code=proc.returncode, started_ns=start, finished_ns=end)
+
+            execute(["mvn", "-B", "clean", "install", "-DskipTests=true"], producer)
+            old_plan = connector.plan(self.root, ["connectors/a"], [], dependency_repos=[producer], jar_pairs=[(built, consumed)])
+            execute(old_plan["commands"][0]["argv"], self.root)
+            old_run = execute(old_plan["commands"][1]["argv"], module, success=False)
+            self.assertNotEqual(0, old_run["exit_code"])
+            old_report = connector.report(old_plan, dict(plan_id=old_plan["plan_id"], modules=[old_run]))
+            self.assertEqual("failed", old_report["modules"][0]["status"])
+            self.assertEqual(1, old_report["modules"][0]["counts"]["failures"])
+
+            java.write_text('package sample; public class Library { public static String value() { return "new"; } }')
+            execute(["mvn", "-B", "clean", "install", "-DskipTests=true"], producer)
+            new_plan = connector.plan(self.root, ["connectors/a"], [], dependency_repos=[producer], jar_pairs=[(built, consumed)])
+            execute(new_plan["commands"][0]["argv"], self.root)
+            new_run = execute(new_plan["commands"][1]["argv"], module)
+            new_report = connector.report(new_plan, dict(plan_id=new_plan["plan_id"], modules=[new_run]))
+            self.assertTrue(new_report["passed"], new_report)
+            self.assertEqual(2, new_report["modules"][0]["counts"]["tests"])
+            self.assertNotEqual(old_plan["artifacts"][0]["sha256"], new_plan["artifacts"][0]["sha256"])
 
 
 if __name__ == "__main__":

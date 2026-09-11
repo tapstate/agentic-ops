@@ -63,12 +63,14 @@ Maven profile 必须从目标分支的 POM、构建脚本或 CI 获取。企业�
 
 最终报告明确应测、实测和未覆盖模块及原因；选中的 Java 模块内部全量执行集成测试。存在消费版本差异时，执行前证明上层模块使用本次变更构建的 Jar；仅坐标相近或本地已有同名 Jar 不足以证明。
 
-### 连接器选择执行与报告
+### Maven 模块选择执行与报告
 
-现有连接器 CI 入口调用 `tapdata/tapdata-it` 的共享 workflow，其自动目录筛选不代替上面的完整影响分析。Agent 将最终确定的本仓连接器模块逐个传入 `connector_tests.py plan`，不重新缩小到直接改动目录。跨仓分别生成清单。当前适配复用 `src/it/java` 和标准 `target/failsafe-reports`；其它布局列为能力缺口，不静默跳过。
+按 Maven 模块处理，不按 FE、TM 或连接器分别建立流程。现有连接器 CI 入口调用 `tapdata/tapdata-it` 的共享 workflow，其自动目录筛选不代替上面的完整影响分析。Agent 将最终确定的本仓模块逐个传入 `maven_tests.py plan`，不重新缩小到直接改动目录。跨仓分别生成清单；同一模块需要运行两类测试时分别生成清单并汇总，不能仅选其中一类后宣称全部验证完成。
+
+核对目标分支有效 POM 和测试内容后选择 `--framework failsafe`（默认，`src/it/java`、`target/failsafe-reports`）或 `--framework surefire`（`src/test/java`、`target/surefire-reports`）。两者都执行所选模块内该框架的全量适用用例。Surefire 结果注明普通或混合模块测试，不能仅因 Maven 成功而宣称集成覆盖。其它布局或缺少对应框架列为覆盖缺口，由 Agent 核实或按研发决定处理；不擅自切换业务分支来寻找测试。
 
 ```sh
-python3 projects/tapdata/scripts/connector_tests.py plan \
+python3 projects/tapdata/scripts/maven_tests.py plan \
   --repo <connector-repository-root> \
   --module connectors/mysql-connector \
   --module connectors/mongodb-connector > <outside-repository>/plan.json
@@ -76,7 +78,9 @@ python3 projects/tapdata/scripts/connector_tests.py plan \
 
 有已核实 profile 时重复提供 `--profile <name>`。清单绑定当前 Git Head、未提交 diff 和未跟踪文件；存放在仓库之外或已忽略的运行目录，避免记录本身改变源码快照。清单不是新的任务状态，也不授权任何外部操作。
 
-Agent 用原生工具按清单中的 `cwd` 和 `argv` 顺序执行：先 `install -pl <selected> -am` 准备依赖（跳过测试），成功后逐模块运行 `clean test-compile failsafe:integration-test failsafe:verify`，显式启用集成测试。不对测试命令使用 `-am`，避免把构建依赖误当必测范围；应测的上层模块必须已单独列入清单。不使用单类/方法过滤，不照搬 CI 中关闭 TLS 验证、全局代理或写 settings 的环境操作。
+Agent 用原生工具按清单中的 `cwd` 和 `argv` 顺序执行：先 `install -pl <selected> -am` 准备依赖（跳过测试），成功后逐模块运行 `clean test-compile failsafe:integration-test failsafe:verify` 或 Surefire 的 `clean test`，显式启用测试。不对测试命令使用 `-am`，避免把构建依赖误当必测范围；应测的上层模块必须已单独列入清单。不使用单类/方法过滤，不照搬 CI 中关闭 TLS 验证、全局代理或写 settings 的环境操作。
+
+跨仓依赖先按依赖方向在原生工具中完成本次源码的 `clean install`，保留构建前后源码快照、实际命令及成功退出记录。核对版本坐标，不为通过而临时修改消费版本。记录本次构建的 Jar 与实际消费路径：普通 Maven 依赖核对有效测试 classpath；动态插件还需核对下载源及实际加载文件，不能仅看 POM。生成清单时通过 `--dependency-repo <producer-root>` 绑定生产仓库快照，通过 `--jar-pair <built-jar> <consumed-jar>` 核对内容并保存 SHA-256；两者均可重复。内容不一致立即报告，测试完成后源码或任一 Jar 变化会使核验失败。哈希一致只证明两个文件内容相同，不能代替本次构建记录或实际加载路径证据。
 
 执行前核对有效 POM、settings、环境参数中没有额外过滤用例、跳过测试或改变报告位置的配置。`clean` 会清除所选模块构建产物，需确认待保留的日志/证据已另存；依赖准备失败时不得继续使用缓存 Jar 冒充本轮准备完成。数据库、凭据和测试资源必须使用已授权环境；环境未就绪不等于测试通过。模块内能力不支持、框架缺失或非本次变更失败，按研发决定处理并记录。
 
@@ -92,12 +96,14 @@ Agent 用原生工具按清单中的 `cwd` 和 `argv` 顺序执行：先 `instal
 ```
 
 ```sh
-python3 projects/tapdata/scripts/connector_tests.py report \
+python3 projects/tapdata/scripts/maven_tests.py report \
   --plan <outside-repository>/plan.json \
   --execution <outside-repository>/execution.json
 ```
 
-核验会拒绝变更后的源码快照或不同清单的结果；逐模块列出缺执行、缺报告、旧报告、零用例、跳过和失败。只有本轮用例报告计数完整且退出成功时才标记模块通过，未提供结果的模块保留在报告内。解析后的摘要不含测试日志正文或连接凭据。该结论不证明依赖 Jar 来源、断言质量或测试配置无过滤，Agent 仍须结合原生执行事实核对；这些整体证据由共同流程接入，不在本脚本复制流程门禁。
+核验会拒绝变更后的源码快照、已声明依赖变化或不同清单的结果；逐模块列出缺执行、缺报告、旧报告、零用例、跳过和失败。只有本轮用例报告计数完整且退出成功时才标记模块通过，未提供结果的模块保留在报告内。解析后的摘要不含测试日志正文或连接凭据。该结论不证明断言质量或测试配置无过滤，Agent 仍须结合原生执行事实核对；这些整体证据由共同流程接入，不在本脚本复制流程门禁。
+
+执行清单为可再生的临时分析文件，当前格式为 2；旧连接器清单需用当前入口重新生成，不保留旧命令兼容入口。不改变 `.agenticops/` 工作空间持久状态或 epoch。
 
 ### 依赖构建命令
 
