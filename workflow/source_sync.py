@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -52,16 +53,40 @@ def verify(root, work_branch, base_revision, source_revision):
             "boundary": "仅证明包含给定来源提交；最新远端来源和 Merge 授权须原生回读核对。"}
 
 
+def impact(root, work_branch, base_revision, source_revision, before_merge_revision):
+    result = verify(root, work_branch, base_revision, source_revision)
+    if not quality.exact_commit(before_merge_revision):
+        raise ValueError("同步前任务版本必须为完整提交 SHA")
+    if not ancestor(root, base_revision, before_merge_revision) or not ancestor(
+            root, before_merge_revision, result["task_revision"]):
+        raise ValueError("同步前任务成果未保留，需研发决定后续处理")
+    comparisons = {}
+    for name, start, end in (("original_task", base_revision, before_merge_revision),
+                             ("incoming_source", base_revision, source_revision),
+                             ("final_task", source_revision, result["task_revision"])):
+        paths = git(root, "diff", "--name-only", "-z", start, end, "--")
+        patch = git(root, "diff", "--binary", "--no-ext-diff", "--no-textconv", start, end, "--")
+        comparisons[name] = {"from": start, "to": end,
+                             "paths": [p for p in paths.split("\0") if p],
+                             "diff_sha256": hashlib.sha256(patch.encode()).hexdigest()}
+    result.update(before_merge_revision=before_merge_revision, comparisons=comparisons,
+                  analysis_required=True,
+                  boundary="差异只供 Agent 分析；无文本冲突不证明无行为影响。测试证据必须绑定最终源码与用例。")
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--work-branch", required=True)
     parser.add_argument("--base-revision", required=True)
     parser.add_argument("--source-revision", required=True)
+    parser.add_argument("--before-merge-revision")
     args = parser.parse_args()
     try:
-        print(json.dumps(verify(args.repo, args.work_branch, args.base_revision, args.source_revision),
-                         ensure_ascii=False, indent=2))
+        arguments = (args.repo, args.work_branch, args.base_revision, args.source_revision)
+        result = impact(*arguments, args.before_merge_revision) if args.before_merge_revision else verify(*arguments)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (ValueError, OSError, subprocess.TimeoutExpired) as error:
         print("错误：%s" % error, file=sys.stderr)

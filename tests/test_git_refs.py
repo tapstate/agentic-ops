@@ -189,6 +189,20 @@ class SourceSyncTests(unittest.TestCase):
             self.verify()
         self.assertIn("<<<<<<<", (self.root / "source").read_text())
 
+    def test_conflict_free_merge_still_requires_impact_analysis(self):
+        self.git("merge", "--no-edit", "develop")
+        result = source_sync.impact(self.root, "feature", self.base, self.source, self.task)
+        self.assertTrue(result["analysis_required"])
+        self.assertEqual(["task"], result["comparisons"]["original_task"]["paths"])
+        self.assertEqual(["source"], result["comparisons"]["incoming_source"]["paths"])
+        self.assertEqual(["task"], result["comparisons"]["final_task"]["paths"])
+        old_revision = result["task_revision"]
+        self.commit("task", "revised behavior")
+        updated = source_sync.impact(self.root, "feature", self.base, self.source, self.task)
+        self.assertNotEqual(old_revision, updated["task_revision"])
+        self.assertNotEqual(result["comparisons"]["final_task"]["diff_sha256"],
+                            updated["comparisons"]["final_task"]["diff_sha256"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
