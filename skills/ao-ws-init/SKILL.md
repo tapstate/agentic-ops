@@ -19,9 +19,9 @@ description: 创建、更新或受控清理 AgenticOps 项目工作空间；适�
 
 不要手改 `.agenticops/workspace.json`、`init.json`、生成的入口或 Skill 链接。
 
-## 已存在工作空间：先问“清理还是更新”
+## 已存在工作空间：按已明确的意图处理
 
-当 `<workspace>/.agenticops/workspace.json` 表明它已绑定到当前 Product Root 时，先展示现有的 Product Root、workspace ID、项目、Source Pool、已接入 Agent、`doctor` 结果及任务数量，然后停止并请用户选择：**更新**、**清理**或取消。不得直接执行 `init`，也不得静默换项目、Source Pool 或 Agent 集合。
+当 `<workspace>/.agenticops/workspace.json` 表明它已绑定到当前 Product Root 时，先展示现有的 Product Root、workspace ID、项目、Source Pool、已接入 Agent、`doctor` 结果及任务数量，用户已明确要求更新且绑定一致时，直接走更新；只有意图不清时才请用户选择更新、清理或取消。不得直接执行 `init`，也不得静默换项目、Source Pool 或 Agent 集合。
 
 - **更新**：只可修复或刷新既有生成接线，保留当前绑定和任务语义。取得用户选择后执行 `<product-root>/agenticops repair --workspace <workspace>`，再执行 `doctor` 并回读结果。若用户想改项目、Source Pool 或接入 Agent，说明这不是更新；必须走清理后重建。
 - **清理**：这是破坏性操作。先以只读方式列出该工作空间和任务状态，说明 `workspace purge` 会删除受管接线、绑定和所有本地任务状态；它会先清理受控 linked worktree，脏 worktree 或未知状态会停止并保留现场。获得用户对**精确工作空间路径和此删除范围**的明确确认后，才执行 `<product-root>/agenticops workspace purge --workspace <workspace> --yes`。不得使用 `--all`，不得删除 Source Pool、业务仓库或未受管文件。清理成功后，如用户仍要创建，重新走下节的创建确认。
@@ -30,7 +30,7 @@ description: 创建、更新或受控清理 AgenticOps 项目工作空间；适�
 
 ## 新建：先确认四项绑定
 
-在创建目录、Source Pool 或任何接线前，汇总并请用户一次确认以下四项。每项有默认值时必须明确标为“默认”：
+在创建目录、Source Pool 或任何接线前，汇总以下四项。用户或已有有效确认已经明确覆盖的值只回读，不重复提问；仅请求缺失项和未经确认的默认值。每项有默认值时必须明确标为“默认”：
 
 | 必须确认的输入 | 取值规则 |
 | --- | --- |
@@ -61,7 +61,7 @@ description: 创建、更新或受控清理 AgenticOps 项目工作空间；适�
 <product-root>/agenticops doctor --workspace <workspace>
 ```
 
-回读工作空间路径、workspace ID、Product Root、项目、Source Pool（含 `product-default` 或 `workspace-override` 来源）、接入 Agent 和 `doctor` 结果。失败时不要改参数重试或手工补文件；报告失败原因和未写入/已写入的事实，等待用户决定。
+回读工作空间路径、workspace ID、Product Root、项目、Source Pool（含 `product-default` 或 `workspace-override` 来源）、接入 Agent 和 `doctor` 结果。失败时先只读核对 `doctor` 和受管清单，报告未写入、已写入或结果未知的事实；在原绑定和授权内，只有确认可安全重试时才重试同一操作。绑定冲突、权限不足、删除范围变化或结果仍不明时停止依赖操作并请求所需决定，不改参数或手工补文件。
 
 ## 结果边界
 

@@ -1,6 +1,6 @@
 ---
 name: ao-test-takeover
-description: Orchestrate a fresh AgenticOps workspace and one subagent to test a Jira task takeover through its real stopping point; use for flow validation and follow-up repair evidence, not business-code implementation.
+description: 在全新隔离工作空间中用一个子代理测试 Jira 任务接管，推进至真实停止点并提供复测证据；用于维护面流程验证，不用于业务代码实现。
 ---
 
 # AgenticOps 任务接管测试
@@ -11,7 +11,7 @@ description: Orchestrate a fresh AgenticOps workspace and one subagent to test a
 
 ## 执行前：确认测试绑定
 
-在创建工作空间、启动子代理或调用 Jira 前，主会话必须取得以下四项并回读为一次测试绑定。缺一项就只请求缺失项，不开始测试：
+在创建工作空间、启动子代理或调用 Jira 前，主会话先解析以下绑定，其中前三项必填，预设门禁回复可选。缺少必填项时只请求缺失项，并继续已有路径与 Profile 的只读核对；Jira Key 的真实性由真实读取核验，不要求用户先证明：
 
 | 输入 | 规则 |
 | --- | --- |
@@ -20,7 +20,7 @@ description: Orchestrate a fresh AgenticOps workspace and one subagent to test a
 | 测试目录 | 例如 `~/test/agentic-ops-test`；它是测试工作空间的父目录，必须可写、位于维护面产品根和 Source Pool 外。每次运行在其下创建唯一子目录，绝不复用或覆盖已有工作空间。 |
 | 预设门禁回复（可选） | 逐条列出“门禁类型 → 回复 → 适用条件”。未提供时，所有真实人工决定都回主会话。 |
 
-单条会话请求中已明确给出的四项可视为本次测试绑定的确认；否则先呈现解析后的四项请用户确认。测试绑定只授权创建隔离工作空间、读取事实和执行测试范围内的正常流程，不授权 AgenticOps 源码修复、业务代码修改、提交、推送、PR、合并或发布。
+当前会话已明确给出且仍有效的前三项可视为本次测试绑定的确认，回读后继续；不要求用户在同一条消息重复提供。没有预设回复就按真实人工决策处理，不因此阻塞启动。测试绑定只授权创建隔离工作空间、读取事实和执行测试范围内的正常流程，不授权 AgenticOps 源码修复、业务代码修改、提交、推送、PR、合并或发布。
 
 预设门禁回复不是万能授权：它只能在当前项目、Jira Key、run 和上下文与适用条件全部匹配时使用，并在回传中记录。它不能自动同意范围扩大、风险取舍、`task_execution` 授权、Jira 描述/评论写入、删除、提交、推送、PR、合并或发布；这些仍须回主会话由人确认。
 
@@ -29,7 +29,7 @@ description: Orchestrate a fresh AgenticOps workspace and one subagent to test a
 - 先读维护面产品根的 `docs/strategy/project-goals.md`，确认当前分支为 `develop`，记录 HEAD 与未提交改动；不 checkout、reset、stash 或覆盖维护面现场。只使用 v1 的 `agenticops`、`workflow/`、`projects/`，不调用旧 `ao-work`、`ao-maint` 或兼容 Runtime。
 - 在确认的测试目录下创建一个新的、唯一的测试工作空间；它必须位于产品根和 Source Pool 之外，也不能复用已有项目工作空间。使用维护面代码执行 `agenticops init`，并记录产品根、workspace 路径、workspace ID、项目、Agent 和 Source Pool。若目录校验失败，报告确切原因，不选择替代目录或把产品根当工作空间。
 - 启动一个子代理，而非创建用户侧新任务。给它工作空间绝对路径、Jira key、测试边界和本次测试标识；子代理只能在这个工作空间及其受控 worktree 中写本地运行状态。
-- 用等待/事件方式接收子代理结论。若收到人工决策请求，主会话向用户完整展示选项、推荐、影响、已完成事实和恢复命令；用户回复后，将原文发送回同一子代理继续，不另建 run 或子代理。
+- 用平台已有的等待/事件方式接收子代理结论，保留同一子代理与 run 标识；等待期间可整理证据和做独立只读分析，不并发修改其工作空间。用户中途补充或取消要求时，及时转达同一子代理，停止受影响步骤并核对在途结果。若收到人工决策请求，主会话向用户完整展示选项、推荐、影响、已完成事实和恢复命令；用户回复后，将原文发送回同一子代理继续，不另建 run 或子代理。
 - 完成或阻断后，主会话汇总测试结果。默认保留工作空间、run、worktree 和事件用于修复后复测；不得自动 purge 或删除分支。
 
 完整的子代理输入与回传格式见 [references/subagent-contract.md](references/subagent-contract.md)。启动前必须读取它。
@@ -46,7 +46,7 @@ description: Orchestrate a fresh AgenticOps workspace and one subagent to test a
 ## 流程问题、修复与复测
 
 - 将测试中发现的问题分为“预期人工门禁”和“流程缺陷”。后者必须附带触发输入、实际/期望行为、命令/错误、run、相关状态与最小复现路径；不能把“等待人工决定”写成缺陷。
-- 测试运行本身只暴露和总结问题。若要修复 AgenticOps 流程，主会话先展示最小修复建议、影响文件、验证和风险，并取得新的、精确的修复授权；不得借测试绑定修改维护面代码。
+- 测试运行本身只暴露和总结问题。若要修复 AgenticOps 流程，主会话先展示最小修复建议、影响文件、验证和风险，并检查已有授权是否明确覆盖该修复；未覆盖或范围、风险、验证变化时才取得新的、精确的修复授权；不得借测试绑定修改维护面代码。
 - 修复后运行与变更相称的本地验证；再以相同的 Jira 项目/Key 和测试绑定创建**另一个**新工作空间复测。比较两次 run 的停止点与证据，确认目标问题消失且未绕过真实人工门禁。修复授权不包含提交、推送、PR、合并或发布。
 
 ## 测试报告

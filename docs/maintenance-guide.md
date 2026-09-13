@@ -78,14 +78,13 @@ workspace="$HOME/agenticops-tapdata"
 
 ## 5. 验证
 
-运行代码变更必须执行：
+运行代码及 Skill 变更按固定合同执行完整验收一次：
 
 ```sh
-internal/acceptance.sh quick
 internal/acceptance.sh full
 ```
 
-`quick` 检查 Runtime 和资源边界；`full` 执行四项固定验收。也可以按需组合：
+`full` 执行四项固定验收。开发中可先用 `quick` 检查 Runtime 和资源边界，或按需组合检查；它们不能替代要求的完整验收。不要求先跑 `quick` 再机械重复 `full`。完整验收通过后，仅在候选变化、检查失败或存在未解决风险时追加验证：
 
 ```sh
 internal/acceptance.sh runtime install
@@ -112,3 +111,13 @@ internal/release/hotfix.sh <JIRA-KEY>
 它原子更新 `main` 与 `develop`；冲突、分叉或回读不明时停止。源码版本由 `python3 internal/version.py` 输出为 `<分支>-<标签>-<提交数>-<提交编号>`。
 
 详细边界见[项目目标](strategy/project-goals.md)和 [v1 架构](architecture/agenticops-v1-architecture.md)。
+
+## 7. 维护 Agent 协作与模型适配
+
+截至 2026-09-13，OpenAI 的 [GPT-6 Astra 指引](https://developers.openai.com/api/docs/guides/latest-model)说明：模型更敏感于 Skill 和仓库指令，可能多问澄清问题、扩大测试；也支持执行中补充要求和异步工具能力。这些是模型与平台能力说明，不是 AgenticOps 的权限保证。
+
+维护面据此采用根 `AGENTS.md` 的协作约定：沿用有效授权、先完成可审查准备、只在真实决策处暂停；技能编写检查见 [Skill 维护规范](skill-maintenance.md)。初始化技能区分明确更新与意图不清的重建，接管测试技能区分必填绑定与可选回复，避免把重复确认当作安全措施。
+
+异步工具、执行中补充要求和推理强度调整以当前 Agent 实际暴露的接口为准；不能因为模型支持就假定 CLI、桌面端或 Adapter 已支持。没有异步能力时按顺序执行并报告阻塞，不新增 Runtime 模拟平台调度，也不自行修改用户模型配置。等待期间可做独立只读分析；恢复后先核验原操作及当前目标，再消费结果。子代理只用于已要求的独立工作，接管测试仍使用一个执行子代理，不扩大并发写入范围。
+
+指引调整的人工场景核对包括：明确更新既有工作空间时直接 repair；缺工作目录时只问该目录；已有绑定不符时停止覆盖；用户中途收窄目标时停止受影响步骤；外部写结果未知时先回读；测试通过且候选未变时不重复运行。静态核对与固定验收只能证明指令和资源合同，不能宣称 Astra 行为、真实 Jira 接管或多平台端到端已验证。
