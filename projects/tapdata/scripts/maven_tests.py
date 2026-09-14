@@ -12,6 +12,9 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from maven_reports import parse_xml
+
 
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -107,19 +110,11 @@ def counts(report_dir, started, finished):
         if file.is_symlink() or not started <= file.stat().st_mtime_ns <= finished:
             raise ValueError("报告不属于本轮执行：%s" % file.name)
         raw = file.read_bytes()
-        suite = ET.fromstring(raw)
-        if suite.tag != "testsuite":
-            raise ValueError("无法识别 Maven 报告：%s" % file.name)
-        numbers = {key: int(suite.attrib[key]) for key in total}
-        cases = suite.findall("testcase")
-        actual = {"tests": len(cases), "failures": sum(c.find("failure") is not None for c in cases),
-                  "errors": sum(c.find("error") is not None for c in cases),
-                  "skipped": sum(c.find("skipped") is not None for c in cases)}
-        if numbers != actual or any(n < 0 for n in numbers.values()):
-            raise ValueError("报告计数不一致：%s" % file.name)
+        parsed = parse_xml(raw, file.name)
+        numbers = parsed["counts"]
         for key in total:
             total[key] += numbers[key]
-        evidence.append({"file": file.name, "sha256": hashlib.sha256(raw).hexdigest()})
+        evidence.append(parsed)
     return total, evidence
 
 

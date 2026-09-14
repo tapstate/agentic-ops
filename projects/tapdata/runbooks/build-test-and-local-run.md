@@ -71,6 +71,49 @@ gh run view <run-id> --repo <owner/repo> --attempt <attempt> --log
 
 对照质量检查项导入实际 `execute` 证据：`origin=ci`，实际用例与代码版本，`source_ref` 指向精确运行/报告。无法映射到现有结果枚举的缺报告、缺执行或版本不明记录为 UNKNOWN，并在 observation 保留具体原因；不能填 PASS。报告总结以 Jira 讨论回写并回读，至少包含各仓代码/测试版本、应测/实测/未覆盖范围、运行和报告链接、结果计数、失败归因与后续处理。评论失败保留同步待办，不丢失本地分析。
 
+### 任务级报告分析
+
+一个任务的所有仓库、PR 均须列入本轮报告清单，缺报告也保留对象。先用 `task.py repository context` 取得当前任务仓库登记，再用原生 GitHub 工具逐 PR 回读 Head、工作流、run、Job、矩阵及上传步骤。只在验证目的、配置和范围相同且存在明确规则时判断运行替代关系；不能挑选成功运行，也不能把不同配置的新运行自动当作旧运行的替代。选择无法确定时保留候选，`selection` 写 `unresolved`。
+
+原生下载应保存 ZIP 到 `interaction-path` 提供的当前 run 路径；可使用 `gh api repos/<owner>/<repo>/actions/artifacts/<artifact-id>/zip` 获取精确 artifact，再用下述脚本直接读取 ZIP，无需解压。权限不足、过期、不存在、上传失败、取消、超时、排队和运行中分别记载；可恢复的网络错误有限重试，其它对象继续处理。上传日志等证据才能证明 attempt，不能从名称或时间猜测；部分 Job 重跑按已有 CI 规则关联各自来源，不伪装成单次完整执行。
+
+`maven_reports.py` 只读取已取得的本地目录、单份 XML 或 ZIP，不调用 GitHub、不执行测试、不选择有效运行、不写任务状态。命令输出 JSON 到标准输出，Agent 将其保存在当前 run 的受控交互路径。退出码 0 仅表示处理结束，包含缺报告和解析失败的正常输出；输入契约无效返回 2，不能把退出码当作测试 PASS。
+
+```sh
+python3 projects/tapdata/scripts/maven_reports.py --source <downloaded-artifact.zip>
+python3 projects/tapdata/scripts/maven_reports.py --source <module>/target/failsafe-reports
+python3 projects/tapdata/scripts/maven_reports.py --input <report-inventory.json>
+```
+
+任务清单是可再生的分析输入，不是新增任务事实源。每个对象是一组有独立来源的报告，多个 artifact 分别登记；一个 artifact 可包含多个模块，输出按文件路径保留，不凭文件名猜模块。`context` 保存原生回读的精确版本及运行，`provenance` 保存归属判断及证据，`execution` 分别保存测试退出码、Job/run 状态；未知信息不填写虚构值。示例：
+
+```json
+{
+  "schema_version": 1,
+  "snapshot": {"source_ref": "当前 run 仓库登记及 PR 回读文件", "observed_at": "实际读取时间"},
+  "objects": [
+    {
+      "id": "repo-a-pr-101-job-1-artifact-1",
+      "repository": "owner/repo-a",
+      "context": {"pr": 101, "head_sha": "完整提交", "checkout_sha": "实际测试提交", "run_id": 1, "job_id": 1, "artifact_id": 1, "artifact_url": "原生回读的下载来源"},
+      "selection": "unresolved",
+      "provenance": {"status": "unknown", "source_ref": "原生回读记录；attempt 尚未核实"},
+      "execution": {"exit_code": null, "job_conclusion": "success", "run_status": "completed"},
+      "path": "/absolute/path/to/artifact.zip"
+    },
+    {"id": "repo-b-pr-202", "repository": "owner/repo-b", "context": {"pr": 202}, "reason": "artifact 已过期"}
+  ]
+}
+```
+
+逐对象输出报告文件哈希、套件和用例、计数、耗时、失败/错误/跳过明细及解析异常。Failsafe 汇总只交叉核对，不重复累加；参数化实例保留名称，无法区分的重复身份报冲突，重试异常保留在明细。任务不生成跨运行去重总计，也不输出验收 PASS。目录/ZIP 中非 Maven 明细 XML 不参与计数；仅支持无命名空间的 Maven testsuite/testsuites，不支持的格式显式披露。压缩文件在内存逐文件读取，限制文件数和大小，拒绝危险路径、符号链接和 XML DTD/实体。异常正文只做常见凭据脱敏且截断，写 Jira 前仍需人工可见内容审查，不复制全部原始报告。
+
+Agent 对照已确定应测清单核对报告完整性；没有清单时只能说“已取得报告的分析完成”。分析结束前再次回读任务成员和各 PR Head，变化的对象记待增量核对，保留已完成结果，不无限追赶。原始文件哈希只证明内容，`input_sha256` 只标识本轮输入，均不认证外部来源。`processing_complete` 表示每个清单对象都有结果或缺失原因，不等于报告完整、测试成功或任务完成。
+
+执行状态和报告计数分开解释：XML 无失败但命令非零、超时或取消时不得称为执行通过；CI 成功但缺报告仍是证据缺口。失败归因需有断言、异常和必要对照依据；跳过原因未记载就说明未知，先分析影响再按现有规则提交具体人工处置。用户接受风险不改写原始失败或跳过。通过现有 `quality.py verification`/`execute` 以 `report_ref`/`source_ref` 引用保存的分析文件，填写逐项真实计数和结果；脚本不自动生成 PASS 或用户接受决定。
+
+TapData 保留底层先合并、上层后合并的流程。本阶段跨仓消费版本只读取已有日志、构件或执行证据：有证据记录到 `dependency_observation`，没有则披露“实际消费版本未核实／跨仓组合尚未证明”，不新增门禁，不改现有验证规则。各 PR 分别通过不代表跨仓组合通过；底层合并后按已有流程分析上层新报告。本能力不补跑、不修改 CI、不推导用例缺口、不实现依赖失效传播。
+
 ## 后端工具链
 
 Tapdata 4.x 核心工程当前基线为 JDK 17。执行前记录：

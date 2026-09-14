@@ -25,6 +25,8 @@ PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_quality.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_issue_versions.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_jira_status.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_jira_watermark.py"
+PYTHONDONTWRITEBYTECODE=1 "$product_python" -m unittest discover \
+  -s "$repo_root/projects/tapdata/tests" -p 'test_maven*.py'
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$repo_root" \
   "$internal_python" -m unittest discover \
     -s "$repo_root/internal/tests" -p 'test_story_gate.py' -v
