@@ -6,7 +6,7 @@
 
 ## 1. 安装
 
-按[Git SSH 授权指引](security/git-ssh-access.md)确认访问权限后，执行以下命令。它使用默认安装位置、发布分支、Source Pool 和仓库供给方式：
+按[Git SSH 授权指引](security/git-ssh-access.md)确认访问权限后，执行以下命令。它使用默认安装位置和发布分支：
 
 ```sh
 (
@@ -35,12 +35,10 @@
     --branch main \
     --current-ref "$ao_ref"
 
-  python3 "$ao_home/bootstrap/repository_pool.py" \
-    --product-root "$ao_home" configure
 )
 ```
 
-成功后，产品安装在 `~/.agentic-ops`。默认 Source Pool 是 `~/.agentic-ops-repos`，使用 `auto-clone` 供给模式；无需把这些默认值写进命令。接管任务时，Agent 会按项目仓库目录受控下载缺失的业务仓库。
+成功后，产品安装在 `~/.agentic-ops`。接管时按完整工程 Profile 在工位 source 中准备独立业务仓库，不配置共享源码池。
 
 ## 2. 创建项目工作空间
 
@@ -51,7 +49,7 @@
   --workspace "$HOME/agenticops-tapdata"
 ```
 
-不传 `--agent` 时会接入全部可用 Agent，不传 `--repository-pool` 时会继承安装时的默认池。接着检查接线：
+不传 `--agent` 时会接入全部可用 Agent。接着检查接线：
 
 ```sh
 ~/.agentic-ops/agenticops doctor --workspace "$HOME/agenticops-tapdata"
@@ -76,14 +74,14 @@ cd "$HOME/agenticops-tapdata"
 接管 TAP-123。
 ```
 
-Agent 会先读取 Jira 和项目准入规则，登记仓库并准备本地任务 worktree，然后给出方案。方案、风险和实现授权需要你确认；事实、权限或门禁不明确时，它会停下并说明下一步。接管不是自动提交、推送或合并：这些操作仍需用户授权并受平台与服务端权限约束；Workflow 只在检查点核对确认和证据。
+Agent 会先读取 Jira 和项目准入规则，确认产品版本并接管完整 source 工程，随后登记修改仓，然后给出方案。方案、风险和实现授权需要你确认；事实、权限或门禁不明确时，它会停下并说明下一步。接管不是自动提交、推送或合并：这些操作仍需用户授权并受平台与服务端权限约束；Workflow 只在检查点核对确认和证据。
 
 ## 接下来可能需要
 
 - [Git SSH 安装](usage/git-ssh-install.md)：默认安装命令的独立说明。
 - [gh 一键安装](usage/gh-one-click-install.md)：无法使用 Git SSH 时的备用安装方式。
-- [自定义 Source Pool](usage/custom-source-pool.md)：复用现有业务仓库或改为手动供给。
-- [任务授权指引](usage/task-authorization.md)：用脚本从空任务列表接管 Jira 任务，再完成准入、基线和实施授权。
+- [工位源码与材料](usage/workspace-materials.md)：独立源码及清理后明确复用持久材料。
+- [任务授权指引](usage/task-authorization.md)：用脚本从空闲工位接管 Jira 任务，再完成准入、基线和实施授权。
 - [更新与回退](usage/update-and-rollback.md)：更新安装、修复工作空间接线或回退一次更新。
 - [常见问题](usage/faq.md)：安装失败、Hook、任务恢复和本地清理。
 

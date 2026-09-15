@@ -20,6 +20,12 @@ PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_repair_strate
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_failures.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_git_refs.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_engineering_baseline.py"
+PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_station_state.py"
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$repo_root" "$product_python" -m unittest internal.tests.test_workspace_recovery
+PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_station_resources.py"
+PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_station_source.py"
+PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_repository_recovery.py"
+PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_station_lifecycle.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_workspace_compatibility.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_checkpoints.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_quality.py"

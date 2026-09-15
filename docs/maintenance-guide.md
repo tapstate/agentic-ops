@@ -2,6 +2,21 @@
 
 不熟悉本文术语时，先查看[术语表](glossary.md)。
 
+## 旧版空工位的一次性恢复
+
+正常升级遵循[更新与回退](usage/update-and-rollback.md)。当指定旧版清理器无法处理自身缓存且绑定产品根已切换时，可由维护人员使用 `internal/workspace_recovery.py`；它不安装到使用工作面，不解析活动任务，也不修改旧 epoch 或复用历史授权。
+
+此工具仅支持产品提交 `25d0b2c66298b5c00eb961d2929116846e113681` 生成的 epoch 2、任务索引为空的 TapData 工位。其它版本、有任务、未知状态、改动接线或不可信目录均停止，不扩大为通用兼容工具。先停止该工位 Agent 和应用写入，再生成清单：
+
+```sh
+python3 internal/workspace_recovery.py plan --workspace <绝对工位路径> --product-root <绝对产品根> --backup <工位外同文件系统的新备份目录>
+python3 internal/workspace_recovery.py apply --backup <备份目录> --confirmed-digest <核验并确认的摘要> --writers-stopped
+```
+
+plan 固化工位身份、旧状态和接线指纹。apply 取得工位、旧状态及缓存锁，逐项回读后原子移出受管接线，最后整体移出已核验的旧状态目录。文件保存在备份中，不递归删除原材料；源码、配置、归档、其它用户文件及数据库不在处置范围内。秘密可能存在于旧配置，备份仅当前用户可访问，不提交或上传。符号链接按原目标字符串保存，备份不作为可直接运行的旧工位。
+
+中断后使用原摘要重试，通过原位置或备份位置的唯一匹配恢复；不覆盖已有备份或新工位。结果 exported 只表示导出成功，不表示新工位已可用。确认旧绑定已移出后，单独使用新版本原生 init/doctor 重建；若保留材料非空，按正常规则确认并使用 --reuse-materials。恢复旧现场需单独核验和授权，不能把备份直接覆盖到新工位。
+
 ## 1. 从零开始
 
 准备 Git、Python 3.9+ 和 uv：
@@ -12,9 +27,9 @@ cd agentic-ops
 ./agenticops setup
 ```
 
-克隆前先完成 [Git SSH 授权指引](security/git-ssh-access.md)，并确认账号有本仓库访问权。示例显式以 `develop` 作为维护基线；`setup` 会仅 fast-forward 同步该分支、安装本仓库维护依赖并接入受信 Git Hook。工作区有修改时会停止，不会覆盖修改。默认 Source Pool 是 `${product_root}-repos`，供给模式为 `auto-clone`；该目录不能与 Product Root 或项目工作空间互相嵌套，且必须可读、可写、可进入。
+克隆前先完成 [Git SSH 授权指引](security/git-ssh-access.md)，并确认账号有本仓库访问权。示例显式以 `develop` 作为维护基线；`setup` 会仅 fast-forward 同步该分支、安装本仓库维护依赖并接入受信 Git Hook。工作区有修改时会停止，不会覆盖修改。业务源码由独立工位的 source 管理，不写入产品根。
 
-默认 `auto-clone` 会在项目仓库映射和 Git SSH 权限允许时，由受控 `repository prepare` 下载缺失仓库。需要禁止自动下载时，显式使用 `--repository-provisioning manual`，并按 `<pool>/<owner>/<repo>` 预先准备洁净主工作树。配置保存于 `.local/repository-pool.json`；它是本机运行配置，不提交。已有项目工作空间会固化当时的池绑定，修改开发面默认值不会静默迁移它们。
+工位接管时按完整 Profile 下载缺失独立仓库；无权限或已有目录不洁净时停止对应准备。产品不再管理共享池或跨工位源码租约。
 
 `setup` 用于首次初始化维护工作面。之后在 `develop` 更新当前源码目录：
 
@@ -52,8 +67,6 @@ workspace="$HOME/agenticops-tapdata"
 ```text
 .local/
 ├── product.json              # source、仓库、develop 和最近生命周期同步提交
-├── repository-pool.json      # 默认 Source Pool 根目录和仓库供给模式
-├── repository-worktrees.json # 跨工作空间 worktree 租约
 ├── lifecycle.lock/           # 生命周期操作期间的临时互斥锁
 ├── venv/internal/            # 本仓库维护依赖
 ├── cache/                    # 缓存

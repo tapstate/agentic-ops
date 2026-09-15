@@ -49,7 +49,14 @@ def record_readback(base, task, payload):
         raise ValueError("回读来源含敏感内容，请脱敏")
     records = load(base, task)
     records[key] = record
-    task_store._write_json_atomic(state_path(base, task), {"issue_key": task["issue_key"], "run_id": task["run_id"], "fields": records})
+    with task_store.task_run_lock(base, task["issue_key"]):
+        current = task_store.check_expected_run(base, task["issue_key"], task["run_id"])
+        task_store.require_development(base, current)
+        if task.get("_revision") != current["_revision"]:
+            raise ValueError("工位 revision 已变化，拒绝过期字段回读")
+        if current.get("facts") != task.get("facts"):
+            raise ValueError("本地事实已变化，拒绝过期回读")
+        task_store._write_json_atomic(state_path(base, task), {"issue_key": task["issue_key"], "run_id": task["run_id"], "fields": records})
     return record
 
 
@@ -119,9 +126,10 @@ def main():
     try:
         issue = task_store.resolve_issue(args.dir, args.issue_key)
         with task_store.task_run_lock(args.dir, issue):
-            task = json.loads(task_store.task_path(args.dir, issue).read_text(encoding="utf-8"))
+            task = task_store.read_task(args.dir, issue)
             if args.command == "readback":
                 task_store.check_expected_run(args.dir, issue, args.expected_run_id)
+                task_store.require_development(args.dir, task)
                 if not args.input:
                     raise ValueError("readback 需要 --input")
                 result = record_readback(args.dir, task, json.loads(Path(args.input).read_text(encoding="utf-8")))

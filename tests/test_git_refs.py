@@ -14,12 +14,12 @@ from workflow import git_refs, source_sync
 
 
 class GitRefsTests(unittest.TestCase):
-    def identity(self, repository, remote, repository_id=None, source_pool_root=None):
+    def identity(self, repository, remote, repository_id=None, source_root=None):
         identity = {"repository_id": repository_id or str(Path(repository).resolve()), "remote": remote,
                     "origin": "github.test/a/repo.git", "repository_path": str(Path(repository).resolve()),
                     "git_common_dir": "/git"}
-        if source_pool_root:
-            identity["source_pool_root"] = str(Path(source_pool_root).resolve())
+        if source_root:
+            identity["source_root"] = str(Path(source_root).resolve())
         return "key", identity
 
     def test_per_scope_ttl_and_refresh(self):
@@ -89,14 +89,14 @@ class GitRefsTests(unittest.TestCase):
             self.assertEqual("cached", result["scopes"]["heads"]["freshness"])
             write.assert_not_called()
 
-    def test_repository_id_and_source_pool_are_part_of_cache_identity(self):
+    def test_repository_id_and_source_root_are_part_of_cache_identity(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / "cache.json"
             with mock.patch.object(git_refs, "repository_identity", wraps=git_refs.repository_identity) as identity, \
                     mock.patch.object(git_refs, "_query", return_value={"main": "a" * 40}):
                 identity.side_effect = self.identity
-                git_refs.snapshot("/repo", cache_file=cache, cache_root="/root", repository_id="owner/repo", source_pool_root="/pool-a", now=100)
-                other = git_refs.read_snapshot("/repo", cache_file=cache, cache_root="/root", repository_id="owner/repo", source_pool_root="/pool-b", now=101)
+                git_refs.snapshot("/repo", cache_file=cache, cache_root="/root", repository_id="owner/repo", source_root="/pool-a", now=100)
+                other = git_refs.read_snapshot("/repo", cache_file=cache, cache_root="/root", repository_id="owner/repo", source_root="/pool-b", now=101)
             self.assertEqual("stale", other["scopes"]["heads"]["freshness"])
 
     def test_roots_are_isolated_and_preserved(self):

@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workflow import failures, task_store
+from station_fixture import save_task as save_station_task
 
 
 class FailureTests(unittest.TestCase):
@@ -19,8 +20,8 @@ class FailureTests(unittest.TestCase):
         (self.base / ".agenticops/workspace.json").write_text(json.dumps({
             "schema_version": 1, "product_root": str(ROOT), "project": "tapdata", "agents": []}))
         self.task = {"issue_key": "DEMO-1", "run_id": "run-one", "repositories": [{"repository": "owner/repo"}]}
-        task_store._write_json_atomic(task_store.task_path(self.base, "DEMO-1"), self.task)
-        task_store.register(self.base, "DEMO-1", status="active")
+        save_station_task(self.base, self.task)
+
 
     def tearDown(self):
         self.temp.cleanup()

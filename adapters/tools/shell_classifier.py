@@ -85,17 +85,15 @@ def _dispatch(tokens):
     executor, _ = _executor_spec(executable)
     if executor and executor != "python":
         return [], {}
-    if executable == "agenticops" and "workspace" in tokens and any(
-        action in tokens for action in ("purge", "prefetch")
-    ):
+    if executable == "agenticops" and "workspace" in tokens and "purge" in tokens:
         return (
-            ["prefetch_project_repositories" if "prefetch" in tokens else "manage_repository_worktree", UNKNOWN],
+            ["manage_station", UNKNOWN],
             {},
         ) if len(
             workspaces := _argument_values(tokens, "--workspace")
         ) > 1 or any(item.split("=", 1)[0] not in ("--all", "--yes", "--workspace")
                      for item in tokens if item.startswith("-")) else (
-            ["prefetch_project_repositories" if "prefetch" in tokens else "manage_repository_worktree"],
+            ["manage_station"],
             {"workspace": workspaces[0] if workspaces else ""},
         )
     return _workflow(tokens)
@@ -137,7 +135,7 @@ def _workflow(tokens):
     if index >= len(tokens):
         return [], {}
     normalized = tokens[index].replace("\\", "/")
-    script = next((name for name in ("task.py", "repository_worktree.py")
+    script = next((name for name in ("task.py",)
                    if normalized == "workflow/" + name or normalized.endswith("/workflow/" + name)), None)
     if executor == "python" and not script:
         return [], {}
@@ -147,22 +145,10 @@ def _workflow(tokens):
 def _workflow_action(script, arguments):
     if not script or any(item in ("-h", "--help") for item in arguments):
         return [], {}
-    if script == "repository_worktree.py":
-        operation = (
-            "prefetch_project_repositories" if "prefetch" in arguments else
-            "manage_repository_worktree" if any(action in arguments
-                                                 for action in ("prepare", "cleanup")) else None
-        )
-    elif "purge" in arguments:
-        operation = "delete_task_state"
-    elif "repository" in arguments and "prepare" in arguments:
-        operation = (
-            "manage_repository_worktree"
-            if "--reuse-existing-branch" in arguments
-            else "prepare_task_repository"
-        )
-    elif "repository" in arguments and "cleanup" in arguments:
-        operation = "manage_repository_worktree"
+    if arguments and arguments[0] in ("takeover", "archive", "release", "clean", "cleanup-amend"):
+        operation = "manage_station"
+    elif arguments[:2] == ["repository", "add"]:
+        operation = "scope_change"
     else:
         operation = None
     if not operation:

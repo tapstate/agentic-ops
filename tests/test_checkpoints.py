@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "bootstrap"))
 from workflow import authorization, jira_status, task, task_store
+from station_fixture import save_task as save_station_task
 from agent_registry import discover
 from render import check_checkpoint_migration
 from workspace_paths import WorkspaceDirectory
@@ -34,19 +35,22 @@ class CheckpointTests(unittest.TestCase):
         self.state = {"issue_key": "TAP-123", "run_id": "run-0123456789ab", "task_class": "technical_task",
                       "stage": "waiting_takeover", "facts": {}, "repositories": [], "pending": None, "history": []}
         self.save()
-        task_store.register(self.base, "TAP-123")
+
         self.q1_digest = mock.patch.object(authorization.quality, "q1_digest", return_value="fixture-q1-digest")
         self.q2_digest = mock.patch.object(authorization.quality, "q2_digest", return_value="fixture-q2-digest")
         self.q1_digest.start()
         self.q2_digest.start()
         self.addCleanup(self.q1_digest.stop)
         self.addCleanup(self.q2_digest.stop)
+        completion = mock.patch("workflow.station.completion_proof", return_value={"verified": True})
+        completion.start()
+        self.addCleanup(completion.stop)
 
     def save(self):
-        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.state)
+        save_station_task(self.base, self.state)
 
     def read(self):
-        return json.loads(task_store.task_path(self.base, "TAP-123").read_text())
+        return task_store.read_task(self.base, "TAP-123")
 
     def args(self, **kwargs):
         values = dict(dir=str(self.base), issue_key="TAP-123", expected_run_id=self.state["run_id"],
@@ -76,31 +80,31 @@ class CheckpointTests(unittest.TestCase):
 
     def test_completion_state_write_failure_does_not_revoke_confirmation(self):
         record = self.confirmation()
+        before = self.read()
         with mock.patch.object(task.quality, "advance_problems", return_value=[]), \
                 mock.patch.object(task, "save", side_effect=OSError("state write failed")):
             with self.assertRaises(OSError):
                 task.cmd_advance(self.args())
-        self.assertEqual(self.read(), self.state)
+        self.assertEqual(self.read(), before)
         self.assertEqual(json.loads(self.auth_path.read_text()), record)
         with mock.patch.object(task.quality, "advance_problems", return_value=[]):
             self.assertEqual(task.cmd_advance(self.args()), 0)
 
     def test_completion_retry_finishes_each_partial_write_without_rechecking(self):
-        for module, name in ((task, "revoke_authorization"), (task_store, "set_status")):
+        for module, name in ((task, "revoke_authorization"),):
             with self.subTest(failed_write=name):
                 self.confirmation()
-                task_store.set_status(self.base, "TAP-123", "active")
                 with mock.patch.object(task.quality, "advance_problems", return_value=[]), \
                         mock.patch.object(module, name, side_effect=OSError("interrupted")):
                     with self.assertRaises(OSError):
                         task.cmd_advance(self.args())
                 self.assertEqual(self.read()["stage"], "completed")
-                self.assertEqual(task_store.task_status(self.base, "TAP-123"), "active")
+                self.assertEqual(self.read()["outcome"], "completed")
                 with mock.patch.object(task, "_check_advance", side_effect=AssertionError("must not recheck")):
                     self.assertEqual(task.cmd_advance(self.args()), 0)
-                    before = self.auth_path.read_bytes(), self.read(), task_store.registry_path(self.base).read_bytes()
+                    before = self.auth_path.read_bytes(), self.read(), task_store.current_path(self.base).read_bytes()
                     self.assertEqual(task.cmd_advance(self.args()), 0)
-                    self.assertEqual(before, (self.auth_path.read_bytes(), self.read(), task_store.registry_path(self.base).read_bytes()))
+                    self.assertEqual(before, (self.auth_path.read_bytes(), self.read(), task_store.current_path(self.base).read_bytes()))
                 self.assertEqual(task_store.task_status(self.base, "TAP-123"), "completed")
                 self.assertEqual(len(self.read()["history"]), 1)
                 with self.assertRaises(ValueError):
@@ -122,20 +126,20 @@ class CheckpointTests(unittest.TestCase):
             self.assertEqual(task.cmd_advance(self.args()), 0)
 
     def test_renewal_rejects_changed_plan_repository_run_and_revoked_record(self):
-        for change in ("plan", "scope", "base", "endpoint", "run", "revoked", "legacy", "completed", "inactive"):
+        for change in ("plan", "scope", "base", "endpoint", "run", "revoked", "legacy", "completed", "archived"):
             with self.subTest(change=change):
-                task_store.set_status(self.base, "TAP-123", "active")
+                self.state.update(outcome="in_progress", archive_ref=None)
                 record = self.confirmation(expired=True)
                 args = self.renewal(record)
                 if change == "plan": self.state["facts"]["fix_plan"] = "changed"
                 elif change in ("scope", "base", "endpoint"):
                     field = {"scope": "approved_scope", "base": "base_sha", "endpoint": "authorized_endpoint"}[change]
-                    self.state["repositories"][0][field] = "changed"
+                    self.state["repositories"][0][field] = "b" * 40 if change == "base" else "changed"
                 elif change == "run": self.state["run_id"] = "run-fedcba987654"
                 elif change == "revoked": record["status"] = "revoked"
                 elif change == "legacy": record.pop("approved_plan_digest")
                 elif change == "completed": self.state["stage"] = "completed"
-                else: task_store.set_status(self.base, "TAP-123", "inactive")
+                else: self.state["archive_ref"] = {"path": "archive/fixture", "digest": "a" * 64}
                 self.save()
                 task_store._write_json_atomic(self.auth_path, record)
                 args.expected_authorization_digest = authorization.record_digest(record)
@@ -238,9 +242,10 @@ class CheckpointTests(unittest.TestCase):
         commands = [
             (task.cmd_record, dict(key="anything", value="value", force=True)),
             (task.cmd_block, dict(reason="old request")),
-            (task.cmd_repository_add, {}), (task.cmd_repository_record, {}),
-            (task.cmd_repository_prepare, {}), (task.cmd_repository_cleanup, {}),
-            (task.cmd_activate, {}), (task.cmd_deactivate, {}),
+            (task.cmd_repository_add, dict(expected_revision=self.read()["_revision"], operation_id="op-stale",
+                 repo="tapdata/tapdata", work_branch="fix/stale", base_branch="develop", scope="fixture", verification="test",
+                 expected_head=None, historical_base=None)),
+            (task.cmd_repository_record, {}),
             (authorization.cmd_grant, {}), (authorization.cmd_revoke, {}),
         ]
         before = self.read()

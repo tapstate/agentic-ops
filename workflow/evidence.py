@@ -218,15 +218,14 @@ def main():
 
     try:
         task_store.workspace_project(args.dir)
-        task_store.migrate_legacy(args.dir)
         issue = task_store.resolve_issue(args.dir, args.issue_key)
     except ValueError as error:
         print("错误：%s" % error, file=sys.stderr)
         return 2
     try:
         task_dir = task_store.task_directory(args.dir, issue)
-        task = load_json(task_store.task_path(args.dir, issue))
-        auth = load_json(task_dir / "authorization.json")
+        task = task_store.read_task(args.dir, issue)
+        auth = load_json(task_store.authorization_path(args.dir, issue))
         events = load_events(task_dir / "events.jsonl")
         ci_states = ci.current_states(args.dir, task)
         spec = project_rules.load_admission(workspace=args.dir)

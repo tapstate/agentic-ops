@@ -83,7 +83,7 @@ def classify(checks):
 
 
 def identity(base, issue, repo, pr):
-    task = json.loads(task_store.task_path(base, issue).read_text(encoding="utf-8"))
+    task = task_store.read_task(base, issue)
     known = [r["repository"] for r in task.get("repositories", [])]
     if repo is None and len(known) == 1:
         repo = known[0]
@@ -254,7 +254,6 @@ def main():
     args = parser.parse_args()
     try:
         task_store.workspace_project(args.dir)
-        task_store.migrate_legacy(args.dir)
         return args.func(args)
     except (ValueError, OSError) as error:
         print("错误：%s" % error, file=sys.stderr)

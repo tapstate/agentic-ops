@@ -38,7 +38,12 @@ def load_state(base, task):
 
 
 def save_state(base, task, state):
-    task_store._write_json_atomic(state_path(base, task), state)
+    with task_store.task_run_lock(base, task["issue_key"]):
+        current = task_store.check_expected_run(base, task["issue_key"], task["run_id"])
+        task_store.require_development(base, current)
+        if task.get("_revision") != current["_revision"]:
+            raise ValueError("工位 revision 已变化，拒绝过期 Jira 状态回执")
+        task_store._write_json_atomic(state_path(base, task), state)
 
 
 def config(base, task):
@@ -198,7 +203,7 @@ def guidance_for(fields, rules, task):
 
 
 def prepare(base, issue_key, trigger, snapshot):
-    task = json.loads(task_store.task_path(base, issue_key).read_text(encoding="utf-8"))
+    task = task_store.read_task(base, issue_key)
     rules = config(base, task)
     rule = rules.get("attempts", {}).get(trigger)
     if not isinstance(rule, dict):
@@ -295,7 +300,7 @@ def prepare_transition(record, snapshot, fields, rule, rules, task):
 
 
 def complete(base, issue_key, trigger, outcome, snapshot, message):
-    task = json.loads(task_store.task_path(base, issue_key).read_text(encoding="utf-8"))
+    task = task_store.read_task(base, issue_key)
     state = load_state(base, task)
     record = state["attempts"].get(trigger)
     if not record or record.get("outcome") not in ("ready", "unknown", "failed"):
@@ -341,12 +346,12 @@ def main():
     args = parser.parse_args()
     try:
         task_store.workspace_project(args.dir)
-        issue = task_store.resolve_active_issue(args.dir, args.issue_key)
+        issue = task_store.resolve_issue(args.dir, args.issue_key)
         with task_store.task_run_lock(args.dir, issue):
-            task_store.resolve_active_issue(args.dir, issue)
-            task = json.loads(task_store.task_path(args.dir, issue).read_text(encoding="utf-8"))
+            task = task_store.read_task(args.dir, issue)
             if args.command != "status":
                 task_store.check_expected_run(args.dir, issue, args.expected_run_id)
+                task_store.require_development(args.dir, task)
             if args.command == "prepare":
                 result = prepare(args.dir, issue, args.trigger, read_input(args.input))
             elif args.command == "complete":

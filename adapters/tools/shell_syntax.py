@@ -125,7 +125,7 @@ def _controlled_token(token):
     return (
         executable in {"agenticops", "gh", "git"}
         or executable.startswith("python")
-        or normalized.endswith(("/workflow/task.py", "/workflow/repository_worktree.py"))
+        or normalized.endswith("/workflow/task.py")
     )
 
 

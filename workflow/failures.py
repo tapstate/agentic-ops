@@ -169,7 +169,7 @@ def main():
             result = apply(args.dir, issue, args.expected_run_id, args.revision,
                            json.loads(Path(args.input).read_text()))
         else:
-            task = json.loads(task_store.task_path(args.dir, issue).read_text())
+            task = task_store.read_task(args.dir, issue)
             state, problems = load(args.dir, task)
             result = dict(state, problems=problems)
         print(json.dumps(result, ensure_ascii=False, indent=2))

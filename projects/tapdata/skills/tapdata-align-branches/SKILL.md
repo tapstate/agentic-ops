@@ -11,12 +11,12 @@ metadata:
 
 `show` 是不改工作树的分析能力。默认通过通用 `workflow/git_refs.py snapshot` 读取单仓库 GitHub refs 缓存；首次加载、缓存超过阈值或显式刷新时才顺序刷新当前需要的仓库。它不会 checkout、切换、合并、提交、推送或改动工作树文件。需要 PluginKit 时，脚本按已核验的主仓 SHA 优先读取已有本地对象；对象不存在时只在临时 Git 对象库中获取并核对远端分支，不写入 TapData 模块仓库。
 
-`apply` 用于把用户明确指定的 TapData 模块根目录同步到已经确认的 `show` 计划。它不是任务 worktree 的准备入口，不能替代 `task.py repository prepare`。
+`apply` 用于把用户明确指定的 TapData 模块根目录同步到已经确认的 `show` 计划。它不是任务接管入口，不能替代 task.py takeover；已占用工位不可通过 apply 改变冻结基线，应只读 show。
 
 若外部调用方只需快速分析，应使用带缓存的 `snapshot`；若操作前必须取得当前远端的精确 head 事实，应使用无缓存的 `probe`：
 
 ```sh
-# 带缓存：缓存属于工作空间，不写入 Product Root 或 Source Pool
+# 带缓存：缓存属于工作空间，不写入 Product Root 或其它工位
 python3 <agenticops-root>/workflow/git_refs.py snapshot \
   --repository <git-root> --scope heads \
   --repository-id <owner>/<repo> \
@@ -48,16 +48,16 @@ python3 <agenticops-root>/projects/tapdata/scripts/align_branches.py \
 
 `apply` 必须显式提供 `--tapdata-root`，不允许从工作空间绑定、当前目录或用户主目录猜测写入目标。计划摘要同时绑定规范化模块根目录、仓库路径、处理范围、当前状态和目标状态，不能跨另一套目录或范围复用。它始终重新核验远端 refs；任何绑定事实导致摘要变化时停止并要求重新查看、确认。指定 `--repository` 时只应用主仓和明确列出的仓库；未指定时应用本地已接入且参与分支关系的仓库。
 
-`--tapdata-root` 必须直接包含主仓 `<tapdata-root>/tapdata`；它不是通用 Source Pool，也不是 `tapdata/tapdata` 主仓目录。默认缓存写入当前工作空间的 `<workspace>/.agenticops/git-ref-cache-v2.json`，以规范化绝对 `<tapdata-root>` 分区，再按 `<owner>/<repo> + canonical origin + scope` 映射；不写入 Product Root 或 Source Pool。旧 `git-ref-cache-v1.json` 由用户自行处理，现役路径不读取、迁移或删除它。脱离工作空间运行时，必须显式传入 `--cache-file`。目录中其它已登记仓库可尚未接入。`--repository` 可重复，表示本次必须核验的任务目标仓库；主仓始终必需。省略它时输出完整目录诊断，但不把全部仓库变成前置条件。
+`--tapdata-root` 必须直接包含主仓 `<tapdata-root>/tapdata`；它不是产品根，也不是 `tapdata/tapdata` 主仓目录。默认缓存写入当前工作空间的 `<workspace>/.agenticops/git-ref-cache-v2.json`，以规范化绝对 `<tapdata-root>` 分区，再按 `<owner>/<repo> + canonical origin + scope` 映射；不写入 Product Root 或其它工位。旧 `git-ref-cache-v1.json` 由用户自行处理，现役路径不读取、迁移或删除它。脱离工作空间运行时，必须显式传入 `--cache-file`。目录中其它已登记仓库可尚未接入。`--repository` 可重复，表示本次必须核验的任务目标仓库；主仓始终必需。省略它时输出完整目录诊断，但不把全部仓库变成前置条件。
 
 省略 `--tapdata-root` 时，脚本按以下顺序解析 TapData 模块根目录：
 
-1. 从当前执行路径向上找到最近的 `.agenticops/workspace.json`，使用其中的 `repository_pool.root/tapdata`。
+1. 从当前执行路径向上找到最近的 `.agenticops/workspace.json`，使用该工位的 `source/tapdata`。
 2. 未找到工作空间绑定时，使用当前执行目录。
 
 因此 `$tapdata-align-branches release-v4.21.0` 必须被执行为上述 `show --version release-v4.21.0`，不能映射为 `--home $HOME`。如果最终目录不含主仓 `<tapdata-root>/tapdata`，脚本应立即报错停止；不得先把它当作 IDEA 平铺多仓目录，也不得扫描用户主目录。
 
-工作空间的全局 Source Pool 仍采用 `<pool>/tapdata/<repository>` 布局；本工具将其解析为 `<pool>/tapdata` 后再处理。若主仓缺失，脚本在任何远端刷新前停止；若显式指定仓库缺失，结果为 `blocked`。未指定的缺失仓库以 `not_covered` 报告，不阻断其它仓库。输出包含本地状态、目标分支、目标 SHA、推导理由和目标状态；`unchanged` 表示不参与关系推导，而非对本地工作树采取操作。
+工作空间固定源码位于 source/tapdata/<repository>。若主仓缺失，脚本在任何远端刷新前停止；若显式指定仓库缺失，结果为 `blocked`。未指定的缺失仓库以 `not_covered` 报告，不阻断其它仓库。输出包含本地状态、目标分支、目标 SHA、推导理由和目标状态；`unchanged` 表示不参与关系推导，而非对本地工作树采取操作。
 
 ## 刷新策略与进度
 
@@ -79,7 +79,7 @@ JSON 顶层的 `outcome` 为 `complete`、`partial` 或 `blocked`，`scope` 说�
 - `main`、`develop`、严格格式的 `release-vX.Y.Z` 使用项目已确认规则；带 `release-v` 前缀但格式不合法的名称直接拒绝。
 - 功能分支先在配置列出的仓库找完全同名分支，绝不按 Jira 号模糊猜测。
 - `common-lib`、`connectors`、`connectors-enterprise` 找不到同名分支时，从主仓该功能分支的 PluginKit 读取**精确** `release-vX.Y.Z`；目标分支不存在即 `unresolved`，绝不自动升到更高 release，也不再走 Tag 回退。
-- 其余配置为 Tag 回退的仓库，使用主仓功能分支 first-parent 最近的产品 Tag：`X.Y.Z-dev` 推导 `develop`，`X.Y.Z` 推导 `release-vX.Y.Z`；Tag 图必须已由受控 Source Pool 刷新流程同步，`show` 不会为此修改模块仓库。缺少本地 Tag 图或目标分支不存在即 `unresolved`；显式 `apply` 只获取已经解析出的目标分支。
-- 文档仓库被显式标记为 `unchanged`；不参与功能分支推导。
+- 其余配置为 Tag 回退的仓库，使用主仓功能分支 first-parent 最近的产品 Tag：`X.Y.Z-dev` 推导 `develop`，`X.Y.Z` 推导 `release-vX.Y.Z`；Tag 图必须已由当前原生 Git 获取流程同步，`show` 不会为此修改模块仓库。缺少本地 Tag 图或目标分支不存在即 `unresolved`；显式 `apply` 只获取已经解析出的目标分支。
+- docs/docs-en 不在活动目录；t-layer3-test 是可选验证依赖。
 
 分析结果是分支事实；只有携带匹配 `plan_digest` 的显式 `apply` 才允许同步该用户开发环境。二者都不授权提交、推送、PR、合并或发布。

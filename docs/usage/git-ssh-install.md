@@ -21,9 +21,7 @@
     --product-root "$ao_install_root" write \
     --mode installed --repository git@github.com:tapstate/agentic-ops.git \
     --branch main --current-ref "$ao_current_ref"
-  python3 "$ao_install_root/bootstrap/repository_pool.py" \
-    --product-root "$ao_install_root" configure
 )
 ```
 
-这会使用同一组默认值：安装到 `~/.agentic-ops`、默认 Source Pool 为 `~/.agentic-ops-repos`、供给模式为 `auto-clone`。需要指定 Pool 或改为手动供给时，先阅读[自定义 Source Pool](custom-source-pool.md)。
+产品默认安装到 `~/.agentic-ops`；完整工程在任务接管时于工位 source 中准备。持久材料复用见[工位源码与材料](workspace-materials.md)。

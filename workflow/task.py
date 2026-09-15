@@ -1,37 +1,5 @@
 #!/usr/bin/env python3
-"""AgenticOps 项目工作空间任务工具：归一管理多个可并行激活的任务。
-
-阶段（简化自 agentic-ops stages.yaml）：
-  waiting_takeover -> task_intake -> design_review -> implementation
-  -> pr_review -> ci_validation -> completed
-
-硬约束（全部由本工具执行，不依赖 agent 自觉）：
-  - 只能推进到相邻的下一阶段（不可跳跃、不可回退；重做用 reset）。
-  - 离开 task_intake 必须集齐当前 Project admission.json 中该任务类型的
-    必填 fact；recorded_decision 类型改为披露缺项并在质量检查点记录处置。
-  - 进入 implementation 必须存在有效的 task_execution 授权（workflow/authorization.py 签发），
-    且授权 issue_key 与任务一致。
-  - 离开 implementation 必须记录 verification，且不得命中 admission.json
-    verification_rules 的禁止模式；recorded_decision 类型由 quality.py 的用户处置替代文本门禁。
-  - 每次推进必须 --note 说明推进依据（人工节点的确认内容）。
-
-用法：
-  python3 workflow/task.py init --issue-key TAP-123 --task-class defect_fix [--dir .]
-  python3 workflow/task.py list [--dir .]
-  python3 workflow/task.py checklist --issue-key TAP-123 [--json]
-  python3 workflow/task.py branch --repo tapdata/tapdata      # 查表解析分支，禁止猜测
-  python3 workflow/task.py repository context --issue-key TAP-123 --json
-  python3 workflow/task.py record --issue-key TAP-123 --expected-run-id <当前-run-id> --key problem_branch --value develop
-  python3 workflow/task.py advance --issue-key TAP-123 --expected-run-id <当前-run-id> \
-    --expected-stage task_intake --note "准入三项必填齐备，见 Jira 评论"
-  python3 workflow/task.py block --issue-key TAP-123 --expected-run-id <当前-run-id> --reason "缺问题版本，已写补卡评论"
-  python3 workflow/task.py status --issue-key TAP-123
-  python3 workflow/task.py interaction-path --issue-key TAP-123 --expected-run-id <当前-run-id> \
-    --name jira-snapshot.json
-  python3 workflow/task.py reset --issue-key TAP-123 --expected-run-id <当前-run-id> \
-    --stage design_review --note "计划实质变更，重新确认"
-  python3 workflow/task.py purge --issue-key TAP-123 --expected-run-id <当前-run-id> --yes
-"""
+"""单任务研发工位：takeover/archive/release/clean 及确定性任务检查点。"""
 from __future__ import annotations
 
 import argparse
@@ -44,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from gate import engine  # noqa: E402
-from workflow import authorization, issue_versions, jira_watermark, project_rules, quality, repair_strategy, repository_worktree, task_store  # noqa: E402
+from workflow import authorization, issue_versions, jira_watermark, project_rules, quality, repair_strategy, station_source, task_store  # noqa: E402
 
 STAGES = [
     "waiting_takeover",
@@ -73,22 +41,11 @@ def resolve_issue(base, issue_key=None):
 
 
 def load(base, issue_key=None):
-    issue = resolve_issue(base, issue_key)
-    path = task_store.task_path(base, issue)
-    if not path.is_file():
-        return None
-    with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+    return task_store.read_task(base, issue_key)
 
 
 def save(base, task):
-    path = task_store.task_path(base, task["issue_key"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(".%s.%s.tmp" % (path.name, os.getpid()))
-    temporary.write_text(
-        json.dumps(task, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
-    os.replace(str(temporary), str(path))
+    task_store.write_task(base, task)
 
 
 def revoke_authorization(base, issue_key, reason):
@@ -108,103 +65,90 @@ def revoke_authorization(base, issue_key, reason):
     os.replace(str(temporary), str(path))
 
 
-def activation_conflicts(base, task):
-    conflicts = []
-    for other_issue in task_store.registered_issues(base, statuses=("active",)):
-        if other_issue == task["issue_key"]:
-            continue
-        path = task_store.task_path(base, other_issue)
-        if not path.is_file():
-            continue
-        other = json.loads(path.read_text(encoding="utf-8"))
-        other_bindings = {
-            (item.get("repository"), item.get("work_branch"))
-            for item in other.get("repositories", [])
-        }
-        for item in task.get("repositories", []):
-            binding = (item.get("repository"), item.get("work_branch"))
-            if binding in other_bindings:
-                conflicts.append("%s:%s（与 %s 冲突）" % (binding[0], binding[1], other_issue))
-    return conflicts
-
-
 def require(base, issue_key=None):
-    issue = task_store.resolve_active_issue(base, issue_key)
+    issue = task_store.resolve_issue(base, issue_key)
     task = load(base, issue)
     if task is None:
-        print("错误：没有任务状态（先执行 task.py init）", file=sys.stderr)
+        print("错误：没有任务状态（先执行 task.py takeover）", file=sys.stderr)
         sys.exit(2)
     return task
 
 
-def cmd_init(args):
-    try:
-        issue = task_store.validate_issue_key(args.issue_key)
-        project_rules.validate_project_issue(profile(args.dir), issue)
-        spec = admission(args.dir)
-    except ValueError as error:
-        print("错误：%s" % error, file=sys.stderr)
-        return 2
-    task_classes = tuple(sorted(spec["task_classes"]))
-    if args.task_class not in task_classes:
-        print("错误：task-class 必须是 %s 之一" % "/".join(task_classes), file=sys.stderr)
-        return 2
-    try:
-        with task_store.task_run_lock(args.dir, issue):
-            existing_path = task_store.task_path(args.dir, issue)
-            existing = None
-            if existing_path.is_file():
-                existing = json.loads(existing_path.read_text(encoding="utf-8"))
-            if existing and not args.force:
-                if existing.get("stage") == "completed":
-                    print(
-                        "错误：任务已完成，不能通过 init 重新激活；确需重开请先确认并使用 reset",
-                        file=sys.stderr,
-                    )
-                    return 2
-                prepared = [
-                    item.get("repository")
-                    for item in existing.get("repositories", [])
-                    if (item.get("worktree") or {}).get("status") == "prepared"
-                ]
-                print(
-                    "任务已被接管：%s（阶段 %s，run=%s）"
-                    % (existing.get("issue_key"), existing.get("stage"), existing.get("run_id")),
-                    file=sys.stderr,
-                )
-                if prepared:
-                    print("当前 run 已有 worktree：%s" % "、".join(prepared), file=sys.stderr)
-                print(
-                    "请选择：继续现有 run 请执行 task.py activate --issue-key %s；"
-                    "清理重做请先执行 repository cleanup，再显式执行 reset "
-                    "--expected-run-id %s。未做选择，状态未改变。"
-                    % (issue, existing.get("run_id")),
-                    file=sys.stderr,
-                )
-                return 3
-            if existing and args.force:
-                print(
-                    "错误：禁止覆盖已有任务状态；请先清理当前 run，再使用 reset 保留历史并重新授权",
-                    file=sys.stderr,
-                )
-                return 2
-            task = {
-                "issue_key": issue,
-                "run_id": "run-" + uuid.uuid4().hex[:12],
-                "task_class": args.task_class,
-                "stage": STAGES[0],
-                "facts": {},
-                "repositories": [],
-                "pending": None,
-                "history": [{"ts": now(), "event": "init", "stage": STAGES[0]}],
-            }
-            save(args.dir, task)
-            task_store.register(args.dir, issue, status="active")
-    except ValueError as error:
-        print("错误：%s" % error, file=sys.stderr)
-        return 2
-    print("任务已初始化并激活：%s（%s），阶段 %s" % (issue, args.task_class, STAGES[0]))
-    _print_next(task)
+def cmd_takeover(args):
+    from workflow import station
+    overrides = {}
+    for value in args.explicit_branch:
+        if "=" not in value:
+            raise ValueError("显式分支格式为 repository=branch")
+        name, branch = value.split("=", 1)
+        if name in overrides:
+            raise ValueError("重复显式分支")
+        overrides[name] = branch
+    request = {"issue_key": args.issue_key, "task_class": args.task_class, "version": args.version,
+               "profile": args.profile, "optional_repositories": args.optional_repository,
+               "explicit_branches": overrides}
+    if args.continuation_input:
+        request["continuations"] = json.loads(Path(args.continuation_input).read_text(encoding="utf-8"))
+    print(json.dumps(station.takeover(args.dir, request, args.operation_id, args.expected_revision), ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_lifecycle(args):
+    from workflow import station
+    request = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    print(json.dumps(station.execute(args.dir, args.cmd, args.issue_key, args.expected_run_id,
+                                    args.expected_revision, args.operation_id, request), ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_cleanup_plan(args):
+    from workflow import station_resources, station_source, station_operation, engineering_baseline
+    with task_store.task_state_lock(args.dir):
+        task = task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
+        result = station_resources.plan(args.dir, task)
+        operation = station_operation.read(args.dir)
+        result["plan_revision"] = len(operation.get("plan_revisions", [])) if operation else 0
+        if task.get("engineering_baseline", {}).get("status") == "frozen":
+            result["candidate_digest"] = engineering_baseline.digest(station_source.inspect(args.dir, task["engineering_baseline"]))
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_cleanup_amend(args):
+    from workflow import station
+    request = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    request["expected_plan_revision"] = args.expected_plan_revision
+    print(json.dumps(station.amend_cleanup(args.dir, args.issue_key, args.expected_run_id,
+        args.expected_revision, args.operation_id, args.expected_plan_digest, request), ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_repository_add(args):
+    from workflow import station
+    issue = task_store.resolve_issue(args.dir, args.issue_key)
+    print(json.dumps(station.scope_change(args.dir, issue, args.expected_run_id,
+        args.expected_revision, args.operation_id, args.repo, args.work_branch,
+        args.base_branch, [args.scope], args.verification, args.expected_head), ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_repository_list(args):
+    print(json.dumps(load(args.dir, args.issue_key)["task_repositories"], ensure_ascii=False, indent=2))
+    return 0
+
+
+def repository_context(base, task):
+    from workflow import station_operation
+    return {"issue_key": task["issue_key"], "run_id": task["run_id"], "revision": task["_revision"],
+            "operation": station_operation.read(base),
+            "workspace": str(Path(base).resolve()), "engineering_baseline": task["engineering_baseline"],
+            "task_repositories": task["task_repositories"],
+            "repositories": task.get("repositories", []),
+            "paths": {name: str(Path(base).resolve() / name) for name in ("source", "config", "runtime", "archive")}}
+
+
+def cmd_repository_context(args):
+    print(json.dumps(repository_context(args.dir, load(args.dir, args.issue_key)), ensure_ascii=False, indent=2))
     return 0
 
 
@@ -364,11 +308,12 @@ def cmd_repair_strategy_clear(args):
 def cmd_issue_versions(args):
     with task_store.task_run_lock(args.dir, args.issue_key):
         task = require(args.dir, args.issue_key)
+        task_store.require_development(args.dir, task)
         if task["run_id"] != args.expected_run_id:
             raise ValueError("任务 run 已变化，拒绝旧的影响版本规划")
         prepared = any(r.get("base_sha") for r in task.get("repositories", []))
         if task["stage"] not in ("waiting_takeover", "task_intake", "design_review"):
-            raise ValueError("已固化版本规划或已进入实现；先受控 cleanup/reset，再调整修复线并重新授权")
+            raise ValueError("已固化版本规划或已进入实现；先归档并受控 clean，再按新修复线 takeover")
         try:
             payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
         except (OSError, ValueError) as error:
@@ -380,11 +325,11 @@ def cmd_issue_versions(args):
             # resolve 已核验当前目标分支证据；冻结基线独立按受控工作树验证，
             # 不要求历史开发起点等于当前远端 Head，也不改写该起点。
             try:
-                repository_worktree.task_roots(args.dir, task["issue_key"])
+                station_source.inspect(args.dir, task["engineering_baseline"])
             except ValueError as error:
                 problems.append("已准备开发基线无效：%s" % error)
             if problems:
-                raise ValueError("；".join(problems) + "；先 cleanup/reset 再准备正确基线")
+                raise ValueError("；".join(problems) + "；先归档并 clean，再 takeover 准备正确基线")
         if project_rules.scan_sensitive(admission(args.dir), json.dumps(plan, ensure_ascii=False)):
             raise ValueError("影响版本输入含敏感内容，脱敏后再提交")
         task["facts"][issue_versions.FACT] = plan
@@ -394,191 +339,6 @@ def cmd_issue_versions(args):
         revoke_authorization(args.dir, task["issue_key"], "issue_versions_changed")
         save(args.dir, task)
     print(json.dumps(plan, ensure_ascii=False, indent=2))
-    return 0
-
-
-@task_store.task_mutation
-def cmd_repository_add(args):
-    task = require(args.dir, args.issue_key)
-    current_profile = profile(args.dir)
-    try:
-        branches = project_rules.resolve_branches(current_profile, args.repo)
-    except LookupError as exc:
-        print("错误：%s" % exc, file=sys.stderr)
-        return 2
-    if any(item.get("repository") == args.repo for item in task.get("repositories", [])):
-        print("错误：仓库已加入当前任务：%s" % args.repo, file=sys.stderr)
-        return 2
-    for other_issue in task_store.registered_issues(args.dir, statuses=("active",)):
-        if other_issue == task["issue_key"]:
-            continue
-        other_path = task_store.task_path(args.dir, other_issue)
-        if not other_path.is_file():
-            continue
-        other = json.loads(other_path.read_text(encoding="utf-8"))
-        if any(
-            item.get("repository") == args.repo
-            and item.get("work_branch") == args.work_branch
-            for item in other.get("repositories", [])
-        ):
-            print(
-                "错误：激活任务 %s 已绑定相同仓库和工作分支，无法唯一解析门禁上下文"
-                % other_issue,
-                file=sys.stderr,
-            )
-            return 2
-    base_branch = args.base_branch or branches.get("baseline_branch")
-    version_rules = issue_versions.rules(args.dir, task)
-    version_plan = task.get("facts", {}).get(issue_versions.FACT)
-    if version_rules and isinstance(version_plan, dict):
-        primary = version_plan["primary_branch"]
-        if args.repo == version_rules["product_repository"]:
-            if args.base_branch and args.base_branch != primary:
-                raise ValueError("主仓只能使用本次唯一修复线：%s" % primary)
-            base_branch = primary
-        elif primary != version_rules["preferred_branch"] and not args.base_branch:
-            raise ValueError("非优先修复线的模块仓库必须先做产品分支对齐，再显式传 --base-branch；不得默认回退 develop")
-    if not base_branch:
-        print("错误：仓库 %s 没有可验证的基线分支" % args.repo, file=sys.stderr)
-        return 2
-    authorized_endpoint = project_rules.canonical_repository_endpoint(
-        branches.get("origin")
-    )
-    if not authorized_endpoint:
-        print(
-            "错误：仓库 %s 的 Project catalog origin 无法形成可信 endpoint"
-            % args.repo,
-            file=sys.stderr,
-        )
-        return 2
-    item = {
-        "repository": args.repo,
-        "authorized_endpoint": authorized_endpoint,
-        "work_branch": args.work_branch,
-        "base_branch": base_branch,
-        "approved_scope": args.scope,
-        "verification_method": args.verification,
-        "base_sha": None,
-        "catalog_digest": None,
-        "worktree": None,
-        "pull_request": None,
-        "ci": None,
-    }
-    task.setdefault("repositories", []).append(item)
-    task["history"].append(
-        {"ts": now(), "event": "repository_add", "repository": args.repo}
-    )
-    save(args.dir, task)
-    print("已加入任务仓库：%s（%s -> %s）" % (args.repo, base_branch, args.work_branch))
-    return 0
-
-
-def cmd_repository_list(args):
-    task = require(args.dir, args.issue_key)
-    print(json.dumps(task.get("repositories", []), ensure_ascii=False, indent=2))
-    return 0
-
-
-@task_store.task_mutation
-def cmd_repository_update(args):
-    task = require(args.dir, args.issue_key)
-    if task_store.task_status(args.dir, task["issue_key"]) != "active" or task["stage"] != "task_intake":
-        raise ValueError("repository update 只允许 active 任务的 task_intake；先检查 cleanup/reset 路径")
-    item = next((r for r in task.get("repositories", []) if r["repository"] == args.repo), None)
-    if item is None:
-        raise ValueError("仓库尚未登记：%s" % args.repo)
-    if any(item.get(key) for key in ("base_sha", "catalog_digest", "worktree")):
-        raise ValueError("仓库仍有基线或 worktree 记录；先 cleanup/reset，保留旧分支与 PR")
-    if not all(str(value).strip() for value in (args.scope, args.verification, args.reason)):
-        raise ValueError("更新必须提供非空范围、验证方式和原因")
-    if args.work_branch == item["work_branch"]:
-        raise ValueError("新分支处理必须使用不同的工作分支")
-    if project_rules.scan_sensitive(admission(args.dir), " ".join((args.scope, args.verification, args.reason))):
-        raise ValueError("仓库更新包含敏感内容，请脱敏后重试")
-    repository_worktree._run(["git", "check-ref-format", "--branch", args.work_branch])
-    binding, product_root, pool_root = repository_worktree.workspace_binding(args.dir)
-    # 与 prepare 相同的锁顺序；登记不创建或移动任何 Git 分支。
-    with repository_worktree._pool_lock(product_root):
-        for other_issue in task_store.registered_issues(args.dir, statuses=("active",)):
-            other = load(args.dir, other_issue)
-            if any(r.get("repository") == args.repo and r.get("work_branch") == args.work_branch
-                   for r in other.get("repositories", [])):
-                raise ValueError("工作分支已由激活任务占用：%s" % other_issue)
-        for lease in repository_worktree._load_leases(product_root):
-            if lease.get("pool_root") == str(pool_root) and lease.get("repository") == args.repo:
-                if (lease.get("branch") == args.work_branch or
-                        lease.get("workspace_id") == binding["workspace_id"] and
-                        lease.get("issue_key") == task["issue_key"]):
-                    raise ValueError("仓库仍有任务租约或新分支被占用；先核对清理结果")
-        if repository_worktree.task_worktree_path(args.dir, task, args.repo).exists():
-            raise ValueError("当前 run 仍有未登记的 worktree 路径，请先核对现场")
-        main = repository_worktree.repository_path(pool_root, args.repo)
-        entry = repository_worktree._catalog(args.dir)["repositories"][args.repo]
-        if item.get("authorized_endpoint") != project_rules.canonical_repository_endpoint(entry["origin"]):
-            raise ValueError("仓库 endpoint 与项目目录不一致")
-        if args.work_branch == item["base_branch"]:
-            raise ValueError("工作分支不能使用目标基线分支")
-        if main.is_dir():
-            repository_worktree._validate_origin_chain(main, args.repo, entry["origin"])
-            if repository_worktree._run([
-                "git", "-C", str(main), "show-ref", "--verify", "--quiet", "refs/heads/" + args.work_branch
-            ], check=False).returncode == 0:
-                raise ValueError("新工作分支本地已存在：%s" % args.work_branch)
-        remote = repository_worktree._run([
-            "git", "ls-remote", "--heads", entry["origin"], "refs/heads/" + args.work_branch
-        ])
-        if remote.stdout.strip():
-            raise ValueError("新工作分支远端已存在：%s" % args.work_branch)
-        before = dict(item)
-        revoke_authorization(args.dir, task["issue_key"], "repository_update")
-        item.update(work_branch=args.work_branch, approved_scope=args.scope,
-                    verification_method=args.verification, pull_request=None, ci=None)
-        task["history"].append({
-            "ts": now(), "event": "repository_update", "run_id": task["run_id"],
-            "repository": args.repo, "reason": args.reason, "before": before, "after": dict(item),
-        })
-        save(args.dir, task)
-    print("已更新仓库登记；旧分支/PR 保留，旧交付引用已归档，进入实现前重新确认方案并授权。")
-    return 0
-
-
-def repository_context(base, task):
-    """返回当前会话继续处理任务所需的、已校验的只读上下文。"""
-    roots = repository_worktree.task_roots(base, task["issue_key"])
-    repositories = []
-    for item, root in zip(task.get("repositories", []), roots):
-        repositories.append(
-            {
-                "repository": item["repository"],
-                "worktree": str(root),
-                "work_branch": item["work_branch"],
-                "base_branch": item["base_branch"],
-                "base_sha": item["base_sha"],
-                "approved_scope": item["approved_scope"],
-                "verification_method": item["verification_method"],
-            }
-        )
-    return {
-        "issue_key": task["issue_key"],
-        "run_id": task["run_id"],
-        "workspace": str(Path(base).resolve()),
-        "repositories": repositories,
-    }
-
-
-def cmd_repository_context(args):
-    try:
-        task = require(args.dir, args.issue_key)
-        context = repository_context(args.dir, task)
-    except ValueError as error:
-        print("错误：%s" % error, file=sys.stderr)
-        return 2
-    if args.json:
-        print(json.dumps(context, ensure_ascii=False, indent=2))
-        return 0
-    print("任务执行上下文：%s（run=%s）" % (context["issue_key"], context["run_id"]))
-    for item in context["repositories"]:
-        print("  - %s：%s（%s）" % (item["repository"], item["worktree"], item["work_branch"]))
     return 0
 
 
@@ -606,55 +366,25 @@ def cmd_repository_record(args):
     if item is None:
         print("错误：仓库不在当前任务中：%s" % args.repo, file=sys.stderr)
         return 2
-    if args.pr is None and args.ci is None:
+    if args.pr is None and args.ci is None and not getattr(args, "delivery_input", None):
         print("错误：至少提供 --pr 或 --ci", file=sys.stderr)
         return 2
     if args.pr is not None:
         item["pull_request"] = args.pr
     if args.ci is not None:
         item["ci"] = args.ci
+    if getattr(args, "delivery_input", None):
+        delivery = json.loads(Path(args.delivery_input).read_text(encoding="utf-8"))
+        if not isinstance(delivery, dict) or delivery.get("repository") != args.repo:
+            raise ValueError("交付回读必须绑定当前仓库")
+        if project_rules.scan_sensitive(admission(args.dir), json.dumps(delivery, ensure_ascii=False)):
+            raise ValueError("交付回读包含敏感内容")
+        task["task_repositories"][args.repo]["deliveries"] = [delivery]
     task["history"].append(
         {"ts": now(), "event": "repository_result", "repository": args.repo}
     )
     save(args.dir, task)
     print("已记录仓库结果：%s" % args.repo)
-    return 0
-
-
-@task_store.task_mutation
-def cmd_repository_prepare(args):
-    try:
-        paths = repository_worktree.prepare_task(
-            args.dir,
-            args.issue_key,
-            reuse_existing_branch=args.reuse_existing_branch,
-            continuation=repository_worktree.continuation_bases(args.continuation_base),
-            continuation_heads=repository_worktree.continuation_bases(args.continuation_head),
-        )
-    except ValueError as error:
-        print("错误：%s" % error, file=sys.stderr)
-        return 2
-    print("已准备任务 worktree：")
-    for path in paths:
-        print("  - %s" % path)
-    return 0
-
-
-@task_store.task_mutation
-def cmd_repository_cleanup(args):
-    try:
-        result = repository_worktree.cleanup_task(
-            args.dir, args.issue_key, delete_branches=args.delete_branches
-        )
-    except ValueError as error:
-        print("错误：%s" % error, file=sys.stderr)
-        return 2
-    print("已清理 %s 个任务 worktree。" % len(result["removed"]))
-    for branch in result["branches"]:
-        print(
-            "分支处理：%s:%s -> %s"
-            % (branch["repository"], branch["branch"], branch["status"])
-        )
     return 0
 
 
@@ -683,30 +413,14 @@ def _check_advance(task, target, base, spec):
                 'task.py block --issue-key %s --reason "准入缺项：%s"'
                 % (task["issue_key"], "、".join(f["label"] for f in missing))
             )
-        repositories = task.get("repositories", [])
-        if not repositories:
-            problems.append(
-                "离开 task_intake 前至少登记一个源码仓库；先执行 task.py repository add"
-            )
-        else:
-            incomplete = [
-                item.get("repository")
-                for item in repositories
-                if (item.get("worktree") or {}).get("status") != "prepared"
-                or not item.get("base_sha")
-                or not item.get("catalog_digest")
-            ]
-            if incomplete:
-                problems.append(
-                    "离开 task_intake 前必须为全部登记仓库准备受控 worktree 并固化 "
-                    "base_sha/catalog_digest：%s；执行 task.py repository prepare"
-                    % "、".join(incomplete)
-                )
-            else:
-                try:
-                    repository_worktree.task_roots(base, task["issue_key"])
-                except ValueError as error:
-                    problems.append("受控本地 Git 基线无效：%s" % error)
+        try:
+            from workflow import engineering_baseline, station_source
+            engineering_baseline.validate(task.get("engineering_baseline"))
+            if not task.get("source_prepared"):
+                raise ValueError("完整工程尚未准备完成")
+            station_source.inspect(base, task["engineering_baseline"])
+        except ValueError as error:
+            problems.append("完整工程基线无效：%s" % error)
     if target == "pr_review" and not flexible:
         verification = (task.get("facts") or {}).get("verification")
         for reason in project_rules.check_verification(spec, verification):
@@ -747,24 +461,17 @@ def _check_advance(task, target, base, spec):
                         problems.append("Q1/Q2 方案或验收项已变化，需要重新确认方案")
                 except ValueError as error:
                     problems.append("Q1/Q2 方案确认无效：%s" % error)
-    if target == "completed":
-        prepared = [
-            item.get("repository")
-            for item in task.get("repositories", [])
-            if (item.get("worktree") or {}).get("status") == "prepared"
-        ]
-        if prepared:
-            problems.append(
-                "任务完成前必须先执行 repository cleanup：%s" % "、".join(prepared)
-            )
     problems.extend(quality.advance_problems(base, task, target))
     return problems
 
 
-@task_store.task_mutation
 def cmd_advance(args):
     issue = task_store.resolve_issue(args.dir, args.issue_key)
     with task_store.task_run_lock(args.dir, issue):
+        task = task_store.check_expected_run(args.dir, issue, args.expected_run_id)
+        if not (task.get("stage") == "completed" and task.get("terminal_proof")
+                and args.expected_stage in ("ci_validation", "completed")):
+            task_store.require_development(args.dir, task)
         return _cmd_advance_locked(args)
 
 
@@ -773,7 +480,7 @@ def _cmd_advance_locked(args):
     # completed 是已核验的提交点；中断重试只收敛派生状态，不重复推进或重做验收。
     if task["stage"] == "completed" and args.expected_stage in ("ci_validation", "completed"):
         _finish_completion(args.dir, task)
-        print("任务已完成，授权及注册状态已收敛。")
+        print("任务已完成，授权撤销已收敛；仍需明确 release。")
         return 0
     task_store.resolve_active_issue(args.dir, args.issue_key)
     if task.get("stage") != getattr(args, "expected_stage", None):
@@ -788,6 +495,10 @@ def _cmd_advance_locked(args):
         for p in problems:
             print("阻止推进：%s" % p, file=sys.stderr)
         return 3
+    if target == "completed":
+        from workflow import station
+        task["terminal_proof"] = station.completion_proof(args.dir, task)
+        task["outcome"] = "completed"
     task["stage"] = target
     task["pending"] = None
     task["history"].append({"ts": now(), "event": "advance", "stage": target, "note": args.note})
@@ -816,84 +527,6 @@ def cmd_block(args):
     return 0
 
 
-def _cmd_reset_locked(args):
-    task = load(args.dir, args.issue_key)
-    if task is None:
-        print("错误：没有任务状态", file=sys.stderr)
-        return 2
-    if task.get("run_id") != args.expected_run_id:
-        print(
-            "错误：reset 绑定的 run 已失效（当前 %s，传入 %s）；请重新检查任务状态"
-            % (task.get("run_id"), args.expected_run_id),
-            file=sys.stderr,
-        )
-        return 3
-    if args.stage not in STAGES or args.stage == "completed":
-        print("错误：未知阶段 %s" % args.stage, file=sys.stderr)
-        return 2
-    current_index = STAGES.index(task["stage"])
-    target_index = STAGES.index(args.stage)
-    if target_index > current_index:
-        print(
-            "错误：reset 只能回退或停留在当前阶段，不能从 %s 跳到 %s"
-            % (task["stage"], args.stage),
-            file=sys.stderr,
-        )
-        return 2
-    prepared = [
-        item.get("repository")
-        for item in task.get("repositories", [])
-        if (item.get("worktree") or {}).get("status") == "prepared"
-    ]
-    if prepared:
-        print(
-            "错误：reset 前必须先清理当前 run 的 worktree：%s"
-            % "、".join(prepared),
-            file=sys.stderr,
-        )
-        return 2
-    revoke_authorization(args.dir, task["issue_key"], "task_reset")
-    task["history"].append(
-        {"ts": now(), "event": "reset", "from": task["stage"], "to": args.stage, "note": args.note}
-    )
-    task["stage"] = args.stage
-    task["run_id"] = "run-" + uuid.uuid4().hex[:12]
-    for key in ("jira_snapshot", "agenticops_version", repair_strategy.OVERRIDE_FACT):
-        if key in task["facts"]:
-            task["history"].append({"ts": now(), "event": "archive_fact", "key": key, "value": task["facts"].pop(key)})
-    for item in task.get("repositories", []):
-        if item.get("base_sha"):
-            task["history"].append({
-                "ts": now(), "event": "archive_repository_baseline",
-                "repository": item["repository"], "work_branch": item["work_branch"],
-                "base_branch": item["base_branch"], "base_sha": item["base_sha"],
-                "run_id": args.expected_run_id,
-            })
-        item["base_sha"] = None
-        item["catalog_digest"] = None
-        item["worktree"] = None
-    task["pending"] = None
-    save(args.dir, task)
-    task_store.set_status(args.dir, task["issue_key"], "active")
-    print(
-        "已重置到阶段：%s（%s），新 run=%s；旧授权已撤销，进入实现前必须重新授权"
-        % (args.stage, args.note, task["run_id"])
-    )
-    _print_next(task)
-    return 0
-
-
-def cmd_reset(args):
-    try:
-        issue = task_store.resolve_issue(args.dir, args.issue_key)
-    except ValueError as error:
-        print("错误：%s" % error, file=sys.stderr)
-        return 2
-    args.issue_key = issue
-    with task_store.task_run_lock(args.dir, issue):
-        return _cmd_reset_locked(args)
-
-
 @task_store.task_mutation
 def cmd_interaction_path(args):
     task = load(args.dir, args.issue_key)
@@ -908,12 +541,12 @@ def cmd_interaction_path(args):
 
 NEXT_GUIDE = {
     "waiting_takeover": "读取 Jira 初始快照并准备本地版本水印；尽力回写，失败记录警告后继续 advance 进入 task_intake",
-    "task_intake": "checklist/record 完成准入 -> repository add/prepare 固化本地基线 -> 源码分析 -> advance；takeover 状态同步失败记录警告并继续",
-    "design_review": "基于任务 worktree 形成方案 -> 研发工程师确认 -> workflow/authorization.py grant -> advance；Jira 尽力回写，失败不阻断",
+    "task_intake": "checklist/record 完成准入 -> repository add 登记修改范围及工作分支（完整工程已在 takeover 准备）-> 源码分析 -> advance；Jira 状态同步失败记录警告并继续",
+    "design_review": "基于 source 完整工程形成方案 -> 研发工程师确认 -> workflow/authorization.py grant -> advance；Jira 尽力回写，失败不阻断",
     "implementation": "在授权范围内实现和测试；Q2 已选修复后检查项在最终 SHA 符合预期时自动记录 Q3，继续已授权提交/推送和 Draft PR；Jira 同步失败列警告，PR 后统一总结",
     "pr_review": "完成 Q4 关联用例验收后 advance；进入 ci_validation 后用 jira_status.py 在 tests_passed 节点同步尝试一次 Tests Passed",
     "ci_validation": "完成 Tests Passed 同步尝试，用 workflow/ci.py watch 更新每个 PR Head 的 Checks，再用 pr_ready.py 核对测试任务、PR Checks 和 Q1-Q4",
-    "completed": "用 workflow/evidence.py 生成证据总结，经确认后作为 Jira 评论回写",
+    "completed": "生成脱敏任务总结；研发明确确认 cleanup-plan 与最终候选后 release，归档并释放工位；Jira 同步结果另行回读",
 }
 
 
@@ -1030,7 +663,7 @@ def cmd_status(args):
         return 0
     print("任务：%s（%s）" % (task["issue_key"], task["task_class"]))
     print("run：%s" % (task.get("run_id") or "旧状态未记录"))
-    print("注册状态：%s" % task_store.task_status(args.dir, task["issue_key"]))
+    print("任务结果：%s（工位仍占用）" % task.get("outcome", "in_progress"))
     print("阶段：%s" % task["stage"])
     if task.get("pending"):
         p = task["pending"]
@@ -1050,110 +683,6 @@ def cmd_status(args):
     return 0
 
 
-def cmd_list(args):
-    registry = task_store.load_registry(args.dir, create=False)
-    if registry is None or not registry["tasks"]:
-        print("工作空间暂无任务。")
-        return 0
-    print("项目：%s" % registry["project"])
-    for issue, entry in sorted(registry["tasks"].items()):
-        path = task_store.task_path(args.dir, issue)
-        task = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-        print("- %s：%s，阶段 %s" % (issue, entry.get("status"), task.get("stage", "状态缺失")))
-    return 0
-
-
-@task_store.task_mutation
-def cmd_activate(args):
-    try:
-        issue = task_store.validate_issue_key(args.issue_key)
-        with task_store.task_run_lock(args.dir, issue):
-            task = load(args.dir, issue)
-            if task is None:
-                raise ValueError("任务状态缺失：%s" % issue)
-            if task.get("stage") == "completed":
-                raise ValueError("任务已完成；确需重开请使用 reset 并重新授权")
-            conflicts = activation_conflicts(args.dir, task)
-            if conflicts:
-                raise ValueError("任务无法激活：%s" % "；".join(conflicts))
-            task_store.set_status(args.dir, issue, "active")
-    except ValueError as error:
-        print("错误：%s" % error, file=sys.stderr)
-        return 2
-    print("任务已激活：%s" % task_store.validate_issue_key(args.issue_key))
-    return 0
-
-
-@task_store.task_mutation
-def cmd_deactivate(args):
-    try:
-        issue = task_store.validate_issue_key(args.issue_key)
-        with task_store.task_run_lock(args.dir, issue):
-            registry = task_store.load_registry(args.dir, create=False)
-            if registry and registry["tasks"].get(issue, {}).get("status") == "completed":
-                raise ValueError("completed 任务无需停用")
-            task_store.set_status(args.dir, issue, "inactive")
-    except ValueError as error:
-        print("错误：%s" % error, file=sys.stderr)
-        return 2
-    print("任务已停用：%s（状态和方案确认仍保留，推进前需要恢复）" % task_store.validate_issue_key(args.issue_key))
-    return 0
-
-
-def cmd_purge(args):
-    if not args.yes:
-        print("错误：purge 会删除任务注册与任务目录，必须显式传入 --yes", file=sys.stderr)
-        return 2
-    try:
-        issue = task_store.validate_issue_key(args.issue_key)
-        with task_store.task_run_lock(args.dir, issue):
-            task = load(args.dir, issue)
-            if task is None:
-                raise ValueError("任务状态缺失：%s" % issue)
-            status = task_store.task_status(args.dir, issue)
-            if status != "inactive":
-                raise ValueError(
-                    "purge 只允许 inactive 任务：%s（当前 %s）" % (issue, status)
-                )
-            if task.get("run_id") != args.expected_run_id:
-                raise ValueError(
-                    "purge 绑定的 run 已失效（当前 %s，传入 %s）；请重新检查任务状态"
-                    % (task.get("run_id"), args.expected_run_id)
-                )
-            cleanup = {"removed": [], "branches": []}
-            if task.get("repositories"):
-                cleanup = repository_worktree._cleanup_task_locked(
-                    args.dir, issue, delete_branches=True
-                )
-                task = load(args.dir, issue)
-            if task_store.task_status(args.dir, issue) != "inactive":
-                raise ValueError("purge 清理后任务状态发生变化，拒绝删除：%s" % issue)
-            if task.get("run_id") != args.expected_run_id:
-                raise ValueError("purge 清理后 run_id 发生变化，拒绝删除：%s" % issue)
-            execution_root = repository_worktree.task_execution_root(args.dir, task)
-            if execution_root.exists():
-                raise ValueError("purge 前任务 worktree 根目录仍存在：%s" % execution_root)
-            leases = repository_worktree.remaining_task_leases(args.dir, task)
-            if leases:
-                raise ValueError(
-                    "purge 前仍有当前 task/run 的 Source Pool 租约：%d" % len(leases)
-                )
-            residual = [
-                "%s:%s(%s)"
-                % (item["repository"], item["branch"], item["status"])
-                for item in cleanup["branches"]
-                if item["status"].startswith("retained")
-            ]
-            task_store.purge_inactive(args.dir, issue, args.expected_run_id)
-    except ValueError as error:
-        print("错误：%s" % error, file=sys.stderr)
-        return 2
-    print("任务已 purge：%s（注册与任务目录已删除）" % issue)
-    if residual:
-        print("保留无充分删除证明的本地分支（未强制删除）：%s" % "、".join(residual))
-    return 0
-
-
 def main():
     class StrictArgumentParser(argparse.ArgumentParser):
         def __init__(self, *args, **kwargs):
@@ -1163,12 +692,43 @@ def main():
     parser = StrictArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("init")
+    p = sub.add_parser("takeover")
     p.add_argument("--issue-key", required=True)
     p.add_argument("--task-class", required=True)
-    p.add_argument("--force", action="store_true")
+    p.add_argument("--version", required=True)
+    p.add_argument("--profile", default="full-application")
+    p.add_argument("--optional-repository", action="append", default=[])
+    p.add_argument("--explicit-branch", action="append", default=[])
+    p.add_argument("--continuation-input")
+    p.add_argument("--operation-id", required=True)
+    p.add_argument("--expected-revision", required=True, type=int)
     p.add_argument("--dir", default=".")
-    p.set_defaults(func=cmd_init)
+    p.set_defaults(func=cmd_takeover)
+    for kind in ("archive", "release", "clean"):
+        p = sub.add_parser(kind)
+        p.add_argument("--issue-key", required=True)
+        p.add_argument("--expected-run-id", required=True)
+        p.add_argument("--expected-revision", required=True, type=int)
+        p.add_argument("--operation-id", required=True)
+        p.add_argument("--input", required=True)
+        p.add_argument("--dir", default=".")
+        p.set_defaults(func=cmd_lifecycle)
+    p = sub.add_parser("cleanup-plan")
+    p.add_argument("--issue-key", required=True)
+    p.add_argument("--expected-run-id", required=True)
+    p.add_argument("--dir", default=".")
+    p.set_defaults(func=cmd_cleanup_plan)
+    p = sub.add_parser("cleanup-amend", help="精确补充当前清理计划；archive 仅刷新未发布草稿，不授权删除",
+                       description="绑定原 operation、计划摘要和修订编号。archive 仅刷新未发布草稿，不删除资源；正式档案不可改写。clean/release 使用新精确确认后，仍以原始请求恢复。")
+    p.add_argument("--issue-key", required=True)
+    p.add_argument("--expected-run-id", required=True)
+    p.add_argument("--expected-revision", required=True, type=int)
+    p.add_argument("--operation-id", required=True)
+    p.add_argument("--expected-plan-digest", required=True)
+    p.add_argument("--expected-plan-revision", required=True, type=int)
+    p.add_argument("--input", required=True)
+    p.add_argument("--dir", default=".")
+    p.set_defaults(func=cmd_cleanup_amend)
 
     p = sub.add_parser("record")
     p.add_argument("--issue-key")
@@ -1240,20 +800,14 @@ def main():
     add.add_argument("--issue-key")
     add.add_argument("--repo", required=True)
     add.add_argument("--work-branch", required=True)
-    add.add_argument("--base-branch")
+    add.add_argument("--base-branch", required=True)
+    add.add_argument("--operation-id", required=True)
+    add.add_argument("--expected-revision", required=True, type=int)
+    add.add_argument("--expected-head")
     add.add_argument("--scope", required=True)
     add.add_argument("--verification", required=True)
     add.add_argument("--dir", default=".")
     add.set_defaults(func=cmd_repository_add)
-    update = repository_sub.add_parser("update")
-    update.add_argument("--issue-key")
-    update.add_argument("--repo", required=True)
-    update.add_argument("--work-branch", required=True)
-    update.add_argument("--scope", required=True)
-    update.add_argument("--verification", required=True)
-    update.add_argument("--reason", required=True)
-    update.add_argument("--dir", default=".")
-    update.set_defaults(func=cmd_repository_update)
     listing = repository_sub.add_parser("list")
     listing.add_argument("--issue-key")
     listing.add_argument("--dir", default=".")
@@ -1268,21 +822,9 @@ def main():
     record.add_argument("--repo", required=True)
     record.add_argument("--pr")
     record.add_argument("--ci")
+    record.add_argument("--delivery-input")
     record.add_argument("--dir", default=".")
     record.set_defaults(func=cmd_repository_record)
-    prepare = repository_sub.add_parser("prepare")
-    prepare.add_argument("--issue-key")
-    prepare.add_argument("--reuse-existing-branch", action="store_true")
-    prepare.add_argument("--continuation-base", action="append", default=[])
-    prepare.add_argument("--continuation-head", action="append", default=[])
-    prepare.add_argument("--dir", default=".")
-    prepare.set_defaults(func=cmd_repository_prepare)
-    cleanup = repository_sub.add_parser("cleanup")
-    cleanup.add_argument("--issue-key")
-    cleanup.add_argument("--delete-branches", action="store_true")
-    cleanup.add_argument("--dir", default=".")
-    cleanup.set_defaults(func=cmd_repository_cleanup)
-
     p = sub.add_parser("advance")
     p.add_argument("--issue-key")
     p.add_argument("--expected-stage", required=True, choices=STAGES)
@@ -1296,14 +838,6 @@ def main():
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_block)
 
-    p = sub.add_parser("reset")
-    p.add_argument("--issue-key")
-    p.add_argument("--expected-run-id", required=True)
-    p.add_argument("--stage", required=True)
-    p.add_argument("--note", required=True)
-    p.add_argument("--dir", default=".")
-    p.set_defaults(func=cmd_reset)
-
     p = sub.add_parser("status")
     p.add_argument("--issue-key")
     p.add_argument("--dir", default=".")
@@ -1316,35 +850,14 @@ def main():
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_interaction_path)
 
-    p = sub.add_parser("list")
-    p.add_argument("--dir", default=".")
-    p.set_defaults(func=cmd_list)
-
-    p = sub.add_parser("activate")
-    p.add_argument("--issue-key", required=True)
-    p.add_argument("--dir", default=".")
-    p.set_defaults(func=cmd_activate)
-
-    p = sub.add_parser("deactivate")
-    p.add_argument("--issue-key", required=True)
-    p.add_argument("--dir", default=".")
-    p.set_defaults(func=cmd_deactivate)
-
-    p = sub.add_parser("purge")
-    p.add_argument("--issue-key", required=True)
-    p.add_argument("--expected-run-id", required=True)
-    p.add_argument("--yes", action="store_true")
-    p.add_argument("--dir", default=".")
-    p.set_defaults(func=cmd_purge)
-
-    for command in ("record", "advance", "block", "activate", "deactivate"):
+    for command in ("record", "advance", "block"):
         sub.choices[command].add_argument("--expected-run-id", required=True)
-    for command in ("add", "update", "record-result", "prepare", "cleanup"):
+    for command in ("add", "record-result"):
         repository_sub.choices[command].add_argument("--expected-run-id", required=True)
     args = parser.parse_args()
     try:
         task_store.workspace_project(args.dir)
-        task_store.migrate_legacy(args.dir)
+        task_store.read_current(args.dir)
         return args.func(args)
     except ValueError as error:
         print("错误：%s" % error, file=sys.stderr)

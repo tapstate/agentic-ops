@@ -17,7 +17,7 @@ run_id: <run id or unavailable>
 stage: <workflow stage or unavailable>
 summary: <one-paragraph fact summary>
 completed_evidence:
-  - <Jira/Profile/workspace/worktree evidence>
+  - <Jira/Profile/workspace/source evidence>
 decision:
   question: <only when needs_human_decision>
   options: <choice, impact, recommendation>
@@ -28,7 +28,7 @@ blocker:
 artifacts:
   workspace: <absolute path>
   task_state: <absolute path>
-  worktrees: <absolute paths and SHA>
+  sources: <absolute independent repository paths and SHA>
 external_writes:
   - <actual Jira transition/comment, or none>
 non_actions:
@@ -39,8 +39,8 @@ used_preset_gate_replies:
   - <reply id, condition, actual use; or none>
 ```
 
-`needs_human_decision` 不结束测试：主会话取得用户答复后，必须将答复和当前 run ID 回传同一子代理继续。`blocked` 仅在没有安全替代路径、且已给出最小恢复输入时结束。`completed` 必须说明对应完成证据；单个接管命令、初始化或 worktree 创建不能作为完成结论。
+`needs_human_decision` 不结束测试：主会话取得用户答复后，必须将答复和当前 run ID 回传同一子代理继续。`blocked` 仅在没有安全替代路径、且已给出最小恢复输入时结束。`completed` 必须说明对应完成证据；单个接管命令、初始化或 source 准备不能作为完成结论。
 
-测试完成或阻断后，保留工作空间。只有用户明确要求清理时，才按当前 run ID 进行 worktree cleanup/purge；先检查洁净度，绝不强删未合并分支或未提交修改。
+测试完成或阻断后，保留工作空间。只有用户明确要求清理时，才按当前 run ID 使用 archive/clean 精确清单完成任务退出，再对空闲工位明确 workspace purge；绝不强删 Git refs 或未确认文件。
 
 若发现流程缺陷，子代理只回传最小复现和证据，不自行修复维护面代码。主会话核对是否已有明确覆盖该范围的修复授权；缺失或授权失效时才请求补充，测试绑定本身不包含修复授权；修复后的验证使用新的测试工作空间和新的 run，不能复用本次现场作为“已修复”证据。

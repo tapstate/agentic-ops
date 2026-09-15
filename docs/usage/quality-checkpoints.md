@@ -4,7 +4,7 @@
 
 使用现有 `quality.py apply --issue-key <key> --expected-run-id <run> --expected-revision <当前revision> --input <json> --dir <workspace>`，输入为 `{"action":"verification","payload":{...}}`。每个仓库分别提交材料，内部自动绑定当前任务各仓源码版本；不是新任务类型或执行引擎。写前先 `quality.py status`，source_sync 还会实际读取已准备的任务工作树并核对包含关系。原生报告的真实性、依赖清单和语义分析仍由 Agent 核对，工具不认证来源或判断断言含义。
 
-所有材料提供 kind、repository、target_revision（当前完整 SHA 或首轮本地 worktree 指纹）、source_ref。其余内容如下：
+所有材料提供 kind、repository、target_revision（当前完整 SHA 或首轮本地源码指纹）、source_ref。其余内容如下：
 
 | kind | 材料 |
 |---|---|
@@ -23,7 +23,7 @@ TapData 功能和缺陷使用相同配置：Q3、Q4 要求 local/source_sync，Q
 
 研发已手工处理未解决问题时，使用 manual_result，提供 finish 的实际结果/版本/报告字段，并附 reason 和真实用户消息 proof；不消耗自动修复轮数。仍有 running 轮次时先 finish 保留当时实际结果，再记录人工处理。没有明确人工来源或实际验证，不能声明恢复成功。
 
-本次将 `workspace_state_epoch` 提升为 2，仅支持 epoch 2；旧任务/CI/质量材料不做在线兼容。切换前用旧产品完成或停用任务、清理 linked worktree，并经明确确认 purge 本地状态。没有升级协议 1 的安装须先经官方指定的兼容过渡版本或重新安装；不能宣称可从任意旧版本直接升级。发布、清理和业务验收仍分别授权。
+当前工位采用 epoch 3；材料只属于当前 run。旧状态由原版清理，新版本不迁移历史确认。生成/清理与跨版编排的顺序见[更新与回退](update-and-rollback.md)。发布、清理和业务验收分别授权。
 
 ## PR 审查返工
 
@@ -64,9 +64,9 @@ interaction_file="$(python3 <agenticops-root>/workflow/task.py interaction-path 
   --name jira-snapshot.json --dir "$project_workspace")"
 ```
 
-文件名使用 lowercase-kebab-case，可选扩展名为 `json`、`jsonl`、`log`、`md` 或 `txt`。路径位于 `.agenticops/tasks/<issue>/<run-id>/`；reset 后旧 run 材料保留用于恢复与追溯，任务级 purge 会随任务目录统一删除。不要用任务号前缀和根目录文件名模拟任务归属。
+文件名使用 lowercase-kebab-case，可选扩展名 json/jsonl/log/md/txt。interaction-path 返回 `.agenticops/evidence/interactions/` 内路径，仅当前 run 可写；归档后停止开发，release/clean 收尾移除活动副本，档案保留必要脱敏材料。不用根目录文件名前缀模拟任务归属。
 
-旧版本已经散落在 `.agenticops/` 根目录的文件不会被在线迁移，也不会按文件名猜测 run 归属。遇到不兼容升级时，先在原版本完成或停用任务、清理 linked worktree 并显式 purge 本地任务状态；需要保留的旧材料由研发工程师移出状态目录归档，再重新执行升级。以上本地处理不修改 Jira。
+旧状态不在线迁移或猜测归属；退出当前任务后，明确 workspace purge 注销受管状态，再按新版本生成。未知残留阻止清理；需保留材料先导出核验。见[更新与回退](update-and-rollback.md)。
 
 ## 任务类型与质量配置
 
@@ -234,9 +234,9 @@ python3 "$agenticops_root/workflow/pr_ready.py" \
 }
 ```
 
-effective.versions 无需 Jira ID。省略时采用初始版本，但仍需用户确认实施分支及来源。相同 run 的再次导入保留初始 observed，可在设计阶段修正版本；已准备的分支和 base_sha 必须保持一致。实际修复线改变仍需 cleanup/reset 和重新确认。版本差异进入同步警告，下一次 Jira 评论说明；不能把本地修正声称为 Jira 字段已更新。
+effective.versions 无需 Jira ID。省略时采用初始版本，但仍需用户确认实施分支及来源。相同 run 的再次导入保留初始 observed，可在设计阶段修正版本；已准备的分支和 base_sha 必须保持一致。实际修复线改变仍需归档清理后重接并重新确认。版本差异进入同步警告，下一次 Jira 评论说明；不能把本地修正声称为 Jira 字段已更新。
 
-用输出的 `primary_branch` 进行产品分支对齐，模块按其对齐结果准备，不把主仓分支名套给所有模块。TapData 的 `--tapdata-root` 指包含模块仓库的产品目录；`hazelcast` 固定参与并使用 `release-v5.5.0`。版本核验不改变 Source Pool 或当前工作树。
+用输出的 `primary_branch` 进行产品分支对齐，模块按其对齐结果准备，不把主仓分支名套给所有模块。TapData 的 `--tapdata-root` 指包含模块仓库的产品目录；`hazelcast` 固定参与并使用 `release-v5.5.0`。版本核验不改变 source 或当前分支。
 
 ## 检查项、执行及决定
 
@@ -351,7 +351,7 @@ Q1 仅绑定准入事实和已到期项；Q2 绑定修复方案、稳定用例�
 
 受控 cleanup 在成功移除干净工作树时保存 `final_revision`，质量快照继续核对该提交，避免仅因移除了工作目录便让验收确认失效。移除前代码已变化仍会失效；旧记录缺少最终 SHA 时不能猜测补齐。
 
-reset 后新 run 不继承旧验收。旧 run 的未知评论保留并汇总警告；相同正文不得重复发送，不同检查点评论可继续。旧 run 的 receipt/readback 可核对原操作，不通过删除记录消除未知结果。
+清理后重接的新 run 不继承旧验收；旧未知评论只作为原档案证据，不借新 run 重发。恢复未知外部调用必须核对原操作，不删除账本消除未知结果。
 
 接管进入 `task_intake` 后尝试一次 `Analyzed → In Progress`，Q4 验收完成并进入 `ci_validation` 后尝试一次 `In Progress → Tests Passed`。每次都先读取 Jira 当前状态、可用转换和转换必填字段；状态不匹配、字段补不了、权限不足或外部调用失败时记录人工指引并继续本地主流程，不重试，也不影响后续节点按各自事实再尝试。附件规定与线上 Validator 若不一致，应报告并以实时 Workflow 为准；手工用例仍是用例，不能冒充缺陷免测。`Pull Request Submitted`、实际合并、发布和 `Done` 仍分别以标准流程及外部事实人工确认。
 

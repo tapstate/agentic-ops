@@ -12,6 +12,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workflow import jira_status, jira_tests, pr_ready, task_store  # noqa: E402
+from station_fixture import save_task as save_station_task
 
 
 class JiraStatusTests(unittest.TestCase):
@@ -28,8 +29,8 @@ class JiraStatusTests(unittest.TestCase):
         )
         self.task = {"issue_key": "TAP-123", "run_id": "run-0123456789ab", "task_class": "defect_fix",
                      "stage": "task_intake", "facts": {}, "repositories": [], "pending": None, "history": []}
-        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
-        task_store.register(self.base, "TAP-123")
+        save_station_task(self.base, self.task)
+
 
     def snapshot(self, status="Analyzed", assignee="u-1", required=False):
         return {"source_ref": "fixture:jira/TAP-123", "current_user": {"accountId": "u-1"},
@@ -41,7 +42,7 @@ class JiraStatusTests(unittest.TestCase):
 
     def feature_snapshot(self):
         self.task["task_class"] = "feature_change"
-        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
+        save_station_task(self.base, self.task)
         snapshot = self.snapshot()
         snapshot["issue"]["fields"]["issuetype"] = {"id": "10010"}
         snapshot["transitions"].append(dict(snapshot["transitions"][0], id="51", name="Development Started"))
@@ -76,7 +77,7 @@ class JiraStatusTests(unittest.TestCase):
     def test_story_tests_passed_requires_quality_and_own_fields(self):
         snapshot = self.feature_snapshot()
         self.task["stage"] = "ci_validation"
-        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
+        save_station_task(self.base, self.task)
         snapshot["issue"]["fields"]["status"]["name"] = "In Progress"
         snapshot["transitions"] = [{"id": "71", "to": {"name": "Tests Passed"}, "fields": {}}]
         with mock.patch.object(jira_status, "tests_passed_ready", return_value=(False, "quality_not_verified", ["Q4 pending"], [])):
@@ -115,14 +116,14 @@ class JiraStatusTests(unittest.TestCase):
         result = jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot(status="Open"))
         self.assertEqual(result["reason"], "jira_status_mismatch")
         self.task["run_id"] = "run-fedcba987654"
-        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
+        save_station_task(self.base, self.task)
         result = jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot(required=True))
         self.assertEqual(result["reason"], "required_fields_missing")
         self.assertEqual(result["missing_fields"], ["fixVersions"])
 
     def test_tests_passed_is_independent_and_requires_q4(self):
         self.task["stage"] = "ci_validation"
-        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
+        save_station_task(self.base, self.task)
         snapshot = self.snapshot(status="In Progress")
         snapshot["transitions"] = [{"id": "501", "name": "Tests Pass",
                                     "to": {"id": "30", "name": "Tests Passed"}, "fields": {}}]
@@ -145,7 +146,7 @@ class JiraStatusTests(unittest.TestCase):
 
     def test_pr_ready_requires_all_three_groups(self):
         self.task["stage"] = "ci_validation"
-        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
+        save_station_task(self.base, self.task)
         input_path = self.base / "jira.json"
         def linked_test(status_name="Done", category="done"):
             return {
@@ -302,7 +303,7 @@ class JiraStatusTests(unittest.TestCase):
 
     def test_tests_passed_requires_jira_type_and_current_case_version(self):
         self.task["stage"] = "ci_validation"
-        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
+        save_station_task(self.base, self.task)
         rules = {"tests_passed": {"linked_test_task": {"relations": ["tests"], "issue_types": ["Test"]},
                                    "test_types": {"Manual": {"method": "manual"}}, "ignored_test_types": {}}}
         report = {

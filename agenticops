@@ -8,12 +8,12 @@ usage() {
   cat <<'EOF'
 用法：
   agenticops install [install 参数]
-  agenticops setup [--repository-pool <目录>] [--repository-provisioning manual|auto-clone]
+  agenticops setup
   agenticops agents
-  agenticops init [--workspace <目录>] [--project <项目>] [--agent <Agent ID>]... [--repository-pool <目录>]
+  agenticops init [--workspace <目录>] [--project <项目>] [--agent <Agent ID>]... [--reuse-materials]
   agenticops doctor [--workspace <目录>]
   agenticops repair [--workspace <目录>] [--accept-checkpoint-migration]
-  agenticops workspace <list|prune|repair|clean|detach|purge|prefetch> [参数]
+  agenticops workspace <list|prune|repair|clean|detach|purge> [参数]
   agenticops start <Agent ID> [-- <Agent 参数>]
   agenticops start --agent <Agent ID> [--workspace <目录>] [-- <Agent 参数>]
   agenticops update
@@ -97,12 +97,6 @@ start_agent() {
     --install-home "$product_root" --workspace "$workspace" --refresh
   python3 "$product_root/bootstrap/workspace_registry.py" \
     --product-root "$product_root" register --workspace "$workspace"
-  python3 - "$product_root" "$workspace" <<'PY'
-import sys
-sys.path.insert(0, sys.argv[1])
-from workflow import task_store
-task_store.migrate_legacy(sys.argv[2])
-PY
   agent_command="$(python3 "$product_root/bootstrap/agent_registry.py" \
     --product-root "$product_root" resolve-launch "$agent_name" --workspace "$workspace")"
   command -v "$agent_command" >/dev/null 2>&1 || {
@@ -162,7 +156,7 @@ case "$command_name" in
 import sys
 sys.path.insert(0, sys.argv[1])
 from workflow import task_store
-task_store.migrate_legacy(sys.argv[2])
+task_store.read_current(sys.argv[2])
 print("AgenticOps 工作空间修复完成：%s" % sys.argv[2])
 PY
     ;;

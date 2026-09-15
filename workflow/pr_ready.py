@@ -91,7 +91,7 @@ def ci_problems(base, task):
 
 def check(base, issue_key, jira_input):
     from workflow import external_sync
-    task = json.loads(task_store.task_path(base, issue_key).read_text(encoding="utf-8"))
+    task = task_store.read_task(base, issue_key)
     rules = quality.config(base, task)
     if not rules or not isinstance(rules.get("pr_ready"), dict):
         raise ValueError("当前 Project 未配置 PR Ready 验收")
@@ -139,7 +139,7 @@ def main():
     args = parser.parse_args()
     try:
         task_store.workspace_project(args.dir)
-        issue = task_store.resolve_active_issue(args.dir, args.issue_key)
+        issue = task_store.resolve_issue(args.dir, args.issue_key)
         result = check(args.dir, issue, args.jira_input)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result["ready"] else 3

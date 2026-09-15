@@ -218,10 +218,13 @@ def verify_local_repository(workspace, repository, origin, ref_kind, ref, sha):
     alternates = path / ".git" / "objects" / "info" / "alternates"
     if alternates.exists() or alternates.is_symlink():
         raise ValueError("独立工程仓库不能依赖 alternates")
-    actual = canonical_repository_endpoint(git("remote", "get-url", "origin"))
     expected = canonical_repository_endpoint(origin)
-    if not expected or actual != expected:
-        raise ValueError("工程仓库 origin 与目录不匹配")
+    for arguments in (("config", "--get-all", "remote.origin.url"),
+                      ("remote", "get-url", "--all", "origin"),
+                      ("remote", "get-url", "--push", "--all", "origin")):
+        urls = git(*arguments).splitlines()
+        if len(urls) != 1 or not expected or canonical_repository_endpoint(urls[0]) != expected:
+            raise ValueError("工程仓库 origin 配置、下载和推送地址必须唯一且与目录匹配")
     if git("cat-file", "-t", sha) != "commit":
         raise ValueError("基线 SHA 不是 commit 对象")
     reference = {"branch": "refs/remotes/origin/", "tag": "refs/tags/", "commit": ""}[ref_kind] + ref

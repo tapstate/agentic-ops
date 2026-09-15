@@ -62,7 +62,6 @@
       "update-branch": "update_pr"
     },
     "workflow_modules": {
-      "workflow.repository_worktree": "repository_worktree.py",
       "workflow.task": "task.py"
     }
   },

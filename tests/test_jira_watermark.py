@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from bootstrap import product_version  # noqa: E402
 from workflow import jira_watermark, project_rules, task_store  # noqa: E402
+from station_fixture import save_task as save_station_task
 
 
 class JiraWatermarkTests(unittest.TestCase):
@@ -23,6 +24,7 @@ class JiraWatermarkTests(unittest.TestCase):
         self.base = Path(self.temporary.name)
         self.product = self.base / "product"
         shutil.copytree(ROOT / "projects" / "tapdata", self.product / "projects" / "tapdata")
+        shutil.copytree(ROOT / "contracts", self.product / "contracts")
         subprocess.run(["git", "init", "-q", "-b", "develop"], cwd=self.product, check=True)
         subprocess.run(["git", "add", "."], cwd=self.product, check=True)
         subprocess.run(
@@ -38,8 +40,8 @@ class JiraWatermarkTests(unittest.TestCase):
             "issue_key": "TAP-123", "run_id": "run-0123456789ab", "task_class": "defect_fix",
             "stage": "waiting_takeover", "facts": {}, "repositories": [], "pending": None, "history": [],
         }
-        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
-        task_store.register(self.base, "TAP-123")
+        save_station_task(self.base, self.task)
+
 
     def snapshot(self, value=None, issue_type_id="10011"):
         fields = {"issuetype": {"id": issue_type_id, "name": "Bug"}}

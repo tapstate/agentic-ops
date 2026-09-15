@@ -1,6 +1,6 @@
 # 单任务研发工位设计合同
 
-本文定义尚未实现的目标架构，供运行代码、项目适配和验收实现共用；不是当前 CLI 使用说明、发布就绪声明或工作项执行计划。产品方向见[项目目标](../strategy/project-goals.md)，现役行为与分层见[v1 工程架构](agenticops-v1-architecture.md)。本文出现的字段和接口均是拟实施合同。
+本文定义单任务工位的实现合同，供运行代码、项目适配和验收实现共用；不是当前 CLI 使用说明、发布就绪声明或工作项执行计划。产品方向见[项目目标](../strategy/project-goals.md)，现役行为与分层见[v1 工程架构](agenticops-v1-architecture.md)。实现与验收必须分别提供证据；合同本身不声明真实 TapData 环境已运行。
 
 ## 1. 目标与范围
 
@@ -54,7 +54,7 @@ config 不随任务删除。任务专用有效配置写入 runtime，正式档�
 
 ### 4.1 完整工程基线
 
-基线值的机器合同见 [engineering-baseline.schema.json](../../contracts/engineering-baseline.schema.json)。`workflow/engineering_baseline.py` 提供基线值构造、摘要校验、任务仓库引用和只读本地 Git 对象核验；`projects/tapdata/engineering-profiles.json` 定义完整应用的仓库集合，项目脚本 `engineering_baseline.py` 复用现役分支解析器。值构造中的 `status=frozen` 只表示输入清单已固化，调用方仍必须在接管操作中核验新鲜远端事实及全部本地 Git 对象后持久化；它不表示已创建仓库、已准备 runtime 或已绑定当前任务。这些模块不写工作空间状态，不改变现役 epoch，也不提供替代任务入口。
+基线值的机器合同见 [engineering-baseline.schema.json](../../contracts/engineering-baseline.schema.json)。`workflow/engineering_baseline.py` 提供基线值构造、摘要校验、任务仓库引用和只读本地 Git 对象核验；`projects/tapdata/engineering-profiles.json` 定义完整应用的仓库集合，项目脚本 `engineering_baseline.py` 复用现役分支解析器。值构造中的 `status=frozen` 只表示输入清单已固化，调用方仍必须在接管操作中核验新鲜远端事实及全部本地 Git 对象后持久化；它不表示已创建仓库、已准备 runtime 或已绑定当前任务。基线模块本身不写状态；生命周期由 station 与 task.py 入口持锁编排。
 
 每个 run 只有一份冻结工程基线。条目至少包含 `repository_id/origin/ref_kind/ref_name/commit_sha/resolution_source/rule_version/path`。Profile 决定完整运行所需仓库，Project 的现役仓库目录仍是 origin 唯一来源。解析结果中的 current、展示回退、未核验或 unresolved 不能作为可执行基线。所有条目解析成功并核验 Git 对象后，一次固化全清单摘要；不能把部分准备冒充完整环境。
 
@@ -88,6 +88,8 @@ config 不随任务删除。任务专用有效配置写入 runtime，正式档�
 现役阶段检查仍维护 task.stage，目标完成检查从“先移除 worktree”改为先验证交付并持久化 outcome=completed，资源释放独立。研发的 release 可以在完成事实已有时执行，或在同一调用中核验并记录 completed；确认只覆盖精确任务/run/成果，不覆盖以后变动。completed 之后出现新的源码差异不回退完成事实，也不能直接清理；必须核验和明确处置额外成果。无代码任务通过 Project 定义的验收证据完成，不用空 PR 清单推导成功。
 
 release 的研发确认绑定任务、run、最终候选摘要和释放范围。clean 确认绑定 run 与精确 `cleanup_plan_digest`；plan 逐项包含对象身份/指纹、范围，以及 delete、retain_ref、retain_config 或明确展示的 export_then_delete。plan 不包含尚未生成的档案摘要。未提交修改的不可逆丢弃必须列出文件和内容指纹；现有精确授权仍有效时不重复询问。未知归属、未列项或确认后新增内容不删除且阻止解绑，不静默 stash。保留在 source 中的 dirty 文件不能被视为工位空闲。
+
+现场漂移通过同一 operation 的追加式计划修订恢复，重新确认精确清单并绑定原摘要与修订编号；保留原请求、旧计划、草稿与已完成回执。正式档案不得覆盖。独立 archive 仅在正式档案尚未发布时允许重新确认草稿清单，此确认不授权删除。释放恢复不能把新增未验收提交纳入旧完成证明；重新生成相同内容的产物也不能沿用旧删除回执。
 
 “归档 + 清理”允许两个顺序调用，也可由一次明确请求按 clean 的阶段编排。先停止任务写入者，生成或核验本 run 标记“未完成”的正式档案；再记录本地 interrupted 和研发终止决定，按已确认清单清理。此前独立 archive 不要求先把任务改为 interrupted，后续 clean 复用该档案，不因 outcome 从 in_progress 变为 interrupted 而重写正文。归档失败或身份、摘要不匹配时不删除现场；清理失败仍保持占用。清理不关闭 PR、不修改 Jira、不撤销远端提交。部分 prepare 失败时，未冻结基线也可 clean：使用已登记创建步骤和准备前事实生成清单，档案如实记录已知材料及缺口，不要求不存在的完整基线或验收结果。完整独立仓库和本地 refs 保留，未知创建残留需人工处置。
 
@@ -137,7 +139,9 @@ archive 不要求任务先完成或终止。`record.task_result` 为 completed �
 
 分支解析复用 `version-branch-alignments.json` 与现役解析器规则，输出明确 ref/SHA；现有展示回退和 keep-current 结果若无法提供确定执行依据，必须配置明确 ref 后再冻结。产品版本与模块分支不机械同名，目标分支另行登记。已有基线外仓库需要加入时，应先确认 Profile 范围，在冻结前补齐；冻结后发现遗漏而必须扩展完整工程时结束本次处理并明确清理重接，不能修改同 run 清单冒充原环境。
 
-Profile 数据合同包含 `id/revision/repositories/version_resolver/toolchain_requirements/actions/resources/health_checks`。actions 是按目标源码核验的 argv、cwd、环境引用和产物声明，支持 prepare/build/start/stop/verify；只能引用固定 source/config/runtime 路径。工具版本、Maven profile、Node 包管理器从目标分支和已确认环境取得，不猜值。配方应从工作空间根解析 context 后可执行，不依赖用户另一套开发目录。
+完整配方的目标合同包含 `id/revision/repositories/version_resolver/toolchain_requirements/actions/resources/health_checks`。当前 engineering-profiles.json 仅实现 id/revision/repositories/optional_repositories；其余配方合同尚未实现或未经真实环境验证，不能以删除合同的方式宣称完整应用已交付。actions 应是按目标源码核验的 argv、cwd、环境引用和产物声明，覆盖 prepare/build/start/stop/verify，只引用固定 source/config/runtime 路径。工具版本、Maven profile、Node 包管理器必须从目标分支和已确认环境取得，不猜值；实际启动与健康证据是独立验收层。
+
+现役资源登记通过 station_resources.py 接收 file/process/external 数组并绑定 run。外部资源 quiesced 且回读可信可先归档，最终释放或清理须得到 cleaned；归档后只允许既有 external 身份不变的清理状态/readback_ref 更新，不允许新增资源或改写正式档案。
 
 FE/TM 工作目录在 runtime 中分开，连接同一已确认 Mongo 环境，端口和 backend_url 必须互相匹配。启动健康检查分别记录 TM 可用、FE 连接成功、适用时 Web 可访问；任务验证另证明本次 connector/Jar 的生产与实际加载文件内容一致。未具备数据库或凭据只报告环境缺口，不伪造启动成功。实现配方时需用真实目标分支验证各入口，本文不声明当前模板已可运行。
 
@@ -152,15 +156,9 @@ FE/TM 工作目录在 runtime 中分开，连接同一已确认 Mongo 环境，�
 | TapData Project 与任务 Skill | 完整工程 Profile、分支解析消费、原生运行资源配方和四操作引导；不复制公共状态逻辑 |
 | docs、故事合同与测试 | 现役与目标区别在实现发布时收敛，按本合同验收并更新使用说明 |
 
-当前清单 epoch=2，目标结构不兼容，完整实施版本采用下一个未占用 epoch（当前预期 3）并要求最低升级协议 2。本次不另发兼容过渡版本：旧安装先用旧版本受控解绑，再安装新版本并重建，不承诺旧升级器直接 update。新版本的协议 2 保障其后的升级与回退，包括空绑定在内的所有不兼容工作空间均须先解绑，repair 不跨代际采用。不得声称新代码可以追溯保护旧升级器。用户切换顺序与失败边界见[更新与回退](../usage/update-and-rollback.md)。
+当前状态代际为 epoch 3，最低升级协议为 2。生成与清理机制先在同版本形成完整闭环，不依赖升级器：生成工位→任务接管/归档/释放或清理→workspace purge→重生成。purge 只移除归属明确的接线与受管状态，保留 source/config/archive；非空 runtime、未知 .agenticops 内容或未完成操作阻止解绑。保留目录可在明确 --reuse-materials 后复用，但不能自动导入配置、历史授权或验收。
 
-升级选择现役已有的“导出后整体解绑并重建工位”路径，不使用 task.py 的任务级 purge：后者只允许 inactive，且 completed 无法 deactivate。现役 `bootstrap/workspace_registry.py` 的 workspace purge 持工作空间锁，检查并清理各任务 worktree，再移除整个任务注册、接线和绑定，不以 inactive 为前提。操作会注销原工作空间，因此是显式重建而不是保持绑定在线升级。
-
-具体顺序为：在旧版本完成或明确停用全部任务 → 把需保留的脱敏任务材料、工作空间绑定信息和源码 refs 清单导出到工作空间之外并核验 → 展示整工位 purge 范围并取得明确确认 → 使用旧 Product Root 的 workspace purge 清理受控现场并注销 → 核对旧状态和 worktree 租约均已清理、外部档案和 Git 分支保留 → 升级 Product Root → 在原空闲目录用新模型重新初始化，生成新工位身份并在 legacy 档案索引保留旧 ID。不得为绕过限制 reset completed 或手改注册表。未知残留导致 purge 预检失败时先停下，由研发按精确清单决定是否导出或保留，不自动扩大删除范围。
-
-该现役 workspace purge 路径须以包含 completed/inactive 两类旧任务的 fixture 验证，不能以任务级 purge 测试代替。只有回归证明所需发布版本缺少安全路径时，才先发布保持 epoch 2 的兼容修复版本；修复不必自动提升 updater protocol。旧材料以 legacy 标识保留，不改写成新 run 授权和验收。新 config/source/runtime/archive 名称若已有未知内容，初始化停止且不覆盖；新目录只在切换到支持它们的版本后创建。
-
-回退同样先在新版本完成或终止任务、清理 runtime、移除新活动状态并保全档案，才能用回退协议切换。source 独立仓库和已归档材料默认保留，不被 purge 混删；旧版本如不认识这些目录，只能把它们当非托管数据，不据此宣称旧工作空间已就绪，必要时用独立空目录重新初始化。跨版本不在线猜测迁移活动任务或复用旧确认。
+跨版本是第二阶段编排：先让原版本完成自身清理，再切换产品并调用新版本生成；新版本不解析旧任务或提供旧清理 Runtime。本次不另发过渡版本，旧安装先在原版本保存材料并受控解绑，再重新安装，不承诺旧升级器直接 update。新协议只保障此后的切换。任一已登记工作空间不兼容或无法核验均阻止版本切换；repair 不跨代际采用。回退使用相同干净边界。操作说明见[更新与回退](../usage/update-and-rollback.md)。
 
 ## 11. 可复用验收合同
 

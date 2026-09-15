@@ -4,6 +4,10 @@
 
 本文用于帮助 AIAgent 在 Tapdata 任务中选择构建、测试、本地启动和日志检查方式。命令是参数化示例，执行前必须用目标分支配置校验。
 
+工位接管先冻结完整工程，repository context 返回独立 source 仓库；以下构建 cwd 使用这些已核验路径。持久环境配置位于 config，有效配置、Maven local、插件、日志和报告进入唯一 runtime。操作前核验 Project 资源配方，禁止写共享 Maven 缓存后声称隔离；归档或退出前登记并核验停止写入者。目录或配方生成不证明真实 TM/FE/Web 已启动，必须以实际健康检查与任务产物加载证据结论为准。
+
+当前完整应用 Profile 只定义仓库集合与修订，尚未包含已实证的 actions/toolchain/health_checks 配方。实际工具链、运行参数与数据库环境须按目标分支核验。资源事实通过 workflow/station_resources.py 的 --issue-key/--expected-run-id/--input 登记；外部资源 quiesced 且有回读可先归档，最终释放/清理必须回读 cleaned。归档后仅允许更新既有 external 的清理状态与回读来源，不新增或变更资源身份。
+
 来源：《TapData 产品研发指南（v3.5.4+）》，提取日期为 2026-07-27；移植自 tapstate/agentic-ops（2026-08-27）。
 
 ## 执行前确认
@@ -343,6 +347,32 @@ spring.data.mongodb.obs.uri=mongodb://mongo/tapdata
 ```
 
 路径与目标分支实际启动脚本不一致时，以启动脚本和日志配置为准。
+
+## 本地工位配置输入
+
+以下是用户与 Agent 协作准备环境的输入规范，不是现役自动启动命令。TM/FE 模板分别为 [tm.yml](../templates/station/tm.yml) 与 [fe.yml](../templates/station/fe.yml)，复制到工位 config 目录后按实际端口调整。实际启动前由 Agent 核对冻结分支，生成并登记 runtime/effective-config 中的生效副本，再使用原生工具执行；模板不能证明工具链、企业许可或应用已可用。
+
+用户本地准备以下信息，秘密不要发在聊天或写入任务归档：
+
+| 输入 | 本地约定与核验 |
+|---|---|
+| MongoDB 连接 | config/secrets/mongodb-uri，权限仅当前用户可读；内容为完整 URI，用户名和密码中的特殊字符须 URL 编码 |
+| 数据库与用户 | 使用研发授权的独立库与用户；authSource 是用户实际创建所在库，不由业务库名推断 |
+| MongoDB 拓扑 | 提供已初始化副本集的实际名称；本地参考脚本用 rs0，但不得把未知 standalone 当完整验证环境 |
+| TM 端口 | 模板显式 3030；如调整须同步 FE baseURLs，并核验实际绑定。仅绑定本机的需求还应在生效配置指定 server.address=127.0.0.1 |
+| FE Access Code | config/secrets/fe-access-code，在该工位 TM 初始化后实际获取；首次没有则留缺失，不复制源码示例凭据 |
+| 企业许可 | 给出已授权许可文件的位置与适用版本；无需许可也须以目标模块实际行为确认，不从 OSS 单一检查推断 |
+| 工具链 | 提供可用 JDK、Maven、Node 和包管理器路径；不修改用户全局默认，不自动新增组件 |
+
+MongoDB URI 的结构示例（占位符必须替换后才能使用）：
+
+```text
+mongodb://tapdata:<URL编码密码>@127.0.0.1:27017/tapdata?authSource=<实际认证库>&replicaSet=<实际副本集名>
+```
+
+启动时从上述秘密文件注入 TAPDATA_MONGO_URI 与 TAPDATA_ACCESS_CODE，仅传给应用子进程，不输出环境、命令展开值或原始连接错误。TAPDATA_HOME 指向工位 runtime/app；TM 的静态文件按目标分支装配到其 components/webroot。运行登记只保存路径、身份与安全摘要，不复制秘密内容。应用写入授权数据库，不创建或删除共享 MongoDB 服务；停止和清理也不删除整库。
+
+模板的参考源码为 release-v4.22.0 的 [TM Mongo 配置](https://github.com/tapdata/tapdata/blob/f872e7b77dab1ba243dc20e2d3ea0c2bafe560af/manager/tm/src/main/java/com/tapdata/tm/config/DefaultMongoConfig.java)、[FE 配置](https://github.com/tapdata/tapdata/blob/f872e7b77dab1ba243dc20e2d3ea0c2bafe560af/iengine/iengine-app/src/main/resources/application.yml)及[本地 Mongo 脚本](https://github.com/tapdata/tapdata/blob/f872e7b77dab1ba243dc20e2d3ea0c2bafe560af/scripts/start_mongo.sh)。该分支 TM 可执行产物是 manager/tm/target/tm-0.0.1-SNAPSHOT-exec.jar，FE 为 iengine/ie.jar，不能误用普通非可执行 Jar。Java 编译基线为 17，官方装配使用 Node 20；其它已安装版本须构建验证。以上只证明源码配置和产物约定，不是本机启动、UI 登录或连接器加载验收。
 
 ## 验证记录
 

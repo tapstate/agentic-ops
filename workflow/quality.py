@@ -619,16 +619,8 @@ def apply(base, issue, run_id, revision, command):
     quality_contract.validate(command, "quality-action.schema.json")
     with task_store.task_run_lock(base, issue):
         task_store.resolve_issue(base, issue)
-        task = json.loads(task_store.task_path(base, issue).read_text(encoding="utf-8"))
-        archived = task["run_id"] != run_id
-        recovery = command["action"] in ("receipt", "readback")
-        if task_store.task_status(base, issue) != "active" and command["action"] not in (
-                "draft", "confirm", "prepare_write", "receipt", "readback"):
-            raise ValueError("非 active 任务只允许证据回写及回读")
-        if archived and recovery:
-            task = dict(task, run_id=run_id)
-            if not state_path(base, task).exists():
-                raise ValueError("旧 run 无可恢复记录")
+        task = task_store.read_task(base, issue)
+        task_store.require_development(base, task)
         if task["run_id"] != run_id:
             raise ValueError("任务 run 已变化，拒绝旧请求")
         rules = config(base, task)
@@ -637,11 +629,7 @@ def apply(base, issue, run_id, revision, command):
         state = load(base, task)
         if type(revision) is not int or state["revision"] != revision:
             raise ValueError("质量 revision 已变化，先刷新再提交")
-        if archived:
-            rules = state["events"][-1]["rules"]
-            ctx = state["events"][-1]["context"]
-        else:
-            ctx = context(base, task)
+        ctx = context(base, task)
         if command["action"] == "verification" and command["payload"].get("kind") == "source_sync":
             from workflow import source_sync
             command = copy.deepcopy(command)
@@ -742,7 +730,7 @@ def main():
             result = apply(args.dir, issue, args.expected_run_id, args.expected_revision,
                            json.loads(Path(args.input).read_text(encoding="utf-8")))
         else:
-            task = json.loads(task_store.task_path(args.dir, issue).read_text(encoding="utf-8"))
+            task = task_store.read_task(args.dir, issue)
             rules = config(args.dir, task)
             if not enabled(task, rules):
                 raise ValueError("当前任务未启用质量检查")

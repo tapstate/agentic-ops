@@ -38,7 +38,7 @@ def find_gate_root(cwd):
     current = Path(cwd).resolve()
     for candidate in [current] + list(current.parents):
         if (candidate / ".agenticops" / "workspace.json").is_file() or (
-            candidate / ".agenticops" / "tasks" / "index.json"
+            candidate / ".agenticops" / "current-task.json"
         ).is_file():
             return candidate
     return current
@@ -46,14 +46,27 @@ def find_gate_root(cwd):
 
 def _active_task_directories(root):
     state = Path(root) / ".agenticops"
-    registry = _read_json(state / "tasks" / "index.json")
-    if isinstance(registry, dict) and isinstance(registry.get("tasks"), dict):
-        return [
-            (issue, state / "tasks" / issue)
-            for issue, entry in sorted(registry["tasks"].items())
-            if isinstance(entry, dict) and entry.get("status") == "active"
-        ]
+    task = current_task(state)
+    operation = _read_json(state / "operation.json")
+    if isinstance(task, dict) and not task.get("archive_ref") and task.get("outcome") == "in_progress":
+        if (not (state / "operation.json").exists()
+                or isinstance(operation, dict) and operation.get("status") == "done"):
+            return [(task["issue_key"], state)]
     return []
+
+
+def current_task(state):
+    """只读当前工位信封；不解释或迁移旧任务。"""
+    state = Path(state)
+    if (state / "tasks").exists() or (state / "worktrees").exists():
+        return None
+    envelope = _read_json(state / "current-task.json")
+    if (not isinstance(envelope, dict) or envelope.get("schema_version") != 1
+            or type(envelope.get("revision")) is not int or envelope["revision"] < 0
+            or (state / "current-task.json").is_symlink()):
+        return None
+    task = envelope.get("current")
+    return task if isinstance(task, dict) and task.get("issue_key") and task.get("run_id") else None
 
 
 def _repositories_match(document, context):
@@ -61,8 +74,8 @@ def _repositories_match(document, context):
     branch = context.get("branch", "")
     if not repository:
         return False
-    for item in document.get("repositories", []):
-        if not isinstance(item, dict) or item.get("repository") != repository:
+    for name, item in document.get("task_repositories", {}).items():
+        if not isinstance(item, dict) or name != repository:
             continue
         if not context.get("branch_relevant", True):
             return True
@@ -72,13 +85,13 @@ def _repositories_match(document, context):
 
 
 def find_task_directory(cwd, context=None, issue_key=None):
-    """按 Jira 任务号或仓库+分支唯一解析 active 任务目录。"""
+    """按 Jira 任务号或仓库+分支唯一解析 当前任务目录。"""
     directory, _ = resolve_task_directory(cwd, context=context, issue_key=issue_key)
     return directory
 
 
 def resolve_task_directory(cwd, context=None, issue_key=None):
-    """解析 active 任务，并返回可审计的解析状态。"""
+    """解析 当前任务，并返回可审计的解析状态。"""
     root = find_gate_root(cwd)
     candidates = _active_task_directories(root)
     if issue_key:
@@ -87,7 +100,7 @@ def resolve_task_directory(cwd, context=None, issue_key=None):
         matches = []
         branch_context_required = False
         for _, path in candidates:
-            task = _read_json(path / "state.json")
+            task = current_task(path)
             if task and _repositories_match(task, context):
                 matches.append(path)
             elif (
@@ -118,11 +131,11 @@ def load_authorization_for_issue(cwd, issue_key):
 
 def jira_status_intent(task_directory, transition_id):
     """核对当前 run 是否准备了同一 Jira transition；不解释项目规则。"""
-    task = _read_json(Path(task_directory) / "state.json")
+    task = current_task(task_directory)
     if not isinstance(task, dict) or not transition_id:
         return "missing"
     matched = False
-    for path in sorted(Path(task_directory).glob("jira-status-*.json")):
+    for path in sorted((Path(task_directory) / "evidence").glob("jira-status-*.json")):
         state = _read_json(path)
         if not isinstance(state, dict) or state.get("run_id") != task.get("run_id"):
             continue
@@ -135,7 +148,7 @@ def jira_status_intent(task_directory, transition_id):
             break
     if not matched:
         return "missing"
-    events = Path(task_directory) / "events.jsonl"
+    events = Path(task_directory) / "evidence" / "events.jsonl"
     try:
         lines = events.read_text(encoding="utf-8").splitlines() if events.is_file() else []
     except OSError:
@@ -154,12 +167,12 @@ def jira_status_intent(task_directory, transition_id):
 
 def jira_watermark_intent(task_directory, issue_key, field_id, digest):
     """核对当前 run 是否准备了同一接管水印字段载荷；不解释项目规则。"""
-    task = _read_json(Path(task_directory) / "state.json")
+    task = current_task(task_directory)
     if (not isinstance(task, dict) or str(task.get("issue_key") or "").upper() != str(issue_key or "").upper() or
             not field_id or not digest):
         return "missing"
     matched = False
-    for path in sorted(Path(task_directory).glob("jira-watermark-*.json")):
+    for path in sorted((Path(task_directory) / "evidence").glob("jira-watermark-*.json")):
         state = _read_json(path)
         record = state.get("watermark") if isinstance(state, dict) else None
         if (state.get("run_id") == task.get("run_id") and isinstance(record, dict) and
@@ -177,7 +190,7 @@ def jira_watermark_intent(task_directory, issue_key, field_id, digest):
             break
     if not matched:
         return "missing"
-    events = Path(task_directory) / "events.jsonl"
+    events = Path(task_directory) / "evidence" / "events.jsonl"
     try:
         lines = events.read_text(encoding="utf-8").splitlines() if events.is_file() else []
     except OSError:
@@ -196,7 +209,7 @@ def jira_watermark_intent(task_directory, issue_key, field_id, digest):
 
 
 def find_authorization(cwd, context=None, issue_key=None):
-    """从项目工作空间的 active 任务中唯一解析当前操作授权。"""
+    """从项目工作空间的 当前任务中唯一解析当前操作授权。"""
     directory = find_task_directory(cwd, context=context, issue_key=issue_key)
     if directory is None:
         return None, None
@@ -204,26 +217,29 @@ def find_authorization(cwd, context=None, issue_key=None):
     return (_read_json(path), str(path)) if path.is_file() else (None, str(path))
 
 
-def task_worktree_matches(task_directory, git_cwd, context):
-    """确认显式 Git 工作目录就是已解析任务的当前绑定 worktree。"""
-    task = _read_json(Path(task_directory) / "state.json")
+def task_source_matches(task_directory, git_cwd, context):
+    """确认显式 Git 工作目录就是已解析任务的固定 source 仓库。"""
+    task = current_task(task_directory)
     if not isinstance(task, dict):
         return False
     try:
         candidate = Path(git_cwd).resolve()
     except OSError:
         return False
-    for item in task.get("repositories", []):
+    for name, item in task.get("task_repositories", {}).items():
         if not isinstance(item, dict):
             continue
-        worktree = item.get("worktree")
+        entry = task.get("engineering_baseline", {}).get("repositories", {}).get(name, {})
+        expected = Path(task_directory).parent / "source" / name
+        if any(path.is_symlink() for path in (expected, expected.parent, expected.parent.parent, expected / ".git")):
+            continue
         if (
-            item.get("repository") == context.get("origin")
+            name == context.get("origin")
             and item.get("work_branch") == context.get("branch")
-            and isinstance(worktree, dict)
-            and worktree.get("status") == "prepared"
-            and isinstance(worktree.get("path"), str)
-            and Path(worktree["path"]).resolve() == candidate
+            and task.get("source_prepared") is True
+            and entry.get("path") == "source/" + name
+            and (expected / ".git").is_dir()
+            and expected.resolve() == candidate
         ):
             return True
     return False
@@ -382,7 +398,7 @@ def check_authorization(auth, context, policy, now=None):
     if isinstance(repository_fact_error, str) and repository_fact_error:
         reasons.append(repository_fact_error)
     if not auth:
-        return False, ["不存在可唯一匹配的 active 任务执行授权"]
+        return False, ["不存在可唯一匹配的 当前任务执行授权"]
     if auth.get("scope") != "task_execution":
         reasons.append("授权 scope 不是 task_execution")
     if auth.get("status") != "active":
@@ -562,46 +578,10 @@ def evaluate(operation, context, auth, policy, now=None):
                 "Agent 必须停止直接推送；请通过受保护的审查与合入流程处理。",
             )
 
-    if level == "controlled":
-        issue_key = context.get("issue_key")
-        if not issue_key:
-            return _result(
-                ASK,
-                operation,
-                "受控仓库准备必须显式指定 Jira 任务号",
-                "issue_key_required",
-                "请使用 workflow/task.py repository prepare --issue-key <KEY> 重试。",
-            )
-        resolution = context.get("task_resolution")
-        if resolution != "resolved":
-            reason = (
-                "Jira 任务 %s 不是当前工作空间中的 active 任务" % issue_key
-                if resolution == "no_active_task"
-                else "当前执行上下文无法唯一解析 active 任务"
-            )
-            code = "no_active_task" if resolution == "no_active_task" else "ambiguous_active_task"
-            return _result(
-                ASK,
-                operation,
-                reason,
-                code,
-                "请先接管或恢复对应任务，再使用显式 --issue-key 重试；Agent 停止仓库准备及其依赖步骤。",
-            )
-        return _result(
-            ALLOW,
-            operation,
-            "active 任务 %s 的受控 Source Pool 与 linked worktree 准备可自动执行" % issue_key,
-            "controlled_prepare_allowed",
-        )
-
     if level == "confirmation":
-        return _result(
-            ASK,
-            operation,
-            "项目仓库预下载会批量写入 Source Pool，必须由研发工程师逐次确认",
-            "project_repository_prefetch_confirmation_required",
-            "请研发工程师确认本次预下载；确认后可在目标工作空间原样执行 agenticops workspace prefetch --yes。",
-        )
+        return _result(ASK, operation, "工位生命周期操作必须由研发确认精确任务与处置范围",
+                           "station_confirmation_required",
+                           "请确认本次工位操作及其请求摘要；归档不授予删除权限，释放或清理仍须核验精确清单。")
 
     if level == "excluded":
         return _result(
@@ -615,20 +595,20 @@ def evaluate(operation, context, auth, policy, now=None):
     resolution = context.get("task_resolution")
     if resolution != "resolved":
         if resolution == "branch_context_required":
-            reason = "当前操作已匹配 active 任务仓库，但无法确定 Git 工作分支"
+            reason = "当前操作已匹配 当前任务仓库，但无法确定 Git 工作分支"
             code = "branch_context_required"
             required_action = (
-                "请先使用 repository context --issue-key <KEY> --json 获取对应任务 worktree，"
+                "请先使用 repository context --issue-key <KEY> --json 获取当前工位 source 仓库，"
                 "并将工具工作目录设为该路径后原样重试；不得用 PR 正文或重新接管推断任务。"
             )
         elif resolution == "no_active_task":
-            reason = "当前操作无法匹配 active 任务"
+            reason = "当前操作无法匹配 当前任务"
             code = "no_active_task"
-            required_action = "请先接管任务或消除 active 任务歧义；Agent 在恢复前停止该操作及其依赖步骤。"
+            required_action = "请先接管任务并核对工位身份；Agent 在恢复前停止该操作及其依赖步骤。"
         else:
-            reason = "当前操作匹配到多个 active 任务"
+            reason = "当前操作的工位身份不明确"
             code = "ambiguous_active_task"
-            required_action = "请先接管任务或消除 active 任务歧义；Agent 在恢复前停止该操作及其依赖步骤。"
+            required_action = "请先接管任务并核对工位身份；Agent 在恢复前停止该操作及其依赖步骤。"
         return _result(
             ASK,
             operation,
@@ -641,7 +621,7 @@ def evaluate(operation, context, auth, policy, now=None):
         return _result(
             ASK,
             operation,
-            "active 任务尚未签发 task_execution 授权",
+            "当前任务尚未签发 task_execution 授权",
             "authorization_missing",
             "请完成方案确认并签发 task_execution 授权；Agent 在授权前停止该操作及其依赖步骤。",
         )

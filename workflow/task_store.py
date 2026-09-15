@@ -1,201 +1,202 @@
 #!/usr/bin/env python3
-"""项目工作空间中的多任务状态索引与任务级文件路径。
-
-工作空间只绑定一个 Product Project；任务注册表统一管理任务身份与激活状态，任务
-事实、授权、事件和 CI 记录按 Jira issue key 隔离保存。
-"""
+"""单任务工位状态；只保留 current-task.json，不迁移旧状态。"""
 from __future__ import annotations
-
+import copy
 import json
 import os
 import re
-import shutil
-import stat
-import time
+import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
-
 import fcntl
 
-
-REGISTRY_VERSION = 1
 ISSUE_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*$")
 RUN_ID_PATTERN = re.compile(r"^run-[a-z0-9][a-z0-9-]*$")
-INTERACTION_NAME_PATTERN = re.compile(
-    r"^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.(?:json|jsonl|log|md|txt))?$"
-)
+INTERACTION_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.(?:json|jsonl|log|md|txt))?$")
 _held_locks = threading.local()
-
 
 def now():
     return time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
-
 def workspace_path(base):
     return Path(base).resolve()
-
 
 def state_path(base):
     return workspace_path(base) / ".agenticops"
 
+def validate_issue_key(value):
+    value = str(value or "").strip().upper()
+    if not ISSUE_KEY_PATTERN.fullmatch(value):
+        raise ValueError("Jira issue key 格式无效")
+    return value
 
-def registry_path(base):
-    return state_path(base) / "tasks" / "index.json"
+def current_path(base):
+    return state_path(base) / "current-task.json"
 
-
-def task_directory(base, issue_key):
-    return state_path(base) / "tasks" / validate_issue_key(issue_key)
-
-
-def interaction_directory(base, issue_key, run_id):
-    """返回当前任务 run 的 Agent 交互文件目录，不创建目录。"""
-    issue = validate_issue_key(issue_key)
-    value = str(run_id or "").strip()
-    if not RUN_ID_PATTERN.fullmatch(value):
-        raise ValueError("任务 run_id 格式无效：%s" % run_id)
-    return task_directory(base, issue) / value
-
-
-def prepare_interaction_directory(base, issue_key, run_id, create=False, require=False):
-    """校验交互目录路径链不含符号链接，并按需创建 run 目录。"""
-    directory = interaction_directory(base, issue_key, run_id)
-    chain = [state_path(base), state_path(base) / "tasks", directory.parent]
-    for path in chain:
-        try:
-            info = path.lstat()
-        except FileNotFoundError as error:
-            raise ValueError("交互目录父路径缺失：%s" % path) from error
-        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
-            raise ValueError("交互目录父路径不是安全目录：%s" % path)
+def read_current(base):
+    path = current_path(base)
+    if state_path(base).is_symlink():
+        raise ValueError("工作空间状态目录不能是符号链接")
+    if any((state_path(base) / name).exists() or (state_path(base) / name).is_symlink() for name in ("tasks", "worktrees")):
+        raise ValueError("旧工作空间必须使用原版本受控解绑并重建")
+    if path.is_symlink():
+        raise ValueError("当前状态不能是符号链接")
     try:
-        info = directory.lstat()
-    except FileNotFoundError:
-        if not create:
-            if require:
-                raise ValueError("目标 run 没有已知交互目录：%s" % run_id)
-            return directory
-        try:
-            directory.mkdir(mode=0o700)
-            info = directory.lstat()
-        except OSError as error:
-            raise ValueError("无法创建交互目录：%s" % error) from error
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
-        raise ValueError("交互目录不是安全目录：%s" % directory)
-    return directory
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError("当前工位状态缺失或无法读取") from error
+    if (not isinstance(document, dict)
+            or set(document) != {"schema_version", "revision", "current"}
+            or document["schema_version"] != 1
+            or type(document["revision"]) is not int or document["revision"] < 0):
+        raise ValueError("工位状态结构无效")
+    current = document["current"]
+    if current is not None and (not isinstance(current, dict)
+            or validate_issue_key(current.get("issue_key")) != current.get("issue_key")
+            or not RUN_ID_PATTERN.fullmatch(str(current.get("run_id", "")))):
+        raise ValueError("当前任务身份无效")
+    return document
 
+def initialize_current(base):
+    if current_path(base).exists():
+        return read_current(base)
+    if any((state_path(base) / name).exists() for name in ("tasks", "worktrees")):
+        raise ValueError("不能在线迁移旧任务")
+    value = {"schema_version": 1, "revision": 0, "current": None}
+    _write_json_atomic(current_path(base), value)
+    return value
 
-def interaction_path(base, issue_key, run_id, name, create=False):
-    """解析受控交互文件路径；文件名禁止目录、隐藏文件和非约定扩展名。"""
-    value = str(name or "").strip()
-    if not INTERACTION_NAME_PATTERN.fullmatch(value):
-        raise ValueError(
-            "交互文件名无效：%s；请使用 lowercase-kebab-case 和 json/jsonl/log/md/txt 扩展名"
-            % name
-        )
-    directory = prepare_interaction_directory(
-        base, issue_key, run_id, create=create, require=create
-    )
-    path = directory / value
-    try:
-        info = path.lstat()
-    except FileNotFoundError:
-        return path
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-        raise ValueError("交互文件路径不是普通文件：%s" % path)
-    return path
+def compare_and_set(base, expected_revision, current):
+    before = read_current(base)
+    if before["revision"] != expected_revision:
+        raise ValueError("工位 revision 已变化")
+    value = {"schema_version": 1, "revision": expected_revision + 1, "current": copy.deepcopy(current)}
+    _write_json_atomic(current_path(base), value)
+    return value
 
+def read_task(base, issue_key=None):
+    value = read_current(base)
+    task = value["current"]
+    if task is None:
+        return None
+    if issue_key is not None and validate_issue_key(issue_key) != task["issue_key"]:
+        raise ValueError("请求任务不是当前任务")
+    task = copy.deepcopy(task)
+    task["_revision"] = value["revision"]
+    # 现有质量工具消费的字段视图，不再持久化第二份仓库基线或 worktree 状态。
+    entries = task.get("engineering_baseline", {}).get("repositories", {})
+    repositories = []
+    for name, binding in task.get("task_repositories", {}).items():
+        if name not in entries:
+            raise ValueError("任务仓库不属于冻结工程基线")
+        entry = entries[name]
+        observation = binding.get("observation") or {}
+        results = observation.get("results", {})
+        from workflow.project_rules import canonical_repository_endpoint
+        repositories.append({
+            "repository": name, "authorized_endpoint": canonical_repository_endpoint(entry["origin"]),
+            "base_branch": binding["target_branch"], "base_sha": entry["commit_sha"],
+            "work_branch": binding["work_branch"], "approved_scope": "\n".join(binding["approved_scope"]),
+            "verification_method": binding["verification_method"],
+            "catalog_digest": binding["baseline_entry_digest"],
+            "worktree": ({"path": str(workspace_path(base) / entry["path"]), "status": "prepared"}
+                         if task.get("source_prepared") else None),
+            "pull_request": results.get("pull_request"), "ci": results.get("ci"),
+        })
+    task["repositories"] = repositories
+    return task
+
+def write_task(base, task):
+    value = copy.deepcopy(task)
+    expected = value.pop("_revision", None)
+    repositories = value.pop("repositories", [])
+    for row in repositories:
+        binding = value.get("task_repositories", {}).get(row["repository"])
+        if binding is None:
+            raise ValueError("必须先登记 task_repositories，不能写入旧仓库清单")
+        observation = binding.get("observation") or {}
+        observation["results"] = {"pull_request": row.get("pull_request"), "ci": row.get("ci")}
+        binding["observation"] = observation
+    before = read_current(base)
+    current = before["current"]
+    if current is not None:
+        if (current["issue_key"], current["run_id"]) != (value["issue_key"], value["run_id"]):
+            raise ValueError("工位已占用，禁止覆盖当前任务")
+        if expected is None:
+            raise ValueError("写入缺少预期 revision")
+    elif expected is None:
+        expected = before["revision"]
+    result = compare_and_set(base, expected, value)
+    task["_revision"] = result["revision"]
 
 def task_path(base, issue_key):
-    return task_directory(base, issue_key) / "state.json"
+    validate_issue_key(issue_key)
+    return current_path(base)
 
+def task_directory(base, issue_key):
+    resolve_issue(base, issue_key)
+    return state_path(base) / "evidence"
 
 def authorization_path(base, issue_key):
-    return task_directory(base, issue_key) / "authorization.json"
-
+    resolve_issue(base, issue_key)
+    return state_path(base) / "authorization.json"
 
 def events_path(base, issue_key):
     return task_directory(base, issue_key) / "events.jsonl"
 
-
 def ci_path(base, issue_key, pr):
     return task_directory(base, issue_key) / ("ci-%s.json" % pr)
 
+def interaction_directory(base, issue_key, run_id):
+    check_expected_run(base, issue_key, run_id)
+    return task_directory(base, issue_key) / "interactions"
 
-def validate_issue_key(issue_key):
-    value = str(issue_key or "").strip().upper()
-    if not ISSUE_KEY_PATTERN.fullmatch(value):
-        raise ValueError("Jira issue key 格式无效：%s" % issue_key)
-    return value
+def prepare_interaction_directory(base, issue_key, run_id, create=False, require=False):
+    directory = interaction_directory(base, issue_key, run_id)
+    for path in (directory.parent, directory):
+        if path.is_symlink() or (path.exists() and not path.is_dir()):
+            raise ValueError("交互目录必须为真实目录")
+        if create:
+            path.mkdir(mode=0o700, exist_ok=True)
+    if require and not directory.is_dir():
+        raise ValueError("交互目录缺失")
+    return directory
 
+def interaction_path(base, issue_key, run_id, name, create=False):
+    if not isinstance(name, str) or not INTERACTION_NAME_PATTERN.fullmatch(name):
+        raise ValueError("交互文件名无效")
+    path = prepare_interaction_directory(base, issue_key, run_id, create=create, require=create) / name
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise ValueError("交互文件不是普通文件")
+    return path
 
 def workspace_project(base):
-    path = state_path(base) / "workspace.json"
-    if not path.is_file():
-        raise ValueError("工作空间缺少 .agenticops/workspace.json，请先执行 agenticops init")
-    try:
-        binding = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ValueError("工作空间绑定无法读取：%s" % error) from error
-    project = binding.get("project")
-    if not isinstance(project, str) or not project:
-        raise ValueError("工作空间绑定缺少 project")
-    return project
-
-
-def empty_registry(project):
-    return {"schema_version": REGISTRY_VERSION, "project": project, "tasks": {}}
-
-
-def load_registry(base, create=False):
-    migrate_legacy(base)
-    path = registry_path(base)
-    if not path.is_file():
-        if create:
-            return empty_registry(workspace_project(base))
-        return None
-    try:
-        registry = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ValueError("任务注册表无法读取：%s" % error) from error
-    if registry.get("schema_version") != REGISTRY_VERSION:
-        raise ValueError("不支持的任务注册表版本：%s" % registry.get("schema_version"))
-    if registry.get("project") != workspace_project(base):
-        raise ValueError("任务注册表 project 与工作空间绑定不一致")
-    if not isinstance(registry.get("tasks"), dict):
-        raise ValueError("任务注册表 tasks 必须是对象")
-    for issue, entry in registry["tasks"].items():
-        if validate_issue_key(issue) != issue:
-            raise ValueError("任务注册表 issue key 未规范化：%s" % issue)
-        if not isinstance(entry, dict) or entry.get("status") not in (
-            "active", "inactive", "completed"
-        ):
-            raise ValueError("任务注册表状态无效：%s" % issue)
-    return registry
-
+    return json.loads((state_path(base) / "workspace.json").read_text())["project"]
 
 def _write_json_atomic(path, document):
+    path = Path(path)
+    if path.is_symlink():
+        raise ValueError("不能覆盖符号链接状态")
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(".%s.%s.tmp" % (path.name, os.getpid()))
-    temporary.write_text(
-        json.dumps(document, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    os.replace(str(temporary), str(path))
-
-
-@contextmanager
-def registry_lock(base):
-    root = state_path(base)
-    root.mkdir(parents=True, exist_ok=True)
-    with open(root / "tasks.lock", "a+", encoding="utf-8") as stream:
-        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+    fd, name = tempfile.mkstemp(prefix="." + path.name + ".", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(document, stream, ensure_ascii=False, indent=2, allow_nan=False)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(name, path)
+        parent = os.open(str(path.parent), os.O_RDONLY)
         try:
-            yield
+            os.fsync(parent)
         finally:
-            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
-
+            os.close(parent)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
 
 def _active_product_lifecycle(product_root):
     lock = Path(product_root).resolve() / ".local" / "lifecycle.lock"
@@ -220,16 +221,15 @@ def _active_product_lifecycle(product_root):
 
 
 def _require_workspace_epoch_supported(base, product_root):
-    """阻止新产品继续写入尚未 repair/adopt 的旧代际工作空间。"""
+    """只允许当前产品支持的已初始化工位写入；不采用旧代际。"""
     manifest_path = (
         Path(product_root).resolve()
         / "contracts"
         / "workspace-state-compatibility.json"
     )
     init_path = state_path(base) / "init.json"
-    # 协议发布前的产品根和测试夹具没有清单；双方均进入协议后才执行代际门禁。
     if not manifest_path.is_file() or not init_path.is_file():
-        return
+        raise ValueError("工作空间兼容性清单或初始化标记缺失，请受控解绑并重建")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         init = json.loads(init_path.read_text(encoding="utf-8"))
@@ -237,7 +237,7 @@ def _require_workspace_epoch_supported(base, product_root):
         raise ValueError("工作空间状态代际无法核验：%s" % error) from error
     supported = manifest.get("supported_workspace_state_epochs")
     legacy = manifest.get("legacy_workspace_state_epoch")
-    epoch = init.get("workspace_state_epoch", legacy)
+    epoch = init.get("workspace_state_epoch")
     if (
         not isinstance(supported, list)
         or not supported
@@ -276,6 +276,8 @@ def task_state_lock(
         return
     state_root = state_path(base)
     binding_path = state_root / "workspace.json"
+    if state_root.is_symlink() or binding_path.is_symlink():
+        raise ValueError("工作空间状态目录与绑定不能是符号链接")
     try:
         binding = json.loads(binding_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -303,7 +305,8 @@ def task_state_lock(
             except (OSError, json.JSONDecodeError) as error:
                 raise ValueError("获得任务状态锁后工作空间绑定无法读取：%s" % error) from error
             current_root = current.get("product_root")
-            if not isinstance(current_root, str) or Path(current_root).resolve() != Path(product_root).resolve():
+            if (current != binding or state_root.is_symlink() or binding_path.is_symlink()
+                    or not isinstance(current_root, str) or Path(current_root).resolve() != Path(product_root).resolve()):
                 raise ValueError("获得任务状态锁后工作空间绑定已变化，拒绝继续")
             lifecycle = _active_product_lifecycle(current_root)
             if lifecycle and not allow_product_lifecycle:
@@ -331,252 +334,62 @@ def task_run_lock(base, issue_key):
         yield
 
 
+
 def check_expected_run(base, issue_key, expected_run_id):
-    """由持锁的变更入口调用；不得用执行时的新 run 自动补齐旧请求。"""
-    if not isinstance(expected_run_id, str) or not expected_run_id:
-        raise ValueError("状态变更需要 --expected-run-id；先读取当前任务状态")
-    try:
-        task = json.loads(task_path(base, issue_key).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise ValueError("当前任务状态无法核验，拒绝写入：%s" % error) from error
-    if not isinstance(task, dict) or task.get("run_id") != expected_run_id:
-        raise ValueError("任务 run 已变化或状态无效，拒绝旧请求")
+    if not expected_run_id:
+        raise ValueError("状态变更需要 --expected-run-id")
+    task = read_task(base, issue_key)
+    if task is None or task["run_id"] != expected_run_id:
+        raise ValueError("任务 run 已变化，拒绝旧请求")
     return task
 
+def require_development(base, task):
+    if task.get("archive_ref") or task.get("outcome") in ("completed", "interrupted"):
+        raise ValueError("任务已归档或终止，只允许释放或清理")
+    path = state_path(base) / "operation.json"
+    if path.exists() and json.loads(path.read_text()).get("status") != "done":
+        raise ValueError("工位有未完成操作，请先恢复")
 
 def task_mutation(function):
-    """任务 CLI 变更入口共享锁和 run 校验，不包含项目规则。"""
     @wraps(function)
     def locked(args):
-        issue = resolve_issue(args.dir, args.issue_key)
-        with task_run_lock(args.dir, issue):
-            check_expected_run(args.dir, issue, getattr(args, "expected_run_id", None))
+        with task_state_lock(args.dir):
+            issue = resolve_issue(args.dir, args.issue_key)
+            task = check_expected_run(args.dir, issue, getattr(args, "expected_run_id", None))
+            require_development(args.dir, task)
             args.issue_key = issue
             return function(args)
     return locked
 
-
-def save_registry(base, registry):
-    _write_json_atomic(registry_path(base), registry)
-
-
-def register(base, issue_key, status="active"):
-    issue = validate_issue_key(issue_key)
-    with registry_lock(base):
-        registry = load_registry(base, create=True)
-        entry = registry["tasks"].get(issue)
-        timestamp = now()
-        if entry is None:
-            registry["tasks"][issue] = {
-                "status": status,
-                "created_at": timestamp,
-                "updated_at": timestamp,
-            }
-        else:
-            entry["status"] = status
-            entry["updated_at"] = timestamp
-        save_registry(base, registry)
-    return registry["tasks"][issue]
-
-
-def set_status(base, issue_key, status):
-    if status not in ("active", "inactive", "completed"):
-        raise ValueError("未知任务注册状态：%s" % status)
-    issue = validate_issue_key(issue_key)
-    with registry_lock(base):
-        registry = load_registry(base, create=False)
-        if registry is None or issue not in registry["tasks"]:
-            raise ValueError("任务未注册：%s" % issue)
-        registry["tasks"][issue]["status"] = status
-        registry["tasks"][issue]["updated_at"] = now()
-        save_registry(base, registry)
-
-
-def task_status(base, issue_key):
-    issue = validate_issue_key(issue_key)
-    registry = load_registry(base, create=False)
-    if registry is None or issue not in registry["tasks"]:
-        raise ValueError("任务未注册：%s" % issue)
-    return registry["tasks"][issue]["status"]
-
-
-def purge_inactive(base, issue_key, expected_run_id):
-    """删除一个已停用且已完成 worktree 清理的任务状态。"""
-    issue = validate_issue_key(issue_key)
-    with registry_lock(base):
-        registry = load_registry(base, create=False)
-        if registry is None or issue not in registry["tasks"]:
-            raise ValueError("任务未注册：%s" % issue)
-        entry = dict(registry["tasks"][issue])
-        if entry.get("status") != "inactive":
-            raise ValueError("purge 只允许 inactive 任务：%s（当前 %s）" % (issue, entry.get("status")))
-        directory = task_directory(base, issue)
-        state = task_path(base, issue)
-        if not directory.is_dir() or not state.is_file():
-            raise ValueError("任务目录或状态缺失，拒绝 purge：%s" % directory)
-        try:
-            task = json.loads(state.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise ValueError("任务状态无法读取，拒绝 purge：%s" % error) from error
-        if task.get("run_id") != expected_run_id:
-            raise ValueError(
-                "purge 绑定的 run 已失效（当前 %s，传入 %s）；请重新检查任务状态"
-                % (task.get("run_id"), expected_run_id)
-            )
-        prepared = [
-            item.get("repository")
-            for item in task.get("repositories", [])
-            if (item.get("worktree") or {}).get("status") == "prepared"
-        ]
-        if prepared:
-            raise ValueError("purge 前仍有 prepared worktree：%s" % "、".join(prepared))
-
-        staged = directory.with_name(".purging-%s-%s" % (issue, os.getpid()))
-        if staged.exists():
-            raise ValueError("检测到未完成的 purge 暂存目录：%s" % staged)
-        os.replace(str(directory), str(staged))
-        del registry["tasks"][issue]
-        try:
-            save_registry(base, registry)
-        except Exception:
-            os.replace(str(staged), str(directory))
-            raise
-        try:
-            shutil.rmtree(staged)
-        except Exception as error:
-            # 尽力恢复注册与目录；恢复失败时保留显式异常，绝不报告 purge 成功。
-            registry["tasks"][issue] = entry
-            save_registry(base, registry)
-            if staged.exists() and not directory.exists():
-                os.replace(str(staged), str(directory))
-            raise ValueError("任务目录删除失败，已恢复注册：%s" % error) from error
-
-
 def registered_issues(base, statuses=None):
-    registry = load_registry(base, create=False)
-    if registry is None:
+    task = read_task(base)
+    if task is None:
         return []
-    accepted = set(statuses or ())
-    return sorted(
-        issue
-        for issue, entry in registry["tasks"].items()
-        if not accepted or entry.get("status") in accepted
-    )
-
+    status = "completed" if task.get("outcome") == "completed" else "active"
+    return [task["issue_key"]] if not statuses or status in statuses else []
 
 def resolve_issue(base, issue_key=None):
-    if issue_key:
-        issue = validate_issue_key(issue_key)
-        if issue not in registered_issues(base):
-            raise ValueError("任务未注册：%s" % issue)
-        return issue
-    active = registered_issues(base, statuses=("active",))
-    if len(active) == 1:
-        return active[0]
-    if not active:
-        raise ValueError("工作空间没有激活任务，请先 init 或 activate")
-    raise ValueError(
-        "工作空间有多个激活任务，必须显式提供 --issue-key：%s" % ", ".join(active)
-    )
-
+    task = read_task(base, issue_key)
+    if task is None:
+        raise ValueError("工位没有当前任务，请先接管")
+    return task["issue_key"]
 
 def resolve_active_issue(base, issue_key=None):
-    issue = resolve_issue(base, issue_key)
-    if issue not in registered_issues(base, statuses=("active",)):
-        raise ValueError("任务不是 active，不能执行状态变更：%s" % issue)
-    return issue
+    task = read_task(base, issue_key)
+    if task is None:
+        raise ValueError("工位没有当前任务")
+    require_development(base, task)
+    return task["issue_key"]
 
+def task_status(base, issue_key):
+    task = read_task(base, issue_key)
+    if task is None:
+        raise ValueError("工位没有当前任务")
+    return "completed" if task.get("outcome") == "completed" else "active"
 
-def _remove_empty_tree(path):
-    for directory in sorted(
-        (item for item in path.rglob("*") if item.is_dir()), reverse=True
-    ):
-        try:
-            directory.rmdir()
-        except OSError:
-            pass
-    try:
-        path.rmdir()
-    except OSError:
-        pass
-
-
-def migrate_legacy(base):
-    """把开发期 `.gate` 状态一次性迁入 `.agenticops/tasks`。"""
-    legacy_root = workspace_path(base) / ".gate"
-    if not legacy_root.is_dir():
-        return None
-    new_registry = registry_path(base)
-    legacy_registry = legacy_root / "tasks.json"
-    if legacy_registry.is_file():
-        if new_registry.exists():
-            raise ValueError("新旧任务注册表同时存在，拒绝自动合并")
-        try:
-            registry = json.loads(legacy_registry.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise ValueError("旧任务注册表无法迁移：%s" % error) from error
-        tasks = registry.get("tasks")
-        if not isinstance(tasks, dict):
-            raise ValueError("旧任务注册表 tasks 必须是对象")
-        migrations = []
-        for issue in sorted(tasks):
-            validate_issue_key(issue)
-            source = legacy_root / "tasks" / issue
-            destination = task_directory(base, issue)
-            if not source.is_dir() or not (source / "task.json").is_file():
-                raise ValueError("旧任务目录或 task.json 缺失：%s" % source)
-            if destination.exists():
-                raise ValueError("任务迁移目标已存在，拒绝覆盖：%s" % destination)
-            migrations.append((source, destination))
-        for source, destination in migrations:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(str(source), str(destination))
-            old_state = destination / "task.json"
-            os.replace(str(old_state), str(destination / "state.json"))
-        new_registry.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(str(legacy_registry), str(new_registry))
-        _remove_empty_tree(legacy_root)
-        return "multiple"
-
-    legacy_task = legacy_root / "task.json"
-    if not legacy_task.is_file():
-        _remove_empty_tree(legacy_root)
-        return None
-    try:
-        task = json.loads(legacy_task.read_text(encoding="utf-8"))
-        issue = validate_issue_key(task.get("issue_key"))
-    except (OSError, json.JSONDecodeError, ValueError) as error:
-        raise ValueError("旧版任务状态无法迁移：%s" % error) from error
-    destination = task_directory(base, issue)
-    if registry_path(base).exists():
-        raise ValueError("新旧任务注册表同时存在，拒绝自动合并")
-    if destination.exists():
-        raise ValueError("任务迁移目标已存在，拒绝覆盖：%s" % destination)
-    destination.mkdir(parents=True, exist_ok=True)
-    legacy_files = [
-        legacy_task,
-        legacy_root / "authorization.json",
-        legacy_root / "events.jsonl",
-    ]
-    legacy_files.extend(sorted(legacy_root.glob("ci-*.json")))
-    pairs = []
-    for source in legacy_files:
-        if not source.exists():
-            continue
-        target_name = "state.json" if source.name == "task.json" else source.name
-        target = destination / target_name
-        if target.exists():
-            raise ValueError("旧版状态迁移目标已存在，拒绝覆盖：%s" % target)
-        pairs.append((source, target))
-    for source, target in pairs:
-        os.replace(str(source), str(target))
-    registry = empty_registry(workspace_project(base))
-    timestamp = now()
-    registry["tasks"][issue] = {
-        "status": "active",
-        "created_at": timestamp,
-        "updated_at": timestamp,
-    }
-    save_registry(base, registry)
-    _remove_empty_tree(legacy_root)
-    return issue
+def set_status(base, issue_key, status):
+    if status != "completed":
+        raise ValueError("不再支持激活/停用多任务；请归档后释放或清理")
+    task = read_task(base, issue_key)
+    task["outcome"] = "completed"
+    write_task(base, task)

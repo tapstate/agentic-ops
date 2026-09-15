@@ -2,7 +2,7 @@
 """任务授权工具：按当前任务的多仓范围签发或撤销授权伞。
 
 签发即模拟"设计审查通过"这一人工节点：授权绑定任务、仓库、分支和计划版本，
-写入 `.agenticops/tasks/<issue-key>/authorization.json`。Workflow 在实现和验收检查点
+写入 `.agenticops/authorization.json`。Workflow 在实现和验收检查点
 重新核验确认绑定；它不代表 Git/Jira/PR 每次原生调用均经过 AgenticOps 授权。
 
 用法：
@@ -130,7 +130,7 @@ def cmd_grant(args):
         print("错误：没有任务状态，请先初始化任务并确认仓库范围", file=sys.stderr)
         return 2
     try:
-        task = json.loads(current_task_path.read_text(encoding="utf-8"))
+        task = task_store.read_task(args.dir, issue)
     except (OSError, json.JSONDecodeError) as exc:
         print("错误：任务状态无法读取：%s" % exc, file=sys.stderr)
         return 2
@@ -260,7 +260,6 @@ def main():
     args = parser.parse_args()
     try:
         task_store.workspace_project(args.dir)
-        task_store.migrate_legacy(args.dir)
         return args.func(args)
     except ValueError as error:
         print("错误：%s" % error, file=sys.stderr)

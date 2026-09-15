@@ -17,6 +17,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workflow import authorization, ci, evidence, failures, issue_versions, pr_ready, quality, quality_contract, task, task_store
+from station_fixture import save_task as save_station_task, initialize_workspace
 
 
 def proof():
@@ -60,10 +61,10 @@ class QualityTests(unittest.TestCase):
                          {"repository": "tapdata/tapdata-manager", "approved_scope": "bug-fix"}],
                      "pending": None, "history": []}
         self.save_task()
-        task_store.register(self.base, "TAP-123")
+
 
     def save_task(self):
-        task_store._write_json_atomic(task_store.task_path(self.base, self.task["issue_key"]), self.task)
+        save_station_task(self.base, self.task)
 
     def view(self):
         return quality.report(quality.load(self.base, self.task), quality.config(self.base, self.task), quality.context(self.base, self.task))
@@ -207,6 +208,8 @@ class QualityTests(unittest.TestCase):
             quality.q1_digest(self.base, self.task)
 
     def test_tapdata_feature_project_contract_and_manual_verification(self):
+        local_head = mock.patch.object(pr_ready, "local_head", return_value="a" * 40)
+        local_head.start(); self.addCleanup(local_head.stop)
         """AO-142：读取实际 Project 配置，不在测试中生成替代功能规则。"""
         self.task.update(task_class="feature_change", stage="design_review", facts={
             "acceptance_criteria": "正常和失败场景符合约定", "target_repo": "tapdata/tapdata",
@@ -306,6 +309,8 @@ class QualityTests(unittest.TestCase):
             self.checkpoint("q2-plan")
 
     def test_defect_confirmation_failure_retest_and_same_version_resume(self):
+        local_head = mock.patch.object(pr_ready, "local_head", return_value="a" * 40)
+        local_head.start(); self.addCleanup(local_head.stop)
         """AO-143：真实质量/授权入口衔接，不模拟检查通过或访问外部服务。"""
         self.task["stage"] = "design_review"
         self.task["repositories"] = self.task["repositories"][:1]
@@ -604,8 +609,9 @@ class QualityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "完整提交 SHA"):
             self.decide()
 
-    def test_verified_clean_commit_survives_controlled_worktree_cleanup(self):
-        repo = self.base / "git-repo"; repo.mkdir()
+    def test_verified_clean_commit_survives_neutral_checkout(self):
+        self.task["repositories"] = self.task["repositories"][:1]
+        repo = self.base / "source/tapdata/tapdata"; repo.mkdir(parents=True)
         subprocess.run(["git", "init", "-q", str(repo)], check=True)
         subprocess.run(["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.test",
                         "commit", "-qm", "fixture", "--allow-empty"], check=True)
@@ -615,11 +621,12 @@ class QualityTests(unittest.TestCase):
         self.apply("item", {"plan": dict(plan, target_revision=sha), "reason": "核验目标提交"})
         self.select(); self.execute(); self.decide(); self.checkpoint("q4-acceptance")
         self.publish_checkpoint("q4-acceptance")
-        self.task["repositories"][0]["worktree"] = {"status": "removed", "final_revision": sha}; self.save_task()
+        subprocess.run(["git", "-C", str(repo), "checkout", "--detach", sha], check=True, capture_output=True)
         view = self.view()
         self.assertTrue(view["checkpoints"]["q4-acceptance"]["reviewed"])
         self.assertTrue(view["checkpoints"]["q4-acceptance"]["published"])
-        self.task["repositories"][0]["worktree"]["final_revision"] = "b" * 40; self.save_task()
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.test",
+                        "commit", "-qm", "new candidate", "--allow-empty"], check=True)
         self.assertFalse(self.view()["checkpoints"]["q4-acceptance"]["reviewed"])
 
     def test_checkpoint_publication_warns_without_blocking_and_preserves_binding(self):
@@ -775,7 +782,7 @@ class QualityTests(unittest.TestCase):
         self.task["facts"]["problem_version"] = "new-version"; self.save_task()
         with self.assertRaises(ValueError): self.apply("prepare_write", {"id": "summary", "digest": d})
 
-    def test_old_run_isolation_and_pending_write_recovery(self):
+    def test_old_run_isolation_rejects_late_receipt(self):
         record = self.publication(); old_run = self.task["run_id"]
         old_revision = self.view()["revision"]
         self.task["run_id"] = "run-fedcba987654"; self.save_task()
@@ -784,10 +791,34 @@ class QualityTests(unittest.TestCase):
             quality.apply(self.base, "TAP-123", old_run, old_revision, {"action": "draft", "payload": {"id": "summary", "body": "x"}})
         with self.assertRaisesRegex(ValueError, "旧 run"):
             self.publication()
-        quality.apply(self.base, "TAP-123", old_run, old_revision, {"action": "readback", "payload": {
-            "id": "summary", "operation_id": record["operation_id"], "site": record["site"],
-            "issue_key": "TAP-123", "comment_id": "100", "body": record["body"], "source_ref": "fixture:jira/100"}})
-        self.publication()
+        before = quality.state_path(self.base, dict(self.task, run_id=old_run)).read_bytes()
+        with self.assertRaisesRegex(ValueError, "run 已变化"):
+            quality.apply(self.base, "TAP-123", old_run, old_revision, {"action": "readback", "payload": {
+                "id": "summary", "operation_id": record["operation_id"], "site": record["site"],
+                "issue_key": "TAP-123", "comment_id": "100", "body": record["body"], "source_ref": "fixture:jira/100"}})
+        self.assertEqual(quality.state_path(self.base, dict(self.task, run_id=old_run)).read_bytes(), before)
+
+    def test_archive_freezes_quality_ci_authorization_and_jira_writes(self):
+        from workflow import jira_status, jira_watermark
+        checks = ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata")
+        self.task["archive_ref"] = {"path": "archive/TAP-123/" + self.task["run_id"], "digest": "a" * 64}
+        self.save_task()
+        before = {p: p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()}
+        actions = [
+            lambda: self.apply("draft", {"id": "late", "body": "归档后草稿"}),
+            lambda: ci.save_state(self.base, "TAP-123", "1", checks),
+            lambda: authorization.cmd_grant(SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"])),
+            lambda: jira_status.save_state(self.base, self.task, jira_status.load_state(self.base, self.task)),
+            lambda: jira_watermark.save_state(self.base, self.task, jira_watermark.load_state(self.base, self.task)),
+        ]
+        for action in actions:
+            with self.assertRaisesRegex(ValueError, "归档"):
+                action()
+        for script in ("jira_status.py", "jira_watermark.py"):
+            result = subprocess.run([sys.executable, str(ROOT / "workflow" / script), "status",
+                "--dir", str(self.base), "--issue-key", "TAP-123"], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(before, {p: p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()})
 
     def test_ci_unknown_skipped_repo_run_isolation_and_cas(self):
         for checks, expected in (([{"status": "COMPLETED"}], "unknown"), ([{"conclusion": "SKIPPED"}], "skipped"),
@@ -868,7 +899,8 @@ class QualityTests(unittest.TestCase):
             self.checkpoint("q3-draft")
 
     def test_live_code_change_invalidates_after_but_not_reproduction(self):
-        repo = self.base / "git-repo"; repo.mkdir()
+        self.task["repositories"] = self.task["repositories"][:1]
+        repo = self.base / "source/tapdata/tapdata"; repo.mkdir(parents=True)
         subprocess.run(["git", "init", "-q", str(repo)], check=True)
         subprocess.run(["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.test",
                         "commit", "-q", "--allow-empty", "-m", "fixture"], check=True)
@@ -913,12 +945,15 @@ class FeatureFlowTests(unittest.TestCase):
         doc["repositories"][self.repo]["origin"] = str(self.remote)
         task_store._write_json_atomic(catalog, doc)
         task_store._write_json_atomic(self.ws / ".agenticops/workspace.json", {
-            "schema_version": 2, "product_root": str(self.product), "project": "tapdata",
-            "workspace_id": "3" * 32, "agents": ["codex"],
-            "repository_pool": {"root": str(self.root / "pool"), "source": "workspace-override"}})
-        task_store._write_json_atomic(self.product / ".local/repository-pool.json", {
-            "schema_version": 1, "root": str(self.root / "pool"), "provisioning": "auto-clone"})
-        (self.root / "pool").mkdir()
+            "schema_version": 3, "product_root": str(self.product), "project": "tapdata",
+            "workspace_id": "3" * 32, "agents": ["codex"]})
+        task_store.initialize_current(self.ws)
+        initialize_workspace(self.ws)
+        profiles = self.product / "projects/tapdata/engineering-profiles.json"
+        profile_doc = json.loads(profiles.read_text())
+        profile_doc["profiles"]["full-application"]["repositories"] = [self.repo]
+        profile_doc["profiles"]["full-application"]["optional_repositories"] = []
+        profiles.write_text(json.dumps(profile_doc))
 
     def git(self, *args):
         return subprocess.check_output(["git", "-c", "user.name=Fixture", "-c",
@@ -930,8 +965,11 @@ class FeatureFlowTests(unittest.TestCase):
     def cli(self, tool, *args, expected=0, mutation=True):
         command = [sys.executable, str(ROOT / "workflow" / tool), *args,
                    "--issue-key", "TAP-123", "--dir", str(self.ws)]
-        if mutation and args[0] != "init":
+        if mutation and args[0] != "takeover":
             command += ["--expected-run-id", self.read()["run_id"]]
+        if args[0] == "takeover" or args[:2] == ("repository", "add"):
+            command += ["--operation-id", "op-fixture-" + str(task_store.read_current(self.ws)["revision"]),
+                        "--expected-revision", str(task_store.read_current(self.ws)["revision"])]
         if args[0] == "advance":
             command += ["--expected-stage", self.read()["stage"]]
         result = subprocess.run(command, capture_output=True, text=True, timeout=30)
@@ -986,9 +1024,9 @@ class FeatureFlowTests(unittest.TestCase):
             self.apply("verification", self.local_material)
 
     def test_cli_intake_failure_recovery_upstream_merge_and_pr_ready(self):
-        self.cli("task.py", "init", "--task-class", "feature_change")
+        self.cli("task.py", "takeover", "--task-class", "feature_change", "--version", "develop")
         run = self.read()["run_id"]
-        self.cli("task.py", "init", "--task-class", "feature_change", expected=3)
+        self.cli("task.py", "takeover", "--task-class", "feature_change", "--version", "develop", expected=2)
         self.assertEqual(self.read()["run_id"], run)
         initial = Path(self.cli("task.py", "interaction-path", "--name", "jira-intake.json").strip())
         initial.write_text(json.dumps({"source_ref": "fixture:jira-intake", "issue": {
@@ -998,8 +1036,7 @@ class FeatureFlowTests(unittest.TestCase):
         self.cli("task.py", "advance", "--note", "fixture:已读 Analyzed 与负责人")
         self.cli("task.py", "advance", "--note", "缺项不能进入设计", expected=3)
         self.cli("task.py", "repository", "add", "--repo", self.repo, "--work-branch", "feature/TAP-123",
-                 "--scope", "feature.py", "--verification", "python -B verify.py")
-        self.cli("task.py", "repository", "prepare")
+                 "--base-branch", "develop", "--scope", "feature.py", "--verification", "python -B verify.py")
         repo = self.read()["repositories"][0]
         worktree = Path(repo["worktree"]["path"])
         frozen = repo["base_sha"]

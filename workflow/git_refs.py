@@ -2,7 +2,7 @@
 """只读采集 Git 远端 heads/tags，并提供按仓库、按查询范围的本地缓存。
 
 本模块不解释分支名称、版本或产品关系。调用方只能把返回值当作带
-``as_of`` 的 Git 事实；最终 worktree 基线仍须由 repository prepare 冻结。
+``as_of`` 的 Git 事实；最终工程基线仍须由工位接管核验并冻结。
 
 外部调用分两类：
 
@@ -19,9 +19,12 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 SCOPES = {"heads", "tags"}
@@ -62,7 +65,7 @@ def normalize_origin(value):
     return text.rstrip("/")
 
 
-def repository_identity(repository, remote, repository_id=None, source_pool_root=None):
+def repository_identity(repository, remote, repository_id=None, source_root=None):
     path = Path(repository).resolve()
     top = Path(_output(["git", "rev-parse", "--show-toplevel"], path)).resolve()
     if top != path:
@@ -79,8 +82,8 @@ def repository_identity(repository, remote, repository_id=None, source_pool_root
         "remote": remote,
         "origin": normalize_origin(origin),
     }
-    if source_pool_root is not None:
-        identity["source_pool_root"] = str(Path(source_pool_root).resolve())
+    if source_root is not None:
+        identity["source_root"] = str(Path(source_root).resolve())
     metadata = {"repository_path": str(path), "git_common_dir": str(common_path)}
     encoded = json.dumps(identity, ensure_ascii=False, sort_keys=True).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest(), dict(identity, **metadata)
@@ -159,6 +162,50 @@ def _cache_lock(path):
         raise GitRefsError("无法锁定 Git refs 缓存：%s" % error) from error
 
 
+@contextlib.contextmanager
+def _cache_write_scope(path):
+    """工位缓存先持状态锁，再持缓存锁，禁止与解绑/重建交错写回。
+
+    查询期间保留工位锁，使 purge 不会移除仍有缓存写入者的状态目录。
+    非工位的显式缓存路径不受工位生命周期约束。
+    """
+    original = Path(os.path.abspath(os.path.expanduser(str(path))))
+    state = next((parent for parent in original.parents if parent.name == ".agenticops"), None)
+    if state is None:
+        original = original.resolve()
+        state = next((parent for parent in original.parents if parent.name == ".agenticops"), None)
+    if state is None:
+        yield lambda: None
+        return
+    from workflow import task_store
+    relative = original.relative_to(state)
+    workspace = state.parent.resolve()
+    state = workspace / ".agenticops"
+    target = state / relative
+
+    def identity():
+        for candidate in (target, *target.parents):
+            if candidate == workspace:
+                break
+            if candidate.is_symlink():
+                raise GitRefsError("工位缓存路径不能是符号链接")
+        details = state.stat()
+        return (details.st_dev, details.st_ino,
+                (state / "workspace.json").read_bytes(), (state / "init.json").read_bytes())
+
+    try:
+        with task_store.task_state_lock(workspace):
+            expected = identity()
+
+            def verify():
+                if identity() != expected:
+                    raise GitRefsError("工位身份已变化，拒绝旧缓存写回")
+
+            yield verify
+    except (OSError, ValueError) as error:
+        raise GitRefsError("工位缓存刷新已停止，未恢复旧工作空间：%s" % error) from error
+
+
 def _parse_heads(output):
     result = {}
     for line in output.splitlines():
@@ -231,7 +278,7 @@ def _cached_result(record, requested, moment, max_age_seconds):
 
 
 def read_snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
-                  max_age_seconds=300, now=None, repository_id=None, source_pool_root=None,
+                  max_age_seconds=300, now=None, repository_id=None, source_root=None,
                   cache_root=None):
     """严格只读地加载缓存；不会联网、加锁、创建目录或写回文件。"""
     if cache_file is None:
@@ -241,7 +288,7 @@ def read_snapshot(repository, remote="origin", scopes=("heads",), cache_file=Non
     if not requested or not set(requested) <= SCOPES:
         raise GitRefsError("scopes 只支持 heads/tags")
     moment = time.time() if now is None else now
-    key, identity = repository_identity(repository, remote, repository_id, source_pool_root)
+    key, identity = repository_identity(repository, remote, repository_id, source_root)
     document = _read_cache(Path(cache_file).resolve())
     record = _root_repositories(document, root).get(key)
     if record is None or record.get("identity") != identity:
@@ -250,7 +297,7 @@ def read_snapshot(repository, remote="origin", scopes=("heads",), cache_file=Non
 
 
 def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
-             refresh="auto", max_age_seconds=300, now=None, repository_id=None, source_pool_root=None,
+             refresh="auto", max_age_seconds=300, now=None, repository_id=None, source_root=None,
              cache_root=None):
     """返回单仓库 raw refs 快照；缓存只加速远端查询，不解释业务含义。"""
     if refresh not in ("auto", "always"):
@@ -261,7 +308,7 @@ def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
     if not isinstance(max_age_seconds, int) or max_age_seconds < 0:
         raise GitRefsError("max_age_seconds 必须是非负整数")
     moment = time.time() if now is None else now
-    key, identity = repository_identity(repository, remote, repository_id, source_pool_root)
+    key, identity = repository_identity(repository, remote, repository_id, source_root)
     path = Path(repository).resolve()
     cache_path = Path(cache_file).resolve() if cache_file else None
     root = _cache_root(cache_root) if cache_path else None
@@ -316,10 +363,12 @@ def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
             for scope in requested
         ):
             return _cached_result(existing, requested, moment, max_age_seconds)
-    with _cache_lock(cache_path):
-        document = _read_cache(cache_path)
-        result = collect(document)
-        _write_cache(cache_path, document)
+    with _cache_write_scope(cache_file) as verify_workspace:
+        with _cache_lock(cache_path):
+            document = _read_cache(cache_path)
+            result = collect(document)
+            verify_workspace()
+            _write_cache(cache_path, document)
     return result
 
 
@@ -334,7 +383,7 @@ def main(argv=None):
     snapshot_parser.add_argument("--cache-root", required=True, help="当前缓存分区的规范化根目录")
     snapshot_parser.add_argument("--refresh", action="store_true", help="强制查询远端并更新缓存；默认按 TTL 自动刷新")
     snapshot_parser.add_argument("--repository-id", required=True, help="<owner>/<repo>，作为缓存仓库映射")
-    snapshot_parser.add_argument("--source-pool", help="绑定当前缓存的 Source Pool 根目录")
+    snapshot_parser.add_argument("--source-root", help="绑定当前缓存的 source 工程目录 根目录")
     snapshot_parser.add_argument("--max-age", type=int, default=300)
     probe_parser = sub.add_parser("probe", help="无缓存精确查询远端指定 head")
     probe_parser.add_argument("--origin", required=True)
@@ -344,7 +393,7 @@ def main(argv=None):
         if args.command == "snapshot":
             result = snapshot(args.repository, args.remote, args.scope or ("heads",), args.cache_file,
                               "always" if args.refresh else "auto", args.max_age,
-                              repository_id=args.repository_id, source_pool_root=args.source_pool,
+                              repository_id=args.repository_id, source_root=args.source_root,
                               cache_root=args.cache_root)
         else:
             result = probe(args.origin, args.head)

@@ -3,25 +3,13 @@ set -euo pipefail
 
 product_root="${AGENTIC_OPS_HOME:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)}"
 target_branch="develop"
-repository_pool=""
-repository_provisioning="auto-clone"
 
 usage() {
-  printf '用法：setup.sh [--repository-pool <目录>] [--repository-provisioning manual|auto-clone]\n'
+  printf '用法：setup.sh\n'
 }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --repository-pool)
-      test "$#" -ge 2 || { usage >&2; exit 2; }
-      repository_pool="$2"
-      shift 2
-      ;;
-    --repository-provisioning)
-      test "$#" -ge 2 || { usage >&2; exit 2; }
-      repository_provisioning="$2"
-      shift 2
-      ;;
     -h|--help)
       usage
       exit 0
@@ -45,13 +33,6 @@ if [ -f "$product_root/.local/product.json" ]; then
     printf 'AgenticOps：使用工作面不能执行 setup；请使用 agenticops update\n' >&2
     exit 2
   }
-  if [ -n "$repository_pool" ] || [ ! -f "$product_root/.local/repository-pool.json" ]; then
-    pool_arguments=()
-    test -z "$repository_pool" || pool_arguments+=(--root "$repository_pool")
-    python3 "$product_root/bootstrap/repository_pool.py" --product-root "$product_root" \
-      configure ${pool_arguments[@]+"${pool_arguments[@]}"} \
-      --provisioning "$repository_provisioning" >/dev/null
-  fi
   exec env AGENTIC_OPS_HOME="$product_root" bash "$product_root/bootstrap/update.sh"
 fi
 for command_name in git python3 uv; do
@@ -93,15 +74,7 @@ python3 "$product_root/bootstrap/product_state.py" \
   --product-root "$product_root" write \
   --mode source --repository "$repository" --branch "$target_branch" \
   --current-ref "$current_ref"
-pool_arguments=()
-test -z "$repository_pool" || pool_arguments+=(--root "$repository_pool")
-python3 "$product_root/bootstrap/repository_pool.py" --product-root "$product_root" \
-  configure ${pool_arguments[@]+"${pool_arguments[@]}"} \
-  --provisioning "$repository_provisioning" >/dev/null
 python3 "$product_root/bootstrap/skill_wiring.py" \
   --product-root "$product_root" --refresh
 
 printf 'AgenticOps 初始化完成：工作面=维护，branch=%s，ref=%s\n' "$target_branch" "$current_ref"
-printf 'Source Pool：%s（%s）\n' \
-  "$(python3 "$product_root/bootstrap/repository_pool.py" --product-root "$product_root" read --field root)" \
-  "$repository_provisioning"
