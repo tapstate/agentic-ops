@@ -4,8 +4,11 @@ from dataclasses import dataclass
 
 
 STORY_CATEGORIES = frozenset({"internal", "product"})
+FULL_ACCEPTANCE_CHECKS = (
+    "python_runtime", "resource_contracts", "product_install_boundary", "release_workflow",
+)
 ACCEPTANCE_CHECKS = frozenset(
-    {"python_runtime", "resource_contracts", "release_workflow", "story_registry"}
+    (*FULL_ACCEPTANCE_CHECKS, "story_registry")
 )
 
 
@@ -54,6 +57,10 @@ class StoryImpact:
     pr_url: str
     pr_head_sha: str
     pr_review_approved: bool
+    comparison_base: str
+    candidate_tree: str
+    change_fingerprint: str
+    registry_digest: str
 
     @property
     def requires_revision_confirmation(self) -> bool:
@@ -83,4 +90,7 @@ class StoryImpact:
             "pr_url": self.pr_url,
             "pr_head_sha": self.pr_head_sha,
             "pr_review_approved": self.pr_review_approved,
+            "comparison_base": self.comparison_base,
+            "candidate_tree": self.candidate_tree,
+            "change_fingerprint": self.change_fingerprint,
         }

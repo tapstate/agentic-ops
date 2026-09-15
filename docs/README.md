@@ -1,5 +1,7 @@
 # AgenticOps 文档总纲
 
+[维护指引](maintenance-guide.md#5-验证)负责诊断检查、绑定候选的正式四项验收、耗时报告与证据 v5 使用；[INT-001](user-stories/v1/int-001-release-governance.md)规定验收完整性、失败失效和首次信任根升级边界。运行进度与性能验收结果仍以 Jira 为准。
+
 TapData 的按需 Wiki 阅读由 [tapdata-wiki](../projects/tapdata/skills/tapdata-wiki/SKILL.md) 说明检索与源码核验边界；项目 Profile 仅引用中央登记的共享仓库。[架构总纲](architecture/agenticops-v1-architecture.md)定义中央共享材料归属；[工位源码与材料](usage/workspace-materials.md)负责共享仓库准备、显式更新和故障处理，不引入任务知识快照或自动刷新。
 
 任务退出与编码准备由[工位合同](architecture/single-task-station.md)统一定义：清理预检、归档与二次确认、活动材料清单、外部分支及 PR 的原生处置、编码前仓库关系核验。项目 Skill 负责用户交互，Workflow 负责可执行检查与恢复；审计档案不用于恢复开发。

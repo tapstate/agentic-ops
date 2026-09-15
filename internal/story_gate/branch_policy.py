@@ -10,6 +10,8 @@ from typing import Any
 
 import yaml
 
+from internal.story_gate.evidence import git_environment
+
 
 POLICY_PATH = "internal/story_gate/review-policy.yaml"
 
@@ -229,6 +231,7 @@ def _git(root: Path, *arguments: str) -> str:
         stderr=subprocess.PIPE,
         text=True,
         timeout=20,
+        env=git_environment(),
     )
     if completed.returncode != 0:
         raise ValueError(completed.stderr.strip() or "Git 命令失败")

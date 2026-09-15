@@ -38,3 +38,5 @@ PYTHONDONTWRITEBYTECODE=1 "$product_python" -m unittest discover \
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$repo_root" \
   "$internal_python" -m unittest discover \
     -s "$repo_root/internal/tests" -p 'test_story_gate.py' -v
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$repo_root" \
+  "$internal_python" -m unittest internal.tests.test_verification -v

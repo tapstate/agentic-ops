@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,7 +23,8 @@ from internal.story_gate.branch_policy import (
     resolve_branch_review,
 )
 from internal.story_gate.git_changes import collect_changes
-from internal.story_gate.model import StoryImpact, StoryRegistry
+from internal.story_gate.model import FULL_ACCEPTANCE_CHECKS, StoryImpact, StoryRegistry
+from internal.story_gate import evidence as verification
 from internal.story_gate.registry import load_story_registry, path_matches
 
 GOVERNED_PATHS = ("**",)
@@ -104,6 +106,13 @@ class StoryGateService:
         return result
 
     def approve(
+        self, source: str, impact_id: str, authorization_reference: str,
+        *, base: str | None = None, head: str | None = None,
+    ) -> dict[str, Any]:
+        with TaskLock(self._verification_lock(), timeout=5):
+            return self._approve_locked(source, impact_id, authorization_reference, base=base, head=head)
+
+    def _approve_locked(
         self,
         source: str,
         impact_id: str,
@@ -176,6 +185,8 @@ class StoryGateService:
         }
 
     def verify(self, source: str, *, base: str | None = None, head: str | None = None, event_sink: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+        if source not in ("staged", "range") or (source == "range" and (not base or not head)):
+            raise ValueError("正式验收需 staged，或显式提供 range 的 --base 和 --head")
         registry, impact = self._calculate(source, base=base, head=head, read_pr_fact=False)
         report = _review_report(registry, impact)
         if not impact.has_impact or impact.unmapped_paths:
@@ -185,55 +196,77 @@ class StoryGateService:
                 "请先查阅审查报告并补齐故事映射",
                 self._result(registry, impact, report, _digest(report)),
             )
-        run_dir = self._run_dir(impact.impact_id)
+        run_id = uuid.uuid4().hex
+        run_dir = self._run_dir(impact.impact_id) / run_id
         _ensure_run_path_safe(self.root, run_dir / "output.log")
         _ensure_run_path_safe(self.root, run_dir / "events.ndjson")
         _ensure_record_path_safe(self.root, self._evidence_path(impact.impact_id))
         run_dir.mkdir(parents=True, exist_ok=True)
+        for private_dir in (run_dir, run_dir.parent, run_dir.parent.parent):
+            private_dir.chmod(0o700)
         output_path = run_dir / "output.log"
         evidence_path = self._evidence_path(impact.impact_id)
         events_path = run_dir / "events.ndjson"
-        with TaskLock(run_dir / ".lock", timeout=5):
-            output_path.unlink(missing_ok=True)
-            events_path.unlink(missing_ok=True)
+        for private_file in (output_path, events_path):
+            private_file.touch(mode=0o600, exist_ok=False)
+        with TaskLock(self._verification_lock(), timeout=5):
+            approval_path = self._approval_path(impact.impact_id)
+            _ensure_record_path_safe(self.root, approval_path)
+            approval_path.unlink(missing_ok=True)
+            evidence_path.unlink(missing_ok=True)
+            environment = {}
+            results = []
+            payload = self._write_evidence_summary(evidence_path, impact, "running", results,
+                                                  environment=environment, run_id=run_id)
             with events_path.open("a", encoding="utf-8") as events_file:
                 def emit(event: dict[str, Any]) -> None:
-                    payload = {"timestamp": _now(), "impact_id": impact.impact_id, **event}
+                    payload = {"timestamp": _now(), "impact_id": impact.impact_id, "run_id": run_id, **event}
                     events_file.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
                     events_file.flush()
                     if event_sink:
                         event_sink(payload)
 
-                results = []
-                for check_id in impact.acceptance_checks:
-                    started = time.monotonic()
-                    emit({"event": "check_started", "check_id": check_id})
-                    with output_path.open("ab", buffering=0) as output_file:
-                        start_offset = output_file.tell()
-                        output_file.write(f"\n===== {check_id} started =====\n".encode())
-                        process = subprocess.Popen(_check_command(self.root, check_id), cwd=self.root, stdout=output_file, stderr=subprocess.STDOUT, env=_check_environment(self.root), start_new_session=True)
-                        last_progress = 0.0
-                        while process.poll() is None:
-                            elapsed = time.monotonic() - started
-                            if elapsed > 300:
-                                os.killpg(process.pid, signal.SIGKILL)
-                                process.wait()
-                                raise subprocess.TimeoutExpired(process.args, 300)
-                            if elapsed - last_progress >= 10:
-                                emit({"event": "check_progress", "check_id": check_id, "elapsed_seconds": round(elapsed, 3)})
-                                last_progress = elapsed
-                            time.sleep(0.1)
-                        output_file.write(f"===== {check_id} finished exit={process.returncode} =====\n".encode())
-                        end_offset = output_file.tell()
-                    check = {"check_id": check_id, "passed": process.returncode == 0, "exit_code": process.returncode, "duration_seconds": round(time.monotonic() - started, 3), "log_path": str(output_path.relative_to(self.root)), "log_start": start_offset, "log_end": end_offset, "log_sha256": _file_segment_sha256(output_path, start_offset, end_offset)}
-                    results.append(check)
-                    emit({"event": "check_finished", "check_id": check_id, "passed": check["passed"], "duration_seconds": check["duration_seconds"]})
-                    if not check["passed"]:
-                        payload = self._write_evidence_summary(evidence_path, impact, "failed", results)
-                        emit({"event": "verify_completed", "acceptance_status": "failed", "evidence_path": str(evidence_path)})
-                        raise StoryGateError(code="story_acceptance_failed", message=f"项目故事验收失败：{check_id}", status="blocked", exit_code=EXIT_BLOCKED, retry_safe=True, required_human_action="请修复失败后重新生成报告并运行固定验收", details={**self._result(registry, impact, report, _digest(report), evidence=payload), "acceptance_status": "failed", "checks": results, "evidence_path": str(evidence_path)})
-                payload = self._write_evidence_summary(evidence_path, impact, "passed", results)
-                emit({"event": "verify_completed", "acceptance_status": "passed", "evidence_path": str(evidence_path)})
+                try:
+                    verification.require_material(self.root, impact)
+                    environment = verification.environment(self.root)
+                    for check_id in impact.acceptance_checks:
+                        started = time.monotonic()
+                        emit({"event": "check_started", "check_id": check_id})
+                        with output_path.open("ab", buffering=0) as output_file:
+                            start_offset = output_file.tell()
+                            output_file.write(f"\n===== {check_id} started =====\n".encode())
+                            process = subprocess.Popen(_check_command(self.root, check_id), cwd=self.root, stdout=output_file, stderr=subprocess.STDOUT, env=_check_environment(self.root), start_new_session=True)
+                            try:
+                                last_progress = 0.0
+                                while process.poll() is None:
+                                    elapsed = time.monotonic() - started
+                                    if elapsed > verification.CHECK_TIMEOUTS[check_id]:
+                                        raise subprocess.TimeoutExpired(process.args, verification.CHECK_TIMEOUTS[check_id])
+                                    if elapsed - last_progress >= 10:
+                                        emit({"event": "check_progress", "check_id": check_id, "elapsed_seconds": round(elapsed, 3)})
+                                        last_progress = elapsed
+                                    time.sleep(0.1)
+                            except BaseException:
+                                _stop_check(process)
+                                raise
+                            output_file.write(f"===== {check_id} finished exit={process.returncode} =====\n".encode())
+                            end_offset = output_file.tell()
+                        check = {"check_id": check_id, "passed": process.returncode == 0, "exit_code": process.returncode, "duration_seconds": round(time.monotonic() - started, 3), "log_path": str(output_path.relative_to(self.root)), "log_start": start_offset, "log_end": end_offset, "log_sha256": _file_segment_sha256(output_path, start_offset, end_offset)}
+                        results.append(check)
+                        emit({"event": "check_finished", "check_id": check_id, "passed": check["passed"], "duration_seconds": check["duration_seconds"]})
+                        if not check["passed"]:
+                            raise ValueError(f"项目故事验收失败：{check_id}")
+                    verification.require_material(self.root, impact)
+                    _, after = self._calculate(source, base=base, head=head, read_pr_fact=False)
+                    if after.impact_id != impact.impact_id or verification.environment(self.root) != environment:
+                        raise ValueError("验收期间候选、基线或环境发生变化")
+                    payload = self._write_evidence_summary(evidence_path, impact, "passed", results, environment=environment, run_id=run_id)
+                    emit({"event": "verify_completed", "acceptance_status": "passed", "evidence_path": str(evidence_path)})
+                except BaseException as error:
+                    status = "cancelled" if isinstance(error, KeyboardInterrupt) else "failed"
+                    payload = self._write_evidence_summary(evidence_path, impact, status, results, environment=environment, run_id=run_id, error=type(error).__name__)
+                    emit({"event": "verify_completed", "acceptance_status": status, "evidence_path": str(evidence_path)})
+                    raise StoryGateError(code="story_acceptance_failed", message=f"正式验收未通过：{error}", status="blocked", exit_code=EXIT_BLOCKED, retry_safe=True, required_human_action="请查看本次日志，修复后重新验收；旧通过结果已失效", details={"acceptance_status": status, "checks": results, "evidence_path": str(evidence_path)}) from error
         result = {
             **self._result(registry, impact, report, _digest(report), evidence=payload),
             "checks": results,
@@ -242,14 +275,20 @@ class StoryGateService:
         return result
 
     def _write_evidence_summary(
-        self, evidence_path: Path, impact: StoryImpact, acceptance_status: str, checks: list[dict[str, Any]]
+        self, evidence_path: Path, impact: StoryImpact, acceptance_status: str, checks: list[dict[str, Any]],
+        *, environment: dict[str, Any], run_id: str, error: str = "",
     ) -> dict[str, Any]:
         payload = {
-            "schema_version": AUTHORIZATION_RECORD_SCHEMA_VERSION,
+            "schema_version": verification.EVIDENCE_SCHEMA_VERSION,
             **_impact_record_fields(impact),
             "acceptance_status": acceptance_status,
             "checks": checks,
             "verified_at": _now(),
+            "binding": _verification_binding(impact),
+            "environment": environment,
+            "environment_digest": verification.digest(environment),
+            "run_id": run_id,
+            "error": error,
         }
         atomic_write_json(evidence_path, payload)
         return payload
@@ -275,6 +314,9 @@ class StoryGateService:
                         commit_sha,
                         f"refs/remotes/origin/{review.target_branch}",
                     )
+                base = _git(self.root, "rev-parse", f"{base}^{{commit}}")
+            comparison_base = base if source == "range" else _git(self.root, "rev-parse", "HEAD^{commit}")
+            candidate_tree = verification.candidate_tree(self.root, source, commit_sha or None)
             changes = collect_changes(self.root, source, base=base, head=head)
             gate_stage = os.environ.get("AGENTIC_OPS_STORY_GATE_STAGE", "").strip()
             pr = PullRequestFact()
@@ -300,7 +342,6 @@ class StoryGateService:
         impacted: set[str] = set()
         revisions: set[str] = set()
         categories: set[str] = set()
-        checks: set[str] = set()
         registry_changed = registry.path in changes.paths
         for story in registry.stories:
             direct_revision = registry_changed or story.document in changes.paths
@@ -314,7 +355,6 @@ class StoryGateService:
             if direct_revision or path_impact:
                 impacted.add(story.story_id)
                 categories.add(story.category)
-                checks.update(story.acceptance_checks)
 
         mapped_paths = {
             changed_path
@@ -339,6 +379,8 @@ class StoryGateService:
                 "stories": sorted(impacted),
                 "revisions": sorted(revisions),
                 "unmapped": unmapped,
+                "comparison_base": comparison_base,
+                "candidate_tree": candidate_tree,
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -358,7 +400,7 @@ class StoryGateService:
             impacted_categories=tuple(sorted(categories)),
             revision_story_ids=tuple(sorted(revisions)),
             unmapped_paths=unmapped,
-            acceptance_checks=tuple(sorted(checks)),
+            acceptance_checks=FULL_ACCEPTANCE_CHECKS if impacted else (),
             current_branch=review.branch,
             review_channel=review.channel,
             confirmation_stage=confirmation_stage,
@@ -368,6 +410,10 @@ class StoryGateService:
             pr_url=pr.url,
             pr_head_sha=pr.head_sha,
             pr_review_approved=pr.approved_for_head,
+            comparison_base=comparison_base,
+            candidate_tree=candidate_tree,
+            change_fingerprint=changes.fingerprint,
+            registry_digest=registry.digest,
         )
 
     def _result(
@@ -424,11 +470,48 @@ class StoryGateService:
 
     def _read_matching_evidence(self, impact: StoryImpact) -> dict[str, Any] | None:
         payload = _read_record(self._evidence_path(impact.impact_id), self.root)
-        if payload is None or payload.get("schema_version") not in {3, 4}:
+        if payload is None or payload.get("schema_version") != verification.EVIDENCE_SCHEMA_VERSION:
             return None
         if not _record_matches_impact(payload, impact):
             return None
-        return payload if payload.get("acceptance_status") == "passed" else None
+        if payload.get("acceptance_status") != "passed" or payload.get("binding") != _verification_binding(impact):
+            return None
+        checks = payload.get("checks")
+        run_id = payload.get("run_id")
+        if not isinstance(run_id, str) or not re.fullmatch(r"[0-9a-f]{32}", run_id) or payload.get("error") != "":
+            return None
+        expected_log = str((self._run_dir(impact.impact_id) / run_id / "output.log").relative_to(self.root))
+        previous_end = 0
+        if not isinstance(checks, list) or len(checks) != len(FULL_ACCEPTANCE_CHECKS):
+            return None
+        for expected, check in zip(FULL_ACCEPTANCE_CHECKS, checks):
+            if (not isinstance(check, dict) or check.get("check_id") != expected
+                    or check.get("passed") is not True or type(check.get("exit_code")) is not int
+                    or check["exit_code"] != 0 or not isinstance(check.get("log_sha256"), str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", check["log_sha256"])
+                    or type(check.get("log_start")) is not int or type(check.get("log_end")) is not int
+                    or not 0 <= check["log_start"] < check["log_end"]):
+                return None
+            if check.get("log_path") != expected_log or check["log_start"] != previous_end:
+                return None
+            previous_end = check["log_end"]
+        environment = payload.get("environment")
+        if not verification.valid_environment(environment) or payload.get("environment_digest") != verification.digest(environment):
+            return None
+        # 受信发布校验器读取历史开发事实；随后发布流程仍独立执行隔离四项。
+        if os.environ.get("AGENTIC_OPS_STORY_GATE_STAGE") != "release":
+            try:
+                verification.require_material(self.root, impact)
+                if verification.environment(self.root) != environment:
+                    return None
+            except (OSError, ValueError, subprocess.SubprocessError):
+                return None
+        return payload
+
+    def _verification_lock(self) -> Path:
+        path = self.root / ".local/story-gate/runs/.verification.lock"
+        _ensure_run_path_safe(self.root, path / "owner")
+        return path
 
     def _approval_path(self, impact_id: str) -> Path:
         return self.root / ".local" / "story-gate" / "approvals" / f"{impact_id}.json"
@@ -606,6 +689,38 @@ def _impact_record_fields(impact: StoryImpact) -> dict[str, Any]:
     }
 
 
+def _verification_binding(impact: StoryImpact) -> dict[str, str]:
+    return {"comparison_base": impact.comparison_base, "candidate_tree": impact.candidate_tree,
+            "change_fingerprint": impact.change_fingerprint, "registry_digest": impact.registry_digest,
+            "contract_digest": verification.contract_digest()}
+
+
+def _stop_check(process):
+    previous = {sig: signal.signal(sig, signal.SIG_IGN) for sig in (signal.SIGINT, signal.SIGTERM)}
+    try:
+        _reap_check(process)
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
+def _reap_check(process):
+    # 先允许 Python/Git 包装层回收自己的子进程，再强制结束本检查进程组。
+    try:
+        os.killpg(process.pid, signal.SIGINT)
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    process.wait()
+
+
 def _record_matches_impact(payload: dict[str, Any], impact: StoryImpact) -> bool:
     return (
         payload.get("impact_id") == impact.impact_id
@@ -700,6 +815,7 @@ def _git(root: Path, *arguments: str) -> str:
         stderr=subprocess.PIPE,
         text=True,
         timeout=20,
+        env=verification.git_environment(),
     )
     if completed.returncode != 0:
         raise ValueError(completed.stderr.strip() or "Git 命令失败")
@@ -710,6 +826,7 @@ def _check_command(root: Path, check_id: str) -> list[str]:
     return {
         "python_runtime": [str(root / "internal" / "tests" / "test_runtime.sh")],
         "resource_contracts": [str(root / "internal" / "tests" / "test_resources.sh")],
+        "product_install_boundary": [str(root / "tests" / "test_install.sh")],
         "release_workflow": [str(root / "internal" / "tests" / "test_release.sh")],
         "story_registry": [
             sys.executable,
@@ -725,11 +842,11 @@ def _check_command(root: Path, check_id: str) -> list[str]:
 
 
 def _check_environment(root: Path) -> dict[str, str]:
-    environment = dict(os.environ)
+    environment = verification.git_environment()
+    environment.pop("AGENTIC_OPS_RELEASE_WORKFLOW_TEST_RUNNING", None)
     environment["PYTHONPYCACHEPREFIX"] = environment.get("PYTHONPYCACHEPREFIX", ".local/cache/pycache")
     internal_path = str(root)
-    existing_path = environment.get("PYTHONPATH", "")
-    environment["PYTHONPATH"] = f"{internal_path}{os.pathsep}{existing_path}" if existing_path else internal_path
+    environment["PYTHONPATH"] = internal_path
     return environment
 
 

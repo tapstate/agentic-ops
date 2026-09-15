@@ -91,20 +91,26 @@ workspace="$HOME/agenticops-tapdata"
 
 ## 5. 验证
 
-运行代码及 Skill 变更按固定合同执行完整验收一次：
+运行代码及 Skill 变更整理为明确候选后，使用一次正式验收同时完成四项检查和提交门禁证据：
 
 ```sh
-internal/acceptance.sh full
+internal/acceptance.sh full --change-source staged
 ```
 
-`full` 执行四项固定验收。开发中可先用 `quick` 检查 Runtime 和资源边界，或按需组合检查；它们不能替代要求的完整验收。不要求先跑 `quick` 再机械重复 `full`。完整验收通过后，仅在候选变化、检查失败或存在未解决风险时追加验证：
+此入口薄转发至 `story-gate verify`，固定执行 Runtime、Resources、Install、Release；故事注册表已在 Runtime 内执行，不重复计为第五项。已提交范围使用 `full --change-source range --base <base> --head <head>`，且当前实际 HEAD 必须等于指定 head。staged 前后要求工作树与索引一致，无非忽略的未跟踪输入；不会自动暂存、stash 或清理用户文件。
+
+不带 `--change-source` 的 `full`、`quick` 或组合检查只用于诊断，不产生门禁证据。`quick` 包含完整 Runtime，并不承诺快速。开发中按需运行受影响用例，候选确定后再正式验收，不要先执行诊断 full 再重复正式四项。
 
 ```sh
 internal/acceptance.sh runtime install
 internal/acceptance.sh --list
 ```
 
-日志和汇总写入 `.local/acceptance/<run-id>/`。OPA 未安装导致 Rego 一致性检查跳过时必须在交付中说明。不要使用 `--no-verify`。
+诊断日志写入 `.local/acceptance/<run-id>/`；正式日志写入 `.local/story-gate/runs/<impact-id>/<run-id>/`，最新自包含摘要位于 `.local/story-gate/evidence/`。同一精确候选从暂存到 commit/range、推送可以消费匹配证据；基线、完整树、变更范围或行为相关环境变化则重验。显式再次调用 verify 始终重新执行，不做跨候选缓存。重验开始即使旧通过和审批失效，失败、取消、超时保留本次非通过记录。机器崩溃残留锁需人工确认没有在途进程后处理，不自动抢锁。
+
+检查上限分别为 Runtime 600 秒、Resources 120 秒、Install 600 秒、Release 300 秒；超时回收检查进程组，不用提高等待上限冒充性能优化。生命周期测试保留完整九仓端到端和双仓隔离，其余使用独立最小临时工程，输出逐用例耗时；正式记录同时给出每组耗时。性能调优使用同机同配置三次中位数，不把时间阈值作为普通 CI 硬门禁。
+
+证据 v5 的环境字段只包含实际工具版本、两个维护依赖文件的摘要和测试行为开关，不记录绝对路径或敏感环境变量。正式四项拒绝启用可选 Maven 集成开关；有需要时单独运行诊断并附上真实集成证据。OPA 缺失或可选 Maven 用例未启用必须明确披露，不声称真实集成已验收。Git 读取和检查子进程清除外部 `GIT_*` 上下文覆盖，候选不能使用 assume-unchanged 或 skip-worktree 隐藏工作树变化。原始日志目录和文件分别限制为 0700 和 0600。发布校验器核验历史开发记录后，仍在自身隔离环境重新完整验收。v3/v4 记录仅保留查阅，不满足新版合同；首次升级走受保护 main 的独立人工 PR，不要求旧 release submit-review 接受新格式，不双写旧证据。不要使用 `--no-verify`。
 
 ## 6. 发布与 Hotfix
 
