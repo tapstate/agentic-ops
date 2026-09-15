@@ -78,6 +78,23 @@ class CheckpointTests(unittest.TestCase):
         return self.args(expected_authorization_digest=authorization.record_digest(record), ttl_hours=8,
                          confirmed_by="reviewer", confirmation_ref="fixture:explicit-human-confirmation", **kwargs)
 
+    def test_implementation_requires_authorization_bound_to_readiness(self):
+        self.confirmation(stage="design_review")
+        with mock.patch.object(task.station_source, "require_readiness", return_value="new-ready-digest"), \
+                mock.patch.object(task.issue_versions, "problems", return_value=[]), \
+                mock.patch.object(task.quality, "advance_problems", return_value=[]):
+            problems = task._check_advance(self.read(), "implementation", self.base, task.admission(self.base))
+            self.assertTrue(any("未绑定当前仓库就绪摘要" in message for message in problems))
+            record = json.loads(self.auth_path.read_text())
+            record["source_readiness_digest"] = "new-ready-digest"
+            task_store._write_json_atomic(self.auth_path, record)
+            problems = task._check_advance(self.read(), "implementation", self.base, task.admission(self.base))
+            self.assertFalse(any("仓库未就绪" in message for message in problems))
+
+    def test_task_contract_cannot_be_disabled_by_record(self):
+        with self.assertRaisesRegex(ValueError, "接管入口管理"):
+            task.cmd_record(self.args(key="station_contract", value="1", force=True))
+
     def test_completion_state_write_failure_does_not_revoke_confirmation(self):
         record = self.confirmation()
         before = self.read()
