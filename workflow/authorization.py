@@ -120,6 +120,63 @@ def cmd_renew(args):
 
 
 @task_store.task_mutation
+def cmd_reconfirm(args):
+    """同一实施范围内重新绑定已确认的 Q2，保留原授权与有效期。"""
+    issue = task_store.resolve_active_issue(args.dir, args.issue_key)
+    task = task_store.check_expected_run(args.dir, issue, args.expected_run_id)
+    if task.get("stage") not in ("design_review", "implementation", "pr_review", "ci_validation"):
+        raise ValueError("当前阶段不允许重新绑定验收方案")
+    if not args.confirmed_by.strip() or not args.confirmation_ref.strip():
+        raise ValueError("重新绑定需要明确决定者和可回查的人工确认来源")
+    path = task_store.authorization_path(args.dir, issue)
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("原授权无法读取，拒绝重新绑定") from error
+    if not isinstance(record, dict) or record_digest(record) != args.expected_authorization_digest:
+        raise ValueError("原授权已变化，重新核对确认对象")
+    expiry = record.get("expires_at_epoch")
+    if type(expiry) not in (int, float) or not math.isfinite(expiry):
+        raise ValueError("原授权有效期无效")
+    valid, reasons = engine.check_authorization(record, {"issue_key": issue, "branch_relevant": False},
+                                                engine.load_policy())
+    if not valid:
+        raise ValueError("原授权不能重新绑定：%s" % "；".join(reasons))
+    old_q2 = record.get("approved_q2_digest")
+    if not isinstance(old_q2, str) or not old_q2:
+        raise ValueError("旧授权缺少 Q2 摘要，不能通过重新绑定迁移")
+    current_q1 = quality.q1_digest(args.dir, task)
+    expected_q1 = getattr(args, "expected_q1_digest", None)
+    if expected_q1 is not None and expected_q1 != current_q1:
+        raise ValueError("目标 Q1 已变化，重新核对确认对象")
+    if not isinstance(record.get("approved_q1_digest"), str) or not record["approved_q1_digest"]:
+        raise ValueError("旧授权缺少 Q1 摘要，不能通过重新绑定迁移")
+    if (record.get("agentic_run_id") != task["run_id"]
+            or record.get("repositories") != repository_bindings(task.get("repositories", []))
+            or record.get("approved_plan_digest") != plan_digest(task, args.dir)
+            or (expected_q1 is None and record.get("approved_q1_digest") != current_q1)):
+        raise ValueError("实施方案、Q1、run 或仓库绑定已变化，不能仅重新绑定验收方案")
+    check_catalog_bindings(args.dir, record["repositories"])
+    new_q2 = quality.q2_digest(args.dir, task)
+    if new_q2 != args.expected_q2_digest or (new_q2 == old_q2 and current_q1 == record["approved_q1_digest"]):
+        raise ValueError("目标 Q2 已变化或与原授权相同，重新核对确认对象")
+    history = record.setdefault("reconfirmations", [])
+    if not isinstance(history, list):
+        raise ValueError("原授权重新确认历史无效")
+    history.append({"confirmed_by": args.confirmed_by, "confirmation_ref": args.confirmation_ref,
+                    "confirmed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "previous_authorization_digest": args.expected_authorization_digest,
+                    "previous_q2_digest": old_q2, "approved_q2_digest": new_q2})
+    if expected_q1 is not None:
+        history[-1].update(previous_q1_digest=record["approved_q1_digest"], approved_q1_digest=current_q1)
+        record["approved_q1_digest"] = current_q1
+    record["approved_q2_digest"] = new_q2
+    task_store._write_json_atomic(path, record)
+    print("已重新绑定当前 run 经人工确认的验收方案：%s" % path)
+    return 0
+
+
+@task_store.task_mutation
 def cmd_grant(args):
     issue = task_store.validate_issue_key(args.issue_key)
     if issue not in task_store.registered_issues(args.dir, statuses=("active",)):
@@ -244,6 +301,17 @@ def main():
     p_renew.add_argument("--ttl-hours", type=float, default=8)
     p_renew.add_argument("--dir", default=".")
     p_renew.set_defaults(func=cmd_renew)
+
+    p_reconfirm = sub.add_parser("reconfirm")
+    p_reconfirm.add_argument("--issue-key", required=True)
+    p_reconfirm.add_argument("--expected-run-id", required=True)
+    p_reconfirm.add_argument("--expected-authorization-digest", required=True)
+    p_reconfirm.add_argument("--expected-q2-digest", required=True)
+    p_reconfirm.add_argument("--expected-q1-digest")
+    p_reconfirm.add_argument("--confirmed-by", required=True)
+    p_reconfirm.add_argument("--confirmation-ref", required=True)
+    p_reconfirm.add_argument("--dir", default=".")
+    p_reconfirm.set_defaults(func=cmd_reconfirm)
 
     p_revoke = sub.add_parser("revoke")
     p_revoke.add_argument("--issue-key")

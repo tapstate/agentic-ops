@@ -202,6 +202,78 @@ class CheckpointTests(unittest.TestCase):
         self.assertEqual(cli(*arguments, "--confirmation-ref", "fixture:confirmed").returncode, 0)
         self.assertEqual(cli(*arguments, "--confirmation-ref", "fixture:confirmed").returncode, 2)
 
+    def test_reconfirm_preserves_scope_expiry_history_and_rejects_replay(self):
+        record = self.confirmation("pr_review")
+        before = self.read()
+        args = self.renewal(record, expected_q2_digest="confirmed-manual-q2")
+        with mock.patch.object(authorization.quality, "q2_digest", return_value=args.expected_q2_digest):
+            self.assertEqual(authorization.cmd_reconfirm(args), 0)
+            updated = json.loads(self.auth_path.read_text())
+            self.assertEqual(self.read(), before)
+            for key in record:
+                if key != "approved_q2_digest": self.assertEqual(updated[key], record[key])
+            self.assertEqual(updated["approved_q2_digest"], args.expected_q2_digest)
+            self.assertEqual(updated["reconfirmations"][0]["previous_q2_digest"], record["approved_q2_digest"])
+            with self.assertRaises(ValueError): authorization.cmd_reconfirm(args)
+            second = self.renewal(updated, expected_q2_digest="confirmed-second-q2")
+            with mock.patch.object(authorization.quality, "q2_digest", return_value=second.expected_q2_digest):
+                self.assertEqual(authorization.cmd_reconfirm(second), 0)
+            self.assertEqual(json.loads(self.auth_path.read_text())["reconfirmations"][0], updated["reconfirmations"][0])
+
+    def test_reconfirm_rejects_invalid_confirmation_and_changed_bindings_without_writes(self):
+        for change in ("expired", "revoked", "run", "plan", "scope", "branch", "q1", "legacy",
+                       "unconfirmed", "target", "old_digest", "same", "proof", "history", "archived"):
+            with self.subTest(change=change):
+                self.state.pop("archive_ref", None)
+                record = self.confirmation("pr_review", expired=change == "expired")
+                args = self.renewal(record, expected_q2_digest="new-q2")
+                if change == "revoked": record["status"] = "revoked"
+                elif change == "run": args.expected_run_id = "run-other"
+                elif change == "plan": self.state["facts"]["fix_plan"] = "changed"
+                elif change == "scope": self.state["repositories"][0]["approved_scope"] = "expanded"
+                elif change == "branch": self.state["repositories"][0]["work_branch"] = "other"
+                elif change == "q1": record["approved_q1_digest"] = "other"
+                elif change == "legacy": record.pop("approved_q2_digest")
+                elif change == "target": args.expected_q2_digest = "wrong"
+                elif change == "same": record["approved_q2_digest"] = "new-q2"
+                elif change == "proof": args.confirmation_ref = " "
+                elif change == "history": record["reconfirmations"] = {}
+                elif change == "archived": self.state["archive_ref"] = {"path": "archive/fixture", "digest": "a" * 64}
+                self.save()
+                task_store._write_json_atomic(self.auth_path, record)
+                args.expected_authorization_digest = "wrong" if change == "old_digest" else authorization.record_digest(record)
+                before = self.auth_path.read_bytes(), self.read()
+                with mock.patch.object(authorization.quality, "q2_digest", return_value="new-q2",
+                                       side_effect=ValueError("Q2 not confirmed") if change == "unconfirmed" else None):
+                    with self.assertRaises(ValueError): authorization.cmd_reconfirm(args)
+                self.assertEqual(before, (self.auth_path.read_bytes(), self.read()))
+
+    def test_reconfirm_q1_requires_explicit_current_digest_and_preserves_original_scope(self):
+        record = self.confirmation("ci_validation")
+        args = self.renewal(record, expected_q2_digest="new-q2")
+        before = self.auth_path.read_bytes()
+        with mock.patch.object(authorization.quality, "q1_digest", return_value="new-q1"), \
+                mock.patch.object(authorization.quality, "q2_digest", return_value="new-q2"):
+            with self.assertRaises(ValueError): authorization.cmd_reconfirm(args)
+            args.expected_q1_digest = "stale-q1"
+            with self.assertRaises(ValueError): authorization.cmd_reconfirm(args)
+            self.assertEqual(self.auth_path.read_bytes(), before)
+            args.expected_q1_digest = "new-q1"
+            with mock.patch.object(authorization.quality, "q1_digest", side_effect=ValueError("unconfirmed Q1")):
+                with self.assertRaises(ValueError): authorization.cmd_reconfirm(args)
+            self.state["repositories"][0]["approved_scope"] = "expanded"
+            self.save()
+            with self.assertRaises(ValueError): authorization.cmd_reconfirm(args)
+            self.state["repositories"][0]["approved_scope"] = "test"
+            self.save()
+            self.assertEqual(authorization.cmd_reconfirm(args), 0)
+        updated = json.loads(self.auth_path.read_text())
+        for key in record:
+            if key not in ("approved_q1_digest", "approved_q2_digest"):
+                self.assertEqual(updated[key], record[key])
+        self.assertEqual(updated["reconfirmations"][0]["previous_q1_digest"], record["approved_q1_digest"])
+        self.assertEqual(updated["approved_q1_digest"], "new-q1")
+
     def test_missing_evidence_keeps_state_and_confirmation_unchanged(self):
         self.state["stage"] = "implementation"
         self.save()
