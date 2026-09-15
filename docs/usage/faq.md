@@ -30,12 +30,12 @@
 
 ## 完成时写入失败或会话中断
 
-使用原来的 issue、run 和 `--expected-stage ci_validation` 重试最后一次 `advance`。Workflow 先检查验收条件，再原子保存 `completed` 阶段，最后撤销授权并更新注册状态。保存阶段前失败时，授权保持原样，重试重新检查；保存阶段后失败时，重试只幂等收敛撤销和注册，不重做验收或追加完成事件。即使原授权随后到期，也不会阻断已提交终态的收敛。只有收敛完成命令才返回成功；不要手改状态或为此 reset。
+恢复原 issue/run/op 与原请求，先查看 operation 的已完成步骤和回执。release/clean 中断不解除占用；completed 不回退，正式档案不重写。退出成功后才允许下一任务，不能手改 current 或换操作编号绕过恢复。
 
 ## 再次接管已接管任务
 
-不要重新初始化同一任务。Agent 会展示已有 `run_id`，由你选择继续现有现场，或先清理洁净 worktree 后按精确 `run_id` 重做。任务级清理只影响本地状态，不修改 Jira；不要用工作空间级 `purge` 代替它。
+不要覆盖当前任务。先回读 current/op，恢复同一 run 和未完成操作；不继续时明确归档清理，再接新任务。已完成任务由研发释放；任务 clean 不修改 Jira，workspace purge 不能替代任务退出。
 
-## 任务准备被 Source Pool 阻断
+## 完整工程准备失败
 
-默认 `auto-clone` 会按项目目录下载缺失仓库。若仍被阻断，确认 Git SSH 权限、项目仓库映射和 Pool 目录可读写；已有主工作树时还需满足 origin、基线分支和洁净度要求。需要修改 Pool 或改为手动供给时参阅[自定义 Source Pool](custom-source-pool.md)。
+takeover 按 Profile 准备全部独立 source；核对 Git 权限、catalog origin、版本和既有目录洁净度。恢复同一操作，不删未知残留或重新创建 run。目录复用见[工位源码与材料](workspace-materials.md)。

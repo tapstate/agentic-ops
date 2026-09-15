@@ -22,6 +22,7 @@ GATE_RUNNER = ROOT / "gate" / "runner.py"
 sys.path.insert(0, str(ROOT))
 from gate import engine  # noqa: E402
 from workflow import jira_watermark, quality, task_store  # noqa: E402
+from station_fixture import save_task as save_station_task
 
 PASS = 0
 FAIL = 0
@@ -162,7 +163,13 @@ def make_workspace(branch="feature/TAP-123", origin="git@github.com:acme/widget.
             cwd=ws,
             check=True,
         )
+    task_store.initialize_current(ws)
     return ws
+
+
+def occupy(ws, issue):
+    save_station_task(ws, {"issue_key": issue, "run_id": "run-fixture", "task_class": "technical_task",
+                          "stage": "task_intake", "facts": {}, "repositories": [], "history": [], "pending": None})
 
 
 def grant(ws, **overrides):
@@ -182,9 +189,6 @@ def grant(ws, **overrides):
     }]
     repositories.extend(overrides.get("extra_repositories", []))
     issue = overrides.get("issue_key", "TAP-123")
-    task_store.register(ws, issue, status="active")
-    gate = task_store.task_directory(ws, issue)
-    gate.mkdir(parents=True, exist_ok=True)
     run_id = "run-" + ("1" if issue == "TAP-123" else "9") * 12
     facts = {
         "fix_plan": {
@@ -198,8 +202,7 @@ def grant(ws, **overrides):
             "test_links": [{"item_id": "fixture-after-fix", "case_status": "proposed", "owner": "fixture-tester"}],
         },
     }
-    task_store.task_path(ws, issue).write_text(
-        json.dumps({
+    save_station_task(ws, {
             "issue_key": issue,
             "run_id": run_id,
             "task_class": "defect_fix",
@@ -208,10 +211,8 @@ def grant(ws, **overrides):
             "repositories": repositories,
             "pending": None,
             "history": [],
-        }),
-        encoding="utf-8",
-    )
-    task = json.loads(task_store.task_path(ws, issue).read_text(encoding="utf-8"))
+        })
+    task = task_store.read_task(ws, issue)
     rules = quality.config(ws)
     view = quality.report(quality.load(ws, task), rules, quality.context(ws, task))
 
@@ -250,7 +251,7 @@ def make_git_repository(path):
     path.mkdir(parents=True)
     subprocess.run(["git", "init", "-q", "-b", "feature/TAP-123"], cwd=path, check=True)
     subprocess.run(["git", "remote", "add", "origin", "git@github.com:acme/widget.git"], cwd=path, check=True)
-    (path / "README.md").write_text("task worktree\n", encoding="utf-8")
+    (path / "README.md").write_text("工位 source\n", encoding="utf-8")
     subprocess.run(["git", "add", "README.md"], cwd=path, check=True)
     subprocess.run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"],
@@ -261,13 +262,12 @@ def make_git_repository(path):
 
 
 def prepare_task_worktree(ws, issue_key="TAP-123"):
-    state_path = task_store.task_path(ws, issue_key)
-    task = json.loads(state_path.read_text(encoding="utf-8"))
+    task = task_store.read_task(ws, issue_key)
     worktree = make_git_repository(
-        ws / ".agenticops" / "worktrees" / issue_key / task["run_id"] / "acme" / "widget"
+        ws / "source" / "acme" / "widget"
     )
     task["repositories"][0]["worktree"] = {"status": "prepared", "path": str(worktree)}
-    state_path.write_text(json.dumps(task), encoding="utf-8")
+    save_station_task(ws, task)
     return worktree
 
 
@@ -323,65 +323,65 @@ def main():
         check("无授权时 git push 需确认", run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws), "ask")
         check("无授权时 Jira transition 需确认", run_hook("mcp__atlassian__transition_issue", {"issueKey": "TAP-123"}, ws), "ask")
         check(
-            "没有 active 任务时受控 prepare 暂停",
+            "没有 当前任务时工位操作 暂停",
             run_hook(
                 "Bash",
-                {"command": "python3 workflow/task.py repository prepare --issue-key TAP-123"},
+                {"command": "python3 workflow/task.py archive --issue-key TAP-123"},
                 ws,
             ),
             "ask",
         )
-        task_store.register(ws, "TAP-123", status="active")
+        occupy(ws, "TAP-123")
         check(
-            "active 任务受控 prepare 自动放行",
+            "当前任务归档仍需明确确认",
             run_hook(
                 "Bash",
-                {"command": "python3 workflow/task.py repository prepare --issue-key TAP-123"},
-                ws,
-            ),
-            "allow",
-        )
-        check(
-            "直接入口与小写 issue key 仍绑定 active 任务",
-            run_hook(
-                "Bash",
-                {"command": "workflow/task.py repository prepare --issue-key tap-123"},
-                ws,
-            ),
-            "allow",
-        )
-        check(
-            "重复同值 issue key 的 prepare 停止",
-            run_hook(
-                "Bash",
-                {"command": "workflow/task.py repository prepare --issue-key TAP-123 --issue-key=TAP-123"},
+                {"command": "python3 workflow/task.py archive --issue-key TAP-123"},
                 ws,
             ),
             "ask",
         )
         check(
-            "重复异值 issue key 的 prepare 停止",
+            "直接入口与小写 issue key 不跳过确认",
             run_hook(
                 "Bash",
-                {"command": "workflow/task.py repository prepare --issue-key=TAP-123 --issue-key TAP-999"},
+                {"command": "workflow/task.py archive --issue-key tap-123"},
                 ws,
             ),
             "ask",
         )
         check(
-            "重复 dir 的 prepare 停止",
+            "重复同值 issue key 的 归档停止",
             run_hook(
                 "Bash",
-                {"command": "workflow/task.py repository prepare --dir ws-a --issue-key TAP-123 --dir=ws-b"},
+                {"command": "workflow/task.py archive --issue-key TAP-123 --issue-key=TAP-123"},
                 ws,
             ),
             "ask",
         )
         check(
-            "受控 prepare 必须显式指定 issue key",
+            "重复异值 issue key 的 归档停止",
             run_hook(
                 "Bash",
-                {"command": "python3 workflow/task.py repository prepare"},
+                {"command": "workflow/task.py archive --issue-key=TAP-123 --issue-key TAP-999"},
+                ws,
+            ),
+            "ask",
+        )
+        check(
+            "重复 dir 的 归档停止",
+            run_hook(
+                "Bash",
+                {"command": "workflow/task.py archive --dir ws-a --issue-key TAP-123 --dir=ws-b"},
+                ws,
+            ),
+            "ask",
+        )
+        check(
+            "工位操作 必须显式指定 issue key",
+            run_hook(
+                "Bash",
+                {"command": "python3 workflow/task.py archive"},
                 ws,
             ),
             "ask",
@@ -390,16 +390,16 @@ def main():
             "复用已有分支仍需人工确认",
             run_hook(
                 "Bash",
-                {"command": "python3 workflow/task.py repository prepare --issue-key TAP-123 --reuse-existing-branch"},
+                {"command": "python3 workflow/task.py archive --issue-key TAP-123 --reuse-existing-branch"},
                 ws,
             ),
             "ask",
         )
         check(
-            "repository cleanup 仍需人工确认",
+            "clean 仍需人工确认",
             run_hook(
                 "Bash",
-                {"command": "python3 workflow/task.py repository cleanup --issue-key TAP-123"},
+                {"command": "python3 workflow/task.py clean --issue-key TAP-123"},
                 ws,
             ),
             "ask",
@@ -407,24 +407,24 @@ def main():
         check("直接 git worktree add 需人工确认", run_hook("Bash", {"command": "git worktree add /tmp/x"}, ws), "ask")
         check("直接 git clone 需人工确认", run_hook("Bash", {"command": "git clone git@example.test:a/b.git"}, ws), "ask")
         check("直接 git fetch 需人工确认", run_hook("Bash", {"command": "git fetch origin develop"}, ws), "ask")
-        check("直接 repository_worktree prepare 需人工确认", run_hook("Bash", {"command": "workflow/repository_worktree.py prepare --issue-key TAP-123"}, ws), "ask")
-        prefetch = run_standard({
+        check("直接工位清理 需人工确认", run_hook("Bash", {"command": "workflow/task.py clean --issue-key TAP-123"}, ws), "ask")
+        lifecycle = run_standard({
             "protocol_version": 1,
             "event": "before_operation",
             "source": {"agent": "test", "adapter": "test", "adapter_version": 1},
             "cwd": str(ws),
-            "operations": ["prefetch_project_repositories"],
+            "operations": ["manage_station"],
         })
-        check("项目仓库预下载需人工确认", prefetch["decision"], "ask")
-        check("项目仓库预下载不依赖 Jira 任务", prefetch["reason_code"], "project_repository_prefetch_confirmation_required")
-        check("项目仓库预下载确认后可执行", "确认后可在目标工作空间原样执行" in prefetch["required_action"], True)
-        check("项目仓库预下载 Hook 仍需确认", run_hook("Bash", {"command": "./agenticops workspace prefetch --yes"}, ws), "ask")
-        check("直接 task purge 需人工确认", run_hook("Bash", {"command": "workflow/task.py purge --issue-key TAP-123 --yes"}, ws), "ask")
-        check("python task purge 需人工确认", run_hook("Bash", {"command": "python3 workflow/task.py purge --issue-key TAP-123 --yes"}, ws), "ask")
-        check("python -m task purge 仍需人工确认", run_hook("Bash", {"command": "python3 -m workflow.task purge --issue-key TAP-123 --yes"}, ws), "ask")
-        check("紧凑 python -m task purge 仍需人工确认", run_hook("Bash", {"command": "python3 -mworkflow.task purge --issue-key TAP-123 --yes"}, ws), "ask")
-        check("python -m repository_worktree prepare 仍需人工确认", run_hook("Bash", {"command": "python3 -m workflow.repository_worktree prepare --issue-key TAP-123"}, ws), "ask")
-        check("python -m task 受控 prepare 放行", run_hook("Bash", {"command": "python3 -m workflow.task repository prepare --issue-key tap-123"}, ws), "allow")
+        check("工位操作需人工确认", lifecycle["decision"], "ask")
+        check("工位操作不借用任务授权", lifecycle["reason_code"], "station_confirmation_required")
+        check("归档不授权删除", "归档不授予删除权限" in lifecycle["required_action"], True)
+        check("工位解绑 Hook 仍需确认", run_hook("Bash", {"command": "./agenticops workspace purge --yes"}, ws), "ask")
+        check("直接 task clean 需人工确认", run_hook("Bash", {"command": "workflow/task.py clean --issue-key TAP-123 --yes"}, ws), "ask")
+        check("python task clean 需人工确认", run_hook("Bash", {"command": "python3 workflow/task.py clean --issue-key TAP-123 --yes"}, ws), "ask")
+        check("python -m task clean 仍需人工确认", run_hook("Bash", {"command": "python3 -m workflow.task clean --issue-key TAP-123 --yes"}, ws), "ask")
+        check("紧凑 python -m task clean 仍需人工确认", run_hook("Bash", {"command": "python3 -mworkflow.task clean --issue-key TAP-123 --yes"}, ws), "ask")
+        check("python -m 工位清理 仍需人工确认", run_hook("Bash", {"command": "python3 -m workflow.task clean --issue-key TAP-123"}, ws), "ask")
+        check("python -m task 归档需确认", run_hook("Bash", {"command": "python3 -m workflow.task archive --issue-key tap-123"}, ws), "ask")
         check("未知 Python 模块交还 Agent 原生权限", run_hook("Bash", {"command": "python3 -m workflow.other purge --issue-key TAP-123 --yes"}, ws), "passthrough")
         check("Python -c 内联执行交还 Agent 原生权限", run_hook("Bash", {"command": "python3 -c 'print(1)'"}, ws), "passthrough")
         check("Python stdin 执行交还 Agent 原生权限", run_hook("Bash", {"command": "python3 -"}, ws), "passthrough")
@@ -439,12 +439,12 @@ def main():
         check("nodejs 脚本文件交还 Agent 原生权限", run_hook("Bash", {"command": "nodejs payload.js"}, ws), "passthrough")
         check("Python 只读版本查询不受控", run_hook("Bash", {"command": "python3 --version"}, ws), "passthrough")
         check("nodejs 只读版本查询不受控", run_hook("Bash", {"command": "nodejs --version"}, ws), "passthrough")
-        check("带值 Python 长选项后的 purge 仍需人工确认", run_hook("Bash", {"command": "python3 --check-hash-based-pycs always workflow/task.py purge --issue-key TAP-123 --yes"}, ws), "ask")
+        check("带值 Python 长选项后的 purge 仍需人工确认", run_hook("Bash", {"command": "python3 --check-hash-based-pycs always workflow/task.py clean --issue-key TAP-123 --yes"}, ws), "ask")
         check("git message 值 --help 不旁路 commit", run_hook("Bash", {"command": "git commit -m --help"}, ws), "ask")
         check("gh title 值 --help 不旁路建 PR", run_hook("Bash", {"command": "gh pr create --title --help"}, ws), "ask")
         check("git 真实 help 不受控", run_hook("Bash", {"command": "git commit -a --help"}, ws), "passthrough")
         check("gh 真实 help 不受控", run_hook("Bash", {"command": "gh pr create --draft --help"}, ws), "passthrough")
-        check("task repository --help 不误拦", run_hook("Bash", {"command": "python3 workflow/task.py repository prepare --help"}, ws), "passthrough")
+        check("task repository --help 不误拦", run_hook("Bash", {"command": "python3 workflow/task.py archive --help"}, ws), "passthrough")
         check("repository context 不误拦", run_hook("Bash", {"command": "python3 workflow/task.py repository context --issue-key TAP-123 --json"}, ws), "passthrough")
         readonly_composition = (
             "rg --files .agenticops %s | rg '(jira|adapter|gate|runner|task)' && "
@@ -488,40 +488,40 @@ def main():
 
         target_ws = make_workspace()
         try:
-            task_store.register(target_ws, "TAP-777", status="active")
+            occupy(target_ws, "TAP-777")
             check(
-                "绝对 --dir 按目标工作空间解析 active 任务",
+                "绝对 --dir 按目标工作空间确认归档",
                 run_hook(
                     "Bash",
-                    {"command": "python3 workflow/task.py repository prepare --issue-key tap-777 --dir %s" % target_ws},
+                    {"command": "python3 workflow/task.py archive --issue-key tap-777 --dir %s" % target_ws},
                     ws,
                 ),
-                "allow",
+                "ask",
             )
             relative_target = os.path.relpath(target_ws, ws)
             check(
                 "相对 --dir 按 Hook cwd 解析目标工作空间",
                 run_hook(
                     "Bash",
-                    {"command": "python3 workflow/task.py repository prepare --issue-key TAP-777 --dir %s" % relative_target},
+                    {"command": "python3 workflow/task.py archive --issue-key TAP-777 --dir %s" % relative_target},
                     ws,
                 ),
-                "allow",
+                "ask",
             )
             check(
-                "前置只读 Workflow segment 不污染 prepare target",
+                "前置只读 Workflow segment 不污染归档目标",
                 run_hook(
                     "Bash",
-                    {"command": "workflow/task.py status --issue-key TAP-999 --dir wsA && workflow/task.py repository prepare --issue-key tap-777 --dir %s" % target_ws},
+                    {"command": "workflow/task.py status --issue-key TAP-999 --dir wsA && workflow/task.py archive --issue-key tap-777 --dir %s" % target_ws},
                     ws,
                 ),
-                "allow",
+                "ask",
             )
             check(
-                "跨工作空间不得借用 Hook cwd 的 active 任务",
+                "跨工作空间不得借用 Hook cwd 的 当前任务",
                 run_hook(
                     "Bash",
-                    {"command": "python3 workflow/task.py repository prepare --issue-key TAP-123 --dir %s" % target_ws},
+                    {"command": "python3 workflow/task.py archive --issue-key TAP-123 --dir %s" % target_ws},
                     ws,
                 ),
                 "ask",
@@ -530,7 +530,7 @@ def main():
                 "复合 prepare 不得用单一 target 代表多个工作空间",
                 run_hook(
                     "Bash",
-                    {"command": "workflow/task.py repository prepare --issue-key TAP-123 && workflow/task.py repository prepare --issue-key TAP-777 --dir %s" % target_ws},
+                    {"command": "workflow/task.py archive --issue-key TAP-123 && workflow/task.py archive --issue-key TAP-777 --dir %s" % target_ws},
                     ws,
                 ),
                 "ask",
@@ -549,7 +549,7 @@ def main():
                 "未绑定目标工作空间停止 prepare",
                 run_hook(
                     "Bash",
-                    {"command": "workflow/task.py repository prepare --issue-key TAP-404 --dir %s" % unbound_target},
+                    {"command": "workflow/task.py archive --issue-key TAP-404 --dir %s" % unbound_target},
                     ws,
                 ),
                 "ask",
@@ -570,10 +570,10 @@ def main():
             "operations": ["git_commit"],
             "target": {"issue_key": "TAP-123"},
         })
-        check("active 任务无授权使用独立原因码", missing_auth["reason_code"], "authorization_missing")
+        check("当前任务无授权使用独立原因码", missing_auth["reason_code"], "authorization_missing")
         check("无授权响应给出处理方式", bool(missing_auth.get("required_action")), True)
 
-        authorization_path = task_store.task_directory(ws, "TAP-123") / "authorization.json"
+        authorization_path = task_store.authorization_path(ws, "TAP-123")
         authorization_path.write_text("{}", encoding="utf-8")
         invalid_auth = run_standard({
             "protocol_version": 1,
@@ -594,7 +594,7 @@ def main():
             "operations": ["git_commit"],
             "target": {"issue_key": "TAP-999"},
         })
-        check("无 active 任务使用独立原因码", no_task["reason_code"], "no_active_task")
+        check("无 当前任务使用独立原因码", no_task["reason_code"], "no_active_task")
 
         # ---- 签发授权后 -------------------------------------------------
         grant(ws)
@@ -866,12 +866,11 @@ def main():
         check("复合 gh PR 不得跨仓库共用 target", run_hook("Bash", {"command": "gh pr create -R acme/widget --title t --body b && gh pr edit 1 -R acme/other --title t"}, ws), "ask")
         check("复合同仓库 gh PR 正常合并", run_hook("Bash", {"command": "gh pr create -R acme/widget --title t --body b && gh pr edit 1 --repo acme/widget --title t"}, ws), "allow")
 
-        # ---- GitHub 写操作需要 task worktree 的分支上下文 ----------------
+        # ---- GitHub 写操作需要 工位 source 的分支上下文 ----------------
         branchless_ws = make_workspace(initialize_git=False)
         try:
             grant(branchless_ws)
             branchless_worktree = prepare_task_worktree(branchless_ws)
-            grant(branchless_ws, issue_key="TAP-999", work_branch="feature/TAP-999")
             command = "gh pr edit 1 --repo acme/widget --title t"
             branchless_edit = run_codex_output(
                 "exec_command",
@@ -879,7 +878,7 @@ def main():
                 branchless_ws,
             )
             check(
-                "同仓多 active 任务但工作空间根缺分支时停止",
+                "同仓多 当前任务但工作空间根缺分支时停止",
                 branchless_edit["hookSpecificOutput"]["permissionDecision"],
                 "deny",
             )
@@ -890,7 +889,7 @@ def main():
                 True,
             )
             check(
-                "缺分支上下文提示 task worktree",
+                "缺分支上下文提示 工位 source",
                 "工具工作目录设为该路径"
                 in branchless_edit["hookSpecificOutput"]["permissionDecisionReason"],
                 True,
@@ -914,6 +913,15 @@ def main():
                 ),
                 "deny",
             )
+            relocated = branchless_ws / "relocated-source"
+            branchless_worktree.rename(relocated)
+            branchless_worktree.symlink_to(relocated, target_is_directory=True)
+            try:
+                check("source 符号链接不得借用任务授权", run_codex("exec_command",
+                    {"cmd": command, "workdir": str(branchless_worktree)}, branchless_ws), "deny")
+            finally:
+                branchless_worktree.unlink()
+                relocated.rename(branchless_worktree)
             if shutil.which("opa"):
                 opa_branchless_edit = run_codex_output(
                     "exec_command",
@@ -940,20 +948,28 @@ def main():
             shutil.rmtree(branchless_ws)
 
         check(
-            "普通任务授权不覆盖 Source Pool 管理",
+            "普通任务授权不覆盖 原生 Git 仓库同步",
             run_hook("Bash", {"command": "git fetch origin develop"}, ws),
             "ask",
         )
 
-        # ---- 同一项目空间多个 active 任务按仓库+分支解析 -----------------
-        grant(ws, issue_key="TAP-999", work_branch="feature/TAP-999")
-        subprocess.run(["git", "checkout", "-q", "-b", "feature/TAP-999"], cwd=ws, check=True)
-        check("第二个 active 任务使用自己的授权", run_hook("Bash", {"command": "git commit -m x"}, ws), "allow")
-        subprocess.run(["git", "checkout", "-q", "feature/TAP-123"], cwd=ws, check=True)
-        check("切回分支后恢复第一个任务授权", run_hook("Bash", {"command": "git commit -m x"}, ws), "allow")
-        grant(ws, issue_key="TAP-999", work_branch="feature/TAP-123")
-        check("两个 active 任务上下文冲突时保守停止", run_hook("Bash", {"command": "git commit -m x"}, ws), "ask")
-        grant(ws, issue_key="TAP-999", work_branch="feature/TAP-999")
+        # ---- 并发由独立工位承担，不能覆盖现有 current ------------------
+        other_ws = make_workspace()
+        try:
+            grant(other_ws, issue_key="TAP-999", work_branch="feature/TAP-999")
+            subprocess.run(["git", "checkout", "-q", "-b", "feature/TAP-999"], cwd=other_ws, check=True)
+            check("第二工位使用自己的授权", run_hook("Bash", {"command": "git commit -m x"}, other_ws), "allow")
+            check("第一工位授权保持独立", run_hook("Bash", {"command": "git commit -m x"}, ws), "allow")
+            check("跨工位任务不借用授权", run_hook("mcp__atlassian__transition_issue", {"issueKey": "TAP-999"}, ws), "ask")
+            before = task_store.current_path(ws).read_bytes()
+            try:
+                task_store.write_task(ws, task_store.read_task(other_ws))
+                rejected = False
+            except ValueError:
+                rejected = True
+            check("占用工位拒绝覆盖任务", rejected and task_store.current_path(ws).read_bytes() == before, True)
+        finally:
+            shutil.rmtree(other_ws)
 
         # ---- 授权伞永不覆盖的高危操作 -----------------------------------
         check("merge 始终需单独确认", run_hook("Bash", {"command": "git merge develop"}, ws), "ask")
@@ -1330,7 +1346,7 @@ def main():
                 ("Bash", {"command": "git push origin HEAD:refs/tags/v1"}),
                 ("Bash", {"command": "git push upstream feature/TAP-123"}),
                 ("Bash", {"command": "git -c color.ui=false push origin feature/TAP-123"}),
-                ("Bash", {"command": "workflow/task.py repository prepare --issue-key TAP-123 --issue-key=TAP-123"}),
+                ("Bash", {"command": "workflow/task.py archive --issue-key TAP-123 --issue-key=TAP-123"}),
                 ("Bash", {"command": "git -c color.ui=false status --short"}),
                 ("Bash", {"command": "git status & git push -f origin feature/TAP-123"}),
                 ("Bash", {"command": "if git status; then git push origin feature/TAP-123; fi"}),
@@ -1363,11 +1379,10 @@ def main():
                 py = run_hook(tool, tin, ws)
                 opa = run_hook(tool, tin, ws, env_extra={"AO_GATE_USE_OPA": "1"})
                 check("OPA 一致性：%s %s" % (tool.split("__")[-1], tin.get("command", "")), opa, py)
-            task_store.register(ws, "TAP-555", status="active")
             reason_cases = [
-                ("prepare_task_repository", "TAP-123", "controlled_prepare_allowed"),
+                ("manage_station", "TAP-123", "station_confirmation_required"),
                 ("git_commit", "TAP-404", "no_active_task"),
-                ("git_commit", "TAP-555", "authorization_missing"),
+                ("git_commit", "TAP-555", "no_active_task"),
                 ("transition_jira_status", "TAP-123", "operation_not_covered"),
             ]
             for operation, issue_key, expected_reason_code in reason_cases:
@@ -1388,7 +1403,7 @@ def main():
                     bool(opa.get("required_action")),
                     bool(py.get("required_action")),
                 )
-            authorization_path = task_store.task_directory(ws, "TAP-123") / "authorization.json"
+            authorization_path = task_store.authorization_path(ws, "TAP-123")
             original_authorization = json.loads(authorization_path.read_text(encoding="utf-8"))
             repository = original_authorization["repositories"][0]
             malformed_authorizations = {

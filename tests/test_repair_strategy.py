@@ -12,6 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workflow import repair_strategy, task, task_store
+from station_fixture import save_task as save_station_task
 
 
 CATALOG = {
@@ -49,14 +50,14 @@ class RepairStrategyTest(unittest.TestCase):
             "issue_key": self.issue, "run_id": self.run_id, "task_class": "defect_fix",
             "stage": "task_intake", "facts": {}, "repositories": [], "pending": None, "history": [],
         }
-        task_store._write_json_atomic(task_store.task_path(self.workspace, self.issue), self.state)
-        task_store.register(self.workspace, self.issue, status="active")
+        save_station_task(self.workspace, self.state)
+
 
     def tearDown(self):
         self.temp.cleanup()
 
     def read_state(self):
-        return json.loads(task_store.task_path(self.workspace, self.issue).read_text(encoding="utf-8"))
+        return task_store.read_task(self.workspace, self.issue)
 
     def args(self, **values):
         base = {"dir": str(self.workspace), "issue_key": self.issue,
@@ -118,28 +119,30 @@ class RepairStrategyTest(unittest.TestCase):
             ))
         self.assertEqual(self.read_state(), before)
 
-    def test_reset_archives_override_instead_of_leaking_to_new_run(self):
+    def test_archive_freezes_override_and_new_run_uses_default(self):
         self.assertEqual(task.cmd_repair_strategy_set(self.args()), 0)
-        reset_args = self.args(stage="task_intake", note="重新规划")
-        self.assertEqual(task.cmd_reset(reset_args), 0)
-        current = self.read_state()
+        self.state = self.read_state()
+        self.state["archive_ref"] = {"path": "archive/DEMO-1/" + self.run_id, "digest": "a" * 64}
+        save_station_task(self.workspace, self.state)
+        archived = self.read_state()
+        with self.assertRaisesRegex(ValueError, "归档"):
+            task.cmd_repair_strategy_clear(self.args())
+        self.assertEqual(self.read_state(), archived)
+        current = dict(self.state, run_id="run-new", facts={}, archive_ref=None)
+        save_station_task(self.workspace, current)
         self.assertNotEqual(current["run_id"], self.run_id)
         self.assertNotIn(repair_strategy.OVERRIDE_FACT, current["facts"])
-        archived = [item for item in current["history"]
-                    if item.get("event") == "archive_fact"
-                    and item.get("key") == repair_strategy.OVERRIDE_FACT]
-        self.assertEqual(len(archived), 1)
-        self.assertEqual(archived[0]["value"]["id"], "context_driven")
+        self.assertEqual(archived["facts"][repair_strategy.OVERRIDE_FACT]["id"], "context_driven")
 
     def test_q2_or_later_change_does_not_create_mixed_state(self):
         self.state["stage"] = "implementation"
-        task_store._write_json_atomic(task_store.task_path(self.workspace, self.issue), self.state)
+        save_station_task(self.workspace, self.state)
         self.assertEqual(task.cmd_repair_strategy_set(self.args()), 2)
         self.assertNotIn(repair_strategy.OVERRIDE_FACT, self.read_state()["facts"])
 
     def test_active_authorization_prevents_pre_advance_strategy_drift(self):
         self.state["stage"] = "design_review"
-        task_store._write_json_atomic(task_store.task_path(self.workspace, self.issue), self.state)
+        save_station_task(self.workspace, self.state)
         task_store._write_json_atomic(task_store.authorization_path(self.workspace, self.issue), {
             "status": "active"
         })

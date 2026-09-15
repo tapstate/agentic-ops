@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "完整工程冻结基线值",
+  "description": "只描述基线值，不声明工位已准备、授权已批准或应用验收通过；跨字段身份和摘要由 workflow 核验。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "profile",
+    "resolution_input",
+    "repositories",
+    "digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "status": {
+      "const": "frozen"
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "revision",
+        "digest"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "resolution_input": {
+      "type": "object"
+    },
+    "repositories": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "repository_id",
+          "origin",
+          "ref_kind",
+          "ref_name",
+          "commit_sha",
+          "resolution_source",
+          "rule_version",
+          "path"
+        ],
+        "properties": {
+          "repository_id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$"
+          },
+          "origin": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ref_kind": {
+            "enum": [
+              "branch",
+              "tag",
+              "commit"
+            ]
+          },
+          "ref_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "commit_sha": {
+            "type": "string",
+            "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"
+          },
+          "resolution_source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rule_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^source/[^/]+/[^/]+$"
+          }
+        }
+      }
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

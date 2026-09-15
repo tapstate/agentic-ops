@@ -1,0 +1,12 @@
+# 复制到工作空间 config/fe.yml；Access Code 来自该工位 TM 的实际初始化。
+spring:
+  data:
+    mongodb:
+      uri: ${TAPDATA_MONGO_URI}
+tapdata:
+  cloud:
+    accessCode: ${TAPDATA_ACCESS_CODE}
+    retryTime: 3
+    baseURLs:
+      - http://127.0.0.1:3030/api/
+  mode: cluster

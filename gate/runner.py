@@ -180,6 +180,7 @@ def _audit(cwd, context, record):
         task_directory = engine.find_task_directory(
             cwd, context=context, issue_key=context.get("issue_key")
         )
+        active_task = task_directory is not None
         if task_directory is None:
             root = engine.find_gate_root(cwd)
             workspace_state = root / ".agenticops"
@@ -189,7 +190,9 @@ def _audit(cwd, context, record):
             else:
                 task_directory = workspace_state
         task_directory.mkdir(parents=True, exist_ok=True)
-        with open(task_directory / "events.jsonl", "a", encoding="utf-8") as stream:
+        evidence = task_directory / "evidence" if active_task else task_directory
+        evidence.mkdir(exist_ok=True)
+        with open(evidence / "events.jsonl", "a", encoding="utf-8") as stream:
             stream.write(json.dumps(record, ensure_ascii=False) + "\n")
         return None
     except OSError as error:
@@ -231,13 +234,13 @@ def evaluate_request(request, policy_path=None):
         target.get("git_cwd")
         and task_directory is not None
         and not context.get("repository_fact_error")
-        and not engine.task_worktree_matches(task_directory, context["git_cwd"], context)
+        and not engine.task_source_matches(task_directory, context["git_cwd"], context)
     ):
-        context["repository_fact_error"] = "git -C 目录不是当前任务已准备的 worktree"
+        context["repository_fact_error"] = "git -C 目录不是当前任务已准备的 source 仓库"
     authorization = None
     authorization_path = None
     if task_directory is not None:
-        task_state = engine._read_json(task_directory / "state.json")
+        task_state = engine.current_task(task_directory)
         if isinstance(task_state, dict):
             context["agentic_run_id"] = task_state.get("run_id")
         path = task_directory / "authorization.json"
@@ -294,13 +297,13 @@ def evaluate_request(request, policy_path=None):
             "reason_code": "invalid_standard_operation",
             "required_action": "请修复 Adapter 映射，只请求可请求的标准操作。",
         }
-    elif request["operations"].count("prepare_task_repository") > 1:
+    elif request["operations"].count("manage_station") > 1:
         result = {
             "decision": engine.ASK,
-            "operation": "prepare_task_repository",
-            "reason": "一个 Gate 请求包含多个受控仓库准备目标，无法唯一绑定工作空间",
+            "operation": "manage_station",
+            "reason": "一个 Gate 请求包含多个工位操作，不能共用一次确认",
             "reason_code": "ambiguous_workflow_target",
-            "required_action": "请将每个任务工作空间的 repository prepare 拆成独立命令后重试。",
+            "required_action": "请将每个工位生命周期操作拆成独立命令后确认。",
         }
     elif os.environ.get("AO_GATE_USE_OPA") == "1" and len(request["operations"]) == 1:
         try:

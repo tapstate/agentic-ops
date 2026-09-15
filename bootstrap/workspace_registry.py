@@ -11,7 +11,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from workflow import project_rules, repository_worktree, task_store  # noqa: E402
+from workflow import station_operation, task_store  # noqa: E402
+from bootstrap.workspace_compatibility import require_workspace_can_adopt
 from bootstrap.workspace_paths import WorkspaceDirectory, workspace_artifact_path  # noqa: E402
 
 
@@ -95,7 +96,7 @@ def binding_status(product_root, workspace, tree=None):
         document = tree.read_json(relative, "工作空间绑定")
     except ValueError:
         return "unreadable", "工作空间绑定不可读取"
-    if document.get("schema_version") not in (1, 2):
+    if document.get("schema_version") != 3:
         return "invalid", "工作空间绑定版本不支持"
     if document.get("product_root") != str(product_root.resolve()):
         return "rebound", "已绑定到其它 Product Root"
@@ -201,66 +202,28 @@ def detach_preflight(product_root, workspace, purge=False, tree=None):
             raise ValueError("生成接线已被修改或异常，拒绝删除：%s" % path)
         deletable.append(relative)
     state_root = workspace_artifact_path(workspace, STATE_DIRECTORY)
-    task_root = state_root / "tasks"
-    if task_root.is_symlink():
-        raise ValueError("任务状态目录不能是符号链接，拒绝操作：%s" % task_root)
-    task_count = sum(1 for path in task_root.iterdir() if path.is_dir()) if task_root.is_dir() else 0
-    prepared_roots = []
-    if task_root.is_dir():
-        for task_path in sorted(task_root.glob("*/state.json")):
-            task = load_json(task_path, "任务状态")
-            prepared = [
-                item.get("repository")
-                for item in task.get("repositories", [])
-                if isinstance(item, dict)
-                and (item.get("worktree") or {}).get("status") == "prepared"
-            ]
-            if prepared and not purge:
-                raise ValueError(
-                    "工作空间仍有已准备的任务 worktree，detach 前必须先清理：%s"
-                    % "、".join(prepared)
-                )
-            if prepared:
-                # 清理只需要验证并处理已准备的仓库。task_roots() 用于执行上下文，
-                # 会要求任务的每个仓库都已准备；多仓任务在先准备一部分后新增仓库时，
-                # 该条件不成立，但不应阻止 purge 回收已有的洁净 worktree。
-                checks = repository_worktree.preflight_cleanup(workspace, task)
-                prepared_roots.extend(check["path"] for check in checks)
-    if purge:
-        allowed = {
-            Path(path).relative_to(STATE_DIRECTORY)
-            for path in deletable
-            if Path(path).parts and Path(path).parts[0] == STATE_DIRECTORY
-        }
-        allowed.update(
-            {
-                Path("workspace.json"),
-                Path("init.json"),
-                Path("tasks.lock"),
-                WORKSPACE_GATE_EVENTS,
-            }
-        )
-        for root in prepared_roots:
-            current = root
-            while current != state_root and state_root in current.parents:
-                allowed.add(current.relative_to(state_root))
-                current = current.parent
-        for path in state_root.rglob("*"):
-            relative = path.relative_to(state_root)
-            if relative.parts and relative.parts[0] == "tasks":
-                if path.is_symlink():
-                    raise ValueError("任务状态包含符号链接，拒绝清理：%s" % path)
-                continue
-            if any(path == root or root in path.parents for root in prepared_roots):
-                continue
-            if relative == WORKSPACE_GATE_EVENTS and (
-                not tree.is_file(Path(STATE_DIRECTORY) / relative)
-                or tree.is_symlink(Path(STATE_DIRECTORY) / relative)
-            ):
-                raise ValueError("工作空间 Gate 审计事件不是普通文件，拒绝清理：%s" % path)
-            if relative not in allowed:
-                raise ValueError("工作空间状态包含未知文件，拒绝清理：%s" % path)
-    return deletable, task_count
+    require_workspace_can_adopt(product_root, workspace)
+    current = task_store.read_current(workspace)
+    if current["current"] is not None:
+        raise ValueError("工位仍被任务占用，必须先归档并释放或清理，不能解绑")
+    operation_path = state_root / "operation.json"
+    if operation_path.exists():
+        if operation_path.is_symlink():
+            raise ValueError("操作状态不能是符号链接")
+        operation = station_operation.read(workspace)
+        if operation.get("status") != "done":
+            raise ValueError("工位仍有未完成操作，不能解绑")
+    allowed = {"workspace.json", "init.json", "current-task.json", "operation.json",
+               "events.jsonl", "git-ref-cache-v2.json",
+               "git-ref-cache-v2.json.lock"}
+    for path in state_root.iterdir():
+        if path.name not in allowed or path.is_symlink() or not path.is_file():
+            raise ValueError("工作空间状态包含未知文件或未清理活动证据，拒绝解绑：%s" % path)
+    if not tree.is_dir("runtime") or tree.is_symlink("runtime"):
+        raise ValueError("runtime 目录缺失或不安全，拒绝解绑")
+    if any(tree.path("runtime").iterdir()):
+        raise ValueError("runtime 仍有材料，必须先经任务清理或明确处置，不能解绑")
+    return deletable, 0
 
 
 def remove_empty_parents(paths, tree):
@@ -274,7 +237,7 @@ def remove_empty_parents(paths, tree):
 
 def detach(product_root, workspace, purge=False):
     workspace = Path(workspace).resolve()
-    lock = task_store.task_state_lock(workspace) if purge else _null_context()
+    lock = task_store.task_state_lock(workspace)
     with lock:
         with WorkspaceDirectory(workspace) as tree:
             # purge 必须在持有工作空间状态目录锁后重新预检；命令展示阶段的预检
@@ -282,32 +245,12 @@ def detach(product_root, workspace, purge=False):
             deletable, _ = detach_preflight(
                 product_root, workspace, purge=purge, tree=tree
             )
-            issues = []
-            if purge:
-                registry = task_store.load_registry(workspace, create=False)
-                issues = sorted((registry or {}).get("tasks", {}))
-                for issue in issues:
-                    if not task_store.task_path(workspace, issue).is_file():
-                        raise ValueError("任务状态缺失，拒绝 purge：%s" % issue)
-                    # 已持有 task-state 锁，必须调用不递归加锁的实现；其内部按固定顺序
-                    # 获取 pool 锁并重新预检 worktree/lease。
-                    repository_worktree._cleanup_task_locked(workspace, issue)
-
             for relative in deletable:
                 tree.unlink(relative)
 
-            if purge:
-                # 锁序固定为 task-state ->（逐任务 pool）-> registry；进入这里时不再
-                # 持有 pool 锁。registry 锁内回读任务集合后一次性删除任务状态。
-                with task_store.registry_lock(workspace):
-                    current = task_store.load_registry(workspace, create=False)
-                    current_issues = sorted((current or {}).get("tasks", {}))
-                    if current_issues != issues:
-                        raise ValueError("purge 期间任务注册表发生变化，拒绝删除")
-                    tree.remove_tree(Path(STATE_DIRECTORY) / "tasks", missing_ok=True)
-                tree.unlink(Path(STATE_DIRECTORY) / "tasks.lock", missing_ok=True)
-                tree.unlink(Path(STATE_DIRECTORY) / WORKSPACE_GATE_EVENTS, missing_ok=True)
-
+            for name in ("current-task.json", "operation.json", "events.jsonl",
+                         "git-ref-cache-v2.json", "git-ref-cache-v2.json.lock"):
+                tree.unlink(Path(STATE_DIRECTORY) / name, missing_ok=True)
             for relative in (
                 Path(STATE_DIRECTORY) / "init.json",
                 Path(STATE_DIRECTORY) / "workspace.json",
@@ -373,43 +316,12 @@ def command_detach(args, product_root, purge=False):
     details = {}
     for workspace in targets:
         _, task_count = detach_preflight(product_root, workspace, purge=purge)
-        details[str(workspace)] = "将删除接线和绑定，并%s %s 个任务目录" % ("清理" if purge else "保留", task_count)
+        details[str(workspace)] = "空闲工位：只移除接线和绑定；保留 source/config/archive"
     show_targets("purge" if purge else "detach", targets, details)
     confirm(args)
     for workspace in targets:
         detach(product_root, workspace, purge=purge)
     print("已%s %s 个工作空间。" % ("彻底清理" if purge else "解绑", len(targets)))
-
-
-def command_prefetch(args, product_root):
-    targets = [Path(item) for item in load_registry(product_root)] if args.all else [
-        Path(args.workspace or ".").resolve()
-    ]
-    details = {}
-    for workspace in targets:
-        require_tracked(product_root, workspace)
-        project = project_rules.project_from_workspace(workspace)
-        catalog = project_rules.load_repository_catalog(workspace=workspace)
-        repositories = catalog.get("repositories", {})
-        if not repositories:
-            raise ValueError("项目仓库目录为空，拒绝预下载：%s" % workspace)
-        details[str(workspace)] = "%s 项目，按目录预下载 %d 个仓库" % (project, len(repositories))
-    show_targets("prefetch", targets, details)
-    confirm(args)
-    cloned = existing = failed = 0
-    failures = []
-    for workspace in targets:
-        reports = repository_worktree.prefetch_project_repositories(workspace)
-        cloned += sum(item["status"] == "cloned" for item in reports)
-        existing += sum(item["status"] == "existing" for item in reports)
-        failed_reports = [item for item in reports if item["status"] == "failed"]
-        failed += len(failed_reports)
-        failures.extend(failed_reports)
-    print("预下载完成：新下载 %d 个，已存在并通过复核 %d 个，失败 %d 个。" % (cloned, existing, failed))
-    for item in failures:
-        print("预下载失败：%s：%s" % (item["repository"], item["error"]))
-    if failures:
-        raise ValueError("部分仓库预下载失败；已继续完成其余仓库，请根据上方明细处理")
 
 
 def command_pending(args, product_root):
@@ -452,11 +364,6 @@ def parser():
         target.add_argument("--workspace")
         target.add_argument("--all", action="store_true")
         command.add_argument("--yes", action="store_true", help="非交互环境确认已展示的目标列表")
-    prefetch = commands.add_parser("prefetch")
-    target = prefetch.add_mutually_exclusive_group()
-    target.add_argument("--workspace")
-    target.add_argument("--all", action="store_true")
-    prefetch.add_argument("--yes", action="store_true", help="非交互环境确认已展示的目标列表")
     clean = commands.add_parser("clean")
     target = clean.add_mutually_exclusive_group(required=True)
     target.add_argument("--workspace")
@@ -486,8 +393,6 @@ def main():
             command_detach(args, product_root)
         elif args.command == "purge":
             command_detach(args, product_root, purge=True)
-        elif args.command == "prefetch":
-            command_prefetch(args, product_root)
         return 0
     except (ValueError, subprocess.CalledProcessError) as error:
         print("AgenticOps：%s" % error, file=sys.stderr)

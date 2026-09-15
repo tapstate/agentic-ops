@@ -87,7 +87,7 @@
       }
     },
     "feature_change": {
-      "title": "新功能 / 需求变更",
+      "title": "功能开发",
       "doc": "projects/tapdata/admission/feature-change.md",
       "required_facts": [
         {
@@ -95,7 +95,7 @@
           "label": "验收标准",
           "source": "Jira 描述「验收标准」章节",
           "example": "关键用户场景完成验证，新增行为有自动化测试覆盖",
-          "note": "需求完成后怎样判断可验收",
+          "note": "已明确功能范围的验收场景；不承担需求发现与需求任务规划",
           "agent_may_propose": true,
           "human_confirmation_required": true,
           "supplement": "请补充「验收标准」：完成后按什么场景/指标判断可验收。"
@@ -114,22 +114,12 @@
         {
           "key": "verification_method",
           "label": "验证方式",
-          "source": "Jira 验证方式字段（customfield_10049）",
+          "source": "Jira 描述或研发确认的验证方案",
           "example": "执行对应模块单元测试和必要手工验证",
-          "note": "完成后必须执行的验证",
+          "note": "记录本次实际验证方法和来源；仅在实时字段可编辑时回填 Jira，不要求 customfield_10049 可用",
           "agent_may_propose": true,
           "human_confirmation_required": true,
-          "supplement": "请补充「验证方式」（customfield_10049）：完成后必须执行哪些测试或验证。"
-        },
-        {
-          "key": "risk_level",
-          "label": "风险等级",
-          "source": "Jira 风险字段或标签",
-          "example": "T3",
-          "note": "决定人工门禁与验证强度",
-          "agent_may_propose": false,
-          "human_confirmation_required": true,
-          "supplement": "请补充「风险等级」（如 T1/T2/T3）：决定人工门禁与验证强度。"
+          "supplement": "请确认本次必须执行的测试或验证；可由研发提供，不要求自动回填 Jira 字段。"
         }
       ],
       "optional_facts": [
@@ -138,8 +128,15 @@
           "label": "范围边界",
           "source": "描述或沟通记录",
           "note": "明确不做什么，避免范围蔓延"
+        },
+        {
+          "key": "implementation_plan",
+          "label": "实施方案",
+          "source": "源码分析及研发确认",
+          "note": "JSON 对象，包含 objective、changes、acceptance、risks、rollback；在 Q2 确认前记录，验收场景与检查项逐项对应"
         }
-      ]
+      ],
+      "quality_profile": "quality-feature.json"
     },
     "technical_task": {
       "title": "技术任务",

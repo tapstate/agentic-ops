@@ -122,15 +122,6 @@ class ContractConformanceTest(unittest.TestCase):
             load_json(ROOT / "contracts" / "workspace-state-compatibility.json"),
         )
 
-    def test_repository_pool_configuration_conforms_to_schema(self):
-        schema = load_json(ROOT / "contracts" / "repository-pool.schema.json")
-        document = {
-            "schema_version": 1,
-            "root": "/opt/agentic-ops-repos",
-            "provisioning": "manual",
-        }
-        assert_schema(self, schema, document)
-
     def test_source_product_state_conforms_to_schema(self):
         schema = load_json(ROOT / "contracts" / "product-state.schema.json")
         document = {
@@ -148,7 +139,6 @@ class ContractConformanceTest(unittest.TestCase):
         init_schema = load_json(ROOT / "contracts" / "workspace-init.schema.json")
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary) / "workspace"
-            repository_pool = Path(temporary) / "repository-pool"
             subprocess.run(
                 [
                     sys.executable,
@@ -159,8 +149,6 @@ class ContractConformanceTest(unittest.TestCase):
                     str(workspace),
                     "--project",
                     "tapdata",
-                    "--repository-pool",
-                    str(repository_pool),
                 ],
                 check=True,
                 capture_output=True,
@@ -176,42 +164,22 @@ class ContractConformanceTest(unittest.TestCase):
                 init_schema,
                 load_json(workspace / ".agenticops" / "init.json"),
             )
-            subprocess.run(
-                [
-                    sys.executable,
-                    str(ROOT / "workflow" / "task.py"),
-                    "init",
-                    "--issue-key",
-                    "TAP-123",
-                    "--task-class",
-                    "defect_fix",
-                    "--dir",
-                    str(workspace),
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            registry_schema = load_json(ROOT / "contracts" / "task-registry.schema.json")
-            assert_schema(
-                self,
-                registry_schema,
-                load_json(workspace / ".agenticops" / "tasks" / "index.json"),
-            )
             task_schema = load_json(ROOT / "contracts" / "task-state.schema.json")
-            assert_schema(
-                self,
-                task_schema,
-                load_json(workspace / ".agenticops" / "tasks" / "TAP-123" / "state.json"),
-            )
+            assert_schema(self, task_schema, load_json(workspace / ".agenticops" / "current-task.json"))
+            from station_fixture import save_task
+            save_task(workspace, {"issue_key": "TAP-123", "run_id": "run-fixture", "task_class": "defect_fix",
+                "stage": "task_intake", "facts": {}, "repositories": [{"repository": "tapdata/tapdata"}],
+                "pending": None, "history": []})
+            assert_schema(self, task_schema, load_json(workspace / ".agenticops" / "current-task.json"))
 
-    def test_task_endpoint_is_optional_v1_compatibility_field(self):
+    def test_task_bindings_reference_one_baseline(self):
         schema = load_json(ROOT / "contracts" / "task-state.schema.json")
-        repository = schema["properties"]["repositories"]["items"]
-        self.assertIn("authorized_endpoint", repository["properties"])
-        self.assertNotIn("authorized_endpoint", repository["required"])
-        endpoint = repository["properties"]["authorized_endpoint"]
-        self.assertEqual(endpoint, {"type": "string", "minLength": 1})
+        current = schema["properties"]["current"]
+        self.assertNotIn("repositories", current["properties"])
+        binding = current["properties"]["task_repositories"]["additionalProperties"]
+        self.assertIn("baseline_entry_digest", binding["required"])
+        self.assertNotIn("base_sha", binding["properties"])
+        self.assertNotIn("worktree", binding["properties"])
 
     def test_gate_validator_and_schema_accept_the_same_request(self):
         schema = load_json(ROOT / "contracts" / "gate-request.schema.json")
@@ -262,15 +230,21 @@ class ContractConformanceTest(unittest.TestCase):
         self.assertTrue(shell_operations <= requestable)
 
     def test_repository_tool_classification_preserves_control_boundary(self):
+        for action in ("takeover", "archive", "release", "clean", "cleanup-amend"):
+            self.assertEqual(["manage_station"], classify_bash("python3 -m workflow.task %s --issue-key TAP-123" % action))
+        self.assertEqual(["scope_change"], classify_bash("workflow/task.py repository add --repo owner/repo --issue-key TAP-123"))
+        self.assertEqual([], classify_bash("workflow/task.py record --key note --value archive --issue-key TAP-123"))
+        self.assertEqual([], classify_bash("workflow/task.py repository prepare --issue-key TAP-123"))
+        self.assertEqual([], classify_bash("python3 -m workflow.repository_worktree prepare --issue-key TAP-123"))
         self.assertEqual(
-            ["prepare_task_repository"],
+            ["manage_station"],
             classify_bash(
-                "python3 workflow/task.py repository prepare --issue-key TAP-123"
+                "python3 workflow/task.py archive --issue-key TAP-123"
             ),
         )
         self.assertEqual(
-            ["prepare_task_repository"],
-            classify_bash("workflow/task.py repository prepare --issue-key TAP-123"),
+            ["manage_station"],
+            classify_bash("workflow/task.py archive --issue-key TAP-123"),
         )
         for command in (
             "sed -n '1,200p' ./agenticops",
@@ -332,60 +306,56 @@ class ContractConformanceTest(unittest.TestCase):
             classify_bash("rg task .agenticops && git push origin feature/TAP-123"),
         )
         self.assertEqual(
-            ["prepare_task_repository"],
-            classify_bash("rg task .agenticops && workflow/task.py repository prepare --issue-key TAP-123"),
+            ["manage_station"],
+            classify_bash("rg task .agenticops && workflow/task.py archive --issue-key TAP-123"),
         )
         operations, _, target = classify_tool_call(
             "Bash", {"command": "./agenticops workspace purge --workspace /other --yes"}
         )
-        self.assertEqual(["manage_repository_worktree"], operations)
+        self.assertEqual(["manage_station"], operations)
         self.assertEqual("/other", target["workspace"])
         operations, _, target = classify_tool_call(
             "Bash", {"command": "./agenticops workspace prefetch --workspace /other --yes"}
         )
-        self.assertEqual(["prefetch_project_repositories"], operations)
-        self.assertEqual("/other", target["workspace"])
+        self.assertEqual([], operations)
+        self.assertNotIn("workspace", target)
         self.assertEqual(
-            ["prefetch_project_repositories"],
+            [],
             classify_bash("./agenticops workspace prefetch --yes"),
         )
         for command in (
-            "python3 workflow/task.py repository prepare --issue-key TAP-123 --reuse-existing-branch",
-            "python3 workflow/task.py repository cleanup --issue-key TAP-123",
-            "python3 workflow/repository_worktree.py prepare --issue-key TAP-123",
-            "workflow/repository_worktree.py prepare --issue-key TAP-123",
             "git clone git@example.test:a/b.git",
             "git fetch origin develop",
             "git worktree add /tmp/x",
         ):
             self.assertEqual(["manage_repository_worktree"], classify_bash(command), command)
         self.assertEqual(
-            ["prefetch_project_repositories"],
+            [],
             classify_bash("python3 workflow/repository_worktree.py prefetch --dir /workspace"),
         )
         for command in (
-            "python3 workflow/task.py repository prepare --help",
+            "python3 workflow/task.py archive --help",
             "python3 workflow/task.py repository context --issue-key TAP-123 --json",
             "python3 workflow/repository_worktree.py roots --issue-key TAP-123",
             "python3 workflow/repository_worktree.py execution-root --issue-key TAP-123",
         ):
             self.assertEqual([], classify_bash(command), command)
         for command in (
-            "python3 workflow/task.py purge --issue-key TAP-123 --yes",
-            "workflow/task.py purge --issue-key TAP-123 --yes",
-            "python3 -m workflow.task purge --issue-key TAP-123 --yes",
-            "python3 -mworkflow.task purge --issue-key TAP-123 --yes",
-            "python3 --check-hash-based-pycs always workflow/task.py purge --issue-key TAP-123 --yes",
-            "python3 --check-hash-based-pycs=always workflow/task.py purge --issue-key TAP-123 --yes",
+            "python3 workflow/task.py clean --issue-key TAP-123 --yes",
+            "workflow/task.py clean --issue-key TAP-123 --yes",
+            "python3 -m workflow.task clean --issue-key TAP-123 --yes",
+            "python3 -mworkflow.task clean --issue-key TAP-123 --yes",
+            "python3 --check-hash-based-pycs always workflow/task.py clean --issue-key TAP-123 --yes",
+            "python3 --check-hash-based-pycs=always workflow/task.py clean --issue-key TAP-123 --yes",
         ):
-            self.assertEqual(["delete_task_state"], classify_bash(command), command)
+            self.assertEqual(["manage_station"], classify_bash(command), command)
         self.assertEqual(
-            ["manage_repository_worktree"],
+            [],
             classify_bash("python3 -m workflow.repository_worktree prepare --issue-key TAP-123"),
         )
         self.assertEqual(
-            ["prepare_task_repository"],
-            classify_bash("python3 -B -m workflow.task repository prepare --issue-key TAP-123"),
+            ["manage_station"],
+            classify_bash("python3 -B -m workflow.task archive --issue-key TAP-123"),
         )
         for module in ("workflow.other", "workflow.task.extra", "workflow.repository_worktree.extra"):
             self.assertEqual(
@@ -394,15 +364,15 @@ class ContractConformanceTest(unittest.TestCase):
             )
         self.assertEqual(
             [],
-            classify_bash("python3 --check-hash-based-pycs workflow/task.py purge --issue-key TAP-123 --yes"),
+            classify_bash("python3 --check-hash-based-pycs workflow/task.py clean --issue-key TAP-123 --yes"),
         )
         self.assertEqual(
             [],
-            classify_bash("python3 -c'print(1)' workflow/task.py purge --issue-key TAP-123 --yes"),
+            classify_bash("python3 -c'print(1)' workflow/task.py clean --issue-key TAP-123 --yes"),
         )
         self.assertEqual(
             [],
-            classify_bash("python3 - workflow/task.py purge --issue-key TAP-123 --yes"),
+            classify_bash("python3 - workflow/task.py clean --issue-key TAP-123 --yes"),
         )
         for command in (
             "python3",
@@ -424,8 +394,8 @@ class ContractConformanceTest(unittest.TestCase):
         ):
             self.assertEqual([], classify_bash(command), command)
         self.assertEqual(
-            ["delete_task_state"],
-            classify_bash("python3 -X dev -W ignore -B workflow/task.py purge --issue-key TAP-123 --yes"),
+            ["manage_station"],
+            classify_bash("python3 -X dev -W ignore -B workflow/task.py clean --issue-key TAP-123 --yes"),
         )
         self.assertEqual(["git_commit"], classify_bash("git commit -m --help"))
         self.assertEqual(["create_pr"], classify_bash("gh pr create --title --help"))
@@ -720,22 +690,22 @@ class ContractConformanceTest(unittest.TestCase):
 
         operations, _, target = classify_tool_call(
             "Bash",
-            {"command": "workflow/task.py repository prepare --issue-key tap-123 --dir ../target"},
+            {"command": "workflow/task.py archive --issue-key tap-123 --dir ../target"},
         )
-        self.assertEqual(["prepare_task_repository"], operations)
+        self.assertEqual(["manage_station"], operations)
         self.assertEqual("TAP-123", target["issue_key"])
         self.assertEqual("../target", target["workspace"])
         for command in (
-            "workflow/task.py repository prepare --issue-key TAP-123 --issue-key TAP-123",
-            "workflow/task.py repository prepare --issue-key=TAP-123 --issue-key TAP-124",
-            "workflow/task.py repository prepare --dir ws-a --issue-key TAP-123 --dir=ws-b",
-            "workflow/task.py repository prepare --dir=ws-a --dir ws-a --issue-key=TAP-123",
+            "workflow/task.py archive --issue-key TAP-123 --issue-key TAP-123",
+            "workflow/task.py archive --issue-key=TAP-123 --issue-key TAP-124",
+            "workflow/task.py archive --dir ws-a --issue-key TAP-123 --dir=ws-b",
+            "workflow/task.py archive --dir=ws-a --dir ws-a --issue-key=TAP-123",
         ):
             operations, _, duplicate_target = classify_tool_call(
                 "Bash", {"command": command}
             )
             self.assertEqual(
-                ["prepare_task_repository", "unknown_external_write"],
+                ["manage_station", "unknown_external_write"],
                 operations,
                 command,
             )
@@ -749,19 +719,19 @@ class ContractConformanceTest(unittest.TestCase):
         self.assertNotIn("issue_key", target)
         self.assertNotIn("workspace", target)
         self.assertEqual(
-            ["prepare_task_repository"],
-            classify_bash("python3 -B workflow/task.py repository prepare --issue-key TAP-123"),
+            ["manage_station"],
+            classify_bash("python3 -B workflow/task.py archive --issue-key TAP-123"),
         )
         operations, _, target = classify_tool_call(
             "Bash",
-            {"command": "workflow/task.py status --issue-key TAP-999 --dir wsA && workflow/task.py repository prepare --issue-key tap-123 --dir wsB"},
+            {"command": "workflow/task.py status --issue-key TAP-999 --dir wsA && workflow/task.py archive --issue-key tap-123 --dir wsB"},
         )
-        self.assertEqual(["prepare_task_repository"], operations)
+        self.assertEqual(["manage_station"], operations)
         self.assertEqual("TAP-123", target["issue_key"])
         self.assertEqual("wsB", target["workspace"])
         operations, _, target = classify_tool_call(
             "Bash",
-            {"command": "workflow/task.py purge --issue-key TAP-123 --dir wsA --yes && workflow/task.py repository prepare --issue-key TAP-124 --dir wsB"},
+            {"command": "workflow/task.py clean --issue-key TAP-123 --dir wsA --yes && workflow/task.py archive --issue-key TAP-124 --dir wsB"},
         )
         self.assertIn("unknown_external_write", operations)
         self.assertNotIn("issue_key", target)

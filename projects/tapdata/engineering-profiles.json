@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "full-application": {
+      "id": "full-application",
+      "revision": 1,
+      "repositories": [
+        "tapdata/tapdata",
+        "tapdata/tapdata-common-lib",
+        "tapdata/tapdata-connectors",
+        "tapdata/tapdata-connectors-enterprise",
+        "tapdata/tapdata-enterprise",
+        "tapdata/tapdata-license",
+        "tapdata/tapdata-web",
+        "tapdata/tapdata-application",
+        "tapdata/hazelcast"
+      ],
+      "optional_repositories": ["tapdata/t-layer3-test"]
+    }
+  }
+}

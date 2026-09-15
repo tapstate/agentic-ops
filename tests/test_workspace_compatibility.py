@@ -30,52 +30,57 @@ class WorkspaceCompatibilityTests(unittest.TestCase):
         self.product_root = Path(self.temporary.name) / "product"
         self.workspace = Path(self.temporary.name) / "workspace"
         state = self.workspace / ".agenticops"
-        tasks = state / "tasks"
-        tasks.mkdir(parents=True)
+        state.mkdir(parents=True)
         self.product_root.mkdir()
+        (self.product_root / "contracts").mkdir()
+        (self.product_root / "contracts/workspace-state-compatibility.json").write_text(json.dumps(manifest(1)))
         (state / "workspace.json").write_text(
-            json.dumps({"product_root": str(self.product_root.resolve())}) + "\n",
+            json.dumps({"schema_version": 3, "workspace_id": "a" * 32,
+                        "project": "tapdata", "agents": ["codex"],
+                        "product_root": str(self.product_root.resolve())}) + "\n",
             encoding="utf-8",
         )
         (state / "init.json").write_text(
             json.dumps({"workspace_state_epoch": 1}) + "\n",
             encoding="utf-8",
         )
-        (tasks / "index.json").write_text(
-            json.dumps({"schema_version": 1, "project": "tapdata", "tasks": {}}) + "\n",
-            encoding="utf-8",
-        )
+
 
     def tearDown(self):
         self.temporary.cleanup()
 
     def add_task(self, issue="TAP-123", status="active", run_id="run-abc"):
-        tasks = self.workspace / ".agenticops" / "tasks"
-        (tasks / issue).mkdir()
-        (tasks / issue / "state.json").write_text(
-            json.dumps({"issue_key": issue, "run_id": run_id}) + "\n",
-            encoding="utf-8",
-        )
-        (tasks / "index.json").write_text(
-            json.dumps({
-                "schema_version": 1,
-                "project": "tapdata",
-                "tasks": {issue: {"status": status}},
-            }) + "\n",
-            encoding="utf-8",
-        )
+        (self.workspace / ".agenticops/current-task.json").write_text(json.dumps({
+            "schema_version": 1, "revision": 1,
+            "current": {"issue_key": issue, "run_id": run_id, "outcome": status}
+        }))
 
-    def test_empty_workspace_can_cross_epoch(self):
+    def test_empty_workspace_cannot_adopt_incompatible_epoch(self):
         reasons = compatibility.workspace_blockers(
             self.product_root, self.workspace, manifest(2)
         )
         self.assertEqual(["状态代际 1 不受目标代际 2 支持"], reasons)
-        self.assertEqual(
-            2,
+        with self.assertRaisesRegex(ValueError, "受控解绑并重建"):
             compatibility.require_workspace_can_adopt(
                 self.product_root, self.workspace, manifest(2)
-            ),
-        )
+            )
+
+    def test_empty_binding_blocks_upgrade_and_rollback_without_state_changes(self):
+        init = self.workspace / ".agenticops/init.json"
+        before = init.read_bytes()
+        for rollback in (False, True):
+            with self.subTest(rollback=rollback), mock.patch.object(
+                compatibility, "manifest_at_ref", side_effect=[manifest(1), manifest(2)]
+            ), mock.patch.object(compatibility, "load_workspace_registry", return_value=[str(self.workspace)]):
+                with self.assertRaisesRegex(ValueError, "agenticops " + ("rollback" if rollback else "update")) as error:
+                    compatibility.check_upgrade(self.product_root, "old-sha", "target-sha", rollback)
+                self.assertIn("old-sha -> target-sha", str(error.exception))
+                self.assertEqual(before, init.read_bytes())
+
+    def test_unregistered_workspaces_do_not_block_switch(self):
+        with mock.patch.object(compatibility, "manifest_at_ref", side_effect=[manifest(1), manifest(2)]), \
+                mock.patch.object(compatibility, "load_workspace_registry", return_value=[]):
+            self.assertEqual([], compatibility.check_upgrade(self.product_root, "old", "new"))
 
     def test_supported_old_epoch_is_preserved_during_repair(self):
         target = manifest(2, supported=[1, 2])
@@ -89,30 +94,20 @@ class WorkspaceCompatibilityTests(unittest.TestCase):
     def test_registered_task_blocks_cross_epoch_and_reports_identity(self):
         self.add_task()
         with self.assertRaisesRegex(
-            ValueError, "任务 TAP-123（status=active，run=run-abc）"
+            ValueError, "不兼容"
         ):
             compatibility.require_workspace_can_adopt(
                 self.product_root, self.workspace, manifest(2)
             )
 
-    def test_unknown_root_state_blocks_cross_epoch(self):
-        legacy = self.workspace / ".agenticops" / "tap-123-old-readback.json"
-        legacy.write_text("{}\n", encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, "未识别的旧状态文件"):
-            compatibility.require_workspace_can_adopt(
-                self.product_root, self.workspace, manifest(2)
-            )
-
-    def test_symlinked_task_registry_blocks_cross_epoch(self):
-        registry = self.workspace / ".agenticops" / "tasks" / "index.json"
-        external = Path(self.temporary.name) / "external-index.json"
-        external.write_text(registry.read_text(encoding="utf-8"), encoding="utf-8")
-        registry.unlink()
-        registry.symlink_to(external)
-        with self.assertRaisesRegex(ValueError, "任务注册表是符号链接"):
-            compatibility.require_workspace_can_adopt(
-                self.product_root, self.workspace, manifest(2)
-            )
+    def test_old_state_is_never_parsed_or_mutated_by_new_version(self):
+        legacy = self.workspace / ".agenticops/tasks"
+        legacy.mkdir()
+        index = legacy / "index.json"
+        index.write_text("unreadable old-format fixture")
+        with self.assertRaisesRegex(ValueError, "受控解绑并重建"):
+            compatibility.require_workspace_can_adopt(self.product_root, self.workspace, manifest(3))
+        self.assertEqual(index.read_text(), "unreadable old-format fixture")
 
     def test_direct_upgrade_uses_target_epoch_without_scanning_intermediate_versions(self):
         self.add_task(status="inactive")
@@ -177,16 +172,16 @@ class WorkspaceCompatibilityTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "状态代际 1 不受目标代际 2 支持"):
                 compatibility.check_upgrade(self.product_root, "old", "new")
 
-    def test_newer_upgrade_protocol_requires_bridge_release(self):
+    def test_newer_upgrade_protocol_requires_reinstallation(self):
         with mock.patch.object(
             compatibility,
             "manifest_at_ref",
             side_effect=[
                 manifest(1, minimum_updater=1),
-                manifest(1, minimum_updater=2),
+                manifest(1, minimum_updater=compatibility.UPDATER_PROTOCOL_VERSION + 1),
             ],
         ):
-            with self.assertRaisesRegex(ValueError, "过渡版本"):
+            with self.assertRaisesRegex(ValueError, "重新安装"):
                 compatibility.check_upgrade(self.product_root, "old", "new")
 
     def test_bridge_updater_can_reach_later_protocol(self):
@@ -208,11 +203,11 @@ class WorkspaceCompatibilityTests(unittest.TestCase):
 
     def test_task_mutation_rejects_unadopted_epoch_after_upgrade(self):
         contracts = self.product_root / "contracts"
-        contracts.mkdir()
+        contracts.mkdir(exist_ok=True)
         (contracts / "workspace-state-compatibility.json").write_text(
             json.dumps(manifest(2)) + "\n", encoding="utf-8"
         )
-        with self.assertRaisesRegex(ValueError, "请先执行 agenticops repair"):
+        with self.assertRaisesRegex(ValueError, "受控解绑并重建"):
             with compatibility.task_store.task_state_lock(self.workspace):
                 pass
         init_path = self.workspace / ".agenticops" / "init.json"

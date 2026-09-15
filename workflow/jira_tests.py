@@ -59,12 +59,14 @@ def linked_tests(document, issue_key, rules):
         return ["Jira 快照缺少 issue.fields.issuelinks；请重新读取缺陷「已链接工作项」或请用户提供当前链接。"], [], []
 
     _, relations, issue_types = _policy(rules)
-    detail_by_key, problems = _details(document)
-    if detail_by_key is None:
-        detail_by_key = {}
+    problems = []
     candidates = {}
     for link in links:
         if not isinstance(link, dict) or not isinstance(link.get("type"), dict):
+            problems.append("Jira 已链接工作项格式无效，无法确认关联 Test")
+            continue
+        if not any(_text(link["type"].get(key)) for key in ("inward", "outward")):
+            problems.append("Jira 已链接工作项缺少关系名称，无法确认关联 Test")
             continue
         for direction, relation_key, target_key in (("outward", "outward", "outwardIssue"),
                                                      ("inward", "inward", "inwardIssue")):
@@ -85,6 +87,13 @@ def linked_tests(document, issue_key, rules):
                 continue
             candidates[str(target["key"]).upper()] = target
 
+    # 只有显式 false 才免除独立 Test；链接事实缺失或已有链接损坏仍不能放行。
+    if not candidates and (rules.get("pr_ready") or {}).get("require_linked_test_tasks") is False:
+        return problems, [], []
+    detail_by_key, detail_problems = _details(document)
+    problems.extend(detail_problems)
+    if detail_by_key is None:
+        detail_by_key = {}
     if not candidates:
         problems.append("Jira 未返回符合配置的关联 Test；请由用户与 Agent 在「已链接工作项」创建或关联验收用例。")
         return problems, [], []

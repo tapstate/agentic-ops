@@ -2,8 +2,7 @@
   "schema_version": 1,
   "default": "tapdata/tapdata",
   "layout": {
-    "main_worktree": "<pool>/<owner>/<repo>",
-    "task_worktree": "<workspace>/.agenticops/worktrees/<issue-key>/<run-id>/<owner>/<repo>"
+    "source": "<workspace>/source/<owner>/<repo>"
   },
   "repositories": {
     "tapdata/tapdata": {"origin": "git@github.com:tapdata/tapdata.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["product"]},
@@ -15,9 +14,7 @@
     "tapdata/tapdata-web": {"origin": "git@github.com:tapdata/tapdata-web.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["product"]},
     "tapdata/hazelcast": {"origin": "git@github.com:tapdata/hazelcast.git", "baseline_branch": "release-v5.5.0", "dev_branch": "release-v5.5.0", "domains": []},
     "tapdata/tapdata-application": {"origin": "git@github.com:tapdata/tapdata-application.git", "baseline_branch": "main", "dev_branch": "main", "domains": ["product"]},
-    "tapdata/t-layer3-test": {"origin": "git@github.com:tapdata/t-layer3-test.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["taptest"]},
-    "tapdata/docs": {"origin": "git@github.com:tapdata/docs.git", "baseline_branch": "main", "dev_branch": "main", "domains": []},
-    "tapdata/docs-en": {"origin": "git@github.com:tapdata/docs-en.git", "baseline_branch": "main", "dev_branch": "main", "domains": []}
+    "tapdata/t-layer3-test": {"origin": "git@github.com:tapdata/t-layer3-test.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["taptest"]}
   },
   "branch_resolution": {
     "rule": "任务基线必须按目标仓库从 repositories 显式解析；禁止从当前分支或隐式 main 猜测",

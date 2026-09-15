@@ -12,9 +12,33 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workflow import jira_status, jira_tests, pr_ready, task_store  # noqa: E402
+from station_fixture import save_task as save_station_task
 
 
 class JiraStatusTests(unittest.TestCase):
+    def test_tapdata_profiles_recognize_real_jira_test_link_direction(self):
+        link_type = {"id": "10009", "name": "Test", "inward": "is tested by", "outward": "tests"}
+        target = {"key": "TAP-12921", "fields": {"issuetype": {"name": "Test"}}}
+        for profile in ("quality.json", "quality-feature.json"):
+            with self.subTest(profile=profile):
+                rules = json.loads((ROOT / "projects/tapdata" / profile).read_text())
+                document = {"issue": {"key": "TAP-12833", "fields": {"issuelinks": [
+                    {"type": link_type, "inwardIssue": target}]}},
+                    "linked_test_details": [{"key": "TAP-12921", "test_type": "Manual",
+                                             "case_version": "updated:1", "source_ref": "fixture:jira/TAP-12921"}]}
+                problems, tests, ignored = jira_tests.linked_tests(document, "TAP-12833", rules)
+                self.assertEqual(problems, [])
+                self.assertEqual([item["key"] for item in tests], ["TAP-12921"])
+                self.assertEqual(tests[0]["method"], "manual")
+                self.assertEqual(ignored, [])
+                for invalid in (
+                    {"type": link_type, "outwardIssue": target},
+                    {"type": link_type},
+                    {"type": link_type, "inwardIssue": {"key": "TAP-1", "fields": {"issuetype": {"name": "Bug"}}}},
+                ):
+                    document["issue"]["fields"]["issuelinks"] = [invalid]
+                    self.assertTrue(jira_tests.linked_tests(document, "TAP-12833", rules)[0])
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="ao-jira-status-")
         self.addCleanup(self.temporary.cleanup)
@@ -28,8 +52,8 @@ class JiraStatusTests(unittest.TestCase):
         )
         self.task = {"issue_key": "TAP-123", "run_id": "run-0123456789ab", "task_class": "defect_fix",
                      "stage": "task_intake", "facts": {}, "repositories": [], "pending": None, "history": []}
-        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
-        task_store.register(self.base, "TAP-123")
+        save_station_task(self.base, self.task)
+
 
     def snapshot(self, status="Analyzed", assignee="u-1", required=False):
         return {"source_ref": "fixture:jira/TAP-123", "current_user": {"accountId": "u-1"},
@@ -38,6 +62,58 @@ class JiraStatusTests(unittest.TestCase):
                 "transitions": [{"id": "421", "name": "Start Investigation",
                                  "to": {"id": "20", "name": "In Progress"},
                                  "fields": {"fixVersions": {"required": required}}}]}
+
+    def feature_snapshot(self):
+        self.task["task_class"] = "feature_change"
+        save_station_task(self.base, self.task)
+        snapshot = self.snapshot()
+        snapshot["issue"]["fields"]["issuetype"] = {"id": "10010"}
+        snapshot["transitions"].append(dict(snapshot["transitions"][0], id="51", name="Development Started"))
+        return snapshot
+
+    def test_story_selects_own_transition_and_reads_back(self):
+        snapshot = self.feature_snapshot()
+        prepared = jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)
+        self.assertEqual(prepared["transition_id"], "51")
+        snapshot["issue"]["fields"]["status"]["name"] = "正在进行"
+        self.assertEqual(jira_status.complete(self.base, "TAP-123", "takeover", "unknown", snapshot, "")["outcome"], "succeeded")
+        # Same-version persisted records still load; no repeated write after completion.
+        self.assertTrue(jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)["repeated"])
+
+    def test_story_rejects_wrong_issue_type_even_with_same_status(self):
+        snapshot = self.feature_snapshot()
+        snapshot["issue"]["fields"]["issuetype"]["id"] = "10008"
+        with self.assertRaisesRegex(ValueError, "工作类型"):
+            jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)
+
+    def test_preflight_missing_fields_can_be_filled_before_write(self):
+        snapshot = self.feature_snapshot()
+        snapshot["transitions"][1]["fields"] = {"fixVersions": {"required": True}}
+        self.assertEqual(jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)["reason"], "required_fields_missing")
+        snapshot["issue"]["fields"]["fixVersions"] = [{"id": "fixture-version"}]
+        result = jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)
+        self.assertEqual(result["outcome"], "ready")
+        self.assertEqual(len(result["preflight_history"]), 1)
+        jira_status.complete(self.base, "TAP-123", "takeover", "unknown", snapshot, "timeout")
+        self.assertEqual(jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)["outcome"], "unknown")
+
+    def test_story_tests_passed_requires_quality_and_own_fields(self):
+        snapshot = self.feature_snapshot()
+        self.task["stage"] = "ci_validation"
+        save_station_task(self.base, self.task)
+        snapshot["issue"]["fields"]["status"]["name"] = "In Progress"
+        snapshot["transitions"] = [{"id": "71", "to": {"name": "Tests Passed"}, "fields": {}}]
+        with mock.patch.object(jira_status, "tests_passed_ready", return_value=(False, "quality_not_verified", ["Q4 pending"], [])):
+            self.assertEqual(jira_status.prepare(self.base, "TAP-123", "tests_passed", snapshot)["reason"], "quality_not_verified")
+        with mock.patch.object(jira_status, "tests_passed_ready", return_value=(True, "", [], [])):
+            result = jira_status.prepare(self.base, "TAP-123", "tests_passed", snapshot)
+        self.assertEqual(result["transition_id"], "71")
+        self.assertEqual({x["mapping"] for x in result["field_plan"]}, {"story_test_review", "fix_versions"})
+
+    def test_unavailable_transition_is_not_prepared(self):
+        snapshot = self.feature_snapshot()
+        snapshot["transitions"][1]["isAvailable"] = False
+        self.assertEqual(jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)["reason"], "transition_unavailable")
 
     def test_takeover_prepares_once_and_readback_completes(self):
         first = jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot())
@@ -63,14 +139,14 @@ class JiraStatusTests(unittest.TestCase):
         result = jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot(status="Open"))
         self.assertEqual(result["reason"], "jira_status_mismatch")
         self.task["run_id"] = "run-fedcba987654"
-        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
+        save_station_task(self.base, self.task)
         result = jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot(required=True))
         self.assertEqual(result["reason"], "required_fields_missing")
         self.assertEqual(result["missing_fields"], ["fixVersions"])
 
     def test_tests_passed_is_independent_and_requires_q4(self):
         self.task["stage"] = "ci_validation"
-        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
+        save_station_task(self.base, self.task)
         snapshot = self.snapshot(status="In Progress")
         snapshot["transitions"] = [{"id": "501", "name": "Tests Pass",
                                     "to": {"id": "30", "name": "Tests Passed"}, "fields": {}}]
@@ -93,7 +169,7 @@ class JiraStatusTests(unittest.TestCase):
 
     def test_pr_ready_requires_all_three_groups(self):
         self.task["stage"] = "ci_validation"
-        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
+        save_station_task(self.base, self.task)
         input_path = self.base / "jira.json"
         def linked_test(status_name="Done", category="done"):
             return {
@@ -179,6 +255,34 @@ class JiraStatusTests(unittest.TestCase):
 
         self.assertTrue(any("请用户" in item for item in problems))
 
+    def test_optional_linked_tests_only_allow_verified_absence(self):
+        rules = {"tests_passed": {"linked_test_task": {"relations": ["tests"], "issue_types": ["Test"]},
+                 "test_types": {"Manual": {"method": "manual"}}, "ignored_test_types": {}},
+                 "pr_ready": {"require_linked_test_tasks": False}}
+        doc = {"issue": {"key": "TAP-123", "fields": {"issuelinks": []}}}
+        self.assertEqual(jira_tests.linked_tests(doc, "TAP-123", rules), ([], [], []))
+        for value in (True, None, "false", 0):
+            with self.subTest(required=value):
+                rules["pr_ready"]["require_linked_test_tasks"] = value
+                self.assertTrue(jira_tests.linked_tests(doc, "TAP-123", rules)[0])
+        rules["pr_ready"]["require_linked_test_tasks"] = False
+        for links in (None, [{}], [{"type": {}}], [{"type": {"outward": "tests"}}]):
+            with self.subTest(links=links):
+                doc["issue"]["fields"]["issuelinks"] = links
+                self.assertTrue(jira_tests.linked_tests(doc, "TAP-123", rules)[0])
+
+        doc["issue"]["fields"]["issuelinks"] = [{"type": {"outward": "tests"},
+            "outwardIssue": {"key": "TAP-T1", "fields": {"issuetype": {"name": "Test"}}}}]
+        self.assertTrue(jira_tests.linked_tests(doc, "TAP-123", rules)[0])
+        doc["linked_test_details"] = [{"key": "TAP-T1", "test_type": "Manual", "case_version": "v1",
+                                       "source_ref": "fixture:jira/TAP-T1"}]
+        problems, tests, ignored = jira_tests.linked_tests(doc, "TAP-123", rules)
+        self.assertEqual(problems, [])
+        self.assertEqual([item["key"] for item in tests], ["TAP-T1"])
+        self.assertTrue(jira_tests.confirmation_problems({"items": {}}, tests))
+        doc["linked_test_details"][0]["test_type"] = "unknown"
+        self.assertTrue(jira_tests.linked_tests(doc, "TAP-123", rules)[0])
+
     def test_pr_ready_requires_user_acceptance_for_each_linked_test(self):
         rules = {"pr_ready": {"require_user_confirmation_per_linked_test": True,
                                 "accepted_outcomes": ["accept", "not_applicable"]}}
@@ -222,7 +326,7 @@ class JiraStatusTests(unittest.TestCase):
 
     def test_tests_passed_requires_jira_type_and_current_case_version(self):
         self.task["stage"] = "ci_validation"
-        task_store._write_json_atomic(task_store.task_path(self.base, "TAP-123"), self.task)
+        save_station_task(self.base, self.task)
         rules = {"tests_passed": {"linked_test_task": {"relations": ["tests"], "issue_types": ["Test"]},
                                    "test_types": {"Manual": {"method": "manual"}}, "ignored_test_types": {}}}
         report = {

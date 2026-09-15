@@ -11,10 +11,9 @@
     "layout": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["main_worktree", "task_worktree"],
+      "required": ["source"],
       "properties": {
-        "main_worktree": {"const": "<pool>/<owner>/<repo>"},
-        "task_worktree": {"const": "<workspace>/.agenticops/worktrees/<issue-key>/<run-id>/<owner>/<repo>"}
+        "source": {"const": "<workspace>/source/<owner>/<repo>"}
       }
     },
     "repositories": {

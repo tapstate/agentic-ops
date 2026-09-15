@@ -12,6 +12,7 @@ def snapshot(model, rules, ctx, checkpoint=None):
         view = quality.checkpoint_view(model, checkpoint, rules, ctx)
         return quality.digest([view["digest"], view["decision"], view["reviewed"]])
     return quality.digest({"items": model["items"], "checkpoints": model["checkpoints"],
+                           "verification": model.get("verification", {}),
                            "context": ctx, "rules": rules})
 
 
@@ -27,9 +28,10 @@ def checkpoint_body(model, checkpoint, rules, ctx):
         if any(decision.get(key) for key in ("follow_up", "owner", "deadline")):
             lines.append("检查点后续：%s；责任人：%s；期限：%s" % (
                 decision.get("follow_up", "待确认"), decision.get("owner", "待确认"), decision.get("deadline", "待确认")))
-        for key, label in (("problem_version", "本地问题版本"), ("problem_symptom", "问题现象"),
+        legacy_fields = (("problem_version", "本地问题版本"), ("problem_symptom", "问题现象"),
                            ("problem_branch", "问题分支"), ("reproduce_path", "复现路径"),
-                           ("acceptance_criteria", "验收标准"), ("fix_plan", "修复方案")):
+                           ("acceptance_criteria", "验收标准"), ("fix_plan", "修复方案"))
+        for key, label in legacy_fields:
             if key == "fix_plan" and checkpoint == rules["checkpoints"][0]["id"]:
                 continue
             if facts.get(key):
@@ -47,6 +49,14 @@ def checkpoint_body(model, checkpoint, rules, ctx):
                     lines.append("回滚：%s" % plan.get("rollback", "待补充"))
                 else:
                     lines.append("%s：%s" % (label, facts[key]))
+        # 保留既有缺陷正文；项目新增的方案事实完整输出，不在 Q1 提前发布方案。
+        checkpoints = [point["id"] for point in rules["checkpoints"]]
+        if checkpoints.index(checkpoint) >= checkpoints.index(rules["selection_checkpoint"]):
+            rendered = {key for key, _ in legacy_fields}
+            for key in rules.get("plan_fact_keys", []):
+                if key not in rendered and key in facts:
+                    lines.append("方案事实 %s：%s" % (key, json.dumps(facts[key], ensure_ascii=False, sort_keys=True)))
+                    rendered.add(key)
         plan = facts.get("issue_version_plan", {})
         if plan.get("primary_branch"):
             lines.append("实施分支：%s" % plan["primary_branch"])
@@ -77,6 +87,18 @@ def checkpoint_body(model, checkpoint, rules, ctx):
                 lines.append("后续：%s；责任人：%s；期限：%s" % (
                     disposition["follow_up"], disposition.get("owner", "待确认"), disposition.get("deadline", "待确认")))
         lines.append("记录：AO-" + quality.digest([ctx["issue_key"], ctx["run_id"], checkpoint, view["digest"]])[:20])
+        for repo, entries in model.get("verification", {}).items():
+            for kind in rules.get("verification_checkpoints", {}).get(checkpoint, []):
+                if kind not in entries:
+                    continue
+                material = entries[kind]["data"]
+                lines.append("验证 %s / %s：代码 %s；来源 %s" %
+                             (repo, kind, material["target_revision"], material["source_ref"]))
+                for item in material.get("results", []):
+                    lines.append("范围 %s：%s；用例数 %s，失败 %s，错误 %s，跳过 %s；报告 %s；缺口处置 %s" %
+                                 (item["scope"], item["result"], item.get("tests", "未知"), item.get("failures", "未知"),
+                                  item.get("errors", "未知"), item.get("skipped", "未知"), item["report_ref"],
+                                  json.dumps(item.get("decision"), ensure_ascii=False) if item.get("decision") else "无"))
         return "\n\n".join(lines)
     fact_keys = list(rules.get("intake_fact_keys", ctx["facts"]))
     if checkpoint != rules["checkpoints"][0]["id"]:

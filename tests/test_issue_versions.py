@@ -16,6 +16,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workflow import issue_versions, task, task_store
+from station_fixture import save_task as save_station_task
 
 
 class IssueVersionsTests(unittest.TestCase):
@@ -29,7 +30,7 @@ class IssueVersionsTests(unittest.TestCase):
         (self.base / ".agenticops/workspace.json").write_text(json.dumps({"product_root": str(product), "project": "tapdata"}))
         self.task = {"issue_key": "TAP-123", "run_id": "run-0123456789ab", "task_class": "defect_fix",
                      "stage": "task_intake", "facts": {}, "repositories": [], "pending": None, "history": []}
-        task.save(self.base, self.task); task_store.register(self.base, "TAP-123")
+        save_station_task(self.base, self.task)
         self.payload = {"issue": {"key": "TAP-123", "fields": {"versions": [
             {"id": "1", "name": "4.18.0"}, {"id": "2", "name": "release-v4.21.0"}]}},
             "source_ref": "fixture:jira/TAP-123", "develop": {"status": "present", "revision": "a" * 40, "source_ref": "fixture:source-analysis"}}
@@ -96,6 +97,7 @@ class IssueVersionsTests(unittest.TestCase):
         self.payload["effective"]["versions"] = [{"name": "4.22.0"}]
         plan = self.resolve()
         self.task["facts"] = {issue_versions.FACT: plan, "problem_version": "4.22.0"}
+        save_station_task(self.base, self.task)
         before = copy.deepcopy(self.task)
         payload = {"fact_key": "problem_version", "expected_fact_digest": quality.digest("4.22.0"),
                    "jira_field": "versions", "issue": {"key": "TAP-123", "fields": {"versions": [{"id": "9", "name": "4.22.0"}]}},
@@ -127,7 +129,8 @@ class IssueVersionsTests(unittest.TestCase):
     def test_command_rejects_wrong_run_and_force_record_then_gates_branch(self):
         path = self.base / "input.json"; path.write_text(json.dumps(self.payload))
         args = SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"], input=str(path))
-        with mock.patch.object(issue_versions, "remote_refs", return_value=self.refs), contextlib.redirect_stdout(io.StringIO()):
+        with mock.patch.object(task.station_source, "inspect", return_value={}), \
+                mock.patch.object(issue_versions, "remote_refs", return_value=self.refs), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(task.cmd_issue_versions(args), 0)
         current = task.load(self.base, "TAP-123")
         self.assertEqual(current["facts"]["problem_version"], "4.18.0、release-v4.21.0")
@@ -157,13 +160,13 @@ class IssueVersionsTests(unittest.TestCase):
 
     def test_initial_analysis_on_prepared_develop_does_not_require_reset(self):
         self.task["repositories"] = [{"repository": "tapdata/tapdata", "base_branch": "develop", "base_sha": "a" * 40}]
-        task.save(self.base, self.task)
+        save_station_task(self.base, self.task)
         path = self.base / "input.json"; path.write_text(json.dumps(self.payload))
         args = SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"], input=str(path))
-        with mock.patch.object(task.repository_worktree, "task_roots", return_value=[self.base]), \
+        with mock.patch.object(task.station_source, "inspect", return_value={}), \
                 mock.patch.object(issue_versions, "remote_refs", return_value=self.refs), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(task.cmd_issue_versions(args), 0)
-        with mock.patch.object(task.repository_worktree, "task_roots", return_value=[self.base]), \
+        with mock.patch.object(task.station_source, "inspect", return_value={}), \
                 mock.patch.object(issue_versions, "remote_refs", return_value=self.refs), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(task.cmd_issue_versions(args), 0)
 

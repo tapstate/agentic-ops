@@ -24,6 +24,19 @@ SPEC.loader.exec_module(align)
 
 
 class TapDataBranchAlignmentTest(unittest.TestCase):
+    def test_catalog_unbinds_docs_but_preserves_test_repository(self):
+        config, repositories = align.load_configuration(ROOT)
+        self.assertEqual(10, len(repositories))
+        scope = align.resolve_scope(repositories, "tapdata/tapdata", ["tapdata/t-layer3-test"])
+        self.assertIn("tapdata/t-layer3-test", scope["required_repositories"])
+        self.assertEqual("develop", config["versions"]["current"]["branches"]["tapdata/t-layer3-test"])
+        for repository in ("tapdata/docs", "tapdata/docs-en"):
+            with self.subTest(repository=repository):
+                self.assertNotIn(repository, repositories)
+                self.assertNotIn(repository, scope["reported_repositories"])
+                with self.assertRaisesRegex(align.AlignmentError, "未登记的目标仓库"):
+                    align.resolve_scope(repositories, "tapdata/tapdata", [repository])
+
     @staticmethod
     def git(path, *arguments):
         return subprocess.run(
@@ -83,10 +96,10 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             workspace = Path(temporary) / "workspace"
             binding = workspace / ".agenticops" / "workspace.json"
             binding.parent.mkdir(parents=True)
-            binding.write_text(json.dumps({"repository_pool": {"root": "/pool"}}), encoding="utf-8")
+            binding.write_text(json.dumps({"schema_version": 3}), encoding="utf-8")
             root, source = align.resolve_tapdata_root(None, workspace / "nested")
 
-        self.assertEqual(Path("/pool/tapdata"), root)
+        self.assertEqual((workspace / "source/tapdata").resolve(), root)
         self.assertIn("workspace.json", source)
 
     def test_execution_directory_is_only_fallback_not_user_home(self):
@@ -120,18 +133,18 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
         self.assertEqual(Path("/tapdata-root/tapdata"), align.module_repository("/tapdata-root", "tapdata/tapdata"))
         self.assertEqual(Path("/tapdata-root/tapdata-web"), align.module_repository("/tapdata-root", "tapdata/tapdata-web"))
 
-    def test_git_refs_cache_belongs_to_workspace_and_reads_bound_source_pool(self):
+    def test_git_refs_cache_belongs_to_workspace_and_reads_fixed_source(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = Path(temporary) / "workspace"
             binding = workspace / ".agenticops" / "workspace.json"
             binding.parent.mkdir(parents=True)
-            binding.write_text(json.dumps({"repository_pool": {"root": "/pool"}}), encoding="utf-8")
+            binding.write_text(json.dumps({"schema_version": 3}), encoding="utf-8")
             cache, pool = align.git_refs_cache_file(workspace)
         self.assertEqual((workspace / ".agenticops" / "git-ref-cache-v2.json").resolve(), cache)
-        self.assertEqual(Path("/pool"), pool)
+        self.assertEqual((workspace / "source").resolve(), pool)
 
     def test_main_repository_is_validated_before_other_module_repositories(self):
-        repositories = {"tapdata/docs": {}, "tapdata/tapdata": {}}
+        repositories = {"tapdata/tapdata-web": {}, "tapdata/tapdata": {}}
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaisesRegex(align.AlignmentError, "TapData 模块根目录缺少主仓.*tapdata/tapdata"):
                 align.refresh_branch_cache(temporary, repositories, "tapdata/tapdata", "auto")
@@ -418,16 +431,16 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             "license_repository": "tapdata/tapdata-license",
             "keep_current_repositories": ["tapdata/tapdata-application"],
             "fixed_branches": {"tapdata/hazelcast": "release-v5.5.0"},
-            "independent_repositories": ["tapdata/t-layer3-test", "tapdata/docs"],
+            "independent_repositories": ["tapdata/t-layer3-test", "example/independent"],
             "same_name_repositories": [],
             "plugin_release_repositories": [],
             "display_fallback_branches": {"tapdata/tapdata-application": "main", "tapdata/t-layer3-test": "develop"},
         }
-        refs = {"tapdata/tapdata-application": {"main": "a"}, "tapdata/hazelcast": {"release-v5.5.0": "b"}, "tapdata/t-layer3-test": {"develop": "c"}, "tapdata/docs": {"main": "d"}}
+        refs = {"tapdata/tapdata-application": {"main": "a"}, "tapdata/hazelcast": {"release-v5.5.0": "b"}, "tapdata/t-layer3-test": {"develop": "c"}, "example/independent": {"main": "d"}}
         application = align.derived_target("tapdata/tapdata-application", "fix-xxx", rules, refs, Path("/pool/tapdata/tapdata"), {})
         hazelcast = align.derived_target("tapdata/hazelcast", "fix-xxx", rules, refs, Path("/pool/tapdata/tapdata"), {})
         tests = align.derived_target("tapdata/t-layer3-test", "fix-xxx", rules, refs, Path("/pool/tapdata/tapdata"), {})
-        unchanged = align.derived_target("tapdata/docs", "fix-xxx", rules, refs, Path("/pool/tapdata/tapdata"), {})
+        unchanged = align.derived_target("example/independent", "fix-xxx", rules, refs, Path("/pool/tapdata/tapdata"), {})
 
         self.assertEqual(("main", "fixed"), application[:2])
         self.assertEqual(("release-v5.5.0", "fixed"), hazelcast[:2])
@@ -489,7 +502,7 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             target, reason = align.feature_tag_branch(Path("/pool/tapdata"), "feat_ha_dmp", "product-sha")
 
         self.assertIsNone(target)
-        self.assertIn("受控 Source Pool 刷新流程", reason)
+        self.assertIn("source 工程目录", reason)
         command.assert_not_called()
 
     def test_feature_tag_fallback_and_malformed_release_prefix_are_not_silent(self):

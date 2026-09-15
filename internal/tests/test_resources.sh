@@ -73,8 +73,8 @@ for file in \
   contracts/adapter-manifest.schema.json contracts/operation-catalog.schema.json \
   contracts/product-state.schema.json contracts/workspace.schema.json \
   contracts/workspace-state-compatibility.json contracts/workspace-state-compatibility.schema.json \
-  contracts/repository-pool.schema.json contracts/repository-catalog.schema.json \
-  contracts/workspace-init.schema.json contracts/task-registry.schema.json \
+  contracts/repository-catalog.schema.json \
+  contracts/workspace-init.schema.json \
   contracts/task-state.schema.json contracts/operation-catalog.json \
   gate/engine.py gate/runner.py \
   policies/operations.json policies/continuity.json policies/defect-repair-strategies.json \
@@ -97,8 +97,8 @@ for file in \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
   bootstrap/workspace-init.sh bootstrap/render.py bootstrap/workspace_paths.py bootstrap/agent_registry.py \
   bootstrap/skill_wiring.py \
-  bootstrap/product_state.py bootstrap/product_version.py bootstrap/repository_pool.py bootstrap/workspace_registry.py bootstrap/workspace_compatibility.py \
-  workflow/repository_worktree.py \
+  bootstrap/product_state.py bootstrap/product_version.py bootstrap/workspace_registry.py bootstrap/workspace_compatibility.py \
+  workflow/station.py workflow/station_source.py workflow/source_pool.py workflow/station_resources.py workflow/station_archive.py workflow/station_operation.py \
   tests/test_gate.py tests/test_contracts.py tests/test_adapter_boundary.py tests/test_workflow.py tests/test_install.sh \
   internal/acceptance.sh internal/bin/story-gate internal/story_gate/stories.yaml \
   internal/story_gate/review-policy.yaml internal/release/release.sh \
@@ -114,8 +114,7 @@ for file in \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
   bootstrap/workspace-init.sh bootstrap/render.py bootstrap/agent_registry.py \
   bootstrap/skill_wiring.py \
-  bootstrap/product_state.py bootstrap/product_version.py bootstrap/repository_pool.py bootstrap/workspace_registry.py bootstrap/workspace_compatibility.py \
-  workflow/repository_worktree.py \
+  bootstrap/product_state.py bootstrap/product_version.py bootstrap/workspace_registry.py bootstrap/workspace_compatibility.py \
   tests/test_install.sh internal/acceptance.sh internal/bin/story-gate internal/release/release.sh \
   internal/release/hotfix.sh internal/tests/test_runtime.sh \
   internal/tests/test_resources.sh internal/tests/test_release.sh \
@@ -139,11 +138,9 @@ python3 -m json.tool contracts/gate-decision.schema.json >/dev/null
 python3 -m json.tool contracts/adapter-manifest.schema.json >/dev/null
 python3 -m json.tool contracts/operation-catalog.schema.json >/dev/null
 python3 -m json.tool contracts/product-state.schema.json >/dev/null
-python3 -m json.tool contracts/repository-pool.schema.json >/dev/null
 python3 -m json.tool contracts/repository-catalog.schema.json >/dev/null
 python3 -m json.tool contracts/workspace.schema.json >/dev/null
 python3 -m json.tool contracts/workspace-init.schema.json >/dev/null
-python3 -m json.tool contracts/task-registry.schema.json >/dev/null
 python3 -m json.tool contracts/task-state.schema.json >/dev/null
 python3 -m json.tool contracts/operation-catalog.json >/dev/null
 python3 -m json.tool projects/tapdata/profile.json >/dev/null
@@ -197,8 +194,8 @@ for name, requirement in requirements["required_servers"].items():
 workspace_entry = Path("adapters/workspace/AGENTS.md").read_text(encoding="utf-8")
 assert 'mcp-requirements.json' in workspace_entry
 assert '首次需要 Jira 事实时检查 `atlassian`' in workspace_entry
-assert '不得伪造工具结果' in workspace_entry
-assert 'GitHub MCP、`gh` 和其它 GitHub 工具不由 AgenticOps 绑定' in workspace_entry
+assert '不得伪造结果' in workspace_entry
+assert 'GitHub MCP、gh 或其它工具由 Agent 按已有授权选择' in workspace_entry
 
 profile = json.loads(Path("projects/tapdata/profile.json").read_text(encoding="utf-8"))
 assert profile["statuses"]["Analyzed"] == "waiting_takeover"
@@ -223,13 +220,13 @@ assert profile["workflows_by_issue_type"] == [{
     },
 }]
 PY
-grep -Fq '接管、继续或 reset 成功只是流程恢复点' adapters/workspace/AGENTS.md ||
+grep -Fq '接管或继续成功只是流程恢复点' adapters/workspace/AGENTS.md ||
   fail "工作空间入口未声明接管后的连续推进"
 grep -Fq '远程候选参考' adapters/workspace/AGENTS.md ||
   fail "工作空间入口未声明远程源码证据边界"
-grep -Fq '登记完成后立即执行受控 `task.py repository prepare`' \
+grep -Fq 'task.py takeover --issue-key' \
   projects/tapdata/skills/tapdata-task/SKILL.md ||
-  fail "TapData Skill 未声明受控仓库准备"
+  fail "TapData Skill 未声明完整工程接管"
 grep -Fq 'repositories' policies/operations.json || fail "任务授权未绑定多仓库集合"
 grep -Fq '@AGENTS.md' adapters/agents/claude/templates/CLAUDE.md ||
   fail "Claude 入口未复用公共 Agent 规则"

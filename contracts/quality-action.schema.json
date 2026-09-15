@@ -35,6 +35,9 @@
     },
     {
       "$ref": "#/$defs/readback"
+    },
+    {
+      "$ref": "#/$defs/verification"
     }
   ],
   "$defs": {
@@ -715,6 +718,22 @@
             "source_ref"
           ],
           "additionalProperties": false
+        }
+      },
+      "required": [
+        "action",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "verification"
+        },
+        "payload": {
+          "type": "object"
         }
       },
       "required": [

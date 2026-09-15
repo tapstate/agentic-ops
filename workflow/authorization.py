@@ -2,7 +2,7 @@
 """任务授权工具：按当前任务的多仓范围签发或撤销授权伞。
 
 签发即模拟"设计审查通过"这一人工节点：授权绑定任务、仓库、分支和计划版本，
-写入 `.agenticops/tasks/<issue-key>/authorization.json`。Workflow 在实现和验收检查点
+写入 `.agenticops/authorization.json`。Workflow 在实现和验收检查点
 重新核验确认绑定；它不代表 Git/Jira/PR 每次原生调用均经过 AgenticOps 授权。
 
 用法：
@@ -42,8 +42,16 @@ def repository_bindings(repositories):
     return [{key: item.get(key) for key in keys} for item in repositories]
 
 
-def plan_digest(task):
-    value = json.dumps(task.get("facts", {}).get("fix_plan"), ensure_ascii=False, sort_keys=True)
+def plan_digest(task, base=None):
+    plan = task.get("facts", {}).get("fix_plan")
+    if base is not None:
+        spec = project_rules.load_admission(workspace=base)
+        if project_rules.class_spec(spec, task["task_class"]).get("quality_profile") is not None:
+            rules = quality.config(base, task)
+            plan = {"task_class": task["task_class"], "facts": {
+                key: task.get("facts", {}).get(key) for key in rules["plan_fact_keys"]}}
+    # 未声明任务配置时保留旧摘要，旧缺陷授权及事件无需迁移。
+    value = json.dumps(plan, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
@@ -90,7 +98,7 @@ def cmd_renew(args):
         raise ValueError("原授权不能续签：%s" % "；".join(reasons))
     if (record.get("agentic_run_id") != task["run_id"]
             or record.get("repositories") != repository_bindings(task.get("repositories", []))
-            or record.get("approved_plan_digest") != plan_digest(task)
+            or record.get("approved_plan_digest") != plan_digest(task, args.dir)
             or q1_digest != quality.q1_digest(args.dir, task)
             or q2_digest != quality.q2_digest(args.dir, task)):
         raise ValueError("方案、run 或仓库绑定已变化（或旧授权缺少方案摘要），必须重新设计确认")
@@ -112,6 +120,63 @@ def cmd_renew(args):
 
 
 @task_store.task_mutation
+def cmd_reconfirm(args):
+    """同一实施范围内重新绑定已确认的 Q2，保留原授权与有效期。"""
+    issue = task_store.resolve_active_issue(args.dir, args.issue_key)
+    task = task_store.check_expected_run(args.dir, issue, args.expected_run_id)
+    if task.get("stage") not in ("design_review", "implementation", "pr_review", "ci_validation"):
+        raise ValueError("当前阶段不允许重新绑定验收方案")
+    if not args.confirmed_by.strip() or not args.confirmation_ref.strip():
+        raise ValueError("重新绑定需要明确决定者和可回查的人工确认来源")
+    path = task_store.authorization_path(args.dir, issue)
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError("原授权无法读取，拒绝重新绑定") from error
+    if not isinstance(record, dict) or record_digest(record) != args.expected_authorization_digest:
+        raise ValueError("原授权已变化，重新核对确认对象")
+    expiry = record.get("expires_at_epoch")
+    if type(expiry) not in (int, float) or not math.isfinite(expiry):
+        raise ValueError("原授权有效期无效")
+    valid, reasons = engine.check_authorization(record, {"issue_key": issue, "branch_relevant": False},
+                                                engine.load_policy())
+    if not valid:
+        raise ValueError("原授权不能重新绑定：%s" % "；".join(reasons))
+    old_q2 = record.get("approved_q2_digest")
+    if not isinstance(old_q2, str) or not old_q2:
+        raise ValueError("旧授权缺少 Q2 摘要，不能通过重新绑定迁移")
+    current_q1 = quality.q1_digest(args.dir, task)
+    expected_q1 = getattr(args, "expected_q1_digest", None)
+    if expected_q1 is not None and expected_q1 != current_q1:
+        raise ValueError("目标 Q1 已变化，重新核对确认对象")
+    if not isinstance(record.get("approved_q1_digest"), str) or not record["approved_q1_digest"]:
+        raise ValueError("旧授权缺少 Q1 摘要，不能通过重新绑定迁移")
+    if (record.get("agentic_run_id") != task["run_id"]
+            or record.get("repositories") != repository_bindings(task.get("repositories", []))
+            or record.get("approved_plan_digest") != plan_digest(task, args.dir)
+            or (expected_q1 is None and record.get("approved_q1_digest") != current_q1)):
+        raise ValueError("实施方案、Q1、run 或仓库绑定已变化，不能仅重新绑定验收方案")
+    check_catalog_bindings(args.dir, record["repositories"])
+    new_q2 = quality.q2_digest(args.dir, task)
+    if new_q2 != args.expected_q2_digest or (new_q2 == old_q2 and current_q1 == record["approved_q1_digest"]):
+        raise ValueError("目标 Q2 已变化或与原授权相同，重新核对确认对象")
+    history = record.setdefault("reconfirmations", [])
+    if not isinstance(history, list):
+        raise ValueError("原授权重新确认历史无效")
+    history.append({"confirmed_by": args.confirmed_by, "confirmation_ref": args.confirmation_ref,
+                    "confirmed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "previous_authorization_digest": args.expected_authorization_digest,
+                    "previous_q2_digest": old_q2, "approved_q2_digest": new_q2})
+    if expected_q1 is not None:
+        history[-1].update(previous_q1_digest=record["approved_q1_digest"], approved_q1_digest=current_q1)
+        record["approved_q1_digest"] = current_q1
+    record["approved_q2_digest"] = new_q2
+    task_store._write_json_atomic(path, record)
+    print("已重新绑定当前 run 经人工确认的验收方案：%s" % path)
+    return 0
+
+
+@task_store.task_mutation
 def cmd_grant(args):
     issue = task_store.validate_issue_key(args.issue_key)
     if issue not in task_store.registered_issues(args.dir, statuses=("active",)):
@@ -122,7 +187,7 @@ def cmd_grant(args):
         print("错误：没有任务状态，请先初始化任务并确认仓库范围", file=sys.stderr)
         return 2
     try:
-        task = json.loads(current_task_path.read_text(encoding="utf-8"))
+        task = task_store.read_task(args.dir, issue)
     except (OSError, json.JSONDecodeError) as exc:
         print("错误：任务状态无法读取：%s" % exc, file=sys.stderr)
         return 2
@@ -166,6 +231,8 @@ def cmd_grant(args):
             return 2
     path = task_store.authorization_path(args.dir, issue)
     path.parent.mkdir(parents=True, exist_ok=True)
+    from workflow import station_source
+    readiness_digest = station_source.require_readiness(args.dir, task)
     record = {
         "scope": "task_execution",
         "status": "active",
@@ -174,13 +241,15 @@ def cmd_grant(args):
         "enforcement": "workflow_checkpoints",
         "agent_id": args.agent_id,
         "approved_plan_version": args.plan_version,
-        "approved_plan_digest": plan_digest(task),
+        "approved_plan_digest": plan_digest(task, args.dir),
         "approved_q1_digest": approved_q1_digest,
         "approved_q2_digest": approved_q2_digest,
         "repositories": repository_bindings(repositories),
         "granted_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "expires_at_epoch": time.time() + args.ttl_hours * 3600,
     }
+    if readiness_digest:
+        record["source_readiness_digest"] = readiness_digest
     task_store._write_json_atomic(path, record)
     print("已签发授权：%s" % path)
     print(json.dumps(record, ensure_ascii=False, indent=2))
@@ -237,6 +306,17 @@ def main():
     p_renew.add_argument("--dir", default=".")
     p_renew.set_defaults(func=cmd_renew)
 
+    p_reconfirm = sub.add_parser("reconfirm")
+    p_reconfirm.add_argument("--issue-key", required=True)
+    p_reconfirm.add_argument("--expected-run-id", required=True)
+    p_reconfirm.add_argument("--expected-authorization-digest", required=True)
+    p_reconfirm.add_argument("--expected-q2-digest", required=True)
+    p_reconfirm.add_argument("--expected-q1-digest")
+    p_reconfirm.add_argument("--confirmed-by", required=True)
+    p_reconfirm.add_argument("--confirmation-ref", required=True)
+    p_reconfirm.add_argument("--dir", default=".")
+    p_reconfirm.set_defaults(func=cmd_reconfirm)
+
     p_revoke = sub.add_parser("revoke")
     p_revoke.add_argument("--issue-key")
     p_revoke.add_argument("--expected-run-id", required=True)
@@ -252,7 +332,6 @@ def main():
     args = parser.parse_args()
     try:
         task_store.workspace_project(args.dir)
-        task_store.migrate_legacy(args.dir)
         return args.func(args)
     except ValueError as error:
         print("错误：%s" % error, file=sys.stderr)

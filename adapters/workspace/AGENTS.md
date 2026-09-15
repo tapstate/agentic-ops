@@ -1,108 +1,55 @@
 <!-- 由 AgenticOps 生成；不要在项目工作空间直接维护。 -->
 # AgenticOps 项目工作空间入口
 
-本项目工作空间由中央 AgenticOps 产品根目录（Product Root）管理：
+本工作空间是一台独立研发工位，由中央 AgenticOps 产品根目录管理。一工位、一套完整工程、一个当前任务；并发通过多个工位实现。
 
 - 产品根目录：`__AGENTIC_OPS_HOME__/`
 - Product Project：`__AGENTIC_OPS_PROJECT__`
 - Repository Catalog：`__AGENTIC_OPS_HOME__/projects/__AGENTIC_OPS_PROJECT__/repositories.json`
-- Initialization：`.agenticops/init.json`
-- Workspace Configuration：`.agenticops/workspace.json`
-- Task Registry：`.agenticops/tasks/index.json`
-- Task State：`.agenticops/tasks/<issue-key>/`
-- Task Run Interactions：`.agenticops/tasks/<issue-key>/<run-id>/`
+- 初始化与工位绑定：`.agenticops/init.json`、`.agenticops/workspace.json`
+- 唯一当前任务与操作：`.agenticops/current-task.json`、`.agenticops/operation.json`
+- 活动授权与证据：`.agenticops/authorization.json`、`.agenticops/evidence/`
+- 持久配置：`config/`；独立源码：`source/<owner>/<repo>/`；唯一运行现场：`runtime/`；正式归档：`archive/<issue>/<run>/`
 
-一个工作空间只绑定一个产品项目，可以同时接管该项目下多个 Jira 任务；每个任务可
-组织多个 Git 仓库。开始或恢复任务前，
-必须读取中央产品根目录中当前项目的 Profile、准入规则和适用 Skill：
+当前 Project Profile、准入及 Skill 位于：
 
 - `__AGENTIC_OPS_HOME__/projects/__AGENTIC_OPS_PROJECT__/profile.json`
 - `__AGENTIC_OPS_HOME__/projects/__AGENTIC_OPS_PROJECT__/admission.json`
 - `__AGENTIC_OPS_HOME__/projects/__AGENTIC_OPS_PROJECT__/skills/`
 
-已接入 Agent 的原生 Skill 目录会以符号链接接线到同一份中央项目 Skill：Codex 使用
-`.agents/skills/`，Claude Code 使用 `.claude/skills/`。不要修改这些工作空间链接或复制
-Skill；更新、检查和修复均由 Product Root 统一处理。
-
-多个任务同时 active 时，所有状态命令必须显式绑定任务号和项目工作空间：
-
-```bash
-python3 __AGENTIC_OPS_HOME__/workflow/task.py status --issue-key <JIRA-KEY> --dir <项目工作空间>
-```
-
-`AGENTS.md`、各 Agent 入口、Hook 和 MCP 配置都是可重新生成的薄接线，不是规则事实
-源；项目规则和运行资产只在产品根目录维护。
+Codex 的 `.agents/skills/`、Claude Code 的 `.claude/skills/` 链接到同一中央项目 Skill，不复制规则。AGENTS、Agent 入口和 MCP 配置只是可再生接线，不是事实源。
 
 ## 必需插件的按需配置
 
-当前项目的必需外部插件清单位于 `__AGENTIC_OPS_HOME__/adapters/tools/mcp-requirements.json`：
-`atlassian` 提供 Jira 任务、准入和状态事实，是项目所需的 MCP 插件，但不是启动前置条件。
-GitHub MCP、`gh` 和其它 GitHub 工具不由 AgenticOps 绑定；Agent 依据当前任务、可用工具和
-用户授权自行选择。
+必需插件清单位于 `__AGENTIC_OPS_HOME__/adapters/tools/mcp-requirements.json`。首次需要 Jira 事实时检查 `atlassian` 是否可用；缺失、未启用或未登录时，只暂停依赖 Jira 的步骤，说明用途与当前客户端安装/登录入口。不得伪造结果、自行配置全局插件或改用未受控 token/PAT。GitHub MCP、gh 或其它工具由 Agent 按已有授权选择，不作为启动前置条件。
 
-- 首次需要 Jira 事实时检查 `atlassian` 是否可调用。
-- `atlassian` 不可用、未安装、未启用或未登录时，停止 Jira 事实依赖的步骤，明确告诉研发工程师所需插件、用途和当前客户端的安装/登录入口；不得伪造工具结果、改用未受控 token/PAT，或自行修改全局 Agent 配置。
-- 在用户完成安装和认证后，重新读取 Jira 事实并从当前停止点继续。与该插件无关的本地准备工作可以继续。
+## 当前任务操作
 
-## 必须遵守的入口规则
+接管、归档、释放、清理是四个生命周期操作。开始前必须先读取当前项目 `.agents/skills/` 或 `.claude/skills/` 中匹配的 Project Skill。memory 只能作为历史线索；当前产品规则和实际 CLI 是依据。Skill 缺失或越界时停止副作用并提示从工作空间根执行 `./agenticops repair`。
 
-- Jira 是任务事实源，Git 是代码事实源，GitHub PR/CI 是审查事实源；`.agenticops/`
-  只保存工作空间配置及本地执行、恢复和门禁事件，不替代外部事实源。
-- 收到接管、继续、恢复或 reset 任务请求时，必须先读取当前项目 `.agents/skills/` 或
-  `.claude/skills/` 中匹配的 Project Skill，再读取历史 memory 或会话摘要。当前 Product
-  Root、Project Profile 和 Project Skill 是现役规则源；memory 只能作为历史线索，不得
-  用来推断现役命令。Skill 缺失、链接不可读或目标越界时停止任务副作用并提示从工作空间
-  根执行 `./agenticops repair`；不得从历史信息推断或恢复已经退役的入口。
-- `.agenticops/tasks/index.json` 只统一注册任务及其 active/inactive/completed
-  状态；每个任务的事实、授权、事件和 CI 证据只能写入自己的
-  `.agenticops/tasks/<issue-key>/`。
-- Agent 为 Jira/MCP/质量检查准备的输入、草稿、回执、回读和日志不得散落在
-  `.agenticops/` 根目录。先用 `workflow/task.py interaction-path --issue-key <JIRA-KEY>
-  --expected-run-id <run> --name <lowercase-kebab-case.ext> --dir <项目工作空间>` 获取路径，
-  再写入该路径；允许的扩展名为 `json`、`jsonl`、`log`、`md`、`txt`。reset 后旧 run
-  交互文件留在旧 run 目录供追溯，任务级 purge 会与整个任务目录一起删除。
-  历史版本散落在根目录的文件不在线迁移或猜测归属；遇到工作空间状态不兼容的升级时，先在原版本结束或停用任务、清理 linked worktree 并显式 purge 本地任务状态，再按升级提示处理需要归档的旧材料。以上本地清理不修改 Jira。
-- Workflow 在本地状态变更处执行流程门禁。失败时展示原因和停止点，停止依赖步骤，不手改状态文件绕过。Git/Jira/PR、编辑、构建和测试由 Agent 原生权限处理。
-- 规范化为 `defect_fix` 的任务在 Q1 使用 `workflow/task.py checklist --json` 或 `next` 读取 `repair_strategy`，默认只向用户显示当前策略而不增加确认；生成 Q2 方案时应用返回的 `planning_guidance`，并在现有方案中披露应用结果和偏差。修复策略只是 advisory 调优，配置不可用或偏离只报告 warning，不能作为 Workflow、Quality、Gate 或 Authorization 的阻断条件。
-- 接管、继续或 reset 成功只是流程恢复点，不是默认停点。选择现有 run 或 reset 是人工
-  决策；选择完成后应继续核验 Jira、补齐准入、登记仓库并准备本地基线，直到遇到方案
-  确认、风险授权、事实不可信或其它真实人工决策点。
-- 当前 Project 启用 Jira 状态同步时，接管进入 `task_intake` 和 Q4 后各按 Skill 准备并
-  同步尝试一次精确 transition。已达目标直接记录；状态不符、缺字段或调用失败均跳过
-  该次状态同步并继续本地主流程。PR Ready 前必须核对关联测试任务、当前 PR Head 的
-  Checks 和任务检查项；`Pull Request Submitted` 仍由责任人处理。
-- `task_intake` 中先为每个目标仓库登记仓库、工作分支、基线分支、范围和验证方式，再
-  执行受控 `workflow/task.py repository prepare`。该操作按已登记的 active 任务自动
-  准备 Source Pool（`auto-clone` 模式会自动下载）和当前 run 的 linked worktree，固化
-  `base_sha`，不要求预先签发 `task_execution` 授权；直接 Git clone、复用已有分支和
-  非受控 worktree 操作交由平台原生权限处理，不能作为受控基线的替代。
-- 只有 `repository prepare` 产出的本地任务 worktree、`base_sha` 和目录摘要才是任务的
-  Git 基线。GitHub API、网页或其它远程只读源码只能标记为“远程候选参考”，不能写成
-  “已核实基线”，也不能据此推进 `design_review`。本地基线完成后才能分析代码、形成
-  方案；研发工程师确认方案后再签发一次任务授权。新增仓库、重新准备或修改范围会使
-  原授权失效。
-- 同一任务可以修改多个仓库；多个 active 任务使用同一仓库时必须使用不同工作分支。
-  每个仓库分别保存提交、PR、CI 与验证事实，任务级
-  证据汇总这些结果。
-- `run_id` 只由 Workflow 创建；主 Agent、subagent 和恢复会话读取并共享同一任务状态。
-  再次发现已接管任务时必须停止并让用户选择继续，或清理 worktree 后显式 reset；不得按
-  Agent 会话自行生成新 run。reset 必须绑定当前 `--expected-run-id`，过期或并发请求停止。
-- Jira 人可见内容使用中文；不得提交 token、密钥、客户数据或原始敏感日志。
-- 合并、发布、Tag、强推、历史改写、保护分支写入始终不在任务授权范围内。
-- 业务代码修改、构建和测试只能在当前任务 worktree 中进行；Product Root、Source Pool
-  根目录、仓库主工作树和其它任务 worktree 不能作为任务写入目标。
-- Agent 从工作空间根使用 `./agenticops start <id>` 启动，并在同一会话完成任务。prepare 后必须执行 `python3 __AGENTIC_OPS_HOME__/workflow/task.py repository context --issue-key <JIRA-KEY> --json --dir <项目工作空间>`，只在返回的当前 issue/run worktree 中分析、修改、构建和测试。当前会话的 Git 副作用必须使用 `git -C <返回的 worktree> ...`；执行前按 repository context 核对当前任务已准备的精确路径。不得启动嵌套 Agent、切换工作空间或创建会话级“当前任务”状态。任务状态操作继续显式绑定 workspace、issue 和 run。
-- 任务或工作空间清理必须先清理 linked worktree；脏 worktree 必须停止并保留现场。
-- 临时结束处理用 `deactivate`，恢复同一 run 用 `activate`；清理重做使用 cleanup 后
-  精确绑定当前 `run_id` 的 `reset`。只有任务已 inactive、run 精确匹配且研发工程师明确
-  确认时，才可执行任务级 `purge` 删除该任务的本地状态；它不修改 Jira，脏 worktree
-  必须停止，未合并分支必须保留并报告。
-- 未迁移的辅助能力不阻塞整个流程：优先使用 Agent 原生能力；没有安全自动路径时，
-  只暂停对应副作用步骤并给出结构化人工接力。事实不可信、权限不足、高风险人工
-  门禁和外部写结果不明确仍必须停止。
+```bash
+python3 __AGENTIC_OPS_HOME__/workflow/task.py status --issue-key <JIRA-KEY> --dir <项目工作空间>
+python3 __AGENTIC_OPS_HOME__/workflow/task.py repository context --issue-key <JIRA-KEY> --json --dir <项目工作空间>
+```
 
-- Agent 原生入口只负责加载中央规则；不得把产品根目录的 Policy、Project 或 Skill
-  复制成工作目录事实源。
-- 状态写命令必须绑定当前 `--expected-run-id`，advance 另带 `--expected-stage`；从 status/next 读取并固定，拒绝后先核对变化。
-- Workflow 校验准入、确认与证据，只保证不满足条件不能推进；方案确认不代表每次原生工具调用均被拦截。Jira 同步保留准备与回读，不保证强制单次调用。
-- 旧接线迁移提示必须交给使用者核对，显式执行 `./agenticops repair --accept-checkpoint-migration`；不手改配置清除提示。
+- 接管前 current 必须为空且没有未完成 operation；完成任务也必须由研发明确释放，不能自动接新任务。接管失败保留同 run、同 operation 恢复，不新建运行编号伪装重试。
+- 接管完成后核验完整工程基线及 source；修改仓另行登记工作分支、目标分支、范围和验证方式。基线与任务交付是两份不同信息，PR/HEAD 更新不改冻结基线。冻结后不得隐式扩展工程集合。
+- 接管或继续成功只是流程恢复点，不是默认停点。应继续核验 Jira、补齐准入并形成方案，直到真实的确认、事实、权限或风险阻塞点。
+- GitHub API 或网页源码只能标为“远程候选参考”；完整 ref/SHA 与本地独立仓库核验完成后才能声称已核实基线并进入设计评审。方案确认后才签发任务授权，范围变化撤销旧授权。
+- 所有任务写请求携带当前 `--expected-run-id`；阶段推进另带 `--expected-stage`；生命周期和范围操作携带 operation ID 与 expected revision。参数从当前上下文读出并固定，拒绝后先核对变化。不得用新 run 补齐迟到请求。
+- Agent 从工作空间根 `./agenticops start <id>` 启动并在同一会话继续；Git 使用 `git -C <source 中已核验仓库路径>`。不启动嵌套 Agent，不复制会话级当前状态，不修改 Product Root 或其它工位源码。
+- 构建、测试和应用运行遵循 Project 的资源配方；配置不随任务清除，任务有效配置、Maven local、插件、日志和报告进入唯一 runtime。配套仓源码变更也必须先登记。
+- 未完成任务可归档并标记 incomplete；归档后停止开发但仍占用工位。随后经精确确认 clean，复用原档案并追加回执，成功后才解除占用。release 核验交付与项目验收后归档并释放；PR 合并不能替代其它已配置验收。
+- 清理必须先核验并停止登记写入者，取得精确清单确认并发布档案；未知文件、路径漂移、未确认的新内容或资源身份不符时保留现场并停止。不得通用 git clean/reset、删除共享缓存或远端对象。保留 Git refs 和正式归档。
+- 交互输入、草稿和回读先用 `task.py interaction-path --issue-key <JIRA-KEY> --expected-run-id <run> --name <lowercase-kebab-case.ext> --dir <项目工作空间>` 获取路径，不散落状态根；允许 json、jsonl、log、md、txt。活动记录仅属于当前 run，正式归档不转成新任务授权。
+- 工位级 purge 仅用于任务已释放/清理且操作结束的工位，按生成归属移除接线与受管状态，保留 source/config/archive。原路径重新初始化若保留材料，需明确 `init --reuse-materials`；这不授权覆盖材料、导入有效配置或复用历史证据。runtime 必须为空。
+- 不兼容旧工作空间必须使用原版本保存材料、受控解绑并重建，新版本不解析或迁移旧任务。repair 不跨代际采用；生成/清理先在同版本形成闭环，升级只在干净边界编排，不把清理失败当升级成功。
+
+## 事实、安全与流程检查点
+
+- Jira 是任务事实源，Git 是代码事实源，GitHub PR/CI 是审查事实源；本地状态只服务执行、恢复和证据，不替代外部事实。
+- Workflow 在本地状态变更处执行流程门禁。失败后停止依赖步骤并展示原因，不手改状态绕过。原生工具执行仍由平台权限控制，不承诺拦截任意本地写入。
+- defect_fix 的 Q1 通过 checklist --json 或 next 读取 repair_strategy；生成 Q2 方案时应用返回的 `planning_guidance`。策略为 advisory，缺失只报告 warning，不增加 Gate/Quality/Authorization 阻断条件。
+- 启用 Jira 同步时，task_intake 与 Q4 各按 Skill 尝试一次精确状态流转；失败不阻塞无关本地步骤，外部结果不明先回读。PR Ready 核验当前 PR Head Checks、关联测试和任务检查项；Pull Request Submitted 由责任人处理。
+- 用户可见内容使用中文，不保存 token、密钥、客户数据或原始敏感日志。合并、发布、Tag、强推、历史改写、保护分支写入始终需要独立明确授权。
+- 未迁移辅助能力只暂停相应副作用步骤并给出人工接力；事实不可信、权限不足、风险须人工决定及外部结果不明必须停止。

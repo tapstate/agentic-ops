@@ -14,8 +14,6 @@ from pathlib import Path
 
 from agent_registry import select
 from product_state import load as load_product_state
-from repository_pool import load as load_repository_pool
-from repository_pool import validate_root as validate_repository_pool_root
 from skill_wiring import validate_skill
 from workspace_paths import WorkspaceDirectory, workspace_artifact_path
 from workspace_compatibility import (
@@ -25,7 +23,7 @@ from workspace_compatibility import (
 )
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 INIT_SCHEMA_VERSION = 2
 STATE_DIRECTORY = ".agenticops"
 INIT_NAME = "init.json"
@@ -158,7 +156,7 @@ def load_workspace(workspace, tree=None):
         return None, None
     if document is not None:
         if document.get("schema_version") not in (1, SCHEMA_VERSION):
-            raise ValueError("不支持的工作空间配置版本")
+            raise ValueError("工作空间不兼容，请使用原版本将这个旧工作空间受控解绑并重建")
         return document, None
     return None, None
 
@@ -265,49 +263,20 @@ def expected_artifacts(install_root, workspace, project, agents, manifests):
     return artifacts, messages
 
 
-def default_repository_pool(install_root):
-    return load_repository_pool(install_root)["root"]
+def require_current_workspace_document(document):
+    if document is not None and document.get("schema_version") != SCHEMA_VERSION:
+        raise ValueError("工作空间不兼容，请使用原版本将这个旧工作空间受控解绑并重建")
+    return document
 
 
-def migrate_workspace_document(install_root, workspace, document):
-    if document is None:
-        return None
-    migrated = dict(document)
-    if migrated.get("schema_version") == 1:
-        migrated.update(
-            {
-                "schema_version": SCHEMA_VERSION,
-                "workspace_id": uuid.uuid4().hex,
-                "repository_pool": {
-                    "root": default_repository_pool(install_root),
-                    "source": "product-default-migration",
-                },
-            }
-        )
-    return migrated
-
-
-def workspace_document(install_root, workspace, project, agents, existing, repository_pool):
-    if existing:
-        workspace_id = existing["workspace_id"]
-        pool = existing["repository_pool"]
-    else:
-        selected = repository_pool or default_repository_pool(install_root)
-        pool = {
-            "root": str(validate_repository_pool_root(install_root, selected, create=True)),
-            "source": "workspace-override" if repository_pool else "product-default",
-        }
-        workspace_id = uuid.uuid4().hex
-    pool_root = Path(pool["root"]).resolve()
-    if workspace == pool_root or pool_root in workspace.parents or workspace in pool_root.parents:
-        raise ValueError("项目工作空间与 Source Pool 不能互相嵌套：%s" % workspace)
+def workspace_document(install_root, workspace, project, agents, existing):
+    workspace_id = existing["workspace_id"] if existing else uuid.uuid4().hex
     return {
         "schema_version": SCHEMA_VERSION,
         "product_root": str(install_root.resolve()),
         "workspace_id": workspace_id,
         "project": project,
         "agents": agents,
-        "repository_pool": pool,
     }
 
 
@@ -448,16 +417,8 @@ def validate_workspace_document(install_root, document):
     workspace_id = document.get("workspace_id")
     if not isinstance(workspace_id, str) or not re.fullmatch(r"[a-f0-9]{32}", workspace_id):
         raise ValueError("工作空间配置缺少 workspace_id")
-    pool = document.get("repository_pool")
-    if not isinstance(pool, dict) or not isinstance(pool.get("root"), str):
-        raise ValueError("工作空间配置缺少 repository_pool.root")
-    if pool.get("source") not in (
-        "product-default", "workspace-override", "product-default-migration"
-    ):
-        raise ValueError("工作空间 repository_pool.source 无效")
-    pool_root = validate_repository_pool_root(install_root, pool["root"], create=False)
-    if not pool_root.is_dir():
-        raise ValueError("工作空间绑定的 Source Pool 不存在：%s" % pool_root)
+    if document.get("schema_version") != SCHEMA_VERSION or "repository_pool" in document:
+        raise ValueError("工作空间不兼容，请使用原版本将这个旧工作空间受控解绑并重建")
     selected, manifests = select(install_root, agents)
     return project, selected, manifests
 
@@ -469,6 +430,12 @@ def check_workspace(install_root, workspace, config, init, tree):
     compatibility = load_manifest(install_root)
     if workspace_epoch(workspace, compatibility) not in compatibility["supported_workspace_state_epochs"]:
         raise ValueError("工作空间状态代际与当前产品不兼容；请先在原版本结束并清理任务，再重新初始化工作空间")
+    from workflow import station_operation, task_store
+    task_store.read_current(workspace)
+    station_operation.read(workspace)
+    for name in ("config", "source", "runtime", "archive"):
+        if not tree.is_dir(name) or tree.is_symlink(name):
+            raise ValueError("工位目录缺失或不安全，请检查后执行 repair：%s" % name)
     artifacts, _ = expected_artifacts(install_root, workspace, project, agents, manifests)
     if init.get("product_ref") != product_ref(install_root):
         raise ValueError("产品根目录版本已变化，请执行 agenticops repair")
@@ -521,7 +488,7 @@ def main():
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--agent", action="append")
     parser.add_argument("--project")
-    parser.add_argument("--repository-pool")
+    parser.add_argument("--reuse-materials", action="store_true")
     parser.add_argument("--accept-checkpoint-migration", action="store_true")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--refresh", action="store_true")
@@ -536,8 +503,7 @@ def main():
     try:
         with WorkspaceDirectory(workspace) as tree:
             config, legacy = load_workspace(workspace, tree)
-            legacy_workspace_schema = bool(config and config.get("schema_version") == 1)
-            config = migrate_workspace_document(install_root, workspace, config)
+            config = require_current_workspace_document(config)
             init = load_init(workspace, tree)
             if arguments.refresh or arguments.check:
                 if config is None:
@@ -555,8 +521,6 @@ def main():
             if arguments.check:
                 _, all_manifests = select(install_root, None)
                 check_checkpoint_migration(owned_artifacts(init, legacy), all_manifests, False, tree)
-                if legacy_workspace_schema:
-                    parser.error("工作空间配置需要迁移 Source Pool 绑定，请执行 agenticops repair")
                 checked_project, checked_agents = check_workspace(
                     install_root, workspace, config, init, tree
                 )
@@ -571,6 +535,19 @@ def main():
                 )
                 return 0
 
+            for name in ("config", "source", "runtime", "archive"):
+                if tree.exists(name):
+                    if not tree.is_dir(name) or tree.is_symlink(name):
+                        raise ValueError("工位目录已有未知内容或不安全路径，拒绝覆盖：%s" % name)
+                    if config is None and any(tree.path(name).iterdir()):
+                        if name == "runtime" or not arguments.reuse_materials:
+                            raise ValueError("已有材料不能自动采用；runtime 必须为空，其它目录需明确 --reuse-materials：%s" % name)
+            if config is None:
+                if tree.exists(STATE_DIRECTORY):
+                    if not tree.is_dir(STATE_DIRECTORY) or tree.is_symlink(STATE_DIRECTORY):
+                        raise ValueError("未绑定的状态目录不安全，拒绝生成")
+                    if any(tree.path(STATE_DIRECTORY).iterdir()):
+                        raise ValueError("发现未绑定的旧状态或未知材料，请使用原版本受控解绑并重建")
             if config is not None:
                 validate_workspace_document(install_root, config)
             agents, manifests = select(install_root, requested_agents)
@@ -604,7 +581,6 @@ def main():
                 project,
                 agents,
                 config,
-                arguments.repository_pool,
             )
 
             for target, artifact in artifacts.items():
@@ -624,6 +600,10 @@ def main():
                     tree.chmod(target, 0o700)
             tree.write_json_atomic(Path(STATE_DIRECTORY) / WORKSPACE_NAME, workspace_config)
             tree.write_json_atomic(Path(STATE_DIRECTORY) / INIT_NAME, document)
+            for name in ("config", "source", "runtime", "archive"):
+                tree.path(name).mkdir(mode=0o700, exist_ok=True)
+            from workflow import task_store
+            task_store.initialize_current(workspace)
             if tree.is_file(LEGACY_BINDING_NAME):
                 tree.unlink(LEGACY_BINDING_NAME)
     except ValueError as error:

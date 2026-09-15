@@ -26,20 +26,99 @@ def digest(value):
                                     separators=(",", ":")).encode()).hexdigest()
 
 
-def config(base):
+def config(base, task=None):
     root = project_rules.product_root_from_workspace(base)
     project = project_rules.project_from_workspace(base)
-    path = project_rules.project_root(root, project) / "quality.json"
+    project_dir = project_rules.project_root(root, project)
+    profile = None
+    if task is not None:
+        spec = project_rules.load_admission(workspace=base)
+        cls = project_rules.class_spec(spec, task["task_class"])
+        profile = cls.get("quality_profile")
+        if "quality_profile" in cls and profile is None:
+            raise ValueError("quality_profile 不能声明为空")
+    if profile is not None and (not isinstance(profile, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*\.json", profile)):
+        raise ValueError("quality_profile 必须是当前 Project 内的 lowercase-kebab-case JSON 文件名")
+    path = project_dir / (profile or "quality.json")
+    if path.resolve().parent != project_dir.resolve():
+        raise ValueError("质量配置不能指向当前 Project 之外")
     if not path.exists():
+        if profile is not None:
+            raise ValueError("任务声明的质量配置缺失：%s" % profile)
         return None
-    result = json.loads(path.read_text(encoding="utf-8"))
-    if result.get("schema_version") != 1:
-        raise ValueError("不支持的质量配置版本")
-    ids = [c["id"] for c in result["checkpoints"]]
-    if not ids or len(ids) != len(set(ids)) or result["selection_checkpoint"] not in ids:
-        raise ValueError("质量检查点配置无效")
-    result["jira"]["site"] = project_rules.load_profile(workspace=base)["jira"]["site"]
+    try:
+        result = json.loads(path.read_text(encoding="utf-8"))
+        if result.get("schema_version") != 1:
+            raise ValueError("不支持的质量配置版本")
+        ids = [c["id"] for c in result["checkpoints"]]
+        if not ids or len(ids) != len(set(ids)) or result["selection_checkpoint"] not in ids:
+            raise ValueError("质量检查点配置无效")
+        from workflow import verification
+        requirements = result.get("verification_checkpoints", {})
+        if not isinstance(requirements, dict) or not set(requirements) <= set(ids):
+            raise ValueError("验证检查点配置无效")
+        for kinds in list(requirements.values()) + [result.get("pr_ready", {}).get("required_verification", [])]:
+            if not isinstance(kinds, list) or any(not isinstance(k, str) or k not in verification.KINDS for k in kinds):
+                raise ValueError("验证材料种类配置无效")
+        if profile is not None:
+            validate_task_profile(result, task)
+            required = {f["key"] for f in cls.get("required_facts", [])}
+            if not required.issubset(result["intake_fact_keys"]):
+                raise ValueError("接管确认必须绑定准入要求的全部事实")
+            known = project_rules.known_fact_keys(spec, task["task_class"])
+            if any(k not in known for k in result["plan_fact_keys"]):
+                raise ValueError("方案事实必须先在 Project 准入配置中声明")
+        result["jira"]["site"] = project_rules.load_profile(workspace=base)["jira"]["site"]
+    except (OSError, KeyError, TypeError, AttributeError) as error:
+        raise ValueError("质量配置无法读取或结构无效：%s" % path.name) from error
     return result
+
+
+def validate_task_profile(rules, task):
+    """显式任务配置使用现有检查点合同；不引入表达式或任务编排。"""
+    classes = rules.get("task_classes")
+    if not isinstance(classes, list) or task["task_class"] not in classes:
+        raise ValueError("任务质量配置未启用当前任务类型")
+    points = {p["id"]: p for p in rules["checkpoints"]}
+    selected = rules["selection_checkpoint"]
+    before = rules.get("stage_checkpoints", {}).get("implementation", [])
+    if ("q1-intake" not in points or selected == "q1-intake"
+            or not {"q1-intake", selected}.issubset(before)):
+        raise ValueError("任务质量配置必须在实施前检查接管与方案确认")
+    for key in ("q1-intake", selected):
+        if points[key].get("confirmation", "user") != "user":
+            raise ValueError("接管与方案检查必须保留人工决定")
+    for keys in rules.get("stage_checkpoints", {}).values():
+        if not isinstance(keys, list) or any(k not in points for k in keys):
+            raise ValueError("阶段引用了无效质量检查点")
+    for stage in ("pr_review", "ci_validation", "completed"):
+        if not rules.get("stage_checkpoints", {}).get(stage):
+            raise ValueError("任务质量配置缺少 %s 的必要检查" % stage)
+    for name in ("intake_fact_keys", "plan_fact_keys"):
+        keys = rules.get(name)
+        if not isinstance(keys, list) or not keys or any(not isinstance(k, str) or not k for k in keys):
+            raise ValueError("任务质量配置缺少有效的 %s" % name)
+    contract = rules.get("plan_contract")
+    if contract is not None or not rules.get("structured_fix_plan"):
+        if (not isinstance(contract, dict) or set(contract) != {"fact_key", "required_fields"}
+                or contract.get("fact_key") not in rules["plan_fact_keys"]
+                or not isinstance(contract.get("required_fields"), list) or not contract["required_fields"]
+                or any(not isinstance(k, str) or not k for k in contract["required_fields"])):
+            raise ValueError("任务质量配置必须声明有效 plan_contract")
+
+
+def plan_problems(model, rules, ctx):
+    contract = rules.get("plan_contract")
+    problems = structured_plan_problems(model, rules, ctx)
+    if contract is not None:
+        plan = ctx["facts"].get(contract["fact_key"])
+        if not isinstance(plan, dict):
+            return problems + ["方案事实 %s 必须是 JSON 对象" % contract["fact_key"]]
+        for key in contract["required_fields"]:
+            value = plan.get(key)
+            if not isinstance(value, (str, list, dict)) or not value or (isinstance(value, str) and not value.strip()):
+                problems.append("方案 %s.%s 缺失或为空" % (contract["fact_key"], key))
+    return problems
 
 
 def enabled(task, rules):
@@ -94,9 +173,10 @@ def git_revision(path):
 
 
 def context(base, task):
-    from workflow import ci
+    from workflow import ci, failures
     ci_states = ci.current_states(base, task)
     repos = {}
+    cleanup_artifacts = {}
     for repo in task.get("repositories", []):
         entry = {k: repo.get(k) for k in ("repository", "base_branch", "work_branch", "base_sha",
                   "catalog_digest", "approved_scope", "verification_method")}
@@ -106,9 +186,12 @@ def context(base, task):
             entry["live_revision"] = git_revision(wt["path"])
         elif wt.get("status") == "removed" and wt.get("final_revision"):
             entry["live_revision"] = wt["final_revision"]
+            cleanup_artifacts.update(wt.get("verified_artifacts", {}))
         repos[repo["repository"]] = entry
         entry["ci_digest"] = digest([s for s in ci_states if s["repository"] == repo["repository"]])
     return {"issue_key": task["issue_key"], "run_id": task["run_id"], "facts": task.get("facts", {}),
+            "failures": failures.load(base, task)[1],
+            "cleanup_artifacts": cleanup_artifacts,
             "repositories": repos,
             "missing_facts": [f["key"] for f in project_rules.missing_required(
                 project_rules.load_admission(workspace=base), task["task_class"], task.get("facts", {}))]}
@@ -173,7 +256,8 @@ def automatic_checkpoint_problems(model, checkpoint, rules, ctx):
     after_fix = {key: view for key, view in views.items() if view["plan"]["timing"] == "after_fix"}
     if not after_fix:
         return ["首轮验证没有已定义的修复后检查项，不能自动推进"]
-    problems = []
+    from workflow import verification
+    problems = verification.problems(model, ctx, rules.get("verification_checkpoints", {}).get(checkpoint, []))
     for key, view in after_fix.items():
         plan = view["plan"]
         if not view["selected"]:
@@ -282,14 +366,16 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
             problems.append("%s 用户要求补测/返工" % key)
     if index >= ids.index(rules["selection_checkpoint"]):
         problems += ["%s 方案待用户选择" % k for k, v in views.items() if not v["selected"]]
-        problems += ["修复方案事实 %s 尚未记录；请说明根因、范围、修复方式和风险" % k
+        problems += ["方案事实 %s 尚未记录；请补齐项目要求的方案内容" % k
                      for k in rules.get("plan_fact_keys", []) if not ctx["facts"].get(k)]
         if checkpoint == rules["selection_checkpoint"]:
-            problems += structured_plan_problems(model, rules, ctx)
+            problems += plan_problems(model, rules, ctx)
     snapshot = {"checkpoint": checkpoint, "items": views, "due": list(due),
                 "not_due": [k for k in views if k not in due], "context": ctx, "rules": rules}
     if rules.get("contract_revision", 1) >= 2:
         scoped = copy.deepcopy(ctx)
+        scoped.pop("failures", None)
+        scoped.pop("cleanup_artifacts", None)
         fact_keys = rules["intake_fact_keys"] + (rules.get("plan_fact_keys", []) if index else [])
         scoped["facts"] = {k: v for k, v in ctx["facts"].items() if k in fact_keys}
         for repo in scoped["repositories"].values():
@@ -303,6 +389,13 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
         snapshot.update(context=scoped, items=dict(future, **due))
         if index == 0:
             snapshot["not_due"] = []
+    from workflow import verification
+    requirements = rules.get("verification_checkpoints", {}).get(checkpoint, [])
+    problems.extend(verification.problems(model, ctx, requirements))
+    if requirements:
+        snapshot["verification"] = {repo: {kind: entries.get(kind) for kind in requirements}
+                                    for repo, entries in model.get("verification", {}).items()}
+        snapshot["failures"] = ctx.get("failures", {})
     record = model["checkpoints"].get(checkpoint)
     configured_automatic = rules["checkpoints"][index].get("confirmation") == "automatic"
     result = {"digest": digest(snapshot), "due": list(due), "not_due": snapshot["not_due"],
@@ -337,7 +430,9 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
 
 
 def checkpoint_digest(base, task, checkpoint, required_outcome=None):
-    rules = config(base)
+    rules = config(base, task)
+    if not enabled(task, rules):
+        raise ValueError("当前任务类型未配置可用的质量确认，不能签发或复用方案授权")
     value = report(load(base, task), rules, context(base, task))
     view = value["checkpoints"].get(checkpoint)
     outcome = checkpoint_outcome(view or {})
@@ -352,7 +447,10 @@ def q1_digest(base, task):
 
 
 def q2_digest(base, task):
-    return checkpoint_digest(base, task, config(base)["selection_checkpoint"], required_outcome="accept")
+    rules = config(base, task)
+    if not enabled(task, rules):
+        raise ValueError("当前任务类型未配置可用的方案检查")
+    return checkpoint_digest(base, task, rules["selection_checkpoint"], required_outcome="accept")
 
 
 def check_proof(proof):
@@ -384,7 +482,10 @@ def check_decision(decision):
 def reduce(model, command, rules, ctx):
     """确定性归约；重放时使用当时规则和上下文，不重新解释旧决定。"""
     action, p = command["action"], command["payload"]
-    if action == "item":
+    if action == "verification":
+        from workflow import verification
+        verification.record(model, p, ctx)
+    elif action == "item":
         plan = p["plan"]
         points = {c["id"]: c for c in rules["checkpoints"]}
         if plan["checkpoint"] not in points or plan["timing"] != points[plan["checkpoint"]]["timing"]:
@@ -510,6 +611,7 @@ def report(state, rules, ctx):
             "items": {k: item_view(v, rules, ctx) for k, v in model["items"].items()},
             "checkpoints": checkpoints,
             "publications": publications,
+            "verification": model.get("verification", {}),
             "boundary": "处置完成不等于测试全通过；本地确认来源由调用者提交，不能认证操作者身份。Jira 状态需外部回读。"}
 
 
@@ -517,37 +619,46 @@ def apply(base, issue, run_id, revision, command):
     quality_contract.validate(command, "quality-action.schema.json")
     with task_store.task_run_lock(base, issue):
         task_store.resolve_issue(base, issue)
-        task = json.loads(task_store.task_path(base, issue).read_text(encoding="utf-8"))
-        archived = task["run_id"] != run_id
-        recovery = command["action"] in ("receipt", "readback")
-        if task_store.task_status(base, issue) != "active" and command["action"] not in (
-                "draft", "confirm", "prepare_write", "receipt", "readback"):
-            raise ValueError("非 active 任务只允许证据回写及回读")
-        if archived and recovery:
-            task = dict(task, run_id=run_id)
-            if not state_path(base, task).exists():
-                raise ValueError("旧 run 无可恢复记录")
+        task = task_store.read_task(base, issue)
+        task_store.require_development(base, task)
         if task["run_id"] != run_id:
             raise ValueError("任务 run 已变化，拒绝旧请求")
-        rules = config(base)
+        rules = config(base, task)
         if not enabled(task, rules):
             raise ValueError("当前任务类型未启用质量检查")
         state = load(base, task)
         if type(revision) is not int or state["revision"] != revision:
             raise ValueError("质量 revision 已变化，先刷新再提交")
-        if archived:
-            rules = state["events"][-1]["rules"]
-            ctx = state["events"][-1]["context"]
-        else:
-            ctx = context(base, task)
+        ctx = context(base, task)
+        if command["action"] == "verification" and command["payload"].get("kind") == "source_sync":
+            from workflow import source_sync
+            command = copy.deepcopy(command)
+            p = command["payload"]
+            repository = next((r for r in task["repositories"] if r["repository"] == p.get("repository")), None)
+            if not repository or (repository.get("worktree") or {}).get("status") != "prepared":
+                raise ValueError("来源同步必须核对当前任务已准备的工作树")
+            p["sync"] = source_sync.impact(repository["worktree"]["path"], repository["work_branch"],
+                                           repository["base_sha"], p.get("source_revision", ""),
+                                           p.get("before_merge_revision", ""))
         if command["action"] == "prepare_write":
             from workflow.quality_write import check_unresolved_runs
             check_unresolved_runs(base, task, replay(state)["publications"][command["payload"]["id"]]["body"])
         model = replay(state)
         reduce(model, command, rules, ctx)
+        if command["action"] == "verification":
+            from workflow import verification
+            verification.verify_artifacts(command["payload"])
         event = {"at": datetime.now(timezone.utc).isoformat(), "command": copy.deepcopy(command),
                  "rules": rules, "context": ctx}
-        text = json.dumps(event, ensure_ascii=False)
+        scanned = copy.deepcopy(event)
+        if command["action"] == "verification":
+            # 已核验的本地 Jar 路径是私有恢复元数据，不进入 Jira 摘要。
+            # 仅豁免这两个路径字段，其它用户材料继续按项目规则扫描。
+            for jar in scanned["command"]["payload"].get("jars", []):
+                for key in ("built_path", "consumed_path"):
+                    if key in jar:
+                        jar[key] = "<local-artifact>"
+        text = json.dumps(scanned, ensure_ascii=False)
         if project_rules.scan_sensitive(project_rules.load_admission(workspace=base), text):
             raise ValueError("质量输入含敏感内容，请脱敏后重新提交；未保存正文")
         state["events"].append(event)
@@ -575,7 +686,7 @@ def apply(base, issue, run_id, revision, command):
 
 
 def advance_problems(base, task, target):
-    rules = config(base)
+    rules = config(base, task)
     if not rules and project_rules.class_spec(project_rules.load_admission(workspace=base), task["task_class"]).get("quality_mode") == "recorded_decision":
         raise ValueError("质量模式已启用但 quality.json 缺失，不能降级为无检查")
     if not enabled(task, rules):
@@ -619,8 +730,8 @@ def main():
             result = apply(args.dir, issue, args.expected_run_id, args.expected_revision,
                            json.loads(Path(args.input).read_text(encoding="utf-8")))
         else:
-            task = json.loads(task_store.task_path(args.dir, issue).read_text(encoding="utf-8"))
-            rules = config(args.dir)
+            task = task_store.read_task(args.dir, issue)
+            rules = config(args.dir, task)
             if not enabled(task, rules):
                 raise ValueError("当前任务未启用质量检查")
             result = report(load(args.dir, task), rules, context(args.dir, task))

@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "contract_revision": 3,
+  "commit_evidence_checkpoint": "q4-acceptance",
+  "intake_fact_keys": [
+    "acceptance_criteria",
+    "target_repo",
+    "verification_method"
+  ],
+  "plan_fact_keys": [
+    "implementation_plan",
+    "scope_boundary"
+  ],
+  "structured_fix_plan": false,
+  "publication_mode": "deferred-summary",
+  "comment_format": "human-text-v1",
+  "task_classes": [
+    "feature_change"
+  ],
+  "checkpoints": [
+    {
+      "id": "q1-intake",
+      "title": "接管与 Jira 事实盘点",
+      "timing": "before_fix"
+    },
+    {
+      "id": "q2-plan",
+      "title": "功能实施与验收方案确认",
+      "timing": "before_fix"
+    },
+    {
+      "id": "q3-draft",
+      "title": "首轮验证与 Draft PR",
+      "timing": "after_fix",
+      "confirmation": "automatic"
+    },
+    {
+      "id": "q4-acceptance",
+      "title": "功能验收",
+      "timing": "after_fix"
+    },
+    {
+      "id": "q5-review",
+      "title": "审查及 CI 事实",
+      "timing": "after_fix"
+    },
+    {
+      "id": "q6-delivery",
+      "title": "交付证据核对",
+      "timing": "after_fix"
+    }
+  ],
+  "stage_checkpoints": {
+    "implementation": [
+      "q1-intake",
+      "q2-plan"
+    ],
+    "pr_review": [
+      "q3-draft"
+    ],
+    "ci_validation": [
+      "q4-acceptance"
+    ],
+    "completed": [
+      "q5-review",
+      "q6-delivery"
+    ]
+  },
+  "selection_checkpoint": "q2-plan",
+  "methods": {
+    "taptest": {
+      "origins": [
+        "taptest"
+      ],
+      "guidance": "t-layer3-test 的 write-xray-test 生成 Xray 用例，write-test-script 实现脚本；调用者核对技能可用性，以实际 Test Execution 和报告关联单用例。"
+    },
+    "integration": {
+      "origins": [
+        "local_maven",
+        "ci"
+      ],
+      "guidance": "用例与产品模块同工程；先核对代码、POM、Failsafe、路径过滤和实际报告。已有覆盖由 CI 触发，新用例在所属工程开发。Maven 本地与 CI 是执行来源。"
+    },
+    "unit": {
+      "origins": [
+        "local_maven",
+        "ci"
+      ],
+      "guidance": "Unit 用例由用户与 Agent 在代码工程实现或复用；核对单元测试及 CI 集成测试的实际报告，并把最终验收绑定到完整提交 SHA。"
+    },
+    "manual": {
+      "origins": [
+        "manual"
+      ],
+      "guidance": "关联真实手工用例、执行人、环境、步骤/预期、观察结果及附件；不把无法自动化等同免测。"
+    },
+    "other": {
+      "origins": [
+        "external"
+      ],
+      "guidance": "用户明确批准的其它验证方式，单项单用例，记录方法细节及可回查证据。"
+    }
+  },
+  "knowledge": [
+    {
+      "name": "公司知识库",
+      "url": "https://github.com/tapstate/wiki",
+      "git": "git@github.com:tapstate/wiki.git"
+    },
+    {
+      "name": "集成测试规范索引",
+      "url": "https://github.com/tapstate/wiki/tree/main/06_研发流程/集成测试用例规范",
+      "note": "07_集成测试可作实现线索，执行事实以目标分支代码/POM/报告为准。"
+    }
+  ],
+  "jira": {
+    "automatic_transition_attempts": ["takeover", "tests_passed"],
+    "manual_transitions": [
+      "pull_request_submitted",
+      "merged",
+      "done"
+    ],
+    "note": "Story 按 profile.json 的 status_sync.by_task_class.feature_change 执行 takeover/tests_passed：Agent 使用 jira_status prepare，原生转换后回读并 complete；缺项交研发处理。PR 提审、合并及完成保持人工处理，不借用缺陷转换 ID。"
+  },
+  "tests_passed": {
+    "linked_test_task": {
+      "relations": [
+        "is tested by"
+      ],
+      "issue_types": [
+        "Test"
+      ]
+    },
+    "test_types": {
+      "Manual": {
+        "method": "manual",
+        "guidance": "由用户启动所需本地或测试环境，执行 Jira Test 步骤并提供执行人、环境、实际结果及可回查证据。"
+      },
+      "TapTest": {
+        "method": "taptest",
+        "guidance": "由 t-layer3-test 管理自动化实现和执行；导入对应 Test Execution 或测试报告。"
+      },
+      "Unit": {
+        "method": "unit",
+        "guidance": "由用户与 Agent 核对单元测试和 CI 集成测试；导入绑定完整提交 SHA 的实际报告。"
+      }
+    },
+    "ignored_test_types": {
+      "TapCE": "TapCE 当前不纳管，不计入通过也不自动视为通过；若因此无法满足验收或 Jira Validator，请用户调整 Jira 或验收方案后重新读取。"
+    }
+  },
+  "pr_ready": {
+    "required_checkpoints": [
+      "q1-intake",
+      "q2-plan",
+      "q3-draft",
+      "q4-acceptance"
+    ],
+    "accepted_outcomes": [
+      "accept",
+      "not_applicable",
+      "observed"
+    ],
+    "require_linked_test_tasks": false,
+    "require_user_confirmation_per_linked_test": true,
+    "require_all_pr_checks_success": true,
+    "required_verification": [
+      "local",
+      "source_sync",
+      "ci"
+    ]
+  },
+  "draft_pr": "在已授权范围内，先合并各仓最新检出来源分支并重验受影响内容，再推送或创建 PR；不将提交前报告改写为新 Head 的执行事实。",
+  "standards": [
+    "TapData-研发与发布流程规范-v1.4（2026-09-02）",
+    "TapData-T3工单处理流程规范-v1.5（2026-09-02）"
+  ],
+  "plan_contract": {
+    "fact_key": "implementation_plan",
+    "required_fields": [
+      "objective",
+      "changes",
+      "acceptance",
+      "risks",
+      "rollback"
+    ]
+  },
+  "verification_checkpoints": {
+    "q3-draft": [
+      "local",
+      "source_sync"
+    ],
+    "q4-acceptance": [
+      "local",
+      "source_sync"
+    ],
+    "q5-review": [
+      "local",
+      "source_sync",
+      "ci",
+      "review"
+    ],
+    "q6-delivery": [
+      "local",
+      "source_sync",
+      "ci",
+      "review"
+    ]
+  }
+}

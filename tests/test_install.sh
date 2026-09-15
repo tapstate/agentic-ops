@@ -32,7 +32,6 @@ source_repo="$test_root/source"
 install_root="$test_root/install"
 maintainer_root="$test_root/maintainer"
 workspace="$test_root/project-workspace"
-shared_repository_pool="$test_root/shared-repository-pool"
 
 mkdir -p "$source_repo"
 git -C "$source_repo" init -q -b "$install_branch"
@@ -90,7 +89,6 @@ test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$m
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field tracking_branch)" = develop
 test "$(python3 "$maintainer_root/bootstrap/product_version.py" --product-root "$maintainer_root")" = \
   "develop-untagged-1-$(git -C "$maintainer_root" rev-parse --short=8 HEAD)"
-test "$(python3 "$maintainer_root/bootstrap/repository_pool.py" --product-root "$maintainer_root" read --field provisioning)" = "auto-clone"
 test -x "$(git -C "$maintainer_root" config --get core.hooksPath)/pre-commit"
 test -f "$maintainer_root/.local/maintenance-skill-wiring.json"
 for agent_skill_root in .agents/skills .claude/skills; do
@@ -214,8 +212,7 @@ git -C "$maintainer_root" checkout -q -- agenticops
 git -C "$source_repo" switch -q "$install_branch"
 
 bash "$repo_root/bootstrap/install.sh" \
-  --install-home "$install_root" --repository "$source_repo" --branch "$install_branch" \
-  --repository-pool "$shared_repository_pool"
+  --install-home "$install_root" --repository "$source_repo" --branch "$install_branch"
 
 test -f "$install_root/contracts/gate-request.schema.json"
 test -f "$install_root/gate/runner.py"
@@ -231,10 +228,7 @@ test ! -e "$install_root/.agents/skills/ao-test-takeover"
 test ! -e "$install_root/.claude/skills/ao-test-takeover"
 test ! -e "$install_root/internal"
 test -f "$install_root/.local/product.json"
-test -f "$install_root/.local/repository-pool.json"
-test "$(python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" read --field root)" = \
-  "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$shared_repository_pool")"
-test "$(python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" read --field provisioning)" = "auto-clone"
+test ! -e "$install_root/.local/repository-pool.json"
 test "$(python3 "$install_root/bootstrap/product_state.py" --product-root "$install_root" read --field tracking_branch)" = "$install_branch"
 test "$(python3 "$install_root/bootstrap/product_version.py" --product-root "$install_root")" = \
   "$install_branch-untagged-1-$(git -C "$install_root" rev-parse --short=8 HEAD)"
@@ -428,12 +422,12 @@ grep -F 'python3 '"$install_root_physical"'/workflow/task.py status --issue-key 
 grep -F 'python3 '"$install_root_physical"'/workflow/task.py repository context --issue-key <JIRA-KEY>' "$workspace/AGENTS.md" >/dev/null
 grep -F '必须先读取当前项目 `.agents/skills/`' "$workspace/AGENTS.md" >/dev/null
 grep -F 'memory 只能作为历史线索' "$workspace/AGENTS.md" >/dev/null
-grep -F '接管、继续或 reset 成功只是流程恢复点' "$workspace/AGENTS.md" >/dev/null
+grep -F '接管或继续成功只是流程恢复点' "$workspace/AGENTS.md" >/dev/null
 grep -F '远程候选参考' "$workspace/AGENTS.md" >/dev/null
 grep -F 'Workflow 在本地状态变更处执行流程门禁' "$workspace/AGENTS.md" >/dev/null
 grep -F '生成 Q2 方案时应用返回的 `planning_guidance`' "$workspace/AGENTS.md" >/dev/null
-grep -F '登记完成后立即执行受控 `task.py repository prepare`' \
-  "$install_root/projects/tapdata/skills/tapdata-task/SKILL.md" >/dev/null
+grep -F '完整工程基线' "$workspace/AGENTS.md" >/dev/null
+grep -F 'current-task.json' "$workspace/AGENTS.md" >/dev/null
 if "$workspace/agenticops" --help | grep -F 'agenticops task' >/dev/null; then
   printf '统一入口错误暴露了任务 Runtime\n' >&2
   exit 1
@@ -511,20 +505,21 @@ assert task_workflow == [{
     },
 }]
 PY
-python3 - "$workspace/.agenticops/workspace.json" "$workspace/.agenticops/init.json" "$install_root" "$shared_repository_pool" <<'PY'
+python3 - "$workspace/.agenticops/workspace.json" "$workspace/.agenticops/init.json" "$install_root" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 binding = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 initialization = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-assert binding["schema_version"] == 2
+assert binding["schema_version"] == 3
 assert binding["product_root"] == str(Path(sys.argv[3]).resolve())
 assert len(binding["workspace_id"]) == 32
 assert binding["project"] == "tapdata"
 assert binding["agents"] == ["claude", "codex", "test-agent"]
-assert binding["repository_pool"]["source"] == "product-default"
-assert binding["repository_pool"]["root"] == str(Path(sys.argv[4]).resolve())
+assert "repository_pool" not in binding
+assert not (Path(sys.argv[1]).parent / "tasks").exists()
+assert (Path(sys.argv[1]).parent / "current-task.json").is_file()
 assert initialization["schema_version"] == 2
 artifacts = {item["path"]: item for item in initialization["artifacts"]}
 assert {"AGENTS.md", "agenticops", ".mcp.json", "CLAUDE.md", ".test-agent/settings.json", ".agents/skills/tapdata-task", ".claude/skills/tapdata-task"} <= set(artifacts)
@@ -638,41 +633,6 @@ if "$install_root/agenticops" init --workspace "$test_root/unknown-workspace" --
   printf '未知 Agent 被错误接受\n' >&2
   exit 1
 fi
-override_workspace="$test_root/override-workspace"
-override_pool="$test_root/override-pool"
-"$install_root/agenticops" init --workspace "$override_workspace" --agent codex \
-  --repository-pool "$override_pool" >/dev/null
-python3 - "$override_workspace/.agenticops/workspace.json" "$override_pool" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-binding = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-assert binding["repository_pool"]["root"] == str(Path(sys.argv[2]).resolve())
-assert binding["repository_pool"]["source"] == "workspace-override"
-PY
-rmdir "$override_pool"
-if "$install_root/agenticops" doctor --workspace "$override_workspace" >/dev/null 2>&1; then
-  printf 'Source Pool 缺失时 doctor 未失败关闭\n' >&2
-  exit 1
-fi
-frozen_workspace="$test_root/frozen-workspace"
-"$install_root/agenticops" init --workspace "$frozen_workspace" --agent codex >/dev/null
-new_default_pool="$test_root/new-default-pool"
-python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" \
-  configure --root "$new_default_pool" >/dev/null
-"$install_root/agenticops" repair --workspace "$frozen_workspace" >/dev/null
-python3 - "$frozen_workspace/.agenticops/workspace.json" "$shared_repository_pool" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-binding = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-assert binding["repository_pool"]["root"] == str(Path(sys.argv[2]).resolve())
-PY
-python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" \
-  configure --root "$shared_repository_pool" >/dev/null
-
 # 旧版托管 Codex Hook 必须显式迁移，普通 repair 不得静默撤除控制。
 legacy_codex_workspace="$test_root/legacy-codex-workspace"
 mkdir -p "$legacy_codex_workspace/.agenticops" "$legacy_codex_workspace/.codex"
@@ -689,7 +649,8 @@ digest = sys.argv[3]
 (workspace / ".agenticops" / "workspace.json").write_text(
     json.dumps(
         {
-            "schema_version": 1,
+            "schema_version": 3,
+            "workspace_id": "a" * 32,
             "product_root": str(install_root),
             "project": "tapdata",
             "agents": ["codex"],
@@ -705,6 +666,7 @@ digest = sys.argv[3]
         {
             "schema_version": 1,
             "product_ref": "legacy",
+            "workspace_state_epoch": json.loads((install_root / "contracts/workspace-state-compatibility.json").read_text())["workspace_state_epoch"],
             "artifacts": [
                 {
                     "path": ".codex/agenticops-hooks.example.json",
@@ -782,8 +744,6 @@ grep -F -- '--workspace WORKSPACE | --all' "$workspace_help" >/dev/null
 
 detached_workspace="$test_root/detached-workspace"
 "$install_root/agenticops" init --workspace "$detached_workspace" --agent codex >/dev/null
-python3 "$install_root/workflow/task.py" init \
-  --issue-key TAP-555 --task-class technical_task --dir "$detached_workspace" >/dev/null
 if "$install_root/agenticops" workspace detach --workspace "$detached_workspace" >/dev/null 2>&1; then
   printf '非交互 detach 被错误接受\n' >&2
   exit 1
@@ -793,7 +753,7 @@ test ! -e "$detached_workspace/.agenticops/workspace.json"
 test ! -e "$detached_workspace/.agenticops/init.json"
 test ! -e "$detached_workspace/agenticops"
 test ! -e "$detached_workspace/.agents"
-test -f "$detached_workspace/.agenticops/tasks/TAP-555/state.json"
+test ! -e "$detached_workspace/.agenticops"
 if "$install_root/agenticops" workspace list | grep -F -- "$detached_workspace" >/dev/null; then
   printf '解绑工作空间仍保留在提示索引\n' >&2
   exit 1
@@ -878,180 +838,8 @@ if "$install_root/agenticops" workspace purge \
 fi
 test -d "$event_directory_workspace/.agenticops/events.jsonl"
 
-purge_workspace="$test_root/purge-workspace"
-"$install_root/agenticops" init --workspace "$purge_workspace" --agent codex >/dev/null
-python3 "$install_root/workflow/task.py" init \
-  --issue-key TAP-556 --task-class technical_task --dir "$purge_workspace" >/dev/null
-python3 "$install_root/workflow/task.py" init \
-  --issue-key TAP-558 --task-class technical_task --dir "$purge_workspace" >/dev/null
-if "$install_root/agenticops" workspace purge --all --yes >/dev/null 2>&1; then
-  printf '批量 purge 被错误接受\n' >&2
-  exit 1
-fi
-# purge 从重新预检到最终删除必须只持有一次工作空间状态目录锁。已到达锁边界的并发
-# init 必须在 purge 事务内阻塞，释放后因 workspace binding 已删除而失败，不能重建状态。
-python3 - "$install_root" "$purge_workspace" <<'PY'
-import contextlib
-import multiprocessing
-import sys
-import time
-from pathlib import Path
-from types import SimpleNamespace
-
-install_root = Path(sys.argv[1])
-workspace = Path(sys.argv[2])
-marker = workspace.parent / "purge-init-lock-entered"
-sys.path.insert(0, str(install_root))
-
-from bootstrap import workspace_registry
-from workflow import repository_worktree, task as workflow_task, task_store
-
-
-def competing_init():
-    original_lock = task_store.task_run_lock
-
-    @contextlib.contextmanager
-    def marked_lock(base, issue_key):
-        marker.write_text("entered\n", encoding="utf-8")
-        with original_lock(base, issue_key):
-            yield
-
-    task_store.task_run_lock = marked_lock
-    arguments = SimpleNamespace(
-        issue_key="TAP-559", task_class="technical_task", dir=str(workspace), force=False
-    )
-    with open("/dev/null", "w", encoding="utf-8") as sink:
-        with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
-            result = workflow_task.cmd_init(arguments)
-            raise SystemExit(result)
-
-
-context = multiprocessing.get_context("fork")
-process = context.Process(target=competing_init)
-original_cleanup = repository_worktree._cleanup_task_locked
-cleanup_calls = []
-
-
-def cleanup_with_competitor(current, issue, *, delete_branches=False):
-    cleanup_calls.append(issue)
-    if not process.is_alive() and process.exitcode is None:
-        process.start()
-        deadline = time.monotonic() + 5
-        while not marker.exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        assert marker.exists(), "并发 init 未到达 task-state 锁边界"
-        time.sleep(0.1)
-        assert process.is_alive(), "并发 init 未被 workspace purge 的 task-state 锁阻塞"
-        assert not task_store.task_path(workspace, "TAP-559").exists()
-    return original_cleanup(current, issue, delete_branches=delete_branches)
-
-
-repository_worktree._cleanup_task_locked = cleanup_with_competitor
-try:
-    workspace_registry.detach(install_root, workspace, purge=True)
-finally:
-    repository_worktree._cleanup_task_locked = original_cleanup
-
-process.join(5)
-assert not process.is_alive(), "purge 完成后并发 init 未退出"
-assert process.exitcode == 2, "binding 删除后并发 init 未失败关闭：%s" % process.exitcode
-assert cleanup_calls == ["TAP-556", "TAP-558"], cleanup_calls
-assert not (workspace / ".agenticops").exists(), "并发 init 在 purge 后重建了任务状态"
-PY
-test ! -e "$purge_workspace/.agenticops"
-
-# registry 最终回读完成后若整个 .agenticops 被换成外部 symlink，递归删除必须通过
-# 已打开的 workspace/.agenticops FD 发现替换并停止，不能遍历外部 tasks。
-purge_race_workspace="$test_root/purge-race-workspace"
-purge_race_outside="$test_root/purge-race-outside"
-mkdir -p "$purge_race_outside/tasks"
-printf 'outside tasks sentinel\n' > "$purge_race_outside/tasks/sentinel"
-"$install_root/agenticops" init --workspace "$purge_race_workspace" --agent codex >/dev/null
-python3 "$install_root/workflow/task.py" init \
-  --issue-key TAP-560 --task-class technical_task --dir "$purge_race_workspace" >/dev/null
-python3 - "$install_root" "$purge_race_workspace" "$purge_race_outside" <<'PY'
-import sys
-from pathlib import Path
-
-install_root = Path(sys.argv[1])
-workspace = Path(sys.argv[2])
-outside = Path(sys.argv[3])
-sys.path.insert(0, str(install_root))
-
-from bootstrap import workspace_registry
-from workflow import task_store
-
-original_load_registry = task_store.load_registry
-calls = 0
-
-
-def replace_after_final_registry_check(base, create=False):
-    global calls
-    document = original_load_registry(base, create=create)
-    calls += 1
-    # 第一次是 purge 任务集合，第二次是 cleanup 的 issue 解析，第三次才是
-    # registry 锁内的最终回读；返回第三次结果后立即替换整个状态根。
-    if calls == 3:
-        state = workspace / ".agenticops"
-        state.rename(workspace / ".agenticops-held")
-        state.symlink_to(outside, target_is_directory=True)
-    return document
-
-
-task_store.load_registry = replace_after_final_registry_check
-try:
-    try:
-        workspace_registry.detach(install_root, workspace, purge=True)
-    except ValueError as error:
-        assert "父目录已被替换" in str(error)
-    else:
-        raise AssertionError(".agenticops 最终检查后被替换时 purge 未失败关闭")
-finally:
-    task_store.load_registry = original_load_registry
-
-assert calls == 3, calls
-assert (outside / "tasks" / "sentinel").read_text(encoding="utf-8") == \
-    "outside tasks sentinel\n"
-assert (workspace / ".agenticops-held" / "tasks" / "TAP-560" / "state.json").is_file()
-(workspace / ".agenticops").unlink()
-(workspace / ".agenticops-held").rename(workspace / ".agenticops")
-workspace_registry.detach(install_root, workspace, purge=True)
-assert not (workspace / ".agenticops").exists()
-PY
-
-task_purge_workspace="$test_root/task-purge-workspace"
-"$install_root/agenticops" init --workspace "$task_purge_workspace" --agent codex >/dev/null
-python3 "$install_root/workflow/task.py" init \
-  --issue-key TAP-557 --task-class technical_task --dir "$task_purge_workspace" >/dev/null
-task_purge_run="$(python3 - "$task_purge_workspace/.agenticops/tasks/TAP-557/state.json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-print(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["run_id"])
-PY
-)"
-python3 "$install_root/workflow/task.py" deactivate \
-  --issue-key TAP-557 --expected-run-id "$task_purge_run" --dir "$task_purge_workspace" >/dev/null
-if python3 "$install_root/workflow/task.py" purge --issue-key TAP-557 \
-  --expected-run-id "$task_purge_run" --dir "$task_purge_workspace" >/dev/null 2>&1; then
-  printf '任务 purge 缺少 --yes 时被错误接受\n' >&2
-  exit 1
-fi
-if python3 "$install_root/workflow/task.py" purge --issue-key TAP-557 \
-  --expected-run-id run-stale --yes --dir "$task_purge_workspace" >/dev/null 2>&1; then
-  printf '任务 purge 接受了过期 run_id\n' >&2
-  exit 1
-fi
-python3 "$install_root/workflow/task.py" purge --issue-key TAP-557 \
-  --expected-run-id "$task_purge_run" --yes --dir "$task_purge_workspace" >/dev/null
-test ! -e "$task_purge_workspace/.agenticops/tasks/TAP-557"
-if python3 "$install_root/workflow/task.py" list --dir "$task_purge_workspace" | \
-    grep -F 'TAP-557' >/dev/null; then
-  printf '已 purge 的任务仍存在于任务注册表\n' >&2
-  exit 1
-fi
-python3 "$install_root/workflow/task.py" --help | grep -F 'purge' >/dev/null
+# 新版空闲工位清理与重建、材料保留、并发和路径替换回归。
+python3 "$repo_root/tests/test_station_bootstrap.py" --product-root "$install_root"
 
 missing_workspace="$test_root/missing-workspace"
 "$install_root/agenticops" init --workspace "$missing_workspace" --agent codex >/dev/null
@@ -1096,43 +884,7 @@ if "$workspace/agenticops" start codex TAP-123 >/dev/null 2>&1; then
 fi
 test ! -e "$workspace/AGENTS.md.tmp"
 
-python3 "$install_root/workflow/task.py" init \
-  --issue-key TAP-123 --task-class defect_fix --dir "$workspace" >/dev/null
-python3 "$install_root/workflow/task.py" init \
-  --issue-key TAP-999 --task-class technical_task --dir "$workspace" >/dev/null
-test -f "$workspace/.agenticops/tasks/index.json"
-test -f "$workspace/.agenticops/tasks/TAP-123/state.json"
-test -f "$workspace/.agenticops/tasks/TAP-999/state.json"
-test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["workspace_state_epoch"])' "$workspace/.agenticops/init.json")" = 1
-python3 "$install_root/workflow/task.py" list --dir "$workspace" | grep -F 'TAP-123：active' >/dev/null
-python3 "$install_root/workflow/task.py" list --dir "$workspace" | grep -F 'TAP-999：active' >/dev/null
-python3 "$install_root/workflow/quality.py" status --issue-key TAP-123 --dir "$workspace" > "$test_root/quality-status.json"
-python3 - "$test_root/quality-status.json" <<'PY'
-import json
-import sys
-status = json.load(open(sys.argv[1], encoding="utf-8"))
-assert status["issue_key"] == "TAP-123"
-assert status["revision"] == 0
-assert "integration" in status["methods"]
-assert not status["checkpoints"]["q2-plan"]["reviewed"]
-PY
-task_index_digest="$(file_digest "$workspace/.agenticops/tasks/index.json")"
-task_123_digest="$(file_digest "$workspace/.agenticops/tasks/TAP-123/state.json")"
-task_999_digest="$(file_digest "$workspace/.agenticops/tasks/TAP-999/state.json")"
-
-legacy_workspace="$test_root/legacy-workspace"
-"$install_root/agenticops" init --workspace "$legacy_workspace" --agent codex >/dev/null
-mkdir -p "$legacy_workspace/.gate"
-printf '%s\n' \
-  '{"issue_key":"TAP-777","task_class":"technical_task","status":"active"}' \
-  > "$legacy_workspace/.gate/task.json"
-printf '%s\n' '{"scope":"legacy"}' > "$legacy_workspace/.gate/authorization.json"
-printf '%s\n' '{"event":"legacy"}' > "$legacy_workspace/.gate/events.jsonl"
-python3 "$install_root/workflow/task.py" list --dir "$legacy_workspace" | grep -F 'TAP-777：active' >/dev/null
-test -f "$legacy_workspace/.agenticops/tasks/TAP-777/state.json"
-test -f "$legacy_workspace/.agenticops/tasks/TAP-777/authorization.json"
-test -f "$legacy_workspace/.agenticops/tasks/TAP-777/events.jsonl"
-test ! -e "$legacy_workspace/.gate"
+task_index_digest="$(file_digest "$workspace/.agenticops/current-task.json")"
 
 printf 'next\n' > "$source_repo/NEXT"
 git -C "$source_repo" add NEXT
@@ -1147,18 +899,12 @@ if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; t
 fi
 "$workspace/agenticops" repair >/dev/null
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
-test -f "$workspace/.agenticops/tasks/TAP-123/state.json"
-test -f "$workspace/.agenticops/tasks/TAP-999/state.json"
-test "$(file_digest "$workspace/.agenticops/tasks/index.json")" = "$task_index_digest"
-test "$(file_digest "$workspace/.agenticops/tasks/TAP-123/state.json")" = "$task_123_digest"
-test "$(file_digest "$workspace/.agenticops/tasks/TAP-999/state.json")" = "$task_999_digest"
+test "$(file_digest "$workspace/.agenticops/current-task.json")" = "$task_index_digest"
 "$workspace/agenticops" rollback >/dev/null
 test ! -f "$install_root/NEXT"
 "$workspace/agenticops" repair >/dev/null
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
-test "$(file_digest "$workspace/.agenticops/tasks/index.json")" = "$task_index_digest"
-test "$(file_digest "$workspace/.agenticops/tasks/TAP-123/state.json")" = "$task_123_digest"
-test "$(file_digest "$workspace/.agenticops/tasks/TAP-999/state.json")" = "$task_999_digest"
+test "$(file_digest "$workspace/.agenticops/current-task.json")" = "$task_index_digest"
 
 python3 - "$source_repo/contracts/workspace-state-compatibility.json" <<'PY'
 import json
@@ -1167,8 +913,8 @@ from pathlib import Path
 
 path = Path(sys.argv[1])
 document = json.loads(path.read_text(encoding="utf-8"))
-document["workspace_state_epoch"] = 2
-document["supported_workspace_state_epochs"] = [2]
+document["workspace_state_epoch"] += 1
+document["supported_workspace_state_epochs"] = [document["workspace_state_epoch"]]
 path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
 git -C "$source_repo" add contracts/workspace-state-compatibility.json
@@ -1179,228 +925,8 @@ if "$workspace/agenticops" update > "$test_root/incompatible-update-output" 2>&1
   exit 1
 fi
 grep -F '目标版本包含不兼容的工作空间状态变更' "$test_root/incompatible-update-output" >/dev/null
-grep -F '任务 TAP-123（status=active' "$test_root/incompatible-update-output" >/dev/null
+grep -F '状态代际' "$test_root/incompatible-update-output" >/dev/null
 test "$(git -C "$install_root" rev-parse HEAD)" = "$installed_head_before_blocked_update"
-
-# 当前工作空间会话读取已校验任务上下文；purge 同步移除 worktree。
-python3 - "$install_root/projects/tapdata/repositories.json" "$source_repo" "$install_branch" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-document = json.loads(path.read_text(encoding="utf-8"))
-entry = document["repositories"]["tapdata/tapdata"]
-entry["origin"] = str(Path(sys.argv[2]).resolve())
-entry["baseline_branch"] = sys.argv[3]
-entry["dev_branch"] = sys.argv[3]
-path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-PY
-git -C "$install_root" add projects/tapdata/repositories.json
-git -C "$install_root" -c user.email=test@example.invalid -c user.name=Test \
-  commit -qm 'test: update source-pool fixture'
-pool_main="$shared_repository_pool/tapdata/tapdata"
-mkdir -p "$(dirname "$pool_main")"
-git clone -q "$source_repo" "$pool_main"
-python3 - "$workspace" TAP-123 "$install_root" <<'PY'
-import hashlib
-import json
-import subprocess
-import sys
-from pathlib import Path
-
-workspace = Path(sys.argv[1])
-issue_key = sys.argv[2]
-product_root = Path(sys.argv[3])
-task_path = workspace / ".agenticops" / "tasks" / issue_key / "state.json"
-task = json.loads(task_path.read_text(encoding="utf-8"))
-suffix = hashlib.sha256(task["run_id"].encode("utf-8")).hexdigest()[:24]
-state_path = task_path.parent / ("jira-watermark-%s.json" % suffix)
-version = subprocess.check_output(
-    [sys.executable, str(product_root / "bootstrap" / "product_version.py"), "--product-root", str(product_root)],
-    text=True,
-).strip()
-state_path.write_text(json.dumps({
-    "schema_version": 1, "issue_key": issue_key, "run_id": task["run_id"],
-    "watermark": {
-        "at": "2026-09-04T00:00:00+0000", "source_ref": "fixture:jira/" + issue_key,
-        "issue_key": issue_key, "field_id": "customfield_10421", "field_name": "AgenticOps Version",
-        "logical_key": "agenticops_version", "issue_type_id": "10011", "version": version,
-        "write_mode": "overwrite", "payload_digest": hashlib.sha256(
-            json.dumps({"field_id": "customfield_10421", "value": version}, ensure_ascii=False,
-                       sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
-        "outcome": "verified", "reason": "install_fixture_read_back",
-        "completed_at": "2026-09-04T00:00:00+0000", "readback_ref": "fixture:jira/" + issue_key,
-        "readback_value": version,
-    },
-}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-PY
-workspace_task_run="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["run_id"])' "$workspace/.agenticops/tasks/TAP-123/state.json")"
-python3 "$install_root/workflow/task.py" advance --issue-key TAP-123 --expected-run-id "$workspace_task_run" --expected-stage waiting_takeover \
-  --note '安装验收：已完成接管并进入准入阶段' --dir "$workspace" >/dev/null
-python3 "$install_root/workflow/task.py" repository add --issue-key TAP-123 --expected-run-id "$workspace_task_run" \
-  --repo tapdata/tapdata --work-branch feature/TAP-123-source-pool \
-  --base-branch "$install_branch" --scope 'Source Pool 启动接线' \
-  --verification 'bash tests/test_install.sh' --dir "$workspace" >/dev/null
-python3 "$install_root/workflow/task.py" repository prepare --issue-key TAP-123 --expected-run-id "$workspace_task_run" \
-  --dir "$workspace" >/dev/null
-task_root="$(python3 "$install_root/workflow/repository_worktree.py" roots \
-  --issue-key TAP-123 --dir "$workspace")"
-resolved_workspace="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$workspace")"
-case "$task_root" in
-  "$resolved_workspace"/.agenticops/worktrees/TAP-123/*/tapdata/tapdata) ;;
-  *) printf '任务 worktree 路径不符合工作空间布局：%s\n' "$task_root" >&2; exit 1 ;;
-esac
-PATH="$fake_bin:$PATH" \
-AGENTIC_OPS_EXPECTED_WORKSPACE="$expected_workspace" \
-AGENTIC_OPS_CAPTURE="$capture" \
-  "$workspace/agenticops" start codex -- --model workspace-after-prepare >/dev/null
-grep -Fx -- '--model workspace-after-prepare' "$capture" >/dev/null
-task_context="$test_root/task-context.json"
-python3 "$install_root/workflow/task.py" repository context --issue-key TAP-123 \
-  --json --dir "$workspace" > "$task_context"
-python3 - "$task_context" "$task_root" "$workspace" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-context = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-assert context["issue_key"] == "TAP-123"
-assert Path(context["workspace"]).resolve() == Path(sys.argv[3]).resolve()
-assert [item["worktree"] for item in context["repositories"]] == [sys.argv[2]]
-assert context["repositories"][0]["base_sha"]
-PY
-# 已准备部分仓库后仍可登记后续仓库；此时 workspace purge 只应校验并回收
-# 已准备的 worktree，不能把执行上下文“全仓已准备”的条件误用于清理预检。
-python3 "$install_root/workflow/task.py" repository add --issue-key TAP-123 --expected-run-id "$workspace_task_run" \
-  --repo tapdata/tapdata-enterprise --work-branch feature/TAP-123-enterprise \
-  --base-branch "$install_branch" --scope '企业模块后续改动' \
-  --verification 'bash tests/test_install.sh' --dir "$workspace" >/dev/null
-"$install_root/agenticops" workspace purge --workspace "$workspace" --yes >/dev/null
-test ! -e "$task_root"
-test ! -e "$workspace/.agenticops"
-
-# 安装产物必须能完成“初始化 -> 任务授权 -> 精确任务清理”闭环；auto-clone 同时验证
-# 受控 repository prepare 供给 Source Pool 并固化本地 Git 基线。
-auto_clone_pool="$test_root/auto-clone-pool"
-auto_clone_workspace="$test_root/auto-clone-workspace"
-python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" \
-  configure --root "$auto_clone_pool" >/dev/null
-test "$(python3 "$install_root/bootstrap/repository_pool.py" --product-root "$install_root" read --field provisioning)" = "auto-clone"
-"$install_root/agenticops" init --workspace "$auto_clone_workspace" --agent codex >/dev/null
-python3 "$install_root/workflow/task.py" init \
-  --issue-key TAP-124 --task-class technical_task --dir "$auto_clone_workspace" >/dev/null
-python3 - "$auto_clone_workspace" TAP-124 "$install_root" <<'PY'
-import hashlib
-import json
-import subprocess
-import sys
-from pathlib import Path
-
-workspace = Path(sys.argv[1])
-issue_key = sys.argv[2]
-product_root = Path(sys.argv[3])
-task_path = workspace / ".agenticops" / "tasks" / issue_key / "state.json"
-task = json.loads(task_path.read_text(encoding="utf-8"))
-suffix = hashlib.sha256(task["run_id"].encode("utf-8")).hexdigest()[:24]
-state_path = task_path.parent / ("jira-watermark-%s.json" % suffix)
-version = subprocess.check_output(
-    [sys.executable, str(product_root / "bootstrap" / "product_version.py"), "--product-root", str(product_root)],
-    text=True,
-).strip()
-state_path.write_text(json.dumps({
-    "schema_version": 1, "issue_key": issue_key, "run_id": task["run_id"],
-    "watermark": {
-        "at": "2026-09-04T00:00:00+0000", "source_ref": "fixture:jira/" + issue_key,
-        "issue_key": issue_key, "field_id": "customfield_10421", "field_name": "AgenticOps Version",
-        "logical_key": "agenticops_version", "issue_type_id": "10011", "version": version,
-        "write_mode": "overwrite", "payload_digest": hashlib.sha256(
-            json.dumps({"field_id": "customfield_10421", "value": version}, ensure_ascii=False,
-                       sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
-        "outcome": "verified", "reason": "install_fixture_read_back",
-        "completed_at": "2026-09-04T00:00:00+0000", "readback_ref": "fixture:jira/" + issue_key,
-        "readback_value": version,
-    },
-}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-PY
-auto_clone_run="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["run_id"])' "$auto_clone_workspace/.agenticops/tasks/TAP-124/state.json")"
-python3 "$install_root/workflow/task.py" advance --issue-key TAP-124 --expected-run-id "$auto_clone_run" --expected-stage waiting_takeover \
-  --note '安装验收：进入准入阶段后自动准备仓库' --dir "$auto_clone_workspace" >/dev/null
-python3 "$install_root/workflow/task.py" repository add --issue-key TAP-124 --expected-run-id "$auto_clone_run" \
-  --repo tapdata/tapdata --work-branch feature/TAP-124-auto-clone \
-  --base-branch "$install_branch" --scope 'auto-clone 受控准备' \
-  --verification 'bash tests/test_install.sh' --dir "$auto_clone_workspace" >/dev/null
-python3 "$install_root/workflow/task.py" repository prepare --issue-key TAP-124 --expected-run-id "$auto_clone_run" \
-  --dir "$auto_clone_workspace" >/dev/null
-test -d "$auto_clone_pool/tapdata/tapdata/.git"
-auto_clone_task_root="$(python3 "$install_root/workflow/repository_worktree.py" roots \
-  --issue-key TAP-124 --dir "$auto_clone_workspace")"
-python3 - "$auto_clone_workspace/.agenticops/tasks/TAP-124/state.json" "$source_repo" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-task = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-repository = task["repositories"][0]
-assert repository["base_sha"]
-assert repository["authorized_endpoint"] == str(Path(sys.argv[2]).resolve())
-assert repository["worktree"]["status"] == "prepared"
-assert Path(repository["worktree"]["path"]).is_dir()
-PY
-for fact in \
-  'acceptance_criteria=安装产物可以签发授权并精确回收任务状态' \
-  'target_repo=tapdata/tapdata' \
-  'verification_method=bash tests/test_install.sh' \
-  'risk_level=T3'; do
-  key="${fact%%=*}"
-  value="${fact#*=}"
-  python3 "$install_root/workflow/task.py" record --issue-key TAP-124 --expected-run-id "$auto_clone_run" \
-    --key "$key" --value "$value" --dir "$auto_clone_workspace" >/dev/null
-done
-python3 "$install_root/workflow/task.py" advance --issue-key TAP-124 --expected-run-id "$auto_clone_run" --expected-stage task_intake \
-  --note '安装验收：准入与受控基线已确认，进入设计评审' \
-  --dir "$auto_clone_workspace" >/dev/null
-python3 "$install_root/workflow/authorization.py" grant --issue-key TAP-124 --expected-run-id "$auto_clone_run" \
-  --agent-id install-acceptance --plan-version install-test-v1 \
-  --dir "$auto_clone_workspace" >/dev/null
-auto_clone_run="$(python3 - "$auto_clone_workspace/.agenticops/tasks/TAP-124/state.json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-print(json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["run_id"])
-PY
-)"
-python3 - "$auto_clone_workspace/.agenticops/tasks/TAP-124/state.json" \
-  "$auto_clone_workspace/.agenticops/tasks/TAP-124/authorization.json" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-task = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-authorization = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-assert task["stage"] == "design_review"
-assert authorization["scope"] == "task_execution"
-assert authorization["status"] == "active"
-assert authorization["issue_key"] == task["issue_key"] == "TAP-124"
-assert authorization["agentic_run_id"] == task["run_id"]
-assert authorization["agent_id"] == "install-acceptance"
-assert authorization["repositories"][0]["base_sha"] == task["repositories"][0]["base_sha"]
-PY
-python3 "$install_root/workflow/task.py" deactivate --issue-key TAP-124 --expected-run-id "$auto_clone_run" \
-  --dir "$auto_clone_workspace" >/dev/null
-python3 "$install_root/workflow/task.py" purge --issue-key TAP-124 \
-  --expected-run-id "$auto_clone_run" --yes --dir "$auto_clone_workspace" >/dev/null
-test ! -e "$auto_clone_task_root"
-test ! -e "$auto_clone_workspace/.agenticops/tasks/TAP-124"
-if python3 "$install_root/workflow/task.py" list --dir "$auto_clone_workspace" | \
-    grep -F 'TAP-124' >/dev/null; then
-  printf '任务 purge 后仍保留在任务注册表：TAP-124\n' >&2
-  exit 1
-fi
-test -d "$auto_clone_pool/tapdata/tapdata/.git"
-"$install_root/agenticops" workspace purge --workspace "$auto_clone_workspace" --yes >/dev/null
-test ! -e "$auto_clone_workspace/.agenticops"
 
 printf 'AgenticOps 安装边界验证通过：被测分支=%s，被测提交=%s，安装 fixture 分支=%s\n' \
   "${tested_branch:-detached HEAD}" "$tested_ref" "$install_branch"

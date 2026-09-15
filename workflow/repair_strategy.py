@@ -122,7 +122,7 @@ def can_change(base, task):
     if task.get("stage") == "design_review":
         try:
             from workflow import quality
-            rules = quality.config(base)
+            rules = quality.config(base, task)
             if quality.enabled(task, rules):
                 report = quality.report(quality.load(base, task), rules, quality.context(base, task))
                 checkpoint = rules["selection_checkpoint"]

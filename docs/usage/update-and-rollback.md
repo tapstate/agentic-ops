@@ -1,27 +1,28 @@
 # 更新与回退
 
-以下命令在安装目录的使用工作面执行，不需要进入业务工作空间：
+本页负责用户切换产品的顺序与失败边界。工位数据合同见[工位合同](../architecture/single-task-station.md)。不要把“更新成功”“工作空间生成成功”和“应用验收通过”混为一谈。
 
-```sh
-~/.agentic-ops/agenticops update
-~/.agentic-ops/agenticops rollback
-```
+## 第一阶段：同版本生成与清理
 
-`update` 仅 fast-forward 到安装时记录的分支；`rollback` 回到最近一次更新前的提交。安装目录有本地修改、HEAD 偏离安装记录或远端历史异常时，命令会停止，不会覆盖现场。
+先在同一个 Product Root 版本完成闭环：
 
-产品使用单调递增的 `workspace_state_epoch` 管理工作空间持久化兼容性。`update` 和 `rollback` 在切换产品提交前读取目标兼容性清单；当前与目标 epoch 相同，或目标明确支持当前 epoch 时，不要求结束任务。若目标不支持当前 epoch，命令会检查全部已登记工作空间并失败关闭，列出 workspace、issue、status、run 和旧状态残留。
+1. agenticops init --workspace <绝对路径> --project tapdata，生成绑定、空 current 和 config/source/runtime/archive。
+2. 在工位中接管任务。处理中不能接新任务；结束后 archive/release 或 archive/clean，精确授权范围以项目 Skill 和 CLI 为准。
+3. 当前任务为空、操作完成且 runtime 已清空后，明确执行 agenticops workspace purge --workspace <绝对路径> --yes。清理验证生成归属，不删除 source/config/archive 和未知用户材料；未知状态导致失败，不能宣称工位已干净。
+4. 确认 .agenticops 与受管接线已移除，再初始化。保留目录非空时明确追加 --reuse-materials；这只允许保留既有真实目录，不授权覆盖、删除或导入旧任务。runtime 必须为空，重新生成新的 workspace_id。
 
-遇到不兼容提示时，留在当前版本依次完成或停用任务、清理 linked worktree，并显式 purge 本地任务状态；脏 worktree、未合并分支、不可访问工作空间或无法识别的旧状态必须人工处理。需要保留的历史材料先移出 `.agenticops/` 归档，再重新执行 `update`。这些操作只处理本地状态，不修改 Jira。任务仅进入 `completed` 并不代表已经清理。
+workspace clean --generated-only 是接线刷新，不是上述解除绑定操作；不能用它证明状态已清空。
 
-升级协议必须先通过兼容的过渡版本进入安装：过渡版本提升 Updater 能力但保持目标最低协议要求不变，后续版本才提升 `minimum_updater_protocol_version` 和 epoch。若命令提示目标需要更新的升级协议，先安装官方指定的过渡版本；早于该协议的安装不能直接跨越不兼容版本。空工作空间跨 epoch 更新后，在 `repair` 或 `start` 写入目标代际前，任务状态写入口会失败关闭。
+## 第二阶段：跨版本编排
 
-工作空间无法启动或 `doctor` 报接线漂移时，使用已绑定的产品根目录修复：
+升级器只编排原版本清理完成后的切换与目标版本生成，不再实现一套任务清理逻辑。当前 updater 在 Git 引用切换前读取兼容清单并检查所有已登记工作空间；不兼容、绑定缺失、工作空间不可访问或事实无法读取时保持原版本不动。原版任务与旧状态必须由原版处理，不由目标版本猜测迁移。
 
-```sh
-~/.agentic-ops/agenticops doctor --workspace <项目工作空间>
-~/.agentic-ops/agenticops repair --workspace <项目工作空间>
-```
+兼容更新执行 agenticops update，随后 doctor 检查、repair 刷新同代际接线。rollback 只适用于安装工作面，同样先检查目标兼容性；维护工作面使用 Git 治理流程，不自动移动源码分支。
 
-`doctor` 只读检查；`repair` 只重建可再生接线。跨 epoch 时只有已经清空任务和旧状态残留的工作空间才能采用新代际，不执行在线数据迁移。更新后，已启动的 Agent 需重启。
+## 本次首次切换
 
-不要用 `rollback` 管理 AgenticOps 源码仓库；源码维护使用 Git 流程，见[维护指引](../maintenance-guide.md)。
+本版 epoch 3，最低 updater protocol 2。本次不发布兼容过渡版，也不承诺旧安装直接 update：用户先用仍可运行的原版本保存材料、清理旧任务及其受控源码现场、注销旧绑定，然后安装新版本并明确初始化。旧源码池、Git refs、导出材料不由新版本删除。新升级规则只保护本版之后的切换，不追溯保护旧升级器。
+
+若手动替换产品文件或源码分支绕过升级器，新入口拒绝旧状态。应恢复与旧状态匹配的原产品版本完成清理，或先保全旧现场、使用独立空目录安装和初始化；不手改 epoch、注册表或当前状态。
+
+任何清理失败都留在原版本处理，不能自动进入新生成步骤。已有确认只覆盖其明确路径与材料；新增文件、范围变化和未知结果先回读并取得缺失决定。合并、发布、Tag 和保护分支写入仍需独立授权。

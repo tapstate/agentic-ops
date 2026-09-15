@@ -4,14 +4,14 @@
 
 ## Agent 文件系统权限
 
-Source Pool 位于项目工作空间之外，只保存统一维护的主工作树；任务 worktree 位于 `<workspace>/.agenticops/worktrees/<issue-key>/<run-id>/`。Agent 从项目工作空间启动并在同一会话中继续任务，工作空间是 Agent 原生文件系统边界，Source Pool 不加入可写范围。任务状态操作继续显式绑定 workspace 和 issue。
+完整源码在工位 source 中，每仓有独立 Git 元数据；config/runtime/archive 分开。工位是平台文件系统授权边界，状态操作仍绑定 issue/run。
 
 - `repository context --issue-key <issue-key> --json` 在源码分析、实现或恢复前校验当前 run 的租约、规范路径、分支、`base_sha` 和目录摘要；失败时停止任务依赖步骤。
-- 当前会话执行 Git/PR 工具前，用 `repository context` 核对任务 worktree，按用户授权操作；AgenticOps 不在这些原生调用前再次判定。
-- 同一工作空间的其它 task worktree 可被会话访问；任务边界依靠显式 issue/run、工作分支和检查点证据核验，不宣称 task/run 沙箱隔离。
-- linked worktree 的 `.git` 指向主仓库元数据；平台可能要求精确的元数据写权限。流程确认记录不替代平台权限。
+- 当前会话执行 Git/PR 工具前，用 `repository context` 核对当前 source 仓库，按用户授权操作；AgenticOps 不在这些原生调用前再次判定。
+- 一个工位仅有一个当前任务；显式 run/revision 防止迟到状态写入，不承诺拦截任意原生文件修改。
+- 独立 Git 元数据只属于当前工位；流程确认不能替代平台权限。
 
-Source Pool 的 clone、fetch 和 worktree 创建/删除应通过确定性 Workflow 或用户从受控终端执行。Git 公共元数据仍位于 Source Pool 主工作树的 `.git/worktrees/`；若平台阻止相关写入，应请求精确目录/命令审批，不能把整个池永久加入全局可写根目录。
+源码准备按 Project Profile 和操作意图执行。不能把产品根或其它工位加入全局可写范围；遇到平台限制只申请精确目录和命令权限。
 
 ## GitHub
 

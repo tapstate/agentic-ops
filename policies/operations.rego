@@ -286,35 +286,21 @@ result := {"decision": "ask", "operation": input.operation, "reason": "受控操
 } else := {"decision": "allow", "operation": input.operation, "reason": "当前 task/run 已准备同一 Jira 接管版本水印，只允许本节点写入一次并回读", "reason_code": "jira_watermark_intent_covered"} if {
 	input.operation == "edit_jira_issue"
 	input.context.jira_watermark_intent == "matched"
-} else := {"decision": "ask", "operation": input.operation, "reason": "受控仓库准备必须显式指定 Jira 任务号", "reason_code": "issue_key_required", "required_action": "请使用 workflow/task.py repository prepare --issue-key <KEY> 重试。"} if {
-	level == "controlled"
-	not input.context.issue_key
-} else := {"decision": "ask", "operation": input.operation, "reason": sprintf("Jira 任务 %v 不是当前工作空间中的 active 任务", [input.context.issue_key]), "reason_code": "no_active_task", "required_action": "请先接管或恢复对应任务，再使用显式 --issue-key 重试；Agent 停止仓库准备及其依赖步骤。"} if {
-	level == "controlled"
-	input.context.issue_key
-	input.context.task_resolution == "no_active_task"
-} else := {"decision": "ask", "operation": input.operation, "reason": "当前执行上下文无法唯一解析 active 任务", "reason_code": "ambiguous_active_task", "required_action": "请先接管或恢复对应任务，再使用显式 --issue-key 重试；Agent 停止仓库准备及其依赖步骤。"} if {
-	level == "controlled"
-	input.context.issue_key
-	input.context.task_resolution == "ambiguous_active_task"
-} else := {"decision": "allow", "operation": input.operation, "reason": sprintf("active 任务 %v 的受控 Source Pool 与 linked worktree 准备可自动执行", [input.context.issue_key]), "reason_code": "controlled_prepare_allowed"} if {
-	level == "controlled"
-	input.context.issue_key
-	input.context.task_resolution == "resolved"
-} else := {"decision": "ask", "operation": input.operation, "reason": "项目仓库预下载会批量写入 Source Pool，必须由研发工程师逐次确认", "reason_code": "project_repository_prefetch_confirmation_required", "required_action": "请研发工程师确认本次预下载；确认后可在目标工作空间原样执行 agenticops workspace prefetch --yes。"} if {
+} else := {"decision": "ask", "operation": input.operation, "reason": "工位生命周期操作必须由研发确认精确任务与处置范围", "reason_code": "station_confirmation_required", "required_action": "请确认本次工位操作及其请求摘要；归档不授予删除权限，释放或清理仍须核验精确清单。"} if {
 	level == "confirmation"
+	input.operation == "manage_station"
 } else := {"decision": "ask", "operation": input.operation, "reason": "高风险操作永不被任务授权覆盖，每次都需要人工单独确认", "reason_code": "excluded_operation", "required_action": "请研发工程师在自己的终端执行原命令，完成后回复“继续”；Agent 不得重试该命令。"} if {
 	level == "excluded"
-} else := {"decision": "ask", "operation": input.operation, "reason": "当前操作已匹配 active 任务仓库，但无法确定 Git 工作分支", "reason_code": "branch_context_required", "required_action": "请先使用 repository context --issue-key <KEY> --json 获取对应任务 worktree，并将工具工作目录设为该路径后原样重试；不得用 PR 正文或重新接管推断任务。"} if {
+} else := {"decision": "ask", "operation": input.operation, "reason": "当前操作已匹配 当前任务仓库，但无法确定 Git 工作分支", "reason_code": "branch_context_required", "required_action": "请先使用 repository context --issue-key <KEY> --json 获取当前工位 source 仓库，并将工具工作目录设为该路径后原样重试；不得用 PR 正文或重新接管推断任务。"} if {
 	level == "gated"
 	input.context.task_resolution == "branch_context_required"
-} else := {"decision": "ask", "operation": input.operation, "reason": "当前操作无法匹配 active 任务", "reason_code": "no_active_task", "required_action": "请先接管任务或消除 active 任务歧义；Agent 在恢复前停止该操作及其依赖步骤。"} if {
+} else := {"decision": "ask", "operation": input.operation, "reason": "当前操作无法匹配 当前任务", "reason_code": "no_active_task", "required_action": "请先接管任务并核对工位身份；Agent 在恢复前停止该操作及其依赖步骤。"} if {
 	level == "gated"
 	input.context.task_resolution == "no_active_task"
-} else := {"decision": "ask", "operation": input.operation, "reason": "当前操作匹配到多个 active 任务", "reason_code": "ambiguous_active_task", "required_action": "请先接管任务或消除 active 任务歧义；Agent 在恢复前停止该操作及其依赖步骤。"} if {
+} else := {"decision": "ask", "operation": input.operation, "reason": "当前操作的工位身份不明确", "reason_code": "ambiguous_active_task", "required_action": "请先接管任务并核对工位身份；Agent 在恢复前停止该操作及其依赖步骤。"} if {
 	level == "gated"
 	input.context.task_resolution == "ambiguous_active_task"
-} else := {"decision": "ask", "operation": input.operation, "reason": "active 任务尚未签发 task_execution 授权", "reason_code": "authorization_missing", "required_action": "请完成方案确认并签发 task_execution 授权；Agent 在授权前停止该操作及其依赖步骤。"} if {
+} else := {"decision": "ask", "operation": input.operation, "reason": "当前任务尚未签发 task_execution 授权", "reason_code": "authorization_missing", "required_action": "请完成方案确认并签发 task_execution 授权；Agent 在授权前停止该操作及其依赖步骤。"} if {
 	level == "gated"
 	input.context.task_resolution == "resolved"
 	input.context.authorization_state == "missing"

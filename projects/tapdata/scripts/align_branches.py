@@ -250,11 +250,9 @@ def workspace_tapdata_root(start):
         if not binding.is_file():
             continue
         document = read_json(binding)
-        pool = document.get("repository_pool", {})
-        root = pool.get("root") if isinstance(pool, dict) else None
-        if not isinstance(root, str) or not root:
-            raise AlignmentError("工作空间配置缺少 repository_pool.root：%s" % binding)
-        return Path(root).expanduser().resolve() / "tapdata", binding
+        if document.get("schema_version") != 3:
+            raise AlignmentError("旧工作空间必须使用原版本受控解绑并重建")
+        return directory / "source" / "tapdata", binding
     return None, None
 
 
@@ -277,17 +275,15 @@ def workspace_binding(start):
 
 
 def git_refs_cache_file(execution_directory, explicit=None):
-    """缓存属于可写工作空间；Source Pool 身份来自其绑定，不能由路径猜测。"""
+    """缓存属于可写工作空间；source 工程目录 身份来自其绑定，不能由路径猜测。"""
     if explicit:
         return Path(explicit).expanduser().resolve(), None
     workspace, binding, document = workspace_binding(execution_directory)
     if workspace is None:
-        raise AlignmentError("缺少工作空间绑定；请提供 --cache-file，不能从 tapdata-root 父目录猜测 Source Pool")
-    pool = document.get("repository_pool", {})
-    root = pool.get("root") if isinstance(pool, dict) else None
-    if not isinstance(root, str) or not root:
-        raise AlignmentError("工作空间配置缺少 repository_pool.root：%s" % binding)
-    return workspace / ".agenticops" / "git-ref-cache-v2.json", Path(root).expanduser().resolve()
+        raise AlignmentError("缺少工作空间绑定；请提供 --cache-file，不能从 tapdata-root 父目录猜测 source 工程目录")
+    if document.get("schema_version") != 3:
+        raise AlignmentError("旧工作空间必须使用原版本受控解绑并重建")
+    return workspace / ".agenticops" / "git-ref-cache-v2.json", workspace / "source"
 
 
 def local_repository_state(path):
@@ -318,7 +314,7 @@ def resolve_scope(repositories, product_repository, requested):
     return {"requested_repositories": selected, "required_repositories": required, "reported_repositories": sorted(repositories)}
 
 
-def inspect_repositories(tapdata_root, repositories, scope, refresh_mode, cache_file=None, source_pool_root=None):
+def inspect_repositories(tapdata_root, repositories, scope, refresh_mode, cache_file=None, source_root=None):
     """逐仓检查并刷新引用；未选中的缺失仓库只降低覆盖度。"""
     required = set(scope["required_repositories"])
     product_repository = scope["required_repositories"][0]
@@ -369,13 +365,13 @@ def inspect_repositories(tapdata_root, repositories, scope, refresh_mode, cache_
                     snapshot = git_refs.snapshot(
                         observation["_path"], scopes=scopes, cache_file=cache_file, refresh=mode,
                         max_age_seconds=AUTO_REFRESH_MAX_AGE_SECONDS, repository_id=repository,
-                        source_pool_root=source_pool_root, cache_root=tapdata_root,
+                        source_root=source_root, cache_root=tapdata_root,
                     )
                 else:
                     snapshot = git_refs.read_snapshot(
                         observation["_path"], scopes=scopes, cache_file=cache_file,
                         max_age_seconds=AUTO_REFRESH_MAX_AGE_SECONDS, repository_id=repository,
-                        source_pool_root=source_pool_root, cache_root=tapdata_root,
+                        source_root=source_root, cache_root=tapdata_root,
                     )
                 cached = snapshot["scopes"]["heads"]
             except git_refs.GitRefsError as error:
@@ -544,17 +540,17 @@ def plugin_release(product_path, branch, expected_sha, rules):
 
 
 def local_feature_branch_ready(product_path, branch, expected_sha):
-    """确认 Source Pool 已有与远端引用缓存一致的功能分支对象。
+    """确认 source 工程目录 已有与远端引用缓存一致的功能分支对象。
 
-    分支分析不能自行 fetch 或改写 Source Pool；缺少对象时由受控的
-    Source Pool 刷新流程同步，再重新执行分析。
+    分支分析不能自行 fetch 或改写 source 工程目录；缺少对象时由受控的
+    source 工程目录 刷新流程同步，再重新执行分析。
     """
     try:
         local_sha = git_output(["git", "rev-parse", "--verify", "origin/%s" % branch], product_path)
     except AlignmentError:
-        return "本地 Source Pool 未同步功能分支 origin/%s；请通过受控 Source Pool 刷新流程同步分支后重试" % branch
+        return "本地 source 工程目录 未同步功能分支 origin/%s；请通过受控 source 工程目录 刷新流程同步分支后重试" % branch
     if local_sha != expected_sha:
-        return "本地 Source Pool 的 origin/%s 与远端引用缓存 SHA 不一致；请通过受控 Source Pool 刷新流程同步分支后重试" % branch
+        return "本地 source 工程目录 的 origin/%s 与远端引用缓存 SHA 不一致；请通过受控 source 工程目录 刷新流程同步分支后重试" % branch
     return None
 
 
@@ -567,7 +563,7 @@ def feature_tag_branch(product_path, branch, product_sha):
         try:
             tag = git_output(["git", "describe", "--first-parent", "--tags", "--abbrev=0", "--match", "[0-9]*.[0-9]*.[0-9]*", "origin/%s" % branch], product_path)
         except AlignmentError:
-            raise AlignmentError("本地 Source Pool 的 Tag 图不足；请通过受控 Source Pool 刷新流程同步 Tag 后重试")
+            raise AlignmentError("本地 source 工程目录 的 Tag 图不足；请通过受控 source 工程目录 刷新流程同步 Tag 后重试")
     except AlignmentError as error:
         return None, "无法确定功能分支的 first-parent 最近产品 Tag：%s" % error
     match = re.fullmatch(r"v?(\d+\.\d+\.\d+)(-dev)?", tag)
@@ -1028,13 +1024,17 @@ def main(argv=None, execution_directory=None):
         if args.command == "apply" and not args.tapdata_root:
             raise AlignmentError("apply 必须显式提供 --tapdata-root；不得从工作空间或当前目录猜测写入目标")
         tapdata_root, source = resolve_tapdata_root(args.tapdata_root, execution_directory or Path.cwd())
+        if args.command == "apply":
+            workspace, _, _ = workspace_binding(tapdata_root)
+            if workspace is not None:
+                raise AlignmentError("工位源码由任务接管固化基线；不能用分支对齐 apply 改写，请先结束当前任务再接管新任务。独立开发目录不受此限制")
         refresh_mode = "always" if args.command == "apply" or getattr(args, "refresh", False) else "auto"
         progress("开始解析：refresh=%s，TapData 根目录=%s" % (refresh_mode, tapdata_root))
         scope = resolve_scope(repositories, config["derivation"]["product_repository"], args.repository)
-        cache_file, source_pool_root = git_refs_cache_file(execution_directory or Path.cwd(), args.cache_file)
+        cache_file, source_root = git_refs_cache_file(execution_directory or Path.cwd(), args.cache_file)
         observations, fetch_seconds = inspect_repositories(
             tapdata_root, repositories, scope, refresh_mode, cache_file,
-            source_pool_root=source_pool_root,
+            source_root=source_root,
         )
         progress("开始本地 origin/* 解析")
         resolution_started = time.monotonic()

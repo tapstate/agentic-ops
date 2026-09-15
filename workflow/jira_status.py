@@ -38,7 +38,12 @@ def load_state(base, task):
 
 
 def save_state(base, task, state):
-    task_store._write_json_atomic(state_path(base, task), state)
+    with task_store.task_run_lock(base, task["issue_key"]):
+        current = task_store.check_expected_run(base, task["issue_key"], task["run_id"])
+        task_store.require_development(base, current)
+        if task.get("_revision") != current["_revision"]:
+            raise ValueError("工位 revision 已变化，拒绝过期 Jira 状态回执")
+        task_store._write_json_atomic(state_path(base, task), state)
 
 
 def config(base, task):
@@ -48,6 +53,14 @@ def config(base, task):
         raise ValueError("当前 Project 未配置 Jira 状态同步")
     if task["task_class"] not in result.get("task_classes", []):
         raise ValueError("当前任务类型未启用 Jira 状态同步")
+    overrides = result.get("by_task_class", {})
+    if not isinstance(overrides, dict):
+        raise ValueError("Jira 状态同步 by_task_class 必须是对象")
+    if task["task_class"] in overrides:
+        override = overrides[task["task_class"]]
+        if not isinstance(override, dict) or not isinstance(override.get("attempts"), dict):
+            raise ValueError("Jira 任务类型状态同步配置无效")
+        result = dict(result, **override)
     return result
 
 
@@ -75,7 +88,7 @@ def issue_from(snapshot, issue_key):
 
 
 def strict_checkpoint_ready(base, task, checkpoint):
-    rules = quality.config(base)
+    rules = quality.config(base, task)
     if not quality.enabled(task, rules):
         return False, ["当前任务未启用质量检查"]
     report = quality.report(quality.load(base, task), rules, quality.context(base, task))
@@ -98,7 +111,7 @@ def tests_passed_ready(base, task, snapshot):
     ready, problems = strict_checkpoint_ready(base, task, "q4-acceptance")
     if not ready:
         return False, "quality_not_verified", problems, []
-    quality_rules = quality.config(base)
+    quality_rules = quality.config(base, task)
     report = quality.report(quality.load(base, task), quality_rules, quality.context(base, task))
     checkpoint = report["checkpoints"]["q4-acceptance"]
     outcome = ((checkpoint.get("decision") or {}).get("decision") or {}).get("outcome")
@@ -118,6 +131,8 @@ def transition_for(snapshot, rule):
     configured_id = str(rule.get("transition_id") or "")
     for transition in transitions:
         if not isinstance(transition, dict):
+            continue
+        if transition.get("isAvailable") is False:
             continue
         target = transition.get("to") or {}
         if configured_id and str(transition.get("id") or "") != configured_id:
@@ -188,17 +203,23 @@ def guidance_for(fields, rules, task):
 
 
 def prepare(base, issue_key, trigger, snapshot):
-    task = json.loads(task_store.task_path(base, issue_key).read_text(encoding="utf-8"))
+    task = task_store.read_task(base, issue_key)
     rules = config(base, task)
     rule = rules.get("attempts", {}).get(trigger)
     if not isinstance(rule, dict):
         raise ValueError("未知 Jira 状态同步节点：%s" % trigger)
+    issue, fields, status = issue_from(snapshot, issue_key)
+    allowed_types = rules.get("issue_type_ids")
+    if allowed_types is not None and str((fields.get("issuetype") or {}).get("id", "")) not in allowed_types:
+        raise ValueError("Jira 工作类型与当前任务状态同步配置不匹配")
     state = load_state(base, task)
     previous = state["attempts"].get(trigger)
     retry_history = []
     if previous:
-        retryable = (trigger == "tests_passed" and previous.get("outcome") == "skipped" and
-                     previous.get("reason") in ("quality_not_verified", "linked_test_facts_not_ready"))
+        retryable = (previous.get("outcome") == "skipped" and
+                     previous.get("reason") in ("quality_not_verified", "linked_test_facts_not_ready",
+                                                "required_fields_missing", "transition_unavailable",
+                                                "local_stage_mismatch", "jira_status_mismatch", "assignee_mismatch"))
         if not retryable:
             return dict(previous, repeated=True)
         retry_history = list(previous.get("preflight_history", [])) + [{
@@ -279,7 +300,7 @@ def prepare_transition(record, snapshot, fields, rule, rules, task):
 
 
 def complete(base, issue_key, trigger, outcome, snapshot, message):
-    task = json.loads(task_store.task_path(base, issue_key).read_text(encoding="utf-8"))
+    task = task_store.read_task(base, issue_key)
     state = load_state(base, task)
     record = state["attempts"].get(trigger)
     if not record or record.get("outcome") not in ("ready", "unknown", "failed"):
@@ -325,12 +346,12 @@ def main():
     args = parser.parse_args()
     try:
         task_store.workspace_project(args.dir)
-        issue = task_store.resolve_active_issue(args.dir, args.issue_key)
+        issue = task_store.resolve_issue(args.dir, args.issue_key)
         with task_store.task_run_lock(args.dir, issue):
-            task_store.resolve_active_issue(args.dir, issue)
-            task = json.loads(task_store.task_path(args.dir, issue).read_text(encoding="utf-8"))
+            task = task_store.read_task(args.dir, issue)
             if args.command != "status":
                 task_store.check_expected_run(args.dir, issue, args.expected_run_id)
+                task_store.require_development(args.dir, task)
             if args.command == "prepare":
                 result = prepare(args.dir, issue, args.trigger, read_input(args.input))
             elif args.command == "complete":

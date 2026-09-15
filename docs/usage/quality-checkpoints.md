@@ -1,5 +1,57 @@
 # 质量检查与证据
 
+## 共同验证材料
+
+使用现有 `quality.py apply --issue-key <key> --expected-run-id <run> --expected-revision <当前revision> --input <json> --dir <workspace>`，输入为 `{"action":"verification","payload":{...}}`。每个仓库分别提交材料，内部自动绑定当前任务各仓源码版本；不是新任务类型或执行引擎。写前先 `quality.py status`，source_sync 还会实际读取已准备的任务工作树并核对包含关系。原生报告的真实性、依赖清单和语义分析仍由 Agent 核对，工具不认证来源或判断断言含义。
+
+所有材料提供 kind、repository、target_revision（当前完整 SHA 或首轮本地源码指纹）、source_ref。其余内容如下：
+
+| kind | 材料 |
+|---|---|
+| local | analysis_ref（变更/用例缺口判断）、case_review_ref、case_version、dependency_analysis_ref；required_scope 列出全部应测模块及场景，results 对每项给出 scope、result、report_ref |
+| ci | local 的相同范围及报告字段，加 run_ref、attempt 正整数、head_revision（本次 PR Head）、checkout_ref（实际测试源码及该 Head 的对应依据） |
+| source_sync | source_branch（登记的检出来源）、source_revision（刚回读的来源 SHA）、before_merge_revision、observed_at、impact_analysis_ref；sync 由工具实际生成，用户输入不能代替 Git 核对 |
+| review | complete=true 表示已完整分页回读；items 逐项记录 id、source_ref、reason、status（fixed/not_applicable/accepted_gap/pending），fixed 必须有 verification_ref；无意见使用空列表并保留回读来源 |
+
+results 中 result 使用 PASS/FAIL/UNKNOWN/NOT_RUN/SKIPPED。PASS 另需报告中的 tests、failures、errors、skipped 非负整数，tests 必须大于零，其余必须为零。非 PASS 保留原结果；若研发明确接受该项缺口，提供 decision，包含 reason、uncovered（精确等于该 scope）、follow_up、proof（actor/source=user_message/reference/at）。不能用一项决定覆盖其它范围。review 的 accepted_gap 也提供这组明确处置。
+
+跨仓 Jar 材料使用 jars 列表，每项包含 built_sha256、consumed_sha256（必须相同）和 loaded_from（实际加载证据）。local 另给 built_path、consumed_path 绝对路径，写入及检查点复核内容哈希；这两个路径仅保存为本地恢复元数据，不进入 Jira 摘要，其它材料仍按项目规则扫描。没有 Jar 时省略列表，但 dependency_analysis_ref 仍须说明分析依据。CI 使用运行内文件与加载证据，不冒充本地文件核验。报告引用、版本及统计从实际执行取得，不能为满足字段填造数字。
+
+TapData 功能和缺陷使用相同配置：Q3、Q4 要求 local/source_sync，Q5、Q6 再要求 ci/review；PR Ready 要求 local/source_sync/ci，同时保留现有 PR Checks 和人工验收规则。代码、用例所在仓或依赖仓变化，报告失效；CI 重新观察后需重新核对并登记 CI 材料。本地 Jar 变化也失效。遗漏范围、未处理失败或待处理审查意见阻止对应检查点，人工接受的缺口保留原结果。
+
+源码同步后已解决问题只需无修改重验时，`failures.py` 使用 revalidate，参数同 finish，不消耗修复轮数；失败则回到 unresolved，后续修改仍须 start 记账。每次重新验证都保留事件，不能改写历史。旧 `ci.py record-fix` 已移除，CI 观察不再维护另一套预算。
+
+研发已手工处理未解决问题时，使用 manual_result，提供 finish 的实际结果/版本/报告字段，并附 reason 和真实用户消息 proof；不消耗自动修复轮数。仍有 running 轮次时先 finish 保留当时实际结果，再记录人工处理。没有明确人工来源或实际验证，不能声明恢复成功。
+
+当前工位采用 epoch 3；材料只属于当前 run。旧状态由原版清理，新版本不迁移历史确认。生成/清理与跨版编排的顺序见[更新与回退](update-and-rollback.md)。发布、清理和业务验收分别授权。
+
+## PR 审查返工
+
+Agent 原生回读当前 PR Head、审查结论、普通评论和行内审查线程，读取完整分页；只读 PR 总体状态或只看最新一条评论不算意见收集完整。每条必要意见保留原始链接/ID、审查所针对提交、处理结论（已修复/说明不采纳/待研发决定）、理由、对应修改和验证。过时线程仍核对问题是否在当前代码存在，不能仅因 outdated 或线程已关闭就判为已解决。
+
+在已确认预期和授权范围内直接修复、补用例并重验；不同意意见时给出代码/预期依据。验收含义改变、范围扩大或无法确定时交研发决策。只有具备明确外部评论授权时才回复 PR；本地可以先准备回复及证据，不擅自替审查人批准、关闭讨论或撤销请求修改。
+
+审查指出与已有失败相同的问题时，使用 `failures.py` 的原 problem_id 和 stage=review 累计轮次，不新建预算。修改结束后重新核对检出来源、最终差异、本地测试及当前 PR CI；此前提交的批准或测试结果不能证明新提交仍满足要求。推送仍受当前任务授权限制。
+
+Q5 前回读所有必要意见处理结论、当前 PR Head 的审查状态和 CI 报告。未决意见与研发接受的具体缺口分别记录，不能用一条总体“已处理”代替。缺少审查事实时保留未知，不能直接将 Q5/Q6 推进当作交付完成。研发处理后从当前环节继续，保留原提交、意见及验证记录；Jira 测试/处理总结引用对应意见和报告。
+
+## 失败归因与有限修复
+
+Agent 用原生工具分析失败。只有证据指向当前变更才自行修复；已有失败、环境问题及归因不明由研发决定。使用 `workflow/failures.py status --issue-key <key> --dir <workspace>` 回读当前 run 的失败记录，随后以 `apply --expected-run-id <run> --revision <读取的 revision> --input <事件.json>` 记录操作（同样携带 issue-key、dir）。输入保存在当前 run 的受控交互路径。
+
+| action | 必需内容与含义 |
+|---|---|
+| observe | repository、稳定 check_id、label、attribution（current_change/preexisting/environment/unknown）、evidence；创建或更新问题，返回 problem_id |
+| start | problem_id、stage（local/ci/review）；修改前占用一轮，包含本轮分析、修改、重验 |
+| finish | problem_id、result（PASS/FAIL/UNKNOWN/NOT_RUN/SKIPPED）、source_revision、evidence；使用实际版本及报告，未执行如实说明 |
+| decide | problem_id、decision、reason、proof；continue 另给 additional_rounds 正整数，accept_gap 另给 uncovered 与 follow_up |
+
+`proof` 使用已有用户消息来源字段 actor、source=user_message、reference 和带时区 at，引用研发真实决定，不是身份认证。人工追加明确限定从当前累计次数起可再试几轮；接受缺口保留 accepted_gap，不写 PASS。环境问题由研发授权 Agent 处理时，也明确续修轮数。
+
+同一问题以首次关联的 repository/check_id 定位，label 改名不改变身份；本地、PR CI、审查和恢复共用累计三轮，不因成功后再次出现而清零。Agent 必须将相同根因的后续失败关联原检查项，不能通过新建 check_id 绕开次数；工具不猜测语义上是否为同一根因。源文件或用例改名时仍使用原 check_id。中断中的轮次先以真实结果（包括 UNKNOWN/NOT_RUN）finish，不重开不记账；事实或范围变化则重新 observe 并核对人工决定是否仍适用。
+
+记录按任务 run 隔离、带 revision 并持锁更新；重放保留归因、每轮来源及结果、决定和报告。新增失败文件不改写已有任务或 CI 文件；接入阶段检查点前，记录本身不代表流程已经强制检查全部失败，也不代替 PR Checks 或 Q4 验收。
+
 质量检查采用“必须核对、用户决定处置”的方式。Agent 提议验收用例及验证方式，用户选择；测试工具提供执行结果，用户决定是否验收、补测、不适用、延期或接受风险。接受风险不会把失败或未执行改为通过。
 
 本文说明稳定操作方式。项目标准来自 `projects/<project>/quality.json` 和 `admission.json`，输入及恢复契约来自 `contracts/quality-action.schema.json`、`quality-state.schema.json`。工作项与最终证据仍在 Jira；本地记录只是任务 run 的执行及恢复材料。[任务授权](task-authorization.md)和[安全边界](../security/permissions.md)独立生效。
@@ -12,11 +64,25 @@ interaction_file="$(python3 <agenticops-root>/workflow/task.py interaction-path 
   --name jira-snapshot.json --dir "$project_workspace")"
 ```
 
-文件名使用 lowercase-kebab-case，可选扩展名为 `json`、`jsonl`、`log`、`md` 或 `txt`。路径位于 `.agenticops/tasks/<issue>/<run-id>/`；reset 后旧 run 材料保留用于恢复与追溯，任务级 purge 会随任务目录统一删除。不要用任务号前缀和根目录文件名模拟任务归属。
+文件名使用 lowercase-kebab-case，可选扩展名 json/jsonl/log/md/txt。interaction-path 返回 `.agenticops/evidence/interactions/` 内路径，仅当前 run 可写；归档后停止开发，release/clean 收尾移除活动副本，档案保留必要脱敏材料。不用根目录文件名前缀模拟任务归属。
 
-旧版本已经散落在 `.agenticops/` 根目录的文件不会被在线迁移，也不会按文件名猜测 run 归属。遇到不兼容升级时，先在原版本完成或停用任务、清理 linked worktree 并显式 purge 本地任务状态；需要保留的旧材料由研发工程师移出状态目录归档，再重新执行升级。以上本地处理不修改 Jira。
+旧状态不在线迁移或猜测归属；退出当前任务后，明确 workspace purge 注销受管状态，再按新版本生成。未知残留阻止清理；需保留材料先导出核验。见[更新与回退](update-and-rollback.md)。
+
+## 任务类型与质量配置
+
+任务类型可在 Project 的 `admission.json` 中声明 `quality_profile`，值为当前项目目录内的 JSON 文件名，例如 `quality-feature.json`。未声明时沿用 `quality.json`，保留现有缺陷规则及摘要算法。显式声明的文件缺失、配置无效或未启用当前任务类型时，相关质量检查拒绝推进，不回退到缺陷规则。质量配置选择统一用于授权、阶段、证据、PR Ready 及同步告警。
+
+专用配置复用现有质量合同，通过 `task_classes` 声明适用类型，通过 `intake_fact_keys` 和 `plan_fact_keys` 声明参与确认的事实。实施前必须包含人工决定的 `q1-intake` 与 `selection_checkpoint`。未使用既有 `structured_fix_plan` 检查时，必须以 `plan_contract` 声明方案对象的 `fact_key` 和非空 `required_fields` 列表；该事实同时列入 `plan_fact_keys` 并登记为准入配置中的已知事实。`task.py record --key <方案事实> --input <JSON文件>` 可以记录此对象。这里只检查必要内容存在和确认有效性，方案合理性及测试预期仍由 Agent 与研发核对。
+
+任务专用方案摘要绑定任务类型和配置指定的方案事实；授权签发、续签及推进使用同一选择。已确认的方案、验收或规则实质变化后，重新核对相关确认；未参与确认的展示备注不影响方案。没有启用质量检查的任务不能签发方案授权，不能通过空配置代替检查。增加配置支持不等于功能任务已完成 Jira 或真实测试接入。
+
+本次能力扩展不增加本地状态字段、路径或事件格式，`workspace_state_epoch` 保持 1。未启用专用配置的旧缺陷任务继续使用原规则及相同摘要；旧事件按记录的规则重放。给已有任务切换质量配置属于规则变化，旧确认不会自动迁移为新规则下的确认。专用配置须部署在支持此能力的产品版本；回退旧产品前结束或停用这些任务，不能将新能力下的任务当作已验证的旧版续办路径。
 
 ## 流程与检查点
+
+TapData 功能开发使用 `quality-feature.json` 与 `implementation_plan`，Q2 绑定目标、实现变化、验收场景、风险、回滚及范围；不要求缺陷根因。CI 用例在功能任务内维护，不要求独立 Jira Test；实际关联的 Test 仍按当前用例版本与方式核对。Q4 必须有当前代码的验收证据，不能因为无独立测试任务而省略验证。下图中的修复方案和修复步骤，对功能分别对应实施方案与功能实现。
+
+功能 Jira 协作遵循“先读事实、处理过程中补充、按阶段回填、流转后回读”，见[项目任务引导](../../projects/tapdata/skills/tapdata-task/SKILL.md#功能任务的-jira-协作)。Story 与缺陷复用 `jira_status.py prepare/complete`，项目 `status_sync.by_task_class` 分别配置流转和字段采集提示，避免套用缺陷规则。已知未发起转换的预检缺项可补齐后重检；已发起写入的 failed/unknown 先回读，不自动重放。现有状态格式不变，旧记录继续保留。配置支持不等于真实完整交付已验收。
 
 ```mermaid
 flowchart TD
@@ -168,9 +234,9 @@ python3 "$agenticops_root/workflow/pr_ready.py" \
 }
 ```
 
-effective.versions 无需 Jira ID。省略时采用初始版本，但仍需用户确认实施分支及来源。相同 run 的再次导入保留初始 observed，可在设计阶段修正版本；已准备的分支和 base_sha 必须保持一致。实际修复线改变仍需 cleanup/reset 和重新确认。版本差异进入同步警告，下一次 Jira 评论说明；不能把本地修正声称为 Jira 字段已更新。
+effective.versions 无需 Jira ID。省略时采用初始版本，但仍需用户确认实施分支及来源。相同 run 的再次导入保留初始 observed，可在设计阶段修正版本；已准备的分支和 base_sha 必须保持一致。实际修复线改变仍需归档清理后重接并重新确认。版本差异进入同步警告，下一次 Jira 评论说明；不能把本地修正声称为 Jira 字段已更新。
 
-用输出的 `primary_branch` 进行产品分支对齐，模块按其对齐结果准备，不把主仓分支名套给所有模块。TapData 的 `--tapdata-root` 指包含模块仓库的产品目录；`hazelcast` 固定参与并使用 `release-v5.5.0`。版本核验不改变 Source Pool 或当前工作树。
+用输出的 `primary_branch` 进行产品分支对齐，模块按其对齐结果准备，不把主仓分支名套给所有模块。TapData 的 `--tapdata-root` 指包含模块仓库的产品目录；`hazelcast` 固定参与并使用 `release-v5.5.0`。版本核验不改变 source 或当前分支。
 
 ## 检查项、执行及决定
 
@@ -285,7 +351,7 @@ Q1 仅绑定准入事实和已到期项；Q2 绑定修复方案、稳定用例�
 
 受控 cleanup 在成功移除干净工作树时保存 `final_revision`，质量快照继续核对该提交，避免仅因移除了工作目录便让验收确认失效。移除前代码已变化仍会失效；旧记录缺少最终 SHA 时不能猜测补齐。
 
-reset 后新 run 不继承旧验收。旧 run 的未知评论保留并汇总警告；相同正文不得重复发送，不同检查点评论可继续。旧 run 的 receipt/readback 可核对原操作，不通过删除记录消除未知结果。
+清理后重接的新 run 不继承旧验收；旧未知评论只作为原档案证据，不借新 run 重发。恢复未知外部调用必须核对原操作，不删除账本消除未知结果。
 
 接管进入 `task_intake` 后尝试一次 `Analyzed → In Progress`，Q4 验收完成并进入 `ci_validation` 后尝试一次 `In Progress → Tests Passed`。每次都先读取 Jira 当前状态、可用转换和转换必填字段；状态不匹配、字段补不了、权限不足或外部调用失败时记录人工指引并继续本地主流程，不重试，也不影响后续节点按各自事实再尝试。附件规定与线上 Validator 若不一致，应报告并以实时 Workflow 为准；手工用例仍是用例，不能冒充缺陷免测。`Pull Request Submitted`、实际合并、发布和 `Done` 仍分别以标准流程及外部事实人工确认。
 
