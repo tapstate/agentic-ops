@@ -16,6 +16,29 @@ from station_fixture import save_task as save_station_task
 
 
 class JiraStatusTests(unittest.TestCase):
+    def test_tapdata_profiles_recognize_real_jira_test_link_direction(self):
+        link_type = {"id": "10009", "name": "Test", "inward": "is tested by", "outward": "tests"}
+        target = {"key": "TAP-12921", "fields": {"issuetype": {"name": "Test"}}}
+        for profile in ("quality.json", "quality-feature.json"):
+            with self.subTest(profile=profile):
+                rules = json.loads((ROOT / "projects/tapdata" / profile).read_text())
+                document = {"issue": {"key": "TAP-12833", "fields": {"issuelinks": [
+                    {"type": link_type, "inwardIssue": target}]}},
+                    "linked_test_details": [{"key": "TAP-12921", "test_type": "Manual",
+                                             "case_version": "updated:1", "source_ref": "fixture:jira/TAP-12921"}]}
+                problems, tests, ignored = jira_tests.linked_tests(document, "TAP-12833", rules)
+                self.assertEqual(problems, [])
+                self.assertEqual([item["key"] for item in tests], ["TAP-12921"])
+                self.assertEqual(tests[0]["method"], "manual")
+                self.assertEqual(ignored, [])
+                for invalid in (
+                    {"type": link_type, "outwardIssue": target},
+                    {"type": link_type},
+                    {"type": link_type, "inwardIssue": {"key": "TAP-1", "fields": {"issuetype": {"name": "Bug"}}}},
+                ):
+                    document["issue"]["fields"]["issuelinks"] = [invalid]
+                    self.assertTrue(jira_tests.linked_tests(document, "TAP-12833", rules)[0])
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="ao-jira-status-")
         self.addCleanup(self.temporary.cleanup)

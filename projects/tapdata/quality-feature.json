@@ -125,7 +125,7 @@
   "tests_passed": {
     "linked_test_task": {
       "relations": [
-        "tests"
+        "is tested by"
       ],
       "issue_types": [
         "Test"

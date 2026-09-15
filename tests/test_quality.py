@@ -370,7 +370,7 @@ class QualityTests(unittest.TestCase):
         jira_input = self.base / "jira-tests.json"
         jira_input.write_text(json.dumps({"source_ref": "fixture:jira",
             "issue": {"key": "TAP-123", "fields": {"issuelinks": [
-                {"type": {"outward": "tests"}, "outwardIssue": {
+                {"type": {"inward": "is tested by", "outward": "tests"}, "inwardIssue": {
                     "key": "TAP-T1", "fields": {"issuetype": {"name": "Test"}}}}]}},
             "linked_test_details": [{"key": "TAP-T1", "test_type": "Manual",
                                      "case_version": "test-v1", "source_ref": "fixture:jira/TAP-T1"}]}))
