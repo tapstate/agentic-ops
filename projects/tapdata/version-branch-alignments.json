@@ -60,10 +60,7 @@
         "tapdata/tapdata-application",
         "tapdata/t-layer3-test"
       ],
-      "unchanged_repositories": [
-        "tapdata/docs",
-        "tapdata/docs-en"
-      ],
+      "unchanged_repositories": [],
       "plugin_release_policy": "exact",
       "tag_selection": "first_parent_nearest",
       "rule": "功能分支先在列出的仓库找完全同名 branch；common-lib/connectors/connectors-enterprise 无同名 branch 时只按 tapdata 该分支 PluginKit 的精确 release-vX.Y.Z 推导，目标不存在即停止；其它 tag_fallback 仓库使用 tapdata 功能分支 first-parent 最近的产品 Tag：X.Y.Z-dev 推导 develop，X.Y.Z 推导 release-vX.Y.Z。未列入的仓库不得隐式推导。"
@@ -80,9 +77,7 @@
       "tapdata/hazelcast": "release-v5.5.0"
     },
     "independent_repositories": [
-      "tapdata/t-layer3-test",
-      "tapdata/docs",
-      "tapdata/docs-en"
+      "tapdata/t-layer3-test"
     ],
     "rule": "main 时全部 linked 仓使用 main；develop 时 license 使用 main、其余 linked 仓使用 develop；release-vX.Y.Z 使用标准 release 规则。功能分支仅按 feature_branch 显式规则推导，不能沿用固定分支或旧的任务分支回退。"
   },
@@ -100,9 +95,7 @@
         "tapdata/tapdata-web": "develop",
         "tapdata/hazelcast": "release-v5.5.0",
         "tapdata/tapdata-application": "main",
-        "tapdata/t-layer3-test": "develop",
-        "tapdata/docs": "main",
-        "tapdata/docs-en": "main"
+        "tapdata/t-layer3-test": "develop"
       }
     }
   }

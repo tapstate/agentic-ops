@@ -37,6 +37,16 @@
         }
       }
     },
+    "retired_repositories": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["origin"],
+        "properties": {"origin": {"type": "string", "minLength": 1}}
+      }
+    },
     "branch_resolution": {
       "type": "object",
       "required": ["rule", "resolver", "forbidden_sources", "on_unknown_repository"]

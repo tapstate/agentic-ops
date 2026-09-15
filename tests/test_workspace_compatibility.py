@@ -65,17 +65,32 @@ class WorkspaceCompatibilityTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def test_empty_workspace_can_cross_epoch(self):
+    def test_empty_workspace_cannot_adopt_incompatible_epoch(self):
         reasons = compatibility.workspace_blockers(
             self.product_root, self.workspace, manifest(2)
         )
         self.assertEqual(["状态代际 1 不受目标代际 2 支持"], reasons)
-        self.assertEqual(
-            2,
+        with self.assertRaisesRegex(ValueError, "受控解绑并重建"):
             compatibility.require_workspace_can_adopt(
                 self.product_root, self.workspace, manifest(2)
-            ),
-        )
+            )
+
+    def test_empty_binding_blocks_upgrade_and_rollback_without_state_changes(self):
+        init = self.workspace / ".agenticops/init.json"
+        before = init.read_bytes()
+        for rollback in (False, True):
+            with self.subTest(rollback=rollback), mock.patch.object(
+                compatibility, "manifest_at_ref", side_effect=[manifest(1), manifest(2)]
+            ), mock.patch.object(compatibility, "load_workspace_registry", return_value=[str(self.workspace)]):
+                with self.assertRaisesRegex(ValueError, "agenticops " + ("rollback" if rollback else "update")) as error:
+                    compatibility.check_upgrade(self.product_root, "old-sha", "target-sha", rollback)
+                self.assertIn("old-sha -> target-sha", str(error.exception))
+                self.assertEqual(before, init.read_bytes())
+
+    def test_unregistered_workspaces_do_not_block_switch(self):
+        with mock.patch.object(compatibility, "manifest_at_ref", side_effect=[manifest(1), manifest(2)]), \
+                mock.patch.object(compatibility, "load_workspace_registry", return_value=[]):
+            self.assertEqual([], compatibility.check_upgrade(self.product_root, "old", "new"))
 
     def test_supported_old_epoch_is_preserved_during_repair(self):
         target = manifest(2, supported=[1, 2])
@@ -183,7 +198,7 @@ class WorkspaceCompatibilityTests(unittest.TestCase):
             "manifest_at_ref",
             side_effect=[
                 manifest(1, minimum_updater=1),
-                manifest(1, minimum_updater=2),
+                manifest(1, minimum_updater=compatibility.UPDATER_PROTOCOL_VERSION + 1),
             ],
         ):
             with self.assertRaisesRegex(ValueError, "过渡版本"):
@@ -212,7 +227,7 @@ class WorkspaceCompatibilityTests(unittest.TestCase):
         (contracts / "workspace-state-compatibility.json").write_text(
             json.dumps(manifest(2)) + "\n", encoding="utf-8"
         )
-        with self.assertRaisesRegex(ValueError, "请先执行 agenticops repair"):
+        with self.assertRaisesRegex(ValueError, "受控解绑并重建"):
             with compatibility.task_store.task_state_lock(self.workspace):
                 pass
         init_path = self.workspace / ".agenticops" / "init.json"

@@ -24,6 +24,19 @@ SPEC.loader.exec_module(align)
 
 
 class TapDataBranchAlignmentTest(unittest.TestCase):
+    def test_catalog_unbinds_docs_but_preserves_test_repository(self):
+        config, repositories = align.load_configuration(ROOT)
+        self.assertEqual(10, len(repositories))
+        scope = align.resolve_scope(repositories, "tapdata/tapdata", ["tapdata/t-layer3-test"])
+        self.assertIn("tapdata/t-layer3-test", scope["required_repositories"])
+        self.assertEqual("develop", config["versions"]["current"]["branches"]["tapdata/t-layer3-test"])
+        for repository in ("tapdata/docs", "tapdata/docs-en"):
+            with self.subTest(repository=repository):
+                self.assertNotIn(repository, repositories)
+                self.assertNotIn(repository, scope["reported_repositories"])
+                with self.assertRaisesRegex(align.AlignmentError, "未登记的目标仓库"):
+                    align.resolve_scope(repositories, "tapdata/tapdata", [repository])
+
     @staticmethod
     def git(path, *arguments):
         return subprocess.run(
@@ -131,7 +144,7 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
         self.assertEqual(Path("/pool"), pool)
 
     def test_main_repository_is_validated_before_other_module_repositories(self):
-        repositories = {"tapdata/docs": {}, "tapdata/tapdata": {}}
+        repositories = {"tapdata/tapdata-web": {}, "tapdata/tapdata": {}}
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaisesRegex(align.AlignmentError, "TapData 模块根目录缺少主仓.*tapdata/tapdata"):
                 align.refresh_branch_cache(temporary, repositories, "tapdata/tapdata", "auto")
@@ -418,16 +431,16 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             "license_repository": "tapdata/tapdata-license",
             "keep_current_repositories": ["tapdata/tapdata-application"],
             "fixed_branches": {"tapdata/hazelcast": "release-v5.5.0"},
-            "independent_repositories": ["tapdata/t-layer3-test", "tapdata/docs"],
+            "independent_repositories": ["tapdata/t-layer3-test", "example/independent"],
             "same_name_repositories": [],
             "plugin_release_repositories": [],
             "display_fallback_branches": {"tapdata/tapdata-application": "main", "tapdata/t-layer3-test": "develop"},
         }
-        refs = {"tapdata/tapdata-application": {"main": "a"}, "tapdata/hazelcast": {"release-v5.5.0": "b"}, "tapdata/t-layer3-test": {"develop": "c"}, "tapdata/docs": {"main": "d"}}
+        refs = {"tapdata/tapdata-application": {"main": "a"}, "tapdata/hazelcast": {"release-v5.5.0": "b"}, "tapdata/t-layer3-test": {"develop": "c"}, "example/independent": {"main": "d"}}
         application = align.derived_target("tapdata/tapdata-application", "fix-xxx", rules, refs, Path("/pool/tapdata/tapdata"), {})
         hazelcast = align.derived_target("tapdata/hazelcast", "fix-xxx", rules, refs, Path("/pool/tapdata/tapdata"), {})
         tests = align.derived_target("tapdata/t-layer3-test", "fix-xxx", rules, refs, Path("/pool/tapdata/tapdata"), {})
-        unchanged = align.derived_target("tapdata/docs", "fix-xxx", rules, refs, Path("/pool/tapdata/tapdata"), {})
+        unchanged = align.derived_target("example/independent", "fix-xxx", rules, refs, Path("/pool/tapdata/tapdata"), {})
 
         self.assertEqual(("main", "fixed"), application[:2])
         self.assertEqual(("release-v5.5.0", "fixed"), hazelcast[:2])

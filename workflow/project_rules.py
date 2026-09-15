@@ -32,7 +32,8 @@ def canonical_repository_endpoint(value):
         return str(Path(text).resolve())
     if text.startswith("file://"):
         return "file://" + str(Path(text[7:]).resolve())
-    scp = re.fullmatch(r"(?:[^@/:]+@)?([^/:]+):(.+)", text)
+    # URL 必须走协议解析；https://host/path 不是 host:path 的 SSH 简写。
+    scp = None if "://" in text else re.fullmatch(r"(?:[^@/:]+@)?([^/:]+):(.+)", text)
     if scp:
         host, path = scp.groups()
         endpoint = "%s/%s" % (host.lower(), path.lstrip("/"))
@@ -145,6 +146,16 @@ def load_profile(root=ROOT, project="tapdata", workspace=None):
             for key in ("origin", "baseline_branch", "dev_branch")
         ):
             raise ValueError("项目仓库目录条目不完整：%s" % repository)
+    retired = catalog.get("retired_repositories", {})
+    if not isinstance(retired, dict) or set(retired) & set(catalog["repositories"]):
+        raise ValueError("退役仓库必须与活动仓库分开登记")
+    for repository, entry in retired.items():
+        if (not isinstance(repository, str)
+                or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
+                or any(part in (".", "..") for part in repository.split("/"))
+                or not isinstance(entry, dict) or set(entry) != {"origin"}
+                or not isinstance(entry["origin"], str) or not entry["origin"].strip()):
+            raise ValueError("退役仓库清理身份无效：%s" % repository)
     profile["repositories"] = catalog
     return profile
 

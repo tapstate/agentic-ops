@@ -18,7 +18,7 @@ MANIFEST_PATH = "contracts/workspace-state-compatibility.json"
 MANIFEST_SCHEMA_VERSION = 1
 # 新协议必须先在可由旧 Updater 到达的过渡版本中提升这里的能力值；该过渡版本的
 # minimum_updater_protocol_version 仍保持旧值，后续不兼容版本才能提升最低要求。
-UPDATER_PROTOCOL_VERSION = 1
+UPDATER_PROTOCOL_VERSION = 2
 INIT_PATH = Path(".agenticops/init.json")
 TASKS_PATH = Path(".agenticops/tasks")
 
@@ -250,35 +250,35 @@ def check_upgrade(product_root, current_ref, target_ref, allow_legacy_target=Fal
                 )
         except ValueError as error:
             reasons = ["工作空间无法锁定并核验：%s" % error]
-        if reasons and not (
-            len(reasons) == 1 and reasons[0].startswith("状态代际 ")
-        ):
+        if reasons:
             blocked.append((workspace, reasons))
     if blocked:
         lines = [
             "目标版本包含不兼容的工作空间状态变更，升级已停止。",
-            "请先在当前版本完成或停用任务、清理 linked worktree，并显式 purge 本地任务状态；这些操作不修改 Jira。",
+            "产品版本尚未切换：%s -> %s。" % (current_ref, target_ref),
+            "请先在当前版本完成或明确停用任务，导出并核验需保留材料，按确认范围清理 linked worktree，将旧工作空间受控解绑并重建；这些操作不修改 Jira。",
+            "先使用当前版本执行受控 workspace purge 注销旧绑定；即使任务为空也不能直接跨代际采用。升级成功后再明确初始化新工作空间，不自动删除源码池、Git 分支或导出材料。",
         ]
         for workspace, reasons in blocked:
             lines.append("工作空间：%s" % workspace)
             lines.extend("- %s" % reason for reason in reasons)
-        lines.append("处理完成后重新执行 agenticops update。")
+        lines.append("处理完成后重新执行 agenticops %s。" % (
+            "rollback" if allow_legacy_target else "update"))
         raise ValueError("\n".join(lines))
     return []
 
 
 def require_workspace_can_adopt(product_root, workspace, target_manifest=None):
-    """返回 repair 后应记录的代际；跨代际采用前要求工作空间已清空。"""
+    """repair 仅保留受支持代际；不把空的旧绑定在线转成新工位。"""
     target = target_manifest or load_manifest(product_root)
     current_epoch = workspace_epoch(Path(workspace), target)
     if current_epoch in target["supported_workspace_state_epochs"]:
         return current_epoch
     reasons = workspace_blockers(product_root, workspace, target)
-    if len(reasons) == 1 and reasons[0].startswith("状态代际 "):
-        return target["workspace_state_epoch"]
     raise ValueError(
-        "工作空间状态与当前产品不兼容。请先在原版本完成或停用任务、清理 linked worktree，"
-        "并显式 purge 本地任务状态；这些操作不修改 Jira。\n- %s"
+        "工作空间状态与当前产品不兼容，repair 不执行跨代际采用。"
+        "请恢复可处理该状态的原产品版本，保存材料后将这个旧工作空间受控解绑并重建；"
+        "不要手改 epoch 或任务状态，这些操作不修改 Jira。\n- %s"
         % "\n- ".join(reasons)
     )
 

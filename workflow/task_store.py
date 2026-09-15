@@ -248,8 +248,8 @@ def _require_workspace_epoch_supported(base, product_root):
         raise ValueError("工作空间状态兼容性清单或代际标记无效")
     if epoch not in supported:
         raise ValueError(
-            "工作空间状态代际 %s 与当前产品不兼容；请先执行 agenticops repair，"
-            "有残留任务时回退到原版本完成清理" % epoch
+            "工作空间状态代际 %s 与当前产品不兼容；请使用可处理该状态的原版本，"
+            "保存材料后将这个旧工作空间受控解绑并重建；repair 不执行跨代际采用" % epoch
         )
 
 

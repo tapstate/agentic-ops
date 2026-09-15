@@ -4,6 +4,12 @@
 
 本文是现役人读文档的结构入口。新建或调整文档时，先在本页或对应主题的子级总纲明确目标、范围、层级、职责和导航关系；再细化正文。仅当文档过长，或稳定内容被多个页面复用时，才拆分子文档。
 
+单任务研发工位的目标是让一个工作空间顺序完成完整工程准备、任务处理、归档和释放，并通过多个工位并行；尚未完成的任务也可先归档标记“未完成”，再按确认范围清理工位。[项目目标](strategy/project-goals.md)声明目标方向与现役边界；[v1 工程架构](architecture/agenticops-v1-architecture.md)继续描述已实现内核，并导航至[单任务工位设计合同](architecture/single-task-station.md)。后者集中定义尚未实现的身份、数据归属、双仓库清单、四操作、中断恢复、升级与可复用验收合同；因其需要独立实现评审而单篇维护，不把目标语义反写成现役能力。工作项、排期、评审进度和执行结果仍由 Jira 管理。
+
+完整工程基线的机器数据由 [engineering-baseline 契约](../contracts/engineering-baseline.schema.json)描述；设计合同的“双仓库信息”章节说明基础模块与 Git 核验的调用边界。基线值构造、只读对象检查不等于新工位生命周期已经接线，不能据此改写现有工作空间状态。
+
+TapData 的活动仓库范围以 `projects/tapdata/repositories.json` 的 `repositories` 为准；文档仓库 docs/docs-en 已解除活动登记，t-layer3-test 保留为验证依赖。`retired_repositories` 只保留旧 worktree 清理所需的可信 origin，不允许新任务准备或分支对齐；清理仍执行路径、Git 身份、租约和脏文件检查。解除登记不删除既有仓库、分支或任务材料。该兼容扩展不改变工作空间状态结构或 epoch；单任务工位目标的升级边界见[设计合同](architecture/single-task-station.md)。
+
 维护 Agent 的协作优化由[维护指引](maintenance-guide.md)说明模型依据、平台能力边界与验证方式，[Skill 维护规范](skill-maintenance.md)负责指令审查标准，根 `AGENTS.md` 保存日常协作约定，`skills/` 保存初始化与接管测试的具体指引。目标是在已有授权内持续完成工作，减少重复确认和重复验证；不改变产品门禁、授权或工作空间状态契约。
 
 TapData 的测试缺口分析、Java 影响范围和 Maven 模块测试属于项目构建与验证适配：[构建、测试与本地运行](../projects/tapdata/runbooks/build-test-and-local-run.md)说明用例判断依据、框架缺口处置、有效 Maven 模型的采集、跨仓消费关系、原生 Maven 执行清单、依赖 Jar 及报告核验的使用边界；项目脚本只准备清单和分析证据，不执行测试或改变任务阶段。项目任务 Skill 引导 Agent 在已有验收方案内自主分析，不替代共同质量检查点。

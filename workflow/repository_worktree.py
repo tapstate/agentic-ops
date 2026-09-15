@@ -781,6 +781,8 @@ def preflight_cleanup(workspace, task):
             raise ValueError("任务 worktree 不存在，拒绝清理：%s" % expected)
         entry = catalog.get("repositories", {}).get(item["repository"])
         if entry is None:
+            entry = catalog.get("retired_repositories", {}).get(item["repository"])
+        if entry is None:
             raise ValueError("项目仓库目录未登记，拒绝清理：%s" % item["repository"])
         main = repository_path(pool_root, item["repository"])
         if not main.is_dir():

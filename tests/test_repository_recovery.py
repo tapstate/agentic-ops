@@ -89,6 +89,34 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(rw._load_leases(self.product), [])
         self.assertIsNone(self.read()["repositories"][0]["worktree"])
 
+    def retire_repository(self):
+        catalog = self.product / "projects/tapdata/repositories.json"
+        doc = json.loads(catalog.read_text())
+        entry = doc["repositories"].pop(self.repo)
+        doc.setdefault("retired_repositories", {})[self.repo] = {"origin": entry["origin"]}
+        task_store._write_json_atomic(catalog, doc)
+
+    def test_retired_repository_can_only_clean_existing_worktree(self):
+        root = self.prepare()[0]
+        self.retire_repository()
+        rw.cleanup_task(self.ws, "TAP-123")
+        self.assertFalse(root.exists())
+        self.assertEqual([], rw._load_leases(self.product))
+        self.assertTrue(self.main.is_dir())
+        with self.assertRaisesRegex(ValueError, "未登记"):
+            self.prepare()
+
+    def test_retired_repository_cleanup_keeps_safety_checks(self):
+        root = self.prepare()[0]
+        self.retire_repository()
+        (root / "unsaved.txt").write_text("keep me", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "未提交"):
+            rw.cleanup_task(self.ws, "TAP-123")
+        self.git("-C", str(self.main), "remote", "set-url", "origin", "https://other.test/repo.git")
+        with self.assertRaisesRegex(ValueError, "origin"):
+            rw.preflight_cleanup(self.ws, self.read())
+        self.assertEqual("keep me", (root / "unsaved.txt").read_text())
+
     def test_old_branch_rejects_latest_before_creation_then_explicit_continuation_works(self):
         latest = self.advance_target()
         before = self.read()
