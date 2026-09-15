@@ -87,6 +87,44 @@ class SourceFixture:
 
 
 class SourceTests(SourceFixture, unittest.TestCase):
+    def test_readiness_failure_revokes_old_observation_without_changing_source(self):
+        from workflow import engineering_baseline as baseline
+        import json
+        self.prepare()
+        value = baseline.freeze({"id": "test", "revision": 1, "repositories": [self.name]}, self.catalog,
+            {self.name: {"verification": "verified", "ref_kind": "branch", "ref_name": "develop", "commit_sha": self.sha,
+                         "resolution_source": "fixture", "rule_version": "1"}}, {"fixture": True})
+        task = {"issue_key": "TAP-123", "run_id": self.op["run_id"], "facts": {"station_contract": 2},
+                "source_prepared": True, "engineering_baseline": value,
+                "task_repositories": {self.name: baseline.task_repository(value, self.name, "fix/ready", "develop", ["file.txt"], "unit")}}
+        self.git(self.repo, "checkout", "-b", "fix/ready")
+        task_store.write_task(self.ws, task)
+        with mock.patch.object(source, "git", wraps=source.git) as calls:
+            record = source.prepare_readiness(self.ws, task)
+            self.assertEqual(record["snapshot"]["digest"], source.require_readiness(self.ws, task))
+            self.assertFalse({call.args[1] for call in calls.call_args_list} & {"clean", "reset", "merge", "rebase", "restore", "push", "checkout"})
+        real_git = source.git
+        def fail_fetch(path, *args, **kwargs):
+            if args[0] == "fetch":
+                raise ValueError("network unavailable")
+            return real_git(path, *args, **kwargs)
+        with mock.patch.object(source, "git", side_effect=fail_fetch):
+            with self.assertRaisesRegex(ValueError, "network unavailable"):
+                source.prepare_readiness(self.ws, task)
+        with self.assertRaisesRegex(ValueError, "证据失效"):
+            source.require_readiness(self.ws, task)
+        stored = json.loads((self.ws / ".agenticops/evidence/source-readiness.json").read_text())
+        self.assertEqual(stored["status"], "refreshing")
+        self.assertEqual(self.git(self.repo, "rev-parse", "HEAD"), self.sha)
+        self.assertEqual(self.git(self.repo, "branch", "--show-current"), "fix/ready")
+        source.prepare_readiness(self.ws, task)
+        self.assertEqual(source.require_readiness(self.ws, task), record["snapshot"]["digest"])
+        self.git(self.repo, "push", "origin", "HEAD:refs/heads/fix/ready")
+        with self.assertRaisesRegex(ValueError, "远端工作分支"):
+            source.require_readiness(self.ws, task)
+        with self.assertRaisesRegex(ValueError, "远端工作分支"):
+            source.prepare_readiness(self.ws, task)
+
     def test_independent_clone_and_durable_fetch(self):
         self.prepare()
         source.identity(self.repo, str(self.remote))

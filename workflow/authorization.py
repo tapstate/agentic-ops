@@ -231,6 +231,8 @@ def cmd_grant(args):
             return 2
     path = task_store.authorization_path(args.dir, issue)
     path.parent.mkdir(parents=True, exist_ok=True)
+    from workflow import station_source
+    readiness_digest = station_source.require_readiness(args.dir, task)
     record = {
         "scope": "task_execution",
         "status": "active",
@@ -246,6 +248,8 @@ def cmd_grant(args):
         "granted_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "expires_at_epoch": time.time() + args.ttl_hours * 3600,
     }
+    if readiness_digest:
+        record["source_readiness_digest"] = readiness_digest
     task_store._write_json_atomic(path, record)
     print("已签发授权：%s" % path)
     print(json.dumps(record, ensure_ascii=False, indent=2))

@@ -1,5 +1,7 @@
 # AgenticOps 文档总纲
 
+任务退出与编码准备由[工位合同](architecture/single-task-station.md)统一定义：清理预检、归档与二次确认、活动材料清单、外部分支及 PR 的原生处置、编码前仓库关系核验。项目 Skill 负责用户交互，Workflow 负责可执行检查与恢复；审计档案不用于恢复开发。
+
 源码池仅承担下载加速：[工位合同](architecture/single-task-station.md)定义先缓存后独立源码的准备与恢复边界，[工位源码与材料](usage/workspace-materials.md)说明缓存位置、复用与清理；项目目标保持工位独立性。
 
 原版本清理器自身失效时的一次性空工位恢复归入[维护指引](maintenance-guide.md#旧版空工位的一次性恢复)，只说明维护面导出与重建边界，不作为产品升级兼容入口。
