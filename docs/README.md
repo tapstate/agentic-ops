@@ -1,5 +1,7 @@
 # AgenticOps 文档总纲
 
+TapData 的按需 Wiki 阅读由 [tapdata-wiki](../projects/tapdata/skills/tapdata-wiki/SKILL.md) 说明检索与源码核验边界；项目 Profile 仅引用中央登记的共享仓库。[架构总纲](architecture/agenticops-v1-architecture.md)定义中央共享材料归属；[工位源码与材料](usage/workspace-materials.md)负责共享仓库准备、显式更新和故障处理，不引入任务知识快照或自动刷新。
+
 任务退出与编码准备由[工位合同](architecture/single-task-station.md)统一定义：清理预检、归档与二次确认、活动材料清单、外部分支及 PR 的原生处置、编码前仓库关系核验。项目 Skill 负责用户交互，Workflow 负责可执行检查与恢复；审计档案不用于恢复开发。
 
 源码池仅承担下载加速：[工位合同](architecture/single-task-station.md)定义先缓存后独立源码的准备与恢复边界，[工位源码与材料](usage/workspace-materials.md)说明缓存位置、复用与清理；项目目标保持工位独立性。

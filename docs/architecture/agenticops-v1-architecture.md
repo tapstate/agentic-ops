@@ -57,6 +57,8 @@ Agent → Workflow 状态变更入口 → 持锁校验 → 状态与证据
 
 `.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期配置外，它可保存由本 Product Root 成功初始化过的工作空间提示索引；该索引只用于更新后提示接线待刷新，不发现、不扫描、更不自动修改业务目录。生命周期操作使用 `.local/lifecycle.lock/` 防止同一产品根目录并发更新或回退。更新源码后，当前源码内核立即生效；已启动 Agent 需要重启，普通生成接线由下一次 `start` 刷新，也可通过 `doctor` 和 `repair` 检查、修复。检测到托管 Hook 退役时，start 和普通 repair 保留现场并报告迁移范围；用户明确选择 `repair --accept-checkpoint-migration` 后，先校验全部旧 Hook 的归属哈希，再移除并刷新。此选择不是持久门禁开关，不会改写 task/run 或授权记录。`rollback` 只属于使用工作面；维护工作面保留正常 Git 历史和发布治理，不由产品入口自动移动源码分支。
 
+Product Root 的 `.local/source-pool` 是下载缓存；`.local/shared-repositories/<owner>/<repo>` 是与缓存对象独立的完整共享参考仓库，由 `bootstrap/shared-repositories.json` 登记、Project Profile 引用。Bootstrap 的通用 ensure/update/status 仅管理显式准备、快进更新和本地核验；初始化、接管、任务开始及查询不自动刷新。共享参考仓不进入工作空间任务基线、状态或 epoch，不随 workspace purge 清理，不承担业务事实源职责。使用边界见[工位源码与材料](../usage/workspace-materials.md)。
+
 ## 5. 单任务工位
 
 一个工作空间绑定一个 Project，当前任务存入 .agenticops/current-task.json；没有当前任务且无未完成 operation 才为空闲。source 中每个仓库均有独立 Git 元数据，不使用共享对象依赖。config 保存持久配置，runtime 保存唯一活动环境，archive 保存不可变正式档案及追加回执。

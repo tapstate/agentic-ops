@@ -12,7 +12,14 @@ from workflow import project_rules
 
 def pool_path(workspace, name, origin):
     binding = json.loads((Path(workspace) / ".agenticops/workspace.json").read_text())
-    root = Path(binding["product_root"]).resolve()
+    return pool_path_at_root(binding["product_root"], name, origin)
+
+
+def pool_path_at_root(root, name, origin):
+    root = Path(root).resolve()
+    if (not isinstance(name, str) or not name or Path(name).is_absolute()
+            or any(part in ("", ".", "..") for part in name.split("/"))):
+        raise ValueError("源码池仓库名称无效")
     endpoint = project_rules.canonical_repository_endpoint(origin)
     if not endpoint:
         raise ValueError("源码池 origin 无效")
@@ -47,7 +54,14 @@ def identity(path, origin, git):
 
 @contextmanager
 def refreshed(workspace, name, origin, git):
-    path = pool_path(workspace, name, origin)
+    binding = json.loads((Path(workspace) / ".agenticops/workspace.json").read_text())
+    with refreshed_at_root(binding["product_root"], name, origin, git) as path:
+        yield path
+
+
+@contextmanager
+def refreshed_at_root(root, name, origin, git):
+    path = pool_path_at_root(root, name, origin)
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(str(path) + ".lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:

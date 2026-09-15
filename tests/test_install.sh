@@ -448,13 +448,20 @@ import sys
 from pathlib import Path
 
 workspace = Path(sys.argv[1])
-skill = Path(sys.argv[2]) / "projects/tapdata/skills/tapdata-task"
-for relative in (".agents/skills/tapdata-task", ".claude/skills/tapdata-task"):
-    link = workspace / relative
-    assert link.is_symlink()
-    assert not Path(os.readlink(link)).is_absolute()
-    assert link.resolve() == skill.resolve()
-    assert (link / "SKILL.md").is_file()
+import json
+product = Path(sys.argv[2])
+assert json.loads((product / "projects/tapdata/profile.json").read_text())["wiki_repository"] == "tapstate/wiki"
+assert json.loads((product / "bootstrap/shared-repositories.json").read_text())["repositories"]["tapstate/wiki"] == {"origin": "git@github.com:tapstate/wiki.git", "branch": "main"}
+assert (product / "bootstrap/shared_repositories.py").is_file()
+assert not (product / ".local/shared-repositories").exists()
+for name in ("tapdata-task", "tapdata-wiki"):
+    skill = Path(sys.argv[2]) / "projects/tapdata/skills" / name
+    for discovery in (".agents/skills", ".claude/skills"):
+        link = workspace / discovery / name
+        assert link.is_symlink()
+        assert not Path(os.readlink(link)).is_absolute()
+        assert link.resolve() == skill.resolve()
+        assert (link / "SKILL.md").is_file()
 PY
 python3 - "$install_root" <<'PY'
 import ast

@@ -86,6 +86,7 @@ for file in \
   projects/tapdata/quality.json docs/usage/quality-checkpoints.md tests/test_quality.py tests/test_jira_status.py tests/test_jira_watermark.py \
   projects/tapdata/profile.json projects/tapdata/repositories.json projects/tapdata/admission.json \
   projects/tapdata/skills/tapdata-task/SKILL.md \
+  projects/tapdata/skills/tapdata-wiki/SKILL.md bootstrap/shared-repositories.json bootstrap/shared_repositories.py \
   skills/ao-test-takeover/SKILL.md skills/ao-ws-init/SKILL.md \
   adapters/workspace/AGENTS.md adapters/workspace/agenticops adapters/agents/claude/templates/CLAUDE.md \
   adapters/runtime.py adapters/tools/classifier.py adapters/tools/git_push_syntax.py \
