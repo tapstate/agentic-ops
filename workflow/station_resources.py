@@ -70,13 +70,88 @@ def verify_stopped(base, task, require_cleaned=False):
             if result.stdout.strip() == item["started_at"]:
                 raise ValueError("登记写入进程仍存活，请先按身份核验后停止：%s" % pid)
         elif item.get("kind") == "external":
-            accepted = ("cleaned",) if require_cleaned else ("quiesced", "cleaned")
+            terminal = "retained" if item.get("action") == "retain" else "cleaned"
+            accepted = (terminal,) if require_cleaned else ("quiesced", terminal)
             if item.get("status") not in accepted or not item.get("readback_ref"):
                 raise ValueError("外部资源尚未回读%s，请人工处理：%s" % (
                     "清理完成" if require_cleaned else "停止写入", item.get("id")))
 
 
-def plan(base, task):
+def active_files(base):
+    """活动材料的授权指纹；资源回读单独校验，不让回读改变已确认身份。"""
+    root = store.state_path(base)
+    result = {}
+    for name in ("authorization.json", "evidence"):
+        target = root / name
+        paths = [target] + sorted(target.rglob("*")) if target.is_dir() else [target]
+        for path in paths:
+            if path.is_symlink() or (path.exists() and not path.is_file() and not path.is_dir()):
+                raise ValueError("活动材料含符号链接或特殊对象")
+            if path.is_file():
+                data = path.read_bytes()
+                if path == root / "evidence/resources.json":
+                    document = json.loads(data)
+                    document.setdefault("schema_version", 1)
+                    for entry in document.get("entries", []):
+                        if entry.get("kind") == "external":
+                            entry.pop("status", None)
+                            entry.pop("readback_ref", None)
+                    data = json.dumps(document, sort_keys=True, ensure_ascii=False).encode("utf-8")
+                result[path.relative_to(root).as_posix()] = hashlib.sha256(data).hexdigest()
+    return result
+
+
+def task_fingerprint(task):
+    """排除本次退出自身产生的 outcome/archive/revision，绑定开发事实与范围。"""
+    return baseline.digest({"issue_key": task["issue_key"], "run_id": task["run_id"],
+        "facts": task.get("facts"), "pending": task.get("pending"), "history": task.get("history"),
+        "engineering_baseline": task.get("engineering_baseline"),
+        "bindings": {name: {key: binding.get(key) for key in ("work_branch", "target_branch", "approved_scope", "verification_method", "baseline_entry_digest")}
+                     for name, binding in task.get("task_repositories", {}).items()}})
+
+
+def verify_active(base, cleanup_plan, operation):
+    expected = cleanup_plan["active_state"]["files"]
+    actual = active_files(base)
+    name = "clear-active:" + str(len(operation.get("plan_revisions", []))) + ":" + cleanup_plan["digest"]
+    step = operation.get("steps", {}).get(name)
+    if step is None:
+        valid = actual == expected
+    elif step.get("receipt") is not None:
+        valid = not actual
+    else:
+        valid = all(name in expected and expected[name] == sha for name, sha in actual.items())
+    if not valid:
+        raise ValueError("活动材料变化，需要重新确认清理计划")
+
+
+def preflight(base, task):
+    """只读预检允许写入者仍运行；错误作为阻塞展示，不推定现场可清理。"""
+    operation = operations.read(base)
+    value = {"issue_key": task["issue_key"], "run_id": task["run_id"],
+             "revision": task.get("_revision"), "stage": task.get("stage"),
+             "outcome": task.get("outcome"), "pending": task.get("pending"),
+             "archive_ref": task.get("archive_ref"),
+             "operation": {k: operation[k] for k in ("operation_id", "kind", "status", "phase")} if operation else None,
+             "decision_required": not bool(task.get("archive_ref")), "blockers": [],
+             "task_repositories": task.get("task_repositories", {})}
+    try:
+        value["resources"] = inventory(base, task)
+        value["active_files"] = active_files(base)
+        value["cleanup_plan"] = plan(base, task)
+    except (ValueError, OSError) as error:
+        value["blockers"].append(str(error))
+    value["digest"] = baseline.digest(value)
+    return value
+
+
+def plan(base, task, version=None):
+    if version is None:
+        operation = operations.read(base)
+        previous = operation.get("cleanup_plan", {}) if operation and operation.get("status") != "done" else {}
+        version = previous.get("schema_version", 2 if task.get("facts", {}).get("station_contract") == 2 else 1)
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError("未知清理计划版本，拒绝猜测恢复")
     verify_stopped(base, task)
     managed = {}
     for item in inventory(base, task):
@@ -132,9 +207,15 @@ def plan(base, task):
                                      "before": fingerprint(target), "repository": name,
                                      "file": filename, "head": head,
                                      "before_index": source.git(path, "ls-files", "--stage", "-z", "--", filename).stdout}
-    value = {"schema_version": 1, "run_id": task["run_id"],
+    value = {"schema_version": version, "run_id": task["run_id"],
              "external": [item for item in inventory(base, task) if item.get("kind") == "external"],
              "entries": [entries[key] for key in sorted(entries)]}
+    if version == 2:
+        value["active_state"] = {"files": active_files(base), "unbind_run": task["run_id"], "task_digest": task_fingerprint(task)}
+        value["retained"] = ["config", "source repositories and unselected refs", "archive", ".agenticops/operation.json", ".agenticops/workspace.json", ".agenticops/init.json"]
+        value["external"] = [{k: v for k, v in item.items() if k not in ("status", "readback_ref")}
+                             for item in value["external"]]
+        value["external_confirmation_digest"] = baseline.digest({"run_id": task["run_id"], "external": value["external"]})
     value["digest"] = baseline.digest(value)
     return value
 
@@ -147,15 +228,22 @@ def clean(base, task, cleanup_plan, confirmed_digest, operation):
         raise ValueError("清理确认与当前 run 或精确清单不匹配")
     if not task.get("archive_ref"):
         raise ValueError("正式归档未绑定，不能清理")
+    if cleanup_plan.get("schema_version") == 2:
+        if cleanup_plan["active_state"]["task_digest"] != task_fingerprint(task):
+            raise ValueError("任务事实变化，需要重新确认清理计划")
+        verify_active(base, cleanup_plan, operation)
+        if cleanup_plan["external"] and operation.get("external_confirmation_digest", operation["request"].get("external_confirmation_digest")) != cleanup_plan["external_confirmation_digest"]:
+            raise ValueError("外部资源需要再次确认精确处置摘要")
     verify_stopped(base, task, require_cleaned=True)
     external = {item["id"]: item for item in inventory(base, task) if item.get("kind") == "external"}
     for entry in cleanup_plan.get("external", []):
         name = "external:%s:%s:%s" % (len(operation.get("plan_revisions", [])), cleanup_plan["digest"], baseline.digest(entry["id"]))
-        step = operations.intent(base, operation, name, entry, {"id": entry["id"], "status": "cleaned"})
+        terminal = "retained" if entry.get("action") == "retain" else "cleaned"
+        step = operations.intent(base, operation, name, entry, {"id": entry["id"], "status": terminal})
         actual = external.get(entry["id"])
         if actual is None and step["receipt"] is not None:
             continue  # 活动登记已在清理末尾回收，持久回执仍随操作留存。
-        if (not actual or actual.get("status") != "cleaned" or not actual.get("readback_ref")
+        if (not actual or actual.get("status") != terminal or not actual.get("readback_ref")
                 or {k: v for k, v in actual.items() if k not in ("status", "readback_ref")}
                 != {k: v for k, v in entry.items() if k not in ("status", "readback_ref")}):
             raise ValueError("外部资源清理回读与确认清单不一致")
@@ -279,7 +367,8 @@ def register(base, issue, run_id, entries, expected_operation_id=None):
                 raise ValueError("资源必须登记生产来源")
             if (closed or recovery) and not (recovery and entry.get("kind") == "file"):
                 previous = merged.get(key(entry))
-                if (entry.get("kind") != "external" or not previous or entry.get("status") != "cleaned"
+                terminal = "retained" if entry.get("action") == "retain" else "cleaned"
+                if (entry.get("kind") != "external" or not previous or entry.get("status") != terminal
                         or {k: v for k, v in entry.items() if k not in ("status", "readback_ref")}
                         != {k: v for k, v in previous.items() if k not in ("status", "readback_ref")}):
                     raise ValueError("归档后只能回读已登记外部资源的精确清理结果")
@@ -302,8 +391,15 @@ def register(base, issue, run_id, entries, expected_operation_id=None):
                     raise ValueError("进程必须登记 PID、启动时间、工作目录及可执行程序")
             elif entry.get("kind") != "external":
                 raise ValueError("未知资源类型")
-            elif not entry.get("id") or (entry.get("status") in ("quiesced", "cleaned") and not entry.get("readback_ref")):
+            elif not entry.get("id") or (entry.get("status") in ("quiesced", "cleaned", "retained") and not entry.get("readback_ref")):
                 raise ValueError("外部资源必须有身份，清理完成必须提供回读依据")
+            if entry.get("kind") == "external" and ("action" in entry or task.get("facts", {}).get("station_contract") == 2):
+                if entry.get("action") not in ("retain", "delete", "close"):
+                    raise ValueError("外部资源处置必须为 retain/delete/close")
+                if not isinstance(entry.get("before"), dict) or not entry["before"]:
+                    raise ValueError("外部资源处置必须记录操作前身份和 SHA/状态")
+                if entry["action"] != "retain" and entry["before"].get("protected") is not False:
+                    raise ValueError("删除前必须核验对象不受保护")
             merged[key(entry)] = entry
         store._write_json_atomic(store.task_directory(base, issue) / "resources.json",
                                  {"schema_version": 1, "run_id": run_id, "entries": list(merged.values())})

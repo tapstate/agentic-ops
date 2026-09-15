@@ -12,6 +12,7 @@ class ResourceTests(SourceFixture, unittest.TestCase):
         super().setUp()
         self.prepare()
         self.task = {"issue_key": "TAP-123", "run_id": self.op["run_id"], "archive_ref": {"digest": "test"},
+                     "facts": {"station_contract": 2},
                      "engineering_baseline": {"status": "frozen", "repositories": {self.name: {"origin": str(self.remote), "commit_sha": self.sha, "path": "source/" + self.name}}},
                      "task_repositories": {self.name: {"target_branch": "develop", "work_branch": "fix/test", "approved_scope": ["file.txt"], "verification_method": "unit", "baseline_entry_digest": "test"}}}
         task_store.write_task(self.ws, self.task)
@@ -114,15 +115,100 @@ class ResourceTests(SourceFixture, unittest.TestCase):
                 resources.verify_stopped(self.ws, self.task)
 
     def test_quiesced_external_can_archive_then_confirm_cleanup(self):
-        entry = {"kind": "external", "id": "test-data", "producer": "test", "status": "quiesced", "readback_ref": "stopped-proof"}
+        entry = {"kind": "external", "id": "test-data", "producer": "test", "status": "quiesced", "readback_ref": "stopped-proof",
+                 "action": "delete", "before": {"protected": False, "state": "present"}}
         task_store._write_json_atomic(self.ws / ".agenticops/evidence/resources.json", {
             "run_id": self.task["run_id"], "entries": [entry]})
         plan = resources.plan(self.ws, self.task)
+        self.op["external_confirmation_digest"] = plan["external_confirmation_digest"]
         with self.assertRaisesRegex(ValueError, "清理完成"):
             resources.clean(self.ws, self.task, plan, plan["digest"], self.op)
         resources.register(self.ws, self.task["issue_key"], self.task["run_id"], [dict(entry, status="cleaned", readback_ref="deleted-proof")])
         resources.clean(self.ws, self.task, plan, plan["digest"], self.op)
         self.assertTrue(any(name.startswith("external:") for name in self.op["steps"]))
+
+    def test_active_evidence_drift_preserves_runtime(self):
+        path = self.ws / "runtime/output"
+        path.write_text("keep until confirmed")
+        self.register_files("runtime/output")
+        plan = resources.plan(self.ws, self.task)
+        task_store._write_json_atomic(self.ws / ".agenticops/evidence/late.json", {"late": True})
+        with self.assertRaisesRegex(ValueError, "活动材料变化"):
+            resources.clean(self.ws, self.task, plan, plan["digest"], self.op)
+        self.assertTrue(path.exists())
+
+    def test_external_readback_does_not_change_confirmation_scope(self):
+        entry = {"kind": "external", "id": "pr:owner/repo:1", "producer": "test", "status": "quiesced",
+                 "readback_ref": "before", "action": "close", "before": {"head": "a" * 40, "protected": False}}
+        task_store._write_json_atomic(self.ws / ".agenticops/evidence/resources.json", {"run_id": self.task["run_id"], "entries": [entry]})
+        plan = resources.plan(self.ws, self.task)
+        resources.register(self.ws, self.task["issue_key"], self.task["run_id"], [dict(entry, status="cleaned", readback_ref="closed")])
+        self.assertEqual(plan, resources.plan(self.ws, self.task))
+        with self.assertRaisesRegex(ValueError, "再次确认"):
+            resources.clean(self.ws, self.task, plan, plan["digest"], self.op)
+        self.op["external_confirmation_digest"] = plan["external_confirmation_digest"]
+        resources.clean(self.ws, self.task, plan, plan["digest"], self.op)
+
+    def test_active_disappearance_requires_persisted_delete_intent(self):
+        evidence = self.ws / ".agenticops/evidence/proof.json"
+        evidence.parent.mkdir(parents=True, exist_ok=True)
+        evidence.write_text("proof")
+        plan = resources.plan(self.ws, self.task)
+        evidence.unlink()
+        with self.assertRaisesRegex(ValueError, "活动材料变化"):
+            resources.verify_active(self.ws, plan, self.op)
+        name = "clear-active:0:" + plan["digest"]
+        self.op["steps"][name] = {"receipt": None}
+        resources.verify_active(self.ws, plan, self.op)
+        evidence.write_text("changed")
+        with self.assertRaisesRegex(ValueError, "活动材料变化"):
+            resources.verify_active(self.ws, plan, self.op)
+        self.op["steps"][name]["receipt"] = {"done": True}
+        evidence.write_text("proof")
+        with self.assertRaisesRegex(ValueError, "活动材料变化"):
+            resources.verify_active(self.ws, plan, self.op)
+
+    def test_existing_v1_plan_keeps_original_shape(self):
+        self.op.update(kind="clean", cleanup_plan=resources.plan(self.ws, self.task, version=1))
+        station_operation.save(self.ws, self.op)
+        self.assertEqual(resources.plan(self.ws, self.task), self.op["cleanup_plan"])
+
+    def test_legacy_run_new_exit_keeps_v1(self):
+        self.task["facts"] = {}
+        for kind in ("takeover", "archive", "clean", "release"):
+            self.op.update(kind=kind, status="done")
+            station_operation.save(self.ws, self.op)
+            self.assertEqual(resources.plan(self.ws, self.task)["schema_version"], 1)
+
+    def test_new_external_requires_action_and_before(self):
+        self.task["archive_ref"] = None
+        task_store.write_task(self.ws, self.task)
+        station_operation.finish(self.ws, self.op)
+        entry = {"kind": "external", "id": "branch:test", "producer": "test", "status": "quiesced", "readback_ref": "proof"}
+        for extra in ({}, {"action": "delete"}, {"action": "delete", "before": {"head": self.sha}},
+                      {"action": "delete", "before": {"protected": True}}):
+            with self.assertRaises(ValueError):
+                resources.register(self.ws, self.task["issue_key"], self.task["run_id"], [dict(entry, **extra)])
+        self.task["facts"] = {}
+        task_store.write_task(self.ws, self.task)
+        resources.register(self.ws, self.task["issue_key"], self.task["run_id"], [entry])
+
+    def test_external_retain_and_protected_delete(self):
+        self.task["archive_ref"] = None
+        task_store.write_task(self.ws, self.task)
+        station_operation.finish(self.ws, self.op)
+        entry = {"kind": "external", "id": "branch:owner/repo:main", "producer": "test", "status": "quiesced",
+                 "readback_ref": "protected-main", "action": "delete", "before": {"protected": True, "head": "a" * 40}}
+        with self.assertRaisesRegex(ValueError, "不受保护"):
+            resources.register(self.ws, self.task["issue_key"], self.task["run_id"], [entry])
+        entry.update(action="retain", status="retained")
+        resources.register(self.ws, self.task["issue_key"], self.task["run_id"], [entry])
+        plan = resources.plan(self.ws, self.task)
+        self.task["archive_ref"] = {"digest": "test"}
+        self.op["external_confirmation_digest"] = plan["external_confirmation_digest"]
+        resources.clean(self.ws, self.task, plan, plan["digest"], self.op)
+        receipt = next(step["receipt"] for name, step in self.op["steps"].items() if name.startswith("external:"))
+        self.assertEqual(receipt["status"], "retained")
 
     def test_recovery_registration_requires_exact_current_operation(self):
         self.op["kind"] = "clean"

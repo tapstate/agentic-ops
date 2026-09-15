@@ -182,3 +182,96 @@ def inspect(workspace, value):
                         "branch": git(path, "branch", "--show-current").stdout.strip(),
                         "dirty": bool(git(path, "status", "--porcelain", "--untracked-files=all").stdout)}
     return result
+
+
+def readiness_snapshot(workspace, task):
+    """只读核对 B/W/T；远端查询结果必须与已下载对象一致。"""
+    value = task["engineering_baseline"]
+    observed = inspect(workspace, value)
+    if not task.get("source_prepared") or not task.get("task_repositories"):
+        raise ValueError("完整工程及任务分支尚未准备")
+    from workflow import station_resources
+    managed = {item["path"] for item in station_resources.inventory(workspace, task) if item.get("kind") == "file"}
+    result = {}
+    for name, state in observed.items():
+        path = repository_path(workspace, name)
+        require_clean(path)
+        ignored = git(path, "ls-files", "--others", "--ignored", "--exclude-standard", "-z").stdout.split("\0")
+        if any(filename and "source/" + name + "/" + filename not in managed for filename in ignored):
+            raise ValueError("源码含未登记 ignored 产物：" + name)
+        entry = value["repositories"][name]
+        binding = task["task_repositories"].get(name)
+        if not binding:
+            if state["head"] != entry["commit_sha"] or state["branch"]:
+                raise ValueError("配套仓偏离冻结基线：" + name)
+            continue
+        if state["branch"] != binding["work_branch"]:
+            raise ValueError("工作分支与登记不一致：" + name)
+        base = entry["commit_sha"]
+        if git(path, "merge-base", "--is-ancestor", base, state["head"], check=False).returncode:
+            raise ValueError("工作分支不从冻结基线派生：" + name)
+        ref = "refs/heads/" + baseline.ref_name(binding["target_branch"])
+        rows = git(path, "ls-remote", "--exit-code", "--refs", "origin", ref).stdout.splitlines()
+        if len(rows) != 1 or rows[0].split()[1] != ref:
+            raise ValueError("远端目标分支缺失或不明确：" + name)
+        target = rows[0].split()[0]
+        if git(path, "rev-parse", "--verify", "refs/remotes/origin/" + binding["target_branch"]).stdout.strip() != target:
+            raise ValueError("远端引用变化，请重新执行 source-readiness：" + name)
+        if target != base and git(path, "merge-base", "--is-ancestor", base, target, check=False).returncode:
+            raise ValueError("目标分支与冻结基线分叉或回退：" + name)
+        work_ref = "refs/heads/" + baseline.ref_name(binding["work_branch"])
+        remote_work = git(path, "ls-remote", "--refs", "origin", work_ref).stdout.splitlines()
+        if len(remote_work) > 1 or (remote_work and remote_work[0].split()[1] != work_ref):
+            raise ValueError("远端工作分支事实不明确：" + name)
+        remote_head = remote_work[0].split()[0] if remote_work else None
+        continuation = value.get("resolution_input", {}).get("continuations", {}).get(name)
+        expected_remote = continuation["expected_head"] if continuation else None
+        if remote_head is not None and remote_head != expected_remote:
+            raise ValueError("远端工作分支与接管合同不一致：" + name)
+        result[name] = dict(state, target_branch=binding["target_branch"], target_sha=target,
+                            remote_work_sha=remote_head, baseline_sha=base, relation="equal" if target == base else "advanced")
+    snapshot = {"run_id": task["run_id"], "baseline_digest": value["digest"],
+                "bindings": {name: {key: binding[key] for key in ("work_branch", "target_branch", "approved_scope", "verification_method")}
+                             for name, binding in task["task_repositories"].items()}, "repositories": result}
+    snapshot["digest"] = baseline.digest(snapshot)
+    return snapshot
+
+
+def prepare_readiness(workspace, task):
+    """持锁调用；先使旧证据失效，逐仓记录 fetch 意图，再发布可核对结果。"""
+    from workflow import task_store
+    path = task_store.task_directory(workspace, task["issue_key"]) / "source-readiness.json"
+    record = {"run_id": task["run_id"], "status": "refreshing", "fetches": {}}
+    task_store._write_json_atomic(path, record)
+    for name, binding in task["task_repositories"].items():
+        repository = repository_path(workspace, name)
+        identity(repository, task["engineering_baseline"]["repositories"][name]["origin"])
+        require_clean(repository)
+        branch = baseline.ref_name(binding["target_branch"])
+        record["fetches"][name] = {"target_branch": branch, "status": "intent"}
+        task_store._write_json_atomic(path, record)
+        git(repository, "fetch", "--no-tags", "origin", "+refs/heads/" + branch + ":refs/remotes/origin/" + branch)
+        record["fetches"][name]["status"] = "done"
+        task_store._write_json_atomic(path, record)
+    snapshot = readiness_snapshot(workspace, task)
+    record.update(status="observed", snapshot=snapshot)
+    task_store._write_json_atomic(path, record)
+    return record
+
+
+def require_readiness(workspace, task):
+    from workflow import task_store
+    import json
+    if task.get("facts", {}).get("station_contract") != 2:
+        return None  # 已有 run 沿原合同恢复，新接管采用新检查。
+    path = task_store.task_directory(workspace, task["issue_key"]) / "source-readiness.json"
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("编码前须执行 source-readiness")
+    record = json.loads(path.read_text())
+    snapshot = readiness_snapshot(workspace, task)
+    if record.get("status") != "observed" or record.get("snapshot") != snapshot:
+        raise ValueError("仓库就绪证据失效，请重新执行 source-readiness")
+    if any(item["relation"] == "advanced" for item in snapshot["repositories"].values()):
+        if record.get("accepted_digest") != snapshot["digest"] or not record.get("decision_ref"):
+            raise ValueError("目标分支已推进；请确认沿冻结基线开发并在 PR 前同步，或归档清理后重新接管")
+    return snapshot["digest"]

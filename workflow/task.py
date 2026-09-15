@@ -114,6 +114,36 @@ def cmd_cleanup_plan(args):
     return 0
 
 
+def cmd_cleanup_preflight(args):
+    from workflow import station_resources
+    with task_store.task_state_lock(args.dir):
+        task = task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
+        print(json.dumps(station_resources.preflight(args.dir, task), ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_source_readiness(args):
+    with task_store.task_state_lock(args.dir):
+        task = task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
+        task_store.require_development(args.dir, task)
+        if task["stage"] not in ("task_intake", "design_review"):
+            raise ValueError("仓库就绪检查只在开始编码前执行")
+        if args.confirm_digest:
+            path = task_store.task_directory(args.dir, task["issue_key"]) / "source-readiness.json"
+            if path.is_symlink():
+                raise ValueError("就绪证据不能是符号链接")
+            record = json.loads(path.read_text())
+            snapshot = station_source.readiness_snapshot(args.dir, task)
+            if record.get("status") != "observed" or record.get("snapshot") != snapshot or args.confirm_digest != snapshot["digest"] or not args.decision_ref:
+                raise ValueError("就绪确认缺失或仓库事实变化")
+            record.update(accepted_digest=args.confirm_digest, decision_ref=args.decision_ref)
+            task_store._write_json_atomic(path, record)
+        else:
+            record = station_source.prepare_readiness(args.dir, task)
+        print(json.dumps(record, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_cleanup_amend(args):
     from workflow import station
     request = json.loads(Path(args.input).read_text(encoding="utf-8"))
@@ -180,6 +210,8 @@ def cmd_snapshot(args):
 
 @task_store.task_mutation
 def cmd_record(args):
+    if args.key == "station_contract":
+        raise ValueError("station_contract 由接管入口管理，不能通过 record 修改")
     task = require(args.dir, args.issue_key)
     if args.key == repair_strategy.OVERRIDE_FACT:
         raise ValueError("修复策略只允许通过 repair-strategy set/clear 修改")
@@ -391,6 +423,14 @@ def cmd_repository_record(args):
 def _check_advance(task, target, base, spec):
     """返回阻止推进的原因列表。"""
     problems = []
+    if target == "implementation":
+        try:
+            ready_digest = station_source.require_readiness(base, task)
+            auth, _ = engine.load_authorization_for_issue(base, task["issue_key"])
+            if ready_digest and (auth or {}).get("source_readiness_digest") != ready_digest:
+                raise ValueError("编码授权未绑定当前仓库就绪摘要")
+        except (ValueError, OSError) as error:
+            problems.append("编码前仓库未就绪：%s" % error)
     if target in ("design_review", "implementation"):
         problems.extend(issue_versions.problems(base, task))
     flexible = project_rules.class_spec(spec, task["task_class"]).get("quality_mode") == "recorded_decision"
@@ -414,7 +454,7 @@ def _check_advance(task, target, base, spec):
                 % (task["issue_key"], "、".join(f["label"] for f in missing))
             )
         try:
-            from workflow import engineering_baseline, station_source
+            from workflow import engineering_baseline
             engineering_baseline.validate(task.get("engineering_baseline"))
             if not task.get("source_prepared"):
                 raise ValueError("完整工程尚未准备完成")
@@ -542,7 +582,7 @@ def cmd_interaction_path(args):
 NEXT_GUIDE = {
     "waiting_takeover": "读取 Jira 初始快照并准备本地版本水印；尽力回写，失败记录警告后继续 advance 进入 task_intake",
     "task_intake": "checklist/record 完成准入 -> repository add 登记修改范围及工作分支（完整工程已在 takeover 准备）-> 源码分析 -> advance；Jira 状态同步失败记录警告并继续",
-    "design_review": "基于 source 完整工程形成方案 -> 研发工程师确认 -> workflow/authorization.py grant -> advance；Jira 尽力回写，失败不阻断",
+    "design_review": "基于 source 完整工程形成方案 -> 新任务 source-readiness 核验仓库及目标分支 -> 研发工程师确认 -> workflow/authorization.py grant -> advance；Jira 尽力回写，失败不阻断",
     "implementation": "在授权范围内实现和测试；Q2 已选修复后检查项在最终 SHA 符合预期时自动记录 Q3，继续已授权提交/推送和 Draft PR；Jira 同步失败列警告，PR 后统一总结",
     "pr_review": "完成 Q4 关联用例验收后 advance；进入 ci_validation 后用 jira_status.py 在 tests_passed 节点同步尝试一次 Tests Passed",
     "ci_validation": "完成 Tests Passed 同步尝试，用 workflow/ci.py watch 更新每个 PR Head 的 Checks，再用 pr_ready.py 核对测试任务、PR Checks 和 Q1-Q4",
@@ -551,6 +591,9 @@ NEXT_GUIDE = {
 
 
 def _print_next(task):
+    if task.get("archive_ref"):
+        print("任务已归档，仅供审计；下一步：回读 cleanup-plan 并确认后%s。" % (" release" if task.get("outcome") == "completed" else " clean"))
+        return
     if not task.get("run_id"):
         print("旧状态缺少 run_id：可查看历史，不得直接发起流程写入；需人工确认恢复方案。")
         return
@@ -566,6 +609,11 @@ def cmd_next(args):
     import io
     from workflow import external_sync
     task = require(args.dir, args.issue_key)
+    if task.get("archive_ref"):
+        print(json.dumps({"issue_key": task["issue_key"], "run_id": task["run_id"],
+            "advance_ready": False, "next_stage": None, "archive_ref": task["archive_ref"],
+            "guidance": "档案只供审计；回读 cleanup-plan，确认后执行 release 或 clean"}, ensure_ascii=False, indent=2))
+        return 0
     index = STAGES.index(task["stage"])
     target = STAGES[index + 1] if index + 1 < len(STAGES) else None
     diagnostic = io.StringIO()
@@ -718,6 +766,18 @@ def main():
     p.add_argument("--expected-run-id", required=True)
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_cleanup_plan)
+    p = sub.add_parser("cleanup-preflight", help="只读展示任务状态与清理范围，供用户决定是否继续")
+    p.add_argument("--issue-key", required=True)
+    p.add_argument("--expected-run-id", required=True)
+    p.add_argument("--dir", default=".")
+    p.set_defaults(func=cmd_cleanup_preflight)
+    p = sub.add_parser("source-readiness", help="编码前刷新引用、检查工作区及分支关系")
+    p.add_argument("--issue-key", required=True)
+    p.add_argument("--expected-run-id", required=True)
+    p.add_argument("--confirm-digest")
+    p.add_argument("--decision-ref")
+    p.add_argument("--dir", default=".")
+    p.set_defaults(func=cmd_source_readiness)
     p = sub.add_parser("cleanup-amend", help="精确补充当前清理计划；archive 仅刷新未发布草稿，不授权删除",
                        description="绑定原 operation、计划摘要和修订编号。archive 仅刷新未发布草稿，不删除资源；正式档案不可改写。clean/release 使用新精确确认后，仍以原始请求恢复。")
     p.add_argument("--issue-key", required=True)

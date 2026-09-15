@@ -23,9 +23,13 @@ metadata:
 
 ## 归档、释放和清理
 
+新任务先使用原生 Git/GitHub 只读核对本地/远端任务分支和全部任务 PR，登记需要处置的 external，包含精确 id、action、before 身份及 SHA/状态；删除对象须回读保护信息为 false。登记完整后执行 `task.py cleanup-preflight --issue-key <issue> --expected-run-id <run> --dir <workspace>`，向用户展示当前阶段、完成情况、阻塞及完整清理范围；用户未决定继续时停止退出步骤。归档请求加入本次 `preflight_digest` 和真实 `decision_ref`；确认后再次登记资源会使摘要失效，必须重新预检并确认。归档后生成 cleanup-plan，再请求本地清理确认；外部分支删除或 PR 关闭还必须独立展示并确认 `external_confirmation_digest`。Workflow 不执行这些外部动作：由 Agent 使用原生工具执行后回读，更新相同已登记对象的 cleaned/retained 状态与 readback_ref，再调用 clean/release。用户选择保留时 action=retain，不将“未删除”写成 cleaned。未知结果保留工位占用。
+
+正常新任务 archive 成功后才可 clean；未完成接管沿原 handoff_clean 保留先归档再删除的恢复链。cleanup-plan v2 展示活动授权、证据、解绑动作和保留的 config/source/archive/operation；确认请求写到系统临时目录，避免自引用使清单变化。档案只供审计和优化，不能从档案恢复原开发。旧 run 按原合同完成后，新接管自动采用新检查。
+
 运行前后用 `python3 <agenticops-root>/workflow/station_resources.py --dir <workspace> --issue-key <issue> --expected-run-id <run> --input <资源数组.json>` 登记实际资源。数组每项包含 kind 与 producer；file 记录工位相对 path，process 记录 pid/started_at/cwd/executable，external 记录精确 id/status/readback_ref。原生工具负责停止或外部清理，Workflow 核对登记身份，不扫描或误停其它进程。
 
-外部资源已停止写入且有回读依据时可标记 quiesced，允许先 archive；release/clean 最终解绑前必须有 cleaned 的回读。归档后通常仅允许同一已登记 external 的 status=cleaned 与 readback_ref 更新，补充清理事实而不重写档案。归档退出、完成待释放或当前未完成归档/清理若发现迟到产物，可用资源登记命令加 --expected-operation-id 精确登记本工位产物来源，再重新确认清单；登记本身不授予删除权限，不恢复开发。未知归属或清理结果不明时保留占用。
+外部资源已停止写入且有回读依据时可标记 quiesced，允许先 archive；release/clean 最终解绑前必须有 cleaned（保留处置对应 retained）的回读。归档后通常仅允许同一已登记 external 的终态与 readback_ref 更新，补充清理事实而不重写档案。归档退出、完成待释放或当前未完成归档/清理若发现迟到产物，可用资源登记命令加 --expected-operation-id 精确登记本工位产物来源，再重新确认清单；登记本身不授予删除权限，不恢复开发。未知归属或清理结果不明时保留占用。
 
 archive 可将未完成任务正式归档为 incomplete，但仍占用且停止开发。release 要求交付及项目验收核对与研发明确释放。clean 用于不再继续的未完成任务：先有效档案，再精确授权清理，成功后才解绑；不关闭 PR 或修改 Jira。
 
@@ -38,6 +42,8 @@ archive 可将未完成任务正式归档为 incomplete，但仍占用且停止�
 当前 engineering-profiles.json 只定义仓库集合与 Profile 修订；完整应用工具链、actions 和健康检查配方尚须按实际目标分支与环境验证，不能把完整源码准备成功称为 TapData 启动或任务验收通过。缺数据库、凭据或运行入口时报告具体缺口，不填造默认值。
 
 ## 准入、设计和多仓库
+
+新任务在 Q2 授权前执行 `task.py source-readiness --issue-key <issue> --expected-run-id <run> --dir <workspace>`；它刷新目标引用并核验完整工程与工作分支。若提示目标正常推进，展示冻结基线、工作 Head、最新目标 SHA，并请用户决定保留基线且在 PR 前按既有规则同步，或归档清理后重接。选择保留时执行相同命令并追加 `--confirm-digest <快照摘要> --decision-ref <真实决定来源>`。随后 grant 与 advance 会重新核对这些事实；变化时重新准备。脏源码、身份错误、未知 ignored 产物、分叉及远端核验失败按返回原因处理，不能自动丢弃改动或重写冻结基线。
 
 `feature_change` 表示已有明确范围的功能开发，不接入需求任务。通过 `checklist` 读取验收标准、目标仓库和验证方式；功能任务不要求独立风险等级，具体风险与回滚纳入实施方案统一确认；验证方式可由研发确认，不强制写入 Jira `customfield_10049`。使用项目 `quality-feature.json`，在 Q2 前用 `task.py record --key implementation_plan --input <方案.json>` 记录目标、实现变化、验收场景、风险和回滚，并记录 `scope_boundary`。每个验收场景要对应具体检查项、预期和执行方式；不填写假根因、问题版本或 `fix_plan`。下文版本规划、根因与修复线规则仅适用于 `defect_fix`。
 

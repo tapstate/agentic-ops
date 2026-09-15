@@ -74,6 +74,18 @@ config 不随任务删除。任务专用有效配置写入 runtime，正式档�
 
 ## 5. 操作状态与接口语义
 
+新接管在 `facts.station_contract=2` 标记增强检查合同；旧 run 缺少此标记时保留原生命周期和授权恢复语义，旧的进行中清理计划仍按其原 schema 生成、比较和恢复，不在线重写。路径及旧字段语义保持兼容，workspace epoch 保持 3；新增可选事实和证据只影响新接管。此兼容方式不承诺旧客户端具备增强检查，完整升级或回退仍遵循版本切换前的任务退出协议。
+
+Agent 首先执行只读 `cleanup-preflight`，展示任务阶段、结果、阻塞、活动操作、归档及资源清单；用户拒绝时保持现场。未归档的新任务执行 archive 时必须提供当前 `preflight_digest` 和真实用户决定的 `decision_ref`。确认绑定 revision 和观察摘要，现场变化后重新展示。Workflow 核对这些绑定，用户交互由 Agent 承担，不提供用户身份认证。
+
+正常新任务必须先 archive，再生成 cleanup-plan 并取得删除确认后 clean。未完成 takeover 保留现有 handoff_clean：用户先确认停止和精确清理范围，原操作链内先发布档案再执行删除；失败仍沿原身份恢复。此例外仅处理未完成接管。已完成任务仍使用 release。
+
+cleanup-plan v2 纳入活动授权和全部 evidence 文件指纹、绑定 run 的解绑动作，以及保留目录；resources.json 的外部清理状态和回读单独验证，允许清理后的同对象回读更新，不改变原处置身份摘要。临时命令输入放在工位活动材料之外（例如系统临时目录），避免生成确认请求自身改变待确认材料。operation.json 保留最近操作及恢复回执，不作为待删除日志；正式档案只用于审计与优化，不能恢复开发。
+
+分支、PR 及其它 external 必须归档前核验并登记精确 ID、producer、处置 action（retain/delete/close）、before 身份与 SHA/状态；破坏性处置要求 before.protected=false 的已核验事实。Agent 在归档后展示独立的 external_confirmation_digest 并取得确认，再使用原生工具处置、回读。同一对象最后登记 cleaned 或 retain 对应的 retained 和 readback_ref；清理请求同时包含 confirmed_digest 与 external_confirmation_digest。Workflow 核验摘要与回读，不执行原生分支删除、PR 关闭，也不能拦截任意平台调用；没有执行确认时保留外部对象，不能将其标成已清理。确认范围变化使用 cleanup-amend 并重新提供外部摘要。未知外部对象在归档后不能新增登记或猜测归属。
+
+编码前的新任务使用 `source-readiness` 刷新任务目标分支引用。准备先将旧证据标为 refreshing，逐仓保存 fetch 意图和结果，最终记录本次 observed 快照；失败重试安全地刷新同一 run 的证据，不推进阶段。检查全部工程身份、工作区与未登记 ignored 产物，以及任务分支、冻结基线祖先关系和目标分支。等同基线时可进入授权；目标正常向前推进时，用户可用 `--confirm-digest` 与 `--decision-ref` 明确选择保留冻结基线开发、在 PR 前按项目规则同步，或退出后重新接管。分叉、回退、缺失或不可信引用拒绝。grant 及进入 implementation 时重新回读本地与远端，授权绑定 source_readiness_digest；准备过程不修改冻结基线或工作分支内容。已开始编码后不要求工作区始终洁净，也不重复以本检查替代后续代码与 CI 证据。
+
 公开写操作只有 `takeover/archive/release/clean`。只读上下文返回 current、operation、完整基线、任务变更、目录与项目执行入口；读取不修改状态。所有写请求有幂等操作 ID；重复请求返回相同操作结果或继续其未完成步骤，不重复接管或再次删除。
 
 | 操作 | 前提与结果 | 阶段 |

@@ -1058,6 +1058,8 @@ class FeatureFlowTests(unittest.TestCase):
                               "proof": self.proof()})
         self.cli("task.py", "advance", "--note", "未确认方案", expected=3)
         self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
+        self.cli("authorization.py", "grant", "--agent-id", "fixture", "--plan-version", "v1", expected=2)
+        self.cli("task.py", "source-readiness")
         self.cli("authorization.py", "grant", "--agent-id", "fixture", "--plan-version", "v1")
         self.cli("task.py", "advance", "--note", "确认后开始开发")
         self.execute(worktree, "before", 1)
