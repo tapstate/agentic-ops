@@ -4,6 +4,8 @@
 
 TapData 的按需 Wiki 阅读由 [tapdata-wiki](../projects/tapdata/skills/tapdata-wiki/SKILL.md) 说明检索与源码核验边界；项目 Profile 仅引用中央登记的共享仓库。[架构总纲](architecture/agenticops-v1-architecture.md)定义中央共享材料归属；[工位源码与材料](usage/workspace-materials.md)负责共享仓库准备、显式更新和故障处理，不引入任务知识快照或自动刷新。
 
+TapData 集成测试协作由 [tapdata-ci-test](../projects/tapdata/skills/tapdata-ci-test/SKILL.md) 负责用例分析、编写、执行与报告修复；[tapdata-task](../projects/tapdata/skills/tapdata-task/SKILL.md) 负责在研发节点调用、授权、质量记录与外部跟进。集成测试技能按需使用 tapdata-wiki；[构建、测试与本地运行](../projects/tapdata/runbooks/build-test-and-local-run.md) 保留具体操作与报告工具说明。技能能力缺失不增加流程门禁，已有验收条件仍由原质量合同处理，不建立第二套测试状态。
+
 任务退出与编码准备由[工位合同](architecture/single-task-station.md)统一定义：清理预检、归档与二次确认、活动材料清单、外部分支及 PR 的原生处置、编码前仓库关系核验。项目 Skill 负责用户交互，Workflow 负责可执行检查与恢复；审计档案不用于恢复开发。
 
 源码池仅承担下载加速：[工位合同](architecture/single-task-station.md)定义先缓存后独立源码的准备与恢复边界，[工位源码与材料](usage/workspace-materials.md)说明缓存位置、复用与清理；项目目标保持工位独立性。
