@@ -24,7 +24,7 @@ cd "$HOME/agenticops-tapdata"
 将下面提示词中的文档地址、项目名、工作空间 按实际情况替换后，发给同一会话中的 Agent。示例使用现役 `main` 的首次使用指引，明确要求它只在当前目录初始化工作空间：
 
 ```text
-根据 https://raw.githubusercontent.com/tapstate/agentic-ops/main/docs/usage-guide.md 安装并初始化 tapdata 项目：工作空间为当前 cwd 目录，源码池使用 ~/.agentic-ops-repos。
+根据 https://raw.githubusercontent.com/tapstate/agentic-ops/main/docs/usage-guide.md 安装并初始化 tapdata 项目：工作空间为当前 cwd 目录，源码缓存由产品根自动管理。
 
 开始前先确认当前 cwd 是空目录，且它不在安装目录、源码池或业务仓库内；检查 Git、Python 3.9+ 与 Git SSH 权限。按文档安装到默认的 ~/.agentic-ops，初始化当前 cwd 为 tapdata 工作空间，并执行 doctor 验证接线。不要接管 Jira 任务、准备业务仓库、修改业务代码、提交、推送或合并；遇到权限、目录冲突或外部写入确认时停下并说明原因和所需决定。
 ```
@@ -36,6 +36,6 @@ Agent 应回报以下可核验结果：
 - 使用工作面已安装在 `~/.agentic-ops`；
 - 当前 cwd 已初始化为 `tapdata` 工作空间，包含生成的 `./agenticops` 与 `.agenticops/workspace.json`；
 - `./agenticops doctor` 已通过；
-- 工位配置、完整独立源码、唯一运行现场和档案分别位于 config/source/runtime/archive；不配置共享源码池。
+- 工位配置、完整独立源码、唯一运行现场和档案分别位于 config/source/runtime/archive；源码池由产品根自动管理，仅加速接管时的独立源码下载。
 
 安装和初始化结束后，先结束这次从空目录启动的 Agent 会话，再从该工作空间重新启动 Agent：`./agenticops start codex` 或 `./agenticops start claude`。这样 Agent 才会在启动时加载当前项目指引。新工作空间不生成通用 Hook；旧接线迁移按[常见问题](faq.md)显式处理。随后才按[首次使用指引](../usage-guide.md)接管具体 Jira 任务。

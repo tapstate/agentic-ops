@@ -6,7 +6,7 @@
 
 - macOS、Linux 使用 Git 和 Python 3.9+ 即可安装、更新和回退。
 - 中央产品根目录（Product Root）保存唯一运行资产；源码目录和安装产品根目录使用同一入口和产品结构。
-- 生成单工位 config/source/runtime/archive 和空 current；不配置共享源码池。purge 验证空闲、已完成操作和生成归属，保留持久材料，再生成需显式复用决定。
+- 生成单工位 config/source/runtime/archive 和空 current；源码池由产品根自动管理，仅加速接管时的独立源码下载。purge 验证空闲、已完成操作和生成归属，保留持久材料，再生成需显式复用决定。
 - 工作空间使用 `.agenticops/` 保存初始化与唯一当前任务；config/source/runtime/archive 分离持久材料与运行现场，不复制 Project Skill、Policy 或 Runtime。
 - 不同 Agent 原生事件转换为同一版本化标准请求和标准判定。
 - Agent 在同一工位会话继续任务；上下文验证 source 独立仓库，不扩展其它工位权限。

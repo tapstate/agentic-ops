@@ -10,7 +10,7 @@ class RecoveryTests(SourceFixture, unittest.TestCase):
     def test_failed_fetch_keeps_clone_for_retry(self):
         original = source.git
         def fail(path, *args, **kwargs):
-            if args[0] == "fetch":
+            if args[0] == "fetch" and path == self.repo:
                 raise ValueError("network unavailable")
             return original(path, *args, **kwargs)
         with mock.patch.object(source, "git", side_effect=fail):

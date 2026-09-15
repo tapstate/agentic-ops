@@ -98,7 +98,7 @@ for file in \
   bootstrap/workspace-init.sh bootstrap/render.py bootstrap/workspace_paths.py bootstrap/agent_registry.py \
   bootstrap/skill_wiring.py \
   bootstrap/product_state.py bootstrap/product_version.py bootstrap/workspace_registry.py bootstrap/workspace_compatibility.py \
-  workflow/station.py workflow/station_source.py workflow/station_resources.py workflow/station_archive.py workflow/station_operation.py \
+  workflow/station.py workflow/station_source.py workflow/source_pool.py workflow/station_resources.py workflow/station_archive.py workflow/station_operation.py \
   tests/test_gate.py tests/test_contracts.py tests/test_adapter_boundary.py tests/test_workflow.py tests/test_install.sh \
   internal/acceptance.sh internal/bin/story-gate internal/story_gate/stories.yaml \
   internal/story_gate/review-policy.yaml internal/release/release.sh \

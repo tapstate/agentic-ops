@@ -3,16 +3,51 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import signal
 import subprocess
+import sys
+import time
+import tempfile
 
-from workflow import engineering_baseline as baseline, project_rules, station_operation as operations
+from workflow import engineering_baseline as baseline, project_rules, station_operation as operations, source_pool
+
+GIT_LOCAL_TIMEOUT = 120
+GIT_NETWORK_TIMEOUT = 1800
+GIT_PROGRESS_INTERVAL = 10
 
 
 def git(path, *arguments, check=True):
     environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     environment.update(GIT_TERMINAL_PROMPT="0", GIT_NO_REPLACE_OBJECTS="1", GIT_NO_LAZY_FETCH="1")
-    result = subprocess.run(["git", "-C", str(path), *arguments], env=environment,
-                            text=True, capture_output=True, timeout=120)
+    command = ["git", "-C", str(path), *arguments]
+    network = arguments[0] in ("clone", "fetch")
+    timeout = GIT_NETWORK_TIMEOUT if network else GIT_LOCAL_TIMEOUT
+    started = time.monotonic()
+    process = subprocess.Popen(command, env=environment, text=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               start_new_session=True)
+    try:
+        while True:
+            remaining = timeout - (time.monotonic() - started)
+            try:
+                stdout, stderr = process.communicate(timeout=max(0, min(GIT_PROGRESS_INTERVAL, remaining)))
+                break
+            except subprocess.TimeoutExpired:
+                if time.monotonic() - started >= timeout:
+                    raise ValueError("Git 操作超时（%s，%s 秒）；保留现场并恢复原操作" % (arguments[0], timeout))
+                if network:
+                    print("[station-source] %s 仍在执行（%s 秒）" %
+                          (arguments[0], int(time.monotonic() - started)), file=sys.stderr, flush=True)
+    except BaseException:
+        # Git 的 SSH/index-pack 子进程也可能持有输出管道或继续写仓库。
+        # 仅终止本次创建的进程组，回收后才允许调用方恢复同一操作。
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.communicate()
+        raise
+    result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
     if check and result.returncode:
         raise ValueError("Git 操作失败（%s）：%s" % (arguments[0], result.stderr.strip()))
     return result
@@ -69,23 +104,33 @@ def prepare_repositories(workspace, catalog, selected, operation):
         origin = catalog[name]["origin"]
         step = "clone:" + name
         recorded = operation["steps"].get(step)
-        if not path.exists():
-            if recorded and recorded["receipt"] is not None:
-                raise ValueError("已准备仓库被移除，拒绝重建冒充恢复")
-            operations.intent(workspace, operation, step, {"exists": False}, {"origin": origin})
-            path.parent.mkdir(parents=True, exist_ok=True)
-            git(path.parent, "clone", "--no-local", "--no-checkout", "--", origin, str(path))
-        elif recorded is None:
+        fetch_step = "fetch:" + name
+        completed_fetch = operation["steps"].get(fetch_step)
+        if path.exists() and recorded is None:
             identity(path, origin)
             require_clean(path)
-            operations.intent(workspace, operation, step, {"exists": True}, {"origin": origin})
+        if not path.exists() and recorded and recorded["receipt"] is not None:
+            raise ValueError("已准备仓库被移除，拒绝重建冒充恢复")
+        if path.exists():
+            identity(path, origin)
+        if not completed_fetch or completed_fetch["receipt"] is None:
+            operations.intent(workspace, operation, step,
+                              recorded["before"] if recorded else {"exists": path.exists()}, {"origin": origin})
+            with source_pool.refreshed(workspace, name, origin, git) as cache:
+                if not path.exists():
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with tempfile.TemporaryDirectory(prefix=".prepare-", dir=path.parent) as temporary:
+                        staged = Path(temporary) / "repository"
+                        git(path.parent, "clone", "--no-local", "--no-checkout", "--", str(cache), str(staged))
+                        git(staged, "remote", "set-url", "origin", origin)
+                        identity(staged, origin)
+                        staged.rename(path)
+                operations.receipt(workspace, operation, step, {"path": str(path), "origin": origin})
+                operations.intent(workspace, operation, fetch_step, {}, {"origin": origin})
+                git(path, "fetch", "--prune", str(cache),
+                    "+refs/heads/*:refs/remotes/origin/*", "refs/tags/*:refs/tags/*")
         identity(path, origin)
-        operations.receipt(workspace, operation, step, {"path": str(path), "origin": origin})
-        # --no-checkout 新克隆尚无 index；已有仓库必须在操作开始前洁净。
-        fetch_step = "fetch:" + name
-        fetch = operations.intent(workspace, operation, fetch_step, {}, {"origin": origin})
-        if fetch["receipt"] is None:
-            git(path, "fetch", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*", "refs/tags/*:refs/tags/*")
+        fetch = operation["steps"][fetch_step]
         refs = {}
         for line in git(path, "for-each-ref", "--format=%(refname) %(objectname)", "refs/remotes/origin/").stdout.splitlines():
             ref, sha = line.split(" ", 1)
