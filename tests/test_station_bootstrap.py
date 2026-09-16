@@ -134,7 +134,15 @@ class StationBootstrapTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '任务占用'):
             registry.detach(ROOT, self.workspace, purge=True)
         state.write_bytes(original)
-        operation = station_operation.begin(self.workspace, 'takeover', 'op-bootstrap-pending', 0, {})
+        workspace_config = self.workspace / '.agenticops/workspace.json'
+        document = json.loads(workspace_config.read_text())
+        document['branch_identity'] = {
+            'schema_version': 1,
+            'git_name': 'Fixture',
+            'source': 'git_global_user_name',
+        }
+        workspace_config.write_text(json.dumps(document))
+        operation = station_operation.begin(self.workspace, 'takeover', 'op-bootstrap-pending', 0, {'issue_key': 'TAP-123'})
         operation['status'] = 'failed'
         station_operation.save(self.workspace, operation)
         with self.assertRaisesRegex(ValueError, '未完成操作'):

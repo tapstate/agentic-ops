@@ -14,7 +14,9 @@ from pathlib import Path
 import fcntl
 
 ISSUE_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*$")
-RUN_ID_PATTERN = re.compile(r"^run-[a-z0-9][a-z0-9-]*$")
+LEGACY_RUN_ID_PATTERN = re.compile(r"^run-[a-z0-9][a-z0-9-]*$")
+NEW_RUN_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8}$")
+RUN_ID_PATTERN = re.compile(r"^(?:run-[a-z0-9][a-z0-9-]*|[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8})$")
 INTERACTION_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.(?:json|jsonl|log|md|txt))?$")
 _held_locks = threading.local()
 
@@ -32,6 +34,64 @@ def validate_issue_key(value):
     if not ISSUE_KEY_PATTERN.fullmatch(value):
         raise ValueError("Jira issue key 格式无效")
     return value
+
+
+def timestamp_hex(seconds=None):
+    """返回固定 8 位的 Unix 秒级 HEX；超出无符号 32 位范围时拒绝生成。"""
+    if seconds is None:
+        seconds = int(time.time())
+    if type(seconds) is not int or not 0 <= seconds <= 0xFFFFFFFF:
+        raise ValueError("秒级时间戳超出 8 位 HEX 可表示范围")
+    return "%08x" % seconds
+
+
+def new_run_id(issue_key, seconds=None):
+    return "%s-%s" % (validate_issue_key(issue_key), timestamp_hex(seconds))
+
+
+def validate_run_id(issue_key, run_id):
+    issue = validate_issue_key(issue_key)
+    if not isinstance(run_id, str) or not RUN_ID_PATTERN.fullmatch(run_id):
+        raise ValueError("run_id 格式无效")
+    if NEW_RUN_ID_PATTERN.fullmatch(run_id) and not run_id.startswith(issue + "-"):
+        raise ValueError("run_id 与 Jira issue key 不一致")
+    return run_id
+
+
+def validate_git_name(value):
+    if not isinstance(value, str) or "/" in value:
+        raise ValueError("git_name 必须是合法的单段 Git 分支前缀")
+    from workflow import engineering_baseline
+    try:
+        engineering_baseline.ref_name(value)
+    except ValueError as error:
+        raise ValueError("git_name 必须是合法的单段 Git 分支前缀") from error
+    return value
+
+
+def workspace_git_name(base):
+    path = state_path(base) / "workspace.json"
+    if path.is_symlink():
+        raise ValueError("工作空间配置不能是符号链接")
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError("工作空间配置无法读取") from error
+    identity = document.get("branch_identity")
+    if not isinstance(identity, dict):
+        raise ValueError(
+            "工作空间未配置 git_name；请执行 agenticops workspace identity --workspace <目录> "
+            "。它会读取全局 Git user.name 并一次性保存，用于稳定生成任务工作分支，避免恢复时受机器配置变化影响"
+        )
+    if set(identity) != {"schema_version", "git_name", "source"} or identity.get("schema_version") != 1:
+        raise ValueError("工作空间 git_name 配置结构无效")
+    if identity.get("source") != "git_global_user_name":
+        raise ValueError("工作空间 git_name 配置来源无效")
+    return validate_git_name(identity.get("git_name"))
+
+
+def generated_work_branch(base, task):
+    return "%s/%s" % (workspace_git_name(base), validate_run_id(task["issue_key"], task["run_id"]))
 
 def current_path(base):
     return state_path(base) / "current-task.json"
@@ -55,9 +115,13 @@ def read_current(base):
         raise ValueError("工位状态结构无效")
     current = document["current"]
     if current is not None and (not isinstance(current, dict)
-            or validate_issue_key(current.get("issue_key")) != current.get("issue_key")
-            or not RUN_ID_PATTERN.fullmatch(str(current.get("run_id", "")))):
+            or validate_issue_key(current.get("issue_key")) != current.get("issue_key")):
         raise ValueError("当前任务身份无效")
+    if current is not None:
+        try:
+            validate_run_id(current["issue_key"], current.get("run_id"))
+        except ValueError as error:
+            raise ValueError("当前任务身份无效") from error
     return document
 
 def initialize_current(base):

@@ -21,7 +21,7 @@
     },
     "run_id": {
       "type": "string",
-      "pattern": "^run-[a-z0-9-]+$"
+      "pattern": "^(?:run-[a-z0-9][a-z0-9-]*|[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8})$"
     },
     "directories": {
       "type": "array",

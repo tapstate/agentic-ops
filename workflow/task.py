@@ -864,7 +864,7 @@ def main():
     add = repository_sub.add_parser("add")
     add.add_argument("--issue-key")
     add.add_argument("--repo", required=True)
-    add.add_argument("--work-branch", required=True)
+    add.add_argument("--work-branch", help="仅续办既有分支时需要；新分支由工作空间 git_name 和当前 run 自动生成")
     add.add_argument("--base-branch", required=True)
     add.add_argument("--operation-id", required=True)
     add.add_argument("--expected-revision", required=True, type=int)

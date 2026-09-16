@@ -6,7 +6,7 @@ TapData 的按需 Wiki 阅读由 [tapdata-wiki](../projects/tapdata/skills/tapda
 
 TapData 集成测试协作由 [tapdata-ci-test](../projects/tapdata/skills/tapdata-ci-test/SKILL.md) 负责用例分析、编写、执行与报告修复；[tapdata-task](../projects/tapdata/skills/tapdata-task/SKILL.md) 负责在研发节点调用、授权、质量记录与外部跟进。集成测试技能按需使用 tapdata-wiki；[构建、测试与本地运行](../projects/tapdata/runbooks/build-test-and-local-run.md) 保留具体操作与报告工具说明。技能能力缺失不增加流程门禁，已有验收条件仍由原质量合同处理，不建立第二套测试状态。
 
-任务退出与编码准备由[工位合同](architecture/single-task-station.md)统一定义：重置工位保留配置、独立源码和正式档案，按任务独占目录回收运行产物，并核验源码成果、开发基线与空闲条件。该主题覆盖目录归属、一次范围确认、中断恢复、分支及 PR 的可选原生处置和 epoch 兼容边界；不覆盖工作空间卸载或自动恢复历史任务。项目目标负责方向，工位合同负责可执行语义与验收，使用指引和项目 Skill 负责入口与操作说明，机器契约约束持久字段，避免重复维护规则。
+任务退出与编码准备由[工位合同](architecture/single-task-station.md)统一定义：重置工位保留配置、独立源码和正式档案，按任务独占目录回收运行产物，并核验源码成果、开发基线与空闲条件。该主题覆盖目录归属、一次范围确认、中断恢复、由工作空间 `git_name` 和 run 生成的分支及 PR 处置、以及 epoch 兼容边界；不覆盖工作空间卸载或自动恢复历史任务。项目目标负责方向，工位合同负责可执行语义与验收，使用指引和项目 Skill 负责入口与操作说明，机器契约约束持久字段，避免重复维护规则。
 
 源码池仅承担下载加速：[工位合同](architecture/single-task-station.md)定义先缓存后独立源码的准备与恢复边界，[工位源码与材料](usage/workspace-materials.md)说明缓存位置、复用与清理；项目目标保持工位独立性。
 

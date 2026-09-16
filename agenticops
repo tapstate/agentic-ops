@@ -13,7 +13,7 @@ usage() {
   agenticops init [--workspace <目录>] [--project <项目>] [--agent <Agent ID>]... [--reuse-materials]
   agenticops doctor [--workspace <目录>]
   agenticops repair [--workspace <目录>] [--accept-checkpoint-migration]
-  agenticops workspace <list|prune|repair|clean|detach|purge> [参数]
+  agenticops workspace <list|identity|prune|repair|clean|detach|purge> [参数]
   agenticops start <Agent ID> [-- <Agent 参数>]
   agenticops start --agent <Agent ID> [--workspace <目录>] [-- <Agent 参数>]
   agenticops update

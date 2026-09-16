@@ -27,7 +27,7 @@ class StationTests(unittest.TestCase):
         (self.ws / ".agenticops").mkdir(parents=True)
         for name in ("source", "config", "runtime", "archive"):
             (self.ws / name).mkdir()
-        self.write(self.ws / ".agenticops/workspace.json", {"schema_version": 3, "product_root": str(self.product), "project": "tapdata", "workspace_id": "a" * 32})
+        self.write(self.ws / ".agenticops/workspace.json", {"schema_version": 3, "product_root": str(self.product), "project": "tapdata", "workspace_id": "a" * 32, "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"}})
         self.write(self.ws / ".agenticops/init.json", {"workspace_state_epoch": 4})
         task_store.initialize_current(self.ws)
 
@@ -117,7 +117,7 @@ class StationTests(unittest.TestCase):
         from workflow import station_source
         task = self.new_contract(self.takeover())
         untouched = self.other_repository_state()
-        station.scope_change(self.ws, task["issue_key"], task["run_id"], task["_revision"], "op-ready-scope", "tapdata/tapdata", "fix/ready", "develop", ["file.txt"], "unit")
+        station.scope_change(self.ws, task["issue_key"], task["run_id"], task["_revision"], "op-ready-scope", "tapdata/tapdata", None, "develop", ["file.txt"], "unit")
         task = task_store.read_task(self.ws)
         with self.assertRaisesRegex(ValueError, "source-readiness"):
             station_source.require_readiness(self.ws, task)
@@ -161,11 +161,14 @@ class StationTests(unittest.TestCase):
 
     def test_scope_binding_and_existing_branch_rejected(self):
         task = self.takeover()
-        station.scope_change(self.ws, task["issue_key"], task["run_id"], task["_revision"], "op-scope-one", "tapdata/tapdata", "fix/test", "develop", ["file.txt"], "unit tests")
+        with self.assertRaisesRegex(ValueError, "必须使用工作空间 git_name"):
+            station.scope_change(self.ws, task["issue_key"], task["run_id"], task["_revision"], "op-scope-wrong", "tapdata/tapdata", "fix/test", "develop", ["file.txt"], "unit tests")
+        station.scope_change(self.ws, task["issue_key"], task["run_id"], task["_revision"], "op-scope-one", "tapdata/tapdata", None, "develop", ["file.txt"], "unit tests")
         current = task_store.read_current(self.ws)["current"]
         self.assertNotIn("repositories", current)
-        self.assertEqual(current["task_repositories"]["tapdata/tapdata"]["work_branch"], "fix/test")
-        self.assertEqual(self.git(self.ws / "source/tapdata/tapdata", "branch", "--show-current"), "fix/test")
+        expected = "Test/" + task["run_id"]
+        self.assertEqual(current["task_repositories"]["tapdata/tapdata"]["work_branch"], expected)
+        self.assertEqual(self.git(self.ws / "source/tapdata/tapdata", "branch", "--show-current"), expected)
 
     def test_incomplete_archive_does_not_complete_or_unbind(self):
         self.prepare_engineering(9)
@@ -361,12 +364,13 @@ class StationTests(unittest.TestCase):
             station_operation.read(self.ws)
 
     def test_operation_read_rejects_digest_mismatch_and_unfinished_done(self):
-        operation = station_operation.begin(self.ws, "takeover", "op-read-check", 0, {})
+        request = {"issue_key": "TAP-123"}
+        operation = station_operation.begin(self.ws, "takeover", "op-read-check", 0, request)
         operation["request"] = {"changed": True}
         station_operation.save(self.ws, operation)
         with self.assertRaisesRegex(ValueError, "摘要"):
             station_operation.read(self.ws)
-        operation["request"] = {}
+        operation["request"] = request
         operation["status"] = "done"
         operation["steps"] = {"sample": {"before": {}, "expected": {}, "receipt": None}}
         station_operation.save(self.ws, operation)
@@ -402,7 +406,7 @@ class StationTests(unittest.TestCase):
         from workflow import station_resources, task as task_cli
         task = self.takeover()
         untouched = self.other_repository_state()
-        station.scope_change(self.ws, task["issue_key"], task["run_id"], task["_revision"], "op-release-scope", "tapdata/tapdata", "fix/finished", "develop", ["file.txt"], "unit test")
+        station.scope_change(self.ws, task["issue_key"], task["run_id"], task["_revision"], "op-release-scope", "tapdata/tapdata", None, "develop", ["file.txt"], "unit test")
         task = task_store.read_task(self.ws)
         task["stage"] = "ci_validation"
         with mock.patch.object(task_cli, "_check_advance", return_value=[]):
