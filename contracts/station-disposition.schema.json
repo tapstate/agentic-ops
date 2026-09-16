@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "归档后分支及 PR 原生处置记录",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "disposition_id",
+    "phase",
+    "object_id"
+  ],
+  "properties": {
+    "disposition_id": {
+      "type": "string",
+      "pattern": "^disposition-[a-z0-9-]{8,80}$"
+    },
+    "phase": {
+      "enum": [
+        "intent",
+        "unknown",
+        "readback"
+      ]
+    },
+    "object_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "resource_type": {
+      "enum": [
+        "git-branch",
+        "pull-request"
+      ]
+    },
+    "action": {
+      "enum": [
+        "delete",
+        "close"
+      ]
+    },
+    "before": {
+      "type": "object"
+    },
+    "confirmed_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "intent_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "decision_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "readback_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "deleted",
+        "closed",
+        "unchanged"
+      ]
+    }
+  }
+}

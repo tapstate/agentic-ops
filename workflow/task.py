@@ -96,8 +96,13 @@ def cmd_takeover(args):
 def cmd_lifecycle(args):
     from workflow import station
     request = json.loads(Path(args.input).read_text(encoding="utf-8"))
-    print(json.dumps(station.execute(args.dir, args.cmd, args.issue_key, args.expected_run_id,
-                                    args.expected_revision, args.operation_id, request), ensure_ascii=False, indent=2))
+    result = station.execute(args.dir, args.cmd, args.issue_key, args.expected_run_id,
+                             args.expected_revision, args.operation_id, request)
+    summary = {key: result.get(key) for key in ("operation_id", "kind", "run_id", "phase", "status", "archive_ref")}
+    plan = result.get("cleanup_plan", {})
+    summary.update(directory_count=len(plan.get("directories", [])), source_artifact_count=len(plan.get("entries", [])),
+                   plan_digest=plan.get("digest"), retained=plan.get("retained", []))
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 
 

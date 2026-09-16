@@ -28,7 +28,7 @@ class StationTests(unittest.TestCase):
         for name in ("source", "config", "runtime", "archive"):
             (self.ws / name).mkdir()
         self.write(self.ws / ".agenticops/workspace.json", {"schema_version": 3, "product_root": str(self.product), "project": "tapdata", "workspace_id": "a" * 32})
-        self.write(self.ws / ".agenticops/init.json", {"workspace_state_epoch": 3})
+        self.write(self.ws / ".agenticops/init.json", {"workspace_state_epoch": 4})
         task_store.initialize_current(self.ws)
 
     def prepare_engineering(self, count=1):
@@ -49,6 +49,7 @@ class StationTests(unittest.TestCase):
         catalog = json.loads(catalog_path.read_text())
         for entry in catalog["repositories"].values():
             entry["origin"] = str(self.remote)
+            entry["dev_branch"] = "develop"
         self.write(catalog_path, catalog)
         profile_path = self.product / "projects/tapdata/engineering-profiles.json"
         profiles = json.loads(profile_path.read_text())
@@ -73,22 +74,20 @@ class StationTests(unittest.TestCase):
         revision = task_store.read_current(self.ws)["revision"]
         station.takeover(self.ws, self.request, operation, revision)
         task = task_store.read_task(self.ws)
-        # 原生命周期场景保留旧 run，验证升级后仍可恢复。
-        task["facts"].pop("station_contract", None)
-        task_store.write_task(self.ws, task)
         return task
 
     def new_contract(self, task):
-        task["facts"]["station_contract"] = 2
+        task["facts"]["station_contract"] = 3
         task_store.write_task(self.ws, task)
         return task
 
     def execute(self, base, kind, issue, run, revision, operation, request):
-        # 原生命周期恢复场景模拟两次真实用户确认；拒绝路径另有独立用例。
         from workflow import station_resources
         task = task_store.read_task(base)
-        if task and kind in ("archive", "clean") and "preflight_digest" not in request:
-            request.update(preflight_digest=station_resources.preflight(base, task)["digest"], decision_ref="fixture:user-continue")
+        if task:
+            request.setdefault("decision_ref", "fixture:user-continue")
+            if "confirmed_digest" not in request:
+                request["confirmed_digest"] = station_resources.plan(base, task)["digest"]
         return station.execute(base, kind, issue, run, revision, operation, request)
 
     def test_takeover_full_engineering_and_idempotency(self):
@@ -109,7 +108,7 @@ class StationTests(unittest.TestCase):
         before = {p: p.read_bytes() for p in (self.ws / ".agenticops").rglob("*") if p.is_file()}
         preflight = station_resources.preflight(self.ws, task)
         self.assertTrue(preflight["decision_required"])
-        with self.assertRaisesRegex(ValueError, "继续归档清理决定"):
+        with self.assertRaisesRegex(ValueError, "重置范围"):
             station.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-no-decision", {"summary": "停止", "reason": "取消"})
         self.assertEqual(before, {p: p.read_bytes() for p in (self.ws / ".agenticops").rglob("*") if p.is_file()})
 
@@ -147,23 +146,18 @@ class StationTests(unittest.TestCase):
             station_source.prepare_readiness(self.ws, task)
         self.assertEqual(self.other_repository_state(), untouched)
 
-    def test_new_run_archives_before_second_cleanup_confirmation(self):
+    def test_new_run_archives_and_resets_with_one_confirmation(self):
         from workflow import station_resources
-        task = self.new_contract(self.takeover())
-        request = {"summary": "尚未编码", "reason": "用户取消", "decision_ref": "fixture:user",
-                   "preflight_digest": station_resources.preflight(self.ws, task)["digest"]}
-        with self.assertRaisesRegex(ValueError, "先 archive"):
-            station.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-new-clean", request)
-        station.execute(self.ws, "archive", task["issue_key"], task["run_id"], task["_revision"], "op-new-archive", request)
-        task = task_store.read_task(self.ws)
-        record_path = self.ws / task["archive_ref"]["path"] / "record.json"
-        original = record_path.read_bytes()
-        with self.assertRaisesRegex(ValueError, "确认"):
-            station.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-new-clean", {})
+        task = self.takeover()
         plan = station_resources.plan(self.ws, task)
-        station.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-new-clean", {"confirmed_digest": plan["digest"]})
+        request = {"summary": "尚未编码", "reason": "用户取消", "decision_ref": "fixture:user",
+                   "confirmed_digest": plan["digest"]}
+        station.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-new-clean", request)
         self.assertIsNone(task_store.read_task(self.ws))
-        self.assertEqual(original, record_path.read_bytes())
+        record = json.loads((self.ws / "archive" / task["issue_key"] / task["run_id"] / "record.json").read_text())
+        self.assertEqual(record["task_result"], "incomplete")
+        self.assertTrue((self.ws / "runtime").is_dir())
+        self.assertEqual(list((self.ws / "runtime").iterdir()), [])
 
     def test_scope_binding_and_existing_branch_rejected(self):
         task = self.takeover()
@@ -176,10 +170,9 @@ class StationTests(unittest.TestCase):
     def test_incomplete_archive_does_not_complete_or_unbind(self):
         self.prepare_engineering(9)
         task = self.takeover()
-        resources = mock.Mock()
-        resources.plan.return_value = {"run_id": task["run_id"], "entries": [], "digest": "plan"}
-        with mock.patch.object(station, "_resources", return_value=resources):
-            self.execute(self.ws, "archive", task["issue_key"], task["run_id"], task["_revision"], "op-archive-one", {"summary": "处理到定位；尚未修改。", "reason": "研发决定停止"})
+        from workflow import station_resources
+        with mock.patch.object(station_resources, "clean", side_effect=AssertionError("archive does not reset")):
+            self.execute(self.ws, "archive", task["issue_key"], task["run_id"], task["_revision"], "op-archive-one", {"summary":"处理到定位；尚未修改。","reason":"研发决定停止"})
         current = task_store.read_task(self.ws)
         self.assertEqual(current["outcome"], "in_progress")
         record = station_archive.verify(self.ws, current["archive_ref"], current)
@@ -195,7 +188,6 @@ class StationTests(unittest.TestCase):
         self.assertNotIn("repositories", evidence["current"])
         with self.assertRaisesRegex(ValueError, "归档"):
             task_store.require_development(self.ws, current)
-        resources.clean.assert_not_called()
 
     def test_wrong_confirmation_keeps_current(self):
         task = self.takeover()
@@ -209,72 +201,50 @@ class StationTests(unittest.TestCase):
 
     def test_clean_then_new_takeover_retains_archive_and_refs(self):
         task = self.takeover()
-        resources = mock.Mock()
-        resources.plan.return_value = {"run_id": task["run_id"], "entries": [], "digest": "plan"}
-        with mock.patch.object(station, "_resources", return_value=resources):
-            self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-clean-one", {"summary": "未完成", "reason": "取消", "confirmed_digest": "plan"})
+        self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-clean-one", {"summary":"未完成", "reason":"取消"})
         self.assertIsNone(task_store.read_task(self.ws))
         self.assertTrue((self.ws / "archive" / task["issue_key"] / task["run_id"] / "record.json").is_file())
-        next_task = self.takeover("op-takeover-next")
-        self.assertNotEqual(next_task["run_id"], task["run_id"])
+        next_task=self.takeover("op-takeover-next")
+        self.assertNotEqual(next_task["run_id"],task["run_id"])
 
     def test_cleanup_failure_keeps_interrupted_occupied(self):
+        from workflow import station_resources
         task = self.takeover()
-        resources = mock.Mock()
-        resources.plan.return_value = {"run_id": task["run_id"], "entries": [], "digest": "plan"}
-        resources.clean.side_effect = ValueError("资源指纹变化")
-        with mock.patch.object(station, "_resources", return_value=resources):
-            with self.assertRaisesRegex(ValueError, "指纹"):
-                self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-clean-one", {"summary": "未完成", "reason": "取消", "confirmed_digest": "plan"})
-        self.assertEqual(task_store.read_task(self.ws)["outcome"], "interrupted")
-        self.assertNotEqual(station_operation.read(self.ws)["status"], "done")
+        with mock.patch.object(station_resources,"clean",side_effect=ValueError("资源指纹变化")), self.assertRaisesRegex(ValueError,"指纹"):
+            self.execute(self.ws,"clean",task["issue_key"],task["run_id"],task["_revision"],"op-clean-one",{"summary":"未完成","reason":"取消"})
+        self.assertEqual(task_store.read_task(self.ws)["outcome"],"interrupted")
+        self.assertNotEqual(station_operation.read(self.ws)["status"],"done")
 
     def test_unbind_crash_recovers_without_cleaning_again(self):
-        task = self.takeover()
-        resources = mock.Mock()
-        resources.plan.return_value = {"run_id": task["run_id"], "entries": [], "digest": "plan"}
-        request = {"summary": "未完成", "reason": "取消", "confirmed_digest": "plan"}
-        original = station_operation.receipt
-        def crash(base, operation, name, value):
-            if name == "unbind":
-                raise OSError("crash after CAS")
-            return original(base, operation, name, value)
-        with mock.patch.object(station, "_resources", return_value=resources), mock.patch.object(station_operation, "receipt", side_effect=crash):
-            with self.assertRaises(OSError):
-                self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-clean-crash", request)
+        from workflow import station_resources
+        task=self.takeover(); request={"summary":"未完成","reason":"取消"}
+        original=station_operation.receipt
+        def crash(base,operation,name,value):
+            if name=="unbind": raise OSError("crash after CAS")
+            return original(base,operation,name,value)
+        with mock.patch.object(station_operation,"receipt",side_effect=crash), self.assertRaises(OSError):
+            self.execute(self.ws,"clean",task["issue_key"],task["run_id"],task["_revision"],"op-clean-crash",request)
         self.assertIsNone(task_store.read_task(self.ws))
-        calls = resources.clean.call_count
-        with mock.patch.object(station, "_resources", return_value=resources):
-            self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-clean-crash", request)
-        self.assertEqual(resources.clean.call_count, calls)
-        self.assertEqual(station_operation.read(self.ws)["status"], "done")
+        with mock.patch.object(station_resources,"clean",side_effect=AssertionError("no replay")):
+            self.execute(self.ws,"clean",task["issue_key"],task["run_id"],task["_revision"],"op-clean-crash",request)
+        self.assertEqual(station_operation.read(self.ws)["status"],"done")
 
     def test_incomplete_archive_reused_by_clean(self):
-        task = self.takeover()
-        resources = mock.Mock()
-        resources.plan.return_value = {"run_id": task["run_id"], "entries": [], "digest": "plan"}
-        request = {"summary": "未完成", "reason": "取消"}
-        with mock.patch.object(station, "_resources", return_value=resources):
-            self.execute(self.ws, "archive", task["issue_key"], task["run_id"], task["_revision"], "op-archive-only", request)
-            task = task_store.read_task(self.ws)
-            record_path = self.ws / task["archive_ref"]["path"] / "record.json"
-            before = record_path.read_bytes()
-            self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-clean-later", dict(request, confirmed_digest="plan"))
-        self.assertEqual(record_path.read_bytes(), before)
-        self.assertEqual(json.loads(before)["task_result"], "incomplete")
+        task=self.takeover(); request={"summary":"未完成","reason":"取消"}
+        self.execute(self.ws,"archive",task["issue_key"],task["run_id"],task["_revision"],"op-archive-only",request)
+        task=task_store.read_task(self.ws)
+        path=self.ws/task["archive_ref"]["path"]/"record.json"; before=path.read_bytes()
+        self.execute(self.ws,"clean",task["issue_key"],task["run_id"],task["_revision"],"op-clean-later",request)
+        self.assertEqual(path.read_bytes(),before)
+        self.assertEqual(json.loads(before)["task_result"],"incomplete")
 
     def test_failed_takeover_can_handoff_to_clean(self):
         self.prepare_engineering()
-        with mock.patch.object(station.source, "prepare_repositories", side_effect=ValueError("network")):
-            with self.assertRaises(ValueError):
-                station.takeover(self.ws, self.request, "op-takeover-fail", 0)
-        task = task_store.read_task(self.ws)
-        resources = mock.Mock()
-        resources.plan.return_value = {"run_id": task["run_id"], "entries": [], "digest": "plan"}
-        with mock.patch.object(station, "_resources", return_value=resources):
-            self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-clean-partial", {"summary": "网络失败，未完成准备", "reason": "取消", "confirmed_digest": "plan"})
-        operation = station_operation.read(self.ws)
-        self.assertEqual(operation["supersedes"]["operation_id"], "op-takeover-fail")
+        with mock.patch.object(station.source,"prepare_repositories",side_effect=ValueError("network")), self.assertRaises(ValueError):
+            station.takeover(self.ws,self.request,"op-takeover-fail",0)
+        task=task_store.read_task(self.ws)
+        self.execute(self.ws,"clean",task["issue_key"],task["run_id"],task["_revision"],"op-clean-partial",{"summary":"网络失败","reason":"取消"})
+        self.assertEqual(station_operation.read(self.ws)["supersedes"]["operation_id"],"op-takeover-fail")
         self.assertIsNone(task_store.read_task(self.ws))
 
     def test_completion_requires_merged_head_and_quality(self):
@@ -372,39 +342,18 @@ class StationTests(unittest.TestCase):
 
     def test_cleanup_amend_preserves_pending_step_and_cleans_new_owned_file(self):
         from workflow import station_resources
-        task = self.takeover()
-        old = self.ws / "runtime/logs/old.log"
-        old.write_text("original report")
-        station_resources.register(self.ws, task["issue_key"], task["run_id"], [{"kind": "file", "path": "runtime/logs/old.log", "producer": "build"}])
-        first = station_resources.plan(self.ws, task)
-        request = {"summary": "未完成", "reason": "停止", "confirmed_digest": first["digest"]}
-        original_receipt = station_operation.receipt
-        def crash(base, operation, name, value):
-            if name.startswith("resource:"):
-                raise OSError("after delete before receipt")
-            return original_receipt(base, operation, name, value)
-        with mock.patch.object(station_operation, "receipt", side_effect=crash):
-            with self.assertRaises(OSError):
-                self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-amend-clean", request)
-        current = task_store.read_task(self.ws)
-        record = self.ws / current["archive_ref"]["path"] / "record.json"
-        before = record.read_bytes()
-        late = self.ws / "runtime/logs/late.log"
-        late.write_text("late known report")
-        station_resources.register(self.ws, task["issue_key"], task["run_id"], [{"kind": "file", "path": "runtime/logs/late.log", "producer": "build"}], expected_operation_id="op-amend-clean")
-        second = station_resources.plan(self.ws, current)
-        with self.assertRaisesRegex(ValueError, "确认"):
-            station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-amend-clean", first["digest"], {"confirmed_digest": "wrong", "expected_plan_revision": 0})
-        operation = station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-amend-clean", first["digest"], {"confirmed_digest": second["digest"], "expected_plan_revision": 0})
-        pending = operation["steps"]["resource:0:" + first["digest"] + ":runtime/logs/old.log"]
-        self.assertIsNone(pending["receipt"])
-        self.assertEqual(pending["superseded_by"], second["digest"])
-        self.assertEqual(operation["plan_revisions"][0]["plan"], first)
-        self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-amend-clean", request)
-        self.assertIsNone(task_store.read_task(self.ws))
-        self.assertFalse(late.exists())
-        self.assertEqual(record.read_bytes(), before)
-        self.assertEqual(station_operation.read(self.ws)["status"], "done")
+        task=self.takeover()
+        first=station_resources.plan(self.ws,task)
+        request={"summary":"未完成","reason":"停止","confirmed_digest":first["digest"]}
+        with mock.patch.object(station_resources,"clean",side_effect=OSError("before directory reset")), self.assertRaises(OSError):
+            self.execute(self.ws,"clean",task["issue_key"],task["run_id"],task["_revision"],"op-amend-clean",request)
+        current=task_store.read_task(self.ws)
+        record=self.ws/current["archive_ref"]["path"]/"record.json";before=record.read_bytes()
+        late=self.ws/"runtime/logs/late.log";late.write_text("late generated output")
+        # 独占目录内变化不扩权、不重算逐文件摘要，也不要求第二次确认。
+        self.assertEqual(station_resources.plan(self.ws,current)["digest"],first["digest"])
+        self.execute(self.ws,"clean",task["issue_key"],task["run_id"],task["_revision"],"op-amend-clean",request)
+        self.assertFalse(late.exists());self.assertEqual(record.read_bytes(),before)
 
     def test_operation_read_rejects_damaged_done_log(self):
         self.write(self.ws / ".agenticops/operation.json", {"schema_version": 1, "status": "done", "steps": {}})
@@ -469,7 +418,11 @@ class StationTests(unittest.TestCase):
         file = self.ws / "source/tapdata/tapdata/file.txt"
         file.write_text("late modification explicitly discarded")
         second = station_resources.plan(self.ws, current)
-        station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-release-amend", first["digest"], {"confirmed_digest": second["digest"], "expected_plan_revision": 0})
+        entry=second["entries"][0]
+        snapshot={k:entry[k] for k in ("head","before","before_index","index_patch","worktree_patch")}
+        station_resources.register(self.ws,task["issue_key"],task["run_id"],[{"kind":"source-disposition","producer":"user","path":entry["path"],"preservation":{"action":"discard","snapshot":snapshot}}],expected_operation_id="op-release-amend")
+        second=station_resources.plan(self.ws,current)
+        station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-release-amend", first["digest"], {"confirmed_digest": second["digest"], "expected_plan_revision": 0,"discard_digest":baseline.digest(second["entries"])})
         self.execute(self.ws, "release", task["issue_key"], task["run_id"], task["_revision"], "op-release-amend", request)
         self.assertIsNone(task_store.read_task(self.ws))
         self.assertEqual(file.read_text(), "baseline\n")
@@ -496,8 +449,8 @@ class StationTests(unittest.TestCase):
         self.assertEqual(len(station_operation.read(self.ws)["plan_revisions"]), 1)
         self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-repeat-plan", request)
         operation = station_operation.read(self.ws)
-        self.assertIsNotNone(operation["steps"]["resource:0:" + plan["digest"] + ":runtime/logs/repeated.log"]["receipt"])
-        self.assertIsNotNone(operation["steps"]["resource:1:" + plan["digest"] + ":runtime/logs/repeated.log"]["receipt"])
+        receipts = self.ws / "archive" / task["issue_key"] / task["run_id"] / "receipts"
+        self.assertEqual(len(list(receipts.glob("op-repeat-plan-root-v*-done.json"))), 2)
         self.assertIsNone(task_store.read_task(self.ws))
 
     def test_cleanup_amend_before_archive_publication_preserves_old_draft(self):

@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "epoch 4 工位重置确认清单",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "directories",
+    "entries",
+    "source",
+    "external",
+    "active_state",
+    "retained",
+    "digest",
+    "archive_runtime"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 3
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^run-[a-z0-9-]+$"
+    },
+    "directories": {
+      "type": "array",
+      "items": {
+        "$ref": "station-directory.schema.json"
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "repository",
+          "file",
+          "action",
+          "head",
+          "before",
+          "before_index",
+          "index_patch",
+          "worktree_patch",
+          "preservation"
+        ],
+        "properties": {
+          "action": {
+            "enum": [
+              "restore",
+              "delete"
+            ]
+          },
+          "preservation": {
+            "type": "object",
+            "required": [
+              "action"
+            ],
+            "properties": {
+              "action": {
+                "enum": [
+                  "archive",
+                  "export",
+                  "discard"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "source": {
+      "type": "object"
+    },
+    "external": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "action"
+        ]
+      }
+    },
+    "active_state": {
+      "type": "object",
+      "required": [
+        "files",
+        "unbind_run",
+        "task_digest"
+      ]
+    },
+    "retained": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "archive_runtime": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

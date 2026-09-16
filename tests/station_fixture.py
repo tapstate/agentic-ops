@@ -55,7 +55,7 @@ def initialize_workspace(base):
     binding["agents"] = binding.get("agents") or ["codex"]
     binding.pop("repository_pool", None)
     task_store._write_json_atomic(binding_path, binding)
-    task_store._write_json_atomic(state / "init.json", {"workspace_state_epoch": 3})
+    task_store._write_json_atomic(state / "init.json", {"workspace_state_epoch": 4})
     manifest = Path(binding["product_root"]) / "contracts/workspace-state-compatibility.json"
     if not manifest.exists():
         original = Path(__file__).resolve().parents[1] / "contracts/workspace-state-compatibility.json"

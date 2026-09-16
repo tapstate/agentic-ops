@@ -74,15 +74,7 @@ config 不随任务删除。任务专用有效配置写入 runtime，正式档�
 
 ## 5. 操作状态与接口语义
 
-新接管在 `facts.station_contract=2` 标记增强检查合同；旧 run 缺少此标记时保留原生命周期和授权恢复语义，旧的进行中清理计划仍按其原 schema 生成、比较和恢复，不在线重写。路径及旧字段语义保持兼容，workspace epoch 保持 3；新增可选事实和证据只影响新接管。此兼容方式不承诺旧客户端具备增强检查，完整升级或回退仍遵循版本切换前的任务退出协议。
-
-Agent 首先执行只读 `cleanup-preflight`，展示任务阶段、结果、阻塞、活动操作、归档及资源清单；用户拒绝时保持现场。未归档的新任务执行 archive 时必须提供当前 `preflight_digest` 和真实用户决定的 `decision_ref`。确认绑定 revision 和观察摘要，现场变化后重新展示。Workflow 核对这些绑定，用户交互由 Agent 承担，不提供用户身份认证。
-
-正常新任务必须先 archive，再生成 cleanup-plan 并取得删除确认后 clean。未完成 takeover 保留现有 handoff_clean：用户先确认停止和精确清理范围，原操作链内先发布档案再执行删除；失败仍沿原身份恢复。此例外仅处理未完成接管。已完成任务仍使用 release。
-
-cleanup-plan v2 纳入活动授权和全部 evidence 文件指纹、绑定 run 的解绑动作，以及保留目录；resources.json 的外部清理状态和回读单独验证，允许清理后的同对象回读更新，不改变原处置身份摘要。临时命令输入放在工位活动材料之外（例如系统临时目录），避免生成确认请求自身改变待确认材料。operation.json 保留最近操作及恢复回执，不作为待删除日志；正式档案只用于审计与优化，不能恢复开发。
-
-分支、PR 及其它 external 必须归档前核验并登记精确 ID、producer、处置 action（retain/delete/close）、before 身份与 SHA/状态；破坏性处置要求 before.protected=false 的已核验事实。Agent 在归档后展示独立的 external_confirmation_digest 并取得确认，再使用原生工具处置、回读。同一对象最后登记 cleaned 或 retain 对应的 retained 和 readback_ref；清理请求同时包含 confirmed_digest 与 external_confirmation_digest。Workflow 核验摘要与回读，不执行原生分支删除、PR 关闭，也不能拦截任意平台调用；没有执行确认时保留外部对象，不能将其标成已清理。确认范围变化使用 cleanup-amend 并重新提供外部摘要。未知外部对象在归档后不能新增登记或猜测归属。
+新接管使用 `facts.station_contract=3` 和 cleanup-plan schema 3，对应 workspace epoch 4。旧 epoch 的活动状态由原版本退出，不在本版保留旧清理执行器。一次确认、目录回收、源码成果与外部处置以第 7、8 节为准；只读预检仍由 cleanup-preflight 提供。
 
 编码前的新任务使用 `source-readiness` 刷新任务目标分支引用。准备先将旧证据标为 refreshing，逐仓保存 fetch 意图和结果，最终记录本次 observed 快照；失败重试安全地刷新同一 run 的证据，不推进阶段。检查全部工程身份、工作区与未登记 ignored 产物，以及任务分支、冻结基线祖先关系和目标分支。等同基线时可进入授权；目标正常向前推进时，用户可用 `--confirm-digest` 与 `--decision-ref` 明确选择保留冻结基线开发、在 PR 前按项目规则同步，或退出后重新接管。分叉、回退、缺失或不可信引用拒绝。grant 及进入 implementation 时重新回读本地与远端，授权绑定 source_readiness_digest；准备过程不修改冻结基线或工作分支内容。已开始编码后不要求工作区始终洁净，也不重复以本检查替代后续代码与 CI 证据。
 
@@ -99,7 +91,7 @@ cleanup-plan v2 纳入活动授权和全部 evidence 文件指纹、绑定 run �
 
 现役阶段检查仍维护 task.stage，目标完成检查从“先移除 worktree”改为先验证交付并持久化 outcome=completed，资源释放独立。研发的 release 可以在完成事实已有时执行，或在同一调用中核验并记录 completed；确认只覆盖精确任务/run/成果，不覆盖以后变动。completed 之后出现新的源码差异不回退完成事实，也不能直接清理；必须核验和明确处置额外成果。无代码任务通过 Project 定义的验收证据完成，不用空 PR 清单推导成功。
 
-release 的研发确认绑定任务、run、最终候选摘要和释放范围。clean 确认绑定 run 与精确 `cleanup_plan_digest`；plan 逐项包含对象身份/指纹、范围，以及 delete、retain_ref、retain_config 或明确展示的 export_then_delete。plan 不包含尚未生成的档案摘要。未提交修改的不可逆丢弃必须列出文件和内容指纹；现有精确授权仍有效时不重复询问。未知归属、未列项或确认后新增内容不删除且阻止解绑，不静默 stash。保留在 source 中的 dirty 文件不能被视为工位空闲。
+release 的研发确认绑定任务、run、最终候选摘要和释放范围。clean 确认绑定 run 与精确 `cleanup_plan_digest`；plan 包含目录身份、范围、源码 archive/export/discard 处置及开发基线。plan 不包含尚未生成的档案摘要。未提交修改的不可逆丢弃必须列出文件和内容指纹；现有精确授权仍有效时不重复询问。未知归属、未列项或确认后新增内容不删除且阻止解绑，不静默 stash。保留在 source 中的 dirty 文件不能被视为工位空闲。
 
 现场漂移通过同一 operation 的追加式计划修订恢复，重新确认精确清单并绑定原摘要与修订编号；保留原请求、旧计划、草稿与已完成回执。正式档案不得覆盖。独立 archive 仅在正式档案尚未发布时允许重新确认草稿清单，此确认不授权删除。释放恢复不能把新增未验收提交纳入旧完成证明；重新生成相同内容的产物也不能沿用旧删除回执。
 
@@ -115,35 +107,47 @@ release 的研发确认绑定任务、run、最终候选摘要和释放范围。
 
 除了 PR，继续核验 Project 现有质量、CI、关联测试及适用的发布验收；任务类型未配置的验收不能凭空要求，已配置要求也不能被“PR 已合并”替代。completed 是本地核验结果，Jira 同步结果另存，不能假称已改 Jira。外部写入未知先回读原操作，清理不再次发送。
 
-## 7. 资源隔离与稳定现场
+## 7. 任务目录与重置边界
 
-Project 资源清单定义管理路径、生产动作、停止/核验入口、保留或删除策略。首版 runtime 内固定分出 effective-config、maven-local、plugins、logs、reports 和应用工作目录，仍是一份活动 runtime。Maven 命令显式使用该工位 runtime 的 local repository；不能把本任务 Jar 安装进共享可写缓存再假称隔离。源码内 target、node_modules 或打包输出仅按实际配方逐项声明，不能通用 `git clean -fdx`。
+“重置工位”是 clean/release 共用的退出行为，不新增第五个生命周期入口，也不替代 workspace purge。config、完整独立 source、正式 archive 及初始化接线保留；runtime 是任务独占可丢弃区域，清空内容但保留根目录。持久配置、源码唯一副本和用户手工材料不能放入 runtime。完成任务仍通过 release 核验原有交付事实；未完成任务通过 clean 归档为 incomplete，再记录 interrupted，不修改 Jira 完成状态。
 
-端口在启动时实际绑定并回读，不把“探测时空闲”当预留成功。进程记录 PID、启动时间、可执行程序和工作目录；停止前重新核对身份，避免 PID 重用误杀。只核对本工位登记资源，不扫描整台机器未知进程作为释放条件。停止失败或原会话仍有写入者时保持占用，不宣称工位锁能阻止原生写入。
+runtime 采用 `clear_children_keep_root`，其直接和深层生成内容均在授权域内，不逐文件登记。源码内无法迁出的 target/node_modules 等目录由 Project engineering profile 的 generated_directories 声明，实际生产前按精确路径登记为 `source-generated/delete_root`。配方模式只允许选择候选路径，不授予已有非空目录的删除权。目录身份包含 station/run、路径、生产者、配方 ID/版本、父目录及根目录的 device/inode。Workflow 先写创建意图，再 mkdir 并写创建回执，最后才能启动生产者；已存在目录只能在显式采用且确认为空时登记。创建后回执前中断不能猜测非空目录归属；仅按原创建意图核验生产者、配方、父身份和空目录后继续。初始 current CAS 同时保存已核验空 runtime 的采用身份，允许在后续目录登记前中断时取消接管。
 
-测试数据使用项目已授权的工位独立实例或可验证命名空间，记录精确对象及创建回执；不能删除共享数据库或按任务号猜测归属。没有安全清理接口时给出精确人工接力，回读完成后才能解绑。秘密使用持久引用及有效配置注入，不复制到档案。接管复用有效环境确认，不在输入未变化时要求逐项重复确认。
+受管根及祖先禁止链接、越界、挂载点；源码生成根不得包含 tracked 文件。递归删除基于目录 FD，不跟随内部符号链接，只删除链接本身；跨设备、嵌套 .git、FIFO/socket/device 等特殊对象停止处理。生产者在预检前已移除的生成根，以 observed_missing_before_intent 显式列入确认并记录观测缺失；确认后、清理意图前才消失的根须重新确认，不能冒称本次已删除。目录回执后再次出现内容时停止，必须明确补充处置，不能沿用旧回执重删。这不是本地安全沙箱，不承诺阻止任意原生进程写入。
 
-正式归档前停止任务应用、测试、构建及其它登记写入者，再核对源代码、配置和产物指纹。人工执行进程必须登记或明确交接；不能证明现场稳定时不发布档案。单独 archive 成功后以 current.archive_ref 锁定本次处理材料，不要求 outcome 已为终态，但不再允许源码开发、阶段推进或新增实施授权；只允许核验、归档重试及相应的释放/清理。这是为结束本次处理而归档，不是暂停后续写的快照。未完成任务必须清理成功后才能接新任务；以后再次接管同一 Jira 使用新 run。
+Agent 使用原生能力停止已登记应用、构建、测试和其它写入者，Workflow 回读身份；不能凭 PID 号码猜测进程，不扫描整机。容器、数据库命名空间等运行资源必须完成精确回收，或由项目给出保留不会污染后续任务的隔离证据。未知外部写入仅检查当前 run 已登记 operation、活动证据和同步记录，必须先回读原操作；不能改成 retain 绕过，不宣称能检测未登记的原生调用。
 
-## 8. 归档、清理与中断恢复
+## 8. 一次确认、成果归档与恢复
 
-archive 不要求任务先完成或终止。`record.task_result` 为 completed 或 incomplete，分别展示“已完成”“未完成”；仅 outcome=completed 且有相应完成事实才记 completed，其余按 incomplete 归档。未完成档案记录处理到哪里、已有成果、未解决事项、已有验证和归档原因，不因缺少合并 PR 或验收报告而拒绝归档；未知材料明确标记缺失。归档不自行设置 completed/interrupted，不解绑，也不改变 Jira。后续清理的本地终止和资源回收结果写入 receipts，不把 incomplete 改写为 completed。两类档案均记录 station/run/issue；事实、推测和未知分开，不补造耗时和次数，不保存完整会话、秘密或原始敏感日志。
+预检展示 task/run、目录根和身份、源码成果处置、每仓开发引用及完整提交 SHA、保留项、归档策略与当前阻塞。确认绑定这些确定范围；独占目录内部生成内容和停止时产生的日志不改变授权范围。源码内容、根身份或处置范围变化需要展示差异并补充确认。正式档案摘要是执行证据，不加入范围摘要，不因归档完成再次询问同一授权。
 
-正式档案先在 archive 下的受控临时目录生成，清单包含脱敏文件哈希，核验后在同一文件系统原子改名到 `<issue>/<run>`。目标已存在时只能验证相同身份和内容后复用，不能覆盖。record 内包括冻结现场摘要与 `resource_inventory`（资源事实及建议处置），该 inventory 不授予删除权限。敏感资源只记录脱敏对象 ID、建议处置和安全摘要，真实参数留在受限 operation 中。临时目录通过操作 ID 证明归属，不能按通配符清理其它档案。
+退出顺序为：展示范围并确认 → 停止写入者并核验 → 保存并核验正式档案 → 回收目录及明确处置源码 → 检出开发基线 → 撤销授权并清除活动材料 → CAS 解绑 → done。原生工具负责停止动作；检查点发现写入者未停时保留现场。独立 archive 仍支持只归档不释放，后来 clean/release 复用覆盖当前成果的档案与有效确认。
 
-用户授权范围与执行完整性关联分开：`cleanup_plan` 的规范化内容为 run、对象身份/指纹、处置和范围；`cleanup_plan_digest` 固定这些内容，`confirmation_digest` 证明研发已确认该 plan。正式档案发布后才形成唯一可执行的 `operation.cleanup_manifest`，它引用原 plan 并组合 `cleanup_plan_digest/confirmation_digest/archive_digest`。archive digest 只关联证据，不参与授权范围摘要；补齐它既不修改 plan，也不扩权或要求重复确认。尚无正式档案或有效 plan 确认时不得执行删除。
+### 8.1 源码成果与日志
 
-独立 archive 后，已完成任务走 release，未完成任务走 clean；从原 inventory 与当前相关资源回读生成 plan，取得其尚缺的精确确认，再使用既有 archive digest 形成 manifest，不因归档后记录终止而重新生成档案。既有确认范围和内容仍匹配时直接复用。确认后新增对象不自动扩权；同一 operation 在删除新增项前追加新的 plan 及确认版本，保留旧版本和已执行回执。新增对象作为本操作附加 inventory 留在 receipt 中，不改正式档案；无法证明归属则保持占用。
+每份待移除成果只允许三种确定动作：archive、export、discard。默认 archive 保存 HEAD→index 和 index→worktree 两份 binary/full-index patch、必要 untracked 文件实际字节及路径/大小/hash/mode，记录 origin、Head、分支和保留引用。在临时仓库按顺序重建并比对文件、index entries 和 mode；不能只有 diff 文件名或状态摘要。代码材料只用于审计和人工取回，不重新激活旧 run。
 
-归档发布后，operation 保存 archive_path/digest，并在同一工位锁内 CAS 更新 current.archive_ref；独立 archive 只有完成 archive_bound 才标记 done。恢复仅校验档案自身及其绑定，不重算已部分清理的现场。若发布已成功但回执或 archive_ref 未写，未完成操作继续阻止开发和接新任务，按预先登记目标和文件清单回读，补回执及绑定。正式正文不可变；实际清理或释放结果在 receipts 中按 operation ID 原子追加，记录 archive digest、实际 cleanup manifest digest 和逐项结果；重复写只能接受相同内容。
+export 必须写到本次清理范围以外的受控位置，实际内容、源码快照及回读均核验；discard 必须额外确认精确仓库、路径和内容指纹。无任何有效动作时不得恢复或删除源码。敏感正文不进入档案，不通过改写 patch 假称保存完整；超过大小上限或不支持的冲突索引、submodule、源码链接等对象停止并明确处置。旧档案必须逐成果摘要覆盖，不因整体档案有效就推定保存了新增成果。归档保存脱敏总结、结构化证据和 Project 指定 runtime/logs、runtime/reports 文本；停止期间新增日志先追加不可变回执。归档保存上述脱敏材料，不保存原始敏感日志或依赖缓存。
 
-所有状态与步骤使用同一工位锁串行；锁文件在 `.agenticops/` 内固定，单次释放不删除锁目录。每个外部副作用前写意图，后写实际回读。步骤原子写临时文件、flush/fsync 后 replace，并持久化父目录；跨文件不宣称事务。release/clean 内的归档仅为 phase，不创建嵌套 operation。
+正式档案在 archive/<issue> 的操作专属临时目录准备，核验后原子改名到 archive/<issue>/<run>，发布后正文不可覆盖。目录回收、解绑和后续分支处置只追加 receipts。发布成功但回执或 archive_ref 未写时，恢复先核验已有档案并补绑定，不重算已部分回收的现场。
 
-清理按确认清单逐项执行：目标是 symlink、路径越界、身份/内容发生未允许变化、包含未列文件时停止；已删除条目视为幂等成功。源码未提交修改仅在 clean 的精确授权下恢复到该条目已记录的提交内容，不能误用默认 develop；工位 neutral 只切洁净独立 checkout 到已记录的冻结或最终候选提交，保留全部分支 refs。中立状态不要求追远端最新版本。
+### 8.2 开发基线与分支
 
-完成清理后先将证据、授权撤销事实和最终回执持久化；再把当前运行辅助状态清理至空闲允许清单，写 unbind intent，最后 CAS 将 current=null 并增加 revision。operation 未标记 done 时即使 current=null 仍阻止新接管，恢复依据同一 operation/run 的终态回执补 done，不能重新清理无关现场。新 run 建立前必须没有旧活动授权或质量状态；档案完整后才移除其活动副本。
+接管时按 Project 每仓 dev_branch 解析已下载开发引用，保存完整 SHA、引用来源、观察时间及配方版本，独立于任务冻结基线。重置只使用已确认且本地存在的 SHA，detached checkout，不移动命名开发分支或任务分支，不执行 rebase、reset、stash 或网络 fetch。任务 Head 通过计划中明确展示的 refs/agenticops/archive/<run>/<repository-digest> 保留；此引用不自动删除。下次接管重新刷新、核验目标开发基线。
 
-未完成 takeover 可在研发确认后转入 clean，交接始终在同一 operation 文件内可判定：先向旧 operation 原子写入完整 `handoff`（目标 clean operation ID、请求、cleanup plan 及其确认和摘要，此时不要求未来 archive digest），再原子替换为 clean operation，内含 `supersedes`、原操作摘要、已完成步骤与资源记录。新 clean 发布档案后再补齐可执行 manifest。读到旧 takeover 的 handoff 时只继续交接，不再 prepare；读到 clean 时只恢复 clean。旧记录归入 evidence 可随后完成，不作为交接正确性的前置条件。未完成 release/clean 只能恢复同一操作，不允许用另一 kind 覆盖。迟到回执绑定旧 run/op 只能被拒绝或单独追加原档案备注，不能修改新任务或正式档案正文。
+没有有效归位 SHA 的已检出仓库停止；未完成 takeover 中有可信创建事实但尚未 checkout 的 .git-only 仓库可保留并标为待准备，沿同一 handoff_clean 恢复。未选中的已登记持久仓库保留，核验身份、无写入者及接管前后状态；source 中未知对象阻止空闲，不当作生成物删除。
+
+本地/远端任务分支和 PR 默认保留，普通重置不调用 GitHub。删除分支或关闭 PR 是重置后的独立选择：先展示精确对象、SHA、状态和保护信息，经用户确认后以原生工具执行。workflow/station_disposition.py 只向原 archive 的 receipts 按 disposition_id 追加 intent 和 readback，不占 current、不重启旧 operation、不执行外部调用。unknown 只回读原调用，不重发，也不撤销已完成的本地重置。
+
+### 8.3 操作日志、空闲判定与兼容
+
+operation.json 保留操作身份、阶段和材料引用；不可变大清单与归档草稿按内容摘要保存在 .agenticops/operation-data。生成物清理回执按目录保存在 archive receipts，不按文件保存 intent/receipt，不随生成文件数重写完整状态。各阶段先持久意图再执行副作用，实际结果回读后原子写入回执，文件及父目录 fsync；跨文件不声称事务。
+
+删除中断后恢复同一目录意图；delete_root 缺失只有存在可信创建和删除意图、父身份匹配时才可补回执。clear_children_keep_root 必须证明原根身份未变且为空。范围变化通过同一 operation 追加计划修订和确认；正式档案不可覆盖，新增源码必须明确 export/discard 或另行安全保存，不能假称被旧档案覆盖。
+
+空闲必须满足：runtime 为空、受管源码生成目录不存在、本次工程源码洁净且在确认开发 SHA、配置档案及保留引用完整、已登记写入者停止、运行资源无污染、没有活动授权/证据和未完成 operation。未知材料不删除且阻止解绑。先持久化结果与授权撤销事实，再清除活动副本、写 unbind intent、CAS current=null、补 done；任何中断沿原操作恢复，不碰新任务。
+
+目录归属、源码材料、操作 sidecar 和恢复语义使用 epoch 4。epoch 3 必须在原版本退出并受控 purge 后显式重建；本版不在线迁移或续接旧 operation。purge 校验并移除归属明确的 operation-data，保留 source/config/archive，未知或损坏状态停止。
 
 ## 9. TapData 配方合同
 
@@ -153,7 +157,7 @@ archive 不要求任务先完成或终止。`record.task_result` 为 completed �
 
 完整配方的目标合同包含 `id/revision/repositories/version_resolver/toolchain_requirements/actions/resources/health_checks`。当前 engineering-profiles.json 仅实现 id/revision/repositories/optional_repositories；其余配方合同尚未实现或未经真实环境验证，不能以删除合同的方式宣称完整应用已交付。actions 应是按目标源码核验的 argv、cwd、环境引用和产物声明，覆盖 prepare/build/start/stop/verify，只引用固定 source/config/runtime 路径。工具版本、Maven profile、Node 包管理器必须从目标分支和已确认环境取得，不猜值；实际启动与健康证据是独立验收层。
 
-现役资源登记通过 station_resources.py 接收 file/process/external 数组并绑定 run。外部资源 quiesced 且回读可信可先归档，最终释放或清理须得到 cleaned；归档后只允许既有 external 身份不变的清理状态/readback_ref 更新，不允许新增资源或改写正式档案。
+现役资源登记通过 station_resources.py 接收 directory/process/external/source-disposition 数组并绑定 run；file 只用于已有工具的证据登记，不替代目录归属。生产前创建生成目录，运行资源与可选分支/PR 按第 7、8 节分别处置，归档后不恢复开发或改写正式档案。
 
 FE/TM 工作目录在 runtime 中分开，连接同一已确认 Mongo 环境，端口和 backend_url 必须互相匹配。启动健康检查分别记录 TM 可用、FE 连接成功、适用时 Web 可访问；任务验证另证明本次 connector/Jar 的生产与实际加载文件内容一致。未具备数据库或凭据只报告环境缺口，不伪造启动成功。实现配方时需用真实目标分支验证各入口，本文不声明当前模板已可运行。
 
@@ -168,7 +172,7 @@ FE/TM 工作目录在 runtime 中分开，连接同一已确认 Mongo 环境，�
 | TapData Project 与任务 Skill | 完整工程 Profile、分支解析消费、原生运行资源配方和四操作引导；不复制公共状态逻辑 |
 | docs、故事合同与测试 | 现役与目标区别在实现发布时收敛，按本合同验收并更新使用说明 |
 
-当前状态代际为 epoch 3，最低升级协议为 2。生成与清理机制先在同版本形成完整闭环，不依赖升级器：生成工位→任务接管/归档/释放或清理→workspace purge→重生成。purge 只移除归属明确的接线与受管状态，保留 source/config/archive；非空 runtime、未知 .agenticops 内容或未完成操作阻止解绑。保留目录可在明确 --reuse-materials 后复用，但不能自动导入配置、历史授权或验收。
+当前状态代际为 epoch 4，最低升级协议为 2。生成与清理机制先在同版本形成完整闭环，不依赖升级器：生成工位→任务接管/归档/释放或清理→workspace purge→重生成。purge 只移除归属明确的接线与受管状态，保留 source/config/archive；非空 runtime、未知 .agenticops 内容或未完成操作阻止解绑。保留目录可在明确 --reuse-materials 后复用，但不能自动导入配置、历史授权或验收。
 
 跨版本是第二阶段编排：先让原版本完成自身清理，再切换产品并调用新版本生成；新版本不解析旧任务或提供旧清理 Runtime。本次不另发过渡版本，旧安装先在原版本保存材料并受控解绑，再重新安装，不承诺旧升级器直接 update。新协议只保障此后的切换。任一已登记工作空间不兼容或无法核验均阻止版本切换；repair 不跨代际采用。回退使用相同干净边界。操作说明见[更新与回退](../usage/update-and-rollback.md)。
 
@@ -203,4 +207,4 @@ FE/TM 工作目录在 runtime 中分开，连接同一已确认 Mongo 环境，�
 
 初始化仍只生成空工位接线；接管确定 Project Profile 后才按所选仓库准备源码。缓存不可用时停止当前源码准备，不绕过先入池的顺序；已经完成 fetch 的恢复直接核验工位已有引用，不刷新缓存或重新解释历史基线。工作空间 purge 不清理产品根缓存，也不清理旧版源码池。
 
-本次只改变对象下载路径，不改变 `.agenticops/` 字段、clone/fetch 意图与回执含义，保持 epoch 3。旧版已完成步骤和未完成 fetch 可直接恢复；工位不存在但 clone 已回执仍拒绝重建。缓存不是工作空间状态的迁移来源。
+本次只改变对象下载路径，不改变 `.agenticops/` 字段、clone/fetch 意图与回执含义，下载路径变化本身不改变 epoch；任务重置合同使用 epoch 4。同 epoch 已完成步骤和未完成 fetch 可直接恢复；工位不存在但 clone 已回执仍拒绝重建。缓存不是工作空间状态的迁移来源。

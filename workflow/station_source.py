@@ -96,6 +96,32 @@ def require_clean(path):
         raise ValueError("源码仓库存在未提交修改，拒绝覆盖：%s" % path)
 
 
+def check_station_layout(workspace, catalog, selected):
+    """仅检查工位源码边界；未知目录不被当作可回收产物。"""
+    root = Path(workspace).resolve() / "source"
+    if root.is_symlink():
+        raise ValueError("source 不能是符号链接")
+    retained = {}
+    if not root.exists():
+        return retained
+    owners = {name.split("/")[0] for name in catalog}
+    for owner in root.iterdir():
+        if owner.is_symlink() or not owner.is_dir() or owner.name not in owners:
+            raise ValueError("source 含未知顶层对象：" + owner.name)
+        for repository in owner.iterdir():
+            name = owner.name + "/" + repository.name
+            if name not in catalog:
+                raise ValueError("source 含未知仓库：" + name)
+            identity(repository, catalog[name]["origin"])
+            if name not in selected:
+                require_clean(repository)
+                if git(repository, "ls-files", "--others", "--ignored", "--exclude-standard").stdout:
+                    raise ValueError("未选择的持久仓库含未知生成物：" + name)
+                retained[name] = {"head": git(repository, "rev-parse", "HEAD").stdout.strip(),
+                                  "branch": git(repository, "branch", "--show-current").stdout.strip()}
+    return retained
+
+
 def prepare_repositories(workspace, catalog, selected, operation):
     """先登记 clone/fetch 意图；失败保留现场，只按同一操作恢复。"""
     observations = {}
@@ -191,13 +217,14 @@ def readiness_snapshot(workspace, task):
     if not task.get("source_prepared") or not task.get("task_repositories"):
         raise ValueError("完整工程及任务分支尚未准备")
     from workflow import station_resources
-    managed = {item["path"] for item in station_resources.inventory(workspace, task) if item.get("kind") == "file"}
+    from workflow import station_directories
+    managed = station_directories.load(workspace, task)
     result = {}
     for name, state in observed.items():
         path = repository_path(workspace, name)
         require_clean(path)
         ignored = git(path, "ls-files", "--others", "--ignored", "--exclude-standard", "-z").stdout.split("\0")
-        if any(filename and "source/" + name + "/" + filename not in managed for filename in ignored):
+        if any(filename and not station_directories.covered("source/" + name + "/" + filename, managed) for filename in ignored):
             raise ValueError("源码含未登记 ignored 产物：" + name)
         entry = value["repositories"][name]
         binding = task["task_repositories"].get(name)
@@ -262,7 +289,7 @@ def prepare_readiness(workspace, task):
 def require_readiness(workspace, task):
     from workflow import task_store
     import json
-    if task.get("facts", {}).get("station_contract") != 2:
+    if task.get("facts", {}).get("station_contract") not in (2, 3):
         return None  # 已有 run 沿原合同恢复，新接管采用新检查。
     path = task_store.task_directory(workspace, task["issue_key"]) / "source-readiness.json"
     if path.is_symlink() or not path.is_file():

@@ -58,7 +58,7 @@ class SourceFixture:
         task_store.initialize_current(self.ws)
         task_store._write_json_atomic(self.ws / ".agenticops/workspace.json", {
             "schema_version": 3, "product_root": str(self.root / "product"), "project": "tapdata", "workspace_id": "a" * 32})
-        task_store._write_json_atomic(self.ws / ".agenticops/init.json", {"workspace_state_epoch": 3})
+        task_store._write_json_atomic(self.ws / ".agenticops/init.json", {"workspace_state_epoch": 4})
         self.seed = self.root / "seed"
         self.seed.mkdir()
         self.git(self.seed, "init", "-b", "develop")

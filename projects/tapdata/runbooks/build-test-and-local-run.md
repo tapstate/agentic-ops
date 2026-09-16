@@ -8,7 +8,7 @@
 
 工位接管先冻结完整工程，repository context 返回独立 source 仓库；以下构建 cwd 使用这些已核验路径。持久环境配置位于 config，有效配置、Maven local、插件、日志和报告进入唯一 runtime。操作前核验 Project 资源配方，禁止写共享 Maven 缓存后声称隔离；归档或退出前登记并核验停止写入者。目录或配方生成不证明真实 TM/FE/Web 已启动，必须以实际健康检查与任务产物加载证据结论为准。
 
-当前完整应用 Profile 只定义仓库集合与修订，尚未包含已实证的 actions/toolchain/health_checks 配方。实际工具链、运行参数与数据库环境须按目标分支核验。资源事实通过 workflow/station_resources.py 的 --issue-key/--expected-run-id/--input 登记；外部资源 quiesced 且有回读可先归档，最终释放/清理必须回读 cleaned。归档后仅允许更新既有 external 的清理状态与回读来源，不新增或变更资源身份。
+当前完整应用 Profile 只定义仓库集合与修订，尚未包含已实证的 actions/toolchain/health_checks 配方。实际工具链、运行参数与数据库环境须按目标分支核验。日志、报告和可迁出的产出分别集中到 runtime/logs、runtime/reports 和其它 runtime 子目录；不可迁出的 target/node_modules 在启动生产者之前按 Profile 配方登记目录，重置说明见[任务授权指引](../../../docs/usage/task-authorization.md#重置工位)。资源事实通过 workflow/station_resources.py 的 --issue-key/--expected-run-id/--input 登记；外部资源 quiesced 且有回读可先归档，最终释放/清理必须回读 cleaned。归档后仅允许更新既有 external 的清理状态与回读来源，不新增或变更资源身份。
 
 来源：《TapData 产品研发指南（v3.5.4+）》，提取日期为 2026-07-27；移植自 tapstate/agentic-ops（2026-08-27）。
 

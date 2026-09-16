@@ -949,6 +949,8 @@ class FeatureFlowTests(unittest.TestCase):
             "workspace_id": "3" * 32, "agents": ["codex"]})
         task_store.initialize_current(self.ws)
         initialize_workspace(self.ws)
+        for name in ("source", "config", "runtime", "archive"):
+            (self.ws / name).mkdir(exist_ok=True)
         profiles = self.product / "projects/tapdata/engineering-profiles.json"
         profile_doc = json.loads(profiles.read_text())
         profile_doc["profiles"]["full-application"]["repositories"] = [self.repo]

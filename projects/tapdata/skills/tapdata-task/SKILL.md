@@ -23,25 +23,19 @@ metadata:
 6. 续办原 run 不改基线。新 run 续办旧分支时，用 takeover --continuation-input <json> 显式给出以仓库 ID 为键的 work_branch/baseline_sha/expected_head，均需真实 Git/PR 核验；旧报告不自动变成新验收。随后 repository add 使用 --expected-head 核对续办分支。更换工程版本或扩大完整集合须归档清理后重接，不能偷改冻结清单。
 7. snapshot 固化 Jira 初始事实，jira_watermark 按现役 prepare/complete 尽力回写并回读。进入 task_intake 后，按 Project status_sync 节点执行精确 Jira 同步；未知结果先回读，不阻塞无依赖本地准备。接管成功不是停点，继续到真实方案、权限或事实决策点。
 
-## 归档、释放和清理
+## 归档、释放和重置工位
 
-新任务先使用原生 Git/GitHub 只读核对本地/远端任务分支和全部任务 PR，登记需要处置的 external，包含精确 id、action、before 身份及 SHA/状态；删除对象须回读保护信息为 false。登记完整后执行 `task.py cleanup-preflight --issue-key <issue> --expected-run-id <run> --dir <workspace>`，向用户展示当前阶段、完成情况、阻塞及完整清理范围；用户未决定继续时停止退出步骤。归档请求加入本次 `preflight_digest` 和真实 `decision_ref`；确认后再次登记资源会使摘要失效，必须重新预检并确认。归档后生成 cleanup-plan，再请求本地清理确认；外部分支删除或 PR 关闭还必须独立展示并确认 `external_confirmation_digest`。Workflow 不执行这些外部动作：由 Agent 使用原生工具执行后回读，更新相同已登记对象的 cleaned/retained 状态与 readback_ref，再调用 clean/release。用户选择保留时 action=retain，不将“未删除”写成 cleaned。未知结果保留工位占用。
+用户要求清理时使用现有 clean/release 重置工位，不创建另一套生命周期。保留 config/source/archive，runtime 清空保根，Project 声明并在生产前登记的源码生成目录整体回收；分支和 PR 默认保留。先读取 cleanup-preflight，展示任务状态、目录归属、源码成果处置、开发基线 SHA 和阻塞。request 包含 summary/reason、confirmed_digest 及真实 decision_ref；用户既有确认仍覆盖范围时直接沿用，不因归档完成再问。discard 源码还需额外确认 preflight 返回的 discard_digest。release 同时绑定原 candidate_digest，不能把 incomplete 档案后置改为 completed。
 
-正常新任务 archive 成功后才可 clean；未完成接管沿原 handoff_clean 保留先归档再删除的恢复链。cleanup-plan v2 展示活动授权、证据、解绑动作和保留的 config/source/archive/operation；确认请求写到系统临时目录，避免自引用使清单变化。档案只供审计和优化，不能从档案恢复原开发。旧 run 按原合同完成后，新接管自动采用新检查。
+使用原生能力停止已登记写入者并回读后，调用 task.py clean/release；Workflow 在同一操作内归档、核验源码材料、回收目录、检出开发 SHA、撤销授权和解绑。源码归位使用 detached checkout，命名分支和提交保留，不 rebase、不猜测当前版本、不联网追新。下次接管重新核验开发基线。无有效基线、未知资源或已登记外部写入结果未知时，处理具体阻塞，不手改状态或换工具绕过。
 
-运行前后用 `python3 <agenticops-root>/workflow/station_resources.py --dir <workspace> --issue-key <issue> --expected-run-id <run> --input <资源数组.json>` 登记实际资源。数组每项包含 kind 与 producer；file 记录工位相对 path，process 记录 pid/started_at/cwd/executable，external 记录精确 id/status/readback_ref。原生工具负责停止或外部清理，Workflow 核对登记身份，不扫描或误停其它进程。
+所有可迁出的日志、依赖安装、插件、报告和应用现场集中写 runtime。源码内 target/node_modules 生产前，使用 station_resources.py 登记 kind=directory、精确 path、producer，由 Workflow 创建并登记根身份后再执行构建；不得等目录非空后再按名称收编。已有空目录采用需 adopt_empty=true。受管目录内部无需逐文件登记。进程仍记录 PID、启动时间、cwd、executable；实际测试数据记录隔离身份及回读。
 
-外部资源已停止写入且有回读依据时可标记 quiesced，允许先 archive；release/clean 最终解绑前必须有 cleaned（保留处置对应 retained）的回读。归档后通常仅允许同一已登记 external 的终态与 readback_ref 更新，补充清理事实而不重写档案。归档退出、完成待释放或当前未完成归档/清理若发现迟到产物，可用资源登记命令加 --expected-operation-id 精确登记本工位产物来源，再重新确认清单；登记本身不授予删除权限，不恢复开发。未知归属或清理结果不明时保留占用。
+默认归档保存实际源码修改和必要新文件并做重建核验；超限/敏感材料无法归档时，登记 source-disposition，明确 archive/export/discard 和当前快照，不把摘要当作源码备份。export 使用 workflow/station_export.py 创建工位外私有成果并核验回读，参数见[任务授权指引](../../../../docs/usage/task-authorization.md#重置工位)，discard 必须精确确认。源码链接、冲突索引、submodule 等不支持状态先明确处理，不能擅自丢弃。
 
-archive 可将未完成任务正式归档为 incomplete，但仍占用且停止开发。release 要求交付及项目验收核对与研发明确释放。clean 用于不再继续的未完成任务：先有效档案，再精确授权清理，成功后才解绑；不关闭 PR 或修改 Jira。
+运行资源 external 与可选 Git 对象区分：分支 resource_type=git-branch，PR resource_type=pull-request，默认 retain，不因未删除阻止重置。用户要求删除分支/关闭 PR 时，在本地重置完成后独立展示 ID、SHA/状态及保护回读，经确认后先用 workflow/station_disposition.py 向原档案追加 intent，再使用原生工具执行，再追加 readback。unknown 只回读原操作，不重发；不修改 Jira，不改档案正文，不重新占用已释放工位。
 
-已有 incomplete 档案只能 clean，不能在归档后补成 completed 再 release。清理现场发生变化时，先重新运行 cleanup-plan，展示新增或变化对象并取得新 confirmed_digest；使用 task.py cleanup-amend，固定当前 issue/run/revision/operation-id、--expected-plan-digest 和 --expected-plan-revision，--input 提供新 confirmed_digest。原操作保存追加确认版本，随后用原生命周期请求恢复；不覆盖正式档案或旧回执。重新生成相同内容的产物也需要新确认版本，不能借旧删除回执放行。未完成 archive 在正式档案尚未发布时也可用该命令重新确认草稿清单，但不执行删除；该命令只恢复原操作，不新增任务生命周期。
-
-先按 Project 资源清单停止并核对写入者；cleanup-plan --issue-key <issue> --expected-run-id <run> --dir <workspace> 返回处置计划及摘要。向研发展示具体对象、文件/内容指纹、保留 refs/config、候选摘要和缺失证据；确认不能只说“清理一下”。请求 JSON 包含真实 summary/reason；release/clean 另包含确认计划的 confirmed_digest，release 包含已确认 candidate_digest。然后调用 task.py <archive|release|clean> --issue-key <issue> --expected-run-id <run> --expected-revision <revision> --operation-id <op-id> --input <json> --dir <workspace>。失败恢复同一请求与操作，不覆盖 operation。
-
-档案只保存脱敏总结、已验证事实、成果、未完成事项、证据缺口和退出原因；不保存完整敏感会话或秘密，不把 incomplete 改成 completed。再次接管前核验 current=null、op done、runtime 无旧材料和活动授权已撤销。工位级 purge 只在任务退出后用于解除绑定，不能代替 archive/clean。
-
-当前 engineering-profiles.json 只定义仓库集合与 Profile 修订；完整应用工具链、actions 和健康检查配方尚须按实际目标分支与环境验证，不能把完整源码准备成功称为 TapData 启动或任务验收通过。缺数据库、凭据或运行入口时报告具体缺口，不填造默认值。
+中断恢复同一 issue/run/revision/operation-id 和原请求。目录身份或源码处置变化时执行 cleanup-amend，绑定原摘要和 plan revision，补充确认差异；运行目录内部新增生成物在原目录授权范围内，不逐文件重做摘要。已完成目录回执后重新产生内容必须停止并明确补充处置，不能沿旧回执删除。确认请求保存在工位外系统临时目录，避免污染活动材料。epoch 3 工作空间必须由原版本退出及 purge 后重建，不能用本版接续旧清理。
 
 ## 准入、设计和多仓库
 

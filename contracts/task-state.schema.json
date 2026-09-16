@@ -21,6 +21,9 @@
         "facts": {"type": "object"},
         "history": {"type": "array", "items": {"type": "object"}},
         "pending": {"type": ["object", "null"]},
+        "reset_baseline": {"type": "object"},
+        "retained_repositories": {"type": "object"},
+        "initial_runtime": {"$ref": "station-directory.schema.json"},
         "source_prepared": {"type": "boolean"},
         "engineering_baseline": {
           "type": "object", "required": ["status"],

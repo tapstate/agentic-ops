@@ -217,6 +217,12 @@ def detach_preflight(product_root, workspace, purge=False, tree=None):
                "events.jsonl", "git-ref-cache-v2.json",
                "git-ref-cache-v2.json.lock"}
     for path in state_root.iterdir():
+        if path.name == "operation-data" and path.is_dir() and not path.is_symlink():
+            from workflow import engineering_baseline
+            for item in path.iterdir():
+                if item.is_symlink() or not item.is_file() or item.suffix != ".json" or engineering_baseline.digest(json.loads(item.read_text())) != item.stem:
+                    raise ValueError("操作材料包含未知或损坏对象，拒绝解绑")
+            continue
         if path.name not in allowed or path.is_symlink() or not path.is_file():
             raise ValueError("工作空间状态包含未知文件或未清理活动证据，拒绝解绑：%s" % path)
     if not tree.is_dir("runtime") or tree.is_symlink("runtime"):
@@ -251,6 +257,7 @@ def detach(product_root, workspace, purge=False):
             for name in ("current-task.json", "operation.json", "events.jsonl",
                          "git-ref-cache-v2.json", "git-ref-cache-v2.json.lock"):
                 tree.unlink(Path(STATE_DIRECTORY) / name, missing_ok=True)
+            tree.remove_tree(Path(STATE_DIRECTORY) / "operation-data", missing_ok=True)
             for relative in (
                 Path(STATE_DIRECTORY) / "init.json",
                 Path(STATE_DIRECTORY) / "workspace.json",
