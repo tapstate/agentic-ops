@@ -66,7 +66,9 @@ cd "$HOME/agenticops-tapdata"
 
 新工作空间不生成通用 Agent Hook；旧工作空间若提示迁移，按[常见问题](usage/faq.md)显式核对和迁移。首次使用 Jira 事实时，Agent 会检查必需插件并在缺失时引导安装和登录；GitHub 工具由 Agent 按任务自行选择。Claude Code 会读取工作空间生成的 `.mcp.json`；使用 Claude Code 时，将最后一行替换为 `./agenticops start claude`。
 
-初始化会读取全局 Git `user.name` 并在其可作为分支前缀时一次性保存为工作空间 `git_name`。未设置或值不合法时，先用 `git config --global user.name <合法 Git 提交用户名>` 补充，再执行 `agenticops workspace identity --workspace <工作空间>`；它用于稳定生成和恢复任务分支，不会读取或保存 Git 凭证。
+初始化会读取全局 Git `user.name` 并在其可作为分支前缀时一次性保存为工作空间 `git_name`。未设置或值不合法时，先用 `git config --global user.name <合法 Git 提交用户名>` 补充，再在工位内执行 `./agenticops workspace identity`；它用于稳定生成和恢复任务分支，不会读取或保存 Git 凭证。
+
+在已初始化工位内，所有需要单个工作空间目标的 `agenticops workspace` 操作默认使用当前目录；传入 `--workspace <目录>` 时以传入目录为准。`--all` 始终是显式批量操作，不会被当前目录替代。
 
 ## 4. 接管第一个任务
 

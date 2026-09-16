@@ -107,6 +107,34 @@ start_agent() {
   exec "$agent_command" ${forwarded[@]+"${forwarded[@]}"}
 }
 
+workspace_command() {
+  workspace_command_name="${1:-}"
+  case "$workspace_command_name" in
+    identity|prune|repair|clean|detach|purge)
+      ;;
+    *)
+      exec python3 "$product_root/bootstrap/workspace_registry.py" \
+        --product-root "$product_root" "$@"
+      ;;
+  esac
+
+  workspace_target_supplied=0
+  for workspace_argument in "$@"; do
+    case "$workspace_argument" in
+      --workspace|--all)
+        workspace_target_supplied=1
+        break
+        ;;
+    esac
+  done
+  if [ "$workspace_target_supplied" -eq 0 ]; then
+    exec python3 "$product_root/bootstrap/workspace_registry.py" \
+      --product-root "$product_root" "$workspace_command_name" --workspace "$workspace" "${@:2}"
+  fi
+  exec python3 "$product_root/bootstrap/workspace_registry.py" \
+    --product-root "$product_root" "$@"
+}
+
 command_name="${1:-}"
 if [ -z "$command_name" ]; then
   usage
@@ -161,8 +189,7 @@ print("AgenticOps 工作空间修复完成：%s" % sys.argv[2])
 PY
     ;;
   workspace)
-    exec python3 "$product_root/bootstrap/workspace_registry.py" \
-      --product-root "$product_root" "$@"
+    workspace_command "$@"
     ;;
   start)
     start_agent "$@"

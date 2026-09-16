@@ -596,6 +596,7 @@ fi
 "$install_root/agenticops" repair --workspace "$workspace" >/dev/null
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
 "$install_root/agenticops" workspace clean --workspace "$workspace" --generated-only >/dev/null
+(cd "$workspace" && ./agenticops workspace clean --generated-only >/dev/null)
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
 test -L "$workspace/.agents/skills/tapdata-ci-test"
 test -L "$workspace/.claude/skills/tapdata-ci-test"
@@ -764,20 +765,13 @@ if "$install_root/agenticops" start --agent test-agent --workspace "$subset_work
   printf '工作空间启动了未绑定的 Agent\n' >&2
   exit 1
 fi
-workspace_help="$test_root/workspace-help"
-if "$install_root/agenticops" workspace detach > "$workspace_help" 2>&1; then
-  printf '缺少工作空间目标的 detach 被错误接受\n' >&2
-  exit 1
-fi
-grep -F -- '--workspace WORKSPACE | --all' "$workspace_help" >/dev/null
-
 detached_workspace="$test_root/detached-workspace"
 "$install_root/agenticops" init --workspace "$detached_workspace" --agent codex >/dev/null
-if "$install_root/agenticops" workspace detach --workspace "$detached_workspace" >/dev/null 2>&1; then
+if (cd "$detached_workspace" && ./agenticops workspace detach) >/dev/null 2>&1; then
   printf '非交互 detach 被错误接受\n' >&2
   exit 1
 fi
-"$install_root/agenticops" workspace detach --workspace "$detached_workspace" --yes >/dev/null
+(cd "$detached_workspace" && ./agenticops workspace detach --yes >/dev/null)
 test ! -e "$detached_workspace/.agenticops/workspace.json"
 test ! -e "$detached_workspace/.agenticops/init.json"
 test ! -e "$detached_workspace/agenticops"
