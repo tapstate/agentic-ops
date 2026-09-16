@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """epoch 4 目录重置、源码成果和恢复边界的真实 Git 回归。"""
 import json
+import io
 import os
 from pathlib import Path
 import sys
 import time
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import test_station_lifecycle as lifecycle
-from workflow import station, station_resources as resources, station_directories as directories
+from workflow import station, station_resources as resources, station_directories as directories, task as task_cli
 from workflow import station_artifacts as artifacts, station_operation as operations, station_archive, task_store
 
 
@@ -49,6 +51,33 @@ class ResourceTests(unittest.TestCase):
         self.assertIsNone(task_store.read_task(self.ws))
         self.assertEqual(self.git(self.repo, 'branch', '--show-current'), '')
         self.assertEqual(self.git(self.repo, 'rev-parse', 'fix/resource'), task['reset_baseline'][self.name]['sha'])
+
+    def test_runtime_child_is_lazy_and_rejects_links(self):
+        task = self.ready()
+        child = directories.runtime_child(self.ws, task, 'maven-local')
+        self.assertEqual(child, (self.ws / 'runtime/maven-local').resolve())
+        self.assertFalse(child.exists())
+        with self.assertRaisesRegex(ValueError, '名称'):
+            directories.runtime_child(self.ws, task, '../maven-local')
+        outside = self.root / 'outside-runtime-child'
+        outside.mkdir()
+        child.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, '符号链接'):
+            directories.runtime_child(self.ws, task, 'maven-local')
+
+    def test_runtime_path_binds_current_run_and_rejects_terminal_task(self):
+        task = self.ready()
+        args = SimpleNamespace(dir=self.ws, issue_key=task['issue_key'], expected_run_id=task['run_id'], name='maven-local')
+        with mock.patch('sys.stdout', new_callable=io.StringIO) as output:
+            self.assertEqual(0, task_cli.cmd_runtime_path(args))
+        context = json.loads(output.getvalue())
+        self.assertEqual(task['run_id'], context['run_id'])
+        self.assertEqual(str((self.ws / 'runtime/maven-local').resolve()), context['local_repository'])
+        current = task_store.read_task(self.ws)
+        current['outcome'] = 'completed'
+        task_store.write_task(self.ws, current)
+        with self.assertRaisesRegex(ValueError, '非进行中'):
+            task_cli.cmd_runtime_path(args)
 
     def test_directory_created_before_producer_and_nonempty_not_adopted(self):
         task = self.ready()

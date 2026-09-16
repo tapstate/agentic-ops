@@ -34,7 +34,7 @@
 │   └── evidence/               # 当前执行的质量、CI、同步及本地事实
 ├── config/                     # 研发维护的持久配置和秘密引用
 ├── source/<owner>/<repo>/      # 完整独立 Git 仓库，跨任务保留
-├── runtime/                    # 唯一运行配置、Maven local、插件、日志及报告
+├── runtime/                    # 唯一运行配置、任务 Maven local、插件、日志及报告
 └── archive/<issue-key>/<run-id>/
     ├── summary.md
     ├── record.json             # 内容清单与证据引用
@@ -48,7 +48,7 @@
 
 `operation.json` 包含 `schema_version/operation_id/kind/run_id/request_digest/expected_revision/phase/status/steps/confirmation/archive_ref/cleanup_plan/cleanup_manifest`。`steps` 记录每个副作用的意图、精确对象、预期前后事实与回执；`status=running|failed|done`。failed 仍属未完成，不释放工位。归档摘要使用规范化 JSON（键排序、无多余空白、UTF-8）和 SHA-256；文件清单记录相对路径、字节长度和 SHA-256，排除自身哈希和后续 receipts，避免循环摘要。
 
-config 不随任务删除。任务专用有效配置写入 runtime，正式档案只留脱敏配置、版本和秘密引用名称，不复制秘密。runtime 不以 run 分目录；暂存档案只用于原子发布，不属于第二个活动运行环境。
+config 不随任务删除。任务专用有效配置写入 runtime，正式档案只留脱敏配置、版本和秘密引用名称，不复制秘密。runtime 不以 run 分目录；暂存档案只用于原子发布，不属于第二个活动运行环境。Maven 的安装级与用户级 settings 继续提供镜像、认证、代理和 profile；工位只将本地仓库定向到 runtime，不复制 settings 或共享任务构件。
 
 ## 4. 两类仓库信息
 

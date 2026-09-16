@@ -278,6 +278,7 @@ class StationTests(unittest.TestCase):
         from workflow import station_resources
         task = self.takeover()
         path = self.ws / "runtime/logs/build.log"
+        path.parent.mkdir()
         path.write_text("test build output")
         station_resources.register(self.ws, task["issue_key"], task["run_id"], [{"kind": "file", "path": "runtime/logs/build.log", "producer": "test-build"}])
         plan = station_resources.plan(self.ws, task)
@@ -349,7 +350,7 @@ class StationTests(unittest.TestCase):
             self.execute(self.ws,"clean",task["issue_key"],task["run_id"],task["_revision"],"op-amend-clean",request)
         current=task_store.read_task(self.ws)
         record=self.ws/current["archive_ref"]["path"]/"record.json";before=record.read_bytes()
-        late=self.ws/"runtime/logs/late.log";late.write_text("late generated output")
+        late=self.ws/"runtime/logs/late.log";late.parent.mkdir();late.write_text("late generated output")
         # 独占目录内变化不扩权、不重算逐文件摘要，也不要求第二次确认。
         self.assertEqual(station_resources.plan(self.ws,current)["digest"],first["digest"])
         self.execute(self.ws,"clean",task["issue_key"],task["run_id"],task["_revision"],"op-amend-clean",request)
@@ -431,7 +432,7 @@ class StationTests(unittest.TestCase):
     def test_cleanup_amend_same_digest_uses_new_execution_revision(self):
         from workflow import station_resources
         task = self.takeover()
-        file = self.ws / "runtime/logs/repeated.log"
+        file = self.ws / "runtime/logs/repeated.log"; file.parent.mkdir()
         file.write_text("identical regenerated output")
         station_resources.register(self.ws, task["issue_key"], task["run_id"], [{"kind": "file", "path": "runtime/logs/repeated.log", "producer": "build"}])
         plan = station_resources.plan(self.ws, task)
@@ -456,7 +457,7 @@ class StationTests(unittest.TestCase):
     def test_cleanup_amend_before_archive_publication_preserves_old_draft(self):
         from workflow import station_resources
         task = self.takeover()
-        file = self.ws / "runtime/logs/draft.log"
+        file = self.ws / "runtime/logs/draft.log"; file.parent.mkdir()
         file.write_text("first output")
         station_resources.register(self.ws, task["issue_key"], task["run_id"], [{"kind": "file", "path": "runtime/logs/draft.log", "producer": "build"}])
         first = station_resources.plan(self.ws, task)
@@ -487,7 +488,7 @@ class StationTests(unittest.TestCase):
         from workflow import station_resources
         task = self.takeover()
         untouched = self.other_repository_state()
-        file = self.ws / "runtime/logs/published.log"
+        file = self.ws / "runtime/logs/published.log"; file.parent.mkdir()
         file.write_text("first output")
         station_resources.register(self.ws, task["issue_key"], task["run_id"], [{"kind": "file", "path": "runtime/logs/published.log", "producer": "build"}])
         first = station_resources.plan(self.ws, task)
@@ -523,7 +524,7 @@ class StationTests(unittest.TestCase):
     def test_standalone_archive_refreshes_only_unpublished_draft(self):
         from workflow import station_resources
         task = self.takeover()
-        file = self.ws / "runtime/logs/archive.log"
+        file = self.ws / "runtime/logs/archive.log"; file.parent.mkdir()
         file.write_text("initial output")
         station_resources.register(self.ws, task["issue_key"], task["run_id"], [{"kind": "file", "path": "runtime/logs/archive.log", "producer": "build"}])
         request = {"summary": "未完成", "reason": "停止"}

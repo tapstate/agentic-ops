@@ -190,13 +190,6 @@ def takeover(base, request, operation_id, expected_revision):
         source.checkout_baseline(base, task["engineering_baseline"], operation)
         task["source_prepared"] = True
         task_store.write_task(base, task)
-        for directory in ("effective-config", "maven-local", "plugins", "logs", "reports", "fe", "tm"):
-            path = Path(base).resolve() / "runtime" / directory
-            if path.is_symlink() or (path.exists() and not path.is_dir()):
-                raise ValueError("运行目录不是受控真实目录")
-            operations.intent(base, operation, "runtime:" + directory, {}, {"path": str(path)})
-            path.mkdir(parents=True, exist_ok=True)
-            operations.receipt(base, operation, "runtime:" + directory, {"path": str(path)})
         operations.finish(base, operation)
         return operation
 

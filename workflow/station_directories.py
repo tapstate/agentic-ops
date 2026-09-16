@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import stat
 
 from workflow import engineering_baseline as baseline, project_rules, task_store as store
@@ -120,6 +121,25 @@ def create(base, task, relative, producer, adopt=False):
     entry["identity"] = identity(path)
     save(base, task, roots)
     return entry
+
+
+def runtime_child(base, task, name):
+    """返回当前 run 的 runtime 子路径，不把子目录登记为第二个受管根。"""
+    if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
+        raise ValueError("runtime 子目录名称无效")
+    roots = load(base, task)
+    entry = roots.get("runtime")
+    if entry is None:
+        raise ValueError("当前 run 缺少受管 runtime 根目录")
+    root = validate(base, entry)
+    path = root / name
+    if path.is_symlink():
+        raise ValueError("runtime 子目录不能是符号链接")
+    if path.exists() and not path.is_dir():
+        raise ValueError("runtime 子路径必须是目录")
+    if path.exists() and path.is_mount():
+        raise ValueError("runtime 子目录不能是挂载点")
+    return path
 
 
 def sync(path):
