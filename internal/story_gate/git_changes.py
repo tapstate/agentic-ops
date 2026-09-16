@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from internal.story_gate.model import ChangeSet
+from internal.story_gate.evidence import git_environment
 
 
 def collect_changes(
@@ -57,6 +58,7 @@ def _git_bytes(root: Path, *arguments: str) -> bytes:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         timeout=20,
+        env=git_environment(),
     )
     if completed.returncode != 0:
         diagnostic = completed.stderr.decode("utf-8", errors="replace").strip()

@@ -5,6 +5,7 @@
     "note": "通用 transitions 与按事务类型 workflows_by_issue_type 均以 TapData Jira 实时读取为准；TAP-12289 于 2026-08-31 核验，任务类型映射于 2026-09-01 由 TAP-12773 核验。状态与流转优先使用稳定 ID，未映射的状态或流转不得猜测。"
   },
   "profile_id": "tapdata",
+  "wiki_repository": "tapstate/wiki",
   "jira": {
     "site": "https://tapdata.atlassian.net",
     "project_key": "TAP",

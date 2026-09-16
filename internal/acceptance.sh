@@ -6,9 +6,11 @@ repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 usage() {
   cat <<'EOF'
 用法：
-  internal/acceptance.sh                     # 完整验收
+  internal/acceptance.sh                     # 完整诊断，不生成门禁证据
   internal/acceptance.sh quick               # Runtime + 资源边界
-  internal/acceptance.sh full                # 四项固定验收
+  internal/acceptance.sh full                # 四项诊断，不生成门禁证据
+  internal/acceptance.sh full --change-source staged
+  internal/acceptance.sh full --change-source range --base <base> --head <head>
   internal/acceptance.sh <检查项>...          # 按需组合
   internal/acceptance.sh --list
 
@@ -28,6 +30,13 @@ EOF
 }
 
 checks=()
+
+# 只有显式绑定的 full 才进入唯一正式验收流程；其余保持诊断语义。
+if [ "${1:-}" = "full" ] && [ "${2:-}" = "--change-source" ]; then
+  case "${3:-}" in staged|range) ;; *) usage >&2; exit 2;; esac
+  shift
+  exec "$repo_root/internal/bin/story-gate" --source-root "$repo_root" verify "$@" --progress
+fi
 
 add_check() {
   local candidate="$1"
@@ -73,6 +82,7 @@ fi
 if [ "$#" -eq 0 ]; then
   set -- full
 fi
+printf '诊断验收：不生成提交门禁证据；正式验收请使用 full --change-source staged 或 range。\n'
 for selection in "$@"; do
   expand_selection "$selection"
 done

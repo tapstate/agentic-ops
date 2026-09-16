@@ -69,6 +69,9 @@ class StoryGateTest(unittest.TestCase):
 
     def prepare(self, root: Path) -> None:
         paths = {
+            root / "internal/uv.lock": "version = 1\n",
+            root / "internal/pyproject.toml": "[project]\nname = 'fixture'\n",
+            root / ".gitignore": ".local/\n",
             root / ".agentic-ops-source": "source\n",
             root / "docs/strategy/project-goals.md": "# 项目目标\n",
             root / "docs/user-stories/v1/int-001.md": STORY_BODY.format(story_id="INT-001"),

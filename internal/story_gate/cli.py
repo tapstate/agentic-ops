@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import sys
 from pathlib import Path
 
@@ -44,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     root = Path(args.source_root).resolve()
     service = StoryGateService(root)
+    previous = signal.signal(signal.SIGTERM, _interrupt)
     try:
         if args.command == "impact":
             result = service.inspect(args.change_source, base=args.base, head=args.head)
@@ -90,6 +92,12 @@ def main(argv: list[str] | None = None) -> int:
             sys.stderr,
         )
         return 1
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def _interrupt(signum, frame):
+    raise KeyboardInterrupt
 
 
 if __name__ == "__main__":

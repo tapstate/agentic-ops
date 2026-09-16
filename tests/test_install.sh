@@ -448,13 +448,20 @@ import sys
 from pathlib import Path
 
 workspace = Path(sys.argv[1])
-skill = Path(sys.argv[2]) / "projects/tapdata/skills/tapdata-task"
-for relative in (".agents/skills/tapdata-task", ".claude/skills/tapdata-task"):
-    link = workspace / relative
-    assert link.is_symlink()
-    assert not Path(os.readlink(link)).is_absolute()
-    assert link.resolve() == skill.resolve()
-    assert (link / "SKILL.md").is_file()
+import json
+product = Path(sys.argv[2])
+assert json.loads((product / "projects/tapdata/profile.json").read_text())["wiki_repository"] == "tapstate/wiki"
+assert json.loads((product / "bootstrap/shared-repositories.json").read_text())["repositories"]["tapstate/wiki"] == {"origin": "git@github.com:tapstate/wiki.git", "branch": "main"}
+assert (product / "bootstrap/shared_repositories.py").is_file()
+assert not (product / ".local/shared-repositories").exists()
+for name in ("tapdata-task", "tapdata-wiki", "tapdata-ci-test"):
+    skill = Path(sys.argv[2]) / "projects/tapdata/skills" / name
+    for discovery in (".agents/skills", ".claude/skills"):
+        link = workspace / discovery / name
+        assert link.is_symlink()
+        assert not Path(os.readlink(link)).is_absolute()
+        assert link.resolve() == skill.resolve()
+        assert (link / "SKILL.md").is_file()
 PY
 python3 - "$install_root" <<'PY'
 import ast
@@ -526,6 +533,9 @@ assert {"AGENTS.md", "agenticops", ".mcp.json", "CLAUDE.md", ".test-agent/settin
 assert not {".claude/settings.json", ".codex/hooks.json"} & set(artifacts)
 assert artifacts[".agents/skills/tapdata-task"]["kind"] == "symlink"
 assert artifacts[".claude/skills/tapdata-task"]["kind"] == "symlink"
+for name in ("tapdata-wiki", "tapdata-ci-test"):
+    for discovery in (".agents/skills", ".claude/skills"):
+        assert artifacts[discovery + "/" + name]["kind"] == "symlink"
 assert ".agents/skills/ao-test-takeover" not in artifacts
 assert ".claude/skills/ao-test-takeover" not in artifacts
 assert ".agents/skills/ao-ws-init" not in artifacts
@@ -569,6 +579,15 @@ fi
 "$install_root/agenticops" repair --workspace "$workspace" >/dev/null
 test -L "$workspace/.agents/skills/tapdata-task"
 
+rm "$workspace/.agents/skills/tapdata-ci-test"
+if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
+  printf '集成测试 Skill 链接漂移未被 doctor 发现\n' >&2
+  exit 1
+fi
+"$install_root/agenticops" repair --workspace "$workspace" >/dev/null
+test -L "$workspace/.agents/skills/tapdata-ci-test"
+test -L "$workspace/.claude/skills/tapdata-ci-test"
+
 printf 'drift\n' > "$workspace/AGENTS.md"
 if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
   printf '工作目录漂移未被 doctor 发现\n' >&2
@@ -578,6 +597,8 @@ fi
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
 "$install_root/agenticops" workspace clean --workspace "$workspace" --generated-only >/dev/null
 "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
+test -L "$workspace/.agents/skills/tapdata-ci-test"
+test -L "$workspace/.claude/skills/tapdata-ci-test"
 
 printf 'drift\n' > "$workspace/agenticops"
 if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
@@ -618,8 +639,16 @@ subset_workspace="$test_root/subset-workspace"
 "$install_root/agenticops" init --workspace "$subset_workspace" --agent codex >/dev/null
 test ! -e "$subset_workspace/.codex/hooks.json"
 test -L "$subset_workspace/.agents/skills/tapdata-task"
+test -L "$subset_workspace/.agents/skills/tapdata-ci-test"
 test ! -e "$subset_workspace/CLAUDE.md"
 test ! -e "$subset_workspace/.claude/settings.json"
+test ! -e "$subset_workspace/.claude/skills"
+"$install_root/agenticops" workspace purge --workspace "$subset_workspace" --yes >/dev/null
+test ! -L "$subset_workspace/.agents/skills/tapdata-ci-test"
+test ! -e "$subset_workspace/.agents/skills/tapdata-ci-test"
+test -f "$install_root/projects/tapdata/skills/tapdata-ci-test/SKILL.md"
+"$install_root/agenticops" init --workspace "$subset_workspace" --agent codex >/dev/null
+test -L "$subset_workspace/.agents/skills/tapdata-ci-test"
 test ! -e "$subset_workspace/.claude/skills"
 collision_workspace="$test_root/root-entry-collision-workspace"
 mkdir -p "$collision_workspace"
