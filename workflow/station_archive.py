@@ -62,14 +62,14 @@ def verify(base, reference, task):
     binding = json.loads((task_store.state_path(base) / "workspace.json").read_text(encoding="utf-8"))
     if record.get("station_id") != binding.get("workspace_id"):
         raise ValueError("档案不属于当前工位")
-    if {path.name for path in target.iterdir()} - {"record.json", "summary.md", "evidence.json", "receipts"}:
+    if {path.name for path in target.iterdir()} - {"record.json", "summary.md", "evidence.json", "source-artifacts.json", "runtime-evidence.json", "receipts"}:
         raise ValueError("正式档案包含清单外文件")
     if (record.get("issue_key"), record.get("run_id")) != (task["issue_key"], task["run_id"]):
         raise ValueError("档案身份不一致")
     if baseline.digest(record) != reference.get("digest"):
         raise ValueError("档案摘要不一致")
     for name, entry in record["files"].items():
-        if name not in ("summary.md", "evidence.json"):
+        if name not in ("summary.md", "evidence.json", "source-artifacts.json", "runtime-evidence.json"):
             raise ValueError("档案清单含未知文件")
         path = target / name
         if path.is_symlink() or not path.is_file():
@@ -128,6 +128,10 @@ def publish(base, task, request, inventory, operation, check_stable=None):
         binding = json.loads((task_store.state_path(base) / "workspace.json").read_text())
         data = summary.encode("utf-8")
         evidence = _evidence(base, task)
+        from workflow import station_artifacts
+        artifacts = station_artifacts.material(base, task, inventory)
+        from workflow import station_logs
+        logs = station_logs.material(base, task, inventory)
         recorded = {"schema_version": 1, "station_id": binding["workspace_id"],
                     "issue_key": task["issue_key"], "run_id": task["run_id"],
                     "task_result": "completed" if task.get("outcome") == "completed" and task.get("terminal_proof") else "incomplete",
@@ -139,7 +143,11 @@ def publish(base, task, request, inventory, operation, check_stable=None):
                     "terminal_proof_digest": baseline.digest(task.get("terminal_proof")),
                     "evidence_policy": "保存脱敏结构化证据与总结；原始日志及交互材料不进入档案",
                     "files": {"summary.md": {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()},
-                              "evidence.json": {"size": len(evidence), "sha256": hashlib.sha256(evidence).hexdigest()}}}
+                              "evidence.json": {"size": len(evidence), "sha256": hashlib.sha256(evidence).hexdigest()},
+                              "source-artifacts.json": {"size": len(artifacts), "sha256": hashlib.sha256(artifacts).hexdigest()},
+                              "runtime-evidence.json": {"size": len(logs), "sha256": hashlib.sha256(logs).hexdigest()}}}
+        operation["archive_logs"] = logs.decode("utf-8")
+        operation["archive_artifacts"] = artifacts.decode("utf-8")
         operation["archive_evidence"] = evidence.decode("utf-8")
         operation["archive_record"] = recorded
         operations.save(base, operation)
@@ -155,7 +163,7 @@ def publish(base, task, request, inventory, operation, check_stable=None):
             raise ValueError("归档前源码现场变化，拒绝发布")
         temporary = parent / ("." + task["run_id"] + "." + operation["operation_id"] + "." + str(len(operation.get("plan_revisions", []))))
         _directory(temporary)
-        if {path.name for path in temporary.iterdir()} - {"record.json", "summary.md", "evidence.json"}:
+        if {path.name for path in temporary.iterdir()} - {"record.json", "summary.md", "evidence.json", "source-artifacts.json", "runtime-evidence.json"}:
             raise ValueError("归档暂存目录包含未知内容")
         summary_path = temporary / "summary.md"
         if summary_path.is_symlink():
@@ -167,6 +175,19 @@ def publish(base, task, request, inventory, operation, check_stable=None):
             raise ValueError("归档暂存文件不能是符号链接")
         with evidence_path.open("wb") as stream:
             stream.write(operation["archive_evidence"].encode("utf-8")); stream.flush(); os.fsync(stream.fileno())
+        artifact_path = temporary / "source-artifacts.json"
+        if artifact_path.is_symlink():
+            raise ValueError("源码档案不能是符号链接")
+        with artifact_path.open("wb") as stream:
+            stream.write(operation["archive_artifacts"].encode("utf-8")); stream.flush(); os.fsync(stream.fileno())
+        log_path = temporary / "runtime-evidence.json"
+        if log_path.is_symlink():
+            raise ValueError("运行证据不能是符号链接")
+        from workflow import station_logs
+        if station_logs.material(base, task, inventory).decode("utf-8") != operation["archive_logs"]:
+            raise ValueError("日志/报告在归档期间变化，请停止写入者后恢复")
+        with log_path.open("wb") as stream:
+            stream.write(operation["archive_logs"].encode("utf-8")); stream.flush(); os.fsync(stream.fileno())
         task_store._write_json_atomic(temporary / "record.json", recorded)
         os.rename(temporary, target)
         descriptor = os.open(str(parent), os.O_RDONLY)
@@ -191,7 +212,7 @@ def receipt(base, task, operation, result, phase="resources-released"):
         raise ValueError("未知档案回执阶段")
     path = directory / (operation["operation_id"] + "-" + phase + ".json")
     value = {"operation_id": operation["operation_id"], "run_id": task["run_id"],
-             "archive_digest": task["archive_ref"]["digest"], "phase": phase, "result": result}
+             "archive_digest": task["archive_ref"]["digest"], "phase": phase, "operation_kind": operation["kind"], "result": result}
     if path.exists():
         if path.is_symlink() or json.loads(path.read_text()) != value:
             raise ValueError("归档回执不能覆盖不同内容")

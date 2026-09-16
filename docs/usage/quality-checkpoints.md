@@ -23,7 +23,7 @@ TapData 功能和缺陷使用相同配置：Q3、Q4 要求 local/source_sync，Q
 
 研发已手工处理未解决问题时，使用 manual_result，提供 finish 的实际结果/版本/报告字段，并附 reason 和真实用户消息 proof；不消耗自动修复轮数。仍有 running 轮次时先 finish 保留当时实际结果，再记录人工处理。没有明确人工来源或实际验证，不能声明恢复成功。
 
-当前工位采用 epoch 3；材料只属于当前 run。旧状态由原版清理，新版本不迁移历史确认。生成/清理与跨版编排的顺序见[更新与回退](update-and-rollback.md)。发布、清理和业务验收分别授权。
+当前工位采用 epoch 4；材料只属于当前 run。旧状态由原版清理，新版本不迁移历史确认。生成/清理与跨版编排的顺序见[更新与回退](update-and-rollback.md)。发布、清理和业务验收分别授权。
 
 ## PR 审查返工
 
@@ -279,7 +279,7 @@ AO 不新增测试执行器或测试平台客户端。Agent 用现有工具读�
 
 本地 Maven 与 CI 是同一集成测试方式的不同执行来源。`ci.py watch` 只观察 PR 返回的检查，绿色不证明目标集成用例运行；必须核对路径过滤、矩阵、跳过条件及测试报告。未知、空检查、跳过均不会被当作成功。CI 记录按任务、run、仓库和 PR 隔离，旧版无身份记录不作为当前证据。
 
-公司 wiki 索引在项目 `quality.json`；目标分支的代码、POM 和 CI 是实现事实源。Failsafe 项目在核对配置后可使用 `mvn test-compile failsafe:integration-test failsafe:verify -DskipITs=false`，指定用例用 `-Dit.test=Class#method`。`mvn test` 或仅编译成功不能证明该集成用例已执行，先核对实际模块及报告。
+公司 wiki 索引在项目 `quality.json`；目标分支的代码、POM 和 CI 是实现事实源。Failsafe 项目在核对配置后可使用 Project Runbook 指定的 Maven 命令运行 `test-compile failsafe:integration-test failsafe:verify -DskipITs=false`，指定用例用 `-Dit.test=Class#method`；Runbook 指定任务本地仓库时不得退回裸 `mvn` 或共享缓存。`mvn test` 或仅编译成功不能证明该集成用例已执行，先核对实际模块及报告。
 
 ## 操作接口
 

@@ -27,6 +27,7 @@ PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_station_sourc
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_shared_repositories.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_repository_recovery.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_station_lifecycle.py"
+PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_task_identity.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_workspace_compatibility.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_checkpoints.py"
 PYTHONDONTWRITEBYTECODE=1 "$product_python" "$repo_root/tests/test_quality.py"

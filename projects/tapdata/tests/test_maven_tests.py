@@ -3,6 +3,8 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -19,7 +21,16 @@ class ConnectorTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name).resolve()
+        self.temp_root = Path(self.tmp.name).resolve()
+        self.root = self.temp_root / "repository"
+        self.root.mkdir()
+        self.runtime = self.temp_root / "workspace/runtime"
+        self.runtime.mkdir(parents=True)
+        self.context = {"workspace": str(self.temp_root / "workspace"), "station_id": "station-fixture",
+                        "run_id": "run-fixture", "local_repository": str(self.runtime / "maven-local")}
+        self.maven = self.root / "mvn"
+        self.maven.write_text("#!/bin/sh\nexit 0\n")
+        self.maven.chmod(0o700)
         self.git("init", "-q")
         self.git("config", "user.name", "Fixture")
         self.git("config", "user.email", "fixture@example.invalid")
@@ -37,7 +48,7 @@ class ConnectorTests(unittest.TestCase):
         return subprocess.check_output(["git", "-C", str(self.root), *args], stderr=subprocess.PIPE)
 
     def plan(self, modules=None):
-        return connector.plan(self.root, modules or ["connectors/a"], [])
+        return connector.plan(self.root, modules or ["connectors/a"], [], runtime=self.context, executable=self.maven)
 
     def execution(self, plan, skipped=0, fail=0, exit_code=0):
         started = time.time_ns()
@@ -45,13 +56,24 @@ class ConnectorTests(unittest.TestCase):
         folder.mkdir(parents=True, exist_ok=True)
         child = "<failure/>" if fail else "<skipped/>" if skipped else ""
         (folder / "TEST-SampleIT.xml").write_text('<testsuite tests="1" failures="%d" errors="0" skipped="%d"><testcase name="one">%s</testcase></testsuite>' % (fail, skipped, child))
-        return {"plan_id": plan["plan_id"], "modules": [{"module": "connectors/a", "exit_code": exit_code, "started_ns": started, "finished_ns": time.time_ns()}]}
+        commands = []
+        for command in plan["commands"]:
+            entry = {"kind": command["kind"], "exit_code": exit_code if command["kind"] == "test" else 0, "started_ns": started,
+                     "finished_ns": time.time_ns(), "runtime_context": plan["runtime_context"]}
+            if "module" in command:
+                entry["module"] = command["module"]
+            if command["kind"] == "toolchain":
+                entry["observed_maven_version"] = "3.9.16"
+            commands.append(entry)
+        return {"plan_id": plan["plan_id"], "runtime_context": plan["runtime_context"], "commands": commands}
 
     def test_selects_only_requested_module_without_case_filters(self):
         plan = self.plan()
         self.assertEqual(["connectors/a"], plan["selected"])
-        self.assertEqual(2, len(plan["commands"]))
-        test = plan["commands"][1]
+        self.assertEqual(3, len(plan["commands"]))
+        self.assertEqual(str(self.maven.resolve()), plan["maven_executable"])
+        self.assertEqual(self.context, plan["runtime_context"])
+        test = plan["commands"][-1]
         self.assertNotIn("-am", test["argv"])
         self.assertIn("clean", test["argv"])
         self.assertIn("-DskipITs=false", test["argv"])
@@ -74,9 +96,10 @@ class ConnectorTests(unittest.TestCase):
 
     def test_missing_execution_kept(self):
         plan = self.plan(["connectors/a", "connectors/b"])
-        report = connector.report(plan, self.execution(plan))
-        self.assertFalse(report["passed"])
-        self.assertEqual("not_executed", report["modules"][1]["status"])
+        run = self.execution(plan)
+        run["commands"].pop()
+        with self.assertRaisesRegex(ValueError, "一一对应"):
+            connector.report(plan, run)
 
     def test_failures_skips_and_exit_failure_not_passed(self):
         for skipped, fail, code in [(1, 0, 0), (0, 1, 0), (0, 0, 1)]:
@@ -89,7 +112,7 @@ class ConnectorTests(unittest.TestCase):
         run = self.execution(plan)
         file = self.root / "connectors/a/target/failsafe-reports/TEST-SampleIT.xml"
         file.write_text('<testsuite tests="0" failures="0" errors="0" skipped="0"/>')
-        run["modules"][0]["finished_ns"] = time.time_ns()
+        next(item for item in run["commands"] if item["kind"] == "test")["finished_ns"] = time.time_ns()
         self.assertFalse(connector.report(plan, run)["passed"])
         file.unlink()
         self.assertFalse(connector.report(plan, run)["passed"])
@@ -97,7 +120,8 @@ class ConnectorTests(unittest.TestCase):
     def test_stale_report_rejected(self):
         plan = self.plan()
         run = self.execution(plan)
-        run["modules"][0]["started_ns"] = run["modules"][0]["finished_ns"]
+        item = next(item for item in run["commands"] if item["kind"] == "test")
+        item["started_ns"] = item["finished_ns"]
         self.assertEqual("unknown", connector.report(plan, run)["modules"][0]["status"])
 
     def test_changed_code_rejects_prior_results(self):
@@ -118,7 +142,7 @@ class ConnectorTests(unittest.TestCase):
         module = self.root / "connectors/a"
         (module / "src/test").mkdir()
         (module / "src/it/java").rename(module / "src/test/java")
-        plan = connector.plan(self.root, ["connectors/a"], [], "surefire")
+        plan = connector.plan(self.root, ["connectors/a"], [], "surefire", runtime=self.context, executable=self.maven)
         run = self.execution(plan)
         (module / "target/failsafe-reports").rename(module / "target/surefire-reports")
         result = connector.report(plan, run)
@@ -133,9 +157,9 @@ class ConnectorTests(unittest.TestCase):
             built.write_bytes(b"new")
             loaded.write_bytes(b"old")
             with self.assertRaisesRegex(ValueError, "内容不同"):
-                connector.plan(self.root, ["connectors/a"], [], jar_pairs=[(built, loaded)])
+                connector.plan(self.root, ["connectors/a"], [], jar_pairs=[(built, loaded)], runtime=self.context, executable=self.maven)
             loaded.write_bytes(b"new")
-            plan = connector.plan(self.root, ["connectors/a"], [], jar_pairs=[(built, loaded)])
+            plan = connector.plan(self.root, ["connectors/a"], [], jar_pairs=[(built, loaded)], runtime=self.context, executable=self.maven)
             run = self.execution(plan)
             self.assertTrue(connector.report(plan, run)["passed"])
             built.write_bytes(b"changed")
@@ -152,7 +176,7 @@ class ConnectorTests(unittest.TestCase):
             file.write_text("old")
             subprocess.run(["git", "-C", str(dependency), "add", "."], check=True)
             subprocess.run(["git", "-C", str(dependency), "commit", "-qm", "fixture"], check=True)
-            plan = connector.plan(self.root, ["connectors/a"], [], dependency_repos=[dependency])
+            plan = connector.plan(self.root, ["connectors/a"], [], dependency_repos=[dependency], runtime=self.context, executable=self.maven)
             run = self.execution(plan)
             file.write_text("new")
             with self.assertRaisesRegex(ValueError, "依赖源码已变化"):
@@ -166,12 +190,21 @@ class ConnectorTests(unittest.TestCase):
 
     def test_old_transient_plan_rejected(self):
         plan = self.plan()
-        plan["schema_version"] = 1
+        plan["schema_version"] = 2
         unsigned = dict(plan)
         unsigned.pop("plan_id")
         plan["plan_id"] = connector.digest(unsigned)
         with self.assertRaisesRegex(ValueError, "清单已变化"):
-            connector.report(plan, {"plan_id": plan["plan_id"], "modules": []})
+            connector.report(plan, {"plan_id": plan["plan_id"], "runtime_context": plan["runtime_context"], "commands": []})
+
+    def test_runtime_context_and_command_records_are_bound(self):
+        plan = self.plan()
+        run = self.execution(plan)
+        run["commands"][1]["runtime_context"] = dict(run["runtime_context"], run_id="run-other")
+        with self.assertRaisesRegex(ValueError, "runtime"):
+            connector.report(plan, run)
+        self.assertTrue(all(command["argv"].count("-Dmaven.repo.local=" + plan["runtime_context"]["local_repository"]) == 1
+                            for command in plan["commands"]))
 
     def test_valid_report_and_cli(self):
         plan = self.plan()
@@ -193,16 +226,22 @@ class ConnectorTests(unittest.TestCase):
             module = self.root / ("connectors/" + name)
             (module / "pom.xml").write_text('<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><parent><groupId>ao.fixture</groupId><artifactId>parent</artifactId><version>1</version><relativePath>../../pom.xml</relativePath></parent><artifactId>%s</artifactId></project>' % name)
             (module / "src/it/java/SampleIT.java").write_text('import org.junit.Test; import static org.junit.Assert.*; public class SampleIT { @Test public void first() { assertTrue(%s); } @Test public void second() { assertTrue(true); } }' % ("true" if name == "a" else "false"))
-        plan = self.plan()
+        plan = connector.plan(self.root, ["connectors/a"], [], runtime=self.context, executable=shutil.which("mvn"))
         runs = []
         for command in plan["commands"]:
             start = time.time_ns()
             proc = subprocess.run(command["argv"], cwd=command["cwd"], capture_output=True, text=True, timeout=180)
             end = time.time_ns()
             self.assertEqual(0, proc.returncode, proc.stdout[-6000:] + proc.stderr[-1000:])
+            entry = dict(kind=command["kind"], exit_code=proc.returncode, started_ns=start, finished_ns=end,
+                         runtime_context=plan["runtime_context"])
+            if command["kind"] == "toolchain":
+                match = re.search(r"Apache Maven (\S+)", proc.stdout + proc.stderr)
+                entry["observed_maven_version"] = match.group(1) if match else ""
             if command["kind"] == "test":
-                runs.append(dict(module=command["module"], exit_code=proc.returncode, started_ns=start, finished_ns=end))
-        report = connector.report(plan, dict(plan_id=plan["plan_id"], modules=runs))
+                entry["module"] = command["module"]
+            runs.append(entry)
+        report = connector.report(plan, dict(plan_id=plan["plan_id"], runtime_context=plan["runtime_context"], commands=runs))
         self.assertTrue(report["passed"], report)
         self.assertEqual(2, report["modules"][0]["counts"]["tests"])
         self.assertFalse((self.root / "connectors/b/target").exists())
@@ -211,7 +250,7 @@ class ConnectorTests(unittest.TestCase):
     def test_real_cross_repository_old_jar_fails_new_jar_passes(self):
         with tempfile.TemporaryDirectory() as d:
             base = Path(d).resolve()
-            producer, cache = base / "producer", base / "maven-cache"
+            producer, cache = base / "producer", Path(self.context["local_repository"])
             producer.mkdir()
             for args in [("init", "-q"), ("config", "user.name", "Fixture"), ("config", "user.email", "fixture@example.invalid")]:
                 subprocess.run(["git", "-C", str(producer), *args], check=True, capture_output=True)
@@ -234,27 +273,40 @@ class ConnectorTests(unittest.TestCase):
 
             def execute(argv, cwd, success=True):
                 start = time.time_ns()
-                proc = subprocess.run(argv + ["-Dmaven.repo.local=" + str(cache)], cwd=cwd, capture_output=True, text=True, timeout=240)
+                proc = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=240)
                 end = time.time_ns()
                 if success:
                     self.assertEqual(0, proc.returncode, proc.stdout[-5000:] + proc.stderr[-1000:])
-                return dict(module="connectors/a", exit_code=proc.returncode, started_ns=start, finished_ns=end)
+                return proc, start, end
 
-            execute(["mvn", "-B", "clean", "install", "-DskipTests=true"], producer)
-            old_plan = connector.plan(self.root, ["connectors/a"], [], dependency_repos=[producer], jar_pairs=[(built, consumed)])
-            execute(old_plan["commands"][0]["argv"], self.root)
-            old_run = execute(old_plan["commands"][1]["argv"], module, success=False)
-            self.assertNotEqual(0, old_run["exit_code"])
-            old_report = connector.report(old_plan, dict(plan_id=old_plan["plan_id"], modules=[old_run]))
+            def execute_plan(plan, test_success):
+                runs = []
+                for command in plan["commands"]:
+                    proc, start, end = execute(command["argv"], command["cwd"], success=command["kind"] != "test" or test_success)
+                    entry = {"kind": command["kind"], "exit_code": proc.returncode, "started_ns": start,
+                             "finished_ns": end, "runtime_context": plan["runtime_context"]}
+                    if command["kind"] == "toolchain":
+                        match = re.search(r"Apache Maven (\S+)", proc.stdout + proc.stderr)
+                        entry["observed_maven_version"] = match.group(1) if match else ""
+                    if command["kind"] == "test":
+                        entry["module"] = command["module"]
+                    runs.append(entry)
+                return {"plan_id": plan["plan_id"], "runtime_context": plan["runtime_context"], "commands": runs}
+
+            maven = shutil.which("mvn")
+            execute([maven, "-Dmaven.repo.local=" + str(cache), "-B", "clean", "install", "-DskipTests=true"], producer)
+            old_plan = connector.plan(self.root, ["connectors/a"], [], dependency_repos=[producer], jar_pairs=[(built, consumed)], runtime=self.context, executable=maven)
+            old_execution = execute_plan(old_plan, test_success=False)
+            old_test = next(item for item in old_execution["commands"] if item["kind"] == "test")
+            self.assertNotEqual(0, old_test["exit_code"])
+            old_report = connector.report(old_plan, old_execution)
             self.assertEqual("failed", old_report["modules"][0]["status"])
             self.assertEqual(1, old_report["modules"][0]["counts"]["failures"])
 
             java.write_text('package sample; public class Library { public static String value() { return "new"; } }')
-            execute(["mvn", "-B", "clean", "install", "-DskipTests=true"], producer)
-            new_plan = connector.plan(self.root, ["connectors/a"], [], dependency_repos=[producer], jar_pairs=[(built, consumed)])
-            execute(new_plan["commands"][0]["argv"], self.root)
-            new_run = execute(new_plan["commands"][1]["argv"], module)
-            new_report = connector.report(new_plan, dict(plan_id=new_plan["plan_id"], modules=[new_run]))
+            execute([maven, "-Dmaven.repo.local=" + str(cache), "-B", "clean", "install", "-DskipTests=true"], producer)
+            new_plan = connector.plan(self.root, ["connectors/a"], [], dependency_repos=[producer], jar_pairs=[(built, consumed)], runtime=self.context, executable=maven)
+            new_report = connector.report(new_plan, execute_plan(new_plan, test_success=True))
             self.assertTrue(new_report["passed"], new_report)
             self.assertEqual(2, new_report["modules"][0]["counts"]["tests"])
             self.assertNotEqual(old_plan["artifacts"][0]["sha256"], new_plan["artifacts"][0]["sha256"])

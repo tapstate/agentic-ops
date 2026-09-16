@@ -3,7 +3,7 @@
   "profiles": {
     "full-application": {
       "id": "full-application",
-      "revision": 1,
+      "revision": 2,
       "repositories": [
         "tapdata/tapdata",
         "tapdata/tapdata-common-lib",
@@ -15,7 +15,19 @@
         "tapdata/tapdata-application",
         "tapdata/hazelcast"
       ],
-      "optional_repositories": ["tapdata/t-layer3-test"]
+      "optional_repositories": [
+        "tapdata/t-layer3-test"
+      ],
+      "generated_directories": [
+        "target",
+        "**/target",
+        "node_modules",
+        "**/node_modules"
+      ],
+      "archive_runtime": [
+        "logs",
+        "reports"
+      ]
     }
   }
 }

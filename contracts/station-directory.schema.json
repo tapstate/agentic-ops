@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "epoch 4 任务独占目录与创建回执",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "run_id",
+    "station_id",
+    "kind",
+    "producer",
+    "recipe",
+    "parent",
+    "disposition",
+    "identity"
+  ],
+  "properties": {
+    "path": {
+      "type": "string",
+      "pattern": "^(runtime|source/[^/]+/[^/]+/.+)$"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^(?:run-[a-z0-9][a-z0-9-]*|[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8})$"
+    },
+    "station_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "enum": [
+        "runtime-exclusive",
+        "source-generated"
+      ]
+    },
+    "producer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recipe": {
+      "type": "object",
+      "required": [
+        "id",
+        "revision"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "parent": {
+      "type": "object",
+      "required": [
+        "device",
+        "inode"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "device": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "inode": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "disposition": {
+      "enum": [
+        "clear_children_keep_root",
+        "delete_root"
+      ]
+    },
+    "identity": {
+      "anyOf": [
+        {
+          "const": null
+        },
+        {
+          "type": "object",
+          "required": [
+            "device",
+            "inode"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "device": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "inode": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      ]
+    },
+    "observed_missing_before_intent": {
+      "enum": [
+        true,
+        false
+      ]
+    }
+  }
+}

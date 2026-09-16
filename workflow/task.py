@@ -96,8 +96,13 @@ def cmd_takeover(args):
 def cmd_lifecycle(args):
     from workflow import station
     request = json.loads(Path(args.input).read_text(encoding="utf-8"))
-    print(json.dumps(station.execute(args.dir, args.cmd, args.issue_key, args.expected_run_id,
-                                    args.expected_revision, args.operation_id, request), ensure_ascii=False, indent=2))
+    result = station.execute(args.dir, args.cmd, args.issue_key, args.expected_run_id,
+                             args.expected_revision, args.operation_id, request)
+    summary = {key: result.get(key) for key in ("operation_id", "kind", "run_id", "phase", "status", "archive_ref")}
+    plan = result.get("cleanup_plan", {})
+    summary.update(directory_count=len(plan.get("directories", [])), source_artifact_count=len(plan.get("entries", [])),
+                   plan_digest=plan.get("digest"), retained=plan.get("retained", []))
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -579,6 +584,21 @@ def cmd_interaction_path(args):
     return 0
 
 
+def cmd_runtime_path(args):
+    from workflow import station_directories
+    with task_store.task_state_lock(args.dir):
+        task = task_store.check_expected_run(args.dir, args.issue_key, args.expected_run_id)
+        if task.get("archive_ref") or task.get("outcome") != "in_progress":
+            raise ValueError("任务已归档或非进行中，不能继续取得 runtime 路径")
+        path = station_directories.runtime_child(args.dir, task, args.name)
+        workspace = Path(args.dir).resolve()
+        station_id = json.loads((task_store.state_path(args.dir) / "workspace.json").read_text(encoding="utf-8"))["workspace_id"]
+        print(json.dumps({"workspace": str(workspace), "station_id": station_id,
+                          "run_id": task["run_id"], "local_repository": str(path)},
+                         ensure_ascii=False, indent=2))
+    return 0
+
+
 NEXT_GUIDE = {
     "waiting_takeover": "读取 Jira 初始快照并准备本地版本水印；尽力回写，失败记录警告后继续 advance 进入 task_intake",
     "task_intake": "checklist/record 完成准入 -> repository add 登记修改范围及工作分支（完整工程已在 takeover 准备）-> 源码分析 -> advance；Jira 状态同步失败记录警告并继续",
@@ -859,7 +879,7 @@ def main():
     add = repository_sub.add_parser("add")
     add.add_argument("--issue-key")
     add.add_argument("--repo", required=True)
-    add.add_argument("--work-branch", required=True)
+    add.add_argument("--work-branch", help="仅续办既有分支时需要；新分支由工作空间 git_name 和当前 run 自动生成")
     add.add_argument("--base-branch", required=True)
     add.add_argument("--operation-id", required=True)
     add.add_argument("--expected-revision", required=True, type=int)
@@ -909,6 +929,13 @@ def main():
     p.add_argument("--name", required=True)
     p.add_argument("--dir", default=".")
     p.set_defaults(func=cmd_interaction_path)
+
+    p = sub.add_parser("runtime-path", help="只读核验当前 run 的受管 runtime 子路径")
+    p.add_argument("--issue-key", required=True)
+    p.add_argument("--expected-run-id", required=True)
+    p.add_argument("--name", required=True)
+    p.add_argument("--dir", default=".")
+    p.set_defaults(func=cmd_runtime_path)
 
     for command in ("record", "advance", "block"):
         sub.choices[command].add_argument("--expected-run-id", required=True)

@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -21,6 +22,9 @@ from workspace_compatibility import (
     require_workspace_can_adopt,
     workspace_epoch,
 )
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from workflow import task_store
 
 
 SCHEMA_VERSION = 3
@@ -269,15 +273,55 @@ def require_current_workspace_document(document):
     return document
 
 
+def global_git_name():
+    try:
+        result = subprocess.run(
+            ["git", "config", "--global", "--get", "user.name"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    value = result.stdout.strip() if result.returncode == 0 else ""
+    try:
+        return task_store.validate_git_name(value)
+    except ValueError:
+        return None
+
+
+def branch_identity(existing):
+    if existing and "branch_identity" in existing:
+        identity = existing["branch_identity"]
+        if (not isinstance(identity, dict) or set(identity) != {"schema_version", "git_name", "source"}
+                or identity.get("schema_version") != 1
+                or identity.get("source") != "git_global_user_name"):
+            raise ValueError("工作空间 git_name 配置结构无效")
+        task_store.validate_git_name(identity.get("git_name"))
+        return dict(identity)
+    if existing is not None:
+        # 旧工作空间没有该可选字段时，只允许补写一次；已有值绝不跟随机器配置改写。
+        value = global_git_name()
+        if value is None:
+            return None
+        return {"schema_version": 1, "git_name": value, "source": "git_global_user_name"}
+    value = global_git_name()
+    if value is None:
+        return None
+    return {"schema_version": 1, "git_name": value, "source": "git_global_user_name"}
+
+
 def workspace_document(install_root, workspace, project, agents, existing):
     workspace_id = existing["workspace_id"] if existing else uuid.uuid4().hex
-    return {
+    result = {
         "schema_version": SCHEMA_VERSION,
         "product_root": str(install_root.resolve()),
         "workspace_id": workspace_id,
         "project": project,
         "agents": agents,
     }
+    identity = branch_identity(existing)
+    if identity is not None:
+        result["branch_identity"] = identity
+    return result
 
 
 def init_document(install_root, artifacts, workspace_state_epoch=None):
@@ -419,6 +463,7 @@ def validate_workspace_document(install_root, document):
         raise ValueError("工作空间配置缺少 workspace_id")
     if document.get("schema_version") != SCHEMA_VERSION or "repository_pool" in document:
         raise ValueError("工作空间不兼容，请使用原版本将这个旧工作空间受控解绑并重建")
+    branch_identity(document)
     selected, manifests = select(install_root, agents)
     return project, selected, manifests
 
@@ -602,7 +647,6 @@ def main():
             tree.write_json_atomic(Path(STATE_DIRECTORY) / INIT_NAME, document)
             for name in ("config", "source", "runtime", "archive"):
                 tree.path(name).mkdir(mode=0o700, exist_ok=True)
-            from workflow import task_store
             task_store.initialize_current(workspace)
             if tree.is_file(LEGACY_BINDING_NAME):
                 tree.unlink(LEGACY_BINDING_NAME)
@@ -616,6 +660,12 @@ def main():
     )
     for message in messages:
         print(message)
+    if "branch_identity" not in workspace_config:
+        print(
+            "AgenticOps：当前工位未配置 git_name。请补充全局 Git user.name 后重新初始化，或执行 "
+            "agenticops workspace identity --workspace <目录>；"
+            "该值会一次性保存，用于稳定生成并恢复任务工作分支。"
+        )
     return 0
 
 

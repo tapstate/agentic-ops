@@ -217,6 +217,12 @@ def detach_preflight(product_root, workspace, purge=False, tree=None):
                "events.jsonl", "git-ref-cache-v2.json",
                "git-ref-cache-v2.json.lock"}
     for path in state_root.iterdir():
+        if path.name == "operation-data" and path.is_dir() and not path.is_symlink():
+            from workflow import engineering_baseline
+            for item in path.iterdir():
+                if item.is_symlink() or not item.is_file() or item.suffix != ".json" or engineering_baseline.digest(json.loads(item.read_text())) != item.stem:
+                    raise ValueError("操作材料包含未知或损坏对象，拒绝解绑")
+            continue
         if path.name not in allowed or path.is_symlink() or not path.is_file():
             raise ValueError("工作空间状态包含未知文件或未清理活动证据，拒绝解绑：%s" % path)
     if not tree.is_dir("runtime") or tree.is_symlink("runtime"):
@@ -251,6 +257,7 @@ def detach(product_root, workspace, purge=False):
             for name in ("current-task.json", "operation.json", "events.jsonl",
                          "git-ref-cache-v2.json", "git-ref-cache-v2.json.lock"):
                 tree.unlink(Path(STATE_DIRECTORY) / name, missing_ok=True)
+            tree.remove_tree(Path(STATE_DIRECTORY) / "operation-data", missing_ok=True)
             for relative in (
                 Path(STATE_DIRECTORY) / "init.json",
                 Path(STATE_DIRECTORY) / "workspace.json",
@@ -346,6 +353,46 @@ def command_pending(args, product_root):
         print("AgenticOps：检测到 %s 个已知工作空间待刷新；请执行 agenticops workspace repair --all，或在使用时执行 start。" % len(pending))
 
 
+def configured_git_name():
+    try:
+        result = subprocess.run(
+            ["git", "config", "--global", "--get", "user.name"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError("无法读取全局 Git user.name；请配置后重试") from error
+    if result.returncode != 0:
+        raise ValueError(
+            "当前机器未配置全局 Git user.name；请先执行 git config --global user.name <合法 Git 提交用户名>，再重试。该值会一次性保存，"
+            "用于稳定生成并恢复任务工作分支"
+        )
+    return task_store.validate_git_name(result.stdout.strip()), "git_global_user_name"
+
+
+def command_identity(args, product_root):
+    workspace = Path(args.workspace).resolve()
+    require_tracked(product_root, workspace)
+    with task_store.task_state_lock(workspace):
+        current = task_store.read_task(workspace)
+        if current and current.get("task_repositories"):
+            raise ValueError("当前任务已登记修改仓库，不能变更 git_name")
+        path = workspace_artifact_path(workspace, Path(STATE_DIRECTORY) / "workspace.json")
+        document = load_json(path, "工作空间配置")
+        existing = document.get("branch_identity")
+        if existing is not None:
+            name = task_store.workspace_git_name(workspace)
+            print("工作空间 git_name 已配置：%s" % name)
+            return
+        name, source = configured_git_name()
+        document["branch_identity"] = {
+            "schema_version": 1,
+            "git_name": name,
+            "source": source,
+        }
+        task_store._write_json_atomic(path, document)
+    print("工作空间 git_name 已配置：%s" % name)
+
+
 def parser():
     class StrictArgumentParser(argparse.ArgumentParser):
         def __init__(self, *args, **kwargs):
@@ -358,6 +405,8 @@ def parser():
     commands.add_parser("register").add_argument("--workspace", required=True)
     commands.add_parser("pending").add_argument("--product-ref", required=True)
     commands.add_parser("list")
+    identity = commands.add_parser("identity")
+    identity.add_argument("--workspace", required=True)
     for name in ("prune", "repair", "detach", "purge"):
         command = commands.add_parser(name)
         target = command.add_mutually_exclusive_group(required=True)
@@ -383,6 +432,8 @@ def main():
             command_pending(args, product_root)
         elif args.command == "list":
             command_list(args, product_root)
+        elif args.command == "identity":
+            command_identity(args, product_root)
         elif args.command == "prune":
             command_prune(args, product_root)
         elif args.command == "repair":

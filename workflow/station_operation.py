@@ -4,7 +4,7 @@ from __future__ import annotations
 import copy
 import json
 import re
-import uuid
+from pathlib import Path
 
 from workflow import engineering_baseline, task_store
 
@@ -27,6 +27,17 @@ def read(base):
             or value.get("status") not in ("running", "failed", "done")
             or not isinstance(value.get("steps"), dict)):
         raise ValueError("工位操作日志结构无效")
+    for key, reference in value.pop("payload_refs", {}).items():
+        if key not in PAYLOAD_FIELDS or not re.fullmatch(r"[0-9a-f]{64}", reference):
+            raise ValueError("操作材料引用无效")
+        directory = task_store.state_path(base) / "operation-data"
+        blob = directory / (reference + ".json")
+        if directory.is_symlink() or blob.is_symlink():
+            raise ValueError("操作材料不能是链接")
+        item = json.loads(blob.read_text())
+        if engineering_baseline.digest(item) != reference:
+            raise ValueError("操作材料摘要不一致")
+        value[key] = item
     required = {"operation_id", "kind", "run_id", "request", "request_digest", "expected_revision", "phase"}
     if (not required <= set(value) or not isinstance(value["operation_id"], str)
             or not re.fullmatch(r"op-[a-z0-9-]{8,80}", value["operation_id"])
@@ -49,7 +60,7 @@ def read(base):
 def _verify_superseded(operation, name, step):
     history = operation.get("plan_revisions", [])
     current = operation.get("cleanup_plan", {})
-    if not isinstance(history, list) or not isinstance(current, dict) or not name.startswith(("resource:", "external:", "clear-active:", "archive-publish:")):
+    if not isinstance(history, list) or not isinstance(current, dict) or not name.startswith(("resource:", "source-reset:", "external:", "clear-active:", "archive-publish:")):
         raise ValueError("只有清理资源步骤可被已确认的新计划替代")
     for index, revision in enumerate(history):
         if not isinstance(revision, dict) or not isinstance(revision.get("plan"), dict):
@@ -91,6 +102,11 @@ def _verify_superseded(operation, name, step):
     elif name.startswith("clear-active:"):
         if name != "clear-active:" + str(original_revision) + ":" + original or not isinstance(step["expected"].get("files"), dict):
             raise ValueError("活动材料清理步骤不属于原计划")
+    elif name.startswith("source-reset:"):
+        repository = step["expected"].get("repository")
+        entries = [entry for entry in revision["plan"].get("entries", []) if entry.get("repository") == repository]
+        if step["expected"].get("entries_digest") != engineering_baseline.digest(entries):
+            raise ValueError("源码回收步骤不属于原计划")
     elif name.startswith("resource:"):
         if name != "resource:" + str(original_revision) + ":" + original + ":" + str(step["expected"].get("path")) or step["expected"] not in revision["plan"].get("entries", []):
             raise ValueError("被替代步骤不属于原计划")
@@ -127,7 +143,11 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
     if kind == "takeover":
         if current["current"] is not None:
             raise ValueError("工位仍有当前任务，不能接管新任务")
-        run_id = "run-" + uuid.uuid4().hex
+        issue_key = task_store.validate_issue_key(request.get("issue_key"))
+        run_id = task_store.new_run_id(issue_key)
+        archive = Path(base).resolve() / "archive" / issue_key / run_id
+        if archive.exists() or archive.is_symlink():
+            raise ValueError("执行编号与既有档案冲突，请在下一秒重试接管")
     elif current["current"] is None or current["current"]["run_id"] != run_id:
         raise ValueError("工位 run 已变化")
     value = {
@@ -137,11 +157,31 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
         "request": copy.deepcopy(request), "steps": {},
     }
     save(base, value)
+    collect_payloads(base)
     return value
 
 
+PAYLOAD_FIELDS = {"cleanup_plan", "archive_record", "archive_evidence", "archive_artifacts", "archive_logs", "archive_drafts", "plan_revisions", "amendment_receipts", "previous_operation"}
+
+
 def save(base, operation):
-    task_store._write_json_atomic(path(base), operation)
+    value = dict(operation)
+    references = {}
+    directory = task_store.state_path(base) / "operation-data"
+    if directory.is_symlink():
+        raise ValueError("操作材料目录不能是链接")
+    for key in PAYLOAD_FIELDS & value.keys():
+        item = value.pop(key)
+        reference = engineering_baseline.digest(item)
+        blob = directory / (reference + ".json")
+        if blob.is_symlink():
+            raise ValueError("操作材料不能是链接")
+        if not blob.exists():
+            task_store._write_json_atomic(blob, item)
+        references[key] = reference
+    if references:
+        value["payload_refs"] = references
+    task_store._write_json_atomic(path(base), value)
 
 
 def handoff_clean(base, operation_id, revision, request, run_id, cleanup_plan):
@@ -202,4 +242,32 @@ def finish(base, operation):
         elif step["receipt"] is None:
             raise ValueError("工位操作仍有未核验步骤")
     operation.update(status="done", phase="done")
+    # 正式档案已持有正文，不在当前操作缓存中跨任务保留另一份大字节副本。
+    for key in ("archive_artifacts", "archive_logs", "archive_evidence", "archive_record"):
+        operation.pop(key, None)
+    for draft in operation.get("archive_drafts", []):
+        for key in ("evidence", "artifacts", "logs"):
+            draft.pop(key, None)
     save(base, operation)
+    collect_payloads(base)
+
+
+def collect_payloads(base):
+    """调用者持锁；只回收不再被原子发布的当前 operation 引用的内容寻址材料。"""
+    directory = task_store.state_path(base) / "operation-data"
+    if directory.is_symlink():
+        raise ValueError("操作材料目录不能是链接")
+    if not directory.exists():
+        return
+    current = json.loads(path(base).read_text())
+    retained = set(current.get("payload_refs", {}).values())
+    for blob in directory.iterdir():
+        if blob.is_symlink() or not blob.is_file() or blob.suffix != ".json":
+            raise ValueError("操作材料含未知对象，拒绝回收")
+        if engineering_baseline.digest(json.loads(blob.read_text())) != blob.stem:
+            raise ValueError("操作材料摘要损坏，拒绝回收")
+    for blob in directory.iterdir():
+        if blob.stem not in retained:
+            blob.unlink()
+    from workflow.station_directories import sync
+    sync(directory)

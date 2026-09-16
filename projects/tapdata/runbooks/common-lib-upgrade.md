@@ -54,17 +54,19 @@ tapdata-enterprise、tapdata-connectors-enterprise 等实际消费新 API 的模
 
 ## 构建与验证
 
+先按[构建与本地运行](build-test-and-local-run.md#maven-配置与任务本地仓库)读取当前 run 的 `local_repository` 和绝对 Maven 可执行文件。保留用户 Maven settings 中的镜像、认证和代理，但所有命令必须显式使用该任务本地仓库。
+
 按依赖方向执行：
 
 ```sh
 # tapdata-common-lib
-mvn clean install -T1C -U
+<absolute-mvn> -Dmaven.repo.local=<local_repository> clean install -T1C -U
 
 # tapdata 核心受影响模块
-mvn -pl <module> -am test
+<absolute-mvn> -Dmaven.repo.local=<local_repository> -pl <module> -am test
 
 # tapdata-connectors 中使用新 API 的模块
-mvn -pl <connector-module> -am test
+<absolute-mvn> -Dmaven.repo.local=<local_repository> -pl <connector-module> -am test
 ```
 
 跨仓验证至少覆盖：

@@ -8,7 +8,27 @@
 
 工位接管先冻结完整工程，repository context 返回独立 source 仓库；以下构建 cwd 使用这些已核验路径。持久环境配置位于 config，有效配置、Maven local、插件、日志和报告进入唯一 runtime。操作前核验 Project 资源配方，禁止写共享 Maven 缓存后声称隔离；归档或退出前登记并核验停止写入者。目录或配方生成不证明真实 TM/FE/Web 已启动，必须以实际健康检查与任务产物加载证据结论为准。
 
-当前完整应用 Profile 只定义仓库集合与修订，尚未包含已实证的 actions/toolchain/health_checks 配方。实际工具链、运行参数与数据库环境须按目标分支核验。资源事实通过 workflow/station_resources.py 的 --issue-key/--expected-run-id/--input 登记；外部资源 quiesced 且有回读可先归档，最终释放/清理必须回读 cleaned。归档后仅允许更新既有 external 的清理状态与回读来源，不新增或变更资源身份。
+## Maven 配置与任务本地仓库
+
+Maven 安装级与用户级 `settings.xml` 正常生效，保留镜像、认证、代理和 profile；不复制、修改或归档这些文件。仅本地仓库路径由当前任务覆盖为 `runtime/maven-local`，因此 AgenticOps 的 Maven 计划不会把本任务 Jar 写入共享 `~/.m2/repository`。
+
+每次生成计划、以及执行计划中的每条 Maven 命令前，都重新读取当前 run 的受管路径并保存完整 JSON 到当前交互材料：
+
+```sh
+python3 <agenticops-root>/workflow/task.py runtime-path \
+  --issue-key <issue> --expected-run-id <run> --name maven-local --dir <workspace> \
+  > <outside-repository>/maven-runtime.json
+```
+
+输出绑定 `workspace`、`station_id`、`run_id` 和 `local_repository`。若任务已归档、run 已变化，或 runtime 路径不是受控真实目录，命令失败，不能执行旧计划。`maven_tests.py` 当前只支持 Maven 3.9.x；传入解析后的绝对 Maven 可执行文件路径，而不是裸 `mvn`。其它 Maven 调用同样使用输出中的 `local_repository`，例如：
+
+```sh
+<absolute-mvn> -Dmaven.repo.local=<local_repository> -N -f <module>/pom.xml help:effective-pom -Doutput=<absolute-output>
+```
+
+运行 Maven 时不得传 `-s` 覆盖用户 settings，也不得在项目、全局设置或环境变量中依赖另一个 `maven.repo.local`。`.mvn/maven.config`、`MAVEN_ARGS` 与 `MAVEN_OPTS` 可以保留目标工程的其它参数，但实际版本与本地仓库路径必须由清单回读核验。后台或并行 Maven 写入者须先作为 process 资源登记；同一工位不得并行写同一 `maven-local`。
+
+当前完整应用 Profile 只定义仓库集合与修订，尚未包含已实证的 actions/toolchain/health_checks 配方。实际工具链、运行参数与数据库环境须按目标分支核验。日志、报告和可迁出的产出分别集中到 runtime/logs、runtime/reports 和其它 runtime 子目录；不可迁出的 target/node_modules 在启动生产者之前按 Profile 配方登记目录，重置说明见[任务授权指引](../../../docs/usage/task-authorization.md#重置工位)。资源事实通过 workflow/station_resources.py 的 --issue-key/--expected-run-id/--input 登记；外部资源 quiesced 且有回读可先归档，最终释放/清理必须回读 cleaned。归档后仅允许更新既有 external 的清理状态与回读来源，不新增或变更资源身份。
 
 来源：《TapData 产品研发指南（v3.5.4+）》，提取日期为 2026-07-27；移植自 tapstate/agentic-ops（2026-08-27）。
 
@@ -128,7 +148,7 @@ Tapdata 4.x 核心工程当前基线为 JDK 17。执行前记录：
 
 ```sh
 java -version
-mvn -version
+<absolute-mvn> -Dmaven.repo.local=<local_repository> --version
 ```
 
 公共库可能同时声明多个 JDK profile，必须根据目标分支和实际消费工程选择，不得因为核心工程使用 JDK 17 就批量修改公共库兼容配置。
@@ -141,7 +161,7 @@ Maven profile 必须从目标分支的 POM、构建脚本或 CI 获取。企业�
 
 由 Agent 根据 Git 变更定位模块，核对直接及间接消费其 Jar 的模块（包含跨仓、test/provided/optional 依赖），再确定必测范围。目录聚合 `<modules>` 不等于 Jar 依赖。修改父 POM、BOM、profile 或构建配置时还需检查配置传播；动态加载、反射、脚本引用及缺失模型由 Agent 调查或保守扩大范围，不要求研发补依赖图。
 
-优先使用目标代码、JDK、settings 和 profile 下的 Maven `help:effective-pom`，不自行实现 Maven 继承与属性解析。对每个待分析模块用 `-N -f <module>/pom.xml help:effective-pom -Doutput=<absolute-output>` 采集单模块模型；显式 profile 使用目标分支已有配置。失败时保留解析缺口，不以空依赖继续。该 Maven 操作可能更新本地插件缓存，但不执行测试。
+优先使用目标代码、JDK、settings 和 profile 下的 Maven `help:effective-pom`，不自行实现 Maven 继承与属性解析。对每个待分析模块按上一节取得本地仓库后用 `-Dmaven.repo.local=<local_repository> -N -f <module>/pom.xml help:effective-pom -Doutput=<absolute-output>` 采集单模块模型；显式 profile 使用目标分支已有配置。失败时保留解析缺口，不以空依赖继续。该 Maven 操作可能更新当前工位的本地插件缓存，但不执行测试。
 
 多模块或跨仓闭包可使用 `python3 projects/tapdata/scripts/java_impact.py --input <inventory.json>`。输入由 Agent 根据刚采集的模型构造，不进入任务持久状态；每个模块记录模型文件 SHA-256、实际源码完整提交、相对 POM 路径和 profile。工作区有未提交修改时，在任务证据中另记 diff 及模型生成时间；这些字段是采集来源，不是脚本对 Git 实时状态的认证。代码或模型配置变化后须重新采集。
 
@@ -178,7 +198,9 @@ Maven profile 必须从目标分支的 POM、构建脚本或 CI 获取。企业�
 python3 projects/tapdata/scripts/maven_tests.py plan \
   --repo <connector-repository-root> \
   --module connectors/mysql-connector \
-  --module connectors/mongodb-connector > <outside-repository>/plan.json
+  --module connectors/mongodb-connector \
+  --runtime-context <outside-repository>/maven-runtime.json \
+  --maven-executable <absolute-mvn> > <outside-repository>/plan.json
 ```
 
 有已核实 profile 时重复提供 `--profile <name>`。清单绑定当前 Git Head、未提交 diff 和未跟踪文件；存放在仓库之外或已忽略的运行目录，避免记录本身改变源码快照。清单不是新的任务状态，也不授权任何外部操作。
@@ -189,13 +211,16 @@ Agent 用原生工具按清单中的 `cwd` 和 `argv` 顺序执行：先 `instal
 
 执行前核对有效 POM、settings、环境参数中没有额外过滤用例、跳过测试或改变报告位置的配置。`clean` 会清除所选模块构建产物，需确认待保留的日志/证据已另存；依赖准备失败时不得继续使用缓存 Jar 冒充本轮准备完成。数据库、凭据和测试资源必须使用已授权环境；环境未就绪不等于测试通过。模块内能力不支持、框架缺失或非本次变更失败，按研发决定处理并记录。
 
-每个模块执行前后用 `time.time_ns()` 记录时间，保留原生命令输出与退出码。执行记录格式如下（时间和退出码必须取实际结果）：
+每条清单命令执行前重新运行 `runtime-path`，并将当次 JSON 原样写入命令记录的 `runtime_context`。记录时间、退出码和命令类型；`toolchain` 还记录从实际 `--version` 输出解析的 Maven 版本。执行记录格式如下（时间、版本和退出码必须取实际结果）：
 
 ```json
 {
   "plan_id": "<清单 plan_id>",
-  "modules": [
-    {"module": "connectors/mysql-connector", "started_ns": 0, "finished_ns": 0, "exit_code": 0}
+  "runtime_context": {"workspace": "<workspace>", "station_id": "<station>", "run_id": "<run>", "local_repository": "<workspace>/runtime/maven-local"},
+  "commands": [
+    {"kind": "toolchain", "started_ns": 0, "finished_ns": 0, "exit_code": 0, "observed_maven_version": "3.9.16", "runtime_context": {"workspace": "<workspace>", "station_id": "<station>", "run_id": "<run>", "local_repository": "<workspace>/runtime/maven-local"}},
+    {"kind": "prepare", "started_ns": 0, "finished_ns": 0, "exit_code": 0, "runtime_context": {"workspace": "<workspace>", "station_id": "<station>", "run_id": "<run>", "local_repository": "<workspace>/runtime/maven-local"}},
+    {"kind": "test", "module": "connectors/mysql-connector", "started_ns": 0, "finished_ns": 0, "exit_code": 0, "runtime_context": {"workspace": "<workspace>", "station_id": "<station>", "run_id": "<run>", "local_repository": "<workspace>/runtime/maven-local"}}
   ]
 }
 ```
@@ -208,7 +233,7 @@ python3 projects/tapdata/scripts/maven_tests.py report \
 
 核验会拒绝变更后的源码快照、已声明依赖变化或不同清单的结果；逐模块列出缺执行、缺报告、旧报告、零用例、跳过和失败。只有本轮用例报告计数完整且退出成功时才标记模块通过，未提供结果的模块保留在报告内。解析后的摘要不含测试日志正文或连接凭据。该结论不证明断言质量或测试配置无过滤，Agent 仍须结合原生执行事实核对；这些整体证据由共同流程接入，不在本脚本复制流程门禁。
 
-执行清单为可再生的临时分析文件，当前格式为 2；旧连接器清单需用当前入口重新生成，不保留旧命令兼容入口。不改变 `.agenticops/` 工作空间持久状态或 epoch。
+执行清单为可再生的临时分析文件，当前格式为 3；旧连接器清单需用当前入口重新生成，不保留旧命令兼容入口。不改变 `.agenticops/` 工作空间持久状态或 epoch。
 
 ### 依赖构建命令
 
@@ -227,14 +252,14 @@ tapdata-common-lib
 常用命令：
 
 ```sh
-# 公共库安装到本地 Maven 仓库
-mvn clean install -T1C -U
+# 公共库安装到当前工位 Maven 本地仓库
+<absolute-mvn> -Dmaven.repo.local=<local_repository> clean install -T1C -U
 
 # 核心工程测试
-mvn clean test -T1C <target-branch-profiles>
+<absolute-mvn> -Dmaven.repo.local=<local_repository> clean test -T1C <target-branch-profiles>
 
 # 指定连接器及其依赖模块
-mvn clean package -T1C -pl <connector-module> -am
+<absolute-mvn> -Dmaven.repo.local=<local_repository> clean package -T1C -pl <connector-module> -am
 ```
 
 `-pl` 指定模块，`-am` 同时构建该模块依赖的模块。只有确有反向消费验证需要时才使用 `-amd`。
@@ -246,14 +271,14 @@ mvn clean package -T1C -pl <connector-module> -am
 先运行受影响模块的最小测试，再根据依赖影响扩大范围：
 
 ```sh
-mvn -pl <module> -Dtest=<TestClass> test
-mvn -pl <module> -am test
+<absolute-mvn> -Dmaven.repo.local=<local_repository> -pl <module> -Dtest=<TestClass> test
+<absolute-mvn> -Dmaven.repo.local=<local_repository> -pl <module> -am test
 ```
 
 Sonar 等质量检查必须通过环境变量读取服务地址和凭据：
 
 ```sh
-mvn sonar:sonar \
+<absolute-mvn> -Dmaven.repo.local=<local_repository> sonar:sonar \
   -Dsonar.projectKey=<project-key> \
   -Dsonar.host.url="$SONAR_HOST" \
   -Dsonar.login="$SONAR_TOKEN" \

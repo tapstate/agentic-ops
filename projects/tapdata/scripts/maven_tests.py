@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -14,6 +16,10 @@ import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from maven_reports import parse_xml
+
+
+SUPPORTED_MAVEN_VERSION = "3.9.x"
+RUNTIME_CONTEXT_KEYS = {"workspace", "station_id", "run_id", "local_repository"}
 
 
 def digest(value):
@@ -64,7 +70,41 @@ def jar_pair(built, consumed):
     return {"built": str(paths[0]), "consumed": str(paths[1]), "sha256": hashes[0]}
 
 
-def plan(root, modules, profiles, framework="failsafe", dependency_repos=(), jar_pairs=()):
+def runtime_context(value):
+    if not isinstance(value, dict) or set(value) != RUNTIME_CONTEXT_KEYS:
+        raise ValueError("runtime context 必须包含 workspace、station_id、run_id 和 local_repository")
+    if not all(isinstance(value[key], str) and value[key] for key in RUNTIME_CONTEXT_KEYS):
+        raise ValueError("runtime context 字段无效")
+    workspace = Path(value["workspace"])
+    local = Path(value["local_repository"])
+    if not workspace.is_absolute() or not local.is_absolute() or local != workspace / "runtime" / "maven-local":
+        raise ValueError("Maven local repository 必须是 workspace/runtime/maven-local")
+    runtime = workspace / "runtime"
+    if runtime.is_symlink() or not runtime.is_dir() or runtime.is_mount():
+        raise ValueError("workspace runtime 必须是非链接真实目录")
+    if local.is_symlink() or (local.exists() and (not local.is_dir() or local.is_mount())):
+        raise ValueError("Maven local repository 必须是非链接真实目录或尚未创建")
+    return {key: str(value[key]) for key in sorted(RUNTIME_CONTEXT_KEYS)}
+
+
+def maven_executable(value):
+    candidate = Path(value) if value else Path(shutil.which("mvn") or "")
+    if not candidate or not candidate.is_absolute():
+        raise ValueError("必须提供绝对 Maven 可执行文件路径")
+    try:
+        path = candidate.resolve(strict=True)
+    except OSError as error:
+        raise ValueError("Maven 可执行文件不存在") from error
+    if path.is_symlink() or not path.is_file() or not os.access(str(path), os.X_OK):
+        raise ValueError("Maven 可执行文件必须是可执行普通文件")
+    return str(path)
+
+
+def command(executable, local_repository, *arguments):
+    return [executable, "-Dmaven.repo.local=" + local_repository, *arguments]
+
+
+def plan(root, modules, profiles, framework="failsafe", dependency_repos=(), jar_pairs=(), runtime=None, executable=None):
     root = root.resolve()
     if Path(git(root, "rev-parse", "--show-toplevel").decode().strip()).resolve() != root:
         raise ValueError("repo 必须是 Git 仓库根目录")
@@ -74,6 +114,8 @@ def plan(root, modules, profiles, framework="failsafe", dependency_repos=(), jar
         raise ValueError("profile 名称无效")
     if framework not in ("failsafe", "surefire"):
         raise ValueError("必须明确 Maven 测试框架")
+    context = runtime_context(runtime)
+    executable = maven_executable(executable)
     source_dir = "src/it/java" if framework == "failsafe" else "src/test/java"
     selected, unavailable = [], []
     for name in modules:
@@ -83,19 +125,23 @@ def plan(root, modules, profiles, framework="failsafe", dependency_repos=(), jar
         else:
             selected.append(name)
     options = ["-P" + ",".join(profiles)] if profiles else []
-    commands = []
+    local_repository = context["local_repository"]
+    commands = [{"kind": "toolchain", "cwd": str(root),
+                 "argv": command(executable, local_repository, "--version")}]
     if selected:
-        commands.append({"kind": "prepare", "cwd": str(root), "argv": ["mvn", "-B", "install", "-pl", ",".join(selected), "-am", "-DskipITs=true", "-DskipTests=true", "-Dmaven.javadoc.skip=true"] + options})
+        commands.append({"kind": "prepare", "cwd": str(root), "argv": command(executable, local_repository, "-B", "install", "-pl", ",".join(selected), "-am", "-DskipITs=true", "-DskipTests=true", "-Dmaven.javadoc.skip=true", *options)})
     for name in selected:
         goals = ["test-compile", "failsafe:integration-test", "failsafe:verify"] if framework == "failsafe" else ["test"]
         commands.append({"kind": "test", "module": name, "cwd": str(root / name),
-                         "argv": ["mvn", "-B", "clean"] + goals + ["-DskipITs=false", "-DskipTests=false", "-Dmaven.test.skip=false", "-DfailIfNoTests=true"] + options})
+                         "argv": command(executable, local_repository, "-B", "clean", *goals, "-DskipITs=false", "-DskipTests=false", "-Dmaven.test.skip=false", "-DfailIfNoTests=true", *options)})
     dependencies = [{"repo": str(Path(p).resolve()), "source": snapshot(Path(p).resolve())} for p in dependency_repos]
     artifacts = [jar_pair(*pair) for pair in jar_pairs]
-    result = {"schema_version": 2, "repo": str(root), "source": snapshot(root),
+    result = {"schema_version": 3, "repo": str(root), "source": snapshot(root),
               "framework": framework, "dependency_repositories": dependencies, "artifacts": artifacts,
               "created_ns": time.time_ns(), "requested": modules, "selected": selected,
-              "unavailable": unavailable, "profiles": profiles, "commands": commands}
+              "unavailable": unavailable, "profiles": profiles, "commands": commands,
+              "runtime_context": context, "maven_executable": executable,
+              "supported_maven": SUPPORTED_MAVEN_VERSION}
     result["plan_id"] = digest(result)
     return result
 
@@ -121,8 +167,34 @@ def counts(report_dir, started, finished):
 def report(document, execution):
     expected = dict(document)
     plan_id = expected.pop("plan_id")
-    if document["schema_version"] != 2 or digest(expected) != plan_id or execution["plan_id"] != plan_id:
+    if document["schema_version"] != 3 or digest(expected) != plan_id or execution["plan_id"] != plan_id:
         raise ValueError("执行清单已变化或结果不属于本清单")
+    if execution.get("runtime_context") != document["runtime_context"]:
+        raise ValueError("执行 runtime context 与清单不一致")
+    observed = execution.get("commands")
+    if not isinstance(observed, list) or len(observed) != len(document["commands"]):
+        raise ValueError("执行命令必须与清单一一对应")
+    test_runs = {}
+    version = None
+    for expected_command, actual in zip(document["commands"], observed):
+        if not isinstance(actual, dict) or actual.get("kind") != expected_command["kind"]:
+            raise ValueError("执行命令类型或顺序不一致")
+        if actual.get("module") != expected_command.get("module"):
+            raise ValueError("执行命令模块不一致")
+        started, finished, exit_code = actual.get("started_ns"), actual.get("finished_ns"), actual.get("exit_code")
+        if (type(started) is not int or type(finished) is not int or type(exit_code) is not int
+                or not document["created_ns"] <= started <= finished <= time.time_ns()):
+            raise ValueError("执行时间或退出码无效")
+        if actual.get("runtime_context") != document["runtime_context"]:
+            raise ValueError("执行命令未在清单绑定的 runtime 中运行")
+        if exit_code != 0 and expected_command["kind"] != "test":
+            raise ValueError("Maven 命令失败")
+        if expected_command["kind"] == "toolchain":
+            version = actual.get("observed_maven_version")
+            if not isinstance(version, str) or not re.fullmatch(r"3\.9\.\d+(?:[-+].*)?", version):
+                raise ValueError("当前 Maven 版本不在支持的 3.9.x 范围")
+        if expected_command["kind"] == "test":
+            test_runs[expected_command["module"]] = actual
     root = Path(document["repo"])
     if snapshot(root) != document["source"]:
         raise ValueError("代码已变化，须重新生成清单并执行")
@@ -132,17 +204,11 @@ def report(document, execution):
     for artifact in document["artifacts"]:
         if jar_pair(artifact["built"], artifact["consumed"]) != artifact:
             raise ValueError("依赖 Jar 已变化，须重新验证")
-    runs = {}
-    for entry in execution["modules"]:
-        name = entry["module"]
-        if name in runs or name not in document["selected"]:
-            raise ValueError("执行模块重复或不在清单内")
-        runs[name] = entry
     results = []
     for name in document["selected"]:
         item = {"module": name, "status": "not_executed"}
-        if name in runs:
-            run = runs[name]
+        if name in test_runs:
+            run = test_runs[name]
             try:
                 started, finished = run["started_ns"], run["finished_ns"]
                 if (type(started) is not int or type(finished) is not int or type(run["exit_code"]) is not int
@@ -164,7 +230,8 @@ def report(document, execution):
     results.extend(dict(item, status="unsupported") for item in document["unavailable"])
     return {"plan_id": plan_id, "source": document["source"], "requested": document["requested"],
             "framework": document["framework"], "dependency_repositories": document["dependency_repositories"],
-            "artifacts": document["artifacts"],
+            "artifacts": document["artifacts"], "runtime_context": document["runtime_context"],
+            "maven_executable": document["maven_executable"], "observed_maven_version": version,
             "modules": results, "passed": bool(results) and all(r["status"] == "passed" for r in results),
             "boundary": "仅核对本轮模块测试、已声明依赖源码和 Jar 内容。Surefire 成功不自动证明集成覆盖；Agent 仍须核对构建事实、实际加载路径、无用例过滤及测试预期。"}
 
@@ -179,13 +246,16 @@ def main(argv=None):
     p.add_argument("--framework", choices=("failsafe", "surefire"), default="failsafe")
     p.add_argument("--dependency-repo", action="append", type=Path, default=[])
     p.add_argument("--jar-pair", action="append", nargs=2, default=[], metavar=("BUILT", "CONSUMED"))
+    p.add_argument("--runtime-context", type=Path, required=True)
+    p.add_argument("--maven-executable", required=True)
     p = commands.add_parser("report")
     p.add_argument("--plan", type=Path, required=True)
     p.add_argument("--execution", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "plan":
-            result = plan(args.repo, args.module, args.profile, args.framework, args.dependency_repo, args.jar_pair)
+            result = plan(args.repo, args.module, args.profile, args.framework, args.dependency_repo, args.jar_pair,
+                          json.loads(args.runtime_context.read_text()), args.maven_executable)
         else:
             result = report(json.loads(args.plan.read_text()), json.loads(args.execution.read_text()))
         print(json.dumps(result, ensure_ascii=False, indent=2))

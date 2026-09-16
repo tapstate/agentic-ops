@@ -18,6 +18,11 @@ class StationStateTests(unittest.TestCase):
         self.base = Path(self.temp.name)
         (self.base / ".agenticops").mkdir()
         store.initialize_current(self.base)
+        store._write_json_atomic(self.base / ".agenticops/workspace.json", {
+            "schema_version": 3, "product_root": str(ROOT), "workspace_id": "a" * 32,
+            "project": "tapdata", "agents": ["codex"],
+            "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"},
+        })
 
     def task(self):
         return {"issue_key": "TAP-123", "run_id": "run-abc12345", "outcome": "in_progress"}
@@ -51,11 +56,12 @@ class StationStateTests(unittest.TestCase):
             store.read_current(self.base)
 
     def test_operation_retries_keep_identity_and_intent(self):
-        op = operation.begin(self.base, "takeover", "op-12345678", 0, {"issue": "TAP-123"})
-        retry = operation.begin(self.base, "takeover", "op-12345678", 0, {"issue": "TAP-123"})
+        request = {"issue_key": "TAP-123"}
+        op = operation.begin(self.base, "takeover", "op-12345678", 0, request)
+        retry = operation.begin(self.base, "takeover", "op-12345678", 0, request)
         self.assertEqual(op, retry)
         with self.assertRaisesRegex(ValueError, "不同请求"):
-            operation.begin(self.base, "takeover", "op-12345678", 0, {"issue": "TAP-124"})
+            operation.begin(self.base, "takeover", "op-12345678", 0, {"issue_key": "TAP-124"})
         with self.assertRaisesRegex(ValueError, "未完成"):
             operation.begin(self.base, "takeover", "op-87654321", 0, {})
         operation.intent(self.base, op, "prepare", {"exists": False}, {"sha": "a" * 40})
