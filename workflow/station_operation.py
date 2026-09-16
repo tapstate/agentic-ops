@@ -4,7 +4,7 @@ from __future__ import annotations
 import copy
 import json
 import re
-import uuid
+from pathlib import Path
 
 from workflow import engineering_baseline, task_store
 
@@ -143,7 +143,11 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
     if kind == "takeover":
         if current["current"] is not None:
             raise ValueError("工位仍有当前任务，不能接管新任务")
-        run_id = "run-" + uuid.uuid4().hex
+        issue_key = task_store.validate_issue_key(request.get("issue_key"))
+        run_id = task_store.new_run_id(issue_key)
+        archive = Path(base).resolve() / "archive" / issue_key / run_id
+        if archive.exists() or archive.is_symlink():
+            raise ValueError("执行编号与既有档案冲突，请在下一秒重试接管")
     elif current["current"] is None or current["current"]["run_id"] != run_id:
         raise ValueError("工位 run 已变化")
     value = {

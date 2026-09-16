@@ -28,8 +28,10 @@ class ResourceTests(unittest.TestCase):
         task = self.takeover()
         self.name = 'tapdata/tapdata'
         self.repo = self.ws / 'source' / self.name
-        station.scope_change(self.ws, task['issue_key'], task['run_id'], task['_revision'], 'op-resource-scope', self.name, 'fix/resource', 'develop', ['file.txt', 'new.bin'], 'unit')
-        return task_store.read_task(self.ws)
+        station.scope_change(self.ws, task['issue_key'], task['run_id'], task['_revision'], 'op-resource-scope', self.name, None, 'develop', ['file.txt', 'new.bin'], 'unit')
+        task = task_store.read_task(self.ws)
+        self.branch = task['task_repositories'][self.name]['work_branch']
+        return task
 
     def reset_request(self, task):
         return dict(summary='保存成果并重置', reason='用户取消', decision_ref='fixture:user', confirmed_digest=resources.plan(self.ws, task)['digest'])
@@ -50,7 +52,7 @@ class ResourceTests(unittest.TestCase):
         self.assertEqual(list((self.ws/'runtime').iterdir()), [])
         self.assertIsNone(task_store.read_task(self.ws))
         self.assertEqual(self.git(self.repo, 'branch', '--show-current'), '')
-        self.assertEqual(self.git(self.repo, 'rev-parse', 'fix/resource'), task['reset_baseline'][self.name]['sha'])
+        self.assertEqual(self.git(self.repo, 'rev-parse', self.branch), task['reset_baseline'][self.name]['sha'])
 
     def test_runtime_child_is_lazy_and_rejects_links(self):
         task = self.ready()
@@ -194,14 +196,14 @@ class ResourceTests(unittest.TestCase):
 
     def test_retained_remote_branch_needs_no_network_and_no_delete(self):
         task = self.ready()
-        resources.register(self.ws,task['issue_key'],task['run_id'],[{'kind':'external','producer':'git','id':'github:branch:fix/resource','resource_type':'git-branch','action':'retain','status':'observed','before':{'repository':self.name,'ref':'refs/heads/fix/resource','sha':self.git(self.repo,'rev-parse','HEAD')}}])
+        resources.register(self.ws,task['issue_key'],task['run_id'],[{'kind':'external','producer':'git','id':'github:branch:'+self.branch,'resource_type':'git-branch','action':'retain','status':'observed','before':{'repository':self.name,'ref':'refs/heads/'+self.branch,'sha':self.git(self.repo,'rev-parse','HEAD')}}])
         request = self.reset_request(task)
         self.execute(task,request)
-        self.assertEqual(self.git(self.repo,'branch','--list','fix/resource').strip(),'fix/resource')
+        self.assertEqual(self.git(self.repo,'branch','--list',self.branch).strip(),self.branch)
 
     def test_unknown_remote_write_blocks_and_is_not_relabelled_retain(self):
         task = self.ready()
-        resources.register(self.ws,task['issue_key'],task['run_id'],[{'kind':'external','producer':'git','id':'github:branch:fix/resource','resource_type':'git-branch','status':'unknown','before':{'repository':self.name,'ref':'refs/heads/fix/resource','sha':self.git(self.repo,'rev-parse','HEAD')}}])
+        resources.register(self.ws,task['issue_key'],task['run_id'],[{'kind':'external','producer':'git','id':'github:branch:'+self.branch,'resource_type':'git-branch','status':'unknown','before':{'repository':self.name,'ref':'refs/heads/'+self.branch,'sha':self.git(self.repo,'rev-parse','HEAD')}}])
         with self.assertRaisesRegex(ValueError,'未知'):
             self.execute(task,self.reset_request(task))
         self.assertIsNotNone(task_store.read_task(self.ws))
@@ -265,7 +267,7 @@ class ResourceTests(unittest.TestCase):
         self.assertIsNone(task_store.read_task(self.ws))
         self.assertEqual(list((self.ws/'runtime').iterdir()),[])
         self.assertEqual(self.git(self.repo,'rev-parse',plan['source'][self.name]['preserved_ref']),head)
-        self.assertEqual(self.git(self.repo,'rev-parse','fix/resource'),head)
+        self.assertEqual(self.git(self.repo,'rev-parse',self.branch),head)
         self.assertEqual(self.git(self.repo,'rev-parse','HEAD'),task['reset_baseline'][self.name]['sha'])
 
     def test_clean_amend_after_neutral_keeps_original_source_commit(self):
@@ -309,7 +311,7 @@ class ResourceTests(unittest.TestCase):
         head = self.git(self.repo,'rev-parse','HEAD')
         self.execute(task,self.reset_request(task))
         self.assertEqual(self.git(self.repo,'rev-parse','HEAD'),baseline)
-        self.assertEqual(self.git(self.repo,'rev-parse','fix/resource'),head)
+        self.assertEqual(self.git(self.repo,'rev-parse',self.branch),head)
         refs = self.git(self.repo,'for-each-ref','--format=%(objectname)','refs/agenticops/archive/')
         self.assertIn(head,refs)
 
@@ -370,8 +372,8 @@ class ResourceTests(unittest.TestCase):
         task = self.ready()
         self.execute(task, self.reset_request(task))
         value = {'disposition_id':'disposition-test-12345678', 'phase':'intent',
-                 'resource_type':'git-branch', 'action':'delete', 'object_id':'origin/fix/resource',
-                 'decision_ref':'fixture:user', 'before':{'repository':self.name, 'ref':'refs/heads/fix/resource',
+                 'resource_type':'git-branch', 'action':'delete', 'object_id':'origin/'+self.branch,
+                 'decision_ref':'fixture:user', 'before':{'repository':self.name, 'ref':'refs/heads/'+self.branch,
                  'sha':task['reset_baseline'][self.name]['sha'], 'protected':False}}
         value['confirmed_digest'] = engineering_baseline.digest(value)
         def record(data):

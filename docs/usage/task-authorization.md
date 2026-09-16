@@ -20,11 +20,11 @@ operation-id 使用 op- 前缀的稳定随机标识；重试保持同值和原�
 ```sh
 python3 <agenticops-root>/workflow/task.py repository add \
   --issue-key TAP-123 --expected-run-id <run> --expected-revision <revision> \
-  --operation-id <op-id> --repo <owner/repo> --work-branch <工作分支> \
+  --operation-id <op-id> --repo <owner/repo> \
   --base-branch <PR目标分支> --scope <范围> --verification <验证方式> --dir <workspace>
 ```
 
-修改仓必须属于冻结工程；已有分支不能隐式复用。准入、snapshot、issue-versions 和 quality 仍按项目规则补齐。advance 带当前 expected-run-id 与 expected-stage，拒绝后先回读，不补造事实或自动更新参数重放。
+修改仓必须属于冻结工程；新工作分支由 `<git_name>/<run_id>` 自动生成，已有分支不能隐式复用。仅续办接管时保留既有分支并显式传入 `--work-branch`。准入、snapshot、issue-versions 和 quality 仍按项目规则补齐。advance 带当前 expected-run-id 与 expected-stage，拒绝后先回读，不补造事实或自动更新参数重放。
 
 ### 已有分支/PR 的两条处理路径
 

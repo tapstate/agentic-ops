@@ -10,6 +10,28 @@
     "product_root": { "type": "string", "minLength": 1 },
     "workspace_id": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
     "project": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "branch_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "git_name", "source"],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "git_name": {
+          "type": "string",
+          "minLength": 1,
+          "allOf": [
+            { "not": { "pattern": "^[-.]" } },
+            { "not": { "pattern": "^@$" } },
+            { "not": { "pattern": "\\.\\." } },
+            { "not": { "pattern": "@\\{" } },
+            { "not": { "pattern": "[\\s/~^:?*\\[\\\\\\u0000-\\u001f\\u007f]" } },
+            { "not": { "pattern": "\\.lock$" } },
+            { "not": { "pattern": "\\.$" } }
+          ]
+        },
+        "source": { "const": "git_global_user_name" }
+      }
+    },
     "agents": {
       "type": "array",
       "minItems": 1,

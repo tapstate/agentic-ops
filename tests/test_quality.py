@@ -946,7 +946,8 @@ class FeatureFlowTests(unittest.TestCase):
         task_store._write_json_atomic(catalog, doc)
         task_store._write_json_atomic(self.ws / ".agenticops/workspace.json", {
             "schema_version": 3, "product_root": str(self.product), "project": "tapdata",
-            "workspace_id": "3" * 32, "agents": ["codex"]})
+            "workspace_id": "3" * 32, "agents": ["codex"],
+            "branch_identity": {"schema_version": 1, "git_name": "Fixture", "source": "git_global_user_name"}})
         task_store.initialize_current(self.ws)
         initialize_workspace(self.ws)
         for name in ("source", "config", "runtime", "archive"):
@@ -1037,7 +1038,7 @@ class FeatureFlowTests(unittest.TestCase):
         self.cli("task.py", "snapshot", "--input", str(initial))
         self.cli("task.py", "advance", "--note", "fixture:已读 Analyzed 与负责人")
         self.cli("task.py", "advance", "--note", "缺项不能进入设计", expected=3)
-        self.cli("task.py", "repository", "add", "--repo", self.repo, "--work-branch", "feature/TAP-123",
+        self.cli("task.py", "repository", "add", "--repo", self.repo,
                  "--base-branch", "develop", "--scope", "feature.py", "--verification", "python -B verify.py")
         repo = self.read()["repositories"][0]
         worktree = Path(repo["worktree"]["path"])

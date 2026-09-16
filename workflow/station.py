@@ -203,11 +203,18 @@ def scope_change(base, issue, run_id, revision, operation_id, name, work_branch,
             if name in task.get("task_repositories", {}):
                 raise ValueError("仓库已经登记；不能覆盖本次修改与交付绑定")
         value = task["engineering_baseline"]
+        continuation = value["resolution_input"].get("continuations", {}).get(name)
+        if expected_head is None:
+            generated = task_store.generated_work_branch(base, task)
+            if work_branch is not None and work_branch != generated:
+                raise ValueError("新工作分支必须使用工作空间 git_name 与当前 run 生成")
+            work_branch = generated
+        elif work_branch is None:
+            raise ValueError("续办必须明确既有工作分支")
         item = baseline.task_repository(value, name, work_branch, target_branch, scope, verification)
         path = source.repository_path(base, name)
         source.identity(path, value["repositories"][name]["origin"])
         source.require_clean(path)
-        continuation = value["resolution_input"].get("continuations", {}).get(name)
         if expected_head is not None and (not continuation or continuation["expected_head"] != expected_head or continuation["work_branch"] != work_branch):
             raise ValueError("续办 Head 必须已在接管时绑定历史基线")
         if not previous or previous["operation_id"] != operation_id:
