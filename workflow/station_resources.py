@@ -450,9 +450,12 @@ def neutral(base, task, operation):
             raise ValueError("源码仍含未清理 ignored 产物")
         ref = entry["preserved_ref"]
         target = entry["neutral"]["sha"]
+        baseline_entry = task["engineering_baseline"]["repositories"][name]
+        checkout_branch = source.baseline_branch(baseline_entry)
         artifacts.verify_special_entries(path, target)
         preserved_head = entry["preserved_head"]
-        expected = {"head": target, "detached": True, "preserved_ref": ref, "preserved_head": preserved_head}
+        expected = {"head": target, "checkout_mode": "managed_branch" if checkout_branch else "detached",
+                    "checkout_branch": checkout_branch, "preserved_ref": ref, "preserved_head": preserved_head}
         step = operations.intent(base, operation, "neutral:" + name, {"head": preserved_head}, expected)
         head = source.git(path, "rev-parse", "HEAD").stdout.strip()
         if head not in (entry["head"], target):
@@ -462,9 +465,12 @@ def neutral(base, task, operation):
             raise ValueError("源码保留引用已存在且指向不同成果")
         if previous.returncode:
             source.git(path, "update-ref", ref, preserved_head, "0" * len(preserved_head))
-        if step["receipt"] is not None and (head != target or source.git(path, "branch", "--show-current").stdout.strip()):
+        if step["receipt"] is not None and (head != target or source.git(path, "branch", "--show-current").stdout.strip() != (checkout_branch or "")):
             raise ValueError("源码归位后被再次改变")
-        source.git(path, "-c", "submodule.recurse=false", "checkout", "--detach", target)
+        if checkout_branch:
+            source.git(path, "checkout", checkout_branch)
+        else:
+            source.git(path, "-c", "submodule.recurse=false", "checkout", "--detach", target)
         artifacts.verify_special_entries(path, target)
         operations.receipt(base, operation, "neutral:" + name, expected)
     for entry in plan["directories"]:
@@ -484,7 +490,8 @@ def delivery_head_matches(base, name, observed, expected_head, operation):
         return False
     expected = step["expected"]
     if (expected.get("preserved_head") != expected_head or expected.get("head") != observed["head"]
-            or observed.get("branch") or not expected.get("preserved_ref")):
+            or observed.get("branch") != (expected.get("checkout_branch") or "")
+            or not expected.get("preserved_ref")):
         return False
     actual = source.git(source.repository_path(base, name), "rev-parse", "--verify", expected["preserved_ref"], check=False)
     return actual.returncode == 0 and actual.stdout.strip() == expected_head

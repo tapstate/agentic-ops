@@ -96,6 +96,14 @@ def require_clean(path):
         raise ValueError("源码仓库存在未提交修改，拒绝覆盖：%s" % path)
 
 
+def baseline_branch(entry):
+    """真实分支基线以稳定、只由 AgenticOps 管理的本地分支呈现。"""
+    if entry.get("ref_kind") != "branch":
+        return None
+    reference = baseline.ref_name(entry["ref_name"])
+    return baseline.ref_name("agenticops/baseline/%s-%s" % (reference, entry["commit_sha"][:12]))
+
+
 def check_station_layout(station, catalog, selected):
     """仅检查工位源码边界；未知目录不被当作可回收产物。"""
     root = Path(station).resolve() / "source"
@@ -176,11 +184,14 @@ def checkout_baseline(station, value, operation):
         path = repository_path(station, name)
         identity(path, entry["origin"])
         step = "checkout:" + name
-        expected = {"sha": entry["commit_sha"], "detached": True}
+        branch = baseline_branch(entry)
+        expected = {"sha": entry["commit_sha"], "ref_kind": entry["ref_kind"],
+                    "ref_name": entry["ref_name"], "checkout_mode": "managed_branch" if branch else "detached",
+                    "checkout_branch": branch}
         recorded = operation["steps"].get(step)
         if recorded and recorded["receipt"] is not None:
             if (git(path, "rev-parse", "HEAD").stdout.strip() != entry["commit_sha"]
-                    or git(path, "branch", "--show-current").stdout.strip()):
+                    or git(path, "branch", "--show-current").stdout.strip() != (branch or "")):
                 raise ValueError("已完成的 checkout 发生漂移")
             require_clean(path)
             continue
@@ -188,10 +199,20 @@ def checkout_baseline(station, value, operation):
         clone = operation["steps"]["clone:" + name]
         if clone["before"]["exists"]:
             require_clean(path)
-        git(path, "checkout", "--detach", entry["commit_sha"])
+        if branch:
+            existing = git(path, "rev-parse", "--verify", "refs/heads/" + branch, check=False)
+            if existing.returncode == 0 and existing.stdout.strip() != entry["commit_sha"]:
+                raise ValueError("受管冻结基线分支已指向不同提交")
+            if existing.returncode:
+                git(path, "branch", branch, entry["commit_sha"])
+            git(path, "checkout", branch)
+        else:
+            git(path, "checkout", "--detach", entry["commit_sha"])
         require_clean(path)
         if git(path, "rev-parse", "HEAD").stdout.strip() != entry["commit_sha"]:
             raise ValueError("checkout 回读不一致")
+        if git(path, "branch", "--show-current").stdout.strip() != (branch or ""):
+            raise ValueError("checkout 分支回读不一致")
         operations.receipt(station, operation, step, expected)
 
 
@@ -229,7 +250,7 @@ def readiness_snapshot(station, task):
         entry = value["repositories"][name]
         binding = task["task_repositories"].get(name)
         if not binding:
-            if state["head"] != entry["commit_sha"] or state["branch"]:
+            if state["head"] != entry["commit_sha"] or state["branch"] != (baseline_branch(entry) or ""):
                 raise ValueError("配套仓偏离冻结基线：" + name)
             continue
         if state["branch"] != binding["work_branch"]:

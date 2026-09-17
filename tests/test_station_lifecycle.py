@@ -29,7 +29,7 @@ class StationTests(unittest.TestCase):
         for name in ("source", "config", "runtime", "archive"):
             (self.ws / name).mkdir()
         self.write(self.ws / ".agenticops/station.json", {"schema_version": 3, "product_root": str(self.product), "project": "tapdata", "station_id": "a" * 32, "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"}})
-        self.write(self.ws / ".agenticops/init.json", {"station_state_epoch": 6})
+        self.write(self.ws / ".agenticops/init.json", {"station_state_epoch": 7})
         task_store.initialize_current(self.ws)
 
     def prepare_engineering(self, count=1):

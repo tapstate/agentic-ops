@@ -38,8 +38,9 @@ def apply(base, task, operation):
             station_artifacts.verify_special_entries(repo, entry['neutral']['sha'])
             if station_source.git(repo, "ls-files", "--others", "--ignored", "--exclude-standard").stdout:
                 raise ValueError("源码复位后出现未清理 ignored 产物")
+            checkout_branch = station_source.baseline_branch(task["engineering_baseline"]["repositories"][name])
             if (station_source.git(repo, "rev-parse", "HEAD").stdout.strip() != entry["neutral"]["sha"]
-                    or station_source.git(repo, "branch", "--show-current").stdout.strip()
+                    or station_source.git(repo, "branch", "--show-current").stdout.strip() != (checkout_branch or "")
                     or station_source.git(repo, "rev-parse", entry["preserved_ref"]).stdout.strip() != entry["preserved_head"]):
                 raise ValueError("源码复位后 HEAD 已变化")
 

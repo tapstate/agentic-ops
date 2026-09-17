@@ -58,7 +58,7 @@ config 不随任务删除。任务专用有效配置写入 runtime，正式档�
 
 每个 run 只有一份冻结工程基线。条目至少包含 `repository_id/origin/ref_kind/ref_name/commit_sha/resolution_source/rule_version/path`。Profile 决定完整运行所需仓库，Project 的现役仓库目录仍是 origin 唯一来源。解析结果中的 current、展示回退、未核验或 unresolved 不能作为可执行基线。所有条目解析成功并核验 Git 对象后，一次固化全清单摘要；不能把部分准备冒充完整环境。
 
-首次接管从可信 origin 准备缺失仓库；已有仓库先核验路径、origin 和洁净度，再 fetch 明确引用并检出冻结 SHA，不改工位之外的主工作树。独立仓库保留任务分支和提交，释放时使用 detached HEAD 脱离旧分支，下一次接管才同步新版本。缺失或冲突不覆盖原仓库；只重试该操作能够证明归属的创建或同步步骤。
+首次接管从可信 origin 准备缺失仓库；已有仓库先核验路径、origin 和洁净度，再 fetch 明确引用并检出冻结 SHA，不改工位之外的主工作树。若冻结引用是 branch，则检出只由 AgenticOps 管理、名称含原引用与冻结 SHA 的本地基线分支；tag 和指定 commit 保持 detached。独立仓库保留任务分支和提交，释放时回到同一冻结呈现，下一次接管才同步新版本。缺失或冲突不覆盖原仓库；只重试该操作能够证明归属的创建或同步步骤。
 
 准备期间可只读分析，生成物只写已登记 runtime；未冻结完整清单前不能开始代码修改或签发完整工程验证结果。修改实施线需要显式终止并清理原 run 后新接管，不在同一 run 偷换基线。恢复已有 run 保留其 SHA；新 run 如需复用已有分支，必须显式提供历史基线与预期 Head，核验后将该历史基线作为该仓唯一基线，并披露与其它仓当前解析结果的差异；兼容性由实际工程验证证明，不能自动继承旧验收。
 
@@ -66,7 +66,7 @@ config 不随任务删除。任务专用有效配置写入 runtime，正式档�
 
 每项包含 `repository_id/baseline_entry_digest/work_branch/target_branch/approved_scope/verification_method/observation/deliveries/disposition`。不重复保存第二个可变基线 SHA。`observation` 记录实时 HEAD 与源码指纹；指纹涵盖 tracked 差异和未跟踪源码，不把生成物混入授权源码范围。基线、HEAD 和 PR Head 的含义不同。
 
-任务变更仓库可在源码修改前登记，最终可以无变更；工作分支只在声明范围内使用。配套仓默认 detached 在冻结 SHA，可产生声明的构建产物，不得把 detached 当文件系统只读保证。任何配套仓源码变化都必须先加入任务修改范围。
+任务变更仓库可在源码修改前登记，最终可以无变更；工作分支只在声明范围内使用。配套仓的 branch 基线显示为受管本地基线分支，tag/commit 基线保持 detached；两者都可产生声明的构建产物，不得把分支或 detached 当文件系统只读保证。任何配套仓源码变化都必须先加入任务修改范围。
 
 新增修改仓库使用内部 `scope_change` 操作，不增加用户操作种类：先核对冻结条目和洁净度，持久化意图，登记范围，准备工作分支，回读实际 branch/HEAD 后提交绑定。新分支固定为 `<git_name>/<run_id>`；`git_name` 在工位初始化时从全局 Git `user.name` 校验后一次性写入 `station.json`，缺失或不合法时由研发显式补充，后续不跟随机器配置改变。创建前若本地或远端同名分支存在则失败关闭。续办保留接管时核验的既有分支，不重命名。准备分支不等于授权修改代码；现有实现授权如因范围变化失效，先撤销，再重新确认和签发，不能在失败中保留旧授权。原有仓库的授权修改不能因新增仓库被擦除。中断按同一意图恢复。
 
@@ -133,7 +133,7 @@ export 必须写到本次清理范围以外的受控位置，实际内容、源�
 
 ### 8.2 开发基线与分支
 
-接管时按 Project 每仓 dev_branch 解析已下载开发引用，保存完整 SHA、引用来源、观察时间及配方版本，独立于任务冻结基线。重置只使用已确认且本地存在的 SHA，detached checkout，不移动命名开发分支或任务分支，不执行 rebase、reset、stash 或网络 fetch。任务 Head 通过计划中明确展示的 refs/agenticops/archive/<run>/<repository-digest> 保留；此引用不自动删除。下次接管重新刷新、核验目标开发基线。
+接管时按 Project 每仓 dev_branch 解析已下载开发引用，保存完整 SHA、引用来源、观察时间及配方版本，独立于任务冻结基线。重置只使用已确认且本地存在的 SHA：branch 基线回到同一受管本地基线分支，tag/commit 回到 detached，不移动命名开发分支或任务分支，不执行 rebase、reset、stash 或网络 fetch。任务 Head 通过计划中明确展示的 refs/agenticops/archive/<run>/<repository-digest> 保留；此引用不自动删除。下次接管重新刷新、核验目标开发基线。
 
 没有有效归位 SHA 的已检出仓库停止；未完成 takeover 中有可信创建事实但尚未 checkout 的 .git-only 仓库可保留并标为待准备，沿同一 handoff_clean 恢复。未选中的已登记持久仓库保留，核验身份、无写入者及接管前后状态；source 中未知对象阻止空闲，不当作生成物删除。
 

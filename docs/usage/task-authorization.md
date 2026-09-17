@@ -155,7 +155,7 @@ python3 <agenticops-root>/workflow/task.py cleanup-preflight --issue-key <issue>
 python3 <agenticops-root>/workflow/task.py clean --issue-key <issue> --expected-run-id <run> --expected-revision <revision> --operation-id <op-id> --input <工位外请求.json> --dir <station>
 ```
 
-请求包含 summary、reason、真实 decision_ref 和 cleanup_plan.digest 对应的 confirmed_digest。默认源码归档，显式丢弃还需 discard_digest；完成任务改用 release 并提供 candidate_digest。Agent 先按原生能力停止写入者再执行，Workflow 检查并按同一操作归档及重置，无需归档后二次确认。归位结果为已确认开发 SHA 的 detached HEAD，分支未移动；下次接管联网刷新。
+请求包含 summary、reason、真实 decision_ref 和 cleanup_plan.digest 对应的 confirmed_digest。默认源码归档，显式丢弃还需 discard_digest；完成任务改用 release 并提供 candidate_digest。Agent 先按原生能力停止写入者再执行，Workflow 检查并按同一操作归档及重置，无需归档后二次确认。归位结果保持冻结引用语义：branch 回到受管本地基线分支，tag/commit 回到 detached；命名开发分支和任务分支不移动，下次接管才联网刷新。
 
 需要保留敏感或超过普通归档上限的源码时，先在工位外创建当前用户私有的导出目录（0700），再运行 `python3 <agenticops-root>/workflow/station_export.py --dir <station> --issue-key <issue> --expected-run-id <run> --path source/<owner>/<repo>/<file> --output <绝对导出文件路径>`。工具独占写出 0600 文件、重建核验并回读登记 export 决定；不覆盖已有不同内容，输出仅含路径和摘要。单成果原始内容上限 512 MiB，编码后上限 768 MiB。失败退出操作中的导出另带原 expected-operation-id，随后按新范围补充确认；正式归档后的导出意图和回执进入 archive/receipts。
 

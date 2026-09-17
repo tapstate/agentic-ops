@@ -84,7 +84,7 @@ def main():
             "schema_version": 3, "station_id": "a" * 32, "product_root": str(ROOT),
             "project": "tapdata", "agents": ["codex"]})
         task_store._write_json_atomic(ws / ".agenticops/init.json", {
-            "station_state_epoch": 6})
+            "station_state_epoch": 7})
         state = {"issue_key": "TAP-123", "run_id": "run-workflow-test", "task_class": "defect_fix",
             "stage": "task_intake", "facts": {"acceptance_criteria": "fixture",
             "target_repo": "tapdata/tapdata", "verification_method": "fixture"},

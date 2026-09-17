@@ -59,7 +59,7 @@ class SourceFixture:
         task_store._write_json_atomic(self.ws / ".agenticops/station.json", {
             "schema_version": 3, "product_root": str(self.root / "product"), "project": "tapdata", "station_id": "a" * 32,
             "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"}})
-        task_store._write_json_atomic(self.ws / ".agenticops/init.json", {"station_state_epoch": 6})
+        task_store._write_json_atomic(self.ws / ".agenticops/init.json", {"station_state_epoch": 7})
         self.seed = self.root / "seed"
         self.seed.mkdir()
         self.git(self.seed, "init", "-b", "develop")
@@ -88,6 +88,32 @@ class SourceFixture:
 
 
 class SourceTests(SourceFixture, unittest.TestCase):
+    def test_branch_baseline_uses_managed_branch_but_tag_and_commit_detach(self):
+        from workflow import engineering_baseline as baseline
+        self.prepare()
+        branch = {"verification": "verified", "ref_kind": "branch", "ref_name": "develop", "commit_sha": self.sha,
+                  "resolution_source": "fixture", "rule_version": "1"}
+        value = baseline.freeze({"id": "test", "revision": 1, "repositories": [self.name]}, self.catalog,
+                                {self.name: branch}, {"fixture": True})
+        branch = value["repositories"][self.name]
+        source.checkout_baseline(self.ws, value, self.op)
+        expected = source.baseline_branch(branch)
+        self.assertEqual(self.git(self.repo, "branch", "--show-current"), expected)
+        self.assertEqual(self.git(self.repo, "rev-parse", "HEAD"), self.sha)
+        source.checkout_baseline(self.ws, value, self.op)
+        tag = dict(branch, ref_kind="tag", ref_name="v1")
+        self.op["steps"].pop("checkout:" + self.name)
+        tag_value = baseline.freeze({"id": "test", "revision": 1, "repositories": [self.name]}, self.catalog,
+                                    {self.name: dict(tag, verification="verified")}, {"fixture": True})
+        source.checkout_baseline(self.ws, tag_value, self.op)
+        self.assertEqual(self.git(self.repo, "branch", "--show-current"), "")
+        commit = dict(branch, ref_kind="commit", ref_name=self.sha)
+        self.op["steps"].pop("checkout:" + self.name)
+        commit_value = baseline.freeze({"id": "test", "revision": 1, "repositories": [self.name]}, self.catalog,
+                                       {self.name: dict(commit, verification="verified")}, {"fixture": True})
+        source.checkout_baseline(self.ws, commit_value, self.op)
+        self.assertEqual(self.git(self.repo, "branch", "--show-current"), "")
+
     def test_readiness_failure_revokes_old_observation_without_changing_source(self):
         from workflow import engineering_baseline as baseline
         import json
