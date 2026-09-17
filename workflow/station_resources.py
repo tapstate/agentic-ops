@@ -133,15 +133,30 @@ def verify_active(base, cleanup_plan, operation):
         raise ValueError("活动材料变化，需要重新确认清理计划")
 
 
-def verify_workspace_inventory(base):
-    """初始化接线与四类材料之外的对象保留并阻止复用，不猜测其所有权。"""
+def verify_workspace_inventory(base, rules=None, allow_pending=False):
+    """保留工位根 IDE 配置；其它未知对象阻止复用，不猜测其所有权。"""
     root = Path(base).resolve()
     state = store.state_path(base)
     init = json.loads((state / "init.json").read_text())
     owned = {entry["path"]: entry for entry in init.get("artifacts", [])}
+    from workflow import workspace_clean_rules
+    task = store.read_task(base)
+    registered = directories.load(base, task) if task else {}
+    # 版本 3 的恢复保留原库存语义，不读取后续版本的配置。
+    observed = workspace_clean_rules.inspect(base, owned, registered) if rules is not None else {"objects": {}}
+    if rules is not None and observed["digests"] != rules["digests"]:
+        raise ValueError("清理配置已变化，需要重新确认")
     def inspect(directory, prefix=""):
         for path in directory.iterdir():
             relative = prefix + path.name
+            if rules is None and not prefix and relative == ".idea":
+                if path.is_symlink() or not path.is_dir():
+                    raise ValueError("保留目录不是普通文件或目录：" + relative)
+                continue
+            if not prefix and allow_pending and relative in registered and observed["objects"].get(relative, {}).get("action") == "remove":
+                continue
+            if not prefix and relative in observed["objects"] and observed["objects"][relative]["action"] == "preserve":
+                continue
             if not prefix and path.name in ("config", "source", "runtime", "archive", ".agenticops"):
                 if path.is_symlink() or not path.is_dir():
                     raise ValueError("工位持久目录异常：" + relative)
@@ -203,9 +218,15 @@ def preflight(base, task):
 
 
 def plan(base, task, version=None, decisions_override=None):
-    if version not in (None, 3):
+    if version is None:
+        current_operation = operations.read(base) or {}
+        version = (current_operation.get("cleanup_plan", {}).get("schema_version", 3)
+                   if current_operation.get("run_id") == task["run_id"] and current_operation.get("status") != "done" else 3)
+    if version not in (None, 3, 4):
         raise ValueError("旧清理合同必须由原版本退出，不在线迁移")
     roots = directories.load(base, task)
+    if version != 4 and any(e["kind"] == "workspace-generated" for e in roots.values()):
+        raise ValueError("工位附属目录需要 workspace-clean 版本 4 计划")
     if "runtime" not in roots:
         operation = operations.read(base) or {}
         original = operation.get("previous_operation", operation)
@@ -243,7 +264,7 @@ def plan(base, task, version=None, decisions_override=None):
         target = task.get("reset_baseline", {}).get(name)
         if not target or source.git(repository, "cat-file", "-t", target["sha"]).stdout.strip() != "commit":
             raise ValueError("缺少已核验开发基线，拒绝猜测源码归位")
-        state = artifacts.snapshot(base, name, roots, decisions)
+        state = artifacts.snapshot(base, name, roots, decisions, target["sha"])
         for entry in state.pop("entries"):
             if name not in task.get("task_repositories", {}):
                 raise ValueError("配套仓存在未登记源码修改：%s" % entry["path"])
@@ -273,10 +294,24 @@ def plan(base, task, version=None, decisions_override=None):
              "entries": entries, "source": states, "external": external,
              "active_state": {"files": active_files(base), "unbind_run": task["run_id"], "task_digest": task_fingerprint(task)},
              "retained": ["config", "source repositories and refs", "archive", ".agenticops binding and operation"]}
+    if version == 4:
+        from workflow import workspace_clean_rules
+        init = json.loads((store.state_path(base) / "init.json").read_text())
+        value["rules"] = workspace_clean_rules.inspect(base, [e["path"] for e in init.get("artifacts", [])], roots)
+        for entry in value["directories"]:
+            if entry["kind"] == "workspace-generated" and value["rules"]["objects"].get(entry["path"], {}).get("action", "remove") != "remove":
+                raise ValueError("保留名单与登记目录回收冲突：" + entry["path"])
+        value["schema_version"] = 4
+        verify_workspace_inventory(base, value["rules"], allow_pending=True)
+        for entry in value["directories"]:
+            if entry["kind"] == "source-generated" and directories.path_at(base, entry["path"]).exists():
+                raise ValueError("源码构建产物尚未清理，请使用项目原生工具：" + entry["path"])
     # 内部证据/回执不属于删除授权范围；源码成果、目录归属、开发目标才属于。
     value["digest"] = baseline.digest(value)
     from workflow import quality_contract
     quality_contract.validate(value, "station-reset.schema.json")
+    from workflow.workspace_clean_rules import validate_snapshot
+    validate_snapshot(value)
     return value
 
 
@@ -286,9 +321,9 @@ def verify_known_external(base, task):
         raise ValueError("当前 run 有外部写入结果未知，须回读原操作；不能改 retain 绕过")
 
 
-def clean(base, task, cleanup_plan, confirmed_digest, operation):
+def clean(base, task, cleanup_plan, confirmed_digest, operation, source_only=False, directories_only=False):
     payload = {key: value for key, value in cleanup_plan.items() if key != "digest"}
-    if (cleanup_plan.get("schema_version") != 3 or cleanup_plan.get("run_id") != task["run_id"]
+    if (cleanup_plan.get("schema_version") not in (3, 4) or cleanup_plan.get("run_id") != task["run_id"]
             or baseline.digest(payload) != confirmed_digest or cleanup_plan.get("digest") != confirmed_digest):
         raise ValueError("清理确认与当前 run 或精确清单不匹配")
     if not task.get("archive_ref"):
@@ -313,6 +348,8 @@ def clean(base, task, cleanup_plan, confirmed_digest, operation):
     station_logs.verify_current(base, task, cleanup_plan)
     grouped = {}
     for entry in cleanup_plan["entries"]:
+        if directories_only:
+            break
         grouped.setdefault(entry["repository"], []).append(entry)
     for repository_name, entries in grouped.items():
         repository = source.repository_path(base, repository_name)
@@ -359,7 +396,11 @@ def clean(base, task, cleanup_plan, confirmed_digest, operation):
             else:
                 raise ValueError("未知清理动作")
         operations.receipt(base, operation, name, expected)
+    if source_only:
+        return
     for entry in cleanup_plan["directories"]:
+        if cleanup_plan["schema_version"] == 4 and entry["kind"] == "source-generated" and directories.path_at(base, entry["path"]).exists():
+            raise ValueError("源码构建产物重新出现，禁止通用删除：" + entry["path"])
         if entry["kind"] == "source-generated":
             parts = entry["path"].split("/")
             if source.git(source.repository_path(base, "/".join(parts[1:3])), "ls-files", "-z", "--", "/".join(parts[3:])).stdout:
@@ -409,6 +450,7 @@ def neutral(base, task, operation):
             raise ValueError("源码仍含未清理 ignored 产物")
         ref = entry["preserved_ref"]
         target = entry["neutral"]["sha"]
+        artifacts.verify_special_entries(path, target)
         preserved_head = entry["preserved_head"]
         expected = {"head": target, "detached": True, "preserved_ref": ref, "preserved_head": preserved_head}
         step = operations.intent(base, operation, "neutral:" + name, {"head": preserved_head}, expected)
@@ -422,9 +464,12 @@ def neutral(base, task, operation):
             source.git(path, "update-ref", ref, preserved_head, "0" * len(preserved_head))
         if step["receipt"] is not None and (head != target or source.git(path, "branch", "--show-current").stdout.strip()):
             raise ValueError("源码归位后被再次改变")
-        source.git(path, "checkout", "--detach", target)
+        source.git(path, "-c", "submodule.recurse=false", "checkout", "--detach", target)
+        artifacts.verify_special_entries(path, target)
         operations.receipt(base, operation, "neutral:" + name, expected)
     for entry in plan["directories"]:
+        if plan["schema_version"] == 4 and entry["kind"] != "source-generated":
+            continue
         path = directories.validate(base, entry, missing=True)
         if path.exists() and (entry["disposition"] == "delete_root" or any(path.iterdir())):
             raise ValueError("归位后运行产物再次出现")

@@ -11,6 +11,8 @@ usage() {
   internal/acceptance.sh full                # 四项诊断，不生成门禁证据
   internal/acceptance.sh full --change-source staged
   internal/acceptance.sh full --change-source range --base <base> --head <head>
+  internal/acceptance.sh affected --change-source worktree|staged
+  internal/acceptance.sh affected --change-source range --base <base> --head <head>
   internal/acceptance.sh <检查项>...          # 按需组合
   internal/acceptance.sh --list
 
@@ -36,6 +38,24 @@ if [ "${1:-}" = "full" ] && [ "${2:-}" = "--change-source" ]; then
   case "${3:-}" in staged|range) ;; *) usage >&2; exit 2;; esac
   shift
   exec "$repo_root/internal/bin/story-gate" --source-root "$repo_root" verify "$@" --progress
+fi
+
+# affected 只用于开发诊断：选择器自身失败关闭，且不产生 Story Gate 正式验收证据。
+if [ "${1:-}" = "affected" ]; then
+  [ "${2:-}" = "--change-source" ] || { usage >&2; exit 2; }
+  source="${3:-}"
+  shift 3
+  case "$source" in worktree|staged|range) ;; *) usage >&2; exit 2;; esac
+  selector=(python3 "$repo_root/internal/test_selection.py" --root "$repo_root" --source "$source" --run)
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --base|--head)
+        [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+        selector+=("$1" "$2"); shift 2 ;;
+      *) usage >&2; exit 2 ;;
+    esac
+  done
+  exec "${selector[@]}"
 fi
 
 add_check() {

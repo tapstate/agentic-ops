@@ -62,7 +62,9 @@
       "update-branch": "update_pr"
     },
     "workflow_modules": {
-      "workflow.task": "task.py"
+      "workflow.task": "task.py",
+      "workflow.workspace-clean": "workspace-clean.py",
+      "workflow.workspace-source-reset": "workspace-source-reset.py"
     }
   },
   "mappings": {

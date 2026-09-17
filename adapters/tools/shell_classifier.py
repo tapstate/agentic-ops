@@ -135,7 +135,7 @@ def _workflow(tokens):
     if index >= len(tokens):
         return [], {}
     normalized = tokens[index].replace("\\", "/")
-    script = next((name for name in ("task.py",)
+    script = next((name for name in ("task.py", "workspace-clean.py", "workspace-source-reset.py")
                    if normalized == "workflow/" + name or normalized.endswith("/workflow/" + name)), None)
     if executor == "python" and not script:
         return [], {}
@@ -145,9 +145,11 @@ def _workflow(tokens):
 def _workflow_action(script, arguments):
     if not script or any(item in ("-h", "--help") for item in arguments):
         return [], {}
-    if arguments and arguments[0] in ("takeover", "archive", "release", "clean", "cleanup-amend"):
+    if script in ("workspace-clean.py", "workspace-source-reset.py"):
         operation = "manage_station"
-    elif arguments[:2] == ["repository", "add"]:
+    elif arguments and arguments[0] in ("takeover", "archive", "release", "clean", "cleanup-amend"):
+        operation = "manage_station"
+    elif len(arguments) >= 2 and arguments[0] == "repository" and arguments[1] in ("add", "amend"):
         operation = "scope_change"
     else:
         operation = None

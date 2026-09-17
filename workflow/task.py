@@ -167,6 +167,15 @@ def cmd_repository_add(args):
     return 0
 
 
+def cmd_repository_amend(args):
+    from workflow import station
+    issue = task_store.resolve_issue(args.dir, args.issue_key)
+    print(json.dumps(station.amend_scope(args.dir, issue, args.expected_run_id,
+        args.expected_revision, args.operation_id, args.repo, args.expected_binding_digest,
+        args.expected_head, [args.scope], args.verification, args.decision_ref), ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_repository_list(args):
     print(json.dumps(load(args.dir, args.issue_key)["task_repositories"], ensure_ascii=False, indent=2))
     return 0
@@ -888,6 +897,18 @@ def main():
     add.add_argument("--verification", required=True)
     add.add_argument("--dir", default=".")
     add.set_defaults(func=cmd_repository_add)
+    amend = repository_sub.add_parser("amend")
+    amend.add_argument("--issue-key")
+    amend.add_argument("--repo", required=True)
+    amend.add_argument("--operation-id", required=True)
+    amend.add_argument("--expected-revision", required=True, type=int)
+    amend.add_argument("--expected-binding-digest", required=True)
+    amend.add_argument("--expected-head", required=True)
+    amend.add_argument("--scope", required=True)
+    amend.add_argument("--verification", required=True)
+    amend.add_argument("--decision-ref", required=True)
+    amend.add_argument("--dir", default=".")
+    amend.set_defaults(func=cmd_repository_amend)
     listing = repository_sub.add_parser("list")
     listing.add_argument("--issue-key")
     listing.add_argument("--dir", default=".")
@@ -939,7 +960,7 @@ def main():
 
     for command in ("record", "advance", "block"):
         sub.choices[command].add_argument("--expected-run-id", required=True)
-    for command in ("add", "record-result"):
+    for command in ("add", "amend", "record-result"):
         repository_sub.choices[command].add_argument("--expected-run-id", required=True)
     args = parser.parse_args()
     try:

@@ -33,6 +33,14 @@ def versions(ctx):
     return {name: repo.get("live_revision") for name, repo in ctx["repositories"].items()}
 
 
+def bindings(ctx):
+    from workflow import quality
+    keys = ("repository", "base_branch", "work_branch", "base_sha", "catalog_digest",
+            "approved_scope", "verification_method")
+    return quality.digest({name: {key: repo.get(key) for key in keys}
+                           for name, repo in ctx["repositories"].items()})
+
+
 def verify_artifacts(p):
     if p.get("kind") == "local":
         for jar in p.get("jars", []):
@@ -171,7 +179,7 @@ def validate(p, ctx):
 
 def record(model, p, ctx):
     validate(p, ctx)
-    value = {"data": copy.deepcopy(p), "versions": versions(ctx)}
+    value = {"data": copy.deepcopy(p), "versions": versions(ctx), "bindings": bindings(ctx)}
     if p["kind"] == "ci":
         value["ci_digest"] = ctx["repositories"][p["repository"]].get("ci_digest")
     model.setdefault("verification", {}).setdefault(p["repository"], {})[p["kind"]] = value
@@ -189,7 +197,8 @@ def problems(model, ctx, kinds):
             if not entry:
                 result.append("%s 缺少 %s 验证材料" % (repo, kind))
                 continue
-            if entry["versions"] != versions(ctx) or (kind == "ci" and entry.get("ci_digest") != ctx["repositories"][repo].get("ci_digest")):
+            if (entry["versions"] != versions(ctx) or entry.get("bindings") != bindings(ctx)
+                    or (kind == "ci" and entry.get("ci_digest") != ctx["repositories"][repo].get("ci_digest"))):
                 result.append("%s 的 %s 材料已失效，重新核对当前版本" % (repo, kind))
                 continue
             p = entry["data"]

@@ -230,9 +230,14 @@ class ContractConformanceTest(unittest.TestCase):
         self.assertTrue(shell_operations <= requestable)
 
     def test_repository_tool_classification_preserves_control_boundary(self):
+        for script in ("workspace-clean", "workspace-source-reset"):
+            for command in ("workflow/%s.py" % script, "python3 -B workflow/%s.py" % script, "python3 -m workflow.%s" % script):
+                self.assertEqual(["manage_station"], classify_bash(command + " --dir /tmp/ws --issue-key TAP-123"))
+                self.assertEqual([], classify_bash(command + " --help"))
         for action in ("takeover", "archive", "release", "clean", "cleanup-amend"):
             self.assertEqual(["manage_station"], classify_bash("python3 -m workflow.task %s --issue-key TAP-123" % action))
         self.assertEqual(["scope_change"], classify_bash("workflow/task.py repository add --repo owner/repo --issue-key TAP-123"))
+        self.assertEqual(["scope_change"], classify_bash("workflow/task.py repository amend --repo owner/repo --issue-key TAP-123"))
         self.assertEqual([], classify_bash("workflow/task.py record --key note --value archive --issue-key TAP-123"))
         self.assertEqual([], classify_bash("workflow/task.py repository prepare --issue-key TAP-123"))
         self.assertEqual([], classify_bash("python3 -m workflow.repository_worktree prepare --issue-key TAP-123"))

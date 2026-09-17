@@ -26,6 +26,25 @@ python3 <agenticops-root>/workflow/task.py repository add \
 
 修改仓必须属于冻结工程；新工作分支由 `<git_name>/<run_id>` 自动生成，已有分支不能隐式复用。仅续办接管时保留既有分支并显式传入 `--work-branch`。准入、snapshot、issue-versions 和 quality 仍按项目规则补齐。advance 带当前 expected-run-id 与 expected-stage，拒绝后先回读，不补造事实或自动更新参数重放。
 
+### 设计前修订已登记范围
+
+当前任务处于 `task_intake` 或 `design_review`、源码干净且尚无交付或 PR/CI 观察时，可在用户确认后修订同仓同分支的范围和验证方式：
+
+```sh
+python3 <agenticops-root>/workflow/task.py repository amend \
+  --issue-key <issue> --expected-run-id <run> --expected-revision <revision> \
+  --operation-id <op-id> --repo <owner/repo> \
+  --expected-binding-digest <原绑定摘要> --expected-head <完整Head> \
+  --scope <新范围> --verification <新验证方式> \
+  --decision-ref <真实确认来源> --dir <workspace>
+```
+
+原绑定取 `repository context` 的 `task_repositories[repo]`，摘要按 `workflow.engineering_baseline.digest` 计算。命令核验 origin、工作分支、Head、原绑定和 revision，不创建或切换分支，不重建基线，不覆盖观察、交付或失败历史。变更前撤销原授权；新范围使旧 Q1/Q2、发布确认和共同验证材料失效，即使代码 SHA 未变也须重新核对。之后按已确认的新方案重新记录质量检查点和授权，不将范围修订本身视作实施授权。
+
+中断后保持原 operation-id、revision、摘要、Head 和请求恢复；任务绑定已写入时只补回读和回执，不重复写任务。不同请求不得复用 operation-id。开发后期或有交付证据时拒绝，不能手改阶段或状态绕过。
+
+这是 epoch 4 内的兼容扩展：任务绑定和质量事件格式保持不变，沿用 `scope_change` 操作种类；旧验证事件用事件时保存的 context 重放并计算绑定摘要，不迁移或改写旧日志。
+
 ### 已有分支/PR 的两条处理路径
 
 同 run 恢复保留基线；目标分支推进不代表要重接。新 run 续办需要 takeover --continuation-input <json>，以 repository ID 为键给出 work_branch、baseline_sha、expected_head。历史基线和候选均为真实完整 commit SHA，分支与预期 Head 必须匹配；不是把最新目标当旧分支起点。登记此修改仓时另用 --expected-head 核验续办分支。
@@ -103,7 +122,31 @@ Agent 原生读取这三组差异，核对原任务目的是否仍满足、来�
 
 ## 重置工位
 
-重置保留 config、完整 source 和 archive，清空 runtime，按 Project 配方回收已登记源码生成目录。边界、源码 archive/export/discard 与中断恢复以[工位合同](../architecture/single-task-station.md#8-一次确认成果归档与恢复)为准。
+### 配置化清理入口
+
+`python3 <agenticops-root>/workflow/workspace-clean.py --dir <workspace>` 只读展示当前任务与版本 4 清理计划；未完成任务返回放弃变更问题，不在脚本内部猜测确认或阻塞等待终端输入。预检阻塞仍返回任务与问题，但不提供可执行计划。新清理尚未开始时 `--abandon-changes no` 无副作用退出；已有未完成清理操作时返回恢复提示，不声称撤销此前动作。工位空闲且没有未完成操作时不删除材料。
+
+中央 `policies/workspace-clean.json` 必须存在，项目 `projects/<project>/workspace-clean.json` 可省略。两份配置均为 `{"version":1,"preserve":[".idea/"],"clean":[{"pattern":"scratch/","action":"remove"}]}` 的结构，独立读取，按中央白、项目白、中央黑、项目黑顺序判定；全部未匹配时保留并报告，不配置 `other` 或 `unmatched_policy`。模式仅匹配工位根名称，支持 `*`、`?` 和目录后缀 `/`，不支持前导 `/`、深层路径、`**`、否定或方括号语法。源代码子树由 Git 阶段检查，不由名单递归匹配。
+
+黑名单动作限定为 `source-reset`、`clear-children`、`lifecycle-clean` 和 `remove`；前三项分别只适用于 source、runtime、.agenticops。中央默认保留 config、archive、.idea，项目不能通过白名单跳过核心生命周期。初始化接线仍按原 manifest 核验。`remove` 只用于任务独占的普通根目录，生产前使用现有 `station_resources.py` 登记 `kind=directory`、根名称和 producer；Workflow 创建并登记身份。名单不能认领已有非空目录、初始化接线或任意文件，已有空目录采用仍须 `adopt_empty=true`。需要删除其它对象时停止并明确处置，不把规则匹配当成删除授权。
+
+确认请求放在工位外，包含现有 summary、reason、decision_ref、confirmed_digest，另加 `cleanup_version:4`。未完成任务请求增加 `abandon_changes:true`，并使用下列命令明确传递用户的放弃决定；完成任务不需要放弃参数，但仍须现役 terminal proof 和 candidate_digest。归档保留成果，放弃不删除 Git 分支或提交。
+
+```sh
+python3 <agenticops-root>/workflow/workspace-clean.py --dir <workspace> --issue-key <issue> --expected-run-id <run> --expected-revision <revision> --operation-id <op-id> --input <工位外请求.json> --abandon-changes yes
+```
+
+源码构建目录仍存在时预检停止，Agent 使用项目已有 Maven/npm/pnpm 命令清理，再重新预检；产品不执行这些命令，也不提供目录删除兜底。源目录被外部工具移除时保留原登记，计划观测实际缺失；父目录身份改变或确认后才缺失按现有恢复规则停止。
+
+中断后沿用原 operation-id、原 expected-revision 和原请求恢复；不得改用当前 revision 或另建操作。`workspace-source-reset.py` 是同一版本 4 操作的独立 Git 阶段入口，要求已发布且覆盖当前成果的档案，以及当前 issue/run/revision/operation-id，不得单独用于未归档源码。正常清理由入口调用同一实现，无需手工追加执行一次。
+
+工位根目录的 `.idea/` 属于 IntelliJ IDEA 配置，由中央白名单统一保留，不遍历、归档或删除其内容。目录模式不匹配同名文件，符号链接按通用安全规则拒绝。白名单可以覆盖同层宽泛黑名单；不同清理动作同时命中同层对象才是冲突。新持久计划与目录类型对应 epoch 5，升级边界见[更新与回退](update-and-rollback.md)。
+
+未初始化子模块只在索引、当前提交与归位提交的 gitlink 路径和对象完全一致，且路径不存在或为空目录时保留。清理前和归位时均核验，不递归检出子模块；含内容、符号链接、gitlink 变更或冲突时仍停止。此边界不改变工作空间状态格式或 epoch，也不授权删除子模块内容。
+
+### 原清理操作的恢复
+
+已有 schema 3 操作保留原请求和执行顺序：保留 config、完整 source 和 archive，清空 runtime，按原 Project 配方回收已登记源码生成目录。不得将正在执行的旧计划改成 schema 4；新操作使用上面的配置化入口。边界、源码 archive/export/discard 与中断恢复以[工位合同](../architecture/single-task-station.md#8-一次确认成果归档与恢复)为准。
 
 构建前将日志、插件、下载和可迁出的生成物定位到 runtime；不能迁出的生成目录先用 station_resources.py 创建：输入数组项为 `{"kind":"directory","path":"source/tapdata/tapdata/target","producer":"maven"}`，已有空目录的显式采用另加 `"adopt_empty":true`。目录非空时不能补登记猜归属；源码生成路径必须符合工程 Profile 的 generated_directories。
 
@@ -120,4 +163,4 @@ python3 <agenticops-root>/workflow/task.py clean --issue-key <issue> --expected-
 
 关键日志与报告集中到 runtime/logs、runtime/reports（由 Project 的 archive_runtime 指定），归档保留脱敏后的 UTF-8 正文；停止期间新增内容以不可变附件追加后再删除。单文件超过 16 MiB、总量超过 64 MiB 或非文本材料须先安全导出并留下摘要，不能静默丢弃。
 
-重置失败保持占用；恢复原操作和原请求。范围变化使用 cleanup-amend 绑定原计划摘要及修订号，源码新增成果须明确处理。epoch 3 工位先由原版本归档、退出、purge，本版不在线接续旧操作。
+重置失败保持占用；恢复原操作和原请求。范围变化使用 cleanup-amend 绑定原计划摘要及修订号，源码新增成果须明确处理。epoch 4 及更早工位先由原版本归档、退出、purge，本版不在线接续旧代际操作。
