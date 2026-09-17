@@ -26,7 +26,7 @@ Agent → Workflow 状态变更入口 → 持锁校验 → 状态与证据
 | Project | `projects/<project>/` | Jira、分支、准入、验证和 Runbook |
 | Adapter | `adapters/` | Agent/工具协议的无状态转换 |
 | Bootstrap | `bootstrap/` | 源码目录、产品根目录（Product Root）与工位生命周期 |
-| Maintenance Skill | `skills/` | 仅维护面使用的流程验证与协作指引；不属于任何业务项目，也不安装或接线到业务工位 |
+| Maintenance Skill | `skills/` | 仅产品维护使用的流程验证与协作指引；不属于任何业务项目，也不安装或接线到业务工位 |
 | Internal | `internal/` | AgenticOps 自身的审查和发布 |
 
 规则按变化原因归属：平台差异只能进入 Adapter，项目差异只能进入 Project，公司共性进入 Policy，只有必须确定执行的状态逻辑进入 Workflow。
@@ -44,20 +44,18 @@ Agent → Workflow 状态变更入口 → 持锁校验 → 状态与证据
 
 新增 Agent 只增加一个目录、Manifest、必要的薄适配、模板和测试。Adapter 不得保存状态、依赖 Policy/Project/Workflow 或定义新操作语义。`tests/test_adapter_boundary.py` 对每个 Agent 约束文件数、代码量、依赖和状态写入。
 
-## 4. 产品根目录（Product Root）的两个工作面
+## 4. 安装目录与工位
 
-源码产品根目录和稳定安装产品根目录使用同一个 `agenticops` 入口，但生命周期操作必须区分工作面：
+用户只需使用安装目录和工位。安装目录默认是 `~/.agentic-ops`，通过 `agenticops` 提供生命周期和工位接线；产品源码目录只服务产品维护，不构成用户工作模型。
 
-- 源码目录是源码维护面，首次由 `agenticops setup` 跟踪 `develop`，后续由 `update` 原地 fast-forward 并同步维护依赖和受信 Hook；
-- 安装产品根目录是安装使用面，`update` 只跟随安装时记录的分支；
-- 源码维护面允许本地领先并明确提示，但不自动推送；分支不符、工作区有修改或 Git 历史分叉时停止；安装使用面还要求 HEAD 与本地安装记录严格一致；
-- 两者所有非 Git 本地状态都进入 `.local/`；
-- `.local/product.json` 记录 `mode`、仓库、跟踪分支及生命周期同步提交；`.local/gate/events.jsonl` 只记录直接在 Product Root 执行且无法归属任务的门禁事件，避免把维护状态误写成项目工位状态；源码维护面的实际运行版本始终以 Git HEAD 为准；
-- 安装产品根目录不包含 `internal/` 或维护面 `skills/`。
+- 安装目录的 `update` 只跟随安装时记录的分支，且要求 HEAD 与本地安装记录严格一致；
+- 安装目录所有非 Git 本地状态都进入 `.local/`；
+- `.local/product.json` 记录仓库、跟踪分支、生命周期同步提交及 `source_pool`；`.local/gate/events.jsonl` 只记录直接在安装目录执行且无法归属任务的门禁事件，避免把产品状态误写成项目工位状态；
+- 安装目录不包含 `internal/` 或仅供产品维护的 Skill。
 
-`.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期配置外，它可保存由本 Product Root 成功初始化过的工位提示索引；该索引只用于更新后提示接线待刷新，不发现、不扫描、更不自动修改业务目录。生命周期操作使用 `.local/lifecycle.lock/` 防止同一产品根目录并发更新或回退。更新源码后，当前源码内核立即生效；已启动 Agent 需要重启，普通生成接线由下一次 `start` 刷新，也可通过 `doctor` 和 `repair` 检查、修复。检测到托管 Hook 退役时，start 和普通 repair 保留现场并报告迁移范围；用户明确选择 `repair --accept-checkpoint-migration` 后，先校验全部旧 Hook 的归属哈希，再移除并刷新。此选择不是持久门禁开关，不会改写 task/run 或授权记录。`rollback` 只属于安装使用面；源码维护面保留正常 Git 历史和发布治理，不由产品入口自动移动源码分支。
+`.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期配置外，它可保存由本安装目录成功初始化过的工位提示索引；该索引只用于更新后提示接线待刷新，不发现、不扫描、更不自动修改业务目录。生命周期操作使用 `.local/lifecycle.lock/` 防止同一安装目录并发更新或回退。普通生成接线由下一次 `start` 刷新，也可通过 `doctor` 和 `repair` 检查、修复。检测到托管 Hook 退役时，start 和普通 repair 保留现场并报告迁移范围；用户明确选择 `repair --accept-checkpoint-migration` 后，先校验全部旧 Hook 的归属哈希，再移除并刷新。此选择不是持久门禁开关，不会改写 task/run 或授权记录。
 
-Product Root 的 `.local/source-pool` 是下载缓存；`.local/shared-repositories/<owner>/<repo>` 是与缓存对象独立的完整共享参考仓库，由 `bootstrap/shared-repositories.json` 登记、Project Profile 引用。Bootstrap 的通用 ensure/update/status 仅管理显式准备、快进更新和本地核验；初始化、接管、任务开始及查询不自动刷新。共享参考仓不进入工位任务基线、状态或 epoch，不随 station purge 清理，不承担业务事实源职责。使用边界见[工位源码与材料](../usage/station-materials.md)。
+安装目录配置的源码池是下载缓存：`repositories/<owner>/<repo>.git` 是 bare 仓库；`shared-repositories/<owner>/<repo>` 是与缓存对象独立的完整共享参考仓库，由 `bootstrap/shared-repositories.json` 登记、Project Profile 引用。Bootstrap 的通用 ensure/update/status 仅管理显式准备、快进更新和本地核验；初始化、接管、任务开始及查询不自动刷新。共享参考仓不进入工位任务基线、状态或 epoch，不随 station purge 清理，不承担业务事实源职责。使用边界见[工位源码与材料](../usage/station-materials.md)。
 
 ## 5. 单任务工位
 

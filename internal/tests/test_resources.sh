@@ -126,10 +126,10 @@ done
 test "$(sed -n '1p' .agentic-ops-source)" = "source" ||
   fail ".agentic-ops-source 必须固定为 source"
 
-grep -F '工作面=维护' bootstrap/setup.sh >/dev/null ||
-  fail "setup 必须明确初始化源码维护面"
+grep -F '初始化完成：branch=%s，ref=%s，源码池=%s' bootstrap/setup.sh >/dev/null ||
+  fail "setup 必须明确初始化产品源码目录"
 grep -F 'face="$(lifecycle_work_face "$mode")"' bootstrap/update.sh >/dev/null ||
-  fail "update 必须根据产品根目录 mode 区分工作面"
+  fail "update 必须根据产品根目录 mode 区分生命周期路径"
 
 python3 -m json.tool policies/operations.json >/dev/null
 python3 -m json.tool policies/continuity.json >/dev/null
@@ -242,9 +242,9 @@ if find skills projects/*/skills -type f -path '*/agents/*' -print -quit | grep 
   fail "通用 Skill 源目录仍包含 Agent 专用 agents/ 配置"
 fi
 grep -Fq 'bootstrap/skill_wiring.py' bootstrap/setup.sh ||
-  fail "setup 未刷新源码维护面 Skill 接线"
+  fail "setup 未刷新产品源码 Skill 接线"
 grep -Fq 'bootstrap/skill_wiring.py' bootstrap/update.sh ||
-  fail "update 未刷新源码维护面 Skill 接线"
+  fail "update 未刷新产品源码 Skill 接线"
 grep -Fq 'StationDirectory' bootstrap/render.py ||
   fail "Bootstrap 未以 station 目录 FD 锚定生成接线"
 grep -Fq 'os.O_NOFOLLOW' bootstrap/station_paths.py ||

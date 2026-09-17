@@ -1,7 +1,7 @@
 <!-- 由 AgenticOps 生成；不要在项目工位直接维护。 -->
 # AgenticOps 项目工位入口
 
-本工位是一台独立研发工位，由中央 AgenticOps 产品根目录管理。一工位、一套完整工程、一个当前任务；并发通过多个工位实现。
+本工位是独立项目工作目录，由 AgenticOps 安装目录管理。一工位、一套完整工程、一个当前任务；并发通过多个工位实现。
 
 - 产品根目录：`__AGENTIC_OPS_HOME__/`
 - Product Project：`__AGENTIC_OPS_PROJECT__`

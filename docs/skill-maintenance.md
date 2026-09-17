@@ -26,7 +26,7 @@
 
 | 类型 | 唯一事实源 | 使用范围 | 不得进入 |
 |---|---|---|---|
-| 维护 Skill | `skills/<skill-name>/` | 源码产品根目录的源码维护面 | 安装产品根目录、业务工位、用户级 Skill 目录 |
+| 维护 Skill | `skills/<skill-name>/` | 产品源码目录 | 安装目录、业务工位、用户级 Skill 目录 |
 | 项目 Skill | `projects/<project>/skills/<skill-name>/` | 绑定该产品项目且接入对应 Agent 的业务工位 | 其它产品项目工位、用户级 Skill 目录 |
 | 个人或外部 Skill | Agent 平台自己的个人或插件目录 | 由用户或平台独立管理 | AgenticOps Git、安装包和受管接线清单 |
 
@@ -69,7 +69,7 @@
 
 ## 4. 薄 Adapter 边界
 
-每个 Agent Manifest 只声明一个通用 `skill_target`，表示该 Agent 的原生 Skill 发现根目录。Codex 当前值是 `.agents/skills`，Claude 当前值是 `.claude/skills`。Bootstrap 根据当前工作面决定接入维护 Skill 还是项目 Skill，再把同一通用 Skill 映射到 Manifest 声明的目标；Manifest 不决定 Skill 的业务作用域。
+每个 Agent Manifest 只声明一个通用 `skill_target`，表示该 Agent 的原生 Skill 发现根目录。Codex 当前值是 `.agents/skills`，Claude 当前值是 `.claude/skills`。Bootstrap 根据产品源码目录或工位决定接入维护 Skill 还是项目 Skill，再把同一通用 Skill 映射到 Manifest 声明的目标；Manifest 不决定 Skill 的业务作用域。
 
 薄 Adapter 只允许承担：
 
@@ -85,7 +85,7 @@
 
 维护 Skill 的接线属于源码产品根目录生命周期：
 
-1. `agenticops setup` 首次建立源码维护面后，枚举 `skills/` 中的通用 Skill，再通过各 Agent Manifest 的 `skill_target` 生成原生发现链接或视图。
+1. `agenticops setup` 首次初始化产品源码目录后，枚举 `skills/` 中的通用 Skill，再通过各 Agent Manifest 的 `skill_target` 生成原生发现链接或视图。
 2. `agenticops update` 同步源码、维护依赖和受信 Hook 后，按当前 Git 内容刷新链接；新增 Skill 自动接入，已删除 Skill 的旧链接只在所有权和目标均匹配时移除。
 3. `agenticops station doctor` 在源码产品根目录执行时只读检查维护 Skill 清单、链接目标、越界和同名冲突，不把产品根目录当成业务工位。
 4. Bootstrap 在 `.local/maintenance-skill-wiring.json` 记录生成产物的路径、类型和链接目标，用于检查所有权和安全清理；该文件不提交，也不是 Skill 事实源。
@@ -101,7 +101,7 @@
 3. Project 或 Agent 集合变化不能静默覆盖既有绑定，必须遵守工位清理与重建边界。
 4. 删除项目 Skill 后，`repair` 只能删除清单中登记且目标未漂移的旧链接。
 
-维护 Skill 和项目 Skill 可以在各自目录使用相同的 Agent 原生目标，但来源、产品根目录和产物清单必须隔离，不能用项目工位的 `init.json` 管理维护面接线。
+维护 Skill 和项目 Skill 可以在各自目录使用相同的 Agent 原生目标，但来源、产品目录和产物清单必须隔离，不能用项目工位的 `init.json` 管理产品维护接线。
 
 ## 6. 禁止用户级注册
 
@@ -114,13 +114,13 @@ AgenticOps 的 setup、update、install、init、doctor 和 repair 均不得写�
 /etc/codex/skills/
 ```
 
-也不得通过复制、安装个人 Skill、修改用户级 Codex 配置或创建指向产品根目录的用户级符号链接来补偿仓库接线缺失。用户级位置会跨仓库生效，无法表达维护面、安装面和业务工位边界，并会造成 Git 事实源与个人副本漂移。
+也不得通过复制、安装个人 Skill、修改用户级 Codex 配置或创建指向产品源码目录的用户级符号链接来补偿仓库接线缺失。用户级位置会跨仓库生效，无法表达产品维护、安装目录和业务工位边界，并会造成 Git 事实源与个人副本漂移。
 
 若发现已有用户级 AgenticOps Skill，必须按以下顺序迁移：
 
 1. 只读比较用户级副本与 Git 事实源，列出 `SKILL.md`、元数据、脚本和引用资料差异。
 2. 将仍需保留的内容作为正常仓库变更合入对应 `skills/` 或 `projects/<project>/skills/`，完成固定验证。
-3. 通过源码维护面或项目工位的原生链接验证 Skill 已在正确范围可见。
+3. 通过产品源码目录或项目工位的原生链接验证 Skill 已在正确范围可见。
 4. 回读待删除的精确用户级目录和差异；取得单独删除授权后才清理副本。
 5. 重启或刷新 Agent，再验证无关仓库不再发现该 Skill。
 
@@ -131,8 +131,8 @@ AgenticOps 的 setup、update、install、init、doctor 和 repair 均不得写�
 新增、更新或删除 Skill 时，至少验证以下回归：
 
 - 资源合同登记 Skill 的 `SKILL.md` 及必需脚本、引用资料，目录名与 `name` 一致；Skill 源目录不包含任何 Agent 专用配置。
-- 源码维护面 setup/update 能新增、刷新和安全移除维护 Skill 链接；doctor 能报告缺失、越界、目标漂移和未受管同名文件。
-- 安装产品根目录不包含 `skills/` 和维护面发现链接。
+- 产品源码目录的 setup/update 能新增、刷新和安全移除维护 Skill 链接；doctor 能报告缺失、越界、目标漂移和未受管同名文件。
+- 安装目录不包含 `skills/` 和产品维护发现链接。
 - 业务工位只生成当前 Project Skill，不出现任何维护 Skill。
 - 使用隔离的假 `HOME` 执行安装和接线测试，断言所有用户级 Skill 目录保持未创建、未修改。
 - Codex、Claude 的原生目录均来自各自 Manifest 的同一 `skill_target` 契约；测试 Agent 可用 `null` 明确表示不支持 Skill，公共代码不得猜测默认目录或以平台名分支选择目录。

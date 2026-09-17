@@ -1,4 +1,4 @@
-"""单任务研发工位四操作；所有副作用在同一工位锁和持久化操作下运行。"""
+"""单任务工位四操作；所有副作用在同一工位锁和持久化操作下运行。"""
 from __future__ import annotations
 
 import importlib.util

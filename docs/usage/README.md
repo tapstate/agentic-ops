@@ -24,7 +24,7 @@ PR 前检出来源同步也由[任务授权指引](task-authorization.md)说明�
 
 | 场景 | 文档 | 何时使用 |
 |---|---|---|
-| 默认安装 | [Git SSH 安装](git-ssh-install.md) | 已配置 SSH，按受信 `main` 安装安装使用面 |
+| 默认安装 | [Git SSH 安装](git-ssh-install.md) | 已配置 SSH，按受信 `main` 安装到安装目录 |
 | 配置必需 MCP | [必需 MCP 配置](mcp-setup.md) | 首次使用 Jira 事实时，连接 Jira/Atlassian |
 | 让 AI Agent 安装 | [Agent引导安装指引](agent-guided-install.md) | 从空目录启动 Agent，由它依据现役安装文档安装并初始化项目工位 |
 | 无法使用 Git SSH | [gh 一键安装](gh-one-click-install.md) | 通过 GitHub CLI 登录并安装 |
@@ -38,7 +38,7 @@ PR 前检出来源同步也由[任务授权指引](task-authorization.md)说明�
 
 授权到期但方案未变时，按[任务授权指引](task-authorization.md)显式续签，保留当前 run 和证据；完成操作中断时，按[常见问题](faq.md)重试原请求，收敛已提交的完成状态，不重新验收或重置任务。
 
-这些文档只说明安装使用面。维护 AgenticOps 源码、测试或发布请使用[维护指引](../maintenance-guide.md)。
+这些文档只说明安装目录和工位。维护 AgenticOps 源码、测试或发布请使用[维护指引](../maintenance-guide.md)。
 
 同一实施范围内更正验收方案后的恢复也归[任务授权指引](task-authorization.md)管理：明确 Q2 再确认及配置更正后的显式 Q1 再确认、原授权和目标摘要绑定、历史保留及拒绝范围，与仅延长有效期的续签分开。
 

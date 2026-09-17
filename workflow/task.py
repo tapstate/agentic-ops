@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""单任务研发工位：takeover/archive/release/clean 及确定性任务检查点。"""
+"""单任务工位：takeover/archive/release/clean 及确定性任务检查点。"""
 from __future__ import annotations
 
 import argparse

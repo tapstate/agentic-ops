@@ -4,7 +4,7 @@
 
 ## 旧版空工位的一次性恢复
 
-正常升级遵循[更新与回退](usage/update-and-rollback.md)。当指定旧版清理器无法处理自身缓存且绑定产品根已切换时，可由维护人员使用 `internal/station_recovery.py`；它不安装到安装使用面，不解析活动任务，也不修改旧 epoch 或复用历史授权。
+正常升级遵循[更新与回退](usage/update-and-rollback.md)。当指定旧版清理器无法处理自身缓存且绑定产品根已切换时，可由维护人员使用 `internal/station_recovery.py`；它不安装到安装目录，不解析活动任务，也不修改旧 epoch 或复用历史授权。
 
 此工具仅支持产品提交 `25d0b2c66298b5c00eb961d2929116846e113681` 生成的 epoch 2、任务索引为空的 TapData 工位。其它版本、有任务、未知状态、改动接线或不可信目录均停止，不扩大为通用兼容工具。先停止该工位 Agent 和应用写入，再生成清单：
 
@@ -31,7 +31,7 @@ cd agentic-ops
 
 工位接管时按完整 Profile 下载缺失独立仓库；无权限或已有目录不洁净时停止对应准备。产品不再管理共享池或跨工位源码租约。
 
-`setup` 用于首次初始化源码维护面。之后在 `develop` 更新当前源码目录：
+`setup` 用于首次初始化产品源码目录。之后在 `develop` 更新当前源码目录：
 
 ```sh
 ./agenticops update
@@ -85,7 +85,7 @@ station="$HOME/agenticops-tapdata"
 - 项目差异：`projects/<project>/`
 - Agent/工具协议差异：`adapters/`
 - 安装与接线：`bootstrap/`
-- 维护面协作指引：`skills/`；它们只供维护 Agent 使用，不安装或接线到业务工位。Skill 的分类、事实源、发现接线和迁移要求见 [Skill 维护规范](skill-maintenance.md)。
+- 产品维护协作指引：`skills/`；它们只供维护 Agent 使用，不安装或接线到业务工位。Skill 的分类、事实源、发现接线和迁移要求见 [Skill 维护规范](skill-maintenance.md)。
 
 新增 Agent 只增加 `adapters/agents/<id>/` 的 Manifest、薄 Hook、模板和测试；不要修改公共入口建立平台枚举。新增产品项目只增加 `projects/<project>/`。每个 Jira Project Profile 必须配置 `jira.takeover_watermark`：逻辑键固定为 `agenticops_version`，配置实际 `customfield_<ID>`、字符串字段名、启用的 Jira 事务类型 ID 和 `overwrite` 写入方式；`workflow/project_rules.py` 会拒绝缺失或无效配置，不能绕过接管门禁。工作项、进度和验收写入 Jira，不在仓库新增执行计划。
 
@@ -135,7 +135,7 @@ internal/release/hotfix.sh <JIRA-KEY>
 
 截至 2026-09-13，OpenAI 的 [GPT-6 Astra 指引](https://developers.openai.com/api/docs/guides/latest-model)说明：模型更敏感于 Skill 和仓库指令，可能多问澄清问题、扩大测试；也支持执行中补充要求和异步工具能力。这些是模型与平台能力说明，不是 AgenticOps 的权限保证。
 
-维护面据此采用根 `AGENTS.md` 的协作约定：沿用有效授权、先完成可审查准备、只在真实决策处暂停；技能编写检查见 [Skill 维护规范](skill-maintenance.md)。初始化技能区分明确更新与意图不清的重建，接管测试技能区分必填绑定与可选回复，避免把重复确认当作安全措施。
+产品维护据此采用根 `AGENTS.md` 的协作约定：沿用有效授权、先完成可审查准备、只在真实决策处暂停；技能编写检查见 [Skill 维护规范](skill-maintenance.md)。初始化技能区分明确更新与意图不清的重建，接管测试技能区分必填绑定与可选回复，避免把重复确认当作安全措施。
 
 异步工具、执行中补充要求和推理强度调整以当前 Agent 实际暴露的接口为准；不能因为模型支持就假定 CLI、桌面端或 Adapter 已支持。没有异步能力时按顺序执行并报告阻塞，不新增 Runtime 模拟平台调度，也不自行修改用户模型配置。等待期间可做独立只读分析；恢复后先核验原操作及当前目标，再消费结果。子代理只用于已要求的独立工作，接管测试仍使用一个执行子代理，不扩大并发写入范围。
 

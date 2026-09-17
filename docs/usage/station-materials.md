@@ -1,14 +1,14 @@
 # 工位源码与持久材料
 
-源码池自动位于产品根 `.local/source-pool/`，只用于工位下载加速，无需配置。完整工程由 Project Profile 选择，接管时先下载缺失的池内仓库或刷新已有缓存，再通过本地传输在 `source/<owner>/<repo>` 创建或更新独立 Git 仓库并冻结完整基线；活动修改仓另行登记。
+源码池是安装目录保存的可选配置，默认位于 `~/.agentic-ops-repos`。初始化工位时，显式 `--source-pool` 优先；未指定时使用安装目录配置。它只用于工位下载加速：`repositories/<owner>/<repo>.git` 是 bare 缓存，接管时先下载缺失仓库或刷新已有缓存，再通过本地传输在 `source/<owner>/<repo>` 创建或更新独立 Git 仓库并冻结完整基线；活动修改仓另行登记。
 
 初始化只生成空工位接线，接管时才准备选定的源码。各工位拥有完整对象和独立 Git 元数据，origin 保留真实远端，不使用 linked worktree、硬链接或 alternates。缓存丢失不影响已准备工位的本地开发；下次需要刷新时重新下载入池。下载失败保留任务操作供原请求重试，不把旧缓存视为最新远端事实。
 
-共享同一产品根的工位复用缓存；不同来源通过规范 origin 摘要隔离，每个池内仓库在刷新和传输期间加锁。工位 purge 保留产品缓存；缓存不保存任务状态或验收证据。
+共享同一源码池的工位复用缓存；同名仓库绑定唯一 origin，origin 不一致时失败关闭，不自动隔离。每个池内仓库在刷新和传输期间加锁。工位 purge 保留源码池；缓存不保存任务状态或验收证据。
 
 ## 中央共享 Wiki
 
-`bootstrap/shared-repositories.json` 登记共享仓库来源与分支；TapData 的 Profile 通过 `wiki_repository: tapstate/wiki` 引用 `git@github.com:tapstate/wiki.git` 的 main，不另设 wiki.json。完整共享副本位于 Product Root 的 `.local/shared-repositories/tapstate/wiki`，与 bare 下载缓存分离；同一产品根的多个工位共用，不同产品根分别维护。
+`bootstrap/shared-repositories.json` 登记共享仓库来源与分支；TapData 的 Profile 通过 `wiki_repository: tapstate/wiki` 引用 `git@github.com:tapstate/wiki.git` 的 main，不另设 wiki.json。完整共享副本位于源码池的 `shared-repositories/tapstate/wiki`，与 bare 下载缓存分离；同一源码池下的多个工位共用。它是普通完整 checkout，供只读文件查询；bare 缓存继续只服务下载加速。
 
 研发在工位修复时按需显式运行以下命令；它只准备该工位所属项目登记的 Wiki：
 

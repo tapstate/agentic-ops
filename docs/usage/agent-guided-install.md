@@ -2,7 +2,7 @@
 
 适合把安装和项目工位初始化交给 Codex、Claude Code 等 AI Agent 完成。你仍然负责确认目录、账号访问权限以及 Agent 提出的任何外部写入或高风险操作；AgenticOps 的 Workflow 检查点会约束本地阶段推进，原生工具调用由平台与服务端权限处理。
 
-这条路径只安装安装使用面并初始化一个 TapData 项目工位，不接管 Jira 任务、不修改业务仓库，也不提交、推送或合并代码。
+这条路径只安装到安装目录并初始化一个 TapData 项目工位，不接管 Jira 任务、不修改业务仓库，也不提交、推送或合并代码。
 
 ## 1. 创建空工位目录
 
@@ -33,7 +33,7 @@ cd "$HOME/agenticops-tapdata"
 
 Agent 应回报以下可核验结果：
 
-- 安装使用面已安装在 `~/.agentic-ops`；
+- 安装目录已安装在 `~/.agentic-ops`；
 - 当前 cwd 已初始化为 `tapdata` 工位，包含生成的 `./agenticops` 与 `.agenticops/station.json`；
 - `./agenticops station doctor` 已通过；
 - 工位配置、完整独立源码、唯一运行现场和档案分别位于 config/source/runtime/archive；源码池由产品根自动管理，仅加速接管时的独立源码下载。

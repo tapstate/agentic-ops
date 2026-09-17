@@ -12,13 +12,13 @@ TapData 集成测试协作由 [tapdata-ci-test](../projects/tapdata/skills/tapda
 
 源码池仅承担下载加速：[工位合同](architecture/single-task-station.md)定义先缓存后独立源码的准备与恢复边界，[工位源码与材料](usage/station-materials.md)说明缓存位置、复用与清理；项目目标保持工位独立性。
 
-原版本清理器自身失效时的一次性空工位恢复归入[维护指引](maintenance-guide.md#旧版空工位的一次性恢复)，只说明维护面导出与重建边界，不作为产品升级兼容入口。
+原版本清理器自身失效时的一次性空工位恢复归入[维护指引](maintenance-guide.md#旧版空工位的一次性恢复)，只说明产品维护导出与重建边界，不作为产品升级兼容入口。
 
 本地执行与 Jira 同步的边界由项目目标和架构定义；质量使用指引负责初始快照、本地确认、非阻断同步及 PR 后警告汇总，契约负责可恢复记录格式。
 
 本文是现役人读文档的结构入口。新建或调整文档时，先在本页或对应主题的子级总纲明确目标、范围、层级、职责和导航关系；再细化正文。仅当文档过长，或稳定内容被多个页面复用时，才拆分子文档。
 
-现役工位采用单任务研发工位：source 保存完整独立工程，config 保存持久配置，runtime 是唯一运行现场，archive 保存正式档案，.agenticops 只绑定一个 current 与 operation。[项目目标](strategy/project-goals.md)负责方向，[工程架构](architecture/agenticops-v1-architecture.md)负责分层，[工位合同](architecture/single-task-station.md)负责身份、四操作、恢复及可复用验收边界；机器基线见 [engineering-baseline](../contracts/engineering-baseline.schema.json)。功能存在不等于真实 TapData 应用已验证运行，执行证据与发布结论仍在 Jira。
+现役工位采用单任务模型：source 保存完整独立工程，config 保存持久配置，runtime 是唯一运行现场，archive 保存正式档案，.agenticops 只绑定一个 current 与 operation。[项目目标](strategy/project-goals.md)负责方向，[工程架构](architecture/agenticops-v1-architecture.md)负责分层，[工位合同](architecture/single-task-station.md)负责身份、四操作、恢复及可复用验收边界；机器基线见 [engineering-baseline](../contracts/engineering-baseline.schema.json)。功能存在不等于真实 TapData 应用已验证运行，执行证据与发布结论仍在 Jira。
 
 生成与清理先在同版本形成闭环：初始化、任务处理、归档释放或清理、工位 purge、再次初始化。跨版本升级是第二层编排，只在原版本清理成功后切换并调用新版本生成；不在线迁移任务，不让新版本解释旧 Runtime 状态。[更新与回退](usage/update-and-rollback.md)维护这个使用顺序。
 

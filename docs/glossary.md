@@ -4,7 +4,7 @@
 
 | 名词 | 含义 |
 |---|---|
-| 产品根目录（Product Root） | 承载 AgenticOps 中央产品资产并提供 `agenticops` 入口的合规目录。源码产品根目录是源码维护面；安装产品根目录是安装使用面，默认位于 `~/.agentic-ops`。两者的本机状态均放在各自 `.local/`。 |
+| 安装目录（Installation Directory） | 承载 AgenticOps 中央产品资产并提供 `agenticops` 入口的目录，默认位于 `~/.agentic-ops`；本机配置位于 `.local/`。产品源码目录仅用于维护 AgenticOps，不是用户工作目录。 |
 | 源码目录 | 维护者克隆的 AgenticOps Git 仓库，即源码产品根目录；在 `develop` 分支维护和运行产品。它不是业务项目工位。 |
 | 项目工位 | 业务项目的本地工作目录。一工位、一套完整 source、一个 current；config/runtime/archive 分离持久配置、运行现场和档案，不复制中央规则。 |
 | 产品项目（Project） | 一个业务项目的适配配置，位于 `projects/<project>/`，包含 Jira、仓库、分支、准入规则和 Runbook。 |
