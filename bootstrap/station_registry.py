@@ -12,6 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from workflow import station_operation, task_store  # noqa: E402
+from workflow import project_rules  # noqa: E402
+from bootstrap import shared_repositories  # noqa: E402
 from bootstrap.station_compatibility import require_station_can_adopt
 from bootstrap.station_paths import StationDirectory, station_artifact_path  # noqa: E402
 
@@ -141,6 +143,21 @@ def confirm(args):
 def refresh(product_root, station):
     subprocess.run([sys.executable, str(product_root / "bootstrap" / "render.py"), "--install-home", str(product_root), "--station", str(station), "--refresh"], check=True)
     register(product_root, station)
+
+
+def wiki_repository(product_root, station):
+    require_tracked(product_root, station)
+    profile = project_rules.load_profile(station=station)
+    repository = profile.get("wiki_repository")
+    if not isinstance(repository, str) or not repository:
+        raise ValueError("项目 Profile 缺少 wiki_repository")
+    return repository
+
+
+def ensure_wiki(product_root, station):
+    """按工位绑定的项目 Profile 显式准备共享 Wiki；不隐式更新已有副本。"""
+    repository = wiki_repository(product_root, station)
+    return shared_repositories.run(product_root, repository, "ensure")
 
 
 def owned_artifacts(station, tree=None):
@@ -312,8 +329,15 @@ def command_refresh(args, product_root, action):
     show_targets(action, targets)
     if args.all:
         confirm(args)
+    prepared_wikis = set()
     for station in targets:
         refresh(product_root, station)
+        if getattr(args, "ensure_wiki", False):
+            repository = wiki_repository(product_root, station)
+            if repository not in prepared_wikis:
+                result = shared_repositories.run(product_root, repository, "ensure")
+                print("Wiki 已就绪：%s（%s）" % (result["repository"], result["path"]))
+                prepared_wikis.add(repository)
 
 
 def command_detach(args, product_root, purge=False):
@@ -413,6 +437,10 @@ def parser():
         target.add_argument("--station")
         target.add_argument("--all", action="store_true")
         command.add_argument("--yes", action="store_true", help="非交互环境确认已展示的目标列表")
+        if name == "repair":
+            command.add_argument("--ensure-wiki", action="store_true", help="显式准备项目共享 Wiki；不在初始化或接管时自动执行")
+    wiki = commands.add_parser("ensure-wiki")
+    wiki.add_argument("--station", required=True)
     clean = commands.add_parser("clean")
     target = clean.add_mutually_exclusive_group(required=True)
     target.add_argument("--station")
@@ -438,6 +466,9 @@ def main():
             command_prune(args, product_root)
         elif args.command == "repair":
             command_refresh(args, product_root, "repair")
+        elif args.command == "ensure-wiki":
+            result = ensure_wiki(product_root, Path(args.station).resolve())
+            print("Wiki 已就绪：%s（%s）" % (result["repository"], result["path"]))
         elif args.command == "clean":
             command_refresh(args, product_root, "clean --generated-only")
         elif args.command == "detach":

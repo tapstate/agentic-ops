@@ -56,6 +56,28 @@ class StationBootstrapTests(unittest.TestCase):
         self.assertNotEqual(before['station_id'], after['station_id'])
         self.assertIsNone(task_store.read_current(self.station)['current'])
 
+    def test_wiki_is_prepared_only_by_explicit_repair_option(self):
+        with mock.patch.object(registry.project_rules, 'load_profile', return_value={'wiki_repository': 'tapstate/wiki'}), \
+                mock.patch.object(registry.shared_repositories, 'run', return_value={
+                    'repository': 'tapstate/wiki', 'path': '/tmp/wiki'}) as prepared:
+            result = registry.ensure_wiki(ROOT, self.station)
+        self.assertEqual(result['repository'], 'tapstate/wiki')
+        prepared.assert_called_once_with(ROOT, 'tapstate/wiki', 'ensure')
+
+    def test_repair_all_prepares_a_shared_wiki_once(self):
+        other = self.station.parent / 'other'
+        args = type('Args', (), {'station': None, 'all': True, 'ensure_wiki': True, 'yes': True})()
+        with mock.patch.object(registry, 'select_targets', return_value=[self.station, other]), \
+                mock.patch.object(registry, 'require_tracked'), \
+                mock.patch.object(registry, 'show_targets'), \
+                mock.patch.object(registry, 'confirm'), \
+                mock.patch.object(registry, 'refresh'), \
+                mock.patch.object(registry, 'wiki_repository', return_value='tapstate/wiki'), \
+                mock.patch.object(registry.shared_repositories, 'run', return_value={
+                    'repository': 'tapstate/wiki', 'path': '/tmp/wiki'}) as prepared:
+            registry.command_refresh(args, ROOT, 'repair')
+        prepared.assert_called_once_with(ROOT, 'tapstate/wiki', 'ensure')
+
     def test_preserve_materials_requires_explicit_reuse(self):
         for name in ('config', 'source', 'archive'):
             (self.station / name / 'sentinel').write_text(name)

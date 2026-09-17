@@ -191,13 +191,23 @@ case "$command_name" in
     test "$station_scope" -eq 1 || { usage >&2; exit 2; }
     parse_station "$@"
     repair_args=(--install-home "$product_root" --station "$station" --refresh)
+    ensure_wiki=0
     if [ "$forwarded_count" -ne 0 ]; then
-      test "$forwarded_count" -eq 1 && test "${forwarded[0]}" = "--accept-checkpoint-migration" || { usage >&2; exit 2; }
-      repair_args+=(--accept-checkpoint-migration)
+      for argument in "${forwarded[@]}"; do
+        case "$argument" in
+          --accept-checkpoint-migration) repair_args+=(--accept-checkpoint-migration) ;;
+          --ensure-wiki) ensure_wiki=1 ;;
+          *) usage >&2; exit 2 ;;
+        esac
+      done
     fi
     python3 "$product_root/bootstrap/render.py" "${repair_args[@]}"
     python3 "$product_root/bootstrap/station_registry.py" \
       --product-root "$product_root" register --station "$station"
+    if [ "$ensure_wiki" -eq 1 ]; then
+      python3 "$product_root/bootstrap/station_registry.py" \
+        --product-root "$product_root" ensure-wiki --station "$station"
+    fi
     exec python3 - "$product_root" "$station" <<'PY'
 import sys
 sys.path.insert(0, sys.argv[1])

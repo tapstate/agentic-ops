@@ -10,7 +10,13 @@
 
 `bootstrap/shared-repositories.json` 登记共享仓库来源与分支；TapData 的 Profile 通过 `wiki_repository: tapstate/wiki` 引用 `git@github.com:tapstate/wiki.git` 的 main，不另设 wiki.json。完整共享副本位于 Product Root 的 `.local/shared-repositories/tapstate/wiki`，与 bare 下载缓存分离；同一产品根的多个工位共用，不同产品根分别维护。
 
-研发按需显式运行以下命令（脚本默认使用自身所在 Product Root，也可通过 `--product-root` 指定）：
+研发在工位修复时按需显式运行以下命令；它只准备该工位所属项目登记的 Wiki：
+
+```sh
+agenticops station repair --station <工位目录> --ensure-wiki
+```
+
+底层共享仓库也可由维护者直接操作（脚本默认使用自身所在 Product Root，也可通过 `--product-root` 指定）：
 
 ```sh
 python3 <product-root>/bootstrap/shared_repositories.py ensure --repository tapstate/wiki
@@ -22,7 +28,7 @@ ensure 只在缺失时借助源码池准备独立副本，已有副本仅核验�
 
 准备使用临时目录核验后发布。更新失败不等于工作树仍可用：fetch 失败通常保留原 HEAD，checkout 中断必须先经 status 核验并由研发修复。管理器不自动清理共享材料、不运行 Wiki init、脚本或 Hook；不提供操作系统级只读隔离。
 
-Wiki 不是任务工程，不进入 engineering_baseline、源码仓库版本配套或发布验收。技能需要业务源码时只读项目 source 中的任务对应工程。共享材料不属于工位 purge 范围；本次不改变 `.agenticops` 状态协议，共享材料不改变代际；现役任务重置使用 epoch 5。
+Wiki 不是任务工程，不进入 engineering_baseline、源码仓库版本配套或发布验收。技能需要业务源码时只读项目 source 中的任务对应工程。共享材料不属于工位 purge 范围；显式 Wiki 准备不改变 `.agenticops` 状态协议，现役工位协议使用 epoch 6。
 
 ## 已有源码
 
