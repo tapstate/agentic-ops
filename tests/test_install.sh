@@ -3,6 +3,7 @@ set -euo pipefail
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 test_root="$(mktemp -d)"
+test_root="$(cd "$test_root" && pwd -P)"
 trap 'chmod -R u+w "$test_root" 2>/dev/null || true; rm -rf "$test_root"' EXIT
 test_home="$test_root/home"
 mkdir -p "$test_home"
@@ -30,6 +31,7 @@ file_digest() {
 
 source_repo="$test_root/source"
 install_root="$test_root/install"
+custom_source_pool="$test_root/source-pool"
 maintainer_root="$test_root/maintainer"
 station="$test_root/project-station"
 
@@ -81,12 +83,16 @@ printf '%s\n' \
   > "$setup_bin/uv"
 chmod +x "$setup_bin/uv"
 PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" setup >/dev/null
-"$maintainer_root/agenticops" --help | grep -F '维护：源码产品根目录' >/dev/null
-"$maintainer_root/agenticops" --help | grep -F '使用：安装产品根目录' >/dev/null
+"$maintainer_root/agenticops" --help | grep -F '安装目录：默认 ~/.agentic-ops' >/dev/null
+"$maintainer_root/agenticops" --help | grep -F '工位：项目工作目录' >/dev/null
 test "$(git -C "$maintainer_root" branch --show-current)" = develop
 test -d "$maintainer_root/.local/venv/internal"
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field mode)" = source
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field tracking_branch)" = develop
+test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field source_pool)" = "$HOME/.agentic-ops-repos"
+maintainer_source_pool="$test_root/maintainer-source-pool"
+PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" setup --source-pool "$maintainer_source_pool" >/dev/null
+test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field source_pool)" = "$maintainer_source_pool"
 test "$(python3 "$maintainer_root/bootstrap/product_version.py" --product-root "$maintainer_root")" = \
   "develop-untagged-1-$(git -C "$maintainer_root" rev-parse --short=8 HEAD)"
 test -x "$(git -C "$maintainer_root" config --get core.hooksPath)/pre-commit"
@@ -150,7 +156,7 @@ git -C "$source_repo" commit -qm "source next"
 source_update_output="$test_root/source-update-output"
 PATH="$setup_bin:$PATH" "$source_station/agenticops" update > "$source_update_output"
 test -f "$maintainer_root/SOURCE-NEXT"
-grep -F '工作面=维护' "$source_update_output" >/dev/null
+grep -F '产品源码已更新' "$source_update_output" >/dev/null
 grep -F '请执行 agenticops station repair --all' "$source_update_output" >/dev/null
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field current_ref)" = \
   "$(git -C "$maintainer_root" rev-parse HEAD)"
@@ -177,7 +183,7 @@ mkdir "$maintainer_root/.local/lifecycle.lock"
 printf '%s\n' "$$" > "$maintainer_root/.local/lifecycle.lock/owner"
 printf 'test\n' > "$maintainer_root/.local/lifecycle.lock/operation"
 if PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update >/dev/null 2>&1; then
-  printf '源码维护面并发生命周期更新未被拒绝\n' >&2
+  printf '产品源码目录并发生命周期更新未被拒绝\n' >&2
   exit 1
 fi
 rm -f "$maintainer_root/.local/lifecycle.lock/owner" \
@@ -199,20 +205,21 @@ PY
 
 git -C "$maintainer_root" switch -qc feature/update-boundary
 if PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update >/dev/null 2>&1; then
-  printf '源码维护面在非跟踪分支执行了 update\n' >&2
+  printf '产品源码目录在非跟踪分支执行了 update\n' >&2
   exit 1
 fi
 git -C "$maintainer_root" switch -q develop
 printf '\n# dirty\n' >> "$maintainer_root/agenticops"
 if PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update >/dev/null 2>&1; then
-  printf '源码维护面有未提交修改时执行了 update\n' >&2
+  printf '产品源码目录有未提交修改时执行了 update\n' >&2
   exit 1
 fi
 git -C "$maintainer_root" checkout -q -- agenticops
 git -C "$source_repo" switch -q "$install_branch"
 
 bash "$repo_root/bootstrap/install.sh" \
-  --install-home "$install_root" --repository "$source_repo" --branch "$install_branch"
+  --install-home "$install_root" --repository "$source_repo" --branch "$install_branch" \
+  --source-pool "$custom_source_pool"
 
 test -f "$install_root/contracts/gate-request.schema.json"
 test -f "$install_root/gate/runner.py"
@@ -230,6 +237,7 @@ test ! -e "$install_root/internal"
 test -f "$install_root/.local/product.json"
 test ! -e "$install_root/.local/repository-pool.json"
 test "$(python3 "$install_root/bootstrap/product_state.py" --product-root "$install_root" read --field tracking_branch)" = "$install_branch"
+test "$(python3 "$install_root/bootstrap/product_state.py" --product-root "$install_root" read --field source_pool)" = "$custom_source_pool"
 test "$(python3 "$install_root/bootstrap/product_version.py" --product-root "$install_root")" = \
   "$install_branch-untagged-1-$(git -C "$install_root" rev-parse --short=8 HEAD)"
 if PATH="$setup_bin:$PATH" "$install_root/agenticops" setup >/dev/null 2>&1; then
@@ -519,8 +527,9 @@ from pathlib import Path
 
 binding = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 initialization = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
-assert binding["schema_version"] == 3
+assert binding["schema_version"] == 4
 assert binding["product_root"] == str(Path(sys.argv[3]).resolve())
+assert binding["source_pool"] == str(Path(sys.argv[3]).parent / "source-pool")
 assert len(binding["station_id"]) == 32
 assert binding["project"] == "tapdata"
 assert binding["agents"] == ["claude", "codex", "test-agent"]
@@ -540,6 +549,20 @@ assert ".agents/skills/ao-test-takeover" not in artifacts
 assert ".claude/skills/ao-test-takeover" not in artifacts
 assert ".agents/skills/ao-ws-init" not in artifacts
 assert ".claude/skills/ao-ws-init" not in artifacts
+PY
+override_station="$test_root/override-source-pool-station"
+override_source_pool="$test_root/override-source-pool"
+"$install_root/agenticops" station init --station "$override_station" \
+  --source-pool "$override_source_pool" >/dev/null
+python3 - "$override_station/.agenticops/station.json" "$override_source_pool" "$install_root" "$custom_source_pool" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+binding = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert binding["source_pool"] == str(Path(sys.argv[2]).resolve())
+product = json.loads((Path(sys.argv[3]) / ".local/product.json").read_text(encoding="utf-8"))
+assert product["source_pool"] == str(Path(sys.argv[4]).resolve())
 PY
 python3 - "$station/.claude/settings.json" "$station/.codex/hooks.json" "$install_root" <<'PY'
 import json
@@ -679,9 +702,10 @@ digest = sys.argv[3]
 (station / ".agenticops" / "station.json").write_text(
     json.dumps(
         {
-            "schema_version": 3,
+            "schema_version": 4,
             "station_id": "a" * 32,
             "product_root": str(install_root),
+            "source_pool": str(install_root.parent / "legacy-pool"),
             "project": "tapdata",
             "agents": ["codex"],
         },
@@ -915,7 +939,7 @@ git -C "$source_repo" commit -qm "next"
 installed_update_output="$test_root/installed-update-output"
 "$station/agenticops" update > "$installed_update_output"
 test -f "$install_root/NEXT"
-grep -F '工作面=使用' "$installed_update_output" >/dev/null
+grep -F '安装目录已更新' "$installed_update_output" >/dev/null
 if "$install_root/agenticops" station doctor --station "$station" >/dev/null 2>&1; then
   printf '产品更新后旧工作目录绑定未被识别为待刷新\n' >&2
   exit 1

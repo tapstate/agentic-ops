@@ -8,15 +8,15 @@ usage() {
   cat <<'EOF'
 用法：
   agenticops install [install 参数]
-  agenticops setup
+  agenticops setup [--source-pool <目录>]
   agenticops agents
   agenticops station <init|doctor|repair|start|list|identity|prune|clean|detach|purge> [参数]
   agenticops update
   agenticops rollback
 
-工作面：
-  维护：源码产品根目录，setup 初始化，update 更新已记录的 develop
-  使用：安装产品根目录，update/rollback 跟随安装时记录的分支
+用户目录：
+  安装目录：默认 ~/.agentic-ops，保存产品配置和 source-pool
+  工位：项目工作目录；station init/doctor/repair 在此操作
 EOF
 }
 
@@ -228,7 +228,7 @@ PY
     test "$#" -eq 0 || { usage >&2; exit 2; }
     mode="$(python3 "$product_root/bootstrap/product_state.py" --product-root "$product_root" read --field mode 2>/dev/null || true)"
     test "$mode" = "installed" || {
-      printf 'AgenticOps：源码维护面不执行 rollback，请使用 Git 流程\n' >&2
+      printf 'AgenticOps：产品源码不执行 rollback，请使用 Git 流程\n' >&2
       exit 2
     }
     exec env AGENTIC_OPS_HOME="$product_root" bash "$product_root/bootstrap/rollback.sh"

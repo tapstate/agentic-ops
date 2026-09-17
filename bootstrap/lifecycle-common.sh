@@ -2,8 +2,8 @@
 
 lifecycle_work_face() {
   case "$1" in
-    source) printf '维护' ;;
-    installed) printf '使用' ;;
+    source) printf '产品源码目录' ;;
+    installed) printf '安装目录' ;;
     *) printf '未知' ;;
   esac
 }
@@ -52,7 +52,7 @@ lifecycle_require_clean_tree() {
   lifecycle_root="$1"
   lifecycle_face="$2"
   test -z "$(git -C "$lifecycle_root" status --porcelain)" || {
-    printf 'AgenticOps：%s工作面存在未提交修改，拒绝更新\n' "$lifecycle_face" >&2
+    printf 'AgenticOps：%s存在未提交修改，拒绝更新\n' "$lifecycle_face" >&2
     return 2
   }
 }
@@ -63,7 +63,7 @@ lifecycle_require_recorded_remote() {
   lifecycle_face="$3"
   lifecycle_actual_repository="$(git -C "$lifecycle_root" remote get-url origin)"
   test "$lifecycle_actual_repository" = "$lifecycle_expected_repository" || {
-    printf 'AgenticOps：%s工作面 origin 与本地配置不一致，拒绝更新\n' "$lifecycle_face" >&2
+    printf 'AgenticOps：%s origin 与本地配置不一致，拒绝更新\n' "$lifecycle_face" >&2
     return 2
   }
 }

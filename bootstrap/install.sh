@@ -4,9 +4,10 @@ set -euo pipefail
 install_root="${AGENTIC_OPS_HOME:-$HOME/.agentic-ops}"
 repository="git@github.com:tapstate/agentic-ops.git"
 branch="main"
+source_pool="$HOME/.agentic-ops-repos"
 
 usage() {
-  printf '用法：install.sh [--install-home <目录>] [--repository <Git URL>] [--branch <分支>]\n'
+  printf '用法：install.sh [--install-home <目录>] [--repository <Git URL>] [--branch <分支>] [--source-pool <目录>]\n'
 }
 
 while [ "$#" -gt 0 ]; do
@@ -24,6 +25,11 @@ while [ "$#" -gt 0 ]; do
     --branch)
       test "$#" -ge 2 || { usage >&2; exit 2; }
       branch="$2"
+      shift 2
+      ;;
+    --source-pool)
+      test "$#" -ge 2 || { usage >&2; exit 2; }
+      source_pool="$2"
       shift 2
       ;;
     -h|--help)
@@ -67,11 +73,13 @@ git -C "$install_root" sparse-checkout set adapters bootstrap contracts gate pol
 git -C "$install_root" checkout "$branch"
 
 current_ref="$(git -C "$install_root" rev-parse HEAD)"
+source_pool="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve())' "$source_pool")"
 python3 "$install_root/bootstrap/product_state.py" \
   --product-root "$install_root" write \
   --mode installed --repository "$repository" --branch "$branch" \
-  --current-ref "$current_ref"
+  --current-ref "$current_ref" --source-pool "$source_pool"
 
-printf 'AgenticOps 安装完成：工作面=使用，root=%s\n' "$install_root"
+printf 'AgenticOps 安装完成：安装目录=%s\n' "$install_root"
 printf '安装通道：%s（%s）\n' "$branch" "$current_ref"
+printf '源码池：%s\n' "$source_pool"
 printf '下一步：%s/agenticops station init --station <项目工位> --project tapdata\n' "$install_root"
