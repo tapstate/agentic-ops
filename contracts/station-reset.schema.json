@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "epoch 4 工位重置确认清单",
+  "title": "epoch 5 工位重置确认清单（版本与规则快照另由读取器校验）",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -16,8 +16,23 @@
     "archive_runtime"
   ],
   "properties": {
+    "rules": {
+      "type": "object",
+      "required": ["digests", "objects"],
+      "additionalProperties": false,
+      "properties": {
+        "digests": {"type": "array", "items": {"anyOf": [{"const": null}, {"type": "string", "pattern": "^[0-9a-f]{64}$"}]}},
+        "objects": {"type": "object", "additionalProperties": {
+          "type": "object", "required": ["action", "layer"], "additionalProperties": false,
+          "properties": {
+            "action": {"enum": ["preserve", "source-reset", "clear-children", "lifecycle-clean", "remove"]},
+            "layer": {"enum": ["central", "project"]}
+          }
+        }}
+      }
+    },
     "schema_version": {
-      "const": 3
+      "enum": [3, 4]
     },
     "run_id": {
       "type": "string",
@@ -45,7 +60,7 @@
           "worktree_patch",
           "preservation"
         ],
-        "properties": {
+  "properties": {
           "action": {
             "enum": [
               "restore",

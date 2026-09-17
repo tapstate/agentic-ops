@@ -22,7 +22,7 @@ ensure 只在缺失时借助源码池准备独立副本，已有副本仅核验�
 
 准备使用临时目录核验后发布。更新失败不等于工作树仍可用：fetch 失败通常保留原 HEAD，checkout 中断必须先经 status 核验并由研发修复。管理器不自动清理共享材料、不运行 Wiki init、脚本或 Hook；不提供操作系统级只读隔离。
 
-Wiki 不是任务工程，不进入 engineering_baseline、源码仓库版本配套或发布验收。技能需要业务源码时只读项目 source 中的任务对应工程。共享材料不属于工作空间 purge 范围；本次不改变 `.agenticops` 状态协议，共享材料不改变代际；现役任务重置使用 epoch 4。
+Wiki 不是任务工程，不进入 engineering_baseline、源码仓库版本配套或发布验收。技能需要业务源码时只读项目 source 中的任务对应工程。共享材料不属于工作空间 purge 范围；本次不改变 `.agenticops` 状态协议，共享材料不改变代际；现役任务重置使用 epoch 5。
 
 ## 已有源码
 

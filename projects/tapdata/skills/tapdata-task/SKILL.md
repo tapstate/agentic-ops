@@ -25,9 +25,9 @@ metadata:
 
 ## 归档、释放和重置工位
 
-用户要求清理时使用现有 clean/release 重置工位，不创建另一套生命周期。保留 config/source/archive，runtime 清空保根，Project 声明并在生产前登记的源码生成目录整体回收；分支和 PR 默认保留。先读取 cleanup-preflight，展示任务状态、目录归属、源码成果处置、开发基线 SHA 和阻塞。request 包含 summary/reason、confirmed_digest 及真实 decision_ref；用户既有确认仍覆盖范围时直接沿用，不因归档完成再问。discard 源码还需额外确认 preflight 返回的 discard_digest。release 同时绑定原 candidate_digest，不能把 incomplete 档案后置改为 completed。
+用户要求清理时，新操作先调用 `workflow/workspace-clean.py --dir <workspace>` 只读预检；两层名单和确认请求格式见[配置化清理入口](../../../../docs/usage/task-authorization.md#配置化清理入口)。它复用现有 clean/release 生命周期；未完成任务先确认是否放弃，拒绝则停止，已有确认仍覆盖当前范围时复用。保留 config/source/archive 和命名分支、PR；源码构建残留由 Agent 使用项目原生工具清理，产品不执行 Maven/npm/pnpm，也不以通用删除兜底。discard 源码仍需额外确认精确快照；完成任务同时绑定 terminal proof 和 candidate_digest，不能把 incomplete 档案后置改为 completed。
 
-使用原生能力停止已登记写入者并回读后，调用 task.py clean/release；Workflow 在同一操作内归档、核验源码材料、回收目录、检出开发 SHA、撤销授权和解绑。源码归位使用 detached checkout，命名分支和提交保留，不 rebase、不猜测当前版本、不联网追新。下次接管重新核验开发基线。无有效基线、未知资源或已登记外部写入结果未知时，处理具体阻塞，不手改状态或换工具绕过。
+使用原生能力停止已登记写入者并回读后，按预检计划确认并执行 workspace-clean.py；Workflow 在同一操作内归档、通过独立源码复位模块核验成果并检出开发 SHA、回收已登记目录、撤销授权和解绑。源码归位使用 detached checkout，命名分支和提交保留，不 rebase、不猜测当前版本、不联网追新。下次接管重新核验开发基线。无有效基线、未知资源或已登记外部写入结果未知时，处理具体阻塞，不手改状态或换工具绕过。
 
 所有可迁出的日志、依赖安装、插件、报告和应用现场集中写 runtime。源码内 target/node_modules 生产前，使用 station_resources.py 登记 kind=directory、精确 path、producer，由 Workflow 创建并登记根身份后再执行构建；不得等目录非空后再按名称收编。已有空目录采用需 adopt_empty=true。受管目录内部无需逐文件登记。进程仍记录 PID、启动时间、cwd、executable；实际测试数据记录隔离身份及回读。
 
@@ -35,7 +35,7 @@ metadata:
 
 运行资源 external 与可选 Git 对象区分：分支 resource_type=git-branch，PR resource_type=pull-request，默认 retain，不因未删除阻止重置。用户要求删除分支/关闭 PR 时，在本地重置完成后独立展示 ID、SHA/状态及保护回读，经确认后先用 workflow/station_disposition.py 向原档案追加 intent，再使用原生工具执行，再追加 readback。unknown 只回读原操作，不重发；不修改 Jira，不改档案正文，不重新占用已释放工位。
 
-中断恢复同一 issue/run/revision/operation-id 和原请求。目录身份或源码处置变化时执行 cleanup-amend，绑定原摘要和 plan revision，补充确认差异；运行目录内部新增生成物在原目录授权范围内，不逐文件重做摘要。已完成目录回执后重新产生内容必须停止并明确补充处置，不能沿旧回执删除。确认请求保存在工位外系统临时目录，避免污染活动材料。epoch 3 工作空间必须由原版本退出及 purge 后重建，不能用本版接续旧清理。
+中断恢复同一 issue/run/revision/operation-id 和原请求；已有 schema 3 操作仍走原 task.py 入口，不转换为新计划。目录身份或源码处置变化时执行 cleanup-amend，绑定原摘要和 plan revision，补充确认差异；运行目录内部新增生成物在原目录授权范围内，不逐文件重做摘要。已完成目录回执后重新产生内容必须停止并明确补充处置，不能沿旧回执删除。确认请求保存在工位外系统临时目录，避免污染活动材料。epoch 4 及更旧工位必须由原版本退出及 purge 后重建为 epoch 5，不能用本版接续旧代际清理。
 
 ## 准入、设计和多仓库
 

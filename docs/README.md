@@ -1,5 +1,7 @@
 # AgenticOps 文档总纲
 
+配置化工位清理由[任务授权指引](usage/task-authorization.md#配置化清理入口)说明两个独立名单、确认请求及失败恢复入口；[工位合同](architecture/single-task-station.md#配置化清理计划版本-4)维护版本 4 的源码先复位顺序及与版本 3 的兼容边界。名单负责分类，归属与生命周期检查仍是副作用前提，不接入构建工具执行器。
+
 [维护指引](maintenance-guide.md#5-验证)负责诊断检查、绑定候选的正式四项验收、耗时报告与证据 v5 使用；[INT-001](user-stories/v1/int-001-release-governance.md)规定验收完整性、失败失效和首次信任根升级边界。运行进度与性能验收结果仍以 Jira 为准。
 
 TapData 的按需 Wiki 阅读由 [tapdata-wiki](../projects/tapdata/skills/tapdata-wiki/SKILL.md) 说明检索与源码核验边界；项目 Profile 仅引用中央登记的共享仓库。[架构总纲](architecture/agenticops-v1-architecture.md)定义中央共享材料归属；[工位源码与材料](usage/workspace-materials.md)负责共享仓库准备、显式更新和故障处理，不引入任务知识快照或自动刷新。

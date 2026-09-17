@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""epoch 4 目录重置、源码成果和恢复边界的真实 Git 回归。"""
+"""epoch 5 目录重置、源码成果和恢复边界的真实 Git 回归。"""
 import json
 import io
 import os
@@ -42,6 +42,60 @@ class ResourceTests(unittest.TestCase):
     def register_root(self, task, path='target'):
         resources.register(self.ws, task['issue_key'], task['run_id'], [{'kind':'directory', 'producer':'maven', 'path':'source/'+self.name+'/'+path}])
         return directories.load(self.ws, task)['source/'+self.name+'/'+path]
+
+    def gitlink_ready(self):
+        self.prepare_engineering()
+        sha = self.git(self.seed, 'rev-parse', 'HEAD')
+        self.git(self.seed, 'update-index', '--add', '--cacheinfo', '160000,' + sha + ',vendor/api')
+        self.git(self.seed, 'commit', '-m', 'gitlink baseline')
+        self.git(self.seed, 'push', str(self.remote), 'develop')
+        return self.ready()
+
+    def test_empty_gitlink_survives_clean(self):
+        task = self.gitlink_ready()
+        before = self.git(self.repo, 'ls-files', '--stage')
+        self.git(self.repo, 'config', 'submodule.recurse', 'true')
+        self.execute(task, self.reset_request(task))
+        self.assertIsNone(task_store.read_task(self.ws))
+        self.assertEqual(before, self.git(self.repo, 'ls-files', '--stage'))
+        self.assertTrue((self.repo / 'vendor/api').is_dir())
+        self.assertEqual([], list((self.repo / 'vendor/api').iterdir()))
+
+    def test_gitlink_unsafe_states_are_rejected(self):
+        task = self.gitlink_ready()
+        path = self.repo / 'vendor/api'
+        for name in ('data', '.git'):
+            with self.subTest(name=name):
+                (path / name).write_text('keep')
+                with self.assertRaisesRegex(ValueError, 'submodule'):
+                    resources.plan(self.ws, task)
+                (path / name).unlink()
+        path.rmdir()
+        artifacts.verify_special_entries(self.repo)
+        path.symlink_to(self.root, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, '符号链接'):
+            resources.plan(self.ws, task)
+        path.unlink()
+        path.mkdir()
+        self.git(self.repo, 'update-index', '--cacheinfo', '160000,' + self.git(self.repo, 'rev-parse', 'HEAD') + ',vendor/api')
+        with self.assertRaisesRegex(ValueError, '不一致'):
+            resources.plan(self.ws, task)
+        self.git(self.repo, 'restore', '--staged', 'vendor/api')
+        with self.assertRaisesRegex(ValueError, '不一致'):
+            artifacts.verify_special_entries(self.repo, 'HEAD^')
+
+    def test_gitlink_contents_appearing_before_neutral_are_preserved(self):
+        task = self.gitlink_ready()
+        request = self.reset_request(task)
+        original = resources.neutral
+        def late_content(*args):
+            (self.repo / 'vendor/api/late').write_text('keep')
+            return original(*args)
+        with mock.patch.object(resources, 'neutral', side_effect=late_content):
+            with self.assertRaisesRegex(ValueError, 'submodule'):
+                self.execute(task, request)
+        self.assertEqual('keep', (self.repo / 'vendor/api/late').read_text())
+        self.assertIsNotNone(task_store.read_task(self.ws))
 
     def test_runtime_generated_contents_need_no_file_registration(self):
         task = self.ready()
@@ -426,6 +480,32 @@ class ResourceTests(unittest.TestCase):
         self.assertTrue(root['observed_missing_before_intent'])
         self.execute(task, self.reset_request(task))
         self.assertIsNone(task_store.read_task(self.ws))
+
+    def test_root_idea_configuration_is_retained_during_clean(self):
+        task = self.ready()
+        idea = self.ws / '.idea'
+        idea.mkdir()
+        config = idea / 'workspace.xml'
+        config.write_text('<project/>')
+        identity = config.stat().st_ino
+        self.execute(task, self.reset_request(task))
+        self.assertIsNone(task_store.read_task(self.ws))
+        self.assertEqual('<project/>', config.read_text())
+        self.assertEqual(identity, config.stat().st_ino)
+
+    def test_root_idea_exception_rejects_links_files_and_nested_unknowns(self):
+        idea = self.ws / '.idea'
+        idea.write_text('keep')
+        with self.assertRaisesRegex(ValueError, '普通文件或目录'):
+            resources.verify_workspace_inventory(self.ws)
+        idea.unlink()
+        idea.symlink_to(self.root, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, '普通文件或目录'):
+            resources.verify_workspace_inventory(self.ws)
+        idea.unlink()
+        (self.ws / '.agenticops/.idea').mkdir()
+        with self.assertRaisesRegex(ValueError, '未知'):
+            resources.verify_workspace_inventory(self.ws)
 
     def test_unknown_workspace_objects_block_reuse(self):
         for relative in ('unknown', '.agenticops/unknown', '.agenticops/operation-data/unknown.json'):

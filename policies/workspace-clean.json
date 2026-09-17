@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "preserve": ["config/", "archive/", ".idea/"],
+  "clean": [
+    {"pattern": "source/", "action": "source-reset"},
+    {"pattern": "runtime/", "action": "clear-children"},
+    {"pattern": ".agenticops/", "action": "lifecycle-clean"}
+  ]
+}

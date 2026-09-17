@@ -74,7 +74,7 @@ config 不随任务删除。任务专用有效配置写入 runtime，正式档�
 
 ## 5. 操作状态与接口语义
 
-新接管使用 `facts.station_contract=3` 和 cleanup-plan schema 3，对应 workspace epoch 4。旧 epoch 的活动状态由原版本退出，不在本版保留旧清理执行器。一次确认、目录回收、源码成果与外部处置以第 7、8 节为准；只读预检仍由 cleanup-preflight 提供。
+新接管使用 `facts.station_contract=3`，对应 workspace epoch 5。新配置化入口生成 cleanup-plan schema 4，原 task.py 入口的 schema 3 计划保留独立恢复语义。旧 epoch 的活动状态由原版本退出，不在本版跨代际续接。一次确认、目录回收、源码成果与外部处置以第 7、8 节为准。
 
 编码前的新任务使用 `source-readiness` 刷新任务目标分支引用。准备先将旧证据标为 refreshing，逐仓保存 fetch 意图和结果，最终记录本次 observed 快照；失败重试安全地刷新同一 run 的证据，不推进阶段。检查全部工程身份、工作区与未登记 ignored 产物，以及任务分支、冻结基线祖先关系和目标分支。等同基线时可进入授权；目标正常向前推进时，用户可用 `--confirm-digest` 与 `--decision-ref` 明确选择保留冻结基线开发、在 PR 前按项目规则同步，或退出后重新接管。分叉、回退、缺失或不可信引用拒绝。grant 及进入 implementation 时重新回读本地与远端，授权绑定 source_readiness_digest；准备过程不修改冻结基线或工作分支内容。已开始编码后不要求工作区始终洁净，也不重复以本检查替代后续代码与 CI 证据。
 
@@ -147,7 +147,15 @@ operation.json 保留操作身份、阶段和材料引用；不可变大清单�
 
 空闲必须满足：runtime 为空、受管源码生成目录不存在、本次工程源码洁净且在确认开发 SHA、配置档案及保留引用完整、已登记写入者停止、运行资源无污染、没有活动授权/证据和未完成 operation。未知材料不删除且阻止解绑。先持久化结果与授权撤销事实，再清除活动副本、写 unbind intent、CAS current=null、补 done；任何中断沿原操作恢复，不碰新任务。
 
-目录归属、源码材料、操作 sidecar 和恢复语义使用 epoch 4。epoch 3 必须在原版本退出并受控 purge 后显式重建；本版不在线迁移或续接旧 operation。purge 校验并移除归属明确的 operation-data，保留 source/config/archive，未知或损坏状态停止。
+目录归属、源码材料、操作 sidecar 和恢复语义使用 epoch 5。epoch 4 及更早工位必须在原版本退出并受控 purge 后显式重建；本版不在线迁移或续接旧代际 operation。purge 校验并移除归属明确的 operation-data，保留 source/config/archive，未知或损坏状态停止。
+
+### 配置化清理计划版本 4
+
+`workspace-clean.py` 在原 clean/release 操作内使用清理计划 schema 4，分别绑定中央和项目名单摘要及根对象分类结果，不合并配置。未知对象、规则与核心生命周期冲突、未登记清理目录均在归档前预检拒绝；命中保留目录不遍历子树。源码构建目录必须由原生项目工具先清理，Workflow 只核验登记根缺失和父身份，不递归删除 source-generated 产物。
+
+执行顺序为正式归档核验、同一操作的源码成果恢复与 Git detached 归位、已登记目录回收、活动状态清理及解绑。源码步骤复用既有成果证明和 neutral 回执，额外的 workspace-source-reset 完成回执阻止恢复时重复还原旧 HEAD；后续仍重新核验源码洁净、归位 SHA、保留引用和产物缺失。普通工位根目录通过既有 directory 登记创建为 workspace-generated，删除使用原有目录身份与 FD 回收机制；不从配置取得未知目录的删除权。
+
+状态代际提升到 epoch 5：新增目录 kind、计划字段和执行顺序不兼容旧版读写，升级与回退检查必须在切换前拒绝不支持的代际。epoch 4 工位先由原版本完成退出与 purge，再显式初始化；不在线迁移。当前版本仍允许原 task.py 入口生成 schema 3 计划并按原顺序恢复，但这不是跨 epoch 恢复能力。schema 4 由新入口明确选择，不能用 schema 3 清理器解释其回执。
 
 ## 9. TapData 配方合同
 
@@ -172,7 +180,7 @@ FE/TM 工作目录在 runtime 中分开，连接同一已确认 Mongo 环境，�
 | TapData Project 与任务 Skill | 完整工程 Profile、分支解析消费、原生运行资源配方和四操作引导；不复制公共状态逻辑 |
 | docs、故事合同与测试 | 现役与目标区别在实现发布时收敛，按本合同验收并更新使用说明 |
 
-当前状态代际为 epoch 4，最低升级协议为 2。生成与清理机制先在同版本形成完整闭环，不依赖升级器：生成工位→任务接管/归档/释放或清理→workspace purge→重生成。purge 只移除归属明确的接线与受管状态，保留 source/config/archive；非空 runtime、未知 .agenticops 内容或未完成操作阻止解绑。保留目录可在明确 --reuse-materials 后复用，但不能自动导入配置、历史授权或验收。
+当前状态代际为 epoch 5，最低升级协议为 2。生成与清理机制先在同版本形成完整闭环，不依赖升级器：生成工位→任务接管/归档/释放或清理→workspace purge→重生成。purge 只移除归属明确的接线与受管状态，保留 source/config/archive；非空 runtime、未知 .agenticops 内容或未完成操作阻止解绑。保留目录可在明确 --reuse-materials 后复用，但不能自动导入配置、历史授权或验收。
 
 跨版本是第二阶段编排：先让原版本完成自身清理，再切换产品并调用新版本生成；新版本不解析旧任务或提供旧清理 Runtime。本次不另发过渡版本，旧安装先在原版本保存材料并受控解绑，再重新安装，不承诺旧升级器直接 update。新协议只保障此后的切换。任一已登记工作空间不兼容或无法核验均阻止版本切换；repair 不跨代际采用。回退使用相同干净边界。操作说明见[更新与回退](../usage/update-and-rollback.md)。
 
@@ -207,4 +215,4 @@ FE/TM 工作目录在 runtime 中分开，连接同一已确认 Mongo 环境，�
 
 初始化仍只生成空工位接线；接管确定 Project Profile 后才按所选仓库准备源码。缓存不可用时停止当前源码准备，不绕过先入池的顺序；已经完成 fetch 的恢复直接核验工位已有引用，不刷新缓存或重新解释历史基线。工作空间 purge 不清理产品根缓存，也不清理旧版源码池。
 
-本次只改变对象下载路径，不改变 `.agenticops/` 字段、clone/fetch 意图与回执含义，下载路径变化本身不改变 epoch；任务重置合同使用 epoch 4。同 epoch 已完成步骤和未完成 fetch 可直接恢复；工位不存在但 clone 已回执仍拒绝重建。缓存不是工作空间状态的迁移来源。
+本次只改变对象下载路径，不改变 `.agenticops/` 字段、clone/fetch 意图与回执含义，下载路径变化本身不改变 epoch；任务重置合同使用 epoch 5。同 epoch 已完成步骤和未完成 fetch 可直接恢复；工位不存在但 clone 已回执仍拒绝重建。缓存不是工作空间状态的迁移来源。

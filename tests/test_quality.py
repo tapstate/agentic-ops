@@ -120,6 +120,41 @@ class QualityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "尚未有效确认"):
             quality.q2_digest(self.base, self.task)
 
+    def test_scope_amend_invalidates_q1_q2_and_publication_without_rewriting_log(self):
+        self.feature_profile()
+        self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
+        self.publish_checkpoint("q2-plan")
+        prior = self.view()
+        state = quality.load(self.base, self.task)
+        self.task["repositories"][0]["approved_scope"] = "新增删除对账"
+        self.save_task()
+        after = self.view()
+        for checkpoint in ("q1-intake", "q2-plan"):
+            self.assertFalse(after["checkpoints"][checkpoint]["reviewed"])
+            self.assertNotEqual(prior["checkpoints"][checkpoint]["digest"], after["checkpoints"][checkpoint]["digest"])
+        self.assertEqual(state, quality.load(self.base, self.task))
+        self.assertTrue(prior["publications"]["q2-plan"]["snapshot_current"])
+        self.assertFalse(after["publications"]["q2-plan"]["snapshot_current"])
+
+    def test_persisted_verification_event_replays_original_scope(self):
+        from workflow import verification
+        self.feature_profile()
+        ctx = quality.context(self.base, self.task)
+        ctx["repositories"]["tapdata/tapdata"]["live_revision"] = "a" * 40
+        with mock.patch.object(quality, "context", return_value=ctx):
+            self.apply("verification", {"kind": "review", "repository": "tapdata/tapdata",
+                "target_revision": "a" * 40, "source_ref": "fixture:review", "complete": True, "items": []})
+        path = quality.state_path(self.base, self.task)
+        original_bytes = path.read_bytes()
+        state = quality.load(self.base, self.task)
+        self.assertNotIn("bindings", state["events"][-1]["command"]["payload"])
+        model = quality.replay(state)
+        self.assertEqual([], verification.problems(model, ctx, ["review"]))
+        changed = copy.deepcopy(ctx)
+        changed["repositories"]["tapdata/tapdata"]["approved_scope"] = "expanded"
+        self.assertTrue(verification.problems(model, changed, ["review"]))
+        self.assertEqual(original_bytes, path.read_bytes())
+
     def test_feature_publication_contains_complete_plan_and_accepts_draft(self):
         self.feature_profile(); self.select(); self.checkpoint("q1-intake")
         q1 = self.view()["checkpoints"]["q1-intake"]["publication_body"]
@@ -1183,6 +1218,21 @@ class VerificationContractTests(unittest.TestCase):
         self.v.record(model, p, self.ctx)
         self.assertEqual([], self.v.problems(model, self.ctx, ["local"]))
         self.assertEqual("UNKNOWN", model["verification"]["a/repo"]["local"]["data"]["results"][0]["result"])
+
+    def test_scope_change_invalidates_same_sha_material_and_keeps_history(self):
+        for field in ("approved_scope", "verification_method", "catalog_digest", "base_branch", "work_branch"):
+            with self.subTest(field=field):
+                ctx = copy.deepcopy(self.ctx)
+                model = {}
+                self.v.record(model, self.p, ctx)
+                saved = copy.deepcopy(model)
+                ctx["repositories"]["a/repo"][field] = "changed"
+                self.assertTrue(self.v.problems(model, ctx, ["local"]))
+                self.assertEqual(saved, model)
+                # 历史日志按事件时 context 重放，无需迁移状态或更改 epoch。
+                replayed = {}
+                self.v.record(replayed, self.p, self.ctx)
+                self.assertEqual(saved, replayed)
 
     def test_pending_review_and_unresolved_failure_block(self):
         p = {"kind": "review", "repository": "a/repo", "target_revision": "a" * 40,
