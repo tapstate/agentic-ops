@@ -1,4 +1,4 @@
-# 复制到工作空间 config/fe.yml；Access Code 来自该工位 TM 的实际初始化。
+# 复制到工位 config/fe.yml；Access Code 来自该工位 TM 的实际初始化。
 spring:
   data:
     mongodb:

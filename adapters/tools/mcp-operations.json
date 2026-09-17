@@ -63,8 +63,8 @@
     },
     "workflow_modules": {
       "workflow.task": "task.py",
-      "workflow.workspace-clean": "workspace-clean.py",
-      "workflow.workspace-source-reset": "workspace-source-reset.py"
+      "workflow.station-clean": "station-clean.py",
+      "workflow.station-source-reset": "station-source-reset.py"
     }
   },
   "mappings": {

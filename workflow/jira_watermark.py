@@ -116,7 +116,7 @@ def issue_from(snapshot, issue_key):
 
 
 def config(base):
-    profile = project_rules.load_profile(workspace=base)
+    profile = project_rules.load_profile(station=base)
     return profile["jira"]["takeover_watermark"]
 
 
@@ -127,9 +127,9 @@ def prepare(base, issue_key, snapshot):
     if previous:
         return dict(previous, repeated=True)
     fields, issue_type_id = issue_from(snapshot, issue_key)
-    if project_rules.scan_sensitive(project_rules.load_admission(workspace=base), json.dumps(snapshot, ensure_ascii=False)):
+    if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(snapshot, ensure_ascii=False)):
         raise ValueError("Jira 初始快照含敏感内容，请先脱敏")
-    product_root = project_rules.product_root_from_workspace(base)
+    product_root = project_rules.product_root_from_station(base)
     version = product_version.describe(product_root)
     facts = task.setdefault("facts", {})
     facts.setdefault("jira_snapshot", snapshot)
@@ -174,7 +174,7 @@ def complete(base, issue_key, outcome, snapshot, message=""):
     rules = config(base)
     if issue_type_id != record["issue_type_id"] or issue_type_id not in rules["issue_type_ids"]:
         raise ValueError("Jira 工作项类型已变化或不再适用接管版本水印")
-    product_root = project_rules.product_root_from_workspace(base)
+    product_root = project_rules.product_root_from_station(base)
     current_version = product_version.describe(product_root)
     if current_version != record["version"]:
         record.update(
@@ -196,7 +196,7 @@ def complete(base, issue_key, outcome, snapshot, message=""):
         record.update(outcome=outcome, reason="watermark_%s" % outcome)
         if message:
             text = str(message)[:600]
-            admission = project_rules.load_admission(workspace=base)
+            admission = project_rules.load_admission(station=base)
             record["message"] = (
                 "外部错误信息含敏感内容，原文未保存"
                 if project_rules.scan_sensitive(admission, text) else text
@@ -217,7 +217,7 @@ def takeover_warnings(base, task):
     record = status(base, task)
     if record.get("outcome") == "verified":
         try:
-            current_version = product_version.describe(project_rules.product_root_from_workspace(base))
+            current_version = product_version.describe(project_rules.product_root_from_station(base))
         except ValueError as error:
             return ["无法确认当前 Product Root 版本：%s" % error]
         if current_version != record.get("version"):
@@ -248,7 +248,7 @@ def main():
     status_parser.add_argument("--dir", default=".")
     args = parser.parse_args()
     try:
-        task_store.workspace_project(args.dir)
+        task_store.station_project(args.dir)
         issue_key = task_store.resolve_issue(args.dir, args.issue_key)
         with task_store.task_run_lock(args.dir, issue_key):
             task = task_store.read_task(args.dir, issue_key)

@@ -19,7 +19,7 @@ def _resources():
 
 
 def _project(base):
-    return project_rules.product_root_from_workspace(base) / "projects" / task_store.workspace_project(base)
+    return project_rules.product_root_from_station(base) / "projects" / task_store.station_project(base)
 
 
 def _plan_receipt(base, task, operation, phase, snapshot=None):
@@ -92,18 +92,18 @@ def _clear_active(base, operation):
 def takeover(base, request, operation_id, expected_revision):
     with task_store.task_state_lock(base):
         issue = task_store.validate_issue_key(request["issue_key"])
-        project_rules.validate_project_issue(project_rules.load_profile(workspace=base), issue)
-        project_rules.class_spec(project_rules.load_admission(workspace=base), request["task_class"])
+        project_rules.validate_project_issue(project_rules.load_profile(station=base), issue)
+        project_rules.class_spec(project_rules.load_admission(station=base), request["task_class"])
         project = _project(base)
         profiles = json.loads((project / "engineering-profiles.json").read_text())
         profile = profiles["profiles"][request.get("profile", "full-application")]
-        catalog = project_rules.load_repository_catalog(workspace=base)["repositories"]
+        catalog = project_rules.load_repository_catalog(station=base)["repositories"]
         selected = baseline.selected_repositories(profile, catalog, request.get("optional_repositories", []))
         previous = operations.read(base)
         if not previous or previous["operation_id"] != operation_id:
             if task_store.read_current(base)["current"] is not None:
                 raise ValueError("工位仍有当前任务，不能接管新任务")
-            _resources().verify_workspace_inventory(base)
+            _resources().verify_station_inventory(base)
             for name in selected:
                 path = source.repository_path(base, name)
                 if path.exists():
@@ -126,7 +126,7 @@ def takeover(base, request, operation_id, expected_revision):
                 raise ValueError("接管前 runtime 必须为空")
             task["retained_repositories"] = source.check_station_layout(base, catalog, selected)
             task["initial_runtime"] = {"path": "runtime", "run_id": task["run_id"],
-                "station_id": json.loads((task_store.state_path(base) / "workspace.json").read_text())["workspace_id"],
+                "station_id": json.loads((task_store.state_path(base) / "station.json").read_text())["station_id"],
                 "kind": "runtime-exclusive", "producer": "workflow", "recipe": {"id": "workflow-runtime", "revision": 1},
                 "parent": station_directories.identity(runtime.parent), "identity": station_directories.identity(runtime),
                 "disposition": "clear_children_keep_root"}
@@ -207,7 +207,7 @@ def scope_change(base, issue, run_id, revision, operation_id, name, work_branch,
         if expected_head is None:
             generated = task_store.generated_work_branch(base, task)
             if work_branch is not None and work_branch != generated:
-                raise ValueError("新工作分支必须使用工作空间 git_name 与当前 run 生成")
+                raise ValueError("新工作分支必须使用工位 git_name 与当前 run 生成")
             work_branch = generated
         elif work_branch is None:
             raise ValueError("续办必须明确既有工作分支")
@@ -447,7 +447,7 @@ def amend_cleanup(base, issue, run_id, revision, operation_id, expected_plan_dig
                 "record": operation.pop("archive_record"), "evidence": operation.pop("archive_evidence", None), "artifacts": operation.pop("archive_artifacts", None), "logs": operation.pop("archive_logs", None),
                 "publication_intent": copy.deepcopy(operation["steps"].get("archive-publish:" + str(generation)))})
         for name, step in operation["steps"].items():
-            if name.startswith(("resource:", "source-reset:", "workspace-source-reset:", "external:", "clear-active:", "archive-publish:")) and step["receipt"] is None and not step.get("superseded_by"):
+            if name.startswith(("resource:", "source-reset:", "station-source-reset:", "external:", "clear-active:", "archive-publish:")) and step["receipt"] is None and not step.get("superseded_by"):
                 step["superseded_by"] = confirmed
                 step["superseded_plan_digest"] = expected_plan_digest
                 step["superseded_plan_revision"] = generation
@@ -509,7 +509,7 @@ def execute(base, kind, issue, run_id, revision, operation_id, request):
             if not task.get("archive_ref"):
                 baseline.text(request.get("summary"), "归档总结")
                 baseline.text(request.get("reason"), "归档原因")
-                if project_rules.scan_sensitive(project_rules.load_admission(workspace=base), request["summary"] + "\n" + request["reason"]):
+                if project_rules.scan_sensitive(project_rules.load_admission(station=base), request["summary"] + "\n" + request["reason"]):
                     raise ValueError("归档输入包含敏感内容")
             _resources().verify_stopped(base, task)
             _resources().verify_known_external(base, task)
@@ -552,7 +552,7 @@ def execute(base, kind, issue, run_id, revision, operation_id, request):
             operations.save(base, operation)
         modern = plan["schema_version"] == 4
         if modern:
-            resources.verify_workspace_inventory(base, plan["rules"], allow_pending=True)
+            resources.verify_station_inventory(base, plan["rules"], allow_pending=True)
         reference = archives.publish(base, task, request, plan, operation, lambda: resources.plan(base, task, version=plan["schema_version"]))
         _flush_amendment_receipts(base, task, operation)
         if kind == "archive":
@@ -572,10 +572,10 @@ def execute(base, kind, issue, run_id, revision, operation_id, request):
                                          "confirmation_digest": confirmed, "archive_digest": reference["digest"]}
         operations.save(base, operation)
         if modern:
-            from workflow import workspace_source_reset
-            workspace_source_reset.apply(base, task, operation)
+            from workflow import station_source_reset
+            station_source_reset.apply(base, task, operation)
             resources.clean(base, task, plan, confirmed, operation, directories_only=True)
-            workspace_source_reset.apply(base, task, operation)
+            station_source_reset.apply(base, task, operation)
             if kind == "release":
                 observed = source.inspect(base, task["engineering_baseline"])
                 expected = task["terminal_proof"]["repositories"]
@@ -603,7 +603,7 @@ def execute(base, kind, issue, run_id, revision, operation_id, request):
             _plan_receipt(base, task, operation, "resources-released")
         else:
             archives.receipt(base, task, operation, {"outcome": task["outcome"], "cleanup_manifest": operation["cleanup_manifest"]})
-        resources.verify_workspace_inventory(base, plan.get("rules"))
+        resources.verify_station_inventory(base, plan.get("rules"))
         _clear_active(base, operation)
         operation["final_task"] = {key: task[key] for key in ("issue_key", "run_id", "outcome", "archive_ref")}
         operations.save(base, operation)

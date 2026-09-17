@@ -9,13 +9,13 @@ def apply(base, task, operation):
         raise ValueError("源码复位必须属于当前版本 4 清理操作")
     station_archive.verify(base, task.get("archive_ref"), task)
     station_resources.verify_stopped(base, task)
-    station_resources.verify_workspace_inventory(base, plan["rules"], allow_pending=True)
+    station_resources.verify_station_inventory(base, plan["rules"], allow_pending=True)
     for entry in plan["directories"]:
         path = station_directories.precheck(base, task, entry, operation)
         if entry["kind"] == "source-generated" and path[0].exists():
             raise ValueError("源码构建产物尚未清理，请使用项目原生工具：" + entry["path"])
     generation = str(len(operation.get("plan_revisions", [])))
-    step_name = "workspace-source-reset:" + generation + ":" + plan["digest"]
+    step_name = "station-source-reset:" + generation + ":" + plan["digest"]
     done = operation["steps"].get(step_name, {}).get("receipt")
     if done is None:
         # 按当前计划的源码成果回执判断，不用旧计划的 neutral 推定新增成果已恢复。

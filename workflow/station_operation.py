@@ -47,7 +47,7 @@ def read(base):
             or type(value["expected_revision"]) is not int or value["expected_revision"] < 0
             or not isinstance(value["phase"], str) or not value["phase"]):
         raise ValueError("工位操作日志身份或请求摘要无效")
-    from workflow.workspace_clean_rules import validate_snapshot
+    from workflow.station_clean_rules import validate_snapshot
     if "cleanup_plan" in value:
         validate_snapshot(value["cleanup_plan"])
     for revision in value.get("plan_revisions", []):
@@ -65,7 +65,7 @@ def read(base):
 def _verify_superseded(operation, name, step):
     history = operation.get("plan_revisions", [])
     current = operation.get("cleanup_plan", {})
-    if not isinstance(history, list) or not isinstance(current, dict) or not name.startswith(("resource:", "source-reset:", "workspace-source-reset:", "external:", "clear-active:", "archive-publish:")):
+    if not isinstance(history, list) or not isinstance(current, dict) or not name.startswith(("resource:", "source-reset:", "station-source-reset:", "external:", "clear-active:", "archive-publish:")):
         raise ValueError("只有清理资源步骤可被已确认的新计划替代")
     for index, revision in enumerate(history):
         if not isinstance(revision, dict) or not isinstance(revision.get("plan"), dict):
@@ -107,9 +107,9 @@ def _verify_superseded(operation, name, step):
     elif name.startswith("clear-active:"):
         if name != "clear-active:" + str(original_revision) + ":" + original or not isinstance(step["expected"].get("files"), dict):
             raise ValueError("活动材料清理步骤不属于原计划")
-    elif name.startswith("workspace-source-reset:"):
+    elif name.startswith("station-source-reset:"):
         if (revision["plan"].get("schema_version") != 4
-                or name != "workspace-source-reset:" + str(original_revision) + ":" + original
+                or name != "station-source-reset:" + str(original_revision) + ":" + original
                 or step["expected"] != {"plan_digest": original}):
             raise ValueError("工位源码复位步骤不属于原计划")
     elif name.startswith("source-reset:"):

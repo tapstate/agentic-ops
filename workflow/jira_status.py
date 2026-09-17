@@ -47,7 +47,7 @@ def save_state(base, task, state):
 
 
 def config(base, task):
-    profile = project_rules.load_profile(workspace=base)
+    profile = project_rules.load_profile(station=base)
     result = profile.get("jira", {}).get("status_sync")
     if not isinstance(result, dict) or result.get("schema_version") != 1:
         raise ValueError("当前 Project 未配置 Jira 状态同步")
@@ -314,7 +314,7 @@ def complete(base, issue_key, trigger, outcome, snapshot, message):
     record["reason"] = "target_read_back" if reached else "transition_%s" % outcome
     if message:
         text = str(message)[:600]
-        admission = project_rules.load_admission(workspace=base)
+        admission = project_rules.load_admission(station=base)
         record["message"] = ("外部错误信息含敏感内容，原文未保存" if project_rules.scan_sensitive(admission, text)
                              else text)
     if not reached:
@@ -345,7 +345,7 @@ def main():
     p.add_argument("--dir", default=".")
     args = parser.parse_args()
     try:
-        task_store.workspace_project(args.dir)
+        task_store.station_project(args.dir)
         issue = task_store.resolve_issue(args.dir, args.issue_key)
         with task_store.task_run_lock(args.dir, issue):
             task = task_store.read_task(args.dir, issue)

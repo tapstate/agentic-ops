@@ -120,7 +120,7 @@ def snapshot(base, name, roots, decisions, reset_sha="HEAD"):
 
 def material(base, task, plan, private_export=False):
     """只将明确选择 archive 的字节写进档案；export/discard 只保存安全指纹。"""
-    admission = project_rules.load_admission(workspace=base)
+    admission = project_rules.load_admission(station=base)
     result = {"schema_version": 1, "run_id": task["run_id"], "repositories": {}}
     total = 0
     for name, state in plan["source"].items():

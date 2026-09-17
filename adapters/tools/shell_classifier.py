@@ -18,7 +18,7 @@ PY_FLAGS = set("-b -B -d -E -h --help -i -I -O -OO -P -q -s -S -u -v -V --versio
                "--help-env --help-xoptions --help-all".split())
 def classify_bash_call(command):
     operations = []
-    target_fields = ("issue_key", "workspace", "git_cwd", "push_source_ref", "push_destination_ref",
+    target_fields = ("issue_key", "station", "git_cwd", "push_source_ref", "push_destination_ref",
                      "push_target_branch", "repository"); targets = {key: [] for key in target_fields}
     native_shell_context = False
     for command_tokens, reliable in normalize_shell_call(command, SHELL):
@@ -38,7 +38,7 @@ def classify_bash_call(command):
         unique = set(values)
         if values and all(values) and len(unique) == 1:
             target[field] = unique.pop()
-        elif field in ("issue_key", "workspace") and len(unique) == 1:
+        elif field in ("issue_key", "station") and len(unique) == 1:
             continue
         elif field == "repository" and len(values) == 1 and values[0] == "":
             continue
@@ -85,16 +85,16 @@ def _dispatch(tokens):
     executor, _ = _executor_spec(executable)
     if executor and executor != "python":
         return [], {}
-    if executable == "agenticops" and "workspace" in tokens and "purge" in tokens:
+    if executable == "agenticops" and "station" in tokens and "purge" in tokens:
         return (
             ["manage_station", UNKNOWN],
             {},
         ) if len(
-            workspaces := _argument_values(tokens, "--workspace")
-        ) > 1 or any(item.split("=", 1)[0] not in ("--all", "--yes", "--workspace")
+            stations := _argument_values(tokens, "--station")
+        ) > 1 or any(item.split("=", 1)[0] not in ("--all", "--yes", "--station")
                      for item in tokens if item.startswith("-")) else (
             ["manage_station"],
-            {"workspace": workspaces[0] if workspaces else ""},
+            {"station": stations[0] if stations else ""},
         )
     return _workflow(tokens)
 
@@ -135,7 +135,7 @@ def _workflow(tokens):
     if index >= len(tokens):
         return [], {}
     normalized = tokens[index].replace("\\", "/")
-    script = next((name for name in ("task.py", "workspace-clean.py", "workspace-source-reset.py")
+    script = next((name for name in ("task.py", "station-clean.py", "station-source-reset.py")
                    if normalized == "workflow/" + name or normalized.endswith("/workflow/" + name)), None)
     if executor == "python" and not script:
         return [], {}
@@ -145,7 +145,7 @@ def _workflow(tokens):
 def _workflow_action(script, arguments):
     if not script or any(item in ("-h", "--help") for item in arguments):
         return [], {}
-    if script in ("workspace-clean.py", "workspace-source-reset.py"):
+    if script in ("station-clean.py", "station-source-reset.py"):
         operation = "manage_station"
     elif arguments and arguments[0] in ("takeover", "archive", "release", "clean", "cleanup-amend"):
         operation = "manage_station"
@@ -156,7 +156,7 @@ def _workflow_action(script, arguments):
     if not operation:
         return [], {}
     bindings = {"issue_key": _argument_values(arguments, "--issue-key"),
-                "workspace": _argument_values(arguments, "--dir")}
+                "station": _argument_values(arguments, "--dir")}
     if any(len(values) > 1 for values in bindings.values()):
         return [operation, UNKNOWN], {}
     target = {field: values[0] if values else "" for field, values in bindings.items()}

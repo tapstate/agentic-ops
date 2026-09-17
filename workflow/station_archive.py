@@ -16,7 +16,7 @@ def _directory(path):
 
 
 def _evidence(base, task):
-    rules = project_rules.load_admission(workspace=base)
+    rules = project_rules.load_admission(station=base)
     def redact(value, key=""):
         if any(word in key.lower() for word in ("password", "secret", "token", "credential", "private_key")):
             return "[redacted]"
@@ -59,8 +59,8 @@ def verify(base, reference, task):
     if record_path.is_symlink():
         raise ValueError("档案正文不能是符号链接")
     record = json.loads(record_path.read_text(encoding="utf-8"))
-    binding = json.loads((task_store.state_path(base) / "workspace.json").read_text(encoding="utf-8"))
-    if record.get("station_id") != binding.get("workspace_id"):
+    binding = json.loads((task_store.state_path(base) / "station.json").read_text(encoding="utf-8"))
+    if record.get("station_id") != binding.get("station_id"):
         raise ValueError("档案不属于当前工位")
     if {path.name for path in target.iterdir()} - {"record.json", "summary.md", "evidence.json", "source-artifacts.json", "runtime-evidence.json", "receipts"}:
         raise ValueError("正式档案包含清单外文件")
@@ -115,7 +115,7 @@ def publish(base, task, request, inventory, operation, check_stable=None):
         return task["archive_ref"]
     summary = baseline.text(request.get("summary"), "归档总结")
     reason = baseline.text(request.get("reason"), "归档原因")
-    if project_rules.scan_sensitive(project_rules.load_admission(workspace=base), summary + "\n" + reason):
+    if project_rules.scan_sensitive(project_rules.load_admission(station=base), summary + "\n" + reason):
         raise ValueError("总结或原因包含敏感内容，请先脱敏")
     root = Path(base).resolve() / "archive"
     _directory(root)
@@ -125,14 +125,14 @@ def publish(base, task, request, inventory, operation, check_stable=None):
     relative = target.relative_to(Path(base).resolve()).as_posix()
     recorded = operation.get("archive_record")
     if recorded is None:
-        binding = json.loads((task_store.state_path(base) / "workspace.json").read_text())
+        binding = json.loads((task_store.state_path(base) / "station.json").read_text())
         data = summary.encode("utf-8")
         evidence = _evidence(base, task)
         from workflow import station_artifacts
         artifacts = station_artifacts.material(base, task, inventory)
         from workflow import station_logs
         logs = station_logs.material(base, task, inventory)
-        recorded = {"schema_version": 1, "station_id": binding["workspace_id"],
+        recorded = {"schema_version": 1, "station_id": binding["station_id"],
                     "issue_key": task["issue_key"], "run_id": task["run_id"],
                     "task_result": "completed" if task.get("outcome") == "completed" and task.get("terminal_proof") else "incomplete",
                     "stage": task["stage"], "reason": reason,

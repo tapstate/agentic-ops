@@ -162,7 +162,7 @@ def validate(baseline):
     return baseline
 
 
-def verify_local_repository(workspace, repository, origin, ref_kind, ref, sha):
+def verify_local_repository(station, repository, origin, ref_kind, ref, sha):
     """只读核对独立仓库及本地引用对象；不代替接管时的新鲜远端查询。
 
     不 fetch/clone/checkout；缺失对象由接管操作按其已登记意图准备后重试。
@@ -178,7 +178,7 @@ def verify_local_repository(workspace, repository, origin, ref_kind, ref, sha):
             raise ValueError("commit 引用与 SHA 不一致")
     else:
         ref_name(ref)
-    root = Path(workspace).resolve(strict=True)
+    root = Path(station).resolve(strict=True)
     path = root / "source" / repository
     chain = path.relative_to(root).parts
     current = root
@@ -233,11 +233,11 @@ def verify_local_repository(workspace, repository, origin, ref_kind, ref, sha):
     return {"repository_id": repository, "commit_sha": sha, "path": "source/" + repository}
 
 
-def verify_local_baseline(workspace, value):
+def verify_local_baseline(station, value):
     """全量核验 Git 对象后返回独立副本；任何仓失败均不返回部分成功。"""
     validate(value)
     for name, entry in sorted(value["repositories"].items()):
-        verify_local_repository(workspace, name, entry["origin"], entry["ref_kind"],
+        verify_local_repository(station, name, entry["origin"], entry["ref_kind"],
                                 entry["ref_name"], entry["commit_sha"])
     return copy.deepcopy(value)
 

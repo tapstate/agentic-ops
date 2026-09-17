@@ -29,11 +29,11 @@ def now():
 
 
 def admission(base):
-    return project_rules.load_admission(workspace=base)
+    return project_rules.load_admission(station=base)
 
 
 def profile(base):
-    return project_rules.load_profile(workspace=base)
+    return project_rules.load_profile(station=base)
 
 
 def resolve_issue(base, issue_key=None):
@@ -185,7 +185,7 @@ def repository_context(base, task):
     from workflow import station_operation
     return {"issue_key": task["issue_key"], "run_id": task["run_id"], "revision": task["_revision"],
             "operation": station_operation.read(base),
-            "workspace": str(Path(base).resolve()), "engineering_baseline": task["engineering_baseline"],
+            "station": str(Path(base).resolve()), "engineering_baseline": task["engineering_baseline"],
             "task_repositories": task["task_repositories"],
             "repositories": task.get("repositories", []),
             "paths": {name: str(Path(base).resolve() / name) for name in ("source", "config", "runtime", "archive")}}
@@ -600,9 +600,9 @@ def cmd_runtime_path(args):
         if task.get("archive_ref") or task.get("outcome") != "in_progress":
             raise ValueError("任务已归档或非进行中，不能继续取得 runtime 路径")
         path = station_directories.runtime_child(args.dir, task, args.name)
-        workspace = Path(args.dir).resolve()
-        station_id = json.loads((task_store.state_path(args.dir) / "workspace.json").read_text(encoding="utf-8"))["workspace_id"]
-        print(json.dumps({"workspace": str(workspace), "station_id": station_id,
+        station = Path(args.dir).resolve()
+        station_id = json.loads((task_store.state_path(args.dir) / "station.json").read_text(encoding="utf-8"))["station_id"]
+        print(json.dumps({"station": str(station), "station_id": station_id,
                           "run_id": task["run_id"], "local_repository": str(path)},
                          ensure_ascii=False, indent=2))
     return 0
@@ -888,7 +888,7 @@ def main():
     add = repository_sub.add_parser("add")
     add.add_argument("--issue-key")
     add.add_argument("--repo", required=True)
-    add.add_argument("--work-branch", help="仅续办既有分支时需要；新分支由工作空间 git_name 和当前 run 自动生成")
+    add.add_argument("--work-branch", help="仅续办既有分支时需要；新分支由工位 git_name 和当前 run 自动生成")
     add.add_argument("--base-branch", required=True)
     add.add_argument("--operation-id", required=True)
     add.add_argument("--expected-revision", required=True, type=int)
@@ -964,7 +964,7 @@ def main():
         repository_sub.choices[command].add_argument("--expected-run-id", required=True)
     args = parser.parse_args()
     try:
-        task_store.workspace_project(args.dir)
+        task_store.station_project(args.dir)
         task_store.read_current(args.dir)
         return args.func(args)
     except ValueError as error:

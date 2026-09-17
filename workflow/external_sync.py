@@ -45,7 +45,7 @@ def record_readback(base, task, payload):
     record = {"status": "verified", "fact_digest": quality.digest(value), "jira_field": payload["jira_field"],
               "source_ref": payload["source_ref"]}
     from workflow import project_rules
-    if project_rules.scan_sensitive(project_rules.load_admission(workspace=base), json.dumps(record, ensure_ascii=False)):
+    if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(record, ensure_ascii=False)):
         raise ValueError("回读来源含敏感内容，请脱敏")
     records = load(base, task)
     records[key] = record
@@ -75,7 +75,7 @@ def warnings(base, task, report=None):
             watermark.get("reason", "水印未同步"), watermark.get("source_ref", ""))
     attempts = jira_status.load_state(base, task)["attempts"]
     from workflow import project_rules
-    status_rules = project_rules.load_profile(workspace=base).get("jira", {}).get("status_sync", {})
+    status_rules = project_rules.load_profile(station=base).get("jira", {}).get("status_sync", {})
     if task["task_class"] in status_rules.get("task_classes", []):
         due = ["takeover"] if task.get("stage") != "waiting_takeover" else []
         if task.get("stage") in ("ci_validation", "completed"):

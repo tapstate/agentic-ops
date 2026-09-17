@@ -26,7 +26,7 @@ quick: runtime resources
 full: runtime resources install release
 runtime: Gate、契约、Adapter、Workflow、故事门禁
 resources: 工程结构和架构边界
-install: 源码维护、安装、工作空间、更新和回退
+install: 源码维护、安装、工位、更新和回退
 release: 发布治理
 EOF
 }

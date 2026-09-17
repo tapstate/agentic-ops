@@ -33,9 +33,9 @@ def pattern(value):
 
 
 def load(base):
-    root = project_rules.product_root_from_workspace(base)
-    project = project_rules.project_from_workspace(base)
-    paths = [root / "policies/workspace-clean.json", root / "projects" / project / "workspace-clean.json"]
+    root = project_rules.product_root_from_station(base)
+    project = project_rules.project_from_station(base)
+    paths = [root / "policies/station-clean.json", root / "projects" / project / "station-clean.json"]
     layers, hashes = [], []
     for index, path in enumerate(paths):
         if path.is_symlink():

@@ -91,16 +91,16 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             "_path": Path("/pool/%s" % repository.rsplit("/", 1)[-1]) if local_status == "available" else None,
         }
 
-    def test_workspace_binding_is_default_before_execution_directory(self):
+    def test_station_binding_is_default_before_execution_directory(self):
         with tempfile.TemporaryDirectory() as temporary:
-            workspace = Path(temporary) / "workspace"
-            binding = workspace / ".agenticops" / "workspace.json"
+            station = Path(temporary) / "station"
+            binding = station / ".agenticops" / "station.json"
             binding.parent.mkdir(parents=True)
             binding.write_text(json.dumps({"schema_version": 3}), encoding="utf-8")
-            root, source = align.resolve_tapdata_root(None, workspace / "nested")
+            root, source = align.resolve_tapdata_root(None, station / "nested")
 
-        self.assertEqual((workspace / "source/tapdata").resolve(), root)
-        self.assertIn("workspace.json", source)
+        self.assertEqual((station / "source/tapdata").resolve(), root)
+        self.assertIn("station.json", source)
 
     def test_execution_directory_is_only_fallback_not_user_home(self):
         root, source = align.resolve_tapdata_root(None, "/work/current")
@@ -133,15 +133,15 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
         self.assertEqual(Path("/tapdata-root/tapdata"), align.module_repository("/tapdata-root", "tapdata/tapdata"))
         self.assertEqual(Path("/tapdata-root/tapdata-web"), align.module_repository("/tapdata-root", "tapdata/tapdata-web"))
 
-    def test_git_refs_cache_belongs_to_workspace_and_reads_fixed_source(self):
+    def test_git_refs_cache_belongs_to_station_and_reads_fixed_source(self):
         with tempfile.TemporaryDirectory() as temporary:
-            workspace = Path(temporary) / "workspace"
-            binding = workspace / ".agenticops" / "workspace.json"
+            station = Path(temporary) / "station"
+            binding = station / ".agenticops" / "station.json"
             binding.parent.mkdir(parents=True)
             binding.write_text(json.dumps({"schema_version": 3}), encoding="utf-8")
-            cache, pool = align.git_refs_cache_file(workspace)
-        self.assertEqual((workspace / ".agenticops" / "git-ref-cache-v2.json").resolve(), cache)
-        self.assertEqual((workspace / "source").resolve(), pool)
+            cache, pool = align.git_refs_cache_file(station)
+        self.assertEqual((station / ".agenticops" / "git-ref-cache-v2.json").resolve(), cache)
+        self.assertEqual((station / "source").resolve(), pool)
 
     def test_main_repository_is_validated_before_other_module_repositories(self):
         repositories = {"tapdata/tapdata-web": {}, "tapdata/tapdata": {}}
@@ -190,7 +190,7 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
         observations = {"tapdata/tapdata": self.observation("tapdata/tapdata", {"main": "sha"}, selection="required")}
         with mock.patch.object(align, "load_configuration", return_value=(config, {"tapdata/tapdata": {}})), \
              mock.patch.object(align, "resolve_tapdata_root", return_value=(Path("/tapdata-root"), "explicit")), \
-             mock.patch.object(align, "git_refs_cache_file", return_value=(Path("/workspace/.agenticops/git-ref-cache-v2.json"), Path("/pool"))), \
+             mock.patch.object(align, "git_refs_cache_file", return_value=(Path("/station/.agenticops/git-ref-cache-v2.json"), Path("/pool"))), \
              mock.patch.object(align, "inspect_repositories", return_value=(observations, 0.25)), \
              mock.patch.object(align, "build_plan", return_value=rows), \
              mock.patch.object(align, "report_outcome", return_value=("partial", [], {"cached_exists": 1})), \

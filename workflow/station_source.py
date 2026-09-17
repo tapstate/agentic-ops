@@ -53,9 +53,9 @@ def git(path, *arguments, check=True):
     return result
 
 
-def repository_path(workspace, name):
+def repository_path(station, name):
     baseline.repository_id(name)
-    root = Path(workspace).resolve()
+    root = Path(station).resolve()
     path = root / "source" / name
     current = root
     for part in path.relative_to(root).parts:
@@ -96,9 +96,9 @@ def require_clean(path):
         raise ValueError("源码仓库存在未提交修改，拒绝覆盖：%s" % path)
 
 
-def check_station_layout(workspace, catalog, selected):
+def check_station_layout(station, catalog, selected):
     """仅检查工位源码边界；未知目录不被当作可回收产物。"""
-    root = Path(workspace).resolve() / "source"
+    root = Path(station).resolve() / "source"
     if root.is_symlink():
         raise ValueError("source 不能是符号链接")
     retained = {}
@@ -122,11 +122,11 @@ def check_station_layout(workspace, catalog, selected):
     return retained
 
 
-def prepare_repositories(workspace, catalog, selected, operation):
+def prepare_repositories(station, catalog, selected, operation):
     """先登记 clone/fetch 意图；失败保留现场，只按同一操作恢复。"""
     observations = {}
     for name in selected:
-        path = repository_path(workspace, name)
+        path = repository_path(station, name)
         origin = catalog[name]["origin"]
         step = "clone:" + name
         recorded = operation["steps"].get(step)
@@ -140,9 +140,9 @@ def prepare_repositories(workspace, catalog, selected, operation):
         if path.exists():
             identity(path, origin)
         if not completed_fetch or completed_fetch["receipt"] is None:
-            operations.intent(workspace, operation, step,
+            operations.intent(station, operation, step,
                               recorded["before"] if recorded else {"exists": path.exists()}, {"origin": origin})
-            with source_pool.refreshed(workspace, name, origin, git) as cache:
+            with source_pool.refreshed(station, name, origin, git) as cache:
                 if not path.exists():
                     path.parent.mkdir(parents=True, exist_ok=True)
                     with tempfile.TemporaryDirectory(prefix=".prepare-", dir=path.parent) as temporary:
@@ -151,8 +151,8 @@ def prepare_repositories(workspace, catalog, selected, operation):
                         git(staged, "remote", "set-url", "origin", origin)
                         identity(staged, origin)
                         staged.rename(path)
-                operations.receipt(workspace, operation, step, {"path": str(path), "origin": origin})
-                operations.intent(workspace, operation, fetch_step, {}, {"origin": origin})
+                operations.receipt(station, operation, step, {"path": str(path), "origin": origin})
+                operations.intent(station, operation, fetch_step, {}, {"origin": origin})
                 git(path, "fetch", "--prune", str(cache),
                     "+refs/heads/*:refs/remotes/origin/*", "refs/tags/*:refs/tags/*")
         identity(path, origin)
@@ -164,16 +164,16 @@ def prepare_repositories(workspace, catalog, selected, operation):
                 refs[ref.removeprefix("refs/remotes/origin/")] = sha
         if fetch["receipt"] is not None and fetch["receipt"] != {"refs": refs}:
             raise ValueError("已核验的远端引用发生漂移")
-        operations.receipt(workspace, operation, fetch_step, {"refs": refs})
+        operations.receipt(station, operation, fetch_step, {"refs": refs})
         observations[name] = {"selection": "required", "local": {"status": "available"},
                               "refs": {"verification": "verified"}, "_path": path, "_refs": refs}
     return observations
 
 
-def checkout_baseline(workspace, value, operation):
+def checkout_baseline(station, value, operation):
     baseline.validate(value)
     for name, entry in value["repositories"].items():
-        path = repository_path(workspace, name)
+        path = repository_path(station, name)
         identity(path, entry["origin"])
         step = "checkout:" + name
         expected = {"sha": entry["commit_sha"], "detached": True}
@@ -184,7 +184,7 @@ def checkout_baseline(workspace, value, operation):
                 raise ValueError("已完成的 checkout 发生漂移")
             require_clean(path)
             continue
-        operations.intent(workspace, operation, step, {}, expected)
+        operations.intent(station, operation, step, {}, expected)
         clone = operation["steps"]["clone:" + name]
         if clone["before"]["exists"]:
             require_clean(path)
@@ -192,15 +192,15 @@ def checkout_baseline(workspace, value, operation):
         require_clean(path)
         if git(path, "rev-parse", "HEAD").stdout.strip() != entry["commit_sha"]:
             raise ValueError("checkout 回读不一致")
-        operations.receipt(workspace, operation, step, expected)
+        operations.receipt(station, operation, step, expected)
 
 
-def inspect(workspace, value):
+def inspect(station, value):
     """核对固定基线对象和实时源码状态，不要求远端分支仍指向历史基线。"""
     baseline.validate(value)
     result = {}
     for name, entry in value["repositories"].items():
-        path = repository_path(workspace, name)
+        path = repository_path(station, name)
         identity(path, entry["origin"])
         if git(path, "cat-file", "-t", entry["commit_sha"]).stdout.strip() != "commit":
             raise ValueError("冻结基线对象缺失")
@@ -210,18 +210,18 @@ def inspect(workspace, value):
     return result
 
 
-def readiness_snapshot(workspace, task):
+def readiness_snapshot(station, task):
     """只读核对 B/W/T；远端查询结果必须与已下载对象一致。"""
     value = task["engineering_baseline"]
-    observed = inspect(workspace, value)
+    observed = inspect(station, value)
     if not task.get("source_prepared") or not task.get("task_repositories"):
         raise ValueError("完整工程及任务分支尚未准备")
     from workflow import station_resources
     from workflow import station_directories
-    managed = station_directories.load(workspace, task)
+    managed = station_directories.load(station, task)
     result = {}
     for name, state in observed.items():
-        path = repository_path(workspace, name)
+        path = repository_path(station, name)
         require_clean(path)
         ignored = git(path, "ls-files", "--others", "--ignored", "--exclude-standard", "-z").stdout.split("\0")
         if any(filename and not station_directories.covered("source/" + name + "/" + filename, managed) for filename in ignored):
@@ -264,14 +264,14 @@ def readiness_snapshot(workspace, task):
     return snapshot
 
 
-def prepare_readiness(workspace, task):
+def prepare_readiness(station, task):
     """持锁调用；先使旧证据失效，逐仓记录 fetch 意图，再发布可核对结果。"""
     from workflow import task_store
-    path = task_store.task_directory(workspace, task["issue_key"]) / "source-readiness.json"
+    path = task_store.task_directory(station, task["issue_key"]) / "source-readiness.json"
     record = {"run_id": task["run_id"], "status": "refreshing", "fetches": {}}
     task_store._write_json_atomic(path, record)
     for name, binding in task["task_repositories"].items():
-        repository = repository_path(workspace, name)
+        repository = repository_path(station, name)
         identity(repository, task["engineering_baseline"]["repositories"][name]["origin"])
         require_clean(repository)
         branch = baseline.ref_name(binding["target_branch"])
@@ -280,22 +280,22 @@ def prepare_readiness(workspace, task):
         git(repository, "fetch", "--no-tags", "origin", "+refs/heads/" + branch + ":refs/remotes/origin/" + branch)
         record["fetches"][name]["status"] = "done"
         task_store._write_json_atomic(path, record)
-    snapshot = readiness_snapshot(workspace, task)
+    snapshot = readiness_snapshot(station, task)
     record.update(status="observed", snapshot=snapshot)
     task_store._write_json_atomic(path, record)
     return record
 
 
-def require_readiness(workspace, task):
+def require_readiness(station, task):
     from workflow import task_store
     import json
     if task.get("facts", {}).get("station_contract") not in (2, 3):
         return None  # 已有 run 沿原合同恢复，新接管采用新检查。
-    path = task_store.task_directory(workspace, task["issue_key"]) / "source-readiness.json"
+    path = task_store.task_directory(station, task["issue_key"]) / "source-readiness.json"
     if path.is_symlink() or not path.is_file():
         raise ValueError("编码前须执行 source-readiness")
     record = json.loads(path.read_text())
-    snapshot = readiness_snapshot(workspace, task)
+    snapshot = readiness_snapshot(station, task)
     if record.get("status") != "observed" or record.get("snapshot") != snapshot:
         raise ValueError("仓库就绪证据失效，请重新执行 source-readiness")
     if any(item["relation"] == "advanced" for item in snapshot["repositories"].values()):

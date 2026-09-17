@@ -133,17 +133,17 @@ def verify_active(base, cleanup_plan, operation):
         raise ValueError("活动材料变化，需要重新确认清理计划")
 
 
-def verify_workspace_inventory(base, rules=None, allow_pending=False):
+def verify_station_inventory(base, rules=None, allow_pending=False):
     """保留工位根 IDE 配置；其它未知对象阻止复用，不猜测其所有权。"""
     root = Path(base).resolve()
     state = store.state_path(base)
     init = json.loads((state / "init.json").read_text())
     owned = {entry["path"]: entry for entry in init.get("artifacts", [])}
-    from workflow import workspace_clean_rules
+    from workflow import station_clean_rules
     task = store.read_task(base)
     registered = directories.load(base, task) if task else {}
     # 版本 3 的恢复保留原库存语义，不读取后续版本的配置。
-    observed = workspace_clean_rules.inspect(base, owned, registered) if rules is not None else {"objects": {}}
+    observed = station_clean_rules.inspect(base, owned, registered) if rules is not None else {"objects": {}}
     if rules is not None and observed["digests"] != rules["digests"]:
         raise ValueError("清理配置已变化，需要重新确认")
     def inspect(directory, prefix=""):
@@ -175,7 +175,7 @@ def verify_workspace_inventory(base, rules=None, allow_pending=False):
             else:
                 raise ValueError("工位存在未知材料，保留并停止解绑：" + relative)
     inspect(root)
-    allowed = {"workspace.json", "init.json", "current-task.json", "operation.json", "events.jsonl",
+    allowed = {"station.json", "init.json", "current-task.json", "operation.json", "events.jsonl",
                "git-ref-cache-v2.json", "git-ref-cache-v2.json.lock", "authorization.json", "evidence", "operation-data"}
     for path in state.iterdir():
         if path.name not in allowed or path.is_symlink():
@@ -225,8 +225,8 @@ def plan(base, task, version=None, decisions_override=None):
     if version not in (None, 3, 4):
         raise ValueError("旧清理合同必须由原版本退出，不在线迁移")
     roots = directories.load(base, task)
-    if version != 4 and any(e["kind"] == "workspace-generated" for e in roots.values()):
-        raise ValueError("工位附属目录需要 workspace-clean 版本 4 计划")
+    if version != 4 and any(e["kind"] == "station-generated" for e in roots.values()):
+        raise ValueError("工位附属目录需要 station-clean 版本 4 计划")
     if "runtime" not in roots:
         operation = operations.read(base) or {}
         original = operation.get("previous_operation", operation)
@@ -247,7 +247,7 @@ def plan(base, task, version=None, decisions_override=None):
                 raise ValueError("生成目录现已含跟踪源码，拒绝目录回收")
     engineering = task.get("engineering_baseline", {})
     repositories = engineering.get("repositories", {}) if task.get("source_prepared") else _partial_repositories(base)
-    catalog = project_rules.load_repository_catalog(workspace=base)["repositories"]
+    catalog = project_rules.load_repository_catalog(station=base)["repositories"]
     if source.check_station_layout(base, catalog, repositories) != task.get("retained_repositories", {}):
         raise ValueError("未选择的持久仓库状态变化")
     operation = operations.read(base) or {}
@@ -295,14 +295,14 @@ def plan(base, task, version=None, decisions_override=None):
              "active_state": {"files": active_files(base), "unbind_run": task["run_id"], "task_digest": task_fingerprint(task)},
              "retained": ["config", "source repositories and refs", "archive", ".agenticops binding and operation"]}
     if version == 4:
-        from workflow import workspace_clean_rules
+        from workflow import station_clean_rules
         init = json.loads((store.state_path(base) / "init.json").read_text())
-        value["rules"] = workspace_clean_rules.inspect(base, [e["path"] for e in init.get("artifacts", [])], roots)
+        value["rules"] = station_clean_rules.inspect(base, [e["path"] for e in init.get("artifacts", [])], roots)
         for entry in value["directories"]:
-            if entry["kind"] == "workspace-generated" and value["rules"]["objects"].get(entry["path"], {}).get("action", "remove") != "remove":
+            if entry["kind"] == "station-generated" and value["rules"]["objects"].get(entry["path"], {}).get("action", "remove") != "remove":
                 raise ValueError("保留名单与登记目录回收冲突：" + entry["path"])
         value["schema_version"] = 4
-        verify_workspace_inventory(base, value["rules"], allow_pending=True)
+        verify_station_inventory(base, value["rules"], allow_pending=True)
         for entry in value["directories"]:
             if entry["kind"] == "source-generated" and directories.path_at(base, entry["path"]).exists():
                 raise ValueError("源码构建产物尚未清理，请使用项目原生工具：" + entry["path"])
@@ -310,7 +310,7 @@ def plan(base, task, version=None, decisions_override=None):
     value["digest"] = baseline.digest(value)
     from workflow import quality_contract
     quality_contract.validate(value, "station-reset.schema.json")
-    from workflow.workspace_clean_rules import validate_snapshot
+    from workflow.station_clean_rules import validate_snapshot
     validate_snapshot(value)
     return value
 
@@ -333,7 +333,7 @@ def clean(base, task, cleanup_plan, confirmed_digest, operation, source_only=Fal
     verify_known_external(base, task)
     terminal = [item for item in inventory(base, task) if item.get("kind") == "external" and item.get("resource_type") not in ("git-branch", "pull-request")]
     if terminal:
-        if project_rules.scan_sensitive(project_rules.load_admission(workspace=base), json.dumps(terminal, ensure_ascii=False)):
+        if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(terminal, ensure_ascii=False)):
             raise ValueError("外部资源最终回执含敏感信息，请先脱敏")
         record = {"run_id": task["run_id"], "archive_digest": task["archive_ref"]["digest"], "resources": terminal}
         receipt = Path(base).resolve() / task["archive_ref"]["path"] / "receipts" / ("external-terminal-" + baseline.digest(record) + ".json")
@@ -435,7 +435,7 @@ def _partial_repositories(base):
 
 def neutral(base, task, operation):
     plan = operation["cleanup_plan"]
-    catalog = project_rules.load_repository_catalog(workspace=base)["repositories"]
+    catalog = project_rules.load_repository_catalog(station=base)["repositories"]
     if source.check_station_layout(base, catalog, plan["source"]) != task.get("retained_repositories", {}):
         raise ValueError("未选择的持久仓库状态变化")
     for name, entry in plan["source"].items():

@@ -7,12 +7,12 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from workflow import workspace_clean_rules as rules, workspace_clean, workspace_source_reset
+from workflow import station_clean_rules as rules, station_clean, station_source_reset
 from workflow import station_resources as resources, station, task_store, station_operation
 import test_station_resources as fixture
 
 
-class WorkspaceCleanTests(unittest.TestCase):
+class StationCleanTests(unittest.TestCase):
     setUp = fixture.ResourceTests.setUp
     prepare_engineering = fixture.ResourceTests.prepare_engineering
     write = fixture.ResourceTests.write
@@ -27,7 +27,7 @@ class WorkspaceCleanTests(unittest.TestCase):
                     confirmed_digest=resources.plan(self.ws, task, version=4)['digest'])
 
     def project_rules(self, preserve=(), clean=()):
-        self.write(self.product/'projects/tapdata/workspace-clean.json',
+        self.write(self.product/'projects/tapdata/station-clean.json',
                    dict(version=1, preserve=list(preserve), clean=list(clean)))
 
     def test_priority_and_unmatched(self):
@@ -47,7 +47,7 @@ class WorkspaceCleanTests(unittest.TestCase):
     def test_legacy_inventory_does_not_read_new_rules(self):
         self.ready()
         self.project_rules(['source/'])
-        resources.verify_workspace_inventory(self.ws)
+        resources.verify_station_inventory(self.ws)
         with self.assertRaisesRegex(ValueError, '生命周期'):
             rules.inspect(self.ws)
 
@@ -77,7 +77,7 @@ class WorkspaceCleanTests(unittest.TestCase):
         task = self.ready()
         (self.repo/'file.txt').write_text('saved change')
         (self.ws/'.idea').mkdir()
-        (self.ws/'.idea/workspace.xml').write_text('keep')
+        (self.ws/'.idea/station.xml').write_text('keep')
         (self.ws/'runtime/report').write_text('temporary')
         original = resources.neutral
         def observe(*args):
@@ -88,7 +88,7 @@ class WorkspaceCleanTests(unittest.TestCase):
             self.execute(task, self.cleanup_request(task))
             self.assertEqual(1, called.call_count)
         self.assertIsNone(task_store.read_task(self.ws))
-        self.assertEqual('keep', (self.ws/'.idea/workspace.xml').read_text())
+        self.assertEqual('keep', (self.ws/'.idea/station.xml').read_text())
         self.assertEqual([], list((self.ws/'runtime').iterdir()))
         self.assertEqual('baseline', (self.repo/'file.txt').read_text().strip())
 
@@ -96,7 +96,7 @@ class WorkspaceCleanTests(unittest.TestCase):
         self.ready()
         before = {p.relative_to(self.ws):p.read_bytes() for p in (self.ws/'.agenticops').rglob('*') if p.is_file()}
         with mock.patch('sys.stdout', new_callable=io.StringIO):
-            self.assertEqual(0, workspace_clean.main(['--dir', str(self.ws), '--abandon-changes', 'no']))
+            self.assertEqual(0, station_clean.main(['--dir', str(self.ws), '--abandon-changes', 'no']))
         after = {p.relative_to(self.ws):p.read_bytes() for p in (self.ws/'.agenticops').rglob('*') if p.is_file()}
         self.assertEqual(before, after)
 
@@ -105,7 +105,7 @@ class WorkspaceCleanTests(unittest.TestCase):
         request = self.root/'cleanup-request.json'
         self.write(request, self.cleanup_request(task))
         with mock.patch('sys.stdout', new_callable=io.StringIO) as output:
-            workspace_clean.main(['--dir', str(self.ws), '--issue-key', task['issue_key'],
+            station_clean.main(['--dir', str(self.ws), '--issue-key', task['issue_key'],
                                   '--expected-run-id', task['run_id'], '--expected-revision', str(task['_revision']),
                                   '--operation-id', 'op-cli-cleanup', '--input', str(request), '--abandon-changes', 'yes'])
         self.assertEqual('done', json.loads(output.getvalue())['status'])
@@ -118,11 +118,11 @@ class WorkspaceCleanTests(unittest.TestCase):
         task = task_store.read_task(self.ws)
         before = station_operation.path(self.ws).read_bytes()
         with mock.patch('sys.stdout', new_callable=io.StringIO) as output:
-            workspace_clean.main(['--dir', str(self.ws), '--abandon-changes', 'no'])
+            station_clean.main(['--dir', str(self.ws), '--abandon-changes', 'no'])
         self.assertEqual('cancelled', json.loads(output.getvalue())['status'])
         self.assertEqual(before, station_operation.path(self.ws).read_bytes())
         with mock.patch('sys.stdout', new_callable=io.StringIO) as output:
-            workspace_clean.main(['--dir', str(self.ws)])
+            station_clean.main(['--dir', str(self.ws)])
         self.assertIn('cleanup_plan', json.loads(output.getvalue()))
         path = self.root/'handoff-request.json'
         self.write(path, self.cleanup_request(task))
@@ -135,16 +135,16 @@ class WorkspaceCleanTests(unittest.TestCase):
                 raise OSError('after handoff')
             return original(base, operation)
         with mock.patch.object(station_operation, 'save', side_effect=fail), self.assertRaises(OSError):
-            workspace_clean.main(args)
+            station_clean.main(args)
         changed = json.loads(path.read_text())
         changed['reason'] = 'different'
         self.write(path, changed)
         with self.assertRaisesRegex(ValueError, '原清理交接'):
-            workspace_clean.main(args)
+            station_clean.main(args)
         changed['reason'] = '用户确认停止'
         self.write(path, changed)
         with mock.patch('sys.stdout', new_callable=io.StringIO):
-            workspace_clean.main(args)
+            station_clean.main(args)
         operation = station_operation.read(self.ws)
         self.assertEqual(4, operation['cleanup_plan']['schema_version'])
         self.assertEqual('done', operation['status'])
@@ -157,10 +157,10 @@ class WorkspaceCleanTests(unittest.TestCase):
         before = station_operation.path(self.ws).read_bytes()
         for extra in ([], ['--abandon-changes', 'no']):
             with mock.patch('sys.stdout', new_callable=io.StringIO) as output:
-                workspace_clean.main(['--dir', str(self.ws)] + extra)
+                station_clean.main(['--dir', str(self.ws)] + extra)
             self.assertEqual('resume_required', json.loads(output.getvalue())['status'])
         with self.assertRaisesRegex(ValueError, '尚未绑定任务'):
-            workspace_clean.main(['--dir', str(self.ws), '--issue-key', self.request['issue_key'],
+            station_clean.main(['--dir', str(self.ws), '--issue-key', self.request['issue_key'],
                                   '--expected-run-id', operation['run_id'], '--expected-revision', '0',
                                   '--operation-id', 'op-no-task-clean', '--input', str(self.root/'missing.json')])
         self.assertEqual(before, station_operation.path(self.ws).read_bytes())
@@ -194,7 +194,7 @@ class WorkspaceCleanTests(unittest.TestCase):
     def test_source_reset_requires_archive(self):
         task = self.ready()
         with self.assertRaises(ValueError):
-            workspace_source_reset.run(self.ws,task['issue_key'],task['run_id'],task['_revision'],'op-invalid-reset')
+            station_source_reset.run(self.ws,task['issue_key'],task['run_id'],task['_revision'],'op-invalid-reset')
 
     def test_resume_after_source_reset_does_not_repeat_git_restore(self):
         task = self.ready()
@@ -226,14 +226,14 @@ class WorkspaceCleanTests(unittest.TestCase):
     def test_pending_no_reports_resume_not_zero_write(self):
         self.interrupted_before_directories()
         with mock.patch('sys.stdout', new_callable=io.StringIO) as output:
-            workspace_clean.main(['--dir', str(self.ws), '--abandon-changes', 'no'])
+            station_clean.main(['--dir', str(self.ws), '--abandon-changes', 'no'])
         self.assertEqual('resume_required', json.loads(output.getvalue())['status'])
 
     def test_preview_returns_task_question_with_blockers(self):
         task = self.ready()
         (self.ws/'unknown').write_text('keep')
         with mock.patch('sys.stdout', new_callable=io.StringIO) as output:
-            workspace_clean.main(['--dir', str(self.ws)])
+            station_clean.main(['--dir', str(self.ws)])
         result = json.loads(output.getvalue())
         self.assertEqual(task['run_id'], result['run_id'])
         self.assertTrue(result['question'])
@@ -257,12 +257,12 @@ class WorkspaceCleanTests(unittest.TestCase):
         task = self.ready()
         (self.repo/'file.txt').write_text('keep')
         request = self.cleanup_request(task)
-        original = workspace_source_reset.apply
+        original = station_source_reset.apply
         def replace(*args):
             (self.ws/'runtime').rename(self.root/'old-runtime')
             (self.ws/'runtime').mkdir()
             return original(*args)
-        with mock.patch.object(workspace_source_reset, 'apply', side_effect=replace), self.assertRaisesRegex(ValueError, '身份'):
+        with mock.patch.object(station_source_reset, 'apply', side_effect=replace), self.assertRaisesRegex(ValueError, '身份'):
             self.execute(task, request)
         self.assertEqual('keep', (self.repo/'file.txt').read_text())
 

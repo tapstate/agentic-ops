@@ -6,13 +6,13 @@ import subprocess
 from pathlib import Path
 
 RULES = (
-    ("workflow/workspace", ("workspace_clean", "station_resources", "station_lifecycle")),
-    ("policies/workspace-clean.json", ("workspace_clean",)),
+    ("workflow/station", ("station_clean", "station_resources", "station_lifecycle")),
+    ("policies/station-clean.json", ("station_clean",)),
     ("workflow/station_archive.py", ("station_resources", "station_lifecycle")),
-    ("workflow/station_operation.py", ("workspace_clean", "station_resources", "station_lifecycle")),
-    ("workflow/station_directories.py", ("workspace_clean", "station_resources", "station_lifecycle")),
-    ("workflow/station_resources.py", ("workspace_clean", "station_resources", "station_lifecycle")),
-    ("workflow/station.py", ("workspace_clean", "station_resources", "station_lifecycle")),
+    ("workflow/station_operation.py", ("station_clean", "station_resources", "station_lifecycle")),
+    ("workflow/station_directories.py", ("station_clean", "station_resources", "station_lifecycle")),
+    ("workflow/station_resources.py", ("station_clean", "station_resources", "station_lifecycle")),
+    ("workflow/station.py", ("station_clean", "station_resources", "station_lifecycle")),
     ("workflow/station_source.py", ("station_source", "repository_recovery", "station_lifecycle")),
     ("workflow/source_pool.py", ("station_source", "shared_repositories")),
     ("workflow/quality", ("quality", "jira_status", "jira_watermark", "issue_versions")),
@@ -21,7 +21,7 @@ RULES = (
     ("workflow/", ("workflow", "checkpoints", "failures", "task_identity", "station_state")),
     ("gate/", ("gate", "contracts")),
     ("policies/", ("gate", "contracts")),
-    ("contracts/", ("contracts", "workspace_compatibility")),
+    ("contracts/", ("contracts", "station_compatibility")),
     ("bootstrap/", ("install", "station_bootstrap")),
     ("adapters/", ("adapter_boundary", "gate")),
     ("projects/tapdata/", ("engineering_baseline", "maven", "java_impact", "branch_alignment")),
@@ -34,7 +34,7 @@ RULES = (
 )
 
 TEST_SUITES = {
-    "workspace_clean": ("python3", "tests/test_workspace_clean.py"),
+    "station_clean": ("python3", "tests/test_station_clean.py"),
     "gate": ("python3", "tests/test_gate.py"), "contracts": ("python3", "tests/test_contracts.py"),
     "adapter_boundary": ("python3", "tests/test_adapter_boundary.py"), "workflow": ("python3", "tests/test_workflow.py"),
     "checkpoints": ("python3", "tests/test_checkpoints.py"), "failures": ("python3", "tests/test_failures.py"),
@@ -44,14 +44,13 @@ TEST_SUITES = {
     "station_source": ("python3", "tests/test_station_source.py"), "repository_recovery": ("python3", "tests/test_repository_recovery.py"),
     "shared_repositories": ("python3", "tests/test_shared_repositories.py"), "quality": ("python3", "tests/test_quality.py"),
     "jira_status": ("python3", "tests/test_jira_status.py"), "jira_watermark": ("python3", "tests/test_jira_watermark.py"),
-    "issue_versions": ("python3", "tests/test_issue_versions.py"), "workspace_compatibility": ("python3", "tests/test_workspace_compatibility.py"),
+    "issue_versions": ("python3", "tests/test_issue_versions.py"), "station_compatibility": ("python3", "tests/test_station_compatibility.py"),
     "engineering_baseline": ("python3", "tests/test_engineering_baseline.py"), "install": ("bash", "tests/test_install.sh"),
     "station_bootstrap": ("python3", "tests/test_station_bootstrap.py"), "maven": ("python3", "-m", "unittest", "discover", "-s", "projects/tapdata/tests", "-p", "test_maven*.py"),
     "maven_reports": ("python3", "projects/tapdata/tests/test_maven_reports.py"), "java_impact": ("python3", "projects/tapdata/tests/test_java_impact.py"),
     "branch_alignment": ("python3", "projects/tapdata/tests/test_branch_alignment.py"), "story_gate": ("python3", "-m", "unittest", "internal.tests.test_story_gate"),
     "verification": ("python3", "-m", "unittest", "internal.tests.test_verification"), "release": ("bash", "internal/tests/test_release.sh"),
     "test_selection": ("python3", "-m", "unittest", "internal.tests.test_test_selection"),
-    "workspace_recovery": ("python3", "-m", "unittest", "internal.tests.test_workspace_recovery"),
 }
 
 

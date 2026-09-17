@@ -1,10 +1,10 @@
 # AgenticOps 扩展使用
 
-[配置化清理入口](task-authorization.md#配置化清理入口)负责 `workspace-clean.py` 的预检、放弃决定与恢复请求，并说明中央/项目名单和受控源码复位脚本；计划版本及归档后执行顺序以工位合同为准。
+[配置化清理入口](task-authorization.md#配置化清理入口)负责 `station-clean.py` 的预检、放弃决定与恢复请求，并说明中央/项目名单和受控源码复位脚本；计划版本及归档后执行顺序以工位合同为准。
 
 任务退出的使用目标是保留关键材料并重置工位：[任务授权指引](task-authorization.md)说明目录生产前登记、一次确认、空未初始化子模块及工位 IDE 配置的保留边界和恢复入口，[工位合同](../architecture/single-task-station.md)维护唯一状态语义，[更新与回退](update-and-rollback.md)说明 epoch 4 到 5 必须原版退出和 purge 后重建的边界。
 
-[工位源码与材料](workspace-materials.md)负责源码池下载加速、独立源码生成、中央共享 Wiki 的显式生命周期及缓存丢失后的使用边界；初始化接线与接管准备源码保持分离。
+[工位源码与材料](station-materials.md)负责源码池下载加速、独立源码生成、中央共享 Wiki 的显式生命周期及缓存丢失后的使用边界；初始化接线与接管准备源码保持分离。
 
 质量检查与证据文档统一说明本地有效事实、独立实施分支、简洁 Jira 评论和同步失败恢复；所有阶段的同步警告在 PR 后总结统一展示。
 
@@ -12,7 +12,7 @@
 
 [更新与回退](update-and-rollback.md)负责产品切换前的兼容性预检、旧版本受控解绑、失败恢复和新版本重建顺序；不兼容的空绑定也不能通过 repair 在线采用新代际。单任务工位的状态合同仍由架构文档维护。
 
-[质量检查与证据](quality-checkpoints.md)也负责共同验证材料的字段与检查点绑定、失败归因、跨本地/CI/审查的累计修复轮次、PR 审查意见的逐项处理，以及研发追加轮数或接受具体缺口后的恢复；失败工具只记录和检查条件，修复与重验仍使用原生工具。工作空间采用 epoch 5，升级按兼容清单处理，不在线迁移旧任务。
+[质量检查与证据](quality-checkpoints.md)也负责共同验证材料的字段与检查点绑定、失败归因、跨本地/CI/审查的累计修复轮次、PR 审查意见的逐项处理，以及研发追加轮数或接受具体缺口后的恢复；失败工具只记录和检查条件，修复与重验仍使用原生工具。工位采用 epoch 5，升级按兼容清单处理，不在线迁移旧任务。
 
 [质量检查与证据](quality-checkpoints.md)同时负责按任务类型选择项目质量配置、方案字段检查及旧授权兼容边界；它说明可复用控制的使用合同，不代表任一业务任务类型已通过真实接入验收。
 
@@ -24,21 +24,21 @@ PR 前检出来源同步也由[任务授权指引](task-authorization.md)说明�
 
 | 场景 | 文档 | 何时使用 |
 |---|---|---|
-| 默认安装 | [Git SSH 安装](git-ssh-install.md) | 已配置 SSH，按受信 `main` 安装使用工作面 |
+| 默认安装 | [Git SSH 安装](git-ssh-install.md) | 已配置 SSH，按受信 `main` 安装安装使用面 |
 | 配置必需 MCP | [必需 MCP 配置](mcp-setup.md) | 首次使用 Jira 事实时，连接 Jira/Atlassian |
-| 让 AI Agent 安装 | [Agent引导安装指引](agent-guided-install.md) | 从空目录启动 Agent，由它依据现役安装文档安装并初始化项目工作空间 |
+| 让 AI Agent 安装 | [Agent引导安装指引](agent-guided-install.md) | 从空目录启动 Agent，由它依据现役安装文档安装并初始化项目工位 |
 | 无法使用 Git SSH | [gh 一键安装](gh-one-click-install.md) | 通过 GitHub CLI 登录并安装 |
-| 复用持久材料 | [工位源码与材料](workspace-materials.md) | 同版 purge 后显式复用 source/config/archive，不导入旧任务状态 |
+| 复用持久材料 | [工位源码与材料](station-materials.md) | 同版 purge 后显式复用 source/config/archive，不导入旧任务状态 |
 | 脚本接管与授权 | [任务授权指引](task-authorization.md) | 从空闲工位接管 Jira 任务，完成准入、受控基线、方案确认与实施授权 |
 | 缺陷与功能质量协作 | [质量检查与证据](quality-checkpoints.md) | 当前 run 的交互文件分配、影响版本与优先修复线、稳定方案确认、精确代码证据、从 Jira「已链接工作项」识别 Test 用例、按任务类型读取事实、阶段回填及接管/验收节点的非阻断 Jira 状态同步、PR Ready 三类核对和逐检查点 Jira 回读；复用任务授权及阶段，项目标准从 Project 配置读取 |
 | 日常维护安装 | [更新与回退](update-and-rollback.md) | 安装已存在、更新失败、接线漂移或需要回退 |
 | 排障与恢复 | [常见问题](faq.md) | 安装、启动、Hook 或已接管任务出现问题 |
 
-[常见问题](faq.md)负责旧 Hook 显式迁移与失败恢复；[任务授权指引](task-authorization.md)负责当前 run/阶段绑定和检查点确认；[质量检查与证据](quality-checkpoints.md)负责当前 run 的交互文件和原生 Jira 调用后的证据回读；[更新与回退](update-and-rollback.md)负责跨工作空间状态代际的升级前检查与任务清理引导。外部操作不再由通用 Hook 拦截。
+[常见问题](faq.md)负责旧 Hook 显式迁移与失败恢复；[任务授权指引](task-authorization.md)负责当前 run/阶段绑定和检查点确认；[质量检查与证据](quality-checkpoints.md)负责当前 run 的交互文件和原生 Jira 调用后的证据回读；[更新与回退](update-and-rollback.md)负责跨工位状态代际的升级前检查与任务清理引导。外部操作不再由通用 Hook 拦截。
 
 授权到期但方案未变时，按[任务授权指引](task-authorization.md)显式续签，保留当前 run 和证据；完成操作中断时，按[常见问题](faq.md)重试原请求，收敛已提交的完成状态，不重新验收或重置任务。
 
-这些文档只说明使用工作面。维护 AgenticOps 源码、测试或发布请使用[维护指引](../maintenance-guide.md)。
+这些文档只说明安装使用面。维护 AgenticOps 源码、测试或发布请使用[维护指引](../maintenance-guide.md)。
 
 同一实施范围内更正验收方案后的恢复也归[任务授权指引](task-authorization.md)管理：明确 Q2 再确认及配置更正后的显式 Q1 再确认、原授权和目标摘要绑定、历史保留及拒绝范围，与仅延长有效期的续签分开。
 

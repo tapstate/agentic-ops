@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agenticops.tapdata.net/contracts/workspace-v3.schema.json",
+  "$id": "https://agenticops.tapdata.net/contracts/station-v3.schema.json",
   "title": "AgenticOps Single Task Station Configuration v3",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "product_root", "workspace_id", "project", "agents"],
+  "required": ["schema_version", "product_root", "station_id", "project", "agents"],
   "properties": {
     "schema_version": { "const": 3 },
     "product_root": { "type": "string", "minLength": 1 },
-    "workspace_id": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
+    "station_id": { "type": "string", "pattern": "^[a-f0-9]{32}$" },
     "project": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
     "branch_identity": {
       "type": "object",

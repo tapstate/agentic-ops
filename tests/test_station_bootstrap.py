@@ -17,56 +17,56 @@ parser.add_argument('--product-root', default=str(Path(__file__).resolve().paren
 options, remaining = parser.parse_known_args()
 ROOT = Path(options.product_root).resolve()
 sys.path.insert(0, str(ROOT))
-from bootstrap import workspace_registry as registry
-from bootstrap.workspace_paths import WorkspaceDirectory
+from bootstrap import station_registry as registry
+from bootstrap.station_paths import StationDirectory
 from workflow import task_store, station_operation, git_refs
 
 
 class StationBootstrapTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.workspace = Path(self.temporary.name) / 'workspace'
+        self.station = Path(self.temporary.name) / 'station'
         self.init()
 
     def tearDown(self):
         # Remove only this fixture's registry entry, including failed-cleanup cases.
-        registry.unregister(ROOT, self.workspace)
+        registry.unregister(ROOT, self.station)
         self.temporary.cleanup()
 
     def init(self, *args, success=True):
-        result = subprocess.run(['bash', str(ROOT / 'bootstrap/workspace-init.sh'),
-            '--workspace', str(self.workspace), '--agent', 'codex', *args],
+        result = subprocess.run(['bash', str(ROOT / 'bootstrap/station-init.sh'),
+            '--station', str(self.station), '--agent', 'codex', *args],
             env={**os.environ, 'AGENTIC_OPS_HOME': str(ROOT)}, capture_output=True, text=True)
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return result
 
     def test_generate_purge_generate(self):
-        before = json.loads((self.workspace / '.agenticops/workspace.json').read_text())
+        before = json.loads((self.station / '.agenticops/station.json').read_text())
         self.assertEqual(before['schema_version'], 3)
         self.assertNotIn('repository_pool', before)
         for name in ('config', 'source', 'runtime', 'archive'):
-            self.assertTrue((self.workspace / name).is_dir())
+            self.assertTrue((self.station / name).is_dir())
         for name in ('tasks', 'tasks.lock', 'worktrees'):
-            self.assertFalse((self.workspace / '.agenticops' / name).exists())
-        registry.detach(ROOT, self.workspace, purge=True)
-        self.assertFalse((self.workspace / '.agenticops').exists())
-        self.assertFalse((self.workspace / 'agenticops').exists())
+            self.assertFalse((self.station / '.agenticops' / name).exists())
+        registry.detach(ROOT, self.station, purge=True)
+        self.assertFalse((self.station / '.agenticops').exists())
+        self.assertFalse((self.station / 'agenticops').exists())
         self.init()
-        after = json.loads((self.workspace / '.agenticops/workspace.json').read_text())
-        self.assertNotEqual(before['workspace_id'], after['workspace_id'])
-        self.assertIsNone(task_store.read_current(self.workspace)['current'])
+        after = json.loads((self.station / '.agenticops/station.json').read_text())
+        self.assertNotEqual(before['station_id'], after['station_id'])
+        self.assertIsNone(task_store.read_current(self.station)['current'])
 
     def test_preserve_materials_requires_explicit_reuse(self):
         for name in ('config', 'source', 'archive'):
-            (self.workspace / name / 'sentinel').write_text(name)
-        registry.detach(ROOT, self.workspace, purge=True)
+            (self.station / name / 'sentinel').write_text(name)
+        registry.detach(ROOT, self.station, purge=True)
         self.init(success=False)
         self.init('--reuse-materials')
         for name in ('config', 'source', 'archive'):
-            self.assertEqual((self.workspace / name / 'sentinel').read_text(), name)
+            self.assertEqual((self.station / name / 'sentinel').read_text(), name)
 
     def make_cached_repository(self):
-        repository = self.workspace / 'source/example/repository'
+        repository = self.station / 'source/example/repository'
         repository.mkdir(parents=True)
         for command in (['git', 'init', str(repository)],
                         ['git', '-C', str(repository), 'remote', 'add', 'origin', str(repository)],
@@ -78,8 +78,8 @@ class StationBootstrapTests(unittest.TestCase):
 
     def snapshot(self, repository):
         return git_refs.snapshot(repository,
-            cache_file=self.workspace / '.agenticops/git-ref-cache-v2.json',
-            cache_root=self.workspace, refresh='always')
+            cache_file=self.station / '.agenticops/git-ref-cache-v2.json',
+            cache_root=self.station, refresh='always')
 
     def test_real_cache_purge_and_rebuild_preserves_materials(self):
         repository = self.make_cached_repository()
@@ -87,14 +87,14 @@ class StationBootstrapTests(unittest.TestCase):
         result = self.snapshot(repository)
         self.assertTrue(result['scopes']['heads']['refs'])
         for name in ('git-ref-cache-v2.json', 'git-ref-cache-v2.json.lock'):
-            self.assertTrue((self.workspace / '.agenticops' / name).is_file())
-        registry.detach(ROOT, self.workspace, purge=True)
-        self.assertFalse((self.workspace / '.agenticops').exists())
+            self.assertTrue((self.station / '.agenticops' / name).is_file())
+        registry.detach(ROOT, self.station, purge=True)
+        self.assertFalse((self.station / '.agenticops').exists())
         self.init('--reuse-materials')
         for name in ('git-ref-cache-v2.json', 'git-ref-cache-v2.json.lock'):
-            self.assertFalse((self.workspace / '.agenticops' / name).exists())
+            self.assertFalse((self.station / '.agenticops' / name).exists())
         self.assertEqual(subprocess.check_output(['git', '-C', str(repository), 'rev-parse', 'HEAD']), before)
-        self.assertIsNone(task_store.read_current(self.workspace)['current'])
+        self.assertIsNone(task_store.read_current(self.station)['current'])
         self.assertTrue(self.snapshot(repository)['scopes']['heads']['refs'])
 
     def test_cache_refresh_cannot_recreate_state_after_purge(self):
@@ -105,7 +105,7 @@ class StationBootstrapTests(unittest.TestCase):
         completed = context.Event()
         def purge():
             entered.set()
-            registry.detach(ROOT, self.workspace, purge=True)
+            registry.detach(ROOT, self.station, purge=True)
             completed.set()
         process = context.Process(target=purge)
         def purge_during_remote_query(*args):
@@ -124,63 +124,63 @@ class StationBootstrapTests(unittest.TestCase):
                 process.join(5)
         self.assertEqual(process.exitcode, 0)
         self.assertTrue(completed.is_set())
-        self.assertFalse((self.workspace / '.agenticops').exists(),
+        self.assertFalse((self.station / '.agenticops').exists(),
                          'An in-flight cache refresh recreated state after successful purge')
 
     def test_active_task_and_pending_operation_prevent_detach(self):
-        state = self.workspace / '.agenticops/current-task.json'
+        state = self.station / '.agenticops/current-task.json'
         original = state.read_bytes()
-        task_store.compare_and_set(self.workspace, 0, {'issue_key': 'TAP-123', 'run_id': 'run-test'})
+        task_store.compare_and_set(self.station, 0, {'issue_key': 'TAP-123', 'run_id': 'run-test'})
         with self.assertRaisesRegex(ValueError, '任务占用'):
-            registry.detach(ROOT, self.workspace, purge=True)
+            registry.detach(ROOT, self.station, purge=True)
         state.write_bytes(original)
-        workspace_config = self.workspace / '.agenticops/workspace.json'
-        document = json.loads(workspace_config.read_text())
+        station_config = self.station / '.agenticops/station.json'
+        document = json.loads(station_config.read_text())
         document['branch_identity'] = {
             'schema_version': 1,
             'git_name': 'Fixture',
             'source': 'git_global_user_name',
         }
-        workspace_config.write_text(json.dumps(document))
-        operation = station_operation.begin(self.workspace, 'takeover', 'op-bootstrap-pending', 0, {'issue_key': 'TAP-123'})
+        station_config.write_text(json.dumps(document))
+        operation = station_operation.begin(self.station, 'takeover', 'op-bootstrap-pending', 0, {'issue_key': 'TAP-123'})
         operation['status'] = 'failed'
-        station_operation.save(self.workspace, operation)
+        station_operation.save(self.station, operation)
         with self.assertRaisesRegex(ValueError, '未完成操作'):
-            registry.detach(ROOT, self.workspace, purge=True)
-        self.assertTrue((self.workspace / 'agenticops').exists())
+            registry.detach(ROOT, self.station, purge=True)
+        self.assertTrue((self.station / 'agenticops').exists())
 
     def test_unknown_state_and_runtime_are_not_deleted(self):
-        unknown = self.workspace / '.agenticops/unknown'
+        unknown = self.station / '.agenticops/unknown'
         unknown.write_text('keep')
         with self.assertRaisesRegex(ValueError, '未知文件'):
-            registry.detach(ROOT, self.workspace, purge=True)
+            registry.detach(ROOT, self.station, purge=True)
         self.assertEqual(unknown.read_text(), 'keep')
         unknown.unlink()
-        runtime = self.workspace / 'runtime/unknown'
+        runtime = self.station / 'runtime/unknown'
         runtime.write_text('keep')
         with self.assertRaisesRegex(ValueError, 'runtime'):
-            registry.detach(ROOT, self.workspace, purge=True)
+            registry.detach(ROOT, self.station, purge=True)
         self.assertEqual(runtime.read_text(), 'keep')
 
     def test_reuse_never_adopts_nonempty_runtime_or_symlink(self):
-        registry.detach(ROOT, self.workspace, purge=True)
-        (self.workspace / 'runtime/sentinel').write_text('keep')
+        registry.detach(ROOT, self.station, purge=True)
+        (self.station / 'runtime/sentinel').write_text('keep')
         self.init('--reuse-materials', success=False)
-        self.assertEqual((self.workspace / 'runtime/sentinel').read_text(), 'keep')
-        (self.workspace / 'runtime/sentinel').unlink()
-        (self.workspace / 'source').rmdir()
+        self.assertEqual((self.station / 'runtime/sentinel').read_text(), 'keep')
+        (self.station / 'runtime/sentinel').unlink()
+        (self.station / 'source').rmdir()
         outside = Path(self.temporary.name) / 'outside-source'
         outside.mkdir()
         (outside / 'sentinel').write_text('keep')
-        (self.workspace / 'source').symlink_to(outside, target_is_directory=True)
+        (self.station / 'source').symlink_to(outside, target_is_directory=True)
         self.init('--reuse-materials', success=False)
         self.assertEqual((outside / 'sentinel').read_text(), 'keep')
 
     def test_old_epoch_repair_and_purge_do_not_modify_old_state(self):
-        state = self.workspace / '.agenticops'
+        state = self.station / '.agenticops'
         init = state / 'init.json'
         document = json.loads(init.read_text())
-        document['workspace_state_epoch'] = 2
+        document['station_state_epoch'] = 2
         init.write_text(json.dumps(document))
         old = state / 'tasks'
         old.mkdir()
@@ -188,9 +188,9 @@ class StationBootstrapTests(unittest.TestCase):
         sentinel.write_text('old-format')
         before = init.read_bytes()
         with self.assertRaisesRegex(ValueError, '受控解绑并重建'):
-            registry.detach(ROOT, self.workspace, purge=True)
+            registry.detach(ROOT, self.station, purge=True)
         result = subprocess.run([sys.executable, str(ROOT / 'bootstrap/render.py'),
-            '--install-home', str(ROOT), '--workspace', str(self.workspace), '--refresh'],
+            '--install-home', str(ROOT), '--station', str(self.station), '--refresh'],
             capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('受控解绑并重建', result.stderr)
@@ -198,13 +198,13 @@ class StationBootstrapTests(unittest.TestCase):
         self.assertEqual(sentinel.read_text(), 'old-format')
 
     def test_unknown_unbound_state_prevents_generation(self):
-        registry.detach(ROOT, self.workspace, purge=True)
-        state = self.workspace / '.agenticops'
+        registry.detach(ROOT, self.station, purge=True)
+        state = self.station / '.agenticops'
         state.mkdir()
         (state / 'unknown.json').write_text('unknown')
         self.init('--reuse-materials', success=False)
         self.assertEqual((state / 'unknown.json').read_text(), 'unknown')
-        self.assertFalse((state / 'workspace.json').exists())
+        self.assertFalse((state / 'station.json').exists())
 
     def test_state_replacement_after_preflight_is_rejected(self):
         outside = Path(self.temporary.name) / 'outside'
@@ -214,13 +214,13 @@ class StationBootstrapTests(unittest.TestCase):
         original = registry.detach_preflight
         def replace(*args, **kwargs):
             result = original(*args, **kwargs)
-            state = self.workspace / '.agenticops'
-            state.rename(self.workspace / '.held')
+            state = self.station / '.agenticops'
+            state.rename(self.station / '.held')
             state.symlink_to(outside, target_is_directory=True)
             return result
         with mock.patch.object(registry, 'detach_preflight', side_effect=replace):
             with self.assertRaises(ValueError):
-                registry.detach(ROOT, self.workspace, purge=True)
+                registry.detach(ROOT, self.station, purge=True)
         self.assertEqual(sentinel.read_text(), 'outside')
 
     def test_purge_holds_lock_until_binding_removed(self):
@@ -228,7 +228,7 @@ class StationBootstrapTests(unittest.TestCase):
         def writer():
             marker.write_text('started')
             try:
-                with task_store.task_state_lock(self.workspace):
+                with task_store.task_state_lock(self.station):
                     raise SystemExit(8)
             except ValueError:
                 raise SystemExit(0)
@@ -245,10 +245,10 @@ class StationBootstrapTests(unittest.TestCase):
             self.assertTrue(process.is_alive())
             return result
         with mock.patch.object(registry, 'detach_preflight', side_effect=check):
-            registry.detach(ROOT, self.workspace, purge=True)
+            registry.detach(ROOT, self.station, purge=True)
         process.join(5)
         self.assertEqual(process.exitcode, 0)
-        self.assertFalse((self.workspace / '.agenticops').exists())
+        self.assertFalse((self.station / '.agenticops').exists())
 
 
 if __name__ == '__main__':

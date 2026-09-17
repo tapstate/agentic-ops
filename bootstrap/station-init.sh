@@ -2,20 +2,20 @@
 set -euo pipefail
 
 install_root="${AGENTIC_OPS_HOME:-$HOME/.agentic-ops}"
-workspace=""
+station=""
 agents=()
 project="tapdata"
 reuse_arguments=()
 
 usage() {
-  printf '用法：workspace-init.sh --workspace <项目工作空间> [--agent <Agent ID>]... [--project <项目>] [--reuse-materials]\n'
+  printf '用法：station-init.sh --station <项目工位> [--agent <Agent ID>]... [--project <项目>] [--reuse-materials]\n'
 }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --workspace)
+    --station)
       test "$#" -ge 2 || { usage >&2; exit 2; }
-      workspace="$2"
+      station="$2"
       shift 2
       ;;
     --agent)
@@ -44,17 +44,17 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-test -n "$workspace" || { usage >&2; exit 2; }
+test -n "$station" || { usage >&2; exit 2; }
 install_root="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$install_root")"
-workspace="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$workspace")"
-case "$workspace" in
+station="$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$station")"
+case "$station" in
   "$install_root"|"$install_root"/*)
-    printf 'AgenticOps：项目工作空间不能是产品根目录或其子目录：%s\n' "$workspace" >&2
+    printf 'AgenticOps：项目工位不能是产品根目录或其子目录：%s\n' "$station" >&2
     exit 2
     ;;
 esac
-test ! -f "$workspace/.agentic-ops-source" || {
-  printf 'AgenticOps：源码仓库不能初始化为业务项目工作空间：%s\n' "$workspace" >&2
+test ! -f "$station/.agentic-ops-source" || {
+  printf 'AgenticOps：源码仓库不能初始化为业务项目工位：%s\n' "$station" >&2
   exit 2
 }
 test -f "$install_root/contracts/gate-request.schema.json" || {
@@ -71,12 +71,12 @@ for agent_id in ${agents[@]+"${agents[@]}"}; do
   agent_arguments+=(--agent "$agent_id")
 done
 python3 "$install_root/bootstrap/render.py" \
-  --install-home "$install_root" --workspace "$workspace" \
+  --install-home "$install_root" --station "$station" \
   --project "$project" ${agent_arguments[@]+"${agent_arguments[@]}"} \
   ${reuse_arguments[@]+"${reuse_arguments[@]}"}
-python3 "$install_root/bootstrap/workspace_registry.py" \
-  --product-root "$install_root" register --workspace "$workspace"
+python3 "$install_root/bootstrap/station_registry.py" \
+  --product-root "$install_root" register --station "$station"
 
-printf 'AgenticOps 项目工作空间已初始化：%s（project=%s）\n' "$workspace" "$project"
-printf '统一入口：cd %s && ./agenticops doctor\n' "$workspace"
+printf 'AgenticOps 项目工位已初始化：%s（project=%s）\n' "$station" "$project"
+printf '统一入口：cd %s && ./agenticops station doctor\n' "$station"
 printf '必需插件：首次使用 Jira 事实时，Agent 会检查 atlassian；缺失时只暂停依赖步骤并引导你在当前 Agent 客户端安装和登录。GitHub 工具由 Agent 按任务自行选择。\n'

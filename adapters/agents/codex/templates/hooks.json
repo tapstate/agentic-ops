@@ -1,5 +1,5 @@
 {
-  "description": "AgenticOps workspace gate wiring.",
+  "description": "AgenticOps station gate wiring.",
   "hooks": {
     "__AGENTIC_OPS_HOOK_NATIVE_EVENT__": [
       {

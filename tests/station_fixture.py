@@ -5,7 +5,7 @@ from workflow import engineering_baseline, task_store
 
 
 def save_task(base, task):
-    initialize_workspace(base)
+    initialize_station(base)
     (task_store.state_path(base) / "evidence").mkdir(parents=True, exist_ok=True)
     repositories = task.get("repositories", [])
     if any((row.get("worktree") or {}).get("status") == "prepared" for row in repositories):
@@ -46,17 +46,17 @@ def save_task(base, task):
     task["repositories"] = normalized["repositories"]
 
 
-def initialize_workspace(base):
+def initialize_station(base):
     state = task_store.state_path(base)
-    binding_path = state / "workspace.json"
+    binding_path = state / "station.json"
     binding = json.loads(binding_path.read_text())
     binding["schema_version"] = 3
-    binding.setdefault("workspace_id", "a" * 32)
+    binding.setdefault("station_id", "a" * 32)
     binding["agents"] = binding.get("agents") or ["codex"]
     binding.pop("repository_pool", None)
     task_store._write_json_atomic(binding_path, binding)
-    task_store._write_json_atomic(state / "init.json", {"workspace_state_epoch": 5})
-    manifest = Path(binding["product_root"]) / "contracts/workspace-state-compatibility.json"
+    task_store._write_json_atomic(state / "init.json", {"station_state_epoch": 6})
+    manifest = Path(binding["product_root"]) / "contracts/station-state-compatibility.json"
     if not manifest.exists():
-        original = Path(__file__).resolve().parents[1] / "contracts/workspace-state-compatibility.json"
+        original = Path(__file__).resolve().parents[1] / "contracts/station-state-compatibility.json"
         task_store._write_json_atomic(manifest, json.loads(original.read_text()))

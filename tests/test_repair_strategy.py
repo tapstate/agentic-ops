@@ -35,13 +35,13 @@ class RepairStrategyTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         base = Path(self.temp.name)
         self.root = base / "product"
-        self.workspace = base / "workspace"
+        self.station = base / "station"
         (self.root / "policies").mkdir(parents=True)
         (self.root / "projects" / "demo").mkdir(parents=True)
-        (self.workspace / ".agenticops").mkdir(parents=True)
+        (self.station / ".agenticops").mkdir(parents=True)
         self.catalog_path = self.root / repair_strategy.CATALOG_PATH
         self.catalog_path.write_text(json.dumps(CATALOG, ensure_ascii=False), encoding="utf-8")
-        (self.workspace / ".agenticops" / "workspace.json").write_text(json.dumps({
+        (self.station / ".agenticops" / "station.json").write_text(json.dumps({
             "schema_version": 1, "product_root": str(self.root), "project": "demo", "agents": []
         }), encoding="utf-8")
         self.issue = "DEMO-1"
@@ -50,48 +50,48 @@ class RepairStrategyTest(unittest.TestCase):
             "issue_key": self.issue, "run_id": self.run_id, "task_class": "defect_fix",
             "stage": "task_intake", "facts": {}, "repositories": [], "pending": None, "history": [],
         }
-        save_station_task(self.workspace, self.state)
+        save_station_task(self.station, self.state)
 
 
     def tearDown(self):
         self.temp.cleanup()
 
     def read_state(self):
-        return task_store.read_task(self.workspace, self.issue)
+        return task_store.read_task(self.station, self.issue)
 
     def args(self, **values):
-        base = {"dir": str(self.workspace), "issue_key": self.issue,
+        base = {"dir": str(self.station), "issue_key": self.issue,
                 "expected_run_id": self.run_id, "id": "context_driven", "note": "用户选择"}
         base.update(values)
         return SimpleNamespace(**base)
 
     def test_default_and_non_defect_scope(self):
-        resolved = repair_strategy.resolve(self.workspace, self.state)
+        resolved = repair_strategy.resolve(self.station, self.state)
         self.assertTrue(resolved["applicable"])
         self.assertTrue(resolved["available"])
         self.assertEqual(resolved["effective"], {
             "id": "minimal_sufficient", "label": "最小充分修复", "source": "company_default"
         })
         other = dict(self.state, task_class="feature_change")
-        self.assertEqual(repair_strategy.resolve(self.workspace, other), {"applicable": False})
+        self.assertEqual(repair_strategy.resolve(self.station, other), {"applicable": False})
 
     def test_project_and_user_override(self):
         planning = self.root / "projects" / "demo" / repair_strategy.PROJECT_PATH
         planning.write_text(json.dumps({
             "schema_version": 1, "repair_strategy": {"default": "context_driven"}
         }), encoding="utf-8")
-        resolved = repair_strategy.resolve(self.workspace, self.state)
+        resolved = repair_strategy.resolve(self.station, self.state)
         self.assertEqual(resolved["effective"]["source"], "project_default")
         self.state["facts"][repair_strategy.OVERRIDE_FACT] = {
             "id": "minimal_sufficient", "source": "user", "note": ""
         }
-        resolved = repair_strategy.resolve(self.workspace, self.state)
+        resolved = repair_strategy.resolve(self.station, self.state)
         self.assertEqual(resolved["effective"]["source"], "user_override")
         self.assertEqual(resolved["effective"]["id"], "minimal_sufficient")
 
     def test_invalid_configuration_is_advisory(self):
         self.catalog_path.write_text("{broken", encoding="utf-8")
-        resolved = repair_strategy.resolve(self.workspace, self.state)
+        resolved = repair_strategy.resolve(self.station, self.state)
         self.assertTrue(resolved["applicable"])
         self.assertFalse(resolved["available"])
         self.assertTrue(resolved["warnings"])
@@ -123,27 +123,27 @@ class RepairStrategyTest(unittest.TestCase):
         self.assertEqual(task.cmd_repair_strategy_set(self.args()), 0)
         self.state = self.read_state()
         self.state["archive_ref"] = {"path": "archive/DEMO-1/" + self.run_id, "digest": "a" * 64}
-        save_station_task(self.workspace, self.state)
+        save_station_task(self.station, self.state)
         archived = self.read_state()
         with self.assertRaisesRegex(ValueError, "归档"):
             task.cmd_repair_strategy_clear(self.args())
         self.assertEqual(self.read_state(), archived)
         current = dict(self.state, run_id="run-new", facts={}, archive_ref=None)
-        save_station_task(self.workspace, current)
+        save_station_task(self.station, current)
         self.assertNotEqual(current["run_id"], self.run_id)
         self.assertNotIn(repair_strategy.OVERRIDE_FACT, current["facts"])
         self.assertEqual(archived["facts"][repair_strategy.OVERRIDE_FACT]["id"], "context_driven")
 
     def test_q2_or_later_change_does_not_create_mixed_state(self):
         self.state["stage"] = "implementation"
-        save_station_task(self.workspace, self.state)
+        save_station_task(self.station, self.state)
         self.assertEqual(task.cmd_repair_strategy_set(self.args()), 2)
         self.assertNotIn(repair_strategy.OVERRIDE_FACT, self.read_state()["facts"])
 
     def test_active_authorization_prevents_pre_advance_strategy_drift(self):
         self.state["stage"] = "design_review"
-        save_station_task(self.workspace, self.state)
-        task_store._write_json_atomic(task_store.authorization_path(self.workspace, self.issue), {
+        save_station_task(self.station, self.state)
+        task_store._write_json_atomic(task_store.authorization_path(self.station, self.issue), {
             "status": "active"
         })
         self.assertEqual(task.cmd_repair_strategy_set(self.args()), 2)

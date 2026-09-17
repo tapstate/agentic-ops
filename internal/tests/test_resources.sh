@@ -71,14 +71,14 @@ for file in \
   docs/skill-maintenance.md \
   contracts/gate-request.schema.json contracts/gate-decision.schema.json \
   contracts/adapter-manifest.schema.json contracts/operation-catalog.schema.json \
-  contracts/product-state.schema.json contracts/workspace.schema.json \
-  contracts/workspace-state-compatibility.json contracts/workspace-state-compatibility.schema.json \
+  contracts/product-state.schema.json contracts/station.schema.json \
+  contracts/station-state-compatibility.json contracts/station-state-compatibility.schema.json \
   contracts/repository-catalog.schema.json \
-  contracts/workspace-init.schema.json \
+  contracts/station-init.schema.json \
   contracts/task-state.schema.json contracts/operation-catalog.json \
   gate/engine.py gate/runner.py \
   policies/operations.json policies/continuity.json policies/defect-repair-strategies.json \
-  workflow/task.py workflow/task_store.py workflow/project_rules.py workflow/repair_strategy.py tests/test_workspace_compatibility.py tests/test_repair_strategy.py \
+  workflow/task.py workflow/task_store.py workflow/project_rules.py workflow/repair_strategy.py tests/test_station_compatibility.py tests/test_repair_strategy.py \
   workflow/authorization.py workflow/ci.py workflow/evidence.py \
   workflow/quality.py workflow/quality_contract.py workflow/quality_write.py \
   workflow/jira_status.py workflow/jira_watermark.py workflow/jira_tests.py workflow/pr_ready.py \
@@ -88,7 +88,7 @@ for file in \
   projects/tapdata/skills/tapdata-task/SKILL.md \
   projects/tapdata/skills/tapdata-wiki/SKILL.md projects/tapdata/skills/tapdata-ci-test/SKILL.md bootstrap/shared-repositories.json bootstrap/shared_repositories.py \
   skills/ao-test-takeover/SKILL.md skills/ao-ws-init/SKILL.md \
-  adapters/workspace/AGENTS.md adapters/workspace/agenticops adapters/agents/claude/templates/CLAUDE.md \
+  adapters/station/AGENTS.md adapters/station/agenticops adapters/agents/claude/templates/CLAUDE.md \
   adapters/runtime.py adapters/tools/classifier.py adapters/tools/git_push_syntax.py \
   adapters/tools/shell_classifier.py \
   adapters/tools/shell_syntax.py \
@@ -96,9 +96,9 @@ for file in \
   adapters/agents/claude/hook.py adapters/agents/claude/manifest.json \
   adapters/agents/codex/hook.py adapters/agents/codex/manifest.json \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
-  bootstrap/workspace-init.sh bootstrap/render.py bootstrap/workspace_paths.py bootstrap/agent_registry.py \
+  bootstrap/station-init.sh bootstrap/render.py bootstrap/station_paths.py bootstrap/agent_registry.py \
   bootstrap/skill_wiring.py \
-  bootstrap/product_state.py bootstrap/product_version.py bootstrap/workspace_registry.py bootstrap/workspace_compatibility.py \
+  bootstrap/product_state.py bootstrap/product_version.py bootstrap/station_registry.py bootstrap/station_compatibility.py \
   workflow/station.py workflow/station_source.py workflow/source_pool.py workflow/station_resources.py workflow/station_archive.py workflow/station_operation.py \
   tests/test_gate.py tests/test_contracts.py tests/test_adapter_boundary.py tests/test_workflow.py tests/test_task_identity.py tests/test_install.sh \
   internal/acceptance.sh internal/bin/story-gate internal/story_gate/stories.yaml \
@@ -113,9 +113,9 @@ for file in \
   workflow/task.py workflow/authorization.py workflow/ci.py workflow/evidence.py \
   workflow/jira_status.py workflow/jira_watermark.py workflow/pr_ready.py \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
-  bootstrap/workspace-init.sh bootstrap/render.py bootstrap/agent_registry.py \
+  bootstrap/station-init.sh bootstrap/render.py bootstrap/agent_registry.py \
   bootstrap/skill_wiring.py \
-  bootstrap/product_state.py bootstrap/product_version.py bootstrap/workspace_registry.py bootstrap/workspace_compatibility.py \
+  bootstrap/product_state.py bootstrap/product_version.py bootstrap/station_registry.py bootstrap/station_compatibility.py \
   tests/test_install.sh internal/acceptance.sh internal/bin/story-gate internal/release/release.sh \
   internal/release/hotfix.sh internal/tests/test_runtime.sh \
   internal/tests/test_resources.sh internal/tests/test_release.sh \
@@ -127,7 +127,7 @@ test "$(sed -n '1p' .agentic-ops-source)" = "source" ||
   fail ".agentic-ops-source 必须固定为 source"
 
 grep -F '工作面=维护' bootstrap/setup.sh >/dev/null ||
-  fail "setup 必须明确初始化维护工作面"
+  fail "setup 必须明确初始化源码维护面"
 grep -F 'face="$(lifecycle_work_face "$mode")"' bootstrap/update.sh >/dev/null ||
   fail "update 必须根据产品根目录 mode 区分工作面"
 
@@ -140,8 +140,8 @@ python3 -m json.tool contracts/adapter-manifest.schema.json >/dev/null
 python3 -m json.tool contracts/operation-catalog.schema.json >/dev/null
 python3 -m json.tool contracts/product-state.schema.json >/dev/null
 python3 -m json.tool contracts/repository-catalog.schema.json >/dev/null
-python3 -m json.tool contracts/workspace.schema.json >/dev/null
-python3 -m json.tool contracts/workspace-init.schema.json >/dev/null
+python3 -m json.tool contracts/station.schema.json >/dev/null
+python3 -m json.tool contracts/station-init.schema.json >/dev/null
 python3 -m json.tool contracts/task-state.schema.json >/dev/null
 python3 -m json.tool contracts/operation-catalog.json >/dev/null
 python3 -m json.tool projects/tapdata/profile.json >/dev/null
@@ -159,7 +159,7 @@ done
 
 grep -Fq 'sparse-checkout set adapters bootstrap contracts gate policies projects workflow' bootstrap/install.sh ||
   fail "安装脚本没有限制为产品目录"
-grep -Fq '__AGENTIC_OPS_HOME__' adapters/workspace/AGENTS.md ||
+grep -Fq '__AGENTIC_OPS_HOME__' adapters/station/AGENTS.md ||
   fail "工作目录入口缺少安装路径占位符"
 grep -Fq 'deny_with_guidance' adapters/agents/codex/manifest.json ||
   fail "Codex Adapter 未声明二态降级"
@@ -192,11 +192,11 @@ assert set(template["mcpServers"]) == set(requirements["required_servers"])
 for name, requirement in requirements["required_servers"].items():
     assert template["mcpServers"][name] == {"type": "http", "url": requirement["url"]}
 
-workspace_entry = Path("adapters/workspace/AGENTS.md").read_text(encoding="utf-8")
-assert 'mcp-requirements.json' in workspace_entry
-assert '首次需要 Jira 事实时检查 `atlassian`' in workspace_entry
-assert '不得伪造结果' in workspace_entry
-assert 'GitHub MCP、gh 或其它工具由 Agent 按已有授权选择' in workspace_entry
+station_entry = Path("adapters/station/AGENTS.md").read_text(encoding="utf-8")
+assert 'mcp-requirements.json' in station_entry
+assert '首次需要 Jira 事实时检查 `atlassian`' in station_entry
+assert '不得伪造结果' in station_entry
+assert 'GitHub MCP、gh 或其它工具由 Agent 按已有授权选择' in station_entry
 
 profile = json.loads(Path("projects/tapdata/profile.json").read_text(encoding="utf-8"))
 assert profile["statuses"]["Analyzed"] == "waiting_takeover"
@@ -221,10 +221,10 @@ assert profile["workflows_by_issue_type"] == [{
     },
 }]
 PY
-grep -Fq '接管或继续成功只是流程恢复点' adapters/workspace/AGENTS.md ||
-  fail "工作空间入口未声明接管后的连续推进"
-grep -Fq '远程候选参考' adapters/workspace/AGENTS.md ||
-  fail "工作空间入口未声明远程源码证据边界"
+grep -Fq '接管或继续成功只是流程恢复点' adapters/station/AGENTS.md ||
+  fail "工位入口未声明接管后的连续推进"
+grep -Fq '远程候选参考' adapters/station/AGENTS.md ||
+  fail "工位入口未声明远程源码证据边界"
 grep -Fq 'task.py takeover --issue-key' \
   projects/tapdata/skills/tapdata-task/SKILL.md ||
   fail "TapData Skill 未声明完整工程接管"
@@ -245,24 +245,24 @@ grep -Fq 'bootstrap/skill_wiring.py' bootstrap/setup.sh ||
   fail "setup 未刷新源码维护面 Skill 接线"
 grep -Fq 'bootstrap/skill_wiring.py' bootstrap/update.sh ||
   fail "update 未刷新源码维护面 Skill 接线"
-grep -Fq 'WorkspaceDirectory' bootstrap/render.py ||
-  fail "Bootstrap 未以 workspace 目录 FD 锚定生成接线"
-grep -Fq 'os.O_NOFOLLOW' bootstrap/workspace_paths.py ||
-  fail "Bootstrap 未拒绝跟随工作空间产物父目录符号链接"
-grep -Fq 'os.symlink(target, leaf, dir_fd=parent_fd)' bootstrap/workspace_paths.py ||
+grep -Fq 'StationDirectory' bootstrap/render.py ||
+  fail "Bootstrap 未以 station 目录 FD 锚定生成接线"
+grep -Fq 'os.O_NOFOLLOW' bootstrap/station_paths.py ||
+  fail "Bootstrap 未拒绝跟随工位产物父目录符号链接"
+grep -Fq 'os.symlink(target, leaf, dir_fd=parent_fd)' bootstrap/station_paths.py ||
   fail "Bootstrap 未相对已验证父目录 FD 接线中央 Project Skill"
-grep -Fq 'src_dir_fd=parent_fd, dst_dir_fd=parent_fd' bootstrap/workspace_paths.py ||
+grep -Fq 'src_dir_fd=parent_fd, dst_dir_fd=parent_fd' bootstrap/station_paths.py ||
   fail "Bootstrap 原子替换未锚定已验证父目录 FD"
-grep -Fq 'os.unlink(leaf, dir_fd=parent_fd)' bootstrap/workspace_paths.py ||
+grep -Fq 'os.unlink(leaf, dir_fd=parent_fd)' bootstrap/station_paths.py ||
   fail "Bootstrap 删除未锚定已验证父目录 FD"
-grep -Fq '_assert_entry_unchanged(relative)' bootstrap/workspace_paths.py ||
+grep -Fq '_assert_entry_unchanged(relative)' bootstrap/station_paths.py ||
   fail "Bootstrap 未复核最终产物在校验后是否被替换"
-grep -Fq 'for child in os.listdir(directory_fd)' bootstrap/workspace_paths.py ||
+grep -Fq 'for child in os.listdir(directory_fd)' bootstrap/station_paths.py ||
   fail "Bootstrap purge 未基于已打开目录 FD 递归枚举状态树"
-grep -Fq 'self._remove_tree_at(directory_fd, child' bootstrap/workspace_paths.py ||
+grep -Fq 'self._remove_tree_at(directory_fd, child' bootstrap/station_paths.py ||
   fail "Bootstrap purge 递归删除未保持子目录 FD 锚定"
-if grep -Eq 'shutil\.rmtree|Path\([^)]*\)\.rmdir' bootstrap/workspace_registry.py; then
-  fail "Bootstrap workspace purge 仍将绝对路径交给递归删除副作用"
+if grep -Eq 'shutil\.rmtree|Path\([^)]*\)\.rmdir' bootstrap/station_registry.py; then
+  fail "Bootstrap station purge 仍将绝对路径交给递归删除副作用"
 fi
 
 test ! -e gate/hook.py || fail "Gate 仍包含平台 Hook 入口"

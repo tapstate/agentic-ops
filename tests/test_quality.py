@@ -17,7 +17,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workflow import authorization, ci, evidence, failures, issue_versions, pr_ready, quality, quality_contract, task, task_store
-from station_fixture import save_task as save_station_task, initialize_workspace
+from station_fixture import save_task as save_station_task, initialize_station
 
 
 def proof():
@@ -48,7 +48,7 @@ class QualityTests(unittest.TestCase):
             rules["pr_ready"].pop("required_verification", None)
             path.write_text(json.dumps(rules))
         (self.base / ".agenticops").mkdir()
-        (self.base / ".agenticops/workspace.json").write_text(json.dumps({"project": "tapdata", "product_root": str(product)}))
+        (self.base / ".agenticops/station.json").write_text(json.dumps({"project": "tapdata", "product_root": str(product)}))
         self.task = {"issue_key": "TAP-123", "run_id": "run-0123456789ab", "task_class": "defect_fix",
                      "stage": "implementation", "facts": {"fix_plan": {
                          "format": "structured-v1",
@@ -261,7 +261,7 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(rules["plan_contract"]["fact_key"], "implementation_plan")
         self.assertFalse(rules["structured_fix_plan"])
         self.assertFalse(rules["pr_ready"]["require_linked_test_tasks"])
-        self.assertIn("feature_change", quality.project_rules.load_profile(workspace=self.base)
+        self.assertIn("feature_change", quality.project_rules.load_profile(station=self.base)
                          ["jira"]["status_sync"]["task_classes"])
         self.apply("item", {"plan": {"id": "case-a", "checkpoint": "q4-acceptance",
             "timing": "after_fix", "case_ref": "src/test/FeatureTest.java#behavior", "case_version": "test-v1",
@@ -910,7 +910,7 @@ class QualityTests(unittest.TestCase):
 
     def test_quality_does_not_replace_authorization_or_green_gate(self):
         self.plan(); self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
-        spec = quality.project_rules.load_admission(workspace=self.base)
+        spec = quality.project_rules.load_admission(station=self.base)
         problems = task._check_advance(self.task, "implementation", self.base, spec)
         self.assertTrue(any("授权" in p for p in problems))
         self.execute(result="FAIL", kind="assertion")
@@ -964,7 +964,7 @@ class FeatureFlowTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory(prefix="ao-feature-flow-")
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name).resolve()
-        self.ws, self.product = self.root / "workspace", self.root / "product"
+        self.ws, self.product = self.root / "station", self.root / "product"
         self.seed, self.remote = self.root / "seed", self.root / "remote.git"
         self.repo = "tapdata/tapdata"
         shutil.copytree(ROOT / "projects", self.product / "projects")
@@ -979,12 +979,12 @@ class FeatureFlowTests(unittest.TestCase):
         doc = json.loads(catalog.read_text())
         doc["repositories"][self.repo]["origin"] = str(self.remote)
         task_store._write_json_atomic(catalog, doc)
-        task_store._write_json_atomic(self.ws / ".agenticops/workspace.json", {
+        task_store._write_json_atomic(self.ws / ".agenticops/station.json", {
             "schema_version": 3, "product_root": str(self.product), "project": "tapdata",
-            "workspace_id": "3" * 32, "agents": ["codex"],
+            "station_id": "3" * 32, "agents": ["codex"],
             "branch_identity": {"schema_version": 1, "git_name": "Fixture", "source": "git_global_user_name"}})
         task_store.initialize_current(self.ws)
-        initialize_workspace(self.ws)
+        initialize_station(self.ws)
         for name in ("source", "config", "runtime", "archive"):
             (self.ws / name).mkdir(exist_ok=True)
         profiles = self.product / "projects/tapdata/engineering-profiles.json"

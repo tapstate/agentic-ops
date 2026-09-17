@@ -13,7 +13,7 @@
       "additionalProperties": false,
       "required": ["source"],
       "properties": {
-        "source": {"const": "<workspace>/source/<owner>/<repo>"}
+        "source": {"const": "<station>/source/<owner>/<repo>"}
       }
     },
     "repositories": {

@@ -16,11 +16,11 @@ Maven 安装级与用户级 `settings.xml` 正常生效，保留镜像、认证�
 
 ```sh
 python3 <agenticops-root>/workflow/task.py runtime-path \
-  --issue-key <issue> --expected-run-id <run> --name maven-local --dir <workspace> \
+  --issue-key <issue> --expected-run-id <run> --name maven-local --dir <station> \
   > <outside-repository>/maven-runtime.json
 ```
 
-输出绑定 `workspace`、`station_id`、`run_id` 和 `local_repository`。若任务已归档、run 已变化，或 runtime 路径不是受控真实目录，命令失败，不能执行旧计划。`maven_tests.py` 当前只支持 Maven 3.9.x；传入解析后的绝对 Maven 可执行文件路径，而不是裸 `mvn`。其它 Maven 调用同样使用输出中的 `local_repository`，例如：
+输出绑定 `station`、`station_id`、`run_id` 和 `local_repository`。若任务已归档、run 已变化，或 runtime 路径不是受控真实目录，命令失败，不能执行旧计划。`maven_tests.py` 当前只支持 Maven 3.9.x；传入解析后的绝对 Maven 可执行文件路径，而不是裸 `mvn`。其它 Maven 调用同样使用输出中的 `local_repository`，例如：
 
 ```sh
 <absolute-mvn> -Dmaven.repo.local=<local_repository> -N -f <module>/pom.xml help:effective-pom -Doutput=<absolute-output>
@@ -216,11 +216,11 @@ Agent 用原生工具按清单中的 `cwd` 和 `argv` 顺序执行：先 `instal
 ```json
 {
   "plan_id": "<清单 plan_id>",
-  "runtime_context": {"workspace": "<workspace>", "station_id": "<station>", "run_id": "<run>", "local_repository": "<workspace>/runtime/maven-local"},
+  "runtime_context": {"station": "<station>", "station_id": "<station>", "run_id": "<run>", "local_repository": "<station>/runtime/maven-local"},
   "commands": [
-    {"kind": "toolchain", "started_ns": 0, "finished_ns": 0, "exit_code": 0, "observed_maven_version": "3.9.16", "runtime_context": {"workspace": "<workspace>", "station_id": "<station>", "run_id": "<run>", "local_repository": "<workspace>/runtime/maven-local"}},
-    {"kind": "prepare", "started_ns": 0, "finished_ns": 0, "exit_code": 0, "runtime_context": {"workspace": "<workspace>", "station_id": "<station>", "run_id": "<run>", "local_repository": "<workspace>/runtime/maven-local"}},
-    {"kind": "test", "module": "connectors/mysql-connector", "started_ns": 0, "finished_ns": 0, "exit_code": 0, "runtime_context": {"workspace": "<workspace>", "station_id": "<station>", "run_id": "<run>", "local_repository": "<workspace>/runtime/maven-local"}}
+    {"kind": "toolchain", "started_ns": 0, "finished_ns": 0, "exit_code": 0, "observed_maven_version": "3.9.16", "runtime_context": {"station": "<station>", "station_id": "<station>", "run_id": "<run>", "local_repository": "<station>/runtime/maven-local"}},
+    {"kind": "prepare", "started_ns": 0, "finished_ns": 0, "exit_code": 0, "runtime_context": {"station": "<station>", "station_id": "<station>", "run_id": "<run>", "local_repository": "<station>/runtime/maven-local"}},
+    {"kind": "test", "module": "connectors/mysql-connector", "started_ns": 0, "finished_ns": 0, "exit_code": 0, "runtime_context": {"station": "<station>", "station_id": "<station>", "run_id": "<run>", "local_repository": "<station>/runtime/maven-local"}}
   ]
 }
 ```
@@ -233,7 +233,7 @@ python3 projects/tapdata/scripts/maven_tests.py report \
 
 核验会拒绝变更后的源码快照、已声明依赖变化或不同清单的结果；逐模块列出缺执行、缺报告、旧报告、零用例、跳过和失败。只有本轮用例报告计数完整且退出成功时才标记模块通过，未提供结果的模块保留在报告内。解析后的摘要不含测试日志正文或连接凭据。该结论不证明断言质量或测试配置无过滤，Agent 仍须结合原生执行事实核对；这些整体证据由共同流程接入，不在本脚本复制流程门禁。
 
-执行清单为可再生的临时分析文件，当前格式为 3；旧连接器清单需用当前入口重新生成，不保留旧命令兼容入口。不改变 `.agenticops/` 工作空间持久状态或 epoch。
+执行清单为可再生的临时分析文件，当前格式为 3；旧连接器清单需用当前入口重新生成，不保留旧命令兼容入口。不改变 `.agenticops/` 工位持久状态或 epoch。
 
 ### 依赖构建命令
 
@@ -302,11 +302,11 @@ pnpm dev:daas
 
 ## FE 与 TM 本地运行
 
-建议在项目工作空间中为 FE 和 TM 使用独立工作目录：
+建议在项目工位中为 FE 和 TM 使用独立工作目录：
 
 ```text
-<workspace>/workdir/flow-agent
-<workspace>/workdir/tm
+<station>/workdir/flow-agent
+<station>/workdir/tm
 ```
 
 FE 当前入口类：
@@ -332,7 +332,7 @@ TAPDATA_WORK_DIR=.
 backend_url=<tm-api-url>
 ```
 
-以下配置仅为结构和值的参考样例，不代表当前用户、工作空间或任务的真实运行配置。真实启动前，AIAgent 必须向用户展示拟使用的 FE 与 TM 配置，并要求用户修改或逐项确认；未完成确认时不得启动。FE 与 TM 必须连接同一个已确认的 MongoDB 环境，FE 的 `backend_url` 必须指向本次使用的 TM API。
+以下配置仅为结构和值的参考样例，不代表当前用户、工位或任务的真实运行配置。真实启动前，AIAgent 必须向用户展示拟使用的 FE 与 TM 配置，并要求用户修改或逐项确认；未完成确认时不得启动。FE 与 TM 必须连接同一个已确认的 MongoDB 环境，FE 的 `backend_url` 必须指向本次使用的 TM API。
 
 FE 参考配置：
 

@@ -31,7 +31,7 @@ file_digest() {
 source_repo="$test_root/source"
 install_root="$test_root/install"
 maintainer_root="$test_root/maintainer"
-workspace="$test_root/project-workspace"
+station="$test_root/project-station"
 
 mkdir -p "$source_repo"
 git -C "$source_repo" init -q -b "$install_branch"
@@ -100,9 +100,9 @@ for agent_skill_root in .agents/skills .claude/skills; do
         "$maintainer_root/skills/$maintenance_skill")"
   done
 done
-"$maintainer_root/agenticops" doctor --workspace "$maintainer_root" >/dev/null
+"$maintainer_root/agenticops" station doctor --station "$maintainer_root" >/dev/null
 rm "$maintainer_root/.agents/skills/ao-ws-init"
-if "$maintainer_root/agenticops" doctor --workspace "$maintainer_root" >/dev/null 2>&1; then
+if "$maintainer_root/agenticops" station doctor --station "$maintainer_root" >/dev/null 2>&1; then
   printf '维护 Skill 链接漂移未被 doctor 发现\n' >&2
   exit 1
 fi
@@ -119,19 +119,19 @@ grep -Fx 'project owned' "$maintainer_root/.agents/skills/ao-ws-init" >/dev/null
 rm "$maintainer_root/.agents/skills/ao-ws-init"
 python3 "$maintainer_root/bootstrap/skill_wiring.py" \
   --product-root "$maintainer_root" --refresh >/dev/null
-source_workspace="$test_root/source-workspace"
-"$maintainer_root/agenticops" init --workspace "$source_workspace" \
+source_station="$test_root/source-station"
+"$maintainer_root/agenticops" station init --station "$source_station" \
   --project tapdata --agent test-agent >/dev/null
-"$maintainer_root/agenticops" doctor --workspace "$source_workspace" >/dev/null
-"$source_workspace/agenticops" doctor >/dev/null
+"$maintainer_root/agenticops" station doctor --station "$source_station" >/dev/null
+"$source_station/agenticops" station doctor >/dev/null
 printf '{"note":"changed","hooks":{"__AGENTIC_OPS_HOOK_NATIVE_EVENT__":[{"matcher":"__AGENTIC_OPS_HOOK_NATIVE_TOOL_MATCHER__","hooks":[{"type":"command","command":"python3 __AGENTIC_OPS_HOME__/adapters/agents/test-agent/hook.py","timeout":"__AGENTIC_OPS_HOOK_TIMEOUT_SECONDS__"}]}]}}\n' \
   > "$maintainer_root/adapters/agents/test-agent/templates/settings.json"
-if "$maintainer_root/agenticops" doctor --workspace "$source_workspace" >/dev/null 2>&1; then
-  printf '源码变更后工作空间漂移未被识别\n' >&2
+if "$maintainer_root/agenticops" station doctor --station "$source_station" >/dev/null 2>&1; then
+  printf '源码变更后工位漂移未被识别\n' >&2
   exit 1
 fi
-"$maintainer_root/agenticops" repair --workspace "$source_workspace" >/dev/null
-grep -F '"changed"' "$source_workspace/.test-agent/settings.json" >/dev/null
+"$maintainer_root/agenticops" station repair --station "$source_station" >/dev/null
+grep -F '"changed"' "$source_station/.test-agent/settings.json" >/dev/null
 git -C "$maintainer_root" checkout -q -- adapters/agents/test-agent/templates/settings.json
 
 git -C "$source_repo" switch -q "$source_branch"
@@ -148,10 +148,10 @@ printf '%s\n' \
 git -C "$source_repo" add SOURCE-NEXT skills/fixture-maintenance/SKILL.md
 git -C "$source_repo" commit -qm "source next"
 source_update_output="$test_root/source-update-output"
-PATH="$setup_bin:$PATH" "$source_workspace/agenticops" update > "$source_update_output"
+PATH="$setup_bin:$PATH" "$source_station/agenticops" update > "$source_update_output"
 test -f "$maintainer_root/SOURCE-NEXT"
 grep -F '工作面=维护' "$source_update_output" >/dev/null
-grep -F '请执行 agenticops workspace repair --all' "$source_update_output" >/dev/null
+grep -F '请执行 agenticops station repair --all' "$source_update_output" >/dev/null
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field current_ref)" = \
   "$(git -C "$maintainer_root" rev-parse HEAD)"
 test -L "$maintainer_root/.agents/skills/fixture-maintenance"
@@ -177,14 +177,14 @@ mkdir "$maintainer_root/.local/lifecycle.lock"
 printf '%s\n' "$$" > "$maintainer_root/.local/lifecycle.lock/owner"
 printf 'test\n' > "$maintainer_root/.local/lifecycle.lock/operation"
 if PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update >/dev/null 2>&1; then
-  printf '维护工作面并发生命周期更新未被拒绝\n' >&2
+  printf '源码维护面并发生命周期更新未被拒绝\n' >&2
   exit 1
 fi
 rm -f "$maintainer_root/.local/lifecycle.lock/owner" \
   "$maintainer_root/.local/lifecycle.lock/operation"
 rmdir "$maintainer_root/.local/lifecycle.lock"
-"$maintainer_root/agenticops" repair --workspace "$source_workspace" >/dev/null
-python3 - "$source_workspace/.agenticops/init.json" "$maintainer_root" <<'PY'
+"$maintainer_root/agenticops" station repair --station "$source_station" >/dev/null
+python3 - "$source_station/.agenticops/init.json" "$maintainer_root" <<'PY'
 import json
 import subprocess
 import sys
@@ -199,13 +199,13 @@ PY
 
 git -C "$maintainer_root" switch -qc feature/update-boundary
 if PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update >/dev/null 2>&1; then
-  printf '维护工作面在非跟踪分支执行了 update\n' >&2
+  printf '源码维护面在非跟踪分支执行了 update\n' >&2
   exit 1
 fi
 git -C "$maintainer_root" switch -q develop
 printf '\n# dirty\n' >> "$maintainer_root/agenticops"
 if PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update >/dev/null 2>&1; then
-  printf '维护工作面有未提交修改时执行了 update\n' >&2
+  printf '源码维护面有未提交修改时执行了 update\n' >&2
   exit 1
 fi
 git -C "$maintainer_root" checkout -q -- agenticops
@@ -236,122 +236,122 @@ if PATH="$setup_bin:$PATH" "$install_root/agenticops" setup >/dev/null 2>&1; the
   printf '安装产品根目录被错误切换为源码维护模式\n' >&2
   exit 1
 fi
-if "$install_root/agenticops" init --workspace "$install_root" >/dev/null 2>&1; then
-  printf '产品根目录被错误初始化为项目工作空间\n' >&2
+if "$install_root/agenticops" station init --station "$install_root" >/dev/null 2>&1; then
+  printf '产品根目录被错误初始化为项目工位\n' >&2
   exit 1
 fi
 
-collision_workspace="$test_root/collision-workspace"
-mkdir -p "$collision_workspace"
-printf 'project owned\n' > "$collision_workspace/AGENTS.md"
-if "$install_root/agenticops" init --workspace "$collision_workspace" >/dev/null 2>&1; then
+collision_station="$test_root/collision-station"
+mkdir -p "$collision_station"
+printf 'project owned\n' > "$collision_station/AGENTS.md"
+if "$install_root/agenticops" station init --station "$collision_station" >/dev/null 2>&1; then
   printf '工作目录初始化覆盖了项目自有 AGENTS.md\n' >&2
   exit 1
 fi
-grep -Fx 'project owned' "$collision_workspace/AGENTS.md" >/dev/null
-test ! -e "$collision_workspace/.agenticops"
+grep -Fx 'project owned' "$collision_station/AGENTS.md" >/dev/null
+test ! -e "$collision_station/.agenticops"
 
 # init 必须在任何写入前拒绝中间目录 symlink；只允许最终 Skill 节点按声明接线。
 symlink_outside="$test_root/symlink-outside"
-init_symlink_workspace="$test_root/init-symlink-workspace"
-mkdir -p "$symlink_outside/init" "$init_symlink_workspace/.agents"
-ln -s "$symlink_outside/init" "$init_symlink_workspace/.agents/skills"
-if "$install_root/agenticops" init --workspace "$init_symlink_workspace" \
+init_symlink_station="$test_root/init-symlink-station"
+mkdir -p "$symlink_outside/init" "$init_symlink_station/.agents"
+ln -s "$symlink_outside/init" "$init_symlink_station/.agents/skills"
+if "$install_root/agenticops" station init --station "$init_symlink_station" \
     --agent codex >/dev/null 2>&1; then
-  printf 'init 经由 Skill 父目录 symlink 写出了工作空间\n' >&2
+  printf 'init 经由 Skill 父目录 symlink 写出了工位\n' >&2
   exit 1
 fi
 test ! -e "$symlink_outside/init/tapdata-task"
-test ! -e "$init_symlink_workspace/AGENTS.md"
-test ! -e "$init_symlink_workspace/.agenticops"
+test ! -e "$init_symlink_station/AGENTS.md"
+test ! -e "$init_symlink_station/.agenticops"
 
 # repair 必须拒绝已有 Skill 父目录被替换成 symlink，不能在外部重建最终接线。
-repair_symlink_workspace="$test_root/repair-symlink-workspace"
+repair_symlink_station="$test_root/repair-symlink-station"
 mkdir -p "$symlink_outside/repair"
-"$install_root/agenticops" init --workspace "$repair_symlink_workspace" \
+"$install_root/agenticops" station init --station "$repair_symlink_station" \
   --agent codex >/dev/null
-repair_skill_target="$(readlink "$repair_symlink_workspace/.agents/skills/tapdata-task")"
-for generated_skill in "$repair_symlink_workspace/.agents/skills/"*; do
+repair_skill_target="$(readlink "$repair_symlink_station/.agents/skills/tapdata-task")"
+for generated_skill in "$repair_symlink_station/.agents/skills/"*; do
   rm "$generated_skill"
 done
-rmdir "$repair_symlink_workspace/.agents/skills"
-ln -s "$symlink_outside/repair" "$repair_symlink_workspace/.agents/skills"
+rmdir "$repair_symlink_station/.agents/skills"
+ln -s "$symlink_outside/repair" "$repair_symlink_station/.agents/skills"
 ln -s "$repair_skill_target" "$symlink_outside/repair/tapdata-task"
-if "$install_root/agenticops" repair --workspace "$repair_symlink_workspace" \
+if "$install_root/agenticops" station repair --station "$repair_symlink_station" \
     >/dev/null 2>&1; then
   printf 'repair 接受了 Skill 父目录 symlink\n' >&2
   exit 1
 fi
 test -L "$symlink_outside/repair/tapdata-task"
-test -f "$repair_symlink_workspace/.agenticops/workspace.json"
+test -f "$repair_symlink_station/.agenticops/station.json"
 
 # detach 预检同样必须逐级检查，不能删除 symlink 父目录外的同名最终接线。
-detach_symlink_workspace="$test_root/detach-symlink-workspace"
+detach_symlink_station="$test_root/detach-symlink-station"
 mkdir -p "$symlink_outside/detach"
-"$install_root/agenticops" init --workspace "$detach_symlink_workspace" \
+"$install_root/agenticops" station init --station "$detach_symlink_station" \
   --agent codex >/dev/null
-detach_skill_target="$(readlink "$detach_symlink_workspace/.agents/skills/tapdata-task")"
-for generated_skill in "$detach_symlink_workspace/.agents/skills/"*; do
+detach_skill_target="$(readlink "$detach_symlink_station/.agents/skills/tapdata-task")"
+for generated_skill in "$detach_symlink_station/.agents/skills/"*; do
   rm "$generated_skill"
 done
-rmdir "$detach_symlink_workspace/.agents/skills"
-ln -s "$symlink_outside/detach" "$detach_symlink_workspace/.agents/skills"
+rmdir "$detach_symlink_station/.agents/skills"
+ln -s "$symlink_outside/detach" "$detach_symlink_station/.agents/skills"
 ln -s "$detach_skill_target" "$symlink_outside/detach/tapdata-task"
-if "$install_root/agenticops" workspace detach \
-    --workspace "$detach_symlink_workspace" --yes >/dev/null 2>&1; then
+if "$install_root/agenticops" station detach \
+    --station "$detach_symlink_station" --yes >/dev/null 2>&1; then
   printf 'detach 接受了 Skill 父目录 symlink\n' >&2
   exit 1
 fi
 test -L "$symlink_outside/detach/tapdata-task"
-test -f "$detach_symlink_workspace/.agenticops/workspace.json"
+test -f "$detach_symlink_station/.agenticops/station.json"
 
 # 校验完成后父目录才被替换的确定性 TOCTOU 回归：init/repair/detach 的最终副作用
-# 必须仍锚定已打开的 workspace 目录 FD，且不得写删外部目录。
+# 必须仍锚定已打开的 station 目录 FD，且不得写删外部目录。
 race_outside="$test_root/race-outside"
-race_init_workspace="$test_root/race-init-workspace"
-race_repair_workspace="$test_root/race-repair-workspace"
-race_detach_workspace="$test_root/race-detach-workspace"
+race_init_station="$test_root/race-init-station"
+race_repair_station="$test_root/race-repair-station"
+race_detach_station="$test_root/race-detach-station"
 mkdir -p "$race_outside/init" "$race_outside/repair" "$race_outside/detach" \
-  "$race_init_workspace/.agents/skills"
-"$install_root/agenticops" init --workspace "$race_repair_workspace" --agent codex >/dev/null
-"$install_root/agenticops" init --workspace "$race_detach_workspace" --agent codex >/dev/null
+  "$race_init_station/.agents/skills"
+"$install_root/agenticops" station init --station "$race_repair_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --station "$race_detach_station" --agent codex >/dev/null
 printf 'outside sentinel\n' > "$race_outside/detach/tapdata-task"
-python3 - "$install_root" "$race_init_workspace" "$race_repair_workspace" \
-  "$race_detach_workspace" "$race_outside" <<'PY'
+python3 - "$install_root" "$race_init_station" "$race_repair_station" \
+  "$race_detach_station" "$race_outside" <<'PY'
 import os
 import sys
 from pathlib import Path
 
 install_root = Path(sys.argv[1])
-init_workspace = Path(sys.argv[2])
-repair_workspace = Path(sys.argv[3])
-detach_workspace = Path(sys.argv[4])
+init_station = Path(sys.argv[2])
+repair_station = Path(sys.argv[3])
+detach_station = Path(sys.argv[4])
 outside = Path(sys.argv[5])
 sys.path.insert(0, str(install_root))
 sys.path.insert(0, str(install_root / "bootstrap"))
 
 import render
-from bootstrap import workspace_registry
+from bootstrap import station_registry
 
 
-def render_race(workspace, destination, refresh):
+def render_race(station, destination, refresh):
     original = render.remove_stale_artifacts
 
     def swap_after_preflight(current, owned, targets, tree):
         original(current, owned, targets, tree)
-        skills = workspace / ".agents" / "skills"
-        held = workspace / ".agents" / "skills-held"
+        skills = station / ".agents" / "skills"
+        held = station / ".agents" / "skills-held"
         skills.rename(held)
         skills.symlink_to(destination, target_is_directory=True)
 
     render.remove_stale_artifacts = swap_after_preflight
     argv = [
-        "render.py", "--install-home", str(install_root), "--workspace", str(workspace),
+        "render.py", "--install-home", str(install_root), "--station", str(station),
         "--agent", "codex",
     ]
     if refresh:
         argv = [
-            "render.py", "--install-home", str(install_root), "--workspace", str(workspace),
+            "render.py", "--install-home", str(install_root), "--station", str(station),
             "--refresh",
         ]
     previous = sys.argv
@@ -368,71 +368,71 @@ def render_race(workspace, destination, refresh):
         render.remove_stale_artifacts = original
 
 
-render_race(init_workspace, outside / "init", False)
-render_race(repair_workspace, outside / "repair", True)
+render_race(init_station, outside / "init", False)
+render_race(repair_station, outside / "repair", True)
 assert not (outside / "init" / "tapdata-task").exists()
 assert not (outside / "repair" / "tapdata-task").exists()
 
-original_preflight = workspace_registry.detach_preflight
+original_preflight = station_registry.detach_preflight
 
-def swap_after_detach_preflight(product_root, workspace, purge=False, tree=None):
-    result = original_preflight(product_root, workspace, purge=purge, tree=tree)
-    skills = detach_workspace / ".agents" / "skills"
-    held = detach_workspace / ".agents" / "skills-held"
+def swap_after_detach_preflight(product_root, station, purge=False, tree=None):
+    result = original_preflight(product_root, station, purge=purge, tree=tree)
+    skills = detach_station / ".agents" / "skills"
+    held = detach_station / ".agents" / "skills-held"
     skills.rename(held)
     skills.symlink_to(outside / "detach", target_is_directory=True)
     return result
 
-workspace_registry.detach_preflight = swap_after_detach_preflight
+station_registry.detach_preflight = swap_after_detach_preflight
 try:
     try:
-        workspace_registry.detach(install_root, detach_workspace)
+        station_registry.detach(install_root, detach_station)
     except ValueError as error:
         assert "已被替换" in str(error)
     else:
         raise AssertionError("父目录替换后 detach 未失败关闭")
 finally:
-    workspace_registry.detach_preflight = original_preflight
+    station_registry.detach_preflight = original_preflight
 
 assert (outside / "detach" / "tapdata-task").read_text(encoding="utf-8") == "outside sentinel\n"
 PY
 
-"$install_root/agenticops" init --workspace "$workspace"
+"$install_root/agenticops" station init --station "$station"
 
-test -f "$workspace/.agenticops/workspace.json"
-test -f "$workspace/.agenticops/init.json"
-test -x "$workspace/agenticops"
-test -f "$workspace/AGENTS.md"
-test -f "$workspace/CLAUDE.md"
-test -f "$workspace/.mcp.json"
-test ! -e "$workspace/.claude/settings.json"
-test ! -e "$workspace/.codex/hooks.json"
-test -f "$workspace/.test-agent/settings.json"
-test -L "$workspace/.agents/skills/tapdata-task"
-test -L "$workspace/.claude/skills/tapdata-task"
-test ! -e "$workspace/.agents/skills/ao-test-takeover"
-test ! -e "$workspace/.claude/skills/ao-test-takeover"
-test ! -e "$workspace/.agents/skills/ao-ws-init"
-test ! -e "$workspace/.claude/skills/ao-ws-init"
-"$install_root/agenticops" workspace list | grep -F -- "$workspace" >/dev/null
+test -f "$station/.agenticops/station.json"
+test -f "$station/.agenticops/init.json"
+test -x "$station/agenticops"
+test -f "$station/AGENTS.md"
+test -f "$station/CLAUDE.md"
+test -f "$station/.mcp.json"
+test ! -e "$station/.claude/settings.json"
+test ! -e "$station/.codex/hooks.json"
+test -f "$station/.test-agent/settings.json"
+test -L "$station/.agents/skills/tapdata-task"
+test -L "$station/.claude/skills/tapdata-task"
+test ! -e "$station/.agents/skills/ao-test-takeover"
+test ! -e "$station/.claude/skills/ao-test-takeover"
+test ! -e "$station/.agents/skills/ao-ws-init"
+test ! -e "$station/.claude/skills/ao-ws-init"
+"$install_root/agenticops" station list | grep -F -- "$station" >/dev/null
 install_root_physical="$(cd "$install_root" && pwd -P)"
-grep -F '@AGENTS.md' "$workspace/CLAUDE.md" >/dev/null
-grep -F 'Product Project：`tapdata`' "$workspace/AGENTS.md" >/dev/null
-grep -F 'python3 '"$install_root_physical"'/workflow/task.py status --issue-key <JIRA-KEY>' "$workspace/AGENTS.md" >/dev/null
-grep -F 'python3 '"$install_root_physical"'/workflow/task.py repository context --issue-key <JIRA-KEY>' "$workspace/AGENTS.md" >/dev/null
-grep -F '必须先读取当前项目 `.agents/skills/`' "$workspace/AGENTS.md" >/dev/null
-grep -F 'memory 只能作为历史线索' "$workspace/AGENTS.md" >/dev/null
-grep -F '接管或继续成功只是流程恢复点' "$workspace/AGENTS.md" >/dev/null
-grep -F '远程候选参考' "$workspace/AGENTS.md" >/dev/null
-grep -F 'Workflow 在本地状态变更处执行流程门禁' "$workspace/AGENTS.md" >/dev/null
-grep -F '生成 Q2 方案时应用返回的 `planning_guidance`' "$workspace/AGENTS.md" >/dev/null
-grep -F '完整工程基线' "$workspace/AGENTS.md" >/dev/null
-grep -F 'current-task.json' "$workspace/AGENTS.md" >/dev/null
-if "$workspace/agenticops" --help | grep -F 'agenticops task' >/dev/null; then
+grep -F '@AGENTS.md' "$station/CLAUDE.md" >/dev/null
+grep -F 'Product Project：`tapdata`' "$station/AGENTS.md" >/dev/null
+grep -F 'python3 '"$install_root_physical"'/workflow/task.py status --issue-key <JIRA-KEY>' "$station/AGENTS.md" >/dev/null
+grep -F 'python3 '"$install_root_physical"'/workflow/task.py repository context --issue-key <JIRA-KEY>' "$station/AGENTS.md" >/dev/null
+grep -F '必须先读取当前项目 `.agents/skills/`' "$station/AGENTS.md" >/dev/null
+grep -F 'memory 只能作为历史线索' "$station/AGENTS.md" >/dev/null
+grep -F '接管或继续成功只是流程恢复点' "$station/AGENTS.md" >/dev/null
+grep -F '远程候选参考' "$station/AGENTS.md" >/dev/null
+grep -F 'Workflow 在本地状态变更处执行流程门禁' "$station/AGENTS.md" >/dev/null
+grep -F '生成 Q2 方案时应用返回的 `planning_guidance`' "$station/AGENTS.md" >/dev/null
+grep -F '完整工程基线' "$station/AGENTS.md" >/dev/null
+grep -F 'current-task.json' "$station/AGENTS.md" >/dev/null
+if "$station/agenticops" --help | grep -F 'agenticops task' >/dev/null; then
   printf '统一入口错误暴露了任务 Runtime\n' >&2
   exit 1
 fi
-python3 - "$workspace/.mcp.json" <<'PY'
+python3 - "$station/.mcp.json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -442,12 +442,12 @@ assert servers == {
     "atlassian": {"type": "http", "url": "https://mcp.atlassian.com/v1/mcp/authv2"},
 }
 PY
-python3 - "$workspace" "$install_root" <<'PY'
+python3 - "$station" "$install_root" <<'PY'
 import os
 import sys
 from pathlib import Path
 
-workspace = Path(sys.argv[1])
+station = Path(sys.argv[1])
 import json
 product = Path(sys.argv[2])
 assert json.loads((product / "projects/tapdata/profile.json").read_text())["wiki_repository"] == "tapstate/wiki"
@@ -457,7 +457,7 @@ assert not (product / ".local/shared-repositories").exists()
 for name in ("tapdata-task", "tapdata-wiki", "tapdata-ci-test"):
     skill = Path(sys.argv[2]) / "projects/tapdata/skills" / name
     for discovery in (".agents/skills", ".claude/skills"):
-        link = workspace / discovery / name
+        link = station / discovery / name
         assert link.is_symlink()
         assert not Path(os.readlink(link)).is_absolute()
         assert link.resolve() == skill.resolve()
@@ -512,7 +512,7 @@ assert task_workflow == [{
     },
 }]
 PY
-python3 - "$workspace/.agenticops/workspace.json" "$workspace/.agenticops/init.json" "$install_root" <<'PY'
+python3 - "$station/.agenticops/station.json" "$station/.agenticops/init.json" "$install_root" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -521,7 +521,7 @@ binding = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 initialization = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 assert binding["schema_version"] == 3
 assert binding["product_root"] == str(Path(sys.argv[3]).resolve())
-assert len(binding["workspace_id"]) == 32
+assert len(binding["station_id"]) == 32
 assert binding["project"] == "tapdata"
 assert binding["agents"] == ["claude", "codex", "test-agent"]
 assert "repository_pool" not in binding
@@ -541,7 +541,7 @@ assert ".claude/skills/ao-test-takeover" not in artifacts
 assert ".agents/skills/ao-ws-init" not in artifacts
 assert ".claude/skills/ao-ws-init" not in artifacts
 PY
-python3 - "$workspace/.claude/settings.json" "$workspace/.codex/hooks.json" "$install_root" <<'PY'
+python3 - "$station/.claude/settings.json" "$station/.codex/hooks.json" "$install_root" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -555,7 +555,7 @@ for config_path, agent in ((Path(sys.argv[1]), "claude"), (Path(sys.argv[2]), "c
     assert not any(artifact["target"] == str(config_path.relative_to(config_path.parent.parent))
                    for artifact in manifest["artifacts"])
 PY
-python3 - "$workspace/.test-agent/settings.json" <<'PY'
+python3 - "$station/.test-agent/settings.json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -565,122 +565,122 @@ handler = document["hooks"]["PreToolUse"][0]["hooks"][0]
 assert document["hooks"]["PreToolUse"][0]["matcher"] == "Shell"
 assert handler["timeout"] == 15
 PY
-"$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
-"$workspace/agenticops" doctor >/dev/null
+"$install_root/agenticops" station doctor --station "$station" >/dev/null
+"$station/agenticops" station doctor >/dev/null
 test ! -e "$HOME/.codex/skills"
 test ! -e "$HOME/.agents/skills"
 test ! -e "$HOME/.claude/skills"
 
-rm "$workspace/.agents/skills/tapdata-task"
-if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
-  printf '工作空间 Skill 链接漂移未被 doctor 发现\n' >&2
+rm "$station/.agents/skills/tapdata-task"
+if "$install_root/agenticops" station doctor --station "$station" >/dev/null 2>&1; then
+  printf '工位 Skill 链接漂移未被 doctor 发现\n' >&2
   exit 1
 fi
-"$install_root/agenticops" repair --workspace "$workspace" >/dev/null
-test -L "$workspace/.agents/skills/tapdata-task"
+"$install_root/agenticops" station repair --station "$station" >/dev/null
+test -L "$station/.agents/skills/tapdata-task"
 
-rm "$workspace/.agents/skills/tapdata-ci-test"
-if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
+rm "$station/.agents/skills/tapdata-ci-test"
+if "$install_root/agenticops" station doctor --station "$station" >/dev/null 2>&1; then
   printf '集成测试 Skill 链接漂移未被 doctor 发现\n' >&2
   exit 1
 fi
-"$install_root/agenticops" repair --workspace "$workspace" >/dev/null
-test -L "$workspace/.agents/skills/tapdata-ci-test"
-test -L "$workspace/.claude/skills/tapdata-ci-test"
+"$install_root/agenticops" station repair --station "$station" >/dev/null
+test -L "$station/.agents/skills/tapdata-ci-test"
+test -L "$station/.claude/skills/tapdata-ci-test"
 
-printf 'drift\n' > "$workspace/AGENTS.md"
-if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
+printf 'drift\n' > "$station/AGENTS.md"
+if "$install_root/agenticops" station doctor --station "$station" >/dev/null 2>&1; then
   printf '工作目录漂移未被 doctor 发现\n' >&2
   exit 1
 fi
-"$install_root/agenticops" repair --workspace "$workspace" >/dev/null
-"$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
-"$install_root/agenticops" workspace clean --workspace "$workspace" --generated-only >/dev/null
-(cd "$workspace" && ./agenticops workspace clean --generated-only >/dev/null)
-"$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
-test -L "$workspace/.agents/skills/tapdata-ci-test"
-test -L "$workspace/.claude/skills/tapdata-ci-test"
+"$install_root/agenticops" station repair --station "$station" >/dev/null
+"$install_root/agenticops" station doctor --station "$station" >/dev/null
+"$install_root/agenticops" station clean --station "$station" --generated-only >/dev/null
+(cd "$station" && ./agenticops station clean --generated-only >/dev/null)
+"$install_root/agenticops" station doctor --station "$station" >/dev/null
+test -L "$station/.agents/skills/tapdata-ci-test"
+test -L "$station/.claude/skills/tapdata-ci-test"
 
-printf 'drift\n' > "$workspace/agenticops"
-if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
-  printf '工作空间入口漂移未被 doctor 发现\n' >&2
+printf 'drift\n' > "$station/agenticops"
+if "$install_root/agenticops" station doctor --station "$station" >/dev/null 2>&1; then
+  printf '工位入口漂移未被 doctor 发现\n' >&2
   exit 1
 fi
-"$install_root/agenticops" repair --workspace "$workspace" >/dev/null
-test -x "$workspace/agenticops"
-"$workspace/agenticops" doctor >/dev/null
+"$install_root/agenticops" station repair --station "$station" >/dev/null
+test -x "$station/agenticops"
+"$station/agenticops" station doctor >/dev/null
 
-entry_migration_workspace="$test_root/entry-migration-workspace"
-"$install_root/agenticops" init --workspace "$entry_migration_workspace" --agent codex >/dev/null
-python3 - "$entry_migration_workspace" <<'PY'
+entry_migration_station="$test_root/entry-migration-station"
+"$install_root/agenticops" station init --station "$entry_migration_station" --agent codex >/dev/null
+python3 - "$entry_migration_station" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-workspace = Path(sys.argv[1])
-old_entry = workspace / ".agenticops" / "agenticops"
-new_entry = workspace / "agenticops"
+station = Path(sys.argv[1])
+old_entry = station / ".agenticops" / "agenticops"
+new_entry = station / "agenticops"
 new_entry.rename(old_entry)
-init_path = workspace / ".agenticops" / "init.json"
+init_path = station / ".agenticops" / "init.json"
 document = json.loads(init_path.read_text(encoding="utf-8"))
 for artifact in document["artifacts"]:
     if artifact["path"] == "agenticops":
         artifact["path"] = ".agenticops/agenticops"
         break
 else:
-    raise AssertionError("init.json 缺少工作空间入口")
+    raise AssertionError("init.json 缺少工位入口")
 init_path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
-"$install_root/agenticops" repair --workspace "$entry_migration_workspace" >/dev/null
-test ! -e "$entry_migration_workspace/.agenticops/agenticops"
-test -x "$entry_migration_workspace/agenticops"
-"$entry_migration_workspace/agenticops" doctor >/dev/null
+"$install_root/agenticops" station repair --station "$entry_migration_station" >/dev/null
+test ! -e "$entry_migration_station/.agenticops/agenticops"
+test -x "$entry_migration_station/agenticops"
+"$entry_migration_station/agenticops" station doctor >/dev/null
 
-subset_workspace="$test_root/subset-workspace"
-"$install_root/agenticops" init --workspace "$subset_workspace" --agent codex >/dev/null
-test ! -e "$subset_workspace/.codex/hooks.json"
-test -L "$subset_workspace/.agents/skills/tapdata-task"
-test -L "$subset_workspace/.agents/skills/tapdata-ci-test"
-test ! -e "$subset_workspace/CLAUDE.md"
-test ! -e "$subset_workspace/.claude/settings.json"
-test ! -e "$subset_workspace/.claude/skills"
-"$install_root/agenticops" workspace purge --workspace "$subset_workspace" --yes >/dev/null
-test ! -L "$subset_workspace/.agents/skills/tapdata-ci-test"
-test ! -e "$subset_workspace/.agents/skills/tapdata-ci-test"
+subset_station="$test_root/subset-station"
+"$install_root/agenticops" station init --station "$subset_station" --agent codex >/dev/null
+test ! -e "$subset_station/.codex/hooks.json"
+test -L "$subset_station/.agents/skills/tapdata-task"
+test -L "$subset_station/.agents/skills/tapdata-ci-test"
+test ! -e "$subset_station/CLAUDE.md"
+test ! -e "$subset_station/.claude/settings.json"
+test ! -e "$subset_station/.claude/skills"
+"$install_root/agenticops" station purge --station "$subset_station" --yes >/dev/null
+test ! -L "$subset_station/.agents/skills/tapdata-ci-test"
+test ! -e "$subset_station/.agents/skills/tapdata-ci-test"
 test -f "$install_root/projects/tapdata/skills/tapdata-ci-test/SKILL.md"
-"$install_root/agenticops" init --workspace "$subset_workspace" --agent codex >/dev/null
-test -L "$subset_workspace/.agents/skills/tapdata-ci-test"
-test ! -e "$subset_workspace/.claude/skills"
-collision_workspace="$test_root/root-entry-collision-workspace"
-mkdir -p "$collision_workspace"
-printf 'user owned\n' > "$collision_workspace/agenticops"
-if "$install_root/agenticops" init --workspace "$collision_workspace" --agent codex >/dev/null 2>&1; then
-  printf '工作空间根入口覆盖了已有用户文件\n' >&2
+"$install_root/agenticops" station init --station "$subset_station" --agent codex >/dev/null
+test -L "$subset_station/.agents/skills/tapdata-ci-test"
+test ! -e "$subset_station/.claude/skills"
+collision_station="$test_root/root-entry-collision-station"
+mkdir -p "$collision_station"
+printf 'user owned\n' > "$collision_station/agenticops"
+if "$install_root/agenticops" station init --station "$collision_station" --agent codex >/dev/null 2>&1; then
+  printf '工位根入口覆盖了已有用户文件\n' >&2
   exit 1
 fi
-grep -Fx 'user owned' "$collision_workspace/agenticops" >/dev/null
-if "$install_root/agenticops" init --workspace "$test_root/unknown-workspace" --agent missing-agent >/dev/null 2>&1; then
+grep -Fx 'user owned' "$collision_station/agenticops" >/dev/null
+if "$install_root/agenticops" station init --station "$test_root/unknown-station" --agent missing-agent >/dev/null 2>&1; then
   printf '未知 Agent 被错误接受\n' >&2
   exit 1
 fi
 # 旧版托管 Codex Hook 必须显式迁移，普通 repair 不得静默撤除控制。
-legacy_codex_workspace="$test_root/legacy-codex-workspace"
-mkdir -p "$legacy_codex_workspace/.agenticops" "$legacy_codex_workspace/.codex"
-printf 'legacy codex hook\n' > "$legacy_codex_workspace/.codex/agenticops-hooks.example.json"
-legacy_codex_hash="$(file_digest "$legacy_codex_workspace/.codex/agenticops-hooks.example.json")"
-python3 - "$legacy_codex_workspace" "$install_root" "$legacy_codex_hash" <<'PY'
+legacy_codex_station="$test_root/legacy-codex-station"
+mkdir -p "$legacy_codex_station/.agenticops" "$legacy_codex_station/.codex"
+printf 'legacy codex hook\n' > "$legacy_codex_station/.codex/agenticops-hooks.example.json"
+legacy_codex_hash="$(file_digest "$legacy_codex_station/.codex/agenticops-hooks.example.json")"
+python3 - "$legacy_codex_station" "$install_root" "$legacy_codex_hash" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-workspace = Path(sys.argv[1])
+station = Path(sys.argv[1])
 install_root = Path(sys.argv[2]).resolve()
 digest = sys.argv[3]
-(workspace / ".agenticops" / "workspace.json").write_text(
+(station / ".agenticops" / "station.json").write_text(
     json.dumps(
         {
             "schema_version": 3,
-            "workspace_id": "a" * 32,
+            "station_id": "a" * 32,
             "product_root": str(install_root),
             "project": "tapdata",
             "agents": ["codex"],
@@ -691,12 +691,12 @@ digest = sys.argv[3]
     + "\n",
     encoding="utf-8",
 )
-(workspace / ".agenticops" / "init.json").write_text(
+(station / ".agenticops" / "init.json").write_text(
     json.dumps(
         {
             "schema_version": 1,
             "product_ref": "legacy",
-            "workspace_state_epoch": json.loads((install_root / "contracts/workspace-state-compatibility.json").read_text())["workspace_state_epoch"],
+            "station_state_epoch": json.loads((install_root / "contracts/station-state-compatibility.json").read_text())["station_state_epoch"],
             "artifacts": [
                 {
                     "path": ".codex/agenticops-hooks.example.json",
@@ -711,87 +711,87 @@ digest = sys.argv[3]
     encoding="utf-8",
 )
 PY
-if "$install_root/agenticops" repair --workspace "$legacy_codex_workspace" >/dev/null 2>&1; then
+if "$install_root/agenticops" station repair --station "$legacy_codex_station" >/dev/null 2>&1; then
   printf '普通 repair 不得静默撤除旧 Hook\n' >&2
   exit 1
 fi
-test "$(file_digest "$legacy_codex_workspace/.codex/agenticops-hooks.example.json")" = "$legacy_codex_hash"
+test "$(file_digest "$legacy_codex_station/.codex/agenticops-hooks.example.json")" = "$legacy_codex_hash"
 # 同时覆盖现役旧 Hook、部分漂移及启动路径；迁移预检失败不得先删除另一项。
-python3 - "$legacy_codex_workspace" <<'PY'
+python3 - "$legacy_codex_station" <<'PY'
 import hashlib
 import json
 import sys
 from pathlib import Path
-workspace = Path(sys.argv[1])
-hook = workspace / ".codex/hooks.json"
+station = Path(sys.argv[1])
+hook = station / ".codex/hooks.json"
 hook.write_text('{"hooks": {}}\n')
-manifest = workspace / ".agenticops/init.json"
+manifest = station / ".agenticops/init.json"
 document = json.loads(manifest.read_text())
 document["artifacts"].append({"path": ".codex/hooks.json", "kind": "file",
                               "sha256": hashlib.sha256(hook.read_bytes()).hexdigest()})
 manifest.write_text(json.dumps(document))
-(workspace / ".agenticops/preserved-state.json").write_text('{"run_id":"run-preserved"}\n')
+(station / ".agenticops/preserved-state.json").write_text('{"run_id":"run-preserved"}\n')
 hook.write_text('user changed hook\n')
 PY
-if "$install_root/agenticops" repair --workspace "$legacy_codex_workspace" --accept-checkpoint-migration >/dev/null 2>&1; then
+if "$install_root/agenticops" station repair --station "$legacy_codex_station" --accept-checkpoint-migration >/dev/null 2>&1; then
   printf '显式迁移不得覆盖用户修改的 Hook\n' >&2
   exit 1
 fi
-test "$(file_digest "$legacy_codex_workspace/.codex/agenticops-hooks.example.json")" = "$legacy_codex_hash"
-grep -Fx 'user changed hook' "$legacy_codex_workspace/.codex/hooks.json" >/dev/null
-if "$install_root/agenticops" start --agent codex --workspace "$legacy_codex_workspace" >/dev/null 2>&1; then
+test "$(file_digest "$legacy_codex_station/.codex/agenticops-hooks.example.json")" = "$legacy_codex_hash"
+grep -Fx 'user changed hook' "$legacy_codex_station/.codex/hooks.json" >/dev/null
+if "$install_root/agenticops" station start --agent codex --station "$legacy_codex_station" >/dev/null 2>&1; then
   printf 'start 不得隐式迁移旧 Hook\n' >&2
   exit 1
 fi
-test -f "$legacy_codex_workspace/.codex/hooks.json"
-printf '{"hooks": {}}\n' > "$legacy_codex_workspace/.codex/hooks.json"
-"$install_root/agenticops" repair --workspace "$legacy_codex_workspace" --accept-checkpoint-migration >/dev/null
-test ! -e "$legacy_codex_workspace/.codex/hooks.json"
-test ! -e "$legacy_codex_workspace/.codex/agenticops-hooks.example.json"
-"$install_root/agenticops" doctor --workspace "$legacy_codex_workspace" >/dev/null
-python3 - "$legacy_codex_workspace" <<'PY'
+test -f "$legacy_codex_station/.codex/hooks.json"
+printf '{"hooks": {}}\n' > "$legacy_codex_station/.codex/hooks.json"
+"$install_root/agenticops" station repair --station "$legacy_codex_station" --accept-checkpoint-migration >/dev/null
+test ! -e "$legacy_codex_station/.codex/hooks.json"
+test ! -e "$legacy_codex_station/.codex/agenticops-hooks.example.json"
+"$install_root/agenticops" station doctor --station "$legacy_codex_station" >/dev/null
+python3 - "$legacy_codex_station" <<'PY'
 import json
 import sys
 from pathlib import Path
-workspace = Path(sys.argv[1])
-assert json.loads((workspace / ".agenticops/preserved-state.json").read_text())["run_id"] == "run-preserved"
-migration = json.loads((workspace / ".agenticops/init.json").read_text())["checkpoint_migration"]
+station = Path(sys.argv[1])
+assert json.loads((station / ".agenticops/preserved-state.json").read_text())["run_id"] == "run-preserved"
+migration = json.loads((station / ".agenticops/init.json").read_text())["checkpoint_migration"]
 assert migration["from_product_ref"] == "legacy"
 assert migration["accepted_at"]
 assert set(migration["retired_artifacts"]) == {".codex/hooks.json", ".codex/agenticops-hooks.example.json"}
 PY
 
-if "$install_root/agenticops" start --agent test-agent --workspace "$subset_workspace" >/dev/null 2>&1; then
-  printf '工作空间启动了未绑定的 Agent\n' >&2
+if "$install_root/agenticops" station start --agent test-agent --station "$subset_station" >/dev/null 2>&1; then
+  printf '工位启动了未绑定的 Agent\n' >&2
   exit 1
 fi
-detached_workspace="$test_root/detached-workspace"
-"$install_root/agenticops" init --workspace "$detached_workspace" --agent codex >/dev/null
-if (cd "$detached_workspace" && ./agenticops workspace detach) >/dev/null 2>&1; then
+detached_station="$test_root/detached-station"
+"$install_root/agenticops" station init --station "$detached_station" --agent codex >/dev/null
+if (cd "$detached_station" && ./agenticops station detach) >/dev/null 2>&1; then
   printf '非交互 detach 被错误接受\n' >&2
   exit 1
 fi
-(cd "$detached_workspace" && ./agenticops workspace detach --yes >/dev/null)
-test ! -e "$detached_workspace/.agenticops/workspace.json"
-test ! -e "$detached_workspace/.agenticops/init.json"
-test ! -e "$detached_workspace/agenticops"
-test ! -e "$detached_workspace/.agents"
-test ! -e "$detached_workspace/.agenticops"
-if "$install_root/agenticops" workspace list | grep -F -- "$detached_workspace" >/dev/null; then
-  printf '解绑工作空间仍保留在提示索引\n' >&2
+(cd "$detached_station" && ./agenticops station detach --yes >/dev/null)
+test ! -e "$detached_station/.agenticops/station.json"
+test ! -e "$detached_station/.agenticops/init.json"
+test ! -e "$detached_station/agenticops"
+test ! -e "$detached_station/.agents"
+test ! -e "$detached_station/.agenticops"
+if "$install_root/agenticops" station list | grep -F -- "$detached_station" >/dev/null; then
+  printf '解绑工位仍保留在提示索引\n' >&2
   exit 1
 fi
 
-# 无法唯一归属 active 任务的 Gate 判定写入工作空间级 events.jsonl；purge 必须
+# 无法唯一归属 active 任务的 Gate 判定写入工位级 events.jsonl；purge 必须
 # 将这个受控审计文件与任务状态一并删除，而非把它误判为未知文件。
-unbound_events_workspace="$test_root/unbound-events-workspace"
-"$install_root/agenticops" init --workspace "$unbound_events_workspace" --agent codex >/dev/null
-python3 - "$install_root" "$unbound_events_workspace" <<'PY'
+unbound_events_station="$test_root/unbound-events-station"
+"$install_root/agenticops" station init --station "$unbound_events_station" --agent codex >/dev/null
+python3 - "$install_root" "$unbound_events_station" <<'PY'
 import sys
 from pathlib import Path
 
 install_root = Path(sys.argv[1])
-workspace = Path(sys.argv[2])
+station = Path(sys.argv[2])
 sys.path.insert(0, str(install_root))
 
 from gate import runner
@@ -807,76 +807,76 @@ result = runner.evaluate_request(
             "tool_kind": "shell",
             "tool_name": "test",
         },
-        "cwd": str(workspace),
+        "cwd": str(station),
         "operations": ["unknown_external_write"],
         "target": {},
         "note": "测试无任务归属审计事件",
     }
 )
 assert result["decision"] == "ask", result
-events = workspace / ".agenticops" / "events.jsonl"
+events = station / ".agenticops" / "events.jsonl"
 assert events.is_file(), events
 PY
-"$install_root/agenticops" workspace purge \
-  --workspace "$unbound_events_workspace" --yes >/dev/null
-test ! -e "$unbound_events_workspace/.agenticops"
-if "$install_root/agenticops" workspace purge \
-    --worksp "$workspace" --yes >/dev/null 2>&1; then
-  printf 'workspace purge 未拒绝 workspace 缩写\n' >&2
+"$install_root/agenticops" station purge \
+  --station "$unbound_events_station" --yes >/dev/null
+test ! -e "$unbound_events_station/.agenticops"
+if "$install_root/agenticops" station purge \
+    --worksp "$station" --yes >/dev/null 2>&1; then
+  printf 'station purge 未拒绝 station 缩写\n' >&2
   exit 1
 fi
-test -d "$workspace/.agenticops"
+test -d "$station/.agenticops"
 
 # 仅受控的 events.jsonl 可被 purge；其它未知状态及 events.jsonl 的非常规文件
-# 形态仍必须失败关闭，且不得触及工作空间外的目标。
-unknown_state_workspace="$test_root/unknown-state-workspace"
-"$install_root/agenticops" init --workspace "$unknown_state_workspace" --agent codex >/dev/null
-printf 'unknown\n' > "$unknown_state_workspace/.agenticops/unknown-state"
-if "$install_root/agenticops" workspace purge \
-    --workspace "$unknown_state_workspace" --yes >/dev/null 2>&1; then
-  printf '未知工作空间状态被错误清理\n' >&2
+# 形态仍必须失败关闭，且不得触及工位外的目标。
+unknown_state_station="$test_root/unknown-state-station"
+"$install_root/agenticops" station init --station "$unknown_state_station" --agent codex >/dev/null
+printf 'unknown\n' > "$unknown_state_station/.agenticops/unknown-state"
+if "$install_root/agenticops" station purge \
+    --station "$unknown_state_station" --yes >/dev/null 2>&1; then
+  printf '未知工位状态被错误清理\n' >&2
   exit 1
 fi
-test -f "$unknown_state_workspace/.agenticops/unknown-state"
+test -f "$unknown_state_station/.agenticops/unknown-state"
 
 event_outside="$test_root/event-outside"
 printf 'outside sentinel\n' > "$event_outside"
-event_symlink_workspace="$test_root/event-symlink-workspace"
-"$install_root/agenticops" init --workspace "$event_symlink_workspace" --agent codex >/dev/null
-ln -s "$event_outside" "$event_symlink_workspace/.agenticops/events.jsonl"
-if "$install_root/agenticops" workspace purge \
-    --workspace "$event_symlink_workspace" --yes >/dev/null 2>&1; then
+event_symlink_station="$test_root/event-symlink-station"
+"$install_root/agenticops" station init --station "$event_symlink_station" --agent codex >/dev/null
+ln -s "$event_outside" "$event_symlink_station/.agenticops/events.jsonl"
+if "$install_root/agenticops" station purge \
+    --station "$event_symlink_station" --yes >/dev/null 2>&1; then
   printf '符号链接 Gate 审计事件被错误清理\n' >&2
   exit 1
 fi
 grep -Fx 'outside sentinel' "$event_outside" >/dev/null
 
-event_directory_workspace="$test_root/event-directory-workspace"
-"$install_root/agenticops" init --workspace "$event_directory_workspace" --agent codex >/dev/null
-mkdir "$event_directory_workspace/.agenticops/events.jsonl"
-if "$install_root/agenticops" workspace purge \
-    --workspace "$event_directory_workspace" --yes >/dev/null 2>&1; then
+event_directory_station="$test_root/event-directory-station"
+"$install_root/agenticops" station init --station "$event_directory_station" --agent codex >/dev/null
+mkdir "$event_directory_station/.agenticops/events.jsonl"
+if "$install_root/agenticops" station purge \
+    --station "$event_directory_station" --yes >/dev/null 2>&1; then
   printf '目录 Gate 审计事件被错误清理\n' >&2
   exit 1
 fi
-test -d "$event_directory_workspace/.agenticops/events.jsonl"
+test -d "$event_directory_station/.agenticops/events.jsonl"
 
 # 新版空闲工位清理与重建、材料保留、并发和路径替换回归。
 python3 "$repo_root/tests/test_station_bootstrap.py" --product-root "$install_root"
 
-missing_workspace="$test_root/missing-workspace"
-"$install_root/agenticops" init --workspace "$missing_workspace" --agent codex >/dev/null
-rm -rf "$missing_workspace"
-"$install_root/agenticops" workspace prune --all --yes | grep -F '已注销 1 个无法跟踪的工作空间。' >/dev/null
+missing_station="$test_root/missing-station"
+"$install_root/agenticops" station init --station "$missing_station" --agent codex >/dev/null
+rm -rf "$missing_station"
+"$install_root/agenticops" station prune --all --yes | grep -F '已注销 1 个无法跟踪的工位。' >/dev/null
 
 fake_bin="$test_root/fake-bin"
 capture="$test_root/codex-capture"
-expected_workspace="$(CDPATH= cd -- "$workspace" && pwd -P)"
+expected_station="$(CDPATH= cd -- "$station" && pwd -P)"
 mkdir -p "$fake_bin"
 printf '%s\n' \
   '#!/usr/bin/env bash' \
   'set -eu' \
-  'test "$(pwd -P)" = "$AGENTIC_OPS_EXPECTED_WORKSPACE"' \
+  'test "$(pwd -P)" = "$AGENTIC_OPS_EXPECTED_STATION"' \
   'if [ "${1:-}" = mcp ] && [ "${2:-}" = get ]; then' \
   '  case "$3" in' \
   "    atlassian) printf '%s\\n' '{\"enabled\":true,\"transport\":{\"type\":\"streamable_http\",\"url\":\"https://mcp.atlassian.com/v1/mcp/authv2\"}}' ;;" \
@@ -888,66 +888,66 @@ printf '%s\n' \
   > "$fake_bin/codex"
 chmod +x "$fake_bin/codex"
 PATH="$fake_bin:$PATH" \
-AGENTIC_OPS_EXPECTED_WORKSPACE="$expected_workspace" \
+AGENTIC_OPS_EXPECTED_STATION="$expected_station" \
 AGENTIC_OPS_CAPTURE="$capture" \
-  "$install_root/agenticops" start --agent codex --workspace "$workspace" -- --model fake >/dev/null
+  "$install_root/agenticops" station start --agent codex --station "$station" -- --model fake >/dev/null
 grep -Fx -- '--model fake' "$capture" >/dev/null
 PATH="$fake_bin:$PATH" \
-AGENTIC_OPS_EXPECTED_WORKSPACE="$expected_workspace" \
+AGENTIC_OPS_EXPECTED_STATION="$expected_station" \
 AGENTIC_OPS_CAPTURE="$capture" \
-  "$workspace/agenticops" start codex -- --model workspace-entry >/dev/null
-grep -Fx -- '--model workspace-entry' "$capture" >/dev/null
-if "$workspace/agenticops" start codex --agent codex >/dev/null 2>&1; then
+  "$station/agenticops" station start codex -- --model station-entry >/dev/null
+grep -Fx -- '--model station-entry' "$capture" >/dev/null
+if "$station/agenticops" station start codex --agent codex >/dev/null 2>&1; then
   printf 'start 未拒绝重复 Agent ID\n' >&2
   exit 1
 fi
-if "$workspace/agenticops" start codex TAP-123 >/dev/null 2>&1; then
+if "$station/agenticops" station start codex TAP-123 >/dev/null 2>&1; then
   printf 'start 未拒绝已移除的 Jira Key 位置参数\n' >&2
   exit 1
 fi
-test ! -e "$workspace/AGENTS.md.tmp"
+test ! -e "$station/AGENTS.md.tmp"
 
-task_index_digest="$(file_digest "$workspace/.agenticops/current-task.json")"
+task_index_digest="$(file_digest "$station/.agenticops/current-task.json")"
 
 printf 'next\n' > "$source_repo/NEXT"
 git -C "$source_repo" add NEXT
 git -C "$source_repo" commit -qm "next"
 installed_update_output="$test_root/installed-update-output"
-"$workspace/agenticops" update > "$installed_update_output"
+"$station/agenticops" update > "$installed_update_output"
 test -f "$install_root/NEXT"
 grep -F '工作面=使用' "$installed_update_output" >/dev/null
-if "$install_root/agenticops" doctor --workspace "$workspace" >/dev/null 2>&1; then
+if "$install_root/agenticops" station doctor --station "$station" >/dev/null 2>&1; then
   printf '产品更新后旧工作目录绑定未被识别为待刷新\n' >&2
   exit 1
 fi
-"$workspace/agenticops" repair >/dev/null
-"$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
-test "$(file_digest "$workspace/.agenticops/current-task.json")" = "$task_index_digest"
-"$workspace/agenticops" rollback >/dev/null
+"$station/agenticops" station repair >/dev/null
+"$install_root/agenticops" station doctor --station "$station" >/dev/null
+test "$(file_digest "$station/.agenticops/current-task.json")" = "$task_index_digest"
+"$station/agenticops" rollback >/dev/null
 test ! -f "$install_root/NEXT"
-"$workspace/agenticops" repair >/dev/null
-"$install_root/agenticops" doctor --workspace "$workspace" >/dev/null
-test "$(file_digest "$workspace/.agenticops/current-task.json")" = "$task_index_digest"
+"$station/agenticops" station repair >/dev/null
+"$install_root/agenticops" station doctor --station "$station" >/dev/null
+test "$(file_digest "$station/.agenticops/current-task.json")" = "$task_index_digest"
 
-python3 - "$source_repo/contracts/workspace-state-compatibility.json" <<'PY'
+python3 - "$source_repo/contracts/station-state-compatibility.json" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
 document = json.loads(path.read_text(encoding="utf-8"))
-document["workspace_state_epoch"] += 1
-document["supported_workspace_state_epochs"] = [document["workspace_state_epoch"]]
+document["station_state_epoch"] += 1
+document["supported_station_state_epochs"] = [document["station_state_epoch"]]
 path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
-git -C "$source_repo" add contracts/workspace-state-compatibility.json
-git -C "$source_repo" commit -qm "incompatible workspace state"
+git -C "$source_repo" add contracts/station-state-compatibility.json
+git -C "$source_repo" commit -qm "incompatible station state"
 installed_head_before_blocked_update="$(git -C "$install_root" rev-parse HEAD)"
-if "$workspace/agenticops" update > "$test_root/incompatible-update-output" 2>&1; then
-  printf '存在未清理任务时跨工作空间状态代际升级未被拒绝\n' >&2
+if "$station/agenticops" update > "$test_root/incompatible-update-output" 2>&1; then
+  printf '存在未清理任务时跨工位状态代际升级未被拒绝\n' >&2
   exit 1
 fi
-grep -F '目标版本包含不兼容的工作空间状态变更' "$test_root/incompatible-update-output" >/dev/null
+grep -F '目标版本包含不兼容的工位状态变更' "$test_root/incompatible-update-output" >/dev/null
 grep -F '状态代际' "$test_root/incompatible-update-output" >/dev/null
 test "$(git -C "$install_root" rev-parse HEAD)" = "$installed_head_before_blocked_update"
 

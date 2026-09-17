@@ -52,8 +52,8 @@ def main(argv=None):
     if takeover and not task:
         raise ValueError("接管尚未绑定任务，只能恢复原接管操作")
     request_path = Path(args.input).resolve()
-    workspace = Path(args.dir).resolve()
-    if workspace == request_path or workspace in request_path.parents:
+    station_dir = Path(args.dir).resolve()
+    if station_dir == request_path or station_dir in request_path.parents:
         raise ValueError("确认请求必须位于工位外")
     request = json.loads(request_path.read_text())
     if not isinstance(request, dict):

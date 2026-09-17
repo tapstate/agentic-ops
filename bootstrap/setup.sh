@@ -30,7 +30,7 @@ if [ -f "$product_root/.local/product.json" ]; then
   configured_mode="$(python3 "$product_root/bootstrap/product_state.py" \
     --product-root "$product_root" read --field mode)"
   test "$configured_mode" != "installed" || {
-    printf 'AgenticOps：使用工作面不能执行 setup；请使用 agenticops update\n' >&2
+    printf 'AgenticOps：安装使用面不能执行 setup；请使用 agenticops update\n' >&2
     exit 2
   }
   exec env AGENTIC_OPS_HOME="$product_root" bash "$product_root/bootstrap/update.sh"

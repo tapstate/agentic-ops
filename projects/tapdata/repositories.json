@@ -2,7 +2,7 @@
   "schema_version": 1,
   "default": "tapdata/tapdata",
   "layout": {
-    "source": "<workspace>/source/<owner>/<repo>"
+    "source": "<station>/source/<owner>/<repo>"
   },
   "repositories": {
     "tapdata/tapdata": {"origin": "git@github.com:tapdata/tapdata.git", "baseline_branch": "develop", "dev_branch": "develop", "domains": ["product"]},

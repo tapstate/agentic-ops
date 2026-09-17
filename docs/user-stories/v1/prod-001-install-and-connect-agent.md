@@ -1,16 +1,16 @@
 # PROD-001 安装并接入多种 Agent
 
-研发工程师安装指定分支的产品资产，通过 Manifest 接入一个或多个 Agent；工作空间同一时间只处理一个任务，每任务可以修改多个仓库，多个工位承担并发。
+研发工程师安装指定分支的产品资产，通过 Manifest 接入一个或多个 Agent；工位同一时间只处理一个任务，每任务可以修改多个仓库，多个工位承担并发。
 
 ### 验收标准
 
 - macOS、Linux 使用 Git 和 Python 3.9+ 即可安装、更新和回退。
 - 中央产品根目录（Product Root）保存唯一运行资产；源码目录和安装产品根目录使用同一入口和产品结构。
 - 生成单工位 config/source/runtime/archive 和空 current；源码池由产品根自动管理，仅加速接管时的独立源码下载。purge 验证空闲、已完成操作和生成归属，保留持久材料，再生成需显式复用决定。
-- 工作空间使用 `.agenticops/` 保存初始化与唯一当前任务；config/source/runtime/archive 分离持久材料与运行现场，不复制 Project Skill、Policy 或 Runtime。
+- 工位使用 `.agenticops/` 保存初始化与唯一当前任务；config/source/runtime/archive 分离持久材料与运行现场，不复制 Project Skill、Policy 或 Runtime。
 - 不同 Agent 原生事件转换为同一版本化标准请求和标准判定。
 - Agent 在同一工位会话继续任务；上下文验证 source 独立仓库，不扩展其它工位权限。
-- `agenticops doctor` 发现产品版本和薄接线漂移，`agenticops repair` 重建派生接线，不修改任务状态和授权；同名非产品文件必须拒绝覆盖或删除。
+- `agenticops station doctor` 发现产品版本和薄接线漂移，`agenticops station repair` 重建派生接线，不修改任务状态和授权；同名非产品文件必须拒绝覆盖或删除。
 
 ### 保护行为
 
@@ -20,7 +20,7 @@
 
 ### 验收证据
 
-- 产品稀疏安装、中央入口、项目工作空间初始化、漂移诊断和幂等修复结果。
+- 产品稀疏安装、中央入口、项目工位初始化、漂移诊断和幂等修复结果。
 - 更新到新提交、工作目录刷新并回退到上一提交的测试结果。
 - 动态 Agent Manifest 发现、产物生成和跨 Agent 标准语义一致性结果。
 - 同版生成→任务退出→purge→生成、持久材料复用、新工位身份与旧状态拒绝测试结果。

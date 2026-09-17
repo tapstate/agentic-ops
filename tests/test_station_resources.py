@@ -372,7 +372,7 @@ class ResourceTests(unittest.TestCase):
     def test_epoch_three_rejected_before_state_mutation(self):
         task = self.ready()
         path = self.ws/'.agenticops/init.json'
-        value=json.loads(path.read_text());value['workspace_state_epoch']=3;path.write_text(json.dumps(value))
+        value=json.loads(path.read_text());value['station_state_epoch']=3;path.write_text(json.dumps(value))
         with self.assertRaisesRegex(ValueError,'不兼容|代际|原版本'):
             self.execute(task,{'confirmed_digest':'old'})
         self.assertIsNotNone(task_store.read_task(self.ws))
@@ -485,7 +485,7 @@ class ResourceTests(unittest.TestCase):
         task = self.ready()
         idea = self.ws / '.idea'
         idea.mkdir()
-        config = idea / 'workspace.xml'
+        config = idea / 'station.xml'
         config.write_text('<project/>')
         identity = config.stat().st_ino
         self.execute(task, self.reset_request(task))
@@ -497,23 +497,23 @@ class ResourceTests(unittest.TestCase):
         idea = self.ws / '.idea'
         idea.write_text('keep')
         with self.assertRaisesRegex(ValueError, '普通文件或目录'):
-            resources.verify_workspace_inventory(self.ws)
+            resources.verify_station_inventory(self.ws)
         idea.unlink()
         idea.symlink_to(self.root, target_is_directory=True)
         with self.assertRaisesRegex(ValueError, '普通文件或目录'):
-            resources.verify_workspace_inventory(self.ws)
+            resources.verify_station_inventory(self.ws)
         idea.unlink()
         (self.ws / '.agenticops/.idea').mkdir()
         with self.assertRaisesRegex(ValueError, '未知'):
-            resources.verify_workspace_inventory(self.ws)
+            resources.verify_station_inventory(self.ws)
 
-    def test_unknown_workspace_objects_block_reuse(self):
+    def test_unknown_station_objects_block_reuse(self):
         for relative in ('unknown', '.agenticops/unknown', '.agenticops/operation-data/unknown.json'):
             with self.subTest(path=relative):
                 task = self.ready() if not hasattr(self, 'repo') else task_store.read_task(self.ws)
                 path = self.ws/relative; path.parent.mkdir(exist_ok=True); path.write_text('{}')
                 with self.assertRaisesRegex(ValueError, '未知|损坏'):
-                    resources.verify_workspace_inventory(self.ws)
+                    resources.verify_station_inventory(self.ws)
                 self.assertTrue(path.exists()); path.unlink()
         self.execute(task, self.reset_request(task))
 

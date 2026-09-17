@@ -34,10 +34,10 @@ def _read_json(path):
 
 
 def find_gate_root(cwd):
-    """返回最近的项目工作空间根。"""
+    """返回最近的项目工位根。"""
     current = Path(cwd).resolve()
     for candidate in [current] + list(current.parents):
-        if (candidate / ".agenticops" / "workspace.json").is_file() or (
+        if (candidate / ".agenticops" / "station.json").is_file() or (
             candidate / ".agenticops" / "current-task.json"
         ).is_file():
             return candidate
@@ -209,7 +209,7 @@ def jira_watermark_intent(task_directory, issue_key, field_id, digest):
 
 
 def find_authorization(cwd, context=None, issue_key=None):
-    """从项目工作空间的 当前任务中唯一解析当前操作授权。"""
+    """从项目工位的 当前任务中唯一解析当前操作授权。"""
     directory = find_task_directory(cwd, context=context, issue_key=issue_key)
     if directory is None:
         return None, None

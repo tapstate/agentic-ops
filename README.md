@@ -2,7 +2,7 @@
 
 AgenticOps 是公司级 Agentic 研发基础设施，为 Codex、Claude 及后续 Agent 提供统一的研发规则、操作门禁、任务恢复和证据边界。Agent 仍是执行主体；AgenticOps 负责把平台事件转换为标准操作，并在副作用发生前给出允许、人工确认或拒绝的判定。
 
-它不替代 Jira、Git、GitHub、CI 或人工审查：Jira 是任务事实源，Git 是代码事实源，GitHub PR/CI 是审查与检查事实源。项目工作空间只保存初始化信息，以及按任务隔离的本地运行、授权、恢复和门禁事件。
+它不替代 Jira、Git、GitHub、CI 或人工审查：Jira 是任务事实源，Git 是代码事实源，GitHub PR/CI 是审查与检查事实源。项目工位只保存初始化信息，以及按任务隔离的本地运行、授权、恢复和门禁事件。
 
 ## 解决的问题
 
@@ -29,9 +29,9 @@ Agent 原生工具执行；Workflow 检查点 → Project / Policy / Gate 判定
 | `workflow/` | 阶段、授权、CI、证据和恢复等确定性状态逻辑 |
 | `projects/<project>/` | Jira、仓库分支、准入、验证和 Runbook 等项目差异 |
 | `adapters/` | Agent 与工具协议的无状态转换 |
-| `bootstrap/` | 产品根目录、安装、更新和项目工作空间接线 |
+| `bootstrap/` | 产品根目录、安装、更新和项目工位接线 |
 
-完整的层级边界、产品根目录与工作空间模型见 [v1 工程架构](docs/architecture/agenticops-v1-architecture.md)。
+完整的层级边界、产品根目录与工位模型见 [v1 工程架构](docs/architecture/agenticops-v1-architecture.md)。
 
 ## 快速导航
 
@@ -44,10 +44,10 @@ Agent 原生工具执行；Workflow 检查点 → Project / Policy / Gate 判定
 
 ### 使用者
 
-在业务项目工作空间使用已发布的产品，初始化 Agent 并处理 Jira 任务。
+在业务项目工位使用已发布的产品，初始化 Agent 并处理 Jira 任务。
 
 - [使用指引](docs/usage-guide.md)
-- [Agent引导安装指引](docs/usage/agent-guided-install.md)：从空工作空间启动 Agent，由它完成产品安装与项目初始化。
+- [Agent引导安装指引](docs/usage/agent-guided-install.md)：从空工位启动 Agent，由它完成产品安装与项目初始化。
 - [任务授权指引](docs/usage/task-authorization.md)：脚本接管 Jira 任务并签发实施授权。
 
 ## 文档与合同

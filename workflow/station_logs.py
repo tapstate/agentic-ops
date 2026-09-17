@@ -50,7 +50,7 @@ def _read_tree(directory, root):
 
 
 def material(base, task, plan):
-    rules = project_rules.load_admission(workspace=base)
+    rules = project_rules.load_admission(station=base)
     root = Path(base).resolve()
     result = {"schema_version": 1, "run_id": task["run_id"], "files": {}}
     size = 0

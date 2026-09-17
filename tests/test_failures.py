@@ -17,7 +17,7 @@ class FailureTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.base = Path(self.temp.name)
         (self.base / ".agenticops").mkdir()
-        (self.base / ".agenticops/workspace.json").write_text(json.dumps({
+        (self.base / ".agenticops/station.json").write_text(json.dumps({
             "schema_version": 1, "product_root": str(ROOT), "project": "tapdata", "agents": []}))
         self.task = {"issue_key": "DEMO-1", "run_id": "run-one", "repositories": [{"repository": "owner/repo"}]}
         save_station_task(self.base, self.task)

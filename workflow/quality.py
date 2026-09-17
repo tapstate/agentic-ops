@@ -27,12 +27,12 @@ def digest(value):
 
 
 def config(base, task=None):
-    root = project_rules.product_root_from_workspace(base)
-    project = project_rules.project_from_workspace(base)
+    root = project_rules.product_root_from_station(base)
+    project = project_rules.project_from_station(base)
     project_dir = project_rules.project_root(root, project)
     profile = None
     if task is not None:
-        spec = project_rules.load_admission(workspace=base)
+        spec = project_rules.load_admission(station=base)
         cls = project_rules.class_spec(spec, task["task_class"])
         profile = cls.get("quality_profile")
         if "quality_profile" in cls and profile is None:
@@ -68,7 +68,7 @@ def config(base, task=None):
             known = project_rules.known_fact_keys(spec, task["task_class"])
             if any(k not in known for k in result["plan_fact_keys"]):
                 raise ValueError("方案事实必须先在 Project 准入配置中声明")
-        result["jira"]["site"] = project_rules.load_profile(workspace=base)["jira"]["site"]
+        result["jira"]["site"] = project_rules.load_profile(station=base)["jira"]["site"]
     except (OSError, KeyError, TypeError, AttributeError) as error:
         raise ValueError("质量配置无法读取或结构无效：%s" % path.name) from error
     return result
@@ -194,7 +194,7 @@ def context(base, task):
             "cleanup_artifacts": cleanup_artifacts,
             "repositories": repos,
             "missing_facts": [f["key"] for f in project_rules.missing_required(
-                project_rules.load_admission(workspace=base), task["task_class"], task.get("facts", {}))]}
+                project_rules.load_admission(station=base), task["task_class"], task.get("facts", {}))]}
 
 
 def plan_digest(item, rules, ctx):
@@ -659,7 +659,7 @@ def apply(base, issue, run_id, revision, command):
                     if key in jar:
                         jar[key] = "<local-artifact>"
         text = json.dumps(scanned, ensure_ascii=False)
-        if project_rules.scan_sensitive(project_rules.load_admission(workspace=base), text):
+        if project_rules.scan_sensitive(project_rules.load_admission(station=base), text):
             raise ValueError("质量输入含敏感内容，请脱敏后重新提交；未保存正文")
         state["events"].append(event)
         state["revision"] += 1
@@ -687,7 +687,7 @@ def apply(base, issue, run_id, revision, command):
 
 def advance_problems(base, task, target):
     rules = config(base, task)
-    if not rules and project_rules.class_spec(project_rules.load_admission(workspace=base), task["task_class"]).get("quality_mode") == "recorded_decision":
+    if not rules and project_rules.class_spec(project_rules.load_admission(station=base), task["task_class"]).get("quality_mode") == "recorded_decision":
         raise ValueError("质量模式已启用但 quality.json 缺失，不能降级为无检查")
     if not enabled(task, rules):
         return []

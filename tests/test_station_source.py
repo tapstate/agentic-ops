@@ -53,13 +53,13 @@ class SourceFixture:
         self.root = Path(temp.name).resolve()
         shutil.copytree(ROOT / "contracts", self.root / "product/contracts")
         shutil.copytree(ROOT / "projects", self.root / "product/projects")
-        self.ws = self.root / "workspace"
+        self.ws = self.root / "station"
         (self.ws / ".agenticops").mkdir(parents=True)
         task_store.initialize_current(self.ws)
-        task_store._write_json_atomic(self.ws / ".agenticops/workspace.json", {
-            "schema_version": 3, "product_root": str(self.root / "product"), "project": "tapdata", "workspace_id": "a" * 32,
+        task_store._write_json_atomic(self.ws / ".agenticops/station.json", {
+            "schema_version": 3, "product_root": str(self.root / "product"), "project": "tapdata", "station_id": "a" * 32,
             "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"}})
-        task_store._write_json_atomic(self.ws / ".agenticops/init.json", {"workspace_state_epoch": 5})
+        task_store._write_json_atomic(self.ws / ".agenticops/init.json", {"station_state_epoch": 6})
         self.seed = self.root / "seed"
         self.seed.mkdir()
         self.git(self.seed, "init", "-b", "develop")
@@ -134,7 +134,7 @@ class SourceTests(SourceFixture, unittest.TestCase):
         self.assertEqual(self.op["steps"]["fetch:" + self.name]["receipt"]["refs"]["develop"], self.sha)
         source.prepare_repositories(self.ws, self.catalog, [self.name], self.op)
 
-    def test_cold_pool_precedes_workspace_and_warm_pool_uses_local_transfer(self):
+    def test_cold_pool_precedes_station_and_warm_pool_uses_local_transfer(self):
         with mock.patch.object(source, "git", wraps=source.git) as calls:
             self.prepare()
             clones = [call.args for call in calls.call_args_list if call.args[1] == "clone"]
@@ -142,7 +142,7 @@ class SourceTests(SourceFixture, unittest.TestCase):
             self.assertIn(str(self.remote), clones[0])
             cache = source.source_pool.pool_path(self.ws, self.name, str(self.remote))
             self.assertIn(str(cache), clones[1])
-            other = self.root / "other-workspace"
+            other = self.root / "other-station"
             shutil.copytree(self.ws / ".agenticops", other / ".agenticops")
             operation = dict(self.op, steps={})
             calls.reset_mock()
@@ -170,7 +170,7 @@ class SourceTests(SourceFixture, unittest.TestCase):
         self.assertEqual(values[self.name]["_refs"]["develop"], expected)
         self.assertEqual(self.git(self.repo, "rev-parse", "HEAD"), self.sha)
 
-    def test_failed_download_does_not_publish_pool_or_workspace(self):
+    def test_failed_download_does_not_publish_pool_or_station(self):
         actual = source.git
         def fail(path, *args, **kwargs):
             if args[0] == "clone":

@@ -28,8 +28,8 @@ class StationTests(unittest.TestCase):
         (self.ws / ".agenticops").mkdir(parents=True)
         for name in ("source", "config", "runtime", "archive"):
             (self.ws / name).mkdir()
-        self.write(self.ws / ".agenticops/workspace.json", {"schema_version": 3, "product_root": str(self.product), "project": "tapdata", "workspace_id": "a" * 32, "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"}})
-        self.write(self.ws / ".agenticops/init.json", {"workspace_state_epoch": 5})
+        self.write(self.ws / ".agenticops/station.json", {"schema_version": 3, "product_root": str(self.product), "project": "tapdata", "station_id": "a" * 32, "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"}})
+        self.write(self.ws / ".agenticops/init.json", {"station_state_epoch": 6})
         task_store.initialize_current(self.ws)
 
     def prepare_engineering(self, count=1):
@@ -162,7 +162,7 @@ class StationTests(unittest.TestCase):
 
     def test_scope_binding_and_existing_branch_rejected(self):
         task = self.takeover()
-        with self.assertRaisesRegex(ValueError, "必须使用工作空间 git_name"):
+        with self.assertRaisesRegex(ValueError, "必须使用工位 git_name"):
             station.scope_change(self.ws, task["issue_key"], task["run_id"], task["_revision"], "op-scope-wrong", "tapdata/tapdata", "fix/test", "develop", ["file.txt"], "unit tests")
         station.scope_change(self.ws, task["issue_key"], task["run_id"], task["_revision"], "op-scope-one", "tapdata/tapdata", None, "develop", ["file.txt"], "unit tests")
         current = task_store.read_current(self.ws)["current"]
@@ -181,9 +181,9 @@ class StationTests(unittest.TestCase):
         self.assertEqual(current["outcome"], "in_progress")
         record = station_archive.verify(self.ws, current["archive_ref"], current)
         self.assertEqual(record["task_result"], "incomplete")
-        binding_path = self.ws / ".agenticops/workspace.json"
+        binding_path = self.ws / ".agenticops/station.json"
         binding = json.loads(binding_path.read_text())
-        binding["workspace_id"] = "b" * 32
+        binding["station_id"] = "b" * 32
         self.write(binding_path, binding)
         with self.assertRaisesRegex(ValueError, "工位"):
             station_archive.verify(self.ws, current["archive_ref"], current)

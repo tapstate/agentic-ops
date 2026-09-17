@@ -31,7 +31,7 @@
       "enum": [
         "runtime-exclusive",
         "source-generated",
-        "workspace-generated"
+        "station-generated"
       ]
     },
     "producer": {

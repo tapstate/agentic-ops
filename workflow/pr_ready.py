@@ -138,7 +138,7 @@ def main():
     parser.add_argument("--dir", default=".")
     args = parser.parse_args()
     try:
-        task_store.workspace_project(args.dir)
+        task_store.station_project(args.dir)
         issue = task_store.resolve_issue(args.dir, args.issue_key)
         result = check(args.dir, issue, args.jira_input)
         print(json.dumps(result, ensure_ascii=False, indent=2))

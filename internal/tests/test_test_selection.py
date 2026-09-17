@@ -6,11 +6,11 @@ from internal import test_selection
 class TestSelectionTests(unittest.TestCase):
     def test_station_resources_selects_its_direct_consumers_once(self):
         suites, unmapped = test_selection.select(["workflow/station_resources.py"])
-        self.assertEqual(suites, ["workspace_clean", "station_resources", "station_lifecycle"])
+        self.assertEqual(suites, ["station_clean", "station_resources", "station_lifecycle"])
         self.assertEqual(unmapped, [])
 
     def test_station_operation_selects_resource_and_lifecycle_consumers(self):
-        self.assertEqual(test_selection.select(["workflow/station_operation.py"]), (["workspace_clean", "station_resources", "station_lifecycle"], []))
+        self.assertEqual(test_selection.select(["workflow/station_operation.py"]), (["station_clean", "station_resources", "station_lifecycle"], []))
 
     def test_multiple_paths_are_deduplicated(self):
         suites, unmapped = test_selection.select(["workflow/quality.py", "workflow/jira_status.py"])

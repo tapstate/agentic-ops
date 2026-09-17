@@ -22,7 +22,7 @@ from workflow import authorization, jira_status, task, task_store
 from station_fixture import save_task as save_station_task
 from agent_registry import discover
 from render import check_checkpoint_migration
-from workspace_paths import WorkspaceDirectory
+from station_paths import StationDirectory
 
 
 class CheckpointTests(unittest.TestCase):
@@ -30,7 +30,7 @@ class CheckpointTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory(prefix="ao-checkpoints-")
         self.addCleanup(temp.cleanup)
         self.base = Path(temp.name)
-        task_store._write_json_atomic(self.base / ".agenticops/workspace.json",
+        task_store._write_json_atomic(self.base / ".agenticops/station.json",
                                      {"product_root": str(ROOT), "project": "tapdata"})
         self.state = {"issue_key": "TAP-123", "run_id": "run-0123456789ab", "task_class": "technical_task",
                       "stage": "waiting_takeover", "facts": {}, "repositories": [], "pending": None, "history": []}
@@ -413,11 +413,11 @@ class CheckpointTests(unittest.TestCase):
         for name in ("one", "two"):
             (directory / name).write_text("generated")
             owned[".custom/" + name] = {"kind": "file", "sha256": hashlib.sha256(b"generated").hexdigest()}
-        with WorkspaceDirectory(self.base) as tree:
+        with StationDirectory(self.base) as tree:
             with self.assertRaisesRegex(ValueError, "显式迁移"):
                 check_checkpoint_migration(owned, manifests, False, tree)
         (directory / "two").write_text("user changes")
-        with WorkspaceDirectory(self.base) as tree:
+        with StationDirectory(self.base) as tree:
             with self.assertRaisesRegex(ValueError, "已被修改"):
                 check_checkpoint_migration(owned, manifests, True, tree)
         self.assertEqual((directory / "one").read_text(), "generated")

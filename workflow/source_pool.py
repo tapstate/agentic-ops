@@ -10,8 +10,8 @@ import tempfile
 from workflow import project_rules
 
 
-def pool_path(workspace, name, origin):
-    binding = json.loads((Path(workspace) / ".agenticops/workspace.json").read_text())
+def pool_path(station, name, origin):
+    binding = json.loads((Path(station) / ".agenticops/station.json").read_text())
     return pool_path_at_root(binding["product_root"], name, origin)
 
 
@@ -53,8 +53,8 @@ def identity(path, origin, git):
 
 
 @contextmanager
-def refreshed(workspace, name, origin, git):
-    binding = json.loads((Path(workspace) / ".agenticops/workspace.json").read_text())
+def refreshed(station, name, origin, git):
+    binding = json.loads((Path(station) / ".agenticops/station.json").read_text())
     with refreshed_at_root(binding["product_root"], name, origin, git) as path:
         yield path
 

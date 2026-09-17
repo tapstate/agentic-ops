@@ -46,13 +46,13 @@ def load(base, task):
     if value.get("run_id") != task["run_id"]:
         raise ValueError("目录登记 run 不一致")
     from workflow import quality_contract
-    station_id = json.loads((store.state_path(base) / "workspace.json").read_text())["workspace_id"]
+    station_id = json.loads((store.state_path(base) / "station.json").read_text())["station_id"]
     for name, entry in value["roots"].items():
         quality_contract.validate(entry, "station-directory.schema.json")
         if entry["path"] != name or entry["run_id"] != task["run_id"] or entry["station_id"] != station_id:
             raise ValueError("目录归属身份不一致")
         if ((entry["kind"] == "source-generated" and not name.startswith("source/"))
-                or (entry["kind"] == "workspace-generated" and ("/" in name or name in ("source", "runtime", "config", "archive", ".agenticops")))):
+                or (entry["kind"] == "station-generated" and ("/" in name or name in ("source", "runtime", "config", "archive", ".agenticops")))):
             raise ValueError("目录归属类型与路径不一致")
         runtime = name == "runtime"
         if (entry["disposition"] == "clear_children_keep_root") != runtime or (entry["kind"] == "runtime-exclusive") != runtime:
@@ -65,11 +65,11 @@ def save(base, task, roots):
 
 
 def recipe(base, task):
-    root = project_rules.product_root_from_workspace(base)
+    root = project_rules.product_root_from_station(base)
     profile = task.get("engineering_baseline", {}).get("profile")
     if not profile:
         raise ValueError("生成目录需要已冻结的项目配方")
-    value = json.loads((root / "projects" / store.workspace_project(base) / "engineering-profiles.json").read_text())["profiles"][profile["id"]]
+    value = json.loads((root / "projects" / store.station_project(base) / "engineering-profiles.json").read_text())["profiles"][profile["id"]]
     if value["revision"] != profile["revision"]:
         raise ValueError("生成目录配方版本已变化")
     return value
@@ -79,16 +79,16 @@ def create(base, task, relative, producer, adopt=False):
     """调用者持工位锁；先持久意图，创建/空目录采用后登记身份，再启动生产者。"""
     path = path_at(base, relative)
     runtime = relative == "runtime"
-    workspace_generated = not runtime and "/" not in relative
-    if workspace_generated:
-        from workflow import workspace_clean_rules
-        decision = workspace_clean_rules.classify(workspace_clean_rules.load(base), relative, True)
+    station_generated = not runtime and "/" not in relative
+    if station_generated:
+        from workflow import station_clean_rules
+        decision = station_clean_rules.classify(station_clean_rules.load(base), relative, True)
         if decision["action"] != "remove":
             raise ValueError("工位附属目录必须由清理黑名单声明 remove")
         init = json.loads((store.state_path(base) / "init.json").read_text())
         if any(e["path"] == relative or e["path"].startswith(relative + "/") for e in init.get("artifacts", [])):
             raise ValueError("不能登记初始化接线为清理目录")
-        rule = {"id": "workspace-clean", "revision": 1}
+        rule = {"id": "station-clean", "revision": 1}
     elif runtime:
         rule = {"id": "workflow-runtime", "revision": 1}
     else:
@@ -121,8 +121,8 @@ def create(base, task, relative, producer, adopt=False):
     for other in roots:
         if other != relative and (other.startswith(relative + "/") or relative.startswith(other + "/")):
             raise ValueError("受管目录不能重叠")
-    entry = {"path": relative, "run_id": task["run_id"], "station_id": json.loads((store.state_path(base) / "workspace.json").read_text())["workspace_id"],
-        "kind": "runtime-exclusive" if runtime else ("workspace-generated" if workspace_generated else "source-generated"), "producer": producer,
+    entry = {"path": relative, "run_id": task["run_id"], "station_id": json.loads((store.state_path(base) / "station.json").read_text())["station_id"],
+        "kind": "runtime-exclusive" if runtime else ("station-generated" if station_generated else "source-generated"), "producer": producer,
              "recipe": {"id": rule["id"], "revision": rule["revision"]}, "parent": parent,
              "disposition": "clear_children_keep_root" if runtime else "delete_root", "identity": None}
     if existing and any(existing[k] != entry[k] for k in entry if k != "identity"):

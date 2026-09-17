@@ -74,4 +74,4 @@ python3 "$install_root/bootstrap/product_state.py" \
 
 printf 'AgenticOps 安装完成：工作面=使用，root=%s\n' "$install_root"
 printf '安装通道：%s（%s）\n' "$branch" "$current_ref"
-printf '下一步：%s/agenticops init --workspace <项目工作空间> --project tapdata\n' "$install_root"
+printf '下一步：%s/agenticops station init --station <项目工位> --project tapdata\n' "$install_root"

@@ -62,9 +62,9 @@ def run_tool(tool, *args, cwd):
     return proc.returncode, proc.stdout + proc.stderr
 
 
-def run_workspace_tool(product_root, *args, cwd):
+def run_station_tool(product_root, *args, cwd):
     proc = subprocess.run(
-        [sys.executable, str(ROOT / "bootstrap" / "workspace_registry.py"),
+        [sys.executable, str(ROOT / "bootstrap" / "station_registry.py"),
          "--product-root", str(product_root), *args],
         capture_output=True,
         text=True,
@@ -80,11 +80,11 @@ def main():
     from station_fixture import save_task
     ws = Path(tempfile.mkdtemp(prefix="aogate-wf-"))
     try:
-        task_store._write_json_atomic(ws / ".agenticops/workspace.json", {
-            "schema_version": 3, "workspace_id": "a" * 32, "product_root": str(ROOT),
+        task_store._write_json_atomic(ws / ".agenticops/station.json", {
+            "schema_version": 3, "station_id": "a" * 32, "product_root": str(ROOT),
             "project": "tapdata", "agents": ["codex"]})
         task_store._write_json_atomic(ws / ".agenticops/init.json", {
-            "workspace_state_epoch": 5})
+            "station_state_epoch": 6})
         state = {"issue_key": "TAP-123", "run_id": "run-workflow-test", "task_class": "defect_fix",
             "stage": "task_intake", "facts": {"acceptance_criteria": "fixture",
             "target_repo": "tapdata/tapdata", "verification_method": "fixture"},

@@ -7,10 +7,10 @@
 
 用法：
   python3 workflow/authorization.py grant --issue-key TAP-123 --agent-id dev-bot-1 \
-      --expected-run-id <当前-run-id> --plan-version v1 [--ttl-hours 8] [--dir <workspace>]
-  python3 workflow/authorization.py revoke --issue-key TAP-123 --expected-run-id <当前-run-id> [--dir <workspace>]
-  python3 workflow/authorization.py show   --issue-key TAP-123 [--dir <workspace>]
-  python3 workflow/authorization.py show --issue-key TAP-123 --digest [--dir <workspace>]
+      --expected-run-id <当前-run-id> --plan-version v1 [--ttl-hours 8] [--dir <station>]
+  python3 workflow/authorization.py revoke --issue-key TAP-123 --expected-run-id <当前-run-id> [--dir <station>]
+  python3 workflow/authorization.py show   --issue-key TAP-123 [--dir <station>]
+  python3 workflow/authorization.py show --issue-key TAP-123 --digest [--dir <station>]
   python3 workflow/authorization.py renew --issue-key TAP-123 --expected-run-id <当前-run-id> \
       --expected-authorization-digest <确认前摘要> --confirmed-by <决定者> --confirmation-ref <确认来源> [--ttl-hours 8]
 """
@@ -45,7 +45,7 @@ def repository_bindings(repositories):
 def plan_digest(task, base=None):
     plan = task.get("facts", {}).get("fix_plan")
     if base is not None:
-        spec = project_rules.load_admission(workspace=base)
+        spec = project_rules.load_admission(station=base)
         if project_rules.class_spec(spec, task["task_class"]).get("quality_profile") is not None:
             rules = quality.config(base, task)
             plan = {"task_class": task["task_class"], "facts": {
@@ -60,7 +60,7 @@ def record_digest(record):
 
 
 def check_catalog_bindings(base, repositories):
-    catalog = project_rules.load_repository_catalog(workspace=base)
+    catalog = project_rules.load_repository_catalog(station=base)
     for item in repositories:
         entry = catalog.get("repositories", {}).get(item["repository"])
         endpoint = project_rules.canonical_repository_endpoint(entry.get("origin") if isinstance(entry, dict) else None)
@@ -208,7 +208,7 @@ def cmd_grant(args):
         print("错误：授权前至少确认一个任务仓库", file=sys.stderr)
         return 2
     try:
-        catalog = project_rules.load_repository_catalog(workspace=args.dir)
+        catalog = project_rules.load_repository_catalog(station=args.dir)
     except ValueError as error:
         print("错误：无法核验授权仓库 endpoint：%s" % error, file=sys.stderr)
         return 2
@@ -331,7 +331,7 @@ def main():
 
     args = parser.parse_args()
     try:
-        task_store.workspace_project(args.dir)
+        task_store.station_project(args.dir)
         return args.func(args)
     except ValueError as error:
         print("错误：%s" % error, file=sys.stderr)

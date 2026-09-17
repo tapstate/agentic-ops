@@ -253,7 +253,7 @@ def main():
 
     args = parser.parse_args()
     try:
-        task_store.workspace_project(args.dir)
+        task_store.station_project(args.dir)
         return args.func(args)
     except (ValueError, OSError) as error:
         print("错误：%s" % error, file=sys.stderr)

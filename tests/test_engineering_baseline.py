@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AO-158 完整工程基线与任务分支引用合同，不改写任何真实工作空间。"""
+"""AO-158 完整工程基线与任务分支引用合同，不改写任何真实工位。"""
 from __future__ import annotations
 
 import copy
@@ -164,13 +164,13 @@ class BaselineTest(unittest.TestCase):
     def test_local_baseline_requires_all_repositories_and_returns_copy(self):
         value = self.freeze()
         with mock.patch.object(baseline, "verify_local_repository") as verify:
-            result = baseline.verify_local_baseline("/workspace", value)
+            result = baseline.verify_local_baseline("/station", value)
         self.assertEqual(2, verify.call_count)
         self.assertEqual(value, result)
         self.assertIsNot(value, result)
         with mock.patch.object(baseline, "verify_local_repository", side_effect=[{}, ValueError("missing")]):
             with self.assertRaises(ValueError):
-                baseline.verify_local_baseline("/workspace", value)
+                baseline.verify_local_baseline("/station", value)
         self.assertEqual(value, baseline.validate(value))
 
 

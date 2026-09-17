@@ -30,12 +30,11 @@ run_general_suite() {
   run_product tests/test_git_refs.py
   run_product tests/test_engineering_baseline.py
   run_product tests/test_station_state.py
-  PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$repo_root" "$product_python" -m unittest internal.tests.test_workspace_recovery
   run_product tests/test_station_source.py
   run_product tests/test_shared_repositories.py
   run_product tests/test_repository_recovery.py
   run_product tests/test_task_identity.py
-  run_product tests/test_workspace_compatibility.py
+  run_product tests/test_station_compatibility.py
   run_product tests/test_checkpoints.py
   run_product tests/test_quality.py
   run_product tests/test_issue_versions.py
@@ -50,5 +49,5 @@ run_general_suite() {
 
 run_general_suite
 run_product tests/test_station_resources.py
-run_product tests/test_workspace_clean.py
+run_product tests/test_station_clean.py
 run_product tests/test_station_lifecycle.py

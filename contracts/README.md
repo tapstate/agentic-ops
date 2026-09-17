@@ -9,9 +9,9 @@
 - `adapter-manifest.schema.json`：Agent 能力和生成产物声明。
 - `operation-catalog.json`：标准操作名称、类别、语义和是否可作为请求输入。
 - `product-state.schema.json`：产品根目录（Product Root）的本地模式、跟踪分支和版本状态。
-- `workspace.schema.json`：产品根目录、项目和 Agent 集合的工作空间配置。
-- `workspace-init.schema.json`：生成接线的产品版本、普通文件内容哈希，以及中央 Project Skill 的受控符号链接清单。
-- `task-registry.schema.json`：项目工作空间内多个任务的统一注册与激活状态。
+- `station.schema.json`：产品根目录、项目和 Agent 集合的工位配置。
+- `station-init.schema.json`：生成接线的产品版本、普通文件内容哈希，以及中央 Project Skill 的受控符号链接清单。
+- `task-registry.schema.json`：项目工位内多个任务的统一注册与激活状态。
 - `task-state.schema.json`：每个 Jira 任务统一的阶段、事实、仓库和恢复状态。
 - `jira-field-readback.schema.json`：字段同步回读输入，绑定当前本地事实摘要及 Jira 来源，不修改本地有效事实。
 - `quality-action.schema.json`、`quality-state.schema.json`：任务 run 内质量检查、用户处置及外部证据回写的输入和恢复记录；不扩展任务状态机，也不代表外部系统事实已被认证。
@@ -20,7 +20,7 @@ Manifest v2 新增可选 `retired_artifacts`，声明需要显式迁移的已托
 
 Workflow CLI 的状态写命令现要求 `--expected-run-id`，advance 另要求 `--expected-stage`；缺参数明确失败，不替调用者读取并填充。任务状态文件结构不变，旧 run/历史证据保留。方案确认新增 `enforcement=workflow_checkpoints` 标记，授权绑定在检查点重查；新增 approved_plan_digest 绑定 fix_plan，旧记录不回填。init.json 的 checkpoint_migration 保存迁移前产品引用、接受时间与退役路径，仅为操作记录，不是身份认证。
 
-工作空间持久化兼容边界由 `workspace-state-compatibility.json` 声明，结构由同名 Schema 校验。`workspace_state_epoch` 单调递增：兼容修改保持不变，不兼容修改必须提升；`supported_workspace_state_epochs` 是目标产品可直接使用的状态代际；`minimum_updater_protocol_version` 是安装该目标版本所需的最低 Updater 能力。过渡版本先提升代码能力但保持旧最低要求，后续版本才提升最低要求。`workspace-init.schema.json` 允许新工作空间记录当前 epoch；缺少该字段的历史工作空间按清单中的 `legacy_workspace_state_epoch` 判断。当前不提供跨 epoch 在线数据迁移。
+工位持久化兼容边界由 `station-state-compatibility.json` 声明，结构由同名 Schema 校验。`station_state_epoch` 单调递增：兼容修改保持不变，不兼容修改必须提升；`supported_station_state_epochs` 是目标产品可直接使用的状态代际；`minimum_updater_protocol_version` 是安装该目标版本所需的最低 Updater 能力。过渡版本先提升代码能力但保持旧最低要求，后续版本才提升最低要求。`station-init.schema.json` 允许新工位记录当前 epoch；缺少该字段的历史工位按清单中的 `legacy_station_state_epoch` 判断。当前不提供跨 epoch 在线数据迁移。
 
 ## 兼容规则
 
