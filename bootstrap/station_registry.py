@@ -98,7 +98,7 @@ def binding_status(product_root, station, tree=None):
         document = tree.read_json(relative, "工位绑定")
     except ValueError:
         return "unreadable", "工位绑定不可读取"
-    if document.get("schema_version") != 3:
+    if document.get("schema_version") != 4:
         return "invalid", "工位绑定版本不支持"
     if document.get("product_root") != str(product_root.resolve()):
         return "rebound", "已绑定到其它 Product Root"
@@ -157,7 +157,8 @@ def wiki_repository(product_root, station):
 def ensure_wiki(product_root, station):
     """按工位绑定的项目 Profile 显式准备共享 Wiki；不隐式更新已有副本。"""
     repository = wiki_repository(product_root, station)
-    return shared_repositories.run(product_root, repository, "ensure")
+    binding = load_json(station_artifact_path(station, Path(STATE_DIRECTORY) / "station.json"), "工位绑定")
+    return shared_repositories.run(product_root, repository, "ensure", binding["source_pool"])
 
 
 def owned_artifacts(station, tree=None):
@@ -334,10 +335,12 @@ def command_refresh(args, product_root, action):
         refresh(product_root, station)
         if getattr(args, "ensure_wiki", False):
             repository = wiki_repository(product_root, station)
-            if repository not in prepared_wikis:
-                result = shared_repositories.run(product_root, repository, "ensure")
+            binding = load_json(station_artifact_path(station, Path(STATE_DIRECTORY) / "station.json"), "工位绑定")
+            key = (repository, binding["source_pool"])
+            if key not in prepared_wikis:
+                result = shared_repositories.run(product_root, repository, "ensure", binding["source_pool"])
                 print("Wiki 已就绪：%s（%s）" % (result["repository"], result["path"]))
-                prepared_wikis.add(repository)
+                prepared_wikis.add(key)
 
 
 def command_detach(args, product_root, purge=False):

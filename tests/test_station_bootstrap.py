@@ -35,14 +35,15 @@ class StationBootstrapTests(unittest.TestCase):
 
     def init(self, *args, success=True):
         result = subprocess.run(['bash', str(ROOT / 'bootstrap/station-init.sh'),
-            '--station', str(self.station), '--agent', 'codex', *args],
+            '--station', str(self.station), '--agent', 'codex', '--source-pool', str(self.station.parent / 'pool'), *args],
             env={**os.environ, 'AGENTIC_OPS_HOME': str(ROOT)}, capture_output=True, text=True)
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return result
 
     def test_generate_purge_generate(self):
         before = json.loads((self.station / '.agenticops/station.json').read_text())
-        self.assertEqual(before['schema_version'], 3)
+        self.assertEqual(before['schema_version'], 4)
+        self.assertEqual(before['source_pool'], str((self.station.parent / 'pool').resolve()))
         self.assertNotIn('repository_pool', before)
         for name in ('config', 'source', 'runtime', 'archive'):
             self.assertTrue((self.station / name).is_dir())
@@ -62,10 +63,12 @@ class StationBootstrapTests(unittest.TestCase):
                     'repository': 'tapstate/wiki', 'path': '/tmp/wiki'}) as prepared:
             result = registry.ensure_wiki(ROOT, self.station)
         self.assertEqual(result['repository'], 'tapstate/wiki')
-        prepared.assert_called_once_with(ROOT, 'tapstate/wiki', 'ensure')
+        prepared.assert_called_once_with(ROOT, 'tapstate/wiki', 'ensure', str((self.station.parent / 'pool').resolve()))
 
     def test_repair_all_prepares_a_shared_wiki_once(self):
         other = self.station.parent / 'other'
+        (other / '.agenticops').mkdir(parents=True)
+        (other / '.agenticops/station.json').write_text((self.station / '.agenticops/station.json').read_text())
         args = type('Args', (), {'station': None, 'all': True, 'ensure_wiki': True, 'yes': True})()
         with mock.patch.object(registry, 'select_targets', return_value=[self.station, other]), \
                 mock.patch.object(registry, 'require_tracked'), \
@@ -76,7 +79,7 @@ class StationBootstrapTests(unittest.TestCase):
                 mock.patch.object(registry.shared_repositories, 'run', return_value={
                     'repository': 'tapstate/wiki', 'path': '/tmp/wiki'}) as prepared:
             registry.command_refresh(args, ROOT, 'repair')
-        prepared.assert_called_once_with(ROOT, 'tapstate/wiki', 'ensure')
+        prepared.assert_called_once_with(ROOT, 'tapstate/wiki', 'ensure', str((self.station.parent / 'pool').resolve()))
 
     def test_preserve_materials_requires_explicit_reuse(self):
         for name in ('config', 'source', 'archive'):

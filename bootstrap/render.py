@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from workflow import task_store
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 INIT_SCHEMA_VERSION = 2
 STATE_DIRECTORY = ".agenticops"
 INIT_NAME = "init.json"
@@ -106,8 +106,12 @@ def rendered_content(install_root, project, template, manifest=None):
 def product_ref(install_root):
     local_state = install_root / ".local" / "product.json"
     if local_state.is_file():
-        document = load_product_state(install_root)
-        if document.get("mode") == "installed":
+        try:
+            document = load_product_state(install_root)
+        except ValueError:
+            # 源码产品根可由 Git HEAD 自证版本；旧本地生命周期文件不会被采用或改写。
+            document = None
+        if document and document.get("mode") == "installed":
             current_ref = document.get("current_ref")
             if isinstance(current_ref, str) and current_ref:
                 return current_ref
@@ -291,7 +295,7 @@ def branch_identity(existing):
     return {"schema_version": 1, "git_name": value, "source": "git_global_user_name"}
 
 
-def station_document(install_root, station, project, agents, existing):
+def station_document(install_root, station, project, agents, source_pool, existing):
     station_id = existing["station_id"] if existing else uuid.uuid4().hex
     result = {
         "schema_version": SCHEMA_VERSION,
@@ -299,6 +303,7 @@ def station_document(install_root, station, project, agents, existing):
         "station_id": station_id,
         "project": project,
         "agents": agents,
+        "source_pool": str(Path(source_pool).resolve()),
     }
     identity = branch_identity(existing)
     if identity is not None:
@@ -434,6 +439,7 @@ def check_checkpoint_migration(owned, manifests, accepted, tree):
 def validate_station_document(install_root, document):
     project = document.get("project")
     agents = document.get("agents")
+    source_pool = document.get("source_pool")
     if not isinstance(project, str) or not project:
         raise ValueError("工位配置缺少 project")
     if document.get("product_root") != str(install_root.resolve()):
@@ -445,6 +451,8 @@ def validate_station_document(install_root, document):
         raise ValueError("工位配置缺少 station_id")
     if document.get("schema_version") != SCHEMA_VERSION or "repository_pool" in document:
         raise ValueError("工位不兼容，请使用原版本将这个旧工位受控解绑并重建")
+    if not isinstance(source_pool, str) or not source_pool or not Path(source_pool).is_absolute():
+        raise ValueError("工位配置 source_pool 无效")
     branch_identity(document)
     selected, manifests = select(install_root, agents)
     return project, selected, manifests
@@ -515,6 +523,7 @@ def main():
     parser.add_argument("--station", required=True)
     parser.add_argument("--agent", action="append")
     parser.add_argument("--project")
+    parser.add_argument("--source-pool")
     parser.add_argument("--reuse-materials", action="store_true")
     parser.add_argument("--accept-checkpoint-migration", action="store_true")
     mode = parser.add_mutually_exclusive_group()
@@ -537,9 +546,11 @@ def main():
                     parser.error("工位尚未初始化，请先执行 agenticops station init")
                 project = config["project"]
                 requested_agents = config["agents"]
+                requested_source_pool = config["source_pool"]
             else:
                 project = arguments.project or "tapdata"
                 requested_agents = arguments.agent
+                requested_source_pool = arguments.source_pool or load_product_state(install_root)["source_pool"]
 
             project_root = install_root / "projects" / project
             if not project_root.is_dir():
@@ -607,6 +618,7 @@ def main():
                 station,
                 project,
                 agents,
+                requested_source_pool,
                 config,
             )
 

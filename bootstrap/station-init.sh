@@ -6,9 +6,10 @@ station=""
 agents=()
 project="tapdata"
 reuse_arguments=()
+source_pool=""
 
 usage() {
-  printf '用法：station-init.sh --station <项目工位> [--agent <Agent ID>]... [--project <项目>] [--reuse-materials]\n'
+  printf '用法：station-init.sh --station <项目工位> [--agent <Agent ID>]... [--project <项目>] [--source-pool <目录>] [--reuse-materials]\n'
 }
 
 while [ "$#" -gt 0 ]; do
@@ -31,6 +32,11 @@ while [ "$#" -gt 0 ]; do
     --reuse-materials)
       reuse_arguments+=(--reuse-materials)
       shift
+      ;;
+    --source-pool)
+      test "$#" -ge 2 || { usage >&2; exit 2; }
+      source_pool="$2"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -70,9 +76,14 @@ agent_arguments=()
 for agent_id in ${agents[@]+"${agents[@]}"}; do
   agent_arguments+=(--agent "$agent_id")
 done
+source_pool_arguments=()
+if [ -n "$source_pool" ]; then
+  source_pool_arguments=(--source-pool "$source_pool")
+fi
 python3 "$install_root/bootstrap/render.py" \
   --install-home "$install_root" --station "$station" \
   --project "$project" ${agent_arguments[@]+"${agent_arguments[@]}"} \
+  ${source_pool_arguments[@]+"${source_pool_arguments[@]}"} \
   ${reuse_arguments[@]+"${reuse_arguments[@]}"}
 python3 "$install_root/bootstrap/station_registry.py" \
   --product-root "$install_root" register --station "$station"

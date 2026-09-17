@@ -23,12 +23,12 @@ class TaskIdentityTests(unittest.TestCase):
 
     def binding(self, identity=None, station=None):
         station = station or self.station
-        value = {"schema_version": 3, "product_root": str(ROOT), "station_id": "a" * 32,
+        value = {"schema_version": 4, "product_root": str(ROOT), "source_pool": str(self.station.parent / "pool"), "station_id": "a" * 32,
                  "project": "tapdata", "agents": ["codex"]}
         if identity is not None:
             value["branch_identity"] = identity
         task_store._write_json_atomic(station / ".agenticops/station.json", value)
-        task_store._write_json_atomic(station / ".agenticops/init.json", {"station_state_epoch": 7})
+        task_store._write_json_atomic(station / ".agenticops/init.json", {"station_state_epoch": 8})
 
     def test_timestamp_hex_and_new_run_are_fixed_and_issue_bound(self):
         self.assertEqual(task_store.timestamp_hex(0), "00000000")
@@ -80,13 +80,13 @@ class TaskIdentityTests(unittest.TestCase):
 
     def test_new_station_reads_valid_global_git_name_once(self):
         with mock.patch.object(render, "global_git_name", return_value="developer"):
-            created = render.station_document(ROOT, self.station, "tapdata", ["codex"], None)
+            created = render.station_document(ROOT, self.station, "tapdata", ["codex"], self.station.parent / "pool", None)
         self.assertEqual(created["branch_identity"]["git_name"], "developer")
-        preserved = render.station_document(ROOT, self.station, "tapdata", ["codex"], {
+        preserved = render.station_document(ROOT, self.station, "tapdata", ["codex"], self.station.parent / "pool", {
             "station_id": "b" * 32, "branch_identity": created["branch_identity"]})
         self.assertEqual(preserved["branch_identity"], created["branch_identity"])
         with mock.patch.object(render, "global_git_name", return_value="recovered"):
-            backfilled = render.station_document(ROOT, self.station, "tapdata", ["codex"], {
+            backfilled = render.station_document(ROOT, self.station, "tapdata", ["codex"], self.station.parent / "pool", {
                 "station_id": "c" * 32,
             })
         self.assertEqual(backfilled["branch_identity"]["git_name"], "recovered")

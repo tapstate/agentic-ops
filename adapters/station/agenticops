@@ -15,11 +15,14 @@ try:
     document = json.loads(path.read_text(encoding="utf-8"))
 except (OSError, json.JSONDecodeError) as error:
     raise SystemExit("AgenticOps：工位绑定无法读取：%s" % error)
-if document.get("schema_version") != 3:
+if document.get("schema_version") != 4:
     raise SystemExit("AgenticOps：工位不兼容，请使用原版本将这个旧工位受控解绑并重建；repair 不迁移旧任务状态")
 root = document.get("product_root")
 if not isinstance(root, str) or not root:
     raise SystemExit("AgenticOps：工位绑定缺少 product_root，请执行 agenticops station repair")
+source_pool = document.get("source_pool")
+if not isinstance(source_pool, str) or not source_pool or not Path(source_pool).is_absolute():
+    raise SystemExit("AgenticOps：工位绑定缺少 source_pool，请使用原版本受控解绑并重建")
 print(Path(root).resolve())
 PY
 )"

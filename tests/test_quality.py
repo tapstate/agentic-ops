@@ -980,7 +980,7 @@ class FeatureFlowTests(unittest.TestCase):
         doc["repositories"][self.repo]["origin"] = str(self.remote)
         task_store._write_json_atomic(catalog, doc)
         task_store._write_json_atomic(self.ws / ".agenticops/station.json", {
-            "schema_version": 3, "product_root": str(self.product), "project": "tapdata",
+            "schema_version": 4, "product_root": str(self.product), "source_pool": str(self.root / "pool"), "project": "tapdata",
             "station_id": "3" * 32, "agents": ["codex"],
             "branch_identity": {"schema_version": 1, "git_name": "Fixture", "source": "git_global_user_name"}})
         task_store.initialize_current(self.ws)

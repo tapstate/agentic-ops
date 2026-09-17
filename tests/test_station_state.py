@@ -19,7 +19,7 @@ class StationStateTests(unittest.TestCase):
         (self.base / ".agenticops").mkdir()
         store.initialize_current(self.base)
         store._write_json_atomic(self.base / ".agenticops/station.json", {
-            "schema_version": 3, "product_root": str(ROOT), "station_id": "a" * 32,
+            "schema_version": 4, "product_root": str(ROOT), "source_pool": str(self.base / "pool"), "station_id": "a" * 32,
             "project": "tapdata", "agents": ["codex"],
             "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"},
         })

@@ -138,18 +138,19 @@ def inspect(path, name, entry):
             "branch": entry["branch"], "relation": "equal" if head == target else "behind"}
 
 
-def run(root, name, action):
+def run(root, name, action, pool_root):
     if action not in ("ensure", "update", "status"):
         raise ValueError("不支持的共享仓库操作")
     root = Path(root).resolve()
+    pool_root = Path(pool_root).expanduser().resolve()
     entry = specification(root, name)
-    path = directory(root, ".local/shared-repositories/" + name)
+    path = directory(pool_root, "shared-repositories/" + name)
     with locked(path, create=action == "ensure"):
         if action == "status" or (action == "ensure" and path.exists()):
             return inspect(path, name, entry)
         if action == "update":
             inspect(path, name, entry)
-        with source_pool.refreshed_at_root(root, name, entry["origin"], git) as pool:
+        with source_pool.refreshed_at_root(pool_root, name, entry["origin"], git) as pool:
             target = git(pool, "rev-parse", "refs/heads/" + entry["branch"] + "^{commit}").stdout.strip()
             if action == "ensure":
                 with tempfile.TemporaryDirectory(prefix=".prepare-", dir=path.parent) as temporary:
@@ -180,10 +181,11 @@ def main():
     parser.add_argument("action", choices=("ensure", "update", "status"))
     parser.add_argument("--product-root", default=str(ROOT))
     parser.add_argument("--repository", required=True)
+    parser.add_argument("--source-pool", required=True)
     args = parser.parse_args()
     previous = signal.signal(signal.SIGTERM, interrupted)
     try:
-        result = run(args.product_root, args.repository, args.action)
+        result = run(args.product_root, args.repository, args.action, args.source_pool)
     except KeyboardInterrupt:
         print(json.dumps({"status": "unavailable", "reason": "操作已中断；先 status 核验，必要时由研发修复"}, ensure_ascii=False))
         return 130

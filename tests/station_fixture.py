@@ -50,12 +50,13 @@ def initialize_station(base):
     state = task_store.state_path(base)
     binding_path = state / "station.json"
     binding = json.loads(binding_path.read_text())
-    binding["schema_version"] = 3
+    binding["schema_version"] = 4
     binding.setdefault("station_id", "a" * 32)
     binding["agents"] = binding.get("agents") or ["codex"]
+    binding["source_pool"] = binding.get("source_pool") or str(Path(base) / "pool")
     binding.pop("repository_pool", None)
     task_store._write_json_atomic(binding_path, binding)
-    task_store._write_json_atomic(state / "init.json", {"station_state_epoch": 7})
+    task_store._write_json_atomic(state / "init.json", {"station_state_epoch": 8})
     manifest = Path(binding["product_root"]) / "contracts/station-state-compatibility.json"
     if not manifest.exists():
         original = Path(__file__).resolve().parents[1] / "contracts/station-state-compatibility.json"

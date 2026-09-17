@@ -125,12 +125,13 @@ class ContractConformanceTest(unittest.TestCase):
     def test_source_product_state_conforms_to_schema(self):
         schema = load_json(ROOT / "contracts" / "product-state.schema.json")
         document = {
-            "schema_version": 1,
+            "schema_version": 2,
             "mode": "source",
             "repository": "git@example.test:tapstate/agentic-ops.git",
             "tracking_branch": "develop",
             "current_ref": "a" * 40,
             "previous_ref": None,
+            "source_pool": "/tmp/agentic-ops-repos",
         }
         assert_schema(self, schema, document)
 
@@ -149,6 +150,8 @@ class ContractConformanceTest(unittest.TestCase):
                     str(station),
                     "--project",
                     "tapdata",
+                    "--source-pool",
+                    str(Path(temporary) / "pool"),
                 ],
                 check=True,
                 capture_output=True,
