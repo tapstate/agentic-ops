@@ -1146,6 +1146,26 @@ class QualityTests(unittest.TestCase):
         self.assertFalse(self.view()["items"]["case-a"]["decision_valid"])
         self.assertTrue(self.view()["items"]["case-b"]["decision_valid"])
 
+    def test_evidence_rejects_non_object_events_without_partial_output(self):
+        path = task_store.events_path(self.base, "TAP-123")
+        for value in (None, [], "private-fixture-event", 1, True):
+            with self.subTest(value=value):
+                raw = '{"decision":"allow"}\n' + json.dumps(value) + '\n'
+                path.write_text(raw)
+                with self.assertRaisesRegex(ValueError, "JSON 对象"):
+                    evidence.load_events(path)
+                result = subprocess.run([sys.executable, str(ROOT / 'workflow/evidence.py'),
+                    '--dir', str(self.base), '--issue-key', 'TAP-123'], capture_output=True, text=True)
+                self.assertEqual(4, result.returncode)
+                self.assertEqual('', result.stdout)
+                self.assertNotIn('Traceback', result.stderr)
+                self.assertNotIn('private-fixture-event', result.stderr)
+                self.assertEqual(raw, path.read_text())
+        path.write_text('\n{"decision":"allow"}\n\n')
+        self.assertEqual([{"decision": "allow"}], evidence.load_events(path))
+        path.unlink()
+        self.assertEqual([], evidence.load_events(path))
+
     def test_ci_timeouts_use_monotonic_clock_and_keep_audit_timestamp(self):
         for pr, checks, ticks, verdict in (
                 ("81", [], [100, 401], "start_timeout"),
