@@ -371,6 +371,32 @@ class SourceSyncTests(unittest.TestCase):
         empty = source_sync.impact(self.root, 'feature', self.base, self.source, self.base)
         self.assertEqual([], empty['comparisons']['original_task']['paths'])
 
+    def test_impact_includes_both_sides_of_renames_in_each_comparison(self):
+        self.commit("old-a", "a content")
+        base = self.commit("old-b", "b content")
+        self.git("branch", "source-rename")
+        self.git("mv", "old-a", "new-a")
+        self.git("commit", "-qm", "task rename")
+        before = self.git("rev-parse", "HEAD")
+        self.git("checkout", "source-rename")
+        self.git("mv", "old-b", "new-b")
+        self.git("commit", "-qm", "source rename")
+        source = self.git("rev-parse", "HEAD")
+        self.git("checkout", "feature")
+        self.git("merge", "--no-edit", "source-rename")
+        for preference in ("true", "false"):
+            self.git("config", "diff.renames", preference)
+            result = source_sync.impact(self.root, "feature", base, source, before)
+            for name, expected in (("original_task", {"old-a", "new-a"}),
+                                   ("incoming_source", {"old-b", "new-b"}),
+                                   ("final_task", {"old-a", "new-a"})):
+                comparison = result["comparisons"][name]
+                self.assertEqual(expected, set(comparison["paths"]))
+                patch = source_sync.git(self.root, "diff", "--binary", "--no-ext-diff", "--no-textconv",
+                    comparison["from"], comparison["to"], "--", byte_preserving=True)
+                self.assertEqual(hashlib.sha256(patch.encode("utf-8", errors="surrogateescape")).hexdigest(),
+                                 comparison["diff_sha256"])
+
     def test_non_utf8_diff_is_analyzed_without_losing_byte_identity(self):
         before = self.task
         digests = []

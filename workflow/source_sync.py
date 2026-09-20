@@ -68,7 +68,7 @@ def impact(root, work_branch, base_revision, source_revision, before_merge_revis
     for name, start, end in (("original_task", base_revision, before_merge_revision),
                              ("incoming_source", base_revision, source_revision),
                              ("final_task", source_revision, result["task_revision"])):
-        paths = git(root, "diff", "--name-only", "-z", start, end, "--", nul_delimited=True)
+        paths = git(root, "diff", "--no-renames", "--name-only", "-z", start, end, "--", nul_delimited=True)
         patch = git(root, "diff", "--binary", "--no-ext-diff", "--no-textconv", start, end, "--", byte_preserving=True)
         comparisons[name] = {"from": start, "to": end,
                              "paths": [p for p in paths.split("\0") if p],
