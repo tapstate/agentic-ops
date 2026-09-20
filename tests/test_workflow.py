@@ -98,6 +98,23 @@ def check_project_boundaries(base):
     binding.write_text(json.dumps({"project": "demo", "product_root": str(product)}))
     check("合法旧工位保留项目读取", task_store.station_project(station), "demo")
     check("合法项目目录不变", project_rules.project_root(product, "demo"), project)
+    (project / "admission.json").write_text(json.dumps({"project_marker": "demo"}))
+    check("显式第二项目读取隔离", project_rules.load_admission(product, "demo"), {"project_marker": "demo"})
+    check("工位继续使用旧绑定", project_rules.load_admission(station=station), {"project_marker": "demo"})
+    for reader in (project_rules.project_root, project_rules.load_admission, project_rules.load_profile,
+                   project_rules.load_repository_catalog, project_rules.repository_catalog_path):
+        try:
+            reader(root=ROOT)
+        except ValueError as error:
+            rejected = "显式指定 project" in str(error)
+        else:
+            rejected = False
+        check("缺省项目拒绝 " + reader.__name__, rejected, True)
+    for command, options in (("render", []), ("branch", ["--repo", "tapdata/tapdata"]), ("workflow", [])):
+        code, out = run_tool("project_rules.py", command, "--root", str(product), *options, cwd=ROOT)
+        check("CLI 缺项目拒绝 " + command, code, 2)
+        check("CLI 指出项目参数 " + command, "--project" in out, True)
+    check("缺项目不生成视图", (project / "admission").exists(), False)
     for name, target in (("alias", project), ("external", base)):
         (product / "projects" / name).symlink_to(target, target_is_directory=True)
         try:
@@ -214,7 +231,7 @@ def main():
         run_tool("task.py", "record", "--key", "note", "--value", "无", cwd=ws)
 
         # ---- 生成视图与机读规格不漂移 ------------------------------------
-        code, out = run_tool("project_rules.py", "render", "--check", cwd=ROOT)
+        code, out = run_tool("project_rules.py", "render", "--project", "tapdata", "--check", cwd=ROOT)
         check("admission md 与 json 无漂移", code, 0)
 
         # ---- profile 完整性 --------------------------------------------
@@ -241,14 +258,14 @@ def main():
             "to": {"id": "3", "name": "正在进行"},
         })
         code, out = run_tool(
-            "project_rules.py", "workflow", "--issue-type-id", "10008", "--issue-type-name", "任务", "--json", cwd=ROOT
+            "project_rules.py", "workflow", "--project", "tapdata", "--issue-type-id", "10008", "--issue-type-name", "任务", "--json", cwd=ROOT
         )
         check("工作流 CLI 输出任务类型映射", code, 0)
         check("工作流 CLI 输出可机读", json.loads(out)["transitions"]["start_progress"]["id"], "61")
-        code, out = run_tool("project_rules.py", "workflow", "--issue-type-id", "99999", cwd=ROOT)
+        code, out = run_tool("project_rules.py", "workflow", "--project", "tapdata", "--issue-type-id", "99999", cwd=ROOT)
         check("未知 Jira 事务类型失败关闭", code, 2)
         code, out = run_tool(
-            "project_rules.py", "workflow", "--issue-type-id", "10008", "--issue-type-name", "Bug", cwd=ROOT
+            "project_rules.py", "workflow", "--project", "tapdata", "--issue-type-id", "10008", "--issue-type-name", "Bug", cwd=ROOT
         )
         check("不一致的 Jira 事务类型 ID/名称失败关闭", code, 2)
         check("profile transition 291 标记禁止", profile["transitions"]["pr_approved"]["agent_forbidden"], True)

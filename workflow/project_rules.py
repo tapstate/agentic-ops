@@ -7,10 +7,10 @@
 强制点在 workflow/task.py（阶段推进）与 workflow/evidence.py（证据输出）。
 
 用法：
-  python3 workflow/project_rules.py render            # 由 admission.json 重新生成三张清单 md
-  python3 workflow/project_rules.py render --check    # 只校验 md 与 json 是否漂移（漂移 exit 1）
-  python3 workflow/project_rules.py branch --repo tapdata/tapdata   # 查表解析分支，查不到 exit 2
-  python3 workflow/project_rules.py workflow --issue-type-id 10008 --issue-type-name 任务 --json
+  python3 workflow/project_rules.py render --project <project>  # 由 admission.json 重新生成三张清单 md
+  python3 workflow/project_rules.py render --project <project> --check  # 只校验 md 与 json 是否漂移（漂移 exit 1）
+  python3 workflow/project_rules.py branch --project <project> --repo <owner/repo>   # 查表解析分支，查不到 exit 2
+  python3 workflow/project_rules.py workflow --project <project> --issue-type-id 10008 --issue-type-name 任务 --json
 """
 from __future__ import annotations
 
@@ -83,7 +83,9 @@ def product_root_from_station(station):
     return product
 
 
-def project_root(root=ROOT, project="tapdata"):
+def project_root(root=ROOT, project=None):
+    if project is None:
+        raise ValueError("无工位调用必须显式指定 project")
     projects = Path(root) / "projects"
     path = projects / validate_project_id(project)
     if path.is_symlink() or path.resolve().parent != projects.resolve():
@@ -93,7 +95,7 @@ def project_root(root=ROOT, project="tapdata"):
     return path
 
 
-def load_admission(root=ROOT, project="tapdata", station=None):
+def load_admission(root=ROOT, project=None, station=None):
     selected = project_from_station(station) if station is not None else project
     selected_root = product_root_from_station(station) if station is not None else root
     return _read_json(project_root(selected_root, selected) / "admission.json")
@@ -131,7 +133,7 @@ def validate_takeover_watermark(profile):
     return value
 
 
-def load_profile(root=ROOT, project="tapdata", station=None):
+def load_profile(root=ROOT, project=None, station=None):
     selected = project_from_station(station) if station is not None else project
     selected_root = product_root_from_station(station) if station is not None else root
     profile = _read_json(project_root(selected_root, selected) / "profile.json")
@@ -170,11 +172,11 @@ def load_profile(root=ROOT, project="tapdata", station=None):
     return profile
 
 
-def load_repository_catalog(root=ROOT, project="tapdata", station=None):
+def load_repository_catalog(root=ROOT, project=None, station=None):
     return load_profile(root=root, project=project, station=station)["repositories"]
 
 
-def repository_catalog_path(root=ROOT, project="tapdata", station=None):
+def repository_catalog_path(root=ROOT, project=None, station=None):
     selected = project_from_station(station) if station is not None else project
     selected_root = product_root_from_station(station) if station is not None else root
     base = project_root(selected_root, selected).resolve()
@@ -338,7 +340,8 @@ def _fact_rows(facts, with_example):
     return lines
 
 
-def render_admission_markdown(spec, task_class, project="tapdata"):
+def render_admission_markdown(spec, task_class, project=None):
+    validate_project_id(project)
     cls = class_spec(spec, task_class)
     L = []
     L.append("# %s任务准入检查清单（%s）" % (cls["title"], project))
@@ -427,7 +430,7 @@ def cmd_render(args):
             print("已生成 %s" % path.relative_to(args.root))
     if args.check:
         if drift:
-            print("清单 md 与 admission.json 已漂移：%s（跑 workflow/project_rules.py render）" % "、".join(drift), file=sys.stderr)
+            print("清单 md 与 admission.json 已漂移：%s（跑 workflow/project_rules.py render --project %s）" % ("、".join(drift), args.project), file=sys.stderr)
             return 1
         print("清单 md 与 admission.json 一致。")
     return 0
@@ -477,14 +480,14 @@ def main():
     p = sub.add_parser("render", help="由 admission.json 生成人读清单")
     p.add_argument("--check", action="store_true", help="只校验漂移，不写文件")
     p.add_argument("--root", default=str(ROOT))
-    p.add_argument("--project", default="tapdata")
+    p.add_argument("--project", required=True)
     p.set_defaults(func=cmd_render)
 
     p = sub.add_parser("branch", help="查表解析仓库分支（禁止猜测）")
     p.add_argument("--repo", required=True)
     p.add_argument("--json", action="store_true")
     p.add_argument("--root", default=str(ROOT))
-    p.add_argument("--project", default="tapdata")
+    p.add_argument("--project", required=True)
     p.set_defaults(func=cmd_branch)
 
     p = sub.add_parser("workflow", help="按 Jira 事务类型精确解析工作流（未知类型失败关闭）")
@@ -492,7 +495,7 @@ def main():
     p.add_argument("--issue-type-name")
     p.add_argument("--json", action="store_true")
     p.add_argument("--root", default=str(ROOT))
-    p.add_argument("--project", default="tapdata")
+    p.add_argument("--project", required=True)
     p.set_defaults(func=cmd_workflow)
 
     args = parser.parse_args()

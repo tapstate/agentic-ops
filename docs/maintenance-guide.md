@@ -89,6 +89,8 @@ station="$HOME/agenticops-tapdata"
 
 新增 Agent 只增加 `adapters/agents/<id>/` 的 Manifest、薄 Hook、模板和测试；不要修改公共入口建立平台枚举。新增产品项目只增加 `projects/<project>/`。每个 Jira Project Profile 必须配置 `jira.takeover_watermark`：逻辑键固定为 `agenticops_version`，配置实际 `customfield_<ID>`、字符串字段名、启用的 Jira 事务类型 ID 和 `overwrite` 写入方式；`workflow/project_rules.py` 会拒绝缺失或无效配置，不能绕过接管门禁。工作项、进度和验收写入 Jira，不在仓库新增执行计划。
 
+`python3 workflow/project_rules.py` 的 `render`、`branch` 和 `workflow` 子命令必须通过 `--project <project>` 显式指定项目。无工位的 Python 调用同样提供 `project`，不再默认 TapData；工位调用使用 `station` 的现有绑定。缺少项目时停止读取或生成，旧脚本应补齐参数，不能用默认业务项目代替缺失输入。
+
 ## 5. 验证
 
 运行代码及 Skill 变更整理为明确候选后，使用一次正式验收同时完成四项检查和提交门禁证据：
