@@ -261,11 +261,15 @@ def resolve_issue_type_workflow(profile, issue_type_id=None, issue_type_name=Non
     transitions = workflow.get("transitions")
     if not isinstance(statuses, list) or not isinstance(transitions, dict):
         raise ValueError("事务类型工作流结构无效")
+    status_ids = set()
     for status in statuses:
         if not isinstance(status, dict) or not all(
             isinstance(status.get(key), str) and status[key] for key in ("id", "name", "stage")
         ):
             raise ValueError("事务类型工作流状态结构无效")
+        if status["id"] in status_ids:
+            raise ValueError("事务类型工作流状态 ID 重复")
+        status_ids.add(status["id"])
     return workflow
 
 

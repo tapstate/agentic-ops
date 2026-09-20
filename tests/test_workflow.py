@@ -457,6 +457,22 @@ def main():
         task_workflow = project_rules.resolve_issue_type_workflow(
             profile, issue_type_id="10008", issue_type_name="任务"
         )
+        for stage in ("waiting_takeover", "completed"):
+            duplicate_profile = json.loads(json.dumps(profile))
+            selected = project_rules.resolve_issue_type_workflow(duplicate_profile, issue_type_id="10008")
+            selected["statuses"].append(dict(selected["statuses"][0], stage=stage))
+            try:
+                project_rules.resolve_issue_type_workflow(duplicate_profile, issue_type_id="10008")
+            except ValueError as error:
+                rejected = "状态 ID 重复" in str(error)
+            else:
+                rejected = False
+            check("重复状态 ID 拒绝 " + stage, rejected, True)
+        distinct_profile = json.loads(json.dumps(profile))
+        selected = project_rules.resolve_issue_type_workflow(distinct_profile, issue_type_id="10008")
+        selected["statuses"].append(dict(selected["statuses"][0], id="999999"))
+        check("不同状态可映射相同阶段", project_rules.resolve_issue_type_workflow(
+            distinct_profile, issue_type_id="10008")["statuses"][-1]["stage"], "waiting_takeover")
         check("TapData 任务类型按稳定 ID 解析工作流", task_workflow["issue_type"]["id"], "10008")
         check("TapData 任务待办映射接管等待", task_workflow["statuses"][0], {
             "id": "10029", "name": "待办", "stage": "waiting_takeover"
