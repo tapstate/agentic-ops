@@ -5,6 +5,7 @@ import json
 import multiprocessing
 import os
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -911,6 +912,41 @@ class QualityTests(unittest.TestCase):
                 method.pop("worktree_origins", None)
         model = quality.replay(state)
         self.assertEqual(model["items"]["case-a"]["executions"][0]["target_revision"], revision)
+
+    def test_worktree_fingerprint_ignores_textconv_and_invalidates_evidence(self):
+        self.task["repositories"] = self.task["repositories"][:1]
+        repo = self.base / "source/tapdata/tapdata"
+        repo.mkdir(parents=True)
+        def git(*args):
+            return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True).stdout.decode().strip()
+        git("init", "-q")
+        (repo / ".gitattributes").write_text("*.txt diff=fixture\n")
+        file = repo / "tracked.txt"
+        file.write_text("before")
+        git("add", ".")
+        git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "fixture")
+        head = git("rev-parse", "HEAD")
+        marker = repo / ".git/converter-called"
+        converter = repo / ".git/converter.py"
+        converter.write_text("from pathlib import Path\nPath(%r).write_text('called')\nprint('constant')\n" % str(marker))
+        git("config", "diff.fixture.textconv", shlex.quote(sys.executable) + " " + shlex.quote(str(converter)))
+        self.assertEqual(head, quality.git_revision(repo))
+        self.task["repositories"][0]["worktree"] = {"status": "prepared", "path": str(repo)}
+        self.save_task()
+        plan = self.plan()
+        self.apply("item", {"plan": dict(plan, target_revision=head), "reason": "绑定真实源码"})
+        self.select(); self.execute(); self.decide()
+        self.assertTrue(self.view()["items"]["case-a"]["decision_valid"])
+        file.write_text("after")
+        changed = quality.git_revision(repo)
+        self.assertNotEqual(head, changed)
+        self.assertTrue(quality.exact_worktree(changed))
+        self.assertFalse(self.view()["items"]["case-a"]["decision_valid"])
+        file.write_text("another change")
+        self.assertNotEqual(changed, quality.git_revision(repo))
+        self.assertFalse(marker.exists(), "源码指纹不得运行 textconv 转换器")
+        file.write_text("before")
+        self.assertEqual(head, quality.git_revision(repo))
 
     def test_worktree_fingerprint_frames_untracked_names_content_and_type(self):
         repo = self.base / "fingerprint-repo"

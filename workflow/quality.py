@@ -186,9 +186,9 @@ def git_revision(path):
             raise ValueError("无法核对质量记录所对应的本地代码")
         return p.stdout
     head = git("rev-parse", "HEAD").decode().strip()
-    diff = git("diff", "HEAD", "--binary", "--no-ext-diff")
+    diff = git("diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv")
     untracked = git("ls-files", "--others", "--exclude-standard", "-z")
-    h = hashlib.sha256(b"agenticops-worktree-v2\0" + hashlib.sha256(diff).digest())
+    h = hashlib.sha256(b"agenticops-worktree-v3\0" + hashlib.sha256(diff).digest())
     for name in sorted(untracked.split(b"\0")):
         if not name:
             continue

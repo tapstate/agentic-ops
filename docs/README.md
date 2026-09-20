@@ -1,6 +1,6 @@
 # AgenticOps 文档总纲
 
-源码工作目录指纹由[工位合同](architecture/single-task-station.md#源码指纹与兼容边界)定义质量证据、扩仓和中断恢复共用的字节边界及 epoch；[更新与回退](usage/update-and-rollback.md)负责跨 epoch 的原版退出、purge 和重建操作，不在线迁移旧指纹。
+源码工作目录指纹由[工位合同](architecture/single-task-station.md#源码指纹与兼容边界)定义质量证据、扩仓和中断恢复共用的字节边界、禁用 Git textconv 的源码核验要求及 epoch；[更新与回退](usage/update-and-rollback.md)负责跨 epoch 的原版退出、purge 和重建操作，不在线迁移旧指纹。
 
 项目规则入口的显式项目选择及配置化准入文档生成由[维护指引](maintenance-guide.md)说明；无工位调用必须指定项目，工位运行从已有绑定读取，避免通用入口隐式选用业务规则。
 
