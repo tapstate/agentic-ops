@@ -159,6 +159,25 @@ def check_project_json_objects(base):
             else:
                 rejected = False
             check("JSON 对象校验 %s %s" % (path.name, type(value).__name__), rejected, True)
+    for path, read in readers:
+        for raw in ('{"fixture-private-content":1,"fixture-private-content":2}',
+                    '{"rules":{"fixture-private-content":true,"fixture-private-content":false}}'):
+            path.write_text(raw)
+            try:
+                read()
+            except ValueError as error:
+                message = str(error)
+                rejected = "重复键" in message and path.name in message and "fixture-private-content" not in message
+            else:
+                rejected = False
+            check("重复 JSON 键拒绝 " + path.name, rejected, True)
+    (project / "admission.json").write_text('{"a":{"required":true},"b":{"required":false}}')
+    check("不同对象同名键有效", project_rules.load_admission(product, "demo"),
+          {"a": {"required": True}, "b": {"required": False}})
+    (project / "admission.json").write_text('{"rules":{},"rules":{}}')
+    code, out = run_tool("project_rules.py", "render", "--root", str(product), "--project", "demo", cwd=ROOT)
+    check("重复键 CLI 配置错误", code == 2 and "重复键" in out and "Traceback" not in out, True)
+    check("重复键不生成视图", (project / "admission").exists(), False)
     (project / "profile.json").write_text('["fixture-private-content"]')
     (project / "admission.json").write_text('null')
     for command, options in (("render", []), ("branch", ["--repo", "owner/repo"]), ("workflow", ["--issue-type-id", "1"])):

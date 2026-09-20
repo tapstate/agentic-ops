@@ -49,8 +49,16 @@ def canonical_repository_endpoint(value):
 
 
 def _read_json(path):
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("项目 JSON 包含重复键：%s" % Path(path).name)
+            result[key] = value
+        return result
+
     with open(path, "r", encoding="utf-8") as fh:
-        value = json.load(fh)
+        value = json.load(fh, object_pairs_hook=unique_object)
     if not isinstance(value, dict):
         raise ValueError("项目 JSON 顶层必须是对象：%s" % Path(path).name)
     return value
