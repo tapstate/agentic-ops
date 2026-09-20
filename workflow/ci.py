@@ -175,6 +175,10 @@ def fetch_rollup(repo, pr):
 
 
 def cmd_watch(args):
+    for name, minimum in (("interval", 1), ("start_timeout", 0), ("finish_timeout", 0)):
+        value = getattr(args, name)
+        if type(value) is not int or value < minimum:
+            raise ValueError("CI %s 必须是大于等于 %d 的整数" % (name.replace("_", "-"), minimum))
     issue = task_store.resolve_active_issue(args.dir, args.issue_key)
     with task_store.task_run_lock(args.dir, issue):
         task_store.resolve_active_issue(args.dir, issue)
@@ -257,9 +261,9 @@ def main():
     p.add_argument("--expected-run-id", required=True)
     p.add_argument("--repo", required=True)
     p.add_argument("--pr", required=True)
-    p.add_argument("--interval", type=int, default=POLL_INTERVAL)
-    p.add_argument("--start-timeout", type=int, default=START_TIMEOUT)
-    p.add_argument("--finish-timeout", type=int, default=FINISH_TIMEOUT)
+    p.add_argument("--interval", type=int, default=POLL_INTERVAL, help="轮询间隔秒数，必须为正整数")
+    p.add_argument("--start-timeout", type=int, default=START_TIMEOUT, help="检查启动预算秒数，非负整数")
+    p.add_argument("--finish-timeout", type=int, default=FINISH_TIMEOUT, help="检查完成预算秒数，非负整数")
     p.add_argument("--dir", default=".")
     p.add_argument("--issue-key")
     p.set_defaults(func=cmd_watch)

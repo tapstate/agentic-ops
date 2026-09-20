@@ -1347,16 +1347,36 @@ class QualityTests(unittest.TestCase):
                         returncode=0, stdout=json.dumps({"headRefOid": head, "statusCheckRollup": checks}))):
                     self.assertEqual((checks or [], head), ci.fetch_rollup("owner/repo", "1"))
 
+    def test_ci_watch_validates_budget_before_reading_or_querying(self):
+        for name in ("interval", "start_timeout", "finish_timeout"):
+            invalid = (-1, True, 1.5, float("inf"), None) + ((0,) if name == "interval" else ())
+            for value in invalid:
+                args = SimpleNamespace(interval=1, start_timeout=0, finish_timeout=0)
+                setattr(args, name, value)
+                with self.subTest(name=name, value=value), mock.patch.object(ci, "fetch_rollup") as fetch:
+                    with mock.patch.object(ci.task_store, "resolve_active_issue") as resolve:
+                        with self.assertRaisesRegex(ValueError, name.replace("_", "-")):
+                            ci.cmd_watch(args)
+                        resolve.assert_not_called()
+                    fetch.assert_not_called()
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr="8",
+            interval=1, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
+        with mock.patch.object(ci, "fetch_rollup", return_value=([], "a" * 40)), mock.patch.object(
+                ci.time, "monotonic", side_effect=[10, 11]), mock.patch.object(ci.time, "sleep") as sleep:
+            self.assertEqual(3, ci.cmd_watch(args))
+            sleep.assert_not_called()
+        self.assertEqual("start_timeout", ci.load_state(self.base, "TAP-123", "8", args.repo)["history"][-1]["verdict"])
+
     def test_watch_invalid_response_does_not_write_observation(self):
         args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr="8",
-                               interval=0, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
+                               interval=1, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
         with mock.patch.object(ci.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout='[]')):
             self.assertEqual(4, ci.cmd_watch(args))
         self.assertFalse(ci.state_path(self.base, "TAP-123", "8", args.repo).exists())
 
     def test_watch_records_unknown_as_handoff_and_preserves_raw_checks(self):
         args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr="8",
-                               interval=0, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
+                               interval=1, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
         checks = [{"name": "integration", "status": "COMPLETED", "conclusion": ""}]
         with mock.patch.object(ci, "fetch_rollup", return_value=(checks, "known-sha")):
             self.assertEqual(ci.cmd_watch(args), 3)
