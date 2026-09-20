@@ -104,11 +104,11 @@ def validate_task_profile(rules, task):
         raise ValueError("任务质量配置未启用当前任务类型")
     points = {p["id"]: p for p in rules["checkpoints"]}
     selected = rules["selection_checkpoint"]
+    intake = rules["checkpoints"][0]["id"]
     before = rules.get("stage_checkpoints", {}).get("implementation", [])
-    if ("q1-intake" not in points or selected == "q1-intake"
-            or not {"q1-intake", selected}.issubset(before)):
+    if (selected == intake or not {intake, selected}.issubset(before)):
         raise ValueError("任务质量配置必须在实施前检查接管与方案确认")
-    for key in ("q1-intake", selected):
+    for key in (intake, selected):
         if points[key].get("confirmation", "user") != "user":
             raise ValueError("接管与方案检查必须保留人工决定")
     for keys in rules.get("stage_checkpoints", {}).values():
@@ -514,7 +514,10 @@ def checkpoint_digest(base, task, checkpoint, required_outcome=None):
 
 
 def q1_digest(base, task):
-    return checkpoint_digest(base, task, "q1-intake")
+    rules = config(base, task)
+    if not enabled(task, rules):
+        raise ValueError("当前任务类型未配置可用的接管检查")
+    return checkpoint_digest(base, task, rules["checkpoints"][0]["id"])
 
 
 def q2_digest(base, task):

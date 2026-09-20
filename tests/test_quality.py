@@ -137,6 +137,41 @@ class QualityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "尚未有效确认"):
             quality.q2_digest(self.base, self.task)
 
+    def test_configured_intake_checkpoint_authorization_and_drift(self):
+        self.feature_profile()
+        self.profile_path.write_text(self.profile_path.read_text().replace('"q1-intake"', '"intake"'))
+        self.select()
+        with self.assertRaisesRegex(ValueError, "尚未有效确认"):
+            quality.q1_digest(self.base, self.task)
+        self.checkpoint("intake"); self.checkpoint("q2-plan")
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"],
+                               agent_id="fixture", plan_version="v1", ttl_hours=8)
+        self.assertEqual(authorization.cmd_grant(args), 0)
+        record = json.loads(task_store.authorization_path(self.base, "TAP-123").read_text())
+        self.assertEqual(record["approved_q1_digest"], self.view()["checkpoints"]["intake"]["digest"])
+        self.assertEqual(task._check_advance(self.task, "implementation", self.base, task.admission(self.base)), [])
+        self.task["facts"]["acceptance_criteria"] = "改变验收范围"
+        self.save_task()
+        with self.assertRaisesRegex(ValueError, "尚未有效确认"):
+            quality.q1_digest(self.base, self.task)
+        self.assertTrue(task._check_advance(self.task, "implementation", self.base, task.admission(self.base)))
+
+    def test_configured_intake_keeps_manual_and_stage_requirements(self):
+        self.feature_profile()
+        rules = json.loads(self.profile_path.read_text().replace('"q1-intake"', '"intake"'))
+        for change in ("automatic", "missing_stage", "same_as_selection"):
+            with self.subTest(change=change):
+                candidate = copy.deepcopy(rules)
+                if change == "automatic":
+                    candidate["checkpoints"][0]["confirmation"] = "automatic"
+                elif change == "missing_stage":
+                    candidate["stage_checkpoints"]["implementation"].remove("intake")
+                else:
+                    candidate["selection_checkpoint"] = "intake"
+                self.profile_path.write_text(json.dumps(candidate))
+                with self.assertRaisesRegex(ValueError, "人工决定|接管与方案确认"):
+                    quality.config(self.base, self.task)
+
     def test_replan_invalidates_only_mapped_items_without_rewriting_executions(self):
         self.plan(key="case-a", repo="tapdata/tapdata")
         self.plan(key="case-b", repo="tapdata/tapdata-manager")
