@@ -18,21 +18,62 @@
   "properties": {
     "rules": {
       "type": "object",
-      "required": ["digests", "objects"],
+      "required": [
+        "digests",
+        "objects"
+      ],
       "additionalProperties": false,
       "properties": {
-        "digests": {"type": "array", "items": {"anyOf": [{"const": null}, {"type": "string", "pattern": "^[0-9a-f]{64}$"}]}},
-        "objects": {"type": "object", "additionalProperties": {
-          "type": "object", "required": ["action", "layer"], "additionalProperties": false,
-          "properties": {
-            "action": {"enum": ["preserve", "source-reset", "clear-children", "lifecycle-clean", "remove"]},
-            "layer": {"enum": ["central", "project"]}
+        "digests": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "const": null
+              },
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            ]
           }
-        }}
+        },
+        "objects": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "action",
+              "layer"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "action": {
+                "enum": [
+                  "preserve",
+                  "source-reset",
+                  "clear-children",
+                  "lifecycle-clean",
+                  "remove"
+                ]
+              },
+              "layer": {
+                "enum": [
+                  "central",
+                  "project"
+                ]
+              }
+            }
+          }
+        }
       }
     },
     "schema_version": {
-      "enum": [3, 4]
+      "enum": [
+        3,
+        4,
+        5
+      ]
     },
     "run_id": {
       "type": "string",
@@ -60,7 +101,7 @@
           "worktree_patch",
           "preservation"
         ],
-  "properties": {
+        "properties": {
           "action": {
             "enum": [
               "restore",
@@ -123,6 +164,9 @@
         "type": "string",
         "minLength": 1
       }
+    },
+    "native_clean": {
+      "type": "object"
     }
   }
 }

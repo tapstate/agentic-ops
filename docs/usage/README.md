@@ -4,7 +4,7 @@
 
 完成预检归[任务授权指引](task-authorization.md#完成预检与等待合并)说明：`next`、实际推进和释放共用判定，预检只读，实际变更重新核验；PR Ready 与合并完成分开。
 
-[配置化清理入口](task-authorization.md#配置化清理入口)负责 `station-clean.py` 的预检、放弃决定与恢复请求，并说明中央/项目名单和受控源码复位脚本；计划版本及归档后执行顺序以工位合同为准。
+[配置化清理入口](task-authorization.md#配置化清理入口)负责 `station-clean.py` 的预检、报告保全、一次范围确认、原生清理回执及恢复请求，并说明中央/项目名单和受控源码复位脚本；计划版本及归档后执行顺序以工位合同为准。
 
 任务退出的使用目标是保留关键材料并重置工位：[任务授权指引](task-authorization.md)说明目录生产前登记、一次确认、空未初始化子模块及工位 IDE 配置的保留边界和恢复入口，[工位合同](../architecture/single-task-station.md)维护唯一状态语义，[更新与回退](update-and-rollback.md)说明 epoch 变化时必须原版退出、purge 后再重建的边界。
 

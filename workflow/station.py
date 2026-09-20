@@ -524,7 +524,7 @@ def execute(base, kind, issue, run_id, revision, operation_id, request):
                 raise ValueError("未完成档案只能 clean；不能后置完成再复用 incomplete 档案释放")
         fresh = not previous or previous["operation_id"] != operation_id
         if fresh:
-            if request.get("cleanup_version") == 4 and kind == "clean" and request.get("abandon_changes") is not True:
+            if request.get("cleanup_version") in (4, 5) and kind == "clean" and request.get("abandon_changes") is not True:
                 raise ValueError("未完成任务需要明确放弃变更，未写入状态")
             if kind in ("archive", "clean", "release"):
                 _verify_cleanup_decision(base, task, request)
@@ -572,7 +572,17 @@ def execute(base, kind, issue, run_id, revision, operation_id, request):
                 raise ValueError("清理或释放必须明确确认当前精确 cleanup plan digest")
             operation["cleanup_plan"] = plan
             operations.save(base, operation)
-        modern = plan["schema_version"] == 4
+        modern = plan["schema_version"] in (4, 5)
+        if plan["schema_version"] == 5 and not task.get("archive_ref"):
+            from workflow import native_cleanup
+            pending = native_cleanup.pending(base, task, operation)
+            if pending:
+                operation.update(phase="awaiting_native_clean", native_problems=pending)
+                operations.save(base, operation)
+                return operation
+            # 原生命令结束后只核对同一已确认范围，不重新要求确认摘要。
+            if resources.plan(base, task, version=5)["digest"] != plan["digest"]:
+                raise ValueError("原生清理改变了源码或退出范围，需要重新确认")
         if modern:
             resources.verify_station_inventory(base, plan["rules"], allow_pending=True)
         reference = archives.publish(base, task, request, plan, operation, lambda: resources.plan(base, task, version=plan["schema_version"]))

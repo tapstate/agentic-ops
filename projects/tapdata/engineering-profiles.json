@@ -3,7 +3,7 @@
   "profiles": {
     "full-application": {
       "id": "full-application",
-      "revision": 2,
+      "revision": 3,
       "repositories": [
         "tapdata/tapdata",
         "tapdata/tapdata-common-lib",
@@ -22,7 +22,10 @@
         "target",
         "**/target",
         "node_modules",
-        "**/node_modules"
+        "**/node_modules",
+        "__pycache__",
+        "**/__pycache__",
+        ".pytest_cache"
       ],
       "archive_runtime": [
         "logs",
