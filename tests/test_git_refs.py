@@ -182,6 +182,24 @@ class GitRefsTests(unittest.TestCase):
                     git_refs.probe("fixture:remote", [head])
                 run.assert_not_called()
 
+    def test_snapshot_entries_validate_ttl_before_io(self):
+        for reader in (git_refs.snapshot, git_refs.read_snapshot):
+            for ttl in (True, False, -1, 1.5, "300", None):
+                with self.subTest(reader=reader.__name__, ttl=ttl), mock.patch.object(
+                        git_refs, "repository_identity") as identity, mock.patch.object(git_refs, "_read_cache") as read:
+                    with self.assertRaisesRegex(git_refs.GitRefsError, "非负整数"):
+                        reader("/repo", cache_file="/tmp/unused-cache", cache_root="/root", max_age_seconds=ttl)
+                    identity.assert_not_called()
+                    read.assert_not_called()
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(
+                git_refs, "repository_identity", side_effect=self.identity), mock.patch.object(
+                git_refs, "_query", return_value={"main": "a" * 40}):
+            cache = Path(temporary) / "cache.json"
+            git_refs.snapshot("/repo", cache_file=cache, cache_root="/root", now=100, max_age_seconds=0)
+            for moment, freshness in ((100, "cached"), (101, "stale")):
+                result = git_refs.read_snapshot("/repo", cache_file=cache, cache_root="/root", now=moment, max_age_seconds=0)
+                self.assertEqual(freshness, result["scopes"]["heads"]["freshness"])
+
     def test_read_snapshot_does_not_create_or_write_cache(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / "missing" / "cache.json"

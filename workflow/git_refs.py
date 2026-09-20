@@ -321,10 +321,16 @@ def _cached_result(record, requested, moment, max_age_seconds):
     return result
 
 
+def _validate_max_age(value):
+    if type(value) is not int or value < 0:
+        raise GitRefsError("max_age_seconds 必须是非负整数")
+
+
 def read_snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
                   max_age_seconds=300, now=None, repository_id=None, source_root=None,
                   cache_root=None):
     """严格只读地加载缓存；不会联网、加锁、创建目录或写回文件。"""
+    _validate_max_age(max_age_seconds)
     if cache_file is None:
         raise GitRefsError("只读缓存必须提供 cache_file")
     root = _cache_root(cache_root)
@@ -349,8 +355,7 @@ def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
     requested = tuple(dict.fromkeys(scopes))
     if not requested or not set(requested) <= SCOPES:
         raise GitRefsError("scopes 只支持 heads/tags")
-    if not isinstance(max_age_seconds, int) or max_age_seconds < 0:
-        raise GitRefsError("max_age_seconds 必须是非负整数")
+    _validate_max_age(max_age_seconds)
     moment = time.time() if now is None else now
     key, identity = repository_identity(repository, remote, repository_id, source_root)
     path = Path(repository).resolve()
