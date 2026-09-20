@@ -238,7 +238,8 @@ def interaction_path(base, issue_key, run_id, name, create=False):
     return path
 
 def station_project(base):
-    return json.loads((state_path(base) / "station.json").read_text())["project"]
+    from workflow import project_rules
+    return project_rules.project_from_station(base)
 
 def _write_json_atomic(path, document):
     path = Path(path)

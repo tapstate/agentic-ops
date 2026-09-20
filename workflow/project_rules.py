@@ -53,6 +53,13 @@ def _read_json(path):
         return json.load(fh)
 
 
+def validate_project_id(project):
+    """落实 station.schema.json 的项目标识合同，不把路径当作项目名。"""
+    if not isinstance(project, str) or not re.fullmatch(r"[a-z][a-z0-9-]*", project):
+        raise ValueError("项目 ID 必须以小写字母开头且只含小写字母、数字和连字符")
+    return project
+
+
 def project_from_station(station):
     path = Path(station).resolve() / ".agenticops" / "station.json"
     if not path.is_file():
@@ -61,7 +68,7 @@ def project_from_station(station):
     project = binding.get("project")
     if not isinstance(project, str) or not project:
         raise ValueError("工位绑定缺少 project")
-    return project
+    return validate_project_id(project)
 
 
 def product_root_from_station(station):
@@ -77,7 +84,10 @@ def product_root_from_station(station):
 
 
 def project_root(root=ROOT, project="tapdata"):
-    path = Path(root) / "projects" / project
+    projects = Path(root) / "projects"
+    path = projects / validate_project_id(project)
+    if path.is_symlink() or path.resolve().parent != projects.resolve():
+        raise ValueError("项目适配目录不能是链接或越出 projects：%s" % project)
     if not path.is_dir():
         raise ValueError("未安装项目适配：%s" % project)
     return path

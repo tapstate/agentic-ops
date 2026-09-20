@@ -74,6 +74,48 @@ def run_station_tool(product_root, *args, cwd):
     return proc.returncode, proc.stdout + proc.stderr
 
 
+def check_project_boundaries(base):
+    product = base / "project-boundary-product"
+    project = product / "projects/demo"
+    project.mkdir(parents=True)
+    station = base / "project-boundary-station"
+    binding = station / ".agenticops/station.json"
+    binding.parent.mkdir(parents=True)
+    for name in ("../policies", "/tmp", "demo/other", "Demo", "demo_name", "demo\\other", "demo\n", "", None):
+        binding.write_text(json.dumps({"project": name, "product_root": str(product)}))
+        for label, read in (
+            ("规则目录", lambda: project_rules.project_root(product, name)),
+            ("工位规则", lambda: project_rules.project_from_station(station)),
+            ("状态工位", lambda: task_store.station_project(station)),
+        ):
+            try:
+                read()
+            except ValueError:
+                rejected = True
+            else:
+                rejected = False
+            check("%s 拒绝非法项目 %r" % (label, name), rejected, True)
+    binding.write_text(json.dumps({"project": "demo", "product_root": str(product)}))
+    check("合法旧工位保留项目读取", task_store.station_project(station), "demo")
+    check("合法项目目录不变", project_rules.project_root(product, "demo"), project)
+    for name, target in (("alias", project), ("external", base)):
+        (product / "projects" / name).symlink_to(target, target_is_directory=True)
+        try:
+            project_rules.project_root(product, name)
+        except ValueError:
+            rejected = True
+        else:
+            rejected = False
+        check("项目目录拒绝链接 " + name, rejected, True)
+    render_station = base / "invalid-project-init"
+    result = subprocess.run([sys.executable, str(ROOT / "bootstrap/render.py"),
+                             "--install-home", str(ROOT), "--station", str(render_station),
+                             "--project", "/tmp", "--source-pool", str(base / "pool"), "--agent", "codex"],
+                            capture_output=True, text=True)
+    check("初始化拒绝路径型项目", result.returncode != 0 and "项目 ID" in result.stderr, True)
+    check("非法项目不生成工位绑定", (render_station / ".agenticops/station.json").exists(), False)
+
+
 def main():
     # 生命周期的资源安全、双工位、恢复与精确清理在独立同版测试覆盖；
     # 本文件保留通用 CLI、CI、证据脱敏和项目规则合同。
@@ -218,6 +260,7 @@ def main():
         check("仓库目录分支解析规则已结构化", repositories["branch_resolution"]["forbidden_sources"][0], "current_branch")
         admission = json.loads((ROOT / "projects/tapdata/admission.json").read_text(encoding="utf-8"))
         check("admission 覆盖三类任务", sorted(admission["task_classes"]), ["defect_fix", "feature_change", "technical_task"])
+        check_project_boundaries(ws)
 
     finally:
         shutil.rmtree(ws, ignore_errors=True)
