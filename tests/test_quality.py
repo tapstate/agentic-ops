@@ -1176,6 +1176,45 @@ class QualityTests(unittest.TestCase):
                 self.assertEqual("matched", engine.jira_status_intent(directory, "1"))
                 self.assertEqual("matched", engine.jira_watermark_intent(directory, "TAP-123", "customfield_1", "digest"))
 
+    def test_gate_intents_fail_closed_on_unreadable_or_corrupt_events(self):
+        engine = authorization.engine
+        directory = self.base / "invalid-intent-fixture"
+        records = directory / "evidence"
+        records.mkdir(parents=True)
+        current = {"run_id": "fixture-run", "issue_key": "TAP-123"}
+        (records / "jira-status-fixture.json").write_text(json.dumps({"run_id": "fixture-run",
+            "attempts": {"a": {"outcome": "ready", "transition_id": "1"}}}))
+        watermark = {"outcome": "ready", "issue_key": "TAP-123", "version": "v1", "issue_type_id": "1",
+            "source_ref": "fixture", "logical_key": "agenticops_version", "write_mode": "overwrite",
+            "field_id": "customfield_1", "payload_digest": "digest",
+            "native_request": {"issue_key": "TAP-123", "fields": {"customfield_1": "v1"}}}
+        (records / "jira-watermark-fixture.json").write_text(json.dumps({"run_id": "fixture-run", "watermark": watermark}))
+        path = records / "events.jsonl"
+        def check(expected):
+            with mock.patch.object(engine, "current_task", return_value=current):
+                self.assertEqual(expected, engine.jira_status_intent(directory, "1"))
+                self.assertEqual(expected, engine.jira_watermark_intent(directory, "TAP-123", "customfield_1", "digest"))
+        check("matched")
+        for raw in (b'{bad\n', b'null\n', b'[]\n', b'1\n', b'true\n', b'"event"\n', b'{}\n\xff'):
+            with self.subTest(raw=raw):
+                path.write_bytes(raw)
+                check("missing")
+                self.assertEqual(raw, path.read_bytes())
+        path.write_bytes(b'{"reason_code":"jira_status_intent_covered","agentic_run_id":"fixture-run","jira_transition_id":"1"}\nnull\n')
+        check("missing")
+        path.write_bytes(b'\r\n{}\r\n')
+        check("matched")
+        original_open = Path.open
+        def guarded_open(target, *args, **kwargs):
+            if target == path:
+                raise PermissionError("fixture")
+            return original_open(target, *args, **kwargs)
+        with mock.patch.object(Path, "open", guarded_open):
+            check("missing")
+        path.unlink()
+        path.mkdir()
+        check("missing")
+
     def test_evidence_jsonl_preserves_unicode_separators_inside_strings(self):
         path = task_store.events_path(self.base, "TAP-123")
         events = [{"decision": "allow", "note": "a" + chr(code) + "b"}
