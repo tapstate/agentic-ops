@@ -88,6 +88,7 @@ for file in \
   projects/tapdata/skills/tapdata-task/SKILL.md \
   projects/tapdata/skills/tapdata-wiki/SKILL.md projects/tapdata/skills/tapdata-ci-test/SKILL.md bootstrap/shared-repositories.json bootstrap/shared_repositories.py \
   skills/ao-test-takeover/SKILL.md skills/ao-ws-init/SKILL.md \
+  skills/ao-review-change/SKILL.md skills/ao-review-change/scripts/review-context.py \
   adapters/station/AGENTS.md adapters/station/agenticops adapters/agents/claude/templates/CLAUDE.md \
   adapters/runtime.py adapters/tools/classifier.py adapters/tools/git_push_syntax.py \
   adapters/tools/shell_classifier.py \

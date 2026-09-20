@@ -32,7 +32,7 @@ TapData 集成测试协作由 [tapdata-ci-test](../projects/tapdata/skills/tapda
 
 TapData 活动仓库以 repositories.json 为准；docs/docs-en 已解除，t-layer3-test 保留为可选验证依赖。新版本不保留旧清理身份映射，旧现场由原版本处理，不删除已有源码、Git refs 或材料。
 
-维护 Agent 的协作优化由[维护指引](maintenance-guide.md)说明模型依据、平台能力边界与验证方式，[Skill 维护规范](skill-maintenance.md)负责指令审查标准，根 `AGENTS.md` 保存日常协作约定，`skills/` 保存初始化与接管测试的具体指引。目标是在已有授权内持续完成工作，减少重复确认和重复验证；不改变产品门禁、授权或工位状态契约。
+维护 Agent 的协作优化由[维护指引](maintenance-guide.md)说明模型依据、平台能力边界与验证方式，[Skill 维护规范](skill-maintenance.md)负责指令审查标准，根 `AGENTS.md` 保存日常协作约定，`skills/` 保存初始化、接管测试和[变更审查](../skills/ao-review-change/SKILL.md)的具体指引。变更审查 Skill 只整理现有 Story Gate 材料并指导检查，验收、批准和授权仍由原有机制负责。目标是在已有授权内持续完成工作，减少重复确认和重复验证；不改变产品门禁、授权或工位状态契约。
 
 TapData 的测试缺口分析、Java 影响范围和 Maven 模块测试属于项目构建与验证适配：[构建、测试与本地运行](../projects/tapdata/runbooks/build-test-and-local-run.md)说明用例判断依据、框架缺口处置、有效 Maven 模型的采集、跨仓消费关系、原生 Maven 执行清单、依赖 Jar 及报告核验的使用边界；项目脚本只准备清单和分析证据，不执行测试或改变任务阶段。项目任务 Skill 引导 Agent 在已有验收方案内自主分析，不替代共同质量检查点。
 

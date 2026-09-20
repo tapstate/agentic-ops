@@ -100,7 +100,7 @@ test "$(python3 "$maintainer_root/bootstrap/product_version.py" --product-root "
 test -x "$(git -C "$maintainer_root" config --get core.hooksPath)/pre-commit"
 test -f "$maintainer_root/.local/maintenance-skill-wiring.json"
 for agent_skill_root in .agents/skills .claude/skills; do
-  for maintenance_skill in ao-test-takeover ao-ws-init; do
+  for maintenance_skill in ao-test-takeover ao-ws-init ao-review-change; do
     skill_link="$maintainer_root/$agent_skill_root/$maintenance_skill"
     test -L "$skill_link"
     test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$skill_link")" = \
@@ -230,6 +230,8 @@ test -f "$install_root/workflow/repair_strategy.py"
 test -x "$install_root/agenticops"
 test -f "$maintainer_root/skills/ao-test-takeover/SKILL.md"
 test -f "$maintainer_root/skills/ao-ws-init/SKILL.md"
+test -f "$maintainer_root/skills/ao-review-change/SKILL.md"
+test ! -e "$install_root/skills/ao-review-change"
 test ! -e "$install_root/skills/ao-test-takeover"
 test ! -e "$install_root/skills/ao-ws-init"
 test ! -e "$install_root/.local/maintenance-skill-wiring.json"
@@ -424,6 +426,8 @@ test -L "$station/.agents/skills/tapdata-task"
 test -L "$station/.claude/skills/tapdata-task"
 test ! -e "$station/.agents/skills/ao-test-takeover"
 test ! -e "$station/.claude/skills/ao-test-takeover"
+test ! -e "$station/.agents/skills/ao-review-change"
+test ! -e "$station/.claude/skills/ao-review-change"
 test ! -e "$station/.agents/skills/ao-ws-init"
 test ! -e "$station/.claude/skills/ao-ws-init"
 "$install_root/agenticops" station list | grep -F -- "$station" >/dev/null

@@ -44,6 +44,7 @@ run_general_suite() {
     -s "$repo_root/projects/tapdata/tests" -p 'test_maven*.py'
   run_internal -m unittest discover -s "$repo_root/internal/tests" -p 'test_story_gate.py' -v
   run_internal -m unittest internal.tests.test_test_selection -v
+  run_internal -m unittest internal.tests.test_review_context -v
   run_internal -m unittest internal.tests.test_verification -v
 }
 
