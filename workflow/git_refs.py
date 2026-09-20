@@ -98,9 +98,9 @@ def _read_cache(path):
         return _empty_cache()
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise GitRefsError("Git refs 缓存损坏：%s" % error) from error
-    if document.get("schema_version") != 2 or not isinstance(document.get("roots"), dict):
+    if not isinstance(document, dict) or document.get("schema_version") != 2 or not isinstance(document.get("roots"), dict):
         raise GitRefsError("Git refs 缓存 schema 不兼容；请使用或重建 schema_version=2 的缓存文件")
     return document
 
@@ -113,15 +113,28 @@ def _cache_root(value):
 
 def _root_repositories(document, cache_root, create=False):
     roots = document["roots"]
-    root = roots.get(cache_root)
-    if root is None:
+    if cache_root not in roots:
         if not create:
             return {}
-        root = {"repositories": {}}
-        roots[cache_root] = root
+        roots[cache_root] = {"repositories": {}}
+    root = roots[cache_root]
     if not isinstance(root, dict) or not isinstance(root.get("repositories"), dict):
         raise GitRefsError("Git refs 缓存根目录分区无效")
     return root["repositories"]
+
+
+def _cache_record(repositories, key):
+    """只校验本次读取的仓库，不将损坏记录静默替换为空快照。"""
+    if key not in repositories:
+        return None
+    record = repositories[key]
+    if (not isinstance(record, dict) or not isinstance(record.get("identity"), dict)
+            or not isinstance(record.get("scopes"), dict)):
+        raise GitRefsError("Git refs 缓存仓库记录无效")
+    for entry in record["scopes"].values():
+        if not isinstance(entry, dict) or not isinstance(entry.get("refs"), dict):
+            raise GitRefsError("Git refs 缓存查询范围记录无效")
+    return record
 
 
 def _write_cache(path, document):
@@ -300,7 +313,7 @@ def read_snapshot(repository, remote="origin", scopes=("heads",), cache_file=Non
     moment = time.time() if now is None else now
     key, identity = repository_identity(repository, remote, repository_id, source_root)
     document = _read_cache(Path(cache_file).resolve())
-    record = _root_repositories(document, root).get(key)
+    record = _cache_record(_root_repositories(document, root), key)
     if record is None or record.get("identity") != identity:
         record = {"identity": identity, "scopes": {}}
     return _cached_result(record, requested, moment, max_age_seconds)
@@ -325,8 +338,8 @@ def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
 
     def collect(document):
         repositories = _root_repositories(document, root, create=True)
-        record = repositories.setdefault(key, {"identity": identity, "scopes": {}, "last_attempt": None})
-        if record.get("identity") != identity:
+        record = _cache_record(repositories, key)
+        if record is None or record.get("identity") != identity:
             record = {"identity": identity, "scopes": {}, "last_attempt": None}
             repositories[key] = record
         result = {"identity": identity, "scopes": {}, "network_used": False}
@@ -334,6 +347,8 @@ def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
             previous = record["scopes"].get(scope, {})
             should_refresh = refresh == "always" or (refresh == "auto" and not _fresh(previous, moment, max_age_seconds))
             if should_refresh:
+                # 此标志表示已尝试远端查询，不等价于查询成功。
+                result["network_used"] = True
                 try:
                     refs = _query(path, remote, scope)
                 except GitRefsError as error:
@@ -350,7 +365,6 @@ def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
                              json.dumps(refs, sort_keys=True).encode("utf-8")).hexdigest()}
                 record["scopes"][scope] = entry
                 result["scopes"][scope] = dict(entry, freshness="refreshed")
-                result["network_used"] = True
             else:
                 freshness = "cached" if _fresh(previous, moment, max_age_seconds) else "stale"
                 result["scopes"][scope] = {
@@ -367,7 +381,7 @@ def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
     # TTL 内的自动命中是纯读操作：不创建锁、不改目录、不重写缓存。
     if refresh == "auto":
         document = _read_cache(cache_path)
-        existing = _root_repositories(document, root).get(key)
+        existing = _cache_record(_root_repositories(document, root), key)
         if existing is not None and existing.get("identity") == identity and all(
             _fresh(existing.get("scopes", {}).get(scope, {}), moment, max_age_seconds)
             for scope in requested

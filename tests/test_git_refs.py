@@ -45,9 +45,57 @@ class GitRefsTests(unittest.TestCase):
                     mock.patch.object(git_refs, "_query", side_effect=git_refs.GitRefsError("network")):
                 result = git_refs.snapshot("/repo", cache_file=cache, cache_root="/root", now=500)
             self.assertEqual("refresh_failed", result["scopes"]["heads"]["freshness"])
+            self.assertTrue(result["network_used"])
             self.assertEqual("a" * 40, result["scopes"]["heads"]["refs"]["main"])
             document = json.loads(cache.read_text(encoding="utf-8"))
             self.assertEqual(100, document["roots"]["/root"]["repositories"]["key"]["scopes"]["heads"]["last_success_epoch"])
+
+    def test_first_failed_refresh_reports_attempt_without_inventing_success(self):
+        with mock.patch.object(git_refs, "repository_identity", side_effect=self.identity), \
+                mock.patch.object(git_refs, "_query", side_effect=git_refs.GitRefsError("offline")):
+            result = git_refs.snapshot("/repo")
+        self.assertTrue(result["network_used"])
+        self.assertEqual(result["scopes"]["heads"]["refs"], {})
+        self.assertIsNone(result["scopes"]["heads"]["last_success_at"])
+        self.assertEqual(result["scopes"]["heads"]["freshness"], "refresh_failed")
+
+    def test_corrupt_cache_is_diagnostic_and_never_overwritten(self):
+        identity = self.identity("/repo", "origin")[1]
+        records = [None, [], {}, {"identity": identity, "scopes": None},
+                   {"identity": identity, "scopes": {"heads": None}},
+                   {"identity": identity, "scopes": {"heads": {"refs": []}}}]
+        documents = [None, [], 1, {"schema_version": 2, "roots": None},
+                     {"schema_version": 2, "roots": {"/root": None}}]
+        documents += [{"schema_version": 2, "roots": {"/root": {"repositories": {"key": record}}}}
+                      for record in records]
+        inputs = [json.dumps(value).encode() for value in documents] + [b"{broken", b"\xff"]
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / "cache.json"
+            for raw in inputs:
+                for mode in ("read", "auto", "always"):
+                    with self.subTest(raw=raw, mode=mode), \
+                            mock.patch.object(git_refs, "repository_identity", side_effect=self.identity), \
+                            mock.patch.object(git_refs, "_query") as query:
+                        cache.write_bytes(raw)
+                        with self.assertRaisesRegex(git_refs.GitRefsError, "缓存"):
+                            if mode == "read":
+                                git_refs.read_snapshot("/repo", cache_file=cache, cache_root="/root")
+                            else:
+                                git_refs.snapshot("/repo", cache_file=cache, cache_root="/root", refresh=mode)
+                        self.assertEqual(cache.read_bytes(), raw)
+                        query.assert_not_called()
+
+    def test_unrelated_corrupt_partition_does_not_block_current_repository(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / "cache.json"
+            cache.write_text(json.dumps({"schema_version": 2, "roots": {"/other": None}}))
+            before = cache.read_bytes()
+            with mock.patch.object(git_refs, "repository_identity", side_effect=self.identity), \
+                    mock.patch.object(git_refs, "_query") as query:
+                result = git_refs.read_snapshot("/repo", cache_file=cache, cache_root="/root")
+            self.assertFalse(result["network_used"])
+            self.assertEqual(cache.read_bytes(), before)
+            query.assert_not_called()
 
     def test_repository_identity_change_does_not_reuse_cache(self):
         with tempfile.TemporaryDirectory() as temporary:
