@@ -16,7 +16,7 @@ from workflow import station_source as source, station_resources as resources, s
 
 def configuration(base):
     root = project_rules.product_root_from_station(base)
-    path = root / 'projects' / task_store.station_project(base) / 'repo-cleanup.json'
+    path = project_rules.project_root(root, task_store.station_project(base)) / 'repo-cleanup.json'
     if path.is_symlink():
         raise ValueError('清理配方不能为链接')
     raw = path.read_bytes()
@@ -34,6 +34,7 @@ def sha(path):
 
 def commands(base, task, name, recipe, paths):
     root = project_rules.product_root_from_station(base)
+    project = project_rules.project_root(root, task_store.station_project(base))
     repository = source.repository_path(base, name)
     kind = recipe['kind']
     if kind == 'maven':
@@ -51,9 +52,11 @@ def commands(base, task, name, recipe, paths):
         inputs = {'package.json': sha(package)}
         argv = [manager, 'run', 'clean']
     elif kind == 'project-script':
-        script = root / 'projects' / task_store.station_project(base) / recipe['script']
-        if script.parent != root / 'projects' / task_store.station_project(base) / 'scripts':
-            raise ValueError('项目清理脚本越界')
+        script_directory = project / 'scripts'
+        script = project / recipe['script']
+        if (script.parent != script_directory or script_directory.is_symlink()
+                or script.resolve().parent != script_directory.resolve()):
+            raise ValueError('项目清理脚本越界或父目录为链接')
         inputs = {str(script): sha(script)}
         argv = ['python3', str(script), '--repository', str(repository)]
     else:

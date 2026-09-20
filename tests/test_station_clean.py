@@ -1,5 +1,6 @@
 """名单判定及版本 4 清理真实闭环；不执行构建工具。"""
 import io
+import hashlib
 import json
 import sys
 import unittest
@@ -20,6 +21,45 @@ class StationCleanTests(unittest.TestCase):
     takeover = fixture.ResourceTests.takeover
     ready = fixture.ResourceTests.ready
     execute = fixture.ResourceTests.execute
+
+    def test_native_project_script_keeps_original_command_and_digest(self):
+        from workflow import native_cleanup
+        recipe = {"kind": "project-script", "script": "scripts/clean-t-layer3-test.py", "source_ref": "fixture"}
+        script = (self.product / "projects/tapdata" / recipe["script"]).resolve()
+        paths = ["source/tapdata/t-layer3-test/target"]
+        command = native_cleanup.commands(self.ws, {}, "tapdata/t-layer3-test", recipe, paths)
+        self.assertEqual(command, {"cwd": "source/tapdata/t-layer3-test",
+            "argv": ["python3", str(script), "--repository", str((self.ws / "source/tapdata/t-layer3-test").resolve())],
+            "inputs": {str(script): hashlib.sha256(script.read_bytes()).hexdigest()},
+            "paths": paths, "source_ref": "fixture"})
+
+    def test_native_project_script_rejects_parent_and_file_links(self):
+        from workflow import native_cleanup
+        project = self.product / "projects/tapdata"
+        scripts = project / "scripts"
+        saved = project / "scripts-original"
+        scripts.rename(saved)
+        scripts.symlink_to(saved, target_is_directory=True)
+        recipe = {"kind": "project-script", "script": "scripts/clean-t-layer3-test.py", "source_ref": "fixture"}
+        with self.assertRaisesRegex(ValueError, "父目录为链接"):
+            native_cleanup.commands(self.ws, {}, "tapdata/t-layer3-test", recipe, [])
+        scripts.unlink(); saved.rename(scripts)
+        script = scripts / "clean-t-layer3-test.py"
+        original = scripts / "original.py"
+        script.rename(original); script.symlink_to(original)
+        with self.assertRaisesRegex(ValueError, "不是普通文件"):
+            native_cleanup.commands(self.ws, {}, "tapdata/t-layer3-test", recipe, [])
+
+    def test_native_cleanup_rejects_linked_project_before_reading_recipe(self):
+        from workflow import native_cleanup
+        project = self.product / "projects/tapdata"
+        target = self.product / "relocated-project"
+        project.rename(target); project.symlink_to(target, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "项目适配目录"):
+            native_cleanup.configuration(self.ws)
+        with self.assertRaisesRegex(ValueError, "项目适配目录"):
+            native_cleanup.commands(self.ws, {}, "tapdata/t-layer3-test",
+                {"kind": "project-script", "script": "scripts/clean-t-layer3-test.py", "source_ref": "fixture"}, [])
 
     def cleanup_request(self, task):
         return dict(summary='清理测试', reason='用户确认停止', decision_ref='fixture:user',
