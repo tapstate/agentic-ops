@@ -448,6 +448,12 @@ class StoryGateService:
                 if evidence is not None
                 else ("not_required" if not impact.has_impact else "not_run")
             ),
+            "acceptance_evidence": ({
+                "run_id": evidence["run_id"],
+                "checks": [{key: check[key] for key in
+                            ("check_id", "passed", "exit_code", "duration_seconds") if key in check}
+                           for check in evidence["checks"]],
+            } if evidence is not None else None),
             "approval_ready": approval_ready,
             "confirmation_required": approval_ready and not approved,
             "review_report": report,

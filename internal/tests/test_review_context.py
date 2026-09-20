@@ -44,6 +44,18 @@ class ReviewContextTests(unittest.TestCase):
         self.assertNotIn("change_points", result)
         self.assertEqual(before, {str(p): p.read_bytes() for p in self.root.rglob('*') if p.is_file()})
 
+    def test_acceptance_summary_is_preserved_without_inventing_approval(self):
+        evidence = {"run_id": "a" * 32, "checks": [{"check_id": "python_runtime", "passed": True,
+                    "exit_code": 0, "duration_seconds": 2.5}]}
+        for value, status in ((evidence, "passed"), (None, "not_run")):
+            with self.subTest(status=status):
+                self.gate({"ok": True, "acceptance_status": status, "acceptance_evidence": value, "approved": False})
+                result, code = review_context.collect(self.root, "staged")
+                self.assertEqual(code, 0)
+                self.assertEqual(value, result["acceptance_evidence"])
+                self.assertEqual(status, result["acceptance_status"])
+                self.assertFalse(result["approved"])
+
     def test_original_failure_and_handoff_are_preserved(self):
         self.gate({"ok": False, "code": "story_mapping_missing", "message": "缺少映射",
                    "required_human_action": "补齐映射", "unmapped_paths": ["new.py"]}, 3)

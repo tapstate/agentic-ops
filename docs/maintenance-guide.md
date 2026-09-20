@@ -110,6 +110,8 @@ internal/acceptance.sh runtime install
 internal/acceptance.sh --list
 ```
 
+维护审查可使用 `python3 skills/ao-review-change/scripts/review-context.py --change-source staged` 读取精确候选摘要。`acceptance_evidence` 在 Story Gate 已核验匹配证据时返回 `run_id` 和四项检查结果，便于记录 Jira 验收引用；没有有效证据时为 null。它不读取原始日志，不签发批准，也不替代代码审查。
+
 诊断日志写入 `.local/acceptance/<run-id>/`；正式日志写入 `.local/story-gate/runs/<impact-id>/<run-id>/`，最新自包含摘要位于 `.local/story-gate/evidence/`。同一精确候选从暂存到 commit/range、推送可以消费匹配证据；基线、完整树、变更范围或行为相关环境变化则重验。显式再次调用 verify 始终重新执行，不做跨候选缓存。重验开始即使旧通过和审批失效，失败、取消、超时保留本次非通过记录。机器崩溃残留锁需人工确认没有在途进程后处理，不自动抢锁。
 
 检查上限分别为 Runtime 600 秒、Resources 120 秒、Install 600 秒、Release 300 秒；超时回收检查进程组，不用提高等待上限冒充性能优化。生命周期测试保留完整九仓端到端和双仓隔离，其余使用独立最小临时工程，输出逐用例耗时；正式记录同时给出每组耗时。性能调优使用同机同配置三次中位数，不把时间阈值作为普通 CI 硬门禁。

@@ -11,7 +11,7 @@ FIELDS = (
     "change_source", "changed_paths", "impacted_story_ids", "unmapped_paths",
     "impact_id", "current_branch", "target_branch", "comparison_base",
     "candidate_tree", "change_fingerprint", "commit_sha", "pr_url", "pr_head_sha",
-    "acceptance_checks", "acceptance_status", "approved", "approval_ready",
+    "acceptance_checks", "acceptance_status", "acceptance_evidence", "approved", "approval_ready",
     "confirmation_required", "review_channel", "review_report_digest",
 )
 

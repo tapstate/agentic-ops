@@ -54,6 +54,23 @@ class VerificationTests(unittest.TestCase):
             self.assertEqual(story.acceptance_checks, FULL_ACCEPTANCE_CHECKS)
         self.assertEqual(_check_command(root, 'product_install_boundary'), [str(root / 'tests/test_install.sh')])
 
+    def test_inspection_exposes_only_matching_acceptance_summary(self):
+        self.assertIsNone(self.service.inspect('staged')['acceptance_evidence'])
+        result, _ = self.verify()
+        path, original = self.record(result)
+        summary = self.service.inspect('staged')['acceptance_evidence']
+        self.assertEqual(original['run_id'], summary['run_id'])
+        self.assertEqual(list(FULL_ACCEPTANCE_CHECKS), [row['check_id'] for row in summary['checks']])
+        for row, check in zip(summary['checks'], original['checks']):
+            self.assertEqual({key: check[key] for key in ('check_id', 'passed', 'exit_code', 'duration_seconds')}, row)
+        self.assertNotIn('environment', summary)
+        broken = dict(original, run_id='invalid')
+        path.write_text(json.dumps(broken))
+        self.assertIsNone(self.service.inspect('staged')['acceptance_evidence'])
+        path.write_text(json.dumps(original))
+        self.stage(self.root, 'gate/engine.py', 'VALUE = 2\n')
+        self.assertIsNone(self.service.inspect('staged')['acceptance_evidence'])
+
     def test_trust_root_upgrade_pr_branch_is_unambiguous(self):
         root = Path(__file__).resolve().parents[2]
         for prefix in ('codex', 'feature', 'fix'):

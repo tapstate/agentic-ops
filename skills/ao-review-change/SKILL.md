@@ -14,7 +14,7 @@ python3 skills/ao-review-change/scripts/review-context.py --change-source staged
 python3 skills/ao-review-change/scripts/review-context.py --change-source range --base <base> --head <head>
 ```
 
-未暂存的开发审查可选 `--change-source worktree`，它不产生正式验收证据。脚本只摘要现有 Story Gate 的结果，保留候选标识、错误、缺失验收、确认事项和风险；非零退出先处理对应问题。需完整报告时直接调用 `internal/bin/story-gate impact` 并传相同参数。摘要不是代码审查通过、提交许可或推送授权。
+未暂存的开发审查可选 `--change-source worktree`，它不产生正式验收证据。脚本只摘要现有 Story Gate 的结果，保留候选标识、错误、缺失验收、确认事项和风险；非零退出先处理对应问题。需完整报告时直接调用 `internal/bin/story-gate impact` 并传相同参数。`acceptance_evidence` 仅在 Story Gate 核验当前候选的验收证据有效时提供运行编号和四项结果，可据此回写 Jira；为 null 时不能从旧日志补出通过结论。摘要不是代码审查通过、提交许可或推送授权。
 
 结合实际 diff 逐项核对规则归属、调用方、失败与恢复路径、配置兼容性和验证覆盖。测试通过不能代替设计审查；发现问题时指出触发条件、影响和可实施修复。候选变化后重新读取材料，旧结论只适用于旧候选。没有新修改、失败或未解决风险时，不重复已经通过的检查。
 
