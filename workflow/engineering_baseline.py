@@ -14,11 +14,10 @@ import stat
 import subprocess
 from pathlib import Path
 
-from workflow.project_rules import canonical_repository_endpoint
+from workflow.project_rules import canonical_repository_endpoint, repository_id
 from workflow.git_environment import git_environment
 
 
-REPOSITORY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 SHA = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 
 
@@ -34,12 +33,6 @@ def text(value, field):
         raise ValueError("%s 必须是非空且无首尾空白的字符串" % field)
     if any(ord(character) < 32 for character in value):
         raise ValueError("%s 包含控制字符" % field)
-    return value
-
-
-def repository_id(value):
-    if not isinstance(value, str) or not REPOSITORY.fullmatch(value):
-        raise ValueError("repository_id 必须是安全的 owner/repo")
     return value
 
 

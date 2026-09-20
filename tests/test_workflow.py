@@ -210,6 +210,33 @@ def check_project_json_objects(base):
     check("CLI 缺文件不泄漏栈", "Traceback" not in out, True)
 
 
+def check_catalog_repository_ids(base):
+    product = base / "catalog-id-product"
+    project = product / "projects/demo"
+    project.mkdir(parents=True)
+    (project / "profile.json").write_text((ROOT / "projects/tapdata/profile.json").read_text())
+    path = project / "repositories.json"
+    entry = {"origin": "https://example.org/org/repo.git", "baseline_branch": "main", "dev_branch": "develop"}
+    for group in ("repositories", "retired_repositories"):
+        for name in ("org/bad name", "org/-bad", "org/a\\b", "org/.hidden", "../repo", "org/repo\n", "org/仓库"):
+            catalog = {"schema_version": 1, "repositories": {}}
+            catalog[group] = {name: entry if group == "repositories" else {"origin": entry["origin"]}}
+            path.write_text(json.dumps(catalog))
+            try:
+                project_rules.load_profile(product, "demo")
+            except ValueError as error:
+                rejected = "owner/repo" in str(error)
+            else:
+                rejected = False
+            check("仓库标识拒绝 " + group + repr(name), rejected, True)
+        for name in ("Org1/Repo_2.x-y", "a/b"):
+            catalog = {"schema_version": 1, "repositories": {}}
+            catalog[group] = {name: entry if group == "repositories" else {"origin": entry["origin"]}}
+            path.write_text(json.dumps(catalog))
+            check("仓库标识保留 " + group + name,
+                  name in project_rules.load_profile(product, "demo")["repositories"][group], True)
+
+
 def check_catalog_reference(base):
     product = base / "catalog-reference-product"
     project = product / "projects/demo"
@@ -526,6 +553,7 @@ def main():
         check_project_json_objects(ws)
         check_station_binding_snapshot(ws)
         check_catalog_reference(ws)
+        check_catalog_repository_ids(ws)
         check_admission_documents(ws)
 
     finally:

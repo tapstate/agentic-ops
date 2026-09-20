@@ -23,6 +23,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def repository_id(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*", value):
+        raise ValueError("repository_id 必须是安全的 owner/repo")
+    return value
+
+
 def canonical_repository_endpoint(value):
     """把 Project catalog origin 规范化为保留 host 身份的稳定 endpoint。"""
     text = (value or "").strip().rstrip("/")
@@ -184,9 +190,7 @@ def load_profile(root=ROOT, project=None, station=None):
     if catalog.get("schema_version") != 1 or not isinstance(catalog.get("repositories"), dict):
         raise ValueError("项目仓库目录结构无效：%s" % catalog_path)
     for repository, entry in catalog["repositories"].items():
-        parts = repository.split("/") if isinstance(repository, str) else []
-        if len(parts) != 2 or any(part in ("", ".", "..") for part in parts):
-            raise ValueError("项目仓库目录存在无效 owner/repo：%s" % repository)
+        repository_id(repository)
         if not isinstance(entry, dict) or not all(
             isinstance(entry.get(key), str) and entry.get(key)
             for key in ("origin", "baseline_branch", "dev_branch")
@@ -196,10 +200,8 @@ def load_profile(root=ROOT, project=None, station=None):
     if not isinstance(retired, dict) or set(retired) & set(catalog["repositories"]):
         raise ValueError("退役仓库必须与活动仓库分开登记")
     for repository, entry in retired.items():
-        if (not isinstance(repository, str)
-                or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
-                or any(part in (".", "..") for part in repository.split("/"))
-                or not isinstance(entry, dict) or set(entry) != {"origin"}
+        repository_id(repository)
+        if (not isinstance(entry, dict) or set(entry) != {"origin"}
                 or not isinstance(entry["origin"], str) or not entry["origin"].strip()):
             raise ValueError("退役仓库清理身份无效：%s" % repository)
     profile["repositories"] = catalog
