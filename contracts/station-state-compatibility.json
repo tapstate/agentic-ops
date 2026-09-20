@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "minimum_updater_protocol_version": 2,
-  "station_state_epoch": 14,
-  "legacy_station_state_epoch": 14,
+  "station_state_epoch": 15,
+  "legacy_station_state_epoch": 15,
   "supported_station_state_epochs": [
-    14
+    15
   ]
 }

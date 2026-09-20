@@ -109,6 +109,25 @@ class StationCompatibilityTests(unittest.TestCase):
                 self.fail("旧工位不能进入原生清理写入区")
         self.assertEqual(before, path.read_bytes())
 
+    def test_fingerprint_epoch_rejects_old_state_and_bound_upgrade_or_rollback(self):
+        current = json.loads((ROOT / "contracts/station-state-compatibility.json").read_text())
+        self.assertEqual(15, current["station_state_epoch"])
+        (self.product_root / "contracts/station-state-compatibility.json").write_text(json.dumps(current))
+        path = self.station / ".agenticops/init.json"
+        path.write_text(json.dumps({"station_state_epoch": 14}))
+        record = self.station / ".agenticops/recovery-fixture.json"
+        record.write_text('{"fingerprint":"old-unframed-dirty-digest"}')
+        before = {p: p.read_bytes() for p in (path, record)}
+        with self.assertRaises(ValueError):
+            with task_store.task_state_lock(self.station):
+                self.fail("旧指纹工位不能进入新版本写入区")
+        self.write_registry([str(self.station)])
+        for operation, epochs in (("update", (14, 15)), ("rollback", (15, 14))):
+            with mock.patch.object(compatibility, "manifest_at_ref", side_effect=[manifest(e) for e in epochs]):
+                with self.assertRaisesRegex(ValueError, "仍有绑定工位"):
+                    compatibility.check_upgrade(self.product_root, "old", "new", operation=operation)
+        self.assertEqual(before, {p: p.read_bytes() for p in (path, record)})
+
     def test_all_pre_recovery_epochs_are_rejected_by_current_product(self):
         current_manifest = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current_manifest))

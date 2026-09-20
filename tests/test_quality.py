@@ -912,6 +912,65 @@ class QualityTests(unittest.TestCase):
         model = quality.replay(state)
         self.assertEqual(model["items"]["case-a"]["executions"][0]["target_revision"], revision)
 
+    def test_worktree_fingerprint_frames_untracked_names_content_and_type(self):
+        repo = self.base / "fingerprint-repo"
+        repo.mkdir()
+        def git(*args):
+            return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True).stdout.decode().strip()
+        git("init", "-q")
+        git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "fixture", "--allow-empty")
+        head = git("rev-parse", "HEAD")
+        self.assertEqual(head, quality.git_revision(repo))
+        first = repo / "a"
+        first.write_bytes(b"bc")
+        first.chmod(0o644)
+        original = quality.git_revision(repo)
+        self.assertEqual(original, quality.git_revision(repo))
+        first.unlink()
+        second = repo / "ab"
+        second.write_bytes(b"c")
+        second.chmod(0o644)
+        self.assertNotEqual(original, quality.git_revision(repo))
+        second.unlink()
+        first.write_bytes(b"bc")
+        first.chmod(0o644)
+        self.assertEqual(original, quality.git_revision(repo))
+        first.chmod(0o755)
+        self.assertNotEqual(original, quality.git_revision(repo))
+        first.unlink()
+        first.symlink_to("bc")
+        self.assertNotEqual(original, quality.git_revision(repo))
+        first.unlink()
+        os.symlink(b"target-\xff", os.fsencode(first))
+        self.assertTrue(quality.exact_worktree(quality.git_revision(repo)))
+        first.unlink()
+        self.assertEqual(head, quality.git_revision(repo))
+        first.write_bytes(b"tracked")
+        git("add", "a")
+        git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "tracked")
+        clean = quality.git_revision(repo)
+        first.write_bytes(b"changed")
+        self.assertNotEqual(clean, quality.git_revision(repo))
+
+    def test_renamed_untracked_content_invalidates_quality_decision(self):
+        self.task["repositories"] = self.task["repositories"][:1]
+        repo = self.base / "source/tapdata/tapdata"
+        repo.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.test",
+                        "commit", "-qm", "fixture", "--allow-empty"], check=True)
+        (repo / "a").write_bytes(b"bc")
+        revision = quality.git_revision(repo)
+        self.task["repositories"][0]["worktree"] = {"status": "prepared", "path": str(repo)}
+        self.save_task()
+        plan = self.plan(method="unit", checkpoint="q3-draft")
+        self.apply("item", {"plan": dict(plan, target_revision=revision), "reason": "绑定未提交代码"})
+        self.select(); self.execute(); self.decide()
+        self.assertTrue(self.view()["items"]["case-a"]["decision_valid"])
+        (repo / "a").unlink()
+        (repo / "ab").write_bytes(b"c")
+        self.assertFalse(self.view()["items"]["case-a"]["decision_valid"])
+
     def test_verified_clean_commit_survives_neutral_checkout(self):
         self.task["repositories"] = self.task["repositories"][:1]
         repo = self.base / "source/tapdata/tapdata"; repo.mkdir(parents=True)

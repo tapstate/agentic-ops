@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from workflow import project_rules, quality_contract, task_store  # noqa: E402
 from workflow.git_environment import git_environment
+from workflow.file_digest import sha256_file
 
 
 def digest(value):
@@ -187,18 +188,19 @@ def git_revision(path):
     head = git("rev-parse", "HEAD").decode().strip()
     diff = git("diff", "HEAD", "--binary", "--no-ext-diff")
     untracked = git("ls-files", "--others", "--exclude-standard", "-z")
-    h = hashlib.sha256(diff)
+    h = hashlib.sha256(b"agenticops-worktree-v2\0" + hashlib.sha256(diff).digest())
     for name in sorted(untracked.split(b"\0")):
         if not name:
             continue
         file = Path(path) / os.fsdecode(name)
+        h.update(len(name).to_bytes(8, "big"))
         h.update(name)
         if file.is_symlink():
-            h.update(os.readlink(file).encode())
+            h.update(b"symlink\0")
+            h.update(hashlib.sha256(os.fsencode(os.readlink(file))).digest())
         else:
-            with file.open("rb") as stream:
-                for chunk in iter(lambda: stream.read(1048576), b""):
-                    h.update(chunk)
+            h.update(b"file-x\0" if file.stat().st_mode & 0o111 else b"file--\0")
+            h.update(bytes.fromhex(sha256_file(file)))
     return head if not diff and not untracked else head + ":worktree:" + h.hexdigest()
 
 
