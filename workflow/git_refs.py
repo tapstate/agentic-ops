@@ -220,26 +220,40 @@ def _cache_write_scope(path):
         raise GitRefsError("工位缓存刷新已停止，未恢复旧工位：%s" % error) from error
 
 
+def _ref_rows(output):
+    for line in output.splitlines():
+        if not line:
+            continue
+        fields = line.split("\t")
+        if (len(fields) != 2 or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", fields[0])
+                or not fields[1].startswith("refs/") or any(char.isspace() for char in fields[1])):
+            raise GitRefsError("远端引用响应格式无效")
+        yield fields
+
+
 def _parse_heads(output):
     result = {}
-    for line in output.splitlines():
-        sha, _, ref = line.partition("\t")
-        if re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", sha) and ref.startswith("refs/heads/"):
-            result[ref[len("refs/heads/"):]] = sha
+    for sha, ref in _ref_rows(output):
+        if ref.startswith("refs/heads/"):
+            name = ref[len("refs/heads/"):]
+            if not name or name in result:
+                raise GitRefsError("远端分支回读为空或不唯一")
+            result[name] = sha
     return result
 
 
 def _parse_tags(output):
     result = {}
-    for line in output.splitlines():
-        sha, _, ref = line.partition("\t")
-        if not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", sha) or not ref.startswith("refs/tags/"):
+    for sha, ref in _ref_rows(output):
+        if not ref.startswith("refs/tags/"):
             continue
         name = ref[len("refs/tags/"):]
-        if name.endswith("^{}"):
-            result.setdefault(name[:-3], {})["peeled"] = sha
-        else:
-            result.setdefault(name, {})["object"] = sha
+        field = "peeled" if name.endswith("^{}") else "object"
+        if field == "peeled":
+            name = name[:-3]
+        if not name or field in result.get(name, {}):
+            raise GitRefsError("远端标签回读为空或不唯一")
+        result.setdefault(name, {})[field] = sha
     return result
 
 
@@ -256,14 +270,7 @@ def parse_head_response(output, heads):
     """解析精确查询结果；格式错误不能被解释为分支不存在。"""
     requested = set(heads)
     result = {}
-    for line in output.splitlines():
-        if not line:
-            continue
-        fields = line.split("\t")
-        if (len(fields) != 2 or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", fields[0])
-                or not fields[1].startswith("refs/") or any(char.isspace() for char in fields[1])):
-            raise GitRefsError("远端引用响应格式无效")
-        sha, ref = fields
+    for sha, ref in _ref_rows(output):
         if not ref.startswith("refs/heads/") or ref[len("refs/heads/"):] not in requested:
             continue
         head = ref[len("refs/heads/"):]

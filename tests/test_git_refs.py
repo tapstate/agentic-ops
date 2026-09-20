@@ -64,6 +64,22 @@ class GitRefsTests(unittest.TestCase):
             identity["source_root"] = str(Path(source_root).resolve())
         return "key", identity
 
+    def test_bulk_refs_reject_malformed_and_duplicate_rows(self):
+        for scope, parser, prefix in (("heads", git_refs._parse_heads, "refs/heads/main"),
+                                     ("tags", git_refs._parse_tags, "refs/tags/v1")):
+            valid = "a" * 40 + "\t" + prefix + "\n"
+            for output in ("invalid\t" + prefix, valid + "broken", valid + valid):
+                with self.subTest(scope=scope, output=output):
+                    with self.assertRaises(git_refs.GitRefsError):
+                        parser(output)
+                    with mock.patch.object(git_refs, "repository_identity", side_effect=self.identity), mock.patch.object(
+                            git_refs, "_run", return_value=subprocess.CompletedProcess([], 0, output, "")):
+                        result = git_refs.snapshot("/repo", scopes=(scope,))
+                    self.assertEqual("refresh_failed", result["scopes"][scope]["freshness"])
+            self.assertEqual({}, parser(""))
+        self.assertEqual({"v1": {"object": "a" * 40, "peeled": "b" * 64}}, git_refs._parse_tags(
+            "a" * 40 + "\trefs/tags/v1\n" + "b" * 64 + "\trefs/tags/v1^{}\n"))
+
     def test_per_scope_ttl_and_refresh(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / "cache.json"
