@@ -19,7 +19,8 @@ def identity(path):
 
 def path_at(base, relative):
     parts = relative.split("/") if isinstance(relative, str) else []
-    if not parts or parts[0] not in ("runtime", "source") or any(p in ("", ".", "..", ".git") for p in parts):
+    extra = len(parts) == 1 and parts[0] not in ("config", "archive", ".agenticops", ".agents", ".claude", ".git")
+    if not parts or (parts[0] not in ("runtime", "source") and not extra) or any(p in ("", ".", "..", ".git") for p in parts):
         raise ValueError("受管目录路径越界")
     path = Path(base).resolve()
     for part in parts:
@@ -45,11 +46,14 @@ def load(base, task):
     if value.get("run_id") != task["run_id"]:
         raise ValueError("目录登记 run 不一致")
     from workflow import quality_contract
-    station_id = json.loads((store.state_path(base) / "workspace.json").read_text())["workspace_id"]
+    station_id = json.loads((store.state_path(base) / "station.json").read_text())["station_id"]
     for name, entry in value["roots"].items():
         quality_contract.validate(entry, "station-directory.schema.json")
         if entry["path"] != name or entry["run_id"] != task["run_id"] or entry["station_id"] != station_id:
             raise ValueError("目录归属身份不一致")
+        if ((entry["kind"] == "source-generated" and not name.startswith("source/"))
+                or (entry["kind"] == "station-generated" and ("/" in name or name in ("source", "runtime", "config", "archive", ".agenticops")))):
+            raise ValueError("目录归属类型与路径不一致")
         runtime = name == "runtime"
         if (entry["disposition"] == "clear_children_keep_root") != runtime or (entry["kind"] == "runtime-exclusive") != runtime:
             raise ValueError("目录类型与回收动作不一致")
@@ -61,11 +65,11 @@ def save(base, task, roots):
 
 
 def recipe(base, task):
-    root = project_rules.product_root_from_workspace(base)
+    root = project_rules.product_root_from_station(base)
     profile = task.get("engineering_baseline", {}).get("profile")
     if not profile:
         raise ValueError("生成目录需要已冻结的项目配方")
-    value = json.loads((root / "projects" / store.workspace_project(base) / "engineering-profiles.json").read_text())["profiles"][profile["id"]]
+    value = json.loads((root / "projects" / store.station_project(base) / "engineering-profiles.json").read_text())["profiles"][profile["id"]]
     if value["revision"] != profile["revision"]:
         raise ValueError("生成目录配方版本已变化")
     return value
@@ -75,7 +79,17 @@ def create(base, task, relative, producer, adopt=False):
     """调用者持工位锁；先持久意图，创建/空目录采用后登记身份，再启动生产者。"""
     path = path_at(base, relative)
     runtime = relative == "runtime"
-    if runtime:
+    station_generated = not runtime and "/" not in relative
+    if station_generated:
+        from workflow import station_clean_rules
+        decision = station_clean_rules.classify(station_clean_rules.load(base), relative, True)
+        if decision["action"] != "remove":
+            raise ValueError("工位附属目录必须由清理黑名单声明 remove")
+        init = json.loads((store.state_path(base) / "init.json").read_text())
+        if any(e["path"] == relative or e["path"].startswith(relative + "/") for e in init.get("artifacts", [])):
+            raise ValueError("不能登记初始化接线为清理目录")
+        rule = {"id": "station-clean", "revision": 1}
+    elif runtime:
         rule = {"id": "workflow-runtime", "revision": 1}
     else:
         from workflow import station_source as source
@@ -107,8 +121,8 @@ def create(base, task, relative, producer, adopt=False):
     for other in roots:
         if other != relative and (other.startswith(relative + "/") or relative.startswith(other + "/")):
             raise ValueError("受管目录不能重叠")
-    entry = {"path": relative, "run_id": task["run_id"], "station_id": json.loads((store.state_path(base) / "workspace.json").read_text())["workspace_id"],
-             "kind": "runtime-exclusive" if runtime else "source-generated", "producer": producer,
+    entry = {"path": relative, "run_id": task["run_id"], "station_id": json.loads((store.state_path(base) / "station.json").read_text())["station_id"],
+        "kind": "runtime-exclusive" if runtime else ("station-generated" if station_generated else "source-generated"), "producer": producer,
              "recipe": {"id": rule["id"], "revision": rule["revision"]}, "parent": parent,
              "disposition": "clear_children_keep_root" if runtime else "delete_root", "identity": None}
     if existing and any(existing[k] != entry[k] for k in entry if k != "identity"):
@@ -194,14 +208,17 @@ def validate(base, entry, missing=False):
     return path
 
 
-def reset(base, task, entry, operation):
-    """正式档案内按目录保存回执；文件数量不会增加 operation 的大小或写入次数。"""
+def cleanup_paths(base, task, entry, operation):
     directory = Path(base).resolve() / task["archive_ref"]["path"] / "receipts"
     if directory.is_symlink():
         raise ValueError("回执目录不能是链接")
-    directory.mkdir(exist_ok=True)
     stem = operation["operation_id"] + "-root-v%s-" % len(operation.get("plan_revisions", [])) + baseline.digest(entry)
-    intent_path, receipt_path = (directory / (stem + suffix) for suffix in ("-intent.json", "-done.json"))
+    return tuple(directory / (stem + suffix) for suffix in ("-intent.json", "-done.json"))
+
+
+def precheck(base, task, entry, operation):
+    """所有目录在源码副作用之前回读身份、缺失事实和已有回执。"""
+    intent_path, receipt_path = cleanup_paths(base, task, entry, operation)
     for p in (intent_path, receipt_path):
         if p.is_symlink():
             raise ValueError("目录回执不能是链接")
@@ -214,11 +231,20 @@ def reset(base, task, entry, operation):
     if intended:
         if json.loads(intent_path.read_text()) != expected:
             raise ValueError("目录清理意图不匹配")
-    else:
+    if receipt_path.exists():
+        if not intended or json.loads(receipt_path.read_text()) != expected or (path.exists() and (entry["disposition"] == "delete_root" or any(path.iterdir()))):
+            raise ValueError("回收后目录再次产生内容，拒绝重删")
+    return path, expected
+
+
+def reset(base, task, entry, operation):
+    """正式档案内按目录保存回执；文件数量不会增加 operation 的大小或写入次数。"""
+    path, expected = precheck(base, task, entry, operation)
+    intent_path, receipt_path = cleanup_paths(base, task, entry, operation)
+    intent_path.parent.mkdir(exist_ok=True)
+    if not intent_path.exists():
         store._write_json_atomic(intent_path, expected)
     if receipt_path.exists():
-        if json.loads(receipt_path.read_text()) != expected or (path.exists() and (entry["disposition"] == "delete_root" or any(path.iterdir()))):
-            raise ValueError("回收后目录再次产生内容，拒绝重删")
         return
     if path.exists():
         fd = os.open(str(path), os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)

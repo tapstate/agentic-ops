@@ -23,11 +23,11 @@ _held_locks = threading.local()
 def now():
     return time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
-def workspace_path(base):
+def station_path(base):
     return Path(base).resolve()
 
 def state_path(base):
-    return workspace_path(base) / ".agenticops"
+    return station_path(base) / ".agenticops"
 
 def validate_issue_key(value):
     value = str(value or "").strip().upper()
@@ -69,29 +69,29 @@ def validate_git_name(value):
     return value
 
 
-def workspace_git_name(base):
-    path = state_path(base) / "workspace.json"
+def station_git_name(base):
+    path = state_path(base) / "station.json"
     if path.is_symlink():
-        raise ValueError("工作空间配置不能是符号链接")
+        raise ValueError("工位配置不能是符号链接")
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
-        raise ValueError("工作空间配置无法读取") from error
+        raise ValueError("工位配置无法读取") from error
     identity = document.get("branch_identity")
     if not isinstance(identity, dict):
         raise ValueError(
-            "工作空间未配置 git_name；请执行 agenticops workspace identity --workspace <目录> "
+            "工位未配置 git_name；请执行 agenticops station identity --station <目录> "
             "。它会读取全局 Git user.name 并一次性保存，用于稳定生成任务工作分支，避免恢复时受机器配置变化影响"
         )
     if set(identity) != {"schema_version", "git_name", "source"} or identity.get("schema_version") != 1:
-        raise ValueError("工作空间 git_name 配置结构无效")
+        raise ValueError("工位 git_name 配置结构无效")
     if identity.get("source") != "git_global_user_name":
-        raise ValueError("工作空间 git_name 配置来源无效")
+        raise ValueError("工位 git_name 配置来源无效")
     return validate_git_name(identity.get("git_name"))
 
 
 def generated_work_branch(base, task):
-    return "%s/%s" % (workspace_git_name(base), validate_run_id(task["issue_key"], task["run_id"]))
+    return "%s/%s" % (station_git_name(base), validate_run_id(task["issue_key"], task["run_id"]))
 
 def current_path(base):
     return state_path(base) / "current-task.json"
@@ -99,9 +99,9 @@ def current_path(base):
 def read_current(base):
     path = current_path(base)
     if state_path(base).is_symlink():
-        raise ValueError("工作空间状态目录不能是符号链接")
+        raise ValueError("工位状态目录不能是符号链接")
     if any((state_path(base) / name).exists() or (state_path(base) / name).is_symlink() for name in ("tasks", "worktrees")):
-        raise ValueError("旧工作空间必须使用原版本受控解绑并重建")
+        raise ValueError("旧工位必须使用原版本受控解绑并重建")
     if path.is_symlink():
         raise ValueError("当前状态不能是符号链接")
     try:
@@ -166,7 +166,7 @@ def read_task(base, issue_key=None):
             "work_branch": binding["work_branch"], "approved_scope": "\n".join(binding["approved_scope"]),
             "verification_method": binding["verification_method"],
             "catalog_digest": binding["baseline_entry_digest"],
-            "worktree": ({"path": str(workspace_path(base) / entry["path"]), "status": "prepared"}
+            "worktree": ({"path": str(station_path(base) / entry["path"]), "status": "prepared"}
                          if task.get("source_prepared") else None),
             "pull_request": results.get("pull_request"), "ci": results.get("ci"),
         })
@@ -237,8 +237,8 @@ def interaction_path(base, issue_key, run_id, name, create=False):
         raise ValueError("交互文件不是普通文件")
     return path
 
-def workspace_project(base):
-    return json.loads((state_path(base) / "workspace.json").read_text())["project"]
+def station_project(base):
+    return json.loads((state_path(base) / "station.json").read_text())["project"]
 
 def _write_json_atomic(path, document):
     path = Path(path)
@@ -284,24 +284,24 @@ def _active_product_lifecycle(product_root):
     return operation or "unknown"
 
 
-def _require_workspace_epoch_supported(base, product_root):
+def _require_station_epoch_supported(base, product_root):
     """只允许当前产品支持的已初始化工位写入；不采用旧代际。"""
     manifest_path = (
         Path(product_root).resolve()
         / "contracts"
-        / "workspace-state-compatibility.json"
+        / "station-state-compatibility.json"
     )
     init_path = state_path(base) / "init.json"
     if not manifest_path.is_file() or not init_path.is_file():
-        raise ValueError("工作空间兼容性清单或初始化标记缺失，请受控解绑并重建")
+        raise ValueError("工位兼容性清单或初始化标记缺失，请受控解绑并重建")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         init = json.loads(init_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise ValueError("工作空间状态代际无法核验：%s" % error) from error
-    supported = manifest.get("supported_workspace_state_epochs")
-    legacy = manifest.get("legacy_workspace_state_epoch")
-    epoch = init.get("workspace_state_epoch")
+        raise ValueError("工位状态代际无法核验：%s" % error) from error
+    supported = manifest.get("supported_station_state_epochs")
+    legacy = manifest.get("legacy_station_state_epoch")
+    epoch = init.get("station_state_epoch")
     if (
         not isinstance(supported, list)
         or not supported
@@ -309,11 +309,11 @@ def _require_workspace_epoch_supported(base, product_root):
         or not isinstance(epoch, int)
         or epoch < 1
     ):
-        raise ValueError("工作空间状态兼容性清单或代际标记无效")
+        raise ValueError("工位状态兼容性清单或代际标记无效")
     if epoch not in supported:
         raise ValueError(
-            "工作空间状态代际 %s 与当前产品不兼容；请使用可处理该状态的原版本，"
-            "保存材料后将这个旧工作空间受控解绑并重建；repair 不执行跨代际采用" % epoch
+            "工位状态代际 %s 与当前产品不兼容；请使用可处理该状态的原版本，"
+            "保存材料后将这个旧工位受控解绑并重建；repair 不执行跨代际采用" % epoch
         )
 
 
@@ -321,39 +321,39 @@ def _require_workspace_epoch_supported(base, product_root):
 def task_state_lock(
     base,
     allow_product_lifecycle=False,
-    allow_incompatible_workspace=False,
+    allow_incompatible_station=False,
 ):
-    """持有工作空间状态目录锁，并在获得锁后重新核验工作空间绑定。
+    """持有工位状态目录锁，并在获得锁后重新核验工位绑定。
 
-    任务事实必须只写入项目工作空间。使用 ``.agenticops`` 目录自身作为锁对象，
+    任务事实必须只写入项目工位。使用 ``.agenticops`` 目录自身作为锁对象，
     可使普通任务写入不依赖 Product Root 的 ``.local``，同时让 purge 在删除状态
     目录前与所有任务写入互斥。
     """
-    base = workspace_path(base)
-    held = getattr(_held_locks, "workspaces", None)
+    base = station_path(base)
+    held = getattr(_held_locks, "stations", None)
     if held is None:
-        held = _held_locks.workspaces = set()
+        held = _held_locks.stations = set()
     # 仅同一进程、同一线程的嵌套 Workflow 调用复用锁；线程/进程间仍互斥。
     lock_key = (os.getpid(), str(base))
     if lock_key in held:
         yield
         return
     state_root = state_path(base)
-    binding_path = state_root / "workspace.json"
+    binding_path = state_root / "station.json"
     if state_root.is_symlink() or binding_path.is_symlink():
-        raise ValueError("工作空间状态目录与绑定不能是符号链接")
+        raise ValueError("工位状态目录与绑定不能是符号链接")
     try:
         binding = json.loads(binding_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise ValueError("工作空间绑定无法读取：%s" % error) from error
+        raise ValueError("工位绑定无法读取：%s" % error) from error
     product_root = binding.get("product_root")
     if not isinstance(product_root, str) or not product_root:
-        raise ValueError("工作空间绑定缺少 product_root")
+        raise ValueError("工位绑定缺少 product_root")
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     try:
         descriptor = os.open(str(state_root), flags)
     except OSError as error:
-        raise ValueError("工作空间状态目录无法加锁：%s" % error) from error
+        raise ValueError("工位状态目录无法加锁：%s" % error) from error
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX)
         try:
@@ -361,25 +361,25 @@ def task_state_lock(
             try:
                 current_directory = os.stat(state_root)
             except OSError as error:
-                raise ValueError("获得任务状态锁后工作空间状态目录无法读取：%s" % error) from error
+                raise ValueError("获得任务状态锁后工位状态目录无法读取：%s" % error) from error
             if (opened.st_dev, opened.st_ino) != (current_directory.st_dev, current_directory.st_ino):
-                raise ValueError("获得任务状态锁后工作空间状态目录已替换，拒绝继续")
+                raise ValueError("获得任务状态锁后工位状态目录已替换，拒绝继续")
             try:
                 current = json.loads(binding_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as error:
-                raise ValueError("获得任务状态锁后工作空间绑定无法读取：%s" % error) from error
+                raise ValueError("获得任务状态锁后工位绑定无法读取：%s" % error) from error
             current_root = current.get("product_root")
             if (current != binding or state_root.is_symlink() or binding_path.is_symlink()
                     or not isinstance(current_root, str) or Path(current_root).resolve() != Path(product_root).resolve()):
-                raise ValueError("获得任务状态锁后工作空间绑定已变化，拒绝继续")
+                raise ValueError("获得任务状态锁后工位绑定已变化，拒绝继续")
             lifecycle = _active_product_lifecycle(current_root)
             if lifecycle and not allow_product_lifecycle:
                 raise ValueError(
                     "Product Root 正在执行生命周期操作，任务状态暂不可变更：%s"
                     % lifecycle
                 )
-            if not allow_incompatible_workspace:
-                _require_workspace_epoch_supported(base, current_root)
+            if not allow_incompatible_station:
+                _require_station_epoch_supported(base, current_root)
             held.add(lock_key)
             try:
                 yield

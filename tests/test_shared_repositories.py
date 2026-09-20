@@ -31,7 +31,8 @@ class SharedRepositoryTests(unittest.TestCase):
         (self.product / 'bootstrap/shared-repositories.json').write_text(json.dumps({
             'schema_version': 1, 'repositories': {'tapstate/wiki': {
                 'origin': str(self.seed), 'branch': 'main'}}}))
-        self.path = self.product / '.local/shared-repositories/tapstate/wiki'
+        self.pool = self.root / 'pool'
+        self.path = self.pool / 'shared-repositories/tapstate/wiki'
 
     def git(self, path, *args):
         return subprocess.run(['git', '-C', str(path), *args], check=True,
@@ -43,7 +44,7 @@ class SharedRepositoryTests(unittest.TestCase):
         self.git(self.seed, 'commit', '-m', text)
 
     def run_action(self, action):
-        return shared.run(self.product, 'tapstate/wiki', action)
+        return shared.run(self.product, 'tapstate/wiki', action, self.pool)
 
     def test_prepare_update_and_old_objects(self):
         self.assertEqual(self.run_action('ensure')['status'], 'ready')
@@ -56,7 +57,7 @@ class SharedRepositoryTests(unittest.TestCase):
         self.run_action('update')
         self.assertEqual((self.path / 'article.md').read_text(), 'second')
         self.assertEqual(self.git(self.path, 'show', old + ':article.md'), 'first')
-        pool = shared.source_pool.pool_path_at_root(self.product, 'tapstate/wiki', str(self.seed))
+        pool = shared.source_pool.pool_path_at_root(self.pool, 'tapstate/wiki', str(self.seed))
         for item in (self.path / '.git/objects').rglob('*'):
             equivalent = pool / item.relative_to(self.path / '.git')
             if item.is_file() and equivalent.is_file():
@@ -172,7 +173,7 @@ class SharedRepositoryTests(unittest.TestCase):
         env = dict(os.environ, PATH=str(self.root) + os.pathsep + os.environ['PATH'])
         process = subprocess.Popen([sys.executable, str(ROOT / 'bootstrap/shared_repositories.py'),
                                     'status', '--product-root', str(self.product),
-                                    '--repository', 'tapstate/wiki'], env=env,
+                                    '--repository', 'tapstate/wiki', '--source-pool', str(self.pool)], env=env,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             deadline = time.monotonic() + 5

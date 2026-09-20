@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""为项目工作空间生成中央产品根目录的薄接线。"""
+"""为项目工位生成中央产品根目录的薄接线。"""
 from __future__ import annotations
 
 import argparse
@@ -16,23 +16,22 @@ from pathlib import Path
 from agent_registry import select
 from product_state import load as load_product_state
 from skill_wiring import validate_skill
-from workspace_paths import WorkspaceDirectory, workspace_artifact_path
-from workspace_compatibility import (
+from station_paths import StationDirectory, station_artifact_path
+from station_compatibility import (
     load_manifest,
-    require_workspace_can_adopt,
-    workspace_epoch,
+    require_station_can_adopt,
+    station_epoch,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from workflow import task_store
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 INIT_SCHEMA_VERSION = 2
 STATE_DIRECTORY = ".agenticops"
 INIT_NAME = "init.json"
-WORKSPACE_NAME = "workspace.json"
-LEGACY_BINDING_NAME = ".agenticops.json"
+STATION_NAME = "station.json"
 HOOK_TEMPLATE_MARKER = re.compile(r"__AGENTIC_OPS_HOOK_[A-Z0-9_]+__")
 
 
@@ -45,8 +44,8 @@ def safe_path(root, relative):
     return candidate
 
 
-def state_path(workspace, name):
-    return workspace_artifact_path(workspace, Path(STATE_DIRECTORY) / name)
+def state_path(station, name):
+    return station_artifact_path(station, Path(STATE_DIRECTORY) / name)
 
 
 def read_json(path, label):
@@ -107,8 +106,12 @@ def rendered_content(install_root, project, template, manifest=None):
 def product_ref(install_root):
     local_state = install_root / ".local" / "product.json"
     if local_state.is_file():
-        document = load_product_state(install_root)
-        if document.get("mode") == "installed":
+        try:
+            document = load_product_state(install_root)
+        except ValueError:
+            # 源码产品根可由 Git HEAD 自证版本；旧本地生命周期文件不会被采用或改写。
+            document = None
+        if document and document.get("mode") == "installed":
             current_ref = document.get("current_ref")
             if isinstance(current_ref, str) and current_ref:
                 return current_ref
@@ -130,64 +133,47 @@ def content_hash(content):
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def load_workspace(workspace, tree=None):
+def load_station(station, tree=None):
     if tree is None:
-        path = state_path(workspace, WORKSPACE_NAME)
+        path = state_path(station, STATION_NAME)
         if path.is_file():
-            document = read_json(path, "工作空间配置")
+            document = read_json(path, "工位配置")
         else:
-            legacy = workspace_artifact_path(workspace, LEGACY_BINDING_NAME)
-            if not legacy.is_file():
-                return None, None
-            document = read_json(legacy, "旧工作空间绑定")
-            return {
-                "schema_version": 1,
-                "product_root": document.get("product_root"),
-                "project": document.get("project"),
-                "agents": document.get("agents"),
-            }, document
-    elif tree.is_file(Path(STATE_DIRECTORY) / WORKSPACE_NAME):
-        document = tree.read_json(Path(STATE_DIRECTORY) / WORKSPACE_NAME, "工作空间配置")
-    elif tree.is_file(LEGACY_BINDING_NAME):
-        document = tree.read_json(LEGACY_BINDING_NAME, "旧工作空间绑定")
-        return {
-            "schema_version": 1,
-            "product_root": document.get("product_root"),
-            "project": document.get("project"),
-            "agents": document.get("agents"),
-        }, document
+            return None, None
+    elif tree.is_file(Path(STATE_DIRECTORY) / STATION_NAME):
+        document = tree.read_json(Path(STATE_DIRECTORY) / STATION_NAME, "工位配置")
     else:
         return None, None
     if document is not None:
         if document.get("schema_version") not in (1, SCHEMA_VERSION):
-            raise ValueError("工作空间不兼容，请使用原版本将这个旧工作空间受控解绑并重建")
+            raise ValueError("工位不兼容，请使用原版本将这个旧工位受控解绑并重建")
         return document, None
     return None, None
 
 
-def load_init(workspace, tree=None):
+def load_init(station, tree=None):
     relative = Path(STATE_DIRECTORY) / INIT_NAME
     if tree is None:
-        path = state_path(workspace, INIT_NAME)
+        path = state_path(station, INIT_NAME)
         if not path.is_file():
             return None
-        document = read_json(path, "工作空间初始化信息")
+        document = read_json(path, "工位初始化信息")
     elif not tree.is_file(relative):
         return None
     else:
-        document = tree.read_json(relative, "工作空间初始化信息")
+        document = tree.read_json(relative, "工位初始化信息")
     if document.get("schema_version") not in (1, INIT_SCHEMA_VERSION):
-        raise ValueError("不支持的工作空间初始化版本")
+        raise ValueError("不支持的工位初始化版本")
     return document
 
 
 def common_artifacts(install_root, project):
     return {
         "AGENTS.md": rendered_content(
-            install_root, project, "adapters/workspace/AGENTS.md"
+            install_root, project, "adapters/station/AGENTS.md"
         ),
         "agenticops": rendered_content(
-            install_root, project, "adapters/workspace/agenticops"
+            install_root, project, "adapters/station/agenticops"
         ),
         ".mcp.json": rendered_content(
             install_root, project, "adapters/tools/mcp.template.json"
@@ -221,12 +207,12 @@ def project_skill_sources(install_root, project):
     return sources
 
 
-def expected_artifacts(install_root, workspace, project, agents, manifests):
+def expected_artifacts(install_root, station, project, agents, manifests):
     artifacts = {
         target: file_artifact(content)
         for target, content in common_artifacts(install_root, project).items()
     }
-    owners = {target: "workspace" for target in artifacts}
+    owners = {target: "station" for target in artifacts}
     messages = []
     for agent_id in agents:
         manifest = manifests[agent_id]
@@ -257,8 +243,8 @@ def expected_artifacts(install_root, workspace, project, agents, manifests):
                         "Agent 项目 Skill 接线目标冲突：%s 同时由 %s 和 %s 生成"
                         % (target, owners[target], agent_id)
                     )
-                destination = workspace_artifact_path(
-                    workspace, target, allow_final_symlink=True
+                destination = station_artifact_path(
+                    station, target, allow_final_symlink=True
                 )
                 artifacts[target] = symlink_artifact(
                     os.path.relpath(str(source), str(destination.parent))
@@ -267,9 +253,9 @@ def expected_artifacts(install_root, workspace, project, agents, manifests):
     return artifacts, messages
 
 
-def require_current_workspace_document(document):
+def require_current_station_document(document):
     if document is not None and document.get("schema_version") != SCHEMA_VERSION:
-        raise ValueError("工作空间不兼容，请使用原版本将这个旧工作空间受控解绑并重建")
+        raise ValueError("工位不兼容，请使用原版本将这个旧工位受控解绑并重建")
     return document
 
 
@@ -294,11 +280,11 @@ def branch_identity(existing):
         if (not isinstance(identity, dict) or set(identity) != {"schema_version", "git_name", "source"}
                 or identity.get("schema_version") != 1
                 or identity.get("source") != "git_global_user_name"):
-            raise ValueError("工作空间 git_name 配置结构无效")
+            raise ValueError("工位 git_name 配置结构无效")
         task_store.validate_git_name(identity.get("git_name"))
         return dict(identity)
     if existing is not None:
-        # 旧工作空间没有该可选字段时，只允许补写一次；已有值绝不跟随机器配置改写。
+        # 旧工位没有该可选字段时，只允许补写一次；已有值绝不跟随机器配置改写。
         value = global_git_name()
         if value is None:
             return None
@@ -309,14 +295,15 @@ def branch_identity(existing):
     return {"schema_version": 1, "git_name": value, "source": "git_global_user_name"}
 
 
-def workspace_document(install_root, workspace, project, agents, existing):
-    workspace_id = existing["workspace_id"] if existing else uuid.uuid4().hex
+def station_document(install_root, station, project, agents, source_pool, existing):
+    station_id = existing["station_id"] if existing else uuid.uuid4().hex
     result = {
         "schema_version": SCHEMA_VERSION,
         "product_root": str(install_root.resolve()),
-        "workspace_id": workspace_id,
+        "station_id": station_id,
         "project": project,
         "agents": agents,
+        "source_pool": str(Path(source_pool).resolve()),
     }
     identity = branch_identity(existing)
     if identity is not None:
@@ -324,7 +311,7 @@ def workspace_document(install_root, workspace, project, agents, existing):
     return result
 
 
-def init_document(install_root, artifacts, workspace_state_epoch=None):
+def init_document(install_root, artifacts, station_state_epoch=None):
     recorded_artifacts = []
     for target, artifact in sorted(artifacts.items()):
         if artifact["kind"] == "file":
@@ -338,10 +325,10 @@ def init_document(install_root, artifacts, workspace_state_epoch=None):
     return {
         "schema_version": INIT_SCHEMA_VERSION,
         "product_ref": product_ref(install_root),
-        "workspace_state_epoch": (
-            workspace_state_epoch
-            if workspace_state_epoch is not None
-            else load_manifest(install_root)["workspace_state_epoch"]
+        "station_state_epoch": (
+            station_state_epoch
+            if station_state_epoch is not None
+            else load_manifest(install_root)["station_state_epoch"]
         ),
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "artifacts": recorded_artifacts,
@@ -374,7 +361,7 @@ def artifact_record(artifact):
     return {"kind": "symlink", "target": artifact["target"]}
 
 
-def assert_artifact_ownership(workspace, owned, artifacts, tree):
+def assert_artifact_ownership(station, owned, artifacts, tree):
     for target, expected in artifacts.items():
         path = tree.path(target)
         if not tree.exists(target):
@@ -383,17 +370,17 @@ def assert_artifact_ownership(workspace, owned, artifacts, tree):
             continue
         if expected["kind"] == "symlink":
             if not tree.is_symlink(target) or tree.readlink(target) != expected["target"]:
-                raise ValueError("工作空间已有非 AgenticOps 文件，拒绝覆盖：%s" % path)
+                raise ValueError("工位已有非 AgenticOps 文件，拒绝覆盖：%s" % path)
             continue
         try:
             content = tree.read_text(target)
         except ValueError as error:
-            raise ValueError("工作空间同名文件无法读取：%s：%s" % (path, error)) from error
+            raise ValueError("工位同名文件无法读取：%s：%s" % (path, error)) from error
         if tree.is_symlink(target) or content != expected["content"]:
-            raise ValueError("工作空间已有非 AgenticOps 文件，拒绝覆盖：%s" % path)
+            raise ValueError("工位已有非 AgenticOps 文件，拒绝覆盖：%s" % path)
 
 
-def remove_stale_artifacts(workspace, owned, expected_targets, tree):
+def remove_stale_artifacts(station, owned, expected_targets, tree):
     expected_parents = {
         parent
         for target in expected_targets
@@ -435,7 +422,7 @@ def check_checkpoint_migration(owned, manifests, accepted, tree):
         raise ValueError(
             "需要显式迁移流程检查点：将撤除已托管 Agent Hook %s；Git/Jira/PR 不再自动进入 Gate，"
             "方案确认只在 Workflow 检查点核验，Jira 不再保证强制单次调用。"
-            "请核对后执行 agenticops repair --workspace <当前工作空间> --accept-checkpoint-migration；"
+            "请核对后执行 agenticops station repair --station <当前工位> --accept-checkpoint-migration；"
             "当前接线与任务状态保留。" % ", ".join(retired))
     for target in retired:
         record = owned[target]
@@ -449,45 +436,48 @@ def check_checkpoint_migration(owned, manifests, accepted, tree):
     return retired
 
 
-def validate_workspace_document(install_root, document):
+def validate_station_document(install_root, document):
     project = document.get("project")
     agents = document.get("agents")
+    source_pool = document.get("source_pool")
     if not isinstance(project, str) or not project:
-        raise ValueError("工作空间配置缺少 project")
+        raise ValueError("工位配置缺少 project")
     if document.get("product_root") != str(install_root.resolve()):
-        raise ValueError("工作空间产品根目录不一致，请执行 agenticops repair")
+        raise ValueError("工位产品根目录不一致，请执行 agenticops station repair")
     if not isinstance(agents, list) or not agents:
-        raise ValueError("工作空间配置 agents 无效")
-    workspace_id = document.get("workspace_id")
-    if not isinstance(workspace_id, str) or not re.fullmatch(r"[a-f0-9]{32}", workspace_id):
-        raise ValueError("工作空间配置缺少 workspace_id")
+        raise ValueError("工位配置 agents 无效")
+    station_id = document.get("station_id")
+    if not isinstance(station_id, str) or not re.fullmatch(r"[a-f0-9]{32}", station_id):
+        raise ValueError("工位配置缺少 station_id")
     if document.get("schema_version") != SCHEMA_VERSION or "repository_pool" in document:
-        raise ValueError("工作空间不兼容，请使用原版本将这个旧工作空间受控解绑并重建")
+        raise ValueError("工位不兼容，请使用原版本将这个旧工位受控解绑并重建")
+    if not isinstance(source_pool, str) or not source_pool or not Path(source_pool).is_absolute():
+        raise ValueError("工位配置 source_pool 无效")
     branch_identity(document)
     selected, manifests = select(install_root, agents)
     return project, selected, manifests
 
 
-def check_workspace(install_root, workspace, config, init, tree):
+def check_station(install_root, station, config, init, tree):
     if init is None:
-        raise ValueError("工作空间缺少 init.json，请执行 agenticops repair")
-    project, agents, manifests = validate_workspace_document(install_root, config)
+        raise ValueError("工位缺少 init.json，请执行 agenticops station repair")
+    project, agents, manifests = validate_station_document(install_root, config)
     compatibility = load_manifest(install_root)
-    if workspace_epoch(workspace, compatibility) not in compatibility["supported_workspace_state_epochs"]:
-        raise ValueError("工作空间状态代际与当前产品不兼容；请先在原版本结束并清理任务，再重新初始化工作空间")
+    if station_epoch(station, compatibility) not in compatibility["supported_station_state_epochs"]:
+        raise ValueError("工位状态代际与当前产品不兼容；请先在原版本结束并清理任务，再重新初始化工位")
     from workflow import station_operation, task_store
-    task_store.read_current(workspace)
-    station_operation.read(workspace)
+    task_store.read_current(station)
+    station_operation.read(station)
     for name in ("config", "source", "runtime", "archive"):
         if not tree.is_dir(name) or tree.is_symlink(name):
             raise ValueError("工位目录缺失或不安全，请检查后执行 repair：%s" % name)
-    artifacts, _ = expected_artifacts(install_root, workspace, project, agents, manifests)
+    artifacts, _ = expected_artifacts(install_root, station, project, agents, manifests)
     if init.get("product_ref") != product_ref(install_root):
-        raise ValueError("产品根目录版本已变化，请执行 agenticops repair")
+        raise ValueError("产品根目录版本已变化，请执行 agenticops station repair")
     recorded = owned_artifacts(init, None)
     expected_records = {path: artifact_record(artifact) for path, artifact in artifacts.items()}
     if recorded != expected_records:
-        raise ValueError("工作空间初始化清单漂移，请执行 agenticops repair")
+        raise ValueError("工位初始化清单漂移，请执行 agenticops station repair")
     drift = []
     for target, expected in artifacts.items():
         path = tree.path(target)
@@ -502,13 +492,13 @@ def check_workspace(install_root, workspace, config, init, tree):
         if not valid:
             drift.append(target)
     if drift:
-        raise ValueError("工作空间薄接线漂移：%s" % ", ".join(sorted(drift)))
+        raise ValueError("工位薄接线漂移：%s" % ", ".join(sorted(drift)))
     return project, agents
 
 
-def update_git_exclude(workspace, artifacts):
+def update_git_exclude(station, artifacts):
     result = subprocess.run(
-        ["git", "-C", str(workspace), "rev-parse", "--git-path", "info/exclude"],
+        ["git", "-C", str(station), "rev-parse", "--git-path", "info/exclude"],
         capture_output=True,
         text=True,
     )
@@ -516,7 +506,7 @@ def update_git_exclude(workspace, artifacts):
         return
     exclude = Path(result.stdout.strip())
     if not exclude.is_absolute():
-        exclude = workspace / exclude
+        exclude = station / exclude
     existing = set(exclude.read_text(encoding="utf-8").splitlines()) if exclude.is_file() else set()
     patterns = [STATE_DIRECTORY + "/"] + sorted(artifacts)
     missing = [pattern for pattern in patterns if pattern not in existing]
@@ -530,9 +520,10 @@ def update_git_exclude(workspace, artifacts):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--install-home", required=True)
-    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--station", required=True)
     parser.add_argument("--agent", action="append")
     parser.add_argument("--project")
+    parser.add_argument("--source-pool")
     parser.add_argument("--reuse-materials", action="store_true")
     parser.add_argument("--accept-checkpoint-migration", action="store_true")
     mode = parser.add_mutually_exclusive_group()
@@ -543,21 +534,23 @@ def main():
         parser.error("--accept-checkpoint-migration 只能用于显式 repair/refresh")
 
     install_root = Path(arguments.install_home).resolve()
-    workspace = Path(arguments.workspace).resolve()
-    workspace.mkdir(parents=True, exist_ok=True)
+    station = Path(arguments.station).resolve()
+    station.mkdir(parents=True, exist_ok=True)
     try:
-        with WorkspaceDirectory(workspace) as tree:
-            config, legacy = load_workspace(workspace, tree)
-            config = require_current_workspace_document(config)
-            init = load_init(workspace, tree)
+        with StationDirectory(station) as tree:
+            config, legacy = load_station(station, tree)
+            config = require_current_station_document(config)
+            init = load_init(station, tree)
             if arguments.refresh or arguments.check:
                 if config is None:
-                    parser.error("工作空间尚未初始化，请先执行 agenticops init")
+                    parser.error("工位尚未初始化，请先执行 agenticops station init")
                 project = config["project"]
                 requested_agents = config["agents"]
+                requested_source_pool = config["source_pool"]
             else:
                 project = arguments.project or "tapdata"
                 requested_agents = arguments.agent
+                requested_source_pool = arguments.source_pool or load_product_state(install_root)["source_pool"]
 
             project_root = install_root / "projects" / project
             if not project_root.is_dir():
@@ -566,13 +559,13 @@ def main():
             if arguments.check:
                 _, all_manifests = select(install_root, None)
                 check_checkpoint_migration(owned_artifacts(init, legacy), all_manifests, False, tree)
-                checked_project, checked_agents = check_workspace(
-                    install_root, workspace, config, init, tree
+                checked_project, checked_agents = check_station(
+                    install_root, station, config, init, tree
                 )
                 print(
-                    "AgenticOps 工作空间检查通过：%s（project=%s，agents=%s，ref=%s）"
+                    "AgenticOps 工位检查通过：%s（project=%s，agents=%s，ref=%s）"
                     % (
-                        workspace,
+                        station,
                         checked_project,
                         ",".join(checked_agents),
                         init["product_ref"],
@@ -594,18 +587,18 @@ def main():
                     if any(tree.path(STATE_DIRECTORY).iterdir()):
                         raise ValueError("发现未绑定的旧状态或未知材料，请使用原版本受控解绑并重建")
             if config is not None:
-                validate_workspace_document(install_root, config)
+                validate_station_document(install_root, config)
             agents, manifests = select(install_root, requested_agents)
             artifacts, messages = expected_artifacts(
-                install_root, workspace, project, agents, manifests
+                install_root, station, project, agents, manifests
             )
             adopted_epoch = None
             if init is not None:
-                adopted_epoch = require_workspace_can_adopt(install_root, workspace)
+                adopted_epoch = require_station_can_adopt(install_root, station)
             document = init_document(
                 install_root,
                 artifacts,
-                workspace_state_epoch=adopted_epoch,
+                station_state_epoch=adopted_epoch,
             )
             owned = owned_artifacts(init, legacy)
             _, all_manifests = select(install_root, None)
@@ -618,13 +611,14 @@ def main():
                     "accepted_at": document["generated_at"],
                     "retired_artifacts": migrated,
                 }
-            assert_artifact_ownership(workspace, owned, artifacts, tree)
-            remove_stale_artifacts(workspace, owned, set(artifacts), tree)
-            workspace_config = workspace_document(
+            assert_artifact_ownership(station, owned, artifacts, tree)
+            remove_stale_artifacts(station, owned, set(artifacts), tree)
+            station_config = station_document(
                 install_root,
-                workspace,
+                station,
                 project,
                 agents,
+                requested_source_pool,
                 config,
             )
 
@@ -636,34 +630,32 @@ def main():
                             tree.unlink(target)
                         else:
                             parser.error(
-                                "工作空间 Skill 接线位置是目录，拒绝覆盖：%s" % destination
+                                "工位 Skill 接线位置是目录，拒绝覆盖：%s" % destination
                             )
                     tree.symlink(artifact["target"], target)
                 else:
                     tree.write_text_atomic(target, artifact["content"])
                 if target == "agenticops":
                     tree.chmod(target, 0o700)
-            tree.write_json_atomic(Path(STATE_DIRECTORY) / WORKSPACE_NAME, workspace_config)
+            tree.write_json_atomic(Path(STATE_DIRECTORY) / STATION_NAME, station_config)
             tree.write_json_atomic(Path(STATE_DIRECTORY) / INIT_NAME, document)
             for name in ("config", "source", "runtime", "archive"):
                 tree.path(name).mkdir(mode=0o700, exist_ok=True)
-            task_store.initialize_current(workspace)
-            if tree.is_file(LEGACY_BINDING_NAME):
-                tree.unlink(LEGACY_BINDING_NAME)
+            task_store.initialize_current(station)
     except ValueError as error:
         parser.error(str(error))
 
-    update_git_exclude(workspace, artifacts)
+    update_git_exclude(station, artifacts)
     print(
-        "AgenticOps 工作空间接线已刷新：%s（project=%s，agents=%s，ref=%s）"
-        % (workspace, project, ",".join(agents), document["product_ref"])
+        "AgenticOps 工位接线已刷新：%s（project=%s，agents=%s，ref=%s）"
+        % (station, project, ",".join(agents), document["product_ref"])
     )
     for message in messages:
         print(message)
-    if "branch_identity" not in workspace_config:
+    if "branch_identity" not in station_config:
         print(
             "AgenticOps：当前工位未配置 git_name。请补充全局 Git user.name 后重新初始化，或执行 "
-            "agenticops workspace identity --workspace <目录>；"
+            "agenticops station identity --station <目录>；"
             "该值会一次性保存，用于稳定生成并恢复任务工作分支。"
         )
     return 0

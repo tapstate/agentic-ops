@@ -8,7 +8,8 @@ import os
 from pathlib import Path
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+DEFAULT_SOURCE_POOL = Path.home() / ".agentic-ops-repos"
 
 
 def state_path(root):
@@ -18,7 +19,7 @@ def state_path(root):
 def validate(document):
     required = {
         "schema_version", "mode", "repository", "tracking_branch",
-        "current_ref", "previous_ref",
+        "current_ref", "previous_ref", "source_pool",
     }
     if set(document) != required or document.get("schema_version") != SCHEMA_VERSION:
         raise ValueError("产品根目录本地配置结构无效")
@@ -30,6 +31,9 @@ def validate(document):
     previous = document.get("previous_ref")
     if previous is not None and (not isinstance(previous, str) or not previous.strip()):
         raise ValueError("产品根目录 previous_ref 无效")
+    source_pool = document.get("source_pool")
+    if not isinstance(source_pool, str) or not source_pool.strip() or not Path(source_pool).is_absolute():
+        raise ValueError("产品根目录 source_pool 无效")
     return document
 
 
@@ -65,11 +69,14 @@ def main():
     write.add_argument("--branch", required=True)
     write.add_argument("--current-ref", required=True)
     write.add_argument("--previous-ref")
+    write.add_argument("--source-pool")
     read = sub.add_parser("read")
-    read.add_argument("--field", choices=("mode", "repository", "tracking_branch", "current_ref", "previous_ref"))
+    read.add_argument("--field", choices=("mode", "repository", "tracking_branch", "current_ref", "previous_ref", "source_pool"))
     update = sub.add_parser("update-ref")
     update.add_argument("--current-ref", required=True)
     update.add_argument("--previous-ref")
+    update_pool = sub.add_parser("update-source-pool")
+    update_pool.add_argument("--source-pool", required=True)
     args = parser.parse_args()
     try:
         if args.command == "write":
@@ -80,6 +87,7 @@ def main():
                 "tracking_branch": args.branch,
                 "current_ref": args.current_ref,
                 "previous_ref": args.previous_ref,
+                "source_pool": str(Path(args.source_pool).expanduser().resolve()) if args.source_pool else str(DEFAULT_SOURCE_POOL),
             })
             return 0
         document = load(args.product_root)
@@ -89,6 +97,10 @@ def main():
                 print("" if value is None else value)
             else:
                 print(json.dumps(document, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "update-source-pool":
+            document["source_pool"] = str(Path(args.source_pool).expanduser().resolve())
+            save(args.product_root, document)
             return 0
         previous = args.previous_ref if args.previous_ref is not None else document["current_ref"]
         document["previous_ref"] = previous

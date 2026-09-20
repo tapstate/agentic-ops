@@ -144,7 +144,7 @@ def apply(base, issue, run, revision, event):
             raise ValueError("失败仓库不属于当前任务")
         key = reduce(problems, event)
         from workflow import project_rules
-        if project_rules.scan_sensitive(project_rules.load_admission(workspace=base), json.dumps(event, ensure_ascii=False)):
+        if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(event, ensure_ascii=False)):
             raise ValueError("失败记录含敏感内容，请脱敏")
         state["events"].append(event)
         state["revision"] += 1

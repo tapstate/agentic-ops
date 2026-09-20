@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "epoch 4 任务独占目录与创建回执",
+  "title": "epoch 5 任务独占目录与创建回执",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -17,7 +17,7 @@
   "properties": {
     "path": {
       "type": "string",
-      "pattern": "^(runtime|source/[^/]+/[^/]+/.+)$"
+      "pattern": "^([^/]+|source/[^/]+/[^/]+/.+)$"
     },
     "run_id": {
       "type": "string",
@@ -30,7 +30,8 @@
     "kind": {
       "enum": [
         "runtime-exclusive",
-        "source-generated"
+        "source-generated",
+        "station-generated"
       ]
     },
     "producer": {

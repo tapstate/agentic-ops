@@ -27,7 +27,7 @@ class IssueVersionsTests(unittest.TestCase):
         product = self.base / "product"
         shutil.copytree(ROOT / "projects/tapdata", product / "projects/tapdata")
         (self.base / ".agenticops").mkdir()
-        (self.base / ".agenticops/workspace.json").write_text(json.dumps({"product_root": str(product), "project": "tapdata"}))
+        (self.base / ".agenticops/station.json").write_text(json.dumps({"product_root": str(product), "project": "tapdata"}))
         self.task = {"issue_key": "TAP-123", "run_id": "run-0123456789ab", "task_class": "defect_fix",
                      "stage": "task_intake", "facts": {}, "repositories": [], "pending": None, "history": []}
         save_station_task(self.base, self.task)

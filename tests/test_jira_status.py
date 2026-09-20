@@ -47,7 +47,7 @@ class JiraStatusTests(unittest.TestCase):
         shutil.copytree(ROOT / "projects" / "tapdata", product / "projects" / "tapdata")
         (self.base / ".agenticops").mkdir()
         task_store._write_json_atomic(
-            self.base / ".agenticops/workspace.json",
+            self.base / ".agenticops/station.json",
             {"project": "tapdata", "product_root": str(product)},
         )
         self.task = {"issue_key": "TAP-123", "run_id": "run-0123456789ab", "task_class": "defect_fix",

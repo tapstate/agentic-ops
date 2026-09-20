@@ -33,7 +33,7 @@ class JiraWatermarkTests(unittest.TestCase):
         )
         (self.base / ".agenticops").mkdir()
         task_store._write_json_atomic(
-            self.base / ".agenticops/workspace.json",
+            self.base / ".agenticops/station.json",
             {"project": "tapdata", "product_root": str(self.product)},
         )
         self.task = {

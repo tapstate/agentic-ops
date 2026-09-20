@@ -42,15 +42,49 @@ def safe_source(base, name, filename):
     return resource_path(base, "source/" + name + "/" + filename)
 
 
-def snapshot(base, name, roots, decisions):
+def verify_special_entries(repository, reset_sha="HEAD"):
+    """仅保留索引、当前提交及归位提交完全一致的空未初始化 gitlink。"""
+    def special(raw, tree=False):
+        result = {}
+        for row in filter(None, raw.split(b"\0")):
+            metadata, filename = row.split(b"\t", 1)
+            fields = metadata.split()
+            if fields[0] == b"120000":
+                raise ValueError("源码含跟踪链接，不支持自动重置")
+            if fields[0] == b"160000":
+                if not tree and fields[2] != b"0":
+                    raise ValueError("submodule 索引存在冲突")
+                result[filename] = fields[2] if tree else fields[1]
+        return result
+
+    index = special(git_bytes(repository, "ls-files", "--stage", "-z"))
+    head = special(git_bytes(repository, "ls-tree", "-r", "-z", "HEAD"), True)
+    target = special(git_bytes(repository, "ls-tree", "-r", "-z", reset_sha), True)
+    if index != head or head != target:
+        raise ValueError("submodule 与当前或归位基线不一致，不支持自动重置")
+    for filename in index:
+        parts = os.fsdecode(filename).split("/")
+        if any(part in ("", ".", "..", ".git") for part in parts):
+            raise ValueError("submodule 路径不安全")
+        path = repository
+        for part in parts:
+            path = path / part
+            if path.is_symlink():
+                raise ValueError("submodule 路径含符号链接")
+            if path.exists() and not path.is_dir():
+                raise ValueError("submodule 路径不是目录")
+        if path.exists() and any(path.iterdir()):
+            raise ValueError("submodule 已初始化或包含内容，不支持自动重置")
+
+
+def snapshot(base, name, roots, decisions, reset_sha="HEAD"):
     from workflow.station_resources import fingerprint
     from workflow.station_directories import covered
     repository = source.repository_path(base, name)
     if git_bytes(repository, "ls-files", "--unmerged"):
         raise ValueError("冲突索引不支持自动重置，请先明确处理")
     index = git_bytes(repository, "ls-files", "--stage", "-z")
-    if any(row.startswith((b"160000 ", b"120000 ")) for row in index.split(b"\0")):
-        raise ValueError("源码含 submodule 或跟踪链接，不支持自动重置")
+    verify_special_entries(repository, reset_sha)
     changed = set(filter(None, (git_bytes(repository, "diff", "--name-only", "--no-renames", "-z").decode().split("\0")
                   + git_bytes(repository, "diff", "--cached", "--name-only", "--no-renames", "-z", "HEAD").decode().split("\0"))))
     untracked = set(filter(None, git_bytes(repository, "ls-files", "--others", "--exclude-standard", "-z").decode().split("\0")))
@@ -86,7 +120,7 @@ def snapshot(base, name, roots, decisions):
 
 def material(base, task, plan, private_export=False):
     """只将明确选择 archive 的字节写进档案；export/discard 只保存安全指纹。"""
-    admission = project_rules.load_admission(workspace=base)
+    admission = project_rules.load_admission(station=base)
     result = {"schema_version": 1, "run_id": task["run_id"], "repositories": {}}
     total = 0
     for name, state in plan["source"].items():

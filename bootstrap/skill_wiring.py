@@ -11,7 +11,7 @@ from pathlib import Path
 
 from agent_registry import discover
 from product_state import load as load_product_state
-from workspace_paths import WorkspaceDirectory
+from station_paths import StationDirectory
 
 
 SCHEMA_VERSION = 1
@@ -218,7 +218,7 @@ def main():
     try:
         product_root = validate_source_product_root(arguments.product_root)
         artifacts = expected_artifacts(product_root)
-        with WorkspaceDirectory(product_root) as tree:
+        with StationDirectory(product_root) as tree:
             if arguments.check:
                 check_wiring(product_root, artifacts, tree)
             else:

@@ -1,7 +1,7 @@
 # Claude 端到端验证
 
-1. 执行 `<产品根目录>/agenticops init --workspace <项目工作空间> --project tapdata --agent claude`。
-2. 进入项目工作空间，通过 `./agenticops start claude` 启动 Claude，接管第一个任务；在本工位再次接管必须拒绝，第二个任务使用另一独立工位。
+1. 执行 `<产品根目录>/agenticops station init --station <项目工位> --project tapdata --agent claude`。
+2. 进入项目工位，通过 `./agenticops station start claude` 启动 Claude，接管第一个任务；在本工位再次接管必须拒绝，第二个任务使用另一独立工位。
 3. 验证缺少准入事实时会补卡并停止，未授权时不能进入实现。
 4. 在不同独立工位接管完整工程并分别登记修改仓，在同一 Claude 会话读取 `repository context --issue-key <key> --json` 后继续处理，验证状态和授权互不串用。
 5. 核对不存在生成的 `.claude/settings.json`；Git/Jira/PR 使用平台原生权限。Workflow 状态写入带 expected-run-id，advance 另带 expected-stage，过期确认或证据缺失时不能推进。

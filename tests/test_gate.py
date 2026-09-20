@@ -131,7 +131,7 @@ def run_standard(request, env_extra=None):
     return json.loads(proc.stdout)
 
 
-def make_workspace(branch="feature/TAP-123", origin="git@github.com:acme/widget.git", initialize_git=True):
+def make_station(branch="feature/TAP-123", origin="git@github.com:acme/widget.git", initialize_git=True):
     ws = Path(tempfile.mkdtemp(prefix="aogate-ws-"))
     if initialize_git:
         subprocess.run(["git", "init", "-q", "-b", branch], cwd=ws, check=True)
@@ -149,7 +149,7 @@ def make_workspace(branch="feature/TAP-123", origin="git@github.com:acme/widget.
             "domains": ["test"],
         }
     catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
-    (ws / ".agenticops" / "workspace.json").write_text(
+    (ws / ".agenticops" / "station.json").write_text(
         json.dumps({
             "schema_version": 1, "product_root": str(product_root),
             "project": "tapdata", "agents": ["claude", "codex"],
@@ -272,7 +272,7 @@ def prepare_task_worktree(ws, issue_key="TAP-123"):
 
 
 def main():
-    ws = make_workspace()
+    ws = make_station()
     try:
         invalid = run_standard({})
         check("无效标准请求保守拒绝", invalid["decision"], "deny")
@@ -296,7 +296,7 @@ def main():
             })
             check("源码产品根目录门禁仍执行", source_decision["decision"], "ask")
             check("源码产品根目录审计进入 .local", (product_root / ".local/gate/events.jsonl").is_file(), True)
-            check("源码产品根目录不生成工作空间状态", (product_root / ".agenticops").exists(), False)
+            check("源码产品根目录不生成工位状态", (product_root / ".agenticops").exists(), False)
 
         # ---- 未授权阶段 -------------------------------------------------
         check("只读 bash（git status）不受控", run_hook("Bash", {"command": "git status"}, ws), "passthrough")
@@ -418,7 +418,7 @@ def main():
         check("工位操作需人工确认", lifecycle["decision"], "ask")
         check("工位操作不借用任务授权", lifecycle["reason_code"], "station_confirmation_required")
         check("归档不授权删除", "归档不授予删除权限" in lifecycle["required_action"], True)
-        check("工位解绑 Hook 仍需确认", run_hook("Bash", {"command": "./agenticops workspace purge --yes"}, ws), "ask")
+        check("工位解绑 Hook 仍需确认", run_hook("Bash", {"command": "./agenticops station purge --yes"}, ws), "ask")
         check("直接 task clean 需人工确认", run_hook("Bash", {"command": "workflow/task.py clean --issue-key TAP-123 --yes"}, ws), "ask")
         check("python task clean 需人工确认", run_hook("Bash", {"command": "python3 workflow/task.py clean --issue-key TAP-123 --yes"}, ws), "ask")
         check("python -m task clean 仍需人工确认", run_hook("Bash", {"command": "python3 -m workflow.task clean --issue-key TAP-123 --yes"}, ws), "ask")
@@ -475,22 +475,22 @@ def main():
         ):
             check("宽门禁：Claude %s 前置上下文交还原生权限" % name, run_hook("Bash", {"command": command}, ws), "passthrough")
             check("宽门禁：Codex %s 前置上下文交还原生权限" % name, run_codex("Bash", {"command": command}, ws), "allow")
-        check("只读检查工作空间根入口不误拦", run_hook("Bash", {"command": "sed -n '1,200p' ./agenticops"}, ws), "passthrough")
+        check("只读检查工位根入口不误拦", run_hook("Bash", {"command": "sed -n '1,200p' ./agenticops"}, ws), "passthrough")
         check("本地 sed 修改交还 Agent 原生权限", run_hook("Bash", {"command": "sed -n 1p -i.bak ./agenticops"}, ws), "passthrough")
         check("本地重定向交还 Agent 原生权限", run_hook("Bash", {"command": "cat source > ./agenticops"}, ws), "passthrough")
-        check("管道内未映射操作交还 Agent 原生权限", run_hook("Bash", {"command": "cat ./agenticops | sh -s workspace purge --yes"}, ws), "passthrough")
-        check("rg 预处理交还 Agent 原生权限", run_hook("Bash", {"command": "rg --pre './agenticops workspace purge --yes' x ./agenticops"}, ws), "passthrough")
-        check("命令替换交还 Agent 原生权限", run_hook("Bash", {"command": "head -n \"$(./agenticops workspace purge --yes)\" ./agenticops"}, ws), "passthrough")
+        check("管道内未映射操作交还 Agent 原生权限", run_hook("Bash", {"command": "cat ./agenticops | sh -s station purge --yes"}, ws), "passthrough")
+        check("rg 预处理交还 Agent 原生权限", run_hook("Bash", {"command": "rg --pre './agenticops station purge --yes' x ./agenticops"}, ws), "passthrough")
+        check("命令替换交还 Agent 原生权限", run_hook("Bash", {"command": "head -n \"$(./agenticops station purge --yes)\" ./agenticops"}, ws), "passthrough")
         check("rg 配置交还 Agent 原生权限", run_hook("Bash", {"command": "RIPGREP_CONFIG_PATH=/tmp/rg.conf rg x ./agenticops"}, ws), "passthrough")
         check("repository roots 不误拦", run_hook("Bash", {"command": "python3 workflow/repository_worktree.py roots --issue-key TAP-123"}, ws), "passthrough")
         check("execution-root 不误拦", run_hook("Bash", {"command": "python3 workflow/repository_worktree.py execution-root --issue-key TAP-123"}, ws), "passthrough")
         check("Atlassian 当前用户只读查询不误拦", run_hook("mcp__atlassian__atlassianUserInfo", {}, ws), "passthrough")
 
-        target_ws = make_workspace()
+        target_ws = make_station()
         try:
             occupy(target_ws, "TAP-777")
             check(
-                "绝对 --dir 按目标工作空间确认归档",
+                "绝对 --dir 按目标工位确认归档",
                 run_hook(
                     "Bash",
                     {"command": "python3 workflow/task.py archive --issue-key tap-777 --dir %s" % target_ws},
@@ -500,7 +500,7 @@ def main():
             )
             relative_target = os.path.relpath(target_ws, ws)
             check(
-                "相对 --dir 按 Hook cwd 解析目标工作空间",
+                "相对 --dir 按 Hook cwd 解析目标工位",
                 run_hook(
                     "Bash",
                     {"command": "python3 workflow/task.py archive --issue-key TAP-777 --dir %s" % relative_target},
@@ -518,7 +518,7 @@ def main():
                 "ask",
             )
             check(
-                "跨工作空间不得借用 Hook cwd 的 当前任务",
+                "跨工位不得借用 Hook cwd 的 当前任务",
                 run_hook(
                     "Bash",
                     {"command": "python3 workflow/task.py archive --issue-key TAP-123 --dir %s" % target_ws},
@@ -527,7 +527,7 @@ def main():
                 "ask",
             )
             check(
-                "复合 prepare 不得用单一 target 代表多个工作空间",
+                "复合 prepare 不得用单一 target 代表多个工位",
                 run_hook(
                     "Bash",
                     {"command": "workflow/task.py archive --issue-key TAP-123 && workflow/task.py archive --issue-key TAP-777 --dir %s" % target_ws},
@@ -536,7 +536,7 @@ def main():
                 "ask",
             )
             check(
-                "目标工作空间 Gate 事件写入目标任务审计",
+                "目标工位 Gate 事件写入目标任务审计",
                 task_store.events_path(target_ws, "TAP-777").is_file(),
                 True,
             )
@@ -546,7 +546,7 @@ def main():
         unbound_target = Path(tempfile.mkdtemp(prefix="aogate-unbound-"))
         try:
             check(
-                "未绑定目标工作空间停止 prepare",
+                "未绑定目标工位停止 prepare",
                 run_hook(
                     "Bash",
                     {"command": "workflow/task.py archive --issue-key TAP-404 --dir %s" % unbound_target},
@@ -843,7 +843,7 @@ def main():
         check("无法可靠剥离 env 时交还 Agent 原生权限", run_hook("Bash", {"command": "env -S 'git push origin feature/TAP-123'"}, ws), "passthrough")
         check("动态命令替换交还 Agent 原生权限", run_hook("Bash", {"command": "$(printf git) push origin feature/TAP-123"}, ws), "passthrough")
         check("env 后动态命令替换交还 Agent 原生权限", run_hook("Bash", {"command": "env AO_MODE=test $(printf git) push origin feature/TAP-123"}, ws), "passthrough")
-        check("工作空间外 git -C push 失败关闭", run_hook("Bash", {"command": "git -C /other push origin feature/TAP-123"}, ws), "deny")
+        check("工位外 git -C push 失败关闭", run_hook("Bash", {"command": "git -C /other push origin feature/TAP-123"}, ws), "deny")
         check("git --git-dir 不得借用原仓库授权", run_hook("Bash", {"command": "git --git-dir=/other/repo.git push origin feature/TAP-123"}, ws), "ask")
         check("git --work-tree 不得借用原工作树授权", run_hook("Bash", {"command": "git --work-tree=/other/tree push origin feature/TAP-123"}, ws), "ask")
         check("env -C 未映射包装交还 Agent 原生权限", run_hook("Bash", {"command": "env -C /other git push origin feature/TAP-123"}, ws), "passthrough")
@@ -867,7 +867,7 @@ def main():
         check("复合同仓库 gh PR 正常合并", run_hook("Bash", {"command": "gh pr create -R acme/widget --title t --body b && gh pr edit 1 --repo acme/widget --title t"}, ws), "allow")
 
         # ---- GitHub 写操作需要 工位 source 的分支上下文 ----------------
-        branchless_ws = make_workspace(initialize_git=False)
+        branchless_ws = make_station(initialize_git=False)
         try:
             grant(branchless_ws)
             branchless_worktree = prepare_task_worktree(branchless_ws)
@@ -878,7 +878,7 @@ def main():
                 branchless_ws,
             )
             check(
-                "同仓多 当前任务但工作空间根缺分支时停止",
+                "同仓多 当前任务但工位根缺分支时停止",
                 branchless_edit["hookSpecificOutput"]["permissionDecision"],
                 "deny",
             )
@@ -954,7 +954,7 @@ def main():
         )
 
         # ---- 并发由独立工位承担，不能覆盖现有 current ------------------
-        other_ws = make_workspace()
+        other_ws = make_station()
         try:
             grant(other_ws, issue_key="TAP-999", work_branch="feature/TAP-999")
             subprocess.run(["git", "checkout", "-q", "-b", "feature/TAP-999"], cwd=other_ws, check=True)

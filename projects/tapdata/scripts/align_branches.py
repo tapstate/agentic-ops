@@ -242,16 +242,16 @@ def module_repository(tapdata_root, repository):
     return Path(tapdata_root).resolve() / name
 
 
-def workspace_tapdata_root(start):
-    """返回离执行路径最近的工作空间绑定所对应的 TapData 模块根目录。"""
+def station_tapdata_root(start):
+    """返回离执行路径最近的工位绑定所对应的 TapData 模块根目录。"""
     current = Path(start).resolve()
     for directory in (current, *current.parents):
-        binding = directory / ".agenticops" / "workspace.json"
+        binding = directory / ".agenticops" / "station.json"
         if not binding.is_file():
             continue
         document = read_json(binding)
         if document.get("schema_version") != 3:
-            raise AlignmentError("旧工作空间必须使用原版本受控解绑并重建")
+            raise AlignmentError("旧工位必须使用原版本受控解绑并重建")
         return directory / "source" / "tapdata", binding
     return None, None
 
@@ -259,31 +259,31 @@ def workspace_tapdata_root(start):
 def resolve_tapdata_root(explicit, execution_directory):
     if explicit:
         return Path(explicit).expanduser().resolve(), "explicit"
-    bound_root, binding = workspace_tapdata_root(execution_directory)
+    bound_root, binding = station_tapdata_root(execution_directory)
     if bound_root is not None:
-        return bound_root, "workspace:%s" % binding
+        return bound_root, "station:%s" % binding
     return Path(execution_directory).resolve(), "cwd"
 
 
-def workspace_binding(start):
+def station_binding(start):
     current = Path(start).resolve()
     for directory in (current, *current.parents):
-        binding = directory / ".agenticops" / "workspace.json"
+        binding = directory / ".agenticops" / "station.json"
         if binding.is_file():
             return directory, binding, read_json(binding)
     return None, None, None
 
 
 def git_refs_cache_file(execution_directory, explicit=None):
-    """缓存属于可写工作空间；source 工程目录 身份来自其绑定，不能由路径猜测。"""
+    """缓存属于可写工位；source 工程目录 身份来自其绑定，不能由路径猜测。"""
     if explicit:
         return Path(explicit).expanduser().resolve(), None
-    workspace, binding, document = workspace_binding(execution_directory)
-    if workspace is None:
-        raise AlignmentError("缺少工作空间绑定；请提供 --cache-file，不能从 tapdata-root 父目录猜测 source 工程目录")
+    station, binding, document = station_binding(execution_directory)
+    if station is None:
+        raise AlignmentError("缺少工位绑定；请提供 --cache-file，不能从 tapdata-root 父目录猜测 source 工程目录")
     if document.get("schema_version") != 3:
-        raise AlignmentError("旧工作空间必须使用原版本受控解绑并重建")
-    return workspace / ".agenticops" / "git-ref-cache-v2.json", workspace / "source"
+        raise AlignmentError("旧工位必须使用原版本受控解绑并重建")
+    return station / ".agenticops" / "git-ref-cache-v2.json", station / "source"
 
 
 def local_repository_state(path):
@@ -1002,7 +1002,7 @@ def add_common_arguments(command_parser):
     command_parser.add_argument("--version", required=True, help="tapdata/tapdata 的目标分支名")
     command_parser.add_argument("--repository", action="append", default=[], help="限定本次处理仓库；可重复。主仓始终包含")
     command_parser.add_argument("--tapdata-root", help="直接包含各 TapData 模块仓库的根目录")
-    command_parser.add_argument("--cache-file", help="Git refs 缓存文件；默认使用当前工作空间缓存")
+    command_parser.add_argument("--cache-file", help="Git refs 缓存文件；默认使用当前工位缓存")
     command_parser.add_argument("--json", action="store_true", help="输出机器可读 JSON")
 
 
@@ -1022,11 +1022,11 @@ def main(argv=None, execution_directory=None):
         total_started = time.monotonic()
         config, repositories = load_configuration(args.product_root)
         if args.command == "apply" and not args.tapdata_root:
-            raise AlignmentError("apply 必须显式提供 --tapdata-root；不得从工作空间或当前目录猜测写入目标")
+            raise AlignmentError("apply 必须显式提供 --tapdata-root；不得从工位或当前目录猜测写入目标")
         tapdata_root, source = resolve_tapdata_root(args.tapdata_root, execution_directory or Path.cwd())
         if args.command == "apply":
-            workspace, _, _ = workspace_binding(tapdata_root)
-            if workspace is not None:
+            station, _, _ = station_binding(tapdata_root)
+            if station is not None:
                 raise AlignmentError("工位源码由任务接管固化基线；不能用分支对齐 apply 改写，请先结束当前任务再接管新任务。独立开发目录不受此限制")
         refresh_mode = "always" if args.command == "apply" or getattr(args, "refresh", False) else "auto"
         progress("开始解析：refresh=%s，TapData 根目录=%s" % (refresh_mode, tapdata_root))

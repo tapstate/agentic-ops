@@ -73,8 +73,8 @@ def resolve(base, task):
         return {"applicable": False}
     warnings = []
     try:
-        root = project_rules.product_root_from_workspace(base)
-        project = project_rules.project_from_workspace(base)
+        root = project_rules.product_root_from_station(base)
+        project = project_rules.project_from_station(base)
         catalog, indexed = _catalog(root)
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
         return {"applicable": True, "available": False,
@@ -102,7 +102,7 @@ def resolve(base, task):
 
 
 def list_strategies(base):
-    root = project_rules.product_root_from_workspace(base)
+    root = project_rules.product_root_from_station(base)
     catalog, _ = _catalog(root)
     return catalog
 

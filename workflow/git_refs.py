@@ -179,22 +179,22 @@ def _cache_write_scope(path):
         return
     from workflow import task_store
     relative = original.relative_to(state)
-    workspace = state.parent.resolve()
-    state = workspace / ".agenticops"
+    station = state.parent.resolve()
+    state = station / ".agenticops"
     target = state / relative
 
     def identity():
         for candidate in (target, *target.parents):
-            if candidate == workspace:
+            if candidate == station:
                 break
             if candidate.is_symlink():
                 raise GitRefsError("工位缓存路径不能是符号链接")
         details = state.stat()
         return (details.st_dev, details.st_ino,
-                (state / "workspace.json").read_bytes(), (state / "init.json").read_bytes())
+                (state / "station.json").read_bytes(), (state / "init.json").read_bytes())
 
     try:
-        with task_store.task_state_lock(workspace):
+        with task_store.task_state_lock(station):
             expected = identity()
 
             def verify():
@@ -203,7 +203,7 @@ def _cache_write_scope(path):
 
             yield verify
     except (OSError, ValueError) as error:
-        raise GitRefsError("工位缓存刷新已停止，未恢复旧工作空间：%s" % error) from error
+        raise GitRefsError("工位缓存刷新已停止，未恢复旧工位：%s" % error) from error
 
 
 def _parse_heads(output):
@@ -363,11 +363,11 @@ def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
             for scope in requested
         ):
             return _cached_result(existing, requested, moment, max_age_seconds)
-    with _cache_write_scope(cache_file) as verify_workspace:
+    with _cache_write_scope(cache_file) as verify_station:
         with _cache_lock(cache_path):
             document = _read_cache(cache_path)
             result = collect(document)
-            verify_workspace()
+            verify_station()
             _write_cache(cache_path, document)
     return result
 

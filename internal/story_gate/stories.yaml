@@ -33,7 +33,7 @@ stories:
     category: product
     title: 安装并接入多种 Agent
     document: docs/user-stories/v1/prod-001-install-and-connect-agent.md
-    protected_paths: [agenticops, adapters/**, bootstrap/**, contracts/**, tests/test_install.sh, tests/test_adapter_boundary.py, tests/test_contracts.py, tests/test_workspace_compatibility.py, tests/test_station_bootstrap.py, tests/test_shared_repositories.py]
+    protected_paths: [agenticops, adapters/**, bootstrap/**, contracts/**, tests/test_install.sh, tests/test_adapter_boundary.py, tests/test_contracts.py, tests/test_station_compatibility.py, tests/test_station_bootstrap.py, tests/test_shared_repositories.py]
     acceptance_checks: [python_runtime, resource_contracts, product_install_boundary, release_workflow]
     evidence_requirements:
       - macOS 与 Linux 的轻依赖安装边界
@@ -47,13 +47,13 @@ stories:
     acceptance_checks: [python_runtime, resource_contracts, product_install_boundary, release_workflow]
     evidence_requirements:
       - 流程检查点、旧 run 拒绝、重复推进与确认绑定校验结果
-      - 新工作空间无通用 Hook、旧接线显式迁移与原生工具边界
+      - 新工位无通用 Hook、旧接线显式迁移与原生工具边界
 
   - story_id: PROD-003
     category: product
     title: 推进并恢复多仓库研发任务
     document: docs/user-stories/v1/prod-003-multi-repository-task.md
-    protected_paths: [workflow/**, tests/test_engineering_baseline.py, tests/test_workflow.py, tests/test_repair_strategy.py, tests/test_failures.py, tests/test_repository_recovery.py, tests/test_checkpoints.py, tests/test_quality.py, tests/test_issue_versions.py, tests/test_jira_status.py, tests/test_jira_watermark.py, tests/test_git_refs.py, tests/station_fixture.py, tests/test_station_state.py, tests/test_station_resources.py, tests/test_station_source.py, tests/test_station_lifecycle.py, tests/test_task_identity.py]
+    protected_paths: [workflow/**, tests/test_engineering_baseline.py, tests/test_workflow.py, tests/test_repair_strategy.py, tests/test_failures.py, tests/test_repository_recovery.py, tests/test_checkpoints.py, tests/test_quality.py, tests/test_issue_versions.py, tests/test_jira_status.py, tests/test_jira_watermark.py, tests/test_git_refs.py, tests/station_fixture.py, tests/test_station_state.py, tests/test_station_resources.py, tests/test_station_clean.py, tests/test_station_source.py, tests/test_station_lifecycle.py, tests/test_task_identity.py]
     acceptance_checks: [python_runtime, resource_contracts, product_install_boundary, release_workflow]
     evidence_requirements:
       - 阶段、准入、授权、pending 和恢复结果

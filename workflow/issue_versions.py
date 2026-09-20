@@ -13,7 +13,7 @@ FACT = "issue_version_plan"
 
 
 def rules(base, task):
-    return project_rules.class_spec(project_rules.load_admission(workspace=base),
+    return project_rules.class_spec(project_rules.load_admission(station=base),
                                    task["task_class"]).get("issue_versions")
 
 
@@ -84,7 +84,7 @@ def resolve(base, task, payload):
     preferred = spec["preferred_branch"]
     if develop["status"] == "present" and branch != preferred:
         raise ValueError("优先分支存在同一缺陷，应在该分支修复")
-    profile = project_rules.load_profile(workspace=base)
+    profile = project_rules.load_profile(station=base)
     origin = project_rules.resolve_branches(profile, spec["product_repository"])["origin"]
     refs = remote_refs(origin, {preferred, branch})
     if {preferred, branch} - refs.keys():
@@ -109,7 +109,7 @@ def problems(base, task):
     plan = task.get("facts", {}).get(FACT)
     if not isinstance(plan, dict) or plan.get("run_id") != task["run_id"] or plan.get("rules_digest") != digest(spec):
         return ["影响版本与优先修复线尚未核验：使用 task.py issue-versions 导入 Jira fields.versions 及 develop 核验证据"]
-    profile = project_rules.load_profile(workspace=base)
+    profile = project_rules.load_profile(station=base)
     result = []
     current_origin = project_rules.resolve_branches(profile, spec["product_repository"])["origin"]
     if plan["origin"] != current_origin:

@@ -1,7 +1,6 @@
-"""产品根下可丢弃的下载缓存；锁内刷新并向独立工位传输对象。"""
+"""外置可丢弃源码池；锁内刷新并向独立工位传输对象。"""
 from contextlib import contextmanager
 import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -10,21 +9,24 @@ import tempfile
 from workflow import project_rules
 
 
-def pool_path(workspace, name, origin):
-    binding = json.loads((Path(workspace) / ".agenticops/workspace.json").read_text())
-    return pool_path_at_root(binding["product_root"], name, origin)
+def pool_path(station, name, origin):
+    binding = json.loads((Path(station) / ".agenticops/station.json").read_text())
+    return pool_path_at_root(binding["source_pool"], name, origin)
 
 
 def pool_path_at_root(root, name, origin):
-    root = Path(root).resolve()
+    """返回 <source-pool>/repositories/<owner>/<repo>.git。
+
+    同名仓库的 origin 是该路径唯一身份；不自动为冲突创建第二层目录。
+    """
+    root = Path(root).expanduser().resolve()
     if (not isinstance(name, str) or not name or Path(name).is_absolute()
             or any(part in ("", ".", "..") for part in name.split("/"))):
         raise ValueError("源码池仓库名称无效")
     endpoint = project_rules.canonical_repository_endpoint(origin)
     if not endpoint:
         raise ValueError("源码池 origin 无效")
-    key = hashlib.sha256(endpoint.encode()).hexdigest()
-    path = root / ".local/source-pool" / key / name
+    path = root / "repositories" / (name + ".git")
     current = root
     for part in path.relative_to(root).parts:
         current /= part
@@ -53,9 +55,9 @@ def identity(path, origin, git):
 
 
 @contextmanager
-def refreshed(workspace, name, origin, git):
-    binding = json.loads((Path(workspace) / ".agenticops/workspace.json").read_text())
-    with refreshed_at_root(binding["product_root"], name, origin, git) as path:
+def refreshed(station, name, origin, git):
+    binding = json.loads((Path(station) / ".agenticops/station.json").read_text())
+    with refreshed_at_root(binding["source_pool"], name, origin, git) as path:
         yield path
 
 

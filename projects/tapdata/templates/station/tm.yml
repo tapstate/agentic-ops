@@ -1,4 +1,4 @@
-# 复制到工作空间 config/tm.yml；秘密通过子进程环境注入，不写在模板中。
+# 复制到工位 config/tm.yml；秘密通过子进程环境注入，不写在模板中。
 server:
   address: 127.0.0.1
   port: 3030

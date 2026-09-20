@@ -17,7 +17,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workflow import authorization, ci, evidence, failures, issue_versions, pr_ready, quality, quality_contract, task, task_store
-from station_fixture import save_task as save_station_task, initialize_workspace
+from station_fixture import save_task as save_station_task, initialize_station
 
 
 def proof():
@@ -48,7 +48,7 @@ class QualityTests(unittest.TestCase):
             rules["pr_ready"].pop("required_verification", None)
             path.write_text(json.dumps(rules))
         (self.base / ".agenticops").mkdir()
-        (self.base / ".agenticops/workspace.json").write_text(json.dumps({"project": "tapdata", "product_root": str(product)}))
+        (self.base / ".agenticops/station.json").write_text(json.dumps({"project": "tapdata", "product_root": str(product)}))
         self.task = {"issue_key": "TAP-123", "run_id": "run-0123456789ab", "task_class": "defect_fix",
                      "stage": "implementation", "facts": {"fix_plan": {
                          "format": "structured-v1",
@@ -119,6 +119,41 @@ class QualityTests(unittest.TestCase):
         self.assertTrue(task._check_advance(self.task, "implementation", self.base, spec))
         with self.assertRaisesRegex(ValueError, "尚未有效确认"):
             quality.q2_digest(self.base, self.task)
+
+    def test_scope_amend_invalidates_q1_q2_and_publication_without_rewriting_log(self):
+        self.feature_profile()
+        self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
+        self.publish_checkpoint("q2-plan")
+        prior = self.view()
+        state = quality.load(self.base, self.task)
+        self.task["repositories"][0]["approved_scope"] = "新增删除对账"
+        self.save_task()
+        after = self.view()
+        for checkpoint in ("q1-intake", "q2-plan"):
+            self.assertFalse(after["checkpoints"][checkpoint]["reviewed"])
+            self.assertNotEqual(prior["checkpoints"][checkpoint]["digest"], after["checkpoints"][checkpoint]["digest"])
+        self.assertEqual(state, quality.load(self.base, self.task))
+        self.assertTrue(prior["publications"]["q2-plan"]["snapshot_current"])
+        self.assertFalse(after["publications"]["q2-plan"]["snapshot_current"])
+
+    def test_persisted_verification_event_replays_original_scope(self):
+        from workflow import verification
+        self.feature_profile()
+        ctx = quality.context(self.base, self.task)
+        ctx["repositories"]["tapdata/tapdata"]["live_revision"] = "a" * 40
+        with mock.patch.object(quality, "context", return_value=ctx):
+            self.apply("verification", {"kind": "review", "repository": "tapdata/tapdata",
+                "target_revision": "a" * 40, "source_ref": "fixture:review", "complete": True, "items": []})
+        path = quality.state_path(self.base, self.task)
+        original_bytes = path.read_bytes()
+        state = quality.load(self.base, self.task)
+        self.assertNotIn("bindings", state["events"][-1]["command"]["payload"])
+        model = quality.replay(state)
+        self.assertEqual([], verification.problems(model, ctx, ["review"]))
+        changed = copy.deepcopy(ctx)
+        changed["repositories"]["tapdata/tapdata"]["approved_scope"] = "expanded"
+        self.assertTrue(verification.problems(model, changed, ["review"]))
+        self.assertEqual(original_bytes, path.read_bytes())
 
     def test_feature_publication_contains_complete_plan_and_accepts_draft(self):
         self.feature_profile(); self.select(); self.checkpoint("q1-intake")
@@ -226,7 +261,7 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(rules["plan_contract"]["fact_key"], "implementation_plan")
         self.assertFalse(rules["structured_fix_plan"])
         self.assertFalse(rules["pr_ready"]["require_linked_test_tasks"])
-        self.assertIn("feature_change", quality.project_rules.load_profile(workspace=self.base)
+        self.assertIn("feature_change", quality.project_rules.load_profile(station=self.base)
                          ["jira"]["status_sync"]["task_classes"])
         self.apply("item", {"plan": {"id": "case-a", "checkpoint": "q4-acceptance",
             "timing": "after_fix", "case_ref": "src/test/FeatureTest.java#behavior", "case_version": "test-v1",
@@ -875,7 +910,7 @@ class QualityTests(unittest.TestCase):
 
     def test_quality_does_not_replace_authorization_or_green_gate(self):
         self.plan(); self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
-        spec = quality.project_rules.load_admission(workspace=self.base)
+        spec = quality.project_rules.load_admission(station=self.base)
         problems = task._check_advance(self.task, "implementation", self.base, spec)
         self.assertTrue(any("授权" in p for p in problems))
         self.execute(result="FAIL", kind="assertion")
@@ -929,7 +964,7 @@ class FeatureFlowTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory(prefix="ao-feature-flow-")
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name).resolve()
-        self.ws, self.product = self.root / "workspace", self.root / "product"
+        self.ws, self.product = self.root / "station", self.root / "product"
         self.seed, self.remote = self.root / "seed", self.root / "remote.git"
         self.repo = "tapdata/tapdata"
         shutil.copytree(ROOT / "projects", self.product / "projects")
@@ -944,12 +979,12 @@ class FeatureFlowTests(unittest.TestCase):
         doc = json.loads(catalog.read_text())
         doc["repositories"][self.repo]["origin"] = str(self.remote)
         task_store._write_json_atomic(catalog, doc)
-        task_store._write_json_atomic(self.ws / ".agenticops/workspace.json", {
-            "schema_version": 3, "product_root": str(self.product), "project": "tapdata",
-            "workspace_id": "3" * 32, "agents": ["codex"],
+        task_store._write_json_atomic(self.ws / ".agenticops/station.json", {
+            "schema_version": 4, "product_root": str(self.product), "source_pool": str(self.root / "pool"), "project": "tapdata",
+            "station_id": "3" * 32, "agents": ["codex"],
             "branch_identity": {"schema_version": 1, "git_name": "Fixture", "source": "git_global_user_name"}})
         task_store.initialize_current(self.ws)
-        initialize_workspace(self.ws)
+        initialize_station(self.ws)
         for name in ("source", "config", "runtime", "archive"):
             (self.ws / name).mkdir(exist_ok=True)
         profiles = self.product / "projects/tapdata/engineering-profiles.json"
@@ -1183,6 +1218,21 @@ class VerificationContractTests(unittest.TestCase):
         self.v.record(model, p, self.ctx)
         self.assertEqual([], self.v.problems(model, self.ctx, ["local"]))
         self.assertEqual("UNKNOWN", model["verification"]["a/repo"]["local"]["data"]["results"][0]["result"])
+
+    def test_scope_change_invalidates_same_sha_material_and_keeps_history(self):
+        for field in ("approved_scope", "verification_method", "catalog_digest", "base_branch", "work_branch"):
+            with self.subTest(field=field):
+                ctx = copy.deepcopy(self.ctx)
+                model = {}
+                self.v.record(model, self.p, ctx)
+                saved = copy.deepcopy(model)
+                ctx["repositories"]["a/repo"][field] = "changed"
+                self.assertTrue(self.v.problems(model, ctx, ["local"]))
+                self.assertEqual(saved, model)
+                # 历史日志按事件时 context 重放，无需迁移状态或更改 epoch。
+                replayed = {}
+                self.v.record(replayed, self.p, self.ctx)
+                self.assertEqual(saved, replayed)
 
     def test_pending_review_and_unresolved_failure_block(self):
         p = {"kind": "review", "repository": "a/repo", "target_revision": "a" * 40,

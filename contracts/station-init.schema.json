@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://agenticops.tapdata.net/contracts/workspace-init.schema.json",
-  "title": "AgenticOps Project Workspace Initialization",
+  "$id": "https://agenticops.tapdata.net/contracts/station-init.schema.json",
+  "title": "AgenticOps Project Station Initialization",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "product_ref", "generated_at", "artifacts"],
@@ -21,7 +21,7 @@
     },
     "schema_version": { "enum": [1, 2] },
     "product_ref": { "type": "string", "minLength": 1 },
-    "workspace_state_epoch": { "type": "integer", "minimum": 1 },
+    "station_state_epoch": { "type": "integer", "minimum": 1 },
     "generated_at": { "type": "string", "minLength": 1 },
     "artifacts": {
       "type": "array",

@@ -2,7 +2,7 @@
 
 ## 共同验证材料
 
-使用现有 `quality.py apply --issue-key <key> --expected-run-id <run> --expected-revision <当前revision> --input <json> --dir <workspace>`，输入为 `{"action":"verification","payload":{...}}`。每个仓库分别提交材料，内部自动绑定当前任务各仓源码版本；不是新任务类型或执行引擎。写前先 `quality.py status`，source_sync 还会实际读取已准备的任务工作树并核对包含关系。原生报告的真实性、依赖清单和语义分析仍由 Agent 核对，工具不认证来源或判断断言含义。
+使用现有 `quality.py apply --issue-key <key> --expected-run-id <run> --expected-revision <当前revision> --input <json> --dir <station>`，输入为 `{"action":"verification","payload":{...}}`。每个仓库分别提交材料，内部自动绑定当前任务各仓源码版本；不是新任务类型或执行引擎。写前先 `quality.py status`，source_sync 还会实际读取已准备的任务工作树并核对包含关系。原生报告的真实性、依赖清单和语义分析仍由 Agent 核对，工具不认证来源或判断断言含义。
 
 所有材料提供 kind、repository、target_revision（当前完整 SHA 或首轮本地源码指纹）、source_ref。其余内容如下：
 
@@ -23,7 +23,7 @@ TapData 功能和缺陷使用相同配置：Q3、Q4 要求 local/source_sync，Q
 
 研发已手工处理未解决问题时，使用 manual_result，提供 finish 的实际结果/版本/报告字段，并附 reason 和真实用户消息 proof；不消耗自动修复轮数。仍有 running 轮次时先 finish 保留当时实际结果，再记录人工处理。没有明确人工来源或实际验证，不能声明恢复成功。
 
-当前工位采用 epoch 4；材料只属于当前 run。旧状态由原版清理，新版本不迁移历史确认。生成/清理与跨版编排的顺序见[更新与回退](update-and-rollback.md)。发布、清理和业务验收分别授权。
+当前工位采用 epoch 5；材料只属于当前 run。旧状态由原版清理，新版本不迁移历史确认。生成/清理与跨版编排的顺序见[更新与回退](update-and-rollback.md)。发布、清理和业务验收分别授权。
 
 ## PR 审查返工
 
@@ -37,7 +37,7 @@ Q5 前回读所有必要意见处理结论、当前 PR Head 的审查状态和 C
 
 ## 失败归因与有限修复
 
-Agent 用原生工具分析失败。只有证据指向当前变更才自行修复；已有失败、环境问题及归因不明由研发决定。使用 `workflow/failures.py status --issue-key <key> --dir <workspace>` 回读当前 run 的失败记录，随后以 `apply --expected-run-id <run> --revision <读取的 revision> --input <事件.json>` 记录操作（同样携带 issue-key、dir）。输入保存在当前 run 的受控交互路径。
+Agent 用原生工具分析失败。只有证据指向当前变更才自行修复；已有失败、环境问题及归因不明由研发决定。使用 `workflow/failures.py status --issue-key <key> --dir <station>` 回读当前 run 的失败记录，随后以 `apply --expected-run-id <run> --revision <读取的 revision> --input <事件.json>` 记录操作（同样携带 issue-key、dir）。输入保存在当前 run 的受控交互路径。
 
 | action | 必需内容与含义 |
 |---|---|
@@ -61,12 +61,12 @@ Agent 为 Jira/MCP 调用和质量动作准备的 JSON 输入、草稿、回执�
 ```sh
 interaction_file="$(python3 <agenticops-root>/workflow/task.py interaction-path \
   --issue-key "$task_key" --expected-run-id "$task_run" \
-  --name jira-snapshot.json --dir "$project_workspace")"
+  --name jira-snapshot.json --dir "$project_station")"
 ```
 
 文件名使用 lowercase-kebab-case，可选扩展名 json/jsonl/log/md/txt。interaction-path 返回 `.agenticops/evidence/interactions/` 内路径，仅当前 run 可写；归档后停止开发，release/clean 收尾移除活动副本，档案保留必要脱敏材料。不用根目录文件名前缀模拟任务归属。
 
-旧状态不在线迁移或猜测归属；退出当前任务后，明确 workspace purge 注销受管状态，再按新版本生成。未知残留阻止清理；需保留材料先导出核验。见[更新与回退](update-and-rollback.md)。
+旧状态不在线迁移或猜测归属；退出当前任务后，明确 station purge 注销受管状态，再按新版本生成。未知残留阻止清理；需保留材料先导出核验。见[更新与回退](update-and-rollback.md)。
 
 ## 任务类型与质量配置
 
@@ -76,7 +76,7 @@ interaction_file="$(python3 <agenticops-root>/workflow/task.py interaction-path 
 
 任务专用方案摘要绑定任务类型和配置指定的方案事实；授权签发、续签及推进使用同一选择。已确认的方案、验收或规则实质变化后，重新核对相关确认；未参与确认的展示备注不影响方案。没有启用质量检查的任务不能签发方案授权，不能通过空配置代替检查。增加配置支持不等于功能任务已完成 Jira 或真实测试接入。
 
-本次能力扩展不增加本地状态字段、路径或事件格式，`workspace_state_epoch` 保持 1。未启用专用配置的旧缺陷任务继续使用原规则及相同摘要；旧事件按记录的规则重放。给已有任务切换质量配置属于规则变化，旧确认不会自动迁移为新规则下的确认。专用配置须部署在支持此能力的产品版本；回退旧产品前结束或停用这些任务，不能将新能力下的任务当作已验证的旧版续办路径。
+本次能力扩展不增加本地状态字段、路径或事件格式，`station_state_epoch` 保持 1。未启用专用配置的旧缺陷任务继续使用原规则及相同摘要；旧事件按记录的规则重放。给已有任务切换质量配置属于规则变化，旧确认不会自动迁移为新规则下的确认。专用配置须部署在支持此能力的产品版本；回退旧产品前结束或停用这些任务，不能将新能力下的任务当作已验证的旧版续办路径。
 
 ## 流程与检查点
 
@@ -129,7 +129,7 @@ flowchart TD
 
 ## 非阻断 Jira 状态同步
 
-初始化后先用 `task.py snapshot --issue-key <issue> --expected-run-id <run> --input <snapshot.json> --dir <workspace>` 保存已读的 issue/source_ref。该入口同 run 幂等，独立于水印、Jira 权限和产品版本查询；后续本地普通事实由 record 维护，在相关检查点确认。
+初始化后先用 `task.py snapshot --issue-key <issue> --expected-run-id <run> --input <snapshot.json> --dir <station>` 保存已读的 issue/source_ref。该入口同 run 幂等，独立于水印、Jira 权限和产品版本查询；后续本地普通事实由 record 维护，在相关检查点确认。
 
 接管时复用一次 Jira 初始快照，`jira_watermark.py prepare` 保存本地初始事实和产品版本，再准备原生回写。失败或未知结果记录为同步待办，允许推进 task_intake；未知写入先回读，同 run 恢复不重复导入或覆盖初始事实。
 
@@ -155,11 +155,11 @@ Q4 有效确认并进入 `ci_validation` 后，以 `tests_passed` 节点执行�
 
 ```sh
 python3 "$agenticops_root/workflow/jira_status.py" prepare --expected-run-id "$task_run" \
-  --issue-key "$task_key" --trigger takeover --input "$jira_snapshot" --dir "$project_workspace"
+  --issue-key "$task_key" --trigger takeover --input "$jira_snapshot" --dir "$project_station"
 
 python3 "$agenticops_root/workflow/jira_status.py" complete --expected-run-id "$task_run" \
   --issue-key "$task_key" --trigger takeover --outcome failed \
-  --input "$jira_readback" --message "Jira 原始错误摘要" --dir "$project_workspace"
+  --input "$jira_readback" --message "Jira 原始错误摘要" --dir "$project_station"
 ```
 
 `prepare.outcome=ready` 时只使用返回的 `transition_id` 调用一次原生 Jira transition；这是 Agent 协作约定，Workflow 不拦截原生调用。调用超时或结果不明时先回读；已到目标状态由 `complete` 记为成功，否则按 `unknown` 记录，不盲目重放。同一 run 的同一节点再次 prepare 只返回原记录。
@@ -209,7 +209,7 @@ python3 "$agenticops_root/workflow/jira_status.py" complete --expected-run-id "$
 
 ```sh
 python3 "$agenticops_root/workflow/pr_ready.py" \
-  --issue-key "$task_key" --jira-input "$jira_test_tasks" --dir "$project_workspace"
+  --issue-key "$task_key" --jira-input "$jira_test_tasks" --dir "$project_station"
 ```
 
 工具只在以下三组均通过时返回 ready：从 Jira「已链接工作项」派生的受管 Test 非空，每个 Test 的 Test Type 与用例版本可回读，且每个 Test 都在 Q4 以同一 `case_ref`、当前 Jira 用例版本和对应方式建立检查项，并由用户基于当前 SHA 的 PASS 执行证据逐项作出 `accept` 确认；每个任务仓库都记录 PR，最新 Checks 为 `success` 且 Head 等于当前任务代码；Q1-Q4 及其检查项均有效，Jira 评论同步仅列警告。Jira Test 工作项本身不要求为 Done。没有符合关系和类型的 Test、未逐项确认、Checks 为空、跳过、未知、等待或失败、Head 漂移、`defer/accept_risk/rework` 都会列为待办。`Test Coverage Decision / Exception Details` 只能记录合规例外，不能替代 Test 关联。Jira 状态同步失败单独列入 `jira_status_todos`，不改变三类验收事实；Engineering DRI 处理待办后重新核对，并手工执行 `Pull Request Submitted`。
@@ -218,7 +218,7 @@ python3 "$agenticops_root/workflow/pr_ready.py" \
 
 任务开始保留一次 Jira 初始快照；本次采用的版本由用户确认并记录在本地，后续读取不覆盖它。版本名称不映射 Git 分支。先核验 develop，存在同一缺陷时优先在 develop 修复；否则独立确认一条真实实施分支。只核验优先分析分支与实际选择分支，其它受影响版本的合并与验证列为后续事项。
 
-用 `task.py issue-versions --issue-key <issue> --expected-run-id <run> --input <json> --dir <workspace>` 导入；source_ref、完整 SHA 和确认来源必须来自实际记录：
+用 `task.py issue-versions --issue-key <issue> --expected-run-id <run> --input <json> --dir <station>` 导入；source_ref、完整 SHA 和确认来源必须来自实际记录：
 
 ```json
 {
@@ -287,14 +287,14 @@ AO 不新增测试执行器或测试平台客户端。Agent 用现有工具读�
 
 ```sh
 python3 "$agenticops_root/workflow/quality.py" status \
-  --dir "$project_workspace" --issue-key "$task_key"
+  --dir "$project_station" --issue-key "$task_key"
 ```
 
-`status` 返回当前 `run_id/revision`、项目方式、缺失事实、各项计划及证据、检查点的 `due/not_due/problems`、具体 `handoff`、评论是否 `published` 和确认所需 digest。`task.py next --issue-key <issue> --dir <workspace>` 汇总下一阶段门禁、检查点和待回读评论，只读且不授予权限。每次写入从最新快照取得版本，避免覆盖别人的决定：
+`status` 返回当前 `run_id/revision`、项目方式、缺失事实、各项计划及证据、检查点的 `due/not_due/problems`、具体 `handoff`、评论是否 `published` 和确认所需 digest。`task.py next --issue-key <issue> --dir <station>` 汇总下一阶段门禁、检查点和待回读评论，只读且不授予权限。每次写入从最新快照取得版本，避免覆盖别人的决定：
 
 ```sh
 python3 "$agenticops_root/workflow/quality.py" apply \
-  --dir "$project_workspace" --issue-key "$task_key" \
+  --dir "$project_station" --issue-key "$task_key" \
   --expected-run-id "$run_id" --expected-revision "$revision" \
   --input "$quality_input"
 ```
@@ -361,4 +361,4 @@ Jira 评论采用简洁可读文本。当前 Rovo addCommentToJiraIssue 的 comm
 
 每个阶段均可运行 task.py next 查看 blockers 与 warnings，PR 提交后运行 evidence.py 汇总执行过程被跳过的处理与警告。外部同步失败只暂停该写入或重复尝试，完整测试、CI 和用户验收条件继续由检查点核验。
 
-字段写入成功后，用 `external_sync.py status --issue-key <issue> --dir <workspace>` 获取本地 fact_digests，再以 `readback --expected-run-id <run> --input <json>` 导入 `{fact_key, expected_fact_digest, jira_field, issue, source_ref}`。issue 是实际 Jira 回读，字段必须与本地有效值一致；problem_version 按配置的影响版本字段核对版本名称，不要求本地有 Jira ID。同步回执单独持久化，不改变原始快照、方案确认和阶段；本地事实再次改变后旧回执失效。
+字段写入成功后，用 `external_sync.py status --issue-key <issue> --dir <station>` 获取本地 fact_digests，再以 `readback --expected-run-id <run> --input <json>` 导入 `{fact_key, expected_fact_digest, jira_field, issue, source_ref}`。issue 是实际 Jira 回读，字段必须与本地有效值一致；problem_version 按配置的影响版本字段核对版本名称，不要求本地有 Jira ID。同步回执单独持久化，不改变原始快照、方案确认和阶段；本地事实再次改变后旧回执失效。

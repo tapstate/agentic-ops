@@ -24,11 +24,12 @@ class StationTests(unittest.TestCase):
         self.product = self.root / "product"
         shutil.copytree(ROOT / "projects", self.product / "projects")
         shutil.copytree(ROOT / "contracts", self.product / "contracts")
+        shutil.copytree(ROOT / "policies", self.product / "policies")
         (self.ws / ".agenticops").mkdir(parents=True)
         for name in ("source", "config", "runtime", "archive"):
             (self.ws / name).mkdir()
-        self.write(self.ws / ".agenticops/workspace.json", {"schema_version": 3, "product_root": str(self.product), "project": "tapdata", "workspace_id": "a" * 32, "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"}})
-        self.write(self.ws / ".agenticops/init.json", {"workspace_state_epoch": 4})
+        self.write(self.ws / ".agenticops/station.json", {"schema_version": 4, "product_root": str(self.product), "source_pool": str(self.root / "pool"), "project": "tapdata", "station_id": "a" * 32, "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"}})
+        self.write(self.ws / ".agenticops/init.json", {"station_state_epoch": 8})
         task_store.initialize_current(self.ws)
 
     def prepare_engineering(self, count=1):
@@ -161,7 +162,7 @@ class StationTests(unittest.TestCase):
 
     def test_scope_binding_and_existing_branch_rejected(self):
         task = self.takeover()
-        with self.assertRaisesRegex(ValueError, "必须使用工作空间 git_name"):
+        with self.assertRaisesRegex(ValueError, "必须使用工位 git_name"):
             station.scope_change(self.ws, task["issue_key"], task["run_id"], task["_revision"], "op-scope-wrong", "tapdata/tapdata", "fix/test", "develop", ["file.txt"], "unit tests")
         station.scope_change(self.ws, task["issue_key"], task["run_id"], task["_revision"], "op-scope-one", "tapdata/tapdata", None, "develop", ["file.txt"], "unit tests")
         current = task_store.read_current(self.ws)["current"]
@@ -171,7 +172,7 @@ class StationTests(unittest.TestCase):
         self.assertEqual(self.git(self.ws / "source/tapdata/tapdata", "branch", "--show-current"), expected)
 
     def test_incomplete_archive_does_not_complete_or_unbind(self):
-        self.prepare_engineering(9)
+        self.prepare_engineering()
         task = self.takeover()
         from workflow import station_resources
         with mock.patch.object(station_resources, "clean", side_effect=AssertionError("archive does not reset")):
@@ -180,14 +181,14 @@ class StationTests(unittest.TestCase):
         self.assertEqual(current["outcome"], "in_progress")
         record = station_archive.verify(self.ws, current["archive_ref"], current)
         self.assertEqual(record["task_result"], "incomplete")
-        binding_path = self.ws / ".agenticops/workspace.json"
+        binding_path = self.ws / ".agenticops/station.json"
         binding = json.loads(binding_path.read_text())
-        binding["workspace_id"] = "b" * 32
+        binding["station_id"] = "b" * 32
         self.write(binding_path, binding)
         with self.assertRaisesRegex(ValueError, "工位"):
             station_archive.verify(self.ws, current["archive_ref"], current)
         evidence = json.loads((self.ws / current["archive_ref"]["path"] / "evidence.json").read_text())
-        self.assertEqual(len(evidence["current"]["engineering_baseline"]["repositories"]), 9)
+        self.assertEqual(len(evidence["current"]["engineering_baseline"]["repositories"]), 1)
         self.assertNotIn("repositories", evidence["current"])
         with self.assertRaisesRegex(ValueError, "归档"):
             task_store.require_development(self.ws, current)
@@ -277,7 +278,7 @@ class StationTests(unittest.TestCase):
         self.assertEqual(proof["dispositions"]["tapdata/tapdata"], "merged")
 
     def test_real_resources_clean_and_sequential_takeover(self):
-        self.prepare_engineering(9)
+        self.prepare_engineering()
         from workflow import station_resources
         task = self.takeover()
         path = self.ws / "runtime/logs/build.log"
@@ -292,7 +293,7 @@ class StationTests(unittest.TestCase):
         self.assertNotEqual(self.takeover("op-next-real")["run_id"], task["run_id"])
 
     def test_release_keeps_completed_fact_after_neutral_crash(self):
-        self.prepare_engineering(9)
+        self.prepare_engineering()
         from workflow import station_resources, task as task_cli
         task = self.takeover()
         task["stage"] = "ci_validation"
@@ -556,6 +557,116 @@ class StationTests(unittest.TestCase):
         record = station_archive.verify(self.ws, archived["archive_ref"], archived)
         self.assertEqual(record["task_result"], "incomplete")
         self.assertEqual(record["resource_inventory_digest"], plan["digest"])
+
+    def amend_fixture(self):
+        task = self.takeover()
+        task["stage"] = "task_intake"
+        task_store.write_task(self.ws, task)
+        station.scope_change(self.ws, task["issue_key"], task["run_id"], task["_revision"],
+                             "op-amend-register", "tapdata/tapdata", None, "develop", ["old"], "unit")
+        return task_store.read_task(self.ws)
+
+    def amend_args(self, task, suffix="one"):
+        binding = task["task_repositories"]["tapdata/tapdata"]
+        return [self.ws, task["issue_key"], task["run_id"], task["_revision"],
+                "op-amend-" + suffix, "tapdata/tapdata", baseline.digest(binding),
+                self.git(self.ws / "source/tapdata/tapdata", "rev-parse", "HEAD"),
+                ["new-" + suffix], "unit and integration", "user:confirmed-minimal-amend"]
+
+    def test_amend_scope_preserves_binding_revokes_and_is_idempotent(self):
+        task = self.amend_fixture()
+        args = self.amend_args(task)
+        before = task["task_repositories"]["tapdata/tapdata"]
+        self.write(self.ws / ".agenticops/authorization.json", {"status": "active"})
+        station.amend_scope(*args)
+        after = task_store.read_task(self.ws)
+        expected = dict(before, approved_scope=args[8], verification_method=args[9])
+        self.assertEqual(expected, after["task_repositories"]["tapdata/tapdata"])
+        self.assertEqual(task["_revision"] + 1, after["_revision"])
+        auth = json.loads((self.ws / ".agenticops/authorization.json").read_text())
+        self.assertEqual("revoked", auth["status"])
+        station.amend_scope(*args)
+        self.assertEqual(after, task_store.read_task(self.ws))
+        with self.assertRaisesRegex(ValueError, "相同 operation_id"):
+            station.amend_scope(*args[:-1], "different-decision")
+
+    def test_amend_scope_rejects_changed_inputs_without_writes(self):
+        task = self.amend_fixture()
+        args = self.amend_args(task)
+        for index, value in ((2, "TAP-123-00000000"), (3, args[3] - 1),
+                             (5, "tapdata/not-registered"), (6, "0" * 64),
+                             (7, "0" * 40), (8, []), (9, ""), (10, "")):
+            with self.subTest(index=index):
+                snapshot = {p: p.read_bytes() for p in (self.ws / ".agenticops").rglob("*") if p.is_file()}
+                changed = list(args); changed[index] = value
+                with self.assertRaises(ValueError):
+                    station.amend_scope(*changed)
+                self.assertEqual(snapshot, {p: p.read_bytes() for p in snapshot})
+        no_op = list(args); no_op[8:10] = [["old"], "unit"]
+        with self.assertRaisesRegex(ValueError, "未变化"):
+            station.amend_scope(*no_op)
+        path = self.ws / "source/tapdata/tapdata"
+        for kind in ("untracked", "unstaged", "staged"):
+            target = path / ("extra.txt" if kind == "untracked" else "file.txt")
+            target.write_text("modified")
+            if kind == "staged":
+                self.git(path, "add", "file.txt")
+            with self.assertRaises(ValueError):
+                station.amend_scope(*args)
+            if kind == "untracked":
+                target.unlink()
+            else:
+                target.write_text("baseline\n")
+                self.git(path, "add", "file.txt")
+        self.git(path, "checkout", "--detach")
+        with self.assertRaisesRegex(ValueError, "分支或 Head"):
+            station.amend_scope(*args)
+
+    def test_amend_scope_rejects_late_stage_or_delivery(self):
+        task = self.amend_fixture()
+        for stage, changes in (("implementation", {}), ("task_intake", {"deliveries": [{"pr": 1}]}),
+                               ("design_review", {"observation": {"results": {"ci": "passed"}}}),
+                               ("task_intake", {"disposition": "no_change"})):
+            with self.subTest(stage=stage, changes=changes):
+                task = task_store.read_task(self.ws)
+                task["stage"] = stage
+                binding = task["task_repositories"]["tapdata/tapdata"]
+                binding.update(deliveries=[], observation=None, disposition="pending")
+                binding.update(changes)
+                task.pop("repositories", None)
+                task_store.write_task(self.ws, task)
+                args = self.amend_args(task)
+                with self.assertRaises(ValueError):
+                    station.amend_scope(*args)
+
+    def test_amend_scope_recovers_each_durable_boundary_once(self):
+        from workflow import task as task_cli
+        task = self.amend_fixture()
+        points = [(station_operation, "begin"), (station_operation, "intent"),
+                  (task_cli, "revoke_authorization"), (task_store, "write_task"),
+                  (station_operation, "receipt"), (station_operation, "finish")]
+        for index, (module, name) in enumerate(points):
+            with self.subTest(point=name):
+                task = task_store.read_task(self.ws)
+                args = self.amend_args(task, "crash-" + str(index))
+                original = getattr(module, name)
+                def crash(*a, **kw):
+                    original(*a, **kw)
+                    raise RuntimeError("injected-crash")
+                with mock.patch.object(module, name, side_effect=crash):
+                    with self.assertRaisesRegex(RuntimeError, "injected-crash"):
+                        station.amend_scope(*args)
+                user_file = self.ws / "source/tapdata/tapdata/user-change.txt"
+                if name == "write_task":
+                    user_file.write_text("preserve user's later edit")
+                station.amend_scope(*args)
+                result = task_store.read_task(self.ws)
+                self.assertEqual(task["_revision"] + 1, result["_revision"])
+                self.assertEqual(1, sum(h.get("operation_id") == args[4] for h in result["history"]))
+                self.assertEqual("done", station_operation.read(self.ws)["status"])
+                if name == "write_task":
+                    self.assertEqual("preserve user's later edit", user_file.read_text())
+                    user_file.unlink()
 
     def test_no_change_disposition_is_frozen_in_completion_proof(self):
         from workflow import task as task_cli

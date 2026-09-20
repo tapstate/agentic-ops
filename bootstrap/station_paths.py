@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""以工作空间目录 FD 为锚的生成产物访问。"""
+"""以工位目录 FD 为锚的生成产物访问。"""
 from __future__ import annotations
 
 import errno
@@ -17,17 +17,17 @@ def _relative_parts(relative):
         or not path.parts
         or any(part in ("", ".", "..") for part in path.parts)
     ):
-        raise ValueError("工作空间产物路径越界：%s" % relative)
+        raise ValueError("工位产物路径越界：%s" % relative)
     return tuple(path.parts)
 
 
-def workspace_artifact_path(workspace, relative, allow_final_symlink=False):
+def station_artifact_path(station, relative, allow_final_symlink=False):
     """返回仅用于展示的绝对路径，并拒绝当前已存在的 symlink 父目录。
 
-    实际读写必须使用 :class:`WorkspaceDirectory`；这里保留给无副作用的路径展示和
+    实际读写必须使用 :class:`StationDirectory`；这里保留给无副作用的路径展示和
     兼容调用，不能作为写入前的安全证明。
     """
-    root = Path(workspace).resolve()
+    root = Path(station).resolve()
     parts = _relative_parts(relative)
     current = root
     for index, part in enumerate(parts):
@@ -35,23 +35,23 @@ def workspace_artifact_path(workspace, relative, allow_final_symlink=False):
         final = index == len(parts) - 1
         if current.is_symlink() and not (final and allow_final_symlink):
             if final:
-                raise ValueError("工作空间普通产物不能是符号链接：%s" % current)
-            raise ValueError("工作空间产物父目录不能是符号链接：%s" % current)
+                raise ValueError("工位普通产物不能是符号链接：%s" % current)
+            raise ValueError("工位产物父目录不能是符号链接：%s" % current)
         if not final and current.exists() and not current.is_dir():
-            raise ValueError("工作空间产物父路径不是目录：%s" % current)
+            raise ValueError("工位产物父路径不是目录：%s" % current)
     return root.joinpath(*parts)
 
 
-class WorkspaceDirectory:
-    """在一次生命周期操作中持有 workspace 与父目录 FD。
+class StationDirectory:
+    """在一次生命周期操作中持有 station 与父目录 FD。
 
     父目录通过 openat + O_NOFOLLOW 逐级打开。最终写、替换、接线和删除全部相对已
     打开的父 FD 执行，因此即使校验后路径被改成外部 symlink，也不会触达外部目录。
     每次副作用前还会复核缓存目录的 inode，检测到路径被替换时失败关闭。
     """
 
-    def __init__(self, workspace):
-        self.root = Path(workspace).resolve()
+    def __init__(self, station):
+        self.root = Path(station).resolve()
         self._fds = {}
         self._observed = {}
 
@@ -62,7 +62,7 @@ class WorkspaceDirectory:
         try:
             root_fd = os.open(str(self.root), flags)
         except OSError as error:
-            raise ValueError("工作空间目录无法安全打开：%s：%s" % (self.root, error)) from error
+            raise ValueError("工位目录无法安全打开：%s：%s" % (self.root, error)) from error
         self._fds[()] = root_fd
         return self
 
@@ -92,18 +92,18 @@ class WorkspaceDirectory:
             prefix = prefix + (part,)
             child_fd = self._fds.get(prefix)
             if child_fd is None:
-                raise ValueError("工作空间产物父目录未安全打开：%s" % self.path(Path(*prefix)))
+                raise ValueError("工位产物父目录未安全打开：%s" % self.path(Path(*prefix)))
             try:
                 current = os.stat(part, dir_fd=parent_fd, follow_symlinks=False)
                 opened = os.fstat(child_fd)
             except OSError as error:
-                raise ValueError("工作空间产物父目录已被替换：%s" % self.path(Path(*prefix))) from error
+                raise ValueError("工位产物父目录已被替换：%s" % self.path(Path(*prefix))) from error
             if (
                 not stat.S_ISDIR(current.st_mode)
                 or current.st_dev != opened.st_dev
                 or current.st_ino != opened.st_ino
             ):
-                raise ValueError("工作空间产物父目录已被替换：%s" % self.path(Path(*prefix)))
+                raise ValueError("工位产物父目录已被替换：%s" % self.path(Path(*prefix)))
             parent_fd = child_fd
 
     def _parent(self, relative, create=False):
@@ -128,19 +128,19 @@ class WorkspaceDirectory:
                         child_fd = os.open(part, self._directory_flags(), dir_fd=parent_fd)
                     except OSError as error:
                         raise ValueError(
-                            "工作空间产物父目录无法安全创建：%s" % self.path(Path(*prefix))
+                            "工位产物父目录无法安全创建：%s" % self.path(Path(*prefix))
                         ) from error
                 except OSError as error:
                     if error.errno in (errno.ELOOP, errno.ENOTDIR):
                         raise ValueError(
-                            "工作空间产物父目录不能是符号链接或普通文件：%s"
+                            "工位产物父目录不能是符号链接或普通文件：%s"
                             % self.path(Path(*prefix))
                         ) from error
                     raise
                 opened = os.fstat(child_fd)
                 if not stat.S_ISDIR(opened.st_mode):
                     os.close(child_fd)
-                    raise ValueError("工作空间产物父路径不是目录：%s" % self.path(Path(*prefix)))
+                    raise ValueError("工位产物父路径不是目录：%s" % self.path(Path(*prefix)))
                 self._fds[prefix] = child_fd
             parent_fd = child_fd
         self._assert_cached_chain(parent_parts)
@@ -171,7 +171,7 @@ class WorkspaceDirectory:
             self.lstat(relative)
         current = self._identity(self._raw_lstat(relative))
         if current != self._observed[parts]:
-            raise ValueError("工作空间产物在校验后已被替换：%s" % self.path(relative))
+            raise ValueError("工位产物在校验后已被替换：%s" % self.path(relative))
 
     def _refresh_entry(self, relative):
         self._observed[_relative_parts(relative)] = self._identity(self._raw_lstat(relative))
@@ -209,13 +209,13 @@ class WorkspaceDirectory:
         try:
             fd = os.open(leaf, flags, dir_fd=parent_fd)
         except OSError as error:
-            raise ValueError("工作空间普通产物无法安全读取：%s" % self.path(relative)) from error
+            raise ValueError("工位普通产物无法安全读取：%s" % self.path(relative)) from error
         try:
             opened = os.fstat(fd)
             if not stat.S_ISREG(opened.st_mode):
-                raise ValueError("工作空间普通产物不是文件：%s" % self.path(relative))
+                raise ValueError("工位普通产物不是文件：%s" % self.path(relative))
             if self._identity(opened) != self._observed[_relative_parts(relative)]:
-                raise ValueError("工作空间产物在校验后已被替换：%s" % self.path(relative))
+                raise ValueError("工位产物在校验后已被替换：%s" % self.path(relative))
             with os.fdopen(fd, "r", encoding="utf-8") as stream:
                 fd = -1
                 return stream.read()
@@ -291,7 +291,7 @@ class WorkspaceDirectory:
         fd = os.open(leaf, flags, dir_fd=parent_fd)
         try:
             if self._identity(os.fstat(fd)) != self._observed[_relative_parts(relative)]:
-                raise ValueError("工作空间产物在校验后已被替换：%s" % self.path(relative))
+                raise ValueError("工位产物在校验后已被替换：%s" % self.path(relative))
             os.fchmod(fd, mode)
         finally:
             os.close(fd)
@@ -311,7 +311,7 @@ class WorkspaceDirectory:
             return False
         opened = os.fstat(child_fd)
         if current.st_dev != opened.st_dev or current.st_ino != opened.st_ino:
-            raise ValueError("工作空间产物父目录已被替换：%s" % self.path(relative))
+            raise ValueError("工位产物父目录已被替换：%s" % self.path(relative))
         try:
             os.rmdir(parts[-1], dir_fd=parent_fd)
             return True
@@ -322,7 +322,7 @@ class WorkspaceDirectory:
         try:
             child_fd = os.open(name, self._directory_flags(), dir_fd=parent_fd)
         except OSError as error:
-            raise ValueError("工作空间递归删除拒绝跟随目录链接：%s" % display) from error
+            raise ValueError("工位递归删除拒绝跟随目录链接：%s" % display) from error
         try:
             current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
             opened = os.fstat(child_fd)
@@ -331,7 +331,7 @@ class WorkspaceDirectory:
                 or current.st_dev != opened.st_dev
                 or current.st_ino != opened.st_ino
             ):
-                raise ValueError("工作空间递归删除目录已被替换：%s" % display)
+                raise ValueError("工位递归删除目录已被替换：%s" % display)
             return child_fd
         except Exception:
             os.close(child_fd)
@@ -355,7 +355,7 @@ class WorkspaceDirectory:
                 or current.st_dev != opened.st_dev
                 or current.st_ino != opened.st_ino
             ):
-                raise ValueError("工作空间递归删除目录已被替换：%s" % display)
+                raise ValueError("工位递归删除目录已被替换：%s" % display)
         finally:
             os.close(directory_fd)
         os.rmdir(name, dir_fd=parent_fd)

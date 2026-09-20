@@ -24,4 +24,4 @@
 )
 ```
 
-产品默认安装到 `~/.agentic-ops`；完整工程在任务接管时于工位 source 中准备。持久材料复用见[工位源码与材料](workspace-materials.md)。
+产品默认安装到 `~/.agentic-ops`；完整工程在任务接管时于工位 source 中准备。持久材料复用见[工位源码与材料](station-materials.md)。

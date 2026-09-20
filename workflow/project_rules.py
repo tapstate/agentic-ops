@@ -53,26 +53,26 @@ def _read_json(path):
         return json.load(fh)
 
 
-def project_from_workspace(workspace):
-    path = Path(workspace).resolve() / ".agenticops" / "workspace.json"
+def project_from_station(station):
+    path = Path(station).resolve() / ".agenticops" / "station.json"
     if not path.is_file():
-        raise ValueError("工作空间缺少 .agenticops/workspace.json，请先执行 agenticops init")
+        raise ValueError("工位缺少 .agenticops/station.json，请先执行 agenticops station init")
     binding = _read_json(path)
     project = binding.get("project")
     if not isinstance(project, str) or not project:
-        raise ValueError("工作空间绑定缺少 project")
+        raise ValueError("工位绑定缺少 project")
     return project
 
 
-def product_root_from_workspace(workspace):
-    path = Path(workspace).resolve() / ".agenticops" / "workspace.json"
+def product_root_from_station(station):
+    path = Path(station).resolve() / ".agenticops" / "station.json"
     binding = _read_json(path)
     root = binding.get("product_root")
     if not isinstance(root, str) or not root:
-        raise ValueError("工作空间绑定缺少 product_root")
+        raise ValueError("工位绑定缺少 product_root")
     product = Path(root).resolve()
     if not product.is_dir():
-        raise ValueError("工作空间绑定的 Product Root 不存在：%s" % product)
+        raise ValueError("工位绑定的 Product Root 不存在：%s" % product)
     return product
 
 
@@ -83,9 +83,9 @@ def project_root(root=ROOT, project="tapdata"):
     return path
 
 
-def load_admission(root=ROOT, project="tapdata", workspace=None):
-    selected = project_from_workspace(workspace) if workspace is not None else project
-    selected_root = product_root_from_workspace(workspace) if workspace is not None else root
+def load_admission(root=ROOT, project="tapdata", station=None):
+    selected = project_from_station(station) if station is not None else project
+    selected_root = product_root_from_station(station) if station is not None else root
     return _read_json(project_root(selected_root, selected) / "admission.json")
 
 
@@ -121,9 +121,9 @@ def validate_takeover_watermark(profile):
     return value
 
 
-def load_profile(root=ROOT, project="tapdata", workspace=None):
-    selected = project_from_workspace(workspace) if workspace is not None else project
-    selected_root = product_root_from_workspace(workspace) if workspace is not None else root
+def load_profile(root=ROOT, project="tapdata", station=None):
+    selected = project_from_station(station) if station is not None else project
+    selected_root = product_root_from_station(station) if station is not None else root
     profile = _read_json(project_root(selected_root, selected) / "profile.json")
     validate_takeover_watermark(profile)
     reference = profile.get("repositories", {}).get("catalog")
@@ -160,13 +160,13 @@ def load_profile(root=ROOT, project="tapdata", workspace=None):
     return profile
 
 
-def load_repository_catalog(root=ROOT, project="tapdata", workspace=None):
-    return load_profile(root=root, project=project, workspace=workspace)["repositories"]
+def load_repository_catalog(root=ROOT, project="tapdata", station=None):
+    return load_profile(root=root, project=project, station=station)["repositories"]
 
 
-def repository_catalog_path(root=ROOT, project="tapdata", workspace=None):
-    selected = project_from_workspace(workspace) if workspace is not None else project
-    selected_root = product_root_from_workspace(workspace) if workspace is not None else root
+def repository_catalog_path(root=ROOT, project="tapdata", station=None):
+    selected = project_from_station(station) if station is not None else project
+    selected_root = product_root_from_station(station) if station is not None else root
     base = project_root(selected_root, selected).resolve()
     profile = _read_json(base / "profile.json")
     reference = profile.get("repositories", {}).get("catalog")

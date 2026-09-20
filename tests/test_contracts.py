@@ -114,41 +114,44 @@ class ContractConformanceTest(unittest.TestCase):
             load_json(ROOT / "projects" / "tapdata" / "repositories.json"),
         )
         compatibility_schema = load_json(
-            ROOT / "contracts" / "workspace-state-compatibility.schema.json"
+            ROOT / "contracts" / "station-state-compatibility.schema.json"
         )
         assert_schema(
             self,
             compatibility_schema,
-            load_json(ROOT / "contracts" / "workspace-state-compatibility.json"),
+            load_json(ROOT / "contracts" / "station-state-compatibility.json"),
         )
 
     def test_source_product_state_conforms_to_schema(self):
         schema = load_json(ROOT / "contracts" / "product-state.schema.json")
         document = {
-            "schema_version": 1,
+            "schema_version": 2,
             "mode": "source",
             "repository": "git@example.test:tapstate/agentic-ops.git",
             "tracking_branch": "develop",
             "current_ref": "a" * 40,
             "previous_ref": None,
+            "source_pool": "/tmp/agentic-ops-repos",
         }
         assert_schema(self, schema, document)
 
-    def test_real_workspace_state_conforms_to_schema(self):
-        workspace_schema = load_json(ROOT / "contracts" / "workspace.schema.json")
-        init_schema = load_json(ROOT / "contracts" / "workspace-init.schema.json")
+    def test_real_station_state_conforms_to_schema(self):
+        station_schema = load_json(ROOT / "contracts" / "station.schema.json")
+        init_schema = load_json(ROOT / "contracts" / "station-init.schema.json")
         with tempfile.TemporaryDirectory() as temporary:
-            workspace = Path(temporary) / "workspace"
+            station = Path(temporary) / "station"
             subprocess.run(
                 [
                     sys.executable,
                     str(ROOT / "bootstrap" / "render.py"),
                     "--install-home",
                     str(ROOT),
-                    "--workspace",
-                    str(workspace),
+                    "--station",
+                    str(station),
                     "--project",
                     "tapdata",
+                    "--source-pool",
+                    str(Path(temporary) / "pool"),
                 ],
                 check=True,
                 capture_output=True,
@@ -156,21 +159,21 @@ class ContractConformanceTest(unittest.TestCase):
             )
             assert_schema(
                 self,
-                workspace_schema,
-                load_json(workspace / ".agenticops" / "workspace.json"),
+                station_schema,
+                load_json(station / ".agenticops" / "station.json"),
             )
             assert_schema(
                 self,
                 init_schema,
-                load_json(workspace / ".agenticops" / "init.json"),
+                load_json(station / ".agenticops" / "init.json"),
             )
             task_schema = load_json(ROOT / "contracts" / "task-state.schema.json")
-            assert_schema(self, task_schema, load_json(workspace / ".agenticops" / "current-task.json"))
+            assert_schema(self, task_schema, load_json(station / ".agenticops" / "current-task.json"))
             from station_fixture import save_task
-            save_task(workspace, {"issue_key": "TAP-123", "run_id": "run-fixture", "task_class": "defect_fix",
+            save_task(station, {"issue_key": "TAP-123", "run_id": "run-fixture", "task_class": "defect_fix",
                 "stage": "task_intake", "facts": {}, "repositories": [{"repository": "tapdata/tapdata"}],
                 "pending": None, "history": []})
-            assert_schema(self, task_schema, load_json(workspace / ".agenticops" / "current-task.json"))
+            assert_schema(self, task_schema, load_json(station / ".agenticops" / "current-task.json"))
 
     def test_task_bindings_reference_one_baseline(self):
         schema = load_json(ROOT / "contracts" / "task-state.schema.json")
@@ -230,9 +233,14 @@ class ContractConformanceTest(unittest.TestCase):
         self.assertTrue(shell_operations <= requestable)
 
     def test_repository_tool_classification_preserves_control_boundary(self):
+        for script in ("station-clean", "station-source-reset"):
+            for command in ("workflow/%s.py" % script, "python3 -B workflow/%s.py" % script, "python3 -m workflow.%s" % script):
+                self.assertEqual(["manage_station"], classify_bash(command + " --dir /tmp/ws --issue-key TAP-123"))
+                self.assertEqual([], classify_bash(command + " --help"))
         for action in ("takeover", "archive", "release", "clean", "cleanup-amend"):
             self.assertEqual(["manage_station"], classify_bash("python3 -m workflow.task %s --issue-key TAP-123" % action))
         self.assertEqual(["scope_change"], classify_bash("workflow/task.py repository add --repo owner/repo --issue-key TAP-123"))
+        self.assertEqual(["scope_change"], classify_bash("workflow/task.py repository amend --repo owner/repo --issue-key TAP-123"))
         self.assertEqual([], classify_bash("workflow/task.py record --key note --value archive --issue-key TAP-123"))
         self.assertEqual([], classify_bash("workflow/task.py repository prepare --issue-key TAP-123"))
         self.assertEqual([], classify_bash("python3 -m workflow.repository_worktree prepare --issue-key TAP-123"))
@@ -249,7 +257,7 @@ class ContractConformanceTest(unittest.TestCase):
         for command in (
             "sed -n '1,200p' ./agenticops",
             "sed -n '1,200p' agenticops",
-            "head -n 80 .agenticops/workspace.json",
+            "head -n 80 .agenticops/station.json",
             "stat ./agenticops",
         ):
             self.assertEqual([], classify_bash(command), command)
@@ -281,15 +289,15 @@ class ContractConformanceTest(unittest.TestCase):
         ):
             self.assertEqual([], classify_bash(command), command)
         for command in (
-            "find . -exec ./agenticops workspace purge ';'",
+            "find . -exec ./agenticops station purge ';'",
             "sed -n 1p -i.bak ./agenticops",
             "cat source > ./agenticops",
             "sed -n 1p source > ./agenticops",
-            "cat ./agenticops | sh -s workspace purge --workspace /tmp/example --yes",
-            "sed -n 1p ./agenticops | sh -s workspace purge --workspace /tmp/example --yes",
-            "rg --pre './agenticops workspace purge --yes' pattern ./agenticops",
-            "head -n \"$(./agenticops workspace purge --yes)\" ./agenticops",
-            "cat \"$(./agenticops workspace purge --yes)\" ./agenticops",
+            "cat ./agenticops | sh -s station purge --station /tmp/example --yes",
+            "sed -n 1p ./agenticops | sh -s station purge --station /tmp/example --yes",
+            "rg --pre './agenticops station purge --yes' pattern ./agenticops",
+            "head -n \"$(./agenticops station purge --yes)\" ./agenticops",
+            "cat \"$(./agenticops station purge --yes)\" ./agenticops",
             "RIPGREP_CONFIG_PATH=/tmp/rg.conf rg pattern ./agenticops",
             "rg --pre tool pattern ./agenticops | rg task",
             "rg pattern ./agenticops > output && rg task .agenticops",
@@ -299,7 +307,7 @@ class ContractConformanceTest(unittest.TestCase):
             self.assertEqual([], classify_bash(command), command)
         self.assertIn(
             "unknown_external_write",
-            classify_bash("./agenticops workspace purge --worksp /other --yes"),
+            classify_bash("./agenticops station purge --worksp /other --yes"),
         )
         self.assertEqual(
             ["git_push"],
@@ -310,18 +318,18 @@ class ContractConformanceTest(unittest.TestCase):
             classify_bash("rg task .agenticops && workflow/task.py archive --issue-key TAP-123"),
         )
         operations, _, target = classify_tool_call(
-            "Bash", {"command": "./agenticops workspace purge --workspace /other --yes"}
+            "Bash", {"command": "./agenticops station purge --station /other --yes"}
         )
         self.assertEqual(["manage_station"], operations)
-        self.assertEqual("/other", target["workspace"])
+        self.assertEqual("/other", target["station"])
         operations, _, target = classify_tool_call(
-            "Bash", {"command": "./agenticops workspace prefetch --workspace /other --yes"}
+            "Bash", {"command": "./agenticops station prefetch --station /other --yes"}
         )
         self.assertEqual([], operations)
-        self.assertNotIn("workspace", target)
+        self.assertNotIn("station", target)
         self.assertEqual(
             [],
-            classify_bash("./agenticops workspace prefetch --yes"),
+            classify_bash("./agenticops station prefetch --yes"),
         )
         for command in (
             "git clone git@example.test:a/b.git",
@@ -331,7 +339,7 @@ class ContractConformanceTest(unittest.TestCase):
             self.assertEqual(["manage_repository_worktree"], classify_bash(command), command)
         self.assertEqual(
             [],
-            classify_bash("python3 workflow/repository_worktree.py prefetch --dir /workspace"),
+            classify_bash("python3 workflow/repository_worktree.py prefetch --dir /station"),
         )
         for command in (
             "python3 workflow/task.py archive --help",
@@ -694,7 +702,7 @@ class ContractConformanceTest(unittest.TestCase):
         )
         self.assertEqual(["manage_station"], operations)
         self.assertEqual("TAP-123", target["issue_key"])
-        self.assertEqual("../target", target["workspace"])
+        self.assertEqual("../target", target["station"])
         for command in (
             "workflow/task.py archive --issue-key TAP-123 --issue-key TAP-123",
             "workflow/task.py archive --issue-key=TAP-123 --issue-key TAP-124",
@@ -710,14 +718,14 @@ class ContractConformanceTest(unittest.TestCase):
                 command,
             )
             self.assertNotIn("issue_key", duplicate_target, command)
-            self.assertNotIn("workspace", duplicate_target, command)
+            self.assertNotIn("station", duplicate_target, command)
         operations, _, target = classify_tool_call(
             "Bash",
             {"command": "git commit -m x && echo --issue-key TAP-999 --dir /tmp/other"},
         )
         self.assertEqual(["git_commit"], operations)
         self.assertNotIn("issue_key", target)
-        self.assertNotIn("workspace", target)
+        self.assertNotIn("station", target)
         self.assertEqual(
             ["manage_station"],
             classify_bash("python3 -B workflow/task.py archive --issue-key TAP-123"),
@@ -728,14 +736,14 @@ class ContractConformanceTest(unittest.TestCase):
         )
         self.assertEqual(["manage_station"], operations)
         self.assertEqual("TAP-123", target["issue_key"])
-        self.assertEqual("wsB", target["workspace"])
+        self.assertEqual("wsB", target["station"])
         operations, _, target = classify_tool_call(
             "Bash",
             {"command": "workflow/task.py clean --issue-key TAP-123 --dir wsA --yes && workflow/task.py archive --issue-key TAP-124 --dir wsB"},
         )
         self.assertIn("unknown_external_write", operations)
         self.assertNotIn("issue_key", target)
-        self.assertNotIn("workspace", target)
+        self.assertNotIn("station", target)
         operations, _, target = classify_tool_call(
             "Bash", {"command": "git push origin feature/TAP-123 && git push origin main"},
         )

@@ -19,7 +19,7 @@ from maven_reports import parse_xml
 
 
 SUPPORTED_MAVEN_VERSION = "3.9.x"
-RUNTIME_CONTEXT_KEYS = {"workspace", "station_id", "run_id", "local_repository"}
+RUNTIME_CONTEXT_KEYS = {"station", "station_id", "run_id", "local_repository"}
 
 
 def digest(value):
@@ -72,16 +72,16 @@ def jar_pair(built, consumed):
 
 def runtime_context(value):
     if not isinstance(value, dict) or set(value) != RUNTIME_CONTEXT_KEYS:
-        raise ValueError("runtime context 必须包含 workspace、station_id、run_id 和 local_repository")
+        raise ValueError("runtime context 必须包含 station、station_id、run_id 和 local_repository")
     if not all(isinstance(value[key], str) and value[key] for key in RUNTIME_CONTEXT_KEYS):
         raise ValueError("runtime context 字段无效")
-    workspace = Path(value["workspace"])
+    station = Path(value["station"])
     local = Path(value["local_repository"])
-    if not workspace.is_absolute() or not local.is_absolute() or local != workspace / "runtime" / "maven-local":
-        raise ValueError("Maven local repository 必须是 workspace/runtime/maven-local")
-    runtime = workspace / "runtime"
+    if not station.is_absolute() or not local.is_absolute() or local != station / "runtime" / "maven-local":
+        raise ValueError("Maven local repository 必须是 station/runtime/maven-local")
+    runtime = station / "runtime"
     if runtime.is_symlink() or not runtime.is_dir() or runtime.is_mount():
-        raise ValueError("workspace runtime 必须是非链接真实目录")
+        raise ValueError("station runtime 必须是非链接真实目录")
     if local.is_symlink() or (local.exists() and (not local.is_dir() or local.is_mount())):
         raise ValueError("Maven local repository 必须是非链接真实目录或尚未创建")
     return {key: str(value[key]) for key in sorted(RUNTIME_CONTEXT_KEYS)}

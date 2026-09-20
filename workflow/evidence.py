@@ -217,7 +217,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        task_store.workspace_project(args.dir)
+        task_store.station_project(args.dir)
         issue = task_store.resolve_issue(args.dir, args.issue_key)
     except ValueError as error:
         print("错误：%s" % error, file=sys.stderr)
@@ -228,7 +228,7 @@ def main():
         auth = load_json(task_store.authorization_path(args.dir, issue))
         events = load_events(task_dir / "events.jsonl")
         ci_states = ci.current_states(args.dir, task)
-        spec = project_rules.load_admission(workspace=args.dir)
+        spec = project_rules.load_admission(station=args.dir)
         flexible = project_rules.class_spec(spec, task["task_class"]).get("quality_mode") == "recorded_decision"
         if args.verification is not None and not flexible:
             problems = project_rules.check_verification(spec, args.verification)

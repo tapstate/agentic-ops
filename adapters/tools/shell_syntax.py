@@ -66,13 +66,8 @@ def _unwrap_env(arguments, config):
             arguments,
             "i0vu:C:S:a:",
             (
-                "ignore-environment",
-                "null",
-                "debug",
-                "unset=",
-                "chdir=",
-                "split-string=",
-                "argv0=",
+                "ignore-environment", "null", "debug", "unset=",
+                "chdir=", "split-string=", "argv0=",
             ),
         )
     except getopt.GetoptError:
@@ -125,7 +120,8 @@ def _controlled_token(token):
     return (
         executable in {"agenticops", "gh", "git"}
         or executable.startswith("python")
-        or normalized.endswith("/workflow/task.py")
+        or any(normalized.endswith("/workflow/" + name)
+               for name in ("task.py", "station-clean.py", "station-source-reset.py"))
     )
 
 

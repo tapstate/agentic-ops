@@ -16,11 +16,11 @@ metadata:
 若外部调用方只需快速分析，应使用带缓存的 `snapshot`；若操作前必须取得当前远端的精确 head 事实，应使用无缓存的 `probe`：
 
 ```sh
-# 带缓存：缓存属于工作空间，不写入 Product Root 或其它工位
+# 带缓存：缓存属于工位，不写入 Product Root 或其它工位
 python3 <agenticops-root>/workflow/git_refs.py snapshot \
   --repository <git-root> --scope heads \
   --repository-id <owner>/<repo> \
-  --cache-file <workspace>/.agenticops/git-ref-cache-v2.json \
+  --cache-file <station>/.agenticops/git-ref-cache-v2.json \
   --cache-root <tapdata-root> --max-age 3600
 
 # 无缓存：直接查询当前远端，不读写缓存
@@ -46,18 +46,18 @@ python3 <agenticops-root>/projects/tapdata/scripts/align_branches.py \
   --expected-plan-digest <show-plan-digest> --json
 ```
 
-`apply` 必须显式提供 `--tapdata-root`，不允许从工作空间绑定、当前目录或用户主目录猜测写入目标。计划摘要同时绑定规范化模块根目录、仓库路径、处理范围、当前状态和目标状态，不能跨另一套目录或范围复用。它始终重新核验远端 refs；任何绑定事实导致摘要变化时停止并要求重新查看、确认。指定 `--repository` 时只应用主仓和明确列出的仓库；未指定时应用本地已接入且参与分支关系的仓库。
+`apply` 必须显式提供 `--tapdata-root`，不允许从工位绑定、当前目录或用户主目录猜测写入目标。计划摘要同时绑定规范化模块根目录、仓库路径、处理范围、当前状态和目标状态，不能跨另一套目录或范围复用。它始终重新核验远端 refs；任何绑定事实导致摘要变化时停止并要求重新查看、确认。指定 `--repository` 时只应用主仓和明确列出的仓库；未指定时应用本地已接入且参与分支关系的仓库。
 
-`--tapdata-root` 必须直接包含主仓 `<tapdata-root>/tapdata`；它不是产品根，也不是 `tapdata/tapdata` 主仓目录。默认缓存写入当前工作空间的 `<workspace>/.agenticops/git-ref-cache-v2.json`，以规范化绝对 `<tapdata-root>` 分区，再按 `<owner>/<repo> + canonical origin + scope` 映射；不写入 Product Root 或其它工位。旧 `git-ref-cache-v1.json` 由用户自行处理，现役路径不读取、迁移或删除它。脱离工作空间运行时，必须显式传入 `--cache-file`。目录中其它已登记仓库可尚未接入。`--repository` 可重复，表示本次必须核验的任务目标仓库；主仓始终必需。省略它时输出完整目录诊断，但不把全部仓库变成前置条件。
+`--tapdata-root` 必须直接包含主仓 `<tapdata-root>/tapdata`；它不是产品根，也不是 `tapdata/tapdata` 主仓目录。默认缓存写入当前工位的 `<station>/.agenticops/git-ref-cache-v2.json`，以规范化绝对 `<tapdata-root>` 分区，再按 `<owner>/<repo> + canonical origin + scope` 映射；不写入 Product Root 或其它工位。旧 `git-ref-cache-v1.json` 由用户自行处理，现役路径不读取、迁移或删除它。脱离工位运行时，必须显式传入 `--cache-file`。目录中其它已登记仓库可尚未接入。`--repository` 可重复，表示本次必须核验的任务目标仓库；主仓始终必需。省略它时输出完整目录诊断，但不把全部仓库变成前置条件。
 
 省略 `--tapdata-root` 时，脚本按以下顺序解析 TapData 模块根目录：
 
-1. 从当前执行路径向上找到最近的 `.agenticops/workspace.json`，使用该工位的 `source/tapdata`。
-2. 未找到工作空间绑定时，使用当前执行目录。
+1. 从当前执行路径向上找到最近的 `.agenticops/station.json`，使用该工位的 `source/tapdata`。
+2. 未找到工位绑定时，使用当前执行目录。
 
 因此 `$tapdata-align-branches release-v4.21.0` 必须被执行为上述 `show --version release-v4.21.0`，不能映射为 `--home $HOME`。如果最终目录不含主仓 `<tapdata-root>/tapdata`，脚本应立即报错停止；不得先把它当作 IDEA 平铺多仓目录，也不得扫描用户主目录。
 
-工作空间固定源码位于 source/tapdata/<repository>。若主仓缺失，脚本在任何远端刷新前停止；若显式指定仓库缺失，结果为 `blocked`。未指定的缺失仓库以 `not_covered` 报告，不阻断其它仓库。输出包含本地状态、目标分支、目标 SHA、推导理由和目标状态；`unchanged` 表示不参与关系推导，而非对本地工作树采取操作。
+工位固定源码位于 source/tapdata/<repository>。若主仓缺失，脚本在任何远端刷新前停止；若显式指定仓库缺失，结果为 `blocked`。未指定的缺失仓库以 `not_covered` 报告，不阻断其它仓库。输出包含本地状态、目标分支、目标 SHA、推导理由和目标状态；`unchanged` 表示不参与关系推导，而非对本地工作树采取操作。
 
 ## 刷新策略与进度
 

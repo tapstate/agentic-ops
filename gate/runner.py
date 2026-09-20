@@ -57,7 +57,7 @@ def validate_request(request):
     if not isinstance(target, dict):
         return "target 必须是对象"
     target_fields = {
-        "repository", "git_cwd", "workspace", "issue_key", "branch", "push_source_ref",
+        "repository", "git_cwd", "station", "issue_key", "branch", "push_source_ref",
         "push_destination_ref", "push_target_branch", "jira_transition_id", "jira_watermark_field",
         "jira_watermark_digest", "branch_relevant",
     }
@@ -67,7 +67,7 @@ def validate_request(request):
     if any(
         key in target and not isinstance(target[key], str)
         for key in (
-            "repository", "git_cwd", "workspace", "issue_key", "branch", "push_source_ref",
+            "repository", "git_cwd", "station", "issue_key", "branch", "push_source_ref",
             "push_destination_ref", "push_target_branch", "jira_transition_id", "jira_watermark_field",
             "jira_watermark_digest",
         )
@@ -97,11 +97,11 @@ def _context(request):
         if not candidate.is_absolute():
             candidate = Path(request["cwd"]) / candidate
         candidate = candidate.resolve()
-        workspace = engine.find_gate_root(request["cwd"])
+        station = engine.find_gate_root(request["cwd"])
         try:
-            candidate.relative_to(workspace)
+            candidate.relative_to(station)
         except ValueError:
-            git_cwd_error = "git -C 目录不在当前项目工作空间内"
+            git_cwd_error = "git -C 目录不在当前项目工位内"
         else:
             if not candidate.is_dir():
                 git_cwd_error = "git -C 目录不存在或不是目录"
@@ -124,11 +124,11 @@ def _context(request):
                 )
         else:
             context["origin"] = requested_repository
-    if target.get("workspace"):
-        workspace = Path(target["workspace"])
-        if not workspace.is_absolute():
-            workspace = Path(request["cwd"]) / workspace
-        context["workspace"] = str(workspace.resolve())
+    if target.get("station"):
+        station = Path(target["station"])
+        if not station.is_absolute():
+            station = Path(request["cwd"]) / station
+        context["station"] = str(station.resolve())
     if target.get("issue_key"):
         context["issue_key"] = target["issue_key"]
     if target.get("jira_transition_id"):
@@ -183,12 +183,12 @@ def _audit(cwd, context, record):
         active_task = task_directory is not None
         if task_directory is None:
             root = engine.find_gate_root(cwd)
-            workspace_state = root / ".agenticops"
+            station_state = root / ".agenticops"
             product_state = root / ".local" / "product.json"
             if (root / ".agentic-ops-source").is_file() or product_state.is_file():
                 task_directory = root / ".local" / "gate"
             else:
-                task_directory = workspace_state
+                task_directory = station_state
         task_directory.mkdir(parents=True, exist_ok=True)
         evidence = task_directory / "evidence" if active_task else task_directory
         evidence.mkdir(exist_ok=True)
@@ -221,7 +221,7 @@ def evaluate_request(request, policy_path=None):
     catalog = load_operation_catalog()
     target = request.get("target", {})
     context = _context(request)
-    gate_cwd = context.get("workspace") or request["cwd"]
+    gate_cwd = context.get("station") or request["cwd"]
     resolution_context = context
     if "git_push" in request["operations"] and context.get("fetch_origin"):
         resolution_context = dict(context)

@@ -24,9 +24,9 @@ class ConnectorTests(unittest.TestCase):
         self.temp_root = Path(self.tmp.name).resolve()
         self.root = self.temp_root / "repository"
         self.root.mkdir()
-        self.runtime = self.temp_root / "workspace/runtime"
+        self.runtime = self.temp_root / "station/runtime"
         self.runtime.mkdir(parents=True)
-        self.context = {"workspace": str(self.temp_root / "workspace"), "station_id": "station-fixture",
+        self.context = {"station": str(self.temp_root / "station"), "station_id": "station-fixture",
                         "run_id": "run-fixture", "local_repository": str(self.runtime / "maven-local")}
         self.maven = self.root / "mvn"
         self.maven.write_text("#!/bin/sh\nexit 0\n")

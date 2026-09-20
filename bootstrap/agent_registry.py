@@ -174,7 +174,7 @@ def main():
     sub.add_parser("list")
     resolve = sub.add_parser("resolve-launch")
     resolve.add_argument("agent")
-    resolve.add_argument("--workspace")
+    resolve.add_argument("--station")
     args = parser.parse_args()
     try:
         manifests = discover(args.product_root)
@@ -187,14 +187,14 @@ def main():
                 "未知 Agent：%s；可用 Agent：%s"
                 % (args.agent, ", ".join(sorted(manifests)))
             )
-        if args.workspace:
-            config_path = Path(args.workspace).resolve() / ".agenticops" / "workspace.json"
+        if args.station:
+            config_path = Path(args.station).resolve() / ".agenticops" / "station.json"
             try:
                 config = json.loads(config_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as error:
-                raise ValueError("工作空间配置无法读取：%s" % error) from error
+                raise ValueError("工位配置无法读取：%s" % error) from error
             if args.agent not in config.get("agents", []):
-                raise ValueError("工作空间未绑定 Agent：%s；请重新执行 agenticops init" % args.agent)
+                raise ValueError("工位未绑定 Agent：%s；请重新执行 agenticops station init" % args.agent)
         launch = manifests[args.agent].get("launch", {})
         if launch.get("mode") != "command" or not launch.get("command"):
             raise ValueError(launch.get("message") or "该 Agent 不支持本地命令启动")
