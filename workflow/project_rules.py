@@ -274,9 +274,15 @@ def resolve_issue_type_workflow(profile, issue_type_id=None, issue_type_name=Non
 
 
 def class_spec(spec, task_class):
+    if not isinstance(spec, dict) or not isinstance(spec.get("task_classes", {}), dict):
+        raise ValueError("准入 task_classes 必须是对象")
+    if not isinstance(task_class, str) or not task_class.strip():
+        raise ValueError("任务类型必须是非空字符串")
     classes = spec.get("task_classes", {})
     if task_class not in classes:
         raise ValueError("未知任务类型 %s（可选：%s）" % (task_class, "/".join(sorted(classes))))
+    if not isinstance(classes[task_class], dict):
+        raise ValueError("任务类型定义必须是对象：%s" % task_class)
     return classes[task_class]
 
 

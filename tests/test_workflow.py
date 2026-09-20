@@ -134,6 +134,25 @@ def check_project_boundaries(base):
 
 
 def check_project_json_objects(base):
+    for spec, task_class in ((None, "x"), ({"task_classes": None}, "x"),
+            ({"task_classes": []}, "x"), ({"task_classes": {"x": None}}, "x"),
+            ({"task_classes": {"x": []}}, "x"), ({"task_classes": {}}, []),
+            ({"task_classes": {}}, " ")):
+        try:
+            project_rules.class_spec(spec, task_class)
+        except ValueError:
+            rejected = True
+        else:
+            rejected = False
+        check("任务类型入口拒绝无效结构", rejected, True)
+    selected = {"label": "fixture"}
+    check("任务类型定义原样返回", project_rules.class_spec({"task_classes": {"x": selected}}, "x") is selected, True)
+    try:
+        project_rules.class_spec({"task_classes": {"x": selected}}, "unknown")
+    except ValueError as error:
+        check("未知任务类型保留可选项", "可选：x" in str(error), True)
+    else:
+        check("未知任务类型必须拒绝", False, True)
     product = base / "json-product"
     project = product / "projects/demo"
     project.mkdir(parents=True)
