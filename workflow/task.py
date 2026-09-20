@@ -771,6 +771,22 @@ def cmd_status(args):
     return 0
 
 
+def cmd_replan(args):
+    from workflow import station_replan
+    if args.replan_action == "prepare":
+        with task_store.task_state_lock(args.dir):
+            result = station_replan.prepare(args.dir, args.issue_key, args.expected_run_id,
+                                            json.loads(Path(args.input).read_text(encoding="utf-8")))
+    elif args.replan_action == "apply":
+        result = station_replan.apply(args.dir, args.issue_key, args.expected_run_id,
+                                      args.expected_revision, args.operation_id,
+                                      json.loads(Path(args.input).read_text(encoding="utf-8")), args.decision_ref)
+    else:
+        result = station_replan.abort(args.dir, args.issue_key, args.expected_run_id, args.operation_id, args.decision_ref)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main():
     class StrictArgumentParser(argparse.ArgumentParser):
         def __init__(self, *args, **kwargs):
@@ -779,6 +795,22 @@ def main():
 
     parser = StrictArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
+
+    replan = sub.add_parser("replan", help="同一 run 内修订方案并返回 design_review，保留源码与 PR")
+    children = replan.add_subparsers(dest="replan_action", required=True)
+    for action in ("prepare", "apply", "abort"):
+        child = children.add_parser(action)
+        child.add_argument("--dir", default=".")
+        child.add_argument("--issue-key", required=True)
+        child.add_argument("--expected-run-id", required=True)
+        if action != "abort":
+            child.add_argument("--input", required=True)
+        if action != "prepare":
+            child.add_argument("--operation-id", required=True)
+            child.add_argument("--decision-ref", required=True)
+        if action == "apply":
+            child.add_argument("--expected-revision", type=int, required=True)
+        child.set_defaults(func=cmd_replan)
 
     p = sub.add_parser("takeover")
     p.add_argument("--issue-key", required=True)

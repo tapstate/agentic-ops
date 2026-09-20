@@ -190,6 +190,7 @@ def context(base, task):
         repos[repo["repository"]] = entry
         entry["ci_digest"] = digest([s for s in ci_states if s["repository"] == repo["repository"]])
     return {"issue_key": task["issue_key"], "run_id": task["run_id"], "facts": task.get("facts", {}),
+            "replan_items": task.get("replan", {}).get("item_revisions", {}),
             "failures": failures.load(base, task)[1],
             "cleanup_artifacts": cleanup_artifacts,
             "repositories": repos,
@@ -202,7 +203,10 @@ def plan_digest(item, rules, ctx):
     repo.pop("live_revision", None)
     repo.pop("ci_digest", None)
     plan = selection_plan(item["plan"], rules)
-    return digest([plan, item["plan_version"], rules, repo])
+    payload = [plan, item["plan_version"], rules, repo]
+    if ctx.get("replan_items", {}).get(item["plan"]["id"]):
+        payload.append(ctx["replan_items"][item["plan"]["id"]])
+    return digest(payload)
 
 
 def selection_plan(plan, rules):
@@ -376,6 +380,7 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
         scoped = copy.deepcopy(ctx)
         scoped.pop("failures", None)
         scoped.pop("cleanup_artifacts", None)
+        scoped.pop("replan_items", None)
         fact_keys = rules["intake_fact_keys"] + (rules.get("plan_fact_keys", []) if index else [])
         scoped["facts"] = {k: v for k, v in ctx["facts"].items() if k in fact_keys}
         for repo in scoped["repositories"].values():

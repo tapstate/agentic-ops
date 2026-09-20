@@ -106,7 +106,7 @@ def baseline_branch(entry):
     return baseline.ref_name("agenticops/baseline/%s-%s" % (reference, entry["commit_sha"][:12]))
 
 
-def check_station_layout(station, catalog, selected):
+def check_station_layout(station, catalog, selected, preserved=None):
     """仅检查工位源码边界；未知目录不被当作可回收产物。"""
     root = Path(station).resolve() / "source"
     if root.is_symlink():
@@ -124,7 +124,13 @@ def check_station_layout(station, catalog, selected):
                 raise ValueError("source 含未知仓库：" + name)
             identity(repository, catalog[name]["origin"])
             if name not in selected:
-                require_clean(repository)
+                recovery = (preserved or {}).get(name)
+                if recovery:
+                    from workflow.quality import git_revision
+                    if recovery.get("origin") != catalog[name]["origin"] or git_revision(repository) != recovery.get("fingerprint"):
+                        raise ValueError("保留的返工仓库已变化：" + name)
+                else:
+                    require_clean(repository)
                 if git(repository, "ls-files", "--others", "--ignored", "--exclude-standard").stdout:
                     raise ValueError("未选择的持久仓库含未知生成物：" + name)
                 retained[name] = {"head": git(repository, "rev-parse", "HEAD").stdout.strip(),
@@ -233,6 +239,17 @@ def inspect(station, value):
     return result
 
 
+def require_ready_source(station, task, name):
+    path = repository_path(station, name)
+    previous = task.get("replan", {}).get("sources", {}).get(name)
+    if previous and task.get("stage") == "design_review":
+        from workflow.quality import git_revision
+        if git_revision(path) != previous["fingerprint"]:
+            raise ValueError("返工源码指纹变化，请重新准备方案：" + name)
+    else:
+        require_clean(path)
+
+
 def readiness_snapshot(station, task):
     """只读核对 B/W/T；远端查询结果必须与已下载对象一致。"""
     value = task["engineering_baseline"]
@@ -245,7 +262,7 @@ def readiness_snapshot(station, task):
     result = {}
     for name, state in observed.items():
         path = repository_path(station, name)
-        require_clean(path)
+        require_ready_source(station, task, name)
         ignored = git(path, "ls-files", "--others", "--ignored", "--exclude-standard", "-z").stdout.split("\0")
         if any(filename and not station_directories.covered("source/" + name + "/" + filename, managed) for filename in ignored):
             raise ValueError("源码含未登记 ignored 产物：" + name)
@@ -276,7 +293,10 @@ def readiness_snapshot(station, task):
         remote_head = remote_work[0].split()[0] if remote_work else None
         continuation = value.get("resolution_input", {}).get("continuations", {}).get(name)
         expected_remote = continuation["expected_head"] if continuation else None
-        if remote_head is not None and remote_head != expected_remote:
+        if task.get("replan") and task.get("stage") == "design_review":
+            expected_remote = task["replan"].get("remote_work", {}).get(name)
+        replan = task.get("replan") and task.get("stage") == "design_review"
+        if (replan or remote_head is not None) and remote_head != expected_remote:
             raise ValueError("远端工作分支与接管合同不一致：" + name)
         result[name] = dict(state, target_branch=binding["target_branch"], target_sha=target,
                             remote_work_sha=remote_head, baseline_sha=base, relation="equal" if target == base else "advanced")
@@ -296,7 +316,7 @@ def prepare_readiness(station, task):
     for name, binding in task["task_repositories"].items():
         repository = repository_path(station, name)
         identity(repository, task["engineering_baseline"]["repositories"][name]["origin"])
-        require_clean(repository)
+        require_ready_source(station, task, name)
         branch = baseline.ref_name(binding["target_branch"])
         record["fetches"][name] = {"target_branch": branch, "status": "intent"}
         task_store._write_json_atomic(path, record)

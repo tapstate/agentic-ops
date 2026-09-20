@@ -157,9 +157,54 @@ def validate(baseline):
     )
     rebuilt["profile"] = profile
     rebuilt.pop("digest")
+    history = baseline.get("extension_history", [])
+    if history:
+        original = copy.deepcopy(rebuilt)
+        added_names = set()
+        for entry in history:
+            if not isinstance(entry, dict) or set(entry) != {"before_digest", "added", "decision_ref"}:
+                raise ValueError("基线追加历史结构无效")
+            text(entry["decision_ref"], "decision_ref")
+            if not isinstance(entry["added"], dict) or not entry["added"] or added_names & set(entry["added"]):
+                raise ValueError("基线追加历史重复或为空")
+            added_names.update(entry["added"])
+        if not added_names < set(entries):
+            raise ValueError("基线追加历史不能替换原工程")
+        for name in added_names:
+            original["repositories"].pop(name)
+        original["digest"] = digest(original)
+        for entry in history:
+            if original["digest"] != entry["before_digest"]:
+                raise ValueError("基线追加摘要链不一致")
+            original = _append_value(original, entry["added"], entry["decision_ref"])
+        if original != baseline:
+            raise ValueError("基线追加历史改变了已有条目")
+        rebuilt["extension_history"] = history
+        rebuilt["revision"] = len(history) + 1
     if rebuilt != payload:
         raise ValueError("工程基线结构无效")
     return baseline
+
+
+def _append_value(value, added, decision_ref):
+    result = copy.deepcopy(value)
+    result["repositories"].update(copy.deepcopy(added))
+    result.setdefault("extension_history", []).append({"before_digest": value["digest"],
+                                                       "added": copy.deepcopy(added), "decision_ref": decision_ref})
+    result["revision"] = len(result["extension_history"]) + 1
+    result.pop("digest", None)
+    result["digest"] = digest(result)
+    return result
+
+
+def append_repositories(value, added, decision_ref):
+    validate(value)
+    text(decision_ref, "decision_ref")
+    if not isinstance(added, dict) or not added or set(added) & set(value["repositories"]):
+        raise ValueError("只能追加新仓，不能替换原基线")
+    result = _append_value(value, added, decision_ref)
+    validate(result)
+    return result
 
 
 def verify_local_repository(station, repository, origin, ref_kind, ref, sha):

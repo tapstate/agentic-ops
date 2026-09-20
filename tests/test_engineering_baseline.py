@@ -34,6 +34,24 @@ class BaselineTest(unittest.TestCase):
     def freeze(self):
         return baseline.freeze(self.profile, self.catalog, self.resolutions, {"version": "develop"})
 
+    def test_append_chain_preserves_old_entries_and_rejects_replacement(self):
+        before = self.freeze()
+        full = baseline.freeze(self.profile, self.catalog, dict(self.resolutions, **{"org/test": self.resolutions["org/a"]}),
+                               {"version": "develop"}, optional=["org/test"])
+        added = {"org/test": full["repositories"]["org/test"]}
+        result = baseline.append_repositories(before, added, "fixture:decision")
+        baseline.validate(result)
+        assert_schema(self, json.loads((ROOT / "contracts/engineering-baseline.schema.json").read_text()), result)
+        self.assertEqual(before["repositories"]["org/a"], result["repositories"]["org/a"])
+        self.assertEqual(2, result["revision"])
+        with self.assertRaisesRegex(ValueError, "不能替换"):
+            baseline.append_repositories(result, added, "fixture:another")
+        changed = copy.deepcopy(result)
+        changed["repositories"]["org/a"]["commit_sha"] = "b" * 40
+        changed["digest"] = baseline.digest({k:v for k,v in changed.items() if k != "digest"})
+        with self.assertRaisesRegex(ValueError, "摘要链"):
+            baseline.validate(changed)
+
     def test_complete_baseline_is_stable_and_detached_from_inputs(self):
         result = self.freeze()
         schema = json.loads((ROOT / "contracts" / "engineering-baseline.schema.json").read_text())

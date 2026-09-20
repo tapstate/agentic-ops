@@ -170,3 +170,17 @@ python3 <agenticops-root>/workflow/task.py clean --issue-key <issue> --expected-
 `task.py next` 在 `ci_validation` 阶段同时核对源码洁净、登记工作分支、最终候选的合并 PR 事实、质量验收、CI 和有效方案授权。多个仓库缺失合并事实时一次列出 `awaiting_merge`，`advance_ready` 为 false；PR Ready 只表示具备审查条件，不表示已经合并。合并仍需独立明确授权。
 
 预检不写任务、处置或完成证据。`advance` 和未完成任务的 `release` 使用相同完成判定，并在工位锁内重读当前任务及源码后核验；此前的成功预检不能作为放行令牌。完成写入时才记录最终处置，已有完成凭证的恢复与释放继续核验冻结候选，不重复要求已撤销的实施授权。
+
+## 同周期方案返工
+
+发现 Draft PR 的方向或验收方案需要调整时，先保留当前源码和 PR。准备单个 JSON 输入，包含 `reason`、`facts`、`repositories`、`additions`、`impact`：facts 只更新项目声明的方案字段；repositories 按已登记仓库列出 scope 数组和 verification；additions 另需 ref_name 与 commit_sha，只能选择 Profile 的可选仓。impact 包含受影响 repositories、质量 items 引用和 rationale，必须覆盖受影响仓库的已登记检查项。
+
+```sh
+python3 <agenticops-root>/workflow/task.py replan prepare --dir <station> --issue-key <key> --expected-run-id <run> --input <request.json>
+python3 <agenticops-root>/workflow/task.py replan apply --dir <station> --issue-key <key> --expected-run-id <run> --expected-revision <prepare-revision> --operation-id <stable-operation-id> --input <saved-prepare-output.json> --decision-ref <confirmed-decision-reference>
+python3 <agenticops-root>/workflow/task.py replan abort --dir <station> --issue-key <key> --expected-run-id <run> --operation-id <same-operation-id> --decision-ref <abort-decision-reference>
+```
+
+prepare 只读；Agent 用原生文件工具保存完整输出，展示变更范围、验收影响及新仓来源后取得研发决定。apply 使用完整准备输出，不只传 digest；输入、revision、源码或远端漂移时拒绝。网络失败保留原 operation 恢复，不换 run、不清理重接管。abort 只适用于 current 尚未写入的新方案，写入后应恢复 apply 完成回执。
+
+完成后按原入口 source-readiness、quality status/apply、authorization grant 和 advance 恢复实施。本次研发决定已覆盖的新方案及验收事实使用同一真实确认引用，不重复提问；变化的质量项必须按新方案处理。未变项不重跑，旧执行记录不换版本标签。新仓分支与当前 run 一致，历史分支名中的旧后缀不用于判断当前运行归属。

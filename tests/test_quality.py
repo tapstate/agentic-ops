@@ -120,6 +120,22 @@ class QualityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "尚未有效确认"):
             quality.q2_digest(self.base, self.task)
 
+    def test_replan_invalidates_only_mapped_items_without_rewriting_executions(self):
+        self.plan(key="case-a", repo="tapdata/tapdata")
+        self.plan(key="case-b", repo="tapdata/tapdata-manager")
+        for key in ("case-a", "case-b"):
+            self.select(key); self.execute(key); self.decide(key)
+        before = self.view()
+        history = quality.state_path(self.base, self.task).read_bytes()
+        self.task["replan"] = {"item_revisions": {"case-a": "new-scope-digest"}}
+        self.save_task()
+        after = self.view()
+        self.assertFalse(after["items"]["case-a"]["selected"])
+        self.assertFalse(after["items"]["case-a"]["decision_valid"])
+        self.assertTrue(after["items"]["case-b"]["decision_valid"])
+        self.assertEqual(before["items"]["case-a"]["executions"], after["items"]["case-a"]["executions"])
+        self.assertEqual(history, quality.state_path(self.base, self.task).read_bytes())
+
     def test_validate_cli_is_station_independent_and_reports_safe_field_details(self):
         self.plan()
         self.execute(result="NOT_RUN")

@@ -248,7 +248,7 @@ def plan(base, task, version=None, decisions_override=None):
     engineering = task.get("engineering_baseline", {})
     repositories = engineering.get("repositories", {}) if task.get("source_prepared") else _partial_repositories(base)
     catalog = project_rules.load_repository_catalog(station=base)["repositories"]
-    if source.check_station_layout(base, catalog, repositories) != task.get("retained_repositories", {}):
+    if source.check_station_layout(base, catalog, repositories, task.get("replan_preserved")) != task.get("retained_repositories", {}):
         raise ValueError("未选择的持久仓库状态变化")
     operation = operations.read(base) or {}
     entries, states = [], {}
@@ -436,7 +436,7 @@ def _partial_repositories(base):
 def neutral(base, task, operation):
     plan = operation["cleanup_plan"]
     catalog = project_rules.load_repository_catalog(station=base)["repositories"]
-    if source.check_station_layout(base, catalog, plan["source"]) != task.get("retained_repositories", {}):
+    if source.check_station_layout(base, catalog, plan["source"], task.get("replan_preserved")) != task.get("retained_repositories", {}):
         raise ValueError("未选择的持久仓库状态变化")
     for name, entry in plan["source"].items():
         path = source.repository_path(base, name)

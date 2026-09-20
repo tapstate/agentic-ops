@@ -41,7 +41,7 @@ def read(base):
     required = {"operation_id", "kind", "run_id", "request", "request_digest", "expected_revision", "phase"}
     if (not required <= set(value) or not isinstance(value["operation_id"], str)
             or not re.fullmatch(r"op-[a-z0-9-]{8,80}", value["operation_id"])
-            or value["kind"] not in ("takeover", "archive", "release", "clean", "scope_change")
+            or value["kind"] not in ("takeover", "archive", "release", "clean", "scope_change", "replan")
             or not isinstance(value["run_id"], str) or not task_store.RUN_ID_PATTERN.fullmatch(value["run_id"])
             or not isinstance(value["request"], dict) or value["request_digest"] != engineering_baseline.digest(value["request"])
             or type(value["expected_revision"]) is not int or value["expected_revision"] < 0
@@ -131,7 +131,7 @@ def _verify_superseded(operation, name, step):
 
 
 def begin(base, kind, operation_id, expected_revision, request, run_id=None):
-    if kind not in ("takeover", "archive", "release", "clean", "scope_change"):
+    if kind not in ("takeover", "archive", "release", "clean", "scope_change", "replan"):
         raise ValueError("未知工位操作")
     if not isinstance(operation_id, str) or not re.fullmatch(r"op-[a-z0-9-]{8,80}", operation_id):
         raise ValueError("operation_id 必须为 op- 前缀的稳定操作编号")
