@@ -53,6 +53,8 @@ def config(base, task=None):
         ids = [c["id"] for c in result["checkpoints"]]
         if not ids or len(ids) != len(set(ids)) or result["selection_checkpoint"] not in ids:
             raise ValueError("质量检查点配置无效")
+        for method in result["methods"].values():
+            worktree_origins(method)
         from workflow import verification
         requirements = result.get("verification_checkpoints", {})
         if not isinstance(requirements, dict) or not set(requirements) <= set(ids):
@@ -72,6 +74,19 @@ def config(base, task=None):
     except (OSError, KeyError, TypeError, AttributeError) as error:
         raise ValueError("质量配置无法读取或结构无效：%s" % path.name) from error
     return result
+
+
+def worktree_origins(method):
+    """项目声明工作区证据来源；缺省仅保留旧事件的 Maven 回放语义。"""
+    if "worktree_origins" not in method:
+        return [origin for origin in method.get("origins", []) if origin == "local_maven"]
+    origins = method["worktree_origins"]
+    if (not isinstance(origins, list)
+            or any(not isinstance(origin, str) or not origin.strip() for origin in origins)
+            or len(set(origins)) != len(origins)
+            or not set(origins).issubset(method.get("origins", []))):
+        raise ValueError("worktree_origins 必须是 origins 的无重复非空字符串子集")
+    return origins
 
 
 def validate_task_profile(rules, task):
@@ -577,7 +592,7 @@ def reduce(model, command, rules, ctx):
                 raise ValueError("非失败执行不能声明 failure_kind")
             if rules.get("contract_revision", 1) >= 2:
                 revision = execution["target_revision"]
-                if not exact_commit(revision) and not (exact_worktree(revision) and execution["origin"] == "local_maven"):
+                if not exact_commit(revision) and not (exact_worktree(revision) and execution["origin"] in worktree_origins(method)):
                     raise ValueError("执行证据必须绑定完整提交 SHA；仅本地自动验证可使用精确 worktree 指纹，不接受分支名或短 SHA")
             item["executions"].append(execution)
         else:

@@ -766,6 +766,58 @@ class QualityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "完整提交 SHA"):
             self.decide()
 
+    def test_project_can_select_non_maven_worktree_evidence(self):
+        path = self.product / "projects/tapdata/quality.json"
+        rules = json.loads(path.read_text())
+        rules["methods"]["unit"].update(origins=["local_python", "ci"], worktree_origins=["local_python"])
+        path.write_text(json.dumps(rules))
+        plan = self.plan(method="unit")
+        plan.update(checkpoint="q3-draft", target_revision="a" * 40 + ":worktree:" + "b" * 64)
+        self.apply("item", {"plan": plan, "reason": "项目本地 Python 验证"})
+        self.select()
+        with self.assertRaisesRegex(ValueError, "完整提交 SHA"):
+            self.execute(origin="ci")
+        self.execute(origin="local_python")
+        self.decide()
+        self.assertTrue(self.view()["items"]["case-a"]["decision_valid"])
+        plan["checkpoint"] = "q4-acceptance"
+        self.apply("item", {"plan": plan, "reason": "最终验收仍需提交"})
+        self.select()
+        with self.assertRaisesRegex(ValueError, "完整提交 SHA"):
+            self.decide()
+
+    def test_explicit_empty_worktree_origins_disables_legacy_permission(self):
+        path = self.product / "projects/tapdata/quality.json"
+        rules = json.loads(path.read_text())
+        rules["methods"]["unit"]["worktree_origins"] = []
+        path.write_text(json.dumps(rules))
+        self.plan(method="unit")
+        with self.assertRaisesRegex(ValueError, "完整提交 SHA"):
+            self.execute(target_revision="a" * 40 + ":worktree:" + "b" * 64)
+        self.assertEqual(self.view()["items"]["case-a"]["executions"], [])
+        self.execute()
+
+    def test_invalid_worktree_origin_configuration_fails_closed(self):
+        path = self.product / "projects/tapdata/quality.json"
+        rules = json.loads(path.read_text())
+        for value in ("local_maven", None, ["unknown"], ["local_maven", "local_maven"], [""], [{}]):
+            with self.subTest(value=value):
+                rules["methods"]["unit"]["worktree_origins"] = value
+                path.write_text(json.dumps(rules))
+                with self.assertRaisesRegex(ValueError, "worktree_origins"):
+                    quality.config(self.base)
+
+    def test_legacy_worktree_event_rules_remain_replayable(self):
+        self.plan(method="unit")
+        revision = "a" * 40 + ":worktree:" + "b" * 64
+        self.execute(target_revision=revision)
+        state = quality.load(self.base, self.task)
+        for event in state["events"]:
+            for method in event["rules"]["methods"].values():
+                method.pop("worktree_origins", None)
+        model = quality.replay(state)
+        self.assertEqual(model["items"]["case-a"]["executions"][0]["target_revision"], revision)
+
     def test_verified_clean_commit_survives_neutral_checkout(self):
         self.task["repositories"] = self.task["repositories"][:1]
         repo = self.base / "source/tapdata/tapdata"; repo.mkdir(parents=True)

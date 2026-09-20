@@ -72,33 +72,42 @@
       "origins": [
         "taptest"
       ],
-      "guidance": "t-layer3-test 的 write-xray-test 生成 Xray 用例，write-test-script 实现脚本；调用者核对技能可用性，以实际 Test Execution 和报告关联单用例。"
+      "guidance": "t-layer3-test 的 write-xray-test 生成 Xray 用例，write-test-script 实现脚本；调用者核对技能可用性，以实际 Test Execution 和报告关联单用例。",
+      "worktree_origins": []
     },
     "integration": {
       "origins": [
         "local_maven",
         "ci"
       ],
-      "guidance": "用例与产品模块同工程；先核对代码、POM、Failsafe、路径过滤和实际报告。已有覆盖由 CI 触发，新用例在所属工程开发。Maven 本地与 CI 是执行来源。"
+      "guidance": "用例与产品模块同工程；先核对代码、POM、Failsafe、路径过滤和实际报告。已有覆盖由 CI 触发，新用例在所属工程开发。Maven 本地与 CI 是执行来源。",
+      "worktree_origins": [
+        "local_maven"
+      ]
     },
     "unit": {
       "origins": [
         "local_maven",
         "ci"
       ],
-      "guidance": "Unit 用例由用户与 Agent 在代码工程实现或复用；核对单元测试及 CI 集成测试的实际报告，并把最终验收绑定到完整提交 SHA。"
+      "guidance": "Unit 用例由用户与 Agent 在代码工程实现或复用；核对单元测试及 CI 集成测试的实际报告，并把最终验收绑定到完整提交 SHA。",
+      "worktree_origins": [
+        "local_maven"
+      ]
     },
     "manual": {
       "origins": [
         "manual"
       ],
-      "guidance": "关联真实手工用例、执行人、环境、步骤/预期、观察结果及附件；不把无法自动化等同免测。"
+      "guidance": "关联真实手工用例、执行人、环境、步骤/预期、观察结果及附件；不把无法自动化等同免测。",
+      "worktree_origins": []
     },
     "other": {
       "origins": [
         "external"
       ],
-      "guidance": "用户明确批准的其它验证方式，单项单用例，记录方法细节及可回查证据。"
+      "guidance": "用户明确批准的其它验证方式，单项单用例，记录方法细节及可回查证据。",
+      "worktree_origins": []
     }
   },
   "knowledge": [
