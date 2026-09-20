@@ -1131,6 +1131,23 @@ class QualityTests(unittest.TestCase):
         self.assertFalse(self.view()["items"]["case-a"]["decision_valid"])
         self.assertTrue(self.view()["items"]["case-b"]["decision_valid"])
 
+    def test_ci_timeouts_use_monotonic_clock_and_keep_audit_timestamp(self):
+        for pr, checks, ticks, verdict in (
+                ("81", [], [100, 401], "start_timeout"),
+                ("82", [{"status": "IN_PROGRESS"}], [100, 101, 102, 102, 703, 704], "finish_timeout")):
+            args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr=pr,
+                interval=1, start_timeout=300, finish_timeout=600, expected_run_id=self.task["run_id"])
+            clock = SimpleNamespace(monotonic=mock.Mock(side_effect=ticks),
+                time=mock.Mock(side_effect=AssertionError("wall clock must not measure duration")),
+                sleep=mock.Mock(), strftime=mock.Mock(return_value="2026-09-21T00:00:00+0800"))
+            with self.subTest(verdict=verdict), mock.patch.object(ci, "time", clock), mock.patch.object(
+                    ci, "fetch_rollup", return_value=(checks, "a" * 40)):
+                self.assertEqual(3, ci.cmd_watch(args))
+            record = ci.load_state(self.base, "TAP-123", pr, args.repo)["history"][-1]
+            self.assertEqual(verdict, record["verdict"])
+            self.assertEqual("2026-09-21T00:00:00+0800", record["ts"])
+            clock.time.assert_not_called()
+
     def test_ci_rollup_validates_external_shape_and_revision(self):
         for value in ([], None, {"statusCheckRollup": False, "headRefOid": "a" * 40},
                       {"statusCheckRollup": {}, "headRefOid": "a" * 40},

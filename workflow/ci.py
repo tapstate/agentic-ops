@@ -168,7 +168,7 @@ def cmd_watch(args):
         task_store.resolve_active_issue(args.dir, issue)
         task_store.check_expected_run(args.dir, issue, getattr(args, "expected_run_id", None))
         state = load_state(args.dir, issue, args.pr, getattr(args, "repo", None))
-    started = time.time()
+    started = time.monotonic()
     first_seen = None
     head = ""
     while True:
@@ -181,7 +181,7 @@ def cmd_watch(args):
             print("PR Head 未知，无法关联验证证据。", file=sys.stderr)
             return 4
         verdict, failing = classify(checks)
-        elapsed = time.time() - started
+        elapsed = time.monotonic() - started
         print("[%ds] head=%s 检查=%d 判定=%s" % (elapsed, head[:8], len(checks), verdict))
 
         if verdict == "success":
@@ -208,8 +208,8 @@ def cmd_watch(args):
                 return 3
         else:  # pending
             if first_seen is None:
-                first_seen = time.time()
-            if time.time() - first_seen > args.finish_timeout:
+                first_seen = time.monotonic()
+            if time.monotonic() - first_seen > args.finish_timeout:
                 _log(state, args, "finish_timeout", head, [], checks)
                 save_state(args.dir, issue, args.pr, state)
                 print("检查开始后 %d 秒未结束，转人工。" % args.finish_timeout)
