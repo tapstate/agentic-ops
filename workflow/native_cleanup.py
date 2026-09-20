@@ -14,15 +14,57 @@ from workflow import engineering_baseline as baseline, project_rules, station_di
 from workflow import station_source as source, station_resources as resources, station_operation as operations, task_store
 
 
+def _unique_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError('清理配方包含重复 JSON 键')
+        value[key] = item
+    return value
+
+
+def validate_configuration(value):
+    """完整配置先校验，不能在保全报告途中才发现下一仓配方无效。"""
+    if (not isinstance(value, dict) or set(value) != {'schema_version', 'repositories'}
+            or type(value['schema_version']) is not int or value['schema_version'] != 1
+            or not isinstance(value['repositories'], dict)):
+        raise ValueError('清理配方结构或版本无效')
+    for name, recipe in value['repositories'].items():
+        baseline.repository_id(name)
+        if not isinstance(recipe, dict) or recipe.get('kind') not in ('maven', 'web', 'project-script'):
+            raise ValueError('清理配方类型无效：' + name)
+        expected = {'kind', 'generated', 'reports', 'source_ref'}
+        if recipe['kind'] == 'project-script':
+            expected.add('script')
+        if set(recipe) != expected:
+            raise ValueError('清理配方字段无效：' + name)
+        baseline.text(recipe['source_ref'], '清理配方 source_ref')
+        for field in ('generated', 'reports'):
+            patterns = recipe[field]
+            if not isinstance(patterns, list) or (field == 'generated' and not patterns):
+                raise ValueError('清理配方模式列表无效：' + name + '/' + field)
+            for pattern in patterns:
+                baseline.text(pattern, '清理配方路径模式')
+                parts = pattern.split('/')
+                if ('\\' in pattern or any(part in ('', '.', '..') for part in parts)
+                        or (field == 'generated' and any('**' in part and part != '**' for part in parts))):
+                    raise ValueError('清理配方需要仓库内相对路径模式：' + name)
+        if recipe['kind'] == 'project-script':
+            script = baseline.text(recipe['script'], '清理配方 script')
+            parts = script.split('/')
+            if (len(parts) != 2 or parts[0] != 'scripts' or parts[1] in ('.', '..')
+                    or not parts[1] or '\\' in script):
+                raise ValueError('清理配方脚本必须位于项目 scripts 目录：' + name)
+
+
 def configuration(base):
     root, project = project_rules.station_context(base)
     path = project_rules.project_root(root, project) / 'repo-cleanup.json'
     if path.is_symlink():
         raise ValueError('清理配方不能为链接')
     raw = path.read_bytes()
-    value = json.loads(raw)
-    if value.get('schema_version') != 1:
-        raise ValueError('清理配方版本无效')
+    value = json.loads(raw, object_pairs_hook=_unique_object)
+    validate_configuration(value)
     return root, value, hashlib.sha256(raw).hexdigest()
 
 

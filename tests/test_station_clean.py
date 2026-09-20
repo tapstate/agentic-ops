@@ -61,6 +61,51 @@ class StationCleanTests(unittest.TestCase):
             native_cleanup.commands(self.ws, {}, "tapdata/t-layer3-test",
                 {"kind": "project-script", "script": "scripts/clean-t-layer3-test.py", "source_ref": "fixture"}, [])
 
+    def test_native_configuration_validates_before_inspection(self):
+        import copy
+        from workflow import native_cleanup
+        path = self.product / 'projects/tapdata/repo-cleanup.json'
+        original = json.loads(path.read_text())
+        invalid = [[], None, {'schema_version': True, 'repositories': {}},
+                   {'schema_version': 1, 'repositories': []}, {'schema_version': 1},
+                   dict(original, unexpected=True)]
+        for field, values in {'kind': [[], 'unknown'], 'generated': [[], 'target', [None], ['../target'], ['/target'], ['a/**x']],
+                              'reports': [None, ['/report'], ['../report'], [3]], 'source_ref': ['', None]}.items():
+            for value in values:
+                config = copy.deepcopy(original)
+                config['repositories']['tapdata/tapdata'][field] = value
+                invalid.append(config)
+        for script in (None, '../escape.py', 'scripts/../escape.py', '/scripts/clean.py'):
+            config = copy.deepcopy(original)
+            config['repositories']['tapdata/t-layer3-test']['script'] = script
+            invalid.append(config)
+        invalid.append({'schema_version': 1, 'repositories': {'../escape': original['repositories']['tapdata/tapdata']}})
+        invalid.append({'schema_version': 1, 'repositories': {'owner/repo': []}})
+        for value in invalid:
+            with self.subTest(value=value):
+                path.write_text(json.dumps(value))
+                with mock.patch.object(native_cleanup.source, 'repository_path') as source_path:
+                    with self.assertRaises(ValueError):
+                        native_cleanup.inspect(self.ws, {}, {}, preserve=True)
+                    source_path.assert_not_called()
+        for raw in ('{"schema_version": 1, "schema_version": 1, "repositories": {}}',
+                    '{"schema_version": 1, "repositories": {"owner/repo": {}, "owner/repo": {}}}'):
+            path.write_text(raw)
+            with self.assertRaisesRegex(ValueError, '重复 JSON 键'):
+                native_cleanup.configuration(self.ws)
+
+    def test_native_configuration_keeps_original_bytes_digest(self):
+        from workflow import native_cleanup
+        path = self.product / 'projects/tapdata/repo-cleanup.json'
+        raw = path.read_bytes()
+        root, value, digest = native_cleanup.configuration(self.ws)
+        self.assertEqual(root, self.product.resolve())
+        self.assertEqual(value, json.loads(raw))
+        self.assertEqual(digest, hashlib.sha256(raw).hexdigest())
+        self.assertEqual(raw, path.read_bytes())
+        native_cleanup.validate_configuration({'schema_version': 1, 'repositories': {
+            'owner/repo': {'kind': 'maven', 'source_ref': 'fixture', 'generated': ['**/target'], 'reports': []}}})
+
     def cleanup_request(self, task):
         return dict(summary='清理测试', reason='用户确认停止', decision_ref='fixture:user',
                     cleanup_version=4, abandon_changes=True,
