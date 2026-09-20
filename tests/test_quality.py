@@ -1215,6 +1215,33 @@ class QualityTests(unittest.TestCase):
         path.mkdir()
         check("missing")
 
+    def test_gate_intents_reject_malformed_preparation_files(self):
+        engine = authorization.engine
+        directory = self.base / "preparation-fixture"
+        records = directory / "evidence"
+        records.mkdir(parents=True)
+        current = {"run_id": "fixture-run", "issue_key": "TAP-123"}
+        status = records / "jira-status-fixture.json"
+        watermark = records / "jira-watermark-fixture.json"
+        for raw in (b'null', b'[]', b'1', b'true', b'"state"', b'{bad', b'\xff'):
+            with self.subTest(raw=raw):
+                for path in (status, watermark):
+                    path.write_bytes(raw)
+                with mock.patch.object(engine, "current_task", return_value=current):
+                    self.assertEqual("missing", engine.jira_status_intent(directory, "1"))
+                    self.assertEqual("missing", engine.jira_watermark_intent(directory, "TAP-123", "customfield_1", "digest"))
+                self.assertEqual(raw, status.read_bytes())
+                self.assertEqual(raw, watermark.read_bytes())
+        (directory / "current-task.json").write_bytes(b'\xff')
+        self.assertIsNone(engine.current_task(directory))
+        valid = {"outcome": "ready", "issue_key": "TAP-123", "version": "v1", "issue_type_id": "1",
+            "source_ref": "fixture", "logical_key": "agenticops_version", "write_mode": "overwrite",
+            "field_id": "customfield_1", "payload_digest": "digest",
+            "native_request": {"issue_key": "TAP-123", "fields": {"customfield_1": "v1"}}}
+        (records / "jira-watermark-valid.json").write_text(json.dumps({"run_id": "fixture-run", "watermark": valid}))
+        with mock.patch.object(engine, "current_task", return_value=current):
+            self.assertEqual("matched", engine.jira_watermark_intent(directory, "TAP-123", "customfield_1", "digest"))
+
     def test_evidence_jsonl_preserves_unicode_separators_inside_strings(self):
         path = task_store.events_path(self.base, "TAP-123")
         events = [{"decision": "allow", "note": "a" + chr(code) + "b"}

@@ -29,7 +29,7 @@ def _read_json(path):
     try:
         with open(path, "r", encoding="utf-8") as stream:
             return json.load(stream)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, UnicodeError, OSError):
         return None
 
 
@@ -188,7 +188,9 @@ def jira_watermark_intent(task_directory, issue_key, field_id, digest):
     matched = False
     for path in sorted((Path(task_directory) / "evidence").glob("jira-watermark-*.json")):
         state = _read_json(path)
-        record = state.get("watermark") if isinstance(state, dict) else None
+        if not isinstance(state, dict):
+            continue
+        record = state.get("watermark")
         if (state.get("run_id") == task.get("run_id") and isinstance(record, dict) and
                 record.get("outcome") == "ready" and record.get("issue_key") == task.get("issue_key") and
                 isinstance(record.get("version"), str) and record["version"] and
