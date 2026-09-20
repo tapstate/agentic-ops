@@ -231,6 +231,20 @@ class StationBootstrapTests(unittest.TestCase):
         self.assertEqual((state / 'unknown.json').read_text(), 'unknown')
         self.assertFalse((state / 'station.json').exists())
 
+    def test_prune_does_not_unregister_an_unknown_state_directory(self):
+        state = self.station / '.agenticops'
+        (state / 'station.json').unlink()
+        (state / 'unknown.json').write_text('keep')
+        args = type('Args', (), {'station': str(self.station), 'all': False, 'yes': True})()
+        registry.command_prune(args, ROOT)
+        self.assertIn(str(self.station.resolve()), registry.load_registry(ROOT))
+        self.assertEqual((state / 'unknown.json').read_text(), 'keep')
+
+    def test_station_init_registers_before_render_under_the_lifecycle_lock(self):
+        script = (ROOT / 'bootstrap/station-init.sh').read_text()
+        self.assertLess(script.index('lifecycle_acquire_lock'), script.index('register --station'))
+        self.assertLess(script.index('register --station'), script.index('bootstrap/render.py'))
+
     def test_state_replacement_after_preflight_is_rejected(self):
         outside = Path(self.temporary.name) / 'outside'
         outside.mkdir()

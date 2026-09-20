@@ -20,7 +20,7 @@ TapData 集成测试协作由 [tapdata-ci-test](../projects/tapdata/skills/tapda
 
 现役工位采用单任务模型：source 保存完整独立工程，config 保存持久配置，runtime 是唯一运行现场，archive 保存正式档案，.agenticops 只绑定一个 current 与 operation。[项目目标](strategy/project-goals.md)负责方向，[工程架构](architecture/agenticops-v1-architecture.md)负责分层，[工位合同](architecture/single-task-station.md)负责身份、四操作、恢复及可复用验收边界；机器基线见 [engineering-baseline](../contracts/engineering-baseline.schema.json)。功能存在不等于真实 TapData 应用已验证运行，执行证据与发布结论仍在 Jira。
 
-生成与清理先在同版本形成闭环：初始化、任务处理、归档释放或清理、工位 purge、再次初始化。跨版本升级是第二层编排，只在原版本清理成功后切换并调用新版本生成；不在线迁移任务，不让新版本解释旧 Runtime 状态。[更新与回退](usage/update-and-rollback.md)维护这个使用顺序。
+生成与清理先在同版本形成闭环：初始化、任务处理、归档释放或清理、工位 purge、再次初始化。跨版本升级是第二层编排：升级器只比较不兼容标记；标记变化时必须确认 Product Root 的工位登记为空，原版本负责完成任务和 purge，目标版本只生成新工位，不在线迁移任务或解释旧 Runtime 状态。登记缺失、损坏或无法读取时停止切换。[更新与回退](usage/update-and-rollback.md)维护这个使用顺序。
 
 TapData 活动仓库以 repositories.json 为准；docs/docs-en 已解除，t-layer3-test 保留为可选验证依赖。新版本不保留旧清理身份映射，旧现场由原版本处理，不删除已有源码、Git refs 或材料。
 

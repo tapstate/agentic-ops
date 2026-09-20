@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Product Root 本机工位提示索引与受控维护命令。"""
+"""Product Root 本机工位登记与受控维护命令。"""
 from __future__ import annotations
 
 import argparse
@@ -61,6 +61,14 @@ def load_registry(product_root):
     return sorted(set(paths))
 
 
+def initialize_registry(product_root):
+    path = registry_path(product_root)
+    if path.exists():
+        load_registry(product_root)
+    else:
+        save_registry(product_root, [])
+
+
 def save_registry(product_root, stations):
     write_json(registry_path(product_root), {"schema_version": SCHEMA_VERSION, "stations": sorted(set(stations))})
 
@@ -77,6 +85,17 @@ def unregister(product_root, station):
     stations = load_registry(product_root)
     if station in stations:
         save_registry(product_root, [item for item in stations if item != station])
+
+
+def require_lifecycle_owner(product_root):
+    """仅允许公共入口在持有 Product Root 生命周期锁时修改登记。"""
+    owner_path = Path(product_root).resolve() / ".local" / "lifecycle.lock" / "owner"
+    try:
+        owner = int(owner_path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError) as error:
+        raise ValueError("工位登记变更需要 Product Root 生命周期锁") from error
+    if owner != os.getppid():
+        raise ValueError("工位登记生命周期锁不属于当前公共入口")
 
 
 def binding_status(product_root, station, tree=None):
@@ -259,9 +278,11 @@ def remove_empty_parents(paths, tree):
             path = path.parent
 
 
-def detach(product_root, station, purge=False):
+def detach(product_root, station, purge=False, allow_product_lifecycle=False):
     station = Path(station).resolve()
-    lock = task_store.task_state_lock(station)
+    lock = task_store.task_state_lock(
+        station, allow_product_lifecycle=allow_product_lifecycle
+    )
     with lock:
         with StationDirectory(station) as tree:
             # purge 必须在持有工位状态目录锁后重新预检；命令展示阶段的预检
@@ -312,7 +333,10 @@ def command_prune(args, product_root):
     for station in targets:
         status, reason = binding_status(product_root, station)
         details[str(station)] = reason
-        if status in ("missing", "invalid", "rebound"):
+        state = station / STATE_DIRECTORY
+        if status in ("missing", "rebound") or (
+            status == "invalid" and not state.exists()
+        ):
             removable.append(station)
     show_targets("prune", removable, details)
     if not removable:
@@ -354,7 +378,12 @@ def command_detach(args, product_root, purge=False):
     show_targets("purge" if purge else "detach", targets, details)
     confirm(args)
     for station in targets:
-        detach(product_root, station, purge=purge)
+        detach(
+            product_root,
+            station,
+            purge=purge,
+            allow_product_lifecycle=args.lifecycle_held,
+        )
     print("已%s %s 个工位。" % ("彻底清理" if purge else "解绑", len(targets)))
 
 
@@ -428,7 +457,9 @@ def parser():
 
     result = StrictArgumentParser(description=__doc__)
     result.add_argument("--product-root", required=True)
+    result.add_argument("--lifecycle-held", action="store_true", help=argparse.SUPPRESS)
     commands = result.add_subparsers(dest="command", required=True)
+    commands.add_parser("initialize")
     commands.add_parser("register").add_argument("--station", required=True)
     commands.add_parser("pending").add_argument("--product-ref", required=True)
     commands.add_parser("list")
@@ -457,7 +488,11 @@ def main():
     args = parser().parse_args()
     product_root = Path(args.product_root).resolve()
     try:
-        if args.command == "register":
+        if args.lifecycle_held:
+            require_lifecycle_owner(product_root)
+        if args.command == "initialize":
+            initialize_registry(product_root)
+        elif args.command == "register":
             register(product_root, args.station)
         elif args.command == "pending":
             command_pending(args, product_root)

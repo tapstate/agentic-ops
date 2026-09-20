@@ -78,6 +78,8 @@ python3 "$install_root/bootstrap/product_state.py" \
   --product-root "$install_root" write \
   --mode installed --repository "$repository" --branch "$branch" \
   --current-ref "$current_ref" --source-pool "$source_pool"
+python3 "$install_root/bootstrap/station_registry.py" \
+  --product-root "$install_root" initialize
 
 printf 'AgenticOps 安装完成：安装目录=%s\n' "$install_root"
 printf '安装通道：%s（%s）\n' "$branch" "$current_ref"

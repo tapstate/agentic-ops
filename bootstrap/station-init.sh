@@ -72,6 +72,10 @@ test -f "$install_root/gate/runner.py" || {
   exit 2
 }
 
+# shellcheck source=bootstrap/lifecycle-common.sh
+. "$install_root/bootstrap/lifecycle-common.sh"
+lifecycle_acquire_lock "$install_root" "station-init:$station"
+
 agent_arguments=()
 for agent_id in ${agents[@]+"${agents[@]}"}; do
   agent_arguments+=(--agent "$agent_id")
@@ -80,14 +84,13 @@ source_pool_arguments=()
 if [ -n "$source_pool" ]; then
   source_pool_arguments=(--source-pool "$source_pool")
 fi
+python3 "$install_root/bootstrap/station_registry.py" \
+  --product-root "$install_root" --lifecycle-held register --station "$station"
 python3 "$install_root/bootstrap/render.py" \
   --install-home "$install_root" --station "$station" \
   --project "$project" ${agent_arguments[@]+"${agent_arguments[@]}"} \
   ${source_pool_arguments[@]+"${source_pool_arguments[@]}"} \
   ${reuse_arguments[@]+"${reuse_arguments[@]}"}
-python3 "$install_root/bootstrap/station_registry.py" \
-  --product-root "$install_root" register --station "$station"
-
 printf 'AgenticOps 项目工位已初始化：%s（project=%s）\n' "$station" "$project"
 printf '统一入口：cd %s && ./agenticops station doctor\n' "$station"
 printf '必需插件：首次使用 Jira 事实时，Agent 会检查 atlassian；缺失时只暂停依赖步骤并引导你在当前 Agent 客户端安装和登录。GitHub 工具由 Agent 按任务自行选择。\n'

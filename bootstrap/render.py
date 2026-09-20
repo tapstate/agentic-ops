@@ -20,7 +20,6 @@ from station_paths import StationDirectory, station_artifact_path
 from station_compatibility import (
     load_manifest,
     require_station_can_adopt,
-    station_epoch,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -463,8 +462,7 @@ def check_station(install_root, station, config, init, tree):
         raise ValueError("工位缺少 init.json，请执行 agenticops station repair")
     project, agents, manifests = validate_station_document(install_root, config)
     compatibility = load_manifest(install_root)
-    if station_epoch(station, compatibility) not in compatibility["supported_station_state_epochs"]:
-        raise ValueError("工位状态代际与当前产品不兼容；请先在原版本结束并清理任务，再重新初始化工位")
+    require_station_can_adopt(install_root, station, compatibility)
     from workflow import station_operation, task_store
     task_store.read_current(station)
     station_operation.read(station)

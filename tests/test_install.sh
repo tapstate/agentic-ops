@@ -87,6 +87,8 @@ PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" setup >/dev/null
 "$maintainer_root/agenticops" --help | grep -F '工位：项目工作目录' >/dev/null
 test "$(git -C "$maintainer_root" branch --show-current)" = develop
 test -d "$maintainer_root/.local/venv/internal"
+test -f "$maintainer_root/.local/stations.json"
+grep -F '"stations": []' "$maintainer_root/.local/stations.json" >/dev/null
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field mode)" = source
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field tracking_branch)" = develop
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field source_pool)" = "$HOME/.agentic-ops-repos"
@@ -235,6 +237,8 @@ test ! -e "$install_root/.agents/skills/ao-test-takeover"
 test ! -e "$install_root/.claude/skills/ao-test-takeover"
 test ! -e "$install_root/internal"
 test -f "$install_root/.local/product.json"
+test -f "$install_root/.local/stations.json"
+grep -F '"stations": []' "$install_root/.local/stations.json" >/dev/null
 test ! -e "$install_root/.local/repository-pool.json"
 test "$(python3 "$install_root/bootstrap/product_state.py" --product-root "$install_root" read --field tracking_branch)" = "$install_branch"
 test "$(python3 "$install_root/bootstrap/product_state.py" --product-root "$install_root" read --field source_pool)" = "$custom_source_pool"
@@ -891,7 +895,12 @@ python3 "$repo_root/tests/test_station_bootstrap.py" --product-root "$install_ro
 missing_station="$test_root/missing-station"
 "$install_root/agenticops" station init --station "$missing_station" --agent codex >/dev/null
 rm -rf "$missing_station"
-"$install_root/agenticops" station prune --all --yes | grep -F '已注销 1 个无法跟踪的工位。' >/dev/null
+"$install_root/agenticops" station prune --all --yes \
+  | grep -E '已注销 [1-9][0-9]* 个无法跟踪的工位。' >/dev/null
+if "$install_root/agenticops" station list | grep -F -- "$missing_station" >/dev/null; then
+  printf '缺失工位 prune 后仍保留在登记清单\n' >&2
+  exit 1
+fi
 
 fake_bin="$test_root/fake-bin"
 capture="$test_root/codex-capture"
@@ -961,6 +970,7 @@ from pathlib import Path
 path = Path(sys.argv[1])
 document = json.loads(path.read_text(encoding="utf-8"))
 document["station_state_epoch"] += 1
+document["legacy_station_state_epoch"] = document["station_state_epoch"]
 document["supported_station_state_epochs"] = [document["station_state_epoch"]]
 path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
@@ -971,8 +981,8 @@ if "$station/agenticops" update > "$test_root/incompatible-update-output" 2>&1; 
   printf '存在未清理任务时跨工位状态代际升级未被拒绝\n' >&2
   exit 1
 fi
-grep -F '目标版本包含不兼容的工位状态变更' "$test_root/incompatible-update-output" >/dev/null
-grep -F '状态代际' "$test_root/incompatible-update-output" >/dev/null
+grep -F '目标版本包含不兼容变更' "$test_root/incompatible-update-output" >/dev/null
+grep -F '仍有绑定工位' "$test_root/incompatible-update-output" >/dev/null
 test "$(git -C "$install_root" rev-parse HEAD)" = "$installed_head_before_blocked_update"
 
 printf 'AgenticOps 安装边界验证通过：被测分支=%s，被测提交=%s，安装 fixture 分支=%s\n' \
