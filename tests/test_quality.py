@@ -1146,6 +1146,36 @@ class QualityTests(unittest.TestCase):
         self.assertFalse(self.view()["items"]["case-a"]["decision_valid"])
         self.assertTrue(self.view()["items"]["case-b"]["decision_valid"])
 
+    def test_gate_intent_consumption_preserves_unicode_event_content(self):
+        engine = authorization.engine
+        directory = self.base / "intent-fixture"
+        records = directory / "evidence"
+        records.mkdir(parents=True)
+        current = {"run_id": "fixture-run", "issue_key": "TAP-123"}
+        (records / "jira-status-fixture.json").write_text(json.dumps({"run_id": "fixture-run",
+            "attempts": {"a": {"outcome": "ready", "transition_id": "1"}}}))
+        watermark = {"outcome": "ready", "issue_key": "TAP-123", "version": "v1", "issue_type_id": "1",
+            "source_ref": "fixture", "logical_key": "agenticops_version", "write_mode": "overwrite",
+            "field_id": "customfield_1", "payload_digest": "digest",
+            "native_request": {"issue_key": "TAP-123", "fields": {"customfield_1": "v1"}}}
+        (records / "jira-watermark-fixture.json").write_text(json.dumps({"run_id": "fixture-run", "watermark": watermark}))
+        for code in (0x85, 0x2028, 0x2029):
+            events = [{"reason_code": "jira_status_intent_covered", "jira_transition_id": "1"},
+                      {"reason_code": "jira_watermark_intent_covered", "jira_watermark_field": "customfield_1",
+                       "jira_watermark_digest": "digest"}]
+            for event in events:
+                event.update(agentic_run_id="fixture-run", note="a" + chr(code) + "b")
+            (records / "events.jsonl").write_bytes(("\r\n".join(json.dumps(e, ensure_ascii=False) for e in events) + "\r\n").encode())
+            with mock.patch.object(engine, "current_task", return_value=current):
+                self.assertEqual("consumed", engine.jira_status_intent(directory, "1"))
+                self.assertEqual("consumed", engine.jira_watermark_intent(directory, "TAP-123", "customfield_1", "digest"))
+            for event in events:
+                event["agentic_run_id"] = "other-run"
+            (records / "events.jsonl").write_text("\n".join(json.dumps(e, ensure_ascii=False) for e in events))
+            with mock.patch.object(engine, "current_task", return_value=current):
+                self.assertEqual("matched", engine.jira_status_intent(directory, "1"))
+                self.assertEqual("matched", engine.jira_watermark_intent(directory, "TAP-123", "customfield_1", "digest"))
+
     def test_evidence_jsonl_preserves_unicode_separators_inside_strings(self):
         path = task_store.events_path(self.base, "TAP-123")
         events = [{"decision": "allow", "note": "a" + chr(code) + "b"}

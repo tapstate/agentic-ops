@@ -150,7 +150,7 @@ def jira_status_intent(task_directory, transition_id):
         return "missing"
     events = Path(task_directory) / "evidence" / "events.jsonl"
     try:
-        lines = events.read_text(encoding="utf-8").splitlines() if events.is_file() else []
+        lines = events.read_text(encoding="utf-8").split("\n") if events.is_file() else []
     except OSError:
         return "missing"
     for line in lines:
@@ -192,7 +192,7 @@ def jira_watermark_intent(task_directory, issue_key, field_id, digest):
         return "missing"
     events = Path(task_directory) / "evidence" / "events.jsonl"
     try:
-        lines = events.read_text(encoding="utf-8").splitlines() if events.is_file() else []
+        lines = events.read_text(encoding="utf-8").split("\n") if events.is_file() else []
     except OSError:
         return "missing"
     for line in lines:
