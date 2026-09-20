@@ -63,20 +63,21 @@ def validate_project_id(project):
     return project
 
 
-def project_from_station(station):
+def _station_binding(station):
     path = Path(station).resolve() / ".agenticops" / "station.json"
     if not path.is_file():
         raise ValueError("工位缺少 .agenticops/station.json，请先执行 agenticops station init")
-    binding = _read_json(path)
+    return _read_json(path)
+
+
+def _binding_project(binding):
     project = binding.get("project")
     if not isinstance(project, str) or not project:
         raise ValueError("工位绑定缺少 project")
     return validate_project_id(project)
 
 
-def product_root_from_station(station):
-    path = Path(station).resolve() / ".agenticops" / "station.json"
-    binding = _read_json(path)
+def _binding_product_root(binding):
     root = binding.get("product_root")
     if not isinstance(root, str) or not root:
         raise ValueError("工位绑定缺少 product_root")
@@ -84,6 +85,21 @@ def product_root_from_station(station):
     if not product.is_dir():
         raise ValueError("工位绑定的 Product Root 不存在：%s" % product)
     return product
+
+
+def station_context(station):
+    """一次读取绑定，避免把不同快照的项目名与产品根拼在一起。"""
+    binding = _station_binding(station)
+    project = _binding_project(binding)
+    return _binding_product_root(binding), project
+
+
+def project_from_station(station):
+    return _binding_project(_station_binding(station))
+
+
+def product_root_from_station(station):
+    return _binding_product_root(_station_binding(station))
 
 
 def project_root(root=ROOT, project=None):
@@ -99,8 +115,7 @@ def project_root(root=ROOT, project=None):
 
 
 def load_admission(root=ROOT, project=None, station=None):
-    selected = project_from_station(station) if station is not None else project
-    selected_root = product_root_from_station(station) if station is not None else root
+    selected_root, selected = station_context(station) if station is not None else (root, project)
     return _read_json(project_root(selected_root, selected) / "admission.json")
 
 
@@ -137,8 +152,7 @@ def validate_takeover_watermark(profile):
 
 
 def load_profile(root=ROOT, project=None, station=None):
-    selected = project_from_station(station) if station is not None else project
-    selected_root = product_root_from_station(station) if station is not None else root
+    selected_root, selected = station_context(station) if station is not None else (root, project)
     profile = _read_json(project_root(selected_root, selected) / "profile.json")
     validate_takeover_watermark(profile)
     reference = profile.get("repositories", {}).get("catalog")
@@ -180,8 +194,7 @@ def load_repository_catalog(root=ROOT, project=None, station=None):
 
 
 def repository_catalog_path(root=ROOT, project=None, station=None):
-    selected = project_from_station(station) if station is not None else project
-    selected_root = product_root_from_station(station) if station is not None else root
+    selected_root, selected = station_context(station) if station is not None else (root, project)
     base = project_root(selected_root, selected).resolve()
     profile = _read_json(base / "profile.json")
     reference = profile.get("repositories", {}).get("catalog")

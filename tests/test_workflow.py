@@ -172,6 +172,64 @@ def check_project_json_objects(base):
     check("CLI 缺文件不泄漏栈", "Traceback" not in out, True)
 
 
+def check_station_binding_snapshot(base):
+    from workflow import jira_collect, native_cleanup, repair_strategy, station, station_clean_rules, station_replan
+    area = base.resolve() / "binding-snapshot"
+    products = [area / "product-a", area / "product-b"]
+    for root in products:
+        for name in ("alpha", "beta"):
+            shutil.copytree(ROOT / "projects/tapdata", root / "projects" / name)
+        shutil.copytree(ROOT / "policies", root / "policies")
+    bound = area / "station"
+    binding = bound / ".agenticops/station.json"
+    binding.parent.mkdir(parents=True)
+    initial = {"product_root": str(products[0]), "project": "alpha"}
+    later = {"product_root": str(products[1]), "project": "beta"}
+    task = {"task_class": "defect_fix"}
+    project = products[0] / "projects/alpha"
+    # 赋予各配置可区分的内容，证明调用没有混用第二次绑定。
+    for root in products:
+        for name in ("alpha", "beta"):
+            for filename in ("admission.json", "profile.json", "jira-transitions.json"):
+                path = root / "projects" / name / filename
+                value = json.loads(path.read_text())
+                value["snapshot_marker"] = root.name + "/" + name
+                if filename == "profile.json":
+                    value["jira"]["site"] = "https://" + root.name + "-" + name + ".example.test"
+                path.write_text(json.dumps(value))
+    calls = (
+        ("绑定上下文", lambda: project_rules.station_context(bound), (products[0], "alpha")),
+        ("准入", lambda: project_rules.load_admission(station=bound)["snapshot_marker"], "product-a/alpha"),
+        ("Profile", lambda: project_rules.load_profile(station=bound)["snapshot_marker"], "product-a/alpha"),
+        ("仓库目录路径", lambda: project_rules.repository_catalog_path(station=bound), project / "repositories.json"),
+        ("质量配置", lambda: quality.config(bound, task)["jira"]["site"], "https://product-a-alpha.example.test"),
+        ("Jira 采集", lambda: jira_collect.config(bound, task)[0]["snapshot_marker"], "product-a/alpha"),
+        ("返工项目", lambda: station_replan.project(bound)[1], project),
+        ("工位项目", lambda: station._project(bound), project),
+        ("原生清理", lambda: native_cleanup.configuration(bound)[0], products[0]),
+        ("清理规则", lambda: bool(station_clean_rules.load(bound)["layers"]), True),
+        ("修复策略", lambda: repair_strategy.resolve(bound, task)["available"], True),
+    )
+    original = project_rules._read_json
+    for label, read, expected in calls:
+        binding.write_text(json.dumps(initial))
+        observed = []
+        def changing_read(path):
+            value = original(path)
+            if path == binding:
+                observed.append(value)
+                binding.write_text(json.dumps(later))
+            return value
+        with mock.patch.object(project_rules, "_read_json", side_effect=changing_read):
+            result = read()
+        check("绑定快照结果 " + label, result, expected)
+        check("绑定只读一次 " + label, len(observed), 1)
+    binding.write_text(json.dumps({"project": "alpha"}))
+    check("单字段项目旧 API 保持兼容", project_rules.project_from_station(bound), "alpha")
+    binding.write_text(json.dumps({"product_root": str(products[0])}))
+    check("单字段产品根旧 API 保持兼容", project_rules.product_root_from_station(bound), products[0])
+
+
 def main():
     # 生命周期的资源安全、双工位、恢复与精确清理在独立同版测试覆盖；
     # 本文件保留通用 CLI、CI、证据脱敏和项目规则合同。
@@ -318,6 +376,7 @@ def main():
         check("admission 覆盖三类任务", sorted(admission["task_classes"]), ["defect_fix", "feature_change", "technical_task"])
         check_project_boundaries(ws)
         check_project_json_objects(ws)
+        check_station_binding_snapshot(ws)
 
     finally:
         shutil.rmtree(ws, ignore_errors=True)

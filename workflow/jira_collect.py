@@ -10,11 +10,12 @@ CHECKPOINTS = ("intake", "design_review", "acceptance", "pr_review", "transition
 
 
 def config(base, task):
-    profile = project_rules.load_profile(station=base)
+    root, project = project_rules.station_context(base)
+    profile = project_rules.load_profile(root=root, project=project)
     name = profile.get("jira", {}).get("transitions_config")
     if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9-]+\.json", name):
         raise ValueError("项目缺少 Jira 转换采集配置")
-    path = project_rules.product_root_from_station(base) / "projects" / task_store.station_project(base) / name
+    path = project_rules.project_root(root, project) / name
     value = json.loads(path.read_text())
     if value.get("schema_version") != 1 or task["task_class"] not in value.get("task_classes", {}):
         raise ValueError("Jira 采集配置不支持当前任务类型")

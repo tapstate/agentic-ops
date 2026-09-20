@@ -33,9 +33,8 @@ def pattern(value):
 
 
 def load(base):
-    root = project_rules.product_root_from_station(base)
-    project = project_rules.project_from_station(base)
-    paths = [root / "policies/station-clean.json", root / "projects" / project / "station-clean.json"]
+    root, project = project_rules.station_context(base)
+    paths = [root / "policies/station-clean.json", project_rules.project_root(root, project) / "station-clean.json"]
     layers, hashes = [], []
     for index, path in enumerate(paths):
         if path.is_symlink():

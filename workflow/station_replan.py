@@ -31,9 +31,10 @@ def remote_head(path, origin, branch):
 
 
 def project(base):
-    profile = project_rules.load_profile(station=base)
-    root = project_rules.product_root_from_station(base) / "projects" / task_store.station_project(base)
-    return profile, root, project_rules.load_repository_catalog(station=base)["repositories"]
+    product, project_id = project_rules.station_context(base)
+    profile = project_rules.load_profile(root=product, project=project_id)
+    root = project_rules.project_root(product, project_id)
+    return profile, root, profile["repositories"]["repositories"]
 
 
 def prepare(base, issue, run_id, request):

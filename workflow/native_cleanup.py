@@ -15,8 +15,8 @@ from workflow import station_source as source, station_resources as resources, s
 
 
 def configuration(base):
-    root = project_rules.product_root_from_station(base)
-    path = project_rules.project_root(root, task_store.station_project(base)) / 'repo-cleanup.json'
+    root, project = project_rules.station_context(base)
+    path = project_rules.project_root(root, project) / 'repo-cleanup.json'
     if path.is_symlink():
         raise ValueError('清理配方不能为链接')
     raw = path.read_bytes()
@@ -33,8 +33,8 @@ def sha(path):
 
 
 def commands(base, task, name, recipe, paths):
-    root = project_rules.product_root_from_station(base)
-    project = project_rules.project_root(root, task_store.station_project(base))
+    root, project_id = project_rules.station_context(base)
+    project = project_rules.project_root(root, project_id)
     repository = source.repository_path(base, name)
     kind = recipe['kind']
     if kind == 'maven':

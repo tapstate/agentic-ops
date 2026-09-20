@@ -27,12 +27,11 @@ def digest(value):
 
 
 def config(base, task=None):
-    root = project_rules.product_root_from_station(base)
-    project = project_rules.project_from_station(base)
+    root, project = project_rules.station_context(base)
     project_dir = project_rules.project_root(root, project)
     profile = None
     if task is not None:
-        spec = project_rules.load_admission(station=base)
+        spec = project_rules.load_admission(root=root, project=project)
         cls = project_rules.class_spec(spec, task["task_class"])
         profile = cls.get("quality_profile")
         if "quality_profile" in cls and profile is None:
@@ -78,7 +77,7 @@ def config(base, task=None):
             known = project_rules.known_fact_keys(spec, task["task_class"])
             if any(k not in known for k in result["plan_fact_keys"]):
                 raise ValueError("方案事实必须先在 Project 准入配置中声明")
-        result["jira"]["site"] = project_rules.load_profile(station=base)["jira"]["site"]
+        result["jira"]["site"] = project_rules.load_profile(root=root, project=project)["jira"]["site"]
     except (OSError, KeyError, TypeError, AttributeError) as error:
         raise ValueError("质量配置无法读取或结构无效：%s" % path.name) from error
     return result
