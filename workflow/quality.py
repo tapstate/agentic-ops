@@ -100,11 +100,15 @@ def validate_task_profile(rules, task):
             raise ValueError("任务质量配置缺少有效的 %s" % name)
     contract = rules.get("plan_contract")
     if contract is not None or not rules.get("structured_fix_plan"):
-        if (not isinstance(contract, dict) or set(contract) != {"fact_key", "required_fields"}
+        if (not isinstance(contract, dict) or not {"fact_key", "required_fields"} <= set(contract) or set(contract) - {"fact_key", "required_fields", "review"}
                 or contract.get("fact_key") not in rules["plan_fact_keys"]
                 or not isinstance(contract.get("required_fields"), list) or not contract["required_fields"]
                 or any(not isinstance(k, str) or not k for k in contract["required_fields"])):
             raise ValueError("任务质量配置必须声明有效 plan_contract")
+        if "review" in contract:
+            review = contract["review"]
+            if not isinstance(review, dict) or set(review) != {"sections", "nonempty", "coverage", "repository_sections", "dependencies", "decision_sections", "references"} or not isinstance(review["sections"], dict) or not review["sections"]:
+                raise ValueError("方案 review 配置无效")
 
 
 def plan_problems(model, rules, ctx):
@@ -118,6 +122,9 @@ def plan_problems(model, rules, ctx):
             value = plan.get(key)
             if not isinstance(value, (str, list, dict)) or not value or (isinstance(value, str) and not value.strip()):
                 problems.append("方案 %s.%s 缺失或为空" % (contract["fact_key"], key))
+        if contract.get("review"):
+            from workflow import plan_review
+            problems += plan_review.problems(plan, contract["review"], ctx, model)
     return problems
 
 
@@ -184,6 +191,7 @@ def context(base, task):
         # cleanup removes a worktree after validation; the source revision remains in the item.
         if wt.get("status") == "prepared":
             entry["live_revision"] = git_revision(wt["path"])
+            entry["source_path"] = wt["path"]
         elif wt.get("status") == "removed" and wt.get("final_revision"):
             entry["live_revision"] = wt["final_revision"]
             cleanup_artifacts.update(wt.get("verified_artifacts", {}))
@@ -207,6 +215,7 @@ def plan_digest(item, rules, ctx):
     repo = dict(ctx["repositories"].get(item["plan"]["repository"], {}))
     repo.pop("live_revision", None)
     repo.pop("ci_digest", None)
+    repo.pop("source_path", None)
     plan = selection_plan(item["plan"], rules)
     payload = [plan, item["plan_version"], rules, repo]
     if ctx.get("replan_items", {}).get(item["plan"]["id"]):
@@ -414,6 +423,7 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
         for repo in scoped["repositories"].values():
             repo.pop("live_revision", None)
             repo.pop("ci_digest", None)
+            repo.pop("source_path", None)
         # Intake never depends on future test plans. Plan review includes their selection,
         # but not their future execution results, revisions, CI or acceptance decisions.
         future = {} if index == 0 else {
@@ -654,6 +664,20 @@ def report(state, rules, ctx):
             "boundary": "处置完成不等于测试全通过；本地确认来源由调用者提交，不能认证操作者身份。Jira 状态需外部回读。"}
 
 
+def review_packet(base, task, jira_snapshot):
+    """同一研发确认时机展示方案、验收及当前应采 Jira 字段；不写状态。"""
+    from workflow import jira_collect
+    rules = config(base, task)
+    ctx = context(base, task)
+    model = replay(load(base, task))
+    checkpoint = checkpoint_view(model, rules["selection_checkpoint"], rules, ctx)
+    jira = jira_collect.collect(base, task, "design_review", jira_snapshot)
+    return {"run_id": task["run_id"], "plan": {key: ctx["facts"].get(key) for key in rules["plan_fact_keys"]},
+            "checkpoint": dict(checkpoint, id=rules["selection_checkpoint"]), "jira": jira,
+            "problems": checkpoint["problems"] + ["Jira 当前待确认字段：" + key for key in jira["pending"]],
+            "boundary": "一次展示研发决策；结构检查不证明设计正确。确认后分别记录同一决定来源，不重复询问；Jira 同步缺项仅暂停相应转换。"}
+
+
 def validate_command(command):
     """仅验证输入格式；不证明门禁、授权或执行结果有效。"""
     quality_contract.validate(command, "quality-action.schema.json")
@@ -765,7 +789,7 @@ def advance_problems(base, task, target):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("status", "apply", "validate"))
+    parser.add_argument("command", choices=("status", "review", "apply", "validate"))
     parser.add_argument("--dir", default=".")
     parser.add_argument("--issue-key")
     parser.add_argument("--input")
@@ -790,7 +814,12 @@ def main():
             rules = config(args.dir, task)
             if not enabled(task, rules):
                 raise ValueError("当前任务未启用质量检查")
-            result = report(load(args.dir, task), rules, context(args.dir, task))
+            if args.command == "review":
+                if not args.input:
+                    raise ValueError("review 需要原生 Jira 字段/转换快照 --input")
+                result = review_packet(args.dir, task, json.loads(Path(args.input).read_text()))
+            else:
+                result = report(load(args.dir, task), rules, context(args.dir, task))
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (ValueError, OSError, KeyError, TypeError, subprocess.TimeoutExpired) as error:

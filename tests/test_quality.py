@@ -25,6 +25,23 @@ def proof():
             "at": datetime.now(timezone.utc).isoformat()}
 
 
+def feature_review(criterion, repository, module, item):
+    return {
+        'reference_implementations': [{'status': 'not_found', 'search_scope': [module],
+            'source_revision': 'fixture:isolated-source', 'evidence_ref': 'fixture:search', 'difference': '新增目标行为'}],
+        'acceptance_mapping': [{'criterion': criterion, 'behavior': '新增约定行为', 'repository': repository,
+            'module': module, 'case_ids': [item], 'expected': criterion}],
+        'scope_rationale': {'changes': [{'repository': repository, 'module': module, 'layer': 'local',
+            'necessity': '在目标模块实现验收行为', 'impact': '仅夹具模块'}], 'non_changes': ['不修改公共引擎'], 'blocking_inputs': []},
+        'delivery_dependencies': [{'repository': repository, 'depends_on': [], 'delivery': '本任务 PR',
+            'test_relation': item, 'state': 'ready', 'source_ref': 'fixture:source'}],
+        'environment_readiness': {'config_source': 'fixture:local', 'checks': [{'name': '测试环境',
+            'source_ref': 'fixture:python', 'result': 'ready', 'detail': '独立临时目录'}], 'blocking_inputs': []},
+        'verification_plan': {'commands': ['执行夹具断言'], 'scenarios': [criterion],
+            'invalidation_conditions': ['实现或预期变化'], 'evidence_ref': 'fixture:verification-plan'}
+    }
+
+
 def concurrent_apply(base, run, revision, command, queue):
     try:
         quality.apply(base, "TAP-123", run, revision, command)
@@ -302,6 +319,48 @@ class QualityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "未配置"):
             quality.q1_digest(self.base, self.task)
 
+    def test_feature_review_aggregates_mysql_view_scope_environment_and_reference_gaps(self):
+        from workflow import plan_review
+        spec = json.loads((ROOT / 'projects/tapdata/quality-feature.json').read_text())['plan_contract']['review']
+        plan = feature_review('发现视图', 'tapdata/tapdata', 'mysql', 'view-case')
+        ctx = {'facts': {'acceptance_criteria': ['发现视图', '读取视图']},
+               'repositories': {'tapdata/tapdata': {}}}
+        model = {'items': {'view-case': {'plan': {'timing': 'after_fix', 'repository': 'tapdata/tapdata'}}}}
+        plan['scope_rationale']['changes'][0].update(layer='shared', necessity='')
+        plan['delivery_dependencies'][0]['state'] = 'unresolved'
+        plan['environment_readiness']['checks'][0]['result'] = 'missing'
+        errors = plan_review.problems(plan, spec, ctx, model)
+        for expected in ('necessity', '读取视图', '交付依赖', '环境缺项'):
+            self.assertTrue(any(expected in error for error in errors), errors)
+        malformed = copy.deepcopy(plan)
+        malformed['acceptance_mapping'][0]['repository'] = []
+        self.assertTrue(plan_review.problems(malformed, spec, ctx, model))
+        # 独立 Git 夹具提供可解析同类源码；不预设必须修改引擎或 sql-core。
+        repo = self.base / 'reference-repo'; repo.mkdir()
+        def git(*args):
+            return subprocess.check_output(['git', '-C', str(repo), *args], stderr=subprocess.DEVNULL, text=True).strip()
+        git('init'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.com')
+        (repo / 'mysql.py').write_text('def tables(): return []')
+        git('add', '.'); git('commit', '-m', 'fixture reference')
+        ctx['repositories']['tapdata/tapdata']['source_path'] = str(repo)
+        ctx['facts']['acceptance_criteria'] = '发现视图'
+        plan = feature_review('发现视图', 'tapdata/tapdata', 'mysql', 'view-case')
+        plan['reference_implementations'] = [{'status': 'found', 'repository': 'tapdata/tapdata',
+            'path': 'mysql.py', 'source_revision': git('rev-parse', 'HEAD'), 'difference': '补充视图类型'}]
+        self.assertEqual([], plan_review.problems(plan, spec, ctx, model))
+        plan['reference_implementations'][0]['path'] = 'missing.py'
+        self.assertTrue(any('不能解析' in p for p in plan_review.problems(plan, spec, ctx, model)))
+
+    def test_review_packet_combines_q2_and_jira_without_writing(self):
+        self.feature_profile()
+        snapshot = {'source_ref': 'fixture:jira-read', 'issue': {'key': 'TAP-123',
+            'fields': {'status': {'name': 'Analyzed'}}}, 'transitions': []}
+        before = {str(p): p.read_bytes() for p in self.base.rglob('*') if p.is_file()}
+        result = quality.review_packet(self.base, self.task, snapshot)
+        self.assertEqual('q2-plan', result['checkpoint']['id'])
+        self.assertIn('future', result['jira'])
+        self.assertEqual(before, {str(p): p.read_bytes() for p in self.base.rglob('*') if p.is_file()})
+
     def test_tapdata_feature_project_contract_and_manual_verification(self):
         local_head = mock.patch.object(pr_ready, "local_head", return_value="a" * 40)
         local_head.start(); self.addCleanup(local_head.stop)
@@ -312,6 +371,7 @@ class QualityTests(unittest.TestCase):
             "implementation_plan": {"objective": "新增目标行为", "changes": ["修改目标模块"],
                                     "acceptance": ["case-a 验证约定行为"], "risks": ["边界输入"],
                                     "rollback": "回退目标改动"}})
+        self.task["facts"]["implementation_plan"].update(feature_review("正常和失败场景符合约定", "tapdata/tapdata", "目标模块", "case-a"))
         self.task["repositories"] = self.task["repositories"][:1]
         self.task["repositories"][0].update(authorized_endpoint="github.com/tapdata/tapdata",
             base_branch="develop", work_branch="feature/TAP-123", base_sha="a" * 40,
@@ -1241,7 +1301,7 @@ class FeatureFlowTests(unittest.TestCase):
         self.cli("task.py", "advance", "--note", "基线与输入已确认")
         plan_path = self.cli("task.py", "interaction-path", "--name", "implementation-plan.json").strip()
         Path(plan_path).write_text(json.dumps({"objective": "value 返回 1", "changes": ["修改返回值"],
-            "acceptance": ["verify.py 断言返回值"], "risks": ["仅夹具"], "rollback": "回退 feature.py"}))
+            "acceptance": ["verify.py 断言返回值"], "risks": ["仅夹具"], "rollback": "回退 feature.py", **feature_review("value 返回 1", self.repo, "feature.py", "behavior")}))
         self.cli("task.py", "record", "--key", "implementation_plan", "--input", plan_path)
         plan = {"id": "behavior", "checkpoint": "q4-acceptance", "timing": "after_fix",
                 "case_ref": "verify.py", "case_version": "v1", "case_status": "existing", "method": "unit",

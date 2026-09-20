@@ -394,3 +394,29 @@ TapData 精确接受 `Tests Passed`、`PULL REQUEST SUBMITTED`、`MERGED`、`完
 `prepare/complete` CLI 必须携带同一个 `--operation-id op-...`。新一次退回重进使用新编号，旧编号始终指向原尝试。ready、unknown、failed 的前次结果未消解时禁止换编号重发；状态仍未改变不能证明没有写入。明确未写入需在 complete 使用 `--outcome not_written`，快照增加 `operation_result={operation_id,effect:"not_written",source_ref}`，来源为原调用的明确失败/回查事实。到达目标即回读为 succeeded。
 
 `--trigger native:<实时转换ID>` 仅返回人工交接与统一决策包，不返回自动执行许可。审批、PR 提审、合并、发布和终止不因字段齐全而获得新授权。缺项只暂停本次转换，继续无依赖准备。持久确认和尝试账本语义变更使工位 epoch 升至 13，旧工位须由原版本退出。
+
+
+## 功能方案完整性与一次决策包
+
+TapData 功能方案仍使用 implementation_plan，项目 quality-feature.json 的 plan_contract.review 定义 Q2 必需结构。保留 objective、changes、acceptance、risks、rollback，同时提供：
+
+| 字段 | 内容与检查 |
+|---|---|
+| reference_implementations | found：repository、path、完整 source_revision、difference；检查本地 Git 对象中的文件。not_found：search_scope、source_revision、evidence_ref、difference，说明实际检索未发现，不编造参考 |
+| acceptance_mapping | 每行 criterion 原样对应 acceptance_criteria 文本或文本列表的一项，并填写 behavior、repository、module、case_ids、expected；所有 AC 均有映射，用例 ID 必须是已登记的 after_fix 验收项 |
+| scope_rationale | changes 每行 repository、module、layer（local/shared）、necessity、impact；non_changes 列明确不改范围；blocking_inputs 列尚待研发决定的冲突。公共层修改同样必须说明必要性和影响 |
+| delivery_dependencies | 每仓 repository、depends_on（仓库 ID 列表）、delivery、test_relation、state（ready/planned/unresolved）、source_ref；登记仓不能遗漏，不要求尚未创建的 PR 已存在 |
+| environment_readiness | config_source、checks（name/source_ref/result/detail）、blocking_inputs；检查结果 ready/not_needed/missing。已知 missing 与未决输入一次列全，不以空列表隐藏 |
+| verification_plan | commands、scenarios、invalidation_conditions、evidence_ref；不是执行报告，实施后仍需真实验证 |
+
+acceptance_criteria 多项建议保存为文本列表；单个文本按一个完整 AC 精确映射，不由工具猜测自然语言的拆分。作用域模块须与 AC 实现映射对应。结构检查和 Git 文件存在均不能证明参考恰当、公共层修改必要或断言有效；Agent 必须比较源码与预期，研发确认实质方案。完整方案中没有阻塞项后才允许 Q2 通过与授权；旧简略方案须补全后再确认，不在线迁移或伪造确认。此变更不增加持久状态字段，继续使用 epoch 14 的现有事实与质量日志结构；配置变化自然使旧确认摘要失效。
+
+Q2 前先补齐 Agent 可查事实，读取当前 Jira 字段与 transitions.fields，然后一次展示：
+
+```sh
+python3 <agenticops-root>/workflow/quality.py review --dir <station> --issue-key <issue> --input <原生Jira快照.json>
+```
+
+此命令只读，返回方案、验收检查点、全部方案缺口和 jira_status collect 的当前/未来字段包；未来验收结论不提前索取。用户一次答复可作为质量确认和 Jira 字段确认的共同来源，按各自摘要记录，不再重复询问相同事实。Jira 动态未知表单如实显示；Jira 字段未齐只暂停相关转换，不新增整个研发流程的同步门禁。已确认后改变实质方案，使用[同周期返工](task-authorization.md#同周期方案返工)。
+
+例如 MySQL 视图功能，先读取目标分支现有表/视图发现、元数据映射和执行用例，再决定在连接器局部扩展还是修改共享层。将“可发现视图”“可读取视图数据”“权限不足/不支持时的行为”分别映射到实现模块与用例；没有源码依据不能预设必须修改引擎或 sql-core。
