@@ -87,11 +87,11 @@ def issue_from(snapshot, issue_key):
     return issue, fields, status
 
 
-def strict_checkpoint_ready(base, task, checkpoint):
+def strict_checkpoint_ready(base, task, checkpoint, snapshot=None):
     rules = quality.config(base, task)
     if not quality.enabled(task, rules):
         return False, ["当前任务未启用质量检查"]
-    report = quality.report(quality.load(base, task), rules, quality.context(base, task))
+    report = quality.report(quality.load(base, task), rules, jira_tests.with_snapshot(quality.context(base, task), snapshot, rules))
     view = report["checkpoints"].get(checkpoint)
     if not view or not view["reviewed"]:
         return False, ["质量检查点 %s 尚未有效确认" % checkpoint]
@@ -101,20 +101,20 @@ def strict_checkpoint_ready(base, task, checkpoint):
     for key in view["due"]:
         item = report["items"][key]
         item_decision = (item.get("decision") or {}).get("decision", {})
-        if not item.get("decision_valid") or item_decision.get("outcome") not in ("accept", "not_applicable"):
+        if not quality.item_accepted(item, ("accept", "not_applicable")):
             problems.append("检查项 %s 未通过或未明确不适用" % key)
     return not problems, problems
 
 
 def tests_passed_ready(base, task, snapshot):
     """Tests Passed 只核对 Jira 事实与 Q4 证据，不创建或编辑 Jira Test。"""
-    ready, problems = strict_checkpoint_ready(base, task, "q4-acceptance")
+    ready, problems = strict_checkpoint_ready(base, task, "q4-acceptance", snapshot)
     if not ready:
         return False, "quality_not_verified", problems, []
     quality_rules = quality.config(base, task)
-    report = quality.report(quality.load(base, task), quality_rules, quality.context(base, task))
+    report = quality.report(quality.load(base, task), quality_rules, jira_tests.with_snapshot(quality.context(base, task), snapshot, quality_rules))
     checkpoint = report["checkpoints"]["q4-acceptance"]
-    outcome = ((checkpoint.get("decision") or {}).get("decision") or {}).get("outcome")
+    outcome = quality.checkpoint_outcome(checkpoint)
     if outcome != "accept":
         return False, "quality_not_verified", ["Q4 关联用例验收必须由用户确认通过，不能以不适用或风险处置进入 Tests Passed"], []
     problems, tests, ignored = jira_tests.linked_tests(snapshot, task["issue_key"], quality_rules)

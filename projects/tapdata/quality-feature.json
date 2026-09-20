@@ -114,7 +114,10 @@
     }
   ],
   "jira": {
-    "automatic_transition_attempts": ["takeover", "tests_passed"],
+    "automatic_transition_attempts": [
+      "takeover",
+      "tests_passed"
+    ],
     "manual_transitions": [
       "pull_request_submitted",
       "merged",
@@ -138,7 +141,24 @@
       },
       "TapTest": {
         "method": "taptest",
-        "guidance": "由 t-layer3-test 管理自动化实现和执行；导入对应 Test Execution 或测试报告。"
+        "guidance": "回读关联 TapTest 的 Jira 状态、updated 和来源；通过状态即满足本地联调，不要求本地 PASS 或逐项 accept。",
+        "accepted_statuses": [
+          "Tests Passed",
+          "PULL REQUEST SUBMITTED",
+          "MERGED",
+          "完成"
+        ],
+        "accepted_status_ids": [
+          "10038",
+          "10039",
+          "10040",
+          "10021"
+        ],
+        "status_aliases": [
+          "Pull Request Submitted",
+          "Merged",
+          "已完成"
+        ]
       },
       "Unit": {
         "method": "unit",

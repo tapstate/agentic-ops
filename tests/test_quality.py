@@ -952,13 +952,107 @@ class QualityTests(unittest.TestCase):
         for checks in ([{"state": 1}], {"state": "SUCCESS"}):
             self.assertEqual(ci.classify(checks)[0], "unknown")
 
-    def test_taptest_and_manual_use_the_same_evidence_contract(self):
-        for key, method, origin in (("taptest", "taptest", "taptest"), ("manual", "manual", "manual")):
+    def test_manual_retains_local_evidence_contract(self):
+        for key, method, origin in (("manual", "manual", "manual"),):
             self.plan(key, method); self.select(key)
             with self.assertRaisesRegex(ValueError, "来源"):
                 self.execute(key, origin="local_maven")
             self.execute(key, origin=origin); self.decide(key)
         self.checkpoint("q4-acceptance")
+
+    def taptest_snapshot(self, status="Tests Passed"):
+        return {"run_id": self.task["run_id"], "source_ref": "fixture:jira-snapshot", "observed_at": proof()["at"],
+                "issue": {"key": "TAP-123", "fields": {"status": {"name": "In Progress"}, "issuelinks": [
+                    {"type": {"outward": "is tested by"}, "outwardIssue": {"key": "TAP-T1", "fields": {"issuetype": {"name": "Test"}}}}]}},
+                "linked_test_details": [{"key": "TAP-T1", "test_type": "TapTest", "case_version": "updated:2", "updated": proof()["at"],
+                                          "source_ref": "fixture:TAP-T1", "status": {"name": status}}]}
+
+    def taptest_plan(self):
+        self.plan(method="taptest")
+        plan = self.view()["items"]["case-a"]["plan"]
+        plan.update(case_ref="TAP-T1", target_revision="pending")
+        self.apply("item", {"plan": plan, "reason": "已关联测试任务"})
+        self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
+
+    def test_taptest_four_statuses_all_entrypoints_without_execution_or_accept(self):
+        from workflow import jira_status, jira_tests
+        self.taptest_plan()
+        for status in ("Tests Passed", "PULL REQUEST SUBMITTED", "MERGED", "完成"):
+            with self.subTest(status=status):
+                snapshot = self.taptest_snapshot(status)
+                self.apply("jira_status", {"snapshot": snapshot})
+                self.automatic_checkpoint()
+                view = self.view()
+                self.assertEqual([], view["items"]["case-a"]["executions"])
+                self.assertIsNone(view["items"]["case-a"]["decision"])
+                self.assertEqual("jira_status", view["checkpoints"]["q4-acceptance"]["mode"])
+                self.assertEqual([], quality.advance_problems(self.base, self.task, "ci_validation"))
+                self.assertTrue(jira_status.tests_passed_ready(self.base, self.task, snapshot)[0])
+                self.assertEqual([], pr_ready.quality_problems(self.base, self.task, quality.config(self.base, self.task), snapshot))
+                tests = jira_tests.linked_tests(snapshot, "TAP-123", quality.config(self.base, self.task))[1]
+                self.assertEqual([], jira_tests.confirmation_problems(view, tests))
+        self.task["stage"] = "ci_validation"
+        for index, repo in enumerate(self.task["repositories"]):
+            repo["pull_request"] = str(index + 1)
+        self.save_task()
+        path = self.base / "taptest-jira.json"
+        path.write_text(json.dumps(snapshot))
+        result = pr_ready.check(self.base, "TAP-123", path)
+        self.assertTrue(result["checks"]["linked_test_tasks"]["passed"])
+        self.assertFalse(result["checks"]["pr_checks"]["passed"])
+        with mock.patch.object(pr_ready, "local_head", return_value="a" * 40):
+            for repo in self.task["repositories"]:
+                state = ci.load_state(self.base, "TAP-123", repo["pull_request"], repo["repository"])
+                state["history"].append({"head": "a" * 40, "verdict": "success"})
+                ci.save_state(self.base, "TAP-123", repo["pull_request"], state)
+            self.automatic_checkpoint()
+            self.assertTrue(pr_ready.check(self.base, "TAP-123", path)["ready"])
+            snapshot["linked_test_details"][0]["status"] = {"name": "Open"}
+            path.write_text(json.dumps(snapshot))
+            self.assertFalse(pr_ready.check(self.base, "TAP-123", path)["ready"])
+
+    def test_taptest_old_report_preserved_code_drift_requires_readback_not_new_pass(self):
+        self.taptest_plan()
+        self.execute(origin="taptest", target_revision="a" * 40)
+        prior = copy.deepcopy(self.view()["items"]["case-a"]["executions"])
+        self.apply("jira_status", {"snapshot": self.taptest_snapshot()})
+        original_context = quality.context
+        def changed_context(base, task):
+            ctx = original_context(base, task)
+            ctx["repositories"]["tapdata/tapdata"]["live_revision"] = "b" * 40
+            return ctx
+        with mock.patch.object(quality, "context", side_effect=changed_context):
+            self.assertFalse(self.view()["items"]["case-a"]["jira_status"]["passed"])
+            self.apply("jira_status", {"snapshot": self.taptest_snapshot()})
+            item = self.view()["items"]["case-a"]
+        self.assertTrue(item["jira_status"]["passed"])
+        self.assertEqual(prior, item["executions"])
+        self.assertIsNone(item["decision"])
+        self.assertIn("不证明", item["evidence_gap"])
+
+    def test_taptest_invalid_facts_pending_and_multiple_links_fail_closed(self):
+        from workflow import jira_tests
+        self.taptest_plan()
+        for status in ("Open", "tests passed", "Done", ""):
+            snapshot = self.taptest_snapshot(status)
+            self.apply("jira_status", {"snapshot": snapshot})
+            self.assertFalse(self.view()["checkpoints"]["q4-acceptance"]["reviewed"])
+        for field in ("run_id", "observed_at", "source_ref"):
+            snapshot = self.taptest_snapshot(); snapshot.pop(field)
+            with self.assertRaises(ValueError):
+                self.apply("jira_status", {"snapshot": snapshot})
+        snapshot = self.taptest_snapshot()
+        snapshot["issue"]["fields"]["issuelinks"][0]["type"]["outward"] = "relates to"
+        with self.assertRaises(ValueError):
+            self.apply("jira_status", {"snapshot": snapshot})
+        snapshot = self.taptest_snapshot()
+        link = copy.deepcopy(snapshot["issue"]["fields"]["issuelinks"][0]); link["outwardIssue"]["key"] = "TAP-T2"
+        snapshot["issue"]["fields"]["issuelinks"].append(link)
+        detail = dict(snapshot["linked_test_details"][0], key="TAP-T2", status={"name": "Open"})
+        snapshot["linked_test_details"].append(detail)
+        rules = quality.config(self.base, self.task)
+        tests = jira_tests.linked_tests(snapshot, "TAP-123", rules)[1]
+        self.assertTrue(jira_tests.confirmation_problems(self.view(), tests))
 
     def test_expired_checkpoint_and_missing_rules_fail_closed(self):
         cp = "q2-plan"

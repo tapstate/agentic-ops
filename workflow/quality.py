@@ -189,13 +189,18 @@ def context(base, task):
             cleanup_artifacts.update(wt.get("verified_artifacts", {}))
         repos[repo["repository"]] = entry
         entry["ci_digest"] = digest([s for s in ci_states if s["repository"] == repo["repository"]])
-    return {"issue_key": task["issue_key"], "run_id": task["run_id"], "facts": task.get("facts", {}),
+    result = {"issue_key": task["issue_key"], "run_id": task["run_id"], "facts": task.get("facts", {}),
             "replan_items": task.get("replan", {}).get("item_revisions", {}),
             "failures": failures.load(base, task)[1],
             "cleanup_artifacts": cleanup_artifacts,
             "repositories": repos,
             "missing_facts": [f["key"] for f in project_rules.missing_required(
                 project_rules.load_admission(station=base), task["task_class"], task.get("facts", {}))]}
+
+    assessment = replay(load(base, task)).get("jira_assessment")
+    if assessment is not None:
+        result["jira_assessment"] = assessment
+    return result
 
 
 def plan_digest(item, rules, ctx):
@@ -247,8 +252,21 @@ def item_view(item, rules, ctx):
     pd, ed = plan_digest(item, rules, ctx), item_digest(item, rules, ctx)
     selected = is_valid(item["selection"], pd)
     decided = selected and is_valid(item["decision"], ed)
-    return {"plan": item["plan"], "plan_digest": pd, "digest": ed, "selected": selected,
-            "decision_valid": decided, "decision": item["decision"], "executions": item["executions"]}
+    from workflow import jira_tests
+    result = {"plan": item["plan"], "plan_digest": pd, "digest": ed, "selected": selected,
+              "decision_valid": decided, "decision": item["decision"], "executions": item["executions"]}
+    assessment = jira_tests.item_assessment(item["plan"], rules, ctx)
+    if assessment is not None:
+        result["jira_status"] = assessment
+        result["evidence_gap"] = "本地历史报告不证明当前代码；Jira 状态接纳不新增或改写执行事实。"
+    return result
+
+
+def item_accepted(view, outcomes=("accept", "not_applicable", "observed")):
+    if "jira_status" in view:
+        return view["selected"] and view["jira_status"]["passed"]
+    decision = (view.get("decision") or {}).get("decision", {})
+    return view.get("decision_valid") and decision.get("outcome") in outcomes
 
 
 def automatic_checkpoint_problems(model, checkpoint, rules, ctx):
@@ -266,6 +284,10 @@ def automatic_checkpoint_problems(model, checkpoint, rules, ctx):
         plan = view["plan"]
         if not view["selected"]:
             problems.append("%s 的验收方式尚未经 Q2 确认" % key)
+            continue
+        if "jira_status" in view:
+            if not view["jira_status"]["passed"]:
+                problems.append("%s 需要当前代码下的关联 Jira 通过状态回读" % key)
             continue
         if not exact_commit(plan["target_revision"]):
             problems.append("%s 尚未绑定最终完整提交 SHA" % key)
@@ -290,6 +312,8 @@ def automatic_checkpoint_digest(model, checkpoint, rules, ctx):
 
 
 def checkpoint_outcome(view):
+    if view.get("mode") == "jira_status":
+        return "accept" if view.get("reviewed") else None
     if view.get("mode") == "automatic":
         return "observed"
     return ((view.get("decision") or {}).get("decision") or {}).get("outcome")
@@ -364,7 +388,10 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
     due = {k: v for k, v in views.items() if ids.index(v["plan"]["checkpoint"]) <= index}
     problems = []
     for key, view in due.items():
-        if not view["decision_valid"]:
+        if "jira_status" in view:
+            if not item_accepted(view):
+                problems.append("%s 关联 Jira 状态未满足" % key)
+        elif not view["decision_valid"]:
             problems.append("%s 尚无有效处置" % key)
         elif view["decision"]["decision"]["outcome"] == "rework":
             problems.append("%s 用户要求补测/返工" % key)
@@ -381,6 +408,7 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
         scoped.pop("failures", None)
         scoped.pop("cleanup_artifacts", None)
         scoped.pop("replan_items", None)
+        scoped.pop("jira_assessment", None)
         fact_keys = rules["intake_fact_keys"] + (rules.get("plan_fact_keys", []) if index else [])
         scoped["facts"] = {k: v for k, v in ctx["facts"].items() if k in fact_keys}
         for repo in scoped["repositories"].values():
@@ -411,6 +439,9 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
         result["reviewed"] = (record or {}).get("digest") == result["automatic_digest"] and not result["problems"]
     else:
         result["reviewed"] = is_valid(record, result["digest"]) and not problems
+    status_items = [v for v in due.values() if v["plan"]["timing"] == "after_fix"]
+    if checkpoint == "q4-acceptance" and status_items and all("jira_status" in v for v in status_items):
+        result.update(mode="jira_status", reviewed=not problems)
     result["outcome"] = checkpoint_outcome(result)
     point = rules["checkpoints"][index]
     handoff_request = "核对列出的用例、范围、预期与缺口；选择验收、补测/返工、不适用、延期或接受风险。"
@@ -418,7 +449,7 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
     if checkpoint == "q4-acceptance":
         handoff_request = ("编码完成后，由用户与 Agent 在 Jira 创建或复用 Test，并通过「已链接工作项」关联缺陷；"
                            "重新读取 Test Type、用例版本和链接。TapCE 当前不纳管，若无法形成受管用例请调整 Jira 或验收方案后重试。")
-        handoff_return = ("每个 Manual、TapTest、Unit Test 都需返回精确提交 SHA（当前完整 SHA）的 PASS 证据及用户逐项确认；"
+        handoff_return = ("Manual、Unit 需精确提交 SHA（当前完整 SHA） 的 PASS 证据及用户逐项确认；项目配置状态接纳的 TapTest 只回读 Jira 状态，无需逐项 accept；"
                           "需要本地环境时先提供可操作启动步骤、前置条件和失败日志要求。")
     result["handoff"] = {
         "title": point["title"],
@@ -487,7 +518,10 @@ def check_decision(decision):
 def reduce(model, command, rules, ctx):
     """确定性归约；重放时使用当时规则和上下文，不重新解释旧决定。"""
     action, p = command["action"], command["payload"]
-    if action == "verification":
+    if action == "jira_status":
+        from workflow import jira_tests
+        model["jira_assessment"] = jira_tests.snapshot_assessment(p["snapshot"], rules, ctx)
+    elif action == "verification":
         from workflow import verification
         verification.record(model, p, ctx)
     elif action == "item":
@@ -696,6 +730,8 @@ def apply(base, issue, run_id, revision, command):
         finally:
             if temporary.exists():
                 temporary.unlink()
+        if command["action"] == "jira_status":
+            ctx = dict(ctx, jira_assessment=model["jira_assessment"])
         return report(state, rules, ctx)
 
 

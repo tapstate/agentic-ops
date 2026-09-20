@@ -38,6 +38,9 @@
     },
     {
       "$ref": "#/$defs/verification"
+    },
+    {
+      "$ref": "#/$defs/jira_status"
     }
   ],
   "$defs": {
@@ -739,6 +742,31 @@
         },
         "payload": {
           "type": "object"
+        }
+      },
+      "required": [
+        "action",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "jira_status": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "const": "jira_status"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "snapshot": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "snapshot"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
