@@ -53,6 +53,14 @@ def config(base, task=None):
         ids = [c["id"] for c in result["checkpoints"]]
         if not ids or len(ids) != len(set(ids)) or result["selection_checkpoint"] not in ids:
             raise ValueError("质量检查点配置无效")
+        if "checkpoint" in (result.get("tests_passed") or {}):
+            from workflow import jira_tests
+            checkpoint = jira_tests.acceptance_checkpoint(result)
+            commit_point = result.get("commit_evidence_checkpoint")
+            if (not isinstance(checkpoint, str) or checkpoint not in ids or commit_point not in ids
+                    or ids.index(checkpoint) < ids.index(commit_point)
+                    or result["checkpoints"][ids.index(checkpoint)]["timing"] != "after_fix"):
+                raise ValueError("关联测试验收检查点必须是已登记且不早于完整提交证据检查点的 after_fix 检查点")
         for method in result["methods"].values():
             worktree_origins(method)
         from workflow import verification
@@ -465,16 +473,18 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
     else:
         result["reviewed"] = is_valid(record, result["digest"]) and not problems
     status_items = [v for v in due.values() if v["plan"]["timing"] == "after_fix"]
-    if checkpoint == "q4-acceptance" and status_items and all("jira_status" in v for v in status_items):
+    from workflow import jira_tests
+    linked_checkpoint = jira_tests.acceptance_checkpoint(rules)
+    if checkpoint == linked_checkpoint and status_items and all("jira_status" in v for v in status_items):
         result.update(mode="jira_status", reviewed=not problems)
     result["outcome"] = checkpoint_outcome(result)
     point = rules["checkpoints"][index]
     handoff_request = "核对列出的用例、范围、预期与缺口；选择验收、补测/返工、不适用、延期或接受风险。"
     handoff_return = "执行人、环境、精确提交 SHA、步骤、实际结果及可回查日志/报告；未执行须说明原因。"
-    if checkpoint == "q4-acceptance":
-        handoff_request = ("编码完成后，由用户与 Agent 在 Jira 创建或复用 Test，并通过「已链接工作项」关联缺陷；"
-                           "重新读取 Test Type、用例版本和链接。TapCE 当前不纳管，若无法形成受管用例请调整 Jira 或验收方案后重试。")
-        handoff_return = ("Manual、Unit 需精确提交 SHA（当前完整 SHA） 的 PASS 证据及用户逐项确认；项目配置状态接纳的 TapTest 只回读 Jira 状态，无需逐项 accept；"
+    if checkpoint == linked_checkpoint:
+        handoff_request = ("编码完成后，由用户与 Agent 在 Jira 创建或复用 Test，并通过「已链接工作项」关联当前任务；"
+                           "重新读取 Test Type、用例版本和链接。按项目配置核对受管类型，若无法形成受管用例请调整 Jira 或验收方案后重试。")
+        handoff_return = ("按执行结果验收的用例需精确提交 SHA（当前完整 SHA）的 PASS 证据及用户逐项确认；项目配置状态接纳的用例只回读 Jira 状态，无需逐项 accept；"
                           "需要本地环境时先提供可操作启动步骤、前置条件和失败日志要求。")
     result["handoff"] = {
         "title": point["title"],

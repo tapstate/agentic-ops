@@ -7,6 +7,11 @@ def _text(value):
     return isinstance(value, str) and bool(value.strip())
 
 
+def acceptance_checkpoint(rules):
+    """缺省保留旧事件语义；现役项目显式声明关联测试验收检查点。"""
+    return (rules.get("tests_passed") or {}).get("checkpoint", "q4-acceptance")
+
+
 def _policy(rules):
     policy = (rules.get("tests_passed") or {}).get("linked_test_task") or {}
     relations = set(policy.get("relations") or [])
@@ -124,13 +129,15 @@ def linked_tests(document, issue_key, rules):
                             status_rule=mapping if mapping.get("accepted_statuses") else None))
     if not managed:
         suffix = "；已忽略 %s" % "、".join(item["key"] for item in ignored) if ignored else ""
-        problems.append("没有可纳管的 Manual、TapTest 或 Unit 验收用例%s；请用户调整 Jira 或验收方案后重新读取 Jira。" % suffix)
+        problems.append("没有可纳管的验收用例（项目类型：%s）%s；请用户调整 Jira 或验收方案后重新读取 Jira。" %
+                        ("、".join(sorted(type_rules)) or "未配置", suffix))
     return problems, managed, ignored
 
 
-def confirmation_problems(report, tests):
-    """每个受管 Jira Test 都要有同版本、同方式的 Q4 PASS + 用户 accept。"""
+def confirmation_problems(report, tests, rules=None):
+    """每个受管 Jira Test 都要有同版本、同方式的验收证据及用户确认。"""
     problems = []
+    checkpoint = acceptance_checkpoint(rules or {})
     for test in tests:
         key = str(test["key"]).upper()
         if test.get("status_rule"):
@@ -139,12 +146,12 @@ def confirmation_problems(report, tests):
                 problems.extend(assessment["problems"])
             continue
         items = [item for item in report["items"].values()
-                 if item["plan"]["checkpoint"] == "q4-acceptance" and
+                 if item["plan"]["checkpoint"] == checkpoint and
                  str(item["plan"]["case_ref"]).upper() == key and
                  item["plan"]["case_version"] == test["case_version"] and
                  item["plan"]["method"] == test["method"]]
         if not items:
-            problems.append("关联 Test %s 尚未以当前 Jira 用例版本和 Test Type 在 Q4 建立检查项" % key)
+            problems.append("关联 Test %s 尚未以当前 Jira 用例版本和 Test Type 在 %s 建立检查项" % (key, checkpoint))
             continue
         if not any(item["decision_valid"] and
                    ((item.get("decision") or {}).get("decision") or {}).get("outcome") == "accept"
@@ -194,7 +201,7 @@ def snapshot_assessment(snapshot, rules, ctx):
 
 def item_assessment(plan, rules, ctx):
     mappings = (rules.get("tests_passed") or {}).get("test_types", {})
-    applies = plan["checkpoint"] == "q4-acceptance" and any(
+    applies = plan["checkpoint"] == acceptance_checkpoint(rules) and any(
         r.get("method") == plan["method"] and r.get("accepted_statuses") for r in mappings.values())
     if not applies:
         return None

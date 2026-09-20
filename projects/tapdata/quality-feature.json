@@ -176,7 +176,8 @@
     },
     "ignored_test_types": {
       "TapCE": "TapCE 当前不纳管，不计入通过也不自动视为通过；若因此无法满足验收或 Jira Validator，请用户调整 Jira 或验收方案后重新读取。"
-    }
+    },
+    "checkpoint": "q4-acceptance"
   },
   "pr_ready": {
     "required_checkpoints": [

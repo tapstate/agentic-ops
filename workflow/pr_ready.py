@@ -27,7 +27,7 @@ def linked_test_confirmation_problems(base, task, rules, tests):
     if not rules["pr_ready"].get("require_user_confirmation_per_linked_test"):
         return []
     report = quality.report(quality.load(base, task), rules, quality.context(base, task))
-    return jira_tests.confirmation_problems(report, tests)
+    return jira_tests.confirmation_problems(report, tests, rules)
 
 
 def quality_problems(base, task, rules, snapshot=None):

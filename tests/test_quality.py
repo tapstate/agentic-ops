@@ -432,8 +432,8 @@ class QualityTests(unittest.TestCase):
         return quality.apply(self.base, "TAP-123", self.task["run_id"], self.view()["revision"],
                              {"action": action, "payload": payload})
 
-    def plan(self, key="case-a", method="integration", before=False, repo="tapdata/tapdata", case_status="existing"):
-        plan = {"id": key, "checkpoint": "q2-plan" if before else "q4-acceptance",
+    def plan(self, key="case-a", method="integration", before=False, repo="tapdata/tapdata", case_status="existing", checkpoint=None):
+        plan = {"id": key, "checkpoint": checkpoint or ("q2-plan" if before else "q4-acceptance"),
                 "timing": "before_fix" if before else "after_fix", "case_ref": "case:" + key,
                 "case_version": "test-v1", "case_status": case_status, "method": method,
                 "repository": repo, "target_revision": "a" * 40, "criterion": "目标行为符合预期",
@@ -1079,12 +1079,75 @@ class QualityTests(unittest.TestCase):
                 "linked_test_details": [{"key": "TAP-T1", "test_type": "TapTest", "case_version": "updated:2", "updated": proof()["at"],
                                           "source_ref": "fixture:TAP-T1", "status": {"name": status}}]}
 
-    def taptest_plan(self):
-        self.plan(method="taptest")
+    def taptest_plan(self, checkpoint=None):
+        self.plan(method="taptest", checkpoint=checkpoint)
         plan = self.view()["items"]["case-a"]["plan"]
         plan.update(case_ref="TAP-T1", target_revision="pending")
         self.apply("item", {"plan": plan, "reason": "已关联测试任务"})
         self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
+
+    def rename_acceptance_checkpoint(self):
+        path = self.product / "projects/tapdata/quality.json"
+        path.write_text(path.read_text().replace('"q4-acceptance"', '"acceptance"'))
+
+    def test_configured_acceptance_checkpoint_for_status_evidence(self):
+        from workflow import jira_status, jira_tests
+        self.rename_acceptance_checkpoint()
+        self.taptest_plan(checkpoint="acceptance")
+        snapshot = self.taptest_snapshot()
+        self.apply("jira_status", {"snapshot": snapshot})
+        self.automatic_checkpoint()
+        view = self.view()
+        self.assertEqual(view["checkpoints"]["acceptance"]["mode"], "jira_status")
+        self.assertTrue(view["checkpoints"]["acceptance"]["reviewed"])
+        self.assertEqual(quality.advance_problems(self.base, self.task, "ci_validation"), [])
+        self.assertTrue(jira_status.tests_passed_ready(self.base, self.task, snapshot)[0])
+        rules = quality.config(self.base, self.task)
+        tests = jira_tests.linked_tests(snapshot, "TAP-123", rules)[1]
+        self.assertEqual(pr_ready.linked_test_confirmation_problems(self.base, self.task, rules, tests), [])
+        self.assertEqual(pr_ready.quality_problems(self.base, self.task, rules, snapshot), [])
+
+    def test_configured_acceptance_checkpoint_for_manual_evidence(self):
+        from workflow import jira_status, jira_tests
+        self.rename_acceptance_checkpoint()
+        plan = self.plan(method="manual", checkpoint="acceptance")
+        plan.update(case_ref="TAP-T1", case_version="updated:2")
+        self.apply("item", {"plan": plan, "reason": "自定义项目验收点"})
+        self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
+        self.execute(origin="manual"); self.decide(); self.automatic_checkpoint()
+        self.checkpoint("acceptance")
+        snapshot = self.taptest_snapshot()
+        snapshot["linked_test_details"][0]["test_type"] = "Manual"
+        rules = quality.config(self.base, self.task)
+        tests = jira_tests.linked_tests(snapshot, "TAP-123", rules)[1]
+        self.assertTrue(jira_status.tests_passed_ready(self.base, self.task, snapshot)[0])
+        self.assertEqual(pr_ready.linked_test_confirmation_problems(self.base, self.task, rules, tests), [])
+        self.assertEqual(pr_ready.quality_problems(self.base, self.task, rules, snapshot), [])
+        self.assertTrue(jira_tests.confirmation_problems(self.view(), tests))  # 旧缺省不能借用新检查点。
+
+    def test_invalid_or_early_linked_test_checkpoint_is_rejected(self):
+        path = self.product / "projects/tapdata/quality.json"
+        rules = json.loads(path.read_text())
+        for checkpoint in (None, [], "missing", "q1-intake", "q3-draft"):
+            with self.subTest(checkpoint=checkpoint):
+                rules["tests_passed"]["checkpoint"] = checkpoint
+                path.write_text(json.dumps(rules))
+                with self.assertRaisesRegex(ValueError, "关联测试验收检查点"):
+                    quality.config(self.base, self.task)
+
+    def test_legacy_linked_test_events_replay_without_checkpoint_field(self):
+        path = self.product / "projects/tapdata/quality.json"
+        rules = json.loads(path.read_text())
+        rules["tests_passed"].pop("checkpoint")
+        path.write_text(json.dumps(rules))
+        self.taptest_plan()
+        self.apply("jira_status", {"snapshot": self.taptest_snapshot()})
+        state = quality.load(self.base, self.task)
+        before = quality.replay(state)
+        rules["tests_passed"]["checkpoint"] = "q4-acceptance"
+        path.write_text(json.dumps(rules))
+        self.assertEqual(quality.replay(quality.load(self.base, self.task)), before)
+        self.assertTrue(before["jira_assessment"]["tests"]["TAP-T1"]["passed"])
 
     def test_taptest_four_statuses_all_entrypoints_without_execution_or_accept(self):
         from workflow import jira_status, jira_tests

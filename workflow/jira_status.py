@@ -112,18 +112,19 @@ def strict_checkpoint_ready(base, task, checkpoint, snapshot=None):
 
 
 def tests_passed_ready(base, task, snapshot):
-    """Tests Passed 只核对 Jira 事实与 Q4 证据，不创建或编辑 Jira Test。"""
-    ready, problems = strict_checkpoint_ready(base, task, "q4-acceptance", snapshot)
+    """按项目验收检查点核对 Jira 事实，不创建或编辑 Jira Test。"""
+    quality_rules = quality.config(base, task)
+    checkpoint_id = jira_tests.acceptance_checkpoint(quality_rules or {})
+    ready, problems = strict_checkpoint_ready(base, task, checkpoint_id, snapshot)
     if not ready:
         return False, "quality_not_verified", problems, []
-    quality_rules = quality.config(base, task)
     report = quality.report(quality.load(base, task), quality_rules, jira_tests.with_snapshot(quality.context(base, task), snapshot, quality_rules))
-    checkpoint = report["checkpoints"]["q4-acceptance"]
+    checkpoint = report["checkpoints"][checkpoint_id]
     outcome = quality.checkpoint_outcome(checkpoint)
     if outcome != "accept":
-        return False, "quality_not_verified", ["Q4 关联用例验收必须由用户确认通过，不能以不适用或风险处置进入 Tests Passed"], []
+        return False, "quality_not_verified", ["%s 关联用例验收必须由用户确认通过，不能以不适用或风险处置进入 Tests Passed" % checkpoint_id], []
     problems, tests, ignored = jira_tests.linked_tests(snapshot, task["issue_key"], quality_rules)
-    problems.extend(jira_tests.confirmation_problems(report, tests))
+    problems.extend(jira_tests.confirmation_problems(report, tests, quality_rules))
     if problems:
         return False, "linked_test_facts_not_ready", problems, ignored
     return True, "", [], ignored
