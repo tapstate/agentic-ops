@@ -11,6 +11,7 @@ import stat
 import tempfile
 
 from workflow import project_rules, station_source as source
+from workflow.file_digest import sha256_file
 
 MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
@@ -208,7 +209,7 @@ def verify_coverage(base, task, plan):
             info = target.lstat()
             if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_size > 768 * 1024 * 1024:
                 raise ValueError("导出必须是当前用户持有、权限 0600 的有限大小普通文件")
-            if not choice.get("readback_ref") or digest(target.read_bytes()) != choice.get("sha256"):
+            if not choice.get("readback_ref") or sha256_file(target) != choice.get("sha256"):
                 raise ValueError("源码导出回读尚未核验")
             exported = json.loads(target.read_text())
             if entry["path"] != exported.get("path") or exported.get("snapshot") != {k: entry[k] for k in ("head", "before", "before_index", "index_patch", "worktree_patch")}:

@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 RULES = (
+    ("workflow/file_digest.py", ("quality", "station_resources")),
     ("workflow/station", ("station_clean", "station_resources", "station_lifecycle")),
     ("policies/station-clean.json", ("station_clean",)),
     ("workflow/station_archive.py", ("station_resources", "station_lifecycle")),

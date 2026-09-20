@@ -1629,5 +1629,31 @@ class VerificationContractTests(unittest.TestCase):
                 self.v.verify_artifacts(p)
 
 
+class FileDigestTests(unittest.TestCase):
+    def test_bounded_reads_keep_exact_digest_and_legacy_api(self):
+        import hashlib
+        import io
+        from workflow.file_digest import sha256_file
+        from workflow import verification
+        self.assertIs(verification.file_hash, sha256_file)
+        for data in (b"", b"small", b"content" * (512 * 1024)):
+            sizes = []
+            class BoundedStream(io.BytesIO):
+                def read(self, size=-1):
+                    sizes.append(size)
+                    if not 0 < size <= 1024 * 1024:
+                        raise AssertionError("文件摘要必须分块读取")
+                    return super().read(size)
+            with self.subTest(length=len(data)), mock.patch.object(Path, "open", return_value=BoundedStream(data)):
+                self.assertEqual(hashlib.sha256(data).hexdigest(), sha256_file("fixture"))
+            self.assertTrue(sizes)
+
+    def test_missing_file_is_not_an_empty_digest(self):
+        from workflow.file_digest import sha256_file
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(FileNotFoundError):
+                sha256_file(Path(directory) / "missing")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
