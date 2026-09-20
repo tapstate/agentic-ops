@@ -1136,6 +1136,34 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(ci.current_states(self.base, self.task), [])
         with self.assertRaises(ValueError): ci.save_state(self.base, "TAP-123", "1", a)
 
+    def test_ci_state_readers_reject_corruption_and_preserve_valid_state(self):
+        valid = ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata")
+        path = ci.state_path(self.base, "TAP-123", "1", "tapdata/tapdata")
+        invalid = [None, [], True, 1, "private-fixture-state"]
+        invalid += [dict(valid, revision=value) for value in (-1, True, "1", None)]
+        invalid += [dict(valid, history=value) for value in (None, {}, [None], [1], [[]])]
+        invalid.append(dict(valid, schema_version=2))
+        for raw in [json.dumps(value).encode() for value in invalid] + [b'{bad', b'\xff']:
+            with self.subTest(raw=raw):
+                path.write_bytes(raw)
+                for read in (lambda: ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata"),
+                             lambda: ci.current_states(self.base, self.task)):
+                    with self.assertRaisesRegex(ValueError, "CI 状态"):
+                        read()
+                self.assertEqual(raw, path.read_bytes())
+        result = subprocess.run([sys.executable, str(ROOT / "workflow/ci.py"), "status",
+            "--dir", str(self.base), "--issue-key", "TAP-123", "--repo", "tapdata/tapdata", "--pr", "1"],
+            capture_output=True, text=True)
+        self.assertEqual(4, result.returncode)
+        self.assertEqual("", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
+        valid["history"].append({"verdict": "failure"})
+        raw = json.dumps(valid).encode()
+        path.write_bytes(raw)
+        self.assertEqual(valid, ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata"))
+        self.assertEqual([valid], ci.current_states(self.base, self.task))
+        self.assertEqual(raw, path.read_bytes())
+
     def test_pr_ready_selects_ci_by_repository_and_current_pr(self):
         repository = {"repository": "org/repo", "pull_request": "2"}
         current = {"repository": "org/repo", "pr": "2", "history": [{"verdict": "success", "head": "a" * 40}]}

@@ -102,15 +102,29 @@ def state_path(base, issue_key, pr, repo=None):
     return task_store.task_directory(base, issue_key) / ("ci-%s.json" % suffix)
 
 
+def _read_state(path):
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("CI 状态 JSON 损坏，保留原文件") from error
+    if not isinstance(state, dict):
+        raise ValueError("CI 状态必须是 JSON 对象，保留原文件")
+    if state.get("schema_version") != 3:
+        raise ValueError("不支持的 CI 状态版本，保留原文件")
+    if (type(state.get("revision")) is not int or state["revision"] < 0
+            or not isinstance(state.get("history"), list)
+            or any(not isinstance(entry, dict) for entry in state["history"])):
+        raise ValueError("CI 状态损坏，保留原文件")
+    return state
+
+
 def load_state(base, issue_key, pr, repo=None):
     key = identity(base, issue_key, repo, pr)
     path = state_path(base, issue_key, pr, repo)
     if path.is_file():
-        state = json.loads(path.read_text(encoding="utf-8"))
+        state = _read_state(path)
         if any(state.get(k) != v for k, v in key.items()):
             raise ValueError("CI 状态身份或版本不匹配")
-        if type(state.get("revision")) is not int or not isinstance(state.get("history"), list):
-            raise ValueError("CI 状态损坏")
         return state
     return dict(key, revision=0, history=[])
 
@@ -129,9 +143,7 @@ def save_state(base, issue_key, pr, state, repo=None):
 def current_states(base, task):
     states = []
     for path in sorted(task_store.task_directory(base, task["issue_key"]).glob("ci-*.json")):
-        st = json.loads(path.read_text(encoding="utf-8"))
-        if st.get("schema_version") != 3:
-            raise ValueError("不支持的 CI 状态版本，保留原文件")
+        st = _read_state(path)
         if st.get("run_id") != task["run_id"]:
             continue
         checked = load_state(base, task["issue_key"], st.get("pr"), st.get("repository"))
