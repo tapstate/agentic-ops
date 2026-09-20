@@ -2,6 +2,7 @@
 from pathlib import Path, PurePosixPath
 import subprocess
 from workflow import quality_contract
+from workflow.engineering_baseline import SHA
 from workflow.git_environment import git_environment
 
 
@@ -118,7 +119,7 @@ def problems(plan, declaration, ctx, model):
             errors.append('同类实现缺少可核验本地源码：' + str(name)); continue
         if not isinstance(relative, str) or PurePosixPath(relative).is_absolute() or any(p in ('..', '.git') for p in PurePosixPath(relative).parts):
             errors.append('同类实现路径无效：' + str(relative)); continue
-        if not isinstance(revision, str) or len(revision) != 40 or any(c not in '0123456789abcdef' for c in revision):
+        if not isinstance(revision, str) or not SHA.fullmatch(revision):
             errors.append('同类实现必须绑定完整 Git SHA'); continue
         result = subprocess.run(['git', '--no-optional-locks', '-C', str(Path(root)), 'cat-file', '-t', revision + ':' + relative],
                                 capture_output=True, timeout=30, env=git_environment(read_only=True))

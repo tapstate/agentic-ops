@@ -388,6 +388,35 @@ class QualityTests(unittest.TestCase):
         plan['reference_implementations'][0]['path'] = 'missing.py'
         self.assertTrue(any('不能解析' in p for p in plan_review.problems(plan, spec, ctx, model)))
 
+    def test_plan_references_support_both_git_object_formats(self):
+        from workflow import plan_review
+        declaration = json.loads((ROOT / 'projects/tapdata/quality-feature.json').read_text())['plan_contract']['review']
+        for object_format, length in (('sha1', 40), ('sha256', 64)):
+            with self.subTest(object_format=object_format):
+                repo = self.base / ('references-' + object_format); repo.mkdir()
+                def git(*args):
+                    return subprocess.check_output(['git', '-C', str(repo), *args], stderr=subprocess.DEVNULL, text=True).strip()
+                git('init', '--object-format=' + object_format)
+                git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.invalid')
+                (repo / 'module.py').write_text('value = 1\n')
+                git('add', '.'); git('commit', '-qm', 'reference')
+                revision = git('rev-parse', 'HEAD')
+                self.assertEqual(length, len(revision))
+                plan = feature_review('行为正确', 'owner/repo', 'module', 'case')
+                reference = {'status': 'found', 'repository': 'owner/repo', 'path': 'module.py',
+                             'source_revision': revision, 'difference': 'fixture'}
+                plan['reference_implementations'] = [reference]
+                ctx = {'facts': {'acceptance_criteria': '行为正确'},
+                       'repositories': {'owner/repo': {'source_path': str(repo)}}}
+                model = {'items': {'case': {'plan': {'timing': 'after_fix', 'repository': 'owner/repo'}}}}
+                self.assertEqual([], plan_review.problems(plan, declaration, ctx, model))
+                for invalid in (revision[:12], 'g' * length, revision + '^', '0' * length):
+                    reference['source_revision'] = invalid
+                    self.assertTrue(plan_review.problems(plan, declaration, ctx, model), invalid)
+                reference['source_revision'] = revision
+                reference['path'] = 'missing.py'
+                self.assertTrue(plan_review.problems(plan, declaration, ctx, model))
+
     def test_review_packet_combines_q2_and_jira_without_writing(self):
         self.feature_profile()
         snapshot = {'source_ref': 'fixture:jira-read', 'issue': {'key': 'TAP-123',
