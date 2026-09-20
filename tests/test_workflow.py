@@ -221,6 +221,51 @@ def check_catalog_reference(base):
             check("目录引用越界 " + reader.__name__ + reference, rejected, True)
 
 
+def check_admission_documents(base):
+    product = base / "render-product"
+    project = product / "projects/demo"
+    project.mkdir(parents=True)
+    config = project / "admission.json"
+    spec = {"task_classes": {"audit_task": {"title": "审计", "doc": "projects/demo/admission/audit-task.md"}}}
+    def render(value, checking=False):
+        config.write_text(json.dumps(value))
+        return run_tool("project_rules.py", "render", "--root", str(product), "--project", "demo", *(["--check"] if checking else []), cwd=ROOT)
+    code, _ = render(spec, True)
+    check("新任务类缺文档报告漂移", code, 1)
+    check("只检查不创建文档目录", (project / "admission").exists(), False)
+    code, _ = render(spec)
+    document = project / "admission/audit-task.md"
+    check("配置化新任务类生成成功", code, 0)
+    check("正文绑定新任务类", "--task-class audit_task" in document.read_text(), True)
+    check("配置化文档检查通过", render(spec, True)[0], 0)
+    original = document.read_text()
+    for reference in (None, [], "projects/other/admission/audit.md", "../escape.md", str(base / "escape.md"),
+                      "projects/demo/admission/../escape.md", "projects/demo/admission/UPPER.md", "projects/demo/admission/audit-task.md"):
+        invalid = {"task_classes": {"audit_task": dict(spec["task_classes"]["audit_task"], title="不应写入"),
+                                    "second_task": {"title": "第二任务", "doc": reference}}}
+        code, out = render(invalid)
+        check("错误或重复文档目标拒绝 " + repr(reference), code, 2)
+        check("错误文档目标不产生堆栈 " + repr(reference), "Traceback" not in out, True)
+        check("后续目标错误不部分写入 " + repr(reference), document.read_text(), original)
+    document.unlink()
+    outside = product / "outside.md"
+    outside.write_text("preserved")
+    document.symlink_to(outside)
+    for checking in (False, True):
+        check("拒绝文档链接 " + str(checking), render(spec, checking)[0], 2)
+    check("链接目标未被修改", outside.read_text(), "preserved")
+    document.unlink()
+    document.mkdir()
+    check("拒绝目录型文档", render(spec)[0], 2)
+    document.rmdir()
+    (project / "admission").rmdir()
+    (project / "admission").symlink_to(product, target_is_directory=True)
+    check("拒绝文档目录链接", render(spec)[0], 2)
+    check("目录链接未写入外部", (product / "audit-task.md").exists(), False)
+    code, _ = run_tool("project_rules.py", "render", "--project", "tapdata", "--check", cwd=ROOT)
+    check("TapData 现有三类文档逐字兼容", code, 0)
+
+
 def check_station_binding_snapshot(base):
     from workflow import jira_collect, native_cleanup, repair_strategy, station, station_clean_rules, station_replan
     area = base.resolve() / "binding-snapshot"
@@ -427,6 +472,7 @@ def main():
         check_project_json_objects(ws)
         check_station_binding_snapshot(ws)
         check_catalog_reference(ws)
+        check_admission_documents(ws)
 
     finally:
         shutil.rmtree(ws, ignore_errors=True)

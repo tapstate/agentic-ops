@@ -7,7 +7,7 @@
 强制点在 workflow/task.py（阶段推进）与 workflow/evidence.py（证据输出）。
 
 用法：
-  python3 workflow/project_rules.py render --project <project>  # 由 admission.json 重新生成三张清单 md
+  python3 workflow/project_rules.py render --project <project>  # 由 admission.json 重新生成项目清单 md
   python3 workflow/project_rules.py render --project <project> --check  # 只校验 md 与 json 是否漂移（漂移 exit 1）
   python3 workflow/project_rules.py branch --project <project> --repo <owner/repo>   # 查表解析分支，查不到 exit 2
   python3 workflow/project_rules.py workflow --project <project> --issue-type-id 10008 --issue-type-name 任务 --json
@@ -424,25 +424,40 @@ def render_admission_markdown(spec, task_class, project=None):
     return "\n".join(L)
 
 
-DOC_NAMES = {
-    "defect_fix": "defect-fix.md",
-    "feature_change": "feature-change.md",
-    "technical_task": "technical-task.md",
-}
+def admission_documents(root, project, spec):
+    """先准备全部配置化输出，配置错误不得留下部分生成结果。"""
+    outdir = project_root(root, project) / "admission"
+    if outdir.is_symlink() or (outdir.exists() and not outdir.is_dir()):
+        raise ValueError("准入文档目录必须是普通目录，不能是符号链接")
+    classes = spec.get("task_classes")
+    if not isinstance(classes, dict):
+        raise ValueError("准入 task_classes 必须是对象")
+    documents = {}
+    pattern = r"projects/" + re.escape(project) + r"/admission/[a-z][a-z0-9-]*\.md"
+    for task_class, config in classes.items():
+        reference = config.get("doc") if isinstance(config, dict) else None
+        if not isinstance(reference, str) or not re.fullmatch(pattern, reference):
+            raise ValueError("准入文档路径必须是本项目 admission 下的小写连字符 .md 文件")
+        path = outdir / Path(reference).name
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise ValueError("准入文档必须是普通文件，不能是符号链接")
+        if path in documents:
+            raise ValueError("多个任务类型不能生成同一准入文档")
+        documents[path] = render_admission_markdown(spec, task_class, project=project)
+    return documents
 
 
 def cmd_render(args):
     spec = load_admission(args.root, project=args.project)
-    outdir = Path(args.root) / "projects" / args.project / "admission"
+    documents = admission_documents(args.root, args.project, spec)
     drift = []
-    for task_class in spec.get("task_classes", {}):
-        path = outdir / DOC_NAMES[task_class]
-        body = render_admission_markdown(spec, task_class, project=args.project)
+    for path, body in documents.items():
         if args.check:
             current = path.read_text(encoding="utf-8") if path.is_file() else ""
             if current != body:
                 drift.append(str(path.relative_to(args.root)))
         else:
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(body, encoding="utf-8")
             print("已生成 %s" % path.relative_to(args.root))
     if args.check:
