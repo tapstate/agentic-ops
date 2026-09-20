@@ -1136,6 +1136,22 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(ci.current_states(self.base, self.task), [])
         with self.assertRaises(ValueError): ci.save_state(self.base, "TAP-123", "1", a)
 
+    def test_pr_ready_selects_ci_by_repository_and_current_pr(self):
+        repository = {"repository": "org/repo", "pull_request": "2"}
+        current = {"repository": "org/repo", "pr": "2", "history": [{"verdict": "success", "head": "a" * 40}]}
+        old = {"repository": "org/repo", "pr": "1", "history": [{"verdict": "failure", "head": "b" * 40}]}
+        other = {"repository": "other/repo", "pr": "2", "history": [{"verdict": "failure", "head": "b" * 40}]}
+        with mock.patch.object(pr_ready, "local_head", return_value="a" * 40):
+            for states in ([current, old, other], [other, old, current]):
+                with mock.patch.object(ci, "current_states", return_value=states):
+                    self.assertEqual([], pr_ready.ci_problems(self.base, {"repositories": [repository]}))
+            old["history"] = [{"verdict": "success", "head": "a" * 40}]
+            with mock.patch.object(ci, "current_states", return_value=[old, other]):
+                self.assertIn("尚无当前 run", pr_ready.ci_problems(self.base, {"repositories": [repository]})[0])
+            current["history"] = [{"verdict": "failure", "head": "a" * 40}]
+            with mock.patch.object(ci, "current_states", return_value=[current, old]):
+                self.assertIn("未全部明确成功", pr_ready.ci_problems(self.base, {"repositories": [repository]})[0])
+
     def test_ci_update_invalidates_affected_repo_only(self):
         self.plan(); self.plan("case-b", repo="tapdata/tapdata-manager")
         for key in ("case-a", "case-b"):
