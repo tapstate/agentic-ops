@@ -566,7 +566,7 @@ def _cmd_advance_locked(args):
     if target == "completed":
         _finish_completion(args.dir, task)
     print("已推进到阶段：%s（依据：%s）" % (target, args.note))
-    _print_next(task)
+    _print_next(task, args.dir)
     return 0
 
 
@@ -618,14 +618,27 @@ NEXT_GUIDE = {
     "waiting_takeover": "读取 Jira 初始快照并准备本地版本水印；尽力回写，失败记录警告后继续 advance 进入 task_intake",
     "task_intake": "checklist/record 完成准入 -> repository add 登记修改范围及工作分支（完整工程已在 takeover 准备）-> 源码分析 -> advance；Jira 状态同步失败记录警告并继续",
     "design_review": "基于 source 完整工程形成方案 -> 新任务 source-readiness 核验仓库及目标分支 -> 研发工程师确认 -> workflow/authorization.py grant -> advance；Jira 尽力回写，失败不阻断",
-    "implementation": "在授权范围内实现和测试；Q2 已选修复后检查项在最终 SHA 符合预期时自动记录 Q3，继续已授权提交/推送和 Draft PR；Jira 同步失败列警告，PR 后统一总结",
-    "pr_review": "完成 Q4 关联用例验收后 advance；进入 ci_validation 后用 jira_status.py 在 tests_passed 节点同步尝试一次 Tests Passed",
-    "ci_validation": "完成 Tests Passed 同步尝试，用 workflow/ci.py watch 更新每个 PR Head 的 Checks，再用 pr_ready.py 核对测试任务、PR Checks 和 Q1-Q4；PR Ready 后等待另行授权合并，回读最终候选合并事实才能 completed",
+    "implementation": "在授权范围内实现和验证，按项目规则核对实际证据；继续已授权的提交、推送和 Draft PR，汇总外部同步警告",
+    "pr_review": "按项目规则完成用例验收与代码审查，核对 next 返回的阻塞项后 advance",
+    "ci_validation": "回读当前 PR Head 的 CI、审查和验收事实；满足项目交付条件后等待另行授权合并，回读合并事实再 completed",
     "completed": "生成脱敏任务总结；研发明确确认 cleanup-plan 与最终候选后 release，归档并释放工位；Jira 同步结果另行回读",
 }
 
 
-def _print_next(task):
+def _next_guidance(base, task):
+    """项目提示只影响展示，配置异常不能改变门禁或已完成的状态写入。"""
+    fallback = NEXT_GUIDE.get(task["stage"], "")
+    try:
+        overrides = project_rules.class_spec(admission(base), task["task_class"]).get("stage_guidance", {})
+        if (not isinstance(overrides, dict) or any(key not in NEXT_GUIDE or not isinstance(value, str)
+                or not value.strip() for key, value in overrides.items())):
+            raise ValueError("stage_guidance 必须映射已知阶段到非空提示")
+        return overrides.get(task["stage"], fallback), []
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        return fallback, ["项目阶段指引不可用，已使用通用指引：%s" % error]
+
+
+def _print_next(task, base):
     if task.get("archive_ref"):
         print("任务已归档，仅供审计；下一步：回读 cleanup-plan 并确认后%s。" % (" release" if task.get("outcome") == "completed" else " clean"))
         return
@@ -634,7 +647,10 @@ def _print_next(task):
         return
     print("请求绑定：--expected-run-id %s --expected-stage %s（expected-stage 仅用于 advance）"
           % (task["run_id"], task["stage"]))
-    print("下一步：%s" % NEXT_GUIDE.get(task["stage"], ""))
+    guidance, warnings = _next_guidance(base, task)
+    print("下一步：%s" % guidance)
+    for warning in warnings:
+        print("提示：" + warning)
     print("项目启用 recorded_decision 时，使用 quality.py status/apply 核对用例和用户处置；文本 verification 不代表通过。")
 
 
@@ -662,10 +678,12 @@ def cmd_next(args):
     rules = quality.config(args.dir, task)
     current = quality.report(quality.load(args.dir, task), rules, quality.context(args.dir, task)) if quality.enabled(task, rules) else {}
     points = rules.get("stage_checkpoints", {}).get(target, []) if current else []
+    guidance, guidance_warnings = _next_guidance(args.dir, task)
     payload = {"issue_key": task["issue_key"], "run_id": task["run_id"], "stage": task["stage"],
                       "next_stage": target, "advance_ready": bool(target and not blockers),
                       "blockers": blockers, "diagnostics": diagnostic.getvalue().splitlines(),
-                      "pending": task.get("pending"), "guidance": NEXT_GUIDE[task["stage"]],
+                      "pending": task.get("pending"), "guidance": guidance,
+                      "guidance_warnings": guidance_warnings,
                       "checkpoints": {p: current["checkpoints"][p] for p in points},
                       "publications": current.get("publications", {}),
                       "warnings": external_sync.warnings(args.dir, task, current),
@@ -767,7 +785,7 @@ def cmd_status(args):
                 "  - %s：%s -> %s"
                 % (item["repository"], item["base_branch"], item["work_branch"])
             )
-    _print_next(task)
+    _print_next(task, args.dir)
     return 0
 
 
