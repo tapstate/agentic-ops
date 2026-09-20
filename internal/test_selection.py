@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 RULES = (
+    ("workflow/verification.py", ("quality",)),
     ("workflow/file_digest.py", ("quality", "station_resources")),
     ("workflow/station", ("station_clean", "station_resources", "station_lifecycle")),
     ("policies/station-clean.json", ("station_clean",)),
@@ -85,20 +86,22 @@ def changes(root, source, base=None, head=None):
 
 def select(paths):
     suites, unmapped = [], []
+    direct = {command[1]: name for name, command in TEST_SUITES.items()
+              if len(command) == 2 and command[0] == "python3"
+              and command[1].startswith("tests/") and command[1].endswith(".py")}
     for path in paths:
         matched = []
         if path.startswith("tests/") and path.endswith(".py"):
-            candidate = path.removeprefix("tests/").removesuffix(".py").removeprefix("test_")
-            matched = (candidate,) if candidate in TEST_SUITES else ()
+            matched = (direct[path],) if path in direct else ()
         elif path == "tests/test_install.sh": matched = ("install",)
         else:
             for prefix, candidates in RULES:
                 if path.startswith(prefix):
                     matched.extend(candidates)
             if path.startswith("workflow/") and path.count("/") == 1 and path.endswith(".py"):
-                candidate = Path(path).stem
-                if candidate in TEST_SUITES:
-                    matched.append(candidate)
+                candidate = "tests/test_" + Path(path).stem + ".py"
+                if candidate in direct:
+                    matched.append(direct[candidate])
         if not matched: unmapped.append(path)
         for suite in matched:
             if suite not in suites: suites.append(suite)

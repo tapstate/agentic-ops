@@ -65,6 +65,24 @@ class TestSelectionTests(unittest.TestCase):
         self.assertTrue({"station_clean", "station_resources", "station_lifecycle"}.issubset(suites))
         self.assertEqual(unmapped, [])
 
+    def test_product_verification_does_not_select_internal_namesake(self):
+        suites, unmapped = test_selection.select(["workflow/verification.py"])
+        self.assertIn("quality", suites)
+        self.assertNotIn("verification", suites)
+        self.assertEqual(unmapped, [])
+        internal, missing = test_selection.select(["internal/story_gate/evidence.py"])
+        self.assertIn("verification", internal)
+        self.assertEqual(missing, [])
+        self.assertEqual(test_selection.select(["tests/test_verification.py"]), ([], ["tests/test_verification.py"]))
+
+    def test_direct_selection_uses_command_path_even_with_suite_alias(self):
+        suites = dict(test_selection.TEST_SUITES)
+        suites["renamed_quality"] = suites.pop("quality")
+        with mock.patch.object(test_selection, "TEST_SUITES", suites), mock.patch.object(test_selection, "RULES", ()):
+            self.assertEqual(test_selection.select(["tests/test_quality.py"]), (["renamed_quality"], []))
+            self.assertEqual(test_selection.select(["workflow/quality.py"]), (["renamed_quality"], []))
+            self.assertEqual(test_selection.select(["tests/quality.py"]), ([], ["tests/quality.py"]))
+
     def test_multiple_paths_are_deduplicated(self):
         suites, unmapped = test_selection.select(["workflow/quality.py", "workflow/jira_status.py"])
         self.assertEqual(suites, ["quality", "jira_status", "jira_watermark", "issue_versions", "workflow", "checkpoints", "failures", "task_identity", "station_state"])
