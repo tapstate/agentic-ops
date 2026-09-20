@@ -71,14 +71,19 @@ def changes(root, source, base=None, head=None):
 def select(paths):
     suites, unmapped = [], []
     for path in paths:
-        matched = ()
+        matched = []
         if path.startswith("tests/") and path.endswith(".py"):
             candidate = path.removeprefix("tests/").removesuffix(".py").removeprefix("test_")
             matched = (candidate,) if candidate in TEST_SUITES else ()
         elif path == "tests/test_install.sh": matched = ("install",)
         else:
             for prefix, candidates in RULES:
-                if path.startswith(prefix): matched = candidates; break
+                if path.startswith(prefix):
+                    matched.extend(candidates)
+            if path.startswith("workflow/") and path.count("/") == 1 and path.endswith(".py"):
+                candidate = Path(path).stem
+                if candidate in TEST_SUITES:
+                    matched.append(candidate)
         if not matched: unmapped.append(path)
         for suite in matched:
             if suite not in suites: suites.append(suite)
