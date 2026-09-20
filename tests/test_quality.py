@@ -1146,6 +1146,15 @@ class QualityTests(unittest.TestCase):
         self.assertFalse(self.view()["items"]["case-a"]["decision_valid"])
         self.assertTrue(self.view()["items"]["case-b"]["decision_valid"])
 
+    def test_evidence_jsonl_preserves_unicode_separators_inside_strings(self):
+        path = task_store.events_path(self.base, "TAP-123")
+        events = [{"decision": "allow", "note": "a" + chr(code) + "b"}
+                  for code in (0x85, 0x2028, 0x2029)]
+        raw = "\r\n".join(json.dumps(event, ensure_ascii=False) for event in events) + "\r\n\r\n"
+        path.write_bytes(raw.encode("utf-8"))
+        self.assertEqual(events, evidence.load_events(path))
+        self.assertEqual(raw.encode("utf-8"), path.read_bytes())
+
     def test_evidence_rejects_non_object_events_without_partial_output(self):
         path = task_store.events_path(self.base, "TAP-123")
         for value in (None, [], "private-fixture-event", 1, True):
