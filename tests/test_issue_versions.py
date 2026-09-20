@@ -15,7 +15,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from workflow import issue_versions, task, task_store
+from workflow import git_refs, issue_versions, task, task_store
 from station_fixture import save_task as save_station_task
 
 
@@ -88,9 +88,14 @@ class IssueVersionsTests(unittest.TestCase):
             self.resolve()
 
     def test_network_failure_is_not_missing_branch(self):
-        with mock.patch.object(issue_versions.subprocess, "run", return_value=SimpleNamespace(returncode=128)):
+        with mock.patch.object(git_refs.subprocess, "run", return_value=SimpleNamespace(returncode=128, stdout="", stderr="network failed")):
             with self.assertRaisesRegex(ValueError, "核验失败.*不能认定"):
                 issue_versions.remote_refs("fixture:remote", {"develop"})
+
+    def test_git_start_failure_is_not_missing_branch(self):
+        with mock.patch.object(git_refs.subprocess, "run", side_effect=FileNotFoundError("missing git")):
+            with self.assertRaisesRegex(ValueError, "核验失败.*不能认定"):
+                issue_versions.remote_refs("fixture:remote", {"main"})
 
     def test_field_readback_clears_warning_without_changing_effective_facts(self):
         from workflow import external_sync, quality
@@ -122,7 +127,7 @@ class IssueVersionsTests(unittest.TestCase):
         args.expected_run_id = "run-ffffffffffff"
         with self.assertRaises(ValueError):
             task.cmd_snapshot(args)
-        with mock.patch.object(issue_versions.subprocess, "run", side_effect=subprocess.TimeoutExpired("git", 30)):
+        with mock.patch.object(git_refs.subprocess, "run", side_effect=subprocess.TimeoutExpired("git", 30)):
             with self.assertRaisesRegex(ValueError, "超时"):
                 issue_versions.remote_refs("fixture:remote", {"develop"})
 
@@ -154,8 +159,10 @@ class IssueVersionsTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(remote), "-c", "user.name=Test", "-c", "user.email=test@example.test",
                         "commit", "-qm", "fixture", "--allow-empty"], check=True)
         subprocess.run(["git", "-C", str(remote), "tag", "release-v4.18.0"], check=True)
-        refs = issue_versions.remote_refs(str(remote), {"develop", "release-v4.18.0"})
-        self.assertEqual(set(refs), {"develop"})
+        for branch in ("origin/topic", "refs/topic"):
+            subprocess.run(["git", "-C", str(remote), "branch", branch], check=True)
+        refs = issue_versions.remote_refs(str(remote), {"develop", "release-v4.18.0", "origin/topic", "refs/topic"})
+        self.assertEqual(set(refs), {"develop", "origin/topic", "refs/topic"})
         self.assertEqual(len(refs["develop"]), 40)
 
     def test_initial_analysis_on_prepared_develop_does_not_require_reset(self):

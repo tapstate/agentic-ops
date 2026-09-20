@@ -67,6 +67,31 @@ class GitRefsTests(unittest.TestCase):
         self.assertEqual("a" * 40, result["heads"]["main"])
         self.assertIsNone(result["heads"]["feature/x"])
 
+    def test_query_heads_filters_unrequested_refs_and_accepts_sha256(self):
+        completed = mock.Mock(returncode=0, stderr="", stdout=(
+            "a" * 64 + "\trefs/heads/origin/topic\n" +
+            "b" * 40 + "\trefs/heads/other\n" +
+            "c" * 40 + "\trefs/tags/missing\n"))
+        with mock.patch.object(git_refs, "_run", return_value=completed) as run:
+            refs = git_refs.query_heads("fixture:remote", ["origin/topic", "missing", "origin/topic"])
+        self.assertEqual(refs, {"origin/topic": "a" * 64})
+        run.assert_called_once_with(["git", "ls-remote", "--heads", "fixture:remote",
+                                     "refs/heads/origin/topic", "refs/heads/missing"])
+
+    def test_query_heads_rejects_invalid_inputs_without_query(self):
+        for heads in ([], [""], ["a\x00b"], [{}], [1]):
+            with self.subTest(heads=heads), mock.patch.object(git_refs, "_run") as run:
+                with self.assertRaises(git_refs.GitRefsError):
+                    git_refs.query_heads("fixture:remote", heads)
+                run.assert_not_called()
+
+    def test_probe_keeps_its_branch_input_contract(self):
+        for head in ("origin/topic", "refs/topic"):
+            with self.subTest(head=head), mock.patch.object(git_refs, "_run") as run:
+                with self.assertRaises(git_refs.GitRefsError):
+                    git_refs.probe("fixture:remote", [head])
+                run.assert_not_called()
+
     def test_read_snapshot_does_not_create_or_write_cache(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / "missing" / "cache.json"

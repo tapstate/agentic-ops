@@ -238,6 +238,21 @@ def _query(path, remote, scope):
     return _parse_heads(result.stdout) if scope == "heads" else _parse_tags(result.stdout)
 
 
+def query_heads(origin, heads):
+    """一次无缓存查询字面分支名；返回已存在的请求项，不解释产品分支语义。"""
+    requested = tuple(heads)
+    if not requested or any(not isinstance(head, str) or not head or "\x00" in head for head in requested):
+        raise GitRefsError("远端查询需要非空分支名")
+    requested = tuple(dict.fromkeys(requested))
+    result = _run(["git", "ls-remote", "--heads", origin,
+                   *["refs/heads/" + head for head in requested]])
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip().splitlines()
+        raise GitRefsError(detail[-1] if detail else "Git 远端查询失败")
+    refs = _parse_heads(result.stdout)
+    return {head: refs[head] for head in requested if head in refs}
+
+
 def probe(origin, heads):
     """无缓存地精确查询远端 heads，失败绝不把网络问题解释为不存在。"""
     requested = tuple(dict.fromkeys(str(head).strip() for head in heads if str(head).strip()))
@@ -245,12 +260,7 @@ def probe(origin, heads):
         raise GitRefsError("至少提供一个 --head")
     if any(head.startswith(("refs/", "origin/")) or "\x00" in head for head in requested):
         raise GitRefsError("--head 必须是裸分支名，不接受 refs/ 或 origin/ 前缀")
-    result = _run(["git", "ls-remote", "--heads", origin,
-                   *["refs/heads/" + head for head in requested]])
-    if result.returncode:
-        detail = (result.stderr or result.stdout).strip().splitlines()
-        raise GitRefsError(detail[-1] if detail else "Git 远端查询失败")
-    refs = _parse_heads(result.stdout)
+    refs = query_heads(origin, requested)
     return {
         "origin": normalize_origin(origin),
         "heads": {head: refs.get(head) for head in requested},
