@@ -50,7 +50,10 @@ def canonical_repository_endpoint(value):
 
 def _read_json(path):
     with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+        value = json.load(fh)
+    if not isinstance(value, dict):
+        raise ValueError("项目 JSON 顶层必须是对象：%s" % Path(path).name)
+    return value
 
 
 def validate_project_id(project):
@@ -499,7 +502,11 @@ def main():
     p.set_defaults(func=cmd_workflow)
 
     args = parser.parse_args()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (ValueError, OSError) as error:
+        print("错误：%s" % error, file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

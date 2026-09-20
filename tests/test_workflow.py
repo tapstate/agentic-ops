@@ -133,6 +133,45 @@ def check_project_boundaries(base):
     check("非法项目不生成工位绑定", (render_station / ".agenticops/station.json").exists(), False)
 
 
+def check_project_json_objects(base):
+    product = base / "json-product"
+    project = product / "projects/demo"
+    project.mkdir(parents=True)
+    profile = json.loads((ROOT / "projects/tapdata/profile.json").read_text())
+    (project / "profile.json").write_text(json.dumps(profile))
+    station = base / "json-station"
+    binding = station / ".agenticops/station.json"
+    binding.parent.mkdir(parents=True)
+    readers = (
+        (project / "admission.json", lambda: project_rules.load_admission(product, "demo")),
+        (project / "repositories.json", lambda: project_rules.load_profile(product, "demo")),
+        (binding, lambda: project_rules.project_from_station(station)),
+        (binding, lambda: project_rules.product_root_from_station(station)),
+    )
+    for path, read in readers:
+        for value in ([], None, 1, True, "fixture-private-content"):
+            path.write_text(json.dumps(value))
+            try:
+                read()
+            except ValueError as error:
+                message = str(error)
+                rejected = path.name in message and "顶层必须是对象" in message and "fixture-private-content" not in message
+            else:
+                rejected = False
+            check("JSON 对象校验 %s %s" % (path.name, type(value).__name__), rejected, True)
+    (project / "profile.json").write_text('["fixture-private-content"]')
+    (project / "admission.json").write_text('null')
+    for command, options in (("render", []), ("branch", ["--repo", "owner/repo"]), ("workflow", ["--issue-type-id", "1"])):
+        code, out = run_tool("project_rules.py", command, "--root", str(product), "--project", "demo", *options, cwd=ROOT)
+        check("CLI 配置错误退出 " + command, code, 2)
+        check("CLI 不泄漏栈或内容 " + command, "Traceback" not in out and "fixture-private-content" not in out, True)
+    check("无效配置不生成准入视图", (project / "admission").exists(), False)
+    (project / "admission.json").unlink()
+    code, out = run_tool("project_rules.py", "render", "--root", str(product), "--project", "demo", cwd=ROOT)
+    check("CLI 缺文件也按配置错误处理", code, 2)
+    check("CLI 缺文件不泄漏栈", "Traceback" not in out, True)
+
+
 def main():
     # 生命周期的资源安全、双工位、恢复与精确清理在独立同版测试覆盖；
     # 本文件保留通用 CLI、CI、证据脱敏和项目规则合同。
@@ -278,6 +317,7 @@ def main():
         admission = json.loads((ROOT / "projects/tapdata/admission.json").read_text(encoding="utf-8"))
         check("admission 覆盖三类任务", sorted(admission["task_classes"]), ["defect_fix", "feature_change", "technical_task"])
         check_project_boundaries(ws)
+        check_project_json_objects(ws)
 
     finally:
         shutil.rmtree(ws, ignore_errors=True)
