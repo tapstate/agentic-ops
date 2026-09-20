@@ -5,7 +5,7 @@ import copy
 import json
 from pathlib import Path
 
-from workflow import engineering_baseline as baseline, project_rules, quality
+from workflow import engineering_baseline as baseline, git_refs, project_rules, quality
 from workflow import station_operation as operations, station_source as source, task_store
 
 STAGES = ("design_review", "implementation", "pr_review", "ci_validation")
@@ -23,11 +23,9 @@ def sources(base, value):
 
 
 def remote_head(path, origin, branch):
-    ref = "refs/heads/" + baseline.ref_name(branch)
-    rows = source.git(path, "ls-remote", "--refs", origin, ref).stdout.splitlines()
-    if len(rows) > 1 or (rows and (len(rows[0].split()) != 2 or rows[0].split()[1] != ref)):
-        raise ValueError("远端分支回读不唯一：" + branch)
-    return rows[0].split()[0] if rows else None
+    head = baseline.ref_name(branch)
+    output = source.git(path, "ls-remote", "--refs", origin, "refs/heads/" + head).stdout
+    return git_refs.parse_head_response(output, (head,)).get(head)
 
 
 def project(base):

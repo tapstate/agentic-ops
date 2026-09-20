@@ -14,6 +14,28 @@ from workflow import git_refs, source_sync
 
 
 class GitRefsTests(unittest.TestCase):
+    def test_exact_heads_reject_invalid_or_duplicate_responses(self):
+        from workflow import station_replan
+        valid = "a" * 40 + "\trefs/heads/main\n"
+        for output in ("not-a-sha\trefs/heads/main\n", "a" * 40 + "\n",
+                       valid + valid, valid + "broken\n", "a" * 40 + "\trefs/heads/main\textra\n"):
+            with self.subTest(output=output):
+                response = subprocess.CompletedProcess([], 0, output, "")
+                with mock.patch.object(git_refs, "_run", return_value=response):
+                    with self.assertRaises(git_refs.GitRefsError):
+                        git_refs.query_heads("fixture", ["main"])
+                with mock.patch.object(station_replan.source, "git", return_value=response):
+                    with self.assertRaises(git_refs.GitRefsError):
+                        station_replan.remote_head(".", "fixture", "main")
+
+    def test_replan_remote_head_preserves_missing_and_valid_sha(self):
+        from workflow import station_replan
+        for sha in (None, "a" * 40, "b" * 64):
+            output = sha + "\trefs/heads/main\n" if sha else ""
+            with mock.patch.object(station_replan.source, "git", return_value=subprocess.CompletedProcess([], 0, output, "")) as git:
+                self.assertEqual(sha, station_replan.remote_head(".", "fixture", "main"))
+                git.assert_called_once_with(".", "ls-remote", "--refs", "fixture", "refs/heads/main")
+
     def identity(self, repository, remote, repository_id=None, source_root=None):
         identity = {"repository_id": repository_id or str(Path(repository).resolve()), "remote": remote,
                     "origin": "github.test/a/repo.git", "repository_path": str(Path(repository).resolve()),

@@ -130,6 +130,23 @@ class SourceTests(SourceFixture, unittest.TestCase):
             record = source.prepare_readiness(self.ws, task)
             self.assertEqual(record["snapshot"]["digest"], source.require_readiness(self.ws, task))
             self.assertFalse({call.args[1] for call in calls.call_args_list} & {"clean", "reset", "merge", "rebase", "restore", "push", "checkout"})
+            remote_calls = [call for call in calls.call_args_list if call.args[1] == "ls-remote"]
+            self.assertEqual(2, len(remote_calls))
+            for call in remote_calls:
+                self.assertEqual(("ls-remote", "--refs", "origin", "refs/heads/develop", "refs/heads/fix/ready"), call.args[1:])
+        real_git = source.git
+        for output in ("bad\trefs/heads/develop\n", self.sha + "\n",
+                       (self.sha + "\trefs/heads/develop\n") * 2, ""):
+            def remote_response(path, *args, **kwargs):
+                if args[0] == "ls-remote":
+                    return subprocess.CompletedProcess([], 0, output, "")
+                return real_git(path, *args, **kwargs)
+            with self.subTest(output=output), mock.patch.object(source, "git", side_effect=remote_response):
+                with self.assertRaises(ValueError):
+                    source.prepare_readiness(self.ws, task)
+            stored = json.loads((self.ws / ".agenticops/evidence/source-readiness.json").read_text())
+            self.assertEqual("refreshing", stored["status"])
+        source.prepare_readiness(self.ws, task)
         real_git = source.git
         def fail_fetch(path, *args, **kwargs):
             if args[0] == "fetch":

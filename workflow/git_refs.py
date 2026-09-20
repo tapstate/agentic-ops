@@ -251,6 +251,27 @@ def _query(path, remote, scope):
     return _parse_heads(result.stdout) if scope == "heads" else _parse_tags(result.stdout)
 
 
+def parse_head_response(output, heads):
+    """解析精确查询结果；格式错误不能被解释为分支不存在。"""
+    requested = set(heads)
+    result = {}
+    for line in output.splitlines():
+        if not line:
+            continue
+        fields = line.split("\t")
+        if (len(fields) != 2 or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", fields[0])
+                or not fields[1].startswith("refs/") or any(char.isspace() for char in fields[1])):
+            raise GitRefsError("远端引用响应格式无效")
+        sha, ref = fields
+        if not ref.startswith("refs/heads/") or ref[len("refs/heads/"):] not in requested:
+            continue
+        head = ref[len("refs/heads/"):]
+        if head in result:
+            raise GitRefsError("远端分支回读不唯一：" + head)
+        result[head] = sha
+    return result
+
+
 def query_heads(origin, heads):
     """一次无缓存查询字面分支名；返回已存在的请求项，不解释产品分支语义。"""
     requested = tuple(heads)
@@ -262,8 +283,7 @@ def query_heads(origin, heads):
     if result.returncode:
         detail = (result.stderr or result.stdout).strip().splitlines()
         raise GitRefsError(detail[-1] if detail else "Git 远端查询失败")
-    refs = _parse_heads(result.stdout)
-    return {head: refs[head] for head in requested if head in refs}
+    return parse_head_response(result.stdout, requested)
 
 
 def probe(origin, heads):
