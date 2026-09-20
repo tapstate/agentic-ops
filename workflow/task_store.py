@@ -136,7 +136,7 @@ def initialize_current(base):
 def compare_and_set(base, expected_revision, current):
     before = read_current(base)
     if before["revision"] != expected_revision:
-        raise ValueError("工位 revision 已变化")
+        raise ValueError("工位 revision 已变化：expected=%s actual=%s；请读取 task.py status，不使用质量日志 revision" % (expected_revision, before["revision"]))
     value = {"schema_version": 1, "revision": expected_revision + 1, "current": copy.deepcopy(current)}
     _write_json_atomic(current_path(base), value)
     return value
@@ -285,7 +285,7 @@ def _active_product_lifecycle(product_root):
 
 
 def _require_station_epoch_supported(base, product_root):
-    """只允许当前产品支持的已初始化工位写入；不采用旧代际。"""
+    """只允许当前产品 epoch 的已初始化工位写入。"""
     manifest_path = (
         Path(product_root).resolve()
         / "contracts"
@@ -299,18 +299,16 @@ def _require_station_epoch_supported(base, product_root):
         init = json.loads(init_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError("工位状态代际无法核验：%s" % error) from error
-    supported = manifest.get("supported_station_state_epochs")
-    legacy = manifest.get("legacy_station_state_epoch")
+    product_epoch = manifest.get("station_state_epoch")
     epoch = init.get("station_state_epoch")
     if (
-        not isinstance(supported, list)
-        or not supported
-        or any(not isinstance(item, int) or item < 1 for item in supported)
+        not isinstance(product_epoch, int)
+        or product_epoch < 1
         or not isinstance(epoch, int)
         or epoch < 1
     ):
         raise ValueError("工位状态兼容性清单或代际标记无效")
-    if epoch not in supported:
+    if epoch != product_epoch:
         raise ValueError(
             "工位状态代际 %s 与当前产品不兼容；请使用可处理该状态的原版本，"
             "保存材料后将这个旧工位受控解绑并重建；repair 不执行跨代际采用" % epoch

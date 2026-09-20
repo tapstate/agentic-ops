@@ -104,6 +104,88 @@
     "digest": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "extension_history": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "before_digest",
+          "added",
+          "decision_ref"
+        ],
+        "properties": {
+          "before_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "added": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "repository_id",
+                "origin",
+                "ref_kind",
+                "ref_name",
+                "commit_sha",
+                "resolution_source",
+                "rule_version",
+                "path"
+              ],
+              "properties": {
+                "repository_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$"
+                },
+                "origin": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "ref_kind": {
+                  "enum": [
+                    "branch",
+                    "tag",
+                    "commit"
+                  ]
+                },
+                "ref_name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "commit_sha": {
+                  "type": "string",
+                  "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"
+                },
+                "resolution_source": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "rule_version": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "path": {
+                  "type": "string",
+                  "pattern": "^source/[^/]+/[^/]+$"
+                }
+              }
+            }
+          },
+          "decision_ref": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
     }
   }
 }

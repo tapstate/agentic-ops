@@ -16,7 +16,7 @@ current_ref="$(git -C "$install_root" rev-parse HEAD)"
 git -C "$install_root" cat-file -e "${previous_ref}^{commit}"
 python3 "$install_root/bootstrap/station_compatibility.py" \
   --product-root "$install_root" check-upgrade \
-  --current-ref "$current_ref" --target-ref "$previous_ref" --allow-legacy-target
+  --current-ref "$current_ref" --target-ref "$previous_ref" --operation rollback
 git -C "$install_root" checkout --detach "$previous_ref"
 python3 "$state_tool" --product-root "$install_root" update-ref \
   --current-ref "$previous_ref" --previous-ref "$current_ref"

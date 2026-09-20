@@ -41,7 +41,7 @@ def read(base):
     required = {"operation_id", "kind", "run_id", "request", "request_digest", "expected_revision", "phase"}
     if (not required <= set(value) or not isinstance(value["operation_id"], str)
             or not re.fullmatch(r"op-[a-z0-9-]{8,80}", value["operation_id"])
-            or value["kind"] not in ("takeover", "archive", "release", "clean", "scope_change")
+            or value["kind"] not in ("takeover", "archive", "release", "clean", "scope_change", "replan")
             or not isinstance(value["run_id"], str) or not task_store.RUN_ID_PATTERN.fullmatch(value["run_id"])
             or not isinstance(value["request"], dict) or value["request_digest"] != engineering_baseline.digest(value["request"])
             or type(value["expected_revision"]) is not int or value["expected_revision"] < 0
@@ -108,7 +108,7 @@ def _verify_superseded(operation, name, step):
         if name != "clear-active:" + str(original_revision) + ":" + original or not isinstance(step["expected"].get("files"), dict):
             raise ValueError("活动材料清理步骤不属于原计划")
     elif name.startswith("station-source-reset:"):
-        if (revision["plan"].get("schema_version") != 4
+        if (revision["plan"].get("schema_version") not in (4, 5)
                 or name != "station-source-reset:" + str(original_revision) + ":" + original
                 or step["expected"] != {"plan_digest": original}):
             raise ValueError("工位源码复位步骤不属于原计划")
@@ -131,7 +131,7 @@ def _verify_superseded(operation, name, step):
 
 
 def begin(base, kind, operation_id, expected_revision, request, run_id=None):
-    if kind not in ("takeover", "archive", "release", "clean", "scope_change"):
+    if kind not in ("takeover", "archive", "release", "clean", "scope_change", "replan"):
         raise ValueError("未知工位操作")
     if not isinstance(operation_id, str) or not re.fullmatch(r"op-[a-z0-9-]{8,80}", operation_id):
         raise ValueError("operation_id 必须为 op- 前缀的稳定操作编号")
@@ -149,7 +149,7 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
         raise ValueError("存在未完成工位操作，只能恢复原操作")
     current = task_store.read_current(base)
     if current["revision"] != expected_revision:
-        raise ValueError("工位 revision 已变化")
+        raise ValueError("工位 revision 已变化：expected=%s actual=%s；请读取 task.py status，不使用质量日志 revision" % (expected_revision, current["revision"]))
     if kind == "takeover":
         if current["current"] is not None:
             raise ValueError("工位仍有当前任务，不能接管新任务")
@@ -212,7 +212,7 @@ def handoff_clean(base, operation_id, revision, request, run_id, cleanup_plan):
             raise ValueError("必须恢复原清理交接请求")
     else:
         if current["revision"] != revision:
-            raise ValueError("清理交接 revision 已变化")
+            raise ValueError("清理交接 revision 已变化：expected=%s actual=%s" % (revision, current["revision"]))
         previous["handoff"] = target
         save(base, previous)
     value = {"schema_version": 1, "operation_id": operation_id, "kind": "clean", "run_id": run_id,

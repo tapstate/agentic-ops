@@ -66,7 +66,7 @@ class RecoveryTests(SourceFixture, unittest.TestCase):
         self.git(self.repo, "commit", "--allow-empty", "-m", "unfinished")
         head = self.git(self.repo, "rev-parse", "HEAD")
         task = {"issue_key": "TAP-123", "run_id": self.op["run_id"], "source_prepared": True,
-                "engineering_baseline": {"status": "frozen", "profile": {"id": "full-application", "revision": 2},
+                "engineering_baseline": {"status": "frozen", "profile": {"id": "full-application", "revision": 3},
                     "repositories": {self.name: {"origin": str(self.remote)}}},
                 "reset_baseline": {self.name: {"sha": self.sha}}, "task_repositories": {}}
         task_store.write_task(self.ws, task)

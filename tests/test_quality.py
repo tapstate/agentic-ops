@@ -25,6 +25,23 @@ def proof():
             "at": datetime.now(timezone.utc).isoformat()}
 
 
+def feature_review(criterion, repository, module, item):
+    return {
+        'reference_implementations': [{'status': 'not_found', 'search_scope': [module],
+            'source_revision': 'fixture:isolated-source', 'evidence_ref': 'fixture:search', 'difference': '新增目标行为'}],
+        'acceptance_mapping': [{'criterion': criterion, 'behavior': '新增约定行为', 'repository': repository,
+            'module': module, 'case_ids': [item], 'expected': criterion}],
+        'scope_rationale': {'changes': [{'repository': repository, 'module': module, 'layer': 'local',
+            'necessity': '在目标模块实现验收行为', 'impact': '仅夹具模块'}], 'non_changes': ['不修改公共引擎'], 'blocking_inputs': []},
+        'delivery_dependencies': [{'repository': repository, 'depends_on': [], 'delivery': '本任务 PR',
+            'test_relation': item, 'state': 'ready', 'source_ref': 'fixture:source'}],
+        'environment_readiness': {'config_source': 'fixture:local', 'checks': [{'name': '测试环境',
+            'source_ref': 'fixture:python', 'result': 'ready', 'detail': '独立临时目录'}], 'blocking_inputs': []},
+        'verification_plan': {'commands': ['执行夹具断言'], 'scenarios': [criterion],
+            'invalidation_conditions': ['实现或预期变化'], 'evidence_ref': 'fixture:verification-plan'}
+    }
+
+
 def concurrent_apply(base, run, revision, command, queue):
     try:
         quality.apply(base, "TAP-123", run, revision, command)
@@ -119,6 +136,66 @@ class QualityTests(unittest.TestCase):
         self.assertTrue(task._check_advance(self.task, "implementation", self.base, spec))
         with self.assertRaisesRegex(ValueError, "尚未有效确认"):
             quality.q2_digest(self.base, self.task)
+
+    def test_replan_invalidates_only_mapped_items_without_rewriting_executions(self):
+        self.plan(key="case-a", repo="tapdata/tapdata")
+        self.plan(key="case-b", repo="tapdata/tapdata-manager")
+        for key in ("case-a", "case-b"):
+            self.select(key); self.execute(key); self.decide(key)
+        before = self.view()
+        history = quality.state_path(self.base, self.task).read_bytes()
+        self.task["replan"] = {"item_revisions": {"case-a": "new-scope-digest"}}
+        self.save_task()
+        after = self.view()
+        self.assertFalse(after["items"]["case-a"]["selected"])
+        self.assertFalse(after["items"]["case-a"]["decision_valid"])
+        self.assertTrue(after["items"]["case-b"]["decision_valid"])
+        self.assertEqual(before["items"]["case-a"]["executions"], after["items"]["case-a"]["executions"])
+        self.assertEqual(history, quality.state_path(self.base, self.task).read_bytes())
+
+    def test_validate_cli_is_station_independent_and_reports_safe_field_details(self):
+        self.plan()
+        self.execute(result="NOT_RUN")
+        command = quality.load(self.base, self.task)["events"][-1]["command"]
+        path = self.base / "input.json"
+        path.write_text(json.dumps(command))
+        missing_station = self.base / "does-not-exist"
+        result = subprocess.run([sys.executable, str(ROOT / "workflow/quality.py"), "validate",
+                                 "--dir", str(missing_station), "--input", str(path)], capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue(json.loads(result.stdout)["contract_valid"])
+        self.assertFalse(missing_station.exists())
+        command["payload"]["execution"]["raw_result"] = "secret-value-must-not-appear"
+        with self.assertRaisesRegex(ValueError, r"\$\.payload\.execution\.raw_result.*允许") as caught:
+            quality.validate_command(command)
+        self.assertNotIn("secret-value-must-not-appear", str(caught.exception))
+        command["payload"]["execution"]["raw_result"] = "NOT_RUN"
+        command["payload"]["execution"]["nonexecution_reason"] = []
+        with self.assertRaisesRegex(ValueError, "预期 string，实际 list"):
+            quality.validate_command(command)
+        with self.assertRaises(ValueError):
+            quality.validate_command([command])
+
+    def test_quality_input_diagnostics_and_readonly_validation(self):
+        self.plan()
+        before = quality.state_path(self.base, self.task).read_bytes()
+        with self.assertRaisesRegex(ValueError, r"\$\.payload.*execution"):
+            quality.validate_command({"action": "execute", "payload": {"item_id": "case-a"}})
+        self.execute(result="NOT_RUN")
+        state = quality.load(self.base, self.task)
+        command = state["events"][-1]["command"]
+        quality.validate_command(command)
+        del command["payload"]["execution"]["nonexecution_reason"]
+        with self.assertRaisesRegex(ValueError, "nonexecution_reason"):
+            quality.validate_command(command)
+        # 已保存的旧事件不按新增写入约束拒绝，历史内容保持原样。
+        quality_contract.validate(command, "quality-action.schema.json")
+        snapshot = quality.state_path(self.base, self.task).read_bytes()
+        command["payload"]["execution"]["nonexecution_reason"] = "环境缺失"
+        with self.assertRaisesRegex(ValueError, "expected=0 actual=2.*不是任务 revision"):
+            quality.apply(self.base, "TAP-123", self.task["run_id"], 0, command)
+        self.assertEqual(snapshot, quality.state_path(self.base, self.task).read_bytes())
+        self.assertNotEqual(before, snapshot)
 
     def test_scope_amend_invalidates_q1_q2_and_publication_without_rewriting_log(self):
         self.feature_profile()
@@ -242,6 +319,48 @@ class QualityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "未配置"):
             quality.q1_digest(self.base, self.task)
 
+    def test_feature_review_aggregates_mysql_view_scope_environment_and_reference_gaps(self):
+        from workflow import plan_review
+        spec = json.loads((ROOT / 'projects/tapdata/quality-feature.json').read_text())['plan_contract']['review']
+        plan = feature_review('发现视图', 'tapdata/tapdata', 'mysql', 'view-case')
+        ctx = {'facts': {'acceptance_criteria': ['发现视图', '读取视图']},
+               'repositories': {'tapdata/tapdata': {}}}
+        model = {'items': {'view-case': {'plan': {'timing': 'after_fix', 'repository': 'tapdata/tapdata'}}}}
+        plan['scope_rationale']['changes'][0].update(layer='shared', necessity='')
+        plan['delivery_dependencies'][0]['state'] = 'unresolved'
+        plan['environment_readiness']['checks'][0]['result'] = 'missing'
+        errors = plan_review.problems(plan, spec, ctx, model)
+        for expected in ('necessity', '读取视图', '交付依赖', '环境缺项'):
+            self.assertTrue(any(expected in error for error in errors), errors)
+        malformed = copy.deepcopy(plan)
+        malformed['acceptance_mapping'][0]['repository'] = []
+        self.assertTrue(plan_review.problems(malformed, spec, ctx, model))
+        # 独立 Git 夹具提供可解析同类源码；不预设必须修改引擎或 sql-core。
+        repo = self.base / 'reference-repo'; repo.mkdir()
+        def git(*args):
+            return subprocess.check_output(['git', '-C', str(repo), *args], stderr=subprocess.DEVNULL, text=True).strip()
+        git('init'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.com')
+        (repo / 'mysql.py').write_text('def tables(): return []')
+        git('add', '.'); git('commit', '-m', 'fixture reference')
+        ctx['repositories']['tapdata/tapdata']['source_path'] = str(repo)
+        ctx['facts']['acceptance_criteria'] = '发现视图'
+        plan = feature_review('发现视图', 'tapdata/tapdata', 'mysql', 'view-case')
+        plan['reference_implementations'] = [{'status': 'found', 'repository': 'tapdata/tapdata',
+            'path': 'mysql.py', 'source_revision': git('rev-parse', 'HEAD'), 'difference': '补充视图类型'}]
+        self.assertEqual([], plan_review.problems(plan, spec, ctx, model))
+        plan['reference_implementations'][0]['path'] = 'missing.py'
+        self.assertTrue(any('不能解析' in p for p in plan_review.problems(plan, spec, ctx, model)))
+
+    def test_review_packet_combines_q2_and_jira_without_writing(self):
+        self.feature_profile()
+        snapshot = {'source_ref': 'fixture:jira-read', 'issue': {'key': 'TAP-123',
+            'fields': {'status': {'name': 'Analyzed'}}}, 'transitions': []}
+        before = {str(p): p.read_bytes() for p in self.base.rglob('*') if p.is_file()}
+        result = quality.review_packet(self.base, self.task, snapshot)
+        self.assertEqual('q2-plan', result['checkpoint']['id'])
+        self.assertIn('future', result['jira'])
+        self.assertEqual(before, {str(p): p.read_bytes() for p in self.base.rglob('*') if p.is_file()})
+
     def test_tapdata_feature_project_contract_and_manual_verification(self):
         local_head = mock.patch.object(pr_ready, "local_head", return_value="a" * 40)
         local_head.start(); self.addCleanup(local_head.stop)
@@ -252,6 +371,7 @@ class QualityTests(unittest.TestCase):
             "implementation_plan": {"objective": "新增目标行为", "changes": ["修改目标模块"],
                                     "acceptance": ["case-a 验证约定行为"], "risks": ["边界输入"],
                                     "rollback": "回退目标改动"}})
+        self.task["facts"]["implementation_plan"].update(feature_review("正常和失败场景符合约定", "tapdata/tapdata", "目标模块", "case-a"))
         self.task["repositories"] = self.task["repositories"][:1]
         self.task["repositories"][0].update(authorized_endpoint="github.com/tapdata/tapdata",
             base_branch="develop", work_branch="feature/TAP-123", base_sha="a" * 40,
@@ -447,6 +567,8 @@ class QualityTests(unittest.TestCase):
         execution.update(id=execution_id, origin=origin, source_ref="fixture:report/" + execution_id,
                          environment="local-fixture", observed_at=proof()["at"], raw_result=result,
                          failure_kind=kind, observation="观察目标断言与报告")
+        if result == "NOT_RUN":
+            execution["nonexecution_reason"] = "夹具环境未就绪"
         execution.update(changes)
         return self.apply("execute", {"item_id": key, "execution": execution})
 
@@ -890,13 +1012,107 @@ class QualityTests(unittest.TestCase):
         for checks in ([{"state": 1}], {"state": "SUCCESS"}):
             self.assertEqual(ci.classify(checks)[0], "unknown")
 
-    def test_taptest_and_manual_use_the_same_evidence_contract(self):
-        for key, method, origin in (("taptest", "taptest", "taptest"), ("manual", "manual", "manual")):
+    def test_manual_retains_local_evidence_contract(self):
+        for key, method, origin in (("manual", "manual", "manual"),):
             self.plan(key, method); self.select(key)
             with self.assertRaisesRegex(ValueError, "来源"):
                 self.execute(key, origin="local_maven")
             self.execute(key, origin=origin); self.decide(key)
         self.checkpoint("q4-acceptance")
+
+    def taptest_snapshot(self, status="Tests Passed"):
+        return {"run_id": self.task["run_id"], "source_ref": "fixture:jira-snapshot", "observed_at": proof()["at"],
+                "issue": {"key": "TAP-123", "fields": {"status": {"name": "In Progress"}, "issuelinks": [
+                    {"type": {"outward": "is tested by"}, "outwardIssue": {"key": "TAP-T1", "fields": {"issuetype": {"name": "Test"}}}}]}},
+                "linked_test_details": [{"key": "TAP-T1", "test_type": "TapTest", "case_version": "updated:2", "updated": proof()["at"],
+                                          "source_ref": "fixture:TAP-T1", "status": {"name": status}}]}
+
+    def taptest_plan(self):
+        self.plan(method="taptest")
+        plan = self.view()["items"]["case-a"]["plan"]
+        plan.update(case_ref="TAP-T1", target_revision="pending")
+        self.apply("item", {"plan": plan, "reason": "已关联测试任务"})
+        self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
+
+    def test_taptest_four_statuses_all_entrypoints_without_execution_or_accept(self):
+        from workflow import jira_status, jira_tests
+        self.taptest_plan()
+        for status in ("Tests Passed", "PULL REQUEST SUBMITTED", "MERGED", "完成"):
+            with self.subTest(status=status):
+                snapshot = self.taptest_snapshot(status)
+                self.apply("jira_status", {"snapshot": snapshot})
+                self.automatic_checkpoint()
+                view = self.view()
+                self.assertEqual([], view["items"]["case-a"]["executions"])
+                self.assertIsNone(view["items"]["case-a"]["decision"])
+                self.assertEqual("jira_status", view["checkpoints"]["q4-acceptance"]["mode"])
+                self.assertEqual([], quality.advance_problems(self.base, self.task, "ci_validation"))
+                self.assertTrue(jira_status.tests_passed_ready(self.base, self.task, snapshot)[0])
+                self.assertEqual([], pr_ready.quality_problems(self.base, self.task, quality.config(self.base, self.task), snapshot))
+                tests = jira_tests.linked_tests(snapshot, "TAP-123", quality.config(self.base, self.task))[1]
+                self.assertEqual([], jira_tests.confirmation_problems(view, tests))
+        self.task["stage"] = "ci_validation"
+        for index, repo in enumerate(self.task["repositories"]):
+            repo["pull_request"] = str(index + 1)
+        self.save_task()
+        path = self.base / "taptest-jira.json"
+        path.write_text(json.dumps(snapshot))
+        result = pr_ready.check(self.base, "TAP-123", path)
+        self.assertTrue(result["checks"]["linked_test_tasks"]["passed"])
+        self.assertFalse(result["checks"]["pr_checks"]["passed"])
+        with mock.patch.object(pr_ready, "local_head", return_value="a" * 40):
+            for repo in self.task["repositories"]:
+                state = ci.load_state(self.base, "TAP-123", repo["pull_request"], repo["repository"])
+                state["history"].append({"head": "a" * 40, "verdict": "success"})
+                ci.save_state(self.base, "TAP-123", repo["pull_request"], state)
+            self.automatic_checkpoint()
+            self.assertTrue(pr_ready.check(self.base, "TAP-123", path)["ready"])
+            snapshot["linked_test_details"][0]["status"] = {"name": "Open"}
+            path.write_text(json.dumps(snapshot))
+            self.assertFalse(pr_ready.check(self.base, "TAP-123", path)["ready"])
+
+    def test_taptest_old_report_preserved_code_drift_requires_readback_not_new_pass(self):
+        self.taptest_plan()
+        self.execute(origin="taptest", target_revision="a" * 40)
+        prior = copy.deepcopy(self.view()["items"]["case-a"]["executions"])
+        self.apply("jira_status", {"snapshot": self.taptest_snapshot()})
+        original_context = quality.context
+        def changed_context(base, task):
+            ctx = original_context(base, task)
+            ctx["repositories"]["tapdata/tapdata"]["live_revision"] = "b" * 40
+            return ctx
+        with mock.patch.object(quality, "context", side_effect=changed_context):
+            self.assertFalse(self.view()["items"]["case-a"]["jira_status"]["passed"])
+            self.apply("jira_status", {"snapshot": self.taptest_snapshot()})
+            item = self.view()["items"]["case-a"]
+        self.assertTrue(item["jira_status"]["passed"])
+        self.assertEqual(prior, item["executions"])
+        self.assertIsNone(item["decision"])
+        self.assertIn("不证明", item["evidence_gap"])
+
+    def test_taptest_invalid_facts_pending_and_multiple_links_fail_closed(self):
+        from workflow import jira_tests
+        self.taptest_plan()
+        for status in ("Open", "tests passed", "Done", ""):
+            snapshot = self.taptest_snapshot(status)
+            self.apply("jira_status", {"snapshot": snapshot})
+            self.assertFalse(self.view()["checkpoints"]["q4-acceptance"]["reviewed"])
+        for field in ("run_id", "observed_at", "source_ref"):
+            snapshot = self.taptest_snapshot(); snapshot.pop(field)
+            with self.assertRaises(ValueError):
+                self.apply("jira_status", {"snapshot": snapshot})
+        snapshot = self.taptest_snapshot()
+        snapshot["issue"]["fields"]["issuelinks"][0]["type"]["outward"] = "relates to"
+        with self.assertRaises(ValueError):
+            self.apply("jira_status", {"snapshot": snapshot})
+        snapshot = self.taptest_snapshot()
+        link = copy.deepcopy(snapshot["issue"]["fields"]["issuelinks"][0]); link["outwardIssue"]["key"] = "TAP-T2"
+        snapshot["issue"]["fields"]["issuelinks"].append(link)
+        detail = dict(snapshot["linked_test_details"][0], key="TAP-T2", status={"name": "Open"})
+        snapshot["linked_test_details"].append(detail)
+        rules = quality.config(self.base, self.task)
+        tests = jira_tests.linked_tests(snapshot, "TAP-123", rules)[1]
+        self.assertTrue(jira_tests.confirmation_problems(self.view(), tests))
 
     def test_expired_checkpoint_and_missing_rules_fail_closed(self):
         cp = "q2-plan"
@@ -1085,7 +1301,7 @@ class FeatureFlowTests(unittest.TestCase):
         self.cli("task.py", "advance", "--note", "基线与输入已确认")
         plan_path = self.cli("task.py", "interaction-path", "--name", "implementation-plan.json").strip()
         Path(plan_path).write_text(json.dumps({"objective": "value 返回 1", "changes": ["修改返回值"],
-            "acceptance": ["verify.py 断言返回值"], "risks": ["仅夹具"], "rollback": "回退 feature.py"}))
+            "acceptance": ["verify.py 断言返回值"], "risks": ["仅夹具"], "rollback": "回退 feature.py", **feature_review("value 返回 1", self.repo, "feature.py", "behavior")}))
         self.cli("task.py", "record", "--key", "implementation_plan", "--input", plan_path)
         plan = {"id": "behavior", "checkpoint": "q4-acceptance", "timing": "after_fix",
                 "case_ref": "verify.py", "case_version": "v1", "case_status": "existing", "method": "unit",

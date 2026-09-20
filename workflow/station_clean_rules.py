@@ -127,7 +127,7 @@ def validate_snapshot(plan):
     if version == 3 and "rules" not in plan:
         return
     snapshot = plan.get("rules")
-    if version != 4 or not isinstance(snapshot, dict) or set(snapshot) != {"digests", "objects"}:
+    if version not in (4, 5) or (version == 5 and not isinstance(plan.get("native_clean"), dict)) or not isinstance(snapshot, dict) or set(snapshot) != {"digests", "objects"}:
         raise ValueError("清理计划版本与规则快照不匹配")
     hashes = snapshot["digests"]
     valid_hash = lambda value: isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)

@@ -119,7 +119,9 @@ def linked_tests(document, issue_key, rules):
             continue
         managed.append(dict(candidates[key], test_type=test_type,
                             case_version=detail["case_version"], source_ref=detail["source_ref"],
-                            method=mapping["method"], guidance=mapping.get("guidance", "")))
+                            method=mapping["method"], guidance=mapping.get("guidance", ""),
+                            jira_status=detail.get("status"), updated=detail.get("updated"),
+                            status_rule=mapping if mapping.get("accepted_statuses") else None))
     if not managed:
         suffix = "；已忽略 %s" % "、".join(item["key"] for item in ignored) if ignored else ""
         problems.append("没有可纳管的 Manual、TapTest 或 Unit 验收用例%s；请用户调整 Jira 或验收方案后重新读取 Jira。" % suffix)
@@ -131,6 +133,11 @@ def confirmation_problems(report, tests):
     problems = []
     for test in tests:
         key = str(test["key"]).upper()
+        if test.get("status_rule"):
+            assessment = status_assessment(test)
+            if not assessment["passed"]:
+                problems.extend(assessment["problems"])
+            continue
         items = [item for item in report["items"].values()
                  if item["plan"]["checkpoint"] == "q4-acceptance" and
                  str(item["plan"]["case_ref"]).upper() == key and
@@ -144,3 +151,69 @@ def confirmation_problems(report, tests):
                    for item in items):
             problems.append("关联 Test %s 尚未由用户基于当前 SHA 的 PASS 证据确认测试成功" % key)
     return problems
+
+
+def status_assessment(test):
+    """单一项目配置谓词；不产生执行结果或人工 proof。"""
+    rule = test.get("status_rule") or {}
+    status = test.get("jira_status")
+    problems = []
+    if not isinstance(status, dict) or not _text(status.get("name")):
+        problems.append("关联 Test %s 缺少可回读状态" % test["key"])
+        status = {}
+    if not _text(test.get("updated")):
+        problems.append("关联 Test %s 缺少 updated" % test["key"])
+    names = rule.get("accepted_statuses", []) + rule.get("status_aliases", [])
+    matched = (str(status["id"]) in rule.get("accepted_status_ids", []) if status.get("id")
+               else status.get("name") in names)
+    if not matched:
+        problems.append("关联 Test %s 状态未满足项目通过条件" % test["key"])
+    return {"evidence_type": "jira_status", "key": test["key"], "passed": not problems,
+            "status": status, "updated": test.get("updated"), "source_ref": test["source_ref"],
+            "case_version": test["case_version"], "problems": problems}
+
+
+def snapshot_assessment(snapshot, rules, ctx):
+    from datetime import datetime
+    if snapshot.get("run_id") != ctx["run_id"] or not _text(snapshot.get("source_ref")):
+        raise ValueError("Jira 测试快照必须绑定当前 run 和来源")
+    observed = snapshot.get("observed_at", "")
+    try:
+        stamp = datetime.fromisoformat(observed.replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            raise ValueError()
+    except (ValueError, TypeError, AttributeError):
+        raise ValueError("Jira 测试快照需要带时区 observed_at")
+    problems, tests, ignored = linked_tests(snapshot, ctx["issue_key"], rules)
+    if problems:
+        raise ValueError("；".join(problems))
+    return {"run_id": ctx["run_id"], "source_ref": snapshot["source_ref"], "observed_at": observed,
+            "tests": {t["key"]: status_assessment(t) for t in tests if t.get("status_rule")},
+            "revisions": {name: row.get("live_revision") for name, row in ctx["repositories"].items()}}
+
+
+def item_assessment(plan, rules, ctx):
+    mappings = (rules.get("tests_passed") or {}).get("test_types", {})
+    applies = plan["checkpoint"] == "q4-acceptance" and any(
+        r.get("method") == plan["method"] and r.get("accepted_statuses") for r in mappings.values())
+    if not applies:
+        return None
+    record = ctx.get("jira_assessment") or {}
+    value = record.get("tests", {}).get(str(plan["case_ref"]).upper())
+    fresh = (record.get("run_id") == ctx["run_id"] and
+             record.get("revisions", {}).get(plan["repository"]) == ctx["repositories"][plan["repository"]].get("live_revision"))
+    return dict(value or {"evidence_type": "jira_status", "passed": False, "problems": ["缺少关联 Jira 状态回读"]},
+                passed=bool(value and value["passed"] and fresh), fresh=fresh)
+
+
+def with_snapshot(ctx, snapshot, rules):
+    if snapshot is None or not any(r.get("accepted_statuses") for r in
+            (rules.get("tests_passed") or {}).get("test_types", {}).values()):
+        return ctx
+    _, tests, _ = linked_tests(snapshot, ctx["issue_key"], rules)
+    if any(t.get("status_rule") for t in tests):
+        return dict(ctx, jira_assessment=snapshot_assessment(snapshot, rules, ctx))
+    # A new empty or changed link set must invalidate previously accepted status items.
+    if ctx.get("jira_assessment"):
+        return dict(ctx, jira_assessment={})
+    return ctx

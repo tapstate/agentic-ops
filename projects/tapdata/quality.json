@@ -2,8 +2,17 @@
   "schema_version": 1,
   "contract_revision": 3,
   "commit_evidence_checkpoint": "q4-acceptance",
-  "intake_fact_keys": ["problem_branch", "problem_version", "problem_symptom", "reproduce_path", "acceptance_criteria", "issue_version_plan"],
-  "plan_fact_keys": ["fix_plan"],
+  "intake_fact_keys": [
+    "problem_branch",
+    "problem_version",
+    "problem_symptom",
+    "reproduce_path",
+    "acceptance_criteria",
+    "issue_version_plan"
+  ],
+  "plan_fact_keys": [
+    "fix_plan"
+  ],
   "structured_fix_plan": true,
   "publication_mode": "deferred-summary",
   "comment_format": "human-text-v1",
@@ -107,14 +116,25 @@
     }
   ],
   "jira": {
-    "automatic_transition_attempts": ["takeover", "tests_passed"],
-    "manual_transitions": ["pull_request_submitted", "merged", "done"],
+    "automatic_transition_attempts": [
+      "takeover",
+      "tests_passed"
+    ],
+    "manual_transitions": [
+      "pull_request_submitted",
+      "merged",
+      "done"
+    ],
     "note": "接管不要求预先创建 Test。编码完成后，用户与 Agent 按验收方案创建或复用 Test 并在 Jira「已链接工作项」关联；AgenticOps 只读取、引导、跟进和核对。Tests Passed 前必须重新读取关联 Test、Test Details 与用户确认；Test Coverage 仅用于 Jira 实际 Validator 的例外字段。"
   },
   "tests_passed": {
     "linked_test_task": {
-      "relations": ["is tested by"],
-      "issue_types": ["Test"]
+      "relations": [
+        "is tested by"
+      ],
+      "issue_types": [
+        "Test"
+      ]
     },
     "test_types": {
       "Manual": {
@@ -123,7 +143,24 @@
       },
       "TapTest": {
         "method": "taptest",
-        "guidance": "由 t-layer3-test 管理自动化实现和执行；导入对应 Test Execution 或测试报告。"
+        "guidance": "回读关联 TapTest 的 Jira 状态、updated 和来源；通过状态即满足本地联调，不要求本地 PASS 或逐项 accept。",
+        "accepted_statuses": [
+          "Tests Passed",
+          "PULL REQUEST SUBMITTED",
+          "MERGED",
+          "完成"
+        ],
+        "accepted_status_ids": [
+          "10038",
+          "10039",
+          "10040",
+          "10021"
+        ],
+        "status_aliases": [
+          "Pull Request Submitted",
+          "Merged",
+          "已完成"
+        ]
       },
       "Unit": {
         "method": "unit",
@@ -135,12 +172,25 @@
     }
   },
   "pr_ready": {
-    "required_checkpoints": ["q1-intake", "q2-plan", "q3-draft", "q4-acceptance"],
-    "accepted_outcomes": ["accept", "not_applicable", "observed"],
+    "required_checkpoints": [
+      "q1-intake",
+      "q2-plan",
+      "q3-draft",
+      "q4-acceptance"
+    ],
+    "accepted_outcomes": [
+      "accept",
+      "not_applicable",
+      "observed"
+    ],
     "require_linked_test_tasks": true,
     "require_user_confirmation_per_linked_test": true,
     "require_all_pr_checks_success": true,
-    "required_verification": ["local", "source_sync", "ci"]
+    "required_verification": [
+      "local",
+      "source_sync",
+      "ci"
+    ]
   },
   "draft_pr": "首次有意义变更且第一轮针对性验证后建议 Draft PR；验证受阻时披露结果并按首个有意义提交/一个工作日要求处理。正式提审依 Jira 标准流程。",
   "standards": [

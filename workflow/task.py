@@ -435,6 +435,13 @@ def cmd_repository_record(args):
 
 
 def _check_advance(task, target, base, spec):
+    if target == "completed":
+        from workflow import station
+        return station.evaluate_completion(base, task)["problems"]
+    return _check_advance_base(task, target, base, spec)
+
+
+def _check_advance_base(task, target, base, spec):
     """返回阻止推进的原因列表。"""
     problems = []
     if target == "implementation":
@@ -551,8 +558,7 @@ def _cmd_advance_locked(args):
         return 3
     if target == "completed":
         from workflow import station
-        task["terminal_proof"] = station.completion_proof(args.dir, task)
-        task["outcome"] = "completed"
+        station.apply_completion(task, station.completion_proof(args.dir, task))
     task["stage"] = target
     task["pending"] = None
     task["history"].append({"ts": now(), "event": "advance", "stage": target, "note": args.note})
@@ -614,7 +620,7 @@ NEXT_GUIDE = {
     "design_review": "基于 source 完整工程形成方案 -> 新任务 source-readiness 核验仓库及目标分支 -> 研发工程师确认 -> workflow/authorization.py grant -> advance；Jira 尽力回写，失败不阻断",
     "implementation": "在授权范围内实现和测试；Q2 已选修复后检查项在最终 SHA 符合预期时自动记录 Q3，继续已授权提交/推送和 Draft PR；Jira 同步失败列警告，PR 后统一总结",
     "pr_review": "完成 Q4 关联用例验收后 advance；进入 ci_validation 后用 jira_status.py 在 tests_passed 节点同步尝试一次 Tests Passed",
-    "ci_validation": "完成 Tests Passed 同步尝试，用 workflow/ci.py watch 更新每个 PR Head 的 Checks，再用 pr_ready.py 核对测试任务、PR Checks 和 Q1-Q4",
+    "ci_validation": "完成 Tests Passed 同步尝试，用 workflow/ci.py watch 更新每个 PR Head 的 Checks，再用 pr_ready.py 核对测试任务、PR Checks 和 Q1-Q4；PR Ready 后等待另行授权合并，回读最终候选合并事实才能 completed",
     "completed": "生成脱敏任务总结；研发明确确认 cleanup-plan 与最终候选后 release，归档并释放工位；Jira 同步结果另行回读",
 }
 
@@ -648,6 +654,11 @@ def cmd_next(args):
     diagnostic = io.StringIO()
     with contextlib.redirect_stdout(diagnostic):
         blockers = _check_advance(task, target, args.dir, admission(args.dir)) if target else []
+        if target:
+            try:
+                task_store.require_development(args.dir, task)
+            except ValueError as error:
+                blockers.append(str(error))
     rules = quality.config(args.dir, task)
     current = quality.report(quality.load(args.dir, task), rules, quality.context(args.dir, task)) if quality.enabled(task, rules) else {}
     points = rules.get("stage_checkpoints", {}).get(target, []) if current else []
@@ -760,6 +771,22 @@ def cmd_status(args):
     return 0
 
 
+def cmd_replan(args):
+    from workflow import station_replan
+    if args.replan_action == "prepare":
+        with task_store.task_state_lock(args.dir):
+            result = station_replan.prepare(args.dir, args.issue_key, args.expected_run_id,
+                                            json.loads(Path(args.input).read_text(encoding="utf-8")))
+    elif args.replan_action == "apply":
+        result = station_replan.apply(args.dir, args.issue_key, args.expected_run_id,
+                                      args.expected_revision, args.operation_id,
+                                      json.loads(Path(args.input).read_text(encoding="utf-8")), args.decision_ref)
+    else:
+        result = station_replan.abort(args.dir, args.issue_key, args.expected_run_id, args.operation_id, args.decision_ref)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main():
     class StrictArgumentParser(argparse.ArgumentParser):
         def __init__(self, *args, **kwargs):
@@ -768,6 +795,22 @@ def main():
 
     parser = StrictArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
+
+    replan = sub.add_parser("replan", help="同一 run 内修订方案并返回 design_review，保留源码与 PR")
+    children = replan.add_subparsers(dest="replan_action", required=True)
+    for action in ("prepare", "apply", "abort"):
+        child = children.add_parser(action)
+        child.add_argument("--dir", default=".")
+        child.add_argument("--issue-key", required=True)
+        child.add_argument("--expected-run-id", required=True)
+        if action != "abort":
+            child.add_argument("--input", required=True)
+        if action != "prepare":
+            child.add_argument("--operation-id", required=True)
+            child.add_argument("--decision-ref", required=True)
+        if action == "apply":
+            child.add_argument("--expected-revision", type=int, required=True)
+        child.set_defaults(func=cmd_replan)
 
     p = sub.add_parser("takeover")
     p.add_argument("--issue-key", required=True)

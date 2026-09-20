@@ -36,8 +36,14 @@ def main(argv=None):
         if task and new_cleanup:
             result["question"] = None if task.get("outcome") == "completed" else "任务未完成，是否放弃当前变更并在归档后清理？"
             result["blockers"] = []
+            from workflow import native_cleanup, station_directories
             try:
-                result["cleanup_plan"] = station_resources.plan(args.dir, task, version=4)
+                result["native_clean"], native_errors = native_cleanup.inspect(args.dir, task, station_directories.load(args.dir, task))
+                result["blockers"].extend(native_errors)
+            except (ValueError, OSError) as exc:
+                result["blockers"].append(str(exc))
+            try:
+                result["cleanup_plan"] = station_resources.plan(args.dir, task, version=5)
             except (ValueError, OSError) as exc:
                 result["blockers"].append(str(exc))
             try:
@@ -66,12 +72,12 @@ def main(argv=None):
         kind = "release" if task.get("outcome") == "completed" else "clean"
         if kind == "clean" and args.abandon_changes != "yes":
             raise ValueError("任务未完成，请明确是否放弃变更；未写入任何状态")
-        if request.get("cleanup_version") != 4:
-            raise ValueError("新入口请求必须声明 cleanup_version=4")
+        if request.get("cleanup_version") not in (4, 5):
+            raise ValueError("新入口请求必须声明 cleanup_version=5（旧版 4 请求只按旧合同执行）")
         if kind == "clean":
             if request.get("abandon_changes") is not True:
                 raise ValueError("确认请求必须记录 abandon_changes=true")
     result = station.execute(args.dir, kind, args.issue_key, args.expected_run_id,
                              args.expected_revision, args.operation_id, request)
-    print(json.dumps({key: result.get(key) for key in ("operation_id", "status", "phase", "archive_ref")}, ensure_ascii=False, indent=2))
+    print(json.dumps({key: result.get(key) for key in ("operation_id", "status", "phase", "archive_ref", "native_problems")}, ensure_ascii=False, indent=2))
     return 0

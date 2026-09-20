@@ -100,11 +100,15 @@ def validate_task_profile(rules, task):
             raise ValueError("任务质量配置缺少有效的 %s" % name)
     contract = rules.get("plan_contract")
     if contract is not None or not rules.get("structured_fix_plan"):
-        if (not isinstance(contract, dict) or set(contract) != {"fact_key", "required_fields"}
+        if (not isinstance(contract, dict) or not {"fact_key", "required_fields"} <= set(contract) or set(contract) - {"fact_key", "required_fields", "review"}
                 or contract.get("fact_key") not in rules["plan_fact_keys"]
                 or not isinstance(contract.get("required_fields"), list) or not contract["required_fields"]
                 or any(not isinstance(k, str) or not k for k in contract["required_fields"])):
             raise ValueError("任务质量配置必须声明有效 plan_contract")
+        if "review" in contract:
+            review = contract["review"]
+            if not isinstance(review, dict) or set(review) != {"sections", "nonempty", "coverage", "repository_sections", "dependencies", "decision_sections", "references"} or not isinstance(review["sections"], dict) or not review["sections"]:
+                raise ValueError("方案 review 配置无效")
 
 
 def plan_problems(model, rules, ctx):
@@ -118,6 +122,9 @@ def plan_problems(model, rules, ctx):
             value = plan.get(key)
             if not isinstance(value, (str, list, dict)) or not value or (isinstance(value, str) and not value.strip()):
                 problems.append("方案 %s.%s 缺失或为空" % (contract["fact_key"], key))
+        if contract.get("review"):
+            from workflow import plan_review
+            problems += plan_review.problems(plan, contract["review"], ctx, model)
     return problems
 
 
@@ -150,7 +157,7 @@ def load(base, task):
 def git_revision(path):
     """只读工作目录指纹；只保存哈希，绝不把文件或 diff 内容写入质量证据。"""
     def git(*args):
-        p = subprocess.run(["git", "-C", str(path), *args], capture_output=True, timeout=30)
+        p = subprocess.run(["git", "--no-optional-locks", "-C", str(path), *args], capture_output=True, timeout=30)
         if p.returncode:
             raise ValueError("无法核对质量记录所对应的本地代码")
         return p.stdout
@@ -184,25 +191,36 @@ def context(base, task):
         # cleanup removes a worktree after validation; the source revision remains in the item.
         if wt.get("status") == "prepared":
             entry["live_revision"] = git_revision(wt["path"])
+            entry["source_path"] = wt["path"]
         elif wt.get("status") == "removed" and wt.get("final_revision"):
             entry["live_revision"] = wt["final_revision"]
             cleanup_artifacts.update(wt.get("verified_artifacts", {}))
         repos[repo["repository"]] = entry
         entry["ci_digest"] = digest([s for s in ci_states if s["repository"] == repo["repository"]])
-    return {"issue_key": task["issue_key"], "run_id": task["run_id"], "facts": task.get("facts", {}),
+    result = {"issue_key": task["issue_key"], "run_id": task["run_id"], "facts": task.get("facts", {}),
+            "replan_items": task.get("replan", {}).get("item_revisions", {}),
             "failures": failures.load(base, task)[1],
             "cleanup_artifacts": cleanup_artifacts,
             "repositories": repos,
             "missing_facts": [f["key"] for f in project_rules.missing_required(
                 project_rules.load_admission(station=base), task["task_class"], task.get("facts", {}))]}
 
+    assessment = replay(load(base, task)).get("jira_assessment")
+    if assessment is not None:
+        result["jira_assessment"] = assessment
+    return result
+
 
 def plan_digest(item, rules, ctx):
     repo = dict(ctx["repositories"].get(item["plan"]["repository"], {}))
     repo.pop("live_revision", None)
     repo.pop("ci_digest", None)
+    repo.pop("source_path", None)
     plan = selection_plan(item["plan"], rules)
-    return digest([plan, item["plan_version"], rules, repo])
+    payload = [plan, item["plan_version"], rules, repo]
+    if ctx.get("replan_items", {}).get(item["plan"]["id"]):
+        payload.append(ctx["replan_items"][item["plan"]["id"]])
+    return digest(payload)
 
 
 def selection_plan(plan, rules):
@@ -243,8 +261,21 @@ def item_view(item, rules, ctx):
     pd, ed = plan_digest(item, rules, ctx), item_digest(item, rules, ctx)
     selected = is_valid(item["selection"], pd)
     decided = selected and is_valid(item["decision"], ed)
-    return {"plan": item["plan"], "plan_digest": pd, "digest": ed, "selected": selected,
-            "decision_valid": decided, "decision": item["decision"], "executions": item["executions"]}
+    from workflow import jira_tests
+    result = {"plan": item["plan"], "plan_digest": pd, "digest": ed, "selected": selected,
+              "decision_valid": decided, "decision": item["decision"], "executions": item["executions"]}
+    assessment = jira_tests.item_assessment(item["plan"], rules, ctx)
+    if assessment is not None:
+        result["jira_status"] = assessment
+        result["evidence_gap"] = "本地历史报告不证明当前代码；Jira 状态接纳不新增或改写执行事实。"
+    return result
+
+
+def item_accepted(view, outcomes=("accept", "not_applicable", "observed")):
+    if "jira_status" in view:
+        return view["selected"] and view["jira_status"]["passed"]
+    decision = (view.get("decision") or {}).get("decision", {})
+    return view.get("decision_valid") and decision.get("outcome") in outcomes
 
 
 def automatic_checkpoint_problems(model, checkpoint, rules, ctx):
@@ -262,6 +293,10 @@ def automatic_checkpoint_problems(model, checkpoint, rules, ctx):
         plan = view["plan"]
         if not view["selected"]:
             problems.append("%s 的验收方式尚未经 Q2 确认" % key)
+            continue
+        if "jira_status" in view:
+            if not view["jira_status"]["passed"]:
+                problems.append("%s 需要当前代码下的关联 Jira 通过状态回读" % key)
             continue
         if not exact_commit(plan["target_revision"]):
             problems.append("%s 尚未绑定最终完整提交 SHA" % key)
@@ -286,6 +321,8 @@ def automatic_checkpoint_digest(model, checkpoint, rules, ctx):
 
 
 def checkpoint_outcome(view):
+    if view.get("mode") == "jira_status":
+        return "accept" if view.get("reviewed") else None
     if view.get("mode") == "automatic":
         return "observed"
     return ((view.get("decision") or {}).get("decision") or {}).get("outcome")
@@ -360,7 +397,10 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
     due = {k: v for k, v in views.items() if ids.index(v["plan"]["checkpoint"]) <= index}
     problems = []
     for key, view in due.items():
-        if not view["decision_valid"]:
+        if "jira_status" in view:
+            if not item_accepted(view):
+                problems.append("%s 关联 Jira 状态未满足" % key)
+        elif not view["decision_valid"]:
             problems.append("%s 尚无有效处置" % key)
         elif view["decision"]["decision"]["outcome"] == "rework":
             problems.append("%s 用户要求补测/返工" % key)
@@ -376,11 +416,14 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
         scoped = copy.deepcopy(ctx)
         scoped.pop("failures", None)
         scoped.pop("cleanup_artifacts", None)
+        scoped.pop("replan_items", None)
+        scoped.pop("jira_assessment", None)
         fact_keys = rules["intake_fact_keys"] + (rules.get("plan_fact_keys", []) if index else [])
         scoped["facts"] = {k: v for k, v in ctx["facts"].items() if k in fact_keys}
         for repo in scoped["repositories"].values():
             repo.pop("live_revision", None)
             repo.pop("ci_digest", None)
+            repo.pop("source_path", None)
         # Intake never depends on future test plans. Plan review includes their selection,
         # but not their future execution results, revisions, CI or acceptance decisions.
         future = {} if index == 0 else {
@@ -406,6 +449,9 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
         result["reviewed"] = (record or {}).get("digest") == result["automatic_digest"] and not result["problems"]
     else:
         result["reviewed"] = is_valid(record, result["digest"]) and not problems
+    status_items = [v for v in due.values() if v["plan"]["timing"] == "after_fix"]
+    if checkpoint == "q4-acceptance" and status_items and all("jira_status" in v for v in status_items):
+        result.update(mode="jira_status", reviewed=not problems)
     result["outcome"] = checkpoint_outcome(result)
     point = rules["checkpoints"][index]
     handoff_request = "核对列出的用例、范围、预期与缺口；选择验收、补测/返工、不适用、延期或接受风险。"
@@ -413,7 +459,7 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
     if checkpoint == "q4-acceptance":
         handoff_request = ("编码完成后，由用户与 Agent 在 Jira 创建或复用 Test，并通过「已链接工作项」关联缺陷；"
                            "重新读取 Test Type、用例版本和链接。TapCE 当前不纳管，若无法形成受管用例请调整 Jira 或验收方案后重试。")
-        handoff_return = ("每个 Manual、TapTest、Unit Test 都需返回精确提交 SHA（当前完整 SHA）的 PASS 证据及用户逐项确认；"
+        handoff_return = ("Manual、Unit 需精确提交 SHA（当前完整 SHA） 的 PASS 证据及用户逐项确认；项目配置状态接纳的 TapTest 只回读 Jira 状态，无需逐项 accept；"
                           "需要本地环境时先提供可操作启动步骤、前置条件和失败日志要求。")
     result["handoff"] = {
         "title": point["title"],
@@ -482,7 +528,10 @@ def check_decision(decision):
 def reduce(model, command, rules, ctx):
     """确定性归约；重放时使用当时规则和上下文，不重新解释旧决定。"""
     action, p = command["action"], command["payload"]
-    if action == "verification":
+    if action == "jira_status":
+        from workflow import jira_tests
+        model["jira_assessment"] = jira_tests.snapshot_assessment(p["snapshot"], rules, ctx)
+    elif action == "verification":
         from workflow import verification
         verification.record(model, p, ctx)
     elif action == "item":
@@ -615,8 +664,31 @@ def report(state, rules, ctx):
             "boundary": "处置完成不等于测试全通过；本地确认来源由调用者提交，不能认证操作者身份。Jira 状态需外部回读。"}
 
 
-def apply(base, issue, run_id, revision, command):
+def review_packet(base, task, jira_snapshot):
+    """同一研发确认时机展示方案、验收及当前应采 Jira 字段；不写状态。"""
+    from workflow import jira_collect
+    rules = config(base, task)
+    ctx = context(base, task)
+    model = replay(load(base, task))
+    checkpoint = checkpoint_view(model, rules["selection_checkpoint"], rules, ctx)
+    jira = jira_collect.collect(base, task, "design_review", jira_snapshot)
+    return {"run_id": task["run_id"], "plan": {key: ctx["facts"].get(key) for key in rules["plan_fact_keys"]},
+            "checkpoint": dict(checkpoint, id=rules["selection_checkpoint"]), "jira": jira,
+            "problems": checkpoint["problems"] + ["Jira 当前待确认字段：" + key for key in jira["pending"]],
+            "boundary": "一次展示研发决策；结构检查不证明设计正确。确认后分别记录同一决定来源，不重复询问；Jira 同步缺项仅暂停相应转换。"}
+
+
+def validate_command(command):
+    """仅验证输入格式；不证明门禁、授权或执行结果有效。"""
     quality_contract.validate(command, "quality-action.schema.json")
+    if command["action"] == "execute":
+        execution = command["payload"]["execution"]
+        if execution["raw_result"] == "NOT_RUN" and not execution.get("nonexecution_reason", "").strip():
+            raise ValueError("$.payload.execution.nonexecution_reason：NOT_RUN 必须说明未执行原因；failure_kind 保持 none")
+
+
+def apply(base, issue, run_id, revision, command):
+    validate_command(command)
     with task_store.task_run_lock(base, issue):
         task_store.resolve_issue(base, issue)
         task = task_store.read_task(base, issue)
@@ -628,7 +700,7 @@ def apply(base, issue, run_id, revision, command):
             raise ValueError("当前任务类型未启用质量检查")
         state = load(base, task)
         if type(revision) is not int or state["revision"] != revision:
-            raise ValueError("质量 revision 已变化，先刷新再提交")
+            raise ValueError("质量日志 revision 不一致：expected=%s actual=%s；此值不是任务 revision，请读取 quality.py status" % (revision, state["revision"]))
         ctx = context(base, task)
         if command["action"] == "verification" and command["payload"].get("kind") == "source_sync":
             from workflow import source_sync
@@ -682,6 +754,8 @@ def apply(base, issue, run_id, revision, command):
         finally:
             if temporary.exists():
                 temporary.unlink()
+        if command["action"] == "jira_status":
+            ctx = dict(ctx, jira_assessment=model["jira_assessment"])
         return report(state, rules, ctx)
 
 
@@ -715,14 +789,20 @@ def advance_problems(base, task, target):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("status", "apply"))
+    parser.add_argument("command", choices=("status", "review", "apply", "validate"))
     parser.add_argument("--dir", default=".")
-    parser.add_argument("--issue-key", required=True)
+    parser.add_argument("--issue-key")
     parser.add_argument("--input")
     parser.add_argument("--expected-run-id")
     parser.add_argument("--expected-revision", type=int)
     args = parser.parse_args()
     try:
+        if args.command == "validate":
+            if not args.input:
+                raise ValueError("validate 需要 --input JSON 文件")
+            validate_command(json.loads(Path(args.input).read_text(encoding="utf-8")))
+            print(json.dumps({"contract_valid": True, "boundary": "仅输入格式有效；未检查任务授权、证据和门禁"}, ensure_ascii=False))
+            return 0
         issue = task_store.resolve_issue(args.dir, args.issue_key)
         if args.command == "apply":
             if args.input is None or args.expected_run_id is None or args.expected_revision is None:
@@ -734,7 +814,12 @@ def main():
             rules = config(args.dir, task)
             if not enabled(task, rules):
                 raise ValueError("当前任务未启用质量检查")
-            result = report(load(args.dir, task), rules, context(args.dir, task))
+            if args.command == "review":
+                if not args.input:
+                    raise ValueError("review 需要原生 Jira 字段/转换快照 --input")
+                result = review_packet(args.dir, task, json.loads(Path(args.input).read_text()))
+            else:
+                result = report(load(args.dir, task), rules, context(args.dir, task))
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (ValueError, OSError, KeyError, TypeError, subprocess.TimeoutExpired) as error:

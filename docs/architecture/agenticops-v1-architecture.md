@@ -53,7 +53,7 @@ Agent → Workflow 状态变更入口 → 持锁校验 → 状态与证据
 - `.local/product.json` 记录仓库、跟踪分支、生命周期同步提交及 `source_pool`；`.local/gate/events.jsonl` 只记录直接在安装目录执行且无法归属任务的门禁事件，避免把产品状态误写成项目工位状态；
 - 安装目录不包含 `internal/` 或仅供产品维护的 Skill。
 
-`.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期配置外，它可保存由本安装目录成功初始化过的工位提示索引；该索引只用于更新后提示接线待刷新，不发现、不扫描、更不自动修改业务目录。生命周期操作使用 `.local/lifecycle.lock/` 防止同一安装目录并发更新或回退。普通生成接线由下一次 `start` 刷新，也可通过 `doctor` 和 `repair` 检查、修复。检测到托管 Hook 退役时，start 和普通 repair 保留现场并报告迁移范围；用户明确选择 `repair --accept-checkpoint-migration` 后，先校验全部旧 Hook 的归属哈希，再移除并刷新。此选择不是持久门禁开关，不会改写 task/run 或授权记录。
+`.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期配置外，它保存由本安装目录成功初始化过的工位登记；登记用于跨 epoch 切换前确认所有工位均已解绑，不发现、不扫描、更不自动修改业务目录。首次安装或 setup 创建空登记；跨 epoch 时登记缺失、损坏或无法读取均停止切换。生命周期操作使用 `.local/lifecycle.lock/` 串行 update、rollback 与工位绑定变更。普通生成接线由下一次 `start` 刷新，也可通过 `doctor` 和 `repair` 检查、修复。检测到托管 Hook 退役时，start 和普通 repair 保留现场并报告迁移范围；用户明确选择 `repair --accept-checkpoint-migration` 后，先校验全部旧 Hook 的归属哈希，再移除并刷新。此选择不是持久门禁开关，不会改写 task/run 或授权记录。
 
 安装目录配置的源码池是下载缓存：`repositories/<owner>/<repo>.git` 是 bare 仓库；`shared-repositories/<owner>/<repo>` 是与缓存对象独立的完整共享参考仓库，由 `bootstrap/shared-repositories.json` 登记、Project Profile 引用。Bootstrap 的通用 ensure/update/status 仅管理显式准备、快进更新和本地核验；初始化、接管、任务开始及查询不自动刷新。共享参考仓不进入工位任务基线、状态或 epoch，不随 station purge 清理，不承担业务事实源职责。使用边界见[工位源码与材料](../usage/station-materials.md)。
 
@@ -73,7 +73,7 @@ takeover 先登记操作意图和当前任务，再准备完整独立源码与 r
 
 Bootstrap 生成可再生接线、稳定绑定、空 current 和四类目录；repair 只修复同代际接线。station purge/detach 只处理空闲且无未完成操作的工位，验证生成归属，拒绝未知状态或非空 runtime，移除受管接线、绑定和状态。source/config/archive 与用户文件保留；重新生成时非空持久材料需明确 --reuse-materials，并生成新 station_id，不继承旧 run 授权。
 
-同版本生成→任务闭环→purge→生成先独立验收。升级是第二层：原版清理成功并确认干净边界→切换产品→目标版生成。当前 epoch 5、最低 updater 2；本次不发过渡版本，旧安装须原版本解绑后重新安装。新 updater 不解析另一版本任务，不以 repair 在线收编旧状态。多个已登记工位均须预检；错误或无法核验时保持原产品版本。
+同版本生成→任务闭环→purge→生成先独立验收。升级是第二层：升级器比较当前与目标 `station_state_epoch`；相同时可直接切换，变化时要求工位登记为空。任务退出、状态验证和解绑仍由原版本的 `station purge` 负责，升级器不读取任务、operation、runtime 或旧状态。目标版本只接受自身 epoch，repair 不跨 epoch 采用；登记缺失、损坏、非空或无法核验时保持原产品版本。当前 epoch 以机器契约为准。
 
 项目适配继续管理 Jira、分支、验证和资源配方；外部同步只记录来源和回读，不替代 Git/PR/CI 事实。当前任务的方案、Q1-Q4、授权与实际提交核验继续使用 run/revision，旧证据不能借给新任务。
 

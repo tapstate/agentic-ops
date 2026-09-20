@@ -42,9 +42,13 @@ class CheckpointTests(unittest.TestCase):
         self.q2_digest.start()
         self.addCleanup(self.q1_digest.stop)
         self.addCleanup(self.q2_digest.stop)
-        completion = mock.patch("workflow.station.completion_proof", return_value={"verified": True})
+        completion = mock.patch("workflow.station.completion_proof", return_value={"verified": True, "dispositions": {}})
         completion.start()
         self.addCleanup(completion.stop)
+        evaluation = mock.patch("workflow.station.evaluate_completion",
+                                side_effect=lambda base, value: {"problems": task._check_advance_base(value, "completed", base, task.admission(base))})
+        evaluation.start()
+        self.addCleanup(evaluation.stop)
 
     def save(self):
         save_station_task(self.base, self.state)
@@ -77,6 +81,35 @@ class CheckpointTests(unittest.TestCase):
     def renewal(self, record, **kwargs):
         return self.args(expected_authorization_digest=authorization.record_digest(record), ttl_hours=8,
                          confirmed_by="reviewer", confirmation_ref="fixture:explicit-human-confirmation", **kwargs)
+
+    def test_start_help_and_invalid_agent_leave_station_untouched(self):
+        before = {str(p.relative_to(self.base)): p.read_bytes() for p in self.base.rglob("*") if p.is_file()}
+        for arguments, expected in ((["--help"], 0), (["--agent", "does-not-exist"], 2),
+                                    (["--agent", "codex"], 2)):
+            result = subprocess.run([str(ROOT / "agenticops"), "station", "start",
+                                     "--station", str(self.base)] + arguments,
+                                    capture_output=True, text=True)
+            self.assertEqual(expected, result.returncode, result.stdout + result.stderr)
+        after = {str(p.relative_to(self.base)): p.read_bytes() for p in self.base.rglob("*") if p.is_file()}
+        self.assertEqual(before, after)
+
+    def test_start_without_terminal_rejects_before_refresh(self):
+        import os
+        config_path = self.base / ".agenticops/station.json"
+        config = json.loads(config_path.read_text())
+        config["agents"] = ["codex"]
+        config_path.write_text(json.dumps(config))
+        binary = self.base / "bin/codex"
+        binary.parent.mkdir()
+        binary.write_text("#!/bin/sh\nexit 93\n")
+        binary.chmod(0o755)
+        before = {str(p): p.read_bytes() for p in self.base.rglob("*") if p.is_file()}
+        environment = dict(os.environ, PATH=str(binary.parent) + os.pathsep + os.environ["PATH"])
+        result = subprocess.run([str(ROOT / "agenticops"), "station", "start", "codex",
+                                 "--station", str(self.base)], env=environment, capture_output=True, text=True)
+        self.assertEqual(2, result.returncode)
+        self.assertIn("交互启动需要终端", result.stderr)
+        self.assertEqual(before, {str(p): p.read_bytes() for p in self.base.rglob("*") if p.is_file()})
 
     def test_implementation_requires_authorization_bound_to_readiness(self):
         self.confirmation(stage="design_review")

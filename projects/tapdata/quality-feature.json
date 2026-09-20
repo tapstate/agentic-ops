@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "contract_revision": 3,
+  "contract_revision": 4,
   "commit_evidence_checkpoint": "q4-acceptance",
   "intake_fact_keys": [
     "acceptance_criteria",
@@ -114,7 +114,10 @@
     }
   ],
   "jira": {
-    "automatic_transition_attempts": ["takeover", "tests_passed"],
+    "automatic_transition_attempts": [
+      "takeover",
+      "tests_passed"
+    ],
     "manual_transitions": [
       "pull_request_submitted",
       "merged",
@@ -138,7 +141,24 @@
       },
       "TapTest": {
         "method": "taptest",
-        "guidance": "由 t-layer3-test 管理自动化实现和执行；导入对应 Test Execution 或测试报告。"
+        "guidance": "回读关联 TapTest 的 Jira 状态、updated 和来源；通过状态即满足本地联调，不要求本地 PASS 或逐项 accept。",
+        "accepted_statuses": [
+          "Tests Passed",
+          "PULL REQUEST SUBMITTED",
+          "MERGED",
+          "完成"
+        ],
+        "accepted_status_ids": [
+          "10038",
+          "10039",
+          "10040",
+          "10021"
+        ],
+        "status_aliases": [
+          "Pull Request Submitted",
+          "Merged",
+          "已完成"
+        ]
       },
       "Unit": {
         "method": "unit",
@@ -183,7 +203,382 @@
       "acceptance",
       "risks",
       "rollback"
-    ]
+    ],
+    "review": {
+      "sections": {
+        "reference_implementations": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "status",
+                  "repository",
+                  "path",
+                  "source_revision",
+                  "difference"
+                ],
+                "properties": {
+                  "status": {
+                    "const": "found"
+                  },
+                  "repository": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "source_revision": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{40}$"
+                  },
+                  "difference": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "status",
+                  "search_scope",
+                  "source_revision",
+                  "evidence_ref",
+                  "difference"
+                ],
+                "properties": {
+                  "status": {
+                    "const": "not_found"
+                  },
+                  "search_scope": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "\\S"
+                    }
+                  },
+                  "source_revision": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "evidence_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "difference": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "acceptance_mapping": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "criterion",
+              "behavior",
+              "repository",
+              "module",
+              "case_ids",
+              "expected"
+            ],
+            "properties": {
+              "criterion": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "behavior": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "repository": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "module": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "case_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "\\S"
+                }
+              },
+              "expected": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            }
+          }
+        },
+        "scope_rationale": {
+          "type": "object",
+          "required": [
+            "changes",
+            "non_changes",
+            "blocking_inputs"
+          ],
+          "properties": {
+            "changes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "repository",
+                  "module",
+                  "layer",
+                  "necessity",
+                  "impact"
+                ],
+                "properties": {
+                  "repository": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "module": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "layer": {
+                    "enum": [
+                      "local",
+                      "shared"
+                    ]
+                  },
+                  "necessity": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "impact": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                }
+              }
+            },
+            "non_changes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "blocking_inputs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            }
+          }
+        },
+        "delivery_dependencies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "repository",
+              "depends_on",
+              "delivery",
+              "test_relation",
+              "state",
+              "source_ref"
+            ],
+            "properties": {
+              "repository": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "depends_on": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "\\S"
+                }
+              },
+              "delivery": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "test_relation": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "state": {
+                "enum": [
+                  "ready",
+                  "planned",
+                  "unresolved"
+                ]
+              },
+              "source_ref": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            }
+          }
+        },
+        "environment_readiness": {
+          "type": "object",
+          "required": [
+            "config_source",
+            "checks",
+            "blocking_inputs"
+          ],
+          "properties": {
+            "config_source": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "source_ref",
+                  "result",
+                  "detail"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "source_ref": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "result": {
+                    "enum": [
+                      "ready",
+                      "not_needed",
+                      "missing"
+                    ]
+                  },
+                  "detail": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                }
+              }
+            },
+            "blocking_inputs": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            }
+          }
+        },
+        "verification_plan": {
+          "type": "object",
+          "required": [
+            "commands",
+            "scenarios",
+            "invalidation_conditions",
+            "evidence_ref"
+          ],
+          "properties": {
+            "commands": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "scenarios": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "invalidation_conditions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "evidence_ref": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            }
+          }
+        }
+      },
+      "nonempty": [
+        "reference_implementations",
+        "acceptance_mapping",
+        "delivery_dependencies",
+        "scope_rationale.changes",
+        "scope_rationale.non_changes",
+        "environment_readiness.checks",
+        "verification_plan.commands",
+        "verification_plan.scenarios",
+        "verification_plan.invalidation_conditions"
+      ],
+      "coverage": {
+        "fact": "acceptance_criteria",
+        "section": "acceptance_mapping"
+      },
+      "repository_sections": [
+        "acceptance_mapping",
+        "delivery_dependencies",
+        "scope_rationale.changes"
+      ],
+      "dependencies": "delivery_dependencies",
+      "decision_sections": [
+        "scope_rationale",
+        "environment_readiness"
+      ],
+      "references": "reference_implementations"
+    }
   },
   "verification_checkpoints": {
     "q3-draft": [

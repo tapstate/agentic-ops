@@ -4,9 +4,9 @@ from workflow import station_archive, station_artifacts, station_operation, stat
 
 def apply(base, task, operation):
     plan = operation.get("cleanup_plan", {})
-    if (plan.get("schema_version") != 4 or operation["run_id"] != task["run_id"]
+    if (plan.get("schema_version") not in (4, 5) or operation["run_id"] != task["run_id"]
             or operation["kind"] not in ("clean", "release") or operation["status"] != "running"):
-        raise ValueError("源码复位必须属于当前版本 4 清理操作")
+        raise ValueError("源码复位必须属于当前版本 4/5 清理操作")
     station_archive.verify(base, task.get("archive_ref"), task)
     station_resources.verify_stopped(base, task)
     station_resources.verify_station_inventory(base, plan["rules"], allow_pending=True)

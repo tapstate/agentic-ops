@@ -222,10 +222,10 @@ def plan(base, task, version=None, decisions_override=None):
         current_operation = operations.read(base) or {}
         version = (current_operation.get("cleanup_plan", {}).get("schema_version", 3)
                    if current_operation.get("run_id") == task["run_id"] and current_operation.get("status") != "done" else 3)
-    if version not in (None, 3, 4):
+    if version not in (None, 3, 4, 5):
         raise ValueError("旧清理合同必须由原版本退出，不在线迁移")
     roots = directories.load(base, task)
-    if version != 4 and any(e["kind"] == "station-generated" for e in roots.values()):
+    if version not in (4, 5) and any(e["kind"] == "station-generated" for e in roots.values()):
         raise ValueError("工位附属目录需要 station-clean 版本 4 计划")
     if "runtime" not in roots:
         operation = operations.read(base) or {}
@@ -248,7 +248,7 @@ def plan(base, task, version=None, decisions_override=None):
     engineering = task.get("engineering_baseline", {})
     repositories = engineering.get("repositories", {}) if task.get("source_prepared") else _partial_repositories(base)
     catalog = project_rules.load_repository_catalog(station=base)["repositories"]
-    if source.check_station_layout(base, catalog, repositories) != task.get("retained_repositories", {}):
+    if source.check_station_layout(base, catalog, repositories, task.get("replan_preserved")) != task.get("retained_repositories", {}):
         raise ValueError("未选择的持久仓库状态变化")
     operation = operations.read(base) or {}
     entries, states = [], {}
@@ -294,18 +294,30 @@ def plan(base, task, version=None, decisions_override=None):
              "entries": entries, "source": states, "external": external,
              "active_state": {"files": active_files(base), "unbind_run": task["run_id"], "task_digest": task_fingerprint(task)},
              "retained": ["config", "source repositories and refs", "archive", ".agenticops binding and operation"]}
-    if version == 4:
+    if version in (4, 5):
         from workflow import station_clean_rules
         init = json.loads((store.state_path(base) / "init.json").read_text())
         value["rules"] = station_clean_rules.inspect(base, [e["path"] for e in init.get("artifacts", [])], roots)
         for entry in value["directories"]:
             if entry["kind"] == "station-generated" and value["rules"]["objects"].get(entry["path"], {}).get("action", "remove") != "remove":
                 raise ValueError("保留名单与登记目录回收冲突：" + entry["path"])
-        value["schema_version"] = 4
+        value["schema_version"] = version
         verify_station_inventory(base, value["rules"], allow_pending=True)
         for entry in value["directories"]:
-            if entry["kind"] == "source-generated" and directories.path_at(base, entry["path"]).exists():
+            if version == 4 and entry["kind"] == "source-generated" and directories.path_at(base, entry["path"]).exists():
                 raise ValueError("源码构建产物尚未清理，请使用项目原生工具：" + entry["path"])
+    if version == 5:
+        from workflow import native_cleanup
+        previous = operation.get("cleanup_plan", {}) if operation.get("run_id") == task["run_id"] and operation.get("status") != "done" else {}
+        previous_native = previous.get("native_clean")
+        value["native_clean"], errors = native_cleanup.inspect(base, task, roots, previous=previous_native)
+        if errors:
+            raise ValueError("；".join(errors))
+        if previous_native:
+            old_directories = {entry["path"]: entry for entry in previous["directories"]}
+            for entry in value["directories"]:
+                if entry["kind"] == "source-generated" and entry["path"] in old_directories:
+                    entry["observed_missing_before_intent"] = old_directories[entry["path"]]["observed_missing_before_intent"]
     # 内部证据/回执不属于删除授权范围；源码成果、目录归属、开发目标才属于。
     value["digest"] = baseline.digest(value)
     from workflow import quality_contract
@@ -323,7 +335,7 @@ def verify_known_external(base, task):
 
 def clean(base, task, cleanup_plan, confirmed_digest, operation, source_only=False, directories_only=False):
     payload = {key: value for key, value in cleanup_plan.items() if key != "digest"}
-    if (cleanup_plan.get("schema_version") not in (3, 4) or cleanup_plan.get("run_id") != task["run_id"]
+    if (cleanup_plan.get("schema_version") not in (3, 4, 5) or cleanup_plan.get("run_id") != task["run_id"]
             or baseline.digest(payload) != confirmed_digest or cleanup_plan.get("digest") != confirmed_digest):
         raise ValueError("清理确认与当前 run 或精确清单不匹配")
     if not task.get("archive_ref"):
@@ -399,7 +411,7 @@ def clean(base, task, cleanup_plan, confirmed_digest, operation, source_only=Fal
     if source_only:
         return
     for entry in cleanup_plan["directories"]:
-        if cleanup_plan["schema_version"] == 4 and entry["kind"] == "source-generated" and directories.path_at(base, entry["path"]).exists():
+        if cleanup_plan["schema_version"] in (4, 5) and entry["kind"] == "source-generated" and directories.path_at(base, entry["path"]).exists():
             raise ValueError("源码构建产物重新出现，禁止通用删除：" + entry["path"])
         if entry["kind"] == "source-generated":
             parts = entry["path"].split("/")
@@ -436,7 +448,7 @@ def _partial_repositories(base):
 def neutral(base, task, operation):
     plan = operation["cleanup_plan"]
     catalog = project_rules.load_repository_catalog(station=base)["repositories"]
-    if source.check_station_layout(base, catalog, plan["source"]) != task.get("retained_repositories", {}):
+    if source.check_station_layout(base, catalog, plan["source"], task.get("replan_preserved")) != task.get("retained_repositories", {}):
         raise ValueError("未选择的持久仓库状态变化")
     for name, entry in plan["source"].items():
         path = source.repository_path(base, name)
@@ -474,7 +486,7 @@ def neutral(base, task, operation):
         artifacts.verify_special_entries(path, target)
         operations.receipt(base, operation, "neutral:" + name, expected)
     for entry in plan["directories"]:
-        if plan["schema_version"] == 4 and entry["kind"] != "source-generated":
+        if plan["schema_version"] in (4, 5) and entry["kind"] != "source-generated":
             continue
         path = directories.validate(base, entry, missing=True)
         if path.exists() and (entry["disposition"] == "delete_root" or any(path.iterdir())):

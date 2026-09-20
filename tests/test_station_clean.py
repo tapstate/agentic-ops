@@ -30,6 +30,101 @@ class StationCleanTests(unittest.TestCase):
         self.write(self.product/'projects/tapdata/station-clean.json',
                    dict(version=1, preserve=list(preserve), clean=list(clean)))
 
+    def native_fixture(self, web=False):
+        from workflow import native_cleanup
+        task = self.ready()
+        (self.repo / '.gitignore').write_text('target/\nnode_modules/\n')
+        if web:
+            (self.repo / 'package.json').write_text(json.dumps({'packageManager': 'pnpm@10.32.1', 'scripts': {'clean': 'rm -rf node_modules'}}))
+            config_path = self.product / 'projects/tapdata/repo-cleanup.json'
+            config = json.loads(config_path.read_text())
+            config['repositories'][self.name] = dict(config['repositories']['tapdata/tapdata-web'])
+            config_path.write_text(json.dumps(config))
+        else:
+            (self.repo / 'pom.xml').write_text('<project/>')
+        root = 'node_modules' if web else 'target'
+        resources.register(self.ws, task['issue_key'], task['run_id'], [{'kind': 'directory', 'producer': 'fixture-native', 'path': 'source/' + self.name + '/' + root}])
+        report = self.repo / root / 'surefire-reports' / 'TEST-fixture.xml'
+        report.parent.mkdir(); report.write_text('<testsuite tests="1"/>')
+        with self.assertRaisesRegex(ValueError, '尚未保全'):
+            resources.plan(self.ws, task, version=5)
+        result = native_cleanup.preserve(self.ws, task['issue_key'], task['run_id'])
+        self.assertFalse(result['problems'], result)
+        plan = resources.plan(self.ws, task, version=5)
+        request = dict(summary='原生清理与证据保全', reason='结束本轮', decision_ref='fixture:once', cleanup_version=5,
+                       abandon_changes=True, confirmed_digest=plan['digest'])
+        return task, plan, request, root
+
+    def test_native_maven_preserves_reports_before_cleanup_and_reuses_confirmation(self):
+        import shutil
+        from workflow import native_cleanup
+        task, plan, request, root = self.native_fixture()
+        command = plan['native_clean']['repositories'][self.name]
+        self.assertEqual(['mvn', '-Dmaven.repo.local=' + str((self.ws / 'runtime/maven-local').resolve()), 'clean'], command['argv'])
+        operation = self.execute(task, request)
+        self.assertEqual('awaiting_native_clean', operation['phase'])
+        self.assertIsNone(task_store.read_task(self.ws)['archive_ref'])
+        for row in plan['native_clean']['reports'].values():
+            self.assertTrue((self.ws / row['backup']).is_file())
+        # Fixture 模拟原生 mvn clean 效果；产品本身不执行构建工具。
+        shutil.rmtree(self.repo / root)
+        result = native_cleanup.receipt(self.ws, task['issue_key'], task['run_id'], 'op-resource-reset',
+                                       {self.name: {'exit_code': 0, 'source_ref': 'fixture:mvn-clean-exit'}})
+        self.assertEqual([], result['problems'])
+        self.assertEqual(plan['digest'], resources.plan(self.ws, task_store.read_task(self.ws), version=5)['digest'])
+        self.execute(task, request)
+        self.assertIsNone(task_store.read_task(self.ws))
+        record = next((self.ws / 'archive').rglob('runtime-evidence.json'))
+        self.assertIn('TEST-fixture.xml', record.read_text())
+        self.assertEqual('baseline', (self.repo / 'file.txt').read_text().strip())
+
+    def test_native_web_receipts_aggregate_failure_residue_and_source_drift(self):
+        from workflow import native_cleanup
+        task, plan, request, root = self.native_fixture(web=True)
+        self.assertEqual(['pnpm', 'run', 'clean'], plan['native_clean']['repositories'][self.name]['argv'])
+        self.execute(task, request)
+        (self.repo / 'file.txt').write_text('unexpected source change')
+        result = native_cleanup.receipt(self.ws, task['issue_key'], task['run_id'], 'op-resource-reset',
+            {self.name: {'exit_code': 1, 'source_ref': 'fixture:pnpm-failed'}})
+        self.assertTrue(any('残留' in p for p in result['problems']))
+        self.assertTrue(any('源码指纹' in p for p in result['problems']))
+        self.assertTrue(any('未成功' in p for p in result['problems']))
+        self.assertIsNotNone(task_store.read_task(self.ws))
+
+    def test_native_changed_script_and_unknown_generated_paths_fail_together(self):
+        from workflow import native_cleanup, station_directories
+        task, plan, request, root = self.native_fixture(web=True)
+        (self.repo / 'package.json').write_text(json.dumps({'packageManager': 'pnpm@10.32.1', 'scripts': {}}))
+        (self.repo / 'nested/node_modules').mkdir(parents=True)
+        (self.repo / 'nested/node_modules/file').write_text('new object')
+        value, errors = native_cleanup.inspect(self.ws, task, station_directories.load(self.ws, task), previous=plan['native_clean'])
+        self.assertTrue(any('没有已声明' in p for p in errors))
+        self.assertTrue(any('未登记目录' in p for p in errors))
+        self.assertTrue(any('脚本或 Git' in p for p in errors))
+
+    def test_project_clean_scripts_preserve_sources_and_reject_tracked_candidates(self):
+        import subprocess
+        for name in ('tapdata-application', 't-layer3-test'):
+            with self.subTest(repository=name):
+                repo = self.ws.parent / name
+                repo.mkdir()
+                self.git(repo, 'init')
+                (repo / 'source.txt').write_text('keep')
+                self.git(repo, 'add', 'source.txt')
+                (repo / 'target').mkdir()
+                (repo / 'target/result').write_text('generated')
+                script = fixture.ROOT / 'projects/tapdata/scripts' / ('clean-' + name + '.py')
+                command = [sys.executable, str(script), '--repository', str(repo)]
+                subprocess.run(command, check=True, capture_output=True)
+                self.assertFalse((repo / 'target').exists())
+                self.assertEqual('keep', (repo / 'source.txt').read_text())
+                (repo / 'target').mkdir()
+                (repo / 'target/tracked').write_text('source')
+                self.git(repo, 'add', 'target/tracked')
+                result = subprocess.run(command, capture_output=True)
+                self.assertNotEqual(0, result.returncode)
+                self.assertTrue((repo / 'target/tracked').exists())
+
     def test_priority_and_unmatched(self):
         self.project_rules(['cache/'], [{'pattern':'source/', 'action':'remove'}, {'pattern':'scratch/', 'action':'remove'}])
         config = rules.load(self.ws)

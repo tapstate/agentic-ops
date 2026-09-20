@@ -93,6 +93,8 @@ python3 "$product_root/bootstrap/product_state.py" \
   --product-root "$product_root" write \
   --mode source --repository "$repository" --branch "$target_branch" \
   --current-ref "$current_ref" --source-pool "$source_pool"
+python3 "$product_root/bootstrap/station_registry.py" \
+  --product-root "$product_root" initialize
 python3 "$product_root/bootstrap/skill_wiring.py" \
   --product-root "$product_root" --refresh
 

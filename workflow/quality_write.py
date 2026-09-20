@@ -73,6 +73,10 @@ def checkpoint_body(model, checkpoint, rules, ctx):
             lines.append("验证 %s：%s；版本 %s；处置 %s；%s" % (
                 selected["case_ref"], selected["method"], selected["target_revision"],
                 disposition.get("outcome", "待验收"), disposition.get("reason", "")))
+            assessment = quality.item_view(item, rules, ctx).get("jira_status")
+            if assessment:
+                lines.append("Jira 状态判定：%s；来源：%s；仅表示关联联调条件，本地旧报告不证明当前代码。" % (
+                    "满足" if assessment["passed"] else "未满足", assessment.get("source_ref", "待回读")))
             executions = []
             if due:
                 evidence_id = disposition.get("evidence_id") if view.get("mode") != "automatic" else None

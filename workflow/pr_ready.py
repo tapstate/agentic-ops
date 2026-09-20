@@ -30,8 +30,9 @@ def linked_test_confirmation_problems(base, task, rules, tests):
     return jira_tests.confirmation_problems(report, tests)
 
 
-def quality_problems(base, task, rules):
-    result = quality.report(quality.load(base, task), rules, quality.context(base, task))
+def quality_problems(base, task, rules, snapshot=None):
+    ctx = jira_tests.with_snapshot(quality.context(base, task), snapshot, rules)
+    result = quality.report(quality.load(base, task), rules, ctx)
     accepted = set(rules["pr_ready"]["accepted_outcomes"])
     problems = []
     for checkpoint in rules["pr_ready"]["required_checkpoints"]:
@@ -49,7 +50,7 @@ def quality_problems(base, task, rules):
     for key in due:
         item = result["items"][key]
         decision = ((item.get("decision") or {}).get("decision") or {})
-        if not item.get("decision_valid") or decision.get("outcome") not in accepted:
+        if not quality.item_accepted(item, accepted):
             problems.append("任务检查项 %s 未通过或未明确不适用" % key)
     return problems
 
@@ -100,7 +101,7 @@ def check(base, issue_key, jira_input):
     groups = {
         "linked_test_tasks": linked_problems,
         "pr_checks": ci_problems(base, task),
-        "task_checks": quality_problems(base, task, rules),
+        "task_checks": quality_problems(base, task, rules, jira_status.read_input(jira_input)),
         "verification": verification.problems(quality.replay(quality.load(base, task)), quality.context(base, task),
                                                rules["pr_ready"].get("required_verification", [])),
     }

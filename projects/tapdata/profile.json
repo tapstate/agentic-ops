@@ -9,6 +9,7 @@
   "jira": {
     "site": "https://tapdata.atlassian.net",
     "project_key": "TAP",
+    "transitions_config": "jira-transitions.json",
     "issue_types": ["Story", "故事", "Bug", "缺陷", "Task", "任务"],
     "task_query": "project = TAP AND assignee = currentUser() AND status = Analyzed ORDER BY updated DESC",
     "takeover": {
