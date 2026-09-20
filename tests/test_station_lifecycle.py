@@ -862,6 +862,146 @@ class StationTests(unittest.TestCase):
         self.assertIn("tapdata/t-layer3-test", current["replan_preserved"])
         self.assertTrue(station_resources.plan(self.ws, current)["digest"])
         self.assertEqual(result, station_replan.abort(self.ws, task["issue_key"], task["run_id"], args[4], "fixture:abort"))
+        cleanup = station_resources.plan(self.ws, current, version=5)
+        station.execute(self.ws, 'clean', current['issue_key'], current['run_id'], current['_revision'], 'op-clean-aborted-replan',
+            {'summary': '保留部分准备仓并退出', 'reason': 'fixture', 'decision_ref': 'fixture:cleanup',
+             'cleanup_version': 5, 'abandon_changes': True, 'confirmed_digest': cleanup['digest']})
+        self.assertIsNone(task_store.read_task(self.ws))
+        self.assertTrue((path / '.git').is_dir())
+
+
+    def test_initialized_feature_replan_grant_advance_clean_purge_cycle(self):
+        import contextlib
+        import io
+        import os
+        from types import SimpleNamespace
+        from datetime import datetime, timezone
+        from bootstrap import station_registry
+        from workflow import authorization, quality, station_replan, station_source, station_resources
+        from workflow import task as task_cli
+        from test_quality import feature_review
+        # 从真实同版生成入口开始；只复制产品资产，所有 Git/Jira 输入为隔离夹具。
+        shutil.rmtree(self.ws)
+        for name in ('bootstrap', 'adapters', 'gate', 'workflow'):
+            shutil.copytree(ROOT / name, self.product / name)
+        shutil.copy2(ROOT / 'agenticops', self.product / 'agenticops')
+        init = subprocess.run(['bash', str(self.product / 'bootstrap/station-init.sh'), '--station', str(self.ws),
+            '--agent', 'codex', '--source-pool', str(self.root / 'pool')],
+            env={**os.environ, 'AGENTIC_OPS_HOME': str(self.product)}, capture_output=True, text=True)
+        self.assertEqual(0, init.returncode, init.stdout + init.stderr)
+        self.prepare_engineering()
+        self.request['task_class'] = 'feature_change'
+        task = self.takeover()
+        name = 'tapdata/tapdata'
+        station.scope_change(self.ws, task['issue_key'], task['run_id'], task['_revision'], 'op-scope-feature-cycle',
+                             name, None, 'develop', ['file.txt'], 'fixture assertion')
+        task = task_store.read_task(self.ws)
+        task['stage'] = 'pr_review'
+        plan = {'objective': '目标行为', 'changes': ['file.txt'], 'acceptance': ['目标行为'],
+                'risks': ['夹具'], 'rollback': '回退修改', **feature_review('目标行为', name, 'file.txt', 'behavior')}
+        task['facts'].update(acceptance_criteria='目标行为', target_repo=name, verification_method='fixture assertion',
+                             scope_boundary='file.txt', implementation_plan=plan)
+        task['task_repositories'][name]['observation'] = {'results': {'pull_request': 'fixture:pr-draft'}}
+        task.pop('repositories', None)
+        task_store.write_task(self.ws, task)
+        task = task_store.read_task(self.ws)
+        def apply(action, payload):
+            current = task_store.read_task(self.ws)
+            return quality.apply(self.ws, current['issue_key'], current['run_id'], quality.load(self.ws, current)['revision'],
+                                 {'action': action, 'payload': payload})
+        def view():
+            current = task_store.read_task(self.ws)
+            return quality.report(quality.load(self.ws, current), quality.config(self.ws, current), quality.context(self.ws, current))
+        proof = {'actor': 'Fixture', 'source': 'user_message', 'reference': 'fixture:confirmed-plan',
+                 'at': datetime.now(timezone.utc).isoformat()}
+        apply('item', {'plan': {'id': 'behavior', 'checkpoint': 'q4-acceptance', 'timing': 'after_fix',
+            'case_ref': 'fixture:test', 'case_version': 'v1', 'case_status': 'existing', 'method': 'unit',
+            'repository': name, 'target_revision': task['engineering_baseline']['repositories'][name]['commit_sha'],
+            'criterion': '目标行为', 'steps': 'fixture assertion', 'expected_result': 'PASS', 'scope': 'file.txt'}, 'reason': '验收映射'})
+        apply('select', {'item_id': 'behavior', 'digest': view()['items']['behavior']['plan_digest'], 'proof': proof})
+        def confirm(point):
+            apply('checkpoint', {'checkpoint': point, 'digest': view()['checkpoints'][point]['digest'],
+                                'decision': {'outcome': 'accept', 'reason': 'fixture 确认', 'proof': proof}})
+        confirm('q1-intake'); confirm('q2-plan')
+        q1 = quality.q1_digest(self.ws, task_store.read_task(self.ws))
+        task_store._write_json_atomic(task_store.authorization_path(self.ws, task['issue_key']), {'status': 'active'})
+        path = self.ws / 'source' / name / 'file.txt'
+        path.write_text('preserved feature work')
+        new_plan = dict(plan, objective='修订目标实现方式')
+        request = {'reason': 'Draft 后修订实现', 'facts': {'implementation_plan': new_plan},
+            'repositories': {name: {'scope': ['file.txt'], 'verification': 'fixture assertion'}}, 'additions': {},
+            'impact': {'repositories': [name], 'items': ['behavior'], 'rationale': '当前模块实现方式调整'}}
+        current = task_store.read_task(self.ws)
+        prepared = station_replan.prepare(self.ws, current['issue_key'], current['run_id'], request)
+        station_replan.apply(self.ws, current['issue_key'], current['run_id'], current['_revision'], 'op-replan-feature-cycle', prepared, 'fixture:confirmed-plan')
+        current = task_store.read_task(self.ws)
+        self.assertEqual(q1, quality.q1_digest(self.ws, current))
+        self.assertEqual(task['run_id'], current['run_id'])
+        self.assertEqual('fixture:pr-draft', current['task_repositories'][name]['observation']['results']['pull_request'])
+        self.assertEqual('preserved feature work', path.read_text())
+        apply('select', {'item_id': 'behavior', 'digest': view()['items']['behavior']['plan_digest'], 'proof': proof})
+        confirm('q2-plan')
+        with task_store.task_state_lock(self.ws):
+            station_source.prepare_readiness(self.ws, current)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(0, authorization.cmd_grant(SimpleNamespace(dir=str(self.ws), issue_key=current['issue_key'],
+                expected_run_id=current['run_id'], agent_id='fixture', plan_version='replan-v2', ttl_hours=1)))
+            self.assertEqual(0, task_cli.cmd_advance(SimpleNamespace(dir=str(self.ws), issue_key=current['issue_key'],
+                expected_run_id=current['run_id'], expected_stage='design_review', note='恢复实施')))
+        current = task_store.read_task(self.ws)
+        self.assertEqual('implementation', current['stage'])
+        self.assertEqual('preserved feature work', path.read_text())
+        cleanup = station_resources.plan(self.ws, current, version=5)
+        station.execute(self.ws, 'clean', current['issue_key'], current['run_id'], current['_revision'], 'op-clean-feature-cycle',
+            {'summary': '结束隔离演练', 'reason': '夹具完成', 'decision_ref': 'fixture:cleanup',
+             'cleanup_version': 5, 'abandon_changes': True, 'confirmed_digest': cleanup['digest']})
+        self.assertIsNone(task_store.read_task(self.ws))
+        self.assertTrue(list((self.ws / 'archive').iterdir()))
+        station_registry.detach(self.product, self.ws, purge=True)
+        self.assertFalse((self.ws / '.agenticops').exists())
+        self.assertTrue((self.ws / 'source' / name / '.git').is_dir())
+        self.assertTrue(list((self.ws / 'archive').iterdir()))
+
+    def test_replan_resumes_revoke_clone_and_before_current_crashes(self):
+        from workflow import station_replan, station_source
+        for phase in ('revoke', 'clone', 'before-current'):
+            with self.subTest(phase=phase):
+                case = StationTests()
+                case.setUp()
+                try:
+                    task, prepared = case.replan_fixture(addition=True)
+                    args = (case.ws, task['issue_key'], task['run_id'], task['_revision'], 'op-replan-' + phase, prepared, 'fixture:confirmed')
+                    if phase == 'revoke':
+                        original = station_operation.receipt
+                        def crash(base, op, name, observed):
+                            if name == 'revoke':
+                                raise OSError('crash after revoke')
+                            return original(base, op, name, observed)
+                        patch = mock.patch.object(station_operation, 'receipt', side_effect=crash)
+                    elif phase == 'clone':
+                        original = station_source.prepare_repositories
+                        def crash(*a, **kw):
+                            original(*a, **kw)
+                            raise OSError('crash after clone')
+                        patch = mock.patch.object(station_source, 'prepare_repositories', side_effect=crash)
+                    else:
+                        original = task_store.write_task
+                        def crash(base, value):
+                            if value.get('replan'):
+                                raise OSError('crash before current')
+                            return original(base, value)
+                        patch = mock.patch.object(task_store, 'write_task', side_effect=crash)
+                    with patch, self.assertRaises(OSError):
+                        station_replan.apply(*args)
+                    self.assertEqual('revoked', json.loads(task_store.authorization_path(case.ws, task['issue_key']).read_text())['status'])
+                    station_replan.apply(*args)
+                    current = task_store.read_task(case.ws)
+                    self.assertEqual(task['run_id'], current['run_id'])
+                    self.assertEqual('preserve dirty source', (case.ws / 'source/tapdata/tapdata/file.txt').read_text())
+                    self.assertEqual(1, sum(row.get('event') == 'replan' for row in current['history']))
+                    self.assertEqual('done', station_operation.read(case.ws)['status'])
+                finally:
+                    case.doCleanups()
 
     def test_no_change_disposition_is_frozen_in_completion_proof(self):
         from workflow import task as task_cli

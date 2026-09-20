@@ -109,6 +109,19 @@ class StationCompatibilityTests(unittest.TestCase):
                 self.fail("旧工位不能进入原生清理写入区")
         self.assertEqual(before, path.read_bytes())
 
+    def test_all_pre_recovery_epochs_are_rejected_by_current_product(self):
+        current_manifest = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
+        (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current_manifest))
+        path = self.station / '.agenticops/init.json'
+        for old in range(9, current_manifest['station_state_epoch']):
+            with self.subTest(epoch=old):
+                path.write_text(json.dumps({'station_state_epoch': old}))
+                before = path.read_bytes()
+                with self.assertRaises(ValueError):
+                    with task_store.task_state_lock(self.station):
+                        self.fail('旧工位不得进入写入区')
+                self.assertEqual(before, path.read_bytes())
+
     def test_manifest_rejects_old_epoch_support(self):
         document = manifest(2)
         document["supported_station_state_epochs"] = [1, 2]
