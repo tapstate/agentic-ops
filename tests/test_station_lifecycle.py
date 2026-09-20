@@ -255,7 +255,7 @@ class StationTests(unittest.TestCase):
         task = self.takeover()
         task["stage"] = "ci_validation"
         from workflow import task as task_cli
-        with mock.patch.object(task_cli, "_check_advance", return_value=["质量检查未通过"]):
+        with mock.patch.object(task_cli, "_check_advance_base", return_value=["质量检查未通过"]):
             with self.assertRaisesRegex(ValueError, "质量"):
                 station.completion_proof(self.ws, task)
         task["task_repositories"]["tapdata/tapdata"] = baseline.task_repository(task["engineering_baseline"], "tapdata/tapdata", "fix/x", "develop", ["file.txt"], "test")
@@ -272,9 +272,9 @@ class StationTests(unittest.TestCase):
         task["task_repositories"]["tapdata/tapdata"]["deliveries"] = [{"repository": "tapdata/tapdata", "pr": "123",
             "target_branch": "develop", "candidate_head": head, "pr_head": head,
             "merged_at": "2026-09-15T01:00:00Z", "merge_commit": head, "readback_ref": "fixture:merged-pr"}]
-        with mock.patch.object(task_cli, "_check_advance", return_value=[]):
+        with mock.patch.object(task_cli, "_check_advance_base", return_value=[]):
             proof = station.completion_proof(self.ws, task)
-        self.assertEqual(task["task_repositories"]["tapdata/tapdata"]["disposition"], "merged")
+        self.assertNotEqual(task["task_repositories"]["tapdata/tapdata"].get("disposition"), "merged")
         self.assertEqual(proof["dispositions"]["tapdata/tapdata"], "merged")
 
     def test_real_resources_clean_and_sequential_takeover(self):
@@ -298,7 +298,7 @@ class StationTests(unittest.TestCase):
         task = self.takeover()
         task["stage"] = "ci_validation"
         task_store.write_task(self.ws, task)
-        with mock.patch.object(task_cli, "_check_advance", return_value=[]):
+        with mock.patch.object(task_cli, "_check_advance_base", return_value=[]):
             proof = station.completion_proof(self.ws, task)
         task.update(outcome="completed", stage="completed", terminal_proof=proof)
         task_store.write_task(self.ws, task)
@@ -411,7 +411,7 @@ class StationTests(unittest.TestCase):
         station.scope_change(self.ws, task["issue_key"], task["run_id"], task["_revision"], "op-release-scope", "tapdata/tapdata", None, "develop", ["file.txt"], "unit test")
         task = task_store.read_task(self.ws)
         task["stage"] = "ci_validation"
-        with mock.patch.object(task_cli, "_check_advance", return_value=[]):
+        with mock.patch.object(task_cli, "_check_advance_base", return_value=[]):
             proof = station.completion_proof(self.ws, task)
         task.update(stage="completed", outcome="completed", terminal_proof=proof)
         task_store.write_task(self.ws, task)
@@ -668,14 +668,86 @@ class StationTests(unittest.TestCase):
                     self.assertEqual("preserve user's later edit", user_file.read_text())
                     user_file.unlink()
 
+    def test_completion_preflight_aggregates_missing_merges_without_writes(self):
+        import contextlib
+        import copy
+        import io
+        from types import SimpleNamespace
+        from workflow import task as task_cli
+        self.prepare_engineering(2)
+        task = self.takeover()
+        task["stage"] = "ci_validation"
+        names = list(task["engineering_baseline"]["repositories"])
+        for name in names:
+            path = self.ws / "source" / name
+            self.git(path, "checkout", "-b", "fix/test")
+            self.git(path, "config", "user.email", "test@example.com")
+            self.git(path, "config", "user.name", "Test")
+            (path / "file.txt").write_text("candidate")
+            self.git(path, "add", ".")
+            self.git(path, "commit", "-m", "candidate")
+            task["task_repositories"][name] = baseline.task_repository(
+                task["engineering_baseline"], name, "fix/test", "develop", ["file.txt"], "test")
+        task_store.write_task(self.ws, task)
+        task = task_store.read_task(self.ws)
+        before = copy.deepcopy(task)
+        import os
+        for name in names:
+            path = self.ws / "source" / name / "file.txt"
+            os.utime(path, (1, 1))  # 内容未变，普通 git status 会刷新索引 stat 缓存。
+        files = {str(p): p.read_bytes() for p in self.ws.rglob("*") if p.is_file()}
+        args = SimpleNamespace(dir=str(self.ws), issue_key=task["issue_key"],
+                               expected_run_id=task["run_id"], expected_stage="ci_validation", note="test")
+        with mock.patch.object(task_cli, "_check_advance_base", return_value=[]):
+            result = station.evaluate_completion(self.ws, task)
+            self.assertFalse(result["ready"])
+            self.assertEqual(2, sum("awaiting_merge" in p for p in result["problems"]))
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                task_cli.cmd_next(args)
+            report = json.loads(output.getvalue())
+            self.assertFalse(report["advance_ready"])
+            self.assertEqual(result["problems"], report["blockers"])
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(3, task_cli.cmd_advance(args))
+        self.assertEqual(before, task)
+        self.assertEqual(files, {str(p): p.read_bytes() for p in self.ws.rglob("*") if p.is_file()})
+
+    def test_next_does_not_advertise_advance_during_unfinished_operation(self):
+        import contextlib
+        import io
+        from types import SimpleNamespace
+        from workflow import task as task_cli
+        task = self.takeover()
+        task["stage"] = "ci_validation"
+        task_store.write_task(self.ws, task)
+        station_operation.begin(self.ws, "scope_change", "op-scope-pending",
+                                task_store.read_current(self.ws)["revision"], {}, task["run_id"])
+        output = io.StringIO()
+        with mock.patch.object(task_cli, "_check_advance_base", return_value=[]), contextlib.redirect_stdout(output):
+            task_cli.cmd_next(SimpleNamespace(dir=str(self.ws), issue_key=task["issue_key"]))
+        result = json.loads(output.getvalue())
+        self.assertFalse(result["advance_ready"])
+        self.assertTrue(any("未完成" in message for message in result["blockers"]))
+
+    def test_completion_rechecks_source_after_successful_preflight(self):
+        from workflow import task as task_cli
+        task = self.takeover()
+        task["stage"] = "ci_validation"
+        with mock.patch.object(task_cli, "_check_advance_base", return_value=[]):
+            self.assertTrue(station.evaluate_completion(self.ws, task)["ready"])
+            (self.ws / "source/tapdata/tapdata/file.txt").write_text("later edit")
+            with self.assertRaisesRegex(ValueError, "洁净"):
+                station.completion_proof(self.ws, task)
+
     def test_no_change_disposition_is_frozen_in_completion_proof(self):
         from workflow import task as task_cli
         task = self.takeover()
         task["stage"] = "ci_validation"
         task["task_repositories"]["tapdata/tapdata"] = baseline.task_repository(task["engineering_baseline"], "tapdata/tapdata", "fix/check", "develop", ["file.txt"], "test")
-        with mock.patch.object(task_cli, "_check_advance", return_value=[]):
+        with mock.patch.object(task_cli, "_check_advance_base", return_value=[]):
             proof = station.completion_proof(self.ws, task)
-        self.assertEqual(task["task_repositories"]["tapdata/tapdata"]["disposition"], "no_change")
+        self.assertNotEqual(task["task_repositories"]["tapdata/tapdata"].get("disposition"), "no_change")
         self.assertEqual(proof["dispositions"]["tapdata/tapdata"], "no_change")
 
 

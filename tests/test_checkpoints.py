@@ -42,9 +42,13 @@ class CheckpointTests(unittest.TestCase):
         self.q2_digest.start()
         self.addCleanup(self.q1_digest.stop)
         self.addCleanup(self.q2_digest.stop)
-        completion = mock.patch("workflow.station.completion_proof", return_value={"verified": True})
+        completion = mock.patch("workflow.station.completion_proof", return_value={"verified": True, "dispositions": {}})
         completion.start()
         self.addCleanup(completion.stop)
+        evaluation = mock.patch("workflow.station.evaluate_completion",
+                                side_effect=lambda base, value: {"problems": task._check_advance_base(value, "completed", base, task.admission(base))})
+        evaluation.start()
+        self.addCleanup(evaluation.stop)
 
     def save(self):
         save_station_task(self.base, self.state)

@@ -340,59 +340,81 @@ def amend_scope(base, issue, run_id, revision, operation_id, name, binding_diges
         return operation
 
 
-def completion_proof(base, task):
-    observed = source.inspect(base, task["engineering_baseline"])
-    deliveries = []
-    dispositions = {}
+def evaluate_completion(base, task):
+    """只读完成预检；与实际推进/释放共用，不写任务或回执。"""
+    problems, deliveries, dispositions = [], [], {}
+    try:
+        observed = source.inspect(base, task["engineering_baseline"])
+    except (ValueError, OSError) as error:
+        observed = {}
+        problems.append("完成前源码核验失败：%s" % error)
     for name, state in observed.items():
         if state["dirty"]:
-            raise ValueError("完成前源码必须洁净：" + name)
+            problems.append("完成前源码必须洁净：" + name)
         entry = task["engineering_baseline"]["repositories"][name]
         binding = task["task_repositories"].get(name)
         if state["head"] == entry["commit_sha"]:
             dispositions[name] = "no_change"
             continue
         if binding is None:
-            raise ValueError("配套仓有未登记提交：" + name)
+            problems.append("配套仓有未登记提交：" + name)
+            continue
         if state["branch"] != binding["work_branch"]:
-            raise ValueError("最终候选不在登记工作分支：" + name)
+            problems.append("最终候选不在登记工作分支：" + name)
         valid = [item for item in binding.get("deliveries", []) if not item.get("superseded_by")]
         if len(valid) != 1:
-            raise ValueError("变更仓必须有唯一有效合并 PR：" + name)
+            problems.append("awaiting_merge：变更仓必须有唯一有效合并 PR：" + name)
+            continue
         delivery = valid[0]
         if (delivery.get("repository") != name or delivery.get("candidate_head") != state["head"]
                 or delivery.get("pr_head") != state["head"] or delivery.get("target_branch") != binding["target_branch"]
                 or not all(delivery.get(key) for key in ("pr", "merged_at", "merge_commit", "readback_ref"))):
-            raise ValueError("PR 合并事实与最终候选不一致：" + name)
+            problems.append("awaiting_merge：PR 合并事实与最终候选不一致：" + name)
+            continue
         if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", str(delivery["merge_commit"])):
-            raise ValueError("合并提交必须是完整 SHA")
+            problems.append("合并提交必须是完整 SHA：" + name)
+            continue
         try:
             merged = datetime.fromisoformat(delivery["merged_at"].replace("Z", "+00:00"))
             if merged.tzinfo is None:
                 raise ValueError("合并时间需要时区")
-        except (ValueError, TypeError, AttributeError) as error:
-            raise ValueError("合并时间不是可核验时间戳") from error
+        except (ValueError, TypeError, AttributeError):
+            problems.append("合并时间不是可核验时间戳：" + name)
+            continue
         deliveries.append(delivery)
         dispositions[name] = "merged"
     from workflow import task as task_cli
-    problems = task_cli._check_advance(task, "completed", base, task_cli.admission(base))
+    problems.extend(task_cli._check_advance_base(task, "completed", base, task_cli.admission(base)))
     from workflow import quality, pr_ready, verification
     rules = quality.config(base, task)
     if quality.enabled(task, rules) and isinstance(rules.get("pr_ready"), dict):
         problems.extend(pr_ready.quality_problems(base, task, rules))
-        changed = {item["repository"] for item in deliveries}
+        changed = {name for name, state in observed.items()
+                   if state["head"] != task["engineering_baseline"]["repositories"][name]["commit_sha"]}
         candidate = dict(task, repositories=[item for item in task.get("repositories", []) if item["repository"] in changed])
         problems.extend(pr_ready.ci_problems(base, candidate))
         problems.extend(verification.problems(quality.replay(quality.load(base, task)), quality.context(base, task),
                                                rules["pr_ready"].get("required_verification", [])))
-    if problems:
-        raise ValueError("；".join(problems))
     if task["stage"] not in ("ci_validation", "completed"):
-        raise ValueError("任务尚未到完成验收阶段")
-    for name, binding in task.get("task_repositories", {}).items():
-        binding["disposition"] = dispositions[name]
-    return {"run_id": task["run_id"], "repositories": observed, "deliveries": deliveries,
-            "dispositions": dispositions, "candidate_digest": baseline.digest(observed)}
+        problems.append("任务尚未到完成验收阶段")
+    proof = {"run_id": task["run_id"], "repositories": observed, "deliveries": copy.deepcopy(deliveries),
+             "dispositions": dispositions, "candidate_digest": baseline.digest(observed)}
+    return {"ready": not problems, "problems": problems, "proof": proof if not problems else None}
+
+
+def completion_proof(base, task):
+    result = evaluate_completion(base, task)
+    if not result["ready"]:
+        raise ValueError("；".join(result["problems"]))
+    return result["proof"]
+
+
+def apply_completion(task, proof):
+    """调用方必须持工位锁；仅在最终写入时更新完成处置。"""
+    for name, disposition in proof["dispositions"].items():
+        if name in task.get("task_repositories", {}):
+            task["task_repositories"][name]["disposition"] = disposition
+    task.update(outcome="completed", stage="completed", terminal_proof=proof)
 
 
 def amend_cleanup(base, issue, run_id, revision, operation_id, expected_plan_digest, request):
@@ -539,7 +561,7 @@ def execute(base, kind, issue, run_id, revision, operation_id, request):
             proof = completion_proof(base, task)
             if request.get("candidate_digest") != proof["candidate_digest"]:
                 raise ValueError("释放确认必须绑定最终候选摘要")
-            task.update(outcome="completed", stage="completed", terminal_proof=proof)
+            apply_completion(task, proof)
             task_store.write_task(base, task)
         if kind == "clean" and task.get("outcome") == "completed":
             raise ValueError("已完成任务应释放，不允许改写为未完成")

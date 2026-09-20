@@ -164,3 +164,9 @@ python3 <agenticops-root>/workflow/task.py clean --issue-key <issue> --expected-
 关键日志与报告集中到 runtime/logs、runtime/reports（由 Project 的 archive_runtime 指定），归档保留脱敏后的 UTF-8 正文；停止期间新增内容以不可变附件追加后再删除。单文件超过 16 MiB、总量超过 64 MiB 或非文本材料须先安全导出并留下摘要，不能静默丢弃。
 
 重置失败保持占用；恢复原操作和原请求。范围变化使用 cleanup-amend 绑定原计划摘要及修订号，源码新增成果须明确处理。epoch 4 及更早工位先由原版本归档、退出、purge，本版不在线接续旧代际操作。
+
+## 完成预检与等待合并
+
+`task.py next` 在 `ci_validation` 阶段同时核对源码洁净、登记工作分支、最终候选的合并 PR 事实、质量验收、CI 和有效方案授权。多个仓库缺失合并事实时一次列出 `awaiting_merge`，`advance_ready` 为 false；PR Ready 只表示具备审查条件，不表示已经合并。合并仍需独立明确授权。
+
+预检不写任务、处置或完成证据。`advance` 和未完成任务的 `release` 使用相同完成判定，并在工位锁内重读当前任务及源码后核验；此前的成功预检不能作为放行令牌。完成写入时才记录最终处置，已有完成凭证的恢复与释放继续核验冻结候选，不重复要求已撤销的实施授权。

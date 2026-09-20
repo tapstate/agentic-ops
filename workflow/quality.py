@@ -150,7 +150,7 @@ def load(base, task):
 def git_revision(path):
     """只读工作目录指纹；只保存哈希，绝不把文件或 diff 内容写入质量证据。"""
     def git(*args):
-        p = subprocess.run(["git", "-C", str(path), *args], capture_output=True, timeout=30)
+        p = subprocess.run(["git", "--no-optional-locks", "-C", str(path), *args], capture_output=True, timeout=30)
         if p.returncode:
             raise ValueError("无法核对质量记录所对应的本地代码")
         return p.stdout
