@@ -68,10 +68,14 @@ def configuration(base):
     return root, value, hashlib.sha256(raw).hexdigest()
 
 
-def sha(path):
+def file_bytes(path):
     if path.is_symlink() or not path.is_file():
         raise ValueError('配方输入或报告不是普通文件：' + str(path))
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return path.read_bytes()
+
+
+def sha(path):
+    return hashlib.sha256(file_bytes(path)).hexdigest()
 
 
 def commands(base, task, name, recipe, paths):
@@ -85,13 +89,18 @@ def commands(base, task, name, recipe, paths):
         argv = ['mvn', '-Dmaven.repo.local=' + str(local), 'clean']
     elif kind == 'web':
         package = repository / 'package.json'
-        value = json.loads(package.read_text())
-        if not isinstance(value.get('scripts', {}).get('clean'), str) or not value['scripts']['clean'].strip():
+        raw = file_bytes(package)
+        value = json.loads(raw)
+        if not isinstance(value, dict):
+            raise ValueError('Web package.json 必须是对象：' + name)
+        scripts = value.get('scripts')
+        if not isinstance(scripts, dict) or not isinstance(scripts.get('clean'), str) or not scripts['clean'].strip():
             raise ValueError('Web 工程没有已声明的 clean 脚本：' + name)
-        manager = str(value.get('packageManager', '')).split('@')[0]
+        declared = value.get('packageManager')
+        manager = declared.split('@')[0] if isinstance(declared, str) else None
         if manager not in ('pnpm', 'npm'):
             raise ValueError('Web 包管理器未明确声明，不能猜测：' + name)
-        inputs = {'package.json': sha(package)}
+        inputs = {'package.json': hashlib.sha256(raw).hexdigest()}
         argv = [manager, 'run', 'clean']
     elif kind == 'project-script':
         script_directory = project / 'scripts'

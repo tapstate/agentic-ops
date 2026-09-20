@@ -106,6 +106,52 @@ class StationCleanTests(unittest.TestCase):
         native_cleanup.validate_configuration({'schema_version': 1, 'repositories': {
             'owner/repo': {'kind': 'maven', 'source_ref': 'fixture', 'generated': ['**/target'], 'reports': []}}})
 
+    def test_web_command_and_digest_use_same_input_snapshot(self):
+        from workflow import native_cleanup
+        task = self.ready()
+        path = self.repo / 'package.json'
+        initial = json.dumps({'packageManager': 'pnpm@10', 'scripts': {'clean': 'clean-old'}}).encode()
+        changed = json.dumps({'packageManager': 'npm@10', 'scripts': {'clean': 'clean-new'}}).encode()
+        path.write_bytes(initial)
+        original = json.loads
+        def change_after_parse(raw):
+            value = original(raw)
+            path.write_bytes(changed)
+            return value
+        recipe = {'kind': 'web', 'source_ref': 'fixture'}
+        # 模拟解析过程中原文件变化；命令和摘要仍必须来自同一份读取内容。
+        with mock.patch.object(native_cleanup.project_rules, 'station_context', return_value=(self.product, 'tapdata')), \
+                mock.patch.object(native_cleanup.json, 'loads', side_effect=change_after_parse):
+            command = native_cleanup.commands(self.ws, task, self.name, recipe, [])
+        self.assertEqual(['pnpm', 'run', 'clean'], command['argv'])
+        self.assertEqual({'package.json': hashlib.sha256(initial).hexdigest()}, command['inputs'])
+        refreshed = native_cleanup.commands(self.ws, task, self.name, recipe, [])
+        self.assertEqual(['npm', 'run', 'clean'], refreshed['argv'])
+        self.assertEqual({'package.json': hashlib.sha256(changed).hexdigest()}, refreshed['inputs'])
+        self.assertNotEqual(command, refreshed)
+
+    def test_web_command_rejects_invalid_metadata_before_plan(self):
+        from workflow import native_cleanup
+        task = self.ready()
+        path = self.repo / 'package.json'
+        recipe = {'kind': 'web', 'source_ref': 'fixture'}
+        for value in ([], None, {'scripts': []}, {'scripts': None},
+                      {'scripts': {'clean': []}}, {'scripts': {'clean': '  '}},
+                      {'scripts': {'clean': 'clean'}, 'packageManager': ['pnpm']},
+                      {'scripts': {'clean': 'clean'}, 'packageManager': 'yarn@1'}):
+            with self.subTest(value=value):
+                path.write_text(json.dumps(value))
+                with self.assertRaises(ValueError):
+                    native_cleanup.commands(self.ws, task, self.name, recipe, [])
+        target = self.repo / 'private-package.json'
+        path.rename(target)
+        path.symlink_to(target)
+        with mock.patch.object(native_cleanup.json, 'loads') as parse:
+            with mock.patch.object(native_cleanup.project_rules, 'station_context', return_value=(self.product, 'tapdata')):
+                with self.assertRaisesRegex(ValueError, '不是普通文件'):
+                    native_cleanup.commands(self.ws, task, self.name, recipe, [])
+            parse.assert_not_called()
+
     def cleanup_request(self, task):
         return dict(summary='清理测试', reason='用户确认停止', decision_ref='fixture:user',
                     cleanup_version=4, abandon_changes=True,
