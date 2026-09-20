@@ -14,8 +14,10 @@ from workflow import quality
 from workflow.git_environment import git_environment
 
 
-def git(root, *args):
-    proc = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=30, env=git_environment(read_only=True))
+def git(root, *args, byte_preserving=False):
+    proc = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=30, env=git_environment(read_only=True),
+                          encoding="utf-8" if byte_preserving else None,
+                          errors="surrogateescape" if byte_preserving else None)
     if proc.returncode:
         raise ValueError("Git 核对失败：%s" % (proc.stderr.strip() or " ".join(args)))
     return proc.stdout.strip()
@@ -66,10 +68,10 @@ def impact(root, work_branch, base_revision, source_revision, before_merge_revis
                              ("incoming_source", base_revision, source_revision),
                              ("final_task", source_revision, result["task_revision"])):
         paths = git(root, "diff", "--name-only", "-z", start, end, "--")
-        patch = git(root, "diff", "--binary", "--no-ext-diff", "--no-textconv", start, end, "--")
+        patch = git(root, "diff", "--binary", "--no-ext-diff", "--no-textconv", start, end, "--", byte_preserving=True)
         comparisons[name] = {"from": start, "to": end,
                              "paths": [p for p in paths.split("\0") if p],
-                             "diff_sha256": hashlib.sha256(patch.encode()).hexdigest()}
+                             "diff_sha256": hashlib.sha256(patch.encode("utf-8", errors="surrogateescape")).hexdigest()}
     result.update(before_merge_revision=before_merge_revision, comparisons=comparisons,
                   analysis_required=True,
                   boundary="差异只供 Agent 分析；无文本冲突不证明无行为影响。测试证据必须绑定最终源码与用例。")
