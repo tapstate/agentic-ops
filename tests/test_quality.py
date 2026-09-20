@@ -128,6 +128,21 @@ class QualityTests(unittest.TestCase):
                         approved_scope="目标功能模块")
         self.save_task()
 
+    def test_grant_rejects_invalid_expiry_without_overwriting_authorization(self):
+        self.feature_profile()
+        self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"],
+                               agent_id="fixture", plan_version="v1", ttl_hours=0.5)
+        self.assertEqual(0, authorization.cmd_grant(args))
+        path = task_store.authorization_path(self.base, "TAP-123")
+        original = path.read_bytes()
+        for ttl in (0, -1, float("nan"), float("inf"), 1e308, 1e-300):
+            with self.subTest(ttl=ttl):
+                args.ttl_hours = ttl
+                with self.assertRaisesRegex(ValueError, "有限"):
+                    authorization.cmd_grant(args)
+                self.assertEqual(original, path.read_bytes())
+
     def test_feature_confirmation_grant_advance_and_drift(self):
         self.feature_profile()
         self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
