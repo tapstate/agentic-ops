@@ -1,5 +1,7 @@
 # AgenticOps 扩展使用
 
+质量输入诊断由[质量检查与证据](quality-checkpoints.md#质量输入预检)说明只读格式校验、日志 revision 与未执行原因；启动参数在工位刷新前核验，`station start --help` 不访问工位。默认启动需要终端，自动化调用须显式使用 `--non-interactive` 并传入 Agent 自身支持的非交互参数；包装入口不猜测或改写这些参数。
+
 完成预检归[任务授权指引](task-authorization.md#完成预检与等待合并)说明：`next`、实际推进和释放共用判定，预检只读，实际变更重新核验；PR Ready 与合并完成分开。
 
 [配置化清理入口](task-authorization.md#配置化清理入口)负责 `station-clean.py` 的预检、放弃决定与恢复请求，并说明中央/项目名单和受控源码复位脚本；计划版本及归档后执行顺序以工位合同为准。

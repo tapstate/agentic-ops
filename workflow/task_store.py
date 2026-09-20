@@ -136,7 +136,7 @@ def initialize_current(base):
 def compare_and_set(base, expected_revision, current):
     before = read_current(base)
     if before["revision"] != expected_revision:
-        raise ValueError("工位 revision 已变化")
+        raise ValueError("工位 revision 已变化：expected=%s actual=%s；请读取 task.py status，不使用质量日志 revision" % (expected_revision, before["revision"]))
     value = {"schema_version": 1, "revision": expected_revision + 1, "current": copy.deepcopy(current)}
     _write_json_atomic(current_path(base), value)
     return value

@@ -615,8 +615,17 @@ def report(state, rules, ctx):
             "boundary": "处置完成不等于测试全通过；本地确认来源由调用者提交，不能认证操作者身份。Jira 状态需外部回读。"}
 
 
-def apply(base, issue, run_id, revision, command):
+def validate_command(command):
+    """仅验证输入格式；不证明门禁、授权或执行结果有效。"""
     quality_contract.validate(command, "quality-action.schema.json")
+    if command["action"] == "execute":
+        execution = command["payload"]["execution"]
+        if execution["raw_result"] == "NOT_RUN" and not execution.get("nonexecution_reason", "").strip():
+            raise ValueError("$.payload.execution.nonexecution_reason：NOT_RUN 必须说明未执行原因；failure_kind 保持 none")
+
+
+def apply(base, issue, run_id, revision, command):
+    validate_command(command)
     with task_store.task_run_lock(base, issue):
         task_store.resolve_issue(base, issue)
         task = task_store.read_task(base, issue)
@@ -628,7 +637,7 @@ def apply(base, issue, run_id, revision, command):
             raise ValueError("当前任务类型未启用质量检查")
         state = load(base, task)
         if type(revision) is not int or state["revision"] != revision:
-            raise ValueError("质量 revision 已变化，先刷新再提交")
+            raise ValueError("质量日志 revision 不一致：expected=%s actual=%s；此值不是任务 revision，请读取 quality.py status" % (revision, state["revision"]))
         ctx = context(base, task)
         if command["action"] == "verification" and command["payload"].get("kind") == "source_sync":
             from workflow import source_sync
@@ -715,14 +724,20 @@ def advance_problems(base, task, target):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("status", "apply"))
+    parser.add_argument("command", choices=("status", "apply", "validate"))
     parser.add_argument("--dir", default=".")
-    parser.add_argument("--issue-key", required=True)
+    parser.add_argument("--issue-key")
     parser.add_argument("--input")
     parser.add_argument("--expected-run-id")
     parser.add_argument("--expected-revision", type=int)
     args = parser.parse_args()
     try:
+        if args.command == "validate":
+            if not args.input:
+                raise ValueError("validate 需要 --input JSON 文件")
+            validate_command(json.loads(Path(args.input).read_text(encoding="utf-8")))
+            print(json.dumps({"contract_valid": True, "boundary": "仅输入格式有效；未检查任务授权、证据和门禁"}, ensure_ascii=False))
+            return 0
         issue = task_store.resolve_issue(args.dir, args.issue_key)
         if args.command == "apply":
             if args.input is None or args.expected_run_id is None or args.expected_revision is None:

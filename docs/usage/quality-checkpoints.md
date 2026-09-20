@@ -362,3 +362,11 @@ Jira 评论采用简洁可读文本。当前 Rovo addCommentToJiraIssue 的 comm
 每个阶段均可运行 task.py next 查看 blockers 与 warnings，PR 提交后运行 evidence.py 汇总执行过程被跳过的处理与警告。外部同步失败只暂停该写入或重复尝试，完整测试、CI 和用户验收条件继续由检查点核验。
 
 字段写入成功后，用 `external_sync.py status --issue-key <issue> --dir <station>` 获取本地 fact_digests，再以 `readback --expected-run-id <run> --input <json>` 导入 `{fact_key, expected_fact_digest, jira_field, issue, source_ref}`。issue 是实际 Jira 回读，字段必须与本地有效值一致；problem_version 按配置的影响版本字段核对版本名称，不要求本地有 Jira ID。同步回执单独持久化，不改变原始快照、方案确认和阶段；本地事实再次改变后旧回执失效。
+
+## 质量输入预检
+
+`python3 <agenticops-root>/workflow/quality.py validate --input <json>` 只校验单个 `{"action":"...","payload":{...}}` 操作对象的格式，不接受数组或批量 JSON，也不读取或修改工位；成功仅表示契约格式有效，不证明授权、测试证据或检查点已通过。错误包含所选 action 的具体字段路径；JSON 解析错误保留行列位置。
+
+`apply --expected-revision` 使用 `quality.py status` 返回的质量日志 revision，不使用任务 current 的 revision。冲突诊断同时显示 expected 与 actual，并保持未写入。
+
+新增 `execute` 操作的 `NOT_RUN` 必须提供 `execution.nonexecution_reason`，例如环境缺失的具体配置项；`failure_kind` 仍为 `none`，不能把未执行写成环境测试失败。原始结果与版本不改名，历史事件读取不补造原因。此字段改变旧版本对事件契约的读取能力，工位 epoch 提升至 10；跨代际按更新与回退指引在原版本退出并 purge，不在线转换任务。

@@ -149,7 +149,7 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
         raise ValueError("存在未完成工位操作，只能恢复原操作")
     current = task_store.read_current(base)
     if current["revision"] != expected_revision:
-        raise ValueError("工位 revision 已变化")
+        raise ValueError("工位 revision 已变化：expected=%s actual=%s；请读取 task.py status，不使用质量日志 revision" % (expected_revision, current["revision"]))
     if kind == "takeover":
         if current["current"] is not None:
             raise ValueError("工位仍有当前任务，不能接管新任务")
@@ -212,7 +212,7 @@ def handoff_clean(base, operation_id, revision, request, run_id, cleanup_plan):
             raise ValueError("必须恢复原清理交接请求")
     else:
         if current["revision"] != revision:
-            raise ValueError("清理交接 revision 已变化")
+            raise ValueError("清理交接 revision 已变化：expected=%s actual=%s" % (revision, current["revision"]))
         previous["handoff"] = target
         save(base, previous)
     value = {"schema_version": 1, "operation_id": operation_id, "kind": "clean", "run_id": run_id,

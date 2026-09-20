@@ -120,6 +120,50 @@ class QualityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "尚未有效确认"):
             quality.q2_digest(self.base, self.task)
 
+    def test_validate_cli_is_station_independent_and_reports_safe_field_details(self):
+        self.plan()
+        self.execute(result="NOT_RUN")
+        command = quality.load(self.base, self.task)["events"][-1]["command"]
+        path = self.base / "input.json"
+        path.write_text(json.dumps(command))
+        missing_station = self.base / "does-not-exist"
+        result = subprocess.run([sys.executable, str(ROOT / "workflow/quality.py"), "validate",
+                                 "--dir", str(missing_station), "--input", str(path)], capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertTrue(json.loads(result.stdout)["contract_valid"])
+        self.assertFalse(missing_station.exists())
+        command["payload"]["execution"]["raw_result"] = "secret-value-must-not-appear"
+        with self.assertRaisesRegex(ValueError, r"\$\.payload\.execution\.raw_result.*允许") as caught:
+            quality.validate_command(command)
+        self.assertNotIn("secret-value-must-not-appear", str(caught.exception))
+        command["payload"]["execution"]["raw_result"] = "NOT_RUN"
+        command["payload"]["execution"]["nonexecution_reason"] = []
+        with self.assertRaisesRegex(ValueError, "预期 string，实际 list"):
+            quality.validate_command(command)
+        with self.assertRaises(ValueError):
+            quality.validate_command([command])
+
+    def test_quality_input_diagnostics_and_readonly_validation(self):
+        self.plan()
+        before = quality.state_path(self.base, self.task).read_bytes()
+        with self.assertRaisesRegex(ValueError, r"\$\.payload.*execution"):
+            quality.validate_command({"action": "execute", "payload": {"item_id": "case-a"}})
+        self.execute(result="NOT_RUN")
+        state = quality.load(self.base, self.task)
+        command = state["events"][-1]["command"]
+        quality.validate_command(command)
+        del command["payload"]["execution"]["nonexecution_reason"]
+        with self.assertRaisesRegex(ValueError, "nonexecution_reason"):
+            quality.validate_command(command)
+        # 已保存的旧事件不按新增写入约束拒绝，历史内容保持原样。
+        quality_contract.validate(command, "quality-action.schema.json")
+        snapshot = quality.state_path(self.base, self.task).read_bytes()
+        command["payload"]["execution"]["nonexecution_reason"] = "环境缺失"
+        with self.assertRaisesRegex(ValueError, "expected=0 actual=2.*不是任务 revision"):
+            quality.apply(self.base, "TAP-123", self.task["run_id"], 0, command)
+        self.assertEqual(snapshot, quality.state_path(self.base, self.task).read_bytes())
+        self.assertNotEqual(before, snapshot)
+
     def test_scope_amend_invalidates_q1_q2_and_publication_without_rewriting_log(self):
         self.feature_profile()
         self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
@@ -447,6 +491,8 @@ class QualityTests(unittest.TestCase):
         execution.update(id=execution_id, origin=origin, source_ref="fixture:report/" + execution_id,
                          environment="local-fixture", observed_at=proof()["at"], raw_result=result,
                          failure_kind=kind, observation="观察目标断言与报告")
+        if result == "NOT_RUN":
+            execution["nonexecution_reason"] = "夹具环境未就绪"
         execution.update(changes)
         return self.apply("execute", {"item_id": key, "execution": execution})
 

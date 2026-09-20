@@ -923,12 +923,12 @@ chmod +x "$fake_bin/codex"
 PATH="$fake_bin:$PATH" \
 AGENTIC_OPS_EXPECTED_STATION="$expected_station" \
 AGENTIC_OPS_CAPTURE="$capture" \
-  "$install_root/agenticops" station start --agent codex --station "$station" -- --model fake >/dev/null
+  "$install_root/agenticops" station start --agent codex --station "$station" --non-interactive -- --model fake >/dev/null
 grep -Fx -- '--model fake' "$capture" >/dev/null
 PATH="$fake_bin:$PATH" \
 AGENTIC_OPS_EXPECTED_STATION="$expected_station" \
 AGENTIC_OPS_CAPTURE="$capture" \
-  "$station/agenticops" station start codex -- --model station-entry >/dev/null
+  "$station/agenticops" station start codex --non-interactive -- --model station-entry >/dev/null
 grep -Fx -- '--model station-entry' "$capture" >/dev/null
 if "$station/agenticops" station start codex --agent codex >/dev/null 2>&1; then
   printf 'start 未拒绝重复 Agent ID\n' >&2

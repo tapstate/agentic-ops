@@ -32,7 +32,7 @@ python3 workflow/task.py record --issue-key <JIRA-KEY> --expected-run-id <当前
 
 ## 修复前门禁（强制点：workflow/task.py advance（进入 implementation 时校验授权存在且 issue_key 一致））
 
-授权作用域 `task_execution`，由 workflow/authorization.py grant（研发工程师执行，即设计确认的载体）。授权签发前不得修改任何代码；方案实质变更需 task.py reset --stage design_review 重新确认
+授权作用域 `task_execution`，由 workflow/authorization.py grant（研发工程师执行，即设计确认的载体）。授权签发前不得修改任何代码；方案实质变更需撤销旧授权并重新确认；不得调用不存在的 task.py reset，先读取 task.py --help 和当前任务状态选择受支持的恢复入口
 
 ## 验证结论规则（强制点：workflow/task.py advance（离开 implementation 时 exit 3））
 

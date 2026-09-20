@@ -235,6 +235,11 @@
           "type": "string",
           "minLength": 1,
           "pattern": "\\S"
+        },
+        "nonexecution_reason": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
         }
       },
       "required": [

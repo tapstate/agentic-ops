@@ -59,6 +59,16 @@ class StationCompatibilityTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def test_epoch_nine_rejected_before_mutating_epoch_ten_station(self):
+        (self.product_root / "contracts/station-state-compatibility.json").write_text(json.dumps(manifest(10)))
+        path = self.station / ".agenticops/init.json"
+        path.write_text(json.dumps({"station_state_epoch": 9}))
+        before = path.read_bytes()
+        with self.assertRaises(ValueError):
+            with task_store.task_state_lock(self.station):
+                self.fail("旧工位不能进入写入区")
+        self.assertEqual(before, path.read_bytes())
+
     def test_manifest_rejects_old_epoch_support(self):
         document = manifest(2)
         document["supported_station_state_epochs"] = [1, 2]

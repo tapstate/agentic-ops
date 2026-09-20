@@ -28,6 +28,14 @@ def validate(value, schema, document=None, path="$", root=ROOT):
             return validate(value, document["$defs"][ref[8:]], document, path, root)
         return validate(value, ref, path=path, root=root)
     if "anyOf" in schema:
+        # 操作使用 action 判别；报告匹配分支的字段错误，避免吞掉有效诊断。
+        if isinstance(value, dict) and "action" in value:
+            for option in schema["anyOf"]:
+                ref = option.get("$ref", "")
+                candidate = document["$defs"].get(ref[8:], {}) if ref.startswith("#/$defs/") else option
+                action = candidate.get("properties", {}).get("action", {})
+                if "const" in action and value["action"] == action["const"]:
+                    return validate(value, option, document, path, root)
         for option in schema["anyOf"]:
             try:
                 validate(value, option, document, path, root)
@@ -37,15 +45,15 @@ def validate(value, schema, document=None, path="$", root=ROOT):
         raise ValueError("%s 不符合质量操作契约；请核对 action/payload、字段及类型" % path)
     types = {"object": dict, "array": list, "string": str, "integer": int}
     if "type" in schema and type(value) is not types[schema["type"]]:
-        raise ValueError("%s 类型错误" % path)
+        raise ValueError("%s 类型错误：预期 %s，实际 %s" % (path, schema["type"], type(value).__name__))
     if "const" in schema and (type(value) is not type(schema["const"]) or value != schema["const"]):
         raise ValueError("%s 版本或固定值不支持" % path)
     if "enum" in schema and value not in schema["enum"]:
-        raise ValueError("%s 枚举值无效" % path)
+        raise ValueError("%s 枚举值无效：允许 %s" % (path, json.dumps(schema["enum"], ensure_ascii=False)))
     if isinstance(value, dict):
         props = schema.get("properties", {})
         if set(schema.get("required", [])) - set(value):
-            raise ValueError("%s 缺少必需字段" % path)
+            raise ValueError("%s 缺少必需字段：%s" % (path, "、".join(sorted(set(schema["required"]) - set(value)))))
         extra = schema.get("additionalProperties", True)
         for key, item in value.items():
             if key in props:
