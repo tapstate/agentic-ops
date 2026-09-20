@@ -383,6 +383,8 @@ class QualityTests(unittest.TestCase):
         plan['reference_implementations'] = [{'status': 'found', 'repository': 'tapdata/tapdata',
             'path': 'mysql.py', 'source_revision': git('rev-parse', 'HEAD'), 'difference': '补充视图类型'}]
         self.assertEqual([], plan_review.problems(plan, spec, ctx, model))
+        with mock.patch.dict(os.environ, {'GIT_DIR': '/missing/foreign.git', 'GIT_WORK_TREE': '/missing', 'GIT_CONFIG_COUNT': 'invalid'}):
+            self.assertEqual([], plan_review.problems(plan, spec, ctx, model))
         plan['reference_implementations'][0]['path'] = 'missing.py'
         self.assertTrue(any('不能解析' in p for p in plan_review.problems(plan, spec, ctx, model)))
 

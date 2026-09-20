@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 RULES = (
+    ("workflow/git_environment.py", ("git_refs", "quality", "station_source", "engineering_baseline", "station_resources")),
     ("workflow/verification.py", ("quality",)),
     ("workflow/file_digest.py", ("quality", "station_resources")),
     ("workflow/station", ("station_clean", "station_resources", "station_lifecycle")),

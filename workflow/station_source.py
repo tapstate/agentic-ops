@@ -10,6 +10,7 @@ import time
 import tempfile
 
 from workflow import engineering_baseline as baseline, git_refs, project_rules, station_operation as operations, source_pool
+from workflow.git_environment import git_environment
 
 GIT_LOCAL_TIMEOUT = 120
 GIT_NETWORK_TIMEOUT = 1800
@@ -17,10 +18,7 @@ GIT_PROGRESS_INTERVAL = 10
 
 
 def git(path, *arguments, check=True):
-    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    environment.update(GIT_TERMINAL_PROMPT="0", GIT_NO_REPLACE_OBJECTS="1", GIT_NO_LAZY_FETCH="1")
-    if arguments[0] == "status":
-        environment["GIT_OPTIONAL_LOCKS"] = "0"
+    environment = git_environment(read_only=arguments[0] == "status")
     command = ["git", "-C", str(path), *arguments]
     network = arguments[0] in ("clone", "fetch")
     timeout = GIT_NETWORK_TIMEOUT if network else GIT_LOCAL_TIMEOUT

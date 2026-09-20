@@ -19,6 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from workflow import project_rules, quality_contract, task_store  # noqa: E402
+from workflow.git_environment import git_environment
 
 
 def digest(value):
@@ -179,7 +180,7 @@ def load(base, task):
 def git_revision(path):
     """只读工作目录指纹；只保存哈希，绝不把文件或 diff 内容写入质量证据。"""
     def git(*args):
-        p = subprocess.run(["git", "--no-optional-locks", "-C", str(path), *args], capture_output=True, timeout=30)
+        p = subprocess.run(["git", "--no-optional-locks", "-C", str(path), *args], capture_output=True, timeout=30, env=git_environment(read_only=True))
         if p.returncode:
             raise ValueError("无法核对质量记录所对应的本地代码")
         return p.stdout

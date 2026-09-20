@@ -25,6 +25,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from workflow.git_environment import git_environment
 
 
 SCOPES = {"heads", "tags"}
@@ -38,7 +39,7 @@ class GitRefsError(ValueError):
 def _run(arguments, cwd=None):
     try:
         return subprocess.run(arguments, cwd=cwd, capture_output=True, text=True,
-                              timeout=TIMEOUT_SECONDS)
+                              timeout=TIMEOUT_SECONDS, env=git_environment(read_only=True))
     except subprocess.TimeoutExpired as error:
         raise GitRefsError("Git 远端查询超时") from error
     except OSError as error:

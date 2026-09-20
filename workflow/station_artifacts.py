@@ -12,6 +12,7 @@ import tempfile
 
 from workflow import project_rules, station_source as source
 from workflow.file_digest import sha256_file
+from workflow.git_environment import git_environment
 
 MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
@@ -22,8 +23,7 @@ def digest(data):
 
 
 def git_bytes(repository, *args, data=None):
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    env.update(GIT_TERMINAL_PROMPT="0", GIT_NO_REPLACE_OBJECTS="1", GIT_NO_LAZY_FETCH="1")
+    env = git_environment()
     result = subprocess.run(["git", "-C", str(repository), *args], input=data,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=120)
     if result.returncode:

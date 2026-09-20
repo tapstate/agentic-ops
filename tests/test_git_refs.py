@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Git refs 单仓、单范围缓存的离线合同测试。"""
 import json
+import os
 import subprocess
 from pathlib import Path
 import sys
@@ -35,6 +36,24 @@ class GitRefsTests(unittest.TestCase):
             with mock.patch.object(station_replan.source, "git", return_value=subprocess.CompletedProcess([], 0, output, "")) as git:
                 self.assertEqual(sha, station_replan.remote_head(".", "fixture", "main"))
                 git.assert_called_once_with(".", "ls-remote", "--refs", "fixture", "refs/heads/main")
+
+    def test_git_environment_preserves_auth_and_does_not_mutate_parent(self):
+        from workflow.git_environment import git_environment
+        inherited = {'PATH': '/tools', 'SSH_AUTH_SOCK': '/agent.sock', 'HOME': '/home',
+                     'GIT_DIR': '/other', 'GIT_CONFIG_COUNT': 'broken', 'GIT_OPTIONAL_LOCKS': '1'}
+        with mock.patch.dict(os.environ, inherited, clear=True):
+            before = dict(os.environ)
+            environment = git_environment(read_only=True)
+            self.assertEqual(before, dict(os.environ))
+            self.assertEqual('/agent.sock', environment['SSH_AUTH_SOCK'])
+            self.assertEqual('/tools', environment['PATH'])
+            self.assertNotIn('GIT_DIR', environment)
+            self.assertNotIn('GIT_CONFIG_COUNT', environment)
+            self.assertEqual('0', environment['GIT_OPTIONAL_LOCKS'])
+            self.assertEqual('0', environment['GIT_TERMINAL_PROMPT'])
+            self.assertEqual('1', environment['GIT_NO_REPLACE_OBJECTS'])
+            self.assertEqual('1', environment['GIT_NO_LAZY_FETCH'])
+            self.assertNotIn('GIT_OPTIONAL_LOCKS', git_environment())
 
     def identity(self, repository, remote, repository_id=None, source_root=None):
         identity = {"repository_id": repository_id or str(Path(repository).resolve()), "remote": remote,
@@ -254,6 +273,25 @@ class SourceSyncTests(unittest.TestCase):
     def verify(self, **values):
         return source_sync.verify(self.root, values.get("branch", "feature"), self.base,
                                   values.get("source", self.source))
+
+    def test_product_git_facts_ignore_foreign_context_and_config_injection(self):
+        from workflow import quality
+        self.git('merge', '--no-edit', 'develop')
+        self.git('remote', 'add', 'origin', 'https://example.invalid/expected.git')
+        expected = self.git('rev-parse', 'HEAD')
+        with tempfile.TemporaryDirectory() as temporary:
+            other = Path(temporary)
+            source_sync.git(other, 'init', '-q')
+            source_sync.git(other, 'remote', 'add', 'origin', 'https://example.invalid/other.git')
+            for injected in ({'GIT_DIR': str(other / '.git'), 'GIT_WORK_TREE': str(self.root)},
+                             {'GIT_CONFIG_COUNT': 'invalid', 'GIT_INDEX_FILE': str(other / 'wrong-index')}):
+                with self.subTest(injected=injected), mock.patch.dict(os.environ, injected):
+                    _, identity = git_refs.repository_identity(self.root, 'origin')
+                    self.assertEqual('https://example.invalid/expected.git', identity['origin'])
+                    self.assertEqual((self.root / '.git').resolve(), Path(identity['git_common_dir']).resolve())
+                    self.assertEqual(expected, quality.git_revision(self.root))
+                    self.assertEqual(expected, self.verify()['task_revision'])
+                    self.assertEqual({'feature': expected}, git_refs.query_heads(str(self.root), ['feature']))
 
     def test_unmerged_source_rejected_then_merge_preserves_task(self):
         with self.assertRaisesRegex(ValueError, "尚未包含"):

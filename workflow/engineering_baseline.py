@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 
 from workflow.project_rules import canonical_repository_endpoint
+from workflow.git_environment import git_environment
 
 
 REPOSITORY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
@@ -236,9 +237,7 @@ def verify_local_repository(station, repository, origin, ref_kind, ref, sha):
         if not stat.S_ISDIR(mode):
             raise ValueError("仓库路径必须为真实目录，拒绝 symlink/linked worktree")
     # 只读 Git 不继承调用方的 GIT_DIR、worktree、alternate 或配置注入。
-    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    environment.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0",
-                       GIT_NO_REPLACE_OBJECTS="1", GIT_NO_LAZY_FETCH="1")
+    environment = git_environment(read_only=True)
 
     def git(*arguments):
         try:

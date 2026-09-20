@@ -11,10 +11,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from workflow import quality
+from workflow.git_environment import git_environment
 
 
 def git(root, *args):
-    proc = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=30)
+    proc = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=30, env=git_environment(read_only=True))
     if proc.returncode:
         raise ValueError("Git 核对失败：%s" % (proc.stderr.strip() or " ".join(args)))
     return proc.stdout.strip()
@@ -22,7 +23,7 @@ def git(root, *args):
 
 def ancestor(root, before, after):
     result = subprocess.run(["git", "-C", str(root), "merge-base", "--is-ancestor", before, after],
-                            capture_output=True, text=True, timeout=30)
+                            capture_output=True, text=True, timeout=30, env=git_environment(read_only=True))
     if result.returncode not in (0, 1):
         raise ValueError("无法核对提交祖先关系")
     return result.returncode == 0

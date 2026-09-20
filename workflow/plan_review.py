@@ -2,6 +2,7 @@
 from pathlib import Path, PurePosixPath
 import subprocess
 from workflow import quality_contract
+from workflow.git_environment import git_environment
 
 
 def shape(value, schema, path):
@@ -120,7 +121,7 @@ def problems(plan, declaration, ctx, model):
         if not isinstance(revision, str) or len(revision) != 40 or any(c not in '0123456789abcdef' for c in revision):
             errors.append('同类实现必须绑定完整 Git SHA'); continue
         result = subprocess.run(['git', '--no-optional-locks', '-C', str(Path(root)), 'cat-file', '-t', revision + ':' + relative],
-                                capture_output=True, timeout=30)
+                                capture_output=True, timeout=30, env=git_environment(read_only=True))
         if result.returncode or result.stdout.strip() != b'blob':
             errors.append('同类实现路径/版本不能解析：' + str(name) + '/' + relative)
     return errors
