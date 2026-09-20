@@ -47,7 +47,7 @@ def config(base, task=None):
             raise ValueError("任务声明的质量配置缺失：%s" % profile)
         return None
     try:
-        result = json.loads(path.read_text(encoding="utf-8"))
+        result = project_rules.read_json_object(path)
         if result.get("schema_version") != 1:
             raise ValueError("不支持的质量配置版本")
         ids = [c["id"] for c in result["checkpoints"]]

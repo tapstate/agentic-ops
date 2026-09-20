@@ -323,7 +323,7 @@ def check_station_binding_snapshot(base):
         ("清理规则", lambda: bool(station_clean_rules.load(bound)["layers"]), True),
         ("修复策略", lambda: repair_strategy.resolve(bound, task)["available"], True),
     )
-    original = project_rules._read_json
+    original = project_rules.read_json_object
     for label, read, expected in calls:
         binding.write_text(json.dumps(initial))
         observed = []
@@ -333,7 +333,7 @@ def check_station_binding_snapshot(base):
                 observed.append(value)
                 binding.write_text(json.dumps(later))
             return value
-        with mock.patch.object(project_rules, "_read_json", side_effect=changing_read):
+        with mock.patch.object(project_rules, "read_json_object", side_effect=changing_read):
             result = read()
         check("绑定快照结果 " + label, result, expected)
         check("绑定只读一次 " + label, len(observed), 1)

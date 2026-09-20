@@ -80,6 +80,19 @@ class QualityTests(unittest.TestCase):
         self.save_task()
 
 
+    def test_quality_profiles_share_strict_project_json_reader(self):
+        for name, task in (("quality.json", None), ("quality-feature.json", {"task_class": "feature_change"})):
+            path = self.product / "projects/tapdata" / name
+            original = path.read_text()
+            for raw, message in ((original[:-1] + ',"schema_version":99,"schema_version":1}', "重复键"),
+                                 ('[]', "顶层必须是对象")):
+                with self.subTest(profile=name, raw=message):
+                    path.write_text(raw)
+                    with self.assertRaisesRegex(ValueError, message):
+                        quality.config(self.base, task)
+            path.write_text(original)
+            self.assertEqual(1, quality.config(self.base, task)["schema_version"])
+
     def save_task(self):
         save_station_task(self.base, self.task)
 

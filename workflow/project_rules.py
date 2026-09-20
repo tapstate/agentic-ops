@@ -48,7 +48,7 @@ def canonical_repository_endpoint(value):
     return endpoint[:-4] if endpoint.endswith(".git") else endpoint
 
 
-def _read_json(path):
+def read_json_object(path):
     def unique_object(pairs):
         result = {}
         for key, value in pairs:
@@ -75,7 +75,7 @@ def _station_binding(station):
     path = Path(station).resolve() / ".agenticops" / "station.json"
     if not path.is_file():
         raise ValueError("工位缺少 .agenticops/station.json，请先执行 agenticops station init")
-    return _read_json(path)
+    return read_json_object(path)
 
 
 def _binding_project(binding):
@@ -124,7 +124,7 @@ def project_root(root=ROOT, project=None):
 
 def load_admission(root=ROOT, project=None, station=None):
     selected_root, selected = station_context(station) if station is not None else (root, project)
-    return _read_json(project_root(selected_root, selected) / "admission.json")
+    return read_json_object(project_root(selected_root, selected) / "admission.json")
 
 
 def validate_takeover_watermark(profile):
@@ -177,10 +177,10 @@ def _catalog_path(base, profile):
 def load_profile(root=ROOT, project=None, station=None):
     selected_root, selected = station_context(station) if station is not None else (root, project)
     base = project_root(selected_root, selected)
-    profile = _read_json(base / "profile.json")
+    profile = read_json_object(base / "profile.json")
     validate_takeover_watermark(profile)
     catalog_path = _catalog_path(base, profile)
-    catalog = _read_json(catalog_path)
+    catalog = read_json_object(catalog_path)
     if catalog.get("schema_version") != 1 or not isinstance(catalog.get("repositories"), dict):
         raise ValueError("项目仓库目录结构无效：%s" % catalog_path)
     for repository, entry in catalog["repositories"].items():
@@ -213,7 +213,7 @@ def load_repository_catalog(root=ROOT, project=None, station=None):
 def repository_catalog_path(root=ROOT, project=None, station=None):
     selected_root, selected = station_context(station) if station is not None else (root, project)
     base = project_root(selected_root, selected).resolve()
-    profile = _read_json(base / "profile.json")
+    profile = read_json_object(base / "profile.json")
     return _catalog_path(base, profile)
 
 
