@@ -1,0 +1,827 @@
+{
+  "schema_version": 1,
+  "coverage": {
+    "source_refs": [
+      "Jira TAP-12935 transitions.fields 2026-09-20",
+      "Jira TAP-12289 transitions.fields 2026-09-20",
+      "Jira TAP statuses 2026-09-20",
+      "profile.json 已核验映射"
+    ],
+    "complete_workflow_export": false,
+    "unknown_transition_policy": "native-form-collection-manual-only",
+    "note": "状态目录完整性不代表转换拓扑完整；未见转换/字段在本节点一次采集，不能自动执行。"
+  },
+  "task_classes": {
+    "feature_change": {
+      "issue_type_id": "10010",
+      "fields": {
+        "story_test_review": {
+          "jira_id": "customfield_10413",
+          "aliases": [
+            "customfield_10413",
+            "Story Test Design Review Result"
+          ],
+          "value_type": "option",
+          "source": [
+            "facts.implementation_plan"
+          ],
+          "required_when": true,
+          "collect_at": "acceptance",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": []
+        },
+        "fix_versions": {
+          "jira_id": "fixVersions",
+          "aliases": [
+            "fixVersions"
+          ],
+          "value_type": "array",
+          "source": [],
+          "required_when": true,
+          "collect_at": "design_review",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": [
+            "facts.issue_version_plan"
+          ]
+        },
+        "assignee": {
+          "jira_id": "assignee",
+          "aliases": [
+            "assignee",
+            "Assignee"
+          ],
+          "value_type": "user",
+          "source": [],
+          "required_when": true,
+          "collect_at": "intake",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": []
+        },
+        "customer_acceptance": {
+          "jira_id": "customfield_10414",
+          "aliases": [
+            "Customer Requirement Acceptance"
+          ],
+          "value_type": "option",
+          "source": [],
+          "required_when": true,
+          "collect_at": "pr_review",
+          "decision_owner": "需求验收负责人",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": [
+            "facts.acceptance_criteria"
+          ]
+        }
+      },
+      "transitions": [
+        {
+          "key": "takeover",
+          "from": [
+            "Analyzed"
+          ],
+          "to": "In Progress",
+          "transition_id": "51",
+          "actor": "agent",
+          "fields": [
+            "assignee"
+          ],
+          "metadata": "runtime-required"
+        },
+        {
+          "key": "tests_passed",
+          "from": [
+            "In Progress",
+            "正在进行"
+          ],
+          "to": "Tests Passed",
+          "transition_id": "71",
+          "actor": "agent",
+          "fields": [
+            "story_test_review",
+            "fix_versions"
+          ],
+          "metadata": "runtime-required"
+        },
+        {
+          "key": "native:221",
+          "from": [
+            "正在进行"
+          ],
+          "to": "已取消",
+          "transition_id": "221",
+          "actor": "human",
+          "fields": [],
+          "metadata": "screen-observed-2026-09-20"
+        },
+        {
+          "key": "native:321",
+          "from": [
+            "正在进行"
+          ],
+          "to": "Analyzed",
+          "transition_id": "321",
+          "actor": "human",
+          "fields": [],
+          "metadata": "screen-observed-2026-09-20"
+        },
+        {
+          "key": "to-status:1",
+          "from": null,
+          "to": "打开",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10038",
+          "from": null,
+          "to": "Tests Passed",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10039",
+          "from": null,
+          "to": "Pull Request Submitted",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10058",
+          "from": null,
+          "to": "Re-open",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10127",
+          "from": null,
+          "to": "AI ANALYZING",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10021",
+          "from": null,
+          "to": "已完成",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10005",
+          "from": null,
+          "to": "已取消",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10035",
+          "from": null,
+          "to": "Open On Hold",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10040",
+          "from": null,
+          "to": "Merged",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10046",
+          "from": null,
+          "to": "Analyzed",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10066",
+          "from": null,
+          "to": "Test To Be Automated",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:3",
+          "from": null,
+          "to": "正在进行",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        }
+      ]
+    },
+    "defect_fix": {
+      "issue_type_id": "10011",
+      "fields": {
+        "assignee": {
+          "jira_id": "assignee",
+          "aliases": [
+            "assignee",
+            "Assignee"
+          ],
+          "value_type": "user",
+          "source": [],
+          "required_when": true,
+          "collect_at": "intake",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": []
+        },
+        "issue_classification": {
+          "jira_id": "customfield_10370",
+          "aliases": [
+            "Issue Classification"
+          ],
+          "value_type": "option",
+          "source": [
+            "facts.fix_plan"
+          ],
+          "required_when": true,
+          "collect_at": "design_review",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": [
+            "facts.fix_plan"
+          ]
+        },
+        "root_cause_category": {
+          "jira_id": null,
+          "aliases": [
+            "Root Cause Category"
+          ],
+          "value_type": "option",
+          "source": [
+            "facts.fix_plan"
+          ],
+          "required_when": true,
+          "collect_at": "design_review",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": [
+            "facts.fix_plan"
+          ]
+        },
+        "module": {
+          "jira_id": "customfield_10098",
+          "aliases": [
+            "Module",
+            "components"
+          ],
+          "value_type": "option-with-child",
+          "source": [
+            "repositories"
+          ],
+          "required_when": true,
+          "collect_at": "design_review",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": [
+            "facts.fix_plan"
+          ]
+        },
+        "issue_analysis": {
+          "jira_id": "customfield_10092",
+          "aliases": [
+            "customfield_10092",
+            "Issue Analysis"
+          ],
+          "value_type": "string",
+          "source": [
+            "facts.fix_plan"
+          ],
+          "required_when": true,
+          "collect_at": "design_review",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": [
+            "facts.fix_plan"
+          ]
+        },
+        "fix_details": {
+          "jira_id": "customfield_10093",
+          "aliases": [
+            "customfield_10093",
+            "Fix Details"
+          ],
+          "value_type": "string",
+          "source": [
+            "facts.fix_plan",
+            "repositories"
+          ],
+          "required_when": true,
+          "collect_at": "acceptance",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": []
+        },
+        "tester": {
+          "jira_id": null,
+          "aliases": [
+            "Tester"
+          ],
+          "value_type": "user",
+          "source": [],
+          "required_when": true,
+          "collect_at": "design_review",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": [
+            "facts.fix_plan"
+          ]
+        },
+        "test_can_be_automated": {
+          "jira_id": null,
+          "aliases": [
+            "Test can be automated"
+          ],
+          "value_type": "option",
+          "source": [],
+          "required_when": true,
+          "collect_at": "design_review",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": [
+            "facts.fix_plan"
+          ]
+        },
+        "fix_versions": {
+          "jira_id": "fixVersions",
+          "aliases": [
+            "fixVersions",
+            "Fix Version/s",
+            "Fix Version"
+          ],
+          "value_type": "array",
+          "source": [
+            "facts.issue_version_plan"
+          ],
+          "required_when": true,
+          "collect_at": "design_review",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": [
+            "facts.issue_version_plan"
+          ]
+        },
+        "test_coverage_decision": {
+          "jira_id": "customfield_10416",
+          "aliases": [
+            "customfield_10416",
+            "Test Coverage Decision"
+          ],
+          "value_type": "option",
+          "source": [],
+          "required_when": {
+            "field": "customfield_10416",
+            "equals": "Exception Approved - Low Risk"
+          },
+          "collect_at": "acceptance",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": []
+        },
+        "test_coverage_exception_details": {
+          "jira_id": "customfield_10417",
+          "aliases": [
+            "customfield_10417",
+            "Test Coverage Exception Details"
+          ],
+          "value_type": "string",
+          "source": [],
+          "required_when": {
+            "field": "customfield_10416",
+            "equals": "Exception Approved - Low Risk"
+          },
+          "collect_at": "acceptance",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": []
+        },
+        "issuelinks": {
+          "jira_id": "issuelinks",
+          "aliases": [
+            "链接的事务"
+          ],
+          "value_type": "array",
+          "source": [],
+          "required_when": false,
+          "collect_at": "transition",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": []
+        },
+        "duedate": {
+          "jira_id": "duedate",
+          "aliases": [
+            "截止日期"
+          ],
+          "value_type": "date",
+          "source": [],
+          "required_when": false,
+          "collect_at": "transition",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": []
+        },
+        "customfield_10418": {
+          "jira_id": "customfield_10418",
+          "aliases": [
+            "On Hold Details"
+          ],
+          "value_type": "string",
+          "source": [],
+          "required_when": false,
+          "collect_at": "transition",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": []
+        }
+      },
+      "transitions": [
+        {
+          "key": "takeover",
+          "from": [
+            "Analyzed"
+          ],
+          "to": "In Progress",
+          "transition_id": "421",
+          "actor": "agent",
+          "fields": [
+            "assignee"
+          ],
+          "metadata": "runtime-required"
+        },
+        {
+          "key": "tests_passed",
+          "from": [
+            "In Progress",
+            "正在进行"
+          ],
+          "to": "Tests Passed",
+          "transition_id": null,
+          "actor": "agent",
+          "fields": [
+            "issue_classification",
+            "root_cause_category",
+            "module",
+            "issue_analysis",
+            "fix_details",
+            "tester",
+            "test_can_be_automated",
+            "fix_versions",
+            "test_coverage_decision",
+            "test_coverage_exception_details"
+          ],
+          "metadata": "runtime-required"
+        },
+        {
+          "key": "native:251",
+          "from": [
+            "Analyzed"
+          ],
+          "to": "Canceled (no longer needed)",
+          "transition_id": "251",
+          "actor": "human",
+          "fields": [
+            "fix_details",
+            "issue_classification"
+          ],
+          "metadata": "screen-observed-2026-09-20"
+        },
+        {
+          "key": "native:281",
+          "from": [
+            "Analyzed"
+          ],
+          "to": "Canceled (Duplicate)",
+          "transition_id": "281",
+          "actor": "human",
+          "fields": [
+            "fix_details",
+            "issue_classification",
+            "issuelinks"
+          ],
+          "metadata": "screen-observed-2026-09-20"
+        },
+        {
+          "key": "native:221",
+          "from": [
+            "Analyzed"
+          ],
+          "to": "On Hold",
+          "transition_id": "221",
+          "actor": "human",
+          "fields": [
+            "duedate",
+            "customfield_10418"
+          ],
+          "metadata": "screen-observed-2026-09-20"
+        },
+        {
+          "key": "native:441",
+          "from": [
+            "Analyzed"
+          ],
+          "to": "打开",
+          "transition_id": "441",
+          "actor": "human",
+          "fields": [],
+          "metadata": "screen-observed-2026-09-20"
+        },
+        {
+          "key": "native:451",
+          "from": [
+            "Analyzed"
+          ],
+          "to": "已完成",
+          "transition_id": "451",
+          "actor": "human",
+          "fields": [
+            "issue_analysis",
+            "fix_details",
+            "issue_classification",
+            "module"
+          ],
+          "metadata": "screen-observed-2026-09-20"
+        },
+        {
+          "key": "to-status:1",
+          "from": null,
+          "to": "打开",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10038",
+          "from": null,
+          "to": "Tests Passed",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10039",
+          "from": null,
+          "to": "Pull Request Submitted",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10058",
+          "from": null,
+          "to": "Re-open",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10127",
+          "from": null,
+          "to": "AI ANALYZING",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10021",
+          "from": null,
+          "to": "已完成",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10035",
+          "from": null,
+          "to": "Open On Hold",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10040",
+          "from": null,
+          "to": "Merged",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10046",
+          "from": null,
+          "to": "Analyzed",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10066",
+          "from": null,
+          "to": "Test To Be Automated",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:3",
+          "from": null,
+          "to": "正在进行",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10048",
+          "from": null,
+          "to": "Canceled (no longer needed)",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10032",
+          "from": null,
+          "to": "On Hold",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10049",
+          "from": null,
+          "to": "Re-opened as new",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10043",
+          "from": null,
+          "to": "Canceled (cannot be reproduced)",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10050",
+          "from": null,
+          "to": "Canceled (Duplicate)",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [],
+          "metadata": "topology-and-form-unverified"
+        }
+      ]
+    },
+    "technical_task": {
+      "issue_type_id": "10008",
+      "fields": {
+        "assignee": {
+          "jira_id": "assignee",
+          "aliases": [
+            "assignee",
+            "Assignee"
+          ],
+          "value_type": "user",
+          "source": [],
+          "required_when": true,
+          "collect_at": "intake",
+          "decision_owner": "Engineering DRI",
+          "auto_extract": false,
+          "confirm_when": "value-options-dependencies-owner-change",
+          "depends_on": []
+        }
+      },
+      "transitions": [
+        {
+          "key": "to-status:10021",
+          "from": null,
+          "to": "已完成",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [
+            "assignee"
+          ],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:3",
+          "from": null,
+          "to": "正在进行",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [
+            "assignee"
+          ],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10032",
+          "from": null,
+          "to": "On Hold",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [
+            "assignee"
+          ],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10029",
+          "from": null,
+          "to": "待办",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [
+            "assignee"
+          ],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10047",
+          "from": null,
+          "to": "已规划",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [
+            "assignee"
+          ],
+          "metadata": "topology-and-form-unverified"
+        },
+        {
+          "key": "to-status:10007",
+          "from": null,
+          "to": "已取消",
+          "transition_id": null,
+          "actor": "human",
+          "fields": [
+            "assignee"
+          ],
+          "metadata": "topology-and-form-unverified"
+        }
+      ]
+    }
+  }
+}

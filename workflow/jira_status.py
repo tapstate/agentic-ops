@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import copy
+import re
 import sys
 import time
 from pathlib import Path
@@ -52,7 +54,10 @@ def config(base, task):
     if not isinstance(result, dict) or result.get("schema_version") != 1:
         raise ValueError("当前 Project 未配置 Jira 状态同步")
     if task["task_class"] not in result.get("task_classes", []):
-        raise ValueError("当前任务类型未启用 Jira 状态同步")
+        # 可采集和人工交接不代表新增自动转换权限。
+        from workflow import jira_collect
+        jira_collect.config(base, task)
+        return dict(result, attempts={}, field_mappings={})
     overrides = result.get("by_task_class", {})
     if not isinstance(overrides, dict):
         raise ValueError("Jira 状态同步 by_task_class 必须是对象")
@@ -202,24 +207,64 @@ def guidance_for(fields, rules, task):
     return result
 
 
-def prepare(base, issue_key, trigger, snapshot):
+def prepare(base, issue_key, trigger, snapshot, operation_id=None):
     task = task_store.read_task(base, issue_key)
     rules = config(base, task)
     rule = rules.get("attempts", {}).get(trigger)
     if not isinstance(rule, dict):
-        raise ValueError("未知 Jira 状态同步节点：%s" % trigger)
+        if not trigger.startswith("native:"):
+            raise ValueError("未知 Jira 状态同步节点：%s" % trigger)
+        transition = next((t for t in snapshot.get("transitions", []) if "native:" + str(t.get("id")) == trigger), None)
+        if not transition:
+            raise ValueError("未回读当前原生转换，不能猜测 ID")
+        from workflow import jira_collect
+        packet = jira_collect.collect(base, task, "transition", snapshot)
+        return {"trigger": trigger, "outcome": "handoff", "reason": "human_only_transition", "decision_packet": packet,
+                "transition_id": str(transition["id"]), "guidance": [{"guidance": "本转换未获自动执行授权，完成本节点统一决策后交研发处理。"}]}
+    if operation_id is not None and not re.fullmatch(r"op-[a-z0-9-]{8,80}", operation_id):
+        raise ValueError("Jira operation_id 必须为稳定 op- 编号")
     issue, fields, status = issue_from(snapshot, issue_key)
     allowed_types = rules.get("issue_type_ids")
     if allowed_types is not None and str((fields.get("issuetype") or {}).get("id", "")) not in allowed_types:
         raise ValueError("Jira 工作类型与当前任务状态同步配置不匹配")
     state = load_state(base, task)
     previous = state["attempts"].get(trigger)
+    if operation_id is not None:
+        known = next((v for v in state.get("attempts_by_id", {}).values() if v.get("operation_id") == operation_id), None)
+        if known and known.get("trigger") != trigger:
+            raise ValueError("operation_id 不能复用于另一转换")
+        if known and known.get("operation_id") != (previous or {}).get("operation_id"):
+            return dict(known, repeated=True)
     retry_history = []
+    request = None
+    if operation_id is not None:
+        prior_operation = previous and previous.get("operation_id")
+        # 不以状态尚未改变或一次超时推断未写入；不同意图先消解前次结果。
+        if previous and prior_operation != operation_id and previous.get("outcome") in ("ready", "unknown", "failed"):
+            raise ValueError("前次 Jira 写入结果未确认，先回读原 operation，禁止换编号重发")
+        field_keys = set()
+        transition = transition_for(snapshot, rule)
+        if transition:
+            field_keys.update(transition.get("fields", {}))
+        for logical in rule.get("field_requirements", []):
+            field_keys.update(rules.get("field_mappings", {}).get(logical, {}).get("aliases", [logical]))
+        request = {"run_id": task["run_id"], "trigger": trigger, "operation_id": operation_id,
+                   "expected_from": previous["from_status"] if previous and prior_operation == operation_id else status["name"],
+                   "inputs": {key: fields.get(key) for key in sorted(field_keys) if key in fields},
+                   "form_digest": quality.digest((transition or {}).get("fields", {})),
+                   "rule_digest": quality.digest(rule),
+                   "decisions": {key: value["digest"] for key, value in state.get("decisions", {}).items() if key in field_keys}}
+        if previous and prior_operation == operation_id and previous.get("outcome") != "skipped" and previous.get("request_digest") != quality.digest(request):
+            # 到达目标后的回读不重建转换字段，原意图保持可恢复。
+            if status["name"] not in previous.get("target_statuses", []):
+                raise ValueError("同一 Jira operation 的确认输入已变化，请先回读原意图结果")
+        if previous and prior_operation != operation_id:
+            previous = None
     if previous:
         retryable = (previous.get("outcome") == "skipped" and
                      previous.get("reason") in ("quality_not_verified", "linked_test_facts_not_ready",
                                                 "required_fields_missing", "transition_unavailable",
-                                                "local_stage_mismatch", "jira_status_mismatch", "assignee_mismatch"))
+                                                "local_stage_mismatch", "jira_status_mismatch", "assignee_mismatch", "decision_inputs_pending"))
         if not retryable:
             return dict(previous, repeated=True)
         retry_history = list(previous.get("preflight_history", [])) + [{
@@ -232,6 +277,9 @@ def prepare(base, issue_key, trigger, snapshot):
               "target_statuses": sorted({rule["to"], *rule.get("to_aliases", [])})}
     if retry_history:
         record["preflight_history"] = retry_history
+    if operation_id is not None:
+        record.update(operation_id=operation_id, request=request, request_digest=quality.digest(request),
+                      attempt_id=quality.digest(request))
     record["field_plan"] = guidance_for(rule.get("field_requirements", []), rules, task)
     if task["stage"] not in rule.get("local_stages", []):
         record.update(outcome="skipped", reason="local_stage_mismatch",
@@ -277,6 +325,15 @@ def prepare(base, issue_key, trigger, snapshot):
             record = prepare_transition(record, snapshot, fields, rule, rules, task)
     else:
         record = prepare_transition(record, snapshot, fields, rule, rules, task)
+    if operation_id is not None:
+        from workflow import jira_collect
+        checkpoint = "intake" if trigger == "takeover" else "acceptance"
+        packet = jira_collect.collect(base, task, checkpoint, snapshot)
+        record["decision_packet"] = packet
+        # 只阻塞本次外部转换，不阻塞本地研发。
+        if record["outcome"] == "ready" and (packet["pending"] or any(x.get("due") for x in packet["unknown"])):
+            record.update(outcome="skipped", reason="decision_inputs_pending")
+        state.setdefault("attempts_by_id", {})[record["attempt_id"]] = copy.deepcopy(record)
     state["attempts"][trigger] = record
     save_state(base, task, state)
     return record
@@ -287,6 +344,10 @@ def prepare_transition(record, snapshot, fields, rule, rules, task):
     if transition is None:
         record.update(outcome="skipped", reason="transition_unavailable",
                       guidance=[{"guidance": "Jira 未返回到 %s 的可用转换；核对当前状态、Workflow 和权限。" % rule["to"]}])
+        return record
+    if not isinstance(transition.get("fields"), dict):
+        record.update(outcome="skipped", reason="transition_unavailable",
+                      guidance=[{"guidance": "转换表单未完整回读，请读取 transitions.fields"}])
         return record
     missing = missing_fields(fields, transition)
     if missing:
@@ -299,12 +360,19 @@ def prepare_transition(record, snapshot, fields, rule, rules, task):
     return record
 
 
-def complete(base, issue_key, trigger, outcome, snapshot, message):
+def complete(base, issue_key, trigger, outcome, snapshot, message, operation_id=None):
     task = task_store.read_task(base, issue_key)
     state = load_state(base, task)
     record = state["attempts"].get(trigger)
     if not record or record.get("outcome") not in ("ready", "unknown", "failed"):
         raise ValueError("本节点没有待完成的 Jira 状态转换意图")
+    if operation_id is not None and record.get("operation_id") != operation_id:
+        raise ValueError("Jira 回执不是原 operation")
+    if outcome == "not_written":
+        evidence = snapshot.get("operation_result", {})
+        if (not operation_id or evidence.get("operation_id") != operation_id or evidence.get("effect") != "not_written"
+                or not evidence.get("source_ref")):
+            raise ValueError("确认未写入需要原操作明确结果来源，当前状态不等于目标不能证明未写入")
     _, _, status = issue_from(snapshot, issue_key)
     reached = status["name"] in record.get("target_statuses", [record["target_status"]])
     record["completed_at"] = now()
@@ -319,6 +387,8 @@ def complete(base, issue_key, trigger, outcome, snapshot, message):
                              else text)
     if not reached:
         record["guidance"] = [{"guidance": "自动状态转换未确认成功；本地流程继续，PR Ready 时根据 Jira 原始提示人工处理。"}]
+    if record.get("attempt_id"):
+        state.setdefault("attempts_by_id", {})[record["attempt_id"]] = copy.deepcopy(record)
     save_state(base, task, state)
     return record
 
@@ -329,20 +399,29 @@ def main():
     p = sub.add_parser("prepare")
     p.add_argument("--expected-run-id", required=True)
     p.add_argument("--issue-key", required=True)
-    p.add_argument("--trigger", choices=("takeover", "tests_passed"), required=True)
+    p.add_argument("--trigger", required=True)
+    p.add_argument("--operation-id", required=True)
     p.add_argument("--input", required=True)
     p.add_argument("--dir", default=".")
     p = sub.add_parser("complete")
     p.add_argument("--expected-run-id", required=True)
     p.add_argument("--issue-key", required=True)
-    p.add_argument("--trigger", choices=("takeover", "tests_passed"), required=True)
-    p.add_argument("--outcome", choices=("failed", "unknown"), required=True)
+    p.add_argument("--trigger", required=True)
+    p.add_argument("--operation-id", required=True)
+    p.add_argument("--outcome", choices=("failed", "unknown", "not_written"), required=True)
     p.add_argument("--input", required=True)
     p.add_argument("--message", default="")
     p.add_argument("--dir", default=".")
     p = sub.add_parser("status")
     p.add_argument("--issue-key", required=True)
     p.add_argument("--dir", default=".")
+    for name in ("collect", "confirm"):
+        p = sub.add_parser(name)
+        p.add_argument("--issue-key", required=True)
+        p.add_argument("--expected-run-id", required=True)
+        p.add_argument("--checkpoint", choices=("intake", "design_review", "acceptance", "pr_review", "transition"), required=True)
+        p.add_argument("--input", required=True)
+        p.add_argument("--dir", default=".")
     args = parser.parse_args()
     try:
         task_store.station_project(args.dir)
@@ -352,10 +431,20 @@ def main():
             if args.command != "status":
                 task_store.check_expected_run(args.dir, issue, args.expected_run_id)
                 task_store.require_development(args.dir, task)
-            if args.command == "prepare":
-                result = prepare(args.dir, issue, args.trigger, read_input(args.input))
+            if args.command in ("collect", "confirm"):
+                from workflow import jira_collect
+                document = json.loads(Path(args.input).read_text())
+                snapshot = document["snapshot"]
+                proposals = document.get("proposals", {})
+                if args.command == "collect":
+                    result = jira_collect.collect(args.dir, task, args.checkpoint, snapshot, proposals)
+                else:
+                    result = jira_collect.confirm(args.dir, issue, args.expected_run_id, args.checkpoint,
+                        snapshot, proposals, document["field_digests"], document["proof"])
+            elif args.command == "prepare":
+                result = prepare(args.dir, issue, args.trigger, read_input(args.input), args.operation_id)
             elif args.command == "complete":
-                result = complete(args.dir, issue, args.trigger, args.outcome, read_input(args.input), args.message)
+                result = complete(args.dir, issue, args.trigger, args.outcome, read_input(args.input), args.message, args.operation_id)
             else:
                 result = load_state(args.dir, task)
         print(json.dumps(result, ensure_ascii=False, indent=2))

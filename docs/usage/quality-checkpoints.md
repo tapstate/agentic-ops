@@ -155,10 +155,10 @@ Q4 有效确认并进入 `ci_validation` 后，以 `tests_passed` 节点执行�
 
 ```sh
 python3 "$agenticops_root/workflow/jira_status.py" prepare --expected-run-id "$task_run" \
-  --issue-key "$task_key" --trigger takeover --input "$jira_snapshot" --dir "$project_station"
+  --issue-key "$task_key" --trigger takeover --operation-id <op-id> --input "$jira_snapshot" --dir "$project_station"
 
 python3 "$agenticops_root/workflow/jira_status.py" complete --expected-run-id "$task_run" \
-  --issue-key "$task_key" --trigger takeover --outcome failed \
+  --issue-key "$task_key" --trigger takeover --operation-id <op-id> --outcome failed \
   --input "$jira_readback" --message "Jira 原始错误摘要" --dir "$project_station"
 ```
 
@@ -381,3 +381,16 @@ TapData 精确接受 `Tests Passed`、`PULL REQUEST SUBMITTED`、`MERGED`、`完
 状态材料绑定回读时的代码指纹；代码改变后重新回读并导入 Jira，不要求为此重复变更 Jira 状态。真实 A 版本执行保持 A，展示本地旧报告未证明当前代码；这不是自动重测门禁，补测依据已确认方案及影响分析决定。每仓源码同步、CI 和其它验证要求独立保留。PR Ready 与 Jira 转换核对使用本次传入的实时快照，不能仅依赖之前导入的通过状态。
 
 本次新增质量事件不能被旧版解释，工位 epoch 提升至 12；旧工位须在原版本结束并清理后切换，不在线迁移。
+
+
+### Jira 全流程统一决策包
+
+项目 `profile.json` 引用 `jira-transitions.json`，按任务类型声明字段 ID/别名、类型、来源、条件必填、采集节点、决策责任人和依赖。已核验状态目录及转换均标明来源；`coverage.complete_workflow_export=false` 表示没有管理员完整工作流导出，未见转换的拓扑、未来表单和 Validator 不猜填。Agent 可采集任意原生转换的实时表单，未获自动授权的转换只交研发处理。
+
+在 intake、design_review、acceptance、pr_review、transition 的相关人工节点执行 `jira_status.py collect --checkpoint <节点> --issue-key <key> --expected-run-id <run> --input <json> --dir <station>`。输入包含 `snapshot`（原生 issue、transitions.fields、source_ref）与可选 `proposals`（字段 ID 到建议值）。输出按字段 ID 去重，保留所有转换用途，统一展示已有值、可复用确认、本节点待决、未来待采及动态未知项；建议值不是 Jira 已写事实。
+
+一次向研发展示全部本节点 pending。取得真实决定后，使用相同输入增加 `field_digests`（每个提议值对应 collect 返回的字段摘要）和 `proof`（actor/source/reference/at），执行相同参数的 `confirm`。确认绑定值、选项、依赖和责任人；无关评论及内部 revision 不导致重问。条件必填根据拟确认值计算，未来才知道的验收结果不在设计阶段索要。确认不执行 Jira 写入，Agent 按原生权限回填后仍须回读。
+
+`prepare/complete` CLI 必须携带同一个 `--operation-id op-...`。新一次退回重进使用新编号，旧编号始终指向原尝试。ready、unknown、failed 的前次结果未消解时禁止换编号重发；状态仍未改变不能证明没有写入。明确未写入需在 complete 使用 `--outcome not_written`，快照增加 `operation_result={operation_id,effect:"not_written",source_ref}`，来源为原调用的明确失败/回查事实。到达目标即回读为 succeeded。
+
+`--trigger native:<实时转换ID>` 仅返回人工交接与统一决策包，不返回自动执行许可。审批、PR 提审、合并、发布和终止不因字段齐全而获得新授权。缺项只暂停本次转换，继续无依赖准备。持久确认和尝试账本语义变更使工位 epoch 升至 13，旧工位须由原版本退出。

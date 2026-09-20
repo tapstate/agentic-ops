@@ -167,6 +167,109 @@ class JiraStatusTests(unittest.TestCase):
                                       self.snapshot(), "password=do-not-store")
         self.assertEqual(result["message"], "外部错误信息含敏感内容，原文未保存")
 
+    def collect_fixture(self):
+        from workflow import jira_collect
+        path = self.base / 'product/projects/tapdata/jira-transitions.json'
+        config = json.loads(path.read_text())
+        rule = {'jira_id': 'customfield_a', 'aliases': ['Choice'], 'value_type': 'option', 'source': ['facts.fix_plan'],
+                'required_when': True, 'collect_at': 'design_review', 'decision_owner': 'Engineering DRI',
+                'auto_extract': False, 'confirm_when': 'value-options-dependencies-owner-change', 'depends_on': ['facts.fix_plan']}
+        config['task_classes']['defect_fix']['fields'] = {
+            'choice': rule,
+            'details': dict(rule, jira_id='customfield_b', aliases=['Details'], value_type='string',
+                            required_when={'field': 'customfield_a', 'equals': 'need-details'}),
+            'future': dict(rule, jira_id='customfield_c', aliases=['Result'], value_type='string', collect_at='acceptance')}
+        config['task_classes']['defect_fix']['transitions'] = [
+            {'key': 'forward', 'fields': ['choice'], 'actor': 'agent'},
+            {'key': 'return', 'fields': ['choice', 'details'], 'actor': 'human'}]
+        path.write_text(json.dumps(config))
+        snapshot = self.snapshot()
+        metadata = {'name': 'Choice', 'schema': {'type': 'option'}, 'required': False,
+                    'allowedValues': [{'id': '1', 'value': 'ordinary'}, {'id': '2', 'value': 'need-details'}]}
+        snapshot['transitions'][0]['fields'] = {'customfield_a': metadata}
+        snapshot['transitions'].append({'id': '999', 'to': {'name': 'Open'}, 'fields': {'customfield_a': metadata}})
+        self.task['facts']['fix_plan'] = 'confirmed-plan'; save_station_task(self.base, self.task)
+        return snapshot
+
+    def confirm_packet(self, checkpoint, snapshot, proposals):
+        from workflow import jira_collect
+        packet = jira_collect.collect(self.base, self.task, checkpoint, snapshot, proposals)
+        proof = {'actor': 'fixture', 'source': 'user_message', 'reference': 'fixture:batch-confirmation',
+                 'at': '2026-09-20T12:00:00+08:00'}
+        return jira_collect.confirm(self.base, self.task['issue_key'], self.task['run_id'], checkpoint, snapshot,
+            proposals, {key: packet['fields'][key]['digest'] for key in proposals}, proof)
+
+    def test_collect_is_readonly_deduplicates_and_defers_future_fields(self):
+        from workflow import jira_collect
+        snapshot = self.collect_fixture()
+        before = {str(p): p.read_bytes() for p in (self.base / '.agenticops').rglob('*') if p.is_file()}
+        packet = jira_collect.collect(self.base, self.task, 'design_review', snapshot)
+        self.assertEqual(['customfield_a'], packet['pending'])
+        self.assertEqual(['customfield_c'], packet['future'])
+        self.assertEqual(['forward', 'native:421', 'native:999', 'return'], packet['fields']['customfield_a']['transitions'])
+        self.assertEqual(before, {str(p): p.read_bytes() for p in (self.base / '.agenticops').rglob('*') if p.is_file()})
+        packet = self.confirm_packet('design_review', snapshot, {'customfield_a': {'id': '1'}})
+        self.assertEqual(['customfield_a'], packet['confirmed'])
+        snapshot['issue']['fields']['comment'] = 'unrelated'
+        packet = jira_collect.collect(self.base, self.task, 'design_review', snapshot)
+        self.assertEqual(['customfield_a'], packet['confirmed'])
+        snapshot['issue']['fields']['assignee'] = {'accountId': 'another-owner'}
+        self.assertEqual(['customfield_a'], jira_collect.collect(self.base, self.task, 'design_review', snapshot)['pending'])
+
+    def test_collect_condition_options_dependencies_and_dynamic_fields(self):
+        from workflow import jira_collect
+        snapshot = self.collect_fixture()
+        values = {'customfield_a': {'id': '2'}}
+        packet = jira_collect.collect(self.base, self.task, 'design_review', snapshot, values)
+        self.assertEqual(['customfield_a', 'customfield_b'], packet['pending'])
+        with self.assertRaisesRegex(ValueError, '一次确认全部'):
+            self.confirm_packet('design_review', snapshot, values)
+        values['customfield_b'] = 'cause and evidence'
+        self.assertEqual(['customfield_a', 'customfield_b'], self.confirm_packet('design_review', snapshot, values)['confirmed'])
+        snapshot['transitions'][0]['fields']['customfield_a']['allowedValues'] = [{'id': '3', 'value': 'new'}]
+        packet = jira_collect.collect(self.base, self.task, 'design_review', snapshot)
+        self.assertIn('customfield_a', packet['pending'])
+        self.assertFalse(packet['fields']['customfield_a']['valid_value'])
+        snapshot['transitions'][0]['fields']['customfield_new'] = {'name': 'New required field', 'required': True, 'schema': {'type': 'string'}}
+        self.assertIn('customfield_new', jira_collect.collect(self.base, self.task, 'design_review', snapshot)['pending'])
+        self.task['facts']['fix_plan'] = 'changed plan'; save_station_task(self.base, self.task)
+        self.assertIn('customfield_b', jira_collect.collect(self.base, self.task, 'design_review', snapshot)['pending'])
+
+    def test_status_reentry_unknown_write_and_old_operation_reuse(self):
+        snapshot = self.collect_fixture()
+        # Intake does not ask for design/acceptance values.
+        first = jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot, 'op-jira-first')
+        self.assertEqual('ready', first['outcome'])
+        jira_status.complete(self.base, 'TAP-123', 'takeover', 'unknown', snapshot, 'timeout', 'op-jira-first')
+        with self.assertRaisesRegex(ValueError, '前次 Jira 写入'):
+            jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot, 'op-jira-second')
+        with self.assertRaisesRegex(ValueError, '明确结果'):
+            jira_status.complete(self.base, 'TAP-123', 'takeover', 'not_written', snapshot, '', 'op-jira-first')
+        snapshot['operation_result'] = {'operation_id': 'op-jira-first', 'effect': 'not_written', 'source_ref': 'fixture:rejected-before-send'}
+        jira_status.complete(self.base, 'TAP-123', 'takeover', 'not_written', snapshot, '', 'op-jira-first')
+        second = jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot, 'op-jira-second')
+        self.assertNotEqual(first['attempt_id'], second['attempt_id'])
+        snapshot['issue']['fields']['status']['name'] = 'In Progress'
+        jira_status.complete(self.base, 'TAP-123', 'takeover', 'unknown', snapshot, '', 'op-jira-second')
+        snapshot['issue']['fields']['status']['name'] = 'Analyzed'
+        third = jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot, 'op-jira-third')
+        self.assertEqual('ready', third['outcome'])
+        repeated = jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot, 'op-jira-second')
+        self.assertTrue(repeated['repeated'])
+        self.assertEqual('succeeded', repeated['outcome'])
+        self.assertEqual(3, len(jira_status.load_state(self.base, self.task)['attempts_by_id']))
+
+    def test_manual_transition_returns_collection_without_auto_authority(self):
+        snapshot = self.collect_fixture()
+        result = jira_status.prepare(self.base, 'TAP-123', 'native:999', snapshot, 'op-jira-human')
+        self.assertEqual('handoff', result['outcome'])
+        self.assertIn('decision_packet', result)
+        self.assertFalse(jira_status.load_state(self.base, self.task)['attempts'])
+        self.task['task_class'] = 'technical_task'; save_station_task(self.base, self.task)
+        self.assertEqual('handoff', jira_status.prepare(self.base, 'TAP-123', 'native:999', snapshot, 'op-jira-tech')['outcome'])
+        with self.assertRaisesRegex(ValueError, '未知 Jira'):
+            jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot, 'op-jira-tech')
+
     def test_pr_ready_requires_all_three_groups(self):
         self.task["stage"] = "ci_validation"
         save_station_task(self.base, self.task)
