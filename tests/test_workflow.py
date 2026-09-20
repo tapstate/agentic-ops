@@ -172,6 +172,55 @@ def check_project_json_objects(base):
     check("CLI 缺文件不泄漏栈", "Traceback" not in out, True)
 
 
+def check_catalog_reference(base):
+    product = base / "catalog-reference-product"
+    project = product / "projects/demo"
+    project.mkdir(parents=True)
+    profile_path = project / "profile.json"
+    profile = json.loads((ROOT / "projects/tapdata/profile.json").read_text())
+    readers = (project_rules.load_profile, project_rules.repository_catalog_path)
+    for value in (None, [], "private-fixture", 1, True, {}, {"catalog": []}, {"catalog": "   "}):
+        profile["repositories"] = value
+        profile_path.write_text(json.dumps(profile))
+        for reader in readers:
+            try:
+                reader(product, "demo")
+            except ValueError as error:
+                rejected = "repositories" in str(error) and "private-fixture" not in str(error)
+            else:
+                rejected = False
+            check("目录引用类型 " + reader.__name__ + repr(value), rejected, True)
+    for command, options in (("branch", ["--repo", "owner/repo"]), ("workflow", ["--issue-type-id", "1"])):
+        profile["repositories"] = []
+        profile_path.write_text(json.dumps(profile))
+        code, out = run_tool("project_rules.py", command, "--root", str(product), "--project", "demo", *options, cwd=ROOT)
+        check("目录引用 CLI 错误 " + command, code, 2)
+        check("目录引用 CLI 无堆栈 " + command, "Traceback" not in out and "repositories" in out, True)
+    catalog = project / "nested/catalog.json"
+    catalog.parent.mkdir()
+    catalog.write_text(json.dumps({"schema_version": 1, "repositories": {}}))
+    (project / "alias.json").symlink_to(catalog)
+    for reference in ("nested/catalog.json", "alias.json"):
+        profile["repositories"] = {"catalog": reference}
+        profile_path.write_text(json.dumps(profile))
+        check("合法目录路径 " + reference, project_rules.repository_catalog_path(product, "demo"), catalog.resolve())
+        check("合法目录加载 " + reference, project_rules.load_profile(product, "demo")["repositories"]["repositories"], {})
+    outside = product / "outside.json"
+    outside.write_text(catalog.read_text())
+    (project / "escape.json").symlink_to(outside)
+    for reference in ("../../outside.json", str(outside), "escape.json"):
+        profile["repositories"] = {"catalog": reference}
+        profile_path.write_text(json.dumps(profile))
+        for reader in readers:
+            try:
+                reader(product, "demo")
+            except ValueError as error:
+                rejected = "路径越界" in str(error)
+            else:
+                rejected = False
+            check("目录引用越界 " + reader.__name__ + reference, rejected, True)
+
+
 def check_station_binding_snapshot(base):
     from workflow import jira_collect, native_cleanup, repair_strategy, station, station_clean_rules, station_replan
     area = base.resolve() / "binding-snapshot"
@@ -377,6 +426,7 @@ def main():
         check_project_boundaries(ws)
         check_project_json_objects(ws)
         check_station_binding_snapshot(ws)
+        check_catalog_reference(ws)
 
     finally:
         shutil.rmtree(ws, ignore_errors=True)

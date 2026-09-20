@@ -151,18 +151,27 @@ def validate_takeover_watermark(profile):
     return value
 
 
-def load_profile(root=ROOT, project=None, station=None):
-    selected_root, selected = station_context(station) if station is not None else (root, project)
-    profile = _read_json(project_root(selected_root, selected) / "profile.json")
-    validate_takeover_watermark(profile)
-    reference = profile.get("repositories", {}).get("catalog")
-    if not isinstance(reference, str) or not reference:
+def _catalog_path(base, profile):
+    repositories = profile.get("repositories")
+    if not isinstance(repositories, dict):
+        raise ValueError("项目 Profile 的 repositories 必须是对象")
+    reference = repositories.get("catalog")
+    if not isinstance(reference, str) or not reference.strip():
         raise ValueError("项目 Profile 缺少 repositories.catalog")
-    catalog_path = (project_root(selected_root, selected) / reference).resolve()
+    path = (base / reference).resolve()
     try:
-        catalog_path.relative_to(project_root(selected_root, selected).resolve())
+        path.relative_to(base.resolve())
     except ValueError as error:
         raise ValueError("项目仓库目录路径越界：%s" % reference) from error
+    return path
+
+
+def load_profile(root=ROOT, project=None, station=None):
+    selected_root, selected = station_context(station) if station is not None else (root, project)
+    base = project_root(selected_root, selected)
+    profile = _read_json(base / "profile.json")
+    validate_takeover_watermark(profile)
+    catalog_path = _catalog_path(base, profile)
     catalog = _read_json(catalog_path)
     if catalog.get("schema_version") != 1 or not isinstance(catalog.get("repositories"), dict):
         raise ValueError("项目仓库目录结构无效：%s" % catalog_path)
@@ -197,15 +206,7 @@ def repository_catalog_path(root=ROOT, project=None, station=None):
     selected_root, selected = station_context(station) if station is not None else (root, project)
     base = project_root(selected_root, selected).resolve()
     profile = _read_json(base / "profile.json")
-    reference = profile.get("repositories", {}).get("catalog")
-    if not isinstance(reference, str) or not reference:
-        raise ValueError("项目 Profile 缺少 repositories.catalog")
-    path = (base / reference).resolve()
-    try:
-        path.relative_to(base)
-    except ValueError as error:
-        raise ValueError("项目仓库目录路径越界：%s" % reference) from error
-    return path
+    return _catalog_path(base, profile)
 
 
 def validate_project_issue(profile, issue_key):
