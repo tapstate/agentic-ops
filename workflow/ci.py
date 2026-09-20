@@ -151,7 +151,15 @@ def fetch_rollup(repo, pr):
     if proc.returncode != 0:
         raise RuntimeError("gh 调用失败：%s" % proc.stderr.strip())
     doc = json.loads(proc.stdout)
-    return doc.get("statusCheckRollup") or [], doc.get("headRefOid", "")
+    if not isinstance(doc, dict):
+        raise RuntimeError("CI 返回必须是 JSON 对象")
+    checks = doc.get("statusCheckRollup")
+    head = doc.get("headRefOid")
+    if checks is not None and not isinstance(checks, list):
+        raise RuntimeError("CI 返回的检查集合必须是列表")
+    if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", head):
+        raise RuntimeError("CI 返回的 PR Head 必须是完整提交 SHA")
+    return checks if checks is not None else [], head
 
 
 def cmd_watch(args):

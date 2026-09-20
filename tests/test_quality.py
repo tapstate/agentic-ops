@@ -1131,6 +1131,28 @@ class QualityTests(unittest.TestCase):
         self.assertFalse(self.view()["items"]["case-a"]["decision_valid"])
         self.assertTrue(self.view()["items"]["case-b"]["decision_valid"])
 
+    def test_ci_rollup_validates_external_shape_and_revision(self):
+        for value in ([], None, {"statusCheckRollup": False, "headRefOid": "a" * 40},
+                      {"statusCheckRollup": {}, "headRefOid": "a" * 40},
+                      {"statusCheckRollup": [], "headRefOid": "short"},
+                      {"statusCheckRollup": [], "headRefOid": ["a" * 40]}):
+            with self.subTest(value=value), mock.patch.object(ci.subprocess, "run", return_value=
+                    SimpleNamespace(returncode=0, stdout=json.dumps(value))):
+                with self.assertRaises(RuntimeError):
+                    ci.fetch_rollup("owner/repo", "1")
+        for head in ("a" * 40, "b" * 64):
+            for checks in (None, [], [{"state": "SUCCESS"}]):
+                with mock.patch.object(ci.subprocess, "run", return_value=SimpleNamespace(
+                        returncode=0, stdout=json.dumps({"headRefOid": head, "statusCheckRollup": checks}))):
+                    self.assertEqual((checks or [], head), ci.fetch_rollup("owner/repo", "1"))
+
+    def test_watch_invalid_response_does_not_write_observation(self):
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr="8",
+                               interval=0, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
+        with mock.patch.object(ci.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout='[]')):
+            self.assertEqual(4, ci.cmd_watch(args))
+        self.assertFalse(ci.state_path(self.base, "TAP-123", "8", args.repo).exists())
+
     def test_watch_records_unknown_as_handoff_and_preserves_raw_checks(self):
         args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr="8",
                                interval=0, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
