@@ -323,6 +323,20 @@ class SourceSyncTests(unittest.TestCase):
             self.verify()
         self.assertIn("<<<<<<<", (self.root / "source").read_text())
 
+    def test_impact_preserves_exact_nul_delimited_paths(self):
+        names = [' leading.py', 'trailing.py ', 'line\rbreak.py', 'line\nbreak.py', '中文.py']
+        for name in names:
+            before = self.commit(name, 'fixture')
+        self.git('merge', '--no-edit', 'develop')
+        result = source_sync.impact(self.root, 'feature', self.base, self.source, before)
+        self.assertEqual(set(names + ['task']), set(result['comparisons']['final_task']['paths']))
+        output = subprocess.run([sys.executable, str(ROOT / 'workflow/source_sync.py'), '--repo', str(self.root),
+            '--work-branch', 'feature', '--base-revision', self.base, '--source-revision', self.source,
+            '--before-merge-revision', before], capture_output=True, check=True)
+        self.assertEqual(result, json.loads(output.stdout))
+        empty = source_sync.impact(self.root, 'feature', self.base, self.source, self.base)
+        self.assertEqual([], empty['comparisons']['original_task']['paths'])
+
     def test_non_utf8_diff_is_analyzed_without_losing_byte_identity(self):
         before = self.task
         digests = []

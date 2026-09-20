@@ -14,13 +14,14 @@ from workflow import quality
 from workflow.git_environment import git_environment
 
 
-def git(root, *args, byte_preserving=False):
-    proc = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=30, env=git_environment(read_only=True),
+def git(root, *args, byte_preserving=False, nul_delimited=False):
+    proc = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=not nul_delimited, timeout=30, env=git_environment(read_only=True),
                           encoding="utf-8" if byte_preserving else None,
                           errors="surrogateescape" if byte_preserving else None)
     if proc.returncode:
-        raise ValueError("Git 核对失败：%s" % (proc.stderr.strip() or " ".join(args)))
-    return proc.stdout.strip()
+        error = proc.stderr.decode("utf-8", errors="replace") if nul_delimited else proc.stderr
+        raise ValueError("Git 核对失败：%s" % (error.strip() or " ".join(args)))
+    return proc.stdout.decode("utf-8") if nul_delimited else proc.stdout.strip()
 
 
 def ancestor(root, before, after):
@@ -67,7 +68,7 @@ def impact(root, work_branch, base_revision, source_revision, before_merge_revis
     for name, start, end in (("original_task", base_revision, before_merge_revision),
                              ("incoming_source", base_revision, source_revision),
                              ("final_task", source_revision, result["task_revision"])):
-        paths = git(root, "diff", "--name-only", "-z", start, end, "--")
+        paths = git(root, "diff", "--name-only", "-z", start, end, "--", nul_delimited=True)
         patch = git(root, "diff", "--binary", "--no-ext-diff", "--no-textconv", start, end, "--", byte_preserving=True)
         comparisons[name] = {"from": start, "to": end,
                              "paths": [p for p in paths.split("\0") if p],
