@@ -291,7 +291,7 @@ def normalize_remote_endpoint(url):
         return str(Path(text).resolve())
     if text.startswith("file://"):
         return "file://" + str(Path(text[7:]).resolve())
-    scp = re.fullmatch(r"(?:[^@/:]+@)?([^/:]+):(.+)", text)
+    scp = None if "://" in text else re.fullmatch(r"(?:[^@/:]+@)?([^/:]+):(.+)", text)
     if scp:
         host, path = scp.groups()
         endpoint = "%s/%s" % (host.lower(), path.lstrip("/"))

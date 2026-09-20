@@ -14,6 +14,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from gate import engine
 from workflow import engineering_baseline as baseline
 from workflow.project_rules import canonical_repository_endpoint
 from projects.tapdata.scripts import engineering_baseline as tapdata
@@ -130,6 +131,24 @@ class BaselineTest(unittest.TestCase):
                 self.assertEqual("example.org/org/repo", canonical_repository_endpoint(origin))
         self.assertNotEqual(canonical_repository_endpoint("https://other.org/org/repo.git"),
                             canonical_repository_endpoint("git@example.org:org/repo.git"))
+
+    def test_gate_and_project_remote_identity_agree(self):
+        for origin in ("git@example.org:org/repo.git", "https://example.org/org/repo.git",
+                       "ssh://git@example.org/org/repo.git", "git://example.org/org/repo.git",
+                       "https://user@example.org:8443/org/repo.git", "file:///tmp/repo", "/tmp/repo"):
+            with self.subTest(origin=origin):
+                self.assertEqual(canonical_repository_endpoint(origin), engine.normalize_remote_endpoint(origin))
+        with tempfile.TemporaryDirectory() as directory:
+            def git(*args):
+                subprocess.run(["git", *args], cwd=directory, check=True, capture_output=True)
+            git("init")
+            git("remote", "add", "origin", "https://example.org/org/repo.git")
+            git("remote", "set-url", "--push", "origin", "ssh://git@example.org/org/repo.git")
+            context = engine.git_context(directory, for_push=True)
+            self.assertNotIn("repository_fact_error", context)
+            self.assertEqual("example.org/org/repo", context["push_origin_endpoint"])
+            git("remote", "set-url", "--push", "origin", "ssh://git@other.org/org/repo.git")
+            self.assertIn("repository_fact_error", engine.git_context(directory, for_push=True))
 
     def test_explicit_commit_and_tag_supported(self):
         self.resolutions["org/a"].update(ref_kind="commit", ref_name="a" * 40)
