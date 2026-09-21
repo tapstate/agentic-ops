@@ -59,10 +59,12 @@ def normalize_origin(value):
     text = str(value).strip()
     if "://" in text:
         scheme, rest = text.split("://", 1)
-        rest = rest.split("@", 1)[-1]
-        return scheme.lower() + "://" + rest.rstrip("/")
-    if "@" in text and ":" in text:
-        text = text.split("@", 1)[1]
+        authority, suffix = re.fullmatch(r"([^/?#]*)(.*)", rest, re.DOTALL).groups()
+        authority = authority.rsplit("@", 1)[-1]
+        return scheme.lower() + "://" + (authority + suffix).rstrip("/")
+    scp = re.fullmatch(r"[^/@:]+@((?:\[[^\]]+\]|[^/@:]+):.*)", text, re.DOTALL)
+    if scp:
+        text = scp.group(1)
     return text.rstrip("/")
 
 

@@ -16,6 +16,32 @@ from workflow import git_refs, source_sync
 
 
 class GitRefsTests(unittest.TestCase):
+    def test_origin_redacts_only_authority_userinfo(self):
+        cases = {
+            "https://example.invalid/team/repo@release.git": "https://example.invalid/team/repo@release.git",
+            "HTTPS://user:password@example.invalid/team/repo@release.git/": "https://example.invalid/team/repo@release.git",
+            "ssh://git@[::1]:22/team/repo@release.git": "ssh://[::1]:22/team/repo@release.git",
+            "git@example.invalid:team/repo@release.git": "example.invalid:team/repo@release.git",
+            "git@[::1]:team/repo.git": "[::1]:team/repo.git",
+            "./local@host:repo": "./local@host:repo",
+            "/cache/local@host:repo": "/cache/local@host:repo",
+            "file:///cache/repo@release.git": "file:///cache/repo@release.git",
+        }
+        for origin, expected in cases.items():
+            with self.subTest(origin=origin):
+                self.assertEqual(expected, git_refs.normalize_origin(origin))
+
+    def test_origin_paths_with_at_keep_repository_cache_identity_distinct(self):
+        def identity(origin):
+            with mock.patch.object(git_refs, "_output", side_effect=["/repo", "/repo/.git", origin]):
+                return git_refs.repository_identity("/repo", "origin")
+        first_key, first = identity("https://example.invalid/team/repo@release.git")
+        second_key, second = identity("https://another.invalid/team/repo@release.git")
+        self.assertNotEqual(first_key, second_key)
+        self.assertNotEqual(first["origin"], second["origin"])
+        credential_key, _ = identity("https://user:password@example.invalid/team/repo@release.git")
+        self.assertEqual(first_key, credential_key)
+
     def test_exact_heads_reject_invalid_or_duplicate_responses(self):
         from workflow import station_replan
         valid = "a" * 40 + "\trefs/heads/main\n"
