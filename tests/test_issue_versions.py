@@ -15,7 +15,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from workflow import issue_versions, task, task_store
+from workflow import git_refs, issue_versions, task, task_store
 from station_fixture import save_task as save_station_task
 
 
@@ -88,9 +88,14 @@ class IssueVersionsTests(unittest.TestCase):
             self.resolve()
 
     def test_network_failure_is_not_missing_branch(self):
-        with mock.patch.object(issue_versions.subprocess, "run", return_value=SimpleNamespace(returncode=128)):
+        with mock.patch.object(git_refs.subprocess, "run", return_value=SimpleNamespace(returncode=128, stdout="", stderr="network failed")):
             with self.assertRaisesRegex(ValueError, "核验失败.*不能认定"):
                 issue_versions.remote_refs("fixture:remote", {"develop"})
+
+    def test_git_start_failure_is_not_missing_branch(self):
+        with mock.patch.object(git_refs.subprocess, "run", side_effect=FileNotFoundError("missing git")):
+            with self.assertRaisesRegex(ValueError, "核验失败.*不能认定"):
+                issue_versions.remote_refs("fixture:remote", {"main"})
 
     def test_field_readback_clears_warning_without_changing_effective_facts(self):
         from workflow import external_sync, quality
@@ -122,7 +127,7 @@ class IssueVersionsTests(unittest.TestCase):
         args.expected_run_id = "run-ffffffffffff"
         with self.assertRaises(ValueError):
             task.cmd_snapshot(args)
-        with mock.patch.object(issue_versions.subprocess, "run", side_effect=subprocess.TimeoutExpired("git", 30)):
+        with mock.patch.object(git_refs.subprocess, "run", side_effect=subprocess.TimeoutExpired("git", 30)):
             with self.assertRaisesRegex(ValueError, "超时"):
                 issue_versions.remote_refs("fixture:remote", {"develop"})
 
@@ -154,8 +159,10 @@ class IssueVersionsTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(remote), "-c", "user.name=Test", "-c", "user.email=test@example.test",
                         "commit", "-qm", "fixture", "--allow-empty"], check=True)
         subprocess.run(["git", "-C", str(remote), "tag", "release-v4.18.0"], check=True)
-        refs = issue_versions.remote_refs(str(remote), {"develop", "release-v4.18.0"})
-        self.assertEqual(set(refs), {"develop"})
+        for branch in ("origin/topic", "refs/topic"):
+            subprocess.run(["git", "-C", str(remote), "branch", branch], check=True)
+        refs = issue_versions.remote_refs(str(remote), {"develop", "release-v4.18.0", "origin/topic", "refs/topic"})
+        self.assertEqual(set(refs), {"develop", "origin/topic", "refs/topic"})
         self.assertEqual(len(refs["develop"]), 40)
 
     def test_initial_analysis_on_prepared_develop_does_not_require_reset(self):
@@ -185,7 +192,68 @@ class IssueVersionsTests(unittest.TestCase):
         task.save(self.base, self.task)
         with contextlib.redirect_stdout(io.StringIO()) as output:
             task.cmd_next(SimpleNamespace(dir=self.base, issue_key="TAP-123"))
-        self.assertEqual(json.loads(output.getvalue())["checkpoints"], {})
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["checkpoints"], {})
+        self.assertNotIn("Q2", report["guidance"])
+        self.assertNotIn("Q3", report["guidance"])
+        self.assertEqual(report["guidance_warnings"], [])
+
+    def test_stage_guidance_is_task_scoped_and_does_not_change_readiness(self):
+        self.task.update(task_class="technical_task", stage="implementation")
+        task.save(self.base, self.task)
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123")
+        def read_next():
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                task.cmd_next(args)
+            return json.loads(output.getvalue())
+        before = task_store.task_path(self.base, "TAP-123").read_bytes()
+        original = read_next()
+        path = self.base / "product/projects/tapdata/admission.json"
+        spec = json.loads(path.read_text())
+        spec["task_classes"]["technical_task"]["stage_guidance"] = {"implementation": "项目技术任务提示"}
+        path.write_text(json.dumps(spec))
+        configured = read_next()
+        self.assertEqual(configured["guidance"], "项目技术任务提示")
+        configured["guidance"] = original["guidance"]
+        self.assertEqual(configured, original)
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            task.cmd_status(args)
+        self.assertIn("项目技术任务提示", output.getvalue())
+        defect = dict(self.task, task_class="defect_fix")
+        self.assertIn("Q3", task._next_guidance(self.base, defect)[0])
+        for invalid in (None, [], {"unknown": "提示"}, {"implementation": " "}, {"implementation": 1}):
+            with self.subTest(invalid=invalid):
+                spec["task_classes"]["technical_task"]["stage_guidance"] = invalid
+                path.write_text(json.dumps(spec))
+                report = read_next()
+                self.assertEqual(report["guidance"], original["guidance"])
+                self.assertTrue(report["guidance_warnings"])
+                report["guidance_warnings"] = []
+                self.assertEqual(report, original)
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    task.cmd_status(args)
+                self.assertIn("已使用通用指引", output.getvalue())
+        self.assertEqual(task_store.task_path(self.base, "TAP-123").read_bytes(), before)
+
+    def test_stage_guidance_falls_back_when_project_config_unavailable(self):
+        path = self.base / "product/projects/tapdata/admission.json"
+        path.write_text("null")
+        guidance, warnings = task._next_guidance(self.base, self.task)
+        self.assertEqual(guidance, task.NEXT_GUIDE[self.task["stage"]])
+        self.assertTrue(warnings)
+
+    def test_stage_guidance_uses_current_station_project(self):
+        product = self.base / "product"
+        other = product / "projects/demo"
+        other.mkdir()
+        spec = json.loads((product / "projects/tapdata/admission.json").read_text())
+        spec["task_classes"]["defect_fix"]["stage_guidance"] = {"task_intake": "另一个项目的接管提示"}
+        (other / "admission.json").write_text(json.dumps(spec))
+        binding_path = self.base / ".agenticops/station.json"
+        binding = json.loads(binding_path.read_text())
+        binding["project"] = "demo"
+        binding_path.write_text(json.dumps(binding))
+        self.assertEqual(task._next_guidance(self.base, self.task), ("另一个项目的接管提示", []))
 
 
 if __name__ == "__main__":

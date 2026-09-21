@@ -9,7 +9,8 @@ import sys
 import time
 import tempfile
 
-from workflow import engineering_baseline as baseline, project_rules, station_operation as operations, source_pool
+from workflow import engineering_baseline as baseline, git_refs, project_rules, station_operation as operations, source_pool
+from workflow.git_environment import git_environment
 
 GIT_LOCAL_TIMEOUT = 120
 GIT_NETWORK_TIMEOUT = 1800
@@ -17,10 +18,7 @@ GIT_PROGRESS_INTERVAL = 10
 
 
 def git(path, *arguments, check=True):
-    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    environment.update(GIT_TERMINAL_PROMPT="0", GIT_NO_REPLACE_OBJECTS="1", GIT_NO_LAZY_FETCH="1")
-    if arguments[0] == "status":
-        environment["GIT_OPTIONAL_LOCKS"] = "0"
+    environment = git_environment(read_only=arguments[0] == "status")
     command = ["git", "-C", str(path), *arguments]
     network = arguments[0] in ("clone", "fetch")
     timeout = GIT_NETWORK_TIMEOUT if network else GIT_LOCAL_TIMEOUT
@@ -277,20 +275,19 @@ def readiness_snapshot(station, task):
         base = entry["commit_sha"]
         if git(path, "merge-base", "--is-ancestor", base, state["head"], check=False).returncode:
             raise ValueError("工作分支不从冻结基线派生：" + name)
-        ref = "refs/heads/" + baseline.ref_name(binding["target_branch"])
-        rows = git(path, "ls-remote", "--exit-code", "--refs", "origin", ref).stdout.splitlines()
-        if len(rows) != 1 or rows[0].split()[1] != ref:
+        target_branch = baseline.ref_name(binding["target_branch"])
+        work_branch = baseline.ref_name(binding["work_branch"])
+        output = git(path, "ls-remote", "--refs", "origin",
+                     "refs/heads/" + target_branch, "refs/heads/" + work_branch).stdout
+        remote_heads = git_refs.parse_head_response(output, (target_branch, work_branch))
+        target = remote_heads.get(target_branch)
+        if target is None:
             raise ValueError("远端目标分支缺失或不明确：" + name)
-        target = rows[0].split()[0]
         if git(path, "rev-parse", "--verify", "refs/remotes/origin/" + binding["target_branch"]).stdout.strip() != target:
             raise ValueError("远端引用变化，请重新执行 source-readiness：" + name)
         if target != base and git(path, "merge-base", "--is-ancestor", base, target, check=False).returncode:
             raise ValueError("目标分支与冻结基线分叉或回退：" + name)
-        work_ref = "refs/heads/" + baseline.ref_name(binding["work_branch"])
-        remote_work = git(path, "ls-remote", "--refs", "origin", work_ref).stdout.splitlines()
-        if len(remote_work) > 1 or (remote_work and remote_work[0].split()[1] != work_ref):
-            raise ValueError("远端工作分支事实不明确：" + name)
-        remote_head = remote_work[0].split()[0] if remote_work else None
+        remote_head = remote_heads.get(work_branch)
         continuation = value.get("resolution_input", {}).get("continuations", {}).get(name)
         expected_remote = continuation["expected_head"] if continuation else None
         if task.get("replan") and task.get("stage") == "design_review":

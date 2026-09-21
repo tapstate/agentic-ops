@@ -14,10 +14,10 @@ import stat
 import subprocess
 from pathlib import Path
 
-from workflow.project_rules import canonical_repository_endpoint
+from workflow.project_rules import canonical_repository_endpoint, repository_id
+from workflow.git_environment import git_environment
 
 
-REPOSITORY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 SHA = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
 
 
@@ -33,12 +33,6 @@ def text(value, field):
         raise ValueError("%s 必须是非空且无首尾空白的字符串" % field)
     if any(ord(character) < 32 for character in value):
         raise ValueError("%s 包含控制字符" % field)
-    return value
-
-
-def repository_id(value):
-    if not isinstance(value, str) or not REPOSITORY.fullmatch(value):
-        raise ValueError("repository_id 必须是安全的 owner/repo")
     return value
 
 
@@ -236,9 +230,7 @@ def verify_local_repository(station, repository, origin, ref_kind, ref, sha):
         if not stat.S_ISDIR(mode):
             raise ValueError("仓库路径必须为真实目录，拒绝 symlink/linked worktree")
     # 只读 Git 不继承调用方的 GIT_DIR、worktree、alternate 或配置注入。
-    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    environment.update(GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0",
-                       GIT_NO_REPLACE_OBJECTS="1", GIT_NO_LAZY_FETCH="1")
+    environment = git_environment(read_only=True)
 
     def git(*arguments):
         try:

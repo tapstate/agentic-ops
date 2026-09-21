@@ -125,7 +125,7 @@ class JiraWatermarkTests(unittest.TestCase):
         del profile["jira"]["takeover_watermark"]
         profile_path.write_text(json.dumps(profile), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "takeover_watermark"):
-            project_rules.load_profile(root=self.product)
+            project_rules.load_profile(root=self.product, project="tapdata")
 
 
 if __name__ == "__main__":

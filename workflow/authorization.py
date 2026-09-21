@@ -178,6 +178,8 @@ def cmd_reconfirm(args):
 
 @task_store.task_mutation
 def cmd_grant(args):
+    if not math.isfinite(args.ttl_hours) or args.ttl_hours <= 0:
+        raise ValueError("签发 ttl-hours 必须为有限正数")
     issue = task_store.validate_issue_key(args.issue_key)
     if issue not in task_store.registered_issues(args.dir, statuses=("active",)):
         print("错误：只能为 active 任务签发授权：%s" % issue, file=sys.stderr)
@@ -233,6 +235,10 @@ def cmd_grant(args):
     path.parent.mkdir(parents=True, exist_ok=True)
     from workflow import station_source
     readiness_digest = station_source.require_readiness(args.dir, task)
+    now = time.time()
+    expires = now + args.ttl_hours * 3600
+    if not math.isfinite(expires) or expires <= now:
+        raise ValueError("签发有效期必须是有限的未来时间")
     record = {
         "scope": "task_execution",
         "status": "active",
@@ -246,7 +252,7 @@ def cmd_grant(args):
         "approved_q2_digest": approved_q2_digest,
         "repositories": repository_bindings(repositories),
         "granted_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "expires_at_epoch": time.time() + args.ttl_hours * 3600,
+        "expires_at_epoch": expires,
     }
     if readiness_digest:
         record["source_readiness_digest"] = readiness_digest

@@ -19,7 +19,8 @@ def _resources():
 
 
 def _project(base):
-    return project_rules.product_root_from_station(base) / "projects" / task_store.station_project(base)
+    root, project = project_rules.station_context(base)
+    return project_rules.project_root(root, project)
 
 
 def _plan_receipt(base, task, operation, phase, snapshot=None):

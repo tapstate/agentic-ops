@@ -30,13 +30,17 @@ def load_json(path):
 def load_events(path):
     events = []
     if path.is_file():
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line:
-                try:
-                    events.append(json.loads(line))
-                except json.JSONDecodeError as error:
-                    raise ValueError("门禁事件损坏，保留现场，不能静默省略") from error
+        with path.open(encoding="utf-8") as stream:
+            for line in stream:
+                line = line.strip()
+                if line:
+                    try:
+                        event = json.loads(line)
+                        if not isinstance(event, dict):
+                            raise ValueError("门禁事件必须是 JSON 对象，保留现场，不能生成证据")
+                        events.append(event)
+                    except json.JSONDecodeError as error:
+                        raise ValueError("门禁事件损坏，保留现场，不能静默省略") from error
     return events
 
 

@@ -102,15 +102,29 @@ def state_path(base, issue_key, pr, repo=None):
     return task_store.task_directory(base, issue_key) / ("ci-%s.json" % suffix)
 
 
+def _read_state(path):
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("CI 状态 JSON 损坏，保留原文件") from error
+    if not isinstance(state, dict):
+        raise ValueError("CI 状态必须是 JSON 对象，保留原文件")
+    if state.get("schema_version") != 3:
+        raise ValueError("不支持的 CI 状态版本，保留原文件")
+    if (type(state.get("revision")) is not int or state["revision"] < 0
+            or not isinstance(state.get("history"), list)
+            or any(not isinstance(entry, dict) for entry in state["history"])):
+        raise ValueError("CI 状态损坏，保留原文件")
+    return state
+
+
 def load_state(base, issue_key, pr, repo=None):
     key = identity(base, issue_key, repo, pr)
     path = state_path(base, issue_key, pr, repo)
     if path.is_file():
-        state = json.loads(path.read_text(encoding="utf-8"))
+        state = _read_state(path)
         if any(state.get(k) != v for k, v in key.items()):
             raise ValueError("CI 状态身份或版本不匹配")
-        if type(state.get("revision")) is not int or not isinstance(state.get("history"), list):
-            raise ValueError("CI 状态损坏")
         return state
     return dict(key, revision=0, history=[])
 
@@ -129,9 +143,7 @@ def save_state(base, issue_key, pr, state, repo=None):
 def current_states(base, task):
     states = []
     for path in sorted(task_store.task_directory(base, task["issue_key"]).glob("ci-*.json")):
-        st = json.loads(path.read_text(encoding="utf-8"))
-        if st.get("schema_version") != 3:
-            raise ValueError("不支持的 CI 状态版本，保留原文件")
+        st = _read_state(path)
         if st.get("run_id") != task["run_id"]:
             continue
         checked = load_state(base, task["issue_key"], st.get("pr"), st.get("repository"))
@@ -151,16 +163,28 @@ def fetch_rollup(repo, pr):
     if proc.returncode != 0:
         raise RuntimeError("gh 调用失败：%s" % proc.stderr.strip())
     doc = json.loads(proc.stdout)
-    return doc.get("statusCheckRollup") or [], doc.get("headRefOid", "")
+    if not isinstance(doc, dict):
+        raise RuntimeError("CI 返回必须是 JSON 对象")
+    checks = doc.get("statusCheckRollup")
+    head = doc.get("headRefOid")
+    if checks is not None and not isinstance(checks, list):
+        raise RuntimeError("CI 返回的检查集合必须是列表")
+    if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", head):
+        raise RuntimeError("CI 返回的 PR Head 必须是完整提交 SHA")
+    return checks if checks is not None else [], head
 
 
 def cmd_watch(args):
+    for name, minimum in (("interval", 1), ("start_timeout", 0), ("finish_timeout", 0)):
+        value = getattr(args, name)
+        if type(value) is not int or value < minimum:
+            raise ValueError("CI %s 必须是大于等于 %d 的整数" % (name.replace("_", "-"), minimum))
     issue = task_store.resolve_active_issue(args.dir, args.issue_key)
     with task_store.task_run_lock(args.dir, issue):
         task_store.resolve_active_issue(args.dir, issue)
         task_store.check_expected_run(args.dir, issue, getattr(args, "expected_run_id", None))
         state = load_state(args.dir, issue, args.pr, getattr(args, "repo", None))
-    started = time.time()
+    started = time.monotonic()
     first_seen = None
     head = ""
     while True:
@@ -173,7 +197,7 @@ def cmd_watch(args):
             print("PR Head 未知，无法关联验证证据。", file=sys.stderr)
             return 4
         verdict, failing = classify(checks)
-        elapsed = time.time() - started
+        elapsed = time.monotonic() - started
         print("[%ds] head=%s 检查=%d 判定=%s" % (elapsed, head[:8], len(checks), verdict))
 
         if verdict == "success":
@@ -200,8 +224,8 @@ def cmd_watch(args):
                 return 3
         else:  # pending
             if first_seen is None:
-                first_seen = time.time()
-            if time.time() - first_seen > args.finish_timeout:
+                first_seen = time.monotonic()
+            if time.monotonic() - first_seen > args.finish_timeout:
                 _log(state, args, "finish_timeout", head, [], checks)
                 save_state(args.dir, issue, args.pr, state)
                 print("检查开始后 %d 秒未结束，转人工。" % args.finish_timeout)
@@ -237,9 +261,9 @@ def main():
     p.add_argument("--expected-run-id", required=True)
     p.add_argument("--repo", required=True)
     p.add_argument("--pr", required=True)
-    p.add_argument("--interval", type=int, default=POLL_INTERVAL)
-    p.add_argument("--start-timeout", type=int, default=START_TIMEOUT)
-    p.add_argument("--finish-timeout", type=int, default=FINISH_TIMEOUT)
+    p.add_argument("--interval", type=int, default=POLL_INTERVAL, help="轮询间隔秒数，必须为正整数")
+    p.add_argument("--start-timeout", type=int, default=START_TIMEOUT, help="检查启动预算秒数，非负整数")
+    p.add_argument("--finish-timeout", type=int, default=FINISH_TIMEOUT, help="检查完成预算秒数，非负整数")
     p.add_argument("--dir", default=".")
     p.add_argument("--issue-key")
     p.set_defaults(func=cmd_watch)

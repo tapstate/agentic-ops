@@ -5,7 +5,7 @@ import copy
 import json
 from pathlib import Path
 
-from workflow import engineering_baseline as baseline, project_rules, quality
+from workflow import engineering_baseline as baseline, git_refs, project_rules, quality
 from workflow import station_operation as operations, station_source as source, task_store
 
 STAGES = ("design_review", "implementation", "pr_review", "ci_validation")
@@ -23,17 +23,16 @@ def sources(base, value):
 
 
 def remote_head(path, origin, branch):
-    ref = "refs/heads/" + baseline.ref_name(branch)
-    rows = source.git(path, "ls-remote", "--refs", origin, ref).stdout.splitlines()
-    if len(rows) > 1 or (rows and (len(rows[0].split()) != 2 or rows[0].split()[1] != ref)):
-        raise ValueError("远端分支回读不唯一：" + branch)
-    return rows[0].split()[0] if rows else None
+    head = baseline.ref_name(branch)
+    output = source.git(path, "ls-remote", "--refs", origin, "refs/heads/" + head).stdout
+    return git_refs.parse_head_response(output, (head,)).get(head)
 
 
 def project(base):
-    profile = project_rules.load_profile(station=base)
-    root = project_rules.product_root_from_station(base) / "projects" / task_store.station_project(base)
-    return profile, root, project_rules.load_repository_catalog(station=base)["repositories"]
+    product, project_id = project_rules.station_context(base)
+    profile = project_rules.load_profile(root=product, project=project_id)
+    root = project_rules.project_root(product, project_id)
+    return profile, root, profile["repositories"]["repositories"]
 
 
 def prepare(base, issue, run_id, request):

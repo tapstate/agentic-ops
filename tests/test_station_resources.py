@@ -524,14 +524,36 @@ class ResourceTests(unittest.TestCase):
         (self.repo/'file.txt').write_text('exported content')
         directory = self.root/'exports'; directory.mkdir(mode=0o700)
         output = directory/'source.json'
-        result = station_export.export(self.ws,task['issue_key'],task['run_id'],'source/'+self.name+'/file.txt',str(output.resolve()))
-        self.assertEqual(output.stat().st_mode & 0o777, 0o600)
-        plan = resources.plan(self.ws, task)
-        self.assertEqual(plan['entries'][0]['preservation']['action'], 'export')
-        self.execute(task, self.reset_request(task))
+        original_read = Path.read_bytes
+        def bounded_export_read(path):
+            if path == output:
+                raise AssertionError('导出成果不能为了校验摘要整块读入内存')
+            return original_read(path)
+        with mock.patch.object(Path, 'read_bytes', bounded_export_read):
+            result = station_export.export(self.ws,task['issue_key'],task['run_id'],'source/'+self.name+'/file.txt',str(output.resolve()))
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+            plan = resources.plan(self.ws, task)
+            self.assertEqual(plan['entries'][0]['preservation']['action'], 'export')
+            self.execute(task, self.reset_request(task))
         self.assertTrue(output.exists())
         self.assertEqual(artifacts.digest(output.read_bytes()), result['sha256'])
         self.assertEqual((self.repo/'file.txt').read_text(),'baseline\n')
+
+    def test_export_coverage_rejects_changed_file_with_streamed_digest(self):
+        from workflow import station_export
+        task = self.ready()
+        (self.repo / 'file.txt').write_text('exported content')
+        directory = self.root / 'exports'; directory.mkdir(mode=0o700)
+        output = directory / 'source.json'
+        station_export.export(self.ws, task['issue_key'], task['run_id'], 'source/' + self.name + '/file.txt', str(output.resolve()))
+        plan = resources.plan(self.ws, task)
+        self.write(self.ws / 'archive/fixture/source-artifacts.json', {'repositories': {}})
+        archived_task = dict(task, archive_ref={'path': 'archive/fixture'})
+        artifacts.verify_coverage(self.ws, archived_task, plan)
+        with output.open('ab') as stream:
+            stream.write(b' ')
+        with self.assertRaisesRegex(ValueError, '源码导出回读尚未核验'):
+            artifacts.verify_coverage(self.ws, archived_task, plan)
 
     def test_archive_then_late_export_receipt_survives_reset(self):
         from workflow import station_export

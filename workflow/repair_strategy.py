@@ -20,7 +20,10 @@ ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 def _read_json(path):
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    value = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("修复策略配置必须是 JSON 对象")
+    return value
 
 
 def _catalog(root):
@@ -46,21 +49,22 @@ def _catalog(root):
                 or not guidance or any(not isinstance(line, str) or not line.strip() for line in guidance)):
             raise ValueError("通用修复策略条目内容无效")
         indexed[strategy_id] = item
-    if value["default"] not in indexed:
+    if not isinstance(value["default"], str) or value["default"] not in indexed:
         raise ValueError("通用修复策略默认值不存在")
     return value, indexed
 
 
 def _project_default(root, project, indexed):
-    path = project_rules.project_root(root, project) / PROJECT_PATH
-    if not path.is_file():
-        return None, None
     try:
+        path = project_rules.project_root(root, project) / PROJECT_PATH
+        if not path.is_file():
+            return None, None
         value = _read_json(path)
         if set(value) != {"schema_version", "repair_strategy"} or value["schema_version"] != 1:
             raise ValueError("项目规划配置字段无效")
         section = value["repair_strategy"]
-        if not isinstance(section, dict) or set(section) != {"default"} or section["default"] not in indexed:
+        if (not isinstance(section, dict) or set(section) != {"default"}
+                or not isinstance(section["default"], str) or section["default"] not in indexed):
             raise ValueError("项目修复策略默认值无效")
         return section["default"], None
     except (OSError, ValueError, json.JSONDecodeError) as error:
@@ -73,8 +77,7 @@ def resolve(base, task):
         return {"applicable": False}
     warnings = []
     try:
-        root = project_rules.product_root_from_station(base)
-        project = project_rules.project_from_station(base)
+        root, project = project_rules.station_context(base)
         catalog, indexed = _catalog(root)
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
         return {"applicable": True, "available": False,
@@ -87,7 +90,8 @@ def resolve(base, task):
         selected, source = project_selected, "project_default"
     override = (task.get("facts") or {}).get(OVERRIDE_FACT)
     if override is not None:
-        if isinstance(override, dict) and override.get("id") in indexed:
+        if (isinstance(override, dict) and isinstance(override.get("id"), str)
+                and override["id"] in indexed):
             selected, source = override["id"], "user_override"
         else:
             warnings.append("任务修复策略覆盖无效，已回退到当前默认值")

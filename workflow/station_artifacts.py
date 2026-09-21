@@ -11,6 +11,8 @@ import stat
 import tempfile
 
 from workflow import project_rules, station_source as source
+from workflow.file_digest import sha256_file
+from workflow.git_environment import git_environment
 
 MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
@@ -21,8 +23,7 @@ def digest(data):
 
 
 def git_bytes(repository, *args, data=None):
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    env.update(GIT_TERMINAL_PROMPT="0", GIT_NO_REPLACE_OBJECTS="1", GIT_NO_LAZY_FETCH="1")
+    env = git_environment()
     result = subprocess.run(["git", "-C", str(repository), *args], input=data,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=120)
     if result.returncode:
@@ -208,7 +209,7 @@ def verify_coverage(base, task, plan):
             info = target.lstat()
             if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_size > 768 * 1024 * 1024:
                 raise ValueError("导出必须是当前用户持有、权限 0600 的有限大小普通文件")
-            if not choice.get("readback_ref") or digest(target.read_bytes()) != choice.get("sha256"):
+            if not choice.get("readback_ref") or sha256_file(target) != choice.get("sha256"):
                 raise ValueError("源码导出回读尚未核验")
             exported = json.loads(target.read_text())
             if entry["path"] != exported.get("path") or exported.get("snapshot") != {k: entry[k] for k in ("head", "before", "before_index", "index_patch", "worktree_patch")}:

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -95,6 +97,55 @@ class RepairStrategyTest(unittest.TestCase):
         self.assertTrue(resolved["applicable"])
         self.assertFalse(resolved["available"])
         self.assertTrue(resolved["warnings"])
+
+    def test_project_configuration_errors_fall_back_without_mutating_task(self):
+        path = self.root / "projects/demo" / repair_strategy.PROJECT_PATH
+        before = self.read_state()
+        for value in (None, [], 1, "text", {"schema_version": 1, "repair_strategy": {"default": []}},
+                      {"schema_version": 1, "repair_strategy": {"default": {}}}):
+            with self.subTest(value=value):
+                path.write_text(json.dumps(value), encoding="utf-8")
+                resolved = repair_strategy.resolve(self.station, self.state)
+                self.assertTrue(resolved["available"])
+                self.assertEqual(resolved["effective"]["source"], "company_default")
+                self.assertTrue(resolved["warnings"])
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(task.cmd_repair_strategy_show(self.args(json=True)), 0)
+                self.assertTrue(json.loads(output.getvalue())["warnings"])
+                self.assertEqual(self.read_state(), before)
+
+    def test_missing_project_is_advisory(self):
+        (self.root / "projects/demo").rmdir()
+        resolved = repair_strategy.resolve(self.station, self.state)
+        self.assertTrue(resolved["available"])
+        self.assertEqual(resolved["effective"]["source"], "company_default")
+        self.assertTrue(resolved["warnings"])
+
+    def test_company_configuration_structure_errors_are_advisory(self):
+        for value in (None, [], 1, dict(CATALOG, default=[]), dict(CATALOG, default={})):
+            with self.subTest(value=value):
+                self.catalog_path.write_text(json.dumps(value), encoding="utf-8")
+                resolved = repair_strategy.resolve(self.station, self.state)
+                self.assertFalse(resolved["available"])
+                self.assertTrue(resolved["warnings"])
+
+    def test_invalid_task_override_preserves_project_default(self):
+        path = self.root / "projects/demo" / repair_strategy.PROJECT_PATH
+        path.write_text(json.dumps({"schema_version": 1, "repair_strategy": {"default": "context_driven"}}))
+        for value in ([], {}, 1, "missing"):
+            with self.subTest(value=value):
+                self.state["facts"][repair_strategy.OVERRIDE_FACT] = {"id": value}
+                resolved = repair_strategy.resolve(self.station, self.state)
+                self.assertEqual(resolved["effective"]["id"], "context_driven")
+                self.assertEqual(resolved["effective"]["source"], "project_default")
+                self.assertTrue(resolved["warnings"])
+
+    def test_non_object_authorization_blocks_strategy_change_without_crash(self):
+        task_store.authorization_path(self.station, self.issue).write_text("null")
+        before = self.read_state()
+        self.assertEqual(task.cmd_repair_strategy_set(self.args()), 2)
+        self.assertEqual(self.read_state(), before)
 
     def test_set_clear_and_unknown_are_atomic(self):
         self.assertEqual(task.cmd_repair_strategy_set(self.args()), 0)

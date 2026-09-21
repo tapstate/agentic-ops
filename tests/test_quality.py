@@ -5,6 +5,7 @@ import json
 import multiprocessing
 import os
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -80,6 +81,19 @@ class QualityTests(unittest.TestCase):
         self.save_task()
 
 
+    def test_quality_profiles_share_strict_project_json_reader(self):
+        for name, task in (("quality.json", None), ("quality-feature.json", {"task_class": "feature_change"})):
+            path = self.product / "projects/tapdata" / name
+            original = path.read_text()
+            for raw, message in ((original[:-1] + ',"schema_version":99,"schema_version":1}', "重复键"),
+                                 ('[]', "顶层必须是对象")):
+                with self.subTest(profile=name, raw=message):
+                    path.write_text(raw)
+                    with self.assertRaisesRegex(ValueError, message):
+                        quality.config(self.base, task)
+            path.write_text(original)
+            self.assertEqual(1, quality.config(self.base, task)["schema_version"])
+
     def save_task(self):
         save_station_task(self.base, self.task)
 
@@ -115,6 +129,21 @@ class QualityTests(unittest.TestCase):
                         approved_scope="目标功能模块")
         self.save_task()
 
+    def test_grant_rejects_invalid_expiry_without_overwriting_authorization(self):
+        self.feature_profile()
+        self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"],
+                               agent_id="fixture", plan_version="v1", ttl_hours=0.5)
+        self.assertEqual(0, authorization.cmd_grant(args))
+        path = task_store.authorization_path(self.base, "TAP-123")
+        original = path.read_bytes()
+        for ttl in (0, -1, float("nan"), float("inf"), 1e308, 1e-300):
+            with self.subTest(ttl=ttl):
+                args.ttl_hours = ttl
+                with self.assertRaisesRegex(ValueError, "有限"):
+                    authorization.cmd_grant(args)
+                self.assertEqual(original, path.read_bytes())
+
     def test_feature_confirmation_grant_advance_and_drift(self):
         self.feature_profile()
         self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
@@ -136,6 +165,41 @@ class QualityTests(unittest.TestCase):
         self.assertTrue(task._check_advance(self.task, "implementation", self.base, spec))
         with self.assertRaisesRegex(ValueError, "尚未有效确认"):
             quality.q2_digest(self.base, self.task)
+
+    def test_configured_intake_checkpoint_authorization_and_drift(self):
+        self.feature_profile()
+        self.profile_path.write_text(self.profile_path.read_text().replace('"q1-intake"', '"intake"'))
+        self.select()
+        with self.assertRaisesRegex(ValueError, "尚未有效确认"):
+            quality.q1_digest(self.base, self.task)
+        self.checkpoint("intake"); self.checkpoint("q2-plan")
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", expected_run_id=self.task["run_id"],
+                               agent_id="fixture", plan_version="v1", ttl_hours=8)
+        self.assertEqual(authorization.cmd_grant(args), 0)
+        record = json.loads(task_store.authorization_path(self.base, "TAP-123").read_text())
+        self.assertEqual(record["approved_q1_digest"], self.view()["checkpoints"]["intake"]["digest"])
+        self.assertEqual(task._check_advance(self.task, "implementation", self.base, task.admission(self.base)), [])
+        self.task["facts"]["acceptance_criteria"] = "改变验收范围"
+        self.save_task()
+        with self.assertRaisesRegex(ValueError, "尚未有效确认"):
+            quality.q1_digest(self.base, self.task)
+        self.assertTrue(task._check_advance(self.task, "implementation", self.base, task.admission(self.base)))
+
+    def test_configured_intake_keeps_manual_and_stage_requirements(self):
+        self.feature_profile()
+        rules = json.loads(self.profile_path.read_text().replace('"q1-intake"', '"intake"'))
+        for change in ("automatic", "missing_stage", "same_as_selection"):
+            with self.subTest(change=change):
+                candidate = copy.deepcopy(rules)
+                if change == "automatic":
+                    candidate["checkpoints"][0]["confirmation"] = "automatic"
+                elif change == "missing_stage":
+                    candidate["stage_checkpoints"]["implementation"].remove("intake")
+                else:
+                    candidate["selection_checkpoint"] = "intake"
+                self.profile_path.write_text(json.dumps(candidate))
+                with self.assertRaisesRegex(ValueError, "人工决定|接管与方案确认"):
+                    quality.config(self.base, self.task)
 
     def test_replan_invalidates_only_mapped_items_without_rewriting_executions(self):
         self.plan(key="case-a", repo="tapdata/tapdata")
@@ -348,8 +412,39 @@ class QualityTests(unittest.TestCase):
         plan['reference_implementations'] = [{'status': 'found', 'repository': 'tapdata/tapdata',
             'path': 'mysql.py', 'source_revision': git('rev-parse', 'HEAD'), 'difference': '补充视图类型'}]
         self.assertEqual([], plan_review.problems(plan, spec, ctx, model))
+        with mock.patch.dict(os.environ, {'GIT_DIR': '/missing/foreign.git', 'GIT_WORK_TREE': '/missing', 'GIT_CONFIG_COUNT': 'invalid'}):
+            self.assertEqual([], plan_review.problems(plan, spec, ctx, model))
         plan['reference_implementations'][0]['path'] = 'missing.py'
         self.assertTrue(any('不能解析' in p for p in plan_review.problems(plan, spec, ctx, model)))
+
+    def test_plan_references_support_both_git_object_formats(self):
+        from workflow import plan_review
+        declaration = json.loads((ROOT / 'projects/tapdata/quality-feature.json').read_text())['plan_contract']['review']
+        for object_format, length in (('sha1', 40), ('sha256', 64)):
+            with self.subTest(object_format=object_format):
+                repo = self.base / ('references-' + object_format); repo.mkdir()
+                def git(*args):
+                    return subprocess.check_output(['git', '-C', str(repo), *args], stderr=subprocess.DEVNULL, text=True).strip()
+                git('init', '--object-format=' + object_format)
+                git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.invalid')
+                (repo / 'module.py').write_text('value = 1\n')
+                git('add', '.'); git('commit', '-qm', 'reference')
+                revision = git('rev-parse', 'HEAD')
+                self.assertEqual(length, len(revision))
+                plan = feature_review('行为正确', 'owner/repo', 'module', 'case')
+                reference = {'status': 'found', 'repository': 'owner/repo', 'path': 'module.py',
+                             'source_revision': revision, 'difference': 'fixture'}
+                plan['reference_implementations'] = [reference]
+                ctx = {'facts': {'acceptance_criteria': '行为正确'},
+                       'repositories': {'owner/repo': {'source_path': str(repo)}}}
+                model = {'items': {'case': {'plan': {'timing': 'after_fix', 'repository': 'owner/repo'}}}}
+                self.assertEqual([], plan_review.problems(plan, declaration, ctx, model))
+                for invalid in (revision[:12], 'g' * length, revision + '^', '0' * length):
+                    reference['source_revision'] = invalid
+                    self.assertTrue(plan_review.problems(plan, declaration, ctx, model), invalid)
+                reference['source_revision'] = revision
+                reference['path'] = 'missing.py'
+                self.assertTrue(plan_review.problems(plan, declaration, ctx, model))
 
     def test_review_packet_combines_q2_and_jira_without_writing(self):
         self.feature_profile()
@@ -432,8 +527,8 @@ class QualityTests(unittest.TestCase):
         return quality.apply(self.base, "TAP-123", self.task["run_id"], self.view()["revision"],
                              {"action": action, "payload": payload})
 
-    def plan(self, key="case-a", method="integration", before=False, repo="tapdata/tapdata", case_status="existing"):
-        plan = {"id": key, "checkpoint": "q2-plan" if before else "q4-acceptance",
+    def plan(self, key="case-a", method="integration", before=False, repo="tapdata/tapdata", case_status="existing", checkpoint=None):
+        plan = {"id": key, "checkpoint": checkpoint or ("q2-plan" if before else "q4-acceptance"),
                 "timing": "before_fix" if before else "after_fix", "case_ref": "case:" + key,
                 "case_version": "test-v1", "case_status": case_status, "method": method,
                 "repository": repo, "target_revision": "a" * 40, "criterion": "目标行为符合预期",
@@ -766,6 +861,152 @@ class QualityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "完整提交 SHA"):
             self.decide()
 
+    def test_project_can_select_non_maven_worktree_evidence(self):
+        path = self.product / "projects/tapdata/quality.json"
+        rules = json.loads(path.read_text())
+        rules["methods"]["unit"].update(origins=["local_python", "ci"], worktree_origins=["local_python"])
+        path.write_text(json.dumps(rules))
+        plan = self.plan(method="unit")
+        plan.update(checkpoint="q3-draft", target_revision="a" * 40 + ":worktree:" + "b" * 64)
+        self.apply("item", {"plan": plan, "reason": "项目本地 Python 验证"})
+        self.select()
+        with self.assertRaisesRegex(ValueError, "完整提交 SHA"):
+            self.execute(origin="ci")
+        self.execute(origin="local_python")
+        self.decide()
+        self.assertTrue(self.view()["items"]["case-a"]["decision_valid"])
+        plan["checkpoint"] = "q4-acceptance"
+        self.apply("item", {"plan": plan, "reason": "最终验收仍需提交"})
+        self.select()
+        with self.assertRaisesRegex(ValueError, "完整提交 SHA"):
+            self.decide()
+
+    def test_explicit_empty_worktree_origins_disables_legacy_permission(self):
+        path = self.product / "projects/tapdata/quality.json"
+        rules = json.loads(path.read_text())
+        rules["methods"]["unit"]["worktree_origins"] = []
+        path.write_text(json.dumps(rules))
+        self.plan(method="unit")
+        with self.assertRaisesRegex(ValueError, "完整提交 SHA"):
+            self.execute(target_revision="a" * 40 + ":worktree:" + "b" * 64)
+        self.assertEqual(self.view()["items"]["case-a"]["executions"], [])
+        self.execute()
+
+    def test_invalid_worktree_origin_configuration_fails_closed(self):
+        path = self.product / "projects/tapdata/quality.json"
+        rules = json.loads(path.read_text())
+        for value in ("local_maven", None, ["unknown"], ["local_maven", "local_maven"], [""], [{}]):
+            with self.subTest(value=value):
+                rules["methods"]["unit"]["worktree_origins"] = value
+                path.write_text(json.dumps(rules))
+                with self.assertRaisesRegex(ValueError, "worktree_origins"):
+                    quality.config(self.base)
+
+    def test_legacy_worktree_event_rules_remain_replayable(self):
+        self.plan(method="unit")
+        revision = "a" * 40 + ":worktree:" + "b" * 64
+        self.execute(target_revision=revision)
+        state = quality.load(self.base, self.task)
+        for event in state["events"]:
+            for method in event["rules"]["methods"].values():
+                method.pop("worktree_origins", None)
+        model = quality.replay(state)
+        self.assertEqual(model["items"]["case-a"]["executions"][0]["target_revision"], revision)
+
+    def test_worktree_fingerprint_ignores_textconv_and_invalidates_evidence(self):
+        self.task["repositories"] = self.task["repositories"][:1]
+        repo = self.base / "source/tapdata/tapdata"
+        repo.mkdir(parents=True)
+        def git(*args):
+            return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True).stdout.decode().strip()
+        git("init", "-q")
+        (repo / ".gitattributes").write_text("*.txt diff=fixture\n")
+        file = repo / "tracked.txt"
+        file.write_text("before")
+        git("add", ".")
+        git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "fixture")
+        head = git("rev-parse", "HEAD")
+        marker = repo / ".git/converter-called"
+        converter = repo / ".git/converter.py"
+        converter.write_text("from pathlib import Path\nPath(%r).write_text('called')\nprint('constant')\n" % str(marker))
+        git("config", "diff.fixture.textconv", shlex.quote(sys.executable) + " " + shlex.quote(str(converter)))
+        self.assertEqual(head, quality.git_revision(repo))
+        self.task["repositories"][0]["worktree"] = {"status": "prepared", "path": str(repo)}
+        self.save_task()
+        plan = self.plan()
+        self.apply("item", {"plan": dict(plan, target_revision=head), "reason": "绑定真实源码"})
+        self.select(); self.execute(); self.decide()
+        self.assertTrue(self.view()["items"]["case-a"]["decision_valid"])
+        file.write_text("after")
+        changed = quality.git_revision(repo)
+        self.assertNotEqual(head, changed)
+        self.assertTrue(quality.exact_worktree(changed))
+        self.assertFalse(self.view()["items"]["case-a"]["decision_valid"])
+        file.write_text("another change")
+        self.assertNotEqual(changed, quality.git_revision(repo))
+        self.assertFalse(marker.exists(), "源码指纹不得运行 textconv 转换器")
+        file.write_text("before")
+        self.assertEqual(head, quality.git_revision(repo))
+
+    def test_worktree_fingerprint_frames_untracked_names_content_and_type(self):
+        repo = self.base / "fingerprint-repo"
+        repo.mkdir()
+        def git(*args):
+            return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True).stdout.decode().strip()
+        git("init", "-q")
+        git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "fixture", "--allow-empty")
+        head = git("rev-parse", "HEAD")
+        self.assertEqual(head, quality.git_revision(repo))
+        first = repo / "a"
+        first.write_bytes(b"bc")
+        first.chmod(0o644)
+        original = quality.git_revision(repo)
+        self.assertEqual(original, quality.git_revision(repo))
+        first.unlink()
+        second = repo / "ab"
+        second.write_bytes(b"c")
+        second.chmod(0o644)
+        self.assertNotEqual(original, quality.git_revision(repo))
+        second.unlink()
+        first.write_bytes(b"bc")
+        first.chmod(0o644)
+        self.assertEqual(original, quality.git_revision(repo))
+        first.chmod(0o755)
+        self.assertNotEqual(original, quality.git_revision(repo))
+        first.unlink()
+        first.symlink_to("bc")
+        self.assertNotEqual(original, quality.git_revision(repo))
+        first.unlink()
+        os.symlink(b"target-\xff", os.fsencode(first))
+        self.assertTrue(quality.exact_worktree(quality.git_revision(repo)))
+        first.unlink()
+        self.assertEqual(head, quality.git_revision(repo))
+        first.write_bytes(b"tracked")
+        git("add", "a")
+        git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "tracked")
+        clean = quality.git_revision(repo)
+        first.write_bytes(b"changed")
+        self.assertNotEqual(clean, quality.git_revision(repo))
+
+    def test_renamed_untracked_content_invalidates_quality_decision(self):
+        self.task["repositories"] = self.task["repositories"][:1]
+        repo = self.base / "source/tapdata/tapdata"
+        repo.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=Test", "-c", "user.email=test@example.test",
+                        "commit", "-qm", "fixture", "--allow-empty"], check=True)
+        (repo / "a").write_bytes(b"bc")
+        revision = quality.git_revision(repo)
+        self.task["repositories"][0]["worktree"] = {"status": "prepared", "path": str(repo)}
+        self.save_task()
+        plan = self.plan(method="unit", checkpoint="q3-draft")
+        self.apply("item", {"plan": dict(plan, target_revision=revision), "reason": "绑定未提交代码"})
+        self.select(); self.execute(); self.decide()
+        self.assertTrue(self.view()["items"]["case-a"]["decision_valid"])
+        (repo / "a").unlink()
+        (repo / "ab").write_bytes(b"c")
+        self.assertFalse(self.view()["items"]["case-a"]["decision_valid"])
+
     def test_verified_clean_commit_survives_neutral_checkout(self):
         self.task["repositories"] = self.task["repositories"][:1]
         repo = self.base / "source/tapdata/tapdata"; repo.mkdir(parents=True)
@@ -990,6 +1231,50 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(ci.current_states(self.base, self.task), [])
         with self.assertRaises(ValueError): ci.save_state(self.base, "TAP-123", "1", a)
 
+    def test_ci_state_readers_reject_corruption_and_preserve_valid_state(self):
+        valid = ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata")
+        path = ci.state_path(self.base, "TAP-123", "1", "tapdata/tapdata")
+        invalid = [None, [], True, 1, "private-fixture-state"]
+        invalid += [dict(valid, revision=value) for value in (-1, True, "1", None)]
+        invalid += [dict(valid, history=value) for value in (None, {}, [None], [1], [[]])]
+        invalid.append(dict(valid, schema_version=2))
+        for raw in [json.dumps(value).encode() for value in invalid] + [b'{bad', b'\xff']:
+            with self.subTest(raw=raw):
+                path.write_bytes(raw)
+                for read in (lambda: ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata"),
+                             lambda: ci.current_states(self.base, self.task)):
+                    with self.assertRaisesRegex(ValueError, "CI 状态"):
+                        read()
+                self.assertEqual(raw, path.read_bytes())
+        result = subprocess.run([sys.executable, str(ROOT / "workflow/ci.py"), "status",
+            "--dir", str(self.base), "--issue-key", "TAP-123", "--repo", "tapdata/tapdata", "--pr", "1"],
+            capture_output=True, text=True)
+        self.assertEqual(4, result.returncode)
+        self.assertEqual("", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
+        valid["history"].append({"verdict": "failure"})
+        raw = json.dumps(valid).encode()
+        path.write_bytes(raw)
+        self.assertEqual(valid, ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata"))
+        self.assertEqual([valid], ci.current_states(self.base, self.task))
+        self.assertEqual(raw, path.read_bytes())
+
+    def test_pr_ready_selects_ci_by_repository_and_current_pr(self):
+        repository = {"repository": "org/repo", "pull_request": "2"}
+        current = {"repository": "org/repo", "pr": "2", "history": [{"verdict": "success", "head": "a" * 40}]}
+        old = {"repository": "org/repo", "pr": "1", "history": [{"verdict": "failure", "head": "b" * 40}]}
+        other = {"repository": "other/repo", "pr": "2", "history": [{"verdict": "failure", "head": "b" * 40}]}
+        with mock.patch.object(pr_ready, "local_head", return_value="a" * 40):
+            for states in ([current, old, other], [other, old, current]):
+                with mock.patch.object(ci, "current_states", return_value=states):
+                    self.assertEqual([], pr_ready.ci_problems(self.base, {"repositories": [repository]}))
+            old["history"] = [{"verdict": "success", "head": "a" * 40}]
+            with mock.patch.object(ci, "current_states", return_value=[old, other]):
+                self.assertIn("尚无当前 run", pr_ready.ci_problems(self.base, {"repositories": [repository]})[0])
+            current["history"] = [{"verdict": "failure", "head": "a" * 40}]
+            with mock.patch.object(ci, "current_states", return_value=[current, old]):
+                self.assertIn("未全部明确成功", pr_ready.ci_problems(self.base, {"repositories": [repository]})[0])
+
     def test_ci_update_invalidates_affected_repo_only(self):
         self.plan(); self.plan("case-b", repo="tapdata/tapdata-manager")
         for key in ("case-a", "case-b"):
@@ -1000,9 +1285,193 @@ class QualityTests(unittest.TestCase):
         self.assertFalse(self.view()["items"]["case-a"]["decision_valid"])
         self.assertTrue(self.view()["items"]["case-b"]["decision_valid"])
 
+    def test_gate_intent_consumption_preserves_unicode_event_content(self):
+        engine = authorization.engine
+        directory = self.base / "intent-fixture"
+        records = directory / "evidence"
+        records.mkdir(parents=True)
+        current = {"run_id": "fixture-run", "issue_key": "TAP-123"}
+        (records / "jira-status-fixture.json").write_text(json.dumps({"run_id": "fixture-run",
+            "attempts": {"a": {"outcome": "ready", "transition_id": "1"}}}))
+        watermark = {"outcome": "ready", "issue_key": "TAP-123", "version": "v1", "issue_type_id": "1",
+            "source_ref": "fixture", "logical_key": "agenticops_version", "write_mode": "overwrite",
+            "field_id": "customfield_1", "payload_digest": "digest",
+            "native_request": {"issue_key": "TAP-123", "fields": {"customfield_1": "v1"}}}
+        (records / "jira-watermark-fixture.json").write_text(json.dumps({"run_id": "fixture-run", "watermark": watermark}))
+        for code in (0x85, 0x2028, 0x2029):
+            events = [{"reason_code": "jira_status_intent_covered", "jira_transition_id": "1"},
+                      {"reason_code": "jira_watermark_intent_covered", "jira_watermark_field": "customfield_1",
+                       "jira_watermark_digest": "digest"}]
+            for event in events:
+                event.update(agentic_run_id="fixture-run", note="a" + chr(code) + "b")
+            (records / "events.jsonl").write_bytes(("\r\n".join(json.dumps(e, ensure_ascii=False) for e in events) + "\r\n").encode())
+            with mock.patch.object(engine, "current_task", return_value=current):
+                self.assertEqual("consumed", engine.jira_status_intent(directory, "1"))
+                self.assertEqual("consumed", engine.jira_watermark_intent(directory, "TAP-123", "customfield_1", "digest"))
+            for event in events:
+                event["agentic_run_id"] = "other-run"
+            (records / "events.jsonl").write_text("\n".join(json.dumps(e, ensure_ascii=False) for e in events))
+            with mock.patch.object(engine, "current_task", return_value=current):
+                self.assertEqual("matched", engine.jira_status_intent(directory, "1"))
+                self.assertEqual("matched", engine.jira_watermark_intent(directory, "TAP-123", "customfield_1", "digest"))
+
+    def test_gate_intents_fail_closed_on_unreadable_or_corrupt_events(self):
+        engine = authorization.engine
+        directory = self.base / "invalid-intent-fixture"
+        records = directory / "evidence"
+        records.mkdir(parents=True)
+        current = {"run_id": "fixture-run", "issue_key": "TAP-123"}
+        (records / "jira-status-fixture.json").write_text(json.dumps({"run_id": "fixture-run",
+            "attempts": {"a": {"outcome": "ready", "transition_id": "1"}}}))
+        watermark = {"outcome": "ready", "issue_key": "TAP-123", "version": "v1", "issue_type_id": "1",
+            "source_ref": "fixture", "logical_key": "agenticops_version", "write_mode": "overwrite",
+            "field_id": "customfield_1", "payload_digest": "digest",
+            "native_request": {"issue_key": "TAP-123", "fields": {"customfield_1": "v1"}}}
+        (records / "jira-watermark-fixture.json").write_text(json.dumps({"run_id": "fixture-run", "watermark": watermark}))
+        path = records / "events.jsonl"
+        def check(expected):
+            with mock.patch.object(engine, "current_task", return_value=current):
+                self.assertEqual(expected, engine.jira_status_intent(directory, "1"))
+                self.assertEqual(expected, engine.jira_watermark_intent(directory, "TAP-123", "customfield_1", "digest"))
+        check("matched")
+        for raw in (b'{bad\n', b'null\n', b'[]\n', b'1\n', b'true\n', b'"event"\n', b'{}\n\xff'):
+            with self.subTest(raw=raw):
+                path.write_bytes(raw)
+                check("missing")
+                self.assertEqual(raw, path.read_bytes())
+        path.write_bytes(b'{"reason_code":"jira_status_intent_covered","agentic_run_id":"fixture-run","jira_transition_id":"1"}\nnull\n')
+        check("missing")
+        path.write_bytes(b'\r\n{}\r\n')
+        check("matched")
+        original_open = Path.open
+        def guarded_open(target, *args, **kwargs):
+            if target == path:
+                raise PermissionError("fixture")
+            return original_open(target, *args, **kwargs)
+        with mock.patch.object(Path, "open", guarded_open):
+            check("missing")
+        path.unlink()
+        path.mkdir()
+        check("missing")
+
+    def test_gate_intents_reject_malformed_preparation_files(self):
+        engine = authorization.engine
+        directory = self.base / "preparation-fixture"
+        records = directory / "evidence"
+        records.mkdir(parents=True)
+        current = {"run_id": "fixture-run", "issue_key": "TAP-123"}
+        status = records / "jira-status-fixture.json"
+        watermark = records / "jira-watermark-fixture.json"
+        for raw in (b'null', b'[]', b'1', b'true', b'"state"', b'{bad', b'\xff'):
+            with self.subTest(raw=raw):
+                for path in (status, watermark):
+                    path.write_bytes(raw)
+                with mock.patch.object(engine, "current_task", return_value=current):
+                    self.assertEqual("missing", engine.jira_status_intent(directory, "1"))
+                    self.assertEqual("missing", engine.jira_watermark_intent(directory, "TAP-123", "customfield_1", "digest"))
+                self.assertEqual(raw, status.read_bytes())
+                self.assertEqual(raw, watermark.read_bytes())
+        (directory / "current-task.json").write_bytes(b'\xff')
+        self.assertIsNone(engine.current_task(directory))
+        valid = {"outcome": "ready", "issue_key": "TAP-123", "version": "v1", "issue_type_id": "1",
+            "source_ref": "fixture", "logical_key": "agenticops_version", "write_mode": "overwrite",
+            "field_id": "customfield_1", "payload_digest": "digest",
+            "native_request": {"issue_key": "TAP-123", "fields": {"customfield_1": "v1"}}}
+        (records / "jira-watermark-valid.json").write_text(json.dumps({"run_id": "fixture-run", "watermark": valid}))
+        with mock.patch.object(engine, "current_task", return_value=current):
+            self.assertEqual("matched", engine.jira_watermark_intent(directory, "TAP-123", "customfield_1", "digest"))
+
+    def test_evidence_jsonl_preserves_unicode_separators_inside_strings(self):
+        path = task_store.events_path(self.base, "TAP-123")
+        events = [{"decision": "allow", "note": "a" + chr(code) + "b"}
+                  for code in (0x85, 0x2028, 0x2029)]
+        raw = "\r\n".join(json.dumps(event, ensure_ascii=False) for event in events) + "\r\n\r\n"
+        path.write_bytes(raw.encode("utf-8"))
+        self.assertEqual(events, evidence.load_events(path))
+        self.assertEqual(raw.encode("utf-8"), path.read_bytes())
+
+    def test_evidence_rejects_non_object_events_without_partial_output(self):
+        path = task_store.events_path(self.base, "TAP-123")
+        for value in (None, [], "private-fixture-event", 1, True):
+            with self.subTest(value=value):
+                raw = '{"decision":"allow"}\n' + json.dumps(value) + '\n'
+                path.write_text(raw)
+                with self.assertRaisesRegex(ValueError, "JSON 对象"):
+                    evidence.load_events(path)
+                result = subprocess.run([sys.executable, str(ROOT / 'workflow/evidence.py'),
+                    '--dir', str(self.base), '--issue-key', 'TAP-123'], capture_output=True, text=True)
+                self.assertEqual(4, result.returncode)
+                self.assertEqual('', result.stdout)
+                self.assertNotIn('Traceback', result.stderr)
+                self.assertNotIn('private-fixture-event', result.stderr)
+                self.assertEqual(raw, path.read_text())
+        path.write_text('\n{"decision":"allow"}\n\n')
+        self.assertEqual([{"decision": "allow"}], evidence.load_events(path))
+        path.unlink()
+        self.assertEqual([], evidence.load_events(path))
+
+    def test_ci_timeouts_use_monotonic_clock_and_keep_audit_timestamp(self):
+        for pr, checks, ticks, verdict in (
+                ("81", [], [100, 401], "start_timeout"),
+                ("82", [{"status": "IN_PROGRESS"}], [100, 101, 102, 102, 703, 704], "finish_timeout")):
+            args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr=pr,
+                interval=1, start_timeout=300, finish_timeout=600, expected_run_id=self.task["run_id"])
+            clock = SimpleNamespace(monotonic=mock.Mock(side_effect=ticks),
+                time=mock.Mock(side_effect=AssertionError("wall clock must not measure duration")),
+                sleep=mock.Mock(), strftime=mock.Mock(return_value="2026-09-21T00:00:00+0800"))
+            with self.subTest(verdict=verdict), mock.patch.object(ci, "time", clock), mock.patch.object(
+                    ci, "fetch_rollup", return_value=(checks, "a" * 40)):
+                self.assertEqual(3, ci.cmd_watch(args))
+            record = ci.load_state(self.base, "TAP-123", pr, args.repo)["history"][-1]
+            self.assertEqual(verdict, record["verdict"])
+            self.assertEqual("2026-09-21T00:00:00+0800", record["ts"])
+            clock.time.assert_not_called()
+
+    def test_ci_rollup_validates_external_shape_and_revision(self):
+        for value in ([], None, {"statusCheckRollup": False, "headRefOid": "a" * 40},
+                      {"statusCheckRollup": {}, "headRefOid": "a" * 40},
+                      {"statusCheckRollup": [], "headRefOid": "short"},
+                      {"statusCheckRollup": [], "headRefOid": ["a" * 40]}):
+            with self.subTest(value=value), mock.patch.object(ci.subprocess, "run", return_value=
+                    SimpleNamespace(returncode=0, stdout=json.dumps(value))):
+                with self.assertRaises(RuntimeError):
+                    ci.fetch_rollup("owner/repo", "1")
+        for head in ("a" * 40, "b" * 64):
+            for checks in (None, [], [{"state": "SUCCESS"}]):
+                with mock.patch.object(ci.subprocess, "run", return_value=SimpleNamespace(
+                        returncode=0, stdout=json.dumps({"headRefOid": head, "statusCheckRollup": checks}))):
+                    self.assertEqual((checks or [], head), ci.fetch_rollup("owner/repo", "1"))
+
+    def test_ci_watch_validates_budget_before_reading_or_querying(self):
+        for name in ("interval", "start_timeout", "finish_timeout"):
+            invalid = (-1, True, 1.5, float("inf"), None) + ((0,) if name == "interval" else ())
+            for value in invalid:
+                args = SimpleNamespace(interval=1, start_timeout=0, finish_timeout=0)
+                setattr(args, name, value)
+                with self.subTest(name=name, value=value), mock.patch.object(ci, "fetch_rollup") as fetch:
+                    with mock.patch.object(ci.task_store, "resolve_active_issue") as resolve:
+                        with self.assertRaisesRegex(ValueError, name.replace("_", "-")):
+                            ci.cmd_watch(args)
+                        resolve.assert_not_called()
+                    fetch.assert_not_called()
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr="8",
+            interval=1, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
+        with mock.patch.object(ci, "fetch_rollup", return_value=([], "a" * 40)), mock.patch.object(
+                ci.time, "monotonic", side_effect=[10, 11]), mock.patch.object(ci.time, "sleep") as sleep:
+            self.assertEqual(3, ci.cmd_watch(args))
+            sleep.assert_not_called()
+        self.assertEqual("start_timeout", ci.load_state(self.base, "TAP-123", "8", args.repo)["history"][-1]["verdict"])
+
+    def test_watch_invalid_response_does_not_write_observation(self):
+        args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr="8",
+                               interval=1, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
+        with mock.patch.object(ci.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout='[]')):
+            self.assertEqual(4, ci.cmd_watch(args))
+        self.assertFalse(ci.state_path(self.base, "TAP-123", "8", args.repo).exists())
+
     def test_watch_records_unknown_as_handoff_and_preserves_raw_checks(self):
         args = SimpleNamespace(dir=self.base, issue_key="TAP-123", repo="tapdata/tapdata", pr="8",
-                               interval=0, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
+                               interval=1, start_timeout=0, finish_timeout=0, expected_run_id=self.task["run_id"])
         checks = [{"name": "integration", "status": "COMPLETED", "conclusion": ""}]
         with mock.patch.object(ci, "fetch_rollup", return_value=(checks, "known-sha")):
             self.assertEqual(ci.cmd_watch(args), 3)
@@ -1027,12 +1496,75 @@ class QualityTests(unittest.TestCase):
                 "linked_test_details": [{"key": "TAP-T1", "test_type": "TapTest", "case_version": "updated:2", "updated": proof()["at"],
                                           "source_ref": "fixture:TAP-T1", "status": {"name": status}}]}
 
-    def taptest_plan(self):
-        self.plan(method="taptest")
+    def taptest_plan(self, checkpoint=None):
+        self.plan(method="taptest", checkpoint=checkpoint)
         plan = self.view()["items"]["case-a"]["plan"]
         plan.update(case_ref="TAP-T1", target_revision="pending")
         self.apply("item", {"plan": plan, "reason": "已关联测试任务"})
         self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
+
+    def rename_acceptance_checkpoint(self):
+        path = self.product / "projects/tapdata/quality.json"
+        path.write_text(path.read_text().replace('"q4-acceptance"', '"acceptance"'))
+
+    def test_configured_acceptance_checkpoint_for_status_evidence(self):
+        from workflow import jira_status, jira_tests
+        self.rename_acceptance_checkpoint()
+        self.taptest_plan(checkpoint="acceptance")
+        snapshot = self.taptest_snapshot()
+        self.apply("jira_status", {"snapshot": snapshot})
+        self.automatic_checkpoint()
+        view = self.view()
+        self.assertEqual(view["checkpoints"]["acceptance"]["mode"], "jira_status")
+        self.assertTrue(view["checkpoints"]["acceptance"]["reviewed"])
+        self.assertEqual(quality.advance_problems(self.base, self.task, "ci_validation"), [])
+        self.assertTrue(jira_status.tests_passed_ready(self.base, self.task, snapshot)[0])
+        rules = quality.config(self.base, self.task)
+        tests = jira_tests.linked_tests(snapshot, "TAP-123", rules)[1]
+        self.assertEqual(pr_ready.linked_test_confirmation_problems(self.base, self.task, rules, tests), [])
+        self.assertEqual(pr_ready.quality_problems(self.base, self.task, rules, snapshot), [])
+
+    def test_configured_acceptance_checkpoint_for_manual_evidence(self):
+        from workflow import jira_status, jira_tests
+        self.rename_acceptance_checkpoint()
+        plan = self.plan(method="manual", checkpoint="acceptance")
+        plan.update(case_ref="TAP-T1", case_version="updated:2")
+        self.apply("item", {"plan": plan, "reason": "自定义项目验收点"})
+        self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
+        self.execute(origin="manual"); self.decide(); self.automatic_checkpoint()
+        self.checkpoint("acceptance")
+        snapshot = self.taptest_snapshot()
+        snapshot["linked_test_details"][0]["test_type"] = "Manual"
+        rules = quality.config(self.base, self.task)
+        tests = jira_tests.linked_tests(snapshot, "TAP-123", rules)[1]
+        self.assertTrue(jira_status.tests_passed_ready(self.base, self.task, snapshot)[0])
+        self.assertEqual(pr_ready.linked_test_confirmation_problems(self.base, self.task, rules, tests), [])
+        self.assertEqual(pr_ready.quality_problems(self.base, self.task, rules, snapshot), [])
+        self.assertTrue(jira_tests.confirmation_problems(self.view(), tests))  # 旧缺省不能借用新检查点。
+
+    def test_invalid_or_early_linked_test_checkpoint_is_rejected(self):
+        path = self.product / "projects/tapdata/quality.json"
+        rules = json.loads(path.read_text())
+        for checkpoint in (None, [], "missing", "q1-intake", "q3-draft"):
+            with self.subTest(checkpoint=checkpoint):
+                rules["tests_passed"]["checkpoint"] = checkpoint
+                path.write_text(json.dumps(rules))
+                with self.assertRaisesRegex(ValueError, "关联测试验收检查点"):
+                    quality.config(self.base, self.task)
+
+    def test_legacy_linked_test_events_replay_without_checkpoint_field(self):
+        path = self.product / "projects/tapdata/quality.json"
+        rules = json.loads(path.read_text())
+        rules["tests_passed"].pop("checkpoint")
+        path.write_text(json.dumps(rules))
+        self.taptest_plan()
+        self.apply("jira_status", {"snapshot": self.taptest_snapshot()})
+        state = quality.load(self.base, self.task)
+        before = quality.replay(state)
+        rules["tests_passed"]["checkpoint"] = "q4-acceptance"
+        path.write_text(json.dumps(rules))
+        self.assertEqual(quality.replay(quality.load(self.base, self.task)), before)
+        self.assertTrue(before["jira_assessment"]["tests"]["TAP-T1"]["passed"])
 
     def test_taptest_four_statuses_all_entrypoints_without_execution_or_accept(self):
         from workflow import jira_status, jira_tests
@@ -1477,6 +2009,32 @@ class VerificationContractTests(unittest.TestCase):
             self.assertTrue(self.v.problems(model, self.ctx, ["local"]))
             with self.assertRaises(ValueError):
                 self.v.verify_artifacts(p)
+
+
+class FileDigestTests(unittest.TestCase):
+    def test_bounded_reads_keep_exact_digest_and_legacy_api(self):
+        import hashlib
+        import io
+        from workflow.file_digest import sha256_file
+        from workflow import verification
+        self.assertIs(verification.file_hash, sha256_file)
+        for data in (b"", b"small", b"content" * (512 * 1024)):
+            sizes = []
+            class BoundedStream(io.BytesIO):
+                def read(self, size=-1):
+                    sizes.append(size)
+                    if not 0 < size <= 1024 * 1024:
+                        raise AssertionError("文件摘要必须分块读取")
+                    return super().read(size)
+            with self.subTest(length=len(data)), mock.patch.object(Path, "open", return_value=BoundedStream(data)):
+                self.assertEqual(hashlib.sha256(data).hexdigest(), sha256_file("fixture"))
+            self.assertTrue(sizes)
+
+    def test_missing_file_is_not_an_empty_digest(self):
+        from workflow.file_digest import sha256_file
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(FileNotFoundError):
+                sha256_file(Path(directory) / "missing")
 
 
 if __name__ == "__main__":

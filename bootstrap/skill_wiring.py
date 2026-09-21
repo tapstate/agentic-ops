@@ -193,17 +193,21 @@ def update_git_exclude(product_root, artifacts):
         ["git", "-C", str(product_root), "rev-parse", "--git-path", "info/exclude"],
         capture_output=True,
         text=True,
+        env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
     )
     if result.returncode != 0:
         raise ValueError("源码产品根目录无法定位 Git info/exclude")
     exclude = Path(result.stdout.strip())
     if not exclude.is_absolute():
         exclude = product_root / exclude
-    existing = set(exclude.read_text(encoding="utf-8").splitlines()) if exclude.is_file() else set()
+    content = exclude.read_text(encoding="utf-8") if exclude.is_file() else ""
+    existing = set(content.splitlines())
     missing = [path for path in sorted(artifacts) if path not in existing]
     if missing:
         exclude.parent.mkdir(parents=True, exist_ok=True)
         with exclude.open("a", encoding="utf-8") as stream:
+            if content and not content.endswith("\n"):
+                stream.write("\n")
             for path in missing:
                 stream.write(path + "\n")
 

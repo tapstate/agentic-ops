@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from workflow import engineering_baseline as baseline, station_artifacts as artifacts, task_store
+from workflow.file_digest import sha256_file
 
 
 def receipt_path(base, task, relative, proof, destination):
@@ -95,7 +96,7 @@ def export(base, issue, run, relative, destination, expected_operation_id=None):
         import stat
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_size != len(data):
             raise ValueError('导出目的文件身份或权限异常')
-        if artifacts.digest(target.read_bytes()) != checksum:
+        if sha256_file(target) != checksum:
             raise ValueError('导出文件回读失败，拒绝登记保存决定')
         # 写出期间源码有任何变化时，不把刚生成的旧成果当成当前成果。
         if resources.plan(base, task, decisions_override={relative: {'action': 'archive'}})['entries'] != plan['entries']:

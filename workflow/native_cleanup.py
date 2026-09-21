@@ -14,26 +14,73 @@ from workflow import engineering_baseline as baseline, project_rules, station_di
 from workflow import station_source as source, station_resources as resources, station_operation as operations, task_store
 
 
+def _unique_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError('清理配方包含重复 JSON 键')
+        value[key] = item
+    return value
+
+
+def validate_configuration(value):
+    """完整配置先校验，不能在保全报告途中才发现下一仓配方无效。"""
+    if (not isinstance(value, dict) or set(value) != {'schema_version', 'repositories'}
+            or type(value['schema_version']) is not int or value['schema_version'] != 1
+            or not isinstance(value['repositories'], dict)):
+        raise ValueError('清理配方结构或版本无效')
+    for name, recipe in value['repositories'].items():
+        baseline.repository_id(name)
+        if not isinstance(recipe, dict) or recipe.get('kind') not in ('maven', 'web', 'project-script'):
+            raise ValueError('清理配方类型无效：' + name)
+        expected = {'kind', 'generated', 'reports', 'source_ref'}
+        if recipe['kind'] == 'project-script':
+            expected.add('script')
+        if set(recipe) != expected:
+            raise ValueError('清理配方字段无效：' + name)
+        baseline.text(recipe['source_ref'], '清理配方 source_ref')
+        for field in ('generated', 'reports'):
+            patterns = recipe[field]
+            if not isinstance(patterns, list) or (field == 'generated' and not patterns):
+                raise ValueError('清理配方模式列表无效：' + name + '/' + field)
+            for pattern in patterns:
+                baseline.text(pattern, '清理配方路径模式')
+                parts = pattern.split('/')
+                if ('\\' in pattern or any(part in ('', '.', '..') for part in parts)
+                        or (field == 'generated' and any('**' in part and part != '**' for part in parts))):
+                    raise ValueError('清理配方需要仓库内相对路径模式：' + name)
+        if recipe['kind'] == 'project-script':
+            script = baseline.text(recipe['script'], '清理配方 script')
+            parts = script.split('/')
+            if (len(parts) != 2 or parts[0] != 'scripts' or parts[1] in ('.', '..')
+                    or not parts[1] or '\\' in script):
+                raise ValueError('清理配方脚本必须位于项目 scripts 目录：' + name)
+
+
 def configuration(base):
-    root = project_rules.product_root_from_station(base)
-    path = root / 'projects' / task_store.station_project(base) / 'repo-cleanup.json'
+    root, project = project_rules.station_context(base)
+    path = project_rules.project_root(root, project) / 'repo-cleanup.json'
     if path.is_symlink():
         raise ValueError('清理配方不能为链接')
     raw = path.read_bytes()
-    value = json.loads(raw)
-    if value.get('schema_version') != 1:
-        raise ValueError('清理配方版本无效')
+    value = json.loads(raw, object_pairs_hook=_unique_object)
+    validate_configuration(value)
     return root, value, hashlib.sha256(raw).hexdigest()
 
 
-def sha(path):
+def file_bytes(path):
     if path.is_symlink() or not path.is_file():
         raise ValueError('配方输入或报告不是普通文件：' + str(path))
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    return path.read_bytes()
+
+
+def sha(path):
+    return hashlib.sha256(file_bytes(path)).hexdigest()
 
 
 def commands(base, task, name, recipe, paths):
-    root = project_rules.product_root_from_station(base)
+    root, project_id = project_rules.station_context(base)
+    project = project_rules.project_root(root, project_id)
     repository = source.repository_path(base, name)
     kind = recipe['kind']
     if kind == 'maven':
@@ -42,18 +89,25 @@ def commands(base, task, name, recipe, paths):
         argv = ['mvn', '-Dmaven.repo.local=' + str(local), 'clean']
     elif kind == 'web':
         package = repository / 'package.json'
-        value = json.loads(package.read_text())
-        if not isinstance(value.get('scripts', {}).get('clean'), str) or not value['scripts']['clean'].strip():
+        raw = file_bytes(package)
+        value = json.loads(raw)
+        if not isinstance(value, dict):
+            raise ValueError('Web package.json 必须是对象：' + name)
+        scripts = value.get('scripts')
+        if not isinstance(scripts, dict) or not isinstance(scripts.get('clean'), str) or not scripts['clean'].strip():
             raise ValueError('Web 工程没有已声明的 clean 脚本：' + name)
-        manager = str(value.get('packageManager', '')).split('@')[0]
+        declared = value.get('packageManager')
+        manager = declared.split('@')[0] if isinstance(declared, str) else None
         if manager not in ('pnpm', 'npm'):
             raise ValueError('Web 包管理器未明确声明，不能猜测：' + name)
-        inputs = {'package.json': sha(package)}
+        inputs = {'package.json': hashlib.sha256(raw).hexdigest()}
         argv = [manager, 'run', 'clean']
     elif kind == 'project-script':
-        script = root / 'projects' / task_store.station_project(base) / recipe['script']
-        if script.parent != root / 'projects' / task_store.station_project(base) / 'scripts':
-            raise ValueError('项目清理脚本越界')
+        script_directory = project / 'scripts'
+        script = project / recipe['script']
+        if (script.parent != script_directory or script_directory.is_symlink()
+                or script.resolve().parent != script_directory.resolve()):
+            raise ValueError('项目清理脚本越界或父目录为链接')
         inputs = {str(script): sha(script)}
         argv = ['python3', str(script), '--repository', str(repository)]
     else:

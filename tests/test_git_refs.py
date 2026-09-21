@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Git refs 单仓、单范围缓存的离线合同测试。"""
 import json
+import hashlib
+import os
 import subprocess
 from pathlib import Path
 import sys
@@ -14,6 +16,72 @@ from workflow import git_refs, source_sync
 
 
 class GitRefsTests(unittest.TestCase):
+    def test_origin_redacts_only_authority_userinfo(self):
+        cases = {
+            "https://example.invalid/team/repo@release.git": "https://example.invalid/team/repo@release.git",
+            "HTTPS://user:password@example.invalid/team/repo@release.git/": "https://example.invalid/team/repo@release.git",
+            "ssh://git@[::1]:22/team/repo@release.git": "ssh://[::1]:22/team/repo@release.git",
+            "git@example.invalid:team/repo@release.git": "example.invalid:team/repo@release.git",
+            "git@[::1]:team/repo.git": "[::1]:team/repo.git",
+            "./local@host:repo": "./local@host:repo",
+            "/cache/local@host:repo": "/cache/local@host:repo",
+            "file:///cache/repo@release.git": "file:///cache/repo@release.git",
+        }
+        for origin, expected in cases.items():
+            with self.subTest(origin=origin):
+                self.assertEqual(expected, git_refs.normalize_origin(origin))
+
+    def test_origin_paths_with_at_keep_repository_cache_identity_distinct(self):
+        def identity(origin):
+            with mock.patch.object(git_refs, "_output", side_effect=["/repo", "/repo/.git", origin]):
+                return git_refs.repository_identity("/repo", "origin")
+        first_key, first = identity("https://example.invalid/team/repo@release.git")
+        second_key, second = identity("https://another.invalid/team/repo@release.git")
+        self.assertNotEqual(first_key, second_key)
+        self.assertNotEqual(first["origin"], second["origin"])
+        credential_key, _ = identity("https://user:password@example.invalid/team/repo@release.git")
+        self.assertEqual(first_key, credential_key)
+
+    def test_exact_heads_reject_invalid_or_duplicate_responses(self):
+        from workflow import station_replan
+        valid = "a" * 40 + "\trefs/heads/main\n"
+        for output in ("not-a-sha\trefs/heads/main\n", "a" * 40 + "\n",
+                       valid + valid, valid + "broken\n", "a" * 40 + "\trefs/heads/main\textra\n"):
+            with self.subTest(output=output):
+                response = subprocess.CompletedProcess([], 0, output, "")
+                with mock.patch.object(git_refs, "_run", return_value=response):
+                    with self.assertRaises(git_refs.GitRefsError):
+                        git_refs.query_heads("fixture", ["main"])
+                with mock.patch.object(station_replan.source, "git", return_value=response):
+                    with self.assertRaises(git_refs.GitRefsError):
+                        station_replan.remote_head(".", "fixture", "main")
+
+    def test_replan_remote_head_preserves_missing_and_valid_sha(self):
+        from workflow import station_replan
+        for sha in (None, "a" * 40, "b" * 64):
+            output = sha + "\trefs/heads/main\n" if sha else ""
+            with mock.patch.object(station_replan.source, "git", return_value=subprocess.CompletedProcess([], 0, output, "")) as git:
+                self.assertEqual(sha, station_replan.remote_head(".", "fixture", "main"))
+                git.assert_called_once_with(".", "ls-remote", "--refs", "fixture", "refs/heads/main")
+
+    def test_git_environment_preserves_auth_and_does_not_mutate_parent(self):
+        from workflow.git_environment import git_environment
+        inherited = {'PATH': '/tools', 'SSH_AUTH_SOCK': '/agent.sock', 'HOME': '/home',
+                     'GIT_DIR': '/other', 'GIT_CONFIG_COUNT': 'broken', 'GIT_OPTIONAL_LOCKS': '1'}
+        with mock.patch.dict(os.environ, inherited, clear=True):
+            before = dict(os.environ)
+            environment = git_environment(read_only=True)
+            self.assertEqual(before, dict(os.environ))
+            self.assertEqual('/agent.sock', environment['SSH_AUTH_SOCK'])
+            self.assertEqual('/tools', environment['PATH'])
+            self.assertNotIn('GIT_DIR', environment)
+            self.assertNotIn('GIT_CONFIG_COUNT', environment)
+            self.assertEqual('0', environment['GIT_OPTIONAL_LOCKS'])
+            self.assertEqual('0', environment['GIT_TERMINAL_PROMPT'])
+            self.assertEqual('1', environment['GIT_NO_REPLACE_OBJECTS'])
+            self.assertEqual('1', environment['GIT_NO_LAZY_FETCH'])
+            self.assertNotIn('GIT_OPTIONAL_LOCKS', git_environment())
+
     def identity(self, repository, remote, repository_id=None, source_root=None):
         identity = {"repository_id": repository_id or str(Path(repository).resolve()), "remote": remote,
                     "origin": "github.test/a/repo.git", "repository_path": str(Path(repository).resolve()),
@@ -21,6 +89,22 @@ class GitRefsTests(unittest.TestCase):
         if source_root:
             identity["source_root"] = str(Path(source_root).resolve())
         return "key", identity
+
+    def test_bulk_refs_reject_malformed_and_duplicate_rows(self):
+        for scope, parser, prefix in (("heads", git_refs._parse_heads, "refs/heads/main"),
+                                     ("tags", git_refs._parse_tags, "refs/tags/v1")):
+            valid = "a" * 40 + "\t" + prefix + "\n"
+            for output in ("invalid\t" + prefix, valid + "broken", valid + valid):
+                with self.subTest(scope=scope, output=output):
+                    with self.assertRaises(git_refs.GitRefsError):
+                        parser(output)
+                    with mock.patch.object(git_refs, "repository_identity", side_effect=self.identity), mock.patch.object(
+                            git_refs, "_run", return_value=subprocess.CompletedProcess([], 0, output, "")):
+                        result = git_refs.snapshot("/repo", scopes=(scope,))
+                    self.assertEqual("refresh_failed", result["scopes"][scope]["freshness"])
+            self.assertEqual({}, parser(""))
+        self.assertEqual({"v1": {"object": "a" * 40, "peeled": "b" * 64}}, git_refs._parse_tags(
+            "a" * 40 + "\trefs/tags/v1\n" + "b" * 64 + "\trefs/tags/v1^{}\n"))
 
     def test_per_scope_ttl_and_refresh(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -45,9 +129,57 @@ class GitRefsTests(unittest.TestCase):
                     mock.patch.object(git_refs, "_query", side_effect=git_refs.GitRefsError("network")):
                 result = git_refs.snapshot("/repo", cache_file=cache, cache_root="/root", now=500)
             self.assertEqual("refresh_failed", result["scopes"]["heads"]["freshness"])
+            self.assertTrue(result["network_used"])
             self.assertEqual("a" * 40, result["scopes"]["heads"]["refs"]["main"])
             document = json.loads(cache.read_text(encoding="utf-8"))
             self.assertEqual(100, document["roots"]["/root"]["repositories"]["key"]["scopes"]["heads"]["last_success_epoch"])
+
+    def test_first_failed_refresh_reports_attempt_without_inventing_success(self):
+        with mock.patch.object(git_refs, "repository_identity", side_effect=self.identity), \
+                mock.patch.object(git_refs, "_query", side_effect=git_refs.GitRefsError("offline")):
+            result = git_refs.snapshot("/repo")
+        self.assertTrue(result["network_used"])
+        self.assertEqual(result["scopes"]["heads"]["refs"], {})
+        self.assertIsNone(result["scopes"]["heads"]["last_success_at"])
+        self.assertEqual(result["scopes"]["heads"]["freshness"], "refresh_failed")
+
+    def test_corrupt_cache_is_diagnostic_and_never_overwritten(self):
+        identity = self.identity("/repo", "origin")[1]
+        records = [None, [], {}, {"identity": identity, "scopes": None},
+                   {"identity": identity, "scopes": {"heads": None}},
+                   {"identity": identity, "scopes": {"heads": {"refs": []}}}]
+        documents = [None, [], 1, {"schema_version": 2, "roots": None},
+                     {"schema_version": 2, "roots": {"/root": None}}]
+        documents += [{"schema_version": 2, "roots": {"/root": {"repositories": {"key": record}}}}
+                      for record in records]
+        inputs = [json.dumps(value).encode() for value in documents] + [b"{broken", b"\xff"]
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / "cache.json"
+            for raw in inputs:
+                for mode in ("read", "auto", "always"):
+                    with self.subTest(raw=raw, mode=mode), \
+                            mock.patch.object(git_refs, "repository_identity", side_effect=self.identity), \
+                            mock.patch.object(git_refs, "_query") as query:
+                        cache.write_bytes(raw)
+                        with self.assertRaisesRegex(git_refs.GitRefsError, "缓存"):
+                            if mode == "read":
+                                git_refs.read_snapshot("/repo", cache_file=cache, cache_root="/root")
+                            else:
+                                git_refs.snapshot("/repo", cache_file=cache, cache_root="/root", refresh=mode)
+                        self.assertEqual(cache.read_bytes(), raw)
+                        query.assert_not_called()
+
+    def test_unrelated_corrupt_partition_does_not_block_current_repository(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / "cache.json"
+            cache.write_text(json.dumps({"schema_version": 2, "roots": {"/other": None}}))
+            before = cache.read_bytes()
+            with mock.patch.object(git_refs, "repository_identity", side_effect=self.identity), \
+                    mock.patch.object(git_refs, "_query") as query:
+                result = git_refs.read_snapshot("/repo", cache_file=cache, cache_root="/root")
+            self.assertFalse(result["network_used"])
+            self.assertEqual(cache.read_bytes(), before)
+            query.assert_not_called()
 
     def test_repository_identity_change_does_not_reuse_cache(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -66,6 +198,49 @@ class GitRefsTests(unittest.TestCase):
             result = git_refs.probe("git@github.test:owner/repo.git", ["main", "feature/x"])
         self.assertEqual("a" * 40, result["heads"]["main"])
         self.assertIsNone(result["heads"]["feature/x"])
+
+    def test_query_heads_filters_unrequested_refs_and_accepts_sha256(self):
+        completed = mock.Mock(returncode=0, stderr="", stdout=(
+            "a" * 64 + "\trefs/heads/origin/topic\n" +
+            "b" * 40 + "\trefs/heads/other\n" +
+            "c" * 40 + "\trefs/tags/missing\n"))
+        with mock.patch.object(git_refs, "_run", return_value=completed) as run:
+            refs = git_refs.query_heads("fixture:remote", ["origin/topic", "missing", "origin/topic"])
+        self.assertEqual(refs, {"origin/topic": "a" * 64})
+        run.assert_called_once_with(["git", "ls-remote", "--heads", "fixture:remote",
+                                     "refs/heads/origin/topic", "refs/heads/missing"])
+
+    def test_query_heads_rejects_invalid_inputs_without_query(self):
+        for heads in ([], [""], ["a\x00b"], [{}], [1]):
+            with self.subTest(heads=heads), mock.patch.object(git_refs, "_run") as run:
+                with self.assertRaises(git_refs.GitRefsError):
+                    git_refs.query_heads("fixture:remote", heads)
+                run.assert_not_called()
+
+    def test_probe_keeps_its_branch_input_contract(self):
+        for head in ("origin/topic", "refs/topic"):
+            with self.subTest(head=head), mock.patch.object(git_refs, "_run") as run:
+                with self.assertRaises(git_refs.GitRefsError):
+                    git_refs.probe("fixture:remote", [head])
+                run.assert_not_called()
+
+    def test_snapshot_entries_validate_ttl_before_io(self):
+        for reader in (git_refs.snapshot, git_refs.read_snapshot):
+            for ttl in (True, False, -1, 1.5, "300", None):
+                with self.subTest(reader=reader.__name__, ttl=ttl), mock.patch.object(
+                        git_refs, "repository_identity") as identity, mock.patch.object(git_refs, "_read_cache") as read:
+                    with self.assertRaisesRegex(git_refs.GitRefsError, "非负整数"):
+                        reader("/repo", cache_file="/tmp/unused-cache", cache_root="/root", max_age_seconds=ttl)
+                    identity.assert_not_called()
+                    read.assert_not_called()
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(
+                git_refs, "repository_identity", side_effect=self.identity), mock.patch.object(
+                git_refs, "_query", return_value={"main": "a" * 40}):
+            cache = Path(temporary) / "cache.json"
+            git_refs.snapshot("/repo", cache_file=cache, cache_root="/root", now=100, max_age_seconds=0)
+            for moment, freshness in ((100, "cached"), (101, "stale")):
+                result = git_refs.read_snapshot("/repo", cache_file=cache, cache_root="/root", now=moment, max_age_seconds=0)
+                self.assertEqual(freshness, result["scopes"]["heads"]["freshness"])
 
     def test_read_snapshot_does_not_create_or_write_cache(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -160,6 +335,25 @@ class SourceSyncTests(unittest.TestCase):
         return source_sync.verify(self.root, values.get("branch", "feature"), self.base,
                                   values.get("source", self.source))
 
+    def test_product_git_facts_ignore_foreign_context_and_config_injection(self):
+        from workflow import quality
+        self.git('merge', '--no-edit', 'develop')
+        self.git('remote', 'add', 'origin', 'https://example.invalid/expected.git')
+        expected = self.git('rev-parse', 'HEAD')
+        with tempfile.TemporaryDirectory() as temporary:
+            other = Path(temporary)
+            source_sync.git(other, 'init', '-q')
+            source_sync.git(other, 'remote', 'add', 'origin', 'https://example.invalid/other.git')
+            for injected in ({'GIT_DIR': str(other / '.git'), 'GIT_WORK_TREE': str(self.root)},
+                             {'GIT_CONFIG_COUNT': 'invalid', 'GIT_INDEX_FILE': str(other / 'wrong-index')}):
+                with self.subTest(injected=injected), mock.patch.dict(os.environ, injected):
+                    _, identity = git_refs.repository_identity(self.root, 'origin')
+                    self.assertEqual('https://example.invalid/expected.git', identity['origin'])
+                    self.assertEqual((self.root / '.git').resolve(), Path(identity['git_common_dir']).resolve())
+                    self.assertEqual(expected, quality.git_revision(self.root))
+                    self.assertEqual(expected, self.verify()['task_revision'])
+                    self.assertEqual({'feature': expected}, git_refs.query_heads(str(self.root), ['feature']))
+
     def test_unmerged_source_rejected_then_merge_preserves_task(self):
         with self.assertRaisesRegex(ValueError, "尚未包含"):
             self.verify()
@@ -189,6 +383,67 @@ class SourceSyncTests(unittest.TestCase):
             self.verify()
         self.assertIn("<<<<<<<", (self.root / "source").read_text())
 
+    def test_impact_preserves_exact_nul_delimited_paths(self):
+        names = [' leading.py', 'trailing.py ', 'line\rbreak.py', 'line\nbreak.py', '中文.py']
+        for name in names:
+            before = self.commit(name, 'fixture')
+        self.git('merge', '--no-edit', 'develop')
+        result = source_sync.impact(self.root, 'feature', self.base, self.source, before)
+        self.assertEqual(set(names + ['task']), set(result['comparisons']['final_task']['paths']))
+        output = subprocess.run([sys.executable, str(ROOT / 'workflow/source_sync.py'), '--repo', str(self.root),
+            '--work-branch', 'feature', '--base-revision', self.base, '--source-revision', self.source,
+            '--before-merge-revision', before], capture_output=True, check=True)
+        self.assertEqual(result, json.loads(output.stdout))
+        empty = source_sync.impact(self.root, 'feature', self.base, self.source, self.base)
+        self.assertEqual([], empty['comparisons']['original_task']['paths'])
+
+    def test_impact_includes_both_sides_of_renames_in_each_comparison(self):
+        self.commit("old-a", "a content")
+        base = self.commit("old-b", "b content")
+        self.git("branch", "source-rename")
+        self.git("mv", "old-a", "new-a")
+        self.git("commit", "-qm", "task rename")
+        before = self.git("rev-parse", "HEAD")
+        self.git("checkout", "source-rename")
+        self.git("mv", "old-b", "new-b")
+        self.git("commit", "-qm", "source rename")
+        source = self.git("rev-parse", "HEAD")
+        self.git("checkout", "feature")
+        self.git("merge", "--no-edit", "source-rename")
+        for preference in ("true", "false"):
+            self.git("config", "diff.renames", preference)
+            result = source_sync.impact(self.root, "feature", base, source, before)
+            for name, expected in (("original_task", {"old-a", "new-a"}),
+                                   ("incoming_source", {"old-b", "new-b"}),
+                                   ("final_task", {"old-a", "new-a"})):
+                comparison = result["comparisons"][name]
+                self.assertEqual(expected, set(comparison["paths"]))
+                patch = source_sync.git(self.root, "diff", "--binary", "--no-ext-diff", "--no-textconv",
+                    comparison["from"], comparison["to"], "--", byte_preserving=True)
+                self.assertEqual(hashlib.sha256(patch.encode("utf-8", errors="surrogateescape")).hexdigest(),
+                                 comparison["diff_sha256"])
+
+    def test_non_utf8_diff_is_analyzed_without_losing_byte_identity(self):
+        before = self.task
+        digests = []
+        for byte in (b'\xff', b'\xfe'):
+            (self.root / 'task').write_bytes(b'value=' + byte + b'\n')
+            self.git('add', 'task'); self.git('commit', '-qm', 'non-utf8 fixture')
+            before = self.git('rev-parse', 'HEAD')
+            self.git('merge', '--no-edit', 'develop')
+            result = source_sync.impact(self.root, 'feature', self.base, self.source, before)
+            digests.append(result['comparisons']['final_task']['diff_sha256'])
+            self.assertEqual(['task'], result['comparisons']['final_task']['paths'])
+            self.assertTrue(result['analysis_required'])
+            encoded = json.dumps(result, ensure_ascii=False).encode('utf-8')
+            self.assertNotIn(b'value=', encoded)
+            json.loads(encoded)
+        self.assertNotEqual(*digests)
+        output = subprocess.run([sys.executable, str(ROOT / 'workflow/source_sync.py'), '--repo', str(self.root),
+            '--work-branch', 'feature', '--base-revision', self.base, '--source-revision', self.source,
+            '--before-merge-revision', before], capture_output=True, check=True)
+        self.assertEqual(digests[-1], json.loads(output.stdout)['comparisons']['final_task']['diff_sha256'])
+
     def test_conflict_free_merge_still_requires_impact_analysis(self):
         self.git("merge", "--no-edit", "develop")
         result = source_sync.impact(self.root, "feature", self.base, self.source, self.task)
@@ -196,6 +451,9 @@ class SourceSyncTests(unittest.TestCase):
         self.assertEqual(["task"], result["comparisons"]["original_task"]["paths"])
         self.assertEqual(["source"], result["comparisons"]["incoming_source"]["paths"])
         self.assertEqual(["task"], result["comparisons"]["final_task"]["paths"])
+        for comparison in result['comparisons'].values():
+            legacy = self.git('diff', '--binary', '--no-ext-diff', '--no-textconv', comparison['from'], comparison['to'], '--')
+            self.assertEqual(hashlib.sha256(legacy.encode()).hexdigest(), comparison['diff_sha256'])
         old_revision = result["task_revision"]
         self.commit("task", "revised behavior")
         updated = source_sync.impact(self.root, "feature", self.base, self.source, self.task)

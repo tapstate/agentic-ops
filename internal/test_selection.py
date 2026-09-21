@@ -2,10 +2,16 @@
 """开发诊断的保守 affected 测试选择；正式 Story Gate 不调用此模块。"""
 import argparse
 import json
+import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 RULES = (
+    ("workflow/git_environment.py", ("git_refs", "quality", "station_source", "engineering_baseline", "station_resources")),
+    ("workflow/verification.py", ("quality",)),
+    ("workflow/file_digest.py", ("quality", "station_resources")),
     ("workflow/station", ("station_clean", "station_resources", "station_lifecycle")),
     ("policies/station-clean.json", ("station_clean",)),
     ("workflow/station_archive.py", ("station_resources", "station_lifecycle")),
@@ -48,10 +54,21 @@ TEST_SUITES = {
     "engineering_baseline": ("python3", "tests/test_engineering_baseline.py"), "install": ("bash", "tests/test_install.sh"),
     "station_bootstrap": ("python3", "tests/test_station_bootstrap.py"), "maven": ("python3", "-m", "unittest", "discover", "-s", "projects/tapdata/tests", "-p", "test_maven*.py"),
     "maven_reports": ("python3", "projects/tapdata/tests/test_maven_reports.py"), "java_impact": ("python3", "projects/tapdata/tests/test_java_impact.py"),
-    "branch_alignment": ("python3", "projects/tapdata/tests/test_branch_alignment.py"), "story_gate": ("python3", "-m", "unittest", "internal.tests.test_story_gate"),
-    "verification": ("python3", "-m", "unittest", "internal.tests.test_verification"), "release": ("bash", "internal/tests/test_release.sh"),
-    "test_selection": ("python3", "-m", "unittest", "internal.tests.test_test_selection"),
+    "branch_alignment": ("python3", "projects/tapdata/tests/test_branch_alignment.py"), "story_gate": ("internal-python", "-m", "unittest", "internal.tests.test_story_gate"),
+    "verification": ("internal-python", "-m", "unittest", "internal.tests.test_verification"), "release": ("bash", "internal/tests/test_release.sh"),
+    "test_selection": ("internal-python", "-m", "unittest", "internal.tests.test_test_selection"),
 }
+
+
+def command_for(root, name):
+    command = TEST_SUITES[name]
+    if command[0] not in ("python3", "internal-python"):
+        return command
+    product = os.environ.get("AGENTIC_OPS_TEST_PYTHON") or shutil.which("python3") or sys.executable
+    internal = os.environ.get("AGENTIC_OPS_INTERNAL_TEST_PYTHON") or str(Path(root) / ".local/venv/internal/bin/python")
+    if not os.access(internal, os.X_OK):
+        internal = product
+    return ((internal if command[0] == "internal-python" else product), *command[1:])
 
 
 def changes(root, source, base=None, head=None):
@@ -70,15 +87,22 @@ def changes(root, source, base=None, head=None):
 
 def select(paths):
     suites, unmapped = [], []
+    direct = {command[1]: name for name, command in TEST_SUITES.items()
+              if len(command) == 2 and command[0] == "python3"
+              and command[1].startswith("tests/") and command[1].endswith(".py")}
     for path in paths:
-        matched = ()
+        matched = []
         if path.startswith("tests/") and path.endswith(".py"):
-            candidate = path.removeprefix("tests/").removesuffix(".py").removeprefix("test_")
-            matched = (candidate,) if candidate in TEST_SUITES else ()
+            matched = (direct[path],) if path in direct else ()
         elif path == "tests/test_install.sh": matched = ("install",)
         else:
             for prefix, candidates in RULES:
-                if path.startswith(prefix): matched = candidates; break
+                if path.startswith(prefix):
+                    matched.extend(candidates)
+            if path.startswith("workflow/") and path.count("/") == 1 and path.endswith(".py"):
+                candidate = "tests/test_" + Path(path).stem + ".py"
+                if candidate in direct:
+                    matched.append(direct[candidate])
         if not matched: unmapped.append(path)
         for suite in matched:
             if suite not in suites: suites.append(suite)
@@ -93,15 +117,18 @@ def main():
     args = parser.parse_args(); root = Path(args.root).resolve()
     paths = changes(root, args.source, args.base, args.head)
     suites, unmapped = select(paths)
+    commands = [command_for(root, name) for name in suites]
     result = {"paths": paths, "suites": suites, "unmapped": unmapped,
-              "commands": [TEST_SUITES[name] for name in suites]}
+              "commands": commands}
     print(json.dumps(result, ensure_ascii=False))
     if not paths or unmapped or not suites: raise SystemExit(2)
     if args.run:
-        for name in suites:
-            command = TEST_SUITES[name]
+        for name, command in zip(suites, commands):
+            environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+            if TEST_SUITES[name][0] == "internal-python":
+                environment["PYTHONPATH"] = str(root) + (os.pathsep + environment["PYTHONPATH"] if environment.get("PYTHONPATH") else "")
             print("[affected] %s: %s" % (name, " ".join(command)), flush=True)
-            if subprocess.run(command, cwd=root).returncode:
+            if subprocess.run(command, cwd=root, env=environment).returncode:
                 raise SystemExit(1)
 
 

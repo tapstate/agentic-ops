@@ -23,7 +23,7 @@ from station_compatibility import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from workflow import task_store
+from workflow import project_rules, task_store
 
 
 SCHEMA_VERSION = 4
@@ -441,6 +441,7 @@ def validate_station_document(install_root, document):
     source_pool = document.get("source_pool")
     if not isinstance(project, str) or not project:
         raise ValueError("工位配置缺少 project")
+    project_rules.validate_project_id(project)
     if document.get("product_root") != str(install_root.resolve()):
         raise ValueError("工位产品根目录不一致，请执行 agenticops station repair")
     if not isinstance(agents, list) or not agents:
@@ -550,9 +551,7 @@ def main():
                 requested_agents = arguments.agent
                 requested_source_pool = arguments.source_pool or load_product_state(install_root)["source_pool"]
 
-            project_root = install_root / "projects" / project
-            if not project_root.is_dir():
-                parser.error("未安装项目适配：%s" % project)
+            project_root = project_rules.project_root(install_root, project)
 
             if arguments.check:
                 _, all_manifests = select(install_root, None)

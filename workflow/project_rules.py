@@ -7,10 +7,10 @@
 强制点在 workflow/task.py（阶段推进）与 workflow/evidence.py（证据输出）。
 
 用法：
-  python3 workflow/project_rules.py render            # 由 admission.json 重新生成三张清单 md
-  python3 workflow/project_rules.py render --check    # 只校验 md 与 json 是否漂移（漂移 exit 1）
-  python3 workflow/project_rules.py branch --repo tapdata/tapdata   # 查表解析分支，查不到 exit 2
-  python3 workflow/project_rules.py workflow --issue-type-id 10008 --issue-type-name 任务 --json
+  python3 workflow/project_rules.py render --project <project>  # 由 admission.json 重新生成项目清单 md
+  python3 workflow/project_rules.py render --project <project> --check  # 只校验 md 与 json 是否漂移（漂移 exit 1）
+  python3 workflow/project_rules.py branch --project <project> --repo <owner/repo>   # 查表解析分支，查不到 exit 2
+  python3 workflow/project_rules.py workflow --project <project> --issue-type-id 10008 --issue-type-name 任务 --json
 """
 from __future__ import annotations
 
@@ -21,6 +21,12 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def repository_id(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*", value):
+        raise ValueError("repository_id 必须是安全的 owner/repo")
+    return value
 
 
 def canonical_repository_endpoint(value):
@@ -48,25 +54,44 @@ def canonical_repository_endpoint(value):
     return endpoint[:-4] if endpoint.endswith(".git") else endpoint
 
 
-def _read_json(path):
+def read_json_object(path):
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("项目 JSON 包含重复键：%s" % Path(path).name)
+            result[key] = value
+        return result
+
     with open(path, "r", encoding="utf-8") as fh:
-        return json.load(fh)
+        value = json.load(fh, object_pairs_hook=unique_object)
+    if not isinstance(value, dict):
+        raise ValueError("项目 JSON 顶层必须是对象：%s" % Path(path).name)
+    return value
 
 
-def project_from_station(station):
-    path = Path(station).resolve() / ".agenticops" / "station.json"
-    if not path.is_file():
-        raise ValueError("工位缺少 .agenticops/station.json，请先执行 agenticops station init")
-    binding = _read_json(path)
-    project = binding.get("project")
-    if not isinstance(project, str) or not project:
-        raise ValueError("工位绑定缺少 project")
+def validate_project_id(project):
+    """落实 station.schema.json 的项目标识合同，不把路径当作项目名。"""
+    if not isinstance(project, str) or not re.fullmatch(r"[a-z][a-z0-9-]*", project):
+        raise ValueError("项目 ID 必须以小写字母开头且只含小写字母、数字和连字符")
     return project
 
 
-def product_root_from_station(station):
+def _station_binding(station):
     path = Path(station).resolve() / ".agenticops" / "station.json"
-    binding = _read_json(path)
+    if not path.is_file():
+        raise ValueError("工位缺少 .agenticops/station.json，请先执行 agenticops station init")
+    return read_json_object(path)
+
+
+def _binding_project(binding):
+    project = binding.get("project")
+    if not isinstance(project, str) or not project:
+        raise ValueError("工位绑定缺少 project")
+    return validate_project_id(project)
+
+
+def _binding_product_root(binding):
     root = binding.get("product_root")
     if not isinstance(root, str) or not root:
         raise ValueError("工位绑定缺少 product_root")
@@ -76,17 +101,36 @@ def product_root_from_station(station):
     return product
 
 
-def project_root(root=ROOT, project="tapdata"):
-    path = Path(root) / "projects" / project
+def station_context(station):
+    """一次读取绑定，避免把不同快照的项目名与产品根拼在一起。"""
+    binding = _station_binding(station)
+    project = _binding_project(binding)
+    return _binding_product_root(binding), project
+
+
+def project_from_station(station):
+    return _binding_project(_station_binding(station))
+
+
+def product_root_from_station(station):
+    return _binding_product_root(_station_binding(station))
+
+
+def project_root(root=ROOT, project=None):
+    if project is None:
+        raise ValueError("无工位调用必须显式指定 project")
+    projects = Path(root) / "projects"
+    path = projects / validate_project_id(project)
+    if path.is_symlink() or path.resolve().parent != projects.resolve():
+        raise ValueError("项目适配目录不能是链接或越出 projects：%s" % project)
     if not path.is_dir():
         raise ValueError("未安装项目适配：%s" % project)
     return path
 
 
-def load_admission(root=ROOT, project="tapdata", station=None):
-    selected = project_from_station(station) if station is not None else project
-    selected_root = product_root_from_station(station) if station is not None else root
-    return _read_json(project_root(selected_root, selected) / "admission.json")
+def load_admission(root=ROOT, project=None, station=None):
+    selected_root, selected = station_context(station) if station is not None else (root, project)
+    return read_json_object(project_root(selected_root, selected) / "admission.json")
 
 
 def validate_takeover_watermark(profile):
@@ -121,26 +165,32 @@ def validate_takeover_watermark(profile):
     return value
 
 
-def load_profile(root=ROOT, project="tapdata", station=None):
-    selected = project_from_station(station) if station is not None else project
-    selected_root = product_root_from_station(station) if station is not None else root
-    profile = _read_json(project_root(selected_root, selected) / "profile.json")
-    validate_takeover_watermark(profile)
-    reference = profile.get("repositories", {}).get("catalog")
-    if not isinstance(reference, str) or not reference:
+def _catalog_path(base, profile):
+    repositories = profile.get("repositories")
+    if not isinstance(repositories, dict):
+        raise ValueError("项目 Profile 的 repositories 必须是对象")
+    reference = repositories.get("catalog")
+    if not isinstance(reference, str) or not reference.strip():
         raise ValueError("项目 Profile 缺少 repositories.catalog")
-    catalog_path = (project_root(selected_root, selected) / reference).resolve()
+    path = (base / reference).resolve()
     try:
-        catalog_path.relative_to(project_root(selected_root, selected).resolve())
+        path.relative_to(base.resolve())
     except ValueError as error:
         raise ValueError("项目仓库目录路径越界：%s" % reference) from error
-    catalog = _read_json(catalog_path)
+    return path
+
+
+def load_profile(root=ROOT, project=None, station=None):
+    selected_root, selected = station_context(station) if station is not None else (root, project)
+    base = project_root(selected_root, selected)
+    profile = read_json_object(base / "profile.json")
+    validate_takeover_watermark(profile)
+    catalog_path = _catalog_path(base, profile)
+    catalog = read_json_object(catalog_path)
     if catalog.get("schema_version") != 1 or not isinstance(catalog.get("repositories"), dict):
         raise ValueError("项目仓库目录结构无效：%s" % catalog_path)
     for repository, entry in catalog["repositories"].items():
-        parts = repository.split("/") if isinstance(repository, str) else []
-        if len(parts) != 2 or any(part in ("", ".", "..") for part in parts):
-            raise ValueError("项目仓库目录存在无效 owner/repo：%s" % repository)
+        repository_id(repository)
         if not isinstance(entry, dict) or not all(
             isinstance(entry.get(key), str) and entry.get(key)
             for key in ("origin", "baseline_branch", "dev_branch")
@@ -150,34 +200,23 @@ def load_profile(root=ROOT, project="tapdata", station=None):
     if not isinstance(retired, dict) or set(retired) & set(catalog["repositories"]):
         raise ValueError("退役仓库必须与活动仓库分开登记")
     for repository, entry in retired.items():
-        if (not isinstance(repository, str)
-                or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
-                or any(part in (".", "..") for part in repository.split("/"))
-                or not isinstance(entry, dict) or set(entry) != {"origin"}
+        repository_id(repository)
+        if (not isinstance(entry, dict) or set(entry) != {"origin"}
                 or not isinstance(entry["origin"], str) or not entry["origin"].strip()):
             raise ValueError("退役仓库清理身份无效：%s" % repository)
     profile["repositories"] = catalog
     return profile
 
 
-def load_repository_catalog(root=ROOT, project="tapdata", station=None):
+def load_repository_catalog(root=ROOT, project=None, station=None):
     return load_profile(root=root, project=project, station=station)["repositories"]
 
 
-def repository_catalog_path(root=ROOT, project="tapdata", station=None):
-    selected = project_from_station(station) if station is not None else project
-    selected_root = product_root_from_station(station) if station is not None else root
+def repository_catalog_path(root=ROOT, project=None, station=None):
+    selected_root, selected = station_context(station) if station is not None else (root, project)
     base = project_root(selected_root, selected).resolve()
-    profile = _read_json(base / "profile.json")
-    reference = profile.get("repositories", {}).get("catalog")
-    if not isinstance(reference, str) or not reference:
-        raise ValueError("项目 Profile 缺少 repositories.catalog")
-    path = (base / reference).resolve()
-    try:
-        path.relative_to(base)
-    except ValueError as error:
-        raise ValueError("项目仓库目录路径越界：%s" % reference) from error
-    return path
+    profile = read_json_object(base / "profile.json")
+    return _catalog_path(base, profile)
 
 
 def validate_project_issue(profile, issue_key):
@@ -224,18 +263,28 @@ def resolve_issue_type_workflow(profile, issue_type_id=None, issue_type_name=Non
     transitions = workflow.get("transitions")
     if not isinstance(statuses, list) or not isinstance(transitions, dict):
         raise ValueError("事务类型工作流结构无效")
+    status_ids = set()
     for status in statuses:
         if not isinstance(status, dict) or not all(
             isinstance(status.get(key), str) and status[key] for key in ("id", "name", "stage")
         ):
             raise ValueError("事务类型工作流状态结构无效")
+        if status["id"] in status_ids:
+            raise ValueError("事务类型工作流状态 ID 重复")
+        status_ids.add(status["id"])
     return workflow
 
 
 def class_spec(spec, task_class):
+    if not isinstance(spec, dict) or not isinstance(spec.get("task_classes", {}), dict):
+        raise ValueError("准入 task_classes 必须是对象")
+    if not isinstance(task_class, str) or not task_class.strip():
+        raise ValueError("任务类型必须是非空字符串")
     classes = spec.get("task_classes", {})
     if task_class not in classes:
         raise ValueError("未知任务类型 %s（可选：%s）" % (task_class, "/".join(sorted(classes))))
+    if not isinstance(classes[task_class], dict):
+        raise ValueError("任务类型定义必须是对象：%s" % task_class)
     return classes[task_class]
 
 
@@ -328,7 +377,8 @@ def _fact_rows(facts, with_example):
     return lines
 
 
-def render_admission_markdown(spec, task_class, project="tapdata"):
+def render_admission_markdown(spec, task_class, project=None):
+    validate_project_id(project)
     cls = class_spec(spec, task_class)
     L = []
     L.append("# %s任务准入检查清单（%s）" % (cls["title"], project))
@@ -394,30 +444,45 @@ def render_admission_markdown(spec, task_class, project="tapdata"):
     return "\n".join(L)
 
 
-DOC_NAMES = {
-    "defect_fix": "defect-fix.md",
-    "feature_change": "feature-change.md",
-    "technical_task": "technical-task.md",
-}
+def admission_documents(root, project, spec):
+    """先准备全部配置化输出，配置错误不得留下部分生成结果。"""
+    outdir = project_root(root, project) / "admission"
+    if outdir.is_symlink() or (outdir.exists() and not outdir.is_dir()):
+        raise ValueError("准入文档目录必须是普通目录，不能是符号链接")
+    classes = spec.get("task_classes")
+    if not isinstance(classes, dict):
+        raise ValueError("准入 task_classes 必须是对象")
+    documents = {}
+    pattern = r"projects/" + re.escape(project) + r"/admission/[a-z][a-z0-9-]*\.md"
+    for task_class, config in classes.items():
+        reference = config.get("doc") if isinstance(config, dict) else None
+        if not isinstance(reference, str) or not re.fullmatch(pattern, reference):
+            raise ValueError("准入文档路径必须是本项目 admission 下的小写连字符 .md 文件")
+        path = outdir / Path(reference).name
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise ValueError("准入文档必须是普通文件，不能是符号链接")
+        if path in documents:
+            raise ValueError("多个任务类型不能生成同一准入文档")
+        documents[path] = render_admission_markdown(spec, task_class, project=project)
+    return documents
 
 
 def cmd_render(args):
     spec = load_admission(args.root, project=args.project)
-    outdir = Path(args.root) / "projects" / args.project / "admission"
+    documents = admission_documents(args.root, args.project, spec)
     drift = []
-    for task_class in spec.get("task_classes", {}):
-        path = outdir / DOC_NAMES[task_class]
-        body = render_admission_markdown(spec, task_class, project=args.project)
+    for path, body in documents.items():
         if args.check:
             current = path.read_text(encoding="utf-8") if path.is_file() else ""
             if current != body:
                 drift.append(str(path.relative_to(args.root)))
         else:
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(body, encoding="utf-8")
             print("已生成 %s" % path.relative_to(args.root))
     if args.check:
         if drift:
-            print("清单 md 与 admission.json 已漂移：%s（跑 workflow/project_rules.py render）" % "、".join(drift), file=sys.stderr)
+            print("清单 md 与 admission.json 已漂移：%s（跑 workflow/project_rules.py render --project %s）" % ("、".join(drift), args.project), file=sys.stderr)
             return 1
         print("清单 md 与 admission.json 一致。")
     return 0
@@ -467,14 +532,14 @@ def main():
     p = sub.add_parser("render", help="由 admission.json 生成人读清单")
     p.add_argument("--check", action="store_true", help="只校验漂移，不写文件")
     p.add_argument("--root", default=str(ROOT))
-    p.add_argument("--project", default="tapdata")
+    p.add_argument("--project", required=True)
     p.set_defaults(func=cmd_render)
 
     p = sub.add_parser("branch", help="查表解析仓库分支（禁止猜测）")
     p.add_argument("--repo", required=True)
     p.add_argument("--json", action="store_true")
     p.add_argument("--root", default=str(ROOT))
-    p.add_argument("--project", default="tapdata")
+    p.add_argument("--project", required=True)
     p.set_defaults(func=cmd_branch)
 
     p = sub.add_parser("workflow", help="按 Jira 事务类型精确解析工作流（未知类型失败关闭）")
@@ -482,11 +547,15 @@ def main():
     p.add_argument("--issue-type-name")
     p.add_argument("--json", action="store_true")
     p.add_argument("--root", default=str(ROOT))
-    p.add_argument("--project", default="tapdata")
+    p.add_argument("--project", required=True)
     p.set_defaults(func=cmd_workflow)
 
     args = parser.parse_args()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (ValueError, OSError) as error:
+        print("错误：%s" % error, file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

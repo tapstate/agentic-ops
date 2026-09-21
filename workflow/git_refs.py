@@ -25,6 +25,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from workflow.git_environment import git_environment
 
 
 SCOPES = {"heads", "tags"}
@@ -38,7 +39,7 @@ class GitRefsError(ValueError):
 def _run(arguments, cwd=None):
     try:
         return subprocess.run(arguments, cwd=cwd, capture_output=True, text=True,
-                              timeout=TIMEOUT_SECONDS)
+                              timeout=TIMEOUT_SECONDS, env=git_environment(read_only=True))
     except subprocess.TimeoutExpired as error:
         raise GitRefsError("Git 远端查询超时") from error
     except OSError as error:
@@ -58,10 +59,12 @@ def normalize_origin(value):
     text = str(value).strip()
     if "://" in text:
         scheme, rest = text.split("://", 1)
-        rest = rest.split("@", 1)[-1]
-        return scheme.lower() + "://" + rest.rstrip("/")
-    if "@" in text and ":" in text:
-        text = text.split("@", 1)[1]
+        authority, suffix = re.fullmatch(r"([^/?#]*)(.*)", rest, re.DOTALL).groups()
+        authority = authority.rsplit("@", 1)[-1]
+        return scheme.lower() + "://" + (authority + suffix).rstrip("/")
+    scp = re.fullmatch(r"[^/@:]+@((?:\[[^\]]+\]|[^/@:]+):.*)", text, re.DOTALL)
+    if scp:
+        text = scp.group(1)
     return text.rstrip("/")
 
 
@@ -98,9 +101,9 @@ def _read_cache(path):
         return _empty_cache()
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise GitRefsError("Git refs 缓存损坏：%s" % error) from error
-    if document.get("schema_version") != 2 or not isinstance(document.get("roots"), dict):
+    if not isinstance(document, dict) or document.get("schema_version") != 2 or not isinstance(document.get("roots"), dict):
         raise GitRefsError("Git refs 缓存 schema 不兼容；请使用或重建 schema_version=2 的缓存文件")
     return document
 
@@ -113,15 +116,28 @@ def _cache_root(value):
 
 def _root_repositories(document, cache_root, create=False):
     roots = document["roots"]
-    root = roots.get(cache_root)
-    if root is None:
+    if cache_root not in roots:
         if not create:
             return {}
-        root = {"repositories": {}}
-        roots[cache_root] = root
+        roots[cache_root] = {"repositories": {}}
+    root = roots[cache_root]
     if not isinstance(root, dict) or not isinstance(root.get("repositories"), dict):
         raise GitRefsError("Git refs 缓存根目录分区无效")
     return root["repositories"]
+
+
+def _cache_record(repositories, key):
+    """只校验本次读取的仓库，不将损坏记录静默替换为空快照。"""
+    if key not in repositories:
+        return None
+    record = repositories[key]
+    if (not isinstance(record, dict) or not isinstance(record.get("identity"), dict)
+            or not isinstance(record.get("scopes"), dict)):
+        raise GitRefsError("Git refs 缓存仓库记录无效")
+    for entry in record["scopes"].values():
+        if not isinstance(entry, dict) or not isinstance(entry.get("refs"), dict):
+            raise GitRefsError("Git refs 缓存查询范围记录无效")
+    return record
 
 
 def _write_cache(path, document):
@@ -206,26 +222,40 @@ def _cache_write_scope(path):
         raise GitRefsError("工位缓存刷新已停止，未恢复旧工位：%s" % error) from error
 
 
+def _ref_rows(output):
+    for line in output.splitlines():
+        if not line:
+            continue
+        fields = line.split("\t")
+        if (len(fields) != 2 or not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", fields[0])
+                or not fields[1].startswith("refs/") or any(char.isspace() for char in fields[1])):
+            raise GitRefsError("远端引用响应格式无效")
+        yield fields
+
+
 def _parse_heads(output):
     result = {}
-    for line in output.splitlines():
-        sha, _, ref = line.partition("\t")
-        if re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", sha) and ref.startswith("refs/heads/"):
-            result[ref[len("refs/heads/"):]] = sha
+    for sha, ref in _ref_rows(output):
+        if ref.startswith("refs/heads/"):
+            name = ref[len("refs/heads/"):]
+            if not name or name in result:
+                raise GitRefsError("远端分支回读为空或不唯一")
+            result[name] = sha
     return result
 
 
 def _parse_tags(output):
     result = {}
-    for line in output.splitlines():
-        sha, _, ref = line.partition("\t")
-        if not re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", sha) or not ref.startswith("refs/tags/"):
+    for sha, ref in _ref_rows(output):
+        if not ref.startswith("refs/tags/"):
             continue
         name = ref[len("refs/tags/"):]
-        if name.endswith("^{}"):
-            result.setdefault(name[:-3], {})["peeled"] = sha
-        else:
-            result.setdefault(name, {})["object"] = sha
+        field = "peeled" if name.endswith("^{}") else "object"
+        if field == "peeled":
+            name = name[:-3]
+        if not name or field in result.get(name, {}):
+            raise GitRefsError("远端标签回读为空或不唯一")
+        result.setdefault(name, {})[field] = sha
     return result
 
 
@@ -238,6 +268,34 @@ def _query(path, remote, scope):
     return _parse_heads(result.stdout) if scope == "heads" else _parse_tags(result.stdout)
 
 
+def parse_head_response(output, heads):
+    """解析精确查询结果；格式错误不能被解释为分支不存在。"""
+    requested = set(heads)
+    result = {}
+    for sha, ref in _ref_rows(output):
+        if not ref.startswith("refs/heads/") or ref[len("refs/heads/"):] not in requested:
+            continue
+        head = ref[len("refs/heads/"):]
+        if head in result:
+            raise GitRefsError("远端分支回读不唯一：" + head)
+        result[head] = sha
+    return result
+
+
+def query_heads(origin, heads):
+    """一次无缓存查询字面分支名；返回已存在的请求项，不解释产品分支语义。"""
+    requested = tuple(heads)
+    if not requested or any(not isinstance(head, str) or not head or "\x00" in head for head in requested):
+        raise GitRefsError("远端查询需要非空分支名")
+    requested = tuple(dict.fromkeys(requested))
+    result = _run(["git", "ls-remote", "--heads", origin,
+                   *["refs/heads/" + head for head in requested]])
+    if result.returncode:
+        detail = (result.stderr or result.stdout).strip().splitlines()
+        raise GitRefsError(detail[-1] if detail else "Git 远端查询失败")
+    return parse_head_response(result.stdout, requested)
+
+
 def probe(origin, heads):
     """无缓存地精确查询远端 heads，失败绝不把网络问题解释为不存在。"""
     requested = tuple(dict.fromkeys(str(head).strip() for head in heads if str(head).strip()))
@@ -245,12 +303,7 @@ def probe(origin, heads):
         raise GitRefsError("至少提供一个 --head")
     if any(head.startswith(("refs/", "origin/")) or "\x00" in head for head in requested):
         raise GitRefsError("--head 必须是裸分支名，不接受 refs/ 或 origin/ 前缀")
-    result = _run(["git", "ls-remote", "--heads", origin,
-                   *["refs/heads/" + head for head in requested]])
-    if result.returncode:
-        detail = (result.stderr or result.stdout).strip().splitlines()
-        raise GitRefsError(detail[-1] if detail else "Git 远端查询失败")
-    refs = _parse_heads(result.stdout)
+    refs = query_heads(origin, requested)
     return {
         "origin": normalize_origin(origin),
         "heads": {head: refs.get(head) for head in requested},
@@ -277,10 +330,16 @@ def _cached_result(record, requested, moment, max_age_seconds):
     return result
 
 
+def _validate_max_age(value):
+    if type(value) is not int or value < 0:
+        raise GitRefsError("max_age_seconds 必须是非负整数")
+
+
 def read_snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
                   max_age_seconds=300, now=None, repository_id=None, source_root=None,
                   cache_root=None):
     """严格只读地加载缓存；不会联网、加锁、创建目录或写回文件。"""
+    _validate_max_age(max_age_seconds)
     if cache_file is None:
         raise GitRefsError("只读缓存必须提供 cache_file")
     root = _cache_root(cache_root)
@@ -290,7 +349,7 @@ def read_snapshot(repository, remote="origin", scopes=("heads",), cache_file=Non
     moment = time.time() if now is None else now
     key, identity = repository_identity(repository, remote, repository_id, source_root)
     document = _read_cache(Path(cache_file).resolve())
-    record = _root_repositories(document, root).get(key)
+    record = _cache_record(_root_repositories(document, root), key)
     if record is None or record.get("identity") != identity:
         record = {"identity": identity, "scopes": {}}
     return _cached_result(record, requested, moment, max_age_seconds)
@@ -305,8 +364,7 @@ def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
     requested = tuple(dict.fromkeys(scopes))
     if not requested or not set(requested) <= SCOPES:
         raise GitRefsError("scopes 只支持 heads/tags")
-    if not isinstance(max_age_seconds, int) or max_age_seconds < 0:
-        raise GitRefsError("max_age_seconds 必须是非负整数")
+    _validate_max_age(max_age_seconds)
     moment = time.time() if now is None else now
     key, identity = repository_identity(repository, remote, repository_id, source_root)
     path = Path(repository).resolve()
@@ -315,8 +373,8 @@ def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
 
     def collect(document):
         repositories = _root_repositories(document, root, create=True)
-        record = repositories.setdefault(key, {"identity": identity, "scopes": {}, "last_attempt": None})
-        if record.get("identity") != identity:
+        record = _cache_record(repositories, key)
+        if record is None or record.get("identity") != identity:
             record = {"identity": identity, "scopes": {}, "last_attempt": None}
             repositories[key] = record
         result = {"identity": identity, "scopes": {}, "network_used": False}
@@ -324,6 +382,8 @@ def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
             previous = record["scopes"].get(scope, {})
             should_refresh = refresh == "always" or (refresh == "auto" and not _fresh(previous, moment, max_age_seconds))
             if should_refresh:
+                # 此标志表示已尝试远端查询，不等价于查询成功。
+                result["network_used"] = True
                 try:
                     refs = _query(path, remote, scope)
                 except GitRefsError as error:
@@ -340,7 +400,6 @@ def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
                              json.dumps(refs, sort_keys=True).encode("utf-8")).hexdigest()}
                 record["scopes"][scope] = entry
                 result["scopes"][scope] = dict(entry, freshness="refreshed")
-                result["network_used"] = True
             else:
                 freshness = "cached" if _fresh(previous, moment, max_age_seconds) else "stale"
                 result["scopes"][scope] = {
@@ -357,7 +416,7 @@ def snapshot(repository, remote="origin", scopes=("heads",), cache_file=None,
     # TTL 内的自动命中是纯读操作：不创建锁、不改目录、不重写缓存。
     if refresh == "auto":
         document = _read_cache(cache_path)
-        existing = _root_repositories(document, root).get(key)
+        existing = _cache_record(_root_repositories(document, root), key)
         if existing is not None and existing.get("identity") == identity and all(
             _fresh(existing.get("scopes", {}).get(scope, {}), moment, max_age_seconds)
             for scope in requested

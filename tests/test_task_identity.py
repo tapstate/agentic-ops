@@ -28,7 +28,7 @@ class TaskIdentityTests(unittest.TestCase):
         if identity is not None:
             value["branch_identity"] = identity
         task_store._write_json_atomic(station / ".agenticops/station.json", value)
-        task_store._write_json_atomic(station / ".agenticops/init.json", {"station_state_epoch": 14})
+        task_store._write_json_atomic(station / ".agenticops/init.json", {"station_state_epoch": 16})
 
     def test_timestamp_hex_and_new_run_are_fixed_and_issue_bound(self):
         self.assertEqual(task_store.timestamp_hex(0), "00000000")

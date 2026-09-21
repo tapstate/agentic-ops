@@ -27,7 +27,7 @@ def linked_test_confirmation_problems(base, task, rules, tests):
     if not rules["pr_ready"].get("require_user_confirmation_per_linked_test"):
         return []
     report = quality.report(quality.load(base, task), rules, quality.context(base, task))
-    return jira_tests.confirmation_problems(report, tests)
+    return jira_tests.confirmation_problems(report, tests, rules)
 
 
 def quality_problems(base, task, rules, snapshot=None):
@@ -67,7 +67,7 @@ def local_head(repository):
 
 def ci_problems(base, task):
     states = ci.current_states(base, task)
-    by_repository = {state["repository"]: state for state in states}
+    by_pull_request = {(state["repository"], str(state["pr"])): state for state in states}
     problems = []
     for repository in task.get("repositories", []):
         name = repository["repository"]
@@ -75,7 +75,7 @@ def ci_problems(base, task):
         if not pr:
             problems.append("仓库 %s 尚未记录 PR" % name)
             continue
-        state = by_repository.get(name)
+        state = by_pull_request.get((name, str(pr)))
         if not state or state.get("pr") != str(pr) or not state.get("history"):
             problems.append("仓库 %s 的 PR %s 尚无当前 run 的 Checks 记录" % (name, pr))
             continue

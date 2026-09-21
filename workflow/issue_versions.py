@@ -1,12 +1,10 @@
 """按 Project 配置解析 Jira 影响版本及单一修复线；不实现 Jira 客户端。"""
 import hashlib
 import json
-import re
-import subprocess
 import sys
 from datetime import datetime, timezone
 
-from workflow import project_rules
+from workflow import git_refs, project_rules
 
 
 FACT = "issue_version_plan"
@@ -25,19 +23,9 @@ def remote_refs(origin, branches):
     """一次精确查询；连接失败与不存在分别报告，不修改任何工作树/ref。"""
     print("正在核验主仓远端分支：%s（最长 30 秒）" % "、".join(sorted(branches)), file=sys.stderr, flush=True)
     try:
-        result = subprocess.run(["git", "ls-remote", "--heads", origin,
-                                 *["refs/heads/" + b for b in sorted(branches)]],
-                                capture_output=True, text=True, timeout=30)
-    except subprocess.TimeoutExpired as error:
-        raise ValueError("主仓远端核验超时，事实未核验；不能认定版本不存在或 develop 不受影响") from error
-    if result.returncode:
-        raise ValueError("主仓远端核验失败（网络或权限），不能认定分支不存在")
-    refs = {}
-    for line in result.stdout.splitlines():
-        sha, ref = line.split()
-        if ref.startswith("refs/heads/") and re.fullmatch(r"[0-9a-f]{40}(?:[0-9a-f]{24})?", sha):
-            refs[ref[len("refs/heads/"):]] = sha
-    return refs
+        return git_refs.query_heads(origin, sorted(branches))
+    except git_refs.GitRefsError as error:
+        raise ValueError("主仓远端核验失败（超时、Git 不可用、网络或权限），不能认定分支不存在") from error
 
 
 def resolve(base, task, payload):

@@ -89,6 +89,10 @@ station="$HOME/agenticops-tapdata"
 
 新增 Agent 只增加 `adapters/agents/<id>/` 的 Manifest、薄 Hook、模板和测试；不要修改公共入口建立平台枚举。新增产品项目只增加 `projects/<project>/`。每个 Jira Project Profile 必须配置 `jira.takeover_watermark`：逻辑键固定为 `agenticops_version`，配置实际 `customfield_<ID>`、字符串字段名、启用的 Jira 事务类型 ID 和 `overwrite` 写入方式；`workflow/project_rules.py` 会拒绝缺失或无效配置，不能绕过接管门禁。工作项、进度和验收写入 Jira，不在仓库新增执行计划。
 
+`python3 workflow/project_rules.py` 的 `render`、`branch` 和 `workflow` 子命令必须通过 `--project <project>` 显式指定项目。无工位的 Python 调用同样提供 `project`，不再默认 TapData；工位调用使用 `station` 的现有绑定。缺少项目时停止读取或生成，旧脚本应补齐参数，不能用默认业务项目代替缺失输入。
+
+准入清单生成使用 `admission.json` 中各 `task_classes.<class>.doc` 的路径，新任务类型无需修改通用渲染器。路径必须为 `projects/<project>/admission/<英文小写连字符名称>.md`，不允许越界、符号链接或多个任务类型覆盖同一文件。生成器先检查全部目标并渲染正文，再开始写入；`render --check` 只检测漂移，不创建目录。既有 TapData 文档路径和正文保持不变。
+
 ## 5. 验证
 
 运行代码及 Skill 变更整理为明确候选后，使用一次正式验收同时完成四项检查和提交门禁证据：
@@ -105,6 +109,8 @@ internal/acceptance.sh full --change-source staged
 internal/acceptance.sh runtime install
 internal/acceptance.sh --list
 ```
+
+维护审查可使用 `python3 skills/ao-review-change/scripts/review-context.py --change-source staged` 读取精确候选摘要。`acceptance_evidence` 在 Story Gate 已核验匹配证据时返回 `run_id` 和四项检查结果，便于记录 Jira 验收引用；没有有效证据时为 null。它不读取原始日志，不签发批准，也不替代代码审查。
 
 诊断日志写入 `.local/acceptance/<run-id>/`；正式日志写入 `.local/story-gate/runs/<impact-id>/<run-id>/`，最新自包含摘要位于 `.local/story-gate/evidence/`。同一精确候选从暂存到 commit/range、推送可以消费匹配证据；基线、完整树、变更范围或行为相关环境变化则重验。显式再次调用 verify 始终重新执行，不做跨候选缓存。重验开始即使旧通过和审批失效，失败、取消、超时保留本次非通过记录。机器崩溃残留锁需人工确认没有在途进程后处理，不自动抢锁。
 

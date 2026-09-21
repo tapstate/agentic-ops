@@ -146,13 +146,13 @@ python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key 
 
 中断后沿用原 operation-id、原 expected-revision 和原请求恢复；不得改用当前 revision 或另建操作。`station-source-reset.py` 是同一版本 4/5 操作的独立 Git 阶段入口，要求已发布且覆盖当前成果的档案，以及当前 issue/run/revision/operation-id，不得单独用于未归档源码。正常清理由入口调用同一实现，无需手工追加执行一次。
 
-工位根目录的 `.idea/` 属于 IntelliJ IDEA 配置，由中央白名单统一保留，不遍历、归档或删除其内容。目录模式不匹配同名文件，符号链接按通用安全规则拒绝。白名单可以覆盖同层宽泛黑名单；不同清理动作同时命中同层对象才是冲突。新持久计划与目录类型对应 epoch 5，升级边界见[更新与回退](update-and-rollback.md)。
+工位根目录的 `.idea/` 属于 IntelliJ IDEA 配置，由中央白名单统一保留，不遍历、归档或删除其内容。目录模式不匹配同名文件，符号链接按通用安全规则拒绝。白名单可以覆盖同层宽泛黑名单；不同清理动作同时命中同层对象才是冲突。工位代际及目标产品支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准，清理计划版本不代表工位 epoch；不兼容工位须由匹配的原产品版本处理，升级顺序见[更新与回退](update-and-rollback.md)。
 
 未初始化子模块只在索引、当前提交与归位提交的 gitlink 路径和对象完全一致，且路径不存在或为空目录时保留。清理前和归位时均核验，不递归检出子模块；含内容、符号链接、gitlink 变更或冲突时仍停止。此边界不改变工位状态格式或 epoch，也不授权删除子模块内容。
 
 ### 原清理操作的恢复
 
-已有 schema 3 操作保留原请求和执行顺序：保留 config、完整 source 和 archive，清空 runtime，按原 Project 配方回收已登记源码生成目录。不得将正在执行的旧计划改成 schema 4；新操作使用上面的配置化入口。边界、源码 archive/export/discard 与中断恢复以[工位合同](../architecture/single-task-station.md#8-一次确认成果归档与恢复)为准。
+本节仅适用于当前运行时支持的工位代际，支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准。已有 schema 3 操作保留原请求和执行顺序：保留 config、完整 source 和 archive，清空 runtime，按原 Project 配方回收已登记源码生成目录。不得将正在执行的旧计划改成 schema 4；新操作使用上面的配置化入口。边界、源码 archive/export/discard 与中断恢复以[工位合同](../architecture/single-task-station.md#8-一次确认成果归档与恢复)为准。
 
 构建前将日志、插件、下载和可迁出的生成物定位到 runtime；不能迁出的生成目录先用 station_resources.py 创建：输入数组项为 `{"kind":"directory","path":"source/tapdata/tapdata/target","producer":"maven"}`，已有空目录的显式采用另加 `"adopt_empty":true`。目录非空时不能补登记猜归属；源码生成路径必须符合工程 Profile 的 generated_directories。
 
@@ -169,7 +169,7 @@ python3 <agenticops-root>/workflow/task.py clean --issue-key <issue> --expected-
 
 关键日志与报告集中到 runtime/logs、runtime/reports（由 Project 的 archive_runtime 指定），归档保留脱敏后的 UTF-8 正文；停止期间新增内容以不可变附件追加后再删除。单文件超过 16 MiB、总量超过 64 MiB 或非文本材料须先安全导出并留下摘要，不能静默丢弃。
 
-重置失败保持占用；恢复原操作和原请求。范围变化使用 cleanup-amend 绑定原计划摘要及修订号，源码新增成果须明确处理。epoch 4 及更早工位先由原版本归档、退出、purge，本版不在线接续旧代际操作。
+重置失败保持占用；恢复原操作和原请求。范围变化使用 cleanup-amend 绑定原计划摘要及修订号，源码新增成果须明确处理。不兼容工位先使用匹配的原产品版本结束任务并归档释放或清理，再显式执行 station purge；解绑成功后才切换产品并重新初始化，详见[更新与回退](update-and-rollback.md)。目标版本不解析或迁移旧任务，repair 不跨代际采用。
 
 ## 完成预检与等待合并
 

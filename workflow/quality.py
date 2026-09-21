@@ -19,6 +19,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from workflow import project_rules, quality_contract, task_store  # noqa: E402
+from workflow.git_environment import git_environment
+from workflow.file_digest import sha256_file
 
 
 def digest(value):
@@ -27,12 +29,11 @@ def digest(value):
 
 
 def config(base, task=None):
-    root = project_rules.product_root_from_station(base)
-    project = project_rules.project_from_station(base)
+    root, project = project_rules.station_context(base)
     project_dir = project_rules.project_root(root, project)
     profile = None
     if task is not None:
-        spec = project_rules.load_admission(station=base)
+        spec = project_rules.load_admission(root=root, project=project)
         cls = project_rules.class_spec(spec, task["task_class"])
         profile = cls.get("quality_profile")
         if "quality_profile" in cls and profile is None:
@@ -47,12 +48,22 @@ def config(base, task=None):
             raise ValueError("任务声明的质量配置缺失：%s" % profile)
         return None
     try:
-        result = json.loads(path.read_text(encoding="utf-8"))
+        result = project_rules.read_json_object(path)
         if result.get("schema_version") != 1:
             raise ValueError("不支持的质量配置版本")
         ids = [c["id"] for c in result["checkpoints"]]
         if not ids or len(ids) != len(set(ids)) or result["selection_checkpoint"] not in ids:
             raise ValueError("质量检查点配置无效")
+        if "checkpoint" in (result.get("tests_passed") or {}):
+            from workflow import jira_tests
+            checkpoint = jira_tests.acceptance_checkpoint(result)
+            commit_point = result.get("commit_evidence_checkpoint")
+            if (not isinstance(checkpoint, str) or checkpoint not in ids or commit_point not in ids
+                    or ids.index(checkpoint) < ids.index(commit_point)
+                    or result["checkpoints"][ids.index(checkpoint)]["timing"] != "after_fix"):
+                raise ValueError("关联测试验收检查点必须是已登记且不早于完整提交证据检查点的 after_fix 检查点")
+        for method in result["methods"].values():
+            worktree_origins(method)
         from workflow import verification
         requirements = result.get("verification_checkpoints", {})
         if not isinstance(requirements, dict) or not set(requirements) <= set(ids):
@@ -68,10 +79,23 @@ def config(base, task=None):
             known = project_rules.known_fact_keys(spec, task["task_class"])
             if any(k not in known for k in result["plan_fact_keys"]):
                 raise ValueError("方案事实必须先在 Project 准入配置中声明")
-        result["jira"]["site"] = project_rules.load_profile(station=base)["jira"]["site"]
+        result["jira"]["site"] = project_rules.load_profile(root=root, project=project)["jira"]["site"]
     except (OSError, KeyError, TypeError, AttributeError) as error:
         raise ValueError("质量配置无法读取或结构无效：%s" % path.name) from error
     return result
+
+
+def worktree_origins(method):
+    """项目声明工作区证据来源；缺省仅保留旧事件的 Maven 回放语义。"""
+    if "worktree_origins" not in method:
+        return [origin for origin in method.get("origins", []) if origin == "local_maven"]
+    origins = method["worktree_origins"]
+    if (not isinstance(origins, list)
+            or any(not isinstance(origin, str) or not origin.strip() for origin in origins)
+            or len(set(origins)) != len(origins)
+            or not set(origins).issubset(method.get("origins", []))):
+        raise ValueError("worktree_origins 必须是 origins 的无重复非空字符串子集")
+    return origins
 
 
 def validate_task_profile(rules, task):
@@ -81,11 +105,11 @@ def validate_task_profile(rules, task):
         raise ValueError("任务质量配置未启用当前任务类型")
     points = {p["id"]: p for p in rules["checkpoints"]}
     selected = rules["selection_checkpoint"]
+    intake = rules["checkpoints"][0]["id"]
     before = rules.get("stage_checkpoints", {}).get("implementation", [])
-    if ("q1-intake" not in points or selected == "q1-intake"
-            or not {"q1-intake", selected}.issubset(before)):
+    if (selected == intake or not {intake, selected}.issubset(before)):
         raise ValueError("任务质量配置必须在实施前检查接管与方案确认")
-    for key in ("q1-intake", selected):
+    for key in (intake, selected):
         if points[key].get("confirmation", "user") != "user":
             raise ValueError("接管与方案检查必须保留人工决定")
     for keys in rules.get("stage_checkpoints", {}).values():
@@ -157,25 +181,26 @@ def load(base, task):
 def git_revision(path):
     """只读工作目录指纹；只保存哈希，绝不把文件或 diff 内容写入质量证据。"""
     def git(*args):
-        p = subprocess.run(["git", "--no-optional-locks", "-C", str(path), *args], capture_output=True, timeout=30)
+        p = subprocess.run(["git", "--no-optional-locks", "-C", str(path), *args], capture_output=True, timeout=30, env=git_environment(read_only=True))
         if p.returncode:
             raise ValueError("无法核对质量记录所对应的本地代码")
         return p.stdout
     head = git("rev-parse", "HEAD").decode().strip()
-    diff = git("diff", "HEAD", "--binary", "--no-ext-diff")
+    diff = git("diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv")
     untracked = git("ls-files", "--others", "--exclude-standard", "-z")
-    h = hashlib.sha256(diff)
+    h = hashlib.sha256(b"agenticops-worktree-v3\0" + hashlib.sha256(diff).digest())
     for name in sorted(untracked.split(b"\0")):
         if not name:
             continue
         file = Path(path) / os.fsdecode(name)
+        h.update(len(name).to_bytes(8, "big"))
         h.update(name)
         if file.is_symlink():
-            h.update(os.readlink(file).encode())
+            h.update(b"symlink\0")
+            h.update(hashlib.sha256(os.fsencode(os.readlink(file))).digest())
         else:
-            with file.open("rb") as stream:
-                for chunk in iter(lambda: stream.read(1048576), b""):
-                    h.update(chunk)
+            h.update(b"file-x\0" if file.stat().st_mode & 0o111 else b"file--\0")
+            h.update(bytes.fromhex(sha256_file(file)))
     return head if not diff and not untracked else head + ":worktree:" + h.hexdigest()
 
 
@@ -450,16 +475,18 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
     else:
         result["reviewed"] = is_valid(record, result["digest"]) and not problems
     status_items = [v for v in due.values() if v["plan"]["timing"] == "after_fix"]
-    if checkpoint == "q4-acceptance" and status_items and all("jira_status" in v for v in status_items):
+    from workflow import jira_tests
+    linked_checkpoint = jira_tests.acceptance_checkpoint(rules)
+    if checkpoint == linked_checkpoint and status_items and all("jira_status" in v for v in status_items):
         result.update(mode="jira_status", reviewed=not problems)
     result["outcome"] = checkpoint_outcome(result)
     point = rules["checkpoints"][index]
     handoff_request = "核对列出的用例、范围、预期与缺口；选择验收、补测/返工、不适用、延期或接受风险。"
     handoff_return = "执行人、环境、精确提交 SHA、步骤、实际结果及可回查日志/报告；未执行须说明原因。"
-    if checkpoint == "q4-acceptance":
-        handoff_request = ("编码完成后，由用户与 Agent 在 Jira 创建或复用 Test，并通过「已链接工作项」关联缺陷；"
-                           "重新读取 Test Type、用例版本和链接。TapCE 当前不纳管，若无法形成受管用例请调整 Jira 或验收方案后重试。")
-        handoff_return = ("Manual、Unit 需精确提交 SHA（当前完整 SHA） 的 PASS 证据及用户逐项确认；项目配置状态接纳的 TapTest 只回读 Jira 状态，无需逐项 accept；"
+    if checkpoint == linked_checkpoint:
+        handoff_request = ("编码完成后，由用户与 Agent 在 Jira 创建或复用 Test，并通过「已链接工作项」关联当前任务；"
+                           "重新读取 Test Type、用例版本和链接。按项目配置核对受管类型，若无法形成受管用例请调整 Jira 或验收方案后重试。")
+        handoff_return = ("按执行结果验收的用例需精确提交 SHA（当前完整 SHA）的 PASS 证据及用户逐项确认；项目配置状态接纳的用例只回读 Jira 状态，无需逐项 accept；"
                           "需要本地环境时先提供可操作启动步骤、前置条件和失败日志要求。")
     result["handoff"] = {
         "title": point["title"],
@@ -489,7 +516,10 @@ def checkpoint_digest(base, task, checkpoint, required_outcome=None):
 
 
 def q1_digest(base, task):
-    return checkpoint_digest(base, task, "q1-intake")
+    rules = config(base, task)
+    if not enabled(task, rules):
+        raise ValueError("当前任务类型未配置可用的接管检查")
+    return checkpoint_digest(base, task, rules["checkpoints"][0]["id"])
 
 
 def q2_digest(base, task):
@@ -577,7 +607,7 @@ def reduce(model, command, rules, ctx):
                 raise ValueError("非失败执行不能声明 failure_kind")
             if rules.get("contract_revision", 1) >= 2:
                 revision = execution["target_revision"]
-                if not exact_commit(revision) and not (exact_worktree(revision) and execution["origin"] == "local_maven"):
+                if not exact_commit(revision) and not (exact_worktree(revision) and execution["origin"] in worktree_origins(method)):
                     raise ValueError("执行证据必须绑定完整提交 SHA；仅本地自动验证可使用精确 worktree 指纹，不接受分支名或短 SHA")
             item["executions"].append(execution)
         else:

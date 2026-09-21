@@ -1,5 +1,9 @@
 # AgenticOps 文档总纲
 
+源码工作目录指纹由[工位合同](architecture/single-task-station.md#源码指纹与兼容边界)定义质量证据、扩仓和中断恢复共用的字节边界、禁用 Git textconv 的源码核验要求及 epoch；[更新与回退](usage/update-and-rollback.md)负责跨 epoch 的原版退出、purge 和重建操作，不在线迁移旧指纹。
+
+项目规则入口的显式项目选择及配置化准入文档生成由[维护指引](maintenance-guide.md)说明；无工位调用必须指定项目，工位运行从已有绑定读取，避免通用入口隐式选用业务规则。
+
 功能开发准入由[质量检查与证据](usage/quality-checkpoints.md#功能方案完整性与一次决策包)说明 Q2 聚合检查及 Jira 同阶段采集，[TapData 构建运行指引](../projects/tapdata/runbooks/build-test-and-local-run.md#方案阶段环境预检)负责环境输入、加载验证和不猜测配置的操作依据。
 
 同周期方案返工由[工位合同](architecture/single-task-station.md)定义原 run、追加基线和失败恢复，[任务授权指引](usage/task-authorization.md)维护 prepare/apply/abort 操作；质量文档负责受影响证据，项目 Profile 限定可增仓集合。
@@ -8,7 +12,7 @@
 
 配置化工位清理由[任务授权指引](usage/task-authorization.md#配置化清理入口)说明两个独立名单、确认请求及失败恢复入口；[工位合同](architecture/single-task-station.md#配置化清理计划版本-5)维护版本 5 的报告保全、原生清理回执与源码复位顺序及 epoch 兼容边界。名单负责分类，归属与生命周期检查仍是副作用前提，不接入构建工具执行器。
 
-[维护指引](maintenance-guide.md#5-验证)负责诊断检查、绑定候选的正式四项验收、耗时报告与证据 v5 使用；[INT-001](user-stories/v1/int-001-release-governance.md)规定验收完整性、失败失效和首次信任根升级边界。运行进度与性能验收结果仍以 Jira 为准。
+[维护指引](maintenance-guide.md#5-验证)负责诊断检查、绑定候选的正式四项验收、耗时报告与证据 v5 使用及维护审查的有效验收摘要；[INT-001](user-stories/v1/int-001-release-governance.md)规定验收完整性、失败失效和首次信任根升级边界。运行进度与性能验收结果仍以 Jira 为准。
 
 TapData 的按需 Wiki 阅读由 [tapdata-wiki](../projects/tapdata/skills/tapdata-wiki/SKILL.md) 说明检索与源码核验边界；项目 Profile 仅引用中央登记的共享仓库。[架构总纲](architecture/agenticops-v1-architecture.md)定义中央共享材料归属；[工位源码与材料](usage/station-materials.md)负责共享仓库准备、显式更新和故障处理，不引入任务知识快照或自动刷新。
 
@@ -30,7 +34,7 @@ TapData 集成测试协作由 [tapdata-ci-test](../projects/tapdata/skills/tapda
 
 TapData 活动仓库以 repositories.json 为准；docs/docs-en 已解除，t-layer3-test 保留为可选验证依赖。新版本不保留旧清理身份映射，旧现场由原版本处理，不删除已有源码、Git refs 或材料。
 
-维护 Agent 的协作优化由[维护指引](maintenance-guide.md)说明模型依据、平台能力边界与验证方式，[Skill 维护规范](skill-maintenance.md)负责指令审查标准，根 `AGENTS.md` 保存日常协作约定，`skills/` 保存初始化与接管测试的具体指引。目标是在已有授权内持续完成工作，减少重复确认和重复验证；不改变产品门禁、授权或工位状态契约。
+项目 Skill 提供使用入口与行动顺序：[TapData 任务引导](../projects/tapdata/skills/tapdata-task/SKILL.md)负责任务协作，[分支对齐](../projects/tapdata/skills/tapdata-align-branches/SKILL.md)负责工位分析与独立开发目录的项目操作；现役工位代际及支持范围由[机器兼容清单](../contracts/station-state-compatibility.json)定义，[更新与回退](usage/update-and-rollback.md)负责原版本退出、purge 与目标版本重建。维护 Agent 的协作优化由[维护指引](maintenance-guide.md)说明模型依据、平台能力边界与验证方式，[Skill 维护规范](skill-maintenance.md)负责指令审查标准，根 `AGENTS.md` 保存日常协作约定，`skills/` 保存初始化、接管测试和[变更审查](../skills/ao-review-change/SKILL.md)的具体指引。变更审查 Skill 只整理现有 Story Gate 材料并指导检查，验收、批准和授权仍由原有机制负责。目标是在已有授权内持续完成工作，减少重复确认和重复验证；不改变产品门禁、授权或工位状态契约。
 
 TapData 的测试缺口分析、Java 影响范围和 Maven 模块测试属于项目构建与验证适配：[构建、测试与本地运行](../projects/tapdata/runbooks/build-test-and-local-run.md)说明用例判断依据、框架缺口处置、有效 Maven 模型的采集、跨仓消费关系、原生 Maven 执行清单、依赖 Jar 及报告核验的使用边界；项目脚本只准备清单和分析证据，不执行测试或改变任务阶段。项目任务 Skill 引导 Agent 在已有验收方案内自主分析，不替代共同质量检查点。
 

@@ -27,18 +27,19 @@ def validate_manifest(document, label):
     }
     if not isinstance(document, dict) or set(document) != required:
         raise ValueError("%s结构无效" % label)
-    if document.get("schema_version") != MANIFEST_SCHEMA_VERSION:
+    if type(document.get("schema_version")) is not int or document["schema_version"] != MANIFEST_SCHEMA_VERSION:
         raise ValueError("%s schema_version 不支持" % label)
     for field in (
         "minimum_updater_protocol_version",
         "station_state_epoch",
         "legacy_station_state_epoch",
     ):
-        if not isinstance(document.get(field), int) or document[field] < 1:
+        if type(document.get(field)) is not int or document[field] < 1:
             raise ValueError("%s %s 无效" % (label, field))
     supported = document.get("supported_station_state_epochs")
     if (
-        document["legacy_station_state_epoch"] != document["station_state_epoch"]
+        not isinstance(supported, list) or any(type(epoch) is not int for epoch in supported)
+        or document["legacy_station_state_epoch"] != document["station_state_epoch"]
         or supported != [document["station_state_epoch"]]
     ):
         raise ValueError("%s 不得声明旧工位状态兼容性" % label)
@@ -49,17 +50,21 @@ def load_manifest(product_root):
     path = Path(product_root).resolve() / MANIFEST_PATH
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ValueError("工位兼容性清单无法读取：%s" % error) from error
     return validate_manifest(document, "工位兼容性清单")
 
 
 def manifest_at_ref(product_root, reference):
-    result = subprocess.run(
-        ["git", "-C", str(Path(product_root).resolve()), "show", "%s:%s" % (reference, MANIFEST_PATH)],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(Path(product_root).resolve()), "show", "%s:%s" % (reference, MANIFEST_PATH)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+    except UnicodeError as error:
+        raise ValueError("目标版本工位兼容性清单编码无效：%s" % reference) from error
     if result.returncode:
         raise ValueError("目标版本缺少工位兼容性清单：%s" % reference)
     try:
@@ -77,10 +82,11 @@ def load_station_registry(product_root, required=False):
         return []
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ValueError("工位提示索引无法读取：%s" % error) from error
     stations = document.get("stations") if isinstance(document, dict) else None
-    if document.get("schema_version") != 1 or not isinstance(stations, list):
+    if (not isinstance(document, dict) or type(document.get("schema_version")) is not int
+            or document["schema_version"] != 1 or not isinstance(stations, list)):
         raise ValueError("工位提示索引结构无效：%s" % path)
     if not all(isinstance(item, str) and item for item in stations):
         raise ValueError("工位提示索引包含无效路径：%s" % path)
@@ -117,10 +123,10 @@ def require_station_can_adopt(product_root, station, target_manifest=None):
     init_path = Path(station) / ".agenticops" / "init.json"
     try:
         init = json.loads(init_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise ValueError("工位初始化标记无法读取，请使用原版本解绑并重建：%s" % error) from error
-    current_epoch = init.get("station_state_epoch")
-    if isinstance(current_epoch, int) and current_epoch == target["station_state_epoch"]:
+    current_epoch = init.get("station_state_epoch") if isinstance(init, dict) else None
+    if type(current_epoch) is int and current_epoch == target["station_state_epoch"]:
         return current_epoch
     raise ValueError(
         "工位状态与当前产品不兼容，repair 不执行跨代际采用。"

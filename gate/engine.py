@@ -29,7 +29,7 @@ def _read_json(path):
     try:
         with open(path, "r", encoding="utf-8") as stream:
             return json.load(stream)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, UnicodeError, OSError):
         return None
 
 
@@ -129,6 +129,26 @@ def load_authorization_for_issue(cwd, issue_key):
     return (_read_json(path), str(path)) if path.is_file() else (None, str(path))
 
 
+def _intent_events(task_directory):
+    """读取可信的消费事件；损坏或不可读时不推断意图仍可用。"""
+    path = Path(task_directory) / "evidence" / "events.jsonl"
+    try:
+        with path.open(encoding="utf-8") as stream:
+            events = []
+            for line in stream:
+                if not line.strip():
+                    continue
+                event = json.loads(line)
+                if not isinstance(event, dict):
+                    return None
+                events.append(event)
+            return events
+    except FileNotFoundError:
+        return []
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+
+
 def jira_status_intent(task_directory, transition_id):
     """核对当前 run 是否准备了同一 Jira transition；不解释项目规则。"""
     task = current_task(task_directory)
@@ -148,16 +168,10 @@ def jira_status_intent(task_directory, transition_id):
             break
     if not matched:
         return "missing"
-    events = Path(task_directory) / "evidence" / "events.jsonl"
-    try:
-        lines = events.read_text(encoding="utf-8").splitlines() if events.is_file() else []
-    except OSError:
+    events = _intent_events(task_directory)
+    if events is None:
         return "missing"
-    for line in lines:
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    for event in events:
         if (event.get("reason_code") == "jira_status_intent_covered"
                 and event.get("agentic_run_id") == task.get("run_id")
                 and str(event.get("jira_transition_id")) == str(transition_id)):
@@ -174,7 +188,9 @@ def jira_watermark_intent(task_directory, issue_key, field_id, digest):
     matched = False
     for path in sorted((Path(task_directory) / "evidence").glob("jira-watermark-*.json")):
         state = _read_json(path)
-        record = state.get("watermark") if isinstance(state, dict) else None
+        if not isinstance(state, dict):
+            continue
+        record = state.get("watermark")
         if (state.get("run_id") == task.get("run_id") and isinstance(record, dict) and
                 record.get("outcome") == "ready" and record.get("issue_key") == task.get("issue_key") and
                 isinstance(record.get("version"), str) and record["version"] and
@@ -190,16 +206,10 @@ def jira_watermark_intent(task_directory, issue_key, field_id, digest):
             break
     if not matched:
         return "missing"
-    events = Path(task_directory) / "evidence" / "events.jsonl"
-    try:
-        lines = events.read_text(encoding="utf-8").splitlines() if events.is_file() else []
-    except OSError:
+    events = _intent_events(task_directory)
+    if events is None:
         return "missing"
-    for line in lines:
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    for event in events:
         if (event.get("reason_code") == "jira_watermark_intent_covered" and
                 event.get("agentic_run_id") == task.get("run_id") and
                 event.get("jira_watermark_field") == field_id and
@@ -281,7 +291,7 @@ def normalize_remote_endpoint(url):
         return str(Path(text).resolve())
     if text.startswith("file://"):
         return "file://" + str(Path(text[7:]).resolve())
-    scp = re.fullmatch(r"(?:[^@/:]+@)?([^/:]+):(.+)", text)
+    scp = None if "://" in text else re.fullmatch(r"(?:[^@/:]+@)?([^/:]+):(.+)", text)
     if scp:
         host, path = scp.groups()
         endpoint = "%s/%s" % (host.lower(), path.lstrip("/"))
