@@ -155,15 +155,13 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
             raise ValueError("工位仍有当前任务，不能接管新任务")
         issue_key = task_store.validate_issue_key(request.get("issue_key"))
         from workflow import archive_store
-        for _ in range(16):
-            run_id = task_store.new_run_id(issue_key)
-            try:
-                archive_store.reserve(base, issue_key, run_id)
-                break
-            except FileExistsError:
-                continue
-        else:
-            raise ValueError("无法生成唯一执行编号，拒绝接管")
+        run_id = task_store.new_run_id(issue_key)
+        try:
+            archive_store.reserve(base, issue_key, run_id)
+        except FileExistsError as error:
+            raise ValueError(
+                "执行编号 %s 已存在；同一 Jira 在同一秒只能发起一次接管，请研发稍后重试" % run_id
+            ) from error
     elif current["current"] is None or current["current"]["run_id"] != run_id:
         raise ValueError("工位 run 已变化")
     value = {

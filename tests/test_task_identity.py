@@ -39,18 +39,20 @@ class TaskIdentityTests(unittest.TestCase):
     def test_timestamp_hex_and_new_run_are_fixed_and_issue_bound(self):
         self.assertEqual(task_store.timestamp_hex(0), "00000000")
         self.assertEqual(task_store.timestamp_hex(0xFFFFFFFF), "ffffffff")
-        self.assertEqual(task_store.new_run_id("tap-123", 0x69D8A1F0, "01234567"), "TAP-123-69d8a1f0-01234567")
+        self.assertEqual(task_store.new_run_id("tap-123", 0x69D8A1F0), "TAP-123-69d8a1f0")
         with self.assertRaisesRegex(ValueError, "超出"):
             task_store.timestamp_hex(0x100000000)
         self.assertEqual(task_store.validate_run_id("TAP-123", "run-old-fixture"), "run-old-fixture")
+        self.assertEqual(task_store.validate_run_id("TAP-123", "TAP-123-69d8a1f0-01234567"),
+                         "TAP-123-69d8a1f0-01234567")
         with self.assertRaisesRegex(ValueError, "不一致"):
             task_store.validate_run_id("TAP-123", "TAP-124-69d8a1f0")
 
     def test_takeover_run_reuses_operation_and_rejects_archive_collision(self):
         self.binding({"schema_version": 1, "git_name": "developer", "source": "git_global_user_name"})
-        with mock.patch.object(task_store, "timestamp_hex", return_value="69d8a1f0"), mock.patch.object(task_store.secrets, "token_hex", return_value="01234567"):
+        with mock.patch.object(task_store, "timestamp_hex", return_value="69d8a1f0"):
             operation = station_operation.begin(self.station, "takeover", "op-identity-one", 0, {"issue_key": "TAP-123"})
-        self.assertEqual(operation["run_id"], "TAP-123-69d8a1f0-01234567")
+        self.assertEqual(operation["run_id"], "TAP-123-69d8a1f0")
         retry = station_operation.begin(self.station, "takeover", "op-identity-one", 0, {"issue_key": "TAP-123"})
         self.assertEqual(retry["run_id"], operation["run_id"])
 
@@ -58,25 +60,24 @@ class TaskIdentityTests(unittest.TestCase):
         (other / ".agenticops").mkdir(parents=True)
         task_store.initialize_current(other)
         self.binding({"schema_version": 1, "git_name": "developer", "source": "git_global_user_name"}, other)
-        (self.product / ".archive/TAP-123-69d8a1f0-89abcdef").mkdir(parents=True)
-        with mock.patch.object(task_store, "timestamp_hex", return_value="69d8a1f0"), mock.patch.object(task_store.secrets, "token_hex", return_value="89abcdef"):
-            with self.assertRaisesRegex(ValueError, "唯一执行编号"):
+        (self.product / ".archive/TAP-123-69d8a1f0").mkdir(parents=True)
+        with mock.patch.object(task_store, "timestamp_hex", return_value="69d8a1f0"):
+            with self.assertRaisesRegex(ValueError, "同一 Jira 在同一秒.*稍后重试"):
                 station_operation.begin(other, "takeover", "op-identity-two", 0, {"issue_key": "TAP-123"})
 
     def test_takeover_without_station_identity_keeps_non_code_flow_available(self):
         self.binding()
-        with mock.patch.object(task_store, "timestamp_hex", return_value="69d8a1f0"), mock.patch.object(task_store.secrets, "token_hex", return_value="01234567"):
+        with mock.patch.object(task_store, "timestamp_hex", return_value="69d8a1f0"):
             operation = station_operation.begin(self.station, "takeover", "op-identity-missing", 0, {"issue_key": "TAP-123"})
-        self.assertEqual(operation["run_id"], "TAP-123-69d8a1f0-01234567")
+        self.assertEqual(operation["run_id"], "TAP-123-69d8a1f0")
         with self.assertRaisesRegex(ValueError, "未配置 git_name"):
             task_store.generated_work_branch(self.station, {"issue_key": "TAP-123", "run_id": operation["run_id"]})
         self.assertIsNone(task_store.read_current(self.station)["current"])
 
     def test_failed_takeover_intent_does_not_leave_run_reservation(self):
         self.binding({"schema_version": 1, "git_name": "developer", "source": "git_global_user_name"})
-        run_id = "TAP-123-69d8a1f0-01234567"
+        run_id = "TAP-123-69d8a1f0"
         with mock.patch.object(task_store, "timestamp_hex", return_value="69d8a1f0"), \
-                mock.patch.object(task_store.secrets, "token_hex", return_value="01234567"), \
                 mock.patch.object(station_operation, "save", side_effect=OSError("fixture")):
             with self.assertRaisesRegex(OSError, "fixture"):
                 station_operation.begin(self.station, "takeover", "op-identity-fail", 0, {"issue_key": "TAP-123"})

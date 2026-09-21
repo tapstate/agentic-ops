@@ -6,7 +6,6 @@ import json
 import os
 import re
 import tempfile
-import secrets
 import threading
 import time
 from contextlib import contextmanager
@@ -16,8 +15,8 @@ import fcntl
 
 ISSUE_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*$")
 LEGACY_RUN_ID_PATTERN = re.compile(r"^run-[a-z0-9][a-z0-9-]*$")
-NEW_RUN_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8}-[0-9a-f]{8}$")
-PREVIOUS_RUN_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8}$")
+CURRENT_RUN_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8}$")
+PREVIOUS_RUN_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8}-[0-9a-f]{8}$")
 RUN_ID_PATTERN = re.compile(r"^(?:run-[a-z0-9][a-z0-9-]*|[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8}(?:-[0-9a-f]{8})?)$")
 INTERACTION_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.(?:json|jsonl|log|md|txt))?$")
 _held_locks = threading.local()
@@ -47,11 +46,8 @@ def timestamp_hex(seconds=None):
     return "%08x" % seconds
 
 
-def new_run_id(issue_key, seconds=None, nonce=None):
-    nonce = secrets.token_hex(4) if nonce is None else nonce
-    if not isinstance(nonce, str) or not re.fullmatch(r"[0-9a-f]{8}", nonce):
-        raise ValueError("run_id 随机后缀无效")
-    return "%s-%s-%s" % (validate_issue_key(issue_key), timestamp_hex(seconds), nonce)
+def new_run_id(issue_key, seconds=None):
+    return "%s-%s" % (validate_issue_key(issue_key), timestamp_hex(seconds))
 
 
 def validate_run_id_from_value(run_id):
@@ -63,7 +59,7 @@ def validate_run_id_from_value(run_id):
 def validate_run_id(issue_key, run_id):
     issue = validate_issue_key(issue_key)
     validate_run_id_from_value(run_id)
-    if (NEW_RUN_ID_PATTERN.fullmatch(run_id) or PREVIOUS_RUN_ID_PATTERN.fullmatch(run_id)) and not run_id.startswith(issue + "-"):
+    if (CURRENT_RUN_ID_PATTERN.fullmatch(run_id) or PREVIOUS_RUN_ID_PATTERN.fullmatch(run_id)) and not run_id.startswith(issue + "-"):
         raise ValueError("run_id 与 Jira issue key 不一致")
     return run_id
 
