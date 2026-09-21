@@ -11,7 +11,7 @@ metadata:
 
 `show` 是不改工作树的分析能力。默认通过通用 `workflow/git_refs.py snapshot` 读取单仓库 GitHub refs 缓存；首次加载、缓存超过阈值或显式刷新时才顺序刷新当前需要的仓库。它不会 checkout、切换、合并、提交、推送或改动工作树文件。需要 PluginKit 时，脚本按已核验的主仓 SHA 优先读取已有本地对象；对象不存在时只在临时 Git 对象库中获取并核对远端分支，不写入 TapData 模块仓库。
 
-`apply` 用于把用户明确指定的 TapData 模块根目录同步到已经确认的 `show` 计划。它不是任务接管入口，不能替代 task.py takeover；已占用工位不可通过 apply 改变冻结基线，应只读 show。
+`apply` 仅用于把明确指定的独立开发目录同步到已确认的 `show` 计划。目标目录位于已绑定工位中时，无论工位空闲或占用均禁止 apply；判断依据是目标目录的绑定，不是调用会话或当前执行目录。工位工程由 task.py takeover 准备，show 只提供分析，不替代接管，也不通过 purge 绕过限制。
 
 若外部调用方只需快速分析，应使用带缓存的 `snapshot`；若操作前必须取得当前远端的精确 head 事实，应使用无缓存的 `probe`：
 
@@ -30,32 +30,37 @@ python3 <agenticops-root>/workflow/git_refs.py probe \
 
 ## 使用方式
 
-显式指定 TapData 模块根目录时：
+在已绑定工位中分析工程时，使用 `show`，显式指定工位模块根目录和本工位缓存：
 
 ```sh
 python3 <agenticops-root>/projects/tapdata/scripts/align_branches.py \
-  show --tapdata-root <tapdata-root> --version <tapdata-branch> \
-  --repository <task-repository> --json
+  show --tapdata-root <station>/source/tapdata --version <tapdata-branch> \
+  --repository <owner/repo> \
+  --cache-file <station>/.agenticops/git-ref-cache-v2.json --json
 ```
 
-`show` 输出 `plan_digest`、`apply.ready`、`apply.blockers`、各仓库当前分支/SHA、目标分支/SHA 和预期动作。确认这些内容后才能应用：
+在独立开发目录中，先运行下列 `show`，核对其 `plan_digest`、`apply.ready`、`apply.blockers`、各仓库当前分支/SHA、目标分支/SHA 和预期动作，再按已确认计划执行 `apply`：
 
 ```sh
 python3 <agenticops-root>/projects/tapdata/scripts/align_branches.py \
-  apply --tapdata-root <tapdata-root> --version <tapdata-branch> \
-  --expected-plan-digest <show-plan-digest> --json
+  show --tapdata-root <independent-module-root> --version <tapdata-branch> \
+  --repository <owner/repo> --cache-file <absolute-cache-file> --json
+
+python3 <agenticops-root>/projects/tapdata/scripts/align_branches.py \
+  apply --tapdata-root <independent-module-root> --version <tapdata-branch> \
+  --repository <owner/repo> --cache-file <absolute-cache-file> \
+  --expected-plan-digest <confirmed-show-plan-digest> --json
 ```
 
-`apply` 必须显式提供 `--tapdata-root`，不允许从工位绑定、当前目录或用户主目录猜测写入目标。计划摘要同时绑定规范化模块根目录、仓库路径、处理范围、当前状态和目标状态，不能跨另一套目录或范围复用。它始终重新核验远端 refs；任何绑定事实导致摘要变化时停止并要求重新查看、确认。指定 `--repository` 时只应用主仓和明确列出的仓库；未指定时应用本地已接入且参与分支关系的仓库。
+两条命令中的占位符替换为相同实际值：同一个绝对模块根目录、同一主仓分支、完全一致的全部 `--repository` 参数及同一个显式 `--cache-file`。多仓时两条命令都逐项重复 `--repository`。缓存使用调用者授权可写的位置，不放入 Product Root 或其它工位；缓存路径是执行输入，不是计划摘要绑定字段。`show` 可能联网并更新缓存，不是严格离线或完全无写入的操作。
 
-`--tapdata-root` 必须直接包含主仓 `<tapdata-root>/tapdata`；它不是产品根，也不是 `tapdata/tapdata` 主仓目录。默认缓存写入当前工位的 `<station>/.agenticops/git-ref-cache-v2.json`，以规范化绝对 `<tapdata-root>` 分区，再按 `<owner>/<repo> + canonical origin + scope` 映射；不写入 Product Root 或其它工位。旧 `git-ref-cache-v1.json` 由用户自行处理，现役路径不读取、迁移或删除它。脱离工位运行时，必须显式传入 `--cache-file`。目录中其它已登记仓库可尚未接入。`--repository` 可重复，表示本次必须核验的任务目标仓库；主仓始终必需。省略它时输出完整目录诊断，但不把全部仓库变成前置条件。
+`apply` 必须显式提供 `--tapdata-root`，不允许从工位绑定、当前目录或用户主目录猜测写入目标。计划摘要同时绑定规范化模块根目录、仓库路径、处理范围、当前状态和目标状态，不能跨另一套目录或范围复用。它始终重新核验远端 refs；刷新后摘要变化时，重新运行同范围 `show`、展示差异并核对原确认是否仍适用，范围或风险变化时补充确认；不得直接抄取错误中的新摘要重试。指定 `--repository` 时只应用主仓和明确列出的仓库；未指定时应用本地已接入且参与分支关系的仓库。
 
-省略 `--tapdata-root` 时，脚本按以下顺序解析 TapData 模块根目录：
+`--tapdata-root` 必须直接包含主仓 `<tapdata-root>/tapdata`；它不是产品根，也不是 `tapdata/tapdata` 主仓目录。工位分析须显式将缓存指定为本工位的 `<station>/.agenticops/git-ref-cache-v2.json`，以规范化绝对 `<tapdata-root>` 分区，再按 `<owner>/<repo> + canonical origin + scope` 映射；不写入 Product Root 或其它工位。旧 `git-ref-cache-v1.json` 由用户自行处理，现役路径不读取、迁移或删除它。脱离工位运行时，必须显式传入 `--cache-file`。目录中其它已登记仓库可尚未接入。`--repository` 可重复，表示本次必须核验的任务目标仓库；主仓始终必需。省略它时输出完整目录诊断，但不把全部仓库变成前置条件。
 
-1. 从当前执行路径向上找到最近的 `.agenticops/station.json`，使用该工位的 `source/tapdata`。
-2. 未找到工位绑定时，使用当前执行目录。
+当前脚本的工位默认目录与缓存解析仍只识别旧 station schema，不能据此判断现役工位需要重建。因此工位分析必须同时显式传入 `--tapdata-root` 和 `--cache-file`，不要依赖省略参数的默认解析，也不要因该默认解析错误执行 purge。
 
-因此 `$tapdata-align-branches release-v4.21.0` 必须被执行为上述 `show --version release-v4.21.0`，不能映射为 `--home $HOME`。如果最终目录不含主仓 `<tapdata-root>/tapdata`，脚本应立即报错停止；不得先把它当作 IDEA 平铺多仓目录，也不得扫描用户主目录。
+`$tapdata-align-branches release-v4.21.0` 应展开为上述 `show --version release-v4.21.0`，并按实际工位或独立目录补齐显式模块根目录、仓库范围和缓存路径，不能映射为 `--home $HOME`。如果最终目录不含主仓 `<tapdata-root>/tapdata`，脚本应立即报错停止；不得先把它当作 IDEA 平铺多仓目录，也不得扫描用户主目录。
 
 工位固定源码位于 source/tapdata/<repository>。若主仓缺失，脚本在任何远端刷新前停止；若显式指定仓库缺失，结果为 `blocked`。未指定的缺失仓库以 `not_covered` 报告，不阻断其它仓库。输出包含本地状态、目标分支、目标 SHA、推导理由和目标状态；`unchanged` 表示不参与关系推导，而非对本地工作树采取操作。
 
