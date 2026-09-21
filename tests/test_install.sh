@@ -82,7 +82,9 @@ printf '%s\n' \
   'mkdir -p "$UV_PROJECT_ENVIRONMENT"' \
   > "$setup_bin/uv"
 chmod +x "$setup_bin/uv"
+printf '%s' 'fixture-local-only' > "$maintainer_root/.git/info/exclude"
 PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" setup >/dev/null
+git -C "$maintainer_root" check-ignore --no-index fixture-local-only >/dev/null
 "$maintainer_root/agenticops" --help | grep -F '安装目录：默认 ~/.agentic-ops' >/dev/null
 "$maintainer_root/agenticops" --help | grep -F '工位：项目工作目录' >/dev/null
 test "$(git -C "$maintainer_root" branch --show-current)" = develop
@@ -103,11 +105,15 @@ for agent_skill_root in .agents/skills .claude/skills; do
   for maintenance_skill in ao-test-takeover ao-ws-init ao-review-change; do
     skill_link="$maintainer_root/$agent_skill_root/$maintenance_skill"
     test -L "$skill_link"
+    git -C "$maintainer_root" check-ignore --no-index "$agent_skill_root/$maintenance_skill" >/dev/null
     test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$skill_link")" = \
       "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' \
         "$maintainer_root/skills/$maintenance_skill")"
   done
 done
+exclude_before="$(file_digest "$maintainer_root/.git/info/exclude")"
+python3 "$maintainer_root/bootstrap/skill_wiring.py" --product-root "$maintainer_root" --refresh >/dev/null
+test "$(file_digest "$maintainer_root/.git/info/exclude")" = "$exclude_before"
 "$maintainer_root/agenticops" station doctor --station "$maintainer_root" >/dev/null
 rm "$maintainer_root/.agents/skills/ao-ws-init"
 if "$maintainer_root/agenticops" station doctor --station "$maintainer_root" >/dev/null 2>&1; then
