@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from workflow import station_clean_rules as rules, station_clean, station_source_reset
+from workflow import archive_store, station_clean_rules as rules, station_clean, station_source_reset
 from workflow import station_resources as resources, station, task_store, station_operation
 import test_station_resources as fixture
 
@@ -205,7 +205,7 @@ class StationCleanTests(unittest.TestCase):
         self.assertEqual(plan['digest'], resources.plan(self.ws, task_store.read_task(self.ws), version=5)['digest'])
         self.execute(task, request)
         self.assertIsNone(task_store.read_task(self.ws))
-        record = next((self.ws / 'archive').rglob('runtime-evidence.json'))
+        record = next(archive_store.root(self.ws).rglob('runtime-evidence.json'))
         self.assertIn('TEST-fixture.xml', record.read_text())
         self.assertEqual('baseline', (self.repo / 'file.txt').read_text().strip())
 

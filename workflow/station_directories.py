@@ -209,9 +209,8 @@ def validate(base, entry, missing=False):
 
 
 def cleanup_paths(base, task, entry, operation):
-    directory = Path(base).resolve() / task["archive_ref"]["path"] / "receipts"
-    if directory.is_symlink():
-        raise ValueError("回执目录不能是链接")
+    from workflow import archive_store
+    directory = archive_store.receipts(base, task["archive_ref"], create=True)
     stem = operation["operation_id"] + "-root-v%s-" % len(operation.get("plan_revisions", [])) + baseline.digest(entry)
     return tuple(directory / (stem + suffix) for suffix in ("-intent.json", "-done.json"))
 

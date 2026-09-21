@@ -14,7 +14,7 @@
       "required": ["issue_key", "run_id", "task_class", "stage", "outcome", "facts", "history", "pending", "engineering_baseline", "task_repositories", "terminal_proof", "archive_ref"],
       "properties": {
         "issue_key": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$"},
-        "run_id": {"type": "string", "pattern": "^(?:run-[a-z0-9][a-z0-9-]*|[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8})$"},
+        "run_id": {"type": "string", "pattern": "^(?:run-[a-z0-9][a-z0-9-]*|[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8}(?:-[0-9a-f]{8})?)$"},
         "task_class": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
         "stage": {"enum": ["waiting_takeover", "task_intake", "design_review", "implementation", "pr_review", "ci_validation", "completed"]},
         "outcome": {"enum": ["in_progress", "completed", "interrupted"]},
@@ -52,8 +52,14 @@
         },
         "terminal_proof": {"type": ["object", "null"]},
         "archive_ref": {
-          "type": ["object", "null"], "required": ["path", "digest"],
-          "properties": {"path": {"type": "string", "minLength": 1}, "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["scope", "run_id", "digest"],
+          "properties": {
+            "scope": {"const": "product"},
+            "run_id": {"type": "string", "pattern": "^(?:run-[a-z0-9][a-z0-9-]*|[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8}(?:-[0-9a-f]{8})?)$"},
+            "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+          }
         }
       }
     }

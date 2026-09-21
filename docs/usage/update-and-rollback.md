@@ -6,22 +6,22 @@
 
 先在同一个 Product Root 版本完成闭环：
 
-1. agenticops station init --station <绝对路径> --project tapdata，生成绑定、空 current 和 config/source/runtime/archive。
+1. agenticops station init --station <绝对路径> --project tapdata，生成绑定、空 current 和 config/source/runtime；正式档案在绑定 Product Root 的 `.archive/` 中按 run 保存。
 2. 在工位中接管任务。处理中不能接新任务；结束后 archive/release 或 archive/clean，精确授权范围以项目 Skill 和 CLI 为准。
-3. 当前任务为空、操作完成且 runtime 已清空后，明确执行 agenticops station purge --station <绝对路径> --yes。清理验证生成归属，不删除 source/config/archive 和未知用户材料；未知状态导致失败，不能宣称工位已干净。
+3. 当前任务为空、操作完成且 runtime 已清空后，明确执行 agenticops station purge --station <绝对路径> --yes。清理验证生成归属，不删除 source/config、Product Root `.archive/` 和未知用户材料；未知状态导致失败，不能宣称工位已干净。
 4. 确认 .agenticops 与受管接线已移除，再初始化。保留目录非空时明确追加 --reuse-materials；这只允许保留既有真实目录，不授权覆盖、删除或导入旧任务。runtime 必须为空，重新生成新的 station_id。
 
 station clean --generated-only 是接线刷新，不是上述解除绑定操作；不能用它证明状态已清空。
 
 ## 第二阶段：跨版本编排
 
-升级器只编排产品切换，不实现任务清理逻辑。它在 Git 引用切换前比较当前与目标 `station_state_epoch`：标记相同可直接更新；标记变化时，必须存在可读取的空工位登记。任一仍登记的工位都会停止切换并列出路径，提示继续使用原版本完成或终止任务并执行 `station purge`。登记缺失、损坏或无法读取同样停止。升级器不读取 current task、operation、runtime 或旧状态；原版任务与旧状态必须由原版处理，不由目标版本猜测迁移。
+升级器只编排产品切换，不实现任务清理逻辑。兼容清单只维护 `station_state_epoch` 一个配置项。升级器在 Git 引用切换前比较当前与目标值：相同可直接更新；不同则必须存在可读取的空工位登记。任一仍登记的工位都会停止切换并列出路径，提示继续使用原版本将已完成任务 release、未完成任务 clean，确认正式档案已经发布，再执行 `station purge`。单独执行 archive 仍占用工位，不满足升级条件。登记缺失、损坏或无法读取同样停止。升级器不读取 current task、operation、runtime 或旧状态；原版任务与旧状态必须由原版处理，不由目标版本猜测迁移。
 
 同 epoch 更新执行 `agenticops update`，随后 doctor 检查、repair 刷新接线。epoch 变化后，研发先在原版本完成任务并解绑全部工位，更新成功后再用目标版本重新 init；不自动 repair、init 或导入旧任务。rollback 只适用于安装目录，并使用相同的“epoch 变化则登记必须为空”规则；产品源码使用 Git 治理流程，不自动移动源码分支。
 
 ## 本次首次切换
 
-当前 epoch 以机器契约为准，最低 updater protocol 以同一清单声明。本版不提供旧状态兼容 Runtime：用户先用仍可运行的原版本保存材料、清理旧任务及其受控源码现场、注销旧绑定，然后再更新或重新安装并明确初始化。旧源码池、Git refs、导出材料不由新版本删除。新升级规则只保护采用此协议后的切换，不追溯保护旧升级器。
+当前 epoch 以机器契约为准，清单不再维护最低 updater protocol、旧 epoch 映射或支持列表。本版不提供旧状态兼容 Runtime：用户先用仍可运行的原版本保存材料、清理旧任务及其受控源码现场、注销旧绑定，然后再更新或重新安装并明确初始化。旧源码池、Git refs、导出材料和 Product Root `.archive/` 不由新版本删除。替换或删除整个 Product Root 前必须先保留或导出 `.archive/`。新升级规则只保护采用此协议后的切换，不追溯保护旧升级器。
 
 若手动替换产品文件或源码分支绕过升级器，新入口拒绝旧状态。应恢复与旧状态匹配的原产品版本完成清理，或先保全旧现场、使用独立空目录安装和初始化；不手改 epoch、注册表或当前状态。
 

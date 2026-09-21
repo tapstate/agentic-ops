@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import test_station_lifecycle as lifecycle
 from workflow import station, station_resources as resources, station_directories as directories, task as task_cli
-from workflow import station_artifacts as artifacts, station_operation as operations, station_archive, task_store
+from workflow import archive_store, station_artifacts as artifacts, station_operation as operations, station_archive, task_store
 
 
 class ResourceTests(unittest.TestCase):
@@ -209,7 +209,7 @@ class ResourceTests(unittest.TestCase):
         (self.repo/'new.bin').write_bytes(b'\x00\xffhello')
         request = self.reset_request(task)
         self.execute(task,request)
-        archive = self.ws/'archive'/task['issue_key']/task['run_id']
+        archive = archive_store.run_directory(self.ws, task['run_id'])
         value = json.loads((archive/'source-artifacts.json').read_text())
         artifacts.verify_reconstruction(self.repo,value['repositories'][self.name])
         self.assertEqual((self.repo/'file.txt').read_text(),'baseline\n')
@@ -386,7 +386,7 @@ class ResourceTests(unittest.TestCase):
         request = self.reset_request(task)
         self.execute(task, request, kind='archive', op='op-logs-archive')
         task = task_store.read_task(self.ws)
-        archive = self.ws/task['archive_ref']['path']
+        archive = archive_store.from_reference(self.ws, task['archive_ref'])
         saved = json.loads((archive/'runtime-evidence.json').read_text())
         self.assertEqual(saved['files']['runtime/logs/build.log']['text'], 'build passed\n')
         (logs/'build.log').write_text('build passed\nstop completed\n')
@@ -466,7 +466,7 @@ class ResourceTests(unittest.TestCase):
         task = task_store.read_task(self.ws)
         resources.register(self.ws,task['issue_key'],task['run_id'],[dict(external,status='cleaned',readback_ref='fixture:removed')],'op-external-archive')
         self.execute(task,self.reset_request(task))
-        receipts = list((self.ws/task['archive_ref']['path']/'receipts').glob('external-terminal-*.json'))
+        receipts = list(archive_store.receipts(self.ws, task['archive_ref']).glob('external-terminal-*.json'))
         self.assertEqual(len(receipts),1)
         result = json.loads(receipts[0].read_text())['resources'][0]
         self.assertEqual(result['status'],'cleaned')
@@ -547,8 +547,9 @@ class ResourceTests(unittest.TestCase):
         output = directory / 'source.json'
         station_export.export(self.ws, task['issue_key'], task['run_id'], 'source/' + self.name + '/file.txt', str(output.resolve()))
         plan = resources.plan(self.ws, task)
-        self.write(self.ws / 'archive/fixture/source-artifacts.json', {'repositories': {}})
-        archived_task = dict(task, archive_ref={'path': 'archive/fixture'})
+        archive = self.product / '.archive' / task['run_id']
+        self.write(archive / 'source-artifacts.json', {'repositories': {}})
+        archived_task = dict(task, archive_ref={'scope': 'product', 'run_id': task['run_id'], 'digest': 'a' * 64})
         artifacts.verify_coverage(self.ws, archived_task, plan)
         with output.open('ab') as stream:
             stream.write(b' ')
@@ -563,9 +564,9 @@ class ResourceTests(unittest.TestCase):
         (self.repo/'file.txt').write_text('late content')
         directory = self.root/'exports'; directory.mkdir(mode=0o700)
         result = station_export.export(self.ws,task['issue_key'],task['run_id'],'source/'+self.name+'/file.txt',str((directory/'late.json').resolve()),'op-before-export')
-        self.assertTrue(result['readback_ref'].startswith('archive/'))
+        self.assertTrue(result['readback_ref'].startswith('product-archive:'))
         self.execute(task, self.reset_request(task))
-        self.assertTrue((self.ws/result['readback_ref']).exists())
+        self.assertTrue(list(archive_store.receipts(self.ws, task['archive_ref']).glob('export-*.json')))
 
     def test_late_export_validates_operation_before_any_write(self):
         from workflow import station_export
@@ -575,7 +576,7 @@ class ResourceTests(unittest.TestCase):
         (self.repo/'file.txt').write_text('late content')
         directory = self.root/'exports'; directory.mkdir(mode=0o700)
         output = (directory/'late.json').resolve()
-        receipts = self.ws/task['archive_ref']['path']/'receipts'
+        receipts = archive_store.receipts(self.ws, task['archive_ref'])
         before = set(receipts.iterdir()) if receipts.exists() else set()
         for identifier in (None, 'op-export-wrong'):
             with self.assertRaisesRegex(ValueError, '绑定'):

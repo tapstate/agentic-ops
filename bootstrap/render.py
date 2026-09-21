@@ -467,9 +467,11 @@ def check_station(install_root, station, config, init, tree):
     from workflow import station_operation, task_store
     task_store.read_current(station)
     station_operation.read(station)
-    for name in ("config", "source", "runtime", "archive"):
+    for name in ("config", "source", "runtime"):
         if not tree.is_dir(name) or tree.is_symlink(name):
             raise ValueError("工位目录缺失或不安全，请检查后执行 repair：%s" % name)
+    if tree.exists("archive") and (not tree.is_dir("archive") or tree.is_symlink("archive")):
+        raise ValueError("旧工位归档目录不安全：archive")
     artifacts, _ = expected_artifacts(install_root, station, project, agents, manifests)
     if init.get("product_ref") != product_ref(install_root):
         raise ValueError("产品根目录版本已变化，请执行 agenticops station repair")
@@ -636,7 +638,7 @@ def main():
                     tree.chmod(target, 0o700)
             tree.write_json_atomic(Path(STATE_DIRECTORY) / STATION_NAME, station_config)
             tree.write_json_atomic(Path(STATE_DIRECTORY) / INIT_NAME, document)
-            for name in ("config", "source", "runtime", "archive"):
+            for name in ("config", "source", "runtime"):
                 tree.path(name).mkdir(mode=0o700, exist_ok=True)
             task_store.initialize_current(station)
     except ValueError as error:

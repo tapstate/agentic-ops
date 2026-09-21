@@ -16,7 +16,7 @@
 |---|---|
 | `station_id` | 复用工位已有稳定 `station_id` 作为工位身份，只改用户术语，不建立第二个 ID；创建新工位时生成新值，不能复制绑定文件克隆工位 |
 | `issue_key` | Jira 工作项身份，用户可见 |
-| `run_id` | 新接管生成 `<jira-key>-<timestamp-hex>`；`timestamp-hex` 是 8 位、小写、Unix 秒级 HEX。跨会话恢复不变，清理后重接同一 Jira 也生成新值；同一工位若发现既有同名档案则失败关闭，不生成多份活动 runtime |
+| `run_id` | 新接管生成 `<jira-key>-<timestamp-hex>-<random-hex>`；时间段和随机段均为 8 位小写 HEX。接管前在 Product Root 原子预留，避免同秒多工位碰撞；跨会话恢复不变，清理后重接同一 Jira 也生成新值。旧格式只供当前代际内既有材料读取，不再生成 |
 | `operation_id` | 一次状态或资源操作的恢复身份，用户不必输入；重试沿用，独立新操作使用新值 |
 
 对用户主要展示工位名称、任务号、任务结果与当前操作进度。写入请求携带从上下文读出的 `run_id` 和预期状态版本，执行时不得自动用新 run 补齐旧请求。`run_id` 只防止受检查操作和证据串用，不约束任意原生文件写入。
@@ -34,21 +34,24 @@
 │   └── evidence/               # 当前执行的质量、CI、同步及本地事实
 ├── config/                     # 研发维护的持久配置和秘密引用
 ├── source/<owner>/<repo>/      # 完整独立 Git 仓库，跨任务保留
-├── runtime/                    # 唯一运行配置、任务 Maven local、插件、日志及报告
-└── archive/<issue-key>/<run-id>/
+└── runtime/                    # 唯一运行配置、任务 Maven local、插件、日志及报告
+
+<product-root>/.archive/<run-id>/
     ├── summary.md
     ├── record.json             # 内容清单与证据引用
-    ├── evidence/               # 必要的脱敏证据
+    ├── evidence.json           # 必要的脱敏证据
+    ├── source-artifacts.json   # 源码成果清单
+    ├── runtime-evidence.json   # 运行证据摘要
     └── receipts/               # 追加的清理或释放结果；不修改正式正文
 ```
 
-`current-task.json` 固定包含 `schema_version`、单调 `revision`、`current`。`current=null` 表示无任务；非空对象包含 `issue_key/run_id/task_class/stage/outcome/engineering_baseline/task_repositories/terminal_proof/archive_ref`。`outcome` 为 `in_progress/completed/interrupted`；`archive_ref` 为空或引用本 run 的正式档案路径和摘要，不改变任务是否完成的事实。只有 `current` 的有无决定工位是否占用，不能再在 station 或索引里重复存 occupancy。没有未完成 operation 才可把无任务解释成可接管。
+`current-task.json` 固定包含 `schema_version`、单调 `revision`、`current`。`current=null` 表示无任务；非空对象包含 `issue_key/run_id/task_class/stage/outcome/engineering_baseline/task_repositories/terminal_proof/archive_ref`。`outcome` 为 `in_progress/completed/interrupted`；`archive_ref` 为空或固定为 `scope=product/run_id/digest`，实际路径始终由工位绑定的 Product Root 推导，不保存绝对路径或工位相对路径。只有 `current` 的有无决定工位是否占用，不能再在 station 或索引里重复存 occupancy。没有未完成 operation 才可把无任务解释成可接管。
 
 `engineering_baseline` 包含 `status=resolving|frozen`、Project/Profile 版本、解析输入、仓库条目与整体摘要；只有 frozen 可进入源码开发。`task_repositories` 是以仓库 ID 为键的变更与交付记录，引用唯一基线条目。质量、授权和 CI 状态独立留在 `.agenticops/`，都必须匹配 current 的 run/revision；不存在有效 current 时不接受活动证据写入。归档包含这些当前记录的必要脱敏副本，归档不是新的 Jira 或 Git 事实源。
 
 `operation.json` 包含 `schema_version/operation_id/kind/run_id/request_digest/expected_revision/phase/status/steps/confirmation/archive_ref/cleanup_plan/cleanup_manifest`。`steps` 记录每个副作用的意图、精确对象、预期前后事实与回执；`status=running|failed|done`。failed 仍属未完成，不释放工位。归档摘要使用规范化 JSON（键排序、无多余空白、UTF-8）和 SHA-256；文件清单记录相对路径、字节长度和 SHA-256，排除自身哈希和后续 receipts，避免循环摘要。
 
-config 不随任务删除。任务专用有效配置写入 runtime，正式档案只留脱敏配置、版本和秘密引用名称，不复制秘密。runtime 不以 run 分目录；暂存档案只用于原子发布，不属于第二个活动运行环境。Maven 的安装级与用户级 settings 继续提供镜像、认证、代理和 profile；工位只将本地仓库定向到 runtime，不复制 settings 或共享任务构件。
+config 不随任务删除。任务专用有效配置写入 runtime，正式档案只留脱敏配置、版本和秘密引用名称，不复制秘密。runtime 不以 run 分目录；暂存档案只用于原子发布，不属于第二个活动运行环境。`.archive/` 是 Product Root 的私有持久材料，目录权限为 0700、文件为 0600，不属于可删除的 `.local/`，update、rollback、setup 和 station purge 都不得删除。替换或删除整个 Product Root 前必须先保留或导出该目录。Maven 的安装级与用户级 settings 继续提供镜像、认证、代理和 profile；工位只将本地仓库定向到 runtime，不复制 settings 或共享任务构件。
 
 ## 4. 两类仓库信息
 
@@ -109,7 +112,7 @@ release 的研发确认绑定任务、run、最终候选摘要和释放范围。
 
 ## 7. 任务目录与重置边界
 
-“重置工位”是 clean/release 共用的退出行为，不新增第五个生命周期入口，也不替代 station purge。config、完整独立 source、正式 archive 及初始化接线保留；runtime 是任务独占可丢弃区域，清空内容但保留根目录。持久配置、源码唯一副本和用户手工材料不能放入 runtime。完成任务仍通过 release 核验原有交付事实；未完成任务通过 clean 归档为 incomplete，再记录 interrupted，不修改 Jira 完成状态。
+“重置工位”是 clean/release 共用的退出行为，不新增第五个生命周期入口，也不替代 station purge。工位 config、完整独立 source 及初始化接线保留；Product Root 的正式 `.archive/` 不在工位清理范围。runtime 是任务独占可丢弃区域，清空内容但保留根目录。持久配置、源码唯一副本和用户手工材料不能放入 runtime。完成任务仍通过 release 核验原有交付事实；未完成任务通过 clean 归档为 incomplete，再记录 interrupted，不修改 Jira 完成状态。
 
 runtime 采用 `clear_children_keep_root`，其直接和深层生成内容均在授权域内，不逐文件登记。源码内无法迁出的 target/node_modules 等目录由 Project engineering profile 的 generated_directories 声明，实际生产前按精确路径登记为 `source-generated/delete_root`。配方模式只允许选择候选路径，不授予已有非空目录的删除权。目录身份包含 station/run、路径、生产者、配方 ID/版本、父目录及根目录的 device/inode。Workflow 先写创建意图，再 mkdir 并写创建回执，最后才能启动生产者；已存在目录只能在显式采用且确认为空时登记。创建后回执前中断不能猜测非空目录归属；仅按原创建意图核验生产者、配方、父身份和空目录后继续。初始 current CAS 同时保存已核验空 runtime 的采用身份，允许在后续目录登记前中断时取消接管。
 
@@ -129,7 +132,7 @@ Agent 使用原生能力停止已登记应用、构建、测试和其它写入�
 
 export 必须写到本次清理范围以外的受控位置，实际内容、源码快照及回读均核验；discard 必须额外确认精确仓库、路径和内容指纹。无任何有效动作时不得恢复或删除源码。敏感正文不进入档案，不通过改写 patch 假称保存完整；超过大小上限或不支持的冲突索引、submodule、源码链接等对象停止并明确处置。旧档案必须逐成果摘要覆盖，不因整体档案有效就推定保存了新增成果。归档保存脱敏总结、结构化证据和 Project 指定 runtime/logs、runtime/reports 文本；停止期间新增日志先追加不可变回执。归档保存上述脱敏材料，不保存原始敏感日志或依赖缓存。
 
-正式档案在 archive/<issue> 的操作专属临时目录准备，核验后原子改名到 archive/<issue>/<run>，发布后正文不可覆盖。目录回收、解绑和后续分支处置只追加 receipts。发布成功但回执或 archive_ref 未写时，恢复先核验已有档案并补绑定，不重算已部分回收的现场。
+正式档案在 `<product-root>/.archive/` 的操作专属临时目录准备，核验后原子改名到 `<product-root>/.archive/<run-id>`，发布后正文不可覆盖。目录回收、解绑和后续分支处置只追加 receipts。发布成功但回执或 archive_ref 未写时，恢复先核验已有档案并补绑定，不重算已部分回收的现场。
 
 ### 8.2 开发基线与分支
 
@@ -147,7 +150,7 @@ operation.json 保留操作身份、阶段和材料引用；不可变大清单�
 
 空闲必须满足：runtime 为空、受管源码生成目录不存在、本次工程源码洁净且在确认开发 SHA、配置档案及保留引用完整、已登记写入者停止、运行资源无污染、没有活动授权/证据和未完成 operation。未知材料不删除且阻止解绑。先持久化结果与授权撤销事实，再清除活动副本、写 unbind intent、CAS current=null、补 done；任何中断沿原操作恢复，不碰新任务。
 
-目录归属、源码材料、操作 sidecar 和恢复语义使用机器契约声明的当前 epoch。任何旧 epoch 工位必须在原版本退出并受控 purge 后显式重建；本版不在线迁移或续接旧代际 operation。purge 校验并移除归属明确的 operation-data，保留 source/config/archive，未知或损坏状态停止。
+目录归属、源码材料、操作 sidecar 和恢复语义使用机器契约声明的当前 epoch。任何旧 epoch 工位必须在原版本退出并受控 purge 后显式重建；本版不在线迁移或续接旧代际 operation。purge 校验并移除归属明确的 operation-data，保留 source/config、旧工位 archive（若有）及 Product Root `.archive/`，未知或损坏状态停止。
 
 ### 配置化清理计划版本 5
 
@@ -176,11 +179,11 @@ FE/TM 工作目录在 runtime 中分开，连接同一已确认 Mongo 环境，�
 | task_store/task.py 与任务注册表 | 单 current 占用、四操作及 run/op 恢复，删除多活动任务歧义；完成不以前置删除 worktree 为条件 |
 | repository_worktree 与仓库目录 | 独立固定仓库、完整基线与任务变更引用；旧 task/run 路径只在原版本清理 |
 | authorization、quality、CI、evidence、external_sync | 活动路径单份，保留 run/revision 校验，归档后无活动写入；规则仍来自各 Project/Policy |
-| bootstrap、station schema、init、doctor 与兼容性检查 | 创建/识别 config/source/runtime/archive；检查单 current 与未完成操作；诊断不删除未知文件 |
+| bootstrap、station schema、init、doctor 与兼容性检查 | 创建/识别工位 config/source/runtime 与 Product Root `.archive/`；检查单 current 与未完成操作；诊断不删除未知文件 |
 | TapData Project 与任务 Skill | 完整工程 Profile、分支解析消费、原生运行资源配方和四操作引导；不复制公共状态逻辑 |
 | docs、故事合同与测试 | 现役与目标区别在实现发布时收敛，按本合同验收并更新使用说明 |
 
-当前状态代际和最低升级协议以机器契约为准。生成与清理机制先在同版本形成完整闭环，不依赖升级器：生成工位→任务接管/归档/释放或清理→station purge→重生成。purge 只移除归属明确的接线与受管状态，保留 source/config/archive；非空 runtime、未知 .agenticops 内容或未完成操作阻止解绑。保留目录可在明确 --reuse-materials 后复用，但不能自动导入配置、历史授权或验收。
+当前状态代际以机器契约中的唯一 `station_state_epoch` 为准。生成与清理机制先在同版本形成完整闭环，不依赖升级器：生成工位→任务接管/归档/释放或清理→station purge→重生成。purge 只移除归属明确的接线与受管状态，保留 source/config、旧工位 archive（若有）及 Product Root `.archive/`；非空 runtime、未知 .agenticops 内容或未完成操作阻止解绑。保留目录可在明确 --reuse-materials 后复用，但不能自动导入配置、历史授权或验收。
 
 跨版本是第二阶段编排：先让原版本完成自身清理，再切换产品并调用新版本生成；新版本不解析旧任务或提供旧清理 Runtime。升级器只比较当前与目标 epoch：相同可直接切换，变化时要求可读取的空工位登记；任一登记工位、登记缺失或无法核验均阻止版本切换。repair 不跨代际采用。回退使用相同干净边界。操作说明见[更新与回退](../usage/update-and-rollback.md)。
 
@@ -231,4 +234,4 @@ FE/TM 工作目录在 runtime 中分开，连接同一已确认 Mongo 环境，�
 
 质量证据、扩仓及中断恢复共用工作目录指纹。干净仓库返回精确 HEAD；dirty 仓库使用版本域、禁用外部 diff 与 textconv 后的 tracked 二进制 diff 的 SHA-256，以及按文件名字节排序的未跟踪记录生成组合摘要。每条记录明确编码文件名字节长度、原始文件名字节、普通文件或符号链接类型、普通文件的可执行标记，以及内容或链接目标的 SHA-256，防止名称与内容边界不同却得到相同输入。普通文件内容按块读取，符号链接只读取目标字符串，不跟随目标；本地指纹不是防篡改证明。
 
-指纹边界编码在 epoch 15 引入；禁用 textconv 将兼容边界进一步提升至 epoch 16，兼容清单只支持当前 epoch。旧指纹可能遗漏被转换器隐藏的源码变化，不能由新算法解释；升级与回退必须先在原版本结束任务并归档释放或清理，再显式 purge 注销受管状态，随后切换版本并重建工位，具体入口见[更新与回退](../usage/update-and-rollback.md)。不重新哈希、迁移或复用旧任务的质量确认、恢复记录与授权。
+指纹边界编码在 epoch 15 引入；禁用 textconv 将兼容边界进一步提升至 epoch 16；正式档案迁至 Product Root、run 身份全局预留及已安装快照绑定要求将边界提升至 epoch 17。兼容清单只支持当前 epoch。旧指纹可能遗漏被转换器隐藏的源码变化，旧工位档案与 run 身份也不具备中央存储语义，不能由新算法解释或在线搬迁；升级与回退必须先在原版本结束任务并归档释放或清理，再显式 purge 注销受管状态，随后切换版本并重建工位，具体入口见[更新与回退](../usage/update-and-rollback.md)。不重新哈希、迁移或复用旧任务的质量确认、恢复记录与授权。

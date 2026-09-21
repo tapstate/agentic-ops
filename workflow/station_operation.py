@@ -154,10 +154,16 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
         if current["current"] is not None:
             raise ValueError("工位仍有当前任务，不能接管新任务")
         issue_key = task_store.validate_issue_key(request.get("issue_key"))
-        run_id = task_store.new_run_id(issue_key)
-        archive = Path(base).resolve() / "archive" / issue_key / run_id
-        if archive.exists() or archive.is_symlink():
-            raise ValueError("执行编号与既有档案冲突，请在下一秒重试接管")
+        from workflow import archive_store
+        for _ in range(16):
+            run_id = task_store.new_run_id(issue_key)
+            try:
+                archive_store.reserve(base, issue_key, run_id)
+                break
+            except FileExistsError:
+                continue
+        else:
+            raise ValueError("无法生成唯一执行编号，拒绝接管")
     elif current["current"] is None or current["current"]["run_id"] != run_id:
         raise ValueError("工位 run 已变化")
     value = {
@@ -166,7 +172,12 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
         "expected_revision": expected_revision, "phase": "intent", "status": "running",
         "request": copy.deepcopy(request), "steps": {},
     }
-    save(base, value)
+    try:
+        save(base, value)
+    except Exception:
+        if kind == "takeover":
+            archive_store.consume_reservation(base, run_id)
+        raise
     collect_payloads(base)
     return value
 

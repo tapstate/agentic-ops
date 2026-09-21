@@ -20,7 +20,7 @@ Manifest v2 新增可选 `retired_artifacts`，声明需要显式迁移的已托
 
 Workflow CLI 的状态写命令现要求 `--expected-run-id`，advance 另要求 `--expected-stage`；缺参数明确失败，不替调用者读取并填充。任务状态文件结构不变，旧 run/历史证据保留。方案确认新增 `enforcement=workflow_checkpoints` 标记，授权绑定在检查点重查；新增 approved_plan_digest 绑定 fix_plan，旧记录不回填。init.json 的 checkpoint_migration 保存迁移前产品引用、接受时间与退役路径，仅为操作记录，不是身份认证。
 
-工位持久化不兼容边界由 `station-state-compatibility.json` 声明，结构由同名 Schema 校验。`station_state_epoch` 单调递增：兼容修改保持不变，不兼容修改必须提升。现役产品只接受与自身相同的 epoch；`legacy_station_state_epoch` 必须等于当前 epoch，`supported_station_state_epochs` 必须且只能为当前 epoch 的单元素数组。这两个保留字段仅让既有升级器读取目标标记，不表示目标 Runtime 支持旧状态。`minimum_updater_protocol_version` 是安装该目标版本所需的最低 Updater 能力。`station-init.schema.json` 要求新工位记录当前 epoch；缺少该字段的工位不受支持，必须由原版本处理后解绑。当前不提供跨 epoch 在线数据迁移、旧状态读取或 repair 采用。
+工位持久化不兼容边界由 `station-state-compatibility.json` 声明，结构由同名 Schema 校验。该清单只维护单调递增的 `station_state_epoch`：兼容修改保持不变，不兼容修改必须提升。现役产品只接受与自身相同的 epoch；升级与回退也只比较这个值，不另设旧 epoch 映射、支持列表或最低 updater protocol。`station-init.schema.json` 要求新工位记录当前 epoch；缺少该字段的工位不受支持，必须由原版本完成任务归档、释放并 purge。当前不提供跨 epoch 在线数据迁移、旧状态读取或 repair 采用。
 
 ## 兼容规则
 

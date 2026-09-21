@@ -19,16 +19,31 @@ from workflow.file_digest import sha256_file
 def receipt_path(base, task, relative, proof, destination):
     identifier = baseline.digest({"source": relative, "snapshot": proof, "target": str(destination)})
     if task.get('archive_ref'):
-        return Path(base).resolve() / task['archive_ref']['path'] / 'receipts' / ('export-' + identifier + '.json')
+        from workflow import archive_store
+        return archive_store.receipts(base, task['archive_ref']) / ('export-' + identifier + '.json')
     return task_store.task_directory(base, task['issue_key']) / ('export-' + identifier + '.json')
+
+
+def receipt_reference(base, task, path):
+    if task.get('archive_ref'):
+        return 'product-archive:%s/receipts/%s' % (task['run_id'], path.name)
+    return str(path.relative_to(Path(base).resolve()))
 
 
 def verify_receipt(base, task, entry):
     choice = entry['preservation']
     expected_path = receipt_path(base, task, entry['path'], choice['snapshot'], choice['path'])
     active_path = task_store.task_directory(base, task['issue_key']) / expected_path.name
-    path = Path(base).resolve() / choice.get('readback_ref', '')
-    if path not in (expected_path, active_path) or path.parent.is_symlink() or path.is_symlink() or not path.is_file():
+    reference = choice.get('readback_ref', '')
+    expected_reference = receipt_reference(base, task, expected_path)
+    active_reference = str(active_path.relative_to(Path(base).resolve()))
+    if reference == expected_reference:
+        path = expected_path
+    elif reference == active_reference:
+        path = active_path
+    else:
+        raise ValueError('源码导出缺少受控导出回执')
+    if path.parent.is_symlink() or path.is_symlink() or not path.is_file():
         raise ValueError('源码导出缺少受控导出回执')
     receipt = json.loads(path.read_text())
     choice = entry['preservation']
@@ -68,6 +83,9 @@ def export(base, issue, run, relative, destination, expected_operation_id=None):
         if len(data) > 768 * 1024 * 1024:
             raise ValueError('导出文件超过 768 MiB 上限，需由原生工具保存后人工处置')
         checksum = artifacts.digest(data)
+        if task.get('archive_ref'):
+            from workflow import archive_store
+            archive_store.receipts(base, task['archive_ref'], create=True)
         path = receipt_path(base, task, relative, proof, target)
         intent_path = path.with_suffix('.intent.json')
         intent = {'run_id': run, 'source': relative, 'target': str(target), 'sha256': checksum, 'snapshot': proof, 'archive_digest': task.get('archive_ref', {}).get('digest') if task.get('archive_ref') else None, 'operation_id': expected_operation_id}
@@ -102,7 +120,7 @@ def export(base, issue, run, relative, destination, expected_operation_id=None):
         if resources.plan(base, task, decisions_override={relative: {'action': 'archive'}})['entries'] != plan['entries']:
             raise ValueError('导出期间源码变化，请保留导出并重新核对')
         choice = {'action': 'export', 'path': str(target), 'sha256': checksum, 'snapshot': proof,
-                  'readback_ref': str(path.relative_to(root))}
+                  'readback_ref': receipt_reference(base, task, path)}
         receipt = {'run_id': run, 'source': relative, 'archive_digest': task.get('archive_ref', {}).get('digest') if task.get('archive_ref') else None, 'operation_id': expected_operation_id, 'result': {k: v for k, v in choice.items() if k != 'action'}}
         if path.exists() and json.loads(path.read_text()) != receipt:
             raise ValueError('导出回执不可覆盖')

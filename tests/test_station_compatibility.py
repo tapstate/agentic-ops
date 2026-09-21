@@ -17,14 +17,8 @@ from bootstrap import station_compatibility as compatibility  # noqa: E402
 from workflow import task_store  # noqa: E402
 
 
-def manifest(epoch, minimum_updater=1):
-    return {
-        "schema_version": 1,
-        "minimum_updater_protocol_version": minimum_updater,
-        "station_state_epoch": epoch,
-        "legacy_station_state_epoch": epoch,
-        "supported_station_state_epochs": [epoch],
-    }
+def manifest(epoch):
+    return {"station_state_epoch": epoch}
 
 
 class StationCompatibilityTests(unittest.TestCase):
@@ -113,7 +107,7 @@ class StationCompatibilityTests(unittest.TestCase):
 
     def test_fingerprint_epoch_rejects_old_state_and_bound_upgrade_or_rollback(self):
         current = json.loads((ROOT / "contracts/station-state-compatibility.json").read_text())
-        self.assertEqual(16, current["station_state_epoch"])
+        self.assertEqual(17, current["station_state_epoch"])
         (self.product_root / "contracts/station-state-compatibility.json").write_text(json.dumps(current))
         path = self.station / ".agenticops/init.json"
         path.write_text(json.dumps({"station_state_epoch": 14}))
@@ -124,8 +118,8 @@ class StationCompatibilityTests(unittest.TestCase):
             with task_store.task_state_lock(self.station):
                 self.fail("旧指纹工位不能进入新版本写入区")
         self.write_registry([str(self.station)])
-        for operation, epochs in (("update", (14, 16)), ("rollback", (16, 14)),
-                                  ("update", (15, 16)), ("rollback", (16, 15))):
+        for operation, epochs in (("update", (14, 17)), ("rollback", (17, 14)),
+                                  ("update", (16, 17)), ("rollback", (17, 16))):
             with mock.patch.object(compatibility, "manifest_at_ref", side_effect=[manifest(e) for e in epochs]):
                 with self.assertRaisesRegex(ValueError, "仍有绑定工位"):
                     compatibility.check_upgrade(self.product_root, "old", "new", operation=operation)
@@ -159,15 +153,15 @@ class StationCompatibilityTests(unittest.TestCase):
                     compatibility.require_station_can_adopt(self.product_root, self.station)
                 self.assertEqual(raw, registry.read_bytes())
                 self.assertEqual(raw, init.read_bytes())
-        for field in ("schema_version", "minimum_updater_protocol_version", "station_state_epoch", "legacy_station_state_epoch"):
-            document = manifest(1)
-            document[field] = True
-            with self.subTest(field=field), self.assertRaises(ValueError):
-                compatibility.validate_manifest(document, "fixture")
         document = manifest(1)
-        document["supported_station_state_epochs"] = [True]
+        document["station_state_epoch"] = True
         with self.assertRaises(ValueError):
             compatibility.validate_manifest(document, "fixture")
+        for extra in ("schema_version", "minimum_updater_protocol_version", "legacy_station_state_epoch", "supported_station_state_epochs"):
+            document = manifest(1)
+            document[extra] = 1
+            with self.subTest(extra=extra), self.assertRaises(ValueError):
+                compatibility.validate_manifest(document, "fixture")
         registry.write_text('{"schema_version":true,"stations":[]}')
         with self.assertRaises(ValueError):
             compatibility.load_station_registry(self.product_root, required=True)
@@ -192,18 +186,6 @@ class StationCompatibilityTests(unittest.TestCase):
                     "check-upgrade", "--current-ref", "old", "--target-ref", "new"]))
             self.assertNotIn("Traceback", stderr.getvalue())
             self.assertIn("结构无效", stderr.getvalue())
-
-    def test_manifest_rejects_old_epoch_support(self):
-        document = manifest(2)
-        document["supported_station_state_epochs"] = [1, 2]
-        with self.assertRaisesRegex(ValueError, "不得声明旧工位状态兼容性"):
-            compatibility.validate_manifest(document, "fixture")
-
-    def test_manifest_rejects_legacy_epoch_mapping(self):
-        document = manifest(2)
-        document["legacy_station_state_epoch"] = 1
-        with self.assertRaisesRegex(ValueError, "不得声明旧工位状态兼容性"):
-            compatibility.validate_manifest(document, "fixture")
 
     def test_same_epoch_does_not_require_station_cleanup(self):
         with mock.patch.object(
@@ -245,14 +227,6 @@ class StationCompatibilityTests(unittest.TestCase):
                 self.product_root, "new", "old", operation="rollback"
             )
 
-    def test_newer_upgrade_protocol_requires_reinstallation(self):
-        with mock.patch.object(
-            compatibility, "manifest_at_ref", side_effect=[
-                manifest(1),
-                manifest(1, minimum_updater=compatibility.UPDATER_PROTOCOL_VERSION + 1),
-            ]), self.assertRaisesRegex(ValueError, "重新安装"):
-            compatibility.check_upgrade(self.product_root, "old", "new")
-
     def test_runtime_requires_the_exact_product_epoch(self):
         contracts = self.product_root / "contracts"
         (contracts / "station-state-compatibility.json").write_text(
@@ -267,6 +241,17 @@ class StationCompatibilityTests(unittest.TestCase):
         )
         with task_store.task_state_lock(self.station):
             pass
+
+    def test_runtime_rejects_non_object_manifest_and_init_without_traceback(self):
+        manifest_path = self.product_root / "contracts/station-state-compatibility.json"
+        init_path = self.station / ".agenticops/init.json"
+        for target in (manifest_path, init_path):
+            original = target.read_bytes()
+            target.write_text("[]\n", encoding="utf-8")
+            with self.subTest(path=target), self.assertRaisesRegex(ValueError, "无效"):
+                with task_store.task_state_lock(self.station):
+                    pass
+            target.write_bytes(original)
 
     def test_update_script_checks_before_fast_forward(self):
         script = (ROOT / "bootstrap" / "update.sh").read_text(encoding="utf-8")

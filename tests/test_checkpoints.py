@@ -189,7 +189,7 @@ class CheckpointTests(unittest.TestCase):
                 elif change == "revoked": record["status"] = "revoked"
                 elif change == "legacy": record.pop("approved_plan_digest")
                 elif change == "completed": self.state["stage"] = "completed"
-                else: self.state["archive_ref"] = {"path": "archive/fixture", "digest": "a" * 64}
+                else: self.state["archive_ref"] = {"scope": "product", "run_id": self.state["run_id"], "digest": "a" * 64}
                 self.save()
                 task_store._write_json_atomic(self.auth_path, record)
                 args.expected_authorization_digest = authorization.record_digest(record)
@@ -288,7 +288,7 @@ class CheckpointTests(unittest.TestCase):
                 elif change == "same": record["approved_q2_digest"] = "new-q2"
                 elif change == "proof": args.confirmation_ref = " "
                 elif change == "history": record["reconfirmations"] = {}
-                elif change == "archived": self.state["archive_ref"] = {"path": "archive/fixture", "digest": "a" * 64}
+                elif change == "archived": self.state["archive_ref"] = {"scope": "product", "run_id": self.state["run_id"], "digest": "a" * 64}
                 self.save()
                 task_store._write_json_atomic(self.auth_path, record)
                 args.expected_authorization_digest = "wrong" if change == "old_digest" else authorization.record_digest(record)

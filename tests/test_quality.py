@@ -1199,7 +1199,7 @@ class QualityTests(unittest.TestCase):
     def test_archive_freezes_quality_ci_authorization_and_jira_writes(self):
         from workflow import jira_status, jira_watermark
         checks = ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata")
-        self.task["archive_ref"] = {"path": "archive/TAP-123/" + self.task["run_id"], "digest": "a" * 64}
+        self.task["archive_ref"] = {"scope": "product", "run_id": self.task["run_id"], "digest": "a" * 64}
         self.save_task()
         before = {p: p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()}
         actions = [

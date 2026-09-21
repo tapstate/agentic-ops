@@ -10,15 +10,13 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from workflow import engineering_baseline as baseline, station_archive, task_store
+from workflow import archive_store, engineering_baseline as baseline, station_archive, task_store
 
 
 def record(base, issue, run, value):
     from workflow import quality_contract
     quality_contract.validate(value, "station-disposition.schema.json")
-    task_store.validate_issue_key(issue)
-    if not task_store.RUN_ID_PATTERN.fullmatch(run):
-        raise ValueError("处置 run 无效")
+    task_store.validate_run_id(issue, run)
     identifier = value.get("disposition_id", "")
     if not re.fullmatch(r"disposition-[a-z0-9-]{8,80}", identifier):
         raise ValueError("处置需要稳定 disposition_id")
@@ -26,14 +24,14 @@ def record(base, issue, run, value):
         current = task_store.read_task(base)
         if current is not None:
             raise ValueError("工位已被任务占用，拒绝删除可能被当前任务复用的分支/PR")
-        root = Path(base).resolve() / "archive" / issue / run
-        for directory in (root.parent.parent, root.parent, root):
+        root = archive_store.run_directory(base, run)
+        for directory in (archive_store.root(base), root):
             if directory.is_symlink() or not directory.is_dir():
                 raise ValueError("处置档案路径无效")
         metadata = root / "record.json"
         if metadata.is_symlink():
             raise ValueError("档案正文不能是链接")
-        reference = {"path": str(root.relative_to(Path(base).resolve())), "digest": baseline.digest(json.loads(metadata.read_text()))}
+        reference = archive_store.reference(run, baseline.digest(json.loads(metadata.read_text())))
         station_archive.verify(base, reference, {"issue_key": issue, "run_id": run})
         receipts = root / "receipts"
         if receipts.is_symlink() or not receipts.is_dir():

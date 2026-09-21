@@ -56,8 +56,9 @@ def initialize_station(base):
     binding["source_pool"] = binding.get("source_pool") or str(Path(base) / "pool")
     binding.pop("repository_pool", None)
     task_store._write_json_atomic(binding_path, binding)
-    task_store._write_json_atomic(state / "init.json", {"station_state_epoch": 16})
     manifest = Path(binding["product_root"]) / "contracts/station-state-compatibility.json"
     if not manifest.exists():
         original = Path(__file__).resolve().parents[1] / "contracts/station-state-compatibility.json"
         task_store._write_json_atomic(manifest, json.loads(original.read_text()))
+    epoch = json.loads(manifest.read_text())["station_state_epoch"]
+    task_store._write_json_atomic(state / "init.json", {"station_state_epoch": epoch})

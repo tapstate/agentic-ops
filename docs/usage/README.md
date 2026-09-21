@@ -34,7 +34,7 @@ PR 前检出来源同步也由[任务授权指引](task-authorization.md)说明�
 | 配置必需 MCP | [必需 MCP 配置](mcp-setup.md) | 首次使用 Jira 事实时，连接 Jira/Atlassian |
 | 让 AI Agent 安装 | [Agent引导安装指引](agent-guided-install.md) | 从空目录启动 Agent，由它依据现役安装文档安装并初始化项目工位 |
 | 无法使用 Git SSH | [gh 一键安装](gh-one-click-install.md) | 通过 GitHub CLI 登录并安装 |
-| 复用持久材料 | [工位源码与材料](station-materials.md) | 同版 purge 后显式复用 source/config/archive，不导入旧任务状态 |
+| 复用持久材料 | [工位源码与材料](station-materials.md) | 同版 purge 后显式复用 source/config 和旧工位 archive（若有）；Product Root `.archive/` 独立保留，不导入旧任务状态 |
 | 脚本接管与授权 | [任务授权指引](task-authorization.md) | 从空闲工位接管 Jira 任务，完成准入、受控基线、方案确认与实施授权 |
 | 缺陷与功能质量协作 | [质量检查与证据](quality-checkpoints.md) | 当前 run 的交互文件分配、影响版本与优先修复线、稳定方案确认、精确代码证据、从 Jira「已链接工作项」识别 Test 用例、按任务类型读取事实、TapTest 状态接纳与本地执行分离、阶段回填、全流程 Jira 字段统一采集与转换重入、PR Ready 三类核对和逐检查点 Jira 回读；复用任务授权及阶段，项目标准从 Project 配置读取 |
 | 日常维护安装 | [更新与回退](update-and-rollback.md) | 安装已存在、更新失败、接线漂移或需要回退 |

@@ -12,37 +12,12 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 MANIFEST_PATH = "contracts/station-state-compatibility.json"
-MANIFEST_SCHEMA_VERSION = 1
-# 清单格式由既有升级器读取；目标 Runtime 不兼容旧工位状态。
-UPDATER_PROTOCOL_VERSION = 2
-
-
 def validate_manifest(document, label):
-    required = {
-        "schema_version",
-        "minimum_updater_protocol_version",
-        "station_state_epoch",
-        "legacy_station_state_epoch",
-        "supported_station_state_epochs",
-    }
+    required = {"station_state_epoch"}
     if not isinstance(document, dict) or set(document) != required:
         raise ValueError("%s结构无效" % label)
-    if type(document.get("schema_version")) is not int or document["schema_version"] != MANIFEST_SCHEMA_VERSION:
-        raise ValueError("%s schema_version 不支持" % label)
-    for field in (
-        "minimum_updater_protocol_version",
-        "station_state_epoch",
-        "legacy_station_state_epoch",
-    ):
-        if type(document.get(field)) is not int or document[field] < 1:
-            raise ValueError("%s %s 无效" % (label, field))
-    supported = document.get("supported_station_state_epochs")
-    if (
-        not isinstance(supported, list) or any(type(epoch) is not int for epoch in supported)
-        or document["legacy_station_state_epoch"] != document["station_state_epoch"]
-        or supported != [document["station_state_epoch"]]
-    ):
-        raise ValueError("%s 不得声明旧工位状态兼容性" % label)
+    if type(document.get("station_state_epoch")) is not int or document["station_state_epoch"] < 1:
+        raise ValueError("%s station_state_epoch 无效" % label)
     return document
 
 
@@ -96,10 +71,6 @@ def load_station_registry(product_root, required=False):
 def check_upgrade(product_root, current_ref, target_ref, operation="update"):
     current = manifest_at_ref(product_root, current_ref)
     target = manifest_at_ref(product_root, target_ref)
-    if target["minimum_updater_protocol_version"] > UPDATER_PROTOCOL_VERSION:
-        raise ValueError(
-            "目标版本需要更新的升级协议；请使用原版本受控解绑后重新安装，不能直接跨越此升级协议"
-        )
     if current["station_state_epoch"] == target["station_state_epoch"]:
         return []
     stations = load_station_registry(product_root, required=True)
@@ -109,7 +80,7 @@ def check_upgrade(product_root, current_ref, target_ref, operation="update"):
         "目标版本包含不兼容变更，产品版本尚未切换：%s -> %s。" % (
             current_ref, target_ref
         ),
-        "请继续使用当前版本完成或终止现有任务，并对以下工位执行 station purge。",
+        "请继续使用当前版本将任务完成后 release，或按未完成 clean 归档；随后对以下工位执行 station purge。",
         "目标版本不会读取、迁移或修复旧工位状态；全部工位解绑后重新执行 agenticops %s。" % operation,
         "仍有绑定工位：",
     ]

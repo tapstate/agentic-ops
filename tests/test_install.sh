@@ -145,19 +145,13 @@ rm "$maintainer_root/.agents/skills/ao-ws-init"
 python3 "$maintainer_root/bootstrap/skill_wiring.py" \
   --product-root "$maintainer_root" --refresh >/dev/null
 source_station="$test_root/source-station"
-"$maintainer_root/agenticops" station init --station "$source_station" \
-  --project tapdata --agent test-agent >/dev/null
-"$maintainer_root/agenticops" station doctor --station "$source_station" >/dev/null
-"$source_station/agenticops" station doctor >/dev/null
-printf '{"note":"changed","hooks":{"__AGENTIC_OPS_HOOK_NATIVE_EVENT__":[{"matcher":"__AGENTIC_OPS_HOOK_NATIVE_TOOL_MATCHER__","hooks":[{"type":"command","command":"python3 __AGENTIC_OPS_HOME__/adapters/agents/test-agent/hook.py","timeout":"__AGENTIC_OPS_HOOK_TIMEOUT_SECONDS__"}]}]}}\n' \
-  > "$maintainer_root/adapters/agents/test-agent/templates/settings.json"
-if "$maintainer_root/agenticops" station doctor --station "$source_station" >/dev/null 2>&1; then
-  printf '源码变更后工位漂移未被识别\n' >&2
+if "$maintainer_root/agenticops" station init --station "$source_station" \
+  --project tapdata --agent test-agent > "$test_root/source-station-init-output" 2>&1; then
+  printf '产品源码目录被错误绑定为业务工位 Product Root\n' >&2
   exit 1
 fi
-"$maintainer_root/agenticops" station repair --station "$source_station" >/dev/null
-grep -F '"changed"' "$source_station/.test-agent/settings.json" >/dev/null
-git -C "$maintainer_root" checkout -q -- adapters/agents/test-agent/templates/settings.json
+grep -F '不能作为业务工位 Product Root' "$test_root/source-station-init-output" >/dev/null
+test ! -e "$source_station/.agenticops"
 
 git -C "$source_repo" switch -q "$source_branch"
 printf 'source update\n' > "$source_repo/SOURCE-NEXT"
@@ -173,10 +167,9 @@ printf '%s\n' \
 git -C "$source_repo" add SOURCE-NEXT skills/fixture-maintenance/SKILL.md
 git -C "$source_repo" commit -qm "source next"
 source_update_output="$test_root/source-update-output"
-PATH="$setup_bin:$PATH" "$source_station/agenticops" update > "$source_update_output"
+PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output"
 test -f "$maintainer_root/SOURCE-NEXT"
 grep -F '产品源码已更新' "$source_update_output" >/dev/null
-grep -F '请执行 agenticops station repair --all' "$source_update_output" >/dev/null
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field current_ref)" = \
   "$(git -C "$maintainer_root" rev-parse HEAD)"
 test -L "$maintainer_root/.agents/skills/fixture-maintenance"
@@ -208,20 +201,6 @@ fi
 rm -f "$maintainer_root/.local/lifecycle.lock/owner" \
   "$maintainer_root/.local/lifecycle.lock/operation"
 rmdir "$maintainer_root/.local/lifecycle.lock"
-"$maintainer_root/agenticops" station repair --station "$source_station" >/dev/null
-python3 - "$source_station/.agenticops/init.json" "$maintainer_root" <<'PY'
-import json
-import subprocess
-import sys
-from pathlib import Path
-
-document = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-head = subprocess.check_output(
-    ["git", "-C", sys.argv[2], "rev-parse", "HEAD"], text=True
-).strip()
-assert document["product_ref"] == head
-PY
-
 git -C "$maintainer_root" switch -qc feature/update-boundary
 if PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update >/dev/null 2>&1; then
   printf '产品源码目录在非跟踪分支执行了 update\n' >&2
@@ -991,8 +970,6 @@ from pathlib import Path
 path = Path(sys.argv[1])
 document = json.loads(path.read_text(encoding="utf-8"))
 document["station_state_epoch"] += 1
-document["legacy_station_state_epoch"] = document["station_state_epoch"]
-document["supported_station_state_epochs"] = [document["station_state_epoch"]]
 path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
 git -C "$source_repo" add contracts/station-state-compatibility.json

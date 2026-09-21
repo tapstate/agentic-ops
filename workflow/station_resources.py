@@ -293,7 +293,7 @@ def plan(base, task, version=None, decisions_override=None):
     value = {"schema_version": 3, "run_id": task["run_id"], "directories": [dict(entry, observed_missing_before_intent=not directories.path_at(base, entry["path"]).exists()) for entry in roots.values()], "archive_runtime": logs,
              "entries": entries, "source": states, "external": external,
              "active_state": {"files": active_files(base), "unbind_run": task["run_id"], "task_digest": task_fingerprint(task)},
-             "retained": ["config", "source repositories and refs", "archive", ".agenticops binding and operation"]}
+             "retained": ["config", "source repositories and refs", "Product Root .archive", ".agenticops binding and operation"]}
     if version in (4, 5):
         from workflow import station_clean_rules
         init = json.loads((store.state_path(base) / "init.json").read_text())
@@ -348,7 +348,8 @@ def clean(base, task, cleanup_plan, confirmed_digest, operation, source_only=Fal
         if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(terminal, ensure_ascii=False)):
             raise ValueError("外部资源最终回执含敏感信息，请先脱敏")
         record = {"run_id": task["run_id"], "archive_digest": task["archive_ref"]["digest"], "resources": terminal}
-        receipt = Path(base).resolve() / task["archive_ref"]["path"] / "receipts" / ("external-terminal-" + baseline.digest(record) + ".json")
+        from workflow import archive_store
+        receipt = archive_store.receipts(base, task["archive_ref"], create=True) / ("external-terminal-" + baseline.digest(record) + ".json")
         if receipt.parent.is_symlink() or receipt.is_symlink():
             raise ValueError("外部资源回执不能为链接")
         if not receipt.exists():

@@ -189,7 +189,8 @@ def verify_reconstruction(repository, bundle):
 
 def verify_coverage(base, task, plan):
     """正式档案不可变；每个实际被移除的成果必须被档案、导出或精确丢弃覆盖。"""
-    path = Path(base).resolve() / task["archive_ref"]["path"] / "source-artifacts.json"
+    from workflow import archive_store
+    path = archive_store.from_reference(base, task["archive_ref"]) / "source-artifacts.json"
     archived = json.loads(path.read_text())
     for entry in plan["entries"]:
         choice = entry["preservation"]

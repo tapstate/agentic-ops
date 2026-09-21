@@ -182,13 +182,16 @@ def cmd_repository_list(args):
 
 
 def repository_context(base, task):
-    from workflow import station_operation
+    from workflow import archive_store, station_operation
     return {"issue_key": task["issue_key"], "run_id": task["run_id"], "revision": task["_revision"],
             "operation": station_operation.read(base),
             "station": str(Path(base).resolve()), "engineering_baseline": task["engineering_baseline"],
             "task_repositories": task["task_repositories"],
             "repositories": task.get("repositories", []),
-            "paths": {name: str(Path(base).resolve() / name) for name in ("source", "config", "runtime", "archive")}}
+            "paths": {"source": str(Path(base).resolve() / "source"),
+                      "config": str(Path(base).resolve() / "config"),
+                      "runtime": str(Path(base).resolve() / "runtime"),
+                      "archive": str(archive_store.root(base))}}
 
 
 def cmd_repository_context(args):

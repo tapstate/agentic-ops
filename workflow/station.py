@@ -9,7 +9,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 
-from workflow import engineering_baseline as baseline, project_rules, station_archive as archives
+from workflow import archive_store, engineering_baseline as baseline, project_rules, station_archive as archives
 from workflow import station_operation as operations, station_source as source, task_store
 
 
@@ -25,10 +25,7 @@ def _project(base):
 
 def _plan_receipt(base, task, operation, phase, snapshot=None):
     archives.verify(base, task["archive_ref"], task)
-    directory = Path(base).resolve() / task["archive_ref"]["path"] / "receipts"
-    if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
-        raise ValueError("档案回执目录必须是实际目录")
-    directory.mkdir(exist_ok=True)
+    directory = archive_store.receipts(base, task["archive_ref"], create=True)
     plan = snapshot["plan"] if snapshot else operation["cleanup_plan"]
     generation = snapshot["plan_revision"] if snapshot else len(operation.get("plan_revisions", []))
     path = directory / (operation["operation_id"] + "-" + phase + "-" + str(generation) + "-" + plan["digest"] + ".json")

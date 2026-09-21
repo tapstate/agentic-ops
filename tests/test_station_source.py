@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """固定独立仓库的身份、引用和恢复验证。"""
 from pathlib import Path
+import json
 import os
 import shutil
 import threading
@@ -59,7 +60,8 @@ class SourceFixture:
         task_store._write_json_atomic(self.ws / ".agenticops/station.json", {
             "schema_version": 4, "product_root": str(self.root / "product"), "source_pool": str(self.root / "pool"), "project": "tapdata", "station_id": "a" * 32,
             "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"}})
-        task_store._write_json_atomic(self.ws / ".agenticops/init.json", {"station_state_epoch": 16})
+        epoch = json.loads((self.root / "product/contracts/station-state-compatibility.json").read_text())["station_state_epoch"]
+        task_store._write_json_atomic(self.ws / ".agenticops/init.json", {"station_state_epoch": epoch})
         self.seed = self.root / "seed"
         self.seed.mkdir()
         self.git(self.seed, "init", "-b", "develop")

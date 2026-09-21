@@ -11,7 +11,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from workflow import engineering_baseline as baseline, station, station_archive, station_operation, task_store
+from workflow import archive_store, engineering_baseline as baseline, station, station_archive, station_operation, task_store
 from internal.tests.timing import TimedTestRunner
 
 
@@ -29,7 +29,8 @@ class StationTests(unittest.TestCase):
         for name in ("source", "config", "runtime", "archive"):
             (self.ws / name).mkdir()
         self.write(self.ws / ".agenticops/station.json", {"schema_version": 4, "product_root": str(self.product), "source_pool": str(self.root / "pool"), "project": "tapdata", "station_id": "a" * 32, "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"}})
-        self.write(self.ws / ".agenticops/init.json", {"station_state_epoch": 16})
+        epoch = json.loads((self.product / "contracts/station-state-compatibility.json").read_text())["station_state_epoch"]
+        self.write(self.ws / ".agenticops/init.json", {"station_state_epoch": epoch})
         task_store.initialize_current(self.ws)
 
     def prepare_engineering(self, count=1):
@@ -155,8 +156,14 @@ class StationTests(unittest.TestCase):
                    "confirmed_digest": plan["digest"]}
         station.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-new-clean", request)
         self.assertIsNone(task_store.read_task(self.ws))
-        record = json.loads((self.ws / "archive" / task["issue_key"] / task["run_id"] / "record.json").read_text())
+        archived = archive_store.run_directory(self.ws, task["run_id"])
+        record = json.loads((archived / "record.json").read_text())
         self.assertEqual(record["task_result"], "incomplete")
+        self.assertEqual(archived.parent, (self.product / ".archive").resolve())
+        self.assertEqual(archived.stat().st_mode & 0o777, 0o700)
+        for name in ("record.json", "summary.md", "evidence.json", "source-artifacts.json", "runtime-evidence.json"):
+            self.assertEqual((archived / name).stat().st_mode & 0o777, 0o600)
+        self.assertEqual((archived / "receipts").stat().st_mode & 0o777, 0o700)
         self.assertTrue((self.ws / "runtime").is_dir())
         self.assertEqual(list((self.ws / "runtime").iterdir()), [])
 
@@ -187,7 +194,7 @@ class StationTests(unittest.TestCase):
         self.write(binding_path, binding)
         with self.assertRaisesRegex(ValueError, "工位"):
             station_archive.verify(self.ws, current["archive_ref"], current)
-        evidence = json.loads((self.ws / current["archive_ref"]["path"] / "evidence.json").read_text())
+        evidence = json.loads((archive_store.from_reference(self.ws, current["archive_ref"]) / "evidence.json").read_text())
         self.assertEqual(len(evidence["current"]["engineering_baseline"]["repositories"]), 1)
         self.assertNotIn("repositories", evidence["current"])
         with self.assertRaisesRegex(ValueError, "归档"):
@@ -207,7 +214,7 @@ class StationTests(unittest.TestCase):
         task = self.takeover()
         self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-clean-one", {"summary":"未完成", "reason":"取消"})
         self.assertIsNone(task_store.read_task(self.ws))
-        self.assertTrue((self.ws / "archive" / task["issue_key"] / task["run_id"] / "record.json").is_file())
+        self.assertTrue((archive_store.run_directory(self.ws, task["run_id"]) / "record.json").is_file())
         next_task=self.takeover("op-takeover-next")
         self.assertNotEqual(next_task["run_id"],task["run_id"])
 
@@ -237,7 +244,7 @@ class StationTests(unittest.TestCase):
         task=self.takeover(); request={"summary":"未完成","reason":"取消"}
         self.execute(self.ws,"archive",task["issue_key"],task["run_id"],task["_revision"],"op-archive-only",request)
         task=task_store.read_task(self.ws)
-        path=self.ws/task["archive_ref"]["path"]/"record.json"; before=path.read_bytes()
+        path=archive_store.from_reference(self.ws, task["archive_ref"])/"record.json"; before=path.read_bytes()
         self.execute(self.ws,"clean",task["issue_key"],task["run_id"],task["_revision"],"op-clean-later",request)
         self.assertEqual(path.read_bytes(),before)
         self.assertEqual(json.loads(before)["task_result"],"incomplete")
@@ -310,7 +317,7 @@ class StationTests(unittest.TestCase):
         self.assertEqual(task_store.read_task(self.ws)["outcome"], "completed")
         self.execute(self.ws, "release", task["issue_key"], task["run_id"], task["_revision"], "op-release-crash", request)
         self.assertIsNone(task_store.read_task(self.ws))
-        record = json.loads((self.ws / "archive" / task["issue_key"] / task["run_id"] / "record.json").read_text())
+        record = json.loads((archive_store.run_directory(self.ws, task["run_id"]) / "record.json").read_text())
         self.assertEqual(record["task_result"], "completed")
 
     def test_explicit_continuation_preserves_historical_baseline(self):
@@ -337,13 +344,13 @@ class StationTests(unittest.TestCase):
         from workflow import station_resources
         self.execute(self.ws, "archive", task["issue_key"], task["run_id"], task["_revision"], "op-archive-final", {"summary": "未完成", "reason": "停止处理"})
         current = task_store.read_task(self.ws)
-        before = (self.ws / current["archive_ref"]["path"] / "record.json").read_bytes()
+        before = (archive_store.from_reference(self.ws, current["archive_ref"]) / "record.json").read_bytes()
         plan = station_resources.plan(self.ws, current)
         with mock.patch.object(station, "completion_proof", side_effect=AssertionError("must not complete archived task")):
             with self.assertRaisesRegex(ValueError, "未完成档案"):
                 self.execute(self.ws, "release", current["issue_key"], current["run_id"], current["_revision"], "op-wrong-release", {"confirmed_digest": plan["digest"], "candidate_digest": "unused"})
         self.assertEqual(task_store.read_task(self.ws)["outcome"], "in_progress")
-        self.assertEqual((self.ws / current["archive_ref"]["path"] / "record.json").read_bytes(), before)
+        self.assertEqual((archive_store.from_reference(self.ws, current["archive_ref"]) / "record.json").read_bytes(), before)
 
     def test_cleanup_amend_preserves_pending_step_and_cleans_new_owned_file(self):
         from workflow import station_resources
@@ -353,7 +360,7 @@ class StationTests(unittest.TestCase):
         with mock.patch.object(station_resources,"clean",side_effect=OSError("before directory reset")), self.assertRaises(OSError):
             self.execute(self.ws,"clean",task["issue_key"],task["run_id"],task["_revision"],"op-amend-clean",request)
         current=task_store.read_task(self.ws)
-        record=self.ws/current["archive_ref"]["path"]/"record.json";before=record.read_bytes()
+        record=archive_store.from_reference(self.ws, current["archive_ref"])/"record.json";before=record.read_bytes()
         late=self.ws/"runtime/logs/late.log";late.parent.mkdir();late.write_text("late generated output")
         # 独占目录内变化不扩权、不重算逐文件摘要，也不要求第二次确认。
         self.assertEqual(station_resources.plan(self.ws,current)["digest"],first["digest"])
@@ -455,7 +462,7 @@ class StationTests(unittest.TestCase):
         self.assertEqual(len(station_operation.read(self.ws)["plan_revisions"]), 1)
         self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-repeat-plan", request)
         operation = station_operation.read(self.ws)
-        receipts = self.ws / "archive" / task["issue_key"] / task["run_id"] / "receipts"
+        receipts = archive_store.run_directory(self.ws, task["run_id"]) / "receipts"
         self.assertEqual(len(list(receipts.glob("op-repeat-plan-root-v*-done.json"))), 2)
         self.assertIsNone(task_store.read_task(self.ws))
 
@@ -472,7 +479,7 @@ class StationTests(unittest.TestCase):
                 self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-draft-amend", request)
         current = task_store.read_task(self.ws)
         self.assertIsNone(current["archive_ref"])
-        draft = self.ws / "archive" / task["issue_key"] / ("." + task["run_id"] + ".op-draft-amend.0")
+        draft = archive_store.root(self.ws) / ("." + task["run_id"] + ".op-draft-amend.0")
         old_record = (draft / "record.json").read_bytes()
         file.write_text("changed before publication")
         second = station_resources.plan(self.ws, current)
@@ -482,7 +489,7 @@ class StationTests(unittest.TestCase):
         self.assertEqual((draft / "record.json").read_bytes(), old_record)
         self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-draft-amend", request)
         self.assertIsNone(task_store.read_task(self.ws))
-        target = self.ws / "archive" / task["issue_key"] / task["run_id"]
+        target = archive_store.run_directory(self.ws, task["run_id"])
         record = json.loads((target / "record.json").read_text())
         self.assertEqual(record["resource_inventory_digest"], second["digest"])
         self.assertTrue((target / "receipts" / ("op-draft-amend-amendment-1-" + second["digest"] + ".json")).is_file())
@@ -508,7 +515,7 @@ class StationTests(unittest.TestCase):
                 self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-published-amend", request)
         current = task_store.read_task(self.ws)
         self.assertIsNone(current["archive_ref"])
-        target = self.ws / "archive" / task["issue_key"] / task["run_id"]
+        target = archive_store.run_directory(self.ws, task["run_id"])
         old_record = (target / "record.json").read_bytes()
         file.write_text("later output")
         second = station_resources.plan(self.ws, current)
@@ -956,11 +963,11 @@ class StationTests(unittest.TestCase):
             {'summary': '结束隔离演练', 'reason': '夹具完成', 'decision_ref': 'fixture:cleanup',
              'cleanup_version': 5, 'abandon_changes': True, 'confirmed_digest': cleanup['digest']})
         self.assertIsNone(task_store.read_task(self.ws))
-        self.assertTrue(list((self.ws / 'archive').iterdir()))
+        self.assertTrue(list(archive_store.root(self.ws).iterdir()))
         station_registry.detach(self.product, self.ws, purge=True)
         self.assertFalse((self.ws / '.agenticops').exists())
         self.assertTrue((self.ws / 'source' / name / '.git').is_dir())
-        self.assertTrue(list((self.ws / 'archive').iterdir()))
+        self.assertTrue(list((self.product / '.archive').iterdir()))
 
     def test_replan_resumes_revoke_clone_and_before_current_crashes(self):
         from workflow import station_replan, station_source

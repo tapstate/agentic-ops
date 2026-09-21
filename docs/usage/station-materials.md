@@ -36,6 +36,6 @@ Wiki 不是任务工程，不进入 engineering_baseline、源码仓库版本配
 
 ## 清理后复用
 
-station purge 只处理空闲工位，保留 source/config/archive。原路径重新生成时，对这些非空真实目录明确使用 init --reuse-materials；runtime 必须为空。参数不授权覆盖源码、导入秘密有效配置或复用旧证据。新任务仍按自己的版本解析与验证，不把保留分支自动视作已授权任务。
+station purge 只处理空闲工位，保留 source/config 和旧工位 archive（若有）；Product Root `.archive/` 始终不在工位清理范围。原路径重新生成时，对非空真实工位材料明确使用 init --reuse-materials；runtime 必须为空。参数不授权覆盖源码、导入秘密有效配置或复用旧证据。新任务仍按自己的版本解析与验证，不把保留分支自动视作已授权任务。
 
 旧版源码池作为非托管材料保留，不由新版本迁移或删除。旧工位的退出顺序见[更新与回退](update-and-rollback.md)。

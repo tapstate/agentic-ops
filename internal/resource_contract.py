@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 
-ROOT_KINDS = {"tool", "product_state"}
+ROOT_KINDS = {"tool", "product_state", "archive"}
 REQUIRED_FIELDS = {
     "schema_version",
     "allowed_root_entries",

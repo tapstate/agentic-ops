@@ -46,20 +46,20 @@ Agent → Workflow 状态变更入口 → 持锁校验 → 状态与证据
 
 ## 4. 安装目录与工位
 
-用户只需使用安装目录和工位。安装目录默认是 `~/.agentic-ops`，通过 `agenticops` 提供生命周期和工位接线；产品源码目录只服务产品维护，不构成用户工作模型。
+用户只需使用安装目录和工位。安装目录默认是 `~/.agentic-ops`，通过 `agenticops` 提供生命周期和工位接线；产品源码目录只服务产品维护，不构成用户工作模型，也不能通过公开入口绑定为业务工位 Product Root。候选接管验证使用隔离安装快照。
 
 - 安装目录的 `update` 只跟随安装时记录的分支，且要求 HEAD 与本地安装记录严格一致；
-- 安装目录所有非 Git 本地状态都进入 `.local/`；
+- 安装目录可再生或瞬态的非 Git 本地状态进入 `.local/`；正式任务档案独立进入 `.archive/`；
 - `.local/product.json` 记录仓库、跟踪分支、生命周期同步提交及 `source_pool`；`.local/gate/events.jsonl` 只记录直接在安装目录执行且无法归属任务的门禁事件，避免把产品状态误写成项目工位状态；
 - 安装目录不包含 `internal/` 或仅供产品维护的 Skill。
 
-`.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期配置外，它保存由本安装目录成功初始化过的工位登记；登记用于跨 epoch 切换前确认所有工位均已解绑，不发现、不扫描、更不自动修改业务目录。首次安装或 setup 创建空登记；跨 epoch 时登记缺失、损坏或无法读取均停止切换。生命周期操作使用 `.local/lifecycle.lock/` 串行 update、rollback 与工位绑定变更。普通生成接线由下一次 `start` 刷新，也可通过 `doctor` 和 `repair` 检查、修复。检测到托管 Hook 退役时，start 和普通 repair 保留现场并报告迁移范围；用户明确选择 `repair --accept-checkpoint-migration` 后，先校验全部旧 Hook 的归属哈希，再移除并刷新。此选择不是持久门禁开关，不会改写 task/run 或授权记录。
+`.local/` 是本机可删除、不可提交的产品运行区，不是规则或业务事实源。除生命周期配置外，它保存由本安装目录成功初始化过的工位登记；登记用于跨 epoch 切换前确认所有工位均已解绑，不发现、不扫描、更不自动修改业务目录。首次安装或 setup 创建空登记；跨 epoch 时登记缺失、损坏或无法读取均停止切换。`.archive/` 保存按 run 独立发布的正式档案，不得作为 `.local/` 一并清理。生命周期操作使用 `.local/lifecycle.lock/` 串行 update、rollback 与工位绑定变更。普通生成接线由下一次 `start` 刷新，也可通过 `doctor` 和 `repair` 检查、修复。检测到托管 Hook 退役时，start 和普通 repair 保留现场并报告迁移范围；用户明确选择 `repair --accept-checkpoint-migration` 后，先校验全部旧 Hook 的归属哈希，再移除并刷新。此选择不是持久门禁开关，不会改写 task/run 或授权记录。
 
 安装目录配置的源码池是下载缓存：`repositories/<owner>/<repo>.git` 是 bare 仓库；`shared-repositories/<owner>/<repo>` 是与缓存对象独立的完整共享参考仓库，由 `bootstrap/shared-repositories.json` 登记、Project Profile 引用。Bootstrap 的通用 ensure/update/status 仅管理显式准备、快进更新和本地核验；初始化、接管、任务开始及查询不自动刷新。共享参考仓不进入工位任务基线、状态或 epoch，不随 station purge 清理，不承担业务事实源职责。使用边界见[工位源码与材料](../usage/station-materials.md)。
 
 ## 5. 单任务工位
 
-一个工位绑定一个 Project，当前任务存入 .agenticops/current-task.json；没有当前任务且无未完成 operation 才为空闲。source 中每个仓库均有独立 Git 元数据，不使用共享对象依赖。config 保存持久配置，runtime 保存唯一活动环境，archive 保存不可变正式档案及追加回执。
+一个工位绑定一个 Project，当前任务存入 .agenticops/current-task.json；没有当前任务且无未完成 operation 才为空闲。source 中每个仓库均有独立 Git 元数据，不使用共享对象依赖。config 保存持久配置，runtime 保存唯一活动环境；不可变正式档案及追加回执集中保存在绑定 Product Root 的 `.archive/<run-id>`，因此不随工位 purge 或工位目录删除丢失。
 
 完整工程基线保存 Profile、版本解析输入、每仓 origin/ref/SHA 与摘要；任务修改仓另存分支、目标、范围、验证和交付事实，引用冻结基线。上下文通过 task.py repository context 返回已核验路径，Agent 在同一工位会话使用原生工具操作，不另建会话状态或复制中央规则。
 
@@ -71,7 +71,7 @@ takeover 先登记操作意图和当前任务，再准备完整独立源码与 r
 
 ## 7. 生成、清理与升级分层
 
-Bootstrap 生成可再生接线、稳定绑定、空 current 和四类目录；repair 只修复同代际接线。station purge/detach 只处理空闲且无未完成操作的工位，验证生成归属，拒绝未知状态或非空 runtime，移除受管接线、绑定和状态。source/config/archive 与用户文件保留；重新生成时非空持久材料需明确 --reuse-materials，并生成新 station_id，不继承旧 run 授权。
+Bootstrap 生成可再生接线、稳定绑定、空 current 和工位内 config/source/runtime；repair 只修复同代际接线。station purge/detach 只处理空闲且无未完成操作的工位，验证生成归属，拒绝未知状态或非空 runtime，移除受管接线、绑定和状态。source/config 与用户文件保留，Product Root `.archive/` 不在工位清理范围；重新生成时非空持久材料需明确 --reuse-materials，并生成新 station_id，不继承旧 run 授权。
 
 同版本生成→任务闭环→purge→生成先独立验收。升级是第二层：升级器比较当前与目标 `station_state_epoch`；相同时可直接切换，变化时要求工位登记为空。任务退出、状态验证和解绑仍由原版本的 `station purge` 负责，升级器不读取任务、operation、runtime 或旧状态。目标版本只接受自身 epoch，repair 不跨 epoch 采用；登记缺失、损坏、非空或无法核验时保持原产品版本。当前 epoch 以机器契约为准。
 

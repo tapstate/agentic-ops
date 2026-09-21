@@ -173,7 +173,7 @@ class RepairStrategyTest(unittest.TestCase):
     def test_archive_freezes_override_and_new_run_uses_default(self):
         self.assertEqual(task.cmd_repair_strategy_set(self.args()), 0)
         self.state = self.read_state()
-        self.state["archive_ref"] = {"path": "archive/DEMO-1/" + self.run_id, "digest": "a" * 64}
+        self.state["archive_ref"] = {"scope": "product", "run_id": self.run_id, "digest": "a" * 64}
         save_station_task(self.station, self.state)
         archived = self.read_state()
         with self.assertRaisesRegex(ValueError, "归档"):

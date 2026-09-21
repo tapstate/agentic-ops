@@ -16,10 +16,12 @@ class StationStateTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
+        self.product = self.base / "product"
+        self.product.mkdir()
         (self.base / ".agenticops").mkdir()
         store.initialize_current(self.base)
         store._write_json_atomic(self.base / ".agenticops/station.json", {
-            "schema_version": 4, "product_root": str(ROOT), "source_pool": str(self.base / "pool"), "station_id": "a" * 32,
+            "schema_version": 4, "product_root": str(self.product), "source_pool": str(self.base / "pool"), "station_id": "a" * 32,
             "project": "tapdata", "agents": ["codex"],
             "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"},
         })
@@ -45,7 +47,7 @@ class StationStateTests(unittest.TestCase):
         store.write_task(self.base, task)
         with self.assertRaises(ValueError):
             store.check_expected_run(self.base, "TAP-123", "run-stale")
-        task["archive_ref"] = {"digest": "a" * 64}
+        task["archive_ref"] = {"scope": "product", "run_id": task["run_id"], "digest": "a" * 64}
         store.write_task(self.base, task)
         with self.assertRaisesRegex(ValueError, "归档"):
             store.require_development(self.base, task)

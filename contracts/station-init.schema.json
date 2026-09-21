@@ -4,7 +4,7 @@
   "title": "AgenticOps Project Station Initialization",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "product_ref", "generated_at", "artifacts"],
+  "required": ["schema_version", "product_ref", "station_state_epoch", "generated_at", "artifacts"],
   "properties": {
     "checkpoint_migration": {
       "type": "object",

@@ -86,8 +86,9 @@ class StationBootstrapTests(unittest.TestCase):
         self.assertEqual(before['schema_version'], 4)
         self.assertEqual(before['source_pool'], str((self.station.parent / 'pool').resolve()))
         self.assertNotIn('repository_pool', before)
-        for name in ('config', 'source', 'runtime', 'archive'):
+        for name in ('config', 'source', 'runtime'):
             self.assertTrue((self.station / name).is_dir())
+        self.assertFalse((self.station / 'archive').exists())
         for name in ('tasks', 'tasks.lock', 'worktrees'):
             self.assertFalse((self.station / '.agenticops' / name).exists())
         registry.detach(ROOT, self.station, purge=True)
@@ -123,6 +124,7 @@ class StationBootstrapTests(unittest.TestCase):
         prepared.assert_called_once_with(ROOT, 'tapstate/wiki', 'ensure', str((self.station.parent / 'pool').resolve()))
 
     def test_preserve_materials_requires_explicit_reuse(self):
+        (self.station / 'archive').mkdir()
         for name in ('config', 'source', 'archive'):
             (self.station / name / 'sentinel').write_text(name)
         registry.detach(ROOT, self.station, purge=True)

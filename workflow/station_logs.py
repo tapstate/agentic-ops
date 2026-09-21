@@ -77,7 +77,8 @@ def material(base, task, plan):
 
 
 def verify_current(base, task, plan):
-    target = Path(base).resolve() / task["archive_ref"]["path"] / "runtime-evidence.json"
+    from workflow import archive_store
+    target = archive_store.from_reference(base, task["archive_ref"]) / "runtime-evidence.json"
     if target.is_symlink():
         raise ValueError("运行证据档案不能是链接")
     saved = json.loads(target.read_text())["files"]
@@ -88,7 +89,7 @@ def verify_current(base, task, plan):
         # 正式正文不变，目录授权没有扩大。
         data = {"run_id": task["run_id"], "files": current}
         from workflow.engineering_baseline import digest
-        receipt = target.parent / "receipts" / ("runtime-evidence-" + digest(data) + ".json")
+        receipt = archive_store.receipts(base, task["archive_ref"], create=True) / ("runtime-evidence-" + digest(data) + ".json")
         if receipt.parent.is_symlink() or receipt.is_symlink():
             raise ValueError("日志追加证据不能是链接")
         if not receipt.exists():

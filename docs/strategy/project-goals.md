@@ -49,7 +49,7 @@ Standard Contract + Agent/Tool Adapter + Gate Core + Policy + Workflow + Project
 - **Bootstrap** 只负责安装、更新、回退和工作目录接线。
 - **Internal** 只服务 AgenticOps 仓库自身的故事审查和发布，不是产品运行层。
 
-产品运行采用“安装目录 + 薄项目工位”：安装目录默认是 `~/.agentic-ops`，保存 AgenticOps 中央产品资产和本机配置；项目工位使用 `.agenticops/` 保存初始化和单 current 状态；config/source/runtime/archive 分离配置、源码、运行产物与归档，不复制 Policy、Project Skill 或 Runtime。AgenticOps 源码目录仅用于产品维护，不是用户的第三种工作目录。
+产品运行采用“安装目录 + 薄项目工位”：安装目录默认是 `~/.agentic-ops`，保存 AgenticOps 中央产品资产、本机配置及 `.archive/<run-id>` 正式任务档案；项目工位使用 `.agenticops/` 保存初始化和单 current 状态，config/source/runtime 分离配置、源码与运行产物，不复制 Policy、Project Skill 或 Runtime。正式档案不放在工位内，避免随工位清理丢失。AgenticOps 源码目录仅用于产品维护，不是用户的第三种工作目录。
 
 安装目录的 `update` 只跟随安装时记录的分支；它不得自动覆盖本地修改、处理分叉或推送本地提交。
 

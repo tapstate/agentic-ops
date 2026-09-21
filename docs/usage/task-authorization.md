@@ -152,7 +152,7 @@ python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key 
 
 ### 原清理操作的恢复
 
-本节仅适用于当前运行时支持的工位代际，支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准。已有 schema 3 操作保留原请求和执行顺序：保留 config、完整 source 和 archive，清空 runtime，按原 Project 配方回收已登记源码生成目录。不得将正在执行的旧计划改成 schema 4；新操作使用上面的配置化入口。边界、源码 archive/export/discard 与中断恢复以[工位合同](../architecture/single-task-station.md#8-一次确认成果归档与恢复)为准。
+本节仅适用于当前运行时支持的工位代际，支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准。已有 schema 3 操作保留原请求和执行顺序：保留 config、完整 source 和正式 Product Root `.archive/`，清空 runtime，按原 Project 配方回收已登记源码生成目录。不得将正在执行的旧计划改成 schema 4；新操作使用上面的配置化入口。边界、源码 archive/export/discard 与中断恢复以[工位合同](../architecture/single-task-station.md#8-一次确认成果归档与恢复)为准。
 
 构建前将日志、插件、下载和可迁出的生成物定位到 runtime；不能迁出的生成目录先用 station_resources.py 创建：输入数组项为 `{"kind":"directory","path":"source/tapdata/tapdata/target","producer":"maven"}`，已有空目录的显式采用另加 `"adopt_empty":true`。目录非空时不能补登记猜归属；源码生成路径必须符合工程 Profile 的 generated_directories。
 
@@ -163,7 +163,7 @@ python3 <agenticops-root>/workflow/task.py clean --issue-key <issue> --expected-
 
 请求包含 summary、reason、真实 decision_ref 和 cleanup_plan.digest 对应的 confirmed_digest。默认源码归档，显式丢弃还需 discard_digest；完成任务改用 release 并提供 candidate_digest。Agent 先按原生能力停止写入者再执行，Workflow 检查并按同一操作归档及重置，无需归档后二次确认。归位结果保持冻结引用语义：branch 回到受管本地基线分支，tag/commit 回到 detached；命名开发分支和任务分支不移动，下次接管才联网刷新。
 
-需要保留敏感或超过普通归档上限的源码时，先在工位外创建当前用户私有的导出目录（0700），再运行 `python3 <agenticops-root>/workflow/station_export.py --dir <station> --issue-key <issue> --expected-run-id <run> --path source/<owner>/<repo>/<file> --output <绝对导出文件路径>`。工具独占写出 0600 文件、重建核验并回读登记 export 决定；不覆盖已有不同内容，输出仅含路径和摘要。单成果原始内容上限 512 MiB，编码后上限 768 MiB。失败退出操作中的导出另带原 expected-operation-id，随后按新范围补充确认；正式归档后的导出意图和回执进入 archive/receipts。
+需要保留敏感或超过普通归档上限的源码时，先在工位外创建当前用户私有的导出目录（0700），再运行 `python3 <agenticops-root>/workflow/station_export.py --dir <station> --issue-key <issue> --expected-run-id <run> --path source/<owner>/<repo>/<file> --output <绝对导出文件路径>`。工具独占写出 0600 文件、重建核验并回读登记 export 决定；不覆盖已有不同内容，输出仅含路径和摘要。单成果原始内容上限 512 MiB，编码后上限 768 MiB。失败退出操作中的导出另带原 expected-operation-id，随后按新范围补充确认；正式归档后的导出意图和回执进入 Product Root `.archive/<run-id>/receipts`。
 
 分支和 PR 默认保留。用户选择删除/关闭时，本地重置完成后使用原生工具，另通过 `workflow/station_disposition.py --dir <station> --issue-key <issue> --run-id <原run> --input <处置.json>` 记录 intent/unknown/readback。该工具只记追加证据，不发送外部请求。意图需稳定 disposition_id、精确 object_id、resource_type、action、before 身份及保护回读、decision_ref，并以不含 confirmed_digest 的意图对象摘要确认；回执绑定 intent_digest 和 object_id，包含实际 readback_ref。disposition_id 是本次外部操作的稳定关联键，原生 API 支持幂等键时使用同值；API 不支持时不能把它当作服务端去重保证。重试已有意图只用于回读，不能据此重发。工位已有新任务时拒绝旧任务处置，避免删除被复用的对象。
 
