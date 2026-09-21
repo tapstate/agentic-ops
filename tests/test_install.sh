@@ -88,6 +88,21 @@ git -C "$maintainer_root" check-ignore --no-index fixture-local-only >/dev/null
 "$maintainer_root/agenticops" --help | grep -F '安装目录：默认 ~/.agentic-ops' >/dev/null
 "$maintainer_root/agenticops" --help | grep -F '工位：项目工作目录' >/dev/null
 test "$(git -C "$maintainer_root" branch --show-current)" = develop
+clean_version="$(python3 "$maintainer_root/bootstrap/product_version.py" --product-root "$maintainer_root")"
+test "$(cd "$test_root" && "$maintainer_root/agenticops" version)" = "$clean_version"
+touch "$maintainer_root/version-dirty-fixture"
+test "$("$maintainer_root/agenticops" version)" = "$clean_version-dirty"
+if python3 "$maintainer_root/bootstrap/product_version.py" --product-root "$maintainer_root" >/dev/null 2>&1; then
+  printf '脏产品版本不应通过严格版本校验\n' >&2
+  exit 1
+fi
+rm "$maintainer_root/version-dirty-fixture"
+if "$maintainer_root/agenticops" version unexpected >/dev/null 2>&1; then
+  exit 1
+fi
+if "$maintainer_root/agenticops" station version >/dev/null 2>&1; then
+  exit 1
+fi
 test -d "$maintainer_root/.local/venv/internal"
 test -f "$maintainer_root/.local/stations.json"
 grep -F '"stations": []' "$maintainer_root/.local/stations.json" >/dev/null
@@ -412,6 +427,7 @@ PY
 test -f "$station/.agenticops/station.json"
 test -f "$station/.agenticops/init.json"
 test -x "$station/agenticops"
+test "$("$station/agenticops" version)" = "$(python3 "$install_root/bootstrap/product_version.py" --product-root "$install_root")"
 test -f "$station/AGENTS.md"
 test -f "$station/CLAUDE.md"
 test -f "$station/.mcp.json"

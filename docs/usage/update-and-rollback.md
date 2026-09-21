@@ -4,6 +4,8 @@
 
 ## 第一阶段：同版本生成与清理
 
+执行 `agenticops version` 查询当前产品版本；在源码或工位目录使用 `./agenticops version`，也可用安装入口 `~/.agentic-ops/agenticops version`。输出为 `<分支>-<标签>-<提交数>-<提交编号>`；工位入口显示其绑定 Product Root 的版本，不读取业务仓库版本。产品存在未提交修改时附加 `-dirty`，供诊断使用；接管水印仍拒绝使用脏产品版本。查询不更新产品或工位状态。
+
 先在同一个 Product Root 版本完成闭环：
 
 1. agenticops station init --station <绝对路径> --project tapdata，生成绑定、空 current 和 config/source/runtime；正式档案在绑定 Product Root 的 `.archive/` 中按 run 保存。

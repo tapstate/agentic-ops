@@ -1,5 +1,7 @@
 # AgenticOps 扩展使用
 
+[更新与回退](update-and-rollback.md)同时负责当前产品版本查询，说明源码、安装和工位入口的版本归属及未提交修改的显示方式。
+
 [功能方案完整性与一次决策包](quality-checkpoints.md#功能方案完整性与一次决策包)覆盖同类源码、AC 映射、公共层必要性、交付依赖、环境及验证计划；项目环境的实际取值与核对顺序由现有 TapData Runbook 维护。
 
 质量输入诊断由[质量检查与证据](quality-checkpoints.md#质量输入预检)说明只读格式校验、日志 revision 与未执行原因；启动参数在工位刷新前核验，`station start --help` 不访问工位。默认启动需要终端，自动化调用须显式使用 `--non-interactive` 并传入 Agent 自身支持的非交互参数；包装入口不猜测或改写这些参数。

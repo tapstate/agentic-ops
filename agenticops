@@ -10,6 +10,7 @@ usage() {
   agenticops install [install 参数]
   agenticops setup [--source-pool <目录>]
   agenticops agents
+  agenticops version
   agenticops station <init|doctor|repair|start|list|identity|prune|clean|detach|purge> [参数]
   agenticops update
   agenticops rollback
@@ -189,6 +190,10 @@ if [ "$command_name" = "station" ]; then
 fi
 
 case "$command_name" in
+  version)
+    test "$station_scope" -eq 0 && test "$#" -eq 0 || { usage >&2; exit 2; }
+    exec python3 "$product_root/bootstrap/product_version.py" --product-root "$product_root" --allow-dirty
+    ;;
   install)
     exec bash "$product_root/bootstrap/install.sh" "$@"
     ;;
