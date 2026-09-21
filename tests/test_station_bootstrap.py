@@ -22,6 +22,47 @@ from bootstrap.station_paths import StationDirectory
 from workflow import task_store, station_operation, git_refs
 
 
+class LifecycleCleanTreeTests(unittest.TestCase):
+    def check_tree(self, root):
+        return subprocess.run(['bash', '-c',
+            'set -euo pipefail; source "$1"; lifecycle_require_clean_tree "$2" fixture',
+            'bash', str(ROOT / 'bootstrap/lifecycle-common.sh'), str(root)],
+            capture_output=True, text=True)
+
+    def test_git_status_failure_never_proves_clean_tree(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            result = self.check_tree(root)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn('无法核验', result.stderr)
+            subprocess.run(['git', 'init', '-q', str(root)], check=True)
+            index = root / '.git/index'
+            index.write_bytes(b'broken index')
+            result = self.check_tree(root)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn('无法核验', result.stderr)
+            self.assertEqual(b'broken index', index.read_bytes())
+
+    def test_clean_tree_checks_hidden_untracked_and_tracked_changes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            def git(*args):
+                subprocess.run(['git', '-C', str(root), *args], check=True, capture_output=True)
+            git('init', '-q')
+            self.assertEqual(0, self.check_tree(root).returncode)
+            git('config', 'status.showUntrackedFiles', 'no')
+            user_file = root / 'user-file'
+            user_file.write_text('preserve')
+            self.assertNotEqual(0, self.check_tree(root).returncode)
+            git('add', 'user-file')
+            git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                'commit', '-qm', 'fixture')
+            self.assertEqual(0, self.check_tree(root).returncode)
+            user_file.write_text('modified')
+            self.assertNotEqual(0, self.check_tree(root).returncode)
+            self.assertEqual('modified', user_file.read_text())
+
+
 class StationBootstrapTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

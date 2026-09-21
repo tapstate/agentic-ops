@@ -51,7 +51,11 @@ lifecycle_release_lock() {
 lifecycle_require_clean_tree() {
   lifecycle_root="$1"
   lifecycle_face="$2"
-  test -z "$(git -C "$lifecycle_root" status --porcelain)" || {
+  lifecycle_status="$(git -C "$lifecycle_root" status --porcelain --untracked-files=all)" || {
+    printf 'AgenticOps：无法核验%s工作树状态，拒绝更新\n' "$lifecycle_face" >&2
+    return 2
+  }
+  test -z "$lifecycle_status" || {
     printf 'AgenticOps：%s存在未提交修改，拒绝更新\n' "$lifecycle_face" >&2
     return 2
   }
