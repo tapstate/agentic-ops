@@ -114,6 +114,17 @@ done
 exclude_before="$(file_digest "$maintainer_root/.git/info/exclude")"
 python3 "$maintainer_root/bootstrap/skill_wiring.py" --product-root "$maintainer_root" --refresh >/dev/null
 test "$(file_digest "$maintainer_root/.git/info/exclude")" = "$exclude_before"
+foreign_repository="$test_root/business-repository"
+git init -q "$foreign_repository"
+printf '%s\n' 'business-owned' > "$foreign_repository/.git/info/exclude"
+foreign_exclude_before="$(file_digest "$foreign_repository/.git/info/exclude")"
+GIT_DIR="$foreign_repository/.git" GIT_WORK_TREE="$foreign_repository" \
+  python3 "$maintainer_root/bootstrap/skill_wiring.py" --product-root "$maintainer_root" --refresh >/dev/null
+test "$(file_digest "$foreign_repository/.git/info/exclude")" = "$foreign_exclude_before"
+test "$(file_digest "$maintainer_root/.git/info/exclude")" = "$exclude_before"
+GIT_CONFIG_COUNT=invalid \
+  python3 "$maintainer_root/bootstrap/skill_wiring.py" --product-root "$maintainer_root" --refresh >/dev/null
+test "$(file_digest "$maintainer_root/.git/info/exclude")" = "$exclude_before"
 "$maintainer_root/agenticops" station doctor --station "$maintainer_root" >/dev/null
 rm "$maintainer_root/.agents/skills/ao-ws-init"
 if "$maintainer_root/agenticops" station doctor --station "$maintainer_root" >/dev/null 2>&1; then

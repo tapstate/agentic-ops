@@ -193,6 +193,7 @@ def update_git_exclude(product_root, artifacts):
         ["git", "-C", str(product_root), "rev-parse", "--git-path", "info/exclude"],
         capture_output=True,
         text=True,
+        env={key: value for key, value in os.environ.items() if not key.startswith("GIT_")},
     )
     if result.returncode != 0:
         raise ValueError("源码产品根目录无法定位 Git info/exclude")
