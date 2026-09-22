@@ -215,8 +215,12 @@ def context(base, task):
         wt = repo.get("worktree") or {}
         # cleanup removes a worktree after validation; the source revision remains in the item.
         if wt.get("status") == "prepared":
-            entry["live_revision"] = git_revision(wt["path"])
-            entry["source_path"] = wt["path"]
+            from workflow.station_source import repository_path
+            try:
+                entry["live_revision"] = git_revision(repository_path(base, repo["repository"]))
+            except (ValueError, OSError, subprocess.TimeoutExpired):
+                # 明确的非版本值使版本绑定失败，但不拖死无依赖的 Q1/回执记录。
+                entry["live_revision"] = "unavailable"
         elif wt.get("status") == "removed" and wt.get("final_revision"):
             entry["live_revision"] = wt["final_revision"]
             cleanup_artifacts.update(wt.get("verified_artifacts", {}))
@@ -313,7 +317,8 @@ def automatic_checkpoint_problems(model, checkpoint, rules, ctx):
     if not after_fix:
         return ["首轮验证没有已定义的修复后检查项，不能自动推进"]
     from workflow import verification
-    problems = verification.problems(model, ctx, rules.get("verification_checkpoints", {}).get(checkpoint, []))
+    problems = source_revision_problems(ctx)
+    problems += verification.problems(model, ctx, rules.get("verification_checkpoints", {}).get(checkpoint, []))
     for key, view in after_fix.items():
         plan = view["plan"]
         if not view["selected"]:
@@ -413,6 +418,12 @@ def structured_plan_problems(model, rules, ctx):
     return problems
 
 
+def source_revision_problems(ctx):
+    if any(repo.get('live_revision') == 'unavailable' for repo in ctx['repositories'].values()):
+        return ['源码版本核验不可用；恢复工位源码/Git 后重试，Q1 和既有评论回读可继续']
+    return []
+
+
 def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
     ids = [c["id"] for c in rules["checkpoints"]]
     if checkpoint not in ids:
@@ -430,6 +441,7 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
         elif view["decision"]["decision"]["outcome"] == "rework":
             problems.append("%s 用户要求补测/返工" % key)
     if index >= ids.index(rules["selection_checkpoint"]):
+        problems += source_revision_problems(ctx)
         problems += ["%s 方案待用户选择" % k for k, v in views.items() if not v["selected"]]
         problems += ["方案事实 %s 尚未记录；请补齐项目要求的方案内容" % k
                      for k in rules.get("plan_fact_keys", []) if not ctx["facts"].get(k)]
@@ -506,7 +518,7 @@ def checkpoint_digest(base, task, checkpoint, required_outcome=None):
     rules = config(base, task)
     if not enabled(task, rules):
         raise ValueError("当前任务类型未配置可用的质量确认，不能签发或复用方案授权")
-    value = report(load(base, task), rules, context(base, task))
+    value = report(load(base, task), rules, context(base, task), base=base, task=task)
     view = value["checkpoints"].get(checkpoint)
     outcome = checkpoint_outcome(view or {})
     if not view or not view["reviewed"] or outcome == "rework" or (
@@ -674,14 +686,25 @@ def replay(state):
     return model
 
 
-def report(state, rules, ctx):
+def report(state, rules, ctx, *, base, task):
+    """当前报告必须绑定工位；历史归约不能冒充实时准入报告。"""
+    if base is None or task is None or (ctx['run_id'], ctx['issue_key']) != (task['run_id'], task['issue_key']):
+        raise ValueError('当前质量报告必须绑定工位与任务')
     model = replay(state)
     from workflow.quality_write import snapshot, checkpoint_body
     publications = {key: dict(record, snapshot_current=record["snapshot"] == snapshot(model, rules, ctx, record.get("checkpoint")))
                     for key, record in model["publications"].items()}
     checkpoints = {c["id"]: checkpoint_view(model, c["id"], rules, ctx) for c in rules["checkpoints"]}
+    from workflow import plan_review
+    source_issues = plan_review.source_issues(base, task, rules)
+    selection = checkpoints[rules['selection_checkpoint']]
+    selection['source_issues'] = source_issues
+    if source_issues:
+        selection['problems'].extend(issue['message'] for issue in source_issues)
+        selection['reviewed'] = False
+        selection['outcome'] = checkpoint_outcome(selection)
     for cp, view in checkpoints.items():
-        view["published"] = any(r.get("checkpoint") == cp and r["snapshot_current"] and r["status"] == "verified"
+        view["published"] = view['reviewed'] and any(r.get("checkpoint") == cp and r["snapshot_current"] and r["status"] == "verified"
                                 for r in publications.values())
         if view["reviewed"]:
             view["publication_body"] = checkpoint_body(model, cp, rules, ctx)
@@ -699,8 +722,8 @@ def review_packet(base, task, jira_snapshot):
     from workflow import jira_collect
     rules = config(base, task)
     ctx = context(base, task)
-    model = replay(load(base, task))
-    checkpoint = checkpoint_view(model, rules["selection_checkpoint"], rules, ctx)
+    current = report(load(base, task), rules, ctx, base=base, task=task)
+    checkpoint = current['checkpoints'][rules['selection_checkpoint']]
     jira = jira_collect.collect(base, task, "design_review", jira_snapshot)
     return {"run_id": task["run_id"], "plan": {key: ctx["facts"].get(key) for key in rules["plan_fact_keys"]},
             "checkpoint": dict(checkpoint, id=rules["selection_checkpoint"]), "jira": jira,
@@ -746,6 +769,19 @@ def apply(base, issue, run_id, revision, command):
             from workflow.quality_write import check_unresolved_runs
             check_unresolved_runs(base, task, replay(state)["publications"][command["payload"]["id"]]["body"])
         model = replay(state)
+        action, payload = command['action'], command['payload']
+        bound_checkpoint = payload.get('checkpoint') if action in ('checkpoint', 'draft') else None
+        if action in ('confirm', 'prepare_write'):
+            bound_checkpoint = model['publications'].get(payload['id'], {}).get('checkpoint')
+        if bound_checkpoint == rules['selection_checkpoint']:
+            from workflow import plan_review
+            issues = plan_review.source_issues(base, task, rules)
+            if issues:
+                raise ValueError('；'.join(issue['message'] + '；' + issue['recovery'] for issue in issues))
+        if action == 'prepare_write':
+            body = model['publications'][payload['id']]['body']
+            if project_rules.scan_sensitive(project_rules.load_admission(station=base), body):
+                raise ValueError('对外正文含敏感内容；未生成发送意图，正文已隐藏')
         reduce(model, command, rules, ctx)
         if command["action"] == "verification":
             from workflow import verification
@@ -786,7 +822,7 @@ def apply(base, issue, run_id, revision, command):
                 temporary.unlink()
         if command["action"] == "jira_status":
             ctx = dict(ctx, jira_assessment=model["jira_assessment"])
-        return report(state, rules, ctx)
+        return report(state, rules, ctx, base=base, task=task)
 
 
 def advance_problems(base, task, target):
@@ -798,7 +834,7 @@ def advance_problems(base, task, target):
     points = rules["stage_checkpoints"].get(target, [])
     if not points:
         return []
-    current = report(load(base, task), rules, context(base, task))
+    current = report(load(base, task), rules, context(base, task), base=base, task=task)
     problems = []
     for cp in points:
         view = current["checkpoints"][cp]
@@ -849,7 +885,7 @@ def main():
                     raise ValueError("review 需要原生 Jira 字段/转换快照 --input")
                 result = review_packet(args.dir, task, json.loads(Path(args.input).read_text()))
             else:
-                result = report(load(args.dir, task), rules, context(args.dir, task))
+                result = report(load(args.dir, task), rules, context(args.dir, task), base=args.dir, task=task)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (ValueError, OSError, KeyError, TypeError, subprocess.TimeoutExpired) as error:

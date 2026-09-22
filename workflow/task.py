@@ -679,7 +679,7 @@ def cmd_next(args):
             except ValueError as error:
                 blockers.append(str(error))
     rules = quality.config(args.dir, task)
-    current = quality.report(quality.load(args.dir, task), rules, quality.context(args.dir, task)) if quality.enabled(task, rules) else {}
+    current = quality.report(quality.load(args.dir, task), rules, quality.context(args.dir, task), base=args.dir, task=task) if quality.enabled(task, rules) else {}
     points = rules.get("stage_checkpoints", {}).get(target, []) if current else []
     guidance, guidance_warnings = _next_guidance(args.dir, task)
     payload = {"issue_key": task["issue_key"], "run_id": task["run_id"], "stage": task["stage"],

@@ -96,7 +96,7 @@ def strict_checkpoint_ready(base, task, checkpoint, snapshot=None):
     rules = quality.config(base, task)
     if not quality.enabled(task, rules):
         return False, ["当前任务未启用质量检查"]
-    report = quality.report(quality.load(base, task), rules, jira_tests.with_snapshot(quality.context(base, task), snapshot, rules))
+    report = quality.report(quality.load(base, task), rules, jira_tests.with_snapshot(quality.context(base, task), snapshot, rules), base=base, task=task)
     view = report["checkpoints"].get(checkpoint)
     if not view or not view["reviewed"]:
         return False, ["质量检查点 %s 尚未有效确认" % checkpoint]
@@ -118,7 +118,7 @@ def tests_passed_ready(base, task, snapshot):
     ready, problems = strict_checkpoint_ready(base, task, checkpoint_id, snapshot)
     if not ready:
         return False, "quality_not_verified", problems, []
-    report = quality.report(quality.load(base, task), quality_rules, jira_tests.with_snapshot(quality.context(base, task), snapshot, quality_rules))
+    report = quality.report(quality.load(base, task), quality_rules, jira_tests.with_snapshot(quality.context(base, task), snapshot, quality_rules), base=base, task=task)
     checkpoint = report["checkpoints"][checkpoint_id]
     outcome = quality.checkpoint_outcome(checkpoint)
     if outcome != "accept":

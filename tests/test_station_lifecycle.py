@@ -918,7 +918,7 @@ class StationTests(unittest.TestCase):
                                  {'action': action, 'payload': payload})
         def view():
             current = task_store.read_task(self.ws)
-            return quality.report(quality.load(self.ws, current), quality.config(self.ws, current), quality.context(self.ws, current))
+            return quality.report(quality.load(self.ws, current), quality.config(self.ws, current), quality.context(self.ws, current), base=self.ws, task=current)
         proof = {'actor': 'Fixture', 'source': 'user_message', 'reference': 'fixture:confirmed-plan',
                  'at': datetime.now(timezone.utc).isoformat()}
         apply('item', {'plan': {'id': 'behavior', 'checkpoint': 'q4-acceptance', 'timing': 'after_fix',

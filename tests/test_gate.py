@@ -214,7 +214,7 @@ def grant(ws, **overrides):
         })
     task = task_store.read_task(ws, issue)
     rules = quality.config(ws)
-    view = quality.report(quality.load(ws, task), rules, quality.context(ws, task))
+    view = quality.report(quality.load(ws, task), rules, quality.context(ws, task), base=ws, task=task)
 
     def apply(action, payload):
         nonlocal view

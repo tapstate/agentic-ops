@@ -107,7 +107,7 @@ class StationCompatibilityTests(unittest.TestCase):
 
     def test_fingerprint_epoch_rejects_old_state_and_bound_upgrade_or_rollback(self):
         current = json.loads((ROOT / "contracts/station-state-compatibility.json").read_text())
-        self.assertEqual(17, current["station_state_epoch"])
+        self.assertEqual(18, current["station_state_epoch"])
         (self.product_root / "contracts/station-state-compatibility.json").write_text(json.dumps(current))
         path = self.station / ".agenticops/init.json"
         path.write_text(json.dumps({"station_state_epoch": 14}))
@@ -124,6 +124,21 @@ class StationCompatibilityTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "仍有绑定工位"):
                     compatibility.check_upgrade(self.product_root, "old", "new", operation=operation)
         self.assertEqual(before, {p: p.read_bytes() for p in (path, record)})
+
+    def test_source_reference_epoch_rejects_bound_upgrade_and_rollback(self):
+        self.write_registry([str(self.station)])
+        for old, new in ((17, 18), (18, 17)):
+            (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(manifest(new)))
+            path = self.station / '.agenticops/init.json'
+            path.write_text(json.dumps(manifest(old)))
+            before = path.read_bytes()
+            with self.assertRaises(ValueError):
+                with task_store.task_state_lock(self.station):
+                    self.fail('跨代际不得进入状态写入区')
+            with mock.patch.object(compatibility, 'manifest_at_ref', side_effect=[manifest(old), manifest(new)]):
+                with self.assertRaisesRegex(ValueError, '仍有绑定工位'):
+                    compatibility.check_upgrade(self.product_root, 'old', 'new', operation='update' if new > old else 'rollback')
+            self.assertEqual(before, path.read_bytes())
 
     def test_all_pre_recovery_epochs_are_rejected_by_current_product(self):
         current_manifest = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())

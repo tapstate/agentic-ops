@@ -96,7 +96,7 @@ def warnings(base, task, report=None):
     rules = quality.config(base, task)
     if not quality.enabled(task, rules):
         return result
-    report = report or quality.report(quality.load(base, task), rules, quality.context(base, task))
+    report = report or quality.report(quality.load(base, task), rules, quality.context(base, task), base=base, task=task)
     for checkpoint, view in report["checkpoints"].items():
         if view["reviewed"] and not view["published"]:
             add("checkpoint:" + checkpoint, "deferred", "检查点已确认，当前评论尚未回读验证")
