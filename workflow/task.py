@@ -89,7 +89,10 @@ def cmd_takeover(args):
                "explicit_branches": overrides}
     if args.continuation_input:
         request["continuations"] = json.loads(Path(args.continuation_input).read_text(encoding="utf-8"))
-    print(json.dumps(station.takeover(args.dir, request, args.operation_id, args.expected_revision), ensure_ascii=False, indent=2))
+    result = station.takeover(args.dir, request, args.operation_id, args.expected_revision)
+    from workflow import external_sync
+    current = task_store.read_task(args.dir)
+    print(json.dumps(dict(result, **external_sync.safe_actions(args.dir, current)), ensure_ascii=False, indent=2))
     return 0
 
 
@@ -102,6 +105,8 @@ def cmd_lifecycle(args):
     plan = result.get("cleanup_plan", {})
     summary.update(directory_count=len(plan.get("directories", [])), source_artifact_count=len(plan.get("entries", [])),
                    plan_digest=plan.get("digest"), retained=plan.get("retained", []))
+    from workflow import station_clean_view
+    summary["cleanup_scope"] = station_clean_view.safe_describe(args.dir, task_store.read_task(args.dir), plan or None, result)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 
@@ -545,6 +550,7 @@ def _cmd_advance_locked(args):
     if task["stage"] == "completed" and args.expected_stage in ("ci_validation", "completed"):
         _finish_completion(args.dir, task)
         print("任务已完成，授权撤销已收敛；仍需明确 release。")
+        _print_next(task, args.dir)
         return 0
     task_store.resolve_active_issue(args.dir, args.issue_key)
     if task.get("stage") != getattr(args, "expected_stage", None):
@@ -642,6 +648,8 @@ def _next_guidance(base, task):
 
 
 def _print_next(task, base):
+    from workflow import external_sync
+    print(json.dumps(external_sync.safe_actions(base, task), ensure_ascii=False, indent=2))
     if task.get("archive_ref"):
         print("任务已归档，仅供审计；下一步：回读 cleanup-plan 并确认后%s。" % (" release" if task.get("outcome") == "completed" else " clean"))
         return
@@ -666,7 +674,8 @@ def cmd_next(args):
     if task.get("archive_ref"):
         print(json.dumps({"issue_key": task["issue_key"], "run_id": task["run_id"],
             "advance_ready": False, "next_stage": None, "archive_ref": task["archive_ref"],
-            "guidance": "档案只供审计；回读 cleanup-plan，确认后执行 release 或 clean"}, ensure_ascii=False, indent=2))
+            "guidance": "档案只供审计；回读 cleanup-plan，确认后执行 release 或 clean",
+            **external_sync.safe_actions(args.dir, task)}, ensure_ascii=False, indent=2))
         return 0
     index = STAGES.index(task["stage"])
     target = STAGES[index + 1] if index + 1 < len(STAGES) else None
@@ -689,7 +698,7 @@ def cmd_next(args):
                       "guidance_warnings": guidance_warnings,
                       "checkpoints": {p: current["checkpoints"][p] for p in points},
                       "publications": current.get("publications", {}),
-                      "warnings": external_sync.warnings(args.dir, task, current),
+                      **external_sync.safe_actions(args.dir, task, current),
                       "continuity": "在现有授权内连续完成可执行步骤；只为缺少事实、必要人工决定、权限不足或外部写结果不明暂停。"}
     strategy = _strategy_payload(args.dir, task)
     if task.get("task_class") == repair_strategy.TASK_CLASS:

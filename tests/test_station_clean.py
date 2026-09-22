@@ -22,6 +22,91 @@ class StationCleanTests(unittest.TestCase):
     ready = fixture.ResourceTests.ready
     execute = fixture.ResourceTests.execute
 
+    def test_cleanup_scope_is_read_only_and_keeps_retained_choices(self):
+        from workflow import station_clean_view
+        task = self.ready()
+        plan = resources.plan(self.ws, task, version=5)
+        before = json.dumps(plan, sort_keys=True)
+        view = station_clean_view.describe(self.ws, task, plan)
+        self.assertTrue(view["complete"])
+        self.assertTrue(view["executable"], view)
+        self.assertEqual(view["plan_digest"], plan["digest"])
+        self.assertEqual(before, json.dumps(plan, sort_keys=True))
+        retained = {row["target"] for row in view["retain"]}
+        self.assertIn("config", retained)
+        self.assertIn("source 独立仓库", retained)
+        self.assertIn("Product Root .archive", retained)
+        reset = next(row for row in view["remove_or_reset"] if row["target"] == "source/" + self.name)
+        self.assertEqual(reset["source"]["neutral"]["sha"], task["reset_baseline"][self.name]["sha"])
+
+    def test_partial_cleanup_scope_lists_unknown_and_preserved_without_digest(self):
+        task = self.ready()
+        (self.ws / "user-notes.txt").write_text("private retained material")
+        before = {p: p.read_bytes() for p in (self.ws / ".agenticops").rglob("*") if p.is_file()}
+        output = io.StringIO()
+        with mock.patch("sys.stdout", output):
+            station_clean.main(["--dir", str(self.ws)])
+        result = json.loads(output.getvalue())
+        view = result["cleanup_scope"]
+        self.assertFalse(view["complete"])
+        self.assertFalse(view["executable"])
+        self.assertNotIn("plan_digest", view)
+        self.assertIn("user-notes.txt", [row["target"] for row in view["unknown"]])
+        self.assertIn("config", [row["target"] for row in view["retain"]])
+        self.assertEqual(before, {p: p.read_bytes() for p in (self.ws / ".agenticops").rglob("*") if p.is_file()})
+        self.assertTrue((self.ws / "user-notes.txt").exists())
+
+    def test_resume_view_uses_original_plan_and_completed_receipts(self):
+        from workflow import station_clean_view
+        task = self.ready()
+        plan = resources.plan(self.ws, task, version=5)
+        operation = {"operation_id": "op-view-reset", "status": "running", "phase": "intent", "cleanup_plan": plan,
+                     "steps": {"first": {"receipt": {}}, "second": {"receipt": None}}}
+        view = station_clean_view.describe(self.ws, task, plan, operation)
+        self.assertEqual(view["plan_digest"], plan["digest"])
+        self.assertEqual(view["operation"]["completed_steps"], ["first"])
+        self.assertEqual(view["operation"]["pending_steps"], ["second"])
+        self.assertFalse(view["executable"])
+
+    def test_epoch18_reader_replays_terminal_receipt_and_preserves_cleanup_contract(self):
+        import subprocess
+        import tarfile
+        from workflow import quality
+        task = self.ready()
+        task["task_class"] = "defect_fix"
+        task_store.write_task(self.ws, task)
+        def apply(action, payload):
+            return quality.apply(self.ws, task["issue_key"], task["run_id"], quality.load(self.ws, task)["revision"],
+                                 {"action": action, "payload": payload})
+        apply("draft", {"id": "summary", "body": "夹具完成报告"})
+        record = quality.replay(quality.load(self.ws, task))["publications"]["summary"]
+        apply("confirm", {"id": "summary", "digest": record["digest"], "proof": {"actor": "fixture", "source": "user_message", "reference": "fixture:user", "at": "2026-09-22T00:00:00Z"}})
+        apply("prepare_write", {"id": "summary", "digest": record["digest"]})
+        record = quality.replay(quality.load(self.ws, task))["publications"]["summary"]
+        task.update(outcome="completed", stage="completed")
+        task_store.write_task(self.ws, task)
+        current_before = (self.ws / ".agenticops/current-task.json").read_bytes()
+        apply("readback", {"id": "summary", "operation_id": record["operation_id"], "site": record["site"],
+              "issue_key": task["issue_key"], "comment_id": "123", "body": record["body"], "source_ref": "fixture:comment/123"})
+        self.assertEqual(current_before, (self.ws / ".agenticops/current-task.json").read_bytes())
+        current = task_store.read_task(self.ws)
+        plan = resources.plan(self.ws, current, version=5)
+        old = self.root / "epoch18-reader"
+        old.mkdir()
+        baseline = "d5f0b9a3e4ab1920b6882c6f32f6a9d6fd3bca29"
+        data = subprocess.run(["git", "archive", baseline, "workflow", "bootstrap", "contracts"], cwd=Path(__file__).resolve().parents[1], check=True, capture_output=True).stdout
+        # 只解包可信 Git 树中的普通文件；不沿任何链接写入。
+        with tarfile.open(fileobj=io.BytesIO(data)) as archive:
+            for member in archive:
+                if member.isfile():
+                    target = old / member.name
+                    self.assertTrue(target.resolve().is_relative_to(old.resolve()))
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(archive.extractfile(member).read())
+        script = "from workflow import quality, task_store, station_resources; import sys,json; b=sys.argv[1]; t=task_store.read_task(b); m=quality.replay(quality.load(b,t)); assert m['publications']['summary']['status']=='verified'; station_resources.verify_known_external(b,t); print(json.dumps(station_resources.plan(b,t,version=5)))"
+        observed = subprocess.run([sys.executable, "-c", script, str(self.ws)], cwd=old, check=True, capture_output=True, text=True)
+        self.assertEqual(json.loads(observed.stdout)["digest"], plan["digest"])
+
     def test_native_project_script_keeps_original_command_and_digest(self):
         from workflow import native_cleanup
         recipe = {"kind": "project-script", "script": "scripts/clean-t-layer3-test.py", "source_ref": "fixture"}

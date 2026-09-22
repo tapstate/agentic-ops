@@ -1,5 +1,17 @@
 # 质量检查与证据
 
+## 同步待办与有限回执恢复
+
+TapData 的 `publication_mode=checkpoint` 启用接管摘要和逐检查点评论待办。接管成功、阶段推进、quality apply/status、task next 及 external_sync status 返回 `sync_actions`；它覆盖已确认但未发布的历史检查点，不只看下一阶段。查询不写状态，不代表已获得外部写入权限或同步已完成。接管摘要只说明准备事实，不冒充 Q1 通过；Q1—Q6 必须使用有效检查点的完整正文。
+
+Agent 在当前授权内处理动作；缺少授权时先询问对应动作范围。评论按现有 draft/confirm/prepare_write、原生调用、receipt/readback 顺序处理。稳定 id 复用原记录；尚未发送的过期草稿重新生成确认，已经发送或结果不明的记录只先回读原目标和原正文。新确认不授权重复发送。`refresh_required` 只表示当前材料变化，不撤销原外部调用事实。
+
+状态、水印和字段按各自入口核验，不自动改写任务描述或猜填审批字段。接管状态同步允许在 task_intake/design_review/implementation 补查；更晚阶段交接人工，不回退 Jira 状态。同步失败明确原因及后续动作，不阻止无依赖的本地工作；unknown 或无法证明未写入的 failed 先核清。安全退出判定不消费容错展示结果。
+
+completed 后可通过原 quality receipt/readback、jira_status complete、jira_watermark complete 核对已有意图；不新建或重发。恢复窗口与限制见[工位合同](../architecture/single-task-station.md#外部同步回执恢复)：清理确认或归档证据已绑定时交维护侧，不改状态绕过。无原意图的字段仅作只读观察，不记录终态同步成功。水印回读原版本不等于当前产品版本已同步。
+
+已知未发送事项在结束前列入总结与接力；归档后不自动跨 run 补写。`sync_diagnostics` 表示待办展示失败，应查询原操作；若返回 `local_write=committed`，质量记录已保存，不得重复 apply。兼容旧 `deferred-summary` 配置，但仅 `checkpoint` 主动生成接管及检查点动作。
+
 ## 源码定位与实时核验
 
 同类实现证据保存仓库标识、仓库内相对路径与完整 Git SHA。源码位置由工位既有 `source/<owner>/<repo>` 规则即时解析，并核对当前任务登记、源码准备状态和冻结仓库身份；不接受质量事件提供的绝对路径，也不在新质量事件中保存 `source_path`。原始证据、用户正文和报告引用仍按项目规则扫描，不增加内部路径白名单。

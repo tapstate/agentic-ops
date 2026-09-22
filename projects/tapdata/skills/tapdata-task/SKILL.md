@@ -25,6 +25,8 @@ metadata:
 
 ## 归档、释放和重置工位
 
+先向用户展示 `cleanup_scope` 的清理/复位、保全、保留、未知四类实际对象及允许的决定，再请求确认；不要只问“是否放弃变更”。保留源码仓不等于保留当前工作区修改。部分清单或阻塞不授权执行；恢复展示原范围、完成回执与变化，结束展示实际结果及剩余材料。用户要求处理保留项时遵守独立处置边界，不扩大普通清理授权。
+
 用户要求清理时，新操作先调用 `workflow/station-clean.py --dir <station>` 只读预检；两层名单和确认请求格式见[配置化清理入口](../../../../docs/usage/task-authorization.md#配置化清理入口)。它复用现有 clean/release 生命周期；未完成任务先确认是否放弃，拒绝则停止，已有确认仍覆盖当前范围时复用。保留 config/source/archive 和命名分支、PR；源码构建残留由 Agent 使用项目原生工具清理，产品不执行 Maven/npm/pnpm，也不以通用删除兜底。discard 源码仍需额外确认精确快照；完成任务同时绑定 terminal proof 和 candidate_digest，不能把 incomplete 档案后置改为 completed。
 
 使用原生能力停止已登记写入者并回读后，按预检计划确认并执行 station-clean.py；Workflow 在同一操作内归档、通过独立源码复位模块核验成果并检出开发 SHA、回收已登记目录、撤销授权和解绑。源码归位使用 detached checkout，命名分支和提交保留，不 rebase、不猜测当前版本、不联网追新。下次接管重新核验开发基线。无有效基线、未知资源或已登记外部写入结果未知时，处理具体阻塞，不手改状态或换工具绕过。
@@ -76,6 +78,9 @@ Tests Passed 前核对 Story Test Design Review Result（`customfield_10413`）�
 这些材料证明外部状态，不能替代 Q1-Q4 和代码验证。同步失败只暂停对应写入，继续无依赖工作并在交接时列全 `jira_status_todos`；不手写账本消除提示。
 
 ## 实现、PR、CI 和完成
+
+- 接管、阶段推进和质量操作返回 `sync_actions` 时，先核对已有授权，在当前轮次的安全边界主动处理；恢复使用 task next 或 external_sync status 查全部历史待办，不等待研发提醒。接管摘要不冒充 Q1，检查点使用完整有效正文，未知操作复用原记录回读，不重发。已知未发送说明原因并交接；只读待办不代表发送保证。
+- completed 后只可按[有限回执恢复](../../../../docs/usage/quality-checkpoints.md#同步待办与有限回执恢复)补录已有操作；不得新建草稿或发送。退出前先核清未知结果，再生成确认范围；清理确认或归档草稿已绑定时交维护侧，不改账本或摘要绕过。待办展示失败与本地操作失败分开，先回读原操作，避免重复推进。
 
 - 每个仓库分别验证并记录提交、PR 和 CI，任务级证据统一汇总。按[共同验证材料](../../../../docs/usage/quality-checkpoints.md#共同验证材料)用现有 quality.py verification 动作记录本地测试、来源同步、CI 报告与审查材料；缺失或版本失效时先补齐，不直接改阶段。失败使用 failures.py 原 problem_id 记录 start/finish，替代旧 PR 独立预算入口。
 - 功能与缺陷在方案分析时使用 [tapdata-ci-test](../tapdata-ci-test/SKILL.md) 判断集成测试复用、新增或修改及框架可用性；实现后调用其编写、执行、报告分析和修复能力，PR CI 返回后再次调用报告分析。具体测试步骤由该技能及其 Runbook 维护；主流程负责授权、质量记录、阶段、提交推送和 CI 等待，不复制测试步骤。

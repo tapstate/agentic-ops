@@ -1770,8 +1770,14 @@ class QualityTests(unittest.TestCase):
                             case.execute(); case.automatic_checkpoint(); case.decide()
                             for point in ('q4-acceptance', 'q5-review', 'q6-delivery'):
                                 case.checkpoint(point)
+                            from workflow import external_sync
+                            pending = external_sync.actions(case.base, case.task)['sync_actions']
+                            points = {row['checkpoint']: row for row in pending if row.get('kind') == 'checkpoint_comment'}
+                            for point, view in case.view()['checkpoints'].items():
+                                self.assertEqual(points[point]['body'], view['publication_body'])
                             for point in case.view()['checkpoints']:
                                 case.publish_checkpoint(point)
+                            self.assertFalse(any(row['kind'] == 'checkpoint_comment' for row in external_sync.actions(case.base, case.task)['sync_actions']))
                             self.assertTrue(all(v['reviewed'] for v in case.view()['checkpoints'].values()))
                         saved = quality.state_path(case.base, case.task).read_text()
                         self.assertNotIn('source_path', saved)
@@ -2193,6 +2199,111 @@ class VerificationContractTests(unittest.TestCase):
             self.assertTrue(self.v.problems(model, self.ctx, ["local"]))
             with self.assertRaises(ValueError):
                 self.v.verify_artifacts(p)
+
+
+class SyncRecoveryTests(unittest.TestCase):
+    setUp = QualityTests.setUp
+    save_task = QualityTests.save_task
+    view = QualityTests.view
+    apply = QualityTests.apply
+    publication = QualityTests.publication
+    select = QualityTests.select
+    checkpoint = QualityTests.checkpoint
+    plan = QualityTests.plan
+
+    def terminal(self):
+        self.task.update(stage="completed", outcome="completed")
+        self.save_task()
+
+    def readback(self, record):
+        return self.apply("readback", {"id": "summary", "operation_id": record["operation_id"],
+            "site": record["site"], "issue_key": "TAP-123", "comment_id": "123",
+            "body": record["body"], "source_ref": "fixture:jira/comment/123"})
+
+    def test_completed_receipt_only_preserves_task_and_authorization(self):
+        record = self.publication()
+        self.terminal()
+        before = (self.base / ".agenticops/current-task.json").read_bytes()
+        with self.assertRaisesRegex(ValueError, "终止"):
+            self.apply("draft", {"id": "another", "body": "不得发送"})
+        done = self.readback(record)
+        self.assertEqual(done["publications"]["summary"]["status"], "verified")
+        self.assertEqual(before, (self.base / ".agenticops/current-task.json").read_bytes())
+        self.assertFalse(task_store.authorization_path(self.base, "TAP-123").exists())
+        with self.assertRaises(ValueError):
+            self.readback(record)
+
+    def test_archive_and_confirmed_exit_reject_without_writing(self):
+        from workflow import station_operation
+        record = self.publication()
+        self.terminal()
+        original = quality.state_path(self.base, self.task).read_bytes()
+        for extra in ({"archive_record": {}}, {"archive_evidence": "{}"},
+                      {"steps": {"archive-publish:0": {"before": {}, "expected": {}, "receipt": None}}},
+                      {"request": {"confirmed_digest": "a" * 64}}, {"cleanup_plan": {}},
+                      {"plan_revisions": []}, {"handoff": {}}):
+            operation = {"kind": "archive", "status": "running", "phase": "intent", "run_id": self.task["run_id"], "request": {}, **extra}
+            with self.subTest(extra=extra), mock.patch.object(station_operation, "read", return_value=operation):
+                with self.assertRaises(ValueError):
+                    self.readback(record)
+                self.assertEqual(original, quality.state_path(self.base, self.task).read_bytes())
+
+    def test_early_unconfirmed_archive_allows_original_readback(self):
+        from workflow import station_operation
+        record = self.publication()
+        self.terminal()
+        operation = {"kind": "archive", "status": "running", "phase": "intent", "run_id": self.task["run_id"], "request": {}}
+        with mock.patch.object(station_operation, "read", return_value=operation):
+            self.assertEqual("verified", self.readback(record)["publications"]["summary"]["status"])
+
+    def test_sync_actions_read_only_and_unknown_keeps_original_record(self):
+        from workflow import external_sync
+        record = self.publication()
+        self.task["facts"]["problem_symptom"] = "补充后的事实"
+        self.save_task()
+        before = quality.state_path(self.base, self.task).read_bytes()
+        first = external_sync.actions(self.base, self.task)
+        second = external_sync.actions(self.base, self.task)
+        self.assertEqual(first, second)
+        action = next(row for row in first["sync_actions"] if row["id"] == "summary")
+        self.assertEqual(action["next_action"], "readback")
+        self.assertEqual(action["record"]["operation_id"], record["operation_id"])
+        self.assertEqual(action["record"]["body"], record["body"])
+        self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+
+    def test_historical_checkpoints_return_complete_body_and_stable_id(self):
+        from workflow import external_sync
+        self.plan()
+        self.select()
+        self.checkpoint("q1-intake")
+        self.checkpoint("q2-plan")
+        report = self.view()
+        actions = external_sync.actions(self.base, self.task, report)["sync_actions"]
+        for cp in ("q1-intake", "q2-plan"):
+            row = next(row for row in actions if row.get("checkpoint") == cp)
+            self.assertEqual(row["body"], report["checkpoints"][cp]["publication_body"])
+        self.assertEqual(actions, external_sync.actions(self.base, self.task, report)["sync_actions"])
+
+    def test_post_write_display_failure_does_not_report_write_failed(self):
+        with mock.patch.object(quality, "report", side_effect=ValueError("report unavailable")):
+            result = quality.apply(self.base, "TAP-123", self.task["run_id"], 0,
+                {"action": "draft", "payload": {"id": "summary", "body": "尚未验证"}})
+        self.assertEqual(result["local_write"], "committed")
+        self.assertEqual(quality.load(self.base, self.task)["revision"], 1)
+
+    def test_previous_run_unknown_comment_has_explicit_maintenance_action(self):
+        from workflow import external_sync
+        record = self.publication()
+        original_run = self.task["run_id"]
+        original_path = quality.state_path(self.base, self.task)
+        before = original_path.read_bytes()
+        self.task["run_id"] = "run-fedcba987654"
+        self.save_task()
+        result = external_sync.actions(self.base, self.task)
+        row = next(row for row in result["sync_actions"] if row["run_id"] == original_run)
+        self.assertEqual(row["next_action"], "maintenance_handoff")
+        self.assertEqual(row["record"]["operation_id"], record["operation_id"])
+        self.assertEqual(before, original_path.read_bytes())
 
 
 class FileDigestTests(unittest.TestCase):

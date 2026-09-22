@@ -172,6 +172,16 @@ operation.json 保留操作身份、阶段和材料引用；不可变大清单�
 
 状态代际变化代表新增目录、计划字段或执行顺序已经不兼容旧版读写。升级与回退在切换前只比较 epoch：变化时要求 Product Root 工位登记为空；原版本完成退出与 purge 后，再显式初始化。升级器不读取旧任务或 operation；目标版本不在线迁移、续接或 repair 采用旧代际状态。
 
+### 外部同步回执恢复
+
+本地 completed 不代表 Jira 同步完成。当前 run 的既有评论意图、状态转换意图与水印目标，可在完成后通过专用回执路径核对原操作；不新建草稿、确认、准备发送或更改原目标，不修改任务阶段、实施授权和源码事实。缺少原意图的字段观察不获得终态写入权限。入口与保存均持有工位锁并核对原记录；普通开发入口仍拒绝终态写入。
+
+回执恢复必须早于退出范围绑定和证据冻结。已有清理计划、确认摘要、历史计划、handoff、归档草稿、冻结证据、发布意图或实际档案时停止恢复，返回维护接力，不刷新档案或豁免原摘要。未完成生命周期只允许尚未绑定上述材料的早期 archive 回执；已确认 clean/release 不允许补写。新退出与恢复在同一锁下核清外部未知结果，生成档案前再次核验；已知未发送仍可随总结交接，不增加所有同步必须成功的门禁。
+
+ready、unknown、failed 等没有明确未写入证明或有效回读的结果均须核清。当前远端值不等于目标不证明原调用未执行。水印的原目标观察与当前产品版本同步分别披露，stale 不自动代表原操作已核清。查询和动作清单仅派生，不创建队列或发送意图；展示错误不能将已成功的本地变更报告为失败。
+
+此能力保持 epoch 18：写入现有回执事件和原字段，不增加持久状态类型或改变历史重放含义。旧 epoch 18 读取、重放与清理预检必须保持兼容；回退只失去受限恢复入口。若上述回归不成立，停止重新评审，不在线迁移。epoch 17 不在本能力恢复范围。
+
 ## 9. TapData 配方合同
 
 完整应用 Profile 引用 `projects/tapdata/repositories.json` 仓库 ID，不另存 origin；首版集合为 tapdata、tapdata-common-lib、tapdata-connectors、tapdata-connectors-enterprise、tapdata-enterprise、tapdata-license、tapdata-web、tapdata-application、hazelcast，均位于 `source/tapdata/<repo>`。t-layer3-test 保留项目登记，是明确启用的验证依赖，启用后必须在基线冻结前加入；docs/docs-en 已解除 TapData 项目登记，不参与项目仓库准备和分支对齐。解除登记不删除既有本地仓库、Git refs 或任务材料。其它类型任务的精简 Profile 需单独明确，不能偷偷把完整应用 Profile 降级。

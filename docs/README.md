@@ -1,5 +1,7 @@
 # AgenticOps 文档总纲
 
+清理范围决策与 Jira 阶段同步属于任务退出及流程连续性主题：[工位合同](architecture/single-task-station.md#外部同步回执恢复)维护有限回执恢复、证据冻结和兼容语义；[扩展使用总纲](usage/README.md)导航清理清单与同步待办的操作说明。只读展示复用原计划与账本，既不扩大删除授权，也不承诺外部写入必达。
+
 质量源码定位与证据边界由[质量检查与证据](usage/quality-checkpoints.md#源码定位与实时核验)说明：按工位规范即时定位、历史重放与当前核验分离、检查点故障隔离及对外正文扫描；[扩展使用总纲](usage/README.md)负责导航，跨代际操作复用更新与回退指引，不另设任务迁移流程。
 
 源码工作目录指纹由[工位合同](architecture/single-task-station.md#源码指纹与兼容边界)定义质量证据、扩仓和中断恢复共用的字节边界、禁用 Git textconv 的源码核验要求及 epoch；[更新与回退](usage/update-and-rollback.md)负责跨 epoch 的原版退出、purge 和重建操作，不在线迁移旧指纹。

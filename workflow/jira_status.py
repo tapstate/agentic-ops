@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from workflow import jira_tests, project_rules, quality, task_store  # noqa: E402
+from workflow import jira_tests, project_rules, quality, task_store, sync_recovery  # noqa: E402
 
 
 def now():
@@ -39,10 +39,18 @@ def load_state(base, task):
     return document
 
 
-def save_state(base, task, state):
+def save_state(base, task, state, recovery=None):
     with task_store.task_run_lock(base, task["issue_key"]):
         current = task_store.check_expected_run(base, task["issue_key"], task["run_id"])
-        task_store.require_development(base, current)
+        if recovery is None:
+            task_store.require_development(base, current)
+        else:
+            trigger, original = recovery
+            sync_recovery.require_receipt(base, current)
+            if load_state(base, current)["attempts"].get(trigger) != original:
+                raise ValueError("原 Jira 意图已变化，拒绝过期回执")
+            sync_recovery.validate_update(original, state["attempts"][trigger],
+                {"completed_at", "readback_ref", "readback_status", "outcome", "reason", "message", "guidance"})
         if task.get("_revision") != current["_revision"]:
             raise ValueError("工位 revision 已变化，拒绝过期 Jira 状态回执")
         task_store._write_json_atomic(state_path(base, task), state)
@@ -208,8 +216,10 @@ def guidance_for(fields, rules, task):
     return result
 
 
+@sync_recovery.locked
 def prepare(base, issue_key, trigger, snapshot, operation_id=None):
     task = task_store.read_task(base, issue_key)
+    task_store.require_development(base, task)
     rules = config(base, task)
     rule = rules.get("attempts", {}).get(trigger)
     if not isinstance(rule, dict):
@@ -361,12 +371,17 @@ def prepare_transition(record, snapshot, fields, rule, rules, task):
     return record
 
 
+@sync_recovery.locked
 def complete(base, issue_key, trigger, outcome, snapshot, message, operation_id=None):
+    if outcome not in ("failed", "unknown", "not_written"):
+        raise ValueError("无效 Jira 回执结果")
     task = task_store.read_task(base, issue_key)
     state = load_state(base, task)
     record = state["attempts"].get(trigger)
     if not record or record.get("outcome") not in ("ready", "unknown", "failed"):
         raise ValueError("本节点没有待完成的 Jira 状态转换意图")
+    sync_recovery.require_receipt(base, task)
+    original = copy.deepcopy(record)
     if operation_id is not None and record.get("operation_id") != operation_id:
         raise ValueError("Jira 回执不是原 operation")
     if outcome == "not_written":
@@ -390,7 +405,7 @@ def complete(base, issue_key, trigger, outcome, snapshot, message, operation_id=
         record["guidance"] = [{"guidance": "自动状态转换未确认成功；本地流程继续，PR Ready 时根据 Jira 原始提示人工处理。"}]
     if record.get("attempt_id"):
         state.setdefault("attempts_by_id", {})[record["attempt_id"]] = copy.deepcopy(record)
-    save_state(base, task, state)
+    save_state(base, task, state, recovery=(trigger, original))
     return record
 
 
@@ -431,7 +446,8 @@ def main():
             task = task_store.read_task(args.dir, issue)
             if args.command != "status":
                 task_store.check_expected_run(args.dir, issue, args.expected_run_id)
-                task_store.require_development(args.dir, task)
+                if args.command != "complete":
+                    task_store.require_development(args.dir, task)
             if args.command in ("collect", "confirm"):
                 from workflow import jira_collect
                 document = json.loads(Path(args.input).read_text())

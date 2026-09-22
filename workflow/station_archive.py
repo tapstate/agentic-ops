@@ -135,6 +135,8 @@ def publish(base, task, request, inventory, operation, check_stable=None):
     target = archive_store.run_directory(base, task["run_id"])
     recorded = operation.get("archive_record")
     if recorded is None:
+        from workflow import station_resources
+        station_resources.verify_known_external(base, task)
         binding = json.loads((task_store.state_path(base) / "station.json").read_text())
         data = summary.encode("utf-8")
         evidence = _evidence(base, task)

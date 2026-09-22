@@ -554,6 +554,8 @@ def execute(base, kind, issue, run_id, revision, operation_id, request):
         if operation["status"] == "done":
             return operation
         resources = _resources()
+        # 恢复也核查，不因 fresh=False 跳过未知外部写入；与回执保存共用工位锁。
+        resources.verify_known_external(base, task)
         resources.verify_stopped(base, task)
         if kind == "release" and task.get("outcome") != "completed":
             proof = completion_proof(base, task)

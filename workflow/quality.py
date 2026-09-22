@@ -51,6 +51,8 @@ def config(base, task=None):
         result = project_rules.read_json_object(path)
         if result.get("schema_version") != 1:
             raise ValueError("不支持的质量配置版本")
+        if result.get("publication_mode", "deferred-summary") not in ("checkpoint", "deferred-summary"):
+            raise ValueError("publication_mode 只支持 checkpoint 或历史 deferred-summary")
         ids = [c["id"] for c in result["checkpoints"]]
         if not ids or len(ids) != len(set(ids)) or result["selection_checkpoint"] not in ids:
             raise ValueError("质量检查点配置无效")
@@ -745,7 +747,11 @@ def apply(base, issue, run_id, revision, command):
     with task_store.task_run_lock(base, issue):
         task_store.resolve_issue(base, issue)
         task = task_store.read_task(base, issue)
-        task_store.require_development(base, task)
+        if command["action"] in ("receipt", "readback"):
+            from workflow import sync_recovery
+            sync_recovery.require_receipt(base, task)
+        else:
+            task_store.require_development(base, task)
         if task["run_id"] != run_id:
             raise ValueError("任务 run 已变化，拒绝旧请求")
         rules = config(base, task)
@@ -822,7 +828,14 @@ def apply(base, issue, run_id, revision, command):
                 temporary.unlink()
         if command["action"] == "jira_status":
             ctx = dict(ctx, jira_assessment=model["jira_assessment"])
-        return report(state, rules, ctx, base=base, task=task)
+        try:
+            result = report(state, rules, ctx, base=base, task=task)
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            return {"local_write": "committed", "revision": state["revision"], "run_id": task["run_id"],
+                    "sync_actions": [], "sync_diagnostics": ["质量记录已保存，但报告生成失败（%s）；先查询，不得重复 apply" % type(error).__name__]}
+        from workflow import external_sync
+        result.update(external_sync.safe_actions(base, task, result))
+        return result
 
 
 def advance_problems(base, task, target):
@@ -886,6 +899,8 @@ def main():
                 result = review_packet(args.dir, task, json.loads(Path(args.input).read_text()))
             else:
                 result = report(load(args.dir, task), rules, context(args.dir, task), base=args.dir, task=task)
+            from workflow import external_sync
+            result.update(external_sync.safe_actions(args.dir, task, result if args.command == "status" else None))
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (ValueError, OSError, KeyError, TypeError, subprocess.TimeoutExpired) as error:

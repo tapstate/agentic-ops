@@ -40,7 +40,7 @@
       "task_classes": ["defect_fix", "feature_change"],
       "attempts": {
         "takeover": {
-          "local_stages": ["task_intake"],
+          "local_stages": ["task_intake", "design_review", "implementation"],
           "from": ["Analyzed"],
           "to": "In Progress",
           "to_aliases": ["正在进行"],

@@ -12,7 +12,7 @@
     "scope_boundary"
   ],
   "structured_fix_plan": false,
-  "publication_mode": "deferred-summary",
+  "publication_mode": "checkpoint",
   "comment_format": "human-text-v1",
   "task_classes": [
     "feature_change"

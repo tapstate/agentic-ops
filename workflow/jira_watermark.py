@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import sys
@@ -15,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from bootstrap import product_version  # noqa: E402
-from workflow import project_rules, task_store  # noqa: E402
+from workflow import project_rules, task_store, sync_recovery  # noqa: E402
 
 
 def now():
@@ -83,10 +84,17 @@ def load_state(base, task):
     return document
 
 
-def save_state(base, task, state):
+def save_state(base, task, state, recovery=None):
     with task_store.task_run_lock(base, task["issue_key"]):
         current = task_store.check_expected_run(base, task["issue_key"], task["run_id"])
-        task_store.require_development(base, current)
+        if recovery is None:
+            task_store.require_development(base, current)
+        else:
+            sync_recovery.require_receipt(base, current)
+            if load_state(base, current).get("watermark") != recovery:
+                raise ValueError("原水印意图已变化，拒绝过期回执")
+            sync_recovery.validate_update(recovery, state["watermark"],
+                {"outcome", "reason", "completed_at", "readback_ref", "readback_value", "guidance", "native_request", "message"})
         if task.get("_revision") != current["_revision"]:
             raise ValueError("工位 revision 已变化，拒绝过期 Jira 水印回执")
         task_store._write_json_atomic(state_path(base, task), state)
@@ -120,8 +128,10 @@ def config(base):
     return profile["jira"]["takeover_watermark"]
 
 
+@sync_recovery.locked
 def prepare(base, issue_key, snapshot):
     task = task_store.read_task(base, issue_key)
+    task_store.require_development(base, task)
     state = load_state(base, task)
     previous = state.get("watermark")
     if previous:
@@ -164,12 +174,17 @@ def prepare(base, issue_key, snapshot):
     return record
 
 
+@sync_recovery.locked
 def complete(base, issue_key, outcome, snapshot, message=""):
+    if outcome not in ("failed", "unknown"):
+        raise ValueError("无效水印回执结果")
     task = task_store.read_task(base, issue_key)
     state = load_state(base, task)
     record = state.get("watermark")
-    if not record or record.get("outcome") not in ("ready", "unknown", "failed"):
+    if not record or record.get("outcome") not in ("ready", "unknown", "failed", "stale"):
         raise ValueError("当前 task/run 没有待回读的 Jira 接管水印意图")
+    sync_recovery.require_receipt(base, task)
+    original = copy.deepcopy(record)
     fields, issue_type_id = issue_from(snapshot, issue_key)
     rules = config(base)
     if issue_type_id != record["issue_type_id"] or issue_type_id not in rules["issue_type_ids"]:
@@ -182,7 +197,7 @@ def complete(base, issue_key, outcome, snapshot, message=""):
             readback_ref=snapshot["source_ref"], readback_value=fields.get(record["field_id"]),
             guidance=[{"guidance": "Product Root 版本已变化；不得将旧水印确认成功。保留当前 run、原版本与 Jira 回读，列入同步警告。"}],
         )
-        save_state(base, task, state)
+        save_state(base, task, state, recovery=original)
         return record
     actual = fields.get(record["field_id"])
     record["completed_at"] = now()
@@ -204,7 +219,7 @@ def complete(base, issue_key, outcome, snapshot, message=""):
         record["guidance"] = [
             {"guidance": "水印写入未通过回读确认；本地流程继续，重复写入前先用新的 Jira 只读快照回读。"}
         ]
-    save_state(base, task, state)
+    save_state(base, task, state, recovery=original)
     return record
 
 
@@ -254,7 +269,8 @@ def main():
             task = task_store.read_task(args.dir, issue_key)
             if args.command != "status":
                 task_store.check_expected_run(args.dir, issue_key, args.expected_run_id)
-                task_store.require_development(args.dir, task)
+                if args.command != "complete":
+                    task_store.require_development(args.dir, task)
             if args.command == "prepare":
                 result = prepare(args.dir, issue_key, read_input(args.input))
             elif args.command == "complete":

@@ -81,7 +81,7 @@ def classify(config, name, directory):
     return {"action": "block", "layer": "unmatched"}
 
 
-def inspect(base, owned=(), registered=()):
+def inspect(base, owned=(), registered=(), partial=False):
     root = Path(base).resolve()
     config = load(base)
     result, errors = {}, []
@@ -100,6 +100,7 @@ def inspect(base, owned=(), registered=()):
             continue
         if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)) or path.is_mount():
             errors.append("工位对象不是普通文件或目录：" + name)
+            result[name] = {"action": "block", "layer": "unsafe"}
             continue
         try:
             decision = classify(config, name, stat.S_ISDIR(mode))
@@ -115,6 +116,9 @@ def inspect(base, owned=(), registered=()):
             result[name] = decision
         except ValueError as exc:
             errors.append(str(exc))
+            result[name] = {"action": "block", "layer": "invalid"}
+    if partial:
+        return {"digests": config["digests"], "objects": result, "errors": errors}
     if errors:
         raise ValueError("；".join(errors))
     return {"digests": config["digests"], "objects": result}

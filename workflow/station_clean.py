@@ -3,7 +3,7 @@ import argparse
 import json
 from pathlib import Path
 
-from workflow import station, station_operation, station_resources, task_store
+from workflow import station, station_operation, station_resources, task_store, station_clean_view
 
 
 def main(argv=None):
@@ -25,7 +25,8 @@ def main(argv=None):
         print(json.dumps({"status": "cancelled", "message": "保留当前变更，未执行清理"}, ensure_ascii=False))
         return 0
     if not task and not (operation and operation["status"] != "done"):
-        print(json.dumps({"status": "idle", "message": "工位空闲，未删除任何材料"}, ensure_ascii=False))
+        print(json.dumps({"status": "idle", "message": "工位空闲，本次未删除任何材料",
+            "cleanup_scope": station_clean_view.safe_describe(args.dir, operation=operation)}, ensure_ascii=False, indent=2))
         return 0
     if not args.input or (pending and args.abandon_changes == "no"):
         result = {"status": "confirmation_required" if new_cleanup else "resume_required",
@@ -51,6 +52,14 @@ def main(argv=None):
                 station_resources.verify_known_external(args.dir, task)
             except (ValueError, OSError) as exc:
                 result["blockers"].append(str(exc))
+        original_plan = (operation or {}).get("cleanup_plan") if not new_cleanup else result.get("cleanup_plan")
+        result["cleanup_scope"] = station_clean_view.safe_describe(args.dir, task, original_plan,
+            operation if not new_cleanup else None, result.get("blockers", []))
+        if pending and original_plan:
+            try:
+                station_resources.verify_station_inventory(args.dir, original_plan.get("rules", {}), allow_pending=True)
+            except (ValueError, OSError, KeyError) as error:
+                result["cleanup_scope"]["blockers"].append("当前范围需核验：" + str(error))
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     if any(value is None for value in (args.issue_key, args.expected_run_id, args.expected_revision, args.operation_id)):
@@ -79,5 +88,7 @@ def main(argv=None):
                 raise ValueError("确认请求必须记录 abandon_changes=true")
     result = station.execute(args.dir, kind, args.issue_key, args.expected_run_id,
                              args.expected_revision, args.operation_id, request)
-    print(json.dumps({key: result.get(key) for key in ("operation_id", "status", "phase", "archive_ref", "native_problems")}, ensure_ascii=False, indent=2))
+    output = {key: result.get(key) for key in ("operation_id", "status", "phase", "archive_ref", "native_problems")}
+    output["cleanup_scope"] = station_clean_view.safe_describe(args.dir, task_store.read_task(args.dir), result.get("cleanup_plan"), result)
+    print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0
