@@ -79,6 +79,8 @@ Tests Passed 前核对 Story Test Design Review Result（`customfield_10413`）�
 
 ## 实现、PR、CI 和完成
 
+- 创建或编辑 PR 正文时，按[PR 正文发布与回读](../../../../docs/usage/quality-checkpoints.md#pr-正文发布与回读)每仓准备真实多行 UTF-8 文件，调用 `workflow/pr_body.py preflight`；CLI 用 `--body-file`，不把正文拼入 Shell。原生写入后回读 `number,url,body` 并用 `compare` 核对目标与全文，再报告描述已核验。提示不自动替换合法转义；已存在 PR 保留人工修改，未知结果先回读原 PR，不重建。纯正文修正不触发来源分支合并或代码重验，正文问题不阻塞无依赖工作，不改变 PR Ready 门禁。
+
 - 接管、阶段推进和质量操作返回 `sync_actions` 时，先核对已有授权，在当前轮次的安全边界主动处理；恢复使用 task next 或 external_sync status 查全部历史待办，不等待研发提醒。接管摘要不冒充 Q1，检查点使用完整有效正文，未知操作复用原记录回读，不重发。已知未发送说明原因并交接；只读待办不代表发送保证。
 - completed 后只可按[有限回执恢复](../../../../docs/usage/quality-checkpoints.md#同步待办与有限回执恢复)补录已有操作；不得新建草稿或发送。退出前先核清未知结果，再生成确认范围；清理确认或归档草稿已绑定时交维护侧，不改账本或摘要绕过。待办展示失败与本地操作失败分开，先回读原操作，避免重复推进。
 

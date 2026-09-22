@@ -24,6 +24,26 @@ completed 后可通过原 quality receipt/readback、jira_status complete、jira
 
 旧版本不能重放无 `source_path` 的同类实现确认，新版读写语义使用 epoch 18。旧事件不改写，不承诺全部旧摘要不变，也不在线继承旧 run 或确认；按[更新与回退](update-and-rollback.md)先由原版本保存材料、核对未知外部结果、退出任务并显式 purge，再更新和初始化。该操作不由质量工具自动执行。
 
+## PR 正文发布与回读
+
+PR 正文使用 UTF-8 Markdown 文件和真实换行，通过文件编辑能力生成，不把完整正文拼入 Shell 命令。CLI 创建和更新使用 `gh pr create --repo <owner/repo> ... --body-file <正文文件>` 或 `gh pr edit <编号> --repo <owner/repo> --body-file <正文文件>`；API/MCP 直接传递真实多行字符串，由客户端序列化一次。不要用 `echo -e`、`eval` 或全局反转义转换正文；双引号中的美元符号、反引号及命令替换可能被 Shell 解释，字面 `\n` 也不等于真实换行。
+
+每仓独立准备正文，核对变更、验证结果和未执行项；文件放入当前任务已有证据位置，使用 `task.py interaction-path` 分配。不得将敏感日志或本机绝对路径写入对外正文。纯正文修正不改变源码，不触发来源分支 Merge、代码重验或重新创建 PR；原有代码交付和验收要求保持不变。
+
+```sh
+python3 <agenticops-root>/workflow/pr_body.py preflight --body-file <正文文件>
+gh pr view <编号> --repo <owner/repo> --json number,url,body > <回读.json>
+python3 <agenticops-root>/workflow/pr_body.py compare --body-file <正文文件> --readback <回读.json> --repository <owner/repo> --pr <编号>
+```
+
+先预检再由 Agent 在已有授权内原生发布；发布后重新取得包含 `body` 的当前 JSON 并比对。显式检查原生回读的退出状态，不使用失败调用、旧文件或人工拼造的快照证明成功。API/MCP 回读整理成同一对象 `{number, url, body}` 时保留原始来源，不对 body 二次解码。企业 GitHub 通过 `--host <主机名>` 指定目标站点。正文匹配仅证明传输完整，不证明 Markdown 渲染效果、技术内容或验收结论正确，发布前仍需审阅正文。
+
+工具仅本地读取指定文件，不联网、不写状态、不发送或修正正文。返回 0 表示预检有效或正文匹配，3 表示正文或目标不匹配，4 表示输入不可读取或格式无效。空正文、非法 UTF-8、NUL、孤立 CR、BOM 不通过；疑似用字面 `\n` 拼接标题和列表只返回 warning 及行列，合法代码示例可以保留，不能自动替换。比较只规范化 CRLF 为 LF，不裁剪空白或末尾换行，不解释反斜杠转义；JSON 表示的真实换行与正文中的字面转义分别处理。输出只含诊断与摘要，不回显正文。仓库、主机及 PR 编号必须与回读 URL/number 一致。
+
+编辑已有 PR 前保留最新原文，与拟修改正文比较，保留其他人的更改；写前再次回读确认原文未变，变化时重新整理，不能覆盖。普通 CLI 编辑不提供原子条件更新保证，短窗口内并发仍可能发生；已知有同时编辑者时先协调，写后核对并披露冲突，不声称消除了并发风险。
+
+正文回读不匹配时，只暂停相关描述发布/修正及“描述已核验”的结论，不阻塞无依赖编码、测试或 CI 观察；PR 存在、正文匹配、代码与 CI 通过分别报告。调用超时或结果未知先定位原 PR 并回读，不重建 PR 或盲目重发。它不是 PR Ready 新门禁，不增加工位字段、事件或 epoch，也不认证快照来源；旧状态读取和原门禁保持不变。
+
 ## 共同验证材料
 
 使用现有 `quality.py apply --issue-key <key> --expected-run-id <run> --expected-revision <当前revision> --input <json> --dir <station>`，输入为 `{"action":"verification","payload":{...}}`。每个仓库分别提交材料，内部自动绑定当前任务各仓源码版本；不是新任务类型或执行引擎。写前先 `quality.py status`，source_sync 还会实际读取已准备的任务工作树并核对包含关系。原生报告的真实性、依赖清单和语义分析仍由 Agent 核对，工具不认证来源或判断断言含义。

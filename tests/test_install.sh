@@ -238,6 +238,8 @@ test -f "$install_root/contracts/gate-request.schema.json"
 test -f "$install_root/gate/runner.py"
 test -f "$install_root/policies/defect-repair-strategies.json"
 test -f "$install_root/workflow/repair_strategy.py"
+test -f "$install_root/workflow/pr_body.py"
+python3 "$install_root/workflow/pr_body.py" --help >/dev/null
 test -x "$install_root/agenticops"
 test -f "$maintainer_root/skills/ao-test-takeover/SKILL.md"
 test -f "$maintainer_root/skills/ao-ws-init/SKILL.md"

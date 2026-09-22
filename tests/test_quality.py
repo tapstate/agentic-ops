@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """AO-126：质量决策、恢复及证据隔离的可执行验收；不写外部 Jira。"""
 import copy
+import contextlib
+import io
 import json
 import multiprocessing
 import os
@@ -19,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workflow import authorization, ci, evidence, failures, issue_versions, pr_ready, quality, quality_contract, task, task_store
 from station_fixture import save_task as save_station_task, initialize_station
+from workflow import pr_body
 
 
 def proof():
@@ -2330,6 +2333,122 @@ class FileDigestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(FileNotFoundError):
                 sha256_file(Path(directory) / "missing")
+
+
+PR_BODY_FIXTURE = "## 变更\n\n- 使用 `$collStats` 与 `$(touch forbidden)`\n- 中文、反引号 `cmd`\n\n## 验证\n\n```text\n\\n 是合法示例\n```\n"
+
+
+class PrBodyTest(unittest.TestCase):
+    def snapshot(self, body=PR_BODY_FIXTURE, **values):
+        return dict({"number": 932, "url": "https://github.com/tapdata/tapdata-connectors/pull/932",
+                     "body": body}, **values)
+
+    def compare(self, actual=PR_BODY_FIXTURE, expected=PR_BODY_FIXTURE):
+        return pr_body.compare(expected, self.snapshot(actual), "tapdata/tapdata-connectors", 932)
+
+    def test_exact_content_and_crlf_only_normalization(self):
+        self.assertTrue(self.compare()["matched"])
+        self.assertTrue(self.compare(PR_BODY_FIXTURE.replace("\n", "\r\n"))["matched"])
+        for changed in (PR_BODY_FIXTURE.rstrip(), PR_BODY_FIXTURE + "\n", PR_BODY_FIXTURE.replace("$collStats", ""),
+                        PR_BODY_FIXTURE.replace("\n", r"\n"), PR_BODY_FIXTURE.replace("- 中文", "-  中文")):
+            with self.subTest(changed=changed):
+                self.assertIn("body_mismatch", self.compare(changed)["errors"])
+
+    def test_three_incident_shapes_warn_without_automatic_repair(self):
+        samples = [r"## 变更\n- MongoDB 6+ 使用  聚合\n\n## 验证\n- MongodbUtilTest：4/4 通过",
+                   r"## 变更\n- TM 分流 collStats 与 \n- 保持契约\n\n## 验证\n- 55/55",
+                   r"## 变更\n- MongoDBIMap 分流 collStats 与 \n- 保持契约\n\n## 验证\n- 1/1"]
+        for body in samples:
+            with self.subTest(body=body):
+                result = pr_body.preflight(body)
+                self.assertTrue(result["ok"])
+                self.assertEqual(0, result["actual_newlines"])
+                self.assertTrue(result["warnings"])
+                self.assertEqual(1, result["warnings"][0]["line"])
+
+    def test_literal_escape_examples_remain_valid(self):
+        body = "```text\n## 示例\\n- 示例条目\n```\n"
+        result = self.compare(body, body)
+        self.assertTrue(result["matched"])
+        self.assertTrue(result["warnings"])
+        self.assertEqual(2, result["warnings"][0]["line"])
+
+    def test_target_identity(self):
+        for key, value in [("number", 933), ("number", "932"), ("number", True),
+                           ("url", "https://github.com/other/repo/pull/932"),
+                           ("url", "https://github.com/tapdata/tapdata-connectors/pull/933"),
+                           ("url", "https://evil.example/tapdata/tapdata-connectors/pull/932"),
+                           ("url", "http://github.com/tapdata/tapdata-connectors/pull/932"),
+                           ("url", "https://user@github.com/tapdata/tapdata-connectors/pull/932"),
+                           ("url", "https://github.com/tapdata/tapdata-connectors/pull/932?x=1")]:
+            snapshot = self.snapshot()
+            snapshot[key] = value
+            with self.subTest(key=key, value=value):
+                self.assertFalse(pr_body.compare(PR_BODY_FIXTURE, snapshot, "tapdata/tapdata-connectors", 932)["ok"])
+        snapshot = {"number": 111, "url": "https://git.example/Tapdata/Hazelcast/pull/111", "body": PR_BODY_FIXTURE}
+        self.assertTrue(pr_body.compare(PR_BODY_FIXTURE, snapshot, "tapdata/hazelcast", 111, "git.example")["ok"])
+
+    def test_invalid_or_missing_body_and_target(self):
+        for key in ("number", "url", "body"):
+            snapshot = self.snapshot()
+            del snapshot[key]
+            self.assertFalse(pr_body.compare(PR_BODY_FIXTURE, snapshot, "tapdata/tapdata-connectors", 932)["ok"])
+        for body in (None, {}, [], 3):
+            self.assertFalse(self.compare(body)["ok"])
+        for body in ("", " \n", "a\x00b", "a\rb", "\ufeff正文"):
+            self.assertFalse(pr_body.preflight(body)["ok"])
+
+    def run_cli(self, args):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = pr_body.main(args)
+        return code, json.loads(output.getvalue())
+
+    def test_cli_json_decoding_failures_and_read_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            body = root / "body.md"
+            snapshot = root / "readback.json"
+            state = root / "current-task.json"
+            body.write_bytes(PR_BODY_FIXTURE.encode("utf-8"))
+            snapshot.write_text(json.dumps(self.snapshot()), encoding="utf-8")
+            state.write_bytes(b'{"revision":42}')
+            before = {path.name: path.read_bytes() for path in root.iterdir()}
+            args = ["compare", "--body-file", str(body), "--readback", str(snapshot),
+                    "--repository", "tapdata/tapdata-connectors", "--pr", "932"]
+            self.assertEqual(0, self.run_cli(args)[0])
+            self.assertEqual(before, {path.name: path.read_bytes() for path in root.iterdir()})
+            snapshot.write_text(json.dumps(self.snapshot(PR_BODY_FIXTURE.replace("\n", r"\n"))), encoding="utf-8")
+            code, result = self.run_cli(args)
+            self.assertEqual(3, code)
+            self.assertNotIn("$collStats", json.dumps(result))
+            for invalid in ('{"number":932,"number":933}', '{', 'null', '[]'):
+                snapshot.write_text(invalid, encoding="utf-8")
+                self.assertEqual(4, self.run_cli(args)[0])
+            snapshot.unlink()
+            self.assertEqual(4, self.run_cli(args)[0])
+            body.write_bytes(b'\xff')
+            self.assertEqual(4, self.run_cli(["preflight", "--body-file", str(body)])[0])
+            body.write_bytes(b'')
+            self.assertEqual(3, self.run_cli(["preflight", "--body-file", str(body)])[0])
+
+    def test_body_file_crosses_shell_without_interpretation(self):
+        # 假 gh 仅读取 --body-file；不使用网络、不创建 PR。
+        reader = "import pathlib,sys; print(pathlib.Path(sys.argv[sys.argv.index('--body-file')+1]).read_text(), end='')"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "body with spaces.md"
+            path.write_bytes(PR_BODY_FIXTURE.encode("utf-8"))
+            for name in ("bash", "zsh"):
+                shell = shutil.which(name)
+                if not shell:
+                    continue
+                with self.subTest(shell=name):
+                    command = 'gh() { "$1" -c "$2" "${@:3}"; }; gh "$1" "$2" pr create --body-file "$3"'
+                    result = subprocess.run([shell, "-c", command, "test", sys.executable, reader, str(path)],
+                                            cwd=directory, capture_output=True, text=True, check=True)
+                    self.assertEqual(PR_BODY_FIXTURE, result.stdout)
+                    self.assertFalse((Path(directory) / "forbidden").exists())
+
 
 
 if __name__ == "__main__":
