@@ -14,8 +14,14 @@ def main(argv=None):
     parser.add_argument("--expected-revision", type=int)
     parser.add_argument("--operation-id")
     parser.add_argument("--input", help="工位外确认请求 JSON；省略时只读预检")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--prepare-only", action="store_true", help="确认并保全，不执行清理，交由 Agent 接力")
+    modes.add_argument("--verify-result", action="store_true", help="只验收已完成的清理成果并正式解绑，不要求脚本回执")
     parser.add_argument("--abandon-changes", choices=("yes", "no"), help="未完成任务必须明确选择；不会交互猜测")
     args = parser.parse_args(argv)
+    from workflow import project_rules
+    from bootstrap.station_compatibility import require_station_can_adopt
+    require_station_can_adopt(project_rules.product_root_from_station(args.dir), args.dir)
     task = task_store.read_task(args.dir)
     operation = station_operation.read(args.dir)
     pending = operation and operation["status"] != "done"
@@ -37,14 +43,8 @@ def main(argv=None):
         if task and new_cleanup:
             result["question"] = None if task.get("outcome") == "completed" else "任务未完成，是否放弃当前变更并在归档后清理？"
             result["blockers"] = []
-            from workflow import native_cleanup, station_directories
             try:
-                result["native_clean"], native_errors = native_cleanup.inspect(args.dir, task, station_directories.load(args.dir, task))
-                result["blockers"].extend(native_errors)
-            except (ValueError, OSError) as exc:
-                result["blockers"].append(str(exc))
-            try:
-                result["cleanup_plan"] = station_resources.plan(args.dir, task, version=5)
+                result["cleanup_plan"] = station_resources.plan(args.dir, task, version=6)
             except (ValueError, OSError) as exc:
                 result["blockers"].append(str(exc))
             try:
@@ -81,13 +81,14 @@ def main(argv=None):
         kind = "release" if task.get("outcome") == "completed" else "clean"
         if kind == "clean" and args.abandon_changes != "yes":
             raise ValueError("任务未完成，请明确是否放弃变更；未写入任何状态")
-        if request.get("cleanup_version") not in (4, 5):
-            raise ValueError("新入口请求必须声明 cleanup_version=5（旧版 4 请求只按旧合同执行）")
+        if request.get("cleanup_version") != 6:
+            raise ValueError("新入口请求必须声明 cleanup_version=6；旧计划只按原合同恢复")
         if kind == "clean":
             if request.get("abandon_changes") is not True:
                 raise ValueError("确认请求必须记录 abandon_changes=true")
     result = station.execute(args.dir, kind, args.issue_key, args.expected_run_id,
-                             args.expected_revision, args.operation_id, request)
+                             args.expected_revision, args.operation_id, request,
+                             cleanup_mode="prepare" if args.prepare_only else "verify" if args.verify_result else "execute")
     output = {key: result.get(key) for key in ("operation_id", "status", "phase", "archive_ref", "native_problems")}
     output["cleanup_scope"] = station_clean_view.safe_describe(args.dir, task_store.read_task(args.dir), result.get("cleanup_plan"), result)
     print(json.dumps(output, ensure_ascii=False, indent=2))

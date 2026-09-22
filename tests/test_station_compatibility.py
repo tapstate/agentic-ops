@@ -107,7 +107,7 @@ class StationCompatibilityTests(unittest.TestCase):
 
     def test_fingerprint_epoch_rejects_old_state_and_bound_upgrade_or_rollback(self):
         current = json.loads((ROOT / "contracts/station-state-compatibility.json").read_text())
-        self.assertEqual(18, current["station_state_epoch"])
+        self.assertEqual(19, current["station_state_epoch"])
         (self.product_root / "contracts/station-state-compatibility.json").write_text(json.dumps(current))
         path = self.station / ".agenticops/init.json"
         path.write_text(json.dumps({"station_state_epoch": 14}))
@@ -127,7 +127,7 @@ class StationCompatibilityTests(unittest.TestCase):
 
     def test_source_reference_epoch_rejects_bound_upgrade_and_rollback(self):
         self.write_registry([str(self.station)])
-        for old, new in ((17, 18), (18, 17)):
+        for old, new in ((17, 18), (18, 17), (18, 19), (19, 18)):
             (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(manifest(new)))
             path = self.station / '.agenticops/init.json'
             path.write_text(json.dumps(manifest(old)))

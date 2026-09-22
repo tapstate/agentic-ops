@@ -22,6 +22,329 @@ class StationCleanTests(unittest.TestCase):
     ready = fixture.ResourceTests.ready
     execute = fixture.ResourceTests.execute
 
+    def result_request(self, task):
+        return dict(summary="保存并重置", reason="用户清理", decision_ref="fixture:user",
+                    cleanup_version=6, abandon_changes=True,
+                    confirmed_digest=resources.plan(self.ws, task, version=6)["digest"])
+
+    def test_result_clean_preserves_tracked_target_and_archives_ignored(self):
+        self.prepare_engineering()
+        package = self.seed / "io/tapdata/mock/target"
+        package.mkdir(parents=True)
+        (package / "Source.java").write_text("class Source {}")
+        self.git(self.seed, "add", ".")
+        self.git(self.seed, "commit", "-m", "tracked package")
+        self.git(self.seed, "push", str(self.remote), "develop")
+        task = self.ready()
+        (self.repo / ".git/info/exclude").write_text("build-output/\n")
+        (self.repo / "build-output").mkdir()
+        (self.repo / "build-output/report.txt").write_text("important report")
+        (self.repo / "file.txt").write_text("worktree change")
+        # 不读取构建配方；项目迭代或损坏配方不阻塞源码重置。
+        (self.product / "projects/tapdata/repo-cleanup.json").write_text("broken")
+        profile_path = self.product / "projects/tapdata/engineering-profiles.json"
+        profiles = json.loads(profile_path.read_text())
+        profiles["profiles"]["full-application"]["revision"] += 1
+        self.write(profile_path, profiles)
+        request = self.result_request(task)
+        result = self.execute(task, request)
+        self.assertEqual(result["status"], "done")
+        self.assertTrue((self.repo / "io/tapdata/mock/target/Source.java").is_file())
+        self.assertFalse((self.repo / "build-output").exists())
+        archive = archive_store.from_reference(self.ws, result["archive_ref"])
+        saved = json.loads((archive / "source-artifacts.json").read_text())
+        self.assertIn("build-output/report.txt", saved["repositories"][self.name]["untracked"])
+
+    def test_agent_cleanup_can_finish_without_executor_receipts(self):
+        task = self.ready()
+        (self.repo / "new.bin").write_text("save me")
+        request = self.result_request(task)
+        args = (self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-agent-cleanup", request)
+        result = station.execute(*args, cleanup_mode="prepare")
+        self.assertEqual(result["phase"], "awaiting_cleanup_result")
+        self.assertTrue((self.repo / "new.bin").exists())
+        with self.assertRaises(ValueError):
+            station.execute(*args, cleanup_mode="verify")
+        entry = result["cleanup_plan"]["source"][self.name]
+        # 模拟 Agent 的原生工具动作；不补任何脚本退出码或中间状态。
+        (self.repo / "new.bin").unlink()
+        self.git(self.repo, "update-ref", entry["preserved_ref"], entry["preserved_head"])
+        self.git(self.repo, "checkout", station.source.baseline_branch(task["engineering_baseline"]["repositories"][self.name]))
+        from workflow import station_reset_result
+        with mock.patch.object(station_reset_result, "apply", side_effect=AssertionError("不得调用执行器")):
+            result = station.execute(*args, cleanup_mode="verify")
+        self.assertEqual(result["status"], "done")
+        self.assertIsNone(task_store.read_task(self.ws))
+
+    def test_successful_executor_does_not_replace_result_check(self):
+        task = self.ready()
+        request = self.result_request(task)
+        from workflow import station_reset_result
+        with mock.patch.object(station_reset_result, "apply", return_value=None):
+            with self.assertRaises(ValueError):
+                self.execute(task, request)
+        self.assertIsNotNone(task_store.read_task(self.ws))
+
+    def test_result_clean_rejects_scope_drift_and_preserves_new_file(self):
+        task = self.ready()
+        request = self.result_request(task)
+        args = (self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-result-drift", request)
+        station.execute(*args, cleanup_mode="prepare")
+        (self.repo / "late.txt").write_text("keep")
+        with self.assertRaisesRegex(ValueError, "内容变化"):
+            station.execute(*args)
+        self.assertEqual((self.repo / "late.txt").read_text(), "keep")
+
+    def test_failed_script_intent_can_be_closed_by_observed_result(self):
+        task = self.ready()
+        (self.repo / "new.bin").write_text("save me")
+        request = self.result_request(task)
+        args = (self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-partial-script", request)
+        original = station_operation.receipt
+        def fail(base, operation, name, value):
+            if name.startswith("source-reset:"):
+                raise OSError("模拟脚本中断")
+            return original(base, operation, name, value)
+        with mock.patch.object(station_operation, "receipt", side_effect=fail):
+            with self.assertRaises(OSError):
+                station.execute(*args)
+        operation = station_operation.read(self.ws)
+        entry = operation["cleanup_plan"]["source"][self.name]
+        self.git(self.repo, "update-ref", entry["preserved_ref"], entry["preserved_head"])
+        self.git(self.repo, "checkout", station.source.baseline_branch(task["engineering_baseline"]["repositories"][self.name]))
+        result = station.execute(*args, cleanup_mode="verify")
+        self.assertEqual(result["status"], "done")
+        receipts = [s["receipt"] for name, s in result["steps"].items() if name.startswith("source-reset:")]
+        self.assertEqual(receipts[0]["verification"], "observed_result")
+
+    def interrupted_added_file(self, boundary="index", version=6):
+        task = self.ready()
+        target = self.repo / "new.bin"
+        target.write_text("staged addition")
+        self.git(self.repo, "add", "new.bin")
+        request = self.result_request(task)
+        request.update(cleanup_version=version, confirmed_digest=resources.plan(self.ws, task, version=version)["digest"])
+        args = (self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-added-recovery", request)
+        git, unlink, receipt = station.source.git, Path.unlink, station_operation.receipt
+        def fail_git(path, *arguments, **kwargs):
+            result = git(path, *arguments, **kwargs)
+            if boundary == "index" and arguments[:2] == ("rm", "--cached"):
+                raise OSError("injected interruption")
+            return result
+        def fail_unlink(path, *arguments, **kwargs):
+            result = unlink(path, *arguments, **kwargs)
+            if boundary == "file" and path.resolve() == target.resolve():
+                raise OSError("injected interruption")
+            return result
+        def fail_receipt(base, operation, name, value):
+            if boundary == "receipt" and name.startswith("source-reset:"):
+                raise OSError("injected interruption")
+            return receipt(base, operation, name, value)
+        with mock.patch.object(station.source, "git", side_effect=fail_git), \
+                mock.patch.object(Path, "unlink", new=fail_unlink), \
+                mock.patch.object(station_operation, "receipt", side_effect=fail_receipt):
+            with self.assertRaisesRegex(OSError, "injected interruption"):
+                station.execute(*args)
+        return args
+
+    def test_added_file_resumes_after_index_removal(self):
+        args = self.interrupted_added_file()
+        self.assertEqual(self.git(self.repo, "status", "--porcelain"), "?? new.bin")
+        self.assertEqual(station.execute(*args)["status"], "done")
+
+    def test_added_file_resumes_after_file_removal(self):
+        args = self.interrupted_added_file("file")
+        self.assertEqual(station.execute(*args)["status"], "done")
+
+    def test_added_file_resumes_before_receipt(self):
+        args = self.interrupted_added_file("receipt")
+        self.assertEqual(station.execute(*args)["status"], "done")
+
+    def test_added_file_legacy_resume_unchanged(self):
+        args = self.interrupted_added_file(version=4)
+        self.assertEqual(station.execute(*args)["status"], "done")
+
+    def test_added_file_resume_rejects_changed_content(self):
+        args = self.interrupted_added_file()
+        target = self.repo / "new.bin"
+        target.write_text("new user content")
+        with self.assertRaisesRegex(ValueError, "内容变化"):
+            station.execute(*args)
+        self.assertEqual(target.read_text(), "new user content")
+
+    def test_added_file_resume_rejects_replaced_file(self):
+        args = self.interrupted_added_file()
+        target = self.repo / "new.bin"
+        replacement = self.root / "replacement"
+        replacement.write_bytes(target.read_bytes())
+        replacement.replace(target)
+        with self.assertRaisesRegex(ValueError, "内容变化"):
+            station.execute(*args)
+        self.assertTrue(target.exists())
+
+    def test_added_file_resume_rejects_restaged_content(self):
+        args = self.interrupted_added_file()
+        target = self.repo / "new.bin"
+        target.write_text("new staged content")
+        self.git(self.repo, "add", "new.bin")
+        with self.assertRaisesRegex(ValueError, "内容变化"):
+            station.execute(*args)
+        self.assertEqual(target.read_text(), "new staged content")
+
+    def test_added_file_resume_rejects_new_path(self):
+        args = self.interrupted_added_file()
+        (self.repo / "late.txt").write_text("keep")
+        with self.assertRaisesRegex(ValueError, "内容变化"):
+            station.execute(*args)
+        self.assertTrue((self.repo / "new.bin").exists())
+        self.assertTrue((self.repo / "late.txt").exists())
+
+    def test_added_file_intermediate_requires_matching_pending_intent(self):
+        from workflow import station_reset_result
+        import copy
+        self.interrupted_added_file()
+        operation = station_operation.read(self.ws)
+        plan = operation["cleanup_plan"]
+        prior = next(row for row in plan["entries"] if row["file"] == "new.bin")
+        observed = resources.artifacts.snapshot(self.ws, self.name, {}, {}, include_ignored=True)["entries"][0]
+        key = next(key for key in operation["steps"] if key.startswith("source-reset:"))
+        self.assertTrue(station_reset_result._pending_added_file(self.repo, operation, self.name, prior, observed))
+        for change in ("missing", "completed", "superseded", "different-plan", "different-expected"):
+            with self.subTest(change=change):
+                altered = copy.deepcopy(operation)
+                step = altered["steps"][key]
+                if change == "missing":
+                    del altered["steps"][key]
+                elif change == "completed":
+                    step["receipt"] = step["expected"]
+                elif change == "superseded":
+                    step["superseded_by"] = "another-plan"
+                elif change == "different-plan":
+                    altered["cleanup_plan"]["digest"] = "another-plan"
+                else:
+                    step["expected"]["entries_digest"] = "another-snapshot"
+                self.assertFalse(station_reset_result._pending_added_file(self.repo, altered, self.name, prior, observed))
+
+    def test_result_clean_rejects_nested_repository(self):
+        task = self.ready()
+        nested = self.repo / "nested"
+        nested.mkdir()
+        self.git(nested, "init")
+        with self.assertRaisesRegex(ValueError, "Git"):
+            self.result_request(task)
+
+    def test_readiness_does_not_require_ignored_output_registration(self):
+        from workflow import station_source
+        task = self.ready()
+        (self.repo / ".git/info/exclude").write_text("local-output\n")
+        (self.repo / "local-output").write_text("generated")
+        station_source.readiness_snapshot(self.ws, task)
+
+    def test_result_clean_rejects_old_epoch_without_touching_task(self):
+        task = self.ready()
+        path = self.ws / ".agenticops/init.json"
+        init = json.loads(path.read_text())
+        init["station_state_epoch"] = 18
+        self.write(path, init)
+        current = (self.ws / ".agenticops/current-task.json").read_bytes()
+        with self.assertRaisesRegex(ValueError, "代际|epoch|原版本"):
+            station_clean.main(["--dir", str(self.ws)])
+        self.assertEqual(current, (self.ws / ".agenticops/current-task.json").read_bytes())
+
+    def test_result_clean_uses_reset_sha_when_task_baseline_differs(self):
+        self.prepare_engineering()
+        self.git(self.seed, "checkout", "-b", "release-test")
+        (self.seed / "file.txt").write_text("release baseline")
+        self.git(self.seed, "commit", "-am", "release")
+        self.git(self.seed, "push", str(self.remote), "release-test")
+        self.request["explicit_branches"]["tapdata/tapdata"] = "release-test"
+        self.request["version"] = "release-test"
+        task = self.ready()
+        frozen = task["engineering_baseline"]["repositories"][self.name]["commit_sha"]
+        reset = task["reset_baseline"][self.name]["sha"]
+        self.assertNotEqual(frozen, reset)
+        result = self.execute(task, self.result_request(task))
+        self.assertEqual(self.git(self.repo, "rev-parse", "HEAD"), reset)
+        self.assertEqual(self.git(self.repo, "rev-parse", self.branch), frozen)
+        self.assertEqual(result["status"], "done")
+
+    def test_result_release_retains_delivery(self):
+        task = self.ready()
+        (self.repo / "file.txt").write_text("delivered")
+        self.git(self.repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-am", "delivery")
+        observed = station.source.inspect(self.ws, task["engineering_baseline"])
+        task.update(stage="completed", outcome="completed", terminal_proof={
+            "run_id": task["run_id"], "repositories": observed, "deliveries": [],
+            "dispositions": {self.name: "merged"}, "candidate_digest": resources.baseline.digest(observed)})
+        task_store.write_task(self.ws, task)
+        request = self.result_request(task)
+        request["candidate_digest"] = task["terminal_proof"]["candidate_digest"]
+        result = self.execute(task, request, kind="release")
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(self.git(self.repo, "rev-parse", self.branch), observed[self.name]["head"])
+
+    def test_result_verifier_rejects_changed_refs_without_unbinding(self):
+        task = self.ready()
+        request = self.result_request(task)
+        args = (self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-ref-drift", request)
+        station.execute(*args, cleanup_mode="prepare")
+        self.git(self.repo, "branch", "unexpected")
+        with self.assertRaisesRegex(ValueError, "Git 引用变化"):
+            station.execute(*args, cleanup_mode="verify")
+        self.assertIsNotNone(task_store.read_task(self.ws))
+
+    def test_agent_can_clear_registered_root_without_script_delete_receipt(self):
+        task = self.ready()
+        (self.product / "projects/tapdata/station-clean.json").write_text(json.dumps({
+            "version": 1, "preserve": [], "clean": [{"pattern": "scratch", "action": "remove"}]}))
+        resources.register(self.ws, task["issue_key"], task["run_id"], [{
+            "kind": "directory", "producer": "fixture", "path": "scratch"}])
+        request = self.result_request(task)
+        args = (self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-native-root", request)
+        operation = station.execute(*args, cleanup_mode="prepare")
+        (self.ws / "scratch").rmdir()
+        entry = operation["cleanup_plan"]["source"][self.name]
+        self.git(self.repo, "update-ref", entry["preserved_ref"], entry["preserved_head"])
+        self.git(self.repo, "checkout", entry["checkout_branch"])
+        self.assertEqual(station.execute(*args, cleanup_mode="verify")["status"], "done")
+
+    def test_result_resume_after_active_clear_keeps_export_and_terminal_evidence(self):
+        from workflow import station_export
+        task = self.ready()
+        (self.repo / "new.bin").write_text("private saved content")
+        output = self.root.resolve() / "private-export"
+        output.mkdir(mode=0o700)
+        station_export.export(self.ws, task["issue_key"], task["run_id"],
+                              "source/" + self.name + "/new.bin", str(output / "saved.json"))
+        resources.register(self.ws, task["issue_key"], task["run_id"], [{
+            "kind": "external", "id": "fixture-container", "resource_type": "container", "producer": "fixture",
+            "action": "delete", "before": {"protected": False, "id": "fixture-container"},
+            "status": "cleaned", "readback_ref": "fixture:removed"}])
+        request = self.result_request(task)
+        args = (self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-after-clear", request)
+        original = station._clear_active
+        def fail(*values):
+            original(*values)
+            raise OSError("清除活动材料后中断")
+        with mock.patch.object(station, "_clear_active", side_effect=fail):
+            with self.assertRaises(OSError):
+                station.execute(*args)
+        result = station.execute(*args, cleanup_mode="verify")
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(result["cleanup_manifest"]["result"]["external"][0]["readback_ref"], "fixture:removed")
+
+    def test_result_already_accepted_does_not_delete_new_runtime_content(self):
+        task = self.ready()
+        request = self.result_request(task)
+        args = (self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-new-runtime", request)
+        with mock.patch.object(station, "_clear_active", side_effect=OSError("验收后中断")):
+            with self.assertRaises(OSError):
+                station.execute(*args)
+        (self.ws / "runtime/new-result").write_text("keep")
+        with self.assertRaisesRegex(ValueError, "残留"):
+            station.execute(*args)
+        self.assertEqual((self.ws / "runtime/new-result").read_text(), "keep")
+
     def test_cleanup_scope_is_read_only_and_keeps_retained_choices(self):
         from workflow import station_clean_view
         task = self.ready()
@@ -318,6 +641,22 @@ class StationCleanTests(unittest.TestCase):
         self.assertTrue(any('未登记目录' in p for p in errors))
         self.assertTrue(any('脚本或 Git' in p for p in errors))
 
+    def test_native_generated_glob_ignores_tracked_source_package_with_same_name(self):
+        from workflow import native_cleanup, station_directories
+        task = self.ready()
+        (self.repo / '.gitignore').write_text('target/\n')
+        (self.repo / 'pom.xml').write_text('<project/>')
+        package = self.repo / 'src/main/java/example/target'
+        package.mkdir(parents=True)
+        (package / 'Tracked.java').write_text('class Tracked {}\n')
+        self.git(self.repo, 'add', 'pom.xml', '.gitignore')
+        self.git(self.repo, 'add', '-f', 'src/main/java/example/target/Tracked.java')
+        self.git(self.repo, 'commit', '-m', 'tracked target package')
+
+        _, errors = native_cleanup.inspect(self.ws, task, station_directories.load(self.ws, task))
+
+        self.assertFalse(any('src/main/java/example/target' in error for error in errors), errors)
+
     def test_project_clean_scripts_preserve_sources_and_reject_tracked_candidates(self):
         import subprocess
         for name in ('tapdata-application', 't-layer3-test'):
@@ -414,7 +753,7 @@ class StationCleanTests(unittest.TestCase):
     def test_cli_confirmed_cleanup(self):
         task = self.ready()
         request = self.root/'cleanup-request.json'
-        self.write(request, self.cleanup_request(task))
+        self.write(request, self.result_request(task))
         with mock.patch('sys.stdout', new_callable=io.StringIO) as output:
             station_clean.main(['--dir', str(self.ws), '--issue-key', task['issue_key'],
                                   '--expected-run-id', task['run_id'], '--expected-revision', str(task['_revision']),
@@ -436,7 +775,7 @@ class StationCleanTests(unittest.TestCase):
             station_clean.main(['--dir', str(self.ws)])
         self.assertIn('cleanup_plan', json.loads(output.getvalue()))
         path = self.root/'handoff-request.json'
-        self.write(path, self.cleanup_request(task))
+        self.write(path, self.result_request(task))
         args = ['--dir', str(self.ws), '--issue-key', task['issue_key'], '--expected-run-id', task['run_id'],
                 '--expected-revision', str(task['_revision']), '--operation-id', 'op-clean-handoff',
                 '--input', str(path), '--abandon-changes', 'yes']
@@ -452,12 +791,12 @@ class StationCleanTests(unittest.TestCase):
         self.write(path, changed)
         with self.assertRaisesRegex(ValueError, '原清理交接'):
             station_clean.main(args)
-        changed['reason'] = '用户确认停止'
+        changed['reason'] = '用户清理'
         self.write(path, changed)
         with mock.patch('sys.stdout', new_callable=io.StringIO):
             station_clean.main(args)
         operation = station_operation.read(self.ws)
-        self.assertEqual(4, operation['cleanup_plan']['schema_version'])
+        self.assertEqual(6, operation['cleanup_plan']['schema_version'])
         self.assertEqual('done', operation['status'])
 
     def test_cli_takeover_before_task_write_requires_original_resume(self):

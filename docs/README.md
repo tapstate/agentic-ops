@@ -1,5 +1,7 @@
 # AgenticOps 文档总纲
 
+项目开发以[项目目标](strategy/project-goals.md)判断收益和范围，以[仓库指令](../AGENTS.md)指导维护协作；[维护指引](maintenance-guide.md#4-变更归属)说明如何选择实现归属、评估新增约束并验证效果，不另设规则体系或审批流程。
+
 PR 正文传输完整性属于质量证据主题：[扩展使用总纲](usage/README.md)导航至正文发布与回读操作合同，Workflow 提供只读检查，TapData Skill 指导原生发布和恢复。不新增 GitHub 客户端、工位状态或 PR Ready 门禁。
 
 清理范围决策与 Jira 阶段同步属于任务退出及流程连续性主题：[工位合同](architecture/single-task-station.md#外部同步回执恢复)维护有限回执恢复、证据冻结和兼容语义；[扩展使用总纲](usage/README.md)导航清理清单与同步待办的操作说明。只读展示复用原计划与账本，既不扩大删除授权，也不承诺外部写入必达。
@@ -16,7 +18,7 @@ PR 正文传输完整性属于质量证据主题：[扩展使用总纲](usage/RE
 
 质量输入格式预检和完成等待合并的使用边界由[扩展使用总纲](usage/README.md)导航至质量与任务授权指引；质量执行事件增加未执行原因的兼容边界由机器工位契约管理，工位 epoch 以机器契约为准，升级继续遵守原版退出并 purge。
 
-配置化工位清理由[任务授权指引](usage/task-authorization.md#配置化清理入口)说明两个独立名单、确认请求及失败恢复入口；[工位合同](architecture/single-task-station.md#配置化清理计划版本-5)维护版本 5 的报告保全、原生清理回执与源码复位顺序及 epoch 兼容边界。名单负责分类，归属与生命周期检查仍是副作用前提，不接入构建工具执行器。
+配置化工位清理由[任务授权指引](usage/task-authorization.md#配置化清理入口)说明两个独立名单、确认请求及 Agent 接力；[工位合同](architecture/single-task-station.md#成果导向清理计划版本-6)维护版本 6 的保全、Git 复位、成果验收及 epoch 兼容边界。名单只负责工位根分类，源码按 Git 与确认快照处理，不接入构建工具执行器。
 
 [维护指引](maintenance-guide.md#5-验证)负责诊断检查、绑定候选的正式四项验收、耗时报告与证据 v5 使用及维护审查的有效验收摘要；[INT-001](user-stories/v1/int-001-release-governance.md)规定验收完整性、失败失效和首次信任根升级边界。运行进度与性能验收结果仍以 Jira 为准。
 

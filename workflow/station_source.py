@@ -255,15 +255,11 @@ def readiness_snapshot(station, task):
     if not task.get("source_prepared") or not task.get("task_repositories"):
         raise ValueError("完整工程及任务分支尚未准备")
     from workflow import station_resources
-    from workflow import station_directories
-    managed = station_directories.load(station, task)
     result = {}
     for name, state in observed.items():
         path = repository_path(station, name)
         require_ready_source(station, task, name)
-        ignored = git(path, "ls-files", "--others", "--ignored", "--exclude-standard", "-z").stdout.split("\0")
-        if any(filename and not station_directories.covered("source/" + name + "/" + filename, managed) for filename in ignored):
-            raise ValueError("源码含未登记 ignored 产物：" + name)
+        # ignored 内容不是源码准入失败条件；退出时逐项展示并确认保全/清理。
         entry = value["repositories"][name]
         binding = task["task_repositories"].get(name)
         if not binding:

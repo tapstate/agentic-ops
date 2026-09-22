@@ -144,7 +144,12 @@ def inspect(base, task, roots, preserve=False, previous=None):
             for pattern in recipe['generated']:
                 for candidate in repository.glob(pattern):
                     relative = candidate.relative_to(Path(base)).as_posix()
-                    if '.git' not in candidate.relative_to(repository).parts and not directories.covered(relative, roots):
+                    candidate_relative = candidate.relative_to(repository)
+                    # Glob patterns such as **/target describe generated build roots, but
+                    # may also match a legitimate tracked source package named `target`.
+                    # A tracked path is source, not an undeclared generated root.
+                    tracked = source.git(repository, 'ls-files', '-z', '--', str(candidate_relative)).stdout
+                    if '.git' not in candidate_relative.parts and not tracked and not directories.covered(relative, roots):
                         errors.append('原生命令可能清理未登记目录：' + relative)
             command = commands(base, task, name, recipe, sorted(paths))
             command['refs'] = source.git(repository, 'show-ref').stdout

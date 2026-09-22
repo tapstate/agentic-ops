@@ -41,6 +41,9 @@ def verify_receipt(base, task, entry):
         path = expected_path
     elif reference == active_reference:
         path = active_path
+        # 版本 6 在撤销活动证据前保存经核验的原回执，允许解绑中断后复核。
+        if not path.exists() and task.get('archive_ref'):
+            path = expected_path
     else:
         raise ValueError('源码导出缺少受控导出回执')
     if path.parent.is_symlink() or path.is_symlink() or not path.is_file():
@@ -69,7 +72,10 @@ def export(base, issue, run, relative, destination, expected_operation_id=None):
         info = target.parent.stat()
         if not target.parent.is_dir() or info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise ValueError('导出父目录须由当前用户持有且权限为 0700')
-        plan = resources.plan(base, task, decisions_override={relative: {"action": "archive"}})
+        from workflow import station_operation
+        operation = station_operation.read(base) or {}
+        version = operation.get("cleanup_plan", {}).get("schema_version", 6)
+        plan = resources.plan(base, task, version=version, decisions_override={relative: {"action": "archive"}})
         entry = next((item for item in plan['entries'] if item['path'] == relative), None)
         if entry is None:
             raise ValueError('导出路径不属于当前源码成果')
@@ -117,7 +123,7 @@ def export(base, issue, run, relative, destination, expected_operation_id=None):
         if sha256_file(target) != checksum:
             raise ValueError('导出文件回读失败，拒绝登记保存决定')
         # 写出期间源码有任何变化时，不把刚生成的旧成果当成当前成果。
-        if resources.plan(base, task, decisions_override={relative: {'action': 'archive'}})['entries'] != plan['entries']:
+        if resources.plan(base, task, version=version, decisions_override={relative: {'action': 'archive'}})['entries'] != plan['entries']:
             raise ValueError('导出期间源码变化，请保留导出并重新核对')
         choice = {'action': 'export', 'path': str(target), 'sha256': checksum, 'snapshot': proof,
                   'readback_ref': receipt_reference(base, task, path)}

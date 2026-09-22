@@ -108,7 +108,7 @@ def _verify_superseded(operation, name, step):
         if name != "clear-active:" + str(original_revision) + ":" + original or not isinstance(step["expected"].get("files"), dict):
             raise ValueError("活动材料清理步骤不属于原计划")
     elif name.startswith("station-source-reset:"):
-        if (revision["plan"].get("schema_version") not in (4, 5)
+        if (revision["plan"].get("schema_version") not in (4, 5, 6)
                 or name != "station-source-reset:" + str(original_revision) + ":" + original
                 or step["expected"] != {"plan_digest": original}):
             raise ValueError("工位源码复位步骤不属于原计划")

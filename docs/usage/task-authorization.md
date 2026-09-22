@@ -132,27 +132,27 @@ Agent 原生读取这三组差异，核对原任务目的是否仍满足、来�
 
 ### 配置化清理入口
 
-`python3 <agenticops-root>/workflow/station-clean.py --dir <station>` 只读展示当前任务与版本 5 清理计划；未完成任务返回放弃变更问题，不在脚本内部猜测确认或阻塞等待终端输入。预检阻塞仍返回任务与问题，但不提供可执行计划。新清理尚未开始时 `--abandon-changes no` 无副作用退出；已有未完成清理操作时返回恢复提示，不声称撤销此前动作。工位空闲且没有未完成操作时不删除材料。
+`python3 <agenticops-root>/workflow/station-clean.py --dir <station>` 只读展示当前任务与版本 6 清理计划；未完成任务返回放弃变更问题，不在脚本内部猜测确认或阻塞等待终端输入。预检阻塞仍返回任务与问题，但不提供可执行计划。新清理尚未开始时 `--abandon-changes no` 无副作用退出；已有未完成清理操作时返回恢复提示，不声称撤销此前动作。工位空闲且没有未完成操作时不删除材料。
 
 中央 `policies/station-clean.json` 必须存在，项目 `projects/<project>/station-clean.json` 可省略。两份配置均为 `{"version":1,"preserve":[".idea/"],"clean":[{"pattern":"scratch/","action":"remove"}]}` 的结构，独立读取，按中央白、项目白、中央黑、项目黑顺序判定；全部未匹配时保留并报告，不配置 `other` 或 `unmatched_policy`。模式仅匹配工位根名称，支持 `*`、`?` 和目录后缀 `/`，不支持前导 `/`、深层路径、`**`、否定或方括号语法。源代码子树由 Git 阶段检查，不由名单递归匹配。
 
 黑名单动作限定为 `source-reset`、`clear-children`、`lifecycle-clean` 和 `remove`；前三项分别只适用于 source、runtime、.agenticops。中央默认保留 config、archive、.idea，项目不能通过白名单跳过核心生命周期。初始化接线仍按原 manifest 核验。`remove` 只用于任务独占的普通根目录，生产前使用现有 `station_resources.py` 登记 `kind=directory`、根名称和 producer；Workflow 创建并登记身份。名单不能认领已有非空目录、初始化接线或任意文件，已有空目录采用仍须 `adopt_empty=true`。需要删除其它对象时停止并明确处置，不把规则匹配当成删除授权。
 
-确认请求放在工位外，包含现有 summary、reason、decision_ref、confirmed_digest，另加 `cleanup_version:5`。未完成任务请求增加 `abandon_changes:true`，并使用下列命令明确传递用户的放弃决定；完成任务不需要放弃参数，但仍须现役 terminal proof 和 candidate_digest。归档保留成果，放弃不删除 Git 分支或提交。
+确认请求放在工位外，包含现有 summary、reason、decision_ref、confirmed_digest，另加 `cleanup_version:6`。未完成任务请求增加 `abandon_changes:true`，并使用下列命令明确传递用户的放弃决定；完成任务不需要放弃参数，但仍须现役 terminal proof 和 candidate_digest。归档保留成果，放弃不删除 Git 分支或提交。
 
 ```sh
 python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key <issue> --expected-run-id <run> --expected-revision <revision> --operation-id <op-id> --input <工位外请求.json> --abandon-changes yes
 ```
 
-预检一次列出原生配方、未登记产物、报告保全缺口和其它阻塞。执行清理前先停止写入者，运行 `python3 <agenticops-root>/workflow/native_cleanup.py preserve --dir <station> --issue-key <issue> --expected-run-id <run>`；它只将配方匹配的关键报告复制至 runtime/reports，并核对摘要，不删除原物。修复全部阻塞后重新预检，再由用户确认完整范围一次。
+预检列出全部工程仓库的目标 SHA、暂存/未暂存/未跟踪及 ignored 内容、空目录、保全决定和保留引用。源码旁报告与其它文件一样默认归档；ignored 不是删除授权。大文件或敏感材料先安全导出或精确选择丢弃，再确认范围。无需登记 Maven target 等构建目录，也不依赖项目清理命令或配方。
 
-提交确认请求后，操作在 `awaiting_native_clean` 返回。Agent 按计划各仓 cwd/argv 使用原生工具执行：Java 为绑定当前 runtime/maven-local 的 `mvn -Dmaven.repo.local=<已核验路径> clean`，Web 只接受当前 package.json 明确声明的 pnpm/npm clean 脚本；其它仓使用 `projects/tapdata/repo-cleanup.json` 指定的固定项目脚本，不复用数据库清理脚本。Workflow 不运行这些命令，也不提供通用目录删除兜底。
+停止并核验写入者后，默认入口在同一操作内先归档，再执行确定的 Git 复位及受管目录回收，最后验收。需要 Agent 自行执行时，在上述命令增加 `--prepare-only`：完成正式保全后返回 `awaiting_cleanup_result`，不删除源码和运行目录。按返回计划的精确对象处理，保留成果引用并检出指定基线；不要递归删除整个 source，不移动命名分支或追随远端最新提交。
 
-将全部仓库结果一次写入 JSON（键为仓库 ID，值含整数 exit_code 与可回读 source_ref），使用 `native_cleanup.py receipt`，参数同 preserve 并增加 `--operation-id <原op-id> --input <回执.json>`。成功回执必须同时满足源码/引用未变、登记产物消失、保全报告一致。失败与残留聚合输出；处理后沿用原操作和确认，不能伪造成功退出码。新增对象、脚本、源码或范围变化需完整补充确认。回执不代表产品监督了原生命令，只是带来源的执行事实；原生工具仍遵守宿主权限。
+默认脚本失败后先核对已完成与剩余对象，Agent 可在原授权范围继续，无需换工具就重确认。完成后沿用原请求、operation-id 和 expected-revision，增加 `--verify-result`：不调用执行器，不索取退出码，而是按[版本 6 合同](../architecture/single-task-station.md#成果导向清理计划版本-6)核验实际结果，满足要求后正式解绑。它仍会更新验收和解绑状态，不是只读命令；不允许手改 `.agenticops/`。若需保留工位占用，只运行无 input 的预检查看原范围，不发起最终验收。
 
-回执通过后再次调用原 `station-clean.py` 请求，正式归档保全报告及源码成果，再复位源码、回收 runtime 并解绑。已执行原生清理导致登记根消失，不要求重复确认；父身份漂移仍停止。版本 4 请求仅沿旧合同恢复，不采用版本 5 的执行语义。
+执行成功不代表验收通过；有残留或保全、引用、范围不符时明确补齐。验收器不可用时保留证据，继续无依赖工作，最终解绑保持待核验。出现新增待删内容或处置范围变化时通过原 cleanup-amend 补充确认，不用新的请求偷偷扩大范围。
 
-中断后沿用原 operation-id、原 expected-revision 和原请求恢复；不得改用当前 revision 或另建操作。`station-source-reset.py` 是同一版本 4/5 操作的独立 Git 阶段入口，要求已发布且覆盖当前成果的档案，以及当前 issue/run/revision/operation-id，不得单独用于未归档源码。正常清理由入口调用同一实现，无需手工追加执行一次。
+中断后沿用原 operation-id、原 expected-revision 和原请求恢复；不得改用当前 revision 或另建操作。版本 4/5 的 `station-source-reset.py` 和原生回执仅服务原计划，不是版本 6 的前置步骤。新版本 epoch 19 不能直接操作旧 epoch 18 现场，需由原版本完成退出与 purge 后再切换。
 
 工位根目录的 `.idea/` 属于 IntelliJ IDEA 配置，由中央白名单统一保留，不遍历、归档或删除其内容。目录模式不匹配同名文件，符号链接按通用安全规则拒绝。白名单可以覆盖同层宽泛黑名单；不同清理动作同时命中同层对象才是冲突。工位代际及目标产品支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准，清理计划版本不代表工位 epoch；不兼容工位须由匹配的原产品版本处理，升级顺序见[更新与回退](update-and-rollback.md)。
 
@@ -162,7 +162,7 @@ python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key 
 
 本节仅适用于当前运行时支持的工位代际，支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准。已有 schema 3 操作保留原请求和执行顺序：保留 config、完整 source 和正式 Product Root `.archive/`，清空 runtime，按原 Project 配方回收已登记源码生成目录。不得将正在执行的旧计划改成 schema 4；新操作使用上面的配置化入口。边界、源码 archive/export/discard 与中断恢复以[工位合同](../architecture/single-task-station.md#8-一次确认成果归档与恢复)为准。
 
-构建前将日志、插件、下载和可迁出的生成物定位到 runtime；不能迁出的生成目录先用 station_resources.py 创建：输入数组项为 `{"kind":"directory","path":"source/tapdata/tapdata/target","producer":"maven"}`，已有空目录的显式采用另加 `"adopt_empty":true`。目录非空时不能补登记猜归属；源码生成路径必须符合工程 Profile 的 generated_directories。
+以下旧计划的目录预登记要求只用于其原合同，不适用于新版本 6 清理。新任务可以将可迁出的运行产物放到 runtime；源码旁的构建产物在退出时按实际 Git/文件快照确认处置，不需要先修改项目配方。
 
 ```sh
 python3 <agenticops-root>/workflow/task.py cleanup-preflight --issue-key <issue> --expected-run-id <run> --dir <station>

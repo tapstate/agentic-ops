@@ -27,11 +27,11 @@ metadata:
 
 先向用户展示 `cleanup_scope` 的清理/复位、保全、保留、未知四类实际对象及允许的决定，再请求确认；不要只问“是否放弃变更”。保留源码仓不等于保留当前工作区修改。部分清单或阻塞不授权执行；恢复展示原范围、完成回执与变化，结束展示实际结果及剩余材料。用户要求处理保留项时遵守独立处置边界，不扩大普通清理授权。
 
-用户要求清理时，新操作先调用 `workflow/station-clean.py --dir <station>` 只读预检；两层名单和确认请求格式见[配置化清理入口](../../../../docs/usage/task-authorization.md#配置化清理入口)。它复用现有 clean/release 生命周期；未完成任务先确认是否放弃，拒绝则停止，已有确认仍覆盖当前范围时复用。保留 config/source/archive 和命名分支、PR；源码构建残留由 Agent 使用项目原生工具清理，产品不执行 Maven/npm/pnpm，也不以通用删除兜底。discard 源码仍需额外确认精确快照；完成任务同时绑定 terminal proof 和 candidate_digest，不能把 incomplete 档案后置改为 completed。
+用户要求清理时，新操作先调用 `workflow/station-clean.py --dir <station>` 只读预检；两层名单、版本 6 请求及结果标准见[配置化清理入口](../../../../docs/usage/task-authorization.md#配置化清理入口)。它复用 clean/release；已有确认仍覆盖当前范围时复用。未提交及 ignored 内容先选择保全或精确丢弃，保留 config/source/archive 和命名分支、PR。源码复位不依赖 Maven/npm 清理命令；完成任务仍核对 terminal proof 和 candidate_digest，不能把 incomplete 档案后置改为 completed。
 
-使用原生能力停止已登记写入者并回读后，按预检计划确认并执行 station-clean.py；Workflow 在同一操作内归档、通过独立源码复位模块核验成果并检出开发 SHA、回收已登记目录、撤销授权和解绑。源码归位使用 detached checkout，命名分支和提交保留，不 rebase、不猜测当前版本、不联网追新。下次接管重新核验开发基线。无有效基线、未知资源或已登记外部写入结果未知时，处理具体阻塞，不手改状态或换工具绕过。
+停止写入者后按确认范围执行；默认脚本先保全再清理。脚本异常时核对已完成与剩余动作，在相同授权内接管；也可用 `--prepare-only` 保全后直接交给 Agent。完成后原请求增加 `--verify-result`，按实际成果验收并正式解绑，不要求补成功退出码或重跑原脚本。基线、保全、权限和未知外部结果仍须核验；范围变化补充确认，不手改状态。源码回到确认的受管基线分支或 detached SHA，不移动命名分支，不联网追新。
 
-所有可迁出的日志、依赖安装、插件、报告和应用现场集中写 runtime。源码内 target/node_modules 生产前，使用 station_resources.py 登记 kind=directory、精确 path、producer，由 Workflow 创建并登记根身份后再执行构建；不得等目录非空后再按名称收编。已有空目录采用需 adopt_empty=true。受管目录内部无需逐文件登记。进程仍记录 PID、启动时间、cwd、executable；实际测试数据记录隔离身份及回读。
+可迁出的运行产物优先放 runtime；源码内构建输出不要求生产前登记，也不按 target 等名称判定可删。退出时按实际清单确认，关键报告和敏感材料先保全。进程仍记录 PID、启动时间、cwd、executable；实际测试数据记录隔离身份及回读。
 
 默认归档保存实际源码修改和必要新文件并做重建核验；超限/敏感材料无法归档时，登记 source-disposition，明确 archive/export/discard 和当前快照，不把摘要当作源码备份。export 使用 workflow/station_export.py 创建工位外私有成果并核验回读，参数见[任务授权指引](../../../../docs/usage/task-authorization.md#重置工位)，discard 必须精确确认。源码链接、冲突索引、submodule 等不支持状态先明确处理，不能擅自丢弃。
 
@@ -41,7 +41,7 @@ metadata:
 
 ## 准入、设计和多仓库
 
-新任务在 Q2 授权前执行 `task.py source-readiness --issue-key <issue> --expected-run-id <run> --dir <station>`；它刷新目标引用并核验完整工程与工作分支。若提示目标正常推进，展示冻结基线、工作 Head、最新目标 SHA，并请用户决定保留基线且在 PR 前按既有规则同步，或归档清理后重接。选择保留时执行相同命令并追加 `--confirm-digest <快照摘要> --decision-ref <真实决定来源>`。随后 grant 与 advance 会重新核对这些事实；变化时重新准备。脏源码、身份错误、未知 ignored 产物、分叉及远端核验失败按返回原因处理，不能自动丢弃改动或重写冻结基线。
+新任务在 Q2 授权前执行 `task.py source-readiness --issue-key <issue> --expected-run-id <run> --dir <station>`；它刷新目标引用并核验完整工程与工作分支。若提示目标正常推进，展示冻结基线、工作 Head、最新目标 SHA，并请用户决定保留基线且在 PR 前按既有规则同步，或归档清理后重接。选择保留时执行相同命令并追加 `--confirm-digest <快照摘要> --decision-ref <真实决定来源>`。随后 grant 与 advance 会重新核对这些事实；变化时重新准备。脏源码、身份错误、分叉及远端核验失败按返回原因处理；ignored 内容不因未登记就阻塞源码准入，也不因此取得删除权限。
 
 `feature_change` 表示已有明确范围的功能开发，不接入需求任务。通过 `checklist` 读取验收标准、目标仓库和验证方式；功能任务不要求独立风险等级，具体风险与回滚纳入实施方案统一确认；验证方式可由研发确认，不强制写入 Jira `customfield_10049`。使用项目 `quality-feature.json`，在 Q2 前用 `task.py record --key implementation_plan --input <方案.json>` 记录目标、实现变化、验收场景、风险和回滚，并记录 `scope_boundary`。每个验收场景要对应具体检查项、预期和执行方式；不填写假根因、问题版本或 `fix_plan`。下文版本规划、根因与修复线规则仅适用于 `defect_fix`。
 
