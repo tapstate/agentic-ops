@@ -179,13 +179,10 @@ assert '不得伪造结果' in station_entry
 assert 'GitHub MCP、gh 或其它工具由 Agent 按已有授权选择' in station_entry
 
 profile = json.loads(Path("projects/tapdata/profile.json").read_text(encoding="utf-8"))
-assert profile["statuses"]["Analyzed"] == "waiting_takeover"
-assert profile["transitions"]["start_progress"] == {
-    "name": "Start Investigation",
-    "id": "421",
-    "from": ["Analyzed"],
-    "to": "In Progress",
-}
+assert "statuses" not in profile and "transitions" not in profile
+takeover = profile["jira"]["status_sync"]["attempts"]["takeover"]
+assert takeover["transition_id"] == "421"
+assert takeover["from"] == ["Analyzed"] and takeover["to"] == "In Progress"
 assert profile["workflows_by_issue_type"] == [{
     "issue_type": {"id": "10008", "name": "任务"},
     "statuses": [

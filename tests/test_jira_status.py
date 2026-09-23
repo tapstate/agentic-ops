@@ -116,6 +116,8 @@ class JiraStatusTests(unittest.TestCase):
         self.assertEqual(jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)["reason"], "transition_unavailable")
 
     def test_takeover_prepares_once_and_readback_completes(self):
+        current = task_store.current_path(self.base)
+        before = current.read_bytes()
         first = jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot())
         self.assertEqual(first["outcome"], "ready")
         self.assertEqual(first["transition_id"], "421")
@@ -124,6 +126,24 @@ class JiraStatusTests(unittest.TestCase):
         readback = self.snapshot(status="In Progress")
         done = jira_status.complete(self.base, "TAP-123", "takeover", "unknown", readback, "")
         self.assertEqual(done["outcome"], "succeeded")
+        self.assertEqual(current.read_bytes(), before)
+
+    def test_jira_done_does_not_complete_local_task(self):
+        current = task_store.current_path(self.base)
+        before = current.read_bytes()
+        result = jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot(status="Done"))
+        self.assertEqual(result["reason"], "jira_status_mismatch")
+        self.assertEqual(current.read_bytes(), before)
+
+    def test_native_pr_approved_hands_off_without_write_intent(self):
+        snapshot = self.snapshot(status="Pull Request Submitted")
+        snapshot["transitions"] = [{"id": "291", "name": "PR Approved", "to": {"name": "Merged"}, "fields": {}}]
+        before = {str(p): p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()}
+        result = jira_status.prepare(self.base, "TAP-123", "native:291", snapshot)
+        self.assertEqual(result["outcome"], "handoff")
+        self.assertEqual(result["reason"], "human_only_transition")
+        after = {str(p): p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()}
+        self.assertEqual(after, before)
 
     def test_takeover_accepts_configured_chinese_target_status(self):
         snapshot = self.snapshot()

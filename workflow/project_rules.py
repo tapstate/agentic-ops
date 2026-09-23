@@ -229,7 +229,7 @@ def validate_project_issue(profile, issue_key):
 
 
 def resolve_issue_type_workflow(profile, issue_type_id=None, issue_type_name=None):
-    """按 Jira 事务类型精确选择工作流；没有唯一映射时失败关闭。"""
+    """按事务类型选择只读工作流参考，不推进本地阶段；没有唯一映射时失败关闭。"""
     issue_type_id = str(issue_type_id or "").strip()
     issue_type_name = str(issue_type_name or "").strip()
     if not issue_type_id and not issue_type_name:
@@ -518,6 +518,7 @@ def cmd_workflow(args):
     else:
         issue_type = workflow["issue_type"]
         print("事务类型：%s（%s）" % (issue_type["name"], issue_type["id"]))
+        print("只读参考：以下映射不推进本地阶段，也不授权 Jira 转换。")
         print("状态：%s" % "；".join(
             "%s（%s）→ %s" % (item["name"], item["id"], item["stage"])
             for item in workflow["statuses"]
@@ -542,7 +543,7 @@ def main():
     p.add_argument("--project", required=True)
     p.set_defaults(func=cmd_branch)
 
-    p = sub.add_parser("workflow", help="按 Jira 事务类型精确解析工作流（未知类型失败关闭）")
+    p = sub.add_parser("workflow", help="按 Jira 事务类型查询只读工作流参考，不推进本地阶段（未知类型失败关闭）")
     p.add_argument("--issue-type-id")
     p.add_argument("--issue-type-name")
     p.add_argument("--json", action="store_true")

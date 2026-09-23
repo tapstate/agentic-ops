@@ -173,6 +173,8 @@ flowchart TD
 
 ## 非阻断 Jira 状态同步
 
+项目配置按消费者分工：`profile.json` 的 `jira.status_sync` 由 `jira_status.py` 消费，约束可准备的同步节点；`jira.transitions_config` 引用的字段与人工接力规则由 `jira_collect.py` 消费。`workflows_by_issue_type` 仅供 `project_rules.py workflow` 按事务类型查询，返回的 `stage` 是只读参考，不驱动本地阶段。Jira 回读为 Done、完成或 Tests Passed 均不等于本地任务完成；本地阶段仍由 Workflow 检查点及成果验收推进。未配置自动执行的原生转换只形成交接决策包，不生成自动写入意图。
+
 初始化后先用 `task.py snapshot --issue-key <issue> --expected-run-id <run> --input <snapshot.json> --dir <station>` 保存已读的 issue/source_ref。该入口同 run 幂等，独立于水印、Jira 权限和产品版本查询；后续本地普通事实由 record 维护，在相关检查点确认。
 
 接管时复用一次 Jira 初始快照，`jira_watermark.py prepare` 保存本地初始事实和产品版本，再准备原生回写。失败或未知结果记录为同步待办，允许推进 task_intake；未知写入先回读，同 run 恢复不重复导入或覆盖初始事实。

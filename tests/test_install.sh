@@ -504,14 +504,10 @@ assert not {"hook", "entrypoint", "capabilities"} & set(manifest)
 assert not list((root / "adapters").rglob("*.py"))
 
 profile = json.loads((root / "projects/tapdata/profile.json").read_text(encoding="utf-8"))
-transition = profile["transitions"]["start_progress"]
-assert transition == {
-    "name": "Start Investigation",
-    "id": "421",
-    "from": ["Analyzed"],
-    "to": "In Progress",
-}
-assert profile["statuses"]["Analyzed"] == "waiting_takeover"
+assert "statuses" not in profile and "transitions" not in profile
+transition = profile["jira"]["status_sync"]["attempts"]["takeover"]
+assert transition["transition_id"] == "421"
+assert transition["from"] == ["Analyzed"] and transition["to"] == "In Progress"
 task_workflow = profile["workflows_by_issue_type"]
 assert task_workflow == [{
     "issue_type": {"id": "10008", "name": "任务"},

@@ -493,10 +493,9 @@ def main():
         profile = json.loads((ROOT / "projects" / "tapdata" / "profile.json").read_text(encoding="utf-8"))
         repositories = json.loads((ROOT / "projects" / "tapdata" / "repositories.json").read_text(encoding="utf-8"))
         check("仓库目录基线分支含 common-lib=develop", repositories["repositories"]["tapdata/tapdata-common-lib"]["baseline_branch"], "develop")
-        waiting_takeover_statuses = sorted(
-            status for status, stage in profile["statuses"].items() if stage == "waiting_takeover"
-        )
-        check("TapData 仅 Analyzed 映射 waiting_takeover", waiting_takeover_statuses, ["Analyzed"])
+        check("Profile 不保留未消费的顶层状态映射", "statuses" in profile, False)
+        check("Profile 不保留未消费的顶层转换", "transitions" in profile, False)
+        check("TapData 接管同步从 Analyzed 开始", profile["jira"]["status_sync"]["attempts"]["takeover"]["from"], ["Analyzed"])
         check("TapData 接管水印只覆盖 Bug/Task/Story", sorted(profile["jira"]["takeover_watermark"]["issue_type_ids"]), ["10008", "10010", "10011"])
         check("TapData 接管水印配置通过加载校验", project_rules.validate_takeover_watermark(profile)["field_id"], "customfield_10421")
         task_workflow = project_rules.resolve_issue_type_workflow(
@@ -539,7 +538,6 @@ def main():
             "project_rules.py", "workflow", "--project", "tapdata", "--issue-type-id", "10008", "--issue-type-name", "Bug", cwd=ROOT
         )
         check("不一致的 Jira 事务类型 ID/名称失败关闭", code, 2)
-        check("profile transition 291 标记禁止", profile["transitions"]["pr_approved"]["agent_forbidden"], True)
         check("admission 三张表就位", sorted(p.name for p in (ROOT / "projects/tapdata/admission").glob("*.md")), ["defect-fix.md", "feature-change.md", "technical-task.md"])
         check("runbook 已就位", len(list((ROOT / "projects/tapdata/runbooks").glob("*.md"))) >= 2, True)
         check("profile 只引用统一仓库目录", profile["repositories"]["catalog"], "repositories.json")
