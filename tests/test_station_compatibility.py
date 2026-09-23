@@ -135,9 +135,25 @@ class StationCompatibilityTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, '仍有绑定工位'):
                     compatibility.check_upgrade(self.product_root, 'old', 'new', operation=operation)
 
+    def test_environment_epoch_rejects_epoch_twenty_one_and_bound_switch(self):
+        current = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
+        (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current))
+        path = self.station / '.agenticops/init.json'
+        path.write_text(json.dumps({'station_state_epoch': 21}))
+        before = path.read_bytes()
+        with self.assertRaises(ValueError):
+            with task_store.task_state_lock(self.station):
+                self.fail('旧版不能解释未来环境声明')
+        self.assertEqual(before, path.read_bytes())
+        self.write_registry([str(self.station)])
+        for epochs in ((21, 22), (22, 21)):
+            with mock.patch.object(compatibility, 'manifest_at_ref', side_effect=[manifest(e) for e in epochs]):
+                with self.assertRaisesRegex(ValueError, '仍有绑定工位'):
+                    compatibility.check_upgrade(self.product_root, 'old', 'new')
+
     def test_fingerprint_epoch_rejects_old_state_and_bound_upgrade_or_rollback(self):
         current = json.loads((ROOT / "contracts/station-state-compatibility.json").read_text())
-        self.assertEqual(21, current["station_state_epoch"])
+        self.assertEqual(22, current["station_state_epoch"])
         (self.product_root / "contracts/station-state-compatibility.json").write_text(json.dumps(current))
         path = self.station / ".agenticops/init.json"
         path.write_text(json.dumps({"station_state_epoch": 14}))

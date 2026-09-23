@@ -133,8 +133,11 @@ def validate_task_profile(rules, task):
             raise ValueError("任务质量配置必须声明有效 plan_contract")
         if "review" in contract:
             review = contract["review"]
-            if not isinstance(review, dict) or set(review) != {"sections", "nonempty", "coverage", "repository_sections", "dependencies", "decision_sections", "references"} or not isinstance(review["sections"], dict) or not review["sections"]:
+            if not isinstance(review, dict) or set(review) - {"environment_version"} != {"sections", "nonempty", "coverage", "repository_sections", "dependencies", "decision_sections", "references"} or not isinstance(review["sections"], dict) or not review["sections"]:
                 raise ValueError("方案 review 配置无效")
+            version = review.get('environment_version', 1)
+            if type(version) is not int or version not in (1, 2):
+                raise ValueError('环境依赖契约版本无效')
 
 
 def plan_problems(model, rules, ctx):
@@ -150,7 +153,7 @@ def plan_problems(model, rules, ctx):
                 problems.append("方案 %s.%s 缺失或为空" % (contract["fact_key"], key))
         if contract.get("review"):
             from workflow import plan_review
-            problems += plan_review.problems(plan, contract["review"], ctx, model)
+            problems += plan_review.problems(plan, contract["review"], ctx, model, rules)
     return problems
 
 

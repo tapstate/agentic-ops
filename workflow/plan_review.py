@@ -35,7 +35,59 @@ def get(value, path):
     return value
 
 
-def problems(plan, declaration, ctx, model):
+def environment_problems(plan, declaration, ctx, model, rules):
+    """按事件保存的项目版本解释环境依赖；实际执行仍由检查项验收。"""
+    version = declaration.get('environment_version', 1)
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError('环境依赖契约版本无效')
+    environment = plan.get('environment_readiness', {})
+    rows = environment.get('checks', []) if isinstance(environment, dict) else []
+    errors = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get('name'))
+        if version == 1:
+            if row.get('result') == 'missing':
+                errors.append('环境缺项：' + name)
+            continue
+        dependency = row.get('required_for', 'implementation')
+        if dependency not in ('implementation', 'verification'):
+            errors.append('环境依赖阶段无效：' + name)
+            continue
+        if dependency == 'implementation':
+            if 'item_ids' in row:
+                errors.append('实现环境不能声明延期检查项：' + name)
+            if row.get('result') == 'missing':
+                errors.append('环境缺项：' + name)
+            continue
+        ids = row.get('item_ids')
+        if (not isinstance(ids, list) or not ids or any(not isinstance(i, str) or not i.strip() for i in ids)
+                or len(ids) != len(set(ids))):
+            errors.append('后续验证环境必须关联不重复的检查项：' + name)
+            continue
+        if not rules:
+            errors.append('后续验证环境缺少检查点规则：' + name)
+            continue
+        from workflow import quality
+        points = [point['id'] for point in rules['checkpoints']]
+        selection = points.index(rules['selection_checkpoint'])
+        for item_id in ids:
+            item = model.get('items', {}).get(item_id)
+            if not item:
+                errors.append('环境引用的检查项不存在：' + item_id)
+                continue
+            item_plan = item['plan']
+            checkpoint = item_plan.get('checkpoint')
+            if (item_plan.get('timing') != 'after_fix' or checkpoint not in points
+                    or points.index(checkpoint) <= selection):
+                errors.append('环境只能延期到方案确认后的验收项：' + item_id)
+            elif not quality.item_view(item, rules, ctx)['selected']:
+                errors.append('环境引用的验收项尚未选择：' + item_id)
+    return errors
+
+
+def problems(plan, declaration, ctx, model, rules=None):
     errors = []
     for key, schema in declaration['sections'].items():
         if key not in plan:
@@ -74,10 +126,7 @@ def problems(plan, declaration, ctx, model):
             elif row.get('repository') != item['plan']['repository']:
                 errors.append('AC 模块与验收项仓库不一致：' + str(item_id))
     repos = ctx['repositories']
-    environment = plan.get('environment_readiness', {})
-    if isinstance(environment, dict) and isinstance(environment.get('checks'), list):
-        errors += ['环境缺项：' + str(row.get('name')) for row in environment['checks']
-                   if isinstance(row, dict) and row.get('result') == 'missing']
+    errors += environment_problems(plan, declaration, ctx, model, rules)
     scope = plan.get('scope_rationale', {})
     changes = scope.get('changes', []) if isinstance(scope, dict) else []
     changes = changes if isinstance(changes, list) else []

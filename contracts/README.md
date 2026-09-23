@@ -25,6 +25,8 @@ Workflow CLI 的状态写命令现要求 `--expected-run-id`，advance 另要求
 
 ## 兼容规则
 
+项目 `plan_contract.review.environment_version=2` 显式启用环境阶段依赖，缺省或版本1保持全部 missing 阻塞 Q2，未知版本拒绝。质量事件已有 rules 快照承载该声明，历史回放使用当时规则，不按当前配置重解释。新增阶段/检查项声明改变旧客户端的解释能力，独立交付时再次提升 epoch；升级与回退均原版退出并 purge，不在线迁移或补造确认。
+
 来源同步验证的新事件由写入口生成 `binding_version=2`，仅绑定所属仓的源码版本与七字段仓库登记摘要；无该字段的历史事件保持全仓语义。未知版本及其它验证种类使用该字段必须拒绝，调用者不能指定该内部版本。`local/ci/review` 不改变失效范围。旧客户端不能理解新证据语义，因此跨 epoch 必须原版退出并 purge，不转换历史事件。
 
 `authorization.py renew` 使用 expected-run-id 与 expected-authorization-digest 双重绑定，只延长未撤销、方案摘要及仓库绑定不变的授权有效期；renewals 保存决定者、确认来源、前后有效期和原授权摘要。`show --digest` 只输出当前授权的规范化 SHA256。任务的 `completed` 阶段是验收提交点；同 run 的 `advance --expected-stage ci_validation` 重试可以收敛授权撤销及注册状态，成功收敛后重复调用不再写入。除该终态恢复外，过期阶段请求仍拒绝。

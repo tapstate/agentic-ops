@@ -132,6 +132,98 @@ class QualityTests(unittest.TestCase):
                         approved_scope="目标功能模块")
         self.save_task()
 
+    def future_environment(self, version=2):
+        self.feature_profile()
+        rules = json.loads(self.profile_path.read_text())
+        review = json.loads((ROOT / 'projects/tapdata/quality-feature.json').read_text())['plan_contract']['review']
+        review.pop('environment_version', None)
+        if version is not None:
+            review['environment_version'] = version
+        rules['plan_contract']['review'] = review
+        self.profile_path.write_text(json.dumps(rules))
+        plan = self.task['facts']['implementation_plan']
+        plan.update(feature_review(self.task['facts']['acceptance_criteria'], 'tapdata/tapdata', '目标模块', 'case-a'))
+        row = plan['environment_readiness']['checks'][0]
+        row.update(result='missing', required_for='verification', item_ids=['case-a'],
+                   detail='仅验收需要，研发负责在首轮执行前准备隔离服务；实现不依赖它')
+        self.save_task()
+        return row
+
+    def test_future_environment_allows_implementation_not_unexecuted_acceptance(self):
+        row = self.future_environment()
+        self.select(); self.checkpoint('q1-intake'); self.checkpoint('q2-plan')
+        original = quality.q2_digest(self.base, self.task)
+        args = SimpleNamespace(dir=self.base, issue_key='TAP-123', expected_run_id=self.task['run_id'],
+                               agent_id='fixture', plan_version='v1', ttl_hours=8)
+        self.assertEqual(0, authorization.cmd_grant(args))
+        self.assertEqual([], task._check_advance(self.task, 'implementation', self.base, task.admission(self.base)))
+        with self.assertRaisesRegex(ValueError, '执行证据'):
+            self.automatic_checkpoint()
+        with self.assertRaises(ValueError):
+            self.checkpoint('q4-acceptance')
+        self.execute(result='NOT_RUN')
+        with self.assertRaisesRegex(ValueError, 'NOT_RUN'):
+            self.automatic_checkpoint()
+        self.execute(execution_id='run-2')
+        self.automatic_checkpoint()
+        self.decide(evidence_id='run-2'); self.checkpoint('q4-acceptance')
+        self.assertEqual('missing', row['result'])
+        self.assertEqual(original, quality.q2_digest(self.base, self.task))
+        row['required_for'] = 'implementation'
+        row.pop('item_ids'); self.save_task()
+        with self.assertRaises(ValueError):
+            quality.q2_digest(self.base, self.task)
+        self.assertTrue(task._check_advance(self.task, 'implementation', self.base, task.admission(self.base)))
+
+    def test_future_environment_rejects_ambiguous_invalid_and_unselected_dependencies(self):
+        row = self.future_environment()
+        original = copy.deepcopy(row)
+        self.assertTrue(any('尚未选择' in e for e in self.view()['checkpoints']['q2-plan']['problems']))
+        self.select()
+        cases = ({'required_for': 'unknown'}, {'required_for': None}, {'item_ids': []},
+                 {'item_ids': ['absent']}, {'item_ids': ['case-a', 'case-a']}, {'item_ids': [None]},
+                 {'required_for': 'implementation'}, {'result': 'unknown'})
+        for change in cases:
+            with self.subTest(change=change):
+                row.clear(); row.update(original); row.update(change); self.save_task()
+                self.assertTrue(self.view()['checkpoints']['q2-plan']['problems'])
+        row.clear(); row.update(original); row.pop('required_for'); row.pop('item_ids'); self.save_task()
+        self.assertTrue(any('环境缺项' in e for e in self.view()['checkpoints']['q2-plan']['problems']))
+        row.clear(); row.update(original)
+        self.task['facts']['implementation_plan']['environment_readiness']['blocking_inputs'] = ['运行权限尚未确认']
+        self.save_task()
+        self.assertTrue(any('待研发决定' in e for e in self.view()['checkpoints']['q2-plan']['problems']))
+        self.task['facts']['implementation_plan']['environment_readiness']['blocking_inputs'] = []
+        self.save_task()
+        from workflow import plan_review
+        rules, ctx = quality.config(self.base, self.task), quality.context(self.base, self.task)
+        model = quality.replay(quality.load(self.base, self.task))
+        for change in ({'checkpoint': 'q2-plan'}, {'checkpoint': 'absent'}, {'timing': 'before_fix'}):
+            modified = copy.deepcopy(model); modified['items']['case-a']['plan'].update(change)
+            self.assertTrue(plan_review.problems(self.task['facts']['implementation_plan'],
+                rules['plan_contract']['review'], ctx, modified, rules))
+
+    def test_environment_contract_preserves_legacy_replay_and_rejects_unknown_versions(self):
+        row = self.future_environment(version=None)
+        self.select(); self.checkpoint('q1-intake')
+        with self.assertRaisesRegex(ValueError, '环境缺项'):
+            self.checkpoint('q2-plan')
+        row['result'] = 'ready'; self.save_task(); self.checkpoint('q2-plan')
+        state = quality.load(self.base, self.task)
+        original = copy.deepcopy(state)
+        expected = quality.replay(state)
+        rules = json.loads(self.profile_path.read_text())
+        for version in (0, 3, '2', True):
+            rules['plan_contract']['review']['environment_version'] = version
+            self.profile_path.write_text(json.dumps(rules))
+            with self.assertRaisesRegex(ValueError, '契约版本'):
+                quality.config(self.base, self.task)
+        rules['plan_contract']['review']['environment_version'] = 2
+        self.profile_path.write_text(json.dumps(rules))
+        self.assertEqual(expected, quality.replay(state))
+        self.assertEqual(original, state)
+        self.assertFalse(self.view()['checkpoints']['q2-plan']['reviewed'])
+
     def test_grant_rejects_invalid_expiry_without_overwriting_authorization(self):
         self.feature_profile()
         self.select(); self.checkpoint("q1-intake"); self.checkpoint("q2-plan")
@@ -2026,8 +2118,12 @@ class FeatureFlowTests(unittest.TestCase):
             self.cli("task.py", "record", "--key", key, "--value", value)
         self.cli("task.py", "advance", "--note", "基线与输入已确认")
         plan_path = self.cli("task.py", "interaction-path", "--name", "implementation-plan.json").strip()
-        Path(plan_path).write_text(json.dumps({"objective": "value 返回 1", "changes": ["修改返回值"],
-            "acceptance": ["verify.py 断言返回值"], "risks": ["仅夹具"], "rollback": "回退 feature.py", **feature_review("value 返回 1", self.repo, "feature.py", "behavior")}))
+        implementation_plan = {"objective": "value 返回 1", "changes": ["修改返回值"],
+            "acceptance": ["verify.py 断言返回值"], "risks": ["仅夹具"], "rollback": "回退 feature.py", **feature_review("value 返回 1", self.repo, "feature.py", "behavior")}
+        implementation_plan['environment_readiness']['checks'][0].update(
+            result='missing', required_for='verification', item_ids=['behavior'],
+            detail='执行前由夹具准备并核验 Python 运行环境，不影响返回值修改')
+        Path(plan_path).write_text(json.dumps(implementation_plan))
         self.cli("task.py", "record", "--key", "implementation_plan", "--input", plan_path)
         plan = {"id": "behavior", "checkpoint": "q4-acceptance", "timing": "after_fix",
                 "case_ref": "verify.py", "case_version": "v1", "case_status": "existing", "method": "unit",

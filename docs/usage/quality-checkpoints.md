@@ -454,10 +454,14 @@ TapData 功能方案仍使用 implementation_plan，项目 quality-feature.json 
 | acceptance_mapping | 每行 criterion 原样对应 acceptance_criteria 文本或文本列表的一项，并填写 behavior、repository、module、case_ids、expected；所有 AC 均有映射，用例 ID 必须是已登记的 after_fix 验收项 |
 | scope_rationale | changes 每行 repository、module、layer（local/shared）、necessity、impact；non_changes 列明确不改范围；blocking_inputs 列尚待研发决定的冲突。公共层修改同样必须说明必要性和影响 |
 | delivery_dependencies | 每仓 repository、depends_on（仓库 ID 列表）、delivery、test_relation、state（ready/planned/unresolved）、source_ref；登记仓不能遗漏，不要求尚未创建的 PR 已存在 |
-| environment_readiness | config_source、checks（name/source_ref/result/detail）、blocking_inputs；检查结果 ready/not_needed/missing。已知 missing 与未决输入一次列全，不以空列表隐藏 |
+| environment_readiness | config_source、checks（name/source_ref/result/detail）、blocking_inputs；检查结果 ready/not_needed/missing。checks 可声明 required_for=implementation（缺省）或 verification；后者必须用非空、无重复 item_ids 关联已选后续 after_fix 验收项。已知 missing 与未决输入一次列全，不以空列表隐藏 |
 | verification_plan | commands、scenarios、invalidation_conditions、evidence_ref；不是执行报告，实施后仍需真实验证 |
 
-acceptance_criteria 多项建议保存为文本列表；单个文本按一个完整 AC 精确映射，不由工具猜测自然语言的拆分。作用域模块须与 AC 实现映射对应。结构检查和 Git 文件存在均不能证明参考恰当、公共层修改必要或断言有效；Agent 必须比较源码与预期，研发确认实质方案。完整方案中没有阻塞项后才允许 Q2 通过与授权；旧简略方案须补全后再确认，不在线迁移或伪造确认。此变更不增加持久状态字段，继续使用 epoch 14 的现有事实与质量日志结构；配置变化自然使旧确认摘要失效。
+acceptance_criteria 多项建议保存为文本列表；单个文本按一个完整 AC 精确映射，不由工具猜测自然语言的拆分。作用域模块须与 AC 实现映射对应。结构检查和 Git 文件存在均不能证明参考恰当、公共层修改必要或断言有效；Agent 必须比较源码与预期，研发确认实质方案。完整方案中没有阻塞项后才允许 Q2 通过与授权；旧简略方案须补全后再确认，不在线迁移或伪造确认。配置变化使旧确认摘要失效，工位兼容边界以[机器清单](../../contracts/station-state-compatibility.json)为准。
+
+TapData 功能配置显式启用 `plan_contract.review.environment_version=2`。环境行缺省是实现前置，missing 仍阻塞 Q2；只有明确仅用于验证、且 item_ids 全部指向已选择的 Q2 之后 after_fix 检查项，才能在同一 Q2 决策包确认后允许无依赖编码。detail/source_ref 说明适用范围、补齐责任与方式，不另造表单。未知阶段、未选择/不存在/提前到期的引用不能延期；影响权限、事实可信度或实现正确性的缺项必须按 implementation 或 blocking_inputs 保留，不得仅改标签来放行。Workflow 不判断自然语言是否真实，Agent 与研发仍需核实依赖。
+
+延期不等于已就绪或免测：环境最迟在关联项第一次实际需要执行前补齐，沿用现有执行/验收合同；当前 Q3 自动首轮验证已要求全部 after_fix 项的有效结果，因此不能把所有环境拖到 Q4。计划中的 missing 保留为当时观察，实际环境与运行结果写现有 execute/verification；不回改为 ready，也不因补充执行结果重问未变化的 Q2。改变 required_for/item_ids/范围则重新确认。未声明版本的历史 rules 仍按全部 missing 阻塞解释，未知版本拒绝；新旧客户端不兼容，升级按原版收尾、归档及 purge 后切换。
 
 Q2 前先补齐 Agent 可查事实，读取当前 Jira 字段与 transitions.fields，然后一次展示：
 
