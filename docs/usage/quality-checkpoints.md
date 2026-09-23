@@ -46,7 +46,7 @@ python3 <agenticops-root>/workflow/pr_body.py compare --body-file <正文文件>
 
 ## 共同验证材料
 
-使用现有 `quality.py apply --issue-key <key> --expected-run-id <run> --expected-revision <当前revision> --input <json> --dir <station>`，输入为 `{"action":"verification","payload":{...}}`。每个仓库分别提交材料，内部自动绑定当前任务各仓源码版本；不是新任务类型或执行引擎。写前先 `quality.py status`，source_sync 还会实际读取已准备的任务工作树并核对包含关系。原生报告的真实性、依赖清单和语义分析仍由 Agent 核对，工具不认证来源或判断断言含义。
+使用现有 `quality.py apply --issue-key <key> --expected-run-id <run> --expected-revision <当前revision> --input <json> --dir <station>`，输入为 `{"action":"verification","payload":{...}}`。每个仓库分别提交材料，内部自动绑定源码版本与仓库登记；不是新任务类型或执行引擎。新 source_sync 仅绑定所属仓，local/ci/review 仍绑定全部任务仓。写前先 `quality.py status`，source_sync 还会实际读取已准备的任务工作树并核对包含关系。原生报告的真实性、依赖清单和语义分析仍由 Agent 核对，工具不认证来源或判断断言含义。
 
 所有材料提供 kind、repository、target_revision（当前完整 SHA 或首轮本地源码指纹）、source_ref。其余内容如下：
 
@@ -61,7 +61,9 @@ results 中 result 使用 PASS/FAIL/UNKNOWN/NOT_RUN/SKIPPED。PASS 另需报告�
 
 跨仓 Jar 材料使用 jars 列表，每项包含 built_sha256、consumed_sha256（必须相同）和 loaded_from（实际加载证据）。local 另给 built_path、consumed_path 绝对路径，写入及检查点复核内容哈希；这两个路径仅保存为本地恢复元数据，不进入 Jira 摘要，其它材料仍按项目规则扫描。没有 Jar 时省略列表，但 dependency_analysis_ref 仍须说明分析依据。CI 使用运行内文件与加载证据，不冒充本地文件核验。报告引用、版本及统计从实际执行取得，不能为满足字段填造数字。
 
-TapData 功能和缺陷使用相同配置：Q3、Q4 要求 local/source_sync，Q5、Q6 再要求 ci/review；PR Ready 要求 local/source_sync/ci，同时保留现有 PR Checks 和人工验收规则。代码、用例所在仓或依赖仓变化，报告失效；CI 重新观察后需重新核对并登记 CI 材料。本地 Jar 变化也失效。遗漏范围、未处理失败或待处理审查意见阻止对应检查点，人工接受的缺口保留原结果。
+TapData 功能和缺陷使用相同配置：Q3、Q4 要求 local/source_sync，Q5、Q6 再要求 ci/review；PR Ready 要求 local/source_sync/ci，同时保留现有 PR Checks 和人工验收规则。local/ci/review 在任一任务仓代码或登记变化时失效；CI 重新观察后需重新核对并登记 CI 材料。本地 Jar 变化也失效。遗漏范围、未处理失败或待处理审查意见阻止对应检查点，人工接受的缺口保留原结果。
+
+新 source_sync 的 `binding_version=2` 由工具生成，禁止调用者指定。仅所属仓的源码版本、repository/base_branch/work_branch/base_sha/catalog_digest/approved_scope/verification_method 变化使它失效；无关仓变化不使该来源事实失效，新增仓仍需自己的材料。旧事件缺少版本时继续全仓绑定，未知版本拒绝，不复活历史确认或授权。记录只证明 observed_at 时核对的 source_revision 包含关系，PR 前仍需刷新来源事实，不保证远端以后不再变化。该语义改变须按[更新与回退](update-and-rollback.md)跨 epoch 退出重建，不在线迁移。
 
 源码同步后已解决问题只需无修改重验时，`failures.py` 使用 revalidate，参数同 finish，不消耗修复轮数；失败则回到 unresolved，后续修改仍须 start 记账。每次重新验证都保留事件，不能改写历史。旧 `ci.py record-fix` 已移除，CI 观察不再维护另一套预算。
 

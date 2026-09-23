@@ -741,7 +741,14 @@
           "const": "verification"
         },
         "payload": {
-          "type": "object"
+          "type": "object",
+          "properties": {
+            "binding_version": {
+              "type": "integer",
+              "const": 2,
+              "description": "写入口生成，仅适用于 source_sync；缺省为历史全仓绑定"
+            }
+          }
         }
       },
       "required": [

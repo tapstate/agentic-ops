@@ -1,5 +1,7 @@
 # AgenticOps 扩展使用
 
+[共同验证材料](quality-checkpoints.md#共同验证材料)区分来源同步的单仓绑定与 local/ci/review 的全仓绑定，并说明旧事件重放、实际 Git 核对和 PR 前刷新责任；不新增验证流程或迁移入口。
+
 [PR 正文发布与回读](quality-checkpoints.md#pr-正文发布与回读)负责多行正文的安全传递、只读预检、原生 PR 正文回读比对及局部失败恢复。工具不发送 PR、不新增阶段门禁；项目 Skill 仅负责调用顺序，正文内容及验收事实仍需人工核对。
 
 任务退出范围与 Jira 同步分别由[任务授权指引](task-authorization.md#清理范围决策视图)和[质量检查与证据](quality-checkpoints.md#同步待办与有限回执恢复)说明：前者负责清理、保全、保留和未知对象的用户决策；后者负责接管与检查点的待办、原生执行、回读及终态恢复。状态冻结与兼容边界统一由[工位合同](../architecture/single-task-station.md#外部同步回执恢复)定义，不另建生命周期或同步队列。

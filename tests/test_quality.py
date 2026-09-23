@@ -2074,6 +2074,13 @@ class FeatureFlowTests(unittest.TestCase):
             "source_ref": "fixture:bare-origin-fetch", "observed_at": self.proof()["at"], "source_branch": "develop",
             "source_revision": self.git("-C", str(worktree), "rev-parse", "origin/develop"),
             "before_merge_revision": before_merge, "impact_analysis_ref": "fixture:upstream-only-adds-text-file"})
+        sync_state = quality.load(self.ws, self.read())
+        saved_sync = sync_state['events'][-1]['command']
+        self.assertEqual(2, saved_sync['payload']['binding_version'])
+        self.assertTrue(saved_sync['payload']['sync']['contains_source'])
+        with self.assertRaisesRegex(ValueError, '写入口'):
+            self.apply('verification', saved_sync['payload'])
+        self.assertEqual(sync_state, quality.load(self.ws, self.read()))
         with self.assertRaisesRegex(ValueError, "失败"):
             self.checkpoint("q3-draft")
         failures.apply(self.ws, "TAP-123", run, 2, {"action": "finish", "problem_id": problem,
@@ -2123,6 +2130,70 @@ class VerificationContractTests(unittest.TestCase):
             "case_version": "case-v1", "dependency_analysis_ref": "fixture:no-jars",
             "required_scope": ["module:behavior"], "results": [{"scope": "module:behavior", "result": "PASS",
                 "report_ref": "fixture:report", "tests": 1, "failures": 0, "errors": 0, "skipped": 0}]}
+
+    def source_material(self, version=True):
+        row = self.ctx['repositories']['a/repo']
+        row.update(repository='a/repo', base_branch='develop', work_branch='task', base_sha='a' * 40,
+                   catalog_digest='catalog', approved_scope='module', verification_method='unit')
+        self.ctx['repositories']['b/tests'] = {'live_revision': 'b' * 40}
+        payload = {'kind': 'source_sync', 'repository': 'a/repo', 'target_revision': 'a' * 40,
+                   'source_ref': 'fixture:fetch', 'source_branch': 'develop', 'source_revision': 'a' * 40,
+                   'observed_at': proof()['at'], 'impact_analysis_ref': 'fixture:impact',
+                   'sync': {'task_revision': 'a' * 40, 'base_revision': 'a' * 40,
+                            'work_branch': 'task', 'contains_source': True}}
+        if version:
+            payload['binding_version'] = 2
+        return payload
+
+    def source_problems(self, model, ctx):
+        return [p for p in self.v.problems(model, ctx, ['source_sync']) if p.startswith('a/repo')]
+
+    def test_source_binding_is_local_but_legacy_replay_remains_global(self):
+        for version in (False, True):
+            p = self.source_material(version)
+            state = {'events': [{'command': {'action': 'verification', 'payload': p},
+                                 'rules': {}, 'context': copy.deepcopy(self.ctx)}]}
+            original = copy.deepcopy(state)
+            model = quality.replay(state)
+            self.assertEqual([], self.source_problems(model, self.ctx))
+            changed = copy.deepcopy(self.ctx)
+            changed['repositories']['b/tests']['live_revision'] = 'c' * 40
+            changed['repositories']['b/tests']['approved_scope'] = 'expanded'
+            self.assertEqual(not version, bool(self.source_problems(model, changed)))
+            self.assertTrue(any('b/tests 缺少' in p for p in self.v.problems(model, changed, ['source_sync'])))
+            self.assertEqual(original, state)
+            self.assertEqual(model, quality.replay(state))
+
+    def test_source_own_binding_changes_and_failures_still_block(self):
+        p = self.source_material()
+        model = {}; self.v.record(model, p, self.ctx)
+        for key in ('live_revision', 'repository', 'base_branch', 'work_branch', 'base_sha',
+                    'catalog_digest', 'approved_scope', 'verification_method'):
+            changed = copy.deepcopy(self.ctx)
+            changed['repositories']['a/repo'][key] = 'changed'
+            with self.subTest(key=key):
+                self.assertTrue(self.source_problems(model, changed))
+        changed = copy.deepcopy(self.ctx)
+        changed['failures']['pending'] = {'status': 'running', 'attempts': 1}
+        self.assertTrue(any('失败' in p for p in self.v.problems(model, changed, ['source_sync'])))
+        for key, value in (('source_branch', 'other'), ('target_revision', 'c' * 40)):
+            with self.assertRaises(ValueError):
+                self.v.record({}, dict(p, **{key: value}), self.ctx)
+
+    def test_binding_version_cannot_be_supplied_or_reinterpreted(self):
+        p = self.source_material()
+        with self.assertRaisesRegex(ValueError, '写入口'):
+            quality.validate_command({'action': 'verification', 'payload': p})
+        for version in (1, 3, '2', True, None):
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                self.v.record({}, dict(p, binding_version=version), self.ctx)
+        for kind in ('local', 'ci', 'review'):
+            with self.assertRaisesRegex(ValueError, '绑定版本'):
+                self.v.record({}, dict(p, kind=kind), self.ctx)
+        model = {}; self.v.record(model, p, self.ctx)
+        model['verification']['a/repo']['source_sync']['data']['binding_version'] = 99
+        with self.assertRaises(ValueError):
+            self.v.problems(model, self.ctx, ['source_sync'])
 
     def test_missing_scopes_missing_reports_and_false_pass_rejected(self):
         for change in ({"results": []}, {"required_scope": ["module:behavior", "upper:consumer"]}):

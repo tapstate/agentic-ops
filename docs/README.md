@@ -1,5 +1,7 @@
 # AgenticOps 文档总纲
 
+共同验证材料的失效范围由[质量检查与证据](usage/quality-checkpoints.md#共同验证材料)维护，契约版本与历史重放由[标准契约](../contracts/README.md)说明；来源同步只证明所属仓的来源关系，不替代跨仓测试或方案授权。兼容边界复用工位 epoch 与既有升级流程。
+
 TapData 项目开发采用“现有任务技能导航、两份开发指引按需阅读”： [TapData 开发指引](../projects/tapdata/runbooks/tapdata-development.md)覆盖源码定位、配置、构建、启动与加载验证；[TapTest 开发指引](../projects/tapdata/runbooks/taptest-development.md)覆盖用例生成、脚本开发、环境配置、执行与结果分析，不依赖业务仓的用例技能。两份指引以常用操作顺序、成功标志和少量高频陷阱帮助 Agent 减少返工，不收录完整会话历史或一次性补丁。[构建与测试](../projects/tapdata/runbooks/build-test-and-local-run.md)维护 Maven、Java 测试与配置模板细节；授权和质量判定链接现役合同，不在指引重复维护。
 
 通用工具 Hook 执行链退役后，[工程架构](architecture/agenticops-v1-architecture.md)维护 Agent 原生执行、Workflow 检查点和显式 Gate API 的边界；[标准契约](../contracts/README.md)维护 Manifest v3 的声明式接线；[更新与回退](usage/update-and-rollback.md)负责跨 epoch 原版本退出与重建，用户故事和端到端验证只维护对应验收合同，不另设迁移执行计划。

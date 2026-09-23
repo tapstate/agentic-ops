@@ -736,6 +736,8 @@ def review_packet(base, task, jira_snapshot):
 def validate_command(command):
     """仅验证输入格式；不证明门禁、授权或执行结果有效。"""
     quality_contract.validate(command, "quality-action.schema.json")
+    if command["action"] == "verification" and "binding_version" in command["payload"]:
+        raise ValueError("binding_version 由写入口生成，调用者不得指定")
     if command["action"] == "execute":
         execution = command["payload"]["execution"]
         if execution["raw_result"] == "NOT_RUN" and not execution.get("nonexecution_reason", "").strip():
@@ -771,6 +773,7 @@ def apply(base, issue, run_id, revision, command):
             p["sync"] = source_sync.impact(repository["worktree"]["path"], repository["work_branch"],
                                            repository["base_sha"], p.get("source_revision", ""),
                                            p.get("before_merge_revision", ""))
+            p["binding_version"] = 2
         if command["action"] == "prepare_write":
             from workflow.quality_write import check_unresolved_runs
             check_unresolved_runs(base, task, replay(state)["publications"][command["payload"]["id"]]["body"])
