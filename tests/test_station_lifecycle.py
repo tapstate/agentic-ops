@@ -100,8 +100,18 @@ class StationTests(unittest.TestCase):
         task = self.takeover()
         self.assertEqual(len(task["engineering_baseline"]["repositories"]), 9)
         self.assertTrue(task["source_prepared"])
-        for name in task["engineering_baseline"]["repositories"]:
-            self.assertTrue((self.ws / "source" / name / ".git").is_dir())
+        self.assertEqual(task["engineering_baseline"]["profile"]["id"], "full-application")
+        self.assertEqual(task["stage"], "waiting_takeover")
+        self.assertEqual(task["outcome"], "in_progress")
+        self.assertIsNone(task["terminal_proof"])
+        self.assertEqual(task["task_repositories"], {})
+        self.assertEqual(list((self.ws / "runtime").iterdir()), [])
+        self.assertFalse((self.ws / ".agenticops/authorization.json").exists())
+        for name, entry in task["engineering_baseline"]["repositories"].items():
+            path = self.ws / "source" / name
+            self.assertTrue((path / ".git").is_dir())
+            self.assertEqual(self.git(path, "rev-parse", "HEAD"), entry["commit_sha"])
+            self.assertEqual((path / "file.txt").read_text(), "baseline\n")
         station.takeover(self.ws, self.request, "op-takeover-one", 0)
         self.assertEqual(task_store.read_task(self.ws)["run_id"], task["run_id"])
         with self.assertRaisesRegex(ValueError, "当前任务"):

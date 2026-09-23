@@ -8,7 +8,7 @@
 
 首版支持本地工位。每工位使用独立 Git 仓库和固定 checkout，避免共享 Git 元数据中的任务分支占用、配置和回收耦合；源码池由安装目录配置或工位初始化的显式 `--source-pool` 决定，默认 `~/.agentic-ops-repos`。缓存路径是 `repositories/<owner>/<repo>.git`，不按 origin 增加第二层隔离；同名缓存 origin 不一致时失败关闭，由研发者为新工位配置另一个源码池。接管准备源码时先下载缺失缓存或刷新已有缓存，再从缓存传输到独立工位仓库，不能用对象 alternates 等方式依赖缓存存活。缓存丢失不影响已准备工位。允许未完成任务为清理而正式归档，不增加边开发边保存多个归档快照的能力。容器、远程调度、环境池、会话租约、多任务 runtime 和持续优化平台不属于本合同。
 
-公共 Workflow 维护身份、占用、确认、操作恢复和结果核验；Project 定义仓库、版本解析、构建启动及清理配方。Agent 原生工具执行构建、测试和应用运行；不直接照搬含发布、上传或全局配置修改的打包脚本。根入口仍为薄转发，不建立第二套 Runtime。四操作不授权合并、发布、Tag、强推或历史改写。
+公共 Workflow 维护身份、占用、确认、操作恢复和结果核验；Project 定义源码仓库集合、版本解析、清理规则及构建运行指引。现役 takeover 只准备独立源码与冻结基线，不执行构建、启动或健康检查。Agent 按任务方案使用原生工具执行构建、测试和应用运行；不直接照搬含发布、上传或全局配置修改的打包脚本。根入口仍为薄转发，不建立第二套 Runtime。四操作不授权合并、发布、Tag、强推或历史改写。
 
 ## 2. 身份与唯一事实
 
@@ -71,7 +71,7 @@ config 不随任务删除。任务专用有效配置写入 runtime，正式档�
 
 基线值的机器合同见 [engineering-baseline.schema.json](../../contracts/engineering-baseline.schema.json)。`workflow/engineering_baseline.py` 提供基线值构造、摘要校验、任务仓库引用和只读本地 Git 对象核验；`projects/tapdata/engineering-profiles.json` 定义完整应用的仓库集合，项目脚本 `engineering_baseline.py` 复用现役分支解析器。值构造中的 `status=frozen` 只表示输入清单已固化，调用方仍必须在接管操作中核验新鲜远端事实及全部本地 Git 对象后持久化；它不表示已创建仓库、已准备 runtime 或已绑定当前任务。基线模块本身不写状态；生命周期由 station 与 task.py 入口持锁编排。
 
-每个 run 只有一份冻结工程基线。条目至少包含 `repository_id/origin/ref_kind/ref_name/commit_sha/resolution_source/rule_version/path`。Profile 决定完整运行所需仓库，Project 的现役仓库目录仍是 origin 唯一来源。解析结果中的 current、展示回退、未核验或 unresolved 不能作为可执行基线。所有条目解析成功并核验 Git 对象后，一次固化全清单摘要；不能把部分准备冒充完整环境。
+每个 run 只有一份冻结工程基线。条目至少包含 `repository_id/origin/ref_kind/ref_name/commit_sha/resolution_source/rule_version/path`。Profile 决定完整应用源码集所需仓库，Project 的现役仓库目录仍是 origin 唯一来源。解析结果中的 current、展示回退、未核验或 unresolved 不能作为可执行基线。所有条目解析成功并核验 Git 对象后，一次固化全清单摘要；不能把部分准备冒充完整源码集，也不能把完整源码集冒充可运行环境。
 
 首次接管从可信 origin 准备缺失仓库；已有仓库先核验路径、origin 和洁净度，再 fetch 明确引用并检出冻结 SHA，不改工位之外的主工作树。若冻结引用是 branch，则检出只由 AgenticOps 管理、名称含原引用与冻结 SHA 的本地基线分支；tag 和指定 commit 保持 detached。独立仓库保留任务分支和提交，释放时回到同一冻结呈现，下一次接管才同步新版本。缺失或冲突不覆盖原仓库；只重试该操作能够证明归属的创建或同步步骤。
 
@@ -95,9 +95,9 @@ config 不随任务删除。任务专用有效配置写入 runtime，正式档�
 
 公开写操作只有 `takeover/archive/release/clean`。只读上下文返回 current、operation、完整基线、任务变更、目录与项目执行入口；读取不修改状态。所有写请求有幂等操作 ID；重复请求返回相同操作结果或继续其未完成步骤，不重复接管或再次删除。
 
-| 操作 | 前提与结果 | 阶段 |
+| 操作 | 前提与结果 | 处理顺序（不等同于持久 phase 字段） |
 |---|---|---|
-| 接管 `takeover` | current=null 且无未完成操作；生成新 run 并先绑定工位，成功后可处理任务 | intent → bound → baseline_frozen → source_prepared → runtime_prepared → done |
+| 接管 `takeover` | current=null 且无未完成操作；生成新 run 并先绑定工位，成功后仅表示源码已准备，任务仍处于 waiting_takeover | 意图 → 绑定 current/空 runtime 归属 → 准备仓库 → 核验并冻结基线 → 检出源码 → source_prepared → done |
 | 归档 `archive` | 当前任务可为 in_progress/completed/interrupted；按事实标记“已完成”或“未完成”，不判完成、不解绑 | intent → stopped → frozen → archive_published → archive_bound → done |
 | 释放 `release` | 研发明确释放、交付/验收核对通过；成功后解绑，任何中途失败保持占用 | intent → terminal_recorded → stopped → frozen → archive_published → cleaned → neutral → unbound → done |
 | 清理 `clean` | in_progress 或 interrupted；研发明确终止并确认处置清单；先确保“未完成”档案有效，再记录终止并删除现场，不把 completed 改成 interrupted | intent → stopped → frozen → archive_published → terminal_recorded → cleaned → neutral → unbound → done |
@@ -186,17 +186,19 @@ ready、unknown、failed 等没有明确未写入证明或有效回读的结果�
 
 此能力引入时保持 epoch 18：仅写入现有回执事件和原字段，不改变历史重放含义。版本 6 清理另行提升至 epoch 19，不将回执格式兼容误当成整个工位可跨代际恢复；当前支持范围以机器兼容清单为准。
 
-## 9. TapData 配方合同
+## 9. TapData 源码 Profile 与运行边界
 
-完整应用 Profile 引用 `projects/tapdata/repositories.json` 仓库 ID，不另存 origin；首版集合为 tapdata、tapdata-common-lib、tapdata-connectors、tapdata-connectors-enterprise、tapdata-enterprise、tapdata-license、tapdata-web、tapdata-application、hazelcast，均位于 `source/tapdata/<repo>`。t-layer3-test 保留项目登记，是明确启用的验证依赖，启用后必须在基线冻结前加入；docs/docs-en 已解除 TapData 项目登记，不参与项目仓库准备和分支对齐。解除登记不删除既有本地仓库、Git refs 或任务材料。其它类型任务的精简 Profile 需单独明确，不能偷偷把完整应用 Profile 降级。
+完整应用源码集 Profile 保留机器 ID `full-application`，引用 `projects/tapdata/repositories.json` 仓库 ID，不另存 origin；首版集合为 tapdata、tapdata-common-lib、tapdata-connectors、tapdata-connectors-enterprise、tapdata-enterprise、tapdata-license、tapdata-web、tapdata-application、hazelcast，均位于 `source/tapdata/<repo>`。t-layer3-test 保留项目登记，是明确启用的验证依赖，启用后必须在基线冻结前加入；docs/docs-en 已解除 TapData 项目登记，不参与项目仓库准备和分支对齐。解除登记不删除既有本地仓库、Git refs 或任务材料。其它类型任务的精简 Profile 需单独明确，不能偷偷缩减完整应用源码集。
 
 分支解析复用 `version-branch-alignments.json` 与现役解析器规则，输出明确 ref/SHA；现有展示回退和 keep-current 结果若无法提供确定执行依据，必须配置明确 ref 后再冻结。产品版本与模块分支不机械同名，目标分支另行登记。已有基线外仓库需要加入时，应先确认 Profile 范围，在冻结前补齐；冻结后发现遗漏而必须扩展完整工程时结束本次处理并明确清理重接，不能修改同 run 清单冒充原环境。
 
-完整配方的目标合同包含 `id/revision/repositories/version_resolver/toolchain_requirements/actions/resources/health_checks`。当前 engineering-profiles.json 仅实现 id/revision/repositories/optional_repositories；其余配方合同尚未实现或未经真实环境验证，不能以删除合同的方式宣称完整应用已交付。actions 应是按目标源码核验的 argv、cwd、环境引用和产物声明，覆盖 prepare/build/start/stop/verify，只引用固定 source/config/runtime 路径。工具版本、Maven profile、Node 包管理器必须从目标分支和已确认环境取得，不猜值；实际启动与健康证据是独立验收层。
+现役 `engineering-profiles.json` 声明源码集合、修订与可选仓库，以及已有目录登记所用的生成目录模式；它不是可执行的应用配方。`source_prepared=true` 表示接管已核验所选仓库并检出冻结源码，不表示依赖安装、工具链、有效配置、数据库、构建产物或应用健康已验证。runtime 的建立和归属登记只是空运行目录准备，不生成这些证据，也不授予实施权限或推进任务完成。
+
+自动化构建、启动、停止及健康检查配方属于后续独立范围，待明确真实场景和目标分支后再设计；当前不增加未消费的 `actions/toolchain_requirements/health_checks` 字段，不以空配置声明能力。工具版本、Maven profile、Node 包管理器须从目标分支和已确认环境取得，不猜值。源码准备的验收与实际应用验收分别记录；本边界不将历史未完成的应用运行验收改为通过，也不豁免业务任务本身要求的构建、联调和产物加载证明。
 
 现役资源登记通过 station_resources.py 接收 directory/process/external/source-disposition 数组并绑定 run；file 只用于已有工具的证据登记，不替代目录归属。生产前创建生成目录，运行资源与可选分支/PR 按第 7、8 节分别处置，归档后不恢复开发或改写正式档案。
 
-FE/TM 工作目录在 runtime 中分开，连接同一已确认 Mongo 环境，端口和 backend_url 必须互相匹配。启动健康检查分别记录 TM 可用、FE 连接成功、适用时 Web 可访问；任务验证另证明本次 connector/Jar 的生产与实际加载文件内容一致。未具备数据库或凭据只报告环境缺口，不伪造启动成功。实现配方时需用真实目标分支验证各入口，本文不声明当前模板已可运行。
+任务方案确需实际运行时，按[TapData 构建运行指引](../../projects/tapdata/runbooks/build-test-and-local-run.md)核验环境并执行：FE/TM 工作目录在 runtime 中分开，连接同一已确认 Mongo 环境，端口和 backend_url 必须互相匹配；记录 TM 可用、FE 连接成功、适用时 Web 可访问，并证明本次 connector/Jar 的生产与实际加载文件内容一致。未具备数据库或凭据只报告环境缺口，不伪造启动成功。上述为独立运行验收要求，不是 takeover 已执行的动作或当前模板已可运行的声明。
 
 ## 10. 现役改造映射与升级
 
@@ -206,7 +208,7 @@ FE/TM 工作目录在 runtime 中分开，连接同一已确认 Mongo 环境，�
 | repository_worktree 与仓库目录 | 独立固定仓库、完整基线与任务变更引用；旧 task/run 路径只在原版本清理 |
 | authorization、quality、CI、evidence、external_sync | 活动路径单份，保留 run/revision 校验，归档后无活动写入；规则仍来自各 Project/Policy |
 | bootstrap、station schema、init、doctor 与兼容性检查 | 创建/识别工位 config/source/runtime 与 Product Root `.archive/`；检查单 current 与未完成操作；诊断不删除未知文件 |
-| TapData Project 与任务 Skill | 完整工程 Profile、分支解析消费、原生运行资源配方和四操作引导；不复制公共状态逻辑 |
+| TapData Project 与任务 Skill | 完整源码 Profile、分支解析消费、原生构建运行指引、资源登记和四操作引导；不复制公共状态逻辑 |
 | docs、故事合同与测试 | 现役与目标区别在实现发布时收敛，按本合同验收并更新使用说明 |
 
 当前状态代际以机器契约中的唯一 `station_state_epoch` 为准。生成与清理机制先在同版本形成完整闭环，不依赖升级器：生成工位→任务接管/归档/释放或清理→station purge→重生成。purge 只移除归属明确的接线与受管状态，保留 source/config、旧工位 archive（若有）及 Product Root `.archive/`；非空 runtime、未知 .agenticops 内容或未完成操作阻止解绑。保留目录可在明确 --reuse-materials 后复用，但不能自动导入配置、历史授权或验收。
@@ -219,7 +221,8 @@ FE/TM 工作目录在 runtime 中分开，连接同一已确认 Mongo 环境，�
 
 | 场景 | 必须观察到的结果 |
 |---|---|
-| 首次接管完整工程 | 全 Profile ref/SHA 可核验，修改仓使用工作分支；真实应用加载本任务产物并验证目标行为 |
+| 首次接管完整源码集 | 全 Profile ref/SHA 可核验并实际检出，source_prepared 为真；runtime 仍为空，无应用健康、实施授权或任务完成的隐含结论；修改仓及工作分支另行登记 |
+| 任务另行要求实际应用运行 | 按任务方案提供真实应用健康、产物加载与目标行为证据；源码接管成功、目录存在及模拟测试均不能替代 |
 | 双仓库信息 | 任务绑定只引用冻结基线；当前 Head/PR 更新不改变它；配套仓违规修改会被发现 |
 | 独占与身份 | current 或未完成操作存在时拒绝新任务；同 run 恢复，新接管新 run；旧回执拒绝 |
 | 两个工位 | 固定源码、Git 元数据、Maven 写入、端口和测试数据互不污染 |

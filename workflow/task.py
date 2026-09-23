@@ -486,7 +486,7 @@ def _check_advance_base(task, target, base, spec):
             from workflow import engineering_baseline
             engineering_baseline.validate(task.get("engineering_baseline"))
             if not task.get("source_prepared"):
-                raise ValueError("完整工程尚未准备完成")
+                raise ValueError("完整工程源码尚未准备完成")
             station_source.inspect(base, task["engineering_baseline"])
         except ValueError as error:
             problems.append("完整工程基线无效：%s" % error)
@@ -625,7 +625,7 @@ def cmd_runtime_path(args):
 
 NEXT_GUIDE = {
     "waiting_takeover": "读取 Jira 初始快照并准备本地版本水印；尽力回写，失败记录警告后继续 advance 进入 task_intake",
-    "task_intake": "checklist/record 完成准入 -> repository add 登记修改范围及工作分支（完整工程已在 takeover 准备）-> 源码分析 -> advance；Jira 状态同步失败记录警告并继续",
+    "task_intake": "checklist/record 完成准入 -> repository add 登记修改范围及工作分支（完整工程源码已在 takeover 准备，不代表应用已运行）-> 源码分析 -> advance；Jira 状态同步失败记录警告并继续",
     "design_review": "基于 source 完整工程形成方案 -> 新任务 source-readiness 核验仓库及目标分支 -> 研发工程师确认 -> workflow/authorization.py grant -> advance；Jira 尽力回写，失败不阻断",
     "implementation": "在授权范围内实现和验证，按项目规则核对实际证据；继续已授权的提交、推送和 Draft PR，汇总外部同步警告",
     "pr_review": "按项目规则完成用例验收与代码审查，核对 next 返回的阻塞项后 advance",

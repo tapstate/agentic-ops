@@ -4,6 +4,8 @@
 
 初始化只生成空工位接线，接管时才准备选定的源码。各工位拥有完整对象和独立 Git 元数据，origin 保留真实远端，不使用 linked worktree、硬链接或 alternates。缓存丢失不影响已准备工位的本地开发；下次需要刷新时重新下载入池。下载失败保留任务操作供原请求重试，不把旧缓存视为最新远端事实。
 
+`full-application` 是完整应用源码集的 Profile ID，不是自动应用启动方案。接管成功及 `source_prepared` 只代表源码准备；空 runtime 的存在不证明工具链、有效配置、数据库、构建或应用健康可用。实际运行仍按任务方案和项目 Runbook 独立执行、验证，边界见[工位合同](../architecture/single-task-station.md#9-tapdata-源码-profile-与运行边界)。
+
 共享同一源码池的工位复用缓存；同名仓库绑定唯一 origin，origin 不一致时失败关闭，不自动隔离。每个池内仓库在刷新和传输期间加锁。工位 purge 保留源码池；缓存不保存任务状态或验收证据。
 
 ## 中央共享 Wiki
