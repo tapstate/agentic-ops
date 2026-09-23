@@ -86,7 +86,7 @@
 维护 Skill 的接线属于源码产品根目录生命周期：
 
 1. `agenticops setup` 首次初始化产品源码目录后，枚举 `skills/` 中的通用 Skill，再通过各 Agent Manifest 的 `skill_target` 生成原生发现链接或视图。
-2. `agenticops update` 同步源码、维护依赖和受信 Hook 后，按当前 Git 内容刷新链接；新增 Skill 自动接入，已删除 Skill 的旧链接只在所有权和目标均匹配时移除。
+2. `agenticops update` 同步源码、维护依赖和受信源码 Git Hook 后，按当前 Git 内容刷新链接；新增 Skill 自动接入，已删除 Skill 的旧链接只在所有权和目标均匹配时移除。
 3. `agenticops station doctor` 在源码产品根目录执行时只读检查维护 Skill 清单、链接目标、越界和同名冲突，不把产品根目录当成业务工位。
 4. Bootstrap 在 `.local/maintenance-skill-wiring.json` 记录生成产物的路径、类型和链接目标，用于检查所有权和安全清理；该文件不提交，也不是 Skill 事实源。
 

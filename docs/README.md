@@ -32,7 +32,7 @@ TapData 集成测试协作由 [tapdata-ci-test](../projects/tapdata/skills/tapda
 
 源码池仅承担下载加速：[工位合同](architecture/single-task-station.md)定义先缓存后独立源码的准备与恢复边界，[工位源码与材料](usage/station-materials.md)说明缓存位置、复用与清理；项目目标保持工位独立性。完整应用源码集 Profile 的现役承诺止于源码准备：[术语表](glossary.md)解释名称，[工位合同](architecture/single-task-station.md#9-tapdata-源码-profile-与运行边界)定义源码与未来运行能力的界线，TapData 构建运行指引负责另行构建、启动和实证的操作依据，不把接管成功当成应用可运行。
 
-原版本清理器自身失效时的一次性空工位恢复归入[维护指引](maintenance-guide.md#旧版空工位的一次性恢复)，只说明产品维护导出与重建边界，不作为产品升级兼容入口。
+维护时的源码测试、候选安装快照和业务工位绑定由[维护指引](maintenance-guide.md#2-初始化测试工位)说明，避免把可变源码直接绑定为业务 Product Root；接管测试 Skill 按现役 Workflow 检查点和原生权限报告停止点。旧 Hook 的同 epoch 接线迁移由[常见问题](usage/faq.md)说明，跨 epoch 仍由更新指引负责原版退出。原版本清理器自身失效时的一次性空工位恢复归入[维护指引](maintenance-guide.md#旧版空工位的一次性恢复)，只说明产品维护导出与重建边界，不作为产品升级兼容入口。
 
 本地执行与 Jira 同步的边界由项目目标和架构定义；质量使用指引负责初始快照、本地确认、非阻断同步及 PR 后警告汇总，契约负责可恢复记录格式。
 
