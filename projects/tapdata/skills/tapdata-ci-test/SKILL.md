@@ -1,11 +1,13 @@
 ---
 name: tapdata-ci-test
-description: 在 TapData 研发中分析集成测试的复用、新增或修改需求，按 Wiki 与任务源码编写用例，执行本地集成测试并分析本地或 PR CI 报告、修复重跑；不处理 Xray 关联 Test 的研发验收或 Wiki 生命周期。
+description: 在 TapData 研发中分析和编写 Java Maven 集成测试，执行本地测试并分析本地或 PR CI 报告、修复重跑；不处理 TapTest 用例生成开发执行、Xray 研发验收或 Wiki 生命周期。
 metadata:
   product: agenticops
 ---
 
 # TapData 集成测试
+
+TapTest（t-layer3-test）的用例生成、脚本开发与运行由 [tapdata-task](../tapdata-task/SKILL.md) 导航至独立项目指引，不进入本技能的 Maven 流程。
 
 由 [tapdata-task](../tapdata-task/SKILL.md) 在方案分析、实现后验证和 PR CI 报告返回时按需调用，也可单独请求分析。先读取当前任务的范围、验收预期、工程基线和已有验证记录；实际源码取工位 source。无 current run 时仅输出“未绑定任务基线”的分析，不修改源码、不执行测试、不创建任务状态；仅有 Wiki 支撑的结论标为未核验。检测到 current run 后沿用主流程的授权、范围和失败记录，不借独立调用重置修复轮次。
 

@@ -1,6 +1,6 @@
 ---
 name: tapdata-task
-description: 在单任务工位执行 TapData Jira 研发任务，覆盖完整工程接管、准入、设计确认、多仓实现、PR/CI、归档释放与精确清理。
+description: 在单任务工位执行 TapData Jira 研发任务，覆盖工程接管、设计、多仓实现、开发运行环境、TapTest 用例生成开发执行、PR/CI 与归档清理。
 metadata:
   product: agenticops
 ---
@@ -13,14 +13,16 @@ metadata:
 
 ## 接管与恢复
 
+需要应用开发环境或启动联调时，读取 [TapData 开发指引](../../runbooks/tapdata-development.md)。需要 TapTest（t-layer3-test）的用例生成、脚本开发、环境配置或执行时，读取 [TapTest 开发指引](../../runbooks/taptest-development.md)，由当前 Agent 在既有任务范围内推进，不依赖业务仓 write-xray-test/write-test-script 技能。Java Maven 集成测试才使用 tapdata-ci-test；下文涉及集成测试技能的调用不包含 TapTest。两者分别返回证据，主流程统一处理授权和质量记录。
+
 一般架构、实现和非集成测试审查需要 Wiki 参考资料时，使用 [tapdata-wiki](../tapdata-wiki/SKILL.md)，按项目 Profile 引用阅读中央共享 Wiki，并以当前工位 source 内任务对应版本源码核验。集成测试需求、设计、编写和报告分析统一先进入 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)，由它按需使用 tapdata-wiki；传递本轮已有且适用的查询结果，避免重复查询。Wiki 由研发显式准备和更新，不增加任务开始刷新步骤；不可用时继续有充分源码依据的工作。
 
 1. 先只读核对 current-task.json 与 operation.json：仅 current=null 且操作不存在或 done 时可接新任务，revision 从当前信封读取。已有任务恢复同一 run；未完成操作按原 operation_id、expected_revision 和请求恢复，不另建任务覆盖。
 2. 新任务先真实读取 Jira 类型、状态、经办人与当前用户，按 Project 准入核验；不凭标题、历史或默认仓推断。确定产品版本/主仓分支以及完整 Profile，缺失时询问该事实。
-3. 空闲工位执行 task.py takeover --issue-key <issue> --task-class <class> --version <已确认主仓分支> --profile full-application --operation-id <op-id> --expected-revision <revision> --dir <station>。可选 t-layer3-test 必须在冻结前用 --optional-repository tapdata/t-layer3-test 加入。模块明确覆盖用 --explicit-branch owner/repo=branch，不能覆盖主仓到不同产品版本。
+3. 空闲工位执行 task.py takeover --issue-key <issue> --task-class <class> --version <已确认主仓分支> --profile full-application --operation-id <op-id> --expected-revision <revision> --dir <station>。已知需要 t-layer3-test 时用 --optional-repository tapdata/t-layer3-test 加入；冻结后新增需求按下述同周期方案返工处理。模块明确覆盖用 --explicit-branch owner/repo=branch，不能覆盖主仓到不同产品版本。
 4. 失败保留原 run/op/request 恢复；完成后 repository context 核验完整 source、ref/SHA 与基线摘要，不把远程页面或缓存当已确认基线。Git 操作只使用 context 的 source 路径，不启动嵌套 Agent。
 5. 修改仓通过 repository add --repo <repo> --work-branch <branch> --base-branch <PR目标> --scope <范围> --verification <方式> --operation-id <新op-id> --expected-revision <revision> --expected-run-id <run> --issue-key <issue> --dir <station> 登记并准备工作分支；只允许冻结基线内仓库。范围变化使旧授权失效。
-6. 续办原 run 不改基线。新 run 续办旧分支时，用 takeover --continuation-input <json> 显式给出以仓库 ID 为键的 work_branch/baseline_sha/expected_head，均需真实 Git/PR 核验；旧报告不自动变成新验收。随后 repository add 使用 --expected-head 核对续办分支。更换工程版本或扩大完整集合须归档清理后重接，不能偷改冻结清单。
+6. 续办原 run 不重写已有基线。新 run 续办旧分支时，用 takeover --continuation-input <json> 显式给出以仓库 ID 为键的 work_branch/baseline_sha/expected_head，均需真实 Git/PR 核验；旧报告不自动变成新验收。随后 repository add 使用 --expected-head 核对续办分支。追加当前 Profile 允许的可选仓库时，使用[同周期方案返工](../../../../docs/usage/task-authorization.md#同周期方案返工)，保留成果并重新确认受影响方案和授权；更换工程版本或超出支持范围时须归档清理后重接，不能偷改冻结清单。
 7. snapshot 固化 Jira 初始事实，jira_watermark 按现役 prepare/complete 尽力回写并回读。进入 task_intake 后，按 Project status_sync 节点执行精确 Jira 同步；未知结果先回读，不阻塞无依赖本地准备。接管成功不是停点，继续到真实方案、权限或事实决策点。
 
 ## 归档、释放和重置工位
@@ -57,7 +59,7 @@ metadata:
 - 接管不要求已创建或关联 Test。完成受控基线后，Agent 与用户在 Q2 确认修复方案、验收场景、预期和验证方式；如何定义、编写、创建或复用 Test 由用户与 Agent 处理，AgenticOps 只引导、记录、跟进和核对。缺陷编码完成后再通过 Jira「已链接工作项」创建或关联 Test；功能的 CI 用例随功能代码开发、执行和验收，不要求独立 Jira Test，已有的关联 Test 仍须核对。使用 `quality.py status/apply` 完成 Q1、Q2 的记录与确认，然后进入 implementation。具体输入和恢复方法见 [质量检查与证据](../../../../docs/usage/quality-checkpoints.md)，项目标准来自当前任务选择的质量配置。
 - 功能与缺陷在相关人工节点先按[统一决策包](../../../../docs/usage/quality-checkpoints.md#jira-全流程统一决策包)执行 jira_status collect，一次收集本阶段全部缺项并记录真实确认；未来结果不提前索要。缺陷处理过程中按 Project 转换配置提前采集 Tests Passed 所需属性：Q2 固化分类和根因依据，仓库确认时形成 Module 依据，Q2/Q4 评论分别形成 Issue Analysis/Fix Details 依据，验收方案确认 Tester、自动化属性和 Xray 关联，版本规划只作为选择 Fix Version 的依据。需要责任人选择的枚举、人员、Module、Fix Version ID 和测试例外不得自动猜测；无法可靠补齐时留到状态同步节点跳过并在 PR Ready 提示。
 - 缺陷 Q2 前用 `task.py record --key fix_plan` 记录根因、范围、修复方式、风险与回滚。修复后用例尚未编码时把 `target_revision` 写为 `pending`；先确认稳定用例/方式，执行前用 `item` 绑定精确代码。只补充代码版本不会要求重新选择同一用例；改步骤、预期、范围或方式仍须重新确认。
-- 一个检查项对应一个用例和一种方式；同检查点可有不同方式的多项。修复前不可执行须说明原因，修复后项未到检查点不算失败。`Manual` 由用户执行；`TapTest` 使用目标工程实际提供的 `write-xray-test`、`write-test-script`；`Unit` 核对产品工程的单元测试和 CI 集成测试。TapCE 当前不纳管，不算通过；若因此无法形成受管验收或 Jira Validator 阻塞，请用户调整 Jira 或验收方案并重新读取事实。AgenticOps 工具不承载用例开发或环境执行器；Agent 使用原生工具按授权编写和执行 CI 用例，Jira Test 与 TapTest 使用现有闭环。
+- 一个检查项对应一个用例和一种方式；同检查点可有不同方式的多项。修复前不可执行须说明原因，修复后项未到检查点不算失败。`Manual` 由用户执行；`TapTest` 按 [TapTest 开发指引](../../runbooks/taptest-development.md)生成、开发和执行用例；`Unit` 核对产品工程的单元测试和 CI 集成测试。TapCE 当前不纳管，不算通过；若因此无法形成受管验收或 Jira Validator 阻塞，请用户调整 Jira 或验收方案并重新读取事实。AgenticOps 工具不承载用例开发或环境执行器；Agent 使用原生工具按授权编写和执行用例，质量接纳仍使用现有闭环。
 - 新增仓库或修改分支、范围、验证方式后必须重新确认和授权。
 - Workflow 检查点失败时展示原因、缺失事实和停止点；先补齐所需事实，不手改状态绕过。原生工具审批由平台处理。
 

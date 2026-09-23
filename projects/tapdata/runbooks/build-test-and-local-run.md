@@ -6,7 +6,7 @@
 
 集成测试的分析、编写、执行与修复由 [tapdata-ci-test](../skills/tapdata-ci-test/SKILL.md) 引导，本文维护操作细节；主任务技能负责调用、质量记录和外部动作。测试规范按需通过 [tapdata-wiki](../skills/tapdata-wiki/SKILL.md) 查询中央共享副本，再核对当前工位 source；不使用质量配置中的历史知识链接寻找备用副本，不在测试阶段自动准备或更新 Wiki。
 
-工位接管先冻结完整工程，repository context 返回独立 source 仓库；以下构建 cwd 使用这些已核验路径。持久环境配置位于 config，有效配置、Maven local、插件、日志和报告进入唯一 runtime。操作前核验 Project 资源配方，禁止写共享 Maven 缓存后声称隔离；归档或退出前登记并核验停止写入者。目录或配方生成不证明真实 TM/FE/Web 已启动，必须以实际健康检查与任务产物加载证据结论为准。
+工位接管先冻结完整工程，repository context 返回独立 source 仓库；以下构建 cwd 使用这些已核验路径。持久环境配置位于 config，有效配置、Maven local、插件、日志和报告进入唯一 runtime。操作前核验实际路径、资源归属和写入者，禁止写共享 Maven 缓存后声称隔离；归档或退出前登记并核验停止写入者。目录生成不证明真实 TM/FE/Web 已启动，必须以实际健康检查与任务产物加载证据结论为准。
 
 ## Maven 配置与任务本地仓库
 
@@ -302,80 +302,7 @@ pnpm dev:daas
 
 ## FE 与 TM 本地运行
 
-建议在项目工位中为 FE 和 TM 使用独立工作目录：
-
-```text
-<station>/workdir/flow-agent
-<station>/workdir/tm
-```
-
-FE 当前入口类：
-
-```text
-io.tapdata.Application
-```
-
-FE 和 TM 的本地运行均必须包含：
-
-```text
-app_type=DAAS
-```
-
-通过 TapData 启动器启动时，启动器会默认注入该环境变量；手动或自定义启动方式必须显式设置。
-
-常见配置名：
-
-```text
-app_type=DAAS
-TAPDATA_MONGO_URI=<mongo-uri>
-TAPDATA_WORK_DIR=.
-backend_url=<tm-api-url>
-```
-
-以下配置仅为结构和值的参考样例，不代表当前用户、工位或任务的真实运行配置。真实启动前，AIAgent 必须向用户展示拟使用的 FE 与 TM 配置，并要求用户修改或逐项确认；未完成确认时不得启动。FE 与 TM 必须连接同一个已确认的 MongoDB 环境，FE 的 `backend_url` 必须指向本次使用的 TM API。
-
-FE 参考配置：
-
-```text
-app_type=DAAS
-backend_url=http://localhost:3000/api/
-TAPDATA_MONGO_URI=mongodb://mongo/tapdata
-TAPDATA_WORK_DIR=.
-```
-
-TM 当前入口类：
-
-```text
-com.tapdata.tm.TMApplication
-```
-
-常见配置名：
-
-```text
-app_type=DAAS
-TAPDATA_MONGO_URI=<mongo-uri>
-tapdata_websocket_port=<unique-port>
-```
-
-TM 参考配置：
-
-```text
-app_type=DAAS
-spring.data.mongodb.default.uri=mongodb://mongo/tapdata
-spring.data.mongodb.log.uri=mongodb://mongo/tapdata
-spring.data.mongodb.obs.uri=mongodb://mongo/tapdata
-```
-
-用户确认时至少需要核对 MongoDB URI、FE `backend_url`、FE 与 TM 工作目录，以及 TM 的 HTTP 和 WebSocket 端口。目标分支如果改用 Spring 配置项，应按目标分支配置执行。相同主机运行多个 TM 时，必须为每个实例分配不同的 HTTP 和 WebSocket 端口。
-
-常见日志位置：
-
-```text
-<workdir>/logs/agent/tapdata-agent.log
-<workdir>/logs/manager/tm-<hostname>.log
-```
-
-路径与目标分支实际启动脚本不一致时，以启动脚本和日志配置为准。
+应用启动顺序、运行目录、命令结构、运行核验与排障统一见 [TapData 开发指引](tapdata-development.md)。本页保留下面的配置输入和模板依据，不再维护独立的启动说明。TapTest 用例生成、脚本开发与执行见 [TapTest 指引](taptest-development.md)，不由 Java CI 测试流程替代。
 
 ## 本地工位配置输入
 
