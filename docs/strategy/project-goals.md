@@ -42,7 +42,7 @@ Standard Contract + Agent/Tool Adapter + Gate Core + Policy + Workflow + Project
 ```
 
 - **Standard Contract** 定义 Gate 请求、判定和 Adapter Manifest 的稳定边界。
-- **Agent Adapter** 只转换平台事件与判定；**Tool Adapter** 只映射 MCP、CLI 操作。
+- **Agent Adapter** 只声明平台指引、接线与启动方式；**Tool Adapter** 只声明原生 MCP 接线，不分类或拦截工具调用。
 - **Gate Core + Policy** 负责标准操作、分级和授权判定；配置是规则事实源。
 - **Workflow** 只承载阶段、授权、CI、证据和恢复等小型确定性逻辑。
 - **Project** 保存项目 Jira 映射、仓库分支、准入、验证和 Runbook。
@@ -53,9 +53,9 @@ Standard Contract + Agent/Tool Adapter + Gate Core + Policy + Workflow + Project
 
 安装目录的 `update` 只跟随安装时记录的分支；它不得自动覆盖本地修改、处理分叉或推送本地提交。
 
-Hook、MCP、Skill 和工作目录配置是 Manifest 与模板生成的产物。Adapter 必须无状态，不得依赖 Workflow、Project 或 Policy，并通过固定代码预算和禁止依赖检查；不支持的平台能力通过 Manifest 声明和保守降级，不增加兼容 Runtime。
+MCP、Skill、平台指引和工作目录配置是 Manifest 与模板生成的产物。Adapter 使用声明式 Manifest 与模板，必须无状态，不得依赖 Workflow、Project 或 Policy；不生成工具 Hook 或兼容 Runtime，不支持的平台启动方式显式声明为手动。
 
-使用者工位不生成通用 Agent 工具 Hook。Git、GitHub、Jira、编辑、构建与测试交给 Agent 原生权限和服务端控制；不承诺检查点能阻止 Agent 在阶段推进前执行这些动作。Workflow 在持锁的状态变更入口校验当前 run、预期阶段及确认绑定；Hook 不重复实现状态机。已有 Hook 接线必须显式确认迁移，普通 start/refresh 不得静默撤除。工位没有可写的门禁档位开关；源码和安装产品根共用这一产品语义。
+使用者工位不生成通用 Agent 工具 Hook。Git、GitHub、Jira、编辑、构建与测试交给 Agent 原生权限和服务端控制；不承诺检查点能阻止 Agent 在阶段推进前执行这些动作。Workflow 在持锁的状态变更入口校验当前 run、预期阶段及确认绑定；不保留通用工具 Hook 执行链。已有 Hook 接线必须显式确认迁移，普通 start/refresh 不得静默撤除。工位没有可写的门禁档位开关；源码和安装产品根共用这一产品语义。
 
 现役架构只有一套产品内核。统一 `agenticops` 入口只负责安装生命周期、工作目录接线、诊断、修复和启动 Agent，不承载门禁、项目规则或任务状态机。不得以角色、命令或兼容为理由恢复 `maintainer/`、`developer/` 两个工作面，也不得恢复 `ao-work` 大一统 Runtime。未来若增加统一入口，只能是薄启动或诊断入口，不能成为规则和业务能力中心。
 
@@ -72,7 +72,7 @@ Hook、MCP、Skill 和工作目录配置是 Manifest 与模板生成的产物。
 
 当前 run 保存 Jira 初始快照、用户确认后的有效执行事实及同步差异。Jira 回读不自动覆盖本地确认；版本不推导 Git 分支。评论、水印、版本与状态同步失败只形成待办，不阻止不依赖它的本地阶段。未知结果先核对原操作，PR 后总结统一披露跳过处理与警告；本地完成不代表 Jira 已同步或验收通过。
 
-Hook 是流程控制点，不是本机安全沙箱；凭证最小化、服务端保护、CI 和人工审查仍是最终安全边界。AgenticOps 故障不得静默绕过或伪造成功。
+流程检查点不是本机安全沙箱；凭证最小化、服务端保护、CI 和人工审查仍是最终安全边界。AgenticOps 故障不得静默绕过或伪造成功。
 
 方案确认在流程检查点核验，不再代表每次外部调用均经过 AgenticOps 授权。Jira 同步保留准备、原生调用与结果回读，取消通过 Hook 强制单次调用的保证；结果未知必须先回读。直接改写本地状态文件不属于受支持入口，检查点与本地记录也不提供身份认证或防篡改安全边界。
 

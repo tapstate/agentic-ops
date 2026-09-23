@@ -65,6 +65,19 @@ class StationCompatibilityTests(unittest.TestCase):
                 self.fail("旧工位不能进入写入区")
         self.assertEqual(before, path.read_bytes())
 
+    def test_hook_retirement_rejects_epoch_nineteen_without_adopting_state(self):
+        current = json.loads((ROOT / "contracts/station-state-compatibility.json").read_text())
+        (self.product_root / "contracts/station-state-compatibility.json").write_text(json.dumps(current))
+        path = self.station / ".agenticops/init.json"
+        path.write_text(json.dumps({"station_state_epoch": 19}))
+        before = path.read_bytes()
+        with self.assertRaises(ValueError):
+            compatibility.require_station_can_adopt(self.product_root, self.station)
+        with self.assertRaises(ValueError):
+            with task_store.task_state_lock(self.station):
+                self.fail("退役版本不能写入依赖旧 Hook 的工位")
+        self.assertEqual(before, path.read_bytes())
+
     def test_epoch_ten_rejected_by_replan_epoch_eleven(self):
         (self.product_root / "contracts/station-state-compatibility.json").write_text(json.dumps(manifest(11)))
         path = self.station / ".agenticops/init.json"
@@ -107,7 +120,7 @@ class StationCompatibilityTests(unittest.TestCase):
 
     def test_fingerprint_epoch_rejects_old_state_and_bound_upgrade_or_rollback(self):
         current = json.loads((ROOT / "contracts/station-state-compatibility.json").read_text())
-        self.assertEqual(19, current["station_state_epoch"])
+        self.assertEqual(20, current["station_state_epoch"])
         (self.product_root / "contracts/station-state-compatibility.json").write_text(json.dumps(current))
         path = self.station / ".agenticops/init.json"
         path.write_text(json.dumps({"station_state_epoch": 14}))

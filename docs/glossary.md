@@ -9,8 +9,8 @@
 | 项目工位 | 业务项目的本地工作目录。一工位、一套完整 source、一个 current；config/runtime 分离持久配置与运行现场，不复制中央规则。正式档案保存在绑定 Product Root 的 `.archive/`。 |
 | 产品项目（Project） | 一个业务项目的适配配置，位于 `projects/<project>/`，包含 Jira、仓库、分支、准入规则和 Runbook。 |
 | Agent | 实际执行研发任务的平台，例如 Codex 或 Claude。 |
-| Agent Adapter | 把 Agent 平台事件转换为 AgenticOps 标准操作的无状态适配层。 |
-| Tool Adapter | 把 MCP、CLI 等工具操作映射为标准操作的无状态适配层。 |
+| Agent Adapter | 通过 Manifest 与模板声明 Agent 接线、指引和启动方式的无状态适配层，不执行工具 Hook。 |
+| Tool Adapter | 声明原生 MCP 接线的无状态适配层；旧 MCP/CLI 分类执行链已退役。 |
 | 标准契约（Standard Contract） | `contracts/` 中版本化的请求、判定和 Manifest 协议，是 Adapter 与 Gate 的共同边界。 |
 | Gate | 标准判定内核，供确定性入口复用上下文与规则检查；使用者原生工具不再自动接入。 |
 | Policy | 公司级操作、连续性规则与通用非阻断调优策略，位于 `policies/`；不写业务项目特例。 |

@@ -15,7 +15,7 @@ PROD-003 覆盖初始 Jira 快照、本地确认与非阻断同步的恢复验�
 | 故事 | 职责 |
 |---|---|
 | [PROD-001 安装并接入多种 Agent](prod-001-install-and-connect-agent.md) | 产品根目录、单工位生成与清理、材料保留与多 Agent 接线 |
-| [PROD-002 执行确定性流程检查点](prod-002-policy-gate.md) | 流程状态检查、方案确认绑定、原生工具边界与旧 Hook 显式迁移 |
+| [PROD-002 执行确定性流程检查点](prod-002-policy-gate.md) | 流程状态检查、方案确认绑定、显式 Gate API 与原生工具边界；退役升级复用原版本退出和重建合同 |
 | [PROD-003 推进并恢复多仓库研发任务](prod-003-multi-repository-task.md) | 完整独立工程、单 current 与多工位隔离、接管执行编号和分支身份、质量检查点、非阻断 Jira 状态同步、PR Ready 核对、恢复清理及任务证据 |
 | [PROD-004 低成本适配产品项目](prod-004-adapt-project.md) | 项目 Profile、统一仓库目录、准入规则与 Runbook 适配 |
 | [INT-001 审查并发布 AgenticOps](int-001-release-governance.md) | 仓库内部审查、Hook 分类信任根、发布与版本治理 |

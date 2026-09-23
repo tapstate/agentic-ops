@@ -49,21 +49,17 @@ cp -R "$repo_root/.githooks" "$source_repo/.githooks"
 cp "$repo_root/.agentic-ops-source" "$source_repo/.agentic-ops-source"
 cp "$repo_root/.gitignore" "$source_repo/.gitignore"
 mkdir -p "$source_repo/adapters/agents/test-agent/templates"
-printf '%s\n' '#!/usr/bin/env python3' > "$source_repo/adapters/agents/test-agent/hook.py"
 cat > "$source_repo/adapters/agents/test-agent/manifest.json" <<'JSON'
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "name": "test-agent",
   "adapter_version": 1,
-  "entrypoint": "adapters/agents/test-agent/hook.py",
-  "hook": {"standard_event": "before_operation", "tool_kinds": ["shell"], "timeout_seconds": 15, "failure_mode": "deny", "native": {"event": "PreToolUse", "tool_matchers": {"shell": "Shell"}}},
-  "capabilities": {"decisions": ["allow", "deny"], "ask_fallback": "deny_with_guidance"},
   "artifacts": [{"template": "adapters/agents/test-agent/templates/settings.json", "target": ".test-agent/settings.json"}],
   "launch": {"mode": "command", "command": "test-agent-cli", "message": "测试 Agent 已接线。"},
   "skill_target": null
 }
 JSON
-printf '{"hooks":{"__AGENTIC_OPS_HOOK_NATIVE_EVENT__":[{"matcher":"__AGENTIC_OPS_HOOK_NATIVE_TOOL_MATCHER__","hooks":[{"type":"command","command":"python3 __AGENTIC_OPS_HOME__/adapters/agents/test-agent/hook.py","timeout":"__AGENTIC_OPS_HOOK_TIMEOUT_SECONDS__"}]}]}}\n' \
+printf '%s\n' '{"instruction_root":"__AGENTIC_OPS_HOME__","project":"__AGENTIC_OPS_PROJECT__"}' \
   > "$source_repo/adapters/agents/test-agent/templates/settings.json"
 cp "$repo_root/agenticops" "$source_repo/agenticops"
 chmod +x "$source_repo/agenticops"
@@ -494,28 +490,15 @@ for name in ("tapdata-task", "tapdata-wiki", "tapdata-ci-test"):
         assert (link / "SKILL.md").is_file()
 PY
 python3 - "$install_root" <<'PY'
-import ast
 import json
 import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
 manifest = json.loads((root / "adapters/agents/codex/manifest.json").read_text(encoding="utf-8"))
-tree = ast.parse((root / "adapters/agents/codex/hook.py").read_text(encoding="utf-8"))
-versions = [
-    node.value.value
-    for node in tree.body
-    if isinstance(node, ast.Assign)
-    and any(isinstance(target, ast.Name) and target.id == "ADAPTER_VERSION" for target in node.targets)
-    and isinstance(node.value, ast.Constant)
-    and type(node.value.value) is int
-]
-assert versions == [manifest["adapter_version"]]
-
-mappings = json.loads((root / "adapters/tools/mcp-operations.json").read_text(encoding="utf-8"))
-assert "readonly_tools" not in mappings
-assert "readonly_prefixes" not in mappings
-assert set(mappings["mappings"]) == {"github", "atlassian"}
+assert manifest["schema_version"] == 3
+assert not {"hook", "entrypoint", "capabilities"} & set(manifest)
+assert not list((root / "adapters").rglob("*.py"))
 
 profile = json.loads((root / "projects/tapdata/profile.json").read_text(encoding="utf-8"))
 transition = profile["transitions"]["start_progress"]
@@ -606,9 +589,9 @@ import sys
 from pathlib import Path
 
 document = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-handler = document["hooks"]["PreToolUse"][0]["hooks"][0]
-assert document["hooks"]["PreToolUse"][0]["matcher"] == "Shell"
-assert handler["timeout"] == 15
+assert document["project"] == "tapdata"
+assert Path(document["instruction_root"]).is_dir()
+assert "hooks" not in document
 PY
 "$install_root/agenticops" station doctor --station "$station" >/dev/null
 "$station/agenticops" station doctor >/dev/null

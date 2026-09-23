@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AgenticOps 场景测试：验证标准 Gate 与 Claude/Codex Adapter 语义一致。
+"""AgenticOps 场景测试：验证显式标准 Gate 的授权、策略和审计边界。
 
 运行：python3 tests/test_gate.py
 无第三方依赖。若本机存在 opa，会额外做 Python 评估器与 Rego 的一致性校验。
@@ -16,8 +16,6 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CLAUDE_HOOK = ROOT / "adapters" / "agents" / "claude" / "hook.py"
-CODEX_HOOK = ROOT / "adapters" / "agents" / "codex" / "hook.py"
 GATE_RUNNER = ROOT / "gate" / "runner.py"
 sys.path.insert(0, str(ROOT))
 from gate import engine  # noqa: E402
@@ -50,69 +48,6 @@ def ready_watermark(issue_key, run_id, value):
             "native_request": {"issue_key": issue_key, "fields": {field_id: value}},
         },
     }
-
-
-def run_hook(tool_name, tool_input, cwd, env_extra=None):
-    out = run_hook_output(tool_name, tool_input, cwd, env_extra)
-    hso = out.get("hookSpecificOutput")
-    return hso["permissionDecision"] if hso else "passthrough"
-
-
-def run_hook_output(tool_name, tool_input, cwd, env_extra=None):
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "tool_name": tool_name,
-        "tool_input": tool_input,
-        "cwd": str(cwd),
-    }
-    env = dict(os.environ)
-    if env_extra:
-        env.update(env_extra)
-    proc = subprocess.run(
-        [sys.executable, str(CLAUDE_HOOK)],
-        input=json.dumps(payload),
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=30,
-    )
-    assert proc.returncode == 0, proc.stderr
-    out = json.loads(proc.stdout)
-    return out
-
-
-def run_codex(tool_name, tool_input, cwd, env_extra=None):
-    out = run_codex_output(tool_name, tool_input, cwd, env_extra)
-    if out is None:
-        return "allow"
-    return out["hookSpecificOutput"]["permissionDecision"]
-
-
-def run_codex_output(tool_name, tool_input, cwd, env_extra=None):
-    payload = {
-        "hook_event_name": "PreToolUse",
-        "tool_name": tool_name,
-        "tool_input": tool_input,
-        "cwd": str(cwd),
-    }
-    env = dict(os.environ)
-    if env_extra:
-        env.update(env_extra)
-    proc = subprocess.run(
-        [sys.executable, str(CODEX_HOOK)],
-        input=json.dumps(payload),
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=30,
-    )
-    assert proc.returncode == 0, proc.stderr
-    if not proc.stdout.strip():
-        return None
-    out = json.loads(proc.stdout)
-    output = out.get("hookSpecificOutput")
-    assert output and output["hookEventName"] == "PreToolUse", out
-    return out
 
 
 def run_standard(request, env_extra=None):
@@ -271,6 +206,22 @@ def prepare_task_worktree(ws, issue_key="TAP-123"):
     return worktree
 
 
+def decision(operation, ws, **target):
+    """只构造标准请求，不解析原生工具或命令。"""
+    return run_standard({
+        "protocol_version": 1, "event": "before_operation",
+        "source": {"agent": "test", "adapter": "standard-api", "adapter_version": 1},
+        "cwd": str(ws), "operations": [operation], "target": target,
+    })["decision"]
+
+
+def push(ws, **target):
+    refs = {"push_source_ref": "feature/TAP-123",
+            "push_destination_ref": "refs/heads/feature/TAP-123", "push_target_branch": "feature/TAP-123"}
+    refs.update(target)
+    return decision("git_push", ws, **refs)
+
+
 def main():
     ws = make_station()
     try:
@@ -298,116 +249,6 @@ def main():
             check("源码产品根目录审计进入 .local", (product_root / ".local/gate/events.jsonl").is_file(), True)
             check("源码产品根目录不生成工位状态", (product_root / ".agenticops").exists(), False)
 
-        # ---- 未授权阶段 -------------------------------------------------
-        check("只读 bash（git status）不受控", run_hook("Bash", {"command": "git status"}, ws), "passthrough")
-        check("重定向上下文的已知只读 Git 核验不受控", run_hook("Bash", {"command": "git -C /other rev-parse HEAD"}, ws), "passthrough")
-        check("git-dir 下的已知只读 Git 核验不受控", run_hook("Bash", {"command": "git --git-dir=/other/repo.git log -1"}, ws), "passthrough")
-        check("只读 git -c 核验不受控", run_hook("Bash", {"command": "git -c color.ui=false status --short"}, ws), "passthrough")
-        check("未映射 Git 子命令交还 Agent 原生权限", run_hook("Bash", {"command": "git -C /other unknown-subcommand"}, ws), "passthrough")
-        check("Git alias 子命令交还 Agent 原生权限", run_hook("Bash", {"command": "git ship feature/TAP-123"}, ws), "passthrough")
-        check("变量展开命令位交还 Agent 原生权限", run_hook("Bash", {"command": "G=git; $G push origin feature/TAP-123"}, ws), "passthrough")
-        check("带引号变量别名交还 Agent 原生权限", run_hook("Bash", {"command": "G='git'; \"$G\" push origin feature/TAP-123"}, ws), "passthrough")
-        check("路径变量别名交还 Agent 原生权限", run_hook("Bash", {"command": "P=/usr/bin/git; $P push origin feature/TAP-123"}, ws), "passthrough")
-        check("未解析的变量命令位交还 Agent 原生权限", run_hook("Bash", {"command": "${G} push origin feature/TAP-123"}, ws), "passthrough")
-        check("git add 本地暂存交还 Agent 原生权限", run_hook("Bash", {"command": "git add manager/tm/src/main/resources/application-default.yml"}, ws), "passthrough")
-        check("Codex git add 本地暂存交还原生权限", run_codex("Bash", {"command": "git add manager/tm/src/main/resources/application-default.yml"}, ws), "allow")
-        check("git -C 本地暂存交还 Agent 原生权限", run_hook("Bash", {"command": "git -C /tmp/task-worktree add manager/tm/src/main/resources/application-default.yml"}, ws), "passthrough")
-        check("Codex git -C 本地暂存交还原生权限", run_codex("Bash", {"command": "git -C /tmp/task-worktree add manager/tm/src/main/resources/application-default.yml"}, ws), "allow")
-        check("换行后的保护分支 push 不得漏检", run_hook("Bash", {"command": "git status\ngit push origin main"}, ws), "deny")
-        check("后台分隔后的强推仍被识别", run_hook("Bash", {"command": "git status & git push -f origin feature/TAP-123"}, ws), "deny")
-        check("Shell 控制结构交还 Agent 原生权限", run_hook("Bash", {"command": "if git status; then git push origin feature/TAP-123; fi"}, ws), "passthrough")
-        check("sh -c 子 Shell 交还 Agent 原生权限", run_hook("Bash", {"command": "sh -c 'git push origin feature/TAP-123'"}, ws), "passthrough")
-        check("sudo 包装器交还 Agent 原生权限", run_hook("Bash", {"command": "sudo git push origin feature/TAP-123"}, ws), "passthrough")
-        check("Jira 评论（free）放行", run_hook("mcp__atlassian__add_comment", {"issueKey": "TAP-123"}, ws), "allow")
-        check("无授权时 git commit 需确认", run_hook("Bash", {"command": "git commit -m 'x'"}, ws), "ask")
-        check("无授权时 git push 需确认", run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws), "ask")
-        check("无授权时 Jira transition 需确认", run_hook("mcp__atlassian__transition_issue", {"issueKey": "TAP-123"}, ws), "ask")
-        check(
-            "没有 当前任务时工位操作 暂停",
-            run_hook(
-                "Bash",
-                {"command": "python3 workflow/task.py archive --issue-key TAP-123"},
-                ws,
-            ),
-            "ask",
-        )
-        occupy(ws, "TAP-123")
-        check(
-            "当前任务归档仍需明确确认",
-            run_hook(
-                "Bash",
-                {"command": "python3 workflow/task.py archive --issue-key TAP-123"},
-                ws,
-            ),
-            "ask",
-        )
-        check(
-            "直接入口与小写 issue key 不跳过确认",
-            run_hook(
-                "Bash",
-                {"command": "workflow/task.py archive --issue-key tap-123"},
-                ws,
-            ),
-            "ask",
-        )
-        check(
-            "重复同值 issue key 的 归档停止",
-            run_hook(
-                "Bash",
-                {"command": "workflow/task.py archive --issue-key TAP-123 --issue-key=TAP-123"},
-                ws,
-            ),
-            "ask",
-        )
-        check(
-            "重复异值 issue key 的 归档停止",
-            run_hook(
-                "Bash",
-                {"command": "workflow/task.py archive --issue-key=TAP-123 --issue-key TAP-999"},
-                ws,
-            ),
-            "ask",
-        )
-        check(
-            "重复 dir 的 归档停止",
-            run_hook(
-                "Bash",
-                {"command": "workflow/task.py archive --dir ws-a --issue-key TAP-123 --dir=ws-b"},
-                ws,
-            ),
-            "ask",
-        )
-        check(
-            "工位操作 必须显式指定 issue key",
-            run_hook(
-                "Bash",
-                {"command": "python3 workflow/task.py archive"},
-                ws,
-            ),
-            "ask",
-        )
-        check(
-            "复用已有分支仍需人工确认",
-            run_hook(
-                "Bash",
-                {"command": "python3 workflow/task.py archive --issue-key TAP-123 --reuse-existing-branch"},
-                ws,
-            ),
-            "ask",
-        )
-        check(
-            "clean 仍需人工确认",
-            run_hook(
-                "Bash",
-                {"command": "python3 workflow/task.py clean --issue-key TAP-123"},
-                ws,
-            ),
-            "ask",
-        )
-        check("直接 git worktree add 需人工确认", run_hook("Bash", {"command": "git worktree add /tmp/x"}, ws), "ask")
-        check("直接 git clone 需人工确认", run_hook("Bash", {"command": "git clone git@example.test:a/b.git"}, ws), "ask")
-        check("直接 git fetch 需人工确认", run_hook("Bash", {"command": "git fetch origin develop"}, ws), "ask")
-        check("直接工位清理 需人工确认", run_hook("Bash", {"command": "workflow/task.py clean --issue-key TAP-123"}, ws), "ask")
         lifecycle = run_standard({
             "protocol_version": 1,
             "event": "before_operation",
@@ -418,150 +259,7 @@ def main():
         check("工位操作需人工确认", lifecycle["decision"], "ask")
         check("工位操作不借用任务授权", lifecycle["reason_code"], "station_confirmation_required")
         check("归档不授权删除", "归档不授予删除权限" in lifecycle["required_action"], True)
-        check("工位解绑 Hook 仍需确认", run_hook("Bash", {"command": "./agenticops station purge --yes"}, ws), "ask")
-        check("直接 task clean 需人工确认", run_hook("Bash", {"command": "workflow/task.py clean --issue-key TAP-123 --yes"}, ws), "ask")
-        check("python task clean 需人工确认", run_hook("Bash", {"command": "python3 workflow/task.py clean --issue-key TAP-123 --yes"}, ws), "ask")
-        check("python -m task clean 仍需人工确认", run_hook("Bash", {"command": "python3 -m workflow.task clean --issue-key TAP-123 --yes"}, ws), "ask")
-        check("紧凑 python -m task clean 仍需人工确认", run_hook("Bash", {"command": "python3 -mworkflow.task clean --issue-key TAP-123 --yes"}, ws), "ask")
-        check("python -m 工位清理 仍需人工确认", run_hook("Bash", {"command": "python3 -m workflow.task clean --issue-key TAP-123"}, ws), "ask")
-        check("python -m task 归档需确认", run_hook("Bash", {"command": "python3 -m workflow.task archive --issue-key tap-123"}, ws), "ask")
-        check("未知 Python 模块交还 Agent 原生权限", run_hook("Bash", {"command": "python3 -m workflow.other purge --issue-key TAP-123 --yes"}, ws), "passthrough")
-        check("Python -c 内联执行交还 Agent 原生权限", run_hook("Bash", {"command": "python3 -c 'print(1)'"}, ws), "passthrough")
-        check("Python stdin 执行交还 Agent 原生权限", run_hook("Bash", {"command": "python3 -"}, ws), "passthrough")
-        check("未登记 Python 脚本交还 Agent 原生权限", run_hook("Bash", {"command": "python3 unregistered.py"}, ws), "passthrough")
-        check("Perl 内联执行交还 Agent 原生权限", run_hook("Bash", {"command": "perl -we 'print 1'"}, ws), "passthrough")
-        check("Perl 脚本文件交还 Agent 原生权限", run_hook("Bash", {"command": "perl payload.pl"}, ws), "passthrough")
-        check("Ruby 内联执行交还 Agent 原生权限", run_hook("Bash", {"command": "ruby -e 'puts 1'"}, ws), "passthrough")
-        check("Ruby 脚本文件交还 Agent 原生权限", run_hook("Bash", {"command": "ruby payload.rb"}, ws), "passthrough")
-        check("Node 内联执行交还 Agent 原生权限", run_hook("Bash", {"command": "node --eval='console.log(1)'"}, ws), "passthrough")
-        check("Node 脚本文件交还 Agent 原生权限", run_hook("Bash", {"command": "node payload.js"}, ws), "passthrough")
-        check("nodejs 内联执行交还 Agent 原生权限", run_hook("Bash", {"command": "nodejs -e 'console.log(1)'"}, ws), "passthrough")
-        check("nodejs 脚本文件交还 Agent 原生权限", run_hook("Bash", {"command": "nodejs payload.js"}, ws), "passthrough")
-        check("Python 只读版本查询不受控", run_hook("Bash", {"command": "python3 --version"}, ws), "passthrough")
-        check("nodejs 只读版本查询不受控", run_hook("Bash", {"command": "nodejs --version"}, ws), "passthrough")
-        check("带值 Python 长选项后的 purge 仍需人工确认", run_hook("Bash", {"command": "python3 --check-hash-based-pycs always workflow/task.py clean --issue-key TAP-123 --yes"}, ws), "ask")
-        check("git message 值 --help 不旁路 commit", run_hook("Bash", {"command": "git commit -m --help"}, ws), "ask")
-        check("gh title 值 --help 不旁路建 PR", run_hook("Bash", {"command": "gh pr create --title --help"}, ws), "ask")
-        check("git 真实 help 不受控", run_hook("Bash", {"command": "git commit -a --help"}, ws), "passthrough")
-        check("gh 真实 help 不受控", run_hook("Bash", {"command": "gh pr create --draft --help"}, ws), "passthrough")
-        check("task repository --help 不误拦", run_hook("Bash", {"command": "python3 workflow/task.py archive --help"}, ws), "passthrough")
-        check("repository context 不误拦", run_hook("Bash", {"command": "python3 workflow/task.py repository context --issue-key TAP-123 --json"}, ws), "passthrough")
-        readonly_composition = (
-            "rg --files .agenticops %s | rg '(jira|adapter|gate|runner|task)' && "
-            "rg -n -C 3 'jira|runner|gate|def advance|def cmd_advance' %s %s .agenticops"
-            % (ROOT / "workflow", ROOT / "workflow" / "task.py", ROOT / "workflow" / "task_store.py")
-        )
-        check("Claude 复合只读检索不误拦", run_hook("Bash", {"command": readonly_composition}, ws), "passthrough")
-        check("Codex 复合只读检索不误拦", run_codex("Bash", {"command": readonly_composition}, ws), "allow")
-        glob_search = (
-            "git -C /tmp/task-worktree status --short --branch && "
-            "rg -n -i --glob '*.java' --glob '*.kt' --glob '*.xml' "
-            "--glob '*.yml' --glob '*.yaml' --glob '*.properties' "
-            "'elasticsearch|logwarehouse' ."
-        )
-        check("Claude 含点路径的复合只读检索不误拦", run_hook("Bash", {"command": glob_search}, ws), "passthrough")
-        check("Codex 含点路径的复合只读检索不误拦", run_codex("Bash", {"command": glob_search}, ws), "allow")
-        multi_repository_readonly = (
-            "git -C /tmp/task-worktree-a status --short --branch && "
-            "git -C /tmp/task-worktree-b status --short --branch && "
-            "rg -n -i 'elasticsearch|logwarehouse' /tmp/task-worktree-a /tmp/task-worktree-b"
-        )
-        check("Claude 双 worktree 只读核验不误拦", run_hook("Bash", {"command": multi_repository_readonly}, ws), "passthrough")
-        check("Codex 双 worktree 只读核验不误拦", run_codex("Bash", {"command": multi_repository_readonly}, ws), "allow")
-        for name, command in (
-            ("cd", "cd /tmp/task-worktree && git push origin feature/TAP-123"),
-            ("GIT_DIR", "export GIT_DIR=/tmp/task-worktree/.git && git push origin feature/TAP-123"),
-            ("cd 后 gh PR", "cd /tmp/task-worktree && gh pr edit 1 --repo acme/widget --title t"),
-        ):
-            check("宽门禁：Claude %s 前置上下文交还原生权限" % name, run_hook("Bash", {"command": command}, ws), "passthrough")
-            check("宽门禁：Codex %s 前置上下文交还原生权限" % name, run_codex("Bash", {"command": command}, ws), "allow")
-        check("只读检查工位根入口不误拦", run_hook("Bash", {"command": "sed -n '1,200p' ./agenticops"}, ws), "passthrough")
-        check("本地 sed 修改交还 Agent 原生权限", run_hook("Bash", {"command": "sed -n 1p -i.bak ./agenticops"}, ws), "passthrough")
-        check("本地重定向交还 Agent 原生权限", run_hook("Bash", {"command": "cat source > ./agenticops"}, ws), "passthrough")
-        check("管道内未映射操作交还 Agent 原生权限", run_hook("Bash", {"command": "cat ./agenticops | sh -s station purge --yes"}, ws), "passthrough")
-        check("rg 预处理交还 Agent 原生权限", run_hook("Bash", {"command": "rg --pre './agenticops station purge --yes' x ./agenticops"}, ws), "passthrough")
-        check("命令替换交还 Agent 原生权限", run_hook("Bash", {"command": "head -n \"$(./agenticops station purge --yes)\" ./agenticops"}, ws), "passthrough")
-        check("rg 配置交还 Agent 原生权限", run_hook("Bash", {"command": "RIPGREP_CONFIG_PATH=/tmp/rg.conf rg x ./agenticops"}, ws), "passthrough")
-        check("repository roots 不误拦", run_hook("Bash", {"command": "python3 workflow/repository_worktree.py roots --issue-key TAP-123"}, ws), "passthrough")
-        check("execution-root 不误拦", run_hook("Bash", {"command": "python3 workflow/repository_worktree.py execution-root --issue-key TAP-123"}, ws), "passthrough")
-        check("Atlassian 当前用户只读查询不误拦", run_hook("mcp__atlassian__atlassianUserInfo", {}, ws), "passthrough")
-
-        target_ws = make_station()
-        try:
-            occupy(target_ws, "TAP-777")
-            check(
-                "绝对 --dir 按目标工位确认归档",
-                run_hook(
-                    "Bash",
-                    {"command": "python3 workflow/task.py archive --issue-key tap-777 --dir %s" % target_ws},
-                    ws,
-                ),
-                "ask",
-            )
-            relative_target = os.path.relpath(target_ws, ws)
-            check(
-                "相对 --dir 按 Hook cwd 解析目标工位",
-                run_hook(
-                    "Bash",
-                    {"command": "python3 workflow/task.py archive --issue-key TAP-777 --dir %s" % relative_target},
-                    ws,
-                ),
-                "ask",
-            )
-            check(
-                "前置只读 Workflow segment 不污染归档目标",
-                run_hook(
-                    "Bash",
-                    {"command": "workflow/task.py status --issue-key TAP-999 --dir wsA && workflow/task.py archive --issue-key tap-777 --dir %s" % target_ws},
-                    ws,
-                ),
-                "ask",
-            )
-            check(
-                "跨工位不得借用 Hook cwd 的 当前任务",
-                run_hook(
-                    "Bash",
-                    {"command": "python3 workflow/task.py archive --issue-key TAP-123 --dir %s" % target_ws},
-                    ws,
-                ),
-                "ask",
-            )
-            check(
-                "复合 prepare 不得用单一 target 代表多个工位",
-                run_hook(
-                    "Bash",
-                    {"command": "workflow/task.py archive --issue-key TAP-123 && workflow/task.py archive --issue-key TAP-777 --dir %s" % target_ws},
-                    ws,
-                ),
-                "ask",
-            )
-            check(
-                "目标工位 Gate 事件写入目标任务审计",
-                task_store.events_path(target_ws, "TAP-777").is_file(),
-                True,
-            )
-        finally:
-            shutil.rmtree(target_ws, ignore_errors=True)
-
-        unbound_target = Path(tempfile.mkdtemp(prefix="aogate-unbound-"))
-        try:
-            check(
-                "未绑定目标工位停止 prepare",
-                run_hook(
-                    "Bash",
-                    {"command": "workflow/task.py archive --issue-key TAP-404 --dir %s" % unbound_target},
-                    ws,
-                ),
-                "ask",
-            )
-            check(
-                "Gate 不在未绑定目标目录创建审计状态",
-                (unbound_target / ".agenticops").exists(),
-                False,
-            )
-        finally:
-            shutil.rmtree(unbound_target, ignore_errors=True)
-
+        occupy(ws, "TAP-123")
         missing_auth = run_standard({
             "protocol_version": 1,
             "event": "before_operation",
@@ -601,24 +299,22 @@ def main():
         task_worktree = prepare_task_worktree(ws)
         check(
             "当前会话通过已绑定 git -C worktree commit 放行",
-            run_hook("Bash", {"command": "git -C %s commit -m x" % task_worktree}, ws),
+            decision("git_commit", ws, git_cwd=str(task_worktree)),
             "allow",
         )
         check(
             "当前会话通过已绑定 git -C worktree push 放行",
-            run_hook(
-                "Bash", {"command": "git -C %s push origin feature/TAP-123" % task_worktree}, ws
-            ),
+            push(ws, git_cwd=str(task_worktree)),
             "allow",
         )
         other_worktree = make_git_repository(ws / "other-worktree")
         check(
             "同仓同分支的其它 git -C 路径不得借用授权",
-            run_hook("Bash", {"command": "git -C %s commit -m x" % other_worktree}, ws),
+            decision("git_commit", ws, git_cwd=str(other_worktree)),
             "ask",
         )
-        check("授权后 git commit 放行", run_hook("Bash", {"command": "git commit -m 'x'"}, ws), "allow")
-        check("未配置独立 pushurl 时按 fetch URL 放行", run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws), "allow")
+        check("授权后 git commit 放行", decision("git_commit", ws), "allow")
+        check("未配置独立 pushurl 时按 fetch URL 放行", push(ws), "allow")
         rewrite_key = "url.git@evil.test:acme/widget.git.insteadOf"
         subprocess.run(
             [
@@ -630,7 +326,7 @@ def main():
         )
         check(
             "insteadOf 同时改写 fetch/push 到异主机时拒绝",
-            run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws),
+            push(ws),
             "deny",
         )
         subprocess.run(
@@ -646,7 +342,7 @@ def main():
         )
         check(
             "多个 raw remote.origin.url 时拒绝",
-            run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws),
+            push(ws),
             "deny",
         )
         subprocess.run(
@@ -659,7 +355,7 @@ def main():
         )
         check(
             "无法识别的 raw remote.origin.url 时拒绝",
-            run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws),
+            push(ws),
             "deny",
         )
         subprocess.run(
@@ -683,7 +379,7 @@ def main():
         )
         check(
             "fetch 正常但实际 pushurl 指向其它仓库时拒绝",
-            run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws),
+            push(ws),
             "deny",
         )
         subprocess.run(
@@ -709,7 +405,7 @@ def main():
         )
         check(
             "origin 存在多个 pushurl 时拒绝",
-            run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws),
+            push(ws),
             "deny",
         )
         subprocess.run(
@@ -725,7 +421,7 @@ def main():
             cwd=ws,
             check=True,
         )
-        check("唯一且匹配授权的 pushurl 放行", run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws), "allow")
+        check("唯一且匹配授权的 pushurl 放行", push(ws), "allow")
         subprocess.run(
             ["git", "config", "--unset-all", "remote.origin.pushurl"], cwd=ws, check=True
         )
@@ -736,7 +432,7 @@ def main():
         )
         check(
             "唯一 evil raw/fetch/push 同 slug 仍不匹配授权 endpoint",
-            run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws),
+            push(ws),
             "deny",
         )
         subprocess.run(
@@ -746,7 +442,7 @@ def main():
         )
         check(
             "正常 GitHub fallback 四方 endpoint 放行",
-            run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws),
+            push(ws),
             "allow",
         )
         authorization_path = task_store.authorization_path(ws, "TAP-123")
@@ -765,7 +461,7 @@ def main():
             authorization_path.write_text(json.dumps(malformed), encoding="utf-8")
             check(
                 "授权 endpoint %s时 push 失败关闭" % label,
-                run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws),
+                push(ws),
                 "deny",
             )
         legacy_authorization = json.loads(json.dumps(original_authorization))
@@ -773,7 +469,7 @@ def main():
         authorization_path.write_text(json.dumps(legacy_authorization), encoding="utf-8")
         check(
             "旧授权缺 endpoint 的非 push 操作保持 v1 兼容",
-            run_hook("Bash", {"command": "git commit -m x"}, ws),
+            decision("git_commit", ws),
             "allow",
         )
         authorization_path.write_text(
@@ -787,11 +483,11 @@ def main():
             cwd=ws,
             check=True,
         )
-        check("HEAD 推送授权工作分支放行", run_hook("Bash", {"command": "git push origin HEAD:feature/TAP-123"}, ws), "allow")
-        check("完整 heads source 推送同名授权分支放行", run_hook("Bash", {"command": "git push origin refs/heads/feature/TAP-123"}, ws), "allow")
-        check("push destination 越过授权分支时拒绝", run_hook("Bash", {"command": "git push origin HEAD:feature/TAP-999"}, ws), "deny")
-        check("任意 source 不得写入授权分支", run_hook("Bash", {"command": "git push origin evil:feature/TAP-123"}, ws), "deny")
-        check("push destination 禁止 tags namespace", run_hook("Bash", {"command": "git push origin HEAD:refs/tags/v1"}, ws), "deny")
+        check("HEAD 推送授权工作分支放行", push(ws, push_source_ref="HEAD"), "allow")
+        check("完整 heads source 推送同名授权分支放行", push(ws, push_source_ref="refs/heads/feature/TAP-123"), "allow")
+        check("push destination 越过授权分支时拒绝", push(ws, push_source_ref="HEAD", push_destination_ref="feature/TAP-999", push_target_branch="feature/TAP-999"), "deny")
+        check("任意 source 不得写入授权分支", push(ws, push_source_ref="evil"), "deny")
+        check("push destination 禁止 tags namespace", push(ws, push_source_ref="HEAD", push_destination_ref="refs/tags/v1", push_target_branch="refs/tags/v1"), "deny")
         explicit_target_mismatch = run_standard({
             "protocol_version": 1,
             "event": "before_operation",
@@ -816,698 +512,156 @@ def main():
         })
         check("标准 git_push 缺少 refspec 事实时拒绝", missing_refspec["decision"], "deny")
         check("缺少 refspec 使用独立原因码", missing_refspec["reason_code"], "unauthorized_push_refspec")
-        check("替代 remote 不得借用 origin 授权", run_hook("Bash", {"command": "git push upstream feature/TAP-123"}, ws), "ask")
-        check("remote URL 不得借用 origin 授权", run_hook("Bash", {"command": "git push git@github.com:acme/widget.git feature/TAP-123"}, ws), "ask")
-        check("remote path 不得借用 origin 授权", run_hook("Bash", {"command": "git push /tmp/widget.git feature/TAP-123"}, ws), "ask")
-        check("push --repo 不得借用 origin 授权", run_hook("Bash", {"command": "git push --repo=origin feature/TAP-123"}, ws), "ask")
-        check("副作用 git -c 必须停止", run_hook("Bash", {"command": "git -c color.ui=false push origin feature/TAP-123"}, ws), "ask")
-        check("pushurl 配置覆盖必须停止", run_hook("Bash", {"command": "git -c remote.origin.pushurl=git@evil.test:acme/widget.git push origin feature/TAP-123"}, ws), "ask")
-        check("Git config-env 副作用必须停止", run_hook("Bash", {"command": "git --config-env=remote.origin.pushurl=PUSH_URL push origin feature/TAP-123"}, ws), "ask")
-        check("Git exec-path 副作用必须停止", run_hook("Bash", {"command": "git --exec-path=/custom/git push origin feature/TAP-123"}, ws), "ask")
-        check("未映射内联 alias 交还 Agent 原生权限", run_hook("Bash", {"command": "git -c alias.ship='push origin main' ship feature/TAP-123"}, ws), "passthrough")
-        check("前置环境赋值不绕过 push 门禁", run_hook("Bash", {"command": "AO_MODE=test git push origin feature/TAP-123"}, ws), "allow")
-        check("env 与 command 包装器不绕过 push 门禁", run_hook("Bash", {"command": "env AO_MODE=test command git push origin feature/TAP-123"}, ws), "allow")
-        mixed_push = {"command": "git push origin feature/TAP-123 && git push origin main"}
-        check("复合 push 不得共用首个 target 放行 main", run_hook("Bash", mixed_push, ws), "ask")
-        check("Codex 复合 push 目标歧义时停止", run_codex("Bash", mixed_push, ws), "deny")
-        check("复合同目标 push 正常合并", run_hook("Bash", {"command": "git push origin feature/TAP-123 && git push origin feature/TAP-123"}, ws), "allow")
-        check("单段 push 多 ref 无法唯一表示时停止", run_hook("Bash", {"command": "git push origin feature/TAP-123 feature/TAP-124"}, ws), "ask")
-        check("复合 push 缺少显式 target 时停止", run_hook("Bash", {"command": "git push origin && git push origin feature/TAP-123"}, ws), "ask")
-        check("push 无显式 refspec 时停止", run_hook("Bash", {"command": "git push origin"}, ws), "ask")
-        check("包装后的 push 无显式 refspec 仍停止", run_hook("Bash", {"command": "env AO_MODE=test git push origin"}, ws), "ask")
-        check("push --delete 不得借用普通 push 授权", run_hook("Bash", {"command": "git push --delete origin feature/TAP-123"}, ws), "ask")
-        check("push 空源删除 ref 必须停止", run_hook("Bash", {"command": "git push origin :feature/TAP-123"}, ws), "ask")
-        check("push --prune 隐式删除必须停止", run_hook("Bash", {"command": "git push --prune origin feature/TAP-123"}, ws), "ask")
-        check("push --follow-tags 隐式多 ref 必须停止", run_hook("Bash", {"command": "git push --follow-tags origin feature/TAP-123"}, ws), "ask")
-        check("push 通配 refspec 隐式多 ref 必须停止", run_hook("Bash", {"command": "git push origin 'refs/heads/*:refs/heads/*'"}, ws), "ask")
-        check("无法可靠剥离 env 时交还 Agent 原生权限", run_hook("Bash", {"command": "env -S 'git push origin feature/TAP-123'"}, ws), "passthrough")
-        check("动态命令替换交还 Agent 原生权限", run_hook("Bash", {"command": "$(printf git) push origin feature/TAP-123"}, ws), "passthrough")
-        check("env 后动态命令替换交还 Agent 原生权限", run_hook("Bash", {"command": "env AO_MODE=test $(printf git) push origin feature/TAP-123"}, ws), "passthrough")
-        check("工位外 git -C push 失败关闭", run_hook("Bash", {"command": "git -C /other push origin feature/TAP-123"}, ws), "deny")
-        check("git --git-dir 不得借用原仓库授权", run_hook("Bash", {"command": "git --git-dir=/other/repo.git push origin feature/TAP-123"}, ws), "ask")
-        check("git --work-tree 不得借用原工作树授权", run_hook("Bash", {"command": "git --work-tree=/other/tree push origin feature/TAP-123"}, ws), "ask")
-        check("env -C 未映射包装交还 Agent 原生权限", run_hook("Bash", {"command": "env -C /other git push origin feature/TAP-123"}, ws), "passthrough")
-        check("PATH 覆盖交还 Agent 原生权限", run_hook("Bash", {"command": "PATH=/custom/bin git push origin feature/TAP-123"}, ws), "passthrough")
-        check("Git 传输环境覆盖交还 Agent 原生权限", run_hook("Bash", {"command": "GIT_SSH_COMMAND='ssh -F custom' git push origin feature/TAP-123"}, ws), "passthrough")
-        check("env 清空环境交还 Agent 原生权限", run_hook("Bash", {"command": "env -i git push origin feature/TAP-123"}, ws), "passthrough")
-        check("env 取消 PATH 交还 Agent 原生权限", run_hook("Bash", {"command": "env -u PATH git push origin feature/TAP-123"}, ws), "passthrough")
-        check("缺少仓库目标的 MCP 建 PR 停止", run_hook("mcp__github__create_pull_request", {"title": "t"}, ws), "ask")
-        check("授权后显式仓库 MCP 建 PR 放行", run_hook("mcp__github__create_pull_request", {"repository": "acme/widget", "title": "t"}, ws), "allow")
-        check(
-            "MCP 显式指定未授权仓库时收回放行",
-            run_hook(
-                "mcp__github__create_pull_request",
-                {"owner": "acme", "repo": "other-repo", "head": "feature/TAP-123"},
-                ws,
-            ),
-            "ask",
-        )
-        check("授权后 gh pr create 放行", run_hook("Bash", {"command": "gh pr create --title t --body b"}, ws), "allow")
-        check("复合 gh PR 不得跨仓库共用 target", run_hook("Bash", {"command": "gh pr create -R acme/widget --title t --body b && gh pr edit 1 -R acme/other --title t"}, ws), "ask")
-        check("复合同仓库 gh PR 正常合并", run_hook("Bash", {"command": "gh pr create -R acme/widget --title t --body b && gh pr edit 1 --repo acme/widget --title t"}, ws), "allow")
 
-        # ---- GitHub 写操作需要 工位 source 的分支上下文 ----------------
+        # 平台事件退役不改变显式 Gate API 的操作与授权策略。
+        for operation in ("git_merge", "pr_merge", "release", "git_tag", "manage_repository_worktree"):
+            check("高风险操作单独确认：" + operation, decision(operation, ws), "ask")
+        for operation in ("force_push", "history_rewrite"):
+            check("禁止操作拒绝：" + operation, decision(operation, ws), "deny")
+        for branch in ("main", "release/v1"):
+            check("保护分支拒绝：" + branch, push(ws, push_destination_ref=branch, push_target_branch=branch), "deny")
+        check("评论 free 不依赖授权", decision("write_jira_comment", ws), "allow")
+        check("未覆盖 Jira 转换不借用授权", decision("transition_jira_status", ws, issue_key="TAP-123", branch_relevant=False), "ask")
+        for operation in ("create_pr", "update_pr", "fix_pr_comments"):
+            check("授权内 PR 操作：" + operation, decision(operation, ws, repository="acme/widget"), "allow")
+            check("PR 不跨仓库借授权：" + operation, decision(operation, ws, repository="acme/other-repo"), "ask")
+
+        # 显式 API 的一次性意图语义继续保留，但不宣称原生调用被拦截。
+        task_store._write_json_atomic(
+            task_store.task_directory(ws, "TAP-123") / "jira-status-fixture.json",
+            {"schema_version": 1, "issue_key": "TAP-123", "run_id": "run-111111111111",
+             "attempts": {"takeover": {"outcome": "ready", "transition_id": "421"}}},
+        )
+        for expected in ("allow", "ask"):
+            check("标准 Jira 意图只消费一次", decision("transition_jira_status", ws,
+                  issue_key="TAP-123", jira_transition_id="421", branch_relevant=False), expected)
+        value = "develop-v1.0-99-1234abcd"
+        task_store._write_json_atomic(
+            task_store.task_directory(ws, "TAP-123") / "jira-watermark-fixture.json",
+            ready_watermark("TAP-123", "run-111111111111", value),
+        )
+        for expected in ("allow", "ask"):
+            check("标准水印意图只消费一次", decision("edit_jira_issue", ws,
+                  issue_key="TAP-123", jira_watermark_field="customfield_10421",
+                  jira_watermark_digest=jira_watermark.payload_digest("customfield_10421", value),
+                  branch_relevant=False), expected)
+
+        original_authorization = json.loads(authorization_path.read_text(encoding="utf-8"))
+        for field, value in (("status", "revoked"), ("expires_at_epoch", 1)):
+            malformed = dict(original_authorization, **{field: value})
+            authorization_path.write_text(json.dumps(malformed), encoding="utf-8")
+            check("失效授权收回放行：" + field, decision("git_commit", ws), "ask")
+        authorization_path.write_text(json.dumps(original_authorization), encoding="utf-8")
+        subprocess.run(["git", "checkout", "-q", "-b", "other-branch"], cwd=ws, check=True)
+        check("分支变化收回授权", decision("git_commit", ws), "ask")
+        subprocess.run(["git", "checkout", "-q", "feature/TAP-123"], cwd=ws, check=True)
+        check("分支恢复授权", decision("git_commit", ws), "allow")
+
         branchless_ws = make_station(initialize_git=False)
         try:
             grant(branchless_ws)
-            branchless_worktree = prepare_task_worktree(branchless_ws)
-            command = "gh pr edit 1 --repo acme/widget --title t"
-            branchless_edit = run_codex_output(
-                "exec_command",
-                {"cmd": command},
-                branchless_ws,
-            )
-            check(
-                "同仓多 当前任务但工位根缺分支时停止",
-                branchless_edit["hookSpecificOutput"]["permissionDecision"],
-                "deny",
-            )
-            check(
-                "缺分支上下文使用独立原因码",
-                "[agenticops:branch_context_required]"
-                in branchless_edit["hookSpecificOutput"]["permissionDecisionReason"],
-                True,
-            )
-            check(
-                "缺分支上下文提示 工位 source",
-                "工具工作目录设为该路径"
-                in branchless_edit["hookSpecificOutput"]["permissionDecisionReason"],
-                True,
-            )
-            check(
-                "Codex 单次 workdir 传入后更新 PR 通过",
-                run_codex_output(
-                    "exec_command",
-                    {"cmd": command, "workdir": str(branchless_worktree)},
-                    branchless_ws,
-                ),
-                None,
-            )
-            unbound_worktree = make_git_repository(branchless_ws / "unbound-worktree")
-            check(
-                "任意同仓同分支 workdir 不得借用授权",
-                run_codex(
-                    "exec_command",
-                    {"cmd": command, "workdir": str(unbound_worktree)},
-                    branchless_ws,
-                ),
-                "deny",
-            )
+            source = prepare_task_worktree(branchless_ws)
+            check("工位根缺分支不放行 PR", decision("update_pr", branchless_ws, repository="acme/widget"), "ask")
+            check("已绑定 source 提供 PR 分支上下文", decision("update_pr", branchless_ws,
+                  git_cwd=str(source), repository="acme/widget"), "allow")
+            other_source = make_git_repository(branchless_ws / "other-source")
+            check("同仓同分支的未绑定路径不借授权", decision("git_commit", branchless_ws,
+                  git_cwd=str(other_source)), "ask")
             relocated = branchless_ws / "relocated-source"
-            branchless_worktree.rename(relocated)
-            branchless_worktree.symlink_to(relocated, target_is_directory=True)
+            source.rename(relocated)
+            source.symlink_to(relocated, target_is_directory=True)
             try:
-                check("source 符号链接不得借用任务授权", run_codex("exec_command",
-                    {"cmd": command, "workdir": str(branchless_worktree)}, branchless_ws), "deny")
+                check("source 链接漂移不借授权", decision("git_commit", branchless_ws, git_cwd=str(source)), "ask")
             finally:
-                branchless_worktree.unlink()
-                relocated.rename(branchless_worktree)
-            if shutil.which("opa"):
-                opa_branchless_edit = run_codex_output(
-                    "exec_command",
-                    {"cmd": command},
-                    branchless_ws,
-                    env_extra={"AO_GATE_USE_OPA": "1"},
-                )
-                check(
-                    "缺分支上下文的 OPA 完整响应一致",
-                    opa_branchless_edit["hookSpecificOutput"],
-                    branchless_edit["hookSpecificOutput"],
-                )
-                check(
-                    "单次 workdir 的 OPA 放行一致",
-                    run_codex_output(
-                        "exec_command",
-                        {"cmd": command, "workdir": str(branchless_worktree)},
-                        branchless_ws,
-                        env_extra={"AO_GATE_USE_OPA": "1"},
-                    ),
-                    None,
-                )
+                source.unlink()
+                relocated.rename(source)
         finally:
             shutil.rmtree(branchless_ws)
 
-        check(
-            "普通任务授权不覆盖 原生 Git 仓库同步",
-            run_hook("Bash", {"command": "git fetch origin develop"}, ws),
-            "ask",
-        )
-
-        # ---- 并发由独立工位承担，不能覆盖现有 current ------------------
-        other_ws = make_station()
+        other_ws = make_station(branch="feature/TAP-999")
         try:
             grant(other_ws, issue_key="TAP-999", work_branch="feature/TAP-999")
-            subprocess.run(["git", "checkout", "-q", "-b", "feature/TAP-999"], cwd=other_ws, check=True)
-            check("第二工位使用自己的授权", run_hook("Bash", {"command": "git commit -m x"}, other_ws), "allow")
-            check("第一工位授权保持独立", run_hook("Bash", {"command": "git commit -m x"}, ws), "allow")
-            check("跨工位任务不借用授权", run_hook("mcp__atlassian__transition_issue", {"issueKey": "TAP-999"}, ws), "ask")
+            check("第二工位使用自己的授权", decision("git_commit", other_ws), "allow")
+            check("第一工位授权保持独立", decision("git_commit", ws), "allow")
+            check("跨任务不借用授权", decision("git_commit", ws, issue_key="TAP-999"), "ask")
             before = task_store.current_path(ws).read_bytes()
             try:
                 task_store.write_task(ws, task_store.read_task(other_ws))
                 rejected = False
             except ValueError:
                 rejected = True
-            check("占用工位拒绝覆盖任务", rejected and task_store.current_path(ws).read_bytes() == before, True)
+            check("拒绝覆盖当前任务且保留材料", rejected and task_store.current_path(ws).read_bytes() == before, True)
         finally:
             shutil.rmtree(other_ws)
 
-        # ---- 授权伞永不覆盖的高危操作 -----------------------------------
-        check("merge 始终需单独确认", run_hook("Bash", {"command": "git merge develop"}, ws), "ask")
-        check("gh pr merge 始终需单独确认", run_hook("Bash", {"command": "gh pr merge 42 --squash"}, ws), "ask")
-        check("gh release 始终需单独确认", run_hook("Bash", {"command": "gh release create v1.0"}, ws), "ask")
-        check("Jira transition 不在伞内，需确认", run_hook("mcp__atlassian__transition_issue", {"issueKey": "TAP-123"}, ws), "ask")
-        status_intent = {
-            "schema_version": 1,
-            "issue_key": "TAP-123",
-            "run_id": "run-111111111111",
-            "attempts": {"takeover": {"outcome": "ready", "transition_id": "421"}},
-        }
-        task_store._write_json_atomic(
-            task_store.task_directory(ws, "TAP-123") / "jira-status-fixture.json", status_intent
-        )
-        check(
-            "精确 Jira 状态同步意图自动放行",
-            run_hook("mcp__atlassian__transition_issue", {"issueKey": "TAP-123", "transitionId": "421"}, ws),
-            "allow",
-        )
-        check(
-            "同一 Jira 状态同步意图只能消费一次",
-            run_hook("mcp__atlassian__transition_issue", {"issueKey": "TAP-123", "transitionId": "421"}, ws),
-            "ask",
-        )
-        check(
-            "不同 Jira transition 不借用状态同步意图",
-            run_hook("mcp__atlassian__transition_issue", {"issueKey": "TAP-123", "transitionId": "999"}, ws),
-            "ask",
-        )
-        watermark_value = "develop-v1.0-99-1234abcd"
-        task_store._write_json_atomic(
-            task_store.task_directory(ws, "TAP-123") / "jira-watermark-fixture.json",
-            ready_watermark("TAP-123", "run-111111111111", watermark_value),
-        )
-        check(
-            "精确 Jira 接管水印意图自动放行",
-            run_hook("mcp__atlassian__edit_issue", {
-                "issueKey": "TAP-123", "fields": {"customfield_10421": watermark_value},
-            }, ws),
-            "allow",
-        )
-        check(
-            "同一 Jira 接管水印意图只能消费一次",
-            run_hook("mcp__atlassian__edit_issue", {
-                "issueKey": "TAP-123", "fields": {"customfield_10421": watermark_value},
-            }, ws),
-            "ask",
-        )
-        check(
-            "不同 Jira 水印值不借用字段写入意图",
-            run_hook("mcp__atlassian__edit_issue", {
-                "issueKey": "TAP-123", "fields": {"customfield_10421": "other-version"},
-            }, ws),
-            "ask",
-        )
-        task_store._write_json_atomic(
-            task_store.task_directory(ws, "TAP-123") / "jira-watermark-fixture.json",
-            ready_watermark("TAP-123", "run-111111111111", watermark_value),
-        )
-        check(
-            "水印意图不能夹带其它 Jira 更新",
-            run_hook("mcp__atlassian__edit_issue", {
-                "issueKey": "TAP-123", "fields": {"customfield_10421": watermark_value},
-                "update": {"summary": [{"set": "not allowed"}]},
-            }, ws),
-            "ask",
-        )
-        check(
-            "创建 Jira 任务不能借用已有水印意图",
-            run_hook("mcp__atlassian__create_issue", {
-                "issueKey": "TAP-123", "fields": {"customfield_10421": watermark_value},
-            }, ws),
-            "ask",
-        )
-        check(
-            "冲突 Jira 任务号不能借用水印意图",
-            run_hook("mcp__atlassian__edit_issue", {
-                "issueKey": "TAP-123", "issue_key": "TAP-999",
-                "fields": {"customfield_10421": watermark_value},
-            }, ws),
-            "ask",
-        )
-        opa_watermark_value = "develop-v1.0-100-1234abcd"
-        task_store._write_json_atomic(
-            task_store.task_directory(ws, "TAP-123") / "jira-watermark-fixture.json",
-            ready_watermark("TAP-123", "run-111111111111", opa_watermark_value),
-        )
-        check(
-            "OPA 精确 Jira 接管水印意图与 Python 一致",
-            run_hook("mcp__atlassian__edit_issue", {
-                "issueKey": "TAP-123", "fields": {"customfield_10421": opa_watermark_value},
-            }, ws, env_extra={"AO_GATE_USE_OPA": "1"}),
-            "allow",
-        )
-        not_covered = run_standard({
-            "protocol_version": 1,
-            "event": "before_operation",
-            "source": {"agent": "test", "adapter": "test", "adapter_version": 1},
-            "cwd": str(ws),
-            "operations": ["transition_jira_status"],
-            "target": {"issue_key": "TAP-123", "branch_relevant": False},
-        })
-        check("有效授权未覆盖操作使用独立原因码", not_covered["reason_code"], "operation_not_covered")
+        multi_ws = make_station()
+        try:
+            second = make_git_repository(multi_ws / "service-api")
+            subprocess.run(["git", "remote", "set-url", "origin", "git@github.com:acme/service-api.git"], cwd=second, check=True)
+            subprocess.run(["git", "checkout", "-q", "-b", "feature/TAP-123-api"], cwd=second, check=True)
+            grant(multi_ws, extra_repositories=[{
+                "repository": "acme/service-api", "authorized_endpoint": "github.com/acme/service-api",
+                "work_branch": "feature/TAP-123-api", "base_branch": "develop", "base_sha": "2" * 40,
+                "approved_scope": "API 配套修改", "verification_method": "python3 -m unittest",
+                "pull_request": None, "ci": None,
+            }])
+            check("同一任务第二仓库授权放行", decision("git_commit", second), "allow")
+            check("第二仓库审计回到任务目录", task_store.events_path(multi_ws, "TAP-123").is_file(), True)
+        finally:
+            shutil.rmtree(multi_ws)
 
-        # ---- forbidden --------------------------------------------------
-        check("强推直接拒绝", run_hook("Bash", {"command": "git push --force origin feature/TAP-123"}, ws), "deny")
-        check("带值 force-with-lease 强推直接拒绝", run_hook("Bash", {"command": "git push --force-with-lease=refs/heads/feature/TAP-123 origin feature/TAP-123"}, ws), "deny")
-        check("短选项束中的 force 强推直接拒绝", run_hook("Bash", {"command": "command git push -fu origin feature/TAP-123"}, ws), "deny")
-        check("IPv4 短选项束中的 force 强推直接拒绝", run_hook("Bash", {"command": "git push -f4 --dry-run origin feature/TAP-123"}, ws), "deny")
-        check("IPv6 短选项束中的 force 强推直接拒绝", run_hook("Bash", {"command": "git push -f6 --dry-run origin feature/TAP-123"}, ws), "deny")
-        check("commit --amend（改历史）拒绝", run_hook("Bash", {"command": "git commit --amend"}, ws), "deny")
-        check("push 保护分支拒绝", run_hook("Bash", {"command": "git push origin main"}, ws), "deny")
-        check("push release/* 保护分支拒绝", run_hook("Bash", {"command": "git push origin HEAD:release/v0.7"}, ws), "deny")
-
-        # ---- 绑定失效 ---------------------------------------------------
-        subprocess.run(["git", "checkout", "-q", "-b", "other-branch"], cwd=ws, check=True)
-        check("切到未授权分支后 push 收回放行", run_hook("Bash", {"command": "git push origin other-branch"}, ws), "ask")
-        subprocess.run(["git", "checkout", "-q", "feature/TAP-123"], cwd=ws, check=True)
-        check("切回授权分支恢复放行", run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws), "allow")
-
-        second = ws / "service-api"
-        second.mkdir()
-        subprocess.run(["git", "init", "-q", "-b", "feature/TAP-123-api"], cwd=second, check=True)
-        subprocess.run(["git", "remote", "add", "origin", "git@github.com:acme/service-api.git"], cwd=second, check=True)
-        (second / "README.md").write_text("api\n", encoding="utf-8")
-        subprocess.run(["git", "add", "."], cwd=second, check=True)
-        subprocess.run(
-            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"],
-            cwd=second,
-            check=True,
-        )
-        grant(ws, extra_repositories=[{
-            "repository": "acme/service-api",
-            "authorized_endpoint": "github.com/acme/service-api",
-            "work_branch": "feature/TAP-123-api",
-            "base_branch": "develop",
-            "base_sha": "2" * 40,
-            "approved_scope": "API 配套修改",
-            "verification_method": "python3 -m unittest",
-            "pull_request": None,
-            "ci": None,
-        }])
-        check("同一任务第二仓库 commit 放行", run_hook("Bash", {"command": "git commit -m x"}, second), "allow")
-        check("第二仓库审计写到 TAP-123 任务目录", task_store.events_path(ws, "TAP-123").is_file(), True)
-
-        grant(ws, target_repo="acme/other-repo")
-        check("授权仓库不匹配收回放行", run_hook("Bash", {"command": "git push origin feature/TAP-123"}, ws), "ask")
-
-        grant(ws)
-        subprocess.run([sys.executable, str(ROOT / "workflow" / "authorization.py"), "revoke", "--issue-key", "TAP-123", "--expected-run-id", "run-" + "1" * 12, "--dir", str(ws)], check=True, capture_output=True)
-        check("撤销授权后收回放行", run_hook("Bash", {"command": "git commit -m x"}, ws), "ask")
-
-        # ---- 正向命中与未命中透传 ---------------------------------------
-        check("未映射 mcp 交还 Agent 原生权限", run_hook("mcp__github__run_secret_scanning", {}, ws), "passthrough")
-        check("MCP 同名工具不跨服务误映射", run_hook("mcp__slack__add_comment", {}, ws), "passthrough")
-        check("MCP 合并工具不跨服务误映射", run_hook("mcp__custom__merge_pull_request", {}, ws), "passthrough")
-        check("gh api POST 需确认", run_hook("Bash", {"command": "gh api -X POST /repos/a/b/issues -f title=x"}, ws), "ask")
-        check("复合命令取最严格（status; push --force）", run_hook("Bash", {"command": "git status && git push -f origin feature/TAP-123"}, ws), "deny")
-
-        unknown_command = "node takeover.js --issue-key TAP-12774 --token super-secret"
-        check("Claude 普通未映射命令透传", run_hook("Bash", {"command": unknown_command}, ws), "passthrough")
-        check("Codex 普通未映射命令透传", run_codex("Bash", {"command": unknown_command}, ws), "allow")
-        inspection_command = (
-            "sed -n '1,240p' .agents/skills/tapdata-task/SKILL.md && "
-            "rg -n -i -C 2 'TAP-12289|takeover|接管' memory.md && "
-            "sed -n '1,260p' projects/tapdata/admission.json"
-        )
-        check("Claude 引号内管道符的只读检查透传", run_hook("Bash", {"command": inspection_command}, ws), "passthrough")
-        check("Codex 引号内管道符的只读检查透传", run_codex("Bash", {"command": inspection_command}, ws), "allow")
-        check(
-            "Codex 未映射 MCP 透传",
-            run_codex("mcp__github__run_secret_scanning", {"repository": "acme/widget"}, ws),
-            "allow",
-        )
-
-        ambiguous_command = "sh -c 'git push origin feature/TAP-123' --token super-secret"
-        check("Claude 未映射包装交还原生权限", run_hook("Bash", {"command": ambiguous_command}, ws), "passthrough")
-        check("Codex 未映射包装交还原生权限", run_codex("Bash", {"command": ambiguous_command}, ws), "allow")
-
-        preview_command = (
-            "git -c remote.origin.pushurl=git@evil.test:acme/widget.git push origin feature/TAP-123 --token super-secret mysql -pmysql-secret "
-            "curl -u user:pass PRIVATE_KEY=private-value AUTHORIZATION=auth-secret\x1b[31m"
-        )
-        preview_reason = run_hook_output("Bash", {"command": preview_command}, ws)["hookSpecificOutput"]["permissionDecisionReason"]
-        for secret in ("super-secret", "mysql-secret", "user:pass", "private-value", "auth-secret", "\x1b"):
-            check("命令摘要不泄露敏感值：%s" % secret.encode("unicode_escape").decode(), secret in preview_reason, False)
-        check("命令摘要不再误称原始命令", "原始命令" in preview_reason, False)
-
-        for agent, output in (
-            ("Claude", run_hook_output("Bash", "invalid-tool-input", ws)),
-            ("Codex", run_codex_output("Bash", "invalid-tool-input", ws)),
-        ):
-            failure = output["hookSpecificOutput"]
-            check("%s Hook 异常失败关闭" % agent, failure["permissionDecision"], "deny")
-            check("%s Hook 异常使用统一原因码" % agent, "[agenticops:adapter_failure]" in failure["permissionDecisionReason"], True)
-
-        # ---- Agent Adapter 语义一致性 -----------------------------------
-        parity_cases = [
-            ("Bash", {"command": "git commit -m x"}),
-            ("Bash", {"command": "git push origin feature/TAP-123"}),
-            ("Bash", {"command": "git push origin main"}),
-            ("Bash", {"command": "git merge develop"}),
-            ("Bash", {"command": unknown_command}),
-            ("mcp__atlassian__transition_issue", {"issueKey": "TAP-123"}),
-            ("mcp__atlassian__add_comment", {"issueKey": "TAP-123"}),
-            ("mcp__github__run_secret_scanning", {"repository": "acme/widget"}),
-            ("mcp__slack__add_comment", {}),
-            ("mcp__custom__merge_pull_request", {}),
-        ]
-        for tool, tool_input in parity_cases:
-            claude = run_hook(tool, tool_input, ws)
-            codex = run_codex(tool, tool_input, ws)
-            expected = "deny" if claude in ("ask", "deny") else "allow"
-            check("Codex 二态结果符合标准语义：%s" % tool.split("__")[-1], codex, expected)
-
-        codex_block = run_codex_output("Bash", {"command": "git merge develop"}, ws)
-        codex_reason = codex_block["hookSpecificOutput"]["permissionDecisionReason"]
-        check("Codex ask 降级提示要求立即展示并停止", "必须立即向研发工程师展示" in codex_reason, True)
-        check("Codex ask 降级提示不再重复旧兼容说明", "Hook 不支持 ask" in codex_reason, False)
-        check("Codex ask 降级提示包含单一下一步", codex_reason.count("下一步："), 1)
-        check("Codex ask 降级提示只包含一个原因前缀", codex_reason.count("[agenticops:"), 1)
-        check("Codex 未覆盖操作要求人工执行而非聊天批准重试", "在自己的终端执行原命令" in codex_reason, True)
-        check("Codex 未覆盖操作明确禁止 Agent 重试", "Agent 不得重试该命令" in codex_reason, True)
-
-        # ---- 审计留痕 ---------------------------------------------------
-        events = task_store.events_path(ws, "TAP-123").read_text(encoding="utf-8").strip().splitlines()
-        check("审计事件已记录（>=20 条）", len(events) >= 20, True)
-        audited = [json.loads(item) for item in events]
-        check("审计记录 reason_code", all(item.get("reason_code") for item in audited), True)
-        check("人工处理事件审计 required_action", any(item.get("required_action") for item in audited if item["decision"] != "allow"), True)
-
-        # ---- OPA 一致性 -------------------------------------------------
-        if shutil.which("opa"):
-            unknown_request = {
-                "protocol_version": 1,
-                "event": "before_operation",
-                "source": {"agent": "test", "adapter": "test", "adapter_version": 1},
-                "cwd": str(ws),
-                "operations": ["unknown_external_write"],
-                "target": {"branch_relevant": False},
-            }
-            py_unknown = run_standard(unknown_request)
-            opa_unknown = run_standard(unknown_request, env_extra={"AO_GATE_USE_OPA": "1"})
-            check(
-                "OPA 受控歧义完整响应一致",
-                tuple(opa_unknown.get(field) for field in ("decision", "operation", "reason", "reason_code", "required_action")),
-                tuple(py_unknown.get(field) for field in ("decision", "operation", "reason", "reason_code", "required_action")),
-            )
-            grant(ws)
-            subprocess.run(
-                ["git", "config", "--unset-all", "remote.origin.pushurl"],
-                cwd=ws,
-                check=True,
-            )
-            subprocess.run(
-                [
-                    "git", "config", "--add", rewrite_key,
-                    "git@github.com:acme/widget.git",
-                ],
-                cwd=ws,
-                check=True,
-            )
-            py_rewritten_origin = run_hook(
-                "Bash", {"command": "git push origin feature/TAP-123"}, ws
-            )
-            opa_rewritten_origin = run_hook(
-                "Bash",
-                {"command": "git push origin feature/TAP-123"},
-                ws,
-                env_extra={"AO_GATE_USE_OPA": "1"},
-            )
-            check("Python insteadOf 信任链拒绝", py_rewritten_origin, "deny")
-            check("OPA insteadOf 信任链一致", opa_rewritten_origin, py_rewritten_origin)
-            subprocess.run(
-                ["git", "config", "--unset-all", rewrite_key], cwd=ws, check=True
-            )
-            subprocess.run(
-                [
-                    "git", "config", "--add", "remote.origin.url",
-                    "git@evil.test:acme/widget.git",
-                ],
-                cwd=ws,
-                check=True,
-            )
-            py_multiple_raw = run_hook(
-                "Bash", {"command": "git push origin feature/TAP-123"}, ws
-            )
-            opa_multiple_raw = run_hook(
-                "Bash",
-                {"command": "git push origin feature/TAP-123"},
-                ws,
-                env_extra={"AO_GATE_USE_OPA": "1"},
-            )
-            check("Python raw origin 多值拒绝", py_multiple_raw, "deny")
-            check("OPA raw origin 多值一致", opa_multiple_raw, py_multiple_raw)
-            subprocess.run(
-                ["git", "config", "--unset-all", "remote.origin.url"], cwd=ws, check=True
-            )
-            subprocess.run(
-                [
-                    "git", "config", "--add", "remote.origin.url",
-                    "git@github.com:acme/widget.git",
-                ],
-                cwd=ws,
-                check=True,
-            )
-            subprocess.run(
-                [
-                    "git", "remote", "set-url", "--add", "--push", "origin",
-                    "git@evil.test:acme/widget.git",
-                ],
-                cwd=ws,
-                check=True,
-            )
-            py_untrusted_push = run_hook(
-                "Bash", {"command": "git push origin feature/TAP-123"}, ws
-            )
-            opa_untrusted_push = run_hook(
-                "Bash",
-                {"command": "git push origin feature/TAP-123"},
-                ws,
-                env_extra={"AO_GATE_USE_OPA": "1"},
-            )
-            check("Python 实际 pushurl 错配拒绝", py_untrusted_push, "deny")
-            check("OPA 实际 pushurl 错配一致", opa_untrusted_push, py_untrusted_push)
-            subprocess.run(
-                ["git", "config", "--unset-all", "remote.origin.pushurl"],
-                cwd=ws,
-                check=True,
-            )
-            for push_url in (
-                "git@github.com:acme/widget.git",
-                "git@evil.test:acme/widget.git",
-            ):
-                subprocess.run(
-                    [
-                        "git", "remote", "set-url", "--add", "--push", "origin",
-                        push_url,
-                    ],
-                    cwd=ws,
-                    check=True,
-                )
-            py_ambiguous_push = run_hook(
-                "Bash", {"command": "git push origin feature/TAP-123"}, ws
-            )
-            opa_ambiguous_push = run_hook(
-                "Bash",
-                {"command": "git push origin feature/TAP-123"},
-                ws,
-                env_extra={"AO_GATE_USE_OPA": "1"},
-            )
-            check("Python 多 pushurl 拒绝", py_ambiguous_push, "deny")
-            check("OPA 多 pushurl 一致", opa_ambiguous_push, py_ambiguous_push)
-            subprocess.run(
-                ["git", "config", "--unset-all", "remote.origin.pushurl"],
-                cwd=ws,
-                check=True,
-            )
-            subprocess.run(
-                [
-                    "git", "remote", "set-url", "--add", "--push", "origin",
-                    "git@github.com:acme/widget.git",
-                ],
-                cwd=ws,
-                check=True,
-            )
-            parity_cases = [
-                ("Bash", {"command": "git commit -m x"}),
-                ("Bash", {"command": "git push origin feature/TAP-123"}),
-                ("Bash", {"command": "git push origin HEAD:feature/TAP-123"}),
-                ("Bash", {"command": "git push origin HEAD:feature/TAP-999"}),
-                ("Bash", {"command": "git push origin evil:feature/TAP-123"}),
-                ("Bash", {"command": "git push origin HEAD:refs/tags/v1"}),
-                ("Bash", {"command": "git push upstream feature/TAP-123"}),
-                ("Bash", {"command": "git -c color.ui=false push origin feature/TAP-123"}),
-                ("Bash", {"command": "workflow/task.py archive --issue-key TAP-123 --issue-key=TAP-123"}),
-                ("Bash", {"command": "git -c color.ui=false status --short"}),
-                ("Bash", {"command": "git status & git push -f origin feature/TAP-123"}),
-                ("Bash", {"command": "if git status; then git push origin feature/TAP-123; fi"}),
-                ("Bash", {"command": "sh -c 'git push origin feature/TAP-123'"}),
-                ("Bash", {"command": "sudo git push origin feature/TAP-123"}),
-                ("Bash", {"command": "python3 -c 'print(1)'"}),
-                ("Bash", {"command": "python3 -m workflow.other"}),
-                ("Bash", {"command": "python3 unregistered.py"}),
-                ("Bash", {"command": "perl -we 'print 1'"}),
-                ("Bash", {"command": "perl payload.pl"}),
-                ("Bash", {"command": "node --eval='console.log(1)'"}),
-                ("Bash", {"command": "nodejs payload.js"}),
-                ("Bash", {"command": "python3 --version"}),
-                ("Bash", {"command": "git push --delete origin feature/TAP-123"}),
-                ("Bash", {"command": "git push --follow-tags origin feature/TAP-123"}),
-                ("Bash", {"command": "git push origin 'refs/heads/*:refs/heads/*'"}),
-                ("Bash", {"command": "env AO_MODE=test git push --force-with-lease=feature/TAP-123 origin feature/TAP-123"}),
-                ("Bash", {"command": "env -S 'git push origin feature/TAP-123'"}),
-                ("Bash", {"command": "$(printf git) push origin feature/TAP-123"}),
-                ("Bash", {"command": "G=git; $G push origin feature/TAP-123"}),
-                ("Bash", {"command": "PATH=/custom/bin git push origin feature/TAP-123"}),
-                ("Bash", {"command": "git -C /other push origin feature/TAP-123"}),
-                ("Bash", {"command": "git -C /other rev-parse HEAD"}),
-                ("Bash", {"command": "git push origin main"}),
-                ("Bash", {"command": "git merge develop"}),
-                ("mcp__atlassian__transition_issue", {"issueKey": "TAP-123"}),
-                ("mcp__atlassian__add_comment", {"issueKey": "TAP-123"}),
-            ]
-            for tool, tin in parity_cases:
-                py = run_hook(tool, tin, ws)
-                opa = run_hook(tool, tin, ws, env_extra={"AO_GATE_USE_OPA": "1"})
-                check("OPA 一致性：%s %s" % (tool.split("__")[-1], tin.get("command", "")), opa, py)
-            reason_cases = [
-                ("manage_station", "TAP-123", "station_confirmation_required"),
-                ("git_commit", "TAP-404", "no_active_task"),
-                ("git_commit", "TAP-555", "no_active_task"),
-                ("transition_jira_status", "TAP-123", "operation_not_covered"),
-            ]
-            for operation, issue_key, expected_reason_code in reason_cases:
-                request = {
-                    "protocol_version": 1,
-                    "event": "before_operation",
-                    "source": {"agent": "test", "adapter": "test", "adapter_version": 1},
-                    "cwd": str(ws),
-                    "operations": [operation],
-                    "target": {"issue_key": issue_key, "branch_relevant": False},
-                }
-                py = run_standard(request)
-                opa = run_standard(request, env_extra={"AO_GATE_USE_OPA": "1"})
-                check("Python 原因码：%s" % expected_reason_code, py["reason_code"], expected_reason_code)
-                check("OPA 原因码一致：%s" % expected_reason_code, opa["reason_code"], py["reason_code"])
-                check(
-                    "OPA 处理动作存在性一致：%s" % expected_reason_code,
-                    bool(opa.get("required_action")),
-                    bool(py.get("required_action")),
-                )
-            authorization_path = task_store.authorization_path(ws, "TAP-123")
-            original_authorization = json.loads(authorization_path.read_text(encoding="utf-8"))
-            repository = original_authorization["repositories"][0]
-            malformed_authorizations = {
-                "duplicate_repository": dict(
-                    original_authorization,
-                    repositories=[dict(repository), dict(repository)],
-                ),
-                "non_object_repository": dict(
-                    original_authorization,
-                    repositories=[dict(repository), "invalid"],
-                ),
-                "malformed_repository_collection": dict(
-                    original_authorization,
-                    repositories={"repository": dict(repository)},
-                ),
-                "missing_repository_binding": dict(
-                    original_authorization,
-                    repositories=[{key: value for key, value in repository.items() if key != "base_sha"}],
-                ),
-            }
-            auth_request = {
-                "protocol_version": 1,
-                "event": "before_operation",
-                "source": {"agent": "test", "adapter": "test", "adapter_version": 1},
-                "cwd": str(ws),
-                "operations": ["git_commit"],
-                "target": {"issue_key": "TAP-123"},
-            }
-            try:
-                for name, authorization in malformed_authorizations.items():
-                    authorization_path.write_text(json.dumps(authorization), encoding="utf-8")
-                    py = run_standard(auth_request)
-                    opa = run_standard(auth_request, env_extra={"AO_GATE_USE_OPA": "1"})
-                    check("Python 拒绝畸形授权：%s" % name, py["decision"], "ask")
-                    check("Python 畸形授权原因码：%s" % name, py["reason_code"], "authorization_invalid")
-                    check("OPA 拒绝畸形授权：%s" % name, opa["decision"], py["decision"])
-                    check("OPA 畸形授权原因码：%s" % name, opa["reason_code"], py["reason_code"])
-            finally:
-                authorization_path.write_text(
-                    json.dumps(original_authorization), encoding="utf-8"
-                )
-            empty_or_invalid_values = ("", None, False, 123)
-            for binding in ("issue_key", "agentic_run_id", "agent_id", "approved_plan_version"):
-                for value in empty_or_invalid_values:
-                    authorization = json.loads(json.dumps(original_authorization))
-                    authorization[binding] = value
-                    authorization_path.write_text(json.dumps(authorization), encoding="utf-8")
-                    py = run_standard(auth_request)
-                    opa = run_standard(auth_request, env_extra={"AO_GATE_USE_OPA": "1"})
-                    check(
-                        "required binding parity：%s=%r" % (binding, value),
-                        (py["decision"], py["reason_code"], opa["decision"], opa["reason_code"]),
-                        ("ask", "authorization_invalid", "ask", "authorization_invalid"),
-                    )
-            for binding in (
-                "repository", "work_branch", "base_branch", "base_sha",
-                "approved_scope", "verification_method",
-            ):
-                for value in empty_or_invalid_values:
-                    authorization = json.loads(json.dumps(original_authorization))
-                    authorization["repositories"][0][binding] = value
-                    authorization_path.write_text(json.dumps(authorization), encoding="utf-8")
-                    py = run_standard(auth_request)
-                    opa = run_standard(auth_request, env_extra={"AO_GATE_USE_OPA": "1"})
-                    check(
-                        "repository binding parity：%s=%r" % (binding, value),
-                        (py["decision"], py["reason_code"], opa["decision"], opa["reason_code"]),
-                        ("ask", "authorization_invalid", "ask", "authorization_invalid"),
-                    )
-            push_auth_request = {
-                "protocol_version": 1,
-                "event": "before_operation",
-                "source": {"agent": "test", "adapter": "test", "adapter_version": 1},
-                "cwd": str(ws),
-                "operations": ["git_push"],
-                "target": {
-                    "issue_key": "TAP-123",
-                    "push_source_ref": "HEAD",
-                    "push_destination_ref": "refs/heads/feature/TAP-123",
-                    "push_target_branch": "feature/TAP-123",
-                },
-            }
-            for value in (None, "", ["github.com/acme/widget"], "evil.test/acme/widget"):
-                authorization = json.loads(json.dumps(original_authorization))
-                if value is None:
-                    authorization["repositories"][0].pop("authorized_endpoint", None)
-                else:
-                    authorization["repositories"][0]["authorized_endpoint"] = value
-                authorization_path.write_text(json.dumps(authorization), encoding="utf-8")
-                py = run_standard(push_auth_request)
-                opa = run_standard(push_auth_request, env_extra={"AO_GATE_USE_OPA": "1"})
-                check(
-                    "push authorized_endpoint parity：%r" % (value,),
-                    (py["decision"], py["reason_code"], opa["decision"], opa["reason_code"]),
-                    ("deny", "untrusted_push_repository", "deny", "untrusted_push_repository"),
-                )
-            authorization_path.write_text(
-                json.dumps(original_authorization), encoding="utf-8"
-            )
-        else:
+        # 畸形授权的 Python 验证无条件运行，OPA 存在时才额外比较。
+        use_opa = bool(shutil.which("opa"))
+        if not use_opa:
             print("[SKIP] 未安装 opa，跳过一致性校验")
+        def parity(request):
+            py = run_standard(request)
+            if use_opa:
+                opa = run_standard(request, env_extra={"AO_GATE_USE_OPA": "1"})
+                check("OPA 与 Python 完整判定一致",
+                      tuple(opa.get(k) for k in ("decision", "reason_code", "required_action")),
+                      tuple(py.get(k) for k in ("decision", "reason_code", "required_action")))
+                check("OPA 不发生回退", bool(opa["warnings"]), False)
+            return py
+
+        auth_request = {
+            "protocol_version": 1, "event": "before_operation",
+            "source": {"agent": "test", "adapter": "test", "adapter_version": 1},
+            "cwd": str(ws), "operations": ["git_commit"], "target": {"issue_key": "TAP-123"},
+        }
+        for field in ("issue_key", "agentic_run_id", "agent_id", "approved_plan_version"):
+            for value in ("", None, False, 123):
+                malformed = dict(original_authorization, **{field: value})
+                authorization_path.write_text(json.dumps(malformed), encoding="utf-8")
+                check("无效必需授权绑定：" + field, parity(auth_request)["reason_code"], "authorization_invalid")
+        repository = original_authorization["repositories"][0]
+        malformed_repositories = [[repository, repository], [repository, "invalid"], {"repository": repository}, []]
+        for field in ("repository", "work_branch", "base_branch", "base_sha", "approved_scope", "verification_method"):
+            for value in ("", None, False, 123):
+                malformed_repositories.append([dict(repository, **{field: value})])
+        for repositories in malformed_repositories:
+            malformed = dict(original_authorization, repositories=repositories)
+            authorization_path.write_text(json.dumps(malformed), encoding="utf-8")
+            check("无效仓库授权绑定", parity(auth_request)["reason_code"], "authorization_invalid")
+        authorization_path.write_text(json.dumps(original_authorization), encoding="utf-8")
+        for operation in ("git_commit", "create_pr", "write_jira_comment", "transition_jira_status",
+                          "git_merge", "force_push", "history_rewrite", "unknown_external_write", "manage_station"):
+            parity(dict(auth_request, operations=[operation]))
+        for endpoint in (None, "", ["github.com/acme/widget"], "evil.test/acme/widget"):
+            malformed = json.loads(json.dumps(original_authorization))
+            malformed["repositories"][0]["authorized_endpoint"] = endpoint
+            authorization_path.write_text(json.dumps(malformed), encoding="utf-8")
+            request = dict(auth_request, operations=["git_push"], target={
+                "issue_key": "TAP-123", "push_source_ref": "HEAD",
+                "push_destination_ref": "refs/heads/feature/TAP-123", "push_target_branch": "feature/TAP-123"})
+            check("push endpoint 失败关闭", parity(request)["reason_code"], "untrusted_push_repository")
+        authorization_path.write_text(json.dumps(original_authorization), encoding="utf-8")
+        events = [json.loads(line) for line in task_store.events_path(ws, "TAP-123").read_text(encoding="utf-8").splitlines()]
+        check("标准 API 审计持续记录", len(events) >= 20, True)
+        check("审计含原因码", all(event.get("reason_code") for event in events), True)
+        check("人工处理审计含下一步", any(event.get("required_action") for event in events if event["decision"] != "allow"), True)
     finally:
         shutil.rmtree(ws, ignore_errors=True)
-
     print("\n结果：%d 通过，%d 失败" % (PASS, FAIL))
     return 1 if FAIL else 0
 

@@ -13,7 +13,7 @@ Agent → Workflow 状态变更入口 → 持锁校验 → 状态与证据
               Project / Policy / Gate 的标准判定
 ```
 
-使用者工位只保证流程检查点有效，不自动拦截原生工具。Gate 保留标准协议与可复用判定，旧 Agent Hook/Tool Adapter 协议资产未自动接线；它们的存在不代表产品承诺外部调用被拦截。
+使用者工位只保证流程检查点有效，不自动拦截原生工具。Gate 保留标准协议、显式 API 与 Workflow 复用的判定；通用 Agent Hook、共享执行器及 MCP/CLI 分类器已经删除，不保留另一套工具拦截链。原生 MCP 接线不属于被删除的分类器。
 
 ## 2. 分层
 
@@ -24,7 +24,7 @@ Agent → Workflow 状态变更入口 → 持锁校验 → 状态与证据
 | Policy | `policies/` | 公司级操作、连续性规则及非阻断方案调优策略 |
 | Workflow | `workflow/` | 阶段、授权、CI、证据、恢复 |
 | Project | `projects/<project>/` | Jira、分支、准入、验证和 Runbook |
-| Adapter | `adapters/` | Agent/工具协议的无状态转换 |
+| Adapter | `adapters/` | 平台接线、原生 MCP 与指引的无状态声明 |
 | Bootstrap | `bootstrap/` | 源码目录、产品根目录（Product Root）与工位生命周期 |
 | Maintenance Skill | `skills/` | 仅产品维护使用的流程验证与协作指引；不属于任何业务项目，也不安装或接线到业务工位 |
 | Internal | `internal/` | AgenticOps 自身的审查和发布 |
@@ -35,14 +35,14 @@ Agent → Workflow 状态变更入口 → 持锁校验 → 状态与证据
 
 ## 3. 通用 Agent 适配
 
-公共入口不维护 Agent 枚举。`bootstrap/agent_registry.py` 从 `adapters/agents/*/manifest.json` 发现 Agent。每个 Manifest 声明生成接线与 `retired_artifacts`。退役列表只用于核验并迁移以前托管的文件，不按平台名称在 Bootstrap 写特例。当前内置 Agent 不生成通用 Hook，旧协议能力字段供显式标准判定与协议测试使用。每个 Manifest 声明：
+公共入口不维护 Agent 枚举。`bootstrap/agent_registry.py` 从 `adapters/agents/*/manifest.json` 发现 Agent。每个 Manifest 声明生成接线与 `retired_artifacts`。退役列表只用于核验并迁移以前托管的文件，不按平台名称在 Bootstrap 写特例。Manifest v3 不含 `entrypoint`、`hook` 或 `capabilities`，注册器拒绝旧版或未声明字段。每个 Manifest 声明：
 
-- Agent ID、入口和协议能力；
-- `ask` 不可用时的保守降级；
+- Agent ID 和接线修订号 `adapter_version`；
+- Skill 发现目标及需显式退役的托管文件；
 - 要生成的工位接线；
 - 本地启动方式。
 
-新增 Agent 只增加一个目录、Manifest、必要的薄适配、模板和测试。Adapter 不得保存状态、依赖 Policy/Project/Workflow 或定义新操作语义。`tests/test_adapter_boundary.py` 对每个 Agent 约束文件数、代码量、依赖和状态写入。
+新增 Agent 只增加一个目录、Manifest、必要的指引模板和测试，不要求 Python 入口。Adapter 不得保存状态、依赖 Policy/Project/Workflow 或定义新操作语义。`tests/test_adapter_boundary.py` 约束声明式文件边界、禁止执行器、依赖和状态写入。
 
 ## 4. 安装目录与工位
 
@@ -73,7 +73,7 @@ takeover 先登记操作意图和当前任务，再准备完整独立源码与 r
 
 Bootstrap 生成可再生接线、稳定绑定、空 current 和工位内 config/source/runtime；repair 只修复同代际接线。station purge/detach 只处理空闲且无未完成操作的工位，验证生成归属，拒绝未知状态或非空 runtime，移除受管接线、绑定和状态。source/config 与用户文件保留，Product Root `.archive/` 不在工位清理范围；重新生成时非空持久材料需明确 --reuse-materials，并生成新 station_id，不继承旧 run 授权。
 
-同版本生成→任务闭环→purge→生成先独立验收。升级是第二层：升级器比较当前与目标 `station_state_epoch`；相同时可直接切换，变化时要求工位登记为空。任务退出、状态验证和解绑仍由原版本的 `station purge` 负责，升级器不读取任务、operation、runtime 或旧状态。目标版本只接受自身 epoch，repair 不跨 epoch 采用；登记缺失、损坏、非空或无法核验时保持原产品版本。当前 epoch 以机器契约为准。
+同版本生成→任务闭环→purge→生成先独立验收。升级是第二层：升级器比较当前与目标 `station_state_epoch`；相同时可直接切换，变化时要求工位登记为空。任务退出、状态验证和解绑仍由原版本的 `station purge` 负责，升级器不读取任务、operation、runtime 或旧状态。删除工具 Hook 的执行依赖会改变旧接线的读用语义，因此退役版本提升 epoch；旧客户端通过已有 epoch 检查在切换前停止，不能用新版检查器的行为替代旧客户端回归。目标版本只接受自身 epoch，repair 不跨 epoch 采用；登记缺失、损坏、非空或无法核验时保持原产品版本。当前 epoch 以机器契约为准。
 
 项目适配继续管理 Jira、分支、验证和资源配方；外部同步只记录来源和回读，不替代 Git/PR/CI 事实。当前任务的方案、Q1-Q4、授权与实际提交核验继续使用 run/revision，旧证据不能借给新任务。
 
@@ -83,12 +83,12 @@ Bootstrap 生成可再生接线、稳定绑定、空 current 和工位内 config
 
 使用者运行不接线通用工具 Hook。确定性状态检查在 Workflow 的实际变更入口执行；外部操作不因有副作用而进入 Gate。显式调用 Gate 标准 API 的协议校验仍失败关闭，但不能据此宣称已限制所有原生调用。直接编辑状态文件不受支持，也不具备防篡改保证。
 
-Hook 是流程控制点，不是安全沙箱。不得关闭 Agent 平台原生沙箱或把未命中透传配置成无条件外部写权限；凭证最小权限、服务端保护、CI 和人工审查仍是最终边界。合并、发布、Tag、保护分支写入、强推和历史改写不被普通任务授权覆盖。Agent Hook、共享 Adapter Runtime 和 Tool Adapter 分类策略属于发布信任根，修改后禁止自动发布，必须通过受保护 `main` 的独立人工审查 PR 完成升级。
+流程检查点不是安全沙箱。不得关闭 Agent 平台原生沙箱或把未命中透传配置成无条件外部写权限；凭证最小权限、服务端保护、CI 和人工审查仍是最终边界。合并、发布、Tag、保护分支写入、强推和历史改写不被普通任务授权覆盖。旧 Agent Hook、共享 Adapter Runtime 和 Tool Adapter 分类策略的删除或重新引入仍属于发布信任根变更，禁止自动发布，必须通过受保护 `main` 的独立人工审查 PR 完成升级。
 
 ## 9. 架构验收
 
 - 公共入口可发现任意合规 Agent Manifest，不存在固定平台枚举。
-- Gate 只接受标准协议，Adapter 重量门禁通过。
+- Gate 只接受标准协议，显式 API、Workflow 授权复用和 Adapter 声明式边界测试通过。
 - 新工位不生成通用工具 Hook；旧托管 Hook 只经显式迁移移除，任一目标漂移时保留现场。
 - 源码目录和安装产品根目录共用结构、入口和 `.local/` 约定。
 - 工位分离持久配置、独立源码、单份运行产物、归档和当前状态。

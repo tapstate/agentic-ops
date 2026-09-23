@@ -70,20 +70,6 @@ def replacements(install_root, project, manifest=None):
         "__AGENTIC_OPS_HOME__": str(install_root.resolve()),
         "__AGENTIC_OPS_PROJECT__": project,
     }
-    if manifest is not None:
-        hook = manifest["hook"]
-        native = hook["native"]
-        tool_matchers = native["tool_matchers"]
-        native_matcher = (
-            None
-            if tool_matchers is None
-            else "|".join(tool_matchers[kind] for kind in hook["tool_kinds"])
-        )
-        values['"__AGENTIC_OPS_HOOK_TIMEOUT_SECONDS__"'] = str(
-            hook["timeout_seconds"]
-        )
-        values['"__AGENTIC_OPS_HOOK_NATIVE_EVENT__"'] = json.dumps(native["event"])
-        values['"__AGENTIC_OPS_HOOK_NATIVE_TOOL_MATCHER__"'] = json.dumps(native_matcher)
     return values
 
 

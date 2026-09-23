@@ -23,6 +23,8 @@ station clean --generated-only 是接线刷新，不是上述解除绑定操作�
 
 ## 本次首次切换
 
+通用工具 Hook 执行链在 Manifest v3 中退役，原 Hook 的可执行依赖不再随产品安装。该变更提升工位 epoch；即使某个工位已经不生成 Hook，也必须先由原版本退出并 purge，再切换重建。`repair --accept-checkpoint-migration` 只处理同 epoch 的已托管产物，不是跨 epoch 升级入口；人工或全局 Hook 不自动扫描、删除，不能证明归属的文件应保留并由用户处理。
+
 当前 epoch 以机器契约为准，清单不再维护最低 updater protocol、旧 epoch 映射或支持列表。本版不提供旧状态兼容 Runtime：用户先用仍可运行的原版本保存材料、清理旧任务及其受控源码现场、注销旧绑定，然后再更新或重新安装并明确初始化。旧源码池、Git refs、导出材料和 Product Root `.archive/` 不由新版本删除。替换或删除整个 Product Root 前必须先保留或导出 `.archive/`。新升级规则只保护采用此协议后的切换，不追溯保护旧升级器。
 
 若手动替换产品文件或源码分支绕过升级器，新入口拒绝旧状态。应恢复与旧状态匹配的原产品版本完成清理，或先保全旧现场、使用独立空目录安装和初始化；不手改 epoch、注册表或当前状态。

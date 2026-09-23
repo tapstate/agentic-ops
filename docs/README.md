@@ -1,5 +1,7 @@
 # AgenticOps 文档总纲
 
+通用工具 Hook 执行链退役后，[工程架构](architecture/agenticops-v1-architecture.md)维护 Agent 原生执行、Workflow 检查点和显式 Gate API 的边界；[标准契约](../contracts/README.md)维护 Manifest v3 的声明式接线；[更新与回退](usage/update-and-rollback.md)负责跨 epoch 原版本退出与重建，用户故事和端到端验证只维护对应验收合同，不另设迁移执行计划。
+
 项目开发以[项目目标](strategy/project-goals.md)判断收益和范围，以[仓库指令](../AGENTS.md)指导维护协作；[维护指引](maintenance-guide.md#4-变更归属)说明如何选择实现归属、评估新增约束并验证效果，不另设规则体系或审批流程。
 
 PR 正文传输完整性属于质量证据主题：[扩展使用总纲](usage/README.md)导航至正文发布与回读操作合同，Workflow 提供只读检查，TapData Skill 指导原生发布和恢复。不新增 GitHub 客户端、工位状态或 PR Ready 门禁。

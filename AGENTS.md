@@ -13,7 +13,7 @@ AgenticOps 是公司级 Agentic 研发基础设施。Agent 平台负责原生工
 - `policies/`：公司级操作策略和流程连续性原则，不写项目特例。
 - `workflow/`：任务阶段、授权、CI 和证据等小型确定性工具。
 - `projects/<project>/`：项目 Profile、准入规则和 Runbook；项目之间不得混写。
-- `adapters/agents/`：Agent Hook 协议薄转换；`adapters/tools/`：MCP、CLI 工具映射。两者都不得复制策略、状态机或项目规则。
+- `adapters/agents/`：Agent Manifest 与原生指引模板；`adapters/tools/`：原生 MCP 接线声明。两者都不得实现工具拦截或复制策略、状态机及项目规则。
 - `bootstrap/`：安装、更新、回退和工作目录接线，不实现业务流程。
 - `tests/`：产品主链路测试。
 - `internal/`：仅供本仓库使用的故事门禁和发布工具，不进入研发安装目录，也不是第二套产品 Runtime。
@@ -26,7 +26,7 @@ AgenticOps 是公司级 Agentic 研发基础设施。Agent 平台负责原生工
 
 - Jira 是任务事实源，Git 是代码事实源，GitHub PR/CI 是审查和检查事实源；项目工位的 `.agenticops/` 只保存初始化信息、工位配置，以及唯一当前任务的本地执行、恢复、授权和门禁事件。
 - 公司通用操作边界进入 `policies/`；项目 Jira、分支、准入和验证差异进入 `projects/<project>/`；平台协议差异进入 `adapters/`；确定性状态逻辑才进入 `workflow/`。
-- Hook、MCP 和 Skill 接线是 Manifest 与模板生成的产物，不是规则事实源。Gate 不得出现平台协议字段；Adapter 必须无状态，并通过 `tests/test_adapter_boundary.py` 的文件数、代码预算、禁止依赖和禁止状态写入检查。
+- MCP、Agent 指引和 Skill 接线是 Manifest 与模板生成的产物，不是规则事实源。Gate 不得出现平台协议字段；Adapter 必须无状态，并通过 `tests/test_adapter_boundary.py` 的声明式文件边界、禁止执行器、禁止依赖和禁止状态写入检查。
 - 项目规则优先于 AIAgent 规则，AIAgent 规则优先于公司规则，个人偏好最低。
 - 当前仓库规则只约束 AgenticOps 本身，不得把 TapData、TapState 等业务仓库的分支、测试和目录约定反向写入本仓库规则。
 - AgenticOps 源码仓库、`~/.agentic-ops` 安装目录和各业务项目工位必须分开。

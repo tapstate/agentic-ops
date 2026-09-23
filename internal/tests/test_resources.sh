@@ -90,12 +90,9 @@ for file in \
   skills/ao-test-takeover/SKILL.md skills/ao-ws-init/SKILL.md \
   skills/ao-review-change/SKILL.md skills/ao-review-change/scripts/review-context.py \
   adapters/station/AGENTS.md adapters/station/agenticops adapters/agents/claude/templates/CLAUDE.md \
-  adapters/runtime.py adapters/tools/classifier.py adapters/tools/git_push_syntax.py \
-  adapters/tools/shell_classifier.py \
-  adapters/tools/shell_syntax.py \
-  adapters/tools/mcp-operations.json adapters/tools/mcp-requirements.json adapters/tools/mcp.template.json \
-  adapters/agents/claude/hook.py adapters/agents/claude/manifest.json \
-  adapters/agents/codex/hook.py adapters/agents/codex/manifest.json \
+  adapters/tools/mcp-requirements.json adapters/tools/mcp.template.json \
+  adapters/agents/claude/manifest.json \
+  adapters/agents/codex/manifest.json \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
   bootstrap/station-init.sh bootstrap/render.py bootstrap/station_paths.py bootstrap/agent_registry.py \
   bootstrap/skill_wiring.py \
@@ -110,7 +107,7 @@ for file in \
 done
 
 for file in \
-    agenticops gate/runner.py adapters/agents/claude/hook.py adapters/agents/codex/hook.py \
+    agenticops gate/runner.py \
   workflow/task.py workflow/authorization.py workflow/ci.py workflow/evidence.py \
   workflow/jira_status.py workflow/jira_watermark.py workflow/pr_ready.py \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
@@ -148,47 +145,29 @@ python3 -m json.tool contracts/operation-catalog.json >/dev/null
 python3 -m json.tool projects/tapdata/profile.json >/dev/null
 python3 -m json.tool projects/tapdata/repositories.json >/dev/null
 python3 -m json.tool projects/tapdata/admission.json >/dev/null
-python3 -m json.tool adapters/tools/mcp-operations.json >/dev/null
 python3 -m json.tool adapters/tools/mcp-requirements.json >/dev/null
 python3 -m json.tool adapters/tools/mcp.template.json >/dev/null
 for manifest in adapters/agents/*/manifest.json; do
   python3 -m json.tool "$manifest" >/dev/null
-done
-for template in adapters/agents/*/templates/*.json; do
-  python3 -m json.tool "$template" >/dev/null
 done
 
 grep -Fq 'sparse-checkout set adapters bootstrap contracts gate policies projects workflow' bootstrap/install.sh ||
   fail "安装脚本没有限制为产品目录"
 grep -Fq '__AGENTIC_OPS_HOME__' adapters/station/AGENTS.md ||
   fail "工作目录入口缺少安装路径占位符"
-grep -Fq 'deny_with_guidance' adapters/agents/codex/manifest.json ||
-  fail "Codex Adapter 未声明二态降级"
 python3 - <<'PY' || fail "Project、MCP 与 Codex 资源版本不一致"
-import ast
 import json
 from pathlib import Path
 
-manifest = json.loads(Path("adapters/agents/codex/manifest.json").read_text(encoding="utf-8"))
-tree = ast.parse(Path("adapters/agents/codex/hook.py").read_text(encoding="utf-8"))
-versions = [
-    node.value.value
-    for node in tree.body
-    if isinstance(node, ast.Assign)
-    and any(isinstance(target, ast.Name) and target.id == "ADAPTER_VERSION" for target in node.targets)
-    and isinstance(node.value, ast.Constant)
-    and type(node.value.value) is int
-]
-assert versions == [manifest["adapter_version"]]
+from bootstrap.agent_registry import discover
 
-mappings = json.loads(Path("adapters/tools/mcp-operations.json").read_text(encoding="utf-8"))
+manifests = discover(Path("."))
+assert all(manifest["schema_version"] == 3 for manifest in manifests.values())
+assert not list(Path("adapters").rglob("*.py"))
+
 requirements = json.loads(Path("adapters/tools/mcp-requirements.json").read_text(encoding="utf-8"))
 template = json.loads(Path("adapters/tools/mcp.template.json").read_text(encoding="utf-8"))
-assert "readonly_tools" not in mappings
-assert "readonly_prefixes" not in mappings
-assert set(mappings["mappings"]) == {"github", "atlassian"}
 assert set(requirements["required_servers"]) == {"atlassian"}
-assert set(requirements["required_servers"]) < set(mappings["mappings"])
 assert set(template["mcpServers"]) == set(requirements["required_servers"])
 for name, requirement in requirements["required_servers"].items():
     assert template["mcpServers"][name] == {"type": "http", "url": requirement["url"]}

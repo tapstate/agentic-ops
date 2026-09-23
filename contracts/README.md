@@ -1,12 +1,12 @@
 # AgenticOps 标准契约
 
-`contracts/` 是 Agent、Tool Adapter 与 Gate Core 之间的唯一协议事实源。
+`contracts/` 维护显式 Gate API、声明式 Agent 接线与工位状态的机器合同。本文导航各合同职责与兼容边界；分层与执行保证以[工程架构](../docs/architecture/agenticops-v1-architecture.md)为准。
 
 质量 receipt 增加 deferred 与可选 reason：表示已知未写入，必须说明原因；unknown 表示结果不明，不得盲目重发。同步状态不决定本地阶段通过。issue-versions 输入的 effective 保存 versions、execution_branch 和 proof，observed 保留初始 Jira 快照；版本无需 Jira ID，也不映射分支。旧事件按记录时规则重放，人读评论格式由当前 Project 配置决定。
 
 - `gate-request.schema.json`：Adapter 交给 Gate 的标准操作请求。
 - `gate-decision.schema.json`：Gate 返回给 Adapter 的三态标准判定。
-- `adapter-manifest.schema.json`：Agent 能力和生成产物声明。
+- `adapter-manifest.schema.json`：Manifest v3 的 Agent 接线修订、生成与退役产物、启动方式和 Skill 目标声明，不包含工具 Hook 协议。
 - `operation-catalog.json`：标准操作名称、类别、语义和是否可作为请求输入。
 - `product-state.schema.json`：产品根目录（Product Root）的本地模式、跟踪分支和版本状态。
 - `station.schema.json`：产品根目录、项目和 Agent 集合的工位配置。
@@ -16,7 +16,7 @@
 - `jira-field-readback.schema.json`：字段同步回读输入，绑定当前本地事实摘要及 Jira 来源，不修改本地有效事实。
 - `quality-action.schema.json`、`quality-state.schema.json`：任务 run 内质量检查、用户处置及外部证据回写的输入和恢复记录；不扩展任务状态机，也不代表外部系统事实已被认证。
 
-Manifest v2 新增可选 `retired_artifacts`，声明需要显式迁移的已托管产物；不生成平台特例或可写门禁档位。当前内置 Agent 的 artifacts 不包含通用 Hook。Gate v1 协议资产仍可独立测试和显式调用，但不再接入使用者原生工具；以下旧 Gate 目标字段不代表当前 Jira 同步有强制单次调用保证。
+Manifest v3 删除 `entrypoint`、`hook` 和 `capabilities`，不再要求 Agent 提供 Python Hook；`adapter_version` 只标识平台接线修订。可选 `retired_artifacts` 仍用于显式移除已核验归属的托管产物，不能删除用户修改文件。注册器不解析旧版 Manifest，也不提供工具拦截模式开关。Gate v1 继续支持独立测试和显式调用，但不接入使用者原生工具；以下 Gate 目标字段不代表当前 Jira 同步有强制单次调用保证。删除旧 Hook 执行依赖属于工位接线读用语义不兼容，必须通过 epoch 边界由原版本退出并 purge 后重建，不能靠新版扫描或在线迁移旧任务。
 
 Workflow CLI 的状态写命令现要求 `--expected-run-id`，advance 另要求 `--expected-stage`；缺参数明确失败，不替调用者读取并填充。任务状态文件结构不变，旧 run/历史证据保留。方案确认新增 `enforcement=workflow_checkpoints` 标记，授权绑定在检查点重查；新增 approved_plan_digest 绑定 fix_plan，旧记录不回填。init.json 的 checkpoint_migration 保存迁移前产品引用、接受时间与退役路径，仅为操作记录，不是身份认证。
 
