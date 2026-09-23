@@ -31,6 +31,8 @@ Agent → Workflow 状态变更入口 → 持锁校验 → 状态与证据
 
 规则按变化原因归属：平台差异只能进入 Adapter，项目差异只能进入 Project，公司共性进入 Policy，只有必须确定执行的状态逻辑进入 Workflow。
 
+Workflow 内，`task.py` 保留命令参数与阶段编排；`task_checks.py` 维护命令推进与生命周期完成检查共用的只读判定，继续消费 Project、Quality 和 Gate；`authorization.py` 维护授权绑定提取与撤销等授权职责。`station.py`、`station_replan.py` 直接复用这些能力，不反向导入任务 CLI，不复制检查条件。模块拆分以共享职责和依赖方向为依据，不改变阶段、锁、写入顺序或恢复语义。
+
 缺陷修复策略属于通用方案调优，不是 Gate 或质量门禁。通用目录位于 `policies/defect-repair-strategies.json`，项目可在 `projects/<project>/planning.json` 只覆盖默认选择；Workflow 容错解析后由 `task.py checklist/next` 向 Agent 提供 Q2 方案指导。它仅适用于规范化 `defect_fix`，配置不可用、Agent 未应用或方案偏离均只产生警告，不改变阶段推进、质量问题或授权判定。健康配置默认使用“最小充分修复”：完整消除已确认根因并保持架构稳定性、兼容性和容错性，同时限制无关扩散；它不等于追求最少代码行。
 
 ## 3. 通用 Agent 适配

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """流程检查点：重复请求、旧 run、并发写入与 Hook 迁移，不访问外部服务。"""
+import ast
 import copy
 import contextlib
 import hashlib
@@ -18,7 +19,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "bootstrap"))
-from workflow import authorization, jira_status, task, task_store
+from workflow import authorization, jira_status, task, task_checks, task_store
 from station_fixture import save_task as save_station_task
 from agent_registry import discover
 from render import check_checkpoint_migration
@@ -46,7 +47,7 @@ class CheckpointTests(unittest.TestCase):
         completion.start()
         self.addCleanup(completion.stop)
         evaluation = mock.patch("workflow.station.evaluate_completion",
-                                side_effect=lambda base, value: {"problems": task._check_advance_base(value, "completed", base, task.admission(base))})
+                                side_effect=lambda base, value: {"problems": task_checks.check_advance(value, "completed", base, task.admission(base))})
         evaluation.start()
         self.addCleanup(evaluation.stop)
 
@@ -141,7 +142,7 @@ class CheckpointTests(unittest.TestCase):
             self.assertEqual(task.cmd_advance(self.args()), 0)
 
     def test_completion_retry_finishes_each_partial_write_without_rechecking(self):
-        for module, name in ((task, "revoke_authorization"),):
+        for module, name in ((authorization, "revoke_authorization"),):
             with self.subTest(failed_write=name):
                 self.confirmation()
                 with mock.patch.object(task.quality, "advance_problems", return_value=[]), \
@@ -411,12 +412,38 @@ class CheckpointTests(unittest.TestCase):
         spec = task.admission(self.base)
         auth = {"issue_key": "TAP-123", "agentic_run_id": "run-old", "repositories": [],
                 "approved_plan_digest": authorization.plan_digest(self.state)}
-        with mock.patch.object(task.engine, "load_authorization_for_issue", return_value=(auth, None)), \
-                mock.patch.object(task.engine, "check_authorization", return_value=(True, [])):
+        with mock.patch.object(task_checks.engine, "load_authorization_for_issue", return_value=(auth, None)), \
+                mock.patch.object(task_checks.engine, "check_authorization", return_value=(True, [])):
             self.assertTrue(any("run" in p for p in task._check_advance(self.state, "pr_review", self.base, spec)))
             auth["agentic_run_id"] = self.state["run_id"]
             self.state["facts"]["fix_plan"] = "changed"
             self.assertTrue(any("方案已变化" in p for p in task._check_advance(self.state, "pr_review", self.base, spec)))
+
+    def test_shared_workflow_modules_do_not_import_task_cli(self):
+        for name in ("station.py", "station_replan.py", "task_checks.py", "authorization.py"):
+            with self.subTest(module=name):
+                tree = ast.parse((ROOT / "workflow" / name).read_text(encoding="utf-8"))
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ImportFrom):
+                        self.assertNotEqual(node.module, "workflow.task")
+                        if node.module == "workflow":
+                            self.assertNotIn("task", [item.name for item in node.names])
+                    elif isinstance(node, ast.Import):
+                        self.assertNotIn("workflow.task", [item.name for item in node.names])
+        self.assertFalse(hasattr(task, "repository_bindings"))
+        self.assertFalse(hasattr(task, "revoke_authorization"))
+
+    def test_lifecycle_authorization_revoke_is_idempotent(self):
+        self.confirmation()
+        with task_store.task_run_lock(self.base, self.state["issue_key"]):
+            authorization.revoke_authorization(self.base, self.state["issue_key"], "task_completed")
+            before = self.auth_path.read_bytes()
+            record = json.loads(before)
+            self.assertEqual("revoked", record["status"])
+            self.assertEqual("task_completed", record["revoked_reason"])
+            with mock.patch.object(authorization.os, "replace", side_effect=AssertionError("不得重复写入")):
+                authorization.revoke_authorization(self.base, self.state["issue_key"], "task_completed")
+            self.assertEqual(before, self.auth_path.read_bytes())
 
     def test_unknown_jira_outcome_can_converge_by_readback_without_new_attempt(self):
         self.state.update(stage="task_intake")

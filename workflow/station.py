@@ -234,7 +234,7 @@ def scope_change(base, issue, run_id, revision, operation_id, name, work_branch,
             if not continuation or continuation["expected_head"] != expected_head or continuation["work_branch"] != work_branch:
                 raise ValueError("续办 Head 必须已在接管时绑定历史基线")
             sha = expected_head
-        from workflow.task import revoke_authorization
+        from workflow.authorization import revoke_authorization
         revoke_authorization(base, issue, "scope_changed")
         step = operations.intent(base, operation, "branch", {}, {"branch": work_branch, "sha": sha})
         if expected_head is None and not step["before"].get("authorized_creation"):
@@ -322,7 +322,7 @@ def amend_scope(base, issue, run_id, revision, operation_id, name, binding_diges
         if operation is None:
             operation = operations.begin(base, "scope_change", operation_id, revision, request, run_id)
         operations.intent(base, operation, "binding", before, after)
-        from workflow.task import revoke_authorization
+        from workflow.authorization import revoke_authorization
         revoke_authorization(base, issue, "repository_scope_amended")
         if not applied:
             task["task_repositories"][name] = after
@@ -382,8 +382,8 @@ def evaluate_completion(base, task):
             continue
         deliveries.append(delivery)
         dispositions[name] = "merged"
-    from workflow import task as task_cli
-    problems.extend(task_cli._check_advance_base(task, "completed", base, task_cli.admission(base)))
+    from workflow import project_rules, task_checks
+    problems.extend(task_checks.check_advance(task, "completed", base, project_rules.load_admission(station=base)))
     from workflow import quality, pr_ready, verification
     rules = quality.config(base, task)
     if quality.enabled(task, rules) and isinstance(rules.get("pr_ready"), dict):

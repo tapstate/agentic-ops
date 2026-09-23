@@ -20,6 +20,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -27,6 +28,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from workflow import project_rules, quality, task_store  # noqa: E402
 from gate import engine  # noqa: E402
+
+
+def revoke_authorization(base, issue_key, reason):
+    """生命周期持锁调用；相同原因的重复撤销不重写记录。"""
+    path = task_store.authorization_path(base, issue_key)
+    if not path.is_file():
+        return
+    auth = json.loads(path.read_text(encoding="utf-8"))
+    if auth.get("status") == "revoked" and auth.get("revoked_reason") == reason:
+        return
+    auth["status"] = "revoked"
+    auth["revoked_at"] = task_store.now()
+    auth["revoked_reason"] = reason
+    temporary = path.with_name(".%s.%s.tmp" % (path.name, os.getpid()))
+    temporary.write_text(
+        json.dumps(auth, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    os.replace(str(temporary), str(path))
 
 
 def repository_bindings(repositories):
