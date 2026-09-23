@@ -217,18 +217,15 @@ def cleanup_paths(base, task, entry, operation):
 
 def precheck(base, task, entry, operation):
     """所有目录在源码副作用之前回读身份、缺失事实和已有回执。"""
+    version = operation.get("cleanup_plan", {}).get("schema_version")
+    if type(version) is not int or version != 6:
+        raise ValueError("目录清理仅接受版本 6 计划")
     intent_path, receipt_path = cleanup_paths(base, task, entry, operation)
     for p in (intent_path, receipt_path):
         if p.is_symlink():
             raise ValueError("目录回执不能是链接")
     intended = intent_path.exists()
     path = validate(base, entry, missing=True)
-    native = operation.get("cleanup_plan", {}).get("native_clean", {}).get("repositories", {})
-    native_done = operation.get('native_plan_digest') == baseline.digest(operation.get('cleanup_plan', {}).get('native_clean')) and any(entry["path"] in row["paths"] and operation.get("native_receipts", {}).get(name, {}).get("exit_code") == 0
-                      for name, row in native.items())
-    result_based = operation.get("cleanup_plan", {}).get("schema_version") == 6
-    if not intended and not path.exists() and not entry.get("observed_missing_before_intent") and not native_done and not result_based:
-        raise ValueError("目录在确认后、清理意图前缺失，需要重新确认观测结果")
     # 预检已明确绑定提前缺失的事实；回执不声称本操作删除了该目录。
     expected = {"run_id": task["run_id"], "operation_id": operation["operation_id"], "root": entry}
     if intended:

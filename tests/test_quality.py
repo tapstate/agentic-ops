@@ -1910,6 +1910,7 @@ class FeatureFlowTests(unittest.TestCase):
         self.repo = "tapdata/tapdata"
         shutil.copytree(ROOT / "projects", self.product / "projects")
         shutil.copytree(ROOT / "contracts", self.product / "contracts")
+        shutil.copytree(ROOT / "policies", self.product / "policies")
         self.git("init", "-q", "-b", "develop", str(self.seed))
         (self.seed / "feature.py").write_text("def value():\n    return 0\n")
         (self.seed / "verify.py").write_text("from feature import value\nassert value() == 1\n")

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "epoch 5 工位重置确认清单（版本与规则快照另由读取器校验）",
+  "title": "工位重置确认清单版本 6（规则快照另由读取器校验）",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -13,7 +13,8 @@
     "active_state",
     "retained",
     "digest",
-    "archive_runtime"
+    "archive_runtime",
+    "rules"
   ],
   "properties": {
     "rules": {
@@ -69,12 +70,7 @@
       }
     },
     "schema_version": {
-      "enum": [
-        3,
-        4,
-        5,
-        6
-      ]
+      "const": 6
     },
     "run_id": {
       "type": "string",
@@ -165,9 +161,6 @@
         "type": "string",
         "minLength": 1
       }
-    },
-    "native_clean": {
-      "type": "object"
     }
   }
 }

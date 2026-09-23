@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """固定 source 的中断恢复与对象保留合同。"""
 import json
+import shutil
 import unittest
 from unittest import mock
-from test_station_source import SourceFixture
+from test_station_source import ROOT, SourceFixture
 from workflow import station_source as source, station_resources as resources, task_store, station_directories as directories
 
 
 class RecoveryTests(SourceFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
+        shutil.copytree(ROOT / 'policies', self.root / 'product/policies')
         path = self.root / "product/projects/tapdata/repositories.json"
         catalog = json.loads(path.read_text())
         catalog["repositories"][self.name]["origin"] = str(self.remote)

@@ -82,14 +82,14 @@ def main(argv=None):
         if kind == "clean" and args.abandon_changes != "yes":
             raise ValueError("任务未完成，请明确是否放弃变更；未写入任何状态")
         if request.get("cleanup_version") != 6:
-            raise ValueError("新入口请求必须声明 cleanup_version=6；旧计划只按原合同恢复")
+            raise ValueError("请求必须声明 cleanup_version=6；旧计划由原版本退出，不在线迁移")
         if kind == "clean":
             if request.get("abandon_changes") is not True:
                 raise ValueError("确认请求必须记录 abandon_changes=true")
     result = station.execute(args.dir, kind, args.issue_key, args.expected_run_id,
                              args.expected_revision, args.operation_id, request,
                              cleanup_mode="prepare" if args.prepare_only else "verify" if args.verify_result else "execute")
-    output = {key: result.get(key) for key in ("operation_id", "status", "phase", "archive_ref", "native_problems")}
+    output = {key: result.get(key) for key in ("operation_id", "status", "phase", "archive_ref")}
     output["cleanup_scope"] = station_clean_view.safe_describe(args.dir, task_store.read_task(args.dir), result.get("cleanup_plan"), result)
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0

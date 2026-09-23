@@ -332,7 +332,7 @@ def check_admission_documents(base):
 
 
 def check_station_binding_snapshot(base):
-    from workflow import jira_collect, native_cleanup, repair_strategy, station, station_clean_rules, station_replan
+    from workflow import jira_collect, repair_strategy, station, station_clean_rules, station_replan
     area = base.resolve() / "binding-snapshot"
     products = [area / "product-a", area / "product-b"]
     for root in products:
@@ -365,7 +365,6 @@ def check_station_binding_snapshot(base):
         ("Jira 采集", lambda: jira_collect.config(bound, task)[0]["snapshot_marker"], "product-a/alpha"),
         ("返工项目", lambda: station_replan.project(bound)[1], project),
         ("工位项目", lambda: station._project(bound), project),
-        ("原生清理", lambda: native_cleanup.configuration(bound)[0], products[0]),
         ("清理规则", lambda: bool(station_clean_rules.load(bound)["layers"]), True),
         ("修复策略", lambda: repair_strategy.resolve(bound, task)["available"], True),
     )

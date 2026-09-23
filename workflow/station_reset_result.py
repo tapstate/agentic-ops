@@ -64,6 +64,11 @@ def guard(base, task, operation):
     resources.verify_known_external(base, task)
     resources.verify_stopped(base, task, require_cleaned=True)
     resources.verify_station_inventory(base, plan["rules"], allow_pending=True)
+    # 所有工位根必须先核验身份，不能在源码恢复后才发现 runtime 已被替换。
+    for entry in plan["directories"]:
+        if entry["kind"] == "source-generated":
+            raise ValueError("版本 6 源码必须按文件快照处理，不能整目录回收")
+        directories.validate(base, entry, missing=entry["disposition"] == "delete_root")
     if resources.task_fingerprint(task) != plan["active_state"]["task_digest"]:
         raise ValueError("任务范围或事实变化，需要补充确认")
     if operation["kind"] == "release":
@@ -85,6 +90,9 @@ def guard(base, task, operation):
         current = refs(repository)
         expected = dict(entry["refs"])
         preserved = entry["preserved_ref"]
+        if (operation.get("steps", {}).get("neutral:" + name, {}).get("receipt") is not None
+                and preserved not in current):
+            raise ValueError("已核验的源码保留引用缺失：" + name)
         if preserved in current:
             expected[preserved] = entry["preserved_head"]
         branch_ref = "refs/heads/" + entry["checkout_branch"] if entry["checkout_branch"] else None
@@ -159,6 +167,8 @@ def apply(base, task, operation):
     if operation["steps"].get(completed, {}).get("receipt") is not None:
         verify(base, task, operation)
         return  # 已验收后再出现内容不能沿旧确认重删。
+    for entry in plan["directories"]:
+        directories.precheck(base, task, entry, operation)
     for name, entry in plan["source"].items():
         if entry.get("initial_checkout"):
             continue

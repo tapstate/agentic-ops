@@ -142,17 +142,12 @@ def verify_station_inventory(base, rules=None, allow_pending=False):
     from workflow import station_clean_rules
     task = store.read_task(base)
     registered = directories.load(base, task) if task else {}
-    # 版本 3 的恢复保留原库存语义，不读取后续版本的配置。
-    observed = station_clean_rules.inspect(base, owned, registered) if rules is not None else {"objects": {}}
+    observed = station_clean_rules.inspect(base, owned, registered)
     if rules is not None and observed["digests"] != rules["digests"]:
         raise ValueError("清理配置已变化，需要重新确认")
     def inspect(directory, prefix=""):
         for path in directory.iterdir():
             relative = prefix + path.name
-            if rules is None and not prefix and relative == ".idea":
-                if path.is_symlink() or not path.is_dir():
-                    raise ValueError("保留目录不是普通文件或目录：" + relative)
-                continue
             if not prefix and allow_pending and relative in registered and observed["objects"].get(relative, {}).get("action") == "remove":
                 continue
             if not prefix and relative in observed["objects"] and observed["objects"][relative]["action"] == "preserve":
@@ -217,20 +212,18 @@ def preflight(base, task):
     return value
 
 
+def require_cleanup_version(version):
+    if type(version) is not int or version != 6:
+        raise ValueError("仅支持清理计划版本 6；旧清理合同必须由原版本退出，不在线迁移")
+
+
 def plan(base, task, version=None, decisions_override=None):
-    if version is None:
-        current_operation = operations.read(base) or {}
-        version = (current_operation.get("cleanup_plan", {}).get("schema_version", 3)
-                   if current_operation.get("run_id") == task["run_id"] and current_operation.get("status") != "done" else 3)
-    if version not in (None, 3, 4, 5, 6):
-        raise ValueError("旧清理合同必须由原版本退出，不在线迁移")
-    roots = directories.load(base, task)
-    if version == 6:
-        roots = {name: entry for name, entry in roots.items() if entry["kind"] != "source-generated"}
-    if version not in (4, 5, 6) and any(e["kind"] == "station-generated" for e in roots.values()):
-        raise ValueError("工位附属目录需要 station-clean 版本 4 计划")
+    require_cleanup_version(6 if version is None else version)
+    # 操作读取器统一拒绝旧计划（含 handoff 和计划修订），不在线转换。
+    operation = operations.read(base) or {}
+    roots = {name: entry for name, entry in directories.load(base, task).items()
+             if entry["kind"] != "source-generated"}
     if "runtime" not in roots:
-        operation = operations.read(base) or {}
         original = operation.get("previous_operation", operation)
         if (original.get("kind") != "takeover" or original.get("run_id") != task["run_id"]
                 or original.get("steps") or not task.get("initial_runtime")):
@@ -240,19 +233,13 @@ def plan(base, task, version=None, decisions_override=None):
         if any(path.iterdir()):
             raise ValueError("尚未启动生产者的 runtime 出现未知材料")
     for entry in roots.values():
-        # 已开始删除的 source-generated 根可以不存在，但身份由原操作恢复核验。
+        # 已确认回收的工位根可以缺失，身份与原确认由成果核验器检查。
         directories.validate(base, entry, missing=True)
-        if entry["kind"] == "source-generated":
-            parts = entry["path"].split("/")
-            repository = source.repository_path(base, "/".join(parts[1:3]))
-            if source.git(repository, "ls-files", "-z", "--", "/".join(parts[3:])).stdout:
-                raise ValueError("生成目录现已含跟踪源码，拒绝目录回收")
     engineering = task.get("engineering_baseline", {})
     repositories = engineering.get("repositories", {}) if task.get("source_prepared") else _partial_repositories(base)
     catalog = project_rules.load_repository_catalog(station=base)["repositories"]
     if source.check_station_layout(base, catalog, repositories, task.get("replan_preserved")) != task.get("retained_repositories", {}):
         raise ValueError("未选择的持久仓库状态变化")
-    operation = operations.read(base) or {}
     entries, states = [], {}
     decisions = {item["path"]: item["preservation"] for item in inventory(base, task) if item.get("kind") == "source-disposition"}
     if decisions_override:
@@ -266,15 +253,13 @@ def plan(base, task, version=None, decisions_override=None):
         target = task.get("reset_baseline", {}).get(name)
         if not target or source.git(repository, "cat-file", "-t", target["sha"]).stdout.strip() != "commit":
             raise ValueError("缺少已核验开发基线，拒绝猜测源码归位")
-        state = artifacts.snapshot(base, name, roots, decisions, target["sha"], include_ignored=version == 6)
+        state = artifacts.snapshot(base, name, roots, decisions, target["sha"], include_ignored=True)
         for entry in state.pop("entries"):
-            if version != 6 and name not in task.get("task_repositories", {}):
-                raise ValueError("配套仓存在未登记源码修改：%s" % entry["path"])
             entries.append(entry)
         preserved_head = state["head"]
         if operation.get("run_id") == task["run_id"]:
             previous_source = operation.get("cleanup_plan", {}).get("source", {}).get(name, {})
-            if version == 6 and previous_source and operation.get("status") != "done":
+            if previous_source and operation.get("status") != "done":
                 if state["head"] not in (previous_source["head"], previous_source["neutral"]["sha"]):
                     raise ValueError("源码归位后 Head 已变化，不能补充清理")
                 preserved_head = previous_source["preserved_head"]
@@ -286,15 +271,14 @@ def plan(base, task, version=None, decisions_override=None):
                 preserved_head = prior["preserved_head"]
         state.update(origin=row["origin"], neutral=target, preserved_head=preserved_head,
                      preserved_ref="refs/agenticops/archive/" + task["run_id"] + "/" + baseline.digest(name)[:24])
-        if version == 6:
-            from workflow import station_reset_result
-            state["directories"] = station_reset_result.source_directories(repository)
-            state["refs"] = station_reset_result.refs(repository)
-            state["checkout_branch"] = (source.baseline_branch(dict(row, ref_name=target["ref"], commit_sha=target["sha"]))
-                                        if row.get("ref_kind") == "branch" else None)
-            branch_ref = "refs/heads/" + state["checkout_branch"] if state["checkout_branch"] else None
-            if branch_ref in state["refs"] and state["refs"][branch_ref] != target["sha"]:
-                raise ValueError("受管清理基线分支已指向不同提交")
+        from workflow import station_reset_result
+        state["directories"] = station_reset_result.source_directories(repository)
+        state["refs"] = station_reset_result.refs(repository)
+        state["checkout_branch"] = (source.baseline_branch(dict(row, ref_name=target["ref"], commit_sha=target["sha"]))
+                                    if row.get("ref_kind") == "branch" else None)
+        branch_ref = "refs/heads/" + state["checkout_branch"] if state["checkout_branch"] else None
+        if branch_ref in state["refs"] and state["refs"][branch_ref] != target["sha"]:
+            raise ValueError("受管清理基线分支已指向不同提交")
         states[name] = state
     external = []
     for item in inventory(base, task):
@@ -303,38 +287,20 @@ def plan(base, task, version=None, decisions_override=None):
                 external.append({"id": item["id"], "resource_type": item["resource_type"], "action": "retain", "before": item["before"]})
             else:
                 external.append({k: v for k, v in item.items() if k not in ("status", "readback_ref")})
-    logs = (directories.recipe(base, task).get("archive_runtime", ["logs", "reports"])
-            if version != 6 and engineering.get("status") == "frozen" else ["logs", "reports"])
+    logs = ["logs", "reports"]
     for relative in logs:
         directories.path_at(base, "runtime/" + relative)
-    value = {"schema_version": 3, "run_id": task["run_id"], "directories": [dict(entry, observed_missing_before_intent=not directories.path_at(base, entry["path"]).exists()) for entry in roots.values()], "archive_runtime": logs,
+    value = {"schema_version": 6, "run_id": task["run_id"], "directories": [dict(entry, observed_missing_before_intent=not directories.path_at(base, entry["path"]).exists()) for entry in roots.values()], "archive_runtime": logs,
              "entries": entries, "source": states, "external": external,
              "active_state": {"files": active_files(base), "unbind_run": task["run_id"], "task_digest": task_fingerprint(task)},
              "retained": ["config", "source repositories and refs", "Product Root .archive", ".agenticops binding and operation"]}
-    if version in (4, 5, 6):
-        from workflow import station_clean_rules
-        init = json.loads((store.state_path(base) / "init.json").read_text())
-        value["rules"] = station_clean_rules.inspect(base, [e["path"] for e in init.get("artifacts", [])], roots)
-        for entry in value["directories"]:
-            if entry["kind"] == "station-generated" and value["rules"]["objects"].get(entry["path"], {}).get("action", "remove") != "remove":
-                raise ValueError("保留名单与登记目录回收冲突：" + entry["path"])
-        value["schema_version"] = version
-        verify_station_inventory(base, value["rules"], allow_pending=True)
-        for entry in value["directories"]:
-            if version == 4 and entry["kind"] == "source-generated" and directories.path_at(base, entry["path"]).exists():
-                raise ValueError("源码构建产物尚未清理，请使用项目原生工具：" + entry["path"])
-    if version == 5:
-        from workflow import native_cleanup
-        previous = operation.get("cleanup_plan", {}) if operation.get("run_id") == task["run_id"] and operation.get("status") != "done" else {}
-        previous_native = previous.get("native_clean")
-        value["native_clean"], errors = native_cleanup.inspect(base, task, roots, previous=previous_native)
-        if errors:
-            raise ValueError("；".join(errors))
-        if previous_native:
-            old_directories = {entry["path"]: entry for entry in previous["directories"]}
-            for entry in value["directories"]:
-                if entry["kind"] == "source-generated" and entry["path"] in old_directories:
-                    entry["observed_missing_before_intent"] = old_directories[entry["path"]]["observed_missing_before_intent"]
+    from workflow import station_clean_rules
+    init = json.loads((store.state_path(base) / "init.json").read_text())
+    value["rules"] = station_clean_rules.inspect(base, [e["path"] for e in init.get("artifacts", [])], roots)
+    for entry in value["directories"]:
+        if entry["kind"] == "station-generated" and value["rules"]["objects"].get(entry["path"], {}).get("action", "remove") != "remove":
+            raise ValueError("保留名单与登记目录回收冲突：" + entry["path"])
+    verify_station_inventory(base, value["rules"], allow_pending=True)
     # 内部证据/回执不属于删除授权范围；源码成果、目录归属、开发目标才属于。
     value["digest"] = baseline.digest(value)
     from workflow import quality_contract
@@ -352,7 +318,7 @@ def verify_known_external(base, task):
 
 def clean(base, task, cleanup_plan, confirmed_digest, operation, source_only=False, directories_only=False):
     payload = {key: value for key, value in cleanup_plan.items() if key != "digest"}
-    if (cleanup_plan.get("schema_version") not in (3, 4, 5, 6) or cleanup_plan.get("run_id") != task["run_id"]
+    if (cleanup_plan.get("schema_version") != 6 or cleanup_plan.get("run_id") != task["run_id"]
             or baseline.digest(payload) != confirmed_digest or cleanup_plan.get("digest") != confirmed_digest):
         raise ValueError("清理确认与当前 run 或精确清单不匹配")
     if not task.get("archive_ref"):
@@ -384,19 +350,18 @@ def clean(base, task, cleanup_plan, confirmed_digest, operation, source_only=Fal
     for repository_name, entries in grouped.items():
         repository = source.repository_path(base, repository_name)
         head = entries[0]["head"]
-        if cleanup_plan["schema_version"] == 6:
-            observed_head = source.git(repository, "rev-parse", "HEAD").stdout.strip()
-            if observed_head != head:
-                from workflow import station_reset_result
-                station_reset_result.source_result(base, task, repository_name, cleanup_plan["source"][repository_name])
-                continue
+        observed_head = source.git(repository, "rev-parse", "HEAD").stdout.strip()
+        if observed_head != head:
+            from workflow import station_reset_result
+            station_reset_result.source_result(base, task, repository_name, cleanup_plan["source"][repository_name])
+            continue
         name = "source-reset:%s:%s:%s" % (len(operation.get("plan_revisions", [])), cleanup_plan["digest"], repository_name)
         expected = {"repository": repository_name, "head": head, "entries_digest": baseline.digest(entries)}
         step = operations.intent(base, operation, name, {}, expected)
         if source.git(repository, "rev-parse", "HEAD").stdout.strip() != head:
             raise ValueError("源码 Head 已变化，拒绝恢复")
         if step["receipt"] is not None:
-            if artifacts.snapshot(base, repository_name, {e["path"]: e for e in cleanup_plan["directories"]}, {}, include_ignored=cleanup_plan["schema_version"] == 6)["entries"]:
+            if artifacts.snapshot(base, repository_name, {e["path"]: e for e in cleanup_plan["directories"]}, {}, include_ignored=True)["entries"]:
                 raise ValueError("源码清理后再次变化，拒绝重删")
             continue
         for entry in entries:
@@ -435,12 +400,8 @@ def clean(base, task, cleanup_plan, confirmed_digest, operation, source_only=Fal
     if source_only:
         return
     for entry in cleanup_plan["directories"]:
-        if cleanup_plan["schema_version"] in (4, 5) and entry["kind"] == "source-generated" and directories.path_at(base, entry["path"]).exists():
-            raise ValueError("源码构建产物重新出现，禁止通用删除：" + entry["path"])
         if entry["kind"] == "source-generated":
-            parts = entry["path"].split("/")
-            if source.git(source.repository_path(base, "/".join(parts[1:3])), "ls-files", "-z", "--", "/".join(parts[3:])).stdout:
-                raise ValueError("生成目录现已含跟踪源码，拒绝目录回收")
+            raise ValueError("版本 6 源码必须按文件快照处理，不能整目录回收")
         print("[station-reset] 回收目录 " + entry["path"], file=sys.stderr, flush=True)
         directories.reset(base, task, entry, operation)
 
@@ -471,6 +432,7 @@ def _partial_repositories(base):
 
 def neutral(base, task, operation):
     plan = operation["cleanup_plan"]
+    require_cleanup_version(plan.get("schema_version"))
     catalog = project_rules.load_repository_catalog(station=base)["repositories"]
     if source.check_station_layout(base, catalog, plan["source"], task.get("replan_preserved")) != task.get("retained_repositories", {}):
         raise ValueError("未选择的持久仓库状态变化")
@@ -481,21 +443,19 @@ def neutral(base, task, operation):
             if {p.name for p in path.iterdir()} != {".git"}:
                 raise ValueError("未完成检出仓库出现未知内容")
             continue
-        if plan["schema_version"] == 6:
-            from workflow import station_reset_result
-            try:
-                station_reset_result.source_result(base, task, name, entry)
-            except ValueError:
-                pass
-            else:
-                continue
+        from workflow import station_reset_result
+        try:
+            station_reset_result.source_result(base, task, name, entry)
+        except ValueError:
+            pass
+        else:
+            continue
         source.require_clean(path)
         if source.git(path, "ls-files", "--others", "--ignored", "--exclude-standard").stdout:
             raise ValueError("源码仍含未清理 ignored 产物")
         ref = entry["preserved_ref"]
         target = entry["neutral"]["sha"]
-        baseline_entry = task["engineering_baseline"]["repositories"][name]
-        checkout_branch = entry["checkout_branch"] if plan["schema_version"] == 6 else source.baseline_branch(baseline_entry)
+        checkout_branch = entry["checkout_branch"]
         artifacts.verify_special_entries(path, target)
         preserved_head = entry["preserved_head"]
         expected = {"head": target, "checkout_mode": "managed_branch" if checkout_branch else "detached",
@@ -512,23 +472,16 @@ def neutral(base, task, operation):
         if step["receipt"] is not None and (head != target or source.git(path, "branch", "--show-current").stdout.strip() != (checkout_branch or "")):
             raise ValueError("源码归位后被再次改变")
         if checkout_branch:
-            if plan["schema_version"] == 6:
-                current = source.git(path, "rev-parse", "--verify", "refs/heads/" + checkout_branch, check=False)
-                if current.returncode:
-                    source.git(path, "branch", checkout_branch, target)
-                elif current.stdout.strip() != target:
-                    raise ValueError("受管清理基线分支已变化")
+            current = source.git(path, "rev-parse", "--verify", "refs/heads/" + checkout_branch, check=False)
+            if current.returncode:
+                source.git(path, "branch", checkout_branch, target)
+            elif current.stdout.strip() != target:
+                raise ValueError("受管清理基线分支已变化")
             source.git(path, "checkout", checkout_branch)
         else:
             source.git(path, "-c", "submodule.recurse=false", "checkout", "--detach", target)
         artifacts.verify_special_entries(path, target)
         operations.receipt(base, operation, "neutral:" + name, expected)
-    for entry in plan["directories"]:
-        if plan["schema_version"] in (4, 5, 6) and entry["kind"] != "source-generated":
-            continue
-        path = directories.validate(base, entry, missing=True)
-        if path.exists() and (entry["disposition"] == "delete_root" or any(path.iterdir())):
-            raise ValueError("归位后运行产物再次出现")
 
 
 def delivery_head_matches(base, name, observed, expected_head, operation):
@@ -542,16 +495,7 @@ def delivery_head_matches(base, name, observed, expected_head, operation):
             return False
         actual = source.git(source.repository_path(base, name), "rev-parse", "--verify", entry["preserved_ref"], check=False)
         return actual.returncode == 0 and actual.stdout.strip() == expected_head
-    step = operation.get("steps", {}).get("neutral:" + name)
-    if not step:
-        return False
-    expected = step["expected"]
-    if (expected.get("preserved_head") != expected_head or expected.get("head") != observed["head"]
-            or observed.get("branch") != (expected.get("checkout_branch") or "")
-            or not expected.get("preserved_ref")):
-        return False
-    actual = source.git(source.repository_path(base, name), "rev-parse", "--verify", expected["preserved_ref"], check=False)
-    return actual.returncode == 0 and actual.stdout.strip() == expected_head
+    return False
 
 
 def registration_state(base, task, expected_operation_id=None):

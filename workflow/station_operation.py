@@ -50,6 +50,8 @@ def read(base):
     from workflow.station_clean_rules import validate_snapshot
     if "cleanup_plan" in value:
         validate_snapshot(value["cleanup_plan"])
+    if "cleanup_plan" in value.get("handoff", {}):
+        validate_snapshot(value["handoff"]["cleanup_plan"])
     for revision in value.get("plan_revisions", []):
         validate_snapshot(revision["plan"])
     for name, step in value["steps"].items():
@@ -108,7 +110,7 @@ def _verify_superseded(operation, name, step):
         if name != "clear-active:" + str(original_revision) + ":" + original or not isinstance(step["expected"].get("files"), dict):
             raise ValueError("活动材料清理步骤不属于原计划")
     elif name.startswith("station-source-reset:"):
-        if (revision["plan"].get("schema_version") not in (4, 5, 6)
+        if (revision["plan"].get("schema_version") != 6
                 or name != "station-source-reset:" + str(original_revision) + ":" + original
                 or step["expected"] != {"plan_digest": original}):
             raise ValueError("工位源码复位步骤不属于原计划")

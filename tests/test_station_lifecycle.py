@@ -86,6 +86,9 @@ class StationTests(unittest.TestCase):
     def execute(self, base, kind, issue, run, revision, operation, request):
         from workflow import station_resources
         task = task_store.read_task(base)
+        request.setdefault("cleanup_version", 6)
+        if kind == "clean":
+            request.setdefault("abandon_changes", True)
         if task:
             request.setdefault("decision_ref", "fixture:user-continue")
             if "confirmed_digest" not in request:
@@ -111,7 +114,7 @@ class StationTests(unittest.TestCase):
         preflight = station_resources.preflight(self.ws, task)
         self.assertTrue(preflight["decision_required"])
         with self.assertRaisesRegex(ValueError, "重置范围"):
-            station.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-no-decision", {"summary": "停止", "reason": "取消"})
+            station.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-no-decision", {"summary": "停止", "reason": "取消", "abandon_changes": True})
         self.assertEqual(before, {p: p.read_bytes() for p in (self.ws / ".agenticops").rglob("*") if p.is_file()})
 
     def test_readiness_tracks_remote_advance_dirty_and_divergence(self):
@@ -152,7 +155,7 @@ class StationTests(unittest.TestCase):
         from workflow import station_resources
         task = self.takeover()
         plan = station_resources.plan(self.ws, task)
-        request = {"summary": "尚未编码", "reason": "用户取消", "decision_ref": "fixture:user",
+        request = {"summary": "尚未编码", "reason": "用户取消", "decision_ref": "fixture:user", "abandon_changes": True,
                    "confirmed_digest": plan["digest"]}
         station.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-new-clean", request)
         self.assertIsNone(task_store.read_task(self.ws))
@@ -447,9 +450,19 @@ class StationTests(unittest.TestCase):
         file = self.ws / "runtime/logs/repeated.log"; file.parent.mkdir()
         file.write_text("identical regenerated output")
         station_resources.register(self.ws, task["issue_key"], task["run_id"], [{"kind": "file", "path": "runtime/logs/repeated.log", "producer": "build"}])
+        # 版本 6 将 refs 纳入摘要；先具备目标成果引用，才能隔离验证同摘要的重复目录清理。
+        initial = station_resources.plan(self.ws, task)
+        for name, entry in initial["source"].items():
+            self.git(self.ws / "source" / name, "update-ref", entry["preserved_ref"], entry["preserved_head"])
         plan = station_resources.plan(self.ws, task)
         request = {"summary": "未完成", "reason": "停止", "confirmed_digest": plan["digest"]}
-        with mock.patch.object(station_resources, "neutral", side_effect=OSError("after cleaned")):
+        original = station_resources.clean
+        def fail_after_directories(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if kwargs.get("directories_only"):
+                raise OSError("after cleaned")
+            return result
+        with mock.patch.object(station_resources, "clean", side_effect=fail_after_directories):
             with self.assertRaises(OSError):
                 self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-repeat-plan", request)
         current = task_store.read_task(self.ws)
@@ -869,10 +882,10 @@ class StationTests(unittest.TestCase):
         self.assertIn("tapdata/t-layer3-test", current["replan_preserved"])
         self.assertTrue(station_resources.plan(self.ws, current)["digest"])
         self.assertEqual(result, station_replan.abort(self.ws, task["issue_key"], task["run_id"], args[4], "fixture:abort"))
-        cleanup = station_resources.plan(self.ws, current, version=5)
+        cleanup = station_resources.plan(self.ws, current, version=6)
         station.execute(self.ws, 'clean', current['issue_key'], current['run_id'], current['_revision'], 'op-clean-aborted-replan',
             {'summary': '保留部分准备仓并退出', 'reason': 'fixture', 'decision_ref': 'fixture:cleanup',
-             'cleanup_version': 5, 'abandon_changes': True, 'confirmed_digest': cleanup['digest']})
+             'cleanup_version': 6, 'abandon_changes': True, 'confirmed_digest': cleanup['digest']})
         self.assertIsNone(task_store.read_task(self.ws))
         self.assertTrue((path / '.git').is_dir())
 
@@ -958,10 +971,10 @@ class StationTests(unittest.TestCase):
         current = task_store.read_task(self.ws)
         self.assertEqual('implementation', current['stage'])
         self.assertEqual('preserved feature work', path.read_text())
-        cleanup = station_resources.plan(self.ws, current, version=5)
+        cleanup = station_resources.plan(self.ws, current, version=6)
         station.execute(self.ws, 'clean', current['issue_key'], current['run_id'], current['_revision'], 'op-clean-feature-cycle',
             {'summary': '结束隔离演练', 'reason': '夹具完成', 'decision_ref': 'fixture:cleanup',
-             'cleanup_version': 5, 'abandon_changes': True, 'confirmed_digest': cleanup['digest']})
+             'cleanup_version': 6, 'abandon_changes': True, 'confirmed_digest': cleanup['digest']})
         self.assertIsNone(task_store.read_task(self.ws))
         self.assertTrue(list(archive_store.root(self.ws).iterdir()))
         station_registry.detach(self.product, self.ws, purge=True)

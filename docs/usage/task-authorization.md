@@ -152,7 +152,7 @@ python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key 
 
 执行成功不代表验收通过；有残留或保全、引用、范围不符时明确补齐。验收器不可用时保留证据，继续无依赖工作，最终解绑保持待核验。出现新增待删内容或处置范围变化时通过原 cleanup-amend 补充确认，不用新的请求偷偷扩大范围。
 
-中断后沿用原 operation-id、原 expected-revision 和原请求恢复；不得改用当前 revision 或另建操作。版本 4/5 的 `station-source-reset.py` 和原生回执仅服务原计划，不是版本 6 的前置步骤。新版本 epoch 19 不能直接操作旧 epoch 18 现场，需由原版本完成退出与 purge 后再切换。
+中断后沿用原 operation-id、原 expected-revision 和原请求恢复；不得改用当前 revision 或另建操作。所有清理入口仅支持版本 6，旧版本 3–5 的请求、在途计划和接管交接计划均拒绝，不在线转成新计划。旧工位必须由原版本完成退出与 purge 后再切换；历史档案保留，但不恢复为活动清理操作。
 
 工位根目录的 `.idea/` 属于 IntelliJ IDEA 配置，由中央白名单统一保留，不遍历、归档或删除其内容。目录模式不匹配同名文件，符号链接按通用安全规则拒绝。白名单可以覆盖同层宽泛黑名单；不同清理动作同时命中同层对象才是冲突。工位代际及目标产品支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准，清理计划版本不代表工位 epoch；不兼容工位须由匹配的原产品版本处理，升级顺序见[更新与回退](update-and-rollback.md)。
 

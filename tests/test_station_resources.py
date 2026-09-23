@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""epoch 5 目录重置、源码成果和恢复边界的真实 Git 回归。"""
+"""版本 6 目录重置、源码成果和恢复边界的真实 Git 回归。"""
 import json
 import io
 import os
@@ -34,7 +34,7 @@ class ResourceTests(unittest.TestCase):
         return task
 
     def reset_request(self, task):
-        return dict(summary='保存成果并重置', reason='用户取消', decision_ref='fixture:user', confirmed_digest=resources.plan(self.ws, task)['digest'])
+        return dict(cleanup_version=6, abandon_changes=True, summary='保存成果并重置', reason='用户取消', decision_ref='fixture:user', confirmed_digest=resources.plan(self.ws, task)['digest'])
 
     def execute(self, task, request, kind='clean', op='op-resource-reset'):
         return station.execute(self.ws, kind, task['issue_key'], task['run_id'], task['_revision'], op, request)
@@ -195,12 +195,14 @@ class ResourceTests(unittest.TestCase):
             resources.plan(self.ws,task)
         self.assertEqual((self.ws/'source/unknown').read_text(),'keep')
 
-    def test_unknown_ignored_file_blocks(self):
+    def test_ignored_file_requires_preservation_in_confirmed_plan(self):
         task = self.ready()
         (self.repo/'.git/info/exclude').write_text('ignored\n')
         (self.repo/'ignored').write_text('keep')
-        with self.assertRaisesRegex(ValueError,'ignored'):
-            resources.plan(self.ws,task)
+        plan = resources.plan(self.ws,task)
+        entry = next(e for e in plan['entries'] if e['file'] == 'ignored')
+        self.assertEqual(entry['preservation']['action'], 'archive')
+        self.assertEqual((self.repo/'ignored').read_text(), 'keep')
 
     def test_archive_reconstructs_staged_unstaged_binary_new_and_deleted(self):
         task = self.ready()
@@ -351,10 +353,16 @@ class ResourceTests(unittest.TestCase):
     def test_completed_directory_receipt_rejects_late_content(self):
         task = self.ready()
         request = self.reset_request(task)
-        with mock.patch.object(resources,'neutral',side_effect=OSError('crash')), self.assertRaises(OSError):
+        original = resources.clean
+        def fail(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if kwargs.get('directories_only'):
+                raise OSError('crash')
+            return result
+        with mock.patch.object(resources,'clean',side_effect=fail), self.assertRaises(OSError):
             self.execute(task,request)
         (self.ws/'runtime/late').write_text('keep')
-        with self.assertRaisesRegex(ValueError,'再次出现'):
+        with self.assertRaisesRegex(ValueError,'再次产生'):
             self.execute(task,request)
         self.assertTrue((self.ws/'runtime/late').exists())
 
@@ -407,13 +415,16 @@ class ResourceTests(unittest.TestCase):
         self.assertTrue((reports/'binary').exists())
         self.assertIsNotNone(task_store.read_task(self.ws))
 
-    def test_generated_root_becoming_tracked_is_not_deleted(self):
+    def test_generated_root_becoming_tracked_is_archived_before_reset(self):
         task = self.ready()
         self.register_root(task)
         (self.repo/'target/code').write_text('keep')
         self.git(self.repo, 'add', 'target/code')
-        with self.assertRaisesRegex(ValueError, '跟踪'):
-            resources.plan(self.ws, task)
+        plan = resources.plan(self.ws, task)
+        entry = next(e for e in plan['entries'] if e['file'] == 'target/code')
+        self.assertEqual(entry['preservation']['action'], 'archive')
+        self.assertEqual(entry['action'], 'restore')
+        self.assertFalse(any(e['kind'] == 'source-generated' for e in plan['directories']))
         self.assertTrue((self.repo/'target/code').exists())
 
     def test_existing_directory_requires_same_producer(self):
@@ -472,13 +483,13 @@ class ResourceTests(unittest.TestCase):
         self.assertEqual(result['status'],'cleaned')
         self.assertEqual(result['readback_ref'],'fixture:removed')
 
-    def test_missing_generated_root_is_explicit_in_plan(self):
+    def test_missing_generated_root_needs_no_legacy_directory_plan(self):
         task = self.ready()
         self.register_root(task)
         (self.repo/'target').rmdir()
         plan = resources.plan(self.ws, task)
-        root = next(e for e in plan['directories'] if e['kind']=='source-generated')
-        self.assertTrue(root['observed_missing_before_intent'])
+        self.assertFalse(any(e['kind']=='source-generated' for e in plan['directories']))
+        self.assertNotIn('target', plan['source'][self.name]['directories'])
         self.execute(task, self.reset_request(task))
         self.assertIsNone(task_store.read_task(self.ws))
 
@@ -497,7 +508,7 @@ class ResourceTests(unittest.TestCase):
     def test_root_idea_exception_rejects_links_files_and_nested_unknowns(self):
         idea = self.ws / '.idea'
         idea.write_text('keep')
-        with self.assertRaisesRegex(ValueError, '普通文件或目录'):
+        with self.assertRaisesRegex(ValueError, '未知材料'):
             resources.verify_station_inventory(self.ws)
         idea.unlink()
         idea.symlink_to(self.root, target_is_directory=True)
@@ -631,7 +642,7 @@ class ResourceTests(unittest.TestCase):
                 writes.append(len(json.dumps(value)));return original(path,value)
             started=time.monotonic()
             with mock.patch.object(task_store,'_write_json_atomic',side_effect=record):
-                directories.reset(self.ws,task,entry,{'operation_id':'op-scale-'+str(count)})
+                directories.reset(self.ws,task,entry,{'operation_id':'op-scale-'+str(count), 'cleanup_plan': plan})
             row={'files':count,'plan_seconds':round(plan_seconds,3),'delete_seconds':round(time.monotonic()-started,3),'state_writes':len(writes),'state_bytes':sum(writes),'plan_bytes':len(json.dumps(plan))}
             measures.append(row);print('RESET_PERFORMANCE '+json.dumps(row),flush=True)
         self.assertEqual([r['state_writes'] for r in measures],[2,2,2])
