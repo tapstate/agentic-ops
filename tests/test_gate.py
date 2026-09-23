@@ -629,6 +629,22 @@ def main():
             "source": {"agent": "test", "adapter": "test", "adapter_version": 1},
             "cwd": str(ws), "operations": ["git_commit"], "target": {"issue_key": "TAP-123"},
         }
+        # free 是本地策略分级，不是用户或 Jira 服务端的写权限授权。
+        comment_request = dict(auth_request, operations=["write_jira_comment"])
+        for label, raw in (
+            ("缺失", None), ("有效", json.dumps(original_authorization)),
+            ("过期", json.dumps(dict(original_authorization, expires_at_epoch=1))),
+            ("撤销", json.dumps(dict(original_authorization, status="revoked"))),
+            ("损坏", "{bad-json"),
+        ):
+            if raw is None:
+                authorization_path.unlink(missing_ok=True)
+            else:
+                authorization_path.write_text(raw, encoding="utf-8")
+            result = parity(comment_request)
+            check("评论 free 不依赖授权状态：" + label,
+                  (result["decision"], result["reason_code"]), ("allow", "operation_free"))
+        authorization_path.write_text(json.dumps(original_authorization), encoding="utf-8")
         for field in ("issue_key", "agentic_run_id", "agent_id", "approved_plan_version"):
             for value in ("", None, False, 123):
                 malformed = dict(original_authorization, **{field: value})

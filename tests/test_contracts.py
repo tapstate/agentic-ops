@@ -217,6 +217,12 @@ class ContractConformanceTest(unittest.TestCase):
         policy = load_json(ROOT / "policies" / "operations.json")
         self.assertEqual({item["name"] for item in catalog["operations"]}, set(policy["operations"]))
 
+    def test_free_operations_do_not_duplicate_task_authorization_scope(self):
+        policy = load_json(ROOT / "policies" / "operations.json")
+        free = {name for name, value in policy["operations"].items() if value["level"] == "free"}
+        self.assertIn("write_jira_comment", free)
+        self.assertFalse(free & set(policy["authorization_scopes"]["task_execution"]["covered_operations"]))
+
     def test_contract_policy_drift_fails_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
