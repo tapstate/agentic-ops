@@ -59,6 +59,8 @@
 
 `current-task.json` 固定包含 `schema_version`、单调 `revision`、`current`。`current=null` 表示无任务；非空对象包含 `issue_key/run_id/task_class/stage/outcome/engineering_baseline/task_repositories/terminal_proof/archive_ref`。`outcome` 为 `in_progress/completed/interrupted`；`archive_ref` 为空或固定为 `scope=product/run_id/digest`，实际路径始终由工位绑定的 Product Root 推导，不保存绝对路径或工位相对路径。只有 `current` 的有无决定工位是否占用，不能再在 station 或索引里重复存 occupancy。没有未完成 operation 才可把无任务解释成可接管。
 
+`task_store` 在读取和 CAS 写入前复用 `task-state.schema.json` 校验完整结构，冻结工程基线与任务仓库引用复用既有值校验；Gate 上下文仅调用同一只读入口。损坏、缺字段、未知枚举或非整数 revision 均拒绝，不补写默认值或改动原文件。合法历史 run 格式、空闲状态及恢复中间态保持兼容；结构校验不代表外部事实已验收，不新增 stage/outcome 自动转换，也不提供防篡改保证。
+
 `engineering_baseline` 包含 `status=resolving|frozen`、Project/Profile 版本、解析输入、仓库条目与整体摘要；只有 frozen 可进入源码开发。`task_repositories` 是以仓库 ID 为键的变更与交付记录，引用唯一基线条目。质量、授权和 CI 状态独立留在 `.agenticops/`，都必须匹配 current 的 run/revision；不存在有效 current 时不接受活动证据写入。归档包含这些当前记录的必要脱敏副本，归档不是新的 Jira 或 Git 事实源。
 
 `operation.json` 包含 `schema_version/operation_id/kind/run_id/request_digest/expected_revision/phase/status/steps/confirmation/archive_ref/cleanup_plan/cleanup_manifest`。`steps` 记录每个副作用的意图、精确对象、预期前后事实与回执；`status=running|failed|done`。failed 仍属未完成，不释放工位。归档摘要使用规范化 JSON（键排序、无多余空白、UTF-8）和 SHA-256；文件清单记录相对路径、字节长度和 SHA-256，排除自身哈希和后续 receipts，避免循环摘要。

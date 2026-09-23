@@ -5,7 +5,7 @@ import shutil
 import unittest
 from unittest import mock
 from test_station_source import ROOT, SourceFixture
-from workflow import station_source as source, station_resources as resources, task_store, station_directories as directories
+from workflow import station_source as source, station_resources as resources, task_store, station_directories as directories, engineering_baseline
 
 
 class RecoveryTests(SourceFixture, unittest.TestCase):
@@ -33,6 +33,8 @@ class RecoveryTests(SourceFixture, unittest.TestCase):
     def partial(self):
         source.prepare_repositories(self.ws, self.catalog, [self.name], self.op)
         task = {"issue_key": "TAP-123", "run_id": self.op["run_id"],
+                "task_class": "technical_task", "stage": "waiting_takeover", "outcome": "in_progress",
+                "facts": {}, "history": [], "pending": None, "terminal_proof": None, "archive_ref": None,
                 "engineering_baseline": {"status": "resolving"}, "task_repositories": {}}
         task_store.write_task(self.ws, task)
         (self.ws / "runtime").mkdir(exist_ok=True)
@@ -67,9 +69,13 @@ class RecoveryTests(SourceFixture, unittest.TestCase):
         self.git(self.repo, "config", "user.name", "Test")
         self.git(self.repo, "commit", "--allow-empty", "-m", "unfinished")
         head = self.git(self.repo, "rev-parse", "HEAD")
+        frozen = engineering_baseline.freeze({"id": "full-application", "revision": 3, "repositories": [self.name]},
+            self.catalog, {self.name: {"verification": "verified", "ref_kind": "commit", "ref_name": self.sha,
+                "commit_sha": self.sha, "resolution_source": "fixture", "rule_version": "1"}}, {"fixture": True})
         task = {"issue_key": "TAP-123", "run_id": self.op["run_id"], "source_prepared": True,
-                "engineering_baseline": {"status": "frozen", "profile": {"id": "full-application", "revision": 3},
-                    "repositories": {self.name: {"origin": str(self.remote)}}},
+                "task_class": "technical_task", "stage": "waiting_takeover", "outcome": "in_progress",
+                "facts": {}, "history": [], "pending": None, "terminal_proof": None, "archive_ref": None,
+                "engineering_baseline": frozen,
                 "reset_baseline": {self.name: {"sha": self.sha}}, "task_repositories": {}}
         task_store.write_task(self.ws, task)
         (self.ws / "runtime").mkdir(exist_ok=True)

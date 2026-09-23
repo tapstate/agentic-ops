@@ -102,6 +102,26 @@ def generated_work_branch(base, task):
 def current_path(base):
     return state_path(base) / "current-task.json"
 
+def validate_current(document):
+    """校验既有持久合同，不补字段、不推进阶段，也不访问外部事实。"""
+    from workflow import engineering_baseline, quality_contract
+    try:
+        quality_contract.validate(document, "task-state.schema.json")
+    except ValueError as error:
+        raise ValueError("工位状态结构无效：%s" % error) from error
+    current = document["current"]
+    if current is None:
+        return document
+    if validate_issue_key(current["issue_key"]) != current["issue_key"]:
+        raise ValueError("当前任务身份无效")
+    validate_run_id(current["issue_key"], current["run_id"])
+    baseline = current["engineering_baseline"]
+    if baseline["status"] == "frozen":
+        engineering_baseline.validate_task_repositories(baseline, current["task_repositories"])
+    elif current["task_repositories"]:
+        raise ValueError("任务仓库必须引用冻结工程基线")
+    return document
+
 def read_current(base):
     path = current_path(base)
     if state_path(base).is_symlink():
@@ -114,21 +134,7 @@ def read_current(base):
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         raise ValueError("当前工位状态缺失或无法读取") from error
-    if (not isinstance(document, dict)
-            or set(document) != {"schema_version", "revision", "current"}
-            or document["schema_version"] != 1
-            or type(document["revision"]) is not int or document["revision"] < 0):
-        raise ValueError("工位状态结构无效")
-    current = document["current"]
-    if current is not None and (not isinstance(current, dict)
-            or validate_issue_key(current.get("issue_key")) != current.get("issue_key")):
-        raise ValueError("当前任务身份无效")
-    if current is not None:
-        try:
-            validate_run_id(current["issue_key"], current.get("run_id"))
-        except ValueError as error:
-            raise ValueError("当前任务身份无效") from error
-    return document
+    return validate_current(document)
 
 def initialize_current(base):
     if current_path(base).exists():
@@ -141,9 +147,10 @@ def initialize_current(base):
 
 def compare_and_set(base, expected_revision, current):
     before = read_current(base)
-    if before["revision"] != expected_revision:
+    if type(expected_revision) is not int or before["revision"] != expected_revision:
         raise ValueError("工位 revision 已变化：expected=%s actual=%s；请读取 task.py status，不使用质量日志 revision" % (expected_revision, before["revision"]))
     value = {"schema_version": 1, "revision": expected_revision + 1, "current": copy.deepcopy(current)}
+    validate_current(value)
     _write_json_atomic(current_path(base), value)
     return value
 
@@ -165,6 +172,8 @@ def read_task(base, issue_key=None):
         entry = entries[name]
         observation = binding.get("observation") or {}
         results = observation.get("results", {})
+        if not isinstance(results, dict):
+            raise ValueError("任务仓库 observation.results 必须是对象")
         from workflow.project_rules import canonical_repository_endpoint
         repositories.append({
             "repository": name, "authorized_endpoint": canonical_repository_endpoint(entry["origin"]),

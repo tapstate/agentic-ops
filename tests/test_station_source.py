@@ -124,6 +124,8 @@ class SourceTests(SourceFixture, unittest.TestCase):
             {self.name: {"verification": "verified", "ref_kind": "branch", "ref_name": "develop", "commit_sha": self.sha,
                          "resolution_source": "fixture", "rule_version": "1"}}, {"fixture": True})
         task = {"issue_key": "TAP-123", "run_id": self.op["run_id"], "facts": {"station_contract": 2},
+                "task_class": "technical_task", "stage": "implementation", "outcome": "in_progress",
+                "history": [], "pending": None, "terminal_proof": None, "archive_ref": None,
                 "source_prepared": True, "engineering_baseline": value,
                 "task_repositories": {self.name: baseline.task_repository(value, self.name, "fix/ready", "develop", ["file.txt"], "unit")}}
         self.git(self.repo, "checkout", "-b", "fix/ready")

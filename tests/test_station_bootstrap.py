@@ -200,7 +200,10 @@ class StationBootstrapTests(unittest.TestCase):
     def test_active_task_and_pending_operation_prevent_detach(self):
         state = self.station / '.agenticops/current-task.json'
         original = state.read_bytes()
-        task_store.compare_and_set(self.station, 0, {'issue_key': 'TAP-123', 'run_id': 'run-test'})
+        task_store.compare_and_set(self.station, 0, {'issue_key': 'TAP-123', 'run_id': 'run-test',
+            'task_class': 'technical_task', 'stage': 'waiting_takeover', 'outcome': 'in_progress',
+            'facts': {}, 'history': [], 'pending': None, 'engineering_baseline': {'status': 'resolving'},
+            'task_repositories': {}, 'terminal_proof': None, 'archive_ref': None})
         with self.assertRaisesRegex(ValueError, '任务占用'):
             registry.detach(ROOT, self.station, purge=True)
         state.write_bytes(original)
@@ -297,7 +300,9 @@ class StationBootstrapTests(unittest.TestCase):
 
     def test_existing_project_is_reused_and_conflicting_project_is_readonly(self):
         task_store.write_task(self.station, {'issue_key': 'TAP-123', 'run_id': 'run-project-binding',
-                                           'stage': 'task_intake', 'facts': {}})
+            'task_class': 'technical_task', 'stage': 'task_intake', 'outcome': 'in_progress',
+            'facts': {}, 'history': [], 'pending': None, 'engineering_baseline': {'status': 'resolving'},
+            'task_repositories': {}, 'terminal_proof': None, 'archive_ref': None})
         current = self.station / '.agenticops/current-task.json'
         before_current = current.read_bytes()
         station_id = json.loads((self.station / '.agenticops/station.json').read_text())['station_id']

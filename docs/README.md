@@ -36,6 +36,8 @@ TapData 集成测试协作由 [tapdata-ci-test](../projects/tapdata/skills/tapda
 
 本地执行与 Jira 同步的边界由项目目标和架构定义；质量使用指引负责初始快照、本地确认、非阻断同步及 PR 后警告汇总，并说明项目配置的消费者与只读工作流参考的边界；契约负责可恢复记录格式。
 
+当前任务的读写校验由[工位合同](architecture/single-task-station.md)说明：复用版本化状态契约、保留合法恢复状态、拒绝损坏数据且不在线修复；Gate 上下文复用只读状态入口，不另维护宽松格式。
+
 本文是现役人读文档的结构入口。新建或调整文档时，先在本页或对应主题的子级总纲明确目标、范围、层级、职责和导航关系；再细化正文。仅当文档过长，或稳定内容被多个页面复用时，才拆分子文档。
 
 现役工位采用单任务模型：source 保存完整独立工程，config 保存持久配置，runtime 是唯一运行现场，.agenticops 只绑定一个 current 与 operation；正式档案独立保存在 Product Root 的 `.archive/`，不随工位清理删除。[项目目标](strategy/project-goals.md)负责方向，[工程架构](architecture/agenticops-v1-architecture.md)负责分层，[工位合同](architecture/single-task-station.md)负责身份、四操作、恢复及可复用验收边界；机器基线见 [engineering-baseline](../contracts/engineering-baseline.schema.json)。功能存在不等于真实 TapData 应用已验证运行，执行证据与发布结论仍在 Jira。

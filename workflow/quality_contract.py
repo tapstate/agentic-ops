@@ -1,4 +1,4 @@
-"""质量契约的有限 JSON Schema 校验器，仅实现本产品使用的关键字。
+"""产品状态与质量契约的有限 JSON Schema 校验器，仅实现本产品使用的关键字。
 
 不联网解析引用，不接受契约目录以外的文件；未知关键字失败关闭。
 """
@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent / "contracts"
 KEYWORDS = {"$schema", "$id", "$defs", "$ref", "title", "description", "anyOf",
             "type", "const", "enum", "properties", "required", "additionalProperties",
-            "items", "minimum", "minLength", "pattern"}
+            "items", "minimum", "minLength", "minItems", "pattern"}
 
 
 def validate(value, schema, document=None, path="$", root=ROOT):
@@ -43,12 +43,17 @@ def validate(value, schema, document=None, path="$", root=ROOT):
             except ValueError:
                 pass
         raise ValueError("%s 不符合质量操作契约；请核对 action/payload、字段及类型" % path)
-    types = {"object": dict, "array": list, "string": str, "integer": int}
-    if "type" in schema and type(value) is not types[schema["type"]]:
-        raise ValueError("%s 类型错误：预期 %s，实际 %s" % (path, schema["type"], type(value).__name__))
+    types = {"object": dict, "array": list, "string": str, "integer": int,
+             "boolean": bool, "null": type(None)}
+    if "type" in schema:
+        allowed = schema["type"] if isinstance(schema["type"], list) else [schema["type"]]
+        if not allowed or any(name not in types for name in allowed):
+            raise ValueError("%s 契约含未支持类型" % path)
+        if type(value) not in tuple(types[name] for name in allowed):
+            raise ValueError("%s 类型错误：预期 %s，实际 %s" % (path, schema["type"], type(value).__name__))
     if "const" in schema and (type(value) is not type(schema["const"]) or value != schema["const"]):
         raise ValueError("%s 版本或固定值不支持" % path)
-    if "enum" in schema and value not in schema["enum"]:
+    if "enum" in schema and not any(type(value) is type(item) and value == item for item in schema["enum"]):
         raise ValueError("%s 枚举值无效：允许 %s" % (path, json.dumps(schema["enum"], ensure_ascii=False)))
     if isinstance(value, dict):
         props = schema.get("properties", {})
@@ -62,9 +67,12 @@ def validate(value, schema, document=None, path="$", root=ROOT):
                 raise ValueError("%s 含未声明字段 %s" % (path, key))
             elif isinstance(extra, dict):
                 validate(item, extra, document, path + "." + key, root)
-    if isinstance(value, list) and "items" in schema:
-        for i, item in enumerate(value):
-            validate(item, schema["items"], document, "%s[%s]" % (path, i), root)
+    if isinstance(value, list):
+        if len(value) < schema.get("minItems", 0):
+            raise ValueError("%s 数组项数低于下限" % path)
+        if "items" in schema:
+            for i, item in enumerate(value):
+                validate(item, schema["items"], document, "%s[%s]" % (path, i), root)
     if isinstance(value, str):
         if len(value) < schema.get("minLength", 0) or ("pattern" in schema and not re.search(schema["pattern"], value)):
             raise ValueError("%s 字符串为空或格式无效" % path)
