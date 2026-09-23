@@ -906,7 +906,7 @@ class StationTests(unittest.TestCase):
             shutil.copytree(ROOT / name, self.product / name)
         shutil.copy2(ROOT / 'agenticops', self.product / 'agenticops')
         init = subprocess.run(['bash', str(self.product / 'bootstrap/station-init.sh'), '--station', str(self.ws),
-            '--agent', 'codex', '--source-pool', str(self.root / 'pool')],
+            '--project', 'tapdata', '--agent', 'codex', '--source-pool', str(self.root / 'pool')],
             env={**os.environ, 'AGENTIC_OPS_HOME': str(self.product)}, capture_output=True, text=True)
         self.assertEqual(0, init.returncode, init.stdout + init.stderr)
         self.prepare_engineering()

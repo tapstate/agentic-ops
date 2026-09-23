@@ -4,6 +4,7 @@ import argparse
 import json
 import multiprocessing
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -74,9 +75,10 @@ class StationBootstrapTests(unittest.TestCase):
         registry.unregister(ROOT, self.station)
         self.temporary.cleanup()
 
-    def init(self, *args, success=True):
+    def init(self, *args, success=True, project='tapdata'):
+        project_args = [] if project is None else ['--project', project]
         result = subprocess.run(['bash', str(ROOT / 'bootstrap/station-init.sh'),
-            '--station', str(self.station), '--agent', 'codex', '--source-pool', str(self.station.parent / 'pool'), *args],
+            '--station', str(self.station), '--agent', 'codex', '--source-pool', str(self.station.parent / 'pool'), *project_args, *args],
             env={**os.environ, 'AGENTIC_OPS_HOME': str(ROOT)}, capture_output=True, text=True)
         self.assertEqual(result.returncode == 0, success, result.stdout + result.stderr)
         return result
@@ -285,8 +287,77 @@ class StationBootstrapTests(unittest.TestCase):
 
     def test_station_init_registers_before_render_under_the_lifecycle_lock(self):
         script = (ROOT / 'bootstrap/station-init.sh').read_text()
-        self.assertLess(script.index('lifecycle_acquire_lock'), script.index('register --station'))
-        self.assertLess(script.index('register --station'), script.index('bootstrap/render.py'))
+        self.assertLess(script.index('lifecycle_acquire_lock'), script.index('--resolve-project'))
+        self.assertLess(script.index('--resolve-project'), script.index('register --station'))
+        self.assertLess(script.index('register --station'), script.rindex('bootstrap/render.py'))
+
+    def station_bytes(self):
+        return {p.relative_to(self.station).as_posix(): p.read_bytes()
+                for p in self.station.rglob('*') if p.is_file() and not p.is_symlink()}
+
+    def test_existing_project_is_reused_and_conflicting_project_is_readonly(self):
+        task_store.write_task(self.station, {'issue_key': 'TAP-123', 'run_id': 'run-project-binding',
+                                           'stage': 'task_intake', 'facts': {}})
+        current = self.station / '.agenticops/current-task.json'
+        before_current = current.read_bytes()
+        station_id = json.loads((self.station / '.agenticops/station.json').read_text())['station_id']
+        self.init(project=None)
+        self.assertEqual(before_current, current.read_bytes())
+        self.assertEqual(station_id, json.loads((self.station / '.agenticops/station.json').read_text())['station_id'])
+        before = self.station_bytes()
+        registered = registry.registry_path(ROOT).read_bytes()
+        result = self.init(project='other', success=False)
+        self.assertIn('已绑定项目 tapdata', result.stderr)
+        self.assertEqual(before, self.station_bytes())
+        self.assertEqual(registered, registry.registry_path(ROOT).read_bytes())
+        for mode in ([], ['--refresh'], ['--check']):
+            result = subprocess.run([sys.executable, str(ROOT / 'bootstrap/render.py'),
+                '--install-home', str(ROOT), '--station', str(self.station), '--project', 'other', *mode],
+                capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('已绑定项目 tapdata', result.stderr)
+            self.assertEqual(before, self.station_bytes())
+
+    def test_new_station_requires_project_before_registration_or_creation(self):
+        original = self.station
+        self.station = original.parent / 'new-station'
+        try:
+            registered = registry.registry_path(ROOT).read_bytes()
+            for project, message in ((None, '首次初始化'), ('', '项目 ID'), ('missing-project', '未安装项目')):
+                result = self.init(project=project, success=False)
+                self.assertIn(message, result.stderr)
+                self.assertFalse(self.station.exists())
+                self.assertEqual(registered, registry.registry_path(ROOT).read_bytes())
+                project_args = [] if project is None else ['--project', project]
+                result = subprocess.run([sys.executable, str(ROOT / 'bootstrap/render.py'),
+                    '--install-home', str(ROOT), '--station', str(self.station), *project_args],
+                    capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+                self.assertFalse(self.station.exists())
+        finally:
+            self.station = original
+
+    def test_non_tapdata_binding_is_reused_without_default(self):
+        product = self.station.parent / 'product'
+        for name in ('bootstrap', 'contracts', 'workflow', 'adapters'):
+            shutil.copytree(ROOT / name, product / name)
+        (product / 'projects/demo').mkdir(parents=True)
+        (product / 'projects/other').mkdir()
+        target = self.station.parent / 'demo-station'
+        command = [sys.executable, str(product / 'bootstrap/render.py'), '--install-home', str(product),
+                   '--station', str(target), '--source-pool', str(self.station.parent / 'pool'), '--agent', 'codex']
+        result = subprocess.run(command + ['--project', 'demo'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        before = json.loads((target / '.agenticops/station.json').read_text())
+        for mode in ([], ['--refresh'], ['--check']):
+            result = subprocess.run(command + mode, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(before, json.loads((target / '.agenticops/station.json').read_text()))
+        result = subprocess.run(command + ['--project', 'other'], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('已绑定项目 demo', result.stderr)
+        self.assertEqual(before, json.loads((target / '.agenticops/station.json').read_text()))
 
     def test_state_replacement_after_preflight_is_rejected(self):
         outside = Path(self.temporary.name) / 'outside'

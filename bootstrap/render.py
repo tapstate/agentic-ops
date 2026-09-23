@@ -504,6 +504,33 @@ def update_git_exclude(station, artifacts):
                 stream.write(pattern + "\n")
 
 
+def select_station_project(install_root, config, requested, require_existing=False):
+    """首次明确选择，后续复用绑定；不能通过生成接线改变工位项目。"""
+    config = require_current_station_document(config)
+    if config is not None:
+        validate_station_document(install_root, config)
+        project = config["project"]
+        if requested is not None and requested != project:
+            raise ValueError("工位已绑定项目 %s，不能改为 %s；请先在原版本结束任务并 purge 后重新初始化" % (project, requested))
+    else:
+        if require_existing:
+            raise ValueError("工位尚未初始化，请先执行 agenticops station init")
+        if requested is None:
+            raise ValueError("首次初始化必须显式指定 --project <项目>，不默认选择业务项目")
+        project = requested
+    project_rules.project_root(install_root, project)
+    return project
+
+
+def resolve_station_project(install_root, station, requested, require_existing=False):
+    """登记前只读预检；生成时仍在目录 FD 内复核，不能依赖过时的预检结果。"""
+    config = None
+    if station.exists():
+        with StationDirectory(station) as tree:
+            config, _ = load_station(station, tree)
+    return select_station_project(install_root, config, requested, require_existing)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--install-home", required=True)
@@ -516,30 +543,32 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--refresh", action="store_true")
     mode.add_argument("--check", action="store_true")
+    mode.add_argument("--resolve-project", action="store_true", help=argparse.SUPPRESS)
     arguments = parser.parse_args()
     if arguments.accept_checkpoint_migration and not arguments.refresh:
         parser.error("--accept-checkpoint-migration 只能用于显式 repair/refresh")
 
     install_root = Path(arguments.install_home).resolve()
     station = Path(arguments.station).resolve()
-    station.mkdir(parents=True, exist_ok=True)
     try:
+        if arguments.resolve_project or not station.exists():
+            project = resolve_station_project(install_root, station, arguments.project,
+                                              arguments.refresh or arguments.check)
+            if arguments.resolve_project:
+                print(project)
+                return 0
+        station.mkdir(parents=True, exist_ok=True)
         with StationDirectory(station) as tree:
             config, legacy = load_station(station, tree)
-            config = require_current_station_document(config)
+            project = select_station_project(install_root, config, arguments.project,
+                                             arguments.refresh or arguments.check)
             init = load_init(station, tree)
             if arguments.refresh or arguments.check:
-                if config is None:
-                    parser.error("工位尚未初始化，请先执行 agenticops station init")
-                project = config["project"]
                 requested_agents = config["agents"]
                 requested_source_pool = config["source_pool"]
             else:
-                project = arguments.project or "tapdata"
                 requested_agents = arguments.agent
                 requested_source_pool = arguments.source_pool or load_product_state(install_root)["source_pool"]
-
-            project_root = project_rules.project_root(install_root, project)
 
             if arguments.check:
                 _, all_manifests = select(install_root, None)
@@ -571,8 +600,6 @@ def main():
                         raise ValueError("未绑定的状态目录不安全，拒绝生成")
                     if any(tree.path(STATE_DIRECTORY).iterdir()):
                         raise ValueError("发现未绑定的旧状态或未知材料，请使用原版本受控解绑并重建")
-            if config is not None:
-                validate_station_document(install_root, config)
             agents, manifests = select(install_root, requested_agents)
             artifacts, messages = expected_artifacts(
                 install_root, station, project, agents, manifests

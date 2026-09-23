@@ -12,7 +12,7 @@ PR 正文传输完整性属于质量证据主题：[扩展使用总纲](usage/RE
 
 源码工作目录指纹由[工位合同](architecture/single-task-station.md#源码指纹与兼容边界)定义质量证据、扩仓和中断恢复共用的字节边界、禁用 Git textconv 的源码核验要求及 epoch；[更新与回退](usage/update-and-rollback.md)负责跨 epoch 的原版退出、purge 和重建操作，不在线迁移旧指纹。
 
-项目规则入口的显式项目选择及配置化准入文档生成由[维护指引](maintenance-guide.md)说明；无工位调用必须指定项目，工位运行从已有绑定读取，避免通用入口隐式选用业务规则。
+项目规则入口的显式项目选择及配置化准入文档生成由[维护指引](maintenance-guide.md)说明；[首次使用指引](usage-guide.md#2-创建项目工位)负责首次初始化必填项目、既有绑定复用和跨项目重建的操作边界。无工位调用必须指定项目，工位运行从已有绑定读取，避免通用入口隐式选用业务规则。
 
 功能开发准入由[质量检查与证据](usage/quality-checkpoints.md#功能方案完整性与一次决策包)说明 Q2 聚合检查及 Jira 同阶段采集，[TapData 构建运行指引](../projects/tapdata/runbooks/build-test-and-local-run.md#方案阶段环境预检)负责环境输入、加载验证和不猜测配置的操作依据。
 

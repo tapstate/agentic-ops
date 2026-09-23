@@ -259,7 +259,7 @@ if PATH="$setup_bin:$PATH" "$install_root/agenticops" setup >/dev/null 2>&1; the
   printf '安装产品根目录被错误切换为源码维护模式\n' >&2
   exit 1
 fi
-if "$install_root/agenticops" station init --station "$install_root" >/dev/null 2>&1; then
+if "$install_root/agenticops" station init --project tapdata --station "$install_root" >/dev/null 2>&1; then
   printf '产品根目录被错误初始化为项目工位\n' >&2
   exit 1
 fi
@@ -267,7 +267,7 @@ fi
 collision_station="$test_root/collision-station"
 mkdir -p "$collision_station"
 printf 'project owned\n' > "$collision_station/AGENTS.md"
-if "$install_root/agenticops" station init --station "$collision_station" >/dev/null 2>&1; then
+if "$install_root/agenticops" station init --project tapdata --station "$collision_station" >/dev/null 2>&1; then
   printf '工作目录初始化覆盖了项目自有 AGENTS.md\n' >&2
   exit 1
 fi
@@ -279,7 +279,7 @@ symlink_outside="$test_root/symlink-outside"
 init_symlink_station="$test_root/init-symlink-station"
 mkdir -p "$symlink_outside/init" "$init_symlink_station/.agents"
 ln -s "$symlink_outside/init" "$init_symlink_station/.agents/skills"
-if "$install_root/agenticops" station init --station "$init_symlink_station" \
+if "$install_root/agenticops" station init --project tapdata --station "$init_symlink_station" \
     --agent codex >/dev/null 2>&1; then
   printf 'init 经由 Skill 父目录 symlink 写出了工位\n' >&2
   exit 1
@@ -291,7 +291,7 @@ test ! -e "$init_symlink_station/.agenticops"
 # repair 必须拒绝已有 Skill 父目录被替换成 symlink，不能在外部重建最终接线。
 repair_symlink_station="$test_root/repair-symlink-station"
 mkdir -p "$symlink_outside/repair"
-"$install_root/agenticops" station init --station "$repair_symlink_station" \
+"$install_root/agenticops" station init --project tapdata --station "$repair_symlink_station" \
   --agent codex >/dev/null
 repair_skill_target="$(readlink "$repair_symlink_station/.agents/skills/tapdata-task")"
 for generated_skill in "$repair_symlink_station/.agents/skills/"*; do
@@ -311,7 +311,7 @@ test -f "$repair_symlink_station/.agenticops/station.json"
 # detach 预检同样必须逐级检查，不能删除 symlink 父目录外的同名最终接线。
 detach_symlink_station="$test_root/detach-symlink-station"
 mkdir -p "$symlink_outside/detach"
-"$install_root/agenticops" station init --station "$detach_symlink_station" \
+"$install_root/agenticops" station init --project tapdata --station "$detach_symlink_station" \
   --agent codex >/dev/null
 detach_skill_target="$(readlink "$detach_symlink_station/.agents/skills/tapdata-task")"
 for generated_skill in "$detach_symlink_station/.agents/skills/"*; do
@@ -336,8 +336,8 @@ race_repair_station="$test_root/race-repair-station"
 race_detach_station="$test_root/race-detach-station"
 mkdir -p "$race_outside/init" "$race_outside/repair" "$race_outside/detach" \
   "$race_init_station/.agents/skills"
-"$install_root/agenticops" station init --station "$race_repair_station" --agent codex >/dev/null
-"$install_root/agenticops" station init --station "$race_detach_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$race_repair_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$race_detach_station" --agent codex >/dev/null
 printf 'outside sentinel\n' > "$race_outside/detach/tapdata-task"
 python3 - "$install_root" "$race_init_station" "$race_repair_station" \
   "$race_detach_station" "$race_outside" <<'PY'
@@ -359,6 +359,7 @@ from bootstrap import station_registry
 
 def render_race(station, destination, refresh):
     original = render.remove_stale_artifacts
+    swapped = []
 
     def swap_after_preflight(current, owned, targets, tree):
         original(current, owned, targets, tree)
@@ -366,11 +367,12 @@ def render_race(station, destination, refresh):
         held = station / ".agents" / "skills-held"
         skills.rename(held)
         skills.symlink_to(destination, target_is_directory=True)
+        swapped.append(True)
 
     render.remove_stale_artifacts = swap_after_preflight
     argv = [
         "render.py", "--install-home", str(install_root), "--station", str(station),
-        "--agent", "codex",
+        "--agent", "codex", "--project", "tapdata",
     ]
     if refresh:
         argv = [
@@ -384,6 +386,7 @@ def render_race(station, destination, refresh):
             render.main()
         except SystemExit as error:
             assert error.code == 2
+            assert swapped, "必须实际到达父目录替换边界，不能因缺参数提前失败"
         else:
             raise AssertionError("父目录替换后 render 未失败关闭")
     finally:
@@ -420,7 +423,7 @@ finally:
 assert (outside / "detach" / "tapdata-task").read_text(encoding="utf-8") == "outside sentinel\n"
 PY
 
-"$install_root/agenticops" station init --station "$station"
+"$install_root/agenticops" station init --project tapdata --station "$station"
 
 test -f "$station/.agenticops/station.json"
 test -f "$station/.agenticops/init.json"
@@ -557,7 +560,7 @@ assert ".claude/skills/ao-ws-init" not in artifacts
 PY
 override_station="$test_root/override-source-pool-station"
 override_source_pool="$test_root/override-source-pool"
-"$install_root/agenticops" station init --station "$override_station" \
+"$install_root/agenticops" station init --project tapdata --station "$override_station" \
   --source-pool "$override_source_pool" >/dev/null
 python3 - "$override_station/.agenticops/station.json" "$override_source_pool" "$install_root" "$custom_source_pool" <<'PY'
 import json
@@ -639,7 +642,7 @@ test -x "$station/agenticops"
 "$station/agenticops" station doctor >/dev/null
 
 entry_migration_station="$test_root/entry-migration-station"
-"$install_root/agenticops" station init --station "$entry_migration_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$entry_migration_station" --agent codex >/dev/null
 python3 - "$entry_migration_station" <<'PY'
 import json
 import sys
@@ -665,7 +668,7 @@ test -x "$entry_migration_station/agenticops"
 "$entry_migration_station/agenticops" station doctor >/dev/null
 
 subset_station="$test_root/subset-station"
-"$install_root/agenticops" station init --station "$subset_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$subset_station" --agent codex >/dev/null
 test ! -e "$subset_station/.codex/hooks.json"
 test -L "$subset_station/.agents/skills/tapdata-task"
 test -L "$subset_station/.agents/skills/tapdata-ci-test"
@@ -676,18 +679,18 @@ test ! -e "$subset_station/.claude/skills"
 test ! -L "$subset_station/.agents/skills/tapdata-ci-test"
 test ! -e "$subset_station/.agents/skills/tapdata-ci-test"
 test -f "$install_root/projects/tapdata/skills/tapdata-ci-test/SKILL.md"
-"$install_root/agenticops" station init --station "$subset_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$subset_station" --agent codex >/dev/null
 test -L "$subset_station/.agents/skills/tapdata-ci-test"
 test ! -e "$subset_station/.claude/skills"
 collision_station="$test_root/root-entry-collision-station"
 mkdir -p "$collision_station"
 printf 'user owned\n' > "$collision_station/agenticops"
-if "$install_root/agenticops" station init --station "$collision_station" --agent codex >/dev/null 2>&1; then
+if "$install_root/agenticops" station init --project tapdata --station "$collision_station" --agent codex >/dev/null 2>&1; then
   printf '工位根入口覆盖了已有用户文件\n' >&2
   exit 1
 fi
 grep -Fx 'user owned' "$collision_station/agenticops" >/dev/null
-if "$install_root/agenticops" station init --station "$test_root/unknown-station" --agent missing-agent >/dev/null 2>&1; then
+if "$install_root/agenticops" station init --project tapdata --station "$test_root/unknown-station" --agent missing-agent >/dev/null 2>&1; then
   printf '未知 Agent 被错误接受\n' >&2
   exit 1
 fi
@@ -795,7 +798,7 @@ if "$install_root/agenticops" station start --agent test-agent --station "$subse
   exit 1
 fi
 detached_station="$test_root/detached-station"
-"$install_root/agenticops" station init --station "$detached_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$detached_station" --agent codex >/dev/null
 if (cd "$detached_station" && ./agenticops station detach) >/dev/null 2>&1; then
   printf '非交互 detach 被错误接受\n' >&2
   exit 1
@@ -814,7 +817,7 @@ fi
 # 无法唯一归属 active 任务的 Gate 判定写入工位级 events.jsonl；purge 必须
 # 将这个受控审计文件与任务状态一并删除，而非把它误判为未知文件。
 unbound_events_station="$test_root/unbound-events-station"
-"$install_root/agenticops" station init --station "$unbound_events_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$unbound_events_station" --agent codex >/dev/null
 python3 - "$install_root" "$unbound_events_station" <<'PY'
 import sys
 from pathlib import Path
@@ -859,7 +862,7 @@ test -d "$station/.agenticops"
 # 仅受控的 events.jsonl 可被 purge；其它未知状态及 events.jsonl 的非常规文件
 # 形态仍必须失败关闭，且不得触及工位外的目标。
 unknown_state_station="$test_root/unknown-state-station"
-"$install_root/agenticops" station init --station "$unknown_state_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$unknown_state_station" --agent codex >/dev/null
 printf 'unknown\n' > "$unknown_state_station/.agenticops/unknown-state"
 if "$install_root/agenticops" station purge \
     --station "$unknown_state_station" --yes >/dev/null 2>&1; then
@@ -871,7 +874,7 @@ test -f "$unknown_state_station/.agenticops/unknown-state"
 event_outside="$test_root/event-outside"
 printf 'outside sentinel\n' > "$event_outside"
 event_symlink_station="$test_root/event-symlink-station"
-"$install_root/agenticops" station init --station "$event_symlink_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$event_symlink_station" --agent codex >/dev/null
 ln -s "$event_outside" "$event_symlink_station/.agenticops/events.jsonl"
 if "$install_root/agenticops" station purge \
     --station "$event_symlink_station" --yes >/dev/null 2>&1; then
@@ -881,7 +884,7 @@ fi
 grep -Fx 'outside sentinel' "$event_outside" >/dev/null
 
 event_directory_station="$test_root/event-directory-station"
-"$install_root/agenticops" station init --station "$event_directory_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$event_directory_station" --agent codex >/dev/null
 mkdir "$event_directory_station/.agenticops/events.jsonl"
 if "$install_root/agenticops" station purge \
     --station "$event_directory_station" --yes >/dev/null 2>&1; then
@@ -894,7 +897,7 @@ test -d "$event_directory_station/.agenticops/events.jsonl"
 python3 "$repo_root/tests/test_station_bootstrap.py" --product-root "$install_root"
 
 missing_station="$test_root/missing-station"
-"$install_root/agenticops" station init --station "$missing_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$missing_station" --agent codex >/dev/null
 rm -rf "$missing_station"
 "$install_root/agenticops" station prune --all --yes \
   | grep -E '已注销 [1-9][0-9]* 个无法跟踪的工位。' >/dev/null
