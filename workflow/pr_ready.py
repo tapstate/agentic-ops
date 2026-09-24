@@ -103,7 +103,7 @@ def check(base, issue_key, jira_input):
         "pr_checks": ci_problems(base, task),
         "task_checks": quality_problems(base, task, rules, jira_status.read_input(jira_input)),
         "verification": verification.problems(quality.replay(quality.load(base, task)), quality.context(base, task),
-                                               rules["pr_ready"].get("required_verification", [])),
+                                               rules["pr_ready"].get("required_verification", []), rules),
     }
     if task.get("stage") != "ci_validation":
         groups["task_checks"].append("本地任务尚未到 ci_validation，不能进入 PR Ready 核对")

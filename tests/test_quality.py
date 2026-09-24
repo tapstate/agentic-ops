@@ -31,6 +31,9 @@ def proof():
 
 def feature_review(criterion, repository, module, item):
     return {
+        'integration_tests': [{'repository': repository, 'scope': module + ':value',
+            'level': 'fixture:跨进程集成', 'knowledge_ref': 'fixture:测试合同', 'rationale': '验证调用与返回边界',
+            'case_strategy': '复用 verify.py 独立断言', 'execution_plan': '本地及模拟 CI 运行 verify.py，回读报告'}],
         'reference_implementations': [{'status': 'not_found', 'search_scope': [module],
             'source_revision': 'fixture:isolated-source', 'evidence_ref': 'fixture:search', 'difference': '新增目标行为'}],
         'acceptance_mapping': [{'criterion': criterion, 'behavior': '新增约定行为', 'repository': repository,
@@ -66,6 +69,7 @@ class QualityTests(unittest.TestCase):
             path = product / "projects/tapdata" / name
             rules = json.loads(path.read_text())
             rules.pop("verification_checkpoints", None)
+            rules.pop("verification_plan", None)  # 独立验证历史质量合同；新合同另有生产配置回归。
             rules["pr_ready"].pop("required_verification", None)
             path.write_text(json.dumps(rules))
         (self.base / ".agenticops").mkdir()
@@ -83,6 +87,38 @@ class QualityTests(unittest.TestCase):
                      "pending": None, "history": []}
         self.save_task()
 
+
+    def test_production_integration_plan_required_for_feature_and_defect(self):
+        from workflow import verification
+        for name, fact in (("quality.json", "fix_plan"), ("quality-feature.json", "implementation_plan")):
+            rules = json.loads((ROOT / "projects/tapdata" / name).read_text())
+            rows = [{"repository": repo["repository"], "scope": "module:behavior",
+                     "level": "fixture:知识分级", "knowledge_ref": "fixture:wiki-path",
+                     "rationale": "变更触及模块契约", "case_strategy": "新增边界断言，复用正常路径",
+                     "execution_plan": "本地定向、模块回归及 PR 报告核对"} for repo in self.task["repositories"]]
+            ctx = quality.context(self.base, self.task)
+            ctx["facts"][fact] = {"integration_tests": rows}
+            with self.subTest(profile=name):
+                self.assertEqual([], verification.plan_problems(rules, ctx))
+                for field in rows[0]:
+                    changed = copy.deepcopy(ctx)
+                    del changed["facts"][fact]["integration_tests"][0][field]
+                    self.assertTrue(verification.plan_problems(rules, changed), field)
+                changed = copy.deepcopy(ctx)
+                changed["facts"][fact]["integration_tests"].pop()
+                self.assertTrue(verification.plan_problems(rules, changed))
+                changed = copy.deepcopy(ctx)
+                changed["facts"][fact]["integration_tests"].append(rows[0])
+                self.assertTrue(verification.plan_problems(rules, changed))
+        # 缺陷路径实际 Q2 也消费新合同，不能只依赖技能文字。
+        self.task["facts"]["fix_plan"].pop("integration_tests", None)
+        self.plan()
+        self.select()
+        path = self.product / "projects/tapdata/quality.json"
+        rules = json.loads(path.read_text())
+        rules["verification_plan"] = json.loads((ROOT / "projects/tapdata/quality.json").read_text())["verification_plan"]
+        path.write_text(json.dumps(rules))
+        self.assertTrue(any("integration_tests" in p for p in self.view()["checkpoints"]["q2-plan"]["problems"]))
 
     def test_quality_profiles_share_strict_project_json_reader(self):
         for name, task in (("quality.json", None), ("quality-feature.json", {"task_class": "feature_change"})):
@@ -2091,7 +2127,7 @@ class FeatureFlowTests(unittest.TestCase):
                 "target_revision": plan["target_revision"], "source_ref": "fixture:run/" + Path(path).name,
                 "analysis_ref": "fixture:confirmed-value-behavior", "case_review_ref": "fixture:verify.py-assertion",
                 "case_version": "v1", "dependency_analysis_ref": "fixture:no-jar-dependency",
-                "required_scope": ["feature.py:value"], "results": [{"scope": "feature.py:value", "result": "PASS",
+                "required_scope": ["feature.py:value"], "results": [{"scope": "feature.py:value", "method": "integration", "result": "PASS",
                     "report_ref": "fixture:run/" + Path(path).name, "tests": 1, "failures": 0, "errors": 0, "skipped": 0}]}
             self.apply("verification", self.local_material)
 
@@ -2208,6 +2244,37 @@ class FeatureFlowTests(unittest.TestCase):
         result = pr_ready.check(self.ws, "TAP-123", snapshot)
         self.assertTrue(result["ready"], result)
         self.assertTrue(result["jira_status_todos"])
+        # 其它 Checks 全绿仍须真实集成测试，或研发对明确缺口作出决定。
+        material = dict(copy.deepcopy(self.local_material), kind="ci", run_ref="fixture:ci-run-1",
+                        checkout_ref="fixture:checkout-head", head_revision=head, attempt=1)
+        material["results"][0]["method"] = "unit"
+        self.apply("verification", material)
+        self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["ready"])
+        material["results"][0].update(method="integration", result="UNKNOWN", report_ref="fixture:缺报告")
+        self.apply("verification", material)
+        self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["ready"])
+        material["results"][0]["decision"] = {"reason": "报告未上传",
+            "uncovered": "feature.py:value", "follow_up": "研发安排补测；不替代已选用例验收", "proof": self.proof()}
+        self.apply("verification", material)
+        self.assertTrue(pr_ready.check(self.ws, "TAP-123", snapshot)["ready"])
+        current = quality.replay(quality.load(self.ws, self.read()))
+        self.assertEqual("UNKNOWN", current["verification"][self.repo]["ci"]["data"]["results"][0]["result"])
+        # 明确缺口处置不能解除 PR Checks 条件。
+        check_state = ci.load_state(self.ws, "TAP-123", "1", self.repo)
+        check_state["history"].append({"head": head, "verdict": "skipped"})
+        ci.save_state(self.ws, "TAP-123", "1", check_state)
+        self.apply("verification", material)
+        self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["ready"])
+        check_state = ci.load_state(self.ws, "TAP-123", "1", self.repo)
+        check_state["history"].append({"head": head, "verdict": "success"})
+        ci.save_state(self.ws, "TAP-123", "1", check_state)
+        self.apply("verification", material)
+        # CI 重新观察使既有确认摘要失效，缺口决定不能替代重新验收。
+        self.checkpoint("q3-draft")
+        self.apply("decide", {"item_id": "behavior", "digest": self.view()["items"]["behavior"]["digest"],
+            "decision": {"outcome": "accept", "evidence_id": "after", "reason": "夹具重新核对当前证据",
+                         "proof": self.proof()}})
+        self.checkpoint("q4-acceptance")
         before = task_store.task_path(self.ws, "TAP-123").read_bytes()
         self.assertTrue(pr_ready.check(self.ws, "TAP-123", snapshot)["ready"])
         self.assertEqual(task_store.task_path(self.ws, "TAP-123").read_bytes(), before)
@@ -2226,6 +2293,91 @@ class VerificationContractTests(unittest.TestCase):
             "case_version": "case-v1", "dependency_analysis_ref": "fixture:no-jars",
             "required_scope": ["module:behavior"], "results": [{"scope": "module:behavior", "result": "PASS",
                 "report_ref": "fixture:report", "tests": 1, "failures": 0, "errors": 0, "skipped": 0}]}
+
+    def integration_rules(self):
+        rules = json.loads((ROOT / "projects/tapdata/quality.json").read_text())
+        self.ctx["facts"] = {"fix_plan": {"integration_tests": [{"repository": "a/repo",
+            "scope": "module:behavior", "level": "fixture:知识分级", "knowledge_ref": "fixture:wiki",
+            "rationale": "模块对外行为", "case_strategy": "复用正常路径，新增边界",
+            "execution_plan": "本地与 CI 模块全量，回读真实报告"}]}}
+        return rules
+
+    def ci_material(self):
+        p = dict(copy.deepcopy(self.p), kind="ci", head_revision="a" * 40,
+                 run_ref="fixture:run", checkout_ref="fixture:checkout", attempt=1)
+        p["results"][0]["method"] = "integration"
+        return p
+
+    def test_ci_cannot_omit_planned_integration_even_when_other_checks_pass(self):
+        rules = self.integration_rules()
+        for mutation in ("method", "scope"):
+            p = self.ci_material()
+            if mutation == "method":
+                p["results"][0]["method"] = "unit"
+            else:
+                p["required_scope"] = ["lint"]
+                p["results"][0]["scope"] = "lint"
+            model = {}; self.v.record(model, p, self.ctx, rules)
+            errors = self.v.problems(model, self.ctx, ["ci"], rules)
+            self.assertTrue(any("请求研发确认" in error for error in errors), errors)
+        # 本地验证不被 CI 计划额外扩大，继续沿用既有合同。
+        model = {}; self.v.record(model, self.p, self.ctx, rules)
+        self.assertEqual([], self.v.problems(model, self.ctx, ["local"], rules))
+
+    def test_each_ci_gap_needs_explicit_scope_decision_and_keeps_raw_result(self):
+        rules = self.integration_rules()
+        for raw, reason in (("NOT_RUN", "其它 Checks 成功但未执行集成测试"),
+                            ("NOT_RUN", "工作流未触发"), ("SKIPPED", "跳过"),
+                            ("UNKNOWN", "零用例"), ("UNKNOWN", "缺报告"), ("FAIL", "断言失败")):
+            p = self.ci_material()
+            p["results"][0].update(result=raw, report_ref="fixture:" + reason)
+            if reason == "工作流未触发":
+                p["run_status"] = "not_triggered"
+                for key in ("run_ref", "attempt", "checkout_ref"): p.pop(key)
+            model = {}; self.v.record(model, p, self.ctx, rules)
+            self.assertTrue(self.v.problems(model, self.ctx, ["ci"], rules))
+            decision = {"reason": reason, "uncovered": "module:behavior",
+                        "follow_up": "由研发安排补测；仅确认本次验证缺口", "proof": proof()}
+            p["results"][0]["decision"] = decision
+            model = {}; self.v.record(model, p, self.ctx, rules)
+            self.assertEqual([], self.v.problems(model, self.ctx, ["ci"], rules))
+            self.assertEqual(raw, model["verification"]["a/repo"]["ci"]["data"]["results"][0]["result"])
+            p["results"][0]["decision"]["proof"]["source"] = "jira_issue"
+            with self.assertRaises(ValueError): self.v.record({}, p, self.ctx, rules)
+
+    def test_not_triggered_ci_rejects_fabricated_run_or_pass(self):
+        self.integration_rules()
+        p = self.ci_material(); p["run_status"] = "not_triggered"
+        for key in ("run_ref", "attempt", "checkout_ref"): p.pop(key)
+        p["results"][0]["result"] = "NOT_RUN"
+        for key, value in (("run_ref", "fake"), ("attempt", 1), ("checkout_ref", "fake"), ("run_status", "unknown")):
+            with self.assertRaises(ValueError): self.v.record({}, dict(p, **{key: value}), self.ctx)
+        p["results"][0]["result"] = "PASS"
+        with self.assertRaises(ValueError): self.v.record({}, p, self.ctx)
+
+    def test_plan_and_head_changes_invalidate_ci_gap_decisions(self):
+        rules = self.integration_rules(); p = self.ci_material()
+        model = {}; self.v.record(model, p, self.ctx, rules)
+        self.assertEqual([], self.v.problems(model, self.ctx, ["ci"], rules))
+        for field in ("scope", "level", "knowledge_ref", "execution_plan"):
+            ctx = copy.deepcopy(self.ctx)
+            ctx["facts"]["fix_plan"]["integration_tests"][0][field] = "changed"
+            self.assertTrue(self.v.problems(model, ctx, ["ci"], rules))
+        for field in ("live_revision", "ci_digest"):
+            ctx = copy.deepcopy(self.ctx); ctx["repositories"]["a/repo"][field] = "changed"
+            self.assertTrue(self.v.problems(model, ctx, ["ci"], rules))
+
+    def test_old_verification_events_replay_without_inventing_new_coverage(self):
+        rules = self.integration_rules(); p = self.ci_material(); p["results"][0].pop("method")
+        old = copy.deepcopy(rules); old.pop("verification_plan")
+        state = {"events": [{"command": {"action": "verification", "payload": p},
+                             "rules": old, "context": copy.deepcopy(self.ctx)}]}
+        original = copy.deepcopy(state); model = quality.replay(state)
+        self.assertNotIn("plan_digest", model["verification"]["a/repo"]["ci"])
+        self.assertEqual([], self.v.problems(model, self.ctx, ["ci"], old))
+        self.assertTrue(self.v.problems(model, self.ctx, ["ci"], rules))
+        self.assertEqual(original, state)
+        self.assertEqual(model, quality.replay(state))
 
     def source_material(self, version=True):
         row = self.ctx['repositories']['a/repo']

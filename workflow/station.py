@@ -393,7 +393,7 @@ def evaluate_completion(base, task):
         candidate = dict(task, repositories=[item for item in task.get("repositories", []) if item["repository"] in changed])
         problems.extend(pr_ready.ci_problems(base, candidate))
         problems.extend(verification.problems(quality.replay(quality.load(base, task)), quality.context(base, task),
-                                               rules["pr_ready"].get("required_verification", [])))
+                                               rules["pr_ready"].get("required_verification", []), rules))
     if task["stage"] not in ("ci_validation", "completed"):
         problems.append("任务尚未到完成验收阶段")
     proof = {"run_id": task["run_id"], "repositories": observed, "deliveries": copy.deepcopy(deliveries),

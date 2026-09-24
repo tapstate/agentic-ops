@@ -11,7 +11,7 @@ Wiki 是参考资料，不是任务、代码或验收事实源。按需使用 Ag
 
 ## 路径与范围
 
-从工位 `.agenticops/station.json` 读取绑定的 Product Root，再读取该产品根的 `projects/tapdata/profile.json` 中 `wiki_repository` 引用。只执行 `python3 <product-root>/bootstrap/shared_repositories.py status --repository <wiki_repository>`，使用返回的 ready 路径；中央登记负责远端身份与分支。缺失或不可用时说明研发可按产品使用文档显式准备/修复，继续不依赖 Wiki 的工作。本技能不执行 ensure/update，不猜兄弟目录、不扫描整个源码池，不使用 `TWIKI_REPO_ROOT` 或 `~/.twiki`。
+从工位 `.agenticops/station.json` 读取绑定的 Product Root，再读取该产品根的 `projects/tapdata/profile.json` 中 `wiki_repository` 引用。只执行 `python3 <product-root>/bootstrap/shared_repositories.py status --repository <wiki_repository> --source-pool <station.source_pool>`，使用返回的 ready 路径；中央登记负责远端身份与分支。缺失或不可用时说明研发可按产品使用文档显式准备/修复，继续不依赖 Wiki 的工作。本技能不执行 ensure/update，不猜兄弟目录、不扫描整个源码池，不使用 `TWIKI_REPO_ROOT` 或 `~/.twiki`。
 
 查询开始只读取一次 `HEAD^{commit}`，本次全部原生 `git ls-tree`、`git grep`、`git show` 都使用该临时提交值，不混读实时工作树。默认只搜索 `03_代码说明书/`、`06_研发流程/`、`07_集成测试/` 下 mode 为 100644/100755 的普通 Markdown blob，不读取符号链接或子模块。文章链接不是扩大范围的授权；其它目录仅在研发本次明确指定时读取。目录缺失时说明缺口，不自动扩大到全库；动态发现文章，不依赖 frontmatter 或 Wiki AGENTS 编号。
 

@@ -1,5 +1,7 @@
 # AgenticOps 文档总纲
 
+CI 集成测试优化复用现有质量链：[质量检查与证据](usage/quality-checkpoints.md)维护方案与报告的字段、缺口确认及兼容边界；[TapData 集成测试](../projects/tapdata/skills/tapdata-ci-test/SKILL.md)和[构建测试指引](../projects/tapdata/runbooks/build-test-and-local-run.md)负责应用 Wiki 分级、用例开发执行和报告分析。测试级别定义仅从中央 Wiki 获取，本文不维护副本；真实业务验收与产品回归分别记录。
+
 共享需求设计以 [ao-requirement](../skills/shared/ao-requirement/SKILL.md) 为入口，帮助研发理解项目现状、需求取舍及验收并形成可实施方案；维护面与业务工位共用方法，项目规则提供上下文。[Skill 维护规范](skill-maintenance.md)维护共享资产归属、安装、发现与清理合同，[工程架构](architecture/agenticops-v1-architecture.md)维护职责边界，[更新与回退](usage/update-and-rollback.md)维护旧安装资源补齐及恢复操作。具体需求、评审和验收记录在 Jira，不另建执行计划。
 
 共同验证材料的失效范围由[质量检查与证据](usage/quality-checkpoints.md#共同验证材料)维护，契约版本与历史重放由[标准契约](../contracts/README.md)说明；来源同步只证明所属仓的来源关系，不替代跨仓测试或方案授权。兼容边界复用工位 epoch 与既有升级流程。

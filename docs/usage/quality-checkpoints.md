@@ -48,16 +48,26 @@ python3 <agenticops-root>/workflow/pr_body.py compare --body-file <正文文件>
 
 使用现有 `quality.py apply --issue-key <key> --expected-run-id <run> --expected-revision <当前revision> --input <json> --dir <station>`，输入为 `{"action":"verification","payload":{...}}`。每个仓库分别提交材料，内部自动绑定源码版本与仓库登记；不是新任务类型或执行引擎。新 source_sync 仅绑定所属仓，local/ci/review 仍绑定全部任务仓。写前先 `quality.py status`，source_sync 还会实际读取已准备的任务工作树并核对包含关系。原生报告的真实性、依赖清单和语义分析仍由 Agent 核对，工具不认证来源或判断断言含义。
 
+TapData 功能与缺陷在同一次 Q2 方案确认中分别把 `integration_tests` 写入 `implementation_plan` 或 `fix_plan`，不增加确认轮次。每项给出 repository、scope（稳定的模块/行为范围）、level（本次从 Wiki 判断的级别，可有多级）、knowledge_ref（文章路径）、rationale（结合源码的判定依据）、case_strategy（复用/新增/修改的具体用例与理由）、execution_plan（入口、环境、定向调试、模块回归、CI 触发与报告验证安排）。每个任务仓库至少一项；同仓库的 scope 不重复。无法适用或框架不支持也要明确理由和未覆盖范围，不能删除该仓记录。级别定义及具体编写流程由 [tapdata-ci-test](../../projects/tapdata/skills/tapdata-ci-test/SKILL.md)查询 Wiki 并用任务源码核验，工具不判断语义或固化 Wiki 分级。
+
+项目 `verification_plan` 配置选择方案事实、字段、方式、材料种类及字段形状。Workflow 复用该配置核对完整性与范围：TapData 的 CI 材料必须逐项覆盖上述 scope，对应 results 标记 `method=integration`；普通单元测试或 lint 的 PASS 不能充当集成测试结果。scope 的模块/场景内容就是既有应测清单，不新增编号台账；具体用例仍复用 item/execute。本地验证继续使用既有 required_scope 与所选用例合同，不因计划要求的某级测试只适合 CI 或完整部署而再增加一轮本地免测确认。方案内容变化使旧 CI 材料及缺口决定失效；源码版本或 CI 观察变化仍按既有绑定失效；报告内容变化须重新分析登记，工具不凭引用自动检测远端报告变化。维护 schema 只约束材料完整性，是否覆盖真实行为仍需 Agent 审查。
+
 所有材料提供 kind、repository、target_revision（当前完整 SHA 或首轮本地源码指纹）、source_ref。其余内容如下：
 
 | kind | 材料 |
 |---|---|
 | local | analysis_ref（变更/用例缺口判断）、case_review_ref、case_version、dependency_analysis_ref；required_scope 列出全部应测模块及场景，results 对每项给出 scope、result、report_ref |
-| ci | local 的相同范围及报告字段，加 run_ref、attempt 正整数、head_revision（本次 PR Head）、checkout_ref（实际测试源码及该 Head 的对应依据） |
+| ci | local 的相同范围及报告字段，加 run_ref、attempt 正整数、head_revision（本次 PR Head）、checkout_ref（实际测试源码及该 Head 的对应依据）；完全未触发运行使用下述 not_triggered 形式 |
 | source_sync | source_branch（登记的检出来源）、source_revision（刚回读的来源 SHA）、before_merge_revision、observed_at、impact_analysis_ref；sync 由工具实际生成，用户输入不能代替 Git 核对 |
 | review | complete=true 表示已完整分页回读；items 逐项记录 id、source_ref、reason、status（fixed/not_applicable/accepted_gap/pending），fixed 必须有 verification_ref；无意见使用空列表并保留回读来源 |
 
 results 中 result 使用 PASS/FAIL/UNKNOWN/NOT_RUN/SKIPPED。PASS 另需报告中的 tests、failures、errors、skipped 非负整数，tests 必须大于零，其余必须为零。非 PASS 保留原结果；若研发明确接受该项缺口，提供 decision，包含 reason、uncovered（精确等于该 scope）、follow_up、proof（actor/source=user_message/reference/at）。不能用一项决定覆盖其它范围。review 的 accepted_gap 也提供这组明确处置。
+
+没有 CI 运行时，CI 材料使用 `run_status=not_triggered`、当前完整 `head_revision`，`source_ref` 引用 PR/触发配置的真实回读，所有 results 保持 `NOT_RUN`，不得填写 run_ref、attempt、checkout_ref。已有运行但未执行集成测试仍使用该运行的真实信息；未触发、跳过、零用例、缺报告分别写入 report_ref 引用的缺口分析，使用 NOT_RUN/SKIPPED/UNKNOWN，不能借其它 Checks 成功填写 PASS。完全未触发时，PR Checks 自身缺失仍按原规则阻止 PR Ready。
+
+发现这些缺口时主动请求研发明确本次仓库/PR Head、具体未覆盖场景、原因及补测/延期/风险处置；待回复时可保存无 decision 的原始材料，工具提示缺口未处置。研发决定仅解除该范围的材料缺口待决状态，不修改原始结果，不替代选定用例验收、失败修复、PR Checks 或 Jira 服务端条件。确认框架不支持时，先检索已有跟进事项，再询问是否创建或关联 Jira；建票决定和本次缺口处置分别记录，Jira 链接不充当 `proof.source=user_message`。
+
+本次方案及验证语义调整提升工位 epoch；历史事件继续按事件中原规则重放，但不补造新分级、覆盖或确认。升级/回退必须先按原版结束任务并归档释放或清理、purge，再切换版本，不能在线迁移活动任务。
 
 跨仓 Jar 材料使用 jars 列表，每项包含 built_sha256、consumed_sha256（必须相同）和 loaded_from（实际加载证据）。local 另给 built_path、consumed_path 绝对路径，写入及检查点复核内容哈希；这两个路径仅保存为本地恢复元数据，不进入 Jira 摘要，其它材料仍按项目规则扫描。没有 Jar 时省略列表，但 dependency_analysis_ref 仍须说明分析依据。CI 使用运行内文件与加载证据，不冒充本地文件核验。报告引用、版本及统计从实际执行取得，不能为满足字段填造数字。
 

@@ -9,6 +9,57 @@ from workflow.file_digest import sha256_file as file_hash
 KINDS = {"local", "source_sync", "ci", "review"}
 
 
+def plan_rows(rules, ctx):
+    contract = (rules or {}).get("verification_plan")
+    if not contract:
+        return []
+    plan = ctx.get("facts", {}).get(contract["fact_key"], {})
+    return plan.get(contract["field"]) if isinstance(plan, dict) else None
+
+
+def plan_problems(rules, ctx):
+    """项目提供知识字段形状；内核只检查完整性、仓库与范围。"""
+    contract = (rules or {}).get("verification_plan")
+    if not contract:
+        return []
+    from workflow import plan_review
+    rows = plan_rows(rules, ctx)
+    errors = plan_review.shape(rows, contract["schema"], "方案." + contract["field"])
+    if errors:
+        return errors
+    seen, repositories = set(), set(ctx["repositories"])
+    for row in rows:
+        key = (row["repository"], row["scope"])
+        if key in seen:
+            errors.append("验证方案范围重复：%s / %s" % key)
+        seen.add(key)
+        if row["repository"] not in repositories:
+            errors.append("验证方案引用未登记仓库：" + row["repository"])
+    errors += ["验证方案未覆盖仓库：" + repo for repo in sorted(repositories - {r["repository"] for r in rows})]
+    return errors
+
+
+def coverage_problems(p, rules, ctx):
+    contract = (rules or {}).get("verification_plan")
+    if not contract or p["kind"] not in contract["kinds"]:
+        return []
+    errors = plan_problems(rules, ctx)
+    if errors:
+        return errors
+    from workflow import quality
+    if p["kind"] == "ci" and not quality.exact_commit(p["target_revision"]):
+        errors.append("CI 验证必须绑定当前完整提交 SHA")
+    results = {r["scope"]: r for r in p["results"]}
+    for row in plan_rows(rules, ctx):
+        if row["repository"] != p["repository"]:
+            continue
+        result = results.get(row["scope"])
+        if not result or result.get("method") != contract["method"]:
+            errors.append("%s %s 缺少 %s / %s 实测或缺口材料；请求研发确认具体未覆盖范围及处置，不能以其它 Checks 成功替代" %
+                          (p["repository"], p["kind"], contract["method"], row["scope"]))
+    return errors
+
+
 def nonempty(value, label):
     if not isinstance(value, str) or not value.strip():
         raise ValueError("验证材料缺少 " + label)
@@ -149,10 +200,23 @@ def validate(p, ctx):
                     if not Path(file).is_absolute():
                         raise ValueError("本地 Jar 必须使用绝对路径")
         if kind == "ci":
-            nonempty(p.get("run_ref"), "CI 运行")
-            nonempty(p.get("checkout_ref"), "实际 checkout 核对来源")
-            if p.get("head_revision") != revision or type(p.get("attempt")) is not int or p["attempt"] < 1:
-                raise ValueError("CI 运行 Head 或 attempt 无效")
+            if p.get("head_revision") != revision:
+                raise ValueError("CI 运行 Head 与当前代码不一致")
+            status = p.get("run_status", "observed")
+            if status == "not_triggered":
+                if not quality.exact_commit(revision):
+                    raise ValueError("未触发 CI 也必须绑定完整 PR Head")
+                if any(key in p for key in ("run_ref", "attempt", "checkout_ref")):
+                    raise ValueError("未触发 CI 不能填写不存在的运行、attempt 或 checkout")
+                if any(r["result"] != "NOT_RUN" for r in results):
+                    raise ValueError("未触发 CI 只能记录 NOT_RUN")
+            elif status == "observed":
+                nonempty(p.get("run_ref"), "CI 运行")
+                nonempty(p.get("checkout_ref"), "实际 checkout 核对来源")
+                if type(p.get("attempt")) is not int or p["attempt"] < 1:
+                    raise ValueError("CI 运行 attempt 无效")
+            else:
+                raise ValueError("CI run_status 无效")
     elif kind == "source_sync":
         sync = p.get("sync") or {}
         r = ctx["repositories"][repo]
@@ -183,16 +247,20 @@ def validate(p, ctx):
                 gap(item.get("decision"))
 
 
-def record(model, p, ctx):
+def record(model, p, ctx, rules=None):
     validate(p, ctx)
     revisions, scope = binding(p, ctx)
     value = {"data": copy.deepcopy(p), "versions": revisions, "bindings": scope}
+    contract = (rules or {}).get("verification_plan")
+    if contract and p["kind"] in contract["kinds"]:
+        from workflow import quality
+        value["plan_digest"] = quality.digest(plan_rows(rules, ctx))
     if p["kind"] == "ci":
         value["ci_digest"] = ctx["repositories"][p["repository"]].get("ci_digest")
     model.setdefault("verification", {}).setdefault(p["repository"], {})[p["kind"]] = value
 
 
-def problems(model, ctx, kinds):
+def problems(model, ctx, kinds, rules=None):
     if not kinds:
         return []
     if not isinstance(kinds, list) or not set(kinds) <= KINDS:
@@ -210,6 +278,12 @@ def problems(model, ctx, kinds):
                 result.append("%s 的 %s 材料已失效，重新核对当前版本" % (repo, kind))
                 continue
             p = entry["data"]
+            contract = (rules or {}).get("verification_plan")
+            if contract and kind in contract["kinds"]:
+                from workflow import quality
+                if entry.get("plan_digest") != quality.digest(plan_rows(rules, ctx)):
+                    result.append("%s 的 %s 验证方案已变化，重新核对报告和缺口决定" % (repo, kind))
+                result.extend(coverage_problems(p, rules, ctx))
             if kind == "local":
                 for jar in p.get("jars", []):
                     try:
@@ -220,7 +294,7 @@ def problems(model, ctx, kinds):
                         result.append("%s 的依赖 Jar 已变化或缺失，需重验" % repo)
             for item in p.get("results", []):
                 if item["result"] != "PASS" and not item.get("decision"):
-                    result.append("%s %s：%s 尚未解决或明确处置" % (repo, item["scope"], item["result"]))
+                    result.append("%s %s：%s 尚未解决或明确处置；请求研发确认具体缺口及后续动作，确认不等于 PASS" % (repo, item["scope"], item["result"]))
             for item in p.get("items", []):
                 if item["status"] == "pending":
                     result.append("%s 审查意见 %s 尚未处理" % (repo, item["id"]))
