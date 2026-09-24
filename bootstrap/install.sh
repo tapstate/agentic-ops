@@ -70,7 +70,7 @@ git clone --filter=blob:none --no-checkout --branch "$branch" --single-branch \
   "$repository" "$install_root"
 git -C "$install_root" sparse-checkout init --cone
 # 此脚本支持通过 stdin 单独执行，不能依赖调用者目录中的辅助文件。
-install_paths=(adapters bootstrap contracts gate policies projects workflow)
+install_paths=(adapters bootstrap contracts docs gate policies projects workflow)
 shared_entry="$(git -C "$install_root" ls-tree HEAD -- skills/shared)"
 if [ -n "$shared_entry" ]; then
   case "$shared_entry" in

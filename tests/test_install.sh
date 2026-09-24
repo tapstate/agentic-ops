@@ -39,7 +39,7 @@ mkdir -p "$source_repo"
 git -C "$source_repo" init -q -b "$install_branch"
 git -C "$source_repo" config user.email agentic-ops-test@example.test
 git -C "$source_repo" config user.name "AgenticOps Test"
-for product_dir in adapters bootstrap contracts gate policies projects skills workflow; do
+for product_dir in adapters bootstrap contracts docs gate policies projects skills workflow; do
   cp -R "$repo_root/$product_dir" "$source_repo/$product_dir"
 done
 cp -R "$repo_root/internal" "$source_repo/internal"
@@ -64,7 +64,7 @@ printf '%s\n' '{"instruction_root":"__AGENTIC_OPS_HOME__","project":"__AGENTIC_O
 cp "$repo_root/agenticops" "$source_repo/agenticops"
 chmod +x "$source_repo/agenticops"
 git -C "$source_repo" add .agentic-ops-source .gitignore .githooks agenticops adapters bootstrap \
-  contracts gate policies projects skills workflow internal
+  contracts docs gate policies projects skills workflow internal
 git -C "$source_repo" commit -qm "initial"
 git -C "$source_repo" branch "$source_branch"
 
@@ -246,6 +246,9 @@ test -f "$install_root/gate/runner.py"
 test -f "$install_root/policies/defect-repair-strategies.json"
 test -f "$install_root/workflow/repair_strategy.py"
 test -f "$install_root/workflow/pr_body.py"
+test -f "$install_root/docs/usage/quality-checkpoints.md"
+test -f "$install_root/docs/usage/task-authorization.md"
+test -f "$install_root/docs/architecture/single-task-station.md"
 python3 "$install_root/workflow/pr_body.py" --help >/dev/null
 test -x "$install_root/agenticops"
 test -f "$maintainer_root/skills/ao-test-takeover/SKILL.md"
@@ -958,6 +961,17 @@ test ! -e "$station/AGENTS.md.tmp"
 
 task_index_digest="$(file_digest "$station/.agenticops/current-task.json")"
 
+# 模拟旧 sparse 安装缺失项目 Skill 引用文档；同提交 update 应补齐且不改任务。
+git -C "$install_root" sparse-checkout set adapters bootstrap contracts gate policies projects workflow skills/shared
+test ! -e "$install_root/docs"
+install_head_before_docs="$(git -C "$install_root" rev-parse HEAD)"
+install_state_before_docs="$(file_digest "$install_root/.local/product.json")"
+"$station/agenticops" update >/dev/null
+test -f "$install_root/docs/usage/quality-checkpoints.md"
+test "$(git -C "$install_root" rev-parse HEAD)" = "$install_head_before_docs"
+test "$(file_digest "$install_root/.local/product.json")" = "$install_state_before_docs"
+test "$(file_digest "$station/.agenticops/current-task.json")" = "$task_index_digest"
+
 printf 'next\n' > "$source_repo/NEXT"
 git -C "$source_repo" add NEXT
 git -C "$source_repo" commit -qm "next"
@@ -974,6 +988,7 @@ fi
 test "$(file_digest "$station/.agenticops/current-task.json")" = "$task_index_digest"
 "$station/agenticops" rollback >/dev/null
 test ! -f "$install_root/NEXT"
+test -f "$install_root/docs/usage/quality-checkpoints.md"
 "$station/agenticops" station repair >/dev/null
 "$install_root/agenticops" station doctor --station "$station" >/dev/null
 test "$(file_digest "$station/.agenticops/current-task.json")" = "$task_index_digest"

@@ -9,7 +9,7 @@
 - 初始化与工位绑定：`.agenticops/init.json`、`.agenticops/station.json`
 - 唯一当前任务与操作：`.agenticops/current-task.json`、`.agenticops/operation.json`
 - 活动授权与证据：`.agenticops/authorization.json`、`.agenticops/evidence/`
-- 持久配置：`config/`；独立源码：`source/<owner>/<repo>/`；唯一运行现场：`runtime/`；正式归档：`archive/<issue>/<run>/`
+- 持久配置：`config/`；独立源码：`source/<owner>/<repo>/`；唯一运行现场：`runtime/`；正式归档：Product Root 的 `.archive/<run-id>/`
 
 当前 Project Profile、准入及 Skill 位于：
 
@@ -40,7 +40,7 @@ python3 __AGENTIC_OPS_HOME__/workflow/task.py repository context --issue-key <JI
 - Agent 从工位根 `./agenticops station start <id>` 启动并在同一会话继续；Git 使用 `git -C <source 中已核验仓库路径>`。不启动嵌套 Agent，不复制会话级当前状态，不修改 Product Root 或其它工位源码。
 - 构建、测试和应用运行遵循 Project 的资源配方；配置不随任务清除，任务有效配置、Maven local、插件、日志和报告进入唯一 runtime。配套仓源码变更也必须先登记。
 - 未完成任务可归档并标记 incomplete；归档后停止开发但仍占用工位。随后经精确确认 clean，复用原档案并追加回执，成功后才解除占用。release 核验交付与项目验收后归档并释放；PR 合并不能替代其它已配置验收。
-- 清理必须先核验并停止登记写入者，取得精确清单确认并发布档案；未知文件、路径漂移、未确认的新内容或资源身份不符时保留现场并停止。不得通用 git clean/reset、删除共享缓存或远端对象。保留 Git refs 和正式归档。
+- 清理必须先核验并停止登记写入者，取得精确清单确认并发布档案；未知文件、路径漂移、未确认的新内容或资源身份不符时保留现场并停止。不得通用 git clean/reset、删除共享缓存或远端对象。保留任务成果引用和正式归档，按已确认清单回收受管临时基线引用。
 - 交互输入、草稿和回读先用 `task.py interaction-path --issue-key <JIRA-KEY> --expected-run-id <run> --name <lowercase-kebab-case.ext> --dir <项目工位>` 获取路径，不散落状态根；允许 json、jsonl、log、md、txt。活动记录仅属于当前 run，正式归档不转成新任务授权。
 - 工位级 purge 仅用于任务已释放/清理且操作结束的工位，按生成归属移除接线与受管状态，保留 source/config/archive。原路径重新初始化若保留材料，需明确 `init --reuse-materials`；这不授权覆盖材料、导入有效配置或复用历史证据。runtime 必须为空。
 - 不兼容旧工位必须使用原版本保存材料、受控解绑并重建，新版本不解析或迁移旧任务。repair 不跨代际采用；生成/清理先在同版本形成闭环，升级只在干净边界编排，不把清理失败当升级成功。
