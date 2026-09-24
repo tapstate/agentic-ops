@@ -1,5 +1,7 @@
 # AgenticOps 扩展使用
 
+任务清理采用六阶段自动执行与成果验收；完整盘点、异常接管、分支处置及 epoch 23 恢复边界由[工位合同](../architecture/single-task-station.md#阶段式清理)统一定义，操作入口复用任务授权指引，PROD-003 覆盖阶段失败和接力验收。
+
 共享需求技能的安装资源补齐、同 epoch 接线刷新与回退由[更新与回退](update-and-rollback.md#共享-skill-资源与接线)说明；技能职责与发现范围以[Skill 维护规范](../skill-maintenance.md)为准。
 
 [共同验证材料](quality-checkpoints.md#共同验证材料)区分来源同步的单仓绑定与 local/ci/review 的全仓绑定，并说明旧事件重放、实际 Git 核对和 PR 前刷新责任；不新增验证流程或迁移入口。

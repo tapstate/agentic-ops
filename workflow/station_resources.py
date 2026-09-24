@@ -18,7 +18,7 @@ from workflow import station_source as source, task_store as store
 from workflow import station_directories as directories, station_artifacts as artifacts
 
 
-def resource_path(base, relative):
+def resource_path(base, relative, leaf_link=False):
     if not isinstance(relative, str):
         raise ValueError("资源路径必须是相对路径")
     parts = relative.split("/")
@@ -26,14 +26,18 @@ def resource_path(base, relative):
         raise ValueError("资源只能位于 runtime 或 source，不能包括 Git 元数据")
     root = Path(base).resolve()
     path = root
-    for part in parts:
+    for index, part in enumerate(parts):
         path = path / part
-        if path.is_symlink():
+        if path.is_symlink() and not (leaf_link and index == len(parts) - 1):
             raise ValueError("资源路径不能包含符号链接：%s" % relative)
     return path
 
 
 def fingerprint(path):
+    if path.is_symlink():
+        data = os.fsencode(os.readlink(path))
+        return {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
+                "mode": stat.S_IMODE(path.lstat().st_mode), "link": True}
     if not path.exists():
         return None
     if path.is_symlink() or not path.is_file():
@@ -274,8 +278,7 @@ def plan(base, task, version=None, decisions_override=None):
         from workflow import station_reset_result
         state["directories"] = station_reset_result.source_directories(repository)
         state["refs"] = station_reset_result.refs(repository)
-        state["checkout_branch"] = (source.baseline_branch(dict(row, ref_name=target["ref"], commit_sha=target["sha"]))
-                                    if row.get("ref_kind") == "branch" else None)
+        state["checkout_branch"] = None  # 清理只检出精确 SHA，不移动任何命名分支。
         branch_ref = "refs/heads/" + state["checkout_branch"] if state["checkout_branch"] else None
         if branch_ref in state["refs"] and state["refs"][branch_ref] != target["sha"]:
             raise ValueError("受管清理基线分支已指向不同提交")
@@ -284,7 +287,13 @@ def plan(base, task, version=None, decisions_override=None):
     for item in inventory(base, task):
         if item.get("kind") == "external":
             if item.get("resource_type") in ("git-branch", "pull-request"):
-                external.append({"id": item["id"], "resource_type": item["resource_type"], "action": "retain", "before": item["before"]})
+                action = item.get("action", "retain")
+                expected = "delete" if item["resource_type"] == "git-branch" else "close"
+                if action not in ("retain", expected):
+                    raise ValueError("分支/PR 处置动作不匹配：" + item["id"])
+                if action != "retain" and (item["before"].get("protected") is not False or not item.get("decision_ref")):
+                    raise ValueError("分支/PR 删除须有保护回读与用户决定：" + item["id"])
+                external.append(dict({k: v for k, v in item.items() if k not in ("status", "readback_ref")}, action=action))
             else:
                 external.append({k: v for k, v in item.items() if k not in ("status", "readback_ref")})
     logs = ["logs", "reports"]
@@ -294,6 +303,10 @@ def plan(base, task, version=None, decisions_override=None):
              "entries": entries, "source": states, "external": external,
              "active_state": {"files": active_files(base), "unbind_run": task["run_id"], "task_digest": task_fingerprint(task)},
              "retained": ["config", "source repositories and refs", "Product Root .archive", ".agenticops binding and operation"]}
+    from workflow import station_cleanup_stages
+    for entry in external:
+        if entry["action"] == "delete" and station_cleanup_stages.local(entry):
+            station_cleanup_stages.local_identity(base, task, {"cleanup_plan": value}, entry)
     from workflow import station_clean_rules
     init = json.loads((store.state_path(base) / "init.json").read_text())
     value["rules"] = station_clean_rules.inspect(base, [e["path"] for e in init.get("artifacts", [])], roots)
@@ -316,7 +329,7 @@ def verify_known_external(base, task):
         raise ValueError("当前 run 有外部写入结果未知，须回读原操作；不能改 retain 绕过")
 
 
-def clean(base, task, cleanup_plan, confirmed_digest, operation, source_only=False, directories_only=False):
+def clean(base, task, cleanup_plan, confirmed_digest, operation, source_only=False, directories_only=False, only_repository=None):
     payload = {key: value for key, value in cleanup_plan.items() if key != "digest"}
     if (cleanup_plan.get("schema_version") != 6 or cleanup_plan.get("run_id") != task["run_id"]
             or baseline.digest(payload) != confirmed_digest or cleanup_plan.get("digest") != confirmed_digest):
@@ -324,10 +337,10 @@ def clean(base, task, cleanup_plan, confirmed_digest, operation, source_only=Fal
     if not task.get("archive_ref"):
         raise ValueError("正式归档未绑定，不能清理")
     verify_active(base, cleanup_plan, operation)
-    verify_stopped(base, task, require_cleaned=True)
+    verify_stopped(base, task, require_cleaned=not source_only)
     verify_known_external(base, task)
     terminal = [item for item in inventory(base, task) if item.get("kind") == "external" and item.get("resource_type") not in ("git-branch", "pull-request")]
-    if terminal:
+    if terminal and not source_only:
         if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(terminal, ensure_ascii=False)):
             raise ValueError("外部资源最终回执含敏感信息，请先脱敏")
         record = {"run_id": task["run_id"], "archive_digest": task["archive_ref"]["digest"], "resources": terminal}
@@ -346,7 +359,8 @@ def clean(base, task, cleanup_plan, confirmed_digest, operation, source_only=Fal
     for entry in cleanup_plan["entries"]:
         if directories_only:
             break
-        grouped.setdefault(entry["repository"], []).append(entry)
+        if only_repository is None or entry["repository"] == only_repository:
+            grouped.setdefault(entry["repository"], []).append(entry)
     for repository_name, entries in grouped.items():
         repository = source.repository_path(base, repository_name)
         head = entries[0]["head"]
@@ -364,38 +378,47 @@ def clean(base, task, cleanup_plan, confirmed_digest, operation, source_only=Fal
             if artifacts.snapshot(base, repository_name, {e["path"]: e for e in cleanup_plan["directories"]}, {}, include_ignored=True)["entries"]:
                 raise ValueError("源码清理后再次变化，拒绝重删")
             continue
+        from workflow import station_reset_result
+        original = {entry["path"]: entry for entry in entries}
+        for observed in artifacts.snapshot(base, repository_name, {}, {}, include_ignored=True)["entries"]:
+            prior = original.get(observed["path"])
+            unchanged = prior and all(observed[k] == prior[k] for k in
+                ("head", "before", "before_index", "index_patch", "worktree_patch", "file_identity"))
+            if not unchanged and not station_reset_result._pending_added_file(repository, operation, repository_name, prior, observed):
+                raise ValueError("清理确认后源码内容变化：" + observed["path"])
+        # 在任何写入前核对整仓快照；执行只使用明确路径，不进行宽泛 clean。
+        tracked = set(filter(None, artifacts.git_bytes(repository, "ls-tree", "-r", "--name-only", "-z", head).decode().split("\0")))
+        restore, additions, remove = [], [], []
         for entry in entries:
-            target = resource_path(base, entry["path"])
+            target = resource_path(base, entry["path"], leaf_link=True)
             before = fingerprint(target)
-            info = target.stat() if target.exists() else None
-            current_identity = {"device": info.st_dev, "inode": info.st_ino, "mtime_ns": info.st_mtime_ns} if info else None
+            info = target.lstat() if target.exists() or target.is_symlink() else None
+            identity = {"device": info.st_dev, "inode": info.st_ino, "mtime_ns": info.st_mtime_ns} if info else None
             if entry["action"] == "delete":
-                if before is not None and (before != entry["before"] or current_identity != entry["file_identity"]):
-                    raise ValueError("清理确认后文件变化：%s" % entry["path"])
-                if before is not None:
-                    target.unlink()
-                    directories.sync(target.parent)
+                if before is not None and (before != entry["before"] or identity != entry["file_identity"]):
+                    raise ValueError("清理确认后文件变化：" + entry["path"])
+                remove.append(target)
             elif entry["action"] == "restore":
-                restored = [source.git(repository, "diff", *args, "--quiet", "--", entry["file"], check=False).returncode
-                            for args in ((), ("--cached", "HEAD"))]
-                if any(code not in (0, 1) for code in restored):
-                    raise ValueError("不能核验恢复结果")
-                index = source.git(repository, "ls-files", "--stage", "-z", "--", entry["file"]).stdout
-                exists = source.git(repository, "cat-file", "-e", entry["head"] + ":" + entry["file"], check=False).returncode == 0
-                if exists:
-                    if (before != entry["before"] or index != entry["before_index"] or current_identity != entry["file_identity"]) and restored != [0, 0]:
-                        raise ValueError("待恢复文件变化，需重新确认")
-                    source.git(repository, "restore", "--source=" + entry["head"], "--staged", "--worktree", "--", entry["file"])
+                if entry["file"] in tracked:
+                    restore.append(entry["file"])
                 else:
-                    # rm --cached 后仍可能保留工作文件；untracked 不参与 diff，必须单独核验。
-                    if index not in (entry["before_index"], "") or (before is not None and
-                            (before != entry["before"] or current_identity != entry["file_identity"])):
-                        raise ValueError("暂存新增文件在清理期间变化，需重新确认")
-                    source.git(repository, "rm", "--cached", "--ignore-unmatch", "--", entry["file"])
-                    if target.exists():
-                        target.unlink()
+                    additions.append(entry["file"])
+                    if before is not None and (before != entry["before"] or identity != entry["file_identity"]):
+                        raise ValueError("暂存新增文件在清理期间变化：" + entry["path"])
+                    remove.append(target)
             else:
                 raise ValueError("未知清理动作")
+        # 有界批次避免 ARG_MAX；literal pathspec 防止文件名被当成 glob 或 magic。
+        for offset in range(0, len(restore), 128):
+            source.git(repository, "--literal-pathspecs", "restore", "--source=" + head,
+                       "--staged", "--worktree", "--", *restore[offset:offset + 128])
+        for offset in range(0, len(additions), 128):
+            source.git(repository, "--literal-pathspecs", "rm", "--cached", "--ignore-unmatch",
+                       "--", *additions[offset:offset + 128])
+        for target in remove:
+            if target.exists() or target.is_symlink():
+                target.unlink()
+                directories.sync(target.parent)
         operations.receipt(base, operation, name, expected)
     if source_only:
         return
@@ -430,13 +453,15 @@ def _partial_repositories(base):
     return repositories
 
 
-def neutral(base, task, operation):
+def neutral(base, task, operation, only_repository=None):
     plan = operation["cleanup_plan"]
     require_cleanup_version(plan.get("schema_version"))
     catalog = project_rules.load_repository_catalog(station=base)["repositories"]
     if source.check_station_layout(base, catalog, plan["source"], task.get("replan_preserved")) != task.get("retained_repositories", {}):
         raise ValueError("未选择的持久仓库状态变化")
     for name, entry in plan["source"].items():
+        if only_repository is not None and name != only_repository:
+            continue
         path = source.repository_path(base, name)
         source.identity(path, entry["origin"])
         if entry.get("initial_checkout"):
@@ -544,7 +569,7 @@ def register(base, issue, run_id, entries, expected_operation_id=None):
                 directories.create(base, task, entry["path"], entry["producer"], entry.get("adopt_empty", False))
                 continue
             elif entry.get("kind") == "source-disposition":
-                resource_path(base, entry["path"])
+                resource_path(base, entry["path"], leaf_link=True)
                 if entry.get("preservation", {}).get("action") not in ("archive", "export", "discard"):
                     raise ValueError("源码成果必须选择 archive/export/discard")
             elif entry.get("kind") == "file":

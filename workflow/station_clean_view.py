@@ -1,8 +1,56 @@
 """清理计划的只读决策视图；不产生另一份执行摘要或删除授权。"""
 import json
 import subprocess
+import os
+import stat
+from pathlib import Path
 
 from workflow import station_clean_rules, station_directories, station_source, task_store
+
+
+def source_inventory(base, task):
+    """部分观测不生成删除计划；逐仓收集 Git 状态和特殊对象，不跟随链接。"""
+    result = []
+    for name in task.get("engineering_baseline", {}).get("repositories", {}):
+        row = {"repository": name, "objects": [], "problems": [],
+               "baseline": task.get("reset_baseline", {}).get(name)}
+        result.append(row)
+        try:
+            repo = station_source.repository_path(base, name)
+            row["head"] = station_source.git(repo, "rev-parse", "HEAD").stdout.strip()
+            row["branch"] = station_source.git(repo, "branch", "--show-current").stdout.strip()
+            categories = (("worktree", ("diff", "--name-only", "--no-renames", "-z")),
+                          ("index", ("diff", "--cached", "--name-only", "--no-renames", "-z")),
+                          ("untracked", ("ls-files", "--others", "--exclude-standard", "-z")),
+                          ("ignored", ("ls-files", "--others", "--ignored", "--exclude-standard", "-z")))
+            objects = {}
+            for category, args in categories:
+                for filename in filter(None, station_source.git(repo, *args).stdout.split("\0")):
+                    objects.setdefault(filename, []).append(category)
+            for filename, categories in sorted(objects.items()):
+                row["objects"].append({"path": "source/" + name + "/" + filename,
+                    "git_state": categories, "allowed_decisions": ["archive", "export", "discard_with_exact_confirmation"]})
+            device = repo.stat().st_dev
+            def failed(error):
+                row["problems"].append({"path": str(error.filename), "reason": str(error)})
+            for root, dirs, files in os.walk(repo, followlinks=False, onerror=failed):
+                parent = Path(root)
+                if parent == repo:
+                    dirs[:] = [d for d in dirs if d != ".git"]
+                    files = [f for f in files if f != ".git"]
+                for leaf in list(dirs) + files:
+                    path = parent / leaf
+                    try:
+                        info = path.lstat()
+                        if leaf == ".git" or info.st_dev != device or path.is_mount() or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)):
+                            row["problems"].append({"path": str(path), "reason": "嵌套 Git、挂载或特殊对象，需明确处置"})
+                            if leaf in dirs:
+                                dirs.remove(leaf)
+                    except OSError as error:
+                        failed(error)
+        except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+            row["problems"].append({"path": "source/" + name, "reason": str(error)})
+    return result
 
 
 def describe(base, task=None, plan=None, operation=None, blockers=()):
@@ -68,9 +116,16 @@ def describe(base, task=None, plan=None, operation=None, blockers=()):
             group = "retain" if entry["action"] == "retain" else "remove_or_reset"
             row(group, entry["id"], entry["action"], "已登记外部资源；不是本次已执行结果", ["retain", "separate_request"] if group == "retain" else ["confirm", "cancel"], evidence=entry)
     if task:
+        if not plan:
+            result["source_inventory"] = source_inventory(base, task)
+            for repository in result["source_inventory"]:
+                for problem in repository["problems"]:
+                    row("unknown", problem["path"], "no_action", problem["reason"], ["clarify", "cancel"])
         for name, state in task.get("retained_repositories", {}).items():
             row("retain", "source/" + name, "retain", "未选中持久仓库，保持接管前状态", ["retain", "separate_request"], observation=state)
     if operation:
+        from workflow import station_cleanup_stages
+        result["stages"] = station_cleanup_stages.describe(operation)
         result["operation"] = {"id": operation.get("operation_id"), "status": operation.get("status"), "phase": operation.get("phase"),
             "completed_steps": [key for key, step in operation.get("steps", {}).items() if step.get("receipt") is not None],
             "pending_steps": [key for key, step in operation.get("steps", {}).items() if step.get("receipt") is None],

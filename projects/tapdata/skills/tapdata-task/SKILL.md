@@ -35,11 +35,11 @@ metadata:
 
 可迁出的运行产物优先放 runtime；源码内构建输出不要求生产前登记，也不按 target 等名称判定可删。退出时按实际清单确认，关键报告和敏感材料先保全。进程仍记录 PID、启动时间、cwd、executable；实际测试数据记录隔离身份及回读。
 
-默认归档保存实际源码修改和必要新文件并做重建核验；超限/敏感材料无法归档时，登记 source-disposition，明确 archive/export/discard 和当前快照，不把摘要当作源码备份。export 使用 workflow/station_export.py 创建工位外私有成果并核验回读，参数见[任务授权指引](../../../../docs/usage/task-authorization.md#重置工位)，discard 必须精确确认。源码链接、冲突索引、submodule 等不支持状态先明确处理，不能擅自丢弃。
+默认归档保存实际源码修改和必要新文件并做重建核验；超限/敏感材料无法归档时，登记 source-disposition，明确 archive/export/discard 和当前快照，不把摘要当作源码备份。export 使用 workflow/station_export.py 创建工位外私有成果并核验回读，参数见[任务授权指引](../../../../docs/usage/task-authorization.md#重置工位)，discard 必须精确确认。源码链接只保存链接文本、不跟随目标；冲突索引、submodule 等不支持状态先明确处理，不能擅自丢弃。
 
-运行资源 external 与可选 Git 对象区分：分支 resource_type=git-branch，PR resource_type=pull-request，默认 retain，不因未删除阻止重置。用户要求删除分支/关闭 PR 时，在本地重置完成后独立展示 ID、SHA/状态及保护回读，经确认后先用 workflow/station_disposition.py 向原档案追加 intent，再使用原生工具执行，再追加 readback。unknown 只回读原操作，不重发；不修改 Jira，不改档案正文，不重新占用已释放工位。
+清理默认自动经过准入、归档、源码、分支/PR、资源、释放六阶段，出口检查实际成果；仅遇到 needs_attention 时处理 problems，随后恢复同一操作。分支/PR 默认保留；用户明确删除时在原计划登记精确对象和决定，本地分支 location=local 由固定逻辑处理。远端分支和 PR 在 cleanup_disposition 阶段使用原生工具，先 station_disposition intent，后实际回读 readback，再恢复原清理；未知结果先回读，不重发，不把删除失败静默改为保留。完整用法见[阶段式清理](../../../../docs/architecture/single-task-station.md#阶段式清理)。
 
-中断恢复同一 issue/run/revision/operation-id 和原请求；已有 schema 3 操作仍走原 task.py 入口，不转换为新计划。目录身份或源码处置变化时执行 cleanup-amend，绑定原摘要和 plan revision，补充确认差异；运行目录内部新增生成物在原目录授权范围内，不逐文件重做摘要。已完成目录回执后重新产生内容必须停止并明确补充处置，不能沿旧回执删除。确认请求保存在工位外系统临时目录，避免污染活动材料。当前工位代际及目标产品支持范围以[机器兼容清单](../../../../contracts/station-state-compatibility.json)为准。工位与目标产品不兼容时，先使用匹配的原产品版本结束任务并归档释放或清理，再显式执行 station purge；确认解绑成功后才切换产品并按目标版本重新初始化，顺序见[更新与回退](../../../../docs/usage/update-and-rollback.md)。不得使用目标版本解析或迁移旧任务，也不得通过 repair 跨代际采用。
+中断恢复同一 issue/run/revision/operation-id 和原请求；旧 schema 3–5 或旧 epoch 只能由原产品版本退出，不用现役入口恢复。目录身份或源码处置变化时执行 cleanup-amend，绑定原摘要和 plan revision，补充确认差异；运行目录内部新增生成物在原目录授权范围内，不逐文件重做摘要。已完成目录回执后重新产生内容必须停止并明确补充处置，不能沿旧回执删除。确认请求保存在工位外系统临时目录，避免污染活动材料。当前工位代际及目标产品支持范围以[机器兼容清单](../../../../contracts/station-state-compatibility.json)为准。工位与目标产品不兼容时，先使用匹配的原产品版本结束任务并归档释放或清理，再显式执行 station purge；确认解绑成功后才切换产品并按目标版本重新初始化，顺序见[更新与回退](../../../../docs/usage/update-and-rollback.md)。不得使用目标版本解析或迁移旧任务，也不得通过 repair 跨代际采用。
 
 ## 准入、设计和多仓库
 
