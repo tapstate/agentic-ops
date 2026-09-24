@@ -69,7 +69,9 @@ class StationCleanTests(unittest.TestCase):
         # 模拟 Agent 的原生工具动作；不补任何脚本退出码或中间状态。
         (self.repo / "new.bin").unlink()
         self.git(self.repo, "update-ref", entry["preserved_ref"], entry["preserved_head"])
-        self.git(self.repo, "checkout", "--detach", entry["neutral"]["sha"])
+        self.git(self.repo, "checkout", "-B", entry["checkout_branch"], entry["neutral"]["sha"])
+        for ref, sha in entry["baseline_refs"].items():
+            self.git(self.repo, "update-ref", "-d", ref, sha)
         from workflow import station_reset_result
         with mock.patch.object(station_reset_result, "apply", side_effect=AssertionError("不得调用执行器")):
             result = station.execute(*args, cleanup_mode="verify")
@@ -111,7 +113,9 @@ class StationCleanTests(unittest.TestCase):
         operation = station_operation.read(self.ws)
         entry = operation["cleanup_plan"]["source"][self.name]
         self.git(self.repo, "update-ref", entry["preserved_ref"], entry["preserved_head"])
-        self.git(self.repo, "checkout", "--detach", entry["neutral"]["sha"])
+        self.git(self.repo, "checkout", "-B", entry["checkout_branch"], entry["neutral"]["sha"])
+        for ref, sha in entry["baseline_refs"].items():
+            self.git(self.repo, "update-ref", "-d", ref, sha)
         result = station.execute(*args, cleanup_mode="verify")
         self.assertEqual(result["status"], "done")
         receipts = [s["receipt"] for name, s in result["steps"].items() if name.startswith("source-reset:")]
@@ -301,7 +305,9 @@ class StationCleanTests(unittest.TestCase):
         (self.ws / "scratch").rmdir()
         entry = operation["cleanup_plan"]["source"][self.name]
         self.git(self.repo, "update-ref", entry["preserved_ref"], entry["preserved_head"])
-        self.git(self.repo, "checkout", "--detach", entry["neutral"]["sha"])
+        self.git(self.repo, "checkout", "-B", entry["checkout_branch"], entry["neutral"]["sha"])
+        for ref, sha in entry["baseline_refs"].items():
+            self.git(self.repo, "update-ref", "-d", ref, sha)
         self.assertEqual(station.execute(*args, cleanup_mode="verify")["status"], "done")
 
     def test_result_resume_after_active_clear_keeps_export_and_terminal_evidence(self):
@@ -737,7 +743,7 @@ class CleanupStagesTests(unittest.TestCase):
         (self.repo/'file.txt').write_text('change')
         result = station.execute(*self.args(task))
         self.assertTrue(all(row['verified'] for row in stages.describe(result)))
-        self.assertEqual('', self.git(self.repo, 'branch', '--show-current'))
+        self.assertEqual('develop', self.git(self.repo, 'branch', '--show-current'))
         self.assertIsNone(task_store.read_task(self.ws))
 
     def test_links_archive_without_following_external_target(self):
@@ -862,7 +868,7 @@ class CleanupStagesTests(unittest.TestCase):
         (self.repo/'late').write_text('unconfirmed')
         with self.assertRaises(ValueError): station.execute(*args)
         self.assertEqual('baseline\n', (second/'file.txt').read_text())
-        self.assertEqual('', self.git(second,'branch','--show-current'))
+        self.assertEqual('develop', self.git(second,'branch','--show-current'))
         self.assertEqual('unconfirmed', (self.repo/'late').read_text())
 
     def test_quiesced_external_does_not_block_source_but_blocks_resource_exit(self):

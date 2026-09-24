@@ -278,10 +278,8 @@ def plan(base, task, version=None, decisions_override=None):
         from workflow import station_reset_result
         state["directories"] = station_reset_result.source_directories(repository)
         state["refs"] = station_reset_result.refs(repository)
-        state["checkout_branch"] = None  # 清理只检出精确 SHA，不移动任何命名分支。
-        branch_ref = "refs/heads/" + state["checkout_branch"] if state["checkout_branch"] else None
-        if branch_ref in state["refs"] and state["refs"][branch_ref] != target["sha"]:
-            raise ValueError("受管清理基线分支已指向不同提交")
+        from workflow import station_development
+        station_development.plan(repository, state, catalog[name]["dev_branch"])
         states[name] = state
     external = []
     for item in inventory(base, task):
@@ -341,9 +339,13 @@ def clean(base, task, cleanup_plan, confirmed_digest, operation, source_only=Fal
     verify_known_external(base, task)
     terminal = [item for item in inventory(base, task) if item.get("kind") == "external" and item.get("resource_type") not in ("git-branch", "pull-request")]
     if terminal and not source_only:
-        if project_rules.scan_sensitive(project_rules.load_admission(station=base), json.dumps(terminal, ensure_ascii=False)):
+        from workflow import station_archive
+        terminal_digest = baseline.digest(terminal)
+        rules = project_rules.load_admission(station=base)
+        terminal = station_archive.redact_evidence(rules, terminal)
+        if project_rules.scan_sensitive(rules, json.dumps(terminal, ensure_ascii=False)):
             raise ValueError("外部资源最终回执含敏感信息，请先脱敏")
-        record = {"run_id": task["run_id"], "archive_digest": task["archive_ref"]["digest"], "resources": terminal}
+        record = {"run_id": task["run_id"], "archive_digest": task["archive_ref"]["digest"], "resources": terminal, "resources_digest": terminal_digest}
         from workflow import archive_store
         receipt = archive_store.receipts(base, task["archive_ref"], create=True) / ("external-terminal-" + baseline.digest(record) + ".json")
         if receipt.parent.is_symlink() or receipt.is_symlink():
@@ -496,13 +498,13 @@ def neutral(base, task, operation, only_repository=None):
             source.git(path, "update-ref", ref, preserved_head, "0" * len(preserved_head))
         if step["receipt"] is not None and (head != target or source.git(path, "branch", "--show-current").stdout.strip() != (checkout_branch or "")):
             raise ValueError("源码归位后被再次改变")
+        if step["receipt"] is not None and any(
+                source.git(path, "rev-parse", "--verify", name, check=False).returncode == 0
+                for name in entry["baseline_refs"]):
+            raise ValueError("已回收受管基线再次出现，拒绝重复删除")
         if checkout_branch:
-            current = source.git(path, "rev-parse", "--verify", "refs/heads/" + checkout_branch, check=False)
-            if current.returncode:
-                source.git(path, "branch", checkout_branch, target)
-            elif current.stdout.strip() != target:
-                raise ValueError("受管清理基线分支已变化")
-            source.git(path, "checkout", checkout_branch)
+            from workflow import station_development
+            station_development.checkout(path, entry)
         else:
             source.git(path, "-c", "submodule.recurse=false", "checkout", "--detach", target)
         artifacts.verify_special_entries(path, target)

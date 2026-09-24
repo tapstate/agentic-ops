@@ -1,6 +1,8 @@
 # AgenticOps 扩展使用
 
-任务清理采用六阶段自动执行与成果验收；完整盘点、异常接管、分支处置及 epoch 24 恢复边界由[工位合同](../architecture/single-task-station.md#阶段式清理)统一定义，操作入口复用任务授权指引，PROD-003 覆盖阶段失败和接力验收。
+空闲工位的源码刷新由[工位源码与材料](station-materials.md)说明：`station source-update` 刷新已准备仓库，支持 `--repo` 指定单仓；任务接管后不能使用，不替代任务基线核验。
+
+任务清理采用六阶段自动执行与成果验收；完整盘点、异常接管、分支处置及当前 epoch 恢复边界由[工位合同](../architecture/single-task-station.md#阶段式清理)统一定义，操作入口复用任务授权指引，PROD-003 覆盖阶段失败和接力验收。
 
 共享需求技能的安装资源补齐、同 epoch 接线刷新与回退由[更新与回退](update-and-rollback.md#共享-skill-资源与接线)说明；技能职责与发现范围以[Skill 维护规范](../skill-maintenance.md)为准。
 

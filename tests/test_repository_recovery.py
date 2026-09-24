@@ -83,7 +83,7 @@ class RecoveryTests(SourceFixture, unittest.TestCase):
         self.op["cleanup_plan"] = resources.plan(self.ws, task)
         resources.neutral(self.ws, task, self.op)
         self.assertEqual(self.git(self.repo, "rev-parse", "fix/retained"), head)
-        self.assertEqual(self.git(self.repo, "branch", "--show-current"), "")
+        self.assertEqual(self.git(self.repo, "branch", "--show-current"), "develop")
 
 
 if __name__ == "__main__":

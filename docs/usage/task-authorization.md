@@ -146,7 +146,7 @@ python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key 
 
 预检列出全部工程仓库的目标 SHA、暂存/未暂存/未跟踪及 ignored 内容、空目录、保全决定和保留引用。源码旁报告与其它文件一样默认归档；ignored 不是删除授权。大文件或敏感材料先安全导出或精确选择丢弃，再确认范围。无需登记 Maven target 等构建目录，也不依赖项目清理命令或配方。
 
-停止并核验写入者后，默认入口在同一操作内先归档，再执行确定的 Git 复位及受管目录回收，最后验收。需要 Agent 自行执行时，在上述命令增加 `--prepare-only`：完成正式保全后返回 `awaiting_cleanup_result`，不删除源码和运行目录。按返回计划的精确对象处理，保留成果引用并检出指定基线；不要递归删除整个 source，不移动命名分支或追随远端最新提交。
+停止并核验写入者后，默认入口在同一操作内先归档，再执行确定的 Git 复位及受管目录回收，最后验收。需要 Agent 自行执行时，在上述命令增加 `--prepare-only`：完成正式保全后返回 `awaiting_cleanup_result`，不删除源码和运行目录。按返回计划的精确对象处理，保留成果引用并检出指定基线；不要递归删除整个 source；按计划快进开发分支并回收列明的受管基线引用，不追随远端最新提交。
 
 默认脚本失败后先核对已完成与剩余对象，Agent 可在原授权范围继续，无需换工具就重确认。完成后沿用原请求、operation-id 和 expected-revision，增加 `--verify-result`：不调用执行器，不索取退出码，而是按[版本 6 合同](../architecture/single-task-station.md#成果导向清理计划版本-6)核验实际结果，满足要求后正式解绑。它仍会更新验收和解绑状态，不是只读命令；不允许手改 `.agenticops/`。若需保留工位占用，只运行无 input 的预检查看原范围，不发起最终验收。
 
@@ -166,7 +166,7 @@ python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key 
 
 需要保留敏感或超过普通归档上限的源码时，先在工位外创建当前用户私有的导出目录（0700），再运行 `python3 <agenticops-root>/workflow/station_export.py --dir <station> --issue-key <issue> --expected-run-id <run> --path source/<owner>/<repo>/<file> --output <绝对导出文件路径>`。工具独占写出 0600 文件、重建核验并回读登记 export 决定；不覆盖已有不同内容，输出仅含路径和摘要。单成果原始内容上限 512 MiB，编码后上限 768 MiB。失败退出操作中的导出另带原 expected-operation-id，随后按新范围补充确认；正式归档后的导出意图和回执进入 Product Root `.archive/<run-id>/receipts`。
 
-本地任务分支在源码回到 detached 基线后由固定逻辑删除，保持成果引用。远端分支及 PR 由原生工具处理：运行至 cleanup_disposition 后，用 `workflow/station_disposition.py --dir <station> --issue-key <issue> --run-id <run> --input <处置.json>` 保存与原计划精确匹配的 intent，原生操作后保存 readback，再恢复原清理命令。unknown 必须先回读，不能重发；状态为 unchanged 不满足删除目标。已释放工位仍支持独立处置原档案，但不能处置被新任务占用的对象。
+本地任务分支在源码回到项目开发分支后由固定逻辑删除，保持成果引用。远端分支及 PR 由原生工具处理：运行至 cleanup_disposition 后，用 `workflow/station_disposition.py --dir <station> --issue-key <issue> --run-id <run> --input <处置.json>` 保存与原计划精确匹配的 intent，原生操作后保存 readback，再恢复原清理命令。unknown 必须先回读，不能重发；状态为 unchanged 不满足删除目标。已释放工位仍支持独立处置原档案，但不能处置被新任务占用的对象。
 
 意图包含稳定 disposition_id、phase=intent、object_id、resource_type、action、before、真实 decision_ref 和不含 confirmed_digest 的意图摘要 confirmed_digest；回读包含同一 disposition_id/object_id、phase=readback、intent_digest、实际 readback_ref，以及 deleted/closed 状态。记录工具不代替远端操作，也不把本地夹具回读当作真实 GitHub 验证。
 

@@ -106,7 +106,7 @@ class ResourceTests(unittest.TestCase):
         self.assertEqual(list((self.ws/'runtime').iterdir()), [])
         self.assertIsNone(task_store.read_task(self.ws))
         entry = task['engineering_baseline']['repositories'][self.name]
-        self.assertEqual(self.git(self.repo, 'branch', '--show-current'), '')
+        self.assertEqual(self.git(self.repo, 'branch', '--show-current'), 'develop')
         self.assertEqual(self.git(self.repo, 'rev-parse', self.branch), task['reset_baseline'][self.name]['sha'])
 
     def test_runtime_child_is_lazy_and_rejects_links(self):

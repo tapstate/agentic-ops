@@ -100,6 +100,8 @@ def guard(base, task, operation, final=False):
         branch_ref = "refs/heads/" + entry["checkout_branch"] if entry["checkout_branch"] else None
         if branch_ref in current and branch_ref not in expected:
             expected[branch_ref] = entry["neutral"]["sha"]
+        from workflow import station_development
+        expected = station_development.expected_refs(entry, current, expected)
         from workflow import station_cleanup_stages
         expected = station_cleanup_stages.expected_refs(base, task, operation, name, expected, current)
         if current != expected:
@@ -116,6 +118,8 @@ def source_result(base, task, name, entry):
     if source.git(repository, "ls-files", "--others", "--ignored", "--exclude-standard", "-z").stdout:
         raise ValueError("源码仍有 ignored 内容：" + name)
     branch = entry["checkout_branch"] or ""
+    if any(ref in refs(repository) for ref in entry["baseline_refs"]):
+        raise ValueError("受管临时基线分支仍未回收：" + name)
     if (source.git(repository, "rev-parse", "HEAD").stdout.strip() != entry["neutral"]["sha"]
             or source.git(repository, "branch", "--show-current").stdout.strip() != branch
             or refs(repository).get(entry["preserved_ref"]) != entry["preserved_head"]):
@@ -141,7 +145,9 @@ def verify(base, task, operation):
     clear = "clear-active:" + str(len(operation.get("plan_revisions", []))) + ":" + plan["digest"]
     if not external and clear in operation["steps"]:
         external = operation.get("cleanup_manifest", {}).get("result", {}).get("external", [])
-    if resources.project_rules.scan_sensitive(resources.project_rules.load_admission(station=base), json.dumps(external, ensure_ascii=False)):
+    rules = resources.project_rules.load_admission(station=base)
+    external = station_archive.redact_evidence(rules, external)
+    if resources.project_rules.scan_sensitive(rules, json.dumps(external, ensure_ascii=False)):
         raise ValueError("外部资源最终回读含敏感内容，请先脱敏")
     return {"plan_digest": plan["digest"], "verification": "observed_result", "external": external}
 
