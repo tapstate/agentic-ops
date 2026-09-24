@@ -1,3 +1,3 @@
 # Claude Agent Adapter
 
-该目录只把 Claude `PreToolUse` 与 AgenticOps 标准请求、标准判定互相转换。当前 Manifest 不生成通用 Hook；旧托管 `.claude/settings.json` 由显式检查点迁移移除。协议转换资产供独立测试，项目 Skill 不保存在 Adapter 中。
+该目录通过 Manifest v3 声明 Claude 启动方式、`CLAUDE.md` 指引、Skill 发现目标与退役产物，不含 `PreToolUse` 转换器，也不生成通用工具 Hook。项目 Skill 不保存在 Adapter 中。旧托管 `.claude/settings.json` 只在同 epoch 下经明确确认与归属核验移除；跨 epoch 由原版本退出并 purge 后重建。合同与保证边界见[工程架构](../../../docs/architecture/agenticops-v1-architecture.md)。

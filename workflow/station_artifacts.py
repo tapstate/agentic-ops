@@ -78,7 +78,7 @@ def verify_special_entries(repository, reset_sha="HEAD"):
             raise ValueError("submodule 已初始化或包含内容，不支持自动重置")
 
 
-def snapshot(base, name, roots, decisions, reset_sha="HEAD"):
+def snapshot(base, name, roots, decisions, reset_sha="HEAD", include_ignored=False):
     from workflow.station_resources import fingerprint
     from workflow.station_directories import covered
     repository = source.repository_path(base, name)
@@ -91,6 +91,9 @@ def snapshot(base, name, roots, decisions, reset_sha="HEAD"):
     untracked = set(filter(None, git_bytes(repository, "ls-files", "--others", "--exclude-standard", "-z").decode().split("\0")))
     ignored = filter(None, git_bytes(repository, "ls-files", "--others", "--ignored", "--exclude-standard", "-z").decode().split("\0"))
     for filename in ignored:
+        if include_ignored:
+            untracked.add(filename)
+            continue
         if not covered("source/" + name + "/" + filename, roots):
             raise ValueError("源码含未登记 ignored 产物：%s" % filename)
     entries = []
@@ -103,12 +106,13 @@ def snapshot(base, name, roots, decisions, reset_sha="HEAD"):
             continue
         target = safe_source(base, name, filename)
         before = fingerprint(target)
-        before_index = source.git(repository, "ls-files", "--stage", "-z", "--", filename).stdout
+        before_index = source.git(repository, "ls-files", "--stage", "-z", "--", filename).stdout if filename in changed else ""
         choice = decisions.get(relative, {"action": "archive"})
         if choice.get("action") not in ("archive", "export", "discard"):
             raise ValueError("源码成果必须选择 archive/export/discard")
         proof = {"head": head, "before": before, "before_index": before_index,
-                 "index_patch": digest(patch(repository, [filename], True)), "worktree_patch": digest(patch(repository, [filename]))}
+                 "index_patch": digest(patch(repository, [filename], True) if filename in changed else b""),
+                 "worktree_patch": digest(patch(repository, [filename]) if filename in changed else b"")}
         if choice["action"] != "archive" and choice.get("snapshot") != proof:
             raise ValueError("源码导出或丢弃决定未绑定当前完整成果指纹：%s" % relative)
         info = target.stat() if target.exists() else None
@@ -189,7 +193,8 @@ def verify_reconstruction(repository, bundle):
 
 def verify_coverage(base, task, plan):
     """正式档案不可变；每个实际被移除的成果必须被档案、导出或精确丢弃覆盖。"""
-    path = Path(base).resolve() / task["archive_ref"]["path"] / "source-artifacts.json"
+    from workflow import archive_store
+    path = archive_store.from_reference(base, task["archive_ref"]) / "source-artifacts.json"
     archived = json.loads(path.read_text())
     for entry in plan["entries"]:
         choice = entry["preservation"]

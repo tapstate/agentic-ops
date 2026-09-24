@@ -1,6 +1,6 @@
 # AgenticOps 首次使用指引
 
-这篇只带你完成一条默认路径：安装 AgenticOps、创建工位并接管第一个 Jira 任务。默认值已由产品配置；除示例中的工位路径和任务号外，不需要先理解或填写其它选项。
+这篇只带你完成一条使用路径：安装 AgenticOps、明确选择产品项目、创建工位并接管第一个 Jira 任务。项目、工位路径和任务号须按实际情况填写；其它选项可沿用产品默认值。
 
 开始前准备：Git、Python 3.9+，并确保 Git SSH 已获得 `tapstate/agentic-ops` 的读取权限。Jira/Atlassian 插件在首次实际使用时按[必需 MCP 配置](usage/mcp-setup.md)引导安装和登录，不是首次启动的前置条件；GitHub 工具由 Agent 按任务自行选择。不熟悉术语时查看[术语表](glossary.md)。
 
@@ -42,12 +42,14 @@
 
 ## 2. 创建项目工位
 
-工位放在业务代码之外。以下示例为默认项目创建 `~/agenticops-tapdata`；只需要把路径换成你的实际位置：
+工位放在业务代码之外。首次初始化必须显式指定 `--project`，不默认选择 TapData。以下示例为 TapData 创建 `~/agenticops-tapdata`；其它项目需使用安装中已有的项目 ID，并调整工位路径：
 
 ```sh
 ~/.agentic-ops/agenticops station init \
-  --station "$HOME/agenticops-tapdata"
+  --station "$HOME/agenticops-tapdata" --project tapdata
 ```
+
+已有工位再次初始化时可以省略 `--project`，沿用原绑定；显式传入同一项目也可。指定不同项目会停止，不能用 init 或 repair 在线切换。确需更换项目时，先由原版本结束任务、归档释放或清理，再显式 purge，之后重新初始化；保留材料的采用见[工位源码与材料](usage/station-materials.md)。缺少或无效项目不会创建新工位或写入登记。
 
 不传 `--agent` 时会接入全部可用 Agent。接着检查接线：
 

@@ -50,6 +50,8 @@ def read(base):
     from workflow.station_clean_rules import validate_snapshot
     if "cleanup_plan" in value:
         validate_snapshot(value["cleanup_plan"])
+    if "cleanup_plan" in value.get("handoff", {}):
+        validate_snapshot(value["handoff"]["cleanup_plan"])
     for revision in value.get("plan_revisions", []):
         validate_snapshot(revision["plan"])
     for name, step in value["steps"].items():
@@ -108,7 +110,7 @@ def _verify_superseded(operation, name, step):
         if name != "clear-active:" + str(original_revision) + ":" + original or not isinstance(step["expected"].get("files"), dict):
             raise ValueError("活动材料清理步骤不属于原计划")
     elif name.startswith("station-source-reset:"):
-        if (revision["plan"].get("schema_version") not in (4, 5)
+        if (revision["plan"].get("schema_version") != 6
                 or name != "station-source-reset:" + str(original_revision) + ":" + original
                 or step["expected"] != {"plan_digest": original}):
             raise ValueError("工位源码复位步骤不属于原计划")
@@ -154,10 +156,14 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
         if current["current"] is not None:
             raise ValueError("工位仍有当前任务，不能接管新任务")
         issue_key = task_store.validate_issue_key(request.get("issue_key"))
+        from workflow import archive_store
         run_id = task_store.new_run_id(issue_key)
-        archive = Path(base).resolve() / "archive" / issue_key / run_id
-        if archive.exists() or archive.is_symlink():
-            raise ValueError("执行编号与既有档案冲突，请在下一秒重试接管")
+        try:
+            archive_store.reserve(base, issue_key, run_id)
+        except FileExistsError as error:
+            raise ValueError(
+                "执行编号 %s 已存在；同一 Jira 在同一秒只能发起一次接管，请研发稍后重试" % run_id
+            ) from error
     elif current["current"] is None or current["current"]["run_id"] != run_id:
         raise ValueError("工位 run 已变化")
     value = {
@@ -166,7 +172,12 @@ def begin(base, kind, operation_id, expected_revision, request, run_id=None):
         "expected_revision": expected_revision, "phase": "intent", "status": "running",
         "request": copy.deepcopy(request), "steps": {},
     }
-    save(base, value)
+    try:
+        save(base, value)
+    except Exception:
+        if kind == "takeover":
+            archive_store.consume_reservation(base, run_id)
+        raise
     collect_payloads(base)
     return value
 

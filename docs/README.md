@@ -1,16 +1,32 @@
 # AgenticOps 文档总纲
 
+共享需求设计以 [ao-requirement](../skills/shared/ao-requirement/SKILL.md) 为入口，帮助研发理解项目现状、需求取舍及验收并形成可实施方案；维护面与业务工位共用方法，项目规则提供上下文。[Skill 维护规范](skill-maintenance.md)维护共享资产归属、安装、发现与清理合同，[工程架构](architecture/agenticops-v1-architecture.md)维护职责边界，[更新与回退](usage/update-and-rollback.md)维护旧安装资源补齐及恢复操作。具体需求、评审和验收记录在 Jira，不另建执行计划。
+
+共同验证材料的失效范围由[质量检查与证据](usage/quality-checkpoints.md#共同验证材料)维护，契约版本与历史重放由[标准契约](../contracts/README.md)说明；来源同步只证明所属仓的来源关系，不替代跨仓测试或方案授权。兼容边界复用工位 epoch 与既有升级流程。
+
+TapData 项目开发采用“现有任务技能导航、两份开发指引按需阅读”： [TapData 开发指引](../projects/tapdata/runbooks/tapdata-development.md)覆盖源码定位、配置、构建、启动与加载验证；[TapTest 开发指引](../projects/tapdata/runbooks/taptest-development.md)覆盖用例生成、脚本开发、环境配置、执行与结果分析，不依赖业务仓的用例技能。两份指引以常用操作顺序、成功标志和少量高频陷阱帮助 Agent 减少返工，不收录完整会话历史或一次性补丁。[构建与测试](../projects/tapdata/runbooks/build-test-and-local-run.md)维护 Maven、Java 测试与配置模板细节；授权和质量判定链接现役合同，不在指引重复维护。
+
+通用工具 Hook 执行链退役后，[工程架构](architecture/agenticops-v1-architecture.md)维护 Agent 原生执行、Workflow 检查点和显式 Gate API 的边界；[标准契约](../contracts/README.md)维护 Manifest v3 的声明式接线；[更新与回退](usage/update-and-rollback.md)负责跨 epoch 原版本退出与重建，用户故事和端到端验证只维护对应验收合同，不另设迁移执行计划。
+
+项目开发以[项目目标](strategy/project-goals.md)判断收益和范围，以[仓库指令](../AGENTS.md)指导维护协作；[维护指引](maintenance-guide.md#4-变更归属)说明如何选择实现归属、评估新增约束并验证效果，不另设规则体系或审批流程。[工程架构](architecture/agenticops-v1-architecture.md#2-分层)同时维护 Workflow 内共享检查、授权和 CLI 编排的职责，按实际依赖拆分，不以文件行数设拆分目标。
+
+PR 正文传输完整性属于质量证据主题：[扩展使用总纲](usage/README.md)导航至正文发布与回读操作合同，Workflow 提供只读检查，TapData Skill 指导原生发布和恢复。不新增 GitHub 客户端、工位状态或 PR Ready 门禁。
+
+清理范围决策与 Jira 阶段同步属于任务退出及流程连续性主题：[工位合同](architecture/single-task-station.md#外部同步回执恢复)维护有限回执恢复、证据冻结和兼容语义；[扩展使用总纲](usage/README.md)导航清理清单与同步待办的操作说明。只读展示复用原计划与账本，既不扩大删除授权，也不承诺外部写入必达。
+
+质量源码定位与证据边界由[质量检查与证据](usage/quality-checkpoints.md#源码定位与实时核验)说明：按工位规范即时定位、历史重放与当前核验分离、检查点故障隔离及对外正文扫描；[扩展使用总纲](usage/README.md)负责导航，跨代际操作复用更新与回退指引，不另设任务迁移流程。
+
 源码工作目录指纹由[工位合同](architecture/single-task-station.md#源码指纹与兼容边界)定义质量证据、扩仓和中断恢复共用的字节边界、禁用 Git textconv 的源码核验要求及 epoch；[更新与回退](usage/update-and-rollback.md)负责跨 epoch 的原版退出、purge 和重建操作，不在线迁移旧指纹。
 
-项目规则入口的显式项目选择及配置化准入文档生成由[维护指引](maintenance-guide.md)说明；无工位调用必须指定项目，工位运行从已有绑定读取，避免通用入口隐式选用业务规则。
+项目规则入口的显式项目选择及配置化准入文档生成由[维护指引](maintenance-guide.md)说明；[首次使用指引](usage-guide.md#2-创建项目工位)负责首次初始化必填项目、既有绑定复用和跨项目重建的操作边界。无工位调用必须指定项目，工位运行从已有绑定读取，避免通用入口隐式选用业务规则。
 
-功能开发准入由[质量检查与证据](usage/quality-checkpoints.md#功能方案完整性与一次决策包)说明 Q2 聚合检查及 Jira 同阶段采集，[TapData 构建运行指引](../projects/tapdata/runbooks/build-test-and-local-run.md#方案阶段环境预检)负责环境输入、加载验证和不猜测配置的操作依据。
+功能开发准入由[质量检查与证据](usage/quality-checkpoints.md#功能方案完整性与一次决策包)说明 Q2 聚合检查、环境依赖阶段及 Jira 同阶段采集，[TapData 构建运行指引](../projects/tapdata/runbooks/build-test-and-local-run.md#方案阶段环境预检)负责环境输入、加载验证和不猜测配置的操作依据。计划声明与实际执行证据分开，不新增环境台账或审批。
 
 同周期方案返工由[工位合同](architecture/single-task-station.md)定义原 run、追加基线和失败恢复，[任务授权指引](usage/task-authorization.md)维护 prepare/apply/abort 操作；质量文档负责受影响证据，项目 Profile 限定可增仓集合。
 
 质量输入格式预检和完成等待合并的使用边界由[扩展使用总纲](usage/README.md)导航至质量与任务授权指引；质量执行事件增加未执行原因的兼容边界由机器工位契约管理，工位 epoch 以机器契约为准，升级继续遵守原版退出并 purge。
 
-配置化工位清理由[任务授权指引](usage/task-authorization.md#配置化清理入口)说明两个独立名单、确认请求及失败恢复入口；[工位合同](architecture/single-task-station.md#配置化清理计划版本-5)维护版本 5 的报告保全、原生清理回执与源码复位顺序及 epoch 兼容边界。名单负责分类，归属与生命周期检查仍是副作用前提，不接入构建工具执行器。
+配置化工位清理由[任务授权指引](usage/task-authorization.md#配置化清理入口)说明两个独立名单、确认请求及 Agent 接力；[工位合同](architecture/single-task-station.md#成果导向清理计划版本-6)维护唯一现役版本 6 的保全、Git 复位、成果验收及旧协议退出边界，[机器契约](../contracts/station-reset.schema.json)约束持久计划。名单只负责工位根分类，源码按 Git 与确认快照处理，不保留旧计划执行器或构建工具清理配方。
 
 [维护指引](maintenance-guide.md#5-验证)负责诊断检查、绑定候选的正式四项验收、耗时报告与证据 v5 使用及维护审查的有效验收摘要；[INT-001](user-stories/v1/int-001-release-governance.md)规定验收完整性、失败失效和首次信任根升级边界。运行进度与性能验收结果仍以 Jira 为准。
 
@@ -18,19 +34,21 @@ TapData 的按需 Wiki 阅读由 [tapdata-wiki](../projects/tapdata/skills/tapda
 
 TapData 集成测试协作由 [tapdata-ci-test](../projects/tapdata/skills/tapdata-ci-test/SKILL.md) 负责用例分析、编写、执行与报告修复；[tapdata-task](../projects/tapdata/skills/tapdata-task/SKILL.md) 负责在研发节点调用、授权、质量记录与外部跟进。集成测试技能按需使用 tapdata-wiki；[构建、测试与本地运行](../projects/tapdata/runbooks/build-test-and-local-run.md) 保留具体操作与报告工具说明。技能能力缺失不增加流程门禁，已有验收条件仍由原质量合同处理，不建立第二套测试状态。
 
-任务退出与编码准备由[工位合同](architecture/single-task-station.md)统一定义：重置工位保留配置、独立源码和正式档案，按任务独占目录回收运行产物，并核验源码成果、开发基线与空闲条件。该主题覆盖目录归属、一次范围确认、中断恢复、由工位 `git_name` 和 run 生成的分支及 PR 处置、以及 epoch 兼容边界；不覆盖工位卸载或自动恢复历史任务。项目目标负责方向，工位合同负责可执行语义与验收，使用指引和项目 Skill 负责入口与操作说明，机器契约约束持久字段，避免重复维护规则。
+任务退出、运行身份与编码准备由[工位合同](architecture/single-task-station.md)统一定义：其中身份章节维护 `run_id` 的职责、固定格式、秒级冲突失败语义、历史读取兼容与变更边界；重置章节负责保留配置和独立源码，将正式档案发布到 Product Root 的 `.archive/<run-id>`，按任务独占目录回收运行产物，并核验源码成果、开发基线与空闲条件。该主题覆盖目录归属、一次范围确认、中断恢复、由工位 `git_name` 和 run 生成的分支及 PR 处置、以及 epoch 兼容边界；不覆盖工位卸载或自动恢复历史任务。项目目标负责方向，工位合同负责可执行语义与验收，使用指引和项目 Skill 负责入口与操作说明，机器契约约束持久字段，避免重复维护规则。
 
-源码池仅承担下载加速：[工位合同](architecture/single-task-station.md)定义先缓存后独立源码的准备与恢复边界，[工位源码与材料](usage/station-materials.md)说明缓存位置、复用与清理；项目目标保持工位独立性。
+源码池仅承担下载加速：[工位合同](architecture/single-task-station.md)定义先缓存后独立源码的准备与恢复边界，[工位源码与材料](usage/station-materials.md)说明缓存位置、复用与清理；项目目标保持工位独立性。完整应用源码集 Profile 的现役承诺止于源码准备：[术语表](glossary.md)解释名称，[工位合同](architecture/single-task-station.md#9-tapdata-源码-profile-与运行边界)定义源码与未来运行能力的界线，TapData 构建运行指引负责另行构建、启动和实证的操作依据，不把接管成功当成应用可运行。
 
-原版本清理器自身失效时的一次性空工位恢复归入[维护指引](maintenance-guide.md#旧版空工位的一次性恢复)，只说明产品维护导出与重建边界，不作为产品升级兼容入口。
+维护时的源码测试、候选安装快照和业务工位绑定由[维护指引](maintenance-guide.md#2-初始化测试工位)说明，避免把可变源码直接绑定为业务 Product Root；接管测试 Skill 按现役 Workflow 检查点和原生权限报告停止点。旧 Hook 的同 epoch 接线迁移由[常见问题](usage/faq.md)说明，跨 epoch 仍由更新指引负责原版退出。原版本清理器自身失效时的一次性空工位恢复归入[维护指引](maintenance-guide.md#旧版空工位的一次性恢复)，只说明产品维护导出与重建边界，不作为产品升级兼容入口。
 
-本地执行与 Jira 同步的边界由项目目标和架构定义；质量使用指引负责初始快照、本地确认、非阻断同步及 PR 后警告汇总，契约负责可恢复记录格式。
+本地执行与 Jira 同步的边界由项目目标和架构定义；质量使用指引负责初始快照、本地确认、非阻断同步及 PR 后警告汇总，并说明项目配置的消费者与只读工作流参考的边界；契约负责可恢复记录格式。
+
+当前任务的读写校验由[工位合同](architecture/single-task-station.md)说明：复用版本化状态契约、保留合法恢复状态、拒绝损坏数据且不在线修复；Gate 上下文复用只读状态入口，不另维护宽松格式。
 
 本文是现役人读文档的结构入口。新建或调整文档时，先在本页或对应主题的子级总纲明确目标、范围、层级、职责和导航关系；再细化正文。仅当文档过长，或稳定内容被多个页面复用时，才拆分子文档。
 
-现役工位采用单任务模型：source 保存完整独立工程，config 保存持久配置，runtime 是唯一运行现场，archive 保存正式档案，.agenticops 只绑定一个 current 与 operation。[项目目标](strategy/project-goals.md)负责方向，[工程架构](architecture/agenticops-v1-architecture.md)负责分层，[工位合同](architecture/single-task-station.md)负责身份、四操作、恢复及可复用验收边界；机器基线见 [engineering-baseline](../contracts/engineering-baseline.schema.json)。功能存在不等于真实 TapData 应用已验证运行，执行证据与发布结论仍在 Jira。
+现役工位采用单任务模型：source 保存完整独立工程，config 保存持久配置，runtime 是唯一运行现场，.agenticops 只绑定一个 current 与 operation；正式档案独立保存在 Product Root 的 `.archive/`，不随工位清理删除。[项目目标](strategy/project-goals.md)负责方向，[工程架构](architecture/agenticops-v1-architecture.md)负责分层，[工位合同](architecture/single-task-station.md)负责身份、四操作、恢复及可复用验收边界；机器基线见 [engineering-baseline](../contracts/engineering-baseline.schema.json)。功能存在不等于真实 TapData 应用已验证运行，执行证据与发布结论仍在 Jira。
 
-生成与清理先在同版本形成闭环：初始化、任务处理、归档释放或清理、工位 purge、再次初始化。跨版本升级是第二层编排：升级器只比较不兼容标记；标记变化时必须确认 Product Root 的工位登记为空，原版本负责完成任务和 purge，目标版本只生成新工位，不在线迁移任务或解释旧 Runtime 状态。登记缺失、损坏或无法读取时停止切换。[更新与回退](usage/update-and-rollback.md)维护这个使用顺序。
+生成与清理先在同版本形成闭环：初始化、任务处理、归档释放或清理、工位 purge、再次初始化。跨版本升级是第二层编排：升级器只比较唯一的 `station_state_epoch`；值变化时必须确认 Product Root 的工位登记为空，原版本负责把全部任务通过 release 或 clean 正式归档并 purge，目标版本只生成新工位，不在线迁移任务或解释旧 Runtime 状态。登记缺失、损坏或无法读取时停止切换。[更新与回退](usage/update-and-rollback.md)维护这个使用顺序。
 
 TapData 活动仓库以 repositories.json 为准；docs/docs-en 已解除，t-layer3-test 保留为可选验证依赖。新版本不保留旧清理身份映射，旧现场由原版本处理，不删除已有源码、Git refs 或材料。
 

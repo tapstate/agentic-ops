@@ -9,7 +9,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 
-from workflow import engineering_baseline as baseline, project_rules, station_archive as archives
+from workflow import archive_store, engineering_baseline as baseline, project_rules, station_archive as archives
 from workflow import station_operation as operations, station_source as source, task_store
 
 
@@ -25,10 +25,7 @@ def _project(base):
 
 def _plan_receipt(base, task, operation, phase, snapshot=None):
     archives.verify(base, task["archive_ref"], task)
-    directory = Path(base).resolve() / task["archive_ref"]["path"] / "receipts"
-    if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
-        raise ValueError("档案回执目录必须是实际目录")
-    directory.mkdir(exist_ok=True)
+    directory = archive_store.receipts(base, task["archive_ref"], create=True)
     plan = snapshot["plan"] if snapshot else operation["cleanup_plan"]
     generation = snapshot["plan_revision"] if snapshot else len(operation.get("plan_revisions", []))
     path = directory / (operation["operation_id"] + "-" + phase + "-" + str(generation) + "-" + plan["digest"] + ".json")
@@ -38,6 +35,8 @@ def _plan_receipt(base, task, operation, phase, snapshot=None):
              "archive_digest": task["archive_ref"]["digest"], "cleanup_plan_digest": plan["digest"], "plan_revision": generation,
              "confirmation_digest": snapshot["confirmation_digest"] if snapshot else operation.get("confirmation_digest", operation["request"].get("confirmed_digest")),
              "inventory": [{"id": baseline.digest(entry), "action": entry.get("action", "external")} for entry in plan.get("entries", []) + plan.get("external", [])]}
+    if phase == "resources-released":
+        value["observed_result"] = operation["cleanup_manifest"]["result"]
     if path.is_symlink():
         raise ValueError("档案回执不能是符号链接")
     if path.exists():
@@ -71,8 +70,7 @@ def _clear_active(base, operation):
         return values
     actual = inventory()
     plan = operation["cleanup_plan"]
-    if plan.get("schema_version") in (3, 4):
-        _resources().verify_active(base, plan, operation)
+    _resources().verify_active(base, plan, operation)
     step_name = "clear-active:" + str(len(operation.get("plan_revisions", []))) + ":" + operation["cleanup_plan"]["digest"]
     step = operations.intent(base, operation, step_name, {}, {"files": actual}) if step_name not in operation["steps"] else operation["steps"][step_name]
     expected = step["expected"]["files"]
@@ -236,7 +234,7 @@ def scope_change(base, issue, run_id, revision, operation_id, name, work_branch,
             if not continuation or continuation["expected_head"] != expected_head or continuation["work_branch"] != work_branch:
                 raise ValueError("续办 Head 必须已在接管时绑定历史基线")
             sha = expected_head
-        from workflow.task import revoke_authorization
+        from workflow.authorization import revoke_authorization
         revoke_authorization(base, issue, "scope_changed")
         step = operations.intent(base, operation, "branch", {}, {"branch": work_branch, "sha": sha})
         if expected_head is None and not step["before"].get("authorized_creation"):
@@ -324,7 +322,7 @@ def amend_scope(base, issue, run_id, revision, operation_id, name, binding_diges
         if operation is None:
             operation = operations.begin(base, "scope_change", operation_id, revision, request, run_id)
         operations.intent(base, operation, "binding", before, after)
-        from workflow.task import revoke_authorization
+        from workflow.authorization import revoke_authorization
         revoke_authorization(base, issue, "repository_scope_amended")
         if not applied:
             task["task_repositories"][name] = after
@@ -384,8 +382,8 @@ def evaluate_completion(base, task):
             continue
         deliveries.append(delivery)
         dispositions[name] = "merged"
-    from workflow import task as task_cli
-    problems.extend(task_cli._check_advance_base(task, "completed", base, task_cli.admission(base)))
+    from workflow import project_rules, task_checks
+    problems.extend(task_checks.check_advance(task, "completed", base, project_rules.load_admission(station=base)))
     from workflow import quality, pr_ready, verification
     rules = quality.config(base, task)
     if quality.enabled(task, rules) and isinstance(rules.get("pr_ready"), dict):
@@ -494,7 +492,7 @@ def amend_cleanup(base, issue, run_id, revision, operation_id, expected_plan_dig
 
 
 def _verify_cleanup_decision(base, task, request):
-    plan = _resources().plan(base, task, version=request.get("cleanup_version", 3))
+    plan = _resources().plan(base, task, version=request.get("cleanup_version", 6))
     if request.get("confirmed_digest") != plan["digest"] or not request.get("decision_ref"):
         raise ValueError("请展示重置范围并确认 confirmed_digest 与真实 decision_ref")
     discard = [e for e in plan["entries"] if e["preservation"]["action"] == "discard"]
@@ -502,9 +500,14 @@ def _verify_cleanup_decision(base, task, request):
         raise ValueError("丢弃源码成果需要额外确认 discard_digest")
 
 
-def execute(base, kind, issue, run_id, revision, operation_id, request):
+def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_mode="execute"):
     if kind not in ("archive", "release", "clean"):
         raise ValueError("未知生命周期操作")
+    if cleanup_mode not in ("execute", "prepare", "verify"):
+        raise ValueError("未知清理执行模式")
+    _resources().require_cleanup_version(request.get("cleanup_version", 6))
+    if cleanup_mode != "execute" and kind == "archive":
+        raise ValueError("Agent 接力只用于版本 6 清理操作")
     with task_store.task_state_lock(base):
         previous = operations.read(base)
         if previous and previous["operation_id"] == operation_id and "unbind" in previous["steps"] and task_store.read_current(base)["current"] is None:
@@ -525,7 +528,7 @@ def execute(base, kind, issue, run_id, revision, operation_id, request):
                 raise ValueError("未完成档案只能 clean；不能后置完成再复用 incomplete 档案释放")
         fresh = not previous or previous["operation_id"] != operation_id
         if fresh:
-            if request.get("cleanup_version") in (4, 5) and kind == "clean" and request.get("abandon_changes") is not True:
+            if kind == "clean" and request.get("abandon_changes") is not True:
                 raise ValueError("未完成任务需要明确放弃变更，未写入状态")
             if kind in ("archive", "clean", "release"):
                 _verify_cleanup_decision(base, task, request)
@@ -537,7 +540,7 @@ def execute(base, kind, issue, run_id, revision, operation_id, request):
             _resources().verify_stopped(base, task)
             _resources().verify_known_external(base, task)
             if kind != "archive":
-                candidate_plan = _resources().plan(base, task, version=request.get("cleanup_version", 3))
+                candidate_plan = _resources().plan(base, task, version=request.get("cleanup_version", 6))
                 if request.get("confirmed_digest") != candidate_plan["digest"]:
                     raise ValueError("必须确认当前精确 cleanup plan digest")
             if kind == "release":
@@ -550,13 +553,15 @@ def execute(base, kind, issue, run_id, revision, operation_id, request):
                 raise ValueError("已完成任务应释放")
         if previous and previous["kind"] == "takeover" and previous["status"] != "done" and kind == "clean":
             handoff = previous.get("handoff")
-            plan = handoff["cleanup_plan"] if handoff else _resources().plan(base, task, version=request.get("cleanup_version", 3))
+            plan = handoff["cleanup_plan"] if handoff else _resources().plan(base, task, version=request.get("cleanup_version", 6))
             operation = operations.handoff_clean(base, operation_id, revision, request, run_id, plan)
         else:
             operation = operations.begin(base, kind, operation_id, revision, request, run_id)
         if operation["status"] == "done":
             return operation
         resources = _resources()
+        # 恢复也核查，不因 fresh=False 跳过未知外部写入；与回执保存共用工位锁。
+        resources.verify_known_external(base, task)
         resources.verify_stopped(base, task)
         if kind == "release" and task.get("outcome") != "completed":
             proof = completion_proof(base, task)
@@ -568,70 +573,39 @@ def execute(base, kind, issue, run_id, revision, operation_id, request):
             raise ValueError("已完成任务应释放，不允许改写为未完成")
         plan = operation.get("cleanup_plan")
         if plan is None:
-            plan = resources.plan(base, task, version=request.get("cleanup_version", 3))
+            plan = resources.plan(base, task, version=request.get("cleanup_version", 6))
             if kind != "archive" and request.get("confirmed_digest") != plan["digest"]:
                 raise ValueError("清理或释放必须明确确认当前精确 cleanup plan digest")
             operation["cleanup_plan"] = plan
             operations.save(base, operation)
-        modern = plan["schema_version"] in (4, 5)
-        if plan["schema_version"] == 5 and not task.get("archive_ref"):
-            from workflow import native_cleanup
-            pending = native_cleanup.pending(base, task, operation)
-            if pending:
-                operation.update(phase="awaiting_native_clean", native_problems=pending)
-                operations.save(base, operation)
-                return operation
-            # 原生命令结束后只核对同一已确认范围，不重新要求确认摘要。
-            if resources.plan(base, task, version=5)["digest"] != plan["digest"]:
-                raise ValueError("原生清理改变了源码或退出范围，需要重新确认")
-        if modern:
-            resources.verify_station_inventory(base, plan["rules"], allow_pending=True)
+        resources.require_cleanup_version(plan.get("schema_version"))
+        resources.verify_station_inventory(base, plan["rules"], allow_pending=True)
         reference = archives.publish(base, task, request, plan, operation, lambda: resources.plan(base, task, version=plan["schema_version"]))
         _flush_amendment_receipts(base, task, operation)
         if kind == "archive":
             operations.finish(base, operation)
             return operation
-        if kind == "release" and operation.get("phase") not in ("cleaned", "neutral", "unbound") and not (modern and any(k.startswith("neutral:") for k in operation["steps"])):
-            if request.get("candidate_digest") != task["terminal_proof"]["candidate_digest"]:
-                raise ValueError("释放确认候选摘要不一致")
-            current = source.inspect(base, task["engineering_baseline"])
-            if not operation.get("plan_revisions") and baseline.digest(current) != task["terminal_proof"]["candidate_digest"]:
-                raise ValueError("完成后源码已变化，拒绝释放")
-        elif kind == "clean":
+        if kind == "clean":
             task["outcome"] = "interrupted"
             task_store.write_task(base, task)
         confirmed = operation.get("confirmation_digest", request["confirmed_digest"])
+        previous_result = operation.get("cleanup_manifest", {}).get("result")
         operation["cleanup_manifest"] = {"cleanup_plan_digest": plan["digest"],
                                          "confirmation_digest": confirmed, "archive_digest": reference["digest"]}
+        if previous_result and previous_result.get("plan_digest") == plan["digest"]:
+            operation["cleanup_manifest"]["result"] = previous_result
         operations.save(base, operation)
-        if modern:
-            from workflow import station_source_reset
-            station_source_reset.apply(base, task, operation)
-            resources.clean(base, task, plan, confirmed, operation, directories_only=True)
-            station_source_reset.apply(base, task, operation)
-            if kind == "release":
-                observed = source.inspect(base, task["engineering_baseline"])
-                expected = task["terminal_proof"]["repositories"]
-                if any(state["dirty"] or not resources.delivery_head_matches(base, name, state, expected.get(name, {}).get("head"), operation) for name, state in observed.items()):
-                    raise ValueError("释放归位后的源码或保留候选与交付证明不一致")
-            operation["phase"] = "neutral"
+        from workflow import station_reset_result
+        if cleanup_mode == "prepare":
+            operation["phase"] = "awaiting_cleanup_result"
             operations.save(base, operation)
-        if operation.get("phase") not in ("cleaned", "neutral", "unbound"):
-            resources.clean(base, task, plan, confirmed, operation)
-        if kind == "release" and operation.get("phase") not in ("neutral", "unbound"):
-            observed = source.inspect(base, task["engineering_baseline"])
-            expected = task["terminal_proof"]["repositories"]
-            if any(state["dirty"] or not resources.delivery_head_matches(base, name, state, expected.get(name, {}).get("head"), operation) for name, state in observed.items()):
-                raise ValueError("释放清理后源码仍有差异或新增提交，拒绝解绑")
-        if operation.get("phase") not in ("neutral", "unbound"):
-            operation["phase"] = "cleaned"
-            operations.save(base, operation)
-        if not modern:
-            resources.neutral(base, task, operation)
+            return operation
+        if cleanup_mode == "execute":
+            station_reset_result.apply(base, task, operation)
+        operation["cleanup_manifest"]["result"] = station_reset_result.record(base, task, operation)
         operation["phase"] = "neutral"
         operations.save(base, operation)
-        # 授权文件已随正式证据归档；在 clear-active 的持久意图下移除即撤销。
-        # 不先改写授权内容，避免使已确认的活动材料指纹失效。
+        # 已按实际清理成果核验；活动授权随归档保全后的 clear-active 意图移除。
         if operation.get("plan_revisions"):
             _plan_receipt(base, task, operation, "resources-released")
         else:

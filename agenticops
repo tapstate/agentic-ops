@@ -10,6 +10,7 @@ usage() {
   agenticops install [install 参数]
   agenticops setup [--source-pool <目录>]
   agenticops agents
+  agenticops version
   agenticops station <init|doctor|repair|start|list|identity|prune|clean|detach|purge> [参数]
   agenticops update
   agenticops rollback
@@ -189,6 +190,10 @@ if [ "$command_name" = "station" ]; then
 fi
 
 case "$command_name" in
+  version)
+    test "$station_scope" -eq 0 && test "$#" -eq 0 || { usage >&2; exit 2; }
+    exec python3 "$product_root/bootstrap/product_version.py" --product-root "$product_root" --allow-dirty
+    ;;
   install)
     exec bash "$product_root/bootstrap/install.sh" "$@"
     ;;
@@ -201,6 +206,15 @@ case "$command_name" in
     ;;
   init)
     test "$station_scope" -eq 1 || { usage >&2; exit 2; }
+    product_mode="$(python3 "$product_root/bootstrap/product_state.py" --product-root "$product_root" read --field mode 2>/dev/null || true)"
+    if [ "$product_mode" != "installed" ]; then
+      if [ "$product_mode" = "source" ]; then
+        printf 'AgenticOps：产品源码目录是可变维护现场，不能作为业务工位 Product Root；请先安装候选快照，再从安装目录执行 station init。\n' >&2
+      else
+        printf 'AgenticOps：无法核验 Product Root 为已安装快照；请先完成 install，再从安装目录执行 station init。\n' >&2
+      fi
+      exit 2
+    fi
     parse_station "$@"
     exec env AGENTIC_OPS_HOME="$product_root" \
       bash "$product_root/bootstrap/station-init.sh" \

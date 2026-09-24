@@ -29,7 +29,7 @@ cd agentic-ops
 
 克隆前先完成 [Git SSH 授权指引](security/git-ssh-access.md)，并确认账号有本仓库访问权。示例显式以 `develop` 作为维护基线；`setup` 会仅 fast-forward 同步该分支、安装本仓库维护依赖并接入受信 Git Hook。工作区有修改时会停止，不会覆盖修改。业务源码由独立工位的 source 管理，不写入产品根。
 
-工位接管时按完整 Profile 下载缺失独立仓库；无权限或已有目录不洁净时停止对应准备。产品不再管理共享池或跨工位源码租约。
+工位接管时按完整源码 Profile 准备独立仓库；无权限或已有目录不洁净时停止对应准备。产品管理 bare 下载缓存以加速准备，但不共享工位 Git 元数据或管理跨工位源码租约；缓存不是任务事实源，详见[工位源码与材料](usage/station-materials.md)。
 
 `setup` 用于首次初始化产品源码目录。之后在 `develop` 更新当前源码目录：
 
@@ -37,30 +37,38 @@ cd agentic-ops
 ./agenticops update
 ```
 
-`update` 只执行 fast-forward，不自动切换分支、处理分叉、覆盖修改或推送本地提交。本地领先远端时会继续同步维护依赖和 Hook，并明确报告领先提交数。
+`update` 只执行 fast-forward，不自动切换分支、处理分叉、覆盖修改或推送本地提交。本地领先远端时会继续同步维护依赖和源码 Git Hook，并明确报告领先提交数。
 
-## 2. 初始化项目工位
+## 2. 初始化测试工位
 
-维护源码目录与项目工位必须分开。以下示例在当前 `develop` 源码目录为 TapData 初始化工位，并立即检查接线：
+维护源码目录、候选安装目录与项目工位必须分开。公开入口只允许已安装 Product Root 绑定业务工位，不允许可变源码目录直接绑定。以下示例从当前源码仓库的已提交 `develop` 创建本地候选安装，再初始化新的 TapData 测试工位；不推送，不触碰已有安装或工位：
 
 ```sh
-station="$HOME/agenticops-tapdata"
-./agenticops station init --station "$station" --project tapdata
-./agenticops station doctor --station "$station"
+source_root="$(pwd -P)"
+test_root="$(mktemp -d "${TMPDIR:-/tmp}/agenticops-test.XXXXXX")"
+candidate_root="$test_root/product"
+station="$test_root/station"
+./agenticops install --install-home "$candidate_root" --repository "$source_root" --branch develop
+"$candidate_root/agenticops" station init --station "$station" --project tapdata
+"$candidate_root/agenticops" station doctor --station "$station"
 ```
 
-`station` 不得是源码目录或其子目录。省略 `--agent` 会接入当前源码目录提供的全部 Agent；只接入部分 Agent 时重复传入 `--agent <Agent ID>`。
+Git 克隆只包含该分支已提交内容，不包含当前未提交修改；先核对源码候选提交与安装 HEAD。未提交候选的安装范围必须另外精确记录，不能把上面的克隆结果称为已包含工作树。正式固定验收由[验证](#5-验证)的既有入口准备隔离候选，不要为运行测试擅自提交或推送。
+
+`station` 不得是产品源码、安装目录或其子目录；测试父目录也应在二者之外。省略 `--agent` 会接入候选安装提供的全部 Agent；只接入部分 Agent 时重复传入 `--agent <Agent ID>`。示例只初始化和诊断，不接管 Jira；实际接管测试按已有测试绑定及授权执行，结束后保留现场供审查，退出和 purge 另按正常边界处理。
 
 ## 3. 维护与运行是一套代码
 
-源码目录直接运行产品；修改 `develop` 后，Gate、Policy、Workflow、Project 和 Adapter 立即从同一份源码运行，不需要复制到另一套安装目录。只有工位中的生成接线可能需要刷新：
+源码目录可以直接运行同一套 Gate、Policy、Workflow、Project、Adapter 模块和维护测试，不维护第二套 Runtime。业务工位则运行其绑定的候选安装快照，不会随着源码工作树编辑而热更新。需要复测新候选时准备新的安装快照和测试工位；已有安装的升级遵循[更新与回退](usage/update-and-rollback.md)，不能复制源码覆盖活动安装。
+
+工位中的同版本可再生接线可能需要刷新，命令必须从其绑定安装运行：
 
 ```sh
-./agenticops station doctor --station <项目工位>
-./agenticops station repair --station <项目工位>
+<绑定安装目录>/agenticops station doctor --station <项目工位>
+<绑定安装目录>/agenticops station repair --station <项目工位>
 ```
 
-已启动的 Agent 可能仍持有启动时加载的指引，源码更新后应重启 Agent。通过 `agenticops station start` 启动时会自动刷新接线。更新、回退和首次初始化由 `.local/lifecycle.lock/` 串行执行；发布、Hotfix 或固定验收运行期间不要更新源码。
+已启动的 Agent 可能仍持有启动时加载的指引，绑定安装或接线更新后应重启 Agent。通过 `agenticops station start` 启动时会尝试刷新接线；发现旧托管 Hook 时保留现场并要求同 epoch 的显式迁移，跨 epoch 不能用 refresh/repair 续接。源码仓库 Git Hook 独立保留，不是使用者的工具拦截链。更新、回退和首次初始化由 `.local/lifecycle.lock/` 串行执行；发布、Hotfix 或固定验收运行期间不要更新源码。
 
 源码目录产生的所有非 Git 状态统一进入：
 
@@ -78,6 +86,10 @@ station="$HOME/agenticops-tapdata"
 
 ## 4. 变更归属
 
+先从实际受阻或易出错的场景检查现有要求：是成果标准缺失、判定错误，还是辅助工具失败。优先修正现有判定、去除重复步骤或复用原生能力；只有现有机制不能解决问题时，才新增规则、配置或状态，并在现有方案中说明收益、适用边界和维护代价，不另建登记或审批流程。例如，源码清理应依据 Git 跟踪事实和已确认的处置范围，不因 Java 包目录名为 `target` 就增加 Maven 输出目录登记。
+
+评审时用代表性场景比较改动前后的操作负担和结果：正常路径是否减少人工判断或重复操作，脚本中断后能否在原权限内接力，结果不合格时能否明确缺项并补齐。相关行为纳入受影响用例；文档更新和脚本成功本身不证明流程改善，未做真实场景验证的结论应明确限制。权限、保全和外部未知结果的边界不能因简化流程而取消。验证入口与执行时机沿用下节，不新增一套检查流程。
+
 - 标准协议：`contracts/`
 - 公司通用门禁：`policies/`
 - 平台无关判定：`gate/`
@@ -85,9 +97,9 @@ station="$HOME/agenticops-tapdata"
 - 项目差异：`projects/<project>/`
 - Agent/工具协议差异：`adapters/`
 - 安装与接线：`bootstrap/`
-- 产品维护协作指引：`skills/`；它们只供维护 Agent 使用，不安装或接线到业务工位。Skill 的分类、事实源、发现接线和迁移要求见 [Skill 维护规范](skill-maintenance.md)。
+- 产品维护协作指引：`skills/`（不含 `shared/`）；它们只供维护 Agent 使用，不安装或接线到业务工位。共享需求设计入口为 `skills/shared/ao-requirement/`，维护根和项目工位共用方法，按目标项目读取约束。Skill 的分类、事实源、发现接线和迁移要求见 [Skill 维护规范](skill-maintenance.md)。
 
-新增 Agent 只增加 `adapters/agents/<id>/` 的 Manifest、薄 Hook、模板和测试；不要修改公共入口建立平台枚举。新增产品项目只增加 `projects/<project>/`。每个 Jira Project Profile 必须配置 `jira.takeover_watermark`：逻辑键固定为 `agenticops_version`，配置实际 `customfield_<ID>`、字符串字段名、启用的 Jira 事务类型 ID 和 `overwrite` 写入方式；`workflow/project_rules.py` 会拒绝缺失或无效配置，不能绕过接管门禁。工作项、进度和验收写入 Jira，不在仓库新增执行计划。
+新增 Agent 只增加 `adapters/agents/<id>/` 的 Manifest v3、必要的指引模板和测试（不提供通用工具 Hook）；不要修改公共入口建立平台枚举。新增产品项目只增加 `projects/<project>/`。每个 Jira Project Profile 必须配置 `jira.takeover_watermark`：逻辑键固定为 `agenticops_version`，配置实际 `customfield_<ID>`、字符串字段名、启用的 Jira 事务类型 ID 和 `overwrite` 写入方式；`workflow/project_rules.py` 会拒绝缺失或无效配置，不能绕过接管门禁。工作项、进度和验收写入 Jira，不在仓库新增执行计划。
 
 `python3 workflow/project_rules.py` 的 `render`、`branch` 和 `workflow` 子命令必须通过 `--project <project>` 显式指定项目。无工位的 Python 调用同样提供 `project`，不再默认 TapData；工位调用使用 `station` 的现有绑定。缺少项目时停止读取或生成，旧脚本应补齐参数，不能用默认业务项目代替缺失输入。
 

@@ -4,6 +4,8 @@
 
 初始化只生成空工位接线，接管时才准备选定的源码。各工位拥有完整对象和独立 Git 元数据，origin 保留真实远端，不使用 linked worktree、硬链接或 alternates。缓存丢失不影响已准备工位的本地开发；下次需要刷新时重新下载入池。下载失败保留任务操作供原请求重试，不把旧缓存视为最新远端事实。
 
+`full-application` 是完整应用源码集的 Profile ID，不是自动应用启动方案。接管成功及 `source_prepared` 只代表源码准备；空 runtime 的存在不证明工具链、有效配置、数据库、构建或应用健康可用。实际运行仍按任务方案和项目 Runbook 独立执行、验证，边界见[工位合同](../architecture/single-task-station.md#9-tapdata-源码-profile-与运行边界)。
+
 共享同一源码池的工位复用缓存；同名仓库绑定唯一 origin，origin 不一致时失败关闭，不自动隔离。每个池内仓库在刷新和传输期间加锁。工位 purge 保留源码池；缓存不保存任务状态或验收证据。
 
 ## 中央共享 Wiki
@@ -36,6 +38,6 @@ Wiki 不是任务工程，不进入 engineering_baseline、源码仓库版本配
 
 ## 清理后复用
 
-station purge 只处理空闲工位，保留 source/config/archive。原路径重新生成时，对这些非空真实目录明确使用 init --reuse-materials；runtime 必须为空。参数不授权覆盖源码、导入秘密有效配置或复用旧证据。新任务仍按自己的版本解析与验证，不把保留分支自动视作已授权任务。
+station purge 只处理空闲工位，保留 source/config 和旧工位 archive（若有）；Product Root `.archive/` 始终不在工位清理范围。原路径重新生成时，对非空真实工位材料明确使用 init --reuse-materials；runtime 必须为空。参数不授权覆盖源码、导入秘密有效配置或复用旧证据。新任务仍按自己的版本解析与验证，不把保留分支自动视作已授权任务。
 
 旧版源码池作为非托管材料保留，不由新版本迁移或删除。旧工位的退出顺序见[更新与回退](update-and-rollback.md)。

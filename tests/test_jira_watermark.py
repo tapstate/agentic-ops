@@ -128,5 +128,40 @@ class JiraWatermarkTests(unittest.TestCase):
             project_rules.load_profile(root=self.product, project="tapdata")
 
 
+class TerminalWatermarkTests(unittest.TestCase):
+    setUp = JiraWatermarkTests.setUp
+    snapshot = JiraWatermarkTests.snapshot
+
+    def test_terminal_failed_stays_unknown_until_original_readback(self):
+        from workflow import external_sync, station_resources
+        record = jira_watermark.prepare(self.base, "TAP-123", self.snapshot())
+        jira_watermark.complete(self.base, "TAP-123", "failed", self.snapshot("old"))
+        self.task.update(stage="completed", outcome="completed")
+        save_station_task(self.base, self.task)
+        with self.assertRaisesRegex(ValueError, "未知"):
+            station_resources.verify_known_external(self.base, self.task)
+        with self.assertRaises(ValueError):
+            jira_watermark.prepare(self.base, "TAP-123", self.snapshot())
+        result = jira_watermark.complete(self.base, "TAP-123", "unknown", self.snapshot(record["version"]))
+        self.assertEqual(result["outcome"], "verified")
+        station_resources.verify_known_external(self.base, self.task)
+
+    def test_stale_product_does_not_hide_unknown_original_write(self):
+        from workflow import external_sync, station_resources
+        record = jira_watermark.prepare(self.base, "TAP-123", self.snapshot())
+        self.task.update(stage="completed", outcome="completed")
+        save_station_task(self.base, self.task)
+        subprocess.run(["git", "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "commit", "--allow-empty", "-qm", "next"], cwd=self.product, check=True)
+        stale = jira_watermark.complete(self.base, "TAP-123", "unknown", self.snapshot("different"))
+        self.assertEqual(stale["outcome"], "stale")
+        with self.assertRaisesRegex(ValueError, "未知"):
+            station_resources.verify_known_external(self.base, self.task)
+        jira_watermark.complete(self.base, "TAP-123", "unknown", self.snapshot(record["version"]))
+        station_resources.verify_known_external(self.base, self.task)
+        action = next(row for row in external_sync.actions(self.base, self.task)["sync_actions"] if row["id"] == "agenticops_version")
+        self.assertTrue(action["original_target_observed"])
+        self.assertEqual(action["next_action"], "manual_handoff")
+
+
 if __name__ == "__main__":
     unittest.main()

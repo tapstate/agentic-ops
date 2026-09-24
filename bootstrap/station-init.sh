@@ -4,12 +4,12 @@ set -euo pipefail
 install_root="${AGENTIC_OPS_HOME:-$HOME/.agentic-ops}"
 station=""
 agents=()
-project="tapdata"
+project_arguments=()
 reuse_arguments=()
 source_pool=""
 
 usage() {
-  printf '用法：station-init.sh --station <项目工位> [--agent <Agent ID>]... [--project <项目>] [--source-pool <目录>] [--reuse-materials]\n'
+  printf '用法：station-init.sh --station <项目工位> [--agent <Agent ID>]... [--project <项目>] [--source-pool <目录>] [--reuse-materials]\n首次初始化必须指定 --project；已有工位省略时沿用绑定，不允许切换项目。\n'
 }
 
 while [ "$#" -gt 0 ]; do
@@ -26,7 +26,7 @@ while [ "$#" -gt 0 ]; do
       ;;
     --project)
       test "$#" -ge 2 || { usage >&2; exit 2; }
-      project="$2"
+      project_arguments=(--project "$2")
       shift 2
       ;;
     --reuse-materials)
@@ -75,6 +75,11 @@ test -f "$install_root/gate/runner.py" || {
 # shellcheck source=bootstrap/lifecycle-common.sh
 . "$install_root/bootstrap/lifecycle-common.sh"
 lifecycle_acquire_lock "$install_root" "station-init:$station"
+
+# 在登记前只读确认项目，仍保持登记先于生成以支持失败恢复。
+project="$(python3 "$install_root/bootstrap/render.py" \
+  --install-home "$install_root" --station "$station" --resolve-project \
+  ${project_arguments[@]+"${project_arguments[@]}"})"
 
 agent_arguments=()
 for agent_id in ${agents[@]+"${agents[@]}"}; do

@@ -1,22 +1,7 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "name": "codex",
-  "adapter_version": 8,
-  "entrypoint": "adapters/agents/codex/hook.py",
-  "hook": {
-    "standard_event": "before_operation",
-    "tool_kinds": ["shell", "mcp"],
-    "timeout_seconds": 30,
-    "failure_mode": "deny",
-    "native": {
-      "event": "PreToolUse",
-      "tool_matchers": null
-    }
-  },
-  "capabilities": {
-    "decisions": ["allow", "deny"],
-    "ask_fallback": "deny_with_guidance"
-  },
+  "adapter_version": 9,
   "artifacts": [],
   "retired_artifacts": [".codex/hooks.json", ".codex/agenticops-hooks.example.json"],
   "launch": {

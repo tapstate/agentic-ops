@@ -49,7 +49,6 @@
       "covered_operations": [
         "git_commit",
         "git_push",
-        "write_jira_comment",
         "create_pr",
         "update_pr",
         "fix_pr_comments"

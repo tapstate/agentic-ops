@@ -27,12 +27,23 @@ def versions(ctx):
     return {name: repo.get("live_revision") for name, repo in ctx["repositories"].items()}
 
 
-def bindings(ctx):
+def bindings(ctx, repository=None):
     from workflow import quality
     keys = ("repository", "base_branch", "work_branch", "base_sha", "catalog_digest",
             "approved_scope", "verification_method")
     return quality.digest({name: {key: repo.get(key) for key in keys}
-                           for name, repo in ctx["repositories"].items()})
+                           for name, repo in ctx["repositories"].items()
+                           if repository is None or name == repository})
+
+
+def binding(p, ctx):
+    """旧事件缺省全仓；新来源事实只绑定所属仓，不能重解释历史。"""
+    if "binding_version" not in p:
+        return versions(ctx), bindings(ctx)
+    if type(p["binding_version"]) is not int or p["binding_version"] != 2 or p.get("kind") != "source_sync":
+        raise ValueError("验证材料绑定版本无效")
+    repo = p["repository"]
+    return {repo: ctx["repositories"][repo].get("live_revision")}, bindings(ctx, repo)
 
 
 def verify_artifacts(p):
@@ -88,6 +99,7 @@ def validate(p, ctx):
     kind, repo = p.get("kind"), p.get("repository")
     if kind not in KINDS or repo not in ctx["repositories"]:
         raise ValueError("验证种类或任务仓库无效")
+    binding(p, ctx)
     revision = nonempty(p.get("target_revision"), "target_revision")
     if not (quality.exact_commit(revision) or quality.exact_worktree(revision)) or revision != versions(ctx)[repo]:
         raise ValueError("验证材料不是当前任务代码版本")
@@ -173,7 +185,8 @@ def validate(p, ctx):
 
 def record(model, p, ctx):
     validate(p, ctx)
-    value = {"data": copy.deepcopy(p), "versions": versions(ctx), "bindings": bindings(ctx)}
+    revisions, scope = binding(p, ctx)
+    value = {"data": copy.deepcopy(p), "versions": revisions, "bindings": scope}
     if p["kind"] == "ci":
         value["ci_digest"] = ctx["repositories"][p["repository"]].get("ci_digest")
     model.setdefault("verification", {}).setdefault(p["repository"], {})[p["kind"]] = value
@@ -191,7 +204,8 @@ def problems(model, ctx, kinds):
             if not entry:
                 result.append("%s 缺少 %s 验证材料" % (repo, kind))
                 continue
-            if (entry["versions"] != versions(ctx) or entry.get("bindings") != bindings(ctx)
+            revisions, scope = binding(entry["data"], ctx)
+            if (entry["versions"] != revisions or entry.get("bindings") != scope
                     or (kind == "ci" and entry.get("ci_digest") != ctx["repositories"][repo].get("ci_digest"))):
                 result.append("%s 的 %s 材料已失效，重新核对当前版本" % (repo, kind))
                 continue

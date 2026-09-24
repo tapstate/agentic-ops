@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""epoch 5 目录重置、源码成果和恢复边界的真实 Git 回归。"""
+"""版本 6 目录重置、源码成果和恢复边界的真实 Git 回归。"""
 import json
 import io
 import os
@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import test_station_lifecycle as lifecycle
 from workflow import station, station_resources as resources, station_directories as directories, task as task_cli
-from workflow import station_artifacts as artifacts, station_operation as operations, station_archive, task_store
+from workflow import archive_store, station_artifacts as artifacts, station_operation as operations, station_archive, task_store
 
 
 class ResourceTests(unittest.TestCase):
@@ -34,7 +34,7 @@ class ResourceTests(unittest.TestCase):
         return task
 
     def reset_request(self, task):
-        return dict(summary='保存成果并重置', reason='用户取消', decision_ref='fixture:user', confirmed_digest=resources.plan(self.ws, task)['digest'])
+        return dict(cleanup_version=6, abandon_changes=True, summary='保存成果并重置', reason='用户取消', decision_ref='fixture:user', confirmed_digest=resources.plan(self.ws, task)['digest'])
 
     def execute(self, task, request, kind='clean', op='op-resource-reset'):
         return station.execute(self.ws, kind, task['issue_key'], task['run_id'], task['_revision'], op, request)
@@ -195,12 +195,14 @@ class ResourceTests(unittest.TestCase):
             resources.plan(self.ws,task)
         self.assertEqual((self.ws/'source/unknown').read_text(),'keep')
 
-    def test_unknown_ignored_file_blocks(self):
+    def test_ignored_file_requires_preservation_in_confirmed_plan(self):
         task = self.ready()
         (self.repo/'.git/info/exclude').write_text('ignored\n')
         (self.repo/'ignored').write_text('keep')
-        with self.assertRaisesRegex(ValueError,'ignored'):
-            resources.plan(self.ws,task)
+        plan = resources.plan(self.ws,task)
+        entry = next(e for e in plan['entries'] if e['file'] == 'ignored')
+        self.assertEqual(entry['preservation']['action'], 'archive')
+        self.assertEqual((self.repo/'ignored').read_text(), 'keep')
 
     def test_archive_reconstructs_staged_unstaged_binary_new_and_deleted(self):
         task = self.ready()
@@ -209,7 +211,7 @@ class ResourceTests(unittest.TestCase):
         (self.repo/'new.bin').write_bytes(b'\x00\xffhello')
         request = self.reset_request(task)
         self.execute(task,request)
-        archive = self.ws/'archive'/task['issue_key']/task['run_id']
+        archive = archive_store.run_directory(self.ws, task['run_id'])
         value = json.loads((archive/'source-artifacts.json').read_text())
         artifacts.verify_reconstruction(self.repo,value['repositories'][self.name])
         self.assertEqual((self.repo/'file.txt').read_text(),'baseline\n')
@@ -351,10 +353,16 @@ class ResourceTests(unittest.TestCase):
     def test_completed_directory_receipt_rejects_late_content(self):
         task = self.ready()
         request = self.reset_request(task)
-        with mock.patch.object(resources,'neutral',side_effect=OSError('crash')), self.assertRaises(OSError):
+        original = resources.clean
+        def fail(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if kwargs.get('directories_only'):
+                raise OSError('crash')
+            return result
+        with mock.patch.object(resources,'clean',side_effect=fail), self.assertRaises(OSError):
             self.execute(task,request)
         (self.ws/'runtime/late').write_text('keep')
-        with self.assertRaisesRegex(ValueError,'再次出现'):
+        with self.assertRaisesRegex(ValueError,'再次产生'):
             self.execute(task,request)
         self.assertTrue((self.ws/'runtime/late').exists())
 
@@ -386,7 +394,7 @@ class ResourceTests(unittest.TestCase):
         request = self.reset_request(task)
         self.execute(task, request, kind='archive', op='op-logs-archive')
         task = task_store.read_task(self.ws)
-        archive = self.ws/task['archive_ref']['path']
+        archive = archive_store.from_reference(self.ws, task['archive_ref'])
         saved = json.loads((archive/'runtime-evidence.json').read_text())
         self.assertEqual(saved['files']['runtime/logs/build.log']['text'], 'build passed\n')
         (logs/'build.log').write_text('build passed\nstop completed\n')
@@ -407,13 +415,16 @@ class ResourceTests(unittest.TestCase):
         self.assertTrue((reports/'binary').exists())
         self.assertIsNotNone(task_store.read_task(self.ws))
 
-    def test_generated_root_becoming_tracked_is_not_deleted(self):
+    def test_generated_root_becoming_tracked_is_archived_before_reset(self):
         task = self.ready()
         self.register_root(task)
         (self.repo/'target/code').write_text('keep')
         self.git(self.repo, 'add', 'target/code')
-        with self.assertRaisesRegex(ValueError, '跟踪'):
-            resources.plan(self.ws, task)
+        plan = resources.plan(self.ws, task)
+        entry = next(e for e in plan['entries'] if e['file'] == 'target/code')
+        self.assertEqual(entry['preservation']['action'], 'archive')
+        self.assertEqual(entry['action'], 'restore')
+        self.assertFalse(any(e['kind'] == 'source-generated' for e in plan['directories']))
         self.assertTrue((self.repo/'target/code').exists())
 
     def test_existing_directory_requires_same_producer(self):
@@ -466,19 +477,19 @@ class ResourceTests(unittest.TestCase):
         task = task_store.read_task(self.ws)
         resources.register(self.ws,task['issue_key'],task['run_id'],[dict(external,status='cleaned',readback_ref='fixture:removed')],'op-external-archive')
         self.execute(task,self.reset_request(task))
-        receipts = list((self.ws/task['archive_ref']['path']/'receipts').glob('external-terminal-*.json'))
+        receipts = list(archive_store.receipts(self.ws, task['archive_ref']).glob('external-terminal-*.json'))
         self.assertEqual(len(receipts),1)
         result = json.loads(receipts[0].read_text())['resources'][0]
         self.assertEqual(result['status'],'cleaned')
         self.assertEqual(result['readback_ref'],'fixture:removed')
 
-    def test_missing_generated_root_is_explicit_in_plan(self):
+    def test_missing_generated_root_needs_no_legacy_directory_plan(self):
         task = self.ready()
         self.register_root(task)
         (self.repo/'target').rmdir()
         plan = resources.plan(self.ws, task)
-        root = next(e for e in plan['directories'] if e['kind']=='source-generated')
-        self.assertTrue(root['observed_missing_before_intent'])
+        self.assertFalse(any(e['kind']=='source-generated' for e in plan['directories']))
+        self.assertNotIn('target', plan['source'][self.name]['directories'])
         self.execute(task, self.reset_request(task))
         self.assertIsNone(task_store.read_task(self.ws))
 
@@ -497,7 +508,7 @@ class ResourceTests(unittest.TestCase):
     def test_root_idea_exception_rejects_links_files_and_nested_unknowns(self):
         idea = self.ws / '.idea'
         idea.write_text('keep')
-        with self.assertRaisesRegex(ValueError, '普通文件或目录'):
+        with self.assertRaisesRegex(ValueError, '未知材料'):
             resources.verify_station_inventory(self.ws)
         idea.unlink()
         idea.symlink_to(self.root, target_is_directory=True)
@@ -547,8 +558,9 @@ class ResourceTests(unittest.TestCase):
         output = directory / 'source.json'
         station_export.export(self.ws, task['issue_key'], task['run_id'], 'source/' + self.name + '/file.txt', str(output.resolve()))
         plan = resources.plan(self.ws, task)
-        self.write(self.ws / 'archive/fixture/source-artifacts.json', {'repositories': {}})
-        archived_task = dict(task, archive_ref={'path': 'archive/fixture'})
+        archive = self.product / '.archive' / task['run_id']
+        self.write(archive / 'source-artifacts.json', {'repositories': {}})
+        archived_task = dict(task, archive_ref={'scope': 'product', 'run_id': task['run_id'], 'digest': 'a' * 64})
         artifacts.verify_coverage(self.ws, archived_task, plan)
         with output.open('ab') as stream:
             stream.write(b' ')
@@ -563,9 +575,9 @@ class ResourceTests(unittest.TestCase):
         (self.repo/'file.txt').write_text('late content')
         directory = self.root/'exports'; directory.mkdir(mode=0o700)
         result = station_export.export(self.ws,task['issue_key'],task['run_id'],'source/'+self.name+'/file.txt',str((directory/'late.json').resolve()),'op-before-export')
-        self.assertTrue(result['readback_ref'].startswith('archive/'))
+        self.assertTrue(result['readback_ref'].startswith('product-archive:'))
         self.execute(task, self.reset_request(task))
-        self.assertTrue((self.ws/result['readback_ref']).exists())
+        self.assertTrue(list(archive_store.receipts(self.ws, task['archive_ref']).glob('export-*.json')))
 
     def test_late_export_validates_operation_before_any_write(self):
         from workflow import station_export
@@ -575,7 +587,7 @@ class ResourceTests(unittest.TestCase):
         (self.repo/'file.txt').write_text('late content')
         directory = self.root/'exports'; directory.mkdir(mode=0o700)
         output = (directory/'late.json').resolve()
-        receipts = self.ws/task['archive_ref']['path']/'receipts'
+        receipts = archive_store.receipts(self.ws, task['archive_ref'])
         before = set(receipts.iterdir()) if receipts.exists() else set()
         for identifier in (None, 'op-export-wrong'):
             with self.assertRaisesRegex(ValueError, '绑定'):
@@ -630,7 +642,7 @@ class ResourceTests(unittest.TestCase):
                 writes.append(len(json.dumps(value)));return original(path,value)
             started=time.monotonic()
             with mock.patch.object(task_store,'_write_json_atomic',side_effect=record):
-                directories.reset(self.ws,task,entry,{'operation_id':'op-scale-'+str(count)})
+                directories.reset(self.ws,task,entry,{'operation_id':'op-scale-'+str(count), 'cleanup_plan': plan})
             row={'files':count,'plan_seconds':round(plan_seconds,3),'delete_seconds':round(time.monotonic()-started,3),'state_writes':len(writes),'state_bytes':sum(writes),'plan_bytes':len(json.dumps(plan))}
             measures.append(row);print('RESET_PERFORMANCE '+json.dumps(row),flush=True)
         self.assertEqual([r['state_writes'] for r in measures],[2,2,2])

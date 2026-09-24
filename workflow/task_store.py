@@ -15,8 +15,9 @@ import fcntl
 
 ISSUE_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*$")
 LEGACY_RUN_ID_PATTERN = re.compile(r"^run-[a-z0-9][a-z0-9-]*$")
-NEW_RUN_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8}$")
-RUN_ID_PATTERN = re.compile(r"^(?:run-[a-z0-9][a-z0-9-]*|[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8})$")
+CURRENT_RUN_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8}$")
+PREVIOUS_RUN_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8}-[0-9a-f]{8}$")
+RUN_ID_PATTERN = re.compile(r"^(?:run-[a-z0-9][a-z0-9-]*|[A-Z][A-Z0-9_]*-[1-9][0-9]*-[0-9a-f]{8}(?:-[0-9a-f]{8})?)$")
 INTERACTION_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.(?:json|jsonl|log|md|txt))?$")
 _held_locks = threading.local()
 
@@ -49,11 +50,16 @@ def new_run_id(issue_key, seconds=None):
     return "%s-%s" % (validate_issue_key(issue_key), timestamp_hex(seconds))
 
 
-def validate_run_id(issue_key, run_id):
-    issue = validate_issue_key(issue_key)
+def validate_run_id_from_value(run_id):
     if not isinstance(run_id, str) or not RUN_ID_PATTERN.fullmatch(run_id):
         raise ValueError("run_id 格式无效")
-    if NEW_RUN_ID_PATTERN.fullmatch(run_id) and not run_id.startswith(issue + "-"):
+    return run_id
+
+
+def validate_run_id(issue_key, run_id):
+    issue = validate_issue_key(issue_key)
+    validate_run_id_from_value(run_id)
+    if (CURRENT_RUN_ID_PATTERN.fullmatch(run_id) or PREVIOUS_RUN_ID_PATTERN.fullmatch(run_id)) and not run_id.startswith(issue + "-"):
         raise ValueError("run_id 与 Jira issue key 不一致")
     return run_id
 
@@ -96,6 +102,26 @@ def generated_work_branch(base, task):
 def current_path(base):
     return state_path(base) / "current-task.json"
 
+def validate_current(document):
+    """校验既有持久合同，不补字段、不推进阶段，也不访问外部事实。"""
+    from workflow import engineering_baseline, quality_contract
+    try:
+        quality_contract.validate(document, "task-state.schema.json")
+    except ValueError as error:
+        raise ValueError("工位状态结构无效：%s" % error) from error
+    current = document["current"]
+    if current is None:
+        return document
+    if validate_issue_key(current["issue_key"]) != current["issue_key"]:
+        raise ValueError("当前任务身份无效")
+    validate_run_id(current["issue_key"], current["run_id"])
+    baseline = current["engineering_baseline"]
+    if baseline["status"] == "frozen":
+        engineering_baseline.validate_task_repositories(baseline, current["task_repositories"])
+    elif current["task_repositories"]:
+        raise ValueError("任务仓库必须引用冻结工程基线")
+    return document
+
 def read_current(base):
     path = current_path(base)
     if state_path(base).is_symlink():
@@ -108,21 +134,7 @@ def read_current(base):
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         raise ValueError("当前工位状态缺失或无法读取") from error
-    if (not isinstance(document, dict)
-            or set(document) != {"schema_version", "revision", "current"}
-            or document["schema_version"] != 1
-            or type(document["revision"]) is not int or document["revision"] < 0):
-        raise ValueError("工位状态结构无效")
-    current = document["current"]
-    if current is not None and (not isinstance(current, dict)
-            or validate_issue_key(current.get("issue_key")) != current.get("issue_key")):
-        raise ValueError("当前任务身份无效")
-    if current is not None:
-        try:
-            validate_run_id(current["issue_key"], current.get("run_id"))
-        except ValueError as error:
-            raise ValueError("当前任务身份无效") from error
-    return document
+    return validate_current(document)
 
 def initialize_current(base):
     if current_path(base).exists():
@@ -135,9 +147,10 @@ def initialize_current(base):
 
 def compare_and_set(base, expected_revision, current):
     before = read_current(base)
-    if before["revision"] != expected_revision:
+    if type(expected_revision) is not int or before["revision"] != expected_revision:
         raise ValueError("工位 revision 已变化：expected=%s actual=%s；请读取 task.py status，不使用质量日志 revision" % (expected_revision, before["revision"]))
     value = {"schema_version": 1, "revision": expected_revision + 1, "current": copy.deepcopy(current)}
+    validate_current(value)
     _write_json_atomic(current_path(base), value)
     return value
 
@@ -159,6 +172,8 @@ def read_task(base, issue_key=None):
         entry = entries[name]
         observation = binding.get("observation") or {}
         results = observation.get("results", {})
+        if not isinstance(results, dict):
+            raise ValueError("任务仓库 observation.results 必须是对象")
         from workflow.project_rules import canonical_repository_endpoint
         repositories.append({
             "repository": name, "authorized_endpoint": canonical_repository_endpoint(entry["origin"]),
@@ -300,12 +315,18 @@ def _require_station_epoch_supported(base, product_root):
         init = json.loads(init_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError("工位状态代际无法核验：%s" % error) from error
+    if (
+        not isinstance(manifest, dict)
+        or not isinstance(init, dict)
+        or set(manifest) != {"station_state_epoch"}
+    ):
+        raise ValueError("工位状态兼容性清单或代际标记无效")
     product_epoch = manifest.get("station_state_epoch")
     epoch = init.get("station_state_epoch")
     if (
-        not isinstance(product_epoch, int)
+        type(product_epoch) is not int
         or product_epoch < 1
-        or not isinstance(epoch, int)
+        or type(epoch) is not int
         or epoch < 1
     ):
         raise ValueError("工位状态兼容性清单或代际标记无效")

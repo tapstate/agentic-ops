@@ -36,6 +36,7 @@ Agent 应回报以下可核验结果：
 - 安装目录已安装在 `~/.agentic-ops`；
 - 当前 cwd 已初始化为 `tapdata` 工位，包含生成的 `./agenticops` 与 `.agenticops/station.json`；
 - `./agenticops station doctor` 已通过；
-- 工位配置、完整独立源码、唯一运行现场和档案分别位于 config/source/runtime/archive；源码池由产品根自动管理，仅加速接管时的独立源码下载。
+- 工位配置、完整独立源码和唯一运行现场分别位于 config/source/runtime；正式档案位于 Product Root `.archive/<run-id>`。源码池由产品根自动管理，仅加速接管时的独立源码下载。
+- 业务工位必须从安装目录初始化；产品源码目录会随维护分支和提交变化，公开入口拒绝将其绑定为业务工位 Product Root。候选版本接管测试先安装到隔离目录，再从该快照创建工位。
 
 安装和初始化结束后，先结束这次从空目录启动的 Agent 会话，再从该工位重新启动 Agent：`./agenticops station start codex` 或 `./agenticops station start claude`。这样 Agent 才会在启动时加载当前项目指引。新工位不生成通用 Hook；旧接线迁移按[常见问题](faq.md)显式处理。随后才按[首次使用指引](../usage-guide.md)接管具体 Jira 任务。

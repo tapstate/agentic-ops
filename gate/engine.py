@@ -56,17 +56,15 @@ def _active_task_directories(root):
 
 
 def current_task(state):
-    """只读当前工位信封；不解释或迁移旧任务。"""
+    """上下文复用 Workflow 的只读状态入口，不推进或迁移任务。"""
+    from workflow import task_store
     state = Path(state)
-    if (state / "tasks").exists() or (state / "worktrees").exists():
+    if state.name != ".agenticops":
         return None
-    envelope = _read_json(state / "current-task.json")
-    if (not isinstance(envelope, dict) or envelope.get("schema_version") != 1
-            or type(envelope.get("revision")) is not int or envelope["revision"] < 0
-            or (state / "current-task.json").is_symlink()):
+    try:
+        return task_store.read_current(state.parent)["current"]
+    except (OSError, ValueError):
         return None
-    task = envelope.get("current")
-    return task if isinstance(task, dict) and task.get("issue_key") and task.get("run_id") else None
 
 
 def _repositories_match(document, context):

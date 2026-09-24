@@ -4,7 +4,7 @@
 
 ## Agent 文件系统权限
 
-完整源码在工位 source 中，每仓有独立 Git 元数据；config/runtime/archive 分开。工位是平台文件系统授权边界，状态操作仍绑定 issue/run。
+完整源码在工位 source 中，每仓有独立 Git 元数据；config/runtime 分开，正式档案在 Product Root `.archive/`。工位是平台文件系统授权边界，状态操作仍绑定 issue/run；归档发布是退出操作明确授权的 Product Root 写入。
 
 - `repository context --issue-key <issue-key> --json` 在源码分析、实现或恢复前校验当前 run 的租约、规范路径、分支、`base_sha` 和目录摘要；失败时停止任务依赖步骤。
 - 当前会话执行 Git/PR 工具前，用 `repository context` 核对当前 source 仓库，按用户授权操作；AgenticOps 不在这些原生调用前再次判定。

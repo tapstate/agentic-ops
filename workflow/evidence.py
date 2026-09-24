@@ -241,7 +241,7 @@ def main():
         rules = quality.config(args.dir, task)
         if flexible and not quality.enabled(task, rules):
             raise ValueError("当前任务启用了质量处置，但缺少匹配的质量配置")
-        quality_report = (quality.report(quality.load(args.dir, task), rules, quality.context(args.dir, task))
+        quality_report = (quality.report(quality.load(args.dir, task), rules, quality.context(args.dir, task), base=args.dir, task=task)
                           if quality.enabled(task, rules) else None)
         from workflow import external_sync
         summary = build_summary(task, auth, events, ci_states, spec,

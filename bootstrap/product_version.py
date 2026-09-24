@@ -24,12 +24,13 @@ def _git(root, *arguments):
     return result.stdout.strip()
 
 
-def describe(product_root):
-    """返回干净 Git Product Root 的版本；脏工作树不能作为接管水印。"""
+def describe(product_root, allow_dirty=False):
+    """默认要求干净产品；诊断可显示带 dirty 后缀的版本，接管水印保持严格。"""
     root = Path(product_root).resolve()
     if not root.is_dir():
         raise ValueError("Product Root 不存在：%s" % root)
-    if _git(root, "status", "--porcelain"):
+    dirty = bool(_git(root, "status", "--porcelain"))
+    if dirty and not allow_dirty:
         raise ValueError("Product Root 存在未提交改动，不能作为可追溯接管版本")
     branch = _git(root, "branch", "--show-current") or "detached"
     commit = _git(root, "rev-parse", "--short=8", "HEAD")
@@ -39,15 +40,16 @@ def describe(product_root):
     except ValueError:
         tag = "untagged"
         count = _git(root, "rev-list", "--count", "HEAD")
-    return "%s-%s-%s-%s" % (branch, tag, count, commit)
+    return "%s-%s-%s-%s%s" % (branch, tag, count, commit, "-dirty" if dirty else "")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--product-root", default=Path(__file__).resolve().parent.parent)
+    parser.add_argument("--allow-dirty", action="store_true", help="显示未提交修改的版本，并附加 -dirty")
     args = parser.parse_args()
     try:
-        print(describe(args.product_root))
+        print(describe(args.product_root, allow_dirty=args.allow_dirty))
         return 0
     except ValueError as error:
         parser.error(str(error))

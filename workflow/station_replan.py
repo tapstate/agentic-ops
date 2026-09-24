@@ -155,7 +155,7 @@ def apply(base, issue, run_id, revision, operation_id, prepared, decision_ref):
         _, _, catalog = project(base)
         if baseline.digest(catalog) != prepared["catalog_digest"]:
             raise ValueError("项目仓库配置已变化")
-        from workflow.task import revoke_authorization
+        from workflow.authorization import revoke_authorization
         operations.intent(base, operation, "revoke", {}, {"reason": "task_replan"})
         revoke_authorization(base, issue, "task_replan")
         operations.receipt(base, operation, "revoke", {"revoked": True})
@@ -249,7 +249,7 @@ def abort(base, issue, run_id, operation_id, decision_ref):
         step = operation["steps"].get("current")
         if step and raw(task) == step["expected"]:
             raise ValueError("新方案已写入，须恢复 apply 完成回执，不得倒退")
-        from workflow.task import revoke_authorization
+        from workflow.authorization import revoke_authorization
         revoke_authorization(base, issue, "task_replan")
         operation["aborting"] = True
         operation["abort_decision_ref"] = decision_ref

@@ -71,3 +71,18 @@ lifecycle_require_recorded_remote() {
     return 2
   }
 }
+
+# 安装范围随目标版本选择；不安装维护 Skill，也不修改工位状态。
+lifecycle_refresh_install_scope() {
+  local scope_root="$1" scope_ref="$2" scope_entry
+  local scope_paths=(adapters bootstrap contracts gate policies projects workflow)
+  git -C "$scope_root" cat-file -e "${scope_ref}^{commit}" || return 2
+  scope_entry="$(git -C "$scope_root" ls-tree "$scope_ref" -- skills/shared)" || return 2
+  if [ -n "$scope_entry" ]; then
+    case "$scope_entry" in
+      '040000 tree '*) scope_paths+=(skills/shared) ;;
+      *) printf 'AgenticOps：目标共享 Skill 根不是目录，拒绝切换\n' >&2; return 2 ;;
+    esac
+  fi
+  git -C "$scope_root" sparse-checkout set "${scope_paths[@]}"
+}

@@ -37,6 +37,11 @@
       "kind": "product_state"
     },
     {
+      "path": ".archive",
+      "gitignore_pattern": ".archive/",
+      "kind": "archive"
+    },
+    {
       "path": ".superpowers",
       "gitignore_pattern": ".superpowers/",
       "kind": "tool"

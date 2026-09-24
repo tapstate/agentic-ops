@@ -332,7 +332,7 @@ def check_admission_documents(base):
 
 
 def check_station_binding_snapshot(base):
-    from workflow import jira_collect, native_cleanup, repair_strategy, station, station_clean_rules, station_replan
+    from workflow import jira_collect, repair_strategy, station, station_clean_rules, station_replan
     area = base.resolve() / "binding-snapshot"
     products = [area / "product-a", area / "product-b"]
     for root in products:
@@ -365,7 +365,6 @@ def check_station_binding_snapshot(base):
         ("Jira 采集", lambda: jira_collect.config(bound, task)[0]["snapshot_marker"], "product-a/alpha"),
         ("返工项目", lambda: station_replan.project(bound)[1], project),
         ("工位项目", lambda: station._project(bound), project),
-        ("原生清理", lambda: native_cleanup.configuration(bound)[0], products[0]),
         ("清理规则", lambda: bool(station_clean_rules.load(bound)["layers"]), True),
         ("修复策略", lambda: repair_strategy.resolve(bound, task)["available"], True),
     )
@@ -399,7 +398,7 @@ def main():
             "schema_version": 4, "station_id": "a" * 32, "product_root": str(ROOT), "source_pool": str(ws / "pool"),
             "project": "tapdata", "agents": ["codex"]})
         task_store._write_json_atomic(ws / ".agenticops/init.json", {
-            "station_state_epoch": 16})
+            "station_state_epoch": json.loads((ROOT / "contracts/station-state-compatibility.json").read_text())["station_state_epoch"]})
         state = {"issue_key": "TAP-123", "run_id": "run-workflow-test", "task_class": "defect_fix",
             "stage": "task_intake", "facts": {"acceptance_criteria": "fixture",
             "target_repo": "tapdata/tapdata", "verification_method": "fixture"},
@@ -494,10 +493,9 @@ def main():
         profile = json.loads((ROOT / "projects" / "tapdata" / "profile.json").read_text(encoding="utf-8"))
         repositories = json.loads((ROOT / "projects" / "tapdata" / "repositories.json").read_text(encoding="utf-8"))
         check("仓库目录基线分支含 common-lib=develop", repositories["repositories"]["tapdata/tapdata-common-lib"]["baseline_branch"], "develop")
-        waiting_takeover_statuses = sorted(
-            status for status, stage in profile["statuses"].items() if stage == "waiting_takeover"
-        )
-        check("TapData 仅 Analyzed 映射 waiting_takeover", waiting_takeover_statuses, ["Analyzed"])
+        check("Profile 不保留未消费的顶层状态映射", "statuses" in profile, False)
+        check("Profile 不保留未消费的顶层转换", "transitions" in profile, False)
+        check("TapData 接管同步从 Analyzed 开始", profile["jira"]["status_sync"]["attempts"]["takeover"]["from"], ["Analyzed"])
         check("TapData 接管水印只覆盖 Bug/Task/Story", sorted(profile["jira"]["takeover_watermark"]["issue_type_ids"]), ["10008", "10010", "10011"])
         check("TapData 接管水印配置通过加载校验", project_rules.validate_takeover_watermark(profile)["field_id"], "customfield_10421")
         task_workflow = project_rules.resolve_issue_type_workflow(
@@ -540,7 +538,6 @@ def main():
             "project_rules.py", "workflow", "--project", "tapdata", "--issue-type-id", "10008", "--issue-type-name", "Bug", cwd=ROOT
         )
         check("不一致的 Jira 事务类型 ID/名称失败关闭", code, 2)
-        check("profile transition 291 标记禁止", profile["transitions"]["pr_approved"]["agent_forbidden"], True)
         check("admission 三张表就位", sorted(p.name for p in (ROOT / "projects/tapdata/admission").glob("*.md")), ["defect-fix.md", "feature-change.md", "technical-task.md"])
         check("runbook 已就位", len(list((ROOT / "projects/tapdata/runbooks").glob("*.md"))) >= 2, True)
         check("profile 只引用统一仓库目录", profile["repositories"]["catalog"], "repositories.json")

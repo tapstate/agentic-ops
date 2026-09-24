@@ -116,6 +116,8 @@ class JiraStatusTests(unittest.TestCase):
         self.assertEqual(jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)["reason"], "transition_unavailable")
 
     def test_takeover_prepares_once_and_readback_completes(self):
+        current = task_store.current_path(self.base)
+        before = current.read_bytes()
         first = jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot())
         self.assertEqual(first["outcome"], "ready")
         self.assertEqual(first["transition_id"], "421")
@@ -124,6 +126,24 @@ class JiraStatusTests(unittest.TestCase):
         readback = self.snapshot(status="In Progress")
         done = jira_status.complete(self.base, "TAP-123", "takeover", "unknown", readback, "")
         self.assertEqual(done["outcome"], "succeeded")
+        self.assertEqual(current.read_bytes(), before)
+
+    def test_jira_done_does_not_complete_local_task(self):
+        current = task_store.current_path(self.base)
+        before = current.read_bytes()
+        result = jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot(status="Done"))
+        self.assertEqual(result["reason"], "jira_status_mismatch")
+        self.assertEqual(current.read_bytes(), before)
+
+    def test_native_pr_approved_hands_off_without_write_intent(self):
+        snapshot = self.snapshot(status="Pull Request Submitted")
+        snapshot["transitions"] = [{"id": "291", "name": "PR Approved", "to": {"name": "Merged"}, "fields": {}}]
+        before = {str(p): p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()}
+        result = jira_status.prepare(self.base, "TAP-123", "native:291", snapshot)
+        self.assertEqual(result["outcome"], "handoff")
+        self.assertEqual(result["reason"], "human_only_transition")
+        after = {str(p): p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()}
+        self.assertEqual(after, before)
 
     def test_takeover_accepts_configured_chinese_target_status(self):
         snapshot = self.snapshot()
@@ -481,6 +501,43 @@ class JiraStatusTests(unittest.TestCase):
         state["history"][0]["head"] = "0" * 40
         with mock.patch.object(pr_ready.ci, "current_states", return_value=[state]):
             self.assertTrue(any("Head" in item for item in pr_ready.ci_problems(self.base, task)))
+
+
+class TerminalStatusTests(unittest.TestCase):
+    setUp = JiraStatusTests.setUp
+    snapshot = JiraStatusTests.snapshot
+
+    def prepare(self):
+        # 本组只验证恢复边界；表单采集由原有 collect 回归覆盖。
+        with mock.patch("workflow.jira_collect.collect", return_value={"pending": [], "unknown": []}):
+            return jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot(), "op-original-takeover")
+
+    def test_completed_original_transition_can_read_back_not_prepare(self):
+        from workflow import external_sync, station_resources
+        operation_id = "op-original-takeover"
+        record = self.prepare()
+        jira_status.complete(self.base, "TAP-123", "takeover", "failed", self.snapshot(), "timeout", operation_id)
+        self.task.update(stage="completed", outcome="completed")
+        save_station_task(self.base, self.task)
+        with self.assertRaisesRegex(ValueError, "未知"):
+            station_resources.verify_known_external(self.base, self.task)
+        with self.assertRaises(ValueError):
+            jira_status.prepare(self.base, "TAP-123", "takeover", self.snapshot(), "op-new-takeover")
+        before = (self.base / ".agenticops/current-task.json").read_bytes()
+        done = jira_status.complete(self.base, "TAP-123", "takeover", "unknown", self.snapshot("In Progress"), "", operation_id)
+        self.assertEqual(done["outcome"], "succeeded")
+        self.assertEqual(done["operation_id"], record["operation_id"])
+        self.assertEqual(before, (self.base / ".agenticops/current-task.json").read_bytes())
+        station_resources.verify_known_external(self.base, self.task)
+
+    def test_defect_takeover_recovery_window_and_explicit_not_written(self):
+        for stage in ("design_review", "implementation"):
+            self.task["stage"] = stage
+            save_station_task(self.base, self.task)
+            record = self.prepare()
+            self.assertEqual(record["outcome"], "ready")
+        with self.assertRaisesRegex(ValueError, "未写入"):
+            jira_status.complete(self.base, "TAP-123", "takeover", "not_written", self.snapshot(), "", "op-original-takeover")
 
 
 if __name__ == "__main__":

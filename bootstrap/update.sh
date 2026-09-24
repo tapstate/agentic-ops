@@ -69,6 +69,9 @@ if [ "$mode" = "installed" ] && [ "$ahead" -gt 0 ]; then
   printf 'AgenticOps：安装目录领先 origin/%s，远端历史可能已变化，拒绝更新\n' "$branch" >&2
   exit 2
 fi
+if [ "$mode" = "installed" ]; then
+  lifecycle_refresh_install_scope "$product_root" "$target_ref"
+fi
 if [ "$behind" -gt 0 ]; then
   git -C "$product_root" merge --ff-only "$target_ref"
 fi
@@ -96,7 +99,7 @@ if [ "$mode" = "source" ]; then
     printf 'AgenticOps：源码已更新到 %s，但维护 Skill 接线失败；修复后重新执行 update\n' "$updated_ref" >&2
     exit 2
   fi
-else
+elif [ "$updated_ref" != "$current_ref" ]; then
   python3 "$state_tool" --product-root "$product_root" update-ref \
     --current-ref "$updated_ref" --previous-ref "$current_ref"
 fi

@@ -374,7 +374,7 @@ def command_detach(args, product_root, purge=False):
     details = {}
     for station in targets:
         _, task_count = detach_preflight(product_root, station, purge=purge)
-        details[str(station)] = "空闲工位：只移除接线和绑定；保留 source/config/archive"
+        details[str(station)] = "空闲工位：只移除接线和绑定；保留 source/config、旧工位 archive（若有）及 Product Root .archive"
     show_targets("purge" if purge else "detach", targets, details)
     confirm(args)
     for station in targets:

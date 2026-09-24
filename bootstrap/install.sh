@@ -69,7 +69,16 @@ fi
 git clone --filter=blob:none --no-checkout --branch "$branch" --single-branch \
   "$repository" "$install_root"
 git -C "$install_root" sparse-checkout init --cone
-git -C "$install_root" sparse-checkout set adapters bootstrap contracts gate policies projects workflow
+# 此脚本支持通过 stdin 单独执行，不能依赖调用者目录中的辅助文件。
+install_paths=(adapters bootstrap contracts gate policies projects workflow)
+shared_entry="$(git -C "$install_root" ls-tree HEAD -- skills/shared)"
+if [ -n "$shared_entry" ]; then
+  case "$shared_entry" in
+    '040000 tree '*) install_paths+=(skills/shared) ;;
+    *) printf 'AgenticOps：目标共享 Skill 根不是目录，拒绝安装\n' >&2; exit 2 ;;
+  esac
+fi
+git -C "$install_root" sparse-checkout set "${install_paths[@]}"
 git -C "$install_root" checkout "$branch"
 
 current_ref="$(git -C "$install_root" rev-parse HEAD)"

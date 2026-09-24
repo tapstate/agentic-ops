@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """AO-126：质量决策、恢复及证据隔离的可执行验收；不写外部 Jira。"""
 import copy
+import contextlib
+import io
 import json
 import multiprocessing
 import os
@@ -19,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from workflow import authorization, ci, evidence, failures, issue_versions, pr_ready, quality, quality_contract, task, task_store
 from station_fixture import save_task as save_station_task, initialize_station
+from workflow import pr_body
 
 
 def proof():
@@ -98,7 +101,7 @@ class QualityTests(unittest.TestCase):
         save_station_task(self.base, self.task)
 
     def view(self):
-        return quality.report(quality.load(self.base, self.task), quality.config(self.base, self.task), quality.context(self.base, self.task))
+        return quality.report(quality.load(self.base, self.task), quality.config(self.base, self.task), quality.context(self.base, self.task), base=self.base, task=self.task)
 
     def feature_profile(self):
         """仅在夹具配置功能；生产功能准入与 Jira 接入由 AO-142 交付。"""
@@ -128,6 +131,98 @@ class QualityTests(unittest.TestCase):
                         work_branch="feature/TAP-123", base_sha="a" * 40, verification_method="模块测试",
                         approved_scope="目标功能模块")
         self.save_task()
+
+    def future_environment(self, version=2):
+        self.feature_profile()
+        rules = json.loads(self.profile_path.read_text())
+        review = json.loads((ROOT / 'projects/tapdata/quality-feature.json').read_text())['plan_contract']['review']
+        review.pop('environment_version', None)
+        if version is not None:
+            review['environment_version'] = version
+        rules['plan_contract']['review'] = review
+        self.profile_path.write_text(json.dumps(rules))
+        plan = self.task['facts']['implementation_plan']
+        plan.update(feature_review(self.task['facts']['acceptance_criteria'], 'tapdata/tapdata', '目标模块', 'case-a'))
+        row = plan['environment_readiness']['checks'][0]
+        row.update(result='missing', required_for='verification', item_ids=['case-a'],
+                   detail='仅验收需要，研发负责在首轮执行前准备隔离服务；实现不依赖它')
+        self.save_task()
+        return row
+
+    def test_future_environment_allows_implementation_not_unexecuted_acceptance(self):
+        row = self.future_environment()
+        self.select(); self.checkpoint('q1-intake'); self.checkpoint('q2-plan')
+        original = quality.q2_digest(self.base, self.task)
+        args = SimpleNamespace(dir=self.base, issue_key='TAP-123', expected_run_id=self.task['run_id'],
+                               agent_id='fixture', plan_version='v1', ttl_hours=8)
+        self.assertEqual(0, authorization.cmd_grant(args))
+        self.assertEqual([], task._check_advance(self.task, 'implementation', self.base, task.admission(self.base)))
+        with self.assertRaisesRegex(ValueError, '执行证据'):
+            self.automatic_checkpoint()
+        with self.assertRaises(ValueError):
+            self.checkpoint('q4-acceptance')
+        self.execute(result='NOT_RUN')
+        with self.assertRaisesRegex(ValueError, 'NOT_RUN'):
+            self.automatic_checkpoint()
+        self.execute(execution_id='run-2')
+        self.automatic_checkpoint()
+        self.decide(evidence_id='run-2'); self.checkpoint('q4-acceptance')
+        self.assertEqual('missing', row['result'])
+        self.assertEqual(original, quality.q2_digest(self.base, self.task))
+        row['required_for'] = 'implementation'
+        row.pop('item_ids'); self.save_task()
+        with self.assertRaises(ValueError):
+            quality.q2_digest(self.base, self.task)
+        self.assertTrue(task._check_advance(self.task, 'implementation', self.base, task.admission(self.base)))
+
+    def test_future_environment_rejects_ambiguous_invalid_and_unselected_dependencies(self):
+        row = self.future_environment()
+        original = copy.deepcopy(row)
+        self.assertTrue(any('尚未选择' in e for e in self.view()['checkpoints']['q2-plan']['problems']))
+        self.select()
+        cases = ({'required_for': 'unknown'}, {'required_for': None}, {'item_ids': []},
+                 {'item_ids': ['absent']}, {'item_ids': ['case-a', 'case-a']}, {'item_ids': [None]},
+                 {'required_for': 'implementation'}, {'result': 'unknown'})
+        for change in cases:
+            with self.subTest(change=change):
+                row.clear(); row.update(original); row.update(change); self.save_task()
+                self.assertTrue(self.view()['checkpoints']['q2-plan']['problems'])
+        row.clear(); row.update(original); row.pop('required_for'); row.pop('item_ids'); self.save_task()
+        self.assertTrue(any('环境缺项' in e for e in self.view()['checkpoints']['q2-plan']['problems']))
+        row.clear(); row.update(original)
+        self.task['facts']['implementation_plan']['environment_readiness']['blocking_inputs'] = ['运行权限尚未确认']
+        self.save_task()
+        self.assertTrue(any('待研发决定' in e for e in self.view()['checkpoints']['q2-plan']['problems']))
+        self.task['facts']['implementation_plan']['environment_readiness']['blocking_inputs'] = []
+        self.save_task()
+        from workflow import plan_review
+        rules, ctx = quality.config(self.base, self.task), quality.context(self.base, self.task)
+        model = quality.replay(quality.load(self.base, self.task))
+        for change in ({'checkpoint': 'q2-plan'}, {'checkpoint': 'absent'}, {'timing': 'before_fix'}):
+            modified = copy.deepcopy(model); modified['items']['case-a']['plan'].update(change)
+            self.assertTrue(plan_review.problems(self.task['facts']['implementation_plan'],
+                rules['plan_contract']['review'], ctx, modified, rules))
+
+    def test_environment_contract_preserves_legacy_replay_and_rejects_unknown_versions(self):
+        row = self.future_environment(version=None)
+        self.select(); self.checkpoint('q1-intake')
+        with self.assertRaisesRegex(ValueError, '环境缺项'):
+            self.checkpoint('q2-plan')
+        row['result'] = 'ready'; self.save_task(); self.checkpoint('q2-plan')
+        state = quality.load(self.base, self.task)
+        original = copy.deepcopy(state)
+        expected = quality.replay(state)
+        rules = json.loads(self.profile_path.read_text())
+        for version in (0, 3, '2', True):
+            rules['plan_contract']['review']['environment_version'] = version
+            self.profile_path.write_text(json.dumps(rules))
+            with self.assertRaisesRegex(ValueError, '契约版本'):
+                quality.config(self.base, self.task)
+        rules['plan_contract']['review']['environment_version'] = 2
+        self.profile_path.write_text(json.dumps(rules))
+        self.assertEqual(expected, quality.replay(state))
+        self.assertEqual(original, state)
+        self.assertFalse(self.view()['checkpoints']['q2-plan']['reviewed'])
 
     def test_grant_rejects_invalid_expiry_without_overwriting_authorization(self):
         self.feature_profile()
@@ -400,51 +495,64 @@ class QualityTests(unittest.TestCase):
         malformed['acceptance_mapping'][0]['repository'] = []
         self.assertTrue(plan_review.problems(malformed, spec, ctx, model))
         # 独立 Git 夹具提供可解析同类源码；不预设必须修改引擎或 sql-core。
-        repo = self.base / 'reference-repo'; repo.mkdir()
+        repo = self.base / 'source/tapdata/tapdata'; repo.mkdir(parents=True)
         def git(*args):
             return subprocess.check_output(['git', '-C', str(repo), *args], stderr=subprocess.DEVNULL, text=True).strip()
         git('init'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.com')
+        git('remote', 'add', 'origin', 'https://github.com/tapdata/tapdata')
         (repo / 'mysql.py').write_text('def tables(): return []')
         git('add', '.'); git('commit', '-m', 'fixture reference')
-        ctx['repositories']['tapdata/tapdata']['source_path'] = str(repo)
         ctx['facts']['acceptance_criteria'] = '发现视图'
         plan = feature_review('发现视图', 'tapdata/tapdata', 'mysql', 'view-case')
         plan['reference_implementations'] = [{'status': 'found', 'repository': 'tapdata/tapdata',
             'path': 'mysql.py', 'source_revision': git('rev-parse', 'HEAD'), 'difference': '补充视图类型'}]
+        runtime_task = {'facts': {'implementation_plan': plan},
+                        'repositories': [{'repository': 'tapdata/tapdata', 'worktree': {'status': 'prepared'}}],
+                        'engineering_baseline': {'repositories': {'tapdata/tapdata': {'origin': 'https://github.com/tapdata/tapdata'}}}}
+        rules = {'selection_checkpoint': 'q2-plan', 'plan_contract': {'fact_key': 'implementation_plan', 'review': spec}}
         self.assertEqual([], plan_review.problems(plan, spec, ctx, model))
         with mock.patch.dict(os.environ, {'GIT_DIR': '/missing/foreign.git', 'GIT_WORK_TREE': '/missing', 'GIT_CONFIG_COUNT': 'invalid'}):
             self.assertEqual([], plan_review.problems(plan, spec, ctx, model))
+            self.assertEqual([], plan_review.source_issues(self.base, runtime_task, rules))
         plan['reference_implementations'][0]['path'] = 'missing.py'
-        self.assertTrue(any('不能解析' in p for p in plan_review.problems(plan, spec, ctx, model)))
+        self.assertEqual([], plan_review.problems(plan, spec, ctx, model))
+        self.assertTrue(any('不能解析' in p['message'] for p in plan_review.source_issues(self.base, runtime_task, rules)))
 
     def test_plan_references_support_both_git_object_formats(self):
         from workflow import plan_review
         declaration = json.loads((ROOT / 'projects/tapdata/quality-feature.json').read_text())['plan_contract']['review']
         for object_format, length in (('sha1', 40), ('sha256', 64)):
             with self.subTest(object_format=object_format):
-                repo = self.base / ('references-' + object_format); repo.mkdir()
+                name = 'owner/references-' + object_format
+                repo = self.base / 'source' / name; repo.mkdir(parents=True)
                 def git(*args):
                     return subprocess.check_output(['git', '-C', str(repo), *args], stderr=subprocess.DEVNULL, text=True).strip()
                 git('init', '--object-format=' + object_format)
+                git('remote', 'add', 'origin', 'https://github.com/' + name)
                 git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.invalid')
                 (repo / 'module.py').write_text('value = 1\n')
                 git('add', '.'); git('commit', '-qm', 'reference')
                 revision = git('rev-parse', 'HEAD')
                 self.assertEqual(length, len(revision))
-                plan = feature_review('行为正确', 'owner/repo', 'module', 'case')
-                reference = {'status': 'found', 'repository': 'owner/repo', 'path': 'module.py',
+                plan = feature_review('行为正确', name, 'module', 'case')
+                reference = {'status': 'found', 'repository': name, 'path': 'module.py',
                              'source_revision': revision, 'difference': 'fixture'}
                 plan['reference_implementations'] = [reference]
                 ctx = {'facts': {'acceptance_criteria': '行为正确'},
-                       'repositories': {'owner/repo': {'source_path': str(repo)}}}
-                model = {'items': {'case': {'plan': {'timing': 'after_fix', 'repository': 'owner/repo'}}}}
+                       'repositories': {name: {}}}
+                model = {'items': {'case': {'plan': {'timing': 'after_fix', 'repository': name}}}}
+                runtime_task = {'facts': {'implementation_plan': plan},
+                                'repositories': [{'repository': name, 'worktree': {'status': 'prepared'}}],
+                                'engineering_baseline': {'repositories': {name: {'origin': 'https://github.com/' + name}}}}
+                rules = {'selection_checkpoint': 'q2-plan', 'plan_contract': {'fact_key': 'implementation_plan', 'review': declaration}}
                 self.assertEqual([], plan_review.problems(plan, declaration, ctx, model))
+                self.assertEqual([], plan_review.source_issues(self.base, runtime_task, rules))
                 for invalid in (revision[:12], 'g' * length, revision + '^', '0' * length):
                     reference['source_revision'] = invalid
-                    self.assertTrue(plan_review.problems(plan, declaration, ctx, model), invalid)
+                    self.assertTrue(plan_review.source_issues(self.base, runtime_task, rules), invalid)
                 reference['source_revision'] = revision
                 reference['path'] = 'missing.py'
-                self.assertTrue(plan_review.problems(plan, declaration, ctx, model))
+                self.assertTrue(plan_review.source_issues(self.base, runtime_task, rules))
 
     def test_review_packet_combines_q2_and_jira_without_writing(self):
         self.feature_profile()
@@ -1199,7 +1307,7 @@ class QualityTests(unittest.TestCase):
     def test_archive_freezes_quality_ci_authorization_and_jira_writes(self):
         from workflow import jira_status, jira_watermark
         checks = ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata")
-        self.task["archive_ref"] = {"path": "archive/TAP-123/" + self.task["run_id"], "digest": "a" * 64}
+        self.task["archive_ref"] = {"scope": "product", "run_id": self.task["run_id"], "digest": "a" * 64}
         self.save_task()
         before = {p: p.read_bytes() for p in (self.base / ".agenticops").rglob("*") if p.is_file()}
         actions = [
@@ -1706,6 +1814,183 @@ class QualityTests(unittest.TestCase):
         events = task_store.events_path(self.base, "TAP-123"); events.write_text('{bad\n')
         with self.assertRaises(ValueError): evidence.load_events(events)
 
+    def reference_feature(self):
+        """真实规范目录 + found 引用；不以 mock 代替源码引用核验。"""
+        self.feature_profile()
+        name = 'tapdata/tapdata'
+        repo = self.base / 'source' / name
+        repo.mkdir(parents=True)
+        def git(*args):
+            return subprocess.check_output(['git', '-C', str(repo), *args], stderr=subprocess.DEVNULL, text=True).strip()
+        git('init'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.invalid')
+        git('remote', 'add', 'origin', 'https://github.com/' + name)
+        (repo / 'module.py').write_text('value = 1\n')
+        git('add', '.'); git('commit', '-qm', 'fixture')
+        sha = git('rev-parse', 'HEAD')
+        self.task['repositories'][0]['worktree'] = {'status': 'prepared', 'path': str(repo)}
+        plan = self.task['facts']['implementation_plan']
+        plan.update(feature_review(self.task['facts']['acceptance_criteria'], name, 'module', 'case-a'))
+        plan['reference_implementations'] = [{'status': 'found', 'repository': name,
+            'path': 'module.py', 'source_revision': sha, 'difference': '扩展目标行为'}]
+        rules = json.loads(self.profile_path.read_text())
+        rules['plan_contract']['review'] = json.loads((ROOT / 'projects/tapdata/quality-feature.json').read_text())['plan_contract']['review']
+        self.profile_path.write_text(json.dumps(rules))
+        self.save_task()
+        item = self.view()['items']['case-a']['plan']
+        self.apply('item', {'plan': dict(item, target_revision=sha), 'reason': '绑定真实夹具提交'})
+        self.select()
+        return repo
+
+    def test_all_checkpoints_and_publications_exclude_generated_home_paths(self):
+        from workflow import station_source
+        for feature in (False, True):
+            for home in ('/Users/fixture/station', '/home/fixture/station'):
+                with self.subTest(feature=feature, home=home):
+                    case = QualityTests('test_sensitive_input_not_saved_and_broken_events_not_hidden')
+                    case.setUp()
+                    try:
+                        if feature:
+                            case.feature_profile()
+                        else:
+                            case.plan()
+                        for repo in case.task['repositories']:
+                            repo['worktree'] = {'status': 'prepared', 'path': home + '/source/' + repo['repository']}
+                        case.save_task()
+                        # 目录形态注入定位边界，Git 指纹已由独立真实仓库测试覆盖。
+                        with mock.patch.object(station_source, 'repository_path', side_effect=lambda base, name: Path(home) / 'source' / name), \
+                             mock.patch.object(quality, 'git_revision', return_value='a' * 40):
+                            case.select()
+                            case.checkpoint('q1-intake', outcome='not_applicable')
+                            case.checkpoint('q2-plan')
+                            case.execute(); case.automatic_checkpoint(); case.decide()
+                            for point in ('q4-acceptance', 'q5-review', 'q6-delivery'):
+                                case.checkpoint(point)
+                            from workflow import external_sync
+                            pending = external_sync.actions(case.base, case.task)['sync_actions']
+                            points = {row['checkpoint']: row for row in pending if row.get('kind') == 'checkpoint_comment'}
+                            for point, view in case.view()['checkpoints'].items():
+                                self.assertEqual(points[point]['body'], view['publication_body'])
+                            for point in case.view()['checkpoints']:
+                                case.publish_checkpoint(point)
+                            self.assertFalse(any(row['kind'] == 'checkpoint_comment' for row in external_sync.actions(case.base, case.task)['sync_actions']))
+                            self.assertTrue(all(v['reviewed'] for v in case.view()['checkpoints'].values()))
+                        saved = quality.state_path(case.base, case.task).read_text()
+                        self.assertNotIn('source_path', saved)
+                        self.assertNotIn(home, saved)
+                    finally:
+                        case.doCleanups()
+
+    def test_reference_replay_does_not_access_git_or_old_absolute_paths(self):
+        self.reference_feature()
+        self.checkpoint('q1-intake'); self.checkpoint('q2-plan')
+        self.publish_checkpoint('q2-plan')
+        state = quality.load(self.base, self.task)
+        expected = quality.replay(state)
+        # 历史记录可含旧内部字段，但不能用其重新定位或核验当前磁盘。
+        old = copy.deepcopy(state)
+        for event in old['events']:
+            event['context']['repositories']['tapdata/tapdata']['source_path'] = '/Users/old/source/tapdata/tapdata'
+        with mock.patch('workflow.plan_review.subprocess.run', side_effect=AssertionError('历史不能查 Git')):
+            self.assertEqual(expected, quality.replay(old))
+        self.assertNotIn('source_path', quality.state_path(self.base, self.task).read_text())
+
+    def test_reference_runtime_failures_do_not_block_q1_or_comment_readback(self):
+        from workflow import station_source
+        self.reference_feature()
+        self.checkpoint('q1-intake'); self.checkpoint('q2-plan')
+        record = self.publication()
+        before_digest = self.view()['checkpoints']['q2-plan']['digest']
+        with mock.patch.object(station_source, 'identity', side_effect=subprocess.TimeoutExpired('git', 30)), \
+             mock.patch.object(quality, 'git_revision', side_effect=OSError('private diagnostic')):
+            current = self.view()
+            q2 = current['checkpoints']['q2-plan']
+            self.assertEqual(before_digest, q2['digest'])
+            self.assertFalse(q2['reviewed'])
+            self.assertNotIn('publication_body', q2)
+            self.assertEqual('tool_failure', q2['source_issues'][0]['category'])
+            with self.assertRaises(ValueError): self.checkpoint('q2-plan')
+            with self.assertRaises(ValueError): quality.q2_digest(self.base, self.task)
+            args = SimpleNamespace(dir=self.base, issue_key='TAP-123', expected_run_id=self.task['run_id'],
+                                   agent_id='fixture', plan_version='v1', ttl_hours=8)
+            self.assertEqual(2, authorization.cmd_grant(args))
+            self.assertFalse(task_store.authorization_path(self.base, 'TAP-123').exists())
+            self.assertTrue(quality.advance_problems(self.base, self.task, 'implementation'))
+            self.checkpoint('q1-intake')
+            self.apply('receipt', {'id': 'summary', 'operation_id': record['operation_id'], 'result': 'unknown'})
+            result = self.apply('readback', {'id': 'summary', 'operation_id': record['operation_id'],
+                'site': record['site'], 'issue_key': 'TAP-123', 'comment_id': '100', 'body': record['body'], 'source_ref': 'fixture:jira/100'})
+            self.assertEqual('verified', result['publications']['summary']['status'])
+        self.assertTrue(self.view()['checkpoints']['q2-plan']['reviewed'])
+
+    def test_reference_identity_and_evidence_fail_closed_without_diagnostic_leaks(self):
+        from workflow import plan_review, station_source
+        repo = self.reference_feature()
+        rules = quality.config(self.base, self.task)
+        for change in ('missing_repo', 'unprepared', 'missing_file', 'bad_sha', 'absolute', 'traversal', 'unregistered'):
+            candidate = copy.deepcopy(self.task)
+            row = candidate['facts']['implementation_plan']['reference_implementations'][0]
+            if change == 'missing_repo': candidate['engineering_baseline']['repositories'] = {}
+            elif change == 'unprepared': candidate['repositories'][0]['worktree'] = None
+            elif change == 'missing_file': row['path'] = 'missing.py'
+            elif change == 'bad_sha': row['source_revision'] = '0' * 40
+            elif change == 'absolute': row['path'] = '/Users/fixture/private.txt'
+            elif change == 'traversal': row['path'] = '../private.txt'
+            else: row['repository'] = 'foreign/repo'
+            with self.subTest(change=change):
+                issues = plan_review.source_issues(self.base, candidate, rules)
+                self.assertTrue(issues)
+                self.assertNotIn('/Users/', json.dumps(issues))
+        subprocess.run(['git', '-C', str(repo), 'remote', 'set-url', 'origin', 'https://github.com/foreign/repo'], check=True)
+        self.assertTrue(plan_review.source_issues(self.base, self.task, rules))
+        subprocess.run(['git', '-C', str(repo), 'remote', 'set-url', 'origin', 'https://github.com/tapdata/tapdata'], check=True)
+        moved = repo.with_name('saved-source'); repo.rename(moved); repo.symlink_to(moved, target_is_directory=True)
+        self.assertTrue(plan_review.source_issues(self.base, self.task, rules))
+        repo.unlink(); moved.rename(repo)
+        for error in (FileNotFoundError('/Users/private/tool'), ValueError('Git 操作超时（private）')):
+            with mock.patch.object(station_source, 'identity', side_effect=error):
+                issues = plan_review.source_issues(self.base, self.task, rules)
+                self.assertEqual('tool_failure', issues[0]['category'])
+                self.assertNotIn('private', json.dumps(issues))
+
+    def test_current_report_requires_runtime_binding(self):
+        state, rules, ctx = quality.load(self.base, self.task), quality.config(self.base, self.task), quality.context(self.base, self.task)
+        with self.assertRaises(TypeError): quality.report(state, rules, ctx)
+        with self.assertRaises(ValueError): quality.report(state, rules, ctx, base=None, task=self.task)
+
+    def test_unavailable_source_revision_cannot_auto_accept_old_pass(self):
+        self.reference_feature()
+        self.checkpoint('q1-intake'); self.checkpoint('q2-plan')
+        self.execute(); self.automatic_checkpoint(); self.decide(); self.checkpoint('q4-acceptance')
+        with mock.patch.object(quality, 'git_revision', side_effect=OSError('unavailable')):
+            current = self.view()
+            self.assertFalse(current['checkpoints']['q3-draft']['reviewed'])
+            self.assertFalse(current['checkpoints']['q4-acceptance']['reviewed'])
+            before = quality.state_path(self.base, self.task).read_bytes()
+            with self.assertRaisesRegex(ValueError, '源码版本核验不可用'):
+                self.automatic_checkpoint()
+            self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+
+    def test_prepare_write_rescans_saved_body_with_current_sensitive_rules(self):
+        self.apply('draft', {'id': 'summary', 'body': '待发送正文'})
+        record = self.view()['publications']['summary']
+        self.apply('confirm', {'id': 'summary', 'digest': record['digest'], 'proof': proof()})
+        path = self.product / 'projects/tapdata/admission.json'
+        admission = json.loads(path.read_text())
+        admission['evidence_rules']['forbidden_patterns'].append({'pattern': '待发送正文', 'reason': '新增敏感规则'})
+        path.write_text(json.dumps(admission))
+        before = quality.state_path(self.base, self.task).read_bytes()
+        with self.assertRaisesRegex(ValueError, '未生成发送意图'):
+            self.apply('prepare_write', {'id': 'summary', 'digest': record['digest']})
+        self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+
+    def test_user_paths_and_credentials_remain_rejected(self):
+        self.checkpoint('q1-intake', outcome='not_applicable')
+        before = quality.state_path(self.base, self.task).read_bytes()
+        for body in ('源码 /Users/fixture/source/owner/repo', '日志 /home/fixture/report.txt', 'password=fixture-secret'):
+            with self.subTest(body=body), self.assertRaisesRegex(ValueError, '敏感'):
+                self.apply('draft', {'id': 'summary', 'body': body})
+            self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+
 
 class FeatureFlowTests(unittest.TestCase):
     def setUp(self):
@@ -1717,6 +2002,7 @@ class FeatureFlowTests(unittest.TestCase):
         self.repo = "tapdata/tapdata"
         shutil.copytree(ROOT / "projects", self.product / "projects")
         shutil.copytree(ROOT / "contracts", self.product / "contracts")
+        shutil.copytree(ROOT / "policies", self.product / "policies")
         self.git("init", "-q", "-b", "develop", str(self.seed))
         (self.seed / "feature.py").write_text("def value():\n    return 0\n")
         (self.seed / "verify.py").write_text("from feature import value\nassert value() == 1\n")
@@ -1765,7 +2051,7 @@ class FeatureFlowTests(unittest.TestCase):
     def view(self):
         state = self.read()
         return quality.report(quality.load(self.ws, state), quality.config(self.ws, state),
-                              quality.context(self.ws, state))
+                              quality.context(self.ws, state), base=self.ws, task=state)
 
     def apply(self, action, payload):
         return quality.apply(self.ws, "TAP-123", self.read()["run_id"], self.view()["revision"],
@@ -1832,8 +2118,12 @@ class FeatureFlowTests(unittest.TestCase):
             self.cli("task.py", "record", "--key", key, "--value", value)
         self.cli("task.py", "advance", "--note", "基线与输入已确认")
         plan_path = self.cli("task.py", "interaction-path", "--name", "implementation-plan.json").strip()
-        Path(plan_path).write_text(json.dumps({"objective": "value 返回 1", "changes": ["修改返回值"],
-            "acceptance": ["verify.py 断言返回值"], "risks": ["仅夹具"], "rollback": "回退 feature.py", **feature_review("value 返回 1", self.repo, "feature.py", "behavior")}))
+        implementation_plan = {"objective": "value 返回 1", "changes": ["修改返回值"],
+            "acceptance": ["verify.py 断言返回值"], "risks": ["仅夹具"], "rollback": "回退 feature.py", **feature_review("value 返回 1", self.repo, "feature.py", "behavior")}
+        implementation_plan['environment_readiness']['checks'][0].update(
+            result='missing', required_for='verification', item_ids=['behavior'],
+            detail='执行前由夹具准备并核验 Python 运行环境，不影响返回值修改')
+        Path(plan_path).write_text(json.dumps(implementation_plan))
         self.cli("task.py", "record", "--key", "implementation_plan", "--input", plan_path)
         plan = {"id": "behavior", "checkpoint": "q4-acceptance", "timing": "after_fix",
                 "case_ref": "verify.py", "case_version": "v1", "case_status": "existing", "method": "unit",
@@ -1880,6 +2170,13 @@ class FeatureFlowTests(unittest.TestCase):
             "source_ref": "fixture:bare-origin-fetch", "observed_at": self.proof()["at"], "source_branch": "develop",
             "source_revision": self.git("-C", str(worktree), "rev-parse", "origin/develop"),
             "before_merge_revision": before_merge, "impact_analysis_ref": "fixture:upstream-only-adds-text-file"})
+        sync_state = quality.load(self.ws, self.read())
+        saved_sync = sync_state['events'][-1]['command']
+        self.assertEqual(2, saved_sync['payload']['binding_version'])
+        self.assertTrue(saved_sync['payload']['sync']['contains_source'])
+        with self.assertRaisesRegex(ValueError, '写入口'):
+            self.apply('verification', saved_sync['payload'])
+        self.assertEqual(sync_state, quality.load(self.ws, self.read()))
         with self.assertRaisesRegex(ValueError, "失败"):
             self.checkpoint("q3-draft")
         failures.apply(self.ws, "TAP-123", run, 2, {"action": "finish", "problem_id": problem,
@@ -1929,6 +2226,70 @@ class VerificationContractTests(unittest.TestCase):
             "case_version": "case-v1", "dependency_analysis_ref": "fixture:no-jars",
             "required_scope": ["module:behavior"], "results": [{"scope": "module:behavior", "result": "PASS",
                 "report_ref": "fixture:report", "tests": 1, "failures": 0, "errors": 0, "skipped": 0}]}
+
+    def source_material(self, version=True):
+        row = self.ctx['repositories']['a/repo']
+        row.update(repository='a/repo', base_branch='develop', work_branch='task', base_sha='a' * 40,
+                   catalog_digest='catalog', approved_scope='module', verification_method='unit')
+        self.ctx['repositories']['b/tests'] = {'live_revision': 'b' * 40}
+        payload = {'kind': 'source_sync', 'repository': 'a/repo', 'target_revision': 'a' * 40,
+                   'source_ref': 'fixture:fetch', 'source_branch': 'develop', 'source_revision': 'a' * 40,
+                   'observed_at': proof()['at'], 'impact_analysis_ref': 'fixture:impact',
+                   'sync': {'task_revision': 'a' * 40, 'base_revision': 'a' * 40,
+                            'work_branch': 'task', 'contains_source': True}}
+        if version:
+            payload['binding_version'] = 2
+        return payload
+
+    def source_problems(self, model, ctx):
+        return [p for p in self.v.problems(model, ctx, ['source_sync']) if p.startswith('a/repo')]
+
+    def test_source_binding_is_local_but_legacy_replay_remains_global(self):
+        for version in (False, True):
+            p = self.source_material(version)
+            state = {'events': [{'command': {'action': 'verification', 'payload': p},
+                                 'rules': {}, 'context': copy.deepcopy(self.ctx)}]}
+            original = copy.deepcopy(state)
+            model = quality.replay(state)
+            self.assertEqual([], self.source_problems(model, self.ctx))
+            changed = copy.deepcopy(self.ctx)
+            changed['repositories']['b/tests']['live_revision'] = 'c' * 40
+            changed['repositories']['b/tests']['approved_scope'] = 'expanded'
+            self.assertEqual(not version, bool(self.source_problems(model, changed)))
+            self.assertTrue(any('b/tests 缺少' in p for p in self.v.problems(model, changed, ['source_sync'])))
+            self.assertEqual(original, state)
+            self.assertEqual(model, quality.replay(state))
+
+    def test_source_own_binding_changes_and_failures_still_block(self):
+        p = self.source_material()
+        model = {}; self.v.record(model, p, self.ctx)
+        for key in ('live_revision', 'repository', 'base_branch', 'work_branch', 'base_sha',
+                    'catalog_digest', 'approved_scope', 'verification_method'):
+            changed = copy.deepcopy(self.ctx)
+            changed['repositories']['a/repo'][key] = 'changed'
+            with self.subTest(key=key):
+                self.assertTrue(self.source_problems(model, changed))
+        changed = copy.deepcopy(self.ctx)
+        changed['failures']['pending'] = {'status': 'running', 'attempts': 1}
+        self.assertTrue(any('失败' in p for p in self.v.problems(model, changed, ['source_sync'])))
+        for key, value in (('source_branch', 'other'), ('target_revision', 'c' * 40)):
+            with self.assertRaises(ValueError):
+                self.v.record({}, dict(p, **{key: value}), self.ctx)
+
+    def test_binding_version_cannot_be_supplied_or_reinterpreted(self):
+        p = self.source_material()
+        with self.assertRaisesRegex(ValueError, '写入口'):
+            quality.validate_command({'action': 'verification', 'payload': p})
+        for version in (1, 3, '2', True, None):
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                self.v.record({}, dict(p, binding_version=version), self.ctx)
+        for kind in ('local', 'ci', 'review'):
+            with self.assertRaisesRegex(ValueError, '绑定版本'):
+                self.v.record({}, dict(p, kind=kind), self.ctx)
+        model = {}; self.v.record(model, p, self.ctx)
+        model['verification']['a/repo']['source_sync']['data']['binding_version'] = 99
+        with self.assertRaises(ValueError):
+            self.v.problems(model, self.ctx, ['source_sync'])
 
     def test_missing_scopes_missing_reports_and_false_pass_rejected(self):
         for change in ({"results": []}, {"required_scope": ["module:behavior", "upper:consumer"]}):
@@ -2011,6 +2372,111 @@ class VerificationContractTests(unittest.TestCase):
                 self.v.verify_artifacts(p)
 
 
+class SyncRecoveryTests(unittest.TestCase):
+    setUp = QualityTests.setUp
+    save_task = QualityTests.save_task
+    view = QualityTests.view
+    apply = QualityTests.apply
+    publication = QualityTests.publication
+    select = QualityTests.select
+    checkpoint = QualityTests.checkpoint
+    plan = QualityTests.plan
+
+    def terminal(self):
+        self.task.update(stage="completed", outcome="completed")
+        self.save_task()
+
+    def readback(self, record):
+        return self.apply("readback", {"id": "summary", "operation_id": record["operation_id"],
+            "site": record["site"], "issue_key": "TAP-123", "comment_id": "123",
+            "body": record["body"], "source_ref": "fixture:jira/comment/123"})
+
+    def test_completed_receipt_only_preserves_task_and_authorization(self):
+        record = self.publication()
+        self.terminal()
+        before = (self.base / ".agenticops/current-task.json").read_bytes()
+        with self.assertRaisesRegex(ValueError, "终止"):
+            self.apply("draft", {"id": "another", "body": "不得发送"})
+        done = self.readback(record)
+        self.assertEqual(done["publications"]["summary"]["status"], "verified")
+        self.assertEqual(before, (self.base / ".agenticops/current-task.json").read_bytes())
+        self.assertFalse(task_store.authorization_path(self.base, "TAP-123").exists())
+        with self.assertRaises(ValueError):
+            self.readback(record)
+
+    def test_archive_and_confirmed_exit_reject_without_writing(self):
+        from workflow import station_operation
+        record = self.publication()
+        self.terminal()
+        original = quality.state_path(self.base, self.task).read_bytes()
+        for extra in ({"archive_record": {}}, {"archive_evidence": "{}"},
+                      {"steps": {"archive-publish:0": {"before": {}, "expected": {}, "receipt": None}}},
+                      {"request": {"confirmed_digest": "a" * 64}}, {"cleanup_plan": {}},
+                      {"plan_revisions": []}, {"handoff": {}}):
+            operation = {"kind": "archive", "status": "running", "phase": "intent", "run_id": self.task["run_id"], "request": {}, **extra}
+            with self.subTest(extra=extra), mock.patch.object(station_operation, "read", return_value=operation):
+                with self.assertRaises(ValueError):
+                    self.readback(record)
+                self.assertEqual(original, quality.state_path(self.base, self.task).read_bytes())
+
+    def test_early_unconfirmed_archive_allows_original_readback(self):
+        from workflow import station_operation
+        record = self.publication()
+        self.terminal()
+        operation = {"kind": "archive", "status": "running", "phase": "intent", "run_id": self.task["run_id"], "request": {}}
+        with mock.patch.object(station_operation, "read", return_value=operation):
+            self.assertEqual("verified", self.readback(record)["publications"]["summary"]["status"])
+
+    def test_sync_actions_read_only_and_unknown_keeps_original_record(self):
+        from workflow import external_sync
+        record = self.publication()
+        self.task["facts"]["problem_symptom"] = "补充后的事实"
+        self.save_task()
+        before = quality.state_path(self.base, self.task).read_bytes()
+        first = external_sync.actions(self.base, self.task)
+        second = external_sync.actions(self.base, self.task)
+        self.assertEqual(first, second)
+        action = next(row for row in first["sync_actions"] if row["id"] == "summary")
+        self.assertEqual(action["next_action"], "readback")
+        self.assertEqual(action["record"]["operation_id"], record["operation_id"])
+        self.assertEqual(action["record"]["body"], record["body"])
+        self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+
+    def test_historical_checkpoints_return_complete_body_and_stable_id(self):
+        from workflow import external_sync
+        self.plan()
+        self.select()
+        self.checkpoint("q1-intake")
+        self.checkpoint("q2-plan")
+        report = self.view()
+        actions = external_sync.actions(self.base, self.task, report)["sync_actions"]
+        for cp in ("q1-intake", "q2-plan"):
+            row = next(row for row in actions if row.get("checkpoint") == cp)
+            self.assertEqual(row["body"], report["checkpoints"][cp]["publication_body"])
+        self.assertEqual(actions, external_sync.actions(self.base, self.task, report)["sync_actions"])
+
+    def test_post_write_display_failure_does_not_report_write_failed(self):
+        with mock.patch.object(quality, "report", side_effect=ValueError("report unavailable")):
+            result = quality.apply(self.base, "TAP-123", self.task["run_id"], 0,
+                {"action": "draft", "payload": {"id": "summary", "body": "尚未验证"}})
+        self.assertEqual(result["local_write"], "committed")
+        self.assertEqual(quality.load(self.base, self.task)["revision"], 1)
+
+    def test_previous_run_unknown_comment_has_explicit_maintenance_action(self):
+        from workflow import external_sync
+        record = self.publication()
+        original_run = self.task["run_id"]
+        original_path = quality.state_path(self.base, self.task)
+        before = original_path.read_bytes()
+        self.task["run_id"] = "run-fedcba987654"
+        self.save_task()
+        result = external_sync.actions(self.base, self.task)
+        row = next(row for row in result["sync_actions"] if row["run_id"] == original_run)
+        self.assertEqual(row["next_action"], "maintenance_handoff")
+        self.assertEqual(row["record"]["operation_id"], record["operation_id"])
+        self.assertEqual(before, original_path.read_bytes())
+
+
 class FileDigestTests(unittest.TestCase):
     def test_bounded_reads_keep_exact_digest_and_legacy_api(self):
         import hashlib
@@ -2035,6 +2501,122 @@ class FileDigestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(FileNotFoundError):
                 sha256_file(Path(directory) / "missing")
+
+
+PR_BODY_FIXTURE = "## 变更\n\n- 使用 `$collStats` 与 `$(touch forbidden)`\n- 中文、反引号 `cmd`\n\n## 验证\n\n```text\n\\n 是合法示例\n```\n"
+
+
+class PrBodyTest(unittest.TestCase):
+    def snapshot(self, body=PR_BODY_FIXTURE, **values):
+        return dict({"number": 932, "url": "https://github.com/tapdata/tapdata-connectors/pull/932",
+                     "body": body}, **values)
+
+    def compare(self, actual=PR_BODY_FIXTURE, expected=PR_BODY_FIXTURE):
+        return pr_body.compare(expected, self.snapshot(actual), "tapdata/tapdata-connectors", 932)
+
+    def test_exact_content_and_crlf_only_normalization(self):
+        self.assertTrue(self.compare()["matched"])
+        self.assertTrue(self.compare(PR_BODY_FIXTURE.replace("\n", "\r\n"))["matched"])
+        for changed in (PR_BODY_FIXTURE.rstrip(), PR_BODY_FIXTURE + "\n", PR_BODY_FIXTURE.replace("$collStats", ""),
+                        PR_BODY_FIXTURE.replace("\n", r"\n"), PR_BODY_FIXTURE.replace("- 中文", "-  中文")):
+            with self.subTest(changed=changed):
+                self.assertIn("body_mismatch", self.compare(changed)["errors"])
+
+    def test_three_incident_shapes_warn_without_automatic_repair(self):
+        samples = [r"## 变更\n- MongoDB 6+ 使用  聚合\n\n## 验证\n- MongodbUtilTest：4/4 通过",
+                   r"## 变更\n- TM 分流 collStats 与 \n- 保持契约\n\n## 验证\n- 55/55",
+                   r"## 变更\n- MongoDBIMap 分流 collStats 与 \n- 保持契约\n\n## 验证\n- 1/1"]
+        for body in samples:
+            with self.subTest(body=body):
+                result = pr_body.preflight(body)
+                self.assertTrue(result["ok"])
+                self.assertEqual(0, result["actual_newlines"])
+                self.assertTrue(result["warnings"])
+                self.assertEqual(1, result["warnings"][0]["line"])
+
+    def test_literal_escape_examples_remain_valid(self):
+        body = "```text\n## 示例\\n- 示例条目\n```\n"
+        result = self.compare(body, body)
+        self.assertTrue(result["matched"])
+        self.assertTrue(result["warnings"])
+        self.assertEqual(2, result["warnings"][0]["line"])
+
+    def test_target_identity(self):
+        for key, value in [("number", 933), ("number", "932"), ("number", True),
+                           ("url", "https://github.com/other/repo/pull/932"),
+                           ("url", "https://github.com/tapdata/tapdata-connectors/pull/933"),
+                           ("url", "https://evil.example/tapdata/tapdata-connectors/pull/932"),
+                           ("url", "http://github.com/tapdata/tapdata-connectors/pull/932"),
+                           ("url", "https://user@github.com/tapdata/tapdata-connectors/pull/932"),
+                           ("url", "https://github.com/tapdata/tapdata-connectors/pull/932?x=1")]:
+            snapshot = self.snapshot()
+            snapshot[key] = value
+            with self.subTest(key=key, value=value):
+                self.assertFalse(pr_body.compare(PR_BODY_FIXTURE, snapshot, "tapdata/tapdata-connectors", 932)["ok"])
+        snapshot = {"number": 111, "url": "https://git.example/Tapdata/Hazelcast/pull/111", "body": PR_BODY_FIXTURE}
+        self.assertTrue(pr_body.compare(PR_BODY_FIXTURE, snapshot, "tapdata/hazelcast", 111, "git.example")["ok"])
+
+    def test_invalid_or_missing_body_and_target(self):
+        for key in ("number", "url", "body"):
+            snapshot = self.snapshot()
+            del snapshot[key]
+            self.assertFalse(pr_body.compare(PR_BODY_FIXTURE, snapshot, "tapdata/tapdata-connectors", 932)["ok"])
+        for body in (None, {}, [], 3):
+            self.assertFalse(self.compare(body)["ok"])
+        for body in ("", " \n", "a\x00b", "a\rb", "\ufeff正文"):
+            self.assertFalse(pr_body.preflight(body)["ok"])
+
+    def run_cli(self, args):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = pr_body.main(args)
+        return code, json.loads(output.getvalue())
+
+    def test_cli_json_decoding_failures_and_read_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            body = root / "body.md"
+            snapshot = root / "readback.json"
+            state = root / "current-task.json"
+            body.write_bytes(PR_BODY_FIXTURE.encode("utf-8"))
+            snapshot.write_text(json.dumps(self.snapshot()), encoding="utf-8")
+            state.write_bytes(b'{"revision":42}')
+            before = {path.name: path.read_bytes() for path in root.iterdir()}
+            args = ["compare", "--body-file", str(body), "--readback", str(snapshot),
+                    "--repository", "tapdata/tapdata-connectors", "--pr", "932"]
+            self.assertEqual(0, self.run_cli(args)[0])
+            self.assertEqual(before, {path.name: path.read_bytes() for path in root.iterdir()})
+            snapshot.write_text(json.dumps(self.snapshot(PR_BODY_FIXTURE.replace("\n", r"\n"))), encoding="utf-8")
+            code, result = self.run_cli(args)
+            self.assertEqual(3, code)
+            self.assertNotIn("$collStats", json.dumps(result))
+            for invalid in ('{"number":932,"number":933}', '{', 'null', '[]'):
+                snapshot.write_text(invalid, encoding="utf-8")
+                self.assertEqual(4, self.run_cli(args)[0])
+            snapshot.unlink()
+            self.assertEqual(4, self.run_cli(args)[0])
+            body.write_bytes(b'\xff')
+            self.assertEqual(4, self.run_cli(["preflight", "--body-file", str(body)])[0])
+            body.write_bytes(b'')
+            self.assertEqual(3, self.run_cli(["preflight", "--body-file", str(body)])[0])
+
+    def test_body_file_crosses_shell_without_interpretation(self):
+        # 假 gh 仅读取 --body-file；不使用网络、不创建 PR。
+        reader = "import pathlib,sys; print(pathlib.Path(sys.argv[sys.argv.index('--body-file')+1]).read_text(), end='')"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "body with spaces.md"
+            path.write_bytes(PR_BODY_FIXTURE.encode("utf-8"))
+            for name in ("bash", "zsh"):
+                shell = shutil.which(name)
+                if not shell:
+                    continue
+                with self.subTest(shell=name):
+                    command = 'gh() { "$1" -c "$2" "${@:3}"; }; gh "$1" "$2" pr create --body-file "$3"'
+                    result = subprocess.run([shell, "-c", command, "test", sys.executable, reader, str(path)],
+                                            cwd=directory, capture_output=True, text=True, check=True)
+                    self.assertEqual(PR_BODY_FIXTURE, result.stdout)
+                    self.assertFalse((Path(directory) / "forbidden").exists())
+
 
 
 if __name__ == "__main__":

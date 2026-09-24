@@ -18,17 +18,23 @@ class TaskIdentityTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.station = Path(self.temporary.name) / "station"
+        self.product = Path(self.temporary.name) / "product"
+        (self.product / "contracts").mkdir(parents=True)
+        (self.product / "contracts/station-state-compatibility.json").write_text(
+            (ROOT / "contracts/station-state-compatibility.json").read_text()
+        )
         (self.station / ".agenticops").mkdir(parents=True)
         task_store.initialize_current(self.station)
 
     def binding(self, identity=None, station=None):
         station = station or self.station
-        value = {"schema_version": 4, "product_root": str(ROOT), "source_pool": str(self.station.parent / "pool"), "station_id": "a" * 32,
+        value = {"schema_version": 4, "product_root": str(self.product.resolve()), "source_pool": str(self.station.parent / "pool"), "station_id": "a" * 32,
                  "project": "tapdata", "agents": ["codex"]}
         if identity is not None:
             value["branch_identity"] = identity
         task_store._write_json_atomic(station / ".agenticops/station.json", value)
-        task_store._write_json_atomic(station / ".agenticops/init.json", {"station_state_epoch": 16})
+        epoch = json.loads((self.product / "contracts/station-state-compatibility.json").read_text())["station_state_epoch"]
+        task_store._write_json_atomic(station / ".agenticops/init.json", {"station_state_epoch": epoch})
 
     def test_timestamp_hex_and_new_run_are_fixed_and_issue_bound(self):
         self.assertEqual(task_store.timestamp_hex(0), "00000000")
@@ -37,6 +43,8 @@ class TaskIdentityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "超出"):
             task_store.timestamp_hex(0x100000000)
         self.assertEqual(task_store.validate_run_id("TAP-123", "run-old-fixture"), "run-old-fixture")
+        self.assertEqual(task_store.validate_run_id("TAP-123", "TAP-123-69d8a1f0-01234567"),
+                         "TAP-123-69d8a1f0-01234567")
         with self.assertRaisesRegex(ValueError, "不一致"):
             task_store.validate_run_id("TAP-123", "TAP-124-69d8a1f0")
 
@@ -52,9 +60,9 @@ class TaskIdentityTests(unittest.TestCase):
         (other / ".agenticops").mkdir(parents=True)
         task_store.initialize_current(other)
         self.binding({"schema_version": 1, "git_name": "developer", "source": "git_global_user_name"}, other)
-        (other / "archive/TAP-123/TAP-123-69d8a1f0").mkdir(parents=True)
+        (self.product / ".archive/TAP-123-69d8a1f0").mkdir(parents=True)
         with mock.patch.object(task_store, "timestamp_hex", return_value="69d8a1f0"):
-            with self.assertRaisesRegex(ValueError, "档案冲突"):
+            with self.assertRaisesRegex(ValueError, "同一 Jira 在同一秒.*稍后重试"):
                 station_operation.begin(other, "takeover", "op-identity-two", 0, {"issue_key": "TAP-123"})
 
     def test_takeover_without_station_identity_keeps_non_code_flow_available(self):
@@ -66,16 +74,25 @@ class TaskIdentityTests(unittest.TestCase):
             task_store.generated_work_branch(self.station, {"issue_key": "TAP-123", "run_id": operation["run_id"]})
         self.assertIsNone(task_store.read_current(self.station)["current"])
 
+    def test_failed_takeover_intent_does_not_leave_run_reservation(self):
+        self.binding({"schema_version": 1, "git_name": "developer", "source": "git_global_user_name"})
+        run_id = "TAP-123-69d8a1f0"
+        with mock.patch.object(task_store, "timestamp_hex", return_value="69d8a1f0"), \
+                mock.patch.object(station_operation, "save", side_effect=OSError("fixture")):
+            with self.assertRaisesRegex(OSError, "fixture"):
+                station_operation.begin(self.station, "takeover", "op-identity-fail", 0, {"issue_key": "TAP-123"})
+        self.assertFalse((self.product / ".archive/.reservations" / (run_id + ".json")).exists())
+
     def test_station_identity_is_first_write_wins_and_generates_branch(self):
         self.binding()
         with mock.patch.object(station_registry, "configured_git_name", return_value=("developer", "git_global_user_name")):
-            station_registry.command_identity(type("Args", (), {"station": str(self.station)})(), ROOT)
+            station_registry.command_identity(type("Args", (), {"station": str(self.station)})(), self.product)
         task = {"issue_key": "TAP-123", "run_id": "TAP-123-69d8a1f0"}
         self.assertEqual(task_store.generated_work_branch(self.station, task), "developer/TAP-123-69d8a1f0")
         document = json.loads((self.station / ".agenticops/station.json").read_text())
         self.assertEqual(document["branch_identity"]["git_name"], "developer")
         with mock.patch.object(station_registry, "configured_git_name", return_value=("other", "git_global_user_name")):
-            station_registry.command_identity(type("Args", (), {"station": str(self.station)})(), ROOT)
+            station_registry.command_identity(type("Args", (), {"station": str(self.station)})(), self.product)
         self.assertEqual(json.loads((self.station / ".agenticops/station.json").read_text())["branch_identity"]["git_name"], "developer")
 
     def test_new_station_reads_valid_global_git_name_once(self):

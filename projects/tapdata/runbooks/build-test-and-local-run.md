@@ -6,7 +6,7 @@
 
 集成测试的分析、编写、执行与修复由 [tapdata-ci-test](../skills/tapdata-ci-test/SKILL.md) 引导，本文维护操作细节；主任务技能负责调用、质量记录和外部动作。测试规范按需通过 [tapdata-wiki](../skills/tapdata-wiki/SKILL.md) 查询中央共享副本，再核对当前工位 source；不使用质量配置中的历史知识链接寻找备用副本，不在测试阶段自动准备或更新 Wiki。
 
-工位接管先冻结完整工程，repository context 返回独立 source 仓库；以下构建 cwd 使用这些已核验路径。持久环境配置位于 config，有效配置、Maven local、插件、日志和报告进入唯一 runtime。操作前核验 Project 资源配方，禁止写共享 Maven 缓存后声称隔离；归档或退出前登记并核验停止写入者。目录或配方生成不证明真实 TM/FE/Web 已启动，必须以实际健康检查与任务产物加载证据结论为准。
+工位接管先冻结完整工程，repository context 返回独立 source 仓库；以下构建 cwd 使用这些已核验路径。持久环境配置位于 config，有效配置、Maven local、插件、日志和报告进入唯一 runtime。操作前核验实际路径、资源归属和写入者，禁止写共享 Maven 缓存后声称隔离；归档或退出前登记并核验停止写入者。目录生成不证明真实 TM/FE/Web 已启动，必须以实际健康检查与任务产物加载证据结论为准。
 
 ## Maven 配置与任务本地仓库
 
@@ -28,7 +28,7 @@ python3 <agenticops-root>/workflow/task.py runtime-path \
 
 运行 Maven 时不得传 `-s` 覆盖用户 settings，也不得在项目、全局设置或环境变量中依赖另一个 `maven.repo.local`。`.mvn/maven.config`、`MAVEN_ARGS` 与 `MAVEN_OPTS` 可以保留目标工程的其它参数，但实际版本与本地仓库路径必须由清单回读核验。后台或并行 Maven 写入者须先作为 process 资源登记；同一工位不得并行写同一 `maven-local`。
 
-当前完整应用 Profile 只定义仓库集合与修订，尚未包含已实证的 actions/toolchain/health_checks 配方。实际工具链、运行参数与数据库环境须按目标分支核验。日志、报告和可迁出的产出分别集中到 runtime/logs、runtime/reports 和其它 runtime 子目录；不可迁出的 target/node_modules 在启动生产者之前按 Profile 配方登记目录，重置说明见[任务授权指引](../../../docs/usage/task-authorization.md#重置工位)。资源事实通过 workflow/station_resources.py 的 --issue-key/--expected-run-id/--input 登记；外部资源 quiesced 且有回读可先归档，最终释放/清理必须回读 cleaned。归档后仅允许更新既有 external 的清理状态与回读来源，不新增或变更资源身份。
+`full-application` 的现役承诺是完整应用源码集准备，不包含自动构建、启动或健康检查配方；`source_prepared` 和空 runtime 都不能作为应用已运行的证据。实际工具链、运行参数与数据库环境须按目标分支及任务方案另行核验，未来自动配方独立设计，不用未消费字段占位。日志、报告和可迁出的产出分别集中到 runtime/logs、runtime/reports 和其它 runtime 子目录；源码中的 target/node_modules 不要求生产前登记，版本 6 重置按实际 Git/文件清单确认保全与处置，不按目录名授权删除，见[任务授权指引](../../../docs/usage/task-authorization.md#重置工位)。运行资源事实仍通过 workflow/station_resources.py 的 --issue-key/--expected-run-id/--input 登记；外部资源 quiesced 且有回读可先归档，最终释放/清理必须回读 cleaned。归档后仅允许更新既有 external 的清理状态与回读来源，不新增或变更资源身份。
 
 来源：《TapData 产品研发指南（v3.5.4+）》，提取日期为 2026-07-27；移植自 tapstate/agentic-ops（2026-08-27）。
 
@@ -302,80 +302,7 @@ pnpm dev:daas
 
 ## FE 与 TM 本地运行
 
-建议在项目工位中为 FE 和 TM 使用独立工作目录：
-
-```text
-<station>/workdir/flow-agent
-<station>/workdir/tm
-```
-
-FE 当前入口类：
-
-```text
-io.tapdata.Application
-```
-
-FE 和 TM 的本地运行均必须包含：
-
-```text
-app_type=DAAS
-```
-
-通过 TapData 启动器启动时，启动器会默认注入该环境变量；手动或自定义启动方式必须显式设置。
-
-常见配置名：
-
-```text
-app_type=DAAS
-TAPDATA_MONGO_URI=<mongo-uri>
-TAPDATA_WORK_DIR=.
-backend_url=<tm-api-url>
-```
-
-以下配置仅为结构和值的参考样例，不代表当前用户、工位或任务的真实运行配置。真实启动前，AIAgent 必须向用户展示拟使用的 FE 与 TM 配置，并要求用户修改或逐项确认；未完成确认时不得启动。FE 与 TM 必须连接同一个已确认的 MongoDB 环境，FE 的 `backend_url` 必须指向本次使用的 TM API。
-
-FE 参考配置：
-
-```text
-app_type=DAAS
-backend_url=http://localhost:3000/api/
-TAPDATA_MONGO_URI=mongodb://mongo/tapdata
-TAPDATA_WORK_DIR=.
-```
-
-TM 当前入口类：
-
-```text
-com.tapdata.tm.TMApplication
-```
-
-常见配置名：
-
-```text
-app_type=DAAS
-TAPDATA_MONGO_URI=<mongo-uri>
-tapdata_websocket_port=<unique-port>
-```
-
-TM 参考配置：
-
-```text
-app_type=DAAS
-spring.data.mongodb.default.uri=mongodb://mongo/tapdata
-spring.data.mongodb.log.uri=mongodb://mongo/tapdata
-spring.data.mongodb.obs.uri=mongodb://mongo/tapdata
-```
-
-用户确认时至少需要核对 MongoDB URI、FE `backend_url`、FE 与 TM 工作目录，以及 TM 的 HTTP 和 WebSocket 端口。目标分支如果改用 Spring 配置项，应按目标分支配置执行。相同主机运行多个 TM 时，必须为每个实例分配不同的 HTTP 和 WebSocket 端口。
-
-常见日志位置：
-
-```text
-<workdir>/logs/agent/tapdata-agent.log
-<workdir>/logs/manager/tm-<hostname>.log
-```
-
-路径与目标分支实际启动脚本不一致时，以启动脚本和日志配置为准。
+应用启动顺序、运行目录、命令结构、运行核验与排障统一见 [TapData 开发指引](tapdata-development.md)。本页保留下面的配置输入和模板依据，不再维护独立的启动说明。TapTest 用例生成、脚本开发与执行见 [TapTest 指引](taptest-development.md)，不由 Java CI 测试流程替代。
 
 ## 本地工位配置输入
 
@@ -428,6 +355,6 @@ mongodb://tapdata:<URL编码密码>@127.0.0.1:27017/tapdata?authSource=<实际�
 | 健康和认证 | 从当前启动/路由配置取得实际健康及认证检查入口；服务端口响应不等于登录、连接器可用或端到端验收 |
 | TapTest 启动 | 使用 t-layer3-test 当前分支 README、依赖、用例入口和工位专用配置；先核验解释器、目标 TM/Engine、认证与报告路径，不猜启动参数或复制 CI 凭据 |
 | 既有容器/数据卷 | 只读回读名称、标签、用途、归属和当前写入者；复用会影响原数据时一次展示精确对象与风险，取得对应决定后执行 |
-| 报告与退出 | 日志/报告优先 runtime；不可迁移生成物生产前登记。清理按 repo-cleanup.json 与[任务授权指引](../../../docs/usage/task-authorization.md#配置化清理入口)，先保全必要报告再运行原生 clean |
+| 报告与退出 | 日志/报告优先 runtime；退出按[任务授权指引](../../../docs/usage/task-authorization.md#配置化清理入口)的版本 6 计划先保全，再核验清理成果；源码旁生成物纳入确认快照，不依赖原生 clean 配方 |
 
 环境预检不启动服务、不新建账号、不更改全局配置。能从已授权本地材料核实的由 Agent 完成，只把无法核实且影响方案或验证的输入一起交研发确认；明确不需要的组件记 not_needed 及理由。实现后执行实际健康、认证、插件加载及目标用例，结果与功能/测试源码版本分别记录，不能把预检 ready 当成测试 PASS。

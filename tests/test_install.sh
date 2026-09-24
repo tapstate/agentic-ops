@@ -49,21 +49,17 @@ cp -R "$repo_root/.githooks" "$source_repo/.githooks"
 cp "$repo_root/.agentic-ops-source" "$source_repo/.agentic-ops-source"
 cp "$repo_root/.gitignore" "$source_repo/.gitignore"
 mkdir -p "$source_repo/adapters/agents/test-agent/templates"
-printf '%s\n' '#!/usr/bin/env python3' > "$source_repo/adapters/agents/test-agent/hook.py"
 cat > "$source_repo/adapters/agents/test-agent/manifest.json" <<'JSON'
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "name": "test-agent",
   "adapter_version": 1,
-  "entrypoint": "adapters/agents/test-agent/hook.py",
-  "hook": {"standard_event": "before_operation", "tool_kinds": ["shell"], "timeout_seconds": 15, "failure_mode": "deny", "native": {"event": "PreToolUse", "tool_matchers": {"shell": "Shell"}}},
-  "capabilities": {"decisions": ["allow", "deny"], "ask_fallback": "deny_with_guidance"},
   "artifacts": [{"template": "adapters/agents/test-agent/templates/settings.json", "target": ".test-agent/settings.json"}],
   "launch": {"mode": "command", "command": "test-agent-cli", "message": "测试 Agent 已接线。"},
   "skill_target": null
 }
 JSON
-printf '{"hooks":{"__AGENTIC_OPS_HOOK_NATIVE_EVENT__":[{"matcher":"__AGENTIC_OPS_HOOK_NATIVE_TOOL_MATCHER__","hooks":[{"type":"command","command":"python3 __AGENTIC_OPS_HOME__/adapters/agents/test-agent/hook.py","timeout":"__AGENTIC_OPS_HOOK_TIMEOUT_SECONDS__"}]}]}}\n' \
+printf '%s\n' '{"instruction_root":"__AGENTIC_OPS_HOME__","project":"__AGENTIC_OPS_PROJECT__"}' \
   > "$source_repo/adapters/agents/test-agent/templates/settings.json"
 cp "$repo_root/agenticops" "$source_repo/agenticops"
 chmod +x "$source_repo/agenticops"
@@ -88,6 +84,21 @@ git -C "$maintainer_root" check-ignore --no-index fixture-local-only >/dev/null
 "$maintainer_root/agenticops" --help | grep -F '安装目录：默认 ~/.agentic-ops' >/dev/null
 "$maintainer_root/agenticops" --help | grep -F '工位：项目工作目录' >/dev/null
 test "$(git -C "$maintainer_root" branch --show-current)" = develop
+clean_version="$(python3 "$maintainer_root/bootstrap/product_version.py" --product-root "$maintainer_root")"
+test "$(cd "$test_root" && "$maintainer_root/agenticops" version)" = "$clean_version"
+touch "$maintainer_root/version-dirty-fixture"
+test "$("$maintainer_root/agenticops" version)" = "$clean_version-dirty"
+if python3 "$maintainer_root/bootstrap/product_version.py" --product-root "$maintainer_root" >/dev/null 2>&1; then
+  printf '脏产品版本不应通过严格版本校验\n' >&2
+  exit 1
+fi
+rm "$maintainer_root/version-dirty-fixture"
+if "$maintainer_root/agenticops" version unexpected >/dev/null 2>&1; then
+  exit 1
+fi
+if "$maintainer_root/agenticops" station version >/dev/null 2>&1; then
+  exit 1
+fi
 test -d "$maintainer_root/.local/venv/internal"
 test -f "$maintainer_root/.local/stations.json"
 grep -F '"stations": []' "$maintainer_root/.local/stations.json" >/dev/null
@@ -110,6 +121,9 @@ for agent_skill_root in .agents/skills .claude/skills; do
       "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' \
         "$maintainer_root/skills/$maintenance_skill")"
   done
+done
+for agent_skill_root in .agents/skills .claude/skills; do
+  test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$maintainer_root/$agent_skill_root/ao-requirement")" = "$maintainer_root/skills/shared/ao-requirement"
 done
 exclude_before="$(file_digest "$maintainer_root/.git/info/exclude")"
 python3 "$maintainer_root/bootstrap/skill_wiring.py" --product-root "$maintainer_root" --refresh >/dev/null
@@ -145,19 +159,13 @@ rm "$maintainer_root/.agents/skills/ao-ws-init"
 python3 "$maintainer_root/bootstrap/skill_wiring.py" \
   --product-root "$maintainer_root" --refresh >/dev/null
 source_station="$test_root/source-station"
-"$maintainer_root/agenticops" station init --station "$source_station" \
-  --project tapdata --agent test-agent >/dev/null
-"$maintainer_root/agenticops" station doctor --station "$source_station" >/dev/null
-"$source_station/agenticops" station doctor >/dev/null
-printf '{"note":"changed","hooks":{"__AGENTIC_OPS_HOOK_NATIVE_EVENT__":[{"matcher":"__AGENTIC_OPS_HOOK_NATIVE_TOOL_MATCHER__","hooks":[{"type":"command","command":"python3 __AGENTIC_OPS_HOME__/adapters/agents/test-agent/hook.py","timeout":"__AGENTIC_OPS_HOOK_TIMEOUT_SECONDS__"}]}]}}\n' \
-  > "$maintainer_root/adapters/agents/test-agent/templates/settings.json"
-if "$maintainer_root/agenticops" station doctor --station "$source_station" >/dev/null 2>&1; then
-  printf '源码变更后工位漂移未被识别\n' >&2
+if "$maintainer_root/agenticops" station init --station "$source_station" \
+  --project tapdata --agent test-agent > "$test_root/source-station-init-output" 2>&1; then
+  printf '产品源码目录被错误绑定为业务工位 Product Root\n' >&2
   exit 1
 fi
-"$maintainer_root/agenticops" station repair --station "$source_station" >/dev/null
-grep -F '"changed"' "$source_station/.test-agent/settings.json" >/dev/null
-git -C "$maintainer_root" checkout -q -- adapters/agents/test-agent/templates/settings.json
+grep -F '不能作为业务工位 Product Root' "$test_root/source-station-init-output" >/dev/null
+test ! -e "$source_station/.agenticops"
 
 git -C "$source_repo" switch -q "$source_branch"
 printf 'source update\n' > "$source_repo/SOURCE-NEXT"
@@ -173,10 +181,9 @@ printf '%s\n' \
 git -C "$source_repo" add SOURCE-NEXT skills/fixture-maintenance/SKILL.md
 git -C "$source_repo" commit -qm "source next"
 source_update_output="$test_root/source-update-output"
-PATH="$setup_bin:$PATH" "$source_station/agenticops" update > "$source_update_output"
+PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update > "$source_update_output"
 test -f "$maintainer_root/SOURCE-NEXT"
 grep -F '产品源码已更新' "$source_update_output" >/dev/null
-grep -F '请执行 agenticops station repair --all' "$source_update_output" >/dev/null
 test "$(python3 "$maintainer_root/bootstrap/product_state.py" --product-root "$maintainer_root" read --field current_ref)" = \
   "$(git -C "$maintainer_root" rev-parse HEAD)"
 test -L "$maintainer_root/.agents/skills/fixture-maintenance"
@@ -208,20 +215,6 @@ fi
 rm -f "$maintainer_root/.local/lifecycle.lock/owner" \
   "$maintainer_root/.local/lifecycle.lock/operation"
 rmdir "$maintainer_root/.local/lifecycle.lock"
-"$maintainer_root/agenticops" station repair --station "$source_station" >/dev/null
-python3 - "$source_station/.agenticops/init.json" "$maintainer_root" <<'PY'
-import json
-import subprocess
-import sys
-from pathlib import Path
-
-document = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-head = subprocess.check_output(
-    ["git", "-C", sys.argv[2], "rev-parse", "HEAD"], text=True
-).strip()
-assert document["product_ref"] == head
-PY
-
 git -C "$maintainer_root" switch -qc feature/update-boundary
 if PATH="$setup_bin:$PATH" "$maintainer_root/agenticops" update >/dev/null 2>&1; then
   printf '产品源码目录在非跟踪分支执行了 update\n' >&2
@@ -236,18 +229,29 @@ fi
 git -C "$maintainer_root" checkout -q -- agenticops
 git -C "$source_repo" switch -q "$install_branch"
 
-bash "$repo_root/bootstrap/install.sh" \
-  --install-home "$install_root" --repository "$source_repo" --branch "$install_branch" \
-  --source-pool "$custom_source_pool"
+# 与 gh 一键安装一致：仅向 Bash 传脚本文本，从源码目录之外运行。
+# 同名本地辅助脚本不能被执行。
+installer_cwd="$test_root/installer-cwd"
+mkdir -p "$installer_cwd"
+printf '%s\n' 'exit 99' > "$installer_cwd/lifecycle-common.sh"
+(
+  cd "$installer_cwd"
+  cat "$repo_root/bootstrap/install.sh" | bash -s -- \
+    --install-home "$install_root" --repository "$source_repo" --branch "$install_branch" \
+    --source-pool "$custom_source_pool"
+)
 
 test -f "$install_root/contracts/gate-request.schema.json"
 test -f "$install_root/gate/runner.py"
 test -f "$install_root/policies/defect-repair-strategies.json"
 test -f "$install_root/workflow/repair_strategy.py"
+test -f "$install_root/workflow/pr_body.py"
+python3 "$install_root/workflow/pr_body.py" --help >/dev/null
 test -x "$install_root/agenticops"
 test -f "$maintainer_root/skills/ao-test-takeover/SKILL.md"
 test -f "$maintainer_root/skills/ao-ws-init/SKILL.md"
 test -f "$maintainer_root/skills/ao-review-change/SKILL.md"
+test -f "$install_root/skills/shared/ao-requirement/SKILL.md"
 test ! -e "$install_root/skills/ao-review-change"
 test ! -e "$install_root/skills/ao-test-takeover"
 test ! -e "$install_root/skills/ao-ws-init"
@@ -267,7 +271,7 @@ if PATH="$setup_bin:$PATH" "$install_root/agenticops" setup >/dev/null 2>&1; the
   printf '安装产品根目录被错误切换为源码维护模式\n' >&2
   exit 1
 fi
-if "$install_root/agenticops" station init --station "$install_root" >/dev/null 2>&1; then
+if "$install_root/agenticops" station init --project tapdata --station "$install_root" >/dev/null 2>&1; then
   printf '产品根目录被错误初始化为项目工位\n' >&2
   exit 1
 fi
@@ -275,7 +279,7 @@ fi
 collision_station="$test_root/collision-station"
 mkdir -p "$collision_station"
 printf 'project owned\n' > "$collision_station/AGENTS.md"
-if "$install_root/agenticops" station init --station "$collision_station" >/dev/null 2>&1; then
+if "$install_root/agenticops" station init --project tapdata --station "$collision_station" >/dev/null 2>&1; then
   printf '工作目录初始化覆盖了项目自有 AGENTS.md\n' >&2
   exit 1
 fi
@@ -287,7 +291,7 @@ symlink_outside="$test_root/symlink-outside"
 init_symlink_station="$test_root/init-symlink-station"
 mkdir -p "$symlink_outside/init" "$init_symlink_station/.agents"
 ln -s "$symlink_outside/init" "$init_symlink_station/.agents/skills"
-if "$install_root/agenticops" station init --station "$init_symlink_station" \
+if "$install_root/agenticops" station init --project tapdata --station "$init_symlink_station" \
     --agent codex >/dev/null 2>&1; then
   printf 'init 经由 Skill 父目录 symlink 写出了工位\n' >&2
   exit 1
@@ -299,7 +303,7 @@ test ! -e "$init_symlink_station/.agenticops"
 # repair 必须拒绝已有 Skill 父目录被替换成 symlink，不能在外部重建最终接线。
 repair_symlink_station="$test_root/repair-symlink-station"
 mkdir -p "$symlink_outside/repair"
-"$install_root/agenticops" station init --station "$repair_symlink_station" \
+"$install_root/agenticops" station init --project tapdata --station "$repair_symlink_station" \
   --agent codex >/dev/null
 repair_skill_target="$(readlink "$repair_symlink_station/.agents/skills/tapdata-task")"
 for generated_skill in "$repair_symlink_station/.agents/skills/"*; do
@@ -319,7 +323,7 @@ test -f "$repair_symlink_station/.agenticops/station.json"
 # detach 预检同样必须逐级检查，不能删除 symlink 父目录外的同名最终接线。
 detach_symlink_station="$test_root/detach-symlink-station"
 mkdir -p "$symlink_outside/detach"
-"$install_root/agenticops" station init --station "$detach_symlink_station" \
+"$install_root/agenticops" station init --project tapdata --station "$detach_symlink_station" \
   --agent codex >/dev/null
 detach_skill_target="$(readlink "$detach_symlink_station/.agents/skills/tapdata-task")"
 for generated_skill in "$detach_symlink_station/.agents/skills/"*; do
@@ -344,8 +348,8 @@ race_repair_station="$test_root/race-repair-station"
 race_detach_station="$test_root/race-detach-station"
 mkdir -p "$race_outside/init" "$race_outside/repair" "$race_outside/detach" \
   "$race_init_station/.agents/skills"
-"$install_root/agenticops" station init --station "$race_repair_station" --agent codex >/dev/null
-"$install_root/agenticops" station init --station "$race_detach_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$race_repair_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$race_detach_station" --agent codex >/dev/null
 printf 'outside sentinel\n' > "$race_outside/detach/tapdata-task"
 python3 - "$install_root" "$race_init_station" "$race_repair_station" \
   "$race_detach_station" "$race_outside" <<'PY'
@@ -367,6 +371,7 @@ from bootstrap import station_registry
 
 def render_race(station, destination, refresh):
     original = render.remove_stale_artifacts
+    swapped = []
 
     def swap_after_preflight(current, owned, targets, tree):
         original(current, owned, targets, tree)
@@ -374,11 +379,12 @@ def render_race(station, destination, refresh):
         held = station / ".agents" / "skills-held"
         skills.rename(held)
         skills.symlink_to(destination, target_is_directory=True)
+        swapped.append(True)
 
     render.remove_stale_artifacts = swap_after_preflight
     argv = [
         "render.py", "--install-home", str(install_root), "--station", str(station),
-        "--agent", "codex",
+        "--agent", "codex", "--project", "tapdata",
     ]
     if refresh:
         argv = [
@@ -392,6 +398,7 @@ def render_race(station, destination, refresh):
             render.main()
         except SystemExit as error:
             assert error.code == 2
+            assert swapped, "必须实际到达父目录替换边界，不能因缺参数提前失败"
         else:
             raise AssertionError("父目录替换后 render 未失败关闭")
     finally:
@@ -428,17 +435,22 @@ finally:
 assert (outside / "detach" / "tapdata-task").read_text(encoding="utf-8") == "outside sentinel\n"
 PY
 
-"$install_root/agenticops" station init --station "$station"
+"$install_root/agenticops" station init --project tapdata --station "$station"
 
 test -f "$station/.agenticops/station.json"
 test -f "$station/.agenticops/init.json"
 test -x "$station/agenticops"
+test "$("$station/agenticops" version)" = "$(python3 "$install_root/bootstrap/product_version.py" --product-root "$install_root")"
 test -f "$station/AGENTS.md"
 test -f "$station/CLAUDE.md"
 test -f "$station/.mcp.json"
 test ! -e "$station/.claude/settings.json"
 test ! -e "$station/.codex/hooks.json"
 test -f "$station/.test-agent/settings.json"
+for agent_skill_root in .agents/skills .claude/skills; do
+  test -L "$station/$agent_skill_root/ao-requirement"
+  test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$station/$agent_skill_root/ao-requirement")" = "$install_root/skills/shared/ao-requirement"
+done
 test -L "$station/.agents/skills/tapdata-task"
 test -L "$station/.claude/skills/tapdata-task"
 test ! -e "$station/.agents/skills/ao-test-takeover"
@@ -497,38 +509,21 @@ for name in ("tapdata-task", "tapdata-wiki", "tapdata-ci-test"):
         assert (link / "SKILL.md").is_file()
 PY
 python3 - "$install_root" <<'PY'
-import ast
 import json
 import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
 manifest = json.loads((root / "adapters/agents/codex/manifest.json").read_text(encoding="utf-8"))
-tree = ast.parse((root / "adapters/agents/codex/hook.py").read_text(encoding="utf-8"))
-versions = [
-    node.value.value
-    for node in tree.body
-    if isinstance(node, ast.Assign)
-    and any(isinstance(target, ast.Name) and target.id == "ADAPTER_VERSION" for target in node.targets)
-    and isinstance(node.value, ast.Constant)
-    and type(node.value.value) is int
-]
-assert versions == [manifest["adapter_version"]]
-
-mappings = json.loads((root / "adapters/tools/mcp-operations.json").read_text(encoding="utf-8"))
-assert "readonly_tools" not in mappings
-assert "readonly_prefixes" not in mappings
-assert set(mappings["mappings"]) == {"github", "atlassian"}
+assert manifest["schema_version"] == 3
+assert not {"hook", "entrypoint", "capabilities"} & set(manifest)
+assert not list((root / "adapters").rglob("*.py"))
 
 profile = json.loads((root / "projects/tapdata/profile.json").read_text(encoding="utf-8"))
-transition = profile["transitions"]["start_progress"]
-assert transition == {
-    "name": "Start Investigation",
-    "id": "421",
-    "from": ["Analyzed"],
-    "to": "In Progress",
-}
-assert profile["statuses"]["Analyzed"] == "waiting_takeover"
+assert "statuses" not in profile and "transitions" not in profile
+transition = profile["jira"]["status_sync"]["attempts"]["takeover"]
+assert transition["transition_id"] == "421"
+assert transition["from"] == ["Analyzed"] and transition["to"] == "In Progress"
 task_workflow = profile["workflows_by_issue_type"]
 assert task_workflow == [{
     "issue_type": {"id": "10008", "name": "任务"},
@@ -577,7 +572,7 @@ assert ".claude/skills/ao-ws-init" not in artifacts
 PY
 override_station="$test_root/override-source-pool-station"
 override_source_pool="$test_root/override-source-pool"
-"$install_root/agenticops" station init --station "$override_station" \
+"$install_root/agenticops" station init --project tapdata --station "$override_station" \
   --source-pool "$override_source_pool" >/dev/null
 python3 - "$override_station/.agenticops/station.json" "$override_source_pool" "$install_root" "$custom_source_pool" <<'PY'
 import json
@@ -609,9 +604,9 @@ import sys
 from pathlib import Path
 
 document = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-handler = document["hooks"]["PreToolUse"][0]["hooks"][0]
-assert document["hooks"]["PreToolUse"][0]["matcher"] == "Shell"
-assert handler["timeout"] == 15
+assert document["project"] == "tapdata"
+assert Path(document["instruction_root"]).is_dir()
+assert "hooks" not in document
 PY
 "$install_root/agenticops" station doctor --station "$station" >/dev/null
 "$station/agenticops" station doctor >/dev/null
@@ -659,7 +654,7 @@ test -x "$station/agenticops"
 "$station/agenticops" station doctor >/dev/null
 
 entry_migration_station="$test_root/entry-migration-station"
-"$install_root/agenticops" station init --station "$entry_migration_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$entry_migration_station" --agent codex >/dev/null
 python3 - "$entry_migration_station" <<'PY'
 import json
 import sys
@@ -685,7 +680,7 @@ test -x "$entry_migration_station/agenticops"
 "$entry_migration_station/agenticops" station doctor >/dev/null
 
 subset_station="$test_root/subset-station"
-"$install_root/agenticops" station init --station "$subset_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$subset_station" --agent codex >/dev/null
 test ! -e "$subset_station/.codex/hooks.json"
 test -L "$subset_station/.agents/skills/tapdata-task"
 test -L "$subset_station/.agents/skills/tapdata-ci-test"
@@ -696,18 +691,18 @@ test ! -e "$subset_station/.claude/skills"
 test ! -L "$subset_station/.agents/skills/tapdata-ci-test"
 test ! -e "$subset_station/.agents/skills/tapdata-ci-test"
 test -f "$install_root/projects/tapdata/skills/tapdata-ci-test/SKILL.md"
-"$install_root/agenticops" station init --station "$subset_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$subset_station" --agent codex >/dev/null
 test -L "$subset_station/.agents/skills/tapdata-ci-test"
 test ! -e "$subset_station/.claude/skills"
 collision_station="$test_root/root-entry-collision-station"
 mkdir -p "$collision_station"
 printf 'user owned\n' > "$collision_station/agenticops"
-if "$install_root/agenticops" station init --station "$collision_station" --agent codex >/dev/null 2>&1; then
+if "$install_root/agenticops" station init --project tapdata --station "$collision_station" --agent codex >/dev/null 2>&1; then
   printf '工位根入口覆盖了已有用户文件\n' >&2
   exit 1
 fi
 grep -Fx 'user owned' "$collision_station/agenticops" >/dev/null
-if "$install_root/agenticops" station init --station "$test_root/unknown-station" --agent missing-agent >/dev/null 2>&1; then
+if "$install_root/agenticops" station init --project tapdata --station "$test_root/unknown-station" --agent missing-agent >/dev/null 2>&1; then
   printf '未知 Agent 被错误接受\n' >&2
   exit 1
 fi
@@ -815,7 +810,7 @@ if "$install_root/agenticops" station start --agent test-agent --station "$subse
   exit 1
 fi
 detached_station="$test_root/detached-station"
-"$install_root/agenticops" station init --station "$detached_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$detached_station" --agent codex >/dev/null
 if (cd "$detached_station" && ./agenticops station detach) >/dev/null 2>&1; then
   printf '非交互 detach 被错误接受\n' >&2
   exit 1
@@ -834,7 +829,7 @@ fi
 # 无法唯一归属 active 任务的 Gate 判定写入工位级 events.jsonl；purge 必须
 # 将这个受控审计文件与任务状态一并删除，而非把它误判为未知文件。
 unbound_events_station="$test_root/unbound-events-station"
-"$install_root/agenticops" station init --station "$unbound_events_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$unbound_events_station" --agent codex >/dev/null
 python3 - "$install_root" "$unbound_events_station" <<'PY'
 import sys
 from pathlib import Path
@@ -879,7 +874,7 @@ test -d "$station/.agenticops"
 # 仅受控的 events.jsonl 可被 purge；其它未知状态及 events.jsonl 的非常规文件
 # 形态仍必须失败关闭，且不得触及工位外的目标。
 unknown_state_station="$test_root/unknown-state-station"
-"$install_root/agenticops" station init --station "$unknown_state_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$unknown_state_station" --agent codex >/dev/null
 printf 'unknown\n' > "$unknown_state_station/.agenticops/unknown-state"
 if "$install_root/agenticops" station purge \
     --station "$unknown_state_station" --yes >/dev/null 2>&1; then
@@ -891,7 +886,7 @@ test -f "$unknown_state_station/.agenticops/unknown-state"
 event_outside="$test_root/event-outside"
 printf 'outside sentinel\n' > "$event_outside"
 event_symlink_station="$test_root/event-symlink-station"
-"$install_root/agenticops" station init --station "$event_symlink_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$event_symlink_station" --agent codex >/dev/null
 ln -s "$event_outside" "$event_symlink_station/.agenticops/events.jsonl"
 if "$install_root/agenticops" station purge \
     --station "$event_symlink_station" --yes >/dev/null 2>&1; then
@@ -901,7 +896,7 @@ fi
 grep -Fx 'outside sentinel' "$event_outside" >/dev/null
 
 event_directory_station="$test_root/event-directory-station"
-"$install_root/agenticops" station init --station "$event_directory_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$event_directory_station" --agent codex >/dev/null
 mkdir "$event_directory_station/.agenticops/events.jsonl"
 if "$install_root/agenticops" station purge \
     --station "$event_directory_station" --yes >/dev/null 2>&1; then
@@ -914,7 +909,7 @@ test -d "$event_directory_station/.agenticops/events.jsonl"
 python3 "$repo_root/tests/test_station_bootstrap.py" --product-root "$install_root"
 
 missing_station="$test_root/missing-station"
-"$install_root/agenticops" station init --station "$missing_station" --agent codex >/dev/null
+"$install_root/agenticops" station init --project tapdata --station "$missing_station" --agent codex >/dev/null
 rm -rf "$missing_station"
 "$install_root/agenticops" station prune --all --yes \
   | grep -E '已注销 [1-9][0-9]* 个无法跟踪的工位。' >/dev/null
@@ -991,8 +986,6 @@ from pathlib import Path
 path = Path(sys.argv[1])
 document = json.loads(path.read_text(encoding="utf-8"))
 document["station_state_epoch"] += 1
-document["legacy_station_state_epoch"] = document["station_state_epoch"]
-document["supported_station_state_epochs"] = [document["station_state_epoch"]]
 path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
 git -C "$source_repo" add contracts/station-state-compatibility.json

@@ -26,13 +26,13 @@ def jira_test_tasks(path, issue_key, rules):
 def linked_test_confirmation_problems(base, task, rules, tests):
     if not rules["pr_ready"].get("require_user_confirmation_per_linked_test"):
         return []
-    report = quality.report(quality.load(base, task), rules, quality.context(base, task))
+    report = quality.report(quality.load(base, task), rules, quality.context(base, task), base=base, task=task)
     return jira_tests.confirmation_problems(report, tests, rules)
 
 
 def quality_problems(base, task, rules, snapshot=None):
     ctx = jira_tests.with_snapshot(quality.context(base, task), snapshot, rules)
-    result = quality.report(quality.load(base, task), rules, ctx)
+    result = quality.report(quality.load(base, task), rules, ctx, base=base, task=task)
     accepted = set(rules["pr_ready"]["accepted_outcomes"])
     problems = []
     for checkpoint in rules["pr_ready"]["required_checkpoints"]:

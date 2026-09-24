@@ -81,7 +81,7 @@ def classify(config, name, directory):
     return {"action": "block", "layer": "unmatched"}
 
 
-def inspect(base, owned=(), registered=()):
+def inspect(base, owned=(), registered=(), partial=False):
     root = Path(base).resolve()
     config = load(base)
     result, errors = {}, []
@@ -100,6 +100,7 @@ def inspect(base, owned=(), registered=()):
             continue
         if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)) or path.is_mount():
             errors.append("工位对象不是普通文件或目录：" + name)
+            result[name] = {"action": "block", "layer": "unsafe"}
             continue
         try:
             decision = classify(config, name, stat.S_ISDIR(mode))
@@ -115,6 +116,9 @@ def inspect(base, owned=(), registered=()):
             result[name] = decision
         except ValueError as exc:
             errors.append(str(exc))
+            result[name] = {"action": "block", "layer": "invalid"}
+    if partial:
+        return {"digests": config["digests"], "objects": result, "errors": errors}
     if errors:
         raise ValueError("；".join(errors))
     return {"digests": config["digests"], "objects": result}
@@ -123,10 +127,8 @@ def inspect(base, owned=(), registered=()):
 def validate_snapshot(plan):
     """读取持久计划时校验版本边界；不加载当前配置改变旧计划。"""
     version = plan.get("schema_version")
-    if version == 3 and "rules" not in plan:
-        return
     snapshot = plan.get("rules")
-    if version not in (4, 5) or (version == 5 and not isinstance(plan.get("native_clean"), dict)) or not isinstance(snapshot, dict) or set(snapshot) != {"digests", "objects"}:
+    if type(version) is not int or version != 6 or not isinstance(snapshot, dict) or set(snapshot) != {"digests", "objects"}:
         raise ValueError("清理计划版本与规则快照不匹配")
     hashes = snapshot["digests"]
     valid_hash = lambda value: isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from agent_registry import select
 from product_state import load as load_product_state
-from skill_wiring import validate_skill
+from skill_wiring import validate_skill, shared_skill_sources, unique_skill_sources
 from station_paths import StationDirectory, station_artifact_path
 from station_compatibility import (
     load_manifest,
@@ -70,20 +70,6 @@ def replacements(install_root, project, manifest=None):
         "__AGENTIC_OPS_HOME__": str(install_root.resolve()),
         "__AGENTIC_OPS_PROJECT__": project,
     }
-    if manifest is not None:
-        hook = manifest["hook"]
-        native = hook["native"]
-        tool_matchers = native["tool_matchers"]
-        native_matcher = (
-            None
-            if tool_matchers is None
-            else "|".join(tool_matchers[kind] for kind in hook["tool_kinds"])
-        )
-        values['"__AGENTIC_OPS_HOOK_TIMEOUT_SECONDS__"'] = str(
-            hook["timeout_seconds"]
-        )
-        values['"__AGENTIC_OPS_HOOK_NATIVE_EVENT__"'] = json.dumps(native["event"])
-        values['"__AGENTIC_OPS_HOOK_NATIVE_TOOL_MATCHER__"'] = json.dumps(native_matcher)
     return values
 
 
@@ -235,7 +221,9 @@ def expected_artifacts(install_root, station, project, agents, manifests):
             owners[target] = agent_id
         skill_target = manifest.get("skill_target")
         if skill_target:
-            for source in project_skill_sources(install_root, project):
+            for source in unique_skill_sources(
+                project_skill_sources(install_root, project), shared_skill_sources(install_root)
+            ):
                 target = str(Path(skill_target) / source.name)
                 if target in artifacts:
                     raise ValueError(
@@ -366,6 +354,11 @@ def assert_artifact_ownership(station, owned, artifacts, tree):
         if not tree.exists(target):
             continue
         if target in owned:
+            recorded = owned[target]
+            if recorded["kind"] == "symlink" and (
+                not tree.is_symlink(target) or tree.readlink(target) != recorded["target"]
+            ):
+                raise ValueError("工位 Skill 接线已漂移，拒绝覆盖：%s" % path)
             continue
         if expected["kind"] == "symlink":
             if not tree.is_symlink(target) or tree.readlink(target) != expected["target"]:
@@ -467,9 +460,11 @@ def check_station(install_root, station, config, init, tree):
     from workflow import station_operation, task_store
     task_store.read_current(station)
     station_operation.read(station)
-    for name in ("config", "source", "runtime", "archive"):
+    for name in ("config", "source", "runtime"):
         if not tree.is_dir(name) or tree.is_symlink(name):
             raise ValueError("工位目录缺失或不安全，请检查后执行 repair：%s" % name)
+    if tree.exists("archive") and (not tree.is_dir("archive") or tree.is_symlink("archive")):
+        raise ValueError("旧工位归档目录不安全：archive")
     artifacts, _ = expected_artifacts(install_root, station, project, agents, manifests)
     if init.get("product_ref") != product_ref(install_root):
         raise ValueError("产品根目录版本已变化，请执行 agenticops station repair")
@@ -516,6 +511,33 @@ def update_git_exclude(station, artifacts):
                 stream.write(pattern + "\n")
 
 
+def select_station_project(install_root, config, requested, require_existing=False):
+    """首次明确选择，后续复用绑定；不能通过生成接线改变工位项目。"""
+    config = require_current_station_document(config)
+    if config is not None:
+        validate_station_document(install_root, config)
+        project = config["project"]
+        if requested is not None and requested != project:
+            raise ValueError("工位已绑定项目 %s，不能改为 %s；请先在原版本结束任务并 purge 后重新初始化" % (project, requested))
+    else:
+        if require_existing:
+            raise ValueError("工位尚未初始化，请先执行 agenticops station init")
+        if requested is None:
+            raise ValueError("首次初始化必须显式指定 --project <项目>，不默认选择业务项目")
+        project = requested
+    project_rules.project_root(install_root, project)
+    return project
+
+
+def resolve_station_project(install_root, station, requested, require_existing=False):
+    """登记前只读预检；生成时仍在目录 FD 内复核，不能依赖过时的预检结果。"""
+    config = None
+    if station.exists():
+        with StationDirectory(station) as tree:
+            config, _ = load_station(station, tree)
+    return select_station_project(install_root, config, requested, require_existing)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--install-home", required=True)
@@ -528,30 +550,32 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--refresh", action="store_true")
     mode.add_argument("--check", action="store_true")
+    mode.add_argument("--resolve-project", action="store_true", help=argparse.SUPPRESS)
     arguments = parser.parse_args()
     if arguments.accept_checkpoint_migration and not arguments.refresh:
         parser.error("--accept-checkpoint-migration 只能用于显式 repair/refresh")
 
     install_root = Path(arguments.install_home).resolve()
     station = Path(arguments.station).resolve()
-    station.mkdir(parents=True, exist_ok=True)
     try:
+        if arguments.resolve_project or not station.exists():
+            project = resolve_station_project(install_root, station, arguments.project,
+                                              arguments.refresh or arguments.check)
+            if arguments.resolve_project:
+                print(project)
+                return 0
+        station.mkdir(parents=True, exist_ok=True)
         with StationDirectory(station) as tree:
             config, legacy = load_station(station, tree)
-            config = require_current_station_document(config)
+            project = select_station_project(install_root, config, arguments.project,
+                                             arguments.refresh or arguments.check)
             init = load_init(station, tree)
             if arguments.refresh or arguments.check:
-                if config is None:
-                    parser.error("工位尚未初始化，请先执行 agenticops station init")
-                project = config["project"]
                 requested_agents = config["agents"]
                 requested_source_pool = config["source_pool"]
             else:
-                project = arguments.project or "tapdata"
                 requested_agents = arguments.agent
                 requested_source_pool = arguments.source_pool or load_product_state(install_root)["source_pool"]
-
-            project_root = project_rules.project_root(install_root, project)
 
             if arguments.check:
                 _, all_manifests = select(install_root, None)
@@ -583,8 +607,6 @@ def main():
                         raise ValueError("未绑定的状态目录不安全，拒绝生成")
                     if any(tree.path(STATE_DIRECTORY).iterdir()):
                         raise ValueError("发现未绑定的旧状态或未知材料，请使用原版本受控解绑并重建")
-            if config is not None:
-                validate_station_document(install_root, config)
             agents, manifests = select(install_root, requested_agents)
             artifacts, messages = expected_artifacts(
                 install_root, station, project, agents, manifests
@@ -636,7 +658,7 @@ def main():
                     tree.chmod(target, 0o700)
             tree.write_json_atomic(Path(STATE_DIRECTORY) / STATION_NAME, station_config)
             tree.write_json_atomic(Path(STATE_DIRECTORY) / INIT_NAME, document)
-            for name in ("config", "source", "runtime", "archive"):
+            for name in ("config", "source", "runtime"):
                 tree.path(name).mkdir(mode=0o700, exist_ok=True)
             task_store.initialize_current(station)
     except ValueError as error:

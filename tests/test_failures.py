@@ -19,7 +19,9 @@ class FailureTests(unittest.TestCase):
         (self.base / ".agenticops").mkdir()
         (self.base / ".agenticops/station.json").write_text(json.dumps({
             "schema_version": 1, "product_root": str(ROOT), "project": "tapdata", "agents": []}))
-        self.task = {"issue_key": "DEMO-1", "run_id": "run-one", "repositories": [{"repository": "owner/repo"}]}
+        self.task = {"issue_key": "DEMO-1", "run_id": "run-one", "task_class": "technical_task",
+                     "stage": "implementation", "facts": {}, "history": [], "pending": None,
+                     "repositories": [{"repository": "owner/repo"}]}
         save_station_task(self.base, self.task)
 
 

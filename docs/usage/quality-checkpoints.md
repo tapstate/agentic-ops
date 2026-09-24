@@ -1,8 +1,52 @@
 # 质量检查与证据
 
+## 同步待办与有限回执恢复
+
+TapData 的 `publication_mode=checkpoint` 启用接管摘要和逐检查点评论待办。接管成功、阶段推进、quality apply/status、task next 及 external_sync status 返回 `sync_actions`；它覆盖已确认但未发布的历史检查点，不只看下一阶段。查询不写状态，不代表已获得外部写入权限或同步已完成。接管摘要只说明准备事实，不冒充 Q1 通过；Q1—Q6 必须使用有效检查点的完整正文。
+
+Agent 在当前授权内处理动作；缺少授权时先询问对应动作范围。评论按现有 draft/confirm/prepare_write、原生调用、receipt/readback 顺序处理。稳定 id 复用原记录；尚未发送的过期草稿重新生成确认，已经发送或结果不明的记录只先回读原目标和原正文。新确认不授权重复发送。`refresh_required` 只表示当前材料变化，不撤销原外部调用事实。
+
+状态、水印和字段按各自入口核验，不自动改写任务描述或猜填审批字段。接管状态同步允许在 task_intake/design_review/implementation 补查；更晚阶段交接人工，不回退 Jira 状态。同步失败明确原因及后续动作，不阻止无依赖的本地工作；unknown 或无法证明未写入的 failed 先核清。安全退出判定不消费容错展示结果。
+
+completed 后可通过原 quality receipt/readback、jira_status complete、jira_watermark complete 核对已有意图；不新建或重发。恢复窗口与限制见[工位合同](../architecture/single-task-station.md#外部同步回执恢复)：清理确认或归档证据已绑定时交维护侧，不改状态绕过。无原意图的字段仅作只读观察，不记录终态同步成功。水印回读原版本不等于当前产品版本已同步。
+
+已知未发送事项在结束前列入总结与接力；归档后不自动跨 run 补写。`sync_diagnostics` 表示待办展示失败，应查询原操作；若返回 `local_write=committed`，质量记录已保存，不得重复 apply。兼容旧 `deferred-summary` 配置，但仅 `checkpoint` 主动生成接管及检查点动作。
+
+## 源码定位与实时核验
+
+同类实现证据保存仓库标识、仓库内相对路径与完整 Git SHA。源码位置由工位既有 `source/<owner>/<repo>` 规则即时解析，并核对当前任务登记、源码准备状态和冻结仓库身份；不接受质量事件提供的绝对路径，也不在新质量事件中保存 `source_path`。原始证据、用户正文和报告引用仍按项目规则扫描，不增加内部路径白名单。
+
+历史重放仅恢复记录，不重新执行同类实现的 Git 查询；当前报告、方案确认、实施授权及相关阶段推进必须执行实时核验。核验能力或源码缺失不能解释为通过。临时定位与核验结果不进入业务确认摘要；方案、仓库或引用版本变化仍使相关确认失效。此边界只针对同类实现查询，不表示其它验证材料不再复核。
+
+当前报告的方案检查点返回 `source_issues`：包含类别、引用序号、问题、责任人、补齐动作和受影响检查点。`evidence_gap` 要求研发与 Agent 修正或补齐依据；`tool_failure` 要求恢复工具后重试，无依赖工作继续。不回显本机路径或 Git 原始错误。Q2 核验失败阻止对应确认与实施授权，不阻止 Q1 合规记录和既有评论回执、回读；不新增强制通过入口。其它阶段仍按原配置检查实际输出。
+
+发送准备按当前规则重新扫描已保存的完整正文，拒绝时不增加质量 revision、不生成发送意图。历史外部写入结果未知时先核对原操作，不因新扫描规则或方案核验故障盲目重发。归档继续执行原有脱敏。
+
+旧版本不能重放无 `source_path` 的同类实现确认，新版读写语义使用 epoch 18。旧事件不改写，不承诺全部旧摘要不变，也不在线继承旧 run 或确认；按[更新与回退](update-and-rollback.md)先由原版本保存材料、核对未知外部结果、退出任务并显式 purge，再更新和初始化。该操作不由质量工具自动执行。
+
+## PR 正文发布与回读
+
+PR 正文使用 UTF-8 Markdown 文件和真实换行，通过文件编辑能力生成，不把完整正文拼入 Shell 命令。CLI 创建和更新使用 `gh pr create --repo <owner/repo> ... --body-file <正文文件>` 或 `gh pr edit <编号> --repo <owner/repo> --body-file <正文文件>`；API/MCP 直接传递真实多行字符串，由客户端序列化一次。不要用 `echo -e`、`eval` 或全局反转义转换正文；双引号中的美元符号、反引号及命令替换可能被 Shell 解释，字面 `\n` 也不等于真实换行。
+
+每仓独立准备正文，核对变更、验证结果和未执行项；文件放入当前任务已有证据位置，使用 `task.py interaction-path` 分配。不得将敏感日志或本机绝对路径写入对外正文。纯正文修正不改变源码，不触发来源分支 Merge、代码重验或重新创建 PR；原有代码交付和验收要求保持不变。
+
+```sh
+python3 <agenticops-root>/workflow/pr_body.py preflight --body-file <正文文件>
+gh pr view <编号> --repo <owner/repo> --json number,url,body > <回读.json>
+python3 <agenticops-root>/workflow/pr_body.py compare --body-file <正文文件> --readback <回读.json> --repository <owner/repo> --pr <编号>
+```
+
+先预检再由 Agent 在已有授权内原生发布；发布后重新取得包含 `body` 的当前 JSON 并比对。显式检查原生回读的退出状态，不使用失败调用、旧文件或人工拼造的快照证明成功。API/MCP 回读整理成同一对象 `{number, url, body}` 时保留原始来源，不对 body 二次解码。企业 GitHub 通过 `--host <主机名>` 指定目标站点。正文匹配仅证明传输完整，不证明 Markdown 渲染效果、技术内容或验收结论正确，发布前仍需审阅正文。
+
+工具仅本地读取指定文件，不联网、不写状态、不发送或修正正文。返回 0 表示预检有效或正文匹配，3 表示正文或目标不匹配，4 表示输入不可读取或格式无效。空正文、非法 UTF-8、NUL、孤立 CR、BOM 不通过；疑似用字面 `\n` 拼接标题和列表只返回 warning 及行列，合法代码示例可以保留，不能自动替换。比较只规范化 CRLF 为 LF，不裁剪空白或末尾换行，不解释反斜杠转义；JSON 表示的真实换行与正文中的字面转义分别处理。输出只含诊断与摘要，不回显正文。仓库、主机及 PR 编号必须与回读 URL/number 一致。
+
+编辑已有 PR 前保留最新原文，与拟修改正文比较，保留其他人的更改；写前再次回读确认原文未变，变化时重新整理，不能覆盖。普通 CLI 编辑不提供原子条件更新保证，短窗口内并发仍可能发生；已知有同时编辑者时先协调，写后核对并披露冲突，不声称消除了并发风险。
+
+正文回读不匹配时，只暂停相关描述发布/修正及“描述已核验”的结论，不阻塞无依赖编码、测试或 CI 观察；PR 存在、正文匹配、代码与 CI 通过分别报告。调用超时或结果未知先定位原 PR 并回读，不重建 PR 或盲目重发。它不是 PR Ready 新门禁，不增加工位字段、事件或 epoch，也不认证快照来源；旧状态读取和原门禁保持不变。
+
 ## 共同验证材料
 
-使用现有 `quality.py apply --issue-key <key> --expected-run-id <run> --expected-revision <当前revision> --input <json> --dir <station>`，输入为 `{"action":"verification","payload":{...}}`。每个仓库分别提交材料，内部自动绑定当前任务各仓源码版本；不是新任务类型或执行引擎。写前先 `quality.py status`，source_sync 还会实际读取已准备的任务工作树并核对包含关系。原生报告的真实性、依赖清单和语义分析仍由 Agent 核对，工具不认证来源或判断断言含义。
+使用现有 `quality.py apply --issue-key <key> --expected-run-id <run> --expected-revision <当前revision> --input <json> --dir <station>`，输入为 `{"action":"verification","payload":{...}}`。每个仓库分别提交材料，内部自动绑定源码版本与仓库登记；不是新任务类型或执行引擎。新 source_sync 仅绑定所属仓，local/ci/review 仍绑定全部任务仓。写前先 `quality.py status`，source_sync 还会实际读取已准备的任务工作树并核对包含关系。原生报告的真实性、依赖清单和语义分析仍由 Agent 核对，工具不认证来源或判断断言含义。
 
 所有材料提供 kind、repository、target_revision（当前完整 SHA 或首轮本地源码指纹）、source_ref。其余内容如下：
 
@@ -17,7 +61,9 @@ results 中 result 使用 PASS/FAIL/UNKNOWN/NOT_RUN/SKIPPED。PASS 另需报告�
 
 跨仓 Jar 材料使用 jars 列表，每项包含 built_sha256、consumed_sha256（必须相同）和 loaded_from（实际加载证据）。local 另给 built_path、consumed_path 绝对路径，写入及检查点复核内容哈希；这两个路径仅保存为本地恢复元数据，不进入 Jira 摘要，其它材料仍按项目规则扫描。没有 Jar 时省略列表，但 dependency_analysis_ref 仍须说明分析依据。CI 使用运行内文件与加载证据，不冒充本地文件核验。报告引用、版本及统计从实际执行取得，不能为满足字段填造数字。
 
-TapData 功能和缺陷使用相同配置：Q3、Q4 要求 local/source_sync，Q5、Q6 再要求 ci/review；PR Ready 要求 local/source_sync/ci，同时保留现有 PR Checks 和人工验收规则。代码、用例所在仓或依赖仓变化，报告失效；CI 重新观察后需重新核对并登记 CI 材料。本地 Jar 变化也失效。遗漏范围、未处理失败或待处理审查意见阻止对应检查点，人工接受的缺口保留原结果。
+TapData 功能和缺陷使用相同配置：Q3、Q4 要求 local/source_sync，Q5、Q6 再要求 ci/review；PR Ready 要求 local/source_sync/ci，同时保留现有 PR Checks 和人工验收规则。local/ci/review 在任一任务仓代码或登记变化时失效；CI 重新观察后需重新核对并登记 CI 材料。本地 Jar 变化也失效。遗漏范围、未处理失败或待处理审查意见阻止对应检查点，人工接受的缺口保留原结果。
+
+新 source_sync 的 `binding_version=2` 由工具生成，禁止调用者指定。仅所属仓的源码版本、repository/base_branch/work_branch/base_sha/catalog_digest/approved_scope/verification_method 变化使它失效；无关仓变化不使该来源事实失效，新增仓仍需自己的材料。旧事件缺少版本时继续全仓绑定，未知版本拒绝，不复活历史确认或授权。记录只证明 observed_at 时核对的 source_revision 包含关系，PR 前仍需刷新来源事实，不保证远端以后不再变化。该语义改变须按[更新与回退](update-and-rollback.md)跨 epoch 退出重建，不在线迁移。
 
 源码同步后已解决问题只需无修改重验时，`failures.py` 使用 revalidate，参数同 finish，不消耗修复轮数；失败则回到 unresolved，后续修改仍须 start 记账。每次重新验证都保留事件，不能改写历史。旧 `ci.py record-fix` 已移除，CI 观察不再维护另一套预算。
 
@@ -128,6 +174,8 @@ flowchart TD
 以上是现有 `task.py advance` 的强制检查点。Q2 的 `fix_plan` 必须以 `structured-v1` JSON 记录：每个问题现象及来源、可回查证据、可证伪假设、未取得的关键输入、修改范围、风险、回滚以及每个验收项的 Test 关联意图。缺输入时只输出一次性材料清单，不得签发授权或将假设称为根因。`case_status=existing` 表示复用已回读的 Test，必须保留 Jira 来源；`case_status=proposed` 表示确认创建并关联的意图，必须提供步骤、预期、方式和责任人。Q4 才回读真实关联、版本和执行结果；计划创建的 Test 在创建后补入真实 key/version 不会推翻 Q2 的创建意图。Q3 只在全部已确认的修复后检查项满足证据合同（TapTest 按状态，其它方式按当前完整 SHA 的预期结果）时使用 `auto_checkpoint` 记录事实并回写 Jira。它不等同于用户验收，也不能在失败、跳过、未知、计划变化时推进。原生工具由平台权限处理；Workflow 只保证不满足条件不能推进。advance 需要 expected-run-id 和 expected-stage；Jira prepare/complete 需要 expected-run-id，均从当前 task.py status 固定。不要跳过 Workflow，也不要因本地处置而绕过服务端 Validator 或保护分支。
 
 ## 非阻断 Jira 状态同步
+
+项目配置按消费者分工：`profile.json` 的 `jira.status_sync` 由 `jira_status.py` 消费，约束可准备的同步节点；`jira.transitions_config` 引用的字段与人工接力规则由 `jira_collect.py` 消费。`workflows_by_issue_type` 仅供 `project_rules.py workflow` 按事务类型查询，返回的 `stage` 是只读参考，不驱动本地阶段。Jira 回读为 Done、完成或 Tests Passed 均不等于本地任务完成；本地阶段仍由 Workflow 检查点及成果验收推进。未配置自动执行的原生转换只形成交接决策包，不生成自动写入意图。
 
 初始化后先用 `task.py snapshot --issue-key <issue> --expected-run-id <run> --input <snapshot.json> --dir <station>` 保存已读的 issue/source_ref。该入口同 run 幂等，独立于水印、Jira 权限和产品版本查询；后续本地普通事实由 record 维护，在相关检查点确认。
 
@@ -406,10 +454,14 @@ TapData 功能方案仍使用 implementation_plan，项目 quality-feature.json 
 | acceptance_mapping | 每行 criterion 原样对应 acceptance_criteria 文本或文本列表的一项，并填写 behavior、repository、module、case_ids、expected；所有 AC 均有映射，用例 ID 必须是已登记的 after_fix 验收项 |
 | scope_rationale | changes 每行 repository、module、layer（local/shared）、necessity、impact；non_changes 列明确不改范围；blocking_inputs 列尚待研发决定的冲突。公共层修改同样必须说明必要性和影响 |
 | delivery_dependencies | 每仓 repository、depends_on（仓库 ID 列表）、delivery、test_relation、state（ready/planned/unresolved）、source_ref；登记仓不能遗漏，不要求尚未创建的 PR 已存在 |
-| environment_readiness | config_source、checks（name/source_ref/result/detail）、blocking_inputs；检查结果 ready/not_needed/missing。已知 missing 与未决输入一次列全，不以空列表隐藏 |
+| environment_readiness | config_source、checks（name/source_ref/result/detail）、blocking_inputs；检查结果 ready/not_needed/missing。checks 可声明 required_for=implementation（缺省）或 verification；后者必须用非空、无重复 item_ids 关联已选后续 after_fix 验收项。已知 missing 与未决输入一次列全，不以空列表隐藏 |
 | verification_plan | commands、scenarios、invalidation_conditions、evidence_ref；不是执行报告，实施后仍需真实验证 |
 
-acceptance_criteria 多项建议保存为文本列表；单个文本按一个完整 AC 精确映射，不由工具猜测自然语言的拆分。作用域模块须与 AC 实现映射对应。结构检查和 Git 文件存在均不能证明参考恰当、公共层修改必要或断言有效；Agent 必须比较源码与预期，研发确认实质方案。完整方案中没有阻塞项后才允许 Q2 通过与授权；旧简略方案须补全后再确认，不在线迁移或伪造确认。此变更不增加持久状态字段，继续使用 epoch 14 的现有事实与质量日志结构；配置变化自然使旧确认摘要失效。
+acceptance_criteria 多项建议保存为文本列表；单个文本按一个完整 AC 精确映射，不由工具猜测自然语言的拆分。作用域模块须与 AC 实现映射对应。结构检查和 Git 文件存在均不能证明参考恰当、公共层修改必要或断言有效；Agent 必须比较源码与预期，研发确认实质方案。完整方案中没有阻塞项后才允许 Q2 通过与授权；旧简略方案须补全后再确认，不在线迁移或伪造确认。配置变化使旧确认摘要失效，工位兼容边界以[机器清单](../../contracts/station-state-compatibility.json)为准。
+
+TapData 功能配置显式启用 `plan_contract.review.environment_version=2`。环境行缺省是实现前置，missing 仍阻塞 Q2；只有明确仅用于验证、且 item_ids 全部指向已选择的 Q2 之后 after_fix 检查项，才能在同一 Q2 决策包确认后允许无依赖编码。detail/source_ref 说明适用范围、补齐责任与方式，不另造表单。未知阶段、未选择/不存在/提前到期的引用不能延期；影响权限、事实可信度或实现正确性的缺项必须按 implementation 或 blocking_inputs 保留，不得仅改标签来放行。Workflow 不判断自然语言是否真实，Agent 与研发仍需核实依赖。
+
+延期不等于已就绪或免测：环境最迟在关联项第一次实际需要执行前补齐，沿用现有执行/验收合同；当前 Q3 自动首轮验证已要求全部 after_fix 项的有效结果，因此不能把所有环境拖到 Q4。计划中的 missing 保留为当时观察，实际环境与运行结果写现有 execute/verification；不回改为 ready，也不因补充执行结果重问未变化的 Q2。改变 required_for/item_ids/范围则重新确认。未声明版本的历史 rules 仍按全部 missing 阻塞解释，未知版本拒绝；新旧客户端不兼容，升级按原版收尾、归档及 purge 后切换。
 
 Q2 前先补齐 Agent 可查事实，读取当前 Jira 字段与 transitions.fields，然后一次展示：
 

@@ -12,15 +12,17 @@
 
 先运行 `~/.agentic-ops/agenticops station doctor --station <项目工位>`；确认后使用同一路径的 `repair --station <项目工位>`。不要手改 `.agenticops/station.json`、Hook 或生成的 Skill 链接。
 
-## 升级后提示流程检查点迁移
+## 提示旧 Hook 或工位代际不兼容
 
-新工位不生成通用 Agent Hook。已有工位检测到托管的旧 Hook 时，start、普通 repair 和 doctor 会报告迁移范围并保留文件。核对后执行：
+新工位不生成通用 Agent Hook。先区分工位代际：跨 epoch 必须按[更新与回退](update-and-rollback.md)由原版本结束任务、归档释放或清理，再显式 purge 后切换重建；不能使用下面的命令在线采用旧状态。
+
+仅在同 epoch 的工位中，检测到托管旧 Hook 时，start、普通 repair 和 doctor 会报告迁移范围并保留文件。核对归属及调用不再逐次受检的边界后，从该工位执行：
 
 ```sh
 ./agenticops station repair --accept-checkpoint-migration
 ```
 
-此操作仅移除归属哈希匹配的旧托管 Hook，并刷新指引和初始化清单；任务、run、历史确认和证据保留。任一旧 Hook 已被修改时停止，不覆盖用户内容。移除的文件是可再生产物，可从迁移前产品版本的模板恢复；恢复旧控制前应明确决定回退并核对配置。自定义或全局 Hook 不受本次迁移管理。
+此操作仅移除归属哈希匹配的旧托管 Hook，并刷新指引和初始化清单；同 epoch 的任务、run、历史确认和证据保留。任一旧 Hook 已被修改时停止，不覆盖用户内容。退役文件可从 Git 历史查阅，但当前安装已无其执行依赖，不能只复制旧模板来恢复拦截；需要回退时仍遵守产品版本与工位 epoch 的完整检查。自定义或全局 Hook 不受本次迁移管理。
 
 迁移后 Git/Jira/PR 使用平台原生权限；方案确认在 Workflow 检查点重新校验，Jira 同步不再保证强制单次调用。旧 Agent 会话应结束，再从工位启动，使接线与当前版本一致。
 

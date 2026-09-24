@@ -128,7 +128,7 @@ def can_change(base, task):
             from workflow import quality
             rules = quality.config(base, task)
             if quality.enabled(task, rules):
-                report = quality.report(quality.load(base, task), rules, quality.context(base, task))
+                report = quality.report(quality.load(base, task), rules, quality.context(base, task), base=base, task=task)
                 checkpoint = rules["selection_checkpoint"]
                 if report["checkpoints"][checkpoint]["reviewed"]:
                     return False, "Q2 已确认；需要重新规划并确认方案后才能采用新策略"

@@ -12,7 +12,7 @@
     "scope_boundary"
   ],
   "structured_fix_plan": false,
-  "publication_mode": "deferred-summary",
+  "publication_mode": "checkpoint",
   "comment_format": "human-text-v1",
   "task_classes": [
     "feature_change"
@@ -215,6 +215,7 @@
       "rollback"
     ],
     "review": {
+      "environment_version": 2,
       "sections": {
         "reference_implementations": {
           "type": "array",
@@ -507,6 +508,18 @@
                     "type": "string",
                     "minLength": 1,
                     "pattern": "\\S"
+                  },
+                  "required_for": {
+                    "enum": ["implementation", "verification"]
+                  },
+                  "item_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "\\S"
+                    }
                   }
                 }
               }

@@ -2,7 +2,7 @@
   "_meta": {
     "source": "AgenticOps TapData 项目适配配置",
     "ported_at": "2026-08-27",
-    "note": "通用 transitions 与按事务类型 workflows_by_issue_type 均以 TapData Jira 实时读取为准；TAP-12289 于 2026-08-31 核验，任务类型映射于 2026-09-01 由 TAP-12773 核验。状态与流转优先使用稳定 ID，未映射的状态或流转不得猜测。"
+    "note": "jira.status_sync 供状态同步使用，jira.transitions_config 供字段采集与人工接力使用；workflows_by_issue_type 仅供按事务类型只读查询，不推进本地阶段，其任务类型映射于 2026-09-01 由 TAP-12773 核验。实际转换须回读 Jira，优先使用稳定 ID，未映射的状态或流转不得猜测。"
   },
   "profile_id": "tapdata",
   "wiki_repository": "tapstate/wiki",
@@ -40,7 +40,7 @@
       "task_classes": ["defect_fix", "feature_change"],
       "attempts": {
         "takeover": {
-          "local_stages": ["task_intake"],
+          "local_stages": ["task_intake", "design_review", "implementation"],
           "from": ["Analyzed"],
           "to": "In Progress",
           "to_aliases": ["正在进行"],
@@ -240,16 +240,6 @@
     }
   },
   "repositories": {"catalog": "repositories.json"},
-  "statuses": {
-    "Analyzed": "waiting_takeover",
-    "正在进行": "implementation", "In Progress": "implementation",
-    "Pull Request Submitted": "implementation", "Tests Passed": "implementation",
-    "完成": "completed", "Done": "completed"
-  },
-  "transitions": {
-    "start_progress": { "name": "Start Investigation", "id": "421", "from": ["Analyzed"], "to": "In Progress" },
-    "pr_approved": { "name": "PR Approved", "id": "291", "from": ["Pull Request Submitted"], "to": "Merged", "agent_forbidden": true }
-  },
   "workflows_by_issue_type": [
     {
       "issue_type": { "id": "10008", "name": "任务" },
