@@ -10,7 +10,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from workflow import archive_store, engineering_baseline as baseline, station_archive, task_store
+from workflow import archive_store, engineering_baseline as baseline, station_archive, task_store, station_operation
 
 
 def record(base, issue, run, value):
@@ -22,8 +22,19 @@ def record(base, issue, run, value):
         raise ValueError("处置需要稳定 disposition_id")
     with task_store.task_state_lock(base):
         current = task_store.read_task(base)
+        active = None
         if current is not None:
-            raise ValueError("工位已被任务占用，拒绝删除可能被当前任务复用的分支/PR")
+            from workflow import station_cleanup_stages as stages, station_reset_result
+            active = station_operation.read(base)
+            if (current.get("issue_key") != issue or current.get("run_id") != run or not active
+                    or active["run_id"] != run or active["kind"] not in ("clean", "release")
+                    or active["status"] != "running" or active["phase"] != "cleanup_disposition"):
+                raise ValueError("工位已被任务占用；只有原清理操作的分支处置阶段可接力")
+            station_reset_result.guard(base, current, active)
+            station_reset_result.verify_sources(base, current, active)
+            choice = next((e for e in stages.decisions(active) if e["id"] == value["object_id"]), None)
+            if not choice or (value["phase"] == "intent" and any(value.get(k) != choice[k] for k in ("before", "action", "resource_type"))):
+                raise ValueError("处置不属于原清理确认范围")
         root = archive_store.run_directory(base, run)
         for directory in (archive_store.root(base), root):
             if directory.is_symlink() or not directory.is_dir():
@@ -33,12 +44,12 @@ def record(base, issue, run, value):
             raise ValueError("档案正文不能是链接")
         reference = archive_store.reference(run, baseline.digest(json.loads(metadata.read_text())))
         station_archive.verify(base, reference, {"issue_key": issue, "run_id": run})
-        receipts = root / "receipts"
+        receipts = archive_store.receipts(base, reference, create=bool(active))
         if receipts.is_symlink() or not receipts.is_dir():
             raise ValueError("重置完成回执不存在")
         done = [p for p in receipts.glob("*-done.json") if not p.is_symlink() and json.loads(p.read_text()).get("result", {}).get("current", "occupied") is None]
         done = [p for p in done if (lambda data: data.get("run_id") == run and data.get("archive_digest") == reference["digest"] and data.get("phase") == "done" and data.get("operation_kind") in ("clean", "release"))(json.loads(p.read_text()))]
-        if not done:
+        if not done and not active:
             raise ValueError("缺少已解绑完成回执")
         phase = value.get("phase")
         intent_path = receipts / (identifier + "-intent.json")

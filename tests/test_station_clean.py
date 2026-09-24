@@ -69,7 +69,7 @@ class StationCleanTests(unittest.TestCase):
         # 模拟 Agent 的原生工具动作；不补任何脚本退出码或中间状态。
         (self.repo / "new.bin").unlink()
         self.git(self.repo, "update-ref", entry["preserved_ref"], entry["preserved_head"])
-        self.git(self.repo, "checkout", station.source.baseline_branch(task["engineering_baseline"]["repositories"][self.name]))
+        self.git(self.repo, "checkout", "--detach", entry["neutral"]["sha"])
         from workflow import station_reset_result
         with mock.patch.object(station_reset_result, "apply", side_effect=AssertionError("不得调用执行器")):
             result = station.execute(*args, cleanup_mode="verify")
@@ -111,7 +111,7 @@ class StationCleanTests(unittest.TestCase):
         operation = station_operation.read(self.ws)
         entry = operation["cleanup_plan"]["source"][self.name]
         self.git(self.repo, "update-ref", entry["preserved_ref"], entry["preserved_head"])
-        self.git(self.repo, "checkout", station.source.baseline_branch(task["engineering_baseline"]["repositories"][self.name]))
+        self.git(self.repo, "checkout", "--detach", entry["neutral"]["sha"])
         result = station.execute(*args, cleanup_mode="verify")
         self.assertEqual(result["status"], "done")
         receipts = [s["receipt"] for name, s in result["steps"].items() if name.startswith("source-reset:")]
@@ -128,7 +128,7 @@ class StationCleanTests(unittest.TestCase):
         git, unlink, receipt = station.source.git, Path.unlink, station_operation.receipt
         def fail_git(path, *arguments, **kwargs):
             result = git(path, *arguments, **kwargs)
-            if boundary == "index" and arguments[:2] == ("rm", "--cached"):
+            if boundary == "index" and arguments[:3] == ("--literal-pathspecs", "rm", "--cached"):
                 raise OSError("injected interruption")
             return result
         def fail_unlink(path, *arguments, **kwargs):
@@ -301,7 +301,7 @@ class StationCleanTests(unittest.TestCase):
         (self.ws / "scratch").rmdir()
         entry = operation["cleanup_plan"]["source"][self.name]
         self.git(self.repo, "update-ref", entry["preserved_ref"], entry["preserved_head"])
-        self.git(self.repo, "checkout", entry["checkout_branch"])
+        self.git(self.repo, "checkout", "--detach", entry["neutral"]["sha"])
         self.assertEqual(station.execute(*args, cleanup_mode="verify")["status"], "done")
 
     def test_result_resume_after_active_clear_keeps_export_and_terminal_evidence(self):
@@ -513,10 +513,10 @@ class StationCleanTests(unittest.TestCase):
         (self.ws/'.idea/station.xml').write_text('keep')
         (self.ws/'runtime/report').write_text('temporary')
         original = resources.neutral
-        def observe(*args):
+        def observe(*args, **kwargs):
             self.assertTrue((self.ws/'runtime/report').exists())
             self.assertTrue(task_store.read_task(self.ws)['archive_ref'])
-            return original(*args)
+            return original(*args, **kwargs)
         with mock.patch.object(resources, 'neutral', side_effect=observe) as called:
             self.execute(task, self.cleanup_request(task))
             self.assertEqual(1, called.call_count)
@@ -695,10 +695,10 @@ class StationCleanTests(unittest.TestCase):
         (self.repo/'file.txt').write_text('keep')
         request = self.cleanup_request(task)
         original = station_reset_result.apply
-        def replace(*args):
+        def replace(*args, **kwargs):
             (self.ws/'runtime').rename(self.root/'old-runtime')
             (self.ws/'runtime').mkdir()
-            return original(*args)
+            return original(*args, **kwargs)
         with mock.patch.object(station_reset_result, 'apply', side_effect=replace), self.assertRaisesRegex(ValueError, '身份'):
             self.execute(task, request)
         self.assertEqual('keep', (self.repo/'file.txt').read_text())
@@ -712,6 +712,218 @@ class StationCleanTests(unittest.TestCase):
     def test_modern_release_amend_after_neutral(self):
         self.reset_amend_after_neutral('release')
 
+
+# 阶段回归沿用清理测试入口和故事映射。
+import os
+from workflow import station_operation as operations, station_cleanup_stages as stages, station_disposition
+from workflow.engineering_baseline import digest
+
+
+class CleanupStagesTests(unittest.TestCase):
+    setUp = fixture.ResourceTests.setUp
+    prepare_engineering = fixture.ResourceTests.prepare_engineering
+    write = fixture.ResourceTests.write
+    git = fixture.ResourceTests.git
+    takeover = fixture.ResourceTests.takeover
+    ready = fixture.ResourceTests.ready
+    reset_request = fixture.ResourceTests.reset_request
+
+    def args(self, task):
+        return (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'],
+                'op-stages-cleanup', self.reset_request(task))
+
+    def test_all_stages_complete_without_agent(self):
+        task = self.ready()
+        (self.repo/'file.txt').write_text('change')
+        result = station.execute(*self.args(task))
+        self.assertTrue(all(row['verified'] for row in stages.describe(result)))
+        self.assertEqual('', self.git(self.repo, 'branch', '--show-current'))
+        self.assertIsNone(task_store.read_task(self.ws))
+
+    def test_links_archive_without_following_external_target(self):
+        self.prepare_engineering()
+        outside = self.root/'outside'; outside.write_text('outside preserved')
+        (self.seed/'tracked-link').symlink_to('file.txt')
+        self.git(self.seed, 'add', '.'); self.git(self.seed, 'commit', '-m', 'links')
+        self.git(self.seed, 'push', str(self.remote), 'develop')
+        task = self.ready()
+        (self.repo/'tracked-link').unlink(); (self.repo/'tracked-link').symlink_to(outside)
+        (self.repo/'untracked-link').symlink_to(self.root/'missing')
+        result = station.execute(*self.args(task))
+        self.assertEqual('file.txt', os.readlink(self.repo/'tracked-link'))
+        self.assertEqual('outside preserved', outside.read_text())
+        self.assertFalse((self.repo/'untracked-link').is_symlink())
+        archived = archive_store.from_reference(self.ws, result['archive_ref'])
+        bundle = json.loads((archived/'source-artifacts.json').read_text())['repositories'][self.name]
+        self.assertTrue(bundle['untracked']['untracked-link']['fingerprint']['link'])
+
+    def test_target_link_directory_transition(self):
+        task = self.ready()
+        (self.repo/'file.txt').unlink()
+        (self.repo/'file.txt').mkdir(); (self.repo/'file.txt/child').write_text('task content')
+        self.git(self.repo, 'add', '.')
+        self.git(self.repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'directory')
+        station.execute(*self.args(task))
+        self.assertEqual('baseline\n', (self.repo/'file.txt').read_text())
+
+    def test_batch_restore_uses_literal_paths(self):
+        self.prepare_engineering()
+        for name in ['a*', 'ab', ':literal', 'space name']:
+            (self.seed/name).write_text('base')
+        self.git(self.seed, 'add', '.'); self.git(self.seed, 'commit', '-m', 'names')
+        self.git(self.seed, 'push', str(self.remote), 'develop')
+        task = self.ready()
+        for name in ['a*', 'ab', ':literal', 'space name']:
+            (self.repo/name).write_text('dirty')
+        original = resources.source.git
+        with mock.patch.object(resources.source, 'git', wraps=original) as called:
+            station.execute(*self.args(task))
+        restores = [call for call in called.call_args_list if 'restore' in call.args]
+        self.assertEqual(1, len(restores))
+        for name in ['a*', 'ab', ':literal', 'space name']:
+            self.assertEqual('base', (self.repo/name).read_text())
+
+    def test_partial_inventory_lists_all_special_objects_and_changes(self):
+        task = self.ready()
+        (self.repo/'notes').write_text('keep')
+        os.mkfifo(self.repo/'fifo-a'); os.mkfifo(self.repo/'fifo-b')
+        output = io.StringIO()
+        with mock.patch('sys.stdout', output):
+            station_clean.main(['--dir', str(self.ws)])
+        view = json.loads(output.getvalue())['cleanup_scope']
+        self.assertFalse(view['executable'])
+        row = view['source_inventory'][0]
+        self.assertTrue(any(e['path'].endswith('/notes') for e in row['objects']))
+        self.assertEqual(2, len(row['problems']))
+        self.assertEqual('keep', (self.repo/'notes').read_text())
+
+    def branch_entry(self, task, location='local'):
+        return {'kind':'external', 'producer':'fixture', 'id':'fixture:'+location,
+                'resource_type':'git-branch', 'action':'delete', 'decision_ref':'fixture:user',
+                'status':'observed', 'before':{'repository':self.name, 'ref':'refs/heads/'+self.branch,
+                    'sha':self.git(self.repo,'rev-parse','HEAD'), 'protected':False, 'location':location}}
+
+    def test_local_branch_delete_keeps_archive_ref(self):
+        task = self.ready(); entry = self.branch_entry(task)
+        resources.register(self.ws, task['issue_key'], task['run_id'], [entry])
+        result = station.execute(*self.args(task))
+        self.assertIsNone(stages.read_ref(self.repo, entry['before']['ref']))
+        self.assertIn(entry['before']['sha'], self.git(self.repo, 'for-each-ref', '--format=%(objectname)', 'refs/agenticops/archive/'))
+        self.assertEqual('done', result['status'])
+
+    def test_remote_handoff_resumes_same_operation(self):
+        task = self.ready(); entry = self.branch_entry(task, 'remote')
+        resources.register(self.ws, task['issue_key'], task['run_id'], [entry])
+        (self.ws/'runtime/cache').write_text('not yet removed')
+        args = self.args(task)
+        with self.assertRaisesRegex(ValueError, '分支/PR'):
+            station.execute(*args)
+        op = operations.read(self.ws)
+        self.assertEqual('cleanup_disposition', op['phase'])
+        self.assertTrue(op['steps'][stages.key(op,'source')]['receipt'])
+        self.assertTrue((self.ws/'runtime/cache').exists())
+        intent = {'disposition_id':'disposition-remote-branch', 'phase':'intent','object_id':entry['id'],
+                  'resource_type':entry['resource_type'], 'action':entry['action'],
+                  'before':entry['before'],'decision_ref':'fixture:user'}
+        intent['confirmed_digest'] = digest(intent)
+        station_disposition.record(self.ws, task['issue_key'], task['run_id'], intent)
+        # 夹具模拟原生服务返回的回读；不声称这是真实 GitHub 验证。
+        result = dict(disposition_id=intent['disposition_id'],phase='readback',object_id=entry['id'],
+                      intent_digest=digest(intent),status='deleted',readback_ref='fixture:remote-absent')
+        station_disposition.record(self.ws, task['issue_key'], task['run_id'], result)
+        self.assertEqual('done', station.execute(*args)['status'])
+
+    def test_completed_source_is_not_cleaned_again(self):
+        task = self.ready(); entry = self.branch_entry(task, 'remote')
+        resources.register(self.ws, task['issue_key'], task['run_id'], [entry])
+        args = self.args(task)
+        with self.assertRaises(ValueError): station.execute(*args)
+        (self.repo/'late').write_text('do not delete')
+        with self.assertRaises(ValueError): station.execute(*args)
+        self.assertEqual('do not delete',(self.repo/'late').read_text())
+
+    def test_resource_cleanup_waits_for_source(self):
+        task = self.ready(); args = self.args(task)
+        station.execute(*args, cleanup_mode='prepare')
+        (self.repo/'late').write_text('new')
+        (self.ws/'runtime/cache').write_text('keep')
+        with self.assertRaises(ValueError): station.execute(*args)
+        self.assertEqual('cleanup_source',operations.read(self.ws)['phase'])
+        self.assertTrue((self.ws/'runtime/cache').exists())
+
+    def test_source_continues_other_repository_before_stage_failure(self):
+        self.prepare_engineering(count=2)
+        task = self.ready()
+        other = next(name for name in task['engineering_baseline']['repositories'] if name != self.name)
+        second = self.ws/'source'/other
+        (second/'file.txt').write_text('save other repository')
+        args = self.args(task)
+        station.execute(*args, cleanup_mode='prepare')
+        (self.repo/'late').write_text('unconfirmed')
+        with self.assertRaises(ValueError): station.execute(*args)
+        self.assertEqual('baseline\n', (second/'file.txt').read_text())
+        self.assertEqual('', self.git(second,'branch','--show-current'))
+        self.assertEqual('unconfirmed', (self.repo/'late').read_text())
+
+    def test_quiesced_external_does_not_block_source_but_blocks_resource_exit(self):
+        task = self.ready()
+        entry = {'kind':'external','producer':'fixture','id':'fixture:container',
+                 'resource_type':'container','action':'delete','before':{'protected':False,'id':'fixture'},
+                 'status':'quiesced','readback_ref':'fixture:stopped'}
+        resources.register(self.ws,task['issue_key'],task['run_id'],[entry])
+        args = self.args(task)
+        with self.assertRaisesRegex(ValueError,'清理完成'): station.execute(*args)
+        op = operations.read(self.ws)
+        self.assertEqual('cleanup_resources',op['phase'])
+        self.assertTrue(op['steps'][stages.key(op,'source')]['receipt'])
+        entry.update(status='cleaned',readback_ref='fixture:removed')
+        resources.register(self.ws,task['issue_key'],task['run_id'],[entry],expected_operation_id=args[5])
+        self.assertEqual('done',station.execute(*args)['status'])
+
+    def test_release_receipt_interruption_recovers_without_task(self):
+        task = self.ready(); args = self.args(task)
+        original = operations.receipt
+        def fail(base, operation, name, value):
+            if name.startswith('cleanup-stage:') and name.endswith(':release'):
+                raise OSError('release receipt interrupted')
+            return original(base,operation,name,value)
+        with mock.patch.object(operations,'receipt',side_effect=fail), self.assertRaises(OSError):
+            station.execute(*args)
+        self.assertIsNone(task_store.read_task(self.ws))
+        result = station.execute(*args)
+        self.assertEqual('done',result['status'])
+        self.assertTrue(all(row['verified'] for row in stages.describe(result)))
+
+    def test_amend_after_local_branch_deleted_preserves_remaining_work(self):
+        task = self.ready(); entry = self.branch_entry(task)
+        resources.register(self.ws,task['issue_key'],task['run_id'],[entry])
+        args = self.args(task)
+        original = resources.clean
+        def fail(*a, **kw):
+            if kw.get('directories_only'): raise OSError('before resources')
+            return original(*a, **kw)
+        with mock.patch.object(resources,'clean',side_effect=fail), self.assertRaises(OSError):
+            station.execute(*args)
+        self.assertIsNone(stages.read_ref(self.repo,entry['before']['ref']))
+        current = task_store.read_task(self.ws); op = operations.read(self.ws)
+        updated = resources.plan(self.ws,current)
+        station.amend_cleanup(self.ws,task['issue_key'],task['run_id'],current['_revision'],args[5],
+            op['cleanup_plan']['digest'],{'confirmed_digest':updated['digest'],'expected_plan_revision':0})
+        self.assertEqual('done',station.execute(*args)['status'])
+
+    def test_committed_directory_replaced_by_baseline_link_does_not_touch_target(self):
+        self.prepare_engineering()
+        outside = self.root/'outside-tree'; outside.mkdir(); (outside/'keep').write_text('preserve')
+        (self.seed/'switch').symlink_to(outside,target_is_directory=True)
+        self.git(self.seed,'add','.'); self.git(self.seed,'commit','-m','baseline link')
+        self.git(self.seed,'push',str(self.remote),'develop')
+        task = self.ready()
+        (self.repo/'switch').unlink(); (self.repo/'switch').mkdir(); (self.repo/'switch/task').write_text('task')
+        self.git(self.repo,'add','.')
+        self.git(self.repo,'-c','user.name=Test','-c','user.email=test@example.com','commit','-m','task directory')
+        station.execute(*self.args(task))
+        self.assertTrue((self.repo/'switch').is_symlink())
+        self.assertEqual('preserve',(outside/'keep').read_text())
 
 if __name__ == '__main__':
     unittest.main()

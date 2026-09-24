@@ -30,8 +30,10 @@ def source_directories(repository):
             info = path.lstat()
             if name == ".git" or info.st_dev != device or path.is_mount():
                 raise ValueError("源码含嵌套 Git 或挂载对象，请明确处理")
+            if stat.S_ISLNK(info.st_mode):
+                continue  # Git/文件快照核验链接本身，os.walk 不跟随。
             if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
-                raise ValueError("源码含链接或特殊对象，请明确处理")
+                raise ValueError("源码含特殊对象，请明确处理：" + str(path))
             if stat.S_ISDIR(info.st_mode):
                 found[path.relative_to(repository).as_posix()] = directories.identity(path)
     return found
@@ -51,7 +53,7 @@ def target_directories(repository, sha):
     return result
 
 
-def guard(base, task, operation):
+def guard(base, task, operation, final=False):
     plan = operation["cleanup_plan"]
     if (plan.get("schema_version") != 6 or operation["run_id"] != task["run_id"]
             or operation["kind"] not in ("clean", "release") or operation["status"] != "running"
@@ -62,7 +64,7 @@ def guard(base, task, operation):
     artifacts.verify_coverage(base, task, plan)
     resources.verify_active(base, plan, operation)
     resources.verify_known_external(base, task)
-    resources.verify_stopped(base, task, require_cleaned=True)
+    resources.verify_stopped(base, task, require_cleaned=final)
     resources.verify_station_inventory(base, plan["rules"], allow_pending=True)
     # 所有工位根必须先核验身份，不能在源码恢复后才发现 runtime 已被替换。
     for entry in plan["directories"]:
@@ -98,6 +100,8 @@ def guard(base, task, operation):
         branch_ref = "refs/heads/" + entry["checkout_branch"] if entry["checkout_branch"] else None
         if branch_ref in current and branch_ref not in expected:
             expected[branch_ref] = entry["neutral"]["sha"]
+        from workflow import station_cleanup_stages
+        expected = station_cleanup_stages.expected_refs(base, task, operation, name, expected, current)
         if current != expected:
             raise ValueError("保留 Git 引用变化：" + name)
         artifacts.verify_special_entries(repository, entry["neutral"]["sha"])
@@ -123,9 +127,11 @@ def source_result(base, task, name, entry):
 
 def verify(base, task, operation):
     """只读验收，无论是否执行过内置脚本；失败不写成功或解绑状态。"""
-    plan = guard(base, task, operation)
+    plan = guard(base, task, operation, final=True)
     for name, entry in plan["source"].items():
         source_result(base, task, name, entry)
+    from workflow import station_cleanup_stages
+    station_cleanup_stages.verify_dispositions(base, task, operation)
     for entry in plan["directories"]:
         path = directories.validate(base, entry, missing=True)
         if path.exists() and (entry["disposition"] == "delete_root" or any(path.iterdir())):
@@ -160,57 +166,87 @@ def _pending_added_file(repository, operation, name, prior, observed):
     return not source.git(repository, "ls-tree", "-z", prior["head"], "--", prior["file"]).stdout
 
 
-def apply(base, task, operation):
-    """默认加速路径；先核查剩余内容，再复用精确文件恢复与目录回收。"""
-    plan = guard(base, task, operation)
-    completed = "station-source-reset:" + str(len(operation.get("plan_revisions", []))) + ":" + plan["digest"]
-    if operation["steps"].get(completed, {}).get("receipt") is not None:
-        verify(base, task, operation)
-        return  # 已验收后再出现内容不能沿旧确认重删。
-    for entry in plan["directories"]:
-        directories.precheck(base, task, entry, operation)
-    for name, entry in plan["source"].items():
-        if entry.get("initial_checkout"):
-            continue
-        repository = source.repository_path(base, name)
+def _apply_repository(base, task, operation, name, entry):
+    plan = operation["cleanup_plan"]
+    if entry.get("initial_checkout"):
+        return
+    repository = source.repository_path(base, name)
+    try:
+        source_result(base, task, name, entry)
+    except ValueError:
+        pass
+    else:
+        return
+    current_dirs = source_directories(repository)
+    allowed = set(entry["directories"]) | target_directories(repository, entry["neutral"]["sha"])
+    if set(current_dirs) - allowed:
+        raise ValueError("清理确认后新增源码目录，请补充确认：" + name)
+    for relative, identity in current_dirs.items():
+        if relative in entry["directories"] and identity != entry["directories"][relative]:
+            raise ValueError("清理确认后源码目录身份变化：" + name + "/" + relative)
+    head = source.git(repository, "rev-parse", "HEAD").stdout.strip()
+    if head not in (entry["head"], entry["neutral"]["sha"]):
+        raise ValueError("清理期间源码 Head 变化：" + name)
+    observed = artifacts.snapshot(base, name, {}, {}, entry["neutral"]["sha"], include_ignored=True)
+    original = {row["path"]: row for row in plan["entries"] if row["repository"] == name}
+    for row in observed["entries"]:
+        prior = original.get(row["path"])
+        unchanged = prior and all(row[key] == prior[key] for key in ("head", "before", "before_index", "index_patch", "worktree_patch", "file_identity"))
+        if not unchanged and not _pending_added_file(repository, operation, name, prior, row):
+            raise ValueError("清理确认后源码内容变化，请补充确认：" + row["path"])
+    resources.clean(base, task, plan, plan["digest"], operation, source_only=True, only_repository=name)
+    keep = target_directories(repository, entry["head"]) | target_directories(repository, entry["neutral"]["sha"])
+    for relative in sorted(entry["directories"], key=lambda p: len(p.split("/")), reverse=True):
+        path = repository / relative
+        if relative not in keep and path.exists() and not path.is_symlink():
+            if directories.identity(path) != entry["directories"][relative]:
+                raise ValueError("待清空目录身份变化：" + str(path))
+            path.rmdir()
+    resources.neutral(base, task, operation, only_repository=name)
+    source_result(base, task, name, entry)
+
+
+def verify_sources(base, task, operation):
+    errors = []
+    for name, entry in operation["cleanup_plan"]["source"].items():
         try:
             source_result(base, task, name, entry)
-        except ValueError:
-            pass
-        else:
-            continue  # 已达到目标的仓库不再套用删除前的目录身份。
-        current_dirs = source_directories(repository)
-        allowed = set(entry["directories"]) | target_directories(repository, entry["neutral"]["sha"])
-        if set(current_dirs) - allowed:
-            raise ValueError("清理确认后新增源码目录，请补充确认：" + name)
-        for relative, identity in current_dirs.items():
-            if relative in entry["directories"] and identity != entry["directories"][relative]:
-                raise ValueError("清理确认后源码目录身份变化：" + name + "/" + relative)
-        head = source.git(repository, "rev-parse", "HEAD").stdout.strip()
-        if head not in (entry["head"], entry["neutral"]["sha"]):
-            raise ValueError("清理期间源码 Head 变化：" + name)
-        observed = artifacts.snapshot(base, name, {}, {}, entry["neutral"]["sha"], include_ignored=True)
-        original = {row["path"]: row for row in plan["entries"] if row["repository"] == name}
-        for row in observed["entries"]:
-            prior = original.get(row["path"])
-            unchanged = prior and all(row[key] == prior[key] for key in ("head", "before", "before_index", "index_patch", "worktree_patch", "file_identity"))
-            if not unchanged and not _pending_added_file(repository, operation, name, prior, row):
-                raise ValueError("清理确认后源码内容变化，请补充确认：" + row["path"])
-    resources.clean(base, task, plan, plan["digest"], operation, source_only=True)
-    # 仅删除已确认目录中的空目录，不按名称或宽泛 glob 递归删除源码。
-    for name, entry in plan["source"].items():
-        if entry.get("initial_checkout"):
-            continue
-        repository = source.repository_path(base, name)
-        keep = target_directories(repository, entry["head"]) | target_directories(repository, entry["neutral"]["sha"])
-        for relative in sorted(entry["directories"], key=lambda p: len(p.split("/")), reverse=True):
-            path = repository / relative
-            if relative not in keep and path.exists():
-                if directories.identity(path) != entry["directories"][relative]:
-                    raise ValueError("待清空目录身份变化")
-                path.rmdir()
-    resources.neutral(base, task, operation)
-    resources.clean(base, task, plan, plan["digest"], operation, directories_only=True)
+        except (ValueError, OSError) as error:
+            errors.append(name + ": " + str(error))
+    if errors:
+        raise ValueError("源码阶段验收未通过：\n" + "\n".join(errors))
+
+
+def apply(base, task, operation):
+    """同一操作内按阶段执行；阶段失败保留进度，验收通过才进入下一阶段。"""
+    from workflow import station_cleanup_stages as stages
+    operation["phase"] = "cleanup_source"
+    operations.save(base, operation)
+    plan = guard(base, task, operation)
+    completed = "station-source-reset:" + str(len(operation.get("plan_revisions", []))) + ":" + plan["digest"]
+    if operation.get("steps", {}).get(completed, {}).get("receipt") is not None:
+        verify(base, task, operation)
+        return
+    def reset_sources():
+        errors = []
+        for name, entry in plan["source"].items():
+            try:
+                _apply_repository(base, task, operation, name, entry)
+            except (ValueError, OSError) as error:
+                errors.append((name, error))
+        if len(errors) == 1:
+            raise errors[0][1]
+        if errors:
+            error_type = OSError if all(isinstance(error, OSError) for _, error in errors) else ValueError
+            raise error_type("源码复位未完成：\n" + "\n".join(name + ": " + str(error) for name, error in errors))
+    stages.run(base, task, operation, "source", reset_sources,
+               lambda: verify_sources(base, task, operation))
+    stages.run(base, task, operation, "disposition",
+               lambda: stages.dispose_local(base, task, operation),
+               lambda: stages.verify_dispositions(base, task, operation))
+    stages.run(base, task, operation, "resources",
+               lambda: resources.clean(base, task, plan, plan["digest"], operation, directories_only=True),
+               lambda: verify(base, task, operation))
 
 
 def record(base, task, operation):
