@@ -13,7 +13,8 @@
     "issue_types": ["Story", "故事", "Bug", "缺陷", "Task", "任务"],
     "task_query": "project = TAP AND assignee = currentUser() AND status = Analyzed ORDER BY updated DESC",
     "takeover": {
-      "required_status": "Analyzed",
+      "allowed_statuses": ["Analyzed", "In Progress", "正在进行"],
+      "in_progress_run_decision": "developer_selects_resume_or_new_run",
       "required_assignee": "currentUser()",
       "on_mismatch": "deny"
     },
