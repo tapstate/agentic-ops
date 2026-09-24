@@ -26,7 +26,8 @@ Agent → Workflow 状态变更入口 → 持锁校验 → 状态与证据
 | Project | `projects/<project>/` | Jira、分支、准入、验证和 Runbook |
 | Adapter | `adapters/` | 平台接线、原生 MCP 与指引的无状态声明 |
 | Bootstrap | `bootstrap/` | 源码目录、产品根目录（Product Root）与工位生命周期 |
-| Maintenance Skill | `skills/` | 仅产品维护使用的流程验证与协作指引；不属于任何业务项目，也不安装或接线到业务工位 |
+| Shared Skill | `skills/shared/` | 项目无关的协作方法；源码维护根与项目工位共享，Bootstrap 管理接线，项目提供实际约束 |
+| Maintenance Skill | `skills/`（不含 `shared/`） | 仅产品维护使用的流程验证与协作指引；不属于任何业务项目，也不安装或接线到业务工位 |
 | Internal | `internal/` | AgenticOps 自身的审查和发布 |
 
 规则按变化原因归属：平台差异只能进入 Adapter，项目差异只能进入 Project，公司共性进入 Policy，只有必须确定执行的状态逻辑进入 Workflow。

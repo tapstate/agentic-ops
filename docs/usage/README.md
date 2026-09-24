@@ -1,5 +1,7 @@
 # AgenticOps 扩展使用
 
+共享需求技能的安装资源补齐、同 epoch 接线刷新与回退由[更新与回退](update-and-rollback.md#共享-skill-资源与接线)说明；技能职责与发现范围以[Skill 维护规范](../skill-maintenance.md)为准。
+
 [共同验证材料](quality-checkpoints.md#共同验证材料)区分来源同步的单仓绑定与 local/ci/review 的全仓绑定，并说明旧事件重放、实际 Git 核对和 PR 前刷新责任；不新增验证流程或迁移入口。
 
 [PR 正文发布与回读](quality-checkpoints.md#pr-正文发布与回读)负责多行正文的安全传递、只读预检、原生 PR 正文回读比对及局部失败恢复。工具不发送 PR、不新增阶段门禁；项目 Skill 仅负责调用顺序，正文内容及验收事实仍需人工核对。

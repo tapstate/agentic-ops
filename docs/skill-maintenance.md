@@ -9,7 +9,7 @@
 - Skill 本体是 Agent 无关的通用资产；同一份定义必须能被不同 Agent Adapter 接入使用。
 - Git 中的 Skill 目录是唯一事实源；原生发现目录只保存 Bootstrap 通过薄 Adapter 生成的受控链接或视图。
 - AgenticOps Skill 不注册到用户级、管理员级或系统级 Skill 目录，不复制到多个位置。
-- 维护 Skill 只在源码产品根目录可见；项目 Skill 只在绑定对应产品项目的工位可见。
+- 维护 Skill 只在源码产品根目录可见；项目 Skill 只在绑定对应产品项目的工位可见；共享 Skill 在源码维护根和受管项目工位可见。
 - Skill 只指导 Agent 协作。可确定执行或必须强制的规则仍进入 Contract、Policy、Gate、Workflow 或 Project，不能依赖 Skill 散文代替门禁。
 - Agent 原生发现目录、展示元数据和调用协议属于平台差异，必须由 Agent Manifest 与薄 Adapter 声明；Skill 源目录和公共 Bootstrap 不出现 Agent 类型分支。
 - 所有生成、检查、刷新和清理都必须失败关闭：不覆盖未登记文件，不跟随异常符号链接，不删除目标已漂移的链接。
@@ -26,7 +26,8 @@
 
 | 类型 | 唯一事实源 | 使用范围 | 不得进入 |
 |---|---|---|---|
-| 维护 Skill | `skills/<skill-name>/` | 产品源码目录 | 安装目录、业务工位、用户级 Skill 目录 |
+| 维护 Skill | `skills/<skill-name>/`（不含保留目录 `shared`） | 产品源码目录 | 安装目录、业务工位、用户级 Skill 目录 |
+| 共享 Skill | `skills/shared/<skill-name>/` | 源码维护根与受管项目工位 | 用户级 Skill 目录、无关仓库的发现入口 |
 | 项目 Skill | `projects/<project>/skills/<skill-name>/` | 绑定该产品项目且接入对应 Agent 的业务工位 | 其它产品项目工位、用户级 Skill 目录 |
 | 个人或外部 Skill | Agent 平台自己的个人或插件目录 | 由用户或平台独立管理 | AgenticOps Git、安装包和受管接线清单 |
 
@@ -49,27 +50,27 @@
 ```text
 通用 Skill 事实源
         │
-        ├── Bootstrap 选择业务作用域：maintenance 或 project
+        ├── Bootstrap 选择来源：维护或当前项目 Skill，加共享 Skill
         │
         └── Agent Manifest + 薄 Adapter 选择平台发现方式
                     ├── Codex  → .agents/skills/<skill-name>
                     └── Claude → .claude/skills/<skill-name>
 ```
 
-源码产品根目录的维护 Skill 链接解析到 `skills/<skill-name>/`；项目工位的项目 Skill 链接解析到 `<product-root>/projects/<project>/skills/<skill-name>/`。两者都使用相对路径，最终解析到当前产品根目录内的同一份通用 Git 事实源。
+源码产品根目录的维护 Skill 链接解析到 `skills/<skill-name>/`；项目工位的项目 Skill 链接解析到 `<product-root>/projects/<project>/skills/<skill-name>/`；共享链接解析到所在或绑定产品根的 `skills/shared/<skill-name>/`。所有链接使用相对路径，不复制正文；同名维护、项目或共享来源冲突时拒绝接线，不按优先级覆盖。源码和安装各自使用其产品版本的 Git 事实源，不让工位链接到可变维护源码。
 
 生成链接或平台视图不是新的 Skill 定义，也不是规则事实源。Adapter 不得修改 Skill 的名称、触发语义、工作流步骤、安全边界或资源内容。
 
-| 启动位置 | 维护 Skill | 当前项目 Skill |
-|---|---:|---:|
-| 源码产品根目录 | 可见 | 不自动接入 |
-| 安装产品根目录 | 不可见 | 不自动接入 |
-| 绑定后的业务工位 | 不可见 | 可见 |
-| 无关仓库或个人会话 | 不可见 | 不可见 |
+| 启动位置 | 维护 Skill | 当前项目 Skill | 共享 Skill |
+|---|---:|---:|---:|
+| 源码产品根目录 | 可见 | 不自动接入 | 可见 |
+| 安装产品根目录 | 不可见 | 不自动接入 | 保存资产，不生成发现入口 |
+| 绑定后的业务工位 | 不可见 | 可见 | 可见 |
+| 无关仓库或个人会话 | 不可见 | 不可见 | 不可见 |
 
 ## 4. 薄 Adapter 边界
 
-每个 Agent Manifest 只声明一个通用 `skill_target`，表示该 Agent 的原生 Skill 发现根目录。Codex 当前值是 `.agents/skills`，Claude 当前值是 `.claude/skills`。Bootstrap 根据产品源码目录或工位决定接入维护 Skill 还是项目 Skill，再把同一通用 Skill 映射到 Manifest 声明的目标；Manifest 不决定 Skill 的业务作用域。
+每个 Agent Manifest 只声明一个通用 `skill_target`，表示该 Agent 的原生 Skill 发现根目录。Codex 当前值是 `.agents/skills`，Claude 当前值是 `.claude/skills`。Bootstrap 根据产品源码目录或工位选择维护 Skill 或当前项目 Skill，并加入共享 Skill，再映射到 Manifest 声明的目标；Manifest 不决定 Skill 的业务作用域。
 
 薄 Adapter 只允许承担：
 
@@ -85,7 +86,7 @@
 
 维护 Skill 的接线属于源码产品根目录生命周期：
 
-1. `agenticops setup` 首次初始化产品源码目录后，枚举 `skills/` 中的通用 Skill，再通过各 Agent Manifest 的 `skill_target` 生成原生发现链接或视图。
+1. `agenticops setup` 首次初始化产品源码目录后，枚举 `skills/` 中除 `shared/` 外的维护 Skill 及 `skills/shared/` 中的共享 Skill，再通过各 Agent Manifest 的 `skill_target` 生成原生发现链接或视图。
 2. `agenticops update` 同步源码、维护依赖和受信源码 Git Hook 后，按当前 Git 内容刷新链接；新增 Skill 自动接入，已删除 Skill 的旧链接只在所有权和目标均匹配时移除。
 3. `agenticops station doctor` 在源码产品根目录执行时只读检查维护 Skill 清单、链接目标、越界和同名冲突，不把产品根目录当成业务工位。
 4. Bootstrap 在 `.local/maintenance-skill-wiring.json` 记录生成产物的路径、类型和链接目标，用于检查所有权和安全清理；该文件不提交，也不是 Skill 事实源。
@@ -96,12 +97,18 @@
 
 项目 Skill 继续复用现有工位接线：
 
-1. `agenticops station init` 根据所选 Project 确定通用项目 Skill，再通过 Agent Manifest 的 `skill_target` 链接到工位的原生发现目录。
+1. `agenticops station init` 根据所选 Project 确定项目 Skill 并加入共享 Skill，再通过 Agent Manifest 的 `skill_target` 链接到工位的原生发现目录。
 2. `.agenticops/init.json` 记录受管链接；`doctor` 只读检查，`repair` 幂等刷新。
 3. Project 或 Agent 集合变化不能静默覆盖既有绑定，必须遵守工位清理与重建边界。
 4. 删除项目 Skill 后，`repair` 只能删除清单中登记且目标未漂移的旧链接。
 
 维护 Skill 和项目 Skill 可以在各自目录使用相同的 Agent 原生目标，但来源、产品目录和产物清单必须隔离，不能用项目工位的 `init.json` 管理产品维护接线。
+
+### 5.3 共享 Skill
+
+共享资产使用现有 Manifest `skill_target` 与两种既有产物清单；不增加状态字段、项目需求配置或平台专用分支。安装只增加 `skills/shared/`，其中 `.gitkeep` 保留空共享根以支持删除最后一个技能后的清理，源码维护枚举跳过保留的 `shared` 容器；共享根缺失或异常时明确报告，不能把缺资源当成没有共享技能。生成与清理复用原有入口，删除共享技能后只清理清单中登记且目标未漂移的链接。
+
+此变更不改变工位状态字段和读写语义，保持当前 epoch，以同 epoch 旧清单补齐、删除及回退清理回归为兼容依据。旧状态、任务现场和授权不迁移；更新后仍由 doctor/repair 显式刷新工位。项目上下文从绑定和现有资料读取，共享需求分析不要求活动任务，也不推进任务阶段。
 
 ## 6. 禁止用户级注册
 
@@ -132,8 +139,8 @@ AgenticOps 的 setup、update、install、init、doctor 和 repair 均不得写�
 
 - 资源合同登记 Skill 的 `SKILL.md` 及必需脚本、引用资料，目录名与 `name` 一致；Skill 源目录不包含任何 Agent 专用配置。
 - 产品源码目录的 setup/update 能新增、刷新和安全移除维护 Skill 链接；doctor 能报告缺失、越界、目标漂移和未受管同名文件。
-- 安装目录不包含 `skills/` 和产品维护发现链接。
-- 业务工位只生成当前 Project Skill，不出现任何维护 Skill。
+- 安装目录只包含 `skills/shared/` 共享子树，不包含维护 Skill 和产品根发现链接；旧安装补齐及回退见[更新与回退](usage/update-and-rollback.md#共享-skill-资源与接线)。
+- 业务工位生成当前 Project Skill 与共享 Skill，不出现维护 Skill 或其它项目 Skill。
 - 使用隔离的假 `HOME` 执行安装和接线测试，断言所有用户级 Skill 目录保持未创建、未修改。
 - Codex、Claude 的原生目录均来自各自 Manifest 的同一 `skill_target` 契约；测试 Agent 可用 `null` 明确表示不支持 Skill，公共代码不得猜测默认目录或以平台名分支选择目录。
 - 不同 Agent 生成视图中的 `SKILL.md`、脚本和引用资料必须解析到同一通用事实源；可选平台展示元数据不得改变隐式调用边界或 Skill 语义。

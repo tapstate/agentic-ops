@@ -345,7 +345,7 @@ class StationBootstrapTests(unittest.TestCase):
 
     def test_non_tapdata_binding_is_reused_without_default(self):
         product = self.station.parent / 'product'
-        for name in ('bootstrap', 'contracts', 'workflow', 'adapters'):
+        for name in ('bootstrap', 'contracts', 'workflow', 'adapters', 'skills'):
             shutil.copytree(ROOT / name, product / name)
         (product / 'projects/demo').mkdir(parents=True)
         (product / 'projects/other').mkdir()

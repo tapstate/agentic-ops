@@ -122,6 +122,9 @@ for agent_skill_root in .agents/skills .claude/skills; do
         "$maintainer_root/skills/$maintenance_skill")"
   done
 done
+for agent_skill_root in .agents/skills .claude/skills; do
+  test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$maintainer_root/$agent_skill_root/ao-requirement")" = "$maintainer_root/skills/shared/ao-requirement"
+done
 exclude_before="$(file_digest "$maintainer_root/.git/info/exclude")"
 python3 "$maintainer_root/bootstrap/skill_wiring.py" --product-root "$maintainer_root" --refresh >/dev/null
 test "$(file_digest "$maintainer_root/.git/info/exclude")" = "$exclude_before"
@@ -226,9 +229,17 @@ fi
 git -C "$maintainer_root" checkout -q -- agenticops
 git -C "$source_repo" switch -q "$install_branch"
 
-bash "$repo_root/bootstrap/install.sh" \
-  --install-home "$install_root" --repository "$source_repo" --branch "$install_branch" \
-  --source-pool "$custom_source_pool"
+# 与 gh 一键安装一致：仅向 Bash 传脚本文本，从源码目录之外运行。
+# 同名本地辅助脚本不能被执行。
+installer_cwd="$test_root/installer-cwd"
+mkdir -p "$installer_cwd"
+printf '%s\n' 'exit 99' > "$installer_cwd/lifecycle-common.sh"
+(
+  cd "$installer_cwd"
+  cat "$repo_root/bootstrap/install.sh" | bash -s -- \
+    --install-home "$install_root" --repository "$source_repo" --branch "$install_branch" \
+    --source-pool "$custom_source_pool"
+)
 
 test -f "$install_root/contracts/gate-request.schema.json"
 test -f "$install_root/gate/runner.py"
@@ -240,6 +251,7 @@ test -x "$install_root/agenticops"
 test -f "$maintainer_root/skills/ao-test-takeover/SKILL.md"
 test -f "$maintainer_root/skills/ao-ws-init/SKILL.md"
 test -f "$maintainer_root/skills/ao-review-change/SKILL.md"
+test -f "$install_root/skills/shared/ao-requirement/SKILL.md"
 test ! -e "$install_root/skills/ao-review-change"
 test ! -e "$install_root/skills/ao-test-takeover"
 test ! -e "$install_root/skills/ao-ws-init"
@@ -435,6 +447,10 @@ test -f "$station/.mcp.json"
 test ! -e "$station/.claude/settings.json"
 test ! -e "$station/.codex/hooks.json"
 test -f "$station/.test-agent/settings.json"
+for agent_skill_root in .agents/skills .claude/skills; do
+  test -L "$station/$agent_skill_root/ao-requirement"
+  test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$station/$agent_skill_root/ao-requirement")" = "$install_root/skills/shared/ao-requirement"
+done
 test -L "$station/.agents/skills/tapdata-task"
 test -L "$station/.claude/skills/tapdata-task"
 test ! -e "$station/.agents/skills/ao-test-takeover"

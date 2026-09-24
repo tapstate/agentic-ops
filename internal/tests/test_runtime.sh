@@ -31,6 +31,7 @@ run_general_suite() {
   run_product tests/test_engineering_baseline.py
   run_product tests/test_station_state.py
   run_product tests/test_station_source.py
+  run_product tests/test_shared_skills.py
   run_product tests/test_shared_repositories.py
   run_product tests/test_repository_recovery.py
   run_product tests/test_task_identity.py

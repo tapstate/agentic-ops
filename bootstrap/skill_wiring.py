@@ -60,13 +60,37 @@ def validate_skill(skill_root):
         raise ValueError("Skill description 不能为空：%s" % skill_file)
 
 
+def shared_skill_sources(product_root):
+    root = Path(product_root).resolve() / "skills"
+    shared = root / "shared"
+    if root.is_symlink() or shared.is_symlink() or not shared.is_dir():
+        raise ValueError("共享 Skill 资源缺失或路径异常；请在绑定产品根运行新版 agenticops update 补齐资源，再执行 station repair")
+    sources = []
+    for candidate in sorted(shared.iterdir()):
+        if candidate.name.startswith("."):
+            continue
+        validate_skill(candidate)
+        sources.append(candidate)
+    return sources
+
+
+def unique_skill_sources(*groups):
+    sources = {}
+    for group in groups:
+        for source in group:
+            if source.name in sources:
+                raise ValueError("Skill 名称冲突：%s 与 %s" % (sources[source.name], source))
+            sources[source.name] = source
+    return list(sources.values())
+
+
 def maintenance_skill_sources(product_root):
     root = Path(product_root).resolve() / "skills"
-    if not root.is_dir():
+    if root.is_symlink() or not root.is_dir():
         raise ValueError("源码产品根目录缺少通用 Skill 目录：%s" % root)
     sources = []
     for candidate in sorted(root.iterdir()):
-        if candidate.name.startswith("."):
+        if candidate.name.startswith(".") or candidate.name == "shared":
             continue
         validate_skill(candidate)
         sources.append(candidate)
@@ -89,7 +113,7 @@ def validate_source_product_root(product_root):
 def expected_artifacts(product_root):
     artifacts = {}
     owners = {}
-    sources = maintenance_skill_sources(product_root)
+    sources = unique_skill_sources(maintenance_skill_sources(product_root), shared_skill_sources(product_root))
     for agent_id, manifest in sorted(discover(product_root).items()):
         skill_target = manifest.get("skill_target")
         if not skill_target:

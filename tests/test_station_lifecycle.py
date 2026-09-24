@@ -909,7 +909,7 @@ class StationTests(unittest.TestCase):
         from test_quality import feature_review
         # 从真实同版生成入口开始；只复制产品资产，所有 Git/Jira 输入为隔离夹具。
         shutil.rmtree(self.ws)
-        for name in ('bootstrap', 'adapters', 'gate', 'workflow'):
+        for name in ('bootstrap', 'adapters', 'gate', 'workflow', 'skills'):
             shutil.copytree(ROOT / name, self.product / name)
         shutil.copy2(ROOT / 'agenticops', self.product / 'agenticops')
         init = subprocess.run(['bash', str(self.product / 'bootstrap/station-init.sh'), '--station', str(self.ws),

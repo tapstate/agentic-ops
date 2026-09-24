@@ -87,7 +87,7 @@ for file in \
   projects/tapdata/profile.json projects/tapdata/repositories.json projects/tapdata/admission.json \
   projects/tapdata/skills/tapdata-task/SKILL.md \
   projects/tapdata/skills/tapdata-wiki/SKILL.md projects/tapdata/skills/tapdata-ci-test/SKILL.md bootstrap/shared-repositories.json bootstrap/shared_repositories.py \
-  skills/ao-test-takeover/SKILL.md skills/ao-ws-init/SKILL.md \
+  skills/ao-test-takeover/SKILL.md skills/ao-ws-init/SKILL.md skills/shared/ao-requirement/SKILL.md skills/shared/ao-requirement/references/design-types.md \
   skills/ao-review-change/SKILL.md skills/ao-review-change/scripts/review-context.py \
   adapters/station/AGENTS.md adapters/station/agenticops adapters/agents/claude/templates/CLAUDE.md \
   adapters/tools/mcp-requirements.json adapters/tools/mcp.template.json \
@@ -95,7 +95,7 @@ for file in \
   adapters/agents/codex/manifest.json \
   bootstrap/install.sh bootstrap/setup.sh bootstrap/update.sh bootstrap/rollback.sh bootstrap/lifecycle-common.sh \
   bootstrap/station-init.sh bootstrap/render.py bootstrap/station_paths.py bootstrap/agent_registry.py \
-  bootstrap/skill_wiring.py \
+  bootstrap/skill_wiring.py tests/test_shared_skills.py \
   bootstrap/product_state.py bootstrap/product_version.py bootstrap/station_registry.py bootstrap/station_compatibility.py \
   workflow/station.py workflow/station_source.py workflow/source_pool.py workflow/station_resources.py workflow/station_archive.py workflow/station_operation.py \
   tests/test_gate.py tests/test_contracts.py tests/test_adapter_boundary.py tests/test_workflow.py tests/test_task_identity.py tests/test_install.sh \
@@ -151,7 +151,7 @@ for manifest in adapters/agents/*/manifest.json; do
   python3 -m json.tool "$manifest" >/dev/null
 done
 
-grep -Fq 'sparse-checkout set adapters bootstrap contracts gate policies projects workflow' bootstrap/install.sh ||
+grep -Fq 'install_paths=(adapters bootstrap contracts gate policies projects workflow)' bootstrap/install.sh ||
   fail "安装脚本没有限制为产品目录"
 grep -Fq '__AGENTIC_OPS_HOME__' adapters/station/AGENTS.md ||
   fail "工作目录入口缺少安装路径占位符"

@@ -97,7 +97,7 @@ Git 克隆只包含该分支已提交内容，不包含当前未提交修改；�
 - 项目差异：`projects/<project>/`
 - Agent/工具协议差异：`adapters/`
 - 安装与接线：`bootstrap/`
-- 产品维护协作指引：`skills/`；它们只供维护 Agent 使用，不安装或接线到业务工位。Skill 的分类、事实源、发现接线和迁移要求见 [Skill 维护规范](skill-maintenance.md)。
+- 产品维护协作指引：`skills/`（不含 `shared/`）；它们只供维护 Agent 使用，不安装或接线到业务工位。共享需求设计入口为 `skills/shared/ao-requirement/`，维护根和项目工位共用方法，按目标项目读取约束。Skill 的分类、事实源、发现接线和迁移要求见 [Skill 维护规范](skill-maintenance.md)。
 
 新增 Agent 只增加 `adapters/agents/<id>/` 的 Manifest v3、必要的指引模板和测试（不提供通用工具 Hook）；不要修改公共入口建立平台枚举。新增产品项目只增加 `projects/<project>/`。每个 Jira Project Profile 必须配置 `jira.takeover_watermark`：逻辑键固定为 `agenticops_version`，配置实际 `customfield_<ID>`、字符串字段名、启用的 Jira 事务类型 ID 和 `overwrite` 写入方式；`workflow/project_rules.py` 会拒绝缺失或无效配置，不能绕过接管门禁。工作项、进度和验收写入 Jira，不在仓库新增执行计划。
 

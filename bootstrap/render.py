@@ -15,7 +15,7 @@ from pathlib import Path
 
 from agent_registry import select
 from product_state import load as load_product_state
-from skill_wiring import validate_skill
+from skill_wiring import validate_skill, shared_skill_sources, unique_skill_sources
 from station_paths import StationDirectory, station_artifact_path
 from station_compatibility import (
     load_manifest,
@@ -221,7 +221,9 @@ def expected_artifacts(install_root, station, project, agents, manifests):
             owners[target] = agent_id
         skill_target = manifest.get("skill_target")
         if skill_target:
-            for source in project_skill_sources(install_root, project):
+            for source in unique_skill_sources(
+                project_skill_sources(install_root, project), shared_skill_sources(install_root)
+            ):
                 target = str(Path(skill_target) / source.name)
                 if target in artifacts:
                     raise ValueError(
@@ -352,6 +354,11 @@ def assert_artifact_ownership(station, owned, artifacts, tree):
         if not tree.exists(target):
             continue
         if target in owned:
+            recorded = owned[target]
+            if recorded["kind"] == "symlink" and (
+                not tree.is_symlink(target) or tree.readlink(target) != recorded["target"]
+            ):
+                raise ValueError("工位 Skill 接线已漂移，拒绝覆盖：%s" % path)
             continue
         if expected["kind"] == "symlink":
             if not tree.is_symlink(target) or tree.readlink(target) != expected["target"]:

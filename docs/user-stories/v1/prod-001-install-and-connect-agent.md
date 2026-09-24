@@ -9,6 +9,7 @@
 - 生成单工位 config/source/runtime 和空 current，并由 Product Root `.archive/` 保存正式档案；源码池由产品根自动管理，仅加速接管时的独立源码下载。purge 验证空闲、已完成操作和生成归属，保留持久材料及中央档案，再生成需显式复用决定。
 - 工位使用 `.agenticops/` 保存初始化与唯一当前任务；config/source/runtime 分离持久材料与运行现场，不复制 Project Skill、Policy 或 Runtime。
 - Manifest v3 声明原生指引、启动方式、Skill 和退役产物；新增 Agent 无需工具 Hook 入口，不生成通用工具拦截接线。
+- 共享 Skill 按[维护规范](../../skill-maintenance.md)在源码维护根与项目工位发现；维护 Skill 不进入安装或业务工位，共享方法根据目标项目读取事实，不要求活动任务。
 - Agent 在同一工位会话继续任务；上下文验证 source 独立仓库，不扩展其它工位权限。
 - `agenticops station doctor` 发现产品版本和薄接线漂移，`agenticops station repair` 重建派生接线，不修改任务状态和授权；同名非产品文件必须拒绝覆盖或删除。
 
@@ -22,5 +23,6 @@
 
 - 产品稀疏安装、中央入口、项目工位初始化、漂移诊断和幂等修复结果。
 - 更新到新提交、工作目录刷新并回退到上一提交的测试结果。
+- 共享技能同源、同名冲突、旧清单补齐及漂移保护、旧安装资源补齐、重复更新保持回退指针、回退移除共享接线的结果；用户级目录保持未写入。
 - 无 Python Hook 的第三方 Agent Manifest 发现、产物生成和启动结果；原生 MCP 与 Skill 接线回归。
 - 同版生成→任务退出→purge→生成、持久材料复用、新工位身份与旧状态拒绝测试结果。

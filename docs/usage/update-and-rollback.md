@@ -2,6 +2,14 @@
 
 本页负责用户切换产品的顺序与失败边界。工位数据合同见[工位合同](../architecture/single-task-station.md)。不要把“更新成功”“工位生成成功”和“应用验收通过”混为一谈。
 
+## 共享 Skill 资源与接线
+
+安装只包含 `skills/shared/`，维护根和工位通过各自原有受管清单接入共享技能。新增共享技能不修改任务状态或 epoch；同 epoch 旧清单在 `station repair` 时补齐，现有任务与授权保持原语义。`station doctor` 可报告缺资源、缺链接与漂移；修复不覆盖未受管同名文件。
+
+旧版 updater 首次切换到支持共享 Skill 的版本时，可能保留旧 sparse-checkout 范围。此时先在绑定安装产品根再次运行 `./agenticops update`，由新版更新器补齐共享子树，再运行 `station doctor --station <工位路径>` 和 `station repair --station <工位路径>`。产品 HEAD 未变化时只补齐资源，不覆盖原回退指针；不要复制技能到用户目录来补偿缺失。重新执行 update 仍遵守原来的脏树、远端及兼容检查。
+
+新版更新与回退按目标 Git 树选择共享子树，维护 Skill 始终不进入安装。回退后由目标版本的原生 repair 清理其不再需要、且清单归属和目标仍匹配的生成链接；漂移则停止并保留材料。生成与清理沿用原有清单，目标版本不读取或迁移任务数据。该支持不追溯改变旧 updater；缺资源或失败时不宣称共享技能已经可用。
+
 ## 第一阶段：同版本生成与清理
 
 执行 `agenticops version` 查询当前产品版本；在源码或工位目录使用 `./agenticops version`，也可用安装入口 `~/.agentic-ops/agenticops version`。输出为 `<分支>-<标签>-<提交数>-<提交编号>`；工位入口显示其绑定 Product Root 的版本，不读取业务仓库版本。产品存在未提交修改时附加 `-dirty`，供诊断使用；接管水印仍拒绝使用脏产品版本。查询不更新产品或工位状态。
