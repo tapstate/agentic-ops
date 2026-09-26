@@ -151,7 +151,7 @@ for manifest in adapters/agents/*/manifest.json; do
   python3 -m json.tool "$manifest" >/dev/null
 done
 
-grep -Fq 'install_paths=(adapters bootstrap contracts gate policies projects workflow)' bootstrap/install.sh ||
+grep -Fq 'install_paths=(adapters bootstrap contracts docs gate policies projects workflow)' bootstrap/install.sh ||
   fail "安装脚本没有限制为产品目录"
 grep -Fq '__AGENTIC_OPS_HOME__' adapters/station/AGENTS.md ||
   fail "工作目录入口缺少安装路径占位符"

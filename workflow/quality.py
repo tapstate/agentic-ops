@@ -73,6 +73,17 @@ def config(base, task=None):
         for kinds in list(requirements.values()) + [result.get("pr_ready", {}).get("required_verification", [])]:
             if not isinstance(kinds, list) or any(not isinstance(k, str) or k not in verification.KINDS for k in kinds):
                 raise ValueError("验证材料种类配置无效")
+        if "verification_plan" in result:
+            declaration = result["verification_plan"]
+            if (not isinstance(declaration, dict)
+                    or set(declaration) != {"fact_key", "field", "method", "kinds", "schema"}
+                    or declaration.get("fact_key") not in result.get("plan_fact_keys", [])
+                    or not isinstance(declaration.get("field"), str) or not declaration["field"].strip()
+                    or not isinstance(declaration.get("method"), str) or declaration["method"] not in result["methods"]
+                    or not isinstance(declaration.get("kinds"), list) or not declaration["kinds"]
+                    or any(k not in ("local", "ci") for k in declaration["kinds"])
+                    or not isinstance(declaration.get("schema"), dict)):
+                raise ValueError("验证方案配置无效")
         if profile is not None:
             validate_task_profile(result, task)
             required = {f["key"] for f in cls.get("required_facts", [])}
@@ -142,7 +153,8 @@ def validate_task_profile(rules, task):
 
 def plan_problems(model, rules, ctx):
     contract = rules.get("plan_contract")
-    problems = structured_plan_problems(model, rules, ctx)
+    from workflow import verification
+    problems = structured_plan_problems(model, rules, ctx) + verification.plan_problems(rules, ctx)
     if contract is not None:
         plan = ctx["facts"].get(contract["fact_key"])
         if not isinstance(plan, dict):
@@ -323,7 +335,7 @@ def automatic_checkpoint_problems(model, checkpoint, rules, ctx):
         return ["首轮验证没有已定义的修复后检查项，不能自动推进"]
     from workflow import verification
     problems = source_revision_problems(ctx)
-    problems += verification.problems(model, ctx, rules.get("verification_checkpoints", {}).get(checkpoint, []))
+    problems += verification.problems(model, ctx, rules.get("verification_checkpoints", {}).get(checkpoint, []), rules)
     for key, view in after_fix.items():
         plan = view["plan"]
         if not view["selected"]:
@@ -476,7 +488,7 @@ def checkpoint_view(model, checkpoint, rules, ctx, checking_automatic=False):
             snapshot["not_due"] = []
     from workflow import verification
     requirements = rules.get("verification_checkpoints", {}).get(checkpoint, [])
-    problems.extend(verification.problems(model, ctx, requirements))
+    problems.extend(verification.problems(model, ctx, requirements, rules))
     if requirements:
         snapshot["verification"] = {repo: {kind: entries.get(kind) for kind in requirements}
                                     for repo, entries in model.get("verification", {}).items()}
@@ -580,7 +592,7 @@ def reduce(model, command, rules, ctx):
         model["jira_assessment"] = jira_tests.snapshot_assessment(p["snapshot"], rules, ctx)
     elif action == "verification":
         from workflow import verification
-        verification.record(model, p, ctx)
+        verification.record(model, p, ctx, rules)
     elif action == "item":
         plan = p["plan"]
         points = {c["id"]: c for c in rules["checkpoints"]}

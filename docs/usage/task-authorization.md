@@ -146,7 +146,7 @@ python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key 
 
 预检列出全部工程仓库的目标 SHA、暂存/未暂存/未跟踪及 ignored 内容、空目录、保全决定和保留引用。源码旁报告与其它文件一样默认归档；ignored 不是删除授权。大文件或敏感材料先安全导出或精确选择丢弃，再确认范围。无需登记 Maven target 等构建目录，也不依赖项目清理命令或配方。
 
-停止并核验写入者后，默认入口在同一操作内先归档，再执行确定的 Git 复位及受管目录回收，最后验收。需要 Agent 自行执行时，在上述命令增加 `--prepare-only`：完成正式保全后返回 `awaiting_cleanup_result`，不删除源码和运行目录。按返回计划的精确对象处理，保留成果引用并检出指定基线；不要递归删除整个 source，不移动命名分支或追随远端最新提交。
+停止并核验写入者后，默认入口在同一操作内先归档，再执行确定的 Git 复位及受管目录回收，最后验收。需要 Agent 自行执行时，在上述命令增加 `--prepare-only`：完成正式保全后返回 `awaiting_cleanup_result`，不删除源码和运行目录。按返回计划的精确对象处理，保留成果引用并检出指定基线；不要递归删除整个 source；按计划快进开发分支并回收列明的受管基线引用，不追随远端最新提交。
 
 默认脚本失败后先核对已完成与剩余对象，Agent 可在原授权范围继续，无需换工具就重确认。完成后沿用原请求、operation-id 和 expected-revision，增加 `--verify-result`：不调用执行器，不索取退出码，而是按[版本 6 合同](../architecture/single-task-station.md#成果导向清理计划版本-6)核验实际结果，满足要求后正式解绑。它仍会更新验收和解绑状态，不是只读命令；不允许手改 `.agenticops/`。若需保留工位占用，只运行无 input 的预检查看原范围，不发起最终验收。
 
@@ -160,20 +160,15 @@ python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key 
 
 ### 原清理操作的恢复
 
-本节仅适用于当前运行时支持的工位代际，支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准。已有 schema 3 操作保留原请求和执行顺序：保留 config、完整 source 和正式 Product Root `.archive/`，清空 runtime，按原 Project 配方回收已登记源码生成目录。不得将正在执行的旧计划改成 schema 4；新操作使用上面的配置化入口。边界、源码 archive/export/discard 与中断恢复以[工位合同](../architecture/single-task-station.md#8-一次确认成果归档与恢复)为准。
+现役入口在同一操作内按[六阶段合同](../architecture/single-task-station.md#阶段式清理)自动执行。发生问题返回 needs_attention、当前 phase、problems 和清理范围；按具体对象处理后复用原 issue/run/revision/operation-id 与请求恢复。阶段出口验收通过才进入下一阶段，不能手改状态。旧 schema 3–5 和旧 epoch 操作只能由匹配的原版本退出，不能调用现役入口恢复。
 
-以下旧计划的目录预登记要求只用于其原合同，不适用于新版本 6 清理。新任务可以将可迁出的运行产物放到 runtime；源码旁的构建产物在退出时按实际 Git/文件快照确认处置，不需要先修改项目配方。
-
-```sh
-python3 <agenticops-root>/workflow/task.py cleanup-preflight --issue-key <issue> --expected-run-id <run> --dir <station>
-python3 <agenticops-root>/workflow/task.py clean --issue-key <issue> --expected-run-id <run> --expected-revision <revision> --operation-id <op-id> --input <工位外请求.json> --dir <station>
-```
-
-请求包含 summary、reason、真实 decision_ref 和 cleanup_plan.digest 对应的 confirmed_digest。默认源码归档，显式丢弃还需 discard_digest；完成任务改用 release 并提供 candidate_digest。Agent 先按原生能力停止写入者再执行，Workflow 检查并按同一操作归档及重置，无需归档后二次确认。归位结果保持冻结引用语义：branch 回到受管本地基线分支，tag/commit 回到 detached；命名开发分支和任务分支不移动，下次接管才联网刷新。
+默认分支/PR 保留。用户选择删除时，先通过 station_resources.py 登记 external，包含 id、resource_type、action、before 和 decision_ref；before 包含 repository、完整 ref/sha（PR 为 number/state/head_sha）、protected=false，本地分支另加 location=local。处置与源码范围在同一次计划中确认；没有新范围不重复询问。
 
 需要保留敏感或超过普通归档上限的源码时，先在工位外创建当前用户私有的导出目录（0700），再运行 `python3 <agenticops-root>/workflow/station_export.py --dir <station> --issue-key <issue> --expected-run-id <run> --path source/<owner>/<repo>/<file> --output <绝对导出文件路径>`。工具独占写出 0600 文件、重建核验并回读登记 export 决定；不覆盖已有不同内容，输出仅含路径和摘要。单成果原始内容上限 512 MiB，编码后上限 768 MiB。失败退出操作中的导出另带原 expected-operation-id，随后按新范围补充确认；正式归档后的导出意图和回执进入 Product Root `.archive/<run-id>/receipts`。
 
-分支和 PR 默认保留。用户选择删除/关闭时，本地重置完成后使用原生工具，另通过 `workflow/station_disposition.py --dir <station> --issue-key <issue> --run-id <原run> --input <处置.json>` 记录 intent/unknown/readback。该工具只记追加证据，不发送外部请求。意图需稳定 disposition_id、精确 object_id、resource_type、action、before 身份及保护回读、decision_ref，并以不含 confirmed_digest 的意图对象摘要确认；回执绑定 intent_digest 和 object_id，包含实际 readback_ref。disposition_id 是本次外部操作的稳定关联键，原生 API 支持幂等键时使用同值；API 不支持时不能把它当作服务端去重保证。重试已有意图只用于回读，不能据此重发。工位已有新任务时拒绝旧任务处置，避免删除被复用的对象。
+本地任务分支在源码回到项目开发分支后由固定逻辑删除，保持成果引用。远端分支及 PR 由原生工具处理：运行至 cleanup_disposition 后，用 `workflow/station_disposition.py --dir <station> --issue-key <issue> --run-id <run> --input <处置.json>` 保存与原计划精确匹配的 intent，原生操作后保存 readback，再恢复原清理命令。unknown 必须先回读，不能重发；状态为 unchanged 不满足删除目标。已释放工位仍支持独立处置原档案，但不能处置被新任务占用的对象。
+
+意图包含稳定 disposition_id、phase=intent、object_id、resource_type、action、before、真实 decision_ref 和不含 confirmed_digest 的意图摘要 confirmed_digest；回读包含同一 disposition_id/object_id、phase=readback、intent_digest、实际 readback_ref，以及 deleted/closed 状态。记录工具不代替远端操作，也不把本地夹具回读当作真实 GitHub 验证。
 
 关键日志与报告集中到 runtime/logs、runtime/reports（由 Project 的 archive_runtime 指定），归档保留脱敏后的 UTF-8 正文；停止期间新增内容以不可变附件追加后再删除。单文件超过 16 MiB、总量超过 64 MiB 或非文本材料须先安全导出并留下摘要，不能静默丢弃。
 

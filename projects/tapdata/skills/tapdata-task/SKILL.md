@@ -17,7 +17,7 @@ metadata:
 
 一般架构、实现和非集成测试审查需要 Wiki 参考资料时，使用 [tapdata-wiki](../tapdata-wiki/SKILL.md)，按项目 Profile 引用阅读中央共享 Wiki，并以当前工位 source 内任务对应版本源码核验。集成测试需求、设计、编写和报告分析统一先进入 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)，由它按需使用 tapdata-wiki；传递本轮已有且适用的查询结果，避免重复查询。Wiki 由研发显式准备和更新，不增加任务开始刷新步骤；不可用时继续有充分源码依据的工作。
 
-1. 先只读核对 current-task.json 与 operation.json：仅 current=null 且操作不存在或 done 时可接新任务，revision 从当前信封读取。已有任务恢复同一 run；未完成操作按原 operation_id、expected_revision 和请求恢复，不另建任务覆盖。
+1. 先只读核对 current-task.json 与 operation.json：仅 current=null 且操作不存在或 done 时可接新任务，revision 从当前信封读取。Jira 正在进行的任务由研发决定恢复已有 run 或使用新 run，已有明确决定不重复询问。选择恢复时核验原 run；找不到可恢复的 run 时说明缺项，不伪造恢复。选择新 run 时，已有活动任务须先按确认范围保全、归档并清理，不能直接覆盖。未完成操作按原 operation_id、expected_revision 和请求恢复，不用新 run 绕过在途操作。
 2. 新任务先真实读取 Jira 类型、状态、经办人与当前用户，按 Project 准入核验；不凭标题、历史或默认仓推断。确定产品版本/主仓分支以及完整 Profile，缺失时询问该事实。
 3. 空闲工位执行 task.py takeover --issue-key <issue> --task-class <class> --version <已确认主仓分支> --profile full-application --operation-id <op-id> --expected-revision <revision> --dir <station>。已知需要 t-layer3-test 时用 --optional-repository tapdata/t-layer3-test 加入；冻结后新增需求按下述同周期方案返工处理。模块明确覆盖用 --explicit-branch owner/repo=branch，不能覆盖主仓到不同产品版本。
 4. 失败保留原 run/op/request 恢复；完成后 repository context 核验完整 source、ref/SHA 与基线摘要，不把远程页面或缓存当已确认基线。Git 操作只使用 context 的 source 路径，不启动嵌套 Agent。
@@ -31,15 +31,15 @@ metadata:
 
 用户要求清理时，新操作先调用 `workflow/station-clean.py --dir <station>` 只读预检；两层名单、版本 6 请求及结果标准见[配置化清理入口](../../../../docs/usage/task-authorization.md#配置化清理入口)。它复用 clean/release；已有确认仍覆盖当前范围时复用。未提交及 ignored 内容先选择保全或精确丢弃，保留 config/source/archive 和命名分支、PR。源码复位不依赖 Maven/npm 清理命令；完成任务仍核对 terminal proof 和 candidate_digest，不能把 incomplete 档案后置改为 completed。
 
-停止写入者后按确认范围执行；默认脚本先保全再清理。脚本异常时核对已完成与剩余动作，在相同授权内接管；也可用 `--prepare-only` 保全后直接交给 Agent。完成后原请求增加 `--verify-result`，按实际成果验收并正式解绑，不要求补成功退出码或重跑原脚本。基线、保全、权限和未知外部结果仍须核验；范围变化补充确认，不手改状态。源码回到确认的受管基线分支或 detached SHA，不移动命名分支，不联网追新。
+停止写入者后按确认范围执行；默认脚本先保全再清理。脚本异常时核对已完成与剩余动作，在相同授权内接管；也可用 `--prepare-only` 保全后直接交给 Agent。完成后原请求增加 `--verify-result`，按实际成果验收并正式解绑，不要求补成功退出码或重跑原脚本。基线、保全、权限和未知外部结果仍须核验；范围变化补充确认，不手改状态。源码回到 Profile 开发分支的已确认 SHA，按清单回收受管临时基线引用，不联网追新；空闲工位才可使用 source-update 刷新。
 
 可迁出的运行产物优先放 runtime；源码内构建输出不要求生产前登记，也不按 target 等名称判定可删。退出时按实际清单确认，关键报告和敏感材料先保全。进程仍记录 PID、启动时间、cwd、executable；实际测试数据记录隔离身份及回读。
 
-默认归档保存实际源码修改和必要新文件并做重建核验；超限/敏感材料无法归档时，登记 source-disposition，明确 archive/export/discard 和当前快照，不把摘要当作源码备份。export 使用 workflow/station_export.py 创建工位外私有成果并核验回读，参数见[任务授权指引](../../../../docs/usage/task-authorization.md#重置工位)，discard 必须精确确认。源码链接、冲突索引、submodule 等不支持状态先明确处理，不能擅自丢弃。
+默认归档保存实际源码修改和必要新文件并做重建核验；超限/敏感材料无法归档时，登记 source-disposition，明确 archive/export/discard 和当前快照，不把摘要当作源码备份。export 使用 workflow/station_export.py 创建工位外私有成果并核验回读，参数见[任务授权指引](../../../../docs/usage/task-authorization.md#重置工位)，discard 必须精确确认。源码链接只保存链接文本、不跟随目标；冲突索引、submodule 等不支持状态先明确处理，不能擅自丢弃。
 
-运行资源 external 与可选 Git 对象区分：分支 resource_type=git-branch，PR resource_type=pull-request，默认 retain，不因未删除阻止重置。用户要求删除分支/关闭 PR 时，在本地重置完成后独立展示 ID、SHA/状态及保护回读，经确认后先用 workflow/station_disposition.py 向原档案追加 intent，再使用原生工具执行，再追加 readback。unknown 只回读原操作，不重发；不修改 Jira，不改档案正文，不重新占用已释放工位。
+清理默认自动经过准入、归档、源码、分支/PR、资源、释放六阶段，出口检查实际成果；仅遇到 needs_attention 时处理 problems，随后恢复同一操作。分支/PR 默认保留；用户明确删除时在原计划登记精确对象和决定，本地分支 location=local 由固定逻辑处理。远端分支和 PR 在 cleanup_disposition 阶段使用原生工具，先 station_disposition intent，后实际回读 readback，再恢复原清理；未知结果先回读，不重发，不把删除失败静默改为保留。完整用法见[阶段式清理](../../../../docs/architecture/single-task-station.md#阶段式清理)。
 
-中断恢复同一 issue/run/revision/operation-id 和原请求；已有 schema 3 操作仍走原 task.py 入口，不转换为新计划。目录身份或源码处置变化时执行 cleanup-amend，绑定原摘要和 plan revision，补充确认差异；运行目录内部新增生成物在原目录授权范围内，不逐文件重做摘要。已完成目录回执后重新产生内容必须停止并明确补充处置，不能沿旧回执删除。确认请求保存在工位外系统临时目录，避免污染活动材料。当前工位代际及目标产品支持范围以[机器兼容清单](../../../../contracts/station-state-compatibility.json)为准。工位与目标产品不兼容时，先使用匹配的原产品版本结束任务并归档释放或清理，再显式执行 station purge；确认解绑成功后才切换产品并按目标版本重新初始化，顺序见[更新与回退](../../../../docs/usage/update-and-rollback.md)。不得使用目标版本解析或迁移旧任务，也不得通过 repair 跨代际采用。
+中断恢复同一 issue/run/revision/operation-id 和原请求；旧 schema 3–5 或旧 epoch 只能由原产品版本退出，不用现役入口恢复。目录身份或源码处置变化时执行 cleanup-amend，绑定原摘要和 plan revision，补充确认差异；运行目录内部新增生成物在原目录授权范围内，不逐文件重做摘要。已完成目录回执后重新产生内容必须停止并明确补充处置，不能沿旧回执删除。确认请求保存在工位外系统临时目录，避免污染活动材料。当前工位代际及目标产品支持范围以[机器兼容清单](../../../../contracts/station-state-compatibility.json)为准。工位与目标产品不兼容时，先使用匹配的原产品版本结束任务并归档释放或清理，再显式执行 station purge；确认解绑成功后才切换产品并按目标版本重新初始化，顺序见[更新与回退](../../../../docs/usage/update-and-rollback.md)。不得使用目标版本解析或迁移旧任务，也不得通过 repair 跨代际采用。
 
 ## 准入、设计和多仓库
 
@@ -65,7 +65,7 @@ metadata:
 
 ## 功能任务的 Jira 协作
 
-功能开发仅接入 Story。新接管仍要求 Analyzed 且负责人正确；正在进行的任务只恢复已有 run，没有 run 时先明确交接方案，不自动退回 Jira 或放宽准入。
+功能开发仅接入 Story，经办人必须正确。Analyzed 可新接管；In Progress（正在进行）由研发选择恢复已有 run 或建立新 run，不自动退回 Jira。新 run 记录研发决定与交接来源，按接管与恢复步骤核验既有分支、基线和成果；重新建立本轮方案、授权和验收记录，不继承旧授权或旧 PASS。其它状态仍按项目准入拒绝，不因新 run 选择放宽。
 
 Agent 按以下顺序主动处理，不等待研发提醒状态流转：
 
@@ -87,14 +87,16 @@ Tests Passed 前核对 Story Test Design Review Result（`customfield_10413`）�
 - completed 后只可按[有限回执恢复](../../../../docs/usage/quality-checkpoints.md#同步待办与有限回执恢复)补录已有操作；不得新建草稿或发送。退出前先核清未知结果，再生成确认范围；清理确认或归档草稿已绑定时交维护侧，不改账本或摘要绕过。待办展示失败与本地操作失败分开，先回读原操作，避免重复推进。
 
 - 每个仓库分别验证并记录提交、PR 和 CI，任务级证据统一汇总。按[共同验证材料](../../../../docs/usage/quality-checkpoints.md#共同验证材料)用现有 quality.py verification 动作记录本地测试、来源同步、CI 报告与审查材料；缺失或版本失效时先补齐，不直接改阶段。失败使用 failures.py 原 problem_id 记录 start/finish，替代旧 PR 独立预算入口。
+- 功能与缺陷 Q2 方案确认时都要明确 Wiki 依据的 CI 集成测试级别、判定理由、范围、用例复用/新增/修改和验证安排，按[共同验证材料](../../../../docs/usage/quality-checkpoints.md#共同验证材料)记录 integration_tests，与现有方案一次确认。不能只列命令或让研发先交用例清单。
 - 功能与缺陷在方案分析时使用 [tapdata-ci-test](../tapdata-ci-test/SKILL.md) 判断集成测试复用、新增或修改及框架可用性；实现后调用其编写、执行、报告分析和修复能力，PR CI 返回后再次调用报告分析。具体测试步骤由该技能及其 Runbook 维护；主流程负责授权、质量记录、阶段、提交推送和 CI 等待，不复制测试步骤。
-- 集成测试技能、框架、Wiki 或环境不可用时，展示具体模块、场景、依据和未覆盖范围，继续无依赖工作。确认存在当前授权内无法补齐且值得跟进的框架接入或覆盖能力缺口时，主动询问是否新增关联任务；临时查询失败、未提供本地环境等先说明恢复方式，不默认转成业务任务。创建前查询已有跟进事项；研发同意后按明确范围创建、关联并回读，结果未知先核对原操作，不重复创建。复用决定前核对当前事实、目标项目、任务类型、负责人和关联对象；这些内容或范围、风险实质变化时补充确认，普通文字整理不重复询问。是否创建任务与是否接受本次验证缺口分别确认；不能以拒绝创建、等待答复或已建任务代替质量处置。辅助能力缺失不自动新增门禁，但已有应测范围、选定验收项、PR Checks 和 failures 记录仍按原合同处理，不漏报失败或缩减范围。
+- 集成测试技能、框架、Wiki 或环境不可用时，展示具体模块、场景、依据和未覆盖范围，继续无依赖工作。确认框架不支持时，先检索已有事项，再询问是否创建或关联 Jira；临时查询失败、未提供本地环境等先说明恢复方式，不默认转成业务任务。创建前查询已有跟进事项；研发同意后按明确范围创建、关联并回读，结果未知先核对原操作，不重复创建。复用决定前核对当前事实、目标项目、任务类型、负责人和关联对象；这些内容或范围、风险实质变化时补充确认，普通文字整理不重复询问。是否创建任务与是否接受本次验证缺口分别确认；不能以拒绝创建、等待答复或已建任务代替质量处置。辅助能力缺失不自动新增门禁，但已有应测范围、选定验收项、PR Checks 和 failures 记录仍按原合同处理，不漏报失败或缩减范围。
 - 功能 PR 创建或更新前，先核对每个任务仓库的检出来源 `base_branch`，读取其最新远端 SHA；在方案授权内将该分支合并到任务工作分支，保留原冻结基线记录。冲突不明时暂停。合并产生代码变化后重验受影响内容并更新提交、检查项与 CI 证据；未变化也须核对报告仍适用，不能把旧报告改写为新 Head。此操作不授权 PR 合入或写保护分支。
 - 每次原子操作成功后继续下一项已授权工作；用 `task.py next --issue-key <issue-key>` 查看门禁、检查点和待回写评论。已有任务授权覆盖的编码、测试、提交、推送、Draft PR 和 Jira 回写不再逐步询问，仍遵守平台权限、外部事实回读和流程检查点。Q3 使用 `auto_checkpoint`：仅当 Q2 已选的全部修复后检查项满足各自证据合同（TapTest 使用项目配置的 Jira 状态依据）时自动记录和回写；它不是用户验收。`next` 只是只读建议，不授予新权限，也不能代替实际完成阶段工作。
 - 暂停时展示 `quality.py status` 或 `task.py next` 中该检查点的 `handoff`：说明为什么停、具体用例/步骤/预期、仓库与完整提交 SHA、谁来验证、需返回的日志/报告及可选处置。需要用户启动本地环境时，先提供候选 SHA、分支/推送状态、构建与启动方式、环境前置条件、测试数据和失败日志要求；用户在其它机器或共享环境验证时，先按授权推送分支或 Draft PR。手工执行必须先给可操作 `steps`；只有日志但没有目标提交时不可猜 SHA 或把分支名导入执行证据。一次列全需要用户决定的项目；恢复后复用已确认事实，不重复问同一问题。
 - 首轮本地自动测试可绑定 `git_revision` 返回的工作区指纹；手工证据及最终验收只用完整提交 SHA。提交后重新核对/执行验证并使用实际产物 SHA，不能把提交前报告改写为提交后运行。缺证据可如实记录风险或延期，不能填充 PASS。
 - 有意义变更且完成第一轮针对性验证后建议 Draft PR；如验证受阻，按项目标准披露现状。Q3 是自动首轮事实检查点，使用 `execute` 导入真实报告、`jira_status` 导入 TapTest 状态，在所有已选修复后项符合合同后执行 `auto_checkpoint`；Q4 才展示验收检查项（含实际关联 Test）、当前 SHA 的执行证据与风险，使用 `decide/checkpoint` 记录用户最终验收。用户可接受风险，不得把未执行、跳过、未知或失败改成通过。
 - 仅对启用 `status_sync` 的任务：Q4 完成并进入 `ci_validation` 后，立即读取 Jira issue、已链接 Test、每个 Test 的 Test Details 和可用 transitions，执行 `jira_status.py prepare --trigger tests_passed --operation-id <op-id>`。Manual/Unit 在 Q4 以同一 `case_ref`、当前用例版本和对应方式记录当前完整 SHA 的 PASS 证据及逐项 `accept`；TapTest 导入 `quality.py` 的 `jira_status` 动作，按[状态依据](../../../../docs/usage/quality-checkpoints.md#taptest-的-jira-状态依据)接纳，不要求本地 PASS 或逐项确认；Q4 总体须满足对应合同。Jira 已是 `Tests Passed` 也先核对这些事实；当前为 `In Progress` 且返回 `ready` 时同步尝试一次并写后回读。缺少 Jira 事实、关联、类型、版本或确认时，工具提示用户补充/调整后可以重新做预检；已发起的 Jira 转换不在同一节点盲目重试。
+- 每个 PR 都要核对目标集成测试是否实际运行；其他 Checks 绿色、未触发、跳过、零用例或缺报告均主动展示具体缺口并请求研发明确处置，不能直接进入下一步或以建票代替确认。使用现有 verification 的原始结果和 decision 记录，确认不等于 PASS，也不解除用例验收、失败、PR Checks 和服务端条件。
 - PR Ready 前必须更新每个任务仓库当前 PR Head 的 `ci.py watch` 记录，再以同一 Jira 快照运行 `pr_ready.py` 复核。Test 工作项本身无需 Done。所有 PR Checks 明确成功且绑定当前 Head、Q1-Q4 及检查项满足要求后才可称为 PR Ready。状态同步遗留统一提示 Engineering DRI 人工处理；`Pull Request Submitted` 不由 Agent 自动执行。
 - 使用原生工具取得每个 PR 当前 Head 对应的 CI 运行和实际报告，交 tapdata-ci-test 分析。首次失败先用稳定 check_id、归因及证据 observe，复发复用原 problem_id，再按原授权与累计轮次 start 修复。定向调试后提交候选，在完整提交 SHA 上完成最终本地重验并记录结果，再推送、等待新 CI，将新报告交回技能分析；非当前变更、归因不明或轮数用尽按质量合同交研发处置。返回结果写入现有质量材料，测试总结写 Jira 讨论并回读，不改写任务描述代替报告。Q5、Q6 核对审查及交付事实。接管和 Q4 节点只尝试 Project 明确配置的单次 Jira 状态同步；线上 Validator 与附件冲突需报告确认，禁止用本地质量处置绕过。
 - PR 审查按[审查返工](../../../../docs/usage/quality-checkpoints.md#pr-审查返工)完整回读普通评论及行内线程，逐项修复或说明依据；改变验收预期交研发决定。相同失败沿用原 problem_id，使用失败工具的 review 来源累计轮次，修改后重验当前代码并回读当前 PR CI；不以线程过时或已关闭替代问题核对。

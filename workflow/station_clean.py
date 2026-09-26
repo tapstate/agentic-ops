@@ -93,3 +93,24 @@ def main(argv=None):
     output["cleanup_scope"] = station_clean_view.safe_describe(args.dir, task_store.read_task(args.dir), result.get("cleanup_plan"), result)
     print(json.dumps(output, ensure_ascii=False, indent=2))
     return 0
+
+
+def cli(argv=None):
+    """命令行输出结构化接管信息；Python 调用者仍可捕获原异常。"""
+    import sys
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    try:
+        return main(arguments)
+    except (ValueError, OSError) as error:
+        base = arguments[arguments.index("--dir") + 1] if "--dir" in arguments else "."
+        try:
+            operation = station_operation.read(base)
+            task = task_store.read_task(base)
+            scope = station_clean_view.safe_describe(base, task, (operation or {}).get("cleanup_plan"), operation, [str(error)])
+        except (ValueError, OSError):
+            operation, scope = None, {"complete": False}
+        print(json.dumps({"status": "needs_attention", "operation_id": (operation or {}).get("operation_id"),
+            "phase": (operation or {}).get("phase", "admission"), "problems": str(error).splitlines(),
+            "next_action": "处理具体对象后用原请求恢复；范围变化使用 cleanup-amend，不手改状态。",
+            "cleanup_scope": scope}, ensure_ascii=False, indent=2))
+        return 2

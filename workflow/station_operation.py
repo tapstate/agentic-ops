@@ -67,7 +67,7 @@ def read(base):
 def _verify_superseded(operation, name, step):
     history = operation.get("plan_revisions", [])
     current = operation.get("cleanup_plan", {})
-    if not isinstance(history, list) or not isinstance(current, dict) or not name.startswith(("resource:", "source-reset:", "station-source-reset:", "external:", "clear-active:", "archive-publish:")):
+    if not isinstance(history, list) or not isinstance(current, dict) or not name.startswith(("resource:", "source-reset:", "station-source-reset:", "external:", "clear-active:", "archive-publish:", "cleanup-stage:")):
         raise ValueError("只有清理资源步骤可被已确认的新计划替代")
     for index, revision in enumerate(history):
         if not isinstance(revision, dict) or not isinstance(revision.get("plan"), dict):
@@ -114,6 +114,11 @@ def _verify_superseded(operation, name, step):
                 or name != "station-source-reset:" + str(original_revision) + ":" + original
                 or step["expected"] != {"plan_digest": original}):
             raise ValueError("工位源码复位步骤不属于原计划")
+    elif name.startswith("cleanup-stage:"):
+        from workflow.station_cleanup_stages import STAGES
+        stage = step["expected"].get("stage")
+        if stage not in STAGES or name != "cleanup-stage:" + str(original_revision) + ":" + original + ":" + stage or step["expected"].get("plan_digest") != original:
+            raise ValueError("阶段回执不属于原计划")
     elif name.startswith("source-reset:"):
         repository = step["expected"].get("repository")
         entries = [entry for entry in revision["plan"].get("entries", []) if entry.get("repository") == repository]

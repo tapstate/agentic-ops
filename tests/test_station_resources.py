@@ -88,9 +88,9 @@ class ResourceTests(unittest.TestCase):
         task = self.gitlink_ready()
         request = self.reset_request(task)
         original = resources.neutral
-        def late_content(*args):
+        def late_content(*args, **kwargs):
             (self.repo / 'vendor/api/late').write_text('keep')
-            return original(*args)
+            return original(*args, **kwargs)
         with mock.patch.object(resources, 'neutral', side_effect=late_content):
             with self.assertRaisesRegex(ValueError, 'submodule'):
                 self.execute(task, request)
@@ -106,7 +106,7 @@ class ResourceTests(unittest.TestCase):
         self.assertEqual(list((self.ws/'runtime').iterdir()), [])
         self.assertIsNone(task_store.read_task(self.ws))
         entry = task['engineering_baseline']['repositories'][self.name]
-        self.assertEqual(self.git(self.repo, 'branch', '--show-current'), station.source.baseline_branch(entry))
+        self.assertEqual(self.git(self.repo, 'branch', '--show-current'), 'develop')
         self.assertEqual(self.git(self.repo, 'rev-parse', self.branch), task['reset_baseline'][self.name]['sha'])
 
     def test_runtime_child_is_lazy_and_rejects_links(self):
@@ -274,7 +274,7 @@ class ResourceTests(unittest.TestCase):
         original = resources.source.git
         def crash(repository, *args, **kwargs):
             result = original(repository, *args, **kwargs)
-            if args[:2] == ('rm', '--cached'):
+            if args[:3] == ('--literal-pathspecs', 'rm', '--cached'):
                 raise OSError('crash after index removal')
             return result
         with mock.patch.object(resources.source, 'git', side_effect=crash), self.assertRaises(OSError):

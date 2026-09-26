@@ -1,5 +1,11 @@
 # AgenticOps 文档总纲
 
+TapData 正在进行的任务由研发选择恢复已有 run 或建立新 run；项目准入配置与操作步骤由 [TapData 任务技能](../projects/tapdata/skills/tapdata-task/SKILL.md#接管与恢复)维护，复用既有归档清理和分支续办机制，不复制旧授权或验收结论。
+
+CI 集成测试优化复用现有质量链：[质量检查与证据](usage/quality-checkpoints.md)维护方案与报告的字段、缺口确认及兼容边界；[TapData 集成测试](../projects/tapdata/skills/tapdata-ci-test/SKILL.md)和[构建测试指引](../projects/tapdata/runbooks/build-test-and-local-run.md)负责应用 Wiki 分级、用例开发执行和报告分析。测试级别定义仅从中央 Wiki 获取，本文不维护副本；真实业务验收与产品回归分别记录。
+
+任务清理采用六阶段自动执行与成果验收；完整盘点、异常接管、分支处置及当前 epoch 恢复边界由[工位合同](architecture/single-task-station.md#阶段式清理)统一定义，操作入口复用任务授权指引，PROD-003 覆盖阶段失败和接力验收。
+
 共享需求设计以 [ao-requirement](../skills/shared/ao-requirement/SKILL.md) 为入口，帮助研发理解项目现状、需求取舍及验收并形成可实施方案；维护面与业务工位共用方法，项目规则提供上下文。[Skill 维护规范](skill-maintenance.md)维护共享资产归属、安装、发现与清理合同，[工程架构](architecture/agenticops-v1-architecture.md)维护职责边界，[更新与回退](usage/update-and-rollback.md)维护旧安装资源补齐及恢复操作。具体需求、评审和验收记录在 Jira，不另建执行计划。
 
 共同验证材料的失效范围由[质量检查与证据](usage/quality-checkpoints.md#共同验证材料)维护，契约版本与历史重放由[标准契约](../contracts/README.md)说明；来源同步只证明所属仓的来源关系，不替代跨仓测试或方案授权。兼容边界复用工位 epoch 与既有升级流程。
@@ -78,3 +84,8 @@ CI 用例开发与质量核对继续由上述 TapData 构建指引承载：从�
 缺陷质量协作属于“使用与维护”主题：[质量检查与证据](usage/quality-checkpoints.md)说明检查点、非阻断修复策略调优、编码后 Jira Test 关联、Test Type 跟进、用户处置、非阻断 Jira 状态同步、PR Ready 核对和回写恢复；项目验证方式以 `projects/<project>/quality.json` 为准，修复策略以 `policies/defect-repair-strategies.json` 为通用事实源并允许项目只覆盖默认选择，数据结构以 `contracts/quality-*.schema.json` 为准，不在使用文档另设任务阶段。
 
 旧版 AgenticOps 的设计、合同和操作说明以 Git Tag `v0.7` 为准，不在 v1 现役文档树保留重复版本。
+安装目录包含本树的人读文档，供项目 Skill 和 Runbook 的相对链接直接读取；安装、更新与回退共享文档范围，不复制文档到工位。缺失资源补齐的操作由[更新与回退](usage/update-and-rollback.md)维护，维护工具仍不进入安装目录。
+
+## 空闲工位源码生命周期
+
+开发分支归位、受管基线回收及空闲刷新由[工位合同](architecture/single-task-station.md)定义，操作入口见[工位源码与材料](usage/station-materials.md)，退出仍使用既有清理与归档流程。

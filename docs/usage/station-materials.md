@@ -41,3 +41,9 @@ Wiki 不是任务工程，不进入 engineering_baseline、源码仓库版本配
 station purge 只处理空闲工位，保留 source/config 和旧工位 archive（若有）；Product Root `.archive/` 始终不在工位清理范围。原路径重新生成时，对非空真实工位材料明确使用 init --reuse-materials；runtime 必须为空。参数不授权覆盖源码、导入秘密有效配置或复用旧证据。新任务仍按自己的版本解析与验证，不把保留分支自动视作已授权任务。
 
 旧版源码池作为非托管材料保留，不由新版本迁移或删除。旧工位的退出顺序见[更新与回退](update-and-rollback.md)。
+
+## 空闲工位源码刷新
+
+在未接管任务且没有未完成工位操作时，执行 `agenticops station source-update`，将 source 下已准备仓库的项目开发分支快进到远端最新；使用 `--repo tapdata/tapdata` 只刷新指定仓库，使用 `--station <目录>` 指定工位。开发分支取自各仓 Profile 的 `dev_branch`，不统一假定为 develop，不刷新中央 Wiki 或改写任务基线。
+
+命令逐仓核验身份、分支及干净状态。存在未提交或 ignored 产物、本地独有提交、分叉、非开发分支或未完成任务时保留现场并报告，不能自动 reset、stash 或覆盖。批量刷新保留各仓结果：一个仓库失败不撤销其它已完成的快进，再次运行可继续。尚未准备的仓库不会自动克隆；接管仍按完整工程准备机制执行。

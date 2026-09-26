@@ -128,6 +128,10 @@ def grant(ws, **overrides):
     facts = {
         "fix_plan": {
             "format": "structured-v1",
+            "integration_tests": [{"repository": repo["repository"], "scope": "fixture:gate",
+                "level": "fixture:模块契约", "knowledge_ref": "fixture:knowledge",
+                "rationale": "仅 Gate 夹具", "case_strategy": "复用固定 Gate 场景",
+                "execution_plan": "固定验收夹具，本任务不执行业务 CI"} for repo in repositories],
             "problem_statements": [{"id": "P1", "text": "固定 Gate 场景的预期行为", "source_ref": "fixture:jira"}],
             "evidence": [{"id": "F1", "source_ref": "fixture:source", "observation": "夹具源码与基线已核对"}],
             "hypotheses": [{"id": "H1", "explains": ["P1"], "evidence_ids": ["F1"],

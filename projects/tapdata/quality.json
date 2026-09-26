@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "contract_revision": 3,
+  "contract_revision": 4,
   "commit_evidence_checkpoint": "q4-acceptance",
   "intake_fact_keys": [
     "problem_branch",
@@ -120,7 +120,7 @@
     },
     {
       "name": "集成测试规范索引",
-      "url": "https://github.com/tapstate/wiki/tree/main/06_研发流程/集成测试用例规范",
+      "url": "https://github.com/tapstate/wiki/tree/main/06_研发流程/tapdata/集成测试用例规范",
       "note": "07_集成测试可作实现线索，执行事实以目标分支代码/POM/报告为准。"
     }
   ],
@@ -228,5 +228,67 @@
       "ci",
       "review"
     ]
+  },
+  "verification_plan": {
+    "fact_key": "fix_plan",
+    "field": "integration_tests",
+    "method": "integration",
+    "kinds": [
+      "ci"
+    ],
+    "schema": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "repository",
+          "scope",
+          "level",
+          "knowledge_ref",
+          "rationale",
+          "case_strategy",
+          "execution_plan"
+        ],
+        "properties": {
+          "repository": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "scope": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "level": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "knowledge_ref": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "case_strategy": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "execution_plan": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
   }
 }

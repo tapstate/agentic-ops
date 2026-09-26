@@ -393,7 +393,7 @@ def evaluate_completion(base, task):
         candidate = dict(task, repositories=[item for item in task.get("repositories", []) if item["repository"] in changed])
         problems.extend(pr_ready.ci_problems(base, candidate))
         problems.extend(verification.problems(quality.replay(quality.load(base, task)), quality.context(base, task),
-                                               rules["pr_ready"].get("required_verification", [])))
+                                               rules["pr_ready"].get("required_verification", []), rules))
     if task["stage"] not in ("ci_validation", "completed"):
         problems.append("任务尚未到完成验收阶段")
     proof = {"run_id": task["run_id"], "repositories": observed, "deliveries": copy.deepcopy(deliveries),
@@ -468,7 +468,7 @@ def amend_cleanup(base, issue, run_id, revision, operation_id, expected_plan_dig
                 "record": operation.pop("archive_record"), "evidence": operation.pop("archive_evidence", None), "artifacts": operation.pop("archive_artifacts", None), "logs": operation.pop("archive_logs", None),
                 "publication_intent": copy.deepcopy(operation["steps"].get("archive-publish:" + str(generation)))})
         for name, step in operation["steps"].items():
-            if name.startswith(("resource:", "source-reset:", "station-source-reset:", "external:", "clear-active:", "archive-publish:")) and step["receipt"] is None and not step.get("superseded_by"):
+            if name.startswith(("resource:", "source-reset:", "station-source-reset:", "external:", "clear-active:", "archive-publish:", "cleanup-stage:")) and step["receipt"] is None and not step.get("superseded_by"):
                 step["superseded_by"] = confirmed
                 step["superseded_plan_digest"] = expected_plan_digest
                 step["superseded_plan_revision"] = generation
@@ -519,6 +519,9 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
             operations.receipt(base, previous, "unbind", {"current": None})
             final_task = previous["final_task"]
             archives.receipt(base, final_task, previous, {"outcome": final_task["outcome"], "current": None}, "done")
+            from workflow import station_cleanup_stages as stages
+            stages.run(base, final_task, previous, "release", lambda: None,
+                       lambda: task_store.read_current(base)["current"] is None)
             operations.finish(base, previous)
             return previous
         task = task_store.check_expected_run(base, issue, run_id)
@@ -580,7 +583,14 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
             operations.save(base, operation)
         resources.require_cleanup_version(plan.get("schema_version"))
         resources.verify_station_inventory(base, plan["rules"], allow_pending=True)
+        from workflow import station_cleanup_stages as stages
+        stages.run(base, task, operation, "admission", lambda: None,
+                   lambda: resources.verify_station_inventory(base, plan["rules"], allow_pending=True))
+        operation["phase"] = "cleanup_archive"
+        operations.save(base, operation)
         reference = archives.publish(base, task, request, plan, operation, lambda: resources.plan(base, task, version=plan["schema_version"]))
+        stages.run(base, task, operation, "archive", lambda: None,
+                   lambda: archives.verify(base, reference, task))
         _flush_amendment_receipts(base, task, operation)
         if kind == "archive":
             operations.finish(base, operation)
@@ -602,8 +612,20 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
             return operation
         if cleanup_mode == "execute":
             station_reset_result.apply(base, task, operation)
+        else:
+            operation["phase"] = "cleanup_source"
+            operations.save(base, operation)
+            station_reset_result.guard(base, task, operation)
+            stages.run(base, task, operation, "source", lambda: None,
+                       lambda: station_reset_result.verify_sources(base, task, operation))
+            stages.run(base, task, operation, "disposition", lambda: None,
+                       lambda: stages.verify_dispositions(base, task, operation))
+            stages.run(base, task, operation, "resources", lambda: None,
+                       lambda: station_reset_result.verify(base, task, operation))
+        operation["phase"] = "cleanup_release"
+        operations.save(base, operation)
         operation["cleanup_manifest"]["result"] = station_reset_result.record(base, task, operation)
-        operation["phase"] = "neutral"
+        operation["phase"] = "cleanup_release"
         operations.save(base, operation)
         # 已按实际清理成果核验；活动授权随归档保全后的 clear-active 意图移除。
         if operation.get("plan_revisions"):
@@ -620,5 +642,7 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
         operation["phase"] = "unbound"
         operations.save(base, operation)
         archives.receipt(base, task, operation, {"outcome": task["outcome"], "current": None}, "done")
+        stages.run(base, task, operation, "release", lambda: None,
+                   lambda: task_store.read_current(base)["current"] is None)
         operations.finish(base, operation)
         return operation

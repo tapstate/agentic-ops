@@ -1,5 +1,9 @@
 # AgenticOps 扩展使用
 
+空闲工位的源码刷新由[工位源码与材料](station-materials.md)说明：`station source-update` 刷新已准备仓库，支持 `--repo` 指定单仓；任务接管后不能使用，不替代任务基线核验。
+
+任务清理采用六阶段自动执行与成果验收；完整盘点、异常接管、分支处置及当前 epoch 恢复边界由[工位合同](../architecture/single-task-station.md#阶段式清理)统一定义，操作入口复用任务授权指引，PROD-003 覆盖阶段失败和接力验收。
+
 共享需求技能的安装资源补齐、同 epoch 接线刷新与回退由[更新与回退](update-and-rollback.md#共享-skill-资源与接线)说明；技能职责与发现范围以[Skill 维护规范](../skill-maintenance.md)为准。
 
 [共同验证材料](quality-checkpoints.md#共同验证材料)区分来源同步的单仓绑定与 local/ci/review 的全仓绑定，并说明旧事件重放、实际 Git 核对和 PR 前刷新责任；不新增验证流程或迁移入口。
@@ -65,3 +69,5 @@ PR 前检出来源同步也由[任务授权指引](task-authorization.md)说明�
 设计前已登记仓库的范围修订由[任务授权指引](task-authorization.md#设计前修订已登记范围)说明：仅调整范围和验证方式，保留分支与历史，撤销旧授权并重新核对质量证据；不支持后期交付回退。
 
 任务进入实现后修订方案或增加允许的仓库，使用[同周期返工](task-authorization.md#同周期方案返工)，保留原成果并撤销旧授权；不通过退出工位重建任务。
+
+CI 集成测试的方案范围、PR 缺口处置与未触发运行表示统一由[质量检查与证据](quality-checkpoints.md#共同验证材料)维护；项目用例分析、编写及重验由其链接的 TapData Skill 和 Runbook 负责，不另设测试台账。

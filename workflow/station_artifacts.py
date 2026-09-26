@@ -34,13 +34,18 @@ def git_bytes(repository, *args, data=None):
 def patch(repository, filenames, cached=False):
     if not filenames:
         return b""
-    return git_bytes(repository, "diff", "--no-ext-diff", "--no-textconv", "--binary", "--full-index", "--no-renames",
+    return git_bytes(repository, "--literal-pathspecs", "diff", "--no-ext-diff", "--no-textconv", "--binary", "--full-index", "--no-renames",
                      *( ["--cached", "HEAD"] if cached else []), "--", *filenames)
 
 
 def safe_source(base, name, filename):
     from workflow.station_resources import resource_path
-    return resource_path(base, "source/" + name + "/" + filename)
+    return resource_path(base, "source/" + name + "/" + filename, leaf_link=True)
+
+
+def contents(path):
+    """链接只保存链接文本，绝不读取目标。"""
+    return os.fsencode(os.readlink(path)) if path.is_symlink() else path.read_bytes() if path.exists() else b""
 
 
 def verify_special_entries(repository, reset_sha="HEAD"):
@@ -50,8 +55,6 @@ def verify_special_entries(repository, reset_sha="HEAD"):
         for row in filter(None, raw.split(b"\0")):
             metadata, filename = row.split(b"\t", 1)
             fields = metadata.split()
-            if fields[0] == b"120000":
-                raise ValueError("源码含跟踪链接，不支持自动重置")
             if fields[0] == b"160000":
                 if not tree and fields[2] != b"0":
                     raise ValueError("submodule 索引存在冲突")
@@ -115,7 +118,7 @@ def snapshot(base, name, roots, decisions, reset_sha="HEAD", include_ignored=Fal
                  "worktree_patch": digest(patch(repository, [filename]) if filename in changed else b"")}
         if choice["action"] != "archive" and choice.get("snapshot") != proof:
             raise ValueError("源码导出或丢弃决定未绑定当前完整成果指纹：%s" % relative)
-        info = target.stat() if target.exists() else None
+        info = target.lstat() if target.exists() or target.is_symlink() else None
         entries.append({"path": relative, "repository": name, "file": filename,
                         "file_identity": {"device": info.st_dev, "inode": info.st_ino, "mtime_ns": info.st_mtime_ns} if info else None,
                         "action": "restore" if filename in changed else "delete", **proof, "preservation": choice})
@@ -138,16 +141,16 @@ def material(base, task, plan, private_export=False):
         new_files = {}
         for entry in entries:
             path = safe_source(base, name, entry["file"])
-            data = path.read_bytes() if path.exists() else b""
+            data = contents(path)
             if len(data) > (512 * 1024 * 1024 if private_export else MAX_FILE_BYTES):
-                raise ValueError("源码成果超过归档大小上限，请精确导出或确认丢弃")
+                raise ValueError("源码成果超过归档大小上限，请精确导出或确认丢弃：" + entry["path"])
             # 检查实际内容而非 base64；二进制 patch 也不能掩盖索引中的秘密。
             checked = [data]
             if entry["before_index"]:
                 checked.append(git_bytes(repository, "show", ":" + entry["file"]))
             for value in checked:
                 if not private_export and project_rules.scan_sensitive(admission, value.decode("utf-8", errors="replace")):
-                    raise ValueError("源码成果含敏感内容，不能归档；请安全导出或明确丢弃")
+                    raise ValueError("源码成果含敏感内容，不能归档；请安全导出或明确丢弃：" + entry["path"])
             if entry["action"] == "delete":
                 new_files[entry["file"]] = {"data": base64.b64encode(data).decode(), "fingerprint": entry["before"]}
             total += sum(map(len, checked))
@@ -184,8 +187,11 @@ def verify_reconstruction(repository, bundle):
             if any((check / Path(*Path(filename).parts[:i])).is_symlink() for i in range(1, len(Path(filename).parts))):
                 raise ValueError("源码成果路径包含符号链接")
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(base64.b64decode(entry["data"]))
-            path.chmod(entry["fingerprint"]["mode"])
+            if entry["fingerprint"].get("link"):
+                path.symlink_to(os.fsdecode(base64.b64decode(entry["data"])))
+            else:
+                path.write_bytes(base64.b64decode(entry["data"]))
+                path.chmod(entry["fingerprint"]["mode"])
         for entry in bundle["entries"]:
             if fingerprint(check / entry["file"]) != entry["before"] or source.git(check, "ls-files", "--stage", "-z", "--", entry["file"]).stdout != entry["before_index"]:
                 raise ValueError("源码成果重建内容或索引不一致，拒绝重置")

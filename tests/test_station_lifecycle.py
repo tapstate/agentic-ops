@@ -459,10 +459,13 @@ class StationTests(unittest.TestCase):
         file = self.ws / "runtime/logs/repeated.log"; file.parent.mkdir()
         file.write_text("identical regenerated output")
         station_resources.register(self.ws, task["issue_key"], task["run_id"], [{"kind": "file", "path": "runtime/logs/repeated.log", "producer": "build"}])
-        # 版本 6 将 refs 纳入摘要；先具备目标成果引用，才能隔离验证同摘要的重复目录清理。
+        # 先具备开发分支目标及成果引用，隔离验证同摘要的重复目录清理。
         initial = station_resources.plan(self.ws, task)
         for name, entry in initial["source"].items():
             self.git(self.ws / "source" / name, "update-ref", entry["preserved_ref"], entry["preserved_head"])
+            self.git(self.ws / "source" / name, "checkout", "-B", entry["checkout_branch"], entry["neutral"]["sha"])
+            for ref, sha in entry["baseline_refs"].items():
+                self.git(self.ws / "source" / name, "update-ref", "-d", ref, sha)
         plan = station_resources.plan(self.ws, task)
         request = {"summary": "未完成", "reason": "停止", "confirmed_digest": plan["digest"]}
         original = station_resources.clean

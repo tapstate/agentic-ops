@@ -16,18 +16,23 @@ def _directory(path):
     os.chmod(path, 0o700)
 
 
+def redact_evidence(rules, value, key=""):
+    """复用档案脱敏规则生成副本，不改变活动事实。"""
+    if any(word in key.lower() for word in ("password", "secret", "token", "credential", "private_key")):
+        return "[redacted]"
+    if isinstance(value, dict):
+        return {name: redact_evidence(rules, item, name) for name, item in value.items()}
+    if isinstance(value, list):
+        return [redact_evidence(rules, item) for item in value]
+    if isinstance(value, str) and project_rules.scan_sensitive(rules, value):
+        return "[redacted]"
+    return value
+
+
 def _evidence(base, task):
     rules = project_rules.load_admission(station=base)
-    def redact(value, key=""):
-        if any(word in key.lower() for word in ("password", "secret", "token", "credential", "private_key")):
-            return "[redacted]"
-        if isinstance(value, dict):
-            return {name: redact(item, name) for name, item in value.items()}
-        if isinstance(value, list):
-            return [redact(item) for item in value]
-        if isinstance(value, str) and project_rules.scan_sensitive(rules, value):
-            return "[redacted]"
-        return value
+    def redact(value):
+        return redact_evidence(rules, value)
     documents = {"current": redact({key: value for key, value in task.items() if key not in ("_revision", "repositories")})}
     directory = task_store.state_path(base) / "evidence"
     if directory.is_symlink():

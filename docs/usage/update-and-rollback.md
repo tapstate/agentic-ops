@@ -4,6 +4,8 @@
 
 ## 共享 Skill 资源与接线
 
+安装范围包含 `docs/` 人读文档，项目 Skill 可直接打开质量检查、授权和工位合同等相对链接，不依赖维护源码目录。旧安装缺少该目录时，在绑定 Product Root 运行新版 `agenticops update` 补齐；同一提交也会刷新安装范围，不改变任务状态或原回退指针。安装范围补齐不代表业务任务已验收。
+
 安装只包含 `skills/shared/`，维护根和工位通过各自原有受管清单接入共享技能。新增共享技能不修改任务状态或 epoch；同 epoch 旧清单在 `station repair` 时补齐，现有任务与授权保持原语义。`station doctor` 可报告缺资源、缺链接与漂移；修复不覆盖未受管同名文件。
 
 旧版 updater 首次切换到支持共享 Skill 的版本时，可能保留旧 sparse-checkout 范围。此时先在绑定安装产品根再次运行 `./agenticops update`，由新版更新器补齐共享子树，再运行 `station doctor --station <工位路径>` 和 `station repair --station <工位路径>`。产品 HEAD 未变化时只补齐资源，不覆盖原回退指针；不要复制技能到用户目录来补偿缺失。重新执行 update 仍遵守原来的脏树、远端及兼容检查。
