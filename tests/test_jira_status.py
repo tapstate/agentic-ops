@@ -236,6 +236,40 @@ class JiraStatusTests(unittest.TestCase):
         snapshot['issue']['fields']['assignee'] = {'accountId': 'another-owner'}
         self.assertEqual(['customfield_a'], jira_collect.collect(self.base, self.task, 'design_review', snapshot)['pending'])
 
+    def test_collect_rejects_conflicting_option_identity_without_changing_confirmation(self):
+        from workflow import jira_collect
+        snapshot = self.collect_fixture()
+        values = {'customfield_a': {'id': '1', 'value': 'ordinary'}}
+        self.assertEqual(['customfield_a'], self.confirm_packet('design_review', snapshot, values)['confirmed'])
+        before = {str(p): p.read_bytes() for p in (self.base / '.agenticops').rglob('*') if p.is_file()}
+        for value in ({'id': 'wrong', 'value': 'ordinary'}, {'id': '1', 'value': 'wrong'}):
+            with self.subTest(value=value):
+                proposals = {'customfield_a': value}
+                packet = jira_collect.collect(self.base, self.task, 'design_review', snapshot, proposals)
+                self.assertFalse(packet['fields']['customfield_a']['valid_value'])
+                with self.assertRaisesRegex(ValueError, '字段值'):
+                    self.confirm_packet('design_review', snapshot, proposals)
+                self.assertEqual(before, {str(p): p.read_bytes() for p in (self.base / '.agenticops').rglob('*') if p.is_file()})
+        self.assertEqual(['customfield_a'], jira_collect.collect(self.base, self.task, 'design_review', snapshot)['confirmed'])
+
+    def test_option_identity_must_match_one_allowed_choice_including_children(self):
+        from workflow import jira_collect
+        options = [{'id': '1', 'value': 'first', 'name': 'First',
+                    'children': [{'id': '11', 'value': 'child'}]},
+                   {'id': '2', 'value': 'second', 'name': 'Second'}]
+        for value in ({'id': '1'}, {'value': 'first'}, {'name': 'First'},
+                      {'id': '1', 'value': 'first', 'name': 'First'},
+                      {'id': '1', 'child': {'id': '11', 'value': 'child'}}):
+            with self.subTest(value=value):
+                self.assertTrue(jira_collect.valid_value(value, {'type': 'option'}, options))
+        for value in ({'id': '1', 'value': 'second'}, {'id': 'wrong', 'name': 'First'},
+                      {'id': '1', 'name': 'Second'}, {'other': 'first'},
+                      {'id': '1', 'child': {'id': 'wrong', 'value': 'child'}}):
+            with self.subTest(value=value):
+                self.assertFalse(jira_collect.valid_value(value, {'type': 'option-with-child'}, options))
+                self.assertFalse(jira_collect.valid_value([{'id': '2'}, value], {'type': 'array'}, options))
+        self.assertTrue(jira_collect.valid_value([{'id': '1'}, {'id': '2'}], {'type': 'array'}, options))
+
     def test_collect_condition_options_dependencies_and_dynamic_fields(self):
         from workflow import jira_collect
         snapshot = self.collect_fixture()
