@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from bootstrap import product_version  # noqa: E402
+from bootstrap import product_version, station_compatibility  # noqa: E402
 from workflow import jira_watermark, project_rules, task_store  # noqa: E402
 from station_fixture import save_task as save_station_task
 
@@ -42,6 +44,34 @@ class JiraWatermarkTests(unittest.TestCase):
         }
         save_station_task(self.base, self.task)
 
+
+    def test_product_git_facts_ignore_foreign_repository_environment(self):
+        foreign = self.base / "foreign"
+        subprocess.run(["git", "clone", "-q", str(self.product), str(foreign)], check=True)
+        subprocess.run(["git", "checkout", "-qb", "foreign"], cwd=foreign, check=True)
+        manifest = self.product / "contracts/station-state-compatibility.json"
+        old_epoch = json.loads(manifest.read_text())["station_state_epoch"]
+        manifest.write_text(json.dumps({"station_state_epoch": old_epoch + 1}))
+        for repo in (self.product, foreign):
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "-c", "user.email=test@example.invalid", "-c", "user.name=Test",
+                            "commit", "--allow-empty", "-qm", "fixture-next"], cwd=repo, check=True)
+        expected = product_version.describe(self.product)
+        for environment in ({"GIT_DIR": str(foreign / ".git"), "GIT_WORK_TREE": str(foreign)},
+                            {"GIT_CONFIG_COUNT": "invalid"}):
+            with self.subTest(environment=environment), mock.patch.dict(os.environ, environment):
+                inherited = dict(os.environ)
+                with self.subTest(fact="version"):
+                    self.assertEqual(expected, product_version.describe(self.product))
+                with self.subTest(fact="epoch"):
+                    self.assertEqual(old_epoch + 1, station_compatibility.manifest_at_ref(self.product, "HEAD")["station_state_epoch"])
+                with self.subTest(fact="upgrade"), self.assertRaisesRegex(ValueError, "工位登记清单缺失"):
+                    station_compatibility.check_upgrade(self.product, "HEAD~1", "HEAD")
+                result = subprocess.run([sys.executable, str(ROOT / "bootstrap/product_version.py"),
+                    "--product-root", str(self.product)], cwd=self.base, capture_output=True, text=True)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual(expected, result.stdout.strip())
+                self.assertEqual(inherited, dict(os.environ))
 
     def snapshot(self, value=None, issue_type_id="10011"):
         fields = {"issuetype": {"id": issue_type_id, "name": "Bug"}}
