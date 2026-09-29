@@ -417,7 +417,13 @@ class StationTests(unittest.TestCase):
         late.write_text("late report")
         station_resources.register(self.ws, task["issue_key"], task["run_id"], [{"kind": "file", "path": "runtime/late.log", "producer": "fixture"}], expected_operation_id="op-amend-evidence")
         second = station_resources.plan(self.ws, current)
+        with self.assertRaisesRegex(ValueError, "再次产生"):
+            station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-amend-evidence", first["digest"], {"confirmed_digest": second["digest"], "expected_plan_revision": 0})
+        preserved = self.root / "preserved-late.log"
+        late.rename(preserved)
+        second = station_resources.plan(self.ws, current)
         station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-amend-evidence", first["digest"], {"confirmed_digest": second["digest"], "expected_plan_revision": 0})
+        self.assertEqual(preserved.read_text(), "late report")
         self.execute(self.ws, "clean", task["issue_key"], task["run_id"], task["_revision"], "op-amend-evidence", request)
         self.assertIsNone(task_store.read_task(self.ws))
         self.assertFalse((self.ws / ".agenticops/evidence").exists())
@@ -453,13 +459,13 @@ class StationTests(unittest.TestCase):
         self.assertEqual(file.read_text(), "baseline\n")
         self.assertEqual(self.other_repository_state(), untouched)
 
-    def test_cleanup_amend_same_digest_uses_new_execution_revision(self):
+    def test_cleanup_amend_same_digest_rejects_regenerated_content(self):
         from workflow import station_resources
         task = self.takeover()
         file = self.ws / "runtime/logs/repeated.log"; file.parent.mkdir()
         file.write_text("identical regenerated output")
         station_resources.register(self.ws, task["issue_key"], task["run_id"], [{"kind": "file", "path": "runtime/logs/repeated.log", "producer": "build"}])
-        # 先具备开发分支目标及成果引用，隔离验证同摘要的重复目录清理。
+        # 先具备开发分支目标及成果引用，验证同摘要也不能重复删除新增内容。
         initial = station_resources.plan(self.ws, task)
         for name, entry in initial["source"].items():
             self.git(self.ws / "source" / name, "update-ref", entry["preserved_ref"], entry["preserved_head"])
@@ -482,6 +488,12 @@ class StationTests(unittest.TestCase):
         file.write_text("identical regenerated output")
         self.assertEqual(station_resources.plan(self.ws, current)["digest"], plan["digest"])
         amendment = {"confirmed_digest": plan["digest"], "expected_plan_revision": 0}
+        with self.assertRaisesRegex(ValueError, "再次产生"):
+            station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-repeat-plan", plan["digest"], amendment)
+        preserved = self.root / "preserved-logs"
+        file.parent.rename(preserved)
+        updated = station_resources.plan(self.ws, current)
+        amendment["confirmed_digest"] = updated["digest"]
         station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-repeat-plan", plan["digest"], amendment)
         station.amend_cleanup(self.ws, task["issue_key"], task["run_id"], current["_revision"], "op-repeat-plan", plan["digest"], amendment)
         self.assertEqual(len(station_operation.read(self.ws)["plan_revisions"]), 1)
@@ -489,6 +501,7 @@ class StationTests(unittest.TestCase):
         operation = station_operation.read(self.ws)
         receipts = archive_store.run_directory(self.ws, task["run_id"]) / "receipts"
         self.assertEqual(len(list(receipts.glob("op-repeat-plan-root-v*-done.json"))), 2)
+        self.assertEqual((preserved / "repeated.log").read_text(), "identical regenerated output")
         self.assertIsNone(task_store.read_task(self.ws))
 
     def test_cleanup_amend_before_archive_publication_preserves_old_draft(self):

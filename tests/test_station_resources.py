@@ -184,7 +184,7 @@ class ResourceTests(unittest.TestCase):
         request = self.reset_request(task)
         root = self.ws/'runtime'
         root.rename(self.ws/'runtime-old'); root.mkdir()
-        with self.assertRaisesRegex(ValueError,'身份'):
+        with self.assertRaisesRegex(ValueError,'身份|未知材料|确认'):
             self.execute(task,request)
         self.assertTrue((self.ws/'runtime-old').exists())
 
@@ -318,6 +318,12 @@ class ResourceTests(unittest.TestCase):
         plan = resources.plan(self.ws,current)
         self.assertNotEqual(plan['source'][self.name]['head'],head)
         self.assertEqual(plan['source'][self.name]['preserved_head'],head)
+        with self.assertRaisesRegex(ValueError, '再次产生'):
+            station.amend_cleanup(self.ws,task['issue_key'],task['run_id'],current['_revision'],previous['operation_id'],
+                previous['cleanup_plan']['digest'],{'confirmed_digest':plan['digest'],'expected_plan_revision':0,'decision_ref':'fixture:user'})
+        # 新生成物须独立保全处置，不能用补充计划重删已完成目录。
+        (self.ws/'runtime/late').rename(self.root/'preserved-late-output')
+        plan = resources.plan(self.ws,current)
         station.amend_cleanup(self.ws,task['issue_key'],task['run_id'],current['_revision'],previous['operation_id'],
             previous['cleanup_plan']['digest'],{'confirmed_digest':plan['digest'],'expected_plan_revision':0,'decision_ref':'fixture:user'})
         self.execute(task,request,kind=kind)

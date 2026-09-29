@@ -113,8 +113,8 @@ def create(base, task, relative, producer, adopt=False):
     if existing and existing.get("identity"):
         if existing["producer"] != producer or existing["recipe"] != {"id": rule["id"], "revision": rule["revision"]}:
             raise ValueError("目录创建恢复生产来源或配方不一致")
-        if identity(path) != existing["identity"] or parent != existing["parent"]:
-            raise ValueError("受管目录身份已变化")
+        # 持久登记表达逻辑归属；物理身份只在已确认的清理计划内比较。
+        identity(path)
         return existing
     if path.exists() and (any(path.iterdir()) or not (runtime or adopt)):
         raise ValueError("已有目录只能显式采用已核验的空目录")
@@ -145,7 +145,8 @@ def runtime_child(base, task, name):
     entry = roots.get("runtime")
     if entry is None:
         raise ValueError("当前 run 缺少受管 runtime 根目录")
-    root = validate(base, entry)
+    root = path_at(base, entry["path"])
+    identity(root)
     path = root / name
     if path.is_symlink():
         raise ValueError("runtime 子目录不能是符号链接")
@@ -197,6 +198,19 @@ def _walk(fd, device, delete=False):
             raise ValueError("受管目录含特殊文件，停止重置")
 
 
+def snapshot(base, entry):
+    """采集本次盘点身份，不修改持久登记或历史清理计划。"""
+    path = path_at(base, entry["path"])
+    if not entry.get("identity"):
+        raise ValueError("受管目录创建未完成")
+    absent = not path.exists()
+    if absent and entry["disposition"] != "delete_root":
+        raise ValueError("受管目录缺失")
+    return dict(entry, parent=identity(path.parent),
+                identity=identity(path) if not absent else entry["identity"],
+                observed_missing_before_intent=absent)
+
+
 def validate(base, entry, missing=False):
     path = path_at(base, entry["path"])
     if identity(path.parent) != entry["parent"]:
@@ -213,6 +227,28 @@ def cleanup_paths(base, task, entry, operation):
     directory = archive_store.receipts(base, task["archive_ref"], create=True)
     stem = operation["operation_id"] + "-root-v%s-" % len(operation.get("plan_revisions", [])) + baseline.digest(entry)
     return tuple(directory / (stem + suffix) for suffix in ("-intent.json", "-done.json"))
+
+
+def verify_completed_roots(base, task, operation):
+    """重新确认不允许把已完成目录的新内容纳入再次删除。"""
+    if not task.get("archive_ref"):
+        return
+    plans = [(row["revision"], row["plan"]) for row in operation.get("plan_revisions", [])]
+    plans.append((len(operation.get("plan_revisions", [])), operation["cleanup_plan"]))
+    for revision, plan in plans:
+        prior = dict(operation, plan_revisions=[None] * revision)
+        for entry in plan["directories"]:
+            intent, receipt = cleanup_paths(base, task, entry, prior)
+            if intent.is_symlink() or receipt.is_symlink():
+                raise ValueError("目录回执不能是链接")
+            if not receipt.exists():
+                continue
+            expected = {"run_id": task["run_id"], "operation_id": operation["operation_id"], "root": entry}
+            if not intent.exists() or json.loads(intent.read_text()) != expected or json.loads(receipt.read_text()) != expected:
+                raise ValueError("目录清理回执不匹配")
+            path = path_at(base, entry["path"])
+            if path.exists() and (entry["disposition"] == "delete_root" or any(path.iterdir())):
+                raise ValueError("回收后目录再次产生内容，拒绝重删")
 
 
 def precheck(base, task, entry, operation):

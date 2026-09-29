@@ -27,6 +27,112 @@ class StationCleanTests(unittest.TestCase):
                     cleanup_version=6, abandon_changes=True,
                     confirmed_digest=resources.plan(self.ws, task, version=6)["digest"])
 
+    def test_legacy_empty_runtime_recovery_is_explicit_and_idempotent(self):
+        from internal import station_identity_recovery as recovery
+        from workflow import station_directories as directories
+        task = self.ready()
+        registry = directories.registry_path(self.ws, task)
+        before = json.loads(registry.read_text())
+        for field in ('parent', 'identity'):
+            before['roots']['runtime'][field]['device'] += 100
+        self.write(registry, before)
+        manifest = self.product / 'contracts/station-state-compatibility.json'
+        self.write(manifest, {'station_state_epoch': 25})
+        init = self.ws / '.agenticops/init.json'
+        info = json.loads(init.read_text()); info['station_state_epoch'] = 25; self.write(init, info)
+        request = self.root / 'identity-request.json'
+        argv = ['recovery', '--product-root', str(self.product.resolve()), '--station', str(self.ws.resolve()), '--request', str(request.resolve())]
+        def run(extra=()):
+            with mock.patch.object(sys, 'path', list(sys.path)), mock.patch.object(sys, 'argv', argv + list(extra)), mock.patch.object(recovery.subprocess, 'check_output', side_effect=[recovery.SUPPORTED, '']), mock.patch('sys.stdout', new_callable=io.StringIO):
+                recovery.main()
+        run()
+        self.assertEqual(before, json.loads(registry.read_text()))
+        data = json.loads(request.read_text())
+        extra = ['--confirm-digest', data['digest'], '--decision-ref', 'fixture:user', '--writers-stopped']
+        (self.ws / 'runtime/new').write_text('keep')
+        with self.assertRaisesRegex(ValueError, '非空'):
+            run(extra)
+        self.assertEqual(before, json.loads(registry.read_text()))
+        (self.ws / 'runtime/new').unlink()
+        run(extra)
+        run(extra)
+        self.assertEqual(data['after'], json.loads(registry.read_text()))
+        self.assertEqual(task, task_store.read_task(self.ws))
+
+    def test_legacy_recovery_rejects_inode_or_device_topology_changes(self):
+        from internal.station_identity_recovery import candidate
+        before = {'roots': {'runtime': {'parent': {'device': 1, 'inode': 10},
+                                        'identity': {'device': 1, 'inode': 11}}}}
+        for parent, child in (({'device': 2, 'inode': 12}, {'device': 2, 'inode': 11}),
+                              ({'device': 2, 'inode': 10}, {'device': 2, 'inode': 12}),
+                              ({'device': 2, 'inode': 10}, {'device': 3, 'inode': 11})):
+            with self.assertRaises(ValueError):
+                candidate(before, parent, child)
+        self.assertEqual(1, before['roots']['runtime']['identity']['device'])
+
+    def test_creation_device_change_does_not_block_new_plan(self):
+        from workflow import station_directories as directories
+        task = self.ready()
+        path = directories.registry_path(self.ws, task)
+        original = json.loads(path.read_text())
+        changed = json.loads(path.read_text())
+        for entry in changed['roots'].values():
+            entry['parent']['device'] += 100
+            entry['identity']['device'] += 100
+        self.write(path, changed)
+        plan = resources.plan(self.ws, task)
+        self.assertEqual(original['roots']['runtime']['identity'], plan['directories'][0]['identity'])
+        self.assertEqual(changed, json.loads(path.read_text()))
+        self.execute(task, self.result_request(task))
+        self.assertIsNone(task_store.read_task(self.ws))
+
+    def test_confirmed_identity_change_requires_amendment(self):
+        from workflow import station_directories as directories
+        task = self.ready()
+        request = self.result_request(task)
+        args = (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'], 'op-identity', request)
+        station.execute(*args, cleanup_mode='prepare')
+        runtime = self.ws / 'runtime'
+        runtime.rename(self.root / 'saved-runtime')
+        runtime.mkdir()
+        with self.assertRaisesRegex(ValueError, '身份'):
+            station.execute(*args)
+        current = task_store.read_task(self.ws)
+        op = station_operation.read(self.ws)
+        new_plan = resources.plan(self.ws, current)
+        amend = dict(request, confirmed_digest=new_plan['digest'], expected_plan_revision=0)
+        station.amend_cleanup(self.ws, task['issue_key'], task['run_id'], current['_revision'],
+                              op['operation_id'], op['cleanup_plan']['digest'], amend)
+        result = station.execute(*args)
+        self.assertEqual('done', result['status'])
+        self.assertTrue((self.root / 'saved-runtime').exists())
+
+    def test_amend_cannot_redelete_completed_runtime(self):
+        from workflow import station_directories as directories
+        task = self.ready()
+        request = self.result_request(task)
+        args = (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'], 'op-completed-root', request)
+        station.execute(*args, cleanup_mode='prepare')
+        current = task_store.read_task(self.ws)
+        op = station_operation.read(self.ws)
+        entry = op['cleanup_plan']['directories'][0]
+        directories.reset(self.ws, current, entry, op)
+        (self.ws / 'runtime/late.txt').write_text('must remain')
+        amend = dict(request, confirmed_digest=resources.plan(self.ws, current)['digest'], expected_plan_revision=0)
+        with self.assertRaisesRegex(ValueError, '再次产生'):
+            station.amend_cleanup(self.ws, task['issue_key'], task['run_id'], current['_revision'],
+                                  op['operation_id'], op['cleanup_plan']['digest'], amend)
+        self.assertEqual('must remain', (self.ws / 'runtime/late.txt').read_text())
+        (self.ws / 'runtime/late.txt').rename(self.root / 'saved-late.txt')
+        amend['confirmed_digest'] = resources.plan(self.ws, current)['digest']
+        station.amend_cleanup(self.ws, task['issue_key'], task['run_id'], current['_revision'],
+                              op['operation_id'], op['cleanup_plan']['digest'], amend)
+        (self.ws / 'runtime/new-after-amend.txt').write_text('must also remain')
+        with self.assertRaisesRegex(ValueError, '再次产生'):
+            station.execute(*args)
+        self.assertEqual('must also remain', (self.ws / 'runtime/new-after-amend.txt').read_text())
+
+
     def test_result_clean_preserves_tracked_target_and_archives_ignored(self):
         self.prepare_engineering()
         package = self.seed / "io/tapdata/mock/target"
@@ -343,7 +449,7 @@ class StationCleanTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 station.execute(*args)
         (self.ws / "runtime/new-result").write_text("keep")
-        with self.assertRaisesRegex(ValueError, "残留"):
+        with self.assertRaisesRegex(ValueError, "再次产生"):
             station.execute(*args)
         self.assertEqual((self.ws / "runtime/new-result").read_text(), "keep")
 

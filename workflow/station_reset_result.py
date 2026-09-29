@@ -66,6 +66,7 @@ def guard(base, task, operation, final=False):
     resources.verify_known_external(base, task)
     resources.verify_stopped(base, task, require_cleaned=final)
     resources.verify_station_inventory(base, plan["rules"], allow_pending=True)
+    directories.verify_completed_roots(base, task, operation)
     # 所有工位根必须先核验身份，不能在源码恢复后才发现 runtime 已被替换。
     for entry in plan["directories"]:
         if entry["kind"] == "source-generated":

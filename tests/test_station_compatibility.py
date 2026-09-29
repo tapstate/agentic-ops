@@ -151,9 +151,19 @@ class StationCompatibilityTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, '仍有绑定工位'):
                     compatibility.check_upgrade(self.product_root, 'old', 'new')
 
+    def test_directory_snapshot_epoch_rejects_old_active_station(self):
+        self.write_registry([str(self.station)])
+        for operation, epochs in (('update', (25, 26)), ('rollback', (26, 25))):
+            with mock.patch.object(compatibility, 'manifest_at_ref', side_effect=[manifest(e) for e in epochs]):
+                with self.assertRaisesRegex(ValueError, '仍有绑定工位'):
+                    compatibility.check_upgrade(self.product_root, 'old', 'new', operation=operation)
+        (self.product_root / '.local/stations.json').write_text(json.dumps({'schema_version': 1, 'stations': []}))
+        with mock.patch.object(compatibility, 'manifest_at_ref', side_effect=[manifest(25), manifest(26)]):
+            compatibility.check_upgrade(self.product_root, 'old', 'new')
+
     def test_ci_plan_epoch_rejects_epoch_twenty_two_and_bound_switch(self):
         current = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
-        self.assertEqual(25, current['station_state_epoch'])
+        self.assertEqual(26, current['station_state_epoch'])
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current))
         path = self.station / '.agenticops/init.json'
         path.write_text(json.dumps({'station_state_epoch': 22}))
@@ -170,7 +180,7 @@ class StationCompatibilityTests(unittest.TestCase):
 
     def test_merged_cleanup_epoch_rejects_both_epoch_twenty_three_candidates(self):
         current = json.loads((ROOT / 'contracts/station-state-compatibility.json').read_text())
-        self.assertEqual(25, current['station_state_epoch'])
+        self.assertEqual(26, current['station_state_epoch'])
         (self.product_root / 'contracts/station-state-compatibility.json').write_text(json.dumps(current))
         path = self.station / '.agenticops/init.json'
         path.write_text(json.dumps({'station_state_epoch': 23}))
@@ -187,7 +197,7 @@ class StationCompatibilityTests(unittest.TestCase):
 
     def test_fingerprint_epoch_rejects_old_state_and_bound_upgrade_or_rollback(self):
         current = json.loads((ROOT / "contracts/station-state-compatibility.json").read_text())
-        self.assertEqual(25, current["station_state_epoch"])
+        self.assertEqual(26, current["station_state_epoch"])
         (self.product_root / "contracts/station-state-compatibility.json").write_text(json.dumps(current))
         path = self.station / ".agenticops/init.json"
         path.write_text(json.dumps({"station_state_epoch": 14}))
