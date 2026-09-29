@@ -90,4 +90,4 @@ CI 用例开发与质量核对继续由上述 TapData 构建指引承载：从�
 
 开发分支归位、受管基线回收及空闲刷新由[工位合同](architecture/single-task-station.md)定义，操作入口见[工位源码与材料](usage/station-materials.md)，退出仍使用既有清理与归档流程。
 
-目录长期归属与清理操作身份快照的职责、跨会话重新盘点及完成回执保护由[工位合同](architecture/single-task-station.md)维护；原版本异常恢复仅属于受控维护，不作为新版在线迁移能力。
+目录长期归属与清理操作身份快照的职责、epoch 25 既有状态兼容、跨会话重新盘点及完成回执保护由[工位合同](architecture/single-task-station.md)维护；原版本异常恢复仅属于受控维护，不作为新版在线迁移能力。

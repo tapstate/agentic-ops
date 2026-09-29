@@ -162,6 +162,6 @@ internal/release/hotfix.sh <JIRA-KEY>
 
 ## epoch 25 空 runtime 身份恢复
 
-仅当研发明确批准旧版本恢复例外时，维护工具 `internal/station_identity_recovery.py` 可处理未修改的安装提交 `16b76424c2f20ec737d29d23aec830a4ecdd1eaf`。它加载该原安装的 Workflow，要求当前任务未归档、无未完成操作、无登记写入者或未知外部结果，且仅登记一个空 runtime、父子 inode 均不变、仅设备号变化；不解释其它版本，不进入产品安装目录。
+epoch 25 目录身份修复版本可直接清理同 epoch 工位，以下工具仅供仍需在原安装完成清理的受控恢复，不是同 epoch 更新的前置要求。仅当研发明确批准旧版本恢复例外时，维护工具 `internal/station_identity_recovery.py` 可处理未修改的安装提交 `16b76424c2f20ec737d29d23aec830a4ecdd1eaf`。它加载该原安装的 Workflow，要求当前任务未归档、无未完成操作、无登记写入者或未知外部结果，且仅登记一个空 runtime、父子 inode 均不变、仅设备号变化；不解释其它版本，不进入产品安装目录。
 
 先用 `--product-root <原安装> --station <工位> --request <工位外私有新文件>` 生成旧新登记及绑定摘要；审阅后以相同参数追加 `--confirm-digest <摘要> --decision-ref <用户决定来源> --writers-stopped` 执行。恢复只原子更新原格式目录登记并保留外部请求和回执；中断复用相同请求，任务或目录变化则停止。此恢复不授权删除或升级；仍由原版本重新生成清理清单、保全归档、清理及 purge，成功后才切换新版。

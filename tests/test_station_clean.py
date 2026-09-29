@@ -73,6 +73,7 @@ class StationCleanTests(unittest.TestCase):
     def test_creation_device_change_does_not_block_new_plan(self):
         from workflow import station_directories as directories
         task = self.ready()
+        self.assertEqual(25, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
         path = directories.registry_path(self.ws, task)
         original = json.loads(path.read_text())
         changed = json.loads(path.read_text())
@@ -89,6 +90,7 @@ class StationCleanTests(unittest.TestCase):
     def test_confirmed_identity_change_requires_amendment(self):
         from workflow import station_directories as directories
         task = self.ready()
+        self.assertEqual(25, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
         request = self.result_request(task)
         args = (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'], 'op-identity', request)
         station.execute(*args, cleanup_mode='prepare')
@@ -110,6 +112,7 @@ class StationCleanTests(unittest.TestCase):
     def test_amend_cannot_redelete_completed_runtime(self):
         from workflow import station_directories as directories
         task = self.ready()
+        self.assertEqual(25, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
         request = self.result_request(task)
         args = (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'], 'op-completed-root', request)
         station.execute(*args, cleanup_mode='prepare')
