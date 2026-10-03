@@ -93,6 +93,23 @@ class SharedRepositoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'origin'):
             self.run_action('status')
 
+    def test_status_works_without_write_access_and_blocks_updates(self):
+        self.run_action('ensure')
+        original_open = os.open
+
+        def read_only_open(path, flags, *args, **kwargs):
+            if flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC):
+                raise PermissionError('只读访问')
+            return original_open(path, flags, *args, **kwargs)
+
+        with mock.patch.object(shared.os, 'open', side_effect=read_only_open), \
+                mock.patch.object(shared.source_pool, 'refreshed_at_root', side_effect=AssertionError('network')):
+            self.assertEqual(self.run_action('status')['status'], 'ready')
+        with shared.locked(self.path, read_only=True):
+            self.assertEqual(self.run_action('status')['status'], 'ready')
+            with self.assertRaisesRegex(ValueError, '管理中'):
+                self.run_action('update')
+
     def test_failed_refresh_preserves_head(self):
         self.run_action('ensure')
         old = self.git(self.path, 'rev-parse', 'HEAD')

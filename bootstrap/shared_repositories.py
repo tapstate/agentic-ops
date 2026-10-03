@@ -79,14 +79,14 @@ def specification(root, name):
 
 
 @contextmanager
-def locked(path, create=False):
+def locked(path, create=False, read_only=False):
     if create:
         path.parent.mkdir(parents=True, exist_ok=True)
-    flags = os.O_RDWR | os.O_NOFOLLOW | (os.O_CREAT if create else 0)
+    flags = (os.O_RDONLY if read_only else os.O_RDWR) | os.O_NOFOLLOW | (os.O_CREAT if create else 0)
     descriptor = os.open(str(path) + ".lock", flags, 0o600)
     try:
         try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(descriptor, (fcntl.LOCK_SH if read_only else fcntl.LOCK_EX) | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise ValueError("共享仓库正在管理中，请稍后重试") from error
         yield
@@ -145,7 +145,7 @@ def run(root, name, action, pool_root):
     pool_root = Path(pool_root).expanduser().resolve()
     entry = specification(root, name)
     path = directory(pool_root, "shared-repositories/" + name)
-    with locked(path, create=action == "ensure"):
+    with locked(path, create=action == "ensure", read_only=action == "status"):
         if action == "status" or (action == "ensure" and path.exists()):
             return inspect(path, name, entry)
         if action == "update":
