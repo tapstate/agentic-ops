@@ -55,6 +55,22 @@ def require(base, issue_key=None):
     return task
 
 
+def operation_summary(operation):
+    """CLI 展示操作身份和进度；完整回执仍由原日志及 context --full 提供。"""
+    if operation is None:
+        return None
+    result = {key: operation[key] for key in (
+        "operation_id", "kind", "run_id", "expected_revision", "request_digest",
+        "phase", "status", "archive_ref") if key in operation}
+    steps = operation.get("steps", {})
+    result["completed_steps"] = [name for name, step in steps.items() if step.get("receipt") is not None]
+    result["pending_steps"] = [name for name, step in steps.items()
+                               if step.get("receipt") is None and not step.get("superseded_by")]
+    result["superseded_steps"] = [name for name, step in steps.items() if step.get("superseded_by")]
+    result["details"] = "repository context --full（读取完整操作与恢复回执）"
+    return result
+
+
 def cmd_takeover(args):
     from workflow import station
     overrides = {}
@@ -73,7 +89,7 @@ def cmd_takeover(args):
     result = station.takeover(args.dir, request, args.operation_id, args.expected_revision)
     from workflow import external_sync
     current = task_store.read_task(args.dir)
-    print(json.dumps(dict(result, **external_sync.safe_actions(args.dir, current)), ensure_ascii=False, indent=2))
+    print(json.dumps(dict(operation_summary(result), **external_sync.safe_actions(args.dir, current)), ensure_ascii=False, indent=2))
     return 0
 
 
@@ -147,18 +163,20 @@ def cmd_cleanup_amend(args):
 def cmd_repository_add(args):
     from workflow import station
     issue = task_store.resolve_issue(args.dir, args.issue_key)
-    print(json.dumps(station.scope_change(args.dir, issue, args.expected_run_id,
+    result = station.scope_change(args.dir, issue, args.expected_run_id,
         args.expected_revision, args.operation_id, args.repo, args.work_branch,
-        args.base_branch, [args.scope], args.verification, args.expected_head), ensure_ascii=False, indent=2))
+        args.base_branch, [args.scope], args.verification, args.expected_head)
+    print(json.dumps(operation_summary(result), ensure_ascii=False, indent=2))
     return 0
 
 
 def cmd_repository_amend(args):
     from workflow import station
     issue = task_store.resolve_issue(args.dir, args.issue_key)
-    print(json.dumps(station.amend_scope(args.dir, issue, args.expected_run_id,
+    result = station.amend_scope(args.dir, issue, args.expected_run_id,
         args.expected_revision, args.operation_id, args.repo, args.expected_binding_digest,
-        args.expected_head, [args.scope], args.verification, args.decision_ref), ensure_ascii=False, indent=2))
+        args.expected_head, [args.scope], args.verification, args.decision_ref)
+    print(json.dumps(operation_summary(result), ensure_ascii=False, indent=2))
     return 0
 
 
@@ -181,7 +199,10 @@ def repository_context(base, task):
 
 
 def cmd_repository_context(args):
-    print(json.dumps(repository_context(args.dir, load(args.dir, args.issue_key)), ensure_ascii=False, indent=2))
+    result = repository_context(args.dir, load(args.dir, args.issue_key))
+    if not args.full:
+        result["operation"] = operation_summary(result["operation"])
+    print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -871,6 +892,7 @@ def main():
     context = repository_sub.add_parser("context")
     context.add_argument("--issue-key")
     context.add_argument("--json", action="store_true")
+    context.add_argument("--full", action="store_true", help="包括完整操作回执；默认只展示身份和步骤进度")
     context.add_argument("--dir", default=".")
     context.set_defaults(func=cmd_repository_context)
     record = repository_sub.add_parser("record-result")

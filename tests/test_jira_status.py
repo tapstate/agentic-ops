@@ -86,6 +86,55 @@ class JiraStatusTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "工作类型"):
             jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)
 
+    def test_takeover_existing_assignee_needs_no_duplicate_decision(self):
+        for task_class in ('feature_change', 'defect_fix'):
+            with self.subTest(task_class=task_class):
+                self.task['task_class'] = task_class
+                save_station_task(self.base, self.task)
+                snapshot = self.feature_snapshot() if task_class == 'feature_change' else self.snapshot()
+                snapshot['transitions'] = [snapshot['transitions'][-1]]
+                snapshot['transitions'][0]['fields'] = {}
+                for assignee, expected in (('other', 'assignee_mismatch'),
+                                                              (None, 'assignee_mismatch'),
+                                                              ('u-1', 'transition_prepared')):
+                    snapshot['issue']['fields']['assignee'] = {'accountId': assignee}
+                    result = jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot,
+                                                 operation_id='op-' + task_class.replace('_', '-'))
+                    self.assertEqual(result['reason'], expected)
+                    self.assertNotIn('assignee', result['decision_packet']['pending'])
+                snapshot['issue']['fields']['status']['name'] = 'In Progress'
+                done = jira_status.complete(self.base, 'TAP-123', 'takeover', 'unknown', snapshot, '',
+                                            operation_id='op-' + task_class.replace('_', '-'))
+                self.assertEqual(done['outcome'], 'succeeded')
+
+    def test_native_required_assignee_still_requires_decision(self):
+        snapshot = self.feature_snapshot()
+        snapshot['transitions'] = [snapshot['transitions'][-1]]
+        snapshot['transitions'][0]['fields'] = {'assignee': {
+            'required': True, 'schema': {'type': 'user'}, 'name': 'Assignee'}}
+        result = jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot,
+                                     operation_id='op-required-assignee')
+        self.assertEqual(result['reason'], 'decision_inputs_pending')
+        self.assertIn('assignee', result['decision_packet']['pending'])
+
+    def test_old_unsent_assignee_preflight_retries_after_config_fix(self):
+        snapshot = self.feature_snapshot()
+        snapshot['transitions'] = [snapshot['transitions'][-1]]
+        snapshot['transitions'][0]['fields'] = {}
+        path = self.base / 'product/projects/tapdata/jira-transitions.json'
+        current = path.read_text()
+        previous = json.loads(current)
+        previous['task_classes']['feature_change']['fields']['assignee']['collect_at'] = 'intake'
+        path.write_text(json.dumps(previous))
+        blocked = jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot,
+                                      operation_id='op-existing-intake')
+        self.assertEqual(blocked['reason'], 'decision_inputs_pending')
+        path.write_text(current)
+        ready = jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot,
+                                    operation_id='op-existing-intake')
+        self.assertEqual(ready['outcome'], 'ready')
+        self.assertEqual(ready['preflight_history'][-1]['reason'], 'decision_inputs_pending')
+
     def test_preflight_missing_fields_can_be_filled_before_write(self):
         snapshot = self.feature_snapshot()
         snapshot["transitions"][1]["fields"] = {"fixVersions": {"required": True}}

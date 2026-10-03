@@ -8,6 +8,8 @@
 
 共享同一源码池的工位复用缓存；同名仓库绑定唯一 origin，origin 不一致时失败关闭，不自动隔离。每个池内仓库在刷新和传输期间加锁。工位 purge 保留源码池；缓存不保存任务状态或验收证据。
 
+`task.py takeover`、`repository add/amend` 和 `repository context` 默认只展示操作身份和步骤进度，不展开下载时记录的所有远端分支。`repository context` 仍保留完整工程冻结基线、任务仓库及路径；排障或恢复需要完整回执时使用 `repository context --full --issue-key <key> --dir <station>`。摘要只影响 CLI 显示，操作日志、Python 接口及旧工位状态不变；不以摘要代替实际源码或外部结果核验。
+
 ## 中央共享 Wiki
 
 `bootstrap/shared-repositories.json` 登记共享仓库来源与分支；TapData 的 Profile 通过 `wiki_repository: tapstate/wiki` 引用 `git@github.com:tapstate/wiki.git` 的 main，不另设 wiki.json。完整共享副本位于源码池的 `shared-repositories/tapstate/wiki`，与 bare 下载缓存分离；同一源码池下的多个工位共用。它是普通完整 checkout，供只读文件查询；bare 缓存继续只服务下载加速。
