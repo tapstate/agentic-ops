@@ -473,7 +473,7 @@ grep -F 'memory 只能作为历史线索' "$station/AGENTS.md" >/dev/null
 grep -F '接管或继续成功只是流程恢复点' "$station/AGENTS.md" >/dev/null
 grep -F '远程候选参考' "$station/AGENTS.md" >/dev/null
 grep -F 'Workflow 在本地状态变更处执行流程门禁' "$station/AGENTS.md" >/dev/null
-grep -F '生成 Q2 方案时应用返回的 `planning_guidance`' "$station/AGENTS.md" >/dev/null
+grep -F '通过 checklist --json 或 next 读取当前任务适用的准入、质量与方案指导' "$station/AGENTS.md" >/dev/null
 grep -F '完整工程基线' "$station/AGENTS.md" >/dev/null
 grep -F 'current-task.json' "$station/AGENTS.md" >/dev/null
 if "$station/agenticops" --help | grep -F 'agenticops task' >/dev/null; then
