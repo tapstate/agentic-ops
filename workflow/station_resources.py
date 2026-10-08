@@ -248,7 +248,9 @@ def plan(base, task, version=None, decisions_override=None):
         decisions.update(decisions_override)
     for name, row in repositories.items():
         repository = source.repository_path(base, name)
-        source.identity(repository, row["origin"])
+        # 本次目录盘点已按 Catalog 核验身份；冻结来源不同仍须独立核验。
+        if project_rules.canonical_repository_endpoint(row["origin"]) != project_rules.canonical_repository_endpoint(catalog.get(name, {}).get("origin")):
+            source.identity(repository, row["origin"])
         if row.get("initial_checkout"):
             states[name] = {"origin": row["origin"], "initial_checkout": True}
             continue

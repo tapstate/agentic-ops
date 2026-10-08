@@ -500,6 +500,7 @@ def _verify_cleanup_decision(base, task, request):
     discard = [e for e in plan["entries"] if e["preservation"]["action"] == "discard"]
     if discard and request.get("discard_digest") != baseline.digest(discard):
         raise ValueError("丢弃源码成果需要额外确认 discard_digest")
+    return plan
 
 
 def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_mode="execute"):
@@ -532,11 +533,12 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
             if record["task_result"] != "completed" or task.get("outcome") != "completed":
                 raise ValueError("未完成档案只能 clean；不能后置完成再复用 incomplete 档案释放")
         fresh = not previous or previous["operation_id"] != operation_id
+        prepared_plan = None
         if fresh:
             if kind == "clean" and request.get("abandon_changes") is not True:
                 raise ValueError("未完成任务需要明确放弃变更，未写入状态")
             if kind in ("archive", "clean", "release"):
-                _verify_cleanup_decision(base, task, request)
+                prepared_plan = _verify_cleanup_decision(base, task, request)
             if not task.get("archive_ref"):
                 baseline.text(request.get("summary"), "归档总结")
                 baseline.text(request.get("reason"), "归档原因")
@@ -544,10 +546,6 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
                     raise ValueError("归档输入包含敏感内容")
             _resources().verify_stopped(base, task)
             _resources().verify_known_external(base, task)
-            if kind != "archive":
-                candidate_plan = _resources().plan(base, task, version=request.get("cleanup_version", 6))
-                if request.get("confirmed_digest") != candidate_plan["digest"]:
-                    raise ValueError("必须确认当前精确 cleanup plan digest")
             if kind == "release":
                 proof = task.get("terminal_proof") if task.get("outcome") == "completed" else completion_proof(base, task)
                 if not proof or request.get("candidate_digest") != proof["candidate_digest"]:
@@ -558,7 +556,7 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
                 raise ValueError("已完成任务应释放")
         if previous and previous["kind"] == "takeover" and previous["status"] != "done" and kind == "clean":
             handoff = previous.get("handoff")
-            plan = handoff["cleanup_plan"] if handoff else _resources().plan(base, task, version=request.get("cleanup_version", 6))
+            plan = handoff["cleanup_plan"] if handoff else prepared_plan
             operation = operations.handoff_clean(base, operation_id, revision, request, run_id, plan)
         else:
             operation = operations.begin(base, kind, operation_id, revision, request, run_id)
@@ -574,11 +572,13 @@ def execute(base, kind, issue, run_id, revision, operation_id, request, cleanup_
                 raise ValueError("释放确认必须绑定最终候选摘要")
             apply_completion(task, proof)
             task_store.write_task(base, task)
+            prepared_plan = None  # 完成处置改变任务事实，不能复用此前的盘点。
         if kind == "clean" and task.get("outcome") == "completed":
             raise ValueError("已完成任务应释放，不允许改写为未完成")
         plan = operation.get("cleanup_plan")
         if plan is None:
-            plan = resources.plan(base, task, version=request.get("cleanup_version", 6))
+            # 仅复用本次持锁调用中已确认的盘点；恢复与发布前仍重新核验。
+            plan = prepared_plan if prepared_plan is not None else resources.plan(base, task, version=request.get("cleanup_version", 6))
             if kind != "archive" and request.get("confirmed_digest") != plan["digest"]:
                 raise ValueError("清理或释放必须明确确认当前精确 cleanup plan digest")
             operation["cleanup_plan"] = plan

@@ -78,7 +78,7 @@ CI 用例开发与质量核对继续由上述 TapData 构建指引承载：从�
 |---|---|---|
 | 产品定位与架构 | [项目目标](strategy/project-goals.md)、[v1 工程架构](architecture/agenticops-v1-architecture.md)、[术语表](glossary.md) | 产品边界、分层、稳定术语、流程检查点与 Agent 原生权限责任及迁移准绳 |
 | 使用与维护 | [首次使用指引](usage-guide.md)、[必需 MCP 配置](usage/mcp-setup.md)、[Agent引导安装指引](usage/agent-guided-install.md)、[任务授权指引](usage/task-authorization.md)、[扩展使用索引](usage/README.md)、[维护指引](maintenance-guide.md)、[Skill 维护规范](skill-maintenance.md) | 首次安装到接管任务、Claude Code/Codex 的必需 Jira MCP 接线、GitHub 工具的自主选择边界、由 AI Agent 在空工位完成安装与初始化、脚本加载任务、准入、受控基线与实施授权、独立源码准备与持久材料复用、更新和回退、项目工位根 `./agenticops` 薄入口、受控仓库准备、当前工位会话中的任务执行上下文、任务恢复与精确清理、Skill 分类与发现接线、证据标签，以及日常运行和维护 |
-| 安全与验证 | [权限与安全边界](security/permissions.md)、[Git SSH 授权指引](security/git-ssh-access.md)、[Claude 端到端验证](testing/e2e-claude.md)、[Codex 端到端验证](testing/e2e-codex.md) | 凭证、以工位为单位的 Agent 文件系统授权、Workflow 检查点与原生 Git/GitHub 写操作边界、访问诊断和端到端验收 |
+| 安全与验证 | [权限与安全边界](security/permissions.md)、[Git SSH 授权指引](security/git-ssh-access.md)、[Claude 端到端验证](testing/e2e-claude.md)、[Codex 端到端验证](testing/e2e-codex.md) | 凭证、以工位为单位的 Agent 文件系统授权、Workflow 检查点与原生 Git/GitHub 写操作边界、访问诊断和端到端验收；[维护验证](maintenance-guide.md#5-验证)负责源码规则测试、真实交互测试与固定验收的分工 |
 | 产品合同 | [v1 用户故事总纲](user-stories/v1/README.md) | 稳定的产品能力、保护行为和验收证据 |
 
 文档链接权威来源而不重复维护相同规则。具体工作项、进度、阻塞和验收由 Jira 管理，不在本树新增平行执行计划。

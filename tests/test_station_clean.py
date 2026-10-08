@@ -20,12 +20,49 @@ class StationCleanTests(unittest.TestCase):
     git = fixture.ResourceTests.git
     takeover = fixture.ResourceTests.takeover
     ready = fixture.ResourceTests.ready
+    rule_task = fixture.lifecycle.StationTests.rule_task
     execute = fixture.ResourceTests.execute
 
     def result_request(self, task):
         return dict(summary="保存并重置", reason="用户清理", decision_ref="fixture:user",
                     cleanup_version=6, abandon_changes=True,
                     confirmed_digest=resources.plan(self.ws, task, version=6)["digest"])
+
+    def test_plan_still_rejects_frozen_origin_different_from_catalog(self):
+        import copy
+        task = self.ready()
+        changed = copy.deepcopy(task)
+        changed['engineering_baseline']['repositories'][self.name]['origin'] = str(self.root / 'other.git')
+        with self.assertRaisesRegex(ValueError, 'origin'):
+            resources.plan(self.ws, changed)
+        self.assertIsNotNone(task_store.read_task(self.ws))
+
+    def test_reused_plan_detects_source_change_before_archive_publication(self):
+        task = self.ready()
+        request = self.result_request(task)
+        original = station.archives.publish
+        def changed_source(*args, **kwargs):
+            (self.repo / 'file.txt').write_text('late source must survive')
+            return original(*args, **kwargs)
+        with mock.patch.object(station.archives, 'publish', side_effect=changed_source):
+            with self.assertRaisesRegex(ValueError, '现场变化'):
+                self.execute(task, request)
+        self.assertEqual('late source must survive', (self.repo / 'file.txt').read_text())
+        self.assertIsNotNone(task_store.read_task(self.ws))
+        self.assertIsNone(task_store.read_task(self.ws)['archive_ref'])
+
+    def test_cleanup_resume_rechecks_origin_after_preparation(self):
+        task = self.ready()
+        request = self.result_request(task)
+        args = (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'], 'op-origin-resume', request)
+        prepared = station.execute(*args, cleanup_mode='prepare')
+        self.assertEqual('awaiting_cleanup_result', prepared['phase'])
+        self.git(self.repo, 'config', 'remote.origin.url', str(self.root / 'other.git'))
+        with self.assertRaisesRegex(ValueError, 'origin'):
+            station.execute(*args)
+        self.assertIsNotNone(task_store.read_task(self.ws))
+        self.git(self.repo, 'config', 'remote.origin.url', str(self.remote))
+        self.assertEqual('done', station.execute(*args)['status'])
 
     def test_legacy_empty_runtime_recovery_is_explicit_and_idempotent(self):
         from internal import station_identity_recovery as recovery
@@ -537,9 +574,9 @@ class StationCleanTests(unittest.TestCase):
                 for p in root.rglob('*') if p.is_file() and '.git' not in p.parts}
 
     def test_old_requested_versions_are_rejected_without_writes(self):
-        task = self.ready()
-        (self.repo / 'file.txt').write_text('must preserve')
-        request = self.result_request(task)
+        task = self.rule_task()
+        (self.ws / 'runtime/keep.txt').write_text('must preserve')
+        request = dict(summary='保存并重置', reason='用户清理', decision_ref='fixture:user', abandon_changes=True)
         before = self.state_bytes()
         for version in (3, 4, 5, 6.0, True, '6'):
             with self.subTest(version=version):
@@ -592,7 +629,7 @@ class StationCleanTests(unittest.TestCase):
             rules.load(self.ws)
 
     def test_inventory_always_enforces_current_rules(self):
-        self.ready()
+        self.rule_task()
         self.project_rules(['source/'])
         with self.assertRaisesRegex(ValueError, '生命周期'):
             resources.verify_station_inventory(self.ws)
@@ -641,7 +678,7 @@ class StationCleanTests(unittest.TestCase):
         self.assertEqual('baseline', (self.repo/'file.txt').read_text().strip())
 
     def test_no_abandon_is_zero_write(self):
-        self.ready()
+        self.rule_task()
         before = {p.relative_to(self.ws):p.read_bytes() for p in (self.ws/'.agenticops').rglob('*') if p.is_file()}
         with mock.patch('sys.stdout', new_callable=io.StringIO):
             self.assertEqual(0, station_clean.main(['--dir', str(self.ws), '--abandon-changes', 'no']))
@@ -841,6 +878,7 @@ class CleanupStagesTests(unittest.TestCase):
     git = fixture.ResourceTests.git
     takeover = fixture.ResourceTests.takeover
     ready = fixture.ResourceTests.ready
+    rule_task = fixture.lifecycle.StationTests.rule_task
     reset_request = fixture.ResourceTests.reset_request
 
     def args(self, task):
