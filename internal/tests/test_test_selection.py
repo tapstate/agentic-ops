@@ -121,6 +121,25 @@ class TestSelectionTests(unittest.TestCase):
     def test_unknown_path_fails_closed(self):
         self.assertEqual(test_selection.select(["new/unmapped.py"]), ([], ["new/unmapped.py"]))
 
+    def test_formal_local_tests_and_documents_have_bounded_checks(self):
+        self.assertEqual(test_selection.formal_checks(["tests/test_quality.py"]),
+                         ("resource_contracts", "affected:quality"))
+        self.assertEqual(test_selection.formal_checks(["docs/usage/task-authorization.md"]), ("resource_contracts",))
+        self.assertEqual(test_selection.formal_checks(["tests/test_quality.py", "docs/README.md", "tests/test_quality.py"]),
+                         ("resource_contracts", "affected:quality"))
+
+    def test_formal_shared_and_unknown_changes_require_full(self):
+        from internal.story_gate.model import FULL_ACCEPTANCE_CHECKS
+        paths = ("workflow/quality.py", "contracts/new.json", "bootstrap/render.py", "gate/engine.py",
+                 "internal/test_selection.py", "internal/story_gate/service.py", ".githooks/pre-commit",
+                 "tests/test_station_lifecycle.py", "tests/test_station_resources.py", "tests/test_contracts.py",
+                 "tests/test_station_source.py", "unknown/new.py", "docs/example.py", "docs/user-stories/v1/int-001.md", "projects/tapdata/quality.json",
+                 "projects/tapdata/skills/tapdata-task/SKILL.md")
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertEqual(test_selection.formal_checks(["tests/test_quality.py", path]), FULL_ACCEPTANCE_CHECKS)
+
+
 
 if __name__ == "__main__":
     unittest.main()

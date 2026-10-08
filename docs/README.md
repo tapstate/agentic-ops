@@ -36,7 +36,7 @@ PR 正文传输完整性属于质量证据主题：[扩展使用总纲](usage/RE
 
 配置化工位清理由[任务授权指引](usage/task-authorization.md#配置化清理入口)说明两个独立名单、确认请求及 Agent 接力；[工位合同](architecture/single-task-station.md#成果导向清理计划版本-6)维护唯一现役版本 6 的保全、Git 复位、成果验收及旧协议退出边界，[机器契约](../contracts/station-reset.schema.json)约束持久计划。名单只负责工位根分类，源码按 Git 与确认快照处理，不保留旧计划执行器或构建工具清理配方。
 
-[维护指引](maintenance-guide.md#5-验证)负责诊断检查、绑定候选的正式四项验收、耗时报告与证据 v5 使用及维护审查的有效验收摘要；[INT-001](user-stories/v1/int-001-release-governance.md)规定验收完整性、失败失效和首次信任根升级边界。运行进度与性能验收结果仍以 Jira 为准。
+[维护指引](maintenance-guide.md#5-验证)负责诊断检查、提交候选按影响验收、发布隔离四项验收、耗时报告与证据 v6 使用及维护审查的有效验收摘要；[INT-001](user-stories/v1/int-001-release-governance.md)规定验收完整性、失败失效和首次信任根升级边界。运行进度与性能验收结果仍以 Jira 为准。
 
 TapData 的按需 Wiki 阅读由 [tapdata-wiki](../projects/tapdata/skills/tapdata-wiki/SKILL.md) 说明检索与源码核验边界；项目 Profile 仅引用中央登记的共享仓库。[架构总纲](architecture/agenticops-v1-architecture.md)定义中央共享材料归属；[工位源码与材料](usage/station-materials.md)负责共享仓库准备、显式更新和故障处理，不引入任务知识快照或自动刷新。
 

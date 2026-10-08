@@ -24,6 +24,7 @@ from internal.story_gate.branch_policy import (
 )
 from internal.story_gate.git_changes import collect_changes
 from internal.story_gate.model import FULL_ACCEPTANCE_CHECKS, StoryImpact, StoryRegistry
+from internal import test_selection
 from internal.story_gate import evidence as verification
 from internal.story_gate.registry import load_story_registry, path_matches
 
@@ -184,7 +185,9 @@ class StoryGateService:
             ),
         }
 
-    def verify(self, source: str, *, base: str | None = None, head: str | None = None, event_sink: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+    def verify(self, source: str, *, base: str | None = None, head: str | None = None, event_sink: Callable[[dict[str, Any]], None] | None = None, scope: str = "affected") -> dict[str, Any]:
+        if scope not in ("affected", "full"):
+            raise ValueError("未知验收范围")
         if source not in ("staged", "range") or (source == "range" and (not base or not head)):
             raise ValueError("正式验收需 staged，或显式提供 range 的 --base 和 --head")
         registry, impact = self._calculate(source, base=base, head=head, read_pr_fact=False)
@@ -196,6 +199,7 @@ class StoryGateService:
                 "请先查阅审查报告并补齐故事映射",
                 self._result(registry, impact, report, _digest(report)),
             )
+        selected_checks = FULL_ACCEPTANCE_CHECKS if scope == "full" else impact.acceptance_checks
         run_id = uuid.uuid4().hex
         run_dir = self._run_dir(impact.impact_id) / run_id
         _ensure_run_path_safe(self.root, run_dir / "output.log")
@@ -217,7 +221,7 @@ class StoryGateService:
             environment = {}
             results = []
             payload = self._write_evidence_summary(evidence_path, impact, "running", results,
-                                                  environment=environment, run_id=run_id)
+                                                  environment=environment, run_id=run_id, planned_checks=selected_checks)
             with events_path.open("a", encoding="utf-8") as events_file:
                 def emit(event: dict[str, Any]) -> None:
                     payload = {"timestamp": _now(), "impact_id": impact.impact_id, "run_id": run_id, **event}
@@ -229,7 +233,7 @@ class StoryGateService:
                 try:
                     verification.require_material(self.root, impact)
                     environment = verification.environment(self.root)
-                    for check_id in impact.acceptance_checks:
+                    for check_id in selected_checks:
                         started = time.monotonic()
                         emit({"event": "check_started", "check_id": check_id})
                         with output_path.open("ab", buffering=0) as output_file:
@@ -240,8 +244,8 @@ class StoryGateService:
                                 last_progress = 0.0
                                 while process.poll() is None:
                                     elapsed = time.monotonic() - started
-                                    if elapsed > verification.CHECK_TIMEOUTS[check_id]:
-                                        raise subprocess.TimeoutExpired(process.args, verification.CHECK_TIMEOUTS[check_id])
+                                    if elapsed > verification.check_timeout(check_id):
+                                        raise subprocess.TimeoutExpired(process.args, verification.check_timeout(check_id))
                                     if elapsed - last_progress >= 10:
                                         emit({"event": "check_progress", "check_id": check_id, "elapsed_seconds": round(elapsed, 3)})
                                         last_progress = elapsed
@@ -260,11 +264,11 @@ class StoryGateService:
                     _, after = self._calculate(source, base=base, head=head, read_pr_fact=False)
                     if after.impact_id != impact.impact_id or verification.environment(self.root) != environment:
                         raise ValueError("验收期间候选、基线或环境发生变化")
-                    payload = self._write_evidence_summary(evidence_path, impact, "passed", results, environment=environment, run_id=run_id)
+                    payload = self._write_evidence_summary(evidence_path, impact, "passed", results, environment=environment, run_id=run_id, planned_checks=selected_checks)
                     emit({"event": "verify_completed", "acceptance_status": "passed", "evidence_path": str(evidence_path)})
                 except BaseException as error:
                     status = "cancelled" if isinstance(error, KeyboardInterrupt) else "failed"
-                    payload = self._write_evidence_summary(evidence_path, impact, status, results, environment=environment, run_id=run_id, error=type(error).__name__)
+                    payload = self._write_evidence_summary(evidence_path, impact, status, results, environment=environment, run_id=run_id, planned_checks=selected_checks, error=type(error).__name__)
                     emit({"event": "verify_completed", "acceptance_status": status, "evidence_path": str(evidence_path)})
                     raise StoryGateError(code="story_acceptance_failed", message=f"正式验收未通过：{error}", status="blocked", exit_code=EXIT_BLOCKED, retry_safe=True, required_human_action="请查看本次日志，修复后重新验收；旧通过结果已失效", details={"acceptance_status": status, "checks": results, "evidence_path": str(evidence_path)}) from error
         result = {
@@ -276,7 +280,7 @@ class StoryGateService:
 
     def _write_evidence_summary(
         self, evidence_path: Path, impact: StoryImpact, acceptance_status: str, checks: list[dict[str, Any]],
-        *, environment: dict[str, Any], run_id: str, error: str = "",
+        *, environment: dict[str, Any], run_id: str, planned_checks: tuple[str, ...], error: str = "",
     ) -> dict[str, Any]:
         payload = {
             "schema_version": verification.EVIDENCE_SCHEMA_VERSION,
@@ -284,7 +288,9 @@ class StoryGateService:
             "acceptance_status": acceptance_status,
             "checks": checks,
             "verified_at": _now(),
-            "binding": _verification_binding(impact),
+            "binding": _verification_binding(impact, tuple(check["check_id"] for check in checks)),
+            "verification_scope": "full" if planned_checks == FULL_ACCEPTANCE_CHECKS else "affected",
+            "planned_checks": list(planned_checks),
             "environment": environment,
             "environment_digest": verification.digest(environment),
             "run_id": run_id,
@@ -400,7 +406,7 @@ class StoryGateService:
             impacted_categories=tuple(sorted(categories)),
             revision_story_ids=tuple(sorted(revisions)),
             unmapped_paths=unmapped,
-            acceptance_checks=FULL_ACCEPTANCE_CHECKS if impacted else (),
+            acceptance_checks=test_selection.formal_checks(changes.paths) if impacted else (),
             current_branch=review.branch,
             review_channel=review.channel,
             confirmation_stage=confirmation_stage,
@@ -450,6 +456,7 @@ class StoryGateService:
             ),
             "acceptance_evidence": ({
                 "run_id": evidence["run_id"],
+                "verification_scope": evidence["verification_scope"],
                 "checks": [{key: check[key] for key in
                             ("check_id", "passed", "exit_code", "duration_seconds") if key in check}
                            for check in evidence["checks"]],
@@ -480,17 +487,23 @@ class StoryGateService:
             return None
         if not _record_matches_impact(payload, impact):
             return None
-        if payload.get("acceptance_status") != "passed" or payload.get("binding") != _verification_binding(impact):
-            return None
         checks = payload.get("checks")
+        if not isinstance(checks, list) or not all(isinstance(check, dict) for check in checks):
+            return None
+        actual_checks = tuple(check.get("check_id") for check in checks)
+        if payload.get("acceptance_status") != "passed" or payload.get("binding") != _verification_binding(impact, actual_checks):
+            return None
         run_id = payload.get("run_id")
         if not isinstance(run_id, str) or not re.fullmatch(r"[0-9a-f]{32}", run_id) or payload.get("error") != "":
             return None
         expected_log = str((self._run_dir(impact.impact_id) / run_id / "output.log").relative_to(self.root))
         previous_end = 0
-        if not isinstance(checks, list) or len(checks) != len(FULL_ACCEPTANCE_CHECKS):
+        if actual_checks not in (impact.acceptance_checks, FULL_ACCEPTANCE_CHECKS):
             return None
-        for expected, check in zip(FULL_ACCEPTANCE_CHECKS, checks):
+        expected_scope = "full" if actual_checks == FULL_ACCEPTANCE_CHECKS else "affected"
+        if payload.get("verification_scope") != expected_scope or payload.get("planned_checks") != list(actual_checks):
+            return None
+        for expected, check in zip(actual_checks, checks):
             if (not isinstance(check, dict) or check.get("check_id") != expected
                     or check.get("passed") is not True or type(check.get("exit_code")) is not int
                     or check["exit_code"] != 0 or not isinstance(check.get("log_sha256"), str)
@@ -695,10 +708,12 @@ def _impact_record_fields(impact: StoryImpact) -> dict[str, Any]:
     }
 
 
-def _verification_binding(impact: StoryImpact) -> dict[str, str]:
+def _verification_binding(impact: StoryImpact, checks: tuple[str, ...] | None = None) -> dict[str, Any]:
     return {"comparison_base": impact.comparison_base, "candidate_tree": impact.candidate_tree,
             "change_fingerprint": impact.change_fingerprint, "registry_digest": impact.registry_digest,
-            "contract_digest": verification.contract_digest()}
+            "contract_digest": verification.contract_digest(),
+            "required_checks": list(impact.acceptance_checks),
+            "executed_checks": list(impact.acceptance_checks if checks is None else checks)}
 
 
 def _stop_check(process):
@@ -829,6 +844,8 @@ def _git(root: Path, *arguments: str) -> str:
 
 
 def _check_command(root: Path, check_id: str) -> list[str]:
+    if check_id.startswith("affected:"):
+        return list(test_selection.command_for(root, check_id.removeprefix("affected:")))
     return {
         "python_runtime": [str(root / "internal" / "tests" / "test_runtime.sh")],
         "resource_contracts": [str(root / "internal" / "tests" / "test_resources.sh")],

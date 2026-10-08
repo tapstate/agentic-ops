@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""开发诊断的保守 affected 测试选择；正式 Story Gate 不调用此模块。"""
+"""开发诊断与提交候选的保守影响选择；发布仍独立执行完整验收。"""
 import argparse
 import json
 import os
@@ -107,6 +107,29 @@ def select(paths):
         for suite in matched:
             if suite not in suites: suites.append(suite)
     return suites, unmapped
+
+
+# 共享实现、安装和治理改动的影响不能由局部测试清单可靠界定。
+FULL_PREFIXES = ("workflow/", "gate/", "policies/", "contracts/", "bootstrap/", "adapters/",
+                 "internal/", ".githooks/", ".github/", "skills/", "agenticops", "AGENTS.md",
+                 "docs/strategy/", "docs/architecture/", "docs/user-stories/", "docs/security/", "docs/glossary.md")
+SHARED_TEST_FIXTURES = frozenset(("tests/test_station_lifecycle.py", "tests/test_station_resources.py",
+                                  "tests/test_station_source.py", "tests/test_contracts.py"))
+
+
+def formal_checks(paths):
+    """从全部候选路径推导最低验收范围；未知影响回到完整四项。"""
+    from internal.story_gate.model import FULL_ACCEPTANCE_CHECKS
+    paths = sorted(set(paths))
+    if not paths or any(path.startswith(FULL_PREFIXES) or path in SHARED_TEST_FIXTURES for path in paths):
+        return FULL_ACCEPTANCE_CHECKS
+    if any(path.startswith("projects/") and not any(part in path for part in ("/scripts/", "/tests/", "/runbooks/")) for path in paths):
+        return FULL_ACCEPTANCE_CHECKS
+    suites, unmapped = select([path for path in paths
+                               if not (path.endswith(".md") and (path.startswith("docs/") or "/runbooks/" in path))])
+    if unmapped:
+        return FULL_ACCEPTANCE_CHECKS
+    return tuple(["resource_contracts", *("affected:" + name for name in sorted(suites))])
 
 
 def main():
