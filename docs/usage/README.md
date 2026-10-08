@@ -1,5 +1,9 @@
 # AgenticOps 扩展使用
 
+Jira 已有经办人的接管准入与原生表单决策由[统一决策包](quality-checkpoints.md#jira-全流程统一决策包)区分：Project Profile 核验当前用户身份，字段采集只在对应人工节点或实时必填表单要求时请求决定，不重复确认已核验的接管事实。
+
+接管及仓库操作的日常输出与详细恢复回执由[工位源码与材料](station-materials.md)说明；显示摘要不改变操作日志、冻结基线或授权语义。
+
 空闲工位的源码刷新由[工位源码与材料](station-materials.md)说明：`station source-update` 刷新已准备仓库，支持 `--repo` 指定单仓；任务接管后不能使用，不替代任务基线核验。
 
 任务清理采用六阶段自动执行与成果验收；完整盘点、异常接管、分支处置及当前 epoch 恢复边界由[工位合同](../architecture/single-task-station.md#阶段式清理)统一定义，操作入口复用任务授权指引，PROD-003 覆盖阶段失败和接力验收。

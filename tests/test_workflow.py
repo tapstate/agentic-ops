@@ -388,7 +388,49 @@ def check_station_binding_snapshot(base):
     check("单字段产品根旧 API 保持兼容", project_rules.product_root_from_station(bound), products[0])
 
 
+def check_operation_output():
+    from workflow import station, external_sync
+    operation = {'operation_id': 'op-output-test', 'kind': 'takeover', 'run_id': 'TAP-123-69d8a1f0',
+                 'phase': 'source', 'status': 'running', 'expected_revision': 0,
+                 'steps': {'fetch:repo': {'receipt': {'refs': {'branch-' + str(i): 'a' * 40 for i in range(5000)}}},
+                           'source:repo': {'receipt': None},
+                           'old-step': {'receipt': None, 'superseded_by': 'replacement'}}}
+    original = json.dumps(operation, sort_keys=True)
+    context = {'operation': operation, 'engineering_baseline': {'sha': 'a' * 40},
+               'task_repositories': [{'repository': 'owner/repo'}], 'revision': 1}
+    with mock.patch.object(workflow_task, 'load', return_value={}), \
+            mock.patch.object(workflow_task, 'repository_context', side_effect=lambda *args: json.loads(json.dumps(context))):
+        outputs = []
+        for full in (False, True):
+            stream = io.StringIO()
+            with contextlib.redirect_stdout(stream):
+                workflow_task.cmd_repository_context(SimpleNamespace(dir='fixture', issue_key='TAP-123', full=full))
+            outputs.append(stream.getvalue())
+        compact, detailed = map(json.loads, outputs)
+        check('默认仓库输出不被远端分支数量放大', len(outputs[0]) < 2000, True)
+        check('完整上下文保留原操作回执', detailed == context, True)
+        check('摘要仍提供完整冻结基线', compact['engineering_baseline'], context['engineering_baseline'])
+        check('摘要保留任务仓库', compact['task_repositories'], context['task_repositories'])
+        check('摘要区分待执行与已替代步骤', compact['operation']['pending_steps'], ['source:repo'])
+        check('摘要保留已完成步骤', compact['operation']['completed_steps'], ['fetch:repo'])
+    args = SimpleNamespace(dir='fixture', issue_key='TAP-123', task_class='feature_change', version='develop',
+                           profile='full-application', optional_repository=[], explicit_branch=[],
+                           continuation_input=None, operation_id='op-output-test', expected_revision=0)
+    with mock.patch.object(station, 'takeover', return_value=operation), \
+            mock.patch.object(task_store, 'read_task', return_value={}), \
+            mock.patch.object(external_sync, 'safe_actions', return_value={'sync_actions': [{'id': 'still-pending'}]}):
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
+            workflow_task.cmd_takeover(args)
+        output = json.loads(stream.getvalue())
+        check('接管CLI不展开全部refs', len(stream.getvalue()) < 2000, True)
+        check('接管摘要保留同步待办', output['sync_actions'], [{'id': 'still-pending'}])
+    check('摘要不改写原操作回执', json.dumps(operation, sort_keys=True) == original, True)
+    check('无操作时摘要仍为空', workflow_task.operation_summary(None), None)
+
+
 def main():
+    check_operation_output()
     # 生命周期的资源安全、双工位、恢复与精确清理在独立同版测试覆盖；
     # 本文件保留通用 CLI、CI、证据脱敏和项目规则合同。
     from station_fixture import save_task

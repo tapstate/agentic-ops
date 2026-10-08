@@ -452,6 +452,8 @@ def amend_cleanup(base, issue, run_id, revision, operation_id, expected_plan_dig
         generation = len(history)
         if type(request.get("expected_plan_revision")) is not int or request["expected_plan_revision"] != generation:
             raise ValueError("原清理计划修订编号已变化或缺失，拒绝旧确认")
+        from workflow import station_directories
+        station_directories.verify_completed_roots(base, task, operation)
         plan = _resources().plan(base, task, version=current["schema_version"])
         confirmed = request.get("confirmed_digest")
         if not confirmed or confirmed != plan["digest"]:

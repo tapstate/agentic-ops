@@ -8,13 +8,20 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from workflow.git_environment import git_environment
 
 
 def _git(root, *arguments):
     try:
         result = subprocess.run(
-            ["git", *arguments], cwd=root, capture_output=True, text=True, timeout=10
+            ["git", *arguments], cwd=root, capture_output=True, text=True, timeout=10,
+            env=git_environment(read_only=True),
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise ValueError("无法读取 Product Root 的 Git 事实：%s" % error) from error

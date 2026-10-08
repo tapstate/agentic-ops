@@ -61,7 +61,8 @@ def valid_value(value, schema, options):
         for choice in choices:
             if not isinstance(item, dict) or not isinstance(choice, dict):
                 continue
-            if any(item.get(k) is not None and item.get(k) == choice.get(k) for k in ("id", "value", "name")):
+            identifiers = [k for k in ("id", "value", "name") if item.get(k) is not None]
+            if identifiers and all(item[k] == choice.get(k) for k in identifiers):
                 return not item.get("child") or match(item["child"], choice.get("children", []))
         return False
     return all(match(item, options) for item in (value if isinstance(value, list) else [value]))

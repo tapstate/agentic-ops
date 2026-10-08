@@ -11,6 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+from workflow.git_environment import git_environment
+
 MANIFEST_PATH = "contracts/station-state-compatibility.json"
 def validate_manifest(document, label):
     required = {"station_state_epoch"}
@@ -37,6 +39,7 @@ def manifest_at_ref(product_root, reference):
             capture_output=True,
             text=True,
             encoding="utf-8",
+            env=git_environment(read_only=True),
         )
     except UnicodeError as error:
         raise ValueError("目标版本工位兼容性清单编码无效：%s" % reference) from error

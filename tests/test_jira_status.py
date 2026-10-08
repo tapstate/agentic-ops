@@ -86,6 +86,55 @@ class JiraStatusTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "工作类型"):
             jira_status.prepare(self.base, "TAP-123", "takeover", snapshot)
 
+    def test_takeover_existing_assignee_needs_no_duplicate_decision(self):
+        for task_class in ('feature_change', 'defect_fix'):
+            with self.subTest(task_class=task_class):
+                self.task['task_class'] = task_class
+                save_station_task(self.base, self.task)
+                snapshot = self.feature_snapshot() if task_class == 'feature_change' else self.snapshot()
+                snapshot['transitions'] = [snapshot['transitions'][-1]]
+                snapshot['transitions'][0]['fields'] = {}
+                for assignee, expected in (('other', 'assignee_mismatch'),
+                                                              (None, 'assignee_mismatch'),
+                                                              ('u-1', 'transition_prepared')):
+                    snapshot['issue']['fields']['assignee'] = {'accountId': assignee}
+                    result = jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot,
+                                                 operation_id='op-' + task_class.replace('_', '-'))
+                    self.assertEqual(result['reason'], expected)
+                    self.assertNotIn('assignee', result['decision_packet']['pending'])
+                snapshot['issue']['fields']['status']['name'] = 'In Progress'
+                done = jira_status.complete(self.base, 'TAP-123', 'takeover', 'unknown', snapshot, '',
+                                            operation_id='op-' + task_class.replace('_', '-'))
+                self.assertEqual(done['outcome'], 'succeeded')
+
+    def test_native_required_assignee_still_requires_decision(self):
+        snapshot = self.feature_snapshot()
+        snapshot['transitions'] = [snapshot['transitions'][-1]]
+        snapshot['transitions'][0]['fields'] = {'assignee': {
+            'required': True, 'schema': {'type': 'user'}, 'name': 'Assignee'}}
+        result = jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot,
+                                     operation_id='op-required-assignee')
+        self.assertEqual(result['reason'], 'decision_inputs_pending')
+        self.assertIn('assignee', result['decision_packet']['pending'])
+
+    def test_old_unsent_assignee_preflight_retries_after_config_fix(self):
+        snapshot = self.feature_snapshot()
+        snapshot['transitions'] = [snapshot['transitions'][-1]]
+        snapshot['transitions'][0]['fields'] = {}
+        path = self.base / 'product/projects/tapdata/jira-transitions.json'
+        current = path.read_text()
+        previous = json.loads(current)
+        previous['task_classes']['feature_change']['fields']['assignee']['collect_at'] = 'intake'
+        path.write_text(json.dumps(previous))
+        blocked = jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot,
+                                      operation_id='op-existing-intake')
+        self.assertEqual(blocked['reason'], 'decision_inputs_pending')
+        path.write_text(current)
+        ready = jira_status.prepare(self.base, 'TAP-123', 'takeover', snapshot,
+                                    operation_id='op-existing-intake')
+        self.assertEqual(ready['outcome'], 'ready')
+        self.assertEqual(ready['preflight_history'][-1]['reason'], 'decision_inputs_pending')
+
     def test_preflight_missing_fields_can_be_filled_before_write(self):
         snapshot = self.feature_snapshot()
         snapshot["transitions"][1]["fields"] = {"fixVersions": {"required": True}}
@@ -235,6 +284,40 @@ class JiraStatusTests(unittest.TestCase):
         self.assertEqual(['customfield_a'], packet['confirmed'])
         snapshot['issue']['fields']['assignee'] = {'accountId': 'another-owner'}
         self.assertEqual(['customfield_a'], jira_collect.collect(self.base, self.task, 'design_review', snapshot)['pending'])
+
+    def test_collect_rejects_conflicting_option_identity_without_changing_confirmation(self):
+        from workflow import jira_collect
+        snapshot = self.collect_fixture()
+        values = {'customfield_a': {'id': '1', 'value': 'ordinary'}}
+        self.assertEqual(['customfield_a'], self.confirm_packet('design_review', snapshot, values)['confirmed'])
+        before = {str(p): p.read_bytes() for p in (self.base / '.agenticops').rglob('*') if p.is_file()}
+        for value in ({'id': 'wrong', 'value': 'ordinary'}, {'id': '1', 'value': 'wrong'}):
+            with self.subTest(value=value):
+                proposals = {'customfield_a': value}
+                packet = jira_collect.collect(self.base, self.task, 'design_review', snapshot, proposals)
+                self.assertFalse(packet['fields']['customfield_a']['valid_value'])
+                with self.assertRaisesRegex(ValueError, '字段值'):
+                    self.confirm_packet('design_review', snapshot, proposals)
+                self.assertEqual(before, {str(p): p.read_bytes() for p in (self.base / '.agenticops').rglob('*') if p.is_file()})
+        self.assertEqual(['customfield_a'], jira_collect.collect(self.base, self.task, 'design_review', snapshot)['confirmed'])
+
+    def test_option_identity_must_match_one_allowed_choice_including_children(self):
+        from workflow import jira_collect
+        options = [{'id': '1', 'value': 'first', 'name': 'First',
+                    'children': [{'id': '11', 'value': 'child'}]},
+                   {'id': '2', 'value': 'second', 'name': 'Second'}]
+        for value in ({'id': '1'}, {'value': 'first'}, {'name': 'First'},
+                      {'id': '1', 'value': 'first', 'name': 'First'},
+                      {'id': '1', 'child': {'id': '11', 'value': 'child'}}):
+            with self.subTest(value=value):
+                self.assertTrue(jira_collect.valid_value(value, {'type': 'option'}, options))
+        for value in ({'id': '1', 'value': 'second'}, {'id': 'wrong', 'name': 'First'},
+                      {'id': '1', 'name': 'Second'}, {'other': 'first'},
+                      {'id': '1', 'child': {'id': 'wrong', 'value': 'child'}}):
+            with self.subTest(value=value):
+                self.assertFalse(jira_collect.valid_value(value, {'type': 'option-with-child'}, options))
+                self.assertFalse(jira_collect.valid_value([{'id': '2'}, value], {'type': 'array'}, options))
+        self.assertTrue(jira_collect.valid_value([{'id': '1'}, {'id': '2'}], {'type': 'array'}, options))
 
     def test_collect_condition_options_dependencies_and_dynamic_fields(self):
         from workflow import jira_collect

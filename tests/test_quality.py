@@ -1525,6 +1525,29 @@ class QualityTests(unittest.TestCase):
         with mock.patch.object(engine, "current_task", return_value=current):
             self.assertEqual("matched", engine.jira_watermark_intent(directory, "TAP-123", "customfield_1", "digest"))
 
+    def test_evidence_ci_summary_preserves_repository_revision_and_time(self):
+        states = [
+            {"repository": "owner/first", "pr": "42", "history": [
+                {"verdict": "failure", "head": "c" * 40, "ts": "old"},
+                {"verdict": "success", "head": "a" * 40, "ts": "2026-09-29T10:00:00+0800"}]},
+            {"repository": "owner/second", "pr": "42", "history": [
+                {"verdict": "failure", "head": "b" * 40, "ts": "2026-09-30T10:00:00+0800"}]},
+            {"repository": "owner/third", "pr": "43", "history": []},
+        ]
+        before = copy.deepcopy(states)
+        summary = evidence.build_summary(None, None, [], states, {})
+        lines = [line for line in summary.splitlines() if line.startswith("*CI")]
+        self.assertEqual(3, len(lines))
+        for line, state in zip(lines[:2], states[:2]):
+            latest = state["history"][-1]
+            for value in (state["repository"], "#42", latest["verdict"], latest["head"], latest["ts"]):
+                self.assertIn(value, line)
+        self.assertNotIn("c" * 40, summary)
+        self.assertIn("owner/third", lines[2])
+        self.assertIn("无记录", lines[2])
+        self.assertIn("未知", lines[2])
+        self.assertEqual(before, states)
+
     def test_evidence_jsonl_preserves_unicode_separators_inside_strings(self):
         path = task_store.events_path(self.base, "TAP-123")
         events = [{"decision": "allow", "note": "a" + chr(code) + "b"}

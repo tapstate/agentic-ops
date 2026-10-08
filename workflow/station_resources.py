@@ -233,12 +233,10 @@ def plan(base, task, version=None, decisions_override=None):
                 or original.get("steps") or not task.get("initial_runtime")):
             raise ValueError("runtime 缺少当前 run 的目录归属")
         roots["runtime"] = task["initial_runtime"]
-        path = directories.validate(base, roots["runtime"])
+        path = directories.path_at(base, roots["runtime"]["path"])
         if any(path.iterdir()):
             raise ValueError("尚未启动生产者的 runtime 出现未知材料")
-    for entry in roots.values():
-        # 已确认回收的工位根可以缺失，身份与原确认由成果核验器检查。
-        directories.validate(base, entry, missing=True)
+    roots = {name: directories.snapshot(base, entry) for name, entry in roots.items()}
     engineering = task.get("engineering_baseline", {})
     repositories = engineering.get("repositories", {}) if task.get("source_prepared") else _partial_repositories(base)
     catalog = project_rules.load_repository_catalog(station=base)["repositories"]
@@ -297,7 +295,7 @@ def plan(base, task, version=None, decisions_override=None):
     logs = ["logs", "reports"]
     for relative in logs:
         directories.path_at(base, "runtime/" + relative)
-    value = {"schema_version": 6, "run_id": task["run_id"], "directories": [dict(entry, observed_missing_before_intent=not directories.path_at(base, entry["path"]).exists()) for entry in roots.values()], "archive_runtime": logs,
+    value = {"schema_version": 6, "run_id": task["run_id"], "directories": list(roots.values()), "archive_runtime": logs,
              "entries": entries, "source": states, "external": external,
              "active_state": {"files": active_files(base), "unbind_run": task["run_id"], "task_digest": task_fingerprint(task)},
              "retained": ["config", "source repositories and refs", "Product Root .archive", ".agenticops binding and operation"]}

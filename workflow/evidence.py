@@ -152,7 +152,9 @@ def build_summary(task, auth, events, ci_states, spec, verification=None, qualit
     for st in ci_states:
         last = st.get("history", [])[-1] if st.get("history") else {}
         lines.append(
-            "*CI（PR #%s）*：最近记录 %s" % (st.get("pr"), last.get("verdict", "无记录"))
+            "*CI（%s PR #%s）*：最近记录 %s；Head %s；观察时间 %s" % (
+                st.get("repository", "未知仓库"), st.get("pr"), last.get("verdict", "无记录"),
+                last.get("head", "未知"), last.get("ts", "未知"))
         )
     if ci_states:
         lines.append("")
