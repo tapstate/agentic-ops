@@ -18,6 +18,19 @@ ADAPTERS = ROOT / "adapters"
 AGENT_ROOT = ADAPTERS / "agents"
 TOOL_ROOT = ADAPTERS / "tools"
 class AdapterBoundaryTest(unittest.TestCase):
+    def test_station_guidance_does_not_impose_tapdata_workflow(self):
+        # 换项目后接线仍只导航该项目，不能继承 TapData 的状态或质量节点。
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "entry.md").write_text(
+                (ADAPTERS / "station/AGENTS.md").read_text(encoding="utf-8"), encoding="utf-8")
+            manifest = discover(ROOT)["codex"]
+            entry = rendered_content(root, "other-product", "entry.md", manifest)
+            self.assertIn("projects/other-product/profile.json", entry)
+            for project_rule in ("task_intake", "Q4", "Pull Request Submitted",
+                                 "defect_fix", "关联测试", "tapdata"):
+                self.assertNotIn(project_rule, entry)
+
     def test_adapters_are_declarative_without_tool_interception(self):
         self.assertEqual(list(ADAPTERS.rglob("*.py")), [])
         for agent, manifest in discover(ROOT).items():

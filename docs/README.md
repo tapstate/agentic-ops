@@ -1,5 +1,7 @@
 # AgenticOps 文档总纲
 
+流程授权与提示词边界由[任务授权指引](usage/task-authorization.md)维护来源同步、方案决定复用和清理内分支/PR 处置的操作说明；[Skill 维护规范](skill-maintenance.md)负责按需加载与能力缺失的接力原则。通用工位模板只导航当前 Project 的规则，项目 Skill 消费配置与已核验结果，不重复维护项目分支值或增加确认步骤；实际状态和授权判定仍由现役 Workflow、Policy 与工位合同负责。
+
 TapData 正在进行的任务由研发选择恢复已有 run 或建立新 run；项目准入配置与操作步骤由 [TapData 任务技能](../projects/tapdata/skills/tapdata-task/SKILL.md#接管与恢复)维护，复用既有归档清理和分支续办机制，不复制旧授权或验收结论。
 
 CI 集成测试优化复用现有质量链：[质量检查与证据](usage/quality-checkpoints.md)维护方案与报告的字段、缺口确认及兼容边界；[TapData 集成测试](../projects/tapdata/skills/tapdata-ci-test/SKILL.md)和[构建测试指引](../projects/tapdata/runbooks/build-test-and-local-run.md)负责应用 Wiki 分级、用例开发执行和报告分析。测试级别定义仅从中央 Wiki 获取，本文不维护副本；真实业务验收与产品回归分别记录。
@@ -34,7 +36,7 @@ PR 正文传输完整性属于质量证据主题：[扩展使用总纲](usage/RE
 
 配置化工位清理由[任务授权指引](usage/task-authorization.md#配置化清理入口)说明两个独立名单、确认请求及 Agent 接力；[工位合同](architecture/single-task-station.md#成果导向清理计划版本-6)维护唯一现役版本 6 的保全、Git 复位、成果验收及旧协议退出边界，[机器契约](../contracts/station-reset.schema.json)约束持久计划。名单只负责工位根分类，源码按 Git 与确认快照处理，不保留旧计划执行器或构建工具清理配方。
 
-[维护指引](maintenance-guide.md#5-验证)负责诊断检查、绑定候选的正式四项验收、耗时报告与证据 v5 使用及维护审查的有效验收摘要；[INT-001](user-stories/v1/int-001-release-governance.md)规定验收完整性、失败失效和首次信任根升级边界。运行进度与性能验收结果仍以 Jira 为准。
+[维护指引](maintenance-guide.md#5-验证)负责诊断检查、提交候选按影响验收、发布隔离四项验收、耗时报告与证据 v6 使用及维护审查的有效验收摘要；[INT-001](user-stories/v1/int-001-release-governance.md)规定验收完整性、失败失效和首次信任根升级边界。运行进度与性能验收结果仍以 Jira 为准。
 
 TapData 的按需 Wiki 阅读由 [tapdata-wiki](../projects/tapdata/skills/tapdata-wiki/SKILL.md) 说明检索与源码核验边界；项目 Profile 仅引用中央登记的共享仓库。[架构总纲](architecture/agenticops-v1-architecture.md)定义中央共享材料归属；[工位源码与材料](usage/station-materials.md)负责共享仓库准备、显式更新和故障处理，不引入任务知识快照或自动刷新。
 
@@ -76,7 +78,7 @@ CI 用例开发与质量核对继续由上述 TapData 构建指引承载：从�
 |---|---|---|
 | 产品定位与架构 | [项目目标](strategy/project-goals.md)、[v1 工程架构](architecture/agenticops-v1-architecture.md)、[术语表](glossary.md) | 产品边界、分层、稳定术语、流程检查点与 Agent 原生权限责任及迁移准绳 |
 | 使用与维护 | [首次使用指引](usage-guide.md)、[必需 MCP 配置](usage/mcp-setup.md)、[Agent引导安装指引](usage/agent-guided-install.md)、[任务授权指引](usage/task-authorization.md)、[扩展使用索引](usage/README.md)、[维护指引](maintenance-guide.md)、[Skill 维护规范](skill-maintenance.md) | 首次安装到接管任务、Claude Code/Codex 的必需 Jira MCP 接线、GitHub 工具的自主选择边界、由 AI Agent 在空工位完成安装与初始化、脚本加载任务、准入、受控基线与实施授权、独立源码准备与持久材料复用、更新和回退、项目工位根 `./agenticops` 薄入口、受控仓库准备、当前工位会话中的任务执行上下文、任务恢复与精确清理、Skill 分类与发现接线、证据标签，以及日常运行和维护 |
-| 安全与验证 | [权限与安全边界](security/permissions.md)、[Git SSH 授权指引](security/git-ssh-access.md)、[Claude 端到端验证](testing/e2e-claude.md)、[Codex 端到端验证](testing/e2e-codex.md) | 凭证、以工位为单位的 Agent 文件系统授权、Workflow 检查点与原生 Git/GitHub 写操作边界、访问诊断和端到端验收 |
+| 安全与验证 | [权限与安全边界](security/permissions.md)、[Git SSH 授权指引](security/git-ssh-access.md)、[Claude 端到端验证](testing/e2e-claude.md)、[Codex 端到端验证](testing/e2e-codex.md) | 凭证、以工位为单位的 Agent 文件系统授权、Workflow 检查点与原生 Git/GitHub 写操作边界、访问诊断和端到端验收；[维护验证](maintenance-guide.md#5-验证)负责源码规则测试、真实交互测试与固定验收的分工 |
 | 产品合同 | [v1 用户故事总纲](user-stories/v1/README.md) | 稳定的产品能力、保护行为和验收证据 |
 
 文档链接权威来源而不重复维护相同规则。具体工作项、进度、阻塞和验收由 Jira 管理，不在本树新增平行执行计划。

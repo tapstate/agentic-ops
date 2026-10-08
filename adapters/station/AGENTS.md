@@ -25,7 +25,7 @@ Codex 的 `.agents/skills/`、Claude Code 的 `.claude/skills/` 链接到同一�
 
 ## 当前任务操作
 
-接管、归档、释放、清理是四个生命周期操作。开始前必须先读取当前项目 `.agents/skills/` 或 `.claude/skills/` 中匹配的 Project Skill。memory 只能作为历史线索；当前产品规则和实际 CLI 是依据。Skill 缺失或越界时停止副作用并提示从工位根执行 `./agenticops station repair`。
+接管、归档、释放、清理是四个生命周期操作。开始前必须先读取当前项目 `.agents/skills/` 或 `.claude/skills/` 中匹配的 Project Skill。memory 只能作为历史线索；当前产品规则和实际 CLI 是依据。Skill 缺失或越界时，提示从工位根执行 `./agenticops station repair`，不使用越界材料。若绑定产品根中的现役 Project 规则、合同、CLI 与原授权可核验，按同一成果标准接管；规则来源、权限或安全路径无法核验时，只停止受影响的副作用步骤，继续无依赖的准备，不手改状态。
 
 ```bash
 python3 __AGENTIC_OPS_HOME__/workflow/task.py status --issue-key <JIRA-KEY> --dir <项目工位>
@@ -49,7 +49,7 @@ python3 __AGENTIC_OPS_HOME__/workflow/task.py repository context --issue-key <JI
 
 - Jira 是任务事实源，Git 是代码事实源，GitHub PR/CI 是审查事实源；本地状态只服务执行、恢复和证据，不替代外部事实。
 - Workflow 在本地状态变更处执行流程门禁。失败后停止依赖步骤并展示原因，不手改状态绕过。原生工具执行仍由平台权限控制，不承诺拦截任意本地写入。
-- defect_fix 的 Q1 通过 checklist --json 或 next 读取 repair_strategy；生成 Q2 方案时应用返回的 `planning_guidance`。策略为 advisory，缺失只报告 warning，不增加 Gate/Quality/Authorization 阻断条件。
-- 启用 Jira 同步时，task_intake 与 Q4 各按 Skill 尝试一次精确状态流转；失败不阻塞无关本地步骤，外部结果不明先回读。PR Ready 核验当前 PR Head Checks、关联测试和任务检查项；Pull Request Submitted 由责任人处理。
-- 用户可见内容使用中文，不保存 token、密钥、客户数据或原始敏感日志。合并、发布、Tag、强推、历史改写、保护分支写入始终需要独立明确授权。
+- 通过 checklist --json 或 next 读取当前任务适用的准入、质量与方案指导；项目 Skill 解释具体协作节点。advisory 指导不可用、未应用或偏离时只报告 warning，不增加 Gate/Quality/Authorization 阻断条件。
+- Jira 同步节点、转换、验收要求与人工交接从当前 Project 配置及 Skill 读取，不固定任务类型、阶段或 Jira 状态名。原生写入后回读；失败不阻塞无关本地步骤，外部结果不明先核对原操作。PR Ready 按项目质量合同核验当前候选的审查与检查事实，不代替合入或任务完成。
+- 用户可见内容使用中文，不保存 token、密钥、客户数据或原始敏感日志。来源分支 Merge 到任务工作分支需要具体对象与来源 SHA 的明确授权，可复用方案中仍有效的具体决定；普通任务授权不包含 Merge。PR 合入、发布、Tag、强推、历史改写、保护分支写入始终需要新的明确授权。
 - 未迁移辅助能力只暂停相应副作用步骤并给出人工接力；事实不可信、权限不足、风险须人工决定及外部结果不明必须停止。

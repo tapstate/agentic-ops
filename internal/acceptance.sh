@@ -33,14 +33,15 @@ EOF
 
 checks=()
 
-# 只有显式绑定的 full 才进入唯一正式验收流程；其余保持诊断语义。
-if [ "${1:-}" = "full" ] && [ "${2:-}" = "--change-source" ]; then
+# 显式绑定的候选验收共用 Story Gate；worktree 保持诊断语义。
+if { [ "${1:-}" = "full" ] || [ "${1:-}" = "affected" ]; } && [ "${2:-}" = "--change-source" ] && [ "${3:-}" != "worktree" ]; then
   case "${3:-}" in staged|range) ;; *) usage >&2; exit 2;; esac
+  scope="$1"
   shift
-  exec "$repo_root/internal/bin/story-gate" --source-root "$repo_root" verify "$@" --progress
+  exec "$repo_root/internal/bin/story-gate" --source-root "$repo_root" verify "$@" --scope "$scope" --progress
 fi
 
-# affected 只用于开发诊断：选择器自身失败关闭，且不产生 Story Gate 正式验收证据。
+# affected worktree 只用于开发诊断，不产生提交证据。
 if [ "${1:-}" = "affected" ]; then
   [ "${2:-}" = "--change-source" ] || { usage >&2; exit 2; }
   source="${3:-}"

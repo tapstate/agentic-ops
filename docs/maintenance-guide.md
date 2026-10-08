@@ -107,28 +107,30 @@ Git 克隆只包含该分支已提交内容，不包含当前未提交修改；�
 
 ## 5. 验证
 
-运行代码及 Skill 变更整理为明确候选后，使用一次正式验收同时完成四项检查和提交门禁证据：
+运行代码及 Skill 变更整理为明确候选后，使用普通提交/PR 候选按影响范围生成正式门禁证据：
 
 ```sh
-internal/acceptance.sh full --change-source staged
+internal/acceptance.sh affected --change-source staged
 ```
 
-此入口薄转发至 `story-gate verify`，固定执行 Runtime、Resources、Install、Release；故事注册表已在 Runtime 内执行，不重复计为第五项。已提交范围使用 `full --change-source range --base <base> --head <head>`，且当前实际 HEAD 必须等于指定 head。staged 前后要求工作树与索引一致，无非忽略的未跟踪输入；不会自动暂存、stash 或清理用户文件。
+此入口薄转发至 `story-gate verify`，复用 `internal/test_selection.py` 根据全部候选路径选择关联测试，至少运行 Resources。共享 Workflow、Gate/Policy、契约、安装与 Adapter、门禁/发布、Project 配置与 Skill、共享测试夹具及未知影响回到完整四项；已知测试文件运行自身测试，项目脚本运行声明的关联消费者，普通文档运行资源检查。选择器只减少已可靠界定的范围，不以单个修改文件代表完整影响。已提交范围使用 `affected --change-source range --base <base> --head <head>`，且当前实际 HEAD 必须等于指定 head。staged 前后要求工作树与索引一致，无非忽略的未跟踪输入；不会自动暂存、stash 或清理用户文件。
 
-不带 `--change-source` 的 `full`、`quick` 或组合检查只用于诊断，不产生门禁证据。`quick` 包含完整 Runtime，并不承诺快速。开发中按需运行受影响用例，候选确定后再正式验收，不要先执行诊断 full 再重复正式四项。
+显式需要完整候选验收时使用 `full --change-source staged` 或 `full --change-source range --base <base> --head <head>`；完整证据可以满足同候选的局部最低要求。`affected --change-source worktree`、不带 `--change-source` 的 `full`、`quick` 或组合检查只用于诊断，不产生门禁证据。`quick` 包含完整 Runtime，并不承诺快速。开发中按需运行受影响用例，候选确定后再正式验收，不要先执行诊断 full 再重复正式四项。
 
 ```sh
 internal/acceptance.sh runtime install
 internal/acceptance.sh --list
 ```
 
-维护审查可使用 `python3 skills/ao-review-change/scripts/review-context.py --change-source staged` 读取精确候选摘要。`acceptance_evidence` 在 Story Gate 已核验匹配证据时返回 `run_id` 和四项检查结果，便于记录 Jira 验收引用；没有有效证据时为 null。它不读取原始日志，不签发批准，也不替代代码审查。
+维护审查可使用 `python3 skills/ao-review-change/scripts/review-context.py --change-source staged` 读取精确候选摘要。`acceptance_evidence` 在 Story Gate 已核验匹配证据时返回 `run_id`、验收范围和实际检查结果，便于记录 Jira 验收引用；没有有效证据时为 null。它不读取原始日志，不签发批准，也不替代代码审查。
 
-诊断日志写入 `.local/acceptance/<run-id>/`；正式日志写入 `.local/story-gate/runs/<impact-id>/<run-id>/`，最新自包含摘要位于 `.local/story-gate/evidence/`。同一精确候选从暂存到 commit/range、推送可以消费匹配证据；基线、完整树、变更范围或行为相关环境变化则重验。显式再次调用 verify 始终重新执行，不做跨候选缓存。重验开始即使旧通过和审批失效，失败、取消、超时保留本次非通过记录。机器崩溃残留锁需人工确认没有在途进程后处理，不自动抢锁。
+诊断日志写入 `.local/acceptance/<run-id>/`；正式日志写入 `.local/story-gate/runs/<impact-id>/<run-id>/`，最新自包含摘要位于 `.local/story-gate/evidence/`。同一精确候选从暂存到 commit/range、推送可以消费匹配证据；基线、完整树、变更范围、选择器内容或行为相关环境变化则重验；门禁回读时重新推导最低范围，局部证据不得满足更宽的要求。显式再次调用 verify 始终重新执行，不做跨候选缓存。重验开始即使旧通过和审批失效，失败、取消、超时保留本次非通过记录。机器崩溃残留锁需人工确认没有在途进程后处理，不自动抢锁。
 
 检查上限分别为 Runtime 600 秒、Resources 120 秒、Install 600 秒、Release 300 秒；超时回收检查进程组，不用提高等待上限冒充性能优化。生命周期测试保留完整九仓端到端和双仓隔离，其余使用独立最小临时工程，输出逐用例耗时；正式记录同时给出每组耗时。性能调优使用同机同配置三次中位数，不把时间阈值作为普通 CI 硬门禁。
 
-证据 v5 的环境字段只包含实际工具版本、两个维护依赖文件的摘要和测试行为开关，不记录绝对路径或敏感环境变量。正式四项拒绝启用可选 Maven 集成开关；有需要时单独运行诊断并附上真实集成证据。OPA 缺失或可选 Maven 用例未启用必须明确披露，不声称真实集成已验收。Git 读取和检查子进程清除外部 `GIT_*` 上下文覆盖，候选不能使用 assume-unchanged 或 skip-worktree 隐藏工作树变化。原始日志目录和文件分别限制为 0700 和 0600。发布校验器核验历史开发记录后，仍在自身隔离环境重新完整验收。v3/v4 记录仅保留查阅，不满足新版合同；首次升级走受保护 main 的独立人工 PR，不要求旧 release submit-review 接受新格式，不双写旧证据。不要使用 `--no-verify`。
+规则测试直接构造经现有契约校验的任务状态，在源码观察等外部边界使用固定输入，保留真实判定、摘要计算和本地状态读写；不得把被测的门禁、归档验证或恢复判定 mock 成成功。只验证规则的用例应断言不执行 Git，避免隐含依赖完整接管夹具。Git 命令与输出语义由边界测试覆盖；源码保存与重置、索引和引用变化、gitlink、归档前现场漂移及中断恢复继续使用独立真实临时仓库。固定 Runtime 同时运行规则测试和真实交互测试，保留代表性的正常、失败恢复和多仓完整流程，不以抽样正常路径代替安全回归。线上 Jira/GitHub 联调与业务验收单独记录，mock 通过不能证明真实服务交互已验收。
+
+证据 v6 的环境字段只包含实际工具版本、两个维护依赖文件的摘要和测试行为开关，不记录绝对路径或敏感环境变量。正式候选验收拒绝启用可选 Maven 集成开关；有需要时单独运行诊断并附上真实集成证据。OPA 缺失或可选 Maven 用例未启用必须明确披露，不声称真实集成已验收。Git 读取和检查子进程清除外部 `GIT_*` 上下文覆盖，候选不能使用 assume-unchanged 或 skip-worktree 隐藏工作树变化。原始日志目录和文件分别限制为 0700 和 0600。发布校验器核验历史开发记录后，仍在自身隔离环境重新完整验收。v3/v4/v5 记录仅保留查阅，不满足 v6 选择与绑定合同；首次升级走受保护 main 的独立人工 PR，不要求旧 release submit-review 接受 v6 格式，不双写旧证据。不要使用 `--no-verify`。
 
 ## 6. 发布与 Hotfix
 

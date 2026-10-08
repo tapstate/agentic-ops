@@ -43,7 +43,7 @@ run_general_suite() {
   run_product tests/test_jira_status.py
   run_product tests/test_jira_watermark.py
   PYTHONDONTWRITEBYTECODE=1 "$product_python" -m unittest discover \
-    -s "$repo_root/projects/tapdata/tests" -p 'test_maven*.py'
+    -s "$repo_root/projects/tapdata/tests" -p 'test_*.py'
   run_internal -m unittest discover -s "$repo_root/internal/tests" -p 'test_story_gate.py' -v
   run_internal -m unittest internal.tests.test_test_selection -v
   run_internal -m unittest internal.tests.test_review_context -v

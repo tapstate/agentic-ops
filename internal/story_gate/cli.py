@@ -33,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify = commands.add_parser("verify")
     _change_arguments(verify)
     verify.add_argument("--progress", action="store_true")
+    verify.add_argument("--scope", choices=("affected", "full"), default="affected")
     return parser
 
 
@@ -63,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
                 base=args.base,
                 head=args.head,
                 event_sink=_write if args.progress else None,
+                scope=args.scope,
             )
         _write({"ok": True, "operation": "story_%s" % args.command, **result})
         return 0
