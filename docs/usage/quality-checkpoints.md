@@ -326,9 +326,11 @@ Q2 前通过 `task.py record --key fix_plan --value "根因、范围、修复方
 
 ## 与测试结果联动
 
+TapData 代码变更以 CI 集成测试为主要验证路径，按适用 Wiki 规范和任务源码完成用例判断、编写及验证。Jira「已链接工作项」中的 Test 检查继续保留，CI 通过不能替代关联用例验收。用例需要开发时由用户决定是否在当前会话处理；外部处理保留责任、所需结果和未完成事实，不放宽 Q4、Tests Passed 或 PR Ready 条件。处理选择复用既有方案确认及授权，不新增状态字段或确认环节。
+
 | 验证方式 | 执行来源 | 关联方式 |
 |---|---|---|
-| `taptest` | `taptest` | 从 `t-layer3-test` 读取 `write-xray-test`、`write-test-script` 的实际能力；由原生 Agent 使用技能生成／实现，导入具体 Xray Test Execution、报告、版本与单用例结果 |
+| `taptest` | `taptest` | 保留关联 Test 和 Jira 状态核验；用例是否在当前会话开发由用户决定，仅选择当前会话开发或执行时读取 TapTest 指引并按 Wiki 规范处理。本地执行证据关联具体 Xray Test Execution、报告、版本与单用例结果，不替代项目 Jira 状态接纳 |
 | `unit` | `local_maven` 或 `ci` | 对应 Jira Test Type `Unit`；已有覆盖则复用，新覆盖由用户与 Agent 在所属产品模块工程实现；核对实际 class/method、报告、产品提交、测试版本、CI run/attempt |
 | `manual` | `manual` | 用户选定的真实手工用例、执行人、环境、步骤预期及观察结果，关联可回查附件／评论 |
 | `other` | `external` | 用户批准的其它方式；用例中明确方法细节，并导入其执行证据 |

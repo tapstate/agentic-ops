@@ -4,7 +4,7 @@
 
 TapData 正在进行的任务由研发选择恢复已有 run 或建立新 run；项目准入配置与操作步骤由 [TapData 任务技能](../projects/tapdata/skills/tapdata-task/SKILL.md#接管与恢复)维护，复用既有归档清理和分支续办机制，不复制旧授权或验收结论。
 
-CI 集成测试优化复用现有质量链：[质量检查与证据](usage/quality-checkpoints.md)维护方案与报告的字段、缺口确认及兼容边界；[TapData 集成测试](../projects/tapdata/skills/tapdata-ci-test/SKILL.md)和[构建测试指引](../projects/tapdata/runbooks/build-test-and-local-run.md)负责应用 Wiki 分级、用例开发执行和报告分析。测试级别定义仅从中央 Wiki 获取，本文不维护副本；真实业务验收与产品回归分别记录。
+TapData 代码变更以 CI 集成测试为主要验证路径，Jira 关联 Test 检查继续保留，用例是否在当前会话开发由用户决定。CI 集成测试优化复用现有质量链：[质量检查与证据](usage/quality-checkpoints.md)维护方案与报告的字段、缺口确认及兼容边界；[TapData 集成测试](../projects/tapdata/skills/tapdata-ci-test/SKILL.md)和[构建测试指引](../projects/tapdata/runbooks/build-test-and-local-run.md)负责应用 Wiki 分级、用例开发执行和报告分析。测试级别定义仅从中央 Wiki 获取，本文不维护副本；真实业务验收与产品回归分别记录。
 
 任务清理采用六阶段自动执行与成果验收；完整盘点、异常接管、分支处置及当前 epoch 恢复边界由[工位合同](architecture/single-task-station.md#阶段式清理)统一定义，操作入口复用任务授权指引，PROD-003 覆盖阶段失败和接力验收。
 
@@ -12,7 +12,7 @@ CI 集成测试优化复用现有质量链：[质量检查与证据](usage/quali
 
 共同验证材料的失效范围由[质量检查与证据](usage/quality-checkpoints.md#共同验证材料)维护，契约版本与历史重放由[标准契约](../contracts/README.md)说明；来源同步只证明所属仓的来源关系，不替代跨仓测试或方案授权。兼容边界复用工位 epoch 与既有升级流程。
 
-TapData 项目开发采用“现有任务技能导航、两份开发指引按需阅读”： [TapData 开发指引](../projects/tapdata/runbooks/tapdata-development.md)覆盖源码定位、配置、构建、启动与加载验证；[TapTest 开发指引](../projects/tapdata/runbooks/taptest-development.md)覆盖用例生成、脚本开发、环境配置、执行与结果分析，不依赖业务仓的用例技能。两份指引以常用操作顺序、成功标志和少量高频陷阱帮助 Agent 减少返工，不收录完整会话历史或一次性补丁。[构建与测试](../projects/tapdata/runbooks/build-test-and-local-run.md)维护 Maven、Java 测试与配置模板细节；授权和质量判定链接现役合同，不在指引重复维护。
+TapData 项目开发采用“现有任务技能导航、两份开发指引按需阅读”： [TapData 开发指引](../projects/tapdata/runbooks/tapdata-development.md)覆盖源码定位、配置、构建、启动与加载验证；[TapTest 开发指引](../projects/tapdata/runbooks/taptest-development.md)保留用例开发、环境配置、执行与结果分析能力，仅在用户选择当前会话处理 TapTest 时阅读；用例规范按需查询 Wiki 并结合任务源码核验，不依赖业务仓的用例技能。两份指引以常用操作顺序、成功标志和少量高频陷阱帮助 Agent 减少返工，不收录完整会话历史或一次性补丁。[构建与测试](../projects/tapdata/runbooks/build-test-and-local-run.md)维护 Maven、Java 测试与配置模板细节；授权和质量判定链接现役合同，不在指引重复维护。
 
 通用工具 Hook 执行链退役后，[工程架构](architecture/agenticops-v1-architecture.md)维护 Agent 原生执行、Workflow 检查点和显式 Gate API 的边界；[标准契约](../contracts/README.md)维护 Manifest v3 的声明式接线；[更新与回退](usage/update-and-rollback.md)负责跨 epoch 原版本退出与重建，用户故事和端到端验证只维护对应验收合同，不另设迁移执行计划。
 

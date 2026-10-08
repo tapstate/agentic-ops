@@ -74,7 +74,7 @@
       "origins": [
         "taptest"
       ],
-      "guidance": "t-layer3-test 的 write-xray-test 生成 Xray 用例，write-test-script 实现脚本；调用者核对技能可用性，以实际 Test Execution 和报告关联单用例。",
+      "guidance": "保留 Jira 关联用例及状态检查；由用户决定是否在当前会话开发用例。仅在用户选择当前会话开发或执行时读取 TapTest 开发指引，按适用 Wiki 规范与任务源码处理；本地执行按实际 Test Execution 和报告关联单用例，不替代 Jira 状态接纳。",
       "worktree_origins": []
     },
     "integration": {

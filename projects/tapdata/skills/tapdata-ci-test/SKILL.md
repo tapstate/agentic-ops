@@ -7,7 +7,7 @@ metadata:
 
 # TapData 集成测试
 
-TapTest（t-layer3-test）的用例生成、脚本开发与运行由 [tapdata-task](../tapdata-task/SKILL.md) 导航至独立项目指引，不进入本技能的 Maven 流程。
+TapData 代码变更以 CI 集成测试为主要验证路径，依据 Wiki 规范和任务源码判断覆盖、编写及测试。TapTest（t-layer3-test）的用例开发与运行仅在用户选择当前会话处理时，由 [tapdata-task](../tapdata-task/SKILL.md) 导航至独立项目指引，不进入本技能的 Maven 流程。
 
 由 [tapdata-task](../tapdata-task/SKILL.md) 在方案分析、实现后验证和 PR CI 报告返回时按需调用，也可单独请求分析。先读取当前任务的范围、验收预期、工程基线和已有验证记录；实际源码取工位 source。无 current run 时仅输出“未绑定任务基线”的分析，不修改源码、不执行测试、不创建任务状态；仅有 Wiki 支撑的结论标为未核验。检测到 current run 后沿用主流程的授权、范围和失败记录，不借独立调用重置修复轮次。
 

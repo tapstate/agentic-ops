@@ -76,4 +76,4 @@ PR 前检出来源同步也由[任务授权指引](task-authorization.md)说明�
 
 任务进入实现后修订方案或增加允许的仓库，使用[同周期返工](task-authorization.md#同周期方案返工)，保留原成果并撤销旧授权；不通过退出工位重建任务。
 
-CI 集成测试的方案范围、PR 缺口处置与未触发运行表示统一由[质量检查与证据](quality-checkpoints.md#共同验证材料)维护；项目用例分析、编写及重验由其链接的 TapData Skill 和 Runbook 负责，不另设测试台账。
+TapData 代码变更优先按 Wiki 规范判断、编写和验证 CI 集成测试；Jira 关联用例检查保留，用例开发是否在当前会话完成由用户决定。TapTest 开发与执行指引仅在用户选择当前会话处理时读取，处理入口由 [TapData 任务技能](../../projects/tapdata/skills/tapdata-task/SKILL.md)维护。CI 集成测试的方案范围、PR 缺口处置与未触发运行表示统一由[质量检查与证据](quality-checkpoints.md#共同验证材料)维护；项目用例分析、编写及重验由其链接的 TapData Skill 和 Runbook 负责，不另设测试台账。

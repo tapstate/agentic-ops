@@ -1,6 +1,6 @@
 # TapData 开发指引
 
-按“定位源码 → 准备配置 → 构建 → 启动 → 验证加载与业务行为”推进；已有有效成果直接复用，只准备本任务需要的组件。Java 测试细节见[构建与测试](build-test-and-local-run.md)，业务自动化用例见 [TapTest 开发指引](taptest-development.md)。
+按“定位源码 → 准备配置 → 构建 → 启动 → 验证加载与业务行为”推进；已有有效成果直接复用，只准备本任务需要的组件。Java 测试细节见[构建与测试](build-test-and-local-run.md)，仅在用户选择当前会话处理 TapTest 时读取 [TapTest 开发指引](taptest-development.md)。
 
 ## 1. 定位源码与修改范围
 
@@ -61,4 +61,4 @@ cd <station>/runtime/app/flow-agent
 | 插件注册时报只读错误 | 检查注册是否原地处理 Jar；需要写入时使用本任务 runtime 部署副本，保留原始哈希和转换记录 |
 | Web 构建失败 | 按当前分支核对 Node、包管理器和脚本，不默认套用旧 OpenSSL workaround |
 
-交接给研发：源码与制品版本、实际命令、环境身份、已验证行为、日志引用和剩余问题。需要端到端用例时继续 [TapTest 执行](taptest-development.md#4-执行与分析结果)。退出时只处理已核实归属的资源；授权、归档与清理统一按[任务指引](../../../docs/usage/task-authorization.md#配置化清理入口)执行，不在此另设流程。
+交接给研发：源码与制品版本、实际命令、环境身份、已验证行为、日志引用和剩余问题。仅在用户选择当前会话执行 TapTest 时继续 [TapTest 执行](taptest-development.md#4-执行与分析结果)。退出时只处理已核实归属的资源；授权、归档与清理统一按[任务指引](../../../docs/usage/task-authorization.md#配置化清理入口)执行，不在此另设流程。
