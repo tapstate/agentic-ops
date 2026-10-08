@@ -93,3 +93,7 @@ CI 用例开发与质量核对继续由上述 TapData 构建指引承载：从�
 开发分支归位、受管基线回收及空闲刷新由[工位合同](architecture/single-task-station.md)定义，操作入口见[工位源码与材料](usage/station-materials.md)，退出仍使用既有清理与归档流程。
 
 目录长期归属与清理操作身份快照的职责、epoch 25 既有状态兼容、跨会话重新盘点及完成回执保护由[工位合同](architecture/single-task-station.md)维护；原版本异常恢复仅属于受控维护，不作为新版在线迁移能力。
+
+工位绑定的统一读取、格式校验与 epoch 复核由[工位合同](architecture/single-task-station.md)定义；Bootstrap 与项目工具复用 Workflow 的只读访问模块。升级指引只负责版本切换顺序，不维护逐工具 schema 支持列表。
+
+正式验收的持续执行、慢检查诊断和用户优化决策由[维护指引](maintenance-guide.md#5-验证)维护；检查耗时仅触发诊断提示，取消与失败处理仍由验收器负责。

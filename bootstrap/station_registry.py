@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from workflow import station_operation, task_store  # noqa: E402
-from workflow import project_rules  # noqa: E402
+from workflow import project_rules, station_context  # noqa: E402
 from bootstrap import shared_repositories  # noqa: E402
 from bootstrap.station_compatibility import require_station_can_adopt
 from bootstrap.station_paths import StationDirectory, station_artifact_path  # noqa: E402
@@ -117,8 +117,10 @@ def binding_status(product_root, station, tree=None):
         document = tree.read_json(relative, "工位绑定")
     except ValueError:
         return "unreadable", "工位绑定不可读取"
-    if document.get("schema_version") != 4:
-        return "invalid", "工位绑定版本不支持"
+    try:
+        station_context.validate_binding(document)
+    except ValueError as error:
+        return "invalid", str(error)
     if document.get("product_root") != str(product_root.resolve()):
         return "rebound", "已绑定到其它 Product Root"
     return "tracked", "绑定正常"

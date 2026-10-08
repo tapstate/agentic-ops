@@ -29,6 +29,7 @@ run_general_suite() {
   run_product tests/test_failures.py
   run_product tests/test_git_refs.py
   run_product tests/test_engineering_baseline.py
+  run_product tests/test_station_context.py
   run_product tests/test_station_state.py
   run_product tests/test_station_source.py
   run_product tests/test_station_source_update.py

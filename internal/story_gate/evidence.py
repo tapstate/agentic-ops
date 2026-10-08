@@ -15,10 +15,7 @@ from internal.story_gate.model import FULL_ACCEPTANCE_CHECKS
 from internal import test_selection
 
 EVIDENCE_SCHEMA_VERSION = 6
-CHECK_TIMEOUTS = {
-    "python_runtime": 600, "resource_contracts": 120,
-    "product_install_boundary": 600, "release_workflow": 300,
-}
+SLOW_CHECK_SECONDS = 600
 BEHAVIOR_FLAGS = ("AO_CONNECTOR_MAVEN_TEST", "AO_JAR_MAVEN_TEST")
 
 
@@ -84,12 +81,8 @@ def require_material(root, impact):
 
 def contract_digest():
     return digest({"contract": "candidate-selection/v6", "checks": FULL_ACCEPTANCE_CHECKS,
-                   "timeouts": CHECK_TIMEOUTS,
+                   "slow_check_seconds": SLOW_CHECK_SECONDS,
                    "selection_digest": hashlib.sha256(Path(test_selection.__file__).read_bytes()).hexdigest()})
-
-
-def check_timeout(check_id):
-    return CHECK_TIMEOUTS.get(check_id, CHECK_TIMEOUTS["python_runtime"])
 
 
 def environment(root):

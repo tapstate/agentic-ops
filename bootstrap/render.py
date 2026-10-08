@@ -23,10 +23,10 @@ from station_compatibility import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from workflow import project_rules, task_store
+from workflow import project_rules, task_store, station_context
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = station_context.schema_version()
 INIT_SCHEMA_VERSION = 2
 STATE_DIRECTORY = ".agenticops"
 INIT_NAME = "init.json"
@@ -130,8 +130,7 @@ def load_station(station, tree=None):
     else:
         return None, None
     if document is not None:
-        if document.get("schema_version") not in (1, SCHEMA_VERSION):
-            raise ValueError("工位不兼容，请使用原版本将这个旧工位受控解绑并重建")
+        station_context.validate_binding(document)
         return document, None
     return None, None
 
@@ -241,8 +240,8 @@ def expected_artifacts(install_root, station, project, agents, manifests):
 
 
 def require_current_station_document(document):
-    if document is not None and document.get("schema_version") != SCHEMA_VERSION:
-        raise ValueError("工位不兼容，请使用原版本将这个旧工位受控解绑并重建")
+    if document is not None:
+        station_context.validate_binding(document)
     return document
 
 
@@ -442,8 +441,7 @@ def validate_station_document(install_root, document):
     station_id = document.get("station_id")
     if not isinstance(station_id, str) or not re.fullmatch(r"[a-f0-9]{32}", station_id):
         raise ValueError("工位配置缺少 station_id")
-    if document.get("schema_version") != SCHEMA_VERSION or "repository_pool" in document:
-        raise ValueError("工位不兼容，请使用原版本将这个旧工位受控解绑并重建")
+    station_context.validate_binding(document)
     if not isinstance(source_pool, str) or not source_pool or not Path(source_pool).is_absolute():
         raise ValueError("工位配置 source_pool 无效")
     branch_identity(document)

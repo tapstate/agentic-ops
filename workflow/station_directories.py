@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import stat
 
+from workflow import station_context
 from workflow import engineering_baseline as baseline, project_rules, task_store as store
 
 
@@ -46,7 +47,7 @@ def load(base, task):
     if value.get("run_id") != task["run_id"]:
         raise ValueError("目录登记 run 不一致")
     from workflow import quality_contract
-    station_id = json.loads((store.state_path(base) / "station.json").read_text())["station_id"]
+    station_id = station_context.read_binding(base)["station_id"]
     for name, entry in value["roots"].items():
         quality_contract.validate(entry, "station-directory.schema.json")
         if entry["path"] != name or entry["run_id"] != task["run_id"] or entry["station_id"] != station_id:
@@ -121,7 +122,7 @@ def create(base, task, relative, producer, adopt=False):
     for other in roots:
         if other != relative and (other.startswith(relative + "/") or relative.startswith(other + "/")):
             raise ValueError("受管目录不能重叠")
-    entry = {"path": relative, "run_id": task["run_id"], "station_id": json.loads((store.state_path(base) / "station.json").read_text())["station_id"],
+    entry = {"path": relative, "run_id": task["run_id"], "station_id": station_context.read_binding(base)["station_id"],
         "kind": "runtime-exclusive" if runtime else ("station-generated" if station_generated else "source-generated"), "producer": producer,
              "recipe": {"id": rule["id"], "revision": rule["revision"]}, "parent": parent,
              "disposition": "clear_children_keep_root" if runtime else "delete_root", "identity": None}

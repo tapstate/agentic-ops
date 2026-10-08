@@ -9,6 +9,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 
+from workflow import station_context
 from workflow import archive_store, engineering_baseline as baseline, project_rules, station_archive as archives
 from workflow import station_operation as operations, station_source as source, task_store
 
@@ -125,7 +126,7 @@ def takeover(base, request, operation_id, expected_revision):
                 raise ValueError("接管前 runtime 必须为空")
             task["retained_repositories"] = source.check_station_layout(base, catalog, selected)
             task["initial_runtime"] = {"path": "runtime", "run_id": task["run_id"],
-                "station_id": json.loads((task_store.state_path(base) / "station.json").read_text())["station_id"],
+                "station_id": station_context.read_binding(base)["station_id"],
                 "kind": "runtime-exclusive", "producer": "workflow", "recipe": {"id": "workflow-runtime", "revision": 1},
                 "parent": station_directories.identity(runtime.parent), "identity": station_directories.identity(runtime),
                 "disposition": "clear_children_keep_root"}

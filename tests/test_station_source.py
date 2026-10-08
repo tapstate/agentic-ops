@@ -58,7 +58,7 @@ class SourceFixture:
         (self.ws / ".agenticops").mkdir(parents=True)
         task_store.initialize_current(self.ws)
         task_store._write_json_atomic(self.ws / ".agenticops/station.json", {
-            "schema_version": 4, "product_root": str(self.root / "product"), "source_pool": str(self.root / "pool"), "project": "tapdata", "station_id": "a" * 32,
+            "schema_version": 4, "product_root": str(self.root / "product"), "source_pool": str(self.root / "pool"), "project": "tapdata", "agents": ["codex"], "station_id": "a" * 32,
             "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"}})
         epoch = json.loads((self.root / "product/contracts/station-state-compatibility.json").read_text())["station_state_epoch"]
         task_store._write_json_atomic(self.ws / ".agenticops/init.json", {"station_state_epoch": epoch})

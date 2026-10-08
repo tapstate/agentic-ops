@@ -308,16 +308,20 @@ class VerificationTests(unittest.TestCase):
                 with self.assertRaises(StoryGateError): self.verify()
                 with self.assertRaises(StoryGateError): self.service.approve('range', 'x', 'x')
 
-    def test_timeout_reaps_child_and_invalidates_pass(self):
-        first, _ = self.verify()
-        marker = self.root / '.local/late-write'
-        child = 'import time; from pathlib import Path; time.sleep(.6); Path(%r).touch()' % str(marker)
-        command = [sys.executable, '-c', 'import subprocess,sys,time; subprocess.Popen([sys.executable,"-c",%r]); time.sleep(3)' % child]
-        with mock.patch.dict(evidence.CHECK_TIMEOUTS, {'python_runtime': .15}):
-            with self.assertRaises(StoryGateError): self.verify(command)
-        time.sleep(.65)
-        self.assertFalse(marker.exists())
-        self.assertEqual(self.record(first)[1]['acceptance_status'], 'failed')
+    def test_slow_check_reports_once_and_continues_to_success(self):
+        events = []
+        command = [sys.executable, '-c', 'import time; print("working", flush=True); time.sleep(.35)']
+        with mock.patch.object(evidence, 'SLOW_CHECK_SECONDS', .15):
+            result, _ = self.verify(command, event_sink=events.append)
+            self.assertEqual(self.record(result)[1]['acceptance_status'], 'passed')
+        slow = [event for event in events if event['event'] == 'check_slow']
+        self.assertEqual(len(slow), len(FULL_ACCEPTANCE_CHECKS))
+        self.assertEqual(len({event['check_id'] for event in slow}), len(slow))
+        for event in slow:
+            self.assertGreater(event['elapsed_seconds'], .15)
+            self.assertGreaterEqual(event['output_idle_seconds'], 0)
+            self.assertTrue((self.root / event['log_path']).is_file())
+            self.assertIn('用户', event['required_human_action'])
         self.assertFalse(self.service._verification_lock().exists())
 
     def test_keyboard_interrupt_invalidates_pass(self):

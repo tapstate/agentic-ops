@@ -91,16 +91,54 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             "_path": Path("/pool/%s" % repository.rsplit("/", 1)[-1]) if local_status == "available" else None,
         }
 
+    @staticmethod
+    def station_document(station):
+        return {"schema_version": 4, "product_root": str(ROOT), "source_pool": str(station / "pool"),
+                "station_id": "a" * 32, "project": "tapdata", "agents": ["codex"]}
+
     def test_station_binding_is_default_before_execution_directory(self):
         with tempfile.TemporaryDirectory() as temporary:
             station = Path(temporary) / "station"
             binding = station / ".agenticops" / "station.json"
             binding.parent.mkdir(parents=True)
-            binding.write_text(json.dumps({"schema_version": 3}), encoding="utf-8")
+            binding.write_text(json.dumps(self.station_document(station)), encoding="utf-8")
+            (binding.parent / "init.json").write_text((ROOT / "contracts/station-state-compatibility.json").read_text())
             root, source = align.resolve_tapdata_root(None, station / "nested")
 
         self.assertEqual((station / "source/tapdata").resolve(), root)
         self.assertIn("station.json", source)
+
+    def test_station_binding_rejects_incompatible_schema_without_changes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            station = Path(temporary) / "station"
+            binding = station / ".agenticops" / "station.json"
+            binding.parent.mkdir(parents=True)
+            for version in (None, 1, 2, 3, 5):
+                with self.subTest(schema_version=version):
+                    binding.write_text(json.dumps(dict(self.station_document(station), schema_version=version)), encoding="utf-8")
+                    before = binding.read_bytes()
+                    for resolve in (align.station_tapdata_root, align.git_refs_cache_file):
+                        with self.subTest(resolver=resolve.__name__):
+                            with self.assertRaisesRegex(align.AlignmentError, "工位绑定格式错误"):
+                                resolve(station / "source" / "tapdata" / "tapdata")
+                    self.assertEqual(before, binding.read_bytes())
+
+    def test_current_schema_with_old_epoch_is_rejected_by_both_readers(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            station = Path(temporary) / "station"
+            state = station / ".agenticops"
+            state.mkdir(parents=True)
+            binding = state / "station.json"
+            binding.write_text(json.dumps(self.station_document(station)))
+            epoch = json.loads((ROOT / "contracts/station-state-compatibility.json").read_text())["station_state_epoch"]
+            initialization = state / "init.json"
+            initialization.write_text(json.dumps({"station_state_epoch": epoch - 1}))
+            before = (binding.read_bytes(), initialization.read_bytes())
+            for resolve in (align.station_tapdata_root, align.git_refs_cache_file):
+                with self.subTest(resolver=resolve.__name__):
+                    with self.assertRaisesRegex(align.AlignmentError, "代际"):
+                        resolve(station)
+            self.assertEqual(before, (binding.read_bytes(), initialization.read_bytes()))
 
     def test_execution_directory_is_only_fallback_not_user_home(self):
         root, source = align.resolve_tapdata_root(None, "/work/current")
@@ -138,7 +176,8 @@ class TapDataBranchAlignmentTest(unittest.TestCase):
             station = Path(temporary) / "station"
             binding = station / ".agenticops" / "station.json"
             binding.parent.mkdir(parents=True)
-            binding.write_text(json.dumps({"schema_version": 3}), encoding="utf-8")
+            binding.write_text(json.dumps(self.station_document(station)), encoding="utf-8")
+            (binding.parent / "init.json").write_text((ROOT / "contracts/station-state-compatibility.json").read_text())
             cache, pool = align.git_refs_cache_file(station)
         self.assertEqual((station / ".agenticops" / "git-ref-cache-v2.json").resolve(), cache)
         self.assertEqual((station / "source").resolve(), pool)

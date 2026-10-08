@@ -28,7 +28,7 @@ class StationTests(unittest.TestCase):
         (self.ws / ".agenticops").mkdir(parents=True)
         for name in ("source", "config", "runtime", "archive"):
             (self.ws / name).mkdir()
-        self.write(self.ws / ".agenticops/station.json", {"schema_version": 4, "product_root": str(self.product), "source_pool": str(self.root / "pool"), "project": "tapdata", "station_id": "a" * 32, "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"}})
+        self.write(self.ws / ".agenticops/station.json", {"schema_version": 4, "product_root": str(self.product), "source_pool": str(self.root / "pool"), "project": "tapdata", "agents": ["codex"], "station_id": "a" * 32, "branch_identity": {"schema_version": 1, "git_name": "Test", "source": "git_global_user_name"}})
         epoch = json.loads((self.product / "contracts/station-state-compatibility.json").read_text())["station_state_epoch"]
         self.write(self.ws / ".agenticops/init.json", {"station_state_epoch": epoch})
         task_store.initialize_current(self.ws)

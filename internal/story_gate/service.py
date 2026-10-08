@@ -242,10 +242,23 @@ class StoryGateService:
                             process = subprocess.Popen(_check_command(self.root, check_id), cwd=self.root, stdout=output_file, stderr=subprocess.STDOUT, env=_check_environment(self.root), start_new_session=True)
                             try:
                                 last_progress = 0.0
+                                slow_reported = False
+                                last_output_size = output_file.tell()
+                                last_output_change = started
                                 while process.poll() is None:
                                     elapsed = time.monotonic() - started
-                                    if elapsed > verification.check_timeout(check_id):
-                                        raise subprocess.TimeoutExpired(process.args, verification.check_timeout(check_id))
+                                    output_size = output_path.stat().st_size
+                                    if output_size != last_output_size:
+                                        last_output_size = output_size
+                                        last_output_change = time.monotonic()
+                                    if not slow_reported and elapsed > verification.SLOW_CHECK_SECONDS:
+                                        emit({"event": "check_slow", "check_id": check_id,
+                                              "elapsed_seconds": round(elapsed, 3),
+                                              "output_idle_seconds": round(time.monotonic() - last_output_change, 3),
+                                              "log_path": str(output_path.relative_to(self.root)),
+                                              "log_start": start_offset,
+                                              "required_human_action": "检查继续执行；请分析日志与耗时，说明慢因的证据和待验证推测，再由用户决定是否优化或取消"})
+                                        slow_reported = True
                                     if elapsed - last_progress >= 10:
                                         emit({"event": "check_progress", "check_id": check_id, "elapsed_seconds": round(elapsed, 3)})
                                         last_progress = elapsed

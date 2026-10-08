@@ -74,6 +74,11 @@ def run_station_tool(product_root, *args, cwd):
     return proc.returncode, proc.stdout + proc.stderr
 
 
+def binding_document(product, project):
+    return {"schema_version": 4, "product_root": str(product), "project": project,
+            "station_id": "a" * 32, "source_pool": str(product / "pool"), "agents": ["codex"]}
+
+
 def check_project_boundaries(base):
     product = base / "project-boundary-product"
     project = product / "projects/demo"
@@ -95,8 +100,8 @@ def check_project_boundaries(base):
             else:
                 rejected = False
             check("%s 拒绝非法项目 %r" % (label, name), rejected, True)
-    binding.write_text(json.dumps({"project": "demo", "product_root": str(product)}))
-    check("合法旧工位保留项目读取", task_store.station_project(station), "demo")
+    binding.write_text(json.dumps(binding_document(product, "demo")))
+    check("合法现役工位保留项目读取", task_store.station_project(station), "demo")
     check("合法项目目录不变", project_rules.project_root(product, "demo"), project)
     (project / "admission.json").write_text(json.dumps({"project_marker": "demo"}))
     check("显式第二项目读取隔离", project_rules.load_admission(product, "demo"), {"project_marker": "demo"})
@@ -342,8 +347,8 @@ def check_station_binding_snapshot(base):
     bound = area / "station"
     binding = bound / ".agenticops/station.json"
     binding.parent.mkdir(parents=True)
-    initial = {"product_root": str(products[0]), "project": "alpha"}
-    later = {"product_root": str(products[1]), "project": "beta"}
+    initial = binding_document(products[0], "alpha")
+    later = binding_document(products[1], "beta")
     task = {"task_class": "defect_fix"}
     project = products[0] / "projects/alpha"
     # 赋予各配置可区分的内容，证明调用没有混用第二次绑定。
@@ -368,24 +373,32 @@ def check_station_binding_snapshot(base):
         ("清理规则", lambda: bool(station_clean_rules.load(bound)["layers"]), True),
         ("修复策略", lambda: repair_strategy.resolve(bound, task)["available"], True),
     )
-    original = project_rules.read_json_object
+    from workflow import station_context
+    original = station_context.read_object
     for label, read, expected in calls:
         binding.write_text(json.dumps(initial))
         observed = []
-        def changing_read(path):
-            value = original(path)
+        def changing_read(path, label):
+            value = original(path, label)
             if path == binding:
                 observed.append(value)
                 binding.write_text(json.dumps(later))
             return value
-        with mock.patch.object(project_rules, "read_json_object", side_effect=changing_read):
+        with mock.patch.object(station_context, "read_object", side_effect=changing_read):
             result = read()
         check("绑定快照结果 " + label, result, expected)
         check("绑定只读一次 " + label, len(observed), 1)
-    binding.write_text(json.dumps({"project": "alpha"}))
-    check("单字段项目旧 API 保持兼容", project_rules.project_from_station(bound), "alpha")
-    binding.write_text(json.dumps({"product_root": str(products[0])}))
-    check("单字段产品根旧 API 保持兼容", project_rules.product_root_from_station(bound), products[0])
+    for incomplete in ({"project": "alpha"}, {"product_root": str(products[0])}):
+        binding.write_text(json.dumps(incomplete))
+        for read in (project_rules.project_from_station, project_rules.product_root_from_station):
+            try:
+                read(bound)
+            except ValueError:
+                rejected = True
+            else:
+                rejected = False
+            check("工位绑定不接受字段残缺的对象", rejected, True)
+
 
 
 def check_operation_output():
