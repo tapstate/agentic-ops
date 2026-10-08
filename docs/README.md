@@ -36,7 +36,7 @@ PR 正文传输完整性属于质量证据主题：[扩展使用总纲](usage/RE
 
 质量输入格式预检和完成等待合并的使用边界由[扩展使用总纲](usage/README.md)导航至质量与任务授权指引；质量执行事件增加未执行原因的兼容边界由机器工位契约管理，工位 epoch 以机器契约为准，升级继续遵守原版退出并 purge。
 
-配置化工位清理由[任务授权指引](usage/task-authorization.md#配置化清理入口)说明两个独立名单、确认请求及 Agent 接力；[工位合同](architecture/single-task-station.md#成果导向清理计划版本-6)维护唯一现役版本 6 的保全、Git 复位、成果验收及旧协议退出边界，[机器契约](../contracts/station-reset.schema.json)约束持久计划。名单只负责工位根分类，源码按 Git 与确认快照处理，不保留旧计划执行器或构建工具清理配方。
+配置化工位清理由[任务授权指引](usage/task-authorization.md#配置化清理入口)说明两个独立名单、确认请求及 Agent 接力；[工位合同](architecture/single-task-station.md#成果导向清理计划版本-6)维护唯一现役版本 6 的保全、Git 复位、成果验收及旧协议退出边界，[机器契约](../contracts/station-reset.schema.json)约束持久计划。配置统一声明作用域、名称模式、对象类型和动作；结构身份由中央机器合同维护，源码继续 Git 保全，执行和恢复绑定冻结规则、扫描边界及具体对象完成回执。
 
 [维护指引](maintenance-guide.md#5-验证)负责诊断检查、提交候选按影响验收、发布隔离四项验收、耗时报告与证据 v6 使用及维护审查的有效验收摘要；[INT-001](user-stories/v1/int-001-release-governance.md)规定验收完整性、失败失效和首次信任根升级边界。运行进度与性能验收结果仍以 Jira 为准。
 
@@ -94,8 +94,10 @@ CI 用例开发与质量核对继续由上述 TapData 构建指引承载：从�
 
 开发分支归位、受管基线回收及空闲刷新由[工位合同](architecture/single-task-station.md)定义，操作入口见[工位源码与材料](usage/station-materials.md)，退出仍使用既有清理与归档流程。
 
-目录长期归属与清理操作身份快照的职责、epoch 25 既有状态兼容、跨会话重新盘点及完成回执保护由[工位合同](architecture/single-task-station.md)维护；原版本异常恢复仅属于受控维护，不作为新版在线迁移能力。
+目录长期归属与清理操作身份快照的职责、epoch 26 配置与扫描边界冻结、跨会话重新盘点及完成回执保护由[工位合同](architecture/single-task-station.md)维护；原版本异常恢复仅属于受控维护，不作为新版在线迁移能力。
 
 工位绑定的统一读取、格式校验与 epoch 复核由[工位合同](architecture/single-task-station.md)定义；Bootstrap 与项目工具复用 Workflow 的只读访问模块。升级指引只负责版本切换顺序，不维护逐工具 schema 支持列表。
 
 正式验收的持续执行、慢检查诊断和用户优化决策由[维护指引](maintenance-guide.md#5-验证)维护；检查耗时仅触发诊断提示，取消与失败处理仍由验收器负责。
+
+macOS `.DS_Store` 的清理边界由[工位合同](architecture/single-task-station.md#成果导向清理计划版本-6)维护：中央清理名单声明元数据名称，Workflow 在已授权清理内处理普通未跟踪文件；旧计划的成果保全决定继续有效，不遍历保留目录或 Git 内部目录。

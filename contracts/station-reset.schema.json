@@ -20,52 +20,34 @@
     "rules": {
       "type": "object",
       "required": [
+        "version",
+        "layers",
         "digests",
-        "objects"
+        "structure",
+        "objects",
+        "batches"
       ],
       "additionalProperties": false,
       "properties": {
+        "version": {
+          "const": 2
+        },
+        "layers": {
+          "type": "array",
+          "minItems": 2
+        },
         "digests": {
           "type": "array",
-          "items": {
-            "anyOf": [
-              {
-                "const": null
-              },
-              {
-                "type": "string",
-                "pattern": "^[0-9a-f]{64}$"
-              }
-            ]
-          }
+          "minItems": 2
+        },
+        "structure": {
+          "type": "object"
         },
         "objects": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "object",
-            "required": [
-              "action",
-              "layer"
-            ],
-            "additionalProperties": false,
-            "properties": {
-              "action": {
-                "enum": [
-                  "preserve",
-                  "source-reset",
-                  "clear-children",
-                  "lifecycle-clean",
-                  "remove"
-                ]
-              },
-              "layer": {
-                "enum": [
-                  "central",
-                  "project"
-                ]
-              }
-            }
-          }
+          "type": "object"
+        },
+        "batches": {
+          "type": "object"
         }
       }
     },

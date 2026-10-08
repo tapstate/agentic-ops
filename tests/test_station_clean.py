@@ -110,7 +110,7 @@ class StationCleanTests(unittest.TestCase):
     def test_creation_device_change_does_not_block_new_plan(self):
         from workflow import station_directories as directories
         task = self.ready()
-        self.assertEqual(25, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
+        self.assertEqual(26, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
         path = directories.registry_path(self.ws, task)
         original = json.loads(path.read_text())
         changed = json.loads(path.read_text())
@@ -127,7 +127,7 @@ class StationCleanTests(unittest.TestCase):
     def test_confirmed_identity_change_requires_amendment(self):
         from workflow import station_directories as directories
         task = self.ready()
-        self.assertEqual(25, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
+        self.assertEqual(26, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
         request = self.result_request(task)
         args = (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'], 'op-identity', request)
         station.execute(*args, cleanup_mode='prepare')
@@ -149,7 +149,7 @@ class StationCleanTests(unittest.TestCase):
     def test_amend_cannot_redelete_completed_runtime(self):
         from workflow import station_directories as directories
         task = self.ready()
-        self.assertEqual(25, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
+        self.assertEqual(26, json.loads((self.ws / ".agenticops/init.json").read_text())["station_state_epoch"])
         request = self.result_request(task)
         args = (self.ws, 'clean', task['issue_key'], task['run_id'], task['_revision'], 'op-completed-root', request)
         station.execute(*args, cleanup_mode='prepare')
@@ -442,7 +442,7 @@ class StationCleanTests(unittest.TestCase):
     def test_agent_can_clear_registered_root_without_script_delete_receipt(self):
         task = self.ready()
         (self.product / "projects/tapdata/station-clean.json").write_text(json.dumps({
-            "version": 1, "preserve": [], "clean": [{"pattern": "scratch", "action": "remove"}]}))
+            "version": 2, "rules": [{"scope": "station-root", "type": "directory", "pattern": "scratch", "action": "remove"}]}))
         resources.register(self.ws, task["issue_key"], task["run_id"], [{
             "kind": "directory", "producer": "fixture", "path": "scratch"}])
         request = self.result_request(task)
@@ -612,12 +612,12 @@ class StationCleanTests(unittest.TestCase):
 
     def project_rules(self, preserve=(), clean=()):
         self.write(self.product/'projects/tapdata/station-clean.json',
-                   dict(version=1, preserve=list(preserve), clean=list(clean)))
+                   dict(version=2, rules=[dict(scope="station-root", type="directory", pattern=p.rstrip("/"), action="preserve") for p in preserve] + [dict(scope="station-root", type="directory", pattern=r["pattern"].rstrip("/"), action=r["action"]) for r in clean]))
 
     def test_priority_and_unmatched(self):
         self.project_rules(['cache/'], [{'pattern':'source/', 'action':'remove'}, {'pattern':'scratch/', 'action':'remove'}])
         config = rules.load(self.ws)
-        for name, expected in [('config', 'preserve'), ('cache', 'preserve'), ('source', 'source-reset'), ('scratch', 'remove'), ('unknown', 'block')]:
+        for name, expected in [('config', 'preserve'), ('cache', 'preserve'), ('source', 'remove'), ('scratch', 'remove'), ('unknown', 'block')]:
             with self.subTest(name=name):
                 self.assertEqual(expected, rules.classify(config, name, True)['action'])
 
@@ -627,6 +627,35 @@ class StationCleanTests(unittest.TestCase):
         self.project_rules(['cache/', 'cache/'])
         with self.assertRaisesRegex(ValueError, '重复'):
             rules.load(self.ws)
+
+    def test_rule_scope_type_and_action_combinations_fail_closed(self):
+        invalid = [dict(scope='repository', pattern='cache', type='directory', action='remove'),
+                   dict(scope='repository', pattern='report', type='file', action='preserve'),
+                   dict(scope='source-layout', pattern='owner', type='directory', action='remove'),
+                   dict(scope='station-root', pattern='file', type='file', action='source-reset')]
+        for row in invalid:
+            with self.subTest(row=row), self.assertRaisesRegex(ValueError, '作用域|类型'):
+                rules.validate_layer({'version': 2, 'rules': [row]})
+        config = rules.load(self.ws)
+        self.assertEqual('block', rules.classify(config, '.DS_Store', True)['action'])
+        self.assertEqual('archive', rules.classify(config, 'ordinary.txt', scope='repository')['action'])
+        legacy = {'version': 1, 'preserve': [], 'clean': []}
+        with self.assertRaisesRegex(ValueError, '版本'):
+            rules.validate_layer(legacy)
+
+    def test_project_rule_priority_and_core_capability_are_separate(self):
+        self.project_rules(clean=[{'pattern': '.idea', 'action': 'remove'}])
+        self.assertEqual('remove', rules.classify(rules.load(self.ws), '.idea', True)['action'])
+        self.project_rules(clean=[{'pattern': 'source', 'action': 'remove'}])
+        with self.assertRaisesRegex(ValueError, '生命周期'):
+            rules.inspect(self.ws)
+        self.project_rules()
+        path = self.product/'policies/station-clean.json'
+        value = json.loads(path.read_text())
+        value['rules'] = [row for row in value['rules'] if row['pattern'] != 'runtime']
+        self.write(path, value)
+        with self.assertRaisesRegex(ValueError, '生命周期'):
+            rules.inspect(self.ws)
 
     def test_inventory_always_enforces_current_rules(self):
         self.rule_task()

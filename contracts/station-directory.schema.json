@@ -17,7 +17,7 @@
   "properties": {
     "path": {
       "type": "string",
-      "pattern": "^([^/]+|source/[^/]+/[^/]+/.+)$"
+      "pattern": "^([^/]+|[^/]+/[^/]+/[^/]+/.+)$"
     },
     "run_id": {
       "type": "string",

@@ -15,14 +15,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from workflow import engineering_baseline as baseline, station_operation as operations, project_rules
 from workflow import station_source as source, task_store as store
-from workflow import station_directories as directories, station_artifacts as artifacts
+from workflow import station_directories as directories, station_artifacts as artifacts, station_clean_rules, station_layout
 
 
 def resource_path(base, relative, leaf_link=False):
     if not isinstance(relative, str):
         raise ValueError("资源路径必须是相对路径")
     parts = relative.split("/")
-    if any(part in ("", ".", "..", ".git") for part in parts) or parts[0] not in ("runtime", "source"):
+    managed = {station_layout.station_name(base, role) for role in ("task-runtime", "repositories")}
+    if any(part in ("", ".", "..", ".git") for part in parts) or parts[0] not in managed:
         raise ValueError("资源只能位于 runtime 或 source，不能包括 Git 元数据")
     root = Path(base).resolve()
     path = root
@@ -143,23 +144,15 @@ def verify_station_inventory(base, rules=None, allow_pending=False):
     state = store.state_path(base)
     init = json.loads((state / "init.json").read_text())
     owned = {entry["path"]: entry for entry in init.get("artifacts", [])}
-    from workflow import station_clean_rules
     task = store.read_task(base)
     registered = directories.load(base, task) if task else {}
-    observed = station_clean_rules.inspect(base, owned, registered)
-    if rules is not None and observed["digests"] != rules["digests"]:
+    observed = station_clean_rules.inspect(base, owned, registered, config=rules)
+    if rules is not None and (station_clean_rules.load(base)["digests"] != rules["digests"]
+                              or station_layout.load(project_rules.product_root_from_station(base))["digest"] != rules["structure"]["digest"]):
         raise ValueError("清理配置已变化，需要重新确认")
     def inspect(directory, prefix=""):
         for path in directory.iterdir():
             relative = prefix + path.name
-            if not prefix and allow_pending and relative in registered and observed["objects"].get(relative, {}).get("action") == "remove":
-                continue
-            if not prefix and relative in observed["objects"] and observed["objects"][relative]["action"] == "preserve":
-                continue
-            if not prefix and path.name in ("config", "source", "runtime", "archive", ".agenticops"):
-                if path.is_symlink() or not path.is_dir():
-                    raise ValueError("工位持久目录异常：" + relative)
-                continue
             if relative in owned:
                 record = owned[relative]
                 if record.get("kind", "file") == "symlink":
@@ -171,6 +164,18 @@ def verify_station_inventory(base, rules=None, allow_pending=False):
                 continue
             if any(item.startswith(relative + "/") for item in owned) and path.is_dir() and not path.is_symlink():
                 inspect(path, relative + "/")
+            elif not prefix:
+                decision = observed["objects"].get(relative, {})
+                if decision.get("action") == "preserve":
+                    continue
+                if decision.get("action") in ("source-reset", "clear-children", "lifecycle-clean"):
+                    if path.is_symlink() or not path.is_dir():
+                        raise ValueError("工位持久目录异常：" + relative)
+                    continue
+                if allow_pending and (decision.get("action") == "discard" or
+                                      (decision.get("action") == "remove" and relative in registered)):
+                    continue
+                raise ValueError("工位存在未知材料，保留并停止解绑：" + relative)
             else:
                 raise ValueError("工位存在未知材料，保留并停止解绑：" + relative)
     inspect(root)
@@ -227,13 +232,14 @@ def plan(base, task, version=None, decisions_override=None):
     operation = operations.read(base) or {}
     roots = {name: entry for name, entry in directories.load(base, task).items()
              if entry["kind"] != "source-generated"}
-    if "runtime" not in roots:
+    runtime_root = station_layout.station_name(base, "task-runtime")
+    if runtime_root not in roots:
         original = operation.get("previous_operation", operation)
         if (original.get("kind") != "takeover" or original.get("run_id") != task["run_id"]
                 or original.get("steps") or not task.get("initial_runtime")):
             raise ValueError("runtime 缺少当前 run 的目录归属")
-        roots["runtime"] = task["initial_runtime"]
-        path = directories.path_at(base, roots["runtime"]["path"])
+        roots[runtime_root] = task["initial_runtime"]
+        path = directories.path_at(base, roots[runtime_root]["path"])
         if any(path.iterdir()):
             raise ValueError("尚未启动生产者的 runtime 出现未知材料")
     roots = {name: directories.snapshot(base, entry) for name, entry in roots.items()}
@@ -242,6 +248,7 @@ def plan(base, task, version=None, decisions_override=None):
     catalog = project_rules.load_repository_catalog(station=base)["repositories"]
     if source.check_station_layout(base, catalog, repositories, task.get("replan_preserved")) != task.get("retained_repositories", {}):
         raise ValueError("未选择的持久仓库状态变化")
+    rules = station_clean_rules.load(base)
     entries, states = [], {}
     decisions = {item["path"]: item["preservation"] for item in inventory(base, task) if item.get("kind") == "source-disposition"}
     if decisions_override:
@@ -257,7 +264,7 @@ def plan(base, task, version=None, decisions_override=None):
         target = task.get("reset_baseline", {}).get(name)
         if not target or source.git(repository, "cat-file", "-t", target["sha"]).stdout.strip() != "commit":
             raise ValueError("缺少已核验开发基线，拒绝猜测源码归位")
-        state = artifacts.snapshot(base, name, roots, decisions, target["sha"], include_ignored=True)
+        state = artifacts.snapshot(base, name, roots, decisions, target["sha"], include_ignored=True, rules=rules)
         for entry in state.pop("entries"):
             entries.append(entry)
         preserved_head = state["head"]
@@ -296,7 +303,7 @@ def plan(base, task, version=None, decisions_override=None):
                 external.append({k: v for k, v in item.items() if k not in ("status", "readback_ref")})
     logs = ["logs", "reports"]
     for relative in logs:
-        directories.path_at(base, "runtime/" + relative)
+        directories.path_at(base, station_layout.relative(base, "task-runtime", relative))
     value = {"schema_version": 6, "run_id": task["run_id"], "directories": list(roots.values()), "archive_runtime": logs,
              "entries": entries, "source": states, "external": external,
              "active_state": {"files": active_files(base), "unbind_run": task["run_id"], "task_digest": task_fingerprint(task)},
@@ -305,9 +312,9 @@ def plan(base, task, version=None, decisions_override=None):
     for entry in external:
         if entry["action"] == "delete" and station_cleanup_stages.local(entry):
             station_cleanup_stages.local_identity(base, task, {"cleanup_plan": value}, entry)
-    from workflow import station_clean_rules
     init = json.loads((store.state_path(base) / "init.json").read_text())
-    value["rules"] = station_clean_rules.inspect(base, [e["path"] for e in init.get("artifacts", [])], roots)
+    value["rules"] = station_clean_rules.freeze(base, task,
+        station_clean_rules.inspect(base, [e["path"] for e in init.get("artifacts", [])], roots, config=rules), catalog, states, protected={e["path"] for e in entries})
     for entry in value["directories"]:
         if entry["kind"] == "station-generated" and value["rules"]["objects"].get(entry["path"], {}).get("action", "remove") != "remove":
             raise ValueError("保留名单与登记目录回收冲突：" + entry["path"])
@@ -424,11 +431,131 @@ def clean(base, task, cleanup_plan, confirmed_digest, operation, source_only=Fal
         operations.receipt(base, operation, name, expected)
     if source_only:
         return
+    clean_rule_batches(base, task, operation)
     for entry in cleanup_plan["directories"]:
         if entry["kind"] == "source-generated":
             raise ValueError("版本 6 源码必须按文件快照处理，不能整目录回收")
         print("[station-reset] 回收目录 " + entry["path"], file=sys.stderr, flush=True)
         directories.reset(base, task, entry, operation)
+
+
+def batch_key(operation, batch):
+    plan = operation["cleanup_plan"]
+    return "cleanup-batch:%s:%s:%s" % (len(operation.get("plan_revisions", [])), plan["digest"], batch)
+
+
+def verify_completed_batches(base, task, operation):
+    """历史已完成范围也不能因计划修订重新开放默认丢弃。"""
+    plans = [r["plan"] for r in operation.get("plan_revisions", [])] + [operation["cleanup_plan"]]
+    for revision, plan in enumerate(plans):
+        for name, batch in plan["rules"]["batches"].items():
+            key = "cleanup-batch:%s:%s:%s" % (revision, plan["digest"], name)
+            if operation.get("steps", {}).get(key, {}).get("receipt") is None:
+                continue
+            if batch["scope"] == "repository" and batch["repository"] in plan["source"]:
+                from workflow import station_reset_result
+                station_reset_result.source_result(base, task, batch["repository"], plan["source"][batch["repository"]])
+            discard_batch(base, task, operation, name, verify_only=True, plan=plan, revision=revision)
+
+
+def discard_batch(base, task, operation, name, verify_only=False, complete=True, plan=None, revision=None):
+    """只消费冻结边界；目录 FD 核验后删普通文件，不跨批次扩扫。"""
+    from bootstrap.station_paths import StationDirectory
+    plan = plan or operation["cleanup_plan"]
+    rules = plan["rules"]
+    batch = rules["batches"][name]
+    revision = len(operation.get("plan_revisions", [])) if revision is None else revision
+    key = "cleanup-batch:%s:%s:%s" % (revision, plan["digest"], name)
+    step = operation.get("steps", {}).get(key)
+    done = step is not None and step.get("receipt") is not None
+    protected = {e["path"] for e in plan["entries"]}
+    repository_name = batch.get("repository")
+    repository = source.repository_path(base, repository_name) if repository_name else None
+    paths = []
+    final_repository = False
+    if repository and (verify_only or complete) and repository_name in plan["source"]:
+        from workflow import station_reset_result
+        station_reset_result.source_result(base, task, repository_name, plan["source"][repository_name])
+        final_repository = True
+    if repository:
+        source.identity(repository, batch["origin"])
+        if repository_name in task.get("replan_preserved", {}):
+            raise ValueError("冻结返工仓库不能进入默认丢弃")
+        prefix = repository.relative_to(Path(base).resolve()).as_posix()
+        reset_sha = plan["source"].get(repository_name, {}).get("neutral", {}).get("sha", "HEAD")
+        files = set()
+        for args in (("--others", "--exclude-standard"), ("--others", "--ignored", "--exclude-standard")):
+            files.update(filter(None, source.git(repository, "ls-files", *args, "-z").stdout.split("\0")))
+        for filename in files:
+            relative = prefix + "/" + filename
+            if relative not in protected and source.untracked_discard(repository, filename, rules, reset_sha):
+                parent = str(Path(relative).parent)
+                if parent not in batch["directories"]:
+                    raise ValueError("清理确认后新增源码目录，请补充确认：" + relative)
+                paths.append(relative)
+    expected = {"batch": name, "boundary_digest": baseline.digest(batch), "plan_digest": plan["digest"]}
+    if done and (step.get("expected") != expected or step.get("receipt") != expected):
+        raise ValueError("清理批次完成回执与当前计划不匹配")
+    if not verify_only and not done:
+        operations.intent(base, operation, key, {}, expected)
+    with StationDirectory(base) as tree:
+        for relative, expected_identity in batch["directories"].items():
+            if final_repository and relative != repository.relative_to(Path(base).resolve()).as_posix():
+                continue  # Git 归位可以把旧目录变成已核验的基线文件或链接，不再扫描。
+            if relative == ".":
+                observed = directories.identity(Path(base).resolve())
+                fd = tree._fds[()]
+            else:
+                info = tree.lstat(relative)
+                if info is None:
+                    if repository and relative != repository.relative_to(Path(base).resolve()).as_posix():
+                        continue  # 正常源码复位可以删除已确认的基线外子目录。
+                    raise ValueError("清理扫描边界缺失：" + relative)
+                if not stat.S_ISDIR(info.st_mode) or tree.path(relative).is_mount():
+                    raise ValueError("清理扫描边界类型异常：" + relative)
+                observed = {"device": info.st_dev, "inode": info.st_ino}
+                tree._parent(relative + "/.boundary-check")
+                fd = tree._fds[tuple(relative.split("/"))]
+            if observed != expected_identity:
+                raise ValueError("清理扫描边界身份变化：" + relative)
+            if not repository:
+                for leaf in os.listdir(fd):
+                    candidate = leaf if relative == "." else relative + "/" + leaf
+                    info = tree.lstat(candidate)
+                    if info is not None and stat.S_ISREG(info.st_mode) and candidate not in protected:
+                        if station_clean_rules.classify(rules, leaf, scope=batch["scope"])["action"] == "discard":
+                            paths.append(candidate)
+        if paths and (done or verify_only):
+            raise ValueError("已完成清理对象出现新增内容，保留并停止：" + paths[0])
+        for relative in sorted(set(paths)):
+            before = tree.lstat(relative)
+            if before is None:
+                continue
+            parent, leaf = tree._parent(relative)
+            opened = os.fstat(parent)
+            frozen = batch["directories"].get(str(Path(relative).parent))
+            if frozen is None and str(Path(relative).parent) == ".":
+                frozen = batch["directories"].get(".")
+            if frozen != {"device": opened.st_dev, "inode": opened.st_ino} or before.st_dev != opened.st_dev:
+                raise ValueError("清理文件跨越冻结边界：" + relative)
+            if not stat.S_ISREG(before.st_mode) or tree.path(relative).is_mount():
+                raise ValueError("清理文件类型变化：" + relative)
+            if repository and not source.untracked_discard(repository, relative[len(prefix)+1:], rules, reset_sha):
+                raise ValueError("清理文件跟踪状态或保全资格变化：" + relative)
+            tree.unlink(relative)
+            os.fsync(parent)
+    if not verify_only and not done and complete:
+        operations.receipt(base, operation, key, expected)
+
+
+def clean_rule_batches(base, task, operation):
+    """资源阶段仅清理未由源码阶段处理的冻结对象。"""
+    plan = operation["cleanup_plan"]
+    verify_completed_batches(base, task, operation)
+    for name, batch in plan["rules"]["batches"].items():
+        if batch.get("repository") in plan["source"]:
+            continue
+        discard_batch(base, task, operation, name)
 
 
 def _partial_repositories(base):
@@ -459,7 +586,7 @@ def neutral(base, task, operation, only_repository=None):
     plan = operation["cleanup_plan"]
     require_cleanup_version(plan.get("schema_version"))
     catalog = project_rules.load_repository_catalog(station=base)["repositories"]
-    if source.check_station_layout(base, catalog, plan["source"], task.get("replan_preserved")) != task.get("retained_repositories", {}):
+    if source.check_station_layout(base, catalog, plan["source"], task.get("replan_preserved"), rules=plan["rules"]) != task.get("retained_repositories", {}):
         raise ValueError("未选择的持久仓库状态变化")
     for name, entry in plan["source"].items():
         if only_repository is not None and name != only_repository:
@@ -577,10 +704,10 @@ def register(base, issue, run_id, entries, expected_operation_id=None):
             elif entry.get("kind") == "file":
                 target = resource_path(base, entry["path"])
                 fingerprint(target)
-                if entry["path"].startswith("source/"):
+                if entry["path"].startswith(station_layout.station_name(base, "repositories") + "/"):
                     engineering = task.get("engineering_baseline", {})
                     repositories = engineering.get("repositories", {}) if task.get("source_prepared") else _partial_repositories(base)
-                    names = [name for name in repositories if entry["path"].startswith("source/" + name + "/")]
+                    names = [name for name in repositories if entry["path"].startswith(station_layout.relative(base, "repositories", name + "/"))]
                     if len(names) != 1:
                         raise ValueError("源码产物不属于当前工程")
                     name = names[0]

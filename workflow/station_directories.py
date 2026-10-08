@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import stat
 
-from workflow import station_context
+from workflow import station_context, station_layout
 from workflow import engineering_baseline as baseline, project_rules, task_store as store
 
 
@@ -20,8 +20,10 @@ def identity(path):
 
 def path_at(base, relative):
     parts = relative.split("/") if isinstance(relative, str) else []
-    extra = len(parts) == 1 and parts[0] not in ("config", "archive", ".agenticops", ".agents", ".claude", ".git")
-    if not parts or (parts[0] not in ("runtime", "source") and not extra) or any(p in ("", ".", "..", ".git") for p in parts):
+    roles = station_layout.station_roots(base)
+    managed = {p for p, r in roles.items() if r["role"] in ("task-runtime", "repositories")}
+    extra = len(parts) == 1 and parts[0] not in roles
+    if not parts or (parts[0] not in managed and not extra) or any(p in ("", ".", "..", ".git") for p in parts):
         raise ValueError("受管目录路径越界")
     path = Path(base).resolve()
     for part in parts:
@@ -48,14 +50,17 @@ def load(base, task):
         raise ValueError("目录登记 run 不一致")
     from workflow import quality_contract
     station_id = station_context.read_binding(base)["station_id"]
+    structure = station_layout.station_roots(base)
+    source_root = station_layout.station_name(base, "repositories")
+    runtime_root = station_layout.station_name(base, "task-runtime")
     for name, entry in value["roots"].items():
         quality_contract.validate(entry, "station-directory.schema.json")
         if entry["path"] != name or entry["run_id"] != task["run_id"] or entry["station_id"] != station_id:
             raise ValueError("目录归属身份不一致")
-        if ((entry["kind"] == "source-generated" and not name.startswith("source/"))
-                or (entry["kind"] == "station-generated" and ("/" in name or name in ("source", "runtime", "config", "archive", ".agenticops")))):
+        if ((entry["kind"] == "source-generated" and not name.startswith(source_root + "/"))
+                or (entry["kind"] == "station-generated" and ("/" in name or name in structure))):
             raise ValueError("目录归属类型与路径不一致")
-        runtime = name == "runtime"
+        runtime = name == runtime_root
         if (entry["disposition"] == "clear_children_keep_root") != runtime or (entry["kind"] == "runtime-exclusive") != runtime:
             raise ValueError("目录类型与回收动作不一致")
     return value["roots"]
@@ -79,7 +84,7 @@ def recipe(base, task):
 def create(base, task, relative, producer, adopt=False):
     """调用者持工位锁；先持久意图，创建/空目录采用后登记身份，再启动生产者。"""
     path = path_at(base, relative)
-    runtime = relative == "runtime"
+    runtime = relative == station_layout.station_name(base, "task-runtime")
     station_generated = not runtime and "/" not in relative
     if station_generated:
         from workflow import station_clean_rules
@@ -95,12 +100,12 @@ def create(base, task, relative, producer, adopt=False):
     else:
         from workflow import station_source as source
         repositories = task.get("engineering_baseline", {}).get("repositories", {})
-        names = [name for name in repositories if relative.startswith("source/" + name + "/")]
+        names = [name for name in repositories if relative.startswith(station_layout.relative(base, "repositories", name + "/"))]
         if len(names) != 1:
             raise ValueError("生成目录不属于当前工程")
         name = names[0]
         rule = recipe(base, task)
-        local = relative[len("source/" + name + "/"):]
+        local = relative[len(station_layout.relative(base, "repositories", name + "/")):]
         if not any(Path(local).match(pattern) for pattern in rule.get("generated_directories", [])):
             raise ValueError("生成目录未由 Project 配方声明")
         repository = source.repository_path(base, name)
@@ -143,7 +148,7 @@ def runtime_child(base, task, name):
     if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
         raise ValueError("runtime 子目录名称无效")
     roots = load(base, task)
-    entry = roots.get("runtime")
+    entry = roots.get(station_layout.station_name(base, "task-runtime"))
     if entry is None:
         raise ValueError("当前 run 缺少受管 runtime 根目录")
     root = path_at(base, entry["path"])

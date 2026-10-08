@@ -65,6 +65,7 @@ class QualityTests(unittest.TestCase):
         product = self.base / "product"
         self.product = product
         shutil.copytree(ROOT / "projects" / "tapdata", product / "projects" / "tapdata")
+        shutil.copytree(ROOT / "contracts", product / "contracts")
         for name in ("quality.json", "quality-feature.json"):
             path = product / "projects/tapdata" / name
             rules = json.loads(path.read_text())

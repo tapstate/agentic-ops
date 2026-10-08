@@ -264,9 +264,11 @@ def detach_preflight(product_root, station, purge=False, tree=None):
             continue
         if path.name not in allowed or path.is_symlink() or not path.is_file():
             raise ValueError("工位状态包含未知文件或未清理活动证据，拒绝解绑：%s" % path)
-    if not tree.is_dir("runtime") or tree.is_symlink("runtime"):
+    from workflow import station_layout
+    runtime_root = station_layout.station_name(station, "task-runtime")
+    if not tree.is_dir(runtime_root) or tree.is_symlink(runtime_root):
         raise ValueError("runtime 目录缺失或不安全，拒绝解绑")
-    if any(tree.path("runtime").iterdir()):
+    if any(tree.path(runtime_root).iterdir()):
         raise ValueError("runtime 仍有材料，必须先经任务清理或明确处置，不能解绑")
     return deletable, 0
 

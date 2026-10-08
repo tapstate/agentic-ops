@@ -9,7 +9,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 
-from workflow import station_context
+from workflow import station_context, station_layout
 from workflow import archive_store, engineering_baseline as baseline, project_rules, station_archive as archives
 from workflow import station_operation as operations, station_source as source, task_store
 
@@ -121,11 +121,11 @@ def takeover(base, request, operation_id, expected_revision):
                     "stage": "waiting_takeover", "outcome": "in_progress", "facts": {"station_contract": 3}, "history": [],
                     "pending": None, "engineering_baseline": {"status": "resolving"},
                     "task_repositories": {}, "terminal_proof": None, "archive_ref": None}
-            runtime = station_directories.path_at(base, "runtime")
+            runtime = station_directories.path_at(base, station_layout.station_name(base, "task-runtime"))
             if any(runtime.iterdir()):
                 raise ValueError("接管前 runtime 必须为空")
             task["retained_repositories"] = source.check_station_layout(base, catalog, selected)
-            task["initial_runtime"] = {"path": "runtime", "run_id": task["run_id"],
+            task["initial_runtime"] = {"path": station_layout.station_name(base, "task-runtime"), "run_id": task["run_id"],
                 "station_id": station_context.read_binding(base)["station_id"],
                 "kind": "runtime-exclusive", "producer": "workflow", "recipe": {"id": "workflow-runtime", "revision": 1},
                 "parent": station_directories.identity(runtime.parent), "identity": station_directories.identity(runtime),
@@ -137,7 +137,7 @@ def takeover(base, request, operation_id, expected_revision):
             task["retained_repositories"] = source.check_station_layout(base, catalog, selected)
             task_store.write_task(base, task)
         from workflow import station_directories
-        station_directories.create(base, task, "runtime", "workflow", adopt=True)
+        station_directories.create(base, task, station_layout.station_name(base, "task-runtime"), "workflow", adopt=True)
         if task["engineering_baseline"]["status"] != "frozen":
             observations = source.prepare_repositories(base, catalog, selected, operation)
             specification = importlib.util.spec_from_file_location("station_project_resolver", project / "scripts/engineering_baseline.py")
@@ -455,6 +455,7 @@ def amend_cleanup(base, issue, run_id, revision, operation_id, expected_plan_dig
             raise ValueError("原清理计划修订编号已变化或缺失，拒绝旧确认")
         from workflow import station_directories
         station_directories.verify_completed_roots(base, task, operation)
+        _resources().verify_completed_batches(base, task, operation)
         plan = _resources().plan(base, task, version=current["schema_version"])
         confirmed = request.get("confirmed_digest")
         if not confirmed or confirmed != plan["digest"]:
@@ -471,7 +472,7 @@ def amend_cleanup(base, issue, run_id, revision, operation_id, expected_plan_dig
                 "record": operation.pop("archive_record"), "evidence": operation.pop("archive_evidence", None), "artifacts": operation.pop("archive_artifacts", None), "logs": operation.pop("archive_logs", None),
                 "publication_intent": copy.deepcopy(operation["steps"].get("archive-publish:" + str(generation)))})
         for name, step in operation["steps"].items():
-            if name.startswith(("resource:", "source-reset:", "station-source-reset:", "external:", "clear-active:", "archive-publish:", "cleanup-stage:")) and step["receipt"] is None and not step.get("superseded_by"):
+            if name.startswith(("resource:", "source-reset:", "station-source-reset:", "external:", "clear-active:", "archive-publish:", "cleanup-stage:", "cleanup-batch:")) and step["receipt"] is None and not step.get("superseded_by"):
                 step["superseded_by"] = confirmed
                 step["superseded_plan_digest"] = expected_plan_digest
                 step["superseded_plan_revision"] = generation

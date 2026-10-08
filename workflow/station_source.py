@@ -9,7 +9,7 @@ import sys
 import time
 import tempfile
 
-from workflow import engineering_baseline as baseline, git_refs, project_rules, station_operation as operations, source_pool
+from workflow import engineering_baseline as baseline, git_refs, project_rules, station_operation as operations, source_pool, station_layout
 from workflow.git_environment import git_environment
 
 GIT_LOCAL_TIMEOUT = 120
@@ -56,7 +56,7 @@ def git(path, *arguments, check=True):
 def repository_path(station, name):
     baseline.repository_id(name)
     root = Path(station).resolve()
-    path = root / "source" / name
+    path = root / station_layout.station_name(station, "repositories") / name
     current = root
     for part in path.relative_to(root).parts:
         current = current / part
@@ -104,19 +104,25 @@ def baseline_branch(entry):
     return baseline.ref_name("agenticops/baseline/%s-%s" % (reference, entry["commit_sha"][:12]))
 
 
-def check_station_layout(station, catalog, selected, preserved=None):
+def check_station_layout(station, catalog, selected, preserved=None, rules=None):
     """仅检查工位源码边界；未知目录不被当作可回收产物。"""
-    root = Path(station).resolve() / "source"
+    root = Path(station).resolve() / station_layout.station_name(station, "repositories")
     if root.is_symlink():
         raise ValueError("source 不能是符号链接")
     retained = {}
     if not root.exists():
         return retained
+    from workflow import station_clean_rules
+    rules = rules or station_clean_rules.load(station)
     owners = {name.split("/")[0] for name in catalog}
     for owner in root.iterdir():
+        if station_clean_rules.file_action(rules, owner, "source-layout") in ("preserve", "discard"):
+            continue
         if owner.is_symlink() or not owner.is_dir() or owner.name not in owners:
             raise ValueError("source 含未知顶层对象：" + owner.name)
         for repository in owner.iterdir():
+            if station_clean_rules.file_action(rules, repository, "source-layout") in ("preserve", "discard"):
+                continue
             name = owner.name + "/" + repository.name
             if name not in catalog:
                 raise ValueError("source 含未知仓库：" + name)
@@ -128,8 +134,10 @@ def check_station_layout(station, catalog, selected, preserved=None):
                     if recovery.get("origin") != catalog[name]["origin"] or git_revision(repository) != recovery.get("fingerprint"):
                         raise ValueError("保留的返工仓库已变化：" + name)
                 else:
-                    require_clean(repository)
-                if git(repository, "ls-files", "--others", "--ignored", "--exclude-standard").stdout:
+                    if not disposable_only(repository, rules):
+                        require_clean(repository)
+                ignored = filter(None, git(repository, "ls-files", "--others", "--ignored", "--exclude-standard", "-z").stdout.split("\0"))
+                if not recovery and any(not untracked_discard(repository, filename, rules) for filename in ignored):
                     raise ValueError("未选择的持久仓库含未知生成物：" + name)
                 retained[name] = {"head": git(repository, "rev-parse", "HEAD").stdout.strip(),
                                   "branch": git(repository, "branch", "--show-current").stdout.strip()}
@@ -338,3 +346,26 @@ def require_readiness(station, task):
         if record.get("accepted_digest") != snapshot["digest"] or not record.get("decision_ref"):
             raise ValueError("目标分支已推进；请确认沿冻结基线开发并在 PR 前同步，或归档清理后重新接管")
     return snapshot["digest"]
+
+
+def untracked_discard(repository, filename, rules, reset_sha="HEAD"):
+    from workflow import station_clean_rules
+    parts = filename.split("/")
+    if any(p in ("", ".", "..", ".git") for p in parts):
+        return False
+    path = repository / filename
+    if station_clean_rules.file_action(rules, path, "repository") != "discard":
+        return False
+    for parent in path.parents:
+        if parent == repository:
+            break
+        if parent.is_symlink() or parent.is_mount():
+            return False
+    return (not git(repository, "--literal-pathspecs", "ls-files", "-z", "--", filename).stdout
+            and not git(repository, "--literal-pathspecs", "ls-tree", "-z", "HEAD", "--", filename).stdout
+            and not git(repository, "--literal-pathspecs", "ls-tree", "-z", reset_sha, "--", filename).stdout)
+
+
+def disposable_only(repository, rules):
+    rows = git(repository, "status", "--porcelain", "--untracked-files=all", "-z").stdout.split("\0")
+    return all(row.startswith("?? ") and untracked_discard(repository, row[3:], rules) for row in rows if row)

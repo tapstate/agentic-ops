@@ -1,9 +1,59 @@
 {
-  "version": 1,
-  "preserve": ["config/", "archive/", ".idea/"],
-  "clean": [
-    {"pattern": "source/", "action": "source-reset"},
-    {"pattern": "runtime/", "action": "clear-children"},
-    {"pattern": ".agenticops/", "action": "lifecycle-clean"}
+  "version": 2,
+  "rules": [
+    {
+      "scope": "station-root",
+      "pattern": "source",
+      "type": "directory",
+      "action": "source-reset"
+    },
+    {
+      "scope": "station-root",
+      "pattern": "runtime",
+      "type": "directory",
+      "action": "clear-children"
+    },
+    {
+      "scope": "station-root",
+      "pattern": ".agenticops",
+      "type": "directory",
+      "action": "lifecycle-clean"
+    },
+    {
+      "scope": "station-root",
+      "pattern": "config",
+      "type": "directory",
+      "action": "preserve"
+    },
+    {
+      "scope": "station-root",
+      "pattern": "archive",
+      "type": "directory",
+      "action": "preserve"
+    },
+    {
+      "scope": "station-root",
+      "pattern": ".idea",
+      "type": "directory",
+      "action": "preserve"
+    },
+    {
+      "scope": "station-root",
+      "pattern": ".DS_Store",
+      "type": "file",
+      "action": "discard"
+    },
+    {
+      "scope": "source-layout",
+      "pattern": ".DS_Store",
+      "type": "file",
+      "action": "discard"
+    },
+    {
+      "scope": "repository",
+      "pattern": ".DS_Store",
+      "type": "file",
+      "action": "discard"
+    }
   ]
 }

@@ -134,9 +134,7 @@ Agent 原生读取这三组差异，核对原任务目的是否仍满足、来�
 
 `python3 <agenticops-root>/workflow/station-clean.py --dir <station>` 只读展示当前任务与版本 6 清理计划；未完成任务返回放弃变更问题，不在脚本内部猜测确认或阻塞等待终端输入。预检阻塞仍返回任务与问题，但不提供可执行计划。新清理尚未开始时 `--abandon-changes no` 无副作用退出；已有未完成清理操作时返回恢复提示，不声称撤销此前动作。工位空闲且没有未完成操作时不删除材料。
 
-中央 `policies/station-clean.json` 必须存在，项目 `projects/<project>/station-clean.json` 可省略。两份配置均为 `{"version":1,"preserve":[".idea/"],"clean":[{"pattern":"scratch/","action":"remove"}]}` 的结构，独立读取，按中央白、项目白、中央黑、项目黑顺序判定；全部未匹配时保留并报告，不配置 `other` 或 `unmatched_policy`。模式仅匹配工位根名称，支持 `*`、`?` 和目录后缀 `/`，不支持前导 `/`、深层路径、`**`、否定或方括号语法。源代码子树由 Git 阶段检查，不由名单递归匹配。
-
-黑名单动作限定为 `source-reset`、`clear-children`、`lifecycle-clean` 和 `remove`；前三项分别只适用于 source、runtime、.agenticops。中央默认保留 config、archive、.idea，项目不能通过白名单跳过核心生命周期。初始化接线仍按原 manifest 核验。`remove` 只用于任务独占的普通根目录，生产前使用现有 `station_resources.py` 登记 `kind=directory`、根名称和 producer；Workflow 创建并登记身份。名单不能认领已有非空目录、初始化接线或任意文件，已有空目录采用仍须 `adopt_empty=true`。需要删除其它对象时停止并明确处置，不把规则匹配当成删除授权。
+配置版本 2 的作用域、对象类型、动作、项目优先级和冻结恢复边界统一见[工位合同](../architecture/single-task-station.md#配置化清理规则与结构合同)。中央 `policies/station-clean.json` 必须存在，项目 `projects/<project>/station-clean.json` 可省略。例如项目附属目录规则为 `{"version":2,"rules":[{"scope":"station-root","pattern":"scratch","type":"directory","action":"remove"}]}`；生产前仍通过现有 `station_resources.py` 登记任务归属和 producer，不能靠名单认领已有非空目录或初始化接线。只读清单展示规则匹配路径与不归档丢弃范围，不自行执行删除。
 
 确认请求放在工位外，包含现有 summary、reason、decision_ref、confirmed_digest，另加 `cleanup_version:6`。未完成任务请求增加 `abandon_changes:true`，并使用下列命令明确传递用户的放弃决定；完成任务不需要放弃参数，但仍须现役 terminal proof 和 candidate_digest。归档保留成果，放弃不删除 Git 分支或提交。
 
@@ -154,7 +152,7 @@ python3 <agenticops-root>/workflow/station-clean.py --dir <station> --issue-key 
 
 中断后沿用原 operation-id、原 expected-revision 和原请求恢复；不得改用当前 revision 或另建操作。所有清理入口仅支持版本 6，旧版本 3–5 的请求、在途计划和接管交接计划均拒绝，不在线转成新计划。旧工位必须由原版本完成退出与 purge 后再切换；历史档案保留，但不恢复为活动清理操作。
 
-工位根目录的 `.idea/` 属于 IntelliJ IDEA 配置，由中央白名单统一保留，不遍历、归档或删除其内容。目录模式不匹配同名文件，符号链接按通用安全规则拒绝。白名单可以覆盖同层宽泛黑名单；不同清理动作同时命中同层对象才是冲突。工位代际及目标产品支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准，清理计划版本不代表工位 epoch；不兼容工位须由匹配的原产品版本处理，升级顺序见[更新与回退](update-and-rollback.md)。
+工位根目录的 `.idea/` 默认由中央规则保留，不遍历、归档或删除其内容；项目规则优先于中央规则。同层规则的保留动作优先，不同破坏性动作同时命中时拒绝。规则用显式类型区分目录与同名文件，符号链接按通用安全规则拒绝；完整语义见[配置化清理规则与结构合同](../architecture/single-task-station.md#配置化清理规则与结构合同)。工位代际及目标产品支持范围以[机器兼容清单](../../contracts/station-state-compatibility.json)为准，清理计划版本不代表工位 epoch；不兼容工位须由匹配的原产品版本处理，升级顺序见[更新与回退](update-and-rollback.md)。
 
 未初始化子模块只在索引、当前提交与归位提交的 gitlink 路径和对象完全一致，且路径不存在或为空目录时保留。清理前和归位时均核验，不递归检出子模块；含内容、符号链接、gitlink 变更或冲突时仍停止。此边界不改变工位状态格式或 epoch，也不授权删除子模块内容。
 

@@ -344,6 +344,8 @@ def check_station_binding_snapshot(base):
         for name in ("alpha", "beta"):
             shutil.copytree(ROOT / "projects/tapdata", root / "projects" / name)
         shutil.copytree(ROOT / "policies", root / "policies")
+        (root / "contracts").mkdir()
+        shutil.copy2(ROOT / "contracts/station-layout.json", root / "contracts/station-layout.json")
     bound = area / "station"
     binding = bound / ".agenticops/station.json"
     binding.parent.mkdir(parents=True)

@@ -23,7 +23,7 @@ from station_compatibility import (
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from workflow import project_rules, task_store, station_context
+from workflow import project_rules, task_store, station_context, station_layout
 
 
 SCHEMA_VERSION = station_context.schema_version()
@@ -458,10 +458,14 @@ def check_station(install_root, station, config, init, tree):
     from workflow import station_operation, task_store
     task_store.read_current(station)
     station_operation.read(station)
-    for name in ("config", "source", "runtime"):
+    for row in station_layout.load(install_root)["roots"]:
+        if not row["create"]:
+            continue
+        name = row["path"]
         if not tree.is_dir(name) or tree.is_symlink(name):
             raise ValueError("工位目录缺失或不安全，请检查后执行 repair：%s" % name)
-    if tree.exists("archive") and (not tree.is_dir("archive") or tree.is_symlink("archive")):
+    retained_root = station_layout.name("retained-material", install_root)
+    if tree.exists(retained_root) and (not tree.is_dir(retained_root) or tree.is_symlink(retained_root)):
         raise ValueError("旧工位归档目录不安全：archive")
     artifacts, _ = expected_artifacts(install_root, station, project, agents, manifests)
     if init.get("product_ref") != product_ref(install_root):
@@ -592,12 +596,15 @@ def main():
                 )
                 return 0
 
-            for name in ("config", "source", "runtime", "archive"):
+            for row in station_layout.load(install_root)["roots"]:
+                if row["role"] == "station-state":
+                    continue
+                name = row["path"]
                 if tree.exists(name):
                     if not tree.is_dir(name) or tree.is_symlink(name):
                         raise ValueError("工位目录已有未知内容或不安全路径，拒绝覆盖：%s" % name)
                     if config is None and any(tree.path(name).iterdir()):
-                        if name == "runtime" or not arguments.reuse_materials:
+                        if row["role"] == "task-runtime" or not arguments.reuse_materials:
                             raise ValueError("已有材料不能自动采用；runtime 必须为空，其它目录需明确 --reuse-materials：%s" % name)
             if config is None:
                 if tree.exists(STATE_DIRECTORY):
@@ -656,8 +663,9 @@ def main():
                     tree.chmod(target, 0o700)
             tree.write_json_atomic(Path(STATE_DIRECTORY) / STATION_NAME, station_config)
             tree.write_json_atomic(Path(STATE_DIRECTORY) / INIT_NAME, document)
-            for name in ("config", "source", "runtime"):
-                tree.path(name).mkdir(mode=0o700, exist_ok=True)
+            for row in station_layout.load(install_root)["roots"]:
+                if row["create"]:
+                    tree.path(row["path"]).mkdir(mode=0o700, exist_ok=True)
             task_store.initialize_current(station)
     except ValueError as error:
         parser.error(str(error))

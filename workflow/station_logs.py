@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import stat
 
-from workflow import project_rules, station_directories, task_store
+from workflow import project_rules, station_directories, task_store, station_layout
 
 MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_TOTAL_BYTES = 64 * 1024 * 1024
@@ -55,7 +55,7 @@ def material(base, task, plan):
     result = {"schema_version": 1, "run_id": task["run_id"], "files": {}}
     size = 0
     for relative in plan["archive_runtime"]:
-        directory = station_directories.path_at(base, "runtime/" + relative)
+        directory = station_directories.path_at(base, station_layout.relative(base, "task-runtime", relative))
         if not directory.exists():
             continue
         for name, data in _read_tree(directory, root):
