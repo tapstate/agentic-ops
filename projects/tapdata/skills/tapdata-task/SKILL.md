@@ -49,7 +49,7 @@ metadata:
 
 - 用 `task.py checklist` 获取机读准入要求，不得凭聊天猜测。
 - `defect_fix` 在 Q1 从 `task.py checklist --json` 或 `task.py next` 读取通用 `repair_strategy`。默认只向用户显示一行当前策略，不增加确认；Q2 按 `planning_guidance` 生成方案并披露应用结果。用户要求调整时，在 Q2 确认前使用 `task.py repair-strategy set/clear` 并绑定当前 run；策略不可用、未应用或偏离只报告 warning，不能阻塞主流程或替代根因、范围、验证和授权检查。策略正文只来自中央 Policy，不复制到本 Skill。
-- 缺陷保留 Jira 初始版本；本地经用户确认的正确版本驱动当前 run。影响版本不映射分支，先核验 develop 的同一缺陷；否则独立确认真实实施分支。其它版本的后续合并与验证记录为待办。
+- 缺陷保留 Jira 初始版本；本地经用户确认的正确版本驱动当前 run，影响版本不映射分支。所有 release 修复必须按[分支修复与测试维护](../../runbooks/build-test-and-local-run.md#分支修复与测试维护)先核查 develop，再选择 develop 修复验证后交用户回补，或参考 develop 正确实现直接修复 release；未知结论先补依据。方案明确各仓基线、实施与验证顺序、业务/集成测试提交拆分和用户回补交接；跨分支不得静默改当前 run 基线或复用其它分支授权，复用现有任务、归档与接管机制分别保留各分支成果和待办。
 - 缺陷在输出根因、修改范围或修复方案前，必须用已确定的 `primary_branch` 调用 TapData 分支对齐：`python3 <agenticops-root>/projects/tapdata/scripts/align_branches.py show --tapdata-root <tapdata-root> --version <primary_branch> --repository <候选任务仓库> --cache-file <station>/.agenticops/git-ref-cache-v2.json --json`。`--tapdata-root` 是包含各模块仓库的产品目录，必须含主仓但不要求其它仓库齐全。读取顶层 `outcome`、`scope`、`blockers`、`checked_at` 和全部 `rows` 的 `repository`、`local`、`target_branch`、`target_sha`、`target_status`、`reason`、`refs`；模块使用项目 `version-branch-alignments.json` 与脚本核验返回的分支，不把主仓 release 名字机械套给模块，也不在 Skill 固定分支值。`not_covered`、`absence_unverified` 或 `unresolved` 不可作为目标仓库基线；版本与分支冲突不能以接受风险放行。
 - 分支对齐只证明“该仓库在本次产品修复线应使用哪个分支”，不能单独证明缺陷属于该仓库。结合 Jira 组件/标签、问题现象、堆栈或文件路径、复现结果和目标分支源码，按以下结论展示仓库与分支后才给出方案：有可回查证据唯一指向一个仓库时，输出“建议分析/修复仓库”表，列出仓库、目标分支、SHA、分支推导理由、refs 新鲜度、核验时间和锁定证据；证据指向多个仓库时，输出“问题候选”表，逐项列出上述字段和候选理由；只有版本关系或无法唯一归属时，输出完整对齐列表并请用户确认优先分析的仓库。
 - 在登记目标仓库并完成必要源码分析后、签发任何 `task_execution` 授权前，必须以**一轮方案确认**完整展示并请求明确确认：① 实施方案——缺陷使用根因及证据、修改范围、修复方式、风险和回滚；功能使用目标、实现变化、范围、风险和回滚；② 验收方案——每个检查项的用例或场景、复用/新增、执行方式、预期结果、目标仓库及验证责任人；③ 后续动作及授权范围——确认可执行的编码、测试、提交、推送、PR 和 Jira 回写动作，用户限制优先。验证失败或事实变化时停止相应步骤；Jira 同步失败只记录警告。用户确认前不得记录为已确认方案、签发实施授权或开始实现；用户调整方案时展示完整有效方案及变化，复用已明确覆盖该变化的真实决定，只补问未决内容或超出原授权的范围；实际方案绑定变化后仍按现役入口撤销、重新绑定授权。确认后以同一确认来源固化 Q1/Q2、对应方案事实及 `workflow/authorization.py grant`；不得再为 Q3 的成功事实重复索取“接受首轮验证”。
@@ -85,6 +85,7 @@ Tests Passed 前核对 Story Test Design Review Result（`customfield_10413`）�
 - 接管、阶段推进和质量操作返回 `sync_actions` 时，先核对已有授权，在当前轮次的安全边界主动处理；恢复使用 task next 或 external_sync status 查全部历史待办，不等待研发提醒。接管摘要不冒充 Q1，检查点使用完整有效正文，未知操作复用原记录回读，不重发。已知未发送说明原因并交接；只读待办不代表发送保证。
 - completed 后只可按[有限回执恢复](../../../../docs/usage/quality-checkpoints.md#同步待办与有限回执恢复)补录已有操作；不得新建草稿或发送。退出前先核清未知结果，再生成确认范围；清理确认或归档草稿已绑定时交维护侧，不改账本或摘要绕过。待办展示失败与本地操作失败分开，先回读原操作，避免重复推进。
 
+- 提交与 PR 准备遵循[分支修复与测试维护](../../runbooks/build-test-and-local-run.md#测试与提交边界)：业务与集成测试强制分开提交，核验合入方式保留回补边界；用户回补后回读实际 release 成果并完成独立功能验证，再创建或更新 PR。不代办跨分支合入，不以 develop 报告替换 release 证据。
 - 每个仓库分别验证并记录提交、PR 和 CI，任务级证据统一汇总。按[共同验证材料](../../../../docs/usage/quality-checkpoints.md#共同验证材料)用现有 quality.py verification 动作记录本地测试、来源同步、CI 报告与审查材料；缺失或版本失效时先补齐，不直接改阶段。失败使用 failures.py 原 problem_id 记录 start/finish，替代旧 PR 独立预算入口。
 - 功能与缺陷 Q2 方案确认时都要明确 Wiki 依据的 CI 集成测试级别、判定理由、范围、用例复用/新增/修改和验证安排，按[共同验证材料](../../../../docs/usage/quality-checkpoints.md#共同验证材料)记录 integration_tests，与现有方案一次确认。不能只列命令或让研发先交用例清单。
 - 功能与缺陷在方案分析时使用 [tapdata-ci-test](../tapdata-ci-test/SKILL.md) 判断集成测试复用、新增或修改及框架可用性；实现后调用其编写、执行、报告分析和修复能力，PR CI 返回后再次调用报告分析。具体测试步骤由该技能及其 Runbook 维护；主流程负责授权、质量记录、阶段、提交推送和 CI 等待，不复制测试步骤。

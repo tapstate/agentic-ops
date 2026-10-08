@@ -6,6 +6,8 @@ TapData 正在进行的任务由研发选择恢复已有 run 或建立新 run；
 
 TapData 代码变更以 CI 集成测试为主要验证路径，Jira 关联 Test 检查继续保留，用例是否在当前会话开发由用户决定。CI 集成测试优化复用现有质量链：[质量检查与证据](usage/quality-checkpoints.md)维护方案与报告的字段、缺口确认及兼容边界；[TapData 集成测试](../projects/tapdata/skills/tapdata-ci-test/SKILL.md)和[构建测试指引](../projects/tapdata/runbooks/build-test-and-local-run.md)负责应用 Wiki 分级、用例开发执行和报告分析。测试级别定义仅从中央 Wiki 获取，本文不维护副本；真实业务验收与产品回归分别记录。
 
+TapData 分支修复与测试维护由[构建测试指引](../projects/tapdata/runbooks/build-test-and-local-run.md#分支修复与测试维护)集中定义：release 修复先核查 develop，业务与集成测试分开提交，用户回补后在 release 独立验证。任务技能负责授权与交接，集成测试技能负责 develop 用例及报告；共同质量合同继续处理具体未覆盖范围，不新增状态或通用门禁。
+
 任务清理采用六阶段自动执行与成果验收；完整盘点、异常接管、分支处置及当前 epoch 恢复边界由[工位合同](architecture/single-task-station.md#阶段式清理)统一定义，操作入口复用任务授权指引，PROD-003 覆盖阶段失败和接力验收。
 
 共享需求设计以 [ao-requirement](../skills/shared/ao-requirement/SKILL.md) 为入口，帮助研发理解项目现状、需求取舍及验收并形成可实施方案；维护面与业务工位共用方法，项目规则提供上下文。该技能负责设计变更同步、冲突核查与交接：每项设计内容只有一个现役权威来源，其它指引引用该来源，设计改变时同步修订。[Skill 维护规范](skill-maintenance.md)维护共享资产归属、安装、发现与清理合同，[工程架构](architecture/agenticops-v1-architecture.md)维护职责边界，[更新与回退](usage/update-and-rollback.md)维护旧安装资源补齐及恢复操作。具体需求、评审和验收记录在 Jira，不另建执行计划；历史决策记录仅辅助问题定位，不承载现役设计或作为功能开发、修复及验收依据。
