@@ -97,6 +97,24 @@ class EnvironmentTests(unittest.TestCase):
         service = mod.read_json(self.env.root / "compose.json")["services"]["node1"]
         self.assertEqual(service["healthcheck"]["start_period"], "900s")
 
+    def test_node_settings_mountpoint_exists_before_compose_start(self):
+        original_start = self.env.start
+
+        def start(state):
+            for node in state["nodes"]:
+                target = self.env.root / "nodes" / node["name"] / "settings.json"
+                source = self.env.root / "builds" / state["build"] / (node["name"] + "-settings.json")
+                self.assertTrue(target.is_file())
+                self.assertEqual(target.read_bytes(), source.read_bytes())
+                self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+            return original_start(state)
+
+        with mock.patch.object(self.env, "start", side_effect=start):
+            self.env.deploy("dev")
+            self.config["java"]["tm"] = "-Xmx2G"
+            self.save("dev")
+            self.env.deploy(update=True)
+
     def test_compose_up_allows_dependency_startup_grace(self):
         self.env.deploy("dev")
         state = self.env.state()
@@ -522,6 +540,32 @@ class EnvironmentTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("node"), "Node 未安装，容器健康脚本行为待核验")
 class NodeHealthTests(unittest.TestCase):
+    def test_configuration_emits_private_yaml_with_escaped_scalars(self):
+        script = ROOT / "projects/tapdata/scripts/test-environment-node.js"
+        harness = r'''
+const fs = require('fs'), vm = require('vm');
+const writes=[];
+const settings={backend_url:'http://node1:3030/api/',engine_opts:'-Xmx2G',tm_opts:'-Xmx1G',uuid:'node-identity'};
+const mockFs={mkdirSync:()=>{},readFileSync:p=>p==='/secret/mongo-uri' ? 'mongodb://user:p"ass@mongo/test' : JSON.stringify(settings),writeFileSync:(p,data,options)=>writes.push({p,data,mode:options.mode})};
+const localProcess={argv:['','','configure'],exitCode:0};
+const mocks={fs:mockFs,path:require('path'),child_process:{},net:{}};
+vm.runInNewContext(fs.readFileSync(process.argv[1],'utf8'),{require:n=>mocks[n],process:localProcess});
+setImmediate(()=>console.log(JSON.stringify({writes,exitCode:localProcess.exitCode})));
+'''
+        result = subprocess.run(["node", "-e", harness, str(script)], capture_output=True, text=True, check=True)
+        output = json.loads(result.stdout)
+        self.assertEqual(output["exitCode"], 0)
+        self.assertEqual({w["p"] for w in output["writes"]}, {"/tapdata/apps/application.yml", "/tapdata/apps/etc/application.yml", "/tapdata/work/application.yml", "/tapdata/work/etc/application.yml", "/tapdata/work/uuid.js"})
+        for write in output["writes"]:
+            self.assertEqual(write["mode"], 0o600)
+            if write["p"].endswith("uuid.js"):
+                self.assertEqual(write["data"], 'module.exports = "node-identity";\n')
+                continue
+            self.assertTrue(write["data"].startswith("spring:\n  data:\n    mongodb:\n"))
+            self.assertIn('      mongoConnectionString: "mongodb://user:p\\"ass@mongo/test"\n', write["data"])
+            self.assertIn('    tapdataPort: "3030"\n', write["data"])
+            self.assertIn('    uuid: "node-identity"\n', write["data"])
+
     def health(self, roles, process_rows):
         script = ROOT / "projects/tapdata/scripts/test-environment-node.js"
         harness = r'''

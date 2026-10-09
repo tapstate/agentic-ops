@@ -11,6 +11,8 @@ mkdir -p "$TAPDATA_WORK_DIR" "$HOME"
 rm -rf /tapdata/apps
 mkdir -p /tapdata/apps
 cp -a /bundle/. /tapdata/apps/
+# 原生打包入口创建此目录；Launcher 启动 TM 时会读取初始化脚本清单。
+mkdir -p /tapdata/apps/etc/init
 node_path="$(sed -n 's/.*"node_binary": "\([^"]*\)".*/\1/p' /tapdata/settings.json)"
 node="/bundle/$node_path"
 export PATH="$(dirname "$node"):$PATH"

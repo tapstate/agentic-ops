@@ -28,6 +28,14 @@ function tcp(port) {
     socket.on('error', () => finish(false));
   });
 }
+function yaml(object, indent = 0) {
+  return Object.entries(object).map(([key, value]) => {
+    const prefix = `${' '.repeat(indent)}${key}:`;
+    return value && typeof value === 'object'
+      ? `${prefix}\n${yaml(value, indent + 2)}`
+      : `${prefix} ${JSON.stringify(value)}\n`;
+  }).join('');
+}
 async function main() {
   if (process.argv[2] === 'configure') {
     const uri = fs.readFileSync('/secret/mongo-uri', 'utf8').trim();
@@ -39,13 +47,15 @@ async function main() {
         SCRIPT_DIR: 'etc', reportInterval: 20000, Decimal128ToNumber: 'false', uuid: settings.uuid
       }}
     };
-    // JSON 是 YAML 的子集；由目标 Launcher 原有 YAML 读取器解析。
+    // Launcher 的 yamljs 不接受 JSON 文档；标量以 JSON 转义生成 YAML 双引号值。
     for (const root of ['/tapdata/apps', '/tapdata/work']) {
       fs.mkdirSync(path.join(root, 'etc'), {recursive: true});
       for (const name of ['application.yml', 'etc/application.yml']) {
-        fs.writeFileSync(path.join(root, name), JSON.stringify(config, null, 2), {mode: 0o600});
+        fs.writeFileSync(path.join(root, name), yaml(config), {mode: 0o600});
       }
     }
+    // 目标 Launcher 的监控进程从 WORK_DIR/uuid.js 读取节点身份。
+    fs.writeFileSync('/tapdata/work/uuid.js', `module.exports = ${JSON.stringify(settings.uuid)};\n`, {mode: 0o600});
     return;
   }
   if (process.argv[2] === 'stop') {

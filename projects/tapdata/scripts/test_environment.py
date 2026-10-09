@@ -345,6 +345,8 @@ class Environment:
             settings = {"components": node["components"], "backend_url": ",".join(backend_urls), "uuid": node["uuid"], "tm_opts": config["java"]["tm"], "engine_opts": config["java"]["engine"], "node_binary": config["node_binary"], "startup_timeout_seconds": config["heartbeat"]["startup_timeout_seconds"]}
             settings_file = candidate / (node["name"] + "-settings.json")
             write_json(settings_file, settings)
+            # Docker Desktop 不能在父目录绑定挂载内创建缺失的文件挂载点。
+            write_json(directory / "settings.json", settings)
             volumes = [str(candidate / "bundle") + ":/bundle:ro", str(directory) + ":/tapdata", str(settings_file) + ":/tapdata/settings.json:ro", str(secret) + ":/secret/mongo-uri:ro", str(HERE / "test-environment-entrypoint.sh") + ":/bootstrap/entrypoint.sh:ro", str(HERE / "test-environment-node.js") + ":/bootstrap/node.js:ro"]
             if config["ports"][node["name"]]["license"]:
                 license_path = contained(self.station / "config", config["ports"][node["name"]]["license"])
