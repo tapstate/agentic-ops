@@ -325,7 +325,7 @@ class Environment:
         _, uri = self.secret(config)
         driver = self.source_path(config["mongo_driver"])
         script = HERE / "test-environment-probe.js"
-        output = call(["docker", "run", "--rm", "-i", "--platform", config["platform"], "--add-host", "host.docker.internal:host-gateway", "--mount", "type=bind,src=%s,dst=/bundle,readonly" % bundle, "--mount", "type=bind,src=%s,dst=/driver,readonly" % driver, "--mount", "type=bind,src=%s,dst=/probe.js,readonly" % script, "--entrypoint", "/bundle/" + config["node_binary"], config["image"], "/probe.js"], input_text=json.dumps({"uri": uri, "heartbeat": config["heartbeat"], "nodes": nodes}), timeout=60)
+        output = call(["docker", "run", "--rm", "-i", "--platform", config["platform"], "--env", "NODE_PATH=/driver", "--add-host", "host.docker.internal:host-gateway", "--mount", "type=bind,src=%s,dst=/bundle,readonly" % bundle, "--mount", "type=bind,src=%s,dst=/driver,readonly" % driver, "--mount", "type=bind,src=%s,dst=/probe.js,readonly" % script, "--entrypoint", "/bundle/" + config["node_binary"], config["image"], "/probe.js"], input_text=json.dumps({"uri": uri, "heartbeat": config["heartbeat"], "nodes": nodes}), timeout=60)
         return json.loads(output)
 
     def generate(self, name, config, candidate, record, previous=None):

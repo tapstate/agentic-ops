@@ -137,6 +137,48 @@ class EnvironmentTests(unittest.TestCase):
         self.assertTrue(any("/bundle/lib/jdk/bin/java" in c and c[-1] == "-version" for c in commands))
         self.assertFalse(any(c[c.index("--entrypoint") + 1] == "java" for c in commands))
 
+    @unittest.skipUnless(shutil.which("node"), "Node 未安装，模块搜索路径行为待核验")
+    def test_probe_resolves_driver_sibling_modules_and_preserves_secret_boundary(self):
+        # 模拟驱动实际文件在独立目录、node_modules 以链接暴露包的布局。
+        # Node 按真实文件路径解析依赖，需要显式搜索挂载的 node_modules。
+        source = self.station / "source"
+        driver = source / self.config["mongo_driver"]
+        driver.mkdir(parents=True)
+        package = source / "driver-package"
+        package.mkdir()
+        (package / "index.js").write_text("module.exports = {resolved: require('bson').resolved};")
+        (driver / "mongodb").symlink_to(package, target_is_directory=True)
+        bson = driver / "bson"
+        bson.mkdir()
+        (bson / "index.js").write_text("module.exports = {resolved: true};")
+        real = mod.Environment(self.station)
+        bundle = self.env.root / "bundle"
+        script = "console.log(JSON.stringify(require(process.argv[1])))"
+
+        def run_probe(argv, input_text, **kwargs):
+            self.assertNotIn("do-not-print", " ".join(argv))
+            self.assertEqual(json.loads(input_text)["nodes"], [])
+            self.assertEqual(json.loads(input_text)["uri"], real.secret(self.config)[1])
+            mounts = [argv[i + 1] for i, value in enumerate(argv) if value == "--mount"]
+            self.assertIn("type=bind,src=%s,dst=/driver,readonly" % driver, mounts)
+            env = os.environ.copy()
+            env.pop("NODE_PATH", None)
+            for i, value in enumerate(argv):
+                if value == "--env":
+                    key, val = argv[i + 1].split("=", 1)
+                    env[key] = str(driver) if val == "/driver" else val
+            result = subprocess.run(["node", "-e", script, str(driver / "mongodb")], env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, "挂载驱动的传递依赖未能解析")
+            return result.stdout
+
+        with mock.patch.object(mod, "call", side_effect=run_probe):
+            self.assertTrue(real.probe(self.config, bundle, [])["resolved"])
+        env = os.environ.copy()
+        env.pop("NODE_PATH", None)
+        missing = subprocess.run(["node", "-e", script, str(driver / "mongodb")], env=env, capture_output=True, text=True)
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("Cannot find module 'bson'", missing.stderr)
+
     def test_no_api_build_and_three_nodes_share_compose_project(self):
         output = self.build_fixture()
         shutil.rmtree(output / "components/apiserver")
