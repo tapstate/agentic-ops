@@ -338,17 +338,22 @@ def command_status(args, product_root):
     if args.json:
         print(json.dumps(info, ensure_ascii=False, indent=2))
         return
-    for label, value in (("工位", info["station"]), ("工位标识", info["station_id"]),
+    rows = [("工位", info["station"]), ("工位标识", info["station_id"]),
                          ("绑定应用", info["product_root"]), ("应用版本", info["product_version"]),
                          ("项目", info["project"]), ("Agent", ",".join(info["agents"])),
                          ("源码池", info["source_pool"]), ("状态代际", epoch),
-                         ("登记", "已登记" if info["registered"] else "未登记")):
-        print("%s：%s" % (label, value))
+                         ("登记", "已登记" if info["registered"] else "未登记")]
     if task is None:
-        print("当前任务：无（空闲）")
+        rows.append(("当前任务", "无（空闲）"))
     else:
-        print("当前任务：%s；运行：%s；状态：%s；阶段：%s" % (
-            task["issue_key"], task["run_id"], task["status"], task["stage"]))
+        rows.extend((("当前任务", task["issue_key"]), ("运行", task["run_id"]),
+                     ("状态", task["status"]), ("阶段", task["stage"])))
+    # 固定标签由中文和 ASCII 构成；中文占两个终端列，不能用字符数补齐。
+    def label_width(label):
+        return sum(1 if ord(char) < 128 else 2 for char in label)
+    width = max(label_width(label) for label, _ in rows)
+    for label, value in rows:
+        print("%s%s : %s" % (label, " " * (width - label_width(label)), value))
 
 
 def command_list(args, product_root):
