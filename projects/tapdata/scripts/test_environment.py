@@ -243,9 +243,6 @@ class Environment:
         if not config["build"] or not config["assets"]:
             raise EnvironmentError("请先根据目标分支配置 build 步骤与完整 Launcher 装配 assets")
         self.secret(config)
-        driver = self.source_path(config["mongo_driver"])
-        if not (driver / "mongodb/package.json").is_file():
-            raise EnvironmentError("需要目标 Launcher 已有的 mongodb Node 模块，不自动安装依赖")
         before = self.snapshot()
         owner = self.root / "owner.json"
         if self.root.exists() and not self.state() and (not owner.is_file() or read_json(owner).get("station_id") != self.identity):
@@ -269,6 +266,9 @@ class Environment:
                 raise EnvironmentError("宿主机构建失败，原环境未变；私有日志已保留")
         if before != self.snapshot():
             raise EnvironmentError("构建期间源码发生变化，保留候选但不部署")
+        driver = self.source_path(config["mongo_driver"])
+        if not (driver / "mongodb/package.json").is_file():
+            raise EnvironmentError("构建后缺少目标 Launcher 的 mongodb Node 模块，请按目标分支准备已有依赖")
         bundle = candidate / "bundle"
         bundle.mkdir()
         for asset in config["assets"]:
@@ -302,7 +302,10 @@ class Environment:
                     raise EnvironmentError("装配二进制架构与目标平台不一致")
             elif not header.startswith(b"#!"):
                 raise EnvironmentError("Launcher/Node 必须为 Linux ELF 或可核验的脚本入口")
-        for unpacked, packed in (("connectors/dist", "connectors/dist.tar.gz"), ("components/apiserver", "components/apiserver.tar.gz")):
+        distributions = [("connectors/dist", "connectors/dist.tar.gz")]
+        if any("APIServer" in roles for roles in config["nodes"].values()):
+            distributions.append(("components/apiserver", "components/apiserver.tar.gz"))
+        for unpacked, packed in distributions:
             if not (bundle / unpacked).is_dir() and not (bundle / packed).is_file():
                 raise EnvironmentError("装配缺失：" + unpacked)
         if not any((bundle / "components/webroot").glob("*")):

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -135,6 +136,49 @@ class EnvironmentTests(unittest.TestCase):
         commands = [c.args[0] for c in calls.call_args_list]
         self.assertTrue(any("/bundle/lib/jdk/bin/java" in c and c[-1] == "-version" for c in commands))
         self.assertFalse(any(c[c.index("--entrypoint") + 1] == "java" for c in commands))
+
+    def test_no_api_build_and_three_nodes_share_compose_project(self):
+        output = self.build_fixture()
+        shutil.rmtree(output / "components/apiserver")
+        self.config["nodes"] = {"node1": ["TM", "FE"], "node2": ["TM", "FE"], "node3": ["FE"]}
+        self.config["ports"] = {
+            "node1": {"tm": 53131, "api": None, "license": ""},
+            "node2": {"tm": 53133, "api": None, "license": ""},
+            "node3": {"tm": None, "api": None, "license": ""},
+        }
+        real = mod.Environment(self.station)
+        with mock.patch.object(real, "snapshot", return_value={}), mock.patch.object(real, "probe"), mock.patch.object(mod, "call", return_value=""):
+            candidate, record = real.build(mod.validate(self.config))
+            real.generate("dev", self.config, candidate, record)
+        compose = mod.read_json(candidate / "compose.json")
+        self.assertEqual(set(compose["services"]), {"node1", "node2", "node3"})
+        self.assertEqual(compose["services"]["node3"]["depends_on"], {"node1": {"condition": "service_healthy"}, "node2": {"condition": "service_healthy"}})
+        with mock.patch.object(mod, "call", return_value="") as calls:
+            real.compose("up", "-d")
+            real.compose("down", "--remove-orphans")
+        for call in calls.call_args_list:
+            self.assertEqual(call.args[0][:6], ["docker", "compose", "-p", real.project, "-f", str(real.root / "compose.json")])
+
+    def test_selected_api_requires_api_artifact_before_docker(self):
+        output = self.build_fixture()
+        shutil.rmtree(output / "components/apiserver")
+        real = mod.Environment(self.station)
+        with mock.patch.object(real, "snapshot", return_value={}), mock.patch.object(mod, "call") as calls:
+            with self.assertRaisesRegex(mod.EnvironmentError, "components/apiserver"):
+                real.build(self.config)
+        calls.assert_not_called()
+
+    def test_build_can_prepare_declared_mongo_driver(self):
+        self.build_fixture()
+        driver = self.station / "source" / self.config["mongo_driver"]
+        shutil.rmtree(driver)
+        self.config["build"] = [{"cwd": "tapdata/tapdata", "argv": [sys.executable, "-c", "from pathlib import Path; p=Path('../tapdata-enterprise/tapdata-agent/node_modules/mongodb/package.json'); p.parent.mkdir(parents=True); p.write_text('{}')"]}]
+        real = mod.Environment(self.station)
+        with mock.patch.object(real, "snapshot", return_value={}), mock.patch.object(real, "probe"), mock.patch.object(mod, "call", return_value=""):
+            candidate, record = real.build(self.config)
+        self.assertTrue((driver / "mongodb/package.json").is_file())
+        self.assertEqual(record["commands"][0]["exit_code"], 0)
+        self.assertTrue((candidate / "bundle/tapdata").is_file())
 
     def test_wrong_architecture_bundled_jdk_fails_before_docker(self):
         output = self.build_fixture()

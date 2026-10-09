@@ -46,17 +46,32 @@ TM、FE、APIServer 分别映射 Launcher 的 `start frontend`、`start backend`
 
 build/assets 不设假定分支的默认命令：Skill 必须读取当前源码脚本与 profile 后填写。所有构建命令使用 argv，不进行 shell 二次解析；确需项目 shell 构建入口时显式调用 bash 和脚本路径。构建失败保留私有日志，部署前后记录所有工位 Git 仓库 HEAD、分支、未提交修改及未跟踪文件摘要；源码变化不继续部署。日志不自动输出或提交。
 
-装配可以由多项 assets 从本轮构建目录复制，也可将本轮源码构建出的完整发行目录映射到 `.`。必须包含 `tapdata`、`tapdata-agent`、Linux Node、`components/tm.jar`、`components/tapdata-agent.jar`、WebUI、Connector 与 API Server（已解包目录或发行包压缩文件）。脚本不自动下载完整应用，不用另一套 Docker start.sh 代替 Launcher。与原版 dbforge 不同，更新只替换应用目录，WORK_DIR 中的身份和日志独立保存，不随重新解包丢失。容器使用宿主机当前 UID/GID，HOME 和 Java user.home 指向节点内可写目录，避免 Linux 上产生宿主用户无法保全或清理的 root 私有文件。
+装配可以由多项 assets 从本轮构建目录复制，也可将本轮源码构建出的完整发行目录映射到 `.`。必须包含 `tapdata`、`tapdata-agent`、Linux Node、`components/tm.jar`、`components/tapdata-agent.jar`、WebUI 与 Connector；仅当任一节点选择 APIServer 时，才要求 API Server（已解包目录或发行包压缩文件）。脚本不自动下载完整应用，不用另一套 Docker start.sh 代替 Launcher。与原版 dbforge 不同，更新只替换应用目录，WORK_DIR 中的身份和日志独立保存，不随重新解包丢失。容器使用宿主机当前 UID/GID，HOME 和 Java user.home 指向节点内可写目录，避免 Linux 上产生宿主用户无法保全或清理的 root 私有文件。
 
 首次部署先在临时 Docker 容器中执行目标 Node、Java 和只读 Mongo 探测。副本集 hello 公布的成员地址也逐一检查可达性；本地 Mongo 使用 `host.docker.internal` 或其他容器可达地址，Linux 增加 host-gateway。URI 若使用 localhost/127.0.0.1 将被拒绝，不猜测替换 URI。MongoDB 必须已经具备该应用所需配置及权限；TLS等额外配置本期不自动生成，应使用目标版本可用的 URI 配置或明确报告缺项。
 
 默认监控读取当前 TM 的 `ClusterState`，以 uuid 匹配节点、`systemInfo.time` 判断心跳。不同目标分支需从实际源码核验字段后调整 heartbeat，不以探测脚本成功代替产品监控事实。startup_timeout_seconds 默认 300、max_age_seconds 默认 60；不能通过扩大阈值掩盖心跳停止。
 
+## 从源码补齐部署准备
+
+缺少 target、dist、node_modules 或配置中的 build/assets，是首次部署的准备工作，不能据此认定分支没有部署能力。先用工位 repository context 定位实际仓库，核对当前分支的构建脚本、package.json、锁文件和打包函数；路径来自实际源码，不假定存在 `source/tapdata/application`。只有所需源码、原生构建能力、凭证或目标平台资源确实无法取得时，才报告具体阻塞。
+
+1. 先回读 `list`，核对 Docker CLI、`docker compose version` 和 `docker info`。`list` 返回状态无法核验时检查工具、daemon 和权限；退出码 0 不表示环境为空。复用已选配置、架构、节点和秘密文件；用户去除 APIServer 时同步删除 nodes 中的角色并把对应 api 端口设为 null。
+2. 按[开发指引](tapdata-development.md#3-构建并装配)准备宿主构建工具与目标分支已有依赖。有锁文件时使用该分支支持的锁定安装命令，例如 npm ci 或 pnpm 的 frozen-lockfile 模式，安装在工位独立源码内；不升级依赖、不改锁文件、不全局安装 pkg。Launcher 已声明 pkg 时优先使用其本地可执行文件。私有仓凭证、下载权限或额外第三方组件缺少时只暂停依赖步骤，继续准备不依赖它的配置和构建项。
+3. 核验宿主构建与容器执行的区别：macOS 的 Node 可运行包管理器，装配包必须包含目标 Linux Node 和 Launcher；不要在 macOS 执行打包脚本自动选出的 Linux Node。若项目完整构建入口混用了 Linux 专用工具，复用分支中各组件的构建入口与打包逻辑装配，不能改成直接启动 Jar。不要盲目运行带 git pull、镜像推送、远端部署或全局依赖安装的整包脚本。
+4. 按依赖顺序填入 build 的 cwd/argv，覆盖所需公共库、TM、FE、WebUI、Connector 和 Launcher；仅选择 APIServer 时准备 API 构建。当前任务 Maven 路径按[构建测试指引](build-test-and-local-run.md#Maven-配置与任务本地仓库)回读；无活动任务时在当前环境 runtime 下使用独立本地仓库，保留用户 settings。构建入口所有 Maven 子调用都要实际消费该路径，不能只给顶层命令一个未传递的参数。
+5. 对照本分支打包函数填写 assets，复制本轮输出到脚本要求的包内路径。常见来源是 application 仓的 output、manager/tm 的 exec Jar、iengine 的 ie.jar、Web 仓的 dist 和 Launcher 仓的 dist；这些只是定位线索，必须核验当前分支。Node 常见路径为 `lib/NDK/node/bin/node`，模板的 `lib/NDK/node/node` 也需按实际包修正。核对 Launcher 的两个入口、配置资源、Java 运行选择和工作目录协议；不能用空目录、占位脚本或旧发行包补足检查。
+6. 通过 configure 保存完整配置，再由 deploy/update 执行构建、装配和 Docker 预检。脚本在构建之后检查 mongo_driver，因此 build 可以先准备目标 Launcher 已声明的 mongodb 依赖。配置保存成功且 build_configured 为 false 只说明草稿已保存，仍须完成构建配置。产物尚未生成时不要先调用 deploy 获取已知错误，然后停止。
+
+失败时指出失败的具体准备或启动步骤、可回查的私有日志位置、旧环境是否仍运行以及剩余输入。普通构建失败按日志修正后继续原操作；源码变动、权限缺失或写入结果未知时先核实，不能盲目重试或把辅助脚本错误当作应用能力缺失。
+
 ## 操作、恢复与卸载
 
-统一入口为 Product Root 的 `projects/tapdata/scripts/test_environment.py`，参数 `--station <station>`。`configure --env <name> --config <json>` 保存完整配置但不应用；`list` 回读配置清单和 Docker 实际状态；`deploy` 多配置时需 `--env`，单配置可省略；`update/status/uninstall` 默认针对活动环境。配置或秘密文件变化需 update，不热加载。
+统一入口为 Product Root 的 `projects/tapdata/scripts/test_environment.py`，参数 `--station <station>`。`configure --env <name> --config <json>` 保存完整配置但不应用；`list` 回读配置清单和 Docker 实际状态；`deploy` 多配置时需 `--env`，单配置可省略；`update/status/uninstall` 默认针对活动环境。配置或秘密文件变化需 update，不热加载。源码修改后要加载新制品也使用 update；对同名活动环境重复 deploy 只回读现有环境，不重建源码。
 
 不同配置的部署需用户明确切换意图，对应 `deploy --env <name> --switch`。目标构建、架构、Mongo和许可证预检成功后才停止旧环境。更新保留同名节点身份；切换清理旧节点现场并生成新身份，两份配置和外部数据库保留。上线失败保留现场和新旧构建记录，不自动回退数据库；用 status 回读并修复后 update，或明确卸载。中断或 Docker 写入结果不明时先回读，归属不明或未登记资源停止自动删除。
+
+所有节点属于同一个 Compose 项目 `ao-tapdata-<station_id>`，定义保存在 `runtime/tapdata-test-env/compose.json`；节点是其中的 services，不按节点分别执行 docker run 或生成独立项目。脚本统一传 `docker compose -p <project> -f <compose-file>`，更新和切换沿用同一项目，工位之间以 station_id 隔离。Docker Desktop 中按该项目查看整组。可用同一组参数执行只读 `ps --all` 核验分组；部署和删除优先使用生命周期入口，避免绕过归属、构建及诊断检查。
 
 卸载先保留私有诊断，再回读确认受管容器和网络已删除，最后清理当前运行目录。不执行 Docker prune、不删除镜像、不删除外部数据库；诊断留在 `runtime/tapdata-test-env-diagnostics/`，配置和源码保留。任务释放前先卸载 Docker 资源，诊断按现有归档规则保全，不能仅删除绑定目录。
 
