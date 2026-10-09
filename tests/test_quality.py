@@ -447,6 +447,24 @@ class QualityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "完整 publication_body"):
             self.apply("draft", {"id": "incomplete-plan", "checkpoint": "q2-plan", "body": body + "错误结论"})
 
+    def test_stage_comment_retains_exact_continuation_binding_without_claiming_push(self):
+        from workflow.quality_write import stage_summary
+        rules = quality.config(self.base, self.task)
+        ctx = quality.context(self.base, self.task)
+        binding = next(iter(ctx['repositories'].values()))
+        binding.update(work_branch='owner/TAP-123-old-run', base_branch='develop',
+                       base_sha='1' * 40, live_revision='2' * 40)
+        view = {'handoff': {'title': '阶段总结'}, 'decision': None, 'due': [], 'digest': 'fixture'}
+        body = stage_summary({'items': {}, 'verification': {}}, 'q1-intake', rules, ctx, view)
+        for value in ('owner/TAP-123-old-run', 'develop', '1' * 40, '2' * 40):
+            self.assertIn(value, body)
+        self.assertIn('需原生回读核验', body)
+        self.assertNotIn('已推送', body)
+        binding.pop('base_sha'); binding['live_revision'] = 'worktree:' + '3' * 64
+        body = stage_summary({'items': {}, 'verification': {}}, 'q1-intake', rules, ctx, view)
+        self.assertIn('历史基线 待补齐', body)
+        self.assertNotIn('历史基线 worktree:', body)
+
     def test_feature_record_input_and_configuration_drift(self):
         self.feature_profile()
         source = self.base / "plan.json"

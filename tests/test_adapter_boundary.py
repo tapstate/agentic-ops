@@ -58,6 +58,8 @@ class AdapterBoundaryTest(unittest.TestCase):
                 dict(manifest, retired_artifacts=["../settings.json"]),
                 dict(manifest, skill_target="/outside"), dict(manifest, adapter_version=True),
                 dict(manifest, artifacts=[{"template": "../outside", "target": "x"}]),
+                dict(manifest, launch=dict(manifest["launch"], arguments="--invalid")),
+                dict(manifest, launch=dict(manifest["launch"], arguments=["bad\0argument"])),
                 [],
             ):
                 path.write_text(json.dumps(invalid), encoding="utf-8")

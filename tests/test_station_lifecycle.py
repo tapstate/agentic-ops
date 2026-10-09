@@ -395,6 +395,43 @@ class StationTests(unittest.TestCase):
         current = task_store.read_task(self.ws)
         self.assertEqual(current["task_repositories"]["tapdata/tapdata"]["deliveries"], [])
 
+    def test_external_continuation_across_epochs_needs_no_old_runtime(self):
+        self.prepare_engineering()
+        old = self.git(self.seed, 'rev-parse', 'HEAD')
+        self.git(self.seed, 'checkout', '-b', 'fix/recovered')
+        (self.seed / 'file.txt').write_text('preserved result\n')
+        self.git(self.seed, 'add', '.')
+        self.git(self.seed, 'commit', '-m', 'preserved result')
+        head = self.git(self.seed, 'rev-parse', 'HEAD')
+        self.git(self.seed, 'push', str(self.remote), 'fix/recovered')
+        # 来源成果已在远端；接管只消费同一标准输入，不访问旧版现场。
+        for epoch in (26, 27, 42):
+            with self.subTest(epoch=epoch):
+                ws = self.root / ('rebuilt-' + str(epoch))
+                self.write(self.product / 'contracts/station-state-compatibility.json',
+                           {'station_state_epoch': epoch})
+                binding = json.loads((self.ws / '.agenticops/station.json').read_text())
+                binding['station_id'] = '%032x' % epoch
+                self.write(ws / '.agenticops/station.json', binding)
+                self.write(ws / '.agenticops/init.json', {'station_state_epoch': epoch})
+                task_store.initialize_current(ws)
+                for name in ('source', 'config', 'runtime'):
+                    (ws / name).mkdir()
+                request = dict(self.request, issue_key='TAP-' + str(epoch),
+                               continuations={'tapdata/tapdata': {
+                                   'work_branch': 'fix/recovered', 'baseline_sha': old,
+                                   'expected_head': head}})
+                station.takeover(ws, request, 'op-recover-' + str(epoch), 0)
+                task = task_store.read_task(ws)
+                self.assertEqual(old, task['engineering_baseline']['repositories']['tapdata/tapdata']['commit_sha'])
+                station.scope_change(ws, task['issue_key'], task['run_id'], task['_revision'],
+                                     'op-scope-recovered-' + str(epoch), 'tapdata/tapdata', 'fix/recovered',
+                                     'develop', ['file.txt'], 'unit tests', head)
+                self.assertEqual(head, self.git(ws / 'source/tapdata/tapdata', 'rev-parse', 'HEAD'))
+                self.assertEqual('preserved result\n', (ws / 'source/tapdata/tapdata/file.txt').read_text())
+                self.assertFalse((ws / '.agenticops/authorization.json').exists())
+                self.assertFalse(list((ws / '.agenticops/evidence').glob('quality-*.json')))
+
     def test_incomplete_archive_cannot_be_completed_by_release(self):
         task = self.takeover()
         from workflow import station_resources

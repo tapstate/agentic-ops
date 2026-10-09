@@ -1,5 +1,7 @@
 # v1 用户故事总纲
 
+PROD-003 覆盖以 Jira 任务为入口、沿 GitHub 成果继续未完成任务的验收：跨多个 epoch 不迁移旧运行状态，AI 补齐缺失的设计、历史基线、代码和验证来源，现役 Workflow 重新核验；PROD-001 的原版本退出、产品切换与工位重建边界保持不变。
+
 PROD-003 的质量交付合同覆盖阶段总结评论、Issue Analysis 实施方案、Fix Details 修复总结及 GitHub PR Ready 回读闭环；具体 Checks 例外复用当前 run 的决定与证据，跨版本退出以当前机器 epoch 为准。
 
 任务清理采用六阶段自动执行与成果验收；完整盘点、异常接管、分支处置及 epoch 24 恢复边界由[工位合同](../../architecture/single-task-station.md#阶段式清理)统一定义，操作入口复用任务授权指引，PROD-003 覆盖阶段失败和接力验收。

@@ -11,7 +11,7 @@ usage() {
   agenticops setup [--source-pool <目录>]
   agenticops agents
   agenticops version
-  agenticops station <init|doctor|repair|start|list|identity|prune|clean|detach|purge|source-update> [参数]
+  agenticops station <init|status|doctor|repair|start|list|identity|prune|clean|detach|purge|source-update> [参数]
   agenticops update
   agenticops rollback
 
@@ -98,8 +98,13 @@ start_agent() {
     esac
   done
   test -n "$agent_name" || { printf 'AgenticOps：start 缺少 Agent ID\n' >&2; exit 2; }
-  agent_command="$(python3 "$product_root/bootstrap/agent_registry.py" \
-    --product-root "$product_root" resolve-launch "$agent_name" --station "$station")"
+  launch_json="$(python3 "$product_root/bootstrap/agent_registry.py" \
+    --product-root "$product_root" resolve-launch "$agent_name" --station "$station" --json)"
+  agent_command="$(python3 -c 'import json, sys; print(json.loads(sys.argv[1])["command"])' "$launch_json")"
+  default_arguments=()
+  while IFS= read -r -d '' argument; do
+    default_arguments+=("$argument")
+  done < <(python3 -c 'import json, sys; sys.stdout.buffer.write(b"".join(value.encode("utf-8") + b"\0" for value in json.loads(sys.argv[1])["arguments"]))' "$launch_json")
   command -v "$agent_command" >/dev/null 2>&1 || {
     printf 'AgenticOps：未找到 Agent 命令：%s\n' "$agent_command" >&2
     exit 2
@@ -118,13 +123,13 @@ start_agent() {
   lifecycle_release_lock
   trap - EXIT
   cd "$station"
-  exec "$agent_command" ${forwarded[@]+"${forwarded[@]}"}
+  exec "$agent_command" ${default_arguments[@]+"${default_arguments[@]}"} ${forwarded[@]+"${forwarded[@]}"}
 }
 
 station_registry_command() {
   station_command_name="${1:-}"
   case "$station_command_name" in
-    identity|prune|repair|clean|detach|purge)
+    status|identity|prune|repair|clean|detach|purge)
       ;;
     *)
       exec python3 "$product_root/bootstrap/station_registry.py" \
@@ -177,7 +182,7 @@ if [ "$command_name" = "station" ]; then
     source-update)
       exec python3 "$product_root/workflow/station-source-update.py" "$@"
       ;;
-    list|identity|prune|clean|detach|purge)
+    status|list|identity|prune|clean|detach|purge)
       station_registry_command "$command_name" "$@"
       exit $?
       ;;

@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from workflow import station_operation, task_store  # noqa: E402
 from workflow import project_rules, station_context  # noqa: E402
 from bootstrap import shared_repositories  # noqa: E402
+from bootstrap.product_version import describe  # noqa: E402
 from bootstrap.station_compatibility import require_station_can_adopt
 from bootstrap.station_paths import StationDirectory, station_artifact_path  # noqa: E402
 
@@ -320,6 +321,36 @@ class _null_context:
         return False
 
 
+def command_status(args, product_root):
+    station = Path(args.station).resolve()
+    with StationDirectory(station) as tree:
+        require_tracked(product_root, station, tree)
+        binding = tree.read_json(Path(STATE_DIRECTORY) / "station.json", "工位绑定")
+        epoch = require_station_can_adopt(product_root, station)
+        current = task_store.read_current(station)["current"]
+    task = None if current is None else {"issue_key": current["issue_key"], "run_id": current["run_id"],
+                                        "status": current["outcome"], "stage": current["stage"]}
+    info = {"station": str(station), "station_id": binding["station_id"],
+            "product_root": binding["product_root"], "product_version": describe(product_root, allow_dirty=True),
+            "project": binding["project"], "agents": binding["agents"],
+            "source_pool": binding["source_pool"], "station_state_epoch": epoch,
+            "registered": str(station) in load_registry(product_root), "task": task}
+    if args.json:
+        print(json.dumps(info, ensure_ascii=False, indent=2))
+        return
+    for label, value in (("工位", info["station"]), ("工位标识", info["station_id"]),
+                         ("绑定应用", info["product_root"]), ("应用版本", info["product_version"]),
+                         ("项目", info["project"]), ("Agent", ",".join(info["agents"])),
+                         ("源码池", info["source_pool"]), ("状态代际", epoch),
+                         ("登记", "已登记" if info["registered"] else "未登记")):
+        print("%s：%s" % (label, value))
+    if task is None:
+        print("当前任务：无（空闲）")
+    else:
+        print("当前任务：%s；运行：%s；状态：%s；阶段：%s" % (
+            task["issue_key"], task["run_id"], task["status"], task["stage"]))
+
+
 def command_list(args, product_root):
     stations = load_registry(product_root)
     if not stations:
@@ -467,6 +498,9 @@ def parser():
     commands.add_parser("register").add_argument("--station", required=True)
     commands.add_parser("pending").add_argument("--product-ref", required=True)
     commands.add_parser("list")
+    status = commands.add_parser("status", help="只读查看工位、绑定应用和当前任务基本信息")
+    status.add_argument("--station", required=True)
+    status.add_argument("--json", action="store_true", help="输出基本信息 JSON，不展开任务事实或秘密")
     identity = commands.add_parser("identity")
     identity.add_argument("--station", required=True)
     for name in ("prune", "repair", "detach", "purge"):
@@ -502,6 +536,8 @@ def main():
             command_pending(args, product_root)
         elif args.command == "list":
             command_list(args, product_root)
+        elif args.command == "status":
+            command_status(args, product_root)
         elif args.command == "identity":
             command_identity(args, product_root)
         elif args.command == "prune":

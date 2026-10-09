@@ -1,5 +1,11 @@
 # AgenticOps 扩展使用
 
+[工位源码与材料](station-materials.md#查看工位基本信息)负责 `station status` 的只读基本信息查询，区分绑定应用、版本、工位登记与任务阶段；状态展示不执行修复或任务推进。
+
+[任务存档与恢复](task-archive-and-resume.md)面向使用者，按暂停存档、隔离升级、从 Jira 接续和恢复验证的顺序组织操作及可直接使用的请求示例。它只导航现役授权、工位和升级合同，不定义另一套状态或迁移格式；任务进展仍记录在 Jira。
+
+[任务授权指引](task-authorization.md#从-jira-任务接续)负责以 Jira key 恢复有效设计、GitHub 分支/PR/CI、历史基线及未完成事项，旧记录缺项由 AI 核实并协助研发补齐；[更新与回退](update-and-rollback.md#任务处理中升级后继续)只负责原版本退出和目标版本重建。共享任务接续 Skill 复用这两页，不建立与 epoch 绑定的转换合同。
+
 [质量检查与证据](quality-checkpoints.md)统一维护阶段评论的人读摘要、Jira 正文表示与回读，以及 PR 提审预检、Checks 具体例外和 GitHub Ready for review 回读闭环。PR Ready 只表示全部目标 PR 已退出 Draft 且回读确认，预检通过不代表提审完成；项目字段采集时机与审批责任由 Project 配置维护。详细结构化证据留在当前 run，不在评论或其它文档重复维护。
 
 [任务授权指引](task-authorization.md)统一说明具体来源同步授权、既有方案决定复用，以及分支/PR 默认保留、精确确认后在清理内或释放后处置的边界；项目同步节点与验收要求从当前 Project 读取，不由通用工位模板固定。
