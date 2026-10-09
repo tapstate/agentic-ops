@@ -1,5 +1,7 @@
 # AgenticOps 扩展使用
 
+[质量检查与证据](quality-checkpoints.md)统一维护阶段评论的人读摘要、Jira 正文表示与回读，以及 PR 提审预检、Checks 具体例外和 GitHub Ready for review 回读闭环。PR Ready 只表示全部目标 PR 已退出 Draft 且回读确认，预检通过不代表提审完成；项目字段采集时机与审批责任由 Project 配置维护。详细结构化证据留在当前 run，不在评论或其它文档重复维护。
+
 [任务授权指引](task-authorization.md)统一说明具体来源同步授权、既有方案决定复用，以及分支/PR 默认保留、精确确认后在清理内或释放后处置的边界；项目同步节点与验收要求从当前 Project 读取，不由通用工位模板固定。
 
 Jira 已有经办人的接管准入与原生表单决策由[统一决策包](quality-checkpoints.md#jira-全流程统一决策包)区分：Project Profile 核验当前用户身份，字段采集只在对应人工节点或实时必填表单要求时请求决定，不重复确认已核验的接管事实。

@@ -428,21 +428,24 @@ class QualityTests(unittest.TestCase):
         self.assertTrue(verification.problems(model, changed, ["review"]))
         self.assertEqual(original_bytes, path.read_bytes())
 
-    def test_feature_publication_contains_complete_plan_and_accepts_draft(self):
+    def test_feature_publication_is_stage_summary_and_plan_is_field_proposal(self):
+        from workflow.quality_write import jira_field_body
         self.feature_profile(); self.select(); self.checkpoint("q1-intake")
         q1 = self.view()["checkpoints"]["q1-intake"]["publication_body"]
         self.assertNotIn("implementation_plan", q1)
         self.checkpoint("q2-plan")
         body = self.view()["checkpoints"]["q2-plan"]["publication_body"]
-        plan = self.task["facts"]["implementation_plan"]
-        self.assertIn(json.dumps(plan, ensure_ascii=False, sort_keys=True), body)
-        self.assertIn('方案事实 scope_boundary："目标模块"', body)
-        self.assertEqual(body.count("方案事实 implementation_plan："), 1)
+        self.assertIn("Issue Analysis", body)
+        for raw in ('"changes":', 'implementation_plan', '目标断言', '新增行为'):
+            self.assertNotIn(raw, body)
+        proposal = jira_field_body(self.base, self.task, "issue_analysis")
+        for value in ("目标行为", "新增行为", "目标断言", "兼容性", "回退改动", "目标模块"):
+            self.assertIn(value, proposal)
+        self.assertNotIn('"changes":', proposal)
         self.apply("draft", {"id": "feature-plan", "checkpoint": "q2-plan", "body": body})
         self.assertEqual(self.view()["publications"]["feature-plan"]["body"], body)
         with self.assertRaisesRegex(ValueError, "完整 publication_body"):
-            self.apply("draft", {"id": "incomplete-plan", "checkpoint": "q2-plan",
-                                  "body": body.replace(json.dumps(plan, ensure_ascii=False, sort_keys=True), "省略方案")})
+            self.apply("draft", {"id": "incomplete-plan", "checkpoint": "q2-plan", "body": body + "错误结论"})
 
     def test_feature_record_input_and_configuration_drift(self):
         self.feature_profile()
@@ -639,7 +642,8 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(authorization.cmd_grant(args), 0)
         self.assertEqual(task._check_advance(self.task, "implementation", self.base, task.admission(self.base)), [])
         body = self.view()["checkpoints"]["q2-plan"]["publication_body"]
-        self.assertIn(json.dumps(plan, ensure_ascii=False, sort_keys=True), body)
+        self.assertIn("Issue Analysis", body)
+        self.assertNotIn(json.dumps(plan, ensure_ascii=False, sort_keys=True), body)
         self.assertNotIn("fix_plan", self.task["facts"])
         self.execute(result="FAIL", kind="assertion")
         with self.assertRaisesRegex(ValueError, "未满足预期"):
@@ -655,18 +659,18 @@ class QualityTests(unittest.TestCase):
             "issue": {"key": "TAP-123", "fields": {"issuelinks": []}}}))
         missing_ci = pr_ready.check(self.base, "TAP-123", jira_input)
         self.assertTrue(missing_ci["checks"]["linked_test_tasks"]["passed"])
-        self.assertFalse(missing_ci["ready"])
+        self.assertFalse(missing_ci["preflight_ready"])
         self.assertFalse(missing_ci["checks"]["pr_checks"]["passed"])
         checks = ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata")
         checks["history"].append({"head": "a" * 40, "verdict": "success"})
         ci.save_state(self.base, "TAP-123", "1", checks)
         self.automatic_checkpoint(); self.decide(evidence_id="run-2"); self.checkpoint("q4-acceptance")
         ready = pr_ready.check(self.base, "TAP-123", jira_input)
-        self.assertTrue(ready["ready"], ready)
+        self.assertTrue(ready["preflight_ready"], ready)
         self.assertTrue(ready["jira_status_todos"])
         plan["changes"] = ["改变功能范围"]; self.save_task()
         self.assertTrue(task._check_advance(self.task, "implementation", self.base, task.admission(self.base)))
-        self.assertFalse(pr_ready.check(self.base, "TAP-123", jira_input)["ready"])
+        self.assertFalse(pr_ready.check(self.base, "TAP-123", jira_input)["preflight_ready"])
 
     def apply(self, action, payload):
         return quality.apply(self.base, "TAP-123", self.task["run_id"], self.view()["revision"],
@@ -769,26 +773,26 @@ class QualityTests(unittest.TestCase):
                     "key": "TAP-T1", "fields": {"issuetype": {"name": "Test"}}}}]}},
             "linked_test_details": [{"key": "TAP-T1", "test_type": "Manual",
                                      "case_version": "test-v1", "source_ref": "fixture:jira/TAP-T1"}]}))
-        self.assertFalse(pr_ready.check(self.base, "TAP-123", jira_input)["ready"])
+        self.assertFalse(pr_ready.check(self.base, "TAP-123", jira_input)["preflight_ready"])
         self.task["repositories"][0].update(pull_request="1", worktree={"final_revision": "a" * 40})
         self.save_task()
         checks = ci.load_state(self.base, "TAP-123", "1", "tapdata/tapdata")
         checks["history"].append({"head": "a" * 40, "verdict": "success"})
         ci.save_state(self.base, "TAP-123", "1", checks)
-        self.assertFalse(pr_ready.check(self.base, "TAP-123", jira_input)["ready"])
+        self.assertFalse(pr_ready.check(self.base, "TAP-123", jira_input)["preflight_ready"])
         self.automatic_checkpoint()
         self.decide(evidence_id="run-2")
         self.checkpoint("q4-acceptance")
         ready = pr_ready.check(self.base, "TAP-123", jira_input)
-        self.assertTrue(ready["ready"], ready)
+        self.assertTrue(ready["preflight_ready"], ready)
         self.assertTrue(ready["jira_status_todos"])
         before = task_store.task_path(self.base, "TAP-123").read_bytes()
-        self.assertTrue(pr_ready.check(self.base, "TAP-123", jira_input)["ready"])
+        self.assertTrue(pr_ready.check(self.base, "TAP-123", jira_input)["preflight_ready"])
         self.assertEqual(task_store.task_path(self.base, "TAP-123").read_bytes(), before)
         # 另一提交的绿色 CI 不能替代当前任务 Head 的验证。
         checks["history"].append({"head": "b" * 40, "verdict": "success"})
         ci.save_state(self.base, "TAP-123", "1", checks)
-        self.assertFalse(pr_ready.check(self.base, "TAP-123", jira_input)["ready"])
+        self.assertFalse(pr_ready.check(self.base, "TAP-123", jira_input)["preflight_ready"])
 
     def test_proposed_test_key_does_not_invalidate_q2_selection(self):
         self.plan(case_status="proposed"); self.select()
@@ -1766,10 +1770,10 @@ class QualityTests(unittest.TestCase):
                 state["history"].append({"head": "a" * 40, "verdict": "success"})
                 ci.save_state(self.base, "TAP-123", repo["pull_request"], state)
             self.automatic_checkpoint()
-            self.assertTrue(pr_ready.check(self.base, "TAP-123", path)["ready"])
+            self.assertTrue(pr_ready.check(self.base, "TAP-123", path)["preflight_ready"])
             snapshot["linked_test_details"][0]["status"] = {"name": "Open"}
             path.write_text(json.dumps(snapshot))
-            self.assertFalse(pr_ready.check(self.base, "TAP-123", path)["ready"])
+            self.assertFalse(pr_ready.check(self.base, "TAP-123", path)["preflight_ready"])
 
     def test_taptest_old_report_preserved_code_drift_requires_readback_not_new_pass(self):
         self.taptest_plan()
@@ -2052,6 +2056,66 @@ class QualityTests(unittest.TestCase):
             self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
 
 
+    def test_literal_markdown_readback_preserves_backslashes_and_real_differences(self):
+        from workflow.quality_write import body_matches
+        original = '统计 [旧_新] *字面*；路径 a\\b；正则 \\n'
+        returned = '统计 \\[旧\\_新\\] \\*字面\\*；路径 a\\b；正则 \\n'
+        self.assertFalse(body_matches(original, returned))
+        self.assertTrue(body_matches(original, returned, 'literal-markdown-v1'))
+        for bad in (returned + 'extra', returned.replace('新', '变更'), returned.replace('a\\b', 'ab'),
+                    returned.replace('\\n', '\n'), returned.replace('旧', '\\u65e7')):
+            self.assertFalse(body_matches(original, bad, 'literal-markdown-v1'))
+        self.apply('draft', {'id': 'literal', 'body': original})
+        record = self.view()['publications']['literal']
+        self.apply('confirm', {'id': 'literal', 'digest': record['digest'], 'proof': proof()})
+        record = self.apply('prepare_write', {'id': 'literal', 'digest': record['digest']})['publications']['literal']
+        self.apply('receipt', {'id': 'literal', 'operation_id': record['operation_id'], 'result': 'unknown'})
+        payload = {'id': 'literal', 'operation_id': record['operation_id'], 'site': record['site'],
+                   'issue_key': 'TAP-123', 'comment_id': '100', 'source_ref': 'fixture:jira/100',
+                   'body': returned, 'body_representation': 'literal-markdown-v1'}
+        with self.assertRaises(ValueError): self.apply('readback', dict(payload, issue_key='OTHER-1'))
+        self.assertEqual('unknown', self.view()['publications']['literal']['status'])
+        self.assertEqual('verified', self.apply('readback', payload)['publications']['literal']['status'])
+        with self.assertRaises(ValueError): self.apply('prepare_write', {'id': 'literal', 'digest': record['digest']})
+
+    def test_legacy_comment_events_replay_without_rewriting_body(self):
+        profile = self.product / 'projects/tapdata/quality.json'
+        current = profile.read_text(); rules = json.loads(current); rules['comment_format'] = 'human-text-v1'
+        profile.write_text(json.dumps(rules))
+        self.plan(); self.select(); self.checkpoint('q2-plan')
+        body = self.view()['checkpoints']['q2-plan']['publication_body']
+        self.apply('draft', {'id': 'legacy', 'checkpoint': 'q2-plan', 'body': body})
+        record = self.view()['publications']['legacy']
+        self.apply('confirm', {'id': 'legacy', 'digest': record['digest'], 'proof': proof()})
+        record = self.apply('prepare_write', {'id': 'legacy', 'digest': record['digest']})['publications']['legacy']
+        before = quality.state_path(self.base, self.task).read_bytes()
+        profile.write_text(current)
+        model = quality.replay(quality.load(self.base, self.task))
+        self.assertEqual(body, model['publications']['legacy']['body'])
+        self.assertEqual(before, quality.state_path(self.base, self.task).read_bytes())
+        self.apply('readback', {'id': 'legacy', 'operation_id': record['operation_id'], 'site': record['site'],
+            'issue_key': 'TAP-123', 'comment_id': '100', 'body': body, 'source_ref': 'fixture:legacy/100'})
+        self.assertEqual('verified', self.view()['publications']['legacy']['status'])
+
+    def test_stage_summary_omits_complex_plan_but_keeps_current_results_and_risks(self):
+        from workflow.quality_write import jira_field_body
+        self.feature_profile()
+        plan = self.task['facts']['implementation_plan']
+        plan['changes'] = [{'repository': 'owner/repo-' + str(i), 'steps': ['操作'] * 10} for i in range(20)]
+        plan['risks'] = ['保留旧容错']; self.save_task()
+        self.select(); self.checkpoint('q1-intake'); self.checkpoint('q2-plan')
+        q2 = self.view()['checkpoints']['q2-plan']['publication_body']
+        self.assertLess(len(q2), 1000); self.assertNotIn('repo-19', q2)
+        self.assertIn('repo-19', jira_field_body(self.base, self.task, 'issue_analysis'))
+        self.execute(); self.automatic_checkpoint(); self.decide(); self.checkpoint('q4-acceptance')
+        q4 = self.view()['checkpoints']['q4-acceptance']['publication_body']
+        self.assertIn('Fix Details', q4); self.assertNotIn('repo-19', q4)
+        details = jira_field_body(self.base, self.task, 'fix_details')
+        self.assertIn('已验收', details); self.assertIn('结果：PASS', details)
+        self.assertIn('fixture:report/run-1', details)
+        self.assertNotIn('"executions":', details)
+
+
 class FeatureFlowTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory(prefix="ao-feature-flow-")
@@ -2244,7 +2308,7 @@ class FeatureFlowTests(unittest.TestCase):
         self.checkpoint("q3-draft")
         body = self.view()["checkpoints"]["q3-draft"]["publication_body"]
         self.assertIn("范围 feature.py:value", body)
-        self.assertIn("用例数 1", body)
+        self.assertIn("用例/失败/错误/跳过计数 1/0/0/0", body)
         self.cli("task.py", "advance", "--note", "首轮验证完成")
         self.cli("task.py", "advance", "--note", "缺少人工验收", expected=3)
         self.cli("task.py", "repository", "record-result", "--repo", self.repo, "--pr", "1")
@@ -2266,21 +2330,21 @@ class FeatureFlowTests(unittest.TestCase):
             "key": "TAP-123", "fields": {"issuetype": {"id": "10010", "name": "Story"},
                 "status": {"name": "Tests Passed"}, "issuelinks": []}}}))
         result = pr_ready.check(self.ws, "TAP-123", snapshot)
-        self.assertTrue(result["ready"], result)
+        self.assertTrue(result["preflight_ready"], result)
         self.assertTrue(result["jira_status_todos"])
         # 其它 Checks 全绿仍须真实集成测试，或研发对明确缺口作出决定。
         material = dict(copy.deepcopy(self.local_material), kind="ci", run_ref="fixture:ci-run-1",
                         checkout_ref="fixture:checkout-head", head_revision=head, attempt=1)
         material["results"][0]["method"] = "unit"
         self.apply("verification", material)
-        self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["ready"])
+        self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
         material["results"][0].update(method="integration", result="UNKNOWN", report_ref="fixture:缺报告")
         self.apply("verification", material)
-        self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["ready"])
+        self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
         material["results"][0]["decision"] = {"reason": "报告未上传",
             "uncovered": "feature.py:value", "follow_up": "研发安排补测；不替代已选用例验收", "proof": self.proof()}
         self.apply("verification", material)
-        self.assertTrue(pr_ready.check(self.ws, "TAP-123", snapshot)["ready"])
+        self.assertTrue(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
         current = quality.replay(quality.load(self.ws, self.read()))
         self.assertEqual("UNKNOWN", current["verification"][self.repo]["ci"]["data"]["results"][0]["result"])
         # 明确缺口处置不能解除 PR Checks 条件。
@@ -2288,7 +2352,7 @@ class FeatureFlowTests(unittest.TestCase):
         check_state["history"].append({"head": head, "verdict": "skipped"})
         ci.save_state(self.ws, "TAP-123", "1", check_state)
         self.apply("verification", material)
-        self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["ready"])
+        self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
         check_state = ci.load_state(self.ws, "TAP-123", "1", self.repo)
         check_state["history"].append({"head": head, "verdict": "success"})
         ci.save_state(self.ws, "TAP-123", "1", check_state)
@@ -2300,10 +2364,10 @@ class FeatureFlowTests(unittest.TestCase):
                          "proof": self.proof()}})
         self.checkpoint("q4-acceptance")
         before = task_store.task_path(self.ws, "TAP-123").read_bytes()
-        self.assertTrue(pr_ready.check(self.ws, "TAP-123", snapshot)["ready"])
+        self.assertTrue(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
         self.assertEqual(task_store.task_path(self.ws, "TAP-123").read_bytes(), before)
         (worktree / "feature.py").write_text("def value():\n    return 2\n")
-        self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["ready"])
+        self.assertFalse(pr_ready.check(self.ws, "TAP-123", snapshot)["preflight_ready"])
 
 
 
