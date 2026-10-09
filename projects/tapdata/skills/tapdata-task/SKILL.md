@@ -13,7 +13,7 @@ metadata:
 
 ## 接管与恢复
 
-需要应用开发环境或启动联调时，读取 [TapData 开发指引](../../runbooks/tapdata-development.md)。TapData 代码变更以 CI 集成测试为主要验证路径，使用 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)按 Wiki 规范和任务源码完成覆盖判断、用例编写、测试及报告分析。Jira 关联 Test 检查始终保留；用例是否在当前会话开发由用户决定，不因发现关联 TapTest 或覆盖缺口自动进入 TapTest 开发。仅在用户选择当前会话处理 TapTest（t-layer3-test）开发或执行时，读取 [TapTest 开发指引](../../runbooks/taptest-development.md)，在已确认范围和授权内推进。已有明确选择直接复用；需要追加仓库或改变范围时按同周期方案返工处理。TapTest 不进入 Java Maven 流程，两者分别返回证据，主流程统一处理授权和质量记录。
+需要配置、部署、更新、检查、切换或卸载工位 Docker 测试环境时，使用 [tapdata-test-env](../tapdata-test-env/SKILL.md)，任务释放或清理前先卸载该 Skill 管理的容器。需要应用开发环境或启动联调时，读取 [TapData 开发指引](../../runbooks/tapdata-development.md)。TapData 代码变更以 CI 集成测试为主要验证路径，使用 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)按 Wiki 规范和任务源码完成覆盖判断、用例编写、测试及报告分析。Jira 关联 Test 检查始终保留；用例是否在当前会话开发由用户决定，不因发现关联 TapTest 或覆盖缺口自动进入 TapTest 开发。仅在用户选择当前会话处理 TapTest（t-layer3-test）开发或执行时，读取 [TapTest 开发指引](../../runbooks/taptest-development.md)，在已确认范围和授权内推进。已有明确选择直接复用；需要追加仓库或改变范围时按同周期方案返工处理。TapTest 不进入 Java Maven 流程，两者分别返回证据，主流程统一处理授权和质量记录。
 
 一般架构、实现和非集成测试审查需要 Wiki 参考资料时，使用 [tapdata-wiki](../tapdata-wiki/SKILL.md)，按项目 Profile 引用阅读中央共享 Wiki，并以当前工位 source 内任务对应版本源码核验。集成测试需求、设计、编写和报告分析统一先进入 [tapdata-ci-test](../tapdata-ci-test/SKILL.md)，由它按需使用 tapdata-wiki；传递本轮已有且适用的查询结果，避免重复查询。Wiki 由研发显式准备和更新，不增加任务开始刷新步骤；不可用时继续有充分源码依据的工作。
 

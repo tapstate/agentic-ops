@@ -123,7 +123,7 @@ def formal_checks(paths):
     paths = sorted(set(paths))
     if not paths or any(path.startswith(FULL_PREFIXES) or path in SHARED_TEST_FIXTURES for path in paths):
         return FULL_ACCEPTANCE_CHECKS
-    if any(path.startswith("projects/") and not any(part in path for part in ("/scripts/", "/tests/", "/runbooks/")) for path in paths):
+    if any(path.startswith("projects/") and "/runbooks/" not in path for path in paths):
         return FULL_ACCEPTANCE_CHECKS
     suites, unmapped = select([path for path in paths
                                if not (path.endswith(".md") and (path.startswith("docs/") or "/runbooks/" in path))])

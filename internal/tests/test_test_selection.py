@@ -134,7 +134,8 @@ class TestSelectionTests(unittest.TestCase):
                  "internal/test_selection.py", "internal/story_gate/service.py", ".githooks/pre-commit",
                  "tests/test_station_lifecycle.py", "tests/test_station_resources.py", "tests/test_contracts.py",
                  "tests/test_station_source.py", "unknown/new.py", "docs/example.py", "docs/user-stories/v1/int-001.md", "projects/tapdata/quality.json",
-                 "projects/tapdata/skills/tapdata-task/SKILL.md")
+                 "projects/tapdata/skills/tapdata-task/SKILL.md", "projects/tapdata/scripts/test_environment.py",
+                 "projects/tapdata/scripts/test-environment-entrypoint.sh", "projects/tapdata/tests/test_test_environment.py")
         for path in paths:
             with self.subTest(path=path):
                 self.assertEqual(test_selection.formal_checks(["tests/test_quality.py", path]), FULL_ACCEPTANCE_CHECKS)
