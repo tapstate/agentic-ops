@@ -104,7 +104,7 @@
           "local_sources": ["facts.fix_plan"],
           "collect_at": "Q2 方案确认并回写时",
           "auto_fill": false,
-          "guidance": "从已确认 fix_plan 和根因证据整理失效机制、触发条件、影响与证据，先回填 Jira 并回读；禁止生成未确认结论。"
+          "guidance": "从已确认实施方案和根因证据整理实现方式、范围、验收、风险与回滚，写入 Issue Analysis 并回读；禁止生成未确认结论。"
         },
         "fix_details": {
           "aliases": ["customfield_10093", "Fix Details"],
@@ -209,7 +209,7 @@
               "local_sources": [
                 "facts.implementation_plan"
               ],
-              "collect_at": "Q2 后准备，Tests Passed 前核对",
+              "collect_at": "Q2 方案评审确认，Tests Passed 前复用并核对变化",
               "auto_fill": false,
               "guidance": "读取当前 Jira 表单和已确认测试方案；审批结果由实际审批人确认，不能根据单测 PASS 猜填。"
             },

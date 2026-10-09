@@ -63,7 +63,7 @@ TapData 功能与缺陷在同一次 Q2 方案确认中分别把 `integration_tes
 
 results 中 result 使用 PASS/FAIL/UNKNOWN/NOT_RUN/SKIPPED。PASS 另需报告中的 tests、failures、errors、skipped 非负整数，tests 必须大于零，其余必须为零。非 PASS 保留原结果；若研发明确接受该项缺口，提供 decision，包含 reason、uncovered（精确等于该 scope）、follow_up、proof（actor/source=user_message/reference/at）。不能用一项决定覆盖其它范围。review 的 accepted_gap 也提供这组明确处置。
 
-没有 CI 运行时，CI 材料使用 `run_status=not_triggered`、当前完整 `head_revision`，`source_ref` 引用 PR/触发配置的真实回读，所有 results 保持 `NOT_RUN`，不得填写 run_ref、attempt、checkout_ref。已有运行但未执行集成测试仍使用该运行的真实信息；未触发、跳过、零用例、缺报告分别写入 report_ref 引用的缺口分析，使用 NOT_RUN/SKIPPED/UNKNOWN，不能借其它 Checks 成功填写 PASS。完全未触发时，PR Checks 自身缺失仍按原规则阻止 PR Ready。
+没有 CI 运行时，CI 材料使用 `run_status=not_triggered`、当前完整 `head_revision`，`source_ref` 引用 PR/触发配置的真实回读，所有 results 保持 `NOT_RUN`，不得填写 run_ref、attempt、checkout_ref。已有运行但未执行集成测试仍使用该运行的真实信息；未触发、跳过、零用例、缺报告分别写入 report_ref 引用的缺口分析，使用 NOT_RUN/SKIPPED/UNKNOWN，不能借其它 Checks 成功填写 PASS。完全未触发时仍需记录真实观察；是否提审按下述 PR Ready 具体 Checks 例外决定，不能改写为 PASS。
 
 发现这些缺口时主动请求研发明确本次仓库/PR Head、具体未覆盖场景、原因及补测/延期/风险处置；待回复时可保存无 decision 的原始材料，工具提示缺口未处置。研发决定仅解除该范围的材料缺口待决状态，不修改原始结果，不替代选定用例验收、失败修复、PR Checks 或 Jira 服务端条件。确认框架不支持时，先检索已有跟进事项，再询问是否创建或关联 Jira；建票决定和本次缺口处置分别记录，Jira 链接不充当 `proof.source=user_message`。
 
@@ -229,8 +229,8 @@ python3 "$agenticops_root/workflow/jira_status.py" complete --expected-run-id "$
 | `In Progress` | Assignee / Engineering DRI | 无可替代的本地事实 | 接管前核对当前 Jira 用户与 Assignee；不一致不改派，跳过转换 |
 | `Tests Passed` | Issue Classification、Root Cause Category | `facts.fix_plan` 仅提供已确认根因依据 | Q2 形成；Jira 枚举值由责任人选择，不从文本猜测 |
 | `Tests Passed` | Module | 任务 `repositories` 与问题归属证据 | 目标仓库确认时形成；映射不唯一时人工选择最终一级 Module |
-| `Tests Passed` | Issue Analysis | `facts.fix_plan`、Q2 已回读评论 | Q2 后补失效机制、触发条件、影响与证据，不生成未确认结论 |
-| `Tests Passed` | Fix Details | `facts.fix_plan`、实际提交、Q4 验证 | 实现与验收后补处理方式、结果、边界和限制；计划不能冒充完成事实 |
+| `Tests Passed` | Issue Analysis | `facts.fix_plan`、已确认方案和依据 | Q2 将实施方案写入字段；评论只引用阶段结论，不作为方案全文来源 |
+| `Tests Passed` | Fix Details | 实际代码变更、提交及 Q4 验证 | 实现与验收后写入修复总结、结果、边界和限制；计划不能冒充完成事实 |
 | `Tests Passed` | Tester、Test can be automated | Q2 验收方案及实际责任人 | 由责任人确认；手工用例可选 `No`，但不等于免测 |
 | `Tests Passed` | Fix Version | `facts.issue_version_plan` 只提供版本与修复线依据 | Tests Passed 前选择实际交付版本；不得把分支名或影响版本猜成 Jira 选项 ID |
 | `Tests Passed` | Xray Test 关联 | Q1-Q4 检查项和 Jira「已链接工作项」中的 Test 任务 | 正常路径至少关联一项正式 Test 任务；每项均需以 PASS 执行证据获得用户 `accept` 确认，本地检查项不能替代 Jira 关联 |
@@ -239,6 +239,12 @@ python3 "$agenticops_root/workflow/jira_status.py" complete --expected-run-id "$
 转换面板实时返回的 required fields 是本次尝试的最终事实源；上表用于提前采集和解释，不覆盖 Jira Workflow。若本地来源已具备，Agent 引导责任人据此回填；若来源缺失、值需专业判断、选项 ID 无法可靠解析或写后回读不一致，就跳过本节点转换，保留具体字段和 Jira 原始错误的脱敏摘要，在 PR Ready 一次列全人工事项。
 
 ## PR Ready 核对
+
+PR Ready 的定义以[术语表](../glossary.md)为准：所有目标 PR 已原生推进到 GitHub Ready for review，并回读确认。`pr_ready.py` 不执行外部写入，`preflight_ready=true` 仅表示提审前置条件满足；`ready=true` 还要求每个 PR 的身份、当前完整 Head、OPEN 和 isDraft=false 均已回读确认。`submission_status` 返回 blocked/pending/confirmed，`remaining` 只列未完成项。未发起或未回读时不能报告“已发起审查”或“等待审查”。GitHub Ready 不保证已存在审查人，回读后按已授权安排核对并补齐，不提前要求所有仓人工指定。
+
+原生工具使用现有任务授权执行 ready，结果未知先回读同一 PR；确认已退出 Draft 的仓库不重复写入，其余仓逐个处理。回读证据使用 `task.py interaction-path --name pr-ready-input.json` 在当前 run 分配的文件，根字段为 schema_version=1、issue_key、run_id、checks_exceptions、pull_requests。`pull_requests` 每项提供 repository、number、url、headRefOid、state、isDraft、source_ref、observed_at（带时区）。工具只验证提供的证据，不认证来源或保证之后外部状态不变；Agent 在执行前及最终报告前取得实时原生回读。保留历史原始回读，在该输入文件更新当前观察；不新增状态账本。退出码 0 表示已回读 Ready，3 表示未完成（看 preflight_ready 区分阻塞与待执行），4 表示输入错误。
+
+用户明确接受本次具体 Checks 缺口并要求提审时，将决定放入 `checks_exceptions`：repository、pr、完整 head、checks_digest、decision=accept_checks_and_submit、reason 和原有 proof（决定者、真实决定来源、带时区时间）。checks_digest 使用 `pr_ready.checks_digest` 对当前 CI history 最新项的 head/verdict/checks/failing 生成；每次重新观察后核对实际集合，时间戳变化不单独使同一决定失效。仅接纳 none/start_timeout、skipped、failure；pending/finish_timeout、未知事实及缺少当前 Head 的观察不支持例外。未取得真实来源、权限不足或外部写结果不明时停止受影响操作。原始 Checks 不改成 success，例外不豁免关联用例、必要质量验证、服务端保护或合并授权。Head 或实际缺口变化需要新决定；已有精确决定覆盖提审时不重复询问。
 
 正式提审前，先为每个任务仓库记录 PR，并使用 `ci.py watch` 取得当前 PR Head 的最新 Checks。Agent 同时从 Jira 读取当前任务 `fields.issuelinks` 与每个关联 Test 的 Test Details：只接受 Project 配置的关系（TapData 缺陷侧为 `tests`）指向、且任务类型为 `Test` 的关联项，输入 `pr_ready.py`：
 
@@ -270,7 +276,7 @@ python3 "$agenticops_root/workflow/pr_ready.py" \
   --issue-key "$task_key" --jira-input "$jira_test_tasks" --dir "$project_station"
 ```
 
-工具只在以下三组均通过时返回 ready：从 Jira「已链接工作项」派生的受管 Test 非空，每个 Test 的 Test Type 与用例版本可回读，且Manual/Unit 在 Q4 以同一 `case_ref`、当前 Jira 用例版本和对应方式建立检查项并由用户基于当前 SHA 的 PASS 证据逐项 `accept`；TapTest 使用下述 Jira 状态判定；每个任务仓库都记录 PR，最新 Checks 为 `success` 且 Head 等于当前任务代码；Q1-Q4 及其检查项均有效，Jira 评论同步仅列警告。Jira Test 工作项本身不要求为 Done。没有符合关系和类型的 Test、未逐项确认、Checks 为空、跳过、未知、等待或失败、Head 漂移、`defer/accept_risk/rework` 都会列为待办。`Test Coverage Decision / Exception Details` 只能记录合规例外，不能替代 Test 关联。Jira 状态同步失败单独列入 `jira_status_todos`，不改变三类验收事实；Engineering DRI 处理待办后重新核对，并手工执行 `Pull Request Submitted`。
+工具只在以下条件满足时返回 preflight_ready：从 Jira「已链接工作项」派生的受管 Test 非空，每个 Test 的 Test Type 与用例版本可回读，且Manual/Unit 在 Q4 以同一 `case_ref`、当前 Jira 用例版本和对应方式建立检查项并由用户基于当前 SHA 的 PASS 证据逐项 `accept`；TapTest 使用下述 Jira 状态判定；每个任务仓库都记录 PR，最新 Checks 为 `success` 或存在上述有效具体提审例外，且 Head 等于当前任务代码；Q1-Q4 及其检查项均有效，Jira 评论同步仅列警告。Jira Test 工作项本身不要求为 Done。没有符合关系和类型的 Test、未逐项确认、Head 漂移、`defer/accept_risk/rework` 都会列为待办；Checks 缺失、跳过或失败按具体例外核对，未知或等待不能据此放行。`Test Coverage Decision / Exception Details` 只能记录合规例外，不能替代 Test 关联。Jira 状态同步失败单独列入 `jira_status_todos`，不改变三类验收事实；Engineering DRI 处理待办后重新核对，并手工执行 `Pull Request Submitted`。
 
 ## 影响版本与优先修复线
 
@@ -395,13 +401,15 @@ python3 "$agenticops_root/workflow/quality.py" apply \
 
 ## 回写和恢复
 
-TapData 每个检查点确认后尽力回写 Jira，评论失败或未回读仅产生警告，不阻止阶段推进或 PR Ready。使用 status 返回的简洁 publication_body；完整结构化证据保存在本地。真实测试、方案确认及必要验收条件仍须满足。
+实施方案（功能的 implementation_plan、缺陷的 fix_plan）写入 Issue Analysis；实际提交、执行结果、验收决定和剩余限制形成 Fix Details。`jira_status collect` 在对应阶段提供人读字段提议，不自动确认或覆盖 Jira 已有内容；已有内容需合并人工修改，确认完整字段值后原生写入并回读。字段写入失败只留下同步待办，不重复在评论发布全文。Story Test Design Review Result 在 design_review 随方案一次确认实际审批选项，acceptance 复用有效决定；方案、选项或责任人变化后重新核对，不根据 PASS 猜填审批结论。
+
+TapData 每个检查点确认后尽力回写 Jira，评论失败或未回读仅产生警告，不阻止阶段推进或 PR Ready。使用 status 返回的阶段总结 publication_body；实施方案写入 Issue Analysis，修复总结写入 Fix Details，均通过现有字段采集包确认、原生写入并回读。评论不展开方案正文或结构化 JSON，也不冒充字段同步完成；完整结构化证据保存在本地。真实测试、方案确认及必要验收条件仍须满足。
 
 方案确认时一并告知用户将把 Q1/Q2、合格的 Q3 首轮事实和最终 Q4 内容回写 Jira。用户可在同一真实回复确认方案、验收方式、任务授权及合格 Q3 的自动回写/推送/Draft PR；该回复可被引用完成多项选择和评论确认，不要求逐条回复。Q4 的 Manual/Unit 仍须基于当前 SHA 的证据请求最终验收；全部为 TapTest 时按状态自动汇总。若内容、授权范围或风险发生实质变化，再请求缺少的决定；不能由 Agent 自行编造用户同意。每个步骤成功后继续已授权编码、验证、提交/推送、PR、CI 和回写，不把一次工具成功当作最终停点。合并、发布等独立授权边界不变。
 
 确需停下时，必须解释当前检查点要核对什么，并把 `handoff` 转成用户可执行的说明：用例/步骤、预期、执行人、环境、仓库及完整 SHA，要求返回日志/报告与实际结果，列出可选处置和仍可继续的工作。缺少 SHA 的日志先补来源，不猜目标版本；恢复同一 run 时不重复问已有效确认的问题。
 
-`evidence.py` 生成可审阅证据摘要。将准备发送的精确正文保存为草稿，展示给用户确认后，先 `prepare_write`，再由原生 Jira 工具发送，随后导入回执和回读。`verified` 仅代表该评论的目标、编号和正文匹配，不代表 Jira 状态流转或任务发布完成。Markdown／ADF 被外部工具规范化时应使用双方一致的正文表示；不匹配时保留现场，不能忽略差异宣布成功。
+`evidence.py` 生成可审阅证据摘要。将准备发送的精确正文保存为草稿，展示给用户确认后，先 `prepare_write`，再由原生 Jira 工具发送，随后导入回执和回读。`verified` 仅代表该评论的目标、编号和正文匹配，不代表 Jira 状态流转或任务发布完成。默认严格核对正文。若已核验原文是字面文本，且原生工具以 Markdown 返回，可在 readback 声明 body_representation=literal-markdown-v1，仅接纳 Jira 在字面 [, ], _ 和 * 前增加反斜杠的转换；原文已有反斜杠、\n、Unicode 转义、链接、代码及其它正文差异不反转义。含 Markdown 格式语义或非文本 ADF 节点时不得使用此表示，需取得双方一致的原生表示后严格核对；不匹配保留现场，不重发。
 
 发送前正文或关联质量快照变化，会使确认失效。检查点评论只绑定该点快照和处置，后续无关阶段不使它失效；普通汇总草稿仍绑定整体快照。拿到意图后发生超时或中断，先回读核对，不重复调用新增评论。未拿到评论 ID 时只能通过可核实的原始请求与远端记录定位；多个同文评论无法消歧时人工接力。`operation_id` 是本地关联编号，不是 Jira 服务端幂等键。
 
@@ -417,7 +425,7 @@ Q1 仅绑定准入事实和已到期项；Q2 绑定修复方案、稳定用例�
 
 本地 `accept_risk` 不等于公司的免测批准。T3 标准中的低风险例外仍需核对优先级、替代验证、责任和回滚措施，以及规定的模块负责人和审批人批准；P0/P1、数据安全、权限或高可用等要求不得据此自动豁免。发生冲突时先报告用户并确认后续处理，保留 Jira 的真实状态。
 
-Jira 评论采用简洁可读文本。当前 Rovo addCommentToJiraIssue 的 commentBody 为 Markdown 字符串，不接受直接传入 ADF 对象；不增加重复 Jira 客户端。正文只规范化 CRLF 和行尾空白，仍核对完整可见文本与目标、评论编号。短标识用于定位，不独立证明内容正确；若工具返回 ADF，由无状态协议转换提取文本，不能靠猜测反转义伪造回读。
+Jira 评论采用简洁可读文本。当前 Rovo addCommentToJiraIssue 的 commentBody 为 Markdown 字符串，不接受直接传入 ADF 对象；不增加重复 Jira 客户端。默认正文只规范化 CRLF 和行尾空白；已核验字面文本可按[回写和恢复](#回写和恢复)显式声明受限转换表示，仍核对完整可见文本与目标、评论编号。短标识用于定位，不独立证明内容正确；若工具返回 ADF，由无状态协议转换提取文本，不能靠猜测反转义伪造回读。
 
 每个阶段均可运行 task.py next 查看 blockers 与 warnings，PR 提交后运行 evidence.py 汇总执行过程被跳过的处理与警告。外部同步失败只暂停该写入或重复尝试，完整测试、CI 和用户验收条件继续由检查点核验。
 

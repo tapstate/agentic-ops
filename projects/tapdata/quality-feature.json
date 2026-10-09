@@ -13,7 +13,7 @@
   ],
   "structured_fix_plan": false,
   "publication_mode": "checkpoint",
-  "comment_format": "human-text-v1",
+  "comment_format": "human-text-v2",
   "task_classes": [
     "feature_change"
   ],

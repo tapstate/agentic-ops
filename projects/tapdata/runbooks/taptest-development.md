@@ -88,7 +88,7 @@ skip_jira=true send_lark_msg=false taptest_repeat_until_fail=false \
 
 给出需求/Xray/选择器、产品与测试源码版本、实际加载制品、环境、命令、结果、日志引用和未覆盖范围。分别说明“用例已设计、脚本已完成、实际执行结果”，避免把阶段成果混成通过。
 
-功能验证、GitHub Ready for Review、AgenticOps PR Ready 与 Jira 状态分开报告；缺少 CI 或 Checks 被跳过不能靠本地 PASS 改写。具体接纳与推进使用[质量检查与证据](../../../docs/usage/quality-checkpoints.md)，包括其中 TapTest 的 Jira 状态依据，本指引不复制门禁规则。
+功能验证、PR 提审预检、已回读 GitHub Ready for review 的 PR Ready 与 Jira 状态分开报告；缺少 CI 或 Checks 被跳过不能靠本地 PASS 改写。具体接纳与推进使用[质量检查与证据](../../../docs/usage/quality-checkpoints.md)，包括其中 TapTest 的 Jira 状态依据，本指引不复制门禁规则。
 
 ## 源码依据
 

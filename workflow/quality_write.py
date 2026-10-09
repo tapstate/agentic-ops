@@ -20,6 +20,8 @@ def checkpoint_body(model, checkpoint, rules, ctx):
     view = quality.checkpoint_view(model, checkpoint, rules, ctx)
     if not view["reviewed"]:
         raise ValueError("检查点尚未有效确认，不能生成已确认评论")
+    if rules.get("comment_format") == "human-text-v2":
+        return stage_summary(model, checkpoint, rules, ctx, view)
     if rules.get("comment_format") == "human-text-v1":
         decision = (view.get("decision") or {}).get("decision", {})
         facts = ctx["facts"]
@@ -187,7 +189,7 @@ def reduce(model, command, rules, ctx):
             if p.get("reason"):
                 record["reason"] = p["reason"]
         else:
-            if any(p[k] != record[k] for k in ("site", "issue_key")) or canonical_text(p["body"]) != canonical_text(record["body"]):
+            if any(p[k] != record[k] for k in ("site", "issue_key")) or not body_matches(record["body"], p["body"], p.get("body_representation", "exact-text")):
                 raise ValueError("回读目标或正文不匹配，保持待核对，不得重发")
             if record.get("comment_id") and p["comment_id"] != record["comment_id"]:
                 raise ValueError("回读评论 ID 与回执不匹配")
@@ -199,6 +201,131 @@ def reduce(model, command, rules, ctx):
 def canonical_text(body):
     """仅规范化换行与行尾空白；不猜测 Markdown 转义、不忽略正文差异。"""
     return "\n".join(line.rstrip() for line in body.replace("\r\n", "\n").split("\n")).strip()
+
+
+def body_matches(expected, actual, representation="exact-text"):
+    """只允许经核验的字面文本转换；原文反斜杠、链接和代码不解码。"""
+    expected, actual = canonical_text(expected), canonical_text(actual)
+    if expected == actual:
+        return True
+    if representation != "literal-markdown-v1":
+        return False
+    # Jira Markdown 回读会为字面 [, ], _ 和 * 加反斜杠。
+    # 向前逐字符匹配而非反转义，保留原文已有反斜杠及所有其它差异。
+    index = 0
+    for char in expected:
+        if char in "[]_*" and actual[index:index + 2] == "\\" + char:
+            index += 2
+        elif actual[index:index + 1] == char:
+            index += 1
+        else:
+            return False
+    return index == len(actual)
+
+
+def stage_summary(model, checkpoint, rules, ctx, view):
+    """评论只承载阶段结论；方案及修复正文分别回填 Jira 专用字段。"""
+    decision = (view.get("decision") or {}).get("decision", {})
+    lines = ["%s：%s" % (ctx["issue_key"], view["handoff"]["title"]),
+             "处置：%s；%s" % (decision.get("outcome", "observed"),
+                                  decision.get("reason", "已核验首轮执行事实"))]
+    if checkpoint == rules["selection_checkpoint"]:
+        lines.append("实施方案：写入 Issue Analysis 后回读核验；本评论不代替字段同步。")
+    if checkpoint == rules.get("tests_passed", {}).get("checkpoint"):
+        lines.append("修复总结：写入 Fix Details 后回读核验；本评论不代替字段同步。")
+    for repo, binding in sorted(ctx.get("repositories", {}).items()):
+        lines.append("仓库 %s；版本 %s" % (repo, binding.get("live_revision", binding.get("base_sha", "待核验"))))
+    for key, item in model["items"].items():
+        plan = item["plan"]
+        due = key in view["due"] or (view.get("mode") == "automatic" and plan["timing"] == "after_fix")
+        if not due:
+            continue
+        disposition = (item.get("decision") or {}).get("decision", {})
+        lines.append("验证 %s：%s；版本 %s；处置 %s；%s" % (
+            plan["case_ref"], plan["method"], plan["target_revision"],
+            disposition.get("outcome", "待验收"), disposition.get("reason", "")))
+        executions = [e for e in item["executions"] if (
+            e["id"] == disposition["evidence_id"] if disposition.get("evidence_id") else
+            all(e[field] == plan[field] for field in ("case_ref", "case_version", "method", "repository", "target_revision")))]
+        for execution in executions[-1:]:
+            lines.append("结果：%s；版本：%s；证据：%s" % (
+                execution["raw_result"], execution["target_revision"], execution["source_ref"]))
+        assessment = quality.item_view(item, rules, ctx).get("jira_status")
+        if assessment:
+            lines.append("Jira 状态判定：%s；来源：%s" % (
+                "满足" if assessment["passed"] else "未满足", assessment.get("source_ref", "待回读")))
+        _follow_up(lines, disposition)
+    for repo, entries in sorted(model.get("verification", {}).items()):
+        for kind in rules.get("verification_checkpoints", {}).get(checkpoint, []):
+            if kind not in entries:
+                continue
+            material = entries[kind]["data"]
+            lines.append("验证 %s / %s；版本 %s；证据 %s" % (
+                repo, kind, material["target_revision"], material["source_ref"]))
+            for result in material.get("results", []):
+                lines.append("范围 %s：%s；用例/失败/错误/跳过计数 %s/%s/%s/%s；报告 %s" % (
+                    result["scope"], result["result"], result.get("tests", "未知"), result.get("failures", "未知"),
+                    result.get("errors", "未知"), result.get("skipped", "未知"), result["report_ref"]))
+                risk = result.get("decision") or {}
+                if risk:
+                    lines.append("缺口：%s；决定：%s" % (risk.get("uncovered", result["scope"]), risk.get("reason", "待核验")))
+                    _follow_up(lines, risk)
+    _follow_up(lines, decision)
+    lines.append("记录：AO-" + quality.digest([ctx["issue_key"], ctx["run_id"], checkpoint, view["digest"]])[:20])
+    return "\n\n".join(lines)
+
+
+def _follow_up(lines, decision):
+    if any(decision.get(key) for key in ("follow_up", "owner", "deadline")):
+        lines.append("后续：%s；责任人：%s；期限：%s" % (
+            decision.get("follow_up", "待确认"), decision.get("owner", "待确认"), decision.get("deadline", "待确认")))
+
+
+def jira_field_body(base, task, field):
+    """为现有 Jira 采集包提供人读提议；不发送、不自动确认或覆盖字段。"""
+    if field == "issue_analysis":
+        facts = task.get("facts", {})
+        plan = facts.get("implementation_plan") or facts.get("fix_plan")
+        if not plan:
+            return None
+        labels = {"objective": "目标", "changes": "实施变更", "acceptance": "验收安排",
+                  "risks": "风险", "rollback": "回滚", "scope_rationale": "范围依据",
+                  "acceptance_mapping": "验收映射", "delivery_dependencies": "交付依赖",
+                  "environment_readiness": "环境准备", "integration_tests": "集成测试",
+                  "reference_implementations": "同类实现", "public_layer_design": "公共层设计",
+                  "problem_statements": "问题", "hypotheses": "根因假设", "blocking_inputs": "待决输入",
+                  "test_links": "测试关联", "repository": "仓库", "module": "模块", "reason": "依据",
+                  "expected": "预期", "steps": "步骤", "executor": "执行人", "source_ref": "证据",
+                  "scope": "范围", "method": "方式", "criterion": "验收条件", "case_ids": "用例",
+                  "text": "说明", "status": "状态", "rationale": "依据", "depends_on": "依赖"}
+        def render(value, label="实施方案", depth=0):
+            prefix = "  " * depth
+            if isinstance(value, dict):
+                lines = [prefix + label + "："]
+                for key, child in value.items():
+                    lines.extend(render(child, labels.get(key, key), depth + 1))
+                return lines
+            if isinstance(value, list):
+                lines = [prefix + label + "："]
+                for index, child in enumerate(value, 1):
+                    lines.extend(render(child, str(index), depth + 1))
+                return lines
+            return [prefix + label + "：" + str(value)]
+        lines = render(plan)
+        if facts.get("scope_boundary"):
+            lines += render(facts["scope_boundary"], "范围边界")
+        return "\n".join(lines)
+    if field == "fix_details":
+        model = quality.replay(quality.load(base, task))
+        if not any(item["executions"] for item in model["items"].values()) and not model.get("verification"):
+            return None
+        rules, ctx = quality.config(base, task), quality.context(base, task)
+        checkpoint = rules.get("tests_passed", {}).get("checkpoint", "q4-acceptance")
+        view = quality.checkpoint_view(model, checkpoint, rules, ctx)
+        body = stage_summary(model, checkpoint, rules, ctx, view)
+        return "修复总结（%s）：\n\n%s" % ("已验收" if view["reviewed"] else "待验收", body.replace(
+            "修复总结：写入 Fix Details 后回读核验；本评论不代替字段同步。\n\n", ""))
+    return None
 
 
 def check_unresolved_runs(base, task, body):
