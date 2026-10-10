@@ -29,7 +29,7 @@
 
 成功标志：得到本次源码构建的可用制品，并能指出实际消费位置。记录制品 SHA-256；同名 Jar 或构建成功不证明应用加载了新代码。临时跳过测试只用于打包，测试结果另行记录。
 
-### Docker 测试环境的构建准备
+### Docker 开发环境的构建准备
 
 这是 Agent 内部准备入口，部署用户只确认[运行输入](test-environment.md#首次部署输入与配置命名)。生命周期脚本不提供假定分支的编译命令；根据实际 repository context 和源码脚本生成 [preparation 模板](../templates/station/test-env-preparation.json)，保存在 `config/tapdata-test-env/preparation/<name>.json`，不让用户填写 build/assets、驱动或心跳字段。不把 td2、某个任务编号、绝对临时文件或一次成功的分支配方写成默认值。
 

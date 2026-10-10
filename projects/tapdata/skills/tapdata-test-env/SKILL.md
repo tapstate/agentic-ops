@@ -1,13 +1,13 @@
 ---
 name: tapdata-test-env
-description: 配置、部署、更新、检查、切换或卸载 TapData 工位 Docker 测试环境；复用多份命名配置，每工位一个活动环境，按节点选择 TM、FE、APIServer，使用宿主机构建的完整 Launcher 和指定外部 MongoDB。不管理生产环境、数据库生命周期或源码分支。
+description: 配置、部署、更新、检查、切换或卸载 TapData 工位 Docker 开发环境；复用多份命名配置，每工位一个活动环境，按节点选择 TM、FE、APIServer，使用宿主机构建的完整 Launcher 和指定外部 MongoDB。不管理生产环境、数据库生命周期或源码分支。
 metadata:
   product: agenticops
 ---
 
-# TapData 测试环境
+# TapData 开发环境
 
-先读取工位绑定和[测试环境指引](../../runbooks/test-environment.md)。当前工位 config 保存多份配置，runtime 只保留一个活动现场；各配置共享当前工位源码，不把配置名称解释为分支或独立源码。使用工位绑定的 Product Root 中的项目脚本，不复制中央脚本到工位，不修改 `.agenticops/` 状态。
+先读取工位绑定和[开发环境指引](../../runbooks/test-environment.md)。当前工位 config 保存多份配置，runtime 只保留一个活动现场；各配置共享当前工位源码，不把配置名称解释为分支或独立源码。使用工位绑定的 Product Root 中的项目脚本，不复制中央脚本到工位，不修改 `.agenticops/` 状态。
 
 ## 首次部署：配置名 → 架构 → 模板 → 补齐 → 自动部署
 
@@ -17,7 +17,7 @@ metadata:
 2. 确认目标架构 `linux/amd64` 或 `linux/arm64`，不从宿主机架构推定。复用已确认值；首次未知时说明两项选择，不重复询问。
 3. 输出[运行配置模板](../../templates/station/test-env.json)，按[命名与输入合同](../../runbooks/test-environment.md#首次部署输入与配置命名)填入配置名、架构及已知默认值。展示可编辑的运行配置和文件位置，不展示构建、Maven、Jar 或内部 preparation 内容。用户可直接用自然语言补充，由 Agent 写入模板。
 4. 集中引导补齐缺项：节点组件、外部 Mongo 连接文件、产品模式、许可证文件及特殊端口/资源要求。默认先提出单节点 TM+FE；用户选 APIServer 才加入。所有节点至少一个 TM，Mongo 必须从容器可达。企业版本地 DAAS 在构建前取得许可证路径；只报告文件是否可用，不回显内容。产品模式作为本轮部署意图记录，不让用户修改 Maven Profile。已有数据库模式冲突时说明影响并等待具体决定，不能自动改库。
-5. 运行配置补齐后，Agent 按[项目开发指引](../../runbooks/tapdata-development.md#docker-测试环境的构建准备)完成工具、依赖、源码构建和完整装配，生成内部 preparation，再 `configure` 和 `deploy`。这部分属于已授权部署的准备工作；普通构建异常自行排查，只有真实缺少凭证、权限或人工决定才询问缺项，不把内部字段交给用户填写。
+5. 运行配置补齐后，Agent 按[项目开发指引](../../runbooks/tapdata-development.md#docker-开发环境的构建准备)完成工具、依赖、源码构建和完整装配，生成内部 preparation，再 `configure` 和 `deploy`。这部分属于已授权部署的准备工作；普通构建异常自行排查，只有真实缺少凭证、权限或人工决定才询问缺项，不把内部字段交给用户填写。
 
 部署前按 Runbook 只读检查 Mongo 目标库已有集合。发现旧表时展示库名/集合数及保留影响，询问用户保留还是清理；只有用户明确保留才使用 --reuse-mongo。用户选择清理时先提供绑定具体目标库的命令供其审核、复制执行；不能主动运行清理。只有用户明确输入对应命令并要求 Agent 代执行时才按该精确范围执行，回读后再部署。命令不能包含明文 URI/凭据，不删除整个 Mongo 实例或其它数据库。
 

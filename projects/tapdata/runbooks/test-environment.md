@@ -1,10 +1,12 @@
-# TapData 工位 Docker 测试环境
+# TapData 工位 Docker 开发环境
+
+本环境用于研发本地测试和联调。现有 `tapdata-test-env` Skill、脚本、配置及运行目录标识继续兼容，用户界面与指引统一称为“开发环境”。
 
 本指引负责命名环境配置、完整 Launcher 装配和本地 Docker 生命周期，由 [tapdata-test-env](../skills/tapdata-test-env/SKILL.md) 使用。源码构建方法仍以[构建测试指引](build-test-and-local-run.md)和当前工位分支为准；工位身份与任务退出以[工位合同](../../../docs/architecture/single-task-station.md)为准。本能力不修改 `.agenticops/` 或引入环境池；配置和运行目录都是可选增量，兼容 epoch 26 的原有工位。
 
 ## 首次部署输入与配置命名
 
-首次部署按“输入环境配置名 → 确认部署架构 → 输出配置模板 → 引导补齐 → 自动部署”进入。用户只需要运行意图，构建准备由 [项目开发指引](tapdata-development.md#docker-测试环境的构建准备)负责；已有配置或事实直接复用。
+首次部署按“输入环境配置名 → 确认部署架构 → 输出配置模板 → 引导补齐 → 自动部署”进入。用户只需要运行意图，构建准备由 [项目开发指引](tapdata-development.md#docker-开发环境的构建准备)负责；已有配置或事实直接复用。
 
 | 输入 | Agent 的引导与默认值 |
 |---|---|
@@ -35,7 +37,7 @@ TM、FE、APIServer 分别映射 Launcher 的 `start frontend`、`start backend`
 
 ## 配置准备与预检
 
-用户配置的 schema_version 为 2；节点、镜像、平台、Mongo 秘密路径、ports 和 java 是运行输入。Agent 依据[项目开发指引](tapdata-development.md#docker-测试环境的构建准备)生成独立 preparation，生命周期脚本合并后复用已有执行合同；旧 schema 1 继续兼容。`configure --env <name> --config <runtime.json> --preparation <preparation.json>` 先验证两份输入，普通配置错误不覆盖已保存配置或停止当前环境。只改运行配置时可省略 --preparation，复用已保存准备文件。
+用户配置的 schema_version 为 2；节点、镜像、平台、Mongo 秘密路径、ports 和 java 是运行输入。Agent 依据[项目开发指引](tapdata-development.md#docker-开发环境的构建准备)生成独立 preparation，生命周期脚本合并后复用已有执行合同；旧 schema 1 继续兼容。`configure --env <name> --config <runtime.json> --preparation <preparation.json>` 先验证两份输入，普通配置错误不覆盖已保存配置或停止当前环境。只改运行配置时可省略 --preparation，复用已保存准备文件。
 
 部署前核对 Docker CLI、Compose 与 daemon、秘密文件权限及端口。Mongo URI 的 localhost/127.0.0.1 不能代表宿主机，使用用户提供的容器可达地址；不猜测替换 URI。Mongo 的权限、TLS 与副本集必须由目标应用支持，不自动创建外部数据库或生成 TLS 材料。源码与目标 Linux 制品、模块加载、Java/Node 执行和副本成员可达性由项目准备及只读容器预检验证；准备失败继续不依赖缺项的工作并保留原环境。
 
