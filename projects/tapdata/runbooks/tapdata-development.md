@@ -29,6 +29,27 @@
 
 成功标志：得到本次源码构建的可用制品，并能指出实际消费位置。记录制品 SHA-256；同名 Jar 或构建成功不证明应用加载了新代码。临时跳过测试只用于打包，测试结果另行记录。
 
+### Docker 开发环境的构建准备
+
+这是 Agent 内部准备入口，部署用户只确认[运行输入](test-environment.md#首次部署输入与配置命名)。生命周期脚本不提供假定分支的编译命令；根据实际 repository context 和源码脚本生成 [preparation 模板](../templates/station/test-env-preparation.json)，保存在 `config/tapdata-test-env/preparation/<name>.json`，不让用户填写 build/assets、驱动或心跳字段。不把 td2、某个任务编号、绝对临时文件或一次成功的分支配方写成默认值。
+
+1. 核对 Docker、JDK、Maven、Node 与分支支持的包管理器。私有仓凭证和工具缺失在昂贵构建前定位，普通准备在部署授权内完成；需要额外第三方 Python 组件时遵循仓库决策规则。缺少 target/dist/node_modules 是准备工作，不代表源码没有部署能力。先定位真实 source 路径，不假定 application 仓的目录拼写。
+2. 通过现役 runtime-path 取得当前任务 Maven 仓库；无活动任务时用 `runtime/tapdata-test-env-maven/<name>`。将核验后的 Maven、JAVA_HOME、隔离仓库路径传给 [Maven 辅助脚本](../scripts/test-environment-maven.py)，每个子调用都使用该脚本或原生等价参数，不依赖顶层参数向下自动传递，不改用户 settings 或任务状态。
+3. build 按公共库 → 核心 → 企业消费者和所选连接器准备 cwd/argv，企业版本地 DAAS 同时使用 `enterprise,idaas`，按[依赖构建命令](build-test-and-local-run.md#依赖构建命令)核对有效资源。WebUI 使用分支已有的 DAAS 构建脚本。仅选择 APIServer 时准备其构建与装配。锁定 npm/pnpm 依赖，使用分支本地 pkg；不改锁文件或全局安装。包管理器版本取 package.json/锁文件，不继承历史研发指引的旧 workaround。
+4. 核对宿主构建与目标 Linux 执行。macOS Node 用于包管理，包中 Node、Launcher 必须为用户选择的 Linux 架构；pkg target 与 Linux Node 发行文件取当前分支支持的组合，不从 Docker 引擎架构推定。直接构建所需组件时保留整包的装配语义，不盲目执行含 git pull、镜像推送、远端发布的脚本，不改为直接启动 Jar。
+5. assets 从本轮输出取得两个 Launcher 入口、TM exec Jar、FE/Engine Jar、WebUI、Connector、应用配置和日志资源、Linux Node。对照原生打包函数核验企业许可证模块注入、idaas TM 配置、OEM 和 `.version` 元数据；完整发行目录可映射到 `.`。当前 Launcher 消费 RC4 的 `.version` 时可用 [版本元数据辅助脚本](../scripts/test-environment-version.js)，传入 Launcher/核心源码/输出文件绝对路径，使用源码 git describe 与目标 Launcher 自有编码，不伪造发布版本。协议不同则使用分支原生入口。Node 常见包内路径 `lib/NDK/node/bin/node`，必须核对实际文件。
+6. preparation 的 mongo_driver 指向 Launcher 已声明的 node_modules，构建可先准备依赖；探测将其挂载 /driver 并设置 NODE_PATH=/driver。heartbeat 从当前分支实际监控源码核对，常见为 ClusterState/uuid/systemInfo.time，默认最大间隔 60 秒、启动 300 秒，不扩大阈值掩盖心跳停止。填完 preparation 后由配置和部署入口执行，不先启动已知缺项的候选。
+
+Maven 辅助调用结构（绝对路径由 Agent 核验后替换）：
+
+```sh
+python3 <product-root>/projects/tapdata/scripts/test-environment-maven.py \
+  --maven <absolute-mvn> --java-home <absolute-jdk-home> \
+  --local-repository <verified-maven-runtime> -- install -Penterprise,idaas -DskipTests
+```
+
+所有 build 命令使用 argv 数组，不进行 shell 二次解析；项目 shell 入口显式 bash。源码指纹在构建前后核验，变化时保留候选不部署；不使用旧 bundle 或同名缓存 Jar 冒充本轮成果。完整包缺项、架构、Java/Node 和 Mongo 副本成员通过后才替换原环境。许可证文件预检只能证明存在，启动后还需验证其有效性及匹配条件。构建失败日志仅私有保留，用户只看到具体缺项、影响和继续路径。
+
 ## 4. 启动并逐层核验
 
 | 顺序 | 操作 | 成功标志 |

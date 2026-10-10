@@ -2,6 +2,8 @@
 
 `contracts/` 维护显式 Gate API、声明式 Agent 接线与工位状态的机器合同。本文导航各合同职责与兼容边界；分层与执行保证以[工程架构](../docs/architecture/agenticops-v1-architecture.md)为准。
 
+Agent 启动的默认参数归 `adapter-manifest.schema.json` 的可选 `launch.arguments` 声明，Bootstrap 按参数数组传递，再追加使用者参数，不执行 shell 二次解析。旧 Manifest 不声明时仍使用空参数数组；这不改变工位状态格式或 epoch。Codex 的当前默认值与原生审批含义见[Codex Adapter](../adapters/agents/codex/README.md)。
+
 质量 receipt 增加 deferred 与可选 reason：表示已知未写入，必须说明原因；unknown 表示结果不明，不得盲目重发。同步状态不决定本地阶段通过。issue-versions 输入的 effective 保存 versions、execution_branch 和 proof，observed 保留初始 Jira 快照；版本无需 Jira ID，也不映射分支。旧事件按记录时规则重放，人读评论格式由当前 Project 配置决定。
 
 - `gate-request.schema.json`：Adapter 交给 Gate 的标准操作请求。

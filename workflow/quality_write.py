@@ -235,6 +235,9 @@ def stage_summary(model, checkpoint, rules, ctx, view):
         lines.append("修复总结：写入 Fix Details 后回读核验；本评论不代替字段同步。")
     for repo, binding in sorted(ctx.get("repositories", {}).items()):
         lines.append("仓库 %s；版本 %s" % (repo, binding.get("live_revision", binding.get("base_sha", "待核验"))))
+        lines.append("接续来源：工作分支 %s；目标分支 %s；历史基线 %s；GitHub 分支/PR 需原生回读核验" % (
+            binding.get("work_branch") or "待补齐", binding.get("base_branch") or "待补齐",
+            binding.get("base_sha") or "待补齐"))
     for key, item in model["items"].items():
         plan = item["plan"]
         due = key in view["due"] or (view.get("mode") == "automatic" and plan["timing"] == "after_fix")

@@ -292,6 +292,10 @@ tapdata-common-lib
 <absolute-mvn> -Dmaven.repo.local=<local_repository> clean package -T1C -pl <connector-module> -am
 ```
 
+企业版同时启用目标分支现役的 `enterprise`、`idaas` Profile，例如在原 Maven 参数中加入 `-Penterprise,idaas`。`enterprise` 选择企业实现，`idaas` 选择本地企业版 TM 的资源与运行模式；只启用前者仍可能打入默认 DFS 开发配置。IDE 勾选后刷新 Maven 依赖；CLI 用相同 Profile 重新解析并构建，核验有效 POM、可执行 Jar 内企业模块及生成的配置，不以 Jar 名称判断版本。依赖顺序仍是公共库 → 核心安装 → 企业消费模块；当前分支的原生整包入口可承担同等步骤。
+
+知识来源：[TapData 产品研发指南（v3.5.4+）](https://tapdata.feishu.cn/docx/CJz0dl9x1oJe6kxlx3wcZZL5n1b)的企业版编译与运行章节，2026-10-10 回读并与当前 POM 核对。该指南同时包含历史版本说明；JDK、Node、端口与 OpenSSL 参数以目标源码为准，不将旧示例固定为本版要求。
+
 `-pl` 指定模块，`-am` 同时构建该模块依赖的模块。只有确有反向消费验证需要时才使用 `-amd`。
 
 `-DskipTests` 可以用于临时打包或定位编译问题，但不能作为验证结果。使用该参数后，必须单独执行与变更范围匹配的测试。

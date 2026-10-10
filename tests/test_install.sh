@@ -255,6 +255,7 @@ test -f "$maintainer_root/skills/ao-test-takeover/SKILL.md"
 test -f "$maintainer_root/skills/ao-ws-init/SKILL.md"
 test -f "$maintainer_root/skills/ao-review-change/SKILL.md"
 test -f "$install_root/skills/shared/ao-requirement/SKILL.md"
+test -f "$install_root/skills/shared/ao-task-resume/SKILL.md"
 test ! -e "$install_root/skills/ao-review-change"
 test ! -e "$install_root/skills/ao-test-takeover"
 test ! -e "$install_root/skills/ao-ws-init"
@@ -453,6 +454,8 @@ test -f "$station/.test-agent/settings.json"
 for agent_skill_root in .agents/skills .claude/skills; do
   test -L "$station/$agent_skill_root/ao-requirement"
   test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$station/$agent_skill_root/ao-requirement")" = "$install_root/skills/shared/ao-requirement"
+  test -L "$station/$agent_skill_root/ao-task-resume"
+  test "$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())' "$station/$agent_skill_root/ao-task-resume")" = "$install_root/skills/shared/ao-task-resume"
 done
 test -L "$station/.agents/skills/tapdata-task"
 test -L "$station/.claude/skills/tapdata-task"
@@ -937,18 +940,28 @@ printf '%s\n' \
   '  exit 0' \
   'fi' \
   'printf "%s\n" "$*" > "$AGENTIC_OPS_CAPTURE"' \
+  'printf "%s\0" "$@" > "$AGENTIC_OPS_CAPTURE.argv"' \
   > "$fake_bin/codex"
 chmod +x "$fake_bin/codex"
 PATH="$fake_bin:$PATH" \
 AGENTIC_OPS_EXPECTED_STATION="$expected_station" \
 AGENTIC_OPS_CAPTURE="$capture" \
   "$install_root/agenticops" station start --agent codex --station "$station" --non-interactive -- --model fake >/dev/null
-grep -Fx -- '--model fake' "$capture" >/dev/null
+grep -Fx -- '--approve-for-me --model fake' "$capture" >/dev/null
 PATH="$fake_bin:$PATH" \
 AGENTIC_OPS_EXPECTED_STATION="$expected_station" \
 AGENTIC_OPS_CAPTURE="$capture" \
   "$station/agenticops" station start codex --non-interactive -- --model station-entry >/dev/null
-grep -Fx -- '--model station-entry' "$capture" >/dev/null
+grep -Fx -- '--approve-for-me --model station-entry' "$capture" >/dev/null
+PATH="$fake_bin:$PATH" \
+AGENTIC_OPS_EXPECTED_STATION="$expected_station" \
+AGENTIC_OPS_CAPTURE="$capture" \
+  "$station/agenticops" station start codex --non-interactive -- --model 'model with spaces' >/dev/null
+python3 - "$capture.argv" <<'PY'
+import sys
+from pathlib import Path
+assert Path(sys.argv[1]).read_bytes().split(b'\0') == [b'--approve-for-me', b'--model', b'model with spaces', b'']
+PY
 if "$station/agenticops" station start codex --agent codex >/dev/null 2>&1; then
   printf 'start 未拒绝重复 Agent ID\n' >&2
   exit 1

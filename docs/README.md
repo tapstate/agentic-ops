@@ -1,8 +1,12 @@
 # AgenticOps 文档总纲
 
+[任务存档与恢复](usage/task-archive-and-resume.md)是使用者处理任务中断、重建与研发环境升级的场景入口；[扩展使用总纲](usage/README.md)说明它与授权、更新、质量及材料文档的职责关系。
+
+任务中途升级后的接续以 Jira 任务为入口，GitHub 保存远端代码、PR 和 CI 成果；目标见[项目目标](strategy/project-goals.md)，本地运行与外部成果的边界见[工位合同](architecture/single-task-station.md#从任务事实接续)。[任务授权指引](usage/task-authorization.md#从-jira-任务接续)负责记录、缺项补全和重新接管，[更新与回退](usage/update-and-rollback.md#任务处理中升级后继续)负责产品切换顺序，共享 [ao-task-resume](../skills/shared/ao-task-resume/SKILL.md) 指导 Agent 使用现役入口。各文档不维护逐 epoch 迁移规则或独立交接台账。
+
 [质量检查与证据](usage/quality-checkpoints.md)维护阶段评论、Issue Analysis 实施方案、Fix Details 修复总结和 GitHub PR Ready 回读闭环；提审含具体 Checks 例外，仍保留真实结果与独立合并授权。新客户端的兼容边界为 epoch 27，旧工位退出与重建遵循[更新与回退](usage/update-and-rollback.md)。
 
-TapData 工位 Docker 测试环境以多份持久配置和唯一活动现场为目标：[测试环境 Skill](../projects/tapdata/skills/tapdata-test-env/SKILL.md)负责选择配置、构建部署和生命周期操作，[测试环境指引](../projects/tapdata/runbooks/test-environment.md)负责配置接口、Launcher 装配、外部 MongoDB 与验收。源码构建约定继续由现有构建测试指引维护；这里不建立环境池或平行任务状态。新增目录为可选内容，不改变 `.agenticops/` 状态读写，该可选环境能力保持自身兼容边界；当前 epoch 以机器兼容清单为准。
+TapData 工位 Docker 开发环境以统一运行配置、多份命名环境和唯一活动现场为目标：[开发环境 Skill](../projects/tapdata/skills/tapdata-test-env/SKILL.md)负责收集架构与运行配置、执行生命周期及验收，[开发环境指引](../projects/tapdata/runbooks/test-environment.md)维护输入、命名、外部 MongoDB、同一 Compose 项目和恢复合同。[TapData 开发指引](../projects/tapdata/runbooks/tapdata-development.md#3-构建并装配)负责 Agent 内部的工具准备、源码构建、完整 Launcher 装配及项目辅助脚本；[构建测试指引](../projects/tapdata/runbooks/build-test-and-local-run.md)维护 Maven/Profile 等细节。运行配置与 Agent 管理的 preparation 文件分离，旧版完整配置继续读取，不自动迁移；不改变 `.agenticops/` 状态或 station_state_epoch，不建立环境池。
 
 流程授权与提示词边界由[任务授权指引](usage/task-authorization.md)维护来源同步、方案决定复用和清理内分支/PR 处置的操作说明；[Skill 维护规范](skill-maintenance.md)负责按需加载与能力缺失的接力原则。通用工位模板只导航当前 Project 的规则，项目 Skill 消费配置与已核验结果，不重复维护项目分支值或增加确认步骤；实际状态和授权判定仍由现役 Workflow、Policy 与工位合同负责。
 
