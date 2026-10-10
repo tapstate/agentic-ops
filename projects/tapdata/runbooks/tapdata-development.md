@@ -73,6 +73,35 @@ cd <station>/runtime/app/flow-agent
 
 保留原生进程/会话标识和日志路径。健康路由从分支源码查证；进程存活、首页可访问都不能替代认证、插件加载及目标业务场景验证。
 
+### 连接器编译与注册
+
+[连接器 Skill](../skills/tapdata-connectors/SKILL.md)负责收集操作、一个或多个连接器和注册目标；[项目脚本](../scripts/connectors.py)从当前源码 POM/规格发现模块，以原生 Maven 与 PDK CLI 执行。不构建或重启整个开发环境，不修改 `.agenticops/`，不增加工位兼容边界。临时制品和回执放 `runtime/tapdata-connectors/<id>/`，由既有 runtime 清理与归档合同管理。
+
+三个模式共享 `--connector <名称或模块>`，重复传参选择多个。`list --station <station> [--repository tapdata/tapdata-connectors]` 列出当前仓库实际模块；同名歧义需精确模块或仓库。企业连接器使用当前工位已有的对应仓库路径，不自动追加源码或改变分支。Agent 按[依赖构建指引](build-test-and-local-run.md#依赖构建命令)准备公共库、Java、Maven 与当前任务隔离仓库；PDK CLI 采用本分支原生产物，例如 `tapdata-cli/target/pdk.jar`，先核对 `register --help`，缺少时仅构建其模块与依赖。
+
+```sh
+# 仅编译；用户输入连接器，技术参数由 Agent 依据当前项目准备
+python3 <product-root>/projects/tapdata/scripts/connectors.py build --station <station> \
+  --connector Dummy --connector MongoDB --connector MySQL \
+  --maven <absolute-mvn> --java-home <java-home> --local-repository <task-maven-repo>
+
+# 仅注册；不触发构建
+python3 <product-root>/projects/tapdata/scripts/connectors.py register --station <station> \
+  --connector Dummy --connector MongoDB --record <build.json> --env <name> \
+  --pdk-cli <absolute-pdk.jar> --java-home <java-home> \
+  --latest
+```
+
+将操作改为 `build-register` 并提供两组参数即可编译后注册，构建失败不上传。编译使用 `clean package -pl <所选模块逗号列表> -am`，避免旧 target 的时间戳 Jar 冒充本轮制品。记录源码 HEAD/工作树、所选模块及拷贝制品的 SHA-256；注册时核验当前源码与记录、全部待传文件校验值，发现变化先重新编译。`--skip-tests` 只用于明确的临时打包，不代表业务测试通过，后续按项目质量指引验证。
+
+注册必须明确目标：`--env` 使用当前活动命名开发环境的一个 TM，未活动时不自动切换；其它研发环境用 `--tm-url <服务根地址>`，禁止地址中带账号、密码或 token。命名环境默认读取 `config/secrets/tapdata-test-env/<name>/admin-password`，由用户填写纯文本管理员密码，权限 0600，末尾换行不计入密码；不自动获取或生成密码。显式 `--credentials` 可指定 `config/secrets/` 内其它秘密文件；JSON 三选一：`{"password":"…"}`（当前原生 CLI 只支持 admin@admin.com）、`{"access_code":"…"}`（旧版 Access Code）或 `{"access_key":"…","secret_key":"…"}`。access_token 不能当作 access_code。使用权限 0600 的临时 Picocli @file，不在 argv、公开输出或回执保存凭据，结束删除参数文件，原生输出仅留私有日志。
+
+原生 RegisterCli 默认 latest=true；辅助脚本明确传 false，只有用户意图需要更新默认版本时才加 `--latest`。同 group/pdkId/version/build 的 SNAPSHOT 注册仍可能覆盖旧制品，即使 latest=false 也不是“绝不替换”；正式非 SNAPSHOT 覆盖由 TM 原生拒绝。当前企业版管理员注册会暂停关联任务/校验、等待停止并尝试恢复；先核对实际影响，未授权的业务影响待决定，不通过换认证方式绕过。批量按连接器顺序执行，一个失败即停，保留已提交项；未知结果先回读，不自动重复整个批次。
+
+UploadFileService 上传成功后可能原地加密 Jar，辅助脚本为每项建立部署副本，编译制品保持不变。回执保留上传前 MD5、原始 SHA-256、部署副本 SHA-256；退出码为 0 仅标记 submitted，verified 保持 false。Agent 从目标分支 API/源码取得每个规格的 pdkId、group、version 和 PDK API build，使用已授权认证只读查询 `/api/DatabaseTypes`，核对实际 jarFile、pdkHash、latest、版本及 `/api/pdk/checkMd5/v3` 等本分支支持的校验入口与上传前 MD5。不能只凭同名连接器或 Completed 宣称通过；查询权限不足或异常时为待核验。
+
+需要验证 FE 已应用时，对照实际下载/加载日志中的 pdkHash、版本和文件校验值，必要的连接测试或任务验证按原范围执行；注册与 FE 加载是不同结果，不自动重启任务/Engine。原生依赖或脚本异常按已有连续性规则接管，不改注册协议、数据库或本地任务状态来伪造通过。
+
 ## 5. 常见卡点与交接
 
 | 现象 | 优先处理 |

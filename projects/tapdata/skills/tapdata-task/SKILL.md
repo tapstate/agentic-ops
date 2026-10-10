@@ -7,6 +7,8 @@ metadata:
 
 # TapData 单任务工位
 
+需要按指定连接器编译、注册或编译后注册时，使用 [tapdata-connectors](../tapdata-connectors/SKILL.md)，复用当前工位源码和明确目标环境，不通过重建整套开发环境更新单个连接器。
+
 先读工位 AGENTS、当前 Project Profile、准入规则和本 Skill。以 station.json 的 Product Root 为准，memory 只作历史线索。工位 config/source/runtime 分离配置、完整源码和唯一运行现场；正式档案在 Product Root 的 `.archive/<run-id>`，.agenticops 只保存一个当前任务与操作。
 
 写请求固定 issue/run，advance 另带 expected-stage；生命周期与范围操作带 expected-revision 和稳定 operation-id。拒绝后先回读，不自动用新 run/revision 重放旧决定。interaction-path 分配当前证据路径，归档后不继续写开发证据。

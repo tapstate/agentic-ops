@@ -321,6 +321,22 @@ Sonar 等质量检查必须通过环境变量读取服务地址和凭据：
 
 不得把服务地址、token、密码或研发工程师本机路径写入项目资产、提交信息或运行证据。
 
+### 连接器 CLI 与 Mac Debezium
+
+连接器选择、编译、注册使用 [tapdata-connectors](../skills/tapdata-connectors/SKILL.md)，命令与回读见[开发指引](tapdata-development.md#连接器编译与注册)。先核对本分支 `tapdata-cli` 是否在根 POM reactor 中；未启用时在 CLI 模块独立构建，不修改根 POM 来凑 `-pl`。模块没有继承根 POM 时，根仓库声明与 profile 不会自动传播。依赖解析失败先核对当前模块有效仓库与实际版本坐标，使用已核验仓库准备其声明依赖，保留用户原生 settings，不替换消费版本或拿其它版本 Jar 冒充。
+
+Mac 的 Debezium 失败先定位实际插件和有效配置，不直接排除模块。已在 `tapdata-connectors` 提交 `0b30754dea3685cac6f8edb232d0f886dff47249`、Apple Silicon、JDK 17 验证：PostgreSQL 的 `protoc-jar-maven-plugin:3.8.0` 自动识别 `osx-aarch_64`，因内置 `protoc 3.8.0` 没有该平台二进制失败；根 `apple-silicon` profile 的 `os.detected.classifier=osx-x86_64` 没有解决此插件的检测。该 profile 不能当作所有 Debezium 模块的通用修复，也不能把其它 protobuf 插件的 classifier 配置套给 protoc-jar。
+
+该插件原生支持 `-DprotocCommand=<已核验可执行文件绝对路径>`。本机使用插件 Jar 内 `bin/3.8.0/protoc-3.8.0-osx-x86_64.exe`，先执行 `--version` 确认 `libprotoc 3.8.0`，再通过此参数使 PostgreSQL、HighGo 两个模块及依赖的 `generate-sources` 全部成功。此结论只覆盖 protobuf 源码生成，不代表完整编译或测试通过。其它 Mac 需先核对插件版本、POM 指定 protobuf 版本及 x86_64 执行支持；不能执行时暂停此步骤，不自动安装 Rosetta 或替换 protoc 版本。Agent 可从当前任务 Maven 仓库内已下载的匹配插件 Jar 提取二进制到 runtime 私有工具目录，保留原插件；不使用共享缓存或把二进制提交入 Git。
+
+```sh
+<absolute-mvn> -Dmaven.repo.local=<local_repository> \
+  -pl connectors-common/debezium-bucket/debezium-connector-postgres,connectors-common/debezium-bucket/debezium-connector-highgo \
+  -am generate-sources -DprotocCommand=<absolute-protoc>
+```
+
+连接器脚本的 `--protoc-command <absolute-protoc>` 将同一原生参数传入完整构建。项目其它模块或插件需要其它参数时，先验证实际 POM 接口，再复用现有 Maven 执行指引，不把一次失败处理扩展为默认全项目参数。
+
 ## 前端构建与运行
 
 前端必须使用目标分支 `package.json` 声明的包管理器和脚本。当前仓库使用 pnpm 时，可按仓库脚本执行：
